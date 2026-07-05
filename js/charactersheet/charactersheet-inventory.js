@@ -3944,19 +3944,66 @@ class CharacterSheetInventory {
 	}
 
 	/**
-	 * Use a consumable item (potion or scroll)
-	 * @param {string} itemId - The item ID
+	 * Normalized primary type code for a consumable, with any `|source` suffix stripped
+	 * and lower-cased (so `"P"`, `"p"`, and `"P|DMG"` all collapse to `"p"`).
+	 * @param {object} item - The item data
+	 * @returns {string}
 	 */
-	async _useConsumable (itemId) {
+	_getConsumableTypeCode (item) {
+		return String(item?.type || "").split("|")[0].trim().toLowerCase();
+	}
+
+	/**
+	 * Whether an item should be USED as a spell scroll. Mirrors the broad detection in
+	 * `_isConsumable` (type prefix `sc` or name contains "scroll") so every item the
+	 * combat/consumables surfaces list actually routes to a use path.
+	 * @param {object} item - The item data
+	 * @returns {boolean}
+	 */
+	_isScrollConsumable (item) {
+		if (this._getConsumableTypeCode(item) === "sc") return true;
+		if (item?.name?.toLowerCase().includes("scroll")) return true;
+		return false;
+	}
+
+	/**
+	 * Whether an item should be USED as a potion (drink / apply). Mirrors `_isConsumable`
+	 * (type prefix `p`, `item.poison`, or name contains "potion"), plus tolerates a
+	 * `|source` suffix on the type — the source-suffix case is exactly why clicking "Use"
+	 * on a `"P|DMG"` potion previously did nothing (strict `item.type === "P"` failed).
+	 * @param {object} item - The item data
+	 * @returns {boolean}
+	 */
+	_isPotionConsumable (item) {
+		if (this._getConsumableTypeCode(item) === "p") return true;
+		if (item?.poison) return true;
+		if (item?.name?.toLowerCase().includes("potion")) return true;
+		return false;
+	}
+
+	/**
+	 * Use a consumable item (potion or scroll).
+	 *
+	 * Dispatch uses the same robust detection as the list-building `_isConsumable`
+	 * (case-insensitive type prefix, `|source` suffix tolerant, name/poison fallback) so
+	 * every item shown as a consumable is actually usable — previously the strict
+	 * `item.type === "P"`/`"SC"` check silently no-op'd for name-matched / lowercase /
+	 * source-suffixed types.
+	 * @param {string} itemId - The item ID
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.maximize=false] - Use as an ACTION per the TGTT item-utilization
+	 *   rule: no roll, take the maximum. Threaded to `_usePotion`.
+	 */
+	async _useConsumable (itemId, {maximize = false} = {}) {
 		const items = this._state.getItems();
 		const item = items.find(i => i.id === itemId);
 		if (!item) return;
 
 		let consumed = false;
-		if (item.type === "P") {
-			consumed = await this._usePotion(item);
-		} else if (item.type === "SC") {
-			consumed = await this._useScroll(item);
+		if (this._isScrollConsumable(item)) {
+			consumed = await this._useScroll(item, {maximize});
+		} else if (this._isPotionConsumable(item)) {
+			consumed = await this._usePotion(item, {maximize});
 		}
 
 		if (consumed) {
@@ -3968,17 +4015,21 @@ class CharacterSheetInventory {
 	}
 
 	/**
-	 * Use a potion
+	 * Use a potion.
 	 * @param {object} item - The item data
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.maximize=false] - Use as an ACTION per the TGTT item-utilization
+	 *   rule: skip the roll and take the MAXIMUM healing. When false (bonus-action use), roll
+	 *   normally. This is driven by which button the player clicked, NOT by the global setting —
+	 *   the old code maxed EVERY use whenever `thelemar_itemUtilization` was on, which was wrong.
 	 * @returns {Promise<boolean>} True if potion was used
 	 */
-	async _usePotion (item) {
+	async _usePotion (item, {maximize = false} = {}) {
 		const healing = this._state.getItemHealingEffect(item.id);
 
 		if (healing) {
 			// Roll healing dice
 			let healAmount = 0;
-			const settings = this._state.getSettings?.() || {};
 
 			if (healing.dice) {
 				// Parse dice string and roll
@@ -3987,11 +4038,11 @@ class CharacterSheetInventory {
 					const [, numDice, dieSize, modifier] = diceMatch;
 					const mod = parseInt(modifier) || 0;
 
-					if (settings.thelemar_itemUtilization) {
-						// Max healing when using action (Thelemar house rule)
+					if (maximize) {
+						// Used as an action (TGTT item utilization): no roll, take the maximum.
 						healAmount = parseInt(numDice) * parseInt(dieSize) + mod;
 					} else {
-						// Roll normally
+						// Bonus-action use: roll normally.
 						for (let i = 0; i < parseInt(numDice); i++) {
 							healAmount += Math.floor(Math.random() * parseInt(dieSize)) + 1;
 						}
@@ -4004,7 +4055,7 @@ class CharacterSheetInventory {
 				this._state.heal(healAmount);
 				JqueryUtil.doToast({
 					type: "success",
-					content: `Drank ${item.name}. Healed ${healAmount} HP!`,
+					content: `Drank ${item.name}. Healed ${healAmount} HP${maximize ? " (max — used as an action)" : ""}!`,
 				});
 				return true;
 			}
@@ -4029,11 +4080,15 @@ class CharacterSheetInventory {
 	}
 
 	/**
-	 * Use a spell scroll
+	 * Use a spell scroll.
 	 * @param {object} item - The item data
+	 * @param {object} [_opts]
+	 * @param {boolean} [_opts.maximize] - Accepted for call-site symmetry with `_usePotion`, but
+	 *   IGNORED: a scroll's only roll is the Arcana check to cast above your level, which is not a
+	 *   "deals damage or heals on use" roll, so the TGTT item-utilization max rule does not apply.
 	 * @returns {Promise<boolean>} True if scroll was used
 	 */
-	async _useScroll (item) {
+	async _useScroll (item, {maximize: _maximize = false} = {}) {
 		const scrollSpell = this._state.getScrollSpell(item.id);
 
 		if (!scrollSpell) {
