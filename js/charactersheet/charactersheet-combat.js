@@ -2027,6 +2027,7 @@ class CharacterSheetCombat {
 		if (section) section.style.display = "";
 
 		container.innerHTML = "";
+		const settings = this._state.getSettings?.() || {};
 		items.forEach((item) => {
 			const qty = item.quantity || 1;
 			const emoji = inv?._getItemTypeEmoji?.(item) || "🧪";
@@ -2034,26 +2035,36 @@ class CharacterSheetCombat {
 			if (this._page?.getHoverLink && item.source) {
 				try { nameHtml = this._page.getHoverLink(UrlUtil.PG_ITEMS, item.name, item.source); } catch (e) { nameHtml = item.name; }
 			}
+			// (Bug 2) Offer the "Use (Action)" MAX button only when the TGTT item-utilization
+			// house rule is on AND the item actually rolls a heal on use — that's the only case
+			// where taking the maximum (action) differs from a normal (bonus-action) roll.
+			const canMaximize = !!settings.thelemar_itemUtilization && !!this._state.getItemHealingEffect?.(item.id);
+			const btnsHtml = canMaximize
+				? `<span class="ve-flex ve-flex-wrap gap-1 ml-auto">
+						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__combat-consumable-use" data-maximize="0" title="Use ${item.name} as a bonus action (roll normally)">Use (Bonus Action)</button>
+						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-consumable-use" data-maximize="1" title="Use ${item.name} as an action — no roll, take the maximum (TGTT item utilization)">Use (Action)</button>
+					</span>`
+				: `<button class="ve-btn ve-btn-xs ve-btn-primary ml-auto charsheet__combat-consumable-use" data-maximize="0" title="Use ${item.name}">Use</button>`;
 			const row = e_({outer: `
 				<div class="charsheet__combat-consumable ve-flex ve-flex-v-center ve-flex-wrap gap-1" data-item-id="${item.id}">
 					<span class="charsheet__combat-consumable-icon" title="Consumable">${emoji}</span>
 					<span class="bold charsheet__combat-consumable-name">${nameHtml}</span>
 					<span class="ve-muted ve-small charsheet__combat-consumable-qty">×${qty}</span>
-					<button class="ve-btn ve-btn-xs ve-btn-primary ml-auto charsheet__combat-consumable-use" title="Use ${item.name}">Use</button>
+					${btnsHtml}
 				</div>
 			`});
-			const useBtn = row.querySelector(".charsheet__combat-consumable-use");
-			if (useBtn) {
+			row.querySelectorAll(".charsheet__combat-consumable-use").forEach((useBtn) => {
 				useBtn.addEventListener("click", (/** @type {*} */ evt) => {
 					evt.stopPropagation();
-					Promise.resolve(inv?._useConsumable?.(item.id))
+					const maximize = useBtn.getAttribute("data-maximize") === "1";
+					Promise.resolve(inv?._useConsumable?.(item.id, {maximize}))
 						.then(() => this.renderCombatConsumables())
 						.catch((err) => {
 							// eslint-disable-next-line no-console
 							console.error("[CharSheet Combat] Error using consumable:", err);
 						});
 				});
-			}
+			});
 			container.append(row);
 		});
 	}
