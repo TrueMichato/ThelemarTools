@@ -55,6 +55,42 @@ describe("BUG 5 — Spell view mode", () => {
 		});
 	});
 
+	describe("_getSpellViewModes (toggle labels)", () => {
+		let mod;
+		beforeEach(() => { mod = makeSpells(new CharacterSheetState()); });
+
+		it("keeps the internal ids as current/prepared/known", () => {
+			expect(mod._getSpellViewModes().map(m => m.id)).toEqual(["current", "prepared", "known"]);
+		});
+
+		it("labels the default 'current' mode as 'Prepared/known split'", () => {
+			const current = mod._getSpellViewModes().find(m => m.id === "current");
+			expect(current.label).toBe("Prepared/known split");
+			// tooltip should no longer describe it as the old 'standard/all spells' view
+			expect(current.title.toLowerCase()).not.toContain("standard view");
+		});
+
+		it("keeps the prepared/known labels intact", () => {
+			const byId = Object.fromEntries(mod._getSpellViewModes().map(m => [m.id, m.label]));
+			expect(byId.prepared).toBe("Prepared");
+			expect(byId.known).toBe("Known");
+		});
+	});
+
+	describe("_shouldRenderSpellbookSection (R45 — hide Spellbook in prepared view)", () => {
+		let mod;
+		beforeEach(() => { mod = makeSpells(new CharacterSheetState()); });
+
+		it("skips the Spellbook section in 'prepared' view", () => {
+			expect(mod._shouldRenderSpellbookSection("prepared")).toBe(false);
+		});
+
+		it("still renders the Spellbook section in 'current' and 'known' views", () => {
+			expect(mod._shouldRenderSpellbookSection("current")).toBe(true);
+			expect(mod._shouldRenderSpellbookSection("known")).toBe(true);
+		});
+	});
+
 	describe("_filterSpellsForViewMode", () => {
 		let mod;
 		const spells = [
