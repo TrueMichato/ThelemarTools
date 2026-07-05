@@ -1,10 +1,13 @@
 /**
- * Character Sheet — Divine Order (2024 / XPHB Cleric L1): Overview state + set/change/remove.
+ * Character Sheet — Divine Order (2024 / XPHB Cleric L1): read-only state getter.
  *
- * R46 Bug 3. Divine Order role picks (Protector / Thaumaturge) are structured sub-features that
- * used to leak into the generic "Specialties & Feats" Overview list. They now get their OWN
- * Overview surface, backed by a read-only `getDivineOrderState` getter that mirrors
- * `getPrinciplesOfDevotionState` (Cleric-gated, catalog fallback, current-first resolution).
+ * R47 Bug 2. Divine Order is a ONE-TIME level-1 build choice (role: Protector / Thaumaturge). It is
+ * NO LONGER a mid-play-changeable Overview field of its own — it is displayed READ-ONLY inside the
+ * "Specialties & Feats" surface as its own group (see CharacterSheetOverviewSpecialtiesExclusion).
+ * `getDivineOrderState` remains a read-only accessor mirroring `getPrinciplesOfDevotionState`
+ * (Cleric-gated, catalog fallback, current-first resolution); these tests pin that getter's
+ * behaviour. The set/change/remove state primitives it exercises are still used by the builder and
+ * level-up flows (where the one-time choice is actually made), so they remain under test here.
  */
 
 import "./setup.js";
