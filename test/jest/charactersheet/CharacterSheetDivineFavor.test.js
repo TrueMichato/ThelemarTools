@@ -349,6 +349,30 @@ describe("Divine Favor — Bug 4: limited casts become tracked resources", () =>
 		expect(dfResource(s, "Conjure Animals").current).toBe(0);
 	});
 
+	test("restoring an innate-spell use (Spells-tab pip) mirrors onto the linked resource", () => {
+		const s = makeState();
+		s.setAbilityBase("wis", 16); // Animal Friendship 3 uses
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(10);
+
+		const af = innate(s, "Animal Friendship");
+		s.useInnateSpell(af.id); // 3 → 2 (mirrors resource)
+		s.useInnateSpell(af.id); // 2 → 1
+		expect(innate(s, "Animal Friendship").uses.current).toBe(1);
+		expect(dfResource(s, "Animal Friendship").current).toBe(1);
+
+		// Clicking a "used" pip in the Spells tab routes through restoreInnateSpell.
+		s.restoreInnateSpell(af.id); // 1 → 2, resource mirrors
+		expect(innate(s, "Animal Friendship").uses.current).toBe(2);
+		expect(dfResource(s, "Animal Friendship").current).toBe(2);
+
+		// Never exceeds max.
+		s.restoreInnateSpell(af.id); // 2 → 3
+		s.restoreInnateSpell(af.id); // clamp at 3
+		expect(innate(s, "Animal Friendship").uses.current).toBe(3);
+		expect(dfResource(s, "Animal Friendship").current).toBe(3);
+	});
+
 	test("spending the resource (Resources/Combat) decrements the linked innate spell", () => {
 		const s = makeState();
 		s.setAbilityBase("wis", 16); // 3 uses
