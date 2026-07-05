@@ -4645,8 +4645,44 @@ class CharacterSheetState {
 		// before the auto-place pipeline existed (or before dart recognition). Runs
 		// LAST so inventory normalisation/containment is settled. Idempotent.
 		this._migrateQuiverBackfill();
+
+		// (R46 Bug 5) Re-apply the TGTT natural-weapon finesse rule to attacks that were
+		// STORED before the rule existed (the rule only runs at addFeature time, so an
+		// existing save keeps the vanilla `abilityMod:'str'`). Idempotent; gated on the
+		// TGTT toggle; leaves explicit con/dex/spellcasting/finesse and non-natural attacks.
+		this._migrateNaturalWeaponFinesse();
 	}
 
+	/**
+	 * (R46 Bug 5) Load-time re-application of the TGTT natural-weapon finesse house rule
+	 * to attacks that were STORED before the rule existed.
+	 *
+	 * The rule ("natural weapons default to `finesse` = the better of STR/DEX, gated on
+	 * `settings.enableTgtt`") is applied only at `addFeature` time (see the
+	 * `NaturalWeaponParser` call site in `addFeature`). `loadFromJson` restores
+	 * `_data.attacks` verbatim, so a natural-weapon attack saved before the fix (e.g. a
+	 * Tabaxi's Claws) keeps its vanilla `abilityMod:'str'` forever.
+	 *
+	 * This sweep rewrites ONLY the untouched `str` default on flagged natural weapons —
+	 * combat.js resolves `finesse` → max(STR, DEX). It must:
+	 *   - be idempotent (a `finesse` attack is already migrated → skipped);
+	 *   - never touch an explicitly-parsed ability (`con`/`dex`/`spellcasting`);
+	 *   - never touch non-natural attacks (weapons carry no `isNaturalWeapon` flag);
+	 *   - respect `enableTgtt === false` (leave `str` for a vanilla game).
+	 * Mirrors the addFeature-time override so fresh and loaded characters agree.
+	 */
+	_migrateNaturalWeaponFinesse () {
+		if (!Array.isArray(this._data.attacks) || !this._data.attacks.length) return;
+		// Respect the master TGTT toggle: only `false` opts out (undefined defaults ON,
+		// matching the addFeature-time guard `getSettings()?.enableTgtt !== false`).
+		if (this.getSettings()?.enableTgtt === false) return;
+
+		for (const attack of this._data.attacks) {
+			if (attack?.isNaturalWeapon === true && attack.abilityMod === "str") {
+				attack.abilityMod = "finesse";
+			}
+		}
+	}
 	/**
 	 * (#11) Load-time backfill: for every EQUIPPED quiver, PURGE any stale
 	 * non-ammunition `containedItems` (e.g. armor wrongly baked in by an earlier
@@ -13548,6 +13584,46 @@ class CharacterSheetState {
 		// option group meant an already-chosen principle (stored in chosenSubfeatures at
 		// level-up) never surfaced in the Overview. Compute `current` first, then return
 		// state when EITHER selectable options OR a stored current pick exists.
+		const current = (this._data.chosenSubfeatures || []).find(r => String(r.parent || "").toLowerCase() === PARENT) || null;
+		const groups = this.getStructuredFeatureChoices(feature) || [];
+		const group = groups.find(g => Array.isArray(g.options) && g.options.length);
+		const options = group ? group.options : [];
+		if (!options.length && !current) return null;
+		return {parentInfo, options, current};
+	}
+
+	/**
+	 * (R46 Bug 3) Overview support for the Divine Order manager (2024 / XPHB Cleric L1).
+	 * Divine Order ("Protector" / "Thaumaturge") is a structured sub-feature choice stored in
+	 * `_data.chosenSubfeatures` under parent "Divine Order". This read-only getter is the exact
+	 * parallel of {@link getPrinciplesOfDevotionState}: it locates the parent Divine Order feature
+	 * (a stored copy if present, else the class-feature catalog), enumerates its role options, and
+	 * reports the currently-chosen record — computing `current` INDEPENDENTLY of option-group
+	 * resolution so an already-picked role still surfaces even when its option refs are unresolvable.
+	 * Returns null when the character has no Divine Order available (not a Cleric, or the catalog
+	 * isn't loaded, and nothing was chosen).
+	 * @returns {{parentInfo:object, options:Array, current:?object}|null}
+	 */
+	getDivineOrderState () {
+		const PARENT = "divine order";
+		// Cleric gate: Divine Order is a Cleric feature. Without this, the catalog fallback
+		// would leak a non-null state onto any character whose loaded catalog merely CONTAINS
+		// the cleric feature (mirrors the getPrinciplesOfDevotionState Cleric gate).
+		if ((this.getClassLevel("Cleric") || 0) <= 0) return null;
+		let feature = (this._data.features || []).find(f => String(f?.name || "").toLowerCase() === PARENT);
+		if (!feature) {
+			feature = (this._classFeatureCatalog || []).find(c => String(c?.name || "").toLowerCase() === PARENT) || null;
+		}
+		if (!feature) return null;
+		const parentInfo = {
+			parent: feature.name,
+			parentSource: feature.source || null,
+			parentClass: feature.className || null,
+			parentClassSource: feature.classSource || null,
+			level: feature.level != null ? feature.level : null,
+		};
+		// Resolve the current pick INDEPENDENTLY of option-group resolution so a stored role
+		// (recorded in chosenSubfeatures at level-up) surfaces even without a re-resolvable group.
 		const current = (this._data.chosenSubfeatures || []).find(r => String(r.parent || "").toLowerCase() === PARENT) || null;
 		const groups = this.getStructuredFeatureChoices(feature) || [];
 		const group = groups.find(g => Array.isArray(g.options) && g.options.length);
