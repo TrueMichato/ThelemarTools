@@ -7037,8 +7037,9 @@ class CharacterSheetSpells {
 			elPip.addEventListener("click", (/** @type {*} */ e) => {
 				const pip = e.currentTarget;
 				if (pip.classList.contains("used")) {
-					// Restore one use
-					spell.uses.current = Math.min(spell.uses.current + 1, spell.uses.max);
+					// Restore one use (routed through state so a linked divine-favor
+					// resource stays in lockstep — see restoreInnateSpell).
+					this._state.restoreInnateSpell(spellId);
 					this._renderSpellList();
 				}
 			});
