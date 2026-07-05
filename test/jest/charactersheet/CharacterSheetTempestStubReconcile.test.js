@@ -138,3 +138,116 @@ describe("Tempest subclass empty-stub reconciliation (Bug 3)", () => {
 		expect(state.reconcileSubclassFeatureEntries()).toBe(0);
 	});
 });
+
+const WRATH_OF_THE_STORM_TEXT =
+	"Also at 1st level, you can thunderously rebuke attackers. When a creature within 5 feet of you that you can see hits you with an attack, you can use your reaction to deal lightning damage to the creature. The lightning damage equals your Wisdom modifier (minimum of 1). You can use this feature a number of times equal to your Wisdom modifier (a minimum of once). You regain all expended uses when you finish a long rest.";
+
+/**
+ * (R45 Bug 3, revised) A backfilled subclass wrapper ("Tempest Domain") whose canonical
+ * entries END with `refSubclassFeature` refs must GRANT the referenced features
+ * ("Wrath of the Storm", "Bonus Proficiencies") as their own stored rows — at the wrapper's
+ * level — so their use pools / reaction text surface.
+ */
+function mkTempestWithRefs () {
+	const state = new CharacterSheetState();
+	state.setAbilityBase("wis", 16); // WIS +3
+	state.addClass({
+		name: "Cleric",
+		source: "TGTT-2014",
+		level: 10,
+		subclass: {name: "Tempest Domain", shortName: "Tempest", source: "TGTT-2014"},
+	});
+
+	// Empty "Tempest Domain" wrapper stub stored at the character's real level 3.
+	state.addFeature({
+		name: "Tempest Domain",
+		source: "TGTT-2014",
+		level: 3,
+		className: "Cleric",
+		classSource: "TGTT-2014",
+		subclassShortName: "Tempest",
+		subclassSource: "TGTT-2014",
+		isSubclassFeature: true,
+		description: "",
+	});
+
+	// Catalog: the canonical Tempest Domain wrapper (entries END with refs), plus the
+	// standalone referenced features WITH entries — mirroring the PHB base-class data.
+	const canonical = [
+		{
+			name: "Tempest Domain",
+			source: "PHB",
+			level: 1,
+			className: "Cleric",
+			classSource: "PHB",
+			subclassShortName: "Tempest",
+			subclassSource: "PHB",
+			isSubclassFeature: true,
+			entries: [
+				"You can manipulate the power of storm and thunder.",
+				{type: "refSubclassFeature", subclassFeature: "Bonus Proficiencies|Cleric||Tempest||1"},
+				{type: "refSubclassFeature", subclassFeature: "Wrath of the Storm|Cleric||Tempest||1"},
+			],
+		},
+		{
+			name: "Bonus Proficiencies",
+			source: "PHB",
+			level: 1,
+			className: "Cleric",
+			classSource: "PHB",
+			subclassShortName: "Tempest",
+			subclassSource: "PHB",
+			isSubclassFeature: true,
+			entries: ["You gain proficiency with martial weapons and heavy armor."],
+		},
+		{
+			name: "Wrath of the Storm",
+			source: "PHB",
+			level: 1,
+			className: "Cleric",
+			classSource: "PHB",
+			subclassShortName: "Tempest",
+			subclassSource: "PHB",
+			isSubclassFeature: true,
+			entries: [WRATH_OF_THE_STORM_TEXT],
+		},
+	];
+	state.setClassFeatureCatalog([], canonical);
+	return state;
+}
+
+describe("Tempest refSubclassFeature expansion (Bug 3 revised)", () => {
+	it("grants Wrath of the Storm + Bonus Proficiencies referenced by the wrapper's entries", () => {
+		const state = mkTempestWithRefs();
+		state.reconcileSubclassFeatureEntries();
+		const wots = state.getFeatures().find(f => f.name === "Wrath of the Storm");
+		const bp = state.getFeatures().find(f => f.name === "Bonus Proficiencies");
+		expect(wots).toBeTruthy();
+		expect(bp).toBeTruthy();
+	});
+
+	it("grants them at the wrapper's stored level, not the ref-encoded base level", () => {
+		const state = mkTempestWithRefs();
+		state.reconcileSubclassFeatureEntries();
+		const wots = state.getFeatures().find(f => f.name === "Wrath of the Storm");
+		expect(wots.level).toBe(3);
+	});
+
+	it("Wrath of the Storm carries reaction text + a WIS-mod/long-rest use pool (surfaces in Combat)", () => {
+		const state = mkTempestWithRefs();
+		state.reconcileSubclassFeatureEntries();
+		const wots = state.getFeatures().find(f => f.name === "Wrath of the Storm");
+		expect(`${wots.description}`).toMatch(/use your reaction/i);
+		expect(wots.uses).toBeTruthy();
+		expect(wots.uses.max).toBe(state.getAbilityMod("wis"));
+		expect(wots.uses.recharge).toBe("long");
+	});
+
+	it("is idempotent — a second reconcile grants no duplicates", () => {
+		const state = mkTempestWithRefs();
+		state.reconcileSubclassFeatureEntries();
+		expect(state.getFeatures().filter(f => f.name === "Wrath of the Storm").length).toBe(1);
+		expect(state.reconcileSubclassFeatureEntries()).toBe(0);
+		expect(state.getFeatures().filter(f => f.name === "Wrath of the Storm").length).toBe(1);
+	});
+});

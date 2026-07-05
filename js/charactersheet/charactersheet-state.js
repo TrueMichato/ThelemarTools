@@ -30027,7 +30027,113 @@ class CharacterSheetState {
 				this._remintFeatureUsesFromText(f);
 			}
 		}
+
+		// (R45 Bug 3, revised) A backfilled subclass feature's entries can END with
+		// `refSubclassFeature` refs to features the character legitimately received but that
+		// were never persisted as their own rows (e.g. PHB "Tempest Domain" ends with refs to
+		// "Bonus Proficiencies" and "Wrath of the Storm"). Grant those referenced features as
+		// their own stored rows — at the WRAPPER's stored level, keeping the character's real
+		// progression — so their use pools / modifiers / activation surface normally. Runs
+		// after the backfill loop so the wrappers already carry their resolved entries.
+		repaired += this._expandStoredSubclassFeatureRefs(pool, norm);
 		return repaired;
+	}
+
+	/**
+	 * (R45 Bug 3 helper) Scan stored subclass features that carry `entries` for
+	 * `refSubclassFeature` references and grant each referenced (entries-carrying) feature as
+	 * its own stored row, at the referencing wrapper's level (so the character's real
+	 * progression is preserved — the ref strings encode the base-class level, not this
+	 * character's). Idempotent: a referenced feature already stored (by name + subclass) is
+	 * skipped, and addFeature dedups again. Recurses into a granted feature's own entries for
+	 * nested ref chains.
+	 * @param {Array} pool - Flat catalog (subclass + class features).
+	 * @param {(s:*)=>string} norm - Case/space-insensitive normaliser.
+	 * @returns {number} count of features granted.
+	 */
+	_expandStoredSubclassFeatureRefs (pool, norm) {
+		if (!Array.isArray(this._data.features) || !pool.length) return 0;
+
+		const isSub = (/** @type {*} */ c) => !!(c.subclassName || c.subclassShortName || c.isSubclassFeature);
+		// Snapshot the wrappers up front: addFeature mutates this._data.features.
+		const wrappers = this._data.features.filter(f => isSub(f) && Array.isArray(f.entries) && f.entries.length);
+
+		let added = 0;
+		for (const wrapper of wrappers) {
+			const queue = [];
+			const visited = new Set();
+
+			const collect = (/** @type {*} */ entries) => {
+				if (!Array.isArray(entries)) return;
+				for (const entry of entries) {
+					if (entry && typeof entry === "object" && entry.type === "refSubclassFeature" && entry.subclassFeature) {
+						const parts = `${entry.subclassFeature}`.split("|");
+						const refName = parts[0];
+						const refSubShort = parts[3] || wrapper.subclassShortName;
+						const vk = `${norm(refName)}|${norm(refSubShort)}`;
+						if (!visited.has(vk)) {
+							visited.add(vk);
+							const cand = pool.find(c =>
+								norm(c.name) === norm(refName)
+								&& Array.isArray(c.entries) && c.entries.length
+								&& isSub(c)
+								&& (!refSubShort || norm(c.subclassShortName || c.subclassName) === norm(refSubShort)));
+							if (cand) {
+								const already = this._data.features.some(f =>
+									norm(f.name) === norm(refName)
+									&& isSub(f)
+									&& (!refSubShort || norm(f.subclassShortName || f.subclassName) === norm(refSubShort)));
+								if (!already) queue.push(this._buildGrantedRefFeature(cand, wrapper, refName, parts));
+								// Recurse into the canonical's own entries for nested ref chains.
+								collect(cand.entries);
+							}
+						}
+					}
+					if (entry && typeof entry === "object" && Array.isArray(entry.entries)) collect(entry.entries);
+				}
+			};
+			collect(wrapper.entries);
+
+			for (const feat of queue) {
+				const before = this._data.features.length;
+				this.addFeature(feat);
+				if (this._data.features.length > before) added++;
+			}
+		}
+		return added;
+	}
+
+	/**
+	 * (R45 Bug 3 helper) Build a stored-feature object for a `refSubclassFeature` target,
+	 * inheriting class/subclass identity + level from the referencing wrapper and a rendered
+	 * `description` (so addFeature can mint a use pool and Combat/Features panels have text).
+	 * @param {*} canonical - The entries-carrying catalog feature the ref points at.
+	 * @param {*} wrapper - The stored feature whose entries carried the ref.
+	 * @param {string} refName - Parsed ref feature name.
+	 * @param {string[]} parts - The `|`-split ref segments (Name|class|classSource|sub|subSource|level).
+	 * @returns {*} feature object ready for addFeature.
+	 */
+	_buildGrantedRefFeature (canonical, wrapper, refName, parts) {
+		const feat = {
+			name: canonical.name || refName,
+			className: parts[1] || wrapper.className,
+			classSource: parts[2] || wrapper.classSource,
+			subclassName: wrapper.subclassName || canonical.subclassName,
+			subclassShortName: parts[3] || wrapper.subclassShortName || canonical.subclassShortName,
+			subclassSource: parts[4] || wrapper.subclassSource || canonical.subclassSource,
+			source: canonical.source || wrapper.source || (parts[4] || wrapper.subclassSource),
+			// Grant at the character's real level for this subclass feature, NOT the base-class
+			// level encoded in the ref string.
+			level: wrapper.level,
+			isSubclassFeature: true,
+			entries: JSON.parse(JSON.stringify(canonical.entries)),
+		};
+		if (canonical.description) {
+			feat.description = canonical.description;
+		} else if (typeof Renderer !== "undefined") {
+			try { feat.description = Renderer.get().render({entries: feat.entries}); } catch (e) { /* leave empty */ }
+		}
+		return feat;
 	}
 
 	/**
