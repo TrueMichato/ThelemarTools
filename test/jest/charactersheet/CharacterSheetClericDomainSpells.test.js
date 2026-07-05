@@ -49,6 +49,32 @@ function makeClericClass () {
 	};
 }
 
+/**
+ * An XPHB/TGTT-shaped Cleric: Divine Order is the level-1 feature and the
+ * subclass (Divine Domain) is only gained at level 3.
+ */
+function makeXphbClericClass () {
+	return {
+		name: "Cleric",
+		source: "XPHB",
+		hd: {number: 1, faces: 8},
+		spellcastingAbility: "wis",
+		casterProgression: "full",
+		subclassTitle: "Divine Domain",
+		classFeatures: [
+			[
+				"Spellcasting|Cleric|XPHB|1",
+				{classFeature: "Divine Order|Cleric|XPHB|1"},
+			],
+			["Channel Divinity|Cleric|XPHB|2"],
+			[
+				{classFeature: "Cleric Subclass|Cleric|XPHB|3", gainSubclassFeature: true},
+			],
+		],
+		subclasses: [makeTempestDomain()],
+	};
+}
+
 /** Minimal page stub sufficient for the apply paths under test. */
 function makePage () {
 	return {
@@ -216,5 +242,38 @@ describe("Cleric domain spells — multiclass path", () => {
 		const spellNames = levelup._state.getSpellsKnown().map(s => s.name.toLowerCase());
 		expect(cantripNames).toContain("sacred flame");
 		expect(spellNames).not.toContain("sacred flame");
+	});
+});
+
+// ─── Subclass-level correctness (guardrail: never force a domain pick early) ───
+
+describe("Cleric domain spells — subclass-gain level is data-driven", () => {
+	test("a 2014-PHB Cleric gains its subclass at level 1 (picker shown in builder/multiclass-L1)", () => {
+		const phb = makeClericClass();
+		expect(CharacterSheetClassUtils.levelGrantsSubclass(phb, 1)).toBe(true);
+		expect(CharacterSheetClassUtils.levelGrantsSubclass(phb, 3)).toBe(false);
+	});
+
+	test("a 2024-XPHB/TGTT Cleric gains its subclass at level 3, NOT level 1", () => {
+		const xphb = makeXphbClericClass();
+		// Level 1 must NOT offer a subclass — its L1 feature is Divine Order, not the domain.
+		expect(CharacterSheetClassUtils.levelGrantsSubclass(xphb, 1)).toBe(false);
+		expect(CharacterSheetClassUtils.levelGrantsSubclass(xphb, 3)).toBe(true);
+	});
+
+	test("an XPHB/TGTT Cleric multiclassed in at level 1 is not granted domain spells prematurely", async () => {
+		const levelup = Object.create(CharacterSheetLevelUp.prototype);
+		levelup._state = new CharacterSheetState();
+		levelup._page = makePage();
+		levelup._processFeatSpellChoices = async () => {};
+
+		const xphb = makeXphbClericClass();
+		// Multiclass-in at level 1 with NO subclass (mirrors the real no-choices path,
+		// since needsSubclass is false for an XPHB cleric at level 1).
+		await levelup._applyMulticlass(xphb, [], {}, {}, [], [], [], [], null);
+
+		const names = levelup._state.getSpellsKnown().map(s => s.name.toLowerCase());
+		expect(names).not.toContain("fog cloud");
+		expect(names).not.toContain("thunderwave");
 	});
 });
