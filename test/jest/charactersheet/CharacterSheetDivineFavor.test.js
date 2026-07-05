@@ -174,6 +174,92 @@ describe("Divine Favor — Votary boons (favour 10)", () => {
 	});
 });
 
+// (Bug 1) A `type:"narrative"` boon reaches no mechanical channel (spell / modifier /
+// ability-score), so it must be surfaced as a real FEATURE in the Features tab or it is
+// silently dropped. Pan → Disciple (favour 25) grants the narrative boon "Attunement to
+// Nature". applyDivineFavorEffects adds it via addFeature tagged `_divineFavor:true`, and the
+// strip pass removes it on the next reconcile (idempotent).
+function dfFeatures (state, name) {
+	return (state.getFeatures() || []).filter(f => f.name === name);
+}
+
+describe("Divine Favor — Bug 1: narrative boons surface as features (favour 25)", () => {
+	test("Attunement to Nature appears in getFeatures() at Disciple tier", () => {
+		const s = makeState();
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(25);
+
+		const feats = dfFeatures(s, "Attunement to Nature");
+		expect(feats).toHaveLength(1);
+		const f = feats[0];
+		expect(f._divineFavor).toBe(true);
+		expect(f.sourceFeature).toBe("Divine Favor: Pan — Disciple");
+		expect(f.description).toMatch(/attune to the natural world/i);
+		// No featureType / parentFeature / combat-method marker → renders through the generic
+		// (unmarked) feature path in the Features tab.
+		expect(f.featureType).toBeUndefined();
+		expect(f.parentFeature).toBeUndefined();
+		expect(f._entityType).toBeUndefined();
+	});
+
+	test("below favour 25 the narrative boon is absent", () => {
+		const s = makeState();
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(24);
+		expect(dfFeatures(s, "Attunement to Nature")).toHaveLength(0);
+	});
+
+	test("re-applying does not duplicate the narrative feature or leak a resource", () => {
+		const s = makeState();
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(25);
+
+		s.applyDivineFavorEffects();
+		s.applyDivineFavorEffects();
+
+		expect(dfFeatures(s, "Attunement to Nature")).toHaveLength(1);
+		// The narrative boon has no use count → it must not mint a stray tracked resource.
+		expect((s._data.resources || []).filter(r => r.name === "Attunement to Nature")).toHaveLength(0);
+		// Exactly one _divineFavor-tagged feature.
+		expect((s._data.features || []).filter(f => f._divineFavor)).toHaveLength(1);
+	});
+
+	test("lowering favour below the tier removes the narrative feature", () => {
+		const s = makeState();
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(25);
+		expect(dfFeatures(s, "Attunement to Nature")).toHaveLength(1);
+
+		s.setDivineFavorLevel(10);
+		expect(dfFeatures(s, "Attunement to Nature")).toHaveLength(0);
+		expect((s._data.features || []).filter(f => f._divineFavor)).toHaveLength(0);
+	});
+
+	test("clearing the god removes the narrative feature", () => {
+		const s = makeState();
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(25);
+		expect(dfFeatures(s, "Attunement to Nature")).toHaveLength(1);
+
+		s.setDivineFavorGod(null);
+		expect(dfFeatures(s, "Attunement to Nature")).toHaveLength(0);
+	});
+
+	test("survives a toJson/loadFromJson round-trip without duplicating", () => {
+		const s = makeState();
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(25);
+
+		const json = s.toJson();
+		expect((json.features || []).filter(f => f.name === "Attunement to Nature")).toHaveLength(1);
+
+		const s2 = makeState();
+		s2.loadFromJson(json);
+		s2.applyDivineFavorEffects(); // controller runs this post-load once the catalog is set
+		expect(dfFeatures(s2, "Attunement to Nature")).toHaveLength(1);
+	});
+});
+
 describe("Divine Favor — Apostle boon (favour 50): +2 score & +2 max", () => {
 	test("boost is withheld until the player chooses a score", () => {
 		const s = makeState();
