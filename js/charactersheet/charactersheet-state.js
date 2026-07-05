@@ -12880,6 +12880,12 @@ class CharacterSheetState {
 		const spell = this._data.spellcasting.innateSpells.find(s => s.id === spellId);
 		if (spell?.uses && spell.uses.current > 0) {
 			spell.uses.current--;
+			// (Bug 4) Keep a mirrored divine-favor resource in lockstep so casting from the
+			// Spells tab also decrements the Resources/Combat tracker (single logical pool).
+			if (spell.linkedResourceId) {
+				const resource = this._data.resources?.find(r => r.id === spell.linkedResourceId);
+				if (resource) resource.current = Math.max(0, Math.min(spell.uses.current, resource.max));
+			}
 		}
 	}
 
@@ -28543,6 +28549,13 @@ class CharacterSheetState {
 					feature.uses.current = resource.current;
 				}
 			}
+			// (Bug 4) Divine-favor limited casts are mirrored by a linked innate spell —
+			// keep its uses in lockstep so the Spells tab, Resources tab and Combat panel
+			// always show the same remaining count (single logical tracker, no drift).
+			if (resource.linkedInnateSpellId) {
+				const innate = this._data.spellcasting?.innateSpells?.find(s => s.id === resource.linkedInnateSpellId);
+				if (innate?.uses) innate.uses.current = resource.current;
+			}
 		}
 	}
 
@@ -30324,6 +30337,16 @@ class CharacterSheetState {
 			this._data.spellcasting.innateSpells = this._data.spellcasting.innateSpells
 				.filter(s => !(s.sourceFeature && s.sourceFeature.startsWith("Divine Favor:")));
 		}
+		// 1d. Remove prior divine-favor resources, remembering spent `current` so a limited
+		// cast the player already used stays spent across re-apply/reload. Keyed by spell
+		// uid, matching the innate-spell preserve above so the two trackers agree.
+		const priorResourceCurrent = {};
+		if (Array.isArray(this._data.resources)) {
+			this._data.resources.forEach(r => {
+				if (r._divineFavor && r._spellUid) priorResourceCurrent[r._spellUid] = r.current;
+			});
+			this._data.resources = this._data.resources.filter(r => !r._divineFavor);
+		}
 
 		// --- 2. Re-apply active boons ----------------------------------------
 		const god = this.getDivineFavorGodData();
@@ -30387,13 +30410,44 @@ class CharacterSheetState {
 				spellcastingAbility: boon.ability || "wis",
 				sourceFeature,
 			});
+			const added = this._data.spellcasting.innateSpells.find(
+				s => s.name === sp.name && s.source === source && s.sourceFeature === sourceFeature,
+			);
 			// Preserve spent uses across re-apply (clamp to the new maximum).
-			const preserved = priorUses[`${sp.name}|${source}`];
-			if (preserved != null) {
-				const added = this._data.spellcasting.innateSpells.find(
-					s => s.name === sp.name && s.source === source && s.sourceFeature === sourceFeature,
-				);
-				if (added && added.uses) added.uses.current = Math.max(0, Math.min(added.uses.max, preserved));
+			const spellUid = `${sp.name}|${source}`;
+			const preserved = priorUses[spellUid];
+			if (preserved != null && added && added.uses) {
+				added.uses.current = Math.max(0, Math.min(added.uses.max, preserved));
+			}
+			// Mirror the innate limited-cast as a TRACKED RESOURCE so it surfaces in the
+			// Resources tab and the Combat "Combat Resources" panel (both derive from
+			// getGenericPoolResources()). The resource is the same logical tracker as the
+			// innate spell — cross-linked via linkedInnateSpellId / linkedResourceId so
+			// spend/restore in any tab stays in lockstep (see setResourceCurrent /
+			// useInnateSpell). Not a parallel counter: it always mirrors the innate uses.
+			if (added && uses > 0) {
+				const resourceCurrent = priorResourceCurrent[spellUid] != null
+					? Math.max(0, Math.min(uses, priorResourceCurrent[spellUid]))
+					: (added.uses ? added.uses.current : uses);
+				// Keep the innate tracker and the resource identical at build time.
+				if (added.uses) added.uses.current = resourceCurrent;
+				// Guard against two boons granting the same spell (addInnateSpell dedupes by
+				// name+source, so the innate spell is shared — don't mint a second resource).
+				const alreadyMinted = (this._data.resources || []).some(r => r._divineFavor && r._spellUid === spellUid);
+				if (!alreadyMinted) {
+					const resourceId = CryptUtil.uid();
+					this.addResource({
+						id: resourceId,
+						name: `Divine Favor: ${sp.name}`,
+						max: uses,
+						current: resourceCurrent,
+						recharge: boon.recharge || "long",
+						_divineFavor: true,
+						_spellUid: spellUid,
+						linkedInnateSpellId: added.id,
+					});
+					added.linkedResourceId = resourceId;
+				}
 			}
 		});
 	}

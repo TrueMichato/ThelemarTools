@@ -442,10 +442,21 @@ the format scales to many gods):
 `applyDivineFavorEffects()` (state) is **imperative and idempotent**: it strips
 every prior divine-favor contribution (named modifiers tagged `_divineFavor`,
 reverses the `_applied` ability-score ledger, removes innate spells whose
-`sourceFeature` starts `"Divine Favor:"`), then re-applies the active boons —
-ability boosts first, so limited-cast use counts reflect the boosted modifier.
-Spent uses are preserved across re-application. The controller re-runs it after
-load (`_reconcileClassFeatures`), once the god catalog is available.
+`sourceFeature` starts `"Divine Favor:"`, and removes resources tagged
+`_divineFavor`), then re-applies the active boons — ability boosts first, so
+limited-cast use counts reflect the boosted modifier. Spent uses are preserved
+across re-application (keyed by spell uid). The controller re-runs it after load
+(`_reconcileClassFeatures`), once the god catalog is available.
+
+Each `limitedCastSpell`/`grantedSpell` boon mints **both** an innate spell (Spells
+tab) **and** a tracked resource named `Divine Favor: <Spell>` (`_divineFavor: true`)
+so it also surfaces in the Overview **Resources** panel and the Combat **Combat
+Resources** panel (both read `getGenericPoolResources()`). The two are the same
+logical tracker, cross-linked via `resource.linkedInnateSpellId` /
+`innateSpell.linkedResourceId`: `useInnateSpell()` (Spells-tab cast) mirrors onto the
+resource and `setResourceCurrent()` (Resources/Combat pips) mirrors back onto the
+innate spell, so spend/restore stays in lockstep with no parallel counter. On a long
+rest both `recoverResources("long")` and `restoreInnateSpells("long")` recharge them.
 
 ### UI
 
@@ -455,7 +466,10 @@ current tier display, devotion/transgression guidance, and the active boons
 (limited-cast spells surface as Cast/restore rows; `abilityScoreBoost` shows a
 score chooser). A compact **Overview** readout (`#charsheet-divine-favor-overview`)
 shows the worshipped god + favour tier. Granted spells also appear in the Spells
-tab as innate spells.
+tab as innate spells, and limited/granted casts appear as tracked pools in the
+Resources and Combat Resources panels. `_onDivineFavorChanged` (features) re-renders
+the spell, ability, Resources, and Combat panels so deity/favour/boon edits update
+every affected tab immediately.
 
 ### Seeded gods
 
@@ -499,7 +513,7 @@ These would require broader system changes:
 - `CharacterSheetTGTT.test.js` — 737 tests (core TGTT systems)
 - `CharacterSheetCombatMethodsSurvey.test.js` — 81 tests (Phase D: tradition parsing, stance integration, subclass tradition grants, edge cases, degree progression, DC calculation, stamina pool)
 - `CharacterSheetRumorSpell.test.js` — Rumor spell (level/school/components/duration, class availability, `rarity:rare`/`legality:illegal-II` tags, higher-level durations)
-- `CharacterSheetDivineFavor.test.js` — Divine Favor subsystem (Pan load, favour/malice tier computation, boon grants at favour 3/10/25/50, limited/granted casts, conditional advantage, Apostle +2 score & +2 max, save/load round-trip, apply/clear idempotency)
+- `CharacterSheetDivineFavor.test.js` — Divine Favor subsystem (Pan load, favour/malice tier computation, boon grants at favour 3/10/25/50, limited/granted casts, conditional advantage, Apostle +2 score & +2 max, save/load round-trip, apply/clear idempotency, and Bug 4: limited/granted casts minting tracked resources cross-linked to their innate spell — spend/restore sync across Spells/Resources/Combat, resource idempotency, and a real-character (Lorian, Pan favour 100) load check)
 
 ### Test Categories
 
