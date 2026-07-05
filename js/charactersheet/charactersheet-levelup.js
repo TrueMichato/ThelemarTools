@@ -5538,8 +5538,13 @@ class CharacterSheetLevelUp {
 
 		const hasSpellChoices = multiclassSpellGain > 0 || multiclassCantripGain > 0;
 
+		// Classes that gain their subclass at level 1 (2014 Cleric/Sorcerer/Warlock and
+		// homebrew equivalents) must pick it now, so its level-1 features and
+		// always-prepared spells (e.g. cleric domain spells) are granted on multiclass-in.
+		const needsSubclass = CharacterSheetClassUtils.levelGrantsSubclass(selectedClass, 1);
+
 		// If no choices needed, add the class directly
-		if (!optionalFeatureGains.length && !featureOptionGroups.length && !hasSkillChoices && !hasSpellChoices && !hasToolChoices) {
+		if (!optionalFeatureGains.length && !featureOptionGroups.length && !hasSkillChoices && !hasSpellChoices && !hasToolChoices && !needsSubclass) {
 			await this._applyMulticlass(selectedClass, features, {}, {}, [], [], [], []);
 			return true;
 		}
@@ -5557,11 +5562,15 @@ class CharacterSheetLevelUp {
 		/** @type {*[]} */ let selectedTools = [];
 		/** @type {*[]} */ let selectedMulticlassSpells = [];
 		/** @type {*[]} */ let selectedMulticlassCantrips = [];
+		/** @type {*} */ let selectedMulticlassSubclass = null;
 
 		const content = e_({outer: `<div></div>`});
 
 		// Info about what choices need to be made
 		const choicesList = [];
+		if (needsSubclass) {
+			choicesList.push(`a ${(selectedClass.subclassTitle || "subclass").toLowerCase()}`);
+		}
 		if (optionalFeatureGains.length) {
 			optionalFeatureGains.forEach((/** @type {*} */ g) => choicesList.push(`${g.newCount} ${g.name}`));
 		}
@@ -5587,6 +5596,22 @@ class CharacterSheetLevelUp {
 				<span class="ve-small">As a level 1 ${selectedClass.name}, you need to select: ${choicesList.join(", ")}</span>
 			</div>
 		`);
+
+		// Render subclass selection for classes that gain a subclass at level 1. Selecting
+		// a subclass drives the domain-spell grant: _applyMulticlass threads it into
+		// addClass, whose applyClassFeatureEffects() → populateSubclassSpells() grants the
+		// subclass's always-prepared spells (level-gated). Reuses the level-up picker.
+		if (needsSubclass) {
+			const subclassSection = e_({outer: `<div class="charsheet__levelup-section mb-3">
+				<h5>📚 ${selectedClass.subclassTitle || "Subclass"}</h5>
+				<p class="ve-small ve-muted">Choose your ${(selectedClass.subclassTitle || "subclass").toLowerCase()} (gained at level 1).</p>
+			</div>`});
+			const subclassPicker = this._renderSubclassSelectionCompact(selectedClass, (/** @type {*} */ subclass) => {
+				selectedMulticlassSubclass = subclass;
+			});
+			subclassSection.append(subclassPicker);
+			content.append(subclassSection);
+		}
 
 		// Render skill selection for multiclass (if applicable). `availableSkills` /
 		// `skillChoiceCount` were computed above from a normalized comparison against
@@ -5755,6 +5780,12 @@ class CharacterSheetLevelUp {
 		btnCancel.addEventListener("click", () => doClose(false));
 		const btnConfirm = e_({outer: `<button class="ve-btn ve-btn-primary">Confirm & Add ${selectedClass.name}</button>`});
 		btnConfirm.addEventListener("click", async () => {
+			// Require a subclass selection when the class gains one at level 1.
+			if (needsSubclass && !selectedMulticlassSubclass) {
+				JqueryUtil.doToast({type: "warning", content: `Please select a ${(selectedClass.subclassTitle || "subclass").toLowerCase()}.`});
+				return;
+			}
+
 			// Validate optional features
 			for (const gain of optionalFeatureGains) {
 				const featureKey = gain.featureTypes.join("_");
@@ -5796,7 +5827,7 @@ class CharacterSheetLevelUp {
 			// room). We deliberately do not gate Confirm on under-filled spell pools.
 
 			// Apply multiclass with selections
-			await this._applyMulticlass(selectedClass, features, selectedOptionalFeatures, selectedFeatureOptions, selectedSkills, selectedMulticlassSpells, selectedMulticlassCantrips, selectedTools.filter(Boolean));
+			await this._applyMulticlass(selectedClass, features, selectedOptionalFeatures, selectedFeatureOptions, selectedSkills, selectedMulticlassSpells, selectedMulticlassCantrips, selectedTools.filter(Boolean), selectedMulticlassSubclass);
 
 			doClose(true);
 		});
@@ -5822,13 +5853,28 @@ class CharacterSheetLevelUp {
 	/**
 	 * Apply multiclass - add class, features, proficiencies, and selected optional features
 	 */
-	async _applyMulticlass (/** @type {*} */ selectedClass, /** @type {*} */ features, /** @type {*} */ selectedOptionalFeatures, /** @type {*} */ selectedFeatureOptions, /** @type {*} */ selectedSkills = [], /** @type {*} */ selectedSpells = [], /** @type {*} */ selectedCantrips = [], /** @type {*} */ selectedTools = []) {
+	async _applyMulticlass (/** @type {*} */ selectedClass, /** @type {*} */ features, /** @type {*} */ selectedOptionalFeatures, /** @type {*} */ selectedFeatureOptions, /** @type {*} */ selectedSkills = [], /** @type {*} */ selectedSpells = [], /** @type {*} */ selectedCantrips = [], /** @type {*} */ selectedTools = [], /** @type {*} */ selectedSubclass = null) {
+		// Resolve the picked subclass to full data (incl. additionalSpells) for classes
+		// that gain their subclass at level 1. Passing additionalSpells into addClass lets
+		// applyClassFeatureEffects() → populateSubclassSpells() grant the subclass's
+		// always-prepared spells (e.g. cleric domain spells), level-gated by class level.
+		const resolvedSubclass = selectedSubclass
+			? (CharacterSheetClassUtils.resolveFullSubclass(selectedSubclass, selectedClass) || selectedSubclass)
+			: null;
+
 		// Add class at level 1 with caster info for multiclass spell slot calculation
 		this._state.addClass({
 			name: selectedClass.name,
 			source: selectedClass.source,
 			level: 1,
-			subclass: null,
+			subclass: resolvedSubclass ? {
+				name: resolvedSubclass.name,
+				shortName: resolvedSubclass.shortName,
+				source: resolvedSubclass.source,
+				casterProgression: resolvedSubclass.casterProgression,
+				spellcastingAbility: resolvedSubclass.spellcastingAbility,
+				additionalSpells: resolvedSubclass.additionalSpells,
+			} : null,
 			casterProgression: selectedClass.casterProgression || null,
 			spellcastingAbility: selectedClass.spellcastingAbility || null,
 			// Spell progression arrays for 2024/TGTT classes
@@ -5837,8 +5883,16 @@ class CharacterSheetLevelUp {
 			cantripProgression: selectedClass.cantripProgression,
 		});
 
+		// When a subclass was chosen, recompute the level-1 features WITH the subclass so
+		// its subclass features are granted too; the gainSubclassFeature placeholder is
+		// skipped in favour of the real subclass features (mirrors the Builder).
+		const featuresToAdd = resolvedSubclass
+			? CharacterSheetClassUtils.getLevelFeatures(selectedClass, 1, resolvedSubclass, this._page.getClassFeatures?.() || [], this._page.getSubclassFeatures?.() || [])
+			: features;
+
 		// Add first level features
-		features.forEach((/** @type {*} */ f) => {
+		featuresToAdd.forEach((/** @type {*} */ f) => {
+			if (resolvedSubclass && f.gainSubclassFeature) return; // placeholder replaced by real subclass feature
 			this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(f, {
 				className: f.className || selectedClass.name,
 				classSource: f.classSource || selectedClass.source,
@@ -5945,10 +5999,12 @@ class CharacterSheetLevelUp {
 		// Add selected cantrips from multiclass
 		if (selectedCantrips && selectedCantrips.length) {
 			selectedCantrips.forEach((/** @type {*} */ cantrip) => {
-				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(cantrip, {
+				// Use addCantrip/buildCantripStateObject: buildSpellStateObject ignores the
+				// isCantrip flag and addSpell only routes level-0 spells to the cantrip list,
+				// so a non-level-0-tagged cantrip would otherwise land in spellsKnown.
+				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(cantrip, {
 					sourceFeature: "Cantrips Known",
 					sourceClass: selectedClass.name,
-					isCantrip: true,
 				}));
 			});
 		}
@@ -5974,6 +6030,14 @@ class CharacterSheetLevelUp {
 			for (const of_ of (/** @type {*} */ (optFeatures))) mcOptionalFeatures.push({name: of_.name, source: of_.source});
 		}
 		if (mcOptionalFeatures.length) mcHistory.choices.optionalFeatures = mcOptionalFeatures;
+		// Record the level-1 subclass pick so per-class removal / replay can reverse it.
+		if (resolvedSubclass) {
+			mcHistory.choices.subclass = {
+				name: resolvedSubclass.name,
+				shortName: resolvedSubclass.shortName,
+				source: resolvedSubclass.source,
+			};
+		}
 		const mcFeatureChoices = [];
 		for (const options of Object.values(selectedFeatureOptions)) {
 			for (const option of (/** @type {*} */ (options))) mcFeatureChoices.push({choice: option.name, source: option.source});
