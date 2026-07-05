@@ -30859,6 +30859,23 @@ class CharacterSheetState {
 
 		// --- 2. Re-apply active boons ----------------------------------------
 		const god = this.getDivineFavorGodData();
+		// 1f. Prune orphaned DF narrative-boon TOGGLE active states (R47-a). A boon toggled ON
+		// creates a `_dfNarrativeBoon` active state keyed by the boon's STABLE feature id; that
+		// state is deliberately NOT stripped above, so a still-active boon stays toggled across
+		// reload (the feature is re-added below with the same id). But if the god changed or
+		// favour dropped so a boon is no longer granted, its feature won't be re-added and the
+		// state would linger — remove any whose boon id is not in the current active set (empty
+		// when there is no god, so all are pruned).
+		if (Array.isArray(this._data.activeStates) && this._data.activeStates.some(s => s._dfNarrativeBoon)) {
+			const validBoonIds = new Set(
+				(god ? this.getActiveDivineFavorBoons() : [])
+					.filter(b => b.type === "narrative" && b.name)
+					.map(b => CharacterSheetState._divineFavorBoonFeatureId(god, b)),
+			);
+			this._data.activeStates = this._data.activeStates.filter(
+				s => !s._dfNarrativeBoon || validBoonIds.has(s.sourceFeatureId),
+			);
+		}
 		if (!god) return;
 		const boons = this.getActiveDivineFavorBoons();
 
@@ -30965,20 +30982,131 @@ class CharacterSheetState {
 		// abilityScoreBoost/limited-or-granted-cast boons were reconciled, and a
 		// `type:"narrative"` boon (e.g. Pan → Disciple → "Attunement to Nature") reached no
 		// channel at all. Tagged `_divineFavor:true` so the strip pass (1e) removes it on the
-		// next reconcile, and given no `featureType` so it renders through the generic
-		// "unmarked feature" path in the Features tab (addFeature dedupes by name+source, and
-		// the strip already ran, so a re-apply/reload never duplicates it).
+		// next reconcile.
+		//
+		// (R47-a) Each narrative boon is ALSO registered as an activatable, duration-tracked
+		// TOGGLE: an at-will boon (action economy but no per-day uses and no combat keyword)
+		// was surfaced in the Features tab but never made USABLE — the combat "Available to
+		// Activate" surface derives from getActivatableFeatures(), which only routes a feature
+		// as a toggle when it carries `activatable` metadata. We give each boon:
+		//   • a STABLE deterministic id (dfboon_<god>_<boon>) so the toggle's active-state
+		//     (keyed by sourceFeatureId) survives the strip+re-add of every reconcile/reload
+		//     without orphaning — the state array is not stripped here, and the re-added
+		//     feature keeps the same id, so a boon toggled ON stays on across a reload;
+		//   • `activatable:{interactionMode:"toggle", stateTypeId:"custom", ...}` so
+		//     detectActivatableFeature() classifies it as a toggle (isToggle:true → excluded
+		//     from renderCombatActions to avoid double-surfacing) and getActivatableFeatures()
+		//     lists it under "Available to Activate";
+		//   • parsed activation action ("as an action/bonus action/reaction") + duration
+		//     ("1 hour"→600 rounds, "1 minute"→10, "until …"→indefinite) from the desc.
+		// Activation is routed through the OWNED toggleDivineFavorBoonState() (see combat.js
+		// _activateCombatFeature) so the active state carries the parsed duration/round
+		// countdown, which the generic _activateFeatureState pipeline does not pass through.
 		boons.forEach(boon => {
 			if (boon.type !== "narrative") return;
 			if (!boon.name) return;
+			const desc = boon.desc || "";
+			const {activationAction, duration} = CharacterSheetState._parseDivineFavorBoonActivation(desc);
+			const featureId = CharacterSheetState._divineFavorBoonFeatureId(god, boon);
 			this.addFeature({
+				id: featureId,
 				name: boon.name,
-				description: boon.desc || "",
+				description: desc,
 				source: god.source || "TGTT",
 				sourceFeature: `Divine Favor: ${god.name} — ${boon._tierName}`,
 				_divineFavor: true,
+				_dfNarrativeBoon: true,
+				_dfBoonDuration: duration,
+				activatable: {
+					interactionMode: "toggle",
+					stateTypeId: "custom",
+					activationAction,
+					duration,
+				},
 			});
+			// At-will boons have NO daily use cap (design). addFeature auto-extracts `uses`
+			// from the description; strip any it minted so the boon never shows a use pool.
+			const added = (this._data.features || []).find(f => f.id === featureId);
+			if (added && added.uses) delete added.uses;
 		});
+	}
+
+	/**
+	 * (R47-a) Parse a Divine Favor narrative boon description for its action economy and
+	 * duration, so the boon can be surfaced as an activatable, duration-tracked toggle.
+	 * @param {string} desc - The boon description text.
+	 * @returns {{activationAction: string, duration: string}}
+	 *   `activationAction` ∈ action|bonus|reaction (default "action").
+	 *   `duration` is a human string parseable by parseDurationToRounds ("1 hour", "10 minutes",
+	 *   …) or "Until ended" when no finite duration is stated.
+	 */
+	static _parseDivineFavorBoonActivation (desc) {
+		const text = String(desc || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
+
+		let activationAction = "action";
+		if (/\bas a bonus action\b|\bbonus action\b/.test(text)) activationAction = "bonus";
+		else if (/\bas a reaction\b|\byour reaction\b/.test(text)) activationAction = "reaction";
+		else if (/\bas an action\b|\byour action\b/.test(text)) activationAction = "action";
+
+		let duration = "Until ended";
+		// Prefer an explicit "(total )?duration of N unit" phrase, then any bare "N unit".
+		const durMatch = text.match(/(?:total\s+)?duration of\s+(\d+)\s*(hour|minute|round|second)s?/)
+			|| text.match(/\bfor\s+(\d+)\s*(hour|minute|round|second)s?/)
+			|| text.match(/\b(\d+)\s*(hour|minute|round|second)s?\b/);
+		if (durMatch) {
+			const amount = parseInt(durMatch[1], 10);
+			const unit = durMatch[2];
+			duration = `${amount} ${unit}${amount === 1 ? "" : "s"}`;
+		}
+		return {activationAction, duration};
+	}
+
+	/**
+	 * (R47-a) Build the STABLE, deterministic feature id for a Divine Favor narrative boon.
+	 * Stability is what lets a toggled-on boon's active state (keyed by sourceFeatureId) survive
+	 * the strip+re-add that every applyDivineFavorEffects() reconcile/reload performs.
+	 * @param {{name?: string, source?: string}} god
+	 * @param {{name?: string}} boon
+	 * @returns {string}
+	 */
+	static _divineFavorBoonFeatureId (god, boon) {
+		const slug = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+		return `dfboon_${slug(god?.name)}_${slug(boon?.name)}`;
+	}
+
+	/**
+	 * (R47-a) Toggle a Divine Favor narrative boon's activatable state on/off. Creates a generic
+	 * "custom" active state carrying the boon's parsed duration (so the combat round countdown +
+	 * auto-expiry via advanceRound apply) and tagged `_dfNarrativeBoon` so the combat End button
+	 * routes back here. Toggling an already-active boon removes its state. Idempotent: reuses the
+	 * existing state via addActiveState's sourceFeatureId dedupe.
+	 * @param {string} featureId - The stable DF-boon feature id.
+	 * @returns {boolean|null} New active status (true=on, false=off), or null if not a DF boon.
+	 */
+	toggleDivineFavorBoonState (featureId) {
+		const feature = (this._data.features || []).find(f => f.id === featureId && f._dfNarrativeBoon);
+		if (!feature) return null;
+		if (!Array.isArray(this._data.activeStates)) this._data.activeStates = [];
+
+		const existing = this._data.activeStates.find(
+			s => s._dfNarrativeBoon && s.sourceFeatureId === featureId && s.active,
+		);
+		if (existing) {
+			this.removeActiveState(existing.id);
+			return false;
+		}
+
+		const duration = feature._dfBoonDuration || feature.activatable?.duration || "Until ended";
+		const stateId = this.addActiveState("custom", {
+			name: feature.name,
+			icon: "✨",
+			sourceFeatureId: featureId,
+			description: feature.description || "",
+			duration,
+		});
+		const state = this._data.activeStates.find(s => s.id === stateId);
+		if (state) state._dfNarrativeBoon = true;
+		return true;
 	}
 
 	/**

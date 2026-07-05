@@ -8067,6 +8067,19 @@ class CharacterSheetCombat {
 				if (isEndable) {
 					stateEl.querySelector(".charsheet__state-remove")?.addEventListener("click", (/** @type {*} */ e) => {
 						e.stopPropagation();
+						// (R47-a) Divine Favor narrative-boon toggles end via the OWNED path so
+						// exactly this boon's state is removed (not deactivateState("custom"),
+						// which would target every custom state by shared stateTypeId).
+						if (state._dfNarrativeBoon && this._state.toggleDivineFavorBoonState) {
+							this._state.toggleDivineFavorBoonState(state.sourceFeatureId);
+							this.renderCombatStates();
+							this.renderCombatDefenses();
+							this.renderCombatEffects();
+							this._page._renderActiveStates?.();
+							this._page._saveCurrentCharacter?.();
+							this._page._renderCharacter?.();
+							return;
+						}
 						// Check if this is a custom ability state
 						const customAbility = state.sourceFeatureId && this._state.getCustomAbilities?.()?.find(a => a.id === state.sourceFeatureId);
 						if (customAbility) {
@@ -8172,6 +8185,18 @@ class CharacterSheetCombat {
 	}
 
 	_activateCombatFeature (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
+		// (R47-a) Divine Favor narrative boons are activatable, duration-tracked TOGGLES routed
+		// through the OWNED toggleDivineFavorBoonState() so the created active state carries the
+		// boon's parsed duration/round countdown — the generic _activateFeatureState pipeline
+		// does not forward a parsed duration for toggle states.
+		if (feature?._dfNarrativeBoon && this._state.toggleDivineFavorBoonState) {
+			this._state.toggleDivineFavorBoonState(feature.id);
+			this._page._saveCurrentCharacter?.();
+			this.renderCombatStates();
+			this._page._renderActiveStates?.();
+			this._page._renderCharacter?.();
+			return;
+		}
 		this._page._activateFeatureState?.(feature, stateTypeId, stateType, resource, resourceCost, activationInfo);
 		this.renderCombatStates();
 		this._page._renderActiveStates?.();
