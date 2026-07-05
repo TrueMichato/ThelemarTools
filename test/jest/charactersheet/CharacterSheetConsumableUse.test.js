@@ -117,6 +117,19 @@ describe("Bug 2 — _useConsumable actually heals + decrements (dispatch fix)", 
 		expect(state.getItems().find(i => i.id === id).quantity).toBe(1);
 	});
 
+	test("R47 Bug 4 — a heal refreshes the HP display (calls page._renderHp) so the regained HP is visible", async () => {
+		const state = newState();
+		const inv = makeInventory(state);
+		let hpRenderCalls = 0;
+		inv._page._renderHp = () => { hpRenderCalls++; };
+		const id = addPotion(state, {name: "Potion of Healing", source: "PHB", type: "P"}, 1);
+
+		await inv._useConsumable(id);
+
+		// The heal mutated state, and the UI was refreshed so it is actually visible.
+		expect(hpRenderCalls).toBeGreaterThanOrEqual(1);
+	});
+
 	test("maximize (used as an action) heals the MAXIMUM (10) and consumes one", async () => {
 		const state = newState();
 		const inv = makeInventory(state);
