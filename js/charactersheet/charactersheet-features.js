@@ -2727,6 +2727,13 @@ class CharacterSheetFeatures {
 		this._page?._renderAbilitiesDetailed?.();
 		this._page?._renderSavingThrows?.();
 		this._page?._renderSkills?.();
+		// (Bug 4) Limited/granted-cast boons mint tracked resources (Resources tab) that also
+		// surface as castable Combat resources — refresh both so deity/favor/boon changes are
+		// reflected immediately, not only after a manual tab switch.
+		this._page?._renderResources?.();
+		this._renderResources?.();
+		this._page?._combat?.renderCombatResources?.();
+		this._page?._combat?.renderCombatActions?.();
 	}
 
 	_abilityLabel (abbr) {
