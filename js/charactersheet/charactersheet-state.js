@@ -1697,8 +1697,11 @@ class FeatureModifierParser {
 		// "add your Wisdom modifier to Perception checks"
 		// "You add your Wisdom modifier to the damage you deal with any cleric cantrip"
 		const addModPatterns = [
-			// Add modifier to saving throw
-			{pattern: /add\s+(?:your\s+)?(\w+)\s+modifier\s+to\s+(?:any\s+)?(?:saving\s+throws?)(?:\s+against\s+([^.]+))?/gi, type: "save"},
+			// Add modifier to saving throw. The conditional clause accepts the common
+			// phrasings for a scoped save: "against X", and the TGTT "made to resist
+			// being X" / "to resist being X" / "to avoid being X" (e.g. Chaste's "add your
+			// Wisdom modifier to any saving throws made to resist being charmed").
+			{pattern: /add\s+(?:your\s+)?(\w+)\s+modifier\s+to\s+(?:any\s+)?(?:saving\s+throws?)(?:\s+(?:made\s+to\s+resist|made\s+to\s+avoid|to\s+resist|to\s+avoid|against)\s+(?:being\s+)?([^.]+))?/gi, type: "save"},
 			// Add modifier to skill/ability checks
 			{pattern: /add\s+(?:your\s+)?(\w+)\s+modifier\s+to\s+(?:\w+\s*\((?:{@skill\s*)?)?(\w+)(?:\}?\))?\s*checks?/gi, type: "check"},
 			// Add modifier to damage with cantrips
@@ -1708,13 +1711,20 @@ class FeatureModifierParser {
 			let match;
 			while ((match = pattern.exec(plainText)) !== null) {
 				const ability = match[1].toLowerCase().substring(0, 3);
-				const target = match[2] ? match[2].toLowerCase().replace(/}?\)?$/, "") : null;
+				const target = match[2] ? match[2].toLowerCase().replace(/}?\)?$/, "").trim() : null;
 				modifiers.push({
 					type: type === "save" ? "save:all" : type === "cantripDamage" ? "damage:cantrip" : `skill:${target}`,
 					value: 0,
 					note: sourceName,
-					addAbilityMod: ability,
-					conditional: type === "save" && target ? `against ${target}` : undefined,
+					// Field is `abilityMod` (NOT `addAbilityMod`): _processFeatureModifiers /
+					// _resolveNamedModifierNumericValue read `abilityMod` to add the live
+					// ability modifier. A prior `addAbilityMod` key had zero consumers, so the
+					// bonus silently dropped to a no-op +0 (root cause of Chaste doing nothing).
+					abilityMod: ability,
+					// Normalized `against:<condition>` form (colon), so formatConditionalText
+					// renders it as "vs <Condition>" and it matches the app-wide conditional
+					// convention used by custom abilities. Chaste → "against:charmed".
+					conditional: type === "save" && target ? `against:${target}` : undefined,
 				});
 			}
 		});
@@ -4531,6 +4541,14 @@ class CharacterSheetState {
 		// and those whose source feature still exists are preserved.
 		this._migrateOrphanedFeatureModifiers();
 
+		// (Bug 5c) Repair persisted "add your <ability> modifier to saves/checks/cantrip
+		// damage" modifiers that a prior parser field-name bug stored as no-op `value:0`
+		// rows (no abilityMod). Notably the Cleric "Chaste" Principle of Devotion, whose
+		// "add your Wisdom modifier to saving throws made to resist being charmed" did
+		// nothing. Runs AFTER _migrateOrphanedFeatureModifiers so orphaned rows are gone
+		// (we never enrich a modifier whose source feature was removed).
+		this._migrateFeatureAbilityModModifiers();
+
 		// Migrate spells: ensure concentration/ritual flags are set correctly
 		this._migrateSpells();
 
@@ -5280,6 +5298,63 @@ class CharacterSheetState {
 	 * skill bonuses are untouched. Idempotent: disabled modifiers are skipped, so a
 	 * second run is a no-op. Mirrors _migrateConditionalSpeedModifiers.
 	 */
+	/**
+	 * Repair persisted "add your <ability> modifier to …" named modifiers that predate
+	 * the parser field-name fix.
+	 *
+	 * `FeatureModifierParser.parseModifiers` emits the ability-scaling bonus for
+	 * "add your Wisdom modifier to any saving throws / skill checks / cantrip damage"
+	 * phrasings under `abilityMod` so that `_resolveNamedModifierNumericValue` adds the
+	 * live modifier. Older builds emitted it under a dead `addAbilityMod` key that no
+	 * consumer read, so the modifier persisted as a no-op (`value:0`, no `abilityMod`).
+	 * The Cleric "Chaste" Principle of Devotion is the canonical victim: its
+	 * "add your Wisdom modifier to any saving throws made to resist being charmed"
+	 * stored as an unconditional `save:all +0` that did nothing.
+	 *
+	 * Because `_processFeatureModifiers` only runs at addFeature/addFeat time (never per
+	 * load) and `loadFromJson` restores `namedModifiers` verbatim, saved characters keep
+	 * the broken modifier forever. Re-parse each affected feature and enrich its stored
+	 * modifier IN PLACE with the resolved `abilityMod` (and the now-detected conditional,
+	 * so a scoped save is correctly gated). Idempotent: a modifier that already carries an
+	 * `abilityMod` is skipped, and enrichment never mints a duplicate row.
+	 */
+	_migrateFeatureAbilityModModifiers () {
+		if (!this._data.namedModifiers?.length) return;
+		if (!this._data.features?.length) return;
+
+		// Only the three ability-mod-bearing parse types can be affected, and only a
+		// modifier still MISSING an abilityMod needs repair (re-runs are a no-op).
+		const candidates = this._data.namedModifiers.filter(m =>
+			typeof m.type === "string"
+			&& !m.abilityMod
+			&& (m.type === "save:all" || m.type === "damage:cantrip" || m.type.startsWith("skill:")),
+		);
+		if (!candidates.length) return;
+
+		candidates.forEach(mod => {
+			const feature = this._data.features.find(f =>
+				(mod.sourceFeatureId && f.id === mod.sourceFeatureId)
+				|| (f.name && mod.note && mod.note.includes(`From ${f.name}`))
+				|| (f.name && mod.name && f.name === mod.name),
+			);
+			if (!feature?.description) return;
+
+			const parsed = FeatureModifierParser.parseModifiers(feature.description, feature.name);
+			const parsedMod = parsed.find(p => p.type === mod.type && p.abilityMod);
+			if (!parsedMod) return;
+
+			mod.abilityMod = parsedMod.abilityMod;
+			// A newly-detected conditional (e.g. Chaste "against charmed") must gate the
+			// bonus: adopt it and disable the base modifier so it only applies in-scope
+			// via the conditional/pre-roll pipeline. An already-conditional mod is left as-is.
+			if (parsedMod.conditional && !mod.conditional) {
+				mod.conditional = parsedMod.conditional;
+				mod.enabled = false;
+				if (mod.note && !mod.note.includes(" - ")) mod.note = `${mod.note} - ${parsedMod.conditional}`;
+			}
+		});
+	}
+
 	_migrateConditionalSkillModifiers () {
 		if (!this._data.namedModifiers?.length) return;
 		if (!this._data.features?.length) return;
@@ -13430,14 +13505,16 @@ class CharacterSheetState {
 	 */
 	getPrinciplesOfDevotionState () {
 		const PARENT = "principles of devotion";
+		// (Bug 5a) Cleric gate: Principles of Devotion is a Cleric feature. Without this
+		// gate the catalog fallback below leaks a non-null state onto ANY character whose
+		// loaded class-feature catalog merely CONTAINS the cleric feature (e.g. a pure
+		// Rogue in a TGTT catalog), which then renders the Overview manager for them.
+		if ((this.getClassLevel("Cleric") || 0) <= 0) return null;
 		let feature = (this._data.features || []).find(f => String(f?.name || "").toLowerCase() === PARENT);
 		if (!feature) {
 			feature = (this._classFeatureCatalog || []).find(c => String(c?.name || "").toLowerCase() === PARENT) || null;
 		}
 		if (!feature) return null;
-		const groups = this.getStructuredFeatureChoices(feature) || [];
-		const group = groups.find(g => Array.isArray(g.options) && g.options.length);
-		if (!group) return null;
 		const parentInfo = {
 			parent: feature.name,
 			parentSource: feature.source || null,
@@ -13445,8 +13522,17 @@ class CharacterSheetState {
 			parentClassSource: feature.classSource || null,
 			level: feature.level != null ? feature.level : null,
 		};
+		// (Bug 5b) Resolve the current pick INDEPENDENTLY of option-group resolution.
+		// Previously an early `return null` when getStructuredFeatureChoices found no
+		// option group meant an already-chosen principle (stored in chosenSubfeatures at
+		// level-up) never surfaced in the Overview. Compute `current` first, then return
+		// state when EITHER selectable options OR a stored current pick exists.
 		const current = (this._data.chosenSubfeatures || []).find(r => String(r.parent || "").toLowerCase() === PARENT) || null;
-		return {parentInfo, options: group.options, current};
+		const groups = this.getStructuredFeatureChoices(feature) || [];
+		const group = groups.find(g => Array.isArray(g.options) && g.options.length);
+		const options = group ? group.options : [];
+		if (!options.length && !current) return null;
+		return {parentInfo, options, current};
 	}
 
 	/**
@@ -29856,6 +29942,136 @@ class CharacterSheetState {
 		return patched;
 	}
 
+	/**
+	 * (R45 Bug 3) Repair subclass/class features that were STORED as empty stubs — no
+	 * `entries`, no `description`, no `uses` — from the resolved feature catalog.
+	 *
+	 * Root cause: a homebrew subclass defined as a `_copy` of a base subclass whose own
+	 * level features are THEMSELVES feature-level `_copy` stubs (e.g. TGTT-2014 "Tempest
+	 * Domain" → XPHB-attached PHB Tempest, whose level-3 "Tempest Domain" / "Channel
+	 * Divinity: Destructive Wrath" are `_copy` of the PHB level-1/level-2 features). The
+	 * character sheet's data loader never merges feature-level `_copy`, so those catalog
+	 * entries carry no `entries`, and the store/level-up path persisted the features blank.
+	 * With no text, no use pool is minted, no activation is classified, and the Features /
+	 * Combat panels render nothing.
+	 *
+	 * The canonical features WITH real text DO exist in the same flat catalog (the base
+	 * class ships the PHB-sourced Tempest features with full entries). So this pass finds
+	 * the richest same-identity catalog entry — lenient on BOTH source and level (a `_copy`
+	 * subclass grants at a shifted level, and its content lives under the base source) —
+	 * and backfills the stored stub's `entries`/`description`, then re-mints any use pool
+	 * from the now-present text. detectActivatableFeature() classifies live off the feature,
+	 * so once text is present Channel-Divinity options / passives / reactions surface through
+	 * the existing generic pipelines with no further wiring.
+	 *
+	 * Catalog-gated (no-ops until setClassFeatureCatalog has run) and idempotent (a repaired
+	 * feature has text on the next pass and is skipped; use re-mint checks for an existing
+	 * pool), so it is safe to call after every load / reconcile.
+	 *
+	 * @returns {number} count of features whose content was repaired.
+	 */
+	reconcileSubclassFeatureEntries () {
+		if (!Array.isArray(this._data.features)) return 0;
+		const pool = [
+			...(Array.isArray(this._subclassFeatureCatalog) ? this._subclassFeatureCatalog : []),
+			...(Array.isArray(this._classFeatureCatalog) ? this._classFeatureCatalog : []),
+		];
+		if (!pool.length) return 0;
+
+		const norm = (/** @type {*} */ s) => (s || "").toString().trim().toLowerCase();
+		const hasText = (/** @type {*} */ f) =>
+			(Array.isArray(f.entries) && f.entries.length) || !!(f.description && `${f.description}`.trim());
+
+		let repaired = 0;
+		for (const f of this._data.features) {
+			// Only repair class-derived features (never a same-named race/background/custom
+			// feature) that are genuinely EMPTY — missing both structured entries and text.
+			const isClassDerived = !!(f.isSubclassFeature || f.subclassName || f.className || f.classSource || f.featureType === "Class");
+			if (!isClassDerived || hasText(f)) continue;
+
+			const fIsSub = !!(f.subclassName || f.isSubclassFeature);
+			const wantName = norm(f.name);
+			const wantSub = norm(f.subclassShortName || f.subclassName);
+			const wantClass = norm(f.className);
+
+			// Candidate = same feature identity, WITH real entries. Source- and level-lenient:
+			// a `_copy` subclass's canonical lives under a different source and level.
+			const candidates = pool.filter(c => {
+				if (norm(c.name) !== wantName) return false;
+				if (!(Array.isArray(c.entries) && c.entries.length)) return false;
+				// Never cross the class/subclass boundary.
+				const cIsSub = !!(c.subclassName || c.subclassShortName || c.isSubclassFeature);
+				if (cIsSub !== fIsSub) return false;
+				// Class scope (lenient when either side omits className).
+				if (wantClass && c.className && norm(c.className) !== wantClass) return false;
+				// Subclass scope (lenient when either side omits it), by short name.
+				if (fIsSub && wantSub) {
+					const cSub = norm(c.subclassShortName || c.subclassName);
+					if (cSub && cSub !== wantSub) return false;
+				}
+				return true;
+			});
+			if (!candidates.length) continue;
+
+			// Prefer an exact-level match; otherwise take the first entries-carrying candidate.
+			const canonical = candidates.find(c => c.level === f.level) || candidates[0];
+
+			const didPatch = this.backfillFeatureContentFromCanonical(canonical, {
+				className: f.className,
+				level: f.level,
+				subclassName: f.subclassName,
+				isSubclassFeature: fIsSub,
+			});
+			if (didPatch) {
+				repaired++;
+				this._remintFeatureUsesFromText(f);
+			}
+		}
+		return repaired;
+	}
+
+	/**
+	 * (R45 Bug 3 helper) After a stored feature's text is backfilled, mint the use pool /
+	 * resource it should have had if it had carried text at add time. Mirrors the use-parsing
+	 * block of addFeature and is conservative: it never overwrites an existing `uses`, and
+	 * only adds a resource row when one does not already exist and the feature is not a
+	 * redundant rider or a synthetic-tracked pool. Idempotent.
+	 * @param {*} feature - The stored feature (already patched with entries/description).
+	 */
+	_remintFeatureUsesFromText (feature) {
+		if (!feature || feature.uses || !feature.description) return;
+		if (this._isResourceSystemFeature(feature)) return;
+
+		let uses = this._getCuratedFeatureUses(feature);
+		if (!uses) {
+			const getAbilityMod = (/** @type {*} */ ability) => this.getAbilityMod(ability);
+			const getProfBonus = () => this.getProficiencyBonus();
+			uses = FeatureUsesParser.parseUses(feature.description, getAbilityMod, getProfBonus);
+		}
+		if (!uses) return;
+
+		feature.uses = {
+			current: uses.current !== undefined ? uses.current : uses.max,
+			max: uses.max,
+			recharge: uses.recharge || feature.recharge,
+		};
+
+		if (uses.max > 0) {
+			const isRedundantRider = CharacterSheetState.isRedundantImprovementFeature?.(feature, this._data.features);
+			const isSyntheticTracked = CharacterSheetState.isSyntheticTrackedResourceFeature?.(feature.name);
+			const existingResource = (this._data.resources || []).find(r => r.name === feature.name || r.featureId === feature.id);
+			if (!existingResource && !isRedundantRider && !isSyntheticTracked) {
+				this.addResource({
+					name: feature.name,
+					max: uses.max,
+					current: uses.current !== undefined ? uses.current : uses.max,
+					recharge: uses.recharge,
+					featureId: feature.id,
+				});
+			}
+		}
+	}
+
 	_reapplyHistoryOptionalFeatures () {
 		const history = [...(this._data.levelHistory || [])].sort((a, b) => a.level - b.level);
 		if (!history.length) return;
@@ -30093,6 +30309,14 @@ class CharacterSheetState {
 		if (!isCombatMethod && feature.description && NaturalWeaponParser.isNaturalWeapon(feature.description)) {
 			const naturalWeapon = NaturalWeaponParser.parseNaturalWeapon(feature.description, feature.name);
 			if (naturalWeapon) {
+				// TGTT house rule: natural weapons are finesse (use the better of STR/DEX).
+				// parseNaturalWeapon is static and has no settings access, so apply the
+				// override here where getSettings() is available. Only override the untouched
+				// "str" default — explicit con/dex/spellcasting (or an already-detected finesse)
+				// stay as parsed. combat.js resolves "finesse" -> max(str, dex).
+				if (naturalWeapon.abilityMod === "str" && this.getSettings()?.enableTgtt !== false) {
+					naturalWeapon.abilityMod = "finesse";
+				}
 				// Check if attack already exists
 				const existingAttack = this._data.attacks.find(a =>
 					a.name === naturalWeapon.name || a.sourceFeature === feature.name,
