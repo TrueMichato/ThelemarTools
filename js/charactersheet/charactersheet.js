@@ -6508,7 +6508,11 @@ class CharacterSheetPage {
 		if (!section || !container) return;
 
 		const info = this._state.getPrinciplesOfDevotionState?.();
-		if (!info || !Array.isArray(info.options) || !info.options.length) {
+		// (Bug 5b) Show the section when there are selectable options OR a principle is
+		// already chosen. A stored pick with no re-resolvable option list must still
+		// render its current badge rather than hiding the section entirely.
+		const hasOptions = info && Array.isArray(info.options) && info.options.length;
+		if (!info || (!hasOptions && !info.current)) {
 			section.style.display = "none";
 			container.innerHTML = "";
 			return;
@@ -6516,7 +6520,7 @@ class CharacterSheetPage {
 		section.style.display = "";
 		container.innerHTML = "";
 
-		const {parentInfo, options, current} = info;
+		const {parentInfo, options = [], current} = info;
 		const currentName = current?.name || null;
 
 		// ----- Current principle (hoverable when its entries resolve) -----
@@ -15283,6 +15287,12 @@ class CharacterSheetPage {
 			// Upgrade's Singular Focus / Groundshatter), now that the class-feature catalog
 			// and combat-method catalog are both available.
 			this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || []);
+			// (R45 Bug 3) Repair subclass/class features stored as empty stubs (e.g. a
+			// TGTT-2014 `_copy` Tempest Domain whose features were persisted with no
+			// entries/description/uses) from the now-available catalog. Must run AFTER
+			// setClassFeatureCatalog — reconcileClassFeatures above ran before the catalog
+			// was resolved, so its backfill had only empty stubs to copy from. Idempotent.
+			this._state.reconcileSubclassFeatureEntries();
 			// Repair manually-learned combat methods whose entity markers were lost so they
 			// resurface in getCombatMethods. Catalog-gated + idempotent; runs here (the
 			// post-catalog reconcile path) because the load-time effect apply happens before
