@@ -378,6 +378,28 @@ describe("Divine Favor — Bug 4: limited casts become tracked resources", () =>
 		expect(innate(s, "Conjure Animals").uses.current).toBe(0); // and mirrored
 	});
 
+	test("a long rest recharges the innate spell and the resource in lockstep", () => {
+		const s = makeState();
+		s.setAbilityBase("wis", 16); // Animal Friendship 3 uses
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(10);
+
+		// Spend from both surfaces: cast (Spells tab) + pip (Resources/Combat).
+		s.useInnateSpell(innate(s, "Animal Friendship").id); // 3 → 2 (mirrors resource)
+		s.setResourceCurrent(dfResource(s, "Conjure Animals").id, 0); // 1 → 0 (mirrors innate)
+		expect(dfResource(s, "Animal Friendship").current).toBe(2);
+		expect(innate(s, "Conjure Animals").uses.current).toBe(0);
+
+		// Both trackers recharge on a long rest via their independent recharge paths.
+		s.restoreInnateSpells("long");
+		s.recoverResources("long");
+
+		expect(innate(s, "Animal Friendship").uses.current).toBe(3);
+		expect(dfResource(s, "Animal Friendship").current).toBe(3);
+		expect(innate(s, "Conjure Animals").uses.current).toBe(1);
+		expect(dfResource(s, "Conjure Animals").current).toBe(1);
+	});
+
 	test("lowering favour / clearing the god strips the resources", () => {
 		const s = makeState();
 		s.setDivineFavorGod("Pan|TGTT");
