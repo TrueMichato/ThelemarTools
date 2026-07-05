@@ -556,6 +556,9 @@ class CharacterSheetBuilder {
 						...this._selectedClassFeatureLanguages.filter(Boolean),
 					],
 					hadSpellcasting: !!this._selectedClass.spellcastingAbility,
+					// Subclass recorded so _clearClassApplication can prune its always-prepared
+					// domain spells when the user switches domain (or class) before finishing.
+					subclassName: this._selectedSubclass?.name || null,
 				};
 
 				// Record level 1 history entry
@@ -2206,6 +2209,11 @@ class CharacterSheetBuilder {
 
 		// Remove class entry from state (also recalculates HP, hit dice, spell slots)
 		this._state.removeClass(snapshot.className, snapshot.classSource);
+
+		// Prune always-prepared domain/subclass spells granted by the removed subclass so
+		// switching domain (or class) before finishing doesn't leave stale grants behind.
+		// populateSubclassSpells() only adds, so this targeted removal is required.
+		if (snapshot.subclassName) this._state.removeSubclassSpells?.(`${snapshot.subclassName} Spells`);
 
 		// Remove save proficiencies granted by this class
 		(snapshot.saveProficiencies || []).forEach((/** @type {*} */ p) => this._state.removeSaveProficiency(p));
@@ -4528,6 +4536,14 @@ class CharacterSheetBuilder {
 			content.append(e_({outer: `<p><strong>Saving Throws:</strong> ${saves}</p>`}));
 		}
 
+		// Subclass selection for classes that gain their subclass at level 1
+		// (2014 Cleric/Sorcerer/Warlock and homebrew equivalents). Selecting a
+		// Divine Domain here is what grants its always-prepared domain spells:
+		// _selectedSubclass carries additionalSpells into addClass, whose
+		// applyClassFeatureEffects() → populateSubclassSpells() grants them.
+		const subclassSection = this._renderClassSubclassSelection(cls);
+		if (subclassSection) content.append(subclassSection);
+
 		// Armor
 		if (cls.startingProficiencies?.armor) {
 			const armor = cls.startingProficiencies.armor.map((/** @type {*} */ a) => typeof a === "string" ? a : a.full).join(", ");
@@ -4647,6 +4663,78 @@ class CharacterSheetBuilder {
 		content.append(quickBuildSection);
 
 		preview.append(content);
+	}
+
+	/**
+	 * Render a subclass picker (e.g. Divine Domain) for classes that gain their
+	 * subclass at level 1 (2014 Cleric/Sorcerer/Warlock and homebrew equivalents).
+	 * Selecting a subclass records it on `this._selectedSubclass` resolved to full
+	 * data (incl. `additionalSpells` + `subclassFeatures`) so the class-step apply
+	 * grants its level-1 features and always-prepared spells. Returns null when the
+	 * class does not gain a subclass at level 1 or has no selectable subclasses.
+	 * @param {*} cls
+	 */
+	_renderClassSubclassSelection (cls) {
+		if (!CharacterSheetClassUtils.levelGrantsSubclass(cls, 1)) return null;
+
+		const subclasses = this._page.filterByAllowedSources(cls.subclasses || [])
+			.slice()
+			.sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
+		if (!subclasses.length) return null;
+
+		const subclassTitle = cls.subclassTitle || "Subclass";
+		const section = e_({outer: `
+			<div class="charsheet__builder-subclass-selection mt-3">
+				<p><strong>${subclassTitle}:</strong> Choose your ${subclassTitle.toLowerCase()} (gained at level 1).</p>
+				<div class="charsheet__builder-subclass-list"></div>
+				<div class="ve-small ve-muted mt-1">Selected: <span class="subclass-selected-name">${this._selectedSubclass?.name || "None"}</span></div>
+			</div>
+		`});
+		const list = section.querySelector(".charsheet__builder-subclass-list");
+		const selectedNameEl = section.querySelector(".subclass-selected-name");
+
+		subclasses.forEach((/** @type {*} */ sc) => {
+			const isSelected = this._selectedSubclass?.name === sc.name && this._selectedSubclass?.source === sc.source;
+			const lbl = e_({outer: `
+				<label class="charsheet__builder-subclass-option ve-flex-v-center mb-1">
+					<input type="radio" name="builder-subclass-choice" value="${sc.name}"${isSelected ? " checked" : ""}>
+					<span class="ml-2">${sc.name}</span>
+					<span class="ve-small ve-muted ml-2">${Parser.sourceJsonToAbv(sc.source)}</span>
+				</label>
+			`});
+
+			lbl.querySelector("input").addEventListener("change", async (/** @type {*} */ e) => {
+				if (!e.target.checked) return;
+				// `sc` from cls.subclasses is already the full merged object; resolveFullSubclass
+				// returns it as-is (short-circuits on additionalSpells/subclassFeatures) and only
+				// does real work for trimmed refs.
+				const resolved = CharacterSheetClassUtils.resolveFullSubclass(sc, cls) || sc;
+				this._selectedSubclass = resolved;
+
+				// Divine Soul (Sorcerer): prompt for affinity so its bonus / always-prepared
+				// spell resolves (getSubclassAlwaysPreparedSpells gates the affinity block on
+				// subclassChoice). Mirrors the level-up wizard's affinity prompt.
+				if (CharacterSheetClassUtils.isDivineSoulSubclass(resolved)) {
+					const affinityOptions = CharacterSheetClassUtils.getDivineSoulAffinityOptions?.(resolved) || [];
+					if (affinityOptions.length && InputUiUtil?.pGetUserEnum) {
+						const affinityChoice = await InputUiUtil.pGetUserEnum({
+							title: "Divine Soul Affinity",
+							values: affinityOptions,
+							fnDisplay: (/** @type {*} */ opt) => opt.name,
+							isResolveItem: true,
+							htmlDescription: "<div>Choose the Divine Soul affinity that grants your extra spell and Cleric spell access.</div>",
+						});
+						if (affinityChoice) this._divineSoulAffinity = affinityChoice;
+					}
+				}
+
+				selectedNameEl.textContent = resolved.name;
+			});
+
+			list.append(lbl);
+		});
+
+		return section;
 	}
 
 	/**
