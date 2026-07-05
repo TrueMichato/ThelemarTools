@@ -11036,6 +11036,77 @@ class CharacterSheetState {
 		});
 	}
 
+	// #region Armor non-proficiency penalties (5e RAW)
+	// RAW (PHB): wearing armor or wielding a shield you lack proficiency with imposes
+	// disadvantage on any ability check, saving throw, or attack roll that uses STR or
+	// DEX, and you cannot cast spells. AC is NOT reduced by RAW, so these are the only
+	// penalties enforced. This is core 5e — never gated behind a homebrew/TGTT toggle.
+
+	/**
+	 * True when the equipped body armor is of a type the character is not proficient with.
+	 * @returns {boolean}
+	 */
+	isWearingNonProficientArmor () {
+		const armor = this._data.ac?.armor;
+		const type = armor?.type ? String(armor.type).toLowerCase() : "";
+		if (!type) return false;
+		return !this.hasArmorProficiency(type);
+	}
+
+	/**
+	 * True when a shield is equipped but the character is not proficient with shields.
+	 * @returns {boolean}
+	 */
+	isWearingNonProficientShield () {
+		if (!this._data.ac?.shield) return false;
+		return !this.hasArmorProficiency("shields");
+	}
+
+	/**
+	 * RAW: you cannot cast spells while wearing armor OR wielding a shield you lack
+	 * proficiency with. Exposed as a flag so casting/Spells surfaces can warn or gate.
+	 * @returns {boolean}
+	 */
+	isSpellcastingBlockedByArmor () {
+		return this.isWearingNonProficientArmor() || this.isWearingNonProficientShield();
+	}
+
+	/**
+	 * Decide whether the non-proficient-armor disadvantage applies to a given roll type.
+	 * Only STR/DEX-involved d20 rolls are penalised (save/check/skill/attack). Returns
+	 * false unless the character is actually wearing non-proficient armor or a shield.
+	 * @param {string} type - Roll type string (e.g. "save:str", "skill:stealth", "attack:melee:str").
+	 * @returns {boolean}
+	 * @private
+	 */
+	_armorPenaltyAppliesToRollType (type) {
+		if (!type) return false;
+		if (!this.isWearingNonProficientArmor() && !this.isWearingNonProficientShield()) return false;
+
+		const parts = type.split(":");
+		const category = parts[0];
+
+		switch (category) {
+			case "save":
+			case "check":
+				return parts[1] === "str" || parts[1] === "dex";
+			case "skill": {
+				const ability = this.getSkillAbility(parts[1]);
+				return ability === "str" || ability === "dex";
+			}
+			case "attack": {
+				// abilityUsed is encoded as the 3rd segment (e.g. "attack:melee:str").
+				// Fall back to the melee/ranged default when it is absent. Weapon
+				// attacks always use STR or DEX; spell attacks (cha/int/wis) are excluded.
+				const ability = parts[2] || (parts[1] === "ranged" ? "dex" : "str");
+				return ability === "str" || ability === "dex";
+			}
+			default:
+				return false;
+		}
+	}
+	// #endregion
+
 	/**
 	 * Check if character has proficiency with a weapon
 	 * @param {string} weapon - The weapon name or type (simple, martial, longsword, etc.)
@@ -38935,6 +39006,19 @@ class CharacterSheetState {
 			if (mod.halfOnSave) result.halfOnSave = true;
 			if (mod.noneOnSave) result.noneOnSave = true;
 		});
+
+		// Armor non-proficiency penalty (5e RAW): wearing armor / wielding a shield you
+		// lack proficiency with imposes disadvantage on STR/DEX-involved d20 rolls
+		// (saves, ability checks, skill checks keyed to STR/DEX, and STR/DEX attacks).
+		// Injected here — the single aggregation point every roll handler consumes — so
+		// it composes with other advantage/disadvantage sources under the normal
+		// net-advantage rules, exactly like any other modType disadvantage.
+		if (this._armorPenaltyAppliesToRollType(type)) {
+			result.disadvantage = true;
+			if (!result.sources.includes("Non-Proficient Armor")) {
+				result.sources.push("Non-Proficient Armor");
+			}
+		}
 
 		// Resolve advantage/disadvantage (they cancel out, unless one is removed)
 		if (result.removeAdvantage && result.advantage) result.advantage = false;
