@@ -98,3 +98,66 @@ describe("Real char — Bug 3: Tempest empty stubs backfilled from the real cata
 		expect(cost).toBeGreaterThanOrEqual(1);
 	});
 });
+
+describe("Real char — Bug 3 (revised): Wrath of the Storm granted via refSubclassFeature", () => {
+	function loadWithCatalog () {
+		const state = loadReal();
+		state.setClassFeatureCatalog(CLERIC_DATA.classFeature || [], CLERIC_DATA.subclassFeature || []);
+		state.reconcileSubclassFeatureEntries();
+		return state;
+	}
+
+	it("neither Wrath of the Storm nor Bonus Proficiencies is stored before reconcile", () => {
+		const state = loadReal();
+		const names = state.getFeatures().map(f => f.name);
+		expect(names).not.toContain("Wrath of the Storm");
+		expect(names).not.toContain("Bonus Proficiencies");
+	});
+
+	it("grants Wrath of the Storm as a reaction with a WIS-mod/long-rest use pool at the wrapper's level", () => {
+		const state = loadWithCatalog();
+		const wots = state.getFeatures().find(f => f.name === "Wrath of the Storm");
+		expect(wots).toBeTruthy();
+		// Granted at the character's real Tempest Domain level (3), not the ref-encoded level 1.
+		const td = state.getFeatures().find(f => f.name === "Tempest Domain");
+		expect(wots.level).toBe(td.level);
+		expect(Array.isArray(wots.entries) && wots.entries.length).toBeTruthy();
+		// Requirements that make combat.js renderCombatActions surface it as a usable action:
+		//   hasActionEconomy (reaction text) + hasLimitedUses (uses.max > 0).
+		expect(`${wots.description}`).toMatch(/use your reaction/i);
+		expect(wots.uses).toBeTruthy();
+		expect(wots.uses.max).toBe(state.getAbilityMod("wis"));
+		expect(wots.uses.recharge).toBe("long");
+	});
+
+	it("Wrath of the Storm passes combat.js renderCombatActions' exclusion gates (surfaces live)", () => {
+		const state = loadWithCatalog();
+		const features = state.getFeatures();
+		const wots = features.find(f => f.name === "Wrath of the Storm");
+		// Not hidden by a Divine-Favor / improvement-rider surface suppressor.
+		expect(CharacterSheetState.isHiddenFromGenericAbilitySurfaces(wots, features)).toBeFalsy();
+		// Not a toggle (would be filtered as an always-on stance).
+		expect(CharacterSheetState.detectActivatableFeature(wots)?.isToggle).toBeFalsy();
+		// The final renderCombatActions predicate: reaction economy + a real use pool → include.
+		const desc = `${wots.description}`;
+		const hasActionEconomy = /\b(as a reaction|use your reaction)\b/i.test(desc);
+		const hasLimitedUses = wots.uses && wots.uses.max > 0;
+		expect(hasActionEconomy && hasLimitedUses).toBeTruthy();
+	});
+
+	it("grants Bonus Proficiencies as its own stored feature", () => {
+		const state = loadWithCatalog();
+		const bp = state.getFeatures().find(f => f.name === "Bonus Proficiencies");
+		expect(bp).toBeTruthy();
+		expect(`${bp.description}`).toMatch(/martial weapons and heavy armor/i);
+	});
+
+	it("is idempotent — a second reconcile grants nothing new", () => {
+		const state = loadWithCatalog();
+		const countAfterFirst = state.getFeatures().filter(f => f.name === "Wrath of the Storm").length;
+		expect(countAfterFirst).toBe(1);
+		const added = state.reconcileSubclassFeatureEntries();
+		expect(added).toBe(0);
+		expect(state.getFeatures().filter(f => f.name === "Wrath of the Storm").length).toBe(1);
+	});
+});
