@@ -4010,6 +4010,11 @@ class CharacterSheetInventory {
 			this._state.consumeItem(itemId);
 			this._renderItemList();
 			this._updateEncumbrance();
+			// A healing potion mutates hp.current in state (via _usePotion -> _state.heal),
+			// but nothing here refreshed the HP display, so the heal appeared to do nothing.
+			// Refresh the HP bar + combat panel so the regained HP is visible immediately.
+			this._page._renderHp?.();
+			this._page._combat?.renderCombatConsumables?.();
 			this._page.saveCharacter();
 		}
 	}
