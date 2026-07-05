@@ -2937,6 +2937,7 @@ class CharacterSheetPage {
 		this._renderOverviewMetamagic();
 		this._renderOverviewRanger();
 		this._renderOverviewPrinciples();
+		this._renderOverviewDivineOrder();
 		this._renderActiveStates();
 		this._renderFavouritesOverview();
 		this._renderOverviewActions();
@@ -6585,6 +6586,96 @@ class CharacterSheetPage {
 		});
 	}
 
+	/**
+	 * (R46 Bug 3) Render the Divine Order manager in the Overview tab (2024 / XPHB Cleric L1).
+	 * Divine Order is a structured sub-feature choice (role: Protector / Thaumaturge) that
+	 * previously leaked into the generic "Specialties & Feats" list. It now gets its OWN field,
+	 * modeled on `_renderOverviewPrinciples`: shows the chosen role (hoverable), a selector to
+	 * choose/change the role (wired to save + re-render), and a "None" option to clear it. Hidden
+	 * for any character without a Divine Order feature (getDivineOrderState → null).
+	 */
+	_renderOverviewDivineOrder () {
+		const section = document.getElementById("charsheet-overview-divine-order-section");
+		const container = document.getElementById("charsheet-overview-divine-order");
+		if (!section || !container) return;
+
+		const info = this._state.getDivineOrderState?.();
+		// Show the section when there are selectable options OR a role is already chosen; a stored
+		// pick with no re-resolvable option list must still render its badge, not hide the section.
+		const hasOptions = info && Array.isArray(info.options) && info.options.length;
+		if (!info || (!hasOptions && !info.current)) {
+			section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		section.style.display = "";
+		container.innerHTML = "";
+
+		const {parentInfo, options = [], current} = info;
+		const currentName = current?.name || null;
+
+		// ----- Current role (hoverable when its entries resolve) -----
+		const header = document.createElement("div");
+		header.className = "ve-flex-v-center gap-2 mb-2 ve-flex-wrap";
+		let currentBadge;
+		if (currentName) {
+			const feat = this._state.getFeature?.(currentName);
+			const entries = Array.isArray(feat?.entries) && feat.entries.length ? feat.entries : null;
+			const hov = entries ? CharacterSheetClassUtils.buildInlineEntriesHoverLink?.(currentName, currentName, entries) : null;
+			currentBadge = `<span class="badge badge-info" style="font-size: 1em; padding: 5px 10px;">⚜️ ${hov || currentName}</span>`;
+		} else {
+			currentBadge = `<span class="badge badge-secondary" style="font-size: 1em; padding: 5px 10px;">No order chosen</span>`;
+		}
+		header.innerHTML = `<strong>Current Order:</strong> ${currentBadge}`;
+		container.appendChild(header);
+
+		// ----- Selector (change / clear) -----
+		const controls = document.createElement("div");
+		controls.className = "ve-flex-v-center gap-2 ve-flex-wrap";
+
+		const select = document.createElement("select");
+		select.className = "form-control input-sm charsheet__divine-order-select";
+		select.style.maxWidth = "260px";
+		const noneOpt = document.createElement("option");
+		noneOpt.value = "";
+		noneOpt.textContent = "— None / Not chosen —";
+		if (!currentName) noneOpt.selected = true;
+		select.appendChild(noneOpt);
+		options.forEach(o => {
+			const opt = document.createElement("option");
+			opt.value = o.name;
+			opt.textContent = o.name;
+			if (o.description) opt.title = o.description;
+			if (currentName && o.name.toLowerCase() === currentName.toLowerCase()) opt.selected = true;
+			select.appendChild(opt);
+		});
+		controls.appendChild(select);
+		container.appendChild(controls);
+
+		// ----- Description of the current role (recall aid) -----
+		const desc = document.createElement("p");
+		desc.className = "ve-small ve-muted mb-0 mt-1 charsheet__divine-order-desc";
+		const currentOpt = options.find(o => currentName && o.name.toLowerCase() === currentName.toLowerCase());
+		desc.textContent = currentOpt?.description
+			|| "Choose the divine work you serve — a martial Protector or a spellcasting Thaumaturge.";
+		container.appendChild(desc);
+
+		select.addEventListener("change", () => {
+			const val = select.value;
+			if (!val) {
+				this._state.removeChosenSubfeature?.("Divine Order", {});
+				JqueryUtil.doToast({type: "info", content: "Cleared your Divine Order."});
+			} else {
+				const option = options.find(o => o.name === val);
+				if (!option) return;
+				this._state.setChosenSubfeature?.(parentInfo, option);
+				JqueryUtil.doToast({type: "success", content: `Chose the ${val} Divine Order.`});
+			}
+			this.saveCharacter();
+			this.renderCharacter();
+		});
+	}
+
 	_useOverviewResource (resource) {
 		if (resource.current <= 0) {
 			JqueryUtil.doToast({type: "warning", content: `No uses remaining for ${resource.name}!`});
@@ -6691,7 +6782,27 @@ class CharacterSheetPage {
 		if (!container) return;
 
 		const feats = this._state.getFeats?.() || [];
-		const specialties = (this._state.getFeatures?.() || []).filter(f => f.isFeatureOption === true);
+		// (R46 Bug 3) Structured-choice sub-options carry `isFeatureOption:true`, but the ones
+		// whose PARENT has its own dedicated Overview surface (Principles of Devotion, Divine
+		// Order) must NOT be duplicated here as generic "specialties". Genuine TGTT Specialties
+		// (and Blessed Strikes, etc.) are also feature-options with OTHER parents, so we exclude
+		// by parent — never by option name. A sub-option's parent is read from BOTH its own
+		// `parentFeature` field AND the durable `chosenSubfeatures` linkage (name+source→parent),
+		// so a save that dropped `parentFeature` on serialization is still caught.
+		const DEDICATED_SURFACE_PARENTS = new Set(["principles of devotion", "divine order"]);
+		const eq = (v) => String(v || "").toLowerCase();
+		const chosen = this._state.getChosenSubfeatures?.() || [];
+		const dedicatedSubOptionKeys = new Set(
+			chosen
+				.filter(r => DEDICATED_SURFACE_PARENTS.has(eq(r.parent)))
+				.map(r => `${eq(r.name)}\u0000${eq(r.source)}`),
+		);
+		const specialties = (this._state.getFeatures?.() || []).filter(f => {
+			if (f.isFeatureOption !== true) return false;
+			if (DEDICATED_SURFACE_PARENTS.has(eq(f.parentFeature))) return false;
+			if (dedicatedSubOptionKeys.has(`${eq(f.name)}\u0000${eq(f.source)}`)) return false;
+			return true;
+		});
 
 		if (!feats.length && !specialties.length) {
 			if (section) section.style.display = "none";
