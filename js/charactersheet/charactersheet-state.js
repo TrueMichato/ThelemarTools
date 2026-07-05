@@ -30692,6 +30692,23 @@ class CharacterSheetState {
 			});
 			this._data.resources = this._data.resources.filter(r => !r._divineFavor);
 		}
+		// 1e. Remove prior divine-favor FEATURES (narrative boons surfaced as real
+		// features) and any resource they minted (linked by featureId), so raising/
+		// lowering favour, re-selecting a god, or reloading never duplicates the
+		// ability. Features are the only DF channel with no prior cleanup pass — this
+		// is what makes the narrative-boon surface idempotent.
+		if (Array.isArray(this._data.features)) {
+			const priorDfFeatureIds = new Set(
+				this._data.features.filter(f => f._divineFavor).map(f => f.id),
+			);
+			if (priorDfFeatureIds.size) {
+				this._data.features = this._data.features.filter(f => !f._divineFavor);
+				if (Array.isArray(this._data.resources)) {
+					this._data.resources = this._data.resources
+						.filter(r => !(r.featureId && priorDfFeatureIds.has(r.featureId)));
+				}
+			}
+		}
 
 		// --- 2. Re-apply active boons ----------------------------------------
 		const god = this.getDivineFavorGodData();
@@ -30794,6 +30811,26 @@ class CharacterSheetState {
 					added.linkedResourceId = resourceId;
 				}
 			}
+		});
+
+		// Pass C: narrative boons surface as real FEATURES (Features tab) so a favour
+		// tier's flavourful ability isn't silently dropped — previously only checkAdvantage/
+		// abilityScoreBoost/limited-or-granted-cast boons were reconciled, and a
+		// `type:"narrative"` boon (e.g. Pan → Disciple → "Attunement to Nature") reached no
+		// channel at all. Tagged `_divineFavor:true` so the strip pass (1e) removes it on the
+		// next reconcile, and given no `featureType` so it renders through the generic
+		// "unmarked feature" path in the Features tab (addFeature dedupes by name+source, and
+		// the strip already ran, so a re-apply/reload never duplicates it).
+		boons.forEach(boon => {
+			if (boon.type !== "narrative") return;
+			if (!boon.name) return;
+			this.addFeature({
+				name: boon.name,
+				description: boon.desc || "",
+				source: god.source || "TGTT",
+				sourceFeature: `Divine Favor: ${god.name} — ${boon._tierName}`,
+				_divineFavor: true,
+			});
 		});
 	}
 
