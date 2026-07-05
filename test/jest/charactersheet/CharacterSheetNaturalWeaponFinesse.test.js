@@ -58,3 +58,71 @@ describe("Natural weapon finesse (TGTT house rule)", () => {
 		expect(atk.abilityMod).toBe("con");
 	});
 });
+
+// -------------------------------------------------------------------------
+// (R46 Bug 5) Load-time migration: existing saves keep the vanilla `str`
+// default because the finesse rule only runs at addFeature time. loadFromJson
+// must re-apply it to already-stored natural-weapon attacks.
+// -------------------------------------------------------------------------
+function mkSaveWithStoredAttacks (attacks, {enableTgtt} = {}) {
+	const json = {
+		name: "Tabaxi Test",
+		abilityScores: {str: 10, dex: 18, con: 14, int: 10, wis: 10, cha: 10},
+		attacks,
+	};
+	if (enableTgtt !== undefined) json.settings = {enableTgtt};
+	return json;
+}
+
+const STORED_CLAWS_STR = {
+	name: "Claws",
+	isMelee: true,
+	isNaturalWeapon: true,
+	abilityMod: "str",
+	damage: "1d6",
+	damageType: "slashing",
+	sourceFeature: "Cat's Claws",
+};
+
+describe("Natural weapon finesse — load-time migration (R46 Bug 5)", () => {
+	const clawsOf = (state) => state.getAttacks().find(a => a.name === "Claws" && a.isNaturalWeapon);
+
+	it("re-applies finesse to a Tabaxi claws attack stored with abilityMod:'str'", () => {
+		const state = new CharacterSheetState();
+		state.loadFromJson(mkSaveWithStoredAttacks([{...STORED_CLAWS_STR}]));
+		expect(clawsOf(state).abilityMod).toBe("finesse");
+	});
+
+	it("leaves the stored 'str' default when TGTT is disabled", () => {
+		const state = new CharacterSheetState();
+		state.loadFromJson(mkSaveWithStoredAttacks([{...STORED_CLAWS_STR}], {enableTgtt: false}));
+		expect(clawsOf(state).abilityMod).toBe("str");
+	});
+
+	it("never touches an explicitly-parsed Constitution natural weapon", () => {
+		const state = new CharacterSheetState();
+		state.loadFromJson(mkSaveWithStoredAttacks([
+			{name: "Bite", isMelee: true, isNaturalWeapon: true, abilityMod: "con", damage: "1d6", damageType: "piercing"},
+		]));
+		expect(state.getAttacks().find(a => a.name === "Bite").abilityMod).toBe("con");
+	});
+
+	it("never touches a non-natural weapon that happens to use STR", () => {
+		const state = new CharacterSheetState();
+		state.loadFromJson(mkSaveWithStoredAttacks([
+			{name: "Longsword", isMelee: true, abilityMod: "str", damage: "1d8", damageType: "slashing"},
+		]));
+		expect(state.getAttacks().find(a => a.name === "Longsword").abilityMod).toBe("str");
+	});
+
+	it("is idempotent — an already-finesse natural weapon is left as-is", () => {
+		const state = new CharacterSheetState();
+		state.loadFromJson(mkSaveWithStoredAttacks([
+			{...STORED_CLAWS_STR, abilityMod: "finesse"},
+		]));
+		expect(clawsOf(state).abilityMod).toBe("finesse");
+		// A second migration pass must be a no-op.
+		state._migrateNaturalWeaponFinesse();
+		expect(clawsOf(state).abilityMod).toBe("finesse");
+	});
+});
