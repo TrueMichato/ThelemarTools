@@ -14,7 +14,11 @@
  *   - Votary (favour 10): Conjure Animals 1/long-rest;
  *   - Apostle (favour 50): +2 to a chosen score (WIS/CHA) AND +2 to its maximum;
  *   - save/load round-trip of `_data.divineFavor`;
- *   - apply/clear idempotency (re-apply never double-counts).
+ *   - apply/clear idempotency (re-apply never double-counts);
+ *   - Bug 4: limited/granted casts also mint a tracked `Divine Favor: <Spell>`
+ *     resource (Resources + Combat panels) cross-linked to the mirroring innate
+ *     spell, so spend/restore stays in lockstep across tabs; resource idempotency;
+ *     and a real-character (Lorian, Pan favour 100) load check.
  */
 
 import "./setup.js";
@@ -290,5 +294,120 @@ describe("Divine Favor — save/load round-trip", () => {
 		expect(df.favor).toBe(0);
 		expect(df.malice).toBe(0);
 		expect(() => s.applyDivineFavorEffects()).not.toThrow();
+	});
+});
+
+// (Bug 4) Limited/granted-cast boons must also surface as TRACKED RESOURCES (Resources tab +
+// Combat "Combat Resources" panel), kept in lockstep with the mirroring innate spell so a
+// cast/spend in any tab agrees. The resource is minted in applyDivineFavorEffects and linked
+// to the innate spell via linkedInnateSpellId / linkedResourceId.
+function dfResource (state, spellName) {
+	return (state._data.resources || []).find(r => r._divineFavor && r.name === `Divine Favor: ${spellName}`);
+}
+
+describe("Divine Favor — Bug 4: limited casts become tracked resources", () => {
+	test("each limited/granted cast mints a linked, tagged resource", () => {
+		const s = makeState();
+		s.setAbilityBase("wis", 16); // +3 → Animal Friendship 3 uses
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(10); // Devotee + Votary
+
+		const af = dfResource(s, "Animal Friendship");
+		const ca = dfResource(s, "Conjure Animals");
+		expect(af).toBeDefined();
+		expect(af.max).toBe(3);
+		expect(af.current).toBe(3);
+		expect(af.recharge).toBe("long");
+		expect(ca).toBeDefined();
+		expect(ca.max).toBe(1);
+		expect(ca.recharge).toBe("long");
+
+		// Cross-linked to the mirroring innate spell (single logical tracker).
+		expect(af.linkedInnateSpellId).toBe(innate(s, "Animal Friendship").id);
+		expect(innate(s, "Animal Friendship").linkedResourceId).toBe(af.id);
+	});
+
+	test("the resource surfaces in the generic pool (Resources + Combat panels)", () => {
+		const s = makeState();
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(10);
+
+		const pool = s.getGenericPoolResources().map(r => r.name);
+		expect(pool).toContain("Divine Favor: Animal Friendship");
+		expect(pool).toContain("Divine Favor: Conjure Animals");
+	});
+
+	test("casting from the Spells tab decrements the linked resource", () => {
+		const s = makeState();
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(10);
+
+		const innateCa = innate(s, "Conjure Animals");
+		s.useInnateSpell(innateCa.id);
+
+		expect(innate(s, "Conjure Animals").uses.current).toBe(0);
+		expect(dfResource(s, "Conjure Animals").current).toBe(0);
+	});
+
+	test("spending the resource (Resources/Combat) decrements the linked innate spell", () => {
+		const s = makeState();
+		s.setAbilityBase("wis", 16); // 3 uses
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(10);
+
+		const res = dfResource(s, "Animal Friendship");
+		s.setResourceCurrent(res.id, 1);
+
+		expect(dfResource(s, "Animal Friendship").current).toBe(1);
+		expect(innate(s, "Animal Friendship").uses.current).toBe(1);
+	});
+
+	test("re-applying does not duplicate resources and preserves spent uses", () => {
+		const s = makeState();
+		s.setAbilityBase("wis", 16);
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(10);
+
+		// Spend one Conjure Animals use, then force a reconcile.
+		s.setResourceCurrent(dfResource(s, "Conjure Animals").id, 0);
+		s.applyDivineFavorEffects();
+
+		const cas = (s._data.resources || []).filter(r => r.name === "Divine Favor: Conjure Animals");
+		expect(cas).toHaveLength(1); // no dupes
+		expect(cas[0].current).toBe(0); // spent state preserved
+		expect(innate(s, "Conjure Animals").uses.current).toBe(0); // and mirrored
+	});
+
+	test("lowering favour / clearing the god strips the resources", () => {
+		const s = makeState();
+		s.setDivineFavorGod("Pan|TGTT");
+		s.setDivineFavorLevel(10);
+		expect(dfResource(s, "Conjure Animals")).toBeDefined();
+
+		s.setDivineFavorLevel(0);
+		expect((s._data.resources || []).filter(r => r._divineFavor)).toHaveLength(0);
+	});
+});
+
+describe("Divine Favor — Bug 4: real character (Lorian, Pan favour 100)", () => {
+	test("granted casts appear as innate spells AND tracked resources on load", () => {
+		const raw = fs.readFileSync(
+			path.join(__dirnameLocal, "fixtures", "lorian-tempest-cleric.json"), "utf8");
+		const s = makeState();
+		s.loadFromJson(JSON.parse(raw));
+		s.applyDivineFavorEffects(); // controller runs this post-load once the catalog is set
+
+		// Spells tab surface.
+		expect(innate(s, "Animal Friendship")).toBeDefined();
+		expect(innate(s, "Conjure Animals")).toBeDefined();
+
+		// Resources / Combat surface (via the generic pool both panels read).
+		const pool = s.getGenericPoolResources().map(r => r.name);
+		expect(pool).toContain("Divine Favor: Animal Friendship");
+		expect(pool).toContain("Divine Favor: Conjure Animals");
+
+		// Uses = WIS mod (WIS boosted by the Apostle +2 boon) for the ability-mod cast.
+		const wisMod = s.getAbilityMod("wis");
+		expect(dfResource(s, "Animal Friendship").max).toBe(Math.max(1, wisMod));
 	});
 });
