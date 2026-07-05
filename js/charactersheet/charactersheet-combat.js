@@ -2993,11 +2993,43 @@ class CharacterSheetCombat {
 	}
 
 	// #region Rendering
+	/**
+	 * Render the armor non-proficiency warning banner into the attacks container.
+	 * 5e RAW: wearing armor / wielding a shield you lack proficiency with imposes
+	 * disadvantage on STR/DEX ability checks, saving throws, and attack rolls, and
+	 * prevents spellcasting. AC is not reduced. Prepended into the attacks list so the
+	 * warning sits near the attacks/AC without needing a dedicated HTML anchor.
+	 * @param {HTMLElement} container - The attacks list container.
+	 * @private
+	 */
+	_renderArmorProficiencyWarning (container) {
+		if (!container) return;
+		const badArmor = this._state.isWearingNonProficientArmor?.();
+		const badShield = this._state.isWearingNonProficientShield?.();
+		if (!badArmor && !badShield) return;
+
+		const gear = badArmor && badShield ? "armor and shield" : (badArmor ? "armor" : "shield");
+		const banner = document.createElement("div");
+		banner.className = "charsheet__armor-penalty-warning ve-small mb-2 p-2 rounded";
+		banner.setAttribute("role", "alert");
+		banner.style.cssText = "background: var(--cs-warning-light, rgba(245,158,11,0.12)); border: 1px solid var(--cs-warning, #f59e0b); color: var(--cs-warning, #f59e0b);";
+		banner.innerHTML = `
+			<div class="bold">⚠️ Non-Proficient ${gear === "shield" ? "Shield" : (gear === "armor" ? "Armor" : "Armor & Shield")}</div>
+			<div class="ve-muted mt-1">Disadvantage on Strength- and Dexterity-based attacks, ability checks, and saving throws. You <span class="bold">cannot cast spells</span> while wearing ${gear} you are not proficient with.</div>
+		`;
+		container.prepend(banner);
+	}
+
 	renderAttacks () {
 		const container = document.getElementById("charsheet-attacks-list") || document.getElementById("charsheet-combat-attacks");
 		if (!container) return;
 
 		container.innerHTML = "";
+
+		// Armor non-proficiency warning (5e RAW): if the character wears armor / wields a
+		// shield they lack proficiency with, surface a prominent banner near the attacks
+		// list. Covers both the disadvantage indicator and the "cannot cast spells" warning.
+		this._renderArmorProficiencyWarning(container);
 
 		// Get configured attacks
 		let attacks = this._state.getAttacks();
