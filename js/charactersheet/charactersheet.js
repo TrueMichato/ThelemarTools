@@ -15313,6 +15313,14 @@ class CharacterSheetPage {
 			// Upgrade's Singular Focus / Groundshatter), now that the class-feature catalog
 			// and combat-method catalog are both available.
 			this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || []);
+			// (R48 Bug 1) Provide the brew-merged full class-object catalog so class-level
+			// always-prepared spells (TGTT Cleric Ceremony/Thaumaturgy, Ranger Hunter's Mark,
+			// etc.) can be resolved — the lean stored `_data.classes[]` drops the class
+			// object's `additionalSpells`. Re-run applyClassFeatureEffects() so
+			// populateClassSpells() executes now that the catalog is available; this is what
+			// auto-fixes EXISTING saves on load without a resave (idempotent reconcile).
+			this._state.setClassCatalog(this._classes || []);
+			this._state.applyClassFeatureEffects();
 			// (R45 Bug 3) Repair subclass/class features stored as empty stubs (e.g. a
 			// TGTT-2014 `_copy` Tempest Domain whose features were persisted with no
 			// entries/description/uses) from the now-available catalog. Must run AFTER
