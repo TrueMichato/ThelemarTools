@@ -12760,6 +12760,229 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Stable `sourceFeature` tag for a class-level always-prepared spell grant.
+	 * Kept distinct from the subclass tag (`"<Subclass> Spells"`) and from the
+	 * player-chosen tags so class grants never collide with — or get mistaken for —
+	 * subclass/player spells. Entries also carry `grantedByClass: true` for precise,
+	 * collision-proof teardown (see {@link populateClassSpells}).
+	 * @param {string} className
+	 * @returns {string}
+	 */
+	static classSpellsSourceFeature (className) {
+		return `${className} Spells`;
+	}
+
+	/**
+	 * Get the class-level always-prepared spells for one class entry.
+	 *
+	 * The base CLASS object (not the subclass) can carry structured
+	 * `additionalSpells` — e.g. the TGTT Cleric always prepares Ceremony +
+	 * Thaumaturgy, the TGTT Ranger always prepares Hunter's Mark. The stored
+	 * `_data.classes[]` entry is lean and DROPS that block, so we resolve the full
+	 * class object from the catalog (set via {@link setClassCatalog}) by name+source.
+	 *
+	 * Mirrors {@link getSubclassAlwaysPreparedSpells}: reuses
+	 * `_flattenAdditionalSpellsLevelValue` + `_parseSpellReference`, honours the
+	 * `|xphb` source suffix, and level-gates by the CLASS level (the `additionalSpells`
+	 * level key is the class level, e.g. `"1"` = class level 1).
+	 * @param {object} cls - A class entry from `_data.classes` (`{name, source, level}`)
+	 * @returns {Array} Enriched always-prepared spell entries (empty until catalog is set)
+	 */
+	getClassAlwaysPreparedSpells (cls) {
+		if (!cls?.name) return [];
+		if (!this._classCatalog?.length) return [];
+
+		const fullClass = this._classCatalog.find(c =>
+			c?.name === cls.name && (c.source === cls.source || !cls.source));
+		const additionalSpells = fullClass?.additionalSpells;
+		if (!additionalSpells?.length) return [];
+
+		const characterLevel = cls.level || 0;
+		const className = cls.name;
+		const result = [];
+
+		for (const spellBlock of additionalSpells) {
+			// "prepared" (level-keyed, always prepared)
+			if (spellBlock.prepared) {
+				for (const [levelKey, spells] of Object.entries(spellBlock.prepared)) {
+					const reqLevel = parseInt(levelKey);
+					if (isNaN(reqLevel) || characterLevel < reqLevel) continue;
+					for (const spellRef of CharacterSheetState._flattenAdditionalSpellsLevelValue(spells)) {
+						const parsed = this._parseSpellReference(spellRef);
+						if (parsed) result.push(this._buildClassSpellEntry(parsed, className, cls));
+					}
+				}
+			}
+
+			// "known" (level-keyed, added to known list) — kept as always-prepared for
+			// parity with the subclass helper (class known-lists are rare but supported).
+			if (spellBlock.known) {
+				for (const [levelKey, spells] of Object.entries(spellBlock.known)) {
+					const reqLevel = parseInt(levelKey);
+					if (isNaN(reqLevel) || characterLevel < reqLevel) continue;
+					for (const spellRef of CharacterSheetState._flattenAdditionalSpellsLevelValue(spells)) {
+						const parsed = this._parseSpellReference(spellRef);
+						if (parsed) result.push(this._buildClassSpellEntry(parsed, className, cls));
+					}
+				}
+			}
+
+			// "innate" (key "0" = always available; "#c" marks cantrips)
+			if (spellBlock.innate) {
+				for (const [levelKey, spells] of Object.entries(spellBlock.innate)) {
+					const reqLevel = parseInt(levelKey);
+					if (isNaN(reqLevel) || (reqLevel > 0 && characterLevel < reqLevel)) continue;
+					for (const spellRef of CharacterSheetState._flattenAdditionalSpellsLevelValue(spells)) {
+						const parsed = this._parseSpellReference(spellRef);
+						if (parsed) result.push(this._buildClassSpellEntry(parsed, className, cls));
+					}
+				}
+			}
+		}
+
+		return result;
+	}
+
+	/**
+	 * Build a class-level always-prepared spell entry, enriched from the injected
+	 * spell database (real level/school/metadata) so it is not silently dropped by
+	 * the level-grouped spell list. Sibling of {@link _buildSubclassSpellEntry}, but
+	 * tagged for the class grant path.
+	 * @param {*} parsed - Output of `_parseSpellReference`
+	 * @param {string} className - Owning class (for sourceFeature/sourceClass)
+	 * @param {*} cls - The owning class entry
+	 * @returns {*} Enriched, tagged spell entry
+	 */
+	_buildClassSpellEntry (parsed, className, cls) {
+		const full = this._resolveFullSpellData(parsed);
+		const enriched = full
+			? {
+				name: full.name,
+				source: full.source,
+				level: parsed.isCantrip ? 0 : full.level,
+				isCantrip: parsed.isCantrip || full.level === 0,
+				school: full.school,
+				ritual: CharacterSheetClassUtils.spellIsRitual(full),
+				concentration: CharacterSheetClassUtils.spellIsConcentration(full),
+				castingTime: CharacterSheetClassUtils.getSpellCastingTime(full),
+				range: CharacterSheetClassUtils.getSpellRange(full),
+				components: CharacterSheetClassUtils.getSpellComponents(full),
+				duration: CharacterSheetClassUtils.getSpellDuration(full),
+				subschools: full.subschools || [],
+			}
+			: {...parsed};
+		return {
+			...enriched,
+			alwaysPrepared: true,
+			prepared: true,
+			grantedByClass: true,
+			sourceFeature: CharacterSheetState.classSpellsSourceFeature(className),
+			sourceClass: className,
+		};
+	}
+
+	/**
+	 * Populate class-level always-prepared spells (base CLASS `additionalSpells`) for
+	 * every current class. This is the class-level sibling of
+	 * {@link populateSubclassSpells}; it is called by `applyClassFeatureEffects()`
+	 * immediately after it.
+	 *
+	 * Runs as a full RECONCILE (idempotent across load / addClass / levelUp /
+	 * level-down / focus change):
+	 *  1. Compute the desired set of class-granted spells across all current classes.
+	 *  2. PRUNE any previously class-granted entry (`grantedByClass === true`) that is
+	 *     no longer desired — this tears the spells down on class removal, level-down
+	 *     below the grant level, or a source change. Player-owned spells never carry
+	 *     `grantedByClass`, so they are never pruned.
+	 *  3. ADD the desired spells (dedup by name+source). A colliding PLAYER-OWNED spell
+	 *     is left completely untouched (never claimed/flagged) so removing the class
+	 *     never deletes a spell the player learned independently.
+	 *
+	 * No-ops until the class catalog is available (see {@link setClassCatalog}).
+	 * @returns {number} Number of spells added
+	 */
+	populateClassSpells () {
+		if (!this._classCatalog?.length) return 0;
+
+		const sc = this._data.spellcasting;
+		if (!sc) return 0;
+		sc.spellsKnown = sc.spellsKnown || [];
+		sc.cantripsKnown = sc.cantripsKnown || [];
+
+		// 1. Desired set across all current classes.
+		const desired = [];
+		for (const cls of (this._data.classes || [])) {
+			desired.push(...this.getClassAlwaysPreparedSpells(cls));
+		}
+		const keyOf = s => `${(s.name || "").toLowerCase()}|${(s.source || "").toLowerCase()}|${(s.sourceClass || "").toLowerCase()}`;
+		const desiredKeys = new Set(desired.map(keyOf));
+
+		// 2. Prune stale class-granted entries (removal / level-down / source change).
+		sc.spellsKnown = sc.spellsKnown.filter(s => !(s.grantedByClass === true && !desiredKeys.has(keyOf(s))));
+		sc.cantripsKnown = sc.cantripsKnown.filter(c => !(c.grantedByClass === true && !desiredKeys.has(keyOf(c))));
+
+		// 3. Add / mark desired spells.
+		let totalAdded = 0;
+		for (const spell of desired) {
+			if (spell.isCantrip) {
+				const existingCantrip = sc.cantripsKnown.find(
+					c => c.name.toLowerCase() === spell.name.toLowerCase()
+						&& (c.source === spell.source || !spell.source),
+				);
+				if (!existingCantrip) {
+					this.addCantrip({
+						name: spell.name,
+						source: spell.source,
+						school: spell.school,
+						castingTime: spell.castingTime,
+						range: spell.range,
+						duration: spell.duration,
+						concentration: spell.concentration,
+						components: spell.components,
+						subschools: spell.subschools,
+						grantedByClass: true,
+						sourceFeature: spell.sourceFeature,
+						sourceClass: spell.sourceClass,
+					});
+					totalAdded++;
+				} else if (existingCantrip.grantedByClass) {
+					// Idempotent: our own prior grant. Keep the stable tags.
+					existingCantrip.sourceFeature = spell.sourceFeature;
+					existingCantrip.sourceClass = spell.sourceClass;
+				}
+				// A player-owned (non-class-granted) cantrip of the same name is left
+				// untouched so class removal never deletes it.
+				continue;
+			}
+
+			const existing = sc.spellsKnown.find(
+				s => s.name.toLowerCase() === spell.name.toLowerCase()
+					&& (s.source === spell.source || !spell.source),
+			);
+
+			if (!existing) {
+				this.addSpell({...spell, alwaysPrepared: true}, true);
+				totalAdded++;
+			} else if (existing.grantedByClass) {
+				// Our own prior grant — re-affirm flags and self-heal a missing level
+				// (saves created before class-spell enrichment). Idempotent.
+				existing.alwaysPrepared = true;
+				existing.prepared = true;
+				existing.sourceFeature = spell.sourceFeature;
+				existing.sourceClass = spell.sourceClass;
+				if ((existing.level == null) && (spell.level != null)) {
+					existing.level = spell.level;
+					if (spell.school && !existing.school) existing.school = spell.school;
+				}
+			}
+			// A player-owned spell of the same name is intentionally left untouched: we
+			// neither claim nor flag it, so removing the class never deletes it.
+		}
+
+		return totalAdded;
+	}
+
+	/**
 	 * Remove subclass-granted always-prepared spells (for when subclass changes).
 	 * Only removes spells that were added by a specific subclass feature.
 	 * @param {string} sourceFeature - The source feature name (e.g., "Life Domain Spells")
@@ -12933,6 +13156,7 @@ class CharacterSheetState {
 				sourceClass: spell.sourceClass || null,
 				subschools: spell.subschools || [],
 				isDivineSoulAffinity: spell.isDivineSoulAffinity || false,
+				grantedByClass: spell.grantedByClass || false,
 			});
 		}
 	}
@@ -12970,6 +13194,7 @@ class CharacterSheetState {
 				sourceClass: spell.sourceClass || null,
 				spellcastingAbility: spell.spellcastingAbility || null,
 				subschools: spell.subschools || [],
+				grantedByClass: spell.grantedByClass || false,
 			});
 		}
 	}
@@ -23274,6 +23499,10 @@ class CharacterSheetState {
 
 		// Populate subclass spells (domain spells, patron spells, origin spells, etc.)
 		this.populateSubclassSpells();
+		// Populate class-level always-prepared spells (base CLASS additionalSpells —
+		// e.g. TGTT Cleric Ceremony/Thaumaturgy, Ranger Hunter's Mark). Catalog-gated
+		// + idempotent reconcile; no-ops until setClassCatalog has run.
+		this.populateClassSpells();
 
 		const calculations = this.getFeatureCalculations();
 		const effects = calculations._effects || [];
@@ -31121,6 +31350,23 @@ class CharacterSheetState {
 	setClassFeatureCatalog (classFeatures, subclassFeatures) {
 		this._classFeatureCatalog = Array.isArray(classFeatures) ? classFeatures : [];
 		this._subclassFeatureCatalog = Array.isArray(subclassFeatures) ? subclassFeatures : [];
+	}
+
+	/**
+	 * Provide the canonical, brew-merged full class-object catalog. Needed because the
+	 * stored `_data.classes[]` entries are lean (`{name, source, level, subclass, ...}`)
+	 * and DROP the class object's structured `additionalSpells` block — so class-level
+	 * always-prepared spells (e.g. TGTT Cleric's Ceremony/Thaumaturgy, Ranger's Hunter's
+	 * Mark) can only be resolved by looking the full class object back up here.
+	 *
+	 * `populateClassSpells()` is catalog-gated on this (no-ops until it is set), so it is
+	 * safe to call before the catalog is available; the page re-runs
+	 * `applyClassFeatureEffects()` after `setClassCatalog()` on load. Mirrors
+	 * {@link setClassFeatureCatalog}.
+	 * @param {Array<*>} classes Full class objects (post brew merge / pMergeCopy)
+	 */
+	setClassCatalog (classes) {
+		this._classCatalog = Array.isArray(classes) ? classes : [];
 	}
 
 	/**
