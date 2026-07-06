@@ -2706,7 +2706,7 @@ class CharacterSheetBuilder {
 					|| (this._selectedRace.name === group.baseName && this._selectedRace.source === group.baseSource && !this._selectedRace._baseName)
 				);
 
-				const subraceCount = hasSubraces ? ` (${group.subraces.length} subraces)` : "";
+				const subraceCount = hasSubraces ? ` (${group.subraces.length} subrace${group.subraces.length === 1 ? "" : "s"})` : "";
 				const item = e_({outer: `
 					<div class="charsheet__builder-list-item ${isSelected ? "active" : ""}">
 						<span class="charsheet__builder-list-item-name">${displayName}${subraceCount}</span>
@@ -6815,7 +6815,7 @@ class CharacterSheetBuilder {
 		// Show Tasha's Custom Origin option
 		const tashasOption = e_({outer: `
 			<label class="ve-flex-v-center mb-2" style="cursor: pointer;">
-				<input type="checkbox" class="mr-2" id="builder-tashas-rules" ${this._useTashasRules ? "checked" : ""}>
+				<input type="checkbox" class="mr-2" style="flex-shrink: 0;" id="builder-tashas-rules" ${this._useTashasRules ? "checked" : ""}>
 				<span>Use Tasha's Custom Origin Rules</span>
 				<span class="ve-muted ve-small ml-1" title="Allows you to reassign racial ability scores, skill proficiencies, and languages">(reassign ASI, skills &amp; languages)</span>
 			</label>
@@ -7634,7 +7634,7 @@ class CharacterSheetBuilder {
 				allAssigned = false;
 				summary.insertAdjacentHTML("beforeend", `
 					<div class="ve-flex-v-center">
-						<strong class="mr-2" style="width: 80px;">${Parser.attAbvToFull(abl)}:</strong>
+						<strong class="mr-2" style="width: 104px; flex-shrink: 0;">${Parser.attAbvToFull(abl)}:</strong>
 						<span class="ve-muted">—${racial ? ` (+${racial})` : ""}</span>
 					</div>
 				`);
@@ -7646,7 +7646,7 @@ class CharacterSheetBuilder {
 
 			summary.insertAdjacentHTML("beforeend", `
 				<div class="ve-flex-v-center">
-					<strong class="mr-2" style="width: 80px;">${Parser.attAbvToFull(abl)}:</strong>
+					<strong class="mr-2" style="width: 104px; flex-shrink: 0;">${Parser.attAbvToFull(abl)}:</strong>
 					<span>${total} (${mod >= 0 ? "+" : ""}${mod})</span>
 				</div>
 			`);
