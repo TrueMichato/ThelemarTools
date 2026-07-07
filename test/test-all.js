@@ -15,6 +15,7 @@ async function main () {
 	await (await import("./test-image-credits.js")).default; // don't fail on missing image credits
 	if (!(await (await import("./test-json.js")).default)) handleFail();
 	if (!(await (await import("./test-misc.js")).default)) handleFail();
+	if (!(await (await import("./test-monster-groups.js")).default)) handleFail();
 	if (!(await (await import("./test-multisource.js")).default)) handleFail();
 	if (!(await (await import("./test-language-fonts.js")).default)) handleFail();
 	if (!(await (await import("./test-map-names.js")).default)) handleFail();

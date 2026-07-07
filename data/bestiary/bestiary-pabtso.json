@@ -1113,7 +1113,11 @@
 				}
 			},
 			"tokenCustom": true,
-			"hasToken": true
+			"hasToken": true,
+			"group": [
+				"Goblins",
+				"Goblinoids"
+			]
 		},
 		{
 			"name": "Goblin Psi Brawler",
@@ -1242,7 +1246,11 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Goblins",
+				"Goblinoids"
+			]
 		},
 		{
 			"name": "Goblin Psi Commander",
@@ -1413,7 +1421,11 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Goblins",
+				"Goblinoids"
+			]
 		},
 		{
 			"name": "Grandlejaw",

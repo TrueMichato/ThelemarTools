@@ -4533,7 +4533,11 @@
 					}
 				}
 			},
-			"hasToken": true
+			"hasToken": true,
+			"group": [
+				"Goblins",
+				"Goblinoids"
+			]
 		},
 		{
 			"name": "Oren Yogilvy",

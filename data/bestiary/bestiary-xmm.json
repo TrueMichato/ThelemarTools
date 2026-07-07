@@ -2911,7 +2911,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Air Elementals"
+			]
 		},
 		{
 			"name": "Allosaurus",
@@ -7517,7 +7520,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Fire Elementals"
+			]
 		},
 		{
 			"name": "Azer Sentinel",
@@ -7614,7 +7620,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Fire Elementals"
+			]
 		},
 		{
 			"name": "Baboon",
@@ -10285,7 +10294,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Oozes"
+			]
 		},
 		{
 			"name": "Blink Dog",
@@ -10875,7 +10887,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Slaadi"
+			]
 		},
 		{
 			"name": "Boar",
@@ -11709,7 +11724,8 @@
 		{
 			"name": "Bugbear Stalker",
 			"group": [
-				"Goblinoids"
+				"Goblinoids",
+				"Bugbears"
 			],
 			"source": "XMM",
 			"page": 62,
@@ -11851,7 +11867,8 @@
 		{
 			"name": "Bugbear Warrior",
 			"group": [
-				"Goblinoids"
+				"Goblinoids",
+				"Bugbears"
 			],
 			"source": "XMM",
 			"page": 62,
@@ -16812,7 +16829,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Slaadi"
+			]
 		},
 		{
 			"name": "Death Tyrant",
@@ -19290,7 +19310,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Air Elementals"
+			]
 		},
 		{
 			"name": "Eagle",
@@ -19483,7 +19506,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Earth Elementals"
+			]
 		},
 		{
 			"name": "Efreeti",
@@ -21527,7 +21553,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Fire Elementals"
+			]
 		},
 		{
 			"name": "Fire Giant",
@@ -22989,7 +23018,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Oozes"
+			]
 		},
 		{
 			"name": "Ghast",
@@ -26476,7 +26508,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githyanki"
+			]
 		},
 		{
 			"name": "Githyanki Knight",
@@ -26624,7 +26659,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githyanki"
+			]
 		},
 		{
 			"name": "Githyanki Warrior",
@@ -26755,7 +26793,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githyanki"
+			]
 		},
 		{
 			"name": "Githzerai Monk",
@@ -26907,7 +26948,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githzerai"
+			]
 		},
 		{
 			"name": "Githzerai Psion",
@@ -27043,7 +27087,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githzerai"
+			]
 		},
 		{
 			"name": "Githzerai Zerth",
@@ -27204,7 +27251,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githzerai"
+			]
 		},
 		{
 			"name": "Glabrezu",
@@ -27622,7 +27672,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Gnolls"
+			]
 		},
 		{
 			"name": "Gnoll Fang of Yeenoghu",
@@ -27738,7 +27791,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Gnolls"
+			]
 		},
 		{
 			"name": "Gnoll Pack Lord",
@@ -27852,7 +27908,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Gnolls"
+			]
 		},
 		{
 			"name": "Gnoll Warrior",
@@ -27943,7 +28002,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Gnolls"
+			]
 		},
 		{
 			"name": "Goat",
@@ -28031,7 +28093,8 @@
 		{
 			"name": "Goblin Boss",
 			"group": [
-				"Goblinoids"
+				"Goblinoids",
+				"Goblins"
 			],
 			"source": "XMM",
 			"page": 143,
@@ -28167,7 +28230,8 @@
 		{
 			"name": "Goblin Hexer",
 			"group": [
-				"Goblinoids"
+				"Goblinoids",
+				"Goblins"
 			],
 			"source": "XMM",
 			"page": 143,
@@ -28311,7 +28375,8 @@
 		{
 			"name": "Goblin Minion",
 			"group": [
-				"Goblinoids"
+				"Goblinoids",
+				"Goblins"
 			],
 			"source": "XMM",
 			"page": 142,
@@ -28415,7 +28480,8 @@
 		{
 			"name": "Goblin Warrior",
 			"group": [
-				"Goblinoids"
+				"Goblinoids",
+				"Goblins"
 			],
 			"source": "XMM",
 			"page": 142,
@@ -29161,7 +29227,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Oozes"
+			]
 		},
 		{
 			"name": "Gray Slaad",
@@ -29329,7 +29398,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Slaadi"
+			]
 		},
 		{
 			"name": "Green Dragon Wyrmling",
@@ -29803,7 +29875,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Slaadi"
+			]
 		},
 		{
 			"name": "Grell",
@@ -31858,7 +31933,8 @@
 		{
 			"name": "Hobgoblin Captain",
 			"group": [
-				"Goblinoids"
+				"Goblinoids",
+				"Hobgoblins"
 			],
 			"source": "XMM",
 			"page": 171,
@@ -31987,7 +32063,8 @@
 		{
 			"name": "Hobgoblin Warlord",
 			"group": [
-				"Goblinoids"
+				"Goblinoids",
+				"Hobgoblins"
 			],
 			"source": "XMM",
 			"page": 171,
@@ -32131,7 +32208,8 @@
 		{
 			"name": "Hobgoblin Warrior",
 			"group": [
-				"Goblinoids"
+				"Goblinoids",
+				"Hobgoblins"
 			],
 			"source": "XMM",
 			"page": 170,
@@ -33751,7 +33829,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Air Elementals"
+			]
 		},
 		{
 			"name": "Iron Golem",
@@ -34995,7 +35076,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Kuo-Toa"
+			]
 		},
 		{
 			"name": "Kuo-toa Archpriest",
@@ -35162,7 +35246,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Kuo-Toa"
+			]
 		},
 		{
 			"name": "Kuo-toa Monitor",
@@ -35274,7 +35361,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Kuo-Toa"
+			]
 		},
 		{
 			"name": "Kuo-toa Whip",
@@ -35407,7 +35497,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Kuo-Toa"
+			]
 		},
 		{
 			"name": "Lacedon Ghoul",
@@ -37049,7 +37142,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Fire Elementals"
+			]
 		},
 		{
 			"name": "Mammoth",
@@ -39308,7 +39404,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Modron Monodrone",
@@ -39390,7 +39489,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Modron Pentadrone",
@@ -39493,7 +39595,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Modron Quadrone",
@@ -39591,7 +39696,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Modron Tridrone",
@@ -39681,7 +39789,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Mud Mephit",
@@ -40359,7 +40470,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Myconids"
+			]
 		},
 		{
 			"name": "Myconid Sovereign",
@@ -40474,7 +40588,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Myconids"
+			]
 		},
 		{
 			"name": "Myconid Spore Servant",
@@ -40554,7 +40671,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Myconids"
+			]
 		},
 		{
 			"name": "Myconid Sprout",
@@ -40643,7 +40763,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Myconids"
+			]
 		},
 		{
 			"name": "Nalfeshnee",
@@ -41807,7 +41930,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Oozes"
+			]
 		},
 		{
 			"name": "Octopus",
@@ -45690,7 +45816,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Oozes"
+			]
 		},
 		{
 			"name": "Pteranodon",
@@ -47017,7 +47146,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Slaadi"
+			]
 		},
 		{
 			"name": "Reef Shark",
@@ -48064,7 +48196,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Sahuagin"
+			]
 		},
 		{
 			"name": "Sahuagin Priest",
@@ -48221,7 +48356,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Sahuagin"
+			]
 		},
 		{
 			"name": "Sahuagin Warrior",
@@ -48340,7 +48478,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Sahuagin"
+			]
 		},
 		{
 			"name": "Salamander",
@@ -48459,7 +48600,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Fire Elementals"
+			]
 		},
 		{
 			"name": "Salamander Fire Snake",
@@ -48543,7 +48687,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Fire Elementals"
+			]
 		},
 		{
 			"name": "Salamander Inferno Master",
@@ -48676,7 +48823,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Fire Elementals"
+			]
 		},
 		{
 			"name": "Satyr",
@@ -50640,7 +50790,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Slaadi"
+			]
 		},
 		{
 			"name": "Smoke Mephit",
@@ -55869,7 +56022,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Trolls"
+			]
 		},
 		{
 			"name": "Troll Limb",
@@ -55950,7 +56106,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Trolls"
+			]
 		},
 		{
 			"name": "Twig Blight",
@@ -58879,7 +59038,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Water Elementals"
+			]
 		},
 		{
 			"name": "Water Weird",
@@ -58990,7 +59152,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Water Elementals"
+			]
 		},
 		{
 			"name": "Weasel",
@@ -60950,7 +61115,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Earth Elementals"
+			]
 		},
 		{
 			"name": "Yeti",
