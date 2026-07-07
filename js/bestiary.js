@@ -643,6 +643,19 @@ class BestiaryPage extends ListPageMultiSource {
 		const btn = document.getElementById("btn-compare-sublist");
 		if (btn) {
 			btn.addEventListener("click", () => this._pHandleClickCompareSublist());
+			this._compareBtn = btn;
+			this._refreshCompareBtnState();
+
+			// Wrap the sublist manager's change handler so we can refresh the
+			// button state (disabled / tooltip) whenever the sublist changes.
+			// This is preferable to writing a plugin for a single UI concern.
+			if (this._sublistManager && typeof this._sublistManager._onSublistChange === "function") {
+				const orig = this._sublistManager._onSublistChange.bind(this._sublistManager);
+				this._sublistManager._onSublistChange = () => {
+					orig();
+					this._refreshCompareBtnState();
+				};
+			}
 		}
 
 		const parseCompareHash = () => {
@@ -654,17 +667,7 @@ class BestiaryPage extends ListPageMultiSource {
 		const pHandleCompareHash = async () => {
 			const hashes = parseCompareHash();
 			if (!hashes || hashes.length < 2) return;
-			const monsters = await Promise.all(
-				hashes.map(hash => DataLoader.pCacheAndGetHash(UrlUtil.PG_BESTIARY, hash).catch(() => null)),
-			);
-			const found = monsters.filter(Boolean);
-			if (found.length < 2) {
-				if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
-					JqueryUtil.doToast({content: "Could not resolve enough creatures from the compare URL.", type: "warning"});
-				}
-				return;
-			}
-			await RenderCompareCreatures.pOpen(found);
+			await RenderCompareCreatures.pOpenForUids(hashes);
 		};
 
 		if (parseCompareHash()) {
@@ -675,6 +678,21 @@ class BestiaryPage extends ListPageMultiSource {
 			// eslint-disable-next-line no-console
 			if (parseCompareHash()) pHandleCompareHash().catch(e => console.error(e));
 		});
+	}
+
+	_refreshCompareBtnState () {
+		if (!this._compareBtn) return;
+		const cnt = this._sublistManager ? this._sublistManager.getSublistedEntities().length : 0;
+		if (cnt >= 2) {
+			this._compareBtn.removeAttribute("disabled");
+			this._compareBtn.title = `Compare ${cnt} pinned creatures side-by-side`;
+		} else if (cnt === 1) {
+			this._compareBtn.setAttribute("disabled", "disabled");
+			this._compareBtn.title = "Pin at least two creatures to compare";
+		} else {
+			this._compareBtn.setAttribute("disabled", "disabled");
+			this._compareBtn.title = "Pin creatures to the sublist, then compare";
+		}
 	}
 
 	async _pHandleClickCompareSublist () {

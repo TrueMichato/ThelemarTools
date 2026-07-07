@@ -349,16 +349,17 @@ class CompareCreaturesDiff {
 			return;
 		}
 
+		// Status is computed **only among present cells**. Missing cells stay
+		// missing regardless of what the present cells look like — presence is
+		// a separate axis (surfaced at the row level via `isAllPresent`) and
+		// should not turn a present cell into a "diff" just because another
+		// creature happens to lack the field entirely.
 		const norms = presentCells.map(c => c.textNorm);
-		const isAllSameNorm = norms.every(n => n === norms[0]);
-		const isAllPresent = presentCells.length === cells.length;
+		const isAllPresentSameNorm = norms.every(n => n === norms[0]);
 
 		cells.forEach(c => {
 			if (!c.isPresent) { c.status = CMP_STATUS_MISSING; return; }
-			// If a value is present but at least one other creature is missing
-			// it, flag it as diff — the absence is itself a difference.
-			if (!isAllPresent) { c.status = CMP_STATUS_DIFF; return; }
-			c.status = isAllSameNorm ? CMP_STATUS_SAME : CMP_STATUS_DIFF;
+			c.status = isAllPresentSameNorm ? CMP_STATUS_SAME : CMP_STATUS_DIFF;
 		});
 	}
 
@@ -708,15 +709,19 @@ class RenderCompareCreatures {
 		row.cells.forEach((cell, ix) => {
 			const mon = monsters[ix];
 			const classes = ["ve-cmp__cell", `ve-cmp__cell--${cell.status || "diff"}`];
-			if (row.ability && cell.abilityDelta != null) {
-				if (cell.abilityDelta > 0.5) classes.push("ve-cmp__cell--ab-hi");
-				else if (cell.abilityDelta < -0.5) classes.push("ve-cmp__cell--ab-lo");
-				else classes.push("ve-cmp__cell--ab-mid");
+			// Ability rows: neutral magnitude indicator (bold + tooltip). No
+			// colour semantics — "low INT on a beast" is intentional design,
+			// not a demerit. Colour is reserved for same/diff/missing.
+			let titleAttr = "";
+			if (row.ability && cell.isPresent && cell.abilityDelta != null && Math.abs(cell.abilityDelta) > 0.5) {
+				classes.push("ve-cmp__cell--ab-extreme");
+				const sign = cell.abilityDelta > 0 ? "+" : "";
+				titleAttr = ` title="${sign}${cell.abilityDelta.toFixed(1)} vs. group mean"`;
 			}
 			const bodyHtml = cell.isPresent ? this._renderCellBody(cell, row) : `<span class="ve-cmp__cell-missing">—</span>`;
 			const dataMon = `data-mon="${this._escape(mon?.name || "")}"`;
 			const dataStatus = `data-status="${cell.status || ""}"`;
-			const cellEl = ee`<div class="${classes.join(" ")}" ${dataMon} ${dataStatus}>${bodyHtml}</div>`;
+			const cellEl = ee`<div class="${classes.join(" ")}" ${dataMon} ${dataStatus}${titleAttr}>${bodyHtml}</div>`;
 			grid.appendChild(cellEl);
 		});
 	}
@@ -769,6 +774,36 @@ class RenderCompareCreatures {
 		eleModalInner.appendChild(content);
 
 		return {doClose};
+	}
+
+	/**
+	 * Public entry for callers that only hold monster URL-hashes (Monster
+	 * Groups view, DM Screen, external tools deep-linking, our own
+	 * `#compare=…` URL-hash handler). Resolves each hash via DataLoader
+	 * and opens the compare modal; toasts and no-ops if too few resolve.
+	 *
+	 * @param {Array<string>} hashes Monster URL-hashes (as produced by
+	 *   `UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_BESTIARY](mon)`).
+	 * @returns {Promise<void>}
+	 */
+	static async pOpenForUids (hashes) {
+		if (!Array.isArray(hashes) || hashes.length < 2) {
+			if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
+				JqueryUtil.doToast({content: "Provide at least two creature UIDs to compare.", type: "warning"});
+			}
+			return;
+		}
+		const resolved = await Promise.all(
+			hashes.map(hash => DataLoader.pCacheAndGetHash(UrlUtil.PG_BESTIARY, hash).catch(() => null)),
+		);
+		const monsters = resolved.filter(Boolean);
+		if (monsters.length < 2) {
+			if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
+				JqueryUtil.doToast({content: "Could not resolve enough creatures to compare.", type: "warning"});
+			}
+			return;
+		}
+		return this.pOpen(monsters);
 	}
 
 	static _getModalTitleSplit (monsters) {

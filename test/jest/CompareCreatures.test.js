@@ -161,19 +161,22 @@ describe("CompareCreaturesDiff", () => {
 			sub.cells.forEach(c => expect(c.status).toBe(CompareCreaturesDiff.STATUS_SAME));
 		});
 
-		it("marks the 'Nimble' trait (only on monA) as missing on monB", () => {
+		it("marks the 'Nimble' trait (only on monA) as missing on monB and same-solo on monA", () => {
 			const sub = findSub(rows, "trait", "Nimble");
 			expect(sub).toBeDefined();
 			expect(sub.isAllPresent).toBe(false);
-			expect(sub.cells[0].status).toBe(CompareCreaturesDiff.STATUS_DIFF);
+			// Present cells are compared only among themselves — a single
+			// present cell is trivially "same" (nothing to diff against).
+			expect(sub.cells[0].status).toBe(CompareCreaturesDiff.STATUS_SAME);
 			expect(sub.cells[1].status).toBe(CompareCreaturesDiff.STATUS_MISSING);
 		});
 
-		it("marks the 'Regeneration' trait (only on monB) as missing on monA", () => {
+		it("marks the 'Regeneration' trait (only on monB) as missing on monA and same-solo on monB", () => {
 			const sub = findSub(rows, "trait", "Regeneration");
 			expect(sub).toBeDefined();
+			expect(sub.isAllPresent).toBe(false);
 			expect(sub.cells[0].status).toBe(CompareCreaturesDiff.STATUS_MISSING);
-			expect(sub.cells[1].status).toBe(CompareCreaturesDiff.STATUS_DIFF);
+			expect(sub.cells[1].status).toBe(CompareCreaturesDiff.STATUS_SAME);
 		});
 	});
 
@@ -188,11 +191,11 @@ describe("CompareCreaturesDiff", () => {
 			sub.cells.forEach(c => expect(c.status).toBe(CompareCreaturesDiff.STATUS_DIFF));
 		});
 
-		it("marks the 'Claw' action (only on monB) as missing on monA", () => {
+		it("marks the 'Claw' action (only on monB) as missing on monA and same-solo on monB", () => {
 			const sub = findSub(rows, "action", "Claw");
 			expect(sub).toBeDefined();
 			expect(sub.cells[0].status).toBe(CompareCreaturesDiff.STATUS_MISSING);
-			expect(sub.cells[1].status).toBe(CompareCreaturesDiff.STATUS_DIFF);
+			expect(sub.cells[1].status).toBe(CompareCreaturesDiff.STATUS_SAME);
 		});
 	});
 });

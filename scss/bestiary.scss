@@ -144,7 +144,10 @@
 			z-index: 2;
 
 			&--row-label {
-				background: transparent;
+				// Sticky first column — needs an opaque background so the
+				// content scrolling under it doesn't bleed through when the
+				// grid overflows horizontally (≥ 5 creatures).
+				background: #efeae0;
 				position: sticky;
 				left: 0;
 				z-index: 3;
@@ -191,7 +194,8 @@
 			overflow-wrap: break-word;
 
 			&--row-label {
-				background: rgb(0 0 0 / 4%);
+				// Sticky first column — opaque to survive horizontal scroll.
+				background: #f2eee6;
 				position: sticky;
 				left: 0;
 				font-weight: 600;
@@ -226,9 +230,9 @@
 				gap: 0.5rem;
 			}
 
-			&--ab-hi { box-shadow: inset 4px 0 0 rgb(80 175 80 / 60%); }
-			&--ab-mid { box-shadow: inset 4px 0 0 rgb(0 0 0 / 15%); }
-			&--ab-lo { box-shadow: inset 4px 0 0 rgb(200 80 80 / 60%); }
+			&--ab-extreme {
+				font-weight: 700;
+			}
 		}
 
 		&__cell-missing {
