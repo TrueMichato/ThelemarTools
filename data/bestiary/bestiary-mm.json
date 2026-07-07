@@ -595,7 +595,7 @@
 		{
 			"name": "Adult Black Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 88,
@@ -1098,7 +1098,7 @@
 		{
 			"name": "Adult Blue Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 91,
@@ -1386,7 +1386,7 @@
 		{
 			"name": "Adult Brass Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 105,
@@ -1695,7 +1695,7 @@
 		{
 			"name": "Adult Bronze Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 108,
@@ -2020,7 +2020,7 @@
 		{
 			"name": "Adult Copper Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 112,
@@ -2323,7 +2323,7 @@
 		{
 			"name": "Adult Gold Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 114,
@@ -2647,7 +2647,7 @@
 		{
 			"name": "Adult Green Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 94,
@@ -2939,7 +2939,7 @@
 		{
 			"name": "Adult Red Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 98,
@@ -3233,7 +3233,7 @@
 		{
 			"name": "Adult Silver Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 117,
@@ -3543,7 +3543,7 @@
 		{
 			"name": "Adult White Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 101,
@@ -4097,7 +4097,7 @@
 		{
 			"name": "Ancient Black Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 87,
@@ -4376,7 +4376,7 @@
 		{
 			"name": "Ancient Blue Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 90,
@@ -4661,7 +4661,7 @@
 		{
 			"name": "Ancient Brass Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 104,
@@ -4979,7 +4979,7 @@
 		{
 			"name": "Ancient Bronze Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 107,
@@ -5296,7 +5296,7 @@
 		{
 			"name": "Ancient Copper Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 110,
@@ -5604,7 +5604,7 @@
 		{
 			"name": "Ancient Gold Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 113,
@@ -5925,7 +5925,7 @@
 		{
 			"name": "Ancient Green Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 93,
@@ -6216,7 +6216,7 @@
 		{
 			"name": "Ancient Red Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 97,
@@ -6503,7 +6503,7 @@
 		{
 			"name": "Ancient Silver Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 116,
@@ -6811,7 +6811,7 @@
 		{
 			"name": "Ancient White Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 100,
@@ -11348,7 +11348,7 @@
 		{
 			"name": "Black Dragon Wyrmling",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 88,
@@ -11883,7 +11883,7 @@
 		{
 			"name": "Blue Dragon Wyrmling",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 91,
@@ -12824,7 +12824,7 @@
 		{
 			"name": "Brass Dragon Wyrmling",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 106,
@@ -13047,7 +13047,7 @@
 		{
 			"name": "Bronze Dragon Wyrmling",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 109,
@@ -16179,7 +16179,7 @@
 		{
 			"name": "Copper Dragon Wyrmling",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 111,
@@ -31983,7 +31983,7 @@
 		{
 			"name": "Gold Dragon Wyrmling",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 115,
@@ -32903,7 +32903,7 @@
 		{
 			"name": "Green Dragon Wyrmling",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 95,
@@ -51693,7 +51693,7 @@
 		{
 			"name": "Red Dragon Wyrmling",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 98,
@@ -55410,7 +55410,7 @@
 		{
 			"name": "Silver Dragon Wyrmling",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 118,
@@ -65149,7 +65149,7 @@
 		{
 			"name": "White Dragon Wyrmling",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 102,
@@ -66985,7 +66985,7 @@
 		{
 			"name": "Young Black Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 88,
@@ -67208,7 +67208,7 @@
 		{
 			"name": "Young Blue Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 91,
@@ -67431,7 +67431,7 @@
 		{
 			"name": "Young Brass Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 105,
@@ -67676,7 +67676,7 @@
 		{
 			"name": "Young Bronze Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 108,
@@ -67925,7 +67925,7 @@
 		{
 			"name": "Young Copper Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 112,
@@ -68161,7 +68161,7 @@
 		{
 			"name": "Young Gold Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 115,
@@ -68414,7 +68414,7 @@
 		{
 			"name": "Young Green Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 94,
@@ -68653,7 +68653,7 @@
 		{
 			"name": "Young Red Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 98,
@@ -69211,7 +69211,7 @@
 		{
 			"name": "Young Silver Dragon",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "MM",
 			"page": 118,
@@ -69450,7 +69450,7 @@
 		{
 			"name": "Young White Dragon",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "MM",
 			"page": 101,
