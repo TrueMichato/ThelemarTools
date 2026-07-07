@@ -700,8 +700,10 @@ class CharacterSheetRespec {
 				}
 			}
 
-			// Darkvision
-			if (race.darkvision) items.push(`Darkvision ${race.darkvision} ft.`);
+			// Senses (darkvision + blindsight + tremorsense + truesight)
+			CharacterSheetClassUtils.SENSE_DISPLAY_ORDER.forEach(senseKey => {
+				if (race[senseKey]) items.push(`${CharacterSheetClassUtils.SENSE_DISPLAY_META[senseKey]?.label || senseKey.toTitleCase()} ${race[senseKey]} ft.`);
+			});
 
 			// Size
 			if (race.size?.length) {
@@ -3146,7 +3148,7 @@ class CharacterSheetRespec {
 		namedMods.filter(m => m.sourceType === "race").forEach(m => this._state.removeNamedModifier(m.id));
 
 		// Reset senses
-		this._state.setSense("darkvision", 0);
+		CharacterSheetClassUtils.SENSE_DISPLAY_ORDER.forEach(senseKey => this._state.setSense(senseKey, 0));
 
 		// Clear ability bonuses (will be reapplied for both race and background)
 		Parser.ABIL_ABVS.forEach(abl => this._state.setAbilityBonus(abl, 0));
@@ -3181,7 +3183,9 @@ class CharacterSheetRespec {
 		this._applySpeedFromRaceData(newRace);
 
 		// Senses
-		if (newRace.darkvision) this._state.setSense("darkvision", newRace.darkvision);
+		CharacterSheetClassUtils.SENSE_DISPLAY_ORDER.forEach(senseKey => {
+			if (newRace[senseKey]) this._state.setSense(senseKey, newRace[senseKey]);
+		});
 
 		// Fixed languages
 		this._applyFixedLanguages(newRace);

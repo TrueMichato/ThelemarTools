@@ -885,7 +885,10 @@
 				"MW",
 				"RCH"
 			],
-			"hasToken": true
+			"hasToken": true,
+			"group": [
+				"Earth Elementals"
+			]
 		},
 		{
 			"name": "Blacktongue Bullywug",

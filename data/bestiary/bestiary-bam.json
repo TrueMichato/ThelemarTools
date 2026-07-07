@@ -3660,7 +3660,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githyanki"
+			]
 		},
 		{
 			"name": "Githyanki Star Seer",
@@ -3795,7 +3798,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githyanki"
+			]
 		},
 		{
 			"name": "Githyanki Xenomancer",
@@ -3935,7 +3941,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githyanki"
+			]
 		},
 		{
 			"name": "Gray Scavver",

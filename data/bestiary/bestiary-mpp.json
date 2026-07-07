@@ -964,7 +964,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Yugoloths"
+			]
 		},
 		{
 			"name": "Bariaur Wanderer",
@@ -2051,7 +2054,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Doomguard Doom Lord",
@@ -3290,7 +3296,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githzerai"
+			]
 		},
 		{
 			"name": "Githzerai Traveler",
@@ -3449,7 +3458,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githzerai"
+			]
 		},
 		{
 			"name": "Githzerai Uniter",
@@ -3591,7 +3603,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githzerai"
+			]
 		},
 		{
 			"name": "Hands of Havoc Fire Starter",
@@ -4183,7 +4198,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Hound Archon",
@@ -5535,7 +5553,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Octon Modron",
@@ -5695,7 +5716,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Planar Incarnate",
@@ -6156,7 +6180,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Shator Demodand",
