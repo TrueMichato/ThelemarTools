@@ -2,6 +2,7 @@ import {EncounterBuilderCacheBestiaryPage} from "./bestiary/bestiary-encounterbu
 import {EncounterBuilderComponentBestiary} from "./bestiary/bestiary-encounterbuilder-component.js";
 import {EncounterBuilderUiBestiary} from "./bestiary/bestiary-encounterbuilder-ui.js";
 import {EncounterBuilderSublistPlugin} from "./bestiary/bestiary-encounterbuilder-sublistplugin.js";
+import {RenderCompareCreatures} from "./bestiary/bestiary-compare.js";
 import {RenderBestiary} from "./render-bestiary.js";
 import {EncounterBuilderRulesClassic} from "./encounterbuilder/rules/encounterbuilder-rules-classic.js";
 import {EncounterBuilderRulesOne} from "./encounterbuilder/rules/encounterbuilder-rules-one.js";
@@ -634,6 +635,62 @@ class BestiaryPage extends ListPageMultiSource {
 			</div>
 		</div>`
 			.appendTo(es(`#wrp-encounterbuild-footer`));
+
+		this._pOnLoad_compareView();
+	}
+
+	_pOnLoad_compareView () {
+		const btn = document.getElementById("btn-compare-sublist");
+		if (btn) {
+			btn.addEventListener("click", () => this._pHandleClickCompareSublist());
+		}
+
+		const parseCompareHash = () => {
+			const rawHash = window.location.hash || "";
+			const m = rawHash.match(/[#&]compare=([^&]+)/);
+			return m ? decodeURIComponent(m[1]).split(",").map(s => s.trim()).filter(Boolean) : null;
+		};
+
+		const pHandleCompareHash = async () => {
+			const hashes = parseCompareHash();
+			if (!hashes || hashes.length < 2) return;
+			const monsters = await Promise.all(
+				hashes.map(hash => DataLoader.pCacheAndGetHash(UrlUtil.PG_BESTIARY, hash).catch(() => null)),
+			);
+			const found = monsters.filter(Boolean);
+			if (found.length < 2) {
+				if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
+					JqueryUtil.doToast({content: "Could not resolve enough creatures from the compare URL.", type: "warning"});
+				}
+				return;
+			}
+			await RenderCompareCreatures.pOpen(found);
+		};
+
+		if (parseCompareHash()) {
+			// eslint-disable-next-line no-console
+			pHandleCompareHash().catch(e => console.error(e));
+		}
+		window.addEventListener("hashchange", () => {
+			// eslint-disable-next-line no-console
+			if (parseCompareHash()) pHandleCompareHash().catch(e => console.error(e));
+		});
+	}
+
+	async _pHandleClickCompareSublist () {
+		const monsters = this._sublistManager
+			? this._sublistManager.getSublistedEntities()
+			: [];
+		if (!monsters || monsters.length < 2) {
+			if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
+				JqueryUtil.doToast({
+					content: "Pin at least two creatures to the encounter/sublist before comparing.",
+					type: "warning",
+				});
+			}
+			return;
+		}
+		await RenderCompareCreatures.pOpen(monsters);
 	}
 
 	async _pPageInit_pProfBonusDiceToggle () {
