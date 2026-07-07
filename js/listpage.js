@@ -21,7 +21,7 @@ class _UtilListPage {
 					title: entity.name,
 					isPermanent: true,
 					pageUrl: `${page}#${hash}`,
-					isBookContent: page === UrlUtil.PG_RECIPES,
+					isBookContent: Renderer.hover.isBookContentStyledPage(page),
 					sourceData: entity,
 				},
 			);
@@ -137,7 +137,7 @@ class SublistManager {
 		this._wrpContainer = null;
 		this._wrpSummaryControls = null;
 
-		this._pSaveSublistDebounced = MiscUtil.debounce(this._pSaveSublist.bind(this), 50);
+		this._pSaveSublistDebounced = MiscUtil.debounce(this._pSaveSublist.bind(this), VeCt.DUR_DEBOUNCE_SAVE);
 
 		this._hkOnListUpdated = null;
 	}
@@ -198,39 +198,16 @@ class SublistManager {
 	async _pBindSublistResizeHandlers () {
 		const STORAGE_KEY = "SUBLIST_RESIZE";
 
-		const eleHandle = ee`<div class="sublist__ele-resize ve-mobile-sm__hidden">...</div>`.appendTo(this._wrpContainer);
-
-		let mousePos;
-		const resize = (evt) => {
-			evt.preventDefault();
-			evt.stopPropagation();
-			const dx = EventUtil.getClientY(evt) - mousePos;
-			mousePos = EventUtil.getClientY(evt);
-			this._wrpContainer.style.height = `${this._wrpContainer.getBoundingClientRect().height + dx}px`;
-		};
-
-		eleHandle
-			.onn("mousedown", (evt) => {
-				if (evt.button !== 0) return;
-
-				evt.preventDefault();
-				mousePos = evt.clientY;
-				document.removeEventListener("mousemove", resize);
-				document.addEventListener("mousemove", resize);
-			});
-
-		document.addEventListener("mouseup", evt => {
-			if (evt.button !== 0) return;
-
-			document.removeEventListener("mousemove", resize);
-			StorageUtil.pSetForPage(STORAGE_KEY, this._wrpContainer.css("height").slice(0, -2));
-		});
-
-		// Avoid setting the height on mobile, as we force the sublist to a static size
-		if (JqueryUtil.isMobile()) return;
-
-		const storedHeight = await StorageUtil.pGetForPage(STORAGE_KEY);
-		if (storedHeight) this._wrpContainer.css("height", `${storedHeight}px`);
+		UiUtil.getEleDragVerticalResize({
+			wrpContainer: this._wrpContainer,
+			// Avoid setting the height on mobile, as we force the sublist to a static size
+			heightPxSaved: JqueryUtil.isMobile()
+				? null
+				: await StorageUtil.pGetForPage(STORAGE_KEY),
+			fnSetHeightPxSaved: heightPx => StorageUtil.pSetForPage(STORAGE_KEY, heightPx),
+		})
+			.addClass("ve-mobile-sm__hidden")
+			.appendTo(this._wrpContainer);
 	}
 
 	_onSublistChange () { /* Implement as required */ }
@@ -371,6 +348,8 @@ class SublistManager {
 			isNoSave = false,
 		} = {},
 	) {
+		await this._listPage.pDoLoadExportedSublistSources(exportedSublist);
+
 		// This should never be necessary, but, ensure no unwanted state gets passed
 		if (exportedSublist) ListUtil.getWithoutManagerClientState(exportedSublist);
 
@@ -386,8 +365,6 @@ class SublistManager {
 		});
 
 		if (exportedSublist && !isAdditive) await this.pDoSublistRemoveAll({isNoSave: true});
-
-		await this._listPage.pDoLoadExportedSublistSources(exportedSublist);
 
 		for (const entityInfo of entityInfos) {
 			const {count, entity, ser} = entityInfo;
@@ -457,6 +434,28 @@ class SublistManager {
 			if (!this.isSublisted({entity})) await this.pDoSublistAdd({entity});
 		}
 		await this._pFinaliseSublist();
+	}
+
+	_pHandleKeydown_upDown_getSublistItem ({direction, entity}) {
+		const hash = this._getSublistFullHash({entity});
+		const sublistItem = this.getSublistListItem({hash});
+
+		if (!sublistItem) {
+			return direction === 1 ? this._listSub.items[0] : this._listSub.items.at(-1);
+		}
+
+		const ix = this._listSub.items.indexOf(sublistItem) + direction;
+		if (ix < 0) return this._listSub.items.at(-1);
+		if (ix > this._listSub.items.length - 1) return this._listSub.items[0];
+		return this._listSub.items[ix];
+	}
+
+	pHandleKeydown_upDown ({direction, entity}) {
+		if (!this._listSub.items.length) return;
+
+		const sublistItem = this._pHandleKeydown_upDown_getSublistItem({direction, entity});
+
+		this._listPage.setListItemHash(this._getSublistFullHash({entity: sublistItem.data.entity}));
 	}
 
 	async _pHandleJsonDownload () {
@@ -927,6 +926,17 @@ class SublistManager {
 	}
 
 	doSublistDeselectAll () { this._listSub.deselectAll(); }
+
+	/* -------------------------------------------- */
+
+	doUpdateSelected ({hash}) {
+		if (!hash) return;
+
+		this._listSub.items
+			.forEach(listItem => {
+				listItem.isSelected = hash === this._getSublistFullHash({entity: listItem.data.entity});
+			});
+	}
 
 	/* -------------------------------------------- */
 
@@ -1577,6 +1587,11 @@ class ListPage {
 		);
 	}
 
+	setListItemHash (hash) {
+		window.location.hash = hash;
+		this._initList_scrollToItem();
+	}
+
 	_initList (
 		{
 			iptSearch,
@@ -1633,7 +1648,7 @@ class ListPage {
 		// endregion
 
 		if (dispPageTagline) {
-			dispPageTagline.innerHTML += ` Press J/K to navigate${isPreviewable ? `, M to expand` : ""}.`;
+			dispPageTagline.innerHTML += ` Press ${this._sublistManager ? `<span title="J/K to navigate within pinned list; p/P to pin and unpin."><kbd>j</kbd>/<kbd>k</kbd></span>` : "<kbd>j</kbd>/<kbd>k</kbd>"} to navigate${isPreviewable ? `, <kbd>m</kbd> to expand` : ""}.`;
 			this._initList_bindWindowHandlers();
 		}
 
@@ -1670,6 +1685,16 @@ class ListPage {
 					// don't switch if the user is typing somewhere else
 					if (EventUtil.isInInput(evt)) return;
 					this._initList_handleListUpDownPress(key === "k" ? -1 : 1);
+					return;
+				}
+
+				case "K":
+				case "J": {
+					if (!this._sublistManager) return;
+					this._sublistManager.pHandleKeydown_upDown({
+						direction: key === "K" ? -1 : 1,
+						entity: this._lastRender.entity,
+					});
 					return;
 				}
 
@@ -1714,16 +1739,14 @@ class ListPage {
 				? listsWithVisibleItems[0].visibleItems[0]
 				: listsWithVisibleItems.last().visibleItems.last();
 			if (tgtItem) {
-				window.location.hash = tgtItem.values.hash;
-				this._initList_scrollToItem();
+				this.setListItemHash(tgtItem.values.hash);
 			}
 			return;
 		}
 
 		const tgtItemSameList = listItemMeta.list.visibleItems[ixVisible + dir];
 		if (tgtItemSameList) {
-			window.location.hash = tgtItemSameList.values.hash;
-			this._initList_scrollToItem();
+			this.setListItemHash(tgtItemSameList.values.hash);
 			return;
 		}
 
@@ -1743,8 +1766,7 @@ class ListPage {
 			const tgtItemOtherList = dir === 1 ? listsCandidate[ixListOther].visibleItems[0] : listsCandidate[ixListOther].visibleItems.last();
 			if (!tgtItemOtherList) continue;
 
-			window.location.hash = tgtItemOtherList.values.hash;
-			this._initList_scrollToItem();
+			this.setListItemHash(tgtItemOtherList.values.hash);
 			return;
 		}
 	}
@@ -1752,6 +1774,8 @@ class ListPage {
 	_updateSelected () {
 		const curSelectedItem = Hist.getSelectedListItem();
 		this.primaryLists.forEach(l => l.updateSelected(curSelectedItem));
+
+		if (this._sublistManager) this._sublistManager.doUpdateSelected({hash: curSelectedItem.values.hash});
 	}
 
 	_openContextMenu (evt, list, listItem) {
@@ -2352,7 +2376,7 @@ class ListPage {
 			{
 				title: `Image Export - ${ent.name}`,
 				isPermanent: true,
-				isBookContent: page === UrlUtil.PG_RECIPES,
+				isBookContent: Renderer.hover.isBookContentStyledPage(page),
 				isResizeOnlyWidth: true,
 				isHideBottomBorder: true,
 				width,
@@ -2418,7 +2442,6 @@ class ListPageTokenDisplay {
 					height: ${ent.foundryTokenScale * 100}%;
 					left: -${(ent.foundryTokenScale - 1) / 2 * 100}%;
 					top: -${(ent.foundryTokenScale - 1) / 2 * this.constructor._CONTAINER_SIZE}px;
-					transition: width 34ms, height 34ms, left 34ms, top 34ms;
 				}
 
 				.ve-stats__wrp-token:hover {

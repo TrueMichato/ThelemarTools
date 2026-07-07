@@ -2,7 +2,7 @@
 
 // in deployment, `IS_DEPLOYED = "<version number>";` should be set below.
 globalThis.IS_DEPLOYED = undefined;
-globalThis.VERSION_NUMBER = /* 5ETOOLS_VERSION__OPEN */"2.26.1"/* 5ETOOLS_VERSION__CLOSE */;
+globalThis.VERSION_NUMBER = /* 5ETOOLS_VERSION__OPEN */"2.32.0"/* 5ETOOLS_VERSION__CLOSE */;
 globalThis.DEPLOYED_IMG_ROOT = "https://raw.githubusercontent.com/5etools-mirror-3/5etools-img/main/";
 // for the roll20 script to set
 globalThis.IS_VTT = false;
@@ -17,63 +17,67 @@ globalThis.HASH_SUB_KV_SEP = ":";
 globalThis.HASH_BLANK = "blankhash";
 globalThis.HASH_SUB_NONE = "null";
 
-globalThis.VeCt = {
-	STR_NONE: "None",
-	STR_SEE_CONSOLE: "See the console (CTRL+SHIFT+J) for details.",
+globalThis.VeCt = class {
+	static STR_NONE = "None";
+	static STR_SEE_CONSOLE = "See the console (CTRL+SHIFT+J) for details.";
 
-	HASH_SCALED: "scaled",
-	HASH_SCALED_SPELL_SUMMON: "scaledspellsummon",
-	HASH_SCALED_CLASS_SUMMON: "scaledclasssummon",
+	static HASH_SCALED = "scaled";
+	static HASH_SCALED_SPELL_SUMMON = "scaledspellsummon";
+	static HASH_SCALED_CLASS_SUMMON = "scaledclasssummon";
 
-	FILTER_BOX_SUB_HASH_SEARCH_PREFIX: "fbsr",
-	FILTER_BOX_SUB_HASH_FLAG_IS_PRESERVE_EXISTING: "fbpe",
+	static FILTER_BOX_SUB_HASH_SEARCH_PREFIX = "fbsr";
+	static FILTER_BOX_SUB_HASH_FLAG_IS_PRESERVE_EXISTING = "fbpe";
 
-	JSON_PRERELEASE_INDEX: `prerelease/index.json`,
-	JSON_BREW_INDEX: `homebrew/index.json`,
+	static JSON_PRERELEASE_INDEX = `prerelease/index.json`;
+	static JSON_BREW_INDEX = `homebrew/index.json`;
 
-	STORAGE_HOMEBREW: "HOMEBREW_STORAGE",
-	STORAGE_HOMEBREW_META: "HOMEBREW_META_STORAGE",
-	STORAGE_EXCLUDES: "EXCLUDES_STORAGE",
-	STORAGE_DMSCREEN: "DMSCREEN_STORAGE",
-	STORAGE_DMSCREEN_TEMP_SUBLIST: "DMSCREEN_TEMP_SUBLIST",
-	STORAGE_ROLLER_MACRO: "ROLLER_MACRO_STORAGE",
-	STORAGE_ENCOUNTER: "ENCOUNTER_STORAGE",
-	STORAGE_POINTBUY: "POINTBUY_STORAGE",
-	STORAGE_GLOBAL_COMPONENT_STATE: "GLOBAL_COMPONENT_STATE",
+	static STORAGE_HOMEBREW = "HOMEBREW_STORAGE";
+	static STORAGE_HOMEBREW_META = "HOMEBREW_META_STORAGE";
+	static STORAGE_EXCLUDES = "EXCLUDES_STORAGE";
+	static STORAGE_DMSCREEN = "DMSCREEN_STORAGE";
+	static STORAGE_DMSCREEN_TEMP_SUBLIST = "DMSCREEN_TEMP_SUBLIST";
+	static STORAGE_ROLLER_MACRO = "ROLLER_MACRO_STORAGE";
+	static STORAGE_ENCOUNTER = "ENCOUNTER_STORAGE";
+	static STORAGE_POINTBUY = "POINTBUY_STORAGE";
+	static STORAGE_GLOBAL_COMPONENT_STATE = "GLOBAL_COMPONENT_STATE";
 
-	DUR_INLINE_NOTIFY: 500,
+	static DUR_INLINE_NOTIFY = 500;
+	static DUR_DEBOUNCE_SAVE = 100;
 
-	PG_NONE: "NO_PAGE",
-	STR_GENERIC: "Generic",
+	static PG_NONE = "NO_PAGE";
+	static STR_GENERIC = "Generic";
 
-	SYM_UI_SKIP: Symbol("uiSkip"),
+	static SYM_UI_SKIP = Symbol("uiSkip");
 
-	SYM_WALKER_BREAK: Symbol("walkerBreak"),
+	static SYM_WALKER_BREAK = Symbol("walkerBreak");
 
-	SYM_UTIL_TIMEOUT: Symbol("timeout"),
+	static SYM_UTIL_TIMEOUT = Symbol("timeout");
 
-	LOC_HOSTNAME_CANCER: "5e.tools",
+	static LOC_HOSTNAME_CANCER = "5e.tools";
 
-	URL_BREW: `https://github.com/TheGiddyLimit/homebrew`,
-	URL_ROOT_BREW: `https://raw.githubusercontent.com/TheGiddyLimit/homebrew/master/`, // N.b. must end with a slash
-	URL_ROOT_BREW_IMG: `https://raw.githubusercontent.com/TheGiddyLimit/homebrew-img/main/`, // N.b. must end with a slash
-	URL_PRERELEASE: `https://github.com/TheGiddyLimit/unearthed-arcana`,
-	URL_ROOT_PRERELEASE: `https://raw.githubusercontent.com/TheGiddyLimit/unearthed-arcana/master/`, // As above
+	static URL_BREW = `https://github.com/TheGiddyLimit/homebrew`;
+	static URL_ROOT_BREW = `https://raw.githubusercontent.com/TheGiddyLimit/homebrew/master/`; // N.b. must end with a slash
+	static URL_ROOT_BREW_IMG = `https://raw.githubusercontent.com/TheGiddyLimit/homebrew-img/main/`; // N.b. must end with a slash
+	static URL_PRERELEASE = `https://github.com/TheGiddyLimit/unearthed-arcana`;
+	static URL_ROOT_PRERELEASE = `https://raw.githubusercontent.com/TheGiddyLimit/unearthed-arcana/master/`; // As above
 
-	STR_NO_ATTUNEMENT: "No Attunement Required",
+	static STR_NO_ATTUNEMENT = "No Attunement Required";
 
-	CR_UNKNOWN: 100001,
-	CR_CUSTOM: 100000,
+	static CR_UNKNOWN = 100001;
+	static CR_CUSTOM = 100000;
 
-	SPELL_LEVEL_MAX: 9,
-	LEVEL_MAX: 20,
+	static SPELL_LEVEL_MAX = 9;
+	static SPELL_USES_MAX = 99;
+	static SPELL_USES_KEYS = new Set(Array.from({length: this.SPELL_USES_MAX}, (_, i) => `${i + 1}`));
+	static SPELL_USES_KEYS_EACH = new Set(Array.from({length: this.SPELL_USES_MAX}, (_, i) => `${i + 1}e`));
+	static LEVEL_MAX = 20;
 
-	ENTDATA_ITEM_MERGED_ENTRY_TAG: "item__mergedEntryTag",
+	static ENTDATA_ITEM_MERGED_ENTRY_TAG = "item__mergedEntryTag";
 
-	DRAG_TYPE_IMPORT: "ve-Import",
-	DRAG_TYPE_LOOT: "ve-Loot",
+	static DRAG_TYPE_IMPORT = "ve-Import";
+	static DRAG_TYPE_LOOT = "ve-Loot";
 
-	Z_INDEX_BENEATH_HOVER: 199,
+	static Z_INDEX_BENEATH_HOVER = 199;
 };
 
 // STRING ==============================================================================================================
@@ -386,6 +390,8 @@ globalThis.StrUtil = class {
 		"yuan-ti": "yuan-ti",
 	};
 
+	/* -------------------------------------------- */
+
 	static _IRREGULAR_SINGLE_WORDS = {
 		...Object.fromEntries(Object.entries(this._IRREGULAR_PLURAL_WORDS).map(([k, v]) => [v, k])),
 	};
@@ -394,7 +400,17 @@ globalThis.StrUtil = class {
 		[/(axe)s$/i, "$1"],
 	];
 
+	static _RE_TO_SINGLE_END_ES = null;
+	static _RE_TO_SINGLE_END_IES = null;
+
+	static _toSingle_init () {
+		this._RE_TO_SINGLE_END_ES ??= /(s|x|z|ch|sh)es$/i;
+		this._RE_TO_SINGLE_END_IES ??= /[bcdfghjklmnpqrstvwxyz]ies$/i;
+	}
+
 	static toSingle (str) {
+		this._toSingle_init();
+
 		if (this._IRREGULAR_SINGLE_WORDS[str.toLowerCase()]) return this._getMatchedCase(str, this._IRREGULAR_SINGLE_WORDS[str.toLowerCase()]);
 		const single = this._IRREGULAR_SINGLE_PATTERNS
 			.first(([re, repl]) => {
@@ -402,16 +418,28 @@ globalThis.StrUtil = class {
 			});
 		if (single) return single;
 
-		if (/(s|x|z|ch|sh)es$/i.test(str)) return str.slice(0, -2);
-		if (/[bcdfghjklmnpqrstvwxyz]ies$/i.test(str)) return `${str.slice(0, -3)}y`;
+		if (this._RE_TO_SINGLE_END_ES.test(str)) return str.slice(0, -2);
+		if (this._RE_TO_SINGLE_END_IES.test(str)) return `${str.slice(0, -3)}y`;
 		return str.replace(/s$/i, "");
 	}
 
+	/* -------------------------------------------- */
+
+	static _RE_TO_PLURAL_END_ES = null;
+	static _RE_TO_PLURAL_END_IES = null;
+
+	static _toPlural_init () {
+		this._RE_TO_PLURAL_END_ES ??= /(s|x|z|ch|sh)$/i;
+		this._RE_TO_PLURAL_END_IES ??= /[bcdfghjklmnpqrstvwxyz]y$/i;
+	}
+
 	static toPlural (str) {
+		this._toPlural_init();
+
 		let plural;
 		if (this._IRREGULAR_PLURAL_WORDS[str.toLowerCase()]) plural = this._IRREGULAR_PLURAL_WORDS[str.toLowerCase()];
-		else if (/(s|x|z|ch|sh)$/i.test(str)) plural = `${str}es`;
-		else if (/[bcdfghjklmnpqrstvwxyz]y$/i.test(str)) plural = str.replace(/y$/i, "ies");
+		else if (this._RE_TO_PLURAL_END_ES.test(str)) plural = `${str}es`;
+		else if (this._RE_TO_PLURAL_END_IES.test(str)) plural = `${str.slice(0, -1)}ies`;
 		else plural = `${str}s`;
 
 		return this._getMatchedCase(str, plural);
@@ -542,6 +570,7 @@ globalThis.SourceUtil = class {
 		{group: "homebrew", displayName: "Homebrew"},
 		{group: "screen", displayName: "Screens"},
 		{group: "recipe", displayName: "Recipes"},
+		{group: "homecraft", displayName: "Home Crafts"},
 		{group: "other", displayName: "Miscellaneous"},
 	];
 
@@ -682,6 +711,7 @@ globalThis.SourceUtil = class {
 	}
 
 	static getEntitySource (it) { return it.source || it.inherits?.source; }
+	static getEntityPage (it) { return it.page ?? it.inherits?.page; }
 };
 
 // CURRENCY ============================================================================================================
@@ -889,7 +919,13 @@ class TemplateUtil {
 		 * or:    ee(ele)`<div>Press this button: ${btn}</div>`
 		 * @return {HTMLElementExtended}
 		 */
-		globalThis.ee = (parts, ...args) => {
+		globalThis.ee = (...allArgs) => {
+			if (!allArgs.length) throw new TypeError(`"ee" called with no arguments!`);
+
+			const [parts, ...args] = allArgs;
+
+			if (parts == null) throw new TypeError(`"ee" called with "${parts}" as first argument!`);
+
 			// eslint-disable-next-line vet-jquery/jquery
 			if (globalThis.jQuery && parts instanceof globalThis.jQuery) throw new Error(`Unhandled jQuery instance!`); // TODO(jquery) migrate
 
@@ -1592,7 +1628,7 @@ class ElementUtil {
 	}
 
 	/** @this {HTMLElementExtended} */
-	static _toggleVe (isActive) {
+	static _toggleVe (isActive = null) {
 		this.toggleClass("ve-hidden", isActive == null ? isActive : !isActive);
 		return this;
 	}
@@ -1610,43 +1646,49 @@ class ElementUtil {
 	}
 
 	/** @this {HTMLElementExtended} */
-	static _attr (name, value) {
-		if (value === undefined) return this.getAttribute(name);
+	static _attr (...args) {
+		const [name, value] = args;
+		if (args.length <= 1) return this.getAttribute(name);
 		if (!value && ElementUtil._ATTRS_NO_FALSY.has(name)) this.removeAttribute(name);
 		else this.setAttribute(name, value);
 		return this;
 	}
 
 	/** @this {HTMLElementExtended} */
-	static _prop (name, value) {
-		if (value === undefined) return this[name];
+	static _prop (...args) {
+		const [name, value] = args;
+		if (args.length <= 1) return this[name];
 		this[name] = value;
 		return this;
 	}
 
 	/** @this {HTMLElementExtended} */
-	static _html (html) {
-		if (html === undefined) return this.innerHTML;
+	static _html (...args) {
+		const [html] = args;
+		if (!args.length) return this.innerHTML;
 		this.innerHTML = html;
 		return this;
 	}
 
 	/** @this {HTMLElementExtended} */
-	static _txt (txt) {
-		if (txt === undefined) return this.innerText;
+	static _txt (...args) {
+		const [txt] = args;
+		if (!args.length) return this.innerText;
 		this.innerText = txt;
 		return this;
 	}
 
 	/** @this {HTMLElementExtended} */
-	static _tooltip (title) {
-		if (title === undefined) return this.getAttribute("title");
+	static _tooltip (...args) {
+		const [title] = args;
+		if (!args.length) return this.getAttribute("title");
 		return this.attr("title", title);
 	}
 
 	/** @this {HTMLElementExtended} */
-	static _placeholdere (placeholder) {
-		if (placeholder === undefined) return this.getAttribute("placeholder");
+	static _placeholdere (...args) {
+		const [placeholder] = args;
+		if (!args.length) return this.getAttribute("placeholder");
 		return this.attr("placeholder", placeholder);
 	}
 
@@ -1673,9 +1715,10 @@ class ElementUtil {
 	}
 
 	/** @this {HTMLElementExtended} */
-	static _css (keyOrObj, val) {
+	static _css (...args) {
+		const [keyOrObj, val] = args;
 		if (typeof keyOrObj === "string") {
-			if (val === undefined) return this.style[keyOrObj];
+			if (args.length <= 1) return this.style[keyOrObj];
 			this.style[keyOrObj] = val;
 			return this;
 		}
@@ -1844,8 +1887,9 @@ class ElementUtil {
 	/* -------------------------------------------- */
 
 	/** @this {HTMLElementExtended} */
-	static _scrollTope (val) {
-		if (val === undefined) return this.scrollTop;
+	static _scrollTope (...args) {
+		const [val] = args;
+		if (!args.length) return this.scrollTop;
 		this.scrollTop = val;
 		return this;
 	}
@@ -3100,9 +3144,21 @@ globalThis.ContextUtil = class {
 	 * @param evt
 	 * @param menu
 	 * @param {?object} userData
+	 * @param {?number} xPos
+	 * @param {?boolean} isFromRight
+	 * @param {?number} yPos
 	 * @return {Promise<*>}
 	 */
-	static pOpenMenu (evt, menu, {userData = null} = {}) {
+	static pOpenMenu (
+		evt,
+		menu,
+		{
+			userData = null,
+			xPos = null,
+			isFromRight = false,
+			yPos = null,
+		} = {},
+	) {
 		evt.preventDefault();
 		evt.stopPropagation();
 
@@ -3111,7 +3167,7 @@ globalThis.ContextUtil = class {
 		// Close any other open menus
 		ContextUtil._menus.filter(it => it !== menu).forEach(it => it.close());
 
-		return menu.pOpen(evt, {userData});
+		return menu.pOpen(evt, {userData, xPos, isFromRight, yPos});
 	}
 
 	static closeAllMenus () {
@@ -3132,6 +3188,18 @@ globalThis.ContextUtil = class {
 			this._metasActions = [];
 
 			this._menusSub = [];
+
+			this._eventChannel = new EventTarget();
+		}
+
+		on (eventName, handler) {
+			this._eventChannel.addEventListener(eventName, handler);
+			return handler;
+		}
+
+		off (eventName, handler) {
+			this._eventChannel.removeEventListener(eventName, handler);
+			return handler;
 		}
 
 		remove () {
@@ -3143,11 +3211,21 @@ globalThis.ContextUtil = class {
 		width () { return this._ele ? this._ele.outerWidthe() : undefined; }
 		height () { return this._ele ? this._ele.outerHeighte() : undefined; }
 
-		pOpen (evt, {userData = null, offsetY = null, boundsX = null} = {}) {
+		pOpen (
+			evt,
+			{
+				userData = null,
+				offsetY = null,
+				boundsX = null,
+				xPos = null,
+				isFromRight = false,
+				yPos = null,
+			} = {},
+		) {
 			evt.stopPropagation();
 			evt.preventDefault();
 
-			this._initLazy();
+			this._initLazy({window: evt?.view?.window || window});
 
 			if (this.resolveResult_) this.resolveResult_(null);
 			this._pResult = new Promise(resolve => {
@@ -3163,16 +3241,24 @@ globalThis.ContextUtil = class {
 					opacity: `0px`,
 					pointerEvents: "none",
 				})
-				.showVe()
-				// Use the accurate width/height to set the final position, and remove our temp styling
-				.css({
-					left: `${this._getMenuPosition(evt, "x", {bounds: boundsX})}px`,
-					top: `${this._getMenuPosition(evt, "y", {offset: offsetY})}px`,
-					opacity: "",
-					pointerEvents: "",
-				});
+				.showVe();
+
+			// Use the accurate width/height to set the final position, and remove our temp styling
+			const cssNxt = {
+				left: "",
+				top: "",
+				opacity: "",
+				pointerEvents: "",
+			};
+
+			cssNxt[isFromRight ? "right" : "left"] = `${xPos ?? this._getMenuPosition(evt, "x", {bounds: boundsX})}px`;
+			cssNxt.top = `${yPos ?? this._getMenuPosition(evt, "y", {offset: offsetY})}px`;
+
+			this._ele.css(cssNxt);
 
 			this._metasActions[0].eleRow.focus();
+
+			this._eventChannel.dispatchEvent(new Event("open"));
 
 			return this._pResult;
 		}
@@ -3186,6 +3272,8 @@ globalThis.ContextUtil = class {
 
 			if (!_isSkipSubMenus) this.closeSubMenus();
 			if (!isSkipParentMenus) this._closeParentMenus();
+
+			this._eventChannel.dispatchEvent(new Event("close"));
 		}
 
 		isOpen () {
@@ -3193,9 +3281,10 @@ globalThis.ContextUtil = class {
 			return !this._ele.classList.contains("ve-hidden");
 		}
 
-		_initLazy () {
+		_initLazy ({window}) {
 			if (this._ele) {
 				this._metasActions.forEach(meta => meta.action.update());
+				this._ele.appendTo(window.document.body);
 				return;
 			}
 
@@ -3209,7 +3298,7 @@ globalThis.ContextUtil = class {
 
 			this._ele = ee`<div class="ve-flex-col ve-ui-ctx__wrp ve-py-2 ve-absolute">${elesAction}</div>`
 				.hideVe()
-				.appendTo(document.body);
+				.appendTo(window.document.body);
 		}
 
 		_getMenuPosition (evt, axis, {bounds = null, offset = null} = {}) {
@@ -3461,7 +3550,7 @@ globalThis.ContextUtil = class {
 
 			const eleRow = ee`<div class="ve-ui-ctx__btn ve-py-1 ve-px-5 ve-split-v-center">
 				<div>${this._name}</div>
-				<div class="ve-pl-4"><span class="caret caret--right"></span></div>
+				<div class="ve-pl-4"><span class="ve-caret ve-caret--right"></span></div>
 			</div>`
 				.onn("click", async evt => {
 					evt.stopPropagation();
@@ -3555,6 +3644,7 @@ globalThis.UrlUtil = class {
 	static PG_CHANGELOG = "changelog.html";
 	static PG_CHAR_CREATION_OPTIONS = "charcreationoptions.html";
 	static PG_RECIPES = "recipes.html";
+	static PG_HOMECRAFTS = "homecrafts.html";
 	static PG_CLASS_SUBCLASS_FEATURES = "classfeatures.html";
 	static PG_CREATURE_FEATURES = "creaturefeatures.html";
 	static PG_VEHICLE_FEATURES = "vehiclefeatures.html";
@@ -3949,6 +4039,7 @@ UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_ACTIONS] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_LANGUAGES] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CHAR_CREATION_OPTIONS] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_RECIPES] = (it) => `${UrlUtil.encodeArrayForHash(it.name, it.source)}${it._scaleFactor ? `${HASH_PART_SEP}${VeCt.HASH_SCALED}${HASH_SUB_KV_SEP}${it._scaleFactor}` : ""}`;
+UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_HOMECRAFTS] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_DECKS] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_BASTIONS] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_ITEM_UPGRADES] = UrlUtil.URL_TO_HASH_GENERIC;
@@ -4002,6 +4093,7 @@ UrlUtil.URL_TO_HASH_BUILDER["action"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_A
 UrlUtil.URL_TO_HASH_BUILDER["language"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_LANGUAGES];
 UrlUtil.URL_TO_HASH_BUILDER["charoption"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CHAR_CREATION_OPTIONS];
 UrlUtil.URL_TO_HASH_BUILDER["recipe"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_RECIPES];
+UrlUtil.URL_TO_HASH_BUILDER["crochetPattern"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_HOMECRAFTS];
 UrlUtil.URL_TO_HASH_BUILDER["deck"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_DECKS];
 UrlUtil.URL_TO_HASH_BUILDER["facility"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_BASTIONS];
 
@@ -4085,6 +4177,7 @@ UrlUtil.PG_TO_NAME[UrlUtil.PG_TEXT_CONVERTER] = "Text Converter";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_CHANGELOG] = "Changelog";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_CHAR_CREATION_OPTIONS] = "Other Character Creation Options";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_RECIPES] = "Recipes";
+UrlUtil.PG_TO_NAME[UrlUtil.PG_HOMECRAFTS] = "Home Crafts";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_CREATURE_FEATURES] = "Creature Features";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_VEHICLE_FEATURES] = "Vehicle Features";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_OBJECT_FEATURES] = "Object Features";
@@ -4144,7 +4237,8 @@ UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_BOOK] = UrlUtil.PG_BOOK;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_PAGE] = null;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_LEGENDARY_GROUP] = null;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_CHAR_CREATION_OPTIONS] = UrlUtil.PG_CHAR_CREATION_OPTIONS;
-UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_RECIPES] = UrlUtil.PG_RECIPES;
+UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_RECIPE] = UrlUtil.PG_RECIPES;
+UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_CROCHET_PATTERN] = UrlUtil.PG_HOMECRAFTS;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_STATUS] = UrlUtil.PG_CONDITIONS_DISEASES;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_DECK] = UrlUtil.PG_DECKS;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_FACILITY] = UrlUtil.PG_BASTIONS;
@@ -4189,6 +4283,7 @@ UrlUtil.SUBLIST_PAGES = {
 	[UrlUtil.PG_LANGUAGES]: true,
 	[UrlUtil.PG_CHAR_CREATION_OPTIONS]: true,
 	[UrlUtil.PG_RECIPES]: true,
+	[UrlUtil.PG_HOMECRAFTS]: true,
 	[UrlUtil.PG_DECKS]: true,
 	[UrlUtil.PG_BASTIONS]: true,
 };
@@ -4501,6 +4596,14 @@ globalThis.SortUtil = class {
 		return SortUtil.ascSortLower(a.name || "", b.name || "") || SortUtil.ascSortLower(a.source || "", b.source || "");
 	}
 
+	static ascSortClass (a, b) {
+		return SortUtil.ascSortDateString(Parser.sourceJsonToDate(b.source), Parser.sourceJsonToDate(a.source)) || SortUtil.ascSortLower(a.name, b.name) || SortUtil.ascSortLower(a.source, b.source);
+	}
+
+	static ascSortSubclass (a, b) {
+		return SortUtil.ascSortDateString(Parser.sourceJsonToDate(b.source), Parser.sourceJsonToDate(a.source)) || SortUtil.ascSortLower(a.name, b.name);
+	}
+
 	static ascSortDeity (a, b) {
 		return SortUtil.ascSortLower(a.name, b.name) || SortUtil.ascSortLower(a.source, b.source) || SortUtil.ascSortLower(a.pantheon, b.pantheon);
 	}
@@ -4518,6 +4621,11 @@ globalThis.SortUtil = class {
 		const ixA = SortUtil._ITEM_RARITY_ORDER.indexOf(a);
 		const ixB = SortUtil._ITEM_RARITY_ORDER.indexOf(b);
 		return (~ixA ? ixA : Number.MAX_SAFE_INTEGER) - (~ixB ? ixB : Number.MAX_SAFE_INTEGER);
+	}
+
+	static ascSortSpellRechargeKeys (a, b) {
+		// `parseInt` discards trailing/un-parsed `e`s; secondary ascSort handles `e`-vs-not-`e`
+		return SortUtil.ascSort(parseInt(a, 10), parseInt(b, 10)) || SortUtil.ascSort(a, b);
 	}
 };
 
@@ -5333,6 +5441,8 @@ globalThis.DataUtil = class {
 			hasToken: true,
 			tokenCredit: true,
 			tokenCustom: true,
+			foundryTokenScale: true,
+			altArt: true,
 			_versions: true,
 		};
 
@@ -5435,10 +5545,8 @@ globalThis.DataUtil = class {
 
 			// TODO(Template) allow templates for other entity types
 			switch (entry.__prop) {
-				case "monster": {
-					const templateData = await DataUtil.loadJSON(`${Renderer.get().baseUrl}data/bestiary/template.json`);
-					return templateData.monsterTemplate;
-				}
+				case "monster": return (await DataUtil.loadJSON(`${Renderer.get().baseUrl}data/bestiary/template.json`)).monsterTemplate;
+				case "legendaryGroup": return ((await DataUtil.loadJSON(`${Renderer.get().baseUrl}data/bestiary/template.json`)).legendaryGroupTemplate);
 				default: throw new Error(`Unsupported!`);
 			}
 		}
@@ -5778,19 +5886,14 @@ globalThis.DataUtil = class {
 				["recharge", "legendary", "charges", "rest", "restLong", "daily", "weekly", "monthly", "yearly"].forEach(prop => {
 					if (!modInfo[prop]) return;
 
-					for (let i = 1; i <= 9; ++i) {
-						const e = `${i}e`;
+					Object.entries(modInfo[prop])
+						.forEach(([k, spells]) => {
+							if (!VeCt.SPELL_USES_KEYS.has(k) && !VeCt.SPELL_USES_KEYS_EACH.has(k)) return;
 
-						spellcasting[prop] = spellcasting[prop] || {};
+							spellcasting[prop] ||= {};
 
-						if (modInfo[prop][i]) {
-							modInfo[prop][i].forEach(sp => (spellcasting[prop][i] = spellcasting[prop][i] || []).push(sp));
-						}
-
-						if (modInfo[prop][e]) {
-							modInfo[prop][e].forEach(sp => (spellcasting[prop][e] = spellcasting[prop][e] || []).push(sp));
-						}
-					}
+							spells.forEach(sp => (spellcasting[prop][k] ||= []).push(sp));
+						});
 				});
 			}
 
@@ -5822,19 +5925,16 @@ globalThis.DataUtil = class {
 				}
 
 				// TODO should be extended  to handle all non-slot-based spellcasters
-				if (modInfo.daily) {
-					for (let i = 1; i <= 9; ++i) {
-						const e = `${i}e`;
+				["daily"].forEach(prop => {
+					if (!modInfo[prop]) return;
 
-						if (modInfo.daily[i]) {
-							modInfo.daily[i].forEach(replaceMeta => handleReplace(spellcasting.daily, replaceMeta, i));
-						}
+					Object.entries(modInfo[prop])
+						.forEach(([k, replaceMetas]) => {
+							if (!VeCt.SPELL_USES_KEYS.has(k) && !VeCt.SPELL_USES_KEYS_EACH.has(k)) return;
 
-						if (modInfo.daily[e]) {
-							modInfo.daily[e].forEach(replaceMeta => handleReplace(spellcasting.daily, replaceMeta, e));
-						}
-					}
-				}
+							replaceMetas.forEach(replaceMeta => handleReplace(spellcasting[prop], replaceMeta, k));
+						});
+				});
 			}
 
 			static _doMod_removeSpells ({copyTo, copyFrom, modInfo, msgPtFailed}) {
@@ -5861,19 +5961,14 @@ globalThis.DataUtil = class {
 				["recharge", "legendary", "charges", "rest", "restLong", "daily", "weekly", "monthly", "yearly"].forEach(prop => {
 					if (!modInfo[prop]) return;
 
-					for (let i = 1; i <= 9; ++i) {
-						const e = `${i}e`;
+					Object.entries(modInfo[prop])
+						.forEach(([k, spells]) => {
+							if (!VeCt.SPELL_USES_KEYS.has(k) && !VeCt.SPELL_USES_KEYS_EACH.has(k)) return;
 
-						spellcasting[prop] = spellcasting[prop] || {};
+							spellcasting[prop] ||= {};
 
-						if (modInfo[prop][i]) {
-							spellcasting[prop][i] = spellcasting[prop][i].filter(it => !modInfo[prop][i].includes(it));
-						}
-
-						if (modInfo[prop][e]) {
-							spellcasting[prop][e] = spellcasting[prop][e].filter(it => !modInfo[prop][e].includes(it));
-						}
-					}
+							spellcasting[prop][k] = spellcasting[prop][k].filter(it => !spells.includes(it));
+						});
 				});
 			}
 
@@ -6332,6 +6427,10 @@ globalThis.DataUtil = class {
 			static getCleanMathExpression (str) { return str.replace(/[^-+/*0-9.,]+/g, ""); }
 		};
 
+		static hasVersions (parent) {
+			return !!parent?._versions?.length;
+		}
+
 		static getVersions (parent, {impl = null, isExternalApplicationIdentityOnly = false} = {}) {
 			if (!parent?._versions?.length) return [];
 
@@ -6388,6 +6487,7 @@ globalThis.DataUtil = class {
 			// Tweak the data structure to match what `_applyCopy` expects
 			ent._copy = {
 				_mod: ent._mod,
+				_templates: ent._templates,
 				_preserve: ent._preserve || {"*": true},
 			};
 			delete ent._mod;
@@ -6422,7 +6522,7 @@ globalThis.DataUtil = class {
 				impl,
 				cpyParentEntity,
 				version,
-				null,
+				DataLoader.getAllFromCacheAll(`${parentEntity.__prop}Template`, {isSilent: true}),
 				{isExternalApplicationIdentityOnly},
 			);
 			Object.assign(version, additionalData);
@@ -6431,6 +6531,11 @@ globalThis.DataUtil = class {
 	};
 
 	static proxy = class {
+		static hasVersions (prop, ent) {
+			if (DataUtil[prop]?.hasVersions) return DataUtil[prop]?.hasVersions(ent);
+			return DataUtil.generic.hasVersions(ent);
+		}
+
 		static getVersions (prop, ent, {isExternalApplicationIdentityOnly = false} = {}) {
 			if (DataUtil[prop]?.getVersions) return DataUtil[prop]?.getVersions(ent, {isExternalApplicationIdentityOnly});
 			return DataUtil.generic.getVersions(ent, {isExternalApplicationIdentityOnly});
@@ -6487,10 +6592,14 @@ globalThis.DataUtil = class {
 		static _DIR = "bestiary";
 		static _PROP = "monster";
 
-		static async loadJSON () {
-			await DataUtil.monster.pPreloadLegendaryGroups();
-			return super.loadJSON();
+		/* -------------------------------------------- */
+
+		static hasVersions (mon) {
+			return DataUtil.generic.hasVersions(mon)
+				|| mon.variant?.some(it => it._version?.addAs || it._version?.addHeadersAs);
 		}
+
+		/* ----- */
 
 		static getVersions (mon, {isExternalApplicationIdentityOnly = false} = {}) {
 			const additionalVersionData = DataUtil.monster._getAdditionalVersionsData(mon);
@@ -6551,26 +6660,29 @@ globalThis.DataUtil = class {
 				.filter(Boolean);
 		}
 
+		/* -------------------------------------------- */
+
 		static _pLoadLegendaryGroups = null;
-		static async pPreloadLegendaryGroups () {
-			return (
-				DataUtil.monster._pLoadLegendaryGroups ||= ((async () => {
-					const legendaryGroups = await DataUtil.legendaryGroup.pLoadAll();
-					DataUtil.monster.populateMetaReference({legendaryGroup: legendaryGroups});
-				})())
-			);
+		static async pPreloadLegendaryGroupsSite () {
+			return (DataUtil.monster._pLoadLegendaryGroups ||= DataLoader.pCacheAndGetAllSite("legendaryGroup"));
 		}
 
-		static legendaryGroupLookup = {};
+		static async pUpdatePreloadLegendaryGroupsPrerelease () {
+			return DataLoader.pCacheAndGetAllPrerelease("legendaryGroup");
+		}
+
+		static async pUpdatePreloadLegendaryGroupsBrew () {
+			return DataLoader.pCacheAndGetAllBrew("legendaryGroup");
+		}
+
+		/* ----- */
+
 		static getLegendaryGroup (mon) {
-			if (!mon.legendaryGroup || !mon.legendaryGroup.source || !mon.legendaryGroup.name) return null;
-			return DataUtil.monster.legendaryGroupLookup[mon.legendaryGroup.source]?.[mon.legendaryGroup.name];
+			if (!mon.legendaryGroup?.source || !mon.legendaryGroup?.name) return null;
+			return DataLoader.getFromCache("legendaryGroup", mon.legendaryGroup.source, UrlUtil.URL_TO_HASH_BUILDER["legendaryGroup"](mon.legendaryGroup));
 		}
-		static populateMetaReference (data) {
-			(data.legendaryGroup || []).forEach(it => {
-				(DataUtil.monster.legendaryGroupLookup[it.source] ||= {})[it.name] = it;
-			});
-		}
+
+		/* -------------------------------------------- */
 	};
 
 	static monsterFluff = class extends _DataUtilPropConfigMultiSource {
@@ -6582,6 +6694,11 @@ globalThis.DataUtil = class {
 	static monsterTemplate = class extends _DataUtilPropConfigSingleSource {
 		static _PAGE = "monsterTemplate";
 		static _FILENAME = "bestiary/template.json";
+	};
+
+	static encounterShape = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = "encounterShape";
+		static _FILENAME = "encounterbuilder.json";
 	};
 
 	static spell = class extends _DataUtilPropConfigMultiSource {
@@ -6788,6 +6905,11 @@ globalThis.DataUtil = class {
 		static _PROP = "spellFluff";
 	};
 
+	static psionic = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = UrlUtil.PG_PSIONICS;
+		static _FILENAME = "psionics.json";
+	};
+
 	static background = class extends _DataUtilPropConfigSingleSource {
 		static _PAGE = UrlUtil.PG_BACKGROUNDS;
 		static _FILENAME = "backgrounds.json";
@@ -6974,6 +7096,10 @@ globalThis.DataUtil = class {
 			if (isMaintainCase) return out;
 			return out.toLowerCase();
 		}
+	};
+
+	static itemMastery = class extends _DataUtilPropConfig {
+		static _PAGE = "itemMastery";
 	};
 
 	static language = class extends _DataUtilPropConfigSingleSource {
@@ -7211,29 +7337,47 @@ globalThis.DataUtil = class {
 		static _FILENAME = "recipes.json";
 
 		static async loadJSON () {
-			return DataUtil.recipe._pLoadJson = DataUtil.recipe._pLoadJson || (async () => {
-				return {
-					recipe: await DataLoader.pCacheAndGetAllSite("recipe"),
-				};
+			return DataUtil.recipe._pLoadJson ||= (async () => {
+				return {recipe: await DataLoader.pCacheAndGetAllSite("recipe")};
 			})();
 		}
 
 		static async loadPrerelease () {
-			return {
-				recipe: await DataLoader.pCacheAndGetAllPrerelease("recipe"),
-			};
+			return {recipe: await DataLoader.pCacheAndGetAllPrerelease("recipe")};
 		}
 
 		static async loadBrew () {
-			return {
-				recipe: await DataLoader.pCacheAndGetAllBrew("recipe"),
-			};
+			return {recipe: await DataLoader.pCacheAndGetAllBrew("recipe")};
 		}
 	};
 
 	static recipeFluff = class extends _DataUtilPropConfigSingleSource {
 		static _PAGE = UrlUtil.PG_RECIPES;
 		static _FILENAME = "fluff-recipes.json";
+	};
+
+	static crochetPattern = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = UrlUtil.PG_HOMECRAFTS;
+		static _FILENAME = "homecrafts.json";
+
+		static async loadJSON () {
+			return DataUtil.crochetPattern._pLoadJson ||= (async () => {
+				return {crochetPattern: await DataLoader.pCacheAndGetAllSite("crochetPattern")};
+			})();
+		}
+
+		static async loadPrerelease () {
+			return {crochetPattern: await DataLoader.pCacheAndGetAllPrerelease("crochetPattern")};
+		}
+
+		static async loadBrew () {
+			return {crochetPattern: await DataLoader.pCacheAndGetAllBrew("crochetPattern")};
+		}
+	};
+
+	static crochetPatternFluff = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = UrlUtil.PG_HOMECRAFTS;
+		static _FILENAME = "fluff-homecrafts.json";
 	};
 
 	static vehicle = class extends _DataUtilPropConfigSingleSource {
@@ -7244,6 +7388,11 @@ globalThis.DataUtil = class {
 	static vehicleFluff = class extends _DataUtilPropConfigSingleSource {
 		static _PAGE = UrlUtil.PG_VEHICLES;
 		static _FILENAME = "fluff-vehicles.json";
+	};
+
+	static vehicleUpgrade = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = UrlUtil.PG_VEHICLES;
+		static _FILENAME = "vehicles.json";
 	};
 
 	static optionalfeature = class extends _DataUtilPropConfigSingleSource {
@@ -7698,6 +7847,26 @@ globalThis.DataUtil = class {
 	static hazardFluff = class extends _DataUtilPropConfigSingleSource {
 		static _PAGE = UrlUtil.PG_TRAPS_HAZARDS;
 		static _FILENAME = "fluff-trapshazards.json";
+	};
+
+	static cult = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = UrlUtil.PG_CULTS_BOONS;
+		static _FILENAME = "cultsboons.json";
+	};
+
+	static boon = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = UrlUtil.PG_CULTS_BOONS;
+		static _FILENAME = "cultsboons.json";
+	};
+
+	static sense = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = "sense";
+		static _FILENAME = "senses.json";
+	};
+
+	static skill = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = "skill";
+		static _FILENAME = "skills.json";
 	};
 
 	static action = class extends _DataUtilPropConfigSingleSource {
@@ -9312,34 +9481,36 @@ globalThis.ExtensionUtil = class {
 if (typeof window !== "undefined") window.addEventListener("rivet.active", () => ExtensionUtil.ACTIVE = true);
 
 // LOCKS ===============================================================================================================
-/**
- * @param {string} name
- * @param {boolean} isDbg
- * @constructor
- */
-globalThis.VeLock = function ({name = null, isDbg = false} = {}) {
-	this._MSG_PAD_LEN = 8;
+globalThis.VeLock = class {
+	static _MSG_PAD_LEN = 8;
+	static _IS_DBG_ALL = false;
 
-	this._name = name;
-	this._isDbg = isDbg;
-	this._lockMeta = null;
+	/**
+	 * @param {?string} [name]
+	 * @param {boolean} [isDbg]
+	 */
+	constructor ({name = null, isDbg = false} = {}) {
+		this._name = name;
+		this._isDbg = isDbg;
+		this._lockMeta = null;
+	}
 
-	this._getCaller = () => {
+	_getCaller () {
 		return (new Error()).stack.split("\n")[3].trim();
-	};
+	}
 
-	this.pLock = async ({token = null} = {}) => {
+	async pLock ({token = null} = {}) {
 		if (token != null && this._lockMeta?.token === token) {
 			++this._lockMeta.depth;
 			// eslint-disable-next-line no-console
-			if (this._isDbg) console.warn(`Lock ${"add".padEnd(this._MSG_PAD_LEN, " ")} "${this._name || "(unnamed)"}" (now ${this._lockMeta.depth}) at ${this._getCaller()}`);
+			if (this._isDbg || this.constructor._IS_DBG_ALL) console.warn(`Lock ${"add".padEnd(this.constructor._MSG_PAD_LEN, " ")} "${this._name || "(unnamed)"}" (now ${this._lockMeta.depth}) at ${this._getCaller()}`);
 			return token;
 		}
 
 		while (this._lockMeta) await this._lockMeta.lock;
 
 		// eslint-disable-next-line no-console
-		if (this._isDbg) console.warn(`Lock ${"acquired".padEnd(this._MSG_PAD_LEN, " ")} "${this._name || "(unnamed)"}" at ${this._getCaller()}`);
+		if (this._isDbg || this.constructor._IS_DBG_ALL) console.warn(`Lock ${"acquired".padEnd(this.constructor._MSG_PAD_LEN, " ")} "${this._name || "(unnamed)"}" at ${this._getCaller()}`);
 
 		let unlock = null;
 		const lock = new Promise(resolve => unlock = resolve);
@@ -9351,24 +9522,24 @@ globalThis.VeLock = function ({name = null, isDbg = false} = {}) {
 		};
 
 		return this._lockMeta.token;
-	};
+	}
 
-	this.unlock = () => {
+	unlock () {
 		if (!this._lockMeta) return;
 
 		if (this._lockMeta.depth > 0) {
 			// eslint-disable-next-line no-console
-			if (this._isDbg) console.warn(`Lock ${"sub".padEnd(this._MSG_PAD_LEN, " ")} "${this._name || "(unnamed)"}" (now ${this._lockMeta.depth - 1}) at ${this._getCaller()}`);
+			if (this._isDbg || this.constructor._IS_DBG_ALL) console.warn(`Lock ${"sub".padEnd(this.constructor._MSG_PAD_LEN, " ")} "${this._name || "(unnamed)"}" (now ${this._lockMeta.depth - 1}) at ${this._getCaller()}`);
 			return --this._lockMeta.depth;
 		}
 
 		// eslint-disable-next-line no-console
-		if (this._isDbg) console.warn(`Lock ${"released".padEnd(this._MSG_PAD_LEN, " ")} "${this._name || "(unnamed)"}" at ${this._getCaller()}`);
+		if (this._isDbg || this.constructor._IS_DBG_ALL) console.warn(`Lock ${"released".padEnd(this.constructor._MSG_PAD_LEN, " ")} "${this._name || "(unnamed)"}" at ${this._getCaller()}`);
 
 		const lockMeta = this._lockMeta;
 		this._lockMeta = null;
 		lockMeta.unlock();
-	};
+	}
 };
 ExcludeUtil._lock = new VeLock({name: "blocklist"});
 

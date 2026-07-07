@@ -28,7 +28,7 @@ class MakeCards extends BaseComponent {
 		this._modalFilterFeats = new ModalFilterFeats({namespace: "makecards.feat"});
 		this._modalFilterOptionalFeatures = new ModalFilterOptionalFeatures({namespace: "makecards.optionalfeatures"});
 
-		this._doSaveStateDebounced = MiscUtil.debounce(() => this._pDoSaveState(), 50);
+		this._doSaveStateDebounced = MiscUtil.debounce(() => this._pDoSaveState(), VeCt.DUR_DEBOUNCE_SAVE);
 	}
 
 	async pInit () {
@@ -448,7 +448,7 @@ class MakeCards extends BaseComponent {
 		} = Renderer.monster.getSubEntries(mon, {renderer});
 
 		return [
-			this._ct_subtitle(Renderer.monster.getTypeAlignmentPart(mon)),
+			this._ct_subtitle(Renderer.monster.getTypeAlignmentPart(mon, {renderer})),
 			this._ct_rule(),
 			this._ct_property("Armor class", this._ct_htmlToText(Parser.acToFull(mon.ac))),
 			this._ct_property("Hit points", this._ct_htmlToText(Renderer.monster.getRenderedHp(mon.hp))),

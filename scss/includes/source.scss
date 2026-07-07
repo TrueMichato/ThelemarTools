@@ -104,6 +104,8 @@
 		$rgb-source-NF: #5bdbd6;
 		$rgb-source-LFL: #d35734;
 		$rgb-source-EFA: #827d4d;
+		$rgb-source-CaBoMP: #832c5a;
+		$rgb-source-RHW: #7e2327;
 
 		// region Categories
 
@@ -561,6 +563,15 @@
 			&EFA,
 			&FFotR {
 				@include mix-source-color($rgb-source-EFA);
+			}
+
+			&CaBoMP {
+				@include mix-source-color($rgb-source-CaBoMP);
+			}
+
+			&RHW,
+			&XScreenRHW {
+				@include mix-source-color($rgb-source-RHW);
 			}
 		}
 		// endregion

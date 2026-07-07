@@ -39,7 +39,7 @@ export class EncounterBuilderRulesOne extends EncounterBuilderRulesBase {
 
 	_render_settingsRules ({stgSettingsRules}) {
 		const wrpSettingsRules = ee`<div class="ve-flex-col">
-			<div class="ve-flex ve-mb-2">${Renderer.get().render(`{@note Based on the encounter building rules on page 114 of the {@book ${Parser.sourceJsonToFull(Parser.SRC_XDMG)}|XDMG|3|Combat Encounter Difficulty}}`)}</div>
+			<div class="ve-flex ve-mb-2">${this._rendererWrapped.er(`{@note Based on the encounter building rules on page 114 of the {@book ${Parser.sourceJsonToFull(Parser.SRC_XDMG)}|XDMG|3|Combat Encounter Difficulty}}`)}</div>
 		</div>`
 			.appendTo(stgSettingsRules);
 
@@ -91,7 +91,7 @@ export class EncounterBuilderRulesOne extends EncounterBuilderRulesBase {
 
 		this._comp.addHookPulseDeriverPartyMeta(() => {
 			const partyMeta = this.getEncounterPartyMeta();
-			const encounterSpendInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureMetas);
+			const encounterSpendInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureGroups);
 			const tier = partyMeta.getEncounterTier(encounterSpendInfo);
 
 			onHookPulseDeriverPartyMetaTierXp({partyMeta});
@@ -104,6 +104,7 @@ export class EncounterBuilderRulesOne extends EncounterBuilderRulesBase {
 						.map(tier => [tier, partyMeta.getBudget(tier)]),
 				),
 				tier: tier,
+				cntPlayers: partyMeta.cntPlayers,
 			});
 
 			dispTtk
@@ -138,7 +139,7 @@ export class EncounterBuilderRulesOne extends EncounterBuilderRulesBase {
 		</div>`;
 
 		this._comp.addHookPulseDeriverPartyMeta(() => {
-			const encounterSpendInfo = this.getEncounterPartyMeta().getEncounterSpendInfo(this._comp.creatureMetas);
+			const encounterSpendInfo = this.getEncounterPartyMeta().getEncounterSpendInfo(this._comp.creatureGroups);
 			hrHasCreatures.toggleVe(encounterSpendInfo.relevantCount);
 			wrpDifficultyCols.toggleVe(encounterSpendInfo.relevantCount);
 		})();
@@ -161,7 +162,7 @@ export class EncounterBuilderRulesOne extends EncounterBuilderRulesBase {
 		this._comp.addHookPulseDeriverPartyMeta(() => {
 			const partyMeta = this.getEncounterPartyMeta();
 
-			const encounterSpendInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureMetas);
+			const encounterSpendInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureGroups);
 
 			const tier = partyMeta.getEncounterTier(encounterSpendInfo);
 
@@ -182,7 +183,7 @@ export class EncounterBuilderRulesOne extends EncounterBuilderRulesBase {
 		this._comp.addHookPulseDeriverPartyMeta(() => {
 			const partyMeta = this.getEncounterPartyMeta();
 
-			const encounterSpendInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureMetas);
+			const encounterSpendInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureGroups);
 
 			dispXpRawTotal.txt(`Total XP: ${encounterSpendInfo.baseSpend?.toLocaleStringVe() || "?"}`);
 			dispXpRawPerPlayer.txt(
@@ -207,7 +208,7 @@ export class EncounterBuilderRulesOne extends EncounterBuilderRulesBase {
 	getDisplaySummary () {
 		const encounterXpInfo = this
 			.getEncounterPartyMeta()
-			.getEncounterSpendInfo(this._comp.creatureMetas);
+			.getEncounterSpendInfo(this._comp.creatureGroups);
 
 		return `${encounterXpInfo.baseSpend.toLocaleStringVe()} XP`;
 	}

@@ -1,7 +1,4 @@
-import {EncounterBuilderRenderableCollectionPlayersSimple} from "./encounterbuilder-playerssimple.js";
-import {EncounterBuilderRenderableCollectionColsExtraAdvanced} from "./encounterbuilder-colsextraadvanced.js";
-import {EncounterBuilderRenderableCollectionPlayersAdvanced} from "./encounterbuilder-playersadvanced.js";
-import {ScaleCreature} from "../scalecreature/scalecreature-scaler-cr.js";
+import {RenderableCollectionViewerCreatures} from "./encounterbuilder-ui-creatures.js";
 
 class _RenderableCollectionCustomShapeGroups extends RenderableCollectionGenericRows {
 	constructor (
@@ -76,135 +73,6 @@ class _RenderableCollectionCustomShapeGroups extends RenderableCollectionGeneric
 	}
 }
 
-class _RenderableCollectionViewerCreatures extends RenderableCollectionGenericRows {
-	constructor (
-		{
-			comp,
-			wrpRows,
-		},
-	) {
-		super(comp, "creatureMetas", wrpRows);
-	}
-
-	_getWrpRow () {
-		return super._getWrpRow()
-			.addClass("ve-py-1p")
-			.addClass("ve-px-1");
-	}
-
-	_populateRow ({comp, wrpRow, entity}) {
-		const {wrp: wrpIptCount} = ComponentUiUtil.getIptNumber(comp, "count", 1, {min: 1, decorationRight: "ticker", asMeta: true});
-		wrpIptCount
-			.addClass("ve-w-50p")
-			.addClass("ve-mr-2");
-
-		const dispCreature = ee`<div class="ve-mr-2 ve-mr-auto ve-grow"></div>`;
-
-		const pDoScaleCr = async ({targetCr}) => {
-			// Fetch original
-			const ent = await DataLoader.pCacheAndGetHash(
-				UrlUtil.PG_BESTIARY,
-				UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_BESTIARY](comp._state.creature),
-			);
-
-			const baseCr = ent.cr.cr || ent.cr;
-			if (baseCr == null) return;
-			const baseCrNum = Parser.crToNumber(baseCr);
-			const scaledToNum = comp._state.creature._isScaledCr ? comp._state._scaledCr : null;
-
-			if (!Parser.isValidCr(targetCr)) {
-				JqueryUtil.doToast({
-					content: `"${targetCr}" is not a valid Challenge Rating! Please enter a valid CR (0-30). For fractions, "1/X" should be used.`,
-					type: "danger",
-				});
-
-				iptCr.val(Parser.numberToCr(scaledToNum ?? baseCrNum));
-				return;
-			}
-
-			const targetCrNum = Parser.crToNumber(targetCr);
-
-			if (targetCrNum === scaledToNum) return;
-
-			const entScaled = await ScaleCreature.scale(ent, targetCrNum);
-
-			// Merge state, if required
-			const entityOther = this._comp._state[this._prop]
-				.find(entityOther => {
-					if (entityOther.id === entity.id) return false;
-					return entityOther.getHash() === entity.getHash()
-						&& MiscUtil.isNearStrictlyEqual(entityOther.getCustomHashId(), entity.getCustomHashId());
-				});
-
-			if (entityOther) {
-				const cntToAdd = comp._state.count;
-				this._utils.doDelete({entity});
-				entityOther.setCount(entityOther.getCount() + cntToAdd);
-				this._comp._triggerCollectionUpdate(this._prop);
-				return;
-			}
-
-			comp._state.creature = entScaled;
-		};
-
-		let pScalingCr = null;
-		const iptCr = ee`<input class="ve-text-center ve-form-control form-control--minimal ve-input-xs ve-w-50p">`
-			.onn("click", () => iptCr.selecte())
-			.onn("change", async () => {
-				await pScalingCr;
-				pScalingCr = pDoScaleCr({targetCr: iptCr.val()});
-				await pScalingCr;
-				pScalingCr = null;
-			});
-		const stgCr = ee`<div class="ve-mr-2 ve-no-wrap ve-flex-v-center"><span class="ve-mr-2">CR</span>${iptCr}</div>`;
-
-		comp._addHookBase("creature", () => {
-			// TODO(customHashId) this doesn't display the scaled creature on hover
-			dispCreature.html(`${Renderer.get().render(`{@creature ${comp._state.creature.name}|${comp._state.creature.source}|${comp._state.creature._displayName || comp._state.creature.name}}`)}`);
-
-			iptCr.val(comp._state.creature.cr?.cr || comp._state.creature.cr);
-
-			stgCr.toggleVe(ScaleCreature.isCrInScaleRange(comp._state.creature));
-		})();
-
-		const btnShuffle = ee`<button title="Randomize Monster" class="ve-btn ve-btn-default ve-btn-xs"><span class="glyphicon glyphicon-random"></span></button>`
-			.onn("click", () => {
-				if (comp._state.isLocked) return;
-				this._comp.doShuffleCreature({creatureMeta: entity});
-			});
-
-		const btnLock = ComponentUiUtil.getBtnBool(
-			comp,
-			"isLocked",
-			{
-				html: `<button title="Lock Monster against Randomizing/Adjusting" class="ve-btn ve-btn-default ve-btn-xs"><span class="glyphicon glyphicon-lock"></span></button>`,
-			},
-		);
-
-		const btnDelete = ee`<button class="ve-btn ve-btn-danger ve-btn-xs" title="Delete"><span class="glyphicon glyphicon-trash"></span></button>`
-			.onn("click", () => {
-				if (comp._state.isLocked) return;
-				this._utils.doDelete({entity});
-			});
-
-		comp._addHookBase("isLocked", () => {
-			btnShuffle.toggleClass("ve-disabled", comp._state.isLocked);
-			btnDelete.toggleClass("ve-disabled", comp._state.isLocked);
-		})();
-
-		ee(wrpRow)`
-			${wrpIptCount}
-			${dispCreature}
-			${stgCr}
-			<div class="ve-btn-group ve-no-wrap">
-				${btnShuffle}
-				${btnLock}
-				${btnDelete}
-			</div>
-		`;
-	}
-}
-
 class _RatioState {
 	constructor ({ratiosPrev = null, cntRotate = 0} = {}) {
 		this.ratiosPrev = ratiosPrev;
@@ -220,15 +88,6 @@ class _RatioState {
 export class EncounterBuilderUi extends BaseComponent {
 	static _RenderState = class {
 		constructor () {
-			this.wrpRowsSimple = null;
-			this.wrpRowsAdvanced = null;
-			this.wrpHeadersAdvanced = null;
-			this.wrpFootersAdvanced = null;
-
-			this._collectionPlayersSimple = null;
-			this._collectionColsExtraAdvanced = null;
-			this._collectionPlayersAdvanced = null;
-
 			this.renderableCollectionViewerCreatures = null;
 		}
 	};
@@ -243,28 +102,64 @@ export class EncounterBuilderUi extends BaseComponent {
 	_comp;
 	/** @type {Array<EncounterBuilderRulesBase>} */
 	_rulesComps;
+	/** @type {Array<EncounterBuilderPartyBase>} */
+	_partyComps;
 	/** @type {EncounterBuilderShapesLookup} */
 	_encounterShapesLookup;
+	/** @type {typeof RenderableCollectionViewerCreatures} */
+	_ClsRenderableCollectionViewerCreatures;
 
-	constructor ({cache, comp, rulesComps, encounterShapesLookup}) {
+	constructor (
+		{
+			cache,
+			comp,
+			rulesComps,
+			partyComps,
+			encounterShapesLookup,
+			rendererWrapped,
+			ClsRenderableCollectionViewerCreatures = null,
+
+			headerTextSettings = "Settings",
+		},
+	) {
+		if (!rendererWrapped) throw new Error(`Missing required "rendererWrapped" option!`);
+
+		ClsRenderableCollectionViewerCreatures ??= RenderableCollectionViewerCreatures;
+
 		super();
 
 		this._cache = cache;
 		this._comp = comp;
 		this._rulesComps = rulesComps;
 		this._rulesCompsLookup = Object.fromEntries(this._rulesComps.map(comp => [comp.rulesId, comp]));
+		this._partyComps = partyComps;
+		this._partyCompsLookup = Object.fromEntries(this._partyComps.map(comp => [comp.partyId, comp]));
 		this._encounterShapesLookup = encounterShapesLookup;
+		this._rendererWrapped = rendererWrapped;
+		this._ClsRenderableCollectionViewerCreatures = ClsRenderableCollectionViewerCreatures;
+
+		this._headerTextSettings = headerTextSettings;
 
 		this._state.activeRulesId = this._rulesComps[0].rulesId;
+		this._state.activePartyId = this._partyComps[0].partyId;
 	}
 
 	addHookOnSave (hk) {
 		const fns = [
-			this._addHookAll("state", hk),
+			this._addHookAllBase(hk),
+
 			...this._rulesComps
 				.map(rulesComp => rulesComp.addHookOnSave(hk)),
+			...this._partyComps
+				.map(partyComp => partyComp.addHookOnSave(hk)),
 		];
 		return (...args) => fns.forEach(fn => fn(...args));
+	}
+
+	getActivePartyId () { return this._state.activePartyId; }
+	setActivePartyId (val) {
+		if (!this._partyCompsLookup[val]) return;
+		this._state.activePartyId = val;
 	}
 
 	getSaveableState () {
@@ -273,6 +168,10 @@ export class EncounterBuilderUi extends BaseComponent {
 			this._rulesComps
 				.map(rulesComp => [rulesComp.rulesId, rulesComp.getSaveableState()]),
 		);
+		out.statePartyComps = Object.fromEntries(
+			this._partyComps
+				.map(partyComp => [partyComp.partyId, partyComp.getSaveableState()]),
+		);
 		return out;
 	}
 
@@ -280,13 +179,19 @@ export class EncounterBuilderUi extends BaseComponent {
 		if (!toLoad) return super.setStateFrom(toLoad, isOverwrite);
 
 		if (toLoad.state) {
-			if (!this._encounterShapesLookup[toLoad.state.activeRulesId]) toLoad.state.activeRulesId = this._rulesComps[0].rulesId;
+			if (!this._rulesCompsLookup[toLoad.state.activeRulesId]) toLoad.state.activeRulesId = this._rulesComps[0].rulesId;
+			if (!this._partyCompsLookup[toLoad.state.activePartyId]) toLoad.state.activePartyId = this._partyComps[0].partyId;
 		}
 
 		const out = super.setStateFrom(toLoad, isOverwrite);
+
 		Object.entries(toLoad?.stateRulesComps || {})
 			.forEach(([rulesId, toLoadSub]) => {
 				this._rulesCompsLookup[rulesId]?.setStateFrom(toLoadSub, isOverwrite);
+			});
+		Object.entries(toLoad?.statePartyComps || {})
+			.forEach(([partyId, toLoadSub]) => {
+				this._partyCompsLookup[partyId]?.setStateFrom(toLoadSub, isOverwrite);
 			});
 		return out;
 	}
@@ -298,6 +203,7 @@ export class EncounterBuilderUi extends BaseComponent {
 	 * @param {HTMLElementExtended} stgShapeCustom
 	 * @param {HTMLElementExtended} stgGroup
 	 * @param {HTMLElementExtended} stgDifficulty
+	 * @param {?HTMLElementExtended} stgFooter
 	 */
 	render (
 		{
@@ -307,6 +213,7 @@ export class EncounterBuilderUi extends BaseComponent {
 			stgShapeCustom,
 			stgGroup,
 			stgDifficulty,
+			stgFooter = null,
 		},
 	) {
 		const rdState = new this.constructor._RenderState();
@@ -314,7 +221,7 @@ export class EncounterBuilderUi extends BaseComponent {
 		const {stgSettingsRules} = this._render_settings({rdState, stgSettings});
 
 		this._render_viewer({rdState, stgViewer});
-		const {stgGroupSummary} = this._render_group({rdState, stgGroup});
+		const {stgGroupSummary} = this._render_group({stgGroup});
 		this._render_shapeCustom({rdState, stgShapeCustom});
 
 		this._rulesComps
@@ -325,7 +232,9 @@ export class EncounterBuilderUi extends BaseComponent {
 				})();
 			});
 
-		this._render_addHooks({rdState});
+		this._render_footer({rdState, stgFooter});
+
+		this._render_addHooks();
 
 		return rdState;
 	}
@@ -334,6 +243,11 @@ export class EncounterBuilderUi extends BaseComponent {
 		return this._rulesCompsLookup[this._state.activeRulesId];
 	}
 
+	_getActivePartyComp () {
+		return this._partyCompsLookup[this._state.activePartyId];
+	}
+
+	/* -------------------------------------------- */
 	/* -------------------------------------------- */
 
 	_render_settings ({stgSettings}) {
@@ -349,7 +263,7 @@ export class EncounterBuilderUi extends BaseComponent {
 		const stgSettingsRules = ee`<div class="ve-flex-col"></div>`;
 
 		ee(stgSettings)`
-			<h4 class="ve-my-2">Settings</h4>
+			<h4 class="ve-my-2">${this._headerTextSettings}</h4>
 			<label class="ve-flex-v-center ve-mb-2"><b class="ve-mr-2">Rules:</b> ${selRulesId}</label>
 			${stgSettingsRules}
 		`;
@@ -359,6 +273,10 @@ export class EncounterBuilderUi extends BaseComponent {
 		};
 	}
 
+	/**
+	 * @param {_RenderState} rdState
+	 * @param {?HTMLElementExtended} stgViewer
+	 */
 	_render_viewer ({rdState, stgViewer}) {
 		this._addHookBase("activeRulesId", () => {
 			this._comp.setActiveRulesComp(this._getActiveRulesComp());
@@ -366,168 +284,131 @@ export class EncounterBuilderUi extends BaseComponent {
 
 		if (!stgViewer) return;
 
-		const wrpOutput = ee`<div class="ve-py-2 ve-mt-5 ecgen-viewer__wrp-output"></div>`
-			.hideVe();
+		const wrpRows = ee`<div class="ve-py-2 ve-overflow-y-auto ve-min-h-0 ve-flex-col ve-h-100"></div>`;
+		const dispEmpty = ee`<div class="ve-muted ve-italic ve-text-center ve-p-2">Add a creature to begin.</div>`;
 
-		ee(stgViewer)`${wrpOutput}`;
+		const wrpOutput = ee`<div class="ecgen-viewer__wrp-output ve-relative">
+			${wrpRows}
+			${dispEmpty}
+		</div>`;
 
-		const renderableCollectionViewerCreatures = new _RenderableCollectionViewerCreatures({
+		UiUtil.getEleDragVerticalResize({
+			wrpContainer: wrpOutput,
+			heightPxSaved: this._state.viewerHeightPx || 130,
+			fnSetHeightPxSaved: heightPx => this._state.viewerHeightPx = heightPx,
+		})
+			.addClass("ecgen-viewer__ele-resize")
+			.appendTo(wrpOutput);
+
+		ee(stgViewer)`
+			<hr class="ve-hr-2">
+			${wrpOutput}
+		`;
+
+		rdState.renderableCollectionViewerCreatures = new this._ClsRenderableCollectionViewerCreatures({
 			comp: this._comp,
-			wrpRows: wrpOutput,
+			wrpRows,
+			rendererWrapped: this._rendererWrapped,
 		});
 
-		this._comp.addHookCreatureMetas(() => {
-			wrpOutput.toggleVe(!!this._comp.creatureMetas.length);
+		this._comp.addHookCreatureGroups(() => {
+			wrpRows.toggleVe(!!this._comp.creatureGroups.length);
+			dispEmpty.toggleVe(!this._comp.creatureGroups.length);
 
-			renderableCollectionViewerCreatures.render();
+			rdState.renderableCollectionViewerCreatures.render();
 		})();
 	}
 
-	_render_group ({rdState, stgGroup}) {
-		stgGroup.appends(`<h4 class="ve-my-2">Group Info</h4>`);
+	_render_group ({stgGroup}) {
+		const selPartyId = ComponentUiUtil.getSelEnum(
+			this,
+			"activePartyId",
+			{
+				values: this._partyComps.map(({partyId}) => partyId),
+				fnDisplay: val => this._partyCompsLookup[val]?.displayName,
+			},
+		)
+			.addClass("ve-w-120p");
 
-		const {
-			stg: stgSimple,
-			wrpRows: wrpRowsSimple,
-		} = this._renderGroupAndDifficulty_getGroupEles_simple();
-		rdState.wrpRowsSimple = wrpRowsSimple;
-
-		const {
-			stg: stgAdvanced,
-			wrpRows: wrpRowsAdvanced,
-			wrpHeaders: wrpHeadersAdvanced,
-			wrpFooters: wrpFootersAdvanced,
-		} = this._renderGroupAndDifficulty_getGroupEles_advanced();
-		rdState.wrpRowsAdvanced = wrpRowsAdvanced;
-		rdState.wrpHeadersAdvanced = wrpHeadersAdvanced;
-		rdState.wrpFootersAdvanced = wrpFootersAdvanced;
+		const stgParty = ee`<div class="ve-flex-col"></div>`;
 
 		const stgGroupSummary = ee`<div class="ve-flex-col ve-w-40"></div>`;
 
-		ee`<div class="ve-flex">
-			<div class="ve-flex-col ve-w-60">
-				${stgSimple}
-				${stgAdvanced}
+		ee(stgGroup)`
+			<h4 class="ve-my-2">Group Info</h4>
+			<label class="ve-flex-v-center ve-mb-2"><b class="ve-mr-2">Mode:</b> ${selPartyId}</label>
+			<hr class="ve-hr-2 ve-mt-0">
+			<div class="ve-flex">
+				<div class="ve-flex-col ve-w-60">
+					${stgParty}
+				</div>
+
+				${stgGroupSummary}
 			</div>
+		`;
 
-			${stgGroupSummary}
-		</div>`
-			.appendTo(stgGroup);
+		this._partyComps
+			.forEach(partyComp => {
+				const {eles} = partyComp.render({stgGroup: stgParty});
+				this._addHookBase("activePartyId", () => {
+					eles.forEach(ele => ele.toggleVe(this._state.activePartyId === partyComp.partyId));
+				})();
+			});
 
-		rdState._collectionPlayersSimple = new EncounterBuilderRenderableCollectionPlayersSimple({
-			comp: this._comp,
-			rdState,
-		});
+		this._addHookBase("activePartyId", (valNotFirstRun) => {
+			this._comp.setActivePartyComp(this._getActivePartyComp());
 
-		rdState._collectionColsExtraAdvanced = new EncounterBuilderRenderableCollectionColsExtraAdvanced({
-			comp: this._comp,
-			rdState,
-		});
-
-		rdState._collectionPlayersAdvanced = new EncounterBuilderRenderableCollectionPlayersAdvanced({
-			comp: this._comp,
-			rdState,
-		});
+			if (valNotFirstRun == null) return;
+			this._render_hk_triggerPulseDerivedPartyMeta();
+			this._render_hk_doUpdateExternalStates();
+		})();
 
 		return {stgGroupSummary};
 	}
 
-	_renderGroupAndDifficulty_getGroupEles_simple () {
-		const btnAddPlayers = ee`<button class="ve-btn ve-btn-primary ve-btn-xs"><span class="glyphicon glyphicon-plus"></span> Add Players</button>`
-			.onn("click", () => this._comp.doAddPlayer());
-
-		const wrpRows = ee`<div class="ve-flex-col ve-w-100"></div>`;
-
-		const stg = ee`<div class="ve-flex-col">
-			<div class="ve-flex">
-				<div class="ve-w-80p">Players:</div>
-				<div class="ve-w-80p">Level:</div>
-			</div>
-
-			${wrpRows}
-
-			<div class="ve-mb-1 ve-flex">
-				<div class="ecgen__wrp_add_players_btn_wrp">
-					${btnAddPlayers}
-				</div>
-			</div>
-
-			${this._renderGroupAndDifficulty_getPtAdvancedMode()}
-
-		</div>`;
-
-		this._comp.addHookIsAdvanced(() => {
-			stg.toggleVe(!this._comp.isAdvanced);
-		})();
-
-		return {
-			wrpRows,
-			stg,
-		};
-	}
-
-	_renderGroupAndDifficulty_getGroupEles_advanced () {
-		const btnAddPlayers = ee`<button class="ve-btn ve-btn-primary ve-btn-xs"><span class="glyphicon glyphicon-plus"></span> Add Player</button>`
-			.onn("click", () => this._comp.doAddPlayer());
-
-		const btnAddAdvancedCol = ee`<button class="ve-btn ve-btn-primary ve-btn-xxs ecgen-player__btn-inline ve-h-ipt-xs ve-bl-0 ve-bb-0 ve-bbl-0 ve-bbr-0 ve-btl-0 ve-ml-n1" title="Add Column" tabindex="-1"><span class="glyphicon glyphicon-list-alt"></span></button>`
-			.onn("click", () => this._comp.doAddColExtraAdvanced());
-
-		const wrpHeaders = ee`<div class="ve-flex"></div>`;
-		const wrpFooters = ee`<div class="ve-flex"></div>`;
-
-		const wrpRows = ee`<div class="ve-flex-col"></div>`;
-
-		const stg = ee`<div class="ve-overflow-x-auto ve-flex-col">
-			<div class="ve-flex-h-center ve-mb-2 ve-bb-1p ve-small-caps ve-self-flex-start">
-				<div class="ve-w-100p ve-mr-1 ve-h-ipt-xs ve-no-shrink">Name</div>
-				<div class="ve-w-40p ve-text-center ve-mr-1 ve-h-ipt-xs ve-no-shrink">Level</div>
-				${wrpHeaders}
-				${btnAddAdvancedCol}
-			</div>
-
-			${wrpRows}
-
-			<div class="ve-mb-1 ve-flex">
-				<div class="ecgen__wrp_add_players_btn_wrp ve-no-shrink ve-no-grow">
-					${btnAddPlayers}
-				</div>
-				${wrpFooters}
-			</div>
-
-			${this._renderGroupAndDifficulty_getPtAdvancedMode()}
-
-			<div class="row">
-				<div class="ve-w-100">
-					${Renderer.get().render(`{@note Additional columns will be imported into the DM Screen.}`)}
-				</div>
-			</div>
-		</div>`;
-
-		this._comp.addHookIsAdvanced(() => {
-			stg.toggleVe(this._comp.isAdvanced);
-		})();
-
-		return {
-			stg,
-			wrpRows,
-			wrpHeaders,
-			wrpFooters,
-		};
-	}
-
-	_renderGroupAndDifficulty_getPtAdvancedMode () {
-		const cbAdvanced = ComponentUiUtil.getCbBool(this._comp, "isAdvanced");
-
-		return ee`<div class="ve-flex-v-center">
-			<label class="ve-flex-v-center">
-				<div class="ve-mr-2">Advanced Mode</div>
-				${cbAdvanced}
-			</label>
-		</div>`;
-	}
-
 	/* -------------------------------------------- */
+
+	_getCustomShapeTemplate () {
+		return this._comp.customShapeGroups?.length
+			? {
+				groups: this._comp.customShapeGroups
+					.map(customShapeGroup => {
+						const {entity} = customShapeGroup;
+
+						return {
+							count: entity.countMinMaxMin === entity.countMinMaxMax
+								? {exact: entity.countMinMaxMin}
+								: {min: entity.countMinMaxMin, max: entity.countMinMaxMax},
+							ratio: {exact: entity.ratioPercentage / 100},
+						};
+					}),
+			}
+			: null;
+	}
+
+	_setCustomShapeGroupsFromShapeTemplate (shapeTemplate) {
+		if (!shapeTemplate?.groups) return 0;
+
+		const groupsConvertable = shapeTemplate.groups
+			.filter(group => (
+				group.ratio?.exact != null
+				&& group.count?.min != null
+				&& group.count?.max != null
+			));
+
+		if (!groupsConvertable.length) return 0;
+
+		this._comp.customShapeGroups = groupsConvertable
+			.map(group => (
+				this._comp.constructor.getDefaultCustomShapeGroup({
+					countMinMaxMin: group.count.min,
+					countMinMaxMax: group.count.max,
+					ratioPercentage: group.ratio.exact * 100,
+				})
+			));
+
+		return groupsConvertable.length;
+	}
 
 	_render_shapeCustom ({rdState, stgShapeCustom}) {
 		const btnAddGroup = ee`<button class="ve-btn ve-btn-xs ve-btn-default"><span class="glyphicon glyphicon-plus"></span> Add Creature Group</button>`
@@ -551,6 +432,27 @@ export class EncounterBuilderUi extends BaseComponent {
 				) return;
 
 				this._comp.customShapeGroups = [];
+			});
+
+		const btnExportCustomShapeGroups = ee`<button class="ve-btn ve-btn-xs ve-btn-default" title="Export Creature Group Configuration"><span class="glyphicon glyphicon-download"></span></button>`
+			.onn("click", () => {
+				DataUtil.userDownload(`custom-encounter-config`, this._getCustomShapeTemplate(), {fileType: "encounterbuilder-custom-shape-template"});
+			});
+
+		const btnImportCustomShapeGroups = ee`<button class="ve-btn ve-btn-xs ve-btn-default" title="Import Creature Group Configuration"><span class="glyphicon glyphicon-upload"></span></button>`
+			.onn("click", async () => {
+				const {jsons, errors} = await InputUiUtil.pGetUserUploadJson({expectedFileTypes: ["encounterbuilder-custom-shape-template"]});
+
+				DataUtil.doHandleFileLoadErrorsGeneric(errors);
+
+				if (!jsons?.length) return;
+
+				const [json] = jsons;
+
+				const cntSet = this._setCustomShapeGroupsFromShapeTemplate(json);
+				if (!cntSet) return JqueryUtil.doToast({content: `Failed to import creature groups! Please ensure the file contains a valid list of exported creature groups.`, type: "warning"});
+
+				JqueryUtil.doToast({content: `Imported ${cntSet} creature group${cntSet === 1 ? "" : "s"}!`});
 			});
 
 		const btnAutoAllocate = ee`<button class="ve-btn ve-btn-xs ve-btn-default" title="Auto-Distribute Remaining Budget (SHIFT to Auto Distribute Entire Budget; CTRL to Auto Distribute Entire Budget by Number of Creature)"><span class="glyphicon glyphicon-equalizer"></span></button>`
@@ -661,23 +563,7 @@ export class EncounterBuilderUi extends BaseComponent {
 
 			doUpdateDispSpent();
 
-			const customShapeTemplate = this._comp.customShapeGroups?.length
-				? {
-					groups: this._comp.customShapeGroups
-						.map(customShapeGroup => {
-							const {entity} = customShapeGroup;
-
-							return {
-								count: entity.countMinMaxMin === entity.countMinMaxMax
-									? {exact: entity.countMinMaxMin}
-									: {min: entity.countMinMaxMin, max: entity.countMinMaxMax},
-								ratio: {exact: entity.ratioPercentage / 100},
-							};
-						}),
-				}
-				: null;
-
-			this._encounterShapesLookup.setCustomShapeTemplate(customShapeTemplate);
+			this._encounterShapesLookup.setCustomShapeTemplate(this._getCustomShapeTemplate());
 
 			this._render_shapeCustom_doUpdateRatios(ratioState);
 		})();
@@ -715,9 +601,15 @@ export class EncounterBuilderUi extends BaseComponent {
 		ee(stgShapeCustom)`
 			<div class="ve-split-v-center ve-my-2">
 				<h4 class="ve-my-0">Custom Encounter</h4>
-				<div class="ve-btn-group">
-					${btnAddGroup}
-					${btnClearGroups}
+				<div class="ve-flex-v-center">
+					<div class="ve-btn-group ve-flex-v-center ve-mr-2">
+						${btnAddGroup}
+						${btnClearGroups}
+					</div>
+					<div class="ve-btn-group ve-flex-v-center">
+						${btnExportCustomShapeGroups}
+						${btnImportCustomShapeGroups}
+					</div>
 				</div>
 			</div>
 
@@ -878,36 +770,20 @@ export class EncounterBuilderUi extends BaseComponent {
 
 	/* -------------------------------------------- */
 
-	_render_addHooks ({rdState}) {
-		this._comp.addHookPlayersSimple((valNotFirstRun) => {
-			rdState._collectionPlayersSimple.render();
+	_render_footer ({rdState, stgFooter}) { /* Implement as required */ }
 
-			if (valNotFirstRun == null) return;
+	/* -------------------------------------------- */
+
+	_render_addHooks () {
+		this._partyComps
+			.forEach(partyComp => partyComp.addHookOnPartyChange((valNotFirstRun) => {
+				if (valNotFirstRun == null) return;
+				this._render_hk_triggerPulseDerivedPartyMeta();
+				this._render_hk_doUpdateExternalStates();
+			}));
+
+		this._comp.addHookCreatureGroups(() => {
 			this._render_hk_triggerPulseDerivedPartyMeta();
-			this._render_hk_doUpdateExternalStates();
-		})();
-
-		this._comp.addHookPlayersAdvanced((valNotFirstRun) => {
-			rdState._collectionPlayersAdvanced.render();
-
-			if (valNotFirstRun == null) return;
-			this._render_hk_triggerPulseDerivedPartyMeta();
-			this._render_hk_doUpdateExternalStates();
-		})();
-
-		this._comp.addHookIsAdvanced((valNotFirstRun) => {
-			if (valNotFirstRun == null) return;
-			this._render_hk_triggerPulseDerivedPartyMeta();
-			this._render_hk_doUpdateExternalStates();
-		})();
-
-		this._comp.addHookCreatureMetas(() => {
-			this._render_hk_triggerPulseDerivedPartyMeta();
-			this._render_hk_doUpdateExternalStates();
-		})();
-
-		this._comp.addHookColsExtraAdvanced(() => {
-			rdState._collectionColsExtraAdvanced.render();
 			this._render_hk_doUpdateExternalStates();
 		})();
 
@@ -927,9 +803,21 @@ export class EncounterBuilderUi extends BaseComponent {
 
 	/* -------------------------------------------- */
 
+	doCleanup () {
+		this._rulesComps
+			.forEach(comp => comp.doCleanup());
+		this._partyComps
+			.forEach(comp => comp.doCleanup());
+	}
+
+	/* -------------------------------------------- */
+
 	_getDefaultState () {
 		return {
 			activeRulesId: null,
+			activePartyId: null,
+
+			viewerHeightPx: null,
 		};
 	}
 }

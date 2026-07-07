@@ -7,6 +7,9 @@ import {EncounterBuilderRulesClassic} from "./encounterbuilder/rules/encounterbu
 import {EncounterBuilderRulesOne} from "./encounterbuilder/rules/encounterbuilder-rules-one.js";
 import {EncounterBuilderRulesMcdmFleeMortals} from "./encounterbuilder/rules/encounterbuilder-rules-mcdmfleemortals.js";
 import {EncounterBuilderShapesLookup} from "./encounterbuilder/encounterbuilder-shapeslookup.js";
+import {WrappedRenderer} from "./render-wrapped.js";
+import {EncounterBuilderPartyCustom} from "./encounterbuilder/party/encounterbuilder-party-custom.js";
+import {EncounterBuilderPartyCustomAdvanced} from "./encounterbuilder/party/encounterbuilder-party-custom-advanced.js";
 
 class _BestiaryConsts {
 	static PROF_MODE_BONUS = "bonus";
@@ -89,12 +92,12 @@ class BestiarySublistManager extends SublistManager {
 			new SublistCellTemplate({
 				name: "CR",
 				css: "ve-col-1-2 ve-px-1 ve-text-center",
-				colStyle: "ve-text-center",
+				colStyle: "text-center",
 			}),
 			new SublistCellTemplate({
 				name: "Number",
 				css: "ve-col-2 ve-pl-1 ve-pr-0 ve-text-center",
-				colStyle: "ve-text-center",
+				colStyle: "text-center",
 			}),
 		];
 	}
@@ -121,12 +124,11 @@ class BestiarySublistManager extends SublistManager {
 			.onn("mousemove", evt => Renderer.hover.handleLinkMouseMove(evt, hovStatblock))
 			.onn("mouseleave", evt => Renderer.hover.handleLinkMouseLeave(evt, hovStatblock));
 
-		const hovTokenMeta = EncounterBuilderUiBestiary.getTokenHoverMeta(mon);
-		const hovToken = !hovTokenMeta ? ee`<span class="ve-col-1-2 best-ecgen__visible"></span>` : ee`<span class="ve-col-1-2 best-ecgen__visible ve-help ve-help--hover">Token</span>`
-			.onn("mouseover", evt => hovTokenMeta.mouseOver(evt, hovToken))
-			.onn("mousemove", evt => hovTokenMeta.mouseMove(evt, hovToken))
-			.onn("mouseleave", evt => hovTokenMeta.mouseLeave(evt, hovToken));
+		// TODO(Future) run `pFnCleanup` before list item is destroyed
+		const hovToken = ee`<span class="ve-col-1-2 best-ecgen__visible ve-help ve-help--hover">Token</span>`;
+		Renderer.monster.hover.bindTokenMouseover({mon, ele: hovToken});
 
+		// TODO(Future) run `pFnCleanup` before list item is destroyed
 		const hovImage = ee`<span class="ve-col-1-2 best-ecgen__visible ve-help ve-help--hover">Image</span>`;
 		Renderer.monster.hover.bindFluffImageMouseover({mon, ele: hovImage});
 
@@ -312,12 +314,6 @@ class BestiaryPageBookView extends ListPageBookView {
 }
 
 class BestiaryPage extends ListPageMultiSource {
-	static async _prereleaseBrewDataSource ({brewUtil}) {
-		const brew = await brewUtil.pGetBrewProcessed();
-		DataUtil.monster.populateMetaReference(brew);
-		return brew;
-	}
-
 	static _tableView_getEntryPropTransform ({mon, fnGet}) {
 		const fnGetSpellTraits = Renderer.monster.getSpellcastingRenderedTraits.bind(Renderer.monster, Renderer.get());
 		const allEntries = fnGet(mon, {fnGetSpellTraits});
@@ -339,8 +335,17 @@ class BestiaryPage extends ListPageMultiSource {
 			},
 
 			dataProps: ["monster"],
-			prereleaseDataSource: () => BestiaryPage._prereleaseBrewDataSource({brewUtil: PrereleaseUtil}),
-			brewDataSource: () => BestiaryPage._prereleaseBrewDataSource({brewUtil: BrewUtil2}),
+
+			prereleaseDataSource: async () => {
+				const data = await PrereleaseUtil.pGetBrewProcessed();
+				await DataUtil.monster.pUpdatePreloadLegendaryGroupsPrerelease();
+				return data;
+			},
+			brewDataSource: async () => {
+				const data = await BrewUtil2.pGetBrewProcessed();
+				await DataUtil.monster.pUpdatePreloadLegendaryGroupsBrew();
+				return data;
+			},
 
 			pFnGetFluff,
 
@@ -466,8 +471,6 @@ class BestiaryPage extends ListPageMultiSource {
 
 	set encounterBuilder (val) { this._encounterBuilder = val; }
 
-	get list_ () { return this._list; }
-
 	getListItem (mon, mI) {
 		const hash = UrlUtil.autoEncodeHash(mon);
 		if (this._seenHashes.has(hash)) return null;
@@ -530,7 +533,7 @@ class BestiaryPage extends ListPageMultiSource {
 
 	handleFilterChange () {
 		super.handleFilterChange();
-		this._encounterBuilder.resetCache();
+		this._encounterBuilder.resetCache(this._getEncounterBuilderCreatures());
 	}
 
 	async _pDoLoadHash ({id, lockToken}) {
@@ -576,7 +579,7 @@ class BestiaryPage extends ListPageMultiSource {
 
 	async _pOnLoad_pPreDataLoad () {
 		this._encounterBuilder.initUi();
-		await DataUtil.monster.pPreloadLegendaryGroups();
+		await DataUtil.monster.pPreloadLegendaryGroupsSite();
 		this._bindProfDiceHandlers();
 	}
 
@@ -943,8 +946,14 @@ class BestiaryPage extends ListPageMultiSource {
 		super._pOnLoad_initVisibleItemsDisplay(...arguments);
 
 		this._list.on("updated", () => {
-			this._encounterBuilder.resetCache();
+			this._encounterBuilder.resetCache(this._getEncounterBuilderCreatures());
 		});
+	}
+
+	_getEncounterBuilderCreatures () {
+		// Note that this intentionally provides only creatures visible in search results
+		return this._list.visibleItems
+			.map(li => this._dataList[li.ix]);
 	}
 }
 
@@ -952,13 +961,25 @@ const bestiaryPage = new BestiaryPage();
 window.bestiaryPage = bestiaryPage;
 const sublistManager = new BestiarySublistManager();
 
+const rendererWrapped = new WrappedRenderer();
+
+const partyBaseArgs = {rendererWrapped};
+const partyCompCustom = new EncounterBuilderPartyCustom({...partyBaseArgs});
+const partyCompCustomAdvanced = new EncounterBuilderPartyCustomAdvanced({...partyBaseArgs});
+const partyComps = [
+	partyCompCustom,
+	partyCompCustomAdvanced,
+];
+
 const encounterBuilderCache = new EncounterBuilderCacheBestiaryPage({bestiaryPage});
 const encounterShapesLookup = new EncounterBuilderShapesLookup();
-const encounterBuilderComp = new EncounterBuilderComponentBestiary({cache: encounterBuilderCache});
-const rulesBaseArgs = {comp: encounterBuilderComp, cache: encounterBuilderCache, encounterShapesLookup};
+const encounterBuilderComp = new EncounterBuilderComponentBestiary({cache: encounterBuilderCache, partyComps});
+
+const rulesBaseArgs = {comp: encounterBuilderComp, cache: encounterBuilderCache, encounterShapesLookup, rendererWrapped};
 const rulesClassic = new EncounterBuilderRulesClassic({...rulesBaseArgs});
 const rulesOne = new EncounterBuilderRulesOne({...rulesBaseArgs});
 const rulesMcdmFleeMortals = new EncounterBuilderRulesMcdmFleeMortals({...rulesBaseArgs});
+
 const encounterBuilder = new EncounterBuilderUiBestiary({
 	cache: encounterBuilderCache,
 	comp: encounterBuilderComp,
@@ -967,7 +988,9 @@ const encounterBuilder = new EncounterBuilderUiBestiary({
 		rulesClassic,
 		rulesMcdmFleeMortals,
 	],
+	partyComps,
 	encounterShapesLookup,
+	rendererWrapped,
 	bestiaryPage,
 	sublistManager,
 });
@@ -975,6 +998,7 @@ const sublistPlugin = new EncounterBuilderSublistPlugin({
 	sublistManager,
 	encounterBuilder,
 	encounterBuilderComp,
+	partyComps,
 });
 sublistManager.addPlugin(sublistPlugin);
 

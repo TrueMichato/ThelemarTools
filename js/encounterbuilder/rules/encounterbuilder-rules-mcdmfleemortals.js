@@ -47,7 +47,7 @@ export class EncounterBuilderRulesMcdmFleeMortals extends EncounterBuilderRulesB
 
 	_render_settingsRules ({stgSettingsRules}) {
 		const wrpSettingsRules = ee`<div class="ve-flex-col">
-			<div class="ve-flex ve-mb-2">${Renderer.get().render(`{@note Based on the encounter building rules on page 16 of {@link MCDM|https://www.mcdmproductions.com}'s {@book Flee, Mortals!|FleeMortals|0|Encounter Building}}`)}</div>
+			<div class="ve-flex ve-mb-2">${this._rendererWrapped.er(`{@note Based on the encounter building rules on page 16 of {@link MCDM|https://www.mcdmproductions.com}'s {@book Flee, Mortals!|FleeMortals|0|Encounter Building}}`)}</div>
 		</div>`
 			.appendTo(stgSettingsRules);
 
@@ -102,7 +102,7 @@ export class EncounterBuilderRulesMcdmFleeMortals extends EncounterBuilderRulesB
 
 		this._comp.addHookPulseDeriverPartyMeta(() => {
 			const partyMeta = this.getEncounterPartyMeta();
-			const encounterSpendInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureMetas);
+			const encounterSpendInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureGroups);
 			const tier = partyMeta.getEncounterTier(encounterSpendInfo);
 
 			onHookPulseDeriverPartyMetaTierXp({partyMeta});
@@ -115,6 +115,7 @@ export class EncounterBuilderRulesMcdmFleeMortals extends EncounterBuilderRulesB
 						.map(tier => [tier, partyMeta.getBudget(tier)]),
 				),
 				tier: tier,
+				cntPlayers: partyMeta.cntPlayers,
 			});
 
 			dispTtk
@@ -122,7 +123,7 @@ export class EncounterBuilderRulesMcdmFleeMortals extends EncounterBuilderRulesB
 
 			dispPointsEncounter.html(`Encounter Points: ${TIER_TO_ENCOUNTER_POINTS[tier] || "?"}`);
 
-			dispExpEncounter.html(`Encounter XP: ${this._getEncounterXp().toLocaleStringVe()} XP`);
+			dispExpEncounter.html(`Encounter XP: ${this._getEncounterXp() ? this._getEncounterXp().toLocaleStringVe() : "?"} XP`);
 			dispExpToLevel.html(this._getRenderedExpToLevel({partyMeta}));
 		})();
 
@@ -156,7 +157,7 @@ export class EncounterBuilderRulesMcdmFleeMortals extends EncounterBuilderRulesB
 		</div>`;
 
 		this._comp.addHookPulseDeriverPartyMeta(() => {
-			const encounterSpendInfo = this.getEncounterPartyMeta().getEncounterSpendInfo(this._comp.creatureMetas);
+			const encounterSpendInfo = this.getEncounterPartyMeta().getEncounterSpendInfo(this._comp.creatureGroups);
 			hrHasCreatures.toggleVe(encounterSpendInfo.relevantCount);
 			wrpDifficultyCols.toggleVe(encounterSpendInfo.relevantCount);
 		})();
@@ -179,7 +180,7 @@ export class EncounterBuilderRulesMcdmFleeMortals extends EncounterBuilderRulesB
 		this._comp.addHookPulseDeriverPartyMeta(() => {
 			const partyMeta = this.getEncounterPartyMeta();
 
-			const encounterSpendInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureMetas);
+			const encounterSpendInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureGroups);
 
 			const tier = partyMeta.getEncounterTier(encounterSpendInfo);
 
@@ -200,7 +201,7 @@ export class EncounterBuilderRulesMcdmFleeMortals extends EncounterBuilderRulesB
 		this._comp.addHookPulseDeriverPartyMeta(() => {
 			const partyMeta = this.getEncounterPartyMeta();
 
-			const encounterSpendInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureMetas);
+			const encounterSpendInfo = partyMeta.getEncounterSpendInfo(this._comp.creatureGroups);
 
 			dispCrTotal.txt(`Total CR: ${encounterSpendInfo.baseSpend == null ? "?" : Parser.numberToVulgar(encounterSpendInfo.baseSpend)}`);
 			dispCrPerPlayer.txt(
@@ -217,8 +218,8 @@ export class EncounterBuilderRulesMcdmFleeMortals extends EncounterBuilderRulesB
 	}
 
 	_getEncounterXp () {
-		return this._comp.creatureMetas
-			.reduce((accum, creatureMeta) => accum + (Parser.crToXpNumber(Parser.numberToCr(creatureMeta.getCrNumber())) || 0) * creatureMeta.getCount(), 0);
+		return this._comp.creatureGroups
+			.reduce((accum, creatureGroup) => accum + (Parser.crToXpNumber(Parser.numberToCr(creatureGroup.getCrNumber())) || 0) * creatureGroup.getCount(), 0);
 	}
 
 	_getEncounterPartyMeta (playerMetas) {
@@ -230,7 +231,7 @@ export class EncounterBuilderRulesMcdmFleeMortals extends EncounterBuilderRulesB
 	getDisplaySummary () {
 		const encounterXpInfo = this
 			.getEncounterPartyMeta()
-			.getEncounterSpendInfo(this._comp.creatureMetas);
+			.getEncounterSpendInfo(this._comp.creatureGroups);
 
 		return `<span title="Total Encounter CR">${Parser.numberToVulgar(encounterXpInfo.baseSpend)} CR</span> (${this._getEncounterXp().toLocaleStringVe()} XP)`;
 	}

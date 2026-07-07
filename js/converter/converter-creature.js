@@ -698,23 +698,6 @@ export class ConverterCreature extends ConverterBase {
 			.forEach(({re, original}) => clean = clean.replace(re, `\n${original}\n`));
 		// endregion
 
-		// region Handle bad OCR'ing of dice
-		clean = clean
-			.replace(/\nl\/(?<unit>day)[.:]\s*/g, (...m) => `\n1/${m.last().unit}: `)
-			.replace(/\b(?<num>[liI!]|\d+)?d[1liI!]\s*[oO0]\b/g, (...m) => `${m.last().num ? isNaN(m.last().num) ? "1" : m.last().num : ""}d10`)
-			.replace(/\b(?<num>[liI!]|\d+)?d[1liI!]\s*2\b/g, (...m) => `${m.last().num ? isNaN(m.last().num) ? "1" : m.last().num : ""}d12`)
-			.replace(/\b[liI!1]\s*d\s*(?<faces>\d+)\b/g, (...m) => `1d${m.last().faces}`)
-			.replace(/\b(?<num>\d+)\s*d\s*(?<faces>\d+)\b/g, (...m) => `${m.last().num}d${m.last().faces}`)
-		;
-		// endregion
-
-		// region Handle misc OCR issues
-		clean = clean
-			.replace(/\bI nt\b/g, "Int")
-			.replace(/\(-[lI!]\)/g, "(-1)")
-		;
-		// endregion
-
 		// Handle modifiers split across lines
 		clean = clean
 			.replace(/([-+] +)\n +(\d+|PB)/g, (...m) => `${m[1]}${m[2]}`)
@@ -1279,7 +1262,7 @@ export class ConverterCreature extends ConverterBase {
 					cur,
 					ptrList,
 					isMultiple,
-					fnIsMatchCurEntry: cur => /\b(?:following( effects)?|their effects follow|subjected to the [^.!?]+ effect)[^.!?]*:/.test(cur.entries.last().trim()),
+					fnIsMatchCurEntry: cur => /\b(?:following( effects)?|their effects follow|subjected to the [^.!?]+ effect).*:/.test(cur.entries.last().trim()),
 					fnIsMatchNxtStr: ({entryNxt, entryNxtStr}) => {
 						if (/\b(?:the target|all targeted)\b/i.test(entryNxtStr) && !entryNxt.name?.includes("(")) return true;
 						if (entryNxt.name && / Only\)$/.test(entryNxt.name)) return true;
@@ -1807,6 +1790,8 @@ export class ConverterCreature extends ConverterBase {
 
 	// SHARED UTILITY FUNCTIONS ////////////////////////////////////////////////////////////////////////////////////////
 	static _doStatblockPostProcess (stats, isMarkdown, options) {
+		this._doPostProcess_removePage(stats, options);
+
 		Renderer.monster.CHILD_PROPS_EXTENDED
 			.filter(prop => stats[prop])
 			.forEach(prop => {
@@ -2016,7 +2001,7 @@ export class ConverterCreature extends ConverterBase {
 		let cntLines = 0;
 		const nextSixLines = [];
 		for (let i = meta.ixToConvert; nextSixLines.length < 6; ++i) {
-			const line = (meta.toConvert[i] || "").toLowerCase();
+			const line = (meta.toConvert[i] || "").toLowerCase().trim();
 			if (Parser.ABIL_ABVS.includes(line)) nextSixLines.push(line);
 			else break;
 			cntLines++;

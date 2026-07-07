@@ -1,4 +1,5 @@
-import {EncounterBuilderSpendInfo, EncounterPartyPlayerMeta} from "../encounterbuilder-models.js";
+import {EncounterBuilderSpendInfo, EncounterPartyPlayerMeta} from "../encounterbuilder-models-other.js";
+import {TIER_UNKNOWN} from "../consts/encounterbuilder-consts.js";
 
 export class EncounterPartyMetaUtils {
 	static getThresholds (
@@ -122,26 +123,26 @@ export class EncounterPartyMetaBase {
 	}
 
 	/**
-	 * @param {Array<EncounterBuilderCreatureMeta>} creatureMetas
+	 * @param {Array<EncounterBuilderCreatureGroupBase>} creatureGroups
 	 * @return {EncounterBuilderSpendInfo}
 	 */
-	getEncounterSpendInfo (creatureMetas) {
+	getEncounterSpendInfo (creatureGroups) {
 		// Avoid including e.g. "summon" creatures.
 		// Note that this effectively discounts non-XP-carrying creatures from "creature count XP multiplier"
 		//   calculations. This is intentional; we make the simplifying assumption that if a creature doesn't carry XP,
 		//   it should have no impact on the difficulty encounter.
-		creatureMetas = creatureMetas
-			.filter(creatureMeta => creatureMeta.getCrNumber() != null)
+		creatureGroups = creatureGroups
+			.filter(creatureGroup => creatureGroup.getCrNumber() != null)
 			.sort((a, b) => SortUtil.ascSort(b.getCrNumber(), a.getCrNumber()));
 
-		return this._getEncounterSpendInfo({creatureMetas});
+		return this._getEncounterSpendInfo({creatureGroups});
 	}
 
 	/**
 	 * @abstract
 	 * @return {EncounterBuilderSpendInfo}
 	 */
-	_getEncounterSpendInfo ({creatureMetas}) {
+	_getEncounterSpendInfo ({creatureGroups}) {
 		throw new Error(`Unimplemented!`);
 	}
 
@@ -173,22 +174,35 @@ export class EncounterPartyMetaBase {
 	 * @abstract
 	 * @return {string}
 	 */
-	getEncounterTier (encounterXpInfo) {
+	_getEncounterTier (encounterXpInfo) {
 		throw new Error(`Unimplemented!`);
+	}
+
+	/**
+	 * @abstract
+	 * @return {string}
+	 */
+	getEncounterTier (encounterXpInfo) {
+		if (!encounterXpInfo?.playerCount) return TIER_UNKNOWN;
+		return this._getEncounterTier(encounterXpInfo);
+	}
+
+	_getTierBudget ({tier, multiplier = null} = {}) {
+		return (this._thresholds[tier] || 0) * (multiplier ?? 1);
 	}
 
 	/**
 	 * @return {string}
 	 */
 	getTierDisplayBudget (tier, {multiplier = null} = {}) {
-		return ((this._thresholds[tier] || 0) * (multiplier ?? 1))?.toLocaleStringVe();
+		return this._getTierBudget({tier, multiplier})?.toLocaleStringVe();
 	}
 
 	/**
 	 * @abstract
 	 * @return {number}
 	 */
-	getCrCutoff (creatureMetas) {
+	getCrCutoff (creatureGroups) {
 		throw new Error(`Unimplemented!`);
 	}
 

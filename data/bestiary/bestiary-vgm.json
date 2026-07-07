@@ -1263,6 +1263,12 @@
 			"name": "Archdruid",
 			"source": "VGM",
 			"page": 210,
+			"otherSources": [
+				{
+					"source": "WDMM",
+					"page": 311
+				}
+			],
 			"referenceSources": [
 				"GoS",
 				"MOT",
@@ -2130,7 +2136,14 @@
 			"source": "VGM",
 			"page": 123,
 			"referenceSources": [
-				"TftYP"
+				"TftYP",
+				"TftYP-AtG",
+				"TftYP-DiT",
+				"TftYP-TFoF",
+				"TftYP-THSoT",
+				"TftYP-ToH",
+				"TftYP-TSC",
+				"TftYP-WPM"
 			],
 			"reprintedAs": [
 				"Barghest|MPMM"
@@ -3528,7 +3541,6 @@
 			"damageTags": [
 				"B",
 				"N",
-				"R",
 				"Y"
 			],
 			"miscTags": [
@@ -4183,9 +4195,22 @@
 			"name": "Champion",
 			"source": "VGM",
 			"page": 212,
+			"otherSources": [
+				{
+					"source": "WDMM",
+					"page": 312
+				}
+			],
 			"referenceSources": [
 				"GoS",
 				"TftYP",
+				"TftYP-AtG",
+				"TftYP-DiT",
+				"TftYP-TFoF",
+				"TftYP-THSoT",
+				"TftYP-ToH",
+				"TftYP-TSC",
+				"TftYP-WPM",
 				"ToA",
 				"WDMM"
 			],
@@ -4827,7 +4852,14 @@
 			"source": "VGM",
 			"page": 212,
 			"referenceSources": [
-				"TftYP"
+				"TftYP",
+				"TftYP-AtG",
+				"TftYP-DiT",
+				"TftYP-TFoF",
+				"TftYP-THSoT",
+				"TftYP-ToH",
+				"TftYP-TSC",
+				"TftYP-WPM"
 			],
 			"reprintedAs": [
 				"Conjurer Wizard|MPMM"
@@ -6724,7 +6756,14 @@
 			"source": "VGM",
 			"page": 213,
 			"referenceSources": [
-				"TftYP"
+				"TftYP",
+				"TftYP-AtG",
+				"TftYP-DiT",
+				"TftYP-TFoF",
+				"TftYP-THSoT",
+				"TftYP-ToH",
+				"TftYP-TSC",
+				"TftYP-WPM"
 			],
 			"reprintedAs": [
 				"Enchanter Wizard|MPMM"
@@ -6898,7 +6937,14 @@
 				"ERLW",
 				"LLK",
 				"SLW",
-				"TftYP"
+				"TftYP",
+				"TftYP-AtG",
+				"TftYP-DiT",
+				"TftYP-TFoF",
+				"TftYP-THSoT",
+				"TftYP-ToH",
+				"TftYP-TSC",
+				"TftYP-WPM"
 			],
 			"reprintedAs": [
 				"Evoker Wizard|MPMM"
@@ -10734,7 +10780,14 @@
 			"source": "VGM",
 			"page": 214,
 			"referenceSources": [
-				"TftYP"
+				"TftYP",
+				"TftYP-AtG",
+				"TftYP-DiT",
+				"TftYP-TFoF",
+				"TftYP-THSoT",
+				"TftYP-ToH",
+				"TftYP-TSC",
+				"TftYP-WPM"
 			],
 			"reprintedAs": [
 				"Illusionist Wizard|MPMM"
@@ -12024,7 +12077,14 @@
 			"page": 169,
 			"referenceSources": [
 				"MOT",
-				"TftYP"
+				"TftYP",
+				"TftYP-AtG",
+				"TftYP-DiT",
+				"TftYP-TFoF",
+				"TftYP-THSoT",
+				"TftYP-ToH",
+				"TftYP-TSC",
+				"TftYP-WPM"
 			],
 			"reprintedAs": [
 				"Leucrotta|MPMM"
@@ -12158,6 +12218,13 @@
 			"referenceSources": [
 				"LLK",
 				"TftYP",
+				"TftYP-AtG",
+				"TftYP-DiT",
+				"TftYP-TFoF",
+				"TftYP-THSoT",
+				"TftYP-ToH",
+				"TftYP-TSC",
+				"TftYP-WPM",
 				"WDH"
 			],
 			"reprintedAs": [
@@ -13408,7 +13475,14 @@
 			"referenceSources": [
 				"DC",
 				"DIP",
-				"TftYP"
+				"TftYP",
+				"TftYP-AtG",
+				"TftYP-DiT",
+				"TftYP-TFoF",
+				"TftYP-THSoT",
+				"TftYP-ToH",
+				"TftYP-TSC",
+				"TftYP-WPM"
 			],
 			"reprintedAs": [
 				"Necromancer Wizard|MPMM"
@@ -14003,6 +14077,12 @@
 			"name": "Neothelid",
 			"source": "VGM",
 			"page": 181,
+			"otherSources": [
+				{
+					"source": "WDMM",
+					"page": 315
+				}
+			],
 			"referenceSources": [
 				"WDMM"
 			],
@@ -17553,7 +17633,14 @@
 			"source": "VGM",
 			"page": 218,
 			"referenceSources": [
-				"TftYP"
+				"TftYP",
+				"TftYP-AtG",
+				"TftYP-DiT",
+				"TftYP-TFoF",
+				"TftYP-THSoT",
+				"TftYP-ToH",
+				"TftYP-TSC",
+				"TftYP-WPM"
 			],
 			"reprintedAs": [
 				"Transmuter Wizard|MPMM"
@@ -17831,6 +17918,12 @@
 			"name": "Ulitharid",
 			"source": "VGM",
 			"page": 175,
+			"otherSources": [
+				{
+					"source": "WDMM",
+					"page": 316
+				}
+			],
 			"referenceSources": [
 				"WDMM"
 			],
