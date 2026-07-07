@@ -302,6 +302,7 @@ class BestiaryPageBookView extends ListPageBookView {
 
 		cntSelectedEnts += this._bookViewToShow.length;
 		wrpContent.appends(stack.join(""));
+		Renderer.statblockCollapse.apply(wrpContent);
 
 		return {cntSelectedEnts, isAnyEntityRendered};
 	}
@@ -912,6 +913,7 @@ class BestiaryPage extends ListPageMultiSource {
 			Renderer.get().addPlugin("dice", pluginDice);
 
 			this._pgContent.empty().appends(RenderBestiary.getRenderedCreature(mon, {btnScaleCr, btnResetScaleCr, selSummonSpellLevel, selSummonClassLevel, classLevelScalerClass: mon.summonedByClass}));
+			Renderer.statblockCollapse.apply(this._pgContent);
 		} finally {
 			Renderer.get().removePlugin("dice", pluginDice);
 			Renderer.get().removePlugin("string_@dc", pluginDc);

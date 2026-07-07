@@ -1225,6 +1225,8 @@ class Panel {
 			const fnBind = Renderer.hover.getFnBindListenersCompact(page);
 			if (fnBind) fnBind(it, eleContentStats);
 
+			Renderer.statblockCollapse.apply(eleContentStats);
+
 			this._stats_bindCrScaleClickHandler(it, meta, eleContentInner, eleContentStats);
 			this._stats_bindSummonScaleClickHandler(it, meta, eleContentInner, eleContentStats);
 
@@ -1266,6 +1268,7 @@ class Panel {
 
 					const doRender = (toRender) => {
 						eleContentStats.empty().appends(Renderer.monster.getCompactRenderedString(toRender, {isShowScalers: true, isScaledCr: !originalCr}));
+						Renderer.statblockCollapse.apply(eleContentStats);
 
 						const nxtMeta = {
 							...meta,
@@ -1302,6 +1305,7 @@ class Panel {
 
 			evt.stopPropagation();
 			eleContentStats.empty().appends(Renderer.monster.getCompactRenderedString(mon, {isShowScalers: true, isScaledCr: false}));
+			Renderer.statblockCollapse.apply(eleContentStats);
 			this.setTab({
 				ix: this.tabIndex,
 				type: PANEL_TYP_STATS,
@@ -1339,6 +1343,7 @@ class Panel {
 				ScaleSpellSummonedCreature.scale(mon, spellLevel)
 					.then(toRender => {
 						eleContentStats.empty().appends(Renderer.monster.getCompactRenderedString(toRender, {isShowScalers: true, isScaledSpellSummon: true}));
+						Renderer.statblockCollapse.apply(eleContentStats);
 
 						this._stats_doUpdateSummonScaleDropdowns(toRender, eleContentStats);
 
@@ -1353,6 +1358,7 @@ class Panel {
 					});
 			} else {
 				eleContentStats.empty().appends(Renderer.monster.getCompactRenderedString(mon, {isShowScalers: true, isScaledCr: false, isScaledSpellSummon: false}));
+				Renderer.statblockCollapse.apply(eleContentStats);
 
 				this._stats_doUpdateSummonScaleDropdowns(mon, eleContentStats);
 
@@ -1387,6 +1393,7 @@ class Panel {
 				ScaleClassSummonedCreature.scale(mon, classLevel)
 					.then(toRender => {
 						eleContentStats.empty().appends(Renderer.monster.getCompactRenderedString(toRender, {isShowScalers: true, isScaledClassSummon: true}));
+						Renderer.statblockCollapse.apply(eleContentStats);
 
 						this._stats_doUpdateSummonScaleDropdowns(toRender, eleContentStats);
 
@@ -1401,6 +1408,7 @@ class Panel {
 					});
 			} else {
 				eleContentStats.empty().appends(Renderer.monster.getCompactRenderedString(mon, {isShowScalers: true, isScaledCr: false, isScaledClassSummon: false}));
+				Renderer.statblockCollapse.apply(eleContentStats);
 
 				this._stats_doUpdateSummonScaleDropdowns(mon, eleContentStats);
 
@@ -1445,6 +1453,7 @@ class Panel {
 				const eleContentInner = ee`<div class="panel-content-wrapper-inner"></div>`;
 				const eleContentStats = ee`<table class="ve-w-100 ve-stats"></table>`.appendTo(eleContentInner);
 				eleContentStats.appends(Renderer.monster.getCompactRenderedString(initialRender, {isShowScalers: true, isScaledCr: true}));
+				Renderer.statblockCollapse.apply(eleContentStats);
 
 				this._stats_bindCrScaleClickHandler(it, meta, eleContentInner, eleContentStats);
 
