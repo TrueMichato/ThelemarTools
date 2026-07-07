@@ -388,7 +388,6 @@
 	}
 
 	/* -------------------------------------------- */
-
 	// Two-column statblock layout (tracker #1200 / 5ET-1080).
 	// Header rows (name/type/AC/HP/speed/abilities/senses/languages) stay full width in the outer
 	// table; the body-section rows (traits, actions, bonus/reactions, legendary, mythic, lair,
@@ -464,5 +463,136 @@
 		vertical-align: top;
 		height: 24px;
 		width: 24px;
+	}
+
+	/* Collapsible statblock entries — see Renderer.statblockCollapse in js/render.js */
+
+	.stats-entry-collapsible {
+		position: relative;
+	}
+
+	.stats-entry-collapsible[data-collapsed="true"] {
+		> p > .stats-entry-collapsible__body-inline,
+		> .stats-entry-collapsible__body-inline,
+		> .stats-entry-collapsible__body,
+		> p.stats-entry-collapsible__body {
+			display: none;
+		}
+	}
+
+	.stats-entry-collapsible__head {
+		display: inline;
+	}
+
+	.stats-entry-collapsible__toggle {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1em;
+		height: 1em;
+		padding: 0;
+		margin-right: 0.15em;
+		border: none;
+		background: transparent;
+		color: inherit;
+		opacity: 0.55;
+		font-size: 0.9em;
+		line-height: 1;
+		cursor: pointer;
+		vertical-align: baseline;
+		transition: opacity 0.1s;
+	}
+
+	.stats-entry-collapsible__toggle:hover,
+	.stats-entry-collapsible__toggle:focus {
+		opacity: 1;
+		outline: none;
+	}
+
+	.stats-entry-collapsible__toggle:focus-visible {
+		outline: 1px dotted currentcolor;
+		outline-offset: 1px;
+	}
+
+	.ve-night-mode .stats-entry-collapsible__toggle {
+		opacity: 0.7;
+	}
+
+	/* Section header (Traits / Actions / Bonus Actions / Reactions / Legendary / Mythic / Lair / Regional) */
+
+	tr[data-section-collapsed="true"] + tr {
+		display: none;
+	}
+
+	.stats-section-collapsible__toggle {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.1em;
+		height: 1.1em;
+		padding: 0;
+		margin-left: 0.35em;
+		border: none;
+		background: transparent;
+		color: inherit;
+		opacity: 0.55;
+		font-size: 0.75em;
+		line-height: 1;
+		cursor: pointer;
+		vertical-align: middle;
+		transition: opacity 0.1s;
+	}
+
+	.stats-section-collapsible__toggle:hover,
+	.stats-section-collapsible__toggle:focus {
+		opacity: 1;
+		outline: none;
+	}
+
+	.stats-section-collapsible__toggle:focus-visible {
+		outline: 1px dotted currentcolor;
+		outline-offset: 1px;
+	}
+
+	h3.ve-stats__sect-header-inner:has(.stats-section-collapsible__toggle) {
+		cursor: pointer;
+	}
+
+	/* Statblock-scoped Collapse-All / Expand-All toolbar in the name row */
+
+	.stats-collapse-toolbar {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+		margin-right: 0.4em;
+	}
+
+	.stats-collapse-toolbar__btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.2em;
+		height: 1.2em;
+		padding: 0;
+		border: 1px solid currentcolor;
+		border-radius: 2px;
+		background: transparent;
+		color: inherit;
+		opacity: 0.45;
+		font-size: 0.85em;
+		line-height: 1;
+		cursor: pointer;
+		transition: opacity 0.1s;
+	}
+
+	.stats-collapse-toolbar__btn:hover,
+	.stats-collapse-toolbar__btn:focus {
+		opacity: 0.9;
+		outline: none;
+	}
+
+	.stats-collapse-toolbar__btn:focus-visible {
+		outline: 1px dotted currentcolor;
+		outline-offset: 1px;
 	}
 }

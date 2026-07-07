@@ -9549,7 +9549,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Trolls"
+			]
 		},
 		{
 			"name": "Troll Mutate",
@@ -9687,7 +9690,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Trolls"
+			]
 		}
 	]
 }

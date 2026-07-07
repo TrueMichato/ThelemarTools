@@ -196,7 +196,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Oozes"
+			]
 		},
 		{
 			"name": "Ivlis",
@@ -481,7 +484,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Kuo-Toa"
+			]
 		},
 		{
 			"name": "Lizardfolk Warden",

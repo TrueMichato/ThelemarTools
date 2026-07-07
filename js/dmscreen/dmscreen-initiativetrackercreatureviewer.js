@@ -157,6 +157,7 @@ export class InitiativeTrackerCreatureViewer extends BaseComponent {
 			if (!mon) return dispCreature.innerHTML = `<div class="ve-dnd-font ve-italic ve-small-caps ve-muted ve-flex-vh-center ve-w-100 ve-h-100">No active creature.</div>`;
 
 			dispCreature.innerHTML = `<table class="ve-w-100 ve-stats"><tbody>${Renderer.monster.getCompactRenderedString(mon, {isShowScalers: false})}</tbody></table>`;
+			Renderer.statblockCollapse.apply(dispCreature);
 		};
 
 		this._addHookBase("creaturePulse", async () => {

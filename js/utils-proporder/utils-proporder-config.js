@@ -2086,6 +2086,8 @@ const PROPORDER_RACE_SUBRACE = [
 
 	"darkvision",
 	"blindsight",
+	"tremorsense",
+	"truesight",
 	"feats",
 
 	new ArrayKey("traitTags", {fnSort: SortUtil.ascSortLower}),
