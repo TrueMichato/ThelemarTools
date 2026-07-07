@@ -1563,8 +1563,10 @@ class CharacterSheetPage {
 				}
 			}
 
-			// Darkvision
-			if (race.darkvision) this._state.setSense("darkvision", race.darkvision);
+			// Senses (darkvision + blindsight + tremorsense + truesight)
+			CharacterSheetClassUtils.SENSE_DISPLAY_ORDER.forEach(senseKey => {
+				if (race[senseKey]) this._state.setSense(senseKey, race[senseKey]);
+			});
 
 			// Languages
 			if (race.languageProficiencies) {

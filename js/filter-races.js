@@ -138,6 +138,8 @@ class PageFilterRaces extends PageFilterBase {
 		r._fTraits = [
 			r.darkvision === 120 ? "Superior Darkvision" : r.darkvision ? "Darkvision" : null,
 			r.blindsight ? "Blindsight" : null,
+			r.tremorsense ? "Tremorsense" : null,
+			r.truesight ? "Truesight" : null,
 			r.skillProficiencies ? "Skill Proficiency" : null,
 			r.toolProficiencies ? "Tool Proficiency" : null,
 			r.feats ? "Feat" : null,
