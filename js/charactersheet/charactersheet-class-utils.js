@@ -4959,6 +4959,15 @@ class CharacterSheetClassUtils {
 			effects: outFeature.effects,
 			uses: outFeature.uses,
 			interactionMode: outFeature.interactionMode,
+			// Proficiency-grant fields (5ET-843). Preserving these on the history
+			// snapshot lets respec / stub features re-grant skill/tool/language
+			// proficiencies on rebuild even when `ref` is set (so we don't roundtrip
+			// the full entries).
+			skillProficiencies: outFeature.skillProficiencies,
+			toolProficiencies: outFeature.toolProficiencies,
+			languageProficiencies: outFeature.languageProficiencies,
+			skillToolLanguageProficiencies: outFeature.skillToolLanguageProficiencies,
+			savingThrowProficiencies: outFeature.savingThrowProficiencies,
 		};
 
 		if (!snapshot.ref) {
