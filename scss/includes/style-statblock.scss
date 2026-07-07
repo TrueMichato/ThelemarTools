@@ -386,4 +386,71 @@
 			max-width vars.$time-2-frames,
 			right vars.$time-2-frames;
 	}
+
+	/* -------------------------------------------- */
+
+	// Two-column statblock layout (tracker #1200 / 5ET-1080).
+	// Header rows (name/type/AC/HP/speed/abilities/senses/languages) stay full width in the outer
+	// table; the body-section rows (traits, actions, bonus/reactions, legendary, mythic, lair,
+	// regional) are wrapped in a dedicated `<tbody class="mon__body-cols-wrap">` which flips to
+	// `display: block` + `column-count: 2` when the outer `.ve-stats` has the `--two-col` modifier.
+	.ve-stats--two-col > tbody.mon__body-cols-wrap {
+		display: block;
+		column-count: 2;
+		column-gap: 1.25rem;
+		column-rule: 1px solid vars.$rgb-border-yellow--statblock;
+
+		> tr {
+			display: block;
+			break-inside: avoid;
+			-webkit-column-break-inside: avoid;
+
+			> td {
+				display: block;
+				width: 100%;
+			}
+		}
+
+		.ve-stats__sect-header-inner {
+			break-after: avoid-column;
+		}
+	}
+
+	.ve-night-mode .ve-stats--two-col > tbody.mon__body-cols-wrap {
+		column-rule-color: vars-night.$rgb-border-grey--statblock-night;
+	}
+
+	// Book-content statblocks (adventure pages, book-mode viewers) render inside narrow fixed
+	// columns already; forcing another column split makes them unreadable.
+	.ve-stats--two-col.ve-stats--book > tbody.mon__body-cols-wrap,
+	.ve-stats--two-col.ve-stats--book-large > tbody.mon__body-cols-wrap {
+		display: table-row-group;
+		column-count: initial;
+		column-gap: initial;
+		column-rule: none;
+
+		> tr {
+			display: table-row;
+
+			> td {
+				display: table-cell;
+				width: auto;
+			}
+		}
+	}
+
+	// Narrow viewports (hover popouts, split-panel DM screen tiles) collapse back to single column
+	// so trait text stays legible.
+	@media (width <= 640px) {
+		.ve-stats--two-col > tbody.mon__body-cols-wrap {
+			column-count: 1;
+			column-rule: none;
+		}
+	}
+
+	.ve-stats__btn-two-col {
+		vertical-align: top;
+		height: 24px;
+		width: 24px;
+	}
 }
