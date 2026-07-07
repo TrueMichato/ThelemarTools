@@ -388,6 +388,83 @@
 	}
 
 	/* -------------------------------------------- */
+	// Two-column statblock layout (tracker #1200 / 5ET-1080).
+	// Header rows (name/type/AC/HP/speed/abilities/senses/languages) stay full width in the outer
+	// table; the body-section rows (traits, actions, bonus/reactions, legendary, mythic, lair,
+	// regional) are wrapped in a dedicated `<tbody class="mon__body-cols-wrap">` which flips to
+	// `display: block` + `column-count: 2` when the outer `.ve-stats` has the `--two-col` modifier.
+	.ve-stats--two-col > tbody.mon__body-cols-wrap {
+		display: block;
+		column-count: 2;
+		column-gap: 1.25rem;
+		column-rule: 1px solid vars.$rgb-border-yellow--statblock;
+
+		> tr {
+			display: block;
+			break-inside: avoid;
+			-webkit-column-break-inside: avoid;
+
+			> td {
+				display: block;
+				width: 100%;
+			}
+		}
+
+		.ve-stats__sect-header-inner {
+			break-after: avoid-column;
+		}
+	}
+
+	.ve-night-mode .ve-stats--two-col > tbody.mon__body-cols-wrap {
+		column-rule-color: vars-night.$rgb-border-grey--statblock-night;
+	}
+
+	// Book-content statblocks (adventure pages, book-mode viewers) render inside narrow fixed
+	// columns already; forcing another column split makes them unreadable.
+	.ve-stats--two-col.ve-stats--book > tbody.mon__body-cols-wrap,
+	.ve-stats--two-col.ve-stats--book-large > tbody.mon__body-cols-wrap {
+		display: table-row-group;
+		column-count: initial;
+		column-gap: initial;
+		column-rule: none;
+
+		> tr {
+			display: table-row;
+
+			> td {
+				display: table-cell;
+				width: auto;
+			}
+		}
+	}
+
+	// Narrow viewports (hover popouts, split-panel DM screen tiles, side-by-side layouts) collapse
+	// back to single column so trait text stays legible. 900px is chosen empirically: bestiary
+	// hover popouts often render around 700-800px wide and cram in two columns; the desktop main
+	// pane and full-window views are comfortably wider than this threshold.
+	@media (width <= 900px) {
+		.ve-stats--two-col > tbody.mon__body-cols-wrap {
+			column-count: 1;
+			column-rule: none;
+		}
+	}
+
+	// Defensive composition with the collapsible-statblocks feature (tracker #1190). When a body
+	// section entry is collapsed to hide its inner content, drop it from the column balancing pass
+	// so an all-collapsed column does not leave the opposite column empty. Covers both the
+	// `[data-collapsed="true"]` attribute and the `.stats-entry-collapsible` marker class variants
+	// their post-processor may use.
+	.ve-stats--two-col > tbody.mon__body-cols-wrap [data-collapsed="true"],
+	.ve-stats--two-col > tbody.mon__body-cols-wrap .stats-entry-collapsible[data-collapsed="true"] {
+		break-inside: auto;
+	}
+
+	.ve-stats__btn-two-col {
+		vertical-align: top;
+		height: 24px;
+		width: 24px;
+	}
+
 	/* Collapsible statblock entries — see Renderer.statblockCollapse in js/render.js */
 
 	.stats-entry-collapsible {
@@ -433,7 +510,7 @@
 	}
 
 	.stats-entry-collapsible__toggle:focus-visible {
-		outline: 1px dotted currentColor;
+		outline: 1px dotted currentcolor;
 		outline-offset: 1px;
 	}
 
@@ -473,7 +550,7 @@
 	}
 
 	.stats-section-collapsible__toggle:focus-visible {
-		outline: 1px dotted currentColor;
+		outline: 1px dotted currentcolor;
 		outline-offset: 1px;
 	}
 
@@ -497,7 +574,7 @@
 		width: 1.2em;
 		height: 1.2em;
 		padding: 0;
-		border: 1px solid currentColor;
+		border: 1px solid currentcolor;
 		border-radius: 2px;
 		background: transparent;
 		color: inherit;
@@ -515,7 +592,7 @@
 	}
 
 	.stats-collapse-toolbar__btn:focus-visible {
-		outline: 1px dotted currentColor;
+		outline: 1px dotted currentcolor;
 		outline-offset: 1px;
 	}
 }
