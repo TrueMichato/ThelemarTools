@@ -135,14 +135,20 @@
 					<div class="ve-ml-auto ve-flex" id="tabs-right"></div>
 				</div>
 
-				<div id="wrp-pagecontent" class="ve-relative wrp-stats-table">
-					<div id="float-token" class="ve-relative"></div>
+				<div id="wrp-pagecontent-outer" class="bestiary__wrp-content ve-w-100">
+					<div id="wrp-pagecontent" class="ve-relative wrp-stats-table bestiary__wrp-content-statblock">
+						<div id="float-token" class="ve-relative"></div>
 
-					<table id="pagecontent" class="ve-w-100 ve-stats">
-						<tr><th class="ve-tbl-border" colspan="6"></th></tr>
-						<tr><td colspan="6" class="initial-message initial-message--med">Select an entry from the list to view it here</td></tr>
-						<tr><th class="ve-tbl-border" colspan="6"></th></tr>
-					</table>
+						<table id="pagecontent" class="ve-w-100 ve-stats">
+							<tr><th class="ve-tbl-border" colspan="6"></th></tr>
+							<tr><td colspan="6" class="initial-message initial-message--med">Select an entry from the list to view it here</td></tr>
+							<tr><th class="ve-tbl-border" colspan="6"></th></tr>
+						</table>
+					</div>
+
+					<div id="wrp-pagecontent-fluff" class="ve-relative wrp-stats-table bestiary__wrp-content-fluff no-print" hidden>
+						<table id="pagecontent-fluff" class="ve-w-100 ve-stats"></table>
+					</div>
 				</div>
 
 				<div class="ve-flex-vh-center ve-mt-2 no-print ve-mobile-sm__flex-col best-ecgen__hidden">
@@ -156,7 +162,8 @@
 
 					<div class="ve-flex-v-center ve-mr-2 ve-mobile-sm__mb-2 ve-mobile-sm__mr-0">
 						<button type="button" class="ve-btn ve-btn-default ve-btn-xs ve-mr-2" id="btn-book">Printer View</button>
-						<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="btn-show-table" title="View and Download Creatures in Tabular Format">Table View</button>
+						<button type="button" class="ve-btn ve-btn-default ve-btn-xs ve-mr-2" id="btn-show-table" title="View and Download Creatures in Tabular Format">Table View</button>
+						<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="btn-wide-view" title="Show statblock and lore side-by-side (requires a wide viewport)">Wide View</button>
 					</div>
 
 					<div class="ve-flex-v-center ve-btn-group" id="btngroup-manager">
