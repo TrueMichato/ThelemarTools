@@ -111,4 +111,53 @@
 		}
 	}
 	// endregion
+
+	// region Wide View (side-by-side statblock + fluff)
+	// The outer wrapper is always present. In default (tabbed) mode, its two children
+	// simply stack — the fluff column is `hidden` via the attribute set in bestiary.html.
+	// When wide-mode is active AND the viewport is wide enough, JS drops the `hidden`
+	// attribute and adds `--wide-active`, at which point the media query below turns the
+	// wrapper into a two-column flex layout.
+	.bestiary__wrp-content {
+		display: block;
+
+		&--wide-active {
+			// Below the "huge" breakpoint we intentionally fall back to stacked layout.
+			// JS also re-renders on `matchMedia` change so the fluff pane is hidden and
+			// the tabs come back for narrow viewports.
+			@media screen and (min-width: #{vars.$width-screen-hg}) {
+				display: flex;
+				align-items: flex-start;
+				gap: 8px;
+
+				.bestiary__wrp-content-statblock {
+					flex: 0 0 auto;
+				}
+
+				.bestiary__wrp-content-fluff {
+					flex: 1 1 0;
+					min-width: 0; // Allow the flex child to shrink below its intrinsic width.
+					overflow: hidden auto;
+
+					img {
+						max-width: 100%;
+						height: auto;
+					}
+				}
+			}
+		}
+	}
+
+	// Print: never render the fluff sibling; always keep the statblock as a single
+	// full-width column. This matches classic Printer View behaviour.
+	@media print {
+		.bestiary__wrp-content {
+			display: block !important;
+		}
+
+		#wrp-pagecontent-fluff {
+			display: none !important;
+		}
+	}
+	// endregion
 }
