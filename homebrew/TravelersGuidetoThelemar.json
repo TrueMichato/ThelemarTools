@@ -24818,6 +24818,12 @@
 			"subclassSource": "TGTT",
 			"level": 3,
 			"header": 1,
+			"skillProficiencies": [
+				{
+					"deception": true,
+					"persuasion": true
+				}
+			],
 			"entries": [
 				"When you choose this Divine Domain at 3rd level, your god has imbued you with magnetic charisma that tempts all who meet you. You gain proficiency in the Deception and Persuasion skills if you don't already have them."
 			]
@@ -25603,6 +25609,11 @@
 			"subclassShortName": "The Horror",
 			"subclassSource": "TGTT",
 			"level": 6,
+			"savingThrowProficiencies": [
+				{
+					"con": true
+				}
+			],
 			"entries": [
 				"At 6th level, your abnormal physique is getting more foothold in the world. You gain proficiency in Constitution saving throws. Furthermore, your Devastating Strike is now considered a magical attack."
 			]
@@ -27182,6 +27193,12 @@
 			"subclassShortName": "Shackled",
 			"subclassSource": "TGTT",
 			"level": 3,
+			"skillProficiencies": [
+				{
+					"acrobatics": true,
+					"performance": true
+				}
+			],
 			"entries": [
 				"You begin your training in the art of hiding your combat movements inside performance. You become proficient with the Acrobatics and Performance skills, if you are not already proficient in them. When using the Performance skill, you may use Dexterity instead of Charisma as the base stat for it."
 			]
