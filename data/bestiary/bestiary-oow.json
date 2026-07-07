@@ -373,7 +373,10 @@
 				"C",
 				"OTH"
 			],
-			"hasToken": true
+			"hasToken": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Replica Monodrone",
@@ -410,7 +413,10 @@
 				"C",
 				"OTH"
 			],
-			"hasToken": true
+			"hasToken": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Replica Pentadrone",
@@ -444,7 +450,10 @@
 				"C",
 				"OTH"
 			],
-			"hasToken": true
+			"hasToken": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Replica Quadrone",
@@ -515,7 +524,10 @@
 				"C",
 				"OTH"
 			],
-			"hasToken": true
+			"hasToken": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Stomping Foot",
