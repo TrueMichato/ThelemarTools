@@ -149,7 +149,11 @@
 	}
 
 	// Print: never render the fluff sibling; always keep the statblock as a single
-	// full-width column. This matches classic Printer View behaviour.
+	// full-width column. Rationale: users triggering "Printer View" or Ctrl+P expect
+	// a printable statblock — fluff/lore/images are supplementary reading content that
+	// bloats page count and rarely renders well on paper. If a user wants the fluff
+	// printed, they can disable wide mode (or switch to the Info tab in classic mode)
+	// and print from there. Do not remove this rule without discussing the change.
 	@media print {
 		.bestiary__wrp-content {
 			display: block !important;

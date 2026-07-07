@@ -453,9 +453,7 @@ class BestiaryPage extends ListPageMultiSource {
 		this._wrpContentOuter = null;
 		this._wrpPagecontentFluff = null;
 		this._pgContentFluff = null;
-		this._wrpFluffControls = null;
 		this._wideModeMql = null;
-		this._wideFluffTab = "info"; // "info" | "images"; picked at render time
 
 		this._encounterBuilder = null;
 
@@ -682,7 +680,6 @@ class BestiaryPage extends ListPageMultiSource {
 		this._wrpContentOuter = e_(document.getElementById("wrp-pagecontent-outer"));
 		this._wrpPagecontentFluff = e_(document.getElementById("wrp-pagecontent-fluff"));
 		this._pgContentFluff = e_(document.getElementById("pagecontent-fluff"));
-		this._wrpFluffControls = e_(document.getElementById("wrp-pagecontent-fluff-controls"));
 
 		if (!this._btnWideView || !this._wrpContentOuter) return;
 
@@ -743,35 +740,54 @@ class BestiaryPage extends ListPageMultiSource {
 		else this._wrpPagecontentFluff.setAttribute("hidden", "hidden");
 	}
 
-	_populateWideFluffPane ({mon, hasFluffText, hasFluffImages}) {
-		if (!this._pgContentFluff || !this._wrpFluffControls) return;
-
-		// Pick the best default: last user choice if still available, else whichever exists.
-		if (this._wideFluffTab === "info" && !hasFluffText && hasFluffImages) this._wideFluffTab = "images";
-		if (this._wideFluffTab === "images" && !hasFluffImages && hasFluffText) this._wideFluffTab = "info";
+	async _populateWideFluffPane ({mon, hasFluffText, hasFluffImages}) {
+		if (!this._pgContentFluff) return;
 		if (!hasFluffText && !hasFluffImages) return;
 
-		const doRender = (which) => {
-			this._wideFluffTab = which;
-			this._pgContentFluff.empty();
-			this._renderStats_doBuildFluffTab({ent: mon, isImageTab: which === "images", wrpContent: this._pgContentFluff});
-		};
+		const wrp = this._pgContentFluff;
+		wrp.empty();
 
-		this._wrpFluffControls.empty();
-		if (hasFluffText && hasFluffImages) {
-			const btnInfo = ee`<button class="ve-btn ve-btn-xs ve-btn-default ve-mr-1">Info</button>`
-				.onn("click", () => { doRender("info"); syncActive(); });
-			const btnImages = ee`<button class="ve-btn ve-btn-xs ve-btn-default">Images</button>`
-				.onn("click", () => { doRender("images"); syncActive(); });
-			const syncActive = () => {
-				btnInfo.toggleClass("ve-active", this._wideFluffTab === "info");
-				btnImages.toggleClass("ve-active", this._wideFluffTab === "images");
-			};
-			this._wrpFluffControls.appends(btnInfo).appends(btnImages);
-			syncActive();
+		// Mirror the surrounding table structure that `Renderer.utils.pBuildFluffTab`
+		// builds, so styling (borders, name row, "Copy as JSON/Markdown" header controls,
+		// borders again) matches the classic tabbed layout exactly. The only difference
+		// is that the single content <td> contains BOTH the info entries and the images,
+		// stacked vertically — we deliberately do NOT add a sub-toggle, because the whole
+		// point of wide mode is to eliminate "click to switch" friction.
+		wrp.appends(Renderer.utils.getBorderTr());
+
+		const headerControls = this._renderStats_doBuildFluffTab_getHeaderControls({ent: mon, isImageTab: false});
+		if (headerControls) {
+			const attrReplace = `data-p-build-fluff-tab-replace="true"`;
+			const eleNameTr = e_({
+				outer: Renderer.utils.getNameTr(mon, {htmlControlRhs: `<div ${attrReplace}></div>`, page: UrlUtil.PG_BESTIARY}),
+			});
+			eleNameTr.find(`[${attrReplace}]`).replaceWith(headerControls);
+			wrp.appends(eleNameTr);
+		} else {
+			wrp.appends(Renderer.utils.getNameTr(mon, {page: UrlUtil.PG_BESTIARY}));
 		}
 
-		doRender(this._wideFluffTab);
+		const eleTd = ee`<td colspan="6" class="ve-pb-3"></td>`;
+		ee`<tr>${eleTd}</tr>`.appendTo(wrp);
+		wrp.appends(Renderer.utils.getBorderTr());
+
+		const fluff = MiscUtil.copyFast((await this._pFnGetFluff(mon)) || {});
+		// Guard against races: the user may have switched creature while fluff was loading.
+		if (this._lastRender.entity !== mon) return;
+
+		fluff.entries = fluff.entries || [Renderer.utils.HTML_NO_INFO];
+		fluff.images = fluff.images || [Renderer.utils.HTML_NO_IMAGES];
+
+		Renderer.get().withMinimizeLayoutShift(() => {
+			const parts = [];
+			if (hasFluffText) parts.push(Renderer.utils.getFluffTabContent({entity: mon, fluff, isImageTab: false}));
+			if (hasFluffImages) {
+				// Section separator between Info and Images when both are shown.
+				if (hasFluffText) parts.push(`<hr class="ve-hr-2 no-print">`);
+				parts.push(Renderer.utils.getFluffTabContent({entity: mon, fluff, isImageTab: true}));
+			}
+			eleTd.html(parts.join(""));
+		});
 	}
 
 	_handleBestiaryLiClick (evt, listItem) {
@@ -846,7 +862,6 @@ class BestiaryPage extends ListPageMultiSource {
 		// Reset the wide-mode fluff pane on each render so stale content from a previous
 		// creature never lingers if the new one has no fluff or wide-mode is disabled.
 		if (this._pgContentFluff) this._pgContentFluff.empty();
-		if (this._wrpFluffControls) this._wrpFluffControls.empty();
 		this._setWideModeVisuals({isActive: false});
 
 		if (this._btnProf != null) {
@@ -882,10 +897,12 @@ class BestiaryPage extends ListPageMultiSource {
 				this._setWideModeVisuals({isActive: isWide});
 
 				if (isWide) {
-					// In wide mode the Info/Images content lives in a sibling table with its
-					// own sub-toggle, so we deliberately don't create Info/Images tab buttons.
-					// The already-bound single "Stat Block" tab is fine — `bindTabButtons`
-					// hides the strip when only one tab exists.
+					// In wide mode the Info/Images content lives in a sibling table, stacked
+					// vertically (Info above, Images below). We deliberately don't create
+					// Info/Images tab buttons: `Renderer.utils.bindTabButtons` skips prepending
+					// the tab-strip button whenever `tabButtons.length === 1`
+					// (js/render.js:3544-3545), so the already-bound single "Stat Block" tab
+					// causes the strip to collapse to empty — no explicit hide needed.
 					this._populateWideFluffPane({mon, hasFluffText, hasFluffImages});
 					return;
 				}
