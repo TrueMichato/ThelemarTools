@@ -528,7 +528,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Air Elementals"
+			]
 		},
 		{
 			"name": "Alkilith",
@@ -3559,7 +3562,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Yugoloths"
+			]
 		},
 		{
 			"name": "Choker",
@@ -5513,7 +5519,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Trolls"
+			]
 		},
 		{
 			"name": "Drow Arachnomancer",
@@ -8672,7 +8681,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Earth Elementals"
+			]
 		},
 		{
 			"name": "Eidolon",
@@ -9443,7 +9455,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Fire Elementals"
+			]
 		},
 		{
 			"name": "Fraz-Urb'luu",
@@ -10443,7 +10458,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githyanki"
+			]
 		},
 		{
 			"name": "Githyanki Kith'rak",
@@ -10594,7 +10612,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githyanki"
+			]
 		},
 		{
 			"name": "Githyanki Supreme Commander",
@@ -10761,7 +10782,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githyanki"
+			]
 		},
 		{
 			"name": "Githzerai Anarch",
@@ -10926,7 +10950,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githzerai"
+			]
 		},
 		{
 			"name": "Githzerai Enlightened",
@@ -11070,7 +11097,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githzerai"
+			]
 		},
 		{
 			"name": "Gloom Weaver",
@@ -12645,7 +12675,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Yugoloths"
+			]
 		},
 		{
 			"name": "Iron Cobra",
@@ -16443,7 +16476,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Yugoloths"
+			]
 		},
 		{
 			"name": "Orcus",
@@ -17570,7 +17606,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Trolls"
+			]
 		},
 		{
 			"name": "Rutterkin",
@@ -19021,7 +19060,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Trolls"
+			]
 		},
 		{
 			"name": "Spring Eladrin",
@@ -22212,7 +22254,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Trolls"
+			]
 		},
 		{
 			"name": "Wastrilith",
@@ -22523,7 +22568,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Water Elementals"
+			]
 		},
 		{
 			"name": "White Abishai",
