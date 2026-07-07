@@ -6307,6 +6307,8 @@ class CharacterSheetBuilder {
 			existingFeatures: alreadyKnown,
 			cantrips: this._selectedKnownCantrips || [],
 			spells: [...(this._selectedKnownSpells || []), ...(this._selectedSpellbookSpells || [])],
+			toolProficiencies: this._state?.getToolProficiencies?.() || [],
+			state: this._state,
 		};
 
 		// Use the shared eligibility filter (same one level-up uses) and keep only
