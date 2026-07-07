@@ -8614,6 +8614,10 @@ Renderer.race = class {
 		return {type: "item", name: "Creature Type:", entry: Parser.raceCreatureTypesToFull(typesFilt)};
 	}
 
+	// Canonical race sense order. Kept in sync with
+	// CharacterSheetClassUtils.SENSE_DISPLAY_ORDER (charactersheet-class-utils.js)
+	// so the popout attribute list and the character-sheet Senses widget render
+	// senses in the same order. Do not reorder without updating both sites.
 	static _RACE_SENSE_KEYS = ["darkvision", "blindsight", "tremorsense", "truesight"];
 
 	static _getRaceRenderableEntriesMeta_senses ({ent}) {
