@@ -365,7 +365,11 @@
 				"RW",
 				"THW"
 			],
-			"hasToken": true
+			"hasToken": true,
+			"group": [
+				"Bugbears",
+				"Goblinoids"
+			]
 		},
 		{
 			"name": "Bugbear Lieutenant",
@@ -397,7 +401,11 @@
 				"RW",
 				"THW"
 			],
-			"hasToken": true
+			"hasToken": true,
+			"group": [
+				"Bugbears",
+				"Goblinoids"
+			]
 		},
 		{
 			"name": "Calcryx",
@@ -2321,7 +2329,11 @@
 			"miscTags": [
 				"MLW"
 			],
-			"hasToken": true
+			"hasToken": true,
+			"group": [
+				"Goblins",
+				"Goblinoids"
+			]
 		},
 		{
 			"name": "Gorvan Ironheart",
@@ -4822,7 +4834,10 @@
 					}
 				]
 			},
-			"hasToken": true
+			"hasToken": true,
+			"group": [
+				"Beholders"
+			]
 		},
 		{
 			"name": "Reduced-Threat Black Pudding",

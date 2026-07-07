@@ -302,7 +302,10 @@
 			},
 			"type": "fiend",
 			"hasToken": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Morte",

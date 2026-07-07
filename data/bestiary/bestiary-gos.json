@@ -4297,7 +4297,10 @@
 				"MW"
 			],
 			"hasToken": true,
-			"hasFluff": true
+			"hasFluff": true,
+			"group": [
+				"Sahuagin"
+			]
 		},
 		{
 			"name": "Sahuagin Champion",
@@ -4418,7 +4421,10 @@
 				"THW"
 			],
 			"hasToken": true,
-			"hasFluff": true
+			"hasFluff": true,
+			"group": [
+				"Sahuagin"
+			]
 		},
 		{
 			"name": "Sahuagin Coral Smasher",
@@ -4547,7 +4553,10 @@
 				"MW"
 			],
 			"hasToken": true,
-			"hasFluff": true
+			"hasFluff": true,
+			"group": [
+				"Sahuagin"
+			]
 		},
 		{
 			"name": "Sahuagin Deep Diver",
@@ -4700,7 +4709,10 @@
 				"wisdom"
 			],
 			"hasToken": true,
-			"hasFluff": true
+			"hasFluff": true,
+			"group": [
+				"Sahuagin"
+			]
 		},
 		{
 			"name": "Sahuagin Hatchling Swarm",
@@ -4805,7 +4817,10 @@
 				"MW"
 			],
 			"hasToken": true,
-			"hasFluff": true
+			"hasFluff": true,
+			"group": [
+				"Sahuagin"
+			]
 		},
 		{
 			"name": "Sahuagin High Priestess",
@@ -4989,7 +5004,10 @@
 				"wisdom"
 			],
 			"hasToken": true,
-			"hasFluff": true
+			"hasFluff": true,
+			"group": [
+				"Sahuagin"
+			]
 		},
 		{
 			"name": "Sahuagin Wave Shaper",
@@ -5137,7 +5155,10 @@
 				"strength"
 			],
 			"hasToken": true,
-			"hasFluff": true
+			"hasFluff": true,
+			"group": [
+				"Sahuagin"
+			]
 		},
 		{
 			"name": "Sanbalet",
