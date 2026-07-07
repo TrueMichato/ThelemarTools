@@ -3335,6 +3335,25 @@ Renderer.utils = class {
 		return `<button title="Send to Foundry (SHIFT for Temporary Import)" class="no-print ve-btn ve-btn-xs ve-btn-default ve-stats__btn-stats-name ve-mx-2 ${isMb ? "ve-mb-2" : ""} ve-self-flex-end ve-lst-is-exporting-image__hidden" onclick="ExtensionUtil.pDoSendStats(event, this)" draggable="true" ondragstart="ExtensionUtil.doDragStart(event, this)"><span class="glyphicon glyphicon-send"></span></button>`;
 	}
 
+	/**
+	 * DOM-only per-statblock toggle for the two-column layout (see `.ve-stats--two-col`).
+	 * The click handler flips the modifier class on the nearest ancestor `.ve-stats` table, so it
+	 * works uniformly for the bestiary main pane (`#pagecontent`), hover popouts, book view, DM
+	 * Screen creature viewers, and character-sheet creature-ref popouts. No persistence — the
+	 * page-wide default lives in `Renderer.monster.get/setDefaultTwoColMode()`.
+	 */
+	static getBtnToggleTwoColHtml ({isMb = true} = {}) {
+		return `<button title="Toggle Two-Column Layout" class="no-print ve-btn ve-btn-xs ve-btn-default ve-stats__btn-stats-name ve-stats__btn-two-col ve-mr-2 ${isMb ? "ve-mb-2" : ""} ve-self-flex-end ve-lst-is-exporting-image__hidden" onclick="Renderer.utils._handleBtnToggleTwoCol(event, this)"><span class="glyphicon glyphicon-th-large"></span></button>`;
+	}
+
+	static _handleBtnToggleTwoCol (evt, btn) {
+		evt?.stopPropagation?.();
+		const tbl = btn.closest(".ve-stats");
+		if (!tbl) return;
+		tbl.classList.toggle("ve-stats--two-col");
+		btn.classList.toggle("ve-active", tbl.classList.contains("ve-stats--two-col"));
+	}
+
 	static isDisplayPage (page) { return page != null && ((!isNaN(page) && page > 0) || isNaN(page)); }
 
 	static getExcludedTr ({entity, dataProp, page, isExcluded}) {
@@ -9808,6 +9827,7 @@ class _RenderCompactBestiaryImplBase {
 				},
 				isInlinedToken,
 				isEmbeddedEntity: opts.isEmbeddedEntity,
+				htmlControlRhs: opts.isEmbeddedEntity ? "" : Renderer.utils.getBtnToggleTwoColHtml(),
 			},
 		);
 	}
@@ -10196,6 +10216,7 @@ class _RenderCompactBestiaryImplClassic extends _RenderCompactBestiaryImplBase {
 					${htmlPtLanguages}
 				</div>
 			</td></tr>
+			</tbody><tbody class="mon__body-cols-wrap">
 			${htmlPtTraits}
 			${htmlPtActions}
 			${htmlPtBonusActions}
@@ -10204,6 +10225,7 @@ class _RenderCompactBestiaryImplClassic extends _RenderCompactBestiaryImplBase {
 			${htmlPtMythicActions}
 			${htmlPtLairActions}
 			${htmlPtRegionalEffects}
+			</tbody><tbody>
 			${htmlPtVariants}
 		`;
 	}
@@ -10377,6 +10399,7 @@ class _RenderCompactBestiaryImplOne extends _RenderCompactBestiaryImplBase {
 					${htmlPtLanguages}
 				</div>
 			</td></tr>
+			</tbody><tbody class="mon__body-cols-wrap">
 			${htmlPtTraits}
 			${htmlPtActions}
 			${htmlPtBonusActions}
@@ -10385,6 +10408,7 @@ class _RenderCompactBestiaryImplOne extends _RenderCompactBestiaryImplBase {
 			${htmlPtMythicActions}
 			${htmlPtLairActions}
 			${htmlPtRegionalEffects}
+			</tbody><tbody>
 			${htmlPtVariants}
 		`;
 	}
@@ -11086,6 +11110,17 @@ Renderer.monster = class {
 
 	static _RENDER_CLASSIC = new _RenderCompactBestiaryImplClassic();
 	static _RENDER_ONE = new _RenderCompactBestiaryImplOne();
+
+	// Page-wide default column mode for the monster statblock (see `.ve-stats--two-col` +
+	// tracker #1200 / 5ET-1080). "single" (default) leaves the outer `<table>` untouched;
+	// "double" adds the modifier class so `<tbody class="mon__body-cols-wrap">` flips to a
+	// two-column flow. Bestiary sets this from `StorageUtil.pGetForPage("bestiaryStatblockColumns")`
+	// on init; hover popouts / DM Screen / character-sheet creature-refs read it via
+	// `getDefaultTwoColMode()` so they inherit the user's setting without a re-render.
+	static _defaultTwoColMode = "single";
+	static getDefaultTwoColMode () { return this._defaultTwoColMode; }
+	static setDefaultTwoColMode (mode) { this._defaultTwoColMode = mode === "double" ? "double" : "single"; }
+	static isDefaultTwoCol () { return this._defaultTwoColMode === "double"; }
 
 	/**
 	 * @param ent
@@ -17410,7 +17445,11 @@ Renderer.hover = class {
 
 		const name = toRender._displayName || toRender.name;
 		const fnRender = opts.fnRender || Renderer.hover.getFnRenderCompact(page, {isStatic: opts.isStatic});
-		const out = ee`<table class="ve-w-100 ve-stats ${opts.isBookContent ? `ve-stats--book` : ""}" ${name ? `data-roll-name-ancestor-roller="${Renderer.stripTags(name).qq()}"` : ""}>${fnRender(toRender, renderFnOpts)}</table>`;
+		// Inherit the page-wide two-column preference for monster popouts (bestiary hover, DM Screen
+		// initiative viewer, character-sheet creature-ref popouts). Skipped for book-content because
+		// those live in already-narrow fixed columns.
+		const isTwoCol = page === UrlUtil.PG_BESTIARY && !opts.isBookContent && Renderer.monster.isDefaultTwoCol();
+		const out = ee`<table class="ve-w-100 ve-stats ${opts.isBookContent ? `ve-stats--book` : ""} ${isTwoCol ? `ve-stats--two-col` : ""}" ${name ? `data-roll-name-ancestor-roller="${Renderer.stripTags(name).qq()}"` : ""}>${fnRender(toRender, renderFnOpts)}</table>`;
 
 		if (!opts.isStatic) {
 			const fnBind = Renderer.hover.getFnBindListenersCompact(page);
