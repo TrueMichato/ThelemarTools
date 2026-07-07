@@ -2,6 +2,7 @@ import {EncounterBuilderCacheBestiaryPage} from "./bestiary/bestiary-encounterbu
 import {EncounterBuilderComponentBestiary} from "./bestiary/bestiary-encounterbuilder-component.js";
 import {EncounterBuilderUiBestiary} from "./bestiary/bestiary-encounterbuilder-ui.js";
 import {EncounterBuilderSublistPlugin} from "./bestiary/bestiary-encounterbuilder-sublistplugin.js";
+import {RenderCompareCreatures} from "./bestiary/bestiary-compare.js";
 import {RenderBestiary} from "./render-bestiary.js";
 import {EncounterBuilderRulesClassic} from "./encounterbuilder/rules/encounterbuilder-rules-classic.js";
 import {EncounterBuilderRulesOne} from "./encounterbuilder/rules/encounterbuilder-rules-one.js";
@@ -657,6 +658,80 @@ class BestiaryPage extends ListPageMultiSource {
 			</div>
 		</div>`
 			.appendTo(es(`#wrp-encounterbuild-footer`));
+
+		this._pOnLoad_compareView();
+	}
+
+	_pOnLoad_compareView () {
+		const btn = document.getElementById("btn-compare-sublist");
+		if (btn) {
+			btn.addEventListener("click", () => this._pHandleClickCompareSublist());
+			this._compareBtn = btn;
+			this._refreshCompareBtnState();
+
+			// Wrap the sublist manager's change handler so we can refresh the
+			// button state (disabled / tooltip) whenever the sublist changes.
+			// This is preferable to writing a plugin for a single UI concern.
+			if (this._sublistManager && typeof this._sublistManager._onSublistChange === "function") {
+				const orig = this._sublistManager._onSublistChange.bind(this._sublistManager);
+				this._sublistManager._onSublistChange = () => {
+					orig();
+					this._refreshCompareBtnState();
+				};
+			}
+		}
+
+		const parseCompareHash = () => {
+			const rawHash = window.location.hash || "";
+			const m = rawHash.match(/[#&]compare=([^&]+)/);
+			return m ? decodeURIComponent(m[1]).split(",").map(s => s.trim()).filter(Boolean) : null;
+		};
+
+		const pHandleCompareHash = async () => {
+			const hashes = parseCompareHash();
+			if (!hashes || hashes.length < 2) return;
+			await RenderCompareCreatures.pOpenForUids(hashes);
+		};
+
+		if (parseCompareHash()) {
+			// eslint-disable-next-line no-console
+			pHandleCompareHash().catch(e => console.error(e));
+		}
+		window.addEventListener("hashchange", () => {
+			// eslint-disable-next-line no-console
+			if (parseCompareHash()) pHandleCompareHash().catch(e => console.error(e));
+		});
+	}
+
+	_refreshCompareBtnState () {
+		if (!this._compareBtn) return;
+		const cnt = this._sublistManager ? this._sublistManager.getSublistedEntities().length : 0;
+		if (cnt >= 2) {
+			this._compareBtn.removeAttribute("disabled");
+			this._compareBtn.title = `Compare ${cnt} pinned creatures side-by-side`;
+		} else if (cnt === 1) {
+			this._compareBtn.setAttribute("disabled", "disabled");
+			this._compareBtn.title = "Pin at least two creatures to compare";
+		} else {
+			this._compareBtn.setAttribute("disabled", "disabled");
+			this._compareBtn.title = "Pin creatures to the sublist, then compare";
+		}
+	}
+
+	async _pHandleClickCompareSublist () {
+		const monsters = this._sublistManager
+			? this._sublistManager.getSublistedEntities()
+			: [];
+		if (!monsters || monsters.length < 2) {
+			if (typeof JqueryUtil !== "undefined" && JqueryUtil.doToast) {
+				JqueryUtil.doToast({
+					content: "Pin at least two creatures to the encounter/sublist before comparing.",
+					type: "warning",
+				});
+			}
+			return;
+		}
+		await RenderCompareCreatures.pOpen(monsters);
 	}
 
 	async _pPageInit_pProfBonusDiceToggle () {
