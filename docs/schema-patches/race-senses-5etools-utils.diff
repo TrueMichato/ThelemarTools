@@ -1,0 +1,528 @@
+diff -ruN a/brew/races.json b/brew/races.json
+--- a/brew/races.json	2026-07-07 17:49:38
++++ b/brew/races.json	2026-07-07 17:49:41
+@@ -74,6 +74,12 @@
+ 				"blindsight": {
+ 					"type": "integer"
+ 				},
++				"tremorsense": {
++					"type": "integer"
++				},
++				"truesight": {
++					"type": "integer"
++				},
+ 				"feats": {
+ 					"$ref": "util.json#/$defs/additionalFeatsArray"
+ 				},
+@@ -348,6 +354,12 @@
+ 				"blindsight": {
+ 					"type": "integer"
+ 				},
++				"tremorsense": {
++					"type": "integer"
++				},
++				"truesight": {
++					"type": "integer"
++				},
+ 				"feats": {
+ 					"$ref": "util.json#/$defs/additionalFeatsArray"
+ 				},
+@@ -707,6 +719,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -985,6 +1003,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -1269,6 +1293,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -1558,6 +1588,12 @@
+ 							"type": "integer"
+ 						},
+ 						"blindsight": {
++							"type": "integer"
++						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
+ 							"type": "integer"
+ 						},
+ 						"feats": {
+@@ -1849,4 +1885,4 @@
+ 		"subrace"
+ 	],
+ 	"additionalProperties": false
+-}
+\ No newline at end of file
++}
+diff -ruN a/brew-fast/races.json b/brew-fast/races.json
+--- a/brew-fast/races.json	2026-07-07 17:49:38
++++ b/brew-fast/races.json	2026-07-07 17:49:41
+@@ -74,6 +74,12 @@
+ 				"blindsight": {
+ 					"type": "integer"
+ 				},
++				"tremorsense": {
++					"type": "integer"
++				},
++				"truesight": {
++					"type": "integer"
++				},
+ 				"feats": {
+ 					"$ref": "util.json#/$defs/additionalFeatsArray"
+ 				},
+@@ -348,6 +354,12 @@
+ 				"blindsight": {
+ 					"type": "integer"
+ 				},
++				"tremorsense": {
++					"type": "integer"
++				},
++				"truesight": {
++					"type": "integer"
++				},
+ 				"feats": {
+ 					"$ref": "util.json#/$defs/additionalFeatsArray"
+ 				},
+@@ -707,6 +719,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -985,6 +1003,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -1269,6 +1293,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -1558,6 +1588,12 @@
+ 							"type": "integer"
+ 						},
+ 						"blindsight": {
++							"type": "integer"
++						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
+ 							"type": "integer"
+ 						},
+ 						"feats": {
+@@ -1849,4 +1885,4 @@
+ 		"subrace"
+ 	],
+ 	"additionalProperties": false
+-}
+\ No newline at end of file
++}
+diff -ruN a/site/races.json b/site/races.json
+--- a/site/races.json	2026-07-07 17:49:38
++++ b/site/races.json	2026-07-07 17:49:41
+@@ -74,6 +74,12 @@
+ 				"blindsight": {
+ 					"type": "integer"
+ 				},
++				"tremorsense": {
++					"type": "integer"
++				},
++				"truesight": {
++					"type": "integer"
++				},
+ 				"feats": {
+ 					"$ref": "util.json#/$defs/additionalFeatsArray"
+ 				},
+@@ -336,6 +342,12 @@
+ 				"blindsight": {
+ 					"type": "integer"
+ 				},
++				"tremorsense": {
++					"type": "integer"
++				},
++				"truesight": {
++					"type": "integer"
++				},
+ 				"feats": {
+ 					"$ref": "util.json#/$defs/additionalFeatsArray"
+ 				},
+@@ -683,6 +695,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -949,6 +967,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -1221,6 +1245,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -1497,6 +1527,12 @@
+ 							"type": "integer"
+ 						},
+ 						"blindsight": {
++							"type": "integer"
++						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
+ 							"type": "integer"
+ 						},
+ 						"feats": {
+@@ -1776,4 +1812,4 @@
+ 		"subrace"
+ 	],
+ 	"additionalProperties": false
+-}
+\ No newline at end of file
++}
+diff -ruN a/site-fast/races.json b/site-fast/races.json
+--- a/site-fast/races.json	2026-07-07 17:49:39
++++ b/site-fast/races.json	2026-07-07 17:49:41
+@@ -74,6 +74,12 @@
+ 				"blindsight": {
+ 					"type": "integer"
+ 				},
++				"tremorsense": {
++					"type": "integer"
++				},
++				"truesight": {
++					"type": "integer"
++				},
+ 				"feats": {
+ 					"$ref": "util.json#/$defs/additionalFeatsArray"
+ 				},
+@@ -336,6 +342,12 @@
+ 				"blindsight": {
+ 					"type": "integer"
+ 				},
++				"tremorsense": {
++					"type": "integer"
++				},
++				"truesight": {
++					"type": "integer"
++				},
+ 				"feats": {
+ 					"$ref": "util.json#/$defs/additionalFeatsArray"
+ 				},
+@@ -683,6 +695,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -949,6 +967,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -1221,6 +1245,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -1497,6 +1527,12 @@
+ 							"type": "integer"
+ 						},
+ 						"blindsight": {
++							"type": "integer"
++						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
+ 							"type": "integer"
+ 						},
+ 						"feats": {
+@@ -1776,4 +1812,4 @@
+ 		"subrace"
+ 	],
+ 	"additionalProperties": false
+-}
+\ No newline at end of file
++}
+diff -ruN a/ua/races.json b/ua/races.json
+--- a/ua/races.json	2026-07-07 17:49:38
++++ b/ua/races.json	2026-07-07 17:49:41
+@@ -74,6 +74,12 @@
+ 				"blindsight": {
+ 					"type": "integer"
+ 				},
++				"tremorsense": {
++					"type": "integer"
++				},
++				"truesight": {
++					"type": "integer"
++				},
+ 				"feats": {
+ 					"$ref": "util.json#/$defs/additionalFeatsArray"
+ 				},
+@@ -327,6 +333,12 @@
+ 				"blindsight": {
+ 					"type": "integer"
+ 				},
++				"tremorsense": {
++					"type": "integer"
++				},
++				"truesight": {
++					"type": "integer"
++				},
+ 				"feats": {
+ 					"$ref": "util.json#/$defs/additionalFeatsArray"
+ 				},
+@@ -665,6 +677,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -922,6 +940,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -1185,6 +1209,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -1452,6 +1482,12 @@
+ 							"type": "integer"
+ 						},
+ 						"blindsight": {
++							"type": "integer"
++						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
+ 							"type": "integer"
+ 						},
+ 						"feats": {
+@@ -1722,4 +1758,4 @@
+ 		"subrace"
+ 	],
+ 	"additionalProperties": false
+-}
+\ No newline at end of file
++}
+diff -ruN a/ua-fast/races.json b/ua-fast/races.json
+--- a/ua-fast/races.json	2026-07-07 17:49:39
++++ b/ua-fast/races.json	2026-07-07 17:49:41
+@@ -74,6 +74,12 @@
+ 				"blindsight": {
+ 					"type": "integer"
+ 				},
++				"tremorsense": {
++					"type": "integer"
++				},
++				"truesight": {
++					"type": "integer"
++				},
+ 				"feats": {
+ 					"$ref": "util.json#/$defs/additionalFeatsArray"
+ 				},
+@@ -327,6 +333,12 @@
+ 				"blindsight": {
+ 					"type": "integer"
+ 				},
++				"tremorsense": {
++					"type": "integer"
++				},
++				"truesight": {
++					"type": "integer"
++				},
+ 				"feats": {
+ 					"$ref": "util.json#/$defs/additionalFeatsArray"
+ 				},
+@@ -665,6 +677,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -922,6 +940,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -1185,6 +1209,12 @@
+ 						"blindsight": {
+ 							"type": "integer"
+ 						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
++							"type": "integer"
++						},
+ 						"feats": {
+ 							"$ref": "util.json#/$defs/additionalFeatsArray"
+ 						},
+@@ -1452,6 +1482,12 @@
+ 							"type": "integer"
+ 						},
+ 						"blindsight": {
++							"type": "integer"
++						},
++						"tremorsense": {
++							"type": "integer"
++						},
++						"truesight": {
+ 							"type": "integer"
+ 						},
+ 						"feats": {
+@@ -1722,4 +1758,4 @@
+ 		"subrace"
+ 	],
+ 	"additionalProperties": false
+-}
+\ No newline at end of file
++}

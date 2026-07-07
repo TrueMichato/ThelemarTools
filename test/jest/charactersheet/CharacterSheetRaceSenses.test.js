@@ -17,7 +17,7 @@ import "../../../js/charactersheet/charactersheet-respec.js";
 const CharacterSheetRespec = globalThis.CharacterSheetRespec;
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
 
-const SENSE_KEYS = ["darkvision", "blindsight", "tremorsense", "truesight"];
+const SENSE_KEYS = CharacterSheetClassUtils.SENSE_DISPLAY_ORDER;
 
 /** Minimal respec stub — mirrors the pattern from CharacterSheetRespecRaceBackground.test.js. */
 function makeRespec (overrides = {}) {
@@ -137,6 +137,28 @@ describe("Race senses (5ET-1226)", () => {
 
 			expect(respec._test.senses.darkvision).toBe(60);
 			expect(respec._test.senses.blindsight).toBe(0);
+			expect(respec._test.senses.tremorsense).toBe(0);
+			expect(respec._test.senses.truesight).toBe(0);
+		});
+
+		test("blindsight-only race (Grimlock-shape) does not silently zero out darkvision on prior state", () => {
+			// Guard: a race that only sets structured `blindsight` (like Grimlock)
+			// must not accidentally leak darkvision from the old race. The reset
+			// pass explicitly clears every sense; the apply pass writes ONLY the
+			// senses present on the new race.
+			const respec = makeRespec({
+				race: {name: "Elf", source: "PHB", speed: 30, darkvision: 60},
+			});
+			// Prime state to reflect the old Elf grant.
+			respec._state.setSense("darkvision", 60);
+
+			const history = {level: 1, class: {name: "Fighter", source: "PHB"}, choices: {race: {name: "Elf", source: "PHB"}}};
+			const newRace = {name: "Grimlock", source: "DMG", speed: 30, blindsight: 30};
+
+			respec._applyRaceChange(history, newRace);
+
+			expect(respec._test.senses.darkvision).toBe(0);
+			expect(respec._test.senses.blindsight).toBe(30);
 			expect(respec._test.senses.tremorsense).toBe(0);
 			expect(respec._test.senses.truesight).toBe(0);
 		});
