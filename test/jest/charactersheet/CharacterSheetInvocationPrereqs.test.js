@@ -263,4 +263,96 @@ describe("CharacterSheetClassUtils.checkPrerequisites", () => {
 			expect(result.reasons).toContain("Level 9 Warlock");
 		});
 	});
+
+	describe("tool proficiency prerequisites", () => {
+		const smithCtx = {...baseContext, toolProficiencies: ["Smith's Tools", "Thieves' Tools"]};
+		const noToolsCtx = {...baseContext, toolProficiencies: []};
+
+		it("passes when the character has the required tool", () => {
+			const prereq = [{proficiency: [{tool: "smith's tools"}]}];
+			const result = CharacterSheetClassUtils.checkPrerequisites(prereq, smithCtx);
+			expect(result.met).toBe(true);
+			expect(result.reasons).toEqual([]);
+		});
+
+		it("fails with a named reason when the character lacks the required tool", () => {
+			const prereq = [{proficiency: [{tool: "smith's tools"}]}];
+			const result = CharacterSheetClassUtils.checkPrerequisites(prereq, noToolsCtx);
+			expect(result.met).toBe(false);
+			expect(result.reasons).toContain("Proficiency with Smith's Tools");
+		});
+
+		it("treats an array as any-of — passes if any listed tool matches", () => {
+			const prereq = [{proficiency: [{tool: ["tinker's tools", "smith's tools"]}]}];
+			const result = CharacterSheetClassUtils.checkPrerequisites(prereq, smithCtx);
+			expect(result.met).toBe(true);
+		});
+
+		it("fails when none of an array-form tool list is proficient", () => {
+			const prereq = [{proficiency: [{tool: ["tinker's tools", "cook's utensils"]}]}];
+			const result = CharacterSheetClassUtils.checkPrerequisites(prereq, smithCtx);
+			expect(result.met).toBe(false);
+			expect(result.reasons[0]).toMatch(/Proficiency with Tinker's Tools or Cook's Utensils/);
+		});
+
+		it("`tool: true` passes when the character has any tool proficiency", () => {
+			const prereq = [{proficiency: [{tool: true}]}];
+			const result = CharacterSheetClassUtils.checkPrerequisites(prereq, smithCtx);
+			expect(result.met).toBe(true);
+		});
+
+		it("`tool: true` fails when the character has no tool proficiencies", () => {
+			const prereq = [{proficiency: [{tool: true}]}];
+			const result = CharacterSheetClassUtils.checkPrerequisites(prereq, noToolsCtx);
+			expect(result.met).toBe(false);
+			expect(result.reasons).toContain("Proficiency with any tool");
+		});
+
+		it("normalizes apostrophes and whitespace when matching", () => {
+			// Data-side is lowercase without apostrophes; character stores canonical case
+			const prereq = [{proficiency: [{tool: "smiths tools"}]}];
+			const result = CharacterSheetClassUtils.checkPrerequisites(prereq, smithCtx);
+			expect(result.met).toBe(true);
+		});
+
+		it("prefers state.hasToolProficiency when a state object is provided", () => {
+			const stubState = {
+				hasToolProficiency: (t) => t.toLowerCase().includes("smith"),
+				getToolProficiencies: () => ["Smith's Tools"],
+			};
+			const ctx = {...baseContext, state: stubState, toolProficiencies: []};
+			const prereq = [{proficiency: [{tool: "smith's tools"}]}];
+			const result = CharacterSheetClassUtils.checkPrerequisites(prereq, ctx);
+			expect(result.met).toBe(true);
+		});
+
+		it("ignores non-tool proficiency kinds without throwing (armor/weapon/skill not yet gated)", () => {
+			const prereq = [{proficiency: [{armor: "heavy"}, {tool: "smith's tools"}]}];
+			// Armor prereq is intentionally not gated yet — only the tool prereq matters
+			const result = CharacterSheetClassUtils.checkPrerequisites(prereq, smithCtx);
+			expect(result.met).toBe(true);
+		});
+
+		it("integrates with getEligibleOptionalFeatures — blocks selection without the tool", () => {
+			const opt = {
+				name: "Rune Craft (Test)",
+				source: "TEST",
+				featureType: ["EI"],
+				prerequisite: [{proficiency: [{tool: "smith's tools"}]}],
+			};
+			const eligibleWithout = CharacterSheetClassUtils.getEligibleOptionalFeatures([opt], {
+				featureTypes: ["EI"],
+				prereqContext: noToolsCtx,
+			});
+			expect(eligibleWithout[0]._meetsPrereqs).toBe(false);
+			expect(eligibleWithout[0]._selectable).toBe(false);
+
+			const eligibleWith = CharacterSheetClassUtils.getEligibleOptionalFeatures([opt], {
+				featureTypes: ["EI"],
+				prereqContext: smithCtx,
+			});
+			expect(eligibleWith[0]._meetsPrereqs).toBe(true);
+			expect(eligibleWith[0]._selectable).toBe(true);
+		});
+	});
 });

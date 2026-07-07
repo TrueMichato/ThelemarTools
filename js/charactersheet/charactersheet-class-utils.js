@@ -1328,8 +1328,20 @@ class CharacterSheetClassUtils {
 	static checkPrerequisites (/** @type {*} */ prerequisite, /** @type {*} */ context) {
 		if (!prerequisite?.length) return {met: true, reasons: []};
 
-		const {classes = [], totalLevel = 0, existingFeatures = [], cantrips = [], spells = []} = context;
+		const {classes = [], totalLevel = 0, existingFeatures = [], cantrips = [], spells = [], toolProficiencies = [], state = null} = context;
 		const reasons = [];
+
+		// Normalized-tool matcher: prefer state.hasToolProficiency (already
+		// strips apostrophes/whitespace), else fall back to a manual case-fold
+		// against the toolProficiencies string list.
+		const _hasTool = (/** @type {string} */ toolName) => {
+			if (state && typeof state.hasToolProficiency === "function") {
+				return state.hasToolProficiency(toolName);
+			}
+			const norm = (/** @type {*} */ s) => (s || "").toString().toLowerCase().replace(/['\s]+/g, "");
+			const want = norm(toolName);
+			return toolProficiencies.some((/** @type {*} */ t) => norm(t) === want);
+		};
 
 		for (/** @type {*} */ const prereq of prerequisite) {
 			// Level prerequisite
@@ -1416,6 +1428,33 @@ class CharacterSheetClassUtils {
 					if (!hasFeature) {
 						const displayName = reqName.split(" ").map((/** @type {*} */ w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 						reasons.push(displayName);
+					}
+				}
+			}
+
+			// Proficiency prerequisite. Currently scoped to `tool` (the kind
+			// this codepath was extended for — see tracker issue #1148).
+			// `armor`, `weapon`, `weaponGroup`, and `skill` proficiency prereqs
+			// are intentionally NOT gated here yet — a future PR can extend
+			// this branch without a re-audit of call sites.
+			if (/** @type {*} */ prereq.proficiency) {
+				for (/** @type {*} */ const profObj of prereq.proficiency) {
+					if (profObj?.tool === undefined) continue;
+					const spec = profObj.tool;
+					// `tool: true` — any tool proficiency satisfies
+					if (spec === true) {
+						const hasAny = state && typeof state.getToolProficiencies === "function"
+							? (state.getToolProficiencies() || []).length > 0
+							: toolProficiencies.length > 0;
+						if (!hasAny) reasons.push("Proficiency with any tool");
+						continue;
+					}
+					// String or string[] — any-of semantics
+					const options = Array.isArray(spec) ? spec : [spec];
+					const met = options.some((/** @type {*} */ toolName) => _hasTool(toolName));
+					if (!met) {
+						const titled = options.map((/** @type {*} */ t) => (t || "").toString().toTitleCase());
+						reasons.push(`Proficiency with ${titled.join(" or ")}`);
 					}
 				}
 			}
@@ -6548,6 +6587,8 @@ class CharacterSheetClassUtils {
 					existingFeatures: alreadyKnown,
 					cantrips: ctx.state.getCantripsKnown?.() || [],
 					spells: ctx.state.getSpellsKnown?.() || [],
+					toolProficiencies: ctx.state.getToolProficiencies?.() || [],
+					state: ctx.state,
 				};
 				choices.optionalFeatures = featOptSpecs.map((/** @type {*} */ spec) => ({
 					...spec,
