@@ -249,6 +249,10 @@ class ProxyBase extends MixinProxyBase(class {}) {}
 globalThis.ProxyBase = ProxyBase;
 
 class UiUtil {
+	static SEARCH_RESULTS_CAP = 75;
+	static TYPE_TIMEOUT_MS = 100; // auto-search after 100ms
+	static TYPE_TIMEOUT_LAZY_MS = 1500;
+
 	static getBtnClassName (btnType) {
 		if (!btnType) return "ve-btn-primary";
 		switch (btnType) {
@@ -283,6 +287,14 @@ class UiUtil {
 	 */
 	static strToNumber (string, fallbackEmpty = 0, opts) { return UiUtil._strToNumber(string, fallbackEmpty, opts, false); }
 
+	static _parseStrAsNumber (str, isInt) {
+		const wrpTree = Renderer.dice.lang.getTree3(str);
+		if (!wrpTree) return NaN;
+		const out = wrpTree.tree.evl({});
+		if (!isNaN(out) && isInt) return Math.round(out);
+		return out;
+	}
+
 	static _strToNumber (string, fallbackEmpty = 0, opts, isInt) {
 		opts = opts || {};
 		let out;
@@ -311,6 +323,20 @@ class UiUtil {
 		string = string.trim().toLowerCase();
 		if (!string) return fallbackEmpty;
 		return string === "true" ? true : string === "false" ? false : opts.fallbackOnNaB;
+	}
+
+	static strToCr (string) {
+		string = string
+			.trim()
+			.replace(/[^0-9/.,]/g, "");
+		if (Parser.isValidCr(string)) return string;
+
+		if (isNaN(string)) return null;
+
+		const asFrac = Parser.numberToFractional(Number(string));
+		if (Parser.isValidCr(asFrac)) return asFrac;
+
+		return null;
 	}
 
 	static intToBonus (int, {isPretty = false} = {}) { return `${int >= 0 ? "+" : int < 0 ? (isPretty ? "\u2212" : "-") : ""}${Math.abs(int)}`; }
@@ -359,6 +385,11 @@ class UiUtil {
 			return lines;
 		}
 	}
+
+	/* -------------------------------------------- */
+
+	static _MODAL_STACK = null;
+	static _MODAL_LAST_MOUSEDOWN = null;
 
 	/**
 	 * @param {Object} [opts] Options object.
@@ -676,13 +707,7 @@ class UiUtil {
 		return sel;
 	}
 
-	static _parseStrAsNumber (str, isInt) {
-		const wrpTree = Renderer.dice.lang.getTree3(str);
-		if (!wrpTree) return NaN;
-		const out = wrpTree.tree.evl({});
-		if (!isNaN(out) && isInt) return Math.round(out);
-		return out;
-	}
+	/* -------------------------------------------- */
 
 	// eslint-disable-next-line vet-jquery/jquery
 	static bindTypingEnd ({ipt, $ipt, fnKeyup, fnKeypress, fnKeydown, fnClick, timeout} = {}) {
@@ -726,6 +751,8 @@ class UiUtil {
 		;
 	}
 
+	/* -------------------------------------------- */
+
 	/** Brute-force select the input, in case something has delayed the rendering (e.g. a VTT application window) */
 	static async pDoForceFocus (ele, {timeout = 250} = {}) {
 		if (!ele) return;
@@ -737,12 +764,60 @@ class UiUtil {
 			ele.focus();
 		}
 	}
+
+	/* -------------------------------------------- */
+
+	static getEleDragVerticalResize (
+		{
+			wrpContainer,
+			heightPxSaved,
+			fnSetHeightPxSaved,
+		},
+	) {
+		const eleResize = ee`<div class="ve-ui-resize__ele-resize ve-touch-action-none ve-absolute ve-w-100">...</div>`;
+
+		let mouseDownPosY;
+		let deltaY;
+		const resize = (evt) => {
+			evt.preventDefault();
+			evt.stopPropagation();
+
+			const dy = EventUtil.getClientY(evt) - mouseDownPosY + deltaY;
+
+			wrpContainer.style.height = `${dy}px`;
+		};
+
+		eleResize
+			.onn("mousedown", (evt) => {
+				if (evt.button !== 0) return;
+
+				evt.preventDefault();
+
+				mouseDownPosY = EventUtil.getClientY(evt);
+				deltaY = mouseDownPosY - wrpContainer.getBoundingClientRect().top + eleResize.getBoundingClientRect().height;
+
+				document.removeEventListener("mousemove", resize);
+				document.addEventListener("mousemove", resize);
+			});
+
+		document.addEventListener("mouseup", evt => {
+			if (evt.button !== 0) return;
+			if (mouseDownPosY == null) return;
+
+			document.removeEventListener("mousemove", resize);
+			mouseDownPosY = null;
+
+			const height = wrpContainer.getBoundingClientRect().height;
+			if (!height) return;
+
+			fnSetHeightPxSaved(Math.round(height));
+		});
+
+		if (heightPxSaved) wrpContainer.style.height = `${heightPxSaved}px`;
+
+		return eleResize;
+	}
 }
-UiUtil.SEARCH_RESULTS_CAP = 75;
-UiUtil.TYPE_TIMEOUT_MS = 100; // auto-search after 100ms
-UiUtil.TYPE_TIMEOUT_LAZY_MS = 1500;
-UiUtil._MODAL_STACK = null;
-UiUtil._MODAL_LAST_MOUSEDOWN = null;
 
 class ListSelectClickHandlerBase {
 	static _EVT_PASS_THOUGH_TAGS = new Set(["A", "BUTTON", "INPUT", "TEXTAREA"]);
@@ -983,6 +1058,11 @@ class ListSelectClickHandler extends ListSelectClickHandlerBase {
 globalThis.ListSelectClickHandler = ListSelectClickHandler;
 
 class RenderableCollectionSelectClickHandler extends ListSelectClickHandlerBase {
+	/**
+	 * @param {BaseComponent} comp
+	 * @param {string} prop
+	 * @param {?string} namespace
+	 */
 	constructor ({comp, prop, namespace = null}) {
 		super();
 		this._comp = comp;
@@ -1011,110 +1091,19 @@ class RenderableCollectionSelectClickHandler extends ListSelectClickHandlerBase 
 	get _visibleItems () {
 		return this._allItems;
 	}
+
+	/* -------------------------------------------- */
+
+	getSelectedIds () {
+		return Object.entries(this._comp._getRenderedCollection({prop: this._prop, namespace: this._namespace}))
+			.filter(([, rendered]) => rendered.cbSel.checked)
+			.map(([id]) => id);
+	}
 }
 
 globalThis.RenderableCollectionSelectClickHandler = RenderableCollectionSelectClickHandler;
 
 class ListUiUtil {
-	static bindPreviewButton (page, allData, item, btnShowHidePreview, {fnGetPreviewStats} = {}) {
-		btnShowHidePreview.addEventListener("click", evt => {
-			const entity = allData[item.ix];
-			page = page || entity?.__prop;
-
-			const elePreviewWrp = this.getOrAddListItemPreviewLazy(item);
-
-			this.handleClickBtnShowHideListPreview(evt, page, entity, btnShowHidePreview, elePreviewWrp, {fnGetPreviewStats});
-		});
-	}
-
-	static handleClickBtnShowHideListPreview (evt, page, entity, btnShowHidePreview, elePreviewWrp, {nxtText = null, fnGetPreviewStats} = {}) {
-		evt.stopPropagation();
-		evt.preventDefault();
-
-		nxtText = nxtText ?? btnShowHidePreview.innerHTML.trim() === this.HTML_GLYPHICON_EXPAND ? this.HTML_GLYPHICON_CONTRACT : this.HTML_GLYPHICON_EXPAND;
-		const isHidden = nxtText === this.HTML_GLYPHICON_EXPAND;
-		const isFluff = !!evt.shiftKey;
-
-		elePreviewWrp.classList.toggle("ve-hidden", isHidden);
-		btnShowHidePreview.innerHTML = nxtText;
-
-		const elePreviewWrpInner = elePreviewWrp.lastElementChild;
-
-		const isForce = (elePreviewWrp.dataset.dataType === "stats" && isFluff) || (elePreviewWrp.dataset.dataType === "fluff" && !isFluff);
-		if (!isForce && elePreviewWrpInner.innerHTML) return;
-
-		elePreviewWrpInner.empty().off("click").onn("click", evt => { evt.stopPropagation(); });
-
-		if (isHidden) return;
-
-		elePreviewWrp.dataset.dataType = isFluff ? "fluff" : "stats";
-
-		const doAppendStatView = () => (fnGetPreviewStats || Renderer.hover.getHoverContent_stats)(page, entity, {isStatic: true}).appendTo(elePreviewWrpInner);
-
-		if (!evt.shiftKey || !UrlUtil.URL_TO_HASH_BUILDER[page]) {
-			doAppendStatView();
-			return;
-		}
-
-		Renderer.utils.pGetProxyFluff({entity})
-			.then(fluffEntity => {
-				// Avoid clobbering existing elements, as other events might have updated the preview area while we were
-				//  loading the fluff.
-				if (elePreviewWrpInner.innerHTML) return;
-
-				if (!fluffEntity) return doAppendStatView();
-				Renderer.hover.getHoverContent_fluff(page, fluffEntity).appendTo(elePreviewWrpInner);
-			});
-	}
-
-	static getOrAddListItemPreviewLazy (item) {
-		// We lazily add the preview UI, to mitigate rendering performance issues
-		let elePreviewWrp;
-		if (item.ele.children.length === 1) {
-			elePreviewWrp = e_({
-				tag: "div",
-				clazz: "ve-hidden ve-flex",
-				children: [
-					e_({tag: "div", clazz: "ve-col-0-5"}),
-					e_({tag: "div", clazz: "ve-col-11-5 ve-ui-list__wrp-preview ve-py-2 ve-pr-2"}),
-				],
-			}).appendTo(item.ele);
-		} else elePreviewWrp = item.ele.lastElementChild;
-		return elePreviewWrp;
-	}
-
-	static bindPreviewAllButton (btnAll, list) {
-		if (!btnAll) return;
-
-		btnAll
-			.addEventListener("click", async () => {
-				const nxtHtml = btnAll.innerHTML === ListUiUtil.HTML_GLYPHICON_EXPAND
-					? ListUiUtil.HTML_GLYPHICON_CONTRACT
-					: ListUiUtil.HTML_GLYPHICON_EXPAND;
-
-				if (nxtHtml === ListUiUtil.HTML_GLYPHICON_CONTRACT && list.visibleItems.length > 500) {
-					const isSure = await InputUiUtil.pGetUserBoolean({
-						title: "Are You Sure?",
-						htmlDescription: `You are about to expand ${list.visibleItems.length} rows. This may seriously degrade performance.<br>Are you sure you want to continue?`,
-					});
-					if (!isSure) return;
-				}
-
-				btnAll.innerHTML = nxtHtml;
-
-				list.visibleItems.forEach(listItem => {
-					if (listItem.data.btnShowHidePreview.innerHTML !== nxtHtml) listItem.data.btnShowHidePreview.click();
-				});
-			});
-
-		list.on("updated", () => {
-			const isShowExpand = list.visibleItems.every(listItem => listItem.data.btnShowHidePreview.innerHTML === ListUiUtil.HTML_GLYPHICON_EXPAND);
-			btnAll.innerHTML = isShowExpand ? ListUiUtil.HTML_GLYPHICON_EXPAND : ListUiUtil.HTML_GLYPHICON_CONTRACT;
-		});
-	}
-
-	// ==================
-
 	static ListSyntax = class {
 		static _READONLY_WALKER = null;
 
@@ -1132,22 +1121,24 @@ class ListUiUtil {
 
 		build () {
 			return {
+				reCommand: /^(?<command>name|stats|info|text)/,
+
 				name: {
-					help: `"name:<query>" ("/query/" for regex; "!query" and "!/query/" to invert) to search by name.`,
+					help: `\`name:"query"\` (/query/ for regex; \`name:! ...\` to invert) to search by name.`,
 					fn: (listItem, searchTerm) => {
 						if (listItem.data._textCacheName == null) listItem.data._textCacheName = listItem.name.toLowerCase().trim();
 						return this._listSyntax_isTextMatch(listItem.data._textCacheName, searchTerm);
 					},
 				},
 				stats: {
-					help: `"stats:<query>" ("/query/" for regex; "!query" and "!/query/" to invert) to search within stat blocks.`,
+					help: `\`stats:"query"\` (/query/ for regex; \`stats:! ...\` to invert) to search within stat blocks.`,
 					fn: (listItem, searchTerm) => {
 						if (listItem.data._textCacheStats == null) listItem.data._textCacheStats = this._getSearchCacheStats(this._dataList[listItem.ix]);
 						return this._listSyntax_isTextMatch(listItem.data._textCacheStats, searchTerm);
 					},
 				},
 				info: {
-					help: `"info:<query>" ("/query/" for regex; "!query" and "!/query/" to invert) to search within info.`,
+					help: `\`info:"query" (/query/ for regex; \`info:! ...\` to invert) to search within info.`,
 					fn: async (listItem, searchTerm) => {
 						if (listItem.data._textCacheFluff == null) listItem.data._textCacheFluff = await this._pGetSearchCacheFluff(this._dataList[listItem.ix]);
 						return this._listSyntax_isTextMatch(listItem.data._textCacheFluff, searchTerm);
@@ -1155,7 +1146,7 @@ class ListUiUtil {
 					isAsync: true,
 				},
 				text: {
-					help: `"text:<query>" ("/query/" for regex; "!query" and "!/query/" to invert) to search within stat blocks plus info.`,
+					help: `\`text:"query" (/query/ for regex; \`text:! ...\` to invert) to search within stat blocks plus info.`,
 					fn: async (listItem, searchTerm) => {
 						if (listItem.data._textCacheAll == null) {
 							const {textCacheStats, textCacheFluff, textCacheAll} = await this._pGetSearchCacheAll(this._dataList[listItem.ix], {textCacheStats: listItem.data._textCacheStats, textCacheFluff: listItem.data._textCacheFluff});
@@ -1241,10 +1232,163 @@ class ListUiUtil {
 
 	// ==================
 }
-ListUiUtil.HTML_GLYPHICON_EXPAND = `[+]`;
-ListUiUtil.HTML_GLYPHICON_CONTRACT = `[\u2212]`;
 
 globalThis.ListUiUtil = ListUiUtil;
+
+/**
+ * @abstract
+ */
+class ListUiPreviewButtonHandlerBase {
+	static HTML_GLYPHICON_EXPAND = `[+]`;
+	static HTML_GLYPHICON_CONTRACT = `[\u2212]`;
+
+	/* -------------------------------------------- */
+
+	_hasAltMode = false;
+
+	/* -------------------------------------------- */
+
+	bindPreviewButton ({entity, listItem, btnShowHidePreview}) {
+		btnShowHidePreview
+			.addEventListener("click", evt => {
+				evt.stopPropagation();
+				evt.preventDefault();
+
+				const elePreviewWrp = this._getOrAddListItemPreviewLazy({listItem});
+
+				this._handleClickBtnShowHideListPreview({evt, entity, btnShowHidePreview, elePreviewWrp});
+			});
+	}
+
+	_getOrAddListItemPreviewLazy ({listItem}) {
+		// We lazily add the preview UI, to mitigate rendering performance issues
+		if (listItem.ele.children.length === 1) {
+			return e_({
+				tag: "div",
+				clazz: "ve-hidden ve-flex",
+				children: [
+					e_({tag: "div", clazz: "ve-col-0-5"}),
+					e_({tag: "div", clazz: "ve-col-11-5 ve-ui-list__wrp-preview ve-py-2 ve-pr-2"}),
+				],
+			})
+				.appendTo(listItem.ele);
+		}
+
+		return listItem.ele.lastElementChild;
+	}
+
+	_handleClickBtnShowHideListPreview ({evt, entity, btnShowHidePreview, elePreviewWrp}) {
+		const nxtText = btnShowHidePreview.innerHTML.trim() === this.constructor.HTML_GLYPHICON_EXPAND
+			? this.constructor.HTML_GLYPHICON_CONTRACT
+			: this.constructor.HTML_GLYPHICON_EXPAND;
+		const isHidden = nxtText === this.constructor.HTML_GLYPHICON_EXPAND;
+		const isAltMode = this._hasAltMode && !!evt.shiftKey;
+
+		elePreviewWrp.classList.toggle("ve-hidden", isHidden);
+		btnShowHidePreview.innerHTML = nxtText;
+
+		const elePreviewWrpInner = elePreviewWrp.lastElementChild;
+
+		const isForce = (elePreviewWrp.dataset.dataType === "primary" && isAltMode) || (elePreviewWrp.dataset.dataType === "secondary" && !isAltMode);
+		if (!isForce && elePreviewWrpInner.innerHTML) return;
+
+		elePreviewWrpInner
+			.empty()
+			.off("click")
+			.onn("click", evt => {
+				evt.stopPropagation();
+			});
+
+		if (isHidden) return;
+
+		elePreviewWrp.dataset.dataType = isAltMode ? "secondary" : "primary";
+
+		if (!isAltMode) return this._doAppendPrimaryView({entity, elePreviewWrpInner});
+		return this._doAppendSecondaryView({entity, elePreviewWrpInner});
+	}
+
+	/* ----- */
+
+	/**
+	 * @abstract
+	 * @return {void}
+	 */
+	_doAppendPrimaryView ({entity, elePreviewWrpInner}) {
+		throw new Error(`Unimplemented!`);
+	}
+
+	/**
+	 * @abstract
+	 * @return {void}
+	 */
+	_doAppendSecondaryView ({entity, elePreviewWrpInner}) {
+		throw new Error(`Unimplemented!`);
+	}
+
+	/* -------------------------------------------- */
+
+	bindPreviewAllButton ({btnAll, list}) {
+		if (!btnAll) return;
+
+		btnAll
+			.addEventListener("click", async () => {
+				const nxtHtml = btnAll.innerHTML === this.constructor.HTML_GLYPHICON_EXPAND
+					? this.constructor.HTML_GLYPHICON_CONTRACT
+					: this.constructor.HTML_GLYPHICON_EXPAND;
+
+				if (nxtHtml === this.constructor.HTML_GLYPHICON_CONTRACT && list.visibleItems.length > 500) {
+					const isSure = await InputUiUtil.pGetUserBoolean({
+						title: "Are You Sure?",
+						htmlDescription: `You are about to expand ${list.visibleItems.length} rows. This may seriously degrade performance.<br>Are you sure you want to continue?`,
+					});
+					if (!isSure) return;
+				}
+
+				btnAll.innerHTML = nxtHtml;
+
+				list.visibleItems.forEach(listItem => {
+					if (listItem.data.btnShowHidePreview.innerHTML !== nxtHtml) listItem.data.btnShowHidePreview.click();
+				});
+			});
+
+		list.on("updated", () => {
+			const isShowExpand = list.visibleItems.every(listItem => listItem.data.btnShowHidePreview.innerHTML === this.constructor.HTML_GLYPHICON_EXPAND);
+			btnAll.innerHTML = isShowExpand ? this.constructor.HTML_GLYPHICON_EXPAND : this.constructor.HTML_GLYPHICON_CONTRACT;
+		});
+	}
+}
+
+globalThis.ListUiPreviewButtonHandlerBase = ListUiPreviewButtonHandlerBase;
+
+class ListUiPreviewButtonHandlerStatsFluff extends ListUiPreviewButtonHandlerBase {
+	_hasAltMode = true;
+
+	constructor ({page}) {
+		super();
+		this._page = page;
+	}
+
+	_doAppendPrimaryView ({entity, elePreviewWrpInner}) {
+		Renderer.hover.getHoverContent_stats(this._page, entity, {isStatic: true})
+			.appendTo(elePreviewWrpInner);
+	}
+
+	_doAppendSecondaryView ({entity, elePreviewWrpInner}) {
+		if (!UrlUtil.URL_TO_HASH_BUILDER[this._page]) return this._doAppendPrimaryView({entity, elePreviewWrpInner});
+
+		Renderer.utils.pGetProxyFluff({entity})
+			.then(fluffEntity => {
+				// Avoid clobbering existing elements, as other events might have updated the preview area while we were
+				//  loading the fluff.
+				if (elePreviewWrpInner.innerHTML) return;
+
+				if (!fluffEntity) return this._doAppendPrimaryView({entity, elePreviewWrpInner});
+				Renderer.hover.getHoverContent_fluff(this._page, fluffEntity).appendTo(elePreviewWrpInner);
+			});
+	}
+}
+
+globalThis.ListUiPreviewButtonHandlerStatsFluff = ListUiPreviewButtonHandlerStatsFluff;
 
 class ProfUiUtil {
 	static _PROF_TO_FULL = {
@@ -1774,7 +1918,7 @@ class SearchUiUtil {
 		Object.values(alternateData).forEach(arr => arr.forEach(d => handleDataItem(d, true)));
 
 		const pAddPrereleaseBrewIndex = async ({brewUtil}) => {
-			const brewIndex = await brewUtil.pGetSearchIndex({id: availContent.ALL.documentStore.length});
+			const brewIndex = await brewUtil.pGetSearchIndex({id: ixMax + 1});
 
 			brewIndex.forEach(d => {
 				if (SearchUiUtil._isNoHoverCat(d.c) || fromDeepIndex(d)) return;
@@ -1783,6 +1927,7 @@ class SearchUiUtil {
 				initIndexForFullCat(d);
 				availContent.ALL.addDoc(d);
 				availContent[d.cf].addDoc(d);
+				ixMax = Math.max(ixMax, d.id);
 			});
 		};
 
@@ -3877,14 +4022,43 @@ function MixinBaseComponent (Cls) {
 
 			const toDelete = new Set(Object.keys(rendered));
 
+			// region Validation/setup
 			for (let i = 0; i < entities.length; ++i) {
 				const entity = entities[i];
 
 				if (entity.id == null) throw new Error(`Collection item did not have an ID!`);
+				if (typeof entity.id !== "string") throw new Error(`Collection item ID was not a string!`);
+
+				toDelete.delete(entity.id);
+			}
+			// endregion
+
+			// region Deletes
+			// Do deletes first, to prevent the case where e.g. a `fnUpdateExisting` triggers a recursive
+			//   update to the collection as an inner loop, which leaves the outer loop with already-deleted
+			//   renders which it will be unable to act upon.
+			const doRemoveElements = meta => {
+				if (meta.wrpRow) meta.wrpRow.remove();
+				// eslint-disable-next-line vet-jquery/jquery
+				if (meta.$wrpRow) meta.$wrpRow.remove();
+				if (meta.fnRemoveEles) meta.fnRemoveEles();
+			};
+
+			toDelete.forEach(id => {
+				const meta = rendered[id];
+				doRemoveElements(meta);
+				delete rendered[id];
+				if (opts.fnDeleteExisting) opts.fnDeleteExisting(meta);
+			});
+			// endregion
+
+			// region New/existing
+			for (let i = 0; i < entities.length; ++i) {
+				const entity = entities[i];
+
 				// N.B.: Meta can be an array, if one item maps to multiple renders (e.g. the same is shown in two places)
 				const meta = rendered[entity.id];
 
-				toDelete.delete(entity.id);
 				if (meta) {
 					if (opts.isDiffMode) {
 						const nxtHash = this._getCollectionEntityHash(entity);
@@ -3910,26 +4084,13 @@ function MixinBaseComponent (Cls) {
 				}
 			}
 
-			const doRemoveElements = meta => {
-				if (meta.wrpRow) meta.wrpRow.remove();
-				// eslint-disable-next-line vet-jquery/jquery
-				if (meta.$wrpRow) meta.$wrpRow.remove();
-				if (meta.fnRemoveEles) meta.fnRemoveEles();
-			};
-
-			toDelete.forEach(id => {
-				const meta = rendered[id];
-				doRemoveElements(meta);
-				delete rendered[id];
-				if (opts.fnDeleteExisting) opts.fnDeleteExisting(meta);
-			});
-
 			if (opts.fnReorderExisting) {
 				entities.forEach((it, i) => {
 					const meta = rendered[it.id];
 					opts.fnReorderExisting(meta, it, i);
 				});
 			}
+			// endregion
 		}
 
 		/**
@@ -4056,7 +4217,7 @@ function MixinBaseComponent (Cls) {
 
 		// to be overridden as required
 		getSaveableState () { return {...this.getBaseSaveableState()}; }
-		setStateFrom (toLoad, isOverwrite = false) { this.setBaseSaveableStateFrom(toLoad, isOverwrite); }
+		setStateFrom (toLoad, isOverwrite = false) { return this.setBaseSaveableStateFrom(toLoad, isOverwrite); }
 
 		async _pLock (lockName, {lockToken = null, isDbg = false} = {}) {
 			this.__locks[lockName] ||= new VeLock({name: lockName, isDbg});
@@ -4187,7 +4348,7 @@ class RenderableCollectionBase {
 globalThis.RenderableCollectionBase = RenderableCollectionBase;
 
 class _RenderableCollectionGenericRowsSyncAsyncUtils {
-	constructor ({comp, prop, wrpRows, namespace}) {
+	constructor ({comp, prop, wrpRows, namespace = null}) {
 		this._comp = comp;
 		this._prop = prop;
 		this._wrpRows = wrpRows;
@@ -4246,9 +4407,17 @@ class _RenderableCollectionGenericRowsSyncAsyncUtils {
 
 	/* -------------------------------------------- */
 
-	getBtnDelete ({entity, title = "Delete"}) {
+	getBtnDelete ({entity, title = "Delete", pFnGetIsConfirm = null}) {
 		return ee`<button class="ve-btn ve-btn-xxs ve-btn-danger" title="${title.qq()}"><span class="glyphicon glyphicon-trash"></span></button>`
-			.onn("click", () => this.doDelete({entity}));
+			.onn("click", async () => {
+				if (
+					pFnGetIsConfirm
+					&& await pFnGetIsConfirm()
+					&& !await InputUiUtil.pGetUserBoolean({title: "Delete", htmlDescription: "Are you sure?", textYes: "Yes", textNo: "Cancel"})
+				) return;
+
+				this.doDelete({entity});
+			});
 	}
 
 	doDelete ({entity}) {
@@ -4290,10 +4459,12 @@ class RenderableCollectionGenericRows extends RenderableCollectionBase {
 	 * @param [opts]
 	 * @param [opts.namespace]
 	 * @param [opts.isDiffMode]
+	 * @param [opts.selectClickHandler]
 	 */
 	constructor (comp, prop, wrpRows, opts) {
 		super(comp, prop, opts);
 		this._wrpRows = wrpRows;
+		this._selectClickHandler = opts?.selectClickHandler;
 
 		this._utils = new _RenderableCollectionGenericRowsSyncAsyncUtils({
 			comp,
@@ -4319,12 +4490,29 @@ class RenderableCollectionGenericRows extends RenderableCollectionBase {
 
 		const renderAdditional = this._populateRow({comp, wrpRow, entity});
 
-		return {
+		const rendered = {
 			...(renderAdditional || {}),
 			id: entity.id,
 			comp,
 			wrpRow,
 		};
+
+		if (this._selectClickHandler) {
+			if (!rendered.cbSel) throw new Error(`Renderable collection with select-click handler failed to return "cbSel"! This is a bug!`);
+			if (!rendered.wrpCbSel) throw new Error(`Renderable collection with select-click handler failed to return "wrpCbSel"! This is a bug!`);
+
+			rendered.wrpRow
+				.onn("click", evt => this._selectClickHandler.handleSelectClick(rendered, evt, {isPassThroughEvents: true}));
+
+			rendered.wrpCbSel
+				.onn("mousedown", evt => {
+					evt.preventDefault();
+					evt.stopPropagation();
+				})
+			;
+		}
+
+		return rendered;
 	}
 
 	_getWrpRow () {
@@ -4727,7 +4915,7 @@ MixinComponentGlobalState._Singleton = class {
 	}
 };
 MixinComponentGlobalState._Singleton.__stateGlobal = {...MixinComponentGlobalState._Singleton._getDefaultStateGlobal()};
-MixinComponentGlobalState._Singleton._pSaveStateDebounced = MiscUtil.debounce(MixinComponentGlobalState._Singleton._pSaveState.bind(MixinComponentGlobalState._Singleton), 100);
+MixinComponentGlobalState._Singleton._pSaveStateDebounced = MiscUtil.debounce(MixinComponentGlobalState._Singleton._pSaveState.bind(MixinComponentGlobalState._Singleton), VeCt.DUR_DEBOUNCE_SAVE);
 MixinComponentGlobalState._Singleton._pLoadingState = null;
 
 // endregion
@@ -5215,12 +5403,15 @@ class ComponentUiUtil {
 	 * @param [opts.asMeta] If a meta-object should be returned containing the hook and the input.
 	 * @param [opts.isDisplayNullAsIndeterminate]
 	 * @param [opts.isTreatIndeterminateNullAsPositive]
+	 * @param [opts.isDisplayAsInverse]
 	 * @param [opts.stateName] State name.
 	 * @param [opts.stateProp] State prop.
 	 * @return {(HTMLElementExtended | Object)}
 	 */
 	static getCbBool (component, prop, opts) {
 		opts = opts || {};
+
+		if ((opts.isDisplayNullAsIndeterminate || opts.isTreatIndeterminateNullAsPositive) && opts.isDisplayAsInverse) throw new Error(`"isDisplayNullAsIndeterminate"/"isTreatIndeterminateNullAsPositive" and "isDisplayAsInverse" are mutually exclusive!`);
 
 		const stateName = opts.stateName || "state";
 		const stateProp = opts.stateProp || `_${stateName}`;
@@ -5237,12 +5428,13 @@ class ComponentUiUtil {
 					return;
 				}
 
-				component[stateProp][prop] = cb.checked;
+				component[stateProp][prop] = opts.isDisplayAsInverse ? !cb.checked : cb.checked;
 			},
 		});
 
 		const hook = () => {
-			cb.checked = !!component[stateProp][prop];
+			const val = !!component[stateProp][prop];
+			cb.checked = opts.isDisplayAsInverse ? !val : val;
 			if (opts.isDisplayNullAsIndeterminate) cb.indeterminate = component[stateProp][prop] == null;
 		};
 		component._addHook(stateName, prop, hook);

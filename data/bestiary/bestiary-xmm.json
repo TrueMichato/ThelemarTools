@@ -222,7 +222,8 @@
 			"page": 86,
 			"referenceSources": [
 				"EFA",
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -373,6 +374,9 @@
 			"page": 12,
 			"srd52": true,
 			"basicRules2024": true,
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"L"
 			],
@@ -690,6 +694,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BtS",
 				"FRAiF"
 			],
 			"size": [
@@ -900,7 +905,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-DotSC"
 			],
 			"size": [
 				"H"
@@ -1174,7 +1180,7 @@
 						"{@spell Detect Magic|XPHB}",
 						"{@spell Minor Illusion|XPHB}",
 						"{@spell Scorching Ray|XPHB}",
-						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no Concentration or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)",
+						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no {@status Concentration|XPHB} or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)",
 						"{@spell Speak with Animals|XPHB}"
 					],
 					"daily": {
@@ -1379,7 +1385,7 @@
 					"will": [
 						"{@spell Detect Magic|XPHB}",
 						"{@spell Guiding Bolt|XPHB} (level 2 version)",
-						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no Concentration or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)",
+						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no {@status Concentration|XPHB} or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)",
 						"{@spell Speak with Animals|XPHB}",
 						"{@spell Thaumaturgy|XPHB}"
 					],
@@ -1528,6 +1534,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-ACfaS",
 				"FRAiF"
 			],
 			"size": [
@@ -1600,7 +1607,7 @@
 						"{@spell Detect Magic|XPHB}",
 						"{@spell Mind Spike|XPHB} (level 4 version)",
 						"{@spell Minor Illusion|XPHB}",
-						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no Concentration or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
+						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no {@status Concentration|XPHB} or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
 					],
 					"daily": {
 						"1e": [
@@ -1809,7 +1816,7 @@
 					"will": [
 						"{@spell Detect Magic|XPHB}",
 						"{@spell Guiding Bolt|XPHB} (level 2 version)",
-						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no Concentration or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
+						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no {@status Concentration|XPHB} or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
 					],
 					"daily": {
 						"1e": [
@@ -2441,7 +2448,7 @@
 						"{@spell Detect Magic|XPHB}",
 						"{@spell Hold Monster|XPHB}",
 						"{@spell Ice Knife|XPHB}",
-						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no Concentration or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
+						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no {@status Concentration|XPHB} or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
 					],
 					"daily": {
 						"1e": [
@@ -2586,6 +2593,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-SD",
 				"FRAiF"
 			],
 			"size": [
@@ -3207,6 +3215,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-DotSC",
 				"FRAiF"
 			],
 			"size": [
@@ -3481,7 +3490,7 @@
 						"{@spell Detect Magic|XPHB}",
 						"{@spell Minor Illusion|XPHB}",
 						"{@spell Scorching Ray|XPHB} (level 3 version)",
-						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no Concentration or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)",
+						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no {@status Concentration|XPHB} or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)",
 						"{@spell Speak with Animals|XPHB}"
 					],
 					"daily": {
@@ -3686,7 +3695,7 @@
 					"will": [
 						"{@spell Detect Magic|XPHB}",
 						"{@spell Guiding Bolt|XPHB} (level 2 version)",
-						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no Concentration or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)",
+						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no {@status Concentration|XPHB} or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)",
 						"{@spell Speak with Animals|XPHB}",
 						"{@spell Thaumaturgy|XPHB}"
 					],
@@ -3910,7 +3919,7 @@
 						"{@spell Detect Magic|XPHB}",
 						"{@spell Mind Spike|XPHB} (level 5 version)",
 						"{@spell Minor Illusion|XPHB}",
-						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no Concentration or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
+						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no {@status Concentration|XPHB} or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
 					],
 					"daily": {
 						"1e": [
@@ -4121,7 +4130,7 @@
 					"will": [
 						"{@spell Detect Magic|XPHB}",
 						"{@spell Guiding Bolt|XPHB} (level 4 version)",
-						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no Concentration or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
+						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no {@status Concentration|XPHB} or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
 					],
 					"daily": {
 						"1e": [
@@ -4754,7 +4763,7 @@
 						"{@spell Detect Magic|XPHB}",
 						"{@spell Hold Monster|XPHB}",
 						"{@spell Ice Knife|XPHB} (level 2 version)",
-						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no Concentration or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
+						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no {@status Concentration|XPHB} or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
 					],
 					"daily": {
 						"1e": [
@@ -5460,7 +5469,8 @@
 			"referenceSources": [
 				"EFA",
 				"FRAiF",
-				"LFL"
+				"LFL",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -5604,7 +5614,7 @@
 				{
 					"name": "Flyby",
 					"entries": [
-						"The broom doesn't provoke an Opportunity Attack when it flies out of an enemy's reach."
+						"The broom doesn't provoke an {@action Opportunity Attack|XPHB} when it flies out of an enemy's reach."
 					]
 				}
 			],
@@ -5642,8 +5652,10 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
+				"BQDD",
 				"EFA",
-				"HotB"
+				"HotB",
+				"RHW"
 			],
 			"size": [
 				"S"
@@ -5729,8 +5741,10 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BD",
 				"EFA",
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -5986,6 +6000,9 @@
 					"page": 346
 				}
 			],
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"M"
 			],
@@ -6064,6 +6081,9 @@
 			],
 			"source": "XMM",
 			"page": 19,
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"M"
 			],
@@ -6287,6 +6307,9 @@
 			"name": "Arch-hag",
 			"source": "XMM",
 			"page": 21,
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"L"
 			],
@@ -6624,7 +6647,8 @@
 			"referenceSources": [
 				"EFA",
 				"FRAiF",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -6830,9 +6854,11 @@
 			"page": 248,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
 				"EFA",
 				"FRAiF",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -7001,9 +7027,12 @@
 			"referenceSources": [
 				"ABH",
 				"DrDe",
+				"DrDe-BtS",
+				"DrDe-TDoN",
 				"EFA",
 				"FRAiF",
-				"LFL"
+				"LFL",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -7206,7 +7235,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"H"
@@ -7912,9 +7942,12 @@
 				"ABH",
 				"BQGT",
 				"DrDe",
+				"DrDe-BD",
+				"DrDe-DotSC",
 				"EFA",
 				"FRAiF",
-				"HotB"
+				"HotB",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -8379,7 +8412,8 @@
 			"source": "XMM",
 			"page": 29,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -8871,7 +8905,9 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
-				"NF"
+				"DrDe-DotSC",
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -9166,6 +9202,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
 				"FRAiF"
 			],
 			"size": [
@@ -9297,7 +9334,8 @@
 			"page": 36,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -9548,7 +9586,8 @@
 			"source": "XMM",
 			"page": 347,
 			"referenceSources": [
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -9714,9 +9753,11 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
 				"EFA",
 				"FRAiF",
 				"FRHoF",
+				"RHW",
 				"ScoEE"
 			],
 			"size": [
@@ -10135,8 +10176,10 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TWoO",
 				"FRAiF",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -10288,6 +10331,7 @@
 			],
 			"passive": 15,
 			"languages": [
+				"Blink Dog",
 				"understands Elvish and Sylvan but can't speak them"
 			],
 			"cr": "1/4",
@@ -10324,6 +10368,7 @@
 			"languageTags": [
 				"CS",
 				"E",
+				"OTH",
 				"S"
 			],
 			"damageTags": [
@@ -10345,7 +10390,8 @@
 			"page": 47,
 			"referenceSources": [
 				"EFA",
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"G"
@@ -10716,7 +10762,9 @@
 			"page": 285,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-FWtVC",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -10913,6 +10961,9 @@
 			"page": 52,
 			"srd52": true,
 			"basicRules2024": true,
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"L"
 			],
@@ -11807,7 +11858,9 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
+				"BQDD",
 				"DrDe",
+				"DrDe-BD",
 				"FRAiF",
 				"HotB",
 				"UtHftLH"
@@ -11925,6 +11978,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
 				"FRAiF"
 			],
 			"size": [
@@ -12577,7 +12631,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"FRAiF",
-				"HotB"
+				"HotB",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -13021,7 +13076,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -13269,7 +13325,7 @@
 				{
 					"name": "Drone",
 					"entries": [
-						"{@actSave con} {@dc 12}, each creature in a 30-foot {@variantrule Emanation [Area of Effect]|XPHB|Emanation} originating from the chasme (demons automatically succeed on this save). {@actSaveFail} The target has the {@condition Unconscious|XPHB} condition and repeats the save at the end of each of its turns. The target succeeds automatically after 10 minutes or if it takes damage or a creature within 5 feet of it takes an action to empty a flask of Holy Water on it. {@actSaveSuccess} The target is immune to this chasme's Drone for 24 hours."
+						"{@actSave con} {@dc 12}, each creature in a 30-foot {@variantrule Emanation [Area of Effect]|XPHB|Emanation} originating from the chasme (demons automatically succeed on this save). {@actSaveFail} The target has the {@condition Unconscious|XPHB} condition and repeats the save at the end of each of its turns. The target succeeds automatically after 10 minutes or if it takes damage or a creature within 5 feet of it takes an action to empty a flask of {@item Holy Water|XPHB} on it. {@actSaveSuccess} The target is immune to this chasme's Drone for 24 hours."
 					]
 				}
 			],
@@ -13321,7 +13377,9 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-TFV",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -13713,6 +13771,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BtS",
 				"FRAiF"
 			],
 			"size": [
@@ -14019,7 +14078,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-BD"
 			],
 			"size": [
 				"S"
@@ -14131,7 +14191,7 @@
 				{
 					"name": "Flyby",
 					"entries": [
-						"The cockatrice doesn't provoke an Opportunity Attack when it flies out of an enemy's reach."
+						"The cockatrice doesn't provoke an {@action Opportunity Attack|XPHB} when it flies out of an enemy's reach."
 					]
 				}
 			],
@@ -14379,11 +14439,19 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"ABH",
+				"BQDD",
 				"DrDe",
+				"DrDe-ACfaS",
+				"DrDe-BD",
+				"DrDe-BtS",
+				"DrDe-DaS",
+				"DrDe-TDoN",
+				"DrDe-TWoO",
 				"FRAiF",
 				"HotB",
 				"LFL",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -14471,6 +14539,7 @@
 			],
 			"referenceSources": [
 				"DrDe",
+				"DrDe-DaS",
 				"HBTD"
 			],
 			"size": [
@@ -14739,7 +14808,7 @@
 						"{@spell Detect Evil and Good|XPHB}",
 						"{@spell Detect Magic|XPHB}",
 						"{@spell Detect Thoughts|XPHB}",
-						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no Concentration or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
+						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no {@status Concentration|XPHB} or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
 					],
 					"daily": {
 						"1e": [
@@ -15108,6 +15177,7 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
+				"BQDD",
 				"FRAiF",
 				"FRHoF",
 				"HotB",
@@ -15195,8 +15265,10 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TWoO",
 				"FRAiF",
 				"FRHoF",
+				"RHW",
 				"ScoEE"
 			],
 			"size": [
@@ -15327,7 +15399,8 @@
 			"source": "XMM",
 			"page": 85,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -15597,6 +15670,7 @@
 			"page": 88,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
 				"FRAiF"
 			],
 			"size": [
@@ -15698,7 +15772,9 @@
 			"page": 89,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-DotSC",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -15882,6 +15958,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BtS",
 				"FRAiF"
 			],
 			"size": [
@@ -15964,7 +16041,8 @@
 			"page": 86,
 			"referenceSources": [
 				"EFA",
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -16097,7 +16175,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -16190,8 +16269,10 @@
 			"page": 92,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TWoO",
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -16401,7 +16482,8 @@
 			"source": "XMM",
 			"page": 93,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -17041,7 +17123,7 @@
 				{
 					"name": "Agile",
 					"entries": [
-						"The deer doesn't provoke an Opportunity Attack when it moves out of an enemy's reach."
+						"The deer doesn't provoke an {@action Opportunity Attack|XPHB} when it moves out of an enemy's reach."
 					]
 				}
 			],
@@ -17115,6 +17197,7 @@
 			"wis": 17,
 			"cha": 20,
 			"save": {
+				"dex": "+11",
 				"con": "+6",
 				"int": "+11",
 				"wis": "+9"
@@ -17329,7 +17412,7 @@
 					],
 					"will": [
 						"{@spell Detect Evil and Good|XPHB}",
-						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no Concentration or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
+						"{@spell Shapechange|XPHB} (Beast or Humanoid form only, no {@variantrule Temporary Hit Points|XPHB} gained from the spell, and no {@status Concentration|XPHB} or {@variantrule Temporary Hit Points|XPHB} required to maintain the spell)"
 					],
 					"daily": {
 						"1e": [
@@ -17439,7 +17522,8 @@
 				}
 			],
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -17646,7 +17730,8 @@
 			"page": 98,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -17760,6 +17845,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-ACfaS",
 				"FRAiF"
 			],
 			"size": [
@@ -17948,9 +18034,11 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TDoN",
 				"FRAiF",
 				"FRHoF",
-				"HBTD"
+				"HBTD",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -18082,7 +18170,8 @@
 			"source": "XMM",
 			"page": 102,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"H",
@@ -18599,7 +18688,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -18759,8 +18849,11 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-ACfaS",
+				"DrDe-TFV",
 				"EFA",
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -18902,6 +18995,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BD",
+				"DrDe-DaS",
 				"FRAiF",
 				"FRHoF"
 			],
@@ -19269,6 +19364,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-FWtVC",
 				"FRAiF"
 			],
 			"size": [
@@ -19399,7 +19495,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -19801,7 +19898,8 @@
 			"source": "XMM",
 			"page": 87,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -21154,7 +21252,8 @@
 			"source": "XMM",
 			"page": 87,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -21303,6 +21402,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
 				"FRAiF",
 				"ScoEE"
 			],
@@ -21539,6 +21639,9 @@
 			"page": 120,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-DotSC",
+				"DrDe-TFV",
+				"DrDe-TWoO",
 				"FRAiF",
 				"NF"
 			],
@@ -21634,7 +21737,7 @@
 				{
 					"name": "Undead Restoration",
 					"entries": [
-						"If the flameskull is destroyed, it regains all its {@variantrule Hit Points|XPHB} in 1 hour unless Holy Water is sprinkled on its remains or the {@spell Dispel Evil and Good|XPHB} spell is cast on them."
+						"If the flameskull is destroyed, it regains all its {@variantrule Hit Points|XPHB} in 1 hour unless {@item Holy Water|XPHB} is sprinkled on its remains or the {@spell Dispel Evil and Good|XPHB} spell is cast on them."
 					]
 				}
 			],
@@ -21704,6 +21807,8 @@
 			"page": 283,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
+				"DrDe-TWoO",
 				"FRAiF"
 			],
 			"size": [
@@ -21826,7 +21931,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -22123,7 +22229,7 @@
 				{
 					"name": "Flyby",
 					"entries": [
-						"The snake doesn't provoke an Opportunity Attack when it flies out of an enemy's reach."
+						"The snake doesn't provoke an {@action Opportunity Attack|XPHB} when it flies out of an enemy's reach."
 					]
 				}
 			],
@@ -22166,7 +22272,8 @@
 			"source": "XMM",
 			"page": 123,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"H"
@@ -22361,6 +22468,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-SD",
 				"FRAiF"
 			],
 			"size": [
@@ -22472,6 +22580,7 @@
 			"page": 127,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-ACfaS",
 				"FRAiF"
 			],
 			"size": [
@@ -22574,7 +22683,9 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-DotSC",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -22627,7 +22738,7 @@
 				{
 					"name": "Flyby",
 					"entries": [
-						"The gargoyle doesn't provoke an Opportunity Attack when it flies out of an enemy's reach."
+						"The gargoyle doesn't provoke an {@action Opportunity Attack|XPHB} when it flies out of an enemy's reach."
 					]
 				}
 			],
@@ -22888,7 +22999,9 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-TWoO",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -23001,7 +23114,9 @@
 			"page": 130,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-TWoO",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -23141,9 +23256,12 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-SD",
+				"DrDe-TWoO",
 				"FRAiF",
 				"FRHoF",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -23323,7 +23441,9 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-TWoO",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -23430,6 +23550,9 @@
 			"page": 354,
 			"srd52": true,
 			"basicRules2024": true,
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"H"
 			],
@@ -23526,6 +23649,7 @@
 			"page": 24,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-ACfaS",
 				"NF"
 			],
 			"size": [
@@ -23827,6 +23951,7 @@
 			"referenceSources": [
 				"BQGT",
 				"DrDe",
+				"DrDe-DaS",
 				"HotB"
 			],
 			"size": [
@@ -24080,7 +24205,9 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-BtS",
+				"RHW"
 			],
 			"size": [
 				"H"
@@ -24957,7 +25084,7 @@
 				{
 					"name": "Flyby",
 					"entries": [
-						"The owl doesn't provoke an Opportunity Attack when it flies out of an enemy's reach."
+						"The owl doesn't provoke an {@action Opportunity Attack|XPHB} when it flies out of an enemy's reach."
 					]
 				}
 			],
@@ -25099,7 +25226,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"EFA",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -25263,7 +25391,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"H"
@@ -25363,7 +25492,8 @@
 			"referenceSources": [
 				"FRAiF",
 				"FRHoF",
-				"HotB"
+				"HotB",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -25672,7 +25802,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-DaS"
 			],
 			"size": [
 				"M"
@@ -25866,7 +25997,7 @@
 				{
 					"name": "Flyby",
 					"entries": [
-						"The wasp doesn't provoke an Opportunity Attack when it flies out of an enemy's reach."
+						"The wasp doesn't provoke an {@action Opportunity Attack|XPHB} when it flies out of an enemy's reach."
 					]
 				}
 			],
@@ -26072,7 +26203,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -26255,7 +26387,7 @@
 						"The githyanki casts one of the following spells, requiring no spell components and using Intelligence as the spellcasting ability (spell save {@dc 18}, {@hit 10} to hit with spell attacks):"
 					],
 					"will": [
-						"{@spell Mage Hand|XPHB} (the hand is Invisible)"
+						"{@spell Mage Hand|XPHB} (the hand is {@condition Invisible|XPHB})"
 					],
 					"daily": {
 						"2e": [
@@ -26352,6 +26484,8 @@
 			"page": 135,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-FWtVC",
+				"DrDe-TFV",
 				"FRAiF"
 			],
 			"size": [
@@ -26408,7 +26542,7 @@
 						"The githyanki casts one of the following spells, requiring no spell components and using Intelligence as the spellcasting ability (spell save {@dc 13}):"
 					],
 					"will": [
-						"{@spell Mage Hand|XPHB} (the hand is Invisible)"
+						"{@spell Mage Hand|XPHB} (the hand is {@condition Invisible|XPHB})"
 					],
 					"daily": {
 						"2e": [
@@ -26550,7 +26684,7 @@
 						"The githyanki casts one of the following spells, requiring no spell components and using Intelligence as the spellcasting ability:"
 					],
 					"will": [
-						"{@spell Mage Hand|XPHB} (the hand is Invisible)"
+						"{@spell Mage Hand|XPHB} (the hand is {@condition Invisible|XPHB})"
 					],
 					"daily": {
 						"2": [
@@ -26683,7 +26817,7 @@
 						"The githzerai casts one of the following spells, requiring no spell components and using Wisdom as the spellcasting ability:"
 					],
 					"will": [
-						"{@spell Mage Hand|XPHB} (the hand is Invisible)"
+						"{@spell Mage Hand|XPHB} (the hand is {@condition Invisible|XPHB})"
 					],
 					"daily": {
 						"1": [
@@ -26841,7 +26975,7 @@
 						"The githzerai casts one of the following spells, requiring no spell components and using Intelligence as the spellcasting ability (spell save {@dc 16}):"
 					],
 					"will": [
-						"{@spell Mage Hand|XPHB} (the hand is Invisible)"
+						"{@spell Mage Hand|XPHB} (the hand is {@condition Invisible|XPHB})"
 					],
 					"daily": {
 						"1e": [
@@ -26972,7 +27106,7 @@
 						"The githzerai casts one of the following spells, requiring no spell components and using Wisdom as the spellcasting ability (spell save {@dc 14}):"
 					],
 					"will": [
-						"{@spell Mage Hand|XPHB} (the hand is Invisible)"
+						"{@spell Mage Hand|XPHB} (the hand is {@condition Invisible|XPHB})"
 					],
 					"daily": {
 						"1e": [
@@ -27824,7 +27958,8 @@
 				}
 			],
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-TDoN"
 			],
 			"size": [
 				"M"
@@ -28037,7 +28172,8 @@
 			"source": "XMM",
 			"page": 143,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S"
@@ -28288,8 +28424,10 @@
 			"referenceSources": [
 				"BQGT",
 				"DrDe",
+				"DrDe-BD",
 				"FRAiF",
-				"HotB"
+				"HotB",
+				"RHW"
 			],
 			"size": [
 				"S"
@@ -28403,7 +28541,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-BD"
 			],
 			"size": [
 				"M"
@@ -28799,6 +28938,9 @@
 			"name": "Graveyard Revenant",
 			"source": "XMM",
 			"page": 260,
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"H"
 			],
@@ -29199,7 +29341,9 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-ACfaS",
+				"DrDe-DaS"
 			],
 			"size": [
 				"M"
@@ -29333,7 +29477,10 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-BD",
+				"DrDe-TFV",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -29407,7 +29554,7 @@
 					"will": [
 						"{@spell Dancing Lights|XPHB}",
 						"{@spell Disguise Self|XPHB} (24-hour duration)",
-						"{@spell Invisibility|XPHB} (self only, and the hag leaves no tracks while Invisible)",
+						"{@spell Invisibility|XPHB} (self only, and the hag leaves no tracks while {@condition Invisible|XPHB})",
 						"{@spell Minor Illusion|XPHB}",
 						"{@spell Ray of Sickness|XPHB} (level 3 version)"
 					],
@@ -29663,7 +29810,8 @@
 			"source": "XMM",
 			"page": 157,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -29878,6 +30026,8 @@
 			"page": 158,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BtS",
+				"DrDe-TFV",
 				"FRAiF"
 			],
 			"size": [
@@ -30136,11 +30286,14 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-DaS",
+				"DrDe-TFV",
 				"EFA",
 				"FRAiF",
 				"FRHoF",
 				"HotB",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -30225,7 +30378,8 @@
 				"FRAiF",
 				"HotB",
 				"LFL",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -30326,7 +30480,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -30495,7 +30650,8 @@
 			"source": "XMM",
 			"page": 45,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"G"
@@ -30747,7 +30903,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"EFA",
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -30831,7 +30988,8 @@
 			"source": "XMM",
 			"page": 260,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"G"
@@ -31442,6 +31600,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-ACfaS",
+				"DrDe-TFV",
 				"FRAiF"
 			],
 			"size": [
@@ -31571,7 +31731,7 @@
 				{
 					"name": "Flyby",
 					"entries": [
-						"The hippogriff doesn't provoke an Opportunity Attack when it flies out of an enemy's reach."
+						"The hippogriff doesn't provoke an {@action Opportunity Attack|XPHB} when it flies out of an enemy's reach."
 					]
 				}
 			],
@@ -32094,6 +32254,9 @@
 			"page": 172,
 			"srd52": true,
 			"basicRules2024": true,
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"T"
 			],
@@ -32509,7 +32672,9 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-TFV",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"H"
@@ -32880,6 +33045,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BD",
+				"DrDe-SD",
 				"FRAiF",
 				"NF"
 			],
@@ -33027,7 +33194,8 @@
 			],
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"T"
@@ -33166,6 +33334,7 @@
 			"referenceSources": [
 				"FRAiF",
 				"FRHoF",
+				"RHW",
 				"ScoEE"
 			],
 			"size": [
@@ -33326,7 +33495,8 @@
 			"source": "XMM",
 			"page": 179,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"T"
@@ -33446,8 +33616,10 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-FWtVC",
 				"LFL",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -33925,6 +34097,9 @@
 			"name": "Juvenile Shadow Dragon",
 			"source": "XMM",
 			"page": 275,
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"M"
 			],
@@ -34268,6 +34443,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BtS",
 				"FRAiF",
 				"FRHoF",
 				"HBTD",
@@ -34698,7 +34874,8 @@
 			"page": 189,
 			"referenceSources": [
 				"EFA",
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -34825,7 +35002,8 @@
 			"source": "XMM",
 			"page": 191,
 			"referenceSources": [
-				"EFA"
+				"EFA",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -35614,7 +35792,7 @@
 				{
 					"name": "Hellish Restoration",
 					"entries": [
-						"If the lemure dies in the Nine Hells, it revives with all its {@variantrule Hit Points|XPHB} in {@dice 1d10} days unless it is killed by a creature under the effects of a {@spell Bless|XPHB} spell or its remains are sprinkled with Holy Water."
+						"If the lemure dies in the Nine Hells, it revives with all its {@variantrule Hit Points|XPHB} in {@dice 1d10} days unless it is killed by a creature under the effects of a {@spell Bless|XPHB} spell or its remains are sprinkled with {@item Holy Water|XPHB}."
 					]
 				}
 			],
@@ -35661,8 +35839,10 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TWoO",
 				"FRAiF",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -36252,7 +36432,8 @@
 			"source": "XMM",
 			"page": 197,
 			"referenceSources": [
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -36368,11 +36549,14 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BtS",
+				"DrDe-DotSC",
 				"EFA",
 				"FRAiF",
 				"FRHoF",
 				"LFL",
 				"NF",
+				"RHW",
 				"UtHftLH"
 			],
 			"size": [
@@ -36415,7 +36599,7 @@
 			},
 			"passive": 14,
 			"languages": [
-				"Common and any three languages"
+				"Common plus three other languages"
 			],
 			"cr": "6",
 			"gear": [
@@ -36875,6 +37059,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-SD",
 				"FRAiF",
 				"NF"
 			],
@@ -37177,6 +37362,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
 				"FRAiF"
 			],
 			"size": [
@@ -37276,6 +37462,7 @@
 			"page": 203,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
 				"FRAiF"
 			],
 			"size": [
@@ -37653,6 +37840,7 @@
 			],
 			"referenceSources": [
 				"DrDe",
+				"DrDe-DaS",
 				"FRAiF",
 				"FRHoF"
 			],
@@ -37727,7 +37915,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -38383,8 +38572,10 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-FWtVC",
 				"FRAiF",
-				"HotB"
+				"HotB",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -38491,7 +38682,9 @@
 			"page": 214,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-TFV",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -38730,7 +38923,7 @@
 						"{@spell Detect Magic|XPHB}",
 						"{@spell Detect Thoughts|XPHB}",
 						"{@spell Disguise Self|XPHB}",
-						"{@spell Mage Hand|XPHB} (the hand is Invisible)"
+						"{@spell Mage Hand|XPHB} (the hand is {@condition Invisible|XPHB})"
 					],
 					"daily": {
 						"1e": [
@@ -38851,7 +39044,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"HotB"
+				"HotB",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -38938,6 +39132,9 @@
 			"page": 283,
 			"srd52": true,
 			"basicRules2024": true,
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"L"
 			],
@@ -39030,6 +39227,7 @@
 			"page": 217,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-FWtVC",
 				"FRAiF"
 			],
 			"size": [
@@ -39302,7 +39500,8 @@
 			"source": "XMM",
 			"page": 218,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-FWtVC"
 			],
 			"size": [
 				"M"
@@ -39399,7 +39598,8 @@
 			"source": "XMM",
 			"page": 217,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-FWtVC"
 			],
 			"size": [
 				"M"
@@ -39488,7 +39688,8 @@
 			"source": "XMM",
 			"page": 207,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-DaS"
 			],
 			"size": [
 				"S"
@@ -39682,7 +39883,11 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-BD",
+				"DrDe-DotSC",
+				"DrDe-TWoO",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -39801,7 +40006,10 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-DotSC",
+				"DrDe-TWoO",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -40051,7 +40259,8 @@
 			"page": 223,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -40686,7 +40895,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -40894,7 +41104,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -40999,11 +41210,16 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BtS",
+				"DrDe-DaS",
+				"DrDe-TDoN",
+				"DrDe-TFV",
 				"EFA",
 				"FRAiF",
 				"HotB",
 				"LFL",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -41093,6 +41309,7 @@
 			"page": 227,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
 				"EFA",
 				"FRAiF",
 				"NF"
@@ -41702,6 +41919,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BD",
 				"EFA",
 				"FRAiF",
 				"HotB",
@@ -41807,8 +42025,10 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TWoO",
 				"HBTD",
-				"HotB"
+				"HotB",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -42002,6 +42222,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TDoN",
 				"FRAiF"
 			],
 			"size": [
@@ -42387,6 +42608,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
 				"FRAiF",
 				"FRHoF",
 				"HotB"
@@ -42473,7 +42695,8 @@
 				}
 			],
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -42501,7 +42724,7 @@
 			"cha": 7,
 			"skill": {
 				"perception": "+4",
-				"stealth": "+6"
+				"stealth": "+7"
 			},
 			"senses": [
 				"Darkvision 60 ft."
@@ -42640,7 +42863,9 @@
 			"page": 236,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-ACfaS",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -42725,6 +42950,9 @@
 			"name": "Performer Legend",
 			"source": "XMM",
 			"page": 237,
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"S",
 				"M"
@@ -42861,6 +43089,7 @@
 			"page": 237,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-ACfaS",
 				"EFA",
 				"FRAiF",
 				"LFL"
@@ -43044,7 +43273,7 @@
 				{
 					"name": "Flyby",
 					"entries": [
-						"The peryton doesn't provoke an Opportunity Attack when it flies out of an enemy's reach."
+						"The peryton doesn't provoke an {@action Opportunity Attack|XPHB} when it flies out of an enemy's reach."
 					]
 				}
 			],
@@ -43232,6 +43461,7 @@
 			"page": 240,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BtS",
 				"FRAiF"
 			],
 			"size": [
@@ -43402,8 +43632,10 @@
 			"referenceSources": [
 				"ABH",
 				"DrDe",
+				"DrDe-BtS",
 				"EFA",
 				"FRAiF",
+				"RHW",
 				"ScoEE"
 			],
 			"size": [
@@ -43650,8 +43882,10 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BtS",
 				"EFA",
 				"FRAiF",
+				"RHW",
 				"ScoEE"
 			],
 			"size": [
@@ -44455,7 +44689,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -44618,7 +44853,8 @@
 			"source": "XMM",
 			"page": 246,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -44832,10 +45068,13 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-SD",
+				"DrDe-TDoN",
 				"EFA",
 				"FRAiF",
 				"FRHoF",
-				"LFL"
+				"LFL",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -44990,6 +45229,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-ACfaS",
+				"DrDe-DaS",
 				"FRAiF"
 			],
 			"size": [
@@ -45117,7 +45358,8 @@
 			"source": "XMM",
 			"page": 234,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"H"
@@ -45306,6 +45548,7 @@
 			"treasure": [
 				"arcana"
 			],
+			"familiar": true,
 			"soundClip": {
 				"type": "internal",
 				"path": "bestiary/pseudodragon.opus"
@@ -45458,6 +45701,9 @@
 			"page": 367,
 			"srd52": true,
 			"basicRules2024": true,
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"M"
 			],
@@ -45496,7 +45742,7 @@
 				{
 					"name": "Flyby",
 					"entries": [
-						"The pteranodon doesn't provoke an Opportunity Attack when it flies out of an enemy's reach."
+						"The pteranodon doesn't provoke an {@action Opportunity Attack|XPHB} when it flies out of an enemy's reach."
 					]
 				}
 			],
@@ -45537,7 +45783,9 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-ACfaS",
+				"RHW"
 			],
 			"size": [
 				"G"
@@ -45802,7 +46050,7 @@
 						"The quaggoth casts one of the following spells, requiring no spell components and using Wisdom as the spellcasting ability (spell save {@dc 12}):"
 					],
 					"will": [
-						"{@spell Mage Hand|XPHB} (the hand is Invisible)",
+						"{@spell Mage Hand|XPHB} (the hand is {@condition Invisible|XPHB})",
 						"{@spell Minor Illusion|XPHB}"
 					],
 					"daily": {
@@ -46009,6 +46257,7 @@
 			"environment": [
 				"planar, abyss"
 			],
+			"familiar": true,
 			"soundClip": {
 				"type": "internal",
 				"path": "bestiary/quasit.opus"
@@ -46051,7 +46300,8 @@
 			"source": "XMM",
 			"page": 184,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -46194,7 +46444,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"ABH"
+				"ABH",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -46237,7 +46488,7 @@
 					"vulnerable": [
 						"piercing"
 					],
-					"note": "damage from weapons wielded by creatures under the effect of a Bless spell",
+					"note": "damage from weapons wielded by creatures under the effect of a {@spell Bless|XPHB} spell",
 					"cond": true
 				}
 			],
@@ -46456,7 +46707,8 @@
 				}
 			],
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-BtS"
 			],
 			"size": [
 				"T"
@@ -46654,7 +46906,8 @@
 			"source": "XMM",
 			"page": 285,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -46971,7 +47224,8 @@
 			"source": "XMM",
 			"page": 259,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -47117,6 +47371,7 @@
 			"srd52": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-SD",
 				"EFA"
 			],
 			"size": [
@@ -47246,7 +47501,9 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
-				"EFA"
+				"DrDe-TFV",
+				"EFA",
+				"RHW"
 			],
 			"size": [
 				"G"
@@ -47353,6 +47610,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-BtS",
 				"FRAiF"
 			],
 			"size": [
@@ -47469,7 +47727,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -47672,7 +47931,8 @@
 			"source": "XMM",
 			"page": 265,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -47971,7 +48231,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"EFA",
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -48425,7 +48686,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -48659,7 +48921,8 @@
 			"page": 269,
 			"referenceSources": [
 				"EFA",
-				"LFL"
+				"LFL",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -48834,6 +49097,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-DaS",
+				"DrDe-TDoN",
 				"FRAiF",
 				"FRHoF",
 				"HBTD"
@@ -49279,7 +49544,8 @@
 			"referenceSources": [
 				"FRAiF",
 				"FRHoF",
-				"HBTD"
+				"HBTD",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -49402,7 +49668,8 @@
 			"page": 273,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -49549,7 +49816,8 @@
 			"source": "XMM",
 			"page": 275,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"H"
@@ -49722,7 +49990,9 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-FWtVC",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -49838,9 +50108,11 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-SD",
 				"EFA",
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -50031,7 +50303,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-TWoO"
 			],
 			"size": [
 				"M"
@@ -50167,10 +50440,12 @@
 			],
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TWoO",
 				"EFA",
 				"FRAiF",
 				"HBTD",
-				"HotB"
+				"HotB",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -50237,6 +50512,7 @@
 				"underdark",
 				"urban"
 			],
+			"familiar": true,
 			"soundClip": {
 				"type": "internal",
 				"path": "bestiary/skeleton.opus"
@@ -50272,6 +50548,9 @@
 					"source": "XPHB",
 					"page": 357
 				}
+			],
+			"referenceSources": [
+				"RHW"
 			],
 			"size": [
 				"T"
@@ -50338,6 +50617,7 @@
 			"treasure": [
 				"any"
 			],
+			"familiar": true,
 			"soundClip": {
 				"type": "internal",
 				"path": "bestiary/slaad-tadpole.opus"
@@ -50368,6 +50648,7 @@
 			"page": 208,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
 				"FRAiF"
 			],
 			"size": [
@@ -50703,7 +50984,8 @@
 			"source": "XMM",
 			"page": 289,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-FWtVC"
 			],
 			"size": [
 				"M"
@@ -50868,8 +51150,10 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TWoO",
 				"FRAiF",
-				"HBTD"
+				"HBTD",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -50995,6 +51279,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-DotSC",
 				"EFA",
 				"FRHoF"
 			],
@@ -51290,7 +51575,7 @@
 				{
 					"name": "Curse of the Riddle",
 					"entries": [
-						"{@actSave int} {@dc 15}, one creature the sphinx can see within 60 feet. {@actSaveFail} 21 ({@damage 6d6}) Psychic damage, and the target is cursed with a riddle. The cursed target has {@variantrule Disadvantage|XPHB} on ability checks and attack rolls. In addition, if it takes the Magic action, it must succeed on a {@dc 15} Intelligence saving throw or that action is wasted. The cursed target can take a Study action to make a {@dc 15} Intelligence check, solving the riddle and ending the curse on a success. The curse ends early if the sphinx curses another target."
+						"{@actSave int} {@dc 15}, one creature the sphinx can see within 60 feet. {@actSaveFail} 21 ({@damage 6d6}) Psychic damage, and the target is cursed with a riddle. The cursed target has {@variantrule Disadvantage|XPHB} on ability checks and attack rolls. In addition, if it takes the {@action Magic|XPHB} action, it must succeed on a {@dc 15} Intelligence saving throw or that action is wasted. The cursed target can take a {@action Study|XPHB} action to make a {@dc 15} Intelligence check, solving the riddle and ending the curse on a success. The curse ends early if the sphinx curses another target."
 					]
 				}
 			],
@@ -51641,6 +51926,7 @@
 			"treasure": [
 				"arcana"
 			],
+			"familiar": true,
 			"traitTags": [
 				"Magic Resistance"
 			],
@@ -51820,7 +52106,7 @@
 				{
 					"name": "Flyby",
 					"entries": [
-						"The devil doesn't provoke an Opportunity Attack when it flies out of an enemy's reach."
+						"The devil doesn't provoke an {@action Opportunity Attack|XPHB} when it flies out of an enemy's reach."
 					]
 				},
 				{
@@ -51891,7 +52177,9 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-TFV",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -52057,6 +52345,7 @@
 				"FRAiF",
 				"FRHoF",
 				"LFL",
+				"RHW",
 				"UtHftLH"
 			],
 			"size": [
@@ -52139,6 +52428,7 @@
 			"treasure": [
 				"armaments"
 			],
+			"familiar": true,
 			"soundClip": {
 				"type": "internal",
 				"path": "bestiary/sprite.opus"
@@ -52182,7 +52472,8 @@
 				"FRAiF",
 				"FRHoF",
 				"LFL",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -52288,7 +52579,8 @@
 			"referenceSources": [
 				"EFA",
 				"FRAiF",
-				"LFL"
+				"LFL",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -52536,7 +52828,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"FRAiF",
-				"HotB"
+				"HotB",
+				"RHW"
 			],
 			"size": [
 				"T"
@@ -52611,7 +52904,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"H"
@@ -52734,6 +53028,7 @@
 			"referenceSources": [
 				"FRAiF",
 				"FRHoF",
+				"RHW",
 				"ScoEE"
 			],
 			"size": [
@@ -53054,6 +53349,7 @@
 			"referenceSources": [
 				"FRAiF",
 				"FRHoF",
+				"RHW",
 				"ScoEE"
 			],
 			"size": [
@@ -53286,8 +53582,10 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TWoO",
 				"FRAiF",
-				"HBTD"
+				"HBTD",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -53521,6 +53819,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-DaS",
 				"FRAiF"
 			],
 			"size": [
@@ -53794,7 +54093,7 @@
 				{
 					"name": "Hellish Restoration",
 					"entries": [
-						"If the swarm dies in the Nine Hells, it revives with all its {@variantrule Hit Points|XPHB} in {@dice 1d10} days unless it is killed by a creature under the effects of a {@spell Bless|XPHB} spell or its remains are sprinkled with Holy Water."
+						"If the swarm dies in the Nine Hells, it revives with all its {@variantrule Hit Points|XPHB} in {@dice 1d10} days unless it is killed by a creature under the effects of a {@spell Bless|XPHB} spell or its remains are sprinkled with {@item Holy Water|XPHB}."
 					]
 				},
 				{
@@ -54687,7 +54986,7 @@
 						"The thri-kreen casts one of the following spells, requiring no spell components and using Intelligence as the spellcasting ability (spell save {@dc 15}):"
 					],
 					"will": [
-						"{@spell Mage Hand|XPHB} (the hand is Invisible)"
+						"{@spell Mage Hand|XPHB} (the hand is {@condition Invisible|XPHB})"
 					],
 					"daily": {
 						"1e": [
@@ -54848,6 +55147,8 @@
 			"referenceSources": [
 				"ABH",
 				"DrDe",
+				"DrDe-BD",
+				"DrDe-BtS",
 				"EFA",
 				"FRAiF"
 			],
@@ -54942,9 +55243,11 @@
 			"referenceSources": [
 				"ABH",
 				"DrDe",
+				"DrDe-TFV",
 				"EFA",
 				"FRAiF",
 				"NF",
+				"RHW",
 				"ScoEE"
 			],
 			"size": [
@@ -55052,9 +55355,11 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
 				"FRAiF",
 				"FRHoF",
-				"LFL"
+				"LFL",
+				"RHW"
 			],
 			"size": [
 				"H"
@@ -55168,7 +55473,8 @@
 			"source": "XMM",
 			"page": 44,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"H"
@@ -55453,8 +55759,11 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-SD",
+				"DrDe-TFV",
 				"FRAiF",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -55649,6 +55958,7 @@
 			"page": 43,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-DaS",
 				"FRAiF",
 				"FRHoF"
 			],
@@ -55746,7 +56056,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"H"
@@ -55842,6 +56153,9 @@
 			],
 			"source": "XMM",
 			"page": 311,
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"M"
 			],
@@ -56050,7 +56364,8 @@
 			"source": "XMM",
 			"page": 312,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -56379,7 +56694,9 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-TWoO",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -56439,7 +56756,7 @@
 					"name": "Charm {@recharge 5}",
 					"type": "spellcasting",
 					"headerEntries": [
-						"The vampire casts {@spell Charm Person|XPHB}, requiring no spell components and using Charisma as the spellcasting ability (spell save {@dc 17}), and the duration is 24 hours. The Charmed target is a willing recipient of the vampire's Bite, the damage of which doesn't end the spell. When the spell ends, the target is unaware it was Charmed by the vampire."
+						"The vampire casts {@spell Charm Person|XPHB}, requiring no spell components and using Charisma as the spellcasting ability (spell save {@dc 17}), and the duration is 24 hours. The {@condition Charmed|XPHB} target is a willing recipient of the vampire's Bite, the damage of which doesn't end the spell. When the spell ends, the target is unaware it was {@condition Charmed|XPHB} by the vampire."
 					],
 					"recharge": {
 						"5": [
@@ -56603,8 +56920,7 @@
 				"A",
 				"B",
 				"N",
-				"P",
-				"R"
+				"P"
 			],
 			"spellcastingTags": [
 				"O"
@@ -56641,7 +56957,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"EFA"
+				"EFA",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -56778,7 +57095,8 @@
 			"page": 316,
 			"referenceSources": [
 				"ABH",
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -56895,7 +57213,6 @@
 				"C",
 				"N",
 				"P",
-				"R",
 				"S"
 			],
 			"miscTags": [
@@ -56914,7 +57231,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"ABH",
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -57064,7 +57382,6 @@
 				"A",
 				"N",
 				"P",
-				"R",
 				"S"
 			],
 			"miscTags": [
@@ -57085,6 +57402,9 @@
 			"name": "Vampire Umbral Lord",
 			"source": "XMM",
 			"page": 318,
+			"referenceSources": [
+				"RHW"
+			],
 			"size": [
 				"S",
 				"M"
@@ -57302,7 +57622,6 @@
 			"damageTags": [
 				"A",
 				"N",
-				"R",
 				"S"
 			],
 			"damageTagsSpell": [
@@ -57351,7 +57670,8 @@
 				}
 			],
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-DaS"
 			],
 			"size": [
 				"T"
@@ -57398,6 +57718,7 @@
 				"hill",
 				"swamp"
 			],
+			"familiar": true,
 			"senseTags": [
 				"B"
 			],
@@ -57418,7 +57739,9 @@
 			"page": 44,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-DaS",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -57608,7 +57931,9 @@
 			"page": 126,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-BtS",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -57809,7 +58134,7 @@
 				{
 					"name": "Spores {@recharge}",
 					"entries": [
-						"{@actSave con} {@dc 15}, each creature in a 20-foot {@variantrule Emanation [Area of Effect]|XPHB|Emanation} originating from the vrock. {@actSaveFail} The target has the {@condition Poisoned|XPHB} condition and repeats the save at the end of each of its turns, ending the effect on itself on a success. While {@condition Poisoned|XPHB}, the target takes 5 ({@damage 1d10}) Poison damage at the start of each of its turns. Emptying a flask of Holy Water on the target ends the effect early."
+						"{@actSave con} {@dc 15}, each creature in a 20-foot {@variantrule Emanation [Area of Effect]|XPHB|Emanation} originating from the vrock. {@actSaveFail} The target has the {@condition Poisoned|XPHB} condition and repeats the save at the end of each of its turns, ending the effect on itself on a success. While {@condition Poisoned|XPHB}, the target takes 5 ({@damage 1d10}) Poison damage at the start of each of its turns. Emptying a flask of {@item Holy Water|XPHB} on the target ends the effect early."
 					]
 				},
 				{
@@ -58094,7 +58419,8 @@
 			"page": 321,
 			"referenceSources": [
 				"EFA",
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -58235,7 +58561,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -58319,8 +58646,10 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-ACfaS",
 				"FFotR",
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -58427,6 +58756,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-FWtVC",
 				"FRAiF",
 				"FRHoF"
 			],
@@ -58753,7 +59083,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -59041,7 +59372,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -59171,7 +59503,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -59314,7 +59647,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -59590,7 +59924,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -59731,7 +60066,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"T"
@@ -59875,7 +60211,9 @@
 			"source": "XMM",
 			"page": 185,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-ACfaS",
+				"DrDe-FWtVC"
 			],
 			"size": [
 				"S"
@@ -59986,8 +60324,10 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-SD",
 				"FRAiF",
-				"NF"
+				"NF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -60096,7 +60436,8 @@
 			],
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -60263,9 +60604,11 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TWoO",
 				"FRAiF",
 				"FRHoF",
-				"HBTD"
+				"HBTD",
+				"RHW"
 			],
 			"size": [
 				"S",
@@ -60395,6 +60738,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-SD",
 				"EFA",
 				"FRAiF"
 			],
@@ -60738,7 +61082,8 @@
 			"page": 341,
 			"referenceSources": [
 				"FRAiF",
-				"FRHoF"
+				"FRHoF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -61085,7 +61430,8 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"FFotR",
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -61211,7 +61557,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-FWtVC"
 			],
 			"size": [
 				"L"
@@ -61348,7 +61695,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-TDoN"
 			],
 			"size": [
 				"L"
@@ -61495,7 +61843,8 @@
 			"srd52": true,
 			"basicRules2024": true,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -61912,6 +62261,7 @@
 			"basicRules2024": true,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-TFV",
 				"FRAiF"
 			],
 			"size": [
@@ -62034,6 +62384,7 @@
 			"page": 258,
 			"referenceSources": [
 				"DrDe",
+				"DrDe-SD",
 				"NF"
 			],
 			"size": [
@@ -62377,7 +62728,8 @@
 			"source": "XMM",
 			"page": 345,
 			"referenceSources": [
-				"FRAiF"
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"L"
@@ -62696,7 +63048,9 @@
 			"page": 343,
 			"referenceSources": [
 				"DrDe",
-				"FRAiF"
+				"DrDe-DaS",
+				"FRAiF",
+				"RHW"
 			],
 			"size": [
 				"M"
@@ -63001,7 +63355,8 @@
 			"source": "XMM",
 			"page": 344,
 			"referenceSources": [
-				"DrDe"
+				"DrDe",
+				"DrDe-TFV"
 			],
 			"size": [
 				"M"
@@ -63170,11 +63525,15 @@
 				}
 			],
 			"referenceSources": [
+				"BQDD",
 				"DrDe",
+				"DrDe-DaS",
+				"DrDe-TWoO",
 				"EFA",
 				"FRAiF",
 				"HBTD",
-				"HotB"
+				"HotB",
+				"RHW"
 			],
 			"size": [
 				"M"
