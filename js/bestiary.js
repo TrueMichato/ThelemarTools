@@ -17,6 +17,7 @@ class _BestiaryConsts {
 
 	static STORAGE_KEY_ENCOUNTER_BUILDER_UI_STATE = "encounterBuilderUiStateState";
 	static STORAGE_KEY_WIDE_MODE = "wideMode";
+	static STORAGE_KEY_STATBLOCK_COLUMNS = "statblockColumns";
 
 	// Matches the SCSS `$width-screen-hg` breakpoint (scss/vars/vars.scss).
 	// Wide mode only actually activates at or above this width; below it we fall back
@@ -293,7 +294,10 @@ class BestiaryPageBookView extends ListPageBookView {
 
 		const renderCreature = (mon) => {
 			isAnyEntityRendered = true;
-			stack.push(`<div class="bkmv__wrp-item ve-inline-block print__ve-block print__my-2"><table class="ve-w-100 ve-stats ve-stats--book ve-stats--bkmv"><tbody>`);
+			// Book view inherits the page-wide statblock column setting so a "Printer View" export
+			// matches what the user sees in the main bestiary pane.
+			const twoColCls = Renderer.monster.isDefaultTwoCol() ? "ve-stats--two-col" : "";
+			stack.push(`<div class="bkmv__wrp-item ve-inline-block print__ve-block print__my-2"><table class="ve-w-100 ve-stats ve-stats--book ve-stats--bkmv ${twoColCls}"><tbody>`);
 			stack.push(Renderer.monster.getCompactRenderedString(mon));
 			stack.push(`</tbody></table></div>`);
 		};
@@ -308,6 +312,7 @@ class BestiaryPageBookView extends ListPageBookView {
 
 		cntSelectedEnts += this._bookViewToShow.length;
 		wrpContent.appends(stack.join(""));
+		Renderer.statblockCollapse.apply(wrpContent);
 
 		return {cntSelectedEnts, isAnyEntityRendered};
 	}
@@ -455,6 +460,9 @@ class BestiaryPage extends ListPageMultiSource {
 		this._pgContentFluff = null;
 		this._wideModeMql = null;
 
+		this._btnTwoCol = null;
+		this._statblockColumnsMode = "single";
+
 		this._encounterBuilder = null;
 
 		this._tokenDisplay = new ListPageTokenDisplay({
@@ -599,6 +607,7 @@ class BestiaryPage extends ListPageMultiSource {
 	async _pOnLoad_pPreDataAdd () {
 		await this._pPageInit_pProfBonusDiceToggle();
 		await this._pPageInit_pWideModeToggle();
+		await this._pPageInit_pStatblockColumnsToggle();
 	}
 
 	async _pOnLoad_pPostLoad () {
@@ -788,6 +797,36 @@ class BestiaryPage extends ListPageMultiSource {
 			}
 			eleTd.html(parts.join(""));
 		});
+	}
+
+	/**
+	 * Statblock column-mode toggle (tracker #1200 / 5ET-1080). Persists a page-wide
+	 * "single" / "double" preference via `StorageUtil.pSetForPage`, applies it as a modifier
+	 * class on `#pagecontent` (the bestiary main pane), and pushes the value into
+	 * `Renderer.monster.setDefaultTwoColMode()` so hover popouts, DM Screen initiative
+	 * viewers, and character-sheet creature-refs inherit it without a re-render.
+	 */
+	async _pPageInit_pStatblockColumnsToggle () {
+		this._btnTwoCol = e_(document.getElementById("btn-statblock-two-col"));
+		if (!this._btnTwoCol) return; // Defensive: markup may be absent in older templates.
+
+		const stored = await StorageUtil.pGetForPage(_BestiaryConsts.STORAGE_KEY_STATBLOCK_COLUMNS);
+		this._statblockColumnsMode = stored === "double" ? "double" : "single";
+
+		const hk = () => {
+			const isDouble = this._statblockColumnsMode === "double";
+			this._btnTwoCol.toggleClass("ve-active", isDouble);
+			this._pgContent.toggleClass("ve-stats--two-col", isDouble);
+			Renderer.monster.setDefaultTwoColMode(this._statblockColumnsMode);
+			StorageUtil.pSetForPage(_BestiaryConsts.STORAGE_KEY_STATBLOCK_COLUMNS, this._statblockColumnsMode).then(null);
+		};
+
+		this._btnTwoCol.onn("click", () => {
+			this._statblockColumnsMode = this._statblockColumnsMode === "double" ? "single" : "double";
+			hk();
+		});
+
+		hk();
 	}
 
 	_handleBestiaryLiClick (evt, listItem) {
@@ -1060,6 +1099,7 @@ class BestiaryPage extends ListPageMultiSource {
 			Renderer.get().addPlugin("dice", pluginDice);
 
 			this._pgContent.empty().appends(RenderBestiary.getRenderedCreature(mon, {btnScaleCr, btnResetScaleCr, selSummonSpellLevel, selSummonClassLevel, classLevelScalerClass: mon.summonedByClass}));
+			Renderer.statblockCollapse.apply(this._pgContent);
 		} finally {
 			Renderer.get().removePlugin("dice", pluginDice);
 			Renderer.get().removePlugin("string_@dc", pluginDc);

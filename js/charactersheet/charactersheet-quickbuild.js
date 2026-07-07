@@ -1798,6 +1798,8 @@ class CharacterSheetQuickBuild {
 					existingFeatures: alreadyKnown,
 					cantrips: this._state.getCantripsKnown?.() || [],
 					spells: this._state.getSpellsKnown?.() || [],
+					toolProficiencies: this._state.getToolProficiencies?.() || [],
+					state: this._state,
 				};
 
 				choices.optionalFeatures = featOptSpecs.map(spec => ({
@@ -2682,6 +2684,8 @@ class CharacterSheetQuickBuild {
 			existingFeatures: existingOptFeatures,
 			cantrips: this._state.getCantripsKnown?.() || [],
 			spells: this._state.getSpellsKnown?.() || [],
+			toolProficiencies: this._state.getToolProficiencies?.() || [],
+			state: this._state,
 		};
 
 		const enrichedOptions = sourceFiltered.map(opt => {

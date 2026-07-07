@@ -1047,17 +1047,19 @@ class CharacterSheetBuilder {
 			});
 		}
 
-		// Darkvision and other senses - set as base values
-		if (this._selectedRace.darkvision) {
-			this._state.setSense("darkvision", this._selectedRace.darkvision);
-		}
-		// Subrace can override darkvision (e.g., Drow get 120ft)
-		if (this._selectedSubrace?.darkvision) {
-			const currentDv = this._state.getSense("darkvision") || 0;
-			if (this._selectedSubrace.darkvision > currentDv) {
-				this._state.setSense("darkvision", this._selectedSubrace.darkvision);
+		// Senses - set as base values (subrace can override with a higher value,
+		// e.g. Drow darkvision 120 replaces High Elf darkvision 60)
+		CharacterSheetClassUtils.SENSE_DISPLAY_ORDER.forEach(senseKey => {
+			if (this._selectedRace[senseKey]) {
+				this._state.setSense(senseKey, this._selectedRace[senseKey]);
 			}
-		}
+			if (this._selectedSubrace?.[senseKey]) {
+				const current = this._state.getSense(senseKey) || 0;
+				if (this._selectedSubrace[senseKey] > current) {
+					this._state.setSense(senseKey, this._selectedSubrace[senseKey]);
+				}
+			}
+		});
 
 		// Skill proficiencies from race data
 		// When using Tasha's Custom Origin, replace fixed racial skills with user's choices
@@ -6307,6 +6309,8 @@ class CharacterSheetBuilder {
 			existingFeatures: alreadyKnown,
 			cantrips: this._selectedKnownCantrips || [],
 			spells: [...(this._selectedKnownSpells || []), ...(this._selectedSpellbookSpells || [])],
+			toolProficiencies: this._state?.getToolProficiencies?.() || [],
+			state: this._state,
 		};
 
 		// Use the shared eligibility filter (same one level-up uses) and keep only

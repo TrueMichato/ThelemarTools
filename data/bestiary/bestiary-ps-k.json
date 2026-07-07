@@ -113,7 +113,10 @@
 			},
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Modrons"
+			]
 		},
 		{
 			"name": "Construct (Shield Guardian)",

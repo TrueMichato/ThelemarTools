@@ -351,7 +351,8 @@ class CharacterSheetExport {
 				const safeCr = this._escapeHtml(monster.cr);
 
 				wrpPreviewMeta.innerHTML = `CR: <strong>${safeCr}</strong> • Source: <strong>${safeSource}</strong> • Name: <strong>${safeName}</strong>`;
-				wrpPreviewStatblock.innerHTML = `<table class="w-100 stats"><tbody>${rendered}</tbody></table>`;
+				wrpPreviewStatblock.innerHTML = `<table class="ve-w-100 ve-stats"><tbody>${rendered}</tbody></table>`;
+				Renderer.statblockCollapse.apply(wrpPreviewStatblock);
 			};
 
 			ee`<div>
