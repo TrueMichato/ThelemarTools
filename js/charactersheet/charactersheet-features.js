@@ -2421,6 +2421,7 @@ class CharacterSheetFeatures {
 				classLevel: this._state.getTotalLevel?.() || 0,
 				features: this._state.getFeatures?.() || [],
 				feats: this._state.getFeats?.() || [],
+				toolProficiencies: this._state.getToolProficiencies?.() || [],
 			};
 			const alreadyKnown = this._state.getFeatures?.().filter((/** @type {*} */ f) => f.featureType === "Optional Feature") || [];
 

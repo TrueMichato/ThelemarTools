@@ -3386,6 +3386,8 @@ class CharacterSheetLevelUp {
 			existingFeatures: existingOptFeatures,
 			cantrips: this._state.getCantripsKnown?.() || [],
 			spells: this._state.getSpellsKnown?.() || [],
+			toolProficiencies: this._state.getToolProficiencies?.() || [],
+			state: this._state,
 		};
 
 		const availableOptions = CharacterSheetClassUtils.getEligibleOptionalFeatures(allOptFeatures, {

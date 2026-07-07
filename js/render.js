@@ -4295,6 +4295,20 @@ Renderer.utils = class {
 								? prof.map(skill => skill.toTitleCase()).join("+")
 								: `Proficiency in the ${prof.map(skill => Renderer.get().render(`{@skill ${skill.toTitleCase()}}`)).joinConjunct(", ", " and ")} skill${prof.length === 1 ? "" : "s"}`;
 						}
+						case "tool": {
+							if (prof === true) return isListMode ? `Tool Proficiency` : `Proficiency with any tool`;
+							const asArr = Array.isArray(prof) ? prof : [prof];
+							const titled = asArr.map(t => t.toTitleCase());
+							if (isListMode) {
+								return styleHint === "classic"
+									? `Prof ${titled.join("/")}`
+									: `${titled.join("/")} Trai.`;
+							}
+							const joined = titled.joinConjunct(", ", " or ");
+							return styleHint === "classic"
+								? `Proficiency with ${joined}`
+								: `${joined} Training`;
+						}
 						default: throw new Error(`Unhandled proficiency type: "${profType}"`);
 					}
 				});
