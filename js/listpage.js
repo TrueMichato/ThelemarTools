@@ -2202,12 +2202,15 @@ class ListPage {
 		});
 	}
 
-	_renderStats_doBuildFluffTab ({ent, isImageTab = false}) {
-		this._pgContent.empty();
+	_renderStats_doBuildFluffTab ({ent, isImageTab = false, wrpContent = null}) {
+		// Callers may pass an explicit `wrpContent` to render into a container other
+		// than the primary statblock table (e.g. the bestiary's "Wide View" fluff pane).
+		const wrp = wrpContent || this._pgContent;
+		wrp.empty();
 
 		return Renderer.utils.pBuildFluffTab({
 			isImageTab,
-			wrpContent: this._pgContent,
+			wrpContent: wrp,
 			pFnGetFluff: this._pFnGetFluff,
 			entity: ent,
 			wrpHeaderControls: this._renderStats_doBuildFluffTab_getHeaderControls({ent, isImageTab}),
