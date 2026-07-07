@@ -5567,7 +5567,10 @@
 				"P",
 				"R"
 			],
-			"hasToken": true
+			"hasToken": true,
+			"group": [
+				"Kuo-Toa"
+			]
 		},
 		{
 			"name": "Lesser Tyrant Shadow",

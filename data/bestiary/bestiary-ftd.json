@@ -3,7 +3,7 @@
 		{
 			"name": "Adult Amethyst Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 161,
@@ -316,7 +316,7 @@
 		{
 			"name": "Adult Crystal Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 171,
@@ -915,7 +915,7 @@
 		{
 			"name": "Adult Emerald Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 196,
@@ -1528,7 +1528,7 @@
 		{
 			"name": "Adult Sapphire Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 215,
@@ -1862,7 +1862,7 @@
 		{
 			"name": "Adult Topaz Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 221,
@@ -2168,7 +2168,7 @@
 		{
 			"name": "Amethyst Dragon Wyrmling",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 162,
@@ -2396,7 +2396,7 @@
 		{
 			"name": "Amethyst Greatwyrm",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 201,
@@ -2714,7 +2714,7 @@
 		{
 			"name": "Ancient Amethyst Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 160,
@@ -3031,7 +3031,7 @@
 		{
 			"name": "Ancient Crystal Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 170,
@@ -3917,7 +3917,7 @@
 		{
 			"name": "Ancient Emerald Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 195,
@@ -4529,7 +4529,7 @@
 		{
 			"name": "Ancient Sapphire Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 214,
@@ -5027,7 +5027,7 @@
 		{
 			"name": "Ancient Topaz Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 220,
@@ -5907,7 +5907,7 @@
 		{
 			"name": "Black Greatwyrm",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "FTD",
 			"page": 168,
@@ -6195,7 +6195,7 @@
 		{
 			"name": "Blue Greatwyrm",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "FTD",
 			"page": 168,
@@ -6482,7 +6482,7 @@
 		{
 			"name": "Brass Greatwyrm",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "FTD",
 			"page": 208,
@@ -6804,7 +6804,7 @@
 		{
 			"name": "Bronze Greatwyrm",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "FTD",
 			"page": 208,
@@ -7126,7 +7126,7 @@
 		{
 			"name": "Copper Greatwyrm",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "FTD",
 			"page": 208,
@@ -7448,7 +7448,7 @@
 		{
 			"name": "Crystal Dragon Wyrmling",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 172,
@@ -7663,7 +7663,7 @@
 		{
 			"name": "Crystal Greatwyrm",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 201,
@@ -11323,7 +11323,7 @@
 		{
 			"name": "Emerald Dragon Wyrmling",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 197,
@@ -11549,7 +11549,7 @@
 		{
 			"name": "Emerald Greatwyrm",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 201,
@@ -12410,7 +12410,7 @@
 		{
 			"name": "Gold Greatwyrm",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "FTD",
 			"page": 208,
@@ -12740,7 +12740,7 @@
 		{
 			"name": "Green Greatwyrm",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "FTD",
 			"page": 168,
@@ -13952,7 +13952,7 @@
 		{
 			"name": "Red Greatwyrm",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "FTD",
 			"page": 168,
@@ -14248,7 +14248,7 @@
 		{
 			"name": "Sapphire Dragon Wyrmling",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 216,
@@ -14489,7 +14489,7 @@
 		{
 			"name": "Sapphire Greatwyrm",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 201,
@@ -14807,7 +14807,7 @@
 		{
 			"name": "Silver Greatwyrm",
 			"group": [
-				"Metallic Dragon"
+				"Metallic Dragons"
 			],
 			"source": "FTD",
 			"page": 208,
@@ -15238,7 +15238,7 @@
 		{
 			"name": "Topaz Dragon Wyrmling",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 223,
@@ -15457,7 +15457,7 @@
 		{
 			"name": "Topaz Greatwyrm",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 201,
@@ -15775,7 +15775,7 @@
 		{
 			"name": "White Greatwyrm",
 			"group": [
-				"Chromatic Dragon"
+				"Chromatic Dragons"
 			],
 			"source": "FTD",
 			"page": 168,
@@ -16063,7 +16063,7 @@
 		{
 			"name": "Young Amethyst Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 161,
@@ -16309,7 +16309,7 @@
 		{
 			"name": "Young Crystal Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 172,
@@ -16971,7 +16971,7 @@
 		{
 			"name": "Young Emerald Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 197,
@@ -17459,7 +17459,7 @@
 		{
 			"name": "Young Sapphire Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 216,
@@ -17868,7 +17868,7 @@
 		{
 			"name": "Young Topaz Dragon",
 			"group": [
-				"Gem Dragon"
+				"Gem Dragons"
 			],
 			"source": "FTD",
 			"page": 223,

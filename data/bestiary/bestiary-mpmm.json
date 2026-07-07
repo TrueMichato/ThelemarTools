@@ -596,7 +596,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Air Elementals"
+			]
 		},
 		{
 			"name": "Alhoon",
@@ -5830,7 +5833,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Yugoloths"
+			]
 		},
 		{
 			"name": "Catoblepas",
@@ -8093,7 +8099,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Beholders"
+			]
 		},
 		{
 			"name": "Deathlock",
@@ -10050,7 +10059,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Trolls"
+			]
 		},
 		{
 			"name": "Diviner Wizard",
@@ -13455,7 +13467,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Earth Elementals"
+			]
 		},
 		{
 			"name": "Eidolon",
@@ -14746,7 +14761,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Fire Elementals"
+			]
 		},
 		{
 			"name": "Fire Giant Dreadnought",
@@ -16251,7 +16269,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Beholders"
+			]
 		},
 		{
 			"name": "Gazer",
@@ -16431,7 +16452,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Beholders"
+			]
 		},
 		{
 			"name": "Geryon",
@@ -17193,7 +17217,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githyanki"
+			]
 		},
 		{
 			"name": "Githyanki Kith'rak",
@@ -17350,7 +17377,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githyanki"
+			]
 		},
 		{
 			"name": "Githyanki Supreme Commander",
@@ -17531,7 +17561,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githyanki"
+			]
 		},
 		{
 			"name": "Githzerai Anarch",
@@ -17708,7 +17741,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githzerai"
+			]
 		},
 		{
 			"name": "Githzerai Enlightened",
@@ -17861,7 +17897,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Githzerai"
+			]
 		},
 		{
 			"name": "Gnoll Flesh Gnawer",
@@ -17979,7 +18018,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Gnolls"
+			]
 		},
 		{
 			"name": "Gnoll Hunter",
@@ -18101,7 +18143,10 @@
 				"THW"
 			],
 			"hasToken": true,
-			"hasFluff": true
+			"hasFluff": true,
+			"group": [
+				"Gnolls"
+			]
 		},
 		{
 			"name": "Gnoll Witherling",
@@ -18235,7 +18280,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Gnolls"
+			]
 		},
 		{
 			"name": "Gray Render",
@@ -20324,7 +20372,11 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Hobgoblins",
+				"Goblinoids"
+			]
 		},
 		{
 			"name": "Hobgoblin Iron Shadow",
@@ -20482,7 +20534,11 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Hobgoblins",
+				"Goblinoids"
+			]
 		},
 		{
 			"name": "Howler",
@@ -21224,7 +21280,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Yugoloths"
+			]
 		},
 		{
 			"name": "Illusionist Wizard",
@@ -28196,7 +28255,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Yugoloths"
+			]
 		},
 		{
 			"name": "Orcus",
@@ -29747,7 +29809,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Trolls"
+			]
 		},
 		{
 			"name": "Rutterkin",
@@ -31906,7 +31971,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Oozes"
+			]
 		},
 		{
 			"name": "Spawn of Kyuss",
@@ -32190,7 +32258,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Trolls"
+			]
 		},
 		{
 			"name": "Spring Eladrin",
@@ -36854,7 +36925,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Trolls"
+			]
 		},
 		{
 			"name": "War Priest",
@@ -37973,7 +38047,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Water Elementals"
+			]
 		},
 		{
 			"name": "White Abishai",
