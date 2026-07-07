@@ -439,8 +439,6 @@
 		}
 	}
 
-	// Narrow viewports (hover popouts, split-panel DM screen tiles) collapse back to single column
-	// so trait text stays legible.
 	// Narrow viewports (hover popouts, split-panel DM screen tiles, side-by-side layouts) collapse
 	// back to single column so trait text stays legible. 900px is chosen empirically: bestiary
 	// hover popouts often render around 700-800px wide and cram in two columns; the desktop main
@@ -453,10 +451,12 @@
 	}
 
 	// Defensive composition with the collapsible-statblocks feature (tracker #1190). When a body
-	// section entry is collapsed to hide its inner content, we must also drop it from the column
-	// balancing pass so an all-collapsed column does not leave the opposite column empty. This
-	// mirrors the standard `display: none` behavior for column flow.
-	.ve-stats--two-col > tbody.mon__body-cols-wrap [data-collapsed="true"] {
+	// section entry is collapsed to hide its inner content, drop it from the column balancing pass
+	// so an all-collapsed column does not leave the opposite column empty. Covers both the
+	// `[data-collapsed="true"]` attribute and the `.stats-entry-collapsible` marker class variants
+	// their post-processor may use.
+	.ve-stats--two-col > tbody.mon__body-cols-wrap [data-collapsed="true"],
+	.ve-stats--two-col > tbody.mon__body-cols-wrap .stats-entry-collapsible[data-collapsed="true"] {
 		break-inside: auto;
 	}
 
