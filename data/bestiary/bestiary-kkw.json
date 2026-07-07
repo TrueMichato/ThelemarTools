@@ -99,7 +99,11 @@
 				"RNG",
 				"RW"
 			],
-			"hasToken": true
+			"hasToken": true,
+			"group": [
+				"Goblins",
+				"Goblinoids"
+			]
 		},
 		{
 			"name": "Krenko",

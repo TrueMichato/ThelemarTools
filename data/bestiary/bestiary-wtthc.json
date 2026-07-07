@@ -925,7 +925,10 @@
 			},
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Gnolls"
+			]
 		},
 		{
 			"name": "Goblin Warrior",
@@ -937,7 +940,11 @@
 			},
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Goblins",
+				"Goblinoids"
+			]
 		},
 		{
 			"name": "Guard",
@@ -1200,7 +1207,10 @@
 				"source": "XMM"
 			},
 			"hasToken": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Myconids"
+			]
 		},
 		{
 			"name": "Needle Blight",

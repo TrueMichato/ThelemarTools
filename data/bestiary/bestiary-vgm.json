@@ -8758,7 +8758,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Gnolls"
+			]
 		},
 		{
 			"name": "Gnoll Hunter",
@@ -8884,7 +8887,10 @@
 				"THW"
 			],
 			"hasToken": true,
-			"hasFluff": true
+			"hasFluff": true,
+			"group": [
+				"Gnolls"
+			]
 		},
 		{
 			"name": "Gnoll Witherling",
@@ -9009,7 +9015,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Gnolls"
+			]
 		},
 		{
 			"name": "Green Guard Drake",
@@ -10273,7 +10282,11 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Hobgoblins",
+				"Goblinoids"
+			]
 		},
 		{
 			"name": "Hobgoblin Iron Shadow",
@@ -10426,7 +10439,11 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Hobgoblins",
+				"Goblinoids"
+			]
 		},
 		{
 			"name": "Illithilich",
@@ -16308,7 +16325,10 @@
 			],
 			"hasToken": true,
 			"hasFluff": true,
-			"hasFluffImages": true
+			"hasFluffImages": true,
+			"group": [
+				"Oozes"
+			]
 		},
 		{
 			"name": "Spawn of Kyuss",

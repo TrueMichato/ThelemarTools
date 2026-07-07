@@ -4314,6 +4314,20 @@ Renderer.utils = class {
 								? prof.map(skill => skill.toTitleCase()).join("+")
 								: `Proficiency in the ${prof.map(skill => Renderer.get().render(`{@skill ${skill.toTitleCase()}}`)).joinConjunct(", ", " and ")} skill${prof.length === 1 ? "" : "s"}`;
 						}
+						case "tool": {
+							if (prof === true) return isListMode ? `Tool Proficiency` : `Proficiency with any tool`;
+							const asArr = Array.isArray(prof) ? prof : [prof];
+							const titled = asArr.map(t => t.toTitleCase());
+							if (isListMode) {
+								return styleHint === "classic"
+									? `Prof ${titled.join("/")}`
+									: `${titled.join("/")} Trai.`;
+							}
+							const joined = titled.joinConjunct(", ", " or ");
+							return styleHint === "classic"
+								? `Proficiency with ${joined}`
+								: `${joined} Training`;
+						}
 						default: throw new Error(`Unhandled proficiency type: "${profType}"`);
 					}
 				});
@@ -6488,6 +6502,8 @@ Renderer.events = class {
 
 				const fnBind = Renderer.hover.getFnBindListenersCompact(page);
 				if (fnBind) fnBind(toRender, nxtTgt);
+
+				Renderer.statblockCollapse.apply(nxt);
 			});
 	}
 };
@@ -8609,6 +8625,7 @@ Renderer.race = class {
 			ent.creatureTypesEntry || (this._getRaceRenderableEntriesMeta_creatureType({ent, styleHint})),
 			ent.sizeEntry || (ent.size ? {type: "item", name: "Size:", entry: Renderer.utils.getRenderedSize(ent.size || [Parser.SZ_VARIES])} : null),
 			ent.speedEntry || (ent.speed != null ? {type: "item", name: "Speed:", entry: Parser.getSpeedString(ent, {isLongForm: true})} : null),
+			ent.sensesEntry || Renderer.race._getRaceRenderableEntriesMeta_senses({ent}),
 		]
 			.filter(Boolean);
 
@@ -8630,6 +8647,20 @@ Renderer.race = class {
 		const typesFilt = (ent.creatureTypes || []).filter(it => `${it}`.toLowerCase() !== Parser.TP_HUMANOID);
 		if (!typesFilt.length) return null;
 		return {type: "item", name: "Creature Type:", entry: Parser.raceCreatureTypesToFull(typesFilt)};
+	}
+
+	// Canonical race sense order. Kept in sync with
+	// CharacterSheetClassUtils.SENSE_DISPLAY_ORDER (charactersheet-class-utils.js)
+	// so the popout attribute list and the character-sheet Senses widget render
+	// senses in the same order. Do not reorder without updating both sites.
+	static _RACE_SENSE_KEYS = ["darkvision", "blindsight", "tremorsense", "truesight"];
+
+	static _getRaceRenderableEntriesMeta_senses ({ent}) {
+		const parts = Renderer.race._RACE_SENSE_KEYS
+			.filter(k => ent[k])
+			.map(k => `${k.toTitleCase()} ${ent[k]} ft.`);
+		if (!parts.length) return null;
+		return {type: "item", name: "Senses:", entry: parts.join(", ")};
 	}
 
 	/* -------------------------------------------- */
@@ -17423,6 +17454,10 @@ Renderer.hover = class {
 		if (!opts.isStatic) {
 			const fnBind = Renderer.hover.getFnBindListenersCompact(page);
 			if (fnBind) fnBind(toRender, out);
+
+			// Inject collapsible-entry affordances (safe no-op when the rendered content
+			//   has no matching entry structure — e.g. spell / item / feat popouts).
+			Renderer.statblockCollapse.apply(out);
 		}
 
 		return out;
@@ -17781,6 +17816,356 @@ Renderer.initLazyImageLoaders = function () {
 
 	images.forEach(ele => observer.track(ele));
 };
+
+// region Collapsible statblock affordances
+//   Post-processor that injects per-entry / per-section / whole-statblock collapse
+//   affordances into rendered compact monster statblocks. Applied to already-rendered
+//   DOM (does not modify the HTML emitted by `Renderer.monster.getCompactRenderedString`)
+//   so that markdown export, adventure inline statblocks, homebrew previews, and
+//   character-sheet export payloads are unaffected.
+//
+//   Collapse state lives on `data-*` attributes of the injected DOM only. It is not
+//   persisted to localStorage or any board state — closing a hover, re-selecting an
+//   initiative combatant, or paginating the bestiary all reset state as intended.
+//
+//   Print: on-screen collapse state is respected. Chevrons themselves are `no-print`.
+Renderer.statblockCollapse = class {
+	static _CLS_ENTRY = "stats-entry-collapsible";
+	static _CLS_ENTRY_TOGGLE = "stats-entry-collapsible__toggle";
+	static _CLS_ENTRY_HEAD = "stats-entry-collapsible__head";
+	static _CLS_ENTRY_BODY = "stats-entry-collapsible__body";
+	static _CLS_ENTRY_BODY_INLINE = "stats-entry-collapsible__body-inline";
+	static _CLS_SECTION_TOGGLE = "stats-section-collapsible__toggle";
+	static _CLS_STATS_TOOLBAR = "stats-collapse-toolbar";
+
+	static _CHEVRON_EXPANDED = "\u25BE"; // ▾
+	static _CHEVRON_COLLAPSED = "\u25B8"; // ▸
+
+	static _isBound = false;
+
+	static bindGlobal ({element = null} = {}) {
+		if (this._isBound) return;
+		this._isBound = true;
+
+		const target = element || document.body;
+
+		target.addEventListener("click", evt => {
+			// Per-entry toggle
+			const eleEntryToggle = evt.target.closest(`.${this._CLS_ENTRY_TOGGLE}`);
+			if (eleEntryToggle) return this._handleClick_entryToggle(evt, eleEntryToggle);
+
+			// Also allow clicking on the header area itself for pointer users
+			//  (but only inside a collapsible entry, and not through a link)
+			const eleEntryHead = evt.target.closest(`.${this._CLS_ENTRY_HEAD}`);
+			if (eleEntryHead && !evt.target.closest("a, button, .stats-entry-collapsible__toggle")) {
+				const eleEntry = eleEntryHead.closest(`.${this._CLS_ENTRY}`);
+				const eleBtn = eleEntry?.querySelector(`:scope > * .${this._CLS_ENTRY_TOGGLE}, :scope .${this._CLS_ENTRY_TOGGLE}`);
+				if (eleBtn) return this._handleClick_entryToggle(evt, eleBtn);
+			}
+
+			// Section header toggle
+			const eleSectionToggle = evt.target.closest(`.${this._CLS_SECTION_TOGGLE}`);
+			if (eleSectionToggle) return this._handleClick_sectionToggle(evt, eleSectionToggle);
+
+			// Also allow clicking on the h3 header for pointer users
+			const eleSectionHeader = evt.target.closest("h3.ve-stats__sect-header-inner");
+			if (eleSectionHeader?.querySelector(`.${this._CLS_SECTION_TOGGLE}`) && !evt.target.closest("a, button")) {
+				const eleBtn = eleSectionHeader.querySelector(`.${this._CLS_SECTION_TOGGLE}`);
+				if (eleBtn) return this._handleClick_sectionToggle(evt, eleBtn);
+			}
+
+			// Collapse-all / Expand-all
+			const eleAllToggle = evt.target.closest(`[data-stats-collapse-all]`);
+			if (eleAllToggle) return this._handleClick_allToggle(evt, eleAllToggle);
+		});
+	}
+
+	/**
+	 * Inject collapse affordances into every `.ve-stats` table found in `root` (or `root`
+	 * itself, if it is a `.ve-stats` table). Idempotent — safe to call repeatedly.
+	 *
+	 * @param {Element|null} root Element containing (or being) a `.ve-stats` table.
+	 */
+	static apply (root) {
+		if (!root || root.nodeType !== 1) return;
+
+		// Both `.ve-stats` (bestiary/DM Screen/hover popouts) and `.ve-rd__b-data--stats`
+		//   (adventure inline `{@creature}` statblocks wrapped in `getEmbeddedDataHeader`)
+		//   host the same trait/action DOM shape.
+		const selector = "table.ve-stats, table.ve-rd__b-data--stats";
+
+		const tables = root.matches?.(selector)
+			? [root]
+			: [...root.querySelectorAll(selector)];
+
+		tables.forEach(tbl => this._applyToTable(tbl));
+	}
+
+	static _applyToTable (tbl) {
+		// Per-element idempotency is enforced by the individual injectors' guards
+		//   (checking existing classes / query selectors), so this method is safe to
+		//   call repeatedly on the same table — including after `.empty()` clears
+		//   inner content between re-renders.
+		this._injectAllToggleControls(tbl);
+		this._injectSectionToggles(tbl);
+		this._injectEntryToggles(tbl);
+	}
+
+	/* ---------- Tier 1: per-entry ---------- */
+
+	static _injectEntryToggles (tbl) {
+		// Regular block entries (traits, actions, reactions, bonus actions rendered
+		//   via `_renderActions` — one `<div class="ve-rd__b--3">` per entry).
+		tbl.querySelectorAll(`td .${Renderer.HEAD_2}:not(.${this._CLS_ENTRY})`).forEach(eleEntry => {
+			// Skip nested entries — only top-level entries directly inside a statblock <td>.
+			// (Deeper nested `ve-rd__b--3` blocks e.g. inside "entries" nested content should
+			//   NOT get a toggle — they're sub-content of a parent entry.)
+			if (eleEntry.parentElement?.closest?.(`.${Renderer.HEAD_2}`)) return;
+			this._wrapEntry(eleEntry);
+		});
+
+		// Hanging-list items (legendary / mythic / lair — rendered as `<p class="ve-rd__p-list-item">`
+		//   inside `<li>` with an inline `<span class="ve-rd__list-item-name">`).
+		tbl.querySelectorAll(`td li.ve-rd__li > p.ve-rd__p-list-item:not(.${this._CLS_ENTRY})`).forEach(eleP => {
+			// Only if it has a title span — otherwise there's nothing to hang a chevron off.
+			if (!eleP.querySelector(":scope > .ve-rd__list-item-name")) return;
+			this._wrapListItemEntry(eleP);
+		});
+	}
+
+	static _wrapEntry (eleEntry) {
+		// The renderer emits (via `_renderActions`):
+		//   <div class="ve-rd__b--3">
+		//     <p><span class="ve-rd__h ve-rd__h--3"><span class="entry-title-inner">Name.</span></span> body...</p>
+		//     <p>Second paragraph...</p>
+		//   </div>
+		// `type: "inlineBlock"` renders with no wrapper element, so the header span is a
+		//   direct child of the first <p>.
+		const eleHeaderSpan = eleEntry.querySelector(":scope > p:first-child > .ve-rd__h--3");
+		if (!eleHeaderSpan) return;
+
+		const eleFirstP = eleHeaderSpan.parentElement;
+		if (!eleFirstP || eleFirstP.tagName !== "P") return;
+
+		eleEntry.classList.add(this._CLS_ENTRY);
+		eleEntry.setAttribute("data-collapsed", "false");
+
+		// Wrap the sibling nodes after the header span (inside the first <p>) in a
+		//   body-inline span so CSS can hide the inline body text.
+		this._wrapPostHeaderNodes(eleFirstP, eleHeaderSpan);
+
+		// Class every subsequent element sibling of eleFirstP inside the entry as body.
+		let sibling = eleFirstP.nextElementSibling;
+		while (sibling) {
+			sibling.classList.add(this._CLS_ENTRY_BODY);
+			sibling = sibling.nextElementSibling;
+		}
+
+		// Inject the toggle button next to the header name.
+		const btn = this._createEntryToggleButton();
+		const eleTitleInner = eleHeaderSpan.querySelector(":scope > .entry-title-inner");
+		if (eleTitleInner) {
+			// Wrap the title span + button in a "head" span so header-click delegation is scoped.
+			const eleHead = document.createElement("span");
+			eleHead.className = this._CLS_ENTRY_HEAD;
+			eleTitleInner.parentNode.insertBefore(eleHead, eleTitleInner);
+			eleHead.appendChild(btn);
+			eleHead.appendChild(document.createTextNode(" "));
+			eleHead.appendChild(eleTitleInner);
+		} else {
+			// Fallback — prepend to the header span directly.
+			eleHeaderSpan.insertBefore(btn, eleHeaderSpan.firstChild);
+		}
+	}
+
+	static _wrapPostHeaderNodes (eleP, eleHeaderSpan) {
+		const trailingNodes = [];
+		let cursor = eleHeaderSpan.nextSibling;
+		while (cursor) {
+			trailingNodes.push(cursor);
+			cursor = cursor.nextSibling;
+		}
+		if (!trailingNodes.length) return;
+
+		const wrap = document.createElement("span");
+		wrap.className = this._CLS_ENTRY_BODY_INLINE;
+		trailingNodes.forEach(n => wrap.appendChild(n));
+		eleP.appendChild(wrap);
+	}
+
+	static _wrapListItemEntry (eleP) {
+		const eleNameSpan = eleP.querySelector(":scope > .ve-rd__list-item-name");
+		if (!eleNameSpan) return;
+
+		eleP.classList.add(this._CLS_ENTRY);
+		eleP.setAttribute("data-collapsed", "false");
+
+		const btn = this._createEntryToggleButton();
+
+		// Wrap the name span + button in a "head" span.
+		const eleHead = document.createElement("span");
+		eleHead.className = this._CLS_ENTRY_HEAD;
+		eleNameSpan.parentNode.insertBefore(eleHead, eleNameSpan);
+		eleHead.appendChild(btn);
+		eleHead.appendChild(document.createTextNode(" "));
+		eleHead.appendChild(eleNameSpan);
+
+		// Wrap all sibling nodes after eleHead in a body-inline span.
+		const wrapInline = document.createElement("span");
+		wrapInline.className = this._CLS_ENTRY_BODY_INLINE;
+		let cursor = eleHead.nextSibling;
+		const toMove = [];
+		while (cursor) { toMove.push(cursor); cursor = cursor.nextSibling; }
+		toMove.forEach(n => wrapInline.appendChild(n));
+		eleP.appendChild(wrapInline);
+	}
+
+	static _createEntryToggleButton () {
+		const btn = document.createElement("button");
+		btn.type = "button";
+		btn.className = `${this._CLS_ENTRY_TOGGLE} no-print`;
+		btn.setAttribute("aria-expanded", "true");
+		btn.setAttribute("aria-label", "Collapse entry");
+		btn.title = "Collapse entry (Ctrl-click to collapse all in section)";
+		btn.textContent = this._CHEVRON_EXPANDED;
+		return btn;
+	}
+
+	static _handleClick_entryToggle (evt, btn) {
+		evt.stopPropagation();
+		evt.preventDefault();
+
+		const eleEntry = btn.closest(`.${this._CLS_ENTRY}`);
+		if (!eleEntry) return;
+
+		const isCollapsedNow = eleEntry.getAttribute("data-collapsed") === "true";
+		const nextCollapsed = !isCollapsedNow;
+		this._setEntryCollapsed(eleEntry, nextCollapsed);
+
+		if (EventUtil.isCtrlMetaKey(evt)) {
+			// Cascade: apply the same state to every sibling collapsible entry inside the
+			//   same section container (immediate parent element that hosts entries).
+			const parent = eleEntry.parentElement;
+			if (parent) {
+				parent.querySelectorAll(`:scope > .${this._CLS_ENTRY}, :scope li > .${this._CLS_ENTRY}`)
+					.forEach(other => {
+						if (other === eleEntry) return;
+						this._setEntryCollapsed(other, nextCollapsed);
+					});
+			}
+		}
+	}
+
+	static _setEntryCollapsed (eleEntry, isCollapsed) {
+		eleEntry.setAttribute("data-collapsed", isCollapsed ? "true" : "false");
+		const btn = eleEntry.querySelector(`.${this._CLS_ENTRY_TOGGLE}`);
+		if (btn) {
+			btn.textContent = isCollapsed ? this._CHEVRON_COLLAPSED : this._CHEVRON_EXPANDED;
+			btn.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+			btn.setAttribute("aria-label", isCollapsed ? "Expand entry" : "Collapse entry");
+		}
+	}
+
+	/* ---------- Tier 2: section headers ---------- */
+
+	static _injectSectionToggles (tbl) {
+		tbl.querySelectorAll("h3.ve-stats__sect-header-inner").forEach(eleH3 => {
+			if (eleH3.querySelector(`:scope > .${this._CLS_SECTION_TOGGLE}`)) return;
+
+			// Find the header <tr> and the body <tr> immediately following it.
+			const eleTr = eleH3.closest("tr");
+			if (!eleTr || !eleTr.nextElementSibling) return;
+
+			eleTr.setAttribute("data-section-collapsed", "false");
+
+			const btn = document.createElement("button");
+			btn.type = "button";
+			btn.className = `${this._CLS_SECTION_TOGGLE} no-print`;
+			btn.setAttribute("aria-expanded", "true");
+			const sectionLabel = (eleH3.textContent || "section").trim().replace(/\s*\(.*\)\s*$/, "");
+			btn.setAttribute("aria-label", `Collapse ${sectionLabel} section`);
+			btn.title = `Collapse ${sectionLabel}`;
+			btn.textContent = this._CHEVRON_EXPANDED;
+
+			eleH3.appendChild(document.createTextNode(" "));
+			eleH3.appendChild(btn);
+		});
+	}
+
+	static _handleClick_sectionToggle (evt, btn) {
+		evt.stopPropagation();
+		evt.preventDefault();
+
+		const eleTr = btn.closest("tr");
+		if (!eleTr) return;
+
+		const isCollapsedNow = eleTr.getAttribute("data-section-collapsed") === "true";
+		const nextCollapsed = !isCollapsedNow;
+		this._setSectionCollapsed(eleTr, nextCollapsed, btn);
+	}
+
+	static _setSectionCollapsed (eleTr, isCollapsed, btn) {
+		eleTr.setAttribute("data-section-collapsed", isCollapsed ? "true" : "false");
+		btn ||= eleTr.querySelector(`.${this._CLS_SECTION_TOGGLE}`);
+		if (btn) {
+			btn.textContent = isCollapsed ? this._CHEVRON_COLLAPSED : this._CHEVRON_EXPANDED;
+			btn.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+			const label = (btn.getAttribute("aria-label") || "").replace(/^(Collapse|Expand)\s+/, isCollapsed ? "Expand " : "Collapse ");
+			btn.setAttribute("aria-label", label);
+		}
+	}
+
+	/* ---------- Tier 4: Collapse-All / Expand-All ---------- */
+
+	static _injectAllToggleControls (tbl) {
+		const wrpSource = tbl.querySelector(".ve-stats__wrp-h-source");
+		if (!wrpSource) return;
+		if (wrpSource.querySelector(`.${this._CLS_STATS_TOOLBAR}`)) return;
+
+		const toolbar = document.createElement("span");
+		toolbar.className = `${this._CLS_STATS_TOOLBAR} no-print`;
+
+		const btnCollapse = document.createElement("button");
+		btnCollapse.type = "button";
+		btnCollapse.className = `${this._CLS_STATS_TOOLBAR}__btn`;
+		btnCollapse.setAttribute("data-stats-collapse-all", "collapse");
+		btnCollapse.title = "Collapse all entries";
+		btnCollapse.setAttribute("aria-label", "Collapse all entries");
+		btnCollapse.textContent = "\u2212"; // − minus sign
+
+		const btnExpand = document.createElement("button");
+		btnExpand.type = "button";
+		btnExpand.className = `${this._CLS_STATS_TOOLBAR}__btn`;
+		btnExpand.setAttribute("data-stats-collapse-all", "expand");
+		btnExpand.title = "Expand all entries";
+		btnExpand.setAttribute("aria-label", "Expand all entries");
+		btnExpand.textContent = "\u002B"; // + plus sign
+
+		toolbar.appendChild(btnCollapse);
+		toolbar.appendChild(btnExpand);
+
+		// Insert before the source abbreviation for visual alignment on the right side.
+		wrpSource.insertBefore(toolbar, wrpSource.firstChild);
+	}
+
+	static _handleClick_allToggle (evt, btn) {
+		evt.stopPropagation();
+		evt.preventDefault();
+
+		const tbl = btn.closest("table.ve-stats, table.ve-rd__b-data--stats");
+		if (!tbl) return;
+
+		const isCollapse = btn.getAttribute("data-stats-collapse-all") === "collapse";
+
+		tbl.querySelectorAll(`.${this._CLS_ENTRY}`).forEach(eleEntry => {
+			this._setEntryCollapsed(eleEntry, isCollapse);
+		});
+		tbl.querySelectorAll(`tr[data-section-collapsed]`).forEach(eleTr => {
+			this._setSectionCollapsed(eleTr, isCollapse);
+		});
+	}
+};
+// endregion
 
 Renderer.HEAD_NEG_1 = "ve-rd__b--0";
 Renderer.HEAD_0 = "ve-rd__b--1";

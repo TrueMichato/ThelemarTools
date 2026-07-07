@@ -135,6 +135,31 @@ weaponProficiencies: ["simple", "martial"],
 armorProficiencies: ["light", "medium", "heavy", "shields"],
 ```
 
+### Senses
+
+The character sheet models the four canonical D&D 5e senses uniformly.
+
+```javascript
+senses: {
+    darkvision: 0,   // range in feet
+    blindsight: 0,
+    tremorsense: 0,
+    truesight: 0,
+},
+```
+
+Race data ingestion honours **all four** senses as top-level numeric
+fields on the race (and, if present, subrace) object — `race.darkvision`,
+`race.blindsight`, `race.tremorsense`, `race.truesight`. The Builder,
+main-sheet race application, and Respec's race-change path iterate
+`CharacterSheetClassUtils.SENSE_DISPLAY_ORDER` so any new sense granted
+by a race is picked up automatically without further plumbing.
+Subrace values override race values when they exceed the race value
+(e.g. Drow's `darkvision: 120` over the base Elf's 60). Prose-only or
+conditional grants (e.g. "while submerged you gain blindsight 10 ft.")
+stay in the race's `entries` block and are surfaced through the
+active-state / toggle system, not through the numeric senses fields.
+
 ### Spellcasting
 
 ```javascript

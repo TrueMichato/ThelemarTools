@@ -9688,6 +9688,7 @@ if (!globalThis.IS_VTT && typeof window !== "undefined") {
 	window.addEventListener("load", () => {
 		Renderer.dice.bindOnclickListener(document.body);
 		Renderer.events.bindGeneric();
+		Renderer.statblockCollapse.bindGlobal();
 	});
 
 	// region Cancer
