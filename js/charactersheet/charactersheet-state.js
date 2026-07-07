@@ -3709,6 +3709,19 @@ const FeatureEffectRegistry = {
 			});
 		}
 
+		// Combined skill/tool/language proficiencies (5ET-843).
+		// Structure mirrors backgrounds: entries with `anySkill` / `anyTool` /
+		// `anyLanguage` numeric counts (always player-choice; no fixed grants).
+		// Deliberate NO-OP: accepting the field here prevents any future data
+		// consumer (schema-conforming) from tripping an "unknown property" fail,
+		// but we do NOT surface effects — the feature-level choose picker is a
+		// separate, un-shipped feature. Adding a `pendingProficiencyChoice` effect
+		// object today would be dead code (no `_applyFeatureEffect` handler) and
+		// half-picker infra we'd have to rip out later. See 5ET-843 PR body.
+		if (featureData.skillToolLanguageProficiencies) {
+			// intentional passthrough
+		}
+
 		// Weapon proficiencies
 		if (featureData.weaponProficiencies) {
 			const weaponProfs = Array.isArray(featureData.weaponProficiencies)
@@ -4651,6 +4664,14 @@ class CharacterSheetState {
 		// existing save keeps the vanilla `abilityMod:'str'`). Idempotent; gated on the
 		// TGTT toggle; leaves explicit con/dex/spellcasting/finesse and non-natural attacks.
 		this._migrateNaturalWeaponFinesse();
+
+		// (5ET-843) Re-apply structured proficiency grants declared on stored features
+		// (skillProficiencies / toolProficiencies / languageProficiencies). Old saves
+		// may hold a Lust Domain L3 "Bonus Proficiencies" wrapper (or any future
+		// subclassFeature with structured profs) that was added BEFORE the addFeature
+		// pipeline processed these fields — the grants were silently dropped.
+		// Idempotent via _trackGrantedProficiency; never downgrades existing levels.
+		this._migrateSubclassFeatureProficiencyGrants();
 	}
 
 	/**
@@ -4683,6 +4704,44 @@ class CharacterSheetState {
 			}
 		}
 	}
+
+	/**
+	 * (5ET-843) Load-time re-application of structured proficiency grants declared on
+	 * stored features. Mirrors `_migrateNaturalWeaponFinesse` — same rationale:
+	 * addFeature-time transforms don't reach saves stored before the transform existed.
+	 *
+	 * For every stored feature that has any of `skillProficiencies` / `toolProficiencies`
+	 * / `languageProficiencies`, re-run `_processFeatureProficiencyGrants`. The tracker
+	 * (`_trackGrantedProficiency`) makes it idempotent by (name, source=feature:id);
+	 * existing proficiency levels are never downgraded. Safe to run every load.
+	 *
+	 * MATCHING IS BY FEATURE `id` (a per-instance UID), NEVER BY NAME. Two homebrew
+	 * subclasses may ship a "Bonus Proficiencies" feature with different structured
+	 * grants; each gets processed against its own tracker slot without collision.
+	 * A feature without an `id` (should never happen after loadFromJson, but defensive)
+	 * is skipped. A feature without any of the four prof fields is also skipped —
+	 * no allowlist, no name-based dispatch.
+	 *
+	 * Repairs:
+	 *   - TGTT Cleric Lust Domain L3 "Bonus Proficiencies" saves that predate 5ET-843
+	 *     (Deception + Persuasion were prose-only, never applied structurally).
+	 *   - Any future subclassFeature (or classFeature) that gains structured prof fields
+	 *     — no per-feature allowlist required.
+	 */
+	_migrateSubclassFeatureProficiencyGrants () {
+		if (!Array.isArray(this._data.features) || !this._data.features.length) return;
+		for (const feature of this._data.features) {
+			if (!feature || !feature.id) continue; // UID gate — never fall back to name matching
+			if (
+				!feature.skillProficiencies
+				&& !feature.toolProficiencies
+				&& !feature.languageProficiencies
+				&& !feature.savingThrowProficiencies
+			) continue;
+			this._processFeatureProficiencyGrants(feature, feature.id);
+		}
+	}
+
 	/**
 	 * (#11) Load-time backfill: for every EQUIPPED quiver, PURGE any stale
 	 * non-ammunition `containedItems` (e.g. armor wrongly baked in by an earlier
@@ -30534,6 +30593,12 @@ class CharacterSheetState {
 			isSubclassFeature: true,
 			entries: JSON.parse(JSON.stringify(canonical.entries)),
 		};
+		// Propagate proficiency-grant fields so addFeature can apply them (5ET-843).
+		// Without these, refSubclassFeature-expanded stubs would silently drop any
+		// skill/tool/language grants the canonical feature declared.
+		for (const key of ["skillProficiencies", "toolProficiencies", "languageProficiencies", "skillToolLanguageProficiencies", "savingThrowProficiencies"]) {
+			if (canonical[key] != null) feat[key] = JSON.parse(JSON.stringify(canonical[key]));
+		}
 		if (canonical.description) {
 			feat.description = canonical.description;
 		} else if (typeof Renderer !== "undefined") {
@@ -30872,6 +30937,13 @@ class CharacterSheetState {
 
 		// Check if this feature grants modifiers to rolls, AC, etc.
 		this._processFeatureModifiers(feature, featureData.id, {claimedSkills});
+
+		// (5ET-843) Apply structured proficiency grants declared on the feature itself
+		// (`skillProficiencies` / `toolProficiencies` / `languageProficiencies`). This
+		// gives `classFeature` and `subclassFeature` schema parity with backgrounds and
+		// races for granted profs. `skillToolLanguageProficiencies` is player-choice
+		// only and is left for the (future) feature-level choose picker.
+		this._processFeatureProficiencyGrants(feature, featureData.id, {claimedSkills});
 
 		// Check if this feature grants specific combat methods directly (e.g. Primal Focus Upgrade).
 		// Resolve each granted method against the catalog and add it as a real combat method.
@@ -32155,6 +32227,130 @@ class CharacterSheetState {
 
 			const valueStr = mod.setValue ? `=${mod.value}` : (mod.value >= 0 ? `+${mod.value}` : `${mod.value}`);
 		});
+	}
+
+	/**
+	 * (5ET-843) Apply structured proficiency grants declared on a feature
+	 * (`skillProficiencies` / `toolProficiencies` / `languageProficiencies`) so
+	 * classFeature and subclassFeature reach schema parity with backgrounds/races.
+	 *
+	 * Semantics:
+	 *   - Only FIXED grants are applied. `choose` / `any` / `anyStandard` /
+	 *     `anyArtisansTool` / `anyMusicalInstrument` are ignored (they are player-choice
+	 *     and the feature-level `choose` picker is a future feature — matches the
+	 *     current classFeature behavior).
+	 *   - Skills default to proficient (1); a value of `2` or `"expertise"` grants
+	 *     expertise. Existing higher levels are NEVER downgraded.
+	 *   - `claimedSkills` (from prose-choice parsing on the same feature) suppresses
+	 *     duplicate grants for skills the user is about to pick.
+	 *   - Every grant is bookkept via `_trackGrantedProficiency("skills"|"tools"|"languages", key, "feature:<id>")`
+	 *     so a later cleanup / removal can `_untrackGrantedProficiency` and decide
+	 *     whether to strip the proficiency.
+	 *   - Idempotent: `_trackGrantedProficiency` dedupes by (name, source); running
+	 *     twice with the same feature id leaves state unchanged.
+	 *
+	 * `skillToolLanguageProficiencies` (2024 background shape: `anySkill`/`anyTool`/
+	 * `anyLanguage` counts) is intentionally NOT auto-applied — all its keys are
+	 * player-choice. It's left to a future picker; today `parseDataEffects` surfaces
+	 * a `pendingProficiencyChoice` effect when the data path allows it.
+	 *
+	 * @param {object} feature
+	 * @param {string} featureId
+	 * @param {object} [opts]
+	 * @param {Set<string>} [opts.claimedSkills] - skill keys already claimed by a
+	 *   prose-parsed feature choice (avoid double-granting).
+	 */
+	_processFeatureProficiencyGrants (feature, featureId, opts = {}) {
+		if (!feature || !featureId) return;
+		const trackSource = `feature:${featureId}`;
+		const claimedSkills = opts.claimedSkills instanceof Set ? opts.claimedSkills : null;
+
+		const asArray = (v) => {
+			if (v == null) return [];
+			return Array.isArray(v) ? v : [v];
+		};
+
+		const SKILL_META_KEYS = new Set(["choose", "any"]);
+		const TOOL_META_KEYS = new Set(["choose", "any", "anyArtisansTool", "anyMusicalInstrument", "anyGamingSet"]);
+		const LANG_META_KEYS = new Set(["choose", "any", "anyStandard", "anyExotic", "anyRare", "anyStandardOrExotic"]);
+
+		// --- Skills ---
+		for (const sp of asArray(feature.skillProficiencies)) {
+			if (!sp || typeof sp !== "object") continue;
+			for (const skill of Object.keys(sp)) {
+				if (SKILL_META_KEYS.has(skill)) continue;
+				const skillKey = skill.toLowerCase().replace(/\s+/g, "");
+				if (claimedSkills?.has(skillKey)) continue;
+				const val = sp[skill];
+				const wantExpertise = val === 2 || val === "expertise";
+				const wantProf = val === true || val === 1 || wantExpertise;
+				if (!wantProf) continue;
+				const currentLevel = this._data.skillProficiencies?.[skillKey] || 0;
+				const targetLevel = wantExpertise ? 2 : 1;
+				if (currentLevel < targetLevel) {
+					this._data.skillProficiencies[skillKey] = targetLevel;
+				}
+				this._trackGrantedProficiency("skills", skillKey, trackSource);
+			}
+		}
+
+		// --- Tools ---
+		for (const tp of asArray(feature.toolProficiencies)) {
+			if (tp == null) continue;
+			if (typeof tp === "string") {
+				if (!this._data.toolProficiencies.some(t => t.toLowerCase() === tp.toLowerCase())) {
+					this.addToolProficiency(tp);
+				}
+				this._trackGrantedProficiency("tools", tp.toLowerCase(), trackSource);
+				continue;
+			}
+			if (typeof tp !== "object") continue;
+			for (const tool of Object.keys(tp)) {
+				if (TOOL_META_KEYS.has(tool)) continue;
+				const val = tp[tool];
+				if (val !== true && val !== 1) continue;
+				const toolDisplay = tool.toTitleCase ? tool.toTitleCase() : tool.replace(/\b\w/g, c => c.toUpperCase());
+				if (!this._data.toolProficiencies.some(t => t.toLowerCase() === tool.toLowerCase())) {
+					this.addToolProficiency(toolDisplay);
+				}
+				this._trackGrantedProficiency("tools", tool.toLowerCase(), trackSource);
+			}
+		}
+
+		// --- Languages ---
+		for (const lp of asArray(feature.languageProficiencies)) {
+			if (lp == null) continue;
+			if (typeof lp === "string") {
+				this.addLanguage(lp);
+				this._trackGrantedProficiency("languages", lp.toLowerCase(), trackSource);
+				continue;
+			}
+			if (typeof lp !== "object") continue;
+			for (const lang of Object.keys(lp)) {
+				if (LANG_META_KEYS.has(lang)) continue;
+				const val = lp[lang];
+				if (val !== true && val !== 1) continue;
+				const langDisplay = lang.toTitleCase ? lang.toTitleCase() : lang.replace(/\b\w/g, c => c.toUpperCase());
+				this.addLanguage(langDisplay);
+				this._trackGrantedProficiency("languages", lang.toLowerCase(), trackSource);
+			}
+		}
+
+		// --- Saving throw proficiencies ---
+		// String form ("con") and object form ({con: true}) both supported.
+		// Idempotent: addSaveProficiency dedupes.
+		for (const sp of asArray(feature.savingThrowProficiencies)) {
+			if (sp == null) continue;
+			if (typeof sp === "string") {
+				this.addSaveProficiency(sp.toLowerCase());
+				continue;
+			}
+			if (typeof sp !== "object") continue;
+			for (const ability of Object.keys(sp)) {
+				if (sp[ability] !== true && sp[ability] !== 1) continue;
+				this.addSaveProficiency(ability.toLowerCase());
+			}
+		}
 	}
 
 	/**
