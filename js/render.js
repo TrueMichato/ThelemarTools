@@ -10915,8 +10915,9 @@ Renderer.monster = class {
 			page: "monsterGroup",
 			source: mg.source,
 			hash,
+			isFauxPage: true,
 		});
-		return `<tr><td colspan="6" class="rd__mon-group-link ve-muted ve-small">Part of: <a href="#${hash}" ${hoverAttrs}>${mg.name}</a></td></tr>`;
+		return `<tr><td colspan="6" class="rd__mon-group-link ve-muted ve-small">Part of: <a ${hoverAttrs}>${mg.name}</a></td></tr>`;
 	}
 
 	static _getInitiativePart_passive ({mon, initPassive}) {
