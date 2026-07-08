@@ -75,6 +75,32 @@ node node/validate-schema-brew-corpus.js data/bestiary/monstergroups.json
 
 (Or use the utils repo's own validation entrypoint.)
 
+## Coordination: skip-guard removal after this PR lands
+
+While the utils schema is pending, `test/test-json.js` in ThelemarTools
+carries a small `_SCHEMA_PENDING_UTILS` array that skips validation of
+`data/bestiary/monstergroups.json` when the schema file isn't found on
+disk in `node_modules/5etools-utils/schema/site/bestiary/`. This guard
+is **self-clearing** — once this utils PR merges and users run
+`npm install` (bumping their `5etools-utils` snapshot), the on-disk
+check flips and validation resumes automatically. No further code
+change is required in ThelemarTools for the skip to lift.
+
+If desired, the reviewer merging this utils PR (or a follow-up
+ThelemarTools PR) may remove the `_SCHEMA_PENDING_UTILS` array entry
+outright once `5etools-utils` >= the merged version is pinned in
+ThelemarTools' `package.json`. The entry lives at:
+
+```js
+// test/test-json.js
+const _SCHEMA_PENDING_UTILS = [
+    {suffix: "bestiary/monstergroups.json", schemaId: "bestiary/monstergroups.json"},
+];
+```
+
+Delete the object literal (or the whole array if it becomes empty).
+
+
 ## Naming decision
 
 We add the *entity* under the top-level `monsterGroup` property and
