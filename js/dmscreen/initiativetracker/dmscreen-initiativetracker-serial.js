@@ -58,6 +58,15 @@ export class InitiativeTrackerRowDataSerializer extends InitiativeTrackerDataSer
 		"entity.ordinal": "o",
 		// endregion
 
+		// region Lair-action companion markers
+		"entity.isLairMarker": "lm",
+		"entity.isLairMarkerManual": "lmM",
+		"entity.legendaryGroupName": "lgn",
+		"entity.legendaryGroupSource": "lgs",
+		"entity.parentMonsterName": "lpm",
+		"entity.refRowIds": "lrr",
+		// endregion
+
 		// region Specific handling
 		// "entity.rowStatColData": "k",
 		// endregion

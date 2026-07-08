@@ -66,6 +66,7 @@ export class InitiativeTrackerSettings extends BaseComponent {
 		"playerInitShowExactMonsterHp",
 		"playerInitHideNewMonster",
 		"playerInitShowOrdinals",
+		"autoAddLairActions",
 		"isStatsAddColumns",
 		"statsCols",
 	];
@@ -125,6 +126,8 @@ export class InitiativeTrackerSettings extends BaseComponent {
 		UiUtil.addModalSep(eleModalInner);
 		this._pGetShowModalResults_renderSection_wounds({eleModalInner});
 		UiUtil.addModalSep(eleModalInner);
+		this._pGetShowModalResults_renderSection_automation({eleModalInner});
+		UiUtil.addModalSep(eleModalInner);
 		this._pGetShowModalResults_renderSection_playerView({eleModalInner});
 		UiUtil.addModalSep(eleModalInner);
 		this._pGetShowModalResults_renderSection_additionalCols({eleModalInner});
@@ -145,6 +148,10 @@ export class InitiativeTrackerSettings extends BaseComponent {
 
 	_pGetShowModalResults_renderSection_wounds ({eleModalInner}) {
 		UiUtil.getAddModalRowCb2({wrp: eleModalInner, comp: this, prop: "isInvertWoundDirection", text: "Track Hit Points as Damage", title: `For example, by default a creature might have "100/100" hit points when at full HP. When tracking damage, this would instead be displayed as "0/100" when the creature is at full HP.`});
+	}
+
+	_pGetShowModalResults_renderSection_automation ({eleModalInner}) {
+		UiUtil.getAddModalRowCb2({wrp: eleModalInner, comp: this, prop: "autoAddLairActions", text: "Auto-add Lair Actions", title: "When a creature with a legendary group containing lair actions or regional effects is added, automatically append a companion row at initiative 20 (losing ties) that surfaces the group's lair-action block. Multiple creatures sharing a legendary group share one marker; the marker is removed when the last referencing creature leaves the tracker."});
 	}
 
 	_pGetShowModalResults_renderSection_playerView ({eleModalInner}) {
