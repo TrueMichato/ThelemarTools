@@ -18,18 +18,37 @@ export class InitiativeTrackerConst {
  */
 export class InitiativeTrackerRowUtil {
 	/**
-	 * Non-combatant marker rows (lair actions, environmental effects, future
-	 * fog / hazard markers) are present in the initiative order but should be
-	 * excluded from combat operations — no HP editing, no condition rolls,
-	 * no bulk-select surfacing.
+	 * Allow-list of boolean flag names on `row.entity` that mark a row as a
+	 * non-combatant (lair actions, environmental effects, future hazards /
+	 * fog / timers, etc.). New marker types opt out of combat operations by
+	 * adding one entry here — no changes required in any feature that
+	 * consumes `isNonCombatantRow`.
 	 *
-	 * Extend this check when new marker flags are introduced.
+	 * Contract for new marker types: use a `is*Marker` naming convention so
+	 * the flag itself is self-documenting when it appears in serialised state.
 	 *
-	 * Currently recognises:
-	 *   - `entity.isLairMarker` — automatic lair-action rows (tracker #1234)
+	 * Canonical entries:
+	 *   - `isLairMarker` — automatic lair-action rows (tracker #1141, branch
+	 *     `truemichato-auto-lair-actions`; canonical namespace declared in
+	 *     `js/dmscreen/initiativetracker/dmscreen-initiativetracker-lairmarkers.js`).
+	 */
+	static NON_COMBATANT_FLAGS = [
+		"isLairMarker",
+	];
+
+	/**
+	 * True when the row represents any kind of non-combatant marker.
+	 * Features that shouldn't operate on markers (bulk HP, condition apply,
+	 * etc.) should filter with this predicate rather than checking any
+	 * individual flag directly.
 	 */
 	static isNonCombatantRow (row) {
-		return !!row?.entity?.isLairMarker;
+		const entity = row?.entity;
+		if (!entity) return false;
+		for (const flag of InitiativeTrackerRowUtil.NON_COMBATANT_FLAGS) {
+			if (entity[flag]) return true;
+		}
+		return false;
 	}
 
 	/**

@@ -61,15 +61,15 @@ re-rolls (independent saves) are a future enhancement.
 - The `Undo` stack lives on the same `InitiativeTracker` instance and
   is also non-persisted. Cap = 5 entries.
 
-## Marker rows — shared predicate (forward-compat)
+## Marker rows — shared allow-list (forward-compat)
 
-Rows that represent **non-combatant markers** (lair actions, environmental
-effects, future fog / hazard markers, etc.) are excluded from bulk HP
-apply — no checkbox is rendered and the shift-click range calculation
-skips them.
+Rows that represent **non-combatant markers** (lair actions,
+environmental effects, future fog / hazard / timer markers, etc.) are
+excluded from bulk HP apply — no checkbox is rendered and the
+shift-click range calculation skips them.
 
-Selection features route the check through a single shared predicate so
-new marker types compose without touching every feature:
+Selection features route the check through a single shared predicate
+so new marker types compose without touching every feature:
 
 ```js
 import {InitiativeTrackerRowUtil} from "./dmscreen-initiativetracker-consts.js";
@@ -77,11 +77,22 @@ import {InitiativeTrackerRowUtil} from "./dmscreen-initiativetracker-consts.js";
 if (!InitiativeTrackerRowUtil.isNonCombatantRow(row)) { /* apply */ }
 ```
 
-**Canonical flag** consumed today: `entity.isLairMarker` (introduced by
-the automatic lair-actions PR, tracker #1234). When new marker types are
-added — environmental hazards, fog banks, condition markers — extend
-`isNonCombatantRow` in `dmscreen-initiativetracker-consts.js` rather
-than adding parallel flags in every feature.
+**Extending the allow-list.** The predicate iterates
+`InitiativeTrackerRowUtil.NON_COMBATANT_FLAGS`, a small array of
+`row.entity.*` boolean flag names. To introduce a new marker type
+(fog banks, condition markers, environmental hazards), push the flag
+name onto this list and add the corresponding boolean field to the
+new marker's row entity. **No changes needed** in the multi-select
+code or any other consumer of `isNonCombatantRow`.
+
+**Naming convention:** use `is*Marker` so the flag reads clearly in
+serialised state.
+
+**Canonical entries today:**
+
+| Flag                 | Introduced by                                         |
+|----------------------|-------------------------------------------------------|
+| `isLairMarker`       | Automatic lair-actions (tracker #1141, branch `truemichato-auto-lair-actions`) — declared in `dmscreen-initiativetracker-lairmarkers.js` |
 
 ## Half-damage rule (5e)
 
