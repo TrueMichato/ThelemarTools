@@ -138,4 +138,18 @@ describe("InitiativeTrackerRowUtil.isNonCombatantRow (marker-row predicate)", ()
 		expect(InitiativeTrackerRowUtil.isNonCombatantRow({id: "x"})).toBe(false);
 		expect(InitiativeTrackerRowUtil.isNonCombatantRow(undefined)).toBe(false);
 	});
+	it("respects the shared NON_COMBATANT_FLAGS allow-list (extension contract)", () => {
+		// New marker types opt out of combat operations by pushing their flag
+		// name onto NON_COMBATANT_FLAGS; this test guards that contract.
+		InitiativeTrackerRowUtil.NON_COMBATANT_FLAGS.push("isFogMarker");
+		try {
+			expect(InitiativeTrackerRowUtil.isNonCombatantRow({id: "x", entity: {isFogMarker: true}})).toBe(true);
+			expect(InitiativeTrackerRowUtil.isNonCombatantRow({id: "x", entity: {isLairMarker: true}})).toBe(true);
+			expect(InitiativeTrackerRowUtil.isNonCombatantRow({id: "x", entity: {name: "PC"}})).toBe(false);
+		} finally {
+			// Restore the shared list so we don't leak state into other suites.
+			const ix = InitiativeTrackerRowUtil.NON_COMBATANT_FLAGS.indexOf("isFogMarker");
+			if (~ix) InitiativeTrackerRowUtil.NON_COMBATANT_FLAGS.splice(ix, 1);
+		}
+	});
 });
