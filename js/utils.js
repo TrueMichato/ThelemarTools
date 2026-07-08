@@ -6715,6 +6715,17 @@ globalThis.DataUtil = class {
 			DataUtil.monster._monsterGroupMembersCacheKey = null;
 		}
 
+		// Clears every monsterGroup-related in-memory cache: entity map,
+		// reverse-index members map, and the site-preload promise. Called
+		// after brew/prerelease reloads so a subsequent lookup re-scans
+		// against the updated corpus (brew monsters + brew monsterGroup
+		// entities included).
+		static _invalidateMonsterGroupCaches () {
+			DataUtil.monster._invalidateMonsterGroupMembers();
+			DataUtil.monster._monsterGroupEntityCache = null;
+			DataUtil.monster._pLoadMonsterGroups = null;
+		}
+
 		static _getMonsterGroupCacheKey ({name, source}) {
 			return `${(name || "").toLowerCase()}\u001f${(source || "").toLowerCase()}`;
 		}
@@ -6764,12 +6775,17 @@ globalThis.DataUtil = class {
 		}
 
 		static async pPreloadMonsterGroupMembers () {
-			const monsters = await DataLoader.pCacheAndGetAllSite("monster");
-			const cacheKey = `site\u001f${monsters.length}`;
+			const [site, prerelease, brew] = await Promise.all([
+				DataLoader.pCacheAndGetAllSite("monster").catch(() => []),
+				DataLoader.pCacheAndGetAllPrerelease("monster").catch(() => []),
+				DataLoader.pCacheAndGetAllBrew("monster").catch(() => []),
+			]);
+			const all = [...(site || []), ...(prerelease || []), ...(brew || [])];
+			const cacheKey = `all\u001f${all.length}`;
 			if (DataUtil.monster._monsterGroupMembersCacheKey === cacheKey && DataUtil.monster._monsterGroupMembersCache) {
 				return DataUtil.monster._monsterGroupMembersCache;
 			}
-			DataUtil.monster._monsterGroupMembersCache = DataUtil.monster._buildMonsterGroupMembersIndex(monsters);
+			DataUtil.monster._monsterGroupMembersCache = DataUtil.monster._buildMonsterGroupMembersIndex(all);
 			DataUtil.monster._monsterGroupMembersCacheKey = cacheKey;
 			return DataUtil.monster._monsterGroupMembersCache;
 		}
@@ -6794,17 +6810,27 @@ globalThis.DataUtil = class {
 			return cache.get(firstLabel.toLowerCase()) || null;
 		}
 
-		// Populate the name-keyed monsterGroup entity cache. Idempotent.
+		// Populate the name-keyed monsterGroup entity cache. Idempotent —
+		// clears via `_invalidateMonsterGroupCaches` before re-scanning.
+		// Loads site + prerelease + brew so brew-shipped entities surface
+		// in the filter panel and on the "Part of:" pill.
 		static _monsterGroupEntityCache = null;
 		static async pPreloadMonsterGroupEntities () {
 			if (DataUtil.monster._monsterGroupEntityCache) return DataUtil.monster._monsterGroupEntityCache;
-			const entities = await DataLoader.pCacheAndGetAllSite("monsterGroup");
+			const [site, prerelease, brew] = await Promise.all([
+				DataLoader.pCacheAndGetAllSite("monsterGroup").catch(() => []),
+				DataLoader.pCacheAndGetAllPrerelease("monsterGroup").catch(() => []),
+				DataLoader.pCacheAndGetAllBrew("monsterGroup").catch(() => []),
+			]);
 			const byName = new Map();
-			for (const mg of entities) {
-				if (!mg?.name) continue;
-				const key = mg.name.toLowerCase();
-				// Keep the first-loaded copy on collision (site data before brew).
-				if (!byName.has(key)) byName.set(key, mg);
+			// Site loaded first, then prerelease, then brew — first-write wins
+			// so a site entity overrides a same-named brew entity by default.
+			for (const src of [site, prerelease, brew]) {
+				for (const mg of (src || [])) {
+					if (!mg?.name) continue;
+					const key = mg.name.toLowerCase();
+					if (!byName.has(key)) byName.set(key, mg);
+				}
 			}
 			DataUtil.monster._monsterGroupEntityCache = byName;
 			return byName;

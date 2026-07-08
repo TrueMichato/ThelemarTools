@@ -351,11 +351,19 @@ class BestiaryPage extends ListPageMultiSource {
 			prereleaseDataSource: async () => {
 				const data = await PrereleaseUtil.pGetBrewProcessed();
 				await DataUtil.monster.pUpdatePreloadLegendaryGroupsPrerelease();
+				await DataUtil.monster.pUpdatePreloadMonsterGroupsPrerelease();
+				DataUtil.monster._invalidateMonsterGroupCaches();
+				await DataUtil.monster.pPreloadMonsterGroupEntities();
+				await DataUtil.monster.pPreloadMonsterGroupMembers();
 				return data;
 			},
 			brewDataSource: async () => {
 				const data = await BrewUtil2.pGetBrewProcessed();
 				await DataUtil.monster.pUpdatePreloadLegendaryGroupsBrew();
+				await DataUtil.monster.pUpdatePreloadMonsterGroupsBrew();
+				DataUtil.monster._invalidateMonsterGroupCaches();
+				await DataUtil.monster.pPreloadMonsterGroupEntities();
+				await DataUtil.monster.pPreloadMonsterGroupMembers();
 				return data;
 			},
 

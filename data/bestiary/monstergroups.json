@@ -13,11 +13,17 @@
 			"basicRules": true,
 			"entries": [
 				"Chromatic dragons are the most numerous, powerful, and evil of true dragons. They are aggressive, hoarding, and gleefully cruel, the color of their scales betraying their preferred breath weapon and disposition: {@creature Black Dragon|MM|black} (acid, swamps and marshes), {@creature Blue Dragon|MM|blue} (lightning, deserts), {@creature Green Dragon|MM|green} (poison, forests), {@creature Red Dragon|MM|red} (fire, mountains), and {@creature White Dragon|MM|white} (cold, arctic ranges).",
-				"Every chromatic dragon serves as a stronghold-holding tyrant of its region, exacting tribute from the sentient creatures nearby and collecting a hoard of treasure. All chromatic dragons age through five recognized stages \u2014 wyrmling, young, adult, ancient, and (rarely) greatwyrm \u2014 growing in size, cunning, and magical potency at each step. They are ultimately the children of Tiamat, the five-headed Queen of Evil Dragons."
+				"Every chromatic dragon serves as a stronghold-holding tyrant of its region, exacting tribute from the sentient creatures nearby and collecting a hoard of treasure. All chromatic dragons age through five recognized stages — wyrmling, young, adult, ancient, and (rarely) greatwyrm — growing in size, cunning, and magical potency at each step. They are ultimately the children of Tiamat, the five-headed Queen of Evil Dragons."
 			],
 			"additionalSources": [
-				{"source": "FTD", "page": 5},
-				{"source": "XMM", "page": 108}
+				{
+					"source": "FTD",
+					"page": 5
+				},
+				{
+					"source": "XMM",
+					"page": 108
+				}
 			],
 			"signatureAbilities": [
 				{
@@ -29,7 +35,7 @@
 				{
 					"name": "Breath Weapon",
 					"entries": [
-						"Each chromatic dragon exhales a devastating cone or line of elemental energy keyed to its color \u2014 acid, lightning, poison gas, fire, or cold. The shape, save DC, and damage die scale sharply from wyrmling to ancient."
+						"Each chromatic dragon exhales a devastating cone or line of elemental energy keyed to its color — acid, lightning, poison gas, fire, or cold. The shape, save DC, and damage die scale sharply from wyrmling to ancient."
 					]
 				}
 			]
@@ -42,11 +48,17 @@
 			"basicRules": true,
 			"entries": [
 				"Metallic dragons are noble, honorable, and (with rare exception) good-aligned true dragons whose scales gleam like the metals they take their names from: {@creature Brass Dragon|MM|brass} (fire, deserts), {@creature Bronze Dragon|MM|bronze} (lightning, coastal), {@creature Copper Dragon|MM|copper} (acid, hills and stony rises), {@creature Gold Dragon|MM|gold} (fire, temperate anywhere), and {@creature Silver Dragon|MM|silver} (cold, mountaintops and clouds).",
-				"Metallic dragons are the offspring of Bahamut, the Platinum Dragon and lord of good dragonkind, and are the ancestral foes of the chromatic dragons. All metallics can adopt humanoid or beast forms, allowing them to walk among mortals unseen \u2014 many spend their long adult lives as scholars, sages, or wandering guardians before finally retiring to lair as ancients."
+				"Metallic dragons are the offspring of Bahamut, the Platinum Dragon and lord of good dragonkind, and are the ancestral foes of the chromatic dragons. All metallics can adopt humanoid or beast forms, allowing them to walk among mortals unseen — many spend their long adult lives as scholars, sages, or wandering guardians before finally retiring to lair as ancients."
 			],
 			"additionalSources": [
-				{"source": "FTD", "page": 5},
-				{"source": "XMM", "page": 136}
+				{
+					"source": "FTD",
+					"page": 5
+				},
+				{
+					"source": "XMM",
+					"page": 136
+				}
 			],
 			"signatureAbilities": [
 				{
@@ -58,25 +70,7 @@
 				{
 					"name": "Two Breath Weapons",
 					"entries": [
-						"Uniquely among true dragons, each metallic dragon possesses two breath weapons: one damaging elemental breath, and one non-damaging \u201cutility\u201d breath (sleep gas, repulsion gas, slow gas, weakening gas, paralyzing breath, or similar) that reflects the dragon's temperament."
-					]
-				}
-			]
-		},
-		{
-			"name": "Gem Dragons",
-			"source": "FTD",
-			"page": 20,
-			"srd": false,
-			"entries": [
-				"Gem dragons are psionic true dragons born from the primordial dragon-god Sardior, the Ruby Dragon. Their scales resemble faceted gemstones \u2014 {@creature Amethyst Dragon|FTD} (force, coastlands and underdark), {@creature Crystal Dragon|FTD} (radiant, arctic peaks), {@creature Emerald Dragon|FTD} (psychic, volcanic ranges), {@creature Sapphire Dragon|FTD} (thunder, deep caverns), and {@creature Topaz Dragon|FTD} (necrotic, deserts and coasts).",
-				"Alone among the great families, gem dragons are neither aligned with Bahamut nor Tiamat. They are contemplative, aloof, and often more interested in ideas, memory, and the workings of the multiverse than in hoards or territorial dominance. Every gem dragon is inherently psionic, and their lairs are typically shared with a chosen circle of psionically-attuned humanoid consorts."
-			],
-			"signatureAbilities": [
-				{
-					"name": "Psionic Talents",
-					"entries": [
-						"Gem dragons manifest an array of innate psionic abilities \u2014 telepathy, mind reading, and telekinetic manipulation \u2014 and their breath weapons are typically psychic or force-typed rather than elemental."
+						"Uniquely among true dragons, each metallic dragon possesses two breath weapons: one damaging elemental breath, and one non-damaging “utility” breath (sleep gas, repulsion gas, slow gas, weakening gas, paralyzing breath, or similar) that reflects the dragon's temperament."
 					]
 				}
 			]
@@ -87,12 +81,18 @@
 			"page": 274,
 			"srd": false,
 			"entries": [
-				"The slaadi are enormous, frog-like humanoids native to Limbo, the plane of pure chaos. They embody unfettered disorder \u2014 vicious, capricious, and driven by an ever-shifting compulsion to reproduce, hunt, and multiply. Their society, such as it is, is loosely ruled by the {@creature Slaad, Death|MM|Death Slaadi} and the twin slaad lords Ssendam and Ygorl, but any given slaad is more likely to devour its siblings than serve them.",
-				"Slaadi are categorized by the color of their hides, which corresponds to a rigid ecological hierarchy: {@creature Slaad, Red|MM|Red} and {@creature Slaad, Blue|MM|Blue} are the numerous \u201cinfectors,\u201d spreading the slaad race through implanted eggs and Chaos Phage; {@creature Slaad, Green|MM|Green} are shape-shifting spies and wanderers; {@creature Slaad, Gray|MM|Gray} and {@creature Slaad, Death|MM|Death} are the powerful, spellcasting elders."
+				"The slaadi are enormous, frog-like humanoids native to Limbo, the plane of pure chaos. They embody unfettered disorder — vicious, capricious, and driven by an ever-shifting compulsion to reproduce, hunt, and multiply. Their society, such as it is, is loosely ruled by the {@creature Slaad, Death|MM|Death Slaadi} and the twin slaad lords Ssendam and Ygorl, but any given slaad is more likely to devour its siblings than serve them.",
+				"Slaadi are categorized by the color of their hides, which corresponds to a rigid ecological hierarchy: {@creature Slaad, Red|MM|Red} and {@creature Slaad, Blue|MM|Blue} are the numerous “infectors,” spreading the slaad race through implanted eggs and Chaos Phage; {@creature Slaad, Green|MM|Green} are shape-shifting spies and wanderers; {@creature Slaad, Gray|MM|Gray} and {@creature Slaad, Death|MM|Death} are the powerful, spellcasting elders."
 			],
 			"additionalSources": [
-				{"source": "MPMM", "page": 210},
-				{"source": "XMM", "page": 271}
+				{
+					"source": "MPMM",
+					"page": 210
+				},
+				{
+					"source": "XMM",
+					"page": 271
+				}
 			],
 			"traitTags": [
 				"Amphibious",
@@ -119,11 +119,14 @@
 			"page": 224,
 			"srd": false,
 			"entries": [
-				"Modrons are the geometric, hive-minded constructs of Mechanus, the plane of perfect law and mechanism. Each modron occupies a fixed rung in a rigid hierarchy \u2014 {@creature Monodrone|MM|monodrones} (single sphere) do the plane's most menial tasks, {@creature Duodrone|MM|duodrones} carry them out, {@creature Tridrone|MM|tridrones} enforce order among them, {@creature Quadrone|MM|quadrones} command patrols, and {@creature Pentadrone|MM|pentadrones} rule regions.",
-				"Above the base modrons stand the hierarchs: decatons, nonatons, octons, septons, hextons, quintons, quartons, tertians, secundi, and finally the near-divine Primus. When a superior modron is destroyed, an inferior is elevated in its place, its form spontaneously reconfiguring \u2014 a process the modrons themselves regard with clockwork indifference. Every seventeen years, a Great Modron March sweeps across the outer planes."
+				"Modrons are the geometric, hive-minded constructs of Mechanus, the plane of perfect law and mechanism. Each modron occupies a fixed rung in a rigid hierarchy — {@creature Monodrone|MM|monodrones} (single sphere) do the plane's most menial tasks, {@creature Duodrone|MM|duodrones} carry them out, {@creature Tridrone|MM|tridrones} enforce order among them, {@creature Quadrone|MM|quadrones} command patrols, and {@creature Pentadrone|MM|pentadrones} rule regions.",
+				"Above the base modrons stand the hierarchs: decatons, nonatons, octons, septons, hextons, quintons, quartons, tertians, secundi, and finally the near-divine Primus. When a superior modron is destroyed, an inferior is elevated in its place, its form spontaneously reconfiguring — a process the modrons themselves regard with clockwork indifference. Every seventeen years, a Great Modron March sweeps across the outer planes."
 			],
 			"additionalSources": [
-				{"source": "MPMM", "page": 174}
+				{
+					"source": "MPMM",
+					"page": 174
+				}
 			],
 			"signatureAbilities": [
 				{
@@ -135,7 +138,7 @@
 				{
 					"name": "Disintegration",
 					"entries": [
-						"When a modron dies, its body disintegrates into a fine dust, leaving no trace \u2014 a courtesy the hierarchy extends to all of its own, and to no one else."
+						"When a modron dies, its body disintegrates into a fine dust, leaving no trace — a courtesy the hierarchy extends to all of its own, and to no one else."
 					]
 				}
 			]
@@ -150,8 +153,14 @@
 				"The yugoloth order is stratified by function: {@creature Mezzoloth|MM|mezzoloths} are the shock troops, {@creature Nycaloth|MM|nycaloths} the aerial cavalry, {@creature Arcanaloth|MM|arcanaloths} the sorcerous secretaries who broker contracts, and {@creature Ultroloth|MM|ultroloths} the terrifying generals. Above them all sits the mysterious General of Gehenna. The MPMM lineup adds the amphibious {@creature Hydroloth|MPMM|hydroloth}, the mind-melting {@creature Oinoloth|MPMM|oinoloth}, and others."
 			],
 			"additionalSources": [
-				{"source": "MPMM", "page": 288},
-				{"source": "MTF", "page": 246}
+				{
+					"source": "MPMM",
+					"page": 288
+				},
+				{
+					"source": "MTF",
+					"page": 246
+				}
 			],
 			"traitTags": [
 				"Magic Resistance"
@@ -160,355 +169,13 @@
 				{
 					"name": "Contracted Service",
 					"entries": [
-						"Every summoned yugoloth serves under a specific, negotiated contract. Break the contract and the yugoloth is under no obligation to obey \u2014 typically it turns on the summoner immediately."
+						"Every summoned yugoloth serves under a specific, negotiated contract. Break the contract and the yugoloth is under no obligation to obey — typically it turns on the summoner immediately."
 					]
 				},
 				{
 					"name": "Innate Teleportation",
 					"entries": [
 						"All yugoloths can teleport at will, allowing them to disengage from any fight that turns against them and reappear where the contract is more profitable."
-					]
-				}
-			]
-		},
-		{
-			"name": "Demons",
-			"source": "MM",
-			"page": 50,
-			"srd": false,
-			"basicRules": true,
-			"entries": [
-				"Demons are the native fiends of the Abyss, an infinite descending nightmare of planes born from the raw evil that first tainted the multiverse. They are chaotic evil incarnate: bestial, insatiable, and forever at war with one another and with the devils of the Nine Hells.",
-				"Demons range from the swarming {@creature Manes|MM|manes} and hopping {@creature Dretch|MM|dretches} through mid-rank horrors like {@creature Vrock|MM|vrocks}, {@creature Hezrou|MM|hezrous}, and {@creature Glabrezu|MM|glabrezu}, up to the towering {@creature Nalfeshnee|MM|nalfeshnees}, {@creature Marilith|MM|mariliths}, and {@creature Balor|MM|balors}. At the pinnacle sit the demon lords \u2014 unique Abyssal potentates such as Orcus, Demogorgon, Graz'zt, and Yeenoghu, each ruling entire layers of the Abyss."
-			],
-			"additionalSources": [
-				{"source": "MPMM", "page": 41},
-				{"source": "MTF", "page": 128},
-				{"source": "XMM", "page": 82}
-			],
-			"traitTags": [
-				"Magic Resistance"
-			],
-			"signatureAbilities": [
-				{
-					"name": "Abyssal Origin",
-					"entries": [
-						"Slain demons dissolve back to the Abyss and reform there in time. Only killing a demon within its Abyssal layer, or through specific ritual magic, destroys it permanently."
-					]
-				},
-				{
-					"name": "Chaotic Evil to the Core",
-					"entries": [
-						"Every demon is chaotic evil. Attempts to bind, charm, or bargain with them are inherently unreliable \u2014 the demon will keep the letter of a compact only as long as it feels like."
-					]
-				}
-			]
-		},
-		{
-			"name": "Devils",
-			"source": "MM",
-			"page": 66,
-			"srd": false,
-			"basicRules": true,
-			"entries": [
-				"Devils are the lawful evil fiends of the Nine Hells of Baator, ruled by the archdevils and, ultimately, by Asmodeus himself. Where demons revel in destruction for its own sake, devils are patient, hierarchical, and contractual \u2014 corrupting mortals by degree and running the vast infernal war machine that both defends the Hells and grinds down its enemies.",
-				"The infernal ranks ascend from {@creature Lemure|MM|lemures} (spirits of damned mortals still being tortured into shape) through {@creature Imp|MM|imps}, {@creature Spined Devil|MM|spined devils}, {@creature Bearded Devil|MM|bearded devils}, {@creature Barbed Devil|MM|barbed devils}, {@creature Chain Devil|MM|chain devils}, {@creature Bone Devil|MM|bone devils}, {@creature Horned Devil|MM|horned devils}, and {@creature Ice Devil|MM|ice devils}, culminating in the {@creature Pit Fiend|MM|pit fiends} who command legions."
-			],
-			"additionalSources": [
-				{"source": "MPMM", "page": 76},
-				{"source": "MTF", "page": 168},
-				{"source": "XMM", "page": 97}
-			],
-			"traitTags": [
-				"Magic Resistance",
-				"Devil's Sight"
-			],
-			"signatureAbilities": [
-				{
-					"name": "Contracts and Souls",
-					"entries": [
-						"Higher devils exist in part to trade in mortal souls, delivering material power and knowledge in exchange for eventual servitude in Hell. Every infernal contract is enforceable by the terrible mechanism of infernal law."
-					]
-				},
-				{
-					"name": "Infernal Regeneration",
-					"entries": [
-						"A devil slain on any plane other than the Nine Hells simply reforms in Hell. Truly destroying a devil requires killing it in its home layer, or with sanctified means \u2014 which is why so few devils ever fully die."
-					]
-				}
-			]
-		},
-		{
-			"name": "Angels",
-			"source": "MM",
-			"page": 16,
-			"srd": false,
-			"basicRules": true,
-			"entries": [
-				"Angels are celestial embodiments of divine will \u2014 pure of purpose, radiant, and terrifyingly focused. Where they walk, evil recoils.",
-				"The angelic hierarchy has three canonical ranks: {@creature Deva|MM|devas} (messengers and guides who deliver divine dreams and portents), {@creature Planetar|MM|planetars} (celestial warriors and lieutenants of the gods, wielding greatswords of flaming light), and {@creature Solar|MM|solars} (the greatest angels, ancient champions of the gods who lead the eternal war against the fiends). A rare few angels, corrupted by pride or grief, become the fallen angels \u2014 unique NPCs whose statblocks derive from the pure form."
-			],
-			"additionalSources": [
-				{"source": "MPMM", "page": 21},
-				{"source": "XMM", "page": 18}
-			],
-			"traitTags": [
-				"Magic Resistance"
-			],
-			"signatureAbilities": [
-				{
-					"name": "Divine Awareness",
-					"entries": [
-						"Angels know when a creature within their vicinity lies. They cannot be deceived by mundane falsehood."
-					]
-				},
-				{
-					"name": "Angelic Weapon",
-					"entries": [
-						"An angel's melee weapon strikes deal significant additional radiant damage \u2014 the manifest force of celestial purpose."
-					]
-				}
-			]
-		},
-		{
-			"name": "Genies",
-			"source": "MM",
-			"page": 143,
-			"srd": false,
-			"entries": [
-				"Genies are the elemental nobility of the Inner Planes: proud, powerful, and imperious spirits who consider themselves the rightful rulers of their native realms. Each of the four great genie races belongs to one of the four elements:",
-				{
-					"type": "list",
-					"style": "list-hang-notitle",
-					"items": [
-						{"type": "item", "name": "Dao", "entries": ["{@creature Dao|MM|Earth genies} of the Elemental Plane of Earth \u2014 avaricious slavers, delvers, and jewelers."]},
-						{"type": "item", "name": "Djinni", "entries": ["{@creature Djinni|MM|Air genies} of the Elemental Plane of Air \u2014 mercurial, honor-bound, and often benevolent by genie standards."]},
-						{"type": "item", "name": "Efreeti", "entries": ["{@creature Efreeti|MM|Fire genies} of the Elemental Plane of Fire, capital City of Brass \u2014 cruel, prideful conquerors."]},
-						{"type": "item", "name": "Marid", "entries": ["{@creature Marid|MM|Water genies} of the Elemental Plane of Water \u2014 whimsical, storytelling nobles who consider themselves the greatest of all genies."]}
-					]
-				}
-			],
-			"additionalSources": [
-				{"source": "MPMM", "page": 106},
-				{"source": "MTF", "page": 197},
-				{"source": "XMM", "page": 149}
-			],
-			"signatureAbilities": [
-				{
-					"name": "Elemental Mastery",
-					"entries": [
-						"Every genie is a master of its native element \u2014 shaping stone, wind, flame, or water at will \u2014 and can plane-shift to its home plane as a native ability."
-					]
-				},
-				{
-					"name": "Wish-Granting (Noble Genies)",
-					"entries": [
-						"Noble genies (a rare subset with elevated challenge ratings) can grant a limited number of wishes to a mortal who defeats or ensnares them. This is the fabled bottled-genie of legend, and the source of many a mortal's ruin."
-					]
-				}
-			]
-		},
-		{
-			"name": "Beholders",
-			"source": "MM",
-			"page": 28,
-			"srd": false,
-			"basicRules": true,
-			"entries": [
-				"Beholders are xenophobic aberrations \u2014 floating spheres of hide, each dominated by a single central eye and a nightmare-crown of ten eye-stalks. Every beholder believes itself the ideal form of life and every deviation an abomination; they murder their own children whose forms differ even slightly.",
-				"The line includes the archetypal {@creature Beholder|MM}, the deep-dwelling {@creature Death Tyrant|MM} (an undead beholder), the paranoid {@creature Spectator|MM} (a lesser summoned beholderkin), and the rare Beholder Zombie. Each beholder's lair is a warren of vertical shafts and antigrav levels, shaped to the whims of its solitary paranoid mind."
-			],
-			"additionalSources": [
-				{"source": "VGM", "page": 12},
-				{"source": "XMM", "page": 45}
-			],
-			"signatureAbilities": [
-				{
-					"name": "Antimagic Cone",
-					"entries": [
-						"A beholder's central eye projects a wide cone of antimagic, within which spells cannot function and magic items become inert \u2014 including any spells or magic the beholder's own foes are relying on."
-					]
-				},
-				{
-					"name": "Eye Rays",
-					"entries": [
-						"Each of the beholder's ten eye-stalks fires a different magical ray as a bonus effect on its turn: charm, paralysis, fear, sleep, telekinesis, slow, enervation, petrification, disintegration, and death. The beholder rolls to determine which rays fire each round."
-					]
-				}
-			]
-		},
-		{
-			"name": "Air Elementals",
-			"source": "MM",
-			"page": 124,
-			"srd": false,
-			"basicRules": true,
-			"entries": [
-				"Air elementals are living whirlwinds of the Elemental Plane of Air \u2014 restless, playful, and often dangerous. They and their kin (dust mephits, air-based invisible stalkers, and greater aerial constructs) are creatures of movement, prized as mounts, scouts, and living winds. The signature form is the {@creature Air Elemental|MM}.",
-				"Related creatures grouped here include the {@creature Invisible Stalker|MM}, a bound air elemental servant tasked with silent pursuit, and various air mephits and djinn-adjacent summons."
-			],
-			"signatureAbilities": [
-				{
-					"name": "Whirlwind Form",
-					"entries": [
-						"An air elemental can enter and pass through spaces occupied by hostile Large-or-smaller creatures without provoking, dragging them along its path in a whirl of pummeling wind."
-					]
-				}
-			]
-		},
-		{
-			"name": "Earth Elementals",
-			"source": "MM",
-			"page": 124,
-			"srd": false,
-			"basicRules": true,
-			"entries": [
-				"Earth elementals are lumbering avatars of the Elemental Plane of Earth \u2014 slow, patient, and immensely strong. In their natural stone-and-rubble form they resemble walking hills; a bound earth elemental may serve as a construction foreman for months at a stretch without complaint. The signature form is the {@creature Earth Elemental|MM}.",
-				"Kin creatures grouped here (by tradition) include the tunnelling {@creature Xorn|MM} and the sedentary {@creature Galeb Duhr|MM}."
-			],
-			"signatureAbilities": [
-				{
-					"name": "Earth Glide",
-					"entries": [
-						"Earth elementals can burrow through any non-magical, un-worked earth or stone at their normal burrowing speed, leaving no tunnel and disturbing nothing on the surface."
-					]
-				}
-			]
-		},
-		{
-			"name": "Fire Elementals",
-			"source": "MM",
-			"page": 125,
-			"srd": false,
-			"basicRules": true,
-			"entries": [
-				"Fire elementals are living conflagrations from the Elemental Plane of Fire \u2014 sadistic, greedy, and destructively enthusiastic. Where they walk, everything burns. The signature form is the {@creature Fire Elemental|MM}.",
-				"The wider fire-elemental family grouped here includes the {@creature Salamander|MM}, the fire-immune {@creature Azer|MM} artisans, the mischievous {@creature Magmin|MM}, and the {@creature Fire Snake|MM} \u2014 kin of the salamander line."
-			],
-			"signatureAbilities": [
-				{
-					"name": "Fire Form",
-					"entries": [
-						"A fire elemental's body ignites any flammable object it touches, and any creature that ends its turn in the elemental's space takes fire damage."
-					]
-				},
-				{
-					"name": "Water Susceptibility",
-					"entries": [
-						"For every 5 feet a fire elemental moves in water, or for every gallon of water splashed on it, it takes an increment of cold damage \u2014 the elemental plane of Water is genuinely hostile to it."
-					]
-				}
-			]
-		},
-		{
-			"name": "Water Elementals",
-			"source": "MM",
-			"page": 125,
-			"srd": false,
-			"basicRules": true,
-			"entries": [
-				"Water elementals are churning tides given consciousness \u2014 slow to anger and slow to relent. When roused they crash through docks and vessels with the weight of the deep sea behind them. The signature form is the {@creature Water Elemental|MM}.",
-				"Related creatures grouped here include the {@creature Water Weird|MM}, an ambush predator that lairs in fountains and pools, and various water mephits."
-			],
-			"signatureAbilities": [
-				{
-					"name": "Whelm",
-					"entries": [
-						"A water elemental can engulf Medium-or-smaller creatures in its space, dragging them along as it moves and drowning them within."
-					]
-				}
-			]
-		},
-		{
-			"name": "Goblinoids",
-			"source": "MM",
-			"page": 165,
-			"srd": false,
-			"basicRules": true,
-			"entries": [
-				"Goblinoid is the umbrella term for three related humanoid races that share ancestry, language, and (often) a warband: {@creature Goblin|MM|goblins}, {@creature Hobgoblin|MM|hobgoblins}, and {@creature Bugbear|MM|bugbears}. All three are traditionally attributed to the maglubiyet-worshipping pantheon of the Bloody Sun.",
-				"Goblins are small, cunning skirmishers who fight in swarms and traps; hobgoblins are disciplined, militaristic legionnaires who value order and rank above all; bugbears are stealthy brutes who ambush from cover, favoring surprise and terror. In a mixed warband, hobgoblins command, goblins scout and trap, and bugbears lie in wait as the killing blow."
-			],
-			"additionalSources": [
-				{"source": "MPMM", "page": 128},
-				{"source": "VGM", "page": 118},
-				{"source": "XMM", "page": 155}
-			],
-			"signatureAbilities": [
-				{
-					"name": "Nimble Escape (Goblins)",
-					"entries": [
-						"Goblins can Disengage or Hide as a bonus action \u2014 the trait that makes a goblin warband hard to pin down."
-					]
-				},
-				{
-					"name": "Martial Advantage (Hobgoblins)",
-					"entries": [
-						"Once per turn a hobgoblin can add extra weapon damage against a target that has an allied hobgoblin within 5 feet of it \u2014 the mechanical expression of hobgoblin drill and formation-fighting."
-					]
-				},
-				{
-					"name": "Surprise Attack (Bugbears)",
-					"entries": [
-						"If a bugbear surprises a creature and hits it with an attack on the first turn of combat, the attack deals substantial additional damage."
-					]
-				}
-			]
-		},
-		{
-			"name": "Githyanki",
-			"source": "MM",
-			"page": 160,
-			"srd": false,
-			"entries": [
-				"The githyanki are a martial, psionic people who raid across the multiverse from their citadel-city of Tu'narath, adrift in the Astral Plane. Once slaves of the mind flayers, the gith rebellion under the general Gith freed them \u2014 and then split their people forever between the militant githyanki and the ascetic {@creature Githzerai|MM|githzerai}.",
-				"Modern githyanki society is a rigid feudal caste under the lich-queen Vlaakith, sworn to the perpetual hunt for surviving illithids and to the ownership of the silver swords \u2014 psionically-forged weapons capable of severing the astral cord of a projecting creature. The line spans {@creature Githyanki Warrior|MM|warriors}, {@creature Githyanki Knight|MM|knights}, {@creature Kith'rak|MPMM|kith'raks}, {@creature Githyanki Supreme Commander|MPMM|supreme commanders}, and the queen's own {@creature Githyanki Gish|MPMM|gish} \u2014 warrior-mages."
-			],
-			"additionalSources": [
-				{"source": "MPMM", "page": 118},
-				{"source": "MTF", "page": 205},
-				{"source": "XMM", "page": 152}
-			],
-			"signatureAbilities": [
-				{
-					"name": "Innate Psionics",
-					"entries": [
-						"Every adult githyanki has some measure of innate psionic capability, typically including {@spell mage hand}, {@spell jump}, and {@spell misty step} without material components, cast using an Intelligence-based DC."
-					]
-				},
-				{
-					"name": "Silver Swords",
-					"entries": [
-						"The order of githyanki knights carries the legendary silver swords, greatswords etched with astral runes that can sever a psionic connection between a projecting creature and its body \u2014 stranding it on whatever plane it left behind."
-					]
-				}
-			]
-		},
-		{
-			"name": "Githzerai",
-			"source": "MM",
-			"page": 161,
-			"srd": false,
-			"entries": [
-				"The githzerai are the ascetic, contemplative counterpart to the militant {@creature Githyanki|MM|githyanki}. Following the philosopher Zerthimon's schism from Gith, the githzerai withdrew to the plane of Limbo \u2014 pure chaos \u2014 where they raise stone monasteries by force of concentrated will and drill against the ever-shifting substance of the plane itself.",
-				"Every githzerai is a psionic monk; even a common {@creature Githzerai Monk|MM} outstrikes armored knights through discipline alone. The ranks ascend through {@creature Zerth|MM|zerths} (senior monks), {@creature Githzerai Anarch|MPMM|anarchs} (rulers who literally reshape Limbo around themselves), and {@creature Githzerai Enlightened|MPMM|the enlightened} (near-mythical masters)."
-			],
-			"additionalSources": [
-				{"source": "MPMM", "page": 119},
-				{"source": "MTF", "page": 205},
-				{"source": "XMM", "page": 152}
-			],
-			"signatureAbilities": [
-				{
-					"name": "Innate Psionics",
-					"entries": [
-						"Every adult githzerai has innate psionic ability, typically including {@spell shield}, {@spell detect thoughts}, and higher-order effects at higher tiers, cast using Wisdom."
-					]
-				},
-				{
-					"name": "Psychic Defense",
-					"entries": [
-						"A githzerai's AC includes their Wisdom modifier while not wearing armor, and higher-ranking githzerai gain resistance to psychic damage \u2014 the fruit of a lifetime of monastic discipline against the chaos of Limbo."
 					]
 				}
 			]

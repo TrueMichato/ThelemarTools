@@ -280,13 +280,18 @@ class PageFilterBestiary extends PageFilterBase {
 				const mg = DataUtil.monster.getMonsterGroupByLabelSync(label);
 				if (!mg?.name) return label; // bare-string fallback — no icon
 				const hash = UrlUtil.URL_TO_HASH_BUILDER["monsterGroup"](mg);
+				// Faux-page hover: clicking pins a group-card popover in place,
+				// hovering previews it. `isFauxPage: true` ensures the click
+				// handler doesn't try to route to a nonexistent bestiary hash.
 				const hoverAttrs = Renderer.hover.getHoverElementAttributes({
 					page: "monsterGroup",
 					source: mg.source,
 					hash,
+					isFauxPage: true,
 				});
-				// Info-icon rendered as a hoverable superscript, keeping the label click-selectable.
-				return `${label} <a class="ve-muted" href="#${hash}" ${hoverAttrs} onclick="event.stopPropagation()" title="View ${mg.name.qq()}">\u24d8</a>`;
+				// Outer span stops propagation so the icon click never
+				// bubbles up to the filter row's selection handler.
+				return `${label} <span onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"><a class="ve-muted" ${hoverAttrs} title="View ${mg.name.qq()}">\u24d8</a></span>`;
 			},
 		});
 	}
