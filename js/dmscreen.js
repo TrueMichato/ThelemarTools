@@ -20,6 +20,7 @@ import {DmMapper} from "./dmscreen/dmscreen-mapper.js";
 import {TimerTrackerMoonSpriteLoader} from "./dmscreen/dmscreen-timetracker.js";
 import {
 	PanelContentManager_Counter,
+	PanelContentManager_DiceCalculator,
 	PanelContentManager_InitiativeTracker,
 	PanelContentManager_InitiativeTrackerCreatureViewer,
 	PanelContentManager_InitiativeTrackerPlayerViewV0,
@@ -3086,6 +3087,14 @@ class AddMenuSpecialTab extends AddMenuTab {
 			const btnCounter = ee`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`.appendTo(wrpCounter);
 			btnCounter.onn("click", async () => {
 				const pcm = new PanelContentManager_Counter({board: this._board, panel: this.menu.pnl});
+				await pcm.pDoPopulate();
+				this.menu.doClose();
+			});
+
+			const wrpDiceCalculator = ee`<div class="ve-ui-modal__row"><span>Dice Calculator</span></div>`.appendTo(eleTab);
+			const btnDiceCalculator = ee`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`.appendTo(wrpDiceCalculator);
+			btnDiceCalculator.onn("click", async () => {
+				const pcm = new PanelContentManager_DiceCalculator({board: this._board, panel: this.menu.pnl});
 				await pcm.pDoPopulate();
 				this.menu.doClose();
 			});
