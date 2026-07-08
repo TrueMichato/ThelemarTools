@@ -358,9 +358,10 @@ class ItemsPage extends ListPage {
 						href: `#${hash}`,
 						clazz: "ve-lst__row-border ve-lst__row-inner",
 						children: [
-							e_({tag: "span", clazz: `ve-col-3-5 ve-pl-0 ve-bold`, text: item.name}),
-							e_({tag: "span", clazz: `ve-col-4`, text: type}),
+							e_({tag: "span", clazz: `ve-col-3 ve-pl-0 ve-bold`, text: item.name}),
+							e_({tag: "span", clazz: `ve-col-3`, text: type}),
 							e_({tag: "span", clazz: `ve-col-1-5 ve-text-center`, text: item._l_weight}),
+							e_({tag: "span", clazz: `ve-col-1-5 ve-text-center`, text: item._l_value}),
 							e_({tag: "span", clazz: `ve-col-0-6 ve-text-center`, text: item._attunementCategory !== VeCt.STR_NO_ATTUNEMENT ? "×" : ""}),
 							e_({
 								tag: "span",
@@ -391,6 +392,7 @@ class ItemsPage extends ListPage {
 					rarity: item.rarity,
 					attunement: item._attunementCategory !== VeCt.STR_NO_ATTUNEMENT,
 					weight: Parser.weightValueToNumber(item.weight),
+					cost: item.value || 0,
 				},
 			);
 
