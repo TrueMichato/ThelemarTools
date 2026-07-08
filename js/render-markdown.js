@@ -1543,6 +1543,24 @@ RendererMarkdown.legendaryGroup = class {
 	}
 };
 
+RendererMarkdown.monsterGroup = class {
+	static getCompactRenderedString (mg, opts = {}) {
+		const meta = opts.meta || {};
+
+		const summary = Renderer.monsterGroup.getSummaryEntry(mg);
+		const members = Renderer.monsterGroup.getMembersEntry(mg);
+		if (!summary && !members) return "";
+
+		const subStack = [""];
+		subStack[0] += `## ${mg._displayName || mg.name}`;
+		if (summary) RendererMarkdown.get().recursiveRender(summary, subStack, meta, {suffix: "\n"});
+		if (members) RendererMarkdown.get().recursiveRender(members, subStack, meta, {suffix: "\n"});
+
+		const render = subStack.join("").trim();
+		return `\n${render}\n\n`;
+	}
+};
+
 RendererMarkdown.table = class {
 	static getCompactRenderedString (tbl, opts = {}) {
 		const meta = opts.meta || {};

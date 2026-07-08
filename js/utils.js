@@ -4106,6 +4106,7 @@ UrlUtil.URL_TO_HASH_BUILDER["classFeature"] = (it) => UrlUtil.encodeArrayForHash
 UrlUtil.URL_TO_HASH_BUILDER["subclassFeature"] = (it) => UrlUtil.encodeArrayForHash(it.name, it.className, it.classSource, it.subclassShortName, it.subclassSource, it.level, it.source);
 UrlUtil.URL_TO_HASH_BUILDER["card"] = (it) => UrlUtil.encodeArrayForHash(it.name, it.set, it.source);
 UrlUtil.URL_TO_HASH_BUILDER["legendaryGroup"] = UrlUtil.URL_TO_HASH_GENERIC;
+UrlUtil.URL_TO_HASH_BUILDER["monsterGroup"] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER["itemEntry"] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER["itemProperty"] = (it) => UrlUtil.encodeArrayForHash(it.abbreviation, it.source);
 UrlUtil.URL_TO_HASH_BUILDER["itemType"] = (it) => UrlUtil.encodeArrayForHash(it.abbreviation, it.source);
@@ -4246,6 +4247,7 @@ UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_CARD] = "card";
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_SKILLS] = "skill";
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_SENSES] = "sense";
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_LEGENDARY_GROUP] = "legendaryGroup";
+UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_MONSTER_GROUP] = "monsterGroup";
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_ITEM_MASTERY] = "itemMastery";
 
 UrlUtil.CAT_TO_HOVER_PAGE[Parser.CAT_ID_CLASS_FEATURE] = "classfeature";
@@ -4254,6 +4256,7 @@ UrlUtil.CAT_TO_HOVER_PAGE[Parser.CAT_ID_CARD] = "card";
 UrlUtil.CAT_TO_HOVER_PAGE[Parser.CAT_ID_SKILLS] = "skill";
 UrlUtil.CAT_TO_HOVER_PAGE[Parser.CAT_ID_SENSES] = "sense";
 UrlUtil.CAT_TO_HOVER_PAGE[Parser.CAT_ID_LEGENDARY_GROUP] = "legendaryGroup";
+UrlUtil.CAT_TO_HOVER_PAGE[Parser.CAT_ID_MONSTER_GROUP] = "monsterGroup";
 UrlUtil.CAT_TO_HOVER_PAGE[Parser.CAT_ID_ITEM_MASTERY] = "itemMastery";
 
 UrlUtil.HASH_START_CREATURE_SCALED = `${VeCt.HASH_SCALED}${HASH_SUB_KV_SEP}`;
@@ -6683,6 +6686,137 @@ globalThis.DataUtil = class {
 		}
 
 		/* -------------------------------------------- */
+
+		static _pLoadMonsterGroups = null;
+		static async pPreloadMonsterGroupsSite () {
+			return (DataUtil.monster._pLoadMonsterGroups ||= DataLoader.pCacheAndGetAllSite("monsterGroup"));
+		}
+
+		static async pUpdatePreloadMonsterGroupsPrerelease () {
+			return DataLoader.pCacheAndGetAllPrerelease("monsterGroup");
+		}
+
+		static async pUpdatePreloadMonsterGroupsBrew () {
+			return DataLoader.pCacheAndGetAllBrew("monsterGroup");
+		}
+
+		/* ----- */
+
+		// Memoized reverse index for monsterGroup members.
+		// Key: `${nameLower}\u001f${sourceLower}` for entity-scoped lookups.
+		// Additionally a name-only index keyed by `${nameLower}` for label-based
+		// lookups from the bestiary filter (where a monster's `group[i]` is a
+		// bare string without a source).
+		static _monsterGroupMembersCache = null;
+		static _monsterGroupMembersCacheKey = null;
+
+		static _invalidateMonsterGroupMembers () {
+			DataUtil.monster._monsterGroupMembersCache = null;
+			DataUtil.monster._monsterGroupMembersCacheKey = null;
+		}
+
+		static _getMonsterGroupCacheKey ({name, source}) {
+			return `${(name || "").toLowerCase()}\u001f${(source || "").toLowerCase()}`;
+		}
+
+		static _buildMonsterGroupMembersIndex (monsters) {
+			const byNameSource = new Map();
+			const byName = new Map();
+			for (const mon of monsters) {
+				const labels = mon.group;
+				if (!labels?.length) continue;
+				const groupSource = mon.groupSource;
+				const stub = {
+					name: mon.name,
+					source: mon.source,
+					hash: UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_BESTIARY](mon),
+				};
+				for (const label of labels) {
+					if (!label) continue;
+					const nameKey = String(label).toLowerCase();
+					if (!byName.has(nameKey)) byName.set(nameKey, []);
+					byName.get(nameKey).push(stub);
+					if (groupSource) {
+						const nsKey = `${nameKey}\u001f${String(groupSource).toLowerCase()}`;
+						if (!byNameSource.has(nsKey)) byNameSource.set(nsKey, []);
+						byNameSource.get(nsKey).push(stub);
+					}
+				}
+			}
+			return {byName, byNameSource};
+		}
+
+		// Synchronous accessor. Returns [] if the index has not been warmed;
+		// call `pPreloadMonsterGroupMembers()` first from an async surface.
+		static getMonsterGroupMembers (mg) {
+			if (!mg?.name) return [];
+			const cache = DataUtil.monster._monsterGroupMembersCache;
+			if (!cache) return [];
+			const nsKey = DataUtil.monster._getMonsterGroupCacheKey(mg);
+			const nameKey = (mg.name || "").toLowerCase();
+			// Prefer name+source match when a monster explicitly binds via
+			// `groupSource`; fall back to any monster with the same group label.
+			const nsHits = cache.byNameSource.get(nsKey);
+			const nameHits = cache.byName.get(nameKey) || [];
+			if (!nsHits?.length) return nameHits.slice();
+			const seen = new Set(nsHits.map(m => `${m.name}\u001f${m.source}`));
+			return nsHits.concat(nameHits.filter(m => !seen.has(`${m.name}\u001f${m.source}`)));
+		}
+
+		static async pPreloadMonsterGroupMembers () {
+			const monsters = await DataLoader.pCacheAndGetAllSite("monster");
+			const cacheKey = `site\u001f${monsters.length}`;
+			if (DataUtil.monster._monsterGroupMembersCacheKey === cacheKey && DataUtil.monster._monsterGroupMembersCache) {
+				return DataUtil.monster._monsterGroupMembersCache;
+			}
+			DataUtil.monster._monsterGroupMembersCache = DataUtil.monster._buildMonsterGroupMembersIndex(monsters);
+			DataUtil.monster._monsterGroupMembersCacheKey = cacheKey;
+			return DataUtil.monster._monsterGroupMembersCache;
+		}
+
+		/* ----- */
+
+		static getMonsterGroup (mon) {
+			const labels = mon.group;
+			if (!labels?.length) return null;
+			const firstLabel = String(labels[0]);
+			const source = mon.groupSource;
+			const hashFromLabel = ({name, source}) => UrlUtil.URL_TO_HASH_BUILDER["monsterGroup"]({name, source});
+
+			// Explicit source binding on the monster — use it directly.
+			if (source) {
+				const hit = DataLoader.getFromCache("monsterGroup", source, hashFromLabel({name: firstLabel, source}));
+				if (hit) return hit;
+			}
+			// Otherwise scan the loaded monsterGroup cache for a name match.
+			const cache = DataUtil.monster._monsterGroupEntityCache;
+			if (!cache) return null;
+			return cache.get(firstLabel.toLowerCase()) || null;
+		}
+
+		// Populate the name-keyed monsterGroup entity cache. Idempotent.
+		static _monsterGroupEntityCache = null;
+		static async pPreloadMonsterGroupEntities () {
+			if (DataUtil.monster._monsterGroupEntityCache) return DataUtil.monster._monsterGroupEntityCache;
+			const entities = await DataLoader.pCacheAndGetAllSite("monsterGroup");
+			const byName = new Map();
+			for (const mg of entities) {
+				if (!mg?.name) continue;
+				const key = mg.name.toLowerCase();
+				// Keep the first-loaded copy on collision (site data before brew).
+				if (!byName.has(key)) byName.set(key, mg);
+			}
+			DataUtil.monster._monsterGroupEntityCache = byName;
+			return byName;
+		}
+
+		static getMonsterGroupByLabelSync (label) {
+			if (!label) return null;
+			const cache = DataUtil.monster._monsterGroupEntityCache;
+			return cache?.get(String(label).toLowerCase()) || null;
+		}
+
+		/* -------------------------------------------- */
 	};
 
 	static monsterFluff = class extends _DataUtilPropConfigMultiSource {
@@ -7751,6 +7885,15 @@ globalThis.DataUtil = class {
 
 		static async pLoadAll () {
 			return (await this.loadJSON()).legendaryGroup;
+		}
+	};
+
+	static monsterGroup = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = UrlUtil.PG_BESTIARY;
+		static _FILENAME = "bestiary/monstergroups.json";
+
+		static async pLoadAll () {
+			return (await this.loadJSON()).monsterGroup;
 		}
 	};
 
