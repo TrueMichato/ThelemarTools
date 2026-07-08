@@ -12,6 +12,7 @@ import {
 	RenderableCollectionRowDataBase,
 } from "./dmscreen-initiativetracker-rowsbase.js";
 import {InitiativeTrackerRowStateBuilderActive} from "./dmscreen-initiativetracker-rowstatebuilder.js";
+import {InitiativeTrackerLairMarkers} from "./dmscreen-initiativetracker-lairmarkers.js";
 
 class _RenderableCollectionRowDataActive extends RenderableCollectionRowDataBase {
 	constructor (
@@ -24,6 +25,114 @@ class _RenderableCollectionRowDataActive extends RenderableCollectionRowDataBase
 		},
 	) {
 		super({comp, prop: "rows", wrpRows, roller, networking, rowStateBuilder});
+	}
+
+	async _pPopulateRow (opts) {
+		if (opts.entity?.entity?.isLairMarker) return this._pPopulateRow_lairMarker(opts);
+		return super._pPopulateRow(opts);
+	}
+
+	async _pPopulateRow_lairMarker ({comp, wrpRow, entity}) {
+		const fnsCleanup = [];
+
+		wrpRow.addClass("dm-init__row--lair");
+
+		comp._addHookBase("isActive", () => wrpRow.toggleClass("dm-init__row-active", !!comp._state.isActive))();
+
+		const wrpLhs = ee`<div class="dm-init__row-lhs"></div>`.appendTo(wrpRow);
+
+		const legendaryGroup = {name: comp._state.legendaryGroupName, source: comp._state.legendaryGroupSource};
+		const lnk = e_({outer: Renderer.get().render(`{@legendaryGroup ${legendaryGroup.name}|${legendaryGroup.source}}`)})
+			.attr("tabindex", "-1");
+
+		const dispLabel = ee`<span class="dm-init__wrp-creature-link"></span>`
+			.appends(lnk);
+
+		const dispParent = ee`<span class="dm-init__number ve-muted ve-ml-1"></span>`;
+		comp._addHookBase("parentMonsterName", () => dispParent.txt(comp._state.parentMonsterName ? `(${comp._state.parentMonsterName})` : ""))();
+
+		const badgeType = comp._state.isLairMarkerManual
+			? `<span class="ve-muted ve-mr-1 ve-small" title="Manually added">Lair</span>`
+			: `<span class="ve-muted ve-mr-1 ve-small" title="Automatically added — the creature(s) whose legendary group this belongs to">Lair</span>`;
+
+		ee`<div class="dm-init__wrp-creature ve-split">
+			<span class="dm-init__wrp-creature-link ve-flex-v-center">
+				${badgeType}
+				${dispLabel}
+				${dispParent}
+			</span>
+		</div>`
+			.appendTo(wrpLhs);
+
+		// Empty conditions row: no per-condition tracking on the marker.
+		ee`<div class="init__wrp_conds ve-h-100"></div>`.appendTo(wrpLhs);
+
+		// Empty stats-cols slot (keeps layout aligned).
+		const wrpStats = ee`<div class="dm-init__row-mid"></div>`.appendTo(wrpRow);
+		const hkParentStatsAddCols = () => wrpStats.toggleVe(!!this._comp._state.isStatsAddColumns);
+		this._comp._addHookBase("isStatsAddColumns", hkParentStatsAddCols)();
+		fnsCleanup.push(() => this._comp._removeHookBase("isStatsAddColumns", hkParentStatsAddCols));
+
+		const wrpRhs = ee`<div class="dm-init__row-rhs"></div>`.appendTo(wrpRow);
+
+		// HP placeholder (marker has no HP).
+		ee`<div class="ve-flex ve-relative ve-mr-3p dm-init__hp-placeholder ve-muted ve-flex-vh-center" title="Lair markers do not track HP">—</div>`
+			.appendTo(wrpRhs);
+
+		// Editable initiative (default 20).
+		this._pPopulateRow_initiative({comp, wrpRhs});
+
+		this._pPopulateRow_btns_lairMarker({comp, entity, wrpRhs});
+
+		return {
+			cbOnTurnStart: () => {},
+			cbOnRoundStart: () => {},
+			fnsCleanup,
+		};
+	}
+
+	_pPopulateRow_btns_lairMarker ({comp, entity, wrpRhs}) {
+		const btnVisible = InitiativeTrackerUi.getBtnPlayerVisible({
+			isVisible: comp._state.isPlayerVisible,
+			fnOnClick: () => comp._state.isPlayerVisible = btnVisible.hasClass("ve-btn-primary")
+				? IS_PLAYER_VISIBLE_ALL
+				: IS_PLAYER_VISIBLE_NONE,
+			additionalClasses: [
+				"dm-init__row-btn",
+				"dm-init__btn_eye",
+			],
+		})
+			.tooltip("Shown in player view")
+			.appendTo(wrpRhs);
+
+		const titleAuto = "Delete (converts back to manual so it doesn't auto-regenerate; SHIFT to fully dismiss for this session)";
+		const titleManual = "Delete";
+
+		ee`<button class="ve-btn ve-btn-danger ve-btn-xs dm-init__row-btn dm-init-lockable" title="${comp._state.isLairMarkerManual ? titleManual : titleAuto}" tabindex="-1"><span class="glyphicon glyphicon-trash"></span></button>`
+			.appendTo(wrpRhs)
+			.onn("click", evt => {
+				if (this._comp._state.isLocked) return;
+
+				const isManual = !!comp._state.isLairMarkerManual;
+
+				if (!isManual && !evt.shiftKey) {
+					// Auto-marker soft-delete: convert to manual so the reconciler
+					//   leaves it alone. DM can then hard-delete manually.
+					comp._state.isLairMarkerManual = true;
+					return;
+				}
+
+				// Shift-click on auto marker: dismiss the group for this session so
+				//   the reconciler won't re-add it. Then delete.
+				if (!isManual && evt.shiftKey && this._comp.dismissLairGroupForSession) {
+					this._comp.dismissLairGroupForSession({
+						legendaryGroupName: comp._state.legendaryGroupName,
+						legendaryGroupSource: comp._state.legendaryGroupSource,
+					});
+				}
+
+				this._utils.doDelete({entity});
+			});
 	}
 
 	async _pPopulateRow_pGetMonsterMeta ({comp}) {
@@ -120,7 +229,34 @@ class _RenderableCollectionRowDataActive extends RenderableCollectionRowDataBase
 				${btnDuplicate}
 			</div>
 		</div>`
-			.appendTo(wrpLhs);
+			.appendTo(wrpLhs)
+			.onn("contextmenu", async evt => {
+				// Right-click on the row's monster line: offer "Add Lair Actions".
+				if (!this._comp.pGetLairMarkerEligibilityForRow) return;
+
+				const eligibility = await this._comp.pGetLairMarkerEligibilityForRow({rowEntity: comp._state});
+				const canAdd = eligibility.isEligible && !eligibility.isAlreadyTracked;
+				const disabledTitle = !eligibility.isEligible
+					? "This creature has no legendary group with lair actions or regional effects."
+					: eligibility.isAlreadyTracked
+						? "A lair-action marker for this creature's group is already on the tracker."
+						: null;
+
+				const action = new ContextUtil.Action(
+					"Add Lair Actions",
+					async () => {
+						if (this._comp._state.isLocked) return;
+						await this._comp.pAddLairMarkerManualForRow({rowEntity: comp._state});
+					},
+					{
+						isDisabled: !canAdd,
+						title: disabledTitle || "Add a companion row at initiative 20 that surfaces this legendary group's lair actions and regional effects.",
+					},
+				);
+
+				evt.preventDefault();
+				await ContextUtil.pOpenMenu(evt, ContextUtil.getMenu([action]));
+			});
 	}
 
 	_pPopulateRow_monster_getRenderedLink ({comp}) {
