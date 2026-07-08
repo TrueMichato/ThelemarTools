@@ -1,12 +1,15 @@
 /*
- * Integrity test for the `group` field on monsters (see
- * `schema/site/util.json#/$defs/group`). Catches:
+ * Integrity tests for the monster group system (see
+ * `schema/site/util.json#/$defs/group` and
+ * `data/bestiary/monstergroups.json`). Catches:
  *
  *   1. Plural/singular label drift (e.g. "Chromatic Dragon" AND
  *      "Chromatic Dragons" both present).
  *   2. Unknown group labels — anything appearing in `mon.group[]` must
  *      be either in the canonical enum below or listed in the escape-
  *      hatch allow-list.
+ *   3. Orphan entities — every `monsterGroup` entity must have at
+ *      least one creature bound to it via `mon.group[]`.
  *
  * Update `CANONICAL_GROUPS` when adding a new group family. The escape
  * hatch (`ALLOW_LEGACY`) exists so obscure ad-hoc groups can survive
@@ -16,6 +19,7 @@ import fs from "fs";
 import path from "path";
 
 const BESTIARY_DIR = "./data/bestiary";
+const MONSTER_GROUPS_FILE = path.join(BESTIARY_DIR, "monstergroups.json");
 
 // Groups that have full-fledged coverage in the corpus. Adding a new
 // group family — even data-only — must add it here.
@@ -104,9 +108,22 @@ function loadGroups () {
 	return labelToMembers;
 }
 
+function loadEntities () {
+	if (!fs.existsSync(MONSTER_GROUPS_FILE)) return [];
+	let raw;
+	try {
+		raw = JSON.parse(fs.readFileSync(MONSTER_GROUPS_FILE, "utf-8"));
+	} catch (e) {
+		throw new Error(`Failed to parse ${MONSTER_GROUPS_FILE}: ${e.message}`, {cause: e});
+	}
+	return raw.monsterGroup || [];
+}
+
 function testMonsterGroups () {
 	const errors = [];
 	const labelToMembers = loadGroups();
+	const entities = loadEntities();
+	const entityNamesLower = new Map(entities.map(e => [e.name.toLowerCase(), e]));
 
 	// 1. Every observed label must be canonical or allow-listed
 	for (const label of labelToMembers.keys()) {
@@ -127,6 +144,30 @@ function testMonsterGroups () {
 	for (const [, labels] of normalized) {
 		if (labels.length <= 1) continue;
 		errors.push(`Label collision — these variants all normalize to the same key: ${labels.map(l => `"${l}"`).join(", ")}. Pick one canonical plural form and rewrite the rest.`);
+	}
+
+	// 3. Every monsterGroup entity must have at least one member.
+	for (const entity of entities) {
+		const key = entity.name.toLowerCase();
+		const hits = labelToMembers.get(entity.name) || [];
+		// case-insensitive fallback — a monster may capitalize differently
+		const anyHits = hits.length
+			|| Array.from(labelToMembers.keys()).some(l => l.toLowerCase() === key);
+		if (!anyHits) {
+			errors.push(`Orphan monsterGroup entity "${entity.name}" (${entity.source}) — no creature in the bestiary declares this in its \`group[]\`. Either add \`"group": ["${entity.name}"]\` to at least one creature, or remove the entity.`);
+		}
+	}
+
+	// 4. Every entity name that a monster references (case-insensitive
+	//    match against `entityNamesLower`) must resolve to a matching-case
+	//    label. Loose-match warning to catch e.g. "slaadi" vs "Slaadi".
+	for (const label of labelToMembers.keys()) {
+		const lower = label.toLowerCase();
+		if (!entityNamesLower.has(lower)) continue;
+		const entity = entityNamesLower.get(lower);
+		if (entity.name !== label) {
+			errors.push(`Case mismatch: label "${label}" (in bestiary) differs from monsterGroup entity name "${entity.name}". Align case in the bestiary data or the entity.`);
+		}
 	}
 
 	return errors;
