@@ -17,11 +17,15 @@
  * `entity.isLairMarker` is the canonical marker flag for the DM Screen
  * initiative tracker. Consumers that want the list of combatant-only rows
  * (e.g. multi-select HP math, damage roll targeting, "select all monsters")
- * should filter with `!row.entity?.isLairMarker`.
+ * should filter via the shared predicate helper on the row-data base class:
  *
- * Future non-combatant row types (weather effects, environmental hazards,
- * mid-encounter timers) should follow this convention rather than inventing
- * synthetic underscored flags.
+ *   `RenderableCollectionRowDataBase.isNonCombatantRow(row)`
+ *   `RenderableCollectionRowDataBase.isCombatantRow(row)`
+ *
+ * (Both live in `dmscreen-initiativetracker-rowsbase.js`.) Prefer the
+ * helpers over hardcoding `!row.entity.isLairMarker` so that new
+ * non-combatant row types (weather effects, environmental hazards,
+ * mid-encounter timers) can extend the convention in one place.
  */
 export class InitiativeTrackerLairMarkers {
 	/* -------------------------------------------- */

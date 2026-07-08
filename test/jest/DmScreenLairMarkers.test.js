@@ -1,4 +1,13 @@
+import "../../js/parser.js";
+import "../../js/utils.js";
 import {InitiativeTrackerLairMarkers} from "../../js/dmscreen/initiativetracker/dmscreen-initiativetracker-lairmarkers.js";
+
+// The row-data base module transitively imports initiativetracker-utils.js,
+//   which extends runtime-global collection classes. Stub them so we can
+//   import the base module and test its static row predicates in isolation.
+globalThis.RenderableCollectionGenericRows ||= class {};
+globalThis.RenderableCollectionAsyncGenericRows ||= class {};
+const {RenderableCollectionRowDataBase} = await import("../../js/dmscreen/initiativetracker/dmscreen-initiativetracker-rowsbase.js");
 
 const LEG_GROUP_DRAGON = {
 	name: "Ancient Red Dragon",
@@ -259,5 +268,26 @@ describe("InitiativeTrackerLairMarkers.getGroupHash", () => {
 		expect(InitiativeTrackerLairMarkers.getGroupHash({name: "", source: "MM"})).toBeNull();
 		expect(InitiativeTrackerLairMarkers.getGroupHash({name: "Foo", source: ""})).toBeNull();
 		expect(InitiativeTrackerLairMarkers.getGroupHash({name: null, source: null})).toBeNull();
+	});
+});
+
+describe("RenderableCollectionRowDataBase row predicates", () => {
+	it("isNonCombatantRow returns true for lair markers", () => {
+		const marker = {id: "m", entity: {isLairMarker: true}};
+		expect(RenderableCollectionRowDataBase.isNonCombatantRow(marker)).toBe(true);
+		expect(RenderableCollectionRowDataBase.isCombatantRow(marker)).toBe(false);
+	});
+
+	it("isCombatantRow returns true for regular monster rows", () => {
+		const mon = {id: "mon", entity: {name: "Goblin", source: "MM"}};
+		expect(RenderableCollectionRowDataBase.isCombatantRow(mon)).toBe(true);
+		expect(RenderableCollectionRowDataBase.isNonCombatantRow(mon)).toBe(false);
+	});
+
+	it("handles null / undefined rows defensively", () => {
+		expect(RenderableCollectionRowDataBase.isNonCombatantRow(null)).toBe(false);
+		expect(RenderableCollectionRowDataBase.isNonCombatantRow(undefined)).toBe(false);
+		expect(RenderableCollectionRowDataBase.isNonCombatantRow({})).toBe(false);
+		expect(RenderableCollectionRowDataBase.isCombatantRow(null)).toBe(true);
 	});
 });
