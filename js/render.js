@@ -15380,7 +15380,15 @@ Renderer.deck = class {
 		const renderSummary = () => {
 			if (!eleCount || !eleSummary) return;
 			const nDrawn = countDrawnNonReplacement();
-			eleCount.textContent = nonReplacementTotal > 0 ? `Drawn: ${nDrawn} / ${nonReplacementTotal}` : "";
+			// Keep the initial view clean: hide the counter until at least one
+			// non-replacement card has been drawn.
+			if (nDrawn > 0 && nonReplacementTotal > 0) {
+				eleCount.textContent = `Drawn: ${nDrawn} / ${nonReplacementTotal}`;
+				eleCount.classList.remove("ve-hidden");
+			} else {
+				eleCount.textContent = "";
+				eleCount.classList.add("ve-hidden");
+			}
 			if (!drawnIxs.size) {
 				eleSummary.classList.add("ve-hidden");
 				eleSummary.innerHTML = "";
