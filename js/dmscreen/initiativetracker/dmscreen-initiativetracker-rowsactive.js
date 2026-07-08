@@ -4,7 +4,7 @@ import {
 } from "./dmscreen-initiativetracker-statcolumns.js";
 import {InitiativeTrackerConditionAdd} from "./dmscreen-initiativetracker-conditionadd.js";
 import {InitiativeTrackerUi} from "./dmscreen-initiativetracker-ui.js";
-import {InitiativeTrackerConst} from "./dmscreen-initiativetracker-consts.js";
+import {InitiativeTrackerConst, InitiativeTrackerRowUtil} from "./dmscreen-initiativetracker-consts.js";
 import {InitiativeTrackerSort} from "./dmscreen-initiativetracker-sort.js";
 import {RenderableCollectionConditions} from "../../initiativetracker/initiativetracker-utils.js";
 import {
@@ -47,7 +47,7 @@ class _RenderableCollectionRowDataActive extends RenderableCollectionRowDataBase
 	// last-clicked row using the current sort order. Marker rows (future lair-
 	// action rows carrying `entity._isMarker`) render no checkbox.
 	_pPopulateRow_selection ({comp, entity, wrpRow, wrpLhs, fnsCleanup}) {
-		if (entity?.entity?._isMarker) return;
+		if (InitiativeTrackerRowUtil.isNonCombatantRow(entity)) return;
 
 		const rowId = entity.id;
 		const root = this._comp;

@@ -61,12 +61,39 @@ re-rolls (independent saves) are a future enhancement.
 - The `Undo` stack lives on the same `InitiativeTracker` instance and
   is also non-persisted. Cap = 5 entries.
 
-## Marker rows (forward-compat)
+## Marker rows — shared predicate (forward-compat)
 
-Rows with `entity._isMarker === true` are **never selectable** — no
-checkbox is rendered and the shift-click range calculation skips them.
-Introduced ahead of the automatic lair-actions PR (#1234) so
-lair-action marker rows will drop in seamlessly when that lands.
+Rows that represent **non-combatant markers** (lair actions, environmental
+effects, future fog / hazard markers, etc.) are excluded from bulk HP
+apply — no checkbox is rendered and the shift-click range calculation
+skips them.
+
+Selection features route the check through a single shared predicate so
+new marker types compose without touching every feature:
+
+```js
+import {InitiativeTrackerRowUtil} from "./dmscreen-initiativetracker-consts.js";
+
+if (!InitiativeTrackerRowUtil.isNonCombatantRow(row)) { /* apply */ }
+```
+
+**Canonical flag** consumed today: `entity.isLairMarker` (introduced by
+the automatic lair-actions PR, tracker #1234). When new marker types are
+added — environmental hazards, fog banks, condition markers — extend
+`isNonCombatantRow` in `dmscreen-initiativetracker-consts.js` rather
+than adding parallel flags in every feature.
+
+## Half-damage rule (5e)
+
+The **½** checkbox routes through `InitiativeTrackerRowUtil.getHalvedDelta(delta)`:
+
+- Floor of `|delta| / 2`, sign preserved (works for healing halves too).
+- **1 halves to 0** — 5e's "damage on save is halved, round down"
+  (PHB p.196) has no minimum-1 rule. The minimum-1 rule applies only to
+  resistance/vulnerability doubling and to the base damage of certain
+  attacks, not to save-for-half. If your table houserules "minimum 1
+  damage on save", extend the helper.
+- Ignored for `=X` (absolute set).
 
 ## Interaction with tracker lock
 
@@ -89,12 +116,13 @@ dying tracking DMs already rely on).
 
 | File | Role |
 |---|---|
+| `js/dmscreen/initiativetracker/dmscreen-initiativetracker-consts.js` | `InitiativeTrackerRowUtil.isNonCombatantRow(row)` shared marker predicate + `getHalvedDelta(delta)` 5e save-for-half helper. Consumed by both this PR and (transitively) any future PR that operates on combatant rows. |
 | `js/utils-ui.js` `UiUtil.getStrNumericModified` | Pure delta-expression parser (extracted from `ComponentUiUtil._getIptNumeric`); returns `{mode, next, delta}`. Used by both the single-row HP input and the bulk bar. |
 | `js/dmscreen/initiativetracker/dmscreen-initiativetracker.js` | Selection state (`_selectedRowIds`, `_lastSelectedRowId`), hooks (`_selectionHooks`), undo stack (`_hpApplyUndoStack`), API (`toggleRowSelection` / `clearSelection` / `_applyHpToSelection` / `_undoLastHpApply` / `_pruneSelection`), and the selection-bar render helper `_render_getWrpSelectionBar`. |
 | `js/dmscreen/initiativetracker/dmscreen-initiativetracker-rowsbase.js` | Adds a `_pPopulateRow_selection` slot in the row skeleton (default no-op). |
 | `js/dmscreen/initiativetracker/dmscreen-initiativetracker-rowsactive.js` | Overrides `_pPopulateRow_selection` to render the checkbox, wire click / shift-click, apply the `.dm-init__row--selected` class, and register/unregister the row-highlight hook. |
 | `scss/includes/dmscreen-initiative-tracker.scss` | Styles for `.dm-init__wrp-selection-bar`, `.dm-init__wrp-row-checkbox`, `.dm-init__row-checkbox`, `.dm-init__row--selected`. |
-| `test/jest/UiUtilGetStrNumericModified.test.js` | 14-case coverage of the delta parser. |
+| `test/jest/UiUtilGetStrNumericModified.test.js` | Parser + `getHalvedDelta` + `isNonCombatantRow` coverage. |
 
 ## Known non-goals
 
@@ -104,4 +132,9 @@ These were intentionally deferred:
 - **"Select All" button** — small selection sets don't need one.
 - **Type-aware selection** (PCs vs monsters) — future.
 - **Bulk conditions** (e.g. Prone-everyone) — future.
-- **Per-row re-rolls** (each target rolls its own save/damage) — future.
+- **Per-row re-rolls** — each target rolling its own save-for-half or its
+  own damage die is the natural next step; today's design rolls once and
+  shares the result. Opt-in "roll per row" toggle is planned as a
+  follow-up.
+- **Minimum-1 damage on save** — not applied. See the half-damage
+  section; extend `getHalvedDelta` if your table houserules it.
