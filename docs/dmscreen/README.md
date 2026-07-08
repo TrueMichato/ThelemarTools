@@ -13,6 +13,7 @@ Developer documentation for the Party Tracker and Journey Tracker panels in the 
 | [Journey Activities](./05-journey-activities.md) | All 8 journey + 11 camp activities, RM deltas, group checks, pace modifiers, tool proficiency |
 | [Party–Journey Integration](./06-party-journey-integration.md) | Board event system, automatic character sync, player data mapping |
 | [Styling Guide](./07-styling-guide.md) | SCSS class hierarchy for both trackers, color coding, night mode |
+| [Initiative Tracker — Multi-Select HP](./08-initiative-tracker-multi-select-hp.md) | Bulk-apply HP workflow (Fireball / save-for-half), selection state, `UiUtil.getStrNumericModified` |
 
 ## System at a Glance
 
