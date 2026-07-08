@@ -1,4 +1,4 @@
-import {InitiativeTrackerConst} from "./dmscreen-initiativetracker-consts.js";
+import {InitiativeTrackerConst, InitiativeTrackerRowUtil} from "./dmscreen-initiativetracker-consts.js";
 import {InitiativeTrackerNetworking} from "./dmscreen-initiativetracker-networking.js";
 import {InitiativeTrackerSettings} from "./dmscreen-initiativetracker-settings.js";
 import {InitiativeTrackerSettingsImport} from "./dmscreen-initiativetracker-importsettings.js";
@@ -75,7 +75,7 @@ export class InitiativeTracker extends BaseComponent {
 
 	toggleRowSelection (rowId, {isShift = false} = {}) {
 		if (isShift && this._lastSelectedRowId && this._lastSelectedRowId !== rowId) {
-			const rows = this._state.rows.filter(r => !r.entity?._isMarker);
+			const rows = this._state.rows.filter(r => !InitiativeTrackerRowUtil.isNonCombatantRow(r));
 			const ixAnchor = rows.findIndex(r => r.id === this._lastSelectedRowId);
 			const ixTarget = rows.findIndex(r => r.id === rowId);
 			if (~ixAnchor && ~ixTarget) {
@@ -155,19 +155,16 @@ export class InitiativeTracker extends BaseComponent {
 		} else {
 			// parsed.delta is (next - 0) = the numeric magnitude with sign
 			sharedDelta = parsed.delta ?? parsed.next;
-			if (isHalf) {
-				const sign = sharedDelta < 0 ? -1 : sharedDelta > 0 ? 1 : 0;
-				sharedDelta = Math.floor(Math.abs(sharedDelta) / 2) * sign;
-			}
+			if (isHalf) sharedDelta = InitiativeTrackerRowUtil.getHalvedDelta(sharedDelta);
 		}
 
-		// Snapshot pre-apply values (only for currently-existing rows) and
-		// build the new rows array in ONE mutation so the root rows-hook
+		// Snapshot pre-apply values (only for currently-existing combatant rows)
+		// and build the new rows array in ONE mutation so the root rows-hook
 		// fires exactly once, keeping saves batched.
 		const idSet = new Set(selectedIds);
 		const snapshots = [];
 		const nextRows = this._state.rows.map(row => {
-			if (!idSet.has(row.id) || row.entity?._isMarker) return row;
+			if (!idSet.has(row.id) || InitiativeTrackerRowUtil.isNonCombatantRow(row)) return row;
 			const cur = row.entity.hpCurrent;
 			const next = absoluteSet != null ? absoluteSet : ((cur ?? 0) + sharedDelta);
 			snapshots.push({rowId: row.id, hpCurrent: cur});

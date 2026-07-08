@@ -3,6 +3,7 @@ import "../../js/utils.js";
 import "../../js/render.js";
 import "../../js/render-dice.js";
 import "../../js/utils-ui.js";
+import {InitiativeTrackerRowUtil} from "../../js/dmscreen/initiativetracker/dmscreen-initiativetracker-consts.js";
 
 // Bulk-apply / initiative-tracker HP delta parser lives in
 // `UiUtil.getStrNumericModified`; this suite covers the same grammar the
@@ -98,5 +99,43 @@ describe("UiUtil.getStrNumericModified", () => {
 		expect(out.mode).toBe("delta");
 		expect(out.next).toBe(5);
 		expect(out.delta).toBe(5);
+	});
+});
+
+describe("InitiativeTrackerRowUtil.getHalvedDelta (5e save-for-half)", () => {
+	// 5e PHB p.196: "half as much damage on a successful one".
+	// PHB p.7 rounding rule: round down. No "minimum 1" for saves.
+	it("halves large signed damage with floor", () => {
+		expect(InitiativeTrackerRowUtil.getHalvedDelta(-30)).toBe(-15);
+		expect(InitiativeTrackerRowUtil.getHalvedDelta(-7)).toBe(-3);
+	});
+	it("halves healing (positive) the same way", () => {
+		expect(InitiativeTrackerRowUtil.getHalvedDelta(12)).toBe(6);
+		expect(InitiativeTrackerRowUtil.getHalvedDelta(5)).toBe(2);
+	});
+	it("halves 1 to 0 (no minimum-1 rule for save-for-half)", () => {
+		expect(InitiativeTrackerRowUtil.getHalvedDelta(1)).toBe(0);
+		expect(InitiativeTrackerRowUtil.getHalvedDelta(-1)).toBe(0);
+	});
+	it("returns 0 for 0", () => {
+		expect(InitiativeTrackerRowUtil.getHalvedDelta(0)).toBe(0);
+	});
+	it("returns 0 for non-finite input", () => {
+		expect(InitiativeTrackerRowUtil.getHalvedDelta(NaN)).toBe(0);
+		expect(InitiativeTrackerRowUtil.getHalvedDelta(Infinity)).toBe(0);
+	});
+});
+
+describe("InitiativeTrackerRowUtil.isNonCombatantRow (marker-row predicate)", () => {
+	it("returns false for regular rows", () => {
+		expect(InitiativeTrackerRowUtil.isNonCombatantRow({id: "x", entity: {name: "Goblin", hpCurrent: 5}})).toBe(false);
+	});
+	it("returns true for rows with entity.isLairMarker (lair-actions PR canonical flag)", () => {
+		expect(InitiativeTrackerRowUtil.isNonCombatantRow({id: "x", entity: {isLairMarker: true}})).toBe(true);
+	});
+	it("null-safe against missing entity or missing row", () => {
+		expect(InitiativeTrackerRowUtil.isNonCombatantRow(null)).toBe(false);
+		expect(InitiativeTrackerRowUtil.isNonCombatantRow({id: "x"})).toBe(false);
+		expect(InitiativeTrackerRowUtil.isNonCombatantRow(undefined)).toBe(false);
 	});
 });
