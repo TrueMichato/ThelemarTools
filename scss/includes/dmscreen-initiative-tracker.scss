@@ -158,6 +158,45 @@
 		display: flex;
 	}
 
+	/* --- Multi-select bulk-HP bar --- */
+	.dm-init__wrp-selection-bar {
+		flex: none;
+		padding: 3px 6px;
+		border-bottom: 1px solid vars.$rgb-border-grey;
+		background: #fff3cd66;
+		gap: 4px;
+	}
+
+	.dm-init__sel-bar-count {
+		font-weight: bold;
+		white-space: nowrap;
+		margin-right: 4px;
+	}
+
+	.dm-init__sel-bar-ipt {
+		width: 180px;
+		max-width: 40%;
+	}
+
+	.dm-init__sel-bar-msg {
+		font-size: 11px;
+	}
+
+	.dm-init__wrp-row-checkbox {
+		flex: 0 0 auto;
+		margin-right: 3px;
+		padding: 0 2px;
+	}
+
+	.dm-init__row-checkbox {
+		cursor: pointer;
+		margin: 0;
+	}
+
+	.dm-init__row.dm-init__row--selected {
+		box-shadow: inset 3px 0 0 0 #d9534f;
+	}
+
 	.dm-init__rounds {
 		width: 35px;
 		height: vars.$h-ipt-xs;

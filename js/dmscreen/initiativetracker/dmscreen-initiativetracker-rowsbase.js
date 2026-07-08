@@ -76,6 +76,7 @@ export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGe
 
 		const wrpLhs = ee`<div class="dm-init__row-lhs"></div>`.appendTo(wrpRow);
 
+		this._pPopulateRow_selection({comp, entity, wrpRow, wrpLhs, fnsCleanup});
 		this._pPopulateRow_player({comp, wrpLhs, isMon});
 		this._pPopulateRow_monster({comp, wrpLhs, isMon, mon, fluff});
 
@@ -153,6 +154,15 @@ export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGe
 		this._comp._addHookBase("statsCols", hkParentStatCols)();
 		fnsCleanup.push(() => this._comp._removeHookBase("statsCols", hkParentStatCols));
 	}
+
+	/* ----- */
+
+	/**
+	 * Multi-select checkbox for the active tracker (Fireball / bulk HP).
+	 * No-op by default — overridden in the active-view subclass.
+	 * @abstract
+	 */
+	_pPopulateRow_selection ({comp, entity, wrpRow, wrpLhs, fnsCleanup}) { /* no-op */ }
 
 	/* ----- */
 
