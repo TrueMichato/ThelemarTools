@@ -276,6 +276,18 @@ class PageFilterBestiary extends PageFilterBase {
 		this._groupFilter = new Filter({
 			header: "Group",
 			items: [],
+			displayFn: label => {
+				const mg = DataUtil.monster.getMonsterGroupByLabelSync(label);
+				if (!mg?.name) return label; // bare-string fallback — no icon
+				const hash = UrlUtil.URL_TO_HASH_BUILDER["monsterGroup"](mg);
+				const hoverAttrs = Renderer.hover.getHoverElementAttributes({
+					page: "monsterGroup",
+					source: mg.source,
+					hash,
+				});
+				// Info-icon rendered as a hoverable superscript, keeping the label click-selectable.
+				return `${label} <a class="ve-muted" href="#${hash}" ${hoverAttrs} onclick="event.stopPropagation()" title="View ${mg.name.qq()}">\u24d8</a>`;
+			},
 		});
 	}
 
@@ -579,6 +591,11 @@ class PageFilterBestiary extends PageFilterBase {
 	}
 
 	async _pPopulateBoxOptions (opts) {
+		// Pre-warm the monsterGroup entity cache so `_groupFilter.displayFn`
+		// can synchronously resolve labels to entities and render the info-icon.
+		// Failure is non-fatal — displayFn simply falls back to the bare label.
+		try { await DataUtil.monster.pPreloadMonsterGroupEntities(); } catch (e) { /* swallow */ }
+
 		Object.entries(Parser.MON_LANGUAGE_TAG_TO_FULL)
 			.sort(([, vA], [, vB]) => SortUtil.ascSortLower(vA, vB))
 			.forEach(([k]) => this._languageFilter.addItem(k));
