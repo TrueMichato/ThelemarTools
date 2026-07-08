@@ -68,6 +68,12 @@
 			line-height: 1.35;
 		}
 
+		&row-text--empty {
+			font-style: italic;
+			opacity: 0.55;
+			user-select: none;
+		}
+
 		&row-ipt {
 			flex: 1;
 			background: transparent;

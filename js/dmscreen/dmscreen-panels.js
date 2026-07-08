@@ -199,6 +199,34 @@ export class PanelContentManager_CustomRandomTable extends _PanelContentManager 
 	_getPanelApp ({state}) {
 		return CustomRandomTable.getPanelApp({board: this._board, savedState: state});
 	}
+
+	// Override the base `pDoPopulate` so we can:
+	//  - Pass `tabCanRename: false` — the in-panel title input is the single source of
+	//    truth for this panel's tab title, so we suppress the double-click-rename affordance
+	//    to avoid a two-way divergence.
+	//  - Wire the panel-app's title state to `panel.setTabTitle(...)` so editing the
+	//    in-panel title renames the tab in real time.
+	async pDoPopulate ({state = {}, title = null} = {}) {
+		const panelApp = this._getPanelApp({state});
+
+		const tabIx = this._panel.setEleContentTab({
+			panelType: this.constructor._PANEL_TYPE,
+			contentMeta: state,
+			panelApp,
+			eleContent: ee`<div class="panel-content-wrapper-inner"></div>`.appends(panelApp.getPanelElement()),
+			title: title || this.constructor._TITLE,
+			tabCanRename: false,
+		});
+
+		const panel = this._panel;
+		const DEFAULT = this.constructor._TITLE;
+		panelApp.setTitleChangeCallback?.(newTitle => {
+			const clean = (newTitle || "").trim();
+			panel.setTabTitle(tabIx, clean || DEFAULT);
+		});
+
+		this._board.fireBoardEvent({type: "panelPopulate", payload: {type: this.constructor._PANEL_TYPE}});
+	}
 }
 
 export class PanelContentManager_NoteBox extends _PanelContentManager {

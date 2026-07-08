@@ -23,18 +23,33 @@ export class CustomRandomTable extends DmScreenPanelAppBase {
 	constructor (...args) {
 		super(...args);
 		this._comp = null;
+		this._titleChangeCb = null;
 	}
 
 	_getPanelElement (board, state) {
 		const wrpPanel = ee`<div class="ve-w-100 ve-h-100 dm-crandom__root dm__panel-bg dm__data-anchor ve-flex-col"></div>`;
 		this._comp = new CustomRandomTableRoot(board, wrpPanel);
 		this._comp.setStateFrom(state);
+		if (this._titleChangeCb) this._comp.setTitleChangeCallback(this._titleChangeCb);
 		this._comp.render(wrpPanel);
 		return wrpPanel;
 	}
 
 	getState () {
 		return this._comp?.getSaveableState();
+	}
+
+	/**
+	 * Register a callback invoked whenever the in-panel title state changes.
+	 * Fired once immediately with the current title so external listeners can reconcile on load.
+	 */
+	setTitleChangeCallback (cb) {
+		this._titleChangeCb = cb;
+		if (this._comp) this._comp.setTitleChangeCallback(cb);
+	}
+
+	getTitle () {
+		return this._comp?.getTitle() ?? "";
 	}
 }
 
@@ -53,9 +68,20 @@ class CustomRandomTableRoot extends CustomRandomTableComponent {
 		this._childComps = [];
 		this._wrpRows = null;
 		this._eleFooter = null;
+		this._titleChangeCb = null;
+		this._addHookBase("title", () => { if (this._titleChangeCb) this._titleChangeCb(this._state.title || ""); });
 	}
 
-	_getDefaultState () { return {title: "", isEditMode: true, lastRolledIx: null}; }
+	static _SEED_ROW_COUNT = 3;
+
+	_getDefaultState () { return {title: "", isEditMode: false, lastRolledIx: null}; }
+
+	getTitle () { return this._state.title || ""; }
+
+	setTitleChangeCallback (cb) {
+		this._titleChangeCb = cb;
+		if (cb) cb(this._state.title || "");
+	}
 
 	render (eleParent) {
 		eleParent.empty();
@@ -224,12 +250,22 @@ class CustomRandomTableRoot extends CustomRandomTableComponent {
 		this._state.lastRolledIx = toLoad.l ?? toLoad.lastRolledIx ?? null;
 
 		this._childComps = [];
-		const rowsRaw = toLoad.r ?? toLoad.rows ?? [];
-		rowsRaw.forEach(r => {
-			const comp = new CustomRandomTableRow(this._board, this._wrpPanel);
-			comp.setStateFrom(r);
-			this._childComps.push(comp);
-		});
+		const rowsRaw = toLoad.r ?? toLoad.rows ?? null;
+		if (rowsRaw != null) {
+			// A saved panel — restore rows as-is (empty array is respected, i.e. "user
+			// deleted everything" persists as an empty table, distinct from a fresh panel).
+			rowsRaw.forEach(r => {
+				const comp = new CustomRandomTableRow(this._board, this._wrpPanel);
+				comp.setStateFrom(r);
+				this._childComps.push(comp);
+			});
+		} else {
+			// Brand-new panel (missing `r` key) — seed a few blank rows so users see the
+			// roll UX immediately rather than an empty surface.
+			for (let i = 0; i < CustomRandomTableRoot._SEED_ROW_COUNT; ++i) {
+				this._childComps.push(new CustomRandomTableRow(this._board, this._wrpPanel));
+			}
+		}
 
 		// Bounds-check restored lastRolledIx against loaded rows
 		if (this._state.lastRolledIx != null
@@ -289,10 +325,16 @@ class CustomRandomTableRow extends CustomRandomTableComponent {
 			return;
 		}
 
-		// View mode: rendered {@tag ...} content
-		const eleText = ee`<div class="dm-crandom__row-text"></div>`;
-		const rendered = Renderer.get().render(this._state.text || "");
-		eleText.innerHTML = rendered;
+		// View mode: rendered {@tag ...} content (or muted placeholder if empty)
+		const rawText = this._state.text || "";
+		const isEmpty = !rawText.trim();
+		const clsEmpty = isEmpty ? " dm-crandom__row-text--empty" : "";
+		const eleText = ee`<div class="dm-crandom__row-text${clsEmpty}"></div>`;
+		if (isEmpty) {
+			eleText.textContent = "<empty row>";
+		} else {
+			eleText.innerHTML = Renderer.get().render(rawText);
+		}
 
 		const clsLast = isLastRolled ? " dm-crandom__row--last" : "";
 		this._eleRow = ee`<div class="dm-crandom__row dm-crandom__row--view ve-flex-v-center ve-w-100 ve-py-1${clsLast}" data-row-id="${this._state.id}">
