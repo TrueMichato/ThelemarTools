@@ -1,6 +1,7 @@
 import {
 	PANEL_TYP_ADVENTURE_DYNAMIC_MAP,
 	PANEL_TYP_COUNTER,
+	PANEL_TYP_CUSTOM_RANDOM_TABLE,
 	PANEL_TYP_INITIATIVE_TRACKER, PANEL_TYP_INITIATIVE_TRACKER_CREATURE_VIEWER,
 	PANEL_TYP_INITIATIVE_TRACKER_PLAYER_V0,
 	PANEL_TYP_INITIATIVE_TRACKER_PLAYER_V1, PANEL_TYP_JOURNEY_TRACKER, PANEL_TYP_MONEY_CONVERTER, PANEL_TYP_PARTY_TRACKER, PANEL_TYP_TEXTBOX, PANEL_TYP_TIME_TRACKER, PANEL_TYP_UNIT_CONVERTER,
@@ -16,6 +17,7 @@ import {TimeTracker} from "./dmscreen-timetracker.js";
 import {DmMapper} from "./dmscreen-mapper.js";
 import {PartyTracker} from "./partytracker/dmscreen-partytracker.js";
 import {JourneyTracker} from "./dmscreen-journeytracker.js";
+import {CustomRandomTable} from "./dmscreen-customrandomtable.js";
 
 export class PanelContentManagerFactory {
 	static _PANEL_TYPES = {};
@@ -185,6 +187,17 @@ export class PanelContentManager_Counter extends _PanelContentManager {
 
 	_getPanelApp ({state}) {
 		return Counter.getPanelApp({board: this._board, savedState: state});
+	}
+}
+
+export class PanelContentManager_CustomRandomTable extends _PanelContentManager {
+	static _PANEL_TYPE = PANEL_TYP_CUSTOM_RANDOM_TABLE;
+	static _TITLE = "Random Table";
+
+	static _ = this._register();
+
+	_getPanelApp ({state}) {
+		return CustomRandomTable.getPanelApp({board: this._board, savedState: state});
 	}
 }
 
