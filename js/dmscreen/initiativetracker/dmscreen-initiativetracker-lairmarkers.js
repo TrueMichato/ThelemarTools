@@ -10,6 +10,18 @@
  * pure — it takes a snapshot of rows and a pre-populated legendary-group cache
  * and returns the diff to apply. Async loading of legendary groups lives in the
  * tracker itself (see `InitiativeTracker.pReconcileLairMarkers`).
+ *
+ * -------------------------------------------------------------------------
+ * CANONICAL NON-COMBATANT MARKER FLAG
+ * -------------------------------------------------------------------------
+ * `entity.isLairMarker` is the canonical marker flag for the DM Screen
+ * initiative tracker. Consumers that want the list of combatant-only rows
+ * (e.g. multi-select HP math, damage roll targeting, "select all monsters")
+ * should filter with `!row.entity?.isLairMarker`.
+ *
+ * Future non-combatant row types (weather effects, environmental hazards,
+ * mid-encounter timers) should follow this convention rather than inventing
+ * synthetic underscored flags.
  */
 export class InitiativeTrackerLairMarkers {
 	/* -------------------------------------------- */
