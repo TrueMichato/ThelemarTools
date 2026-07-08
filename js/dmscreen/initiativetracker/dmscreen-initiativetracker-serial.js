@@ -59,12 +59,15 @@ export class InitiativeTrackerRowDataSerializer extends InitiativeTrackerDataSer
 		// endregion
 
 		// region Lair-action companion markers
+		// `refRowIds` is intentionally NOT serialized: it is derived state that
+		//   the reconciler recomputes from the current row set on every
+		//   mutation (and on the initial post-load reconcile pass). Persisting
+		//   it would only invite stale-id bugs on reload.
 		"entity.isLairMarker": "lm",
 		"entity.isLairMarkerManual": "lmM",
 		"entity.legendaryGroupName": "lgn",
 		"entity.legendaryGroupSource": "lgs",
 		"entity.parentMonsterName": "lpm",
-		"entity.refRowIds": "lrr",
 		// endregion
 
 		// region Specific handling
