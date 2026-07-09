@@ -43,6 +43,35 @@ class _RenderableCollectionRowStatColData extends RenderableCollectionGenericRow
 
 /** @abstract */
 export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGenericRows {
+	/* -------------------------------------------- */
+	// region Shared row predicates
+	//
+	// Consumers of the initiative-tracker row schema (multi-select HP math,
+	// bulk-condition tooling, damage-roll targeting, "select all monsters",
+	// player-view filters, ...) should use these predicates rather than
+	// hardcoding `!row.entity.isLairMarker` — that way, when new non-combatant
+	// row types are added (weather effects, hazards, timers, ...), a single
+	// change here updates every consumer.
+
+	/**
+	 * @param {object} row A tracker row (`{id, entity: {...}}`).
+	 * @returns {boolean} True when the row is a non-combatant marker (currently
+	 *   just lair-action markers). Non-combatant rows should be excluded from
+	 *   any operation that assumes the row participates in the fight — HP
+	 *   changes, condition application, damage rolls, "select all monsters",
+	 *   etc.
+	 */
+	static isNonCombatantRow (row) {
+		return !!row?.entity?.isLairMarker;
+	}
+
+	/** Inverse of `isNonCombatantRow`. */
+	static isCombatantRow (row) {
+		return !this.isNonCombatantRow(row);
+	}
+
+	// endregion
+
 	constructor (
 		{
 			comp,

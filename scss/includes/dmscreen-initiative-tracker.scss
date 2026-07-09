@@ -61,6 +61,19 @@
 		margin-bottom: 3px;
 	}
 
+	.dm-init__row--lair {
+		background: rgba(170, 130, 90, 0.10);
+		border-left: 3px solid rgba(170, 130, 90, 0.55);
+		border-radius: 2px;
+		padding-left: 3px;
+	}
+
+	.dm-init__hp-placeholder {
+		width: 84px;
+		font-size: 14px;
+		user-select: none;
+	}
+
 	.dm-init__row-lhs,
 	.dm-init__row-rhs {
 		display: flex;
