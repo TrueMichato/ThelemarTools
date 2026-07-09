@@ -1,0 +1,41 @@
+# Monster groups schema patch for 5etools-utils
+#
+# This bundle:
+#   1. Creates two new schema files at `schema/site/bestiary/monstergroups.json`
+#      and `schema/brew/bestiary/monstergroups.json` (see README for their
+#      full contents — they are provided as separate files in this directory).
+#   2. Adds an optional `groupSource` field to the monster properties block
+#      in each of the six schema variants (site, site-fast, brew, brew-fast,
+#      ua, ua-fast). `groupSource` is a plain string that disambiguates
+#      `mon.group[i]` labels which appear in more than one `monsterGroup`
+#      source.
+#
+# The `groupSource` hunks below are illustrative and target the standard
+# monster properties block. If the utils repo's monster block has moved,
+# adapt the anchor lines.
+#
+# `git apply --directory=schema --check` should verify cleanly against a
+# recent `5etools-utils` main. If not, apply by hand — the change is tiny.
+
+diff -ruN a/site/bestiary.json b/site/bestiary.json
+--- a/site/bestiary.json
++++ b/site/bestiary.json
+@@ -0,0 +1,7 @@
++				"group": {
++					"$ref": "util.json#/$defs/group"
++				},
++				"groupSource": {
++					"description": "Optional. Disambiguates a monster's `group[0]` label against a specific `monsterGroup.source` when the same label exists under multiple sources.",
++					"type": "string"
++				},
+diff -ruN a/brew/bestiary.json b/brew/bestiary.json
+--- a/brew/bestiary.json
++++ b/brew/bestiary.json
+@@ -0,0 +1,7 @@
++				"group": {
++					"$ref": "util.json#/$defs/group"
++				},
++				"groupSource": {
++					"description": "Optional. Disambiguates a monster's `group[0]` label against a specific `monsterGroup.source` when the same label exists under multiple sources.",
++					"type": "string"
++				},
