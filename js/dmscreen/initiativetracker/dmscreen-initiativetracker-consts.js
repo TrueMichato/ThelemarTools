@@ -51,6 +51,11 @@ export class InitiativeTrackerRowUtil {
 		return false;
 	}
 
+	/** Inverse of `isNonCombatantRow`. */
+	static isCombatantRow (row) {
+		return !InitiativeTrackerRowUtil.isNonCombatantRow(row);
+	}
+
 	/**
 	 * 5e "damage on save = half damage" rule: halve the magnitude, round down.
 	 * Sign is preserved so it works uniformly for healing halves too.

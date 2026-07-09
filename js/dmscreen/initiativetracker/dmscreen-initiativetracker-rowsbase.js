@@ -43,6 +43,11 @@ class _RenderableCollectionRowStatColData extends RenderableCollectionGenericRow
 
 /** @abstract */
 export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGenericRows {
+	// Non-combatant row predicates (`isNonCombatantRow` / `isCombatantRow`) live
+	// on `InitiativeTrackerRowUtil` in `./dmscreen-initiativetracker-consts.js`.
+	// Import that class and consult its `NON_COMBATANT_FLAGS` list when adding
+	// new marker types (lair actions, weather effects, hazards, timers, ...).
+
 	constructor (
 		{
 			comp,

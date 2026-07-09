@@ -29,15 +29,26 @@ export class InitiativeTrackerSort {
 		return SortUtil.ascSort(rowA.id, rowB.id);
 	}
 
+	// Lair markers "lose ties" per DMG init-20 rule: within the same initiative
+	//   value, markers always sort after non-marker rows regardless of sort dir.
+	static _sortRowsLairMarker (rowA, rowB) {
+		return SortUtil.ascSort(
+			rowA.entity?.isLairMarker ? 1 : 0,
+			rowB.entity?.isLairMarker ? 1 : 0,
+		);
+	}
+
 	static _sortRowsName ({sortDir}, rowA, rowB) {
 		return this._sortRowsNameBasic({sortDir}, rowA, rowB)
 			|| this._sortRowsOrdinal(rowA, rowB)
 			|| this._sortRowsInitiativeBasic({sortDir}, rowA, rowB)
+			|| this._sortRowsLairMarker(rowA, rowB)
 			|| this._sortRowsId(rowA, rowB); // Fallback on ID to guarantee stable sort
 	}
 
 	static _sortRowsInitiative ({sortDir}, rowA, rowB) {
 		return this._sortRowsInitiativeBasic({sortDir}, rowA, rowB)
+			|| this._sortRowsLairMarker(rowA, rowB)
 			|| this._sortRowsNameBasic({sortDir}, rowA, rowB)
 			|| this._sortRowsOrdinal(rowA, rowB)
 			|| this._sortRowsId(rowA, rowB); // Fallback on ID to guarantee stable sort

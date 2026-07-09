@@ -27,6 +27,7 @@ import {
 } from "./dmscreen-initiativetracker-rowstatebuilder.js";
 import {InitiativeTrackerDefaultParty} from "./dmscreen-initiativetracker-defaultparty.js";
 import {ListUtilBestiary} from "../../utils-list-bestiary.js";
+import {InitiativeTrackerLairMarkers} from "./dmscreen-initiativetracker-lairmarkers.js";
 
 // TODO(Future) refactor to subclass `DmScreenPanelAppBase`; move state to `_comp`
 export class InitiativeTracker extends BaseComponent {
@@ -57,6 +58,14 @@ export class InitiativeTracker extends BaseComponent {
 		this._selectionHooks = [];
 		this._hpApplyUndoStack = [];
 		this._selectionBarRefs = null;
+
+		// region Lair-action markers
+		this._lairGroupCache = new Map(); // hash -> {legGroup, monName}
+		this._lairGroupPendingLoads = new Map(); // hash -> Promise
+		this._lairRowMonsterInfo = new Map(); // rowId -> {mon, groupHash}
+		this._dismissedLairGroupHashes = new Set(); // session-only, not persisted
+		this._isLairReconciling = false;
+		// endregion
 	}
 
 	/* -------------------------------------------- */
@@ -259,6 +268,12 @@ export class InitiativeTracker extends BaseComponent {
 			this._sendStateToClientsDebounced();
 		};
 		this._addHookAllBase(this._doUpdateExternalStates);
+
+		this._addHookBase("rows", () => { this.pReconcileLairMarkers().catch(e => setTimeout(() => { throw e; })); });
+		this._addHookBase("autoAddLairActions", () => { this.pReconcileLairMarkers().catch(e => setTimeout(() => { throw e; })); });
+		// Initial reconciliation, in case loaded saved state contains lair-eligible creatures without markers,
+		//   or has stale markers whose creature refs were removed while the panel was closed.
+		this.pReconcileLairMarkers().catch(e => setTimeout(() => { throw e; }));
 
 		this._viewRowsActive = new InitiativeTrackerRowDataViewActive({
 			comp: this,
@@ -704,9 +719,10 @@ export class InitiativeTracker extends BaseComponent {
 				if (!entity.isPlayerVisible) return null;
 
 				const isMon = !!entity.source;
+				const isLairMarker = !!entity.isLairMarker;
 
 				const out = {
-					name: entity.name,
+					name: isLairMarker ? entity.displayName : entity.name,
 					initiative: entity.initiative,
 					isActive: entity.isActive,
 					conditions: entity.conditions || [],
@@ -726,6 +742,13 @@ export class InitiativeTracker extends BaseComponent {
 				};
 
 				if (entity.customName) out.customName = entity.customName;
+
+				if (isLairMarker) {
+					// Marker has no HP; force wound level to unknown so player view doesn't render a bar.
+					out.hpWoundLevel = -1;
+					if (this._state.playerInitShowOrdinals && entity.isShowOrdinal) out.ordinal = entity.ordinal;
+					return out;
+				}
 
 				if (isMon ? !!this._state.playerInitShowExactMonsterHp : !!this._state.playerInitShowExactPlayerHp) {
 					out.hpCurrent = entity.hpCurrent;
@@ -972,6 +995,7 @@ export class InitiativeTracker extends BaseComponent {
 		if (this._savedState.piHm != null) stateNxt.playerInitShowExactMonsterHp = this._savedState.piHm;
 		if (this._savedState.piV != null) stateNxt.playerInitHideNewMonster = this._savedState.piV;
 		if (this._savedState.piO != null) stateNxt.playerInitShowOrdinals = this._savedState.piO;
+		if (this._savedState.alA != null) stateNxt.autoAddLairActions = this._savedState.alA;
 		// endregion
 
 		this._proxyAssignSimple("state", stateNxt);
@@ -1001,6 +1025,7 @@ export class InitiativeTracker extends BaseComponent {
 			piHm: this._state.playerInitShowExactMonsterHp,
 			piV: this._state.playerInitHideNewMonster,
 			piO: this._state.playerInitShowOrdinals,
+			alA: this._state.autoAddLairActions,
 			c: (this._state.statsCols || [])
 				.map(data => InitiativeTrackerStatColumnDataSerializer.toSerial(data)),
 			// endregion
@@ -1041,6 +1066,7 @@ export class InitiativeTracker extends BaseComponent {
 			playerInitShowExactMonsterHp: false,
 			playerInitHideNewMonster: true,
 			playerInitShowOrdinals: false,
+			autoAddLairActions: true,
 			statsCols: [],
 			// endregion
 
@@ -1062,6 +1088,203 @@ export class InitiativeTracker extends BaseComponent {
 			// endregion
 		};
 	}
+
+	/* -------------------------------------------- */
+
+	// region Lair-action markers
+
+	async pReconcileLairMarkers () {
+		if (this._isLairReconciling) return;
+
+		this._isLairReconciling = true;
+		try {
+			await this._pReconcileLairMarkers_inner();
+		} finally {
+			this._isLairReconciling = false;
+		}
+	}
+
+	async _pReconcileLairMarkers_inner () {
+		const rows = this._state.rows || [];
+		const autoAddEnabled = !!this._state.autoAddLairActions;
+
+		// Resolve legendary groups for every non-marker row that has a source.
+		//   We do this even when auto-add is disabled, so that existing markers
+		//   can be reconciled (kept in sync / removed when refs disappear).
+		const monsterRows = rows.filter(r => !r.entity?.isLairMarker && r.entity?.source && r.entity?.name);
+		const hashByRowId = new Map();
+
+		await monsterRows
+			.pSerialAwaitMap(async row => {
+				await this._pResolveRowLegendaryGroup({row, hashByRowId});
+			});
+
+		const {rowsNxt, changed} = InitiativeTrackerLairMarkers.computeReconcileDiff({
+			rows,
+			monsterLegendaryGroupHashByRowId: hashByRowId,
+			legGroupCache: this._lairGroupCache,
+			autoAddEnabled,
+			dismissedHashes: this._dismissedLairGroupHashes,
+			fnMakeId: () => CryptUtil.uid(),
+		});
+
+		if (!changed) return;
+
+		this._state.rows = InitiativeTrackerSort.getSortedRows({
+			rows: rowsNxt,
+			sortBy: this._state.sort,
+			sortDir: this._state.dir,
+		});
+	}
+
+	async _pResolveRowLegendaryGroup ({row, hashByRowId}) {
+		const cached = this._lairRowMonsterInfo.get(row.id);
+		if (cached && cached.rowName === row.entity.name && cached.rowSource === row.entity.source) {
+			if (cached.groupHash) hashByRowId.set(row.id, cached.groupHash);
+			return;
+		}
+
+		const mon = await DmScreenUtil.pGetScaledCreature({
+			name: row.entity.name,
+			source: row.entity.source,
+			scaledCr: row.entity.scaledCr,
+			scaledSummonSpellLevel: row.entity.scaledSummonSpellLevel,
+			scaledSummonClassLevel: row.entity.scaledSummonClassLevel,
+		});
+
+		let groupHash = null;
+		if (mon?.legendaryGroup?.name && mon?.legendaryGroup?.source) {
+			groupHash = InitiativeTrackerLairMarkers.getGroupHash(mon.legendaryGroup);
+			await this._pEnsureLegendaryGroupLoaded({legendaryGroup: mon.legendaryGroup, monName: mon.name});
+			if (!InitiativeTrackerLairMarkers.hasTrackableContent(this._lairGroupCache.get(groupHash)?.legGroup)) {
+				groupHash = null;
+			}
+		}
+
+		this._lairRowMonsterInfo.set(row.id, {
+			rowName: row.entity.name,
+			rowSource: row.entity.source,
+			groupHash,
+		});
+
+		if (groupHash) hashByRowId.set(row.id, groupHash);
+	}
+
+	async _pEnsureLegendaryGroupLoaded ({legendaryGroup, monName}) {
+		const hash = InitiativeTrackerLairMarkers.getGroupHash(legendaryGroup);
+		if (!hash) return;
+
+		if (this._lairGroupCache.has(hash)) {
+			// Update parent monster name only if not yet set (first-arrival wins)
+			const entry = this._lairGroupCache.get(hash);
+			if (!entry.monName && monName) entry.monName = monName;
+			return;
+		}
+
+		if (this._lairGroupPendingLoads.has(hash)) {
+			await this._lairGroupPendingLoads.get(hash);
+			return;
+		}
+
+		const p = (async () => {
+			try {
+				const groupHashUrl = UrlUtil.URL_TO_HASH_BUILDER["legendaryGroup"](legendaryGroup);
+				const legGroup = await DataLoader.pCacheAndGet("legendaryGroup", legendaryGroup.source, groupHashUrl);
+				this._lairGroupCache.set(hash, {legGroup, monName});
+			} catch (e) {
+				// Loading failed — cache a null entry so we don't spin re-loading.
+				this._lairGroupCache.set(hash, {legGroup: null, monName});
+			} finally {
+				this._lairGroupPendingLoads.delete(hash);
+			}
+		})();
+		this._lairGroupPendingLoads.set(hash, p);
+		await p;
+	}
+
+	/**
+	 * Manual-add entry point (used by the row context menu).
+	 * @param {object} opts
+	 * @param {object} opts.rowEntity Entity object of the creature row.
+	 * @returns {Promise<boolean>} True on success (marker added).
+	 */
+	async pAddLairMarkerManualForRow ({rowEntity}) {
+		if (!rowEntity?.name || !rowEntity?.source) return false;
+
+		const mon = await DmScreenUtil.pGetScaledCreature({
+			name: rowEntity.name,
+			source: rowEntity.source,
+			scaledCr: rowEntity.scaledCr,
+			scaledSummonSpellLevel: rowEntity.scaledSummonSpellLevel,
+			scaledSummonClassLevel: rowEntity.scaledSummonClassLevel,
+		});
+		if (!mon?.legendaryGroup?.name || !mon?.legendaryGroup?.source) return false;
+
+		await this._pEnsureLegendaryGroupLoaded({legendaryGroup: mon.legendaryGroup, monName: mon.name});
+		const hash = InitiativeTrackerLairMarkers.getGroupHash(mon.legendaryGroup);
+		const cached = this._lairGroupCache.get(hash);
+		if (!InitiativeTrackerLairMarkers.hasTrackableContent(cached?.legGroup)) return false;
+
+		// If a marker for this group already exists, no-op.
+		if ((this._state.rows || []).some(r => r.entity?.isLairMarker && InitiativeTrackerLairMarkers.getGroupHash({name: r.entity.legendaryGroupName, source: r.entity.legendaryGroupSource}) === hash)) return false;
+
+		// Allow re-add after a shift-delete.
+		this._dismissedLairGroupHashes.delete(hash);
+
+		const marker = this._rowStateBuilderActive.pGetNewLairMarkerRowState({
+			legGroup: cached.legGroup,
+			monName: mon.name,
+			refRowIds: [],
+			isManual: true,
+		});
+		this._state.rows = InitiativeTrackerSort.getSortedRows({
+			rows: [...this._state.rows, marker],
+			sortBy: this._state.sort,
+			sortDir: this._state.dir,
+		});
+		return true;
+	}
+
+	/**
+	 * Called by the row-render layer when the DM shift-deletes an auto marker.
+	 * Suppresses re-creation of the marker for the rest of the session.
+	 */
+	dismissLairGroupForSession ({legendaryGroupName, legendaryGroupSource}) {
+		const hash = InitiativeTrackerLairMarkers.getGroupHash({name: legendaryGroupName, source: legendaryGroupSource});
+		if (hash) this._dismissedLairGroupHashes.add(hash);
+	}
+
+	/**
+	 * @param {object} rowEntity
+	 * @returns {Promise<{isEligible: boolean, isAlreadyTracked: boolean, monName: ?string, legendaryGroup: ?object}>}
+	 */
+	async pGetLairMarkerEligibilityForRow ({rowEntity}) {
+		const out = {isEligible: false, isAlreadyTracked: false, monName: null, legendaryGroup: null};
+		if (!rowEntity?.name || !rowEntity?.source) return out;
+
+		const mon = await DmScreenUtil.pGetScaledCreature({
+			name: rowEntity.name,
+			source: rowEntity.source,
+			scaledCr: rowEntity.scaledCr,
+			scaledSummonSpellLevel: rowEntity.scaledSummonSpellLevel,
+			scaledSummonClassLevel: rowEntity.scaledSummonClassLevel,
+		});
+		if (!mon?.legendaryGroup?.name || !mon?.legendaryGroup?.source) return out;
+
+		out.monName = mon.name;
+		out.legendaryGroup = mon.legendaryGroup;
+
+		await this._pEnsureLegendaryGroupLoaded({legendaryGroup: mon.legendaryGroup, monName: mon.name});
+		const hash = InitiativeTrackerLairMarkers.getGroupHash(mon.legendaryGroup);
+		if (!InitiativeTrackerLairMarkers.hasTrackableContent(this._lairGroupCache.get(hash)?.legGroup)) return out;
+
+		out.isEligible = true;
+		out.isAlreadyTracked = (this._state.rows || []).some(r => r.entity?.isLairMarker
+			&& InitiativeTrackerLairMarkers.getGroupHash({name: r.entity.legendaryGroupName, source: r.entity.legendaryGroupSource}) === hash);
+		return out;
+	}
+
+	// endregion
 
 	/* -------------------------------------------- */
 
