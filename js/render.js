@@ -9833,7 +9833,9 @@ class _RenderCompactBestiaryImplBase {
 	}
 
 	_getCommonHtmlParts_sizeTypeAlignment ({mon, renderer}) {
-		return `<tr><td colspan="6"><i>${Renderer.monster.getTypeAlignmentPart(mon, {renderer})}</i></td></tr>`;
+		const ptSizeType = `<tr><td colspan="6"><i>${Renderer.monster.getTypeAlignmentPart(mon, {renderer})}</i></td></tr>`;
+		const ptGroup = Renderer.monster.getPartOfMonsterGroupHtml(mon);
+		return `${ptSizeType}${ptGroup}`;
 	}
 
 	/* ----- */
@@ -10897,6 +10899,25 @@ Renderer.monster = class {
 		]
 			.filter(Boolean)
 			.join(" ");
+	}
+
+	// Emit a "Part of: <group>" pill row below the size/type/alignment line,
+	// but only when a resolvable `monsterGroup` entity exists (bare-string
+	// `mon.group[]` entries render nothing here). Requires the monsterGroup
+	// entity cache to be pre-warmed via
+	// `DataUtil.monster.pPreloadMonsterGroupEntities()` — degrades gracefully
+	// to "" when the cache isn't populated.
+	static getPartOfMonsterGroupHtml (mon) {
+		const mg = DataUtil.monster.getMonsterGroup(mon);
+		if (!mg?.name) return "";
+		const hash = UrlUtil.URL_TO_HASH_BUILDER["monsterGroup"](mg);
+		const hoverAttrs = Renderer.hover.getHoverElementAttributes({
+			page: "monsterGroup",
+			source: mg.source,
+			hash,
+			isFauxPage: true,
+		});
+		return `<tr><td colspan="6" class="rd__mon-group-link ve-muted ve-small">Part of: <a ${hoverAttrs}>${mg.name}</a></td></tr>`;
 	}
 
 	static _getInitiativePart_passive ({mon, initPassive}) {
@@ -12022,6 +12043,104 @@ Renderer.legendaryGroup = class {
 				legGroup.mythicEncounter ? {name: "As a Mythic Encounter", type: "entries", entries: legGroup.mythicEncounter} : null,
 			].filter(Boolean),
 		};
+	}
+};
+
+Renderer.monsterGroup = class {
+	static getCompactRenderedString (mg, opts) {
+		opts = opts || {};
+
+		const summary = Renderer.monsterGroup.getSummaryEntry(mg);
+		const membersEntry = Renderer.monsterGroup.getMembersEntry(mg);
+
+		const renderer = Renderer.get().setFirstSection(true);
+
+		return `
+		${Renderer.utils.getNameTr(mg, {isEmbeddedEntity: opts.isEmbeddedEntity, page: "monsterGroup"})}
+		<tr><td colspan="6" class="ve-pb-2">
+		${summary ? renderer.render(summary) : ""}
+		${membersEntry ? renderer.render(membersEntry) : ""}
+		</td></tr>
+		${Renderer.utils.getPageTr(mg)}`;
+	}
+
+	static getSummaryEntry (mg) {
+		if (!mg) return null;
+		const parts = [];
+		if (mg.entries?.length) parts.push({type: "entries", entries: mg.entries});
+		if (mg.signatureAbilities?.length) {
+			parts.push({
+				name: "Signature Abilities",
+				type: "entries",
+				entries: mg.signatureAbilities.map(ab => ({
+					type: "entries",
+					name: ab.name,
+					entries: ab.entries || [],
+				})),
+			});
+		}
+		if (!parts.length) return null;
+		return {type: "section", entries: parts};
+	}
+
+	static getMembersEntry (mg) {
+		if (!mg) return null;
+		// Use synchronous accessor; caller (bestiary page / hover popover)
+		// is responsible for pre-warming via DataUtil.monster.pPreloadMonsterGroupMembers.
+		const members = (DataUtil.monster.getMonsterGroupMembers(mg) || [])
+			.slice()
+			.sort((a, b) => SortUtil.ascSortLower(a.name, b.name));
+		if (!members.length) return null;
+
+		// Coordination with #738 (Compare Creatures): a small "Compare all"
+		// affordance that resolves the members' hashes and calls the public
+		// entry `RenderCompareCreatures.pOpenForUids`. Kept as raw HTML in
+		// the trailing entries slot so it renders inside the members block.
+		const nameEsc = mg.name.qq();
+		const sourceEsc = (mg.source || "").qq();
+		const ptCompare = members.length >= 2
+			? `<div class="ve-mt-2"><a class="ve-btn ve-btn-default ve-btn-xs" href="#" onclick="event.preventDefault(); Renderer.monsterGroup.pHandleClickCompareMembers('${nameEsc}', '${sourceEsc}');">Compare all members</a></div>`
+			: "";
+
+		return {
+			name: "Members",
+			type: "entries",
+			entries: [
+				{
+					type: "list",
+					style: "list-hang-notitle",
+					items: members.map(m => `{@creature ${m.name}|${m.source}}`),
+				},
+				...(ptCompare ? [ptCompare] : []),
+			],
+		};
+	}
+
+	// Compare-members handler. Invoked from the inline `onclick` in the
+	// members block. Deliberately lightweight — resolves member hashes and
+	// hands off to `RenderCompareCreatures.pOpenForUids`, which is loaded
+	// on the bestiary page.
+	static async pHandleClickCompareMembers (mgName, mgSource) {
+		try {
+			await DataUtil.monster.pPreloadMonsterGroupMembers();
+			const members = DataUtil.monster.getMonsterGroupMembers({name: mgName, source: mgSource});
+			if (!members?.length) return;
+			const hashes = members.map(m => m.hash).filter(Boolean);
+			if (hashes.length < 2) return;
+
+			// Compare view is only wired up on the bestiary page; fall back
+			// to a hash update so navigating there re-runs the compare hook.
+			if (typeof RenderCompareCreatures !== "undefined" && RenderCompareCreatures?.pOpenForUids) {
+				await RenderCompareCreatures.pOpenForUids(hashes);
+				return;
+			}
+			// Redirect to bestiary with compare fragment if we're elsewhere.
+			const compareFrag = `compare=${encodeURIComponent(hashes.join(","))}`;
+			window.location.href = `bestiary.html#${compareFrag}`;
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.error("Failed to open compare view for monster group members", e);
+		}
 	}
 };
 

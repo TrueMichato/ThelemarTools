@@ -269,6 +269,12 @@ class DataTypeLoaderLegendaryGroup extends DataTypeLoaderSingleSource {
 	_filename = "bestiary/legendarygroups.json";
 }
 
+class DataTypeLoaderMonsterGroup extends DataTypeLoaderSingleSource {
+	static PROPS = ["monsterGroup"];
+
+	_filename = "bestiary/monstergroups.json";
+}
+
 class DataTypeLoaderItemProperty extends DataTypeLoaderSingleSource {
 	static PROPS = ["itemProperty"];
 
@@ -1335,6 +1341,7 @@ export class DataLoader {
 		DataTypeLoaderSkill.register({fnRegister});
 		DataTypeLoaderSense.register({fnRegister});
 		DataTypeLoaderLegendaryGroup.register({fnRegister, dependencies: [new DataLoaderDependency({page: "legendaryGroupTemplate"})]});
+		DataTypeLoaderMonsterGroup.register({fnRegister});
 		DataTypeLoaderItemProperty.register({fnRegister});
 		DataTypeLoaderItemEntry.register({fnRegister});
 		DataTypeLoaderItemMastery.register({fnRegister});
