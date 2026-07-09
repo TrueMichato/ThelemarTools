@@ -351,11 +351,19 @@ class BestiaryPage extends ListPageMultiSource {
 			prereleaseDataSource: async () => {
 				const data = await PrereleaseUtil.pGetBrewProcessed();
 				await DataUtil.monster.pUpdatePreloadLegendaryGroupsPrerelease();
+				await DataUtil.monster.pUpdatePreloadMonsterGroupsPrerelease();
+				DataUtil.monster._invalidateMonsterGroupCaches();
+				await DataUtil.monster.pPreloadMonsterGroupEntities();
+				await DataUtil.monster.pPreloadMonsterGroupMembers();
 				return data;
 			},
 			brewDataSource: async () => {
 				const data = await BrewUtil2.pGetBrewProcessed();
 				await DataUtil.monster.pUpdatePreloadLegendaryGroupsBrew();
+				await DataUtil.monster.pUpdatePreloadMonsterGroupsBrew();
+				DataUtil.monster._invalidateMonsterGroupCaches();
+				await DataUtil.monster.pPreloadMonsterGroupEntities();
+				await DataUtil.monster.pPreloadMonsterGroupMembers();
 				return data;
 			},
 
@@ -602,7 +610,15 @@ class BestiaryPage extends ListPageMultiSource {
 	async _pOnLoad_pPreDataLoad () {
 		this._encounterBuilder.initUi();
 		await DataUtil.monster.pPreloadLegendaryGroupsSite();
+		await DataUtil.monster.pPreloadMonsterGroupsSite();
+		await DataUtil.monster.pPreloadMonsterGroupEntities();
 		this._bindProfDiceHandlers();
+	}
+
+	async _pOnLoad_pPostLoad_monsterGroupMembers () {
+		// Populated after the main bestiary list has loaded, so the reverse
+		// index picks up every creature. Non-fatal on error.
+		try { await DataUtil.monster.pPreloadMonsterGroupMembers(); } catch (e) { /* swallow */ }
 	}
 
 	async _pOnLoad_pPreDataAdd () {
@@ -613,6 +629,8 @@ class BestiaryPage extends ListPageMultiSource {
 
 	async _pOnLoad_pPostLoad () {
 		await encounterShapesLookup.pInit();
+
+		await this._pOnLoad_pPostLoad_monsterGroupMembers();
 
 		this._encounterBuilder.setStateFrom(await StorageUtil.pGetForPage(_BestiaryConsts.STORAGE_KEY_ENCOUNTER_BUILDER_UI_STATE));
 

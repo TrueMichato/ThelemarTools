@@ -2558,6 +2558,7 @@ Parser.CAT_ID_FACILITY = 55;
 Parser.CAT_ID_VEHICLE_UPGRADE_OTHER = 56;
 Parser.CAT_ID_CROCHET_PATTERN = 57;
 Parser.CAT_ID_COMBAT_METHOD = 58;
+Parser.CAT_ID_MONSTER_GROUP = 59;
 
 Parser.CAT_ID_GROUPS = {
 	"optionalfeature": [
@@ -2643,6 +2644,7 @@ Parser.CAT_ID_TO_FULL[Parser.CAT_ID_SKILLS] = "Skill";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_SENSES] = "Sense";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_ITEM_MASTERY] = "Item Mastery";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_COMBAT_METHOD] = "Combat Method";
+Parser.CAT_ID_TO_FULL[Parser.CAT_ID_MONSTER_GROUP] = "Monster Group";
 
 Parser.pageCategoryToFull = function (catId) {
 	return Parser._parse_aToB(Parser.CAT_ID_TO_FULL, catId);
@@ -2697,6 +2699,7 @@ Parser.CAT_ID_TO_PROP[Parser.CAT_ID_LANGUAGE] = "language";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_BOOK] = "book";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_PAGE] = null;
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_LEGENDARY_GROUP] = "legendaryGroup";
+Parser.CAT_ID_TO_PROP[Parser.CAT_ID_MONSTER_GROUP] = "monsterGroup";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_CHAR_CREATION_OPTIONS] = "charoption";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_RECIPE] = "recipe";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_CROCHET_PATTERN] = "crochetPattern";
