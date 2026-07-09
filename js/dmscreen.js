@@ -21,6 +21,7 @@ import {TimerTrackerMoonSpriteLoader} from "./dmscreen/dmscreen-timetracker.js";
 import {
 	PanelContentManager_Counter,
 	PanelContentManager_CustomRandomTable,
+	PanelContentManager_DiceCalculator,
 	PanelContentManager_InitiativeTracker,
 	PanelContentManager_InitiativeTrackerCreatureViewer,
 	PanelContentManager_InitiativeTrackerPlayerViewV0,
@@ -1070,7 +1071,8 @@ class Panel {
 					const page = saved.c.p;
 					const source = saved.c.s;
 					const hash = saved.c.u;
-					await panel.doPopulate_Stats(page, source, hash, skipSetTab, saved.r);
+					const drawnIxs = Array.isArray(saved.c.d) ? saved.c.d : undefined;
+					await panel.doPopulate_Stats(page, source, hash, skipSetTab, saved.r, drawnIxs);
 					handleTabRenamed(panel);
 					return panel;
 				}
@@ -1201,8 +1203,9 @@ class Panel {
 		});
 	}
 
-	doPopulate_Stats (page, source, hash, skipSetTab, title) { // FIXME skipSetTab is never used
+	doPopulate_Stats (page, source, hash, skipSetTab, title, drawnIxs) { // FIXME skipSetTab is never used
 		const meta = {p: page, s: source, u: hash};
+		if (page === UrlUtil.PG_DECKS && Array.isArray(drawnIxs) && drawnIxs.length) meta.d = drawnIxs.slice();
 		const ix = this.setTabLoading(
 			PANEL_TYP_STATS,
 			meta,
@@ -1224,7 +1227,24 @@ class Panel {
 			eleContentStats.appends(fn(it));
 
 			const fnBind = Renderer.hover.getFnBindListenersCompact(page);
-			if (fnBind) fnBind(it, eleContentStats);
+			if (fnBind) {
+				// Per-page bind context. For decks we thread drawn-card persistence
+				// through to `Renderer.deck.bindListenersCompact` so the DM Screen tile
+				// survives browser refresh.
+				const bindOpts = page === UrlUtil.PG_DECKS
+					? {
+						deckState: {
+							initialDrawn: meta.d || [],
+							onChange: nextIxs => {
+								if (Array.isArray(nextIxs) && nextIxs.length) meta.d = nextIxs.slice();
+								else delete meta.d;
+								this.board?.doSaveStateDebounced?.();
+							},
+						},
+					}
+					: undefined;
+				fnBind(it, eleContentStats, bindOpts);
+			}
 
 			Renderer.statblockCollapse.apply(eleContentStats);
 
@@ -2536,6 +2556,9 @@ class Panel {
 						p: contentMeta.p,
 						s: contentMeta.s,
 						u: contentMeta.u,
+						...(contentMeta.p === UrlUtil.PG_DECKS && Array.isArray(contentMeta.d) && contentMeta.d.length
+							? {d: contentMeta.d.slice()}
+							: {}),
 					},
 				};
 			case PANEL_TYP_CREATURE_SCALED_CR:
@@ -3087,6 +3110,14 @@ class AddMenuSpecialTab extends AddMenuTab {
 			const btnCounter = ee`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`.appendTo(wrpCounter);
 			btnCounter.onn("click", async () => {
 				const pcm = new PanelContentManager_Counter({board: this._board, panel: this.menu.pnl});
+				await pcm.pDoPopulate();
+				this.menu.doClose();
+			});
+
+			const wrpDiceCalculator = ee`<div class="ve-ui-modal__row"><span>Dice Calculator</span></div>`.appendTo(eleTab);
+			const btnDiceCalculator = ee`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`.appendTo(wrpDiceCalculator);
+			btnDiceCalculator.onn("click", async () => {
+				const pcm = new PanelContentManager_DiceCalculator({board: this._board, panel: this.menu.pnl});
 				await pcm.pDoPopulate();
 				this.menu.doClose();
 			});

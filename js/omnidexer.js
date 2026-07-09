@@ -1384,6 +1384,19 @@ class IndexableLegendaryGroups extends IndexableFile {
 	}
 }
 
+class IndexableMonsterGroups extends IndexableFile {
+	constructor () {
+		super({
+			category: Parser.CAT_ID_MONSTER_GROUP,
+			file: "bestiary/monstergroups.json",
+			listProp: "monsterGroup",
+			baseUrl: "monsterGroup",
+			isHover: true,
+			isFauxPage: true,
+		});
+	}
+}
+
 Omnidexer.TO_INDEX = [
 	new IndexableFileBackgrounds(),
 	new IndexableFileConditions(),
@@ -1433,6 +1446,7 @@ Omnidexer.TO_INDEX = [
 	new IndexableFileDecks(),
 	new IndexableFileFacilities(),
 	new IndexableLegendaryGroups(),
+	new IndexableMonsterGroups(),
 
 	new IndexableFileVehicles(),
 	new IndexableFileVehicles_UpgradeShip(),

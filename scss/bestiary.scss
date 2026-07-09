@@ -337,6 +337,18 @@
 	// full-width column. Rationale: users triggering "Printer View" or Ctrl+P expect
 	// a printable statblock — fluff/lore/images are supplementary reading content that
 	// bloats page count and rarely renders well on paper. If a user wants the fluff
+	// region Monster group "Part of:" pill
+	// Rendered by `Renderer.monster.getPartOfMonsterGroupHtml` as a small
+	// muted row directly under the size/type/alignment line. Only appears
+	// when a resolvable `monsterGroup` entity exists — bare-string groups
+	// stay in the filter panel and don't get this affordance.
+	.rd__mon-group-link {
+		font-size: 0.9em;
+		font-style: italic;
+		padding-top: 2px;
+	}
+	// endregion
+
 	// printed, they can disable wide mode (or switch to the Info tab in classic mode)
 	// and print from there. Do not remove this rule without discussing the change.
 	@media print {
