@@ -4,6 +4,7 @@ import {
 } from "./dmscreen-initiativetracker-statcolumns.js";
 import {DmScreenUtil} from "../dmscreen-util.js";
 import {InitiativeTrackerSort} from "./dmscreen-initiativetracker-sort.js";
+import {InitiativeTrackerLairMarkers} from "./dmscreen-initiativetracker-lairmarkers.js";
 
 /** @abstract */
 class _InitiativeTrackerRowStateBuilderBase {
@@ -126,6 +127,28 @@ export class InitiativeTrackerRowStateBuilderActive extends _InitiativeTrackerRo
 	async pGetScaledCreature ({isMon, name, source, scaledCr, scaledSummonSpellLevel, scaledSummonClassLevel}) {
 		if (!isMon) return null;
 		return DmScreenUtil.pGetScaledCreature({name, source, scaledCr, scaledSummonSpellLevel, scaledSummonClassLevel});
+	}
+
+	/* -------------------------------------------- */
+
+	/**
+	 * Build a lair-marker row for a legendary group.
+	 * @param {object} opts
+	 * @param {object} opts.legGroup Resolved legendary group entry.
+	 * @param {string} opts.monName Parent monster display name (first creature
+	 *   to trigger the marker, used for the "Lair (X)" label).
+	 * @param {string[]} [opts.refRowIds] Ids of creature rows referencing this
+	 *   marker.
+	 * @param {boolean} [opts.isManual] True when the DM created it via the
+	 *   right-click "Add Lair Actions" menu.
+	 */
+	pGetNewLairMarkerRowState ({legGroup, monName, refRowIds = [], isManual = false}) {
+		return InitiativeTrackerLairMarkers[isManual ? "buildManualMarker" : "_buildAutoMarker"]({
+			legGroup,
+			monName,
+			refRowIds,
+			fnMakeId: () => CryptUtil.uid(),
+		});
 	}
 
 	/* -------------------------------------------- */
