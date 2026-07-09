@@ -1,0 +1,61 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://raw.githubusercontent.com/5etools-mirror-3/5etools-utils/main/schema/site/bestiary/monstergroups.json",
+	"version": "1.0.0",
+	"type": "object",
+	"$defs": {
+		"signatureAbility": {
+			"type": "object",
+			"properties": {
+				"name": {"type": "string"},
+				"entries": {
+					"$ref": "../util.json#/$defs/entryArray"
+				}
+			},
+			"required": ["name", "entries"],
+			"additionalProperties": false
+		},
+		"monsterGroup": {
+			"type": "object",
+			"properties": {
+				"name": {"type": "string"},
+				"source": {"$ref": "../util.json#/$defs/source"},
+				"page": {"type": "integer"},
+				"srd": {"$ref": "../util.json#/$defs/srd"},
+				"srd52": {"$ref": "../util.json#/$defs/srd"},
+				"basicRules": {"type": "boolean"},
+				"basicRules2024": {"type": "boolean"},
+				"additionalSources": {"$ref": "../util.json#/$defs/additionalSources"},
+				"otherSources": {"$ref": "../util.json#/$defs/otherSources"},
+				"entries": {"$ref": "../util.json#/$defs/entryArray"},
+				"signatureAbilities": {
+					"type": "array",
+					"items": {"$ref": "#/$defs/signatureAbility"},
+					"minItems": 1,
+					"uniqueItems": true
+				},
+				"traitTags": {
+					"type": "array",
+					"items": {"type": "string"},
+					"minItems": 1,
+					"uniqueItems": true
+				},
+				"reprintedAs": {"$ref": "../util.json#/$defs/reprintedAs"},
+				"hasFluff": {"type": "boolean"},
+				"hasFluffImages": {"type": "boolean"},
+				"_copy": {"$ref": "../util.json#/$defs/copyBlock"}
+			},
+			"required": ["name", "source"],
+			"additionalProperties": false
+		}
+	},
+	"properties": {
+		"monsterGroup": {
+			"type": "array",
+			"items": {"$ref": "#/$defs/monsterGroup"},
+			"uniqueItems": true
+		},
+		"_meta": {"$ref": "../util.json#/$defs/metaBlock"}
+	},
+	"additionalProperties": false
+}
