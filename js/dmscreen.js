@@ -20,6 +20,7 @@ import {DmMapper} from "./dmscreen/dmscreen-mapper.js";
 import {TimerTrackerMoonSpriteLoader} from "./dmscreen/dmscreen-timetracker.js";
 import {
 	PanelContentManager_Counter,
+	PanelContentManager_CustomRandomTable,
 	PanelContentManager_DiceCalculator,
 	PanelContentManager_InitiativeTracker,
 	PanelContentManager_InitiativeTrackerCreatureViewer,
@@ -3117,6 +3118,14 @@ class AddMenuSpecialTab extends AddMenuTab {
 			const btnDiceCalculator = ee`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`.appendTo(wrpDiceCalculator);
 			btnDiceCalculator.onn("click", async () => {
 				const pcm = new PanelContentManager_DiceCalculator({board: this._board, panel: this.menu.pnl});
+				await pcm.pDoPopulate();
+				this.menu.doClose();
+			});
+
+			const wrpRandomTable = ee`<div class="ve-ui-modal__row"><span class="ve-help" title="A user-editable random table — add rows, then click Roll to pick one. Row text supports content tags like {@spell fireball} and {@creature goblin}.">Random Table</span></div>`.appendTo(eleTab);
+			const btnRandomTable = ee`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`.appendTo(wrpRandomTable);
+			btnRandomTable.onn("click", async () => {
+				const pcm = new PanelContentManager_CustomRandomTable({board: this._board, panel: this.menu.pnl});
 				await pcm.pDoPopulate();
 				this.menu.doClose();
 			});

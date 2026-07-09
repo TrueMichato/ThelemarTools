@@ -1,0 +1,132 @@
+@use "../vars/vars";
+
+@layer vetools {
+	.dm-crandom__ {
+		&root {
+			container-type: inline-size;
+		}
+
+		&header {
+			border-bottom: 1px solid rgb(128 128 128 / 35%);
+			gap: 6px;
+		}
+
+		&title {
+			flex: 1;
+			font-weight: 600;
+			background: transparent;
+		}
+
+		&btn-mode {
+			min-width: 56px;
+		}
+
+		&rows {
+			min-height: 40px;
+			flex: 1;
+			gap: 2px;
+		}
+
+		&row {
+			border-radius: 3px;
+			padding-left: 4px;
+			padding-right: 4px;
+			gap: 6px;
+			transition: background-color 0.35s ease-out;
+		}
+
+		&row--edit {
+			align-items: center;
+		}
+
+		&row--view {
+			align-items: flex-start;
+			padding-top: 4px;
+			padding-bottom: 4px;
+			cursor: default;
+		}
+
+		&row--last {
+			background-color: rgb(255 214 88 / 18%);
+		}
+
+		&row--rolled {
+			animation: dm-crandom-flash 1.4s ease-out 1;
+		}
+
+		&row-num {
+			min-width: 26px;
+			font-variant-numeric: tabular-nums;
+			flex-shrink: 0;
+			user-select: none;
+		}
+
+		&row-text {
+			flex: 1;
+			word-break: normal;
+			overflow-wrap: anywhere;
+			line-height: 1.35;
+		}
+
+		&row-text--empty {
+			font-style: italic;
+			opacity: 0.55;
+			user-select: none;
+		}
+
+		&row-ipt {
+			flex: 1;
+			background: transparent;
+			resize: vertical;
+			min-height: 24px;
+			font-family: inherit;
+		}
+
+		&btn-del {
+			flex-shrink: 0;
+		}
+
+		&btn-add {
+			min-width: 100px;
+		}
+
+		&btn-roll {
+			min-width: 120px;
+		}
+
+		&empty {
+			font-size: 0.9em;
+		}
+
+		&footer {
+			border-top: 1px solid rgb(128 128 128 / 35%);
+			gap: 6px;
+		}
+	}
+
+	@keyframes dm-crandom-flash {
+		0% {
+			background-color: rgb(255 214 88 / 85%);
+			box-shadow: 0 0 0 2px rgb(255 214 88 / 85%);
+		}
+		60% {
+			background-color: rgb(255 214 88 / 55%);
+			box-shadow: 0 0 0 2px rgb(255 214 88 / 45%);
+		}
+		100% {
+			background-color: rgb(255 214 88 / 18%);
+			box-shadow: 0 0 0 0 transparent;
+		}
+	}
+
+	.ve-night-mode .dm-crandom__ {
+		&title,
+		&row-ipt {
+			background: transparent;
+		}
+
+		&row--last {
+			background-color: rgb(255 214 88 / 12%);
+		}
+	}
+}
