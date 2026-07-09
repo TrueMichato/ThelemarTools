@@ -1,6 +1,7 @@
 import {
 	PANEL_TYP_ADVENTURE_DYNAMIC_MAP,
 	PANEL_TYP_COUNTER,
+	PANEL_TYP_DICE_CALCULATOR,
 	PANEL_TYP_INITIATIVE_TRACKER, PANEL_TYP_INITIATIVE_TRACKER_CREATURE_VIEWER,
 	PANEL_TYP_INITIATIVE_TRACKER_PLAYER_V0,
 	PANEL_TYP_INITIATIVE_TRACKER_PLAYER_V1, PANEL_TYP_JOURNEY_TRACKER, PANEL_TYP_MONEY_CONVERTER, PANEL_TYP_PARTY_TRACKER, PANEL_TYP_TEXTBOX, PANEL_TYP_TIME_TRACKER, PANEL_TYP_UNIT_CONVERTER,
@@ -9,6 +10,7 @@ import {InitiativeTracker} from "./initiativetracker/dmscreen-initiativetracker.
 import {InitiativeTrackerPlayerV0, InitiativeTrackerPlayerV1} from "./dmscreen-playerinitiativetracker.js";
 import {InitiativeTrackerCreatureViewer} from "./dmscreen-initiativetrackercreatureviewer.js";
 import {Counter} from "./dmscreen-counter.js";
+import {DiceCalculator} from "./dmscreen-dicecalculator.js";
 import {NoteBox} from "./dmscreen-notebox.js";
 import {UnitConverter} from "./dmscreen-unitconverter.js";
 import {MoneyConverter} from "./dmscreen-moneyconverter.js";
@@ -185,6 +187,17 @@ export class PanelContentManager_Counter extends _PanelContentManager {
 
 	_getPanelApp ({state}) {
 		return Counter.getPanelApp({board: this._board, savedState: state});
+	}
+}
+
+export class PanelContentManager_DiceCalculator extends _PanelContentManager {
+	static _PANEL_TYPE = PANEL_TYP_DICE_CALCULATOR;
+	static _TITLE = "Dice Calculator";
+
+	static _ = this._register();
+
+	_getPanelApp ({state}) {
+		return DiceCalculator.getPanelApp({board: this._board, savedState: state});
 	}
 }
 
