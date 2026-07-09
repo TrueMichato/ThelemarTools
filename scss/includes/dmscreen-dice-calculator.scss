@@ -1,0 +1,157 @@
+@use "../vars/vars";
+@use "../vars/vars-night";
+
+@layer vetools {
+	.dm-dicecalc__ {
+		&root {
+			overflow-y: auto;
+		}
+
+		&inner {
+			min-width: 0;
+		}
+
+		&display {
+			font-size: 1.15rem;
+			font-family: monospace;
+			padding: 6px 8px;
+			font-weight: 600;
+
+			&--error {
+				border-color: vars.$rgb-name-red;
+				box-shadow: 0 0 0 2px rgb(200 40 40 / 30%);
+			}
+		}
+
+		&mode-row {
+			flex-wrap: wrap;
+			gap: 4px;
+		}
+
+		&mode-btn {
+			min-width: 60px;
+		}
+
+		&mode-hint {
+			font-size: 11px;
+		}
+
+		&dice-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+			gap: 6px;
+		}
+
+		&die-btn {
+			min-height: 48px;
+			font-size: 1.25rem;
+			font-weight: 700;
+			font-family: monospace;
+			padding: 6px 4px;
+			letter-spacing: 0.5px;
+		}
+
+		&mod-row {
+			gap: 6px;
+		}
+
+		&mod-btn {
+			min-width: 40px;
+			min-height: 36px;
+		}
+
+		&mod-ipt {
+			max-width: 70px;
+			font-size: 1rem;
+			font-weight: 600;
+		}
+
+		&action-row {
+			gap: 6px;
+		}
+
+		&act-btn {
+			flex: 0 0 auto;
+			min-height: 44px;
+			min-width: 60px;
+		}
+
+		&roll-btn {
+			flex: 1 1 auto;
+			min-height: 44px;
+			font-size: 1.15rem;
+			font-weight: 700;
+			letter-spacing: 0.5px;
+		}
+
+		&hist {
+			overflow-y: auto;
+			min-height: 0;
+			flex: 1 1 auto;
+		}
+
+		&hist-empty {
+			font-size: 12px;
+		}
+
+		&hist-item {
+			border-top: 1px solid vars.$rgb-border-grey--trans;
+			gap: 4px;
+			cursor: pointer;
+
+			&:first-child {
+				border-top: 0;
+			}
+
+			&:hover {
+				background: vars.$rgb-border-grey--trans-muted;
+			}
+		}
+
+		&hist-expr {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			font-size: 12px;
+			cursor: default;
+		}
+
+		&hist-mode {
+			display: inline-block;
+			padding: 0 4px;
+			border-radius: 3px;
+			background: vars.$rgb-border-grey--trans;
+			font-size: 10px;
+		}
+
+		&hist-total {
+			font-size: 1rem;
+			min-width: 2.5em;
+			text-align: right;
+		}
+
+		&hist-btn {
+			padding: 2px 6px;
+		}
+	}
+
+	.ve-night-mode .dm-dicecalc__ {
+		&hist-item {
+			border-top-color: vars-night.$rgb-border-grey--night;
+
+			&:hover {
+				background: #ffffff10;
+			}
+		}
+
+		&hist-mode {
+			background: #4a4a4a;
+		}
+
+		&display--error {
+			border-color: vars-night.$rgb-name-red--night;
+			box-shadow: 0 0 0 2px rgb(220 60 60 / 40%);
+		}
+	}
+}
