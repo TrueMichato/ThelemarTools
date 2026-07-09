@@ -1,4 +1,4 @@
-import {InitiativeTrackerConst} from "./dmscreen-initiativetracker-consts.js";
+import {InitiativeTrackerConst, InitiativeTrackerRowUtil} from "./dmscreen-initiativetracker-consts.js";
 import {InitiativeTrackerNetworking} from "./dmscreen-initiativetracker-networking.js";
 import {InitiativeTrackerSettings} from "./dmscreen-initiativetracker-settings.js";
 import {InitiativeTrackerSettingsImport} from "./dmscreen-initiativetracker-importsettings.js";
@@ -52,6 +52,13 @@ export class InitiativeTracker extends BaseComponent {
 		this._doUpdateExternalStates = null;
 		this._sendStateToClientsDebounced = null;
 
+		// Multi-select bulk-HP state (non-persisted, session-only).
+		this._selectedRowIds = new Set();
+		this._lastSelectedRowId = null;
+		this._selectionHooks = [];
+		this._hpApplyUndoStack = [];
+		this._selectionBarRefs = null;
+
 		// region Lair-action markers
 		this._lairGroupCache = new Map(); // hash -> {legGroup, monName}
 		this._lairGroupPendingLoads = new Map(); // hash -> Promise
@@ -60,6 +67,151 @@ export class InitiativeTracker extends BaseComponent {
 		this._isLairReconciling = false;
 		// endregion
 	}
+
+	/* -------------------------------------------- */
+	// region Multi-select bulk-HP API
+
+	isRowSelected (rowId) { return this._selectedRowIds.has(rowId); }
+
+	getSelectedRowIds () { return [...this._selectedRowIds]; }
+
+	_addHookBaseSelection (fn) { this._selectionHooks.push(fn); }
+	_removeHookBaseSelection (fn) {
+		const ix = this._selectionHooks.indexOf(fn);
+		if (~ix) this._selectionHooks.splice(ix, 1);
+	}
+	_fireSelectionHooks () { this._selectionHooks.forEach(fn => { try { fn(); } catch (e) { /* swallow */ } }); }
+
+	toggleRowSelection (rowId, {isShift = false} = {}) {
+		if (isShift && this._lastSelectedRowId && this._lastSelectedRowId !== rowId) {
+			const rows = this._state.rows.filter(r => !InitiativeTrackerRowUtil.isNonCombatantRow(r));
+			const ixAnchor = rows.findIndex(r => r.id === this._lastSelectedRowId);
+			const ixTarget = rows.findIndex(r => r.id === rowId);
+			if (~ixAnchor && ~ixTarget) {
+				const [lo, hi] = ixAnchor < ixTarget ? [ixAnchor, ixTarget] : [ixTarget, ixAnchor];
+				const shouldSelect = !this._selectedRowIds.has(rowId);
+				for (let i = lo; i <= hi; ++i) {
+					if (shouldSelect) this._selectedRowIds.add(rows[i].id);
+					else this._selectedRowIds.delete(rows[i].id);
+				}
+				this._lastSelectedRowId = rowId;
+				this._fireSelectionHooks();
+				this._updateSelectionBar();
+				return;
+			}
+		}
+		if (this._selectedRowIds.has(rowId)) this._selectedRowIds.delete(rowId);
+		else this._selectedRowIds.add(rowId);
+		this._lastSelectedRowId = rowId;
+		this._fireSelectionHooks();
+		this._updateSelectionBar();
+	}
+
+	clearSelection () {
+		if (!this._selectedRowIds.size) return;
+		this._selectedRowIds.clear();
+		this._lastSelectedRowId = null;
+		this._fireSelectionHooks();
+		this._updateSelectionBar();
+	}
+
+	_pruneSelection () {
+		const validIds = new Set(this._state.rows.map(r => r.id));
+		let changed = false;
+		for (const id of [...this._selectedRowIds]) {
+			if (!validIds.has(id)) { this._selectedRowIds.delete(id); changed = true; }
+		}
+		if (this._lastSelectedRowId && !validIds.has(this._lastSelectedRowId)) {
+			this._lastSelectedRowId = null;
+			changed = true;
+		}
+		// Also prune undo snapshots pointing at now-gone rows so undo can't
+		// resurrect state for deleted creatures.
+		this._hpApplyUndoStack = this._hpApplyUndoStack
+			.map(entry => ({
+				...entry,
+				snapshots: entry.snapshots.filter(s => validIds.has(s.rowId)),
+			}))
+			.filter(entry => entry.snapshots.length);
+		if (changed) this._fireSelectionHooks();
+		this._updateSelectionBar();
+	}
+
+	_applyHpToSelection ({raw, isHalf}) {
+		if (this._state.isLocked) return {ok: false, msg: "Tracker is locked."};
+		const trimmed = (raw ?? "").trim();
+		if (!trimmed) return {ok: false, msg: "Enter an expression, e.g. -30, +12, =15, or 8d6."};
+
+		const selectedIds = this.getSelectedRowIds();
+		if (!selectedIds.length) return {ok: false, msg: "No rows selected."};
+
+		// Bulk-bar convention (user-confirmed): bare unsigned number = damage.
+		// Rewrite `12` -> `-12` before parsing so downstream logic is unified.
+		let procRaw = trimmed;
+		const isSignedOrSet = /^[=+\-*/^]/.test(procRaw);
+		if (!isSignedOrSet) procRaw = `-${procRaw}`;
+
+		// Evaluate the expression ONCE against a placeholder prev of 0 so dice
+		// resolve to a single shared numeric magnitude, then apply that same
+		// magnitude to each selected row. Matches "one Fireball, one damage roll".
+		const parsed = UiUtil.getStrNumericModified(procRaw, 0, {isInt: true, fallbackOnNaN: null});
+		if (parsed?.next == null || !Number.isFinite(parsed.next)) return {ok: false, msg: "Could not parse expression."};
+
+		let sharedDelta = null;
+		let absoluteSet = null;
+		if (parsed.mode === "set") {
+			absoluteSet = parsed.next;
+		} else {
+			// parsed.delta is (next - 0) = the numeric magnitude with sign
+			sharedDelta = parsed.delta ?? parsed.next;
+			if (isHalf) sharedDelta = InitiativeTrackerRowUtil.getHalvedDelta(sharedDelta);
+		}
+
+		// Snapshot pre-apply values (only for currently-existing combatant rows)
+		// and build the new rows array in ONE mutation so the root rows-hook
+		// fires exactly once, keeping saves batched.
+		const idSet = new Set(selectedIds);
+		const snapshots = [];
+		const nextRows = this._state.rows.map(row => {
+			if (!idSet.has(row.id) || InitiativeTrackerRowUtil.isNonCombatantRow(row)) return row;
+			const cur = row.entity.hpCurrent;
+			const next = absoluteSet != null ? absoluteSet : ((cur ?? 0) + sharedDelta);
+			snapshots.push({rowId: row.id, hpCurrent: cur});
+			return {
+				...row,
+				entity: {...row.entity, hpCurrent: next},
+			};
+		});
+		if (!snapshots.length) return {ok: false, msg: "Selected rows are no longer present."};
+
+		this._hpApplyUndoStack.push({snapshots, raw: trimmed, mode: parsed.mode, isHalf: !!isHalf});
+		while (this._hpApplyUndoStack.length > 5) this._hpApplyUndoStack.shift();
+
+		this._state.rows = nextRows;
+		this._updateSelectionBar();
+		return {ok: true, count: snapshots.length};
+	}
+
+	_undoLastHpApply () {
+		const entry = this._hpApplyUndoStack.pop();
+		if (!entry) return {ok: false, msg: "Nothing to undo."};
+		const byId = new Map(entry.snapshots.map(s => [s.rowId, s.hpCurrent]));
+		const nextRows = this._state.rows.map(row => {
+			if (!byId.has(row.id)) return row;
+			return {...row, entity: {...row.entity, hpCurrent: byId.get(row.id)}};
+		});
+		this._state.rows = nextRows;
+		this._updateSelectionBar();
+		return {ok: true, count: byId.size};
+	}
+
+	_updateSelectionBar () {
+		if (!this._selectionBarRefs) return;
+		this._selectionBarRefs.update();
+	}
+
+	// endregion
+	/* -------------------------------------------- */
 
 	getState () {
 		return this._getSerializedState();
@@ -130,12 +282,83 @@ export class InitiativeTracker extends BaseComponent {
 			networking: this._networking,
 			rowStateBuilder: this._rowStateBuilderActive,
 		});
+
+		this._render_getWrpSelectionBar().appendTo(wrpTracker);
+
 		this._viewRowsActiveMeta = this._viewRowsActive.getRenderedView();
 		this._viewRowsActiveMeta.ele.appendTo(wrpTracker);
+
+		// Prune selection + undo snapshots whenever the row set changes
+		// (delete / reset / import). Runs after the view's own rows hook.
+		this._addHookBase("rows", () => this._pruneSelection());
 
 		this._render_getWrpFooter({wrpTracker, doUpdateExternalStates: this._doUpdateExternalStates}).appendTo(wrpTracker);
 
 		return wrpTracker;
+	}
+
+	_render_getWrpSelectionBar () {
+		const iptExpr = ee`<input type="text" class="ve-form-control ve-input-xs dm-init-lockable dm-init__sel-bar-ipt" placeholder="e.g. 30 (damage), +12, =15, 8d6" title="Bare number = damage. Use + to heal, = to set. Dice supported.">`
+			.onn("keydown", evt => {
+				if (evt.key === "Enter") { evt.preventDefault(); doApply(); } else if (evt.key === "Escape") iptExpr.blur();
+			});
+
+		const cbHalf = ee`<input type="checkbox" class="dm-init-lockable" title="Halve the numeric damage/heal (5e save-for-half). Ignored for =X.">`;
+
+		const btnApply = ee`<button class="ve-btn ve-btn-danger ve-btn-xs dm-init-lockable" title="Apply HP change to all selected rows">Apply</button>`
+			.onn("click", () => doApply());
+
+		const btnUndo = ee`<button class="ve-btn ve-btn-default ve-btn-xs dm-init-lockable" title="Undo last bulk HP apply"><span class="glyphicon glyphicon-repeat" style="transform: scaleX(-1);"></span> Undo</button>`
+			.onn("click", () => {
+				const res = this._undoLastHpApply();
+				if (!res.ok) return;
+				iptExpr.focus();
+			});
+
+		const btnClear = ee`<button class="ve-btn ve-btn-default ve-btn-xs" title="Clear selection"><span class="glyphicon glyphicon-remove"></span></button>`
+			.onn("click", () => this.clearSelection());
+
+		const dispCount = ee`<span class="dm-init__sel-bar-count"></span>`;
+		const dispMsg = ee`<span class="dm-init__sel-bar-msg ve-muted ve-ml-2"></span>`;
+
+		const doApply = () => {
+			const raw = iptExpr.val();
+			const isHalf = !!cbHalf.prop("checked");
+			const res = this._applyHpToSelection({raw, isHalf});
+			if (!res.ok) {
+				dispMsg.txt(res.msg || "");
+				dispMsg.addClass("ve-error-color");
+				return;
+			}
+			dispMsg.removeClass("ve-error-color");
+			dispMsg.txt(`Applied to ${res.count}.`);
+			iptExpr.val("");
+			iptExpr.focus();
+		};
+
+		const wrp = ee`<div class="dm-init__wrp-selection-bar ve-flex-v-center ve-mx-2 ve-my-1">
+			${dispCount}
+			${iptExpr}
+			<label class="ve-flex-v-center ve-ml-2 ve-mb-0" title="Half damage on save (5e)">${cbHalf}<span class="ve-ml-1">½</span></label>
+			${btnApply}
+			${btnUndo}
+			${btnClear}
+			${dispMsg}
+		</div>`;
+
+		const update = () => {
+			const n = this._selectedRowIds.size;
+			wrp.toggleVe(!!n);
+			dispCount.txt(`Selected: ${n}`);
+			btnUndo.toggleVe(!!this._hpApplyUndoStack.length);
+			// Clear stale success msg once selection changes
+			if (!n) { dispMsg.txt(""); dispMsg.removeClass("ve-error-color"); }
+		};
+
+		this._selectionBarRefs = {wrp, update};
+		update();
+
+		return wrp;
 	}
 
 	_render_getWrpButtonsSort () {

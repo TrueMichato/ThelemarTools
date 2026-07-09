@@ -1,13 +1,7 @@
 import "../../js/parser.js";
 import "../../js/utils.js";
 import {InitiativeTrackerLairMarkers} from "../../js/dmscreen/initiativetracker/dmscreen-initiativetracker-lairmarkers.js";
-
-// The row-data base module transitively imports initiativetracker-utils.js,
-//   which extends runtime-global collection classes. Stub them so we can
-//   import the base module and test its static row predicates in isolation.
-globalThis.RenderableCollectionGenericRows ||= class {};
-globalThis.RenderableCollectionAsyncGenericRows ||= class {};
-const {RenderableCollectionRowDataBase} = await import("../../js/dmscreen/initiativetracker/dmscreen-initiativetracker-rowsbase.js");
+import {InitiativeTrackerRowUtil} from "../../js/dmscreen/initiativetracker/dmscreen-initiativetracker-consts.js";
 
 const LEG_GROUP_DRAGON = {
 	name: "Ancient Red Dragon",
@@ -271,23 +265,23 @@ describe("InitiativeTrackerLairMarkers.getGroupHash", () => {
 	});
 });
 
-describe("RenderableCollectionRowDataBase row predicates", () => {
+describe("InitiativeTrackerRowUtil row predicates", () => {
 	it("isNonCombatantRow returns true for lair markers", () => {
 		const marker = {id: "m", entity: {isLairMarker: true}};
-		expect(RenderableCollectionRowDataBase.isNonCombatantRow(marker)).toBe(true);
-		expect(RenderableCollectionRowDataBase.isCombatantRow(marker)).toBe(false);
+		expect(InitiativeTrackerRowUtil.isNonCombatantRow(marker)).toBe(true);
+		expect(InitiativeTrackerRowUtil.isCombatantRow(marker)).toBe(false);
 	});
 
 	it("isCombatantRow returns true for regular monster rows", () => {
 		const mon = {id: "mon", entity: {name: "Goblin", source: "MM"}};
-		expect(RenderableCollectionRowDataBase.isCombatantRow(mon)).toBe(true);
-		expect(RenderableCollectionRowDataBase.isNonCombatantRow(mon)).toBe(false);
+		expect(InitiativeTrackerRowUtil.isCombatantRow(mon)).toBe(true);
+		expect(InitiativeTrackerRowUtil.isNonCombatantRow(mon)).toBe(false);
 	});
 
 	it("handles null / undefined rows defensively", () => {
-		expect(RenderableCollectionRowDataBase.isNonCombatantRow(null)).toBe(false);
-		expect(RenderableCollectionRowDataBase.isNonCombatantRow(undefined)).toBe(false);
-		expect(RenderableCollectionRowDataBase.isNonCombatantRow({})).toBe(false);
-		expect(RenderableCollectionRowDataBase.isCombatantRow(null)).toBe(true);
+		expect(InitiativeTrackerRowUtil.isNonCombatantRow(null)).toBe(false);
+		expect(InitiativeTrackerRowUtil.isNonCombatantRow(undefined)).toBe(false);
+		expect(InitiativeTrackerRowUtil.isNonCombatantRow({})).toBe(false);
+		expect(InitiativeTrackerRowUtil.isCombatantRow(null)).toBe(true);
 	});
 });

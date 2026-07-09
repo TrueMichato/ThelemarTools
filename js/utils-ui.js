@@ -295,6 +295,70 @@ class UiUtil {
 		return out;
 	}
 
+	/**
+	 * Pure evaluator for a numeric string that may be an absolute value or a
+	 * delta against a previous value. Extracted from ComponentUiUtil._getIptNumeric
+	 * so it can be reused (e.g. bulk-apply UIs) and unit-tested in isolation.
+	 *
+	 * Grammar:
+	 *   ""             -> {mode: "empty", next: fallbackEmpty ?? null}
+	 *   "=X"           -> {mode: "set",   next: eval(X)}
+	 *   "±X" / "*X"…   -> {mode: "delta", next: eval(`${prev}${op}${X}`)}
+	 *                     (leading `-` is treated as a value, not a delta,
+	 *                      when the previous value was already negative —
+	 *                      matches the single-row input's historical behaviour)
+	 *   "X"            -> {mode: "set",   next: eval(X)}
+	 *
+	 * @param raw Raw string from an input.
+	 * @param prevValue Previous numeric value (nullable).
+	 * @param opts Options.
+	 * @param [opts.isInt=false] Round the result to an integer.
+	 * @param [opts.isAllowNull=false] Treat empty input as null (mode "empty").
+	 * @param [opts.fallbackEmpty=0] Value to use when input is empty and !isAllowNull.
+	 * @param [opts.fallbackOnNaN] Value to use when parsing fails.
+	 * @param [opts.min] Optional lower clamp on the result.
+	 * @param [opts.max] Optional upper clamp on the result.
+	 * @return {{mode: string, next: (number|null), delta: (number|null)}}
+	 *   mode is one of "empty", "set", "delta". `delta` is populated with the
+	 *   signed change from prevValue when mode === "delta", else null.
+	 */
+	static getStrNumericModified (raw, prevValue, opts) {
+		opts = opts || {};
+		const fnConvert = opts.isInt ? UiUtil.strToInt : UiUtil.strToNumber;
+		const fallbackEmpty = opts.fallbackEmpty != null ? opts.fallbackEmpty : 0;
+		const convertOpts = {
+			fallbackOnNaN: opts.fallbackOnNaN,
+			min: opts.min,
+			max: opts.max,
+		};
+
+		const trimmed = (raw == null ? "" : String(raw)).trim();
+		if (!trimmed) {
+			if (opts.isAllowNull) return {mode: "empty", next: null, delta: null};
+			return {mode: "set", next: fallbackEmpty, delta: null};
+		}
+
+		if (trimmed.startsWith("=")) {
+			return {mode: "set", next: fnConvert(trimmed.slice(1), fallbackEmpty, convertOpts), delta: null};
+		}
+
+		// Match the historical single-row rule: if the previous value was already
+		// negative, treat a leading `-` as part of the new absolute value rather
+		// than as a delta operator.
+		const mUnary = prevValue != null && prevValue < 0
+			? /^[+/*^]/.exec(trimmed)
+			: /^[-+/*^]/.exec(trimmed);
+
+		if (mUnary) {
+			const rest = trimmed.slice(1).trim();
+			const mod = fnConvert(rest, fallbackEmpty, convertOpts);
+			const next = fnConvert(`${prevValue ?? 0}${mUnary[0]}${mod}`, fallbackEmpty, convertOpts);
+			return {mode: "delta", next, delta: next - (prevValue ?? 0)};
+		}
+
+		return {mode: "set", next: fnConvert(trimmed, fallbackEmpty, convertOpts), delta: null};
+	}
+
 	static _strToNumber (string, fallbackEmpty = 0, opts, isInt) {
 		opts = opts || {};
 		let out;
@@ -5069,23 +5133,20 @@ class ComponentUiUtil {
 
 				if (opts.isAllowNull && !raw) return component._state[prop] = null;
 
-				if (raw.startsWith("=")) {
-					// if it starts with "=", force-set to the value provided
-					component._state[prop] = fnConvert(raw.slice(1), fallbackEmpty, opts) - opts.offset;
+				const parseOpts = {
+					isInt: fnConvert === UiUtil.strToInt,
+					isAllowNull: opts.isAllowNull,
+					fallbackEmpty,
+					fallbackOnNaN: opts.fallbackOnNaN,
+					min: opts.min,
+					max: opts.max,
+				};
+				const {mode, next} = UiUtil.getStrNumericModified(raw, prevValue, parseOpts);
+
+				if (mode === "empty") {
+					component._state[prop] = null;
 				} else {
-					// otherwise, try to modify the previous value
-					const mUnary = prevValue != null && prevValue < 0
-						? /^[+/*^]/.exec(raw) // If the previous value was `-X`, then treat minuses as normal values
-						: /^[-+/*^]/.exec(raw);
-					if (mUnary) {
-						let proc = raw;
-						proc = proc.slice(1).trim();
-						const mod = fnConvert(proc, fallbackEmpty, opts);
-						const full = `${cur ?? 0}${mUnary[0]}${mod}`;
-						component._state[prop] = fnConvert(full, fallbackEmpty, opts) - opts.offset;
-					} else {
-						component._state[prop] = fnConvert(raw, fallbackEmpty, opts) - opts.offset;
-					}
+					component._state[prop] = next - opts.offset;
 				}
 
 				// Ensure the input visually reflects the state

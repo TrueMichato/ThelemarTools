@@ -43,34 +43,10 @@ class _RenderableCollectionRowStatColData extends RenderableCollectionGenericRow
 
 /** @abstract */
 export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGenericRows {
-	/* -------------------------------------------- */
-	// region Shared row predicates
-	//
-	// Consumers of the initiative-tracker row schema (multi-select HP math,
-	// bulk-condition tooling, damage-roll targeting, "select all monsters",
-	// player-view filters, ...) should use these predicates rather than
-	// hardcoding `!row.entity.isLairMarker` — that way, when new non-combatant
-	// row types are added (weather effects, hazards, timers, ...), a single
-	// change here updates every consumer.
-
-	/**
-	 * @param {object} row A tracker row (`{id, entity: {...}}`).
-	 * @returns {boolean} True when the row is a non-combatant marker (currently
-	 *   just lair-action markers). Non-combatant rows should be excluded from
-	 *   any operation that assumes the row participates in the fight — HP
-	 *   changes, condition application, damage rolls, "select all monsters",
-	 *   etc.
-	 */
-	static isNonCombatantRow (row) {
-		return !!row?.entity?.isLairMarker;
-	}
-
-	/** Inverse of `isNonCombatantRow`. */
-	static isCombatantRow (row) {
-		return !this.isNonCombatantRow(row);
-	}
-
-	// endregion
+	// Non-combatant row predicates (`isNonCombatantRow` / `isCombatantRow`) live
+	// on `InitiativeTrackerRowUtil` in `./dmscreen-initiativetracker-consts.js`.
+	// Import that class and consult its `NON_COMBATANT_FLAGS` list when adding
+	// new marker types (lair actions, weather effects, hazards, timers, ...).
 
 	constructor (
 		{
@@ -105,6 +81,7 @@ export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGe
 
 		const wrpLhs = ee`<div class="dm-init__row-lhs"></div>`.appendTo(wrpRow);
 
+		this._pPopulateRow_selection({comp, entity, wrpRow, wrpLhs, fnsCleanup});
 		this._pPopulateRow_player({comp, wrpLhs, isMon});
 		this._pPopulateRow_monster({comp, wrpLhs, isMon, mon, fluff});
 
@@ -182,6 +159,15 @@ export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGe
 		this._comp._addHookBase("statsCols", hkParentStatCols)();
 		fnsCleanup.push(() => this._comp._removeHookBase("statsCols", hkParentStatCols));
 	}
+
+	/* ----- */
+
+	/**
+	 * Multi-select checkbox for the active tracker (Fireball / bulk HP).
+	 * No-op by default — overridden in the active-view subclass.
+	 * @abstract
+	 */
+	_pPopulateRow_selection ({comp, entity, wrpRow, wrpLhs, fnsCleanup}) { /* no-op */ }
 
 	/* ----- */
 

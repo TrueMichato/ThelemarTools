@@ -4,7 +4,7 @@ import {
 } from "./dmscreen-initiativetracker-statcolumns.js";
 import {InitiativeTrackerConditionAdd} from "./dmscreen-initiativetracker-conditionadd.js";
 import {InitiativeTrackerUi} from "./dmscreen-initiativetracker-ui.js";
-import {InitiativeTrackerConst} from "./dmscreen-initiativetracker-consts.js";
+import {InitiativeTrackerConst, InitiativeTrackerRowUtil} from "./dmscreen-initiativetracker-consts.js";
 import {InitiativeTrackerSort} from "./dmscreen-initiativetracker-sort.js";
 import {RenderableCollectionConditions} from "../../initiativetracker/initiativetracker-utils.js";
 import {
@@ -148,6 +148,37 @@ class _RenderableCollectionRowDataActive extends RenderableCollectionRowDataBase
 			mon,
 			fluff,
 		};
+	}
+
+	/* ----- */
+
+	// Multi-select checkbox: click toggles, shift+click extends range from the
+	// last-clicked row using the current sort order. Marker rows (future lair-
+	// action rows carrying `entity._isMarker`) render no checkbox.
+	_pPopulateRow_selection ({comp, entity, wrpRow, wrpLhs, fnsCleanup}) {
+		if (InitiativeTrackerRowUtil.isNonCombatantRow(entity)) return;
+
+		const rowId = entity.id;
+		const root = this._comp;
+
+		const cb = ee`<input type="checkbox" class="dm-init__row-checkbox dm-init-lockable" title="Select for bulk HP apply" tabindex="-1">`
+			.onn("click", evt => {
+				evt.stopPropagation();
+				if (root._state.isLocked) { cb.prop("checked", root.isRowSelected(rowId)); return; }
+				root.toggleRowSelection(rowId, {isShift: !!evt.shiftKey});
+			});
+
+		const hkSelection = () => {
+			const isSel = root.isRowSelected(rowId);
+			cb.prop("checked", isSel);
+			wrpRow.toggleClass("dm-init__row--selected", isSel);
+		};
+		root._addHookBaseSelection(hkSelection);
+		fnsCleanup.push(() => root._removeHookBaseSelection(hkSelection));
+		hkSelection();
+
+		ee`<div class="dm-init__wrp-row-checkbox ve-flex-vh-center">${cb}</div>`
+			.appendTo(wrpLhs);
 	}
 
 	/* ----- */
