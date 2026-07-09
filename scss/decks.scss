@@ -28,6 +28,25 @@
 	#listcontainer {
 		padding-bottom: 24px;
 	}
+
+	// region Compact-render (hover popouts + DM Screen stats tiles) draw controls
+	.decks__wrp-compact-controls {
+		gap: 8px;
+		margin-top: 4px;
+	}
+
+	.decks__disp-drawn-count {
+		font-size: 90%;
+	}
+
+	.decks__wrp-drawn-summary {
+		margin-top: 4px;
+	}
+
+	.decks__lst-drawn {
+		font-size: 90%;
+	}
+	// endregion
 	// endregion
 
 	.decks {
