@@ -15373,7 +15373,9 @@ Renderer.card = class {
 };
 
 Renderer.deck = class {
-	static getCompactRenderedString (ent) {
+	static getCompactRenderedString (ent, opts) {
+		opts = opts || {};
+
 		const lstCards = {
 			name: "Cards",
 			entries: [
@@ -15385,14 +15387,186 @@ Renderer.deck = class {
 			],
 		};
 
+		const ptControls = opts.isStatic
+			? ""
+			: `<hr class="ve-hr-3">
+			<div class="ve-flex-v-center ve-flex-wrap decks__wrp-compact-controls" data-deck-controls>
+				<div class="ve-btn-group ve-flex-v-center">
+					<button class="ve-btn ve-btn-primary ve-btn-xs" data-deck-btn-draw title="Draw a random card from this deck"><i class="fas fa-fw fa-cards"></i> Draw Card</button>
+					<button class="ve-btn ve-btn-default ve-btn-xs" data-deck-btn-reset title="Return all drawn cards to the deck"><i class="fas fa-fw fa-rotate-left"></i> Reset</button>
+				</div>
+				<span class="ve-ml-2 ve-muted decks__disp-drawn-count" data-deck-drawn-count></span>
+			</div>
+			<div class="decks__wrp-drawn-summary ve-hidden" data-deck-drawn-summary></div>`;
+
 		return `
 			${Renderer.utils.getNameTr(ent)}
 			<tr><td colspan="6" class="ve-pb-2">
 			${Renderer.get().setFirstSection(true).render({type: "entries", entries: ent.entries}, 1)}
 			<hr class="ve-hr-3">
 			${Renderer.get().setFirstSection(true).render(lstCards, 1)}
+			${ptControls}
 			</td></tr>
 		`;
+	}
+
+	/**
+	 * Pure random-draw helper. Weighted decks are already pre-normalized by
+	 * `_pGetDereferencedCardData` (a `count: N` card becomes N array
+	 * entries), so uniform random over `deck.cards` yields the correct
+	 * weighted distribution.
+	 *
+	 * Cards flagged `_isReplacement === true` return to the deck and remain
+	 * eligible even if their index is present in `drawnIxSet`.
+	 *
+	 * @param {object} deck Deck entity with `cards: Array<object>`.
+	 * @param {Set<number>} [drawnIxSet] Indices already drawn (default empty).
+	 * @returns {{ixCard: number, card: object} | null} Chosen card, or null when no candidates remain.
+	 */
+	static pickRandomCard (deck, drawnIxSet) {
+		if (!deck?.cards?.length) return null;
+		drawnIxSet = drawnIxSet || new Set();
+
+		const candidateIxs = [];
+		for (let i = 0; i < deck.cards.length; ++i) {
+			const card = deck.cards[i];
+			if (card?._isReplacement || !drawnIxSet.has(i)) candidateIxs.push(i);
+		}
+		if (!candidateIxs.length) return null;
+
+		const ixCard = RollerUtil.rollOnArray(candidateIxs);
+		return {ixCard, card: deck.cards[ixCard]};
+	}
+
+	/**
+	 * Post-render binding for compact deck popouts (hover pins + DM Screen
+	 * stats tiles). Wires the Draw / Reset controls emitted by
+	 * `getCompactRenderedString`.
+	 *
+	 * @param {object} deck
+	 * @param {HTMLElement} ele Compact-render root (`<table>` for hover, `<table>` for DM Screen stats).
+	 * @param {object} [opts]
+	 * @param {{initialDrawn?: number[], onChange?: (drawn: number[]) => void}} [opts.deckState]
+	 *   Optional persistence hook. `initialDrawn` hydrates the drawn-set at bind time; `onChange`
+	 *   is called with an array of drawn indices after every mutation. When omitted, state is
+	 *   session-local to the popout element.
+	 */
+	static bindListenersCompact (deck, ele, opts) {
+		opts = opts || {};
+		if (!ele) return;
+
+		const btnDraw = ele.querySelector?.("[data-deck-btn-draw]");
+		const btnReset = ele.querySelector?.("[data-deck-btn-reset]");
+		const eleCount = ele.querySelector?.("[data-deck-drawn-count]");
+		const eleSummary = ele.querySelector?.("[data-deck-drawn-summary]");
+		if (!btnDraw || !btnReset) return;
+
+		// Idempotence guard: `getHoverContent_stats` binds internally, then the
+		// outer hover flow at `_pHandleLinkMouseOver` binds again on the same element.
+		// Only accept the FIRST call that carries a `deckState` (DM Screen), so
+		// persistence hooks aren't dropped when the flow order differs.
+		const isAlreadyBound = btnDraw.dataset.deckBound === "1";
+		const hasState = !!opts.deckState;
+		if (isAlreadyBound && !hasState) return;
+		if (isAlreadyBound && hasState) {
+			// Prior bind was state-less; replace by cloning to strip its listeners.
+			const newDraw = btnDraw.cloneNode(true);
+			btnDraw.replaceWith(newDraw);
+			const newReset = btnReset.cloneNode(true);
+			btnReset.replaceWith(newReset);
+		}
+		const btnDrawLive = ele.querySelector("[data-deck-btn-draw]");
+		const btnResetLive = ele.querySelector("[data-deck-btn-reset]");
+		btnDrawLive.dataset.deckBound = "1";
+		btnResetLive.dataset.deckBound = "1";
+
+		const initialDrawn = (opts.deckState?.initialDrawn || [])
+			.filter(ix => Number.isInteger(ix) && ix >= 0 && ix < (deck?.cards?.length ?? 0));
+		const drawnIxs = new Set(initialDrawn);
+		ele._deckDrawnIxs = drawnIxs;
+
+		const notifyChanged = () => {
+			try { opts.deckState?.onChange?.(Array.from(drawnIxs).sort((a, b) => a - b)); } catch (e) { /* swallow */ }
+		};
+
+		const nonReplacementTotal = (deck?.cards || []).filter(c => !c?._isReplacement).length;
+		const countDrawnNonReplacement = () => {
+			let n = 0;
+			for (const ix of drawnIxs) if (!deck.cards[ix]?._isReplacement) ++n;
+			return n;
+		};
+
+		const renderSummary = () => {
+			if (!eleCount || !eleSummary) return;
+			const nDrawn = countDrawnNonReplacement();
+			// Keep the initial view clean: hide the counter until at least one
+			// non-replacement card has been drawn.
+			if (nDrawn > 0 && nonReplacementTotal > 0) {
+				eleCount.textContent = `Drawn: ${nDrawn} / ${nonReplacementTotal}`;
+				eleCount.classList.remove("ve-hidden");
+			} else {
+				eleCount.textContent = "";
+				eleCount.classList.add("ve-hidden");
+			}
+			if (!drawnIxs.size) {
+				eleSummary.classList.add("ve-hidden");
+				eleSummary.innerHTML = "";
+				return;
+			}
+			const items = Array.from(drawnIxs).sort((a, b) => a - b)
+				.map(ix => {
+					const card = deck.cards[ix];
+					if (!card) return null;
+					return `<li>${Renderer.get().render(`{@card ${card.name}|${card.set}|${card.source}}`)}</li>`;
+				})
+				.filter(Boolean)
+				.join("");
+			eleSummary.classList.remove("ve-hidden");
+			eleSummary.innerHTML = `<div class="ve-muted ve-small ve-mt-1"><i>Drawn cards:</i></div><ul class="ve-list-none ve-mt-0 ve-mb-1 ve-pl-3 decks__lst-drawn">${items}</ul>`;
+		};
+
+		const openDrawnCardWindow = (evt, card) => {
+			if (!card) return;
+			const content = Renderer.hover.getHoverContent_stats("card", card);
+			Renderer.hover.getShowWindow(
+				content,
+				Renderer.hover.getWindowPositionFromEvent(evt),
+				{
+					title: card._displayName || card.name || "Drawn Card",
+					isPermanent: true,
+					pageUrl: `${UrlUtil.PG_DECKS}#${UrlUtil.autoEncodeHash(deck)}`,
+					sourceData: card,
+				},
+			);
+		};
+
+		btnDrawLive.addEventListener("click", evt => {
+			evt.preventDefault();
+			evt.stopPropagation();
+
+			const pick = Renderer.deck.pickRandomCard(deck, drawnIxs);
+			if (!pick) {
+				if (typeof JqueryUtil !== "undefined") JqueryUtil.doToast({content: "All cards have already been drawn!", type: "warning"});
+				return;
+			}
+
+			if (!pick.card?._isReplacement) drawnIxs.add(pick.ixCard);
+			renderSummary();
+			notifyChanged();
+			openDrawnCardWindow(evt, pick.card);
+		});
+
+		btnResetLive.addEventListener("click", evt => {
+			evt.preventDefault();
+			evt.stopPropagation();
+			if (!drawnIxs.size) return;
+			drawnIxs.clear();
+			renderSummary();
+			notifyChanged();
+			if (typeof JqueryUtil !== "undefined") JqueryUtil.doToast({content: "Reset drawn cards.", type: "info"});
+		});
+
+		renderSummary();
 	}
 };
 
@@ -17537,6 +17711,7 @@ Renderer.hover = class {
 		switch (page) {
 			case UrlUtil.PG_BESTIARY: return Renderer.monster.bindListenersCompact.bind(Renderer.monster);
 			case UrlUtil.PG_RACES: return Renderer.race.bindListenersCompact.bind(Renderer.race);
+			case UrlUtil.PG_DECKS: return Renderer.deck.bindListenersCompact.bind(Renderer.deck);
 			default: return null;
 		}
 	}
@@ -17556,6 +17731,7 @@ Renderer.hover = class {
 	 * @param [opts.isBookContent]
 	 * @param [opts.isStatic] If this content is to be "static," i.e. display only, containing minimal interactive UI.
 	 * @param [opts.fnRender]
+	 * @param [opts.deckState] Optional {initialDrawn, onChange} passed through to `bindListenersCompact` for deck popouts.
 	 * @param [renderFnOpts]
 	 */
 	static getHoverContent_stats (page, toRender, opts, renderFnOpts) {
@@ -17572,7 +17748,10 @@ Renderer.hover = class {
 
 		if (!opts.isStatic) {
 			const fnBind = Renderer.hover.getFnBindListenersCompact(page);
-			if (fnBind) fnBind(toRender, out);
+			// Third-arg context is opt-in for bind fns that need per-page state
+			// (currently: decks, which threads `deckState` for drawn-card persistence).
+			// Extra args are ignored by legacy bind fns (monster, race).
+			if (fnBind) fnBind(toRender, out, {deckState: opts.deckState});
 
 			// Inject collapsible-entry affordances (safe no-op when the rendered content
 			//   has no matching entry structure — e.g. spell / item / feat popouts).
