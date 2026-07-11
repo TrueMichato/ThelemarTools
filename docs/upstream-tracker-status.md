@@ -16,27 +16,37 @@ in sync when a related PR merges into `character-sheet-wip`.
 lands, move the row from Queued / In flight into Shipped and add the PR # + merge
 commit.
 
+**⚠️ Never create GitHub cross-references to upstream.** Do not use
+`5etools/tracker#NNNN` or `https://github.com/5etools/tracker/issues/NNNN` in PR
+bodies, PR titles, commit messages, or issue comments. GitHub auto-links both
+patterns and writes a permanent cross-reference event onto the upstream issue —
+which we do not want to clutter. Instead, use the tracker's own ID (`5ET-XXXX`)
+or the plain-text form `5ET-tracker NNNN` (with a space, so `#` never appears).
+This also applies to files committed to the repo (including this one), because a
+future contributor grepping for tracker numbers may copy the syntax into a PR
+body without thinking.
+
 ---
 
 ## ✅ Shipped
 
 | Tracker | Title | Our PR | Merge |
 |---|---|---|---|
-| [#517](5ET-tracker 517) A+B | Expanded monster `group[]` tags + normalization | #155 | data-only phase |
-| [#517](5ET-tracker 517) C+D+E | First-class `monsterGroup` entity + renderer + filter enrichment | #161 | 5 flagship entities; 13 more deferred to follow-up |
-| [#597](5ET-tracker 597) | Bestiary Wide Mode (statblock + fluff side-by-side ≥1600px) | #152 | |
-| [#738](5ET-tracker 738) | Compare Creatures side-by-side | #157 | `RenderCompareCreatures.pOpenForUids(hashes)` public entry |
-| [#1042](5ET-tracker 1042) | `skillToolLanguageProficiencies` on `subclassFeature` | #159 | Also fixes silent-drop bug for class features; schema PR pending upstream |
-| [#1148](5ET-tracker 1148) | Tool proficiency prerequisites on optional features | #156 | schema PR pending upstream |
-| [#1190](5ET-tracker 1190) | Collapsible statblock entries | #153 | post-processor `Renderer.statblockCollapse` |
-| [#1191](5ET-tracker 1191) | DM Screen Custom Random Tables panel | #160 | with tab-title sync |
-| [#1195](5ET-tracker 1195) | Draw Card button on deck hover / DM Screen embed | #166 | |
-| [#1200](5ET-tracker 1200) | Two-column statblock layout toggle | #158 | `column-count: 2` on wrapped `<tbody>` |
-| [#1232](5ET-tracker 1232) | Multi-select HP math on initiative tracker | #165 | `InitiativeTrackerRowUtil.getHalvedDelta` shared helper |
-| [#1234](5ET-tracker 1234) | Auto-add Lair Action to initiative tracker | #164 | idempotent reconciler + shared `isNonCombatantRow` predicate |
-| [#1252](5ET-tracker 1252) | DM Screen Dice Calculator panel | #162 | `PANEL_TYP_DICE_CALCULATOR = 17` |
-| [#1279](5ET-tracker 1279) | Cost column on magic items list | #163 | reuses `_l_value` display helper |
-| [#1281](5ET-tracker 1281) | Full `senses` tag on races (blindsight/tremorsense/truesight) | #154 | schema PR pending upstream |
+| 5ET-tracker 517 A+B | Expanded monster `group[]` tags + normalization | #155 | data-only phase |
+| 5ET-tracker 517 C+D+E | First-class `monsterGroup` entity + renderer + filter enrichment | #161 | 5 flagship entities; 13 more deferred to follow-up |
+| 5ET-tracker 597 | Bestiary Wide Mode (statblock + fluff side-by-side ≥1600px) | #152 | |
+| 5ET-tracker 738 | Compare Creatures side-by-side | #157 | `RenderCompareCreatures.pOpenForUids(hashes)` public entry |
+| 5ET-tracker 1042 | `skillToolLanguageProficiencies` on `subclassFeature` | #159 | Also fixes silent-drop bug for class features; schema PR pending upstream |
+| 5ET-tracker 1148 | Tool proficiency prerequisites on optional features | #156 | schema PR pending upstream |
+| 5ET-tracker 1190 | Collapsible statblock entries | #153 | post-processor `Renderer.statblockCollapse` |
+| 5ET-tracker 1191 | DM Screen Custom Random Tables panel | #160 | with tab-title sync |
+| 5ET-tracker 1195 | Draw Card button on deck hover / DM Screen embed | #166 | |
+| 5ET-tracker 1200 | Two-column statblock layout toggle | #158 | `column-count: 2` on wrapped `<tbody>` |
+| 5ET-tracker 1232 | Multi-select HP math on initiative tracker | #165 | `InitiativeTrackerRowUtil.getHalvedDelta` shared helper |
+| 5ET-tracker 1234 | Auto-add Lair Action to initiative tracker | #164 | idempotent reconciler + shared `isNonCombatantRow` predicate |
+| 5ET-tracker 1252 | DM Screen Dice Calculator panel | #162 | `PANEL_TYP_DICE_CALCULATOR = 17` |
+| 5ET-tracker 1279 | Cost column on magic items list | #163 | reuses `_l_value` display helper |
+| 5ET-tracker 1281 | Full `senses` tag on races (blindsight/tremorsense/truesight) | #154 | schema PR pending upstream |
 
 **15 tracker items shipped across 15 PRs.**
 
@@ -53,13 +63,13 @@ candidate pool with notes on why each is or isn't a good next-sprint fit._
 
 | Tracker | Title | Why declined |
 |---|---|---|
-| [#1099](5ET-tracker 1099) + [#1227](5ET-tracker 1227) | Encounters page + auto generator | Parked pending product-scope decision (catalog vs generator vs runner). Existing `encountergen.html` already covers 42 random-encounter tables. Re-open when the user articulates which of the three surfaces is wanted. |
-| [#1225](5ET-tracker 1225) | Feet Speed filter for Races | Already implemented in `js/filter-races.js` (verified). |
-| [#331](5ET-tracker 331), [#406](5ET-tracker 406), [#1381](5ET-tracker 1381), [#1383](5ET-tracker 1383) | Charactermancer / character-sheet features | Superseded by this fork's full character sheet. |
-| [#1371](5ET-tracker 1371) | Weapon Mastery Selection Support | Already implemented in this fork's character sheet. |
+| 5ET-tracker 1099 + 5ET-tracker 1227 | Encounters page + auto generator | Parked pending product-scope decision (catalog vs generator vs runner). Existing `encountergen.html` already covers 42 random-encounter tables. Re-open when the user articulates which of the three surfaces is wanted. |
+| 5ET-tracker 1225 | Feet Speed filter for Races | Already implemented in `js/filter-races.js` (verified). |
+| 5ET-tracker 331, 5ET-tracker 406, 5ET-tracker 1381, 5ET-tracker 1383 | Charactermancer / character-sheet features | Superseded by this fork's full character sheet. |
+| 5ET-tracker 1371 | Weapon Mastery Selection Support | Already implemented in this fork's character sheet. |
 | Any `PLUT-*` | Plutonium / Foundry-only tickets | Out of scope for this fork. |
-| [#326](5ET-tracker 326) | Mobile app | Out of fork scope. |
-| [#383](5ET-tracker 383) | Translations infrastructure | Out of fork scope. |
+| 5ET-tracker 326 | Mobile app | Out of fork scope. |
+| 5ET-tracker 383 | Translations infrastructure | Out of fork scope. |
 
 ## Companion upstream schema PRs pending
 
