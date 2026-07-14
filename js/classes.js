@@ -1,5 +1,6 @@
 import {VetoolsConfig} from "./utils-config/utils-config-config.js";
 import {RenderClassesSidebar} from "./render-class.js";
+import {RenderClassesMarkdown} from "./render-class-markdown.js";
 
 import {OmnisearchUtilsUi} from "./omnisearch/omnisearch-utils-ui.js";
 
@@ -423,6 +424,7 @@ class ClassesPage extends MixinComponentGlobalState(MixinBaseComponent(MixinProx
 		this._initLinkGrabbers();
 		this._initScrollToSubclassSelection();
 		this._bindLinkExportButton({btn: e_(document.getElementById("btn-link-export"))});
+		this._doBindBtnExportMarkdown();
 		this._doBindBtnSettingsSidebar();
 
 		Hist.initialLoad = false;
@@ -893,6 +895,36 @@ class ClassesPage extends MixinComponentGlobalState(MixinBaseComponent(MixinProx
 
 		es(`#btn-sidebar-settings`)
 			.onn("click", evt => ContextUtil.pOpenMenu(evt, menu));
+	}
+
+	_doBindBtnExportMarkdown () {
+		const btn = es(`#btn-export-markdown`)
+			.onn("click", async () => {
+				btn.prop("disabled", true);
+				try {
+					const cls = this.activeClassRaw;
+					if (!cls) throw new Error("No class is selected.");
+
+					const subclasses = (cls.subclasses || [])
+						.filter(sc => this._state[UrlUtil.getStateKeySubclass(sc)])
+						.filter(sc => !this.constructor.isSubclassExcluded_(cls, sc));
+					const markdown = await RenderClassesMarkdown.pGetMarkdown({
+						cls,
+						subclasses,
+						baseUrl: window.location.href,
+					});
+
+					DataUtil.userDownloadText(`${DataUtil.getCleanFilename(`${cls.name}-${cls.source}`)}.md`, markdown);
+				} catch (e) {
+					JqueryUtil.doToast({
+						type: "danger",
+						content: `Could not export class Markdown: ${e.message}`,
+					});
+					throw e;
+				} finally {
+					btn.prop("disabled", false);
+				}
+			});
 	}
 
 	getListItem (cls, clsI, isExcluded) {
