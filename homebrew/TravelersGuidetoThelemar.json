@@ -5698,7 +5698,7 @@
 			],
 			"entries": [
 				"Flex is the pinnacle of spell manipulation achieved by mortals. By rethreading the weaves of magic themselves, you are able to alter spells to produce unparalleled effects.",
-				"When you cast this spell, choose a spell of 8th level or lower from any spell list. You cast the chosen spell as part of this spell without expending a spell slot for it and without needing to meet any requirements to cast that spell, including costly components.",
+				"When you cast this spell, choose a spell of 8th level or lower you can cast. You cast the chosen spell as part of this spell without expending a spell slot for it and without needing to meet any requirements to cast that spell, including costly components.",
 				"The spell created by Flex cannot be countered or dispelled except by a 9th-level spell.",
 				"When you cast the chosen spell, select one of the following modifications:",
 				{
@@ -15539,6 +15539,46 @@
 						"s5": [
 							"destructive wave",
 							"contagion"
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "eeeeek",
+			"source": "TGTT",
+			"className": "Warlock",
+			"classSource": "TGTT",
+			"shortName": "eeeeek",
+			"subclassFeatures": [
+				"Expanded Spell List|Warlock|TGTT|eeeeek|TGTT|3",
+				"Hedonistic Manifestation|Warlock|TGTT|eeeeek|TGTT|3",
+				"Transdimensional Step|Warlock|TGTT|eeeeek|TGTT|6",
+				"Immense Power|Warlock|TGTT|eeeeek|TGTT|10",
+				"Sovereign of Realms|Warlock|TGTT|eeeeek|TGTT|14"
+			],
+			"additionalSpells": [
+				{
+					"expanded": {
+						"s1": [
+							"tasha's hideous laughter",
+							"alabaster's adjacent acquisition|Ar5"
+						],
+						"s2": [
+							"vortex warp|SCC",
+							"tasha's mind whip|TCE"
+						],
+						"s3": [
+							"blink",
+							"compel|TGTT"
+						],
+						"s4": [
+							"dimension door",
+							"transfix|TGTT"
+						],
+						"s5": [
+							"dominate person",
+							"steel wind strike|XGE"
 						]
 					}
 				}
@@ -25650,6 +25690,125 @@
 				"An infected creature cannot get infected again for 24 hours. A creature that has made a saving throw against the effect does not make additional saving throws until the end of your next turn.",
 				"You are immune to the effects of the implosion and the infection. You can, before activating this feature, choose up to five creatures to extend this immunity to.",
 				"Once you use this feature, you have to complete a long rest before you can use it again."
+			]
+		},
+		{
+			"name": "Expanded Spell List",
+			"source": "TGTT",
+			"className": "Warlock",
+			"classSource": "TGTT",
+			"subclassShortName": "eeeeek",
+			"subclassSource": "TGTT",
+			"level": 3,
+			"entries": [
+				"The following spells are added to the warlock spell list for you.",
+				{
+					"type": "table",
+					"caption": "eeeeek Expanded Spells",
+					"colLabels": [
+						"Spell Level",
+						"Spells"
+					],
+					"colStyles": [
+						"col-2 text-center",
+						"col-10"
+					],
+					"rows": [
+						[
+							"1st",
+							"{@spell Tasha's Hideous Laughter}, {@spell Alabaster's Adjacent Acquisition|Ar5}"
+						],
+						[
+							"2nd",
+							"{@spell Vortex Warp|SCC}, {@spell Tasha's Mind Whip|TCE}"
+						],
+						[
+							"3rd",
+							"{@spell Blink}, {@spell Compel|TGTT}"
+						],
+						[
+							"4th",
+							"{@spell Dimension Door}, {@spell Transfix|TGTT}"
+						],
+						[
+							"5th",
+							"{@spell Dominate Person}, {@spell Steel Wind Strike|XGE}"
+						]
+					]
+				}
+			]
+		},
+		{
+			"name": "Hedonistic Manifestation",
+			"source": "TGTT",
+			"className": "Warlock",
+			"classSource": "TGTT",
+			"subclassShortName": "eeeeek",
+			"subclassSource": "TGTT",
+			"level": 3,
+			"entries": [
+				"As a bonus action, you transform for 1 minute and gain the following benefits:",
+				{
+					"type": "list",
+					"items": [
+						"You emit a 10-foot-radius aura. Creatures of your choice within the aura have disadvantage on saving throws against being {@condition charmed}.",
+						"When a creature is affected by a spell or cantrip you cast, you can force it to make a Wisdom saving throw against your spell save DC. On a failed save, the target is {@condition charmed} by you until the end of your next turn."
+					]
+				},
+				"You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest."
+			]
+		},
+		{
+			"name": "Transdimensional Step",
+			"source": "TGTT",
+			"className": "Warlock",
+			"classSource": "TGTT",
+			"subclassShortName": "eeeeek",
+			"subclassSource": "TGTT",
+			"level": 6,
+			"entries": [
+				"As a bonus action, you can teleport up to 30 feet to an unoccupied space you can see. When you teleport in this way, you gain resistance to all damage until the start of your next turn.",
+				"You can use this feature a number of times equal to your Charisma modifier (minimum of once), and you regain all expended uses when you finish a long rest."
+			]
+		},
+		{
+			"name": "Immense Power",
+			"source": "TGTT",
+			"className": "Warlock",
+			"classSource": "TGTT",
+			"subclassShortName": "eeeeek",
+			"subclassSource": "TGTT",
+			"level": 10,
+			"entries": [
+				{
+					"type": "list",
+					"items": [
+						"You have advantage on saving throws against being {@condition charmed} or {@condition frightened}.",
+						"You can add your Charisma modifier to any Constitution saving throw you make to maintain concentration on a spell.",
+						"When you damage a creature {@condition charmed} by you, the damage doesn't break the charm."
+					]
+				}
+			]
+		},
+		{
+			"name": "Sovereign of Realms",
+			"source": "TGTT",
+			"className": "Warlock",
+			"classSource": "TGTT",
+			"subclassShortName": "eeeeek",
+			"subclassSource": "TGTT",
+			"level": 14,
+			"entries": [
+				"As an action, you create a 30-foot-radius sphere centered on a point you can see within 60 feet. The sphere lasts for 1 minute and has the following effects:",
+				{
+					"type": "list",
+					"items": [
+						"You and creatures of your choice within the area can teleport to any other point within the area as a bonus action.",
+						"Creatures of your choice within the area must make a Wisdom saving throw against your spell save DC at the start of each of their turns. On a failed save, a creature is {@condition charmed} by you until it leaves the area.",
+						"When you are targeted by an attack or spell, you can use your reaction to swap places with a creature {@condition charmed} by you within the area."
+					]
+				},
+				"Once you use this feature, you can't use it again until you finish a long rest."
 			]
 		},
 		{
