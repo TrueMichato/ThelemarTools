@@ -1,6 +1,6 @@
 export class RenderClassesMarkdown {
-	static _CHARS_PER_COLUMN = 2100;
-	static _MIN_CHARS_TO_SPLIT_COLUMN = 600;
+	static _FLOW_LINES_PER_COLUMN = 50;
+	static _MIN_FLOW_LINES_TO_SPLIT_COLUMN = 14;
 	static _TAG_BLOCKLIST_LINKS = new Set(["@5etools", "@link", "@loader"]);
 
 	static async pGetMarkdown ({cls, subclasses = [], baseUrl = globalThis.location?.href}) {
@@ -380,41 +380,56 @@ ${imageMarkdown}
 			.filter(Boolean)
 			.map(block => block.trim())
 			.filter(Boolean)
+			.flatMap(block => this._getFlowSegments(block))
 			.flatMap(block => this._getSplitFlowBlocks(block));
 		if (!pendingBlocks.length) return [];
 
 		const pages = [];
 		let columns = [[]];
-		let charsInColumn = 0;
+		let linesInColumn = 0;
 
 		const getCurrentColumn = () => columns[columns.length - 1];
+		const doFlushPage = () => {
+			if (columns.some(column => column.length)) {
+				pages.push(columns.map(column => column.join("\n\n")).join("\n\n\\column\n\n"));
+			}
+			columns = [[]];
+			linesInColumn = 0;
+		};
 		const doAdvance = () => {
 			if (columns.length === 1) {
 				columns.push([]);
-				charsInColumn = 0;
+				linesInColumn = 0;
 				return;
 			}
 
-			pages.push(columns.map(column => column.join("\n\n")).join("\n\n\\column\n\n"));
-			columns = [[]];
-			charsInColumn = 0;
+			doFlushPage();
 		};
 
 		while (pendingBlocks.length) {
 			const block = pendingBlocks.shift();
-			if (!getCurrentColumn().length || charsInColumn + block.length <= this._CHARS_PER_COLUMN) {
-				getCurrentColumn().push(block);
-				charsInColumn += block.length;
+			if (this._isPageStartBlock(block)) doFlushPage();
+			if (this._isWideFlowBlock(block)) {
+				doFlushPage();
+				pages.push(block);
 				continue;
 			}
 
-			const remaining = this._CHARS_PER_COLUMN - charsInColumn;
-			const split = remaining >= this._MIN_CHARS_TO_SPLIT_COLUMN
-				? this._getSplitFlowBlockAtLength(block, remaining)
+			const blockLines = this._getFlowLines(block);
+			const spacingLines = getCurrentColumn().length ? 0.25 : 0;
+			if (!getCurrentColumn().length || linesInColumn + spacingLines + blockLines <= this._FLOW_LINES_PER_COLUMN) {
+				getCurrentColumn().push(block);
+				linesInColumn += spacingLines + blockLines;
+				continue;
+			}
+
+			const remaining = this._FLOW_LINES_PER_COLUMN - linesInColumn - spacingLines;
+			const split = remaining >= this._MIN_FLOW_LINES_TO_SPLIT_COLUMN
+				? this._getSplitFlowBlockAtSize(block, remaining)
 				: null;
 			if (split) {
 				getCurrentColumn().push(split[0]);
-				charsInColumn += split[0].length;
+				linesInColumn += spacingLines + this._getFlowLines(split[0]);
 				doAdvance();
 				pendingBlocks.unshift(split[1]);
 				continue;
@@ -422,31 +437,70 @@ ${imageMarkdown}
 
 			doAdvance();
 			getCurrentColumn().push(block);
-			charsInColumn += block.length;
+			linesInColumn += blockLines;
 		}
 
-		if (columns.some(column => column.length)) {
-			pages.push(columns.map(column => column.join("\n\n")).join("\n\n\\column\n\n"));
-		}
+		doFlushPage();
 
 		return pages;
 	}
 
-	static _getSplitFlowBlockAtLength (block, maxLength) {
-		if (block.length <= maxLength || /^\{\{[^]*\}\}$/.test(block)) return null;
+	static _getFlowSegments (block) {
+		const paragraphs = block.split(/\n{2,}/);
+		if (!paragraphs.some(paragraph => this._isWideFlowBlock(paragraph))) return [block];
+
+		const heading = paragraphs[0].match(/^(#{2,6} .+)$/)?.[1];
+		const continuationHeading = heading ? `${heading} *(continued)*` : null;
+		const out = [];
+		let stack = [];
+		let isAfterWide = false;
+
+		const doFlush = () => {
+			if (!stack.length) return;
+			out.push(stack.join("\n\n"));
+			stack = [];
+		};
+
+		paragraphs.forEach(paragraph => {
+			if (this._isWideFlowBlock(paragraph)) {
+				doFlush();
+				out.push(paragraph);
+				isAfterWide = true;
+				return;
+			}
+
+			if (!stack.length && isAfterWide && continuationHeading) stack.push(continuationHeading);
+			stack.push(paragraph);
+			isAfterWide = false;
+		});
+		doFlush();
+
+		return out;
+	}
+
+	static _isPageStartBlock (block) {
+		return /^# [^#]/.test(block);
+	}
+
+	static _isWideFlowBlock (block) {
+		return /^\{\{[^\n}]*\bwide\b/.test(block);
+	}
+
+	static _getSplitFlowBlockAtSize (block, maxLines) {
+		if (this._getFlowLines(block) <= maxLines || /^\{\{[^]*\}\}$/.test(block)) return null;
 
 		const paragraphs = block.split(/\n{2,}/);
 		const heading = paragraphs[0].match(/^(#{2,6} .+)$/)?.[1];
 		const stack = [];
-		let stackLength = 0;
+		let stackLines = 0;
 		let ixParagraph = 0;
 
 		for (; ixParagraph < paragraphs.length; ++ixParagraph) {
 			const paragraph = paragraphs[ixParagraph];
-			const lengthWithSpacing = paragraph.length + (stack.length ? 2 : 0);
-			if (stack.length && stackLength + lengthWithSpacing > maxLength) break;
+			const linesWithSpacing = this._getFlowLines(paragraph) + (stack.length ? 0.25 : 0);
+			if (stack.length && stackLines + linesWithSpacing > maxLines) break;
 			stack.push(paragraph);
-			stackLength += lengthWithSpacing;
+			stackLines += linesWithSpacing;
 		}
 
 		const isOnlyHeading = heading && stack.length === 1;
@@ -461,7 +515,7 @@ ${imageMarkdown}
 	}
 
 	static _getSplitFlowBlocks (block) {
-		if (block.length <= this._CHARS_PER_COLUMN) return [block];
+		if (this._getFlowLines(block) <= this._FLOW_LINES_PER_COLUMN) return [block];
 		if (/^\{\{[^]*\}\}$/.test(block)) return [block];
 
 		const paragraphs = block.split(/\n{2,}/);
@@ -469,23 +523,23 @@ ${imageMarkdown}
 		const continuationHeading = heading ? `${heading} *(continued)*` : null;
 		const out = [];
 		let stack = [];
-		let stackLength = 0;
+		let stackLines = 0;
 
 		const doFlush = () => {
 			if (!stack.length) return;
 			out.push(stack.join("\n\n"));
 			stack = continuationHeading ? [continuationHeading] : [];
-			stackLength = continuationHeading?.length || 0;
+			stackLines = continuationHeading ? this._getFlowLines(continuationHeading) : 0;
 		};
 
 		paragraphs
 			.flatMap(paragraph => this._getSplitFlowParagraph(paragraph))
 			.forEach(paragraph => {
-				const lengthWithSpacing = paragraph.length + (stack.length ? 2 : 0);
+				const linesWithSpacing = this._getFlowLines(paragraph) + (stack.length ? 0.25 : 0);
 				const isStackOnlyHeading = stack.length === 1 && /^#{2,6} /.test(stack[0]);
-				if (stack.length && !isStackOnlyHeading && stackLength + lengthWithSpacing > this._CHARS_PER_COLUMN) doFlush();
+				if (stack.length && !isStackOnlyHeading && stackLines + linesWithSpacing > this._FLOW_LINES_PER_COLUMN) doFlush();
 				stack.push(paragraph);
-				stackLength += paragraph.length + (stack.length > 1 ? 2 : 0);
+				stackLines += this._getFlowLines(paragraph) + (stack.length > 1 ? 0.25 : 0);
 			});
 		doFlush();
 
@@ -493,7 +547,7 @@ ${imageMarkdown}
 	}
 
 	static _getSplitFlowParagraph (paragraph) {
-		if (paragraph.length <= this._CHARS_PER_COLUMN) return [paragraph];
+		if (this._getFlowLines(paragraph) <= this._FLOW_LINES_PER_COLUMN) return [paragraph];
 		if (/^(?:\{\{|\|)/.test(paragraph)) return [paragraph];
 
 		const lines = paragraph.split("\n");
@@ -508,14 +562,14 @@ ${imageMarkdown}
 	static _getSplitFlowParts (parts, separator) {
 		parts = parts
 			.flatMap(part => {
-				if (part.length <= this._CHARS_PER_COLUMN) return [part];
+				if (this._getFlowLines(part) <= this._FLOW_LINES_PER_COLUMN) return [part];
 
 				const words = part.split(/\s+/);
 				if (words.length > 1) return this._getSplitFlowParts(words, " ");
 
 				const out = [];
-				for (let i = 0; i < part.length; i += this._CHARS_PER_COLUMN) {
-					out.push(part.slice(i, i + this._CHARS_PER_COLUMN));
+				for (let i = 0; i < part.length; i += this._FLOW_LINES_PER_COLUMN * 55) {
+					out.push(part.slice(i, i + (this._FLOW_LINES_PER_COLUMN * 55)));
 				}
 				return out;
 			});
@@ -529,7 +583,7 @@ ${imageMarkdown}
 				stack = part;
 				return;
 			}
-			if (stack.length + separator.length + part.length <= this._CHARS_PER_COLUMN) {
+			if (this._getFlowLines(`${stack}${separator}${part}`) <= this._FLOW_LINES_PER_COLUMN) {
 				stack += `${separator}${part}`;
 				return;
 			}
@@ -539,6 +593,23 @@ ${imageMarkdown}
 		if (stack) out.push(stack);
 
 		return out;
+	}
+
+	static _getFlowLines (block) {
+		return block
+			.split("\n")
+			.reduce((total, line) => {
+				const cleanLine = line
+					.replace(/^(?:#{1,6}|[-*+]|\d+\.)\s+/, "")
+					.replace(/[*_`]/g, "")
+					.trim();
+				if (!cleanLine) return total + 0.25;
+
+				if (/^#{1,2}\s/.test(line)) return total + 3 + Math.max(0, Math.ceil(cleanLine.length / 45) - 1);
+				if (/^#{3,6}\s/.test(line)) return total + 2 + Math.max(0, Math.ceil(cleanLine.length / 48) - 1);
+				if (/^(?:[-*+]|\d+\.)\s+/.test(line)) return total + Math.max(1, Math.ceil(cleanLine.length / 48));
+				return total + Math.max(1, Math.ceil(cleanLine.length / 55));
+			}, 0);
 	}
 
 	static _renderEntries (entries) {

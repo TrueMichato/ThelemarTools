@@ -272,7 +272,7 @@ describe("Homebrewery class Markdown export", () => {
 	});
 
 	it("Uses remaining column space before advancing to a new page", () => {
-		const getBlock = name => `#### ${name}\n\n${"A compact paragraph of feature text. ".repeat(17)}\n\n${"A second paragraph of feature text. ".repeat(17)}`;
+		const getBlock = name => `#### ${name}\n\n${"A compact paragraph of feature text. ".repeat(18)}\n\n${"A second paragraph of feature text. ".repeat(18)}`;
 		const pages = RenderClassesMarkdown._getFlowPages([
 			getBlock("First Feature"),
 			getBlock("Second Feature"),
@@ -282,5 +282,56 @@ describe("Homebrewery class Markdown export", () => {
 		expect(pages).toHaveLength(1);
 		expect(pages[0]).toContain("Second Feature *(continued)*");
 		expect(pages[0]).toContain("\\column");
+	});
+
+	it("Starts subclass titles and wide tables on safe page boundaries", () => {
+		const cls = getClass();
+		cls.classFeatures[0][0].entries.push({
+			type: "table",
+			caption: "Bold Strike Outcomes",
+			colLabels: ["D6", "Outcome"],
+			rows: [["1", "Push the target."]],
+		});
+
+		const markdown = RenderClassesMarkdown.getMarkdown({
+			cls,
+			subclasses: [getSubclass()],
+			subclassFluffs: [null],
+			baseUrl: "https://tools.example/classes.html",
+		});
+		const pages = markdown
+			.split("\n\n\\page\n\n")
+			.map(page => page.replace(/\n\n\{\{pageNumber,auto}}$/, "").trim());
+		const subclassPage = pages.find(page => page.includes("# Storm Path"));
+		const featureTablePage = pages.find(page => page.includes("##### Bold Strike Outcomes"));
+		const subclassTablePage = pages.find(page => page.includes("##### Storm Dice"));
+
+		expect(subclassPage).toMatch(/^# Storm Path/);
+		expect(featureTablePage).toMatch(/^\{\{wide\n/);
+		expect(subclassTablePage).toMatch(/^\{\{classTable,wide\n/);
+		expect(featureTablePage).not.toContain("\\column");
+		expect(subclassTablePage).not.toContain("\\column");
+	});
+
+	it("Accounts for tall Markdown lists when packing columns", () => {
+		const pages = RenderClassesMarkdown._getFlowPages([
+			`#### Spellcasting\n\n${"A paragraph of spellcasting rules. ".repeat(50)}`,
+			`#### Tinker's Magic\n\nChoose an item from the following list:\n\n${[...new Array(31)].map((_, ix) => `- Item ${ix + 1}`).join("\n")}`,
+		]);
+		const columns = pages.flatMap(page => page.split("\n\n\\column\n\n"));
+
+		expect(Math.max(...columns.map(column => RenderClassesMarkdown._getFlowLines(column))))
+			.toBeLessThanOrEqual(RenderClassesMarkdown._FLOW_LINES_PER_COLUMN);
+		expect(pages.join("\n")).toContain("#### Tinker's Magic *(continued)*");
+	});
+
+	it("Accounts for spacing between densely packed feature blocks", () => {
+		const pages = RenderClassesMarkdown._getFlowPages(
+			[...new Array(30)].map((_, ix) => `#### Feature ${ix + 1}\n\nA short feature description.`),
+		);
+		const columns = pages.flatMap(page => page.split("\n\n\\column\n\n"));
+
+		expect(Math.max(...columns.map(column => RenderClassesMarkdown._getFlowLines(column))))
+			.toBeLessThanOrEqual(RenderClassesMarkdown._FLOW_LINES_PER_COLUMN);
 	});
 });
