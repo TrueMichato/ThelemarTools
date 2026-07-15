@@ -372,7 +372,7 @@ describe("Homebrewery class Markdown export", () => {
 		expect(markdown).not.toContain("*(continued)*");
 	});
 
-	it("Lists mixed feature sources by default and supports opting out", () => {
+	it("Lists every feature source when the exported document mixes sources and supports opting out", () => {
 		const cls = getClass();
 		cls.classFeatures[0][0].source = "XPHB";
 		cls.classFeatures[0][0].page = 18;
@@ -380,22 +380,10 @@ describe("Homebrewery class Markdown export", () => {
 		cls.classFeatures[1][0].page = 7;
 		const sc = getSubclass();
 		sc.source = "TGTT-2014";
-		sc.subclassFeatures = [
-			[
-				{
-					level: 2,
-					entries: [
-						{
-							type: "entries",
-							name: "Borrowed Storm",
-							source: "XGE",
-							page: 15,
-							entries: ["Move with a borrowed storm."],
-						},
-					],
-				},
-			],
-		];
+		sc.subclassFeatures.flat().forEach((feature, ix) => {
+			feature.source = "TGTT-2014";
+			feature.page = 20 + ix;
+		});
 
 		const markdown = RenderClassesMarkdown.getMarkdown({
 			cls,
@@ -411,7 +399,18 @@ describe("Homebrewery class Markdown export", () => {
 
 		expect(markdown).toMatch(/\*Source: Player.s Handbook \(2024\), p\. 18\*/);
 		expect(markdown).toMatch(/\*Source: Tasha.s Cauldron of Everything, p\. 7\*/);
-		expect(markdown).toMatch(/\*Source: Xanathar.s Guide to Everything, p\. 15\*/);
+		expect(markdown).toMatch(/#### Level 2: Storm Step\n\n\*Source: .*2014.*, p\. 20\*/);
+		expect(markdown).toMatch(/#### Level 3: Thunderous Return\n\n\*Source: .*2014.*, p\. 21\*/);
 		expect(markdownWithoutSources).not.toContain("*Source:");
+	});
+
+	it("Uses selected subclass names in the download filename", () => {
+		const cls = getClass();
+		const sc = getSubclass();
+
+		expect(RenderClassesMarkdown.getDownloadFilename({cls, subclasses: [sc]}))
+			.toBe("Vanguard-XPHB-Storm.md");
+		expect(RenderClassesMarkdown.getDownloadFilename({cls}))
+			.toBe("Vanguard-XPHB-Class-Only.md");
 	});
 });

@@ -57,24 +57,26 @@ export class RenderClassesMarkdown {
 		const classTable = this._getClassTable({cls, subclasses});
 		if (classTable) pages.push(classTable);
 
-		const isIncludeClassFeatureSources = isIncludeFeatureSources && this._hasMixedFeatureSources({
-			ownerSource: cls.source,
-			features: cls.classFeatures,
+		const isIncludeDocumentFeatureSources = isIncludeFeatureSources && this._hasMixedFeatureSources({
+			ownerSources: [
+				cls.source,
+				...subclasses.map(sc => sc.source),
+			],
+			features: [
+				cls.classFeatures,
+				...subclasses.map(sc => sc.subclassFeatures),
+			],
 		});
 		const contentBlocks = [
 			`## ${cls.name} Class Features`,
 			...this._getFeatureBlocks({
 				features: cls.classFeatures,
-				isIncludeFeatureSources: isIncludeClassFeatureSources,
+				isIncludeFeatureSources: isIncludeDocumentFeatureSources,
 			}),
 		];
 
 		subclasses.forEach((sc, ix) => {
 			const scFluff = subclassFluffs[ix];
-			const isIncludeSubclassFeatureSources = isIncludeFeatureSources && this._hasMixedFeatureSources({
-				ownerSource: sc.source,
-				features: sc.subclassFeatures,
-			});
 			contentBlocks.push(
 				this._getSubclassTitle({cls, sc}),
 				this._getImageMarkdown({ent: sc, fluff: scFluff, baseUrl}),
@@ -82,7 +84,7 @@ export class RenderClassesMarkdown {
 				...this._getSubclassTables({sc}),
 				...this._getFeatureBlocks({
 					features: sc.subclassFeatures,
-					isIncludeFeatureSources: isIncludeSubclassFeatureSources,
+					isIncludeFeatureSources: isIncludeDocumentFeatureSources,
 				}),
 			);
 		});
@@ -98,6 +100,18 @@ export class RenderClassesMarkdown {
 			ptsPages.join("\n\n\\page\n\n"),
 			"",
 		].join("\n\n");
+	}
+
+	static getDownloadFilename ({cls, subclasses = []}) {
+		if (!cls) throw new Error("A class is required to generate a download filename.");
+
+		const subclassSuffix = !subclasses.length
+			? "Class-Only"
+			: subclasses.length <= 3
+				? subclasses.map(sc => sc.shortName || sc.name).join("-")
+				: `${subclasses.length}-Subclasses`;
+
+		return `${DataUtil.getCleanFilename(`${cls.name}-${cls.source}-${subclassSuffix}`)}.md`;
 	}
 
 	static _getMetadata ({cls, subclasses}) {
@@ -356,8 +370,8 @@ ${rows.map(row => `| ${row.map(it => this._getTableCell(it)).join(" | ")} |`).jo
 			});
 	}
 
-	static _hasMixedFeatureSources ({ownerSource, features}) {
-		const sources = new Set(ownerSource ? [ownerSource] : []);
+	static _hasMixedFeatureSources ({ownerSources = [], features}) {
+		const sources = new Set(ownerSources.filter(Boolean));
 
 		const addSources = entry => {
 			if (Array.isArray(entry)) return entry.forEach(addSources);

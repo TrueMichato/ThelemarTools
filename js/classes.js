@@ -915,8 +915,7 @@ class ClassesPage extends MixinComponentGlobalState(MixinBaseComponent(MixinProx
 					const cls = this.activeClassRaw;
 					if (!cls) throw new Error("No class is selected.");
 
-					const subclasses = (cls.subclasses || [])
-						.filter(sc => this._state[UrlUtil.getStateKeySubclass(sc)])
+					const subclasses = this._getActiveSubclasses()
 						.filter(sc => !this.constructor.isSubclassExcluded_(cls, sc));
 					const markdown = await RenderClassesMarkdown.pGetMarkdown({
 						cls,
@@ -925,7 +924,10 @@ class ClassesPage extends MixinComponentGlobalState(MixinBaseComponent(MixinProx
 						baseUrl: window.location.href,
 					});
 
-					DataUtil.userDownloadText(`${DataUtil.getCleanFilename(`${cls.name}-${cls.source}`)}.md`, markdown);
+					DataUtil.userDownloadText(
+						RenderClassesMarkdown.getDownloadFilename({cls, subclasses}),
+						markdown,
+					);
 				} catch (e) {
 					JqueryUtil.doToast({
 						type: "danger",
