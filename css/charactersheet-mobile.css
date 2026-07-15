@@ -1061,3 +1061,16 @@
 		overscroll-behavior-y: contain;
 	}
 }
+
+/* ========================================================================
+   Light mode (Day Mode) overrides for mobile
+
+   Active only when the site is in day mode. Mobile is token-driven, so the
+   day-mode token layer handles the bulk; this patches a hardcoded faint-white
+   surface that would vanish on the light canvas.
+   ======================================================================== */
+@media (max-width: 768px) {
+	:root:not(.ve-night-mode) .charsheet-mobile__roll-toolbar-close {
+		background: rgba(15, 23, 42, 0.06);
+	}
+}

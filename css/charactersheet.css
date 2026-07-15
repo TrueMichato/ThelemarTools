@@ -20336,3 +20336,75 @@ color: var(--cs-text-primary, #f1f5f9);
 	color: #ef4444;
 	font-weight: 600;
 }
+
+/* ========================================================================
+   Light mode (Day Mode) component overrides
+
+   Activated only when the site is in day mode (no `.ve-night-mode` on <html>).
+   These patch component-level styles that hardcode dark-mode assumptions and
+   therefore aren't fixed by the day-mode token layer in charactersheet-modern.css.
+   Night mode is untouched.
+   ======================================================================== */
+
+/* Bootstrap-style label badges (spell school, ritual, source, action-cost,
+   combat-method chips …) are rendered as white text on a transparent/pale
+   background — invisible on a light canvas. Give them readable semantic text
+   colours. Solid badges (`.badge-primary`, numeric circles) keep white text. */
+:root:not(.ve-night-mode) .badge-secondary { color: var(--cs-text-secondary); }
+:root:not(.ve-night-mode) .badge-success { color: var(--cs-success); }
+:root:not(.ve-night-mode) .badge-danger { color: var(--cs-danger); }
+:root:not(.ve-night-mode) .badge-info { color: var(--cs-info); }
+:root:not(.ve-night-mode) .badge-warning { color: var(--cs-warning); }
+:root:not(.ve-night-mode) .charsheet__spell-source-badge {
+	color: var(--cs-warning);
+	border-color: rgba(180, 83, 9, 0.35);
+}
+:root:not(.ve-night-mode) .badge-outline-secondary {
+	color: var(--cs-text-secondary);
+	border-color: var(--cs-border-hover);
+}
+:root:not(.ve-night-mode) .badge-outline-info {
+	color: var(--cs-info);
+	border-color: rgba(14, 116, 144, 0.4);
+}
+:root:not(.ve-night-mode) .badge-outline-primary {
+	color: var(--cs-primary);
+	border-color: rgba(99, 102, 241, 0.4);
+}
+:root:not(.ve-night-mode) .badge-outline-success {
+	color: var(--cs-success);
+	border-color: rgba(4, 120, 87, 0.4);
+}
+:root:not(.ve-night-mode) .badge-outline-warning {
+	color: var(--cs-warning);
+	border-color: rgba(180, 83, 9, 0.4);
+}
+:root:not(.ve-night-mode) .badge-outline-danger {
+	color: var(--cs-danger);
+	border-color: rgba(220, 38, 38, 0.4);
+}
+
+/* Preserve the level-up accordion status chip's indigo text (it sits on a pale
+   indigo background), overriding the generic .badge-info rule above. */
+:root:not(.ve-night-mode) .charsheet__levelup-accordion-badge.badge-info { color: var(--cs-primary); }
+
+/* Bright emerald/gold accents that read fine on dark but wash out on light. */
+:root:not(.ve-night-mode) .charsheet__spell-count-granted { color: var(--cs-success, #047857); }
+:root:not(.ve-night-mode) .charsheet__spell-group--innate .charsheet__spell-group-header { color: #a16207; }
+
+/* Solid-red "Damage" action button forces red text via var(--cs-danger); on the
+   day-mode solid red button that's red-on-red. Restore white text. Scope to the
+   button variant only — the same class is reused for damage-value text labels
+   that must keep their red-on-light colour. */
+:root:not(.ve-night-mode) .ve-btn.charsheet__attack-damage { color: #fff; }
+
+/* Weapon-mastery property labels use a light gold that washes out on white. */
+:root:not(.ve-night-mode) .charsheet__mastery-prop { color: #a16207; }
+
+/* Respec / level-history choice chips use bright accent text tuned for dark
+   backgrounds. Deepen them for readable contrast on the pale day-mode chips. */
+:root:not(.ve-night-mode) .charsheet__level-choice--feat { color: var(--cs-warning, #b45309); }
+:root:not(.ve-night-mode) .charsheet__level-choice--feature { color: var(--cs-success, #047857); }
+:root:not(.ve-night-mode) .charsheet__level-choice--subclass { color: var(--cs-accent-amethyst, #9333ea); }
+:root:not(.ve-night-mode) .charsheet__level-choice--skill { color: var(--cs-accent-sapphire, #2563eb); }
+:root:not(.ve-night-mode) .charsheet__level-choice--hp { color: var(--cs-danger, #dc2626); }

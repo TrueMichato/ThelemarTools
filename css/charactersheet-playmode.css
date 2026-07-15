@@ -4002,3 +4002,27 @@ text-align: center;
 outline: 1px solid var(--cs-accent, #7c6fcb);
 border-color: var(--cs-accent, #7c6fcb);
 }
+
+/* ========================================================================
+   Light mode (Day Mode) overrides for play mode
+
+   Active only when the site is in day mode (no `.ve-night-mode` on <html>).
+   Play mode is almost entirely token-driven, so the day-mode token layer in
+   charactersheet-modern.css handles the bulk. These patch the few spots that
+   resolve a too-light token (or hardcode a dark-oriented value) for text.
+   ======================================================================== */
+
+/* The per-skill ability tag uses the "disabled" text token, which is
+   deliberately faint; on a white play-mode card it drops below readable
+   contrast. Use the muted token instead. */
+:root:not(.ve-night-mode) .pm-skill__ability { color: var(--cs-text-muted, #64748b); }
+
+/* Item-rarity badges (in the play-mode detail modal) use bright dark-mode text
+   colours on 15%-alpha tints; on the pale day-mode tint they wash out. Deepen
+   the text to darker shades of the same hue. */
+:root:not(.ve-night-mode) .pm-modal__rarity-badge--common { color: #475569; }
+:root:not(.ve-night-mode) .pm-modal__rarity-badge--uncommon { color: #047857; }
+:root:not(.ve-night-mode) .pm-modal__rarity-badge--rare { color: #0284c7; }
+:root:not(.ve-night-mode) .pm-modal__rarity-badge--very-rare { color: #9333ea; }
+:root:not(.ve-night-mode) .pm-modal__rarity-badge--legendary { color: #b45309; }
+:root:not(.ve-night-mode) .pm-modal__rarity-badge--artifact { color: #dc2626; }

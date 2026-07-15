@@ -144,7 +144,39 @@ BEM-like naming: `.charsheet__element--modifier`
 - Layout: `.charsheet__main-header`, `.charsheet__tab-content`
 - Buttons: `.charsheet__icon-btn--danger`, `.charsheet__toggle-btn--active`
 - Utility classes from 5etools: `.ve-flex-col`, `.w-100`, `.no-wrap`, `.my-0`
-- Two stylesheets: `charactersheet.css` (layout), `charactersheet-modern.css` (aesthetics)
+- Four stylesheets: `charactersheet.css` (layout/main sheet), `charactersheet-modern.css`
+  (design tokens + aesthetics), `charactersheet-playmode.css` (Alt View / `pm-*`),
+  `charactersheet-mobile.css` (`<768px`).
+
+#### Design tokens & light mode (Day Mode)
+
+- All colours flow through `--cs-*` design tokens defined in `charactersheet-modern.css`.
+  `:root` holds the **dark-mode** values; the sheet was originally dark-only.
+- **The sheet follows the site's Day/Night toggle automatically** — there is no
+  separate character-sheet theme switch. `StyleSwitcher` (`js/styleswitch.js`) adds
+  `.ve-night-mode` to `<html>` for night themes; **Day mode carries no class**. So
+  `:root:not(.ve-night-mode)` / `html:not(.ve-night-mode)` reliably means "site is in
+  day mode" (it also resolves the "auto" theme against the OS).
+- **Light mode is purely additive** — night mode must stay byte-for-byte unchanged.
+  The day-mode layer lives in a `:root:not(.ve-night-mode) { … }` token block in
+  `charactersheet-modern.css` (overrides `--cs-bg-*`, `--cs-text-*`, `--cs-border`,
+  shadows, tints, and *deepens* solid accent tokens like `--cs-warning`/`--cs-success`
+  so coloured text stays legible on a white canvas). It also defines the ~35 tokens
+  that were referenced via `var(--token, fallback)` but never actually defined, so day
+  mode resolves them instead of falling back to a dark-oriented colour.
+- **Adding new styles:** prefer `var(--cs-*)` tokens — they get light mode for free.
+  When a component hardcodes a dark-oriented value (white text on a transparent/pale
+  badge, bright `#f59e0b`/`#10b981`-style accent text on a tint, a `rgba(255,255,255,…)`
+  inset/border, etc.), add a **day-mode-only** override scoped with
+  `:root:not(.ve-night-mode) …` rather than changing the base rule. These overrides are
+  grouped in a "Light mode (Day Mode)" section at the end of each of the three
+  component stylesheets. Watch specificity: `:root:not(.ve-night-mode) .x` = (0,3,0),
+  and scope button-vs-text carefully when a class is reused (e.g.
+  `.ve-btn.charsheet__attack-damage` for the red button, but not the damage-value text
+  label that shares `.charsheet__attack-damage`).
+- Verify both themes after colour changes: toggle Day/Night via the site's style switcher
+  (`styleSwitcher._setActiveStyleTheme('day'|'night')`) and confirm night mode is visually
+  identical to before.
 
 ### Data Validation Patterns
 

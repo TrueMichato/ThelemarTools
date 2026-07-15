@@ -95,24 +95,115 @@
 	--cs-transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Light mode overrides */
-@media (prefers-color-scheme: light) {
-	:root.cs-light-mode {
-		--cs-bg-base: #f8fafc;
-		--cs-bg-surface: #ffffff;
-		--cs-bg-elevated: #f1f5f9;
-		--cs-bg-hover: rgba(0, 0, 0, 0.03);
-		--cs-bg-active: rgba(0, 0, 0, 0.06);
-		--cs-text-primary: #0f172a;
-		--cs-text-secondary: #475569;
-		--cs-text-muted: #64748b;
-		--cs-text-disabled: #94a3b8;
-		--cs-border: rgba(0, 0, 0, 0.1);
-		--cs-border-hover: rgba(0, 0, 0, 0.2);
-		--cs-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-		--cs-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-		--cs-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
-	}
+/* ========================================================================
+   Light mode (Day Mode) token overrides
+
+   The 5etools site adds the class `ve-night-mode` to <html> for every night
+   theme; day mode carries no class. `:root:not(.ve-night-mode)` therefore means
+   "the site is in day mode", so the character-sheet light palette follows the
+   site's Day/Night selector automatically — no JS and no separate toggle.
+
+   This layer only *adds* a light palette; the dark defaults in :root above stay
+   the source of truth for night mode.
+   ======================================================================== */
+:root:not(.ve-night-mode) {
+	/* Accent tints — bumped slightly so they stay visible on light surfaces */
+	--cs-primary-light: rgba(99, 102, 241, 0.12);
+	--cs-primary-glow: rgba(99, 102, 241, 0.28);
+	--cs-accent-gold-light: rgba(245, 158, 11, 0.16);
+	--cs-accent-emerald-light: rgba(16, 185, 129, 0.16);
+	--cs-accent-ruby-light: rgba(239, 68, 68, 0.14);
+	--cs-accent-sapphire-light: rgba(59, 130, 246, 0.14);
+	--cs-accent-amethyst-light: rgba(168, 85, 247, 0.14);
+
+	/* Semantic tints */
+	--cs-success-light: rgba(16, 185, 129, 0.12);
+	--cs-warning-light: rgba(245, 158, 11, 0.14);
+	--cs-danger-light: rgba(239, 68, 68, 0.10);
+	--cs-info-light: rgba(6, 182, 212, 0.12);
+
+	/* Backgrounds */
+	--cs-bg-base: #eef1f6;
+	--cs-bg-surface: #ffffff;
+	--cs-bg-elevated: #f4f6fb;
+	--cs-bg-hover: rgba(15, 23, 42, 0.04);
+	--cs-bg-active: rgba(15, 23, 42, 0.07);
+
+	/* Text */
+	--cs-text-primary: #0f172a;
+	--cs-text-secondary: #475569;
+	--cs-text-muted: #64748b;
+	--cs-text-disabled: #94a3b8;
+
+	/* Borders */
+	--cs-border: rgba(15, 23, 42, 0.12);
+	--cs-border-hover: rgba(15, 23, 42, 0.24);
+
+	/* Shadows — softer and cooler on light surfaces */
+	--cs-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+	--cs-shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.10), 0 2px 4px -2px rgba(15, 23, 42, 0.08);
+	--cs-shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.12), 0 4px 6px -4px rgba(15, 23, 42, 0.10);
+	--cs-shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.10);
+	--cs-shadow-glow: 0 0 20px rgba(99, 102, 241, 0.22);
+
+	/* --------------------------------------------------------------------
+	   Deepened solid accents for legible coloured *text* on light surfaces.
+	   The bright dark-mode values (#f59e0b etc.) fail contrast on a white
+	   canvas; these are darker shades of the same hue. Used as button/pill
+	   backgrounds they simply read a touch richer, which suits light mode.
+	   -------------------------------------------------------------------- */
+	--cs-accent-gold: #b45309;
+	--cs-warning: #b45309;
+	--cs-success: #047857;
+	--cs-accent-emerald: #047857;
+	--cs-info: #0e7490;
+	--cs-danger: #dc2626;
+	--cs-accent-ruby: #dc2626;
+	--cs-accent-sapphire: #2563eb;
+	--cs-accent-amethyst: #9333ea;
+
+	/* --------------------------------------------------------------------
+	   Tokens that were *referenced but never defined* anywhere in the sheet
+	   CSS. In night mode they stay undefined so each `var(--token, fallback)`
+	   keeps its (light) fallback exactly as before; here we give them light
+	   values so day mode resolves them correctly instead of falling back to a
+	   dark-mode colour. Sizing-only undefined tokens are intentionally left
+	   alone — their fallbacks are theme-neutral.
+	   -------------------------------------------------------------------- */
+	--cs-text: #0f172a;
+	--cs-text-tertiary: #64748b;
+	--cs-text-on-accent: #ffffff;
+	--cs-accent: #7c3aed;
+	--cs-accent-purple: #7c3aed;
+	--cs-accent-amber: #b45309;
+	--cs-accent-amber-light: rgba(180, 83, 9, 0.12);
+	--cs-accent-blue: #2563eb;
+	--cs-accent-blue-dark: #1d4ed8;
+	--cs-accent-sky: #0284c7;
+	--cs-accent-sky-light: rgba(2, 132, 199, 0.12);
+	--cs-accent-green: #047857;
+	--cs-accent-bg: rgba(124, 58, 237, 0.10);
+	--cs-sapphire-light: rgba(37, 99, 235, 0.12);
+	--cs-error: #dc2626;
+	--cs-primary-rgb: 99, 102, 241;
+
+	--cs-bg: #eef1f6;
+	--cs-bg-alt: #f1f5f9;
+	--cs-bg-secondary: #f1f5f9;
+	--cs-bg-tertiary: #e2e8f0;
+	--cs-bg-card: #ffffff;
+	--cs-bg-input: #ffffff;
+	--cs-input-bg: #ffffff;
+	--cs-card-bg: #ffffff;
+	--cs-card-bg-hover: #f1f5f9;
+	--cs-danger-bg: rgba(220, 38, 38, 0.08);
+	--cs-surface: #ffffff;
+	--cs-surface-2: #f1f5f9;
+	--cs-surface-3: #e2e8f0;
+
+	--cs-border-color: rgba(15, 23, 42, 0.12);
+	--cs-border-subtle: rgba(15, 23, 42, 0.06);
+	--cs-border-light: rgba(15, 23, 42, 0.06);
 }
 
 /* ========================================================================
@@ -190,6 +281,24 @@ body[data-theme] {
 	background-color: var(--cs-theme-bg, #1c1c1c) !important;
 	transition: background-color 0.3s ease;
 }
+
+/* ------------------------------------------------------------------------
+   Day Mode variants — pale tints of each theme hue so the customizable page
+   background still works while reading as a light canvas.
+   ------------------------------------------------------------------------ */
+:root:not(.ve-night-mode) [data-theme="default"] { --cs-theme-bg: #eef1f6; }
+:root:not(.ve-night-mode) [data-theme="indigo"] { --cs-theme-bg: #eef0ff; }
+:root:not(.ve-night-mode) [data-theme="crimson"] { --cs-theme-bg: #fdecec; }
+:root:not(.ve-night-mode) [data-theme="emerald"] { --cs-theme-bg: #e9f7ef; }
+:root:not(.ve-night-mode) [data-theme="amber"] { --cs-theme-bg: #fdf4e3; }
+:root:not(.ve-night-mode) [data-theme="sapphire"] { --cs-theme-bg: #eaf1fd; }
+:root:not(.ve-night-mode) [data-theme="amethyst"] { --cs-theme-bg: #f5edfe; }
+:root:not(.ve-night-mode) [data-theme="rose"] { --cs-theme-bg: #fdeaf0; }
+:root:not(.ve-night-mode) [data-theme="teal"] { --cs-theme-bg: #e6f5f4; }
+:root:not(.ve-night-mode) [data-theme="slate"] { --cs-theme-bg: #eceff4; }
+:root:not(.ve-night-mode) [data-theme="copper"] { --cs-theme-bg: #fbeee4; }
+:root:not(.ve-night-mode) [data-theme="forest"] { --cs-theme-bg: #eaf5ec; }
+:root:not(.ve-night-mode) [data-theme="midnight"] { --cs-theme-bg: #e8edf5; }
 
 /* ========================================================================
    Base Resets & Typography
