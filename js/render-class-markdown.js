@@ -1,9 +1,10 @@
 export class RenderClassesMarkdown {
 	static _FLOW_LINES_PER_COLUMN = 50;
-	static _MIN_FLOW_LINES_TO_SPLIT_COLUMN = 14;
+	static _MIN_FLOW_LINES_TO_SPLIT_COLUMN = 6;
+	static _MAX_KEEP_TOGETHER_FLOW_LINES = 16;
 	static _TAG_BLOCKLIST_LINKS = new Set(["@5etools", "@link", "@loader"]);
 
-	static async pGetMarkdown ({cls, subclasses = [], baseUrl = globalThis.location?.href}) {
+	static async pGetMarkdown ({cls, subclasses = [], isIncludeFeatureSources = true, baseUrl = globalThis.location?.href}) {
 		const [classFluff, subclassFluffs] = await Promise.all([
 			Renderer.class.pGetFluff(cls),
 			Promise.all(subclasses.map(sc => Renderer.subclass.pGetFluff(sc))),
@@ -14,6 +15,7 @@ export class RenderClassesMarkdown {
 			subclasses,
 			classFluff,
 			subclassFluffs,
+			isIncludeFeatureSources,
 			baseUrl,
 		});
 	}
@@ -24,6 +26,7 @@ export class RenderClassesMarkdown {
 			subclasses = [],
 			classFluff = null,
 			subclassFluffs = [],
+			isIncludeFeatureSources = true,
 			baseUrl = globalThis.location?.href,
 		},
 	) {
@@ -54,20 +57,33 @@ export class RenderClassesMarkdown {
 		const classTable = this._getClassTable({cls, subclasses});
 		if (classTable) pages.push(classTable);
 
+		const isIncludeClassFeatureSources = isIncludeFeatureSources && this._hasMixedFeatureSources({
+			ownerSource: cls.source,
+			features: cls.classFeatures,
+		});
 		const contentBlocks = [
 			`## ${cls.name} Class Features`,
-			...this._getFeatureBlocks({features: cls.classFeatures}),
+			...this._getFeatureBlocks({
+				features: cls.classFeatures,
+				isIncludeFeatureSources: isIncludeClassFeatureSources,
+			}),
 		];
 
 		subclasses.forEach((sc, ix) => {
 			const scFluff = subclassFluffs[ix];
+			const isIncludeSubclassFeatureSources = isIncludeFeatureSources && this._hasMixedFeatureSources({
+				ownerSource: sc.source,
+				features: sc.subclassFeatures,
+			});
 			contentBlocks.push(
 				this._getSubclassTitle({cls, sc}),
 				this._getImageMarkdown({ent: sc, fluff: scFluff, baseUrl}),
 				this._getFluff({ent: sc, fluff: scFluff}),
 				...this._getSubclassTables({sc}),
-				`## ${sc.name} Features`,
-				...this._getFeatureBlocks({features: sc.subclassFeatures}),
+				...this._getFeatureBlocks({
+					features: sc.subclassFeatures,
+					isIncludeFeatureSources: isIncludeSubclassFeatureSources,
+				}),
 			);
 		});
 		pages.push(...this._getFlowPages(contentBlocks));
@@ -318,7 +334,7 @@ ${rows.map(row => `| ${row.map(it => this._getTableCell(it)).join(" | ")} |`).jo
 }}`;
 	}
 
-	static _getFeatureBlocks ({features}) {
+	static _getFeatureBlocks ({features, isIncludeFeatureSources = false}) {
 		return (features || [])
 			.flat()
 			.filter(Boolean)
@@ -327,14 +343,38 @@ ${rows.map(row => `| ${row.map(it => this._getTableCell(it)).join(" | ")} |`).jo
 				const heading = name
 					? `#### ${feature.level ? `Level ${feature.level}: ` : ""}${Renderer.stripTags(name)}`
 					: null;
+				const source = isIncludeFeatureSources && feature.source
+					? this._getFeatureSourceMarkdown(feature)
+					: null;
 				const body = feature.entries?.length
-					? this._renderEntries(feature.entries)
-					: this._renderEntries([{...feature, name: null, _displayName: null}]);
+					? this._renderEntries(feature.entries, {isIncludeFeatureSources})
+					: this._renderEntries([{...feature, name: null, _displayName: null}], {isIncludeFeatureSources});
 
-				return [heading, body]
+				return [heading, source, body]
 					.filter(Boolean)
 					.join("\n\n");
 			});
+	}
+
+	static _hasMixedFeatureSources ({ownerSource, features}) {
+		const sources = new Set(ownerSource ? [ownerSource] : []);
+
+		const addSources = entry => {
+			if (Array.isArray(entry)) return entry.forEach(addSources);
+			if (!entry || typeof entry !== "object") return;
+			if (entry.source) sources.add(entry.source);
+			if (entry.entries) addSources(entry.entries);
+			if (entry.items) addSources(entry.items);
+		};
+		addSources(features);
+
+		return sources.size > 1;
+	}
+
+	static _getFeatureSourceMarkdown ({source, page}) {
+		const sourceFull = Parser.sourceJsonToFull(source);
+		if (!sourceFull) return null;
+		return `*Source: ${sourceFull}${page != null ? `, p. ${page}` : ""}*`;
 	}
 
 	static _getFluff ({ent, fluff}) {
@@ -449,11 +489,8 @@ ${imageMarkdown}
 		const paragraphs = block.split(/\n{2,}/);
 		if (!paragraphs.some(paragraph => this._isWideFlowBlock(paragraph))) return [block];
 
-		const heading = paragraphs[0].match(/^(#{2,6} .+)$/)?.[1];
-		const continuationHeading = heading ? `${heading} *(continued)*` : null;
 		const out = [];
 		let stack = [];
-		let isAfterWide = false;
 
 		const doFlush = () => {
 			if (!stack.length) return;
@@ -465,13 +502,10 @@ ${imageMarkdown}
 			if (this._isWideFlowBlock(paragraph)) {
 				doFlush();
 				out.push(paragraph);
-				isAfterWide = true;
 				return;
 			}
 
-			if (!stack.length && isAfterWide && continuationHeading) stack.push(continuationHeading);
 			stack.push(paragraph);
-			isAfterWide = false;
 		});
 		doFlush();
 
@@ -489,8 +523,106 @@ ${imageMarkdown}
 	static _getSplitFlowBlockAtSize (block, maxLines) {
 		if (this._getFlowLines(block) <= maxLines || /^\{\{[^]*\}\}$/.test(block)) return null;
 
+		const sections = this._getFlowSections(block);
+		const stack = [];
+		let stackLines = 0;
+		let ixSection = 0;
+
+		for (; ixSection < sections.length; ++ixSection) {
+			const section = sections[ixSection];
+			const linesWithSpacing = this._getFlowLines(section) + (stack.length ? 0.25 : 0);
+			if (stack.length && stackLines + linesWithSpacing > maxLines) break;
+			if (!stack.length && linesWithSpacing > maxLines) break;
+			stack.push(section);
+			stackLines += linesWithSpacing;
+		}
+
+		if (!stack.length) {
+			const section = sections[0];
+			if (this._getFlowLines(section) <= this._MAX_KEEP_TOGETHER_FLOW_LINES) return null;
+
+			const split = this._getSplitFlowSectionAtSize(section, maxLines);
+			if (!split) return null;
+			return [
+				split[0],
+				[split[1], ...sections.slice(1)].join("\n\n"),
+			];
+		}
+		if (ixSection === sections.length) return null;
+
+		return [
+			stack.join("\n\n"),
+			sections.slice(ixSection).join("\n\n"),
+		];
+	}
+
+	static _getSplitFlowBlocks (block) {
+		if (this._getFlowLines(block) <= this._FLOW_LINES_PER_COLUMN) return [block];
+		if (/^\{\{[^]*\}\}$/.test(block)) return [block];
+
+		const sections = this._getFlowSections(block)
+			.flatMap(section => this._getSplitFlowSection(section));
+		const out = [];
+		let stack = [];
+		let stackLines = 0;
+
+		const doFlush = () => {
+			if (!stack.length) return;
+			out.push(stack.join("\n\n"));
+			stack = [];
+			stackLines = 0;
+		};
+
+		sections
+			.forEach(section => {
+				const linesWithSpacing = this._getFlowLines(section) + (stack.length ? 0.25 : 0);
+				if (stack.length && stackLines + linesWithSpacing > this._FLOW_LINES_PER_COLUMN) {
+					doFlush();
+				}
+				stack.push(section);
+				stackLines += this._getFlowLines(section) + (stack.length > 1 ? 0.25 : 0);
+			});
+		doFlush();
+
+		return out;
+	}
+
+	static _getFlowSections (block) {
 		const paragraphs = block.split(/\n{2,}/);
-		const heading = paragraphs[0].match(/^(#{2,6} .+)$/)?.[1];
+		const out = [];
+		let stack = [];
+
+		paragraphs.forEach(paragraph => {
+			if (this._isFlowHeading(paragraph) && stack.length) {
+				out.push(stack.join("\n\n"));
+				stack = [];
+			}
+			stack.push(paragraph);
+		});
+		if (stack.length) out.push(stack.join("\n\n"));
+
+		return out;
+	}
+
+	static _getSplitFlowSection (section) {
+		if (this._getFlowLines(section) <= this._FLOW_LINES_PER_COLUMN) return [section];
+
+		const out = [];
+		let remaining = section;
+		while (this._getFlowLines(remaining) > this._FLOW_LINES_PER_COLUMN) {
+			const split = this._getSplitFlowSectionAtSize(remaining, this._FLOW_LINES_PER_COLUMN);
+			if (!split) return [...out, remaining];
+			out.push(split[0]);
+			remaining = split[1];
+		}
+		if (remaining) out.push(remaining);
+		return out;
+	}
+
+	static _getSplitFlowSectionAtSize (section, maxLines) {
+		const paragraphs = section
+			.split(/\n{2,}/)
+			.flatMap(paragraph => this._getSplitFlowParagraph(paragraph));
 		const stack = [];
 		let stackLines = 0;
 		let ixParagraph = 0;
@@ -503,47 +635,16 @@ ${imageMarkdown}
 			stackLines += linesWithSpacing;
 		}
 
-		const isOnlyHeading = heading && stack.length === 1;
-		if (!stack.length || isOnlyHeading || ixParagraph === paragraphs.length) return null;
-
-		const remainder = paragraphs.slice(ixParagraph);
-		if (heading) remainder.unshift(`${heading} *(continued)*`);
+		if (stack.length === 1 && this._isFlowHeading(stack[0])) return null;
+		if (!stack.length || ixParagraph === paragraphs.length) return null;
 		return [
 			stack.join("\n\n"),
-			remainder.join("\n\n"),
+			paragraphs.slice(ixParagraph).join("\n\n"),
 		];
 	}
 
-	static _getSplitFlowBlocks (block) {
-		if (this._getFlowLines(block) <= this._FLOW_LINES_PER_COLUMN) return [block];
-		if (/^\{\{[^]*\}\}$/.test(block)) return [block];
-
-		const paragraphs = block.split(/\n{2,}/);
-		const heading = paragraphs[0].match(/^(#{2,6} .+)$/)?.[1];
-		const continuationHeading = heading ? `${heading} *(continued)*` : null;
-		const out = [];
-		let stack = [];
-		let stackLines = 0;
-
-		const doFlush = () => {
-			if (!stack.length) return;
-			out.push(stack.join("\n\n"));
-			stack = continuationHeading ? [continuationHeading] : [];
-			stackLines = continuationHeading ? this._getFlowLines(continuationHeading) : 0;
-		};
-
-		paragraphs
-			.flatMap(paragraph => this._getSplitFlowParagraph(paragraph))
-			.forEach(paragraph => {
-				const linesWithSpacing = this._getFlowLines(paragraph) + (stack.length ? 0.25 : 0);
-				const isStackOnlyHeading = stack.length === 1 && /^#{2,6} /.test(stack[0]);
-				if (stack.length && !isStackOnlyHeading && stackLines + linesWithSpacing > this._FLOW_LINES_PER_COLUMN) doFlush();
-				stack.push(paragraph);
-				stackLines += this._getFlowLines(paragraph) + (stack.length > 1 ? 0.25 : 0);
-			});
-		doFlush();
-
-		return out;
+	static _isFlowHeading (paragraph) {
+		return /^#{2,6}\s/.test(paragraph);
 	}
 
 	static _getSplitFlowParagraph (paragraph) {
@@ -612,11 +713,32 @@ ${imageMarkdown}
 			}, 0);
 	}
 
-	static _renderEntries (entries) {
+	static _renderEntries (entries, {isIncludeFeatureSources = false} = {}) {
+		if (isIncludeFeatureSources) entries = this._getEntriesWithFeatureSources(entries);
 		return this._getPortableMarkdown(RendererMarkdown.get()
 			.setFirstSection(true)
 			.render({type: "entries", entries: this._getEntriesPortable(entries)})
 			.trim());
+	}
+
+	static _getEntriesWithFeatureSources (entry) {
+		if (Array.isArray(entry)) return entry.map(it => this._getEntriesWithFeatureSources(it));
+		if (entry == null || typeof entry !== "object") return entry;
+
+		const out = Object.fromEntries(
+			Object.entries(entry)
+				.map(([key, value]) => [key, this._getEntriesWithFeatureSources(value)]),
+		);
+		if (
+			entry.name
+			&& entry.source
+			&& Array.isArray(out.entries)
+			&& ["entries", "section", "optfeature"].includes(entry.type)
+		) {
+			const source = this._getFeatureSourceMarkdown(entry);
+			if (source) out.entries.unshift(source);
+		}
+		return out;
 	}
 
 	static _getEntriesPortable (entry) {
@@ -663,9 +785,10 @@ ${imageMarkdown}
 				return `| ${cells.join(" | ")} |`;
 			});
 
+		const tableWrapper = colCount > 2 ? "{{wide" : "{{";
 		const pts = [
 			entry.intro?.length ? this._renderEntries(entry.intro) : null,
-			`{{wide
+			`${tableWrapper}
 ${entry.caption ? `##### ${Renderer.stripTags(entry.caption)}\n` : ""}| ${labels.map(label => this._getTableCell(label)).join(" | ")} |
 |${alignments.join("|")}|
 ${tableRows.join("\n")}

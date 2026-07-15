@@ -219,7 +219,8 @@ describe("Homebrewery class Markdown export", () => {
 			.slice(1)
 			.map(page => page.length);
 
-		expect(markdown).toContain("#### Level 1: Endless Feature *(continued)*");
+		expect(markdown).not.toContain("*(continued)*");
+		expect(markdown).toContain("Paragraph 80.");
 		expect(pageLengths.length).toBeGreaterThan(2);
 		expect(Math.max(...pageLengths)).toBeLessThan(5000);
 	});
@@ -263,7 +264,8 @@ describe("Homebrewery class Markdown export", () => {
 			.split("\n")
 			.filter(line => line.startsWith("|"));
 
-		expect(markdown).toContain("{{wide");
+		expect(markdown).toContain("{{\n##### Warped Reality Table");
+		expect(markdown).not.toContain("{{wide\n##### Warped Reality Table");
 		expect(markdown).toContain("|:---:|:---|");
 		expect(markdown).toContain("| 1 | **Warped Sight.** The creature is blinded. |");
 		expect(markdown).toContain("see conditions.");
@@ -280,7 +282,7 @@ describe("Homebrewery class Markdown export", () => {
 		]);
 
 		expect(pages).toHaveLength(1);
-		expect(pages[0]).toContain("Second Feature *(continued)*");
+		expect(pages[0]).not.toContain("*(continued)*");
 		expect(pages[0]).toContain("\\column");
 	});
 
@@ -307,9 +309,9 @@ describe("Homebrewery class Markdown export", () => {
 		const subclassTablePage = pages.find(page => page.includes("##### Storm Dice"));
 
 		expect(subclassPage).toMatch(/^# Storm Path/);
-		expect(featureTablePage).toMatch(/^\{\{wide\n/);
+		expect(featureTablePage).toContain("{{\n##### Bold Strike Outcomes");
+		expect(featureTablePage).not.toContain("{{wide\n##### Bold Strike Outcomes");
 		expect(subclassTablePage).toMatch(/^\{\{classTable,wide\n/);
-		expect(featureTablePage).not.toContain("\\column");
 		expect(subclassTablePage).not.toContain("\\column");
 	});
 
@@ -322,7 +324,7 @@ describe("Homebrewery class Markdown export", () => {
 
 		expect(Math.max(...columns.map(column => RenderClassesMarkdown._getFlowLines(column))))
 			.toBeLessThanOrEqual(RenderClassesMarkdown._FLOW_LINES_PER_COLUMN);
-		expect(pages.join("\n")).toContain("#### Tinker's Magic *(continued)*");
+		expect(pages.join("\n")).not.toContain("*(continued)*");
 	});
 
 	it("Accounts for spacing between densely packed feature blocks", () => {
@@ -333,5 +335,83 @@ describe("Homebrewery class Markdown export", () => {
 
 		expect(Math.max(...columns.map(column => RenderClassesMarkdown._getFlowLines(column))))
 			.toBeLessThanOrEqual(RenderClassesMarkdown._FLOW_LINES_PER_COLUMN);
+	});
+
+	it("Keeps nested feature headings with their first paragraph", () => {
+		const cls = getClass();
+		cls.classFeatures = [
+			[
+				{
+					name: "Canvas of the Mind",
+					level: 6,
+					entries: [
+						...new Array(7).fill("A substantial opening paragraph fills the current column with feature rules. ".repeat(5)),
+						{
+							type: "entries",
+							name: "Whispers of Fleetness",
+							entries: [
+								"{@bold Boon}: Your target moves faster.",
+								"{@bold Bane}: Your target moves slower.",
+							],
+						},
+					],
+				},
+			],
+		];
+
+		const markdown = RenderClassesMarkdown.getMarkdown({
+			cls,
+			baseUrl: "https://tools.example/classes.html",
+		});
+		const pagesAndColumns = markdown
+			.split("\n\n\\page\n\n")
+			.flatMap(page => page.split("\n\n\\column\n\n"));
+		const whispersColumn = pagesAndColumns.find(column => column.includes("#### Whispers of Fleetness"));
+
+		expect(whispersColumn).toContain("**Boon**: Your target moves faster.");
+		expect(markdown).not.toContain("*(continued)*");
+	});
+
+	it("Lists mixed feature sources by default and supports opting out", () => {
+		const cls = getClass();
+		cls.classFeatures[0][0].source = "XPHB";
+		cls.classFeatures[0][0].page = 18;
+		cls.classFeatures[1][0].source = "TCE";
+		cls.classFeatures[1][0].page = 7;
+		const sc = getSubclass();
+		sc.source = "TGTT-2014";
+		sc.subclassFeatures = [
+			[
+				{
+					level: 2,
+					entries: [
+						{
+							type: "entries",
+							name: "Borrowed Storm",
+							source: "XGE",
+							page: 15,
+							entries: ["Move with a borrowed storm."],
+						},
+					],
+				},
+			],
+		];
+
+		const markdown = RenderClassesMarkdown.getMarkdown({
+			cls,
+			subclasses: [sc],
+			baseUrl: "https://tools.example/classes.html",
+		});
+		const markdownWithoutSources = RenderClassesMarkdown.getMarkdown({
+			cls,
+			subclasses: [sc],
+			isIncludeFeatureSources: false,
+			baseUrl: "https://tools.example/classes.html",
+		});
+
+		expect(markdown).toMatch(/\*Source: Player.s Handbook \(2024\), p\. 18\*/);
+		expect(markdown).toMatch(/\*Source: Tasha.s Cauldron of Everything, p\. 7\*/);
+		expect(markdown).toMatch(/\*Source: Xanathar.s Guide to Everything, p\. 15\*/);
+		expect(markdownWithoutSources).not.toContain("*Source:");
 	});
 });

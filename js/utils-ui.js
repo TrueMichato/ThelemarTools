@@ -4975,6 +4975,7 @@ MixinComponentGlobalState._Singleton = class {
 	static _getDefaultStateGlobal () {
 		return {
 			isUseSpellPoints: false,
+			isIncludeClassMarkdownFeatureSources: true,
 		};
 	}
 };

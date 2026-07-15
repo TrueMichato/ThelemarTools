@@ -884,6 +884,13 @@ class ClassesPage extends MixinComponentGlobalState(MixinBaseComponent(MixinProx
 	}
 
 	_doBindBtnSettingsSidebar () {
+		const actionMarkdownFeatureSources = new ContextUtil.ActionSelect({
+			values: [true, false],
+			fnOnChange: isInclude => this._stateGlobal.isIncludeClassMarkdownFeatureSources = isInclude,
+			fnGetDisplayValue: isInclude => `Markdown: ${isInclude ? "Include" : "Hide"} feature sources`,
+		});
+		actionMarkdownFeatureSources.setValue(this._stateGlobal.isIncludeClassMarkdownFeatureSources);
+
 		const menu = ContextUtil.getMenu([
 			new ContextUtil.Action(
 				"Toggle &quot;Spell Points&quot; Mode (5e)",
@@ -891,7 +898,10 @@ class ClassesPage extends MixinComponentGlobalState(MixinBaseComponent(MixinProx
 					this._stateGlobal.isUseSpellPoints = !this._stateGlobal.isUseSpellPoints;
 				},
 			),
+			null,
+			actionMarkdownFeatureSources,
 		]);
+		menu.on("open", () => actionMarkdownFeatureSources.setValue(this._stateGlobal.isIncludeClassMarkdownFeatureSources));
 
 		es(`#btn-sidebar-settings`)
 			.onn("click", evt => ContextUtil.pOpenMenu(evt, menu));
@@ -911,6 +921,7 @@ class ClassesPage extends MixinComponentGlobalState(MixinBaseComponent(MixinProx
 					const markdown = await RenderClassesMarkdown.pGetMarkdown({
 						cls,
 						subclasses,
+						isIncludeFeatureSources: this._stateGlobal.isIncludeClassMarkdownFeatureSources,
 						baseUrl: window.location.href,
 					});
 
