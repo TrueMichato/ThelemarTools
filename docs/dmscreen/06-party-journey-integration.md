@@ -85,7 +85,9 @@ The Journey Tracker ignores: AC, speed, senses, conditions, diseases, counters, 
 
 When displaying a player's bonus for an activity, the Journey Tracker:
 
-1. Looks up the activity's associated skill (e.g., Navigate → `survival`)
+1. Determines the activity's allowed skills (`skills[]`); for multi-skill
+   activities it auto-picks the character's **best** allowed skill (highest total),
+   unless the DM has overridden it via the per-slot `skillChoice` dropdown
 2. Maps skill → ability via `SKILL_TO_ABILITY` (e.g., survival → WIS)
 3. Calculates: `abilityMod + (profLevel × profBonus)`
 4. Checks for tool proficiency bonus:

@@ -2,42 +2,61 @@
 
 Compressed reference for `JourneyTrackerRoot`, activities, RM system, and state persistence.
 
+> **Pure logic lives in `js/dmscreen/dmscreen-journeytracker-consts.js`** (DOM-free
+> constants + functions: `classifyRiskRange`, `classifySingleRoll`,
+> `evaluateGroupCheck`, `rmDeltaForOutcome`, `computeEffectiveDc`,
+> `classifyTrackingDegree`, `computeActivityBonus`, `getActivitySkills`, …).
+> It is unit-tested by `test/jest/DmScreenJourneyTracker.test.js`. Prefer adding
+> new rule logic there (testable) and keep `dmscreen-journeytracker.js` for DOM.
+
 ## Constants
 
 ### Journey Activities (8)
 
-| ID | Label | Skill | RM: S/CS/F/CF/Always | Notes |
-|----|-------|-------|---------------------|-------|
+Activities carry a `skills[]` array (allowed skills; best auto-picked, with a DM
+override dropdown). `skill` is retained as a legacy default. Track sets
+`isTracking: true`.
+
+| ID | Label | Skills | RM: S/CS/F/CF/Always | Notes |
+|----|-------|--------|---------------------|-------|
 | navigate | Navigate | survival | 0/0/0/0/0 | DC ±2 by pace |
-| scout | Scout | perception | −1/−1/0/+1/0 | critSuccessPerPlayer, +2 DC to Hide Tracks |
+| scout | Scout | perception, survival | −1/−1/0/+1/0 | critSuccessPerPlayer; fast=disadv, slow=adv; +2 DC to Hide Tracks |
 | map | Map | investigation | 0/0/0/0/0 | Not possible at fast pace |
-| forage | Forage | survival | 0/0/0/+1/0 | Not possible at fast, +2 DC HideTracks |
-| hideTracks | Hide Tracks | stealth | −1/−2/0/+1/0 | DC += 2×(scouts+foragers+entertainers) |
+| forage | Forage | survival, nature | 0/0/0/+1/0 | Not possible at fast, +2 DC HideTracks |
+| hideTracks | Hide Tracks | survival, stealth | −1/−2/0/+1/0 | DC += 2×(scouts+foragers+entertainers) |
 | entertain | Entertain | performance | 0/0/0/+2/+1 | Always +1 RM (noise) |
-| track | Track | survival | 0/0/0/0/0 | Normal: disadvantage, Fast: impossible |
-| custom | Custom | null | 0/0/0/0/0 | Freeform |
+| track | Track | survival | 0/0/0/0/0 | `isTracking`; terrain DC + Degrees; Normal=disadv, Fast=impossible |
+| custom | Custom | (none) | 0/0/0/0/0 | Freeform |
 
 ### Camp Activities (11)
 
-| ID | Label | Skill | RM: S/CS/F/CF/Always | Notes |
-|----|-------|-------|---------------------|-------|
-| campfire | Campfire | survival | 0/0/0/+2/0 | Separate toggle, +1 RM while active |
-| forage | Forage | survival | 0/0/0/+1/+1 | Always +1 RM (leaves camp) |
-| cook | Cook | null | 0/0/0/0/0 | Requires light, reduces exhaustion |
+| ID | Label | Skills | RM: S/CS/F/CF/Always | Notes |
+|----|-------|--------|---------------------|-------|
+| campfire | Campfire | survival, nature | 0/0/0/+2/0 | Separate Setup toggle, +1 RM while active |
+| forage | Forage | survival, nature | 0/0/0/+1/+1 | Always +1 RM (leaves camp) |
+| cook | Cook | (none) | 0/0/0/0/0 | Requires light, reduces exhaustion |
 | pray | Pray | religion | 0/0/0/0/0 | Components may add RM |
 | tend | Tend | medicine | 0/0/0/0/0 | DM adjudicates |
 | entertain | Entertain | performance | 0/0/0/+2/+1 | Same as journey |
-| scout | Scout | perception | −1/−1/0/+1/0 | +2 DC Hide Camp per scout |
-| research | Research | null | 0/0/0/0/0 | Requires light |
-| hideCamp | Hide Camp | stealth | −1/−2/0/+1/0 | Campfire: +2 DC, per scout/forage: +2 DC |
+| scout | Scout | perception, survival | −1/−1/0/+1/0 | +2 DC Hide Camp per scout |
+| research | Research | arcana, nature, religion, investigation | 0/0/0/0/0 | Requires light |
+| hideCamp | Hide Camp | survival, stealth | −1/−2/0/+1/0 | Campfire: +2 DC, per scout/forage: +2 DC |
 | guard | Guard | perception | 0/0/0/+2/0 | Uses dedicated guard slots |
-| custom | Custom | null | 0/0/0/0/0 | Freeform |
+| custom | Custom | (none) | 0/0/0/0/0 | Freeform |
+
+### Tracking sub-system (Track activity)
+
+Terrain DCs (`TRACKING_TERRAINS`, per-slot `trackTerrain`, default `common`):
+Soft 10 / Common 15 / Hard 20 / Barren 25. Degrees of success by margin
+(`classifyTrackingDegree`): ≥+15 Master · ≥+10 Expert · ≥+5 Solid · ≥0 Success ·
+<0 Lost. `TRACKING_MODIFIERS` are advisory circumstance mods shown in an info
+popover (DM adjudicates — not auto-applied).
 
 ### Pace Options
 
 | ID | Navigation DC | Stealth | Scout | Map/Forage |
 |----|--------------|---------|-------|-----------|
-| slow | −2 | Possible | Normal | Normal |
+| slow | −2 | Possible (group check) | Advantage | Normal |
 | normal | Base DC | No | Normal | Normal |
 | fast | +2 | No | Disadvantage | Impossible |
 
@@ -78,8 +97,13 @@ Match: case-insensitive `includes()` against `toolProficiencies[]`. Adds prof bo
 
 ```javascript
 { activity: string, rollResult: string, customName: string,
+  skillChoice: string|null,   // DM skill override (null = auto best skill)
+  trackTerrain: string,       // Track only: terrain DC key (default "common")
   _rmAlwaysApplied: number, _rmRollApplied: number, _critOverride: string|null }
 ```
+
+Arbitrary slot fields survive migration — `_migrateActivities`/`_cloneActivities`
+spread `{...slot}`, so `skillChoice`/`trackTerrain` persist automatically.
 
 ## Risk Modifier (RM) Flow
 
@@ -100,12 +124,24 @@ Roll d12 + current RM → classify by area risk ranges:
 Result logged to event log
 ```
 
-## Group Check (Activities)
+A **risk threshold bar** (`_renderRiskThresholdBar`) visualizes the Empty/Mild/
+Moderate/Intense spans with the rolled total marked. On an **Intense** result the
+section shows an "Encounter resolved → reset RM to 0" button
+(`_renderIntenseReset`) — clicking sets RM to 0, logs it, and stores
+`encounterResolved: true` on the risk object (rules: RM resets after a long rest
+OR an Intense-Range encounter).
 
-When 2+ players select same activity in a segment:
-- ≥ half succeed → group success (use best result)
-- > half fail → group failure (use worst result)
-- RM effects based on group outcome
+## Group Check (Activities & Stealth)
+
+Locked hybrid model (`evaluateGroupCheck(rolls)` → `{outcome, passes, count}`):
+- **All pass** → Critical Success (activity crit-success RM)
+- **All fail** → Critical Failure (activity crit-fail RM)
+- **Mixed** → standard 5e: ≥ half succeed → Success, else Failure
+
+**Stealth** is not an activity row — it is *always* a segment-level Group Check,
+slow-pace only. Hiders' rolls resolve once per segment via `_computeStealthGroup`;
+the net RM (−2 / −1 / 0 / +2) is applied a single time and persisted in
+`seg.stealthGroupRm` (recomputed idempotently on edit/re-render).
 
 ## Roll Mode
 
@@ -123,6 +159,16 @@ getSaveableState():
   Deep clone all state fields
   Clone activities via _cloneActivities() static method
 ```
+
+New backward-compatible fields (defaulted in `setStateFrom`/`_makeEmptySegment`):
+
+| Field | Location | Default |
+|-------|----------|---------|
+| `skillChoice` | activity slot | `null` |
+| `trackTerrain` | Track slot | `"common"` |
+| `stealthGroupRm` | segment | `0` |
+| `encounterResolved` | segment & camp risk | `false` |
+| `camp.siteDescription` | camp | `""` |
 
 ## Party Sync
 
@@ -142,8 +188,8 @@ Sync status: "Synced (N chars)" or "Manual mode"
 
 | Tab | Index | Renders | Key Method |
 |-----|-------|---------|-----------|
-| Journey | 0 | Segment cards (collapsible) → activities + stealth + RM summary + risk roll | `_renderJourney()` |
-| Camp | 1 | Campfire toggle + activities + guard slots + RM summary + risk roll | `_renderCamp()` |
+| Journey | 0 | Segment cards (collapsible) → activities + stealth **group check** + RM summary + risk roll (+ threshold bar / intense reset) | `_renderJourney()` |
+| Camp | 1 | **Setup** (site description, campfire toggle, hide-camp concealment) → **Rest** (activities + guard slots + RM summary + risk roll) | `_renderCamp()` |
 | Area Config | 2 | Area name, base DC, weather (selector + roll + table + custom types), segment count/names, risk ranges | `_renderArea()` |
 | Log | 3 | Event log (newest first), add note, clear all | `_renderLog()` |
 | 📅 Timeline | 4 | Journey name/date, running totals, current day indicator, day cards (reverse chrono), copy markdown | `_renderTimeline()` |
