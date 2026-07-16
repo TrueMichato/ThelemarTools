@@ -624,6 +624,24 @@ class CharacterSheetCustomAbilities {
 				],
 			},
 			{
+				// Extra spell slots. The type encodes the SLOT LEVEL (spellSlots:1 … spellSlots:9);
+				// the row's numeric value is the NUMBER of extra slots granted at that level.
+				// Applied in CharacterSheetState.calculateSpellSlots() via the named-modifier pipeline
+				// (works for passive/toggleable custom abilities AND equipped custom items).
+				group: "🔮 Spell Slots",
+				options: [
+					{value: "spellSlots:1", label: "1st-Level Spell Slots"},
+					{value: "spellSlots:2", label: "2nd-Level Spell Slots"},
+					{value: "spellSlots:3", label: "3rd-Level Spell Slots"},
+					{value: "spellSlots:4", label: "4th-Level Spell Slots"},
+					{value: "spellSlots:5", label: "5th-Level Spell Slots"},
+					{value: "spellSlots:6", label: "6th-Level Spell Slots"},
+					{value: "spellSlots:7", label: "7th-Level Spell Slots"},
+					{value: "spellSlots:8", label: "8th-Level Spell Slots"},
+					{value: "spellSlots:9", label: "9th-Level Spell Slots"},
+				],
+			},
+			{
 				group: "💪 Saving Throws",
 				options: [
 					{value: "save:all", label: "All Saving Throws"},
@@ -1834,7 +1852,7 @@ class CharacterSheetCustomAbilities {
 									</ul>
 
 									<h5>Effect Types</h5>
-									<p class="ve-small ve-muted">ac, initiative, attack, attack:melee, attack:ranged, attack:spell, damage, damage:melee, damage:ranged, damage:spell, critRange (set absolute, e.g. 19), critRange:expand (expand by amount), tempHp (static amount), tempHp:dice (roll dice like "1d4+4"), speed, speed:fly, speed:swim, speed:climb, spellDc, spellAttack, save:all, save:str/dex/con/int/wis/cha, check:all, check:str/dex/con/int/wis/cha, skill:all, skill:[skillname], passive:[skillname], hp:max, ability:str/dex/con/int/wis/cha, abilityMax:str/dex/con/int/wis/cha (raise/set an ability's maximum; use Set To for an absolute cap up to 30), sense:darkvision/blindsight/tremorsense/truesight, resistance:[damage type], proficiencyBonus, carryCapacity, deathSave</p>
+									<p class="ve-small ve-muted">ac, initiative, attack, attack:melee, attack:ranged, attack:spell, damage, damage:melee, damage:ranged, damage:spell, critRange (set absolute, e.g. 19), critRange:expand (expand by amount), tempHp (static amount), tempHp:dice (roll dice like "1d4+4"), speed, speed:fly, speed:swim, speed:climb, spellDc, spellAttack, save:all, save:str/dex/con/int/wis/cha, check:all, check:str/dex/con/int/wis/cha, skill:all, skill:[skillname], passive:[skillname], hp:max, ability:str/dex/con/int/wis/cha, abilityMax:str/dex/con/int/wis/cha (raise/set an ability's maximum; use Set To for an absolute cap up to 30), sense:darkvision/blindsight/tremorsense/truesight, resistance:[damage type], proficiencyBonus, carryCapacity, deathSave, spellSlots:1..9 (grant extra spell slots of that level; value = number of slots)</p>
 
 									<h5>Example</h5>
 									<pre>{

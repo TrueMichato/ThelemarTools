@@ -11983,6 +11983,30 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Aggregate bonus spell slots contributed by ENABLED `spellSlots:<level>` named modifiers.
+	 * These are minted by `_applyCatalogEffect` for any custom ability (passive or toggled-on) or
+	 * equipped custom item whose Modifiers & Effects editor added a "N-th-Level Spell Slots" effect;
+	 * the modifier's `value` is the number of extra slots. Toggle/equip register/unregister the
+	 * modifier, so simply reading the currently-enabled set here keeps everything in sync.
+	 * @returns {Object<number, number>} Map of slot level (1-9) → total extra slots.
+	 * @private
+	 */
+	_getBonusSpellSlotsFromModifiers () {
+		const out = {};
+		const mods = this._data.namedModifiers || [];
+		for (const mod of mods) {
+			if (!mod || mod.enabled === false) continue;
+			const m = /^spellSlots:([1-9])$/.exec(mod.type || "");
+			if (!m) continue;
+			const level = parseInt(m[1], 10);
+			const n = typeof mod.value === "number" ? mod.value : parseInt(mod.value, 10);
+			if (!Number.isFinite(n) || n === 0) continue;
+			out[level] = (out[level] || 0) + n;
+		}
+		return out;
+	}
+
+	/**
 	 * Calculate spell slots based on class(es) and level using standard 5e spell slot progression
 	 * Handles full casters, half casters, third casters, and multiclassing
 	 * Uses casterProgression property from class/subclass data for accurate multiclass calculation
@@ -12091,35 +12115,52 @@ class CharacterSheetState {
 			20: [4, 3, 3, 3, 3, 2, 2, 1, 1],
 		};
 
-		// Set slots based on caster level
+		// --- Base slots from caster level ---------------------------------------------------
+		const baseSlots = {};
 		if (casterLevel > 0) {
 			const slots = slotTable[Math.min(casterLevel, 20)] || [0, 0, 0, 0, 0, 0, 0, 0, 0];
-			for (let level = 1; level <= 9; level++) {
-				const max = slots[level - 1];
-				// Preserve current usage if already set with same max
-				const existing = this._data.spellcasting.spellSlots[level];
-				if (existing && existing.max === max) {
-					// Keep current value
-				} else {
-					this._data.spellcasting.spellSlots[level] = {current: max, max: max};
-				}
-			}
+			for (let level = 1; level <= 9; level++) baseSlots[level] = slots[level - 1] || 0;
 		}
 
-		// Apply bonus spell slots from items
+		// --- Bonus slots from every non-pact source ----------------------------------------
+		// Two sources, both keyed by slot level:
+		//   1. Equipped items with a prose/structured slot grant → `itemBonuses.spellSlots`
+		//      (set by the inventory module's parser).
+		//   2. Custom abilities and custom items whose Modifiers & Effects editor added a
+		//      `spellSlots:<level>` effect → surfaced here as enabled named modifiers.
+		// Aggregating (rather than mutating slot maxes in place) keeps calculateSpellSlots
+		// idempotent, so repeated render-time calls never double-count a bonus.
+		const bonusSlots = {};
 		const itemBonusSlots = this._data.itemBonuses?.spellSlots || {};
 		for (const [levelStr, bonus] of Object.entries(itemBonusSlots)) {
 			const level = parseInt(levelStr);
-			if (level >= 1 && level <= 9 && bonus > 0) {
-				// Initialize slot if not present (even for non-casters with slot-granting items)
-				if (!this._data.spellcasting.spellSlots[level]) {
-					this._data.spellcasting.spellSlots[level] = {current: bonus, max: bonus};
-				} else {
-					// Add bonus to existing slots
-					this._data.spellcasting.spellSlots[level].max += bonus;
-					// Also add to current (freshly granted slots are available)
-					this._data.spellcasting.spellSlots[level].current += bonus;
-				}
+			const n = typeof bonus === "number" ? bonus : parseInt(bonus, 10);
+			if (level >= 1 && level <= 9 && Number.isFinite(n)) bonusSlots[level] = (bonusSlots[level] || 0) + n;
+		}
+		const modBonusSlots = this._getBonusSpellSlotsFromModifiers();
+		for (let level = 1; level <= 9; level++) {
+			if (modBonusSlots[level]) bonusSlots[level] = (bonusSlots[level] || 0) + modBonusSlots[level];
+		}
+
+		// --- Apply base + bonus idempotently, preserving spent slots ------------------------
+		for (let level = 1; level <= 9; level++) {
+			const targetMax = Math.max(0, (baseSlots[level] || 0) + (bonusSlots[level] || 0));
+			const existing = this._data.spellcasting.spellSlots[level];
+			// A caster keeps a (possibly empty) entry for every level so the grid stays stable;
+			// a non-caster only materialises a level that some bonus actually grants.
+			const shouldExist = casterLevel > 0 || targetMax > 0;
+			if (!shouldExist) {
+				if (existing) delete this._data.spellcasting.spellSlots[level];
+				continue;
+			}
+			if (!existing) {
+				this._data.spellcasting.spellSlots[level] = {current: targetMax, max: targetMax};
+			} else {
+				// Preserve how many slots were already spent so a re-render / equip toggle never
+				// silently refills expended slots (spent = old max − old current).
+				const spent = Math.max(0, (existing.max || 0) - (existing.current || 0));
+				existing.max = targetMax;
+				existing.current = Math.max(0, targetMax - spent);
 			}
 		}
 

@@ -6816,7 +6816,7 @@
 				],
 				"skills": [
 					{
-						"any": 4
+						"any": 3
 					}
 				]
 			},
@@ -7407,7 +7407,7 @@
 								"persuasion",
 								"religion"
 							],
-							"count": 3
+							"count": 2
 						}
 					}
 				]
@@ -8024,7 +8024,7 @@
 								"religion",
 								"survival"
 							],
-							"count": 3
+							"count": 2
 						}
 					}
 				]
@@ -9904,7 +9904,7 @@
 								"persuasion",
 								"religion"
 							],
-							"count": 3
+							"count": 2
 						}
 					}
 				]
@@ -11178,7 +11178,7 @@
 								"sleight of hand",
 								"stealth"
 							],
-							"count": 5
+							"count": 4
 						}
 					}
 				]
@@ -11862,7 +11862,7 @@
 								"persuasion",
 								"religion"
 							],
-							"count": 3
+							"count": 2
 						}
 					}
 				]
@@ -12574,7 +12574,7 @@
 								"nature",
 								"religion"
 							],
-							"count": 3
+							"count": 2
 						}
 					}
 				]
@@ -13001,7 +13001,7 @@
 								"medicine",
 								"religion"
 							],
-							"count": 3
+							"count": 2
 						}
 					}
 				]
