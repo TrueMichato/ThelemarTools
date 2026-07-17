@@ -5446,6 +5446,17 @@
 	background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(139, 92, 246, 0.05) 100%);
 }
 
+/* Level has extra slots granted by an item or ability — amber-shaded. */
+.charsheet__spell-slot-box--boosted {
+	border-color: var(--cs-accent-amber, #d9a441);
+	background: linear-gradient(135deg, rgba(217, 164, 65, 0.15) 0%, rgba(217, 164, 65, 0.05) 100%);
+}
+
+.charsheet__spell-slot-box--boosted:hover {
+	border-color: var(--cs-accent-amber, #d9a441);
+	box-shadow: 0 0 8px rgba(217, 164, 65, 0.35);
+}
+
 .charsheet__spell-slot-level {
 	font-size: var(--cs-text-xs, 0.7rem);
 	font-weight: 600;

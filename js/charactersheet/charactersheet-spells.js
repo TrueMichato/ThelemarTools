@@ -6282,18 +6282,26 @@ class CharacterSheetSpells {
 
 			slotsRendered++;
 			const current = this._state.getSpellSlotsCurrent(level);
+			const bonusCount = Math.min(max, this._state.getBonusSpellSlotsForLevel?.(level) || 0);
+			const baseCount = max - bonusCount;
 
-			// Build pips HTML - filled = available, empty = used
-			// Show first 'current' pips as filled (available), rest as empty (used)
+			// Build pips HTML - filled = available, empty = used.
+			// The last `bonusCount` pips represent slots granted by an item or
+			// ability and are shaded amber to set them apart from class slots.
 			let pipsHtml = "";
 			for (let i = 0; i < max; i++) {
 				const isAvailable = i < current; // First 'current' slots are available (filled)
-				pipsHtml += `<span class="charsheet__spell-slot-pip ${isAvailable ? "" : "charsheet__spell-slot-pip--used"}" style="display: inline-block; width: 18px; height: 18px; border: 2px solid #337ab7; border-radius: 50%; margin: 2px; ${isAvailable ? "background: #337ab7;" : "background: transparent;"}"></span>`;
+				const isBonus = i >= baseCount;
+				const hue = isBonus ? "#d9a441" : "#337ab7";
+				const bonusCls = isBonus ? " charsheet__spell-slot-pip--bonus" : "";
+				const bonusTitle = isBonus ? ` title="Granted by an item or ability"` : "";
+				pipsHtml += `<span class="charsheet__spell-slot-pip${bonusCls} ${isAvailable ? "" : "charsheet__spell-slot-pip--used"}"${bonusTitle} style="display: inline-block; width: 18px; height: 18px; border: 2px solid ${hue}; border-radius: 50%; margin: 2px; ${isAvailable ? `background: ${hue};` : "background: transparent;"}"></span>`;
 			}
 
+			const bonusNote = bonusCount > 0 ? ` <span class="charsheet__spell-slot-bonus-note" title="Granted by an item or ability" style="color: #d9a441; font-size: 0.8em;">(+${bonusCount})</span>` : "";
 			const row = e_({outer: `
 				<div class="charsheet__spell-slot-level" data-spell-level="${level}">
-					<div class="charsheet__spell-slot-level-label">Level ${level}</div>
+					<div class="charsheet__spell-slot-level-label">Level ${level}${bonusNote}</div>
 					<div class="charsheet__spell-slot-pips" style="display: flex; gap: 4px; margin-top: 4px;">
 						${pipsHtml}
 					</div>

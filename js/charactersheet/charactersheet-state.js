@@ -12007,6 +12007,27 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Total number of spell slots at `level` that come from a non-class source
+	 * (equipped items or custom abilities/items granting `spellSlots:<level>`),
+	 * rather than from the caster's class table. Used by the UI to shade the
+	 * item/ability-granted slots differently from the base class slots.
+	 * @param {number|string} level Spell slot level (1-9)
+	 * @returns {number} Count of bonus slots (never negative)
+	 */
+	getBonusSpellSlotsForLevel (level) {
+		const lvl = parseInt(level, 10);
+		if (!Number.isFinite(lvl) || lvl < 1 || lvl > 9) return 0;
+		let bonus = 0;
+		const itemBonusSlots = this._data.itemBonuses?.spellSlots || {};
+		const rawItem = itemBonusSlots[lvl] ?? itemBonusSlots[String(lvl)];
+		const itemNum = typeof rawItem === "number" ? rawItem : parseInt(rawItem, 10);
+		if (Number.isFinite(itemNum)) bonus += itemNum;
+		const modBonus = this._getBonusSpellSlotsFromModifiers()[lvl];
+		if (Number.isFinite(modBonus)) bonus += modBonus;
+		return Math.max(0, bonus);
+	}
+
+	/**
 	 * Calculate spell slots based on class(es) and level using standard 5e spell slot progression
 	 * Handles full casters, half casters, third casters, and multiclassing
 	 * Uses casterProgression property from class/subclass data for accurate multiclass calculation

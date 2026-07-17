@@ -966,6 +966,16 @@
 	background: transparent;
 }
 
+/* Slots granted by an item or ability — amber-shaded to set them apart. */
+.pm-slots__pip--bonus {
+	border-color: var(--cs-accent-amber, #d9a441);
+}
+
+.pm-slots__pip--bonus.pm-slots__pip--filled {
+	background: var(--cs-accent-amber, #d9a441);
+	box-shadow: 0 0 4px rgba(217, 164, 65, 0.45);
+}
+
 .pm-slots__pip:hover {
 	transform: scale(1.2);
 }

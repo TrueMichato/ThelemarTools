@@ -9297,8 +9297,11 @@ class CharacterSheetPage {
 			if (max > 0) {
 				hasSlots = true;
 				const current = this._state.getSpellSlotsCurrent(level);
+				const bonus = this._state.getBonusSpellSlotsForLevel?.(level) || 0;
+				const boostedCls = bonus > 0 ? " charsheet__spell-slot-box--boosted" : "";
+				const boostedTitle = bonus > 0 ? ` (+${bonus} from an item or ability)` : "";
 				slotsRow.insertAdjacentHTML("beforeend", `
-					<div class="charsheet__spell-slot-box" title="Level ${level} spell slots">
+					<div class="charsheet__spell-slot-box${boostedCls}" title="Level ${level} spell slots${boostedTitle}">
 						<span class="charsheet__spell-slot-level">${level}</span>
 						<span class="charsheet__spell-slot-count ${current === 0 ? "ve-muted" : ""}">${current}/${max}</span>
 					</div>

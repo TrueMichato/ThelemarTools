@@ -1433,9 +1433,13 @@ export class CharacterSheetPlayMode {
 				label.textContent = `${lvl}`;
 				const pips = this._ce("div", "pm-slots__pips", levelWrap);
 
+				const bonusCount = Math.min(slot.max, this._state.getBonusSpellSlotsForLevel?.(lvl) || 0);
+				const baseCount = slot.max - bonusCount;
 				for (let i = 0; i < slot.max; i++) {
-					const pip = this._ce("span", `pm-slots__pip pm-slots__pip--${i < slot.current ? "filled" : "empty"}`, pips);
-					this._makeClickable(pip, `Level ${lvl} spell slot ${i + 1} (${i < slot.current ? "use" : "restore"})`, () => {
+					const isBonus = i >= baseCount;
+					const bonusCls = isBonus ? " pm-slots__pip--bonus" : "";
+					const pip = this._ce("span", `pm-slots__pip pm-slots__pip--${i < slot.current ? "filled" : "empty"}${bonusCls}`, pips);
+					this._makeClickable(pip, `Level ${lvl} spell slot ${i + 1}${isBonus ? " (from an item or ability)" : ""} (${i < slot.current ? "use" : "restore"})`, () => {
 						const cur = this._state.getSpellSlotsCurrent(lvl);
 						const max = this._state.getSpellSlotsMax(lvl);
 						if (i < cur) {

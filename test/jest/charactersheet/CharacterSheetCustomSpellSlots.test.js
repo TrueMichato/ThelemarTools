@@ -124,6 +124,42 @@ describe("Custom ability / item extra spell slots", () => {
 		});
 	});
 
+	describe("getBonusSpellSlotsForLevel — UI shading source", () => {
+		it("reports 0 bonus for every level with no grants", () => {
+			const s = mkWizard5();
+			for (let lvl = 1; lvl <= 9; lvl++) expect(s.getBonusSpellSlotsForLevel(lvl)).toBe(0);
+		});
+
+		it("reports the granted count per level (from a custom ability)", () => {
+			const s = mkWizard5();
+			s.addCustomAbility({name: "Reservoir", mode: "passive", effects: [{type: "spellSlots:3", value: 2}]});
+			s.calculateSpellSlots();
+
+			expect(s.getBonusSpellSlotsForLevel(3)).toBe(2);
+			expect(s.getBonusSpellSlotsForLevel(2)).toBe(0);
+			// The bonus never exceeds the level's max (base 2 + bonus 2 = 4).
+			expect(s.getBonusSpellSlotsForLevel(3)).toBeLessThanOrEqual(s.getSpellSlotsMax(3));
+		});
+
+		it("drops back to 0 when a toggleable grant is inactive", () => {
+			const s = mkWizard5();
+			const id = s.addCustomAbility({name: "Surge", mode: "toggleable", effects: [{type: "spellSlots:1", value: 1}]});
+			s.calculateSpellSlots();
+			expect(s.getBonusSpellSlotsForLevel(1)).toBe(0); // inactive
+
+			s.toggleCustomAbility(id);
+			s.calculateSpellSlots();
+			expect(s.getBonusSpellSlotsForLevel(1)).toBe(1); // active
+		});
+
+		it("ignores out-of-range levels", () => {
+			const s = mkWizard5();
+			expect(s.getBonusSpellSlotsForLevel(0)).toBe(0);
+			expect(s.getBonusSpellSlotsForLevel(10)).toBe(0);
+			expect(s.getBonusSpellSlotsForLevel("nope")).toBe(0);
+		});
+	});
+
 	describe("Custom items", () => {
 		it("an equipped custom item grants extra slots and unequipping removes them", () => {
 			const s = mkWizard5();
