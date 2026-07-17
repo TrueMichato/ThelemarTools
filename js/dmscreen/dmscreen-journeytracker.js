@@ -2,513 +2,37 @@ import {DmScreenPanelAppBase} from "./dmscreen-panelapp-base.js";
 import {DmScreenUtil} from "./dmscreen-util.js";
 
 /* ============================================================================================== */
-/*  Constants                                                                                      */
+/*  Constants + pure rule logic are defined in the DOM-free, unit-tested consts module.            */
 /* ============================================================================================== */
 
-const JOURNEY_ACTIVITIES = [
-	{id: "navigate",
-		label: "Navigate",
-		skill: "survival",
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 0,
-		rmAlways: 0,
-		desc: "Essential navigation activity for journeys without a clear path.",
-		successText: "The party continues toward their destination, covering the expected distance.",
-		critSuccessText: "Exceptional navigation — the party finds a shortcut or avoids a hazard.",
-		failureText: "The party makes no progress or veers off course (adds 1d6 hours to travel time).",
-		critFailText: "The party becomes badly lost, potentially entering dangerous territory.",
-		restrictionText: "Fast Pace: DC +2. Slow Pace: DC −2."},
-	{id: "scout",
-		label: "Scout",
-		skill: "perception",
-		rmOnSuccess: -1,
-		rmOnCritSuccess: -1,
-		rmOnFail: 0,
-		rmOnCritFail: 1,
-		rmAlways: 0,
-		critSuccessPerPlayer: true,
-		desc: "Look out for danger along the party's path.",
-		successText: "−1 RM. You spot danger early and alert the party.",
-		critSuccessText: "−1 RM for every party member taking this activity.",
-		failureText: "No effect.",
-		critFailText: "+1 RM. You miss something important.",
-		restrictionText: "Fast Pace gives Disadvantage. +2 DC to Hide Tracks per scout."},
-	{id: "map",
-		label: "Map",
-		skill: "investigation",
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 0,
-		rmAlways: 0,
-		desc: "Document terrain, create maps, and refine understanding of the region.",
-		successText: "The party gains Advantage on their next Navigation check in this area.",
-		critSuccessText: "Advantage on all Navigation checks in this area for the rest of the Journey Phase.",
-		failureText: "No effect.",
-		critFailText: "Misrecorded details — next Navigation check in this area at Disadvantage.",
-		restrictionText: "Not possible at Fast Pace."},
-	{id: "forage",
-		label: "Forage",
-		skill: "survival",
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 1,
-		rmAlways: 0,
-		desc: "Gather edible plants, hunt small game, and locate water sources.",
-		successText: "Find 1d4 rations (DM may adjust based on biome).",
-		critSuccessText: "Find 1d4 + proficiency bonus rations, or locate a rare resource.",
-		failureText: "No resources found.",
-		critFailText: "+1 RM. You disturb the environment.",
-		restrictionText: "Not possible at Fast Pace. +2 DC to Hide Tracks per forager."},
-	{id: "hideTracks",
-		label: "Hide Tracks",
-		skill: "stealth",
-		rmOnSuccess: -1,
-		rmOnCritSuccess: -2,
-		rmOnFail: 0,
-		rmOnCritFail: 1,
-		rmAlways: 0,
-		desc: "Cover footprints and obscure evidence of passage.",
-		successText: "−1 RM.",
-		critSuccessText: "−2 RM, and impose Disadvantage on any creature attempting to track the party for 24 hours.",
-		failureText: "No effect.",
-		critFailText: "+1 RM. You leave obvious clues.",
-		restrictionText: "Fast Pace: DC +2. Slow Pace: DC −2. For each ally performing Scout, Forage, or Entertain: DC +2."},
-	{id: "entertain",
-		label: "Entertain",
-		skill: "performance",
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 2,
-		rmAlways: 1,
-		desc: "Tell stories, sing, play instruments, or boost morale. Noise draws attention.",
-		successText: "Grant Heroic Inspiration to all allies.",
-		critSuccessText: null,
-		failureText: "No effect.",
-		critFailText: "+2 RM. You make a racket.",
-		restrictionText: "Always +1 RM (noise). May prevent stealth-based actions."},
-	{id: "track",
-		label: "Track",
-		skill: "survival",
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 0,
-		rmAlways: 0,
-		desc: "Follow tracks, signs, or magical traces. Replaces Navigation for the segment.",
-		successText: "Successfully follow the trail.",
-		critSuccessText: null,
-		failureText: "Trail is lost; must retry or abandon pursuit.",
-		critFailText: null,
-		restrictionText: "Normal Pace: Disadvantage. Fast Pace: Not possible."},
-	{id: "custom",
-		label: "Custom\u2026",
-		skill: null,
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 0,
-		rmAlways: 0,
-		desc: "A custom activity — set your own name and rules.",
-		successText: null,
-		critSuccessText: null,
-		failureText: null,
-		critFailText: null,
-		restrictionText: null},
-];
-
-const CAMP_ACTIVITIES = [
-	{id: "campfire",
-		label: "Campfire",
-		skill: "survival",
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 2,
-		rmAlways: 0,
-		desc: "Build and maintain a campfire for warmth, light, safety, and cooking.",
-		successText: "A stable fire burns throughout the night, enabling Cook and other fire-dependent activities.",
-		critSuccessText: "Exceptionally well-prepared — grants Advantage on Cook checks.",
-		failureText: "The fire sputters out after 1 hour unless someone spends another hour fixing it.",
-		critFailText: "+2 RM. Excessive smoke or flare; the fire fails.",
-		restrictionText: "+1 RM while active (toggle separately). Required for activities needing light."},
-	{id: "forage",
-		label: "Forage",
-		skill: "survival",
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 1,
-		rmAlways: 1,
-		desc: "Search surroundings (within 1 mile) for food, water, herbs, or ingredients.",
-		successText: "Find 1d4 rations or gather herbs/ingredients.",
-		critSuccessText: "Find 1d4 + proficiency bonus rations or a valuable natural resource.",
-		failureText: "No supplies found.",
-		critFailText: "+1 RM. You disturb the ecosystem.",
-		restrictionText: "+1 RM (leaving camp). May require Campfire to process finds."},
-	{id: "cook",
-		label: "Cook",
-		skill: null,
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 0,
-		rmAlways: 0,
-		desc: "Prepare a hearty meal using ingredients (1 ration + 1 water per person).",
-		successText: "A creature who eats the meal reduces 1 level of Exhaustion (once per Long Rest).",
-		critSuccessText: null,
-		failureText: "The meal is edible but unimpressive; no benefits.",
-		critFailText: "Food is spoiled or badly made. Rations are wasted.",
-		restrictionText: "Requires light (typically Campfire). Chef feat may grant improved effects."},
-	{id: "pray",
-		label: "Pray",
-		skill: "religion",
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 0,
-		rmAlways: 0,
-		desc: "Offer devotion, seek guidance, or perform rituals.",
-		successText: null,
-		critSuccessText: null,
-		failureText: null,
-		critFailText: null,
-		restrictionText: "Each special ritual component (incense, sacrifice, chanting) adds +1 RM."},
-	{id: "tend",
-		label: "Tend",
-		skill: "medicine",
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 0,
-		rmAlways: 0,
-		desc: "Provide care by healing wounds, massaging muscles, or practicing meditation.",
-		successText: "Benefits depend on the player's specific actions (DM adjudicates).",
-		critSuccessText: null,
-		failureText: null,
-		critFailText: null,
-		restrictionText: null},
-	{id: "entertain",
-		label: "Entertain",
-		skill: "performance",
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 2,
-		rmAlways: 1,
-		desc: "Tell stories, sing, play instruments, or boost morale. Noise draws attention.",
-		successText: "Grant Heroic Inspiration to all allies.",
-		critSuccessText: null,
-		failureText: "No effect.",
-		critFailText: "+2 RM. You make a racket.",
-		restrictionText: "Always +1 RM (noise). May prevent stealth-based actions."},
-	{id: "scout",
-		label: "Scout",
-		skill: "perception",
-		rmOnSuccess: -1,
-		rmOnCritSuccess: -1,
-		rmOnFail: 0,
-		rmOnCritFail: 1,
-		rmAlways: 0,
-		desc: "Survey the perimeter, check for tracks, and assess nighttime dangers.",
-		successText: "−1 RM.",
-		critSuccessText: "−1 RM, and all Guards gain Advantage on perception checks until camp break.",
-		failureText: "No effect.",
-		critFailText: "+1 RM.",
-		restrictionText: "+2 DC to Hide Camp per scout. Can be performed before or after setting camp."},
-	{id: "research",
-		label: "Research",
-		skill: null,
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 0,
-		rmAlways: 0,
-		desc: "Study books, experiment with magic, write notes, craft formulas, or practice rituals.",
-		successText: null,
-		critSuccessText: null,
-		failureText: null,
-		critFailText: null,
-		restrictionText: "Requires light. Some experiments may add RM (DM discretion)."},
-	{id: "hideCamp",
-		label: "Hide Camp",
-		skill: "stealth",
-		rmOnSuccess: -1,
-		rmOnCritSuccess: -2,
-		rmOnFail: 0,
-		rmOnCritFail: 1,
-		rmAlways: 0,
-		desc: "Camouflage tents, position camp in shadows, reduce fire visibility.",
-		successText: "−1 RM.",
-		critSuccessText: "−2 RM.",
-		failureText: "No effect.",
-		critFailText: "+1 RM. You accidentally make the camp more conspicuous.",
-		restrictionText: "Campfire present: DC +2. For each Scout/Forage: DC +2. Only at the beginning of a camp sequence."},
-	{id: "guard",
-		label: "Guard",
-		skill: "perception",
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 2,
-		rmAlways: 0,
-		desc: "Keep watch during camp. Can be taken alongside a light activity.",
-		successText: "If a random encounter occurs, the party is not surprised.",
-		critSuccessText: "If an encounter occurs, the party gains Advantage on initiative.",
-		failureText: "If an encounter occurs, the party is surprised.",
-		critFailText: "+2 RM. The guard falls asleep; enemies gain a free round if they attack.",
-		restrictionText: "Can be done alongside low-intensity tasks (Banter). Multiple Guards act in shifts."},
-	{id: "custom",
-		label: "Custom\u2026",
-		skill: null,
-		rmOnSuccess: 0,
-		rmOnCritSuccess: 0,
-		rmOnFail: 0,
-		rmOnCritFail: 0,
-		rmAlways: 0,
-		desc: "A custom activity — set your own name and rules.",
-		successText: null,
-		critSuccessText: null,
-		failureText: null,
-		critFailText: null,
-		restrictionText: null},
-];
-
-const PACE_OPTIONS = [
-	{id: "slow", label: "Slow", tips: "2/3 speed · Nav DC \u22122 · Stealth possible · +5 Passive Perception"},
-	{id: "normal", label: "Normal", tips: "Standard speed · Area Nav DC · No stealth"},
-	{id: "fast", label: "Fast", tips: "1.3\u00d7 speed · Nav DC +2 · No stealth · Disadv. Scout · No Map/Forage"},
-];
-
-const WEATHER_PRESETS = {
-	clear: {label: "Clear", dcMod: 0, rmMod: 0, icon: "\u2600\uFE0F", paceRestrict: null, effects: []},
-	overcast: {label: "Overcast", dcMod: 0, rmMod: 0, icon: "\u2601\uFE0F", paceRestrict: null, effects: []},
-	rain: {label: "Rain", dcMod: 2, rmMod: 0, icon: "\uD83C\uDF27\uFE0F", paceRestrict: null, effects: ["Disadvantage on Perception (sight)", "Extinguishes open flames"]},
-	heavyRain: {label: "Heavy Rain", dcMod: 3, rmMod: 1, icon: "\u26C8\uFE0F", paceRestrict: null, effects: ["Heavily obscured beyond 100ft", "Disadvantage on Perception", "\u22122 Navigation"]},
-	fog: {label: "Fog", dcMod: 2, rmMod: 0, icon: "\uD83C\uDF2B\uFE0F", paceRestrict: null, effects: ["Heavily obscured beyond 30ft", "Disadvantage on Scout"]},
-	snow: {label: "Snow", dcMod: 2, rmMod: 0, icon: "\u2744\uFE0F", paceRestrict: "slow", effects: ["Difficult terrain", "Tracks visible (+2 Track, \u22122 Hide Tracks)"]},
-	blizzard: {label: "Blizzard", dcMod: 5, rmMod: 2, icon: "\uD83C\uDF28\uFE0F", paceRestrict: "slow", effects: ["Heavily obscured", "Extreme Cold exposure", "No Forage/Map"]},
-	extremeHeat: {label: "Extreme Heat", dcMod: 2, rmMod: 0, icon: "\uD83D\uDD25", paceRestrict: null, effects: ["CON save DC 10+1/hour or 1 exhaustion", "Water consumption doubled"]},
-	extremeCold: {label: "Extreme Cold", dcMod: 2, rmMod: 0, icon: "\uD83E\uDD76", paceRestrict: null, effects: ["CON save DC 10+1/hour or 1 exhaustion without cold resistance"]},
-	wind: {label: "Strong Wind", dcMod: 1, rmMod: 0, icon: "\uD83D\uDCA8", paceRestrict: null, effects: ["Disadvantage on ranged attacks", "Disadvantage on Perception (hearing)"]},
-};
-
-const DEFAULT_WEATHER_TABLE = () => [
-	{weatherKey: "clear", weight: 3},
-	{weatherKey: "overcast", weight: 2},
-	{weatherKey: "rain", weight: 2},
-	{weatherKey: "heavyRain", weight: 1},
-	{weatherKey: "fog", weight: 1},
-	{weatherKey: "snow", weight: 1},
-	{weatherKey: "wind", weight: 1},
-];
-
-const WEATHER_TABLE_PRESETS = {
-	temperate: {label: "Temperate",
-		table: [
-			{weatherKey: "clear", weight: 3}, {weatherKey: "overcast", weight: 2},
-			{weatherKey: "rain", weight: 2}, {weatherKey: "heavyRain", weight: 1},
-			{weatherKey: "fog", weight: 1}, {weatherKey: "snow", weight: 1}, {weatherKey: "wind", weight: 1},
-		]},
-	desert: {label: "Desert",
-		table: [
-			{weatherKey: "clear", weight: 4}, {weatherKey: "extremeHeat", weight: 3},
-			{weatherKey: "wind", weight: 2}, {weatherKey: "overcast", weight: 1},
-		]},
-	arctic: {label: "Arctic",
-		table: [
-			{weatherKey: "snow", weight: 3}, {weatherKey: "extremeCold", weight: 3},
-			{weatherKey: "blizzard", weight: 2}, {weatherKey: "overcast", weight: 2},
-			{weatherKey: "clear", weight: 1}, {weatherKey: "wind", weight: 1},
-		]},
-	tropical: {label: "Tropical",
-		table: [
-			{weatherKey: "rain", weight: 3}, {weatherKey: "heavyRain", weight: 2},
-			{weatherKey: "extremeHeat", weight: 2}, {weatherKey: "clear", weight: 2},
-			{weatherKey: "fog", weight: 1}, {weatherKey: "overcast", weight: 1},
-		]},
-	coastal: {label: "Coastal",
-		table: [
-			{weatherKey: "wind", weight: 3}, {weatherKey: "fog", weight: 2},
-			{weatherKey: "rain", weight: 2}, {weatherKey: "overcast", weight: 2},
-			{weatherKey: "clear", weight: 2}, {weatherKey: "heavyRain", weight: 1},
-		]},
-	mountain: {label: "Mountain",
-		table: [
-			{weatherKey: "wind", weight: 3}, {weatherKey: "snow", weight: 2},
-			{weatherKey: "fog", weight: 2}, {weatherKey: "clear", weight: 2},
-			{weatherKey: "extremeCold", weight: 1}, {weatherKey: "blizzard", weight: 1}, {weatherKey: "rain", weight: 1},
-		]},
-};
-
-const RANGE_COLORS = {
-	empty: {cls: "dm-journey__badge--empty", label: "Empty"},
-	mild: {cls: "dm-journey__badge--mild", label: "Mild"},
-	moderate: {cls: "dm-journey__badge--moderate", label: "Moderate"},
-	intense: {cls: "dm-journey__badge--intense", label: "Intense"},
-};
-
-const DEFAULT_AREA = () => ({
-	areaName: "",
-	baseDc: 10,
-	numSegments: 3,
-	segmentNames: ["Morning", "Midday", "Afternoon"],
-	riskRanges: {
-		mild: {min: 1, max: 4},
-		moderate: {min: 5, max: 10},
-		intense: {min: 11, max: 12},
-	},
-	weatherTable: DEFAULT_WEATHER_TABLE(),
-});
-
-const SKILL_TO_ABILITY = {
-	athletics: "str",
-	acrobatics: "dex",
-	sleightOfHand: "dex",
-	stealth: "dex",
-	arcana: "int",
-	history: "int",
-	investigation: "int",
-	nature: "int",
-	religion: "int",
-	animalHandling: "wis",
-	insight: "wis",
-	medicine: "wis",
-	perception: "wis",
-	survival: "wis",
-	deception: "cha",
-	intimidation: "cha",
-	performance: "cha",
-	persuasion: "cha",
-};
-
-/** Maps activity IDs to tool-proficiency keyword fragments (case-insensitive match against toolProficiencies[]). */
-const ACTIVITY_TOOL_KEYWORDS = {
-	navigate: ["navigator"],
-	map: ["cartographer"],
-	cook: ["cook"],
-	forage: ["herbalism"],
-	tend: ["healer", "herbalism"],
-	track: ["navigator"],
-	campfire: ["tinker"],
-	research: ["calligrapher", "forgery"],
-};
-
-const DEFAULT_SUPPLIES = () => [
-	{id: CryptUtil.uid(), name: "Rations", count: 0, dailyBurn: 0, unit: "days", isDefault: true},
-	{id: CryptUtil.uid(), name: "Water", count: 0, dailyBurn: 0, unit: "gallons", isDefault: true},
-	{id: CryptUtil.uid(), name: "Torches", count: 0, dailyBurn: 0, unit: "", isDefault: true},
-];
-
-const DEFAULT_STATE = () => ({
-	tab: 0,
-	riskModifier: 0,
-	travelPace: "normal",
-	rollMode: "raw",
-	players: [],
-	area: DEFAULT_AREA(),
-	journey: {segments: []},
-	camp: {
-		campfireActive: false,
-		activities: {},
-		guardSlots: [],
-		riskRoll: null,
-		riskRollTotal: null,
-		riskRollOverride: null,
-		rmAtRoll: 0,
-	},
-	weather: {
-		current: "clear",
-		perSegment: false,
-		segmentWeather: [],
-		customTypes: [],
-	},
-	supplies: {
-		items: DEFAULT_SUPPLIES(),
-		autoDeplete: true,
-	},
-	timeline: {
-		days: [],
-		currentDayIndex: 0,
-		journeyName: "",
-		startDate: "",
-	},
-	log: [],
-});
-
-/* ============================================================================================== */
-/*  Activity interaction analysis                                                                  */
-/* ============================================================================================== */
-
-function _getActivityInteractions (activities, allPlayers, activityList, pace) {
-	const notes = [];
-	const chosen = {};
-	for (const p of allPlayers) {
-		const slots = activities[p.id];
-		if (!slots) continue;
-		const slotArr = Array.isArray(slots) ? slots : [slots];
-		for (const act of slotArr) {
-			if (!act?.activity) continue;
-			if (!chosen[act.activity]) chosen[act.activity] = [];
-			chosen[act.activity].push(p.name);
-		}
-	}
-
-	const scoutCount = (chosen.scout || []).length;
-	const forageCount = (chosen.forage || []).length;
-	const entertainCount = (chosen.entertain || []).length;
-
-	/* Hide Tracks / Hide Camp DC modifiers from loud activities */
-	if (chosen.hideTracks?.length || chosen.hideCamp?.length) {
-		const key = chosen.hideTracks?.length ? "hideTracks" : "hideCamp";
-		const label = key === "hideTracks" ? "Hide Tracks" : "Hide Camp";
-		const dcParts = [];
-		if (scoutCount) dcParts.push(`+${scoutCount * 2} (${scoutCount} Scout)`);
-		if (forageCount) dcParts.push(`+${forageCount * 2} (${forageCount} Forage)`);
-		if (entertainCount) dcParts.push(`+${entertainCount * 2} (${entertainCount} Entertain)`);
-		if (pace === "fast") dcParts.push("+2 (Fast Pace)");
-		if (pace === "slow") dcParts.push("\u22122 (Slow Pace)");
-		if (dcParts.length) notes.push(`${label} DC: ${dcParts.join(", ")}`);
-	}
-
-	/* Scout at fast pace — disadvantage */
-	if (chosen.scout?.length && pace === "fast") {
-		notes.push("Scout: Disadvantage (Fast Pace)");
-	}
-
-	/* Entertain always adds RM */
-	if (chosen.entertain?.length) {
-		notes.push(`Entertain: always +${chosen.entertain.length} RM (noise)`);
-	}
-
-	/* Camp Forage always adds RM */
-	if (chosen.forage?.length && activityList === CAMP_ACTIVITIES) {
-		notes.push(`Forage (Camp): +${chosen.forage.length} RM (leaving camp)`);
-	}
-
-	/* Fast pace restrictions */
-	if (pace === "fast") {
-		if (chosen.map?.length) notes.push("Map: NOT possible at Fast Pace!");
-		if (chosen.forage?.length && activityList === JOURNEY_ACTIVITIES) notes.push("Forage: NOT possible at Fast Pace!");
-	}
-
-	/* Stealth only at slow */
-	if (chosen.stealth?.length && pace !== "slow") {
-		notes.push("Stealth: only possible at Slow Pace!");
-	}
-
-	/* Navigate DC from pace */
-	if (chosen.navigate?.length) {
-		if (pace === "fast") notes.push("Navigate: DC +2 (Fast Pace)");
-		if (pace === "slow") notes.push("Navigate: DC \u22122 (Slow Pace)");
-	}
-
-	return notes;
-}
+import {
+	JOURNEY_ACTIVITIES,
+	CAMP_ACTIVITIES,
+	PACE_OPTIONS,
+	WEATHER_PRESETS,
+	DEFAULT_WEATHER_TABLE,
+	WEATHER_TABLE_PRESETS,
+	RANGE_COLORS,
+	DEFAULT_AREA,
+	SKILL_TO_ABILITY,
+	ACTIVITY_TOOL_KEYWORDS,
+	DEFAULT_SUPPLIES,
+	DEFAULT_STATE,
+	TRACKING_TERRAINS,
+	TRACKING_DEGREES,
+	TRACKING_MODIFIERS,
+	classifyRiskRange,
+	classifySingleRoll,
+	evaluateGroupCheck,
+	rmDeltaForOutcome,
+	computeEffectiveDc,
+	classifyTrackingDegree,
+	getSkillBonusFromData,
+	getToolProfBonusFromData,
+	getActivitySkills,
+	computeActivityBonus,
+	getActivityInteractions,
+} from "./dmscreen-journeytracker-consts.js";
 
 /* ============================================================================================== */
 /*  Panel entry point                                                                              */
@@ -718,18 +242,41 @@ class JourneyTrackerRoot {
 
 	_renderPaceSelector () {
 		const wrp = ee`<div class="dm-journey__pace-section"></div>`;
+		const eleDetails = ee`<div class="dm-journey__pace-details"></div>`;
+
+		const renderDetails = () => {
+			eleDetails.innerHTML = "";
+			const pace = PACE_OPTIONS.find(p => p.id === this._state.travelPace) || PACE_OPTIONS[1];
+			const rows = [
+				["Speed", pace.moveMult],
+				["Nav DC", pace.navDc > 0 ? `+${pace.navDc}` : `${pace.navDc}`],
+				["Stealth", pace.stealth],
+				["Passive Perc.", pace.passivePerc],
+				["Activities", pace.activities],
+			];
+			for (const [k, v] of rows) {
+				ee`<div class="dm-journey__pace-detail-row"><span class="dm-journey__pace-detail-key">${k}</span><span class="dm-journey__pace-detail-val">${v}</span></div>`.appendTo(eleDetails);
+			}
+		};
+
+		const eleRadios = ee`<div class="dm-journey__pace-radios"></div>`;
 		for (const pace of PACE_OPTIONS) {
 			const radio = ee`<input type="radio" name="dm-journey-pace" value="${pace.id}" ${this._state.travelPace === pace.id ? "checked" : ""}>`;
 			radio.onn("change", () => {
 				this._state.travelPace = pace.id;
+				renderDetails();
 				this._reRenderCurrentTab();
 				this._doSave();
 			});
 			ee`<label class="dm-journey__pace-label" title="${pace.tips}">
 				${radio}
 				<span>${pace.label}</span>
-			</label>`.appendTo(wrp);
+			</label>`.appendTo(eleRadios);
 		}
+
+		eleRadios.appendTo(wrp);
+		eleDetails.appendTo(wrp);
+		renderDetails();
 		return wrp;
 	}
 
@@ -1385,7 +932,7 @@ class JourneyTrackerRoot {
 			card.appendChild(eleStealth);
 
 			ee`<div class="dm-journey__section-title">RM Changes</div>`.appendTo(card);
-			const eleRmSummary = this._renderRmSummary(seg.activities, seg.stealthSlots, JOURNEY_ACTIVITIES);
+			const eleRmSummary = this._renderRmSummary(seg.activities, seg, JOURNEY_ACTIVITIES);
 			card.appendChild(eleRmSummary);
 
 			const eleRisk = this._renderRiskRollSection(seg, () => { this._renderJourney(); this._doSave(); });
@@ -1406,7 +953,7 @@ class JourneyTrackerRoot {
 		const wrp = ee`<div class="dm-journey__stealth-section${isDisabled ? " dm-journey__stealth-section--disabled" : ""}">
 			<div class="ve-flex-v-center ve-gap-1 ve-mb-1">
 				<span class="ve-bold">Stealth</span>
-				<span class="dm-journey__note">(Slow Pace only — success: −1 RM vs DC)</span>
+				<span class="dm-journey__note">(Slow Pace only \u2014 always resolved as one Group Check)</span>
 			</div>
 		</div>`;
 
@@ -1423,15 +970,16 @@ class JourneyTrackerRoot {
 			wrpRows.appendChild(row);
 		}
 
-		const btnAdd = ee`<button class="ve-btn ve-btn-default ve-btn-xs"><span class="glyphicon glyphicon-plus" aria-hidden="true"></span> Add Stealth</button>`;
+		const btnAdd = ee`<button class="ve-btn ve-btn-default ve-btn-xs"><span class="glyphicon glyphicon-plus" aria-hidden="true"></span> Add Hider</button>`;
 		btnAdd.onn("click", () => {
-			seg.stealthSlots.push({playerId: "", rollResult: "", _rmApplied: 0});
+			seg.stealthSlots.push({playerId: "", rollResult: ""});
 			this._renderJourney();
 			this._doSave();
 		});
 
 		wrp.appendChild(wrpRows);
 		wrp.appendChild(btnAdd);
+		wrp.appendChild(this._renderStealthGroupResult(seg));
 		return wrp;
 	}
 
@@ -1446,13 +994,9 @@ class JourneyTrackerRoot {
 			${players.map(p => `<option value="${this._escAttr(p.id)}" ${slot.playerId === p.id ? "selected" : ""}>${this._escHtml(p.name || "Unnamed")}</option>`).join("")}
 		</select>`;
 		sel.onn("change", () => {
-			/* Undo RM from old slot */
-			if (slot._rmApplied) {
-				this._setRm(this._state.riskModifier - slot._rmApplied, `Undo stealth RM (slot ${ix + 1})`);
-				slot._rmApplied = 0;
-			}
 			slot.playerId = sel.val();
 			slot.rollResult = "";
+			this._applyStealthGroupRm(seg);
 			this._renderJourney();
 			this._doSave();
 		});
@@ -1465,61 +1009,31 @@ class JourneyTrackerRoot {
 		/* DC display */
 		const eleDc = ee`<span class="dm-journey__dc-cell" title="Base DC ${baseDc}">${baseDc}</span>`;
 
-		/* Roll input + crit toggle for total mode */
+		/* Roll input (individual pass/fail feeds the group check) */
 		const iptResult = ee`<input type="number" class="ve-form-control ve-input-xs dm-journey__roll-input" placeholder="${isTotalMode ? "Total" : "d20"}" value="${slot.rollResult || ""}" aria-label="Stealth roll">`;
-
-		const CRIT_CYCLE = [null, "critSuccess", "critFail"];
-		const CRIT_LABELS = {null: "\u2014", critSuccess: "\u21D1", critFail: "\u21D3"};
-		const CRIT_CLASSES = {null: "dm-journey__crit-toggle--normal", critSuccess: "dm-journey__crit-toggle--crit-pass", critFail: "dm-journey__crit-toggle--crit-fail"};
-		const CRIT_TITLES = {null: "Normal result (click to cycle)", critSuccess: "Critical Success (click to cycle)", critFail: "Critical Failure (click to cycle)"};
-
-		const curCrit = slot._critOverride || null;
-		const btnCrit = ee`<button class="dm-journey__crit-toggle ${CRIT_CLASSES[curCrit]}" title="${CRIT_TITLES[curCrit]}" type="button" aria-label="Toggle critical result">${CRIT_LABELS[curCrit]}</button>`;
-		btnCrit.toggleVe(isTotalMode);
-		btnCrit.onn("click", () => {
-			const curIdx = CRIT_CYCLE.indexOf(slot._critOverride || null);
-			slot._critOverride = CRIT_CYCLE[(curIdx + 1) % CRIT_CYCLE.length];
-			this._applyStealthRollRm(slot, ix, bonus, baseDc, isTotalMode, players);
-			this._renderJourney();
-			this._doSave();
-		});
-
-		const eleRollCell = ee`<div class="dm-journey__roll-cell">${iptResult}${btnCrit}</div>`;
-
 		iptResult.onn("change", () => {
 			slot.rollResult = iptResult.val()?.trim() || "";
-			slot._critOverride = isTotalMode ? (slot._critOverride || null) : null;
-			this._applyStealthRollRm(slot, ix, bonus, baseDc, isTotalMode, players);
+			this._applyStealthGroupRm(seg);
 			this._renderJourney();
 			this._doSave();
 		});
 
-		/* Result cell */
+		/* Individual pass/fail (crits only matter to the group as all-pass / all-fail) */
 		const eleResult = ee`<span class="dm-journey__roll-result"></span>`;
-		if (slot.rollResult !== "" && slot.rollResult != null) {
+		if (slot.rollResult !== "" && slot.rollResult != null && slot.playerId) {
 			const rollNum = parseInt(slot.rollResult, 10);
-			if (!isNaN(rollNum) && slot.playerId) {
+			if (!isNaN(rollNum)) {
 				const total = isTotalMode ? rollNum : rollNum + bonus;
-				const outcome = this._classifyStealthRoll(rollNum, total, baseDc, isTotalMode, slot._critOverride);
-
-				const ICONS = {critSuccess: "\u2714\u2714", success: "\u2714", fail: "\u2718", critFail: "\u2718\u2718"};
-				const CLASSES = {critSuccess: "dm-journey__roll-result--crit-pass", success: "dm-journey__roll-result--pass", fail: "dm-journey__roll-result--fail", critFail: "dm-journey__roll-result--crit-fail"};
-				const LABELS = {critSuccess: "Crit!", success: "", fail: "", critFail: "Crit Fail!"};
-
-				eleResult.className = `dm-journey__roll-result ${CLASSES[outcome]}`;
-				const parts = [`${ICONS[outcome]} ${total}`];
-				if (LABELS[outcome]) parts.push(LABELS[outcome]);
-				if (slot._rmApplied) parts.push(`(RM ${slot._rmApplied > 0 ? "+" : ""}${slot._rmApplied})`);
-				eleResult.txt(parts.join(" "));
+				const pass = total >= baseDc;
+				eleResult.className = `dm-journey__roll-result ${pass ? "dm-journey__roll-result--pass" : "dm-journey__roll-result--fail"}`;
+				eleResult.txt(`${pass ? "\u2714" : "\u2718"} ${total}`);
 			}
 		}
 
-		const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xs" title="Remove stealth slot" aria-label="Remove stealth slot">\u00d7</button>`;
+		const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xs" title="Remove hider" aria-label="Remove hider">\u00d7</button>`;
 		btnRemove.onn("click", () => {
-			if (slot._rmApplied) {
-				this._setRm(this._state.riskModifier - slot._rmApplied, `Removed stealth slot ${ix + 1}`);
-			}
 			seg.stealthSlots.splice(ix, 1);
+			this._applyStealthGroupRm(seg);
 			this._renderJourney();
 			this._doSave();
 		});
@@ -1528,50 +1042,75 @@ class JourneyTrackerRoot {
 			${sel}
 			<span class="dm-journey__skill-bonus" title="Stealth bonus">${bonusStr}</span>
 			${eleDc}
-			${eleRollCell}
+			${iptResult}
 			${eleResult}
 			${btnRemove}
 		</div>`;
 	}
 
-	/** Classify a stealth roll: check nat 20/1 in d20 mode, or manual override in total mode. */
-	_classifyStealthRoll (rollNum, total, dc, isTotalMode, critOverride) {
-		const success = total >= dc;
-		if (isTotalMode && critOverride) return critOverride;
-		if (!isTotalMode) {
-			if (rollNum === 20) return success ? "critSuccess" : "success";
-			if (rollNum === 1) return !success ? "critFail" : "fail";
+	/**
+	 * Compute the segment's stealth Group Check from all entered hider rolls.
+	 * Locked model: all pass → Crit Success (−2 RM); all fail → Crit Failure (+2 RM);
+	 * else standard 5e (≥ half pass → Success −1 RM, else Failure 0 RM).
+	 */
+	_computeStealthGroup (seg) {
+		const ptChars = this._getPartyTrackerCharacters();
+		const baseDc = this._state.area.baseDc ?? 10;
+		const isTotalMode = this._state.rollMode === "total";
+		const rolls = [];
+		const passResults = [];
+		for (const slot of (seg.stealthSlots || [])) {
+			if (!slot.playerId) continue;
+			const rollNum = parseInt(slot.rollResult, 10);
+			if (isNaN(rollNum)) continue;
+			const ptChar = ptChars.find(c => c.id === slot.playerId);
+			const bonus = ptChar ? JourneyTrackerRoot._getSkillBonusFromData(ptChar, "stealth") : 0;
+			const total = isTotalMode ? rollNum : rollNum + bonus;
+			const pass = total >= baseDc;
+			const name = this._state.players.find(p => p.id === slot.playerId)?.name || "?";
+			rolls.push({name, total, pass});
+			passResults.push(pass);
 		}
-		return success ? "success" : "fail";
+		const outcome = evaluateGroupCheck(passResults);
+		const RM_MAP = {critSuccess: -2, success: -1, fail: 0, critFail: 2};
+		const rmDelta = outcome ? RM_MAP[outcome] : 0;
+		return {rolls, outcome, rmDelta, count: passResults.length};
 	}
 
-	/** Apply stealth roll RM effects with crit support. */
-	_applyStealthRollRm (slot, ix, bonus, baseDc, isTotalMode, players) {
-		/* Undo previous RM */
-		if (slot._rmApplied) {
-			this._setRm(this._state.riskModifier - slot._rmApplied, `Undo stealth roll (slot ${ix + 1})`);
-			slot._rmApplied = 0;
+	/** Apply the net RM change from the stealth Group Check (single logged net change). */
+	_applyStealthGroupRm (seg) {
+		const prev = seg.stealthGroupRm || 0;
+		const {outcome, rmDelta} = this._computeStealthGroup(seg);
+		seg.stealthGroupRm = rmDelta;
+		const net = rmDelta - prev;
+		if (!net) return;
+		const LABELS = {critSuccess: "Critical Success", success: "Success", fail: "Failure", critFail: "Critical Failure"};
+		const reason = outcome
+			? `Stealth Group Check ${LABELS[outcome]}: net ${net > 0 ? "+" : ""}${net} RM`
+			: "Stealth Group Check cleared";
+		this._setRm(this._state.riskModifier + net, reason);
+	}
+
+	/** Group-check readout beneath the hider rows. */
+	_renderStealthGroupResult (seg) {
+		const {rolls, outcome, rmDelta, count} = this._computeStealthGroup(seg);
+		const wrp = ee`<div class="dm-journey__stealth-group"></div>`;
+		if (!count) {
+			ee`<span class="dm-journey__note"><i>Enter each hider's Stealth check \u2014 they resolve together as one Group Check.</i></span>`.appendTo(wrp);
+			return wrp;
 		}
-
-		const rollNum = parseInt(slot.rollResult, 10);
-		if (isNaN(rollNum) || !slot.playerId) return;
-
-		const total = isTotalMode ? rollNum : rollNum + bonus;
-		const outcome = this._classifyStealthRoll(rollNum, total, baseDc, isTotalMode, slot._critOverride);
-		const playerName = players.find(p => p.id === slot.playerId)?.name || "?";
-		const logStr = isTotalMode
-			? `${playerName} \u2014 Stealth: total ${total} vs DC ${baseDc}`
-			: `${playerName} \u2014 Stealth: d20(${rollNum}) ${this._fmtBonus(bonus)} = ${total} vs DC ${baseDc}`;
-
-		const OUTCOME_LABELS = {critSuccess: "Critical Success", success: "Success", fail: "Failure", critFail: "Critical Failure"};
-		const RM_MAP = {critSuccess: -2, success: -1, fail: 0, critFail: 2};
-		const rmDelta = RM_MAP[outcome];
-		slot._rmApplied = rmDelta;
-
-		if (rmDelta) {
-			this._setRm(this._state.riskModifier + rmDelta, `Stealth ${OUTCOME_LABELS[outcome]} (${playerName}): ${rmDelta > 0 ? "+" : ""}${rmDelta} RM`);
-		}
-		this._addLog("activity", `${logStr} \u2192 ${OUTCOME_LABELS[outcome]}${rmDelta ? ` (RM ${rmDelta > 0 ? "+" : ""}${rmDelta})` : ""}`);
+		const passes = rolls.filter(r => r.pass).length;
+		const LABELS = {critSuccess: "Critical Success", success: "Success", fail: "Failure", critFail: "Critical Failure"};
+		const CLS = {
+			critSuccess: "dm-journey__group-badge--crit-pass",
+			success: "dm-journey__group-badge--pass",
+			fail: "dm-journey__group-badge--fail",
+			critFail: "dm-journey__group-badge--crit-fail",
+		};
+		ee`<span class="ve-bold">Group Check:</span>`.appendTo(wrp);
+		ee`<span class="dm-journey__group-badge ${CLS[outcome]}">${LABELS[outcome]}</span>`.appendTo(wrp);
+		ee`<span class="dm-journey__note">${passes}/${count} passed \u00b7 RM ${rmDelta > 0 ? "+" : ""}${rmDelta}</span>`.appendTo(wrp);
+		return wrp;
 	}
 
 	/* -------------------------------------------- */
@@ -1588,6 +1127,7 @@ class JourneyTrackerRoot {
 			segOrCamp.riskRollTotal = result.total;
 			segOrCamp.riskRollOverride = null;
 			segOrCamp.rmAtRoll = this._state.riskModifier;
+			segOrCamp.encounterResolved = false;
 			onUpdate();
 		});
 
@@ -1595,14 +1135,76 @@ class JourneyTrackerRoot {
 		iptOverride.onn("change", () => {
 			const v = iptOverride.val()?.trim();
 			segOrCamp.riskRollOverride = v === "" ? null : parseInt(v, 10);
+			segOrCamp.encounterResolved = false;
 			onUpdate();
 		});
 
-		return ee`<div class="dm-journey__risk-section">
+		const wrp = ee`<div class="dm-journey__risk-section">
 			<span class="ve-bold">Risk Roll:</span>
 			${riskBadge}
 			${btnRoll}
 			${iptOverride}
+		</div>`;
+
+		/* Threshold visualization + Intense-encounter RM reset. */
+		if (segOrCamp.riskRoll != null) {
+			this._renderRiskThresholdBar(segOrCamp).appendTo(wrp);
+
+			const effectiveTotal = segOrCamp.riskRollOverride ?? segOrCamp.riskRollTotal;
+			const range = this._classifyRoll(effectiveTotal);
+			if (range === "intense") this._renderIntenseReset(segOrCamp, onUpdate).appendTo(wrp);
+		}
+
+		return wrp;
+	}
+
+	/** Horizontal bar showing the Empty/Mild/Moderate/Intense spans with the rolled total marked. */
+	_renderRiskThresholdBar (segOrCamp) {
+		const ranges = this._state.area.riskRanges;
+		const mildMin = ranges.mild?.min ?? 1;
+		const modMin = ranges.moderate?.min ?? 5;
+		const intMin = ranges.intense?.min ?? 11;
+		const effectiveTotal = segOrCamp.riskRollOverride ?? segOrCamp.riskRollTotal;
+		const activeRange = this._classifyRoll(effectiveTotal);
+
+		const spans = [
+			{key: "empty", label: "Empty", lo: 0, hi: mildMin - 1},
+			{key: "mild", label: "Mild", lo: mildMin, hi: modMin - 1},
+			{key: "moderate", label: "Moderate", lo: modMin, hi: intMin - 1},
+			{key: "intense", label: "Intense", lo: intMin, hi: null},
+		];
+
+		const bar = ee`<div class="dm-journey__risk-bar" role="img" aria-label="Risk range: ${activeRange}"></div>`;
+		for (const span of spans) {
+			const colorInfo = RANGE_COLORS[span.key];
+			const rangeLbl = span.hi == null ? `${span.lo}+` : (span.lo >= span.hi ? `${span.hi}` : `${span.lo}\u2013${span.hi}`);
+			const isActive = span.key === activeRange;
+			const cell = ee`<div class="dm-journey__risk-bar-cell ${colorInfo.cls} ${isActive ? "dm-journey__risk-bar-cell--active" : ""}" title="${colorInfo.label}: ${rangeLbl}">
+				<span class="dm-journey__risk-bar-label">${span.label}</span>
+				<span class="dm-journey__risk-bar-range">${rangeLbl}</span>
+			</div>`;
+			if (isActive) ee`<span class="dm-journey__risk-bar-marker" title="Rolled ${effectiveTotal}">\u25b2 ${effectiveTotal}</span>`.appendTo(cell);
+			cell.appendTo(bar);
+		}
+		return bar;
+	}
+
+	/** DM control to mark an Intense-Range encounter resolved and reset RM to 0 (rules). */
+	_renderIntenseReset (segOrCamp, onUpdate) {
+		if (segOrCamp.encounterResolved) {
+			return ee`<div class="dm-journey__intense-reset dm-journey__intense-reset--done">
+				<span class="dm-journey__note">\u2713 Intense encounter resolved \u2014 RM was reset to 0.</span>
+			</div>`;
+		}
+		const btn = ee`<button class="ve-btn ve-btn-danger ve-btn-xs" title="After resolving the encounter, the Risk Modifier resets to 0">Encounter resolved \u2192 reset RM to 0</button>`;
+		btn.onn("click", () => {
+			segOrCamp.encounterResolved = true;
+			this._setRm(0, "Intense-Range encounter resolved");
+			onUpdate();
+		});
+		return ee`<div class="dm-journey__intense-reset">
+			<span class="dm-journey__note">\u26a0 Intense Range \u2014 an encounter occurs. After it resolves, reset RM.</span>
+			${btn}
 		</div>`;
 	}
 
@@ -1610,7 +1212,7 @@ class JourneyTrackerRoot {
 	/*  RM Summary (shared)                          */
 	/* -------------------------------------------- */
 
-	_renderRmSummary (activities, stealthSlots, activityList) {
+	_renderRmSummary (activities, seg, activityList) {
 		const players = this._state.players;
 		const items = [];
 
@@ -1632,14 +1234,12 @@ class JourneyTrackerRoot {
 			}
 		}
 
-		/* Gather RM contributions from stealth slots */
-		if (stealthSlots) {
-			for (const slot of stealthSlots) {
-				if (slot._rmApplied) {
-					const playerName = players.find(p => p.id === slot.playerId)?.name || "?";
-					items.push({label: `Stealth (${playerName})`, value: slot._rmApplied, type: "roll"});
-				}
-			}
+		/* Stealth resolves as a single Group Check contribution. */
+		if (seg && seg.stealthGroupRm) {
+			const grp = this._computeStealthGroup(seg);
+			const LABELS = {critSuccess: "Crit Success", success: "Success", fail: "Failure", critFail: "Crit Failure"};
+			const label = grp.outcome ? `Stealth Group (${LABELS[grp.outcome]})` : "Stealth Group";
+			items.push({label, value: seg.stealthGroupRm, type: "roll"});
 		}
 
 		const totalRm = items.reduce((sum, it) => sum + it.value, 0);
@@ -1691,10 +1291,21 @@ class JourneyTrackerRoot {
 		const eleCampfire = ee`<label class="dm-journey__campfire-toggle">
 			${cbxCampfire}
 			<span>Campfire Active</span>
-			<span class="dm-journey__note">(+1 RM while active)</span>
+			<span class="dm-journey__note">(+1 RM while active; +2 to Hide Camp DC)</span>
 		</label>`;
 
-		/* Activity table */
+		/* Site description (Setup) */
+		const txtSite = ee`<textarea class="ve-form-control dm-journey__site-desc" rows="2" placeholder="Describe the campsite — cover, terrain, water, defensibility, hazards…" aria-label="Campsite description"></textarea>`;
+		txtSite.val(camp.siteDescription || "");
+		txtSite.onn("change", () => { camp.siteDescription = txtSite.val() || ""; this._doSave(); });
+
+		/* Concealment guidance for Hide Camp */
+		const eleConceal = ee`<div class="dm-journey__conceal-note dm-journey__note"></div>`;
+		eleConceal.txt(camp.campfireActive
+			? "Hide Camp: DC +2 while a campfire burns. Assign the Hide Camp activity below to conceal the site."
+			: "Hide Camp: assign the Hide Camp activity below to conceal the site (Survival or Stealth).");
+
+		/* Activity table (Rest) */
 		const body = this._renderActivityTable(camp.activities, CAMP_ACTIVITIES);
 
 		/* Guard slots */
@@ -1706,8 +1317,15 @@ class JourneyTrackerRoot {
 		/* Risk Roll section (shared) */
 		const eleRisk = this._renderRiskRollSection(camp, () => { this._renderCamp(); this._doSave(); });
 
+		/* ==================== Setup phase ==================== */
+		ee`<div class="dm-journey__phase-header">\ud83c\udfd5\ufe0f Setup</div>`.appendTo(this._wrpCamp);
+		ee`<div class="dm-journey__section-title">Select Site</div>`.appendTo(this._wrpCamp);
+		this._wrpCamp.appendChild(txtSite);
 		this._wrpCamp.appendChild(eleCampfire);
-		ee`<hr class="dm-journey__camp-section-divider">`.appendTo(this._wrpCamp);
+		this._wrpCamp.appendChild(eleConceal);
+
+		/* ==================== Rest phase ==================== */
+		ee`<div class="dm-journey__phase-header">\ud83c\udf19 Rest</div>`.appendTo(this._wrpCamp);
 		ee`<div class="dm-journey__section-title">Activities</div>`.appendTo(this._wrpCamp);
 		this._wrpCamp.appendChild(body);
 		ee`<hr class="dm-journey__camp-section-divider">`.appendTo(this._wrpCamp);
@@ -1839,7 +1457,7 @@ class JourneyTrackerRoot {
 		}
 
 		/* Activity interaction notes */
-		const notes = _getActivityInteractions(activities, players, activityList, this._state.travelPace);
+		const notes = getActivityInteractions(activities, players, {isCamp: activityList === CAMP_ACTIVITIES, pace: this._state.travelPace});
 		if (notes.length) {
 			const wrpNotes = ee`<div class="dm-journey__interaction-notes"></div>`;
 			ee`<div class="dm-journey__interaction-header">Activity Interactions</div>`.appendTo(wrpNotes);
@@ -1892,14 +1510,17 @@ class JourneyTrackerRoot {
 		iptCustom.onn("change", () => { act.customName = iptCustom.val(); this._doSave(); });
 
 		/* ---- Bonus cell (skill + tool) ---- */
+		const allowedSkills = getActivitySkills(actDef);
 		let bonusStr = "";
 		let bonusTitle = "";
 		let hasToolProf = false;
-		if (ptChar && actDef?.skill) {
-			const info = JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef.id, actDef.skill);
+		let chosenSkill = null;
+		if (ptChar && allowedSkills.length) {
+			const info = JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef, act.skillChoice);
 			bonusStr = this._fmtBonus(info.total);
 			hasToolProf = info.hasToolProf;
-			const parts = [`Skill: ${this._fmtBonus(info.skillBonus)}`];
+			chosenSkill = info.skill;
+			const parts = [`Skill (${this._fmtSkillName(info.skill)}): ${this._fmtBonus(info.skillBonus)}`];
 			if (info.hasToolProf) parts.push(`Tool prof: ${info.toolBonus ? `+${info.toolBonus} (included)` : "has tools (already skill-proficient)"}`);
 			if (actDef.rmAlways > 0) parts.push(`Auto RM: +${actDef.rmAlways}`);
 			else if (actDef.rmOnSuccess < 0) parts.push(`On success: ${actDef.rmOnSuccess} RM`);
@@ -1909,6 +1530,17 @@ class JourneyTrackerRoot {
 		const eleBonusCell = ee`<span class="dm-journey__skill-bonus" title="${this._escAttr(bonusTitle)}">${bonusStr}</span>`;
 		if (hasToolProf) {
 			ee`<span class="dm-journey__tool-indicator" title="Has relevant tool proficiency">\uD83D\uDD27</span>`.appendTo(eleBonusCell);
+		}
+		/* Multi-skill activities: offer a per-slot skill override (default: auto best). */
+		if (allowedSkills.length > 1) {
+			const optsHtml = allowedSkills.map(sk => `<option value="${sk}" ${act.skillChoice === sk ? "selected" : ""}>${this._fmtSkillName(sk)}</option>`).join("");
+			const selSkill = ee`<select class="ve-form-control ve-input-xxs dm-journey__skill-choice" aria-label="Skill for ${this._escAttr(actDef.label)}" title="Skill used (auto-picks the best by default)"><option value="" ${!act.skillChoice ? "selected" : ""}>Auto${chosenSkill ? ` (${this._fmtSkillName(chosenSkill)})` : ""}</option>${optsHtml}</select>`;
+			selSkill.onn("change", () => {
+				act.skillChoice = selSkill.val() || null;
+				this._reRenderCurrentTab();
+				this._doSave();
+			});
+			selSkill.appendTo(eleBonusCell);
 		}
 
 		/* ---- DC cell ---- */
@@ -1921,11 +1553,18 @@ class JourneyTrackerRoot {
 		if (impossible) {
 			dcStr = "N/A";
 			dcCls += " dm-journey__dc-cell--impossible";
+		} else if (actDef?.isTracking) {
+			dcStr = `${this._getTrackTerrainDc(act)}`;
+			dcCls += " dm-journey__dc-cell--modified";
 		} else if (dc != null) {
 			dcStr = `${dc}`;
 			if (dcNotes.length) dcCls += " dm-journey__dc-cell--modified";
 		}
-		const dcTitle = impossible ? "Impossible at current pace" : dcNotes.length ? `Base ${this._state.area.baseDc ?? 10}: ${dcNotes.join(", ")}` : "";
+		const dcTitle = impossible
+			? "Impossible at current pace"
+			: actDef?.isTracking
+				? "Terrain DC (set below) — Soft 10 / Common 15 / Hard 20 / Barren 25"
+				: dcNotes.length ? `Base ${this._state.area.baseDc ?? 10}: ${dcNotes.join(", ")}` : "";
 		const eleDcCell = ee`<span class="${dcCls}" title="${this._escAttr(dcTitle)}">${dcStr}</span>`;
 
 		/* ---- Roll input + crit cycle button ---- */
@@ -1940,7 +1579,7 @@ class JourneyTrackerRoot {
 
 		const curCrit = act._critOverride || null;
 		const btnCrit = ee`<button class="dm-journey__crit-toggle ${CRIT_CLASSES[curCrit]}" title="${CRIT_TITLES[curCrit]}" type="button" aria-label="Toggle critical result">${CRIT_LABELS[curCrit]}</button>`;
-		btnCrit.toggleVe(isTotalMode && !!actDef?.skill);
+		btnCrit.toggleVe(isTotalMode && allowedSkills.length > 0);
 		btnCrit.onn("click", () => {
 			const curIdx = CRIT_CYCLE.indexOf(act._critOverride || null);
 			act._critOverride = CRIT_CYCLE[(curIdx + 1) % CRIT_CYCLE.length];
@@ -2058,9 +1697,9 @@ class JourneyTrackerRoot {
 
 		const rawVal = act.rollResult;
 		const rollNum = parseInt(rawVal, 10);
-		if (isNaN(rollNum) || !actDef?.skill || dc == null || impossible) return;
+		if (isNaN(rollNum) || !getActivitySkills(actDef).length || dc == null || impossible) return;
 
-		const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef.id, actDef.skill) : {total: 0};
+		const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef, act.skillChoice) : {total: 0};
 		const total = isTotalMode ? rollNum : rollNum + bonusInfo.total;
 		const outcome = this._classifyActivityRoll(rollNum, total, dc, actDef, isTotalMode, act._critOverride, activities, allPlayers, activityList);
 
@@ -2068,27 +1707,10 @@ class JourneyTrackerRoot {
 			? `${player.name} \u2014 ${actDef.label}: total ${total} vs DC ${dc}`
 			: `${player.name} \u2014 ${actDef.label}: d20(${rollNum}) ${this._fmtBonus(bonusInfo.total)} = ${total} vs DC ${dc}`;
 
-		let rmDelta = 0;
 		const OUTCOME_LABELS = {critSuccess: "Critical Success", success: "Success", fail: "Failure", critFail: "Critical Failure"};
 		const label = OUTCOME_LABELS[outcome];
-
-		if (outcome === "critSuccess") {
-			if (actDef.critSuccessPerPlayer) {
-				/* Scout crit: −1 RM per player taking this activity */
-				const count = this._countPlayersWithActivity(actDef.id, activities, allPlayers);
-				rmDelta = (actDef.rmOnCritSuccess || 0) * count;
-			} else {
-				rmDelta = actDef.rmOnCritSuccess ?? actDef.rmOnSuccess ?? 0;
-			}
-		} else if (outcome === "success") {
-			rmDelta = actDef.rmOnSuccess ?? 0;
-		} else if (outcome === "critFail") {
-			rmDelta = actDef.rmOnCritFail ?? actDef.rmOnFail ?? 0;
-		} else {
-			rmDelta = actDef.rmOnFail ?? 0;
-		}
-
-		act._rmRollApplied = rmDelta;
+		const perPlayerCount = actDef.critSuccessPerPlayer ? this._countPlayersWithActivity(actDef.id, activities, allPlayers) : 1;
+		const rmDelta = rmDeltaForOutcome(actDef, outcome, {perPlayerCount});
 		if (rmDelta) {
 			this._setRm(this._state.riskModifier + rmDelta, `${actDef.label} ${label} (${player.name}): ${rmDelta > 0 ? "+" : ""}${rmDelta} RM`);
 		}
@@ -2105,27 +1727,18 @@ class JourneyTrackerRoot {
 
 	/** Classify a roll as critSuccess/success/fail/critFail. */
 	_classifyActivityRoll (rollNum, total, dc, actDef, isTotalMode, critOverride, activities, allPlayers, activityList) {
-		const success = total >= dc;
-
 		/* Total mode: use manual crit override if present */
 		if (isTotalMode && critOverride) return critOverride;
 
-		/* d20 mode: auto-detect crits */
-		if (!isTotalMode) {
-			/* Check for group check (2+ players with same activity) */
-			const count = this._countPlayersWithActivity(actDef.id, activities, allPlayers);
-			if (count >= 2) {
-				/* Group check: all pass = crit success, all fail = crit fail */
-				const groupResult = this._evaluateGroupCheck(actDef, activities, allPlayers, dc, activityList);
-				if (groupResult) return groupResult;
-			} else {
-				/* Single player: nat 20 / nat 1 */
-				if (rollNum === 20) return success ? "critSuccess" : "success";
-				if (rollNum === 1) return !success ? "critFail" : "fail";
-			}
+		/* Group check (2+ players with the same activity) — resolved as one group outcome. */
+		const count = this._countPlayersWithActivity(actDef.id, activities, allPlayers);
+		if (count >= 2) {
+			const groupResult = this._evaluateGroupCheck(actDef, activities, allPlayers, dc);
+			if (groupResult) return groupResult;
+			/* Not everyone has rolled yet — fall back to this player's individual result. */
 		}
 
-		return success ? "success" : "fail";
+		return classifySingleRoll({rollNum, total, dc, isTotalMode});
 	}
 
 	/** Count how many activity slots across all players have the given activity. */
@@ -2142,8 +1755,12 @@ class JourneyTrackerRoot {
 		return count;
 	}
 
-	/** Evaluate a group check: if all rolled and all pass → critSuccess, all fail → critFail, else null. */
-	_evaluateGroupCheck (actDef, activities, allPlayers, dc, activityList) {
+	/**
+	 * Evaluate a group check for an activity. Returns null until every participating slot has a roll;
+	 * once all have rolled, delegates to the locked `evaluateGroupCheck` model (all pass → critSuccess,
+	 * all fail → critFail, otherwise standard 5e ≥-half success).
+	 */
+	_evaluateGroupCheck (actDef, activities, allPlayers, dc) {
 		const isTotalMode = this._state.rollMode === "total";
 		const relevantSlots = [];
 		for (const p of allPlayers) {
@@ -2156,36 +1773,38 @@ class JourneyTrackerRoot {
 		}
 		if (relevantSlots.length < 2) return null;
 
-		let allRolled = true;
-		let allPass = true;
-		let allFail = true;
-
+		const passResults = [];
 		for (const {slot, playerId} of relevantSlots) {
 			const rollNum = parseInt(slot.rollResult, 10);
-			if (isNaN(rollNum)) { allRolled = false; break; }
+			if (isNaN(rollNum)) return null; /* wait until everyone has rolled */
 
 			const ptChar = this._getPartyTrackerCharacters().find(c => c.id === playerId);
-			const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef.id, actDef.skill) : {total: 0};
+			const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef, slot.skillChoice) : {total: 0};
 			const total = isTotalMode ? rollNum : rollNum + bonusInfo.total;
-			const success = total >= dc;
-			if (success) allFail = false;
-			else allPass = false;
+			passResults.push(total >= dc);
 		}
 
-		if (!allRolled) return null;
-		if (allPass) return "critSuccess";
-		if (allFail) return "critFail";
-		return null;
+		return evaluateGroupCheck(passResults);
 	}
 
 	/** Render the result cell based on current activity state. */
 	_renderActivityResultCell (act, actDef, ptChar, dc, impossible, isTotalMode, activities, allPlayers, activityList) {
+		/* Track uses its own terrain-DC + Degrees-of-Success panel. */
+		if (actDef?.isTracking) {
+			if (impossible) {
+				const cell = ee`<span class="dm-journey__roll-result dm-journey__roll-result--fail"></span>`;
+				cell.txt("Not possible at Fast pace");
+				return cell;
+			}
+			return this._renderTrackResult(act, actDef, ptChar, isTotalMode);
+		}
+
 		const eleResultCell = ee`<span class="dm-journey__roll-result"></span>`;
 
 		if (act.rollResult !== "" && act.rollResult != null) {
 			const rollNum = parseInt(act.rollResult, 10);
-			if (!isNaN(rollNum) && actDef?.skill && dc != null) {
-				const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef.id, actDef.skill) : {total: 0};
+			if (!isNaN(rollNum) && getActivitySkills(actDef).length && dc != null) {
+				const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef, act.skillChoice) : {total: 0};
 				const total = isTotalMode ? rollNum : rollNum + bonusInfo.total;
 				const outcome = this._classifyActivityRoll(rollNum, total, dc, actDef, isTotalMode, act._critOverride, activities, allPlayers, activityList);
 
@@ -2222,8 +1841,68 @@ class JourneyTrackerRoot {
 	}
 
 	/* -------------------------------------------- */
-	/*  Area Config Tab                              */
+	/*  Track sub-system (system-neutral)            */
 	/* -------------------------------------------- */
+
+	_getTrackTerrainDc (act) {
+		const key = act?.trackTerrain || "common";
+		const terrain = TRACKING_TERRAINS.find(t => t.key === key) || TRACKING_TERRAINS[1];
+		return terrain.dc;
+	}
+
+	/** Interactive Track panel: terrain-DC picker + advisory modifiers + Degrees of Success. */
+	_renderTrackResult (act, actDef, ptChar, isTotalMode) {
+		const wrp = ee`<span class="dm-journey__roll-result dm-journey__track-result"></span>`;
+
+		/* Terrain DC picker (sets the base DC for the check). */
+		const terrainKey = act.trackTerrain || "common";
+		const selTerrain = ee`<select class="ve-form-control ve-input-xxs dm-journey__track-terrain" aria-label="Track terrain" title="Terrain difficulty sets the base DC">
+			${TRACKING_TERRAINS.map(t => `<option value="${t.key}" ${terrainKey === t.key ? "selected" : ""} title="${this._escAttr(t.examples)}">${this._escHtml(t.label)} (DC ${t.dc})</option>`).join("")}
+		</select>`;
+		selTerrain.onn("change", () => {
+			act.trackTerrain = selTerrain.val();
+			this._reRenderCurrentTab();
+			this._doSave();
+		});
+		selTerrain.appendTo(wrp);
+
+		/* Advisory circumstance modifiers (DM adjudicates manually). */
+		const infoBtn = ee`<button class="dm-journey__info-btn" type="button" aria-label="Tracking circumstance modifiers">\u2139</button>`;
+		const pop = ee`<div class="dm-journey__popover dm-journey__track-popover">
+			<div class="dm-journey__popover-title">Circumstance Modifiers (DM adjudicates)</div>
+			<ul class="dm-journey__track-mods">${TRACKING_MODIFIERS.map(m => `<li>${this._escHtml(m.label)}</li>`).join("")}</ul>
+		</div>`;
+		infoBtn.onn("mouseenter", () => pop.classList.add("dm-journey__popover--visible"));
+		infoBtn.onn("mouseleave", () => pop.classList.remove("dm-journey__popover--visible"));
+		infoBtn.appendChild(pop);
+		infoBtn.appendTo(wrp);
+
+		/* Degree of success from the entered roll. */
+		if (act.rollResult !== "" && act.rollResult != null) {
+			const rollNum = parseInt(act.rollResult, 10);
+			if (!isNaN(rollNum)) {
+				const dc = this._getTrackTerrainDc(act);
+				const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef, act.skillChoice) : {total: 0};
+				const total = isTotalMode ? rollNum : rollNum + bonusInfo.total;
+				const degree = classifyTrackingDegree(total, dc);
+				const DEG_CLS = {
+					master: "dm-journey__track-degree--master",
+					expert: "dm-journey__track-degree--expert",
+					solid: "dm-journey__track-degree--solid",
+					path: "dm-journey__track-degree--path",
+					lost: "dm-journey__track-degree--lost",
+				};
+				ee`<span class="dm-journey__track-degree ${DEG_CLS[degree.key]}" title="${this._escAttr(degree.info)}">${total} vs DC ${dc} \u2014 ${this._escHtml(degree.label)}: ${this._escHtml(degree.title)}</span>`.appendTo(wrp);
+			}
+		}
+
+		/* Pace restriction note (Fast = impossible is handled upstream). */
+		if (this._state.travelPace === "normal") {
+			ee`<span class="dm-journey__note">Disadvantage (Normal pace)</span>`.appendTo(wrp);
+		}
+
+		return wrp;
+	}
 
 	_renderArea () {
 		if (!this._wrpArea) return;
@@ -2434,12 +2113,7 @@ class JourneyTrackerRoot {
 	}
 
 	_classifyRoll (total) {
-		const ranges = this._state.area.riskRanges;
-		/* Cascade from top: anything >= intense.min is intense (handles overflow above max) */
-		if (total >= ranges.intense.min) return "intense";
-		if (total >= ranges.moderate.min) return "moderate";
-		if (total >= ranges.mild.min) return "mild";
-		return "empty";
+		return classifyRiskRange(total, this._state.area.riskRanges);
 	}
 
 	_renderRiskBadge (segOrCamp) {
@@ -2471,11 +2145,12 @@ class JourneyTrackerRoot {
 	}
 
 	/**
-	 * Undo all RM contributions from a player's activity slots (journey segments + camp).
+	 * Undo all RM contributions from a player's activity slots (journey segments + camp),
+	 * and drop the player from any stealth Group Checks (recomputing each affected segment).
 	 */
 	_undoPlayerRm (player) {
 		let total = 0;
-		/* Journey segments */
+		/* Journey segment activities */
 		for (const seg of this._state.journey.segments) {
 			const slots = seg.activities?.[player.id];
 			if (slots) {
@@ -2483,10 +2158,6 @@ class JourneyTrackerRoot {
 				for (const act of slotArr) {
 					total += (act._rmAlwaysApplied || 0) + (act._rmRollApplied || 0);
 				}
-			}
-			/* Stealth slots */
-			for (const slot of (seg.stealthSlots || [])) {
-				if (slot.playerId === player.id) total += (slot._rmApplied || 0);
 			}
 		}
 		/* Camp */
@@ -2499,6 +2170,13 @@ class JourneyTrackerRoot {
 		}
 
 		if (total) this._setRm(this._state.riskModifier - total, `Undo all RM from ${player.name}`);
+
+		/* Remove the player from stealth Group Checks and recompute each affected segment. */
+		for (const seg of this._state.journey.segments) {
+			const before = (seg.stealthSlots || []).length;
+			seg.stealthSlots = (seg.stealthSlots || []).filter(slot => slot.playerId !== player.id);
+			if (seg.stealthSlots.length !== before) this._applyStealthGroupRm(seg);
+		}
 	}
 
 	_updateRmDisplay () {
@@ -2513,8 +2191,9 @@ class JourneyTrackerRoot {
 		const rm = this._state.riskModifier;
 		this._eleRmBadge.txt(rm >= 0 ? `+${rm}` : `${rm}`);
 		this._eleRmBadge.className = "dm-journey__rm-badge";
-		if (rm <= 0) this._eleRmBadge.classList.add("dm-journey__rm-badge--low");
-		else if (rm <= 2) this._eleRmBadge.classList.add("dm-journey__rm-badge--mid");
+		/* Documented scale: ≤2 low (green) · 3–6 mid (yellow) · ≥7 high (red). */
+		if (rm <= 2) this._eleRmBadge.classList.add("dm-journey__rm-badge--low");
+		else if (rm <= 6) this._eleRmBadge.classList.add("dm-journey__rm-badge--mid");
 		else this._eleRmBadge.classList.add("dm-journey__rm-badge--high");
 	}
 
@@ -2909,67 +2588,19 @@ class JourneyTrackerRoot {
 	 */
 	_getEffectiveDc (activityId, activityList, activities, allPlayers, segmentIndex) {
 		const actDef = activityList.find(a => a.id === activityId);
-		if (!actDef?.skill) return {dc: null, impossible: false, notes: []};
-
-		const baseDc = this._state.area.baseDc ?? 10;
-		const pace = this._state.travelPace;
-
-		let dc = baseDc;
-		let impossible = false;
-		const notes = [];
-
-		/* Weather DC modifier */
-		const weather = this._getWeatherForSegment(segmentIndex);
-		const weatherPreset = this._getWeatherPreset(weather);
-		if (weatherPreset?.dcMod) {
-			dc += weatherPreset.dcMod;
-			notes.push(`${weatherPreset.dcMod > 0 ? "+" : ""}${weatherPreset.dcMod} ${weatherPreset.label}`);
-		}
-
-		/* Blizzard: no Forage/Map */
-		if (weather === "blizzard" && (activityId === "forage" || activityId === "map")) {
-			impossible = true;
-		}
-
-		/* Pace-based modifiers */
-		if (activityId === "navigate") {
-			if (pace === "fast") { dc += 2; notes.push("+2 fast pace"); }
-			if (pace === "slow") { dc -= 2; notes.push("\u22122 slow pace"); }
-		}
-
-		/* Hide Tracks / Hide Camp: other loud activities raise DC */
-		if (activityId === "hideTracks" || activityId === "hideCamp") {
-			let interactionMod = 0;
-			const counts = {};
-			for (const p of allPlayers) {
-				const slots = activities[p.id];
-				if (!slots) continue;
-				const slotArr = Array.isArray(slots) ? slots : [slots];
-				for (const slot of slotArr) {
-					const a = slot?.activity;
-					if (a === "scout" || a === "forage" || a === "entertain") {
-						counts[a] = (counts[a] || 0) + 1;
-						interactionMod += 2;
-					}
-				}
-			}
-			if (interactionMod) {
-				dc += interactionMod;
-				const parts = [];
-				if (counts.scout) parts.push(`+${counts.scout * 2} scout`);
-				if (counts.forage) parts.push(`+${counts.forage * 2} forage`);
-				if (counts.entertain) parts.push(`+${counts.entertain * 2} entertain`);
-				notes.push(...parts);
-			}
-			if (pace === "fast") { dc += 2; notes.push("+2 fast pace"); }
-			if (pace === "slow") { dc -= 2; notes.push("\u22122 slow pace"); }
-		}
-
-		/* Impossible checks */
-		if (activityId === "map" && pace === "fast") impossible = true;
-		if (activityId === "forage" && pace === "fast" && activityList === JOURNEY_ACTIVITIES) impossible = true;
-
-		return {dc, impossible, notes};
+		const weatherKey = this._getWeatherForSegment(segmentIndex);
+		return computeEffectiveDc({
+			activityId,
+			actDef,
+			activities,
+			allPlayers,
+			pace: this._state.travelPace,
+			baseDc: this._state.area.baseDc ?? 10,
+			weatherKey,
+			weatherPreset: this._getWeatherPreset(weatherKey),
+			campfireActive: !!this._state.camp?.campfireActive,
+			isCamp: activityList === CAMP_ACTIVITIES,
+		});
 	}
 
 	/* -------------------------------------------- */
@@ -2997,10 +2628,12 @@ class JourneyTrackerRoot {
 		return {
 			activities: {},
 			stealthSlots: [],
+			stealthGroupRm: 0,
 			riskRoll: null,
 			riskRollTotal: null,
 			riskRollOverride: null,
 			rmAtRoll: 0,
+			encounterResolved: false,
 			_collapsed: false,
 		};
 	}
@@ -3022,6 +2655,13 @@ class JourneyTrackerRoot {
 	_fmtBonus (n) {
 		if (n == null) return "";
 		return n >= 0 ? `+${n}` : `${n}`;
+	}
+
+	/** Human-friendly skill name (e.g. "sleightOfHand" → "Sleight of Hand"). */
+	_fmtSkillName (skill) {
+		if (!skill) return "\u2014";
+		const spaced = `${skill}`.replace(/([a-z])([A-Z])/g, "$1 $2");
+		return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 	}
 
 	_fmtTimestamp (isoStr) {
@@ -3065,51 +2705,24 @@ class JourneyTrackerRoot {
 	}
 
 	static _getSkillBonusFromData (charData, skill) {
-		if (charData.overrides?.skillBonuses?.[skill] != null) return charData.overrides.skillBonuses[skill];
-		const ability = SKILL_TO_ABILITY[skill];
-		if (!ability) return 0;
-		const score = charData.abilities?.[ability] ?? 10;
-		const mod = Math.floor((score - 10) / 2);
-		const totalLevel = charData.classes?.reduce((sum, c) => sum + (c.level || 0), 0) || 1;
-		const profBonus = Math.floor((totalLevel - 1) / 4) + 2;
-		const profLevel = Number(charData.skillProficiencies?.[skill]) || 0;
-		let bonus = mod + (profLevel * profBonus);
-		bonus += charData.bonuses?.skills?.[skill] || 0;
-		return bonus;
+		return getSkillBonusFromData(charData, skill);
 	}
 
-	/**
-	 * Returns the proficiency bonus if the character has a tool proficiency relevant to the given activity.
-	 * Tool proficiencies are an array of free-text strings; we keyword-match against ACTIVITY_TOOL_KEYWORDS.
-	 * Returns 0 if no relevant tool proficiency.
-	 */
 	static _getToolProfBonusFromData (charData, activityId) {
-		const keywords = ACTIVITY_TOOL_KEYWORDS[activityId];
-		if (!keywords?.length) return 0;
-		const tools = charData.toolProficiencies;
-		if (!Array.isArray(tools) || !tools.length) return 0;
-		const hasMatch = tools.some(t => {
-			const lower = `${t}`.toLowerCase();
-			return keywords.some(kw => lower.includes(kw));
-		});
-		if (!hasMatch) return 0;
-		const totalLevel = charData.classes?.reduce((sum, c) => sum + (c.level || 0), 0) || 1;
-		return Math.floor((totalLevel - 1) / 4) + 2;
+		return getToolProfBonusFromData(charData, activityId);
 	}
 
 	/**
-	 * Returns the effective bonus for a character performing a given activity.
-	 * Combines skill bonus + tool proficiency bonus (only when skill is not already proficient).
+	 * Returns the effective bonus for a character performing a given activity, auto-selecting the
+	 * character's best allowed skill (or `skillChoice`, when the DM has overridden it), and folding in
+	 * a relevant tool proficiency. Delegates to the pure `computeActivityBonus`.
+	 * @param {object} charData Party-tracker character data.
+	 * @param {object} actDef Activity definition (must include `id` + `skill`/`skills`).
+	 * @param {string|null} skillChoice Optional forced skill.
+	 * @returns {{total:number, skillBonus:number, toolBonus:number, hasToolProf:boolean, skill:string|null}}
 	 */
-	static _getActivityBonusFromData (charData, activityId, skill) {
-		if (!skill) return {total: 0, skillBonus: 0, toolBonus: 0, hasToolProf: false};
-		const skillBonus = JourneyTrackerRoot._getSkillBonusFromData(charData, skill);
-		const toolProfBonus = JourneyTrackerRoot._getToolProfBonusFromData(charData, activityId);
-		const hasToolProf = toolProfBonus > 0;
-		const skillProfLevel = Number(charData.skillProficiencies?.[skill]) || 0;
-		/* Only add tool prof to the total if the character isn't already proficient in the skill */
-		const effectiveToolBonus = (hasToolProf && skillProfLevel === 0) ? toolProfBonus : 0;
-		return {total: skillBonus + effectiveToolBonus, skillBonus, toolBonus: effectiveToolBonus, hasToolProf};
+	static _getActivityBonusFromData (charData, actDef, skillChoice = null) {
+		return computeActivityBonus(charData, actDef, {skillChoice});
 	}
 
 	_escHtml (str) {
@@ -3157,21 +2770,25 @@ class JourneyTrackerRoot {
 				segments: (toLoad.journey?.segments || []).map(seg => ({
 					activities: JourneyTrackerRoot._migrateActivities(seg.activities),
 					stealthSlots: (seg.stealthSlots || []).map(s => ({...s})),
+					stealthGroupRm: seg.stealthGroupRm ?? 0,
 					riskRoll: seg.riskRoll ?? null,
 					riskRollTotal: seg.riskRollTotal ?? null,
 					riskRollOverride: seg.riskRollOverride ?? null,
 					rmAtRoll: seg.rmAtRoll ?? 0,
+					encounterResolved: seg.encounterResolved ?? false,
 					_collapsed: seg._collapsed || false,
 				})),
 			},
 			camp: {
 				campfireActive: toLoad.camp?.campfireActive || false,
+				siteDescription: toLoad.camp?.siteDescription || "",
 				activities: JourneyTrackerRoot._migrateActivities(toLoad.camp?.activities),
 				guardSlots: (toLoad.camp?.guardSlots || []).map(s => ({...s})),
 				riskRoll: toLoad.camp?.riskRoll ?? null,
 				riskRollTotal: toLoad.camp?.riskRollTotal ?? null,
 				riskRollOverride: toLoad.camp?.riskRollOverride ?? null,
 				rmAtRoll: toLoad.camp?.rmAtRoll ?? 0,
+				encounterResolved: toLoad.camp?.encounterResolved ?? false,
 			},
 			log: (toLoad.log || []).map(e => ({...e})),
 			weather: {
@@ -3231,21 +2848,25 @@ class JourneyTrackerRoot {
 				segments: this._state.journey.segments.map(seg => ({
 					activities: JourneyTrackerRoot._cloneActivities(seg.activities),
 					stealthSlots: (seg.stealthSlots || []).map(s => ({...s})),
+					stealthGroupRm: seg.stealthGroupRm ?? 0,
 					riskRoll: seg.riskRoll,
 					riskRollTotal: seg.riskRollTotal,
 					riskRollOverride: seg.riskRollOverride,
 					rmAtRoll: seg.rmAtRoll,
+					encounterResolved: seg.encounterResolved ?? false,
 					_collapsed: seg._collapsed || false,
 				})),
 			},
 			camp: {
 				campfireActive: this._state.camp.campfireActive,
+				siteDescription: this._state.camp.siteDescription || "",
 				activities: JourneyTrackerRoot._cloneActivities(this._state.camp.activities),
 				guardSlots: this._state.camp.guardSlots.map(s => ({...s})),
 				riskRoll: this._state.camp.riskRoll,
 				riskRollTotal: this._state.camp.riskRollTotal,
 				riskRollOverride: this._state.camp.riskRollOverride,
 				rmAtRoll: this._state.camp.rmAtRoll,
+				encounterResolved: this._state.camp.encounterResolved ?? false,
 			},
 			log: this._state.log.map(e => ({...e})),
 			weather: {

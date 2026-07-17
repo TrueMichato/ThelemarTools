@@ -89,12 +89,44 @@
 
 	.dm-journey__pace-section {
 		display: inline-flex;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 3px;
+		flex: none;
+	}
+
+	.dm-journey__pace-radios {
+		display: inline-flex;
 		align-items: center;
 		gap: 2px;
-		flex: none;
 		border: 1px solid vars.$rgb-border-grey;
 		border-radius: 4px;
 		overflow: hidden;
+	}
+
+	.dm-journey__pace-details {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 2px 8px;
+		padding: 2px 4px;
+		font-size: 0.72rem;
+		line-height: 1.3;
+	}
+
+	.dm-journey__pace-detail-row {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 3px;
+		white-space: nowrap;
+	}
+
+	.dm-journey__pace-detail-key {
+		font-weight: 700;
+		opacity: 0.7;
+	}
+
+	.dm-journey__pace-detail-val {
+		opacity: 0.95;
 	}
 
 	.dm-journey__pace-label {
@@ -1322,6 +1354,227 @@
 	}
 
 	/* ============================================================ */
+	/*  Risk threshold bar                                           */
+	/* ============================================================ */
+
+	.dm-journey__risk-bar {
+		display: flex;
+		align-items: stretch;
+		gap: 2px;
+		margin: 4px 0;
+		width: 100%;
+	}
+
+	.dm-journey__risk-bar-cell {
+		/* reuses .dm-journey__badge--{empty,mild,moderate,intense} bg/color */
+		flex: 1 1 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0;
+		padding: 3px 4px;
+		border-radius: 4px;
+		min-width: 0;
+		opacity: 0.55;
+		position: relative;
+		transition: opacity 0.12s;
+
+		&--active {
+			opacity: 1;
+			box-shadow: 0 0 0 2px rgb(0 0 0 / 35%);
+		}
+	}
+
+	.dm-journey__risk-bar-label {
+		font-size: 0.78rem;
+		font-weight: 700;
+		line-height: 1.1;
+	}
+
+	.dm-journey__risk-bar-range {
+		font-size: 0.68rem;
+		opacity: 0.8;
+		line-height: 1.1;
+	}
+
+	.dm-journey__risk-bar-marker {
+		position: absolute;
+		top: -13px;
+		font-size: 0.72rem;
+		font-weight: 700;
+		color: vars.$rgb-off-black;
+		white-space: nowrap;
+	}
+
+	/* ============================================================ */
+	/*  Intense-encounter RM reset                                   */
+	/* ============================================================ */
+
+	.dm-journey__intense-reset {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+		padding: 5px 8px;
+		margin-top: 4px;
+		border: 1px solid #f5c2c7;
+		border-radius: 4px;
+		background: rgb(248 215 218 / 45%);
+
+		&--done {
+			border-color: #badbcc;
+			background: rgb(209 231 221 / 45%);
+		}
+	}
+
+	/* ============================================================ */
+	/*  Group-check badge (stealth + group activities)              */
+	/* ============================================================ */
+
+	.dm-journey__stealth-group {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
+		padding: 5px 8px;
+		border-top: 1px solid vars.$rgb-border-grey--muted;
+	}
+
+	.dm-journey__group-badge {
+		display: inline-flex;
+		align-items: center;
+		padding: 2px 8px;
+		border-radius: 4px;
+		font-size: 0.82rem;
+		font-weight: 700;
+		white-space: nowrap;
+
+		&--pass {
+			background: #d4edda;
+			color: #155724;
+		}
+
+		&--crit-pass {
+			background: #b7e4c1;
+			color: #0c4620;
+		}
+
+		&--fail {
+			background: #f8d7da;
+			color: #721c24;
+		}
+
+		&--crit-fail {
+			background: #f1b0b7;
+			color: #4d0d14;
+		}
+	}
+
+	/* ============================================================ */
+	/*  Camp Setup / Rest phases                                     */
+	/* ============================================================ */
+
+	.dm-journey__phase-header {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 5px 8px;
+		margin-top: 4px;
+		font-size: 0.82rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: vars.$rgb-off-black;
+		opacity: 0.72;
+		border-bottom: 1px solid vars.$rgb-border-grey--muted;
+	}
+
+	.dm-journey__site-desc {
+		width: 100%;
+		margin: 4px 0;
+		font-size: 0.86rem;
+		resize: vertical;
+	}
+
+	.dm-journey__conceal-note {
+		padding: 2px 8px 6px;
+	}
+
+	/* ============================================================ */
+	/*  Track sub-system                                             */
+	/* ============================================================ */
+
+	.dm-journey__track-result {
+		display: inline-flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 4px;
+		white-space: normal;
+		overflow: visible;
+	}
+
+	.dm-journey__track-terrain {
+		max-width: 130px;
+	}
+
+	.dm-journey__track-popover {
+		width: 240px;
+	}
+
+	.dm-journey__track-mods {
+		margin: 4px 0 0;
+		padding-left: 16px;
+		font-size: 0.78rem;
+
+		li {
+			margin: 1px 0;
+		}
+	}
+
+	.dm-journey__track-degree {
+		display: inline-flex;
+		align-items: center;
+		padding: 1px 6px;
+		border-radius: 4px;
+		font-size: 0.80rem;
+		font-weight: 700;
+		white-space: nowrap;
+
+		&--master {
+			background: #b7e4c1;
+			color: #0c4620;
+		}
+
+		&--expert {
+			background: #d4edda;
+			color: #155724;
+		}
+
+		&--solid {
+			background: #d1ecf1;
+			color: #0c5460;
+		}
+
+		&--path {
+			background: #fff3cd;
+			color: #856404;
+		}
+
+		&--lost {
+			background: #f8d7da;
+			color: #721c24;
+		}
+	}
+
+	/* --- Skill-choice override select --- */
+
+	.dm-journey__skill-choice {
+		max-width: 118px;
+		font-size: 0.78rem;
+	}
+
+	/* ============================================================ */
 	/*  Night mode                                                   */
 	/* ============================================================ */
 
@@ -1735,6 +1988,90 @@
 
 		.dm-journey__timeline-card-row {
 			border-bottom-color: #3a3a3a;
+		}
+
+		/* --- New: risk bar, group badge, camp phases, track --- */
+
+		.dm-journey__risk-bar-cell--active {
+			box-shadow: 0 0 0 2px rgb(255 255 255 / 40%);
+		}
+
+		.dm-journey__risk-bar-marker {
+			color: #ddd;
+		}
+
+		.dm-journey__intense-reset {
+			border-color: #5a2a2e;
+			background: rgb(58 28 28 / 55%);
+
+			&--done {
+				border-color: #2c5138;
+				background: rgb(27 58 38 / 45%);
+			}
+		}
+
+		.dm-journey__stealth-group {
+			border-top-color: #444;
+		}
+
+		.dm-journey__group-badge {
+			&--pass {
+				background: #1b3a26;
+				color: #8fd19e;
+			}
+
+			&--crit-pass {
+				background: #17472a;
+				color: #6fdc86;
+			}
+
+			&--fail {
+				background: #3a1c1c;
+				color: #f99;
+			}
+
+			&--crit-fail {
+				background: #4d1418;
+				color: #f77;
+			}
+		}
+
+		.dm-journey__phase-header {
+			color: #ccc;
+			border-bottom-color: #444;
+		}
+
+		.dm-journey__site-desc {
+			background: #333;
+			border-color: #555;
+			color: #ddd;
+		}
+
+		.dm-journey__track-degree {
+			&--master {
+				background: #17472a;
+				color: #6fdc86;
+			}
+
+			&--expert {
+				background: #1b3a26;
+				color: #8fd19e;
+			}
+
+			&--solid {
+				background: #123a44;
+				color: #7fd4e0;
+			}
+
+			&--path {
+				background: #3a3215;
+				color: #e6c766;
+			}
+
+			&--lost {
+				background: #3a1c1c;
+				color: #f99;
+			}
 		}
 	}
 }
