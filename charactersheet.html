@@ -89,17 +89,23 @@
 				<div class="charsheet__header-divider"></div>
 
 				<div class="charsheet__header-group charsheet__header-group--progression">
-					<div class="charsheet__xp-control" title="Experience Points tracking">
-						<div class="charsheet__xp-row">
-							<span class="charsheet__xp-label">Current XP</span>
+					<div class="charsheet__xp-control" id="charsheet-xp-control" title="Experience Points tracking">
+						<div class="charsheet__xp-head">
+							<span class="charsheet__xp-label">XP</span>
 							<span class="charsheet__xp-current" id="charsheet-disp-xp-current">0</span>
+							<details class="charsheet__xp-edit">
+								<summary class="charsheet__xp-edit-toggle" title="Adjust experience points">✎</summary>
+								<div class="charsheet__xp-edit-pop">
+									<label class="charsheet__xp-label" for="charsheet-ipt-xp-add">Set / add XP</label>
+									<div class="charsheet__xp-edit-row">
+										<input class="charsheet__xp-input" id="charsheet-ipt-xp-add" type="number" min="0" step="1" value="0">
+										<button class="charsheet__xp-add-btn" id="charsheet-btn-xp-add" title="Add this amount to current XP">Add</button>
+										<button class="charsheet__xp-add-btn" id="charsheet-btn-xp-set" title="Set total XP to this value">Set</button>
+									</div>
+								</div>
+							</details>
 						</div>
-						<div class="charsheet__xp-row">
-							<label class="charsheet__xp-label" for="charsheet-ipt-xp-add">XP</label>
-							<input class="charsheet__xp-input" id="charsheet-ipt-xp-add" type="number" min="0" step="1" value="0">
-							<button class="charsheet__xp-add-btn" id="charsheet-btn-xp-add" title="Add this amount to current XP">Add</button>
-							<button class="charsheet__xp-add-btn" id="charsheet-btn-xp-set" title="Set total XP to this value">Set</button>
-						</div>
+						<div class="charsheet__xp-track" aria-hidden="true"><div class="charsheet__xp-fill" id="charsheet-xp-fill"></div></div>
 						<div class="charsheet__xp-progress" id="charsheet-disp-xp-progress">Add a class to track level progression.</div>
 					</div>
 					<button class="charsheet__action-btn charsheet__action-btn--success" id="charsheet-btn-levelup" title="Level Up">

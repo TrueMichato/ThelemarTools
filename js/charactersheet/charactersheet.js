@@ -3041,14 +3041,20 @@ class CharacterSheetPage {
 		const currentXp = this._state.getXp();
 		(/** @type {*} */ (document.getElementById("charsheet-disp-xp-current"))).textContent = currentXp.toLocaleString();
 
+		const elFill = /** @type {*} */ (document.getElementById("charsheet-xp-fill"));
+		const setFill = (pct) => { if (elFill) elFill.style.width = `${Math.max(0, Math.min(100, pct))}%`; };
+		const elProgress = /** @type {*} */ (document.getElementById("charsheet-disp-xp-progress"));
+
 		const totalLevel = this._state.getTotalLevel();
 		if (totalLevel <= 0) {
-			(/** @type {*} */ (document.getElementById("charsheet-disp-xp-progress"))).textContent = "Add a class to track level progression.";
+			elProgress.textContent = "Add a class to track level progression.";
+			setFill(0);
 			return;
 		}
 
 		if (totalLevel >= 20) {
-			(/** @type {*} */ (document.getElementById("charsheet-disp-xp-progress"))).textContent = "Maximum level reached.";
+			elProgress.textContent = "Maximum level reached.";
+			setFill(100);
 			return;
 		}
 
@@ -3056,11 +3062,13 @@ class CharacterSheetPage {
 		const xpToNext = this._state.getXpToNextLevel();
 		const xpRequired = this._state.getXpRequiredForNextLevel();
 		if (xpToNext <= 0) {
-			(/** @type {*} */ (document.getElementById("charsheet-disp-xp-progress"))).textContent = `Ready for level ${nextLevel} (${currentXp.toLocaleString()}/${xpRequired.toLocaleString()} XP).`;
+			elProgress.textContent = `Ready for level ${nextLevel} (${currentXp.toLocaleString()}/${xpRequired.toLocaleString()} XP).`;
+			setFill(100);
 			return;
 		}
 
-		(/** @type {*} */ (document.getElementById("charsheet-disp-xp-progress"))).textContent = `${xpToNext.toLocaleString()} XP to level ${nextLevel} (${currentXp.toLocaleString()}/${xpRequired.toLocaleString()} XP).`;
+		elProgress.textContent = `${xpToNext.toLocaleString()} XP to level ${nextLevel} (${currentXp.toLocaleString()}/${xpRequired.toLocaleString()} XP).`;
+		setFill(xpRequired > 0 ? (currentXp / xpRequired) * 100 : 0);
 	}
 
 	_renderLevelUpBanner () {

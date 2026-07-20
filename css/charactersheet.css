@@ -20561,3 +20561,200 @@ color: var(--cs-text-primary, #f1f5f9);
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
+
+/* ========================================================================
+   DESIGN OVERHAUL — ROUND 2: Further UI/UX polish
+   ------------------------------------------------------------------------
+   Second review pass. Still pure presentation. Grouped P1 → P3.
+   ======================================================================== */
+
+/* ---- P1.1 — Character name never clips ---------------------------------
+   The identity card (left overview column) is only ~317px, so portrait +
+   name + level badge on one row squeezed the name input to ~95px and the
+   character's own name clipped ("LORIAN HYV"). Reflow with flex-wrap: keep
+   portrait + level badge on the top line and drop the name onto its own
+   full-width line beneath, where it has the whole card to breathe. Pure
+   flexbox reordering, no markup change. */
+.charsheet__identity-main {
+	flex-wrap: wrap;
+	row-gap: var(--cs-space-sm, 0.5rem);
+}
+.charsheet__identity-main > .charsheet__portrait-container { order: 0; }
+.charsheet__identity-main > .charsheet__identity-level {
+	order: 1;
+	margin-left: auto;
+}
+.charsheet__identity-main > .charsheet__identity-name {
+	order: 2;
+	flex: 1 1 100%;
+	min-width: 0;
+}
+.charsheet__ipt-name {
+	width: 100%;
+	min-width: 0;
+	text-overflow: ellipsis;
+}
+/* Make the character name the hero of the identity card. The accessibility
+   text-size rule (.charsheet-page[data-textsize] .tab-content input…) has
+   higher specificity and was flattening the name to the body input size;
+   re-assert a display size that still tracks the user's text-size token but
+   is clamped so long names never re-clip the ~317px identity card. */
+.charsheet-page[data-textsize] .tab-content input:not([type="checkbox"]):not([type="radio"]).charsheet__ipt-name,
+.charsheet__ipt-name {
+	font-size: clamp(1.1rem, var(--cs-text-xl, 1.35rem), 1.6rem);
+	line-height: 1.2;
+}
+
+/* ---- P1.2 — Compact XP / progression control --------------------------
+   Was a dense 3-row mini-panel. Now one calm head line (XP + total), a slim
+   progress track that reads level advancement at a glance, one line of
+   progress copy, and manual Add/Set XP tucked into an on-demand <details>
+   disclosure (inline, so it can't be clipped by the header's overflow). */
+.charsheet__xp-control {
+	gap: 4px;
+	min-width: 148px;
+}
+.charsheet__xp-head {
+	display: flex;
+	align-items: baseline;
+	gap: 5px;
+}
+.charsheet__xp-head .charsheet__xp-current {
+	font-size: 0.9rem;
+	line-height: 1.1;
+}
+.charsheet__xp-edit {
+	margin-left: auto;
+}
+.charsheet__xp-edit-toggle {
+	list-style: none;
+	cursor: pointer;
+	padding: 1px 6px;
+	border-radius: var(--cs-radius-sm, 4px);
+	border: 1px solid var(--cs-border, rgba(255,255,255,0.14));
+	background: transparent;
+	color: var(--cs-text-muted, var(--rgb-text-muted));
+	font-size: 0.72rem;
+	line-height: 1.2;
+	transition: all var(--cs-transition-fast, 0.12s ease);
+	-webkit-user-select: none;
+	user-select: none;
+}
+.charsheet__xp-edit-toggle::-webkit-details-marker { display: none; }
+.charsheet__xp-edit-toggle:hover,
+.charsheet__xp-edit[open] .charsheet__xp-edit-toggle {
+	color: var(--cs-text, inherit);
+	border-color: var(--cs-primary, #6366f1);
+	background: rgba(99, 102, 241, 0.12);
+}
+.charsheet__xp-edit-pop {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-top: 5px;
+	padding-top: 5px;
+	border-top: 1px solid var(--cs-border, rgba(255,255,255,0.1));
+}
+.charsheet__xp-edit-row {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+}
+/* Slim, semantic progress track: accent fill communicates "advancement",
+   never decoration. Width is set from _renderXpTracking (presentation only). */
+.charsheet__xp-track {
+	height: 4px;
+	border-radius: 999px;
+	background: rgba(0, 0, 0, 0.28);
+	overflow: hidden;
+}
+.charsheet__xp-fill {
+	height: 100%;
+	width: 0;
+	border-radius: inherit;
+	background: linear-gradient(90deg, var(--cs-primary, #6366f1), #818cf8);
+	transition: width var(--cs-transition, 0.35s cubic-bezier(0.22, 1, 0.36, 1));
+}
+.charsheet__xp-progress {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.charsheet__xp-fill { transition: none; }
+}
+
+/* ---- P2.1 — One lead per section heading ------------------------------
+   Section titles carried TWO leading marks: a decorative 4px indigo tick
+   (::before) AND an emoji icon. Two leads before every label is decoration,
+   not hierarchy. Drop the tick; the emoji is the single functional lead that
+   players scan by, and the tracked uppercase label carries the heading. */
+.charsheet__section-title::before {
+	display: none;
+}
+
+/* ---- P2.2 — Single-accent action-button hierarchy ---------------------
+   Level Up (success green) + Multiclass (info blue) + Quick Build (filled
+   indigo) put three competing hues side by side. Reserve the filled accent
+   for the one primary (Quick Build) and demote Level Up + Multiclass to one
+   quiet neutral secondary treatment — same family, clear hierarchy. */
+.charsheet__action-btn--success,
+.charsheet__action-btn--info {
+	background: var(--cs-bg-elevated, rgba(255, 255, 255, 0.04));
+	color: var(--cs-text, var(--rgb-text));
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.14));
+}
+.charsheet__action-btn--success:hover,
+.charsheet__action-btn--info:hover {
+	background: var(--cs-bg-surface, rgba(255, 255, 255, 0.08));
+	border-color: var(--cs-primary, #6366f1);
+	transform: translateY(-1px);
+}
+
+/* ---- P2.3 — Combat action rows join the neutral cell system -----------
+   The Combat ABILITIES rows were blue-framed tinted cards (full 2px blue
+   border + blue gradient fill, with a 3px side-stripe on custom rows). All
+   rows are clickable, so the blue distinguished nothing — pure decoration.
+   Neutralise to the shared recessed cell; the Class / Action / Reaction
+   badges and the Use button already carry the meaning. Hover behaves like a
+   cell (tonal fill), not a card (no colour ramp, no lateral shift). */
+.charsheet__combat-action-item {
+	background: var(--cs-bg-base);
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+}
+.charsheet__combat-action-item:hover,
+.charsheet__combat-action-clickable:hover {
+	background: var(--cs-bg-elevated);
+	border-color: var(--cs-border-strong, var(--cs-border, rgba(255, 255, 255, 0.18)));
+	transform: none;
+	box-shadow: none;
+}
+.charsheet__combat-action-item--custom {
+	border-left: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+}
+
+/* ---- P3.4 — Consistent keyboard focus ring ---------------------------
+   Only two :focus-visible rules existed sheet-wide, so keyboard users got
+   an inconsistent (often invisible) focus indicator on chips, cells, icon
+   buttons and toggles. One generic accent ring on the sheet's interactive
+   primitives. Uses :focus-visible so it never shows on mouse click, only on
+   keyboard/AT navigation. Outline (not box-shadow) so it can't be clipped by
+   a parent's border-radius and adds no layout shift. */
+.charsheet-page :is(
+	button,
+	a[href],
+	input:not([type="checkbox"]):not([type="radio"]),
+	select,
+	textarea,
+	summary,
+	[tabindex]:not([tabindex="-1"]),
+	[role="button"],
+	.charsheet__chip,
+	.charsheet__stat-card,
+	.charsheet__combat-action-clickable
+):focus-visible {
+	outline: 2px solid var(--cs-primary, #6366f1);
+	outline-offset: 2px;
+}
