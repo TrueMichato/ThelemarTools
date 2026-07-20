@@ -2370,15 +2370,12 @@
 	box-shadow: var(--cs-shadow-md, 0 4px 6px rgba(0,0,0,0.1));
 }
 
+/* Header card keeps a slightly larger radius + padding for hierarchy; its
+   surface/border come from the unified `.charsheet__section` base (the former
+   indigo gradient tint is retired — see the Phase 1 overhaul block). */
 .charsheet__section--header {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt-grey)) 0%, rgba(99, 102, 241, 0.05) 100%);
 	border-radius: var(--cs-radius-xl, 16px);
 	padding: var(--cs-space-xl, 1.5rem);
-}
-
-.charsheet__section--hp {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(16, 185, 129, 0.1) 100%);
-	border-color: rgba(16, 185, 129, 0.3);
 }
 
 .charsheet__section-title {
@@ -2455,62 +2452,12 @@
 	opacity: 0.7;
 }
 
-/* Section Variants - Enhanced gradients with better visibility and accessibility */
-/* Each section has: stronger gradient, left border accent, and subtle pattern for color-blind users */
-.charsheet__section--resources {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(245, 158, 11, 0.12) 100%);
-	border-left: 3px solid rgba(245, 158, 11, 0.6);
-}
-
-.charsheet__section--states {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(139, 92, 246, 0.12) 100%);
-	border-left: 3px solid rgba(139, 92, 246, 0.6);
-}
-
-.charsheet__section--features {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(59, 130, 246, 0.12) 100%);
-	border-left: 3px solid rgba(59, 130, 246, 0.6);
-}
-
-.charsheet__section--attacks {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(239, 68, 68, 0.12) 100%);
-	border-left: 3px solid rgba(239, 68, 68, 0.6);
-}
-
-.charsheet__section--methods {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(234, 179, 8, 0.12) 100%);
-	border-left: 3px solid rgba(234, 179, 8, 0.6);
-}
-
-.charsheet__section--spells {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(139, 92, 246, 0.15) 100%);
-	border-left: 3px solid rgba(139, 92, 246, 0.7);
-}
-
-.charsheet__section--metamagic {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(236, 72, 153, 0.12) 100%);
-	border-left: 3px solid rgba(236, 72, 153, 0.6);
-}
-
-.charsheet__section--saves {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(16, 185, 129, 0.12) 100%);
-	border-left: 3px solid rgba(16, 185, 129, 0.6);
-}
-
-.charsheet__section--passives {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(147, 51, 234, 0.12) 100%);
-	border-left: 3px solid rgba(147, 51, 234, 0.6);
-}
-
-.charsheet__section--skills {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(99, 102, 241, 0.12) 100%);
-	border-left: 3px solid rgba(99, 102, 241, 0.6);
-}
-
-.charsheet__section--senses {
-	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(59, 130, 246, 0.12) 100%);
-	border-left: 3px solid rgba(59, 130, 246, 0.6);
-}
+/* Section Variants — the former per-section rainbow (a gradient tint + a
+   `border-left: 3px` side-stripe per variant) has been retired. Every
+   `.charsheet__section--*` now renders on the single unified surface defined
+   by `.charsheet__section` (see the Phase 1 overhaul block near end of file).
+   Hierarchy comes from type + spacing; colour is reserved for meaning
+   (danger = HP/damage, success = heal/rest, accent = primary action). */
 
 /* Passive Scores Section */
 .charsheet__passives-grid {
@@ -20419,3 +20366,198 @@ color: var(--cs-text-primary, #f1f5f9);
 :root:not(.ve-night-mode) .charsheet__level-choice--subclass { color: var(--cs-accent-amethyst, #9333ea); }
 :root:not(.ve-night-mode) .charsheet__level-choice--skill { color: var(--cs-accent-sapphire, #2563eb); }
 :root:not(.ve-night-mode) .charsheet__level-choice--hp { color: var(--cs-danger, #dc2626); }
+
+/* ========================================================================
+   DESIGN OVERHAUL — Phase 1: Unified card surface
+   ------------------------------------------------------------------------
+   ONE neutral card treatment across every tab. The per-section decorative
+   accent hues (gold / emerald / ruby / sapphire / amethyst gradient tints)
+   and the `border-left` side-stripes are retired here so hierarchy comes
+   from type + spacing, not colour. Colour is reserved for meaning:
+   danger = HP / damage, success = heal / rest, accent = primary action /
+   current selection. References only theme-aware --cs-* tokens, so it holds
+   in both night (default) and day themes. Placed last so it supersedes the
+   earlier per-variant rules on specificity ties.
+   ======================================================================== */
+.charsheet__section--resources,
+.charsheet__section--states,
+.charsheet__section--features,
+.charsheet__section--attacks,
+.charsheet__section--methods,
+.charsheet__section--spells,
+.charsheet__section--metamagic,
+.charsheet__section--saves,
+.charsheet__section--passives,
+.charsheet__section--skills,
+.charsheet__section--senses,
+.charsheet__section--hp,
+.charsheet__section--header,
+.charsheet__section--identity,
+.charsheet__section--core-stats,
+.charsheet__section--combat-stats,
+.charsheet__section--survival,
+.charsheet__section--actions,
+.charsheet__section--conditions,
+.charsheet__section--exhaustion,
+.charsheet__section--currency,
+.charsheet__abilities-section--passives,
+.charsheet__abilities-section--skills {
+	background: var(--cs-bg-surface);
+	border: 1px solid var(--cs-border);
+}
+
+/* Heading alignment: the `--flex` section title used `space-between`, so a
+   heading with only the leading tick + a normally-hidden trailing action
+   (e.g. WEAPONS & ATTACKS' Quiver button) got shoved to the far right while
+   every other heading sits left. Anchor titles left; let any optional
+   trailing action float right on its own. */
+.charsheet__section-title--flex {
+	justify-content: flex-start;
+}
+.charsheet__section-title--flex > .charsheet__quiver-open-btn {
+	margin-left: auto;
+}
+
+/* ========================================================================
+   DESIGN OVERHAUL — Phase 2: Flatten nested cards -> borderless cells
+   ------------------------------------------------------------------------
+   Nested cards are banned. The 6 ability scores, 3 passive scores, 5 coins,
+   the Prof/Inspiration boxes, and the AC/Init/Speed + Jumps/Carry groups were
+   each their own bordered, tinted mini-card sitting inside a parent card.
+   Here they become borderless cells on one shared recessed surface: borders,
+   decorative top-accent bars, and per-cell hues are removed; grouping is
+   carried by the single recessed fill + grid gap + the parent's one heading.
+   Colour stays reserved for meaning (HP bar, heal/damage, primary actions).
+   ======================================================================== */
+
+/* 1 - Drop borders + decorative fills; keep one neutral recessed cell. */
+.charsheet__ability,
+.charsheet__stat-box,
+.charsheet__passive-card,
+.charsheet__combat-stat,
+.charsheet__currency-item,
+.charsheet__physical-stat-group,
+.charsheet__physical-stat-group--jumps,
+.charsheet__physical-stat-group--carry {
+	border: none;
+	background: var(--cs-bg-base);
+	box-shadow: none;
+}
+
+/* 2 - Remove the decorative top-accent bars (solid on passives, gradient on
+   ability/combat-stat). */
+.charsheet__passive-card::before,
+.charsheet__ability::before,
+.charsheet__combat-stat::before {
+	display: none;
+}
+
+/* 3 - Neutralise per-cell value hues; the bold, large number + its label now
+   carry the hierarchy on their own. */
+.charsheet__section .charsheet__combat-stat-value,
+.charsheet__section .charsheet__passive-value,
+.charsheet__section .charsheet__stat-value {
+	color: var(--cs-text-primary);
+}
+
+/* 4 - Cells hover like cells, not cards: a soft tonal fill change, no lift,
+   no coloured ring, no heavy shadow. The clickable cursor affordance stays. */
+.charsheet__ability:hover,
+.charsheet__stat-box--clickable:hover,
+.charsheet__stat-box--inspiration:hover,
+.charsheet__combat-stat--clickable:hover,
+.charsheet__currency-item:hover {
+	border: none;
+	transform: none;
+	box-shadow: none;
+	background: var(--cs-bg-elevated);
+}
+
+/* 5 - Identity chips are controls, not stat cards: soften the heavy 2px ring
+   to a single hairline so they read as one calm block of selectors. */
+.charsheet__info-chip {
+	border-width: 1px;
+}
+
+/* ========================================================================
+   DESIGN OVERHAUL — Phase 4: Typography
+   ------------------------------------------------------------------------
+   Cinzel is a hero face, not a UI-label face. It stays on the character's
+   name, the page title, and the big display numerals (ability scores, AC,
+   HP, level). Section headings move to the humanist body sans, uppercase +
+   tracked, so they read as crisp labels rather than engraved serif — and so
+   long multi-word labels stop snapping mid-word ("PROFICIENC Y BONUS").
+   ======================================================================== */
+
+/* Section headings: off Cinzel, onto a tracked uppercase label treatment. */
+.charsheet__section-title,
+.cs-card__title {
+	font-family: var(--cs-font-label);
+	text-transform: uppercase;
+	letter-spacing: 0.055em;
+	font-weight: 700;
+}
+
+/* Small stat labels wrap only between words, never inside one, so a long
+   label breaks at its space instead of snapping through the word. */
+.charsheet__stat-label,
+.charsheet__ability-name,
+.charsheet__combat-stat-label,
+.charsheet__passive-label,
+.charsheet__ipt-name,
+.charsheet__core-stats-row .charsheet__stat-label {
+	overflow-wrap: normal;
+	word-break: normal;
+	hyphens: none;
+}
+
+/* ========================================================================
+   DESIGN OVERHAUL — Phase 5: Day-mode parity + navbar harmony
+   ------------------------------------------------------------------------
+   The sheet's day tokens already carry strong ink (primary #0f172a, muted
+   #64748b ≥4.5:1) and Phases 1–2 resolved the washed-out tinted cards to
+   solid white surfaces + neutral cells. The one remaining clash is the
+   legacy site header: a saturated cyan-blue (#006bc4) in day mode that
+   fights the sheet's indigo/slate. These rules only touch this page (this
+   stylesheet loads on charactersheet.html alone) and pull the header into
+   the sheet's own hue family in both themes.
+   ======================================================================== */
+
+/* Day: retint the electric blue header into the sheet's deep-indigo family. */
+:root:not(.ve-night-mode) .page__header {
+	background: linear-gradient(180deg, #4338ca 0%, #312e81 100%);
+	box-shadow: 0 1px 0 rgba(15, 23, 42, 0.12);
+}
+:root:not(.ve-night-mode) .page__subtitle {
+	color: rgba(255, 255, 255, 0.72);
+}
+
+/* Night: cool the charcoal header to the sheet's slate so the top chrome and
+   the sheet read as one surface family. */
+.ve-night-mode .page__header {
+	background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+	box-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* ========================================================================
+   DESIGN OVERHAUL — Phase 6: Header title/subtitle robustness
+   ------------------------------------------------------------------------
+   The site header lays out the title + subtitle as two inline elements in a
+   .container; at the narrow md breakpoint (the smallest width at which the
+   desktop-only header is shown) a long subtitle could crowd the title. Lay
+   them out as a baseline-aligned flex row with a real gap, and let the
+   subtitle truncate gracefully instead of colliding. Page-scoped.
+   ======================================================================== */
+.page__header > .container {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	column-gap: 0.75rem;
+	row-gap: 0;
+	min-width: 0;
+}
+.page__header .page__subtitle {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}

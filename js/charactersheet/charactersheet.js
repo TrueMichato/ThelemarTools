@@ -9794,7 +9794,9 @@ class CharacterSheetPage {
 		if (!secondaryRow || !btn) return;
 
 		StorageUtil.pGet("charsheet-secondary-header-collapsed").then(isCollapsed => {
-			if (isCollapsed) {
+			// Default to collapsed (settings/customization tools live behind "More")
+			// unless the user has explicitly expanded it before.
+			if (isCollapsed !== false) {
 				secondaryRow.classList.add("charsheet__header-row--collapsed");
 				btn.classList.remove("active");
 			} else {
