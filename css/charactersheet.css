@@ -20697,21 +20697,27 @@ color: var(--cs-text-primary, #f1f5f9);
 
 /* ---- P2.2 — Single-accent action-button hierarchy ---------------------
    Level Up (success green) + Multiclass (info blue) + Quick Build (filled
-   indigo) put three competing hues side by side. Reserve the filled accent
-   for the one primary (Quick Build) and demote Level Up + Multiclass to one
-   quiet neutral secondary treatment — same family, clear hierarchy. */
+   indigo) put three competing hues side by side. Reserve the FILLED accent
+   for the one primary (Quick Build); demote Level Up + Multiclass to a quiet
+   *outlined accent* secondary — one accent family, clearly subordinate to
+   the filled primary but not dead grey (the maintainer disliked flat grey).
+   Ghost button: transparent fill, accent-tinted hairline, accent label. */
 .charsheet__action-btn--success,
 .charsheet__action-btn--info {
-	background: var(--cs-bg-elevated, rgba(255, 255, 255, 0.04));
-	color: var(--cs-text, var(--rgb-text));
-	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.14));
+	background: transparent;
+	color: var(--cs-primary, #6366f1);
+	border: 1px solid color-mix(in srgb, var(--cs-primary, #6366f1) 45%, transparent);
 }
 .charsheet__action-btn--success:hover,
 .charsheet__action-btn--info:hover {
-	background: var(--cs-bg-surface, rgba(255, 255, 255, 0.08));
+	background: color-mix(in srgb, var(--cs-primary, #6366f1) 12%, transparent);
 	border-color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary, #6366f1);
 	transform: translateY(-1px);
 }
+/* Keep the button icons on-message with the accent label. */
+.charsheet__action-btn--success .charsheet__action-icon,
+.charsheet__action-btn--info .charsheet__action-icon { color: inherit; }
 
 /* ---- P2.3 — Combat action rows join the neutral cell system -----------
    The Combat ABILITIES rows were blue-framed tinted cards (full 2px blue
@@ -20757,4 +20763,182 @@ color: var(--cs-text-primary, #f1f5f9);
 ):focus-visible {
 	outline: 2px solid var(--cs-primary, #6366f1);
 	outline-offset: 2px;
+}
+
+/* ========================================================================
+   DESIGN OVERHAUL — ROUND 3: maintainer review follow-ups
+   ------------------------------------------------------------------------
+   Feedback pass: un-grey the secondary actions, fix the Passive Scores clip
+   + rainbow, calm the Survival (Hit Dice / Death Saves) cluster, bring the
+   Inventory into the unified neutral system, and land the deferred polish
+   (empty states, spacing rhythm, reduced-motion-safe tab fade). Still pure
+   presentation — no markup, state, or behaviour changes.
+   ======================================================================== */
+
+/* ---- R3.1 — Passive Scores: kill the rainbow + stop the label clip -----
+   The three passive cards were nested bordered cards, each tinted a
+   different hue (perception gold / investigation blue / insight purple) with
+   a coloured top bar, and overflow:hidden clipped the uppercase labels to
+   "PERCEPTIO" / "INVESTIGA". Flatten to borderless recessed cells on the
+   shared surface, unify the three values to ONE accent (the sheet's
+   derived-number colour — kills the 3-hue rainbow while staying consistent
+   with every other computed figure), and trim the cell padding + shrink the
+   label so each name fits on one clean line instead of clipping or breaking
+   mid-word. */
+.charsheet__passive-card {
+	border: none;
+	background: var(--cs-bg-base);
+	overflow: visible;
+	padding-left: var(--cs-space-xs, 6px);
+	padding-right: var(--cs-space-xs, 6px);
+}
+.charsheet__passive-card::before { display: none; }
+.charsheet__passive-card--perception,
+.charsheet__passive-card--investigation,
+.charsheet__passive-card--insight {
+	border-color: transparent;
+}
+.charsheet__passive-card--perception .charsheet__passive-value,
+.charsheet__passive-card--investigation .charsheet__passive-value,
+.charsheet__passive-card--insight .charsheet__passive-value {
+	color: var(--cs-primary, inherit);
+}
+.charsheet__passive-label {
+	font-size: 10px;
+	letter-spacing: 0;
+	line-height: 1.15;
+	white-space: nowrap;
+	overflow: visible;
+}
+
+/* ---- R3.2 — Survival (Hit Dice / Death Saves): calm the purple ---------
+   The card was washed in a purple gradient with purple pool tints, a purple
+   d8 badge and centred sub-headers (inconsistent with the left-aligned
+   label system everywhere else). Neutralise to the shared card, left-align
+   the sub-headers as tracked mini-labels, and give the two halves a hairline
+   divider so the split reads without colour. */
+.charsheet__section--survival {
+	background: var(--cs-bg-surface, var(--rgb-bg-alt));
+}
+.charsheet__survival-row {
+	align-items: stretch;
+}
+.charsheet__survival-header {
+	justify-content: flex-start;
+}
+.charsheet__survival-header .charsheet__hp-label {
+	text-transform: uppercase;
+	letter-spacing: 0.6px;
+	font-size: var(--cs-text-xs, 0.72rem);
+	font-weight: 700;
+	color: var(--cs-text-muted, var(--rgb-text-muted));
+}
+.charsheet__survival-row > .charsheet__deathsaves-box {
+	border-left: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+	padding-left: var(--cs-space-lg, 1rem);
+}
+.charsheet__hitdice-pool {
+	background: var(--cs-bg-base) !important;
+}
+.charsheet__hitdice-type {
+	color: var(--cs-text, inherit);
+	background: var(--cs-bg-elevated, rgba(0, 0, 0, 0.06));
+}
+
+/* ---- R3.3 — Inventory joins the neutral cell system -------------------
+   Category headers wore an indigo gradient + indigo count badge, the tree
+   indent used a 2px indigo side-stripe, and item rows had a heavy 2px frame.
+   Neutralise: recessed header surface, muted count chip, 1px hairline indent
+   guide, 1px item border. Equipped (green) + starred (gold) stay — those are
+   meaningful states — and the Starred category keeps its gold (favourite). */
+.charsheet__category-header {
+	background: var(--cs-bg-base);
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+}
+.charsheet__category-header:hover {
+	background: var(--cs-bg-elevated);
+	border-color: var(--cs-border, rgba(255, 255, 255, 0.18));
+}
+.charsheet__category-count {
+	background: var(--cs-bg-elevated, rgba(0, 0, 0, 0.06));
+	color: var(--cs-text-muted, var(--rgb-text-muted));
+}
+.charsheet__category-items {
+	border-left: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+}
+.charsheet__item {
+	border-width: 1px;
+}
+
+/* ---- R3.4 — Deferred: calm, consistent empty states -------------------
+   Inline empty states (ve-muted ve-text-center) were visually inconsistent
+   with the designed .charsheet__empty-state. Give the inline ones the same
+   calm rhythm (centred, muted, breathing room) without touching the JS that
+   renders them. */
+.charsheet__section .ve-text-center.ve-muted,
+.charsheet__section .ve-muted.ve-text-center {
+	padding: var(--cs-space-lg, 1rem) var(--cs-space-md, 0.75rem);
+	font-size: var(--cs-text-sm, 0.85rem);
+	line-height: 1.4;
+	opacity: 0.85;
+}
+
+/* ---- R3.5 — Deferred: reduced-motion-safe tab fade --------------------
+   A gentle fade+rise when a tab becomes active. Implemented as an animation
+   on the already-visible active panel (default opacity stays 1), so it never
+   gates content — if the animation doesn't run (reduced motion, headless),
+   the panel is simply shown instantly. */
+@media (prefers-reduced-motion: no-preference) {
+	.charsheet-page .tab-pane.ve-active {
+		animation: cs-tab-fade 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+	}
+}
+@keyframes cs-tab-fade {
+	from { opacity: 0; transform: translateY(4px); }
+	to { opacity: 1; transform: none; }
+}
+
+/* ---- R3.6 — Spells: flatten the nested spellcasting-stat cards ---------
+   The per-class spellcasting summary rendered the SAVE DC / SPELL ATTACK /
+   SPELLS / CANTRIPS figures as bordered cards sharing the SAME background
+   as their parent card — a nested-card violation missed in Phase 2. Drop
+   the inner border and drop the cells one surface-step deeper so they read
+   as recessed wells, not cards-in-cards. */
+.charsheet__spell-stat {
+	border: none;
+	background: var(--cs-bg-base, rgba(0, 0, 0, 0.03));
+}
+.charsheet__spell-count-chip {
+	border: none;
+	background: var(--cs-bg-base, rgba(0, 0, 0, 0.03));
+}
+
+/* ---- R3.7 — Deferred: RESOURCES explainer → info affordance -----------
+   The Resources card carried a full-width italic explainer paragraph that
+   read as clutter once you know the sheet. Fold it into a quiet inline
+   info glyph on the heading (native tooltip + aria-label for a11y); the
+   copy is unchanged, just demoted from always-on body text to on-demand. */
+.charsheet__section-info {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.05em;
+	height: 1.05em;
+	margin-left: 0.35em;
+	font-size: 0.82em;
+	line-height: 1;
+	color: var(--cs-text-muted, var(--rgb-text-muted));
+	opacity: 0.7;
+	cursor: help;
+	border-radius: 50%;
+	transition: color 0.15s ease, opacity 0.15s ease;
+}
+.charsheet__section-info:hover,
+.charsheet__section-info:focus-visible {
+	color: var(--cs-primary, currentColor);
+	opacity: 1;
+	outline: none;
+}
+.charsheet__section-info:focus-visible {
+	box-shadow: 0 0 0 2px var(--cs-focus-ring, rgba(99, 102, 241, 0.5));
 }
