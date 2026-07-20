@@ -354,7 +354,8 @@ export class BrewUtil2Base {
 					return this._getBrewDoc({json, url, filename, isLocal: true});
 				} catch (e) {
 					JqueryUtil.doToast({type: "danger", content: `Failed to load local homebrew from URL "${url}"! ${VeCt.STR_SEE_CONSOLE}`});
-					setTimeout(() => { throw e; });
+					// eslint-disable-next-line no-console
+					console.error(`Failed to load local homebrew from URL "${url}":`, e);
 					return null;
 				}
 			}))
