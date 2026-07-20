@@ -3774,7 +3774,7 @@
 }
 
 .charsheet__skills-header-passive {
-	width: max(46px, 4.6em);
+	width: max(52px, 5.2em);
 	text-align: center;
 	flex-shrink: 0;
 	color: var(--cs-accent, #8b5cf6);
@@ -3891,7 +3891,7 @@
 
 /* Passive skill score column */
 .charsheet__skill-passive {
-	width: max(46px, 4.6em);
+	width: max(52px, 5.2em);
 	text-align: center;
 	flex-shrink: 0;
 	font-size: var(--cs-text-sm, 0.85rem);
@@ -12649,7 +12649,14 @@ body.has-quickbuild-overlay .toast__container {
    Modals are appended to body, so we use :has() to check if charsheet-page exists
    ======================================================================== */
 body.is-charsheet-page .ve-ui-modal__overlay {
-	background: rgba(0, 0, 0, 0.7);
+	/* R5 — Modals read as "overlapping" because the flat 0.7 scrim let the sharp
+	   page content behind bleed straight through around the dialog. Deepen the
+	   scrim slightly and add a functional backdrop blur so the page recedes and
+	   the modal reads as a single focused layer. (Not decorative glassmorphism —
+	   this is the backdrop, softened purely to separate figure from ground.) */
+	background: rgba(0, 0, 0, 0.74);
+	-webkit-backdrop-filter: blur(5px);
+	backdrop-filter: blur(5px);
 }
 
 body.is-charsheet-page .ve-ui-modal__inner {
@@ -20999,4 +21006,24 @@ color: var(--cs-text-primary, #f1f5f9);
 .charsheet__lore-skill-passive,
 .charsheet__save-passive-badge {
 	white-space: nowrap;
+}
+
+/* ========================================================================
+   ROUND 5 — Restore accent colour + modal focus polish
+   Maintainer feedback: "there is still need to restore colours you have
+   removed … regarding modals — please look at all of them." The modal scrim
+   deepen + backdrop-blur lives inline at the .ve-ui-modal__overlay rule; the
+   skills "Passive" column got real slack (was 64/64px = zero headroom, so any
+   custom Font clipped it) by widening 4.6em → 5.2em on header + data pill.
+   ======================================================================== */
+
+/* ---- R5.1 — Inventory category count badge regains its accent ----------
+   R3.3 neutralised the whole category header (correctly retiring the indigo
+   gradient + side-stripe rainbow), but it also greyed the little per-category
+   count pill down to muted-on-elevated, which read as "colour removed". The
+   header surface stays neutral; the count pill comes back as a crisp accent
+   chip — a small, meaningful pop that says "N items here" at a glance. */
+.charsheet__category-count {
+	background: var(--cs-primary, #6366f1);
+	color: #fff;
 }
