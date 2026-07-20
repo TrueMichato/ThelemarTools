@@ -242,7 +242,7 @@ export class CharacterSheetPlayMode {
 		const bar = this._ce("div", "pm-status__hp-bar", hpWrap);
 
 		const fill = this._ce("div", "pm-status__hp-fill", bar);
-		fill.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
+		fill.style.width = `${pct}%`;
 		if (pct <= 25) fill.classList.add("pm-status__hp-fill--critical");
 		else if (pct <= 50) fill.classList.add("pm-status__hp-fill--bloodied");
 
@@ -396,27 +396,34 @@ export class CharacterSheetPlayMode {
 	_renderStatusTools (parent) {
 		const tools = this._ce("div", "pm-status__tools", parent);
 
-		// Primary play actions (always visible)
+		// Rest buttons (Phase A3: delegate directly to rest module's full dialogs)
 		this._makeToolBtn(tools, "🏕️ Short Rest", () => this._doShortRest());
 		this._makeToolBtn(tools, "🛏️ Long Rest", () => this._doLongRest());
 
 		this._ce("div", "pm-status__divider", tools);
 
+		// Drawers
 		this._makeToolBtn(tools, "📖 Spells", () => this._openDrawerByType("spells"));
 		this._makeToolBtn(tools, "🎒 Gear", () => this._openDrawerByType("gear"));
+		this._makeToolBtn(tools, "📜 Reference", () => this._openDrawerByType("reference"));
+		this._makeToolBtn(tools, "📝 Notes", () => this._openDrawerByType("notes"));
+		if (this._state.getCompanions().length) {
+			this._makeToolBtn(tools, "🐾 Companions", () => this._openDrawerByType("companions"));
+		}
 
 		this._ce("div", "pm-status__divider", tools);
 
-		// Level Up / Manage bridge — delegates to the existing main-sheet
-		// level-up wizard (Alt View does not reimplement character building).
-		const levelBtn = this._makeToolBtn(tools, "⬆️ Level Up", () => this._openLevelUp());
-		levelBtn.classList.add("pm-status__tool-btn--primary");
+		// Phase C1: Extended toolbar
+		this._makeToolBtn(tools, "🗒 Stickies", () => this._toggleStickyNotesOverlay());
+		this._makeToolBtn(tools, "🎯 Modifiers", () => this._openDrawerByType("modifiers"));
+		this._makeToolBtn(tools, "⚙️ Settings", () => this._openDrawerByType("settings"));
+		this._makeToolBtn(tools, "📋 Roll Log", () => this._openDrawerByType("activity"));
 
-		// Return to the full builder sheet
-		const fullBtn = this._makeToolBtn(tools, "📊 Full Sheet", () => this.toggle());
-		fullBtn.classList.add("pm-status__tool-btn--primary");
+		this._ce("div", "pm-status__divider", tools);
 
-		// Hidden file input backing the "Import" overflow action
+		// Export / Import
+		this._makeToolBtn(tools, "💾 Export", () => this._exportCharacter());
+		const importBtn = this._makeToolBtn(tools, "📥 Import", () => this._elImportInput?.click());
 		const importInput = this._ce("input", null, tools);
 		importInput.type = "file";
 		importInput.accept = ".json";
@@ -437,53 +444,18 @@ export class CharacterSheetPlayMode {
 			importInput.value = "";
 		});
 
-		// Secondary tools folded into a single overflow menu so the status row
-		// never overflows (was 17 buttons > viewport at 1440px). The menu is
-		// body-appended + fixed-positioned so it escapes any overflow clipping.
-		const moreBtn = this._makeToolBtn(tools, "⋯ More", (e) => this._openToolsMenu(e, moreBtn));
-		moreBtn.classList.add("pm-status__tool-btn--more");
-		moreBtn.setAttribute("aria-haspopup", "true");
-	}
-
-	/** Overflow menu holding the secondary Alt View tools. */
-	_openToolsMenu (e, anchorBtn) {
-		const items = [
-			{icon: "📜", label: "Reference", onClick: () => this._openDrawerByType("reference")},
-			{icon: "📝", label: "Notes", onClick: () => this._openDrawerByType("notes")},
-		];
-		if (this._state.getCompanions().length) {
-			items.push({icon: "🐾", label: "Companions", onClick: () => this._openDrawerByType("companions")});
-		}
-		items.push(
-			{separator: true},
-			{icon: "🗒", label: "Sticky Notes", onClick: () => this._toggleStickyNotesOverlay()},
-			{icon: "🎯", label: "Modifiers", onClick: () => this._openDrawerByType("modifiers")},
-			{icon: "📋", label: "Roll Log", onClick: () => this._openDrawerByType("activity")},
-			{icon: "⚙️", label: "Settings", onClick: () => this._openDrawerByType("settings")},
-			{separator: true},
-			{icon: "💾", label: "Export", onClick: () => this._exportCharacter()},
-			{icon: "📥", label: "Import", onClick: () => this._elImportInput?.click()},
-		);
+		// NPC Export (only if exporter available)
 		if (this._page._export) {
-			items.push({icon: "🐉", label: "NPC Export", onClick: () => this._page._export._showNpcExportDialog?.()});
+			this._makeToolBtn(tools, "🐉 NPC Export", () => this._page._export._showNpcExportDialog?.());
 		}
-		items.push({icon: "🖨️", label: "Print", onClick: () => window.print()});
 
-		// Anchor the menu to the button so it reads as an overflow, not a
-		// cursor-positioned context menu.
-		const rect = anchorBtn.getBoundingClientRect();
-		this._showContextMenu({clientX: rect.right, clientY: rect.bottom + 4}, items);
-	}
+		this._makeToolBtn(tools, "🖨️ Print", () => window.print());
 
-	/** Bridge to the existing main-sheet level-up / build wizard. */
-	_openLevelUp () {
-		const levelUp = this._page?._levelUp;
-		if (levelUp?.showLevelUp) {
-			levelUp.showLevelUp();
-			return;
-		}
-		// Fallback: surface the full builder sheet where level-up lives.
-		this.toggle();
+		this._ce("div", "pm-status__divider", tools);
+
+		// Full sheet toggle
+		const fullBtn = this._makeToolBtn(tools, "📊 Full Sheet", () => this.toggle());
+		fullBtn.classList.add("pm-status__tool-btn--primary");
 	}
 
 	_renderIndicators (parent) {
@@ -2559,7 +2531,7 @@ export class CharacterSheetPlayMode {
 				const hpBarWrap = this._ce("div", "pm-companion__hp-bar-wrap", card);
 				const pct = comp.hp.max > 0 ? Math.max(0, Math.min(100, ((comp.hp.current ?? comp.hp.max) / comp.hp.max) * 100)) : 0;
 				const hpBarFill = this._ce("div", "pm-companion__hp-bar-fill", hpBarWrap);
-				hpBarFill.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
+				hpBarFill.style.width = `${pct}%`;
 				if (pct <= 25) hpBarFill.classList.add("pm-companion__hp-bar-fill--critical");
 				else if (pct <= 50) hpBarFill.classList.add("pm-companion__hp-bar-fill--bloodied");
 			}
@@ -4742,10 +4714,10 @@ export class CharacterSheetPlayMode {
 				onChange: (v) => { this._renderSettingsDrawer(container); },
 			},
 			...(settings.enableTgtt ? [
-				{key: "thelemar_carryWeight", label: "TGTT Carry Capacity", type: "toggle", value: settings.thelemar_carryWeight},
-				{key: "thelemar_jumping", label: "TGTT Jumping Rules", type: "toggle", value: settings.thelemar_jumping},
-				{key: "thelemar_linguisticsBonus", label: "TGTT Linguistics", type: "toggle", value: settings.thelemar_linguisticsBonus},
-				{key: "thelemar_criticalRolls", label: "TGTT Critical Rolls", type: "toggle", value: settings.thelemar_criticalRolls},
+				{key: "tgttCarry", label: "TGTT Carry Capacity", type: "toggle", value: settings.tgttCarry},
+				{key: "tgttJumping", label: "TGTT Jumping Rules", type: "toggle", value: settings.tgttJumping},
+				{key: "tgttLinguistics", label: "TGTT Linguistics", type: "toggle", value: settings.tgttLinguistics},
+				{key: "tgttCriticalRolls", label: "TGTT Critical Rolls", type: "toggle", value: settings.tgttCriticalRolls},
 			] : []),
 		]);
 

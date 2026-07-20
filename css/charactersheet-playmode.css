@@ -11,25 +11,6 @@
 	display: none !important;
 }
 
-/* Alt View owns the viewport: hide the entire builder header chrome (the
-   Create-New / XP / Level Up / Multiclass / Quick Build primary row and the
-   Layout…NPC-Export secondary row all live inside #charsheet-header). Without
-   this the builder toolbars stack on top of Alt View's own pm-status bar,
-   producing two competing headers. The global site navbar (.page__header) sits
-   outside #charsheet-header and is intentionally kept. Building/leveling is
-   reached from inside Alt View via the "Level Up" + "Full Sheet" bridges.
-
-   #charsheet-header carries the `.ve-flex-col` utility, which main.css defines
-   as `display: flex !important` inside `@layer vetools`. A cascade layer's
-   important declarations outrank unlayered important declarations regardless of
-   specificity, so this override must live in the same layer to win on
-   specificity ((1,2,0) > .ve-flex-col's (0,1,0)). */
-@layer vetools {
-	.charsheet-page.charsheet--play-mode #charsheet-header {
-		display: none !important;
-	}
-}
-
 .charsheet-page:not(.charsheet--play-mode) #charsheet-play-mode {
 	display: none !important;
 }
@@ -129,10 +110,6 @@
 	gap: var(--cs-space-md, 16px);
 	flex: 1;
 	justify-content: center;
-	/* Wrap when the row can't fit (mobile / narrow); no effect on desktop where
-	   the HP pill + vital chips fit on one line. Prevents a sideways scroll. */
-	flex-wrap: wrap;
-	min-width: 0;
 }
 
 .pm-status__vital {
@@ -188,11 +165,9 @@
 
 .pm-status__hp-fill {
 	height: 100%;
-	width: 100%;
 	border-radius: var(--cs-radius-full, 9999px);
 	background: linear-gradient(90deg, #22c55e, #16a34a);
-	clip-path: inset(0 0 0 0);
-	transition: clip-path 0.4s ease, background 0.4s ease;
+	transition: width 0.4s ease, background 0.4s ease;
 	position: absolute;
 	top: 0;
 	left: 0;
@@ -314,8 +289,6 @@
 .pm-status__tools {
 	display: flex;
 	align-items: center;
-	flex-wrap: wrap;
-	justify-content: flex-end;
 	gap: var(--cs-space-xs, 4px);
 	margin-left: auto;
 }
@@ -346,14 +319,6 @@
 
 .pm-status__tool-btn--primary:hover {
 	filter: brightness(1.1);
-}
-
-/* Overflow ("More") trigger — folds the secondary tools into a menu so the
-   status row never overflows. Styled as a quiet control, distinct from the
-   accented primary actions. */
-.pm-status__tool-btn--more {
-	font-weight: 600;
-	letter-spacing: 0.02em;
 }
 
 .pm-status__divider {
@@ -432,7 +397,7 @@
 }
 
 .pm-card__title {
-	font-family: var(--cs-font-label, 'Inter', sans-serif);
+	font-family: var(--cs-font-display, 'Cinzel', serif);
 	font-size: var(--cs-text-sm, 0.875rem);
 	font-weight: 600;
 	color: var(--cs-text-primary, #f1f5f9);
@@ -1271,7 +1236,7 @@
 }
 
 .pm-drawer__title {
-	font-family: var(--cs-font-label, 'Inter', sans-serif);
+	font-family: var(--cs-font-display, 'Cinzel', serif);
 	font-size: var(--cs-text-lg, 1.125rem);
 	font-weight: 600;
 	color: var(--cs-text-primary, #f1f5f9);
@@ -1493,26 +1458,8 @@
 		font-size: var(--cs-text-base, 1rem);
 	}
 
-	/* Let the class/subclass line wrap instead of truncating to "Rog…". */
-	.pm-status__class-level {
-		white-space: normal;
-	}
-
-	/* Tools fold and wrap; never force a sideways scroll of the status bar. */
-	.pm-status__tools {
-		flex-wrap: wrap;
-		justify-content: flex-start;
-	}
-
 	.pm-status__hp {
 		min-width: 140px;
-	}
-
-	/* Vitals wrap to multiple rows on mobile; align left so wrapped chips
-	   read as a tidy block rather than ragged-centred. */
-	.pm-status__vitals {
-		justify-content: flex-start;
-		gap: var(--cs-space-sm, 8px);
 	}
 
 	.pm-drawer {
@@ -1627,7 +1574,7 @@
 }
 
 .pm-drawer--open {
-	animation: pm-slide-in-right 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+	animation: pm-slide-in-right 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .pm-drawer-backdrop--open {
@@ -1655,7 +1602,7 @@
 
 /* HP bar color transition */
 .pm-status__hp-fill {
-	transition: clip-path 0.4s ease, background 0.4s ease, background-color 0.4s ease;
+	transition: width 0.4s ease, background 0.4s ease, background-color 0.4s ease;
 }
 
 /* :active scale for interactive non-button elements */
@@ -2710,8 +2657,7 @@
 		animation: none !important;
 	}
 
-	.pm-status__hp-fill,
-	.pm-companion__hp-bar-fill {
+	.pm-status__hp-fill {
 		transition: none !important;
 	}
 
@@ -2845,10 +2791,8 @@
 }
 
 .pm-modal__section--higher {
-	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
-	background: var(--cs-bg-elevated, rgba(255, 255, 255, 0.03));
-	border-radius: var(--cs-radius-sm, 6px);
-	padding: 0.5rem 0.75rem;
+	border-left: 3px solid var(--cs-primary, #6366f1);
+	padding-left: 0.75rem;
 }
 
 /* ── Scrollable modal body ── */
@@ -3062,11 +3006,9 @@
 
 .pm-companion__hp-bar-fill {
 	height: 100%;
-	width: 100%;
 	border-radius: 2px;
 	background: var(--cs-success, #22c55e);
-	clip-path: inset(0 0 0 0);
-	transition: clip-path 0.3s ease;
+	transition: width 0.3s ease;
 }
 
 .pm-companion__hp-bar-fill--bloodied {
@@ -3084,9 +3026,9 @@
 	font-style: italic;
 	margin-bottom: 0.5rem;
 	padding: 4px 8px;
-	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
-	background: var(--cs-bg-elevated, rgba(255, 255, 255, 0.03));
-	border-radius: var(--cs-radius-sm, 6px);
+	border-left: 2px solid rgba(245, 158, 11, 0.4);
+	background: rgba(245, 158, 11, 0.04);
+	border-radius: 0 4px 4px 0;
 }
 
 /* ── Statblock modal layout ── */
@@ -3582,9 +3524,9 @@ font-style: italic;
 .pm-edit-abilities__uses-section {
 	padding: 8px 10px;
 	margin-bottom: 8px;
-	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
-	background: var(--cs-bg-elevated, rgba(255, 255, 255, 0.03));
-	border-radius: var(--cs-radius-sm, 6px);
+	border-left: 3px solid var(--cs-primary, #6366f1);
+	background: rgba(99, 102, 241, 0.06);
+	border-radius: 0 var(--cs-radius-sm, 6px) var(--cs-radius-sm, 6px) 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════
