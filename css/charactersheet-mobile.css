@@ -188,8 +188,21 @@
 
 	/* The flex container should wrap */
 	#charsheet-tab-overview > .ve-flex,
-	#charsheet-tab-combat > .ve-flex {
+	#charsheet-tab-combat > .ve-flex,
+	#charsheet-tab-inventory > .ve-flex,
+	#charsheet-tab-notes > .ve-flex {
 		flex-wrap: wrap;
+	}
+
+	/* Inventory + Notes columns are inline flex:2 / flex:1 (or col-half) with
+	   the default min-width:auto, which refuses to shrink and drove the right
+	   column off-screen instead of stacking. Force each column full-width once
+	   the row wraps so they stack cleanly on narrow viewports. The inline
+	   style="flex:2/1" needs !important to be overridden. */
+	#charsheet-tab-inventory > .ve-flex > .ve-flex-col,
+	#charsheet-tab-notes > .ve-flex > .ve-flex-col {
+		flex: 1 1 100% !important;
+		min-width: 0;
 	}
 
 	/* ====================================================================

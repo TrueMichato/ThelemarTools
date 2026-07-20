@@ -20811,17 +20811,15 @@ color: var(--cs-text-primary, #f1f5f9);
 	overflow: visible;
 }
 
-/* ---- R3.2 — Survival (Hit Dice / Death Saves): calm the purple ---------
-   The card was washed in a purple gradient with purple pool tints, a purple
-   d8 badge and centred sub-headers (inconsistent with the left-aligned
-   label system everywhere else). Neutralise to the shared card, left-align
-   the sub-headers as tracked mini-labels, and give the two halves a hairline
-   divider so the split reads without colour. */
-.charsheet__section--survival {
-	background: var(--cs-bg-surface, var(--rgb-bg-alt));
-}
+/* ---- R3.2 — Survival (Hit Dice / Death Saves): fix overflow, keep colour -
+   The amethyst hit-dice colour is intentional and liked — leave it. The real
+   bug: the two boxes were flex:1 with nowrap, so in the narrow middle column
+   the hit-dice content forced its min-width and shoved the Death Saves box
+   clean outside the card. Let the row wrap so Death Saves drops below Hit
+   Dice when both can't fit, and left-align the two sub-headers as tracked
+   mini-labels for consistency with the rest of the sheet (colour untouched). */
 .charsheet__survival-row {
-	align-items: stretch;
+	flex-wrap: wrap;
 }
 .charsheet__survival-header {
 	justify-content: flex-start;
@@ -20832,17 +20830,6 @@ color: var(--cs-text-primary, #f1f5f9);
 	font-size: var(--cs-text-xs, 0.72rem);
 	font-weight: 700;
 	color: var(--cs-text-muted, var(--rgb-text-muted));
-}
-.charsheet__survival-row > .charsheet__deathsaves-box {
-	border-left: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
-	padding-left: var(--cs-space-lg, 1rem);
-}
-.charsheet__hitdice-pool {
-	background: var(--cs-bg-base) !important;
-}
-.charsheet__hitdice-type {
-	color: var(--cs-text, inherit);
-	background: var(--cs-bg-elevated, rgba(0, 0, 0, 0.06));
 }
 
 /* ---- R3.3 — Inventory joins the neutral cell system -------------------
@@ -20941,4 +20928,75 @@ color: var(--cs-text-primary, #f1f5f9);
 }
 .charsheet__section-info:focus-visible {
 	box-shadow: 0 0 0 2px var(--cs-focus-ring, rgba(99, 102, 241, 0.5));
+}
+
+/* ========================================================================
+   DESIGN OVERHAUL — ROUND 4: restore semantic colour + responsive fixes
+   ------------------------------------------------------------------------
+   Round 3 over-corrected. Phase 2 + R3.1 neutralised the PASSIVE and
+   COMBAT-STAT values (and the hit-dice cluster) to a single ink colour,
+   which read as bland and — worse — erased meaning the sheet was using the
+   colour to carry. The north star reserves colour FOR MEANING, and these
+   hues ARE meaning: AC = defence, Speed = movement, Initiative = reflex, and
+   the three passive senses each read at a glance by colour. So the colour
+   comes back — but on the DATA (the numbers), not on card chrome. The
+   flattened, borderless, un-clipped cells from Round 3 stay; the decorative
+   per-section rainbow stays retired. Plus: harden the inventory columns
+   against horizontal overflow, and make every "Passive" label clip-proof.
+   Pure presentation — no markup, state, or behaviour changes.
+   ======================================================================== */
+
+/* ---- R4.1 — Passive Scores: restore the three semantic senses ----------
+   perception = gold, investigation = sapphire, insight = amethyst. Cells
+   stay flat (no border, no top bar from R3.1) — the hue lives on the number
+   + its icon, so it reads as a coloured stat, not a tinted card. Placed
+   after Phase 2 (l.20458) and R3.1 (l.20801) so it wins by source order. */
+.charsheet__passive-card--perception .charsheet__passive-value,
+.charsheet__passive-card--perception .charsheet__passive-icon,
+.charsheet__section .charsheet__passive-card--perception .charsheet__passive-value {
+	color: var(--cs-accent-gold, #f59e0b);
+}
+.charsheet__passive-card--investigation .charsheet__passive-value,
+.charsheet__passive-card--investigation .charsheet__passive-icon,
+.charsheet__section .charsheet__passive-card--investigation .charsheet__passive-value {
+	color: var(--cs-accent-sapphire, #3b82f6);
+}
+.charsheet__passive-card--insight .charsheet__passive-value,
+.charsheet__passive-card--insight .charsheet__passive-icon,
+.charsheet__section .charsheet__passive-card--insight .charsheet__passive-value {
+	color: var(--cs-accent-amethyst, #8b5cf6);
+}
+
+/* ---- R4.2 — Combat stats: restore AC / Initiative / Speed hues ---------
+   Phase 2 (l.20457) neutralised these meaningful colours. Bring them back on
+   the value only (chrome stays flat): AC = sapphire (defence), Initiative =
+   gold (reflex), Speed = success-green (movement). */
+.charsheet__section .charsheet__combat-stat--ac .charsheet__combat-stat-value {
+	color: var(--cs-accent-sapphire, #3b82f6);
+}
+.charsheet__section .charsheet__combat-stat--initiative .charsheet__combat-stat-value {
+	color: var(--cs-accent-gold, #f59e0b);
+}
+.charsheet__section .charsheet__combat-stat--speed .charsheet__combat-stat-value {
+	color: var(--cs-success, #10b981);
+}
+
+/* ---- R4.3 — Inventory: harden the two-column layout --------------------
+   The columns are inline flex:2 / flex:1 with the default min-width:auto, so
+   a wide item row can refuse to shrink and bleed past the right-hand column
+   (and on narrow viewports the right column was pushed off-screen entirely —
+   the mobile stack fix lives in charactersheet-mobile.css). Pin min-width:0
+   so content wraps inside its own column instead of overflowing. */
+#charsheet-tab-inventory > .ve-flex > .ve-flex-col {
+	min-width: 0;
+}
+
+/* ---- R4.4 — "Passive" labels are clip-proof ---------------------------
+   The uppercase "Passive" column header / per-row passive figures must never
+   wrap or clip, even at larger font-size settings or in a narrow column. */
+.charsheet__skills-header-passive,
+.charsheet__skill-passive,
+.charsheet__lore-skill-passive,
+.charsheet__save-passive-badge {
+	white-space: nowrap;
 }
