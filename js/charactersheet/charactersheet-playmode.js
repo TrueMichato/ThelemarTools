@@ -489,7 +489,7 @@ export class CharacterSheetPlayMode {
 		const panel = this._ce("div", "pm-modal", overlay);
 
 		const title = this._ce("div", "pm-modal__title", panel);
-		this._setIconLabel(title, "shield", " ️ Set Temporary HP");
+		this._setIconLabel(title, "shield", " Set Temporary HP");
 
 		const row = this._ce("div", "pm-modal__row", panel);
 		const input = this._ce("input", "pm-modal__input", row);
@@ -774,7 +774,7 @@ export class CharacterSheetPlayMode {
 			});
 		} else {
 			const startBtn = this._ce("button", "pm-combat-tracker__btn pm-combat-tracker__btn--start", tracker);
-			this._setIconLabel(startBtn, "attack", " ️ Start Combat");
+			this._setIconLabel(startBtn, "attack", " Start Combat");
 			startBtn.setAttribute("aria-label", "Start combat encounter");
 			startBtn.addEventListener("click", () => {
 				this._state.startCombat?.();
@@ -955,7 +955,7 @@ export class CharacterSheetPlayMode {
 		const abilCardHeader = card.querySelector(".pm-card__header");
 		if (abilCardHeader) {
 			const editBtn = this._ce("button", "pm-card__action-btn", abilCardHeader);
-			this._setIconLabel(editBtn, "edit", " ️ Edit");
+			this._setIconLabel(editBtn, "edit", " Edit");
 			editBtn.title = "Edit base ability scores";
 			editBtn.addEventListener("click", (e) => {
 				e.stopPropagation();
@@ -1138,7 +1138,7 @@ export class CharacterSheetPlayMode {
 		const profCardHeader = card.querySelector(".pm-card__header");
 		if (profCardHeader) {
 			const editBtn = this._ce("button", "pm-card__action-btn", profCardHeader);
-			this._setIconLabel(editBtn, "edit", " ️ Edit");
+			this._setIconLabel(editBtn, "edit", " Edit");
 			editBtn.title = "Edit armor, weapon, tool, and language proficiencies";
 			editBtn.addEventListener("click", (e) => {
 				e.stopPropagation();
@@ -1261,7 +1261,7 @@ export class CharacterSheetPlayMode {
 		slots.forEach(slot => {
 			const avail = this._actionEconomy[slot.key];
 			const el = this._ce("div", `pm-economy__slot pm-economy__slot--${avail ? "available" : "used"}`, row);
-			el.textContent = `${slot.icon} ${slot.label}`;
+			el.replaceChildren(this._icon(slot.icon), document.createTextNode(` ${slot.label}`));
 			this._makeClickable(el, `${avail ? "Use" : "Restore"} ${slot.label}`, () => {
 				this._actionEconomy[slot.key] = !this._actionEconomy[slot.key];
 				this._renderActionEconomy();
@@ -1439,12 +1439,12 @@ export class CharacterSheetPlayMode {
 			});
 		}
 
-		// D4: ✏️ Weapon Masteries button — show for XPHB mastery classes
+		// D4: Weapon Masteries button — show for XPHB mastery classes
 		const masteryClasses = ["fighter", "barbarian", "paladin", "ranger", "rogue"];
 		const hasMasteryClass = (this._state.getClasses() || []).some(c => masteryClasses.includes((c.name || "").toLowerCase()));
 		if (hasMasteryClass && cardHeader) {
 			const masteryBtn = this._ce("button", "pm-card__action-btn pm-card__action-btn--mastery", cardHeader);
-			this._setIconLabel(masteryBtn, "edit", " ️ Masteries");
+			this._setIconLabel(masteryBtn, "edit", " Masteries");
 			masteryBtn.title = "Edit weapon masteries";
 			masteryBtn.addEventListener("click", (e) => {
 				e.stopPropagation();
@@ -2031,7 +2031,7 @@ export class CharacterSheetPlayMode {
 			const staminaCur = this._state.getStaminaCurrent?.() || 0;
 			const row = this._ce("div", "pm-resource", list);
 			const name = this._ce("span", "pm-resource__name", row);
-			this._setIconLabel(name, "attack", " ️ Stamina");
+			this._setIconLabel(name, "attack", " Stamina");
 			const pips = this._ce("div", "pm-resource__pips", row);
 			for (let i = 0; i < staminaMax; i++) {
 				const pip = this._ce("span", `pm-resource__pip pm-resource__pip--${i < staminaCur ? "filled" : "empty"}`, pips);
@@ -2590,7 +2590,7 @@ export class CharacterSheetPlayMode {
 				doSave();
 			});
 
-			// Focus textarea when ✏️ icon is clicked
+			// Focus textarea when icon is clicked
 			const focusBtn = textareaWrap.previousElementSibling?.querySelector?.(".pm-notes__edit-icon");
 			if (focusBtn) {
 				focusBtn.addEventListener("click", () => textarea.focus());
@@ -3163,7 +3163,7 @@ export class CharacterSheetPlayMode {
 			customDmgInput.style.display = "none";
 
 			const customTypeNote = this._ce("div", "pm-modal__custom-type-note", inputRow);
-			this._setIconLabel(customTypeNote, "warning", " ️ Custom type — resistance/immunity not auto-applied");
+			this._setIconLabel(customTypeNote, "warning", " Custom type — resistance/immunity not auto-applied");
 			customTypeNote.style.display = "none";
 
 			infoRow = this._ce("div", "pm-modal__info", panel);
@@ -3172,7 +3172,7 @@ export class CharacterSheetPlayMode {
 				infoRow.innerHTML = "";
 				if (dmgTypeSelect.value === "other") {
 					const tag = this._ce("span", "pm-modal__tag pm-modal__tag--custom", infoRow);
-					tag.textContent = "ℹ️ Custom type — resistance/immunity not auto-applied";
+					this._setIconLabel(tag, "info", " Custom type — resistance/immunity not auto-applied");
 					return;
 				}
 				const dtype = dmgTypeSelect.value;
@@ -3487,7 +3487,7 @@ export class CharacterSheetPlayMode {
 		}
 		if (spell.ritual) {
 			const rit = this._ce("span", "pm-modal__badge pm-modal__badge--ritual", badges);
-			this._setIconLabel(rit, "ritual", " ️ Ritual");
+			this._setIconLabel(rit, "ritual", " Ritual");
 		}
 
 		// Chips row
@@ -3547,7 +3547,7 @@ export class CharacterSheetPlayMode {
 		}
 		if (spell.ritual) {
 			const ritualBtn = this._ce("button", "pm-modal__btn pm-modal__btn--ritual", btnRow);
-			this._setIconLabel(ritualBtn, "ritual", " ️ Ritual");
+			this._setIconLabel(ritualBtn, "ritual", " Ritual");
 			ritualBtn.title = "Cast as Ritual (no slot)";
 			ritualBtn.addEventListener("click", () => {
 				overlay.remove();
@@ -3753,7 +3753,7 @@ export class CharacterSheetPlayMode {
 			this._showEntityNoteModal("item", item.id, item.name, () => this._openDrawerByType("gear"));
 		});
 		const removeBtn = this._ce("button", "pm-modal__btn pm-modal__btn--damage", btnRow);
-		this._setIconLabel(removeBtn, "delete", " ️ Remove");
+		this._setIconLabel(removeBtn, "delete", " Remove");
 		removeBtn.addEventListener("click", () => {
 			if (!confirm(`Remove ${item.name} from inventory?`)) return;
 			this._state.removeItem?.(item.id);
@@ -4145,7 +4145,7 @@ export class CharacterSheetPlayMode {
 		exportBtn.appendChild(document.createTextNode(" Copy"));
 		exportBtn.style.marginLeft = "auto";
 		exportBtn.addEventListener("click", () => {
-			const md = this._activityLog.map(e => `- ${e.time} ${e.icon} ${e.text}`).join("\n");
+			const md = this._activityLog.map(e => `- ${e.time} ${e.text}`).join("\n");
 			navigator.clipboard?.writeText?.(md).then(() => {
 				JqueryUtil?.doToast?.({type: "success", content: "Activity log copied to clipboard!"});
 			});
@@ -4797,7 +4797,7 @@ export class CharacterSheetPlayMode {
 		// Melee / Ranged
 		const typeRow = row("Type");
 		const meleeBtn = this._ce("button", "pm-attack-type-btn pm-attack-type-btn--active", typeRow);
-		this._setIconLabel(meleeBtn, "weapon-melee", " ️ Melee");
+		this._setIconLabel(meleeBtn, "weapon-melee", " Melee");
 		const rangedBtn = this._ce("button", "pm-attack-type-btn", typeRow);
 		this._setIconLabel(rangedBtn, "weapon-ranged", " Ranged");
 		let isMelee = existing?.isMelee !== false;
@@ -5494,7 +5494,7 @@ export class CharacterSheetPlayMode {
 		const panel = this._ce("div", "pm-modal pm-mastery-modal", overlay);
 
 		const titleEl = this._ce("div", "pm-modal__title", panel);
-		this._setIconLabel(titleEl, "edit", " ️ Weapon Masteries");
+		this._setIconLabel(titleEl, "edit", " Weapon Masteries");
 
 		const subtitle = this._ce("div", "pm-modal__subtitle", panel);
 		subtitle.textContent = "Choose a mastery property for each weapon you want to master.";
