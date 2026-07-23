@@ -49,11 +49,12 @@ const CS_COMBAT_ICONS = {
 	// Druid nature-magic vocabulary (retires the 🐻/🧚 emoji labels).
 	"beast": "fa-paw",
 	"familiar": "fa-hat-wizard",
-	// Illrigger vocabulary (retires 🔥/↪/🎭/♻️ emoji in the Interdiction panel).
+	// Illrigger vocabulary (retires 🔥/↪/🎭/♻️/🩸 emoji in the Interdiction + Conduit panels).
 	"fire": "fa-fire",
 	"move": "fa-share",
 	"charm": "fa-masks-theater",
 	"recycle": "fa-recycle",
+	"blood": "fa-droplet",
 };
 
 /**
@@ -4476,8 +4477,8 @@ class CharacterSheetCombat {
 		container.innerHTML = `
 			<div class="charsheet__conduit-panel">
 				<div class="charsheet__conduit-summary ve-flex ve-flex-v-center ve-flex-wrap gap-2 mb-2">
-					<span title="Conduit dice refresh on a long rest">🩸 Dice <strong>${avail}</strong> / ${max} <span class="ve-muted">d${die}</span></span>
-					<span title="Constitution save DC = 8 + proficiency + CHA">🛡️ Save DC <strong>${dc != null ? dc : "—"}</strong></span>
+					<span title="Conduit dice refresh on a long rest">${csCombatIcon("blood")} Dice <strong>${avail}</strong> / ${max} <span class="ve-muted">d${die}</span></span>
+					<span title="Constitution save DC = 8 + proficiency + CHA">${csCombatIcon("dc")} Save DC <strong>${dc != null ? dc : "—"}</strong></span>
 					<span class="ve-muted ve-small" title="Range to touch/affect a creature">Range: <strong>${range}</strong></span>
 				</div>
 				<div class="charsheet__conduit-controls ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-2">
@@ -4499,7 +4500,7 @@ class CharacterSheetCombat {
 							<option value="success">Save succeeded</option>
 						</select>
 					</label>
-					<button class="ve-btn ve-btn-sm ve-btn-danger charsheet__conduit-spend" type="button" ${avail > 0 ? "" : "disabled"} title="Spend conduit dice and resolve the effect">Spend</button>
+					<button class="cs-combat-btn cs-combat-btn--spend charsheet__conduit-spend" type="button" ${avail > 0 ? "" : "disabled"} title="Spend conduit dice and resolve the effect">${csCombatIcon("blood")}<span>Spend</span></button>
 				</div>
 				<div class="charsheet__conduit-notes">
 					<div class="charsheet__conduit-note">
@@ -4557,7 +4558,7 @@ class CharacterSheetCombat {
 				resultNote: ` Target ${targetWord} ${targetAmt} HP · you ${selfWord} ${selfAmt} HP`,
 			});
 
-			let toast = `🩸 ${isInvig ? "Invigorate" : "Devour"} (${res.dice} → ${res.total}, save ${res.saveResult}): target ${targetWord} ${targetAmt} HP, you ${selfWord} ${selfAmt} HP.`;
+			let toast = `${isInvig ? "Invigorate" : "Devour"} (${res.dice} → ${res.total}, save ${res.saveResult}): target ${targetWord} ${targetAmt} HP, you ${selfWord} ${selfAmt} HP.`;
 			if (res.appliesExhaustion) toast += " Target gains 1 level of exhaustion.";
 			if (res.selfDroppedToZero) toast += " You drop to 0 HP — unconscious and stabilized.";
 			JqueryUtil.doToast({type: isInvig ? "info" : "success", content: toast});
