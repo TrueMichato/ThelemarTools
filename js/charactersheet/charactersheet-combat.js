@@ -4621,7 +4621,7 @@ class CharacterSheetCombat {
 				.join("");
 			rows.push(`
 				<div class="charsheet__mastery-row ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-2">
-					<span class="bold mr-1">🗡️ Lies</span>
+					<span class="bold mr-1">${csCombatIcon("weapon")} Lies</span>
 					<span class="ve-muted ve-small mr-1">use CHA for attack &amp; damage with</span>
 					<select class="form-control input-sm charsheet__mastery-lies" title="Choose a melee weapon type (changeable on a long rest)">${opts}</select>
 					<span class="charsheet__mastery-or ve-muted ve-small">or</span>
@@ -4635,7 +4635,7 @@ class CharacterSheetCombat {
 			const bonus = this._state.getInexorableSaveBonus?.() || 0;
 			rows.push(`
 				<div class="charsheet__mastery-row ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-2">
-					<span class="bold mr-1">🛡️ Inexorable</span>
+					<span class="bold mr-1">${csCombatIcon("dc")} Inexorable</span>
 					<span class="ve-muted ve-small mr-1">hostiles within 5 ft</span>
 					<input type="number" class="form-control input-sm charsheet__mastery-inexorable" min="0" max="5" value="${cur}" style="width: 4rem;" title="+1 to all saves per hostile within 5 ft (max +5)">
 					<span class="badge badge-info" title="Current bonus to all saving throws">+${bonus} to saves</span>
