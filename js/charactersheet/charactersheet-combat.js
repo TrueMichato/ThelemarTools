@@ -9945,15 +9945,15 @@ class CharacterSheetCombat {
 					extraBadges.push(`<span class="badge badge-success ml-1" title="Grants advantage on attack rolls">Adv</span>`);
 				}
 				if (parsed.actionType) {
-					let actionIcon = "⚔️";
-					if (parsed.actionType === "Bonus Action") actionIcon = "⚡";
-					else if (parsed.actionType === "Reaction") actionIcon = "🔄";
-					extraBadges.push(`<span class="badge badge-outline-secondary ml-1">${actionIcon} ${parsed.actionType}</span>`);
+					let actKind = "action";
+					if (parsed.actionType === "Bonus Action") actKind = "bonus";
+					else if (parsed.actionType === "Reaction") actKind = "reaction";
+					extraBadges.push(csCombatActionChip(actKind, {labelOverride: parsed.actionType, cls: "ml-1"}));
 				}
 
 				const isWeaponModifier = parsed.methodCategory === "weaponModifier";
 				const rememberedWeapon = isWeaponModifier ? this._state.getCombatMethodWeapon(method.name) : null;
-				const weaponLabel = rememberedWeapon ? `<span class="ve-muted ve-small ml-1" title="Remembered weapon: ${rememberedWeapon.weaponName}">🗡️ ${rememberedWeapon.weaponName}</span>` : "";
+				const weaponLabel = rememberedWeapon ? `<span class="ve-muted ve-small ml-1" title="Remembered weapon: ${rememberedWeapon.weaponName}">${csCombatIcon("weapon")} ${rememberedWeapon.weaponName}</span>` : "";
 
 				// Focus gating: some granted methods are only usable in a matching Primal Focus mode
 				// (e.g. Singular Focus → Predator, Groundshatter → Prey).
@@ -9975,11 +9975,11 @@ class CharacterSheetCombat {
 				const stanceActive = isStanceMethod && !!this._state.isStanceActive?.(method.name);
 				let actionBtnHtml;
 				if (isStanceMethod && stanceActive) {
-					actionBtnHtml = `<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__method-use" data-method-id="${methodId}" data-cost="${staminaCost}" data-method-stance="1" data-stance-active="1" title="End ${method.name} (bonus action, no stamina cost)">End Stance</button>`;
+					actionBtnHtml = `<button class="cs-combat-btn cs-combat-btn--danger charsheet__method-use" data-method-id="${methodId}" data-cost="${staminaCost}" data-method-stance="1" data-stance-active="1" title="End ${method.name} (bonus action, no stamina cost)">${csCombatIcon("stance")}<span>End Stance</span></button>`;
 				} else if (isStanceMethod) {
-					actionBtnHtml = `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__method-use" data-method-id="${methodId}" data-cost="${staminaCost}" data-method-stance="1" ${focusMismatch ? `disabled title="Switch to ${requiresFocus} focus to use this method"` : `title="Enter ${method.name} (costs ${staminaCost} stamina)"`}>Enter Stance</button>`;
+					actionBtnHtml = `<button class="cs-combat-btn cs-combat-btn--primary charsheet__method-use" data-method-id="${methodId}" data-cost="${staminaCost}" data-method-stance="1" ${focusMismatch ? `disabled title="Switch to ${requiresFocus} focus to use this method"` : `title="Enter ${method.name} (costs ${staminaCost} stamina)"`}>${csCombatIcon("stance")}<span>Enter Stance</span></button>`;
 				} else {
-					actionBtnHtml = `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__method-use" data-method-id="${methodId}" data-cost="${staminaCost}" ${focusMismatch ? `disabled title="Switch to ${requiresFocus} focus to use this method"` : `title="Use this method (costs ${staminaCost} stamina)"`}>Use</button>`;
+					actionBtnHtml = `<button class="cs-combat-btn cs-combat-btn--primary charsheet__method-use" data-method-id="${methodId}" data-cost="${staminaCost}" ${focusMismatch ? `disabled title="Switch to ${requiresFocus} focus to use this method"` : `title="Use this method (costs ${staminaCost} stamina)"`}>${csCombatIcon("surge")}<span>Use</span></button>`;
 				}
 
 				const methodEl = e_({outer: `
@@ -9994,7 +9994,7 @@ class CharacterSheetCombat {
 						</div>
 						${showUseButton ? `<div class="ve-flex ve-flex-v-center ml-2">
 							${actionBtnHtml}
-							${isWeaponModifier ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__method-choose-weapon ml-1" data-method-id="${methodId}" title="Choose which weapon to use">🗡️</button>` : ""}
+							${isWeaponModifier ? `<button class="cs-combat-btn charsheet__method-choose-weapon ml-1" data-method-id="${methodId}" title="Choose which weapon to use" aria-label="Choose weapon for ${method.name}">${csCombatIcon("weapon")}</button>` : ""}
 						</div>` : ""}
 					</div>
 				`});
