@@ -397,9 +397,9 @@ describe("Bug #4 — Hunter's Dodge appears exactly once (the use-button row) an
 		expect(combatPreyBlock).toMatch(/const dodgeName\s*=[\s\S]*?buildInlineEntriesHoverLink/);
 		expect(combatPreyBlock).toContain("getHuntersDodgeNote");
 		// ...and that hover var is ACTUALLY rendered into the badge (not just computed).
-		expect(combatPreyBlock).toMatch(/🛡️ \$\{dodgeName\}/);
-		// No bare plain-text "🛡️ Hunter's Dodge" badge — the name comes from the hover var.
-		expect(combatPreyBlock).not.toMatch(/🛡️ Hunter's Dodge \$\{/);
+		expect(combatPreyBlock).toMatch(/csCombatIcon\("shield"\)\} \$\{dodgeName\}/);
+		// No bare plain-text "Hunter's Dodge" badge — the name comes from the hover var.
+		expect(combatPreyBlock).not.toMatch(/csCombatIcon\("shield"\)\} Hunter's Dodge \$\{/);
 	});
 
 	it("Overview use-button row exists once and its name is hoverable via getHuntersDodgeNote", () => {

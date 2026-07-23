@@ -55,6 +55,10 @@ const CS_COMBAT_ICONS = {
 	"charm": "fa-masks-theater",
 	"recycle": "fa-recycle",
 	"blood": "fa-droplet",
+	// Ranger Primal Focus vocabulary (retires 🎯/🛡️/🔄/✏️/✦ emoji).
+	"target": "fa-crosshairs",
+	"shield": "fa-shield-halved",
+	"edit": "fa-pencil",
 };
 
 /**
@@ -9205,13 +9209,13 @@ class CharacterSheetCombat {
 
 		let html = `
 			<div class="ve-flex-v-center gap-2 mb-2 ve-flex-wrap">
-				<span class="badge ${isPredator ? "badge-danger" : "badge-info"}" style="font-size: 1em; padding: 5px 10px;">${isPredator ? "🎯 Predator" : "🛡️ Prey"}</span>
-				<span class="badge badge-secondary" title="Focus Switches remaining (per long rest)">🔄 ${switchesText}</span>
-				${isUnlimited ? "" : `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-pf-switches-edit" title="Manually set remaining Focus Switches">✏️</button>`}
+				<span class="badge ${isPredator ? "badge-danger" : "badge-info"}" style="font-size: 1em; padding: 5px 10px;">${csCombatIcon(isPredator ? "target" : "shield")} ${isPredator ? "Predator" : "Prey"}</span>
+				<span class="badge badge-secondary" title="Focus Switches remaining (per long rest)">${csCombatIcon("refresh")} ${switchesText}</span>
+				${isUnlimited ? "" : `<button class="cs-combat-btn charsheet__combat-pf-switches-edit" title="Manually set remaining Focus Switches" aria-label="Set remaining Focus Switches">${csCombatIcon("edit")}</button>`}
 			</div>
 			<div class="ve-flex gap-2 mb-2">
-				<button class="ve-btn ve-btn-sm ${isPredator ? "ve-btn-danger" : "ve-btn-outline-danger"} charsheet__combat-pf-btn" data-mode="predator" ${isPredator ? "disabled" : ""}>🎯 Predator</button>
-				<button class="ve-btn ve-btn-sm ${!isPredator ? "ve-btn-info" : "ve-btn-outline-info"} charsheet__combat-pf-btn" data-mode="prey" ${!isPredator ? "disabled" : ""}>🛡️ Prey</button>
+				<button class="cs-combat-btn ${isPredator ? "cs-combat-btn--selected" : ""} charsheet__combat-pf-btn" data-mode="predator" ${isPredator ? "disabled" : ""}>${csCombatIcon("target")}<span>Predator</span></button>
+				<button class="cs-combat-btn ${!isPredator ? "cs-combat-btn--selected" : ""} charsheet__combat-pf-btn" data-mode="prey" ${!isPredator ? "disabled" : ""}>${csCombatIcon("shield")}<span>Prey</span></button>
 			</div>`;
 
 		// Stateful in-play actions for the active mode
@@ -9219,8 +9223,8 @@ class CharacterSheetCombat {
 			const quarrySet = !!this._state.getFocusedQuarry?.();
 			html += `
 				<div class="ve-flex-v-center gap-2 mb-2">
-					<span class="badge ${quarrySet ? "badge-danger" : "badge-secondary"}" title="Focused Quarry (Predator focus)">🎯 Focused Quarry: ${quarrySet ? "Set" : "None"}</span>
-					<button class="ve-btn ve-btn-xs ${quarrySet ? "ve-btn-default" : "ve-btn-danger"} charsheet__combat-quarry-toggle">${quarrySet ? "Clear" : "Designate"}</button>
+					<span class="badge ${quarrySet ? "badge-danger" : "badge-secondary"}" title="Focused Quarry (Predator focus)">${csCombatIcon("target")} Focused Quarry: ${quarrySet ? "Set" : "None"}</span>
+					<button class="cs-combat-btn ${quarrySet ? "" : "cs-combat-btn--primary"} charsheet__combat-quarry-toggle">${csCombatIcon(quarrySet ? "cross" : "target")}<span>${quarrySet ? "Clear" : "Designate"}</span></button>
 				</div>`;
 		} else {
 			const dodgeRemaining = this._state.getHuntersDodgeRemaining?.() ?? 0;
@@ -9233,14 +9237,14 @@ class CharacterSheetCombat {
 				const dodgeNote = CharacterSheetClassUtils.getHuntersDodgeNote?.() || "";
 				// Standard ranger-ability grid (name / badge column / note) so the row
 				// matches its sibling focus-mode reminder rows, while the badge column
-				// keeps the interactive uses badge + Use button + ✏️ manual-edit (Combat).
+				// keeps the interactive uses badge + Use button + edit manual-edit (Combat).
 				html += `
 				<div class="charsheet__ranger-ability-row">
-					<span class="charsheet__ranger-ability-name">🛡️ ${dodgeName}</span>
+					<span class="charsheet__ranger-ability-name">${csCombatIcon("shield")} ${dodgeName}</span>
 					<span class="charsheet__ranger-ability-badge">
 						<span class="badge ${dodgeRemaining > 0 ? "badge-info" : "badge-danger"}">${dodgeRemaining}/${dodgeMax}</span>
-						<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-dodge-use" ${dodgeRemaining > 0 ? "" : "disabled"}>Use</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-dodge-edit" title="Manually set remaining Hunter's Dodge uses">✏️</button>
+						<button class="cs-combat-btn cs-combat-btn--primary charsheet__combat-dodge-use" ${dodgeRemaining > 0 ? "" : "disabled"}>${csCombatIcon("shield")}<span>Use</span></button>
+						<button class="cs-combat-btn charsheet__combat-dodge-edit" title="Manually set remaining Hunter's Dodge uses" aria-label="Set remaining Hunter's Dodge uses">${csCombatIcon("edit")}</button>
 					</span>
 					<span class="charsheet__ranger-ability-note">${dodgeNote}</span>
 				</div>`;
@@ -9262,11 +9266,10 @@ class CharacterSheetCombat {
 				let badge;
 				if (ab.kind === "usable") {
 					const at = ab.actionType;
-					const icon = at === "action" ? "⚔️" : at === "bonus" ? "⚡" : at === "reaction" ? "🔄" : "✨";
-					const label = at === "action" ? "Action" : at === "bonus" ? "Bonus Action" : at === "reaction" ? "Reaction" : "Action";
-					badge = `<span class="badge badge-outline-secondary" title="${label}">${icon} ${label}</span>`;
+					const actKind = at === "bonus" ? "bonus" : at === "reaction" ? "reaction" : "action";
+					badge = csCombatActionChip(actKind);
 				} else {
-					badge = `<span class="badge badge-outline-secondary" title="Passive / situational">✦ Passive</span>`;
+					badge = `<span class="cs-combat-chip" title="Passive / situational">${csCombatIcon("spark")}<span>Passive</span></span>`;
 				}
 				// Hoverable name (renders the note as an inline-hover entry, like the
 				// Combat-method rows above); falls back to plain text.
