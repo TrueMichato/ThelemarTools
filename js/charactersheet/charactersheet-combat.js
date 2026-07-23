@@ -82,6 +82,181 @@ function csCombatPoolCaption (current, max, {recharge = "", cls = ""} = {}) {
 	return `<span class="cs-combat-pool${empty}${cls ? ` ${cls}` : ""}"><span class="cs-combat-pool__count">${cur}</span><span class="cs-combat-pool__sep" aria-hidden="true"> / </span><span class="cs-combat-pool__max">${mx}</span><span class="ve-hidden"> remaining</span>${rechargeHtml}</span>`;
 }
 
+/* ========================================================================
+   Combat Section Shell — accessibility spine (Phase B)
+   ------------------------------------------------------------------------
+   The Rogue vertical slice (Phase 0) hand-built the a11y-bearing chrome
+   inline: a labelled `role="region"` section, a colour+icon+text state
+   toggle with `aria-pressed`, a `role="group"` status strip, and condition
+   pills. Those markup contracts are the single riskiest thing to re-author
+   per class in the Phase-C fan-out (one forgotten `aria-pressed` or missing
+   `aria-labelledby` and a whole class surface goes silent for assistive
+   tech). These functions centralise that contract so every class surface
+   inherits it for free; the class keeps authoring its own inner controls
+   and wiring its own behaviour. Byte-compatible with the Rogue reference,
+   which is migrated onto them below to prove them and prevent divergence.
+   All return HTML strings (composing with this file's `e_({outer})`
+   templating) except {@link csCombatSection}, which returns the region
+   element the caller appends its body to.
+   ======================================================================== */
+
+/** Monotonic counter backing auto-generated, collision-free section title ids. */
+let _csCombatSectionSeq = 0;
+
+/**
+ * Default StateToggle vocabulary — `ON / OFF / USED` (engaged / available /
+ * spent), each encoded by colour + icon + text (never colour alone) so the
+ * same concept always reads the same. A class may override any entry (label
+ * and/or icon) via the `vocab` argument where a different word carries real
+ * game meaning (e.g. `ACTIVE` vs `PASSIVE`, a mode name) — the shell still
+ * enforces the `aria-pressed` + colour/icon/text encoding.
+ */
+const CS_COMBAT_TOGGLE_VOCAB = {
+	"on": {label: "ON", icon: "bolt", pressed: "true", cls: "cs-combat-toggle--on"},
+	"off": {label: "OFF", icon: "off", pressed: "false", cls: "cs-combat-toggle--off"},
+	"used": {label: "USED", icon: "used", pressed: "false", cls: "cs-combat-toggle--used"},
+};
+
+/**
+ * SectionShell — build a labelled region card with the shared header
+ * (themed icon + title + right-aligned primary-action slot). The title
+ * carries the `id` that the region's `aria-labelledby` points at, so
+ * assistive tech can jump to the section and hear its name.
+ * @param {object} opts
+ * @param {string} opts.title Visible, accessible section name.
+ * @param {string} opts.icon Semantic key from {@link CS_COMBAT_ICONS}.
+ * @param {string} [opts.domClass] Extra class(es) on the region (e.g. the
+ *        test-/CSS-contract class a surface already relies on).
+ * @param {string} [opts.titleId] Override the auto-generated title id.
+ * @param {string} [opts.actionsHtml] Primary-action slot markup (e.g. a
+ *        {@link csCombatStateToggle}); omitted → no actions container.
+ * @returns {HTMLElement} The region element (header inserted; body is the
+ *          caller's to append).
+ */
+function csCombatSection ({title, icon, domClass = "", titleId, actionsHtml = ""} = {}) {
+	const id = titleId || `cs-combat-section-title-${++_csCombatSectionSeq}`;
+	const section = e_({outer: `<div class="${domClass ? `${domClass} ` : ""}cs-combat-section" role="region" aria-labelledby="${id}"></div>`});
+	section.insertAdjacentHTML("beforeend", `
+			<div class="cs-combat-section__header">
+				<span class="cs-combat-section__icon">${csCombatIcon(icon)}</span>
+				<span class="cs-combat-section__title" id="${id}">${title}</span>
+				${actionsHtml ? `<div class="cs-combat-section__actions">${actionsHtml}</div>` : ""}
+			</div>
+		`);
+	return section;
+}
+
+/**
+ * StateToggle — a state chip encoded by colour + icon + text with
+ * `aria-pressed`, using the default {@link CS_COMBAT_TOGGLE_VOCAB} unless a
+ * class overrides it. Returns markup only; the caller wires the click.
+ * @param {object} opts
+ * @param {"on"|"off"|"used"} opts.state Current state.
+ * @param {string} [opts.labelPrefix] Prefixes the `aria-label` (e.g. the
+ *        feature name) so the announcement is self-describing.
+ * @param {string} [opts.ariaState] Spoken state for the current state,
+ *        overriding the vocabulary label in the `aria-label` (e.g. "armed",
+ *        "already used this round").
+ * @param {string} [opts.title] Native tooltip.
+ * @param {boolean} [opts.disabled]
+ * @param {string} [opts.domClass] Extra class(es) (e.g. a behaviour hook).
+ * @param {Partial<Record<"on"|"off"|"used", {label?: string, icon?: string}>>} [opts.vocab]
+ *        Per-state label/icon overrides.
+ * @returns {string}
+ */
+function csCombatStateToggle ({state, labelPrefix = "", ariaState, title = "", disabled = false, domClass = "", vocab} = {}) {
+	const base = CS_COMBAT_TOGGLE_VOCAB[state] || CS_COMBAT_TOGGLE_VOCAB.off;
+	const meta = {...base, ...(vocab?.[state] || {})};
+	const spoken = ariaState || meta.label;
+	const ariaLabel = labelPrefix ? `${labelPrefix}: ${spoken}` : spoken;
+	return `<button type="button" class="cs-combat-toggle ${meta.cls}${domClass ? ` ${domClass}` : ""}" aria-pressed="${meta.pressed}" aria-label="${ariaLabel}"${title ? ` title="${title}"` : ""}${disabled ? " disabled" : ""}>${csCombatIcon(meta.icon)}<span>${meta.label}</span></button>`;
+}
+
+/**
+ * StatusStrip — the canonical full-border at-a-glance bar (DC / pool / range
+ * / save), a `role="group"` with an `aria-label` so it reads as one unit.
+ * @param {Array<{label: string, value: string|number, valueWas?: string|number}>} items
+ *        `valueWas` renders a struck previous value before the current one
+ *        (e.g. a base pool superseded by an effective pool).
+ * @param {object} opts
+ * @param {string} opts.ariaLabel Group name for assistive tech.
+ * @param {string} [opts.domClass]
+ * @returns {string}
+ */
+function csCombatStatusStrip (items, {ariaLabel, domClass = ""} = {}) {
+	const itemsHtml = (items || []).map(it => {
+		const wasHtml = it.valueWas != null && it.valueWas !== ""
+			? `<span class="cs-combat-strip__value-was">${it.valueWas}</span>`
+			: "";
+		return `
+				<div class="cs-combat-strip__item">
+					<span class="cs-combat-strip__label">${it.label}</span>
+					${wasHtml}<span class="cs-combat-strip__value">${it.value}</span>
+				</div>`;
+	}).join("");
+	return `<div class="cs-combat-strip${domClass ? ` ${domClass}` : ""}" role="group"${ariaLabel ? ` aria-label="${ariaLabel}"` : ""}>${itemsHtml}
+			</div>`;
+}
+
+/**
+ * ConditionPill — a small state pill (met / blocked / none). When `isToggle`
+ * is set it renders an interactive `<button>` with `aria-pressed` (the
+ * caller wires the click); otherwise a static `<span>`. Icon + text always
+ * travel together so state never relies on colour alone.
+ * @param {object} opts
+ * @param {"met"|"blocked"|"none"} opts.variant
+ * @param {string} opts.label
+ * @param {string} [opts.icon] Semantic key from {@link CS_COMBAT_ICONS}.
+ * @param {string} [opts.title]
+ * @param {boolean} [opts.isToggle] Render as an interactive pressed toggle.
+ * @param {boolean} [opts.pressed] `aria-pressed` value when `isToggle`.
+ * @param {string} [opts.domClass]
+ * @returns {string}
+ */
+function csCombatConditionPill ({variant = "none", label, icon, title = "", isToggle = false, pressed = false, domClass = ""} = {}) {
+	const cls = `cs-combat-cond cs-combat-cond--${variant}${isToggle ? " cs-combat-cond--toggle" : ""}${domClass ? ` ${domClass}` : ""}`;
+	const iconHtml = icon ? csCombatIcon(icon) : "";
+	const titleAttr = title ? ` title="${title}"` : "";
+	if (isToggle) return `<button type="button" class="${cls}" aria-pressed="${pressed ? "true" : "false"}"${titleAttr}>${iconHtml}${label}</button>`;
+	return `<span class="${cls}"${titleAttr}>${iconHtml}${label}</span>`;
+}
+
+/**
+ * Focus the first actionable control inside a freshly-opened modal. The
+ * shared site modal util blurs the trigger on open but does not move focus
+ * into the dialog, so without this a keyboard/AT user lands on `<body>` and
+ * must tab from the top of the page to reach the choices. Guarded for
+ * node/jsdom (no `focus`). Prefer an explicit selector when the desired
+ * initial control isn't the first in DOM order.
+ * @param {HTMLElement} modalInner
+ * @param {{preferSelector?: string}} [opts]
+ * @returns {HTMLElement|null} The focused element, if any.
+ */
+function csFocusModalOnOpen (modalInner, {preferSelector} = {}) {
+	if (!modalInner || typeof modalInner.querySelector !== "function") return null;
+	const prefer = preferSelector ? modalInner.querySelector(preferSelector) : null;
+	const el = prefer || modalInner.querySelector(`button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])`);
+	if (el && typeof el.focus === "function") {
+		try { el.focus(); } catch (ignored) { /* jsdom */ }
+		return el;
+	}
+	return null;
+}
+
+/**
+ * Return focus to a modal's triggering control after it closes — but only if
+ * that control is still in the document (a resolve that re-renders the
+ * surface may have replaced it, in which case refocusing a detached node is
+ * a no-op we skip). Pair with capturing `document.activeElement` *before*
+ * opening the modal.
+ * @param {Element|null} trigger
+ */
+function csRestoreModalFocus (trigger) {
+	if (trigger && trigger.isConnected && typeof (/** @type {*} */ (trigger).focus) === "function") {
+		try { /** @type {*} */ (trigger).focus(); } catch (ignored) { /* jsdom */ }
+	}
+}
+
 class CharacterSheetCombat {
 	/**
 	 * Fighter action-economy features that are owned by the dedicated `renderCombatFighter`
@@ -1537,10 +1712,11 @@ class CharacterSheetCombat {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: `Arcane Shot — ${ctx.attack?.name || "Ranged Attack"}`,
 			isMinHeight0: true,
-			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } },
+			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } csRestoreModalFocus(trigger); },
 		});
 
 		await new Promise((resolve) => {
@@ -1592,6 +1768,10 @@ class CharacterSheetCombat {
 				});
 			});
 			modalInner.querySelector(`[data-act="none"]`).addEventListener("click", () => { finalize(); doClose(); });
+
+			// Move keyboard focus onto the first Apply so the picker is operable
+			// without a mouse (the site util blurs the trigger but doesn't focus in).
+			csFocusModalOnOpen(modalInner, {preferSelector: ".charsheet__arcaneshot-opt"});
 		});
 	}
 
@@ -1710,10 +1890,11 @@ class CharacterSheetCombat {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: `Critical Hit Effect — ${ctx.attack?.name || "Weapon"}`,
 			isMinHeight0: true,
-			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } },
+			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } csRestoreModalFocus(trigger); },
 		});
 
 		await new Promise((resolve) => {
@@ -1761,6 +1942,10 @@ class CharacterSheetCombat {
 				});
 			});
 			modalInner.querySelector(`[data-act="none"]`).addEventListener("click", () => { finalize(); doClose(); });
+
+			// Move keyboard focus onto the first Apply so the picker is operable
+			// without a mouse (the site util blurs the trigger but doesn't focus in).
+			csFocusModalOnOpen(modalInner, {preferSelector: ".charsheet__critrider-opt"});
 		});
 	}
 
@@ -5789,6 +5974,10 @@ class CharacterSheetCombat {
 	async _showCombatActionChoiceModal (feature, choices, onChoice) {
 		if (!choices?.length) return null;
 
+		// Capture the trigger BEFORE the modal opens (the site util blurs it),
+		// so focus can return there when the choice is made or cancelled.
+		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
+
 		const {eleModalInner: modalInner, doClose, pGetResolved} = await UiUtil.pGetShowModal({
 			title: `${feature.name} — Choose`,
 			isMinHeight0: true,
@@ -5818,7 +6007,11 @@ class CharacterSheetCombat {
 		cancelBtn.addEventListener("click", () => doClose(false));
 		modalInner.append(cancelBtn);
 
+		// Move keyboard focus into the dialog so it's operable without a mouse.
+		csFocusModalOnOpen(modalInner);
+
 		await pGetResolved();
+		csRestoreModalFocus(trigger);
 		return resolved;
 	}
 
@@ -7660,51 +7853,37 @@ class CharacterSheetCombat {
 
 		const titleId = "cs-combat-sneak-title";
 
-		// SectionShell — a labelled region so assistive tech can jump to it.
-		const section = e_({outer: `<div class="charsheet__sneak-attack-section cs-combat-section" role="region" aria-labelledby="${titleId}"></div>`});
-
-		// ===== SectionShell header: icon + title + primary-action slot (StateToggle) =====
-		// StateToggle vocabulary — default ON / OFF / USED (color + icon + text).
+		// SectionShell — a labelled region so assistive tech can jump to it,
+		// with the StateToggle in its primary-action slot.
+		// StateToggle vocabulary — default ON / OFF / USED (colour + icon + text).
 		const toggleState = isSpentThisRound ? "used" : this._sneakAttackEnabled ? "on" : "off";
-		const toggleMeta = {
-			on: {label: "ON", icon: "bolt", cls: "cs-combat-toggle--on", pressed: "true", aria: "armed"},
-			off: {label: "OFF", icon: "off", cls: "cs-combat-toggle--off", pressed: "false", aria: "off"},
-			used: {label: "USED", icon: "used", cls: "cs-combat-toggle--used", pressed: "false", aria: "already used this round"},
-		}[toggleState];
+		const toggleAria = {on: "armed", off: "off", used: "already used this round"}[toggleState];
 		const toggleTitle = isSpentThisRound
 			? "Sneak Attack already used this round"
 			: this._sneakAttackEnabled
 				? "Sneak Attack armed — click to turn off for the next damage roll"
 				: "Click to arm Sneak Attack for the next damage roll";
 
-		section.insertAdjacentHTML("beforeend", `
-			<div class="cs-combat-section__header">
-				<span class="cs-combat-section__icon">${csCombatIcon("sneak")}</span>
-				<span class="cs-combat-section__title" id="${titleId}">Sneak Attack</span>
-				<div class="cs-combat-section__actions">
-					<button type="button" class="cs-combat-toggle ${toggleMeta.cls} charsheet__sneak-attack-toggle" aria-pressed="${toggleMeta.pressed}" aria-label="Sneak Attack: ${toggleMeta.aria}" title="${toggleTitle}" ${isSpentThisRound ? "disabled" : ""}>
-						${csCombatIcon(toggleMeta.icon)}<span>${toggleMeta.label}</span>
-					</button>
-				</div>
-			</div>
-		`);
+		const section = csCombatSection({
+			domClass: "charsheet__sneak-attack-section",
+			titleId,
+			icon: "sneak",
+			title: "Sneak Attack",
+			actionsHtml: csCombatStateToggle({
+				state: toggleState,
+				labelPrefix: "Sneak Attack",
+				ariaState: toggleAria,
+				title: toggleTitle,
+				disabled: isSpentThisRound,
+				domClass: "charsheet__sneak-attack-toggle",
+			}),
+		});
 
 		// ===== StatusStrip: at-a-glance dice pool + average =====
-		const diceDisplay = totalCSDiceCost > 0
-			? `<span class="cs-combat-strip__value-was">${baseSneakDice}d6</span><span class="cs-combat-strip__value">${effectiveSneakDice}d6</span>`
-			: `<span class="cs-combat-strip__value">${baseSneakDice}d6</span>`;
-		section.insertAdjacentHTML("beforeend", `
-			<div class="cs-combat-strip" role="group" aria-label="Sneak Attack dice">
-				<div class="cs-combat-strip__item">
-					<span class="cs-combat-strip__label">Dice</span>
-					${diceDisplay}
-				</div>
-				<div class="cs-combat-strip__item">
-					<span class="cs-combat-strip__label">Avg</span>
-					<span class="cs-combat-strip__value">${avgDisplay}</span>
-				</div>
-			</div>
-		`);
+		section.insertAdjacentHTML("beforeend", csCombatStatusStrip([
+			{label: "Dice", value: `${effectiveSneakDice}d6`, valueWas: totalCSDiceCost > 0 ? `${baseSneakDice}d6` : ""},
+			{label: "Avg", value: avgDisplay},
+		], {ariaLabel: "Sneak Attack dice"}));
 
 		section.querySelector(".charsheet__sneak-attack-toggle")?.addEventListener("click", () => {
 			if (!this._isSneakAttackAvailableThisTurn()) {
@@ -7727,15 +7906,22 @@ class CharacterSheetCombat {
 		const conditions = e_({outer: `<div class="cs-combat-conditions"></div>`});
 
 		if (hasAdv) {
-			conditions.insertAdjacentHTML("beforeend", `<span class="cs-combat-cond cs-combat-cond--met" title="Last attack had advantage">${csCombatIcon("check")}Advantage</span>`);
+			conditions.insertAdjacentHTML("beforeend", csCombatConditionPill({variant: "met", icon: "check", label: "Advantage", title: "Last attack had advantage"}));
 		} else if (hasDisadv) {
-			conditions.insertAdjacentHTML("beforeend", `<span class="cs-combat-cond cs-combat-cond--blocked" title="Last attack had disadvantage — Sneak Attack blocked">${csCombatIcon("ban")}Disadvantage</span>`);
+			conditions.insertAdjacentHTML("beforeend", csCombatConditionPill({variant: "blocked", icon: "ban", label: "Disadvantage", title: "Last attack had disadvantage — Sneak Attack blocked"}));
 		} else {
-			conditions.insertAdjacentHTML("beforeend", `<span class="cs-combat-cond cs-combat-cond--none" title="No advantage from the last attack">${csCombatIcon("none")}No advantage</span>`);
+			conditions.insertAdjacentHTML("beforeend", csCombatConditionPill({variant: "none", icon: "none", label: "No advantage", title: "No advantage from the last attack"}));
 		}
 
 		// Ally-adjacent state toggle (clickable condition pill)
-		const allyPill = e_({outer: `<button type="button" class="cs-combat-cond cs-combat-cond--toggle ${allyAdj ? "cs-combat-cond--met" : "cs-combat-cond--none"}" aria-pressed="${allyAdj ? "true" : "false"}" title="Toggle: an ally is within 5 ft of the target">${csCombatIcon(allyAdj ? "check" : "ally")}Ally within 5 ft</button>`});
+		const allyPill = e_({outer: csCombatConditionPill({
+			variant: allyAdj ? "met" : "none",
+			isToggle: true,
+			pressed: allyAdj,
+			icon: allyAdj ? "check" : "ally",
+			label: "Ally within 5 ft",
+			title: "Toggle: an ally is within 5 ft of the target",
+		})});
 		allyPill.addEventListener("click", () => {
 			this._sneakAttackHasAdjacentAlly = !this._sneakAttackHasAdjacentAlly;
 			this._announceCombat(this._sneakAttackHasAdjacentAlly ? "Ally within 5 feet: on" : "Ally within 5 feet: off");
