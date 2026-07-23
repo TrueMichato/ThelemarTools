@@ -59,6 +59,8 @@ const CS_COMBAT_ICONS = {
 	"target": "fa-crosshairs",
 	"shield": "fa-shield-halved",
 	"edit": "fa-pencil",
+	// Channeled cantrip vocabulary (retires ✨/⚔ emoji in the rider row).
+	"clear": "fa-xmark",
 };
 
 /**
@@ -3846,9 +3848,9 @@ class CharacterSheetCombat {
 			: `<span class="ve-muted">no extra on-hit damage yet (gained at 5th level)</span>`;
 		container.innerHTML = `
 			<div class="charsheet__channeled-spell-row ve-flex-v-center ve-flex-wrap">
-				<span class="mr-2">✨ <strong>${rider.spellName}</strong> is channeled into your next damage roll — ${onHitStr}.</span>
-				<span class="ve-muted ve-small mr-2">⚔ if the attack hits</span>
-				<button class="ve-btn ve-btn-xxs ve-btn-default charsheet__channeled-spell-clear" type="button" title="Clear channeled spell">Clear</button>
+				<span class="mr-2">${csCombatIcon("spark")} <strong>${rider.spellName}</strong> is channeled into your next damage roll — ${onHitStr}.</span>
+				<span class="ve-muted ve-small mr-2">${csCombatIcon("weapon")} if the attack hits</span>
+				<button class="cs-combat-btn charsheet__channeled-spell-clear" type="button" title="Clear channeled spell">${csCombatIcon("clear")}<span>Clear</span></button>
 			</div>
 		`;
 	}
