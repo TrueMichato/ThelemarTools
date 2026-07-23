@@ -70,14 +70,18 @@ class CharacterSheetLayout {
 			});
 		}
 
-		// Combat tab has 2 columns
+		// Combat tab uses a single balanced masonry container (Phase E). It was
+		// previously two .charsheet__col-half columns; drag-to-reorder now
+		// treats the whole masonry as one container (like Spells / Features).
 		const combatTab = document.getElementById("charsheet-tab-combat");
 		if (combatTab) {
-			const columns = combatTab.querySelectorAll(".charsheet__col-half");
-			result.push({
-				tabId: "combat",
-				containers: Array.from(columns),
-			});
+			const container = combatTab.querySelector(".charsheet__combat-masonry");
+			if (container) {
+				result.push({
+					tabId: "combat",
+					containers: [container],
+				});
+			}
 		}
 
 		// Spells tab - main container

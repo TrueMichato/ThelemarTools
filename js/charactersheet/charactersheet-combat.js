@@ -7058,6 +7058,39 @@ class CharacterSheetCombat {
 	}
 
 	/**
+	 * Collapse or expand a derived/utility combat card into a thin single-line
+	 * affordance based on whether it has content. Empty Defenses / Conditions /
+	 * Active-Combat-Effects cards otherwise stack as chunky "No active X" voids;
+	 * when empty the section keeps its header (and any inline add button) while
+	 * the body is hidden and a muted hint sits at the trailing edge. Paired with
+	 * the .charsheet__section--combat-empty CSS in charactersheet.css.
+	 * @param {HTMLElement|null} bodyEl The section's inner body container.
+	 * @param {boolean} isEmpty Whether the card has no content to show.
+	 * @param {string} [hintText] Trailing hint shown when collapsed (e.g. "None").
+	 */
+	_setCombatSectionEmpty (bodyEl, isEmpty, hintText = "None") {
+		const section = bodyEl?.closest?.(".charsheet__section");
+		if (!section) return;
+
+		section.classList.toggle("charsheet__section--combat-empty", !!isEmpty);
+
+		const title = section.querySelector(".charsheet__section-title");
+		if (!title) return;
+
+		let hint = title.querySelector(".charsheet__combat-empty-hint");
+		if (isEmpty) {
+			if (!hint) {
+				hint = document.createElement("span");
+				hint.className = "charsheet__combat-empty-hint";
+				title.append(hint);
+			}
+			hint.textContent = hintText;
+		} else if (hint) {
+			hint.remove();
+		}
+	}
+
+	/**
 	 * Render active conditions in combat tab
 	 */
 	renderCombatConditions () {
@@ -7069,8 +7102,11 @@ class CharacterSheetCombat {
 
 		if (!conditions.length) {
 			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No active conditions</div>`;
+			this._setCombatSectionEmpty(container, true);
 			return;
 		}
+
+		this._setCombatSectionEmpty(container, false);
 
 		container.innerHTML = "";
 
@@ -7169,7 +7205,7 @@ class CharacterSheetCombat {
 		// Render resistances
 		const resistancesEl = document.getElementById("charsheet-resistances");
 		if (resistancesEl) {
-			if (allResistances) {
+			if (allResistances.length) {
 				resistancesEl.innerHTML = allResistances.map(r => {
 					const isFromState = stateResistances.includes(r) && !resistances.includes(r);
 					return `<span class="badge ${isFromState ? "badge-warning" : "badge-success"} mr-1" title="${isFromState ? "From active state" : "Base resistance"}">${this._formatDamageType(r)}</span>`;
@@ -7182,7 +7218,7 @@ class CharacterSheetCombat {
 		// Render immunities (damage)
 		const immunitiesEl = document.getElementById("charsheet-immunities");
 		if (immunitiesEl) {
-			if (allImmunities) {
+			if (allImmunities.length) {
 				immunitiesEl.innerHTML = allImmunities.map(i => {
 					const isFromState = stateImmunities.includes(i) && !immunities.includes(i);
 					return `<span class="badge ${isFromState ? "badge-warning" : "badge-primary"} mr-1" title="${isFromState ? "From active state" : "Base immunity"}">${this._formatDamageType(i)}</span>`;
@@ -7195,7 +7231,7 @@ class CharacterSheetCombat {
 		// Render vulnerabilities
 		const vulnerabilitiesEl = document.getElementById("charsheet-vulnerabilities");
 		if (vulnerabilitiesEl) {
-			if (allVulnerabilities) {
+			if (allVulnerabilities.length) {
 				vulnerabilitiesEl.innerHTML = allVulnerabilities.map(v =>
 					`<span class="badge badge-danger mr-1">${this._formatDamageType(v)}</span>`,
 				).join("");
@@ -7221,7 +7257,7 @@ class CharacterSheetCombat {
 		}
 
 		if (condImmunities) {
-			if (allConditionImmunities) {
+			if (allConditionImmunities.length) {
 				// Get condition sources for hover support
 				const conditionsList = this._page?.getConditionsListUnique?.() || this._page?.getConditionsList?.() || [];
 				const conditionSourceMap = new Map();
@@ -7257,6 +7293,13 @@ class CharacterSheetCombat {
 				condImmunities.innerHTML = `<span class="ve-muted">—</span>`;
 			}
 		}
+
+		// Collapse the whole Defenses card to a thin affordance when the
+		// character has no resistances/immunities/vulnerabilities at all.
+		const defensesBody = document.getElementById("charsheet-combat-defenses");
+		const hasAnyDefenses = allResistances.length || allImmunities.length
+			|| allVulnerabilities.length || allConditionImmunities.length;
+		this._setCombatSectionEmpty(defensesBody, !hasAnyDefenses);
 	}
 
 	/**
@@ -7633,6 +7676,7 @@ class CharacterSheetCombat {
 		if (!hasAnyEffects) {
 			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No active effects</div>`;
 		}
+		this._setCombatSectionEmpty(container, !hasAnyEffects);
 	}
 
 	/**

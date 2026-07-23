@@ -2360,6 +2360,64 @@
 }
 
 /* ========================================================================
+   Combat tab — balanced masonry (Phase E layout)
+   ------------------------------------------------------------------------
+   The Combat tab previously used two even flex columns. On class-heavy
+   characters the left column stacked ~2800px of class surfaces while the
+   right column (Defenses / Conditions / Effects / Resources / States)
+   bottomed out ~1700px early, leaving dead void. A single CSS multicol
+   container balances every .charsheet__section by height so tall class
+   content flows into the space the utility cards leave behind — no dead
+   void, no JS bin-packing. Sections stay in document order; drag-to-reorder
+   (charactersheet-layout.js) treats the masonry as one container.
+   ======================================================================== */
+.charsheet__combat-masonry {
+	column-count: 2;
+	column-gap: var(--cs-space-md, 1rem);
+}
+
+.charsheet__combat-masonry > .charsheet__section {
+	/* keep each card intact within a single column; the card's own
+	   margin-bottom carries the vertical rhythm between stacked cards */
+	break-inside: avoid;
+}
+
+@media (max-width: 768px) {
+	.charsheet__combat-masonry {
+		column-count: 1;
+	}
+}
+
+/* Empty derived/utility cards (Defenses, Conditions, Active Combat Effects)
+   collapse to a thin single-line affordance so they don't stack as chunky
+   "No active X" voids on low-content characters. The section keeps its
+   header (and any inline add button); the body is hidden and a muted "None"
+   hint sits at the trailing edge. Toggled by JS via _setCombatSectionEmpty. */
+.charsheet__combat-masonry .charsheet__section--combat-empty {
+	padding-top: var(--cs-space-sm, 0.5rem);
+	padding-bottom: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__combat-masonry .charsheet__section--combat-empty .charsheet__section-title {
+	margin-bottom: 0;
+	padding-bottom: 0;
+	border-bottom: 0;
+}
+
+.charsheet__combat-masonry .charsheet__section--combat-empty > *:not(.charsheet__section-title) {
+	display: none;
+}
+
+.charsheet__combat-empty-hint {
+	margin-left: auto;
+	color: var(--cs-text-muted, var(--rgb-text-muted));
+	font-weight: var(--cs-weight-regular, 400);
+	font-size: var(--cs-text-sm, 0.85rem);
+	letter-spacing: var(--cs-tracking-normal, 0);
+	text-transform: none;
+}
+
+/* ========================================================================
    Sections - Modern card-based design
    ======================================================================== */
 .charsheet__section {
