@@ -213,7 +213,9 @@ describe("_renderArcaneShotToggle — folded into Combat Resources with hover li
 		expect(container.innerHTML).toContain("charsheet__arcane-shot-section");
 		expect(container.innerHTML).toContain("Arcane Shot");
 		expect(container.innerHTML).toContain("3/4"); // remaining/max
-		expect(container.innerHTML).toContain("DC 15");
+		// DC now reads via the StatusStrip: "Save DC (INT)" label + "15" value.
+		expect(container.innerHTML).toContain("Save DC (INT)");
+		expect(container.innerHTML).toContain(">15<");
 	});
 
 	it("uses a hover link for the shot name and DROPS the inline effect text", () => {

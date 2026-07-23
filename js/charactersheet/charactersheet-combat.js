@@ -8092,17 +8092,25 @@ class CharacterSheetCombat {
 
 		if (!riders.length) return;
 
-		const section = e_({outer: `<div class="charsheet__weapon-riders-section mt-3" style="border-top: 1px solid var(--rgb-border-grey, #444); padding-top: 0.5rem;"></div>`});
-		section.insertAdjacentHTML("beforeend", `<div class="ve-flex-v-center mb-1"><strong style="font-size: 1.05em;">Weapon Damage Riders</strong></div>`);
+		// SectionShell — same disclosure chrome as the Sneak Attack fold-in, so the
+		// three Combat Resources subclass surfaces read as one system. Each rider is
+		// its own StateToggle row (no single section-level primary action).
+		const section = csCombatSection({
+			domClass: "charsheet__weapon-riders-section",
+			titleId: "cs-combat-riders-title",
+			icon: "weapon",
+			title: "Weapon Damage Riders",
+		});
 
-		const colors = {ready: "ve-btn-success", off: "ve-btn-default", used: "ve-btn-danger"};
-		const labels = {ready: "READY", off: "OFF", used: "USED"};
+		const list = e_({outer: `<div class="cs-combat-toggle-rows"></div>`});
 
 		for (const rider of riders) {
 			const oncePerTurn = rider.perTurn !== false;
 			const isSpent = oncePerTurn && !this._isRiderAvailableThisTurn(rider.id);
 			if (isSpent && this._weaponRiderEnabled[rider.id]) this._weaponRiderEnabled[rider.id] = false;
-			const toggleState = isSpent ? "used" : this._weaponRiderEnabled[rider.id] ? "ready" : "off";
+			// StateToggle vocabulary — default ON / OFF / USED (colour + icon + text).
+			const toggleState = isSpent ? "used" : this._weaponRiderEnabled[rider.id] ? "on" : "off";
+			const ariaState = isSpent ? "already used this round" : this._weaponRiderEnabled[rider.id] ? "armed" : "off";
 			const title = isSpent
 				? `${rider.name} already used this round`
 				: this._weaponRiderEnabled[rider.id]
@@ -8117,15 +8125,23 @@ class CharacterSheetCombat {
 				const opts = rider.damageTypeChoices
 					.map(t => `<option value="${t}"${t === cur ? " selected" : ""}>${t}</option>`)
 					.join("");
-				typeSelectHtml = `<select class="form-control input-sm charsheet__weapon-rider-dmgtype ml-2" data-rider-id="${rider.id}" style="width: 8rem;" title="Damage type (changeable on a long rest)">${opts}</select>`;
+				typeSelectHtml = `<select class="form-control input-sm charsheet__weapon-rider-dmgtype" data-rider-id="${rider.id}" title="Damage type (changeable on a long rest)">${opts}</select>`;
 			}
 
+			const toggleHtml = csCombatStateToggle({
+				state: toggleState,
+				labelPrefix: rider.name,
+				ariaState,
+				title,
+				disabled: isSpent,
+				domClass: "charsheet__weapon-rider-toggle",
+				attrs: {"data-rider-id": rider.id},
+			});
+
 			const row = e_({outer: `
-				<div class="ve-flex-v-center mb-1 gap-2">
-					<button class="ve-btn ve-btn-xs ${colors[toggleState]} charsheet__weapon-rider-toggle mr-2" data-rider-id="${rider.id}" title="${title}" ${isSpent ? "disabled" : ""}>
-						<span class="glyphicon glyphicon-flash mr-1"></span>${labels[toggleState]}
-					</button>
-					<span class="ve-small"><strong>${rider.name}</strong> ${rider.dice}${rider.note ? ` <span class="ve-muted">(${rider.note})</span>` : ""}</span>
+				<div class="cs-combat-toggle-row">
+					${toggleHtml}
+					<span class="cs-combat-toggle-row__label"><strong>${rider.name}</strong> ${rider.dice}${rider.note ? ` <span class="ve-muted">(${rider.note})</span>` : ""}</span>
 					${typeSelectHtml}
 				</div>
 			`});
@@ -8136,6 +8152,7 @@ class CharacterSheetCombat {
 					return;
 				}
 				this._weaponRiderEnabled[rider.id] = !this._weaponRiderEnabled[rider.id];
+				this._announceCombat(this._weaponRiderEnabled[rider.id] ? `${rider.name} armed` : `${rider.name} off`);
 				this._renderWeaponDamageRiders();
 			});
 			row.querySelector(".charsheet__weapon-rider-dmgtype")?.addEventListener("change", (e) => {
@@ -8144,13 +8161,14 @@ class CharacterSheetCombat {
 				this._page.renderCharacter?.();
 				this._page.saveCharacter?.();
 			});
-			section.append(row);
+			list.append(row);
 
 			if (rider.condition) {
-				section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-1" style="margin-left: 4px;">${rider.condition}</div>`);
+				list.insertAdjacentHTML("beforeend", `<div class="cs-combat-toggle-row__note ve-small ve-muted">${rider.condition}</div>`);
 			}
 		}
 
+		section.append(list);
 		container.append(section);
 	}
 
@@ -8181,17 +8199,24 @@ class CharacterSheetCombat {
 		const hasMagicArrow = !!calcs.hasMagicArrow;
 		const hasCurvingShot = !!calcs.hasCurvingShot;
 
-		const section = e_({outer: `<div class="charsheet__arcane-shot-section mt-3"></div>`});
+		// SectionShell + StatusStrip — same disclosure chrome as the Sneak Attack and
+		// Weapon Damage Riders fold-ins. The at-a-glance DC + uses live in the strip;
+		// the passives and known-shot list read as feature rows below it.
+		const section = csCombatSection({
+			domClass: "charsheet__arcane-shot-section",
+			titleId: "cs-combat-arcaneshot-title",
+			icon: "target",
+			title: "Arcane Shot",
+		});
 
-		section.insertAdjacentHTML("beforeend", `
-			<div class="ve-flex-v-center gap-2 mb-2 ve-flex-wrap">
-				<strong style="font-size: 1.05em;">${csCombatIcon("target")}<span>Arcane Shot</span></strong>
-				${dc != null ? `<span class="badge badge-primary" title="Arcane Shot save DC (${ability})">DC ${dc}</span>` : ""}
-				<span class="ve-small ve-muted" title="Uses are tracked by the Arcane Shot pips above">${csCombatIcon("info")} ${remaining}/${max} — track uses with the pips above</span>
-			</div>`);
+		const stripItems = [];
+		if (dc != null) stripItems.push({label: `Save DC (${ability})`, value: dc});
+		stripItems.push({label: "Uses", value: `${remaining}/${max}`});
+		section.insertAdjacentHTML("beforeend", csCombatStatusStrip(stripItems, {ariaLabel: "Arcane Shot"}));
+		section.insertAdjacentHTML("beforeend", `<div class="cs-combat-toggle-row__note ve-small ve-muted">${csCombatIcon("info")} Track uses with the pips above.</div>`);
 
 		if (hasEverReady) {
-			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-2">${csCombatIcon("spark")} <span class="bold">Ever-Ready Shot:</span> when you roll initiative with no uses left, regain one.${remaining === 0 ? ` <button class="cs-combat-btn cs-combat-btn--heal charsheet__combat-as-everready ml-1">${csCombatIcon("refresh")}<span>Regain (initiative)</span></button>` : ""}</div>`);
+			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted">${csCombatIcon("spark")} <span class="bold">Ever-Ready Shot:</span> when you roll initiative with no uses left, regain one.${remaining === 0 ? ` <button class="cs-combat-btn cs-combat-btn--heal charsheet__combat-as-everready ml-1">${csCombatIcon("refresh")}<span>Regain (initiative)</span></button>` : ""}</div>`);
 		}
 
 		if (hasMagicArrow) {
@@ -8202,9 +8227,9 @@ class CharacterSheetCombat {
 		}
 
 		if (!knownShots.length) {
-			section.insertAdjacentHTML("beforeend", `<div class="ve-muted ve-small mt-1">No Arcane Shot options known yet. Choose them when you gain or level up the Arcane Archer subclass.</div>`);
+			section.insertAdjacentHTML("beforeend", `<div class="ve-muted ve-small">No Arcane Shot options known yet. Choose them when you gain or level up the Arcane Archer subclass.</div>`);
 		} else {
-			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mt-1 mb-1">${csCombatIcon("info")} Roll a ranged attack with a bow to choose and apply an Arcane Shot. Hover a name for its effect.</div>`);
+			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted">${csCombatIcon("info")} Roll a ranged attack with a bow to choose and apply an Arcane Shot. Hover a name for its effect.</div>`);
 			const shotsHtml = knownShots.map(shot => {
 				let nameHtml = shot.name;
 				if (this._page?.getHoverLink && shot.source) {
@@ -8213,7 +8238,7 @@ class CharacterSheetCombat {
 				const srcAbbr = shot.source ? Parser.sourceJsonToAbv(shot.source) : "";
 				return `<span class="charsheet__arcane-shot-pill ve-small"><span class="bold">${nameHtml}</span>${srcAbbr ? ` <span class="ve-muted">(${srcAbbr})</span>` : ""}</span>`;
 			}).join("");
-			section.insertAdjacentHTML("beforeend", `<div class="charsheet__arcane-shot-known ve-flex ve-flex-wrap mt-1">${shotsHtml}</div>`);
+			section.insertAdjacentHTML("beforeend", `<div class="charsheet__arcane-shot-known ve-flex ve-flex-wrap">${shotsHtml}</div>`);
 		}
 
 		const refresh = () => {

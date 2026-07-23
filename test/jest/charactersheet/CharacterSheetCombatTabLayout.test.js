@@ -96,7 +96,7 @@ describe("#6/#7 standalone Arcane Shot section removed + folded in", () => {
 		expect(body).not.toContain("charsheet__combat-as-use");
 		expect(body).not.toContain("this._state.useArcaneShot?.()");
 		// it points players at the pips instead
-		expect(body).toContain("track uses with the pips above");
+		expect(body).toContain("Track uses with the pips above");
 		// Ever-Ready Shot regain stays wired, and refresh persists + re-renders
 		expect(body).toContain("this._state.regainOneArcaneShot?.()");
 		expect(body).toContain("this._page.saveCharacter?.()");
