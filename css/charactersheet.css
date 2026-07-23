@@ -18127,6 +18127,13 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	margin-top: var(--cs-space-xs, 0.25rem);
 }
 
+.charsheet__mm-intro {
+	margin: 0 0 var(--cs-space-sm, 0.5rem);
+	font-size: var(--cs-text-xs, 0.75rem);
+	line-height: var(--cs-leading-snug, 1.4);
+	color: var(--cs-text-secondary, var(--rgb-text-secondary));
+}
+
 .charsheet__mm-row {
 	display: flex;
 	align-items: center;

@@ -6049,8 +6049,9 @@ class CharacterSheetCombat {
 			modalInner.append(btn);
 		}
 
-		// Cancel button
-		const cancelBtn = e_({outer: `<button class="ve-btn ve-btn-default w-100 mt-2 ve-muted">Cancel</button>`});
+		// Dismiss button — "Close" (not "Cancel"): backing out of a choice modal
+		// discards nothing, so it reads like the other use/info modals' Close.
+		const cancelBtn = e_({outer: `<button class="ve-btn ve-btn-default w-100 mt-2">Close</button>`});
 		cancelBtn.addEventListener("click", () => doClose(false));
 		modalInner.append(cancelBtn);
 
@@ -11454,10 +11455,13 @@ class CharacterSheetCombat {
 		const activeMetamagics = (state.getActiveMetamagics?.() || [])
 			.filter(meta => knownKeys.has(meta.key));
 
+		// Returns the compact cost caption plus a plain-language gloss (tooltip)
+		// so first-time sorcerers can decode "SP" / "½ level SP" without leaving
+		// the sheet. "SP" = Sorcery Points.
 		const renderCost = (cost) => {
-			if (cost === "level") return "spell level SP";
-			if (cost === "halfLevel") return "½ level SP";
-			return `${cost} SP`;
+			if (cost === "level") return {text: "spell level SP", title: "Costs Sorcery Points equal to the spell's level"};
+			if (cost === "halfLevel") return {text: "½ level SP", title: "Costs half your sorcerer level (rounded down) in Sorcery Points"};
+			return {text: `${cost} SP`, title: `Costs ${cost} Sorcery Point${cost === 1 ? "" : "s"}`};
 		};
 
 		// SP summary row
@@ -11473,6 +11477,12 @@ class CharacterSheetCombat {
 			</div>
 		`});
 		container.append(spRow);
+
+		// First-run gloss: the Tune/Detune system is TGTT-specific, so teach it once
+		// in plain language rather than assuming the vocabulary. Passive-only.
+		if (passiveMetamagics.length) {
+			container.append(e_({outer: `<p class="charsheet__mm-intro">Tune a passive metamagic to keep it active for the shown Sorcery Point cost; Detune it to free those points.</p>`}));
+		}
 
 		container.querySelectorAll(".charsheet__mm-sp-adjust-btn").forEach((btn) => {
 			btn.addEventListener("click", () => {
@@ -11496,16 +11506,17 @@ class CharacterSheetCombat {
 			container.append(tunedHeader);
 
 			for (const meta of tunedPassives) {
+				const cost = renderCost(meta.cost);
 				const nameHtml = CharacterSheetCombat._getMetamagicHoverLink(page, {...meta, type: meta.type || "passive"});
 				const row = e_({outer: `
 					<div class="charsheet__mm-row charsheet__mm-row--tuned">
 						<span class="charsheet__mm-indicator charsheet__mm-indicator--active">●</span>
 						<div class="charsheet__mm-info">
 							<span class="charsheet__mm-name">${nameHtml}</span>
-							<span class="charsheet__mm-cost">${renderCost(meta.cost)}</span>
+							<span class="charsheet__mm-cost" title="${cost.title}">${cost.text}</span>
 						</div>
 						<span class="charsheet__mm-desc">${meta.description}</span>
-						<button class="cs-combat-btn cs-combat-btn--danger charsheet__mm-tune-btn" data-metamagic-key="${meta.key}">${csCombatIcon("reset")}<span>Detune</span></button>
+						<button class="cs-combat-btn cs-combat-btn--danger charsheet__mm-tune-btn" data-metamagic-key="${meta.key}" aria-label="Detune ${meta.name}" title="Stop maintaining this passive metamagic and free its Sorcery Points">${csCombatIcon("reset")}<span>Detune</span></button>
 					</div>
 				`});
 				container.append(row);
@@ -11518,6 +11529,7 @@ class CharacterSheetCombat {
 			container.append(untunedHeader);
 
 			for (const meta of untunedPassives) {
+				const cost = renderCost(meta.cost);
 				const canAfford = typeof meta.cost === "number" && sp.max >= meta.cost && sp.current >= meta.cost;
 				const nameHtml = CharacterSheetCombat._getMetamagicHoverLink(page, {...meta, type: meta.type || "passive"});
 				const row = e_({outer: `
@@ -11525,10 +11537,10 @@ class CharacterSheetCombat {
 						<span class="charsheet__mm-indicator">○</span>
 						<div class="charsheet__mm-info">
 							<span class="charsheet__mm-name">${nameHtml}</span>
-							<span class="charsheet__mm-cost">${renderCost(meta.cost)}</span>
+							<span class="charsheet__mm-cost" title="${cost.title}">${cost.text}</span>
 						</div>
 						<span class="charsheet__mm-desc">${meta.description}</span>
-						<button class="cs-combat-btn cs-combat-btn--heal charsheet__mm-tune-btn" data-metamagic-key="${meta.key}" ${!canAfford ? `disabled title="Not enough effective sorcery points"` : ""}>${csCombatIcon("check")}<span>Tune</span></button>
+						<button class="cs-combat-btn cs-combat-btn--heal charsheet__mm-tune-btn" data-metamagic-key="${meta.key}" aria-label="Tune ${meta.name}" ${!canAfford ? `disabled title="Not enough Sorcery Points to tune this metamagic"` : `title="Spend Sorcery Points to keep this passive metamagic active"`}>${csCombatIcon("check")}<span>Tune</span></button>
 					</div>
 				`});
 				container.append(row);
@@ -11541,13 +11553,14 @@ class CharacterSheetCombat {
 			container.append(activeHeader);
 
 			for (const meta of activeMetamagics) {
+				const cost = renderCost(meta.cost);
 				const nameHtml = CharacterSheetCombat._getMetamagicHoverLink(page, {...meta, type: meta.type || "active"});
 				const row = e_({outer: `
 					<div class="charsheet__mm-row charsheet__mm-row--active-info">
 						<span class="charsheet__mm-indicator charsheet__mm-indicator--cast">◆</span>
 						<div class="charsheet__mm-info">
 							<span class="charsheet__mm-name">${nameHtml}</span>
-							<span class="charsheet__mm-cost">${renderCost(meta.cost)}</span>
+							<span class="charsheet__mm-cost" title="${cost.title}">${cost.text}</span>
 						</div>
 						<span class="charsheet__mm-desc">${meta.description}</span>
 					</div>
