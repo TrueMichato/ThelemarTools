@@ -95,10 +95,11 @@
 		margin-bottom: 0.75rem !important;
 	}
 
+	/* Wrap header controls onto multiple rows instead of hiding the tools
+	   group (Roll Log, Alt View, Note, Settings) behind a scroll with no
+	   affordance. Everything stays reachable without horizontal scrolling. */
 	.charsheet__header-row--primary {
-		flex-wrap: nowrap;
-		overflow-x: auto;
-		-webkit-overflow-scrolling: touch;
+		flex-wrap: wrap;
 		padding: 0.4rem 0.5rem;
 		gap: 0.4rem;
 	}
@@ -445,6 +446,29 @@
 		max-height: calc(var(--vh, 1vh) * 65);
 		overflow-y: auto;
 		-webkit-overflow-scrolling: touch;
+	}
+
+	/* ====================================================================
+	   Item Picker Tabs — scroll horizontally instead of crushing 4 tabs
+	   At narrow widths four flex:1 tabs can't shrink below their min-content,
+	   so the row overflowed: "Magic Items" wrapped to two lines and the
+	   "Components" tab was clipped off the right edge. Let the strip scroll
+	   with natural-width, single-line tabs (the partially-visible next tab is
+	   the scroll affordance).
+	   ==================================================================== */
+	.charsheet__item-tabs {
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		scrollbar-width: thin;
+		scroll-snap-type: x proximity;
+	}
+
+	.charsheet__item-tab {
+		flex: 0 0 auto;
+		white-space: nowrap;
+		padding: 0.6rem 0.7rem;
+		scroll-snap-align: start;
 	}
 
 	/* ====================================================================
@@ -1085,5 +1109,24 @@
 @media (max-width: 768px) {
 	:root:not(.ve-night-mode) .charsheet-mobile__roll-toolbar-close {
 		background: rgba(15, 23, 42, 0.06);
+	}
+}
+
+/* ========================================================================
+   Reduced motion — mobile self-contained guarantee
+
+   charactersheet-modern.css carries a global catch-all, but this keeps the
+   mobile layer's own motion (section accordions, FAB slide-up, ripple, context
+   menu) neutralized even in isolation. Scoped to the character-sheet subtree so
+   it never reaches unrelated page chrome.
+   ======================================================================== */
+@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+	.charsheet-page,
+	.charsheet-page *,
+	.charsheet-page *::before,
+	.charsheet-page *::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
 	}
 }

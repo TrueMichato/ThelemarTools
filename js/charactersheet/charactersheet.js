@@ -1251,19 +1251,28 @@ class CharacterSheetPage {
 				if (target.closest("input, button, select, textarea, a")) return;
 				this._showHpBreakdownModal();
 			});
+			this._bindActivate(hpSection, {label: "Show hit point breakdown"});
 		}
 
 		// Combat
-		document.getElementById("charsheet-box-ac").addEventListener("click", () => this._showAcBreakdownModal());
-		document.getElementById("charsheet-box-speed").addEventListener("click", () => this._showSpeedBreakdownModal());
-		document.getElementById("charsheet-box-initiative").addEventListener("click", (e) => this._rollInitiative(e));
+		const boxAc = document.getElementById("charsheet-box-ac");
+		boxAc.addEventListener("click", () => this._showAcBreakdownModal());
+		this._bindActivate(boxAc, {label: "Show armor class breakdown"});
+		const boxSpeed = document.getElementById("charsheet-box-speed");
+		boxSpeed.addEventListener("click", () => this._showSpeedBreakdownModal());
+		this._bindActivate(boxSpeed, {label: "Show speed breakdown"});
+		const boxInitiative = document.getElementById("charsheet-box-initiative");
+		boxInitiative.addEventListener("click", (e) => this._rollInitiative(e));
+		this._bindActivate(boxInitiative, {label: "Roll initiative"});
 		document.getElementById("charsheet-btn-use-hitdie").addEventListener("click", (e) => this._onUseHitDie(e));
 		document.getElementById("charsheet-btn-deathsave").addEventListener("click", () => this._onDeathSave());
 
 		// Rest - handled by CharacterSheetRest module
 
 		// Inspiration
-		document.getElementById("charsheet-box-inspiration").addEventListener("click", () => this._toggleInspiration());
+		const boxInspiration = document.getElementById("charsheet-box-inspiration");
+		boxInspiration.addEventListener("click", () => this._toggleInspiration());
+		this._bindActivate(boxInspiration, {label: "Toggle inspiration"});
 
 		// Secondary header toggle
 		document.getElementById("charsheet-btn-more").addEventListener("click", () => this._toggleSecondaryHeader());
@@ -3173,6 +3182,48 @@ class CharacterSheetPage {
 		}
 	}
 
+	/**
+	 * Make a non-native interactive element keyboard-operable (WCAG 2.1 A: 2.1.1 Keyboard).
+	 * Many roll/toggle affordances on this sheet are `<div>`/`<span>` with a click
+	 * listener, which mouse users can use but keyboard users cannot reach or activate.
+	 * This adds `role="button"` + `tabindex="0"` (picked up by the existing
+	 * `:focus-visible` ring in charactersheet.css) and an Enter/Space handler that
+	 * re-dispatches a click — preserving Shift/Ctrl/Meta/Alt so keyboard users keep
+	 * advantage/disadvantage modifiers. Existing click handlers stay untouched; the
+	 * synthetic click simply re-enters them.
+	 *
+	 * Native `<button>`/`<a href>`/`<summary>` are already keyboard-operable, so only
+	 * their accessible name (aria-label) is applied. Idempotent via a data-guard.
+	 * @param {HTMLElement} el Element that already has a click listener.
+	 * @param {{label?: string}} [opts] `label` sets a concise aria-label (accessible name).
+	 * @returns {HTMLElement} the same element, for chaining.
+	 */
+	_bindActivate (el, opts = {}) {
+		if (!el || el.dataset.csActivatable === "1") return el;
+		const tag = el.tagName;
+		const isNativeInteractive = tag === "BUTTON" || tag === "SUMMARY" || (tag === "A" && el.hasAttribute("href"));
+		if (opts.label && !el.getAttribute("aria-label")) el.setAttribute("aria-label", opts.label);
+		if (isNativeInteractive) { el.dataset.csActivatable = "1"; return el; }
+		if (!el.getAttribute("role")) el.setAttribute("role", "button");
+		if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "0");
+		el.dataset.csActivatable = "1";
+		el.addEventListener("keydown", (/** @type {*} */ e) => {
+			if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+			// Space would otherwise scroll the page; Enter is harmless to guard too.
+			e.preventDefault();
+			el.dispatchEvent(new MouseEvent("click", {
+				bubbles: true,
+				cancelable: true,
+				view: window,
+				shiftKey: e.shiftKey,
+				ctrlKey: e.ctrlKey,
+				metaKey: e.metaKey,
+				altKey: e.altKey,
+			}));
+		});
+		return el;
+	}
+
 	_renderAbilities () {
 		const container = document.getElementById("charsheet-abilities");
 		container.innerHTML = "";
@@ -3194,6 +3245,7 @@ class CharacterSheetPage {
 			`});
 
 			ability.addEventListener("click", (e) => this._rollAbilityCheck(abl, e));
+			this._bindActivate(ability, {label: `Roll ${Parser.attAbvToFull(abl)} check`});
 			container.append(ability);
 		});
 	}
@@ -3262,6 +3314,7 @@ class CharacterSheetPage {
 			});
 
 			row.addEventListener("click", (e) => this._rollSavingThrow(abl, e));
+			this._bindActivate(row, {label: `Roll ${Parser.attAbvToFull(abl)} saving throw`});
 			container.append(row);
 		});
 	}
@@ -3273,11 +3326,10 @@ class CharacterSheetPage {
 		// Add header row with column labels
 		container.append(e_({outer: `
 			<div class="charsheet__skills-header">
-				<span class="charsheet__skills-header-prof" title="Proficiency level: Click dots to cycle">Prof</span>
-				<span class="charsheet__skills-header-name">Skill</span>
+				<span class="charsheet__skills-header-name" title="Click the proficiency dots to cycle proficiency">Skill</span>
 				<span class="charsheet__skills-header-ability">Abl</span>
 				<span class="charsheet__skills-header-mod">Mod</span>
-				<span class="charsheet__skills-header-passive" title="Passive score = 10 + modifier">Passive</span>
+				<span class="charsheet__skills-header-passive" title="Passive score = 10 + modifier">Pass</span>
 			</div>
 		`}));
 
@@ -3285,6 +3337,10 @@ class CharacterSheetPage {
 		const allSkills = this.getSkillsList();
 		const skills = allSkills.filter(s => !s.isLoreSkill);
 		const loreSkills = allSkills.filter(s => s.isLoreSkill);
+
+		// Reserve the trailing delete column only when a custom skill exists, so
+		// standard lists keep the passive column flush to the right edge.
+		container.classList.toggle("charsheet__skills--has-custom", skills.some(s => s.isCustom));
 
 		// Check for Jack of All Trades (half proficiency for non-proficient skills)
 		const hasJackOfAllTrades = this._state.hasJackOfAllTrades();
@@ -3328,7 +3384,7 @@ class CharacterSheetPage {
 			const row = e_({outer: `
 				<div class="charsheet__skill-row${customClass}" data-skill="${skillKey}" data-default-ability="${defaultAbility}" title="${skillTooltip.replace(/"/g, "&quot;")}">
 					<span class="charsheet__prof-indicator charsheet__prof-indicator--clickable ${profClass}" title="${profTitle}" data-skill="${skillKey}"></span>
-					<span class="charsheet__skill-name">${skill.name}${skill.isCustom ? " ✦" : ""}</span>
+					<span class="charsheet__skill-name"><span class="charsheet__skill-name-text" title="${skill.name.replace(/"/g, "&quot;")}">${skill.name}</span>${skill.isCustom ? `<span class="charsheet__skill-custom-marker" title="Custom skill">✦</span>` : ""}</span>
 					<span class="charsheet__skill-ability">(${abilityDisplay})</span>
 					<span class="charsheet__skill-mod">${modHtml}</span>
 					<span class="charsheet__skill-passive" title="Passive ${skill.name}: ${passiveScore}">${passiveScore}</span>
@@ -3337,10 +3393,12 @@ class CharacterSheetPage {
 			`});
 
 			// Proficiency toggle click handler
-			row.querySelector(".charsheet__prof-indicator").addEventListener("click", (e) => {
+			const profIndicator = row.querySelector(".charsheet__prof-indicator");
+			profIndicator.addEventListener("click", (e) => {
 				e.stopPropagation();
 				this._cycleSkillProficiency(skillKey);
 			});
+			this._bindActivate(profIndicator, {label: `Cycle ${skill.name} proficiency`});
 
 			row.addEventListener("click", (e) => {
 				// Don't roll if clicking delete button or prof indicator
@@ -3349,14 +3407,17 @@ class CharacterSheetPage {
 				this._rollSkillCheck(skillKey, skill.name, e);
 			});
 			row.addEventListener("contextmenu", (e) => this._showSkillAbilityMenu(e, skillKey, skill.name, skill.ability));
+			this._bindActivate(row, {label: `Roll ${skill.name} check`});
 
 			if (skill.isCustom) {
-				row.querySelector(".charsheet__skill-delete").addEventListener("click", (e) => {
+				const skillDelete = row.querySelector(".charsheet__skill-delete");
+				skillDelete.addEventListener("click", (e) => {
 					e.stopPropagation();
 					this._state.removeCustomSkill(skill.name);
 					this._renderSkills();
 					this._saveCurrentCharacter();
 				});
+				this._bindActivate(skillDelete, {label: `Remove ${skill.name} custom skill`});
 			}
 
 			container.append(row);
@@ -3445,18 +3506,21 @@ class CharacterSheetPage {
 					});
 				});
 
-				row.querySelector(".charsheet__lore-skill-delete").addEventListener("click", (/** @type {*} */ ev) => {
+				const loreDelete = row.querySelector(".charsheet__lore-skill-delete");
+				loreDelete.addEventListener("click", (/** @type {*} */ ev) => {
 					ev.stopPropagation();
 					this._state.removeLoreSkill(skill.name);
 					this._renderSkills();
 					this._saveCurrentCharacter();
 				});
+				this._bindActivate(loreDelete, {label: `Remove ${skill.name} lore skill`});
 
 				row.addEventListener("click", (/** @type {*} */ ev) => {
 					if (ev.target.classList.contains("charsheet__lore-skill-delete")) return;
 					if (ev.target.classList.contains("charsheet__lore-skill-bump")) return;
 					this._rollSkillCheck(skillKey, skill.name, ev);
 				});
+				this._bindActivate(row, {label: `Roll ${skill.name} check`});
 
 				listEl.append(row);
 			});
@@ -4327,33 +4391,36 @@ class CharacterSheetPage {
 		const portraitUrl = this._state.getAppearance("portraitUrl");
 		const hasPortrait = !!portraitUrl;
 
-		// Overview tab portrait
-		const overviewPlaceholder = document.getElementById("charsheet-portrait-placeholder");
-		const overviewImage = document.getElementById("charsheet-portrait-image");
+		// Show the image when a portrait URL is set, otherwise fall back to the
+		// placeholder. If the URL is set but fails to load (dead external link or
+		// corrupted data URL), `onerror` reveals the same placeholder rather than
+		// leaving a broken-image glyph.
+		const applyPortrait = (placeholder, image) => {
+			if (!placeholder || !image) return;
+			if (hasPortrait) {
+				placeholder.classList.add("ve-hidden");
+				image.classList.remove("ve-hidden");
+				image.onerror = () => {
+					placeholder.classList.remove("ve-hidden");
+					image.classList.add("ve-hidden");
+				};
+				image.setAttribute("src", portraitUrl);
+			} else {
+				placeholder.classList.remove("ve-hidden");
+				image.classList.add("ve-hidden");
+				image.onerror = null;
+				image.setAttribute("src", "");
+			}
+		};
 
-		if (hasPortrait) {
-			overviewPlaceholder.classList.add("ve-hidden");
-			overviewImage.setAttribute("src", portraitUrl);
-			overviewImage.classList.remove("ve-hidden");
-		} else {
-			overviewPlaceholder.classList.remove("ve-hidden");
-			overviewImage.classList.add("ve-hidden");
-			overviewImage.setAttribute("src", "");
-		}
-
-		// Notes tab portrait
-		const notesPlaceholder = document.getElementById("charsheet-notes-portrait-placeholder");
-		const notesImage = document.getElementById("charsheet-notes-portrait-image");
-
-		if (hasPortrait) {
-			notesPlaceholder.classList.add("ve-hidden");
-			notesImage.setAttribute("src", portraitUrl);
-			notesImage.classList.remove("ve-hidden");
-		} else {
-			notesPlaceholder.classList.remove("ve-hidden");
-			notesImage.classList.add("ve-hidden");
-			notesImage.setAttribute("src", "");
-		}
+		applyPortrait(
+			document.getElementById("charsheet-portrait-placeholder"),
+			document.getElementById("charsheet-portrait-image"),
+		);
+		applyPortrait(
+			document.getElementById("charsheet-notes-portrait-placeholder"),
+			document.getElementById("charsheet-notes-portrait-image"),
+		);
 
 		// Remove button visibility
 		document.getElementById("charsheet-portrait-remove-btn")?.classList.toggle("ve-hidden", !hasPortrait);
@@ -4997,13 +5064,16 @@ class CharacterSheetPage {
 			});
 
 			// Remove condition badges
-			card.querySelectorAll(".charsheet__companion-condition-badge").forEach(el => el.addEventListener("click", (evt) => {
-				const condName = evt.currentTarget.dataset.condition;
-				this._state.removeCompanionCondition?.(companion.id, condName);
-				this._saveCurrentCharacter();
-				this._renderCompanions();
-				JqueryUtil.doToast({type: "info", content: `Removed ${condName} from ${companion.name}`});
-			}));
+			card.querySelectorAll(".charsheet__companion-condition-badge").forEach(el => {
+				el.addEventListener("click", (evt) => {
+					const condName = evt.currentTarget.dataset.condition;
+					this._state.removeCompanionCondition?.(companion.id, condName);
+					this._saveCurrentCharacter();
+					this._renderCompanions();
+					JqueryUtil.doToast({type: "info", content: `Removed ${condName} from ${companion.name}`});
+				});
+				this._bindActivate(el, {label: `Remove ${el.dataset.condition || "condition"}`});
+			});
 
 			// Skill check buttons
 			card.querySelectorAll(".btn-companion-skill").forEach(el => el.addEventListener("click", (evt) => {
@@ -6031,23 +6101,31 @@ class CharacterSheetPage {
 				this._rollSavingThrow(abl, e);
 			});
 			// Click on proficiency indicator to toggle proficiency
-			card.querySelectorAll(".charsheet__ability-skill-prof").forEach(el => el.addEventListener("click", (e) => {
-				e.stopPropagation();
-				e.preventDefault();
-				const skillMini = e.currentTarget.closest(".charsheet__ability-skill-mini");
-				const skillKey = skillMini.dataset.skill;
-				this._cycleSkillProficiency(skillKey);
-				this._renderAbilitiesDetailed(); // Re-render to update the display
-			}));
+			card.querySelectorAll(".charsheet__ability-skill-prof").forEach(el => {
+				el.addEventListener("click", (e) => {
+					e.stopPropagation();
+					e.preventDefault();
+					const skillMini = e.currentTarget.closest(".charsheet__ability-skill-mini");
+					const skillKey = skillMini.dataset.skill;
+					this._cycleSkillProficiency(skillKey);
+					this._renderAbilitiesDetailed(); // Re-render to update the display
+				});
+				const nm = el.closest(".charsheet__ability-skill-mini")?.querySelector(".charsheet__ability-skill-name")?.textContent || "skill";
+				this._bindActivate(el, {label: `Toggle ${nm} proficiency`});
+			});
 			// Click elsewhere on skill row to roll
-			card.querySelectorAll(".charsheet__ability-skill-mini").forEach(el => el.addEventListener("click", (e) => {
-				// Don't roll if clicking the proficiency indicator (handled above)
-				if ((/** @type {*} */ (e.target)).closest(".charsheet__ability-skill-prof")) return;
-				e.stopPropagation();
-				const skillKey = e.currentTarget.dataset.skill;
-				const skill = skills.find(s => s.name.toLowerCase().replace(/\s+/g, "") === skillKey);
-				if (skill) this._rollSkillCheck(skillKey, skill.name, e);
-			}));
+			card.querySelectorAll(".charsheet__ability-skill-mini").forEach(el => {
+				el.addEventListener("click", (e) => {
+					// Don't roll if clicking the proficiency indicator (handled above)
+					if ((/** @type {*} */ (e.target)).closest(".charsheet__ability-skill-prof")) return;
+					e.stopPropagation();
+					const skillKey = e.currentTarget.dataset.skill;
+					const skill = skills.find(s => s.name.toLowerCase().replace(/\s+/g, "") === skillKey);
+					if (skill) this._rollSkillCheck(skillKey, skill.name, e);
+				});
+				const nm = el.querySelector(".charsheet__ability-skill-name")?.textContent || "skill";
+				this._bindActivate(el, {label: `Roll ${nm} check`});
+			});
 
 			heroGrid.append(card);
 		});
@@ -6158,6 +6236,7 @@ class CharacterSheetPage {
 				`});
 
 				skillRow.addEventListener("click", () => this._rollSkillCheck(skillKey, skill.name));
+				this._bindActivate(skillRow, {label: `Roll ${skill.name} check`});
 				list.append(skillRow);
 			});
 
@@ -6554,6 +6633,7 @@ class CharacterSheetPage {
 
 		const select = document.createElement("select");
 		select.className = "form-control input-sm charsheet__principles-select";
+		select.setAttribute("aria-label", "Pledged principle");
 		select.style.maxWidth = "260px";
 		const noneOpt = document.createElement("option");
 		noneOpt.value = "";
@@ -6685,6 +6765,7 @@ class CharacterSheetPage {
 					this._combat._showCombatActionModal(feature);
 				}
 			});
+			this._bindActivate(row, {label: `Open ${feature.name}`});
 
 			container.append(row);
 		}
@@ -10844,6 +10925,7 @@ class CharacterSheetPage {
 						btnConfirm.disabled = false;
 						btnConfirm.querySelector(".btn-text").textContent = `Apply ${cond.name}`;
 					});
+					this._bindActivate(itemEl, {label: `Select ${cond.name}`});
 
 					// Double-click to apply immediately
 					itemEl.addEventListener("dblclick", () => {
@@ -12249,6 +12331,7 @@ class CharacterSheetPage {
 				menu.remove();
 				this._rollSkillCheck(skillKey, skillName, e, ability);
 			});
+			this._bindActivate(optionEl, {label: `Roll ${skillName} using ${abilityNames[ability]}`});
 			menu.append(optionEl);
 		});
 
@@ -15897,6 +15980,7 @@ class CharacterSheetPage {
 									}
 								}
 							});
+							this._bindActivate(cardEl, {label: `Add ${lang.name} language`});
 
 							listEl.append(cardEl);
 						});
@@ -16373,21 +16457,22 @@ class CharacterSheetPage {
 			const mod = this._state.getAbilityMod(abl);
 			const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
 
+			const ablFull = Parser.attAbvToFull(abl);
 			const row = e_({outer: `
-				<div class="charsheet__edit-ability-row mb-3" style="display: flex; align-items: center; gap: 12px; padding: 8px; border: 1px solid var(--rgb-border-grey, #ddd); border-radius: 6px;">
-					<div style="min-width: 120px;">
-						<strong>${Parser.attAbvToFull(abl)}</strong>
+				<div class="charsheet__edit-ability-row">
+					<div class="charsheet__edit-ability-name">
+						<strong>${ablFull}</strong>
 						<span class="ve-muted">(${abl.toUpperCase()})</span>
 					</div>
-					<div style="display: flex; align-items: center; gap: 6px;">
-						<button class="ve-btn ve-btn-default ve-btn-xs ability-dec" style="width: 28px; height: 28px; font-size: 1rem;">−</button>
-						<input type="number" class="ve-form-control ability-input" value="${base}" min="1" max="30" style="width: 60px; text-align: center; font-weight: bold;">
-						<button class="ve-btn ve-btn-default ve-btn-xs ability-inc" style="width: 28px; height: 28px; font-size: 1rem;">+</button>
+					<div class="charsheet__edit-ability-stepper">
+						<button class="ve-btn ve-btn-default ve-btn-xs ability-dec" type="button" aria-label="Decrease ${ablFull}" title="Decrease ${ablFull}">−</button>
+						<input type="number" class="ve-form-control ability-input" value="${base}" min="1" max="30" aria-label="${ablFull} base score">
+						<button class="ve-btn ve-btn-default ve-btn-xs ability-inc" type="button" aria-label="Increase ${ablFull}" title="Increase ${ablFull}">+</button>
 					</div>
-					<div class="ve-muted ve-small ability-breakdown" style="min-width: 160px;"></div>
-					<div style="min-width: 60px; text-align: center;">
-						<span class="ability-total" style="font-size: 1.1rem; font-weight: bold;"></span>
-						<span class="ve-muted ability-mod" style="margin-left: 4px;"></span>
+					<div class="ve-muted ve-small charsheet__edit-ability-breakdown ability-breakdown"></div>
+					<div class="charsheet__edit-ability-result">
+						<span class="ability-total"></span>
+						<span class="ve-muted ability-mod"></span>
 					</div>
 				</div>
 			`});

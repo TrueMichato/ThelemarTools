@@ -438,7 +438,7 @@
 }
 
 .pm-status__tool-btn--primary {
-	background: var(--cs-primary, #6366f1);
+	background: var(--cs-primary-strong, #6366f1);
 	color: white;
 	border-color: transparent;
 }
@@ -1169,7 +1169,7 @@
 }
 
 .pm-spell__cast:hover {
-	background: var(--cs-primary, #6366f1);
+	background: var(--cs-primary-strong, #6366f1);
 	color: white;
 }
 
@@ -1552,18 +1552,18 @@
 }
 
 .pm-toggle-btn:hover {
-	background: var(--cs-primary, #6366f1);
+	background: var(--cs-primary-strong, #6366f1);
 	color: white;
 }
 
 .pm-toggle-btn--active {
-	background: var(--cs-primary, #6366f1);
+	background: var(--cs-primary-strong, #6366f1);
 	color: white;
 	box-shadow: 0 0 12px var(--cs-primary-glow, rgba(99, 102, 241, 0.4));
 }
 
 .pm-toggle-btn--active:hover {
-	background: var(--cs-primary-hover, #4f46e5);
+	background: #4338ca;
 }
 
 /* ========================================================================
@@ -1662,8 +1662,62 @@
 	.pm-slots__pip,
 	.pm-resource__pip,
 	.pm-feature__pip {
-		width: 16px;
-		height: 16px;
+		min-width: 28px;
+		min-height: 28px;
+	}
+
+	/* Small icon-buttons, proficiency toggles, and expand chevrons each sit
+	   alone in a >=44px row (or with >=45px neighbour spacing), so growing the
+	   real box lands a full 44px pointer target while the glyph inside keeps
+	   its original visual size. */
+	.pm-skill__prof-toggle,
+	.pm-spell__star,
+	.pm-attack__star,
+	.pm-feature__star,
+	.pm-expander__arrow,
+	.pm-currency-cluster__expand-btn,
+	.pm-item__toggle {
+		min-width: 44px;
+		min-height: 44px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* Row / card buttons already clear 24px horizontally — lift them to a 44px
+	   vertical target and centre their label. */
+	.pm-status__hp-btn,
+	.pm-card__action-btn,
+	.pm-economy__reset,
+	.pm-spell__info,
+	.pm-item__info-btn {
+		min-height: 44px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* Paired steppers and edit/delete controls: clear the 24px floor both ways
+	   without colliding with the adjacent control. */
+	.pm-inspiration__btn,
+	.pm-attack__crud-btn,
+	.pm-note-btn,
+	.pm-item__qty-btn {
+		min-width: 32px;
+		min-height: 32px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* The quantity readout is a tap-to-edit target; a later base rule pins its
+	   min-width, so match it with parent specificity to clear the 24px floor. */
+	.pm-item__qty-controls .pm-item__qty-display {
+		min-width: 24px;
+		min-height: 32px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 	}
 }
 
@@ -3327,7 +3381,7 @@ flex-wrap: wrap;
 }
 
 .pm-drawer-actions__btn {
-background: var(--cs-primary, #6366f1);
+background: var(--cs-primary-strong, #6366f1);
 color: #fff;
 border: none;
 border-radius: 6px;
@@ -3339,7 +3393,7 @@ transition: background 0.15s;
 }
 
 .pm-drawer-actions__btn:hover {
-background: var(--cs-primary-hover, #4f46e5);
+background: #4338ca;
 }
 
 .pm-modifier {
@@ -3429,7 +3483,7 @@ color: var(--cs-danger, #ef4444);
 }
 
 .pm-card__action-btn {
-background: var(--cs-primary, #6366f1);
+background: var(--cs-primary-strong, #6366f1);
 color: #fff;
 border: none;
 border-radius: 5px;
@@ -3441,7 +3495,7 @@ margin-left: auto;
 }
 
 .pm-card__action-btn:hover {
-background: var(--cs-primary-hover, #4f46e5);
+background: #4338ca;
 }
 
 /* Modal label + row extras */
@@ -3564,7 +3618,7 @@ min-height: 80px;
 position: absolute;
 bottom: 16px;
 right: 16px;
-background: var(--cs-primary, #6366f1);
+background: var(--cs-primary-strong, #6366f1);
 color: #fff;
 border: none;
 border-radius: 20px;
@@ -3578,7 +3632,7 @@ z-index: 201;
 }
 
 .pm-sticky-fab:hover {
-background: var(--cs-primary-hover, #4f46e5);
+background: #4338ca;
 }
 
 /* ========================================================================
@@ -3616,7 +3670,7 @@ transition: background 0.15s, border-color 0.15s;
 }
 
 .pm-attack-type-btn--active {
-background: var(--cs-primary, #6366f1);
+background: var(--cs-primary-strong, #6366f1);
 border-color: var(--cs-primary, #6366f1);
 color: #fff;
 }

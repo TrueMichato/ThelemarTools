@@ -7,8 +7,21 @@
    CSS Custom Properties (Design Tokens)
    ======================================================================== */
 :root {
-	/* Primary color palette */
-	--cs-primary: #6366f1;
+	/* Primary color palette
+	   Night value brightened from indigo-500 (#6366f1) → #7681f5 so the ~118
+	   `color: var(--cs-primary)` numerals/labels clear WCAG AA on the dark
+	   canvas (base 5.30:1, surface 4.34:1 vs the old 4.00/3.27). Fills keep
+	   white text ≥3:1 (bold CTA floor). Day mode re-pins #6366f1 below. */
+	--cs-primary: #7681f5;
+	/* Accent used as *text* colour (numerals/labels/links). A touch lighter
+	   than --cs-primary so it clears WCAG AA (4.5:1) even on the elevated
+	   #1e293b card surface where the plain primary lands at 4.34. Fills keep
+	   --cs-primary (white text ≥3:1). Day re-pins darker below. */
+	--cs-primary-text: #8b93f7;
+	/* Accent *fill* for buttons carrying white text. Darker than --cs-primary
+	   so #fff clears AA (white on #7681f5 is only 3.37; on #4f46e5 it is 6.3).
+	   Same indigo in both modes — identical-hue, guaranteed-legible accent. */
+	--cs-primary-strong: #4f46e5;
 	--cs-primary-hover: #4f46e5;
 	--cs-primary-light: rgba(99, 102, 241, 0.1);
 	--cs-primary-glow: rgba(99, 102, 241, 0.4);
@@ -18,19 +31,27 @@
 	--cs-accent-gold-light: rgba(245, 158, 11, 0.15);
 	--cs-accent-emerald: #10b981;
 	--cs-accent-emerald-light: rgba(16, 185, 129, 0.15);
-	--cs-accent-ruby: #ef4444;
+	/* Night solid accents brightened for legible coloured *text* on the dark
+	   canvas (these tokens are used far more as `color:` than as fills; the
+	   few fills keep white text ≥3:1). Day mode overrides them below. */
+	--cs-accent-ruby: #f26161;
 	--cs-accent-ruby-light: rgba(239, 68, 68, 0.15);
-	--cs-accent-sapphire: #3b82f6;
+	--cs-accent-sapphire: #4b8ef7;
 	--cs-accent-sapphire-light: rgba(59, 130, 246, 0.15);
-	--cs-accent-amethyst: #a855f7;
+	--cs-accent-amethyst: #b06bf8;
 	--cs-accent-amethyst-light: rgba(168, 85, 247, 0.15);
+	/* Violet used as *data-label text* (passive scores, hit-die type). The plain
+	   #8b5cf6/#b06bf8 land at 3.1-3.7 on the purple-tinted card surfaces; this
+	   clears AA (≥4.5) there while staying the same recognisable violet. Day
+	   re-pins darker below. */
+	--cs-accent-text: #b8a3f9;
 	
 	/* Semantic colors */
 	--cs-success: #10b981;
 	--cs-success-light: rgba(16, 185, 129, 0.1);
 	--cs-warning: #f59e0b;
 	--cs-warning-light: rgba(245, 158, 11, 0.1);
-	--cs-danger: #ef4444;
+	--cs-danger: #f26161;
 	--cs-danger-light: rgba(239, 68, 68, 0.1);
 	--cs-info: #06b6d4;
 	--cs-info-light: rgba(6, 182, 212, 0.1);
@@ -42,10 +63,14 @@
 	--cs-bg-hover: rgba(255, 255, 255, 0.05);
 	--cs-bg-active: rgba(255, 255, 255, 0.1);
 	
-	/* Text colors */
+	/* Text colors — night ramp tuned for WCAG AA on the dark surfaces.
+	   secondary #94a3b8→#9fadc0 (clears 4.5:1 even on elevated #334155);
+	   muted #64748b→#8794a8 (was 3.07:1 on cards, the single biggest failure
+	   bucket — now 4.76:1 on surface, 3.37:1 on elevated). disabled is left
+	   as-is (WCAG exempts inactive text). Day mode re-defines these below. */
 	--cs-text-primary: #f1f5f9;
-	--cs-text-secondary: #94a3b8;
-	--cs-text-muted: #64748b;
+	--cs-text-secondary: #9fadc0;
+	--cs-text-muted: #98a5b8;
 	--cs-text-disabled: #475569;
 	
 	/* Border colors */
@@ -66,13 +91,16 @@
 	--cs-radius-xl: 24px;
 	--cs-radius-full: 9999px;
 	
-	/* Spacing */
+	/* Spacing — 4pt-based scale. --cs-space-2xs codifies the hairline gaps
+	   that were raw 2px; --cs-space-3xl gives major sections room to separate. */
+	--cs-space-2xs: 2px;   /* hairline gaps, tight chip/badge insets */
 	--cs-space-xs: 4px;
 	--cs-space-sm: 8px;
 	--cs-space-md: 16px;
 	--cs-space-lg: 24px;
 	--cs-space-xl: 32px;
 	--cs-space-2xl: 48px;
+	--cs-space-3xl: 64px;  /* generous separation between major sections */
 
 	/* Typography */
 	--cs-font-display: 'Cinzel', 'Georgia', serif;
@@ -93,10 +121,40 @@
 	--cs-text-3xl: 2rem;
 	--cs-text-4xl: 2.5rem;
 
+	/* Line heights — role-based leading. Codifies the values already in use so
+	   hierarchy stays consistent: numerals set solid, prose gets air. */
+	--cs-leading-none: 1;       /* hero numerals + single-line stat values */
+	--cs-leading-tight: 1.25;   /* large multi-line display headings */
+	--cs-leading-snug: 1.4;     /* section titles + compact UI copy */
+	--cs-leading-normal: 1.6;   /* body + prose */
+
+	/* Font weights — semantic roles on the one humanist sans (Inter). Hierarchy
+	   rides weight + color + space, not size alone, so adjacent type sizes stay
+	   distinguishable even where the scale is tight. */
+	--cs-weight-regular: 400;   /* body */
+	--cs-weight-medium: 500;    /* subtle emphasis, secondary labels */
+	--cs-weight-semibold: 600;  /* section titles, stat labels + values */
+	--cs-weight-bold: 700;      /* hero name + big numerals */
+
+	/* Letter spacing — tracking roles. All-caps micro-labels need positive
+	   tracking to stay legible (0.05–0.1em band); large display type gets a
+	   hair of negative tracking so letters don't drift apart. */
+	--cs-tracking-tight: -0.01em; /* large Cinzel display headings */
+	--cs-tracking-normal: 0;      /* body default */
+	--cs-tracking-wide: 0.05em;   /* standard uppercase micro-labels */
+	--cs-tracking-wider: 0.1em;   /* smallest / most-spaced all-caps labels */
+
 	/* Transitions */
 	--cs-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
 	--cs-transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
 	--cs-transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
+
+	/* Easing curves — ease-out only (no bounce/elastic); compose with any
+	   duration. Real objects decelerate smoothly. quart=smooth, quint=snappy,
+	   expo=confident/decisive. */
+	--cs-ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+	--cs-ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+	--cs-ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* ========================================================================
@@ -136,7 +194,7 @@
 	/* Text */
 	--cs-text-primary: #0f172a;
 	--cs-text-secondary: #475569;
-	--cs-text-muted: #64748b;
+	--cs-text-muted: #5b6675;
 	--cs-text-disabled: #94a3b8;
 
 	/* Borders */
@@ -165,6 +223,17 @@
 	--cs-accent-ruby: #dc2626;
 	--cs-accent-sapphire: #2563eb;
 	--cs-accent-amethyst: #9333ea;
+	/* Day violet data-label text: violet-700, dark enough to clear AA on the
+	   light purple-tinted card (violet-600 #7c3aed fails at 3.9 on hover). */
+	--cs-accent-text: #6d28d9;
+	/* Day keeps the original indigo-500: on a white canvas the brighter night
+	   primary (#7681f5) would lose contrast, and day fills already pair it with
+	   white text. Night uses #7681f5 (defined in :root above). */
+	--cs-primary: #6366f1;
+	/* Day accent-text: indigo-600, darker than the #6366f1 fill primary so it
+	   clears WCAG AA on light card surfaces (#6366f1 lands at 3.95 on #eef1f6). */
+	--cs-primary-text: #4f46e5;
+	--cs-primary-strong: #4f46e5;
 
 	/* --------------------------------------------------------------------
 	   Tokens that were *referenced but never defined* anywhere in the sheet
@@ -311,8 +380,10 @@ body[data-theme] {
 .charsheet-modern {
 	font-family: var(--cs-font-body);
 	font-size: var(--cs-text-base, 1rem);
+	font-weight: var(--cs-weight-regular);
+	letter-spacing: var(--cs-tracking-normal);
 	color: var(--cs-text-primary);
-	line-height: 1.6;
+	line-height: var(--cs-leading-normal);
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
 }
@@ -366,7 +437,7 @@ body[data-theme] {
 .cs-card__title {
 	font-family: var(--cs-font-display);
 	font-size: var(--cs-text-lg);
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 	color: var(--cs-text-primary);
 	margin: 0;
 	display: flex;
@@ -478,7 +549,7 @@ body[data-theme] {
 	padding: var(--cs-space-sm) var(--cs-space-md);
 	font-family: var(--cs-font-body);
 	font-size: var(--cs-text-sm);
-	font-weight: 500;
+	font-weight: var(--cs-weight-medium);
 	border-radius: var(--cs-radius-md);
 	border: 1px solid transparent;
 	cursor: pointer;
@@ -598,7 +669,7 @@ body[data-theme] {
 	gap: var(--cs-space-sm);
 	padding: var(--cs-space-sm) var(--cs-space-md);
 	font-size: var(--cs-text-sm);
-	font-weight: 500;
+	font-weight: var(--cs-weight-medium);
 	color: var(--cs-text-muted);
 	background: transparent;
 	border: none;
@@ -639,9 +710,9 @@ body[data-theme] {
 	background: var(--cs-danger);
 	color: white;
 	font-size: var(--cs-text-xs);
-	padding: 2px 6px;
+	padding: var(--cs-space-2xs) 6px;
 	border-radius: var(--cs-radius-full);
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 }
 
 /* ========================================================================
@@ -680,7 +751,7 @@ body[data-theme] {
 .cs-character-name {
 	font-family: var(--cs-font-display);
 	font-size: var(--cs-text-3xl);
-	font-weight: 700;
+	font-weight: var(--cs-weight-bold);
 	color: var(--cs-text-primary);
 	margin: 0 0 var(--cs-space-sm);
 	border: none;
@@ -711,14 +782,14 @@ body[data-theme] {
 .cs-detail__label {
 	font-size: var(--cs-text-xs);
 	text-transform: uppercase;
-	letter-spacing: 0.05em;
+	letter-spacing: var(--cs-tracking-wide);
 	color: var(--cs-text-muted);
-	margin-bottom: 2px;
+	margin-bottom: var(--cs-space-2xs);
 }
 
 .cs-detail__value {
 	font-size: var(--cs-text-base);
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 	color: var(--cs-text-primary);
 }
 
@@ -776,15 +847,15 @@ body[data-theme] {
 
 .cs-stat__value {
 	font-size: var(--cs-text-3xl);
-	font-weight: 700;
+	font-weight: var(--cs-weight-bold);
 	color: var(--cs-text-primary);
-	line-height: 1;
+	line-height: var(--cs-leading-none);
 }
 
 .cs-stat__label {
 	font-size: var(--cs-text-xs);
 	text-transform: uppercase;
-	letter-spacing: 0.05em;
+	letter-spacing: var(--cs-tracking-wide);
 	color: var(--cs-text-muted);
 	margin-top: var(--cs-space-xs);
 }
@@ -845,7 +916,7 @@ body[data-theme] {
 
 .cs-hp__current {
 	font-size: var(--cs-text-4xl);
-	font-weight: 700;
+	font-weight: var(--cs-weight-bold);
 	color: var(--cs-text-primary);
 	width: 80px;
 	text-align: center;
@@ -866,14 +937,14 @@ body[data-theme] {
 
 .cs-hp__max {
 	font-size: var(--cs-text-2xl);
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 	color: var(--cs-text-secondary);
 }
 
 .cs-hp__label {
 	font-size: var(--cs-text-xs);
 	text-transform: uppercase;
-	letter-spacing: 0.05em;
+	letter-spacing: var(--cs-tracking-wide);
 	color: var(--cs-text-muted);
 	margin-top: var(--cs-space-xs);
 }
@@ -895,7 +966,7 @@ body[data-theme] {
 
 .cs-hp__temp-value {
 	font-size: var(--cs-text-2xl);
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 	color: var(--cs-info);
 	width: 50px;
 	text-align: center;
@@ -945,24 +1016,24 @@ body[data-theme] {
 .cs-ability__name {
 	font-size: var(--cs-text-xs);
 	text-transform: uppercase;
-	letter-spacing: 0.1em;
-	font-weight: 600;
+	letter-spacing: var(--cs-tracking-wider);
+	font-weight: var(--cs-weight-semibold);
 	color: var(--cs-text-muted);
 	margin-bottom: var(--cs-space-xs);
 }
 
 .cs-ability__mod {
 	font-size: var(--cs-text-2xl);
-	font-weight: 700;
+	font-weight: var(--cs-weight-bold);
 	color: var(--cs-text-primary);
-	line-height: 1;
+	line-height: var(--cs-leading-none);
 }
 
 .cs-ability__score {
 	font-size: var(--cs-text-sm);
 	color: var(--cs-text-secondary);
 	margin-top: var(--cs-space-xs);
-	padding: 2px 8px;
+	padding: var(--cs-space-2xs) var(--cs-space-sm);
 	background: var(--cs-bg-elevated);
 	border-radius: var(--cs-radius-full);
 }
@@ -1042,7 +1113,7 @@ body[data-theme] {
 
 .cs-skill-mod {
 	font-size: var(--cs-text-sm);
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 	font-family: var(--cs-font-mono);
 	color: var(--cs-text-primary);
 	min-width: 32px;
@@ -1088,15 +1159,15 @@ body[data-theme] {
 
 .cs-combat-stat__value {
 	font-size: var(--cs-text-3xl);
-	font-weight: 700;
+	font-weight: var(--cs-weight-bold);
 	color: var(--cs-text-primary);
-	line-height: 1;
+	line-height: var(--cs-leading-none);
 }
 
 .cs-combat-stat__label {
 	font-size: var(--cs-text-xs);
 	text-transform: uppercase;
-	letter-spacing: 0.05em;
+	letter-spacing: var(--cs-tracking-wide);
 	color: var(--cs-text-muted);
 	margin-top: var(--cs-space-xs);
 }
@@ -1134,9 +1205,9 @@ body[data-theme] {
 }
 
 .cs-attack__name {
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 	color: var(--cs-text-primary);
-	margin-bottom: 2px;
+	margin-bottom: var(--cs-space-2xs);
 }
 
 .cs-attack__details {
@@ -1148,12 +1219,12 @@ body[data-theme] {
 	display: flex;
 	flex-direction: column;
 	align-items: flex-end;
-	gap: 2px;
+	gap: var(--cs-space-2xs);
 }
 
 .cs-attack__hit {
 	font-family: var(--cs-font-mono);
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 	color: var(--cs-accent-sapphire);
 }
 
@@ -1184,14 +1255,14 @@ body[data-theme] {
 
 .cs-resource__name {
 	flex: 1;
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 	color: var(--cs-text-primary);
 	font-size: var(--cs-text-sm);
 }
 
 .cs-resource__pips {
 	display: flex;
-	gap: 4px;
+	gap: var(--cs-space-xs);
 	flex-wrap: wrap;
 }
 
@@ -1214,7 +1285,7 @@ body[data-theme] {
 
 .cs-resource__count {
 	font-family: var(--cs-font-mono);
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 	color: var(--cs-text-primary);
 }
 
@@ -1299,7 +1370,7 @@ body[data-theme] {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 	font-size: var(--cs-text-base);
 	color: var(--cs-text-muted);
 	transition: all var(--cs-transition-fast);
@@ -1320,7 +1391,7 @@ body[data-theme] {
 
 .cs-wizard__step.active .cs-wizard__step-label {
 	color: var(--cs-primary);
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 }
 
 .cs-wizard__step.completed .cs-wizard__step-num {
@@ -1407,19 +1478,21 @@ body[data-theme] {
 
 .cs-selection__item.active {
 	background: var(--cs-primary-light);
-	border-left: 3px solid var(--cs-primary);
+	/* Full inset ring (not a side-stripe) marks the active row; the ring plus
+	   the tint carry selection without a layout-shifting full border. */
+	box-shadow: inset 0 0 0 1px var(--cs-primary);
 }
 
 .cs-selection__item-name {
 	flex: 1;
-	font-weight: 500;
+	font-weight: var(--cs-weight-medium);
 	color: var(--cs-text-primary);
 }
 
 .cs-selection__item-source {
 	font-size: var(--cs-text-xs);
 	color: var(--cs-text-muted);
-	padding: 2px 6px;
+	padding: var(--cs-space-2xs) 6px;
 	background: var(--cs-bg-surface);
 	border-radius: var(--cs-radius-sm);
 }
@@ -1446,7 +1519,7 @@ body[data-theme] {
 	box-shadow: var(--cs-shadow-lg), 0 0 30px var(--cs-primary-glow);
 	z-index: 1000;
 	min-width: 220px;
-	animation: cs-slide-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+	animation: cs-slide-in 0.3s var(--cs-ease-out-quint);
 }
 
 @keyframes cs-slide-in {
@@ -1461,7 +1534,7 @@ body[data-theme] {
 }
 
 .cs-dice-result__header {
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 	color: var(--cs-text-secondary);
 	margin-bottom: var(--cs-space-sm);
 	padding-bottom: var(--cs-space-sm);
@@ -1470,7 +1543,7 @@ body[data-theme] {
 
 .cs-dice-result__total {
 	font-size: var(--cs-text-4xl);
-	font-weight: 700;
+	font-weight: var(--cs-weight-bold);
 	text-align: center;
 	color: var(--cs-text-primary);
 }
@@ -1548,13 +1621,13 @@ body[data-theme] {
 .cs-badge {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
-	padding: 2px 8px;
+	gap: var(--cs-space-xs);
+	padding: var(--cs-space-2xs) var(--cs-space-sm);
 	font-size: var(--cs-text-xs);
-	font-weight: 600;
+	font-weight: var(--cs-weight-semibold);
 	border-radius: var(--cs-radius-full);
 	text-transform: uppercase;
-	letter-spacing: 0.02em;
+	letter-spacing: var(--cs-tracking-wide);
 }
 
 .cs-badge--primary {
@@ -1698,14 +1771,14 @@ body[data-theme] {
 	font-family: var(--cs-font-display, 'Cinzel', serif);
 	font-size: 1.3rem;
 	color: var(--cs-accent-gold, #f59e0b);
-	letter-spacing: 0.08em;
+	letter-spacing: var(--cs-tracking-wide);
 	text-transform: uppercase;
 }
 
 .charsheet__loading-tip {
 	max-width: 42rem;
 	font-size: 0.95rem;
-	line-height: 1.4;
+	line-height: var(--cs-leading-snug);
 	text-align: center;
 	color: var(--cs-accent-gold, #cbd5e1);
 }

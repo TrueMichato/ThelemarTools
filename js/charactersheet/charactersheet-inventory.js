@@ -2093,17 +2093,6 @@ class CharacterSheetInventory {
 		// Build form
 		const form = e_({outer: `<div class="charsheet__custom-item-form"></div>`});
 
-		// Basic Info Section
-		form.append(e_({outer: `
-			<div class="charsheet__modal-info-banner charsheet__modal-info-banner--info">
-				<div class="charsheet__modal-info-banner-icon">✨</div>
-				<div class="charsheet__modal-info-banner-content">
-					<strong>Create Custom Item</strong>
-					<div class="ve-small">Fill in the details for your custom item. Required fields are marked with *</div>
-				</div>
-			</div>
-		`}));
-
 		// Top action slot — holds "Start from Base Item" so a base can be chosen BEFORE filling
 		// fields. Only meaningful when creating (edit mode is already seeded from the item).
 		let topActions = null;

@@ -205,7 +205,7 @@
 
 .charsheet__icon-btn--primary:hover {
 	background: rgba(99, 102, 241, 0.2);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__icon-btn--danger:hover {
@@ -604,7 +604,7 @@
 .charsheet__layout-action--default:hover {
 	background: rgba(99, 102, 241, 0.1);
 	border-color: rgba(99, 102, 241, 0.25);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__layout-action-icon {
@@ -768,7 +768,7 @@
 .charsheet__textsize-toggle.active {
 	background: rgba(var(--cs-primary-rgb, 99, 102, 241), 0.12);
 	border-color: rgba(var(--cs-primary-rgb, 99, 102, 241), 0.2);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__textsize-toggle-icon {
@@ -831,7 +831,7 @@
 	background: transparent;
 	border: none;
 	outline: none;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	font-size: 1rem;
 	font-weight: 600;
 	text-align: right;
@@ -910,7 +910,7 @@
 .charsheet__textsize-preset--active {
 	background: rgba(var(--cs-primary-rgb, 99, 102, 241), 0.15);
 	border-color: rgba(var(--cs-primary-rgb, 99, 102, 241), 0.4);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__textsize-reset {
@@ -963,7 +963,7 @@
 .charsheet__font-toggle.active {
 	background: rgba(99, 102, 241, 0.12);
 	border-color: rgba(99, 102, 241, 0.2);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__font-toggle-icon {
@@ -1099,7 +1099,7 @@
 .charsheet__dice-toggle.active {
 	background: rgba(99, 102, 241, 0.12);
 	border-color: rgba(99, 102, 241, 0.2);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__dice-toggle-icon {
@@ -2195,7 +2195,7 @@
 
 .charsheet__drag-icon {
 	font-size: 1rem;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	letter-spacing: 2px;
 	user-select: none;
 }
@@ -2282,7 +2282,7 @@
 	font-family: var(--cs-font-mono, ui-monospace, monospace);
 	font-size: 0.7rem;
 	font-weight: 600;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	border: 1px solid rgba(99, 102, 241, 0.2);
 }
 
@@ -2316,7 +2316,7 @@
 .charsheet__more-toggle.active {
 	background: rgba(99, 102, 241, 0.12);
 	border-color: rgba(99, 102, 241, 0.2);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__more-toggle-icon {
@@ -2350,6 +2350,13 @@
 
 .charsheet__col-half:last-child {
 	padding-right: 0;
+}
+
+/* Inventory tab uses a 2:1 split (list : side column) rather than the even
+   col-half layout, so it needs its own inter-column gutter to match the
+   16px rhythm the col-half tabs get from their 0 0.5rem padding. */
+.charsheet__inventory-layout {
+	gap: var(--cs-space-md, 1rem);
 }
 
 /* ========================================================================
@@ -2406,7 +2413,7 @@
 
 .charsheet__section-badge {
 	margin-left: auto;
-	background: var(--cs-primary, #6366f1);
+	background: var(--cs-primary-strong, #6366f1);
 	color: white;
 	font-size: var(--cs-text-xs, 0.7rem);
 	font-weight: 700;
@@ -3487,7 +3494,7 @@
 .charsheet__ability-mod {
 	font-size: var(--cs-text-base, 1rem);
 	font-weight: 600;
-	color: var(--cs-primary, var(--rgb-link));
+	color: var(--cs-primary-text, var(--rgb-link));
 	background: rgba(99, 102, 241, 0.1);
 	border-radius: var(--cs-radius-full, 999px);
 	padding: 0.1rem 0.45rem;
@@ -3561,7 +3568,7 @@
 }
 
 .charsheet__stat-box--proficiency .charsheet__stat-value {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	font-size: var(--cs-text-2xl, 1.5rem);
 }
 
@@ -3654,7 +3661,7 @@
 	font-size: var(--cs-text-lg, 1.125rem);
 	min-width: 1.75rem;
 	text-align: center;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__passive-label {
@@ -3674,10 +3681,37 @@
 	gap: 2px;
 }
 
-.charsheet__save-row,
-.charsheet__skill-row {
+.charsheet__save-row {
 	display: flex;
 	align-items: center;
+}
+
+/* Shared 6-column grid for the Skills list header + rows.
+   Every track except the flexible name is a fixed rem (scaled by
+   --cs-text-scale), so the tracks are identical across each independent grid
+   container and the columns line up exactly between the header and the body
+   rows. The trailing delete track collapses to 0 until the list actually
+   holds a custom skill (.charsheet__skills--has-custom), so standard lists
+   keep the passive column flush right with no wasted gutter. */
+.charsheet__skills-header,
+.charsheet__skill-row {
+	display: grid;
+	grid-template-columns:
+		calc(1.6rem * var(--cs-text-scale, 1))
+		minmax(0, 1fr)
+		calc(2rem * var(--cs-text-scale, 1))
+		calc(3.85rem * var(--cs-text-scale, 1))
+		calc(1.9rem * var(--cs-text-scale, 1))
+		var(--cs-skill-del, 0px);
+	align-items: center;
+	column-gap: calc(0.28rem * var(--cs-text-scale, 1));
+}
+
+.charsheet__skills--has-custom {
+	--cs-skill-del: calc(1rem * var(--cs-text-scale, 1));
+}
+
+.charsheet__skill-row {
 	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
 	cursor: pointer;
 	border-radius: var(--cs-radius-md, 8px);
@@ -3731,8 +3765,6 @@
 
 /* Skills header row */
 .charsheet__skills-header {
-	display: flex;
-	align-items: center;
 	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
 	font-size: var(--cs-text-xs, 0.7rem);
 	font-weight: 600;
@@ -3746,38 +3778,25 @@
 }
 
 .charsheet__skills-header-prof {
-	/* Scale with font so the uppercased "PROF" label never overflows its
-	   column and collides with the adjacent "Skill" header at larger
-	   [data-textsize] settings. Fixed-px widths don't scale; em does. */
-	width: max(36px, 3.1em);
 	text-align: center;
-	flex-shrink: 0;
-	margin-right: 0.25rem;
 }
 
 .charsheet__skills-header-name {
-	flex: 1;
-	min-width: 80px;
+	min-width: 0;
+	grid-column: span 2;
 }
 
 .charsheet__skills-header-ability {
-	width: 35px;
 	text-align: center;
-	flex-shrink: 0;
 }
 
 .charsheet__skills-header-mod {
-	width: max(42px, 3.2em);
 	text-align: center;
-	flex-shrink: 0;
-	padding-right: 0.5rem;
 }
 
 .charsheet__skills-header-passive {
-	width: max(52px, 5.2em);
 	text-align: center;
-	flex-shrink: 0;
-	color: var(--cs-accent, #8b5cf6);
+	color: var(--cs-accent-text, #8b5cf6);
 }
 
 /* Skill proficiency legend (legacy) */
@@ -3823,32 +3842,57 @@
 
 .charsheet__save-name,
 .charsheet__skill-name {
-	flex: 1;
 	font-size: var(--cs-text-sm, 0.85rem);
 	font-weight: 500;
+}
+
+.charsheet__save-name {
+	flex: 1;
+}
+
+.charsheet__skill-name {
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+	min-width: 0;
+}
+
+/* Truncate an over-long (custom / long) skill name to a clean single-line
+   ellipsis — deterministic across browsers and keeps a uniform, scannable row
+   height in this narrow column. The full name is available via the cell title,
+   and the ✦ marker is a separate flex item so it is never truncated away. */
+.charsheet__skill-name-text {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.charsheet__skill-custom-marker {
+	flex-shrink: 0;
+	color: var(--cs-accent-gold, #f59e0b);
+	font-size: 0.85em;
+	line-height: 1;
 }
 
 .charsheet__skill-ability {
 	font-size: var(--cs-text-xs, 0.7rem);
 	color: var(--cs-text-muted, var(--rgb-text-muted));
-	width: 35px;
 	text-align: center;
-	flex-shrink: 0;
 	opacity: 0.7;
 }
 
 .charsheet__save-mod,
 .charsheet__skill-mod {
 	font-weight: 700;
-	min-width: max(42px, 3.2em);
+	min-width: 0;
 	width: auto;
 	max-width: 110px;
 	text-align: center;
 	flex-shrink: 0;
 	white-space: nowrap;
 	font-family: var(--cs-font-mono, monospace);
-	color: var(--cs-primary, var(--rgb-link));
-	padding-right: 0.5rem;
+	color: var(--cs-primary-text, var(--rgb-link));
 }
 
 /* Dual canonical/effective modifier display.
@@ -3865,7 +3909,7 @@
 .charsheet__mod-effective {
 	font-size: 0.75em;
 	font-weight: 600;
-	margin-left: 0.15em;
+	margin-left: 0.1em;
 	opacity: 0.95;
 	white-space: nowrap;
 	line-height: 1;
@@ -3891,13 +3935,12 @@
 
 /* Passive skill score column */
 .charsheet__skill-passive {
-	width: max(52px, 5.2em);
+	justify-self: center;
 	text-align: center;
-	flex-shrink: 0;
 	font-size: var(--cs-text-sm, 0.85rem);
 	font-weight: 600;
 	font-family: var(--cs-font-mono, monospace);
-	color: var(--cs-accent, #8b5cf6);
+	color: var(--cs-accent-text, #8b5cf6);
 	background: rgba(139, 92, 246, 0.1);
 	padding: 0.15rem 0.35rem;
 	border-radius: var(--cs-radius-sm, 4px);
@@ -4419,7 +4462,7 @@
 
 .charsheet__combat-stat-hint {
 	font-size: var(--cs-text-xs, 0.65rem);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	opacity: 0;
 	transition: opacity var(--cs-transition-fast, 0.15s ease);
 	margin-top: var(--cs-space-xs, 0.25rem);
@@ -4856,7 +4899,7 @@
 .charsheet__hitdice-type {
 	font-size: var(--cs-text-base, 1rem);
 	margin-left: var(--cs-space-xs, 0.25rem);
-	color: var(--cs-accent-amethyst, #8b5cf6);
+	color: var(--cs-accent-text, #8b5cf6);
 	font-weight: 600;
 	background: rgba(139, 92, 246, 0.1);
 	padding: 0.1rem 0.4rem;
@@ -5233,7 +5276,7 @@
 	font-family: var(--cs-font-mono, monospace);
 	font-weight: 700;
 	font-size: var(--cs-text-base, 1rem);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	background: rgba(99, 102, 241, 0.1);
 	padding: 0.1rem 0.4rem;
 	border-radius: var(--cs-radius-sm, 4px);
@@ -5488,15 +5531,13 @@
 
 .charsheet__spell-item.prepared {
 	background: linear-gradient(90deg, rgba(16, 185, 129, 0.1) 0%, transparent 100%);
-	border-left: 3px solid var(--cs-success, #10b981);
-	padding-left: calc(var(--cs-space-md, 0.75rem) - 3px);
+	padding-left: var(--cs-space-md, 0.75rem);
 }
 
 /* Always Prepared spells (domain, subclass features) */
 .charsheet__spell-item.always-prepared {
 	background: linear-gradient(90deg, rgba(245, 158, 11, 0.12) 0%, transparent 100%);
-	border-left: 3px solid #f59e0b;
-	padding-left: calc(var(--cs-space-md, 0.75rem) - 3px);
+	padding-left: var(--cs-space-md, 0.75rem);
 }
 
 .charsheet__spell-item.always-prepared:hover {
@@ -5538,7 +5579,7 @@
 }
 
 .charsheet__spell-item-name:hover {
-	color: var(--cs-accent, #8b5cf6);
+	color: var(--cs-accent-text, #8b5cf6);
 }
 
 .charsheet__spell-item-meta {
@@ -5789,7 +5830,7 @@
 }
 
 .charsheet__combat-action-item--custom {
-	border-left: 3px solid var(--cs-primary, #3b82f6);
+	background: rgba(59, 130, 246, 0.06);
 }
 
 .charsheet__section-caption {
@@ -6506,7 +6547,7 @@
 	font-size: var(--cs-text-lg, 1.05rem);
 	font-weight: 700;
 	font-family: var(--cs-font-mono, monospace);
-	color: var(--cs-accent, #8b5cf6);
+	color: var(--cs-accent-text, #8b5cf6);
 }
 
 .charsheet__spell-count-chip--over .charsheet__spell-count-value {
@@ -6549,7 +6590,7 @@
 	font-size: var(--cs-text-lg, 1.1rem);
 	font-weight: 700;
 	font-family: var(--cs-font-mono, monospace);
-	color: var(--cs-accent, #8b5cf6);
+	color: var(--cs-accent-text, #8b5cf6);
 }
 
 /* ========================================================================
@@ -6747,7 +6788,6 @@
 	justify-content: space-between;
 	align-items: center;
 	color: var(--cs-text, inherit);
-	border-left: 3px solid var(--cs-accent, #8b5cf6);
 }
 
 .charsheet__spell-list {
@@ -7037,7 +7077,7 @@
 	align-items: center;
 	justify-content: center;
 	margin-right: 0.35rem;
-	color: var(--cs-accent, #8b5cf6);
+	color: var(--cs-accent-text, #8b5cf6);
 	font-size: 0.9rem;
 	text-shadow: 0 0 6px rgba(139, 92, 246, 0.5);
 }
@@ -7212,7 +7252,7 @@
 }
 
 .charsheet__item-name:hover {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	text-decoration: underline;
 }
 
@@ -7300,7 +7340,7 @@
 .charsheet__carrying-bag-label {
 	font-size: 0.8rem;
 	font-weight: 600;
-	color: var(--cs-accent, #8b5cf6);
+	color: var(--cs-accent-text, #8b5cf6);
 	margin-bottom: var(--cs-space-2xs, 0.15rem);
 }
 
@@ -7388,7 +7428,7 @@
 }
 
 .charsheet__feature-toggle:hover {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	transform: scale(1.2);
 }
 
@@ -7400,7 +7440,7 @@
 
 .charsheet__feature-name a,
 .charsheet__feature-link {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	text-decoration: none;
 	cursor: pointer;
 	transition: color var(--cs-transition-fast, 0.15s ease);
@@ -7419,7 +7459,7 @@
 }
 
 .charsheet__feature-summary-more:hover {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	text-decoration: underline;
 }
 
@@ -7496,7 +7536,7 @@
 }
 
 .charsheet__feature-group-header .glyphicon {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__feature-group-body {
@@ -7616,7 +7656,7 @@
 }
 
 .charsheet__builder-step.active .charsheet__builder-step-label {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__builder-step.completed .charsheet__builder-step-label {
@@ -7697,7 +7737,6 @@
 
 .charsheet__builder-list-item.active {
 	background: rgba(99, 102, 241, 0.15);
-	border-left: 4px solid var(--cs-primary, #6366f1);
 	padding-left: var(--cs-space-md, 0.75rem);
 }
 
@@ -8178,7 +8217,7 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__quickbuild-level-display {
 	font-size: 2rem;
 	font-weight: 800;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	width: 60px;
 	text-align: center;
 	line-height: 1;
@@ -8211,7 +8250,7 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__quickbuild-asi-grid .qb-asi-val {
 	font-family: monospace;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 /* Quick Build Class Row */
@@ -8349,7 +8388,6 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__respec-base-card {
 	background: var(--cs-bg-surface, var(--rgb-bg-alt));
 	border: 1px solid var(--cs-border, var(--rgb-border-grey));
-	border-left: 3px solid var(--cs-accent, #7b6cd9);
 	border-radius: var(--cs-radius-lg, 12px);
 	padding: var(--cs-space-md, 0.75rem);
 	margin-bottom: var(--cs-space-lg, 1rem);
@@ -8408,7 +8446,7 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__level-branch-name {
 	font-weight: 800;
 	font-size: 1rem;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__level-branch-sub {
@@ -8527,7 +8565,7 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__level-entry-edit:hover {
 	background: var(--cs-bg-surface, var(--rgb-bg-alt));
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__level-entry-edit:disabled {
@@ -8579,7 +8617,7 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__level-choice--asi {
 	background: rgba(99, 102, 241, 0.15);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__level-choice--feat {
@@ -8676,7 +8714,6 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__respec-type-option:has(input:checked) {
 	background: rgba(99, 102, 241, 0.15);
-	border-left: 3px solid var(--cs-primary, #6366f1);
 }
 
 .charsheet__respec-points-remaining {
@@ -8724,7 +8761,7 @@ body.has-quickbuild-overlay .toast__container {
 	min-width: 30px;
 	text-align: center;
 	font-weight: 600;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__respec-asi-total {
@@ -8784,7 +8821,6 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__respec-feat-item.charsheet__respec-feat-current {
 	background: rgba(99, 102, 241, 0.15);
-	border-left: 3px solid var(--cs-primary, #6366f1);
 }
 
 .charsheet__respec-feat-item.charsheet__respec-feat-selected {
@@ -8929,7 +8965,6 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__intransigent-controls {
 	background: var(--cs-bg-surface, #1e293b);
 	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
-	border-left: 4px solid var(--cs-accent-ruby, #ef4444);
 	border-radius: 8px;
 	color: var(--cs-text-primary, #f1f5f9);
 }
@@ -8967,7 +9002,7 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__intransigent-live {
 	padding: 0.4em 0.6em;
 	border-radius: 6px;
-	border-left: 4px solid var(--cs-accent-ruby, #ef4444);
+	border: 1px solid var(--cs-accent-ruby, #ef4444);
 	background: var(--cs-bg-elevated, #334155);
 	font-size: 0.95em;
 	font-weight: 600;
@@ -9007,7 +9042,7 @@ body.has-quickbuild-overlay .toast__container {
 
 /* Zero allies → gold call-to-action accent that advertises the extend option. */
 .charsheet__intransigent-live--extend {
-	border-left-color: var(--cs-accent-gold, #f59e0b);
+	border-color: var(--cs-accent-gold, #f59e0b);
 }
 
 .charsheet__intransigent-live--extend .charsheet__intransigent-status-head {
@@ -9016,7 +9051,7 @@ body.has-quickbuild-overlay .toast__container {
 
 /* Allies chosen → emerald accent confirming the extension is active. */
 .charsheet__intransigent-live--active {
-	border-left-color: var(--cs-accent-emerald, #10b981);
+	border-color: var(--cs-accent-emerald, #10b981);
 }
 
 .charsheet__intransigent-live--active .charsheet__intransigent-status-head {
@@ -9082,7 +9117,6 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__combat-druid-block {
 	padding: 0.4rem 0.5rem;
-	border-left: 2px solid var(--rgb-link);
 	background: var(--cs-bg-surface, var(--rgb-bg-alt, rgba(127, 127, 127, 0.08)));
 	border-radius: 0.25rem;
 }
@@ -9927,7 +9961,6 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__ability-menu-option--default {
 	background: rgba(76, 175, 80, 0.15);
-	border-left: 3px solid #4caf50;
 }
 
 .charsheet__ability-menu-option--default:hover {
@@ -9947,8 +9980,6 @@ body.has-quickbuild-overlay .toast__container {
 /* Custom Skills */
 .charsheet__skill-row--custom {
 	background: rgba(76, 175, 80, 0.08);
-	border-left: 2px solid #4caf50;
-	padding-left: calc(0.25rem - 2px);
 }
 
 .charsheet__skill-row--custom:hover {
@@ -9956,9 +9987,9 @@ body.has-quickbuild-overlay .toast__container {
 }
 
 .charsheet__skill-delete {
-	margin-left: auto;
-	padding: 0 0.25rem;
-	color: var(--rgb-text-muted, #999);
+	justify-self: center;
+	padding: 0;
+	color: var(--cs-text-muted, var(--rgb-text-muted, #999));
 	cursor: pointer;
 	font-size: 1.1rem;
 	line-height: 1;
@@ -10354,7 +10385,6 @@ body.has-quickbuild-overlay .toast__container {
 	border-radius: var(--cs-radius-md, 8px);
 	padding: var(--cs-space-md, 0.75rem) var(--cs-space-lg, 1rem);
 	margin-bottom: var(--cs-space-sm, 0.5rem);
-	border-left: 4px solid var(--cs-accent-gold, #f59e0b);
 }
 
 .charsheet__levelup-feature-header {
@@ -10404,7 +10434,7 @@ body.has-quickbuild-overlay .toast__container {
 }
 
 .charsheet__levelup-asi-choice input[type="radio"]:checked + span {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	font-weight: 600;
 }
 
@@ -10467,7 +10497,7 @@ body.has-quickbuild-overlay .toast__container {
 	text-align: center;
 	font-weight: 700;
 	font-size: var(--cs-text-lg, 1.1rem);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	background: rgba(99, 102, 241, 0.1);
 	border-radius: var(--cs-radius-sm, 4px);
 	padding: var(--cs-space-xs, 0.25rem);
@@ -10762,7 +10792,7 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__levelup-accordion-badge.badge-info {
 	background: rgba(99, 102, 241, 0.15);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__levelup-accordion-chevron {
@@ -11322,7 +11352,7 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__settings-section-title {
 	font-size: var(--cs-text-md, 0.95rem);
 	font-weight: 700;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	margin-bottom: var(--cs-space-sm, 0.5rem);
 	display: flex;
 	align-items: center;
@@ -11519,7 +11549,7 @@ body.has-quickbuild-overlay .toast__container {
 }
 
 .charsheet__theme-swatch--selected .charsheet__theme-swatch-name {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__theme-swatch-check {
@@ -11549,7 +11579,6 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__modifiers-intro {
 	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
 	background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.1));
-	border-left: 3px solid var(--cs-primary, #6366f1);
 	border-radius: var(--cs-radius-md, 8px);
 	font-size: var(--cs-text-sm, 0.85rem);
 	color: var(--rgb-text-muted, #999);
@@ -11565,7 +11594,7 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__modifiers-section-title {
 	font-size: var(--cs-text-md, 0.95rem);
 	font-weight: 700;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	margin-bottom: var(--cs-space-sm, 0.5rem);
 }
 
@@ -11678,7 +11707,7 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__modifier-form-title {
 	font-size: var(--cs-text-md, 0.95rem);
 	font-weight: 700;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	margin-bottom: var(--cs-space-md, 0.75rem);
 	padding-bottom: var(--cs-space-sm, 0.5rem);
 	border-bottom: 1px solid var(--cs-border, rgba(99, 102, 241, 0.15));
@@ -12229,7 +12258,6 @@ body.has-quickbuild-overlay .toast__container {
 	padding: var(--cs-space-sm, 0.5rem);
 	background: var(--cs-bg-base, rgba(0, 0, 0, 0.1));
 	border-radius: var(--cs-radius-md, 8px);
-	border-left: 3px solid var(--cs-primary, #6366f1);
 }
 
 .charsheet__rest-current-hp {
@@ -12295,7 +12323,7 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__hit-die-die {
 	font-family: var(--cs-font-mono, monospace);
-	color: var(--cs-accent, #8b5cf6);
+	color: var(--cs-accent-text, #8b5cf6);
 	font-weight: 600;
 }
 
@@ -12374,7 +12402,7 @@ body.has-quickbuild-overlay .toast__container {
 }
 
 .charsheet__rest-recovery-arrow {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__rest-recovery-new {
@@ -12534,7 +12562,7 @@ body.has-quickbuild-overlay .toast__container {
 }
 
 #charsheet-tabs > li > a:hover {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	background: rgba(99, 102, 241, 0.08);
 	border-bottom-color: rgba(99, 102, 241, 0.3);
 }
@@ -12542,7 +12570,7 @@ body.has-quickbuild-overlay .toast__container {
 #charsheet-tabs > li.ve-active > a,
 #charsheet-tabs > li.ve-active > a:hover,
 #charsheet-tabs > li.ve-active > a:focus {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	background: rgba(99, 102, 241, 0.1);
 	border-bottom: 3px solid var(--cs-primary, #6366f1);
 	font-weight: 600;
@@ -12674,6 +12702,63 @@ body.is-charsheet-page .ve-ui-modal__inner.ve-w-100 {
 	height: min(700px, 80vh) !important;
 }
 
+/* Edit Ability Scores modal: only six short rows, so opt out of the tall
+   picker default above and size to content (kills ~200px of dead space).
+   Rows are flat divider-separated data rows, not nested cards. */
+body.is-charsheet-page .ve-ui-modal__inner.ve-w-100:has(.charsheet__edit-ability-row) {
+	height: auto !important;
+	max-width: 600px;
+}
+.charsheet__edit-ability-row {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.7rem 0.25rem;
+	border-bottom: 1px solid var(--cs-border, rgba(99, 102, 241, 0.15));
+}
+.charsheet__edit-ability-row:last-of-type {
+	border-bottom: none;
+}
+.charsheet__edit-ability-name {
+	min-width: 96px;
+}
+.charsheet__edit-ability-stepper {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+}
+.charsheet__edit-ability-stepper .ability-dec,
+.charsheet__edit-ability-stepper .ability-inc {
+	width: 34px;
+	height: 34px;
+	padding: 0;
+	font-size: 1rem;
+}
+.charsheet__edit-ability-stepper .ability-input {
+	width: 56px;
+	height: 34px;
+	padding: 0.25rem 0.5rem;
+	line-height: 1.4;
+	text-align: center;
+	font-weight: 700;
+}
+.charsheet__edit-ability-breakdown {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+.charsheet__edit-ability-result {
+	flex: 0 0 auto;
+	min-width: 60px;
+	text-align: right;
+}
+.charsheet__edit-ability-result .ability-total {
+	font-size: 1.1rem;
+	font-weight: 700;
+}
+.charsheet__edit-ability-result .ability-mod {
+	margin-left: 4px;
+}
+
 /* The scroller inside needs to fill the available height */
 body.is-charsheet-page .ve-ui-modal__inner.ve-w-100 > .ve-ui-modal__scroller {
 	flex: 1 1 auto;
@@ -12771,10 +12856,7 @@ body.is-charsheet-page .ve-ui-modal__inner h5 {
 }
 
 body.is-charsheet-page .ve-ui-modal__inner h4 {
-	background: linear-gradient(90deg, var(--cs-primary, #6366f1) 0%, var(--cs-accent, #8b5cf6) 100%);
-	-webkit-background-clip: text;
-	-webkit-text-fill-color: transparent;
-	background-clip: text;
+	color: var(--cs-primary-text, #6366f1);
 }
 
 body.is-charsheet-page .ve-ui-modal__inner hr {
@@ -12973,7 +13055,7 @@ body.is-charsheet-page .ui-modal__inner input[type="radio"]:focus {
 }
 
 .charsheet__item-tab--active {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	border-bottom-color: var(--cs-primary, #6366f1);
 }
 
@@ -12992,7 +13074,7 @@ body.is-charsheet-page .ui-modal__inner input[type="radio"]:focus {
 
 .charsheet__item-tab--active .charsheet__item-tab-count {
 	background: rgba(99, 102, 241, 0.15);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 /* ========================================================================
@@ -13349,7 +13431,6 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 /* Highlighted items (for character's actual subclass) */
 .charsheet__source-multiselect-item--highlight {
 	background: rgba(34, 197, 94, 0.1);
-	border-left: 3px solid var(--cs-success, #22c55e);
 }
 
 .charsheet__source-multiselect-item--highlight:hover {
@@ -13359,7 +13440,6 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 /* Related items (for character's class but not their subclass) */
 .charsheet__source-multiselect-item--related {
 	background: rgba(99, 102, 241, 0.05);
-	border-left: 3px solid var(--cs-primary, #6366f1);
 }
 
 .charsheet__source-multiselect-item--related:hover {
@@ -13442,7 +13522,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 
 .charsheet__filter-toggle-count {
 	font-size: 0.75rem;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	font-weight: 700;
 }
 
@@ -13586,7 +13666,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	letter-spacing: 0.03em;
 	border-radius: var(--cs-radius-full, 20px);
 	background: rgba(99, 102, 241, 0.15);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	white-space: nowrap;
 }
 
@@ -13941,14 +14021,14 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .charsheet__custom-item-form {
 	display: flex;
 	flex-direction: column;
-	gap: var(--cs-space-md, 0.75rem);
+	gap: var(--cs-space-lg, 1.25rem);
 }
 
 .charsheet__custom-item-section {
-	background: var(--cs-bg-base, rgba(0, 0, 0, 0.15));
-	border: 1px solid var(--cs-border, rgba(99, 102, 241, 0.2));
-	border-radius: var(--cs-radius-lg, 12px);
-	padding: var(--cs-space-md, 0.75rem);
+	padding: 0;
+	background: none;
+	border: none;
+	border-radius: 0;
 }
 
 .charsheet__custom-item-section-title {
@@ -13961,10 +14041,10 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 }
 
 /* Bug #1: de-emphasise the legacy "Quick Bonuses" shortcuts and promote the unified
-   "Modifiers & Effects" editor as the primary path. */
+   "Modifiers & Effects" editor as the primary path. Differentiation is carried by the
+   section title (muted / accented) and the "recommended" badge, not by nesting a card. */
 .charsheet__custom-item-section--legacy {
-	opacity: 0.92;
-	border-style: dashed;
+	opacity: 0.85;
 }
 
 .charsheet__custom-item-section--legacy .charsheet__custom-item-section-title {
@@ -13972,9 +14052,9 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	font-weight: 500;
 }
 
-.charsheet__custom-item-section--effects {
-	border-color: var(--cs-primary, #6366f1);
-	box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.25);
+.charsheet__custom-item-section--effects .charsheet__custom-item-section-title {
+	color: var(--cs-primary-text, #8b93f7);
+	border-bottom-color: var(--cs-primary, #6366f1);
 }
 
 .charsheet__custom-item-recommended-badge {
@@ -14103,7 +14183,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 }
 
 .charsheet__prop-hover-link:hover {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__custom-item-prop-check:hover {
@@ -14250,7 +14330,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .charsheet__ac-modal-total-value {
 	font-size: 3.5rem;
 	font-weight: 800;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	line-height: 1;
 	text-shadow: 0 2px 12px rgba(99, 102, 241, 0.3);
 }
@@ -14413,7 +14493,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	font-size: clamp(2rem, 8vw, 3rem);
 	font-weight: 800;
 	line-height: 1;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	text-shadow: 0 2px 12px rgba(99, 102, 241, 0.3);
 }
 
@@ -14547,10 +14627,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .charsheet__method-picker-header-title {
 	font-size: var(--cs-text-lg, 1.125rem);
 	font-weight: 700;
-	background: linear-gradient(90deg, var(--cs-primary, #6366f1), var(--cs-accent, #8b5cf6));
-	-webkit-background-clip: text;
-	-webkit-text-fill-color: transparent;
-	background-clip: text;
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__method-picker-header-stat {
@@ -14559,7 +14636,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 }
 
 .charsheet__method-picker-header-stat-value {
-	color: var(--cs-accent, #8b5cf6);
+	color: var(--cs-accent-text, #8b5cf6);
 	font-weight: 600;
 }
 
@@ -14579,7 +14656,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .charsheet__method-picker-header-known {
 	font-size: var(--cs-text-2xl, 1.5rem);
 	font-weight: 700;
-	color: var(--cs-accent, #8b5cf6);
+	color: var(--cs-accent-text, #8b5cf6);
 	line-height: 1;
 }
 
@@ -14797,8 +14874,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 
 .charsheet__method-picker-item--known {
 	background: rgba(99, 102, 241, 0.08);
-	border-left: 3px solid var(--cs-accent, #8b5cf6);
-	padding-left: calc(var(--cs-space-md, 0.75rem) - 3px);
+	padding-left: var(--cs-space-md, 0.75rem);
 }
 
 .charsheet__method-picker-item--known:hover {
@@ -14827,7 +14903,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 }
 
 .charsheet__method-picker-item-name a {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	text-decoration: none;
 	cursor: pointer;
 	transition: color var(--cs-transition-fast, 0.15s ease);
@@ -14840,7 +14916,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 
 /* Fallback for non-link method names */
 .charsheet__method-picker-item-name > .bold {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	cursor: help;
 }
 
@@ -16362,8 +16438,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	margin-bottom: var(--cs-space-md, 1rem);
 	padding: var(--cs-space-sm, 0.5rem);
 	background: rgba(59, 130, 246, 0.1);
-	border-left: 3px solid #3b82f6;
-	border-radius: 0 var(--cs-radius-sm, 4px) var(--cs-radius-sm, 4px) 0;
+	border-radius: var(--cs-radius-sm, 4px);
 }
 
 .custom-abilities__advanced-intro p {
@@ -16884,7 +16959,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 }
 
 .custom-abilities__grants-selected-item--dm {
-	border-left: 3px solid rgba(234, 179, 8, 0.6);
+	background: rgba(234, 179, 8, 0.08);
 }
 
 .custom-abilities__grants-section > summary {
@@ -17476,7 +17551,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .charsheet__mm-sp-value {
 	font-size: 1.3rem;
 	font-weight: 700;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 }
 
 .charsheet__mm-sp-max {
@@ -17553,7 +17628,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 }
 
 .charsheet__mm-indicator--cast {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	font-size: 0.7rem;
 }
 
@@ -17634,7 +17709,6 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	margin-bottom: var(--cs-space-sm, 0.5rem);
 	background: var(--cs-bg-base, var(--rgb-bg));
 	border: 1px solid var(--cs-border, var(--rgb-border-grey));
-	border-left: 3px solid var(--cs-primary, #6366f1);
 	border-radius: var(--cs-radius-sm, 4px);
 }
 
@@ -17664,7 +17738,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 }
 
 .charsheet__mm-picker-reference-cost {
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	font-weight: 600;
 	white-space: nowrap;
 }
@@ -18060,7 +18134,6 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 
 .charsheet__spell-picker-item--selected {
 	background: rgba(99, 102, 241, 0.15);
-	border-left: 4px solid var(--cs-primary, #6366f1);
 	padding-left: var(--cs-space-md, 0.75rem);
 }
 
@@ -18081,7 +18154,6 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 
 .charsheet__spell-picker-item--previewing {
 	background: rgba(139, 92, 246, 0.12);
-	border-left: 4px solid var(--cs-accent, #8b5cf6);
 }
 
 .charsheet__spell-picker-item-info {
@@ -18207,7 +18279,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .charsheet__qb-level-breakdown-summary {
 	font-size: 0.75rem;
 	font-weight: 500;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	background: rgba(99, 102, 241, 0.15);
 	padding: 0.2rem 0.6rem;
 	border-radius: var(--cs-radius-full, 20px);
@@ -18382,8 +18454,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	padding: 8px 12px;
 	margin-bottom: 4px;
 	border-radius: var(--cs-radius-sm, 4px);
-	border-left: 3px solid var(--roll-color, #546e7a);
-	background: rgba(255,255,255,0.02);
+	background: color-mix(in srgb, var(--roll-color, #546e7a) 9%, rgba(255, 255, 255, 0.02));
 	transition: background 0.12s ease;
 }
 
@@ -18680,7 +18751,9 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 }
 
 .charsheet__empower-rules {
-	border-left: 3px solid var(--cs-success, #22c55e);
+	padding: 6px 8px;
+	background: rgba(34, 197, 94, 0.06);
+	border-radius: var(--cs-radius-sm, 4px);
 }
 
 /* Empower modal — header bar */
@@ -18703,8 +18776,7 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	padding: 4px 8px;
 	margin-top: 2px;
 	background: rgba(220, 53, 69, 0.06);
-	border-left: 3px solid var(--cs-danger, #dc3545);
-	border-radius: 0 var(--cs-radius-sm, 4px) var(--cs-radius-sm, 4px) 0;
+	border-radius: var(--cs-radius-sm, 4px);
 	color: var(--cs-danger, #dc3545);
 }
 
@@ -19770,7 +19842,6 @@ background: rgba(224, 86, 253, 0.15) !important;
 gap: 0.5rem;
 padding: 0.5rem 0.75rem;
 border: 1px solid rgba(224, 86, 253, 0.5);
-border-left: 3px solid #e056fd;
 border-radius: 4px;
 background: rgba(224, 86, 253, 0.08);
 }
@@ -19798,15 +19869,14 @@ color: var(--cs-text-primary, #f1f5f9);
 .charsheet__conduit-summary {
 gap: var(--cs-space-sm, 8px);
 padding: 0.5rem 0.7rem;
-border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
-border-left: 3px solid var(--cs-accent-ruby, #ef4444);
+border: 1px solid var(--cs-accent-ruby, #ef4444);
 border-radius: var(--cs-radius-sm, 6px);
 background: var(--cs-accent-ruby-light, rgba(239, 68, 68, 0.15));
 color: var(--cs-text-primary, #f1f5f9);
 }
 
 .charsheet__conduit-summary {
-border-left-color: var(--cs-accent-ruby, #ef4444);
+border-color: var(--cs-accent-ruby, #ef4444);
 }
 
 .charsheet__interdict-summary strong,
@@ -19853,7 +19923,7 @@ background: var(--cs-bg-elevated, #334155);
 
 /* Moloch-granted free boons get a faint accent so they read as "always known" */
 .charsheet__interdict-boon-row:has(.charsheet__interdict-boon-granted) {
-border-left: 3px solid var(--cs-accent-amethyst, #a855f7);
+background: rgba(168, 85, 247, 0.08);
 }
 
 .charsheet__interdict-boon-granted {
@@ -20056,7 +20126,7 @@ line-height: 1.3;
 
 /* Active vs always-on status reads at a glance via accent, not bulk */
 .charsheet__interdict-boon-status.badge-primary {
-color: var(--cs-primary, #6366f1);
+color: var(--cs-primary-text, #6366f1);
 background: var(--cs-primary-light, rgba(99, 102, 241, 0.18));
 }
 
@@ -20333,7 +20403,7 @@ color: var(--cs-text-primary, #f1f5f9);
 	border-color: rgba(14, 116, 144, 0.4);
 }
 :root:not(.ve-night-mode) .badge-outline-primary {
-	color: var(--cs-primary);
+	color: var(--cs-primary-text);
 	border-color: rgba(99, 102, 241, 0.4);
 }
 :root:not(.ve-night-mode) .badge-outline-success {
@@ -20351,7 +20421,7 @@ color: var(--cs-text-primary, #f1f5f9);
 
 /* Preserve the level-up accordion status chip's indigo text (it sits on a pale
    indigo background), overriding the generic .badge-info rule above. */
-:root:not(.ve-night-mode) .charsheet__levelup-accordion-badge.badge-info { color: var(--cs-primary); }
+:root:not(.ve-night-mode) .charsheet__levelup-accordion-badge.badge-info { color: var(--cs-primary-text); }
 
 /* Bright emerald/gold accents that read fine on dark but wash out on light. */
 :root:not(.ve-night-mode) .charsheet__spell-count-granted { color: var(--cs-success, #047857); }
@@ -20712,14 +20782,14 @@ color: var(--cs-text-primary, #f1f5f9);
 .charsheet__action-btn--success,
 .charsheet__action-btn--info {
 	background: transparent;
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	border: 1px solid color-mix(in srgb, var(--cs-primary, #6366f1) 45%, transparent);
 }
 .charsheet__action-btn--success:hover,
 .charsheet__action-btn--info:hover {
 	background: color-mix(in srgb, var(--cs-primary, #6366f1) 12%, transparent);
 	border-color: var(--cs-primary, #6366f1);
-	color: var(--cs-primary, #6366f1);
+	color: var(--cs-primary-text, #6366f1);
 	transform: translateY(-1px);
 }
 /* Keep the button icons on-message with the accent label. */
@@ -20808,7 +20878,7 @@ color: var(--cs-text-primary, #f1f5f9);
 .charsheet__passive-card--perception .charsheet__passive-value,
 .charsheet__passive-card--investigation .charsheet__passive-value,
 .charsheet__passive-card--insight .charsheet__passive-value {
-	color: var(--cs-primary, inherit);
+	color: var(--cs-primary-text, inherit);
 }
 .charsheet__passive-label {
 	font-size: 10px;
@@ -20929,7 +20999,7 @@ color: var(--cs-text-primary, #f1f5f9);
 }
 .charsheet__section-info:hover,
 .charsheet__section-info:focus-visible {
-	color: var(--cs-primary, currentColor);
+	color: var(--cs-primary-text, currentColor);
 	opacity: 1;
 	outline: none;
 }
