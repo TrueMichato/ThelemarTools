@@ -11394,10 +11394,10 @@ class CharacterSheetCombat {
 			<div class="charsheet__mm-sp-summary">
 				<div class="charsheet__mm-sp-current">
 					<span class="charsheet__mm-sp-label">Sorcery Points Available</span>
-					${opts.isSorceryPointEditable ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__mm-sp-adjust-btn" data-sp-delta="-1" title="Decrease sorcery points" aria-label="Decrease sorcery points" ${sp.current <= 0 ? "disabled" : ""}>-</button>` : ""}
+					${opts.isSorceryPointEditable ? `<button class="cs-combat-btn charsheet__mm-sp-adjust-btn" data-sp-delta="-1" title="Decrease sorcery points" aria-label="Decrease sorcery points" ${sp.current <= 0 ? "disabled" : ""}>−</button>` : ""}
 					<span class="charsheet__mm-sp-value">${sp.current}</span>
 					<span class="charsheet__mm-sp-max">/ ${sp.max}</span>
-					${opts.isSorceryPointEditable ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__mm-sp-adjust-btn" data-sp-delta="1" title="Increase sorcery points" aria-label="Increase sorcery points" ${sp.current >= sp.max ? "disabled" : ""}>+</button>` : ""}
+					${opts.isSorceryPointEditable ? `<button class="cs-combat-btn charsheet__mm-sp-adjust-btn" data-sp-delta="1" title="Increase sorcery points" aria-label="Increase sorcery points" ${sp.current >= sp.max ? "disabled" : ""}>+</button>` : ""}
 				</div>
 			</div>
 		`});
@@ -11434,7 +11434,7 @@ class CharacterSheetCombat {
 							<span class="charsheet__mm-cost">${renderCost(meta.cost)}</span>
 						</div>
 						<span class="charsheet__mm-desc">${meta.description}</span>
-						<button class="ve-btn ve-btn-xs ve-btn-outline-danger charsheet__mm-tune-btn" data-metamagic-key="${meta.key}">Detune</button>
+						<button class="cs-combat-btn cs-combat-btn--danger charsheet__mm-tune-btn" data-metamagic-key="${meta.key}">${csCombatIcon("reset")}<span>Detune</span></button>
 					</div>
 				`});
 				container.append(row);
@@ -11457,7 +11457,7 @@ class CharacterSheetCombat {
 							<span class="charsheet__mm-cost">${renderCost(meta.cost)}</span>
 						</div>
 						<span class="charsheet__mm-desc">${meta.description}</span>
-						<button class="ve-btn ve-btn-xs ve-btn-outline-success charsheet__mm-tune-btn" data-metamagic-key="${meta.key}" ${!canAfford ? `disabled title="Not enough effective sorcery points"` : ""}>Tune</button>
+						<button class="cs-combat-btn cs-combat-btn--heal charsheet__mm-tune-btn" data-metamagic-key="${meta.key}" ${!canAfford ? `disabled title="Not enough effective sorcery points"` : ""}>${csCombatIcon("check")}<span>Tune</span></button>
 					</div>
 				`});
 				container.append(row);
