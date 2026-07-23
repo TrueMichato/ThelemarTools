@@ -12502,6 +12502,330 @@ body.has-quickbuild-overlay .toast__container {
 /* Combat resource pips use the same .used class - 
    filled = available, empty/used = spent */
 
+/* =====================================================================
+   Combat Section Shell
+   ---------------------------------------------------------------------
+   Shared chrome for the diverse per-class combat surfaces: one header
+   contract, one at-a-glance summary strip, one state-toggle treatment,
+   one feature block, one action-button vocabulary, and one screen-reader
+   live channel. Each class keeps its own interaction grammar *inside*
+   these primitives; the shell only standardizes the frame, states, and
+   accessibility. Introduced with the Rogue Sneak Attack slice (Phase 0);
+   adopted across the remaining class surfaces in later phases. All values
+   ride the shared --cs-* design tokens (with legacy --rgb-* fallbacks).
+   ===================================================================== */
+
+/* SectionShell — region wrapper + header contract */
+.cs-combat-section {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-sm, 0.5rem);
+	padding: var(--cs-space-md, 0.75rem);
+	background: var(--cs-bg-surface, var(--rgb-bg-alt));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-md, 10px);
+}
+
+.cs-combat-section__header {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.cs-combat-section__icon {
+	color: var(--cs-primary-text, var(--rgb-link));
+	font-size: 1.05em;
+	flex: 0 0 auto;
+}
+
+.cs-combat-section__title {
+	margin: 0;
+	font-size: var(--cs-text-sm, 0.875rem);
+	font-weight: var(--cs-weight-bold, 700);
+	line-height: var(--cs-leading-snug, 1.4);
+	color: var(--cs-text-primary, inherit);
+}
+
+/* Right-aligned primary-action slot (holds the section's StateToggle etc.) */
+.cs-combat-section__actions {
+	margin-left: auto;
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem);
+	flex: 0 0 auto;
+}
+
+/* StatusStrip — full-border at-a-glance summary bar */
+.cs-combat-strip {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--cs-space-xs, 0.25rem) var(--cs-space-md, 0.75rem);
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	background: var(--cs-bg-base, rgba(0, 0, 0, 0.15));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 6px);
+}
+
+.cs-combat-strip__item {
+	display: inline-flex;
+	align-items: baseline;
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.cs-combat-strip__label {
+	font-size: var(--cs-text-xs, 0.75rem);
+	text-transform: uppercase;
+	letter-spacing: var(--cs-tracking-wide, 0.05em);
+	font-weight: var(--cs-weight-semibold, 600);
+	color: var(--cs-text-muted, var(--rgb-muted));
+}
+
+.cs-combat-strip__value {
+	font-size: var(--cs-text-sm, 0.875rem);
+	font-weight: var(--cs-weight-bold, 700);
+	color: var(--cs-text-primary, inherit);
+	font-variant-numeric: tabular-nums;
+}
+
+/* Superseded value (e.g. base dice before Cunning Strike deductions) */
+.cs-combat-strip__value-was {
+	font-size: var(--cs-text-sm, 0.875rem);
+	font-weight: var(--cs-weight-regular, 400);
+	color: var(--cs-text-muted, var(--rgb-muted));
+	text-decoration: line-through;
+	margin-right: var(--cs-space-2xs, 2px);
+}
+
+/* StateToggle — one state chip: colour + icon + text (never colour alone) */
+.cs-combat-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem);
+	min-height: 24px;
+	padding: 0.2rem 0.6rem;
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: var(--cs-weight-bold, 700);
+	letter-spacing: var(--cs-tracking-wide, 0.05em);
+	text-transform: uppercase;
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-full, 9999px);
+	background: var(--cs-bg-elevated, var(--rgb-bg-alt));
+	color: var(--cs-text-secondary, inherit);
+	cursor: pointer;
+	transition: background var(--cs-transition-fast, 0.15s ease),
+		border-color var(--cs-transition-fast, 0.15s ease),
+		color var(--cs-transition-fast, 0.15s ease);
+}
+
+.cs-combat-toggle:hover:not(:disabled) {
+	border-color: var(--cs-border-hover, var(--rgb-border-grey));
+}
+
+.cs-combat-toggle:focus-visible {
+	outline: 2px solid var(--cs-border-focus, var(--cs-primary, var(--rgb-link)));
+	outline-offset: 2px;
+}
+
+.cs-combat-toggle--on {
+	background: var(--cs-success-light, rgba(16, 185, 129, 0.12));
+	border-color: var(--cs-success, #10b981);
+	color: var(--cs-success-text, var(--cs-success, #10b981));
+}
+
+.cs-combat-toggle--off {
+	color: var(--cs-text-muted, var(--rgb-muted));
+}
+
+.cs-combat-toggle--used {
+	background: var(--cs-danger-light, rgba(239, 68, 68, 0.12));
+	border-color: var(--cs-danger, #f26161);
+	color: var(--cs-danger, #f26161);
+	cursor: not-allowed;
+}
+
+.cs-combat-toggle:disabled {
+	opacity: 0.8;
+	cursor: not-allowed;
+}
+
+/* Condition pills — info-only, or clickable when --toggle */
+.cs-combat-conditions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.cs-combat-cond {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem);
+	padding: 0.1rem 0.5rem;
+	min-height: 24px;
+	font-size: var(--cs-text-xs, 0.75rem);
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-full, 9999px);
+	white-space: nowrap;
+	color: var(--cs-text-secondary, inherit);
+	background: none;
+}
+
+.cs-combat-cond--met {
+	color: var(--cs-success-text, var(--cs-success, #10b981));
+	border-color: var(--cs-success, #10b981);
+	background: var(--cs-success-light, rgba(16, 185, 129, 0.12));
+}
+
+.cs-combat-cond--blocked {
+	color: var(--cs-danger, #f26161);
+	border-color: var(--cs-danger, #f26161);
+	background: var(--cs-danger-light, rgba(239, 68, 68, 0.12));
+}
+
+.cs-combat-cond--none {
+	color: var(--cs-text-muted, var(--rgb-muted));
+}
+
+.cs-combat-cond--toggle {
+	cursor: pointer;
+	transition: background var(--cs-transition-fast, 0.15s ease),
+		border-color var(--cs-transition-fast, 0.15s ease),
+		color var(--cs-transition-fast, 0.15s ease);
+}
+
+.cs-combat-cond--toggle:hover {
+	border-color: var(--cs-border-hover, var(--rgb-border-grey));
+}
+
+.cs-combat-cond--toggle:focus-visible {
+	outline: 2px solid var(--cs-border-focus, var(--cs-primary, var(--rgb-link)));
+	outline-offset: 2px;
+}
+
+/* Inline notice line (unmet trigger / blocked) */
+.cs-combat-notice {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem);
+	font-size: var(--cs-text-xs, 0.75rem);
+}
+
+.cs-combat-notice--warning {
+	color: var(--cs-warning, #f59e0b);
+}
+
+.cs-combat-notice--danger {
+	color: var(--cs-danger, #f26161);
+}
+
+/* FeatureBlock — tokenized bordered/tinted block (no side-stripes) */
+.cs-combat-feature {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-xs, 0.25rem);
+	padding: var(--cs-space-sm, 0.5rem);
+	background: var(--cs-bg-base, rgba(0, 0, 0, 0.12));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 6px);
+}
+
+.cs-combat-feature__title {
+	display: flex;
+	align-items: baseline;
+	gap: var(--cs-space-xs, 0.25rem);
+	font-size: var(--cs-text-sm, 0.875rem);
+	font-weight: var(--cs-weight-bold, 700);
+	color: var(--cs-text-primary, inherit);
+}
+
+.cs-combat-feature__meta {
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: var(--cs-weight-regular, 400);
+	color: var(--cs-text-muted, var(--rgb-muted));
+}
+
+.cs-combat-feature__options {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.cs-combat-feature__summary {
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-muted, var(--rgb-muted));
+}
+
+/* ActionButton — shared combat button vocabulary (labels stay class-authored) */
+.cs-combat-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem);
+	min-height: 24px;
+	padding: 0.2rem 0.55rem;
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: var(--cs-weight-semibold, 600);
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 6px);
+	background: var(--cs-bg-elevated, var(--rgb-bg-alt));
+	color: var(--cs-text-secondary, inherit);
+	cursor: pointer;
+	transition: background var(--cs-transition-fast, 0.15s ease),
+		border-color var(--cs-transition-fast, 0.15s ease),
+		color var(--cs-transition-fast, 0.15s ease);
+}
+
+.cs-combat-btn:hover:not(:disabled) {
+	border-color: var(--cs-border-hover, var(--rgb-border-grey));
+	background: var(--cs-bg-active, var(--rgb-bg-alt));
+}
+
+.cs-combat-btn:focus-visible {
+	outline: 2px solid var(--cs-border-focus, var(--cs-primary, var(--rgb-link)));
+	outline-offset: 2px;
+}
+
+.cs-combat-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.cs-combat-btn--selected,
+.cs-combat-btn--selected:hover:not(:disabled) {
+	background: var(--cs-primary-strong, var(--rgb-link));
+	border-color: var(--cs-primary-strong, var(--rgb-link));
+	color: #fff;
+}
+
+.cs-combat-btn__cost {
+	opacity: 0.75;
+	font-weight: var(--cs-weight-regular, 400);
+}
+
+.cs-combat-icon {
+	flex: 0 0 auto;
+}
+
+.cs-combat-icon--glyph {
+	font-style: normal;
+}
+
+/* Shared screen-reader live channel for combat state/roll announcements
+   (the RollResult primitive, minimal form). Visually hidden; persists
+   outside the re-rendered sections so aria-live changes are announced. */
+.cs-combat-sr-live {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
 .charsheet__combat-state-item {
 	cursor: pointer;
 	transition: all 0.15s ease;

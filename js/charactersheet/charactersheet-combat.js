@@ -4,6 +4,49 @@
  */
 const {e_, ee} = /** @type {*} */ (globalThis);
 
+/* ========================================================================
+   Combat Section Shell — icon system (Phase 0)
+   ------------------------------------------------------------------------
+   Semantic icon keys → Font Awesome classes (FA is loaded site-wide).
+   Mirrors the Alt View `_icon()` approach — a semantic name, a graceful
+   fallback, and a text alternative — but returns an HTML *string* so it
+   composes with this file's `e_({outer: ...})` templating instead of DOM
+   nodes. Every icon is decorative (`aria-hidden`) and always paired with a
+   visible text label or an explicit `aria-label` on its control, so no
+   glyph is ever load-bearing (retires the emoji-/glyphicon-as-icon usage
+   the combat surfaces shipped with). Unknown names fall back to rendering
+   the raw string, so any user-authored glyph still displays.
+   ======================================================================== */
+const CS_COMBAT_ICONS = {
+	"sneak": "fa-user-secret",
+	"bolt": "fa-bolt",
+	"off": "fa-power-off",
+	"used": "fa-circle-check",
+	"check": "fa-check",
+	"cross": "fa-xmark",
+	"ban": "fa-ban",
+	"warning": "fa-triangle-exclamation",
+	"ally": "fa-user-group",
+	"dice": "fa-dice-d6",
+	"dc": "fa-shield-halved",
+	"none": "fa-minus",
+};
+
+/**
+ * Render a Combat Section Shell icon as an HTML string. Decorative by
+ * contract (`aria-hidden="true"`); the calling control supplies the
+ * accessible text.
+ * @param {string} name Semantic key from {@link CS_COMBAT_ICONS}.
+ * @param {{cls?: string}} [opts]
+ * @returns {string}
+ */
+function csCombatIcon (name, {cls = ""} = {}) {
+	const fa = CS_COMBAT_ICONS[name];
+	if (fa) return `<i class="fas ${fa} fa-fw cs-combat-icon${cls ? ` ${cls}` : ""}" aria-hidden="true"></i>`;
+	// Graceful fallback: render the raw string (e.g. a user-authored emoji) as a glyph.
+	return `<span class="cs-combat-icon cs-combat-icon--glyph${cls ? ` ${cls}` : ""}" aria-hidden="true">${name == null ? "" : String(name)}</span>`;
+}
+
 class CharacterSheetCombat {
 	/**
 	 * Fighter action-economy features that are owned by the dedicated `renderCombatFighter`
@@ -7578,49 +7621,57 @@ class CharacterSheetCombat {
 		const totalCSDiceCost = this._selectedCunningStrikes.reduce((sum, cs) => sum + cs.cost, 0);
 		const baseSneakDice = parseInt(sa.dice) || Math.ceil((this._state.getClassLevel?.("Rogue") || 1) / 2);
 		const effectiveSneakDice = Math.max(0, baseSneakDice - totalCSDiceCost);
-
-		const section = e_({outer: `<div class="charsheet__sneak-attack-section mt-3" style="border-top: 1px solid var(--rgb-border-grey, #444); padding-top: 0.5rem;"></div>`});
-
-		// ===== HEADER: Dice count as visual anchor =====
-		const diceDisplay = totalCSDiceCost > 0
-			? `<span style="text-decoration: line-through; opacity: 0.5;">${baseSneakDice}d6</span> ${effectiveSneakDice}d6`
-			: `${baseSneakDice}d6`;
 		const avgDisplay = Math.floor(effectiveSneakDice * 3.5);
 
-		section.insertAdjacentHTML("beforeend", `
-			<div class="ve-flex-v-center mb-1">
-				<strong class="mr-2" style="font-size: 1.05em;">Sneak Attack ${diceDisplay}</strong>
-				<span class="ve-small ve-muted">(avg ${avgDisplay})</span>
-			</div>
-		`);
+		const titleId = "cs-combat-sneak-title";
 
-		// ===== TOGGLE: Clear toggle-switch style =====
-		const toggleState = isSpentThisRound ? "used" : this._sneakAttackEnabled ? "ready" : "off";
-		const toggleColors = {
-			ready: "ve-btn-success",
-			off: "ve-btn-default",
-			used: "ve-btn-danger",
-		};
-		const toggleLabels = {
-			ready: "READY",
-			off: "OFF",
-			used: "USED",
-		};
+		// SectionShell — a labelled region so assistive tech can jump to it.
+		const section = e_({outer: `<div class="charsheet__sneak-attack-section cs-combat-section" role="region" aria-labelledby="${titleId}"></div>`});
+
+		// ===== SectionShell header: icon + title + primary-action slot (StateToggle) =====
+		// StateToggle vocabulary — default ON / OFF / USED (color + icon + text).
+		const toggleState = isSpentThisRound ? "used" : this._sneakAttackEnabled ? "on" : "off";
+		const toggleMeta = {
+			on: {label: "ON", icon: "bolt", cls: "cs-combat-toggle--on", pressed: "true", aria: "armed"},
+			off: {label: "OFF", icon: "off", cls: "cs-combat-toggle--off", pressed: "false", aria: "off"},
+			used: {label: "USED", icon: "used", cls: "cs-combat-toggle--used", pressed: "false", aria: "already used this round"},
+		}[toggleState];
 		const toggleTitle = isSpentThisRound
 			? "Sneak Attack already used this round"
 			: this._sneakAttackEnabled
-				? "Click to disable Sneak Attack for next damage roll"
-				: "Click to enable Sneak Attack for next damage roll";
+				? "Sneak Attack armed — click to turn off for the next damage roll"
+				: "Click to arm Sneak Attack for the next damage roll";
 
-		const toggle = e_({outer: `
-			<div class="ve-flex-v-center mb-1">
-				<button class="ve-btn ve-btn-xs ${toggleColors[toggleState]} charsheet__sneak-attack-toggle mr-2" title="${toggleTitle}" ${isSpentThisRound ? "disabled" : ""}>
-					<span class="glyphicon glyphicon-flash mr-1"></span>${toggleLabels[toggleState]}
-				</button>
+		section.insertAdjacentHTML("beforeend", `
+			<div class="cs-combat-section__header">
+				<span class="cs-combat-section__icon">${csCombatIcon("sneak")}</span>
+				<span class="cs-combat-section__title" id="${titleId}">Sneak Attack</span>
+				<div class="cs-combat-section__actions">
+					<button type="button" class="cs-combat-toggle ${toggleMeta.cls} charsheet__sneak-attack-toggle" aria-pressed="${toggleMeta.pressed}" aria-label="Sneak Attack: ${toggleMeta.aria}" title="${toggleTitle}" ${isSpentThisRound ? "disabled" : ""}>
+						${csCombatIcon(toggleMeta.icon)}<span>${toggleMeta.label}</span>
+					</button>
+				</div>
 			</div>
-		`});
+		`);
 
-		toggle.querySelector(".charsheet__sneak-attack-toggle")?.addEventListener("click", () => {
+		// ===== StatusStrip: at-a-glance dice pool + average =====
+		const diceDisplay = totalCSDiceCost > 0
+			? `<span class="cs-combat-strip__value-was">${baseSneakDice}d6</span><span class="cs-combat-strip__value">${effectiveSneakDice}d6</span>`
+			: `<span class="cs-combat-strip__value">${baseSneakDice}d6</span>`;
+		section.insertAdjacentHTML("beforeend", `
+			<div class="cs-combat-strip" role="group" aria-label="Sneak Attack dice">
+				<div class="cs-combat-strip__item">
+					<span class="cs-combat-strip__label">Dice</span>
+					${diceDisplay}
+				</div>
+				<div class="cs-combat-strip__item">
+					<span class="cs-combat-strip__label">Avg</span>
+					<span class="cs-combat-strip__value">${avgDisplay}</span>
+				</div>
+			</div>
+		`);
+
+		section.querySelector(".charsheet__sneak-attack-toggle")?.addEventListener("click", () => {
 			if (!this._isSneakAttackAvailableThisTurn()) {
 				JqueryUtil.doToast({type: "warning", content: "Sneak Attack has already been used this round."});
 				return;
@@ -7628,62 +7679,66 @@ class CharacterSheetCombat {
 			this._sneakAttackEnabled = !this._sneakAttackEnabled;
 			// Clear CS selections when disabling SA
 			if (!this._sneakAttackEnabled) this._selectedCunningStrikes = [];
+			this._announceCombat(this._sneakAttackEnabled ? "Sneak Attack armed" : "Sneak Attack off");
 			this._renderSneakAttackToggle();
 		});
 
-		section.append(toggle);
-
-		// ===== CONDITION INDICATORS: Real-time SA eligibility =====
+		// ===== Condition indicators: real-time SA eligibility =====
 		const ctx = this._lastAttackContext;
 		const hasAdv = ctx?.hasAdvantage && !ctx?.hasDisadvantage;
 		const hasDisadv = ctx?.hasDisadvantage && !ctx?.hasAdvantage;
 		const allyAdj = this._sneakAttackHasAdjacentAlly;
 
-		const conditions = e_({outer: `<div class="ve-flex-v-center gap-1 mb-2 flex-wrap"></div>`});
+		const conditions = e_({outer: `<div class="cs-combat-conditions"></div>`});
 
-		// Advantage indicator
 		if (hasAdv) {
-			conditions.insertAdjacentHTML("beforeend", `<span class="ve-badge ve-badge--success ve-small" title="Last attack had advantage" style="padding: 1px 6px; border-radius: 3px;">&#x2714; Advantage</span>`);
+			conditions.insertAdjacentHTML("beforeend", `<span class="cs-combat-cond cs-combat-cond--met" title="Last attack had advantage">${csCombatIcon("check")}Advantage</span>`);
 		} else if (hasDisadv) {
-			conditions.insertAdjacentHTML("beforeend", `<span class="ve-badge ve-badge--danger ve-small" title="Last attack had disadvantage — SA blocked" style="padding: 1px 6px; border-radius: 3px;">&#x2718; Disadvantage</span>`);
+			conditions.insertAdjacentHTML("beforeend", `<span class="cs-combat-cond cs-combat-cond--blocked" title="Last attack had disadvantage — Sneak Attack blocked">${csCombatIcon("ban")}Disadvantage</span>`);
 		} else {
-			conditions.insertAdjacentHTML("beforeend", `<span class="ve-badge ve-badge--default ve-small" title="No advantage from last attack" style="padding: 1px 6px; border-radius: 3px; opacity: 0.6;">&#x2014; No Advantage</span>`);
+			conditions.insertAdjacentHTML("beforeend", `<span class="cs-combat-cond cs-combat-cond--none" title="No advantage from the last attack">${csCombatIcon("none")}No advantage</span>`);
 		}
 
-		// Ally adjacent toggle (as inline pill)
-		const allyPill = e_({outer: `<button class="ve-btn ve-btn-xxs ${allyAdj ? "ve-btn-info" : "ve-btn-default"} ve-small" title="Toggle: ally within 5ft of target" style="padding: 1px 6px; border-radius: 3px;">${allyAdj ? "&#x2714; Ally within 5ft" : "Ally within 5ft"}</button>`});
+		// Ally-adjacent state toggle (clickable condition pill)
+		const allyPill = e_({outer: `<button type="button" class="cs-combat-cond cs-combat-cond--toggle ${allyAdj ? "cs-combat-cond--met" : "cs-combat-cond--none"}" aria-pressed="${allyAdj ? "true" : "false"}" title="Toggle: an ally is within 5 ft of the target">${csCombatIcon(allyAdj ? "check" : "ally")}Ally within 5 ft</button>`});
 		allyPill.addEventListener("click", () => {
 			this._sneakAttackHasAdjacentAlly = !this._sneakAttackHasAdjacentAlly;
+			this._announceCombat(this._sneakAttackHasAdjacentAlly ? "Ally within 5 feet: on" : "Ally within 5 feet: off");
 			this._renderSneakAttackToggle();
 		});
 		conditions.append(allyPill);
 
 		section.append(conditions);
 
-		// ===== WARNING: SA conditions not met =====
+		// ===== Notice: armed but trigger not met =====
 		if (this._sneakAttackEnabled && !isSpentThisRound) {
 			const triggerMet = hasAdv || allyAdj;
 			if (!triggerMet && !hasDisadv) {
-				section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-1" style="color: var(--rgb-warning, #f0ad4e);"><span class="glyphicon glyphicon-warning-sign mr-1"></span>No advantage and no ally adjacent — Sneak Attack won't apply</div>`);
+				section.insertAdjacentHTML("beforeend", `<div class="cs-combat-notice cs-combat-notice--warning">${csCombatIcon("warning")}<span>No advantage and no adjacent ally — Sneak Attack won't apply.</span></div>`);
 			} else if (hasDisadv) {
-				section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-1" style="color: var(--rgb-danger, #d9534f);"><span class="glyphicon glyphicon-remove mr-1"></span>Disadvantage blocks Sneak Attack</div>`);
+				section.insertAdjacentHTML("beforeend", `<div class="cs-combat-notice cs-combat-notice--danger">${csCombatIcon("ban")}<span>Disadvantage blocks Sneak Attack.</span></div>`);
 			}
 		}
 
-		// ===== CUNNING STRIKE: Mechanical integration =====
+		// ===== Cunning Strike: FeatureBlock with spend options =====
 		if (calcs.hasCunningStrike) {
 			const csOptions = this._getCunningStrikeOptions(calcs);
 			const saveDC = 8 + this._state.getProficiencyBonus() + this._state.getAbilityMod("dex");
 
-			const cs = e_({outer: `<div class="ve-small mt-1"></div>`});
-			cs.insertAdjacentHTML("beforeend", `<div class="ve-flex-v-center mb-1"><strong>Cunning Strike</strong> <span class="ve-muted ml-1">DC ${saveDC}</span></div>`);
+			const cs = e_({outer: `<div class="cs-combat-feature"></div>`});
+			cs.insertAdjacentHTML("beforeend", `
+				<div class="cs-combat-feature__title">
+					${csCombatIcon("dc")}<span>Cunning Strike</span>
+					<span class="cs-combat-feature__meta">Save DC ${saveDC}</span>
+				</div>
+			`);
 
-			const optList = e_({outer: `<div class="ve-flex gap-1 flex-wrap"></div>`});
+			const optList = e_({outer: `<div class="cs-combat-feature__options" role="group" aria-label="Cunning Strike options"></div>`});
 			csOptions.forEach(opt => {
 				const isSelected = this._selectedCunningStrikes.some(s => s.name === opt.name);
 				const canAfford = opt.cost <= effectiveSneakDice + (isSelected ? opt.cost : 0);
-				const btnClass = isSelected ? "ve-btn-primary" : canAfford ? "ve-btn-default" : "ve-btn-default";
-				const btn = e_({outer: `<button class="ve-btn ve-btn-xxs ${btnClass}" title="${opt.desc} (costs ${opt.cost}d6)" ${!canAfford && !isSelected ? "disabled" : ""} style="${!canAfford && !isSelected ? "opacity: 0.5;" : ""}">${opt.name} <span class="ve-muted">${opt.cost}d6</span></button>`});
+				const disabled = !canAfford && !isSelected;
+				const btn = e_({outer: `<button type="button" class="cs-combat-btn ${isSelected ? "cs-combat-btn--selected" : ""}" aria-pressed="${isSelected ? "true" : "false"}" title="${opt.desc} (costs ${opt.cost}d6)" ${disabled ? "disabled" : ""}><span>${opt.name}</span> <span class="cs-combat-btn__cost">${opt.cost}d6</span></button>`});
 
 				btn.addEventListener("click", () => {
 					if (isSelected) {
@@ -7695,6 +7750,7 @@ class CharacterSheetCombat {
 						}
 						this._selectedCunningStrikes.push(opt);
 					}
+					this._announceCombat(isSelected ? `${opt.name} deselected` : `${opt.name} selected`);
 					this._renderSneakAttackToggle();
 				});
 				optList.append(btn);
@@ -7704,13 +7760,42 @@ class CharacterSheetCombat {
 			// Show selected CS effects summary
 			if (this._selectedCunningStrikes.length) {
 				const summary = this._selectedCunningStrikes.map(s => `${s.name} (${s.cost}d6)`).join(", ");
-				cs.insertAdjacentHTML("beforeend", `<div class="ve-muted mt-1" style="font-size: 0.85em;">Selected: ${summary} — ${totalCSDiceCost}d6 deducted from Sneak Attack</div>`);
+				cs.insertAdjacentHTML("beforeend", `<div class="cs-combat-feature__summary">Selected: ${summary} — ${totalCSDiceCost}d6 deducted from Sneak Attack.</div>`);
 			}
 
 			section.append(cs);
 		}
 
 		container.append(section);
+	}
+
+	/**
+	 * Announce a combat state/roll change on a shared, persistent, visually
+	 * hidden `aria-live="polite"` region (the RollResult primitive, minimal
+	 * form). The region lives outside the re-rendered combat sections so
+	 * screen readers reliably pick up the change; sighted users read the same
+	 * state from the visible colour + icon + text on the control itself.
+	 * @param {string} message
+	 */
+	_announceCombat (message) {
+		if (!message || typeof document === "undefined" || !document.createElement) return;
+		let region = document.getElementById("cs-combat-live-region");
+		if (!region) {
+			const host = document.body || document.documentElement;
+			if (!host) return;
+			region = document.createElement("div");
+			region.id = "cs-combat-live-region";
+			region.className = "cs-combat-sr-live";
+			region.setAttribute("role", "status");
+			region.setAttribute("aria-live", "polite");
+			region.setAttribute("aria-atomic", "true");
+			host.appendChild(region);
+		}
+		// Clear then set so an identical consecutive message still re-announces.
+		region.textContent = "";
+		const set = () => { region.textContent = message; };
+		if (typeof requestAnimationFrame === "function") requestAnimationFrame(set);
+		else set();
 	}
 
 	/**
