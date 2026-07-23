@@ -92,8 +92,10 @@ describe("Last Ditch Evasion — manual reaction button (#7) wiring", () => {
 	it("renders a manual 'Use Last Ditch Evasion' reaction button gated on the tactic", () => {
 		const idx = combatSrc.indexOf("charsheet__combat-lde-use\"");
 		expect(idx).toBeGreaterThan(-1);
-		// The button markup block (gating + label) lives just before the class attr.
-		const markup = combatSrc.slice(idx - 400, idx + 200);
+		// The button markup block (gating + label) lives just before the class attr;
+		// the shell migration adds an icon + <span> wrapper before the label, so the
+		// forward window spans the full themed-icon button.
+		const markup = combatSrc.slice(idx - 400, idx + 400);
 		expect(markup).toContain("hasLastDitchEvasion");
 		expect(markup).toMatch(/avoid all damage \+ Slowed/i);
 		// Triggered by being hit by an attack — must NOT be framed as a Dex save.
