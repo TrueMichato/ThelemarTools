@@ -49,6 +49,11 @@ const CS_COMBAT_ICONS = {
 	// Druid nature-magic vocabulary (retires the 🐻/🧚 emoji labels).
 	"beast": "fa-paw",
 	"familiar": "fa-hat-wizard",
+	// Illrigger vocabulary (retires 🔥/↪/🎭/♻️ emoji in the Interdiction panel).
+	"fire": "fa-fire",
+	"move": "fa-share",
+	"charm": "fa-masks-theater",
+	"recycle": "fa-recycle",
 };
 
 /**
@@ -3964,8 +3969,8 @@ class CharacterSheetCombat {
 						<option value="fire">fire</option>
 						<option value="necrotic">necrotic</option>
 					</select>
-					<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__interdict-burn" type="button" title="Burn seals: ${sealDamage} per seal when the creature takes damage from another source">🔥 Burn</button>
-					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__interdict-move" type="button" title="On this creature's death, move all its seals to a new creature within 30 ft (bonus action)">↪ Move</button>
+					<button class="cs-combat-btn cs-combat-btn--danger charsheet__interdict-burn" type="button" title="Burn seals: ${sealDamage} per seal when the creature takes damage from another source">${csCombatIcon("fire")}<span>Burn</span></button>
+					<button class="cs-combat-btn charsheet__interdict-move" type="button" title="On this creature's death, move all its seals to a new creature within 30 ft (bonus action)">${csCombatIcon("move")}<span>Move</span></button>
 				</div>`).join("")
 			: `<div class="ve-muted ve-small">No creatures are currently interdicted.</div>`;
 
@@ -3995,7 +4000,7 @@ class CharacterSheetCombat {
 					? (canApplyNow ? `${applyLabel} — apply this boon's effect to your sheet` : "No seals available")
 					: "";
 				const activateBtn = canActivate
-					? `<button class="ve-btn ve-btn-xxs ve-btn-primary charsheet__interdict-boon-activate ml-auto" type="button" data-boon-name="${(b.name || "").replace(/"/g, "&quot;")}" ${canApplyNow ? "" : "disabled"} title="${applyTitle}">${applyLabel}</button>`
+					? `<button class="cs-combat-btn cs-combat-btn--primary charsheet__interdict-boon-activate ml-auto" type="button" data-boon-name="${(b.name || "").replace(/"/g, "&quot;")}" ${canApplyNow ? "" : "disabled"} title="${applyTitle}">${applyLabel}</button>`
 					: "";
 				// (R22 #6) Durational boons (Veil of Lies, Shadow Shroud, Hellish Frenzy,
 				// Hellsight) are named toggle states that expend a seal. Surface a one-click
@@ -4007,10 +4012,10 @@ class CharacterSheetCombat {
 				if (boonAf) {
 					const nm = (b.name || "").replace(/"/g, "&quot;");
 					if (boonAf.isActive) {
-						toggleBtn = `<button class="ve-btn ve-btn-xxs ve-btn-danger charsheet__interdict-boon-toggle ml-auto" type="button" data-boon-name="${nm}" title="End this boon's effect">End</button>`;
+						toggleBtn = `<button class="cs-combat-btn cs-combat-btn--danger charsheet__interdict-boon-toggle ml-auto" type="button" data-boon-name="${nm}" title="End this boon's effect">End</button>`;
 					} else {
 						const canAfford = avail > 0;
-						toggleBtn = `<button class="ve-btn ve-btn-xxs ve-btn-primary charsheet__interdict-boon-toggle ml-auto" type="button" data-boon-name="${nm}" ${canAfford ? "" : "disabled"} title="${canAfford ? "Expend a seal to activate this boon" : "No seals available"}">Invoke (1 seal)</button>`;
+						toggleBtn = `<button class="cs-combat-btn cs-combat-btn--primary charsheet__interdict-boon-toggle ml-auto" type="button" data-boon-name="${nm}" ${canAfford ? "" : "disabled"} title="${canAfford ? "Expend a seal to activate this boon" : "No seals available"}">Invoke (1 seal)</button>`;
 					}
 				}
 				return `
@@ -4041,9 +4046,9 @@ class CharacterSheetCombat {
 				<div class="charsheet__interdict-charm mb-2">
 					<div class="ve-muted ve-small mb-1">Charm Enemy</div>
 					<div class="charsheet__interdict-charm-row ve-flex ve-flex-v-center ve-flex-wrap gap-2">
-						<span title="When you seal a Humanoid you may attempt to charm it">🎭 Target makes a <strong>DC ${ceDc != null ? ceDc : "—"}</strong> Charisma save or is <strong>charmed</strong> (1 hour)</span>
+						<span title="When you seal a Humanoid you may attempt to charm it">${csCombatIcon("charm")}Target makes a <strong>DC ${ceDc != null ? ceDc : "—"}</strong> Charisma save or is <strong>charmed</strong> (1 hour)</span>
 						<span class="charsheet__interdict-charm-uses ve-muted ve-small" title="Uses = Charisma modifier (min 1); regained on a long rest">Uses <strong>${usesStr}</strong></span>
-						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__interdict-charm-use ml-auto" type="button" ${canCharm ? "" : "disabled"} title="${canCharm ? "Spend a use to attempt to charm a sealed Humanoid" : "No uses remaining (regained on a long rest)"}">🎭 Charm a target</button>
+						<button class="cs-combat-btn cs-combat-btn--primary charsheet__interdict-charm-use ml-auto" type="button" ${canCharm ? "" : "disabled"} title="${canCharm ? "Spend a use to attempt to charm a sealed Humanoid" : "No uses remaining (regained on a long rest)"}">${csCombatIcon("charm")}<span>Charm a target</span></button>
 					</div>
 				</div>`;
 			})()
@@ -4066,8 +4071,8 @@ class CharacterSheetCombat {
 				<div class="charsheet__interdict-superior mb-2">
 					<div class="ve-muted ve-small mb-1">Superior Interdict</div>
 					<div class="charsheet__interdict-superior-row ve-flex ve-flex-v-center ve-flex-wrap gap-2">
-						<span title="Your seal damage ignores the target's resistances">⚔️ Seal damage <strong>ignores resistance</strong></span>
-						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__interdict-superior-regain ml-auto" type="button" ${canRegain ? "" : "disabled"} title="${title}">♻️ Regain a seal (bonus action)</button>
+						<span title="Your seal damage ignores the target's resistances">${csCombatIcon("weapon")}Seal damage <strong>ignores resistance</strong></span>
+						<button class="cs-combat-btn cs-combat-btn--primary charsheet__interdict-superior-regain ml-auto" type="button" ${canRegain ? "" : "disabled"} title="${title}">${csCombatIcon("recycle")}<span>Regain a seal (bonus action)</span></button>
 					</div>
 				</div>`;
 			})()
@@ -4076,10 +4081,10 @@ class CharacterSheetCombat {
 		container.innerHTML = `
 			<div class="charsheet__interdict-panel">
 				<div class="charsheet__interdict-summary ve-flex ve-flex-v-center ve-flex-wrap gap-2 mb-2">
-					<span class="charsheet__interdict-dc" title="Interdict save DC = 8 + proficiency + CHA">🛡️ Save DC <strong>${dc != null ? dc : "—"}</strong></span>
-					<span class="charsheet__interdict-pool" title="Seals refresh on a short or long rest">🔥 Seals <strong>${avail}</strong> / ${max}</span>
+					<span class="charsheet__interdict-dc" title="Interdict save DC = 8 + proficiency + CHA">${csCombatIcon("dc")}Save DC <strong>${dc != null ? dc : "—"}</strong></span>
+					<span class="charsheet__interdict-pool" title="Seals refresh on a short or long rest">${csCombatIcon("fire")}Seals <strong>${avail}</strong> / ${max}</span>
 					<span class="ve-muted ve-small" title="Burn damage per seal">${sealDamage} per seal</span>
-					<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__interdict-place-btn ml-auto" type="button" ${avail > 0 ? "" : "disabled"} title="Place a seal on a creature (bonus action, or no action on a weapon hit)">Place seal</button>
+					<button class="cs-combat-btn cs-combat-btn--primary charsheet__interdict-place-btn ml-auto" type="button" ${avail > 0 ? "" : "disabled"} title="Place a seal on a creature (bonus action, or no action on a weapon hit)">Place seal</button>
 				</div>
 				<div class="charsheet__interdict-seals mb-2">
 					<div class="ve-muted ve-small mb-1">Interdicted creatures</div>
@@ -4135,7 +4140,7 @@ class CharacterSheetCombat {
 						resultNote: `${result.damageType} damage on ${result.target}`,
 					});
 				}
-				JqueryUtil.doToast({type: "info", content: `🔥 Burned ${result.count} seal${result.count === 1 ? "" : "s"} on ${result.target}: ${result.dice} ${result.damageType}${rolled && typeof rolled.total === "number" ? ` → ${rolled.total}` : ""} damage.`});
+				JqueryUtil.doToast({type: "info", content: `Burned ${result.count} seal${result.count === 1 ? "" : "s"} on ${result.target}: ${result.dice} ${result.damageType}${rolled && typeof rolled.total === "number" ? ` → ${rolled.total}` : ""} damage.`});
 				this.renderCombatInterdiction();
 				this._page.saveCharacter?.();
 			});
@@ -4204,7 +4209,7 @@ class CharacterSheetCombat {
 			if (target == null) return;
 			if (ce) this._state.setResourceCurrent(ce.id, Math.max(0, ce.current - 1));
 			const ceDc = calcs.charmEnemyDc != null ? calcs.charmEnemyDc : dc;
-			JqueryUtil.doToast({type: "info", content: `🎭 ${target || "The target"} must make a DC ${ceDc != null ? ceDc : "—"} Charisma save or be charmed by you for 1 hour.`, autoHideTime: 10000});
+			JqueryUtil.doToast({type: "info", content: `${target || "The target"} must make a DC ${ceDc != null ? ceDc : "—"} Charisma save or be charmed by you for 1 hour.`, autoHideTime: 10000});
 			this.renderCombatInterdiction();
 			this._page.saveCharacter?.();
 		});
@@ -4256,7 +4261,7 @@ class CharacterSheetCombat {
 		const place = (target) => {
 			const placed = this._state.placeSeal?.((target || "").trim() || "Target", {force: true});
 			if (placed) {
-				JqueryUtil.doToast({type: "success", content: `🔥 Seal placed on ${placed.target}. Seals left: ${this._state.getSealsAvailable?.()}`});
+				JqueryUtil.doToast({type: "success", content: `Seal placed on ${placed.target}. Seals left: ${this._state.getSealsAvailable?.()}`});
 				this.renderCombatInterdiction();
 				this._page.saveCharacter?.();
 			} else {
@@ -4322,7 +4327,7 @@ class CharacterSheetCombat {
 		const move = (target) => {
 			const moved = this._state.moveSeals?.(sourceId, (target || "").trim());
 			if (moved) {
-				JqueryUtil.doToast({type: "success", content: `↪ Seals moved to ${moved.target}.`});
+				JqueryUtil.doToast({type: "success", content: `Seals moved to ${moved.target}.`});
 				this.renderCombatInterdiction();
 				this._page.saveCharacter?.();
 			} else {
