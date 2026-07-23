@@ -12778,6 +12778,37 @@ body.has-quickbuild-overlay .toast__container {
 	margin-top: var(--cs-space-xs, 0.25rem);
 }
 
+/* Action-economy / meta chip — small full-border pill (icon + word) that
+   retires the ad-hoc `badge badge-outline-*` action badges. Full border, no
+   side-stripe; reads as one system across every class feature block. */
+.cs-combat-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--cs-space-2xs, 2px);
+	padding: 1px var(--cs-space-xs, 0.25rem);
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: var(--cs-weight-medium, 500);
+	line-height: var(--cs-leading-snug, 1.4);
+	color: var(--cs-text-secondary, inherit);
+	background: var(--cs-bg-elevated, rgba(255, 255, 255, 0.04));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-pill, 999px);
+	white-space: nowrap;
+}
+
+/* Locked variant — a gated reaction/feature not yet available (level prereq). */
+.cs-combat-chip--locked {
+	color: var(--cs-danger-text, var(--rgb-name-color, inherit));
+	border-color: var(--cs-danger-border, rgba(220, 90, 90, 0.5));
+	background: var(--cs-danger-light, rgba(220, 90, 90, 0.12));
+}
+
+/* Pool caption floats to the trailing edge of a feature-block title row. */
+.cs-combat-feature__title .cs-combat-pool,
+.cs-combat-feature__title .cs-combat-chip + .cs-combat-pool {
+	margin-left: auto;
+}
+
 /* PoolDisplay caption — one canonical `N / M (recharge)` grammar for every
    resource pool (Second Wind, Action Surge, stamina, synthetic pools). Pairs
    with the existing pip health-bar; the caption is the read-at-a-glance count.

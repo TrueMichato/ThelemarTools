@@ -45,7 +45,34 @@ const CS_COMBAT_ICONS = {
 	"weapon": "fa-khanda",
 	"spark": "fa-star",
 	"info": "fa-circle-info",
+	"lock": "fa-lock",
 };
+
+/**
+ * Action-economy vocabulary — the shared chip that retires the ⚡/⚔️/🔄
+ * emoji badges hand-built across the class panels. One icon + one word per
+ * cost so "what does this cost me" reads identically everywhere.
+ */
+const CS_COMBAT_ACTION_META = {
+	"action": {icon: "action", label: "Action"},
+	"bonus": {icon: "bonus", label: "Bonus Action"},
+	"reaction": {icon: "reaction", label: "Reaction"},
+	"free": {icon: "spark", label: "No Action"},
+};
+
+/**
+ * Render a small full-border action-economy chip (icon + label). Decorative
+ * icon + a visible word, so the cost never rides on a glyph alone.
+ * @param {"action"|"bonus"|"reaction"|"free"} kind
+ * @param {{labelOverride?: string, cls?: string}} [opts]
+ * @returns {string}
+ */
+function csCombatActionChip (kind, {labelOverride, cls = ""} = {}) {
+	const meta = CS_COMBAT_ACTION_META[kind];
+	if (!meta) return "";
+	const label = labelOverride || meta.label;
+	return `<span class="cs-combat-chip${cls ? ` ${cls}` : ""}" title="Action economy: ${label}">${csCombatIcon(meta.icon)}<span>${label}</span></span>`;
+}
 
 /**
  * Render a Combat Section Shell icon as an HTML string. Decorative by
@@ -162,14 +189,19 @@ function csCombatSection ({title, icon, domClass = "", titleId, actionsHtml = ""
  * @param {string} [opts.domClass] Extra class(es) (e.g. a behaviour hook).
  * @param {Partial<Record<"on"|"off"|"used", {label?: string, icon?: string}>>} [opts.vocab]
  *        Per-state label/icon overrides.
+ * @param {Record<string, string|number>} [opts.attrs] Extra HTML attributes
+ *        (e.g. a `data-*` hook the caller's click handler reads).
  * @returns {string}
  */
-function csCombatStateToggle ({state, labelPrefix = "", ariaState, title = "", disabled = false, domClass = "", vocab} = {}) {
+function csCombatStateToggle ({state, labelPrefix = "", ariaState, title = "", disabled = false, domClass = "", vocab, attrs} = {}) {
 	const base = CS_COMBAT_TOGGLE_VOCAB[state] || CS_COMBAT_TOGGLE_VOCAB.off;
 	const meta = {...base, ...(vocab?.[state] || {})};
 	const spoken = ariaState || meta.label;
 	const ariaLabel = labelPrefix ? `${labelPrefix}: ${spoken}` : spoken;
-	return `<button type="button" class="cs-combat-toggle ${meta.cls}${domClass ? ` ${domClass}` : ""}" aria-pressed="${meta.pressed}" aria-label="${ariaLabel}"${title ? ` title="${title}"` : ""}${disabled ? " disabled" : ""}>${csCombatIcon(meta.icon)}<span>${meta.label}</span></button>`;
+	const attrsHtml = attrs
+		? Object.entries(attrs).map(([k, v]) => ` ${k}="${String(v).replace(/"/g, "&quot;")}"`).join("")
+		: "";
+	return `<button type="button" class="cs-combat-toggle ${meta.cls}${domClass ? ` ${domClass}` : ""}" aria-pressed="${meta.pressed}" aria-label="${ariaLabel}"${title ? ` title="${title}"` : ""}${attrsHtml}${disabled ? " disabled" : ""}>${csCombatIcon(meta.icon)}<span>${meta.label}</span></button>`;
 }
 
 /**
@@ -9561,25 +9593,25 @@ class CharacterSheetCombat {
 			const staminaGain = calcs.staminaEnthusiastStaminaGain ?? 0;
 			html += `
 				<div class="charsheet__combat-fighter-feature cs-combat-feature mb-3">
-					<div class="ve-flex-v-center gap-2 ve-flex-wrap">
-						<span class="bold">Second Wind</span>
-						<span class="badge badge-outline-secondary" title="Action economy">⚡ Bonus Action</span>
-						<span class="badge ${swRemaining > 0 ? "badge-info" : "badge-danger"}" title="Uses remaining (recharge on short or long rest)">${swRemaining}/${swMax}</span>
+					<div class="cs-combat-feature__title">
+						${csCombatIcon("heal")}<span>Second Wind</span>
+						${csCombatActionChip("bonus")}
+						${csCombatPoolCaption(swRemaining, swMax, {recharge: "short/long rest"})}
 					</div>
 					<div class="ve-small ve-muted mt-1">Regain <span class="bold">${healing}</span> hit points. <span class="ve-muted">(Uses are pip-tracked under Combat Resources.)</span></div>
-					<div class="ve-flex-v-center gap-1 ve-flex-wrap mt-1">
-						<button class="ve-btn ve-btn-xs ve-btn-success charsheet__combat-fighter-sw-heal" ${swRemaining > 0 ? "" : "disabled"} title="Spend a use and regain ${healing} HP">Use (heal ${healing})</button>
-						${hasStaminaEnthusiast ? `<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-fighter-sw-stamina" ${swRemaining > 0 ? "" : "disabled"} title="Stamina Enthusiast: regain ${staminaGain} stamina instead of hit points">Use (regain ${staminaGain} stamina)</button>` : ""}
-						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-fighter-sw-reset" ${swRemaining < swMax ? "" : "disabled"} title="Restore all Second Wind uses">Reset</button>
+					<div class="cs-combat-feature__options" role="group" aria-label="Second Wind actions">
+						<button class="cs-combat-btn cs-combat-btn--heal charsheet__combat-fighter-sw-heal" ${swRemaining > 0 ? "" : "disabled"} title="Spend a use and regain ${healing} HP">${csCombatIcon("heal")}<span>Use (heal ${healing})</span></button>
+						${hasStaminaEnthusiast ? `<button class="cs-combat-btn cs-combat-btn--spend charsheet__combat-fighter-sw-stamina" ${swRemaining > 0 ? "" : "disabled"} title="Stamina Enthusiast: regain ${staminaGain} stamina instead of hit points">${csCombatIcon("stance")}<span>Use (regain ${staminaGain} stamina)</span></button>` : ""}
+						<button class="cs-combat-btn charsheet__combat-fighter-sw-reset" ${swRemaining < swMax ? "" : "disabled"} title="Restore all Second Wind uses">${csCombatIcon("reset")}<span>Reset</span></button>
 					</div>`;
 			if (calcs.hasTacticalMind) {
-				html += `<div class="ve-small ve-muted mt-1">✦ <span class="bold">Tactical Mind:</span> when you fail an ability check, you can expend a use of Second Wind to add <span class="bold">1d10</span> to the check (the use isn't spent if it still fails).</div>`;
+				html += `<div class="cs-combat-feature__summary">${csCombatIcon("spark")} <span class="bold">Tactical Mind:</span> when you fail an ability check, you can expend a use of Second Wind to add <span class="bold">1d10</span> to the check (the use isn't spent if it still fails).</div>`;
 			}
 			if (calcs.hasTacticalShift) {
-				html += `<div class="ve-small ve-muted mt-1">✦ <span class="bold">Tactical Shift:</span> when you activate Second Wind, you can move up to half your speed without provoking opportunity attacks.</div>`;
+				html += `<div class="cs-combat-feature__summary">${csCombatIcon("spark")} <span class="bold">Tactical Shift:</span> when you activate Second Wind, you can move up to half your speed without provoking opportunity attacks.</div>`;
 			}
 			if (hasStaminaEnthusiast) {
-				html += `<div class="ve-small ve-muted mt-1">✦ <span class="bold">Stamina Enthusiast:</span> +2 stamina maximum, and Second Wind can regain ${staminaGain} stamina (proficiency bonus) instead of hit points.</div>`;
+				html += `<div class="cs-combat-feature__summary">${csCombatIcon("spark")} <span class="bold">Stamina Enthusiast:</span> +2 stamina maximum, and Second Wind can regain ${staminaGain} stamina (proficiency bonus) instead of hit points.</div>`;
 			}
 			html += `</div>`;
 		}
@@ -9591,15 +9623,15 @@ class CharacterSheetCombat {
 			const asRemaining = this._state.getActionSurgeUsesRemaining?.() ?? 0;
 			html += `
 				<div class="charsheet__combat-fighter-feature cs-combat-feature mb-3">
-					<div class="ve-flex-v-center gap-2 ve-flex-wrap">
-						<span class="bold">Action Surge</span>
-						<span class="badge badge-outline-secondary" title="Action economy">⚔️ Special (no action)</span>
-						<span class="badge ${asRemaining > 0 ? "badge-info" : "badge-danger"}" title="Uses remaining (recharge on short or long rest)">${asRemaining}/${asMax}</span>
+					<div class="cs-combat-feature__title">
+						${csCombatIcon("surge")}<span>Action Surge</span>
+						${csCombatActionChip("free", {labelOverride: "Special · no action"})}
+						${csCombatPoolCaption(asRemaining, asMax, {recharge: "short/long rest"})}
 					</div>
 					<div class="ve-small ve-muted mt-1">On your turn, take one additional action.</div>
-					<div class="ve-flex-v-center gap-1 ve-flex-wrap mt-1">
-						<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__combat-fighter-as-use" ${asRemaining > 0 ? "" : "disabled"} title="Spend one Action Surge use">Use</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-fighter-as-reset" ${asRemaining < asMax ? "" : "disabled"} title="Restore all Action Surge uses">Reset</button>
+					<div class="cs-combat-feature__options" role="group" aria-label="Action Surge actions">
+						<button class="cs-combat-btn cs-combat-btn--spend charsheet__combat-fighter-as-use" ${asRemaining > 0 ? "" : "disabled"} title="Spend one Action Surge use">${csCombatIcon("surge")}<span>Use</span></button>
+						<button class="cs-combat-btn charsheet__combat-fighter-as-reset" ${asRemaining < asMax ? "" : "disabled"} title="Restore all Action Surge uses">${csCombatIcon("reset")}<span>Reset</span></button>
 					</div>
 				</div>`;
 		}
@@ -9633,7 +9665,18 @@ class CharacterSheetCombat {
 					if (!locked) {
 						const on = !!this._battleTacticToggles[tactic.name];
 						const scopeWord = tactic.attackType ? `${tactic.attackType} ` : "";
-						toggleBtnHtml = `<button class="ve-btn ve-btn-xs ${on ? "ve-btn-success" : "ve-btn-default"} charsheet__combat-fighter-tactic-toggle ml-1" data-tactic="${tactic.name.replace(/"/g, "&quot;")}" title="Toggle the +${tactic.attackBonus} ${scopeWord}to-hit bonus for ${tactic.condition || "this tactic"} — applies to ${tactic.attackType || "all"} attacks only">${on ? `✓ +${tactic.attackBonus} ON` : `+${tactic.attackBonus} off`}</button>`;
+						toggleBtnHtml = csCombatStateToggle({
+							state: on ? "on" : "off",
+							labelPrefix: `${tactic.name} to-hit bonus`,
+							ariaState: on ? `+${tactic.attackBonus} active` : "off",
+							title: `Toggle the +${tactic.attackBonus} ${scopeWord}to-hit bonus for ${tactic.condition || "this tactic"} — applies to ${tactic.attackType || "all"} attacks only`,
+							domClass: "charsheet__combat-fighter-tactic-toggle ml-1",
+							vocab: {
+								on: {label: `+${tactic.attackBonus} ON`, icon: "check"},
+								off: {label: `+${tactic.attackBonus} OFF`},
+							},
+							attrs: {"data-tactic": tactic.name},
+						});
 					}
 				}
 				// Crit-range / advantage riders come WITH the (level-gated) reaction, so only
@@ -9648,26 +9691,26 @@ class CharacterSheetCombat {
 				let reactionHtml = "";
 				if (tactic.reaction) {
 					const lockBadge = locked
-						? `<span class="badge badge-danger ml-1" title="Requires Fighter level ${tactic.fighterLevel}">🔒 Lvl ${tactic.fighterLevel}</span>`
-						: `<span class="badge badge-outline-secondary ml-1" title="Reaction">🔄 Reaction</span>`;
+						? `<span class="cs-combat-chip cs-combat-chip--locked ml-1" title="Requires Fighter level ${tactic.fighterLevel}">${csCombatIcon("lock")}<span>Lvl ${tactic.fighterLevel}</span></span>`
+						: `${csCombatActionChip("reaction", {cls: "ml-1"})}`;
 					reactionHtml = `<div class="ve-small ${locked ? "ve-muted" : ""} mt-1">${lockBadge} <span class="bold">${tactic.reaction.name}:</span> ${tactic.reaction.trigger} — ${tactic.reaction.effect}</div>`;
 					// Last Ditch Evasion is the one Battle Tactic with an in-play side effect
 					// (it applies the Slowed condition), so it gets a real "use" button. When
 					// hit by an attack you take NO damage and become Slowed — this button is the
 					// reaction trigger (LDE is NOT a Dex-save-for-half effect).
 					if (!locked && this._state.getFeatureCalculations?.().hasLastDitchEvasion && /^last ditch evasion$/i.test(tactic.name)) {
-						reactionHtml += `<div class="mt-1"><button class="ve-btn ve-btn-xs ve-btn-primary charsheet__combat-lde-use" title="When you're hit by an attack: take no damage and become Slowed until the end of your next turn">🛡️ Use Last Ditch Evasion (avoid all damage + Slowed)</button></div>`;
+						reactionHtml += `<div class="cs-combat-feature__options mt-1"><button class="cs-combat-btn cs-combat-btn--primary charsheet__combat-lde-use" title="When you're hit by an attack: take no damage and become Slowed until the end of your next turn">${csCombatIcon("reaction")}<span>Use Last Ditch Evasion (avoid all damage + Slowed)</span></button></div>`;
 					}
 				}
 
 				html += `
 					<div class="charsheet__combat-fighter-tactic cs-combat-feature mb-2">
-						<div class="ve-flex ve-flex-v-center ve-flex-wrap gap-1">
-							<span class="bold">${nameHtml}</span>
+						<div class="cs-combat-feature__title ve-flex-wrap">
+							${csCombatIcon("stance")}<span>${nameHtml}</span>
 							${badges.join(" ")}
 							${toggleBtnHtml}
 						</div>
-						${tactic.condition && !tactic.reaction ? `<div class="ve-small ve-muted mt-1">Condition: ${tactic.condition}</div>` : ""}
+						${tactic.condition && !tactic.reaction ? `<div class="cs-combat-feature__summary">Condition: ${tactic.condition}</div>` : ""}
 						${reactionHtml}
 					</div>`;
 			});
@@ -9737,7 +9780,7 @@ class CharacterSheetCombat {
 			const slowedStr = res.slowedApplied
 				? " You become Slowed until the end of your next turn."
 				: " (Already Slowed.)";
-			JqueryUtil.doToast({type: "success", content: `🛡️ Last Ditch Evasion: you take no damage.${slowedStr}`});
+			JqueryUtil.doToast({type: "success", content: `Last Ditch Evasion: you take no damage.${slowedStr}`});
 			refresh();
 		});
 	}
