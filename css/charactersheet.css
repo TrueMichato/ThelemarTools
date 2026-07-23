@@ -12464,6 +12464,17 @@ body.has-quickbuild-overlay .toast__container {
 	grid-column: 1 / -1;
 }
 
+/* Known Arcane Shot chip — full-border pill (retires the inline side-stripe
+   marker). Neutral chip; Phase D gives it the StatusStrip/StateToggle
+   treatment shared with the other Combat Resources fold-ins. */
+.charsheet__arcane-shot-pill {
+	display: inline-block;
+	padding: 0.05rem 0.5rem;
+	margin: 0 0.4rem 0.25rem 0;
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-full, 9999px);
+}
+
 /* Grid gap owns the spacing; neutralize the generated mb-2 on cards. */
 .charsheet__combat-resources-list > .charsheet__combat-resource-item {
 	margin-bottom: 0;
@@ -12720,14 +12731,23 @@ body.has-quickbuild-overlay .toast__container {
 }
 
 /* FeatureBlock — tokenized bordered/tinted block (no side-stripes) */
+/* FeatureBlock — tokenized bordered/tinted block that retires the JS inline
+   `border-left: Npx solid …` side-stripes (Fighter / Vitality / Combat
+   Methods / action-modal info blocks). A subtle full 1px border + slightly
+   recessed background reads as a grouped sub-feature inside a section card
+   without the nested-card weight. Block model (not flex-gap) so migrated
+   blocks that space their own children with margin utilities keep their
+   rhythm; the shell's own __* children carry their spacing explicitly. */
 .cs-combat-feature {
-	display: flex;
-	flex-direction: column;
-	gap: var(--cs-space-xs, 0.25rem);
 	padding: var(--cs-space-sm, 0.5rem);
 	background: var(--cs-bg-base, rgba(0, 0, 0, 0.12));
 	border: 1px solid var(--cs-border, var(--rgb-border-grey));
 	border-radius: var(--cs-radius-sm, 6px);
+}
+
+/* Two feature blocks stacked with no utility margin between them. */
+.cs-combat-feature + .cs-combat-feature {
+	margin-top: var(--cs-space-sm, 0.5rem);
 }
 
 .cs-combat-feature__title {
@@ -12749,11 +12769,43 @@ body.has-quickbuild-overlay .toast__container {
 	display: flex;
 	flex-wrap: wrap;
 	gap: var(--cs-space-xs, 0.25rem);
+	margin-top: var(--cs-space-xs, 0.25rem);
 }
 
 .cs-combat-feature__summary {
 	font-size: var(--cs-text-xs, 0.75rem);
 	color: var(--cs-text-muted, var(--rgb-muted));
+	margin-top: var(--cs-space-xs, 0.25rem);
+}
+
+/* PoolDisplay caption — one canonical `N / M (recharge)` grammar for every
+   resource pool (Second Wind, Action Surge, stamina, synthetic pools). Pairs
+   with the existing pip health-bar; the caption is the read-at-a-glance count.
+   Colour encodes availability (never colour alone — the count is the text). */
+.cs-combat-pool {
+	display: inline-flex;
+	align-items: baseline;
+	gap: var(--cs-space-2xs, 2px);
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-variant-numeric: tabular-nums;
+	color: var(--cs-text-secondary, inherit);
+}
+
+.cs-combat-pool__count {
+	font-weight: var(--cs-weight-bold, 700);
+	color: var(--cs-text-primary, inherit);
+}
+
+.cs-combat-pool__max {
+	color: var(--cs-text-muted, var(--rgb-muted));
+}
+
+.cs-combat-pool__recharge {
+	color: var(--cs-text-muted, var(--rgb-muted));
+}
+
+.cs-combat-pool--empty .cs-combat-pool__count {
+	color: var(--cs-danger, #f26161);
 }
 
 /* ActionButton — shared combat button vocabulary (labels stay class-authored) */
@@ -12800,6 +12852,36 @@ body.has-quickbuild-overlay .toast__container {
 .cs-combat-btn__cost {
 	opacity: 0.75;
 	font-weight: var(--cs-weight-regular, 400);
+}
+
+/* ActionButton variants — shared combat verb vocabulary mapped to the intents
+   the class renderers already express (use/enter → primary, spend/surge →
+   spend, heal → heal, end/burn → danger, reset → the neutral base). Labels
+   stay class-authored; only the visual weight is standardized. Consumed as
+   each class surface is migrated onto the shell (Phase C). */
+.cs-combat-btn--primary,
+.cs-combat-btn--primary:hover:not(:disabled) {
+	background: var(--cs-primary-strong, var(--rgb-link));
+	border-color: var(--cs-primary-strong, var(--rgb-link));
+	color: #fff;
+}
+
+.cs-combat-btn--spend {
+	background: var(--cs-warning-light, rgba(245, 158, 11, 0.14));
+	border-color: var(--cs-warning, #f59e0b);
+	color: var(--cs-warning-text, var(--cs-warning, #f59e0b));
+}
+
+.cs-combat-btn--heal {
+	background: var(--cs-success-light, rgba(16, 185, 129, 0.12));
+	border-color: var(--cs-success, #10b981);
+	color: var(--cs-success-text, var(--cs-success, #10b981));
+}
+
+.cs-combat-btn--danger {
+	background: var(--cs-danger-light, rgba(239, 68, 68, 0.12));
+	border-color: var(--cs-danger, #f26161);
+	color: var(--cs-danger, #f26161);
 }
 
 .cs-combat-icon {

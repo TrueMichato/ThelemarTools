@@ -30,6 +30,21 @@ const CS_COMBAT_ICONS = {
 	"dice": "fa-dice-d6",
 	"dc": "fa-shield-halved",
 	"none": "fa-minus",
+	// Action-economy trio (retires the ⚔️/⚡/🛡️ action badges).
+	"action": "fa-hand-fist",
+	"bonus": "fa-bolt-lightning",
+	"reaction": "fa-shield",
+	// Verb vocabulary shared across the class surfaces (Fighter/Vitality/
+	// Barbarian/Method migrations, Phase C).
+	"heal": "fa-heart-pulse",
+	"surge": "fa-fire-flame-curved",
+	"reset": "fa-rotate-left",
+	"refresh": "fa-rotate",
+	"rest": "fa-bed",
+	"stance": "fa-hand-back-fist",
+	"weapon": "fa-khanda",
+	"spark": "fa-star",
+	"info": "fa-circle-info",
 };
 
 /**
@@ -45,6 +60,26 @@ function csCombatIcon (name, {cls = ""} = {}) {
 	if (fa) return `<i class="fas ${fa} fa-fw cs-combat-icon${cls ? ` ${cls}` : ""}" aria-hidden="true"></i>`;
 	// Graceful fallback: render the raw string (e.g. a user-authored emoji) as a glyph.
 	return `<span class="cs-combat-icon cs-combat-icon--glyph${cls ? ` ${cls}` : ""}" aria-hidden="true">${name == null ? "" : String(name)}</span>`;
+}
+
+/**
+ * Render a canonical PoolDisplay caption (`N / M` with an optional recharge
+ * note) as an HTML string. One caption grammar across every pool surface —
+ * generic pools, synthetics, and bespoke pools (Seals, Conduit dice, Wild
+ * Shape, SP) — so "how many do I have left" always reads the same. The
+ * count/max split is spanned so screen readers announce "3 of 5". Marks
+ * itself `--empty` at 0 so exhausted pools read consistently.
+ * @param {number} current
+ * @param {number} max
+ * @param {{recharge?: string, cls?: string}} [opts] recharge e.g. "short rest".
+ * @returns {string}
+ */
+function csCombatPoolCaption (current, max, {recharge = "", cls = ""} = {}) {
+	const cur = Number(current) || 0;
+	const mx = Number(max) || 0;
+	const empty = cur <= 0 ? " cs-combat-pool--empty" : "";
+	const rechargeHtml = recharge ? ` <span class="cs-combat-pool__recharge">(${recharge})</span>` : "";
+	return `<span class="cs-combat-pool${empty}${cls ? ` ${cls}` : ""}"><span class="cs-combat-pool__count">${cur}</span><span class="cs-combat-pool__sep" aria-hidden="true"> / </span><span class="cs-combat-pool__max">${mx}</span><span class="ve-hidden"> remaining</span>${rechargeHtml}</span>`;
 }
 
 class CharacterSheetCombat {
@@ -6533,8 +6568,8 @@ class CharacterSheetCombat {
 		if (!lines.length) return null;
 
 		return e_({outer: `
-			<div class="charsheet__action-modal-effects mb-3 p-2 ve-small" style="background: var(--bg-faint, #f8f9fa); border-radius: 4px; border-left: 3px solid var(--color-primary, #4a90d9);">
-				<div class="bold mb-1 ve-muted">Effects on Use</div>
+			<div class="charsheet__action-modal-effects cs-combat-feature mb-3 ve-small">
+				<div class="cs-combat-feature__title ve-muted mb-1">Effects on Use</div>
 				${lines.map(l => `<div class="mb-1">${l}</div>`).join("")}
 			</div>
 		`});
@@ -6763,7 +6798,7 @@ class CharacterSheetCombat {
 		if (!lines.length) return null;
 
 		return e_({outer: `
-			<div class="charsheet__action-modal-specific mb-3 p-2 ve-small" style="background: var(--bg-faint, #f8f9fa); border-radius: 4px; border-left: 3px solid var(--color-secondary, #6c757d);">
+			<div class="charsheet__action-modal-specific cs-combat-feature mb-3 ve-small">
 				${lines.map(l => `<div class="mb-1">${l}</div>`).join("")}
 			</div>
 		`});
@@ -7943,7 +7978,7 @@ class CharacterSheetCombat {
 					try { nameHtml = this._page.getHoverLink(UrlUtil.PG_OPT_FEATURES, shot.name, shot.source); } catch (e) { nameHtml = shot.name; }
 				}
 				const srcAbbr = shot.source ? Parser.sourceJsonToAbv(shot.source) : "";
-				return `<span class="charsheet__arcane-shot-pill ve-small" style="display:inline-block; border-left: 2px solid var(--rgb-link); padding: 0 0.4rem; margin: 0 0.4rem 0.25rem 0;"><span class="bold">${nameHtml}</span>${srcAbbr ? ` <span class="ve-muted">(${srcAbbr})</span>` : ""}</span>`;
+				return `<span class="charsheet__arcane-shot-pill ve-small"><span class="bold">${nameHtml}</span>${srcAbbr ? ` <span class="ve-muted">(${srcAbbr})</span>` : ""}</span>`;
 			}).join("");
 			section.insertAdjacentHTML("beforeend", `<div class="charsheet__arcane-shot-known ve-flex ve-flex-wrap mt-1">${shotsHtml}</div>`);
 		}
@@ -9339,7 +9374,7 @@ class CharacterSheetCombat {
 			const hasStaminaEnthusiast = !!calcs.hasStaminaEnthusiast;
 			const staminaGain = calcs.staminaEnthusiastStaminaGain ?? 0;
 			html += `
-				<div class="charsheet__combat-fighter-feature mb-3" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
+				<div class="charsheet__combat-fighter-feature cs-combat-feature mb-3">
 					<div class="ve-flex-v-center gap-2 ve-flex-wrap">
 						<span class="bold">Second Wind</span>
 						<span class="badge badge-outline-secondary" title="Action economy">⚡ Bonus Action</span>
@@ -9369,7 +9404,7 @@ class CharacterSheetCombat {
 			const asMax = this._state.getActionSurgeUsesMax?.() ?? 0;
 			const asRemaining = this._state.getActionSurgeUsesRemaining?.() ?? 0;
 			html += `
-				<div class="charsheet__combat-fighter-feature mb-3" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
+				<div class="charsheet__combat-fighter-feature cs-combat-feature mb-3">
 					<div class="ve-flex-v-center gap-2 ve-flex-wrap">
 						<span class="bold">Action Surge</span>
 						<span class="badge badge-outline-secondary" title="Action economy">⚔️ Special (no action)</span>
@@ -9440,7 +9475,7 @@ class CharacterSheetCombat {
 				}
 
 				html += `
-					<div class="charsheet__combat-fighter-tactic mb-2" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
+					<div class="charsheet__combat-fighter-tactic cs-combat-feature mb-2">
 						<div class="ve-flex ve-flex-v-center ve-flex-wrap gap-1">
 							<span class="bold">${nameHtml}</span>
 							${badges.join(" ")}
@@ -9561,7 +9596,7 @@ class CharacterSheetCombat {
 
 		// ===== Vitality Surge (self temp HP on Rage activation) =====
 		html += `
-			<div class="charsheet__combat-vitality-feature mb-3" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
+			<div class="charsheet__combat-vitality-feature cs-combat-feature mb-3">
 				<div class="ve-flex-v-center gap-2 ve-flex-wrap">
 					<span class="bold">Vitality Surge</span>
 					<span class="badge ${rageActive ? "badge-success" : "badge-outline-secondary"}" title="Applied automatically when you activate your Rage">Temp HP = Barbarian level (${surge})</span>
@@ -9571,7 +9606,7 @@ class CharacterSheetCombat {
 
 		// ===== Life-Giving Force (grant an ally temp HP at start of your turns while raging) =====
 		html += `
-			<div class="charsheet__combat-vitality-feature" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
+			<div class="charsheet__combat-vitality-feature cs-combat-feature">
 				<div class="ve-flex-v-center gap-2 ve-flex-wrap">
 					<span class="bold">Life-Giving Force</span>
 					<span class="badge badge-info" title="Roll this many d6 and sum them">${rageDamage}d6</span>
@@ -9580,7 +9615,7 @@ class CharacterSheetCombat {
 
 		if (rageActive) {
 			html += `
-				<div class="charsheet__combat-vitality-reminder mt-2 mb-1" style="border-radius: 4px; padding: 0.35rem 0.5rem; background: rgba(60, 160, 90, 0.14);">
+				<div class="charsheet__combat-vitality-reminder mt-2 mb-1" style="border-radius: 4px; padding: 0.35rem 0.5rem; background: var(--cs-success-light, rgba(60, 160, 90, 0.14));">
 					<span title="Life-Giving Force triggers at the start of each of your turns while raging">🌱 <span class="bold">Round-start reminder:</span> grant an ally within 10 ft <span class="bold">${rageDamage}d6</span> Temp HP.</span>
 				</div>
 				<div class="ve-flex-v-center gap-1 ve-flex-wrap mt-1">
@@ -9710,7 +9745,7 @@ class CharacterSheetCombat {
 				}
 
 				const methodEl = e_({outer: `
-					<div class="charsheet__method-item mb-1 p-1 ve-flex ve-flex-v-center ve-flex-h-space-between" style="border-left: 2px solid var(--rgb-link); padding-left: 0.5rem;">
+					<div class="charsheet__method-item cs-combat-feature mb-1 ve-flex ve-flex-v-center ve-flex-h-space-between">
 						<div class="ve-flex ve-flex-v-center ve-flex-wrap">
 							<span class="charsheet__method-name" style="font-weight: bold;">${methodNameHtml}</span>
 							<span class="ve-muted ve-small ml-2">(${degree}${this._getOrdinalSuffix(degree)})</span>
