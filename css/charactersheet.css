@@ -12730,6 +12730,17 @@ body.has-quickbuild-overlay .toast__container {
 	color: var(--cs-danger, #f26161);
 }
 
+/* Highlighted round-start / active-trigger reminder — a tinted, padded box
+   (retires the JS inline `background: var(--cs-success-light …)` style on the
+   Vitality Life-Giving Force reminder). Icon + text; colour never alone. */
+.cs-combat-notice--success {
+	padding: 0.35rem 0.5rem;
+	border-radius: var(--cs-radius-sm, 6px);
+	background: var(--cs-success-light, rgba(60, 160, 90, 0.14));
+	color: var(--cs-text-primary, inherit);
+	align-items: flex-start;
+}
+
 /* FeatureBlock — tokenized bordered/tinted block (no side-stripes) */
 /* FeatureBlock — tokenized bordered/tinted block that retires the JS inline
    `border-left: Npx solid …` side-stripes (Fighter / Vitality / Combat

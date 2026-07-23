@@ -9826,9 +9826,9 @@ class CharacterSheetCombat {
 		// ===== Vitality Surge (self temp HP on Rage activation) =====
 		html += `
 			<div class="charsheet__combat-vitality-feature cs-combat-feature mb-3">
-				<div class="ve-flex-v-center gap-2 ve-flex-wrap">
-					<span class="bold">Vitality Surge</span>
-					<span class="badge ${rageActive ? "badge-success" : "badge-outline-secondary"}" title="Applied automatically when you activate your Rage">Temp HP = Barbarian level (${surge})</span>
+				<div class="cs-combat-feature__title">
+					${csCombatIcon("heal")}<span>Vitality Surge</span>
+					${csCombatConditionPill({variant: rageActive ? "met" : "none", icon: rageActive ? "check" : "none", label: `Temp HP +${surge}`, title: rageActive ? `Granted this Rage — Temp HP = Barbarian level (${surge})` : `Applied automatically when you activate your Rage — Temp HP = Barbarian level (${surge})`})}
 				</div>
 				<div class="ve-small ve-muted mt-1">When you activate your Rage you gain <span class="bold">${surge}</span> Temporary Hit Points${rageActive ? " (granted this Rage)." : "."}</div>
 			</div>`;
@@ -9836,19 +9836,19 @@ class CharacterSheetCombat {
 		// ===== Life-Giving Force (grant an ally temp HP at start of your turns while raging) =====
 		html += `
 			<div class="charsheet__combat-vitality-feature cs-combat-feature">
-				<div class="ve-flex-v-center gap-2 ve-flex-wrap">
-					<span class="bold">Life-Giving Force</span>
-					<span class="badge badge-info" title="Roll this many d6 and sum them">${rageDamage}d6</span>
+				<div class="cs-combat-feature__title">
+					${csCombatIcon("heal")}<span>Life-Giving Force</span>
+					<span class="cs-combat-chip" title="Roll this many d6 and sum them">${csCombatIcon("dice")}<span>${rageDamage}d6</span></span>
 				</div>
 				<div class="ve-small ve-muted mt-1">At the <span class="bold">start of each of your turns</span> while raging, you can give one creature within 10 ft Temp HP equal to <span class="bold">${rageDamage}d6</span> (summed). These temp HP vanish when your Rage ends.</div>`;
 
 		if (rageActive) {
 			html += `
-				<div class="charsheet__combat-vitality-reminder mt-2 mb-1" style="border-radius: 4px; padding: 0.35rem 0.5rem; background: var(--cs-success-light, rgba(60, 160, 90, 0.14));">
-					<span title="Life-Giving Force triggers at the start of each of your turns while raging">🌱 <span class="bold">Round-start reminder:</span> grant an ally within 10 ft <span class="bold">${rageDamage}d6</span> Temp HP.</span>
+				<div class="cs-combat-notice cs-combat-notice--success mt-2 mb-1">
+					${csCombatIcon("spark")}<span title="Life-Giving Force triggers at the start of each of your turns while raging"><span class="bold">Round-start reminder:</span> grant an ally within 10 ft <span class="bold">${rageDamage}d6</span> Temp HP.</span>
 				</div>
-				<div class="ve-flex-v-center gap-1 ve-flex-wrap mt-1">
-					<button class="ve-btn ve-btn-xs ve-btn-success charsheet__combat-vitality-roll" title="Roll ${rageDamage}d6 and total the Temp HP to grant an ally">🎲 Roll Life-Giving Force (${rageDamage}d6)</button>
+				<div class="cs-combat-feature__options mt-1">
+					<button class="cs-combat-btn cs-combat-btn--heal charsheet__combat-vitality-roll" title="Roll ${rageDamage}d6 and total the Temp HP to grant an ally">${csCombatIcon("dice")}<span>Roll Life-Giving Force (${rageDamage}d6)</span></button>
 				</div>`;
 		} else {
 			html += `<div class="ve-small ve-muted mt-1"><em>Activate Rage to use Life-Giving Force each round.</em></div>`;
@@ -9862,7 +9862,7 @@ class CharacterSheetCombat {
 			const {total, rolls} = this._rollLifeGivingForce(rageDamage);
 			JqueryUtil.doToast({
 				type: "success",
-				content: `🌱 Life-Giving Force: grant an ally within 10 ft <strong>${total}</strong> Temp HP (${rageDamage}d6 [${rolls.join(", ")}]). These vanish when your Rage ends.`,
+				content: `Life-Giving Force: grant an ally within 10 ft <strong>${total}</strong> Temp HP (${rageDamage}d6 [${rolls.join(", ")}]). These vanish when your Rage ends.`,
 			});
 		});
 	}
