@@ -9112,7 +9112,6 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__combat-druid {
 	display: flex;
 	flex-direction: column;
-	gap: 0.5rem;
 }
 
 .charsheet__combat-druid-block {

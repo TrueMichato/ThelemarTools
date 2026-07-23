@@ -46,6 +46,9 @@ const CS_COMBAT_ICONS = {
 	"spark": "fa-star",
 	"info": "fa-circle-info",
 	"lock": "fa-lock",
+	// Druid nature-magic vocabulary (retires the 🐻/🧚 emoji labels).
+	"beast": "fa-paw",
+	"familiar": "fa-hat-wizard",
 };
 
 /**
@@ -9381,21 +9384,21 @@ class CharacterSheetCombat {
 		const beastStatsHtml = ws.inForm ? CharacterSheetClassUtils.buildCreatureStatLineHtml(ws.beast) : "";
 		if (ws.has) {
 			html += `
-				<div class="charsheet__combat-druid-block">
-					<div class="ve-flex-v-center ve-flex-h-between mb-1">
-						<span class="charsheet__combat-druid-label">🐻 Wild Shape</span>
-						<span class="badge ${ws.current > 0 ? "badge-info" : "badge-danger"}" title="Wild Shape uses remaining">${ws.current}/${ws.max}</span>
+				<div class="charsheet__combat-druid-block cs-combat-feature">
+					<div class="cs-combat-feature__title">
+						${csCombatIcon("beast")}<span class="charsheet__combat-druid-label">Wild Shape</span>
+						${csCombatPoolCaption(ws.current, ws.max)}
 					</div>
-					${ws.rechargeLabel ? `<div class="ve-small ve-muted charsheet__combat-druid-note">${ws.rechargeLabel}</div>` : ""}
-					${ws.inForm ? `<div class="ve-small charsheet__combat-druid-active">Currently: ${beastNameHtml}</div>${beastStatsHtml ? `<div class="ve-small ve-muted charsheet__combat-druid-beaststats">${beastStatsHtml}</div>` : ""}` : ""}
-					${ws.usesKnownForms ? `<div class="ve-small ve-muted charsheet__combat-druid-knownforms">Known Forms: ${ws.knownForms.length}/${ws.knownFormsMax}</div>` : ""}
-					<div class="charsheet__combat-druid-actions">
+					${ws.rechargeLabel ? `<div class="ve-small ve-muted charsheet__combat-druid-note mt-1">${ws.rechargeLabel}</div>` : ""}
+					${ws.inForm ? `<div class="ve-small charsheet__combat-druid-active mt-1">Currently: ${beastNameHtml}</div>${beastStatsHtml ? `<div class="ve-small ve-muted charsheet__combat-druid-beaststats">${beastStatsHtml}</div>` : ""}` : ""}
+					${ws.usesKnownForms ? `<div class="ve-small ve-muted charsheet__combat-druid-knownforms mt-1">Known Forms: ${ws.knownForms.length}/${ws.knownFormsMax}</div>` : ""}
+					<div class="charsheet__combat-druid-actions cs-combat-feature__options">
 						${ws.inForm
-		? `<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__combat-druid-end" title="Revert to your normal form (no use refunded)">End Wild Shape</button>`
-		: `<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__combat-druid-transform" ${ws.canTransform ? "title=\"Pick a beast to assume; spends 1 use after you choose\"" : "disabled title=\"No Wild Shape uses remaining\""}>Transform…</button>`}
-						${ws.usesKnownForms ? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__combat-druid-addform" ${ws.canAddForm ? "title=\"Learn a new Beast form\"" : "disabled title=\"You already know the maximum number of forms\""}>Add Form…</button>` : ""}
-						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-druid-minus" ${ws.current > 0 ? "title=\"Spend 1 Wild Shape use\"" : "disabled title=\"No uses to spend\""}>−</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-druid-plus" ${ws.current < ws.max ? "title=\"Restore 1 Wild Shape use\"" : "disabled title=\"Already at maximum\""}>+</button>
+		? `<button class="cs-combat-btn cs-combat-btn--danger charsheet__combat-druid-end" title="Revert to your normal form (no use refunded)">${csCombatIcon("reset")}<span>End Wild Shape</span></button>`
+		: `<button class="cs-combat-btn cs-combat-btn--primary charsheet__combat-druid-transform" ${ws.canTransform ? "title=\"Pick a beast to assume; spends 1 use after you choose\"" : "disabled title=\"No Wild Shape uses remaining\""}>${csCombatIcon("beast")}<span>Transform…</span></button>`}
+						${ws.usesKnownForms ? `<button class="cs-combat-btn charsheet__combat-druid-addform" ${ws.canAddForm ? "title=\"Learn a new Beast form\"" : "disabled title=\"You already know the maximum number of forms\""}>Add Form…</button>` : ""}
+						<button class="cs-combat-btn charsheet__combat-druid-minus" ${ws.current > 0 ? "title=\"Spend 1 Wild Shape use\"" : "disabled title=\"No uses to spend\""} aria-label="Spend one Wild Shape use">−</button>
+						<button class="cs-combat-btn charsheet__combat-druid-plus" ${ws.current < ws.max ? "title=\"Restore 1 Wild Shape use\"" : "disabled title=\"Already at maximum\""} aria-label="Restore one Wild Shape use">+</button>
 					</div>
 				</div>`;
 		}
@@ -9404,13 +9407,13 @@ class CharacterSheetCombat {
 		const wc = summary.wildCompanion;
 		if (wc.has) {
 			html += `
-				<div class="charsheet__combat-druid-block">
-					<div class="ve-flex-v-center ve-flex-h-between mb-1">
-						<span class="charsheet__combat-druid-label">🧚 Wild Companion</span>
+				<div class="charsheet__combat-druid-block cs-combat-feature">
+					<div class="cs-combat-feature__title">
+						${csCombatIcon("familiar")}<span class="charsheet__combat-druid-label">Wild Companion</span>
 					</div>
-					<div class="ve-small ve-muted charsheet__combat-druid-note">Spends 1 Wild Shape use to summon a Fey familiar${wc.duration ? ` (${wc.duration})` : ""}.</div>
-					<div class="charsheet__combat-druid-actions">
-						<button class="ve-btn ve-btn-xs ve-btn-info charsheet__combat-druid-summon" ${wc.canSummon ? "title=\"Open the familiar picker; spends 1 Wild Shape use\"" : "disabled title=\"No Wild Shape uses remaining\""}>Summon Familiar</button>
+					<div class="ve-small ve-muted charsheet__combat-druid-note mt-1">Spends 1 Wild Shape use to summon a Fey familiar${wc.duration ? ` (${wc.duration})` : ""}.</div>
+					<div class="charsheet__combat-druid-actions cs-combat-feature__options">
+						<button class="cs-combat-btn cs-combat-btn--primary charsheet__combat-druid-summon" ${wc.canSummon ? "title=\"Open the familiar picker; spends 1 Wild Shape use\"" : "disabled title=\"No Wild Shape uses remaining\""}>${csCombatIcon("familiar")}<span>Summon Familiar</span></button>
 					</div>
 				</div>`;
 		}
@@ -9419,16 +9422,16 @@ class CharacterSheetCombat {
 		const zo = summary.zodiac;
 		if (zo.has) {
 			html += `
-				<div class="charsheet__combat-druid-block">
-					<div class="ve-flex-v-center ve-flex-h-between mb-1">
-						<span class="charsheet__combat-druid-label">🌟 Zodiac Form</span>
+				<div class="charsheet__combat-druid-block cs-combat-feature">
+					<div class="cs-combat-feature__title">
+						${csCombatIcon("spark")}<span class="charsheet__combat-druid-label">Zodiac Form</span>
 					</div>
 					${zo.activeFormName
-		? `<div class="ve-small charsheet__combat-druid-active">Active: <span class="ve-bold charsheet__combat-druid-zodiac-name"></span></div>`
-		: `<div class="ve-small ve-muted charsheet__combat-druid-note">No constellation assumed.</div>`}
-					<div class="charsheet__combat-druid-actions">
-						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-druid-zodiac-choose" ${zo.canChoose ? "title=\"Open the constellation picker; spends 1 Wild Shape use\"" : "disabled title=\"No Wild Shape uses remaining\""}>Choose Zodiac Form…</button>
-						${zo.activeFormName ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-druid-zodiac-dismiss" title="Dismiss the active Zodiac Form (no use refunded)">Dismiss</button>` : ""}
+		? `<div class="ve-small charsheet__combat-druid-active mt-1">Active: <span class="ve-bold charsheet__combat-druid-zodiac-name"></span></div>`
+		: `<div class="ve-small ve-muted charsheet__combat-druid-note mt-1">No constellation assumed.</div>`}
+					<div class="charsheet__combat-druid-actions cs-combat-feature__options">
+						<button class="cs-combat-btn cs-combat-btn--primary charsheet__combat-druid-zodiac-choose" ${zo.canChoose ? "title=\"Open the constellation picker; spends 1 Wild Shape use\"" : "disabled title=\"No Wild Shape uses remaining\""}>${csCombatIcon("spark")}<span>Choose Zodiac Form…</span></button>
+						${zo.activeFormName ? `<button class="cs-combat-btn charsheet__combat-druid-zodiac-dismiss" title="Dismiss the active Zodiac Form (no use refunded)">Dismiss</button>` : ""}
 					</div>
 				</div>`;
 		}
