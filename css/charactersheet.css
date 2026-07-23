@@ -12463,6 +12463,22 @@ body.has-quickbuild-overlay .toast__container {
 	grid-column: 1 / -1;
 }
 
+/* Arcane Shot fold-in separator — tokenized (retires the JS inline border/pad). */
+.charsheet__arcane-shot-section {
+	border-top: 1px solid var(--cs-border, var(--rgb-border-grey));
+	padding-top: var(--cs-space-sm, 0.5rem);
+}
+
+/* Arcane Shot post-roll picker rows/footer — tokenized (retires inline styles). */
+.charsheet__arcaneshot-opt-row {
+	margin-bottom: var(--cs-space-xs, 6px);
+}
+
+.charsheet__arcaneshot-pick__footer {
+	gap: var(--cs-space-sm, 8px);
+	margin-top: var(--cs-space-md, 12px);
+}
+
 /* Known Arcane Shot chip — full-border pill (retires the inline side-stripe
    marker). Neutral chip; Phase D gives it the StatusStrip/StateToggle
    treatment shared with the other Combat Resources fold-ins. */

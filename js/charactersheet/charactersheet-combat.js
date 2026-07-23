@@ -1782,11 +1782,11 @@ class CharacterSheetCombat {
 					try { nameHtml = this._page.getHoverLink(UrlUtil.PG_OPT_FEATURES, shot.name, shot.source); } catch (e) { nameHtml = shot.name; }
 				}
 				return `
-					<div class="charsheet__arcaneshot-opt-row ve-flex ve-flex-v-center ve-flex-wrap gap-1" style="margin-bottom:6px;">
+					<div class="charsheet__arcaneshot-opt-row ve-flex ve-flex-v-center ve-flex-wrap gap-1">
 						<span class="bold">${nameHtml}</span>
 						${srcAbbr ? `<span class="ve-muted ve-small">(${srcAbbr})</span>` : ""}
 						${dmgBadge}
-						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__arcaneshot-opt ml-auto" data-idx="${i}" title="Apply this Arcane Shot">Apply</button>
+						<button class="cs-combat-btn cs-combat-btn--primary charsheet__arcaneshot-opt ml-auto" data-idx="${i}" title="Apply this Arcane Shot">${csCombatIcon("target")}<span>Apply</span></button>
 					</div>`;
 			}).join("");
 
@@ -1797,8 +1797,8 @@ class CharacterSheetCombat {
 						(${remaining} remaining)${dc != null ? `; targets must make a DC ${dc} ${ability} save where noted` : ""}. Hover a name for its effect.
 					</p>
 					<div class="charsheet__arcaneshot-pick__opts">${rowsHtml}</div>
-					<div class="ve-flex-h-right" style="gap: 8px; margin-top: 12px;">
-						<button class="ve-btn ve-btn-default" data-act="none">None / cancel</button>
+					<div class="ve-flex-h-right charsheet__arcaneshot-pick__footer">
+						<button class="cs-combat-btn" data-act="none">None / cancel</button>
 					</div>
 				</div>
 			`;
@@ -8179,30 +8179,30 @@ class CharacterSheetCombat {
 		const hasMagicArrow = !!calcs.hasMagicArrow;
 		const hasCurvingShot = !!calcs.hasCurvingShot;
 
-		const section = e_({outer: `<div class="charsheet__arcane-shot-section mt-3" style="border-top: 1px solid var(--rgb-border-grey, #444); padding-top: 0.5rem;"></div>`});
+		const section = e_({outer: `<div class="charsheet__arcane-shot-section mt-3"></div>`});
 
 		section.insertAdjacentHTML("beforeend", `
 			<div class="ve-flex-v-center gap-2 mb-2 ve-flex-wrap">
-				<strong style="font-size: 1.05em;">🏹 Arcane Shot</strong>
+				<strong style="font-size: 1.05em;">${csCombatIcon("target")}<span>Arcane Shot</span></strong>
 				${dc != null ? `<span class="badge badge-primary" title="Arcane Shot save DC (${ability})">DC ${dc}</span>` : ""}
-				<span class="ve-small ve-muted" title="Uses are tracked by the Arcane Shot pips above">⚡ ${remaining}/${max} — track uses with the pips above</span>
+				<span class="ve-small ve-muted" title="Uses are tracked by the Arcane Shot pips above">${csCombatIcon("info")} ${remaining}/${max} — track uses with the pips above</span>
 			</div>`);
 
 		if (hasEverReady) {
-			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-2">✦ <span class="bold">Ever-Ready Shot:</span> when you roll initiative with no uses left, regain one.${remaining === 0 ? ` <button class="ve-btn ve-btn-xs ve-btn-success charsheet__combat-as-everready ml-1">Regain (initiative)</button>` : ""}</div>`);
+			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mb-2">${csCombatIcon("spark")} <span class="bold">Ever-Ready Shot:</span> when you roll initiative with no uses left, regain one.${remaining === 0 ? ` <button class="cs-combat-btn cs-combat-btn--heal charsheet__combat-as-everready ml-1">${csCombatIcon("refresh")}<span>Regain (initiative)</span></button>` : ""}</div>`);
 		}
 
 		if (hasMagicArrow) {
-			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted">🏹 <span class="bold">Magic Arrow:</span> ranged weapon attacks count as magical.</div>`);
+			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted">${csCombatIcon("spark")} <span class="bold">Magic Arrow:</span> ranged weapon attacks count as magical.</div>`);
 		}
 		if (hasCurvingShot) {
-			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted">↪ <span class="bold">Curving Shot:</span> on a miss with a magic arrow, use a bonus action to reroll against a target in range.</div>`);
+			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted">${csCombatIcon("refresh")} <span class="bold">Curving Shot:</span> on a miss with a magic arrow, use a bonus action to reroll against a target in range.</div>`);
 		}
 
 		if (!knownShots.length) {
 			section.insertAdjacentHTML("beforeend", `<div class="ve-muted ve-small mt-1">No Arcane Shot options known yet. Choose them when you gain or level up the Arcane Archer subclass.</div>`);
 		} else {
-			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mt-1 mb-1"><span class="glyphicon glyphicon-info-sign mr-1"></span>Roll a ranged attack with a bow to choose and apply an Arcane Shot. Hover a name for its effect.</div>`);
+			section.insertAdjacentHTML("beforeend", `<div class="ve-small ve-muted mt-1 mb-1">${csCombatIcon("info")} Roll a ranged attack with a bow to choose and apply an Arcane Shot. Hover a name for its effect.</div>`);
 			const shotsHtml = knownShots.map(shot => {
 				let nameHtml = shot.name;
 				if (this._page?.getHoverLink && shot.source) {
