@@ -13294,12 +13294,46 @@ body.is-charsheet-page .ve-ui-modal__wrapper .ve-btn-primary.disabled {
 	margin-bottom: 20px;
 }
 
+/* Companions column: center the 800px column so the hero header and the empty
+   state share ONE axis (previously the container was left-pinned while the
+   empty state text-centered, so they fought). */
+.charsheet__companions-container {
+	max-width: 800px;
+	margin-inline: auto;
+}
+.charsheet__companions-empty {
+	text-align: center;
+	padding: 40px 20px;
+}
+.charsheet__companions-empty-icon {
+	font-size: 3em;
+	margin-bottom: 12px;
+	opacity: 0.5;
+}
+.charsheet__companions-empty-title {
+	font-size: 1.1em;
+	margin-bottom: 8px;
+}
+
 /* Edit Ability Scores modal: only six short rows, so opt out of the tall
    picker default above and size to content (kills ~200px of dead space).
    Rows are flat divider-separated data rows, not nested cards. */
 body.is-charsheet-page .ve-ui-modal__inner.ve-w-100:has(.charsheet__edit-ability-row) {
 	height: auto !important;
 	max-width: 600px;
+}
+
+/* Content-light modals (Rest, Export): the `.ve-w-100` default pins a fixed
+   height: min(700px, 80vh) that leaves 40-60% dead void below the controls.
+   Opt them out to size-to-content (same pattern as Edit Ability above), capped
+   + centered. The Level-Up *wizard* keeps its deliberate 90vh workspace. */
+body.is-charsheet-page .ve-ui-modal__inner.ve-w-100:has(.charsheet__rest-modal) {
+	height: auto !important;
+	max-width: 600px;
+}
+body.is-charsheet-page .ve-ui-modal__inner.ve-w-100:has(.charsheet__export-info) {
+	height: auto !important;
+	max-width: 680px;
 }
 .charsheet__edit-ability-row {
 	display: flex;

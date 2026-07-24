@@ -2213,7 +2213,7 @@ class CharacterSheetPage {
 
 		// Always show "Add Custom" button
 		const customBtn = e_({outer: `<button class="ve-btn ve-btn-default" style="white-space: nowrap;" title="Add a custom companion manually">
-			<span class="glyphicon glyphicon-plus mr-1"></span>➕ Custom
+			<span class="glyphicon glyphicon-plus mr-1"></span>Custom
 		</button>`});
 		customBtn.addEventListener("click", () => this._onAddCustomCompanion());
 		container.append(customBtn);
@@ -4737,9 +4737,9 @@ class CharacterSheetPage {
 
 		if (companions.length === 0) {
 			list.innerHTML = `
-				<div class="charsheet__companions-empty" style="text-align: center; padding: 40px 20px;">
-					<div style="font-size: 3em; margin-bottom: 12px; opacity: 0.5;">🦉</div>
-					<div class="ve-muted" style="font-size: 1.1em; margin-bottom: 8px;">No active companions</div>
+				<div class="charsheet__companions-empty">
+					<div class="charsheet__companions-empty-icon">🦉</div>
+					<div class="ve-muted charsheet__companions-empty-title">No active companions</div>
 					<div class="ve-muted ve-small">Cast <em>Find Familiar</em> or click the button above to summon one.</div>
 				</div>
 			`;
