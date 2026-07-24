@@ -6060,7 +6060,7 @@ class CharacterSheetPage {
 					</div>
 					<div class="charsheet__ability-hero-save">
 						<span class="charsheet__ability-save-prof ${isProficient ? "active" : ""}">${isProficient ? "●" : "○"}</span>
-						<span class="charsheet__ability-save-label">Save</span>
+						<span class="charsheet__ability-save-label">Saving Throw</span>
 						<span class="charsheet__ability-save-value">${saveModStr}</span>
 					</div>
 					<div class="charsheet__ability-hero-skills">

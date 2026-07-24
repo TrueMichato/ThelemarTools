@@ -2813,8 +2813,6 @@
 	flex-direction: column;
 	gap: 2px;
 	margin-bottom: var(--cs-space-sm, 0.5rem);
-	max-height: 120px;
-	overflow-y: auto;
 }
 
 .charsheet__ability-skill-mini {
@@ -10170,6 +10168,57 @@ body.has-quickbuild-overlay .toast__container {
 	text-transform: uppercase;
 	letter-spacing: var(--cs-tracking-wide, 0.05em);
 	color: var(--cs-text-muted, var(--rgb-text-muted));
+}
+
+/* Backlog Phase C — Notes Appearance recessed inputs + unit hints.
+   Match the recessed textarea affordance beside them (was a borderless
+   underline grid); number fields carry a static unit suffix. */
+.charsheet__appearance-input {
+	width: 100%;
+	background: var(--cs-bg-base, var(--rgb-bg));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-md, 8px);
+	padding: var(--cs-space-xs, 0.35rem) var(--cs-space-sm, 0.5rem);
+	font-family: var(--cs-font-body, inherit);
+	transition: all var(--cs-transition-fast, 0.15s ease);
+}
+
+.charsheet__appearance-input:focus {
+	border-color: var(--cs-primary, #6366f1);
+	box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+	outline: none;
+}
+
+.charsheet__appearance-input-wrap {
+	position: relative;
+	display: block;
+}
+
+/* Hide the number spinners so the unit suffix sits cleanly; the field is
+   still edited by typing (no value/behavior change). */
+.charsheet__appearance-input-wrap .charsheet__appearance-input {
+	padding-right: 2.2rem;
+}
+
+.charsheet__appearance-input[type="number"]::-webkit-outer-spin-button,
+.charsheet__appearance-input[type="number"]::-webkit-inner-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
+}
+
+.charsheet__appearance-input[type="number"] {
+	-moz-appearance: textfield;
+	appearance: textfield;
+}
+
+.charsheet__appearance-unit {
+	position: absolute;
+	right: var(--cs-space-sm, 0.5rem);
+	top: 50%;
+	transform: translateY(-50%);
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-muted, var(--rgb-text-muted));
+	pointer-events: none;
 }
 
 /* Backlog Phase B — empty feature/resource sections compact to a thin line
