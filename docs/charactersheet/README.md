@@ -19,6 +19,7 @@ Welcome to the 5etools Character Sheet system documentation. This comprehensive 
 | [Future Roadmap](./11-future-roadmap.md) | Planned improvements and enhancement opportunities |
 | [Contributing Guide](./12-contributing-guide.md) | How to add features, tests, and documentation |
 | [TGTT Homebrew](./13-tgtt-thelemar-homebrew.md) | Thelemar homebrew: rules, classes, methods, tactics |
+| [Design System Overhaul](./14-design-system-overhaul.md) | Visual/UX redesign: token layer, the two surfaces, Combat Section Shell, governing rules |
 
 ## System at a Glance
 

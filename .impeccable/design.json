@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-24T02:43:40Z",
+  "title": "Design System: 5etools Character Sheet",
+  "extensions": {
+    "colorMeta": {
+      "primary": { "role": "primary", "displayName": "Arcane Indigo", "canonical": "#6366f1", "note": "Day #6366f1 / night #7681f5. The single brand accent: primary action, selection, focus.", "tonalRamp": ["#1a1b4b", "#272a6e", "#3730a3", "#4338ca", "#4f46e5", "#6366f1", "#818cf8", "#c7d2fe"] },
+      "accent-gold": { "role": "secondary", "displayName": "Torchlight Gold", "canonical": "#f59e0b", "note": "Spend/cost/warning. Day deepens to #b45309.", "tonalRamp": ["#451a03", "#7c2d12", "#b45309", "#d97706", "#f59e0b", "#fbbf24", "#fcd34d", "#fef3c7"] },
+      "accent-emerald": { "role": "secondary", "displayName": "Verdant Emerald", "canonical": "#10b981", "note": "On/armed/healed/success. Day deepens to #047857.", "tonalRamp": ["#022c22", "#064e3b", "#047857", "#059669", "#10b981", "#34d399", "#6ee7b7", "#d1fae5"] },
+      "accent-ruby": { "role": "tertiary", "displayName": "Blood Ruby", "canonical": "#f26161", "note": "Used/end/danger + Illrigger summary strips. Day deepens to #dc2626.", "tonalRamp": ["#450a0a", "#7f1d1d", "#b91c1c", "#dc2626", "#f26161", "#f87171", "#fca5a5", "#fee2e2"] },
+      "accent-sapphire": { "role": "tertiary", "displayName": "Sapphire", "canonical": "#4b8ef7", "note": "Reserved data-label accent. Day #2563eb.", "tonalRamp": ["#0a1a3a", "#132a5e", "#1e40af", "#2563eb", "#3b82f6", "#4b8ef7", "#93c5fd", "#dbeafe"] },
+      "accent-amethyst": { "role": "tertiary", "displayName": "Amethyst", "canonical": "#b06bf8", "note": "Reserved flavor/data accent. Day #9333ea.", "tonalRamp": ["#2e1065", "#4c1d95", "#6d28d9", "#7c3aed", "#9333ea", "#a855f7", "#c4b5fd", "#ede9fe"] },
+      "bg-base-night": { "role": "neutral", "displayName": "Slate Canvas (Night)", "canonical": "#0f172a", "note": "Default body background — the room the sheet lives in.", "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1"] },
+      "bg-surface-night": { "role": "neutral", "displayName": "Card Surface (Night)", "canonical": "#1e293b", "note": "Every section + combat card.", "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1"] },
+      "bg-base-day": { "role": "neutral", "displayName": "Slate Canvas (Day)", "canonical": "#eef1f6", "note": "Day body background — a cool near-white, chroma toward slate not warmth.", "tonalRamp": ["#0f172a", "#334155", "#64748b", "#94a3b8", "#cbd5e1", "#e2e8f0", "#eef1f6", "#ffffff"] },
+      "text-primary-night": { "role": "neutral", "displayName": "Ink (Night)", "canonical": "#f1f5f9", "note": "Primary text on the dark canvas.", "tonalRamp": ["#0f172a", "#334155", "#475569", "#64748b", "#98a5b8", "#9fadc0", "#cbd5e1", "#f1f5f9"] },
+      "text-primary-day": { "role": "neutral", "displayName": "Ink (Day)", "canonical": "#0f172a", "note": "Primary text on the light canvas; secondary #475569, muted #5b6675 — lifted off the AI light-gray default to clear AA.", "tonalRamp": ["#0f172a", "#1e293b", "#334155", "#475569", "#5b6675", "#64748b", "#94a3b8", "#cbd5e1"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display (Cinzel)", "purpose": "Character name, page title, hero stat numerals ONLY. Never a UI label." },
+      "headline": { "displayName": "Headline", "purpose": "Modal titles and major panel headings." },
+      "title": { "displayName": "Title", "purpose": "Section-card and feature-block titles." },
+      "body": { "displayName": "Body", "purpose": "Prose and descriptions; cap at 65-75ch." },
+      "label": { "displayName": "Label", "purpose": "Uppercase tracked micro-labels: stat labels, status-strip labels, toggle text. Uppercase at the selector." },
+      "mono": { "displayName": "Mono", "purpose": "Keyboard hints, dice formulas, aligned counts." }
+    },
+    "shadows": [
+      { "name": "ambient-rest", "value": "0 1px 2px rgba(0,0,0,0.3)", "purpose": "Section cards at rest (night). Day: 0 1px 2px rgba(15,23,42,0.06)." },
+      { "name": "hover-lift", "value": "0 4px 6px -1px rgba(0,0,0,0.3), 0 2px 4px -2px rgba(0,0,0,0.3)", "purpose": "Section cards on hover, paired with a border brighten. The only elevation change most surfaces make." },
+      { "name": "focus-glow", "value": "0 0 20px rgba(99,102,241,0.3)", "purpose": "Reserved indigo halo for rare emphasized elements; not a default card treatment." }
+    ],
+    "motion": [
+      { "name": "transition-fast", "value": "150ms cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "State-change transitions on chips, toggles, buttons (hover/active)." },
+      { "name": "transition-normal", "value": "250ms cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Card hover, larger surface transitions." },
+      { "name": "ease-out-quart", "value": "cubic-bezier(0.25, 1, 0.5, 1)", "purpose": "Smooth ease-out for entrances. No bounce/elastic." },
+      { "name": "ease-out-quint", "value": "cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Snappy ease-out; used by the toast slide-in." },
+      { "name": "ease-out-expo", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Confident/decisive ease-out for the most deliberate reveals." }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "390px", "purpose": "Reference small-phone width; combat masonry collapses to one column at =768px." },
+      { "name": "tablet", "value": "768px", "purpose": "Combat masonry single-column threshold." },
+      { "name": "desktop", "value": "1440px", "purpose": "Reference desktop width for two-column masonry + overflow checks." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Section Card",
+      "kind": "card",
+      "refersTo": "section-card",
+      "description": "The Manager view's top-level container: one neutral card surface, hairline border, flat at rest, brightens + lifts on hover. Title uses the Cinzel display face with a 4px indigo marker.",
+      "html": "<section class=\"ds-section\"><h3 class=\"ds-section__title\">Combat Stats</h3><p class=\"ds-section__body\">Section content sits on the card surface. Inner blocks recess to the base tone.</p></section>",
+      "css": ".ds-section { background: var(--cs-bg-surface, #1e293b); border: 1px solid var(--cs-border, rgba(255,255,255,0.1)); border-radius: var(--cs-radius-lg, 16px); padding: var(--cs-space-lg, 24px); box-shadow: var(--cs-shadow-sm, 0 1px 2px rgba(0,0,0,0.3)); transition: border-color var(--cs-transition-fast, 150ms), box-shadow var(--cs-transition-fast, 150ms); } .ds-section:hover { border-color: var(--cs-border-hover, rgba(255,255,255,0.2)); box-shadow: var(--cs-shadow-md, 0 4px 6px -1px rgba(0,0,0,0.3)); } .ds-section__title { font-family: var(--cs-font-display, 'Cinzel', serif); font-size: var(--cs-text-base, 1rem); font-weight: 600; color: var(--cs-text-primary, #f1f5f9); display: flex; align-items: center; gap: var(--cs-space-sm, 8px); margin: 0 0 var(--cs-space-md, 16px); padding-bottom: var(--cs-space-sm, 8px); border-bottom: 1px solid var(--cs-border, rgba(255,255,255,0.1)); } .ds-section__title::before { content: ''; width: 4px; height: 1em; background: var(--cs-primary, #6366f1); border-radius: 2px; } .ds-section__body { color: var(--cs-text-secondary, #9fadc0); line-height: 1.6; margin: 0; }"
+    },
+    {
+      "name": "Combat Section Shell",
+      "kind": "card",
+      "refersTo": "combat-section",
+      "description": "The shared chrome every class combat surface adopts: labelled region card with a themed icon, title, and a right-aligned primary-action slot. Inner grammar stays class-authored.",
+      "html": "<section class=\"ds-combat-section\" role=\"region\" aria-labelledby=\"ds-cs-title\"><header class=\"ds-combat-section__header\"><svg class=\"ds-combat-section__icon\" width=\"16\" height=\"16\" viewBox=\"0 0 512 512\" aria-hidden=\"true\" fill=\"currentColor\"><path d=\"M256 32l-96 96 96 96 96-96-96-96zM32 256l96 96 96-96-96-96-96 96zm352-96l-96 96 96 96 96-96-96-96zM256 288l-96 96 96 96 96-96-96-96z\"/></svg><h4 id=\"ds-cs-title\" class=\"ds-combat-section__title\">Sneak Attack</h4><div class=\"ds-combat-section__actions\"><button class=\"ds-toggle ds-toggle--on\" aria-pressed=\"true\" aria-label=\"Sneak Attack: armed\"><span>ON</span></button></div></header></section>",
+      "css": ".ds-combat-section { display: flex; flex-direction: column; gap: var(--cs-space-sm, 8px); padding: var(--cs-space-md, 16px); background: var(--cs-bg-surface, #1e293b); border: 1px solid var(--cs-border, rgba(255,255,255,0.1)); border-radius: var(--cs-radius-md, 10px); } .ds-combat-section__header { display: flex; align-items: center; gap: var(--cs-space-sm, 8px); } .ds-combat-section__icon { color: var(--cs-primary-text, #8b93f7); flex: 0 0 auto; } .ds-combat-section__title { margin: 0; font-size: var(--cs-text-sm, 0.875rem); font-weight: 700; color: var(--cs-text-primary, #f1f5f9); } .ds-combat-section__actions { margin-left: auto; display: flex; align-items: center; gap: var(--cs-space-xs, 4px); }"
+    },
+    {
+      "name": "State Toggle",
+      "kind": "custom",
+      "refersTo": "state-toggle-on",
+      "description": "The signature stateful chip. Encodes state three ways at once: color + icon + text. ON = emerald, OFF = muted neutral, USED = ruby/disabled. Always aria-pressed.",
+      "html": "<div style=\"display:flex; gap:8px;\"><button class=\"ds-toggle ds-toggle--on\" aria-pressed=\"true\" aria-label=\"Sneak Attack: armed\"><span>ON</span></button><button class=\"ds-toggle ds-toggle--off\" aria-pressed=\"false\" aria-label=\"Sneak Attack: off\"><span>OFF</span></button><button class=\"ds-toggle ds-toggle--used\" disabled aria-label=\"Sneak Attack: already used this round\"><span>USED</span></button></div>",
+      "css": ".ds-toggle { display: inline-flex; align-items: center; gap: var(--cs-space-xs, 4px); min-height: 24px; padding: 0.2rem 0.6rem; font-size: var(--cs-text-xs, 0.75rem); font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; border: 1px solid var(--cs-border, rgba(255,255,255,0.1)); border-radius: var(--cs-radius-full, 9999px); background: var(--cs-bg-elevated, #334155); color: var(--cs-text-secondary, #9fadc0); cursor: pointer; transition: background var(--cs-transition-fast, 150ms), border-color var(--cs-transition-fast, 150ms), color var(--cs-transition-fast, 150ms); } .ds-toggle:hover:not(:disabled) { border-color: var(--cs-border-hover, rgba(255,255,255,0.2)); } .ds-toggle:focus-visible { outline: 2px solid var(--cs-primary, #6366f1); outline-offset: 2px; } .ds-toggle--on { background: var(--cs-success-light, rgba(16,185,129,0.12)); border-color: var(--cs-success, #10b981); color: var(--cs-success, #10b981); } .ds-toggle--off { color: var(--cs-text-muted, #98a5b8); } .ds-toggle--used { background: var(--cs-danger-light, rgba(239,68,68,0.12)); border-color: var(--cs-danger, #f26161); color: var(--cs-danger, #f26161); cursor: not-allowed; } .ds-toggle:disabled { opacity: 0.8; cursor: not-allowed; }"
+    },
+    {
+      "name": "Status Strip",
+      "kind": "custom",
+      "refersTo": "status-strip",
+      "description": "The at-a-glance summary bar (DC / pool / range / save). Full-border base-tone inset, role=group. A superseded value renders struck-through beside the current one.",
+      "html": "<div class=\"ds-strip\" role=\"group\" aria-label=\"Sneak Attack dice\"><span class=\"ds-strip__item\"><span class=\"ds-strip__label\">Dice</span><span class=\"ds-strip__value\"><span class=\"ds-strip__value-was\">3d6</span>2d6</span></span><span class=\"ds-strip__item\"><span class=\"ds-strip__label\">Avg</span><span class=\"ds-strip__value\">7</span></span></div>",
+      "css": ".ds-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--cs-space-xs, 4px) var(--cs-space-md, 16px); padding: var(--cs-space-xs, 4px) var(--cs-space-sm, 8px); background: var(--cs-bg-base, #0f172a); border: 1px solid var(--cs-border, rgba(255,255,255,0.1)); border-radius: var(--cs-radius-sm, 6px); } .ds-strip__item { display: inline-flex; align-items: baseline; gap: var(--cs-space-xs, 4px); } .ds-strip__label { font-size: var(--cs-text-xs, 0.75rem); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; color: var(--cs-text-muted, #98a5b8); } .ds-strip__value { font-size: var(--cs-text-sm, 0.875rem); font-weight: 700; color: var(--cs-text-primary, #f1f5f9); font-variant-numeric: tabular-nums; } .ds-strip__value-was { font-weight: 400; color: var(--cs-text-muted, #98a5b8); text-decoration: line-through; margin-right: 2px; }"
+    },
+    {
+      "name": "Action Button (Primary)",
+      "kind": "button",
+      "refersTo": "action-button-primary",
+      "description": "Compact in-play button. The neutral base is 'reset'; verb-mapped variants (primary/spend/heal/danger/selected) carry intent. Labels stay class-authored.",
+      "html": "<div style=\"display:flex; gap:8px; flex-wrap:wrap;\"><button class=\"ds-btn ds-btn--primary\">Transform</button><button class=\"ds-btn ds-btn--spend\">Spend 2 <span class=\"ds-btn__cost\">SP</span></button><button class=\"ds-btn ds-btn--heal\">Second Wind</button><button class=\"ds-btn ds-btn--danger\">Burn Seal</button><button class=\"ds-btn\">Reset</button></div>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: var(--cs-space-xs, 4px); min-height: 24px; padding: 0.2rem 0.55rem; font-size: var(--cs-text-xs, 0.75rem); font-weight: 600; border: 1px solid var(--cs-border, rgba(255,255,255,0.1)); border-radius: var(--cs-radius-sm, 6px); background: var(--cs-bg-elevated, #334155); color: var(--cs-text-secondary, #9fadc0); cursor: pointer; transition: background var(--cs-transition-fast, 150ms), border-color var(--cs-transition-fast, 150ms), color var(--cs-transition-fast, 150ms); } .ds-btn:hover:not(:disabled) { border-color: var(--cs-border-hover, rgba(255,255,255,0.2)); background: var(--cs-bg-active, rgba(255,255,255,0.1)); } .ds-btn:focus-visible { outline: 2px solid var(--cs-primary, #6366f1); outline-offset: 2px; } .ds-btn:disabled { opacity: 0.5; cursor: not-allowed; } .ds-btn__cost { opacity: 0.75; font-weight: 400; } .ds-btn--primary { background: var(--cs-primary-strong, #4f46e5); border-color: var(--cs-primary-strong, #4f46e5); color: #fff; } .ds-btn--spend { background: var(--cs-warning-light, rgba(245,158,11,0.14)); border-color: var(--cs-warning, #f59e0b); color: var(--cs-warning, #f59e0b); } .ds-btn--heal { background: var(--cs-success-light, rgba(16,185,129,0.12)); border-color: var(--cs-success, #10b981); color: var(--cs-success, #10b981); } .ds-btn--danger { background: var(--cs-danger-light, rgba(239,68,68,0.12)); border-color: var(--cs-danger, #f26161); color: var(--cs-danger, #f26161); }"
+    },
+    {
+      "name": "Pool Caption",
+      "kind": "custom",
+      "refersTo": "combat-pool",
+      "description": "One canonical N / M (recharge) grammar for every resource pool. Count bold-primary, max/recharge muted, auto-red at empty. Tabular numerals; count/max spanned for screen readers.",
+      "html": "<span class=\"ds-pool\"><span class=\"ds-pool__count\">3</span><span class=\"ds-pool__sep\">/</span><span class=\"ds-pool__max\">5</span><span class=\"ds-pool__recharge\">(long rest)</span></span>",
+      "css": ".ds-pool { display: inline-flex; align-items: baseline; gap: 2px; font-size: var(--cs-text-xs, 0.75rem); font-variant-numeric: tabular-nums; color: var(--cs-text-secondary, #9fadc0); } .ds-pool__count { font-weight: 700; color: var(--cs-text-primary, #f1f5f9); } .ds-pool__max, .ds-pool__recharge { color: var(--cs-text-muted, #98a5b8); } .ds-pool--empty .ds-pool__count { color: var(--cs-danger, #f26161); }"
+    },
+    {
+      "name": "Feature Block",
+      "kind": "card",
+      "refersTo": "feature-block",
+      "description": "Recessed base-tone inset with a full 1px border — the replacement for the banned colored side-stripe block. Stacks with a sibling margin; never nests.",
+      "html": "<div class=\"ds-feature\"><div class=\"ds-feature__title\">Cunning Strike <span class=\"ds-feature__meta\">DC 15</span></div><div class=\"ds-feature__summary\">Trade 1d6 of Sneak Attack for an effect.</div></div>",
+      "css": ".ds-feature { padding: var(--cs-space-sm, 8px); background: var(--cs-bg-base, #0f172a); border: 1px solid var(--cs-border, rgba(255,255,255,0.1)); border-radius: var(--cs-radius-sm, 6px); } .ds-feature + .ds-feature { margin-top: var(--cs-space-sm, 8px); } .ds-feature__title { display: flex; align-items: baseline; gap: var(--cs-space-xs, 4px); font-size: var(--cs-text-sm, 0.875rem); font-weight: 700; color: var(--cs-text-primary, #f1f5f9); } .ds-feature__meta { font-size: var(--cs-text-xs, 0.75rem); font-weight: 400; color: var(--cs-text-muted, #98a5b8); } .ds-feature__summary { font-size: var(--cs-text-xs, 0.75rem); color: var(--cs-text-muted, #98a5b8); margin-top: var(--cs-space-xs, 4px); }"
+    },
+    {
+      "name": "Keyboard Hint",
+      "kind": "chip",
+      "refersTo": "kbd",
+      "description": "Monospace keyboard-shortcut chip used in help tips (e.g. Ctrl+Shift+P for Play Mode). Indigo-tinted, subtle.",
+      "html": "<span class=\"ds-help\"><kbd class=\"ds-kbd\">Ctrl+Shift+P</kbd> <span class=\"ds-help__label\">Play Mode</span></span>",
+      "css": ".ds-help { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--cs-text-muted, #98a5b8); white-space: nowrap; } .ds-kbd { display: inline-block; background: rgba(99,102,241,0.12); padding: 2px 6px; border-radius: 4px; font-family: var(--cs-font-mono, 'JetBrains Mono', monospace); font-size: 0.7rem; font-weight: 600; color: var(--cs-primary-text, #8b93f7); border: 1px solid rgba(99,102,241,0.2); } .ds-help__label { opacity: 0.7; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Lamp-Lit Table",
+    "overview": "This is the interface for a D&D 5e character in active play: a DM and four players around a lamp-lit table, phones and laptops open mid-encounter, glancing down for two seconds to spend a resource and look back up. Every decision serves that glance. The default surface is dark because that is the room the sheet lives in; the light theme is a first-class parity mode, not the starting point. The type is quiet, the numbers are loud, and the color is rationed so that when a chip turns green or a pool turns red it means something. The system's organizing idea is a consistent shell around diverse content: D&D's classes do not share one grammar, and that diversity is intentional and correct. So the design does not flatten those grammars into one control; it wraps every class surface in the same chrome (header, status strip, ON/OFF/USED state vocabulary, roll-feedback channel, accessibility spine). One shell, many contents.",
+    "keyCharacteristics": [
+      "Dark-first, day-at-parity: night is the flagship, the light theme is a full token override that follows the site Day/Night selector.",
+      "Two coordinated surfaces: a dense tabbed Manager view and a stripped Play Mode ('Alt View') for the table, both on one token layer.",
+      "Rationed color: one indigo accent plus a compact semantic set; accent is for state and primary action, never decoration.",
+      "Numbers loud, chrome quiet: tabular numerals, a serif display face reserved for the hero name and big values, a humanist sans doing all UI work.",
+      "Glance-legible state: every stateful control encodes itself in color AND icon AND text.",
+      "WCAG 2.1 AA is a floor: every text token is contrast-tuned per theme, every icon has a text alternative, every toggle carries aria-pressed."
+    ],
+    "rules": [
+      { "name": "The One Voice Rule", "body": "Arcane Indigo is the only brand accent. It marks primary action, current selection, and focus — nothing decorative. If two things on a screen are indigo and only one is the primary action, one is wrong.", "section": "colors" },
+      { "name": "The Rationed-Semantic Rule", "body": "Green means on/available/healed. Amber means spend/cost/warning. Red means used/end/danger. These four are the entire state vocabulary. A class may not introduce a fifth state color for flavor.", "section": "colors" },
+      { "name": "The No-Stripe Rule", "body": "The colored border-left/border-right accent stripe is forbidden — including when authored in JS style strings, where the CSS detector can't see it. State is carried by a full 1px border plus a background tint.", "section": "colors" },
+      { "name": "The Cinzel-Is-a-Hero Rule", "body": "Cinzel appears on the name, the page title, and big numerals — and nowhere else. It is never a button, a toggle, a chip, or a data label.", "section": "typography" },
+      { "name": "The Tabular-Numeral Rule", "body": "Any number that changes in play uses font-variant-numeric: tabular-nums so it doesn't reflow as it ticks.", "section": "typography" },
+      { "name": "The Recessed-Inset Rule", "body": "Inner elements sit on the base background tone, not a lighter one. Nested content reads as cut into the card, never as a card-on-a-card. Nested cards are forbidden.", "section": "elevation" },
+      { "name": "The Flat-At-Rest Rule", "body": "Surfaces are flat at rest. Shadow appears as a response to state (hover) — never as a permanent decoration.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep the game and the task in focus, not the interface.",
+      "Do ration Arcane Indigo to primary action, current selection, and focus (the One Voice Rule).",
+      "Do encode every stateful control in color AND icon AND text; give every icon a text alternative and every toggle aria-pressed.",
+      "Do wrap each class surface in the shared shell while letting its inner grammar stay whatever the class needs.",
+      "Do hold the ON / OFF / USED vocabulary; override the word only where a different word carries real game meaning, never the encoding.",
+      "Do tune every text token to clear WCAG AA in both themes; verify with an alpha-composited contrast probe, not by eye.",
+      "Do keep numbers loud (tabular numerals, weight, space) and chrome quiet.",
+      "Do reserve Cinzel for the name, title, and big numerals; use Inter for all UI."
+    ],
+    "donts": [
+      "Don't use a colored border-left/border-right stripe as an accent — not even in a JS style string.",
+      "Don't nest cards. Inner content is a recessed inset on the base tone.",
+      "Don't reintroduce the per-section rainbow of gradient card tints. One neutral card surface, one accent.",
+      "Don't put the Cinzel display face on a button, toggle, chip, or data label.",
+      "Don't add a fifth state color, or use a semantic hue for decoration.",
+      "Don't animate for entertainment: no page-load choreography, no bounce/elastic easing. Motion conveys state (150-250ms, ease-out) or it doesn't ship.",
+      "Don't treat day mode as an afterthought — it is parity.",
+      "Don't reach for a modal first. Exhaust inline / progressive disclosure; when unavoidable, move focus into the dialog and restore it on close.",
+      "Don't ship muted gray body text on a tinted near-white 'for elegance' — bump toward ink until it clears 4.5:1."
+    ]
+  }
+}

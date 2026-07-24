@@ -1,0 +1,20 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "bounce-easing",
+        "value": "dicebounce",
+        "reason": "Dice landing bounce is literal, domain-appropriate physical motion in the dice roller (user-confirmed intentional); neutralized under prefers-reduced-motion by the global catch-all in charactersheet-modern.css",
+        "createdAt": "2026-07-22T14:31:58.334Z"
+      },
+      {
+        "rule": "bounce-easing",
+        "value": "cubic-bezier(0.34, 1.56, 0.64, 1)",
+        "reason": "The overshoot curve is now used only by the intentional diceBounce dice-settle animation (user-confirmed); toast slide-in migrated to ease-out-quint. A different future bounce curve is still detected.",
+        "createdAt": "2026-07-22T14:34:42.237Z"
+      }
+    ]
+  }
+}
