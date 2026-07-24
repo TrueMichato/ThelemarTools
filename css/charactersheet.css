@@ -7719,7 +7719,7 @@
 }
 
 .charsheet__builder-content {
-	min-height: 400px;
+	min-height: 220px;
 	background: var(--cs-bg-surface, var(--rgb-bg-alt));
 	border: 2px solid var(--cs-border, var(--rgb-border-grey));
 	border-radius: var(--cs-radius-xl, 16px);
@@ -7862,6 +7862,44 @@
 	display: grid;
 	grid-template-columns: repeat(2, 1fr);
 	gap: var(--cs-space-lg, 1rem);
+}
+
+/* Details step — Backstory grows to fill the right column, closing the
+   internal void left when the left (Character) column drives row height. */
+.charsheet__builder-details-right {
+	display: flex;
+	flex-direction: column;
+}
+
+.charsheet__builder-details-backstory {
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+}
+
+.charsheet__builder-details-backstory textarea {
+	flex: 1 1 auto;
+	resize: vertical;
+}
+
+/* Mobile: stack the Details two-column layout and drop the left column's
+   right-padding so each column gets full width (Appearance sub-fields no
+   longer crush to truncated single characters). Layered to beat
+   .ve-flex{display:flex!important} which lives in @layer vetools. */
+@media (max-width: 768px) {
+	@layer vetools {
+		.charsheet__builder-details {
+			flex-direction: column !important;
+		}
+	}
+
+	.charsheet__builder-details > .ve-flex-col {
+		padding-right: 0 !important;
+	}
+
+	.charsheet__builder-details > .ve-flex-col:first-child {
+		margin-bottom: var(--cs-space-lg, 1rem);
+	}
 }
 
 @media (max-width: 768px) {

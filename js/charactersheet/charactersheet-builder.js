@@ -9578,7 +9578,7 @@ class CharacterSheetBuilder {
 	 */
 	_renderDetailsStep (content) {
 		const container = e_({outer: `
-			<div class="ve-flex">
+			<div class="ve-flex charsheet__builder-details">
 				<div class="ve-flex-col" style="flex: 1; padding-right: 1rem;">
 					<div class="charsheet__section">
 						<h5>Character</h5>
@@ -9607,7 +9607,7 @@ class CharacterSheetBuilder {
 					</div>
 				</div>
 				
-				<div class="ve-flex-col" style="flex: 1;">
+				<div class="ve-flex-col charsheet__builder-details-right" style="flex: 1;">
 					<div class="charsheet__section">
 						<h5>Appearance</h5>
 						<div class="ve-flex mb-2">
@@ -9649,7 +9649,7 @@ class CharacterSheetBuilder {
 						</div>
 					</div>
 					
-					<div class="charsheet__section mt-3">
+					<div class="charsheet__section mt-3 charsheet__builder-details-backstory">
 						<h5>Backstory</h5>
 						<textarea class="ve-form-control" id="builder-backstory" rows="8" placeholder="Write your character's backstory...">${this._state.getNote("backstory")}</textarea>
 					</div>
