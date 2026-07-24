@@ -89,7 +89,10 @@ Files: `css/charactersheet.css`, `css/charactersheet-mobile.css`,
 
 - **Card unification + rainbow retirement.** Every `.charsheet__section--*`
   renders on one neutral surface; the 13 per-section gradient tints and the
-  banned `border-left: 3px` side-stripes were removed at source.
+  banned `border-left: 3px` side-stripes were removed at source. *(Later
+  partially reverted by owner request — see "Owner-requested restorations"
+  below: the eleven **content** sections keep their hue tint + colour stripe;
+  the structural chrome sections stay neutral.)*
 - **Nested-card flattening.** Ability scores, passives, currency, AC/Init/Speed,
   Jumps/Carry, spellcasting-stat, count-chips → borderless **recessed cells** on
   the parent surface (the Recessed-Inset Rule; nested cards are forbidden).
@@ -198,7 +201,7 @@ CSS in `css/charactersheet.css` around L12536–13030, JS helpers module-level i
 | **FeatureBlock** | `.cs-combat-feature` | Recessed base-tone inset, full border — replaces the banned side-stripe blocks. |
 | **ActionButton** | `.cs-combat-btn` + `--primary/--spend/--heal/--danger/--selected` | Verb-mapped variants; labels stay class-authored. |
 | **RollResult** | `#cs-combat-live-region` / `_announceCombat()` | Single persistent `aria-live="polite"` region for roll/state feedback. |
-| **Icon system** | `CS_COMBAT_ICONS` / `csCombatIcon()` / `csCombatActionChip()` | ~40 semantic-key → Font Awesome map; every glyph decorative + text-paired. |
+| **Icon system** | `CS_COMBAT_ICONS` / `csCombatIcon()` / `csCombatActionChip()` | ~40 semantic-key → **emoji** map (owner-restored; see below); every glyph decorative (`aria-hidden`) + text-paired. |
 | **Condition pill** | `.cs-combat-cond` + `--met/--blocked/--none/--toggle` | Sentence-case; becomes `aria-pressed` button when toggle. |
 
 **Phase-by-phase:**
@@ -240,6 +243,34 @@ unsaved edits; **Close** = dismiss a use/info/choice modal that discards
 nothing; **Skip** = bypass an optional step; **Dismiss** = remove an
 active/temporary thing; **Done** = finish a picker.
 
+### Owner-requested restorations
+
+After the overhaul shipped, the sheet owner asked for two of their original,
+deliberate design choices to be brought back — both were the owner's asks, not
+generated defaults, and both are retained as the sheet's signature. Restored
+without disturbing any other change:
+
+1. **Per-section identity "rainbow."** The eleven tabbed **content** sections
+   (Resources / Attacks / Spells / Skills / Saves / Passives / Senses / States /
+   Features / Methods / Metamagic) each carry their own hue gradient tint + a
+   leading 3px colour stripe. Implemented in `css/charactersheet.css` as a
+   re-tint block layered *after* the neutral-surface block, so the tint + stripe
+   win on specificity while the unified 1px card border (top/right/bottom) is
+   preserved — the card definition stays, the identity colour comes back on top.
+   rgba over the theme-aware `--cs-bg-surface`, so it holds in night + day. The
+   **structural** chrome sections (header/identity/HP/currency/…) stay neutral.
+   The detector flags the eleven stripes as `side-tab`; they are
+   flagged-and-documented (the sole sanctioned exception to the No-Stripe Rule),
+   not blanket-suppressed, so a stray stripe anywhere else still trips the rule.
+2. **Combat emoji iconography.** `CS_COMBAT_ICONS` maps each semantic key to an
+   emoji glyph (🗡️ Sneak Attack, ⚔️ action, ⚡ bonus, 🔄 reaction, 🐻 Wild Shape,
+   🩸 Conduit dice, ✨ spark, …) and `csCombatIcon()` renders it as an
+   `aria-hidden` glyph span — matching the emoji section icons across the rest of
+   the sheet, rather than Font Awesome marks. The shell's a11y contract is
+   unchanged (every glyph stays decorative + paired with visible text or an
+   `aria-label`), and all shell structure / StatusStrip / StateToggle / layout /
+   copy work from Phases 0–F is untouched.
+
 ---
 
 ## Governing rules (from `DESIGN.md`)
@@ -252,6 +283,8 @@ These are the Named Rules future work must hold:
   warning, red=used/end/danger. No fifth state color.
 - **The No-Stripe Rule** — no colored `border-left`/`border-right` accent, **not
   even in a JS style string** (the detector can't see those; 9 were retired).
+  *Sole sanctioned exception:* the eleven content-section identity stripes
+  (owner-restored — see below).
 - **The Cinzel-Is-a-Hero Rule** — Cinzel on the name, title, and big numerals
   only; never a button/toggle/chip/label.
 - **The Tabular-Numeral Rule** — any number that changes in play uses

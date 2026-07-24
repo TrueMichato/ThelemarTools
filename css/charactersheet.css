@@ -13030,6 +13030,7 @@ body.has-quickbuild-overlay .toast__container {
 
 .cs-combat-icon--glyph {
 	font-style: normal;
+	line-height: 1;
 }
 
 /* Shared screen-reader live channel for combat state/roll announcements
@@ -21034,6 +21035,76 @@ color: var(--cs-text-primary, #f1f5f9);
 .charsheet__abilities-section--skills {
 	background: var(--cs-bg-surface);
 	border: 1px solid var(--cs-border);
+}
+
+/* ========================================================================
+   DESIGN OVERHAUL — per-section identity tints RESTORED (owner request)
+   ------------------------------------------------------------------------
+   The sheet owner deliberately wants each tabbed content section to carry
+   its own hue + a leading colour stripe (the "rainbow" — Resources amber,
+   Attacks red, Spells violet, Skills indigo, …), a design choice that
+   predates the unified-surface pass above. Restored here, scoped to the
+   eleven content sections only, and layered AFTER the neutral block so the
+   tint + stripe win on specificity ties while the unified 1px card border
+   (top/right/bottom, from the block above) is preserved — the card
+   definition stays, the identity colour comes back on top. rgba over the
+   theme-aware --cs-bg-surface, so it holds in both night (default) and day.
+   The structural chrome sections (header/identity/hp/currency/…) stay on
+   the neutral surface — only the vivid content "rainbow" is restored.
+   ======================================================================== */
+.charsheet__section--resources {
+	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(245, 158, 11, 0.12) 100%);
+	border-left: 3px solid rgba(245, 158, 11, 0.6);
+}
+
+.charsheet__section--states {
+	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(139, 92, 246, 0.12) 100%);
+	border-left: 3px solid rgba(139, 92, 246, 0.6);
+}
+
+.charsheet__section--features {
+	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(59, 130, 246, 0.12) 100%);
+	border-left: 3px solid rgba(59, 130, 246, 0.6);
+}
+
+.charsheet__section--attacks {
+	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(239, 68, 68, 0.12) 100%);
+	border-left: 3px solid rgba(239, 68, 68, 0.6);
+}
+
+.charsheet__section--methods {
+	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(234, 179, 8, 0.12) 100%);
+	border-left: 3px solid rgba(234, 179, 8, 0.6);
+}
+
+.charsheet__section--spells {
+	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(139, 92, 246, 0.15) 100%);
+	border-left: 3px solid rgba(139, 92, 246, 0.7);
+}
+
+.charsheet__section--metamagic {
+	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(236, 72, 153, 0.12) 100%);
+	border-left: 3px solid rgba(236, 72, 153, 0.6);
+}
+
+.charsheet__section--saves {
+	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(16, 185, 129, 0.12) 100%);
+	border-left: 3px solid rgba(16, 185, 129, 0.6);
+}
+
+.charsheet__section--passives {
+	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(147, 51, 234, 0.12) 100%);
+	border-left: 3px solid rgba(147, 51, 234, 0.6);
+}
+
+.charsheet__section--skills {
+	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(99, 102, 241, 0.12) 100%);
+	border-left: 3px solid rgba(99, 102, 241, 0.6);
+}
+
+.charsheet__section--senses {
+	background: linear-gradient(135deg, var(--cs-bg-surface, var(--rgb-bg-alt)) 0%, rgba(59, 130, 246, 0.12) 100%);
+	border-left: 3px solid rgba(59, 130, 246, 0.6);
 }
 
 /* Heading alignment: the `--flex` section title used `space-between`, so a

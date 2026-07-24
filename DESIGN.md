@@ -151,12 +151,22 @@ class's panel can read any other class's panel without relearning where to
 look.
 
 This system explicitly rejects decorative SaaS styling, novelty affordances,
-and anything that trades scanability for flourish. It rejects the rainbow of
-per-section accent tints it started from (thirteen gradient card washes,
-retired to one neutral card). It rejects display fonts on UI labels, nested
-cards, and the colored side-stripe. Motion is state, never entertainment: a
-resource that changes announces the change and settles; the page never performs
-its own arrival.
+and anything that trades scanability for flourish. It rejects display fonts on
+UI labels and nested cards. Motion is state, never entertainment: a resource
+that changes announces the change and settles; the page never performs its own
+arrival.
+
+**Owner exception — the content-section identity rainbow.** Two flourishes are
+deliberately kept as the sheet owner's signature, overriding the generic bans
+for these specific elements only: (1) the eleven tabbed **content** sections
+(Resources, Attacks, Spells, Skills, Saves, Passives, Senses, States, Features,
+Methods, Metamagic) each carry their own hue tint + a leading colour stripe —
+the "rainbow" — layered on top of the unified 1px card border; and (2) the
+Combat tab renders emoji glyphs as its iconography (matching the emoji section
+icons across the rest of the sheet). The bans still hold everywhere else: the
+**structural** chrome sections (header/identity/HP/currency/…) stay on the one
+neutral surface, and no new arbitrary stripe or fifth state colour is
+introduced. See §"Owner exception" in the No-Stripe Rule below.
 
 **Key Characteristics:**
 - **Dark-first, day-at-parity.** Night is the flagship; the light theme is a full token override that follows the site's Day/Night selector, never a separate switch.
@@ -201,6 +211,8 @@ everything else is a tuned neutral ramp that differs per theme.
 **The Rationed-Semantic Rule.** Green means on/available/healed. Amber means spend/cost/warning. Red means used/end/danger. These four are the entire state vocabulary. A class may not introduce a fifth state color for flavor.
 
 **The No-Stripe Rule.** The colored `border-left` / `border-right` accent stripe is forbidden — including when authored in JS style strings, where the CSS detector can't see it. State is carried by a full 1px border plus a background tint, never a side-stripe. (Nine such stripes were retired from the combat renderer.)
+
+> **Owner exception.** The eleven tabbed **content** sections (Resources / Attacks / Spells / Skills / Saves / Passives / Senses / States / Features / Methods / Metamagic) deliberately keep a leading 3px colour stripe as part of the owner's per-section identity "rainbow" — a signature that predates the unified-surface pass and is retained by explicit request. This is the *only* sanctioned side-stripe. It rides on top of the neutral 1px card border (the card definition stays), is theme-agnostic (rgba over the mode-aware `--cs-bg-surface`), and is scoped to those content sections only. The detector flags these eleven as `side-tab`; they are flagged-and-documented rather than blanket-suppressed, so a *new* stray stripe anywhere else still trips the rule. Structural chrome sections stay neutral.
 
 ## 3. Typography
 
@@ -305,9 +317,9 @@ collapse to a thin ~48px "add" affordance with a right-aligned "None" hint.
 - **Do** reserve Cinzel for the name, title, and big numerals; use Inter for all UI.
 
 ### Don't:
-- **Don't** use a colored `border-left`/`border-right` stripe as an accent — not even in a JS style string. Full border + tint only.
+- **Don't** use a colored `border-left`/`border-right` stripe as an accent — not even in a JS style string. Full border + tint only. (Sole exception: the eleven content-section identity stripes — see the No-Stripe Rule's owner exception. Don't add any *other* stripe.)
 - **Don't** nest cards. Inner content is a recessed inset on the base tone, never a card-on-a-card.
-- **Don't** reintroduce the per-section rainbow of gradient card tints. One neutral card surface, one accent.
+- **Don't** reintroduce a per-section gradient tint on the *structural* chrome sections. The content-section identity rainbow is the owner's kept signature; structural chrome (header/identity/HP/currency/…) stays on the one neutral card surface.
 - **Don't** put the Cinzel display face on a button, toggle, chip, or data label.
 - **Don't** add a fifth state color, or use a semantic hue (green/amber/red) for decoration.
 - **Don't** animate for entertainment: no page-load choreography, no bounce/elastic easing. Motion conveys state (150–250ms, ease-out) or it doesn't ship.

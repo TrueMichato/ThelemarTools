@@ -7,66 +7,67 @@ const {e_, ee} = /** @type {*} */ (globalThis);
 /* ========================================================================
    Combat Section Shell — icon system (Phase 0)
    ------------------------------------------------------------------------
-   Semantic icon keys → Font Awesome classes (FA is loaded site-wide).
-   Mirrors the Alt View `_icon()` approach — a semantic name, a graceful
-   fallback, and a text alternative — but returns an HTML *string* so it
-   composes with this file's `e_({outer: ...})` templating instead of DOM
-   nodes. Every icon is decorative (`aria-hidden`) and always paired with a
-   visible text label or an explicit `aria-label` on its control, so no
-   glyph is ever load-bearing (retires the emoji-/glyphicon-as-icon usage
-   the combat surfaces shipped with). Unknown names fall back to rendering
-   the raw string, so any user-authored glyph still displays.
-   ======================================================================== */
+   Semantic icon keys → emoji glyphs. The sheet owner deliberately uses
+   emoji as the sheet's iconography (matching the `charsheet__section-icon`
+   emoji across the rest of the sheet), so the combat shell renders emoji
+   here too rather than Font Awesome marks — a design choice restored per
+   the owner's request (see docs/charactersheet/14-design-system-overhaul.md).
+   The shell's a11y contract is unchanged: every glyph is decorative
+   (`aria-hidden`) and always paired with a visible text label or an
+   explicit `aria-label` on its control, so no glyph is ever load-bearing.
+   Keys are a shared vocabulary — a semantic name maps to one representative
+   emoji everywhere it is used. Unknown names fall through as a raw glyph, so
+   a caller can pass an emoji directly. ======================================================================== */
 const CS_COMBAT_ICONS = {
-	"sneak": "fa-user-secret",
-	"bolt": "fa-bolt",
-	"off": "fa-power-off",
-	"used": "fa-circle-check",
-	"check": "fa-check",
-	"cross": "fa-xmark",
-	"ban": "fa-ban",
-	"warning": "fa-triangle-exclamation",
-	"ally": "fa-user-group",
-	"dice": "fa-dice-d6",
-	"dc": "fa-shield-halved",
-	"none": "fa-minus",
-	// Action-economy trio (retires the ⚔️/⚡/🛡️ action badges).
-	"action": "fa-hand-fist",
-	"bonus": "fa-bolt-lightning",
-	"reaction": "fa-shield",
+	"sneak": "🗡️",
+	"bolt": "⚡",
+	"off": "⭕",
+	"used": "✅",
+	"check": "✔️",
+	"cross": "✖️",
+	"ban": "🚫",
+	"warning": "⚠️",
+	"ally": "👥",
+	"dice": "🎲",
+	"dc": "🛡️",
+	"none": "➖",
+	// Action-economy trio.
+	"action": "⚔️",
+	"bonus": "⚡",
+	"reaction": "🔄",
 	// Verb vocabulary shared across the class surfaces (Fighter/Vitality/
 	// Barbarian/Method migrations, Phase C).
-	"heal": "fa-heart-pulse",
-	"surge": "fa-fire-flame-curved",
-	"reset": "fa-rotate-left",
-	"refresh": "fa-rotate",
-	"rest": "fa-bed",
-	"stance": "fa-hand-back-fist",
-	"weapon": "fa-khanda",
-	"spark": "fa-star",
-	"info": "fa-circle-info",
-	"lock": "fa-lock",
-	// Druid nature-magic vocabulary (retires the 🐻/🧚 emoji labels).
-	"beast": "fa-paw",
-	"familiar": "fa-hat-wizard",
-	// Illrigger vocabulary (retires 🔥/↪/🎭/♻️/🩸 emoji in the Interdiction + Conduit panels).
-	"fire": "fa-fire",
-	"move": "fa-share",
-	"charm": "fa-masks-theater",
-	"recycle": "fa-recycle",
-	"blood": "fa-droplet",
-	// Ranger Primal Focus vocabulary (retires 🎯/🛡️/🔄/✏️/✦ emoji).
-	"target": "fa-crosshairs",
-	"shield": "fa-shield-halved",
-	"edit": "fa-pencil",
-	// Channeled cantrip vocabulary (retires ✨/⚔ emoji in the rider row).
-	"clear": "fa-xmark",
+	"heal": "💗",
+	"surge": "🔥",
+	"reset": "↩️",
+	"refresh": "🔄",
+	"rest": "🛏️",
+	"stance": "✊",
+	"weapon": "⚔️",
+	"spark": "✨",
+	"info": "ℹ️",
+	"lock": "🔒",
+	// Druid nature-magic vocabulary.
+	"beast": "🐻",
+	"familiar": "🧚",
+	// Illrigger vocabulary (Interdiction + Conduit panels).
+	"fire": "🔥",
+	"move": "↪️",
+	"charm": "🎭",
+	"recycle": "♻️",
+	"blood": "🩸",
+	// Ranger Primal Focus vocabulary.
+	"target": "🎯",
+	"shield": "🛡️",
+	"edit": "✏️",
+	// Channeled cantrip vocabulary (rider row).
+	"clear": "✖️",
 };
 
 /**
- * Action-economy vocabulary — the shared chip that retires the ⚡/⚔️/🔄
- * emoji badges hand-built across the class panels. One icon + one word per
- * cost so "what does this cost me" reads identically everywhere.
+ * Action-economy vocabulary — the shared chip (emoji + word) used across the
+ * class panels. One icon + one word per cost so "what does this cost me" reads
+ * identically everywhere.
  */
 const CS_COMBAT_ACTION_META = {
 	"action": {icon: "action", label: "Action"},
@@ -92,16 +93,16 @@ function csCombatActionChip (kind, {labelOverride, cls = ""} = {}) {
 /**
  * Render a Combat Section Shell icon as an HTML string. Decorative by
  * contract (`aria-hidden="true"`); the calling control supplies the
- * accessible text.
- * @param {string} name Semantic key from {@link CS_COMBAT_ICONS}.
+ * accessible text. Renders the mapped emoji glyph (see {@link CS_COMBAT_ICONS});
+ * an unmapped value is rendered verbatim so a caller can pass an emoji directly.
+ * @param {string} name Semantic key from {@link CS_COMBAT_ICONS}, or a raw glyph.
  * @param {{cls?: string}} [opts]
  * @returns {string}
  */
 function csCombatIcon (name, {cls = ""} = {}) {
-	const fa = CS_COMBAT_ICONS[name];
-	if (fa) return `<i class="fas ${fa} fa-fw cs-combat-icon${cls ? ` ${cls}` : ""}" aria-hidden="true"></i>`;
-	// Graceful fallback: render the raw string (e.g. a user-authored emoji) as a glyph.
-	return `<span class="cs-combat-icon cs-combat-icon--glyph${cls ? ` ${cls}` : ""}" aria-hidden="true">${name == null ? "" : String(name)}</span>`;
+	const mapped = CS_COMBAT_ICONS[name];
+	const glyph = mapped != null ? mapped : (name == null ? "" : String(name));
+	return `<span class="cs-combat-icon cs-combat-icon--glyph${cls ? ` ${cls}` : ""}" aria-hidden="true">${glyph}</span>`;
 }
 
 /**
