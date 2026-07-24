@@ -3962,8 +3962,12 @@ class CharacterSheetSpells {
 			});
 		}
 
+		// A spell cast is an ACTION OUTCOME, not a completed/available state, so its
+		// feedback container uses the neutral `info` type — green is reserved for
+		// available/complete only (Rationed-Semantic). The genuinely-complete
+		// "Applied to Self" sub-confirmation below stays green.
 		JqueryUtil.doToast(/** @type {*} */ ({
-			type: "success",
+			type: "info",
 			content: toastEl,
 			...(hasGamblerFolly || offerApplyToSelf ? {autoHideTime: 12000} : {}),
 		}));
@@ -7082,7 +7086,7 @@ class CharacterSheetSpells {
 
 		if (spell.atWill) {
 			// At-will spells can always be cast
-			JqueryUtil.doToast({type: "success", content: `Cast ${spell.name} (at will)`});
+			JqueryUtil.doToast({type: "info", content: `Cast ${spell.name} (at will)`});
 			return;
 		}
 
@@ -7092,7 +7096,7 @@ class CharacterSheetSpells {
 		}
 
 		this._state.useInnateSpell(spellId);
-		JqueryUtil.doToast({type: "success", content: `Cast ${spell.name} (${spell.uses.current}/${spell.uses.max} remaining)`});
+		JqueryUtil.doToast({type: "info", content: `Cast ${spell.name} (${spell.uses.current}/${spell.uses.max} remaining)`});
 		this._renderSpellList();
 	}
 
