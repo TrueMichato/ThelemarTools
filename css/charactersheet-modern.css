@@ -38,6 +38,12 @@
 	--cs-accent-ruby-light: rgba(239, 68, 68, 0.15);
 	--cs-accent-sapphire: #4b8ef7;
 	--cs-accent-sapphire-light: rgba(59, 130, 246, 0.15);
+	/* Raw RGB channels for the sapphire/amethyst accents so low-alpha decorative
+	   washes (e.g. the Companions hero gradient) can be composed on tokens
+	   instead of hardcoded rgba(). Theme-agnostic: the wash is intentionally the
+	   same faint tint in day + night, matching the pre-token inline behaviour. */
+	--cs-accent-sapphire-rgb: 59, 130, 246;
+	--cs-accent-amethyst-rgb: 168, 85, 247;
 	--cs-accent-amethyst: #b06bf8;
 	--cs-accent-amethyst-light: rgba(168, 85, 247, 0.15);
 	/* Violet used as *data-label text* (passive scores, hit-die type). The plain
