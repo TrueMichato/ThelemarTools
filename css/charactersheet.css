@@ -7839,6 +7839,7 @@
 	background: var(--cs-bg-surface, var(--rgb-bg-alt));
 	padding: 0.1rem 0.4rem;
 	border-radius: var(--cs-radius-sm, 4px);
+	cursor: help;
 }
 
 .charsheet__builder-preview {

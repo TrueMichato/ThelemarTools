@@ -2712,7 +2712,7 @@ class CharacterSheetBuilder {
 				const item = e_({outer: `
 					<div class="charsheet__builder-list-item ${isSelected ? "active" : ""}">
 						<span class="charsheet__builder-list-item-name">${displayName}${subraceCount}</span>
-						<span class="charsheet__builder-list-item-source">${Parser.sourceJsonToAbv(group.baseSource)}</span>
+						<span class="charsheet__builder-list-item-source" title="${Parser.sourceJsonToFull(group.baseSource)}">${Parser.sourceJsonToAbv(group.baseSource)}</span>
 					</div>
 				`});
 
@@ -4438,6 +4438,10 @@ class CharacterSheetBuilder {
 
 		content.append(container);
 
+		// Surface the "start at higher level" affordance up-front, near the step
+		// header, rather than buried at the bottom of the class preview pane.
+		container.before(this._buildQuickBuildLevelControl());
+
 		const list = /** @type {*} */ (document.getElementById("builder-class-list"));
 		const preview = document.getElementById("builder-class-preview");
 		const search = /** @type {*} */ (document.getElementById("builder-class-search"));
@@ -4454,7 +4458,7 @@ class CharacterSheetBuilder {
 					const item = e_({outer: `
 						<div class="charsheet__builder-list-item ${isSelected ? "active" : ""}">
 							<span class="charsheet__builder-list-item-name">${cls.name}</span>
-							<span class="charsheet__builder-list-item-source">${Parser.sourceJsonToAbv(cls.source)}</span>
+							<span class="charsheet__builder-list-item-source" title="${Parser.sourceJsonToFull(cls.source)}">${Parser.sourceJsonToAbv(cls.source)}</span>
 						</div>
 					`});
 
@@ -4632,13 +4636,22 @@ class CharacterSheetBuilder {
 			content.append(e_({outer: `<p><strong>Spellcasting:</strong> ${Parser.attAbvToFull(cls.spellcastingAbility)}</p>`}));
 		}
 
-		// Quick Build target level
+		preview.append(content);
+	}
+
+	/**
+	 * Build the "start at higher level" Quick-Build control. Surfaced near the
+	 * Class step header (not buried at the bottom of the class preview) so the
+	 * option is discoverable up-front. Logic is unchanged — the slider still
+	 * drives `this._quickBuildTargetLevel`, consumed by the Finish handler.
+	 */
+	_buildQuickBuildLevelControl () {
 		const quickBuildSection = e_({outer: `
-			<div class="charsheet__builder-feat-opt-section mt-3">
+			<div class="charsheet__builder-feat-opt-section charsheet__builder-quickbuild mb-3">
 				<div class="charsheet__builder-feat-opt-header">
 					<span class="charsheet__builder-feat-opt-header-name">⚡ Quick Build — Start at Higher Level</span>
 				</div>
-				<p class="ve-small ve-muted mb-2">Optionally start your character at a higher level. All leveling choices will be collected in a guided wizard after building.</p>
+				<p class="ve-small ve-muted mb-2">Optionally start your character above level 1. All leveling choices are collected in a guided wizard after building.</p>
 				<div class="ve-flex-v-center gap-2">
 					<label class="ve-small ve-bold mb-0">Target Level:</label>
 					<input type="range" class="form-control-range" min="1" max="20" value="${this._quickBuildTargetLevel || 1}" style="flex: 1;" id="builder-quickbuild-level-slider">
@@ -4662,9 +4675,7 @@ class CharacterSheetBuilder {
 			}
 		});
 
-		content.append(quickBuildSection);
-
-		preview.append(content);
+		return quickBuildSection;
 	}
 
 	/**
@@ -4701,7 +4712,7 @@ class CharacterSheetBuilder {
 				<label class="charsheet__builder-subclass-option ve-flex-v-center mb-1">
 					<input type="radio" name="builder-subclass-choice" value="${sc.name}"${isSelected ? " checked" : ""}>
 					<span class="ml-2">${sc.name}</span>
-					<span class="ve-small ve-muted ml-2">${Parser.sourceJsonToAbv(sc.source)}</span>
+					<span class="ve-small ve-muted ml-2" title="${Parser.sourceJsonToFull(sc.source)}">${Parser.sourceJsonToAbv(sc.source)}</span>
 				</label>
 			`});
 
@@ -7821,7 +7832,7 @@ class CharacterSheetBuilder {
 				const customItem = e_({outer: `
 					<div class="charsheet__builder-list-item ${isSelected ? "active" : ""}">
 						<span class="charsheet__builder-list-item-name">${this._customBackground.name}</span>
-						<span class="charsheet__builder-list-item-source">Custom</span>
+						<span class="charsheet__builder-list-item-source" title="Your custom homebrew">Custom</span>
 					</div>
 				`});
 				customItem.addEventListener("click", () => {
@@ -7843,7 +7854,7 @@ class CharacterSheetBuilder {
 					const item = e_({outer: `
 						<div class="charsheet__builder-list-item ${isSelected ? "active" : ""}">
 							<span class="charsheet__builder-list-item-name">${bg.name}</span>
-							<span class="charsheet__builder-list-item-source">${Parser.sourceJsonToAbv(bg.source)}</span>
+							<span class="charsheet__builder-list-item-source" title="${Parser.sourceJsonToFull(bg.source)}">${Parser.sourceJsonToAbv(bg.source)}</span>
 						</div>
 					`});
 
@@ -8175,7 +8186,7 @@ class CharacterSheetBuilder {
 			const customItem = e_({outer: `
 				<div class="charsheet__builder-list-item ${isSelected ? "active" : ""}">
 					<span class="charsheet__builder-list-item-name">${this._customBackground.name}</span>
-					<span class="charsheet__builder-list-item-source">Custom</span>
+					<span class="charsheet__builder-list-item-source" title="Your custom homebrew">Custom</span>
 				</div>
 			`});
 			customItem.addEventListener("click", () => {
@@ -8197,7 +8208,7 @@ class CharacterSheetBuilder {
 				const item = e_({outer: `
 					<div class="charsheet__builder-list-item ${isSelected ? "active" : ""}">
 						<span class="charsheet__builder-list-item-name">${bg.name}</span>
-						<span class="charsheet__builder-list-item-source">${Parser.sourceJsonToAbv(bg.source)}</span>
+						<span class="charsheet__builder-list-item-source" title="${Parser.sourceJsonToFull(bg.source)}">${Parser.sourceJsonToAbv(bg.source)}</span>
 					</div>
 				`});
 
@@ -9312,7 +9323,7 @@ class CharacterSheetBuilder {
 
 	_getBackgroundEquipmentHtml () {
 		if (!this._selectedBackground?.startingEquipment) {
-			return "<p class='ve-muted'>No starting equipment defined</p>";
+			return "<p class='ve-muted'>This background grants no additional equipment.</p>";
 		}
 
 		return Renderer.get().render({entries: this._selectedBackground.startingEquipment});
@@ -9584,7 +9595,7 @@ class CharacterSheetBuilder {
 						<h5>Character</h5>
 						<div class="charsheet__notes-characteristics">
 							<div class="charsheet__notes-char-field">
-								<label class="charsheet__notes-char-label" for="builder-name">Name</label>
+								<label class="charsheet__notes-char-label" for="builder-name">Confirm Name</label>
 								<input type="text" class="ve-form-control" id="builder-name" placeholder="Enter character name" value="${this._state.getName()}">
 							</div>
 							<div class="charsheet__notes-char-field">
