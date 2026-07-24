@@ -11288,6 +11288,18 @@ body.has-quickbuild-overlay .toast__container {
 	padding: var(--cs-space-sm, 0.5rem);
 }
 
+/* MLR-E: denser class rows in the multiclass picker only (≥6–7 visible) —
+   scoped to `.charsheet__multiclass-body` so the shared level-up wizard rows
+   keep their roomier rhythm. */
+.charsheet__multiclass-body .charsheet__levelup-option {
+	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
+	margin-bottom: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__multiclass-body .charsheet__levelup-option-description {
+	margin-top: var(--cs-space-2xs, 2px);
+}
+
 .charsheet__multiclass-selection {
 	display: flex;
 	align-items: center;

@@ -5273,7 +5273,7 @@ class CharacterSheetLevelUp {
 		/** @type {*} */ let updateConfirmButton = null; // Will be assigned after button is created
 
 		const search = e_({outer: `<input type="text" class="ve-form-control charsheet__modal-search" placeholder="🔍 Search classes...">`});
-		const list = e_({outer: `<div class="charsheet__levelup-subclasses" style="max-height: 350px;"></div>`});
+		const list = e_({outer: `<div class="charsheet__levelup-subclasses" style="max-height: min(60vh, 480px);"></div>`});
 
 		// Selection display showing which class is chosen
 		const selectionDisplay = e_({outer: `
@@ -5368,9 +5368,7 @@ class CharacterSheetLevelUp {
 			<div class="charsheet__modal-info-banner charsheet__modal-info-banner--info">
 				<div class="charsheet__modal-info-banner-icon">📚</div>
 				<div class="charsheet__modal-info-banner-content">
-					<strong>Add a New Class</strong>
-					<div class="ve-small">Select a class to multiclass into. You'll start at level 1 in the new class. 
-					Make sure your character meets the ability score prerequisites for multiclassing.</div>
+					<div class="ve-small">Start at level 1 in the new class — your character must meet both classes' ability prerequisites.</div>
 				</div>
 			</div>
 			<div class="charsheet__modal-search-wrapper">
