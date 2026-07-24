@@ -10103,38 +10103,52 @@ body.has-quickbuild-overlay .toast__container {
 	opacity: 1;
 }
 
-.charsheet__section-add {
-	color: #4caf50;
-}
-
-/* Section Add Button (styled button version) */
-.charsheet__section-add-btn {
-	float: right;
+/* Canonical add affordance — ONE indigo icon+label component across every tab.
+   Replaces the legacy green section-add glyph + green section-add-btn pill so
+   green stays reserved for available/complete states (Rationed-Semantic). */
+.charsheet__add-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--cs-space-2xs, 4px);
 	padding: 4px 10px;
 	font-size: calc(var(--cs-font-base, 14px) * 0.8);
 	font-weight: 600;
-	background: linear-gradient(135deg, #4CAF50, #2E7D32);
-	color: white;
+	line-height: var(--cs-leading-tight, 1.25);
+	background: var(--cs-primary-strong, #4f46e5);
+	color: #fff;
 	border: none;
 	border-radius: var(--cs-radius-sm, 4px);
 	cursor: pointer;
-	transition: all 0.2s ease;
-	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+	transition: background var(--cs-transition-fast, 0.15s ease), transform var(--cs-transition-fast, 0.15s ease), box-shadow var(--cs-transition-fast, 0.15s ease);
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
-.charsheet__section-add-btn:hover {
-	background: linear-gradient(135deg, #66BB6A, #43A047);
+.charsheet__add-btn:hover {
+	background: var(--cs-primary-hover, #4338ca);
 	transform: translateY(-1px);
-	box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 }
 
-.charsheet__section-add-btn:active {
+.charsheet__add-btn:active {
 	transform: translateY(0);
-	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
-.charsheet__section-add-btn .glyphicon {
-	margin-right: 4px;
+.charsheet__add-btn:disabled {
+	opacity: 0.5;
+	cursor: default;
+	transform: none;
+	box-shadow: none;
+}
+
+.charsheet__add-btn .glyphicon,
+.charsheet__add-btn .charsheet__btn-icon {
+	margin: 0;
+}
+
+/* Section-header placement (Feats, Custom Abilities headings) */
+.charsheet__add-btn--float {
+	float: right;
 }
 
 /* Edit Proficiencies Modal */
