@@ -685,7 +685,7 @@ class CharacterSheetRespec {
 		if (race) {
 			const raceName = this._state.getRaceName() || race.name;
 			const raceGrants = e_({tag: "div", clazz: "charsheet__level-grants-section"});
-			raceGrants.append(e_({outer: `<div class="ve-small ve-bold">🧬 ${raceName}</div>`}));
+			raceGrants.append(e_({outer: `<div class="ve-small ve-bold">🧬 Species traits</div>`}));
 
 			const items = [];
 
@@ -805,7 +805,7 @@ class CharacterSheetRespec {
 		// Background grants
 		if (background) {
 			const bgGrants = e_({tag: "div", clazz: "charsheet__level-grants-section mt-1"});
-			bgGrants.append(e_({outer: `<div class="ve-small ve-bold">📜 ${background.name}</div>`}));
+			bgGrants.append(e_({outer: `<div class="ve-small ve-bold">📜 Background benefits</div>`}));
 
 			const items = [];
 

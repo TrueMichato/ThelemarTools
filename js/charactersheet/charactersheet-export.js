@@ -75,10 +75,10 @@ class CharacterSheetExport {
 					<li>Keep a backup of your character</li>
 				</ul>
 			</div>
-			<div class="charsheet__export-preview">
-				<label class="ve-muted mb-1">Character Data Preview:</label>
-				<textarea class="ve-form-control" rows="12" readonly style="font-family: monospace; font-size: 0.8rem;">${jsonStr}</textarea>
-			</div>
+			<details class="charsheet__export-preview">
+				<summary class="charsheet__export-preview-summary">Preview raw data</summary>
+				<textarea class="ve-form-control mt-2" rows="12" readonly style="font-family: monospace; font-size: 0.8rem;">${jsonStr}</textarea>
+			</details>
 		</div>`;
 
 		const btnOpenPrintView = e_({tag: "button",
