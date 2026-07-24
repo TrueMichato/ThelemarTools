@@ -208,7 +208,7 @@ everything else is a tuned neutral ramp that differs per theme.
 ### Named Rules
 **The One Voice Rule.** Arcane Indigo is the only brand accent. It marks primary action, current selection, and focus — nothing decorative. If two things on a screen are indigo and only one is the primary action, one is wrong.
 
-**The Rationed-Semantic Rule.** Green means on/available/healed. Amber means spend/cost/warning. Red means used/end/danger. These four are the entire state vocabulary. A class may not introduce a fifth state color for flavor.
+**The Rationed-Semantic Rule.** Green means on/available/healed. Amber means spend/cost/warning. Red means used/end/danger. These four are the entire state vocabulary. A class may not introduce a fifth state color for flavor. Green is **outcome-free** — it marks availability or completion, never the result of an action: an "add" button and a spell-cast confirmation are neutral/`info`, not green.
 
 **The No-Stripe Rule.** The colored `border-left` / `border-right` accent stripe is forbidden — including when authored in JS style strings, where the CSS detector can't see it. State is carried by a full 1px border plus a background tint, never a side-stripe. (Nine such stripes were retired from the combat renderer.)
 
@@ -269,6 +269,15 @@ at rest.
 - **Variants (verb-mapped, labels stay class-authored):** `--primary` (indigo-strong fill, white text — use/enter), `--spend` (amber tint + border — spend/surge), `--heal` (emerald tint + border — heal), `--danger` (ruby tint + border — end/burn), `--selected` (indigo-strong fill — chosen option).
 - **Hover / Focus:** Hover brightens border + background one step (150ms). Focus shows a 2px indigo outline offset 2px. Disabled drops to 0.5 opacity with `not-allowed`.
 
+### Add affordance (canonical `.charsheet__add-btn`)
+The single sheet-wide vocabulary for "add a thing" (Add Spell / Item / Attack /
+Condition / Feat / Custom Ability). Indigo-strong fill, white text (6.29:1),
+`glyphicon-plus` + a text label; a `--float` modifier right-aligns it in a
+section header. It replaced four competing vocabularies (two of which stole the
+reserved green) so **green is vacated** for available/complete only. Every
+instance keeps its existing id-based handler — the component is presentation,
+not behavior.
+
 ### State Toggle (signature component)
 The heart of the combat shell. One chip that encodes its state three ways at
 once — **color + icon + text, never color alone.**
@@ -287,6 +296,7 @@ Illrigger's ruby summary bar.
 - **Section card (`.charsheet__section`):** Card Surface, 1px hairline border, 16px radius (`--cs-radius-lg`), 24px padding, `--cs-shadow-sm` at rest → border-brighten + `--cs-shadow-md` on hover. Title uses the display face with a 4px indigo marker bar and a bottom hairline rule.
 - **Combat section (`.cs-combat-section`):** The shell's region card — Card Surface, 1px border, 10px radius, 16px padding, `role="region"` + `aria-labelledby`. Header = themed icon + title + right-aligned primary-action slot.
 - **Feature block (`.cs-combat-feature`):** Recessed base-tone inset, 6px radius, full border. Replaces the banned side-stripe blocks. Stacks with a `--cs-space-sm` sibling margin; no nesting.
+- **Modal (`.ve-ui-modal__inner` / `.ve-w-100`):** Sizes to content by default (`height:auto`, capped by `max-height` + an internal scroller) so a content-light modal never opens a fixed-height void. Content-heavy pickers and the Level-Up wizard opt into an explicit tall height; a `:has()` size-to-content escape hatch (e.g. `:has(.charsheet__rest-modal)`) restores auto-height for a specific light modal. Primary CTA is the indigo One-Voice button, scoped to CS modals only — the site-wide `.ve-btn-primary` is untouched.
 
 ### Chips & Pills
 - **Action-economy chip (`.cs-combat-chip`):** Small full-border pill (icon + word) for action/bonus/reaction meta; retires the ad-hoc badge system.

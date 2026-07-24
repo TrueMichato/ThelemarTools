@@ -78,7 +78,11 @@ See `DESIGN.md` frontmatter for the full token catalog with values.
 
 ## Work streams
 
-The redesign ran as four streams. Each is independently committed and gated.
+The redesign ran as seven streams. Each is independently committed and gated.
+Streams 1–4 rebuilt the four surfaces (main sheet, Play Mode, cross-cutting
+polish, Combat Section Shell); streams 5–7 followed neglected-surface critiques
+into the modal/shared-component layer, the Builder flow, and the JS-rendered
+modal interiors.
 
 ### 1. Main sheet visual overhaul (Rounds 1–5)
 
@@ -243,6 +247,151 @@ unsaved edits; **Close** = dismiss a use/info/choice modal that discards
 nothing; **Skip** = bypass an optional step; **Dismiss** = remove an
 active/temporary thing; **Done** = finish a picker.
 
+### 5. Modal & shared-component layer (P1 remediation + backlog A–D)
+
+Commits `abbc3422`, `c291c98f`, `6454d7d9`, `90c2af9d`, `10ea697c`, `1ad8ad76`.
+Files: `css/charactersheet.css`, `css/charactersheet-modern.css`,
+`charactersheet.html`, `js/charactersheet/charactersheet.js`,
+`charactersheet-export.js`, `charactersheet-respec.js`.
+
+After the four surface streams, a neglected-surface critique surfaced the
+shared modal chrome and the last card-overuse/color-leak hotspots. This stream
+brought them in line **without new structure** — colour, tokens, disclosure,
+copy, and `:has()` size-to-content only.
+
+- **Colorize modal CTAs → One Voice (`abbc3422`).** Every CS modal primary CTA
+  inherited the site's legacy steel-blue `.ve-btn-primary` (#2a4e6c fill /
+  muted text, borderline `<4.5:1`). Scoped a **CS-modal-only** override to
+  `--cs-primary-strong` (#4f46e5, white 6.29:1) with a `--cs-primary-hover`
+  hover; site-wide `.ve-btn-primary` (DM screen, bestiary, …) is untouched.
+  Also tokenized the Companions hero gradient (was inline hardcoded rgba,
+  detector-flagged) into `.charsheet__companions-header` on new
+  `--cs-accent-amethyst-rgb` / `--cs-accent-sapphire-rgb` channels at the
+  original alphas — gradient kept per design intent, detector finding retired.
+- **Kill content-light modal void (`c291c98f`).** The `.ve-w-100` default
+  pinned content-light modals to `height:min(700px,80vh)`, leaving 40–60% dead
+  space. Added `:has()` size-to-content opt-outs (the proven Edit-Ability
+  pattern) for the Rest (`:has(.charsheet__rest-modal)`) and Export
+  (`:has(.charsheet__export-info)`) modals → `height:auto`, capped + centered
+  (Short Rest 700→485px, Export 700→498px). The Level-Up wizard's deliberate
+  90vh workspace is untouched. Also fixed Companions: dropped the doubled-plus
+  emoji on "+ Custom", centered the 800px column, and lifted empty-state inline
+  styles into classes so the hero header + empty state share one axis.
+- **Backlog A — unify add affordances (`6454d7d9`).** The six "add" affordances
+  spoke four vocabularies (two stealing the reserved green semantic). Replaced
+  all six with one canonical `.charsheet__add-btn` (indigo `--cs-primary-strong`
+  fill, white 6.29:1, `glyphicon-plus` + label; `--float` modifier for section
+  headers). **Green vacated site-wide** for available/complete only. Every
+  button keeps its id-based handler.
+- **Backlog B — card discipline (`90c2af9d`).** Retired the last card-overuse:
+  the four Notes Personality/Ideals/Bonds/Flaws cards collapse into one
+  "Characteristics" card of labelled textareas; `.charsheet__feature` rows
+  soften from a raised card to a 1px recessed inset (no hover lift); empty
+  sections (Class Features / Feats / Custom Abilities / Resources) compact via a
+  layered `:has()` rule instead of rendering as tall blank cards (keeping their
+  teaching copy).
+- **Backlog C — abilities focused card + Notes Appearance (`10ea697c`).** Killed
+  the inner scrollbar on `.charsheet__ability-hero-skills` (cards grow to fit up
+  to 8 related skills); disambiguated the doubled "Save" (readout relabelled
+  "Saving Throw", the "Shield Save" button stays the sole roller); recessed the
+  six Age/Height/Weight/Eyes/Skin/Hair inputs into the textarea affordance with
+  static `yrs`/`ft`/`lb` unit suffixes (spinners hidden).
+- **Backlog D — respec / level-up / export (`1ad8ad76`).** Neutralized the
+  Respec HP chip (was danger-red though HP gain is neutral); de-duplicated the
+  race/background grants headers ("🧬 Species traits" / "📜 Background
+  benefits"); wrapped the raw-JSON export preview in a collapsed
+  `<details>` disclosure (Download/Copy stay one click); recolored the Level-Up
+  progress-fill bar indigo so green appears **only** on genuinely-complete step
+  markers.
+
+### 6. Character Builder flow (BR-A–E)
+
+Commits `10a895ca`, `b20e65ca`, `85bbeb2f`, `4549c506`, `c495e923`. Files:
+`js/charactersheet/charactersheet-builder.js`, `css/charactersheet.css`.
+
+The multi-step creation wizard (`#charsheet-tab-builder`) sits **outside**
+`.ve-ui-modal__inner`, so the modal-scoped rules from stream 5 never reached it.
+This stream brought the Builder to full parity with the shipping shell.
+
+- **BR-A — flatten nested cards → recessed wells (`10a895ca`).** Builder section
+  cards become recessed wells (`--cs-bg-base`, no border/shadow) inside the
+  single outer content frame; master-detail list/preview panes drop from 2px
+  card borders to 1px hairlines. Regrouped the Details step from 7 single-field
+  cards into 3 grouped sections (Character / Appearance / Backstory); all input
+  ids + listeners preserved.
+- **BR-B — unify primary buttons to indigo (`b20e65ca`).** Extended the One-Voice
+  rule to `#charsheet-tab-builder .ve-btn-primary` (same `--cs-primary-strong`
+  tokens) so Next/Finish and the spell-picker "+" speak the sheet's indigo. The
+  Previous button (neutral) and remove toggle (danger red) keep their roles.
+- **BR-C — Abilities compact 2×3 grid + sticky score-chip tray (`85bbeb2f`).**
+  Rewrote the Abilities step from stacked rows into a 2×3 grid (STR/DEX/CON ·
+  INT/WIS/CHA) with a **sticky** score-chip tray so chips + drop targets stay
+  co-visible. Standard-array assignment is drag-first (HTML5 DnD) plus
+  click-select, both fully keyboard-operable (chips + dropzones are native
+  `<button>`s), with a visually-hidden live region announcing each
+  assignment and a live "N to assign" count. All pool/pointbuy/manual state
+  logic preserved; grid collapses to 1 column ≤768px; reduced-motion guard.
+- **BR-D — close light-step void, balance & mobile-stack Details (`4549c506`).**
+  Dropped the content-panel `min-height` 400→220px so the lightest step (Name)
+  no longer opens a void; the Backstory textarea grows to bottom-align its
+  column; the Details two-column row stacks to one column ≤768px (layered
+  override to beat `.ve-flex{display:flex!important}` in `@layer vetools`) so
+  Appearance sub-fields get full width.
+- **BR-E — copy & empty-state cleanups (`c495e923`).** Background-Equipment
+  empty state reads "This background grants no additional equipment."; source
+  badges (Species/Class/Subclass/Background/Custom) gain a full-source-name
+  tooltip (`Parser.sourceJsonToFull`) + `cursor:help`; the Details duplicate
+  name field is relabelled "Confirm Name"; the Quick-Build "Start at Higher
+  Level" control is lifted to the top of the Class step for up-front
+  discoverability (logic unchanged).
+
+### 7. Modal-Layer Remediation (MLR-A–E)
+
+Commits `e03e39e6`, `bb2208b8`, `d665f9ca`. Files: `css/charactersheet.css`,
+`js/charactersheet/charactersheet.js`, `charactersheet-spells.js`,
+`charactersheet-levelup.js`, and one source-coupled test.
+
+A final pass bringing JS-rendered modal **interiors** up to the redesigned
+shell's standard — the shell wraps them, but their bodies still carried
+pre-overhaul contrast, void, stripe, and colour-semantic debt.
+
+- **MLR-A — Edit Proficiencies chips (`e03e39e6`).** Theme-aware chip tokens
+  (`--cs-bg-elevated` / `--cs-text-primary`) fix day-mode contrast
+  (1.14:1 → 16.5:1 day / ~9:1 night); resolve embedded `@tags` via
+  `Renderer.stripTags` so a chip never leaks raw `{@filter …}` syntax;
+  `max-width:100%` so a long proficiency wraps instead of overflowing.
+- **MLR-B — systemic modal size-to-content (`e03e39e6`).** Flipped the
+  `.ve-w-100` modal default from fixed `height:min(700px,80vh)` to `height:auto`
+  (capped by the existing `max-height` + scroller), killing the ~150px void in
+  every content-light modal (prof, settings, multiclass, npc-export).
+  Content-heavy pickers + the level-up wizard keep their explicit tall heights
+  (later source order wins the equal-specificity `!important` tie).
+- **MLR-C — No-Stripe sweep + Settings de-card (`e03e39e6`).** Retired every
+  remaining **non-rainbow** `border-left/right` ≥2px accent (hp-bar-fill,
+  combat-spell-group + category dividers → 1px, ranger-ability-row stripe,
+  custom-abilities category header → full 1px, apply-buff-row edge, Settings
+  Thelemar amber stripe → 1px neutral); de-carded the Settings source-filter
+  into a recessed scroll region. The owner's per-section rainbow
+  (`css:21486–21536`) is untouched. Updated the coupled
+  `CharacterSheetUiTweaksRound8` ranger-row assertion to expect no stripe.
+- **MLR-D — vacate reserved green from spell-cast feedback (`bb2208b8`).** A cast
+  is an action **outcome**, not a completion, so its feedback toasts switched
+  `type:"success"` → `type:"info"` (main cast + innate at-will + limited-use);
+  green stays on genuine completions (Applied-to-Self, memorize, scribe,
+  summon). *Deferred to a future interactive session (documented):* the full
+  cast-toast → `.charsheet__dice-result` surface convergence — a multi-part cast
+  has no single canonical total, `CharacterSheetSpellcastingFlow` couples on the
+  toast content, and ~8 gameplay branches can't be browser-verified
+  unsupervised.
+- **MLR-E — multiclass banner + density (`d665f9ca`).** Dropped the redundant
+  "Add a New Class" heading (duplicated the modal title) and condensed the
+  teaching banner to one line (~30% height reclaimed); raised the class-list
+  `max-height` 350px → `min(60vh, 480px)`; added a density rule **scoped to
+  `.charsheet__multiclass-body .charsheet__levelup-option`** (tighter
+  padding/margin) shrinking rows ~85→~67px so 6–7 fit at once. The **shared**
+  `.charsheet__levelup-option` base rule (level-up wizard subclass/feat pickers)
+  is deliberately untouched.
+
 ### Owner-requested restorations
 
 After the overhaul shipped, the sheet owner asked for two of their original,
@@ -278,11 +427,18 @@ without disturbing any other change:
 These are the Named Rules future work must hold:
 
 - **The One Voice Rule** — Arcane Indigo is the only brand accent (primary
-  action / selection / focus). Nothing decorative.
+  action / selection / focus). Nothing decorative. Extended in streams 5–6 to
+  the modal CTAs and the Builder tab, and to a single canonical
+  `.charsheet__add-btn` for every "add" affordance — so no surface introduces a
+  second primary color.
 - **The Rationed-Semantic Rule** — green=on/available/healed, amber=spend/cost/
-  warning, red=used/end/danger. No fifth state color.
+  warning, red=used/end/danger. No fifth state color. Green is **outcome-free**:
+  it marks availability/completion, never an action result (the add-affordance
+  unification and the spell-cast `success`→`info` switch both vacated green from
+  outcomes).
 - **The No-Stripe Rule** — no colored `border-left`/`border-right` accent, **not
-  even in a JS style string** (the detector can't see those; 9 were retired).
+  even in a JS style string** (the detector can't see those; 9 JS stripes were
+  retired in stream 4, and the last non-rainbow CSS stripes in MLR-C).
   *Sole sanctioned exception:* the eleven content-section identity stripes
   (owner-restored — see below).
 - **The Cinzel-Is-a-Hero Rule** — Cinzel on the name, title, and big numerals
@@ -298,9 +454,10 @@ These are the Named Rules future work must hold:
 ## Gate discipline for future design work
 
 1. `node --check` + `eslint --quiet` on touched JS.
-2. Impeccable detector on touched files — **0 new** findings (the CSS baseline
-   carries documented residuals: 1 tab-underline + ~12 layout-transition
-   fill-bars, kept intentionally).
+2. Impeccable detector on touched files — **0 new** findings (the
+   `charactersheet.css` baseline carries documented residuals: 11 rainbow
+   `side-tab` (owner-restored identity stripes) + 1 `border-accent-on-rounded`
+   tab-underline + ~12 `layout-transition` fill-bars, kept intentionally).
 3. Jest `CharacterSheet` — 392 suites / 12,074 tests green (pre-commit hook runs
    `jest --findRelatedTests`).
 4. Browser probe on the live sheet **day + night** at 1440 + 390: alpha-composited
