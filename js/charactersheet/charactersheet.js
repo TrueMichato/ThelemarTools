@@ -16589,7 +16589,12 @@ class CharacterSheetPage {
 					return;
 				}
 				currentItems.forEach(item => {
-					const displayName = typeof item === "string" ? item : item.full || item.name || item;
+					const rawName = typeof item === "string" ? item : (item.full || item.name || item);
+					// Proficiency data can carry embedded @tags (e.g. weapon-category
+					// proficiencies whose `full` reads "…{@filter Finesse or Light|…}
+					// property"). Resolve them to plain text so the chip never leaks raw
+					// tag syntax to the player.
+					const displayName = Renderer.stripTags(String(rawName));
 					const badgeEl = e_({outer: `
 						<span class="charsheet__edit-prof-badge">
 							${displayName}

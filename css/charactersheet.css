@@ -4195,7 +4195,6 @@
 	background: linear-gradient(90deg, rgba(59, 130, 246, 0.7) 0%, rgba(59, 130, 246, 0.9) 100%);
 	border-radius: var(--cs-radius-full, 999px);
 	transition: width 0.3s ease;
-	border-left: 2px solid rgba(255,255,255,0.3);
 }
 
 .charsheet__hp-bar-label {
@@ -5690,7 +5689,7 @@
 }
 
 .charsheet__combat-spell-group {
-	border-left: 2px solid var(--rgb-border-grey);
+	border-left: 1px solid var(--rgb-border-grey);
 	padding-left: 0.5rem;
 }
 
@@ -7056,7 +7055,7 @@
 	gap: var(--cs-space-sm, 0.5rem);
 	padding: var(--cs-space-sm, 0.5rem) 0;
 	padding-left: var(--cs-space-md, 0.75rem);
-	border-left: 2px solid var(--cs-border, rgba(99, 102, 241, 0.15));
+	border-left: 1px solid var(--cs-border, rgba(99, 102, 241, 0.15));
 	margin-left: var(--cs-space-sm, 0.5rem);
 	margin-top: var(--cs-space-xs, 0.25rem);
 }
@@ -9154,7 +9153,6 @@ body.has-quickbuild-overlay .toast__container {
 	column-gap: 0.5rem;
 	row-gap: 0.15rem;
 	padding: 0.35rem 0 0.35rem 0.5rem;
-	border-left: 2px solid var(--rgb-link);
 	margin-bottom: 0.35rem;
 }
 
@@ -10454,9 +10452,11 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__edit-prof-badge {
 	display: inline-flex;
 	align-items: center;
-	background: var(--rgb-bg-alt, #2a2a2a);
-	border: 1px solid var(--rgb-border-grey, #444);
-	border-radius: 3px;
+	max-width: 100%;
+	background: var(--cs-bg-elevated, #334155);
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+	color: var(--cs-text-primary, #f1f5f9);
+	border-radius: var(--cs-radius-sm, 4px);
 	padding: 0.25rem 0.5rem;
 	font-size: 0.85rem;
 }
@@ -11734,10 +11734,8 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__settings-sources-container {
 	max-height: 300px;
 	overflow-y: auto;
-	border: 1px solid var(--cs-border, rgba(99, 102, 241, 0.15));
-	padding: var(--cs-space-sm, 0.5rem);
-	border-radius: var(--cs-radius-md, 8px);
-	background: var(--cs-bg-base, rgba(0, 0, 0, 0.1));
+	padding: var(--cs-space-sm, 0.5rem) 0 0 0;
+	background: transparent;
 }
 
 .charsheet__settings-option {
@@ -11827,7 +11825,7 @@ body.has-quickbuild-overlay .toast__container {
 	gap: var(--cs-space-sm, 0.5rem);
 	padding-left: var(--cs-space-lg, 1.5rem);
 	margin-top: var(--cs-space-sm, 0.5rem);
-	border-left: 2px solid rgba(245, 158, 11, 0.3);
+	border-left: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
 }
 
 .charsheet__settings-option--sub {
@@ -13542,9 +13540,18 @@ body.is-charsheet-page .ve-ui-modal__inner {
 	overflow: visible !important;
 }
 
-/* Content-heavy modals (those using full width) get a taller height */
+/* Size-to-content is the systemic default for CS modals (MLR-B). The old
+   `.ve-w-100` fixed `height: min(700px, 80vh)` left 40-60% dead void below the
+   controls on every content-light modal (Edit Proficiencies, Settings sub-panes,
+   confirm dialogs, …). Default to `height: auto` so each modal fits its content,
+   capped by the inner's `max-height: calc(85vh - 60px)` — when content is taller
+   the scroller (`flex:1;min-height:0;overflow-y:auto`, below) takes over. The
+   genuinely content-heavy surfaces (spell/item/source pickers, the Level-Up
+   wizard) opt back IN to an explicit tall height further down, so they keep a
+   stable scroll viewport. This subsumes the per-modal Rest/Export/Edit-Ability
+   opt-outs (which now only constrain max-width). */
 body.is-charsheet-page .ve-ui-modal__inner.ve-w-100 {
-	height: min(700px, 80vh) !important;
+	height: auto !important;
 }
 
 /* Character-sheet modal + Builder primary CTAs — One Voice.
@@ -13629,10 +13636,9 @@ body.is-charsheet-page .ve-ui-modal__inner.ve-w-100:has(.charsheet__edit-ability
 	max-width: 600px;
 }
 
-/* Content-light modals (Rest, Export): the `.ve-w-100` default pins a fixed
-   height: min(700px, 80vh) that leaves 40-60% dead void below the controls.
-   Opt them out to size-to-content (same pattern as Edit Ability above), capped
-   + centered. The Level-Up *wizard* keeps its deliberate 90vh workspace. */
+/* Rest / Export: size-to-content is now the systemic default (above); these
+   rules only constrain max-width so the content-light forms don't stretch to the
+   full 800px. The Level-Up *wizard* keeps its deliberate 90vh workspace. */
 body.is-charsheet-page .ve-ui-modal__inner.ve-w-100:has(.charsheet__rest-modal) {
 	height: auto !important;
 	max-width: 600px;
@@ -16423,8 +16429,8 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	gap: var(--cs-space-xs, 0.25rem);
 	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
 	background: rgba(255, 255, 255, 0.05);
-	border-left: 3px solid currentColor;
-	border-radius: 0 var(--cs-radius-sm, 4px) var(--cs-radius-sm, 4px) 0;
+	border: 1px solid currentColor;
+	border-radius: var(--cs-radius-sm, 4px);
 	margin-bottom: var(--cs-space-xs, 0.25rem);
 }
 
@@ -20247,7 +20253,6 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	margin-bottom: 6px;
 	background: #fff;
 	border: 1px solid rgba(0, 0, 0, 0.10);
-	border-left: 3px solid rgba(0, 0, 0, 0.10);
 	border-radius: 4px;
 	transition: border-color 0.15s ease, background 0.15s ease;
 }

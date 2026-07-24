@@ -82,10 +82,12 @@ describe("#3 Hunter's Dodge row matches the standard ranger-section rows", () =>
 		expect(css).not.toContain(".charsheet__ranger-ability-row--action");
 	});
 
-	it("keeps the standard reminder-row grid (border-left accent) intact", () => {
+	it("keeps the standard reminder-row grid intact", () => {
 		const body = cssRuleBody(".charsheet__ranger-ability-row {");
 		expect(body).not.toBeNull();
-		expect(body).toMatch(/border-left:\s*2px solid var\(--rgb-link\)/);
+		// The colored side-stripe accent (border-left: 2px var(--rgb-link)) was
+		// retired in the modal-layer No-Stripe sweep; the grid layout stays.
+		expect(body).not.toMatch(/border-left/);
 		expect(body).toMatch(/display:\s*grid/);
 	});
 
