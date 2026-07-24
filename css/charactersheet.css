@@ -7451,8 +7451,8 @@
    ======================================================================== */
 .charsheet__feature {
 	background: var(--cs-bg-base, var(--rgb-bg));
-	border: 2px solid var(--cs-border, var(--rgb-border-grey));
-	border-radius: var(--cs-radius-lg, 12px);
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-md, 8px);
 	margin-bottom: var(--cs-space-sm, 0.5rem);
 	overflow: hidden;
 	transition: all var(--cs-transition-fast, 0.15s ease);
@@ -7460,7 +7460,6 @@
 
 .charsheet__feature:hover {
 	border-color: var(--cs-primary, #6366f1);
-	box-shadow: var(--cs-shadow-sm, 0 2px 8px rgba(0, 0, 0, 0.1));
 }
 
 .charsheet__feature-header {
@@ -10149,6 +10148,53 @@ body.has-quickbuild-overlay .toast__container {
 /* Section-header placement (Feats, Custom Abilities headings) */
 .charsheet__add-btn--float {
 	float: right;
+}
+
+/* Backlog Phase B — Notes characteristics grouped into one card */
+.charsheet__notes-characteristics {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-md, 1rem);
+}
+
+.charsheet__notes-char-field {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-2xs, 4px);
+}
+
+.charsheet__notes-char-label {
+	margin: 0;
+	font-size: calc(var(--cs-font-base, 14px) * 0.78);
+	font-weight: var(--cs-weight-semibold, 600);
+	text-transform: uppercase;
+	letter-spacing: var(--cs-tracking-wide, 0.05em);
+	color: var(--cs-text-muted, var(--rgb-text-muted));
+}
+
+/* Backlog Phase B — empty feature/resource sections compact to a thin line
+   (not a tall blank card). Layered + high-specificity so it wins over the
+   utility padding on the muted placeholder. */
+@layer vetools {
+	#charsheet-tab-features .charsheet__section:has(> .charsheet__features-list > .ve-muted:only-child),
+	#charsheet-tab-features .charsheet__section:has(> .charsheet__resources-list > .ve-muted:only-child),
+	#charsheet-tab-features .charsheet__section:has(> #features-custom-abilities > .custom-abilities__empty:only-child) {
+		padding-bottom: var(--cs-space-sm, 0.5rem) !important;
+	}
+
+	#charsheet-tab-features .charsheet__section:has(> .charsheet__features-list > .ve-muted:only-child) > .charsheet__section-title,
+	#charsheet-tab-features .charsheet__section:has(> .charsheet__resources-list > .ve-muted:only-child) > .charsheet__section-title,
+	#charsheet-tab-features .charsheet__section:has(> #features-custom-abilities > .custom-abilities__empty:only-child) > .charsheet__section-title {
+		margin-bottom: var(--cs-space-sm, 0.5rem) !important;
+	}
+
+	#charsheet-tab-features .charsheet__section:has(> .charsheet__features-list > .ve-muted:only-child) > .charsheet__features-list > .ve-muted,
+	#charsheet-tab-features .charsheet__section:has(> .charsheet__resources-list > .ve-muted:only-child) > .charsheet__resources-list > .ve-muted,
+	#charsheet-tab-features .charsheet__section:has(> #features-custom-abilities > .custom-abilities__empty:only-child) > #features-custom-abilities > .custom-abilities__empty {
+		padding-top: var(--cs-space-2xs, 2px) !important;
+		padding-bottom: var(--cs-space-2xs, 2px) !important;
+		margin: 0 !important;
+	}
 }
 
 /* Edit Proficiencies Modal */
