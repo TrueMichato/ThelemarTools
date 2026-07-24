@@ -13390,15 +13390,19 @@ body.is-charsheet-page .ve-ui-modal__inner.ve-w-100 {
 	height: min(700px, 80vh) !important;
 }
 
-/* Character-sheet modal primary CTAs — One Voice.
+/* Character-sheet modal + Builder primary CTAs — One Voice.
    The site-wide `.ve-btn-primary` is a legacy steel-blue (#2a4e6c fill / muted
    text, borderline <4.5:1) that leaks into every CS modal footer (Level-Up,
-   Rest, Export, …). Repoint them to the system's Arcane Indigo so the most-
-   clicked buttons speak the sheet's own primary voice. `--cs-primary-strong`
-   (#4f46e5) carries white text at 6.29:1 (clears AA). Scoped to CS modals only
-   — site-wide `.ve-btn-primary` (DM screen, bestiary, …) is untouched. */
+   Rest, Export, …) and into the Builder tab (Next/Finish nav + the spell-picker
+   per-row "+"). Repoint them to the system's Arcane Indigo so the most-clicked
+   buttons speak the sheet's own primary voice. `--cs-primary-strong` (#4f46e5)
+   carries white text at 6.29:1 (clears AA). Scoped to CS modals + the Builder
+   tab only — site-wide `.ve-btn-primary` (DM screen, bestiary, …) is untouched;
+   the Builder's Previous button (`.ve-btn-default`) and the spell-picker remove
+   toggle (`.ve-btn-danger` ✓) keep their neutral / danger voices. */
 body.is-charsheet-page .ve-ui-modal__inner .ve-btn-primary,
-body.is-charsheet-page .ve-ui-modal__wrapper .ve-btn-primary {
+body.is-charsheet-page .ve-ui-modal__wrapper .ve-btn-primary,
+body.is-charsheet-page #charsheet-tab-builder .ve-btn-primary {
 	background: var(--cs-primary-strong, #4f46e5);
 	border-color: var(--cs-primary-strong, #4f46e5);
 	color: #fff;
@@ -13406,7 +13410,9 @@ body.is-charsheet-page .ve-ui-modal__wrapper .ve-btn-primary {
 body.is-charsheet-page .ve-ui-modal__inner .ve-btn-primary:hover,
 body.is-charsheet-page .ve-ui-modal__inner .ve-btn-primary:focus-visible,
 body.is-charsheet-page .ve-ui-modal__wrapper .ve-btn-primary:hover,
-body.is-charsheet-page .ve-ui-modal__wrapper .ve-btn-primary:focus-visible {
+body.is-charsheet-page .ve-ui-modal__wrapper .ve-btn-primary:focus-visible,
+body.is-charsheet-page #charsheet-tab-builder .ve-btn-primary:hover,
+body.is-charsheet-page #charsheet-tab-builder .ve-btn-primary:focus-visible {
 	background: var(--cs-primary-hover, #4338ca);
 	border-color: var(--cs-primary-hover, #4338ca);
 	color: #fff;
@@ -13414,7 +13420,9 @@ body.is-charsheet-page .ve-ui-modal__wrapper .ve-btn-primary:focus-visible {
 body.is-charsheet-page .ve-ui-modal__inner .ve-btn-primary:disabled,
 body.is-charsheet-page .ve-ui-modal__inner .ve-btn-primary.disabled,
 body.is-charsheet-page .ve-ui-modal__wrapper .ve-btn-primary:disabled,
-body.is-charsheet-page .ve-ui-modal__wrapper .ve-btn-primary.disabled {
+body.is-charsheet-page .ve-ui-modal__wrapper .ve-btn-primary.disabled,
+body.is-charsheet-page #charsheet-tab-builder .ve-btn-primary:disabled,
+body.is-charsheet-page #charsheet-tab-builder .ve-btn-primary.disabled {
 	background: var(--cs-primary-strong, #4f46e5);
 	border-color: var(--cs-primary-strong, #4f46e5);
 	color: #fff;
