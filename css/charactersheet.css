@@ -7864,59 +7864,103 @@
 	gap: var(--cs-space-lg, 1rem);
 }
 
+@media (max-width: 768px) {
+	.charsheet__builder-abilities {
+		grid-template-columns: 1fr;
+	}
+}
+
 .charsheet__builder-ability-method {
 	margin-bottom: var(--cs-space-lg, 1rem);
 }
 
-.charsheet__builder-ability-row {
-	display: flex;
-	align-items: center;
-	padding: var(--cs-space-md, 0.75rem);
-	background: var(--cs-bg-base, var(--rgb-bg));
-	border: 2px solid var(--cs-border, var(--rgb-border-grey));
-	border-radius: var(--cs-radius-lg, 12px);
-	margin-bottom: var(--cs-space-sm, 0.5rem);
-	transition: all var(--cs-transition-fast, 0.15s ease);
+/* Compact 2×3 ability grid (STR/DEX/CON top · INT/WIS/CHA bottom) */
+.charsheet__builder-ability-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: var(--cs-space-sm, 0.5rem);
 }
 
-.charsheet__builder-ability-row:hover {
+.charsheet__builder-ability-cell {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--cs-space-2xs, 2px);
+	padding: var(--cs-space-sm, 0.5rem);
+	background: var(--cs-bg-surface, var(--rgb-bg));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-md, 8px);
+	text-align: center;
+	transition: border-color var(--cs-transition-fast, 0.15s ease);
+}
+
+.charsheet__builder-ability-cell.is-filled {
 	border-color: var(--cs-primary, #6366f1);
 }
 
 .charsheet__builder-ability-name {
-	width: 100px;
-	font-weight: 700;
-	color: var(--cs-text-primary, var(--rgb-text));
+	font-size: 0.72rem;
+	font-weight: var(--cs-weight-bold, 700);
+	letter-spacing: var(--cs-tracking-wide, 0.05em);
+	text-transform: uppercase;
+	color: var(--cs-text-secondary, var(--rgb-text-muted));
 }
 
 .charsheet__builder-ability-controls {
 	display: flex;
 	align-items: center;
-	gap: 0.5rem;
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__builder-ability-step {
+	min-width: 2rem;
+	min-height: 2rem;
 }
 
 .charsheet__builder-ability-score {
-	font-size: 1.25rem;
-	font-weight: 700;
-	width: 2.5rem;
+	font-size: 1.35rem;
+	font-weight: var(--cs-weight-bold, 700);
+	min-width: 2.25rem;
+	text-align: center;
+	color: var(--cs-text-primary, var(--rgb-text));
+}
+
+.charsheet__builder-ability-score-input {
+	width: 3.25rem;
+	font-size: 1.1rem;
 	text-align: center;
 }
 
+/* Standard-array drop target — a native <button> (keyboard-operable) */
 .charsheet__builder-ability-dropzone {
-	font-size: 1.25rem;
-	font-weight: 700;
-	min-width: 2.5rem;
-	text-align: center;
-	border: 2px dashed var(--rgb-border-grey);
-	border-radius: 4px;
-	padding: 0.25rem 0.5rem;
+	min-width: 3rem;
+	min-height: 2.75rem;
+	padding: var(--cs-space-2xs, 2px) var(--cs-space-xs, 0.25rem);
+	background: var(--cs-bg-base, transparent);
+	border: 2px dashed var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 6px);
+	color: var(--cs-text-muted, var(--rgb-text-muted));
 	cursor: pointer;
-	transition: background-color 0.15s, border-color 0.15s;
+	transition: background-color 0.15s, border-color 0.15s, transform 0.15s;
 }
 
-.charsheet__builder-ability-dropzone:hover {
-	background-color: var(--rgb-bg-alt);
-	border-color: var(--rgb-border-blue);
+.charsheet__builder-ability-dropzone:hover,
+.charsheet__builder-ability-dropzone:focus-visible {
+	border-color: var(--cs-primary, #6366f1);
+	background: var(--cs-primary-light, rgba(99, 102, 241, 0.08));
+	outline: none;
+}
+
+.charsheet__builder-ability-dropzone.is-filled {
+	border-style: solid;
+	border-color: var(--cs-primary, #6366f1);
+	color: var(--cs-text-primary, var(--rgb-text));
+}
+
+.charsheet__builder-ability-dropzone.drag-over {
+	border-color: var(--cs-primary, #6366f1);
+	background: var(--cs-primary-light, rgba(99, 102, 241, 0.16));
+	transform: scale(1.05);
 }
 
 /* Badge base styles (not in project's custom Bootstrap build) */
@@ -7941,29 +7985,103 @@
 	background-color: var(--cs-primary, #6366f1);
 }
 
+/* Standard-array score chip tray — sticky above the grid so chips + targets stay co-visible */
+.charsheet__builder-score-tray {
+	position: sticky;
+	top: var(--cs-space-sm, 0.5rem);
+	z-index: 1;
+	margin-bottom: var(--cs-space-md, 1rem);
+	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 1rem);
+	background: var(--cs-bg-base, var(--rgb-bg));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-md, 8px);
+}
+
+.charsheet__builder-score-tray-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--cs-space-sm, 0.5rem);
+	margin-bottom: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__builder-score-tray-label {
+	font-size: 0.8rem;
+	color: var(--cs-text-secondary, var(--rgb-text-muted));
+}
+
+.charsheet__builder-score-tray-count {
+	font-size: 0.8rem;
+	font-weight: var(--cs-weight-bold, 700);
+	color: var(--cs-primary-text, var(--cs-primary, #6366f1));
+	white-space: nowrap;
+}
+
+.charsheet__builder-score-pool {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__builder-score-pool-empty {
+	font-size: 0.85rem;
+}
+
 .charsheet__builder-score-badge {
-	transition: transform 0.15s, box-shadow 0.15s;
-	cursor: pointer;
+	border: none;
+	cursor: grab;
+	transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
 }
 
 .charsheet__builder-score-badge:hover {
-	transform: scale(1.1);
-	filter: brightness(1.15);
+	transform: scale(1.08);
+	filter: brightness(1.12);
+}
+
+.charsheet__builder-score-badge:focus-visible {
+	outline: none;
+	box-shadow: 0 0 0 3px var(--cs-primary-light, rgba(99, 102, 241, 0.4));
 }
 
 .charsheet__builder-score-badge.active {
-	box-shadow: 0 0 0 3px var(--rgb-border-blue);
-	transform: scale(1.5);
+	box-shadow: 0 0 0 3px var(--cs-primary, #6366f1);
+	transform: scale(1.12);
+}
+
+.charsheet__builder-score-badge.dragging {
+	opacity: 0.5;
+	cursor: grabbing;
+}
+
+.charsheet__builder-ability-meta {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--cs-space-xs, 0.25rem);
+	font-size: 0.85rem;
 }
 
 .charsheet__builder-ability-mod {
-	color: var(--rgb-text-muted);
-	min-width: 2.5rem;
+	color: var(--cs-text-secondary, var(--rgb-text-muted));
+	font-weight: var(--cs-weight-semibold, 600);
 }
 
 .charsheet__builder-ability-racial {
-	color: #28a745;
-	font-size: 0.85rem;
+	color: var(--cs-primary-text, #4f46e5);
+	font-weight: var(--cs-weight-semibold, 600);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.charsheet__builder-score-badge,
+	.charsheet__builder-ability-dropzone,
+	.charsheet__builder-ability-cell {
+		transition: none;
+	}
+	.charsheet__builder-score-badge:hover,
+	.charsheet__builder-score-badge.active,
+	.charsheet__builder-ability-dropzone.drag-over {
+		transform: none;
+	}
 }
 
 .charsheet__builder-points-remaining {

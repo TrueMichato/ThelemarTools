@@ -7368,38 +7368,50 @@ class CharacterSheetBuilder {
 			this._standardArrayPool = [15, 14, 13, 12, 10, 8];
 		}
 
+		// Standard-array score tray — rendered ABOVE the grid so the score chips
+		// and the six drop targets stay co-visible (no scroll-to-reconcile).
+		if (this._abilityMethod === "standard") {
+			this._renderStandardArrayTray(container);
+		}
+
+		const grid = e_({outer: `<div class="charsheet__builder-ability-grid" role="group" aria-label="Ability scores"></div>`});
+
 		Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
 			const score = this._abilityScores[abl];
 			const racialBonus = this._getRacialBonus(abl);
 			const total = (score || 0) + racialBonus;
 			const mod = score != null ? Math.floor((total - 10) / 2) : null;
+			const full = Parser.attAbvToFull(abl);
+			const isFilled = score != null;
 
 			const scoreDisplay = this._abilityMethod === "standard"
-				? `<span class="charsheet__builder-ability-score charsheet__builder-ability-dropzone" data-ability="${abl}" style="min-width: 2rem; text-align: center; border: 1px dashed #ccc; padding: 0.25rem 0.5rem; cursor: pointer;">${score ?? "—"}</span>`
+				? `<button type="button" class="charsheet__builder-ability-score charsheet__builder-ability-dropzone${isFilled ? " is-filled" : ""}" data-ability="${abl}" aria-label="${full}: ${isFilled ? `score ${score}, activate to unassign` : "empty, activate to assign the selected score"}">${score ?? "—"}</button>`
 				: this._abilityMethod === "manual"
-					? `<input type="number" class="ve-form-control form-control--minimal charsheet__builder-ability-score" value="${score}" min="3" max="18" title="Max starting score is 18 (before racial bonuses)">`
+					? `<input type="number" class="ve-form-control charsheet__builder-ability-score charsheet__builder-ability-score-input" value="${score}" min="3" max="18" aria-label="${full} score" title="Max starting score is 18 (before racial bonuses)">`
 					: `<span class="charsheet__builder-ability-score">${score}</span>`;
 
-			const row = e_({outer: `
-				<div class="charsheet__builder-ability-row">
-					<span class="charsheet__builder-ability-name">${Parser.attAbvToFull(abl)}</span>
+			const cell = e_({outer: `
+				<div class="charsheet__builder-ability-cell${isFilled ? " is-filled" : ""}" data-ability="${abl}">
+					<span class="charsheet__builder-ability-name" title="${full}">${abl.toUpperCase()}</span>
 					<div class="charsheet__builder-ability-controls">
-						${this._abilityMethod === "pointbuy" ? `<button class="ve-btn ve-btn-default ve-btn-xs" data-action="decrease">−</button>` : ""}
+						${this._abilityMethod === "pointbuy" ? `<button type="button" class="ve-btn ve-btn-default ve-btn-xs charsheet__builder-ability-step" data-action="decrease" aria-label="Decrease ${full}">−</button>` : ""}
 						${scoreDisplay}
-						${this._abilityMethod === "pointbuy" ? `<button class="ve-btn ve-btn-default ve-btn-xs" data-action="increase">+</button>` : ""}
-						${racialBonus ? `<span class="charsheet__builder-ability-racial">+${racialBonus}</span>` : ""}
-						<span class="charsheet__builder-ability-mod">(${mod != null ? (mod >= 0 ? "+" : "") + mod : "—"})</span>
+						${this._abilityMethod === "pointbuy" ? `<button type="button" class="ve-btn ve-btn-default ve-btn-xs charsheet__builder-ability-step" data-action="increase" aria-label="Increase ${full}">+</button>` : ""}
+					</div>
+					<div class="charsheet__builder-ability-meta">
+						<span class="charsheet__builder-ability-mod">${mod != null ? (mod >= 0 ? "+" : "") + mod : "—"}</span>
+						${racialBonus ? `<span class="charsheet__builder-ability-racial" title="Species bonus">+${racialBonus}</span>` : ""}
 					</div>
 				</div>
 			`});
 
 			if (this._abilityMethod === "pointbuy") {
-				row.querySelector("[data-action=\"decrease\"]").addEventListener("click", () => this._adjustPointBuy(abl, -1));
-				row.querySelector("[data-action=\"increase\"]").addEventListener("click", () => this._adjustPointBuy(abl, 1));
+				cell.querySelector("[data-action=\"decrease\"]").addEventListener("click", () => this._adjustPointBuy(abl, -1));
+				cell.querySelector("[data-action=\"increase\"]").addEventListener("click", () => this._adjustPointBuy(abl, 1));
 			}
 
 			if (this._abilityMethod === "manual") {
-				row.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
+				cell.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 					// Max base score is 18 for starting characters (before racial bonuses)
 					this._abilityScores[abl] = Math.max(3, Math.min(18, parseInt(e.target.value) || 8));
 					e.target.value = this._abilityScores[abl]; // Update display if clamped
@@ -7407,85 +7419,183 @@ class CharacterSheetBuilder {
 				});
 			}
 
-			container.append(row);
+			grid.append(cell);
 		});
 
-		// Standard array assignment
+		container.append(grid);
+
+		// Standard array: wire the drop targets (drag + native-button click/keyboard)
 		if (this._abilityMethod === "standard") {
-			this._renderStandardArrayAssignment(container);
+			this._wireStandardArrayDropzones(grid);
 		}
 
 		this._updateAbilitySummary();
 	}
 
 	/**
+	 * Persistent visually-hidden live region so drag/keyboard score assignments
+	 * are announced to assistive tech (the re-rendered tray can't hold a stable
+	 * aria-live node). Node/jest-guarded.
+	 * @param {string} message
+	 */
+	_announceBuilder (message) {
+		if (typeof document === "undefined") return;
+		let region = document.getElementById("cs-builder-live-region");
+		if (!region) {
+			region = document.createElement("div");
+			region.id = "cs-builder-live-region";
+			region.className = "cs-combat-sr-live";
+			region.setAttribute("aria-live", "polite");
+			region.setAttribute("aria-atomic", "true");
+			document.body.appendChild(region);
+		}
+		region.textContent = "";
+		// rAF so an identical consecutive message still re-announces
+		(typeof requestAnimationFrame !== "undefined" ? requestAnimationFrame : (/** @type {*} */ cb) => setTimeout(cb, 0))(() => { region.textContent = message; });
+	}
+
+	/**
+	 * Standard-array score tray — a sticky group of draggable score chips rendered
+	 * above the ability grid so chips + drop targets stay co-visible. Chips are
+	 * native buttons (keyboard-operable: focus + Enter/Space selects) and also
+	 * HTML5-draggable for the drag-first path.
 	 * @param {*} container
 	 */
-	_renderStandardArrayAssignment (container) {
-		const assignment = e_({outer: `
-			<div class="mt-3">
-				<p class="ve-muted">Click a score, then click an ability to assign it:</p>
-				<div class="ve-flex ve-flex-wrap" id="standard-array-pool"></div>
+	_renderStandardArrayTray (container) {
+		const remaining = this._standardArrayPool.length;
+		const tray = e_({outer: `
+			<div class="charsheet__builder-score-tray">
+				<div class="charsheet__builder-score-tray-head">
+					<span class="charsheet__builder-score-tray-label">Drag a score onto an ability — or click a score, then an ability.</span>
+					<span class="charsheet__builder-score-tray-count">${remaining} to assign</span>
+				</div>
+				<div class="charsheet__builder-score-pool" id="standard-array-pool" role="group" aria-label="Available ability scores"></div>
 			</div>
 		`});
 
-		const pool = assignment.querySelector("#standard-array-pool");
+		const pool = tray.querySelector("#standard-array-pool");
 
-		// Render available scores
+		if (!this._standardArrayPool.length) {
+			pool.append(e_({outer: `<span class="charsheet__builder-score-pool-empty ve-muted">All scores assigned.</span>`}));
+		}
+
 		this._standardArrayPool.forEach((/** @type {*} */ score, /** @type {*} */ idx) => {
-			const badge = e_({outer: `<span class="badge badge-primary mr-1 mb-1 charsheet__builder-score-badge" data-score="${score}" data-idx="${idx}" style="cursor: pointer; font-size: 1rem; padding: 0.5rem;">${score}</span>`});
+			const isSel = this._selectedStandardScore != null
+				&& this._selectedStandardScore.idx === idx
+				&& this._selectedStandardScore.score === score;
 
-			badge.addEventListener("click", () => {
-				// Toggle selection
-				if (badge.classList.contains("active")) {
-					badge.classList.remove("active");
+			const chip = e_({outer: `<button type="button" class="badge badge-primary charsheet__builder-score-badge${isSel ? " active" : ""}" data-score="${score}" data-idx="${idx}" draggable="true" aria-pressed="${isSel ? "true" : "false"}" aria-label="Score ${score}${isSel ? ", selected" : ""}">${score}</button>`});
+
+			chip.addEventListener("click", () => {
+				if (chip.classList.contains("active")) {
+					chip.classList.remove("active");
+					chip.setAttribute("aria-pressed", "false");
 					this._selectedStandardScore = null;
 				} else {
-					[...pool.querySelectorAll(".badge")].forEach((/** @type {*} */ _el) => _el.classList.remove("active"));
-					badge.classList.add("active");
+					[...pool.querySelectorAll(".charsheet__builder-score-badge")].forEach((/** @type {*} */ _el) => {
+						_el.classList.remove("active");
+						_el.setAttribute("aria-pressed", "false");
+					});
+					chip.classList.add("active");
+					chip.setAttribute("aria-pressed", "true");
 					this._selectedStandardScore = {score, idx};
 				}
 			});
 
-			pool.append(badge);
+			chip.addEventListener("dragstart", (/** @type {*} */ e) => {
+				this._draggingScore = {score, idx};
+				chip.classList.add("dragging");
+				try {
+					e.dataTransfer.setData("text/plain", JSON.stringify({score, idx}));
+					e.dataTransfer.effectAllowed = "move";
+				} catch (ignored) { /* jsdom */ }
+			});
+			chip.addEventListener("dragend", () => {
+				this._draggingScore = null;
+				chip.classList.remove("dragging");
+				[...container.querySelectorAll(".charsheet__builder-ability-dropzone.drag-over")].forEach((/** @type {*} */ dz) => dz.classList.remove("drag-over"));
+			});
+
+			pool.append(chip);
 		});
 
-		// Add click handlers to ability dropzones
-		[...container.querySelectorAll(".charsheet__builder-ability-dropzone")].forEach((/** @type {*} */ dz) => dz.addEventListener("click", (/** @type {*} */ e) => {
-			const abl = e.target.dataset.ability;
-			// Valid standard array scores that can be returned to pool
-			const STANDARD_ARRAY_SCORES = [15, 14, 13, 12, 10, 8];
+		container.append(tray);
+	}
 
-			if (this._selectedStandardScore != null) {
-				// Assign the selected score to this ability
-				const oldScore = this._abilityScores[abl];
+	/**
+	 * Wire the six ability drop targets for the standard-array flow: click /
+	 * Enter / Space (native button) assigns the selected chip or unassigns, and
+	 * HTML5 drag-drop assigns the dragged score.
+	 * @param {*} grid
+	 */
+	_wireStandardArrayDropzones (grid) {
+		[...grid.querySelectorAll(".charsheet__builder-ability-dropzone")].forEach((/** @type {*} */ dz) => {
+			const abl = dz.dataset.ability;
 
-				// If this ability already had a valid standard array score, put it back in the pool
-				if (oldScore != null && STANDARD_ARRAY_SCORES.includes(oldScore)) {
-					this._standardArrayPool.push(oldScore);
-					this._standardArrayPool.sort((/** @type {*} */ a, /** @type {*} */ b) => b - a);
-				}
+			// Native <button> → click fires on Enter/Space too (keyboard-operable).
+			dz.addEventListener("click", () => this._assignStandardScoreToAbility(abl));
 
-				// Assign the new score
-				this._abilityScores[abl] = this._selectedStandardScore.score;
+			dz.addEventListener("dragover", (/** @type {*} */ e) => {
+				if (!this._draggingScore) return;
+				e.preventDefault();
+				try { e.dataTransfer.dropEffect = "move"; } catch (ignored) { /* jsdom */ }
+				dz.classList.add("drag-over");
+			});
+			dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
+			dz.addEventListener("drop", (/** @type {*} */ e) => {
+				e.preventDefault();
+				dz.classList.remove("drag-over");
+				let data = this._draggingScore;
+				try {
+					const raw = e.dataTransfer.getData("text/plain");
+					if (raw) data = JSON.parse(raw);
+				} catch (ignored) { /* fall back to _draggingScore */ }
+				if (!data) return;
+				this._selectedStandardScore = {score: data.score, idx: data.idx};
+				this._assignStandardScoreToAbility(abl);
+			});
+		});
+	}
 
-				// Remove from pool
-				this._standardArrayPool = this._standardArrayPool.filter((/** @type {*} */ _, /** @type {*} */ i) => i !== this._standardArrayPool.indexOf((/** @type {*} */ (this._selectedStandardScore)).score));
+	/**
+	 * Assign the currently-selected standard-array score to an ability (or, with
+	 * nothing selected, unassign the ability's score back to the pool). Shared by
+	 * the click, keyboard, and drag paths.
+	 * @param {string} abl
+	 */
+	_assignStandardScoreToAbility (abl) {
+		const STANDARD_ARRAY_SCORES = [15, 14, 13, 12, 10, 8];
+		const full = Parser.attAbvToFull(abl);
 
-				this._selectedStandardScore = null;
-				this._renderAbilityInputs();
-			} else if (this._abilityScores[abl] != null) {
-				// Clicking an assigned ability with no selection - return to pool (only if valid score)
-				if (STANDARD_ARRAY_SCORES.includes(this._abilityScores[abl])) {
-					this._standardArrayPool.push(this._abilityScores[abl]);
-					this._standardArrayPool.sort((/** @type {*} */ a, /** @type {*} */ b) => b - a);
-				}
-				this._abilityScores[abl] = null;
-				this._renderAbilityInputs();
+		if (this._selectedStandardScore != null) {
+			const assignedScore = this._selectedStandardScore.score;
+			const oldScore = this._abilityScores[abl];
+
+			// If this ability already held a valid standard-array score, return it.
+			if (oldScore != null && STANDARD_ARRAY_SCORES.includes(oldScore)) {
+				this._standardArrayPool.push(oldScore);
+				this._standardArrayPool.sort((/** @type {*} */ a, /** @type {*} */ b) => b - a);
 			}
-		}));
 
-		container.append(assignment);
+			this._abilityScores[abl] = assignedScore;
+
+			// Remove one instance of the assigned score from the pool.
+			const removeIdx = this._standardArrayPool.indexOf(assignedScore);
+			if (removeIdx !== -1) this._standardArrayPool.splice(removeIdx, 1);
+
+			this._selectedStandardScore = null;
+			this._announceBuilder(`${assignedScore} assigned to ${full}. ${this._standardArrayPool.length} to assign.`);
+			this._renderAbilityInputs();
+		} else if (this._abilityScores[abl] != null) {
+			// No selection → unassign this ability, returning a valid score to the pool.
+			if (STANDARD_ARRAY_SCORES.includes(this._abilityScores[abl])) {
+				this._standardArrayPool.push(this._abilityScores[abl]);
+				this._standardArrayPool.sort((/** @type {*} */ a, /** @type {*} */ b) => b - a);
+			}
+			this._abilityScores[abl] = null;
+			this._announceBuilder(`${full} unassigned. ${this._standardArrayPool.length} to assign.`);
+			this._renderAbilityInputs();
+		}
 	}
 
 	/**
