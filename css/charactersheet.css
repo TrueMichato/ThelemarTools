@@ -7727,6 +7727,38 @@
 	box-shadow: var(--cs-shadow-sm, 0 2px 4px rgba(0,0,0,0.05));
 }
 
+/* BUILDER IMPROVEMENT · BR-A — card discipline (no card-on-card).
+   The single `.charsheet__builder-content` card is the only frame. Inner
+   `.charsheet__section` elements were bordered/shadowed surface cards nested
+   inside it (card-on-card, the impeccable hard ban). Here they drop the
+   border + shadow and sit on the recessed base fill — the same recessed-well
+   rhythm the Combat/Notes phases already ship. Higher specificity (0,2,0)
+   beats the base `.charsheet__section` (0,1,0), so no !important needed. */
+.charsheet__builder-content .charsheet__section {
+	background: var(--cs-bg-base, var(--rgb-bg));
+	border: none;
+	box-shadow: none;
+	border-radius: var(--cs-radius-md, 8px);
+}
+
+.charsheet__builder-content .charsheet__section:hover {
+	border-color: transparent;
+	box-shadow: none;
+}
+
+/* Master-detail panes (Species / Background / Class / Spells) already carry a
+   recessed base fill; drop their 2px card border to a 1px hairline so the
+   list ↔ detail split reads as two functional wells, not two cards inside the
+   content card. */
+.charsheet__builder-content .charsheet__builder-list,
+.charsheet__builder-content .charsheet__builder-preview {
+	border-width: 1px;
+}
+
+.charsheet__builder-content .charsheet__builder-list-header {
+	border-bottom-width: 1px;
+}
+
 .charsheet__builder-nav {
 	display: flex;
 	justify-content: space-between;

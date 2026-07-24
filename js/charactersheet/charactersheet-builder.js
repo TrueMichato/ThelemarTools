@@ -9471,28 +9471,29 @@ class CharacterSheetBuilder {
 			<div class="ve-flex">
 				<div class="ve-flex-col" style="flex: 1; padding-right: 1rem;">
 					<div class="charsheet__section">
-						<h5>Character Name</h5>
-						<input type="text" class="ve-form-control" id="builder-name" placeholder="Enter character name" value="${this._state.getName()}">
-					</div>
-					
-					<div class="charsheet__section mt-3">
-						<h5>Personality Traits</h5>
-						<textarea class="ve-form-control" id="builder-personality" rows="3" placeholder="Describe your character's personality...">${this._state.getNote("personality")}</textarea>
-					</div>
-					
-					<div class="charsheet__section mt-3">
-						<h5>Ideals</h5>
-						<textarea class="ve-form-control" id="builder-ideals" rows="2" placeholder="What does your character believe in?">${this._state.getNote("ideals")}</textarea>
-					</div>
-					
-					<div class="charsheet__section mt-3">
-						<h5>Bonds</h5>
-						<textarea class="ve-form-control" id="builder-bonds" rows="2" placeholder="What connections does your character have?">${this._state.getNote("bonds")}</textarea>
-					</div>
-					
-					<div class="charsheet__section mt-3">
-						<h5>Flaws</h5>
-						<textarea class="ve-form-control" id="builder-flaws" rows="2" placeholder="What are your character's weaknesses?">${this._state.getNote("flaws")}</textarea>
+						<h5>Character</h5>
+						<div class="charsheet__notes-characteristics">
+							<div class="charsheet__notes-char-field">
+								<label class="charsheet__notes-char-label" for="builder-name">Name</label>
+								<input type="text" class="ve-form-control" id="builder-name" placeholder="Enter character name" value="${this._state.getName()}">
+							</div>
+							<div class="charsheet__notes-char-field">
+								<label class="charsheet__notes-char-label" for="builder-personality">Personality Traits</label>
+								<textarea class="ve-form-control" id="builder-personality" rows="3" placeholder="Describe your character's personality...">${this._state.getNote("personality")}</textarea>
+							</div>
+							<div class="charsheet__notes-char-field">
+								<label class="charsheet__notes-char-label" for="builder-ideals">Ideals</label>
+								<textarea class="ve-form-control" id="builder-ideals" rows="2" placeholder="What does your character believe in?">${this._state.getNote("ideals")}</textarea>
+							</div>
+							<div class="charsheet__notes-char-field">
+								<label class="charsheet__notes-char-label" for="builder-bonds">Bonds</label>
+								<textarea class="ve-form-control" id="builder-bonds" rows="2" placeholder="What connections does your character have?">${this._state.getNote("bonds")}</textarea>
+							</div>
+							<div class="charsheet__notes-char-field">
+								<label class="charsheet__notes-char-label" for="builder-flaws">Flaws</label>
+								<textarea class="ve-form-control" id="builder-flaws" rows="2" placeholder="What are your character's weaknesses?">${this._state.getNote("flaws")}</textarea>
+							</div>
+						</div>
 					</div>
 				</div>
 				
@@ -9501,30 +9502,39 @@ class CharacterSheetBuilder {
 						<h5>Appearance</h5>
 						<div class="ve-flex mb-2">
 							<div class="ve-flex-col mr-2" style="flex: 1;">
-								<label class="ve-muted ve-small">Age</label>
-								<input type="number" min="0" class="ve-form-control form-control--minimal" id="builder-age" value="${this._state.getAppearance("age")}" placeholder="Years">
+								<label class="charsheet__notes-char-label" for="builder-age">Age</label>
+								<div class="charsheet__appearance-input-wrap">
+									<input type="number" min="0" class="ve-form-control charsheet__appearance-input" id="builder-age" value="${this._state.getAppearance("age")}" placeholder="Age">
+									<span class="charsheet__appearance-unit">yrs</span>
+								</div>
 							</div>
 							<div class="ve-flex-col mr-2" style="flex: 1;">
-								<label class="ve-muted ve-small">Height (ft)</label>
-								<input type="number" min="0" step="0.1" class="ve-form-control form-control--minimal" id="builder-height" value="${this._state.getAppearance("height")}" placeholder="Feet">
+								<label class="charsheet__notes-char-label" for="builder-height">Height</label>
+								<div class="charsheet__appearance-input-wrap">
+									<input type="number" min="0" step="0.1" class="ve-form-control charsheet__appearance-input" id="builder-height" value="${this._state.getAppearance("height")}" placeholder="Height">
+									<span class="charsheet__appearance-unit">ft</span>
+								</div>
 							</div>
 							<div class="ve-flex-col" style="flex: 1;">
-								<label class="ve-muted ve-small">Weight (lbs)</label>
-								<input type="number" min="0" class="ve-form-control form-control--minimal" id="builder-weight" value="${this._state.getAppearance("weight")}" placeholder="Pounds">
+								<label class="charsheet__notes-char-label" for="builder-weight">Weight</label>
+								<div class="charsheet__appearance-input-wrap">
+									<input type="number" min="0" class="ve-form-control charsheet__appearance-input" id="builder-weight" value="${this._state.getAppearance("weight")}" placeholder="Weight">
+									<span class="charsheet__appearance-unit">lb</span>
+								</div>
 							</div>
 						</div>
 						<div class="ve-flex">
 							<div class="ve-flex-col mr-2" style="flex: 1;">
-								<label class="ve-muted ve-small">Eyes</label>
-								<input type="text" class="ve-form-control form-control--minimal" id="builder-eyes" value="${this._state.getAppearance("eyes")}">
+								<label class="charsheet__notes-char-label" for="builder-eyes">Eyes</label>
+								<input type="text" class="ve-form-control charsheet__appearance-input" id="builder-eyes" value="${this._state.getAppearance("eyes")}" placeholder="Eye color">
 							</div>
 							<div class="ve-flex-col mr-2" style="flex: 1;">
-								<label class="ve-muted ve-small">Skin</label>
-								<input type="text" class="ve-form-control form-control--minimal" id="builder-skin" value="${this._state.getAppearance("skin")}">
+								<label class="charsheet__notes-char-label" for="builder-skin">Skin</label>
+								<input type="text" class="ve-form-control charsheet__appearance-input" id="builder-skin" value="${this._state.getAppearance("skin")}" placeholder="Skin color">
 							</div>
 							<div class="ve-flex-col" style="flex: 1;">
-								<label class="ve-muted ve-small">Hair</label>
-								<input type="text" class="ve-form-control form-control--minimal" id="builder-hair" value="${this._state.getAppearance("hair")}">
+								<label class="charsheet__notes-char-label" for="builder-hair">Hair</label>
+								<input type="text" class="ve-form-control charsheet__appearance-input" id="builder-hair" value="${this._state.getAppearance("hair")}" placeholder="Hair color">
 							</div>
 						</div>
 					</div>
