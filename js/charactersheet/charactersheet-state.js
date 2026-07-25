@@ -3819,6 +3819,338 @@ class CharacterSheetState {
 		return matches[0];
 	}
 
+	// #region Spell metadata enrichment & deduplication
+	// -------------------------------------------------------------------------
+	// Single choke-point machinery shared by every spell-add route. Keeps stored
+	// spell/cantrip/innate entries fully enriched (school/casting metadata) and free of
+	// case-insensitive `name|source` duplicates, so no individual route has to remember
+	// to enrich or dedup. Also drives the load-time `_migrateSpells` repair of existing
+	// saves. Editions stay distinct (PHB≠XPHB); same-grant PHB/XPHB dups are reconciled
+	// separately (see `_reconcileSameGrantEditions`).
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Derive the canonical enrichment fields for a spell from its full catalog object.
+	 * The catalog stores STRUCTURED time/range/duration/components, so these are formatted
+	 * via the shared class-utils extractors rather than copied raw.
+	 * @param {*} full Full spell data object from the catalog.
+	 * @returns {*} Flat enrichment fields.
+	 * @private
+	 */
+	_deriveSpellEnrichment (full) {
+		return {
+			name: full.name,
+			source: full.source,
+			level: full.level,
+			school: full.school,
+			castingTime: CharacterSheetClassUtils.getSpellCastingTime(full),
+			range: CharacterSheetClassUtils.getSpellRange(full),
+			duration: CharacterSheetClassUtils.getSpellDuration(full),
+			components: CharacterSheetClassUtils.getSpellComponents(full),
+			concentration: CharacterSheetClassUtils.spellIsConcentration(full),
+			ritual: CharacterSheetClassUtils.spellIsRitual(full),
+			subschools: full.subschools || [],
+		};
+	}
+
+	/**
+	 * Case-insensitive `name|source` identity key for a spell entry. Editions stay distinct
+	 * (PHB≠XPHB) but casing/whitespace differences coalesce.
+	 * @param {*} entry
+	 * @returns {string}
+	 * @private
+	 */
+	_spellIdentityKey (entry) {
+		return `${String(entry?.name || "").trim().toLowerCase()}|${String(entry?.source || "").trim().toLowerCase()}`;
+	}
+
+	/**
+	 * Enrich a spell-add input with catalog metadata and normalize its name/source casing.
+	 * Central to `addSpell`/`addCantrip`/`addInnateSpell` so EVERY add route produces a
+	 * complete, properly-attributed entry instead of a lean stub. Caller-provided fields
+	 * win; only missing enrichment is filled. Returns the input unchanged when the catalog
+	 * is unavailable or the spell can't be resolved (never mangles unresolved homebrew
+	 * sources). Edition-exact: the source is only rewritten when the catalog match is the
+	 * same edition, or when the caller supplied no source at all.
+	 * @param {*} spell
+	 * @returns {*}
+	 * @private
+	 */
+	_enrichSpellInput (spell) {
+		if (!spell || !spell.name || !this._allSpells?.length) return spell;
+		const full = this._resolveFullSpellData({name: spell.name, source: spell.source});
+		if (!full) return spell;
+		const srcExact = !!full.source && !!spell.source
+			&& String(full.source).toLowerCase() === String(spell.source).toLowerCase();
+		// Only stamp catalog metadata from an entry we can trust to be THIS spell: an
+		// exact (case-insensitive) source match, or when the caller supplied no source at
+		// all (legacy refs). A name-only match to a DIFFERENT source may be a homebrew or
+		// wrong-edition spell, so copying its school/level/etc. would be incorrect.
+		const canEnrich = srcExact || !spell.source;
+		const out = {...spell};
+		out.name = full.name; // canonical casing is safe (same spell name)
+		if (!canEnrich) return out;
+		const d = this._deriveSpellEnrichment(full);
+		out.source = d.source;
+		if (out.school == null || out.school === "") out.school = d.school;
+		if (out.level == null) out.level = d.level;
+		if (!out.castingTime) out.castingTime = d.castingTime;
+		if (!out.range) out.range = d.range;
+		if (!out.duration) out.duration = d.duration;
+		if (!out.components) out.components = d.components;
+		if (!Array.isArray(out.subschools) || !out.subschools.length) out.subschools = d.subschools;
+		// Trusted match → derive concentration/ritual authoritatively (fixing stale `false`).
+		out.concentration = d.concentration;
+		out.ritual = d.ritual;
+		return out;
+	}
+
+	/**
+	 * Merge metadata from `src` into an existing stored spell `target` without clobbering
+	 * the target's own richer data or ownership. Fills missing enrichment, ORs
+	 * prepared/grant booleans, and preserves innate resource links / use tracking. Never
+	 * forces `grantedByClass` onto a player-owned entry (that would trigger later
+	 * grant-teardown and mis-count the known limit).
+	 * @param {*} target
+	 * @param {*} src
+	 * @returns {*} target
+	 * @private
+	 */
+	_mergeSpellMetadata (target, src) {
+		if (!target || !src) return target;
+		const fill = (/** @type {string} */ k) => {
+			if ((target[k] == null || target[k] === "") && src[k] != null && src[k] !== "") target[k] = src[k];
+		};
+		["school", "castingTime", "range", "duration", "components", "level"].forEach(fill);
+		if ((!Array.isArray(target.subschools) || !target.subschools.length)
+			&& Array.isArray(src.subschools) && src.subschools.length) {
+			target.subschools = src.subschools;
+		}
+		if (!target.sourceFeature && src.sourceFeature) target.sourceFeature = src.sourceFeature;
+		if (!target.sourceClass && src.sourceClass) target.sourceClass = src.sourceClass;
+		if (src.alwaysPrepared && !target.alwaysPrepared) { target.alwaysPrepared = true; target.prepared = true; }
+		if (src.prepared && !target.prepared) target.prepared = true;
+		if (src.spellcastingAbility && !target.spellcastingAbility) target.spellcastingAbility = src.spellcastingAbility;
+		if (src.isDivineSoulAffinity && !target.isDivineSoulAffinity) target.isDivineSoulAffinity = true;
+		if (src.inSpellbook && !target.inSpellbook) target.inSpellbook = true;
+		if (target.linkedResourceId == null && src.linkedResourceId != null) target.linkedResourceId = src.linkedResourceId;
+		// Innate use tracking: keep the higher max, but NEVER restore spent uses — the
+		// target's own `current` (what the player has left) is authoritative; only clamp it
+		// down if the new max is lower. A fresh target (no tracking yet) adopts src's.
+		if (src.uses && typeof src.uses === "object") {
+			if (!target.uses || typeof target.uses !== "object") {
+				target.uses = {...src.uses};
+			} else {
+				target.uses.max = Math.max(Number(target.uses.max) || 0, Number(src.uses.max) || 0);
+				if ((Number(target.uses.current) || 0) > target.uses.max) target.uses.current = target.uses.max;
+			}
+			if (src.recharge && !target.recharge) target.recharge = src.recharge;
+		}
+		return target;
+	}
+
+	/**
+	 * True when a source string belongs to the 2024 ("one") edition line. Handles the
+	 * TGTT sub-source convention (e.g. "TGTT-2024" vs the classic "TGTT-2014") and any
+	 * explicit 2024/2014 marker, falling back to {@link CharacterSheetClassUtils.is2024Source}
+	 * (exact "XPHB"/"TGTT").
+	 * @param {*} source
+	 * @returns {boolean}
+	 * @private
+	 */
+	_sourceIs2024 (source) {
+		if (!source) return false;
+		const s = String(source).toUpperCase();
+		if (/2014/.test(s)) return false;
+		if (/2024/.test(s)) return true;
+		return CharacterSheetClassUtils.is2024Source(s);
+	}
+
+	/**
+	 * Return whichever of two same-identity spell entries carries the richer metadata:
+	 * a present school outweighs a non-empty castingTime, which outweighs an innate
+	 * resource link. Ties keep the first (`a`) for order-stability.
+	 * @private
+	 */
+	_richerSpellEntry (a, b) {
+		const score = (/** @type {*} */ e) => (e.school ? 4 : 0) + (e.castingTime ? 2 : 0) + (e.linkedResourceId != null ? 1 : 0);
+		return score(b) > score(a) ? b : a;
+	}
+
+	/**
+	 * In-place enrichment of a stored spell entry from the catalog. Fills only missing
+	 * fields and normalizes name/source casing (edition-exact). Idempotent.
+	 * @param {*} entry
+	 * @private
+	 */
+	_enrichStoredSpellEntry (entry) {
+		if (!entry?.name) return;
+		const full = this._resolveFullSpellData({name: entry.name, source: entry.source});
+		if (!full) return;
+		const srcExact = !!full.source && !!entry.source
+			&& String(full.source).toLowerCase() === String(entry.source).toLowerCase();
+		// Same trust rule as `_enrichSpellInput`: never stamp a different source's metadata
+		// onto an entry that names an explicit, non-matching source.
+		const canEnrich = srcExact || !entry.source;
+		entry.name = full.name;
+		if (!canEnrich) return;
+		const d = this._deriveSpellEnrichment(full);
+		entry.source = d.source;
+		if (entry.school == null || entry.school === "") entry.school = d.school;
+		if (entry.level == null) entry.level = d.level;
+		if (!entry.castingTime) entry.castingTime = d.castingTime;
+		if (!entry.range) entry.range = d.range;
+		if (!entry.duration) entry.duration = d.duration;
+		if (!entry.components) entry.components = d.components;
+		if (!Array.isArray(entry.subschools) || !entry.subschools.length) entry.subschools = d.subschools;
+		// Trusted match → set concentration/ritual authoritatively so a stale `false` (from
+		// an older store that ignored structured duration[].concentration) is corrected.
+		entry.concentration = d.concentration;
+		entry.ritual = d.ritual;
+	}
+
+	/**
+	 * Load-time repair (a): enrich lean stored spell/cantrip/innate entries with catalog
+	 * metadata + canonical name/source casing. Runs before the misfiled-cantrip relocation
+	 * in `_migrateSpells` so a null-level cantrip in `spellsKnown` first gains `level: 0`.
+	 * No-ops when the spell database is unavailable.
+	 * @private
+	 */
+	_sweepEnrichStoredSpells () {
+		if (!this._allSpells?.length) return;
+		const sc = this._data.spellcasting;
+		if (!sc) return;
+		for (const arrKey of ["spellsKnown", "cantripsKnown", "innateSpells"]) {
+			const arr = sc[arrKey];
+			if (!Array.isArray(arr)) continue;
+			arr.forEach(entry => this._enrichStoredSpellEntry(entry));
+		}
+	}
+
+	/**
+	 * Load-time repair (b): coalesce case-insensitive `name|source` duplicates and then
+	 * reconcile same-grant PHB/XPHB edition duplicates across all three spell arrays.
+	 * Idempotent.
+	 * @private
+	 */
+	_sweepDedupStoredSpells () {
+		const sc = this._data.spellcasting;
+		if (!sc) return;
+		for (const arrKey of ["spellsKnown", "cantripsKnown", "innateSpells"]) {
+			if (!Array.isArray(sc[arrKey])) continue;
+			sc[arrKey] = this._reconcileSameGrantEditions(this._coalesceSpellDuplicates(sc[arrKey]));
+		}
+	}
+
+	/**
+	 * Coalesce case-insensitive `name|source` duplicate entries (edition-exact). The
+	 * survivor is the richest entry; metadata and grant/prepared flags from the others are
+	 * merged into it. Order-stable.
+	 * @param {Array} arr
+	 * @returns {Array}
+	 * @private
+	 */
+	_coalesceSpellDuplicates (arr) {
+		if (!Array.isArray(arr) || arr.length < 2) return arr;
+		const byKey = new Map();
+		const order = [];
+		for (const entry of arr) {
+			const key = this._spellIdentityKey(entry);
+			if (!byKey.has(key)) { byKey.set(key, entry); order.push(key); continue; }
+			const kept = byKey.get(key);
+			const winner = this._richerSpellEntry(kept, entry);
+			const loser = winner === kept ? entry : kept;
+			this._mergeSpellMetadata(winner, loser);
+			byKey.set(key, winner);
+		}
+		return order.map(k => byKey.get(k));
+	}
+
+	/**
+	 * Within a single subclass/class grant — entries sharing that grant's `sourceFeature`
+	 * tag and spell name that span BOTH editions (e.g. a subclass that mistakenly ended up
+	 * with BOTH the PHB and the XPHB copy of Guidance) — keep the copy whose edition matches
+	 * the granting subclass/class and drop only the opposite-edition copy, merging its flags
+	 * into the survivor.
+	 *
+	 * Deliberately conservative to avoid ever destroying a legitimately-distinct spell:
+	 *  - Only acts on a grant we can positively identify as a class/subclass `"<X> Spells"`
+	 *    tag ({@link _grantEditionIs2024} returns null otherwise) — feat/racial grants, whose
+	 *    same-name entries are never accidental edition dups, are left untouched.
+	 *  - Only acts when the group genuinely spans both editions; same-edition alternate
+	 *    sources (e.g. PHB + TCE, both 2014) are preserved.
+	 *  - Only drops entries of the edition that does NOT match the grant; if none match the
+	 *    grant edition, nothing is dropped.
+	 * Idempotent.
+	 * @param {Array} arr
+	 * @returns {Array}
+	 * @private
+	 */
+	_reconcileSameGrantEditions (arr) {
+		if (!Array.isArray(arr) || arr.length < 2) return arr;
+		const groups = new Map();
+		for (const entry of arr) {
+			if (!entry.sourceFeature || !entry.name) continue;
+			const key = `${String(entry.sourceFeature).toLowerCase()}|${String(entry.name).toLowerCase()}`;
+			if (!groups.has(key)) groups.set(key, []);
+			groups.get(key).push(entry);
+		}
+		const drop = new Set();
+		for (const grp of groups.values()) {
+			if (grp.length < 2) continue;
+			// Only reconcile grants owned by an identifiable class/subclass "<X> Spells" tag.
+			const grantIs2024 = this._grantEditionIs2024(grp[0].sourceFeature, grp[0].sourceClass);
+			if (grantIs2024 == null) continue;
+			// Require a genuine cross-edition span; leave same-edition alternates alone.
+			const has2024 = grp.some(e => this._sourceIs2024(e.source));
+			const hasClassic = grp.some(e => !this._sourceIs2024(e.source));
+			if (!has2024 || !hasClassic) continue;
+			const survivors = grp.filter(e => this._sourceIs2024(e.source) === grantIs2024);
+			const losers = grp.filter(e => this._sourceIs2024(e.source) !== grantIs2024);
+			if (!survivors.length) continue; // nothing matches the grant edition → don't destroy
+			let survivor = survivors[0];
+			for (const e of survivors) survivor = this._richerSpellEntry(survivor, e);
+			for (const e of losers) {
+				this._mergeSpellMetadata(survivor, e);
+				drop.add(e);
+			}
+		}
+		if (!drop.size) return arr;
+		return arr.filter(e => !drop.has(e));
+	}
+
+	/**
+	 * Resolve whether the class/subclass that owns a `"<X> Spells"` grant tag belongs to
+	 * the 2024 edition line, used to pick the surviving edition in
+	 * {@link _reconcileSameGrantEditions}. Returns `null` when no class/subclass on the sheet
+	 * owns the tag — the caller then leaves that group untouched rather than guessing (so
+	 * feat/racial grants are never reconciled).
+	 * @param {string} sourceFeature
+	 * @param {string} [sourceClass]
+	 * @returns {boolean|null}
+	 * @private
+	 */
+	_grantEditionIs2024 (sourceFeature, sourceClass) {
+		const classes = this._data.classes || [];
+		for (const c of classes) {
+			if (c.subclass && sourceFeature === `${c.subclass.name} Spells`) {
+				return this._sourceIs2024(c.subclass.source) || c.subclass.edition === "one";
+			}
+			if (sourceFeature === `${c.name} Spells`) {
+				return this._sourceIs2024(c.source) || c.edition === "one";
+			}
+		}
+		if (sourceClass) {
+			const c = classes.find(cc => cc.name === sourceClass);
+			if (c && sourceFeature === `${c.name} Spells`) {
+				if (c.subclass && (this._sourceIs2024(c.subclass.source) || c.subclass.edition === "one")) return true;
+				return this._sourceIs2024(c.source) || c.edition === "one";
+			}
+		}
+		return null;
+	}
+	// #endregion
+
 	_getDefaultState () {
 		return {
 			id: null,
@@ -4846,6 +5178,11 @@ class CharacterSheetState {
 	 * that uses duration[].concentration instead of a top-level concentration property.
 	 */
 	_migrateSpells () {
+		// B1 (a): enrich lean stored spell/cantrip/innate entries from the catalog FIRST, so
+		// missing school/casting metadata is filled and a null-level cantrip misfiled in
+		// spellsKnown gains `level: 0` before the misfiled-cantrip relocation below runs.
+		this._sweepEnrichStoredSpells();
+
 		// Known concentration spells (common ones)
 		const knownConcentrationSpells = new Set([
 			"bless", "bane", "detect magic", "detect evil and good", "detect thoughts",
@@ -5009,6 +5346,12 @@ class CharacterSheetState {
 				}
 			});
 		}
+
+		// B1 (b/c): coalesce case-insensitive `name|source` duplicates (edition-exact) and
+		// reconcile same-grant PHB/XPHB edition dups so a spell mistakenly granted in both
+		// editions by one subclass collapses to the edition matching that subclass. Runs LAST
+		// so it sees the fully-enriched, relocated arrays. Idempotent.
+		this._sweepDedupStoredSpells();
 	}
 
 	/**
@@ -12822,7 +13165,7 @@ class CharacterSheetState {
 				if (spell.isCantrip) {
 					const existingCantrip = this._data.spellcasting.cantripsKnown.find(
 						s => s.name.toLowerCase() === spell.name.toLowerCase()
-							&& (s.source === spell.source || !spell.source),
+							&& (String(s.source || "").toLowerCase() === String(spell.source || "").toLowerCase() || !spell.source),
 					);
 					if (!existingCantrip) {
 						// Forward the full enriched entry (school/casting metadata) so the
@@ -12857,7 +13200,7 @@ class CharacterSheetState {
 				// Check if already exists
 				const existing = this._data.spellcasting.spellsKnown.find(
 					s => s.name.toLowerCase() === spell.name.toLowerCase()
-						&& (s.source === spell.source || !spell.source),
+						&& (String(s.source || "").toLowerCase() === String(spell.source || "").toLowerCase() || !spell.source),
 				);
 
 				if (existing) {
@@ -13250,29 +13593,33 @@ class CharacterSheetState {
 
 	// #endregion
 
-	addSpell (spell, prepared = false) {
+	addSpell (spell, prepared = undefined) {
+		// Enrich from the catalog so every add route yields a complete entry, and canonicalize
+		// name/source casing so dedup is reliable.
+		spell = this._enrichSpellInput(spell);
+
+		// Resolve the prepared flag: an explicit method argument wins; otherwise honour the
+		// spell object's own `prepared` (e.g. a fulfilled spell choice that passes prepared
+		// inside the object). Defaults to false.
+		const wantPrepared = prepared !== undefined ? prepared : (spell.prepared || false);
+
 		// Check if it's a cantrip
 		if (spell.level === 0) {
 			this.addCantrip(spell);
 			return;
 		}
 
+		// Case-insensitive, edition-exact dedup so a lean `name|source` casing variant is
+		// coalesced into the existing entry instead of duplicated.
+		const key = this._spellIdentityKey(spell);
 		const existing = this._data.spellcasting.spellsKnown.find(
-			s => s.name === spell.name && s.source === spell.source,
+			s => this._spellIdentityKey(s) === key,
 		);
 		if (existing) {
-			// If we're adding from a feature (free), update the existing entry
-			// so it doesn't count against limit
-			if (spell.sourceFeature && !existing.sourceFeature) {
-				existing.sourceFeature = spell.sourceFeature;
-			}
-			if (spell.sourceClass && !existing.sourceClass) {
-				existing.sourceClass = spell.sourceClass;
-			}
-			if (spell.alwaysPrepared && !existing.alwaysPrepared) {
-				existing.alwaysPrepared = true;
-				existing.prepared = true;
-			}
+			// Coalesce: fill missing enrichment + grant/prepared flags without stealing the
+			// survivor's ownership (never force grantedByClass onto a player-owned entry).
+			this._mergeSpellMetadata(existing, spell);
+			if (wantPrepared && !existing.prepared) existing.prepared = true;
 		} else {
 			this._data.spellcasting.spellsKnown.push({
 				id: CryptUtil.uid(),
@@ -13282,7 +13629,7 @@ class CharacterSheetState {
 				school: spell.school,
 				ritual: spell.ritual || false,
 				concentration: spell.concentration || false,
-				prepared: prepared !== undefined ? prepared : spell.prepared,
+				prepared: wantPrepared,
 				alwaysPrepared: spell.alwaysPrepared || false,
 				inSpellbook: spell.inSpellbook || false, // For Wizard spellbook tracking
 				castingTime: spell.castingTime || "",
@@ -13292,6 +13639,7 @@ class CharacterSheetState {
 				sourceFeature: spell.sourceFeature || null,
 				sourceClass: spell.sourceClass || null,
 				subschools: spell.subschools || [],
+				spellcastingAbility: spell.spellcastingAbility || null,
 				isDivineSoulAffinity: spell.isDivineSoulAffinity || false,
 				grantedByClass: spell.grantedByClass || false,
 			});
@@ -13299,20 +13647,15 @@ class CharacterSheetState {
 	}
 
 	addCantrip (spell) {
+		spell = this._enrichSpellInput(spell);
+		const key = this._spellIdentityKey(spell);
 		const existing = this._data.spellcasting.cantripsKnown.find(
-			s => s.name === spell.name && s.source === spell.source,
+			s => this._spellIdentityKey(s) === key,
 		);
 		if (existing) {
-			// If we're adding a cantrip from a feature (free), update the existing entry
-			// so it doesn't count against limit
-			if (spell.sourceFeature && !existing.sourceFeature) {
-				existing.sourceFeature = spell.sourceFeature;
-			}
-			if (spell.sourceClass && !existing.sourceClass) {
-				existing.sourceClass = spell.sourceClass;
-			}
-			// Carry a per-cantrip spellcasting ability override (e.g. a racial cantrip
-			// whose casting ability the player chose) onto a pre-existing entry.
+			// Coalesce a case/edition-casing variant into the existing cantrip, filling
+			// missing enrichment + grant metadata (including a per-cantrip casting ability).
+			this._mergeSpellMetadata(existing, spell);
 			if (spell.spellcastingAbility && !existing.spellcastingAbility) {
 				existing.spellcastingAbility = spell.spellcastingAbility;
 			}
@@ -13364,11 +13707,24 @@ class CharacterSheetState {
 			this._data.spellcasting.innateSpells = [];
 		}
 
-		// Check if already exists
+		spell = this._enrichSpellInput(spell);
+
+		// Case-insensitive, edition-exact dedup; coalesce metadata into the existing entry
+		// (preserving its resource link / use tracking) rather than silently dropping.
+		const key = this._spellIdentityKey(spell);
 		const existing = this._data.spellcasting.innateSpells.find(
-			s => s.name === spell.name && s.source === spell.source,
+			s => this._spellIdentityKey(s) === key,
 		);
-		if (existing) return;
+		if (existing) {
+			// Normalize a numeric caller-supplied `uses` to the stored `{current,max}` shape
+			// (and infer recharge/atWill) so `_mergeSpellMetadata` can fold it in.
+			if (spell.uses != null && typeof spell.uses !== "object") {
+				const n = Number(spell.uses) || 0;
+				spell = {...spell, uses: {current: n, max: n}, recharge: spell.recharge || "long"};
+			}
+			this._mergeSpellMetadata(existing, spell);
+			return;
+		}
 
 		const innateSpell = {
 			id: CryptUtil.uid(),
@@ -13392,6 +13748,10 @@ class CharacterSheetState {
 		// cast with a chosen WIS/INT/CHA) so its save DC / attack bonus can be resolved even
 		// when the character has no spellcasting class.
 		if (spell.spellcastingAbility) innateSpell.spellcastingAbility = spell.spellcastingAbility;
+
+		// Preserve a link to a backing resource pool (e.g. an innate spell whose uses are
+		// tracked by a shared feature resource) so coalescing/merge can keep it.
+		if (spell.linkedResourceId != null) innateSpell.linkedResourceId = spell.linkedResourceId;
 
 		// Add uses tracking if not at-will
 		if (!spell.atWill && spell.uses) {
@@ -13527,6 +13887,7 @@ class CharacterSheetState {
 				recharge: choice.recharge || "long",
 				sourceFeature: choice.featureName,
 				sourceClass: choice.sourceClass || null,
+				spellcastingAbility: choice.ability || null,
 			});
 		} else {
 			this.addSpell({
@@ -13537,7 +13898,13 @@ class CharacterSheetState {
 				prepared: choice.prepared,
 				ritual: spell.ritual || false,
 				concentration: spell.concentration || false,
+				// Attribute the pick to the granting feature so it is recognised as
+				// feature-granted (doesn't count against the known limit) and carry the
+				// feature's chosen casting ability so its DC/attack can resolve without a
+				// spellcasting class. Enrichment (school/casting metadata) is filled by addSpell.
+				sourceFeature: choice.featureName || null,
 				sourceClass: choice.sourceClass || null,
+				spellcastingAbility: choice.ability || null,
 			});
 		}
 
