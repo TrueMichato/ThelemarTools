@@ -3908,7 +3908,16 @@ class CharacterSheetPage {
 
 	_renderProficiencies () {
 		const profs = this._state.getProficiencies();
-		const armor = profs.armor.map(a => typeof a === "string" ? a : a.full).join(", ");
+		// Armor is stored as canonical tokens (light/medium/heavy/shields); present
+		// them as friendly labels on the main sheet. Non-canonical/homebrew values
+		// pass through unchanged.
+		const armorTokenLabels = {light: "Light Armor", medium: "Medium Armor", heavy: "Heavy Armor", shields: "Shields"};
+		const armorLabel = (a) => {
+			const raw = typeof a === "string" ? a : a.full;
+			const token = this._state._normalizeArmorProfToken?.(raw) ?? raw;
+			return armorTokenLabels[token] || raw;
+		};
+		const armor = profs.armor.map(armorLabel).join(", ");
 		const weapons = profs.weapons.map(w => typeof w === "string" ? w : w.full).join(", ");
 		const tools = profs.tools.map(t => typeof t === "string" ? t : t.full).join(", ");
 
@@ -16274,8 +16283,11 @@ class CharacterSheetPage {
 	 * Get available suggestions for each proficiency type
 	 */
 	_getProficiencySuggestions () {
-		// Armor types
-		const armorSuggestions = ["Light Armor", "Medium Armor", "Heavy Armor", "Shields"];
+		// Armor types — suggest the CANONICAL tokens the rest of the sheet consumes
+		// (light/medium/heavy/shields), not friendly labels, so a proficiency added
+		// here satisfies hasArmorProficiency() and clears the non-proficiency penalty.
+		// The modal maps these back to friendly labels for display.
+		const armorSuggestions = ["light", "medium", "heavy", "shields"];
 
 		// Weapons - from items data, filter by weapon types
 		const weaponTypes = new Set();
@@ -16448,17 +16460,35 @@ class CharacterSheetPage {
 			isWidth100: true,
 			cbClose: () => {
 				this._renderProficiencies();
+				// Proficiency changes drive the 5e RAW non-proficiency penalty
+				// (disadvantage on STR/DEX rolls, spellcasting block) and the combat
+				// warning banner. Re-render every dependent surface so the penalty
+				// appears/disappears live without a reload.
+				this._renderSkills();
+				this._renderAttacks();
+				this._combat?.renderAttacks?.();
 				this._saveCurrentCharacter();
 			},
 		});
 
 		const suggestions = this._getProficiencySuggestions();
 
+		// Armor is stored as canonical tokens (light/medium/heavy/shields) so it
+		// matches hasArmorProficiency(); map those to friendly labels for display and
+		// normalise any typed/legacy value back to a token before writing to state.
+		const ARMOR_TOKEN_TO_LABEL = {light: "Light Armor", medium: "Medium Armor", heavy: "Heavy Armor", shields: "Shields"};
+		const armorToDisplay = (v) => {
+			const token = this._state._normalizeArmorProfToken(v);
+			return ARMOR_TOKEN_TO_LABEL[token] || (typeof v === "string" ? v : (v?.full || v?.name || String(v)));
+		};
+		const armorToToken = (v) => this._state._normalizeArmorProfToken(v);
+		const identity = (v) => v;
+
 		const profTypes = [
-			{key: "armor", label: "Armor Proficiencies", getter: "getArmorProficiencies", adder: "addArmorProficiency", remover: "removeArmorProficiency", suggestions: suggestions.armor},
-			{key: "weapons", label: "Weapon Proficiencies", getter: "getWeaponProficiencies", adder: "addWeaponProficiency", remover: "removeWeaponProficiency", suggestions: suggestions.weapons},
-			{key: "tools", label: "Tool Proficiencies", getter: "getToolProficiencies", adder: "addToolProficiency", remover: "removeToolProficiency", suggestions: suggestions.tools},
-			{key: "languages", label: "Languages", getter: "getLanguages", adder: "addLanguage", remover: "removeLanguage", suggestions: suggestions.languages},
+			{key: "armor", label: "Armor Proficiencies", getter: "getArmorProficiencies", adder: "addArmorProficiencyCanonical", remover: "removeArmorProficiency", removerByToken: "removeArmorProficiencyVariants", suggestions: suggestions.armor, toToken: armorToToken, toDisplay: armorToDisplay, normalize: (v) => this._state._normalizeArmorProfToken(v)},
+			{key: "weapons", label: "Weapon Proficiencies", getter: "getWeaponProficiencies", adder: "addWeaponProficiency", remover: "removeWeaponProficiency", suggestions: suggestions.weapons, toToken: identity, toDisplay: identity, normalize: null},
+			{key: "tools", label: "Tool Proficiencies", getter: "getToolProficiencies", adder: "addToolProficiency", remover: "removeToolProficiency", suggestions: suggestions.tools, toToken: identity, toDisplay: identity, normalize: null},
+			{key: "languages", label: "Languages", getter: "getLanguages", adder: "addLanguage", remover: "removeLanguage", suggestions: suggestions.languages, toToken: identity, toDisplay: identity, normalize: null},
 		];
 
 		const renderSection = (profType) => {
@@ -16486,8 +16516,20 @@ class CharacterSheetPage {
 					listEl.insertAdjacentHTML("beforeend", `<span class="ve-muted">None</span>`);
 					return;
 				}
+				// Dedupe by normalized token so legacy pollution (e.g. "light" AND
+				// "Light armor" both present) collapses to a single chip. Removing that
+				// chip removes EVERY stored variant that normalizes to the same token,
+				// repairing polluted saves through normal use.
+				const seen = new Set();
 				currentItems.forEach(item => {
-					const rawName = typeof item === "string" ? item : (item.full || item.name || item);
+					const normKey = profType.normalize ? profType.normalize(item) : null;
+					if (normKey != null) {
+						if (seen.has(normKey)) return;
+						seen.add(normKey);
+					}
+					const rawName = profType.toDisplay
+						? profType.toDisplay(item)
+						: (typeof item === "string" ? item : (item.full || item.name || item));
 					// Proficiency data can carry embedded @tags (e.g. weapon-category
 					// proficiencies whose `full` reads "…{@filter Finesse or Light|…}
 					// property"). Resolve them to plain text so the chip never leaks raw
@@ -16500,7 +16542,17 @@ class CharacterSheetPage {
 						</span>
 					`});
 					badgeEl.querySelector(".charsheet__edit-prof-remove").addEventListener("click", () => {
-						this._state[profType.remover](item);
+						if (profType.removerByToken) {
+							// Single call removes every stored variant normalizing to this token.
+							this._state[profType.removerByToken](item);
+						} else if (normKey != null) {
+							// Remove all stored variants that normalize to this token.
+							this._state[profType.getter]()
+								.filter(i => profType.normalize(i) === normKey)
+								.forEach(variant => this._state[profType.remover](variant));
+						} else {
+							this._state[profType.remover](item);
+						}
 						renderList();
 					});
 					listEl.append(badgeEl);
@@ -16509,10 +16561,19 @@ class CharacterSheetPage {
 			renderList();
 
 			const renderDropdown = (filter = "") => {
-				const currentItems = this._state[profType.getter]().map(i => (typeof i === "string" ? i : i.name || i).toLowerCase());
+				// Exclude already-present entries by normalized token (armor) or by
+				// lowercased value (others); filter against the DISPLAY label so typing
+				// "armor" still matches the canonical "light" suggestion.
+				const currentKeys = new Set(this._state[profType.getter]().map(i => (
+					profType.normalize
+						? profType.normalize(i)
+						: (typeof i === "string" ? i : i.name || i).toLowerCase()
+				)));
 				const filtered = profType.suggestions.filter(s => {
-					if (currentItems.includes(s.toLowerCase())) return false;
-					if (filter && !s.toLowerCase().includes(filter.toLowerCase())) return false;
+					const key = profType.normalize ? profType.normalize(s) : String(s).toLowerCase();
+					if (currentKeys.has(key)) return false;
+					const display = profType.toDisplay ? profType.toDisplay(s) : s;
+					if (filter && !String(display).toLowerCase().includes(filter.toLowerCase())) return false;
 					return true;
 				}).slice(0, 10); // Limit to 10 suggestions
 
@@ -16523,9 +16584,10 @@ class CharacterSheetPage {
 				}
 
 				filtered.forEach(suggestion => {
-					const itemEl = e_({outer: `<div class="charsheet__autocomplete-item">${suggestion}</div>`});
+					const label = profType.toDisplay ? profType.toDisplay(suggestion) : suggestion;
+					const itemEl = e_({outer: `<div class="charsheet__autocomplete-item">${label}</div>`});
 					itemEl.addEventListener("click", () => {
-						this._state[profType.adder](suggestion);
+						this._state[profType.adder](profType.toToken ? profType.toToken(suggestion) : suggestion);
 						inputEl.value = "";
 						dropdownEl.style.display = "none";
 						renderList();
@@ -16538,7 +16600,7 @@ class CharacterSheetPage {
 			const addItem = () => {
 				const value = inputEl.value.trim();
 				if (!value) return;
-				this._state[profType.adder](value);
+				this._state[profType.adder](profType.toToken ? profType.toToken(value) : value);
 				inputEl.value = "";
 				dropdownEl.style.display = "none";
 				renderList();
