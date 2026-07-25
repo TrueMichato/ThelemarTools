@@ -4896,6 +4896,10 @@ class CharacterSheetState {
 		// (we never enrich a modifier whose source feature was removed).
 		this._migrateFeatureAbilityModModifiers();
 
+		// (B2) Repair ability-choice-swap mods (e.g. Forest Sage) that a pre-parser save
+		// never minted. Runs AFTER the orphan strip so removed features aren't resurrected.
+		this._migrateAbilityChoiceSwaps();
+
 		// Migrate spells: ensure concentration/ritual flags are set correctly
 		this._migrateSpells();
 
@@ -5988,8 +5992,13 @@ class CharacterSheetState {
 	_migrateOrphanedFeatureModifiers () {
 		if (!this._data.namedModifiers?.length) return;
 
+		// A modifier's source may be either a feature (_data.features) or a feat
+		// (_data.feats) — feat-sourced modifiers (e.g. Forest Sage's abilitySwap rows)
+		// carry `sourceFeatureId === feat.id`. Both must count as valid ownership so a
+		// still-present feat's modifiers survive load verbatim (enabled state + id) rather
+		// than being stripped and re-minted.
 		const featureIds = new Set(
-			(this._data.features || [])
+			[...(this._data.features || []), ...(this._data.feats || [])]
 				.map(f => f.id)
 				.filter(Boolean),
 		);
@@ -6001,6 +6010,84 @@ class CharacterSheetState {
 		if (this._data.namedModifiers.length !== before) {
 			this._recalculateCustomModifiers();
 		}
+	}
+
+	/**
+	 * (B2) Repair missing ability-choice-swap modifiers on old saves.
+	 *
+	 * Feats/features such as Forest Sage ("use your choice of Intelligence or Wisdom
+	 * to make Animal Handling, Arcana, Nature, or Survival checks") mint `abilitySwap:<skill>`
+	 * named modifiers at addFeat/addFeature time so that `getSkillMod`/`getSkillBreakdown`
+	 * can take the player-favorable MAX of the skill's default ability and each offered
+	 * ability. Saves created BEFORE that parser existed carry the feature (description
+	 * text present) but ZERO swap modifiers, so the skills silently keep their default
+	 * ability. Re-parse each still-present feature's description and mint any
+	 * `abilitySwap:` modifier that is missing — a load-time catch-up for the add pipeline.
+	 *
+	 * Runs AFTER `_migrateOrphanedFeatureModifiers` so we only mint for feats/features
+	 * that still exist (an orphaned/removed source is never resurrected). Minted rows carry
+	 * `value:0`, so they never affect additive skill totals (`getSkillCustomMod` ignores
+	 * them) — they only feed the MAX ability selection. Idempotent: a swap already
+	 * present (matched by type + newAbility + source) is skipped, so re-loads and
+	 * newly-added feats (which mint via `addFeat`) never duplicate. Note the Forest Sage
+	 * description lives on the FEAT object (`_data.feats`), so both feats and features are
+	 * scanned.
+	 */
+	_migrateAbilityChoiceSwaps () {
+		const feats = Array.isArray(this._data.feats) ? this._data.feats : [];
+		const features = Array.isArray(this._data.features) ? this._data.features : [];
+		const sources = [...feats, ...features];
+		if (!sources.length) return;
+		if (!Array.isArray(this._data.namedModifiers)) this._data.namedModifiers = [];
+
+		let added = 0;
+
+		sources.forEach(source => {
+			if (!source?.description || !source.id) return;
+
+			const parsed = FeatureModifierParser.parseModifiers(source.description, source.name);
+			const swaps = parsed.filter(p => typeof p.type === "string" && p.type.startsWith("abilitySwap:") && p.newAbility);
+			if (!swaps.length) return;
+
+			swaps.forEach(swap => {
+				// Already linked to this source? Nothing to do.
+				const linked = this._data.namedModifiers.find(m =>
+					m.type === swap.type
+					&& m.newAbility === swap.newAbility
+					&& m.sourceFeatureId === source.id,
+				);
+				if (linked) return;
+
+				// A legacy row minted before `sourceFeatureId` tracking existed (matched by
+				// the "From <name>" note). Backfill the link so `removeFeat`/`removeFeature`
+				// can later clean it up instead of leaking it forever — do NOT mint a duplicate.
+				const legacy = this._data.namedModifiers.find(m =>
+					m.type === swap.type
+					&& m.newAbility === swap.newAbility
+					&& !m.sourceFeatureId
+					&& m.note && m.note.includes(`From ${source.name}`),
+				);
+				if (legacy) {
+					legacy.sourceFeatureId = source.id;
+					added++;
+					return;
+				}
+
+				this.addNamedModifier({
+					name: source.name,
+					type: swap.type,
+					value: 0,
+					note: `From ${source.name}`,
+					enabled: true,
+					sourceFeatureId: source.id,
+					newAbility: swap.newAbility,
+					oldAbility: swap.oldAbility,
+				});
+				added++;
+			});
+		});
+
+		if (added) this._recalculateCustomModifiers();
 	}
 
 	/**

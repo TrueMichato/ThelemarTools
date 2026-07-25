@@ -1,6 +1,13 @@
 import "./setup.js";
+import {readFileSync} from "fs";
+import {resolve, dirname} from "path";
+import {fileURLToPath} from "url";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const REPO_ROOT = resolve(__dirname, "../../..");
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
@@ -331,5 +338,187 @@ describe("Regression — official feats keep their effects via addFeat", () => {
 		const feat = state.getFeats().find(f => f.name === "Prose Uses Feat 2");
 		expect(feat.uses).toBeTruthy();
 		expect(feat.uses.max).toBe(1);
+	});
+});
+
+describe("Forest Sage — old-save repair migration (B2)", () => {
+	// Build a save that mirrors the Lunaria repro: the Forest Sage FEATURE is present
+	// (description text intact) but the abilitySwap modifiers were never minted (the
+	// save predates the parser). Achieved by adding the feat, exporting, then stripping
+	// every abilitySwap:* row.
+	const buildPreParserSave = ({int = 10, wis = 18} = {}) => {
+		const seed = new CharacterSheetState();
+		seed._data.abilities.int = int;
+		seed._data.abilities.wis = wis;
+		seed.addFeat(makeForestSage());
+		const json = seed.toJson();
+		json.namedModifiers = (json.namedModifiers || []).filter(
+			m => !(typeof m.type === "string" && m.type.startsWith("abilitySwap:")),
+		);
+		return json;
+	};
+
+	test("loadFromJson re-mints the missing abilitySwap modifiers", () => {
+		const save = buildPreParserSave();
+		// Sanity: the save really is missing the swaps.
+		expect(save.namedModifiers.some(m => m.type === "abilitySwap:arcana")).toBe(false);
+
+		const state = new CharacterSheetState();
+		state.loadFromJson(save);
+
+		["arcana", "nature", "animalhandling", "survival"].forEach(skill => {
+			const swaps = state.getNamedModifiersByType(`abilitySwap:${skill}`);
+			expect(swaps.length).toBeGreaterThan(0);
+			// Minted rows are value:0 (feed MAX selection only, never additive totals)
+			// and are linked to the still-present Forest Sage feature.
+			const feature = state.getFeats().find(f => f.name === "Forest Sage");
+			swaps.forEach(m => {
+				expect(m.value).toBe(0);
+				expect(m.sourceFeatureId).toBe(feature.id);
+			});
+			if (skill === "arcana" || skill === "nature") {
+				expect(swaps.some(m => m.newAbility === "wis")).toBe(true);
+			} else {
+				expect(swaps.some(m => m.newAbility === "int")).toBe(true);
+			}
+		});
+	});
+
+	test("repaired save now MAXes Arcana to Wisdom (the reported bug)", () => {
+		const save = buildPreParserSave({int: 10, wis: 18});
+		const state = new CharacterSheetState();
+		state.loadFromJson(save);
+
+		// Before the migration Arcana would have stayed on Int (+0); now it MAXes to Wis (+4).
+		expect(state.getSkillMod("arcana")).toBe(state.getAbilityMod("wis"));
+		const abilityComp = state.getSkillBreakdown("arcana").components.find(c => c.type === "ability");
+		expect(abilityComp.name.toLowerCase()).toContain("swapped from int");
+	});
+
+	test("idempotent: loading the repaired save again does not duplicate mods", () => {
+		const save = buildPreParserSave();
+		const state = new CharacterSheetState();
+		state.loadFromJson(save);
+		const firstCount = state.getNamedModifiersByType("abilitySwap:arcana").length;
+
+		// Re-export (now WITH the minted swaps) and reload — the migration must be a no-op.
+		state.loadFromJson(state.toJson());
+		expect(state.getNamedModifiersByType("abilitySwap:arcana").length).toBe(firstCount);
+	});
+
+	test("no spurious swaps for a feature without the choice-swap prose", () => {
+		const seed = new CharacterSheetState();
+		seed.addFeat({
+			name: "Skill Expert",
+			source: "TCE",
+			entries: [
+				"You have honed your proficiency with particular skills:",
+				{type: "list", items: ["You gain proficiency in one skill of your choice."]},
+			],
+		});
+		const state = new CharacterSheetState();
+		state.loadFromJson(seed.toJson());
+		["arcana", "nature", "animalhandling", "survival", "stealth"].forEach(skill => {
+			expect(state.getNamedModifiersByType(`abilitySwap:${skill}`).length).toBe(0);
+		});
+	});
+
+	test("an orphaned swap (feature removed) is NOT re-minted", () => {
+		// A stale abilitySwap row whose source feature no longer exists. The orphan strip
+		// removes it first; the repair pass then finds no matching feature and mints nothing.
+		const state = new CharacterSheetState();
+		state.loadFromJson({
+			features: [],
+			feats: [],
+			namedModifiers: [
+				{id: "x1", name: "Forest Sage", type: "abilitySwap:arcana", value: 0, newAbility: "wis", oldAbility: "int", enabled: true, sourceFeatureId: "missing-feature-id"},
+			],
+		});
+		expect(state.getNamedModifiersByType("abilitySwap:arcana").length).toBe(0);
+	});
+
+	test("a properly-minted feat swap survives reload unchanged (no strip+re-mint churn)", () => {
+		const seed = new CharacterSheetState();
+		seed.addFeat(makeForestSage());
+		const before = seed.getNamedModifiersByType("abilitySwap:arcana");
+		expect(before.length).toBe(1);
+		const beforeId = before[0].id;
+
+		const state = new CharacterSheetState();
+		state.loadFromJson(seed.toJson());
+		const after = state.getNamedModifiersByType("abilitySwap:arcana");
+		// Same single row, same id, still enabled — the orphan strip no longer deletes
+		// feat-sourced mods, so the migration is a genuine no-op here.
+		expect(after.length).toBe(1);
+		expect(after[0].id).toBe(beforeId);
+		expect(after[0].enabled).not.toBe(false);
+	});
+
+	test("a legacy unlinked swap is backfilled with sourceFeatureId and then removable via removeFeat", () => {
+		const seed = new CharacterSheetState();
+		seed.addFeat(makeForestSage());
+		const json = seed.toJson();
+		const feat = json.feats.find(f => f.name === "Forest Sage");
+		// Simulate a very old row minted before sourceFeatureId tracking: strip the link,
+		// keep the "From <name>" note.
+		json.namedModifiers.forEach(m => {
+			if (typeof m.type === "string" && m.type.startsWith("abilitySwap:")) {
+				delete m.sourceFeatureId;
+				m.note = "From Forest Sage";
+			}
+		});
+
+		const state = new CharacterSheetState();
+		state.loadFromJson(json);
+
+		// Backfilled (not duplicated) — exactly one arcana swap, now linked to the feat.
+		const arcana = state.getNamedModifiersByType("abilitySwap:arcana");
+		expect(arcana.length).toBe(1);
+		expect(arcana[0].sourceFeatureId).toBe(feat.id);
+
+		// Removing the feat now cleans up the swap (previously it leaked forever).
+		state.removeFeat("Forest Sage", "HumblewoodTales");
+		expect(state.getNamedModifiersByType("abilitySwap:arcana").length).toBe(0);
+	});
+});
+
+describe("Lore skill display reflects exhaustion (B5)", () => {
+	test("getSkillBreakdown(lore).total drops with exhaustion while getSkillMod stays intrinsic", () => {
+		const state = new CharacterSheetState();
+		state.setExhaustionRules("2024"); // flat -N per level d20 penalty
+		state.addLoreSkill("Herbalism Lore", 2);
+		const loreKey = "herbalismlore";
+
+		const intrinsic = state.getSkillMod(loreKey);
+		const beforeTotal = state.getSkillBreakdown(loreKey).total;
+		expect(beforeTotal).toBe(intrinsic); // no exhaustion yet
+
+		state.setExhaustion(2);
+		// Intrinsic display (and passive) is unchanged — exhaustion is a d20 roll penalty.
+		expect(state.getSkillMod(loreKey)).toBe(intrinsic);
+		// The effective total shown on the row now reflects the -2 penalty.
+		const breakdown = state.getSkillBreakdown(loreKey);
+		expect(breakdown.total).toBe(intrinsic - 2);
+		expect(breakdown.components.some(c => c.type === "penalty" && c.value === -2)).toBe(true);
+	});
+
+	test("no exhaustion → lore total equals intrinsic mod (regression guard)", () => {
+		const state = new CharacterSheetState();
+		state.addLoreSkill("History Lore", 3);
+		const loreKey = "historylore";
+		expect(state.getSkillBreakdown(loreKey).total).toBe(state.getSkillMod(loreKey));
+	});
+
+	test("source-pin: lore row renders breakdown.total as the mod, intrinsic getSkillMod for passive", () => {
+		// Guards the charactersheet.js display fix from silent reversion. The lore row must
+		// show the exhaustion-aware effective total, while the passive stays on the intrinsic
+		// (exhaustion-free) getSkillMod — matching standard-skill passives.
+		const SOURCE = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+		const m = SOURCE.match(/loreSkills\.forEach\(skill => \{[\s\S]*?const passive = [^\n]*\n/);
+		expect(m).not.toBeNull();
+		const body = m[0];
+		expect(body).toMatch(/const breakdown = this\._state\.getSkillBreakdown\(skillKey\);/);
+		expect(body).toMatch(/const mod = breakdown\.total;/);
+		expect(body).toMatch(/const passive = 10 \+ this\._state\.getSkillMod\(skillKey\);/);
 	});
 });
