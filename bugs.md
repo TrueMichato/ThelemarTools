@@ -20,63 +20,23 @@ to intersect the pool with the character's weapon proficiencies (simple / martia
 weapons) before rendering. Left open deliberately: it changes what real users are offered, so it
 wants its own change + regression test rather than riding along with the spawner work.
 
-### Round 42 — Lunaria spell metadata, skills, resources tracker, proficiency editing, item charges, action economy, roll-log + list pages (IN PROGRESS)
-
-Repro character: `Lunaria` (Ranger 6 Hunter / Druid 4 Circle of the Zodiac, TGTT homebrew). Seven parallel
-sessions, one branch each, integrated foundations-first (S1 + S3 before S6).
-
-**S1 — Spell metadata sweep.** Multiple spell-add routes create entries missing metadata (no `school`,
-`castingTime`, etc.) and duplicate lowercase copies (e.g. `guidance|xphb` with no school sitting beside a
-proper `Guidance|XPHB`; same for Guiding Bolt from "Circle of the Zodiac Spells"; Mend Plants from feat
-Plantmender; Vortex Warp + Magic Mouth from feat Forest Sage picks). Root cause: fallback routes skip the
-canonical builders (`buildSpellStateObject`/`buildCantripStateObject`/`buildInnateSpellStateObject`) and
-`addSpell`/`addCantrip` dedup is case-sensitive. Fix: centralize enrich+normalize+case-insensitive-dedup at
-the entry points AND a `_migrateSpells()` pass to heal existing saves (edition-exact, never collapse PHB/XPHB
-by name). Owns spell-population routes in `charactersheet-state.js` + builders in `charactersheet-class-utils.js`.
-
-**S2 — Skills (Forest Sage ability choice + exhaustion on lore skills).** (a) Forest Sage lets the player use
-Int OR Wis for Animal Handling/Arcana/Nature/Survival, but the existing `abilitySwap` mechanism auto-picks the
-MAX instead of honoring the player's CHOICE — need a real chooser + persisted override applied to BOTH the
-displayed modifier and the actual roll (`check:int`/`check:wis`), cleared on feat removal. (b) Exhaustion
-doesn't visibly affect lore/custom skills — the lore display shows raw `getSkillMod()`; fix the DISPLAY to use
-the breakdown total (do NOT touch `getSkillMod()` — breakdown + roll already subtract exhaustion). Owns
-`getSkillMod`/`getSkillAbility`/`getSkillBreakdown`, the FeatureModifierParser skill-swap block, and the
-skill-row UI + `_rollSkillCheck`/`_showSkillAbilityMenu` in `charactersheet.js`.
-
-**S3 — Resources / activatable tracker (SOLE owner of the activatable classifier).** (a) User-created custom
-abilities with limited uses don't appear in the Overview "Resources" panel (`getGenericPoolResources` ignores
-`customAbilities`; the Features tab handles them) — render them with their own use/restore handlers, not the
-generic setter. (b) "Attunement to Nature" (Pan divine-favor narrative boon) is missing from the tracker;
-per product decision it is **1/day** (resets on long rest) and then runs as a 1-hour toggle — add a 1/day use
-pool to activatable df boons, surface it in the activatable list, consume the daily use on activation.
-Owns `getActivatableFeatures`/`detectActivatableFeature`/`getGenericPoolResources`/`isActivatableAbilityEntry`/
-`isHiddenFromGenericAbilitySurfaces`, Overview `_renderResources`, the combat "Available to Activate" filter,
-df registration/toggle/combat routing, and (surgically) the Pan boon entry in the homebrew file.
-
-**S4 — Proficiency editing.** (a) The Edit-Proficiencies modal has no categorized dropdown for armor/weapon
-categories. (b) After editing proficiencies the non-proficient-armor penalty isn't removed — the modal's
-`cbClose` only re-renders the proficiency list, not attacks/skills/warning banner. Fix: add categorized
-dropdowns mapping display labels → canonical tokens (`"Light Armor"`→`"light"`) and re-render attacks (incl.
-combat `renderAttacks`) + skills on close. Owns `_showEditProficienciesModal`.
-
-**S5 — Item charges.** Magic items that recharge on a period (e.g. "1d6+4 charges at dawn") need a
-roll-recharge button in the inventory and a recharge section in the long-rest menu (long rest currently rolls
-silently). Fix: a canonical state-level single-item recharge op rolled exactly once, surfaced in inventory +
-long-rest, logged to roll history only on commit. Owns `charactersheet-inventory.js` + `charactersheet-rest.js`.
-
-**S6 — Action Economy Sorting (feature).** New UI grouping weapon attacks, spells, and class abilities under
-Action / Bonus Action / Reaction headers. Built as a new `renderCombatActionEconomy()` + a new combat-tab
-section + one appended line in the combat `render()` call-list + `cs-combat-action-economy-*` CSS. Aggregates
-action candidates directly from attacks/spells/features/customAbilities (getActivatableFeatures alone excludes
-combat/reaction). Merges after S1 + S3. UI planned with the impeccable skill.
-
-**S7 — Roll-log badge + list pages.** (a) The roll-log notification count never clears — add an unread counter
-that resets when the log is opened. (b) Combat Methods and Item Upgrades pages are blank because
-`combatmethods.html` and `itemupgrades.html` load `js/list2.js` as `type="text/javascript"` although it uses ES
-`import` — change both to `type="module"` (as `feats.html` does). Owns `charactersheet-rollhistory.js` badge
-internals + those two HTML lines.
-
 ## Closed Bugs
+
+### Round 42 — Lunaria (Ranger 6 Hunter / Druid 4 Circle of the Zodiac, TGTT): spell metadata, skills, resources, proficiency editing, item charges, action economy, roll-log + list pages — COMPLETE
+
+Seven parallel sessions, one branch each, integrated foundations-first (S1 + S3 → S2, S4, S5, S7 → S6). Full gate green on the merged tree: eslint + stylelint clean, **420 suites / 12,460 tests pass**.
+
+- **B1 Spell metadata sweep (S1, `ef01dfae`).** Spell-add fallback routes pushed lean stubs bypassing the canonical builders, and `addSpell`/`addCantrip` dedup was case-sensitive, so `guidance|xphb` never coalesced with `Guidance|XPHB` (triplicate Guidance/Guiding Bolt; Mend Plants / Vortex Warp / Magic Mouth missing `school`). Fixed with a centralized `_enrichSpellInput` + case-insensitive **edition-exact** dedup at the three choke points, a conservative same-grant PHB/XPHB reconciliation (keeps the copy matching the granting subclass edition), and a `_migrateSpells` sweep (`_sweepEnrichStoredSpells`) that heals existing saves. `fulfillSpellChoice` now stamps `sourceFeature` + casting ability and honors `prepared`. Strict-source guard prevents mis-stamping across editions.
+- **B2 Forest Sage skill ability (S2, `9d4f91d3`).** Old saves carried the feat text but zero `abilitySwap` modifiers (they predate the parser), so nothing offered Wis and Arcana stayed Int. Per product decision the behavior is **player-favorable auto-MAX** (skill uses whichever of Int/Wis is higher), not an explicit persisted choice. Added an idempotent `_migrateAbilityChoiceSwaps()` load migration that re-parses each feat/feature description and mints any missing `abilitySwap` mod (`value:0`, `sourceFeatureId`), running after the orphan-strip; also widened `_migrateOrphanedFeatureModifiers` to whitelist `_data.feats` ids so feat-sourced mods survive load. MAX logic + `getSkillMod` untouched.
+- **B5 Exhaustion on lore skills (S2, `9d4f91d3`).** Lore/custom skill rows rendered the intrinsic `getSkillMod()` (exhaustion-free) while the roll + breakdown already subtract exhaustion. Display-only fix: lore mod now uses `getSkillBreakdown().total`; `getSkillMod` left intrinsic (no double-apply).
+- **B3 Custom limited-use abilities in Resources (S3, `b511a5ca`).** Overview `_renderResources` only rendered generic pools + Stamina; custom `mode:"limited"` abilities were dropped. Ported the features.js precedent — surfaces them (skipping passive + already-shown pool-linked), folds them into the count badge/empty-state, and wires rows to `useCustomAbility`/`restoreCustomAbilityUse` (not the generic setter, which no-ops on custom abilities).
+- **B4 Attunement to Nature — Pan divine-favor boon (S3, `b511a5ca`).** Pass C registered the boon as a toggle but stripped its `uses`, so no daily pool appeared. Now mints one canonical tagged `res_dfboon_<id>` resource (1/day, recharge long); the single `toggleDivineFavorBoonState` choke point consumes the use on activation (refused when exhausted, no refund on expiry) across combat + Overview + the Ended→Reactivate path (closing a free-reactivate exploit); long rest restores via `recoverResources("long")`. Homebrew Pan boon entry got `uses:1`/`recharge:"long"`.
+- **B6 Proficiency editing picker (S4, `e71b56c1`).** Root cause deeper than "no dropdown": `hasArmorProficiency()` did an exact-token match while the modal stored friendly labels ("Light Armor"), so modal-added armor never matched and state accumulated duplicates. Normalized BOTH sides via `_normalizeArmorProfToken` (friendly labels, title-case, singular "shield", legacy saves all canonicalize) — transparently repairs polluted saves with no migration and also fixes the play-mode editor. Picker writes canonical tokens and removes all variants on chip removal.
+- **B7 Stale armor penalty after edit (S4, `e71b56c1`).** The penalty logic was correct but `cbClose` only re-rendered the proficiency list. Now also re-renders skills, attacks, and `combat.renderAttacks()` so the non-proficiency banner + STR/DEX disadvantage recompute live.
+- **B8 Item charge recharge (S5, `2bfafce3`).** Three divergent recharge paths existed, none roll-accessible/logged/in the long-rest menu. Consolidated into one canonical `rechargeItemCharges(itemId, {rolledAmount, commit})` (snapshot → roll once or reuse → clamp → commit-only mutates; state never touches roll history). New inventory Recharge button (preview-roll → confirm → commit reuses the roll → `addRoll`; cancel is a no-op) and a long-rest recharge section inside the existing undo snapshot. Verified no double-recharge (live long-rest routes through `_restoreResources` only; `onLongRest`/`_rechargeItems` are dead code).
+- **B9 Action Economy Sorting (S6, `e5871e04`).** New read-only Combat-tab "Action Economy" panel groups everything usable this turn under Action / Bonus Action / Reaction via a pure `getCombatActionEconomy()` (mutates no shared classifier): attacks + equipped weapons + temp/state attacks; spells bucketed by `castingTime` (relies on S1 enrichment); features via a positive-signal `_isActionEconomyFeature` (reads S3's `detectActivatableFeature` read-only); custom abilities by activation. Additive; merged last after S1 + S3.
+- **B10 Roll-log unread badge (S7, `33800183`).** The badge rendered total history length, which only shrank on clear. Added an `_unreadCount` that increments only while the log is closed and resets to 0 on open/clear, so the badge reflects unread-since-last-open and clears when the log is viewed.
+- **B11 Combat Methods / Item Upgrades blank pages (S7, `33800183`).** `combatmethods.html` and `itemupgrades.html` loaded `js/list2.js` as `type="text/javascript"` although it uses ES `import` ("Cannot use import statement outside a module" → "List is not defined"). Changed both to `type="module"` (matching every other list page).
 
 ### Round 41 — Vitality, Might skill & Bard features — COMPLETE
 
