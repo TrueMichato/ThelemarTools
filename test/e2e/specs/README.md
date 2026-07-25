@@ -11,6 +11,26 @@ The local dev server is started automatically by `playwright.config.ts` on port 
 
 ---
 
+## `spawn.spec.ts` — the character spawner
+
+`spawn.spec.ts` guards the spawner: one spec string (`"cleric/tempest/9/dwarf"`)
+builds a complete character by driving the **real** Builder and Quick Build
+engines. It asserts a build matrix, multiclass, determinism, pinned-spec replay,
+the `?spawn=` URL and `respawn()` — all with **zero** unresolved choices.
+
+It deliberately does **not** re-test the wizards; the `tgtt-*` specs do that by
+clicking through them. Use the spawner when you need *a character* (a bug repro,
+a fixture); use the wizard specs when the wizard itself is what's under test.
+
+```bash
+npx playwright test test/e2e/specs/spawn.spec.ts
+npm run spawn -- "fighter/champion/5+warlock/fiend/3"   # same engine, from the shell
+```
+
+Full reference: [`docs/charactersheet/15-spawn-test-characters.md`](../../../docs/charactersheet/15-spawn-test-characters.md).
+
+---
+
 ## TGTT comprehensive player-build coverage
 
 Eighteen spec files (`tgtt-*.spec.ts`) drive the full builder → level-up → loadout → toggle-effect flow for every TGTT character class/race combination actually played in the Thelemar campaign. They are deliberately exhaustive — the goal is to catch ~95% of player-facing bugs before a session.

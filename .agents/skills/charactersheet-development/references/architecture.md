@@ -88,6 +88,12 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 ├── CharacterSheetSpellPicker (charactersheet-spell-picker.js, ~1,200 lines, all static)
 │   Reusable spell selection UI for Builder, LevelUp, QuickBuild.
 │
+├── Spawner (charactersheet-spawn.js / -prompts.js / -autofill.js / -drivers.js)
+│   Builds a complete character from a spec string ("cleric/tempest/9/dwarf")
+│   by driving the REAL Builder + Quick Build engines — no parallel build path.
+│   Surfaces: right-click New Character, ?spawn= URL, charSheet.spawn(),
+│   `npm run spawn`. See docs/charactersheet/15-spawn-test-characters.md.
+│
 ├── charactersheet-buffpicker-helpers.js (~170 lines, pure functions)
 │   No-DOM helpers backing the Apply Buff modal: categorise, chip,
 │   duration format, active-detection. Imported by charactersheet.js.

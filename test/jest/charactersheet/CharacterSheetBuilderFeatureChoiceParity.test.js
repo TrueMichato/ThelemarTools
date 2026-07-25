@@ -95,17 +95,27 @@ describe("#6 (state) racial prose fixed-choice queues a pending skill choice", (
 	});
 });
 
-describe("#6 (builder) `_finishCharacter` seeds + drains pending feature choices", () => {
+describe("#6 (builder) `_finishCharacterCore` seeds + drains pending feature choices", () => {
 	const builderSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-builder.js"), "utf8");
 
-	/** Extract the `_finishCharacter` method body for tightly-scoped assertions. */
+	/**
+	 * Extract the `_finishCharacterCore` method body for tightly-scoped assertions.
+	 * The build work lives in `_finishCharacterCore`; `_finishCharacter` is a thin
+	 * wrapper that adds the tab-switch + Quick Build handoff, so that the spawner can
+	 * reuse the build half headlessly.
+	 */
 	const finishBody = (() => {
-		const m = builderSrc.match(/async _finishCharacter \([\s\S]*?\n\t\}/);
+		const m = builderSrc.match(/async _finishCharacterCore \([\s\S]*?\n\t\}/);
 		return m ? m[0] : "";
 	})();
 
 	test("the method body exists and was located", () => {
 		expect(finishBody.length).toBeGreaterThan(0);
+	});
+
+	test("`_finishCharacter` still delegates to it (the UI path must not fork)", () => {
+		const m = builderSrc.match(/async _finishCharacter \([\s\S]*?\n\t\}/);
+		expect(m?.[0] || "").toMatch(/this\._finishCharacterCore\s*\(/);
 	});
 
 	test("it seeds off-list choices via CharacterSheetClassUtils.seedSubclassFeatureChoices", () => {

@@ -69,6 +69,65 @@ class CharacterSheetBuilder {
 		this._init();
 	}
 
+	/**
+	 * Return every wizard selection to its "nothing chosen yet" state.
+	 *
+	 * The Builder instance outlives any single character, so without this a second
+	 * build inherits the first one's picks — invisible until an apply step reads a
+	 * field the current step never rendered.
+	 */
+	resetSelections () {
+		this._currentStep = 0;
+
+		this._selectedRace = null;
+		this._selectedSubrace = null;
+		this._selectedClass = null;
+		this._selectedSubclass = null;
+		this._selectedBackground = null;
+		this._abilityMethod = "standard";
+		this._abilityScores = {str: null, dex: null, con: null, int: null, wis: null, cha: null};
+		this._standardArrayPool = [15, 14, 13, 12, 10, 8];
+		this._pointBuyRemaining = 27;
+		this._selectedSkills = [];
+		this._selectedExpertise = [];
+		this._selectedWeaponMasteries = [];
+		this._selectedAbilityBonuses = {};
+		this._selectedOptionalFeatures = {};
+		this._selectedClassFeatProgression = [];
+		this._selectedToolProficiencies = [];
+		this._selectedLanguages = [];
+		this._selectedClassFeatureLanguages = [];
+		this._selectedForkedTongueLanguages = [];
+		this._selectedFeatureOptions = {};
+		this._selectedFeatureSkillChoices = {};
+		this._selectedRaceOptionalFeatures = {};
+		this._selectedRacialFeatureChoices = {};
+		this._selectedCombatTraditions = [];
+		this._selectedClassToolProficiencies = [];
+		this._lastAppliedClassSnapshot = null;
+		this._selectedRacialSkills = [];
+		this._selectedRacialTools = [];
+		this._selectedRacialLanguages = {};
+		this._selectedSubraceLanguages = [];
+		this._selectedRacialAbilityChoices = {};
+		this._selectedRacialAbilitySetIdx = {};
+		this._selectedRacialSpells = [];
+		this._selectedRacialSpellAbilities = {};
+		this._useTashasRules = false;
+		this._tashasAbilityBonuses = {};
+		this._equipmentChoices = {};
+		this._equipmentTypeChoices = {};
+		this._tashasSkillReplacements = [];
+		this._tashasLanguageReplacements = [];
+		this._customBackground = null;
+		this._customBackgroundData = null;
+		this._selectedKnownSpells = [];
+		this._selectedKnownCantrips = [];
+		this._selectedSpellbookSpells = [];
+		this._divineSoulAffinity = null;
+		this._quickBuildTargetLevel = 1;
+	}
+
 	// Helper to detect if content is from 2024 edition (D&D One)
 	/** @param {*} entity */
 	_is2024Edition (entity) {
@@ -2480,7 +2539,16 @@ class CharacterSheetBuilder {
 		return {};
 	}
 
-	async _finishCharacter () {
+	/**
+	 * Everything "finishing a character" means in terms of STATE: settle HP, drain the
+	 * choice queues the build left behind, save, and refresh the sheet. Deliberately
+	 * free of navigation, toasts and the Quick Build handoff so a headless driver (the
+	 * spawner) can finish a character without the wizard chrome firing.
+	 *
+	 * @returns {Promise<?*>} Quick Build launch data when a target level above 1 was
+	 *   requested, so the caller can decide how (or whether) to continue the build.
+	 */
+	async _finishCharacterCore () {
 		// Recalculate max HP (CON may have changed since addClass) and fill to full
 		this._state.recalculateHp({syncCurrent: true});
 
@@ -2516,15 +2584,22 @@ class CharacterSheetBuilder {
 		// `<input>` keeps its hardcoded `value="0"` until the next render.
 		this._page.renderCharacter();
 
-		// Check if Quick Build target level is set
-		if (this._quickBuildTargetLevel > 1 && this._page._quickBuild && this._selectedClass) {
-			const quickBuildLaunchData = {
+		if (this._quickBuildTargetLevel > 1 && this._selectedClass) {
+			return {
 				classData: this._selectedClass,
 				targetLevel: this._quickBuildTargetLevel,
 				subclass: this._selectedSubclass || null,
 				subclassChoice: CharacterSheetClassUtils.normalizeDivineSoulAffinity(this._divineSoulAffinity),
 			};
+		}
+		return null;
+	}
 
+	async _finishCharacter () {
+		const quickBuildLaunchData = await this._finishCharacterCore();
+
+		// Check if Quick Build target level is set
+		if (quickBuildLaunchData && this._page._quickBuild) {
 			// Switch to overview first so user sees the character
 			this._page.switchToTab("#charsheet-tab-overview");
 			JqueryUtil.doToast({type: "success", content: "Character created! Opening Quick Build wizard..."});

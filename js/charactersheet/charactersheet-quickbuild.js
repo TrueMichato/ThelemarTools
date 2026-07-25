@@ -4642,6 +4642,15 @@ class CharacterSheetQuickBuild {
 			let selectedSubclass = null;
 			if (analysis.needsSubclass) {
 				selectedSubclass = this._selections.subclasses[`${className}_${classSource}`];
+			} else if (CharacterSheetClassUtils.levelGrantsSubclass?.(classData, classLevel)) {
+				// The class reaches its subclass level during this run, but
+				// `needsSubclass` came back false because a selection already existed
+				// (multiclass legs are seeded before the wizard runs, and
+				// `_hasSubclass` treats a pending selection as "already handled").
+				// Without this the subclass — and every feature it grants — was
+				// silently dropped for the second and later classes.
+				const existing = this._state.getClasses().find(c => c.name === className && c.source === classSource);
+				if (!existing?.subclass) selectedSubclass = this._selections.subclasses[`${className}_${classSource}`] || null;
 			}
 
 			// Re-compute features with subclass if just selected
@@ -4686,15 +4695,28 @@ class CharacterSheetQuickBuild {
 				}
 				targetClass.subclassChoice = this._selections.subclassChoices[`${className}_${classSource}`] || targetClass.subclassChoice || null;
 			} else if (classLevel === 1) {
-				// New multiclass — add to state
+				// New multiclass — add to state. Classes that pick their subclass at
+				// level 1 (2014 Cleric / Sorcerer / Warlock, several TGTT classes)
+				// land here on the very level the subclass is chosen, so the
+				// selection has to be carried through — writing `null` silently
+				// dropped it and produced a subclass-less multiclass leg.
 				this._state.addClass({
 					name: className,
 					source: classSource,
 					level: 1,
-					subclass: null,
+					subclass: selectedSubclass
+						? {
+							name: selectedSubclass.name,
+							shortName: selectedSubclass.shortName,
+							source: selectedSubclass.source,
+							casterProgression: selectedSubclass.casterProgression,
+							spellcastingAbility: selectedSubclass.spellcastingAbility,
+							additionalSpells: selectedSubclass.additionalSpells,
+						}
+						: null,
 					subclassChoice: this._selections.subclassChoices[`${className}_${classSource}`] || null,
-					casterProgression: classData.casterProgression,
-					spellcastingAbility: classData.spellcastingAbility,
+					casterProgression: classData.casterProgression || selectedSubclass?.casterProgression,
+					spellcastingAbility: classData.spellcastingAbility || selectedSubclass?.spellcastingAbility,
 					// Spell progression arrays for 2024/TGTT classes
 					preparedSpellsProgression: classData.preparedSpellsProgression,
 					spellsKnownProgression: classData.spellsKnownProgression,

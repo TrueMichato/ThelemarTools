@@ -39,6 +39,28 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetState --no-cover
 
 `--forceExit` is recommended — some tests hang without it due to async cleanup.
 
+### Getting a character to test against
+
+Do not hand-build characters for manual testing or bug repro. Spawn them:
+
+```bash
+# In the browser console, or a Playwright evaluate():
+await charSheet.spawn("cleric/tempest/9/dwarf");
+
+# By URL (the form to paste into a bug report):
+charactersheet.html?spawn=fighter/champion/5+warlock/fiend/3
+
+# From the shell (headless, prints {spec, report, character}):
+npm run spawn -- "wizard/evocation/5/gnome"
+```
+
+The spawner drives the real Builder and Quick Build engines, so a spawned
+character always reflects the current code — which is the fix for the
+"the fix isn't in my previously-built character" confusion. `charSheet.respawn()`
+rebuilds the current character's spec as a NEW character (never in place).
+
+Full reference: `docs/charactersheet/15-spawn-test-characters.md`.
+
 ### The Import Pattern
 
 Character sheet modules use browser globals. Tests must import explicitly:

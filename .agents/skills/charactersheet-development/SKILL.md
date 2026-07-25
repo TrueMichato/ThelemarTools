@@ -34,6 +34,7 @@ Read the reference that matches your task:
 | Writing or fixing tests, test infrastructure, common pitfalls | [Testing Guide](./references/testing-guide.md) |
 | Current WIP areas, known limitations, ongoing refactors | [Development Status](./references/development-status.md) |
 | Active states, combat mechanics, NPC export, rest, spell/item data shapes | [Subsystem Details](./references/subsystem-details.md) |
+| Getting a character to test a bug against, spawn spec DSL, `npm run spawn` | [Spawning Test Characters](../../../docs/charactersheet/15-spawn-test-characters.md) |
 
 Also consult the project's own workspace docs in `docs/charactersheet/` (not part of this skill) — especially `10-known-limitations.md` and `11-future-roadmap.md`.
 

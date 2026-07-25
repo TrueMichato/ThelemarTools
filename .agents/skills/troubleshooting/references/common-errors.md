@@ -906,6 +906,11 @@ UX bonus pattern: buttons, not a dropdown, for short option lists ("Pay 50gp ✓
 | `Failed to load renderable content for: page="classfeatures.html"` | **J8** — build the hash via `UrlUtil.URL_TO_HASH_BUILDER`, not inline. Watch for fake `-2014`/`-2024` source suffixes. |
 | Feat button opens modal, sheet doesn't change | **L7** — picker confirm must validate → mutate via canonical state setter → render → save. Prefer buttons over dropdowns. |
 | Invocation/maneuver grants no feat picker | **L8** — `featProgression` must be honored on optfeature, not just class/subclass. |
+| "Is the fix actually in?" — a fix works on a new character but not an old one | Expected. Character state was written by the OLD code; `loadFromJson()` restores stored fields verbatim. Either add an idempotent `_migrate*` pass, or re-test on a fresh character: `charSheet.spawn("<spec>")` / `charSheet.respawn()`. |
+| Need a specific class/subclass/level/race to reproduce a bug | Don't hand-build it. `charactersheet.html?spawn=cleric/tempest/9/dwarf`, or `await charSheet.spawn(...)`, or `npm run spawn -- "..."`. See `docs/charactersheet/15-spawn-test-characters.md`. |
+| Spawn reports "needs N more selection(s) but offers none" | The spawner met a wizard control shape it doesn't drive. Add a fill mode in `charactersheet-spawn-autofill.js` (eight shapes are covered today). |
+| Spawn reports an unhandled prompt | A modal opened that `charactersheet-spawn-prompts.js` doesn't answer. Patch the METHOD on the object (`InputUiUtil.pGetUserEnum = …`), never replace the global — modules destructure it at load time. |
+| Multiclass leg has no subclass | **Fixed.** QuickBuild's `_applyQuickBuild` added new legs with `subclass: null`, and `_analyzeLevels` reported `needsSubclass: false` because a pending selection already existed. Both paths now carry `selectedSubclass` through. |
 
 ---
 

@@ -3824,6 +3824,8 @@ class CharacterSheetState {
 			id: null,
 			name: "",
 			xp: 0,
+			// Set only on characters produced by the spawner — see `setSpawnMeta`.
+			spawn: null,
 			race: null,
 			subrace: null,
 			size: "medium", // "tiny", "small", "medium", "large", "huge", "gargantuan"
@@ -6033,6 +6035,20 @@ class CharacterSheetState {
 
 	setId (id) { this._data.id = id; }
 	getId () { return this._data.id; }
+
+	/**
+	 * Provenance for characters produced by the spawner (see
+	 * `charactersheet-spawn-drivers.js`): the spec they were built from, the seed
+	 * that resolved their auto-picked choices, and when. Kept so a test character
+	 * can be rebuilt from scratch against newer code — the point being that a
+	 * character built before a fix does not contain that fix, and re-spawning is
+	 * the only trustworthy way to re-test.
+	 *
+	 * @param {?*} meta
+	 */
+	setSpawnMeta (meta) { this._data.spawn = meta || null; }
+	/** @returns {?*} */
+	getSpawnMeta () { return this._data.spawn || null; }
 	// #endregion
 
 	// #region Basic Info

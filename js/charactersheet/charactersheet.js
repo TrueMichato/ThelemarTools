@@ -19,6 +19,8 @@ import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
 import {CharacterSheetPlayMode} from "./charactersheet-playmode.js";
 import * as CharacterSheetBuffPickerHelpers from "./charactersheet-buffpicker-helpers.js";
 import {CharacterSheetDruidResources} from "./charactersheet-druid-resources.js";
+import {CharacterSheetSpawnSpec, CharacterSheetSpawnRng} from "./charactersheet-spawn.js";
+import {CharacterSheetSpawner} from "./charactersheet-spawn-drivers.js";
 
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, StorageUtil, DataUtil, BrewUtil2, PrereleaseUtil} = /** @type {*} */ (globalThis);
 
@@ -70,6 +72,8 @@ class CharacterSheetPage {
 		this._selCharacter = /** @type {*} */ (null);
 		this._currentCharacterId = null;
 		this._isLevelUpBannerDismissed = false;
+		/** @type {?*} Lazily created on first spawn — see `get spawner`. */
+		this._spawner = null;
 
 		// Transient, session-only snapshot of character state captured immediately
 		// before the most recent short/long rest, used to undo an accidental rest
@@ -199,6 +203,8 @@ class CharacterSheetPage {
 		if (charId) {
 			await this._pLoadCharacter(charId);
 		}
+
+		await this._pHandleSpawnUrl(urlParams);
 
 		// Apply background theme (will use default if no character loaded)
 		this._applyBackgroundTheme(this._state.getBackgroundTheme());
@@ -1195,7 +1201,7 @@ class CharacterSheetPage {
 
 		// Header buttons
 		document.getElementById("charsheet-btn-new").addEventListener("click", () => this._onNewCharacter());
-		document.getElementById("charsheet-btn-new").addEventListener("contextmenu", (e) => { e.preventDefault(); this._onRandomCharacter(); });
+		document.getElementById("charsheet-btn-new").addEventListener("contextmenu", (e) => { e.preventDefault(); this._pOpenSpawnDialog(); });
 		document.getElementById("charsheet-btn-duplicate").addEventListener("click", () => this._onDuplicateCharacter());
 		document.getElementById("charsheet-btn-delete").addEventListener("click", () => this._onDeleteCharacter());
 		document.getElementById("charsheet-btn-delete").addEventListener("contextmenu", (e) => { e.preventDefault(); this._onManageCharacters(); });
@@ -1477,6 +1483,92 @@ class CharacterSheetPage {
 		this._renderCharacter();
 	}
 
+	// #region Spawn (fast test characters)
+
+	/** @returns {*} lazily-created spawner */
+	get spawner () {
+		if (!this._spawner) this._spawner = new CharacterSheetSpawner(this);
+		return this._spawner;
+	}
+
+	/**
+	 * Build a character from a spawn spec — `"cleric/tempest/9/dwarf"` or the
+	 * equivalent object. Exists so reproducing a bug costs one line instead of a
+	 * five-minute walk through two wizards, and so a spawned character always
+	 * reflects the CURRENT build engines (a character built before a fix does not
+	 * contain that fix, which is the single most confusing thing about testing
+	 * this sheet by hand).
+	 *
+	 * @param {string|Object} spec
+	 * @param {{seed?: ?string, name?: ?string, save?: boolean, strict?: boolean}} [opts]
+	 * @returns {Promise<*>} the spawn report
+	 */
+	async spawn (spec, opts) {
+		const report = await this.spawner.spawn(spec, opts);
+		this.switchToTab("#charsheet-tab-overview");
+		JqueryUtil.doToast({
+			type: report.isClean ? "success" : "warning",
+			content: report.isClean
+				? `Spawned ${this._state.getName()}`
+				: `Spawned ${this._state.getName()} with ${report.unresolved.length + report.unhandledPrompts.length} issue(s) — see charSheet.lastSpawnReport()`,
+		});
+		// eslint-disable-next-line no-console
+		console.log(report.toText());
+		return report;
+	}
+
+	/**
+	 * Rebuild this character's spec as a NEW character using today's code. Never
+	 * mutates the existing one: hand-added feats, custom abilities and modifiers
+	 * make in-place rebuilds unsafe, so "is it fixed?" is answered by comparing a
+	 * fresh spawn against the old character.
+	 *
+	 * @param {{seed?: ?string, save?: boolean, strict?: boolean}} [opts]
+	 */
+	async respawn (opts) {
+		const meta = this._state.getSpawnMeta();
+		if (!meta?.spec) {
+			JqueryUtil.doToast({type: "warning", content: "This character wasn't spawned, so there's no spec to respawn from."});
+			return null;
+		}
+		return this.spawn(meta.spec, {seed: meta.seed, ...opts});
+	}
+
+	/** @returns {?*} the report from the most recent spawn, for inspection in the console */
+	lastSpawnReport () { return this._spawner?.lastReport || null; }
+
+	/**
+	 * `?spawn=cleric/tempest/9/dwarf&seed=…&name=…&save=0` — the shareable form of
+	 * a repro. Also accepts `?spawnJson=<url-encoded JSON>` for specs with
+	 * per-choice overrides that don't fit the short DSL.
+	 *
+	 * @param {URLSearchParams} urlParams
+	 */
+	async _pHandleSpawnUrl (urlParams) {
+		const raw = urlParams.get("spawnJson") || urlParams.get("spawn");
+		if (!raw) return;
+
+		try {
+			const spec = CharacterSheetSpawnSpec.parse(raw);
+			// Convenience params so a spec stays readable in a URL.
+			if (urlParams.get("race")) spec.race = urlParams.get("race");
+			if (urlParams.get("subrace")) spec.subrace = urlParams.get("subrace");
+			if (urlParams.get("background")) spec.background = urlParams.get("background");
+
+			await this.spawn(spec, {
+				seed: urlParams.get("seed"),
+				name: urlParams.get("name"),
+				save: urlParams.get("save") !== "0",
+			});
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.error("[CharSheet Spawn]", e);
+			JqueryUtil.doToast({type: "danger", content: `Spawn failed: ${(/** @type {*} */ (e)).message}`});
+		}
+	}
+
+	// #endregion
+
 	async _onNewCharacter () {
 		// Save current character before creating new to prevent data loss
 		if (this._currentCharacterId) {
@@ -1493,451 +1585,161 @@ class CharacterSheetPage {
 		this.switchToTab("#charsheet-tab-builder");
 	}
 
-	// #region Random Character Generation
-
-	async _onRandomCharacter () {
+	/**
+	 * The spawn dialog, reached by right-clicking "New Character". Replaces the old
+	 * "pick a class, get a random level-1 character" shortcut: same one-gesture
+	 * speed, but it drives the real Builder + Quick Build engines, so it reaches any
+	 * level, honours subclass/species choices, and always reflects the current code.
+	 */
+	async _pOpenSpawnDialog () {
 		const classes = this.filterByAllowedSources(this._classes);
 		if (!classes.length) {
 			JqueryUtil.doToast({type: "warning", content: "No classes available. Data may still be loading."});
 			return;
 		}
 
-		const classNames = classes.map(c => c.name).sort();
-		const chosenName = await InputUiUtil.pGetUserEnum({
-			title: "Random Character — Pick a Class",
-			htmlDescription: `<div>Select a class. Race, background, ability scores, proficiencies, and spells will be randomised.</div>`,
-			values: classNames,
-			isResolveItem: true,
+		const races = this.filterByAllowedSources(this._races || []);
+		const backgrounds = this.filterByAllowedSources(this._backgrounds || []);
+		const byName = (/** @type {*} */ a, /** @type {*} */ b) => SortUtil.ascSortLower(a.name, b.name);
+
+		const {eleModalInner: modalInner, doClose} = UiUtil.getShowModal({
+			title: "⚡ Spawn Character",
+			isMinHeight0: true,
 		});
-		if (!chosenName) return;
 
-		const chosenClass = classes.find(c => c.name === chosenName);
-		if (!chosenClass) return;
+		const wrp = e_({outer: `<div class="ve-flex-col"></div>`});
+		wrp.appendChild(e_({outer: `<div class="ve-small ve-muted mb-2">Builds a complete character through the real Builder and Quick&nbsp;Build engines. Same spec always yields the same character unless you set a seed.</div>`}));
 
-		// Save current character before creating the random one
-		if (this._currentCharacterId) {
-			await this._saveCurrentCharacter();
-		}
-
-		this._createNewCharacter();
-		this._selCharacter.value = "";
-
-		this._buildRandomCharacter(chosenClass);
-
-		await this._saveCurrentCharacter();
-		await this._pLoadCharacters();
-		this._selCharacter.value = this._currentCharacterId;
-
-		JqueryUtil.doToast({type: "success", content: `Created random ${chosenName}: ${this._state.getName()}`});
-	}
-
-	_buildRandomCharacter (cls) {
-		const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-		const pickN = (arr, n) => {
-			const shuffled = [...arr].sort(() => Math.random() - 0.5);
-			return shuffled.slice(0, Math.min(n, arr.length));
+		/**
+		 * @param {string} label
+		 * @param {*} control
+		 */
+		const mkRow = (label, control) => {
+			const row = e_({outer: `<label class="ve-flex-v-center mb-2"></label>`});
+			row.appendChild(e_({outer: `<span class="ve-small bold mr-2" style="min-width: 7.5rem;">${label}</span>`}));
+			control.classList.add("ve-form-control", "form-control--minimal");
+			row.appendChild(control);
+			wrp.appendChild(row);
+			return control;
 		};
 
-		// ── 1. Race ──
-		const races = this.filterByAllowedSources(this._races);
-		if (races.length) {
-			const race = pick(races);
-			this._state.setRace({name: race.name, source: race.source}, race._subraceName ? {name: race._subraceName, source: race.source} : null);
-			const sizeAbv = Array.isArray(race.size) ? pick(race.size) : race.size;
-			this._state.setSize(sizeAbv ? (Parser.sizeAbvToFull?.(sizeAbv) || sizeAbv) : "medium");
+		const selClass = mkRow("Class", e_({tag: "select"}));
+		[...classes].sort(byName).forEach(c => selClass.appendChild(e_({tag: "option", val: c.name, txt: c.name})));
 
-			// Speed
-			if (race.speed) {
-				if (typeof race.speed === "number") {
-					this._state.setSpeed("walk", race.speed);
-				} else if (race.speed.walk) {
-					this._state.setSpeed("walk", race.speed.walk);
-				}
-			}
+		const selSubclass = mkRow("Subclass", e_({tag: "select"}));
+		const selRace = mkRow("Species", e_({tag: "select"}));
+		const selBackground = mkRow("Background", e_({tag: "select"}));
+		const iptLevel = mkRow("Level", e_({tag: "input", attrs: {type: "number", min: "1", max: "20", value: "1"}}));
+		const iptSeed = mkRow("Seed", e_({tag: "input", attrs: {type: "text", placeholder: "blank = deterministic"}}));
+		const iptName = mkRow("Name", e_({tag: "input", attrs: {type: "text", placeholder: "auto"}}));
 
-			// Ability bonuses
-			if (race.ability?.length) {
-				const abilityBlock = pick(race.ability);
-				for (const [ab, bonus] of Object.entries(abilityBlock)) {
-					if (ab === "choose") {
-						// Random choice: pick `count` abilities from `from` and give each +`amount`
-						const count = abilityBlock.choose.count || 1;
-						const amount = abilityBlock.choose.amount || 1;
-						const from = abilityBlock.choose.from || Parser.ABIL_ABVS;
-						const chosen = pickN(from, count);
-						for (const a of chosen) this._state.setAbilityBonus(a, (this._state._data.abilityBonuses[a] || 0) + amount);
-					} else if (Parser.ABIL_ABVS.includes(ab)) {
-						this._state.setAbilityBonus(ab, (this._state._data.abilityBonuses[ab] || 0) + bonus);
-					}
-				}
-			}
+		const mkAnyOption = (/** @type {*} */ sel, /** @type {string} */ txt) => sel.appendChild(e_({tag: "option", val: "", txt}));
 
-			// Senses (darkvision + blindsight + tremorsense + truesight)
-			CharacterSheetClassUtils.SENSE_DISPLAY_ORDER.forEach(senseKey => {
-				if (race[senseKey]) this._state.setSense(senseKey, race[senseKey]);
-			});
+		mkAnyOption(selRace, "— random —");
+		[...races].sort(byName).forEach(r => selRace.appendChild(e_({tag: "option", val: r.name, txt: r.name})));
+		mkAnyOption(selBackground, "— random —");
+		[...backgrounds].sort(byName).forEach(bg => selBackground.appendChild(e_({tag: "option", val: bg.name, txt: bg.name})));
 
-			// Languages
-			if (race.languageProficiencies) {
-				race.languageProficiencies.forEach(lp => {
-					Object.keys(lp).forEach(lang => {
-						if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
-						this._state.addLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(/** @type {*} */ (lang)));
-					});
-					// Random extra language choices
-					if (lp.anyStandard || lp.any) {
-						const count = lp.anyStandard || lp.any;
-						const available = this._getAvailableLanguages();
-						const chosen = pickN(available, typeof count === "number" ? count : 1);
-						for (const lang of chosen) this._state.addLanguage(lang);
-					}
-				});
-			}
-
-			// Skill proficiencies from race
-			if (race.skillProficiencies) {
-				race.skillProficiencies.forEach(sp => {
-					Object.keys(sp).forEach(skill => {
-						if (skill === "choose" || skill === "any") return;
-						this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 1);
-					});
-					if (sp.choose) {
-						const from = sp.choose.from || [];
-						const count = sp.choose.count || 1;
-						const chosen = pickN(from.map(s => s.toLowerCase().replace(/\s+/g, "")), count);
-						for (const s of chosen) this._state.setSkillProficiency(s, 1);
-					}
-				});
-			}
-
-			// Resistances
-			if (race.resist) {
-				race.resist.forEach(r => { if (typeof r === "string") this._state.addResistance(r); });
-			}
-
-			// Racial features (traits)
-			if (race.entries) this._addRandomFeatureEntries(race.entries, race.source, "Species");
-		}
-
-		// ── 2. Background ──
-		const backgrounds = this.filterByAllowedSources(this._backgrounds);
-		if (backgrounds.length) {
-			const bg = pick(backgrounds);
-			this._state.setBackground({name: bg.name, source: bg.source});
-
-			if (bg.skillProficiencies) {
-				bg.skillProficiencies.forEach(sp => {
-					Object.keys(sp).forEach(skill => {
-						if (skill === "choose" || skill === "any") return;
-						this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 1);
-					});
-				});
-			}
-
-			if (bg.toolProficiencies) {
-				bg.toolProficiencies.forEach(tp => {
-					Object.entries(tp).forEach(([key, val]) => {
-						if (key === "choose" || key === "any" || key === "anyArtisansTool" || key === "anyMusicalInstrument") return;
-						if (val === true) this._state.addToolProficiency((/** @type {*} */ (key)).toTitleCase());
-					});
-				});
-			}
-
-			if (bg.languageProficiencies) {
-				bg.languageProficiencies.forEach(lp => {
-					Object.entries(lp).forEach(([key, val]) => {
-						if (key === "anyStandard" || key === "any") {
-							const count = typeof val === "number" ? val : 1;
-							const available = this._getAvailableLanguages();
-							const chosen = pickN(available, count);
-							for (const lang of chosen) this._state.addLanguage(lang);
-						} else if (val === true) {
-							this._state.addLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(/** @type {*} */ (key)));
-						}
-					});
-				});
-			}
-
-			// Background features
-			if (bg.entries) this._addRandomFeatureEntries(bg.entries, bg.source, "Background");
-		}
-
-		// ── 3. Ability scores (standard array, priority-shuffled) ──
-		const standardArray = [15, 14, 13, 12, 10, 8];
-		const priority = this._getAbilityPriority(cls);
-		// Minor shuffle for variety: swap 0-2 random pairs
-		const swaps = Math.floor(Math.random() * 3);
-		for (let i = 0; i < swaps; i++) {
-			const a = Math.floor(Math.random() * 6);
-			const b = Math.floor(Math.random() * 6);
-			[priority[a], priority[b]] = [priority[b], priority[a]];
-		}
-		for (let i = 0; i < 6; i++) {
-			this._state.setAbilityBase(priority[i], standardArray[i]);
-		}
-
-		// ── 4. Class (triggers spell slot / HP recalc internally) ──
-		this._state.addClass({name: cls.name, source: cls.source, level: 1});
-
-		// Save proficiencies
-		if (cls.proficiency) {
-			cls.proficiency.forEach(prof => {
-				if (Parser.ABIL_ABVS.includes(prof)) this._state.addSaveProficiency(prof);
-			});
-		}
-
-		// Armor / weapon / tool proficiencies
-		if (cls.startingProficiencies?.armor) {
-			cls.startingProficiencies.armor.forEach(a => {
-				this._state.addArmorProficiency(typeof a === "string" ? a : a.full || String(a));
-			});
-		}
-		if (cls.startingProficiencies?.weapons) {
-			cls.startingProficiencies.weapons.forEach(w => {
-				this._state.addWeaponProficiency(typeof w === "string" ? w : w.full || String(w));
-			});
-		}
-		if (cls.startingProficiencies?.tools) {
-			cls.startingProficiencies.tools.forEach(t => {
-				if (typeof t === "string" && !/\bany\b.*\bchoice\b|\bchoose\b/i.test(t)) {
-					const toolName = (/** @type {*} */ (t.replace(/{@item\s+([^|}]+)[^}]*}/gi, "$1"))).toTitleCase();
-					this._state.addToolProficiency(toolName);
-				}
-			});
-		}
-
-		// Class skill proficiencies (random from class list)
-		if (cls.startingProficiencies?.skills) {
-			const alreadyProficient = new Set(
-				Object.keys(this._state._data.skillProficiencies).filter(s => this._state._data.skillProficiencies[s] >= 1),
-			);
-			cls.startingProficiencies.skills.forEach(skillSet => {
-				if (skillSet.choose) {
-					const count = skillSet.choose.count || 2;
-					const from = (skillSet.choose.from || []).map(s => s.toLowerCase().replace(/\s+/g, ""));
-					const available = from.filter(s => !alreadyProficient.has(s));
-					const chosen = pickN(available, count);
-					for (const s of chosen) {
-						this._state.setSkillProficiency(s, 1);
-						alreadyProficient.add(s);
-					}
-				} else if (skillSet.any) {
-					const allSkills = [
-						"acrobatics", "animalhandling", "arcana", "athletics", "deception",
-						"history", "insight", "intimidation", "investigation", "medicine",
-						"nature", "perception", "performance", "persuasion", "religion",
-						"sleightofhand", "stealth", "survival",
-					];
-					const available = allSkills.filter(s => !alreadyProficient.has(s));
-					const chosen = pickN(available, skillSet.any);
-					for (const s of chosen) {
-						this._state.setSkillProficiency(s, 1);
-						alreadyProficient.add(s);
-					}
-				}
-			});
-		}
-
-		// ── 4b. Class features ──
-		this._addRandomClassFeatures(cls);
-
-		// ── 5. Spellcasting ──
-		if (cls.spellcastingAbility) {
-			this._state.setSpellcastingAbility(cls.spellcastingAbility);
-			this._applyRandomSpells(cls, pickN);
-		}
-
-		// ── 6. Level history ──
-		this._state.recordLevelChoice({
-			level: 1,
-			class: {name: cls.name, source: cls.source},
-			choices: {},
-			complete: true,
-		});
-
-		// ── 7. Name & HP ──
-		const raceName = this._state.getRaceName() || "Adventurer";
-		this._state.setName(`${raceName} ${cls.name}`);
-		const maxHp = this._state.getMaxHp?.() ?? this._state._data.hp.max;
-		this._state._data.hp.current = maxHp;
-
-		this._renderCharacter();
-		this._updateTabVisibility();
-	}
-
-	_addRandomFeatureEntries (entries, source, featureType) {
-		entries.forEach(entry => {
-			if (typeof entry === "object" && entry.name) {
-				this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(
-					{
-						...entry,
-						source: entry.source || source,
-					},
-					{featureType},
-				));
-			}
-		});
-	}
-
-	_addRandomClassFeatures (cls) {
-		if (!cls.classFeatures?.length) return;
-
-		// classFeatures[0] is level 1 features (array-of-arrays format) or flat array
-		let level1Features = cls.classFeatures[0];
-		if (level1Features && !Array.isArray(level1Features)) {
-			level1Features = cls.classFeatures.filter(f => {
-				if (typeof f === "string") {
-					const parts = f.split("|");
-					return parts[3] === "1" || parts.length < 4;
-				} else if (typeof f === "object" && f.classFeature) {
-					const parts = f.classFeature.split("|");
-					return parts[3] === "1" || parts.length < 4;
-				} else if (typeof f === "object" && f.level !== undefined) {
-					return f.level === 1;
-				}
-				return true;
-			});
-		}
-
-		(level1Features || []).forEach(f => {
-			let featureName, featureSource, classSource;
-
-			if (typeof f === "string") {
-				const parts = f.split("|");
-				featureName = parts[0];
-				classSource = parts[2] || cls.source;
-				featureSource = parts[4] || classSource;
-			} else if (typeof f === "object" && f.classFeature) {
-				const parts = f.classFeature.split("|");
-				featureName = parts[0];
-				classSource = parts[2] || cls.source;
-				featureSource = parts[4] || classSource;
-			} else if (typeof f === "object" && f.name) {
-				featureName = f.name;
-				classSource = f.classSource || cls.source;
-				featureSource = f.source || classSource;
-			} else {
-				return;
-			}
-
-			const fullFeatureData = this._getRandomClassFeatureData(featureName, cls.name, classSource, 1);
-			const description = fullFeatureData?.entries
-				? Renderer.get().render({entries: fullFeatureData.entries})
-				: "";
-
-			this._state.addFeature({
-				name: featureName,
-				source: featureSource,
-				level: 1,
-				className: cls.name,
-				classSource: classSource,
-				featureType: "Class",
-				description,
-			});
-		});
-	}
-
-	_getRandomClassFeatureData (featureName, className, source, level) {
-		if (!this._classFeatures?.length) return null;
-
-		return this._classFeatures.find(f => {
-			if (f.name !== featureName || f.className !== className || f.level !== level) return false;
-			if (source && f.source && f.source !== source) {
-				const flexible = [Parser.SRC_PHB, Parser.SRC_XPHB, "SRD"];
-				return flexible.includes(source) && flexible.includes(f.source);
-			}
-			return true;
-		}) || null;
-	}
-
-	_getAbilityPriority (cls) {
-		const priorities = {
-			"Barbarian": ["str", "con", "dex", "wis", "cha", "int"],
-			"Bard": ["cha", "dex", "con", "wis", "int", "str"],
-			"Cleric": ["wis", "con", "str", "cha", "dex", "int"],
-			"Druid": ["wis", "con", "dex", "int", "cha", "str"],
-			"Fighter": ["str", "con", "dex", "wis", "cha", "int"],
-			"Monk": ["dex", "wis", "con", "str", "cha", "int"],
-			"Paladin": ["str", "cha", "con", "wis", "dex", "int"],
-			"Ranger": ["dex", "wis", "con", "str", "int", "cha"],
-			"Rogue": ["dex", "con", "cha", "int", "wis", "str"],
-			"Sorcerer": ["cha", "con", "dex", "wis", "int", "str"],
-			"Warlock": ["cha", "con", "dex", "wis", "int", "str"],
-			"Wizard": ["int", "con", "dex", "wis", "cha", "str"],
-			"Artificer": ["int", "con", "dex", "wis", "cha", "str"],
+		const refreshSubclasses = () => {
+			const classData = classes.find(c => c.name === selClass.value);
+			selSubclass.innerHTML = "";
+			mkAnyOption(selSubclass, "— random —");
+			this.filterByAllowedSources(classData?.subclasses || [])
+				.sort(byName)
+				.forEach(sc => selSubclass.appendChild(e_({tag: "option", val: sc.shortName || sc.name, txt: sc.name})));
 		};
-		return [...(priorities[cls.name] || Parser.ABIL_ABVS)];
-	}
+		refreshSubclasses();
+		selClass.addEventListener("change", () => { refreshSubclasses(); updatePreview(); });
 
-	_getAvailableLanguages () {
-		try {
-			return this.getLanguageNamesSorted?.() || ["Common", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc"];
-		} catch {
-			return ["Common", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc"];
-		}
-	}
+		const preview = e_({outer: `<code class="ve-small ve-block mb-2" style="word-break: break-all;"></code>`});
 
-	_applyRandomSpells (cls, pickN) {
-		const allSpells = this._spellsData || [];
-		if (!allSpells.length) return;
+		/** @returns {*} the spec object described by the current form state */
+		const readSpec = () => {
+			const spec = {
+				classes: [{
+					name: selClass.value,
+					level: Math.max(1, Math.min(20, Number(iptLevel.value) || 1)),
+					subclass: selSubclass.value || null,
+				}],
+				race: selRace.value || null,
+				background: selBackground.value || null,
+				seed: iptSeed.value.trim() || null,
+				name: iptName.value.trim() || null,
+			};
+			return CharacterSheetSpawnSpec.normalize(spec);
+		};
 
-		// Filter spells available to this class at level 1
-		const classSpells = allSpells.filter(sp => {
-			if (!sp.classes?.fromClassList?.length) return false;
-			return sp.classes.fromClassList.some(c => c.name === cls.name && c.source === cls.source);
+		const updatePreview = () => {
+			try {
+				preview.textContent = CharacterSheetSpawnSpec.toShortString(readSpec());
+			} catch (e) {
+				preview.textContent = "";
+			}
+		};
+		[selSubclass, selRace, selBackground, iptLevel, iptSeed, iptName].forEach(el => {
+			el.addEventListener("change", updatePreview);
+			el.addEventListener("input", updatePreview);
+		});
+		updatePreview();
+
+		wrp.appendChild(e_({outer: `<div class="ve-small bold mt-1">Spec</div>`}));
+		wrp.appendChild(preview);
+
+		const btnRow = e_({outer: `<div class="ve-flex-h-right ve-flex-wrap"></div>`});
+		/**
+		 * @param {string} txt
+		 * @param {string} clazz
+		 * @param {function(): *} fn
+		 */
+		const mkBtn = (txt, clazz, fn) => {
+			const btn = e_({tag: "button", clazz: `ve-btn ve-btn-sm ${clazz} ml-2`, text: txt});
+			btn.addEventListener("click", fn);
+			btnRow.appendChild(btn);
+			return btn;
+		};
+
+		mkBtn("🎲 Randomise", "ve-btn-default", () => {
+			const rng = new CharacterSheetSpawnRng(String(Date.now()));
+			selClass.value = rng.pick([...selClass.options].map(o => o.value));
+			refreshSubclasses();
+			const subValues = [...selSubclass.options].map(o => o.value).filter(Boolean);
+			selSubclass.value = subValues.length ? rng.pick(subValues) : "";
+			selRace.value = "";
+			selBackground.value = "";
+			iptSeed.value = String(rng.nextInt(1e9));
+			updatePreview();
 		});
 
-		const cantrips = classSpells.filter(sp => sp.level === 0);
-		const level1Spells = classSpells.filter(sp => sp.level === 1);
+		mkBtn("🔗 Copy URL", "ve-btn-default", async () => {
+			const url = `${location.origin}${location.pathname}?${CharacterSheetSpawnSpec.toQueryString(readSpec())}`;
+			await MiscUtil.pCopyTextToClipboard(url);
+			JqueryUtil.doToast({type: "success", content: "Spawn URL copied"});
+		});
 
-		// Determine cantrip and known spell counts from class data tables
-		const cantripCount = CharacterSheetClassUtils.getCantripsAtLevel?.(cls, cls.name, 1) ??
-			this._getDefaultCantripCount(cls.name);
-		const knownCount = CharacterSheetClassUtils.getKnownSpellsAtLevel?.(cls, cls.name, 1) ??
-			this._getDefaultKnownSpellCount(cls.name);
+		mkBtn("📋 Copy spec", "ve-btn-default", async () => {
+			await MiscUtil.pCopyTextToClipboard(JSON.stringify(CharacterSheetSpawnSpec.toJson(readSpec()), null, 2));
+			JqueryUtil.doToast({type: "success", content: "Spawn spec copied"});
+		});
 
-		// Add cantrips
-		if (cantripCount > 0 && cantrips.length) {
-			const chosen = pickN(cantrips, cantripCount);
-			for (const sp of chosen) {
-				this._state.addCantrip({
-					name: sp.name,
-					source: sp.source,
-					school: sp.school,
-					sourceClass: cls.name,
-				});
+		const btnSpawn = mkBtn("⚡ Spawn", "ve-btn-primary", async () => {
+			const spec = readSpec();
+			btnSpawn.disabled = true;
+			btnSpawn.textContent = "Spawning…";
+			try {
+				await this.spawn(spec);
+				doClose();
+			} catch (e) {
+				// eslint-disable-next-line no-console
+				console.error("[CharSheet Spawn]", e);
+				JqueryUtil.doToast({type: "danger", content: `Spawn failed: ${(/** @type {*} */ (e)).message}`});
+				btnSpawn.disabled = false;
+				btnSpawn.textContent = "⚡ Spawn";
 			}
-		}
+		});
 
-		// Add known spells (for known casters, not prepared casters)
-		const preparedCasters = ["Cleric", "Druid", "Paladin"];
-		if (knownCount > 0 && !preparedCasters.includes(cls.name) && level1Spells.length) {
-			const chosen = pickN(level1Spells, knownCount);
-			for (const sp of chosen) {
-				this._state.addSpell({
-					name: sp.name,
-					source: sp.source,
-					level: sp.level,
-					school: sp.school,
-					ritual: sp.meta?.ritual || false,
-					concentration: sp.duration?.some?.(d => d.concentration) || false,
-					sourceClass: cls.name,
-				}, false);
-			}
-		}
+		wrp.appendChild(btnRow);
+		modalInner.appendChild(wrp);
 	}
-
-	_getDefaultCantripCount (className) {
-		const defaults = {Bard: 2, Cleric: 3, Druid: 2, Sorcerer: 4, Warlock: 2, Wizard: 3, Artificer: 2};
-		return defaults[className] || 0;
-	}
-
-	_getDefaultKnownSpellCount (className) {
-		const defaults = {Bard: 4, Sorcerer: 2, Warlock: 2, Wizard: 6, Ranger: 0};
-		return defaults[className] || 0;
-	}
-
-	// #endregion
 
 	async _onDuplicateCharacter () {
 		if (!this._currentCharacterId) return;
@@ -16841,6 +16643,9 @@ window.addEventListener("load", async () => {
 		await charSheet.pInit();
 
 		(/** @type {*} */ (window)).charSheet = charSheet; // For debugging
+		// One-word console shortcut for spawning test characters:
+		//   await csSpawn("cleric/tempest/9/dwarf")
+		(/** @type {*} */ (globalThis)).csSpawn = (/** @type {*} */ spec, /** @type {*} */ opts) => charSheet.spawn(spec, opts);
 
 		window.dispatchEvent(new Event("toolsLoaded"));
 	} catch (e) {

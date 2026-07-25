@@ -3,7 +3,22 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Quick Build weapon-mastery pool ignores weapon proficiency
+
+Surfaced by the character spawner (`docs/charactersheet/15-spawn-test-characters.md`) while
+probing `rogue/thief/4/halfling`: the spawned Rogue was offered — and picked — **Lance** and
+**Trident** mastery.
+
+`_renderWeaponMasteryStep` (`js/charactersheet/charactersheet-quickbuild.js` ~3285) builds its
+pool as *every* base item with a `mastery` property, split into "Simple Weapons" / "Martial
+Weapons", with no filter against the character's actual weapon proficiencies. Per the 2024 rules
+the choice is limited to weapons "with which you have proficiency", so a Rogue should not see
+martial weapons beyond its short list (hand crossbow, longsword, rapier, shortsword).
+
+Not spawner-specific — a human clicking through Quick Build sees the same over-wide list. Fix is
+to intersect the pool with the character's weapon proficiencies (simple / martial / named
+weapons) before rendering. Left open deliberately: it changes what real users are offered, so it
+wants its own change + regression test rather than riding along with the spawner work.
 
 ## Closed Bugs
 
@@ -1192,7 +1207,7 @@ Integrated from 7 parallel sessions into `character-sheet-wip`. Full suite green
 
 * combat.js `render()` call-list: removed both `renderCombatArcaneArcher()` (S1, folded into resources) and `renderCombatFlanking()` (S2, folded into quick-states) — the one merge conflict, resolved as the union of two removals.
 * combat.js attack functions (`_rollAttack`/`_rollDamage`/`_renderAttackItem`/`renderAttacks`) were touched by S7 (Bladesong mod), S4 (Bee active-state attack) and S1 (masteries display); auto-merged and verified coherent — `getWeaponAbilityMod` is the single ability-mod resolver at all sites and `getActiveStateAttacks` (Bee) is wired alongside.
-* Known latent follow-up (out of round-6 scope, flagged by S6): `charactersheet-respec.js` species-change and `charactersheet.js` `_addRandomFeatureEntries` can still over-grant a level-gated race entry — candidates for adopting S6's `getFeatureUnlockLevel`/`updateRacialFeatures` helpers in a future pass.
+* Known latent follow-up (out of round-6 scope, flagged by S6): `charactersheet-respec.js` species-change can still over-grant a level-gated race entry — a candidate for adopting S6's `getFeatureUnlockLevel`/`updateRacialFeatures` helpers in a future pass. (The other half of this note, `charactersheet.js` `_addRandomFeatureEntries`, is resolved: the random-character generator was a parallel build path and has been replaced by the spawner, which drives the real Builder/Quick Build engines.)
 
 
 ### Round 5 (surfaced during manual testing of the merged round-4 fixes)
