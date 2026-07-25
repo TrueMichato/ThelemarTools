@@ -12679,9 +12679,10 @@ Renderer.item = class {
 		if (!isIgnoreMissing && !out) {
 			if (!this._ERRORS_LOGGED_MISSING_PROPERTY[uid]) {
 				this._ERRORS_LOGGED_MISSING_PROPERTY[uid] = true;
-				const msg = `Item property "${uid}" not found!`;
-				JqueryUtil.doToast({type: "danger", content: msg});
-				setTimeout(() => { throw new Error(msg); });
+				// External homebrew may reference item properties it never registers. Degrade gracefully
+				//   with a once-only console warning (rather than an uncaught throw) and skip the property.
+				// eslint-disable-next-line no-console
+				console.warn(`Item property "${uid}" not found!`);
 			}
 		}
 		return out;

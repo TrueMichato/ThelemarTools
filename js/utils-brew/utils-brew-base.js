@@ -862,10 +862,11 @@ export class BrewUtil2Base {
 		return {brewDocs, unavailableSources};
 	}
 
-	async pPullAllBrews ({brews = null} = {}) {
+	async pPullAllBrews ({brews = null, isReturnMeta = false} = {}) {
 		try {
 			const lockToken = await this._LOCK.pLock();
-			return (await this._pPullAllBrews_({lockToken, brews}));
+			const {brewDocsUpdated, failedBrews} = await this._pPullAllBrews_({lockToken, brews});
+			return isReturnMeta ? {brewDocsUpdated, failedBrews} : brewDocsUpdated;
 		} finally {
 			this._LOCK.unlock();
 		}
@@ -873,6 +874,7 @@ export class BrewUtil2Base {
 
 	async _pPullAllBrews_ ({lockToken, brews = null}) {
 		const brewDocsUpdated = [];
+		const failedBrews = [];
 
 		const brewsCur = MiscUtil.copyFast(await this._pGetBrewRaw({lockToken}));
 		const allowlistDocIdLocals = new Set(
@@ -887,22 +889,32 @@ export class BrewUtil2Base {
 
 				if (!this.isPullable(brew)) return brew;
 
-				const json = await DataUtil.loadRawJSON(brew.head.url, {isBustCache: true});
+				// Tolerate a single failed download (e.g. a renamed/removed remote file) so the
+				//   remaining brews still update. The failed brew is left unchanged and reported.
+				let json;
+				try {
+					json = await DataUtil.loadRawJSON(brew.head.url, {isBustCache: true, isSilent: true});
+				} catch (e) {
+					failedBrews.push({brew, url: brew.head.url, error: e});
+					return brew;
+				}
 
+				// Conversion is intentionally outside the try/catch so genuine internal defects surface
+				//   instead of being miscategorised as (tolerated) download failures.
 				const localLastModified = brew.body._meta?.dateLastModified ?? 0;
 				const sourceLastModified = json._meta?.dateLastModified ?? 0;
 
 				if (sourceLastModified <= localLastModified) return brew;
 
 				const brewDoc = BrewDoc.fromObject(brew).mutUpdate({json});
+				const brewNxt = brewDoc.toObject();
 				brewDocsUpdated.push(brewDoc);
-				return brewDoc.toObject();
+				return brewNxt;
 			});
 
-		if (!brewDocsUpdated.length) return brewDocsUpdated;
+		if (brewDocsUpdated.length) await this.pSetBrew(brewsNxt, {lockToken});
 
-		await this.pSetBrew(brewsNxt, {lockToken});
-		return brewDocsUpdated;
+		return {brewDocsUpdated, failedBrews};
 	}
 
 	isPullable (brew) { return !brew.head.isEditable && !!brew.head.url; }
