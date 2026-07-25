@@ -89,6 +89,95 @@ describe("CharacterSheetRollHistory", () => {
 			expect(history.getRollCount()).toBe(0);
 			expect(history.getRolls()).toEqual([]);
 		});
+
+		test("should reset the unread count to zero", () => {
+			history.addRoll({title: "Roll 1", total: 10});
+			history.addRoll({title: "Roll 2", total: 20});
+			expect(history._unreadCount).toBe(2);
+
+			history.clear();
+			expect(history._unreadCount).toBe(0);
+		});
+	});
+
+	// ===================================================================
+	// Unread badge (B10)
+	// ===================================================================
+	describe("unread badge", () => {
+		test("should start with a zero unread count", () => {
+			expect(history._unreadCount).toBe(0);
+		});
+
+		test("should increment unread count for rolls added while closed", () => {
+			expect(history._isOpen).toBe(false);
+			history.addRoll({title: "Roll 1", total: 10});
+			history.addRoll({title: "Roll 2", total: 20});
+			expect(history._unreadCount).toBe(2);
+		});
+
+		test("should reset unread count to zero when the log is opened", () => {
+			history.addRoll({title: "Roll 1", total: 10});
+			history.addRoll({title: "Roll 2", total: 20});
+			expect(history._unreadCount).toBe(2);
+
+			history.toggle(); // open
+			expect(history._isOpen).toBe(true);
+			expect(history._unreadCount).toBe(0);
+		});
+
+		test("should NOT increment unread count for rolls added while open", () => {
+			history.toggle(); // open
+			expect(history._isOpen).toBe(true);
+
+			history.addRoll({title: "Roll 1", total: 10});
+			history.addRoll({title: "Roll 2", total: 20});
+			expect(history._unreadCount).toBe(0);
+		});
+
+		test("should resume counting unread after the log is closed again", () => {
+			history.toggle(); // open
+			history.toggle(); // close
+			expect(history._isOpen).toBe(false);
+
+			history.addRoll({title: "Roll after close", total: 5});
+			expect(history._unreadCount).toBe(1);
+		});
+
+		test("unread count should not exceed MAX_ROLLS", () => {
+			for (let i = 0; i < CharacterSheetRollHistory.MAX_ROLLS + 25; i++) {
+				history.addRoll({title: `Roll ${i}`, total: i});
+			}
+			expect(history._unreadCount).toBe(CharacterSheetRollHistory.MAX_ROLLS);
+		});
+
+		test("badge should reflect unread count and hide at zero", () => {
+			const badge = {textContent: "", style: {display: ""}};
+			const prevDocument = globalThis.document;
+			globalThis.document = {getElementById: (id) => (id === "charsheet-rolllog-badge" ? badge : null)};
+
+			try {
+				// addRoll drives the badge itself — no manual _updateBadge() call.
+				history.addRoll({title: "Roll 1", total: 10});
+				history.addRoll({title: "Roll 2", total: 20});
+				expect(badge.textContent).toBe("2");
+				expect(badge.style.display).not.toBe("none");
+
+				history.toggle(); // open -> unread resets, badge hidden
+				expect(badge.style.display).toBe("none");
+
+				// Badge tracks unread, NOT total history: 3 stored rolls but only 1 unread.
+				history.toggle(); // close
+				history.addRoll({title: "Roll 3", total: 30});
+				expect(history.getRollCount()).toBe(3);
+				expect(badge.textContent).toBe("1");
+				expect(badge.style.display).not.toBe("none");
+
+				history.clear();
+				expect(badge.style.display).toBe("none");
+			} finally {
+				globalThis.document = prevDocument;
+			}
+		});
 	});
 
 	// ===================================================================
