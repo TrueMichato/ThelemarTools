@@ -3268,10 +3268,13 @@ class CharacterSheetPage {
 		} else {
 			loreSkills.forEach(skill => {
 				const skillKey = skill.name.toLowerCase().replace(/\s+/g, "");
-				const mod = this._state.getSkillMod(skillKey);
-				const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
-				const passive = 10 + mod;
 				const breakdown = this._state.getSkillBreakdown(skillKey);
+				// Display the exhaustion-aware effective total (matches standard skills and the
+				// value the roll uses). Passive stays on the intrinsic getSkillMod — passives
+				// don't take the exhaustion d20 penalty, same as standard-skill passives.
+				const mod = breakdown.total;
+				const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
+				const passive = 10 + this._state.getSkillMod(skillKey);
 				const tooltipLines = breakdown.components.map(comp => `${comp.icon} ${comp.name}: ${comp.value >= 0 ? "+" : ""}${comp.value}`);
 				tooltipLines.push(`─────────\n📚 Total: ${modStr}    Passive: ${passive}`);
 				tooltipLines.push("Click to roll d20 + modifier");
