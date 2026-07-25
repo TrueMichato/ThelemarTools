@@ -11085,18 +11085,48 @@ class CharacterSheetState {
 	getSaveProficiencies () { return [...this._data.saveProficiencies]; }
 
 	/**
+	 * Canonicalise an armor-proficiency string to the token the rest of the sheet
+	 * consumes: `light` / `medium` / `heavy` / `shields`.
+	 *
+	 * Multiple writers historically stored inconsistent forms — friendly labels
+	 * ("Light Armor"), title-cased values ("Shields"), and the class-start singular
+	 * "shield" — none of which matched the exact-lowercase check that gated the
+	 * non-proficiency penalty. Normalising BOTH sides of the comparison here fixes
+	 * every caller (main modal, play-mode editor, feat effects, class start) and
+	 * repairs already-saved characters without a migration. Unrecognised strings
+	 * (homebrew custom armor names) are returned trimmed/lowercased but otherwise
+	 * intact so they still compare equal to themselves.
+	 * @param {*} input
+	 * @returns {string}
+	 */
+	_normalizeArmorProfToken (input) {
+		let s = String(input ?? "").trim().toLowerCase();
+		if (!s) return "";
+		// "light armor" -> "light", "heavy armour" -> "heavy", but leave a specific
+		// armor NAME like "studded leather armor" alone (its stripped form is not a
+		// recognised category, so it falls through to the passthrough return).
+		const stripped = s.replace(/\s+armou?r$/, "");
+		if (["light", "medium", "heavy"].includes(stripped)) return stripped;
+		if (stripped === "shield" || stripped === "shields") return "shields";
+		return s;
+	}
+
+	/**
 	 * Check if character has proficiency with an armor type
 	 * @param {string} armor - The armor type (light, medium, heavy, shields)
 	 * @returns {boolean} True if proficient
 	 */
 	hasArmorProficiency (armor) {
-		// Check normal proficiencies
-		if (this._data.armorProficiencies.some(a => a.toLowerCase() === armor.toLowerCase())) {
+		const want = this._normalizeArmorProfToken(armor);
+
+		// Check normal proficiencies (normalise both sides so "Light Armor",
+		// "light", "shield", and "shields" all resolve to the same canonical token).
+		if (this._data.armorProficiencies.some(a => this._normalizeArmorProfToken(a) === want)) {
 			return true;
 		}
 
 		// Check for proficiency granted by equipped items (e.g., Dwarven Plate)
-		const armorLower = armor.toLowerCase();
+		const armorLower = want;
 		return this.getItems().some(item => {
 			if (!item.grantsProficiency) return false;
 			if (!item.equipped) return false;
@@ -11245,6 +11275,40 @@ class CharacterSheetState {
 	removeArmorProficiency (armor) {
 		const idx = this._data.armorProficiencies.indexOf(armor);
 		if (idx >= 0) this._data.armorProficiencies.splice(idx, 1);
+	}
+
+	/**
+	 * Add an armor proficiency as its canonical token, collapsing any pre-existing
+	 * variants (friendly labels, title-case, singular "shield", legacy duplicates)
+	 * that normalize to the same token. Guarantees exactly one canonical entry so the
+	 * manual proficiency editor cannot re-pollute state. Falls back to storing the raw
+	 * value for unrecognised homebrew armor names (which normalize to themselves).
+	 * @param {string} value
+	 */
+	addArmorProficiencyCanonical (value) {
+		const token = this._normalizeArmorProfToken(value);
+		if (!token) return;
+		this.removeArmorProficiencyVariants(token);
+		this._data.armorProficiencies.push(token);
+	}
+
+	/**
+	 * Remove every stored armor proficiency that normalizes to the same canonical
+	 * token as `value` (repairs polluted saves and powers single-chip removal in the
+	 * editor). Returns the number of entries removed.
+	 * @param {string} value
+	 * @returns {number}
+	 */
+	removeArmorProficiencyVariants (value) {
+		const token = this._normalizeArmorProfToken(value);
+		let removed = 0;
+		for (let i = this._data.armorProficiencies.length - 1; i >= 0; i--) {
+			if (this._normalizeArmorProfToken(this._data.armorProficiencies[i]) === token) {
+				this._data.armorProficiencies.splice(i, 1);
+				removed++;
+			}
+		}
+		return removed;
 	}
 
 	addWeaponProficiency (weapon) {
