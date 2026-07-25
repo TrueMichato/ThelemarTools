@@ -33,6 +33,7 @@ export class CharacterSheetRollHistory {
 		this._panelEl = null;
 		this._listEl = null;
 		this._isOpen = false;
+		this._unreadCount = 0;
 		if (typeof document !== "undefined") this._buildPanel();
 	}
 
@@ -60,6 +61,11 @@ export class CharacterSheetRollHistory {
 
 		if (this._rolls.length > CharacterSheetRollHistory.MAX_ROLLS) {
 			this._rolls.length = CharacterSheetRollHistory.MAX_ROLLS;
+		}
+
+		// Track unread rolls only while the panel is closed; opening the log marks them as seen.
+		if (!this._isOpen) {
+			this._unreadCount = Math.min(this._unreadCount + 1, CharacterSheetRollHistory.MAX_ROLLS);
 		}
 
 		this._updateBadge();
@@ -113,6 +119,7 @@ export class CharacterSheetRollHistory {
 	 */
 	clear () {
 		this._rolls = [];
+		this._unreadCount = 0;
 		this._updateBadge();
 		this._renderList();
 	}
@@ -125,9 +132,12 @@ export class CharacterSheetRollHistory {
 		if (this._panelEl) {
 			this._panelEl.classList.toggle("charsheet__roll-history--open", this._isOpen);
 		}
-		if (this._isOpen && this._listEl) {
-			this._renderList();
+		// Opening the log means the user has seen the rolls — clear the unread badge.
+		if (this._isOpen) {
+			this._unreadCount = 0;
+			if (this._listEl) this._renderList();
 		}
+		this._updateBadge();
 	}
 
 	/**
@@ -224,8 +234,8 @@ export class CharacterSheetRollHistory {
 		if (typeof document === "undefined") return;
 		const badge = document.getElementById("charsheet-rolllog-badge");
 		if (!badge) return;
-		if (this._rolls.length > 0) {
-			badge.textContent = String(this._rolls.length);
+		if (this._unreadCount > 0) {
+			badge.textContent = String(this._unreadCount);
 			badge.style.display = "";
 		} else {
 			badge.style.display = "none";
