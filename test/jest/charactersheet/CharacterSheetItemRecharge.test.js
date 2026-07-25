@@ -268,6 +268,27 @@ describe("Item Charge Recharge — rest & trigger integration", () => {
 		expect(state.getItems().find(i => i.id === id).chargesCurrent).toBe(6);
 	});
 
+	it("onLongRest recharges each qualifying item EXACTLY once (no double-apply)", () => {
+		// Fixed amounts make a double-apply visible as 2x the restore.
+		const idDawn = addChargedItem(state, {name: "Dawnwand", charges: 10, chargesCurrent: 0, recharge: "dawn", rechargeAmount: 2});
+		const idLong = addChargedItem(state, {name: "Longrod", charges: 10, chargesCurrent: 0, recharge: "restLong", rechargeAmount: 3});
+
+		const spy = jest.spyOn(state, "rechargeItemCharges");
+		state.onLongRest();
+
+		// Each item's charges reflect a single application, not two.
+		expect(state.getItems().find(i => i.id === idDawn).chargesCurrent).toBe(2);
+		expect(state.getItems().find(i => i.id === idLong).chargesCurrent).toBe(3);
+
+		// And the canonical op was invoked exactly once per item id across both
+		// (dawn + restLong) passes onLongRest performs.
+		const dawnCalls = spy.mock.calls.filter(c => c[0] === idDawn).length;
+		const longCalls = spy.mock.calls.filter(c => c[0] === idLong).length;
+		expect(dawnCalls).toBe(1);
+		expect(longCalls).toBe(1);
+		spy.mockRestore();
+	});
+
 	it("onMidnight recharges midnight items only", () => {
 		const idMid = addChargedItem(state, {name: "Midwand", charges: 5, chargesCurrent: 1, recharge: "midnight", rechargeAmount: 2});
 		const idDawn = addChargedItem(state, {name: "Dawnwand", charges: 5, chargesCurrent: 0, recharge: "dawn", rechargeAmount: 2});
