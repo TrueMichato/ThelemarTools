@@ -5094,6 +5094,7 @@ class CharacterSheetCombat {
 			() => this.renderCombatEffects(),
 			() => this.renderCombatResources(),
 			() => this.renderCombatActions(),
+			() => this.renderCombatActionEconomy(),
 			() => this.renderCombatMetamagic(),
 			() => this.renderCombatStates(),
 		]);
@@ -5334,6 +5335,327 @@ class CharacterSheetCombat {
 		for (const ability of limitedAbilities) {
 			const actionEl = this._createCustomAbilityElement(ability);
 			container.append(actionEl);
+		}
+	}
+
+	/* ====================================================================
+	   Action Economy overview (B9) — a read-only "what can I do this turn"
+	   division that buckets the character's attacks, spells, features, and
+	   custom abilities under Action / Bonus Action / Reaction headers.
+
+	   This aggregates DIRECTLY from four independent sources; it deliberately
+	   does NOT reuse the "Available to Activate" activatable filter (which
+	   excludes combat/reaction-typed items) nor the renderCombatActions
+	   suppression filter (which drops toggles like Bladesong that ARE part of
+	   the action economy). It mutates no shared classifier — every read is
+	   non-destructive.
+	   ==================================================================== */
+
+	/**
+	 * Normalize an action-economy cost token to one of "action" | "bonus" |
+	 * "reaction" | "free", or null when it carries no turn-economy meaning.
+	 * @param {*} value e.g. "bonus", "1 bonus action", "reaction", "action".
+	 * @returns {("action"|"bonus"|"reaction"|"free"|null)}
+	 */
+	_normalizeActionType (value) {
+		const s = String(value == null ? "" : value).toLowerCase();
+		if (!s) return null;
+		if (s.includes("bonus")) return "bonus";
+		if (s.includes("reaction")) return "reaction";
+		if (s.includes("free") || s.includes("no action")) return "free";
+		if (s.includes("action")) return "action";
+		return null;
+	}
+
+	/**
+	 * Bucket a spell's stored casting-time string (e.g. "1 action", "1 bonus",
+	 * "1 reaction") to an action-economy cost. Longer-than-turn casts
+	 * (minute / hour / round / ritual-only) return null — they are not part of
+	 * turn action economy and are excluded from the overview.
+	 * @param {*} castingTime
+	 * @returns {("action"|"bonus"|"reaction"|null)}
+	 */
+	_bucketSpellCastingTime (castingTime) {
+		const t = this._normalizeActionType(castingTime);
+		return t === "action" || t === "bonus" || t === "reaction" ? t : null;
+	}
+
+	/**
+	 * Positive relevance test: does this feature genuinely carry turn action
+	 * economy (so it belongs in the overview)? This is the INVERSE intent of
+	 * the renderCombatActions suppression filter — here toggles (Bladesong),
+	 * reaction/combat overrides, and resolved activatable abilities all count,
+	 * while passive traits (Darkvision, ability bumps) do not. Read-only.
+	 * @param {*} feature
+	 * @returns {boolean}
+	 */
+	_isActionEconomyFeature (feature) {
+		if (!feature) return false;
+		const nameLower = feature.name?.toLowerCase() || "";
+
+		// Metamagic modifies spells rather than costing an independent action;
+		// it has its own dashboard and is excluded from the economy overview.
+		if (feature.optionalFeatureTypes?.includes("MM")) return false;
+
+		// Explicit classification wins.
+		const override = CharacterSheetState.FEATURE_CLASSIFICATION_OVERRIDES?.[nameLower];
+		if (override === "combat" || override === "reaction" || override === "ability") return true;
+
+		// Toggles (Bladesong, stances) and other activatable features carry a
+		// real activation cost. detectActivatableFeature returns null for pure
+		// passives.
+		try {
+			if (CharacterSheetState.detectActivatableFeature?.(feature)) return true;
+		} catch (e) { /* defensive: never let classification abort aggregation */ }
+
+		// Resolved limited-use / boon abilities (Guided Strike, Purge Toxins, …).
+		if (this._page?._getActivatableAbilityForFeature?.(feature)) return true;
+
+		// Fall back to explicit action-economy phrasing in the feature text.
+		const text = this._resolveFeatureText(feature);
+		return /\b(as an? action|as a bonus action|bonus action to|take a bonus action|use your action|take an action|as a reaction|use your reaction|take a reaction)\b/i.test(text);
+	}
+
+	/**
+	 * Resolve a feature's descriptive text, preferring `description` and falling
+	 * back to rendered `entries`, stripped of markup and lower-cased. Shared by
+	 * relevance + classification so the two never disagree on entries-only
+	 * features.
+	 * @param {*} feature
+	 * @returns {string}
+	 */
+	_resolveFeatureText (feature) {
+		let text = feature?.description;
+		if (!text && feature?.entries) {
+			try { text = Renderer.get().render({entries: feature.entries}); } catch (e) { text = ""; }
+		}
+		return String(text || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+	}
+
+	/**
+	 * Classify a feature's action-economy cost. Honors an explicit reaction
+	 * override, then reads the resolved text (description OR entries) so a
+	 * reaction/bonus feature whose economy lives in `entries` is not silently
+	 * defaulted to Action.
+	 * @param {*} feature
+	 * @returns {("action"|"bonus"|"reaction"|"free")}
+	 */
+	_classifyFeatureActionType (feature) {
+		const nameLower = feature?.name?.toLowerCase() || "";
+		if (CharacterSheetState.FEATURE_CLASSIFICATION_OVERRIDES?.[nameLower] === "reaction") return "reaction";
+		const text = this._resolveFeatureText(feature);
+		if (/bonus action/.test(text)) return "bonus";
+		if (/reaction/.test(text)) return "reaction";
+		if (/no action required|\bfree action\b/.test(text)) return "free";
+		return "action";
+	}
+
+	/**
+	 * Aggregate every turn-usable option the character has into action-economy
+	 * buckets. Pure and read-only: no state is mutated and no shared classifier
+	 * is touched. Returns `{action, bonus, reaction}`, each an array of
+	 * normalized entries `{kind, id, name, source, subtitle, actionType}`.
+	 * `kind` ∈ "attack" | "spell" | "feature" | "custom".
+	 * @returns {{action: Array<object>, bonus: Array<object>, reaction: Array<object>}}
+	 */
+	getCombatActionEconomy () {
+		const buckets = {action: [], bonus: [], reaction: []};
+		const push = (type, entry) => { if (buckets[type]) buckets[type].push(entry); };
+
+		// (1) Attacks — configured + equipped weapons + temporary + active-state.
+		// Weapon attacks default to Action; honor any explicit `actionType`
+		// (active-state form attacks can be bonus actions).
+		const seenAttackNames = new Set();
+		const addAttack = (atk, fallbackType) => {
+			if (!atk) return;
+			const type = this._normalizeActionType(atk.actionType) || fallbackType;
+			if (type !== "action" && type !== "bonus" && type !== "reaction") return;
+			const damage = atk.damage ? `${atk.damage}${atk.damageType ? ` ${atk.damageType}` : ""}` : "";
+			push(type, {
+				kind: "attack",
+				id: atk.id || atk.name,
+				name: atk.name || "Attack",
+				source: atk.sourceState || "",
+				subtitle: damage || (atk.isSpell ? "Spell attack" : "Weapon attack"),
+				actionType: type,
+			});
+		};
+
+		const configured = this._state.getAttacks?.() || [];
+		for (const atk of configured) {
+			seenAttackNames.add((atk.name || "").toLowerCase());
+			addAttack(atk, "action");
+		}
+		// Equipped weapons not already configured — name-only (no damage-math
+		// duplication; the Attacks panel remains the authority on numbers).
+		const items = this._state.getItems?.() || [];
+		for (const weapon of items.filter(i => i.weapon && i.equipped)) {
+			const key = (weapon.name || "").toLowerCase();
+			if (seenAttackNames.has(key)) continue;
+			seenAttackNames.add(key);
+			addAttack({name: weapon.name, damage: weapon.dmg1 || weapon.damage, damageType: weapon.dmgType || weapon.damageType}, "action");
+		}
+		for (const ta of (this._state.getTemporaryAttacks?.() || [])) addAttack(ta, "action");
+		for (const asa of (this._state.getActiveStateAttacks?.() || [])) addAttack(asa, "action");
+
+		// (2) Spells — cantrips + prepared leveled, bucketed by casting time.
+		// A spell can appear more than once in the list (granted by several
+		// sources, or as both its 2014 and 2024 edition); collapse by name so the
+		// overview shows one row per affordance — a player casts "Guidance" once
+		// regardless of which edition entry backs it.
+		const spells = this._state.getSpells?.() || [];
+		const seenSpellKeys = new Set();
+		for (const spell of spells) {
+			if (spell.level !== 0 && !spell.prepared) continue;
+			const type = this._bucketSpellCastingTime(spell.castingTime);
+			if (!type) continue;
+			const spellKey = (spell.name || "").toLowerCase();
+			if (seenSpellKeys.has(spellKey)) continue;
+			seenSpellKeys.add(spellKey);
+			push(type, {
+				kind: "spell",
+				id: spell.id || `${spell.name}|${spell.source}`,
+				name: spell.name,
+				source: spell.source || "",
+				subtitle: spell.level === 0 ? "Cantrip" : `Level ${spell.level}`,
+				actionType: type,
+			});
+		}
+
+		// (3) Features — positive relevance test, then classify.
+		const features = this._state.getFeatures?.() || [];
+		for (const feature of features) {
+			if (!this._isActionEconomyFeature(feature)) continue;
+			const type = this._classifyFeatureActionType(feature);
+			if (type === "free") continue;
+			push(type, {
+				kind: "feature",
+				id: feature.id || feature.name,
+				name: feature.name,
+				source: feature.featureType || feature.source || "",
+				subtitle: this._featureEconomySubtitle(feature),
+				actionType: type,
+			});
+		}
+
+		// (4) Custom abilities — bucket by declared activation action.
+		const customAbilities = this._state.getCustomAbilities?.() || [];
+		for (const ability of customAbilities) {
+			const type = this._normalizeActionType(ability.activationAction);
+			if (type !== "action" && type !== "bonus" && type !== "reaction") continue;
+			push(type, {
+				kind: "custom",
+				id: ability.id || ability.name,
+				name: ability.name,
+				source: "",
+				subtitle: ability.mode === "limited" ? "Limited use" : "At will",
+				actionType: type,
+			});
+		}
+
+		return buckets;
+	}
+
+	/**
+	 * Short trailing descriptor for a feature economy entry — its remaining
+	 * uses when limited, else its feature category.
+	 * @param {*} feature
+	 * @returns {string}
+	 */
+	_featureEconomySubtitle (feature) {
+		if (feature?.uses && feature.uses.max > 0) {
+			const cur = feature.uses.current ?? feature.uses.max;
+			return `${cur}/${feature.uses.max} uses`;
+		}
+		return feature?.featureType || "";
+	}
+
+	/**
+	 * Metadata for the Action Economy overview kinds — one dot glyph + label per
+	 * source so a reader can tell an attack from a spell at a glance without the
+	 * cost chip carrying the whole load.
+	 */
+	static get ACTION_ECONOMY_KIND_META () {
+		return {
+			attack: {label: "Attack", glyph: "⚔"},
+			spell: {label: "Spell", glyph: "✦"},
+			feature: {label: "Feature", glyph: "★"},
+			custom: {label: "Custom", glyph: "✨"},
+		};
+	}
+
+	/**
+	 * Render the Action Economy overview (B9): the character's attacks, spells,
+	 * features and custom abilities grouped under Action / Bonus Action /
+	 * Reaction. Read-only; the existing Attacks / Combat Spells / Abilities
+	 * panels stay the interactive roll/cast surfaces.
+	 */
+	renderCombatActionEconomy () {
+		const section = document.getElementById("charsheet-combat-action-economy-section");
+		const container = document.getElementById("charsheet-combat-action-economy");
+		if (!container) return;
+
+		const buckets = this.getCombatActionEconomy();
+		const total = buckets.action.length + buckets.bonus.length + buckets.reaction.length;
+
+		// Hide the whole panel when the character has nothing to show (matches
+		// the sibling combat sections' empty behavior).
+		if (!total) {
+			if (section) section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		if (section) section.style.display = "";
+		container.innerHTML = "";
+
+		const kindMeta = CharacterSheetCombat.ACTION_ECONOMY_KIND_META;
+		const columns = [
+			{key: "action", chip: "action"},
+			{key: "bonus", chip: "bonus"},
+			{key: "reaction", chip: "reaction"},
+		];
+
+		for (const col of columns) {
+			const entries = buckets[col.key];
+			const group = e_({tag: "div", clazz: "cs-combat-action-economy__group"});
+
+			const header = e_({outer: `<div class="cs-combat-action-economy__head">${csCombatActionChip(col.chip)}<span class="cs-combat-action-economy__count">${entries.length}</span></div>`});
+			group.appendChild(header);
+
+			const list = e_({tag: "div", clazz: "cs-combat-action-economy__list"});
+			if (!entries.length) {
+				const empty = e_({tag: "div", clazz: "cs-combat-action-economy__empty"});
+				empty.textContent = "None";
+				list.appendChild(empty);
+			} else {
+				for (const entry of entries) {
+					const meta = kindMeta[entry.kind] || {label: "", glyph: "•"};
+					const row = e_({tag: "div", clazz: `cs-combat-action-economy__item cs-combat-action-economy__item--${entry.kind}`});
+
+					const badge = e_({tag: "span", clazz: "cs-combat-action-economy__kind"});
+					badge.setAttribute("title", meta.label);
+					badge.setAttribute("aria-label", meta.label);
+					badge.textContent = meta.glyph;
+					row.appendChild(badge);
+
+					// User-controlled strings are set as text (never interpolated
+					// into markup) to keep the overview injection-safe.
+					const name = e_({tag: "span", clazz: "cs-combat-action-economy__name"});
+					name.textContent = entry.name || "";
+					row.appendChild(name);
+
+					if (entry.subtitle) {
+						const sub = e_({tag: "span", clazz: "cs-combat-action-economy__sub"});
+						sub.textContent = entry.subtitle;
+						row.appendChild(sub);
+					}
+
+					list.appendChild(row);
+				}
+			}
+
+			group.appendChild(list);
+			container.appendChild(group);
 		}
 	}
 
@@ -8081,6 +8403,11 @@ class CharacterSheetCombat {
 		}
 
 		container.append(section);
+
+		// Keep the Action Economy overview (B9) in step with active-state
+		// toggles: activating a form can grant/remove a bonus-action attack, and
+		// state toggles refresh here rather than through a full combat render.
+		this.renderCombatActionEconomy?.();
 	}
 
 	/**
