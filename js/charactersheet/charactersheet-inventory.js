@@ -145,6 +145,11 @@ class CharacterSheetInventory {
 				if (itemId) this._restoreCharge(itemId);
 				return;
 			}
+			if (e.target.closest(".charsheet__item-recharge")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this._pRechargeItemCharges(itemId);
+				return;
+			}
 			if (e.target.closest(".charsheet__item-cast-healing")) {
 				const itemId = _getItemId(e.target);
 				if (itemId) this._pCastHealingStaff(itemId);
@@ -3745,6 +3750,67 @@ class CharacterSheetInventory {
 	}
 
 	/**
+	 * Recharge an item via its periodic-recharge formula. Routes through the canonical
+	 * `state.rechargeItemCharges()` so the parse/roll/clamp logic is shared with rests.
+	 * For dice recharges the roll is previewed (no mutation), confirmed, then committed
+	 * reusing the SAME rolled amount (rolled exactly once). Cancelling mutates nothing.
+	 * Fixed / to-full recharges apply directly. Committed recharges are logged to the
+	 * public roll history.
+	 * @param {string} itemId
+	 */
+	async _pRechargeItemCharges (itemId) {
+		const items = this._state.getItems();
+		const item = items.find(i => i.id === itemId);
+		if (!item || !item.charges || !item.recharge) return;
+
+		if ((item.chargesCurrent ?? item.charges) >= item.charges) {
+			JqueryUtil.doToast({type: "warning", content: `${item.name} is already at full charges!`});
+			return;
+		}
+
+		const formula = CharacterSheetState.getItemRechargeFormula(item);
+		// Preview without mutating — this performs the single dice roll (if any).
+		const preview = this._state.rechargeItemCharges(itemId, {commit: false});
+		if (!preview || !preview.didChange) {
+			JqueryUtil.doToast({type: "warning", content: `${item.name}: nothing to recharge.`});
+			return;
+		}
+
+		let result = preview;
+		if (preview.isDice) {
+			// Show the rolled value and let the user confirm before committing.
+			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+				title: `Recharge ${item.name}`,
+				htmlDescription: `
+					<p>Rolled <strong>${formula}</strong> → <strong>${preview.rolls.join(" + ")}</strong> = <strong>${preview.amount}</strong> charge${preview.amount === 1 ? "" : "s"}.</p>
+					<p>Charges: ${preview.previous} → <strong>${preview.newCharges}</strong> / ${item.charges}</p>
+					<p>Apply this recharge?</p>
+				`,
+				textYes: "Recharge",
+				textNo: "Cancel",
+			}));
+			if (!confirmed) return; // Cancel = no mutation, no log.
+			// Commit reusing the previewed roll — do NOT roll again.
+			result = this._state.rechargeItemCharges(itemId, {rolledAmount: preview.amount, commit: true});
+		} else {
+			// Fixed / to-full: apply directly.
+			result = this._state.rechargeItemCharges(itemId, {commit: true});
+		}
+
+		if (result?.committed) {
+			this._page._rollHistory?.addRoll({
+				title: `Recharge: ${item.name}`,
+				total: result.restored,
+				breakdown: result.breakdown,
+			});
+			JqueryUtil.doToast({type: "success", content: `${item.name} recharged: +${result.restored} (${result.newCharges}/${item.charges}).`});
+		}
+
+		this._renderItemList();
+		this._page.saveCharacter();
+	}
+
+	/**
 	 * Recognize a charged healing staff (Staff of Healing and look-alikes) — an item that
 	 * lets the wielder expend charges to cast healing spells. Data-driven where possible:
 	 *  - exact name match for the well-known Staff of Healing, OR
@@ -5681,6 +5747,8 @@ class CharacterSheetInventory {
 		const canEquip = CharacterSheetInventory.canEquipItem(item);
 		const canAttune = item.requiresAttunement;
 		const hasCharges = item.charges && item.charges > 0;
+		const canRecharge = hasCharges && !!item.recharge;
+		const rechargeFormula = canRecharge ? CharacterSheetState.getItemRechargeFormula(item) : "";
 		// Staff of Healing (and similar charged healing staves): a "Cast" affordance lets the
 		// wielder expend charges to cast its healing spells. Gated like attunement effects.
 		const isHealingStaff = this._isHealingStaff(item);
@@ -5799,6 +5867,11 @@ class CharacterSheetInventory {
 							</button>
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-restore-charge" title="Restore 1 charge" ${(item.chargesCurrent ?? item.charges) >= item.charges ? "disabled" : ""}>
 								<span class="glyphicon glyphicon-plus"></span>
+							</button>
+						` : ""}
+						${canRecharge ? `
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-recharge" title="Recharge (${rechargeFormula.replace(/"/g, "&quot;")})" ${(item.chargesCurrent ?? item.charges) >= item.charges ? "disabled" : ""}>
+								<span class="glyphicon glyphicon-refresh"></span> ${rechargeFormula}
 							</button>
 						` : ""}
 						${healingStaffActive ? `

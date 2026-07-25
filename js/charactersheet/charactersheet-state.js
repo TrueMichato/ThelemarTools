@@ -25946,6 +25946,160 @@ class CharacterSheetState {
 		}
 	}
 
+	// ==========================================
+	// Item Recharge (canonical operation)
+	// ==========================================
+	// A single source of truth for restoring charges on a charged item. Both the
+	// inventory-row "Recharge" button and every rest/time trigger route through
+	// `rechargeItemCharges()` so the parse/roll/clamp behavior can never diverge.
+
+	/**
+	 * Human-readable recharge formula for display (does NOT roll).
+	 * @param {object} item - Normalized inventory item (has `charges`, `rechargeAmount`).
+	 * @returns {string} e.g. "1d6 + 1", "3", or "to full".
+	 */
+	static getItemRechargeFormula (item) {
+		const amt = item?.rechargeAmount;
+		if (amt === undefined || amt === null || amt === "") return "to full";
+		if (typeof amt === "number") return String(amt);
+		const raw = String(amt).trim();
+		const lower = raw.toLowerCase();
+		if (lower === "all" || lower === "full") return "to full";
+		// Strip a {@dice ...} wrapper for a clean display string.
+		return raw.replace(/\{@dice\s*([^}]+)\}/i, "$1").trim();
+	}
+
+	/**
+	 * Whether an item's recharge period is satisfied by a given rest type.
+	 * Long rest also covers time-of-day periods that pass during 8 hours of rest.
+	 * @param {object} item - Normalized inventory item.
+	 * @param {"long"|"short"} restType
+	 * @returns {boolean}
+	 */
+	static itemRechargesOnRest (item, restType) {
+		if (!item?.charges || !item?.recharge) return false;
+		if (restType === "long") return ["restLong", "dawn", "dusk", "midnight"].includes(item.recharge);
+		if (restType === "short") return item.recharge === "restShort";
+		return false;
+	}
+
+	/**
+	 * Classify + roll a recharge amount for an item WITHOUT mutating it.
+	 * @param {object} itemData - Normalized item (has `charges`, `rechargeAmount`).
+	 * @param {number} previous - Current charges before recharge.
+	 * @returns {{amount:number, isDice:boolean, formula:string, rolls:number[], parsed:boolean}}
+	 */
+	static _computeItemRechargeAmount (itemData, previous) {
+		const maxCharges = itemData.charges;
+		const formula = CharacterSheetState.getItemRechargeFormula(itemData);
+		const raw = itemData.rechargeAmount;
+
+		// Absent / "all" / "full" → restore to full.
+		if (raw === undefined || raw === null || raw === "") {
+			return {amount: Math.max(0, maxCharges - previous), isDice: false, formula, rolls: [], parsed: true};
+		}
+		if (typeof raw === "number") {
+			return {amount: Math.max(0, raw), isDice: false, formula, rolls: [], parsed: true};
+		}
+		const trimmed = String(raw).trim();
+		const lower = trimmed.toLowerCase();
+		if (lower === "all" || lower === "full") {
+			return {amount: Math.max(0, maxCharges - previous), isDice: false, formula, rolls: [], parsed: true};
+		}
+		// Numeric string (no dice) → fixed amount.
+		if (!/d/i.test(trimmed)) {
+			const n = parseInt(trimmed, 10);
+			if (!Number.isNaN(n)) return {amount: Math.max(0, n), isDice: false, formula, rolls: [], parsed: true};
+			return {amount: 0, isDice: false, formula, rolls: [], parsed: false};
+		}
+		// Dice string → strip {@dice} wrapper, parse NdX(+/-M), roll ONCE.
+		const diceStr = trimmed.replace(/\{@dice\s*([^}]+)\}/i, "$1").trim();
+		const match = diceStr.match(/(\d*)d(\d+)\s*(?:([+-])\s*(\d+))?/i);
+		if (!match) return {amount: 0, isDice: false, formula, rolls: [], parsed: false};
+		const numDice = parseInt(match[1] || "1", 10);
+		const dieSize = parseInt(match[2], 10);
+		const sign = match[3] === "-" ? -1 : 1;
+		const modifier = (parseInt(match[4], 10) || 0) * sign;
+		const rolls = [];
+		let total = modifier;
+		for (let i = 0; i < numDice; i++) {
+			const r = (typeof RollerUtil !== "undefined" && RollerUtil.randomise)
+				? RollerUtil.randomise(dieSize)
+				: Math.floor(Math.random() * dieSize) + 1;
+			rolls.push(r);
+			total += r;
+		}
+		return {amount: Math.max(0, total), isDice: true, formula, rolls, parsed: true};
+	}
+
+	/**
+	 * Canonical recharge operation. Rolls the recharge dice EXACTLY ONCE (unless a
+	 * pre-rolled `rolledAmount` is supplied), clamps to [0, max], and only mutates
+	 * `chargesCurrent` when `commit` is true AND the amount actually changes charges.
+	 * Never touches roll history — the calling UI is responsible for logging.
+	 *
+	 * @param {string} itemId - Inventory entry id.
+	 * @param {object} [opts]
+	 * @param {number|null} [opts.rolledAmount] - Reuse a previously-rolled amount (no re-roll).
+	 * @param {boolean} [opts.commit=true] - When false, computes/rolls a preview without mutating.
+	 * @returns {object|null} Result descriptor, or null if the item has no charges.
+	 *   `{itemId, name, isDice, formula, rolls, amount, previous, newCharges, restored, didChange, breakdown, committed}`
+	 */
+	rechargeItemCharges (itemId, {rolledAmount = null, commit = true} = {}) {
+		const entry = this._data.inventory.find(i => i.id === itemId);
+		const itemData = entry?.item;
+		if (!itemData || !itemData.charges) return null;
+
+		const maxCharges = itemData.charges;
+		const previous = itemData.chargesCurrent ?? maxCharges;
+
+		// Already at (or above) max — no roll, no mutation, no log.
+		if (previous >= maxCharges) {
+			const formula = CharacterSheetState.getItemRechargeFormula(itemData);
+			return {itemId, name: itemData.name, isDice: false, formula, rolls: [], amount: 0, previous, newCharges: previous, restored: 0, didChange: false, breakdown: `+0 (${previous}/${maxCharges})`, committed: false};
+		}
+
+		let amount; let isDice; let formula; let rolls; let parsed = true;
+		if (rolledAmount != null) {
+			// Reuse a preview roll — do NOT roll again.
+			amount = Math.max(0, rolledAmount);
+			isDice = true;
+			formula = CharacterSheetState.getItemRechargeFormula(itemData);
+			rolls = [];
+		} else {
+			({amount, isDice, formula, rolls, parsed} = CharacterSheetState._computeItemRechargeAmount(itemData, previous));
+		}
+
+		const newCharges = Math.max(0, Math.min(previous + amount, maxCharges));
+		const restored = newCharges - previous;
+		const didChange = parsed && restored > 0;
+
+		const breakdown = isDice && rolls.length
+			? `${formula}: [${rolls.join(", ")}] → +${restored} (${newCharges}/${maxCharges})`
+			: `+${restored} (${newCharges}/${maxCharges})`;
+
+		let committed = false;
+		if (commit && didChange) {
+			itemData.chargesCurrent = newCharges;
+			committed = true;
+		}
+
+		return {
+			itemId,
+			name: itemData.name,
+			isDice: !!isDice,
+			formula,
+			rolls,
+			amount,
+			previous,
+			newCharges,
+			restored,
+			didChange,
+			breakdown,
+			committed,
+		};
+	}
+
 	/**
 	 * Use charges from an item
 	 * @param {string} itemId - The item ID
@@ -46889,42 +47043,15 @@ class CharacterSheetState {
 	 */
 	_rechargeItems (trigger) {
 		const items = this._data.inventory || [];
+		const results = [];
 		for (const entry of items) {
 			const itemData = entry.item || entry;
-			// Check if this item has this recharge trigger
-			// Items use `charges` (max) and `chargesCurrent` (current)
-			if (itemData.recharge === trigger && itemData.charges) {
-				const maxCharges = itemData.charges;
-				const currentCharges = itemData.chargesCurrent ?? maxCharges;
-				let rechargeAmount = itemData.rechargeAmount;
-
-				if (!rechargeAmount || rechargeAmount === "all") {
-					// Default: restore all charges
-					itemData.chargesCurrent = maxCharges;
-				} else if (typeof rechargeAmount === "string" && rechargeAmount.includes("d")) {
-					// Strip {@dice ...} wrapper if present
-					rechargeAmount = rechargeAmount.replace(/\{@dice\s*([^}]+)\}/i, "$1").trim();
-					// Parse dice expression like "1d6+4", "1d6 + 4", "2d8-2"
-					const match = rechargeAmount.match(/(\d*)d(\d+)\s*(?:([+-])\s*(\d+))?/i);
-					if (match) {
-						const numDice = parseInt(match[1] || "1", 10);
-						const dieSize = parseInt(match[2], 10);
-						const sign = match[3] === "-" ? -1 : 1;
-						const modifier = (parseInt(match[4], 10) || 0) * sign;
-						// Roll actual dice using RollerUtil.randomise
-						let rolled = modifier;
-						for (let i = 0; i < numDice; i++) {
-							rolled += (typeof RollerUtil !== "undefined" && RollerUtil.randomise)
-								? RollerUtil.randomise(dieSize)
-								: Math.floor(Math.random() * dieSize) + 1;
-						}
-						itemData.chargesCurrent = Math.min(maxCharges, Math.max(0, currentCharges + rolled));
-					}
-				} else if (typeof rechargeAmount === "number") {
-					itemData.chargesCurrent = Math.min(maxCharges, currentCharges + rechargeAmount);
-				}
+			if (itemData.recharge === trigger && itemData.charges && entry.id) {
+				const result = this.rechargeItemCharges(entry.id);
+				if (result?.committed) results.push(result);
 			}
 		}
+		return results;
 	}
 
 	/**
