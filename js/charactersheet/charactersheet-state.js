@@ -31214,9 +31214,15 @@ class CharacterSheetState {
 		// cast the player already used stays spent across re-apply/reload. Keyed by spell
 		// uid, matching the innate-spell preserve above so the two trackers agree.
 		const priorResourceCurrent = {};
+		// (R42/B4) Activatable narrative boons carry a 1/day use pool on a tagged resource
+		// (`_dfNarrativeBoon`, keyed by featureId). Capture its spent `current` so a use the
+		// player already consumed today stays spent across the strip+re-add of every reconcile
+		// and across a reload — mirrors the `_spellUid` preservation for limited casts above.
+		const priorBoonResourceCurrent = {};
 		if (Array.isArray(this._data.resources)) {
 			this._data.resources.forEach(r => {
 				if (r._divineFavor && r._spellUid) priorResourceCurrent[r._spellUid] = r.current;
+				if (r._dfNarrativeBoon && r.featureId) priorBoonResourceCurrent[r.featureId] = r.current;
 			});
 			this._data.resources = this._data.resources.filter(r => !r._divineFavor);
 		}
@@ -31405,10 +31411,41 @@ class CharacterSheetState {
 					duration,
 				},
 			});
-			// At-will boons have NO daily use cap (design). addFeature auto-extracts `uses`
-			// from the description; strip any it minted so the boon never shows a use pool.
+			// The feature itself never carries a use pool — the 1/day cap lives on a separate
+			// tagged resource (below). Strip any `uses` addFeature auto-extracted from the desc,
+			// AND drop any untagged resource it may have auto-minted for this featureId, so we
+			// end with EXACTLY one canonical pool.
 			const added = (this._data.features || []).find(f => f.id === featureId);
 			if (added && added.uses) delete added.uses;
+			if (Array.isArray(this._data.resources)) {
+				this._data.resources = this._data.resources.filter(
+					r => !(r.featureId === featureId && !r._dfNarrativeBoon),
+				);
+			}
+			// (R42/B4) Activatable narrative boons are usable ONCE PER DAY: mint a real
+			// `recharge:"long"` resource so the boon appears in the Resources tracker AND gates
+			// both activate surfaces. Activation consumes the use + starts the 1-hour toggle;
+			// ending/expiry stops the toggle but the use stays spent until a long rest restores
+			// it (recoverResources("long")). Only boons that declare `uses` become 1/day; a boon
+			// without `uses` stays at-will (no resource minted). Spent `current` is preserved
+			// across reconcile/reload via the priorBoonResourceCurrent map captured in 1d.
+			const dailyUses = Number(boon.uses) > 0 ? Math.floor(Number(boon.uses)) : 0;
+			if (dailyUses > 0) {
+				const priorCurrent = priorBoonResourceCurrent[featureId];
+				const current = Number.isFinite(priorCurrent)
+					? Math.max(0, Math.min(priorCurrent, dailyUses))
+					: dailyUses;
+				(this._data.resources || (this._data.resources = [])).push({
+					id: `res_dfboon_${featureId}`,
+					name: boon.name,
+					current,
+					max: dailyUses,
+					recharge: boon.recharge || "long",
+					featureId,
+					_divineFavor: true,
+					_dfNarrativeBoon: true,
+				});
+			}
 		});
 	}
 
@@ -31473,8 +31510,21 @@ class CharacterSheetState {
 			s => s._dfNarrativeBoon && s.sourceFeatureId === featureId && s.active,
 		);
 		if (existing) {
+			// OFF: stop the toggle. The daily use stays spent — no refund (a long rest
+			// restores it via recoverResources("long")).
 			this.removeActiveState(existing.id);
 			return false;
+		}
+
+		// ON: consume one daily use before starting the toggle. If a 1/day pool exists and is
+		// exhausted, refuse activation (the boon is spent until a long rest). Boons with no
+		// pool (at-will) activate freely.
+		const boonResource = (this._data.resources || []).find(
+			r => r._dfNarrativeBoon && r.featureId === featureId,
+		);
+		if (boonResource) {
+			if ((boonResource.current || 0) <= 0) return false;
+			this.setResourceCurrent(boonResource.id, (boonResource.current || 0) - 1);
 		}
 
 		const duration = feature._dfBoonDuration || feature.activatable?.duration || "Until ended";
@@ -43656,6 +43706,13 @@ class CharacterSheetState {
 			// Also check if feature has its own resource (uses)
 			if (!resource && feature.uses) {
 				resource = resources.find(r => r.featureId === feature.id || r.name === feature.name);
+			}
+			// (R42/B4) DF narrative boons carry no `feature.uses` (their 1/day pool lives on a
+			// tagged resource); link that resource so BOTH activate surfaces show "n/max" and
+			// disable the button when the daily use is exhausted.
+			if (!resource && feature._dfNarrativeBoon) {
+				const boonResource = resources.find(r => r._dfNarrativeBoon && r.featureId === feature.id);
+				if (boonResource) resource = {...boonResource, cost: 1};
 			}
 
 			// Determine if this feature is currently active

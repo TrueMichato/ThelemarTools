@@ -37240,6 +37240,8 @@
 						{
 							"type": "narrative",
 							"name": "Attunement to Nature",
+							"uses": 1,
+							"recharge": "long",
 							"desc": "As an action, you attune to the natural world around you and become aware of every beast and plant within 30 feet of you, learning their distance, direction, and whether they are hostile toward you. On each subsequent round you may spend another action to widen this awareness by an additional 30 feet, up to a total duration of 1 hour."
 						}
 					]

@@ -6057,13 +6057,29 @@ class CharacterSheetPage {
 		const resources = this._state.getGenericPoolResources();
 		const usesCombatSystem = this._state.usesCombatSystem?.() || false;
 
-		// Bug 3: Custom limited-use abilities are NOT rendered here anymore —
-		// they live exclusively in the Abilities section below. Resources are
-		// system/class-granted pools only (Channel Divinity, Rage, Ki, spell
-		// slots, racial 1/day, Stamina for the combat-traditions system, etc.).
+		// (R42/B3) Custom limited-use abilities belong in the Resources tracker too — the
+		// Features tab already renders them (features.js _renderResources), but this Overview
+		// panel previously dropped them, so a custom-only or mixed character couldn't see or
+		// spend those uses here. They are consumed/restored via useCustomAbility /
+		// restoreCustomAbilityUse (NOT setResourceCurrent), so they get their own rows with the
+		// ability-specific handlers below. Compute the renderable list up front so it feeds the
+		// count badge and the empty-state check.
+		const customLimited = (this._state.getCustomAbilities?.() || [])
+			.filter(a => a.mode === "limited")
+			.map(ability => {
+				const uses = this._state.getCustomAbilityUsesDisplay?.(ability.id);
+				if (!uses) return null;
+				// Skip abilities linked to an already-shown (non-stamina) pool to avoid double-listing.
+				if (ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId !== "stamina") {
+					const linked = resources.find(r => r.id === ability.resourceSource.resourceId);
+					if (linked) return null;
+				}
+				return {ability, uses};
+			})
+			.filter(Boolean);
 
-		// Update resources count badge — count system resources + (optional) stamina.
-		let totalResourceCount = resources.length;
+		// Update resources count badge — count system resources + (optional) stamina + custom limited.
+		let totalResourceCount = resources.length + customLimited.length;
 		if (usesCombatSystem) {
 			const staminaMax = this._state.getStaminaMax() || 0;
 			if (staminaMax > 0) totalResourceCount++;
@@ -6122,7 +6138,7 @@ class CharacterSheetPage {
 			}
 		}
 
-		if (!resources.length && !usesCombatSystem) {
+		if (!resources.length && !usesCombatSystem && !customLimited.length) {
 			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No class-granted resources yet</div>`;
 			return;
 		}
@@ -6158,6 +6174,53 @@ class CharacterSheetPage {
 					this._renderResources();
 					this._renderActiveStates(); // Refresh active states to update Activate button states
 					if (this._features) this._features._renderResources();
+				}
+			});
+
+			container.append(row);
+		});
+
+		// (R42/B3) Append custom limited-use ability rows. These mutate through
+		// useCustomAbility / restoreCustomAbilityUse (the generic +/- setResourceCurrent path
+		// would silently no-op on them), and refresh every panel that shows the same use pool.
+		customLimited.forEach(({ability, uses}) => {
+			const canUse = this._state.canUseCustomAbility?.(ability.id) ?? uses.current > 0;
+			const canRestore = uses.current < uses.max;
+			const isStaminaLinked = ability.resourceSource?.type === "linked" && ability.resourceSource?.resourceId === "stamina";
+
+			const row = e_({outer: `
+				<div class="charsheet__resource-row charsheet__resource-row--custom" data-ability-id="${ability.id}">
+					<span class="charsheet__resource-icon mr-1">${ability.icon || "⚡"}</span>
+					<span class="charsheet__resource-name">${ability.name}</span>
+					<span class="charsheet__resource-recharge ve-muted ve-small ml-2">(${uses.recharge === "short" ? "Short" : "Long"})</span>
+					<div class="charsheet__resource-uses ml-auto">
+						<button class="ve-btn ve-btn-xs ve-btn-danger mr-2 charsheet__ability-use-btn" ${!canUse ? "disabled" : ""}>Use</button>
+						<span class="charsheet__resource-current">${uses.current}</span>
+						<span class="charsheet__resource-max">/ ${uses.max}</span>
+						<button class="ve-btn ve-btn-xs ve-btn-success ml-2 charsheet__ability-restore-btn" ${!canRestore ? "disabled" : ""}>+</button>
+					</div>
+				</div>
+			`});
+
+			row.querySelector(".charsheet__ability-use-btn").addEventListener("click", () => {
+				if (this._state.useCustomAbility(ability.id)) {
+					this._saveCurrentCharacter();
+					this._renderResources();
+					this._renderActiveStates();
+					if (this._features) this._features._renderResources();
+					if (this._customAbilities) this._customAbilities.render?.();
+					if (isStaminaLinked && this._combat) this._combat._updateStaminaDisplay();
+				}
+			});
+
+			row.querySelector(".charsheet__ability-restore-btn").addEventListener("click", () => {
+				if (this._state.restoreCustomAbilityUse(ability.id)) {
+					this._saveCurrentCharacter();
+					this._renderResources();
+					this._renderActiveStates();
+					if (this._features) this._features._renderResources();
+					if (this._customAbilities) this._customAbilities.render?.();
+					if (isStaminaLinked && this._combat) this._combat._updateStaminaDisplay();
 				}
 			});
 
@@ -7370,6 +7433,19 @@ class CharacterSheetPage {
 				`});
 
 				row.querySelector(".charsheet__reactivate-btn").addEventListener("click", () => {
+					// (R42/B4) An expired DF narrative boon must NOT be reactivated for free —
+					// route through the 1/day choke point so it's refused when the daily use is
+					// spent (and consumes it + restarts the toggle when a use is available).
+					if (state._dfNarrativeBoon && state.sourceFeatureId) {
+						this._state.toggleDivineFavorBoonState(state.sourceFeatureId);
+						this._saveCurrentCharacter();
+						this._renderResources();
+						this._renderActiveStates();
+						if (this._features) this._features._renderResources();
+						this._combat?.renderCombatStates?.();
+						this._renderCharacter();
+						return;
+					}
 					this._state.activateState(state.stateTypeId);
 					this._saveCurrentCharacter();
 					this._renderActiveStates();
@@ -8814,6 +8890,23 @@ class CharacterSheetPage {
 		// generic resource/toggle pipeline. Each handler owns its own resource consumption
 		// and UI, then returns true to short-circuit. Generic features fall through unchanged.
 		if (await this._pHandleR20FeatureActivation(feature, resource, resourceCost)) return;
+
+		// (R42/B4) DF narrative boons are 1/day toggles: route through the OWNED
+		// toggleDivineFavorBoonState() choke point (which consumes the daily use, refuses when
+		// exhausted, and starts the duration-tracked toggle) BEFORE the generic resource
+		// deduction below — otherwise the linked pool would be double-spent.
+		if (feature._dfNarrativeBoon && feature.id) {
+			const result = this._state.toggleDivineFavorBoonState(feature.id);
+			if (result !== null) {
+				this._saveCurrentCharacter();
+				this._renderResources();
+				this._renderActiveStates();
+				if (this._features) this._features._renderResources();
+				this._combat?.renderCombatStates?.();
+				this._renderCharacter();
+			}
+			return;
+		}
 
 		// Use passed cost, or fall back to state type default
 		const cost = resourceCost || stateType?.resourceCost || 1;

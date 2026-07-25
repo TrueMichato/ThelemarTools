@@ -8618,6 +8618,10 @@ class CharacterSheetCombat {
 			this._page._saveCurrentCharacter?.();
 			this.renderCombatStates();
 			this._page._renderActiveStates?.();
+			// (R42/B4) Activation consumes the boon's 1/day use — refresh the Resources tracker
+			// (Overview + Features tab) so the spent use is reflected everywhere immediately.
+			this._page._renderResources?.();
+			this._page._features?._renderResources?.();
 			this._page._renderCharacter?.();
 			return;
 		}
