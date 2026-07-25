@@ -11703,8 +11703,12 @@ class CharacterSheetCombat {
 	}
 
 	static _getMetamagicDashboardTargets () {
+		// All three hosts are editable: the dashboard's Tune/Detune actions spend
+		// sorcery points wherever they render, so the SP badge must be editable
+		// everywhere too. (Overview previously omitted this on the refresh path,
+		// so the badge silently changed behaviour after any re-render.)
 		return [
-			{containerSel: "#charsheet-overview-metamagic", sectionSel: "#charsheet-overview-metamagic-section", spBadgeSel: "#charsheet-overview-metamagic-sp"},
+			{containerSel: "#charsheet-overview-metamagic", sectionSel: "#charsheet-overview-metamagic-section", spBadgeSel: "#charsheet-overview-metamagic-sp", opts: {isSorceryPointEditable: true}},
 			{containerSel: "#charsheet-combat-metamagic", sectionSel: "#charsheet-combat-metamagic-section", spBadgeSel: "#charsheet-combat-metamagic-sp", opts: {isSorceryPointEditable: true}},
 			{containerSel: "#charsheet-spells-metamagic", sectionSel: "#charsheet-spells-metamagic-section", spBadgeSel: "#charsheet-spells-metamagic-sp", opts: {isSorceryPointEditable: true}},
 		];
@@ -11774,6 +11778,10 @@ class CharacterSheetCombat {
 
 		section.style.display = "";
 		container.innerHTML = "";
+		// The Container-Adaptive Rule: this one code path renders on Overview
+		// (~265px), Combat (~510px) and Spells, so the row layout must key off the
+		// container's width rather than the host tab. See css `@container cs-panel`.
+		container.classList?.add("cs-adaptive-panel");
 
 		const sp = state.getSorceryPoints();
 
@@ -11872,7 +11880,7 @@ class CharacterSheetCombat {
 							<span class="charsheet__mm-cost" title="${cost.title}">${cost.text}</span>
 						</div>
 						<span class="charsheet__mm-desc">${meta.description}</span>
-						<button class="cs-combat-btn cs-combat-btn--heal charsheet__mm-tune-btn" data-metamagic-key="${meta.key}" aria-label="Tune ${meta.name}" ${!canAfford ? `disabled title="Not enough Sorcery Points to tune this metamagic"` : `title="Spend Sorcery Points to keep this passive metamagic active"`}>${csCombatIcon("check")}<span>Tune</span></button>
+						<button class="cs-combat-btn cs-combat-btn--spend charsheet__mm-tune-btn" data-metamagic-key="${meta.key}" aria-label="Tune ${meta.name}" ${!canAfford ? `disabled title="Not enough Sorcery Points to tune this metamagic"` : `title="Spend Sorcery Points to keep this passive metamagic active"`}>${csCombatIcon("check")}<span>Tune</span></button>
 					</div>
 				`});
 				container.append(row);
@@ -11881,7 +11889,7 @@ class CharacterSheetCombat {
 
 		// Active metamagics section (info-only)
 		if (activeMetamagics.length) {
-			const activeHeader = e_({outer: `<div class="charsheet__mm-group-label">Active <span class="ve-muted ve-small">(at cast time)</span></div>`});
+			const activeHeader = e_({outer: `<div class="charsheet__mm-group-label">Active <span class="charsheet__mm-group-note">(at cast time)</span></div>`});
 			container.append(activeHeader);
 
 			for (const meta of activeMetamagics) {

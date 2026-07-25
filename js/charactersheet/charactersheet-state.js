@@ -41004,7 +41004,7 @@ class CharacterSheetState {
 			name: "Aurochs",
 			icon: "🐂",
 			tier: "month",
-			summary: "Advantage + proficiency on Strength checks/saves; carry as one size larger.",
+			summary: "Advantage and proficiency on Strength checks and saves; carry as one size larger.",
 			entries: [
 				"You have {@variantrule Advantage|XPHB} on Strength checks and Strength saving throws, and you add your proficiency bonus to those rolls.",
 				"You also count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift.",
@@ -41029,7 +41029,7 @@ class CharacterSheetState {
 			name: "Horse",
 			icon: "🐎",
 			tier: "month",
-			summary: "Walking speed doubled; Dash as a bonus action.",
+			summary: "Double walking speed; bonus action: Dash.",
 			entries: [
 				"Your walking speed is doubled, and you can take the {@action Dash} action as a {@variantrule Bonus Action|XPHB}.",
 			],
@@ -41046,7 +41046,7 @@ class CharacterSheetState {
 			name: "Octopus",
 			icon: "🐙",
 			tier: "month",
-			summary: "Swim speed = walk; underwater breathing and +5 ft reach.",
+			summary: "Swim at your walking speed, breathe underwater, +5 ft reach.",
 			entries: [
 				"While submerged in water, you can breathe normally, gain a swimming speed equal to your walking speed, and suffer no penalties to attack rolls or vision.",
 				"Additionally, your melee reach increases by 5 feet while submerged.",
@@ -41077,7 +41077,7 @@ class CharacterSheetState {
 			name: "Peacock",
 			icon: "🦚",
 			tier: "month",
-			summary: "Attackers must save or choose a new target.",
+			summary: "Attackers must make a Wisdom save or pick a new target.",
 			entries: [
 				"When a creature targets you directly with an attack or a harmful spell, it must succeed on a Wisdom saving throw against your spell save DC.",
 				"On a failed save, the creature must choose a new target or forfeit the attack or spell.",
@@ -41104,7 +41104,7 @@ class CharacterSheetState {
 			name: "Bee",
 			icon: "🐝",
 			tier: "month",
-			summary: "Bonus-action ranged radiant spell attack.",
+			summary: "Bonus action: ranged radiant spell attack, 60 ft.",
 			entries: [
 				"When you activate this form, and as a {@variantrule Bonus Action|XPHB} on subsequent turns while it lasts, you can make a ranged spell attack against one creature within 60 feet. On a hit, the attack deals radiant damage equal to {@damage 1d8} + your Wisdom modifier.",
 				"The damage increases to {@damage 2d8} at 10th level and {@damage 3d8} at 14th level.",
@@ -41140,7 +41140,7 @@ class CharacterSheetState {
 			name: "Hound",
 			icon: "🐕",
 			tier: "month",
-			summary: "Bonus-action mark a creature within 60 ft.",
+			summary: "Bonus action: mark a creature within 60 ft.",
 			entries: [
 				"As a {@variantrule Bonus Action|XPHB}, you can mark one creature you can see within 60 feet. The marked creature has {@variantrule Disadvantage|XPHB} on attack rolls against you, and you always know its location while the form lasts.",
 				"You can have only one creature marked at a time.",
@@ -41155,7 +41155,7 @@ class CharacterSheetState {
 			name: "Cat",
 			icon: "🐈",
 			tier: "month",
-			summary: "Roll floor 8 on Perception/Stealth/Acrobatics; +1d4 passive Perception.",
+			summary: "Perception, Stealth and Acrobatics rolls count as at least 8; +1d4 passive Perception.",
 			entries: [
 				"You gain a +{@dice 1d4} bonus to your passive Perception.",
 				"Additionally, when you make a Wisdom ({@skill Perception}) check or a Dexterity ({@skill Stealth} or {@skill Acrobatics}) check, you can treat a roll of 7 or lower on the {@dice d20} as an 8.",
@@ -41176,7 +41176,7 @@ class CharacterSheetState {
 			name: "Griffon",
 			icon: "🦅",
 			tier: "month",
-			summary: "Advantage vs frightened; bonus-action extra melee attack.",
+			summary: "Advantage on saves vs frightened; bonus action: extra melee attack after you hit.",
 			entries: [
 				"You have {@variantrule Advantage|XPHB} on saving throws against being frightened.",
 				"Additionally, when you hit a creature with a melee attack using your action, you can make one additional melee attack as a {@variantrule Bonus Action|XPHB}.",
@@ -41188,7 +41188,7 @@ class CharacterSheetState {
 			name: "Bulette",
 			icon: "🦏",
 			tier: "month",
-			summary: "AC bonus and a burrow speed.",
+			summary: "+½ proficiency bonus to AC; burrow at half your walking speed.",
 			entries: [
 				"Your Armor Class increases by half your proficiency bonus (rounded up).",
 				"You also gain a burrowing speed equal to half your walking speed.",
@@ -41207,7 +41207,7 @@ class CharacterSheetState {
 			name: "Phoenix",
 			icon: "🔥",
 			tier: "month",
-			summary: "Revive when stabilized while in form.",
+			summary: "Regain 2d8 + Wis hit points if you are stabilized while unconscious.",
 			entries: [
 				"If you are knocked unconscious while in this form and become stable through a successful {@skill Medicine} check or by succeeding on death saving throws, you regain hit points equal to {@dice 2d8} + your Wisdom modifier.",
 			],

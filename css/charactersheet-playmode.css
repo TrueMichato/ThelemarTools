@@ -84,7 +84,7 @@
 	display: inline-block;
 	width: 0.72em;
 	height: 0.72em;
-	border-radius: var(--cs-radius-full, 999px);
+	border-radius: var(--cs-radius-full, 9999px);
 	border: 1.5px solid var(--cs-border-hover, #4a4a68);
 	background: transparent;
 	transition: background-color var(--cs-transition-fast, 0.15s ease-out),
@@ -2023,7 +2023,7 @@
 	padding: 8px 12px;
 	background: var(--cs-danger-light, rgba(239, 68, 68, 0.12));
 	border: 1px solid rgba(239, 68, 68, 0.3);
-	border-radius: var(--cs-radius-md, 8px);
+	border-radius: var(--cs-radius-md, 10px);
 	width: 100%;
 }
 

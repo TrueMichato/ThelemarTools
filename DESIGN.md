@@ -261,6 +261,24 @@ at rest.
 
 **The Flat-At-Rest Rule.** Surfaces are flat at rest. Shadow appears as a response to state (hover) — never as a permanent decoration to make a card "pop."
 
+**The Layer-Scale Rule.** Stacking is a *named scale*, not a number the author invents at the call site. Eleven semantic steps live on `:root` in `css/charactersheet-modern.css` and every character-sheet `z-index` reads one of them:
+
+| Token | Value | Owns |
+|---|---|---|
+| `--cs-z-base` | 0 | In-flow content |
+| `--cs-z-raised` | 10 | Cards/rows lifted within their own section |
+| `--cs-z-sticky` | 100 | Sticky headers + column pins inside a scroller |
+| `--cs-z-overlay` | 1000 | Full-screen scrims |
+| `--cs-z-modal` | 1001 | Modal surface, above its own scrim |
+| `--cs-z-scrim` | 1039 | Local backdrop, below the panel it dims |
+| `--cs-z-panel` | 1040 | Roll history, FAB stack, floating panels |
+| `--cs-z-banner` | 1045 | Level-up / status banners |
+| `--cs-z-tabbar` | 1050 | Mobile bottom tab bar |
+| `--cs-z-toast` | 1060 | Toasts + the roll-modifier toolbar |
+| `--cs-z-tooltip` | 1070 | Context menus, hover cards — always on top |
+
+Values were chosen to preserve the stacking order already shipping, so migration is mechanical. Two corollaries: (1) **a fixed layer owes the layers beneath it clearance, not just a higher number** — the mobile tab bar publishes its own height as `--cs-tabbar-height` (including `env(safe-area-inset-bottom)`), and anything it can cover pads by that amount rather than re-stacking shared chrome; (2) when a shared, site-wide element is in the stack, scope the fix to `body.is-charsheet-page` so non-sheet surfaces are untouched. *Known outliers:* two `10000`/`10001` declarations remain in `css/charactersheet.css`; they are a logged follow-up, not a licence for new ones.
+
 ## 5. Components
 
 ### Buttons
@@ -314,6 +332,16 @@ dense class content rebalances into reclaimed space instead of leaving a dead
 right-column void. Often-empty cards (Defenses / Conditions / Active Effects)
 collapse to a thin ~48px "add" affordance with a right-aligned "None" hint.
 
+### Named Rules
+
+**The Container-Adaptive Rule.** A panel that can be hosted in more than one column responds to **its container's width, never to which tab rendered it.** The sheet renders the same panel code into a ~510px Combat column and a ~265px Overview column; a host-aware branch (`if (tab === "overview")`) forks the component and rots the moment a third host appears. Instead:
+
+- The panel root carries `.cs-adaptive-panel` (`container-type: inline-size; container-name: cs-panel`), and its narrow layout lives in `@container cs-panel (max-width: 380px)`. Any future panel dropped into any future column inherits the behaviour for free.
+- **`text-overflow: ellipsis` is banned on an element that is allowed to wrap.** It cannot fire on a multi-line box; all it does is pair with the `overflow: hidden` it needs and silently clip content. If the text is the payload, give it a row of its own in compact mode rather than a truncation.
+- **The payload never yields space to chrome.** In compact mode, put identity and the action button on one row and let the description span the full panel width beneath them; never let a `nowrap` badge column in a `minmax(0, 1fr) auto` grid squeeze the readable column to nothing.
+- **Density is bought by disclosure, not by shrinking type.** Reference prose that hover already carries (rules reminders, long feature text) collapses behind a `<details>` showing names only; the type scale is not the lever.
+- **Verify containment before shipping.** `container-type: inline-size` establishes size containment. Absolutely-positioned children *inside* the panel will be clipped by it; children portalled to `document.body` (as 5etools hover windows are — `js/utils-ui.js`) escape safely. Check which kind you have.
+
 ## 6. Do's and Don'ts
 
 ### Do:
@@ -325,6 +353,7 @@ collapse to a thin ~48px "add" affordance with a right-aligned "None" hint.
 - **Do** tune every text token to clear WCAG AA in *both* themes; verify with an alpha-composited contrast probe, not by eye.
 - **Do** keep numbers loud (tabular numerals, weight, space) and chrome quiet.
 - **Do** reserve Cinzel for the name, title, and big numerals; use Inter for all UI.
+- **Do** make multi-host panels respond to their container (`@container cs-panel`), and read `z-index` off the `--cs-z-*` scale.
 
 ### Don't:
 - **Don't** use a colored `border-left`/`border-right` stripe as an accent — not even in a JS style string. Full border + tint only. (Sole exception: the eleven content-section identity stripes — see the No-Stripe Rule's owner exception. Don't add any *other* stripe.)
@@ -336,3 +365,5 @@ collapse to a thin ~48px "add" affordance with a right-aligned "None" hint.
 - **Don't** treat day mode as an afterthought — it is parity, following the site Day/Night selector with a full token override.
 - **Don't** reach for a modal first. Exhaust inline / progressive disclosure before a dialog; when a dialog is unavoidable, move focus into it and restore it on close.
 - **Don't** ship muted gray body text on a tinted near-white "for elegance" — the single biggest legibility failure. Bump toward ink until it clears 4.5:1.
+- **Don't** invent a raw `z-index` number, branch a panel's layout on its host tab, or put `text-overflow: ellipsis` on an element that wraps.
+- **Don't** write `var(--rgb-…)` in character-sheet CSS. The site defines only six `--rgb-*` tokens and they use *double-hyphen* modifiers (`--rgb-bg--alt`, `--rgb-font--muted`, `--rgb-name`, `--rgb-border--statblock`, `--rgb-font`, `--rgb-bg`). Every single-hyphen spelling (`--rgb-bg-alt`, `--rgb-text-dim`, `--rgb-border`, …) is undefined, and `var()` on an undefined custom property **fails silently** — the whole declaration is dropped with no console warning. Use `--cs-*`. A scoped compatibility alias block on `body.is-charsheet-page` in `charactersheet-modern.css` keeps the ~540 legacy references alive; don't add to it.

@@ -184,6 +184,56 @@ BEM-like naming: `.charsheet__element--modifier`
   (`styleSwitcher._setActiveStyleTheme('day'|'night')`) and confirm night mode is visually
   identical to before.
 
+#### CSS traps that fail silently
+
+Three failure modes in this codebase produce **no console warning and no visual error** —
+the rule simply does nothing. Check for them before debugging further:
+
+1. **`var(--rgb-…)` is almost always dead.** The site defines exactly six `--rgb-*`
+   custom properties, all with *double-hyphen* modifiers: `--rgb-bg`, `--rgb-bg--alt`,
+   `--rgb-font`, `--rgb-font--muted`, `--rgb-name`, `--rgb-border--statblock`. Every
+   single-hyphen spelling used across the character sheet (`--rgb-bg-alt`,
+   `--rgb-text-dim`, `--rgb-text-muted`, `--rgb-border`, `--rgb-border-grey`,
+   `--rgb-link`, …) is **undefined**, and per spec a `var()` on an undefined property
+   with no fallback makes the whole declaration invalid at computed-value time — it is
+   silently dropped. ~540 such references exist; ~100 were the *only* source for their
+   declaration, i.e. those rules never did anything. A scoped compatibility alias block
+   on `body.is-charsheet-page` in `charactersheet-modern.css` now maps every dead name
+   onto its `--cs-*` equivalent. **Write `--cs-*` in new code; do not extend the alias
+   block.** To check a token is live: `getComputedStyle(document.documentElement)
+   .getPropertyValue('--token')` — an empty string means undefined.
+
+2. **`.ve-flex-h-between` does not exist.** Only `.ve-flex-h-center` and
+   `.ve-flex-h-right` are defined (`scss/includes/util.scss`). The `-between` variant is
+   a plausible-looking invention that appears in JS-authored markup and is a pure no-op,
+   collapsing "Wild Shape · 2 / 2" into "Wild Shape2 / 2". **Use `ve-split-v-center`**
+   for a space-between row (it is what the modal header uses).
+
+3. **Layered `!important` beats unlayered `!important`.** The compiled site CSS wraps
+   everything in `@layer vetools`, and utilities like `.ve-muted` / `.ve-flex-col` are
+   `!important` inside it. An unlayered override — even with higher specificity and its
+   own `!important` — **loses**. Either wrap the override in `@layer vetools { … }` or,
+   usually cleaner, stop applying the utility class in the JS that builds the markup.
+
+#### Multi-host panels
+
+A panel rendered into more than one column (e.g. the Metamagic dashboard, which the
+Combat, Spells *and* Overview tabs all render from one code path) must adapt to its
+**container**, not to its host tab. Add `.cs-adaptive-panel` to the panel root
+(`container-type: inline-size; container-name: cs-panel`, defined near the top of
+`charactersheet.css`) and put the narrow layout in
+`@container cs-panel (max-width: 380px)`. Never branch on the tab name, and never put
+`text-overflow: ellipsis` on an element that is allowed to wrap — it can't fire, and the
+`overflow: hidden` it drags along will clip the content instead. See
+[DESIGN.md](../../../../DESIGN.md) §5 "The Container-Adaptive Rule".
+
+`z-index` reads from the semantic `--cs-z-*` scale in `charactersheet-modern.css`
+(`base` 0 → `raised` 10 → `sticky` 100 → `overlay`/`modal` 1000/1001 → `scrim` 1039 →
+`panel` 1040 → `banner` 1045 → `tabbar` 1050 → `toast` 1060 → `tooltip` 1070). A fixed
+layer also owes clearance to what it covers: the mobile tab bar publishes
+`--cs-tabbar-height` (with `env(safe-area-inset-bottom)`), and scrollers it can occlude
+pad by that value rather than re-stacking shared site chrome.
+
 ### Data Validation Patterns
 
 - **Defensive nullish coalescing everywhere**: `spell?.name?.toLowerCase()`, `Math.max(0, Math.floor(Number(x) || 0))`

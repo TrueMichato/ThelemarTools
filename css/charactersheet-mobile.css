@@ -18,7 +18,7 @@
 		bottom: 0;
 		left: 0;
 		right: 0;
-		z-index: 1050;
+		z-index: var(--cs-z-tabbar, 1050);
 		display: flex !important;
 		flex-wrap: nowrap !important;
 		overflow-x: auto;
@@ -91,7 +91,7 @@
 	   Header — Compact Single Row + Expandable Secondary
 	   ==================================================================== */
 	.charsheet__main-header {
-		border-radius: var(--cs-radius-md, 8px);
+		border-radius: var(--cs-radius-md, 10px);
 		margin-bottom: 0.75rem !important;
 	}
 
@@ -217,7 +217,7 @@
 
 	.charsheet__section--header {
 		padding: 0.75rem;
-		border-radius: var(--cs-radius-lg, 12px);
+		border-radius: var(--cs-radius-lg, 16px);
 	}
 
 	/* Animated collapse wrapper (JS wraps content children in this) */
@@ -410,13 +410,20 @@
 		bottom: calc(56px + env(safe-area-inset-bottom, 0px));
 		width: 100% !important;
 		max-width: 100% !important;
-		z-index: 1040;
+		z-index: var(--cs-z-panel, 1040);
 		border-radius: 0;
 	}
 
 	/* ====================================================================
 	   Modals — Bottom Sheet Style
 	   ==================================================================== */
+
+	/* Tab-bar height. The bar is `position: fixed; bottom: 0` at --cs-z-tabbar,
+	   so every bottom-anchored surface has to reserve room for it. */
+	body.is-charsheet-page {
+		--cs-tabbar-height: calc(56px + env(safe-area-inset-bottom, 0px));
+	}
+
 	body.is-charsheet-page .ve-ui-modal__inner {
 		position: fixed;
 		bottom: 0;
@@ -431,6 +438,12 @@
 		animation: charsheet-mobile-slideUp 0.3s ease;
 	}
 
+	@media (prefers-reduced-motion: reduce) {
+		body.is-charsheet-page .ve-ui-modal__inner {
+			animation: charsheet-mobile-fadeIn 0.15s ease;
+		}
+	}
+
 	@keyframes charsheet-mobile-slideUp {
 		from {
 			transform: translateY(100%);
@@ -440,12 +453,30 @@
 		}
 	}
 
-	/* Modal scroll containment */
-	body.is-charsheet-page .ve-ui-modal__inner .ve-ui-modal__row--body {
+	@keyframes charsheet-mobile-fadeIn {
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
+	}
+
+	/* Modal scroll containment.
+
+	   The sheet is anchored to `bottom: 0` but the tab bar sits on top of it at a
+	   higher layer, so the last ~56px of every modal (the twelfth Zodiac card,
+	   the final row of any picker) was unreachable. Reserving the bar's height as
+	   scroll padding fixes it inside the character-sheet scope, without
+	   re-stacking `.ve-ui-modal__inner`, which is shared site-wide chrome. */
+	body.is-charsheet-page .ve-ui-modal__inner .ve-ui-modal__row--body,
+	body.is-charsheet-page .ve-ui-modal__inner .ve-ui-modal__scroller {
 		max-height: 65vh;
 		max-height: calc(var(--vh, 1vh) * 65);
 		overflow-y: auto;
 		-webkit-overflow-scrolling: touch;
+		padding-bottom: var(--cs-tabbar-height, 56px);
+		scroll-padding-bottom: var(--cs-tabbar-height, 56px);
 	}
 
 	/* ====================================================================
@@ -517,7 +548,7 @@
 		position: fixed;
 		bottom: calc(72px + env(safe-area-inset-bottom, 0px));
 		right: 16px;
-		z-index: 1040;
+		z-index: var(--cs-z-panel, 1040);
 		display: flex;
 		flex-direction: column-reverse;
 		align-items: flex-end;
@@ -554,7 +585,7 @@
 		display: none;
 		position: fixed;
 		inset: 0;
-		z-index: 1039;
+		z-index: var(--cs-z-scrim, 1039);
 		background: rgba(0, 0, 0, 0.3);
 		-webkit-backdrop-filter: blur(2px);
 		backdrop-filter: blur(2px);
@@ -595,7 +626,7 @@
 		background: var(--cs-bg-surface, #1e293b);
 		color: var(--cs-text-primary, #f1f5f9);
 		padding: 6px 12px;
-		border-radius: var(--cs-radius-md, 8px);
+		border-radius: var(--cs-radius-md, 10px);
 		font-size: 0.8rem;
 		font-weight: 500;
 		box-shadow: var(--cs-shadow-md);
@@ -624,7 +655,7 @@
 		bottom: calc(72px + env(safe-area-inset-bottom, 0px));
 		left: 50%;
 		transform: translateX(-50%);
-		z-index: 1060;
+		z-index: var(--cs-z-toast, 1060);
 		display: none;
 		flex-direction: column;
 		align-items: center;
@@ -713,7 +744,7 @@
 	   ==================================================================== */
 	.charsheet-mobile__context-menu {
 		position: fixed;
-		z-index: 1070;
+		z-index: var(--cs-z-tooltip, 1070);
 		background: var(--cs-bg-surface, #1e293b);
 		border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.15));
 		border-radius: var(--cs-radius-lg, 16px);
@@ -830,7 +861,7 @@
 		top: 0;
 		left: 0;
 		right: 0;
-		z-index: 1045;
+		z-index: var(--cs-z-banner, 1045);
 		border-radius: 0;
 	}
 
@@ -941,7 +972,7 @@
 	.charsheet__inventory-search {
 		position: sticky;
 		top: 0;
-		z-index: 10;
+		z-index: var(--cs-z-sticky, 100);
 		background: var(--cs-bg-surface, #1e293b);
 		padding: 0.5rem 0;
 		margin-bottom: 0.5rem;

@@ -375,7 +375,7 @@ class CharacterSheetDruidResources {
 			if (this.hasZodiacForm()) {
 				body.appendChild(this._renderZodiacSection());
 			} else {
-				body.appendChild(e_({outer: `<div class="ve-muted ve-small ve-text-center py-3">No Zodiac Form available.</div>`}));
+				body.appendChild(e_({outer: `<div class="ve-small charsheet__druid-hint ve-text-center py-3">No Zodiac Form available.</div>`}));
 			}
 			return;
 		}
@@ -386,7 +386,7 @@ class CharacterSheetDruidResources {
 			if (this.hasWildShape() && this._usesKnownForms()) {
 				body.appendChild(this._renderKnownFormsRoster());
 			} else {
-				body.appendChild(e_({outer: `<div class="ve-muted ve-small ve-text-center py-3">No Wild Shape forms available.</div>`}));
+				body.appendChild(e_({outer: `<div class="ve-small charsheet__druid-hint ve-text-center py-3">No Wild Shape forms available.</div>`}));
 			}
 			return;
 		}
@@ -397,7 +397,7 @@ class CharacterSheetDruidResources {
 		if (this.hasZodiacForm()) { body.appendChild(this._renderZodiacSection()); any = true; }
 
 		if (!any) {
-			body.appendChild(e_({outer: `<div class="ve-muted ve-small ve-text-center py-3">No Druid resources to track.</div>`}));
+			body.appendChild(e_({outer: `<div class="ve-small charsheet__druid-hint ve-text-center py-3">No Druid resources to track.</div>`}));
 		}
 	}
 
@@ -429,29 +429,31 @@ class CharacterSheetDruidResources {
 			? ""
 			: (inForm.length
 				? ""
-				: `<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__druid-ws-transform ml-2" ${current < 1 ? "disabled title=\"No Wild Shape uses remaining\"" : "title=\"Pick a beast to assume; a use is spent only after you choose\""}>Transform…</button>`);
+				: `<button class="cs-combat-btn cs-combat-btn--spend charsheet__druid-ws-transform" ${current < 1 ? "disabled title=\"No Wild Shape uses remaining\"" : "title=\"Pick a beast to assume; a use is spent only after you choose\""}>Transform…</button>`);
 		const endBtnHtml = inForm.length
-			? `<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__druid-ws-end ml-2" title="Revert to your normal form (no use refunded)">End Wild Shape</button>`
+			? `<button class="cs-combat-btn cs-combat-btn--danger charsheet__druid-ws-end" title="Revert to your normal form (no use refunded)">End Wild Shape</button>`
 			: "";
 
 		const hintHtml = beast
-			? `<div class="ve-small mt-2 charsheet__druid-ws-current">Currently: ${beastNameHtml}</div>${beastStatsHtml ? `<div class="ve-small ve-muted charsheet__druid-ws-currentstats">${beastStatsHtml}</div>` : ""}`
+			? `<div class="ve-small mt-2 charsheet__druid-ws-current">Currently: ${beastNameHtml}</div>${beastStatsHtml ? `<div class="ve-small charsheet__druid-hint charsheet__druid-ws-currentstats">${beastStatsHtml}</div>` : ""}`
 			: (usesKnownForms
-				? `<div class="ve-small ve-muted mt-2">Learn Beast forms below, then Transform into one. A use is spent only when you transform.</div>`
-				: `<div class="ve-small ve-muted mt-2">Transform… opens the beast picker. A use is spent only after you choose a form.</div>`);
+				? `<div class="ve-small charsheet__druid-hint mt-2">Learn Beast forms below, then Transform into one. A use is spent only when you transform.</div>`
+				: `<div class="ve-small charsheet__druid-hint mt-2">Transform… opens the beast picker. A use is spent only after you choose a form.</div>`);
 
+		// The ± steppers sit inside the counter, immediately either side of the value
+		// they change, rather than orphaned in a button row below it.
 		const section = e_({outer: `
-			<div class="charsheet__druid-section mb-3 p-2 rounded" style="background: var(--cs-bg-surface, var(--rgb-bg-alt, #1e293b));">
-				<div class="ve-flex-v-center ve-flex-h-between mb-1">
-					<span class="ve-bold">🐻 Wild Shape</span>
-					<span class="charsheet__druid-ws-uses ve-bold">${current} / ${max}</span>
+			<div class="charsheet__druid-section mb-3">
+				<div class="charsheet__druid-section-head ve-split-v-center mb-1">
+					<h4 class="charsheet__druid-section-title">🐻 Wild Shape</h4>
+					<div class="charsheet__druid-stepper">
+						<button class="cs-combat-btn charsheet__druid-ws-minus" aria-label="Spend 1 Wild Shape use" title="Spend 1 Wild Shape use">−</button>
+						<span class="charsheet__druid-ws-uses" aria-live="polite">${current} / ${max}</span>
+						<button class="cs-combat-btn charsheet__druid-ws-plus" aria-label="Restore 1 Wild Shape use" title="Restore 1 Wild Shape use">+</button>
+					</div>
 				</div>
-				${recharge ? `<div class="ve-small ve-muted mb-2">${recharge}</div>` : ""}
-				<div class="ve-flex-v-center" style="gap: 6px; flex-wrap: wrap;">
-					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__druid-ws-minus" title="Spend 1 Wild Shape use">−</button>
-					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__druid-ws-plus" title="Restore 1 Wild Shape use">+</button>
-					${transformBtnHtml}${endBtnHtml}
-				</div>
+				${recharge ? `<div class="ve-small charsheet__druid-hint mb-2">${recharge}</div>` : ""}
+				${transformBtnHtml || endBtnHtml ? `<div class="charsheet__druid-actions">${transformBtnHtml}${endBtnHtml}</div>` : ""}
 				${hintHtml}
 				<div class="charsheet__druid-ws-knownforms"></div>
 			</div>
@@ -492,40 +494,37 @@ class CharacterSheetDruidResources {
 
 		const wrap = e_({outer: `
 			<div class="charsheet__druid-ws-roster mt-3">
-				<div class="ve-flex-v-center ve-flex-h-between mb-1">
-					<span class="ve-small ve-bold">Known Forms</span>
-					<span class="ve-small ve-muted charsheet__druid-ws-roster-count">${models.length} / ${maxForms}</span>
+				<div class="ve-split-v-center mb-1">
+					<h5 class="charsheet__druid-section-subtitle">Known Forms</h5>
+					<span class="ve-small charsheet__druid-hint charsheet__druid-ws-roster-count">${models.length} / ${maxForms}</span>
 				</div>
 				<div class="charsheet__druid-ws-roster-list ve-flex-col" style="gap: 6px;"></div>
-				<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__druid-ws-add mt-2" ${canAdd ? "title=\"Learn a new Beast form\"" : "disabled title=\"You already know the maximum number of forms\""}>+ Add Form…</button>
+				<button class="cs-combat-btn cs-combat-btn--primary charsheet__druid-ws-add mt-2" ${canAdd ? "title=\"Learn a new Beast form\"" : "disabled title=\"You already know the maximum number of forms\""}>+ Add Form…</button>
 			</div>
 		`});
 
 		const list = wrap.querySelector(".charsheet__druid-ws-roster-list");
 		if (!models.length) {
-			list?.appendChild(e_({outer: `<div class="ve-small ve-muted ve-italic">No forms learned yet. Add a Beast form to transform into it later.</div>`}));
+			list?.appendChild(e_({outer: `<div class="ve-small charsheet__druid-hint ve-italic">No forms learned yet. Add a Beast form to transform into it later.</div>`}));
 		}
 		for (const model of models) {
 			const nameHtml = CharacterSheetClassUtils.buildCreatureHoverNameHtml(model, "ve-bold");
 			const statsHtml = CharacterSheetClassUtils.buildCreatureStatLineHtml(model);
 			const legal = model.isLegalNow;
 			const card = e_({outer: `
-				<div class="charsheet__druid-ws-roster-card p-2 rounded ve-flex-v-center ve-flex-h-between" style="gap: 8px; background: var(--cs-bg-surface-2, var(--rgb-bg, #0f172a));">
+				<div class="charsheet__druid-ws-roster-card ve-split-v-center">
 					<div class="ve-flex-col" style="min-width: 0;">
 						<div class="ve-small charsheet__druid-ws-roster-name">${nameHtml}</div>
-						${statsHtml ? `<div class="ve-small ve-muted charsheet__druid-ws-roster-stats">${statsHtml}</div>` : ""}
+						${statsHtml ? `<div class="ve-small charsheet__druid-hint charsheet__druid-ws-roster-stats">${statsHtml}</div>` : ""}
 						${legal ? "" : `<div class="ve-small ve-destructive charsheet__druid-ws-roster-illegal">Exceeds your current Wild Shape limits</div>`}
 					</div>
-					<div class="ve-flex-v-center" style="gap: 4px;">
-						<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__druid-ws-roster-transform" ${(legal && canSpend) ? "title=\"Transform into this form (spends 1 use)\"" : `disabled title="${legal ? "No Wild Shape uses remaining" : "This form exceeds your current limits"}"`}>Transform</button>
-						<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__druid-ws-roster-remove" title="Forget this form">×</button>
+					<div class="charsheet__druid-actions">
+						<button class="cs-combat-btn cs-combat-btn--spend charsheet__druid-ws-roster-transform" ${(legal && canSpend) ? "title=\"Transform into this form (spends 1 use)\"" : `disabled title="${legal ? "No Wild Shape uses remaining" : "This form exceeds your current limits"}"`}>Transform</button>
+						<button class="cs-combat-btn cs-combat-btn--danger charsheet__druid-ws-roster-remove" aria-label="Forget ${CharacterSheetClassUtils.escapeHtml(model.name || "this form")}" title="Forget this form">×</button>
 					</div>
 				</div>
 			`});
-			card.querySelector(".charsheet__druid-ws-roster-transform")?.addEventListener("click", (evt) => {
-				if (/** @type {*} */ (evt.target)?.closest?.(".ve-help-subtle")) return;
-				this._transformIntoKnownForm(model.knownFormId);
-			});
+			card.querySelector(".charsheet__druid-ws-roster-transform")?.addEventListener("click", () => this._transformIntoKnownForm(model.knownFormId));
 			card.querySelector(".charsheet__druid-ws-roster-remove")?.addEventListener("click", () => this._removeKnownForm(model.knownFormId));
 			list?.appendChild(card);
 		}
@@ -623,9 +622,9 @@ class CharacterSheetDruidResources {
 
 		eleModalInner.appendChild(e_({outer: `
 			<div class="ve-flex-col" style="gap: 10px; min-height: 0;">
-				<div class="ve-flex-v-center ve-flex-h-between" style="gap: 8px;">
-					<div class="ve-small ve-muted charsheet__ws-picker-limits">Eligible Beasts \u2014 ${limitBits.join(", ")}</div>
-					<div class="ve-small ve-muted charsheet__ws-picker-count"></div>
+				<div class="ve-split-v-center" style="gap: 8px;">
+					<div class="ve-small charsheet__druid-hint charsheet__ws-picker-limits">Eligible Beasts \u2014 ${limitBits.join(", ")}</div>
+					<div class="ve-small charsheet__druid-hint charsheet__ws-picker-count"></div>
 				</div>
 				<input type="text" class="form-control input-sm charsheet__ws-picker-search" placeholder="Search forms by name\u2026" style="background: var(--cs-bg-elevated, #334155); color: var(--cs-text-primary, #f1f5f9); border: 1px solid var(--cs-border, rgba(255,255,255,.1));">
 				<div class="charsheet__ws-picker-filters ve-flex-v-center ve-flex-wrap" style="gap: 6px;">
@@ -634,7 +633,7 @@ class CharacterSheetDruidResources {
 					<select class="form-control input-sm charsheet__ws-picker-filter-size" style="${selStyle}" title="Filter by size">${sizeOpts}</select>
 					<select class="form-control input-sm charsheet__ws-picker-filter-crmin" style="${selStyle}" title="Minimum Challenge Rating">${crMinOpts}</select>
 					<select class="form-control input-sm charsheet__ws-picker-filter-crmax" style="${selStyle}" title="Maximum Challenge Rating">${crMaxOpts}</select>
-					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__ws-picker-filter-reset" title="Clear all filters">Reset</button>
+					<button class="cs-combat-btn charsheet__ws-picker-filter-reset" title="Clear all filters">Reset</button>
 				</div>
 				<div class="charsheet__ws-picker-list ve-flex-col ve-overflow-y-auto" style="gap: 6px; max-height: 60vh;"></div>
 			</div>
@@ -666,7 +665,7 @@ class CharacterSheetDruidResources {
 			list.innerHTML = "";
 			if (countEl) countEl.textContent = `${shown.length} form${shown.length === 1 ? "" : "s"}`;
 			if (!shown.length) {
-				list.appendChild(e_({outer: `<div class="ve-small ve-muted ve-italic p-2">No forms match your filters.</div>`}));
+				list.appendChild(e_({outer: `<div class="ve-small charsheet__druid-hint ve-italic p-2">No forms match your filters.</div>`}));
 				return;
 			}
 			const canAddMore = !!this._state.canAddKnownWildShapeForm?.();
@@ -676,21 +675,20 @@ class CharacterSheetDruidResources {
 				const sourceAbv = creature.source ? Parser.sourceJsonToAbv(creature.source) : null;
 				const sourceFull = creature.source ? Parser.sourceJsonToFull(creature.source) : null;
 				const sourceHtml = sourceAbv
-					? `<span class="ve-muted ve-small charsheet__ws-picker-source" title="${CharacterSheetClassUtils.escapeHtml(sourceFull || sourceAbv)}">${CharacterSheetClassUtils.escapeHtml(sourceAbv)}</span>`
+					? `<span class="ve-small charsheet__druid-hint charsheet__ws-picker-source" title="${CharacterSheetClassUtils.escapeHtml(sourceFull || sourceAbv)}">${CharacterSheetClassUtils.escapeHtml(sourceAbv)}</span>`
 					: "";
 				const metaHtml = this._buildKnownFormPickerMeta(creature, rec, model);
 				const isKnown = knownNames.has(`${(creature.name || "").toLowerCase()}|${(creature.source || "").toLowerCase()}`);
 				const card = e_({outer: `
-					<div class="charsheet__ws-picker-card p-2 rounded ve-flex-v-center ve-flex-h-between" style="gap: 8px; background: var(--cs-bg-surface, #1e293b); border: 1px solid var(--cs-border, rgba(255,255,255,.1));">
+					<div class="charsheet__ws-picker-card ve-split-v-center">
 						<div class="ve-flex-col" style="min-width: 0; gap: 2px;">
 							<div class="ve-small charsheet__ws-picker-name ve-flex-v-baseline" style="gap: 6px;">${nameHtml}${sourceHtml}</div>
 							${metaHtml}
 						</div>
-						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__ws-picker-learn" ${(isKnown || !canAddMore) ? `disabled title="${isKnown ? "Already learned" : "You already know the maximum number of forms"}"` : "title=\"Learn this form\""}>${isKnown ? "Known" : "Learn"}</button>
+						<button class="cs-combat-btn cs-combat-btn--primary charsheet__ws-picker-learn" ${(isKnown || !canAddMore) ? `disabled title="${isKnown ? "Already learned" : "You already know the maximum number of forms"}"` : "title=\"Learn this form\""}>${isKnown ? "Known" : "Learn"}</button>
 					</div>
 				`});
-				card.querySelector(".charsheet__ws-picker-learn")?.addEventListener("click", (evt) => {
-					if (/** @type {*} */ (evt.target)?.closest?.(".ve-help-subtle")) return;
+				card.querySelector(".charsheet__ws-picker-learn")?.addEventListener("click", () => {
 					const id = this._state.addKnownWildShapeForm?.(creature);
 					if (id) {
 						JqueryUtil.doToast({type: "success", content: `Learned ${creature.name} as a Wild Shape form.`});
@@ -795,11 +793,11 @@ class CharacterSheetDruidResources {
 		const traitNames = (Array.isArray(rec?.traits) ? rec.traits : [])
 			.map(t => t?.name).filter(Boolean).slice(0, 4).map(esc);
 		const traitLine = traitNames.length
-			? `<div class="ve-small ve-muted charsheet__ws-picker-traits"><span class="ve-bold">Traits</span> ${traitNames.join(", ")}</div>`
+			? `<div class="ve-small charsheet__druid-hint charsheet__ws-picker-traits"><span class="ve-bold">Traits</span> ${traitNames.join(", ")}</div>`
 			: "";
 
 		return `
-			<div class="ve-small ve-muted charsheet__ws-picker-stats">${headBits.join(`<span class="charsheet__beast-sep"> \u2022 </span>`)}</div>
+			<div class="ve-small charsheet__druid-hint charsheet__ws-picker-stats">${headBits.join(`<span class="charsheet__beast-sep"> \u2022 </span>`)}</div>
 			${traitLine}
 		`;
 	}
@@ -915,12 +913,12 @@ class CharacterSheetDruidResources {
 		const duration = calc.wildCompanionDuration || "";
 
 		const section = e_({outer: `
-			<div class="charsheet__druid-section mb-3 p-2 rounded" style="background: var(--cs-bg-surface, var(--rgb-bg-alt, #1e293b));">
-				<div class="ve-flex-v-center ve-flex-h-between mb-1">
-					<span class="ve-bold">🧚 Wild Companion</span>
+			<div class="charsheet__druid-section mb-3">
+				<div class="charsheet__druid-section-head mb-1">
+					<h4 class="charsheet__druid-section-title">🧚 Wild Companion</h4>
 				</div>
-				<div class="ve-small ve-muted mb-2">Spends 1 Wild Shape use to summon a Fey familiar${duration ? ` (${duration})` : ""}.</div>
-				<button class="ve-btn ve-btn-xs ve-btn-info charsheet__druid-wc-summon" ${!canSpend ? "disabled title=\"No Wild Shape uses remaining\"" : ""}>Summon Familiar</button>
+				<div class="ve-small charsheet__druid-hint mb-2">Spends 1 Wild Shape use to summon a Fey familiar${duration ? ` (${duration})` : ""}.</div>
+				<button class="cs-combat-btn cs-combat-btn--spend charsheet__druid-wc-summon" ${!canSpend ? "disabled title=\"No Wild Shape uses remaining\"" : ""}>Summon Familiar</button>
 			</div>
 		`});
 
@@ -962,14 +960,14 @@ class CharacterSheetDruidResources {
 		const defs = (CharacterSheetState.ZODIAC_FORM_DEFS || []).filter(d => d.tier === "month");
 
 		const section = e_({outer: `
-			<div class="charsheet__druid-section mb-2 p-2 rounded" style="background: var(--cs-bg-surface, var(--rgb-bg-alt, #1e293b));">
-				<div class="ve-flex-v-center ve-flex-h-between mb-1">
-					<span class="ve-bold">🌟 Zodiac Form</span>
-					${active ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__druid-zodiac-dismiss">Dismiss</button>` : ""}
+			<div class="charsheet__druid-section mb-2">
+				<div class="charsheet__druid-section-head ve-split-v-center mb-1">
+					<h4 class="charsheet__druid-section-title">🌟 Zodiac Form</h4>
+					${active ? `<button class="cs-combat-btn charsheet__druid-zodiac-dismiss">Dismiss</button>` : ""}
 				</div>
 				${active ? `<div class="ve-small mb-2">Active: <span class="ve-bold charsheet__druid-zodiac-active"></span></div>` : ""}
-				<div class="ve-small ve-muted mb-2">${active ? "Choosing another form spends another Wild Shape use." : "Choose a constellation. Spends 1 Wild Shape use."}</div>
-				<div class="charsheet__druid-zodiac-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px;"></div>
+				<div class="ve-small charsheet__druid-hint mb-2">${active ? "Choosing another form spends another Wild Shape use." : "Choose a constellation. Spends 1 Wild Shape use."}</div>
+				<div class="charsheet__druid-zodiac-grid"></div>
 			</div>
 		`});
 
@@ -995,36 +993,79 @@ class CharacterSheetDruidResources {
 		const grid = section.querySelector(".charsheet__druid-zodiac-grid");
 		for (const def of defs) {
 			const isActive = active?.formId === def.id;
+			// The rules-text hover link lives OUTSIDE the button (a nested interactive
+			// element is invalid and forced a `closest(".ve-help-subtle")` escape hatch
+			// on the click handler). It is a sibling positioned into the card corner.
 			const hoverHtml = CharacterSheetClassUtils?.buildInlineEntriesHoverLink
-				? CharacterSheetClassUtils.buildInlineEntriesHoverLink(def.name, def.name, def.entries)
+				? CharacterSheetClassUtils.buildInlineEntriesHoverLink("ⓘ", def.name, def.entries)
 				: null;
 			const card = e_({outer: `
-				<button class="ve-btn ve-btn-xs ${isActive ? "ve-btn-primary" : "ve-btn-default"} charsheet__druid-zodiac-card ve-text-left"
-					style="display: flex; flex-direction: column; align-items: flex-start; white-space: normal; height: auto; padding: 6px 8px;"
-					${(!canSpend && !isActive) ? "disabled title=\"No Wild Shape uses remaining\"" : ""}>
-					<span class="ve-bold">${def.icon ? `${def.icon} ` : ""}${hoverHtml || def.name}</span>
-					${def.summary ? `<span class="ve-small ve-muted">${def.summary}</span>` : ""}
-				</button>
+				<div class="charsheet__druid-zodiac-card${isActive ? " charsheet__druid-zodiac-card--active" : ""}">
+					<button class="charsheet__druid-zodiac-select" aria-pressed="${isActive ? "true" : "false"}"
+						${(!canSpend && !isActive) ? "disabled title=\"No Wild Shape uses remaining\"" : ""}>
+						<span class="charsheet__druid-zodiac-name">${def.icon ? `${def.icon} ` : ""}${CharacterSheetClassUtils.escapeHtml(def.name)}</span>
+						${def.summary ? `<span class="charsheet__druid-zodiac-summary">${def.summary}</span>` : ""}
+						${isActive ? `<span class="charsheet__druid-zodiac-activemark">✓&nbsp;Active</span>` : ""}
+					</button>
+					${hoverHtml ? `<span class="charsheet__druid-zodiac-info" title="${CharacterSheetClassUtils.escapeHtml(def.name)} — full rules text">${hoverHtml}</span>` : ""}
+				</div>
 			`});
-			card.addEventListener("click", (evt) => {
-				// Don't trigger selection when clicking the hover link itself.
-				if (/** @type {*} */ (evt.target)?.closest?.(".ve-help-subtle")) return;
-				this._pSelectZodiacForm(def.id);
-			});
+			card.querySelector(".charsheet__druid-zodiac-select")?.addEventListener("click", () => this._pSelectZodiacForm(def.id));
 			grid?.appendChild(card);
 		}
 
 		return section;
 	}
 
-	_pSelectZodiacForm (formId) {
+	/**
+	 * Assume a Zodiac constellation form. Spending a Wild Shape use is irreversible
+	 * (there is no refund path), and the twelve cards are a dense grid of similar
+	 * targets, so the spend is gated behind a confirm that names both the form and
+	 * its cost — mirroring `_pTransformWildShapeFree`'s deferred-spend pattern:
+	 * a re-entrancy guard around the await, and a post-await affordability re-check
+	 * so a racing spend elsewhere cannot push the pool negative.
+	 * @param {string} formId
+	 * @private
+	 */
+	async _pSelectZodiacForm (formId) {
+		if (this._isSelectingZodiac) return;
 		this._refreshState();
-		const def = this._state.activateZodiacFormUsingWildShape?.(formId);
-		if (!def) {
+
+		const def = CharacterSheetState.getZodiacFormDef?.(formId);
+		const isActive = this._state.getActiveZodiacForm?.()?.formId === formId;
+
+		// Re-assuming the form you are already in would silently burn a second use.
+		if (isActive) {
+			JqueryUtil.doToast({type: "info", content: `${def?.name || "That form"} is already active.`});
+			return;
+		}
+		if (!this._state.canSpendWildShapeUse?.(1)) {
 			JqueryUtil.doToast({type: "warning", content: "No Wild Shape uses remaining."});
 			return;
 		}
-		JqueryUtil.doToast({type: "success", content: `Zodiac Form: ${def.name} assumed.`});
+
+		this._isSelectingZodiac = true;
+		let isConfirmed;
+		try {
+			isConfirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+				title: `Assume ${def?.name || "Zodiac Form"}?`,
+				textYes: "Assume form",
+				textNo: "Cancel",
+				htmlDescription: `<div class="ve-flex-col" style="gap: 0.35rem;"><div>Spends <strong>1 Wild Shape use</strong>.</div>${def?.summary ? `<div class="ve-small charsheet__druid-hint">${def.summary}</div>` : ""}</div>`,
+			}));
+		} finally {
+			this._isSelectingZodiac = false;
+		}
+		if (!isConfirmed) return;
+
+		// Re-check post-await: uses may have been spent elsewhere while the dialog was open.
+		this._refreshState();
+		const assumed = this._state.activateZodiacFormUsingWildShape?.(formId);
+		if (!assumed) {
+			JqueryUtil.doToast({type: "warning", content: "No Wild Shape uses remaining."});
+			return;
+		}
+		JqueryUtil.doToast({type: "success", content: `Zodiac Form: ${assumed.name} assumed.`});
 		this._refreshSheet();
 		this._renderModalBody();
 	}

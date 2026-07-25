@@ -161,6 +161,99 @@
 	--cs-ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
 	--cs-ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 	--cs-ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+	/* Elevation — a semantic z-index scale.
+
+	   The character sheet accumulated ~60 hand-picked z-index values across four
+	   stylesheets with no documented order, which is how the mobile tab bar ended
+	   up covering the bottom of every modal. These steps name the layers instead;
+	   the numbers preserve the stacking order the sheet already had, so migrating
+	   a declaration onto a token is a no-op at render time.
+
+	   Anything that overlaps something else belongs on one of these. Do not
+	   invent a new bare number: if a surface doesn't fit a step, add a step. */
+	--cs-z-base: 0;        /* in-flow content */
+	--cs-z-raised: 10;     /* cards/rows lifted within their own section */
+	--cs-z-sticky: 100;    /* sticky headers + column pins inside a scroller */
+	--cs-z-overlay: 1000;  /* full-screen scrims */
+	--cs-z-modal: 1001;    /* modal surface, above its own scrim */
+	--cs-z-scrim: 1039;    /* local backdrop, below the panel it dims */
+	--cs-z-panel: 1040;    /* roll history, FAB stack, floating panels */
+	--cs-z-banner: 1045;   /* level-up / status banners */
+	--cs-z-tabbar: 1050;   /* mobile bottom tab bar */
+	--cs-z-toast: 1060;    /* toasts + the roll-modifier toolbar */
+	--cs-z-tooltip: 1070;  /* context menus, hover cards — always on top */
+}
+
+/* ========================================================================
+   Legacy `--rgb-*` compatibility aliases
+
+   The character sheet predates the `--cs-*` token layer and reaches for a
+   `--rgb-*` vocabulary it assumed the site provided. It does not: the site only
+   defines SIX such tokens, and they use a double-hyphen modifier spelling
+   (`--rgb-bg--alt`, `--rgb-font--muted`, `--rgb-name`, `--rgb-border--statblock`,
+   `--rgb-font`, `--rgb-bg`). Every single-hyphen name below — `--rgb-bg-alt`,
+   `--rgb-text-muted`, `--rgb-border-grey`, `--rgb-link`, … — resolves to
+   nothing, and `var()` on an undefined custom property fails SILENTLY: the
+   declaration is either dropped (so the element inherits) or invalidated.
+
+   There are ~540 such references across the character-sheet CSS and JS. Most sit
+   as the terminal fallback of a `var(--cs-x, var(--rgb-y))` chain and are inert,
+   but ~100 are the ONLY source for their declaration, and those rules have been
+   dead the whole time (muted text rendering at inherited body colour, "borders"
+   that never drew).
+
+   Aliasing them here fixes all of them at once, keeps day/night parity for free
+   (each alias points at a `--cs-*` var, resolved per-element), and means a
+   future `--rgb-*` reference still works. Scoped to the character-sheet body so
+   nothing leaks into shared site chrome.
+
+   New code should use the `--cs-*` tokens directly; this block exists so the
+   existing surface is correct, not as an endorsement of the old names.
+   ======================================================================== */
+body.is-charsheet-page {
+	/* Surfaces */
+	--rgb-bg-alt: var(--cs-bg-surface);
+	--rgb-bg-alt-grey: var(--cs-bg-elevated);
+	--rgb-bg-highlight: var(--cs-bg-hover);
+	--rgb-bg-hover: var(--cs-bg-hover);
+	--rgb-bg-text: var(--cs-text-primary);
+
+	/* Text */
+	--rgb-text: var(--cs-text-primary);
+	--rgb-text-secondary: var(--cs-text-secondary);
+	--rgb-text-muted: var(--cs-text-muted);
+	--rgb-text-dim: var(--cs-text-secondary);
+	--rgb-muted: var(--cs-text-muted);
+
+	/* Borders */
+	--rgb-border: var(--cs-border);
+	--rgb-border-grey: var(--cs-border);
+	--rgb-border-grey-muted: var(--cs-border);
+
+	/* Accent / link */
+	--rgb-link: var(--cs-primary);
+	--rgb-link-rgb: 99, 102, 241;
+	--rgb-link-opacity-10: var(--cs-primary-light);
+	--rgb-btn-primary: var(--cs-primary-strong);
+
+	/* Semantic */
+	--rgb-success: var(--cs-success);
+	--rgb-success-rgb: 16, 185, 129;
+	--rgb-text-success: var(--cs-success);
+	--rgb-warning: var(--cs-warning);
+	--rgb-danger: var(--cs-danger);
+	--rgb-text-danger: var(--cs-danger);
+	--rgb-info: var(--cs-info);
+	--rgb-info-rgb: 6, 182, 212;
+
+	/* Named-entity colours (statblock-style accents) */
+	--rgb-name-color: var(--cs-text-primary);
+	--rgb-name--accent: var(--cs-accent-gold, var(--cs-warning));
+	--rgb-name-blue: var(--cs-accent-sapphire, var(--cs-primary));
+	--rgb-name-green: var(--cs-success);
+	--rgb-name-gold: var(--cs-accent-gold, var(--cs-warning));
+	--rgb-name-red: var(--cs-danger);
 }
 
 /* ========================================================================
@@ -229,6 +322,16 @@
 	--cs-accent-ruby: #dc2626;
 	--cs-accent-sapphire: #2563eb;
 	--cs-accent-amethyst: #9333ea;
+	/* Ink-on-tint variants. The base semantic hues above are tuned to read as
+	   *fills* on white; used as TEXT on their own `-light` tint they land just
+	   under AA (amber #b45309 on rgba(245,158,11,.14) over a card = 4.04:1 at
+	   12px). One shade darker clears it with room to spare (5.5-6.5:1) while
+	   staying unmistakably the same hue. Consumed by `.cs-combat-btn--spend`
+	   / `--heal` / `--danger` and any other tinted-chip text. */
+	--cs-warning-text: #92400e;
+	--cs-success-text: #065f46;
+	--cs-danger-text: #b91c1c;
+	--cs-info-text: #155e75;
 	/* Day violet data-label text: violet-700, dark enough to clear AA on the
 	   light purple-tinted card (violet-600 #7c3aed fails at 3.9 on hover). */
 	--cs-accent-text: #6d28d9;

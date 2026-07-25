@@ -238,7 +238,7 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 		expect(globalThis.document.getElementById("charsheet-spells-metamagic-section").style.display).toBe("none");
 	});
 
-	it("should render editable sorcery point controls in the spells-tab dashboard", () => {
+	it("should render editable sorcery point controls on every dashboard host", () => {
 		mockKnownMetamagicDashboard({current: 3, max: 5});
 		renderMetamagicDom();
 
@@ -249,7 +249,10 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 		expect(globalThis.document.querySelector("#charsheet-spells-metamagic .charsheet__mm-name").innerHTML).toContain("data-hover");
 		expect(globalThis.document.querySelector("#charsheet-spells-metamagic .charsheet__mm-name").innerHTML).toContain("Careful Spell (Passive)|TGTT");
 		expect(globalThis.document.querySelectorAll("#charsheet-spells-metamagic .charsheet__mm-sp-adjust-btn")).toHaveLength(2);
-		expect(globalThis.document.querySelectorAll("#charsheet-overview-metamagic .charsheet__mm-sp-adjust-btn")).toHaveLength(0);
+		// Overview used to render read-only (no +/-) even though its Tune/Detune
+		// buttons still spent sorcery points — an inconsistency, not a design.
+		// All three hosts now expose the same editable controls.
+		expect(globalThis.document.querySelectorAll("#charsheet-overview-metamagic .charsheet__mm-sp-adjust-btn")).toHaveLength(2);
 		expect(globalThis.document.querySelectorAll("#charsheet-combat-metamagic .charsheet__mm-sp-adjust-btn")).toHaveLength(2);
 	});
 

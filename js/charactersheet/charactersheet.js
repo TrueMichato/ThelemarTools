@@ -6241,14 +6241,17 @@ class CharacterSheetPage {
 	}
 
 	_renderOverviewMetamagic () {
-		CharacterSheetCombat.renderMetamagicDashboard(this._state, this, "#charsheet-overview-metamagic", "#charsheet-overview-metamagic-section", "#charsheet-overview-metamagic-sp");
+		CharacterSheetCombat.renderMetamagicDashboard(this._state, this, "#charsheet-overview-metamagic", "#charsheet-overview-metamagic-section", "#charsheet-overview-metamagic-sp", {isSorceryPointEditable: true});
 	}
 
 	/**
 	 * Render the Overview "Ranger" dashboard: Primal Focus mode (Predator/Prey) with
-	 * its switch + Hunter's Dodge controls, and the Hunter's Prey active option selector.
-	 * Hidden unless the character actually has Primal Focus or Hunter's Prey. Mode/option
-	 * changes recompute derived effects (speed, AC, damage riders) by re-rendering the sheet.
+	 * its switch + Hunter's Dodge controls, the current Hunter's Prey option, and a
+	 * collapsed list of passive/situational reminders.
+	 * Hidden unless the character actually has Primal Focus or Hunter's Prey. Mode
+	 * changes recompute derived effects (speed, AC, damage riders) by re-rendering the
+	 * sheet. Hunter's Prey is display-only here — it is swapped from the rest dialog
+	 * (`charactersheet-rest.js`), the only caller of `setHuntersPreyOption`.
 	 */
 	_renderOverviewRanger () {
 		const section = document.getElementById("charsheet-overview-ranger-section");
@@ -6266,6 +6269,9 @@ class CharacterSheetPage {
 		}
 		section.style.display = "";
 		container.innerHTML = "";
+		// The Container-Adaptive Rule — this panel lives in a ~316px Overview column
+		// but its rows must survive any host width. See css `@container cs-panel`.
+		container.classList?.add("cs-adaptive-panel");
 
 		// ----- Primal Focus -----
 		if (hasPrimalFocus) {
@@ -6285,12 +6291,12 @@ class CharacterSheetPage {
 			let html = `
 				<div class="ve-flex-v-center gap-2 mb-2 ve-flex-wrap">
 					<strong>Primal Focus:</strong>
-					<span class="badge ${isPredator ? "badge-danger" : "badge-info"}" style="font-size: 1em; padding: 5px 10px;">${isPredator ? "🎯 Predator" : "🛡️ Prey"}</span>
+					<span class="badge badge-secondary" style="font-size: 1em; padding: 5px 10px;">${isPredator ? "🎯 Predator" : "🛡️ Prey"}</span>
 					<span class="badge badge-secondary" title="Focus Switches remaining (per long rest)">🔄 ${switchesText}</span>
 				</div>
 				<div class="ve-flex gap-2 mb-2">
-					<button class="ve-btn ve-btn-sm ${isPredator ? "ve-btn-danger" : "ve-btn-outline-danger"} charsheet__overview-pf-btn" data-mode="predator" ${isPredator ? "disabled" : ""}>🎯 Predator</button>
-					<button class="ve-btn ve-btn-sm ${!isPredator ? "ve-btn-info" : "ve-btn-outline-info"} charsheet__overview-pf-btn" data-mode="prey" ${!isPredator ? "disabled" : ""}>🛡️ Prey</button>
+					<button class="cs-combat-btn ${isPredator ? "cs-combat-btn--selected" : ""} charsheet__overview-pf-btn" data-mode="predator" aria-pressed="${isPredator}" ${isPredator ? "disabled" : ""}>🎯 Predator</button>
+					<button class="cs-combat-btn ${!isPredator ? "cs-combat-btn--selected" : ""} charsheet__overview-pf-btn" data-mode="prey" aria-pressed="${!isPredator}" ${!isPredator ? "disabled" : ""}>🛡️ Prey</button>
 				</div>`;
 
 			if (!isPredator) {
@@ -6334,7 +6340,7 @@ class CharacterSheetPage {
 						badge = `<span class="badge badge-outline-secondary" title="Passive / situational">✦ Passive</span>`;
 					}
 					const extra = (ab.name === "Focused Quarry" && calcs.focusedQuarryDamage)
-						? ` <span class="badge badge-outline-danger" title="Extra damage to your Quarry (once per turn)">+${calcs.focusedQuarryDamage} dmg</span>`
+						? ` <span class="badge badge-outline-secondary" title="Extra damage to your Quarry (once per turn)">+${calcs.focusedQuarryDamage} dmg</span>`
 						: "";
 					// Hoverable name (renders the note as an inline-hover entry, like the
 					// Combat-method and Zodiac-form surfaces); falls back to plain text.
@@ -6397,7 +6403,7 @@ class CharacterSheetPage {
 					<span class="badge badge-info" style="font-size: 1em; padding: 5px 10px;">🏹 ${currentName}</span>
 				</div>
 				<p class="ve-small mb-0">${HUNTERS_PREY_EFFECT[currentOption] || ""}</p>
-				<p class="ve-small mb-0"><em>Change your Hunter's Prey option on a short or long rest.</em></p>`;
+				<p class="ve-small mb-0"><em>Swap options from the Short Rest or Long Rest dialog.</em></p>`;
 			container.appendChild(block);
 		}
 
@@ -6406,12 +6412,11 @@ class CharacterSheetPage {
 		// Tireless, Unrivaled Pioneer, Penetrating Senses, …) that otherwise only
 		// existed as Feature-tab cards, as a legible at-a-glance reminder list.
 		if (reminders.length) {
-			const block = document.createElement("div");
-			block.className = "charsheet__ranger-passives mt-2 pt-2";
-			block.style.borderTop = "1px dashed var(--rgb-border, #dee2e6)";
+			const block = document.createElement("details");
+			block.className = "charsheet__ranger-passives charsheet__ranger-passives-disclosure mt-2 pt-2";
+			block.style.borderTop = "1px dashed var(--cs-border, rgba(255, 255, 255, 0.1))";
 
-			const heading = document.createElement("div");
-			heading.className = "ve-flex-v-center gap-2 mb-1";
+			const heading = document.createElement("summary");
 			heading.innerHTML = `<strong>Passive &amp; Situational</strong><span class="badge badge-secondary" title="Always-on or situational features — reminders only">${reminders.length}</span>`;
 			block.appendChild(heading);
 
@@ -6433,10 +6438,6 @@ class CharacterSheetPage {
 				if (nameHtml) name.innerHTML = nameHtml;
 				else name.textContent = nameLabel;
 
-				const badge = document.createElement("span");
-				badge.className = "charsheet__ranger-ability-badge";
-				badge.innerHTML = `<span class="badge badge-outline-secondary" title="Always-on / situational">✦ Passive</span>`;
-
 				const note = document.createElement("span");
 				note.className = "charsheet__ranger-ability-note";
 				// Distinct mechanics are rendered as separate bullets; single-note features
@@ -6454,7 +6455,10 @@ class CharacterSheetPage {
 					note.textContent = rem.note;
 				}
 
-				row.append(name, badge, note);
+				// No per-row "✦ Passive" badge: every row in this block is passive, so the
+				// group heading already carries that information and repeating it on each
+				// row is noise.
+				row.append(name, note);
 				block.appendChild(row);
 			});
 
