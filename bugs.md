@@ -20,6 +20,28 @@ to intersect the pool with the character's weapon proficiencies (simple / martia
 weapons) before rendering. Left open deliberately: it changes what real users are offered, so it
 wants its own change + regression test rather than riding along with the spawner work.
 
+### Round 43 — homebrew/render robustness, DM Screen party+journey, proficiency dropdown, bestiary view buttons (in progress)
+
+Four parallel sessions, one branch each, disjoint ownership. S1 & S4 both edit `js/render.js` but at **disjoint regions** → merge serially with an explicit region review.
+
+**S1 — Homebrew & render robustness (Bugs 1, 4).** Owns `js/utils-brew/utils-brew-base.js` + `utils-brew-ui-manage.js`, the `js/utils.js` DataUtil request-limiter/fallback regions, and `js/render.js` `getProperty` (~12671-12688) + `_enhanceItem` property loop (~13305-13314).
+
+- **Bug 1 — "Update All" homebrew fails on one dead URL.** `_pPullAllBrews_` uses `pMap` (Promise.all); one 404 (renamed upstream `feat/DnD Beyond; Expanded Racial Feats.json`) rejects the whole batch, so no brews update. Compounded by `utils.js` firing `limiter.addFailure()` on *every* HTTP ≥400 (incl. 404), poisoning the GitHub-raw rate limiter → cascade of "Request was limited" on the CDN fallbacks. Fix: tolerate per-brew fetch failures (update the rest, report the failures); don't treat a 404 as a rate-limit trigger (reserve limiting for 429).
+- **Bug 4 — uncaught `Item property "ADV_*" not found`.** `Renderer.item.getProperty` at `render.js:13307` (`_enhanceItem`) is called without `isIgnoreMissing`, so an external brew referencing custom item properties (`ADV_DIS/DBL/ENT/MON/TRIP`) without registering `itemProperty` entries triggers a toast + deferred throw. Fix: degrade unknown properties gracefully (once-only warning), never synthesize `ADV_*` definitions.
+
+**S2 — DM Screen party & journey (Bugs 2, 3).** Owns `js/dmscreen/partytracker/*`, `dmscreen-journeytracker.js`, `dmscreen-journeytracker-consts.js`, the two dmscreen SCSS files + `css/dmscreen.css`, and `test/jest/DmScreenJourneyTracker.test.js`. Coordinates the dmscreen shared registry (`dmscreen.js`/`dmscreen-consts.js`/`dmscreen-panels.js`) through the orchestrator.
+
+- **Bug 2 — party + journey modals need a design pass.** Impeccable critique → shape plan → implement the fix.
+- **Bug 3 — journey view still buggy.** Reproduce & diagnose *before* the visual redesign so the redesign doesn't mask the original failure.
+
+**S3 — Edit Proficiencies dropdown (Bug 5).** Owns the two `_showEditProficienciesModal` impls (`charactersheet.js` ~16567-16615, `charactersheet-playmode.js` ~5180-5233) + `css/charactersheet.css` (~10842-10860) + `css/charactersheet-playmode.css`. Not `charactersheet-customabilities.js`.
+
+- **Bug 5 — no dropdown.** The main editor already builds an autocomplete but CSS hides it (`display:none` unless a `.open` class is added, which never happens); the play-mode editor is genuinely comma-separated free text. Fix both to real, working dropdowns.
+
+**S4 — Bestiary card options & view buttons (Bug 6).** Owns `js/bestiary.js` (root), `bestiary.html`, the `js/render.js` statblock-toggle regions (~3338-3355 / 9828-9831 / 11135-11144 / 17743-17747, **disjoint from S1**), `js/listpage.js` ~1303-1333 (shared — reproduce each broken button first, stay conservative), `scss/includes/style-statblock.scss` + `scss/bestiary.scss` + generated `css/bestiary.css`/`css/main.css`.
+
+- **Bug 6 — statblock footer options visual bugs + broken view toggles.** The wide view / two-column / etc. buttons below a monster card don't work. Fix the visual bugs and repair the toggles; global statblock QA must cover hover popouts, book view, DM Screen creature views, char-sheet creature refs, and print.
+
 ## Closed Bugs
 
 ### Round 42 — Lunaria (Ranger 6 Hunter / Druid 4 Circle of the Zodiac, TGTT): spell metadata, skills, resources, proficiency editing, item charges, action economy, roll-log + list pages — COMPLETE
