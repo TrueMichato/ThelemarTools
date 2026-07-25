@@ -133,10 +133,14 @@ describe("Divine Favor boon toggle — _divineFavorBoonFeatureId", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. Pass C registration — boon feature carries toggle metadata (no use cap)
+// 3. Pass C registration — boon feature carries toggle metadata + 1/day pool
 // ---------------------------------------------------------------------------
 describe("Divine Favor boon toggle — Pass C metadata", () => {
-	test("Attunement to Nature is added with activatable toggle metadata + stable id, no uses", () => {
+	function boonResource (state, featureId = "dfboon_pan_attunement-to-nature") {
+		return (state.getResources() || []).find(r => r._dfNarrativeBoon && r.featureId === featureId);
+	}
+
+	test("Attunement to Nature is added with activatable toggle metadata + stable id", () => {
 		const s = makeDiscipleState(25);
 		const f = boonFeature(s);
 		expect(f).toBeDefined();
@@ -150,16 +154,58 @@ describe("Divine Favor boon toggle — Pass C metadata", () => {
 			activationAction: "action",
 			duration: "1 hour",
 		});
-		// At-will: NO daily use cap — the boon must never mint a use pool.
+		// The use pool lives on a separate tagged resource, NOT on the feature.
 		expect(f.uses).toBeUndefined();
 	});
 
-	test("re-applying does not duplicate the boon feature (idempotent, stable id)", () => {
+	test("the boon mints a single 1/day (recharge:long) resource, full on first reconcile", () => {
+		const s = makeDiscipleState(25);
+		const matches = (s.getResources() || []).filter(r => r._dfNarrativeBoon && r.featureId === "dfboon_pan_attunement-to-nature");
+		expect(matches).toHaveLength(1);
+		const res = matches[0];
+		expect(res.max).toBe(1);
+		expect(res.current).toBe(1);
+		expect(res.recharge).toBe("long");
+		expect(res._divineFavor).toBe(true);
+		// (R42/B4) Canonical, stable resource id — `res_dfboon_<featureId>` — so reload/reconcile
+		// re-targets the same pool instead of minting a fresh one.
+		expect(res.id).toBe("res_dfboon_dfboon_pan_attunement-to-nature");
+	});
+
+	test("the boon's 1/day pool surfaces in the generic Resources tracker", () => {
+		const s = makeDiscipleState(25);
+		const pool = (s.getGenericPoolResources() || []).find(r => r._dfNarrativeBoon);
+		expect(pool).toBeDefined();
+		expect(pool.name).toBe("Attunement to Nature");
+	});
+
+	test("re-applying does not duplicate the boon feature OR its resource (idempotent)", () => {
 		const s = makeDiscipleState(25);
 		s.applyDivineFavorEffects();
 		s.applyDivineFavorEffects();
 		const matches = (s.getFeatures() || []).filter(f => f.id === "dfboon_pan_attunement-to-nature");
 		expect(matches).toHaveLength(1);
+		expect((s.getResources() || []).filter(r => r._dfNarrativeBoon)).toHaveLength(1);
+	});
+
+	test("a spent use is preserved across an applyDivineFavorEffects reconcile", () => {
+		const s = makeDiscipleState(25);
+		// Consume the day's use.
+		s.toggleDivineFavorBoonState("dfboon_pan_attunement-to-nature");
+		expect(boonResource(s).current).toBe(0);
+		// Reconcile (favour/god change or post-load): the spent use must NOT silently refill.
+		s.applyDivineFavorEffects();
+		expect(boonResource(s).current).toBe(0);
+	});
+
+	test("a spent use is preserved across a toJson/loadFromJson round-trip", () => {
+		const s = makeDiscipleState(25);
+		s.toggleDivineFavorBoonState("dfboon_pan_attunement-to-nature");
+		const json = s.toJson();
+		const s2 = makeState();
+		s2.loadFromJson(json);
+		s2.applyDivineFavorEffects();
+		expect(boonResource(s2).current).toBe(0);
 	});
 });
 
@@ -172,14 +218,19 @@ describe("Divine Favor boon toggle — getActivatableFeatures surfacing", () => 
 			.find(af => af.feature?.id === "dfboon_pan_attunement-to-nature");
 	}
 
-	test("boon appears as a toggle, initially inactive, with no resource cost", () => {
+	test("boon appears as a toggle, initially inactive, linked to its 1/day pool", () => {
 		const s = makeDiscipleState(25);
 		const entry = boonEntry(s);
 		expect(entry).toBeDefined();
 		expect(entry.interactionMode).toBe("toggle");
 		expect(entry.activationInfo.isToggle).toBe(true);
 		expect(entry.isActive).toBe(false);
-		expect(entry.resource).toBeNull();
+		// The 1/day pool is linked so both activate surfaces can show/gate remaining uses.
+		expect(entry.resource).toBeDefined();
+		expect(entry.resource).not.toBeNull();
+		expect(entry.resource._dfNarrativeBoon).toBe(true);
+		expect(entry.resource.max).toBe(1);
+		expect(entry.resource.current).toBe(1);
 	});
 
 	test("boon is NOT filtered out as an ability / hidden surface (so it reaches the combat list)", () => {
@@ -240,6 +291,10 @@ describe("Divine Favor boon toggle — toggleDivineFavorBoonState", () => {
 		const expired = s.advanceRound();
 		expect(expired).toContain("Attunement to Nature");
 		expect(s.getActiveStates().find(x => x._dfNarrativeBoon).active).toBe(false);
+		// (R42/B4) Expiry stops the toggle but must NOT refund the daily use — it stays spent
+		// until a long rest.
+		const boonRes = (s.getResources() || []).find(r => r._dfNarrativeBoon && r.featureId === "dfboon_pan_attunement-to-nature");
+		expect(boonRes.current).toBe(0);
 	});
 
 	test("returns null for a non-DF-boon feature id", () => {
@@ -289,6 +344,65 @@ describe("Divine Favor boon toggle — toggleDivineFavorBoonState", () => {
 		s.setDivineFavorGod("");
 		s.applyDivineFavorEffects();
 		expect(s.getActiveStates().some(x => x._dfNarrativeBoon)).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 5b. 1/day use pool (R42/B4) — activation consumes, long rest restores
+// ---------------------------------------------------------------------------
+describe("Divine Favor boon toggle — 1/day use pool", () => {
+	const FID = "dfboon_pan_attunement-to-nature";
+	function pool (state) {
+		return (state.getResources() || []).find(r => r._dfNarrativeBoon && r.featureId === FID);
+	}
+
+	test("activating (ON) consumes exactly one daily use (1 → 0)", () => {
+		const s = makeDiscipleState(25);
+		expect(pool(s).current).toBe(1);
+		const on = s.toggleDivineFavorBoonState(FID);
+		expect(on).toBe(true);
+		expect(pool(s).current).toBe(0);
+	});
+
+	test("toggling OFF does NOT refund the spent use (stays 0)", () => {
+		const s = makeDiscipleState(25);
+		s.toggleDivineFavorBoonState(FID); // ON — spends the use
+		s.toggleDivineFavorBoonState(FID); // OFF — must not refund
+		expect(pool(s).current).toBe(0);
+		expect(s.getActiveStates().some(x => x._dfNarrativeBoon && x.active)).toBe(false);
+	});
+
+	test("when the pool is exhausted a fresh activation is REFUSED (no state, no double-spend)", () => {
+		const s = makeDiscipleState(25);
+		s.toggleDivineFavorBoonState(FID); // ON
+		s.toggleDivineFavorBoonState(FID); // OFF (use already spent)
+		expect(pool(s).current).toBe(0);
+		// Attempting to re-activate while exhausted must be refused.
+		const retry = s.toggleDivineFavorBoonState(FID);
+		expect(retry).toBe(false);
+		expect(s.getActiveStates().some(x => x._dfNarrativeBoon && x.active)).toBe(false);
+		expect(pool(s).current).toBe(0); // never went negative
+	});
+
+	test("a long rest restores the daily use (0 → 1) so the boon can be used again", () => {
+		const s = makeDiscipleState(25);
+		s.toggleDivineFavorBoonState(FID); // ON — spends the use
+		s.toggleDivineFavorBoonState(FID); // OFF — stops the toggle, use stays spent
+		expect(pool(s).current).toBe(0);
+		s.recoverResources("long");
+		expect(pool(s).current).toBe(1);
+		// And it's usable again after the rest.
+		expect(s.toggleDivineFavorBoonState(FID)).toBe(true);
+		expect(pool(s).current).toBe(0);
+	});
+
+	test("consuming the use does NOT shorten the toggle duration (600-round countdown intact)", () => {
+		const s = makeDiscipleState(25);
+		s.startCombat();
+		s.toggleDivineFavorBoonState(FID);
+		const st = s.getActiveStates().find(x => x._dfNarrativeBoon && x.active);
+		expect(st.roundsRemaining).toBe(600);
+		expect(pool(s).current).toBe(0);
 	});
 });
 
@@ -371,6 +485,10 @@ describe("Divine Favor boon toggle — REAL combat surfacing (Lorian fixture)", 
 		const st = s.getActiveStates().find(x => x._dfNarrativeBoon && x.active);
 		expect(st).toBeDefined();
 		expect(st.roundsRemaining).toBe(600);
+		// (R42/B4) The real combat activation path must route through the 1/day choke point:
+		// the daily use drops 1 → 0 (not the generic-resource bypass, which would leave it at 1).
+		const boonRes = (s.getResources() || []).find(r => r._dfNarrativeBoon && r.featureId === "dfboon_pan_attunement-to-nature");
+		expect(boonRes.current).toBe(0);
 
 		// Re-render: the boon now shows in "Currently Active" with a round reminder + End (×).
 		combat.renderCombatStates();

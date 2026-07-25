@@ -209,7 +209,7 @@ describe("Divine Favor — Bug 1: narrative boons surface as features (favour 25
 		expect(dfFeatures(s, "Attunement to Nature")).toHaveLength(0);
 	});
 
-	test("re-applying does not duplicate the narrative feature or leak a resource", () => {
+	test("re-applying does not duplicate the narrative feature and mints exactly one 1/day resource", () => {
 		const s = makeState();
 		s.setDivineFavorGod("Pan|TGTT");
 		s.setDivineFavorLevel(25);
@@ -218,8 +218,13 @@ describe("Divine Favor — Bug 1: narrative boons surface as features (favour 25
 		s.applyDivineFavorEffects();
 
 		expect(dfFeatures(s, "Attunement to Nature")).toHaveLength(1);
-		// The narrative boon has no use count → it must not mint a stray tracked resource.
-		expect((s._data.resources || []).filter(r => r.name === "Attunement to Nature")).toHaveLength(0);
+		// (R42/B4) The narrative boon is now a 1/day activatable: re-applying must mint EXACTLY
+		// ONE tagged daily-use resource (no duplicate, no untagged stray).
+		const boonRes = (s._data.resources || []).filter(r => r.name === "Attunement to Nature");
+		expect(boonRes).toHaveLength(1);
+		expect(boonRes[0]._dfNarrativeBoon).toBe(true);
+		expect(boonRes[0].max).toBe(1);
+		expect(boonRes[0].recharge).toBe("long");
 		// Exactly one _divineFavor-tagged feature.
 		expect((s._data.features || []).filter(f => f._divineFavor)).toHaveLength(1);
 	});
