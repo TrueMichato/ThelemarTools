@@ -507,6 +507,12 @@ class CharacterSheetRest {
 		const isConcentrating = this._state.isConcentrating?.();
 		const concentration = this._state.getConcentration?.();
 
+		// Items whose recharge period is satisfied by a long rest — surfaced so the
+		// player knows what will refresh (dice-based ones are rolled on apply).
+		const rechargingItems = (this._state.getItems() || [])
+			.filter(it => CharacterSheetState.itemRechargesOnRest(it, "long") && (it.chargesCurrent ?? it.charges) < it.charges)
+			.map(it => ({name: it.name, formula: CharacterSheetState.getItemRechargeFormula(it)}));
+
 		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
 			title: "🌙 Long Rest",
 			isMinHeight0: true,
@@ -561,6 +567,14 @@ class CharacterSheetRest {
 							<span class="charsheet__rest-recovery-new">All recovered</span>
 						</div>
 					</li>
+					${rechargingItems.length ? `
+					<li class="charsheet__rest-recovery-item">
+						<span class="charsheet__rest-recovery-label">🔋 Item Recharges</span>
+						<div class="charsheet__rest-recovery-values">
+							<span class="charsheet__rest-recovery-new">${rechargingItems.map(it => `${it.name} (${it.formula})`).join(", ")}</span>
+						</div>
+					</li>
+					` : ""}
 					${currentExhaustion > 0 ? `
 					<li class="charsheet__rest-recovery-item">
 						<span class="charsheet__rest-recovery-label">😫 Exhaustion</span>
@@ -1233,60 +1247,29 @@ class CharacterSheetRest {
 			this._state.restoreFocusPool?.();
 		}
 
-		// Restore item charges
+		// Restore item charges — routes through the canonical state operation so the
+		// parse/roll/clamp behavior matches the inventory-row Recharge button. Roll-based
+		// recharges are rolled once here and logged to roll history. Runs inside the
+		// existing rest undo snapshot, so these changes are covered by rest undo.
 		const items = this._state.getItems();
 		const restoredItems = [];
 		items.forEach(item => {
-			if (item.charges && item.recharge) {
-				let shouldRestore = false;
-				// Map recharge types to rest types
-				if (restType === "long") {
-					// Long rest restores items that recharge on long rest, dawn, dusk, or midnight
-					shouldRestore = ["restLong", "dawn", "dusk", "midnight"].includes(item.recharge);
-				} else if (restType === "short") {
-					// Short rest only restores items that recharge on short rest
-					shouldRestore = item.recharge === "restShort";
+			if (!CharacterSheetState.itemRechargesOnRest(item, restType)) return;
+			if ((item.chargesCurrent ?? item.charges) >= item.charges) return;
+			try {
+				const result = this._state.rechargeItemCharges(item.id);
+				if (result?.committed) {
+					restoredItems.push({name: item.name, restored: result.restored, total: result.newCharges, max: item.charges});
+					this._page?._rollHistory?.addRoll({
+						title: `Recharge: ${item.name}`,
+						total: result.restored,
+						breakdown: result.breakdown,
+					});
 				}
-
-				if (shouldRestore) {
-					const currentCharges = item.chargesCurrent ?? 0;
-					// Only restore if not already at max
-					if (currentCharges < item.charges) {
-						// Parse rechargeAmount - could be a dice expression like "{@dice 1d6 + 1}" or a number
-						let rechargeAmount = item.charges; // Default to full restore
-						if (item.rechargeAmount) {
-							if (typeof item.rechargeAmount === "number") {
-								rechargeAmount = item.rechargeAmount;
-							} else if (typeof item.rechargeAmount === "string") {
-								// Strip {@dice ...} wrapper if present
-								let diceStr = item.rechargeAmount.replace(/\{@dice\s*([^}]+)\}/i, "$1").trim();
-								// Parse dice notation like "1d6 + 1", "1d6+1", "2d8-2"
-								const diceMatch = diceStr.match(/(\d+)d(\d+)\s*(?:([+-])\s*(\d+))?/i);
-								if (diceMatch) {
-									const numDice = parseInt(diceMatch[1]);
-									const dieSize = parseInt(diceMatch[2]);
-									const sign = diceMatch[3] === "-" ? -1 : 1;
-									const modifier = (parseInt(diceMatch[4]) || 0) * sign;
-									// Roll the dice using RollerUtil if available
-									let total = modifier;
-									for (let i = 0; i < numDice; i++) {
-										total += (typeof RollerUtil !== "undefined" && RollerUtil.randomise)
-											? RollerUtil.randomise(dieSize)
-											: Math.floor(Math.random() * dieSize) + 1;
-									}
-									rechargeAmount = Math.max(0, total);
-								} else {
-									// Try parsing as a plain number
-									rechargeAmount = parseInt(item.rechargeAmount) || item.charges;
-								}
-							}
-						}
-
-						const newCharges = Math.min(currentCharges + rechargeAmount, item.charges);
-						this._state.setItemCharges(item.id, newCharges);
-						restoredItems.push({name: item.name, restored: newCharges - currentCharges, total: newCharges, max: item.charges});
-					}
-				}
+			} catch (e) {
+				// A single malformed item must not abort the rest.
+				// eslint-disable-next-line no-console
+				console.warn(`[CharSheet Rest] Failed to recharge item "${item.name}":`, e);
 			}
 		});
 
