@@ -25,6 +25,8 @@ import {
 	classifySingleRoll,
 	evaluateGroupCheck,
 	rmDeltaForOutcome,
+	computeActivityGroupRm,
+	sumContainerRm,
 	computeEffectiveDc,
 	classifyTrackingDegree,
 	getSkillBonusFromData,
@@ -67,7 +69,8 @@ export class JourneyTracker extends DmScreenPanelAppBase {
 /*  Root component                                                                                 */
 /* ============================================================================================== */
 
-class JourneyTrackerRoot {
+/** Exported for unit testing of the DOM-free RM-reconciliation core (constructor touches no DOM). */
+export class JourneyTrackerRoot {
 	constructor (board, wrpPanel) {
 		this._board = board;
 		this._wrpPanel = wrpPanel;
@@ -162,6 +165,10 @@ class JourneyTrackerRoot {
 			const val = parseInt(this._eleRmValue.val(), 10);
 			if (Number.isNaN(val)) { this._eleRmValue.val(this._state.riskModifier); return; }
 			this._setRm(val, "Manual set");
+			/* Re-baseline derived bookkeeping so future edits apply as deltas from the manual value. */
+			this._reconcileRm({rebaseline: true});
+			this._reRenderCurrentTab();
+			this._doSave();
 		});
 
 		this._eleRmBadge = ee`<span class="dm-journey__rm-badge" aria-live="polite"></span>`;
@@ -174,7 +181,13 @@ class JourneyTrackerRoot {
 			.onn("click", () => this._setRm(this._state.riskModifier + 1, "Manual +1"));
 
 		const btnReset = ee`<button class="ve-btn ve-btn-danger ve-btn-xs" title="Reset RM to 0" aria-label="Reset Risk Modifier">Reset</button>`
-			.onn("click", () => this._setRm(0, "Reset"));
+			.onn("click", () => {
+				this._setRm(0, "Reset");
+				/* Re-baseline derived bookkeeping so a later activity edit doesn't re-add old RM. */
+				this._reconcileRm({rebaseline: true});
+				this._reRenderCurrentTab();
+				this._doSave();
+			});
 
 		/* Pace */
 		const elePace = this._renderPaceSelector();
@@ -191,6 +204,7 @@ class JourneyTrackerRoot {
 		const btnRollMode = ee`<button class="ve-btn ve-btn-xs ${isTotal ? "ve-btn-warning" : "ve-btn-default"}  dm-journey__roll-mode-btn" title="Toggle between entering raw d20 rolls (system adds bonus) or final totals (player already added bonus)">${isTotal ? "Rolls = Total" : "Rolls = d20"}</button>`;
 		btnRollMode.onn("click", () => {
 			this._state.rollMode = this._state.rollMode === "raw" ? "total" : "raw";
+			this._reconcileRm({reason: "Roll mode changed"});
 			this._reRenderCurrentTab();
 			this._renderHeader_update();
 			this._doSave();
@@ -265,6 +279,8 @@ class JourneyTrackerRoot {
 			radio.onn("change", () => {
 				this._state.travelPace = pace.id;
 				renderDetails();
+				/* Pace changes DCs (navigate/scout) and gates stealth RM (J2) — recompute all RM. */
+				this._reconcileRm({reason: `Pace \u2192 ${pace.label}`});
 				this._reRenderCurrentTab();
 				this._doSave();
 			});
@@ -521,6 +537,7 @@ class JourneyTrackerRoot {
 			}
 			this._updateWeatherBadge();
 			this._applyWeatherPaceRestriction();
+			this._reconcileRm({reason: "Weather changed"});
 			this._reRenderCurrentTab();
 			this._doSave();
 		});
@@ -532,6 +549,7 @@ class JourneyTrackerRoot {
 		const cbxPerSeg = ee`<input type="checkbox" ${w.perSegment ? "checked" : ""}>`;
 		cbxPerSeg.onn("change", () => {
 			w.perSegment = cbxPerSeg.prop("checked");
+			this._reconcileRm({reason: "Per-segment weather toggled"});
 			this._renderArea();
 			this._renderJourney();
 			this._doSave();
@@ -562,6 +580,7 @@ class JourneyTrackerRoot {
 				const idx = i;
 				segSel.onn("change", () => {
 					w.segmentWeather[idx] = segSel.val();
+					this._reconcileRm({reason: "Segment weather changed"});
 					this._renderJourney();
 					this._doSave();
 				});
@@ -745,6 +764,7 @@ class JourneyTrackerRoot {
 		const iptDc = ee`<input type="number" class="ve-form-control ve-input-xs dm-journey__wcustom-num" value="${ct.dcMod}" min="-5" max="10" aria-label="DC modifier">`;
 		iptDc.onn("change", () => {
 			ct.dcMod = parseInt(iptDc.val(), 10) || 0;
+			this._reconcileRm({reason: `Custom weather DC (${ct.label})`});
 			this._doSave();
 		});
 
@@ -783,6 +803,7 @@ class JourneyTrackerRoot {
 			/* Reset current weather if it was this type */
 			if (this._state.weather.current === ct.key) this._state.weather.current = "clear";
 			this._state.weather.customTypes.splice(index, 1);
+			this._reconcileRm({reason: `Deleted weather (${ct.label})`});
 			this._updateWeatherBadge();
 			this._renderArea();
 			this._doSave();
@@ -865,6 +886,7 @@ class JourneyTrackerRoot {
 
 		this._updateWeatherBadge();
 		this._applyWeatherPaceRestriction();
+		this._reconcileRm({reason: "Weather rolled"});
 		this._reRenderCurrentTab();
 		this._doSave();
 	}
@@ -996,7 +1018,7 @@ class JourneyTrackerRoot {
 		sel.onn("change", () => {
 			slot.playerId = sel.val();
 			slot.rollResult = "";
-			this._applyStealthGroupRm(seg);
+			this._reconcileRm({reason: "Stealth updated"});
 			this._renderJourney();
 			this._doSave();
 		});
@@ -1013,7 +1035,7 @@ class JourneyTrackerRoot {
 		const iptResult = ee`<input type="number" class="ve-form-control ve-input-xs dm-journey__roll-input" placeholder="${isTotalMode ? "Total" : "d20"}" value="${slot.rollResult || ""}" aria-label="Stealth roll">`;
 		iptResult.onn("change", () => {
 			slot.rollResult = iptResult.val()?.trim() || "";
-			this._applyStealthGroupRm(seg);
+			this._reconcileRm({reason: "Stealth updated"});
 			this._renderJourney();
 			this._doSave();
 		});
@@ -1033,7 +1055,7 @@ class JourneyTrackerRoot {
 		const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xs" title="Remove hider" aria-label="Remove hider">\u00d7</button>`;
 		btnRemove.onn("click", () => {
 			seg.stealthSlots.splice(ix, 1);
-			this._applyStealthGroupRm(seg);
+			this._reconcileRm({reason: "Stealth updated"});
 			this._renderJourney();
 			this._doSave();
 		});
@@ -1075,20 +1097,6 @@ class JourneyTrackerRoot {
 		const RM_MAP = {critSuccess: -2, success: -1, fail: 0, critFail: 2};
 		const rmDelta = outcome ? RM_MAP[outcome] : 0;
 		return {rolls, outcome, rmDelta, count: passResults.length};
-	}
-
-	/** Apply the net RM change from the stealth Group Check (single logged net change). */
-	_applyStealthGroupRm (seg) {
-		const prev = seg.stealthGroupRm || 0;
-		const {outcome, rmDelta} = this._computeStealthGroup(seg);
-		seg.stealthGroupRm = rmDelta;
-		const net = rmDelta - prev;
-		if (!net) return;
-		const LABELS = {critSuccess: "Critical Success", success: "Success", fail: "Failure", critFail: "Critical Failure"};
-		const reason = outcome
-			? `Stealth Group Check ${LABELS[outcome]}: net ${net > 0 ? "+" : ""}${net} RM`
-			: "Stealth Group Check cleared";
-		this._setRm(this._state.riskModifier + net, reason);
 	}
 
 	/** Group-check readout beneath the hider rows. */
@@ -1200,6 +1208,8 @@ class JourneyTrackerRoot {
 		btn.onn("click", () => {
 			segOrCamp.encounterResolved = true;
 			this._setRm(0, "Intense-Range encounter resolved");
+			/* Re-baseline derived bookkeeping so a later activity edit doesn't re-add old RM. */
+			this._reconcileRm({rebaseline: true});
 			onUpdate();
 		});
 		return ee`<div class="dm-journey__intense-reset">
@@ -1284,6 +1294,8 @@ class JourneyTrackerRoot {
 			} else if (!camp.campfireActive && wasActive) {
 				this._setRm(this._state.riskModifier - 1, "Campfire extinguished (−1)");
 			}
+			/* Campfire also shifts the Hide Camp DC (+2) → recompute camp activity group RM. */
+			this._reconcileRm({reason: "Campfire toggled"});
 			this._renderCamp();
 			this._doSave();
 		});
@@ -1478,27 +1490,12 @@ class JourneyTrackerRoot {
 		const selTitle = actDef?.desc || "";
 		const sel = ee`<select class="ve-form-control ve-input-xs dm-journey__activity-sel" aria-label="Activity for ${this._escAttr(player.name)}" title="${this._escAttr(selTitle)}"><option value="">\u2014 None \u2014</option>${optionsHtml}</select>`;
 		sel.onn("change", () => {
-			const oldDef = activityList.find(a => a.id === act.activity);
-			/* Undo all RM applied from this slot */
-			const totalUndo = (act._rmAlwaysApplied || 0) + (act._rmRollApplied || 0);
-			if (totalUndo) {
-				this._setRm(this._state.riskModifier - totalUndo, `Undo ${oldDef?.label || "activity"} (${player.name})`);
-			}
-
-			/* Switch to new activity */
+			/* Switch to the new activity; RM is recomputed wholesale by _reconcileRm (no manual undo). */
 			act.activity = sel.val();
 			act.rollResult = "";
 			act.customName = act.activity === "custom" ? (act.customName || "") : "";
-			act._rmAlwaysApplied = 0;
-			act._rmRollApplied = 0;
 			act._critOverride = null;
-
-			/* Auto-apply rmAlways for the new activity */
-			const newDef = activityList.find(a => a.id === act.activity);
-			if (newDef?.rmAlways) {
-				act._rmAlwaysApplied = newDef.rmAlways;
-				this._setRm(this._state.riskModifier + newDef.rmAlways, `${newDef.label} (${player.name}): auto ${newDef.rmAlways > 0 ? "+" : ""}${newDef.rmAlways} RM`);
-			}
+			this._reconcileRm({reason: `Activity changed (${player.name})`});
 			this._reRenderCurrentTab();
 			this._doSave();
 		});
@@ -1537,6 +1534,7 @@ class JourneyTrackerRoot {
 			const selSkill = ee`<select class="ve-form-control ve-input-xxs dm-journey__skill-choice" aria-label="Skill for ${this._escAttr(actDef.label)}" title="Skill used (auto-picks the best by default)"><option value="" ${!act.skillChoice ? "selected" : ""}>Auto${chosenSkill ? ` (${this._fmtSkillName(chosenSkill)})` : ""}</option>${optsHtml}</select>`;
 			selSkill.onn("change", () => {
 				act.skillChoice = selSkill.val() || null;
+				this._reconcileRm({reason: `Skill changed (${player.name})`});
 				this._reRenderCurrentTab();
 				this._doSave();
 			});
@@ -1583,8 +1581,9 @@ class JourneyTrackerRoot {
 		btnCrit.onn("click", () => {
 			const curIdx = CRIT_CYCLE.indexOf(act._critOverride || null);
 			act._critOverride = CRIT_CYCLE[(curIdx + 1) % CRIT_CYCLE.length];
-			/* Re-evaluate RM for this roll with the new crit state */
-			this._applyActivityRollRm(act, actDef, player, ptChar, dc, impossible, isTotalMode, activities, allPlayers, activityList);
+			/* Re-evaluate RM for this roll with the new crit state. */
+			this._logActivityRoll(act, actDef, player, ptChar, dc, impossible, isTotalMode, activities, allPlayers, activityList);
+			this._reconcileRm({reason: `Crit toggle ${actDef?.label || "activity"} (${player.name})`});
 			this._reRenderCurrentTab();
 			this._doSave();
 		});
@@ -1594,7 +1593,8 @@ class JourneyTrackerRoot {
 		iptResult.onn("change", () => {
 			act.rollResult = iptResult.val()?.trim() || "";
 			act._critOverride = isTotalMode ? (act._critOverride || null) : null;
-			this._applyActivityRollRm(act, actDef, player, ptChar, dc, impossible, isTotalMode, activities, allPlayers, activityList);
+			this._logActivityRoll(act, actDef, player, ptChar, dc, impossible, isTotalMode, activities, allPlayers, activityList);
+			this._reconcileRm({reason: `${player.name} rolled ${actDef?.label || "activity"}`});
 			this._reRenderCurrentTab();
 			this._doSave();
 		});
@@ -1686,17 +1686,15 @@ class JourneyTrackerRoot {
 		</div>`;
 	}
 
-	/* ---- Activity roll RM evaluation (unified for initial roll and crit cycle) ---- */
+	/* ---- Activity roll logging (RM itself is handled centrally by _reconcileRm) ---- */
 
-	_applyActivityRollRm (act, actDef, player, ptChar, dc, impossible, isTotalMode, activities, allPlayers, activityList) {
-		/* Undo previous roll-based RM */
-		if (act._rmRollApplied) {
-			this._setRm(this._state.riskModifier - act._rmRollApplied, `Undo roll ${actDef?.label || "?"} (${player.name})`);
-			act._rmRollApplied = 0;
-		}
-
-		const rawVal = act.rollResult;
-		const rollNum = parseInt(rawVal, 10);
+	/**
+	 * Append a per-roll entry to the activity log describing the individual result. RM changes are
+	 * NOT applied here — {@link _reconcileRm} is the single authority for derived Risk Modifier — so
+	 * this only records the roll and flags a successful forage.
+	 */
+	_logActivityRoll (act, actDef, player, ptChar, dc, impossible, isTotalMode, activities, allPlayers, activityList) {
+		const rollNum = parseInt(act.rollResult, 10);
 		if (isNaN(rollNum) || !getActivitySkills(actDef).length || dc == null || impossible) return;
 
 		const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef, act.skillChoice) : {total: 0};
@@ -1708,21 +1706,10 @@ class JourneyTrackerRoot {
 			: `${player.name} \u2014 ${actDef.label}: d20(${rollNum}) ${this._fmtBonus(bonusInfo.total)} = ${total} vs DC ${dc}`;
 
 		const OUTCOME_LABELS = {critSuccess: "Critical Success", success: "Success", fail: "Failure", critFail: "Critical Failure"};
-		const label = OUTCOME_LABELS[outcome];
-		const perPlayerCount = actDef.critSuccessPerPlayer ? this._countPlayersWithActivity(actDef.id, activities, allPlayers) : 1;
-		const rmDelta = rmDeltaForOutcome(actDef, outcome, {perPlayerCount});
-		if (rmDelta) {
-			this._setRm(this._state.riskModifier + rmDelta, `${actDef.label} ${label} (${player.name}): ${rmDelta > 0 ? "+" : ""}${rmDelta} RM`);
-		}
-		this._addLog("activity", `${logStr} \u2192 ${label}${rmDelta ? ` (RM ${rmDelta > 0 ? "+" : ""}${rmDelta})` : ""}`);
+		this._addLog("activity", `${logStr} \u2192 ${OUTCOME_LABELS[outcome]}`);
 
-		/* Forage success: track that rations were gained (DM enters amount manually or we note it) */
-		if (actDef.id === "forage" && (outcome === "success" || outcome === "critSuccess")) {
-			if (!act._forageLogged) {
-				act._forageLogged = true;
-				/* Don't auto-add a random amount — let the result cell prompt the DM */
-			}
-		}
+		/* Forage success: flag that rations may be gained (DM enters the amount from the result cell). */
+		if (actDef.id === "forage" && (outcome === "success" || outcome === "critSuccess")) act._forageLogged = true;
 	}
 
 	/** Classify a roll as critSuccess/success/fail/critFail. */
@@ -1926,6 +1913,7 @@ class JourneyTrackerRoot {
 			const val = Math.max(1, Math.min(30, parseInt(iptBaseDc.val(), 10) || 10));
 			area.baseDc = val;
 			iptBaseDc.val(val);
+			this._reconcileRm({reason: "Base DC changed"});
 			this._reRenderCurrentTab();
 			this._doSave();
 		});
@@ -2145,38 +2133,194 @@ class JourneyTrackerRoot {
 	}
 
 	/**
-	 * Undo all RM contributions from a player's activity slots (journey segments + camp),
-	 * and drop the player from any stealth Group Checks (recomputing each affected segment).
+	 * Remove a player from all activity + stealth group checks, netting out every derived RM
+	 * contribution they were part of. Works by neutralising the player's activity slots (activity →
+	 * none) and dropping them from stealth, then running the central {@link _reconcileRm}, which
+	 * recomputes each affected group without them. Finally the emptied slot data is discarded.
+	 * (The caller removes the player from the roster.)
 	 */
 	_undoPlayerRm (player) {
-		let total = 0;
-		/* Journey segment activities */
-		for (const seg of this._state.journey.segments) {
-			const slots = seg.activities?.[player.id];
-			if (slots) {
-				const slotArr = Array.isArray(slots) ? slots : [slots];
-				for (const act of slotArr) {
-					total += (act._rmAlwaysApplied || 0) + (act._rmRollApplied || 0);
-				}
+		const neutralise = (container) => {
+			const slots = container?.activities?.[player.id];
+			if (!Array.isArray(slots)) return;
+			for (const slot of slots) {
+				if (!slot || typeof slot !== "object") continue;
+				slot.activity = "";
+				slot.rollResult = "";
+				slot._critOverride = null;
 			}
-		}
-		/* Camp */
-		const campSlots = this._state.camp.activities?.[player.id];
-		if (campSlots) {
-			const slotArr = Array.isArray(campSlots) ? campSlots : [campSlots];
-			for (const campAct of slotArr) {
-				total += (campAct._rmAlwaysApplied || 0) + (campAct._rmRollApplied || 0);
-			}
-		}
+		};
 
-		if (total) this._setRm(this._state.riskModifier - total, `Undo all RM from ${player.name}`);
-
-		/* Remove the player from stealth Group Checks and recompute each affected segment. */
 		for (const seg of this._state.journey.segments) {
-			const before = (seg.stealthSlots || []).length;
 			seg.stealthSlots = (seg.stealthSlots || []).filter(slot => slot.playerId !== player.id);
-			if (seg.stealthSlots.length !== before) this._applyStealthGroupRm(seg);
+			neutralise(seg);
 		}
+		neutralise(this._state.camp);
+
+		this._reconcileRm({reason: `Removed ${player.name}`});
+
+		/* Discard the now-empty slot data so it doesn't linger as an orphan in saved state. */
+		for (const seg of this._state.journey.segments) { if (seg.activities) delete seg.activities[player.id]; }
+		if (this._state.camp.activities) delete this._state.camp.activities[player.id];
+	}
+
+	/**
+	 * Single source of truth for all *derived* Risk-Modifier contributions — activity group-check
+	 * roll RM, per-slot always-on RM, and stealth group checks — across every journey segment and the
+	 * camp. Each source's correct value is recomputed and net-diffed against its previously-recorded
+	 * contribution, then one aggregate {@link _setRm} is applied. This makes RM idempotent and immune
+	 * to the double-count / stale-value bugs of the old per-slot imperative apply/undo (Bug 3 J1/J2).
+	 *
+	 * @param {object}  [opts]
+	 * @param {boolean} [opts.rebaseline]  When true, records are re-synced to their computed values
+	 *   WITHOUT changing `riskModifier` — used on load and after a manual RM override (Reset / Manual
+	 *   set / Intense reset) so subsequent edits apply as relative deltas from the manual base.
+	 * @param {string}  [opts.reason]      Log reason for the aggregate change.
+	 */
+	_reconcileRm ({rebaseline = false, reason = "Recalculated activity RM"} = {}) {
+		const netRef = {net: 0};
+
+		this._state.journey.segments.forEach((seg, i) => {
+			this._reconcileContainer(seg, JOURNEY_ACTIVITIES, i, rebaseline, netRef);
+			/* Stealth group check only contributes at Slow pace (J2: zero-and-keep otherwise). */
+			const prevStealth = seg.stealthGroupRm || 0;
+			const targetStealth = this._state.travelPace === "slow" ? this._computeStealthGroup(seg).rmDelta : 0;
+			if (!rebaseline) netRef.net += targetStealth - prevStealth;
+			seg.stealthGroupRm = targetStealth;
+		});
+
+		this._reconcileContainer(this._state.camp, CAMP_ACTIVITIES, undefined, rebaseline, netRef);
+
+		if (!rebaseline && netRef.net) this._setRm(this._state.riskModifier + netRef.net, reason);
+	}
+
+	/**
+	 * Reconcile one activity container (a journey segment or the camp). Updates the container's
+	 * `activityGroupRm` map (roll RM, keyed by activity id) and each slot's `_rmAlwaysApplied`
+	 * (always-on RM), refreshes the display-only `_rmRollApplied` mirror, and accumulates the net RM
+	 * change into `netRef.net`.
+	 */
+	_reconcileContainer (container, activityList, segmentIndex, rebaseline, netRef) {
+		if (!container) return;
+		const activities = container.activities || (container.activities = {});
+		container.activityGroupRm = container.activityGroupRm || {};
+		const allPlayers = this._state.players;
+
+		/* Group slots by activity id; reset display mirrors; reconcile per-slot always-on RM. */
+		const byActivity = {};
+		for (const p of allPlayers) {
+			const slots = activities[p.id];
+			if (!Array.isArray(slots)) continue;
+			for (const slot of slots) {
+				if (!slot || typeof slot !== "object") continue;
+				slot._rmRollApplied = 0; /* display mirror — recomputed below */
+
+				const adef = activityList.find(a => a.id === slot.activity);
+				const targetAlways = adef?.rmAlways || 0;
+				const prevAlways = slot._rmAlwaysApplied || 0;
+				if (!rebaseline) netRef.net += targetAlways - prevAlways;
+				slot._rmAlwaysApplied = targetAlways;
+
+				if (slot.activity) (byActivity[slot.activity] = byActivity[slot.activity] || []).push({slot, playerId: p.id});
+			}
+		}
+
+		/* Reconcile each present activity group's roll RM. */
+		for (const [activityId, entries] of Object.entries(byActivity)) {
+			const target = this._computeGroupRmForActivity(activityId, entries, activityList, activities, allPlayers, segmentIndex);
+			const prev = container.activityGroupRm[activityId] || 0;
+			if (!rebaseline) netRef.net += target - prev;
+			container.activityGroupRm[activityId] = target;
+
+			/* Display mirror: show the whole group's RM once, on the first rolled participant. */
+			const owner = entries.find(e => !Number.isNaN(parseInt(e.slot.rollResult, 10)));
+			if (owner) owner.slot._rmRollApplied = target;
+		}
+
+		/* Drop stale map entries for activities no longer present in the container. */
+		for (const activityId of Object.keys(container.activityGroupRm)) {
+			if (byActivity[activityId]) continue;
+			const prev = container.activityGroupRm[activityId] || 0;
+			if (!rebaseline) netRef.net -= prev;
+			delete container.activityGroupRm[activityId];
+		}
+	}
+
+	/** Build the pure participant-slot list for an activity group and delegate to computeActivityGroupRm. */
+	_computeGroupRmForActivity (activityId, entries, activityList, activities, allPlayers, segmentIndex) {
+		const actDef = activityList.find(a => a.id === activityId);
+		if (!actDef) return 0;
+		const {dc, impossible} = this._getEffectiveDc(activityId, activityList, activities, allPlayers, segmentIndex);
+		if (dc == null || impossible) return 0;
+
+		/* Group-check participants are unique PLAYERS, not slots — collapse a player's multiple slots of
+		 * the same activity to one entry (prefer a rolled slot) so Scout/crit scaling counts players. */
+		const byPlayer = new Map();
+		for (const e of entries) {
+			const existing = byPlayer.get(e.playerId);
+			const eRolled = !Number.isNaN(parseInt(e.slot.rollResult, 10));
+			if (!existing) { byPlayer.set(e.playerId, e); continue; }
+			const existingRolled = !Number.isNaN(parseInt(existing.slot.rollResult, 10));
+			if (eRolled && !existingRolled) byPlayer.set(e.playerId, e);
+		}
+
+		const isTotalMode = this._state.rollMode === "total";
+		const ptChars = this._getPartyTrackerCharacters();
+		const participantSlots = [...byPlayer.values()].map(({slot, playerId}) => {
+			const rollNum = parseInt(slot.rollResult, 10);
+			if (Number.isNaN(rollNum)) return {rollNum: null, total: null, critOverride: null};
+			const ptChar = ptChars.find(c => c.id === playerId);
+			const bonusInfo = ptChar ? JourneyTrackerRoot._getActivityBonusFromData(ptChar, actDef, slot.skillChoice) : {total: 0};
+			const total = isTotalMode ? rollNum : rollNum + bonusInfo.total;
+			return {rollNum, total, critOverride: slot._critOverride || null};
+		});
+
+		return computeActivityGroupRm({actDef, dc, isTotalMode, participantSlots});
+	}
+
+	/** A fresh, fully-shaped camp object (used by New Day and camp resets). */
+	_makeEmptyCamp () {
+		return {
+			campfireActive: false,
+			siteDescription: "",
+			activities: {},
+			activityGroupRm: {},
+			guardSlots: [],
+			riskRoll: null,
+			riskRollTotal: null,
+			riskRollOverride: null,
+			rmAtRoll: 0,
+			encounterResolved: false,
+		};
+	}
+
+	/**
+	 * On load, re-sync the derived-RM bookkeeping (per-container `activityGroupRm` maps + per-slot
+	 * `_rmAlwaysApplied` / `_rmRollApplied` mirrors) to the values the current activity data implies,
+	 * WITHOUT rewriting the DM's saved `riskModifier`. A legacy save carrying the old double-count
+	 * keeps its saved RM (self-heals on the next New Day full reset); new edits net-diff from the
+	 * corrected baseline so they never double-count again.
+	 */
+	_migrateRmBookkeeping () {
+		/* Prune orphan slot data for players no longer in the roster. `_reconcileContainer` only
+		 * iterates roster players, but `sumContainerRm` (used on segment trim) counts every slot —
+		 * a lingering orphan `_rmAlwaysApplied` would otherwise be subtracted without ever having been
+		 * reconciled in. Removing them keeps the two views of a container's RM consistent. */
+		const rosterIds = new Set(this._state.players.map(p => p.id));
+		const pruneContainer = (container) => {
+			if (!container?.activities) return;
+			for (const pid of Object.keys(container.activities)) {
+				if (!rosterIds.has(pid)) delete container.activities[pid];
+			}
+		};
+		for (const seg of this._state.journey.segments) {
+			seg.activityGroupRm = seg.activityGroupRm || {};
+			if (Array.isArray(seg.stealthSlots)) seg.stealthSlots = seg.stealthSlots.filter(s => rosterIds.has(s.playerId));
+			pruneContainer(seg);
+		}
+		this._state.camp.activityGroupRm = this._state.camp.activityGroupRm || {};
+		pruneContainer(this._state.camp);
+		this._reconcileRm({rebaseline: true});
 	}
 
 	_updateRmDisplay () {
@@ -2230,14 +2374,21 @@ class JourneyTrackerRoot {
 			}
 		}
 
-		/* Remove departed PT characters */
+		/* Remove departed PT characters: net out their RM contributions BEFORE dropping them from
+		 * the roster (reconcile needs the roster to still include them to zero their groups). */
 		const removed = [];
-		this._state.players = this._state.players.filter(p => {
-			if (!p.isFromPartyTracker) return true;
-			if (ptIds.has(p.id)) return true;
+		const departed = this._state.players.filter(p => p.isFromPartyTracker && !ptIds.has(p.id));
+		for (const p of departed) {
 			removed.push(p.name);
-			return false;
-		});
+			this._undoPlayerRm(p);
+		}
+		if (departed.length) {
+			const departedIds = new Set(departed.map(p => p.id));
+			this._state.players = this._state.players.filter(p => !departedIds.has(p.id));
+		}
+
+		/* Recompute derived RM for name/bonus changes on the remaining synced characters. */
+		this._reconcileRm({reason: "Party sync"});
 
 		/* Log sync */
 		const parts = [];
@@ -2558,15 +2709,7 @@ class JourneyTrackerRoot {
 
 		this._state.riskModifier = 0;
 		this._state.journey.segments = [];
-		this._state.camp = {
-			campfireActive: false,
-			activities: {},
-			guardSlots: [],
-			riskRoll: null,
-			riskRollTotal: null,
-			riskRollOverride: null,
-			rmAtRoll: 0,
-		};
+		this._state.camp = this._makeEmptyCamp();
 		this._ensureSegments();
 		this._addLog("reset", `Day ${dayNumber} completed. Starting Day ${dayNumber + 1} in ${areaName}`);
 		this._updateRmDisplay();
@@ -2612,7 +2755,17 @@ class JourneyTrackerRoot {
 		while (this._state.journey.segments.length < num) {
 			this._state.journey.segments.push(this._makeEmptySegment());
 		}
-		this._state.journey.segments.length = num;
+		if (this._state.journey.segments.length > num) {
+			/* Subtract the RM contributions of the segments about to be dropped BEFORE truncating —
+			 * reconcile only sees surviving segments, so trimmed ones must be netted out here. */
+			const removed = this._state.journey.segments.slice(num);
+			let total = 0;
+			for (const seg of removed) total += sumContainerRm(seg);
+			this._state.journey.segments.length = num;
+			if (total) this._setRm(this._state.riskModifier - total, "Segments trimmed");
+			/* Re-sync bookkeeping baselines for the survivors (no RM change expected). */
+			this._reconcileRm({rebaseline: true});
+		}
 	}
 
 	/** Get the weather key for a given segment (or the global weather). */
@@ -2627,6 +2780,7 @@ class JourneyTrackerRoot {
 	_makeEmptySegment () {
 		return {
 			activities: {},
+			activityGroupRm: {},
 			stealthSlots: [],
 			stealthGroupRm: 0,
 			riskRoll: null,
@@ -2769,6 +2923,7 @@ class JourneyTrackerRoot {
 			journey: {
 				segments: (toLoad.journey?.segments || []).map(seg => ({
 					activities: JourneyTrackerRoot._migrateActivities(seg.activities),
+					activityGroupRm: {...(seg.activityGroupRm || {})},
 					stealthSlots: (seg.stealthSlots || []).map(s => ({...s})),
 					stealthGroupRm: seg.stealthGroupRm ?? 0,
 					riskRoll: seg.riskRoll ?? null,
@@ -2783,6 +2938,7 @@ class JourneyTrackerRoot {
 				campfireActive: toLoad.camp?.campfireActive || false,
 				siteDescription: toLoad.camp?.siteDescription || "",
 				activities: JourneyTrackerRoot._migrateActivities(toLoad.camp?.activities),
+				activityGroupRm: {...(toLoad.camp?.activityGroupRm || {})},
 				guardSlots: (toLoad.camp?.guardSlots || []).map(s => ({...s})),
 				riskRoll: toLoad.camp?.riskRoll ?? null,
 				riskRollTotal: toLoad.camp?.riskRollTotal ?? null,
@@ -2823,6 +2979,8 @@ class JourneyTrackerRoot {
 				startDate: toLoad.timeline?.startDate || "",
 			},
 		};
+
+		this._migrateRmBookkeeping();
 	}
 
 	getSaveableState () {
@@ -2847,6 +3005,7 @@ class JourneyTrackerRoot {
 			journey: {
 				segments: this._state.journey.segments.map(seg => ({
 					activities: JourneyTrackerRoot._cloneActivities(seg.activities),
+					activityGroupRm: {...(seg.activityGroupRm || {})},
 					stealthSlots: (seg.stealthSlots || []).map(s => ({...s})),
 					stealthGroupRm: seg.stealthGroupRm ?? 0,
 					riskRoll: seg.riskRoll,
@@ -2861,6 +3020,7 @@ class JourneyTrackerRoot {
 				campfireActive: this._state.camp.campfireActive,
 				siteDescription: this._state.camp.siteDescription || "",
 				activities: JourneyTrackerRoot._cloneActivities(this._state.camp.activities),
+				activityGroupRm: {...(this._state.camp.activityGroupRm || {})},
 				guardSlots: this._state.camp.guardSlots.map(s => ({...s})),
 				riskRoll: this._state.camp.riskRoll,
 				riskRollTotal: this._state.camp.riskRollTotal,

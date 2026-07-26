@@ -254,28 +254,47 @@ class PartyTrackerRoot {
 	}
 
 	_openSettingsMenu (evt) {
-		const {menu, doClose} = this._buildSettingsModal();
+		const trigger = evt.currentTarget || evt.target;
+		const {menu, doClose: doRemove} = this._buildSettingsModal();
 		menu.appendTo(document.body);
 
-		const rect = evt.target.getBoundingClientRect();
+		const rect = trigger.getBoundingClientRect();
 		menu.css({
 			position: "fixed",
 			top: `${rect.bottom + 2}px`,
 			right: `${window.innerWidth - rect.right}px`,
-			zIndex: 9999,
 		});
 
-		const onClickOutside = (e) => {
-			if (!menu.contains(e.target) && !evt.target.contains(e.target)) {
-				doClose();
-				document.removeEventListener("click", onClickOutside, true);
-			}
+		const prevFocus = document.activeElement;
+		let isClosed = false;
+		const doClose = () => {
+			if (isClosed) return;
+			isClosed = true;
+			document.removeEventListener("click", onClickOutside, true);
+			document.removeEventListener("keydown", onKeyDown, true);
+			doRemove();
+			/* Restore focus to the trigger if it's still in the document. */
+			if (prevFocus?.isConnected && typeof prevFocus.focus === "function") prevFocus.focus();
 		};
-		setTimeout(() => document.addEventListener("click", onClickOutside, true), 0);
+
+		const onClickOutside = (e) => {
+			if (!menu.contains(e.target) && !trigger.contains(e.target)) doClose();
+		};
+		const onKeyDown = (e) => {
+			if (e.key === "Escape") { e.stopPropagation(); doClose(); }
+		};
+
+		setTimeout(() => {
+			document.addEventListener("click", onClickOutside, true);
+			document.addEventListener("keydown", onKeyDown, true);
+			/* Move focus into the dialog for keyboard + screen-reader users. */
+			const firstCtrl = menu.querySelector("input, select, button, [tabindex]");
+			if (firstCtrl) firstCtrl.focus();
+		}, 0);
 	}
 
 	_buildSettingsModal () {
-		const wrp = ee`<div class="dm-party__settings" role="dialog" aria-label="Party Tracker Settings"></div>`;
+		const wrp = ee`<div class="dm-party__settings dm-party__settings--floating" role="dialog" aria-modal="false" aria-label="Party Tracker Settings"></div>`;
 
 		ee`<div class="dm-party__settings-title">Party Tracker Settings</div>`.appendTo(wrp);
 

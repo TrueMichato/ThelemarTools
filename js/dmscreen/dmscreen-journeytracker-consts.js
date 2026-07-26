@@ -478,6 +478,7 @@ export const DEFAULT_STATE = () => ({
 		campfireActive: false,
 		siteDescription: "",
 		activities: {},
+		activityGroupRm: {},
 		guardSlots: [],
 		riskRoll: null,
 		riskRollTotal: null,
@@ -594,6 +595,80 @@ export function rmDeltaForOutcome (actDef, outcome, {perPlayerCount = 1} = {}) {
 		case "fail": return actDef.rmOnFail ?? 0;
 		default: return 0;
 	}
+}
+
+/**
+ * Compute the net Risk-Modifier contribution for a single activity's participant group, as a pure
+ * function of the current rolls. This is the single source of truth for activity *roll* RM — it
+ * replaces the old per-slot imperative apply/undo, which double-counted group checks (the group
+ * delta was applied once per participant) and went stale (early rollers kept their individual-check
+ * RM when a later roll flipped the group outcome).
+ *
+ * Model:
+ *  - No participant has rolled yet → 0.
+ *  - 2+ participants, all rolled → ONE group outcome ({@link evaluateGroupCheck}), scaled by the
+ *    participant count only for per-player-crit activities (Scout).
+ *  - 2+ participants, only some rolled → the sum of each rolled slot's individual outcome delta
+ *    (an interim value shown while the group check completes).
+ *  - Single participant → that slot's individual outcome delta.
+ *
+ * Note: crit overrides (total mode) only influence single-participant activities; a completed group
+ * check derives its crit purely from all-pass / all-fail, mirroring {@link evaluateGroupCheck}.
+ *
+ * @param {object}   opts
+ * @param {object}   opts.actDef            Activity definition (rm* fields, critSuccessPerPlayer).
+ * @param {number|null} opts.dc             Effective DC (null → 0 contribution).
+ * @param {boolean} [opts.isTotalMode]      True when rolls are entered as final totals.
+ * @param {Array<{rollNum:(number|null), total:(number|null), critOverride:(string|null)}>} [opts.participantSlots]
+ * @returns {number} Net RM contribution for this activity group.
+ */
+export function computeActivityGroupRm ({actDef, dc, isTotalMode = false, participantSlots = []}) {
+	if (!actDef || dc == null) return 0;
+	if (!getActivitySkills(actDef).length) return 0;
+
+	const rolled = participantSlots.filter(s => s && s.rollNum != null && !Number.isNaN(s.rollNum));
+	if (!rolled.length) return 0;
+
+	const singleDelta = (s) => {
+		const outcome = (isTotalMode && s.critOverride)
+			? s.critOverride
+			: classifySingleRoll({rollNum: s.rollNum, total: s.total, dc, isTotalMode});
+		return rmDeltaForOutcome(actDef, outcome, {perPlayerCount: 1});
+	};
+
+	const count = participantSlots.length;
+	if (count >= 2) {
+		if (rolled.length === count) {
+			const passResults = rolled.map(s => (s.total ?? 0) >= dc);
+			const groupOutcome = evaluateGroupCheck(passResults);
+			const perPlayerCount = actDef.critSuccessPerPlayer ? count : 1;
+			return rmDeltaForOutcome(actDef, groupOutcome, {perPlayerCount});
+		}
+		return rolled.reduce((sum, s) => sum + singleDelta(s), 0);
+	}
+
+	return singleDelta(rolled[0]);
+}
+
+/**
+ * Sum the total derived Risk-Modifier a single activity container (journey segment or camp) currently
+ * contributes: each activity group's recorded roll RM ({@link computeActivityGroupRm} output stored in
+ * `activityGroupRm`), the stealth group check (`stealthGroupRm`), and every slot's always-on RM
+ * (`_rmAlwaysApplied`). Used to net out a container's RM before it is discarded (e.g. segment trim).
+ * Pure: reads only plain state.
+ * @param {object} container A segment or camp object.
+ * @returns {number}
+ */
+export function sumContainerRm (container) {
+	if (!container) return 0;
+	let total = 0;
+	for (const v of Object.values(container.activityGroupRm || {})) total += v || 0;
+	total += container.stealthGroupRm || 0;
+	for (const slots of Object.values(container.activities || {})) {
+		if (!Array.isArray(slots)) continue;
+		for (const slot of slots) total += (slot && slot._rmAlwaysApplied) || 0;
+	}
+	return total;
 }
 
 /**
