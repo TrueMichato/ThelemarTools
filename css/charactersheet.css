@@ -10808,95 +10808,155 @@ body.has-quickbuild-overlay .toast__container {
 	border-bottom: none;
 }
 
-.charsheet__edit-prof-list {
+/* ========================================================================
+   Proficiency Picker (shared by the main-sheet + play-mode editors)
+   A single keyboard-navigable autocomplete widget — see
+   js/charactersheet/charactersheet-prof-editor.js. Styled with --cs-* tokens so
+   it adapts to Day/Night automatically. Visibility is driven by the
+   `--open` modifier class (never a bare inline `display` that falls back to a
+   stylesheet default — the bug this replaces).
+   ======================================================================== */
+.cs-prof-picker {
 	display: flex;
-	flex-wrap: wrap;
+	flex-direction: column;
 	gap: 0.5rem;
 }
 
-.charsheet__edit-prof-badge {
+.cs-prof-picker__label {
+	font-weight: var(--cs-weight-bold, 700);
+	color: var(--cs-text-primary, #f1f5f9);
+}
+
+.cs-prof-picker__chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	min-height: 1.25rem;
+}
+
+.cs-prof-picker__none {
+	color: var(--cs-text-secondary, #9fadc0);
+	font-style: italic;
+	font-size: 0.85rem;
+}
+
+.cs-prof-picker__chip {
 	display: inline-flex;
 	align-items: center;
+	gap: 0.35rem;
 	max-width: 100%;
 	background: var(--cs-bg-elevated, #334155);
 	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
 	color: var(--cs-text-primary, #f1f5f9);
 	border-radius: var(--cs-radius-sm, 6px);
-	padding: 0.25rem 0.5rem;
+	padding: 0.2rem 0.5rem;
 	font-size: 0.85rem;
 }
 
-.charsheet__edit-prof-remove {
-	margin-left: 0.5rem;
+.cs-prof-picker__chip-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.cs-prof-picker__chip-remove {
+	appearance: none;
+	border: none;
+	background: none;
+	color: inherit;
 	cursor: pointer;
-	opacity: 0.5;
-	font-size: 0.7rem;
+	opacity: 0.55;
+	font-size: 1rem;
+	line-height: 1;
+	padding: 0;
 	transition: opacity 0.15s, color 0.15s;
 }
 
-.charsheet__edit-prof-remove:hover {
+.cs-prof-picker__chip-remove:hover {
 	opacity: 1;
-	color: #dc3545;
+	color: var(--cs-danger, #dc3545);
 }
 
-/* Autocomplete Dropdown - Modern Style */
-.charsheet__autocomplete-dropdown {
+.cs-prof-picker__input-wrap {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.cs-prof-picker__input {
+	flex: 1 1 auto;
+	min-width: 0;
+	padding: 0.4rem 0.6rem;
+	border-radius: var(--cs-radius-sm, 6px);
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.15));
+	background: var(--cs-bg-surface, #1e293b);
+	color: var(--cs-text-primary, #f1f5f9);
+	font-size: 0.9rem;
+}
+
+.cs-prof-picker__input:focus {
+	outline: none;
+	border-color: var(--cs-accent, #6366f1);
+	box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+}
+
+.cs-prof-picker__input--invalid {
+	border-color: var(--cs-danger, #dc3545);
+	box-shadow: 0 0 0 2px rgba(220, 53, 69, 0.3);
+}
+
+.cs-prof-picker__add {
+	flex: 0 0 auto;
+	appearance: none;
+	cursor: pointer;
+	padding: 0.4rem 0.75rem;
+	border-radius: var(--cs-radius-sm, 6px);
+	border: 1px solid var(--cs-accent, #6366f1);
+	background: var(--cs-accent, #6366f1);
+	color: #fff;
+	font-size: 0.85rem;
+	font-weight: var(--cs-weight-semibold, 600);
+}
+
+.cs-prof-picker__add:hover {
+	filter: brightness(1.08);
+}
+
+.cs-prof-picker__dropdown {
 	position: absolute;
 	top: calc(100% + 4px);
 	left: 0;
 	right: 0;
 	background: var(--cs-bg-surface, var(--rgb-bg-alt, #1e1e1e));
 	border: 1px solid var(--cs-border, rgba(99, 102, 241, 0.3));
-	border-radius: var(--cs-radius-lg, 16px);
-	max-height: 280px;
+	border-radius: var(--cs-radius-md, 10px);
+	max-height: 260px;
 	overflow-y: auto;
 	z-index: 1000;
 	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 	display: none;
 }
 
-.charsheet__autocomplete-dropdown.open {
+.cs-prof-picker__dropdown--open {
 	display: block;
 }
 
-.charsheet__autocomplete-item {
-	padding: 0.75rem 1rem;
+.cs-prof-picker__option {
+	padding: 0.5rem 0.75rem;
 	cursor: pointer;
-	display: flex;
-	align-items: center;
-	gap: 0.75rem;
-	transition: background 0.15s;
+	color: var(--cs-text-primary, #f1f5f9);
+	font-size: 0.9rem;
 	border-bottom: 1px solid var(--cs-border, rgba(99, 102, 241, 0.1));
 }
 
-.charsheet__autocomplete-item:last-child {
+.cs-prof-picker__option:last-child {
 	border-bottom: none;
 }
 
-.charsheet__autocomplete-item:hover {
-	background: rgba(99, 102, 241, 0.1);
-}
-
-.charsheet__autocomplete-item-icon {
-	font-size: 1.2rem;
-	opacity: 0.7;
-}
-
-.charsheet__autocomplete-item-content {
-	flex: 1;
-	display: flex;
-	flex-direction: column;
-	gap: 0.125rem;
-}
-
-.charsheet__autocomplete-item-name {
-	font-weight: 600;
-	color: var(--cs-text, white);
-}
-
-.charsheet__autocomplete-item-type {
-	font-size: 0.75rem;
-	color: var(--cs-text-muted, rgba(255, 255, 255, 0.5));
+.cs-prof-picker__option:hover,
+.cs-prof-picker__option--active {
+	background: rgba(99, 102, 241, 0.18);
 }
 
 /* Custom Feature Form - Modern Style */

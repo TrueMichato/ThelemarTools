@@ -15,6 +15,7 @@ import {CharacterSheetCustomAbilities} from "./charactersheet-customabilities.js
 import {CharacterSheetQuickBuild} from "./charactersheet-quickbuild.js";
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 import {CharacterSheetSpellPicker} from "./charactersheet-spell-picker.js";
+import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
 import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
 import {CharacterSheetPlayMode} from "./charactersheet-playmode.js";
 import * as CharacterSheetBuffPickerHelpers from "./charactersheet-buffpicker-helpers.js";
@@ -16489,135 +16490,32 @@ class CharacterSheetPage {
 		const identity = (v) => v;
 
 		const profTypes = [
-			{key: "armor", label: "Armor Proficiencies", getter: "getArmorProficiencies", adder: "addArmorProficiencyCanonical", remover: "removeArmorProficiency", removerByToken: "removeArmorProficiencyVariants", suggestions: suggestions.armor, toToken: armorToToken, toDisplay: armorToDisplay, normalize: (v) => this._state._normalizeArmorProfToken(v)},
+			{key: "armor", label: "Armor Proficiencies", getter: "getArmorProficiencies", adder: "addArmorProficiencyCanonical", remover: "removeArmorProficiency", removerByToken: "removeArmorProficiencyVariants", suggestions: suggestions.armor, toToken: armorToToken, toDisplay: armorToDisplay, normalize: (v) => this._state._normalizeArmorProfToken(v), allowFreeText: false},
 			{key: "weapons", label: "Weapon Proficiencies", getter: "getWeaponProficiencies", adder: "addWeaponProficiency", remover: "removeWeaponProficiency", suggestions: suggestions.weapons, toToken: identity, toDisplay: identity, normalize: null},
 			{key: "tools", label: "Tool Proficiencies", getter: "getToolProficiencies", adder: "addToolProficiency", remover: "removeToolProficiency", suggestions: suggestions.tools, toToken: identity, toDisplay: identity, normalize: null},
 			{key: "languages", label: "Languages", getter: "getLanguages", adder: "addLanguage", remover: "removeLanguage", suggestions: suggestions.languages, toToken: identity, toDisplay: identity, normalize: null},
 		];
 
+		// A single shared, keyboard-navigable autocomplete widget per section so this
+		// modal and the play-mode editor behave identically (see
+		// charactersheet-prof-editor.js). Armor is a closed set (must resolve to a
+		// canonical token); the rest allow custom homebrew entries.
 		const renderSection = (profType) => {
-			const sectionEl = e_({outer: `
-				<div class="charsheet__edit-prof-section mb-3">
-					<label class="ve-bold mb-1">${profType.label}</label>
-					<div class="charsheet__edit-prof-list mb-2" id="edit-prof-${profType.key}"></div>
-					<div class="ve-flex-v-center" style="position: relative;">
-						<input type="text" class="ve-form-control form-control--minimal mr-2" id="edit-prof-${profType.key}-input" placeholder="Type to search or enter custom...">
-						<button class="ve-btn ve-btn-primary ve-btn-xs" id="edit-prof-${profType.key}-add">Add</button>
-					</div>
-					<div class="charsheet__autocomplete-dropdown" id="edit-prof-${profType.key}-dropdown" style="display: none;"></div>
-				</div>
-			`});
-
-			const listEl = sectionEl.querySelector(`#edit-prof-${profType.key}`);
-			const inputEl = sectionEl.querySelector(`#edit-prof-${profType.key}-input`);
-			const addBtnEl = sectionEl.querySelector(`#edit-prof-${profType.key}-add`);
-			const dropdownEl = sectionEl.querySelector(`#edit-prof-${profType.key}-dropdown`);
-
-			const renderList = () => {
-				const currentItems = this._state[profType.getter]();
-				listEl.innerHTML = "";
-				if (!currentItems.length) {
-					listEl.insertAdjacentHTML("beforeend", `<span class="ve-muted">None</span>`);
-					return;
-				}
-				// Dedupe by normalized token so legacy pollution (e.g. "light" AND
-				// "Light armor" both present) collapses to a single chip. Removing that
-				// chip removes EVERY stored variant that normalizes to the same token,
-				// repairing polluted saves through normal use.
-				const seen = new Set();
-				currentItems.forEach(item => {
-					const normKey = profType.normalize ? profType.normalize(item) : null;
-					if (normKey != null) {
-						if (seen.has(normKey)) return;
-						seen.add(normKey);
-					}
-					const rawName = profType.toDisplay
-						? profType.toDisplay(item)
-						: (typeof item === "string" ? item : (item.full || item.name || item));
-					// Proficiency data can carry embedded @tags (e.g. weapon-category
-					// proficiencies whose `full` reads "…{@filter Finesse or Light|…}
-					// property"). Resolve them to plain text so the chip never leaks raw
-					// tag syntax to the player.
-					const displayName = Renderer.stripTags(String(rawName));
-					const badgeEl = e_({outer: `
-						<span class="charsheet__edit-prof-badge">
-							${displayName}
-							<span class="charsheet__edit-prof-remove glyphicon glyphicon-remove" title="Remove"></span>
-						</span>
-					`});
-					badgeEl.querySelector(".charsheet__edit-prof-remove").addEventListener("click", () => {
-						if (profType.removerByToken) {
-							// Single call removes every stored variant normalizing to this token.
-							this._state[profType.removerByToken](item);
-						} else if (normKey != null) {
-							// Remove all stored variants that normalize to this token.
-							this._state[profType.getter]()
-								.filter(i => profType.normalize(i) === normKey)
-								.forEach(variant => this._state[profType.remover](variant));
-						} else {
-							this._state[profType.remover](item);
-						}
-						renderList();
-					});
-					listEl.append(badgeEl);
-				});
-			};
-			renderList();
-
-			const renderDropdown = (filter = "") => {
-				// Exclude already-present entries by normalized token (armor) or by
-				// lowercased value (others); filter against the DISPLAY label so typing
-				// "armor" still matches the canonical "light" suggestion.
-				const currentKeys = new Set(this._state[profType.getter]().map(i => (
-					profType.normalize
-						? profType.normalize(i)
-						: (typeof i === "string" ? i : i.name || i).toLowerCase()
-				)));
-				const filtered = profType.suggestions.filter(s => {
-					const key = profType.normalize ? profType.normalize(s) : String(s).toLowerCase();
-					if (currentKeys.has(key)) return false;
-					const display = profType.toDisplay ? profType.toDisplay(s) : s;
-					if (filter && !String(display).toLowerCase().includes(filter.toLowerCase())) return false;
-					return true;
-				}).slice(0, 10); // Limit to 10 suggestions
-
-				dropdownEl.innerHTML = "";
-				if (!filtered.length) {
-					dropdownEl.style.display = "none";
-					return;
-				}
-
-				filtered.forEach(suggestion => {
-					const label = profType.toDisplay ? profType.toDisplay(suggestion) : suggestion;
-					const itemEl = e_({outer: `<div class="charsheet__autocomplete-item">${label}</div>`});
-					itemEl.addEventListener("click", () => {
-						this._state[profType.adder](profType.toToken ? profType.toToken(suggestion) : suggestion);
-						inputEl.value = "";
-						dropdownEl.style.display = "none";
-						renderList();
-					});
-					dropdownEl.append(itemEl);
-				});
-				dropdownEl.style.display = "";
-			};
-
-			const addItem = () => {
-				const value = inputEl.value.trim();
-				if (!value) return;
-				this._state[profType.adder](profType.toToken ? profType.toToken(value) : value);
-				inputEl.value = "";
-				dropdownEl.style.display = "none";
-				renderList();
-			};
-
-			inputEl.addEventListener("input", () => renderDropdown(inputEl.value));
-			inputEl.addEventListener("focus", () => renderDropdown(inputEl.value));
-			inputEl.addEventListener("blur", () => setTimeout(() => dropdownEl.style.display = "none", 200)); // Delay to allow click
-			inputEl.addEventListener("keypress", (e) => {
-				if (e.which === 13) addItem();
+			const picker = new CharacterSheetProfPicker({
+				label: profType.label,
+				suggestions: profType.suggestions,
+				getCurrent: () => this._state[profType.getter](),
+				adder: (v) => this._state[profType.adder](v),
+				remover: (v) => this._state[profType.remover](v),
+				removerByToken: profType.removerByToken ? (v) => this._state[profType.removerByToken](v) : null,
+				normalize: profType.normalize,
+				toDisplay: profType.toDisplay,
+				toToken: profType.toToken,
+				allowFreeText: profType.allowFreeText !== false,
+				placeholder: profType.allowFreeText === false ? "Type to search…" : "Type to search or enter custom…",
 			});
-			addBtnEl.addEventListener("click", addItem);
-
+			const sectionEl = e_({outer: `<div class="charsheet__edit-prof-section mb-3"></div>`});
+			sectionEl.append(picker.render());
 			return sectionEl;
 		};
 

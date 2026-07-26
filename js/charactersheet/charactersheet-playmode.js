@@ -7,6 +7,8 @@
  * to existing CharacterSheetPage methods. It creates NO duplicate state.
  */
 
+import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
+
 const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
 const ABILITY_NAMES = {str: "STR", dex: "DEX", con: "CON", int: "INT", wis: "WIS", cha: "CHA"};
 
@@ -5178,58 +5180,104 @@ export class CharacterSheetPlayMode {
 	// ─── Phase D3: Edit Proficiencies Modal ──────────────────────
 
 	_showEditProficienciesModal () {
-		const profs = this._state.getProficiencies();
 		const overlay = this._ce("div", "pm-modal-overlay");
-		const panel = this._ce("div", "pm-modal", overlay);
+		const panel = this._ce("div", "pm-modal pm-modal--prof", overlay);
 
 		const titleEl = this._ce("div", "pm-modal__title", panel);
 		this._setIconLabel(titleEl, "proficiencies", " Edit Proficiencies");
 
 		const subtitle = this._ce("div", "pm-modal__subtitle", panel);
-		subtitle.textContent = "Enter items separated by commas.";
+		subtitle.textContent = "Search and select. Changes apply immediately.";
+
+		// Reuse the shared picker + suggestion sets so play mode behaves identically
+		// to the main-sheet editor and — critically — routes writes through the state
+		// adders (which normalize armor tokens) instead of the old raw `_data` write
+		// that silently bypassed hasArmorProficiency() normalization.
+		const state = this._state;
+		const suggestions = this._page._getProficiencySuggestions();
+		const ARMOR_TOKEN_TO_LABEL = {light: "Light Armor", medium: "Medium Armor", heavy: "Heavy Armor", shields: "Shields"};
+		const armorToDisplay = (v) => {
+			const token = state._normalizeArmorProfToken(v);
+			return ARMOR_TOKEN_TO_LABEL[token] || (typeof v === "string" ? v : (v?.full || v?.name || String(v)));
+		};
+		const identity = (v) => v;
 
 		const categories = [
-			{key: "armor", label: "Armor", value: profs.armor, placeholder: "e.g. Light Armor, Medium Armor, Shields"},
-			{key: "weapons", label: "Weapons", value: profs.weapons, placeholder: "e.g. Simple Weapons, Longswords"},
-			{key: "tools", label: "Tools", value: profs.tools, placeholder: "e.g. Thieves' Tools, Herbalism Kit"},
-			{key: "languages", label: "Languages", value: profs.languages, placeholder: "e.g. Common, Elvish, Dwarvish"},
+			{
+				label: "Armor",
+				suggestions: suggestions.armor,
+				allowFreeText: false,
+				getCurrent: () => state.getArmorProficiencies(),
+				adder: (v) => state.addArmorProficiencyCanonical(v),
+				remover: (v) => state.removeArmorProficiency(v),
+				removerByToken: (v) => state.removeArmorProficiencyVariants(v),
+				normalize: (v) => state._normalizeArmorProfToken(v),
+				toDisplay: armorToDisplay,
+				toToken: (v) => state._normalizeArmorProfToken(v),
+			},
+			{
+				label: "Weapons",
+				suggestions: suggestions.weapons,
+				allowFreeText: true,
+				getCurrent: () => state.getWeaponProficiencies(),
+				adder: (v) => state.addWeaponProficiency(v),
+				remover: (v) => state.removeWeaponProficiency(v),
+				toDisplay: identity,
+				toToken: identity,
+			},
+			{
+				label: "Tools",
+				suggestions: suggestions.tools,
+				allowFreeText: true,
+				getCurrent: () => state.getToolProficiencies(),
+				adder: (v) => state.addToolProficiency(v),
+				remover: (v) => state.removeToolProficiency(v),
+				toDisplay: identity,
+				toToken: identity,
+			},
+			{
+				label: "Languages",
+				suggestions: suggestions.languages,
+				allowFreeText: true,
+				getCurrent: () => state.getLanguages(),
+				adder: (v) => state.addLanguage(v),
+				remover: (v) => state.removeLanguage(v),
+				toDisplay: identity,
+				toToken: identity,
+			},
 		];
 
-		const inputs = {};
 		categories.forEach(cat => {
-			const row = this._ce("div", "pm-modal__row", panel);
-			const lbl = this._ce("label", "pm-modal__label", row);
-			lbl.textContent = cat.label;
-			const input = this._ce("input", "pm-modal__input", row);
-			input.placeholder = cat.placeholder;
-			input.value = (cat.value || []).map(v => (typeof v === "string" ? v : v.name)).join(", ");
-			inputs[cat.key] = input;
+			const row = this._ce("div", "pm-modal__prof-row", panel);
+			const picker = new CharacterSheetProfPicker({
+				label: cat.label,
+				suggestions: cat.suggestions,
+				getCurrent: cat.getCurrent,
+				adder: cat.adder,
+				remover: cat.remover,
+				removerByToken: cat.removerByToken || null,
+				normalize: cat.normalize,
+				toDisplay: cat.toDisplay,
+				toToken: cat.toToken,
+				allowFreeText: cat.allowFreeText,
+				placeholder: cat.allowFreeText ? "Type to search or enter custom…" : "Type to search…",
+			});
+			row.appendChild(picker.render());
 		});
 
 		const btnRow = this._ce("div", "pm-modal__buttons", panel);
-		const cancelBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
-		cancelBtn.textContent = "Cancel";
-		const saveBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
-		this._setIconLabel(saveBtn, "save", " Save");
+		const doneBtn = this._ce("button", "pm-modal__btn pm-modal__btn--confirm", btnRow);
+		this._setIconLabel(doneBtn, "save", " Done");
 
-		const close = () => overlay.remove();
-		cancelBtn.addEventListener("click", close);
+		const close = () => {
+			overlay.remove();
+			this._logActivity("proficiencies", "Updated proficiencies");
+			this._renderCharacterPanel();
+		};
+		doneBtn.addEventListener("click", close);
 		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
 
-		saveBtn.addEventListener("click", () => {
-			const parse = (str) => str.split(",").map(s => s.trim()).filter(Boolean);
-			// Bulk-replace the proficiency arrays directly (no bulk setter exists in state API)
-			this._state._data.armorProficiencies = parse(inputs.armor.value);
-			this._state._data.weaponProficiencies = parse(inputs.weapons.value);
-			this._state._data.toolProficiencies = parse(inputs.tools.value);
-			this._state._data.languages = parse(inputs.languages.value);
-			this._logActivity("proficiencies", "Updated proficiencies");
-			close();
-			this._renderCharacterPanel();
-		});
-
 		document.body.appendChild(overlay);
-		inputs.armor.focus();
 	}
 
 	// ─── Phase D5: Custom Ability Modal ─────────────────────────
