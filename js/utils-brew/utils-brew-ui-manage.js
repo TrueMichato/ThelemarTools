@@ -252,13 +252,37 @@ export class ManageBrewUi {
 		if (brews && !brews.length) return;
 
 		let brewDocsUpdated;
+		let failedBrews;
 		try {
-			brewDocsUpdated = await this._brewUtil.pPullAllBrews({brews});
+			({brewDocsUpdated, failedBrews} = await this._brewUtil.pPullAllBrews({brews, isReturnMeta: true}));
 		} catch (e) {
 			JqueryUtil.doToast({content: `Update failed! ${VeCt.STR_SEE_CONSOLE}`, type: "danger"});
 			throw e;
 		}
-		if (!brewDocsUpdated?.length) return JqueryUtil.doToast(`Update complete! No ${this._brewUtil.DISPLAY_NAME} was updated.`);
+
+		failedBrews = failedBrews || [];
+		failedBrews.forEach(({url, error}) => {
+			// eslint-disable-next-line no-console
+			console.error(`Failed to update ${this._brewUtil.DISPLAY_NAME} from URL "${url}":`, error);
+		});
+
+		const htmlFailedList = this.constructor._pDoPullAll_getFailedListHtml(failedBrews);
+
+		// Outcome: nothing was updated
+		if (!brewDocsUpdated?.length) {
+			// ... and nothing failed
+			if (!failedBrews.length) return JqueryUtil.doToast(`Update complete! No ${this._brewUtil.DISPLAY_NAME} was updated.`);
+
+			// ... but some failed
+			return JqueryUtil.doToast({
+				type: "danger",
+				isAutoHide: false,
+				content: e_({outer: `<div>
+					<div>Update failed for ${failedBrews.length} ${failedBrews.length === 1 ? this._brewUtil.DISPLAY_NAME : this._brewUtil.DISPLAY_NAME_PLURAL}. ${VeCt.STR_SEE_CONSOLE}</div>
+					${htmlFailedList}
+				</div>`}),
+			});
+		}
 
 		await this._pRender_pBrewList(rdState);
 
@@ -288,9 +312,11 @@ export class ManageBrewUi {
 
 		const messageInfo = {
 			isAutoHide: false,
+			...(failedBrews.length ? {type: "warning"} : {}),
 			contentHtml: `<div>
 				<div>Update complete! ${brewDocsUpdated.length} ${brewDocsUpdated.length === 1 ? `${this._brewUtil.DISPLAY_NAME} was` : `${this._brewUtil.DISPLAY_NAME_PLURAL} were`} updated.</div>
 				${htmlListRows ? `<ul class="ve-mt-2 ve-mb-0">${htmlListRows}</ul>` : ""}
+				${failedBrews.length ? `<div class="ve-mt-2">${failedBrews.length} failed to update. ${VeCt.STR_SEE_CONSOLE}</div>${htmlFailedList}` : ""}
 			</div>`,
 		};
 
@@ -304,6 +330,18 @@ export class ManageBrewUi {
 			...messageInfo,
 			content: e_({outer: messageInfo.contentHtml}),
 		});
+	}
+
+	static _pDoPullAll_getFailedListHtml (failedBrews) {
+		if (!failedBrews?.length) return "";
+
+		const htmlListItems = failedBrews
+			.map(({brew, url}) => this._getBrewName(brew) || brew?.head?.filename || url || "(Unknown)")
+			.sort(SortUtil.ascSortLower)
+			.map(name => `<li>${name.qq()}</li>`)
+			.join("");
+
+		return `<ul class="ve-mt-1 ve-mb-0">${htmlListItems}</ul>`;
 	}
 
 	async pRender (wrp, {rdState = null} = {}) {

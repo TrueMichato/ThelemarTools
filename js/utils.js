@@ -4830,6 +4830,13 @@ globalThis.DataUtil = class {
 		this.REQUEST_LIMITER_GITHUB_RAW,
 	];
 
+	/**
+	 * Only genuine rate-limit responses (HTTP 429) should trip the request limiter. Treating other
+	 *   error statuses (e.g. a `404` from a renamed/removed homebrew file) as rate-limits poisons the
+	 *   limiter and makes every subsequent request to the same host fail with a synthetic 429.
+	 */
+	static _isRequestLimitedStatus (status) { return status === 429; }
+
 	static _OptionalJsonResponse = class {
 		/**
 		 * @param url
@@ -4907,9 +4914,11 @@ globalThis.DataUtil = class {
 			request.addEventListener("load", () => {
 				try {
 					if (request.status >= 400) {
-						this._REQUEST_LIMITERS.forEach(limiter => {
-							if (limiter.isMatch(url)) limiter.addFailure();
-						});
+						if (this._isRequestLimitedStatus(request.status)) {
+							this._REQUEST_LIMITERS.forEach(limiter => {
+								if (limiter.isMatch(url)) limiter.addFailure();
+							});
+						}
 
 						return resolve(
 							new this._OptionalJsonResponse({
@@ -4928,10 +4937,8 @@ globalThis.DataUtil = class {
 						}),
 					);
 				} catch (e) {
-					this._REQUEST_LIMITERS.forEach(limiter => {
-						if (limiter.isMatch(url)) limiter.addFailure();
-					});
-
+					// A JSON-parse failure on an otherwise-successful (2xx) response is not a rate-limit,
+					//   so it must not trip the request limiter.
 					resolve(
 						new this._OptionalJsonResponse({
 							url,
@@ -5040,22 +5047,34 @@ globalThis.DataUtil = class {
 		return DataUtil._loadJson(url, {isDoDataMerge: true});
 	}
 
-	static async loadRawJSON (url, {isBustCache} = {}) {
-		return DataUtil._loadJson(url, {isBustCache});
+	static async loadRawJSON (url, {isBustCache, isSilent = false} = {}) {
+		return DataUtil._loadJson(url, {isBustCache, isSilent});
 	}
 
-	static async _loadJson (url, {isDoDataMerge = false, isBustCache = false} = {}) {
+	static async _loadJson (url, {isDoDataMerge = false, isBustCache = false, isSilent = false} = {}) {
 		const procUrl = UrlUtil.link(url, {isBustCache});
 
 		let data;
+		let errProc = null;
 		try {
 			data = await DataUtil._pLoad({url: procUrl, id: url, isBustCache});
 		} catch (e) {
-			setTimeout(() => { throw e; });
+			errProc = e;
+			// When `isSilent`, callers handle the rejection themselves; avoid surfacing an uncaught
+			//   global throw (the fallback attempt below may still succeed).
+			if (!isSilent) setTimeout(() => { throw e; });
 		}
 
 		// Fallback to the un-processed URL
-		if (!data) data = await DataUtil._pLoad({url: url, id: url, isBustCache});
+		if (!data) {
+			try {
+				data = await DataUtil._pLoad({url: url, id: url, isBustCache});
+			} catch (e) {
+				// Preserve the original (processed-URL) error as the cause for diagnostics.
+				if (errProc != null && e.cause == null) e.cause = errProc;
+				throw e;
+			}
+		}
 
 		if (isDoDataMerge) await DataUtil.pDoMetaMerge(url, data);
 
