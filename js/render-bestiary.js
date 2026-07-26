@@ -391,6 +391,23 @@ class _RenderBestiaryImplBase {
 			${opts.btnResetScaleCr || ""}
 		</td>`;
 	}
+
+	/**
+	 * Extract the top-level nodes (the `<tbody>` groups) of a rendered statblock `<table>` into a
+	 * fragment for appending into the destination `.ve-stats` table (`#pagecontent`, the makebrew
+	 * creature preview, or the SEO page). The body sections are wrapped in a dedicated
+	 * `<tbody class="mon__body-cols-wrap">` (see `_getRenderedCreatureFromTbodies`) so the two-column toggle
+	 * (`.ve-stats--two-col`, tracker #1200 / 5ET-1080) can reflow just the body while the
+	 * name/AC/HP/ability/senses header rows stay full width — matching the structure that
+	 * `Renderer.monster.getCompactRenderedString` emits for hover popouts. Parsing inside a single
+	 * `<table>` context is required: a bare `<tbody>` interleaved with loose `<tr>`s is stripped by
+	 * the HTML parser, which is why the previous flat-row output never picked up the modifier class.
+	 */
+	_getRenderedCreatureFromTbodies (eleTable) {
+		const frag = document.createDocumentFragment();
+		Array.from(eleTable.childNodes).forEach(node => frag.appendChild(node));
+		return frag;
+	}
 }
 
 class _RenderBestiaryImplClassic extends _RenderBestiaryImplBase {
@@ -540,7 +557,8 @@ class _RenderBestiaryImplClassic extends _RenderBestiaryImplBase {
 			entsTrait,
 		});
 
-		return ee`
+		return this._getRenderedCreatureFromTbodies(ee`<table>
+		<tbody>
 		${Renderer.utils.getBorderTr()}
 
 		${htmlPtIsExcluded}
@@ -578,7 +596,9 @@ class _RenderBestiaryImplClassic extends _RenderBestiaryImplBase {
 
 		<tr>${opts.selSummonSpellLevel ? ee`<td colspan="6"><strong class="ve-mr-2">Spell Level</strong> ${opts.selSummonSpellLevel}</td>` : ""}</tr>
 		<tr>${opts.selSummonClassLevel ? ee`<td colspan="6"><strong class="ve-mr-2">${opts.classLevelScalerClass ? "Class Level" : "Level"}</strong> ${opts.selSummonClassLevel}</td>` : ""}</tr>
+		</tbody>
 
+		<tbody class="mon__body-cols-wrap">
 		${htmlPtTraits}
 		${htmlPtActions}
 		${htmlPtBonusActions}
@@ -588,10 +608,14 @@ class _RenderBestiaryImplClassic extends _RenderBestiaryImplBase {
 
 		${htmlPtLairActions}
 		${htmlPtRegionalEffects}
+		</tbody>
 
+		<tbody>
 		${htmlPtFooterExtended}
 
-		${Renderer.utils.getBorderTr()}`;
+		${Renderer.utils.getBorderTr()}
+		</tbody>
+		</table>`);
 	}
 }
 
@@ -738,7 +762,8 @@ class _RenderBestiaryImplOne extends _RenderBestiaryImplBase {
 			entsTrait,
 		});
 
-		return ee`
+		return this._getRenderedCreatureFromTbodies(ee`<table>
+		<tbody>
 		${Renderer.utils.getBorderTr()}
 
 		${htmlPtIsExcluded}
@@ -771,7 +796,9 @@ class _RenderBestiaryImplOne extends _RenderBestiaryImplBase {
 
 		<tr>${opts.selSummonSpellLevel ? ee`<td colspan="6"><strong class="ve-mr-2">Spell Level</strong> ${opts.selSummonSpellLevel}</td>` : ""}</tr>
 		<tr>${opts.selSummonClassLevel ? ee`<td colspan="6"><strong class="ve-mr-2">${opts.classLevelScalerClass ? "Class Level" : "Level"}</strong> ${opts.selSummonClassLevel}</td>` : ""}</tr>
+		</tbody>
 
+		<tbody class="mon__body-cols-wrap">
 		${htmlPtTraits}
 		${htmlPtActions}
 		${htmlPtBonusActions}
@@ -781,10 +808,14 @@ class _RenderBestiaryImplOne extends _RenderBestiaryImplBase {
 
 		${htmlPtLairActions}
 		${htmlPtRegionalEffects}
+		</tbody>
 
+		<tbody>
 		${htmlPtFooterExtended}
 
-		${Renderer.utils.getBorderTr()}`;
+		${Renderer.utils.getBorderTr()}
+		</tbody>
+		</table>`);
 	}
 }
 

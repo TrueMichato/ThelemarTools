@@ -52,7 +52,20 @@
 	}
 	// endregion
 
-	// region Encounter builder
+	// region Statblock control bar
+	// The control bar under the statblock (Encounter Builder, Proficiency Dice, Two Columns,
+	// Printer View, Compare, Table View, Wide View, Manage Content) is centered and non-wrapping
+	// by default. In the tabbed layout the content pane is only ~half the container (~547px), which
+	// is narrower than the buttons' combined width (~669px) — so a `nowrap` row overflows and clips
+	// "Encounter Builder" on the left and the "Manage Content" group on the right. Allow the button
+	// groups to wrap onto additional rows instead; `row-gap` keeps wrapped rows legible while the
+	// existing `ve-mr-2` utilities handle horizontal spacing.
+	.bestiary__wrp-controls {
+		flex-wrap: wrap;
+		row-gap: 4px;
+	}
+	// endregion
+
 	.best__ {
 		&ecgen-active {
 			.ve-lst__row--bestiary-sublist {
@@ -298,45 +311,62 @@
 	// endregion
 
 	// region Wide View (side-by-side statblock + fluff)
-	// The outer wrapper is always present. In default (tabbed) mode, its two children
-	// simply stack — the fluff column is `hidden` via the attribute set in bestiary.html.
-	// When wide-mode is active AND the viewport is wide enough, JS drops the `hidden`
-	// attribute and adds `--wide-active`, at which point the media query below turns the
-	// wrapper into a two-column flex layout.
+	// The outer wrapper is always present. In default (tabbed) mode its two children stack and the
+	// fluff column is `hidden` (attribute set in bestiary.html). When wide mode is active AND the
+	// viewport is at least `$width-screen-hg`, JS drops the `hidden` attribute, adds `--wide-active`
+	// here, and adds `.bstry-wide` on the enclosing `.view-col-wrapper` (see below) so the content
+	// column can claim horizontal room. Gating lives in JS (`_isWideModeActive`, which also
+	// re-renders on `matchMedia` change), so the layout here is purely class-driven; `flex-wrap`
+	// keeps it graceful if the content column is ever still too narrow for two columns.
 	.bestiary__wrp-content {
 		display: block;
 
 		&--wide-active {
-			// Below the "huge" breakpoint we intentionally fall back to stacked layout.
-			// JS also re-renders on `matchMedia` change so the fluff pane is hidden and
-			// the tabs come back for narrow viewports.
-			@media screen and (min-width: #{vars.$width-screen-hg}) {
-				display: flex;
-				align-items: flex-start;
-				gap: 8px;
+			display: flex;
+			flex-wrap: wrap;
+			align-items: flex-start;
+			gap: 8px;
 
-				.bestiary__wrp-content-statblock {
-					flex: 0 0 auto;
-				}
+			.bestiary__wrp-content-statblock {
+				// A definite flex-basis is essential. The statblock table is `table-layout: fixed;
+				// width: 100%`, which — inside a `flex: 0 0 auto` item — makes Chromium fall back to
+				// its ~500000px "unbounded fixed-table" width, overflowing the row and collapsing the
+				// fluff pane to zero. A real basis keeps the table sized against a resolvable width.
+				flex: 1 1 34rem;
+				min-width: 0;
+				width: auto;
+			}
 
-				.bestiary__wrp-content-fluff {
-					flex: 1 1 0;
-					min-width: 0; // Allow the flex child to shrink below its intrinsic width.
-					overflow: hidden auto;
+			.bestiary__wrp-content-fluff {
+				flex: 1 1 22rem;
+				min-width: 0; // Allow the flex child to shrink below its intrinsic width.
+				overflow: hidden auto;
 
-					img {
-						max-width: 100%;
-						height: auto;
-					}
+				img {
+					max-width: 100%;
+					height: auto;
 				}
 			}
 		}
 	}
 
-	// Print: never render the fluff sibling; always keep the statblock as a single
-	// full-width column. Rationale: users triggering "Printer View" or Ctrl+P expect
-	// a printable statblock — fluff/lore/images are supplementary reading content that
-	// bloats page count and rarely renders well on paper. If a user wants the fluff
+	// When wide mode is active, let the content column claim room: relax the Bootstrap `.container`
+	// max-width and shrink the creature list. Scoped to the JS-toggled `.bstry-wide` class so no
+	// other page or state is affected. `!important` is required only on the `.container` cap because
+	// Bootstrap defines it in the unlayered origin, which beats layered normal declarations.
+	.view-col-wrapper.bstry-wide {
+		max-width: none !important;
+		width: 100%;
+
+		> #listcontainer.view-col {
+			flex: 0 0 21rem;
+		}
+
+		> #contentwrapper.view-col {
+			flex: 1 1 0;
+		}
+	}
+
 	// region Monster group "Part of:" pill
 	// Rendered by `Renderer.monster.getPartOfMonsterGroupHtml` as a small
 	// muted row directly under the size/type/alignment line. Only appears
@@ -349,6 +379,11 @@
 	}
 	// endregion
 
+	// region Print
+	// Print: never render the fluff sibling; always keep the statblock as a single
+	// full-width column. Rationale: users triggering "Printer View" or Ctrl+P expect
+	// a printable statblock — fluff/lore/images are supplementary reading content that
+	// bloats page count and rarely renders well on paper. If a user wants the fluff
 	// printed, they can disable wide mode (or switch to the Info tab in classic mode)
 	// and print from there. Do not remove this rule without discussing the change.
 	@media print {

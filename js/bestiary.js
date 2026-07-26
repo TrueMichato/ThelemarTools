@@ -11,6 +11,7 @@ import {EncounterBuilderShapesLookup} from "./encounterbuilder/encounterbuilder-
 import {WrappedRenderer} from "./render-wrapped.js";
 import {EncounterBuilderPartyCustom} from "./encounterbuilder/party/encounterbuilder-party-custom.js";
 import {EncounterBuilderPartyCustomAdvanced} from "./encounterbuilder/party/encounterbuilder-party-custom-advanced.js";
+import {BestiaryWideModeUtil} from "./bestiary/bestiary-wide-mode-util.js";
 
 class _BestiaryConsts {
 	static PROF_MODE_BONUS = "bonus";
@@ -782,6 +783,9 @@ class BestiaryPage extends ListPageMultiSource {
 		this._wrpContentOuter = e_(document.getElementById("wrp-pagecontent-outer"));
 		this._wrpPagecontentFluff = e_(document.getElementById("wrp-pagecontent-fluff"));
 		this._pgContentFluff = e_(document.getElementById("pagecontent-fluff"));
+		// The Bootstrap `.container.view-col-wrapper` that holds the list + content columns; wide
+		// mode widens it (and shrinks the list) via a `.bstry-wide` class toggled in `_setWideModeVisuals`.
+		this._wrpViewCols = document.getElementById("contentwrapper")?.closest(".view-col-wrapper") || null;
 
 		if (!this._btnWideView || !this._wrpContentOuter) return;
 
@@ -799,6 +803,7 @@ class BestiaryPage extends ListPageMultiSource {
 		if (typeof window !== "undefined" && window.matchMedia) {
 			this._wideModeMql = window.matchMedia(_BestiaryConsts.WIDE_MODE_MEDIA_QUERY);
 			const onMqlChange = () => {
+				this._syncWideModeButton();
 				if (!this._isWideMode) return;
 				this._reRenderCurrent();
 			};
@@ -811,13 +816,36 @@ class BestiaryPage extends ListPageMultiSource {
 
 	_syncWideModeButton () {
 		if (!this._btnWideView) return;
-		this._btnWideView.toggleClass("ve-active", !!this._isWideMode);
+
+		// Explain *why* an on-but-inactive Wide View button produces no visible change, so silent
+		// gating (narrow viewport, or a creature with no lore/images) doesn't read as "broken".
+		const hasFluff = this._lastRenderHasFluff !== false; // undefined (nothing rendered yet) => assume ok
+		const {isActive, isMuted, title} = BestiaryWideModeUtil.getButtonState({
+			isToggledOn: !!this._isWideMode,
+			isViewportWide: this._isViewportWideForWideMode(),
+			hasFluff,
+		});
+
+		this._btnWideView.toggleClass("ve-active", isActive);
+		this._btnWideView.toggleClass("ve-muted", isMuted);
+		this._btnWideView.title = title;
+	}
+
+	// Whether the viewport currently meets the wide-mode breakpoint. Prefer the persisted
+	// `matchMedia` result; if `matchMedia` is unavailable, fall back to a live `innerWidth` read
+	// against the same 1600px breakpoint (see `WIDE_MODE_MEDIA_QUERY`) so the button's muted state
+	// and actual activation always agree.
+	_isViewportWideForWideMode () {
+		if (this._wideModeMql) return !!this._wideModeMql.matches;
+		if (typeof window === "undefined") return false;
+		return window.innerWidth >= 1600;
 	}
 
 	_isWideModeActive () {
-		if (!this._isWideMode) return false;
-		if (!this._wideModeMql) return false;
-		return !!this._wideModeMql.matches;
+		return BestiaryWideModeUtil.isWideModeActive({
+			isToggledOn: !!this._isWideMode,
+			isViewportWide: this._isViewportWideForWideMode(),
+		});
 	}
 
 	_reRenderCurrent () {
@@ -837,6 +865,7 @@ class BestiaryPage extends ListPageMultiSource {
 	_setWideModeVisuals ({isActive}) {
 		if (!this._wrpContentOuter) return;
 		this._wrpContentOuter.toggleClass("bestiary__wrp-content--wide-active", !!isActive);
+		if (this._wrpViewCols) this._wrpViewCols.classList.toggle("bstry-wide", !!isActive);
 		if (!this._wrpPagecontentFluff) return;
 		if (isActive) this._wrpPagecontentFluff.removeAttribute("hidden");
 		else this._wrpPagecontentFluff.setAttribute("hidden", "hidden");
@@ -988,6 +1017,10 @@ class BestiaryPage extends ListPageMultiSource {
 		this._lastRender.isScaledSpellSummon = isScaledSpellSummon;
 		this._lastRender.isScaledClassSummon = isScaledClassSummon;
 
+		// Reset the cached fluff flag so a previous creature's "no lore" muted state doesn't linger
+		// on the Wide View button until the async fluff check below resolves (undefined => assume ok).
+		this._lastRenderHasFluff = undefined;
+
 		this._wrpBtnProf = this._wrpBtnProf || e_(document.getElementById("wrp-profbonusdice"));
 
 		this._pgContent.empty();
@@ -1023,6 +1056,9 @@ class BestiaryPage extends ListPageMultiSource {
 		])
 			.then(([hasFluffText, hasFluffImages]) => {
 				if (this._lastRender.entity !== mon) return;
+
+				this._lastRenderHasFluff = !!(hasFluffText || hasFluffImages);
+				this._syncWideModeButton();
 
 				const isWide = this._isWideModeActive() && (hasFluffText || hasFluffImages);
 

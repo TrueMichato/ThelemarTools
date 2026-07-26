@@ -393,25 +393,41 @@
 	// table; the body-section rows (traits, actions, bonus/reactions, legendary, mythic, lair,
 	// regional) are wrapped in a dedicated `<tbody class="mon__body-cols-wrap">` which flips to
 	// `display: block` + `column-count: 2` when the outer `.ve-stats` has the `--two-col` modifier.
-	.ve-stats--two-col > tbody.mon__body-cols-wrap {
+	// The outer `.ve-stats` table uses `table-layout: fixed`, so a bare `display: block` tbody
+	// collapses to a single anonymous cell (~1/6 of the table width) and the columns render far too
+	// narrow. To reflow the body at full width we flip the whole statblock to `display: block` and
+	// re-promote the header/footer row-groups to their own full-width fixed tables (preserving the
+	// ability-grid / AC / HP alignment) while the body wrap becomes a multi-column block box.
+	.ve-stats--two-col {
 		display: block;
-		column-count: 2;
-		column-gap: 1.25rem;
-		column-rule: 1px solid vars.$rgb-border-yellow--statblock;
 
-		> tr {
-			display: block;
-			break-inside: avoid;
-			-webkit-column-break-inside: avoid;
-
-			> td {
-				display: block;
-				width: 100%;
-			}
+		> tbody:not(.mon__body-cols-wrap) {
+			display: table;
+			width: 100%;
+			table-layout: fixed;
 		}
 
-		.ve-stats__sect-header-inner {
-			break-after: avoid-column;
+		> tbody.mon__body-cols-wrap {
+			display: block;
+			width: 100%;
+			column-count: 2;
+			column-gap: 1.25rem;
+			column-rule: 1px solid vars.$rgb-border-yellow--statblock;
+
+			> tr {
+				display: block;
+				break-inside: avoid;
+				-webkit-column-break-inside: avoid;
+
+				> td {
+					display: block;
+					width: 100%;
+				}
+			}
+
+			.ve-stats__sect-header-inner {
+				break-after: avoid-column;
+			}
 		}
 	}
 
@@ -420,20 +436,31 @@
 	}
 
 	// Book-content statblocks (adventure pages, book-mode viewers) render inside narrow fixed
-	// columns already; forcing another column split makes them unreadable.
-	.ve-stats--two-col.ve-stats--book > tbody.mon__body-cols-wrap,
-	.ve-stats--two-col.ve-stats--book-large > tbody.mon__body-cols-wrap {
-		display: table-row-group;
-		column-count: initial;
-		column-gap: initial;
-		column-rule: none;
+	// columns already; forcing another column split makes them unreadable, so fully revert to a
+	// normal single-column table (including the `display: block` promotion above).
+	.ve-stats--two-col.ve-stats--book,
+	.ve-stats--two-col.ve-stats--book-large {
+		display: table;
 
-		> tr {
-			display: table-row;
+		> tbody:not(.mon__body-cols-wrap) {
+			display: table-row-group;
+			width: auto;
+		}
 
-			> td {
-				display: table-cell;
-				width: auto;
+		> tbody.mon__body-cols-wrap {
+			display: table-row-group;
+			width: auto;
+			column-count: initial;
+			column-gap: initial;
+			column-rule: none;
+
+			> tr {
+				display: table-row;
+
+				> td {
+					display: table-cell;
+					width: auto;
+				}
 			}
 		}
 	}
