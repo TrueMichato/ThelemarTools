@@ -2527,6 +2527,24 @@
 	font-size: 1rem;
 }
 
+/* Proficiency editor rows host the shared .cs-prof-picker widget (styled in
+   charactersheet.css). Widen the modal and space the sections so each picker's
+   absolutely-positioned dropdown has room to open. */
+.pm-modal--prof {
+	max-width: 480px;
+	width: 90vw;
+	max-height: 85vh;
+	overflow: visible;
+}
+
+.pm-modal__prof-row {
+	margin-bottom: 1.25rem;
+}
+
+.pm-modal__prof-row:last-of-type {
+	margin-bottom: 0.5rem;
+}
+
 .pm-modal__select {
 	padding: 0.5rem;
 	border-radius: 6px;
