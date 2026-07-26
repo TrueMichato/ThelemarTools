@@ -738,6 +738,12 @@
 		gap: 6px;
 	}
 
+	/* Floating settings popover: sits just above the DM Screen panel chrome (panel z-index scale
+	   tops out at 58 in dmscreen.scss), not an arbitrary stacking value. */
+	.dm-party__settings--floating {
+		z-index: 60;
+	}
+
 	.dm-party__settings-title {
 		font-size: 0.94rem;
 		font-weight: 700;
@@ -994,6 +1000,18 @@
 			&.dm-party__hp-stat--red {
 				background: #ff6b6b;
 			}
+		}
+	}
+
+	/* Respect reduced-motion: drop transitions on Party Tracker controls & bars. */
+	@media (prefers-reduced-motion: reduce) {
+		.dm-party__char-row,
+		.dm-party__collapse-all,
+		.dm-party__dc-cell,
+		.dm-party__dc-bar,
+		.dm-party__hp-bar-fill,
+		.dm-party__remove {
+			transition: none;
 		}
 	}
 }

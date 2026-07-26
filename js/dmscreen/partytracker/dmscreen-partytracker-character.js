@@ -243,16 +243,16 @@ export class PartyTrackerCharacter {
 			<span class="dm-party__char-name" title="${this._data.name || ""}">${this._data.name || "\u2014"}</span>
 			<span class="dm-party__char-meta">${this._data.race || ""}</span>
 			<span class="dm-party__char-meta">${classStr || "\u2014"}</span>
-			<span class="dm-party__char-stat ${hpClass}" title="${hpTitle}">\u2764 ${hpDisplay}</span>
-			<span class="dm-party__char-stat" title="Armor Class">\u{1F6E1} ${this._data.ac}</span>
-			<span class="dm-party__char-stat" title="Passive Perception">\u{1F441} ${this.getPassiveScore("perception")}</span>
-			<span class="dm-party__char-stat" title="Passive Investigation">\u{1F50D} ${this.getPassiveScore("investigation")}</span>
-			<span class="dm-party__char-stat" title="Passive Insight">\u{1F4A1} ${this.getPassiveScore("insight")}</span>
-			${passiveLinguistics != null ? ee`<span class="dm-party__char-stat dm-party__char-tgtt-stat" title="Passive Linguistics">\u{1F5E3} ${passiveLinguistics}</span>` : ""}
-			<span class="dm-party__char-stat ${carryClass}" title="Carry: ${curWeight}/${carry} lb (${carryPct}%)">\u{1F3CB} ${curWeight}/${carry}</span>
-			${sightStr ? ee`<span class="dm-party__char-stat" title="Senses: ${senseEntries.join(", ")}">\u{1F440} ${sightStr}</span>` : ""}
-			<span class="dm-party__char-stat" title="Long Jump ${jump.longRunning}/${jump.longStanding} ft · High Jump ${jump.highRunning}/${jump.highStanding} ft">\u{27A1} ${jump.longRunning}/${jump.longStanding} \u{2B06} ${jump.highRunning}/${jump.highStanding}</span>
-			${exhaustion > 0 ? ee`<span class="dm-party__char-stat dm-party__char-stat--danger" title="Exhaustion Level ${exhaustion}">\u{1F4A4} ${exhaustion}</span>` : ""}
+			<span class="dm-party__char-stat ${hpClass}" title="${hpTitle}" aria-label="Hit points ${hpDisplay}"><span aria-hidden="true">\u2764</span> ${hpDisplay}</span>
+			<span class="dm-party__char-stat" title="Armor Class" aria-label="Armor Class ${this._data.ac}"><span aria-hidden="true">\u{1F6E1}</span> ${this._data.ac}</span>
+			<span class="dm-party__char-stat" title="Passive Perception" aria-label="Passive Perception ${this.getPassiveScore("perception")}"><span aria-hidden="true">\u{1F441}</span> ${this.getPassiveScore("perception")}</span>
+			<span class="dm-party__char-stat" title="Passive Investigation" aria-label="Passive Investigation ${this.getPassiveScore("investigation")}"><span aria-hidden="true">\u{1F50D}</span> ${this.getPassiveScore("investigation")}</span>
+			<span class="dm-party__char-stat" title="Passive Insight" aria-label="Passive Insight ${this.getPassiveScore("insight")}"><span aria-hidden="true">\u{1F4A1}</span> ${this.getPassiveScore("insight")}</span>
+			${passiveLinguistics != null ? ee`<span class="dm-party__char-stat dm-party__char-tgtt-stat" title="Passive Linguistics" aria-label="Passive Linguistics ${passiveLinguistics}"><span aria-hidden="true">\u{1F5E3}</span> ${passiveLinguistics}</span>` : ""}
+			<span class="dm-party__char-stat ${carryClass}" title="Carry: ${curWeight}/${carry} lb (${carryPct}%)" aria-label="Carry weight ${curWeight} of ${carry} pounds, ${carryPct} percent"><span aria-hidden="true">\u{1F3CB}</span> ${curWeight}/${carry}</span>
+			${sightStr ? ee`<span class="dm-party__char-stat" title="Senses: ${senseEntries.join(", ")}" aria-label="Senses ${senseEntries.join(", ")}"><span aria-hidden="true">\u{1F440}</span> ${sightStr}</span>` : ""}
+			<span class="dm-party__char-stat" title="Long Jump ${jump.longRunning}/${jump.longStanding} ft · High Jump ${jump.highRunning}/${jump.highStanding} ft" aria-label="Long jump ${jump.longRunning} running, ${jump.longStanding} standing feet; high jump ${jump.highRunning} running, ${jump.highStanding} standing feet"><span aria-hidden="true">\u{27A1}</span> ${jump.longRunning}/${jump.longStanding} <span aria-hidden="true">\u{2B06}</span> ${jump.highRunning}/${jump.highStanding}</span>
+			${exhaustion > 0 ? ee`<span class="dm-party__char-stat dm-party__char-stat--danger" title="Exhaustion Level ${exhaustion}" aria-label="Exhaustion level ${exhaustion}"><span aria-hidden="true">\u{1F4A4}</span> ${exhaustion}</span>` : ""}
 			${wrpCondPills}
 			${tgttInfo}
 			<div class="ve-ml-auto">${btnRemove}</div>

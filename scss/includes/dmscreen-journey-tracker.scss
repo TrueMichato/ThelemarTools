@@ -2074,4 +2074,15 @@
 			}
 		}
 	}
+
+	/* Respect reduced-motion: drop transitions on Journey Tracker controls & bars. */
+	@media (prefers-reduced-motion: reduce) {
+		.dm-journey__tab,
+		.dm-journey__activity-sel,
+		.dm-journey__seg-header,
+		.dm-journey__supply-bar-fill,
+		.dm-journey__weather-badge {
+			transition: none;
+		}
+	}
 }

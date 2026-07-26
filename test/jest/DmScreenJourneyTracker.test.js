@@ -11,6 +11,8 @@ import {
 	classifySingleRoll,
 	evaluateGroupCheck,
 	rmDeltaForOutcome,
+	computeActivityGroupRm,
+	sumContainerRm,
 	computeEffectiveDc,
 	classifyTrackingDegree,
 	getSkillBonusFromData,
@@ -19,6 +21,7 @@ import {
 	computeActivityBonus,
 	getActivityInteractions,
 } from "../../js/dmscreen/dmscreen-journeytracker-consts.js";
+import {JourneyTrackerRoot} from "../../js/dmscreen/dmscreen-journeytracker.js";
 
 const findAct = (list, id) => list.find(a => a.id === id);
 
@@ -61,6 +64,104 @@ describe("Journey Tracker constants", () => {
 		const s = DEFAULT_STATE();
 		expect(s.camp.siteDescription).toBe("");
 		expect(s.camp.encounterResolved ?? false).toBe(false);
+		expect(s.camp.activityGroupRm).toEqual({});
+	});
+});
+
+/* -------------------------------------------- */
+/*  computeActivityGroupRm (Bug 3 J1 core)       */
+/* -------------------------------------------- */
+
+describe("computeActivityGroupRm", () => {
+	const hideTracks = findAct(JOURNEY_ACTIVITIES, "hideTracks"); // group: succ -1, crit -2, fail 0, critFail +1
+	const scout = findAct(JOURNEY_ACTIVITIES, "scout"); // critSuccessPerPlayer: succ -1, crit -1, critFail +1
+	const entertain = findAct(JOURNEY_ACTIVITIES, "entertain"); // rmAlways 1 (handled elsewhere), critFail +2
+	const dc = 15;
+	const slot = (total, critOverride = null) => ({rollNum: total, total, critOverride});
+
+	it("returns 0 when nobody has rolled yet", () => {
+		expect(computeActivityGroupRm({actDef: hideTracks, dc, isTotalMode: true, participantSlots: [slot(null), slot(null)]})).toBe(0);
+	});
+
+	it("applies a completed 2-player group delta ONCE, not per participant (J1 double-count fix)", () => {
+		// Both succeed but not all-pass-crit: one 16 (pass), one 10 (fail) → group success → -1 (single, not -2).
+		expect(computeActivityGroupRm({actDef: hideTracks, dc, isTotalMode: true, participantSlots: [slot(16), slot(10)]})).toBe(-1);
+	});
+
+	it("treats an all-pass group as a critical success (single -2, not -4)", () => {
+		expect(computeActivityGroupRm({actDef: hideTracks, dc, isTotalMode: true, participantSlots: [slot(16), slot(18)]})).toBe(-2);
+	});
+
+	it("treats an all-fail group as a critical failure", () => {
+		expect(computeActivityGroupRm({actDef: hideTracks, dc, isTotalMode: true, participantSlots: [slot(9), slot(10)]})).toBe(1);
+	});
+
+	it("scales a per-player-crit activity (Scout) by participant count on a full crit success", () => {
+		// All pass → critSuccess; scout rmOnCritSuccess -1 × 2 players = -2.
+		expect(computeActivityGroupRm({actDef: scout, dc, isTotalMode: true, participantSlots: [slot(16), slot(20)]})).toBe(-2);
+	});
+
+	it("does not scale Scout on a mixed (non-crit) group success", () => {
+		expect(computeActivityGroupRm({actDef: scout, dc, isTotalMode: true, participantSlots: [slot(16), slot(9)]})).toBe(-1);
+	});
+
+	it("falls back to the sum of individual rolled deltas while a group is incomplete", () => {
+		// 3-player hideTracks, only two rolled (both success -1) → interim -2.
+		const three = [slot(16), slot(17), slot(null)];
+		expect(computeActivityGroupRm({actDef: hideTracks, dc, isTotalMode: true, participantSlots: three})).toBe(-2);
+	});
+
+	it("collapses the interim value to a single group delta once everyone has rolled", () => {
+		// Same three, now all rolled: two pass + one fail → group success → -1 (was interim -2).
+		const three = [slot(16), slot(17), slot(9)];
+		expect(computeActivityGroupRm({actDef: hideTracks, dc, isTotalMode: true, participantSlots: three})).toBe(-1);
+	});
+
+	it("uses the single-participant individual delta for a solo activity", () => {
+		expect(computeActivityGroupRm({actDef: hideTracks, dc, isTotalMode: true, participantSlots: [slot(16)]})).toBe(-1);
+		expect(computeActivityGroupRm({actDef: hideTracks, dc, isTotalMode: true, participantSlots: [slot(8)]})).toBe(0);
+	});
+
+	it("honors a manual crit override only for single-participant activities in total mode", () => {
+		expect(computeActivityGroupRm({actDef: hideTracks, dc, isTotalMode: true, participantSlots: [slot(16, "critSuccess")]})).toBe(-2);
+	});
+
+	it("excludes always-on RM (rmAlways) from the group delta", () => {
+		// Entertain success → group delta 0 (its +1 rmAlways is applied separately by reconcile).
+		expect(computeActivityGroupRm({actDef: entertain, dc, isTotalMode: true, participantSlots: [slot(16)]})).toBe(0);
+	});
+
+	it("returns 0 for a null DC or an activity without skills", () => {
+		expect(computeActivityGroupRm({actDef: hideTracks, dc: null, isTotalMode: true, participantSlots: [slot(16)]})).toBe(0);
+		expect(computeActivityGroupRm({actDef: findAct(JOURNEY_ACTIVITIES, "custom"), dc, isTotalMode: true, participantSlots: [slot(16)]})).toBe(0);
+	});
+});
+
+/* -------------------------------------------- */
+/*  sumContainerRm (Bug 3 J1 — segment trim)     */
+/* -------------------------------------------- */
+
+describe("sumContainerRm", () => {
+	it("returns 0 for an empty or missing container", () => {
+		expect(sumContainerRm(null)).toBe(0);
+		expect(sumContainerRm({})).toBe(0);
+	});
+
+	it("sums recorded group RM, stealth RM, and per-slot always-on RM", () => {
+		const container = {
+			activityGroupRm: {hideTracks: -2, entertain: 0},
+			stealthGroupRm: -2,
+			activities: {
+				p1: [{activity: "entertain", _rmAlwaysApplied: 1}],
+				p2: [{activity: "hideTracks", _rmAlwaysApplied: 0}, {activity: "entertain", _rmAlwaysApplied: 1}],
+			},
+		};
+		// groups: -2 + 0; stealth: -2; always: 1 + 0 + 1 = 2 → total -2.
+		expect(sumContainerRm(container)).toBe(-2);
+	});
+
+	it("ignores non-array activity slots defensively", () => {
+		expect(sumContainerRm({activityGroupRm: {scout: -1}, activities: {p1: null}})).toBe(-1);
 	});
 });
 
@@ -306,5 +407,149 @@ describe("getActivityInteractions", () => {
 	it("flags impossible activities at fast pace", () => {
 		const acts = {p1: [{activity: "map"}]};
 		expect(getActivityInteractions(acts, players, {pace: "fast"})).toEqual(expect.arrayContaining([expect.stringContaining("NOT possible")]));
+	});
+});
+
+/* -------------------------------------------- */
+/*  Stateful RM reconciliation (Bug 3 J1/J2/J3)  */
+/*  Exercises JourneyTrackerRoot's DOM-free core */
+/* -------------------------------------------- */
+
+describe("JourneyTrackerRoot._reconcileRm", () => {
+	const makeRoot = () => {
+		const board = {doSaveStateDebounced () {}};
+		const root = new JourneyTrackerRoot(board, null);
+		root._state.rollMode = "total"; // roll input == effective total; no Party Tracker bonus lookup
+		root._state.players = [{id: "p1", name: "A"}, {id: "p2", name: "B"}];
+		root._state.journey.segments = [root._makeEmptySegment()];
+		return root;
+	};
+	// hideTracks group outcomes: success -1, crit -2, fail 0, critFail +1 (single group delta).
+	const setHideTracks = (seg, roll1, roll2) => {
+		seg.activities = {
+			p1: [{activity: "hideTracks", rollResult: `${roll1}`, skillChoice: null, _critOverride: null}],
+			p2: [{activity: "hideTracks", rollResult: `${roll2}`, skillChoice: null, _critOverride: null}],
+		};
+	};
+
+	it("applies a completed two-player group delta ONCE, not once per participant (J1)", () => {
+		const root = makeRoot();
+		// 15 passes DC 10, 5 fails → 1/2 pass → group 'success' → -1 (old bug applied -1 twice = -2).
+		setHideTracks(root._state.journey.segments[0], 15, 5);
+		root._reconcileRm();
+		expect(root._state.riskModifier).toBe(-1);
+		expect(root._state.journey.segments[0].activityGroupRm.hideTracks).toBe(-1);
+	});
+
+	it("is idempotent — a second reconcile does not re-apply the delta", () => {
+		const root = makeRoot();
+		setHideTracks(root._state.journey.segments[0], 15, 5);
+		root._reconcileRm();
+		root._reconcileRm();
+		root._reconcileRm();
+		expect(root._state.riskModifier).toBe(-1);
+	});
+
+	it("nets the difference when a completed group's outcome later changes (no stale RM)", () => {
+		const root = makeRoot();
+		const seg = root._state.journey.segments[0];
+		setHideTracks(seg, 15, 5); // success -1
+		root._reconcileRm();
+		expect(root._state.riskModifier).toBe(-1);
+		// Both now fail → group 'critFail' → +1. Net swing from -1 to +1.
+		seg.activities.p1[0].rollResult = "3";
+		seg.activities.p2[0].rollResult = "4";
+		root._reconcileRm();
+		expect(root._state.riskModifier).toBe(1);
+		expect(seg.activityGroupRm.hideTracks).toBe(1);
+	});
+
+	it("drops a group's RM contribution when the activity is cleared", () => {
+		const root = makeRoot();
+		const seg = root._state.journey.segments[0];
+		setHideTracks(seg, 15, 5);
+		root._reconcileRm();
+		expect(root._state.riskModifier).toBe(-1);
+		seg.activities.p1[0].activity = "";
+		seg.activities.p2[0].activity = "";
+		root._reconcileRm();
+		expect(root._state.riskModifier).toBe(0);
+		expect(seg.activityGroupRm.hideTracks).toBeUndefined();
+	});
+
+	it("rebaseline re-syncs the records WITHOUT changing riskModifier (Reset/Manual/load)", () => {
+		const root = makeRoot();
+		const seg = root._state.journey.segments[0];
+		setHideTracks(seg, 15, 5);
+		root._state.riskModifier = 99; // a manual absolute value the DM set
+		seg.activityGroupRm.hideTracks = 0; // stale/legacy record
+		root._reconcileRm({rebaseline: true});
+		expect(root._state.riskModifier).toBe(99); // untouched
+		expect(seg.activityGroupRm.hideTracks).toBe(-1); // record corrected to computed target
+	});
+
+	it("scales Scout critical success by UNIQUE players, not duplicate slots (J1 dedupe)", () => {
+		const root = makeRoot();
+		const seg = root._state.journey.segments[0];
+		// scout critSuccessPerPlayer crit -1 each. p1 has two scout slots, p2 one — all crit-succeed.
+		// Unique players = 2 → -2 (a slot-count bug would give -3).
+		seg.activities = {
+			p1: [
+				{activity: "scout", rollResult: "15", skillChoice: null, _critOverride: null},
+				{activity: "scout", rollResult: "16", skillChoice: null, _critOverride: null},
+			],
+			p2: [{activity: "scout", rollResult: "17", skillChoice: null, _critOverride: null}],
+		};
+		root._reconcileRm();
+		expect(root._state.riskModifier).toBe(-2);
+	});
+
+	it("nets out a departed player's contribution and prunes their slots (syncPartyCharacters path)", () => {
+		const root = makeRoot();
+		const seg = root._state.journey.segments[0];
+		setHideTracks(seg, 15, 5); // -1 while both present
+		root._reconcileRm();
+		expect(root._state.riskModifier).toBe(-1);
+		root._undoPlayerRm(root._state.players[1]); // player B leaves
+		// hideTracks now has a single participant (A, rolled 15 ≥ DC) → individual success -1.
+		expect(seg.activities.p2).toBeUndefined();
+		expect(root._state.riskModifier).toBe(-1);
+	});
+});
+
+describe("JourneyTrackerRoot._makeEmptyCamp (Bug 3 J3)", () => {
+	it("returns a fully-shaped camp incl. siteDescription + encounterResolved", () => {
+		const board = {doSaveStateDebounced () {}};
+		const root = new JourneyTrackerRoot(board, null);
+		const camp = root._makeEmptyCamp();
+		expect(camp).toMatchObject({
+			campfireActive: false,
+			siteDescription: "",
+			activities: {},
+			activityGroupRm: {},
+			guardSlots: [],
+			encounterResolved: false,
+		});
+		// Fresh (non-shared) references.
+		expect(camp.guardSlots).not.toBe(root._makeEmptyCamp().guardSlots);
+	});
+});
+
+describe("JourneyTrackerRoot._migrateRmBookkeeping (orphan pruning)", () => {
+	it("prunes activity + stealth slots for players no longer in the roster", () => {
+		const board = {doSaveStateDebounced () {}};
+		const root = new JourneyTrackerRoot(board, null);
+		root._state.players = [{id: "p1", name: "A"}];
+		root._state.journey.segments = [root._makeEmptySegment()];
+		const seg = root._state.journey.segments[0];
+		seg.activities = {
+			p1: [{activity: "forage", rollResult: "", skillChoice: null, _rmAlwaysApplied: 0}],
+			pGONE: [{activity: "entertain", rollResult: "", skillChoice: null, _rmAlwaysApplied: 1}],
+		};
+		seg.stealthSlots = [{playerId: "p1"}, {playerId: "pGONE"}];
+		root._migrateRmBookkeeping();
+		expect(seg.activities.pGONE).toBeUndefined();
+		expect(seg.activities.p1).toBeDefined();
+		expect(seg.stealthSlots).toEqual([{playerId: "p1"}]);
 	});
 });
