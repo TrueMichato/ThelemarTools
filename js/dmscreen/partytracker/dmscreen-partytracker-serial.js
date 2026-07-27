@@ -152,11 +152,11 @@ export class PartyTrackerCharacterSerializer {
 		persuasion: "cha",
 		// TGTT 7
 		cooking: "wis",
-		culture: "int",
+		culture: "wis",
 		endurance: "con",
 		engineering: "int",
 		harvesting: "wis",
-		linguistics: "int",
+		linguistics: "wis",
 		might: "str",
 	};
 

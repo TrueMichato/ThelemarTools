@@ -3178,9 +3178,14 @@ class CharacterSheetPage {
 			// Calculate passive score using centralized method (includes modifiers, advantage, stances)
 			const passiveScore = this._state.getPassiveScore(skillKey);
 
-			// Handle skills without ability (custom skills with no ability set)
-			const abilityDisplay = skill.ability ? skill.ability.toUpperCase() : "—";
-			const defaultAbility = skill.ability || "";
+			// Handle skills without ability (custom skills with no ability set).
+			// Show the EFFECTIVE ability (pin/feature-swap aware) via the breakdown, and mark
+			// a manual pin with a 📌 so the override is visible at a glance.
+			const effectiveAbility = breakdown.ability;
+			const isPinned = !!this._state.getSkillAbilityOverride?.(skillKey);
+			const abilityDisplay = effectiveAbility ? effectiveAbility.toUpperCase() : "—";
+			const abilityCell = `${abilityDisplay}${isPinned ? `<span class="charsheet__skill-pin-mark" title="Ability pinned to ${abilityDisplay}">📌</span>` : ""}`;
+			const defaultAbility = effectiveAbility || "";
 
 			const customClass = skill.isCustom ? " charsheet__skill-row--custom" : "";
 
@@ -3188,7 +3193,7 @@ class CharacterSheetPage {
 				<div class="charsheet__skill-row${customClass}" data-skill="${skillKey}" data-default-ability="${defaultAbility}" title="${skillTooltip.replace(/"/g, "&quot;")}">
 					<span class="charsheet__prof-indicator charsheet__prof-indicator--clickable ${profClass}" title="${profTitle}" data-skill="${skillKey}"></span>
 					<span class="charsheet__skill-name"><span class="charsheet__skill-name-text" title="${skill.name.replace(/"/g, "&quot;")}">${skill.name}</span>${skill.isCustom ? `<span class="charsheet__skill-custom-marker" title="Custom skill">✦</span>` : ""}</span>
-					<span class="charsheet__skill-ability">(${abilityDisplay})</span>
+					<span class="charsheet__skill-ability">(${abilityCell})</span>
 					<span class="charsheet__skill-mod">${modHtml}</span>
 					<span class="charsheet__skill-passive" title="Passive ${skill.name}: ${passiveScore}">${passiveScore}</span>
 					${skill.isCustom ? `<span class="charsheet__skill-delete" title="Remove custom skill">×</span>` : ""}
@@ -3209,7 +3214,7 @@ class CharacterSheetPage {
 				if (e.target.classList.contains("charsheet__prof-indicator")) return;
 				this._rollSkillCheck(skillKey, skill.name, e);
 			});
-			row.addEventListener("contextmenu", (e) => this._showSkillAbilityMenu(e, skillKey, skill.name, skill.ability));
+			row.addEventListener("contextmenu", (e) => this._showSkillAbilityMenu(e, skillKey, skill.name, effectiveAbility));
 			this._bindActivate(row, {label: `Roll ${skill.name} check`});
 
 			if (skill.isCustom) {
@@ -3235,6 +3240,16 @@ class CharacterSheetPage {
 		`});
 		addBtn.addEventListener("click", () => this._showAddCustomSkillModal());
 		container.append(addBtn);
+
+		// Add "Skill Abilities" button — opens the persistent per-skill ability pin manager.
+		const abilBtn = e_({outer: `
+			<div class="charsheet__skill-add charsheet__skill-abilities-btn" title="Pin any skill to a different ability score">
+				<span class="charsheet__skill-add-icon">📌</span>
+				<span class="charsheet__skill-add-text">Skill Abilities</span>
+			</div>
+		`});
+		abilBtn.addEventListener("click", () => this._showSkillAbilitiesModal());
+		container.append(abilBtn);
 
 		// Lore Skills section (TGTT variant rule)
 		this._renderLoreSkillsSection(container, loreSkills);
@@ -5841,7 +5856,7 @@ class CharacterSheetPage {
 			const saveModStr = saveMod >= 0 ? `+${saveMod}` : `${saveMod}`;
 
 			// Get related skills for this ability
-			const relatedSkills = skills.filter(s => s.ability === abl);
+			const relatedSkills = skills.filter(s => this._state.getSkillAbility(s.name) === abl);
 
 			// Per-source bonus breakdown (mirrors the skill-hover breakdown): the
 			// aggregate "+N bonus" now carries a tooltip itemizing each contribution
@@ -6000,12 +6015,14 @@ class CharacterSheetPage {
 
 		const skillsGrid = skillsSection.querySelector(".charsheet__skills-full-grid");
 
-		// Group skills by ability
+		// Group skills by EFFECTIVE ability (pin/feature-swap aware) so pinned skills appear
+		// under the ability they are actually rolled with.
 		const skillsByAbility = {};
 		Parser.ABIL_ABVS.forEach(abl => skillsByAbility[abl] = []);
 		skills.forEach(skill => {
-			if (skillsByAbility[skill.ability]) {
-				skillsByAbility[skill.ability].push(skill);
+			const eff = this._state.getSkillAbility(skill.name);
+			if (skillsByAbility[eff]) {
+				skillsByAbility[eff].push(skill);
 			}
 		});
 
@@ -12036,8 +12053,11 @@ class CharacterSheetPage {
 		const exhaustionPenalty = this._getExhaustionPenalty();
 
 		// Get aggregated modifiers for this skill
-		// Also get check: type modifiers for the underlying ability
-		const skillAbility = this._state.getSkillAbility?.(skillKey) || this._getDefaultSkillAbility(skillKey);
+		// Also get check: type modifiers for the underlying ability. Route by the EFFECTIVE
+		// ability: an explicit per-roll override wins, otherwise the pin/feature-swap-aware
+		// resolver result (via getSkillAbility) so conditional modifiers / advantage / state
+		// dice follow the ability actually being rolled.
+		const skillAbility = overrideAbility || this._state.getSkillAbility?.(skillKey) || this._getDefaultSkillAbility(skillKey);
 		const skillType = `skill:${skillKey}`;
 		const checkType = `check:${skillAbility}`;
 
@@ -16164,6 +16184,104 @@ class CharacterSheetPage {
 		});
 
 		nameEl.focus();
+	}
+
+	/**
+	 * Show the "Skill Abilities" manager — a persistent per-skill ability pin UI.
+	 *
+	 * Lets the player pin ANY non-lore skill to ANY of the 6 abilities. A pin overrides both the
+	 * skill's default ability and any feature-granted auto-MAX (e.g. Forest Sage). Lore skills are
+	 * excluded (they use a flat bonus with no ability mod, so a pin would do nothing). The transient
+	 * per-roll ability menu (right-click a skill) is unaffected and always wins for that one roll.
+	 */
+	async _showSkillAbilitiesModal () {
+		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			title: "Skill Abilities",
+			isMinHeight0: true,
+		});
+
+		const ABILITIES = Parser.ABIL_ABVS; // ["str","dex","con","int","wis","cha"]
+		const fmtMod = (m) => `${m >= 0 ? "+" : ""}${m}`;
+
+		const wrap = ee`<div class="ve-flex-col charsheet__skill-abil-modal">
+			<div class="ve-muted ve-small mb-2">
+				Pin a skill to a different ability score. A pin overrides the skill's default ability
+				<i>and</i> any feature that would otherwise swap it (e.g. Forest Sage). Right-click a
+				skill row on the sheet for a one-off, non-persistent ability choice instead.
+			</div>
+			<div class="charsheet__skill-abil-list"></div>
+		</div>`;
+		modalInner.append(wrap);
+
+		const listEl = wrap.querySelector(".charsheet__skill-abil-list");
+
+		const renderList = () => {
+			listEl.innerHTML = "";
+			const skills = this.getSkillsList().filter(s => !s.isLoreSkill);
+
+			skills.forEach(skill => {
+				const skillKey = skill.name.toLowerCase().replace(/\s+/g, "");
+				const resolved = this._state._resolveSkillAbility(skillKey);
+				const effAbility = resolved.ability;
+				const source = resolved.source; // "default" | "swap" | "pinned"
+				const isPinned = source === "pinned";
+				const isSwapped = source === "swap";
+
+				let badgeCls = "charsheet__skill-abil-badge--default";
+				let badgeText = "Default";
+				if (isPinned) {
+					badgeCls = "charsheet__skill-abil-badge--pinned";
+					badgeText = "Pinned";
+				} else if (isSwapped) {
+					badgeCls = "charsheet__skill-abil-badge--swap";
+					badgeText = `Feature swap (from ${(resolved.baseAbility || "").toUpperCase()})`;
+				}
+
+				const row = ee`<div class="charsheet__skill-abil-row">
+					<div class="charsheet__skill-abil-info">
+						<span class="charsheet__skill-abil-name">${skill.name}</span>
+						<span class="charsheet__skill-abil-badge ${badgeCls}">${badgeText}</span>
+					</div>
+					<div class="charsheet__skill-abil-controls ve-btn-group" role="group"></div>
+				</div>`;
+				const controls = row.querySelector(".charsheet__skill-abil-controls");
+
+				ABILITIES.forEach(abl => {
+					const mod = this._state.getSkillModWithAbility(skillKey, abl);
+					const isActive = abl === effAbility;
+					const btn = ee`<button type="button" class="ve-btn ve-btn-sm ve-btn-default charsheet__skill-abil-opt ${isActive ? "active" : ""}" title="${abl.toUpperCase()} check: ${fmtMod(mod)}">${abl.toUpperCase()}</button>`;
+					btn.addEventListener("click", () => {
+						// Toggle: clicking the currently-pinned ability clears the pin.
+						if (isPinned && abl === effAbility) {
+							this._state.clearSkillAbilityOverride(skillKey);
+						} else {
+							this._state.setSkillAbilityOverride(skillKey, abl);
+						}
+						this._saveCurrentCharacter();
+						renderList();
+						this._renderSkills();
+					});
+					controls.append(btn);
+				});
+
+				const resetBtn = ee`<button type="button" class="ve-btn ve-btn-sm ve-btn-default charsheet__skill-abil-reset ${isPinned ? "" : "disabled"}" title="Clear the pin — revert to default / feature swap"${isPinned ? "" : " disabled"}>Default</button>`;
+				resetBtn.addEventListener("click", () => {
+					if (!this._state.clearSkillAbilityOverride(skillKey)) return;
+					this._saveCurrentCharacter();
+					renderList();
+					this._renderSkills();
+				});
+				controls.append(resetBtn);
+
+				listEl.append(row);
+			});
+
+			if (!skills.length) {
+				listEl.append(ee`<div class="ve-muted ve-small">No skills available.</div>`);
+			}
+		};
+
+		renderList();
 	}
 
 	/**
