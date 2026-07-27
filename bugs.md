@@ -3,49 +3,17 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 44 — skill→ability correctness + permanent per-skill ability pin, Quick Build weapon-mastery proficiency filter (in progress)
-
-Two parallel sessions, one branch each, fully file-disjoint (S2 is READ-ONLY toward
-`charactersheet-state.js`). Pre-assigned test-file ownership to avoid the two known collisions.
-
-- **S2 — Bug A: Quick Build weapon-mastery pool ignores weapon proficiency.** Surfaced by the
-  spawner (`rogue/thief/4/halfling`): the Rogue was offered — and picked — **Lance** and
-  **Trident**. `_renderWeaponMasteryStep` (`js/charactersheet/charactersheet-quickbuild.js`
-  ~3285) builds its pool as *every* base item with a `mastery` property, split "Simple" /
-  "Martial", with no filter against the character's actual proficiencies. Per the 2024 rules the
-  choice is limited to weapons "with which you have proficiency". Fix = intersect the pool with
-  the character's weapon proficiencies via the existing read-only `_state._isWeaponProficient`
-  (never edit state). Must also drop pre-seeded masteries that are no longer proficient, and be
-  tested for three states: existing Fighter, Builder→Quick Build Fighter, and a *pending
-  multiclass into* Fighter (mastery step renders before the class is added at
-  `charactersheet-quickbuild.js` ~4703 — if proficiencies aren't yet on `_state`, derive pending
-  ones from `classData.multiclassing.proficienciesGained.weapons` rather than mutating state).
-  Owns `test/jest/charactersheet/CharacterSheetQuickBuildWeaponMastery.test.js` (its state mock
-  lacks `_isWeaponProficient`).
-
-- **S1 — Bug B: Culture (and DM-screen Linguistics) skill ability is INT but should be WIS.**
-  Authoritative source is the TGTT homebrew (`homebrew/TravelersGuidetoThelemar.json`: Culture
-  `ability:"wis"`, Linguistics `ability:"wis"`). Two maps are wrong:
-  `charactersheet-state.js` `getSkillAbility()` (~40603 `culture:"int"` → `"wis"`; linguistics
-  already correct) and `dmscreen-partytracker-serial.js` `SKILL_TO_ABILITY` (~155 `culture:"int"`
-  and ~159 `linguistics:"int"` → both `"wis"`). Fixes the Party Tracker calc + DC-calculator
-  labels for free. `CharacterSheetPhase8Fixes.test.js:113` asserts the old `int` and must flip.
-
-- **S1 — Feature C: permanent per-skill ability pin (dedicated UI).** Today only a per-*roll*
-  ability menu (`_showSkillAbilityMenu`) and feature-granted auto-MAX swaps
-  (`abilitySwap:<skill>`, e.g. Forest Sage) exist. Add a persistent `_data.skillAbilityOverrides`
-  ({skillKey → ability}) with precedence **explicit per-roll ability > manual pin > feature
-  auto-MAX > base map**. Route through ONE effective-ability resolver used by `getSkillAbility`,
-  `getSkillMod` (~9459), `getSkillBreakdown` (~10339), modifier matching, and roll routing
-  (`_rollSkillCheck` must derive `checkType` from the *effective* ability, and
-  `getSkillModWithAbility` must honor its supplied ability for state bonuses — both are latent
-  bugs today). Keep a raw base-mapping helper to avoid recursion. Unrestricted (any of 6
-  abilities). The per-roll menu stays a non-persistent override that ignores the pin. Lore skills
-  (no ability mod) are excluded from pinning. Deleting a custom skill (`removeCustomSkill` ~9695)
-  clears its pin. Migration defaults the field to `{}`. Dedicated UI designed with the impeccable
-  skill. DM-screen import discards pins for now (declared char-sheet-only).
+_None currently tracked._
 
 ## Closed Bugs
+
+### Round 44 — skill→ability correctness + permanent per-skill ability pin, weapon-mastery proficiency filter — COMPLETE
+
+Two parallel sessions, one branch each, fully file-disjoint (empty changed-file intersection → conflict-free `--no-ff` integration; S2 stayed READ-ONLY toward `charactersheet-state.js`). Full gate green on the merged tree: eslint + stylelint clean, **429 suites / 12,594 tests pass**.
+
+- **Bug B — Culture (and DM-screen Linguistics) skill ability was INT, should be WIS (S1, `52e6374e`).** Two in-code maps contradicted the authoritative TGTT homebrew (`homebrew/TravelersGuidetoThelemar.json`: Culture/Linguistics `ability:"wis"`). Symptom: Culture *displayed* WIS (from loaded skill data) but *rolled* INT — a display/calc mismatch. Fixed the base skill map in `charactersheet-state.js` `getSkillAbility` (`culture` → `wis`; linguistics was already correct there) and both entries in `dmscreen-partytracker-serial.js` `SKILL_TO_ABILITY` (`culture` + `linguistics` → `wis`), which corrects the Party Tracker calc and DC-calculator labels for free.
+- **Feature C — permanent per-skill ability pin with a dedicated UI (S1, `52e6374e`).** Previously only a transient per-*roll* ability menu (`_showSkillAbilityMenu`) and feature-granted auto-MAX swaps (`abilitySwap:<skill>`, e.g. Forest Sage) existed. Added a persistent `_data.skillAbilityOverrides` model routed through ONE effective-ability resolver `_resolveSkillAbility(skill, {overrideAbility})` → `{ability, baseAbility, source}` with precedence **explicit per-roll override > manual pin > feature auto-MAX > base map**. `getSkillAbility`/`getSkillMod`/`getSkillBreakdown` all consume the resolver (their duplicated swap blocks deleted); a separate `_getBaseSkillAbility` raw lookup prevents recursion and preserves the "swapped from X" breakdown label. Backward-compatible migration (defaults `{}`, normalises corrupt/array saves); setters reject lore skills + invalid abilities; `removeCustomSkill` clears the pin. Two latent bugs fixed alongside: `getSkillModWithAbility` now routes state bonuses through its `ability` argument (not the default), and `_rollSkillCheck` derives `checkType` from the effective ability (override wins) so conditional modifiers / advantage / state dice route correctly. Dedicated "Skill Abilities" modal (impeccable-designed, from the skills footer + play-mode): per-skill effective ability + source badge (Default / Feature swap / Pinned) + a 6-ability segmented control with per-ability mod tooltip + Default reset. Pins are reflected everywhere the ability is shown — main rows (📌), the ability-hero and skills-by-ability groupings (grouped by *effective* ability so a pinned/auto-MAX skill sits under the ability its number derives from), and play-mode rows. The per-roll right-click menu stays a non-persistent override that ignores the pin. DM-screen import leaves pins char-sheet-only (unknown field silently ignored).
+- **Bug A — weapon-mastery pool ignored weapon proficiency (S2, `0704c694`).** Surfaced by the spawner (`rogue/thief/4/halfling`): the Rogue was offered — and picked — **Lance** and **Trident**. Both the Quick Build step (`charactersheet-quickbuild.js` `_renderWeaponMasteryStep`) *and* the Builder picker (`charactersheet-builder.js` `_renderWeaponMasterySelection` — the path the spawn repro actually hits, since a L1–4 Rogue's Quick Build mastery gain is 0) built their pool from *every* base item with a `mastery` property, with no proficiency intersection. Per the 2024 rules the choice is limited to weapons "with which you have proficiency". Fixed by filtering the pool before the simple/martial split with a union predicate `_isWeaponProficient(item) || _matchesWeaponProfTokens(item, tokens)` — where `_matchesWeaponProfTokens` strips `{@item name|src}` tags and `{full}` objects and matches category/named tokens, so `{@item}`-wrapped named profs (e.g. a 2014-style Longsword) resolve locally without ever editing state. For a leg whose proficiencies aren't yet applied to `_state` at render time (a pending Quick Build multiclass, or the Builder class-preview which renders before the Class step is advanced), pending tokens are derived from `classData.multiclassing.proficienciesGained.weapons` / `cls.startingProficiencies.weapons` **without mutating state**. Non-proficient pre-seeded masteries are pruned in place so badge counts stay consistent; a `canFilter` guard keeps older/mock states unfiltered rather than throwing. Verified end-to-end: the spawn repro now yields `Shortbow|XPHB` / `Staff|XPHB` (both simple → Rogue-proficient), no Lance/Trident anywhere. The pre-existing state-side gap (`_isWeaponProficient` does not normalise `{@item}`-wrapped named profs, which also affects attack-roll proficiency) is logged for a future round; the char-sheet-side union fully covers the mastery pools.
 
 ### Round 43 — homebrew/render robustness, DM Screen party+journey, proficiency dropdown, bestiary view buttons — COMPLETE
 
