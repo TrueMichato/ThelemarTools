@@ -1102,7 +1102,9 @@ export class CharacterSheetPlayMode {
 
 	_renderSkillRow (parent, skill) {
 		const mod = this._state.getSkillMod(skill.key);
-		const ability = skill.ability || this._state.getSkillAbility?.(skill.key) || "";
+		// Prefer the EFFECTIVE ability (pin/feature-swap aware) so pins show in play mode too.
+		const ability = this._state.getSkillAbility?.(skill.key) || skill.ability || "";
+		const isPinned = !!this._state.getSkillAbilityOverride?.(skill.key);
 
 		let cls = "pm-skill";
 		if (skill.profLevel >= 2) cls += " pm-skill--expertise";
@@ -1132,6 +1134,10 @@ export class CharacterSheetPlayMode {
 		elName.textContent = skill.name;
 		const elAbility = this._ce("span", "pm-skill__ability", row);
 		elAbility.textContent = ability.toUpperCase?.() || "";
+		if (isPinned) {
+			elAbility.classList.add("pm-skill__ability--pinned");
+			elAbility.title = `Ability pinned to ${ability.toUpperCase?.() || ""}`;
+		}
 		const elMod = this._ce("span", "pm-skill__mod", row);
 		elMod.textContent = this._fmtMod(mod);
 

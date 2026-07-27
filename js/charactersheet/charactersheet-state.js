@@ -4239,6 +4239,7 @@ class CharacterSheetState {
 			saveProficiencies: [], // ["str", "con"]
 			skillProficiencies: {}, // {athletics: 1, stealth: 2} (1 = prof, 2 = expertise)
 			customSkills: [], // [{name, ability, isLoreSkill?, bonus?}] - user-added custom skills (lore skills are flagged with isLoreSkill:true and store a flat `bonus`)
+			skillAbilityOverrides: {}, // {<normalizedSkillKey>: <ability>} - persistent per-skill ability pins (Feature C); lore skills excluded
 			armorProficiencies: [],
 			weaponProficiencies: [],
 			toolProficiencies: [],
@@ -4694,6 +4695,12 @@ class CharacterSheetState {
 		// of reversing a delta that no longer exists (which would leave a phantom negative).
 		this._data.divineFavor._applied = [];
 		if (!this._data.divineFavor.chosenBoons || typeof this._data.divineFavor.chosenBoons !== "object") this._data.divineFavor.chosenBoons = {};
+
+		// Per-skill ability pins (Feature C): default {} on old saves; guard against a
+		// corrupt/non-object value so the resolver's map lookups never throw.
+		if (!this._data.skillAbilityOverrides || typeof this._data.skillAbilityOverrides !== "object" || Array.isArray(this._data.skillAbilityOverrides)) {
+			this._data.skillAbilityOverrides = {};
+		}
 
 		// Ensure namedModifiers array exists
 		if (!Array.isArray(this._data.namedModifiers)) {
@@ -9477,30 +9484,9 @@ class CharacterSheetState {
 			return pb + (loreSkill.bonus || 0) + custom + itemBonus + stateBonus + stanceBonus;
 		}
 
-		// Use getSkillAbility() as single source of truth for skill→ability mapping
-		// Covers standard skills, hardcoded homebrew skills (cooking, culture, etc.), and custom skills
-		let ability = this.getSkillAbility(normalizedSkill);
-
-		// Check for ability swap modifiers (e.g., "use WIS instead of INT for Arcana")
-		// Uses MAX of default ability mod and swapped ability mod
-		if (ability) {
-			const swapMods = this._data.namedModifiers.filter(m =>
-				m.enabled && m.type === `abilitySwap:${normalizedSkill}` && m.newAbility,
-			);
-			if (swapMods.length) {
-				const defaultMod = this.getAbilityMod(ability);
-				let bestAbility = ability;
-				let bestMod = defaultMod;
-				for (const swap of swapMods) {
-					const swapMod = this.getAbilityMod(swap.newAbility);
-					if (swapMod > bestMod) {
-						bestMod = swapMod;
-						bestAbility = swap.newAbility;
-					}
-				}
-				ability = bestAbility;
-			}
-		}
+		// Resolve the effective ability (base map + persistent pin + feature auto-MAX)
+		// via the single resolver so this never drifts from getSkillBreakdown / the roll path.
+		const ability = this._resolveSkillAbility(normalizedSkill).ability;
 
 		return this.getSkillModWithAbility(normalizedSkill, ability);
 	}
@@ -9538,8 +9524,10 @@ class CharacterSheetState {
 		// Note: This already includes namedModifiers via _recalculateCustomModifiers()
 		const abilityCheckBonus = ability ? this.getAbilityCheckCustomMod(ability) : 0;
 
-		// Get bonus from active states (check:ability type bonuses)
-		const stateBonus = this.getSkillBonusFromStates(skill, this.getSkillAbility(skill) || ability);
+		// Get bonus from active states (check:ability type bonuses). Route by the ABILITY
+		// ARGUMENT (the effective/override ability) so alternate-ability rolls don't misroute
+		// state bonuses through the skill's default ability.
+		const stateBonus = this.getSkillBonusFromStates(skill, ability || this.getSkillAbility(skill));
 
 		// Combat stance skill bonus (Thelemar homebrew)
 		const stanceBonus = this._getStanceSkillBonus(skill);
@@ -9699,6 +9687,9 @@ class CharacterSheetState {
 			this._data.customSkills.splice(idx, 1);
 			// Also remove proficiency if set
 			delete this._data.skillProficiencies[key];
+			// And drop any persistent ability pin so a re-added skill of the same
+			// name doesn't inherit a ghost override.
+			if (this._data.skillAbilityOverrides) delete this._data.skillAbilityOverrides[key];
 			return true;
 		}
 		return false;
@@ -10374,36 +10365,22 @@ class CharacterSheetState {
 
 		const components = [];
 
-		// Determine ability (including swaps)
-		let ability = this.getSkillAbility(normalizedSkill);
-		let swappedFrom = null;
-		if (ability) {
-			const swapMods = this._data.namedModifiers.filter(m =>
-				m.enabled && m.type === `abilitySwap:${normalizedSkill}` && m.newAbility,
-			);
-			if (swapMods.length) {
-				const defaultMod = this.getAbilityMod(ability);
-				let bestAbility = ability;
-				let bestMod = defaultMod;
-				for (const swap of swapMods) {
-					const swapMod = this.getAbilityMod(swap.newAbility);
-					if (swapMod > bestMod) {
-						bestMod = swapMod;
-						bestAbility = swap.newAbility;
-					}
-				}
-				if (bestAbility !== ability) {
-					swappedFrom = ability;
-					ability = bestAbility;
-				}
-			}
-		}
+		// Determine effective ability via the single resolver (base + pin + feature auto-MAX).
+		const resolved = this._resolveSkillAbility(normalizedSkill);
+		const ability = resolved.ability;
+		const swappedFrom = resolved.source === "swap" ? resolved.baseAbility : null;
+		const isPinned = resolved.source === "pinned";
 
 		const mod = ability ? this.getAbilityMod(ability) : 0;
 		if (mod !== 0) {
-			const abilityLabel = swappedFrom
-				? `${ability.toUpperCase()} modifier (swapped from ${swappedFrom.toUpperCase()})`
-				: `${ability.toUpperCase()} modifier`;
+			let abilityLabel;
+			if (swappedFrom) {
+				abilityLabel = `${ability.toUpperCase()} modifier (swapped from ${swappedFrom.toUpperCase()})`;
+			} else if (isPinned) {
+				abilityLabel = `${ability.toUpperCase()} modifier (pinned)`;
+			} else {
+				abilityLabel = `${ability.toUpperCase()} modifier`;
+			}
 			components.push({type: "ability", name: abilityLabel, value: mod, icon: "🎲", isCanonical: true});
 		}
 
@@ -10452,7 +10429,7 @@ class CharacterSheetState {
 		const abilityCheckBonus = ability ? this.getAbilityCheckCustomMod(ability) : 0;
 		if (abilityCheckBonus !== 0) components.push({type: "custom", name: `${(ability || "").toUpperCase()} Check Modifier`, value: abilityCheckBonus, icon: "⚙️", isCanonical: false});
 
-		const stateBonus = this.getSkillBonusFromStates(normalizedSkill, this.getSkillAbility(normalizedSkill) || ability);
+		const stateBonus = this.getSkillBonusFromStates(normalizedSkill, ability);
 		if (stateBonus !== 0) components.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮", isCanonical: false});
 
 		const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
@@ -40574,11 +40551,16 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Get the ability associated with a skill (supports both standard and custom skills)
+	 * Get the RAW base ability for a skill from the static map / custom-skill definition.
+	 * This is the plain lookup with NO ability-swap (Forest Sage) and NO manual pin applied —
+	 * it is the base layer the effective-ability resolver builds on. Kept separate from the
+	 * resolver so `_resolveSkillAbility` can call it without recursing and so breakdowns can
+	 * still report "swapped from <base>".
 	 * @param {string} skill - The skill key
-	 * @returns {string|null} The ability abbreviation, or null if skill has no ability
+	 * @returns {string|null} The base ability abbreviation, or null if the skill has no ability
+	 * @private
 	 */
-	getSkillAbility (skill) {
+	_getBaseSkillAbility (skill) {
 		const skillMap = {
 			athletics: "str",
 			acrobatics: "dex",
@@ -40600,7 +40582,7 @@ class CharacterSheetState {
 			persuasion: "cha",
 			// Homebrew/custom standard skills
 			cooking: "wis",
-			culture: "int",
+			culture: "wis",
 			endurance: "con",
 			engineering: "int",
 			harvesting: "wis",
@@ -40626,6 +40608,125 @@ class CharacterSheetState {
 		// Default to int for unknown skills (backwards compatibility)
 		return "int";
 	}
+
+	/**
+	 * Resolve the EFFECTIVE ability used for a skill check, applying (highest precedence first):
+	 *   1. an explicit per-roll `overrideAbility` (transient; ignores the pin for that one roll),
+	 *   2. a persistent manual pin (`_data.skillAbilityOverrides`; overrides base AND feature swap),
+	 *   3. a feature-granted auto-MAX among `abilitySwap:<skill>` modifiers (player-favorable MAX,
+	 *      e.g. Forest Sage),
+	 *   4. the raw base map (`_getBaseSkillAbility`).
+	 *
+	 * Lore skills (flat-bonus, no ability) always resolve to `{ability:null}` — pins/swaps are no-ops.
+	 *
+	 * This is the SINGLE source of truth consumed by getSkillAbility / getSkillMod /
+	 * getSkillBreakdown / the roll path, so the swap+pin logic never drifts across reimplementations.
+	 * @param {string} skill - The skill key
+	 * @param {object} [opts]
+	 * @param {string|null} [opts.overrideAbility] - Transient per-roll ability
+	 * @returns {{ability: string|null, baseAbility: string|null, source: "override"|"pinned"|"swap"|"default"}}
+	 */
+	_resolveSkillAbility (skill, {overrideAbility = null} = {}) {
+		const normalizedSkill = skill?.toLowerCase().replace(/\s+/g, "");
+		const baseAbility = this._getBaseSkillAbility(normalizedSkill);
+
+		// Lore skills have no ability mod; pins/swaps do nothing.
+		if (this._getLoreSkillEntry(normalizedSkill)) {
+			return {ability: null, baseAbility: null, source: "default"};
+		}
+
+		// (1) Explicit per-roll override wins outright (and deliberately ignores the pin).
+		if (overrideAbility) {
+			return {ability: overrideAbility, baseAbility, source: "override"};
+		}
+
+		// (2) Persistent manual pin overrides base AND feature auto-MAX.
+		const pin = this._data.skillAbilityOverrides?.[normalizedSkill];
+		if (pin) {
+			return {ability: pin, baseAbility, source: "pinned"};
+		}
+
+		// (3) Feature-granted auto-MAX among abilitySwap:<skill> modifiers (Forest Sage etc.).
+		if (baseAbility) {
+			const swapMods = this._data.namedModifiers.filter(m =>
+				m.enabled && m.type === `abilitySwap:${normalizedSkill}` && m.newAbility,
+			);
+			if (swapMods.length) {
+				let bestAbility = baseAbility;
+				let bestMod = this.getAbilityMod(baseAbility);
+				for (const swap of swapMods) {
+					const swapMod = this.getAbilityMod(swap.newAbility);
+					if (swapMod > bestMod) {
+						bestMod = swapMod;
+						bestAbility = swap.newAbility;
+					}
+				}
+				if (bestAbility !== baseAbility) {
+					return {ability: bestAbility, baseAbility, source: "swap"};
+				}
+			}
+		}
+
+		// (4) Base map.
+		return {ability: baseAbility, baseAbility, source: "default"};
+	}
+
+	/**
+	 * Get the EFFECTIVE ability associated with a skill (pin- and feature-swap-aware).
+	 * Supports both standard and custom skills. Returns null for lore/flat skills.
+	 * @param {string} skill - The skill key
+	 * @returns {string|null} The effective ability abbreviation, or null if skill has no ability
+	 */
+	getSkillAbility (skill) {
+		return this._resolveSkillAbility(skill).ability;
+	}
+
+	// #region Per-skill ability pins (persistent overrides)
+
+	/**
+	 * Get the persistent ability pin for a skill, if any.
+	 * @param {string} skill - The skill key
+	 * @returns {string|null} The pinned ability abbreviation, or null if not pinned
+	 */
+	getSkillAbilityOverride (skill) {
+		const key = skill?.toLowerCase().replace(/\s+/g, "");
+		return this._data.skillAbilityOverrides?.[key] || null;
+	}
+
+	/**
+	 * Pin a skill to a specific ability (persistent). Rejects lore skills (no ability mod) and
+	 * invalid abilities. Setting the pin to the skill's base ability is allowed (an explicit
+	 * "lock to default" that also suppresses any feature auto-MAX).
+	 * @param {string} skill - The skill key
+	 * @param {string} ability - One of str/dex/con/int/wis/cha
+	 * @returns {boolean} true if the pin was set
+	 */
+	setSkillAbilityOverride (skill, ability) {
+		const key = skill?.toLowerCase().replace(/\s+/g, "");
+		if (!key) return false;
+		if (!Parser.ABIL_ABVS.includes(ability)) return false;
+		// Lore/flat skills ignore ability entirely — a pin would be a no-op.
+		if (this._getLoreSkillEntry(key)) return false;
+		if (!this._data.skillAbilityOverrides || typeof this._data.skillAbilityOverrides !== "object") {
+			this._data.skillAbilityOverrides = {};
+		}
+		this._data.skillAbilityOverrides[key] = ability;
+		return true;
+	}
+
+	/**
+	 * Clear a skill's persistent ability pin (revert to default / feature swap).
+	 * @param {string} skill - The skill key
+	 * @returns {boolean} true if a pin was removed
+	 */
+	clearSkillAbilityOverride (skill) {
+		const key = skill?.toLowerCase().replace(/\s+/g, "");
+		if (!key || !this._data.skillAbilityOverrides || !(key in this._data.skillAbilityOverrides)) return false;
+		delete this._data.skillAbilityOverrides[key];
+		return true;
+	}
+
+	// #endregion
 
 	/**
 	 * @deprecated Use getSkillAbility instead

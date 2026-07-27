@@ -820,6 +820,17 @@
 	text-transform: uppercase;
 }
 
+.pm-skill__ability--pinned {
+	color: var(--cs-accent-text, var(--cs-primary, #a78bfa));
+	font-weight: 700;
+}
+
+.pm-skill__ability--pinned::after {
+	content: "📌";
+	margin-left: 0.15em;
+	font-size: 0.85em;
+}
+
 .pm-skill__mod {
 	font-weight: 700;
 	color: var(--cs-text-primary, #f1f5f9);

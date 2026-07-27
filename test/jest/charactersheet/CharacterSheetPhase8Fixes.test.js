@@ -67,11 +67,11 @@ describe("Phase 8: Standalone Simple Fixes", () => {
 			expect(mod).toBe(3); // Should use WIS modifier
 		});
 
-		test("getSkillMod should use getSkillAbility for culture (int homebrew skill)", () => {
-			charState._data.abilities.int = 18; // +4 modifier
+		test("getSkillMod should use getSkillAbility for culture (wis homebrew skill)", () => {
+			charState._data.abilities.wis = 18; // +4 modifier
 
 			const mod = charState.getSkillMod("culture");
-			expect(mod).toBe(4); // Should use INT modifier
+			expect(mod).toBe(4); // Should use WIS modifier (Culture ability=wis per TGTT)
 		});
 
 		test("getSkillMod should use getSkillAbility for endurance (con homebrew skill)", () => {
@@ -110,7 +110,7 @@ describe("Phase 8: Standalone Simple Fixes", () => {
 
 		test("getSkillAbility should return ability for all hardcoded homebrew skills", () => {
 			expect(charState.getSkillAbility("cooking")).toBe("wis");
-			expect(charState.getSkillAbility("culture")).toBe("int");
+			expect(charState.getSkillAbility("culture")).toBe("wis");
 			expect(charState.getSkillAbility("endurance")).toBe("con");
 			expect(charState.getSkillAbility("engineering")).toBe("int");
 			expect(charState.getSkillAbility("harvesting")).toBe("wis");
