@@ -3289,6 +3289,20 @@ class CharacterSheetQuickBuild {
 			return item.mastery?.length > 0;
 		});
 
+		// XPHB Weapon Mastery choices are limited to weapons the character is proficient
+		// with. Reuse the canonical `_isWeaponProficient` checker (the same one that grants
+		// the attack proficiency bonus) so the pool stays consistent with the rest of the
+		// sheet. For a NEW multiclass leg the class is not yet on `_state` at render time
+		// (it is added on Finish), so also honour the proficiencies that leg is about to
+		// grant, derived locally without mutating state. When the checker is unavailable
+		// (older/mock states) fall back to the unfiltered pool so nothing breaks.
+		const pendingProfTokens = this._getPendingWeaponProfTokens(masteryInfo);
+		const canFilterByProficiency = typeof this._state?._isWeaponProficient === "function";
+		const isProficientWeapon = (weapon) => !canFilterByProficiency
+			|| this._state._isWeaponProficient(weapon)
+			|| this._matchesWeaponProfTokens(weapon, pendingProfTokens);
+		const proficientWeapons = weaponsWithMastery.filter(isProficientWeapon);
+
 		const getMasteryName = (entry) => {
 			if (!entry) return "";
 			if (typeof entry === "string") return entry.split("|")[0];
@@ -3296,11 +3310,29 @@ class CharacterSheetQuickBuild {
 			return "";
 		};
 
-		const simpleWeapons = weaponsWithMastery.filter(w =>
+		// Drop any pre-seeded masteries for weapons the character is no longer proficient
+		// with (e.g. a respec changed the class): they would otherwise stay selected,
+		// consume a badge slot, and vanish from the filtered list, desyncing the count.
+		// Prune in place so the `selectedList` reference (and the click handlers that
+		// mutate it) stay bound to the same array the apply path later reads.
+		const proficientKeys = new Set(proficientWeapons.map(w => `${w.name}|${w.source}`));
+		if (Array.isArray(selectedList)) {
+			const kept = selectedList.filter(
+				sel => typeof sel !== "string" || proficientKeys.has(sel),
+			);
+			if (kept.length !== selectedList.length) {
+				selectedList.length = 0;
+				selectedList.push(...kept);
+				const badge = section.querySelector(".badge");
+				if (badge) badge.textContent = `${selectedList.length}/${masteryInfo.targetTotal}`;
+			}
+		}
+
+		const simpleWeapons = proficientWeapons.filter(w =>
 			w.weaponCategory === "simple" || w.type === "S",
 		).sort((a, b) => a.name.localeCompare(b.name));
 
-		const martialWeapons = weaponsWithMastery.filter(w =>
+		const martialWeapons = proficientWeapons.filter(w =>
 			w.weaponCategory === "martial" || w.type === "M",
 		).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -3352,6 +3384,52 @@ class CharacterSheetQuickBuild {
 		section.append(list);
 		step.append(section);
 		content.append(step);
+	}
+
+	/**
+	 * Weapon-proficiency tokens a not-yet-applied class leg is about to grant.
+	 * A brand-new multiclass leg is added to `_state` only on Finish
+	 * (`_applyQuickBuildInner`), so at render time its proficiencies are not on
+	 * `_state` yet. For such a leg, surface the weapons it will grant via the
+	 * multiclassing table so the mastery pool matches the finished character.
+	 * Returns `[]` for an already-applied class (state already knows its profs) or
+	 * when the class defines no multiclass weapon grants (safe under-include).
+	 * Never mutates state.
+	 * @param {object} masteryInfo
+	 * @returns {string[]}
+	 */
+	_getPendingWeaponProfTokens (masteryInfo) {
+		if (!masteryInfo?.className) return [];
+		const classes = this._state?.getClasses?.() || [];
+		const alreadyApplied = classes.some(c => c.name === masteryInfo.className);
+		if (alreadyApplied) return [];
+		const weapons = masteryInfo.classData?.multiclassing?.proficienciesGained?.weapons;
+		return Array.isArray(weapons) ? weapons : [];
+	}
+
+	/**
+	 * Minimal fallback matcher for pending (not-yet-on-state) proficiency tokens.
+	 * Handles the token shapes the multiclassing table actually uses: the category
+	 * words "simple"/"martial" and specific weapon names (optionally wrapped in an
+	 * `{@item name|source|display}` tag). Descriptor tokens are intentionally not
+	 * resolved here — those are handled by the canonical `_isWeaponProficient` once
+	 * the class is applied.
+	 * @param {object} weapon - Raw base item (has `weaponCategory` + `name`).
+	 * @param {string[]} tokens
+	 * @returns {boolean}
+	 */
+	_matchesWeaponProfTokens (weapon, tokens) {
+		if (!weapon || !tokens?.length) return false;
+		const weaponName = (weapon.name || "").toLowerCase();
+		const category = weapon.weaponCategory;
+		return tokens.some(tokenRaw => {
+			if (typeof tokenRaw !== "string") return false;
+			// Strip an {@item name|source|display} wrapper down to the item name.
+			const tagMatch = /\{@item\s+([^|}]+)/i.exec(tokenRaw);
+			const token = (tagMatch ? tagMatch[1] : tokenRaw).trim().toLowerCase();
+			if (token === "simple" || token === "martial") return category === token;
+			return token === weaponName;
+		});
 	}
 
 	_validateWeaponMasteryStep () {
