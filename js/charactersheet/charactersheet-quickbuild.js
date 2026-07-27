@@ -3292,15 +3292,21 @@ class CharacterSheetQuickBuild {
 		// XPHB Weapon Mastery choices are limited to weapons the character is proficient
 		// with. Reuse the canonical `_isWeaponProficient` checker (the same one that grants
 		// the attack proficiency bonus) so the pool stays consistent with the rest of the
-		// sheet. For a NEW multiclass leg the class is not yet on `_state` at render time
-		// (it is added on Finish), so also honour the proficiencies that leg is about to
-		// grant, derived locally without mutating state. When the checker is unavailable
-		// (older/mock states) fall back to the unfiltered pool so nothing breaks.
+		// sheet. Union it with a local token match against the character's stored weapon
+		// proficiencies: 2014 named martial profs are stored as `{@item longsword|phb|...}`
+		// tokens that the exact-match state checker under-includes, and hiding a weapon the
+		// character genuinely IS proficient with would be the inverse of this bug. For a NEW
+		// multiclass leg the class is not yet on `_state` at render time (it is added on
+		// Finish), so also honour the proficiencies that leg is about to grant, derived
+		// locally without mutating state. When the checker is unavailable (older/mock states)
+		// fall back to the unfiltered pool so nothing breaks.
+		const stateProfTokens = this._state?.getWeaponProficiencies?.() || [];
 		const pendingProfTokens = this._getPendingWeaponProfTokens(masteryInfo);
+		const extraProfTokens = [...stateProfTokens, ...pendingProfTokens];
 		const canFilterByProficiency = typeof this._state?._isWeaponProficient === "function";
 		const isProficientWeapon = (weapon) => !canFilterByProficiency
 			|| this._state._isWeaponProficient(weapon)
-			|| this._matchesWeaponProfTokens(weapon, pendingProfTokens);
+			|| this._matchesWeaponProfTokens(weapon, extraProfTokens);
 		const proficientWeapons = weaponsWithMastery.filter(isProficientWeapon);
 
 		const getMasteryName = (entry) => {

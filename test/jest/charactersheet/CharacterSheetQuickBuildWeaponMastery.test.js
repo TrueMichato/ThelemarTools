@@ -227,6 +227,29 @@ describe("QuickBuild Weapon Mastery picker — proficiency filter (Bug A)", () =
 		expect(html).toContain("Dagger");
 	});
 
+	// Approved refinement — 2014 named martial proficiencies are stored as
+	// `{@item longsword|phb|...}` tokens that the exact-match state checker under-includes.
+	// The union against `getWeaponProficiencies()` must resolve them locally so a weapon the
+	// character genuinely IS proficient with stays in the pool, while Lance/Trident (no
+	// "martial" and no Lance/Trident named prof) remain excluded.
+	it("resolves a {@item}-wrapped named martial proficiency via the union (state checker misses the tag)", () => {
+		const weaponProfs = ["simple", "{@item longsword|phb|longswords}"];
+		const qb = makeQuickBuild({
+			weaponProfs,
+			classes: [{name: "Rogue", source: "PHB"}],
+			items: [DAGGER, LONGSWORD, LANCE, TRIDENT],
+		});
+		// Sanity: the exact-match state checker alone does NOT recognise the tagged token.
+		expect(qb._state._isWeaponProficient(LONGSWORD)).toBe(false);
+
+		const html = render(qb, masteryInfoFor({className: "Rogue"}));
+
+		expect(html).toContain("Dagger"); // simple
+		expect(html).toContain("Longsword"); // named prof via {@item} token union
+		expect(html).not.toContain("Lance"); // martial, not proficient
+		expect(html).not.toContain("Trident"); // martial, not proficient
+	});
+
 	// Progressive-state case (1): existing class already applied to state.
 	it("case 1 — existing Fighter: martial weapons visible from state proficiencies", () => {
 		const qb = makeQuickBuild({
