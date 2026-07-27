@@ -5824,6 +5824,10 @@ class CharacterSheetBuilder {
 	_renderWeaponMasterySelection (cls, masteryInfo) {
 		const {count} = masteryInfo;
 
+		// Filter the mastery pool to proficient weapons and prune non-proficient seeds
+		// BEFORE the section template renders (it prints `_selectedWeaponMasteries.length`).
+		const {simpleWeapons, martialWeapons} = this._buildProficientMasteryGroups(cls);
+
 		const section = e_({outer: `
 			<div class="charsheet__builder-mastery-selection mt-3">
 				<p><strong>Weapon Mastery:</strong> Choose ${count} weapon${count > 1 ? "s" : ""} to master:</p>
@@ -5834,29 +5838,6 @@ class CharacterSheetBuilder {
 		`});
 
 		const container = /** @type {*} */ (section.querySelector(".charsheet__builder-mastery-select-container"));
-
-		// Get only BASE weapons with mastery properties (not magic variants)
-		const allItems = this._page.getItems();
-		const weaponsWithMastery = allItems.filter((/** @type {*} */ item) => {
-			// Must be a base item, not a magic variant
-			if (!item._isBaseItem) return false;
-			// Must be a weapon
-			if (!item.type || !["M", "R", "S"].includes(item.type)) {
-				// Also check weaponCategory for more specific filtering
-				if (!item.weaponCategory) return false;
-			}
-			// Must have mastery property
-			return item.mastery?.length > 0;
-		});
-
-		// Group weapons by type for easier selection
-		const simpleWeapons = weaponsWithMastery.filter((/** @type {*} */ w) =>
-			w.weaponCategory === "simple" || w.type === "S",
-		).sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
-
-		const martialWeapons = weaponsWithMastery.filter((/** @type {*} */ w) =>
-			w.weaponCategory === "martial" || w.type === "M",
-		).sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
 
 		// Helper function to extract mastery name from string or object format
 		const getMasteryName = (/** @type {*} */ masteryEntry) => {
@@ -5889,7 +5870,8 @@ class CharacterSheetBuilder {
 					</label>
 				`});
 
-				lbl.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
+				const input = /** @type {*} */ (lbl.querySelector("input"));
+				input?.addEventListener("change", (/** @type {*} */ e) => {
 					if (e.target.checked) {
 						if (this._selectedWeaponMasteries.length < count) {
 							this._selectedWeaponMasteries.push(weaponKey);
@@ -5900,7 +5882,8 @@ class CharacterSheetBuilder {
 					} else {
 						this._selectedWeaponMasteries = this._selectedWeaponMasteries.filter((/** @type {*} */ m) => m !== weaponKey);
 					}
-					section.querySelector(".mastery-count").textContent = this._selectedWeaponMasteries.length;
+					const countEl = section.querySelector(".mastery-count");
+					if (countEl) countEl.textContent = this._selectedWeaponMasteries.length;
 				});
 
 				checkboxes.append(lbl);
@@ -5918,6 +5901,95 @@ class CharacterSheetBuilder {
 		}
 
 		return section;
+	}
+
+	/**
+	 * Build the proficient Weapon Mastery pool for the Builder, split into simple/martial
+	 * groups, and prune any pre-seeded masteries the character is no longer proficient with.
+	 *
+	 * Weapon Mastery choices are limited to weapons the character is proficient with (2024
+	 * rules). At this point in the Builder the class's starting weapon proficiencies have
+	 * NOT yet been applied to `_state` (that happens when the user advances off the Class
+	 * step), so derive the proficiency tokens locally from `cls.startingProficiencies.weapons`.
+	 * Union with any proficiencies already on state (e.g. when revisiting the step) and the
+	 * canonical `_isWeaponProficient` checker so named profs stored as `{@item name|src}`
+	 * tokens still resolve. Local-only; never mutates state (beyond pruning the local
+	 * `_selectedWeaponMasteries`). When the checker is unavailable, fall back to the
+	 * unfiltered pool so nothing breaks.
+	 * @param {*} cls - The selected class object (for `startingProficiencies.weapons`).
+	 * @returns {{simpleWeapons: Array<*>, martialWeapons: Array<*>}}
+	 */
+	_buildProficientMasteryGroups (cls) {
+		// Get only BASE weapons with mastery properties (not magic variants)
+		const allItems = this._page.getItems();
+		const weaponsWithMastery = allItems.filter((/** @type {*} */ item) => {
+			// Must be a base item, not a magic variant
+			if (!item._isBaseItem) return false;
+			// Must be a weapon
+			if (!item.type || !["M", "R", "S"].includes(item.type)) {
+				// Also check weaponCategory for more specific filtering
+				if (!item.weaponCategory) return false;
+			}
+			// Must have mastery property
+			return item.mastery?.length > 0;
+		});
+
+		const profTokens = [
+			...(this._state?.getWeaponProficiencies?.() || []),
+			...(cls?.startingProficiencies?.weapons || []),
+		];
+		const canFilterByProficiency = typeof this._state?._isWeaponProficient === "function";
+		const isProficientWeapon = (/** @type {*} */ weapon) => !canFilterByProficiency
+			|| this._state._isWeaponProficient(weapon)
+			|| this._matchesWeaponProfTokens(weapon, profTokens);
+		const proficientWeapons = weaponsWithMastery.filter(isProficientWeapon);
+
+		// Drop any pre-seeded masteries for weapons the character is not proficient with,
+		// so they don't stay selected while vanishing from the filtered list (count desync).
+		const proficientKeys = new Set(proficientWeapons.map((/** @type {*} */ w) => `${w.name}|${w.source}`));
+		this._selectedWeaponMasteries = this._selectedWeaponMasteries.filter(
+			(/** @type {*} */ sel) => typeof sel !== "string" || proficientKeys.has(sel),
+		);
+
+		const simpleWeapons = proficientWeapons.filter((/** @type {*} */ w) =>
+			w.weaponCategory === "simple" || w.type === "S",
+		).sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
+
+		const martialWeapons = proficientWeapons.filter((/** @type {*} */ w) =>
+			w.weaponCategory === "martial" || w.type === "M",
+		).sort((/** @type {*} */ a, /** @type {*} */ b) => a.name.localeCompare(b.name));
+
+		return {simpleWeapons, martialWeapons};
+	}
+
+	/**
+	 * Match a raw base weapon against a list of proficiency tokens, used to filter the
+	 * Weapon Mastery pool before the class's starting proficiencies are applied to
+	 * `_state`. Handles the token shapes `startingProficiencies.weapons` (and
+	 * `getWeaponProficiencies()`) actually use: the category words "simple"/"martial",
+	 * specific weapon names (optionally wrapped in an `{@item name|source|display}` tag),
+	 * and `{full: "..."}` objects. Descriptor/choice tokens are intentionally not resolved
+	 * here — those are covered by the canonical `_isWeaponProficient` once applied.
+	 * @param {*} weapon - Raw base item (has `weaponCategory` + `name`).
+	 * @param {Array<*>} tokens
+	 * @returns {boolean}
+	 */
+	_matchesWeaponProfTokens (weapon, tokens) {
+		if (!weapon || !tokens?.length) return false;
+		const weaponName = (weapon.name || "").toLowerCase();
+		const category = weapon.weaponCategory;
+		return tokens.some((/** @type {*} */ tokenRaw) => {
+			// Normalize `{full: "..."}` proficiency objects down to their string form.
+			const tokenStr = typeof tokenRaw === "string"
+				? tokenRaw
+				: (tokenRaw && typeof tokenRaw === "object" ? tokenRaw.full : null);
+			if (typeof tokenStr !== "string") return false;
+			// Strip an {@item name|source|display} wrapper down to the item name.
+			const tagMatch = /\{@item\s+([^|}]+)/i.exec(tokenStr);
+			const token = (tagMatch ? tagMatch[1] : tokenStr).trim().toLowerCase();
+			if (token === "simple" || token === "martial") return category === token;
+			return token === weaponName;
+		});
 	}
 
 	/**
