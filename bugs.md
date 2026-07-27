@@ -3,22 +3,47 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Quick Build weapon-mastery pool ignores weapon proficiency
+### Round 44 — skill→ability correctness + permanent per-skill ability pin, Quick Build weapon-mastery proficiency filter (in progress)
 
-Surfaced by the character spawner (`docs/charactersheet/15-spawn-test-characters.md`) while
-probing `rogue/thief/4/halfling`: the spawned Rogue was offered — and picked — **Lance** and
-**Trident** mastery.
+Two parallel sessions, one branch each, fully file-disjoint (S2 is READ-ONLY toward
+`charactersheet-state.js`). Pre-assigned test-file ownership to avoid the two known collisions.
 
-`_renderWeaponMasteryStep` (`js/charactersheet/charactersheet-quickbuild.js` ~3285) builds its
-pool as *every* base item with a `mastery` property, split into "Simple Weapons" / "Martial
-Weapons", with no filter against the character's actual weapon proficiencies. Per the 2024 rules
-the choice is limited to weapons "with which you have proficiency", so a Rogue should not see
-martial weapons beyond its short list (hand crossbow, longsword, rapier, shortsword).
+- **S2 — Bug A: Quick Build weapon-mastery pool ignores weapon proficiency.** Surfaced by the
+  spawner (`rogue/thief/4/halfling`): the Rogue was offered — and picked — **Lance** and
+  **Trident**. `_renderWeaponMasteryStep` (`js/charactersheet/charactersheet-quickbuild.js`
+  ~3285) builds its pool as *every* base item with a `mastery` property, split "Simple" /
+  "Martial", with no filter against the character's actual proficiencies. Per the 2024 rules the
+  choice is limited to weapons "with which you have proficiency". Fix = intersect the pool with
+  the character's weapon proficiencies via the existing read-only `_state._isWeaponProficient`
+  (never edit state). Must also drop pre-seeded masteries that are no longer proficient, and be
+  tested for three states: existing Fighter, Builder→Quick Build Fighter, and a *pending
+  multiclass into* Fighter (mastery step renders before the class is added at
+  `charactersheet-quickbuild.js` ~4703 — if proficiencies aren't yet on `_state`, derive pending
+  ones from `classData.multiclassing.proficienciesGained.weapons` rather than mutating state).
+  Owns `test/jest/charactersheet/CharacterSheetQuickBuildWeaponMastery.test.js` (its state mock
+  lacks `_isWeaponProficient`).
 
-Not spawner-specific — a human clicking through Quick Build sees the same over-wide list. Fix is
-to intersect the pool with the character's weapon proficiencies (simple / martial / named
-weapons) before rendering. Left open deliberately: it changes what real users are offered, so it
-wants its own change + regression test rather than riding along with the spawner work.
+- **S1 — Bug B: Culture (and DM-screen Linguistics) skill ability is INT but should be WIS.**
+  Authoritative source is the TGTT homebrew (`homebrew/TravelersGuidetoThelemar.json`: Culture
+  `ability:"wis"`, Linguistics `ability:"wis"`). Two maps are wrong:
+  `charactersheet-state.js` `getSkillAbility()` (~40603 `culture:"int"` → `"wis"`; linguistics
+  already correct) and `dmscreen-partytracker-serial.js` `SKILL_TO_ABILITY` (~155 `culture:"int"`
+  and ~159 `linguistics:"int"` → both `"wis"`). Fixes the Party Tracker calc + DC-calculator
+  labels for free. `CharacterSheetPhase8Fixes.test.js:113` asserts the old `int` and must flip.
+
+- **S1 — Feature C: permanent per-skill ability pin (dedicated UI).** Today only a per-*roll*
+  ability menu (`_showSkillAbilityMenu`) and feature-granted auto-MAX swaps
+  (`abilitySwap:<skill>`, e.g. Forest Sage) exist. Add a persistent `_data.skillAbilityOverrides`
+  ({skillKey → ability}) with precedence **explicit per-roll ability > manual pin > feature
+  auto-MAX > base map**. Route through ONE effective-ability resolver used by `getSkillAbility`,
+  `getSkillMod` (~9459), `getSkillBreakdown` (~10339), modifier matching, and roll routing
+  (`_rollSkillCheck` must derive `checkType` from the *effective* ability, and
+  `getSkillModWithAbility` must honor its supplied ability for state bonuses — both are latent
+  bugs today). Keep a raw base-mapping helper to avoid recursion. Unrestricted (any of 6
+  abilities). The per-roll menu stays a non-persistent override that ignores the pin. Lore skills
+  (no ability mod) are excluded from pinning. Deleting a custom skill (`removeCustomSkill` ~9695)
+  clears its pin. Migration defaults the field to `{}`. Dedicated UI designed with the impeccable
+  skill. DM-screen import discards pins for now (declared char-sheet-only).
 
 ## Closed Bugs
 
