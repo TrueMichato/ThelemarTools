@@ -47256,6 +47256,15 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Get a companion's initiative modifier.
+	 * @param {string} companionId - The companion ID
+	 * @returns {number} The companion's Dexterity modifier
+	 */
+	getCompanionInitiative (companionId) {
+		return this.getCompanionAbilityMod(companionId, "dex");
+	}
+
+	/**
 	 * Get a companion's save modifier
 	 * @param {string} companionId - The companion ID
 	 * @param {string} ability - The ability abbreviation

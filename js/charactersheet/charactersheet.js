@@ -4650,6 +4650,8 @@ class CharacterSheetPage {
 			const perceptionStr = perceptionMod >= 0 ? `+${perceptionMod}` : `${perceptionMod}`;
 			const stealthStr = stealthMod >= 0 ? `+${stealthMod}` : `${stealthMod}`;
 			const investigationStr = investigationMod >= 0 ? `+${investigationMod}` : `${investigationMod}`;
+			const initiativeMod = this._state.getCompanionInitiative?.(companion.id) || 0;
+			const initiativeStr = initiativeMod >= 0 ? `+${initiativeMod}` : `${initiativeMod}`;
 
 			// Check action economy state
 			const usedAction = companion.usedAction || false;
@@ -4757,14 +4759,17 @@ class CharacterSheetPage {
 					</div>
 
 					<!-- Quick Skill Checks -->
-					<div class="ve-flex mb-2" style="gap: 8px;">
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="perception" style="flex: 1;" title="Roll Perception check">
+					<div class="charsheet__companion-quick-rolls mb-2">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-initiative" title="Roll initiative for ${companion.customName || companion.name}">
+							⚡ Initiative (${initiativeStr})
+						</button>
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="perception" title="Roll Perception check">
 							👁️ Perception (${perceptionStr})
 						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="stealth" style="flex: 1;" title="Roll Stealth check">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="stealth" title="Roll Stealth check">
 							🤫 Stealth (${stealthStr})
 						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="investigation" style="flex: 1;" title="Roll Investigation check">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="investigation" title="Roll Investigation check">
 							🔍 Investigation (${investigationStr})
 						</button>
 					</div>
@@ -4910,6 +4915,9 @@ class CharacterSheetPage {
 				const skill = evt.currentTarget.dataset.skill;
 				this._rollCompanionSkillCheck(companion, skill);
 			}));
+			card.querySelector(".btn-companion-initiative").addEventListener("click", () => {
+				this._rollCompanionInitiative(companion);
+			});
 
 			// Edit name button
 			card.querySelector(".btn-companion-edit").addEventListener("click", () => {
@@ -5573,6 +5581,18 @@ class CharacterSheetPage {
 		JqueryUtil.doToast({
 			type: "info",
 			content: `🎲 ${companion.customName || companion.name} ${skillName}: ${roll} ${modStr} = <strong>${total}</strong>`,
+		});
+	}
+
+	_rollCompanionInitiative (companion) {
+		const mod = this._state.getCompanionInitiative?.(companion.id) || 0;
+		const roll = Renderer.dice.parseRandomise2("1d20");
+		const total = roll + mod;
+		const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
+
+		JqueryUtil.doToast({
+			type: "info",
+			content: `🎲 ${companion.customName || companion.name} Initiative: ${roll} ${modStr} = <strong>${total}</strong>`,
 		});
 	}
 

@@ -14159,6 +14159,11 @@ body.is-charsheet-page #charsheet-tab-builder .ve-btn-primary.disabled {
 	font-size: 1.1em;
 	margin-bottom: 8px;
 }
+.charsheet__companion-quick-rolls {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: var(--cs-space-sm, 8px);
+}
 
 /* Edit Ability Scores modal: only six short rows, so opt out of the tall
    picker default above and size to content (kills ~200px of dead space).
