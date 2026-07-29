@@ -76,18 +76,30 @@ describe("Companion Play Mode persistence", () => {
 		expect(restored.getCompanions().map(it => it.name)).toEqual(["Button the Owl"]);
 	});
 
-	test("built-in familiar action delegates to the real page handler without adding a second save", async () => {
+	test("built-in familiar action persists through the real page handler without adding a second save", async () => {
 		const state = new CharacterSheetState();
-		const onSummonFamiliar = jest.fn(async () => {});
-		const {playMode, page} = makePlayMode(state, {_onSummonFamiliar: onSummonFamiliar});
+		const {playMode, page, saved} = makePlayMode(state);
+		page._onSummonFamiliar = jest.fn(async () => {
+			state.addCompanion({
+				name: "Delegated Owl",
+				type: CharacterSheetState.COMPANION_TYPES.FAMILIAR,
+				abilities: {dex: 14},
+			});
+			page.saveCharacter();
+		});
 		playMode._showCustomCompanionModal = jest.fn();
 
 		await playMode._addBuiltinCompanion("familiar");
 
-		expect(onSummonFamiliar).toHaveBeenCalledTimes(1);
+		expect(page._onSummonFamiliar).toHaveBeenCalledTimes(1);
 		expect(playMode._showCustomCompanionModal).not.toHaveBeenCalled();
 		expect(playMode._openDrawerByType).toHaveBeenCalledWith("companions");
-		expect(page.saveCharacter).not.toHaveBeenCalled();
+		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+		expect(saved[0].companions.map(it => it.name)).toEqual(["Delegated Owl"]);
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(saved[0]);
+		expect(restored.getCompanions().map(it => it.name)).toEqual(["Delegated Owl"]);
 	});
 
 	test("Find Steed delegation preserves Greater Steed capability", async () => {
