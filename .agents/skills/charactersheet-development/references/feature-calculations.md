@@ -126,6 +126,16 @@ Two ways a swap is created, both flowing through `_processFeatureModifiers` → 
 ### FeatureEffectRegistry
 Maps feature names to effect objects. When a feature is added to the character (during build/levelup), the registry is consulted to auto-apply effects like resistances, proficiencies, and senses.
 
+### Deferred damage maximization and damage-triggered effects
+
+Features which modify a future damage roll use `armDamageMaximization()` rather than spending
+their pool at button-click time. Damage rollers query `canApplyPendingDamageMaximization(type)`,
+roll maximized dice, then call `consumePendingDamageMaximization(type)`; an ineligible roll
+leaves both the pending effect and its resource untouched. Target-facing riders which trigger
+from a resolved damage type use `getTriggeredDamageEffects(type)` (for example, Tempest
+Cleric's optional Thunderbolt Strike push) so spell, weapon, and combat-action results share
+one effect description.
+
 ### Items
 Magic items can provide bonuses that stack with or override feature calculations. Item bonuses are tracked separately in state and aggregated during AC/save/skill computation.
 

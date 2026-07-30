@@ -4438,6 +4438,7 @@ class CharacterSheetState {
 
 			// Resources (class features, racial abilities, etc.)
 			resources: [], // [{id, name, current, max, recharge: "short"|"long"|"dawn"}]
+			pendingDamageMaximization: null, // Deferred one-shot damage maximization (e.g. Destructive Wrath)
 
 			// Notes
 			notes: {
@@ -24247,24 +24248,10 @@ class CharacterSheetState {
 			effects.push({type: "speed", speedType: "fly", equalToWalk: true, source: "Stormborn"});
 		}
 
-		// NOTE (R44 Bug 1): Wrath of the Storm, Channel Divinity: Destructive Wrath and
-		// Thunderbolt Strike are NOT emitted here. They are STORED features (added by the
-		// Builder / level-up from class-cleric.json with full description text), and the
-		// generic stored-feature pipeline already surfaces them to the player:
-		//   • Wrath of the Storm → FeatureUsesParser mints a WIS-mod / long-rest use pool
-		//     (addResource) and its "use your reaction" text classifies it as a Reaction in
-		//     getActivatableFeatures().
-		//   • Channel Divinity: Destructive Wrath → surfaces in getActivatableFeatures() as a
-		//     spendable Channel-Divinity option (channelDivinityCost) against the shared
-		//     Channel Divinity resource.
-		//   • Thunderbolt Strike → a passive on-hit rider, shown verbatim in the Features
-		//     panel (full auto-push mechanics live in the Combat attack pipeline, out of the
-		//     cleric-state scope).
-		// The `hasWrathOfTheStorm` / `hasDestructiveWrath` / `hasThunderboltStrike` calc flags
-		// are an alternate representation that nothing consumes; emitting inert effect objects
-		// for them (types with no `_applyFeatureEffect` handler) would only relocate dead code,
-		// not add any player-facing surface — so we deliberately do not. See
-		// CharacterSheetTempestFeatures.test.js for the real-surface assertions.
+		// Tempest's triggered mechanics are resolved outside the passive-effect aggregator:
+		// Wrath is a stored Reaction with a parsed damage-type choice; Destructive Wrath arms
+		// a deferred one-shot maximizer; and lightning damage asks getTriggeredDamageEffects()
+		// for Thunderbolt Strike's optional push. No inert placeholder effects are emitted here.
 
 		// =========================================================
 		// SUBCLASS-GRANTED COMBAT TRADITIONS (TGTT)
@@ -30006,6 +29993,73 @@ class CharacterSheetState {
 		return true;
 	}
 
+	/**
+	 * Arm a deferred damage-maximization feature without spending its resource. The resource is
+	 * consumed only when an eligible damage roll is actually resolved.
+	 */
+	armDamageMaximization ({
+		sourceFeatureId = null,
+		sourceName = "Damage Maximization",
+		damageTypes = [],
+		resourceName,
+		resourceCost = 1,
+	} = {}) {
+		const normalizedTypes = [...new Set((damageTypes || []).map(it => `${it}`.toLowerCase()).filter(Boolean))];
+		const resource = this.getResource(resourceName);
+		if (!normalizedTypes.length || !resource || resource.current < resourceCost) return false;
+		this._data.pendingDamageMaximization = {
+			sourceFeatureId,
+			sourceName,
+			damageTypes: normalizedTypes,
+			resourceName,
+			resourceCost,
+		};
+		return true;
+	}
+
+	getPendingDamageMaximization () {
+		return this._data.pendingDamageMaximization ? {...this._data.pendingDamageMaximization} : null;
+	}
+
+	canApplyPendingDamageMaximization (damageType) {
+		const pending = this._data.pendingDamageMaximization;
+		if (!pending?.damageTypes?.includes(`${damageType || ""}`.toLowerCase())) return false;
+		const resource = this.getResource(pending.resourceName);
+		return !!resource && resource.current >= pending.resourceCost;
+	}
+
+	consumePendingDamageMaximization (damageType) {
+		if (!this.canApplyPendingDamageMaximization(damageType)) return false;
+		const pending = this._data.pendingDamageMaximization;
+		if (!this.useResourceCharge(pending.resourceName, pending.resourceCost)) return false;
+		this._data.pendingDamageMaximization = null;
+		return true;
+	}
+
+	clearPendingDamageMaximization () {
+		this._data.pendingDamageMaximization = null;
+	}
+
+	/**
+	 * Return target-facing effects caused by a resolved damage type.
+	 */
+	getTriggeredDamageEffects (damageType) {
+		const out = [];
+		const type = `${damageType || ""}`.toLowerCase();
+		const calc = this.getFeatureCalculations?.() || {};
+		if (type === "lightning" && calc.hasThunderboltStrike) {
+			out.push({
+				type: "forcedMovement",
+				distance: 10,
+				direction: "away",
+				maxTargetSize: "Large",
+				optional: true,
+				source: "Thunderbolt Strike",
+			});
+		}
+		return out;
+	}
+
 	setResourceCurrent (resourceId, current) {
 		const resource = this._data.resources.find(r => r.id === resourceId);
 		if (resource) {
@@ -34377,12 +34431,16 @@ class CharacterSheetState {
 
 		// --- Dice roll ---
 		// "deal Xd6 damage", "roll Xd8", "XdY + MOD damage"
-		const damageMatch = text.match(/(?:deal|deals?|takes?|suffers?|rolls?) (\d+d\d+(?:\s*\+\s*\w+)?)\s*(?:\w+\s+)?damage/i);
+		const damageMatch = text.match(/(?:deal|deals?|takes?|suffers?|rolls?) (\d+d\d+(?:\s*\+\s*\w+)?)[^.]{0,60}?\bdamage/i);
 		if (damageMatch) {
+			const damageTypesMatch = text.match(/\b(acid|cold|fire|force|lightning|necrotic|poison|psychic|radiant|thunder|bludgeoning|piercing|slashing)\s+or\s+(acid|cold|fire|force|lightning|necrotic|poison|psychic|radiant|thunder|bludgeoning|piercing|slashing)\s+damage/i);
+			const damageTypeMatch = text.match(/\b(acid|cold|fire|force|lightning|necrotic|poison|psychic|radiant|thunder|bludgeoning|piercing|slashing)\s+damage/i);
 			effects.rollDice = {
 				type: "damage",
 				formula: damageMatch[1].replace(/\s+/g, ""),
 				label: "Damage",
+				damageType: damageTypeMatch?.[1]?.toLowerCase() || null,
+				damageTypeChoices: damageTypesMatch ? [damageTypesMatch[1].toLowerCase(), damageTypesMatch[2].toLowerCase()] : null,
 			};
 			hasEffect = true;
 		}
@@ -34402,11 +34460,11 @@ class CharacterSheetState {
 		// "DC X {ability} saving throw", "must succeed on a DC X {ability} save"
 		const saveMatch = text.match(/dc (\d+) (strength|dexterity|constitution|intelligence|wisdom|charisma) sav/i)
 			|| text.match(/(?:must (?:make|succeed on) (?:a )?)?(?:dc )?(\d+)?\s*(strength|dexterity|constitution|intelligence|wisdom|charisma)\s+saving throw/i);
-		if (saveMatch && saveMatch[1]) {
+		if (saveMatch) {
 			if (!effects.rollDice) {
 				effects.rollDice = {};
 			}
-			effects.rollDice.dc = parseInt(saveMatch[1]);
+			effects.rollDice.dc = saveMatch[1] ? parseInt(saveMatch[1]) : null;
 			effects.rollDice.saveAbility = saveMatch[2].toLowerCase().slice(0, 3);
 			effects.rollDice.type = effects.rollDice.type || "save";
 			hasEffect = true;
@@ -43064,10 +43122,12 @@ class CharacterSheetState {
 		// _buildAbilityActivationInfo → the generic Abilities list with a Use button, whose
 		// click effect is wired by name in charactersheet.js (_pUseSongOfDefense).
 		"song of defense": "ability",
+		"channel divinity: destructive wrath": "ability",
 
 		// === Reactions wrongly detected as activatable toggle states ===
 		"deflect attacks": "reaction",
 		"deflect missiles": "reaction",
+		"wrath of the storm": "reaction",
 
 		// === Wrapper / "choose an option" features that are passive themselves ===
 		// (R20 #4/#17) The wrapper trait only presents sub-options; it is not itself a
@@ -43146,6 +43206,11 @@ class CharacterSheetState {
 			const staminaMatch = text.match(/(?:spend|expend|use|costs?)?\s*\(?(\d+)\s*stamina\s*(?:points?)?\)?/i);
 			if (staminaMatch) staminaCost = parseInt(staminaMatch[1], 10);
 		}
+		const damageMaximizationMatch = text.match(/(?:deal|do)\s+maximum\s+damage[^.]*instead of rolling/i);
+		const damageTypeMatch = text.match(/roll\s+([a-z]+)\s+or\s+([a-z]+)\s+damage/i);
+		const deferredDamageMaximization = damageMaximizationMatch && damageTypeMatch
+			? {damageTypes: [damageTypeMatch[1], damageTypeMatch[2]]}
+			: null;
 		return {
 			stateTypeId: "custom",
 			isCustom: true,
@@ -43162,6 +43227,8 @@ class CharacterSheetState {
 			isDataDriven: true,
 			resourceName: opts.resourceName !== undefined ? opts.resourceName : (feature.uses?.max > 0 ? feature.name : null),
 			resourceCost: opts.resourceCost || 1,
+			channelDivinityCost: opts.resourceName === "Channel Divinity" ? (opts.resourceCost || 1) : null,
+			deferredDamageMaximization,
 		};
 	}
 
@@ -43261,7 +43328,9 @@ class CharacterSheetState {
 			// name in charactersheet.js. Links to its own use pool when the feature
 			// carries `uses` (e.g. Baleful Interdict's seal pool).
 			if (classificationOverride === "ability") {
-				return this._buildAbilityActivationInfo(feature, rawText, text);
+				if (!rawText && !feature.uses && !feature.consumes) return null;
+				const resourceName = /channel\s+divinity/i.test(text) ? "Channel Divinity" : undefined;
+				return this._buildAbilityActivationInfo(feature, rawText, text, {resourceName});
 			}
 
 			// "combat" and "reaction" overrides: parse description for resource costs and effects,
