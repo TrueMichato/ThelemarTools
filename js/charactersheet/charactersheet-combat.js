@@ -330,6 +330,12 @@ class CharacterSheetCombat {
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
 		this._turnAttackUsage = {hasAttackAction: false, attackActionFeatureIds: new Set()};
 		this._handOfHarmUsedThisTurn = false;
+		this._relentlessUsedThisTurn = false;
+		this._pendingBattleMasterDamage = null;
+		this._pendingBattleMasterCheck = null;
+		this._pendingBattleMasterAttackAdvantage = false;
+		this._attackRollSequence = 0;
+		this._battleMasterManeuverRollId = null;
 		this._flankingEnabled = false; // Toggle: add +2 to-hit on melee attacks while flanking (RAW optional rule)
 		// TRANSIENT per-tactic conditional-attack toggles (e.g. High Ground +2 ranged).
 		// Map of tactic name -> bool. Combat-local and never persisted, exactly like
@@ -1362,7 +1368,8 @@ class CharacterSheetCombat {
 		// "attack" — doing so would wrongly bubble a SPECIFIC effect (e.g. Reckless's
 		// "attack:melee:str") onto every roll, granting advantage to ranged attacks.
 		let stateMode;
-		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType);
+		const maneuverAdvantage = !!this._pendingBattleMasterAttackAdvantage;
+		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType) || maneuverAdvantage;
 		const hasDisadvantage = this._state.hasDisadvantageFromStates?.(attackType);
 		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
@@ -1397,6 +1404,7 @@ class CharacterSheetCombat {
 
 		// Roll d20 with advantage/disadvantage support (state mode can be overridden by shift/ctrl keys)
 		const rollResult = this._page.rollD20({event, mode: stateMode});
+		this._pendingBattleMasterAttackAdvantage = false;
 		const total = rollResult.roll + totalBonus;
 
 		// Check for crit/fumble
@@ -1406,6 +1414,10 @@ class CharacterSheetCombat {
 		if (rollResult.roll >= critRange) {
 			resultClass = "charsheet__dice-result-total--crit";
 			resultNote = "Critical Hit!";
+			if (!attack.isSpell && this._state.restoreBloodMaledictOnRiteCritical?.(attack.riteWeaponId || attack.id)) {
+				this._page._renderResources?.();
+				void this._page._saveCurrentCharacter?.();
+			}
 		} else if (rollResult.roll === 1) {
 			resultClass = "charsheet__dice-result-total--fumble";
 			resultNote = "Critical Miss!";
@@ -1456,11 +1468,21 @@ class CharacterSheetCombat {
 			isGuidedStrikeApplication: extraBonus?.label === "Guided Strike",
 		});
 
+		const attackRollId = (this._attackRollSequence || 0) + 1;
+		this._attackRollSequence = attackRollId;
+		if (this._pendingBattleMasterDamage) {
+			if (this._pendingBattleMasterDamage.rollId == null) {
+				this._pendingBattleMasterDamage.rollId = attackRollId;
+				this._battleMasterManeuverRollId = attackRollId;
+			} else if (this._pendingBattleMasterDamage.rollId !== attackRollId) this._pendingBattleMasterDamage = null;
+		}
 		this._lastAttackContext = {
 			attackId,
+			rollId: attackRollId,
 			mode: rollResult.mode || "normal",
 			hasAdvantage,
 			hasDisadvantage,
+			total,
 		};
 		this._recordAttackForTurn(attack);
 		if (this._state.isStateTypeActive?.("awakenedAstralSelf")) this.renderAttacks();
@@ -2597,6 +2619,10 @@ class CharacterSheetCombat {
 
 		// Get bonus from active states (activated abilities)
 		const stateDamageBonus = this._state.getBonusFromStates?.("damage") || 0;
+		const bloodHunterCalc = this._state.getFeatureCalculations?.() || {};
+		const hybridDamageBonus = this._state.isStateTypeActive?.("hybridTransformation") && this._getAttackRollKind(attack).isMelee && !attack.isSpell
+			? (bloodHunterCalc.hybridDamageBonus || 0)
+			: 0;
 
 		// Check if attack uses strength and if rage is active (for rage damage)
 		let rageBonus = 0;
@@ -2721,14 +2747,21 @@ class CharacterSheetCombat {
 			spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
 		}
 
-		const totalBonus = abilityMod + (attack.damageBonus || 0) + featureDamageBonus + itemWeaponDamageBonus + rageBonus + stateDamageBonus + critDamageBonus + spellDamageBonus + ammoFlatDamageBonus;
+		const totalBonus = abilityMod + (attack.damageBonus || 0) + featureDamageBonus + itemWeaponDamageBonus + rageBonus + stateDamageBonus + hybridDamageBonus + critDamageBonus + spellDamageBonus + ammoFlatDamageBonus;
 
 		// Get extra damage dice from active states (e.g., Hex, Flame Tongue)
-		const extraDamageEntries = this._state.getExtraDamageFromStates?.() || [];
+		const extraDamageEntries = (this._state.getExtraDamageFromStates?.() || [])
+			.filter(entry => !entry.weaponId || entry.weaponId === (attack.riteWeaponId || attack.id))
+			.filter(entry => !attack.isSpell || !entry.isCrimsonRite);
 		let extraDamageTotal = 0;
 		const extraDamageParts = [];
 		for (const entry of extraDamageEntries) {
-			const extraRoll = this._parseDamage(entry.dice, isCrit);
+			let extraRoll = this._parseDamage(entry.dice, isCrit);
+			if (entry.isCrimsonRite && this._state.canUseSanguineMasteryReroll?.()) {
+				const reroll = this._parseDamage(entry.dice, isCrit);
+				if (reroll.total > extraRoll.total) extraRoll = reroll;
+				this._state.markSanguineMasteryRerollUsed?.();
+			}
 			extraDamageTotal += extraRoll.total;
 			extraDamageParts.push({dice: entry.dice, total: extraRoll.total, type: entry.damageType, source: entry.source});
 			extraRollsForAnim.push(extraRoll);
@@ -2770,7 +2803,8 @@ class CharacterSheetCombat {
 		}
 		const riderDiffTypeTotal = riderDamageTotal - riderSameTypeTotal;
 
-		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderSameTypeTotal + doubleshotDamage;
+		const {damage: battleMasterDamage, name: battleMasterName} = this._consumeBattleMasterDamage(attackId, isCrit);
+		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderSameTypeTotal + doubleshotDamage + battleMasterDamage;
 		const total = baseDamageTotal + riderDiffTypeTotal + handOfHarmDamage + methodEffectDamage + channelSpellDamage;
 
 		// Build subtitle with breakdown
@@ -2793,6 +2827,7 @@ class CharacterSheetCombat {
 		// Doubleshot rides under the weapon's own damage type, so it is itemized BEFORE
 		// the trailing weapon-type word below.
 		if (doubleshotDamage) subtitle += ` + ${doubleshotDamage} (Doubleshot 2nd arrow ${doubleshotDie})`;
+		if (battleMasterDamage) subtitle += ` + ${battleMasterDamage} (${battleMasterName})`;
 		subtitle += ` ${attack.damageType}`;
 		if (handOfHarmDamage) subtitle += ` | <strong style="color:#9b59b6">+${handOfHarmDamage} necrotic</strong> (Hand of Harm ${handOfHarmFormula})`;
 		if (methodEffectDamage) subtitle += ` | <strong style="color:#c44">+${methodEffectDamage} ongoing</strong> (${methodEffectApplied.name} ${methodEffectFormula}${methodEffectApplied.ongoingSaveType ? `, ${methodEffectApplied.ongoingSaveType.charAt(0).toUpperCase() + methodEffectApplied.ongoingSaveType.slice(1)} DC ${methodEffectApplied.saveDc} to end` : ""})`;
@@ -2975,6 +3010,119 @@ class CharacterSheetCombat {
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
 		this._turnAttackUsage = {hasAttackAction: false, attackActionCount: 0, attackActionFeatureIds: new Set()};
 		this._handOfHarmUsedThisTurn = false;
+		this._relentlessUsedThisTurn = false;
+		this._pendingBattleMasterDamage = null;
+		this._pendingBattleMasterAttackAdvantage = false;
+	}
+
+	canUseBattleMasterAction (actionType) {
+		return this._isActionTypeAvailable(actionType);
+	}
+
+	canUseBattleMasterManeuver (definition) {
+		if (definition?.damageTiming === "nextAttack") return !this._pendingBattleMasterDamage;
+		if (!definition?.attackBound) return true;
+		const rollId = this._lastAttackContext?.rollId;
+		return rollId != null && this._battleMasterManeuverRollId !== rollId;
+	}
+
+	consumeBattleMasterAction (actionType) {
+		this._consumeActionType(actionType);
+	}
+
+	canUseRelentless () {
+		return !!this._state.getFeatureCalculations?.().relentlessDie
+			&& (!this._state.isInCombat?.() || !this._relentlessUsedThisTurn);
+	}
+
+	consumeBattleMasterCheckBonus (rollType) {
+		const pending = this._pendingBattleMasterCheck;
+		if (!pending?.targets?.includes(rollType)) return null;
+		this._pendingBattleMasterCheck = null;
+		return pending;
+	}
+
+	_consumeBattleMasterDamage (attackId, isCrit = false) {
+		const pending = this._pendingBattleMasterDamage;
+		this._pendingBattleMasterDamage = null;
+		if (!pending
+			|| pending.rollId !== this._lastAttackContext?.rollId
+			|| this._lastAttackContext?.attackId !== attackId) return {damage: 0, name: null};
+		const criticalDamage = isCrit ? this._parseDamage(pending.die || "d8").total : 0;
+		return {damage: pending.roll + criticalDamage, name: pending.name};
+	}
+
+	applyBattleMasterManeuver ({feature, definition, roll, die = "d8", dc = null, modifier = 0, modifierAbility = null, target = "self", usedRelentless = false}) {
+		if (definition.action && definition.action !== "special") this._consumeActionType(definition.action);
+		if (usedRelentless && this._state.isInCombat?.()) this._relentlessUsedThisTurn = true;
+		if (definition.attackBound && this._lastAttackContext?.rollId != null) {
+			this._battleMasterManeuverRollId = this._lastAttackContext.rollId;
+		}
+
+		if (definition.rollKind === "attack" && this._lastAttackContext?.total != null) {
+			const adjusted = this._lastAttackContext.total + roll;
+			this._page._showDiceResult?.(
+				`${feature.name} — Adjusted Attack`,
+				adjusted,
+				`${this._lastAttackContext.total} + ${roll} Superiority Die`,
+			);
+		} else if (definition.rollKind === "damage") {
+			this._pendingBattleMasterDamage = {
+				name: feature.name,
+				roll,
+				die,
+				rollId: definition.damageTiming === "nextAttack" ? null : this._lastAttackContext?.rollId,
+			};
+			if ((feature.name || "").toLowerCase() === "feinting attack") this._pendingBattleMasterAttackAdvantage = true;
+		} else if (definition.rollKind === "allyDamage" || definition.rollKind === "secondaryDamage") {
+			this._page._showDiceResult?.(`${feature.name} — Damage`, roll, `${roll} Superiority Die damage`);
+		} else if (definition.rollKind === "allyTempHp") {
+			const fighterLevel = this._state.getClassLevel("Fighter") || 0;
+			const levelBonus = Math.floor(fighterLevel / 2);
+			const total = Math.max(0, roll + levelBonus);
+			this._page._showDiceResult?.(`${feature.name} — Ally Temporary HP`, total, `${roll} + ${levelBonus} (half Fighter level)`);
+		} else if (definition.rollKind === "reduction") {
+			const total = Math.max(0, roll + modifier);
+			this._page._showDiceResult?.(
+				`${feature.name} — Damage Reduction`,
+				total,
+				`${roll} + ${modifier >= 0 ? `+${modifier}` : modifier} ${modifierAbility?.toUpperCase() || ""}`.trim(),
+			);
+		} else if (definition.rollKind === "check") {
+			this._pendingBattleMasterCheck = {name: feature.name, roll, targets: definition.rollTargets || []};
+			this._page._showDiceResult?.(`${feature.name} — Check Bonus`, roll, `+${roll} to ${definition.appliesTo}`);
+		} else if (definition.rollKind === "ac") {
+			if (target === "self") {
+				this._state.addActiveState("custom", {
+					name: feature.name,
+					icon: "🛡️",
+					sourceFeatureId: feature.id,
+					description: `+${roll} AC; end this state when the maneuver's duration expires.`,
+					customEffects: [{type: "bonus", target: "ac", value: roll}],
+					duration: "Until the start of your next turn",
+				});
+			}
+			this._page._showDiceResult?.(
+				`${feature.name} — ${target === "self" ? "AC Bonus" : "Ally AC Bonus"}`,
+				roll,
+				`+${roll} AC`,
+			);
+		} else {
+			this._page._showDiceResult?.(
+				`${feature.name} — Superiority Die`,
+				roll,
+				`+${roll} to ${definition.appliesTo}`,
+			);
+		}
+
+		const saveText = definition.save && dc != null
+			? ` Target makes a DC ${dc} ${definition.save.toUpperCase()} saving throw.`
+			: "";
+		JqueryUtil.doToast({
+			type: "info",
+			content: `${feature.name}: ${definition.appliesTo}.${saveText}`,
+			autoHideTime: 10000,
+		});
 	}
 
 	_recordAttackForTurn (attack) {
@@ -3193,7 +3341,8 @@ class CharacterSheetCombat {
 			diceStr += ` ${d.sign > 0 ? "+" : "-"} ${Math.abs(value)} [${d.dice} ${d.source}]`;
 		}
 
-		const total = rollResult.roll + mod + diceTotal;
+		const maneuverBonus = this.consumeBattleMasterCheckBonus("initiative");
+		const total = rollResult.roll + mod + diceTotal + (maneuverBonus?.roll || 0);
 
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
 		void this._page.pAnimateD20?.(rollResult);
@@ -3202,7 +3351,9 @@ class CharacterSheetCombat {
 			roll: rollResult.roll,
 			modifier: mod,
 			total,
-			subtitle: this._page.formatD20Breakdown(rollResult, mod) + diceStr,
+			subtitle: this._page.formatD20Breakdown(rollResult, mod)
+				+ diceStr
+				+ (maneuverBonus ? ` + ${maneuverBonus.roll} [${maneuverBonus.name}]` : ""),
 		});
 
 		// Update initiative display
@@ -3619,6 +3770,38 @@ class CharacterSheetCombat {
 			opts.push(`<option value="${esc(a.id)}"${curVal === a.id ? " selected" : ""}>${esc(a.name)} (×${count})</option>`);
 		}
 		return `<select class="charsheet__attack-ammo-select" title="Active ammunition — its bonuses ride this weapon's attack and damage rolls; one round is spent on the damage roll">${opts.join("")}</select>`;
+	}
+
+	getAvailableWeaponAttacks () {
+		this.renderAttacks();
+		const activeStateAttacks = this._state.getActiveStateAttacks?.() || [];
+		const attacks = [...(this._cachedAttacks || []), ...activeStateAttacks]
+			.filter(attack => !attack.isSpell && attack.id)
+			.map(attack => attack.riteWeaponId
+				? {...attack, id: attack.riteWeaponId, name: "Predatory Strikes"}
+				: attack);
+		return attacks.filter((attack, ix) => attacks.findIndex(it => it.id === attack.id) === ix);
+	}
+
+	_resolveHybridBloodlustAtTurnStart () {
+		const check = this._state.getHybridBloodlustCheck?.();
+		if (!check) return;
+		if (check.automaticFailure) {
+			JqueryUtil.doToast({type: "danger", content: "Bloodlust automatically fails: move toward the nearest creature and take the Attack action against it."});
+			return;
+		}
+		const rollResult = this._page.rollD20({mode: check.advantage ? "advantage" : "normal"});
+		const total = rollResult.roll + check.bonus;
+		const failed = total < check.dc;
+		this._page.showDiceResult({
+			title: `Bloodlust Wisdom Save${check.advantage ? " (Advantage)" : ""}`,
+			roll: rollResult.roll,
+			modifier: check.bonus,
+			total,
+			resultClass: failed ? "charsheet__dice-result-total--fumble" : "",
+			resultNote: failed ? "Failure — attack the nearest creature." : "Success — you retain control.",
+			subtitle: this._page.formatD20Breakdown(rollResult, check.bonus),
+		});
 	}
 
 	_renderAttackItem (attack, reachCtx = {}) {
@@ -7929,16 +8112,18 @@ class CharacterSheetCombat {
 	 */
 	renderCombatDefenses () {
 		// Get base defenses from character state
-		const resistances = this._state.getResistances?.() || [];
-		const immunities = this._state.getImmunities?.() || [];
-		const vulnerabilities = this._state.getVulnerabilities?.() || [];
-		const conditionImmunities = this._state.getConditionImmunities?.() || [];
+		const effectiveDefenses = this._state.getEffectiveDefenses?.() || {};
+		const resistances = effectiveDefenses.resistances || this._state.getResistances?.() || [];
+		const conditionalResistances = effectiveDefenses.conditionalResistances || [];
+		const immunities = effectiveDefenses.immunities || this._state.getImmunities?.() || [];
+		const vulnerabilities = effectiveDefenses.vulnerabilities || this._state.getVulnerabilities?.() || [];
+		const conditionImmunities = effectiveDefenses.conditionImmunities || this._state.getConditionImmunities?.() || [];
 
 		// Also get defenses from active states (like Rage giving resistance to B/P/S)
 		// Strip "damage:" prefix to match base resistance format
 		const activeStateEffects = this._state.getActiveStateEffects?.() || [];
 		const stateResistances = activeStateEffects
-			.filter(e => e.type === "resistance")
+			.filter(e => e.type === "resistance" && !e.conditional)
 			.map(e => (e.target || "").replace(/^damage:/i, ""));
 		const stateImmunities = activeStateEffects
 			.filter(e => e.type === "immunity")
@@ -7956,11 +8141,16 @@ class CharacterSheetCombat {
 		// Render resistances
 		const resistancesEl = document.getElementById("charsheet-resistances");
 		if (resistancesEl) {
-			if (allResistances.length) {
-				resistancesEl.innerHTML = allResistances.map(r => {
+			if (allResistances.length || conditionalResistances.length) {
+				const unconditionalHtml = allResistances.map(r => {
 					const isFromState = stateResistances.includes(r) && !resistances.includes(r);
 					return `<span class="badge ${isFromState ? "badge-warning" : "badge-success"} mr-1" title="${isFromState ? "From active state" : "Base resistance"}">${this._formatDamageType(r)}</span>`;
 				}).join("");
+				const conditionalHtml = conditionalResistances.map(r => {
+					const condition = CharacterSheetClassUtils.escapeHtml(r.conditional);
+					return `<span class="badge badge-warning mr-1" title="Conditional resistance: ${condition}">${this._formatDamageType(r.type)} (${condition})</span>`;
+				}).join("");
+				resistancesEl.innerHTML = unconditionalHtml + conditionalHtml;
 			} else {
 				resistancesEl.innerHTML = `<span class="ve-muted">—</span>`;
 			}
@@ -9882,6 +10072,7 @@ class CharacterSheetCombat {
 				JqueryUtil.doToast({type: "info", content: "Combat ended."});
 			} else {
 				this._state.startCombat();
+				this._resolveHybridBloodlustAtTurnStart();
 				this._lastSneakAttackRoundUsed = null;
 				this._sneakAttackEnabled = false;
 				this._sneakAttackHasAdjacentAlly = false;
@@ -9901,6 +10092,7 @@ class CharacterSheetCombat {
 
 		document.getElementById("charsheet-combat-next-round").onclick = () => {
 			const expired = this._state.advanceRound?.() || [];
+			this._resolveHybridBloodlustAtTurnStart();
 			const round = this._state.getCombatRound?.() || 0;
 			this._resetTurnActionUsage();
 			this._sneakAttackHasAdjacentAlly = false;

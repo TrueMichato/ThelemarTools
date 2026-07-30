@@ -897,7 +897,7 @@ failing; documented here so it isn't re-triaged as a new failure.
 
 ## CS-BUG-025 — E2E harness never advances past the Builder's "Name Your Character" step, so `createCharacterViaWizard` cannot build any character
 
-**Status**: Open
+**Status**: Fixed
 **Surfaced by**: every spec that calls `createCharacterViaWizard` —
 confirmed on an unmodified `character-sheet-wip` checkout with
 `PW_WORKERS=1 npx playwright test tgtt-arcane-archer-fighter-hochling.spec.ts --grep L1`
@@ -977,3 +977,37 @@ this one is fixed.
 
 **Severity**: High — no product code is broken, but the entire
 character-build safety net is non-functional.
+
+### Resolution
+
+Fixed in the harness only; no product code changed. Clearing the Name
+step exposed three further blockers that had accumulated behind it, all
+fixed in the same pass:
+
+| Blocker | Fix |
+|---|---|
+| Wizard parked on the Name step | `BuilderWizardPage.completeNameStep()`, called by `createCharacterViaWizard` and (defensively) by both race selectors, so the ~20 specs that drive the wizard directly are covered too. It no-ops when the step is absent, so a future step-order change can't re-break it. |
+| Class step gated by an unfilled **Class Feats** progression dropdown | `BuilderWizardPage.selectClassFeatProgressions()` fills every `.charsheet__opt-feat-progression-slot` select, preferring the first feat that renders no additional choices (so `_validateOptFeatureFeatProgressionPicks` is satisfied deterministically). |
+| Class step gated by an under-filled skill picker (presets' hand-written `skillCount` drifts from what the class grants) | `BuilderWizardPage.topUpClassSkillsToRequired()` reads the live `Selected: X/Y` counter and picks the remainder. |
+| Level-up wizard refusing to close because a post-level-up `_pPromptFeatureChoice` modal was still open from the *previous* level | `LevelUpPage.resolvePendingFeatureChoices()` picks the first concrete option (not "Decide later"), called before each level and after each `finish()`. |
+
+Diagnostics hardened so the next drift fails loudly rather than as an
+opaque timeout:
+
+- `waitForListItems` now reports which builder step is actually on screen.
+- `LevelUpPage.finish()` records toasts via a `MutationObserver` (they
+  auto-hide after 5s, so they were always gone by the time the assertion
+  timed out), and `expectModalClosed()` reports the captured toast /
+  runtime error.
+- `createCharacterViaWizard`'s completion guard now also requires at
+  least one class on the character. The old name-only guard passed even
+  when the wizard had silently stalled mid-flow, because the name is set
+  by the wizard's *first* step.
+
+Verified: `tgtt-arcane-archer-fighter-hochling.spec.ts` 6 passed / 2
+skipped (was 2 failed / 2 skipped), plus spot checks on
+`tgtt-battle-master-fighter.spec.ts` and `tgtt-lust-cleric-lexalian.spec.ts`.
+
+The step-order-agnostic redesign suggested above is still worth doing;
+`completeNameStep`'s no-op-when-absent behaviour is a partial down
+payment on it.

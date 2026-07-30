@@ -3776,6 +3776,36 @@ class CharacterSheetState {
 	/** Extra reach granted by a weapon's "Reach" property, in feet. */
 	static REACH_PROPERTY_BONUS = 5;
 
+	static BATTLE_MASTER_MANEUVERS = {
+		"ambush": {action: "special", rollKind: "check", rollTargets: ["initiative", "check:dex:stealth"], appliesTo: "Initiative or Stealth check"},
+		"bait and switch": {action: "special", rollKind: "ac", targetChoice: ["self", "ally"], appliesTo: "AC until the start of your next turn"},
+		"commander's strike": {action: "special", rollKind: "allyDamage", appliesTo: "ally's reaction attack damage"},
+		"commanding presence": {action: "special", rollKind: "check", rollTargets: ["check:cha:intimidation", "check:cha:performance", "check:cha:persuasion"], appliesTo: "Intimidation, Performance, or Persuasion check"},
+		"disarming attack": {action: "special", rollKind: "damage", attackBound: true, save: "str", appliesTo: "attack damage; target drops an object on a failed save"},
+		"distracting strike": {action: "special", rollKind: "damage", attackBound: true, appliesTo: "attack damage; next ally attack has Advantage"},
+		"evasive footwork": {action: "bonus", rollKind: "ac", appliesTo: "AC until the start of your next turn"},
+		"feinting attack": {action: "bonus", rollKind: "damage", damageTiming: "nextAttack", appliesTo: "next attack damage; next attack has Advantage"},
+		"goading attack": {action: "special", rollKind: "damage", attackBound: true, save: "wis", appliesTo: "attack damage; target has Disadvantage against others on a failed save"},
+		"lunging attack": {action: "bonus", rollKind: "damage", damageTiming: "nextAttack", appliesTo: "next melee attack damage after a Dash"},
+		"maneuvering attack": {action: "special", rollKind: "damage", attackBound: true, appliesTo: "attack damage; ally can move with its Reaction"},
+		"menacing attack": {action: "special", rollKind: "damage", attackBound: true, save: "wis", appliesTo: "attack damage; target is Frightened on a failed save"},
+		"parry": {action: "reaction", rollKind: "reduction", modifierChoice: ["str", "dex"], appliesTo: "damage reduction"},
+		"precision attack": {action: "special", rollKind: "attack", attackBound: true, appliesTo: "the triggering attack roll"},
+		"pushing attack": {action: "special", rollKind: "damage", attackBound: true, save: "str", appliesTo: "attack damage; target is pushed on a failed save"},
+		"rally": {action: "bonus", rollKind: "allyTempHp", appliesTo: "an ally's temporary HP"},
+		"riposte": {action: "reaction", rollKind: "damage", damageTiming: "nextAttack", appliesTo: "reaction attack damage"},
+		"sweeping attack": {action: "special", rollKind: "secondaryDamage", attackBound: true, appliesTo: "a second creature's damage"},
+		"tactical assessment": {action: "special", rollKind: "check", rollTargets: ["check:int:history", "check:int:investigation", "check:wis:insight"], appliesTo: "History, Investigation, or Insight check"},
+		"trip attack": {action: "special", rollKind: "damage", attackBound: true, save: "str", appliesTo: "attack damage; target is Prone on a failed save"},
+	};
+
+	static getBattleMasterManeuverDefinition (feature) {
+		if (!feature?.optionalFeatureTypes?.includes("MV:B")) return null;
+		if (feature.source !== Parser.SRC_XPHB) return null;
+		const definition = this.BATTLE_MASTER_MANEUVERS[(feature.name || "").toLowerCase()];
+		return definition ? {...definition} : null;
+	}
+
 	constructor () {
 		this._data = this._getDefaultState();
 		// Optional full spell database, injected by the controller after data
@@ -4576,6 +4606,7 @@ class CharacterSheetState {
 			// `seedSubclassFeatureChoices` from re-offering the same skill pick on every
 			// later level-up (the catch-up backfill re-lists earlier subclass features).
 			fulfilledFeatureSkillChoices: [],
+			fulfilledFeatureToolChoices: [],
 			// Durable record of chosen structured sub-features (Divine Order role,
 			// Blessed Strikes option, Principles of Devotion, Specialties, …) so higher-
 			// level upgrades can find earlier picks (e.g. Improved Blessed Strikes L14
@@ -4653,6 +4684,7 @@ class CharacterSheetState {
 	}
 
 	toJson () {
+		this._ensureBattleMasterSuperiorityDice();
 		return MiscUtil.copyFast(this._data);
 	}
 
@@ -6945,6 +6977,8 @@ class CharacterSheetState {
 		this.calculateSpellSlots();
 		// Apply class feature effects (resistances, immunities, proficiencies, etc.)
 		this.applyClassFeatureEffects();
+		this._ensureBattleMasterSuperiorityDice();
+		this.ensureBloodHunterResources();
 		// Recalculate companion stats (HP, AC, etc. may scale with level/PB)
 		this.recalculateAllCompanions();
 	}
@@ -6971,6 +7005,7 @@ class CharacterSheetState {
 		this.calculateSpellSlots();
 		// Re-apply class feature effects for new level
 		this.applyClassFeatureEffects();
+		this._ensureBattleMasterSuperiorityDice();
 
 		return true;
 	}
@@ -6985,6 +7020,7 @@ class CharacterSheetState {
 		this.calculateSpellSlots();
 		// Re-apply class feature effects after class removal
 		this.applyClassFeatureEffects();
+		this._ensureBattleMasterSuperiorityDice();
 	}
 
 	/**
@@ -7402,6 +7438,7 @@ class CharacterSheetState {
 
 		// 13. Remove history entry
 		this.removeLevelHistoryEntry(targetLevel);
+		if (choices.optionalFeatures?.some(feature => feature?._replaces?.name)) this._reapplyHistoryOptionalFeatures();
 
 		// 13b. Re-index higher total levels down by one so an otherwise-complete history stays
 		//      contiguous (1..N) and the character is not flipped to "legacy". No-op for the
@@ -8527,6 +8564,7 @@ class CharacterSheetState {
 	// #region HP
 	setCurrentHp (hp) {
 		this._data.hp.current = Math.max(0, Math.min(hp, this.getMaxHp()));
+		if (this._data.hp.current === 0) this.deactivateState("hybridTransformation");
 		this._updateBloodiedCondition();
 	}
 
@@ -9421,11 +9459,14 @@ class CharacterSheetState {
 		const stanceBonus = this._getStanceSaveBonus(ability);
 		// Paladin Aura of Protection (level 6+): add CHA mod to all saving throws
 		const auraBonus = this._getAuraOfProtectionBonus();
+		const bloodHunterBonus = ["str", "dex", "con"].includes(ability)
+			? (this.getFeatureCalculations().darkAugmentationSaveBonus || 0)
+			: 0;
 		// Note: exhaustion is intentionally NOT applied here. The displayed save bonus
 		// stays "pure"; the exhaustion penalty is applied once at roll time by the
 		// roll handler (_rollSavingThrow). This avoids the double-application bug
 		// where both display and roll subtracted the penalty.
-		return mod + prof + custom + itemBonus + perAbilityItemBonus + stateBonus + stanceBonus + auraBonus;
+		return mod + prof + custom + itemBonus + perAbilityItemBonus + stateBonus + stanceBonus + auraBonus + bloodHunterBonus;
 	}
 
 	// Alias for test compatibility
@@ -10024,6 +10065,8 @@ class CharacterSheetState {
 
 		// Active state bonuses (e.g., Defensive Stance)
 		ac += this.getBonusFromStates("ac");
+		const isHeavyArmor = this._data.ac.armor?.type === "heavy";
+		if (!isHeavyArmor && this.isStateTypeActive("hybridTransformation")) ac += 1;
 
 		// Other bonuses
 		this._data.ac.bonuses.forEach(bonus => {
@@ -10684,6 +10727,9 @@ class CharacterSheetState {
 		if (type === "walk") {
 			const unarmoredBonus = this.getUnarmoredMovementBonus();
 			if (unarmoredBonus !== 0) components.push({type: "feature", name: "Unarmored Movement", value: unarmoredBonus, icon: "🧘"});
+
+			const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus();
+			if (darkAugmentationSpeedBonus !== 0) components.push({type: "feature", name: "Dark Augmentation", value: darkAugmentationSpeedBonus, icon: "🩸"});
 
 			const armorPenalty = this.getArmorStrengthPenalty();
 			if (armorPenalty !== 0) components.push({type: "penalty", name: "Armor STR Penalty", value: armorPenalty, icon: "⚠️"});
@@ -11347,6 +11393,23 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Dark Augmentation (Blood Hunter 10): +5 walking speed.
+	 *
+	 * Derived straight from the class level rather than from
+	 * `getFeatureCalculations().darkAugmentationSpeedBonus`, matching the
+	 * convention used by every other speed-pipeline bonus getter (see
+	 * `getAdeptSpeedBonus`). This is load-bearing: `getSpeedByType()` calls
+	 * this getter, and `getFeatureCalculations()` reads speeds back for
+	 * features such as Stormborn (Tempest Cleric 17, fly speed = walk speed).
+	 * Routing this through `getFeatureCalculations()` closes that loop into
+	 * infinite recursion for any character who could have both.
+	 * @returns {number}
+	 */
+	getDarkAugmentationSpeedBonus () {
+		return (this._getBloodHunterClass()?.level || 0) >= 10 ? 5 : 0;
+	}
+
+	/**
 	 * Get hover flight speed granted by Volant gemstone (2x walk speed)
 	 * @returns {number} Flight speed in feet, or 0 if no Volant gem equipped
 	 */
@@ -11462,7 +11525,8 @@ class CharacterSheetState {
 		const unarmoredBonus = this.getUnarmoredMovementBonus();
 		const adeptSpeedBonus = this.getAdeptSpeedBonus();
 		const gemstoneSpeedBonus = this.getGemstoneSpeedBonus();
-		const rawWalk = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + (itemSpeedBonus.walk || 0) + (itemSpeedBonus["*"] || 0);
+		const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus();
+		const rawWalk = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + darkAugmentationSpeedBonus + (itemSpeedBonus.walk || 0) + (itemSpeedBonus["*"] || 0);
 		const walkMultiplier = (itemSpeedMultiply.walk || 1) * (itemSpeedMultiply["*"] || 1);
 		const exhaustionSpeedPenalty = this._getExhaustionSpeedPenalty();
 		const walk = Math.max(0, Math.floor(rawWalk * walkMultiplier * speedMultiplier) - exhaustionSpeedPenalty);
@@ -11546,8 +11610,9 @@ class CharacterSheetState {
 		const unarmoredBonus = this.getUnarmoredMovementBonus();
 		const adeptSpeedBonus = this.getAdeptSpeedBonus();
 		const gemstoneSpeedBonus = this.getGemstoneSpeedBonus();
+		const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus();
 		const armorPenalty = this.getArmorStrengthPenalty(); // -10 if STR requirement not met
-		const raw = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + armorPenalty;
+		const raw = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + darkAugmentationSpeedBonus + armorPenalty;
 		return Math.max(0, Math.floor(raw * this.getSpeedMultiplierFromConditions()) - this._getExhaustionSpeedPenalty());
 	}
 
@@ -11576,7 +11641,12 @@ class CharacterSheetState {
 			base = Math.max(base, equalToSpeed);
 		}
 
-		const bonus = (speedMods[type] || 0) + this.getSpeedBonusFromStates(type) + this.getAdeptSpeedBonus() + (itemSpeedBonus[type] || 0) + (itemSpeedBonus["*"] || 0);
+		const bonus = (speedMods[type] || 0)
+			+ this.getSpeedBonusFromStates(type)
+			+ this.getAdeptSpeedBonus()
+			+ (type === "walk" ? this.getDarkAugmentationSpeedBonus() : 0)
+			+ (itemSpeedBonus[type] || 0)
+			+ (itemSpeedBonus["*"] || 0);
 
 		// Check for "equal to walk" modifiers (e.g., "swimming speed equal to your walking speed")
 		const equalToWalkMod = this._data.namedModifiers?.find(m =>
@@ -14234,17 +14304,33 @@ class CharacterSheetState {
 	// =========================================================================
 
 	getPendingFeatureChoices () {
+		this._ensureStudentOfWarChoices();
 		return [...(this._data.pendingFeatureChoices || [])];
 	}
 
 	hasPendingFeatureChoices () {
+		this._ensureStudentOfWarChoices();
 		return (this._data.pendingFeatureChoices?.length || 0) > 0;
+	}
+
+	_ensureStudentOfWarChoices () {
+		const feature = this._data.features?.find(f => (f.name || "").toLowerCase() === "student of war" && f.source === "XPHB");
+		if (!feature) return;
+		const fighterSkills = ["acrobatics", "animal handling", "athletics", "history", "insight", "intimidation", "persuasion", "perception", "survival"];
+		const artisanTools = ["Alchemist's Supplies", "Brewer's Supplies", "Calligrapher's Supplies", "Carpenter's Tools", "Cartographer's Tools", "Cobbler's Tools", "Cook's Utensils", "Glassblower's Tools", "Jeweler's Tools", "Leatherworker's Tools", "Mason's Tools", "Painter's Supplies", "Potter's Tools", "Smith's Tools", "Tinker's Tools", "Weaver's Tools", "Woodcarver's Tools"];
+		if (!this.hasFulfilledFeatureSkillChoice(feature.name)) {
+			this.addPendingFeatureChoice({featureName: feature.name, featureId: feature.id, kind: "skill", options: fighterSkills, count: 1});
+		}
+		const toolFulfilled = (this._data.fulfilledFeatureToolChoices || []).includes(feature.name.toLowerCase());
+		if (!toolFulfilled) {
+			this.addPendingFeatureChoice({featureName: feature.name, featureId: feature.id, kind: "tool", options: artisanTools, count: 1});
+		}
 	}
 
 	/**
 	 * Queue a prose-parsed feature choice. Deduped by featureId + kind + option
 	 * signature so respec/level-up replays don't stack duplicate prompts.
-	 * @param {{featureName?: string, featureId?: string, featureSource?: string, level?: number, kind: "skill"|"cantrip"|"subfeature", options: Array, count?: number, unique?: boolean}} choice
+	 * @param {{featureName?: string, featureId?: string, featureSource?: string, level?: number, kind: "skill"|"tool"|"cantrip"|"subfeature", options: Array, count?: number, unique?: boolean}} choice
 	 * @returns {boolean} True if a new choice was queued.
 	 */
 	addPendingFeatureChoice (choice) {
@@ -14336,13 +14422,31 @@ class CharacterSheetState {
 			if (choice.expertiseIfProficient && (this._data.skillProficiencies?.[skillKey] || 0) >= 1) {
 				this.setSkillProficiency(skillKey, 2);
 			} else {
-				this.addSkillProficiency(skillKey);
+				const trackSource = `feature-choice:${choice.featureId || choice.featureName}`;
+				const existingLevel = this._data.skillProficiencies?.[skillKey] || 0;
+				if (existingLevel >= 1 && !this._data.grantedProficiencies?.skills?.[skillKey]?.length) {
+					this._trackGrantedProficiency("skills", skillKey, "base");
+				}
+				if (existingLevel < 1) this.addSkillProficiency(skillKey);
+				this._trackGrantedProficiency("skills", skillKey, trackSource);
 			}
 			// Record that this feature's seeded skill choice is resolved so a later
 			// level-up (which re-lists earlier subclass features via the catch-up
 			// backfill) does not re-offer it. Skill proficiencies carry no source, so
 			// this marker is the only durable proof of fulfillment.
 			this._recordFulfilledFeatureSkillChoice(choice.featureName);
+		} else if (choice.kind === "tool") {
+			const tool = String(selection);
+			const toolKey = tool.toLowerCase();
+			const trackSource = `feature-choice:${choice.featureId || choice.featureName}`;
+			if (this.hasToolProficiency(tool) && !this._data.grantedProficiencies?.tools?.[toolKey]?.length) {
+				this._trackGrantedProficiency("tools", toolKey, "base");
+			}
+			this.addToolProficiency(tool);
+			this._trackGrantedProficiency("tools", toolKey, trackSource);
+			if (!Array.isArray(this._data.fulfilledFeatureToolChoices)) this._data.fulfilledFeatureToolChoices = [];
+			const key = String(choice.featureName || "").toLowerCase();
+			if (key && !this._data.fulfilledFeatureToolChoices.includes(key)) this._data.fulfilledFeatureToolChoices.push(key);
 		} else if (choice.kind === "cantrip") {
 			const sel = typeof selection === "string"
 				? choice.options.find(o => o.name?.toLowerCase() === selection.toLowerCase())
@@ -14868,6 +14972,25 @@ class CharacterSheetState {
 		if (!feature) return {claimedSkills, claimedSpells};
 
 		const {skillChoices, cantripChoices} = FeatureChoiceParser.extractChoices(feature);
+		if ((feature.name || "").toLowerCase() === "student of war" && feature.source === "XPHB") {
+			const fighterSkills = ["acrobatics", "animal handling", "athletics", "history", "insight", "intimidation", "persuasion", "perception", "survival"];
+			const artisanTools = ["Alchemist's Supplies", "Brewer's Supplies", "Calligrapher's Supplies", "Carpenter's Tools", "Cartographer's Tools", "Cobbler's Tools", "Cook's Utensils", "Glassblower's Tools", "Jeweler's Tools", "Leatherworker's Tools", "Mason's Tools", "Painter's Supplies", "Potter's Tools", "Smith's Tools", "Tinker's Tools", "Weaver's Tools", "Woodcarver's Tools"];
+			this.addPendingFeatureChoice({
+				featureName: feature.name,
+				featureId,
+				kind: "skill",
+				options: fighterSkills,
+				count: 1,
+			});
+			this.addPendingFeatureChoice({
+				featureName: feature.name,
+				featureId,
+				kind: "tool",
+				options: artisanTools,
+				count: 1,
+			});
+			fighterSkills.forEach(skill => claimedSkills.add(skill));
+		}
 
 		// A racial trait's prose may restate a skill choice that is ALSO encoded
 		// structurally on the race as `skillProficiencies.choose` — the authoritative
@@ -15377,6 +15500,88 @@ class CharacterSheetState {
 			const level = cls.level || 1;
 
 			switch (className) {
+				case "Blood Hunter": {
+					const hemocraftChoice = (this._data.levelHistory || [])
+						.filter(h => h.class?.name === "Blood Hunter")
+						.flatMap(h => h.choices?.featureChoices || [])
+						.find(choice => choice.featureName === "Hunter's Bane")?.choice
+						|| this._data.features.find(f => f.parentFeature === "Hunter's Bane")?.name;
+					const hemocraftAbility = /^int/i.test(hemocraftChoice || "")
+						? "int"
+						: /^wis/i.test(hemocraftChoice || "")
+							? "wis"
+							: this.getAbilityMod("int") >= this.getAbilityMod("wis") ? "int" : "wis";
+					const hemocraftModifier = Math.max(1, this.getAbilityMod(hemocraftAbility));
+					const hemocraftDie = level >= 17 ? "1d10" : level >= 11 ? "1d8" : level >= 5 ? "1d6" : "1d4";
+
+					calculations.hasHuntersBane = level >= 1;
+					calculations.hemocraftAbility = hemocraftAbility;
+					calculations.hemocraftModifier = hemocraftModifier;
+					calculations.hemocraftDie = hemocraftDie;
+					calculations.hemocraftSaveDc = 8 + profBonus + this.getAbilityMod(hemocraftAbility) - exhaustionPenalty;
+
+					if (level >= 1) {
+						calculations.hasBloodMaledict = true;
+						calculations.bloodMaledictUses = level >= 17 ? 4 : level >= 13 ? 3 : level >= 6 ? 2 : 1;
+						calculations.bloodCursesKnown = level >= 18 ? 5 : level >= 14 ? 4 : level >= 10 ? 3 : level >= 6 ? 2 : 1;
+					}
+					if (level >= 2) {
+						calculations.hasCrimsonRite = true;
+						calculations.crimsonRitesKnown = level >= 14 ? 3 : level >= 7 ? 2 : 1;
+						calculations.crimsonRiteDamage = hemocraftDie;
+					}
+					if (level >= 5) {
+						calculations.hasExtraAttack = true;
+						calculations.attackCount = Math.max(calculations.attackCount || 1, 2);
+					}
+					if (level >= 6) {
+						calculations.hasBrandOfCastigation = true;
+						calculations.brandDamage = hemocraftModifier;
+					}
+					if (level >= 9) calculations.hasGrimPsychometry = true;
+					if (level >= 10) {
+						calculations.hasDarkAugmentation = true;
+						calculations.darkAugmentationSpeedBonus = 5;
+						calculations.darkAugmentationSaveBonus = hemocraftModifier;
+					}
+					if (level >= 13) {
+						calculations.hasBrandOfTethering = true;
+						calculations.brandDamage = hemocraftModifier * 2;
+						calculations.brandTetherDamage = "4d6";
+						calculations.brandTetherDc = calculations.hemocraftSaveDc;
+					}
+					if (level >= 14) calculations.hasHardenedSoul = true;
+					if (level >= 20) calculations.hasSanguineMastery = true;
+
+					const effectiveSubclass = this.getEffectiveSubclassForClass(cls);
+					const subclassName = effectiveSubclass?.name || effectiveSubclass?.shortName || "";
+					if (/lycan/i.test(subclassName) && level >= 3) {
+						calculations.hasHeightenedSenses = true;
+						calculations.hasHybridTransformation = true;
+						calculations.hybridTransformationUses = level >= 18 ? Infinity : level >= 11 ? 2 : 1;
+						calculations.hybridTransformationDuration = level >= 18 ? "Until ended" : "1 hour";
+						calculations.hybridAcBonus = 1;
+						calculations.hybridDamageBonus = level >= 18 ? 3 : level >= 11 ? 2 : 1;
+						calculations.hybridNaturalWeaponDamage = level >= 11 ? "1d8" : "1d6";
+						if (level >= 7) {
+							calculations.hasStalkersProwess = true;
+							calculations.stalkersProwessSpeedBonus = 10;
+							calculations.hybridAttackBonus = level >= 18 ? 3 : level >= 11 ? 2 : 1;
+							calculations.longJumpBonus = 10;
+							calculations.highJumpBonus = 3;
+						}
+						if (level >= 11) {
+							calculations.hasAdvancedTransformation = true;
+							calculations.hybridRegeneration = Math.max(1, 1 + this.getAbilityMod("con"));
+						}
+						if (level >= 15) calculations.hasBrandOfTheVoracious = true;
+						if (level >= 18) {
+							calculations.hasHybridTransformationMastery = true;
+							calculations.grantsBloodCurseOfTheHowl = true;
+						}
+					}
+					break;
+				}
 				case "Rogue": {
 					const source = cls.source || "PHB";
 					const is2024 = source === "XPHB" || source === "TGTT";
@@ -17780,18 +17985,24 @@ class CharacterSheetState {
 						const maneuversKnown = level >= 15 ? 9 : level >= 10 ? 7 : level >= 7 ? 5 : 3;
 						calculations.maneuversKnown = maneuversKnown;
 
-						// Maneuver save DC
-						const maneuverDc = 8 + profBonus + Math.max(this.getAbilityMod("str"), this.getAbilityMod("dex")) - exhaustionPenalty;
-						calculations.maneuverSaveDc = maneuverDc;
+						// Maneuver save DC. XPHB lets the player choose STR or DEX for
+						// each maneuver, so preserve both values for the use-time picker.
+						const maneuverSaveDcStr = 8 + profBonus + this.getAbilityMod("str") - exhaustionPenalty;
+						const maneuverSaveDcDex = 8 + profBonus + this.getAbilityMod("dex") - exhaustionPenalty;
+						calculations.maneuverSaveDcStr = maneuverSaveDcStr;
+						calculations.maneuverSaveDcDex = maneuverSaveDcDex;
+						calculations.maneuverSaveDc = Math.max(maneuverSaveDcStr, maneuverSaveDcDex);
 
-						// Know Your Enemy (level 7, PHB only)
-						if (!isBM2024 && level >= 7) {
+						// Know Your Enemy is available from level 7 in both editions.
+						if (level >= 7) {
 							calculations.hasKnowYourEnemy = true;
 						}
 
-						// Relentless (level 15): Regain 1 die on initiative if none
+						// XPHB Relentless uses a free d8 once per turn. PHB's version
+						// instead restores one die when initiative is rolled with none.
 						if (level >= 15) {
 							calculations.hasRelentless = true;
+							calculations.relentlessDie = isBM2024 ? "d8" : null;
 						}
 					}
 
@@ -29939,7 +30150,274 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Resources
-	getResources () { return [...this._data.resources]; }
+	getResources () {
+		this._ensureBattleMasterSuperiorityDice();
+		return [...this._data.resources];
+	}
+
+	/**
+	 * Ensure an XPHB/PHB Battle Master's shared maneuver pool exists and tracks
+	 * level-based maximum changes without gifting back already-expended dice.
+	 */
+	_ensureBattleMasterSuperiorityDice () {
+		const fighter = this._data.classes?.find(cls =>
+			(cls.name || "").toLowerCase() === "fighter"
+			&& (cls.subclass?.shortName || "").toLowerCase() === "battle master",
+		);
+		if (!fighter || (fighter.level || 0) < 3) {
+			this._data.resources = (this._data.resources || []).filter(r => r.resourceType !== "battleMasterSuperiorityDice");
+			return null;
+		}
+
+		const max = fighter.level >= 15 ? 6 : fighter.level >= 7 ? 5 : 4;
+		let resource = this._data.resources?.find(r => r.name === "Superiority Dice");
+		if (!resource) {
+			resource = {
+				id: CryptUtil.uid(),
+				name: "Superiority Dice",
+				current: max,
+				max,
+				recharge: "short",
+				resourceType: "battleMasterSuperiorityDice",
+			};
+			this._data.resources.push(resource);
+			return resource;
+		}
+
+		const previousMax = resource.max ?? max;
+		const previousCurrent = resource.current ?? previousMax;
+		const expended = Math.max(0, previousMax - previousCurrent);
+		resource.current = Math.max(0, Math.min(max, max - expended));
+		resource.max = max;
+		resource.recharge = "short";
+		resource.resourceType = "battleMasterSuperiorityDice";
+		return resource;
+	}
+
+	getSuperiorityDice () {
+		const resource = this._ensureBattleMasterSuperiorityDice();
+		return resource ? {...resource} : null;
+	}
+
+	useSuperiorityDie () {
+		const resource = this._ensureBattleMasterSuperiorityDice();
+		if (!resource || resource.current <= 0) return false;
+		resource.current--;
+		return true;
+	}
+
+	restoreKnowYourEnemyWithSuperiorityDie () {
+		const feature = this._data.features?.find(f => (f.name || "").toLowerCase() === "know your enemy");
+		if (!feature?.uses || feature.uses.current >= feature.uses.max) return false;
+		if (!this.useSuperiorityDie()) return false;
+		feature.uses.current++;
+		const resource = this._data.resources?.find(r => r.featureId === feature.id || r.name === feature.name);
+		if (resource) resource.current = feature.uses.current;
+		return true;
+	}
+
+	_getBloodHunterClass () {
+		return (this._data.classes || []).find(cls => cls.name === "Blood Hunter" && (!cls.source || cls.source === "BH2022")) || null;
+	}
+
+	_resizeBloodHunterResource (name, max, recharge, featureName = name) {
+		const feature = this._data.features.find(f => f.name === featureName);
+		let resource = this._data.resources.find(r => r.name === name);
+		if (!resource) {
+			if (!feature) return null;
+			this.addResource({name, max, current: max, recharge, featureId: feature.id});
+			resource = this._data.resources.find(r => r.name === name);
+		} else if (resource.max !== max) {
+			const spent = Number.isFinite(resource.max) ? Math.max(0, resource.max - resource.current) : 0;
+			resource.max = max;
+			resource.current = Number.isFinite(max) ? Math.max(0, max - spent) : Infinity;
+			resource.recharge = recharge;
+			if (feature) resource.featureId = feature.id;
+		}
+		if (feature) {
+			feature.uses = {current: resource.current, max: resource.max, recharge};
+		}
+		return resource;
+	}
+
+	ensureBloodHunterResources () {
+		const cls = this._getBloodHunterClass();
+		if (!cls) return;
+		const level = cls.level || 1;
+		const maledictMax = level >= 17 ? 4 : level >= 13 ? 3 : level >= 6 ? 2 : 1;
+		this._resizeBloodHunterResource("Blood Maledict", maledictMax, "short");
+		if (level >= 6) this._resizeBloodHunterResource("Brand of Castigation", 1, "short");
+
+		const effectiveSubclass = this.getEffectiveSubclassForClass(cls);
+		const isLycan = /lycan/i.test(effectiveSubclass?.name || effectiveSubclass?.shortName || "");
+		if (isLycan && level >= 3) {
+			// Mastery makes transformation free; retain a finite legacy pool so saves and
+			// generic resource renderers never have to serialize/render Infinity.
+			const hybridMax = level >= 11 ? 2 : 1;
+			this._resizeBloodHunterResource("Hybrid Transformation", hybridMax, "short");
+			if (level >= 18 && !this._data.features.some(f => f.name === "Blood Curse of the Howl")) {
+				this._data.features.push({
+					id: "bh2022-blood-curse-of-the-howl",
+					name: "Blood Curse of the Howl",
+					source: "BH2022",
+					level: 18,
+					className: "Blood Hunter",
+					featureType: "Optional Feature",
+					optionalFeatureTypes: ["BC"],
+					description: "As an action, creatures of your choice within 30 feet that can hear you make a Wisdom save against your Hemocraft save DC. On a failure they are frightened until the end of your next turn; a failure by 5 or more also stuns them. Amplify: the range becomes 60 feet.",
+				});
+			}
+		}
+	}
+
+	_rollBloodHunterDie (roll = null) {
+		if (Number.isFinite(roll)) return Math.max(1, Math.floor(roll));
+		const die = this.getFeatureCalculations().hemocraftDie || "1d4";
+		const faces = Number(die.match(/d(\d+)/i)?.[1]) || 4;
+		const first = RollerUtil.randomise(faces);
+		if (!this.canUseSanguineMasteryReroll()) return first;
+		const second = RollerUtil.randomise(faces);
+		this.markSanguineMasteryRerollUsed();
+		return Math.min(first, second);
+	}
+
+	canUseSanguineMasteryReroll () {
+		if (!this.getFeatureCalculations().hasSanguineMastery) return false;
+		if (!this._data.inCombat) return true;
+		return this._data.sanguineMasteryLastRerollRound !== this._data.combatRound;
+	}
+
+	markSanguineMasteryRerollUsed () {
+		if (this._data.inCombat) this._data.sanguineMasteryLastRerollRound = this._data.combatRound;
+	}
+
+	_payHemocraftHpCost (amount) {
+		const cost = Math.max(1, Math.floor(Number(amount) || 1));
+		this.setCurrentHp(Math.max(0, this.getCurrentHp() - cost));
+		return cost;
+	}
+
+	useBloodMaledict ({amplify = false, roll = null} = {}) {
+		this.ensureBloodHunterResources();
+		const resource = this.getResource("Blood Maledict");
+		if (!resource || resource.current < 1) return false;
+		this.setResourceCurrent(resource.id, resource.current - 1);
+		if (amplify) this._payHemocraftHpCost(this._rollBloodHunterDie(roll));
+		return true;
+	}
+
+	getBloodHunterHybridEffects () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasHybridTransformation) return [];
+		return [
+			{type: "advantage", target: "check:str"},
+			{type: "advantage", target: "save:str"},
+			...(calc.hasStalkersProwess ? [{type: "bonus", target: "speed:walk", value: calc.stalkersProwessSpeedBonus}] : []),
+			{type: "resistance", target: "damage:bludgeoning", conditional: "nonmagical, nonsilvered attacks"},
+			{type: "resistance", target: "damage:piercing", conditional: "nonmagical, nonsilvered attacks"},
+			{type: "resistance", target: "damage:slashing", conditional: "nonmagical, nonsilvered attacks"},
+			...["bludgeoning", "slashing"].map(damageType => ({
+				type: "attack",
+				name: `Predatory Strike (${damageType.toTitleCase()})`,
+				riteWeaponId: "hybrid-predatory-strikes",
+				isMelee: true,
+				isRanged: false,
+				isSpell: false,
+				abilityMod: "finesse",
+				damage: calc.hybridNaturalWeaponDamage,
+				damageType,
+				attackBonus: calc.hybridAttackBonus || 0,
+				damageBonus: 0,
+				actionType: "bonus",
+			})),
+		];
+	}
+
+	activateHybridTransformation () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasHybridTransformation) return false;
+		this.ensureBloodHunterResources();
+		const resource = this.getResource("Hybrid Transformation");
+		if (Number.isFinite(calc.hybridTransformationUses)) {
+			if (!resource || resource.current < 1) return false;
+			this.setResourceCurrent(resource.id, resource.current - 1);
+		}
+		this.activateState("hybridTransformation", {
+			name: "Hybrid Transformation",
+			customEffects: this.getBloodHunterHybridEffects(),
+			duration: calc.hybridTransformationDuration,
+			resourceId: resource?.id,
+		});
+		return true;
+	}
+
+	activateCrimsonRite (riteName, {roll = null, weaponId = null, weaponName = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCrimsonRite || !weaponId) return false;
+		const damageType = ({
+			"rite of the flame": "fire",
+			"rite of the frozen": "cold",
+			"rite of the storm": "lightning",
+			"rite of the dead": "necrotic",
+			"rite of the oracle": "psychic",
+			"rite of the roar": "thunder",
+		})[String(riteName || "").toLowerCase()];
+		if (!damageType) return false;
+		this._payHemocraftHpCost(this._rollBloodHunterDie(roll));
+		const existing = this._data.activeStates.find(state => state.stateTypeId === "crimsonRite" && state.active);
+		const otherWeaponEffects = (existing?.customEffects || []).filter(effect => effect.weaponId !== weaponId);
+		const riteEffect = {type: "extraDamage", dice: calc.crimsonRiteDamage, damageType, source: riteName, weaponId, weaponName, isCrimsonRite: true};
+		this.activateState("crimsonRite", {
+			name: "Crimson Rites",
+			description: [...otherWeaponEffects, riteEffect].map(effect => `${effect.source} on ${effect.weaponName || "weapon"}`).join("; "),
+			customEffects: [...otherWeaponEffects, riteEffect],
+			duration: "Until your next short or long rest",
+		});
+		return true;
+	}
+
+	restoreBloodMaledictOnRiteCritical (attackId) {
+		const calc = this.getFeatureCalculations();
+		const riteApplies = this.getExtraDamageFromStates().some(effect => effect.isCrimsonRite && effect.weaponId === attackId);
+		if (!calc.hasSanguineMastery || !riteApplies) return false;
+		this.ensureBloodHunterResources();
+		const resource = this.getResource("Blood Maledict");
+		if (!resource || resource.current >= resource.max) return false;
+		this.setResourceCurrent(resource.id, resource.current + 1);
+		return true;
+	}
+
+	getHybridBloodlustCheck () {
+		if (this._data.hybridBloodlustTurnStartRound === this._data.combatRound) {
+			return this._data.hybridBloodlustTurnStartCheck;
+		}
+		return this._getCurrentHybridBloodlustCheck();
+	}
+
+	_getCurrentHybridBloodlustCheck () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasHybridTransformation
+			|| !this.isStateTypeActive("hybridTransformation")
+			|| this.getCurrentHp() >= this.getMaxHp() / 2) return null;
+		return {
+			dc: 8,
+			bonus: this.getSaveMod("wis"),
+			advantage: !!calc.hasBrandOfTheVoracious,
+			automaticFailure: !!this._data.concentrating || this.isStateTypeActive("rage"),
+		};
+	}
+
+	applyHybridRegenerationAtTurnStart () {
+		this._data.hybridBloodlustTurnStartRound = this._data.combatRound;
+		this._data.hybridBloodlustTurnStartCheck = this._getCurrentHybridBloodlustCheck();
+		const calc = this.getFeatureCalculations();
+		if (!calc.hybridRegeneration || !this.isStateTypeActive("hybridTransformation")) return 0;
+		const currentHp = this.getCurrentHp();
+		if (currentHp <= 0 || currentHp >= this.getMaxHp() / 2) return 0;
+		const before = currentHp;
+		this.heal(calc.hybridRegeneration);
+		return this.getCurrentHp() - before;
+	}
 
 	/**
 	 * (R23 #6) The canonical set of GENERIC resource pools to surface in the bare
@@ -29958,7 +30436,9 @@ class CharacterSheetState {
 	 */
 	getGenericPoolResources () {
 		const allFeatures = this.getFeatures?.() || [];
+		const hasHybridMastery = !!this.getFeatureCalculations().hasHybridTransformationMastery;
 		return (this._data.resources || []).filter(r => {
+			if (hasHybridMastery && r.name === "Hybrid Transformation") return false;
 			const linked = r.featureId
 				? allFeatures.find(f => f.id === r.featureId)
 				: allFeatures.find(f => (f.name || "") === (r.name || ""));
@@ -31740,6 +32220,7 @@ class CharacterSheetState {
 
 			for (const snapshot of snapshots) {
 				if (!snapshot?.name) continue;
+				if (snapshot._replaces?.name) this.removeFeature(snapshot._replaces.name, snapshot._replaces.source);
 
 				const optionalFeatureTypes = snapshot.optionalFeatureTypes
 					|| (typeof snapshot.type === "string" ? snapshot.type.split("_") : []);
@@ -31962,7 +32443,8 @@ class CharacterSheetState {
 		// Check if this feature grants a natural weapon and auto-add as attack
 		// Skip combat methods — they are not standalone attacks
 		const isCombatMethod = CharacterSheetClassUtils.isCombatMethod(feature);
-		if (!isCombatMethod && feature.description && NaturalWeaponParser.isNaturalWeapon(feature.description)) {
+		const isStateScopedNaturalWeapon = feature.name === "Hybrid Transformation" && feature.className === "Blood Hunter";
+		if (!isCombatMethod && !isStateScopedNaturalWeapon && feature.description && NaturalWeaponParser.isNaturalWeapon(feature.description)) {
 			const naturalWeapon = NaturalWeaponParser.parseNaturalWeapon(feature.description, feature.name);
 			if (naturalWeapon) {
 				// TGTT house rule: natural weapons are finesse (use the better of STR/DEX).
@@ -32016,6 +32498,7 @@ class CharacterSheetState {
 
 		// Check if this feature grants modifiers to rolls, AC, etc.
 		this._processFeatureModifiers(feature, featureData.id, {claimedSkills});
+		this.ensureBloodHunterResources();
 
 		// (5ET-843) Apply structured proficiency grants declared on the feature itself
 		// (`skillProficiencies` / `toolProficiencies` / `languageProficiencies`). This
@@ -32030,6 +32513,7 @@ class CharacterSheetState {
 			const grantedMethods = CharacterSheetClassUtils.resolveGrantedCombatMethods(feature, this._combatMethodCatalog);
 			grantedMethods.forEach(method => this.addFeature(method));
 		}
+		if ((feature.name || "").toLowerCase() === "combat superiority") this._ensureBattleMasterSuperiorityDice();
 
 		// Return true when a NEW feature was added (false above on dedupe). Callers that
 		// pair a non-idempotent side effect with the add (e.g. ASI base-score writes in the
@@ -32982,6 +33466,8 @@ class CharacterSheetState {
 	_isResourceSystemFeature (feature) {
 		const name = feature.name?.toLowerCase() || "";
 
+		if (feature.optionalFeatureTypes?.includes("CR") || name === "hybrid transformation") return true;
+
 		// (R20 #17) Options that consume a NAMED shared pool (other than Stamina, which
 		// combat methods handle on their own surface) must NOT mint their own resource —
 		// they draw on the shared pool (e.g. Invoke Hell options share the "Invoke Hell"
@@ -33788,6 +34274,19 @@ class CharacterSheetState {
 
 		// Remove associated resource if it was auto-added
 		if (feature) {
+			const choiceSource = `feature-choice:${feature.id}`;
+			for (const [type, remove] of [
+				["skills", name => this.setSkillProficiency(name, 0)],
+				["tools", name => this.removeToolProficiency(name)],
+			]) {
+				for (const name of Object.keys(this._data.grantedProficiencies?.[type] || {})) {
+					if (!this._data.grantedProficiencies[type][name].includes(choiceSource)) continue;
+					if (this._untrackGrantedProficiency(type, name, choiceSource)) remove(name);
+				}
+			}
+			const featureKey = feature.name.toLowerCase();
+			this._data.fulfilledFeatureSkillChoices = (this._data.fulfilledFeatureSkillChoices || []).filter(name => name !== featureKey);
+			this._data.fulfilledFeatureToolChoices = (this._data.fulfilledFeatureToolChoices || []).filter(name => name !== featureKey);
 			this._data.resources = this._data.resources.filter(r => r.featureId !== feature.id && r.name !== feature.name);
 			// Remove associated attack if it was auto-added (natural weapon)
 			this._data.attacks = this._data.attacks.filter(a => a.featureId !== feature.id && a.sourceFeature !== feature.name);
@@ -37412,11 +37911,12 @@ class CharacterSheetState {
 
 	/**
 	 * Get the complete effective defenses summary combining all sources.
-	 * @returns {{resistances: string[], immunities: string[], vulnerabilities: string[], conditionImmunities: string[]}}
+	 * @returns {{resistances: string[], conditionalResistances: Array<{type:string, conditional:string}>, immunities: string[], vulnerabilities: string[], conditionImmunities: string[]}}
 	 */
 	getEffectiveDefenses () {
 		return {
 			resistances: this.getResistances(),
+			conditionalResistances: this._getConditionalResistancesFromStates(),
 			immunities: this.getImmunities(),
 			vulnerabilities: this.getVulnerabilities(),
 			conditionImmunities: this.getConditionImmunities(),
@@ -37429,8 +37929,22 @@ class CharacterSheetState {
 	_getResistancesFromStates () {
 		const effects = this.getActiveStateEffects();
 		return effects
-			.filter(e => e.type === "resistance" && e.target?.startsWith("damage:"))
+			.filter(e => e.type === "resistance" && e.target?.startsWith("damage:") && !e.conditional)
 			.map(e => e.target.replace("damage:", ""));
+	}
+
+	/** @private */
+	_getConditionalResistancesFromStates () {
+		const seen = new Set();
+		return this.getActiveStateEffects()
+			.filter(e => e.type === "resistance" && e.target?.startsWith("damage:") && e.conditional)
+			.map(e => ({type: e.target.replace("damage:", ""), conditional: e.conditional}))
+			.filter(e => {
+				const key = `${e.type}|${e.conditional}`;
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			});
 	}
 
 	/** @private */
@@ -41949,6 +42463,31 @@ class CharacterSheetState {
 			exclusiveWith: ["bladesong"], // Cannot rage and bladesong simultaneously
 			breaksConcentration: true, // Rage prevents maintaining concentration
 		},
+		hybridTransformation: {
+			id: "hybridTransformation",
+			name: "Hybrid Transformation",
+			icon: "🐺",
+			description: "Lycan hybrid form with predatory strikes, resilient hide, and feral might",
+			effects: [],
+			duration: "1 hour",
+			endConditions: ["Reverted as a bonus action", "Unconscious", "Dead"],
+			resourceName: "Hybrid Transformation",
+			resourceCost: 1,
+			activationAction: "bonus",
+			detectPatterns: ["^hybrid transformation$"],
+			isGeneric: true,
+		},
+		crimsonRite: {
+			id: "crimsonRite",
+			name: "Crimson Rite",
+			icon: "🩸",
+			description: "A known rite infuses weapon strikes with hemocraft damage",
+			effects: [],
+			duration: "Until your next short or long rest",
+			endConditions: ["Finish a short or long rest", "Activate another rite"],
+			activationAction: "bonus",
+			isGeneric: true,
+		},
 		concentration: {
 			id: "concentration",
 			name: "Concentrating",
@@ -43303,6 +43842,7 @@ class CharacterSheetState {
 		// click effect is wired by name in charactersheet.js (_pUseSongOfDefense).
 		"song of defense": "ability",
 		"channel divinity: destructive wrath": "ability",
+		"blood maledict": "passive",
 
 		// === Reactions wrongly detected as activatable toggle states ===
 		"deflect attacks": "reaction",
@@ -43444,10 +43984,14 @@ class CharacterSheetState {
 	 * @returns {object|null} Activation info if this feature is activatable
 	 */
 	static detectActivatableFeature (feature) {
+		const name = feature?.name?.toLowerCase() || "";
+		const isCrimsonRite = feature?.optionalFeatureTypes?.includes("CR");
+		const isBloodCurse = feature?.optionalFeatureTypes?.includes("BC");
+		const isHybridTransformation = name === "hybrid transformation";
 		// (R20) Allow features that carry classification-relevant markers to be processed
 		// even when they only have `entries` (no rendered `description`) — e.g. Invoke Hell
 		// options expanded from refSubclassFeature, or synthesized manifestation children.
-		const hasMarkers = !!(feature?.consumes || feature?._raceManifestation);
+		const hasMarkers = !!(feature?.consumes || feature?._raceManifestation || isCrimsonRite || isBloodCurse || isHybridTransformation);
 		// (R40) A feature named in FEATURE_CLASSIFICATION_OVERRIDES must be processed even when
 		// it arrives entries-only (no rendered `description`), so its override is honoured
 		// rather than dropped by this early return. The override branch below builds its own
@@ -43457,7 +44001,59 @@ class CharacterSheetState {
 
 		const rawText = feature.description || CharacterSheetState._featureTextFromEntries(feature) || "";
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
-		const name = feature.name?.toLowerCase() || "";
+		if (isCrimsonRite) {
+			return {
+				stateTypeId: "crimsonRite",
+				stateType: this.ACTIVE_STATE_TYPES.crimsonRite,
+				matchedBy: "optionalFeatureType",
+				activationAction: "bonus",
+				interactionMode: "toggle",
+				isToggle: true,
+			};
+		}
+		if (isBloodCurse) {
+			return {
+				stateTypeId: "homebrewToggle",
+				stateType: this.ACTIVE_STATE_TYPES.homebrewToggle,
+				matchedBy: "optionalFeatureType",
+				activationAction: "special",
+				resourceName: "Blood Maledict",
+				resourceCost: 1,
+				interactionMode: "limited",
+				isInstant: true,
+				isDataDriven: true,
+			};
+		}
+		if (isHybridTransformation) {
+			return {
+				stateTypeId: "hybridTransformation",
+				stateType: this.ACTIVE_STATE_TYPES.hybridTransformation,
+				matchedBy: "name",
+				activationAction: "bonus",
+				resourceName: "Hybrid Transformation",
+				resourceCost: 1,
+				interactionMode: "toggle",
+				isToggle: true,
+			};
+		}
+
+		const maneuver = this.getBattleMasterManeuverDefinition(feature);
+		if (maneuver) {
+			return {
+				stateTypeId: "custom",
+				isCustom: true,
+				isDataDriven: true,
+				interactionMode: "limited",
+				isToggle: false,
+				isInstant: true,
+				matchedBy: "battleMasterManeuver",
+				activationAction: maneuver.action,
+				resourceName: "Superiority Dice",
+				resourceCost: 1,
+				superiorityDiceCost: 1,
+				maneuver,
+			};
+		}
 
 		const astralStateByName = {
 			"arms of the astral self": "astralArms",
@@ -45120,6 +45716,7 @@ class CharacterSheetState {
 		// every Hochling manifestation option (Guided Strike, War God's Blessing, …) links
 		// to the SAME use rather than each spawning its own.
 		this.ensureDivineManifestationPool();
+		this.ensureBloodHunterResources();
 		const resources = this.getResources();
 
 		for (const feature of this._data.features) {
@@ -45194,6 +45791,9 @@ class CharacterSheetState {
 				if (biResource) {
 					resource = {...biResource, cost: activationInfo.bardicInspirationCost};
 				}
+			} else if (activationInfo.superiorityDiceCost) {
+				const superiorityResource = resources.find(r => r.name === "Superiority Dice");
+				if (superiorityResource) resource = {...superiorityResource, cost: activationInfo.superiorityDiceCost};
 			} else if (stateType?.resourceName) {
 				// Check state type's default resource
 				// Special case: Stamina is tracked separately, not in resources array
@@ -45221,6 +45821,7 @@ class CharacterSheetState {
 				const boonResource = resources.find(r => r._dfNarrativeBoon && r.featureId === feature.id);
 				if (boonResource) resource = {...boonResource, cost: 1};
 			}
+			if (activationInfo.stateTypeId === "hybridTransformation" && this.getFeatureCalculations().hasHybridTransformationMastery) resource = null;
 
 			// Determine if this feature is currently active
 			const isActive = activationInfo.stateTypeId !== "custom"
@@ -46319,6 +46920,8 @@ class CharacterSheetState {
 	startCombat () {
 		this._data.inCombat = true;
 		this._data.combatRound = 1;
+		this._data.sanguineMasteryLastRerollRound = null;
+		this.applyHybridRegenerationAtTurnStart();
 
 		// Stamp activatedAtRound on any already-active states that didn't have one
 		for (const state of this._data.activeStates) {
@@ -46337,6 +46940,9 @@ class CharacterSheetState {
 	endCombat () {
 		this._data.inCombat = false;
 		this._data.combatRound = 0;
+		this._data.sanguineMasteryLastRerollRound = null;
+		this._data.hybridBloodlustTurnStartRound = null;
+		this._data.hybridBloodlustTurnStartCheck = null;
 
 		for (const state of this._data.activeStates) {
 			// Fully deactivate transient "consume on attack" states (e.g. Steady Aim)
@@ -46360,6 +46966,8 @@ class CharacterSheetState {
 		if (!this._data.inCombat) return [];
 
 		this._data.combatRound++;
+		this._data.sanguineMasteryLastRerollRound = null;
+		this.applyHybridRegenerationAtTurnStart();
 		const expired = [];
 		const oldMax = this._data.hp.max || 0;
 		let anyExpiredHpMaxIncrease = false;
@@ -46579,6 +47187,7 @@ class CharacterSheetState {
 				abilityMod: e.abilityMod || "spellcasting",
 				damage: e.damage,
 				damageType: e.damageType || "",
+				riteWeaponId: e.riteWeaponId || null,
 				range: e.range || "",
 				attackBonus: e.attackBonus || 0,
 				damageBonus: e.damageBonus || 0,
@@ -46859,6 +47468,8 @@ class CharacterSheetState {
 				dice: e.value || e.dice || "1d6",
 				damageType: e.damageType || "",
 				source: e.stateName || "state effect",
+				weaponId: e.weaponId || null,
+				isCrimsonRite: !!e.isCrimsonRite,
 			}));
 	}
 
@@ -47487,6 +48098,8 @@ class CharacterSheetState {
 	clearStatesOnRest (restType) {
 		// Rage ends on rest
 		this.deactivateState("rage");
+		this.deactivateState("crimsonRite");
+		if (!this.getFeatureCalculations().hasHybridTransformationMastery) this.deactivateState("hybridTransformation");
 
 		// Concentration ends on rest
 		if (this._data.concentrating) {

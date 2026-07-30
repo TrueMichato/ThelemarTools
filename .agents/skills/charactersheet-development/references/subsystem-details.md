@@ -14,9 +14,9 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 
 ## Active States / Toggle Abilities
 
-### ACTIVE_STATE_TYPES (25 types defined)
+### ACTIVE_STATE_TYPES (40 types defined)
 
-Core states: `rage`, `bladesong`, `sunShield`, `wildShape`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
+Core states: `rage`, `bladesong`, `sunShield`, `wildShape`, `hybridTransformation`, `crimsonRite`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
 
 Each state type defines:
 ```javascript
@@ -83,6 +83,26 @@ When Rage (or any state with `breaksConcentration: true`) activates:
 Steady Aim has TWO effects: `advantage` on next attack + `speedZero` (speed = 0).
 After one attack, `_consumeOnAttackStates()` removes ONLY the advantage effect. The `speedZero` survives until turn end.
 
+### Blood Hunter Runtime States
+
+`hybridTransformation` is activated through
+`state.activateHybridTransformation()`, which spends its shared short-rest pool
+unless level 18 mastery makes activation free. The state stores level-scaled
+custom effects so save/load preserves its Predatory Strike and defenses.
+Conditional resistance effects retain their condition in
+`getEffectiveDefenses().conditionalResistances`, allowing the Defenses UI to
+show qualified protection without promoting it to unconditional resistance.
+Predatory Strike is included in the combat module's canonical weapon picker so
+Crimson Rite can scope its rider to the transformed natural weapon; its
+bludgeoning and slashing attack rows share that rite identity. Combat start and
+round advancement both resolve Bloodlust and regeneration, 0 HP automatically
+reverts the Lycan, and rests end finite transformations but preserve level 18
+mastery.
+`crimsonRite` is created from a selected `CR` optional feature and stores
+`weaponId` on its `extraDamage` effect; combat damage filters that rider to the
+chosen weapon. Both activations use dedicated controller paths because they
+also pay resources or HP before the state is created.
+
 ## Combat System
 
 ### Attack Bonus Calculation
@@ -137,6 +157,26 @@ retaliation and reaction cost.
 ### Weapon Mastery Effects
 
 All 8 XPHB properties tracked: Cleave, Graze, Nick, Push, Sap, Slow, Topple, Vex. Slots scale by class/level.
+
+### XPHB Battle Master Maneuvers
+
+- XPHB `MV:B` options use the generic optional-feature picker at cumulative
+  counts 3/5/7/9 (levels 3/7/10/15), with one optional replacement whenever
+  that progression grants new maneuvers.
+- `battleMasterSuperiorityDice` is a persistent short-rest resource whose max
+  scales 4/5/6 while preserving the number of spent dice during level changes.
+- Every known maneuver is a generic limited activatable linked to that pool.
+  Its descriptor defines action economy, save requirement, damage rider, and
+  whether Relentless can replace the resource spend.
+- Save maneuvers prompt between `maneuverSaveDcStr` and
+  `maneuverSaveDcDex` per use. Damage maneuvers arm an attack-bound, crit-aware
+  one-shot rider and enforce one maneuver per attack; Precision Attack adjusts
+  the latest attack; Rally reports an ally-only temporary-HP result.
+- Replacement snapshots preserve the maneuver they replaced so reload and
+  level-down replay produce the correct known set. Feature-choice proficiency
+  grants are source-tracked so Student of War tears down cleanly.
+- XPHB Relentless is tracked once per turn and supplies a d8 instead of
+  spending a superiority die. Turn advance resets the allowance.
 
 ## Spell Data Format
 

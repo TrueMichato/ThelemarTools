@@ -116,22 +116,22 @@ class CharacterSheetSpawnPrompts {
 	async _answerFeatureChoice (choice) {
 		if (!choice || !Array.isArray(choice.options) || !choice.options.length) return null;
 
-		const bucketByKind = {skill: "skills", cantrip: "cantrips", subfeature: "featureOptions"};
+		const bucketByKind = {skill: "skills", tool: "tools", cantrip: "cantrips", subfeature: "featureOptions"};
 		const bucket = bucketByKind[choice.kind] || "featureOptions";
-		const isSkill = choice.kind === "skill";
+		const isStringChoice = choice.kind === "skill" || choice.kind === "tool";
 
 		const picked = this._picker.pickOne({
 			bucket,
 			kind: `featureChoice:${choice.kind}`,
 			key: choice.featureName || null,
 			options: choice.options,
-			nameOf: (/** @type {*} */ o) => (isSkill ? String(o) : o?.name),
+			nameOf: (/** @type {*} */ o) => (isStringChoice ? String(o) : o?.name),
 			label: `${choice.featureName || "Feature"} → ${choice.kind}`,
 		});
 		if (picked == null) return null;
 
 		// The caller expects a skill KEY string for "skill", `{name, source}` otherwise.
-		return isSkill ? picked : {name: picked.name, source: picked.source};
+		return isStringChoice ? picked : {name: picked.name, source: picked.source};
 	}
 
 	/**
