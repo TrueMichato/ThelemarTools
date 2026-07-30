@@ -1204,47 +1204,55 @@ class CharacterSheetPage {
 	}
 
 	_initEventListeners () {
+		const bind = (elementOrId, eventName, handler) => {
+			const element = typeof elementOrId === "string"
+				? document.getElementById(elementOrId)
+				: elementOrId;
+			element?.addEventListener(eventName, handler);
+			return element;
+		};
+
 		// Character selection
-		this._selCharacter.addEventListener("change", () => this._onCharacterSelect());
+		bind(this._selCharacter, "change", () => this._onCharacterSelect());
 
 		// Header buttons
-		document.getElementById("charsheet-btn-new").addEventListener("click", () => this._onNewCharacter());
-		document.getElementById("charsheet-btn-new").addEventListener("contextmenu", (e) => { e.preventDefault(); this._pOpenSpawnDialog(); });
-		document.getElementById("charsheet-btn-duplicate").addEventListener("click", () => this._onDuplicateCharacter());
-		document.getElementById("charsheet-btn-delete").addEventListener("click", () => this._onDeleteCharacter());
-		document.getElementById("charsheet-btn-delete").addEventListener("contextmenu", (e) => { e.preventDefault(); this._onManageCharacters(); });
-		document.getElementById("charsheet-btn-modifiers").addEventListener("click", () => this._showCustomModifiersModal());
-		document.getElementById("charsheet-btn-settings").addEventListener("click", () => this._showSettingsModal());
+		bind("charsheet-btn-new", "click", () => this._onNewCharacter());
+		bind("charsheet-btn-new", "contextmenu", (e) => { e.preventDefault(); this._pOpenSpawnDialog(); });
+		bind("charsheet-btn-duplicate", "click", () => this._onDuplicateCharacter());
+		bind("charsheet-btn-delete", "click", () => this._onDeleteCharacter());
+		bind("charsheet-btn-delete", "contextmenu", (e) => { e.preventDefault(); this._onManageCharacters(); });
+		bind("charsheet-btn-modifiers", "click", () => this._showCustomModifiersModal());
+		bind("charsheet-btn-settings", "click", () => this._showSettingsModal());
 		// Import/Export/Print handled by CharacterSheetExport module
-		document.getElementById("charsheet-btn-levelup").addEventListener("click", () => this._levelUp?.showLevelUp());
-		document.getElementById("charsheet-btn-multiclass").addEventListener("click", () => this._levelUp?.showMulticlass());
-		document.getElementById("charsheet-btn-quickbuild").addEventListener("click", () => this._quickBuild?.showQuickBuild());
-		document.getElementById("charsheet-btn-xp-add").addEventListener("click", () => this._onXpAdd());
-		document.getElementById("charsheet-btn-xp-set").addEventListener("click", () => this._onXpSet());
-		document.getElementById("charsheet-ipt-xp-add").addEventListener("keydown", (e) => {
+		bind("charsheet-btn-levelup", "click", () => this._levelUp?.showLevelUp());
+		bind("charsheet-btn-multiclass", "click", () => this._levelUp?.showMulticlass());
+		bind("charsheet-btn-quickbuild", "click", () => this._quickBuild?.showQuickBuild());
+		bind("charsheet-btn-xp-add", "click", () => this._onXpAdd());
+		bind("charsheet-btn-xp-set", "click", () => this._onXpSet());
+		bind("charsheet-ipt-xp-add", "keydown", (e) => {
 			if (e.key !== "Enter") return;
 			e.preventDefault();
 			this._onXpAdd();
 		});
-		document.getElementById("charsheet-levelup-banner-btn-now").addEventListener("click", () => this._onLevelUpBannerNow());
-		document.getElementById("charsheet-levelup-banner-btn-later").addEventListener("click", () => this._onLevelUpBannerLater());
+		bind("charsheet-levelup-banner-btn-now", "click", () => this._onLevelUpBannerNow());
+		bind("charsheet-levelup-banner-btn-later", "click", () => this._onLevelUpBannerLater());
 
 		// Character name
-		document.getElementById("charsheet-ipt-name").addEventListener("change", (e) => {
+		bind("charsheet-ipt-name", "change", (e) => {
 			this._state.setName((/** @type {*} */ (e.target)).value);
 			this._saveCurrentCharacter();
 			this._updateCharacterDropdown();
 		});
 
 		// HP controls
-		document.getElementById("charsheet-ipt-hp-current").addEventListener("change", (e) => {
+		bind("charsheet-ipt-hp-current", "change", (e) => {
 			this._state.setCurrentHp(parseInt((/** @type {*} */ (e.target)).value) || 0);
 			this._saveCurrentCharacter();
 			this._renderHp(); // Update HP bar
 			this._renderConditions(); // Update bloodied condition display
 		});
 
-		document.getElementById("charsheet-ipt-hp-temp").addEventListener("change", (e) => {
+		bind("charsheet-ipt-hp-temp", "change", (e) => {
 			this._state.setTempHp(parseInt((/** @type {*} */ (e.target)).value) || 0);
 			this._saveCurrentCharacter();
 			this._renderHp(); // Update HP bar
@@ -1256,16 +1264,16 @@ class CharacterSheetPage {
 			this._renderHp();
 			this._renderConditions();
 		};
-		document.getElementById("charsheet-ipt-hp-max-reduction").addEventListener("change", (e) => {
+		bind("charsheet-ipt-hp-max-reduction", "change", (e) => {
 			applyMaxHpReduction((/** @type {*} */ (e.target)).value);
 		});
-		document.getElementById("charsheet-btn-hp-max-reduction-clear").addEventListener("click", () => {
+		bind("charsheet-btn-hp-max-reduction-clear", "click", () => {
 			applyMaxHpReduction(0);
-			document.getElementById("charsheet-ipt-hp-max-reduction").focus();
+			document.getElementById("charsheet-ipt-hp-max-reduction")?.focus();
 		});
 
-		document.getElementById("charsheet-btn-heal").addEventListener("click", () => this._onHeal());
-		document.getElementById("charsheet-btn-damage").addEventListener("click", () => this._onDamage());
+		bind("charsheet-btn-heal", "click", () => this._onHeal());
+		bind("charsheet-btn-damage", "click", () => this._onDamage());
 
 		// HP breakdown popover — bind on the whole HP section, but stop propagation
 		// on interactive children (inputs, heal/damage buttons) so editing/clicking them
@@ -1283,38 +1291,34 @@ class CharacterSheetPage {
 		}
 
 		// Combat
-		const boxAc = document.getElementById("charsheet-box-ac");
-		boxAc.addEventListener("click", () => this._showAcBreakdownModal());
-		this._bindActivate(boxAc, {label: "Show armor class breakdown"});
-		const boxSpeed = document.getElementById("charsheet-box-speed");
-		boxSpeed.addEventListener("click", () => this._showSpeedBreakdownModal());
-		this._bindActivate(boxSpeed, {label: "Show speed breakdown"});
-		const boxInitiative = document.getElementById("charsheet-box-initiative");
-		boxInitiative.addEventListener("click", (e) => this._rollInitiative(e));
-		this._bindActivate(boxInitiative, {label: "Roll initiative"});
-		document.getElementById("charsheet-btn-use-hitdie").addEventListener("click", (e) => this._onUseHitDie(e));
-		document.getElementById("charsheet-btn-deathsave").addEventListener("click", () => this._onDeathSave());
+		const boxAc = bind("charsheet-box-ac", "click", () => this._showAcBreakdownModal());
+		if (boxAc) this._bindActivate(boxAc, {label: "Show armor class breakdown"});
+		const boxSpeed = bind("charsheet-box-speed", "click", () => this._showSpeedBreakdownModal());
+		if (boxSpeed) this._bindActivate(boxSpeed, {label: "Show speed breakdown"});
+		const boxInitiative = bind("charsheet-box-initiative", "click", (e) => this._rollInitiative(e));
+		if (boxInitiative) this._bindActivate(boxInitiative, {label: "Roll initiative"});
+		bind("charsheet-btn-use-hitdie", "click", (e) => this._onUseHitDie(e));
+		bind("charsheet-btn-deathsave", "click", () => this._onDeathSave());
 
 		// Rest - handled by CharacterSheetRest module
 
 		// Inspiration
-		const boxInspiration = document.getElementById("charsheet-box-inspiration");
-		boxInspiration.addEventListener("click", () => this._toggleInspiration());
-		this._bindActivate(boxInspiration, {label: "Toggle inspiration"});
+		const boxInspiration = bind("charsheet-box-inspiration", "click", () => this._toggleInspiration());
+		if (boxInspiration) this._bindActivate(boxInspiration, {label: "Toggle inspiration"});
 
 		// Secondary header toggle
-		document.getElementById("charsheet-btn-more").addEventListener("click", () => this._toggleSecondaryHeader());
+		bind("charsheet-btn-more", "click", () => this._toggleSecondaryHeader());
 
 		// Roll history toggle
-		document.getElementById("charsheet-btn-rolllog")?.addEventListener("click", () => this._rollHistory?.toggle());
+		bind("charsheet-btn-rolllog", "click", () => this._rollHistory?.toggle());
 
 		// Play Mode toggle
-		document.getElementById("charsheet-btn-playmode")?.addEventListener("click", () => this._playMode?.toggle());
+		bind("charsheet-btn-playmode", "click", () => this._playMode?.toggle());
 
 		// Layout editing
-		document.getElementById("charsheet-btn-layout").addEventListener("click", () => this._toggleLayoutEditMode());
-		document.getElementById("charsheet-btn-reset-layout").addEventListener("click", () => this._resetLayout());
-		document.getElementById("charsheet-btn-default-layout").addEventListener("click", () => this._resetToDefaultLayout());
+		bind("charsheet-btn-layout", "click", () => this._toggleLayoutEditMode());
+		bind("charsheet-btn-reset-layout", "click", () => this._resetLayout());
+		bind("charsheet-btn-default-layout", "click", () => this._resetToDefaultLayout());
 
 		// Theme picker
 		this._initThemePicker();
@@ -1335,19 +1339,19 @@ class CharacterSheetPage {
 		this._initSecondaryHeader();
 
 		// Conditions
-		document.getElementById("charsheet-btn-add-condition").addEventListener("click", () => this._onAddCondition());
+		bind("charsheet-btn-add-condition", "click", () => this._onAddCondition());
 
 		// Exhaustion
-		document.getElementById("charsheet-btn-exhaustion-add").addEventListener("click", () => this._addExhaustion());
-		document.getElementById("charsheet-btn-exhaustion-remove").addEventListener("click", () => this._removeExhaustion());
+		bind("charsheet-btn-exhaustion-add", "click", () => this._addExhaustion());
+		bind("charsheet-btn-exhaustion-remove", "click", () => this._removeExhaustion());
 
 		// Companions - Buttons rendered dynamically via _renderCompanionButtons()
 		// New Round button (resets action economy)
-		document.getElementById("charsheet-btn-new-round").addEventListener("click", () => this._resetAllCompanionActions());
+		bind("charsheet-btn-new-round", "click", () => this._resetAllCompanionActions());
 
 		// Currency
 		["cp", "sp", "ep", "gp", "pp"].forEach(currency => {
-			document.getElementById(`charsheet-ipt-${currency}`).addEventListener("change", (e) => {
+			bind(`charsheet-ipt-${currency}`, "change", (e) => {
 				this._state.setCurrency(currency, parseInt((/** @type {*} */ (e.target)).value) || 0);
 				this._saveCurrentCharacter();
 				this._renderCurrency(); // Update total
@@ -1355,11 +1359,11 @@ class CharacterSheetPage {
 		});
 
 		// Currency conversion button
-		document.getElementById("charsheet-btn-convert-currency").addEventListener("click", () => this._convertCurrencyToGold());
+		bind("charsheet-btn-convert-currency", "click", () => this._convertCurrencyToGold());
 
 		// Notes
 		["personality", "ideals", "bonds", "flaws", "backstory", "notes"].forEach(field => {
-			document.getElementById(`charsheet-txt-${field}`).addEventListener("change", (e) => {
+			bind(`charsheet-txt-${field}`, "change", (e) => {
 				this._state.setNote(field, (/** @type {*} */ (e.target)).value);
 				this._saveCurrentCharacter();
 			});
@@ -1367,7 +1371,7 @@ class CharacterSheetPage {
 
 		// Appearance
 		["age", "height", "weight", "eyes", "skin", "hair"].forEach(field => {
-			document.getElementById(`charsheet-ipt-${field}`).addEventListener("change", (e) => {
+			bind(`charsheet-ipt-${field}`, "change", (e) => {
 				this._state.setAppearance(field, (/** @type {*} */ (e.target)).value);
 				this._saveCurrentCharacter();
 			});
@@ -1386,13 +1390,13 @@ class CharacterSheetPage {
 		}
 
 		// Edit proficiencies
-		document.getElementById("charsheet-edit-proficiencies").addEventListener("click", () => this._showEditProficienciesModal());
+		bind("charsheet-edit-proficiencies", "click", () => this._showEditProficienciesModal());
 
 		// Edit ability scores
-		document.getElementById("charsheet-edit-abilities").addEventListener("click", () => this._showEditAbilityScoresModal());
+		bind("charsheet-edit-abilities", "click", () => this._showEditAbilityScoresModal());
 
 		// Edit weapon masteries
-		document.getElementById("charsheet-edit-masteries").addEventListener("click", () => this._showEditWeaponMasteriesModal());
+		bind("charsheet-edit-masteries", "click", () => this._showEditWeaponMasteriesModal());
 	}
 
 	// #region Character Management
