@@ -5044,6 +5044,11 @@ class CharacterSheetQuickBuild {
 		// (e.g. Aasimar "Celestial Revelation" at level 3). Mirrors updateRacialSpells.
 		CharacterSheetClassUtils.updateRacialFeatures(this._state, this._page);
 
+		// Expand refSubclassFeature wrappers added during this batch before choices/effects are
+		// finalized. This covers official PHB domains as well as shifted-level homebrew copies.
+		this._state.setClassFeatureCatalog?.(this._page._classFeatures || [], this._page._subclassFeatures || []);
+		this._state.reconcileSubclassFeatureEntries?.();
+
 		// Seed subclass-feature prose choices the generic FeatureChoiceParser does not
 		// recognise (fixed-list skill proficiency + bonus off-list cantrip, e.g. Moon
 		// Bard "Primal Lore") so they are resolved by the pending-choice drains below.

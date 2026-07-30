@@ -40,10 +40,10 @@ function makeCombat (overrides = {}) {
 	// Avoid touching the (absent) DOM — the section render is exercised elsewhere.
 	combat.renderCombatChanneledSpell = jest.fn();
 	// Deterministic damage parse: total = sum of dice faces, doubled on crit.
-	combat._parseDamage = (dice, isCrit) => {
+	combat._parseDamage = (dice, isCrit, {maximize = false} = {}) => {
 		const m = /^(\d+)d(\d+)/.exec(dice) || [];
 		const n = Number(m[1] || 0) * Number(m[2] || 0);
-		return {total: isCrit ? n * 2 : n, dice, values: [n]};
+		return {total: maximize ? n : isCrit ? n * 2 : n, dice, values: [n]};
 	};
 	return combat;
 }
@@ -119,6 +119,20 @@ describe("_resolveChannelRiderDamage (rider attaches to next damage roll)", () =
 		combat._pendingSpellRider = {attackId: "atk-1", dice: "1d8"};
 		const res = combat._resolveChannelRiderDamage({isSpell: false}, "atk-OTHER", false);
 		expect(res.riderMatched).toBe(false);
+	});
+
+	it("maximizes and consumes an eligible armed effect on the on-hit thunder rider", () => {
+		const consume = jest.fn(() => true);
+		const combat = makeCombat({state: {
+			canApplyPendingDamageMaximization: type => type === "thunder",
+			consumePendingDamageMaximization: consume,
+			getTriggeredDamageEffects: () => [{type: "forcedMovement", distance: 10}],
+		}});
+		combat._pendingSpellRider = {attackId: "atk-1", dice: "1d8", damageType: "thunder"};
+		const res = combat._resolveChannelRiderDamage({isSpell: false}, "atk-1", false);
+		expect(res).toMatchObject({channelSpellDamage: 8, maximized: true});
+		expect(res.triggeredEffects).toHaveLength(1);
+		expect(consume).toHaveBeenCalledWith("thunder");
 	});
 });
 

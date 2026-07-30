@@ -2540,7 +2540,14 @@ class CharacterSheetCombat {
 		const damageExpression = isAutoWeapon && attack.sourceItem?.attackOverrides?.damage == null
 			? this._getEffectiveWeaponDamageDie(attack.sourceItem)
 			: attack.damage;
-		const damageRoll = this._parseDamage(damageExpression, isCrit);
+		let destructiveWrathApplied = false;
+		const rollTypedDamage = (formula, damageType, crit = isCrit) => {
+			const maximize = !destructiveWrathApplied && this._state.canApplyPendingDamageMaximization?.(damageType);
+			const roll = this._parseDamage(formula, crit, {maximize});
+			if (maximize && this._state.consumePendingDamageMaximization?.(damageType)) destructiveWrathApplied = true;
+			return roll;
+		};
+		const damageRoll = rollTypedDamage(damageExpression, attack.damageType);
 		const abilityMod = this._state.getWeaponAbilityMod(attack);
 
 		// Doubleshot (#20, S4-owned): a pending one-shot rider that grants +1 weapon
@@ -2650,7 +2657,7 @@ class CharacterSheetCombat {
 				// hit (rider.perTurn === false) and are never marked used.
 				const oncePerTurn = rider.perTurn !== false;
 				if (oncePerTurn && !this._isRiderAvailableThisTurn(rider.id)) continue;
-				const riderRoll = this._parseDamage(rider.dice, isCrit);
+				const riderRoll = rollTypedDamage(rider.dice, rider.damageType || attack.damageType);
 				riderDamageTotal += riderRoll.total;
 				riderParts.push({name: rider.name, dice: rider.dice, total: riderRoll.total, type: rider.damageType});
 				riderRollsForAnim.push(riderRoll);
@@ -2732,7 +2739,14 @@ class CharacterSheetCombat {
 		// Channeled-spell on-hit rider (Booming/Green-Flame Blade). Armed by the per-weapon
 		// ✨ button AFTER its attack roll; consumed by the FIRST matching weapon damage roll.
 		// Added as a SEPARATE damage type (its own crit handling + display), like Hand of Harm.
-		const {channelSpell, channelSpellRoll, channelSpellDamage, riderMatched} = this._resolveChannelRiderDamage(attack, attackId, isCrit);
+		const {
+			channelSpell,
+			channelSpellRoll,
+			channelSpellDamage,
+			riderMatched,
+			maximized: channelSpellMaximized,
+			triggeredEffects: channelSpellTriggeredEffects = [],
+		} = this._resolveChannelRiderDamage(attack, attackId, isCrit);
 
 		// Weapon damage riders carry their own damage type (e.g. Hellish Avenger → fire,
 		// Terrorizing Force → a chosen element). Riders whose type differs from the weapon's
@@ -2775,6 +2789,13 @@ class CharacterSheetCombat {
 		if (handOfHarmDamage) subtitle += ` | <strong style="color:#9b59b6">+${handOfHarmDamage} necrotic</strong> (Hand of Harm ${handOfHarmFormula})`;
 		if (methodEffectDamage) subtitle += ` | <strong style="color:#c44">+${methodEffectDamage} ongoing</strong> (${methodEffectApplied.name} ${methodEffectFormula}${methodEffectApplied.ongoingSaveType ? `, ${methodEffectApplied.ongoingSaveType.charAt(0).toUpperCase() + methodEffectApplied.ongoingSaveType.slice(1)} DC ${methodEffectApplied.saveDc} to end` : ""})`;
 		if (channelSpellDamage) subtitle += ` | <strong style="color:#e056fd">+${channelSpellDamage} ${channelSpell.damageType}</strong> (${channelSpell.spellName} on hit ${channelSpell.dice})`;
+		if (channelSpellMaximized) subtitle += " | <strong>Destructive Wrath: maximized</strong>";
+		if (destructiveWrathApplied) subtitle += " | <strong>Destructive Wrath: maximized</strong>";
+		const triggeredDamageTypes = new Set([attack.damageType, ...riderParts.map(it => it.type), channelSpell?.damageType].filter(Boolean));
+		const triggeredEffects = [...triggeredDamageTypes].flatMap(type => this._state.getTriggeredDamageEffects?.(type) || []);
+		triggeredEffects.push(...channelSpellTriggeredEffects);
+		const thunderboltStrike = triggeredEffects.find(it => it.type === "forcedMovement");
+		if (thunderboltStrike) subtitle += ` | Thunderbolt Strike: may push a ${thunderboltStrike.maxTargetSize} or smaller target up to ${thunderboltStrike.distance} ft ${thunderboltStrike.direction}`;
 
 		// Append Cunning Strike effects to subtitle
 		if (cunningStrikeEffects.length) {
@@ -2996,7 +3017,7 @@ class CharacterSheetCombat {
 		return true;
 	}
 
-	_parseDamage (damageStr, isCrit = false) {
+	_parseDamage (damageStr, isCrit = false, {maximize = false} = {}) {
 		// Parse dice notation like "1d8", "2d6+2", etc.
 		const match = damageStr.match(/(\d+)d(\d+)(?:\s*([+-])\s*(\d+))?/);
 		if (!match) {
@@ -3014,7 +3035,7 @@ class CharacterSheetCombat {
 		let total = 0;
 
 		for (let i = 0; i < numDice; i++) {
-			const roll = this._page.rollDice(1, dieSize);
+			const roll = maximize ? dieSize : this._page.rollDice(1, dieSize);
 			rolls.push(roll);
 			total += roll;
 		}
@@ -3881,8 +3902,11 @@ class CharacterSheetCombat {
 		const riderMatched = !!(attack && !attack.isSpell && rider?.attackId === attackId);
 		const channelSpell = (riderMatched && rider?.dice) ? rider : null;
 		if (!channelSpell) return {channelSpell: null, channelSpellRoll: null, channelSpellDamage: 0, riderMatched};
-		const channelSpellRoll = this._parseDamage(channelSpell.dice, isCrit);
-		return {channelSpell, channelSpellRoll, channelSpellDamage: channelSpellRoll.total, riderMatched};
+		const maximize = this._state.canApplyPendingDamageMaximization?.(channelSpell.damageType);
+		const channelSpellRoll = this._parseDamage(channelSpell.dice, isCrit, {maximize});
+		const maximized = maximize && this._state.consumePendingDamageMaximization?.(channelSpell.damageType);
+		const triggeredEffects = this._state.getTriggeredDamageEffects?.(channelSpell.damageType) || [];
+		return {channelSpell, channelSpellRoll, channelSpellDamage: channelSpellRoll.total, riderMatched, maximized, triggeredEffects};
 	}
 
 	/**
@@ -6113,6 +6137,22 @@ class CharacterSheetCombat {
 				return;
 			}
 
+			let combatActionEffects = feature.combatActionEffects;
+			const damageTypeChoices = combatActionEffects?.rollDice?.damageTypeChoices;
+			if (damageTypeChoices?.length) {
+				const chosenDamageType = await InputUiUtil.pGetUserEnum({
+					title: `${feature.name} — Choose Damage Type`,
+					values: damageTypeChoices,
+					fnDisplay: it => it.charAt(0).toUpperCase() + it.slice(1),
+					isResolveItem: true,
+				});
+				if (!chosenDamageType) return;
+				combatActionEffects = {
+					...combatActionEffects,
+					rollDice: {...combatActionEffects.rollDice, damageType: chosenDamageType},
+				};
+			}
+
 			// Check and deduct ki/focus cost from description
 			const calc = this._state.getFeatureCalculations?.() || {};
 			const nameLower = feature.name?.toLowerCase() || "";
@@ -6169,9 +6209,8 @@ class CharacterSheetCombat {
 			}
 
 			// Apply combat action effects (conditions, temp HP, state activation)
-			const effects = feature.combatActionEffects;
-			if (effects) {
-				this._applyCombatActionEffects(feature, effects);
+			if (combatActionEffects) {
+				this._applyCombatActionEffects(feature, combatActionEffects);
 			}
 
 			// Monk: Patient Defense — activate toggle state (disadvantage on attacks, advantage on DEX saves)
@@ -6406,17 +6445,28 @@ class CharacterSheetCombat {
 		if (type === "damage" || type === "healing") {
 			const formula = diceConfig.formula;
 			if (!formula) return null;
-			const result = this._parseDamage(formula);
+			const damageType = diceConfig.damageType || null;
+			const shouldMaximize = type === "damage" && this._state.canApplyPendingDamageMaximization?.(damageType);
+			const result = this._parseDamage(formula, false, {maximize: shouldMaximize});
+			if (shouldMaximize) this._state.consumePendingDamageMaximization?.(damageType);
 			const label = diceConfig.label || (type === "healing" ? "Healing" : "Damage");
+			const saveDc = diceConfig.saveAbility ? (diceConfig.dc || this._state.getSpellSaveDC?.("Cleric")) : null;
+			const triggered = type === "damage" ? (this._state.getTriggeredDamageEffects?.(damageType) || []) : [];
+			const push = triggered.find(it => it.type === "forcedMovement");
+			const detailParts = [`${formula} = [${result.rolls.join(", ")}]`];
+			if (damageType) detailParts.push(damageType);
+			if (saveDc) detailParts.push(`DC ${saveDc} ${diceConfig.saveAbility.toUpperCase()} save`);
+			if (shouldMaximize) detailParts.push("maximized");
+			if (push) detailParts.push(`may push a ${push.maxTargetSize} or smaller target up to ${push.distance} ft ${push.direction}`);
 			const animGroups = [];
 			this._pushDiceGroup(animGroups, result);
 			void this._page.pAnimateDamageDice?.(animGroups);
 			this._page._showDiceResult?.(
 				`${feature.name} — ${label}`,
 				result.total,
-				`${formula} = [${result.rolls.join(", ")}]`,
+				detailParts.join(" • "),
 			);
-			return {type, total: result.total, rolls: result.rolls};
+			return {type, total: result.total, rolls: result.rolls, damageType, maximized: shouldMaximize, triggeredEffects: triggered};
 		}
 
 		return null;

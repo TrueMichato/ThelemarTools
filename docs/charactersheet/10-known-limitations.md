@@ -38,7 +38,9 @@ All 14 Cleric domains are fully implemented:
 - **War**: `warPriestUses`, `guidedStrikeBonus`, `avatarOfBattleResistance`
 - **Knowledge**: `visionOfThePastUses`
 - **Nature**: `dampenElementsUses`, `divineStrikeDamage`
-- **Tempest**: `wrathOfTheStormUses`, `thunderboltStrikePushDistance`, `divineStrikeDamage`
+- **Tempest**: WIS-based Wrath reaction pool with per-use damage choice, deferred Destructive
+  Wrath maximization using Channel Divinity, Thunderbolt Strike forced-movement results,
+  `divineStrikeDamage`, martial/heavy proficiencies, and Stormborn fly speed
 - **Trickery**: `invokeDeplicityUses`, `divineStrikeDamage`
 - **Forge**: `blessingOfTheForgeBonusAc`, `soulOfTheForgeResistances`, `divineStrikeDamage`
 - **Grave**: `sentinelAtDeathsDoorUses`, `eyesOfTheGraveUses`, `potentSpellcastingBonus`

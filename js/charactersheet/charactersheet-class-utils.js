@@ -5880,6 +5880,13 @@ class CharacterSheetClassUtils {
 					{cdName: "Channel Divinity: Radiance of the Dawn", sub: "Light", level: 1, requiresSave: true, description: "As an action, dispel magical darkness within 30 feet and deal radiant damage to hostile creatures there: 2d10 + your character level, halved on a successful Constitution saving throw."},
 				],
 			},
+			tempest: {
+				label: "Tempest Domain \u2014 Channel Divinity",
+				desc: "Destructive Wrath: maximize one lightning or thunder damage roll.",
+				cd: [
+					{cdName: "Channel Divinity: Destructive Wrath", sub: "Tempest", level: 1, description: "When you roll lightning or thunder damage, use your Channel Divinity to deal maximum damage instead of rolling."},
+				],
+			},
 			grave: {
 				label: "Grave Domain \u2014 Channel Divinity",
 				desc: "Path to the Grave: curse a creature so the next hit against it has vulnerability.",

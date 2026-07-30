@@ -1507,6 +1507,7 @@ class CharacterSheetPage {
 		this._currentCharacterId = CryptUtil.uid();
 		this._isLevelUpBannerDismissed = false;
 		this._state.reset();
+		this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || []);
 		this._state.setId(this._currentCharacterId);
 		this._renderCharacter();
 	}
@@ -8449,6 +8450,27 @@ class CharacterSheetPage {
 	 * @returns {Promise<boolean>} true if handled
 	 */
 	async _pHandleR20FeatureActivation (feature, resource, resourceCost = 1) {
+		const activationInfo = CharacterSheetState.detectActivatableFeature?.(feature);
+		if (activationInfo?.deferredDamageMaximization) {
+			const armed = this._state.armDamageMaximization({
+				sourceFeatureId: feature.id,
+				sourceName: feature.name,
+				damageTypes: activationInfo.deferredDamageMaximization.damageTypes,
+				resourceName: activationInfo.resourceName,
+				resourceCost: activationInfo.resourceCost || resourceCost,
+			});
+			JqueryUtil.doToast(/** @type {*} */ ({
+				type: armed ? "success" : "warning",
+				content: armed
+					? `${feature.name} armed. The next eligible damage roll will be maximized and consume ${activationInfo.resourceName}.`
+					: `${activationInfo.resourceName} has no uses remaining.`,
+			}));
+			if (armed) {
+				this._saveCurrentCharacter();
+				this._renderResources();
+			}
+			return true;
+		}
 		const name = (feature?.name || "").toLowerCase();
 		switch (name) {
 			case "healing hands": return this._pUseHealingHands(feature, resource, resourceCost);
