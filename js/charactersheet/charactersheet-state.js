@@ -4831,6 +4831,10 @@ class CharacterSheetState {
 		// Migrate features: infer featureType for old saves that don't have it
 		this._migrateFeatures();
 
+		// Repair old saves whose entries-only features predate use/resource parsing.
+		// Runs after subclass repair + featureType migration and is idempotent.
+		this._migrateFeatureUsesFromEntries();
+
 		// Migrate Hunter's Prey: older saves stored it as a consumable resource/use.
 		// Convert to the toggle model (strip uses, drop the orphan resource).
 		this._migrateHuntersPrey();
@@ -31542,14 +31546,15 @@ class CharacterSheetState {
 	 * @param {*} feature - The stored feature (already patched with entries/description).
 	 */
 	_remintFeatureUsesFromText (feature) {
-		if (!feature || feature.uses || !feature.description) return;
+		const text = feature?.description || CharacterSheetState._featureTextFromEntries(feature);
+		if (!feature || feature.uses || !text) return;
 		if (this._isResourceSystemFeature(feature)) return;
 
 		let uses = this._getCuratedFeatureUses(feature);
 		if (!uses) {
 			const getAbilityMod = (/** @type {*} */ ability) => this.getAbilityMod(ability);
 			const getProfBonus = () => this.getProficiencyBonus();
-			uses = FeatureUsesParser.parseUses(feature.description, getAbilityMod, getProfBonus);
+			uses = FeatureUsesParser.parseUses(text, getAbilityMod, getProfBonus);
 		}
 		if (!uses) return;
 
@@ -31573,6 +31578,10 @@ class CharacterSheetState {
 				});
 			}
 		}
+	}
+
+	_migrateFeatureUsesFromEntries () {
+		(this._data.features || []).forEach(feature => this._remintFeatureUsesFromText(feature));
 	}
 
 	_reapplyHistoryOptionalFeatures () {
@@ -31746,10 +31755,14 @@ class CharacterSheetState {
 			const curated = this._getCuratedFeatureUses(feature);
 			if (curated) {
 				uses = curated;
-			} else if (feature.description && !isMetaFeature) {
+			} else if (!isMetaFeature) {
 				const getAbilityMod = (ability) => this.getAbilityMod(ability);
 				const getProfBonus = () => this.getProficiencyBonus();
-				uses = FeatureUsesParser.parseUses(feature.description, getAbilityMod, getProfBonus);
+				uses = FeatureUsesParser.parseUses(
+					feature.description || CharacterSheetState._featureTextFromEntries(feature),
+					getAbilityMod,
+					getProfBonus,
+				);
 			}
 		}
 
