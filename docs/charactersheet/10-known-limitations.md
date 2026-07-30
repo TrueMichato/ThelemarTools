@@ -74,6 +74,13 @@ All Ranger subclasses are fully implemented:
 - **Swarmkeeper**: `gatheredSwarmDamage`, `writhingTideFlySpeed`, `swarmingDispersalUses`
 - **Drakewarden**: `drakeProfBonus`, `drakesBreathDamage`, `drakesBreathDc`
 
+#### Blood Hunter (BH2022) and Order of the Lycan ✅
+- Hunter's Bane records the Intelligence/Wisdom Hemocraft choice through the generic multi-attribute `abilityDc` feature-option path. Blood Curse, Crimson Rite, and Fighting Style selections use the generic optional-feature progression shared by Builder, Level-Up, and Quick Build.
+- Blood Maledict, Brand of Castigation, and Hybrid Transformation have synchronized rest resources. Amplification and Crimson Rite activation pay their Hemocraft Die HP costs.
+- Hybrid Transformation changes AC, Strength rolls, qualified defenses, attacks, damage, speed/jumps, regeneration, and Bloodlust saves; its level 18 mastery is unlimited and grants Blood Curse of the Howl.
+- Sanguine Mastery rerolls automated Hemocraft costs or Crimson Rite damage once per combat round and keeps the player-favorable result; qualifying Crimson Rite criticals restore and persist one Blood Maledict use.
+- The sheet has no enemy stat model, so target-side Blood Curse debuffs are resolved from the surfaced curse text and Hemocraft save DC rather than persisted on an enemy record.
+
 ---
 
 ## Remaining Implementation Gaps

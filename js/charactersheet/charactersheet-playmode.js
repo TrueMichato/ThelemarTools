@@ -762,6 +762,7 @@ export class CharacterSheetPlayMode {
 			nextBtn.setAttribute("aria-label", `Advance to round ${combatRound + 1}`);
 			nextBtn.addEventListener("click", () => {
 				const expired = this._state.advanceRound?.() || [];
+				this._page._combat?._resolveHybridBloodlustAtTurnStart?.();
 				if (expired.length > 0) {
 					const names = expired.map(e => e.name || "Effect").join(", ");
 					JqueryUtil.doToast({type: "info", content: `Expired: ${names}`});
@@ -786,6 +787,7 @@ export class CharacterSheetPlayMode {
 			startBtn.setAttribute("aria-label", "Start combat encounter");
 			startBtn.addEventListener("click", () => {
 				this._state.startCombat?.();
+				this._page._combat?._resolveHybridBloodlustAtTurnStart?.();
 				this._logActivity("attack", "Combat started");
 				this._renderStatusBar();
 			});

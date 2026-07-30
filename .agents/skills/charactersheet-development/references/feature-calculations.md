@@ -101,6 +101,19 @@ if (subclassName) {
 ### Active States
 Active states (Rage, Bladesong) provide bonuses that layer on top of feature calculations. The combat module calls `getBonusFromStates(type)` to aggregate these. Feature calculations tell you *what* the character has; active states tell you what's *currently active*.
 
+Blood Hunter (BH2022) follows this split: `getFeatureCalculations()` owns
+Hemocraft scaling, save DCs, known-option counts, Brand values, and Lycan
+level thresholds. Crimson Rite and Hybrid Transformation create runtime active
+states with typed damage, weapon scope, defenses, AC, and natural attacks.
+Their pools are synchronized by `ensureBloodHunterResources()` so Builder,
+Level-Up, Quick Build, saved characters, and the active-state UI share one
+current/max value.
+
+Multi-attribute `abilityDc` entries are generic feature choices. Builder,
+Level-Up, and Quick Build persist the selected ability in level-history
+`featureChoices`; calculations should read that durable choice and provide a
+backward-compatible fallback only for legacy saves.
+
 **Aggregation order**: named modifiers → active state bonuses → special bonuses (rage damage, sneak attack dice, critical dice). Stacking is additive unless explicitly noted otherwise.
 
 **Hierarchical effect matching**: When checking for bonuses, the system searches hierarchically:

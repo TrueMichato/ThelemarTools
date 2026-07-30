@@ -167,6 +167,21 @@ class CharacterSheetBuilder {
 			if (!Array.isArray(entries)) return;
 
 			for (const entry of entries) {
+				if (typeof entry === "object"
+					&& entry.type === "abilityDc"
+					&& Array.isArray(entry.attributes)
+					&& entry.attributes.length > 1) {
+					results.push({
+						count: 1,
+						options: entry.attributes.map((ability) => ({
+							name: Parser.attAbvToFull(ability),
+							type: "inline",
+							source: feature.source,
+							entries: [`Use ${Parser.attAbvToFull(ability)} for ${entry.name || feature.name}.`],
+						})),
+					});
+				}
+
 				if (typeof entry === "object" && entry.type === "options") {
 					// Found an options entry
 					/** @type {*[]} */ const options = [];
