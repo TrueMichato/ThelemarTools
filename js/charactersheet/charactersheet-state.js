@@ -31714,10 +31714,14 @@ class CharacterSheetState {
 			const curated = this._getCuratedFeatureUses(feature);
 			if (curated) {
 				uses = curated;
-			} else if (feature.description && !isMetaFeature) {
+			} else if (!isMetaFeature) {
 				const getAbilityMod = (ability) => this.getAbilityMod(ability);
 				const getProfBonus = () => this.getProficiencyBonus();
-				uses = FeatureUsesParser.parseUses(feature.description, getAbilityMod, getProfBonus);
+				uses = FeatureUsesParser.parseUses(
+					feature.description || CharacterSheetState._featureTextFromEntries(feature),
+					getAbilityMod,
+					getProfBonus,
+				);
 			}
 		}
 
