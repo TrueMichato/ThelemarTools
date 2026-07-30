@@ -31834,19 +31834,8 @@ class CharacterSheetState {
 		if (Array.isArray(this._data.namedModifiers)) {
 			this._data.namedModifiers = this._data.namedModifiers.filter(m => !m._divineFavor);
 		}
-		// 1b. Reverse previously-applied ability score / max deltas.
-		const cm = this._data.customModifiers;
-		(df._applied || []).forEach(prev => {
-			if (!prev || !prev.ability) return;
-			if (cm.abilityScores && prev.scoreDelta) {
-				cm.abilityScores[prev.ability] = (cm.abilityScores[prev.ability] || 0) - prev.scoreDelta;
-				if (!cm.abilityScores[prev.ability]) delete cm.abilityScores[prev.ability];
-			}
-			if (cm.abilityScoreMaxIncrease && prev.maxDelta) {
-				cm.abilityScoreMaxIncrease[prev.ability] = (cm.abilityScoreMaxIncrease[prev.ability] || 0) - prev.maxDelta;
-				if (!cm.abilityScoreMaxIncrease[prev.ability]) delete cm.abilityScoreMaxIncrease[prev.ability];
-			}
-		});
+		// 1b. Retire the legacy direct-cache reconciliation ledger. Ability score and
+		// maximum boosts are canonical named modifiers below; customModifiers is derived.
 		df._applied = [];
 		// 1c. Remove divine-favor innate spells, remembering spent uses to preserve them.
 		const priorUses = {};
@@ -31912,7 +31901,10 @@ class CharacterSheetState {
 				s => !s._dfNarrativeBoon || validBoonIds.has(s.sourceFeatureId),
 			);
 		}
-		if (!god) return;
+		if (!god) {
+			this._recalculateCustomModifiers();
+			return;
+		}
 		const boons = this.getActiveDivineFavorBoons();
 
 		// Pass A: ability-score boosts + advantage modifiers.
@@ -31937,17 +31929,33 @@ class CharacterSheetState {
 				const ability = chosen && options.includes(chosen) ? chosen : null;
 				if (!ability) return; // await player choice
 				const amount = Number(boon.amount) || 2;
-				if (!cm.abilityScores) cm.abilityScores = {};
-				cm.abilityScores[ability] = (cm.abilityScores[ability] || 0) + amount;
-				let maxDelta = 0;
+				const idBase = `divineFavor:${god.name}|${god.source}:${key}:${ability}`;
+				this._data.namedModifiers.push({
+					id: `${idBase}:score`,
+					name: `Divine Favor: ${god.name}`,
+					type: `ability:${ability}`,
+					value: amount,
+					note: boon.desc || `${Parser.attAbvToFull(ability)} score increase`,
+					enabled: true,
+					_divineFavor: true,
+				});
 				if (boon.raiseMax) {
-					if (!cm.abilityScoreMaxIncrease) cm.abilityScoreMaxIncrease = {};
-					cm.abilityScoreMaxIncrease[ability] = (cm.abilityScoreMaxIncrease[ability] || 0) + amount;
-					maxDelta = amount;
+					this._data.namedModifiers.push({
+						id: `${idBase}:maximum`,
+						name: `Divine Favor: ${god.name}`,
+						type: `abilityMax:${ability}`,
+						value: amount,
+						note: boon.desc || `${Parser.attAbvToFull(ability)} maximum increase`,
+						enabled: true,
+						_divineFavor: true,
+					});
 				}
-				df._applied.push({ability, scoreDelta: amount, maxDelta});
 			}
 		});
+
+		// Ability boosts must be live before limited-cast spell uses are derived below.
+		// This is the single cache rebuild for the Divine Favor reconciliation pass.
+		this._recalculateCustomModifiers();
 
 		// Pass B: granted / limited-cast spells (after boosts, so ability-mod
 		// use counts reflect any applied ability-score boost).
