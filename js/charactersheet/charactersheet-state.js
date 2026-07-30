@@ -9443,7 +9443,8 @@ class CharacterSheetState {
 	// #endregion
 
 	getSaveMod (ability) {
-		const mod = this.getAbilityMod(ability);
+		const substitutedAbility = this.getActiveAbilitySubstitution(`save:${ability}`);
+		const mod = this.getAbilityMod(substitutedAbility || ability);
 		const prof = this.hasSaveProficiency(ability) ? this.getProficiencyBonus() : 0;
 		const custom = this._data.customModifiers.savingThrows[ability] || 0;
 		// Add item bonuses (general saving throw bonus from magic items)
@@ -10413,8 +10414,17 @@ class CharacterSheetState {
 	 */
 	getSaveBreakdown (ability) {
 		const components = [];
-		const mod = this.getAbilityMod(ability);
-		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲", isCanonical: true});
+		const substitutedAbility = this.getActiveAbilitySubstitution(`save:${ability}`);
+		const mod = this.getAbilityMod(substitutedAbility || ability);
+		if (mod !== 0) {
+			components.push({
+				type: substitutedAbility ? "substitution" : "ability",
+				name: substitutedAbility ? `${substitutedAbility.toUpperCase()} modifier (${ability.toUpperCase()} substitution)` : `${ability.toUpperCase()} modifier`,
+				value: mod,
+				icon: substitutedAbility ? "🪷" : "🎲",
+				isCanonical: true,
+			});
+		}
 
 		const prof = this.hasSaveProficiency(ability) ? this.getProficiencyBonus() : 0;
 		if (prof !== 0) components.push({type: "proficiency", name: "Proficiency", value: prof, icon: "⭐", isCanonical: true});
@@ -10780,8 +10790,17 @@ class CharacterSheetState {
 	getAbilityCheckBreakdown (ability) {
 		const components = [];
 
-		const mod = this.getAbilityMod(ability);
-		if (mod !== 0) components.push({type: "ability", name: `${ability.toUpperCase()} modifier`, value: mod, icon: "🎲", isCanonical: true});
+		const substitutedAbility = this.getActiveAbilitySubstitution(`check:${ability}`);
+		const mod = this.getAbilityMod(substitutedAbility || ability);
+		if (mod !== 0) {
+			components.push({
+				type: substitutedAbility ? "substitution" : "ability",
+				name: substitutedAbility ? `${substitutedAbility.toUpperCase()} modifier (${ability.toUpperCase()} substitution)` : `${ability.toUpperCase()} modifier`,
+				value: mod,
+				icon: substitutedAbility ? "🪷" : "🎲",
+				isCanonical: true,
+			});
+		}
 
 		const customCheck = this.getAbilityCheckCustomMod(ability);
 		if (customCheck !== 0) components.push({type: "custom", name: `${ability.toUpperCase()} Check Modifier`, value: customCheck, icon: "⚙️", isCanonical: false});
@@ -16606,23 +16625,60 @@ class CharacterSheetState {
 						calculations.armsOfAstralSelfCost = 1;
 						calculations.armsOfAstralSelfReach = 10;
 						calculations.armsOfAstralSelfDamage = martialArtsDice;
+						calculations.astralArmsActivationBurst = {
+							damage: martialArtsDice.replace(/^(\d+)/, (_, count) => `${Number(count) * 2}`),
+							damageType: "force",
+							saveAbility: "dex",
+							dc: kiDc,
+							range: 10,
+						};
+						(calculations.grantedAttacks ||= []).push({
+							id: "feature_astral_arms",
+							name: "Astral Arms",
+							sourceFeature: "Astral Arms",
+							damage: martialArtsDice,
+							damageType: "force",
+							abilityMod: "wis",
+							reach: 10,
+							range: "10 ft",
+							isMelee: true,
+							isUnarmedStrike: true,
+							actionType: "action",
+							requiresState: "astralArms",
+						});
 
 						// Visage of the Astral Self (level 6)
 						if (level >= 6) {
 							calculations.hasVisageOfAstralSelf = true;
 							calculations.visageOfAstralSelfCost = 1;
+							calculations.astralSightRange = 120;
+							calculations.astralPrivateSpeechRange = 60;
+							calculations.astralAmplifiedSpeechRange = 600;
 						}
 
 						// Body of the Astral Self (level 11)
 						if (level >= 11) {
 							calculations.hasBodyOfAstralSelf = true;
+							calculations.deflectEnergyReduction = "1d10";
+							calculations.deflectEnergyAbility = "wis";
+							if (this.isStateTypeActive("astralBody")) {
+								(calculations.weaponDamageRiders ||= []).push({
+									id: "empowered-arms",
+									name: "Empowered Arms",
+									dice: martialArtsDice,
+									damageType: "force",
+									perTurn: true,
+									attackSourceFeature: "Astral Arms",
+								});
+							}
 						}
 
 						// Awakened Astral Self (level 17)
 						if (level >= 17) {
 							calculations.hasAwakenedAstralSelf = true;
 							calculations.awakenedAstralSelfCost = 5;
-							calculations.awakenedAstralSelfBonusDamage = "2d10";
+							calculations.awakenedAstralSelfAcBonus = 2;
+							calculations.astralBarrageAttackCount = 3;
 						}
 					}
 
@@ -42522,6 +42578,83 @@ class CharacterSheetState {
 			detectPatterns: ["^sun shield$", "wreathed in a luminous.*aura"],
 			activationAction: "bonus",
 		},
+		astralArms: {
+			id: "astralArms",
+			name: "Arms of the Astral Self",
+			icon: "🪷",
+			description: "Spectral arms extend your reach and let Wisdom guide your Strength and unarmed strikes.",
+			effects: [
+				{type: "abilitySubstitution", targets: ["check:str", "save:str"], ability: "wis"},
+				{type: "summonBurst", damageCalculation: "twiceMartialArts", damageType: "force", saveAbility: "dex", range: 10},
+			],
+			trigger: {label: "Summoning Burst", actionType: "free", effectType: "summonBurst", onActivate: true},
+			duration: "10 minutes",
+			endConditions: ["Duration expires", "You are incapacitated or die"],
+			resourceName: "Ki/Focus",
+			resourceCost: 1,
+			activationAction: "bonus",
+			variablePointSpend: {
+				min: 1,
+				max: 2,
+				describe: amount => amount === 2 ? "Manifest Arms and Visage together" : "Manifest Arms",
+				linkedStateBySpend: {2: "astralVisage"},
+			},
+		},
+		astralVisage: {
+			id: "astralVisage",
+			name: "Visage of the Astral Self",
+			icon: "🎭",
+			description: "An astral visage grants supernatural sight, presence, and projected speech.",
+			effects: [
+				{type: "sense", target: "darkvision", value: 120, magicalDarkness: true},
+				{type: "advantage", target: "skill:insight"},
+				{type: "advantage", target: "skill:intimidation"},
+				{
+					type: "communicationModes",
+					choices: [
+						{id: "private", name: "Private Speech", range: 60, description: "Speak so only one visible creature can hear you."},
+						{id: "amplified", name: "Amplified Speech", range: 600, description: "Make your voice audible to all creatures in range."},
+					],
+				},
+			],
+			trigger: {label: "Word of the Spirit", actionType: "free", effectType: "communicationModes"},
+			duration: "10 minutes",
+			endConditions: ["Duration expires", "You are incapacitated or die"],
+			resourceName: "Ki/Focus",
+			resourceCost: 1,
+			activationAction: "bonus",
+		},
+		astralBody: {
+			id: "astralBody",
+			name: "Body of the Astral Self",
+			icon: "👤",
+			description: "The astral body protects you from elemental harm and empowers your astral arms.",
+			effects: [{
+				type: "damageReduction",
+				dice: "1d10",
+				abilityMod: "wis",
+				damageTypes: ["acid", "cold", "fire", "force", "lightning", "thunder"],
+			}],
+			trigger: {label: "Deflect Energy", actionType: "reaction", effectType: "damageReduction"},
+			duration: "While Arms and Visage are active",
+			endConditions: ["Arms or Visage ends"],
+			requiresStates: ["astralArms", "astralVisage"],
+			activationAction: "free",
+			resourceCost: 0,
+		},
+		awakenedAstralSelf: {
+			id: "awakenedAstralSelf",
+			name: "Awakened Astral Self",
+			icon: "🌌",
+			description: "Manifest your complete astral self, gaining spiritual armor and Astral Barrage.",
+			effects: [{type: "bonus", target: "ac", value: 2}],
+			duration: "10 minutes",
+			endConditions: ["Duration expires", "You are incapacitated or die"],
+			activatesStates: ["astralArms", "astralVisage", "astralBody"],
+			resourceName: "Ki/Focus",
+			resourceCost: 5,
+			activationAction: "bonus",
+		},
 		dancing: {
 			id: "dancing",
 			name: "Dancing",
@@ -43922,6 +44055,28 @@ class CharacterSheetState {
 			};
 		}
 
+		const astralStateByName = {
+			"arms of the astral self": "astralArms",
+			"visage of the astral self": "astralVisage",
+			"body of the astral self": "astralBody",
+			"awakened astral self": "awakenedAstralSelf",
+		};
+		if (astralStateByName[name]) {
+			const stateTypeId = astralStateByName[name];
+			const stateType = this.ACTIVE_STATE_TYPES[stateTypeId];
+			return {
+				stateTypeId,
+				stateType,
+				matchedBy: "name",
+				activationAction: stateType.activationAction,
+				effects: stateType.effects,
+				duration: stateType.duration,
+				endConditions: stateType.endConditions,
+				kiCost: stateType.resourceCost,
+				isToggle: true,
+			};
+		}
+
 		// ===== DATA-DRIVEN ACTIVATABLE SUPPORT =====
 		// If the feature has explicit activatable data, use that directly
 		if (feature.activatable) {
@@ -44575,7 +44730,19 @@ class CharacterSheetState {
 					summaries.push(`Min roll of ${effect.value}`);
 					break;
 				case "sense":
-					summaries.push(`${effect.target} ${effect.value} ft`);
+					summaries.push(`${effect.target} ${effect.value} ft${effect.magicalDarkness ? " (including magical darkness)" : ""}`);
+					break;
+				case "abilitySubstitution":
+					summaries.push(`May use ${effect.ability?.toUpperCase()} for ${effect.targets?.map(target => this._formatTarget(target)).join(" and ")}`);
+					break;
+				case "summonBurst":
+					summaries.push(`Summoning burst: two Martial Arts dice ${effect.damageType} damage, ${effect.saveAbility?.toUpperCase()} save, ${effect.range} ft`);
+					break;
+				case "communicationModes":
+					summaries.push((effect.choices || []).map(choice => `${choice.name} ${choice.range} ft`).join(" or "));
+					break;
+				case "damageReduction":
+					summaries.push(`${effect.dice} + ${effect.abilityMod?.toUpperCase()} damage reduction (${effect.damageTypes?.join(", ")})`);
 					break;
 				case "note":
 					summaries.push(effect.value);
@@ -45576,6 +45743,7 @@ class CharacterSheetState {
 			// Find associated resource if any
 			let resource = null;
 			const stateType = activationInfo.stateType;
+			if (stateType?.requiresStates?.some(requiredId => !this.isStateTypeActive(requiredId))) continue;
 
 			// ===== RESOURCE DETECTION =====
 			// Check for explicit resource info from data-driven detection
@@ -46418,6 +46586,10 @@ class CharacterSheetState {
 
 		// Look up state type definition for side-effect handling
 		const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId];
+		if (stateType?.requiresStates?.some(requiredId => !this.isStateTypeActive(requiredId))) return null;
+		for (const activatedStateId of stateType?.activatesStates || []) {
+			this.activateState(activatedStateId);
+		}
 
 		// Will this activation involve an hpMaxIncrease effect? Only then do we
 		// touch HP — otherwise we'd risk recomputing max HP for unrelated states
@@ -46635,6 +46807,15 @@ class CharacterSheetState {
 			this._removeStateAddedConditions(state);
 			// If this state contributed an hpMaxIncrease, recompute max so the cap drops.
 			if (involvesHpMaxIncrease) this._syncCurrentHpToMaxDelta(oldMax);
+		}
+		for (const [dependentId, stateType] of Object.entries(CharacterSheetState.ACTIVE_STATE_TYPES)) {
+			if (stateType.requiresStates?.includes(stateTypeId) && this.isStateTypeActive(dependentId)) this.deactivateState(dependentId);
+		}
+		if (["astralArms", "astralVisage", "astralBody"].includes(stateTypeId) && this.isStateTypeActive("awakenedAstralSelf")) {
+			this.deactivateState("awakenedAstralSelf");
+		}
+		if (stateTypeId === "awakenedAstralSelf") {
+			for (const componentId of ["astralBody", "astralVisage", "astralArms"]) this.deactivateState(componentId);
 		}
 	}
 
@@ -46919,12 +47100,23 @@ class CharacterSheetState {
 		if (!effect) return null;
 		const value = (Number(effect.value) || 0)
 			+ (effect.abilityMod ? this.getAbilityMod(effect.abilityMod) : 0);
+		const calculations = this.getFeatureCalculations();
+		let resolvedDamage = effect.dice || null;
+		if (effect.damageCalculation === "twiceMartialArts") {
+			resolvedDamage = (calculations.martialArtsDie || calculations.astralArmsDamage || "1d4")
+				.replace(/^(\d+)/, (_, count) => `${Number(count) * 2}`);
+		}
 		return {
 			...stateType.trigger,
 			stateTypeId,
 			stateName: stateType.name,
 			stateIcon: stateType.icon,
-			effect: {...effect, resolvedValue: value},
+			effect: {
+				...effect,
+				resolvedValue: value,
+				resolvedDamage,
+				resolvedDc: effect.saveAbility ? (calculations.kiSaveDc ?? calculations.focusSaveDc ?? null) : null,
+			},
 		};
 	}
 
@@ -46933,10 +47125,26 @@ class CharacterSheetState {
 	 * @returns {Array<object>}
 	 */
 	getFeatureGrantedAttacks () {
-		return (this.getFeatureCalculations().grantedAttacks || []).map(attack => ({
-			...attack,
-			isFeatureAttack: true,
-		}));
+		return (this.getFeatureCalculations().grantedAttacks || [])
+			.filter(attack => !attack.requiresState || this.isStateTypeActive(attack.requiresState))
+			.map(attack => ({
+				...attack,
+				isFeatureAttack: true,
+			}));
+	}
+
+	getActiveAbilitySubstitution (rollType) {
+		const substitutions = this.getActiveStateEffects()
+			.filter(effect => effect.type === "abilitySubstitution" && effect.targets?.includes(rollType));
+		if (!substitutions.length) return null;
+		const substitutedAbility = substitutions
+			.map(effect => effect.ability)
+			.filter(Boolean)
+			.sort((a, b) => this.getAbilityMod(b) - this.getAbilityMod(a))[0] || null;
+		const nativeAbility = rollType.split(":")[1];
+		return substitutedAbility && this.getAbilityMod(substitutedAbility) > this.getAbilityMod(nativeAbility)
+			? substitutedAbility
+			: null;
 	}
 
 	/**

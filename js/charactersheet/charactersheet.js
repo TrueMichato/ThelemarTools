@@ -9165,7 +9165,7 @@ class CharacterSheetPage {
 		// re-invoking from the abilities area would double-spend a seal and stack the buff.
 		if (af.isActive && CharacterSheetState.isInterdictBoonEntry(af)) return true;
 		const stateType = af.activationInfo?.stateType || CharacterSheetState.ACTIVE_STATE_TYPES[af.stateTypeId];
-		const resourceCost = af.resource?.cost || af.activationInfo?.resourceCost || stateType?.resourceCost || 1;
+		const resourceCost = af.resource?.cost ?? af.activationInfo?.resourceCost ?? stateType?.resourceCost ?? 1;
 		await this._activateFeatureState(af.feature, af.stateTypeId, stateType, af.resource, resourceCost, af.activationInfo);
 		this._features?.render?.();
 		return true;
@@ -9175,6 +9175,22 @@ class CharacterSheetPage {
 	 * Activate a feature's state, deducting resource cost if applicable
 	 */
 	async _activateFeatureState (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
+		let variableSpend = null;
+		if (stateType?.variablePointSpend) {
+			const calculations = this._state.getFeatureCalculations();
+			const resourceName = calculations.focusPoints ? "Focus" : "Ki";
+			variableSpend = await this._combat?._pChooseVariablePointSpend?.(feature, {
+				...stateType.variablePointSpend,
+				max: stateTypeId === "astralArms" && !calculations.hasVisageOfAstralSelf ? 1 : stateType.variablePointSpend.max,
+				resourceName,
+			});
+			if (variableSpend == null) return;
+		}
+		const resolvedCost = variableSpend ?? resourceCost ?? stateType?.resourceCost ?? 1;
+		if (resource && resource.current < resolvedCost) {
+			JqueryUtil.doToast({type: "warning", content: `Not enough ${resource.name} remaining.`});
+			return;
+		}
 		if (!this._tryConsumeActiveStateToggleAction(stateTypeId, stateType, activationInfo)) return;
 		// ===== R20: name-keyed homebrew ability "Use" behaviors =====
 		// Intercept the Illrigger/Hochling abilities that need bespoke effects BEFORE the
@@ -9240,7 +9256,7 @@ class CharacterSheetPage {
 		}
 
 		// Use passed cost, or fall back to state type default
-		const cost = resourceCost || stateType?.resourceCost || 1;
+		const cost = resolvedCost;
 
 		// ===== ZODIAC FORM (Circle of the Zodiac): choose-before-deduct =====
 		// Open the constellation picker FIRST; only spend a Wild Shape use once
@@ -9390,6 +9406,8 @@ class CharacterSheetPage {
 				customEffects: shouldParseEffects && parsedEffects?.length > 0 ? parsedEffects : null,
 			};
 			this._state.activateState(stateTypeId, customData);
+			const linkedStateId = stateType?.variablePointSpend?.linkedStateBySpend?.[variableSpend];
+			if (linkedStateId) this._state.activateState(linkedStateId);
 		}
 
 		// Bridge combat stance activation to the stance-specific system
@@ -9400,11 +9418,13 @@ class CharacterSheetPage {
 		this._saveCurrentCharacter();
 		this._renderResources();
 		this._renderActiveStates();
+		if (stateType?.trigger?.onActivate) this._combat?._useActiveStateTrigger?.(stateTypeId, {skipActionCost: true});
+		this._combat?.renderCombatStates?.();
 		this._renderCharacter();
 	}
 
 	_tryConsumeActiveStateToggleAction (stateTypeId, stateType, activationInfo = null) {
-		if (stateTypeId !== "sunShield" || !this._state.isInCombat?.()) return true;
+		if (!["sunShield", "astralArms", "astralVisage", "awakenedAstralSelf"].includes(stateTypeId) || !this._state.isInCombat?.()) return true;
 		return this._combat?._tryConsumeStateToggleAction?.(stateType, activationInfo) ?? true;
 	}
 
@@ -11839,7 +11859,8 @@ class CharacterSheetPage {
 	}
 
 	async _rollAbilityCheck (ability, event) {
-		const baseMod = this._state.getAbilityMod(ability);
+		const substitutedAbility = this._state.getActiveAbilitySubstitution?.(`check:${ability}`);
+		const baseMod = this._state.getAbilityMod(substitutedAbility || ability);
 		const exhaustionPenalty = this._getExhaustionPenalty();
 
 		// Get aggregated modifiers for this ability check (includes custom abilities, items, etc.)

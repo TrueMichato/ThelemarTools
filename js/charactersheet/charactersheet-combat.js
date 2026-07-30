@@ -1332,6 +1332,10 @@ class CharacterSheetCombat {
 			attack = stateAttacks.find(a => a.id === attackId);
 		}
 		if (!attack) return false;
+		if (!this._canRollAttackActionAttack(attack)) {
+			JqueryUtil.doToast({type: "warning", content: "No attacks remain in this Attack action."});
+			return false;
+		}
 
 		// A fresh attack roll discards any pending channeled-spell on-hit rider that has
 		// not yet been consumed by a damage roll (Booming/Green-Flame Blade timing: the
@@ -1481,6 +1485,7 @@ class CharacterSheetCombat {
 			total,
 		};
 		this._recordAttackForTurn(attack);
+		if (this._state.isStateTypeActive?.("awakenedAstralSelf")) this.renderAttacks();
 
 		// Auto-refresh SA section to show updated advantage status
 		this._renderSneakAttackToggle?.();
@@ -2681,6 +2686,7 @@ class CharacterSheetCombat {
 			const weaponRiders = this._state.getFeatureCalculations?.()?.weaponDamageRiders || [];
 			for (const rider of weaponRiders) {
 				if (!this._weaponRiderEnabled[rider.id]) continue;
+				if (!this._isWeaponDamageRiderEligible(rider, attack)) continue;
 				// Most riders are once-per-turn; some (e.g. Terrorizing Force) apply on EVERY
 				// hit (rider.perTurn === false) and are never marked used.
 				const oncePerTurn = rider.perTurn !== false;
@@ -3002,7 +3008,7 @@ class CharacterSheetCombat {
 
 	_resetTurnActionUsage () {
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
-		this._turnAttackUsage = {hasAttackAction: false, attackActionFeatureIds: new Set()};
+		this._turnAttackUsage = {hasAttackAction: false, attackActionCount: 0, attackActionFeatureIds: new Set()};
 		this._handOfHarmUsedThisTurn = false;
 		this._relentlessUsedThisTurn = false;
 		this._pendingBattleMasterDamage = null;
@@ -3124,10 +3130,11 @@ class CharacterSheetCombat {
 		if (!this._turnAttackUsage) this._resetTurnActionUsage();
 		if (!this._isAttackActionRoll(attack)) return;
 		this._turnAttackUsage.hasAttackAction = true;
-		if (attack?.isFeatureAttack) {
-			const id = (attack.sourceFeature || attack.name || "").trim().toLowerCase();
-			if (id) this._turnAttackUsage.attackActionFeatureIds.add(id);
-		}
+		this._turnAttackUsage.attackActionCount++;
+		const id = attack?.isFeatureAttack
+			? (attack.sourceFeature || attack.name || "").trim().toLowerCase()
+			: "__other__";
+		if (id) this._turnAttackUsage.attackActionFeatureIds.add(id);
 	}
 
 	_isAttackActionRoll (attack) {
@@ -3144,6 +3151,25 @@ class CharacterSheetCombat {
 		if (!this._turnAttackUsage?.hasAttackAction) return false;
 		if (!sourceFeature) return true;
 		return this._turnAttackUsage.attackActionFeatureIds.has(sourceFeature.trim().toLowerCase());
+	}
+
+	_getAttackActionAllowance (attack) {
+		const calculations = this._state.getFeatureCalculations?.() || {};
+		const sourceFeature = (attack?.sourceFeature || "").trim().toLowerCase();
+		if (!calculations.hasAwakenedAstralSelf || !this._state.isStateTypeActive?.("awakenedAstralSelf") || sourceFeature !== "astral arms") return 2;
+		const used = this._turnAttackUsage?.attackActionFeatureIds || new Set();
+		return [...used].every(id => id === "astral arms") ? calculations.astralBarrageAttackCount || 3 : 2;
+	}
+
+	_isWeaponDamageRiderEligible (rider, attack) {
+		return !rider?.attackSourceFeature
+			|| (attack?.sourceFeature || "").toLowerCase() === rider.attackSourceFeature.toLowerCase();
+	}
+
+	_canRollAttackActionAttack (attack) {
+		if (!this._state?.isInCombat?.() || !this._state.isStateTypeActive?.("awakenedAstralSelf") || !this._isAttackActionRoll(attack)) return true;
+		const count = this._turnAttackUsage?.attackActionCount || 0;
+		return count < this._getAttackActionAllowance(attack);
 	}
 
 	_isActionTypeAvailable (actionType) {
@@ -3922,6 +3948,10 @@ class CharacterSheetCombat {
 					</button>`
 			: "";
 		const handsUsedHtml = this._renderHandsUsedToggle(attack);
+		const astralBarrageCount = (attack.sourceFeature || "").toLowerCase() === "astral arms"
+			&& this._state.isStateTypeActive?.("awakenedAstralSelf")
+			? this._getAttackActionAllowance(attack)
+			: null;
 
 		return e_({outer: `
 			<div class="charsheet__attack-item" data-attack-id="${attack.id}">
@@ -3939,7 +3969,7 @@ class CharacterSheetCombat {
 				</div>
 				<div class="charsheet__attack-actions">
 					<button class="ve-btn ve-btn-sm ve-btn-primary charsheet__attack-roll" title="Roll Attack">
-						<span class="glyphicon glyphicon-screenshot"></span> Attack
+						<span class="glyphicon glyphicon-screenshot"></span> Attack${astralBarrageCount ? ` (${astralBarrageCount}/action)` : ""}
 					</button>
 					${recklessBtnHtml}
 					<button class="ve-btn ve-btn-sm ve-btn-danger charsheet__attack-damage" title="Roll Damage">
@@ -7871,16 +7901,19 @@ class CharacterSheetCombat {
 		`});
 	}
 
-	_useActiveStateTrigger (stateTypeId) {
+	_useActiveStateTrigger (stateTypeId, {skipActionCost = false} = {}) {
 		const trigger = this._state.getActiveStateTrigger?.(stateTypeId);
 		if (!trigger) return false;
-		if (!this._isActionTypeAvailable(trigger.actionType)) {
+		if (!skipActionCost && !this._isActionTypeAvailable(trigger.actionType)) {
 			const actionName = trigger.actionType === "reaction" ? "Reaction" : trigger.actionType === "bonus" ? "Bonus Action" : "Action";
 			JqueryUtil.doToast({type: "warning", content: `${actionName} already used this round.`});
 			return false;
 		}
 
 		const effect = trigger.effect;
+		if (effect.type === "communicationModes" || effect.type === "damageReduction") {
+			return this._pUseChoiceActiveStateTrigger(trigger, {skipActionCost});
+		}
 		if (effect.type === "retaliationDamage") {
 			const damage = effect.resolvedValue || 0;
 			this._page._showDiceResult?.(
@@ -7889,8 +7922,58 @@ class CharacterSheetCombat {
 				`${damage} ${effect.damageType || ""} damage to the melee attacker`.trim(),
 			);
 		}
+		if (effect.type === "summonBurst") {
+			const roll = this._parseDamage(effect.resolvedDamage || "2d4");
+			this._page._showDiceResult?.(
+				`${trigger.stateName} — ${trigger.label}`,
+				roll.total,
+				`${effect.resolvedDamage} force damage; DEX save DC ${effect.resolvedDc} negates (chosen creatures within ${effect.range} ft)`,
+			);
+		}
+		if (!skipActionCost) this._consumeActionType(trigger.actionType);
+		this.renderCombatStates();
+		return true;
+	}
 
-		this._consumeActionType(trigger.actionType);
+	async _pUseChoiceActiveStateTrigger (trigger, {skipActionCost = false} = {}) {
+		const effect = trigger.effect;
+		if (effect.type === "communicationModes") {
+			const selected = await this._showCombatActionChoiceModal(
+				{name: trigger.label},
+				(effect.choices || []).map(choice => ({
+					...choice,
+					description: `${choice.description} Range: ${choice.range} feet.`,
+				})),
+				() => {},
+			);
+			if (!selected) return false;
+			this._page._showDiceResult?.(
+				`${trigger.stateName} — ${selected.name}`,
+				`${selected.range} ft`,
+				selected.description,
+			);
+		}
+		if (effect.type === "damageReduction") {
+			const selected = await this._showCombatActionChoiceModal(
+				{name: trigger.label},
+				(effect.damageTypes || []).map(type => ({
+					id: type,
+					name: `${type.charAt(0).toUpperCase()}${type.slice(1)} damage`,
+					damageType: type,
+				})),
+				() => {},
+			);
+			if (!selected) return false;
+			const roll = this._parseDamage(effect.resolvedDamage || "1d10");
+			const reduction = Math.max(1, roll.total + (effect.resolvedValue || 0));
+			this._page._showDiceResult?.(
+				`${trigger.stateName} — ${trigger.label}`,
+				reduction,
+				`${effect.resolvedDamage} + WIS ${selected.damageType} damage reduction`,
+			);
+		}
+
+		if (!skipActionCost) this._consumeActionType(trigger.actionType);
 		this.renderCombatStates();
 		return true;
 	}
