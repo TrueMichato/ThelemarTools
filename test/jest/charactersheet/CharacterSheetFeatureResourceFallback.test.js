@@ -41,6 +41,19 @@ const addEntriesOnlyFeature = (state, feature) => {
 	};
 };
 
+const getOldSave = (features, resources = []) => ({
+	...new CharacterSheetState().toJson(),
+	features,
+	resources,
+});
+
+const getOldEntriesOnlyFeatures = () => FEATURES.map(({expected, ...feature}, ix) => ({
+	id: `old-feature-${ix}`,
+	...feature,
+	description: null,
+	featureType: "Class",
+}));
+
 describe("entries-only feature resource fallback", () => {
 	it.each(FEATURES)("$name mints the expected linked resource from entries text", ({expected, ...rawFeature}) => {
 		const state = new CharacterSheetState();
@@ -97,5 +110,73 @@ describe("entries-only feature resource fallback", () => {
 
 		expect(feature.uses).toBeUndefined();
 		expect(resource).toBeUndefined();
+	});
+});
+
+describe("entries-only feature resource save migration", () => {
+	it("mints all missing resources from an old save and exposes the canonical Overview and Combat set", () => {
+		const state = new CharacterSheetState();
+		state.loadFromJson(getOldSave(getOldEntriesOnlyFeatures()));
+
+		for (const {name, expected} of FEATURES) {
+			const feature = state.getFeatures().find(it => it.name === name);
+			const resource = state.getGenericPoolResources().find(it => it.name === name);
+			expect(feature.description).toBeNull();
+			expect(feature.uses).toEqual({current: expected.max, ...expected});
+			expect(resource).toMatchObject({current: expected.max, ...expected, featureId: feature.id});
+		}
+	});
+
+	it("preserves a spent Chronal Shift feature and linked resource across repeated loads", () => {
+		const {expected, ...chronalShift} = FEATURES[1];
+		const feature = {
+			id: "old-chronal-shift",
+			...chronalShift,
+			description: null,
+			featureType: "Class",
+			uses: {current: 1, ...expected},
+		};
+		const resource = {
+			id: "old-chronal-shift-resource",
+			name: chronalShift.name,
+			current: 1,
+			...expected,
+			featureId: feature.id,
+		};
+		const oldSave = getOldSave([feature], [resource]);
+		const state = new CharacterSheetState();
+
+		state.loadFromJson(oldSave);
+		state.loadFromJson(oldSave);
+
+		expect(state.getFeature(chronalShift.name).uses).toEqual({current: 1, ...expected});
+		expect(state.getResources().filter(it => it.name === chronalShift.name)).toEqual([
+			expect.objectContaining({current: 1, ...expected, featureId: feature.id}),
+		]);
+	});
+
+	it("does not double-add migrated resources when the same old save is loaded twice", () => {
+		const oldSave = getOldSave(getOldEntriesOnlyFeatures());
+		const state = new CharacterSheetState();
+
+		state.loadFromJson(oldSave);
+		state.loadFromJson(oldSave);
+
+		for (const {name} of FEATURES) {
+			expect(state.getResources().filter(it => it.name === name)).toHaveLength(1);
+		}
+		expect(state.getResources()).toHaveLength(FEATURES.length);
+	});
+
+	it("does not double-add resources after the migrated character is saved and reloaded", () => {
+		const state = new CharacterSheetState();
+		state.loadFromJson(getOldSave(getOldEntriesOnlyFeatures()));
+
+		state.loadFromJson(state.toJson());
+
+		for (const {name} of FEATURES) {
+			expect(state.getResources().filter(it => it.name === name)).toHaveLength(1);
+		}
+		expect(state.getResources()).toHaveLength(FEATURES.length);
 	});
 });
