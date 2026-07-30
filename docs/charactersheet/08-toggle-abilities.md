@@ -8,6 +8,7 @@ Toggle abilities are features that can be activated and deactivated, providing t
 
 - Standard D&D abilities (Rage, Wild Shape, Patient Defense)
 - Wizard features (Bladesong)
+- Blood Hunter hemocraft (Crimson Rite and Order of the Lycan's Hybrid Transformation)
 - Combat stances (from various homebrew sources)
 - Custom/homebrew toggle abilities
 - Automatic detection and categorization
@@ -154,6 +155,29 @@ wildShape: {
     duration: "Hours based on druid level",
 }
 ```
+
+#### Hybrid Transformation (Blood Hunter: Order of the Lycan)
+
+Hybrid Transformation uses a short-rest pool (one use at level 3, two at level
+11, unlimited at level 18). Its state supplies Strength check/save advantage,
+conditional nonsilvered nonmagical B/P/S resistance, the Predatory Strike
+natural weapon, transformed walking-speed bonus, Lycan attack/damage scaling,
+and the non-heavy-armor AC bonus. Conditional resistance metadata remains
+qualified in the Defenses display rather than appearing as unconditional B/P/S
+resistance.
+Level 11 regeneration is applied when combat rounds advance while the Lycan is
+below half hit points, including the first turn when combat starts. Starting a
+turn below half hit points also rolls the
+Bloodlust Wisdom save (with Brand of the Voracious advantage, or automatic
+failure while concentrating/Raging). Finite transformations end during a rest;
+level 18 mastery transformations remain active until manually ended. Any Lycan
+automatically reverts at 0 HP.
+
+Crimson Rite is a separate active state created from a selected `CR` optional
+feature. Activation rolls the Hemocraft Die as an HP cost, records the selected
+weapon (including Predatory Strike), and adds the rite's typed damage only to
+that weapon. Predatory Strike exposes both its bludgeoning and slashing damage
+choices as rollable attacks while sharing one rite-empowered weapon identity.
 
 #### Reckless Attack (Barbarian)
 ```javascript

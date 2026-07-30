@@ -52,6 +52,29 @@ const calculations = state.getFeatureCalculations();
 
 ## Class Feature Breakdowns
 
+### Blood Hunter (BH2022)
+
+```javascript
+hemocraftAbility: "int" | "wis",       // Persisted Hunter's Bane choice
+hemocraftDie: "1d4" | "1d6" | "1d8" | "1d10",
+hemocraftSaveDc: 8 + proficiency + hemocraft ability modifier,
+bloodMaledictUses: 1 | 2 | 3 | 4,     // Short-rest resource
+bloodCursesKnown: 1 | 2 | 3 | 4 | 5,
+crimsonRitesKnown: 1 | 2 | 3,
+crimsonRiteDamage: hemocraftDie,
+brandDamage: hemocraft modifier,       // Doubled by Brand of Tethering
+darkAugmentationSaveBonus: hemocraft modifier,
+darkAugmentationSpeedBonus: 5,
+```
+
+Order of the Lycan adds `hybridTransformationUses`, `hybridAttackBonus`,
+`hybridDamageBonus`, `hybridNaturalWeaponDamage`, `hybridRegeneration`, and
+Stalker's Prowess movement/jump bonuses.
+Hybrid Transformation and Crimson Rite are active states; their current effects
+are therefore read from state, not permanently folded into the calculation object.
+For legacy saves without a recorded Hunter's Bane choice, Hemocraft falls back
+to the higher Intelligence/Wisdom modifier.
+
 ### Barbarian
 
 ```javascript

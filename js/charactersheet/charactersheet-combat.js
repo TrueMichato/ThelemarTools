@@ -1401,6 +1401,10 @@ class CharacterSheetCombat {
 		if (rollResult.roll >= critRange) {
 			resultClass = "charsheet__dice-result-total--crit";
 			resultNote = "Critical Hit!";
+			if (!attack.isSpell && this._state.restoreBloodMaledictOnRiteCritical?.(attack.riteWeaponId || attack.id)) {
+				this._page._renderResources?.();
+				void this._page._saveCurrentCharacter?.();
+			}
 		} else if (rollResult.roll === 1) {
 			resultClass = "charsheet__dice-result-total--fumble";
 			resultNote = "Critical Miss!";
@@ -2583,6 +2587,10 @@ class CharacterSheetCombat {
 
 		// Get bonus from active states (activated abilities)
 		const stateDamageBonus = this._state.getBonusFromStates?.("damage") || 0;
+		const bloodHunterCalc = this._state.getFeatureCalculations?.() || {};
+		const hybridDamageBonus = this._state.isStateTypeActive?.("hybridTransformation") && this._getAttackRollKind(attack).isMelee && !attack.isSpell
+			? (bloodHunterCalc.hybridDamageBonus || 0)
+			: 0;
 
 		// Check if attack uses strength and if rage is active (for rage damage)
 		let rageBonus = 0;
@@ -2706,14 +2714,21 @@ class CharacterSheetCombat {
 			spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
 		}
 
-		const totalBonus = abilityMod + (attack.damageBonus || 0) + featureDamageBonus + itemWeaponDamageBonus + rageBonus + stateDamageBonus + critDamageBonus + spellDamageBonus + ammoFlatDamageBonus;
+		const totalBonus = abilityMod + (attack.damageBonus || 0) + featureDamageBonus + itemWeaponDamageBonus + rageBonus + stateDamageBonus + hybridDamageBonus + critDamageBonus + spellDamageBonus + ammoFlatDamageBonus;
 
 		// Get extra damage dice from active states (e.g., Hex, Flame Tongue)
-		const extraDamageEntries = this._state.getExtraDamageFromStates?.() || [];
+		const extraDamageEntries = (this._state.getExtraDamageFromStates?.() || [])
+			.filter(entry => !entry.weaponId || entry.weaponId === (attack.riteWeaponId || attack.id))
+			.filter(entry => !attack.isSpell || !entry.isCrimsonRite);
 		let extraDamageTotal = 0;
 		const extraDamageParts = [];
 		for (const entry of extraDamageEntries) {
-			const extraRoll = this._parseDamage(entry.dice, isCrit);
+			let extraRoll = this._parseDamage(entry.dice, isCrit);
+			if (entry.isCrimsonRite && this._state.canUseSanguineMasteryReroll?.()) {
+				const reroll = this._parseDamage(entry.dice, isCrit);
+				if (reroll.total > extraRoll.total) extraRoll = reroll;
+				this._state.markSanguineMasteryRerollUsed?.();
+			}
 			extraDamageTotal += extraRoll.total;
 			extraDamageParts.push({dice: entry.dice, total: extraRoll.total, type: entry.damageType, source: entry.source});
 			extraRollsForAnim.push(extraRoll);
@@ -3534,6 +3549,38 @@ class CharacterSheetCombat {
 			opts.push(`<option value="${esc(a.id)}"${curVal === a.id ? " selected" : ""}>${esc(a.name)} (×${count})</option>`);
 		}
 		return `<select class="charsheet__attack-ammo-select" title="Active ammunition — its bonuses ride this weapon's attack and damage rolls; one round is spent on the damage roll">${opts.join("")}</select>`;
+	}
+
+	getAvailableWeaponAttacks () {
+		this.renderAttacks();
+		const activeStateAttacks = this._state.getActiveStateAttacks?.() || [];
+		const attacks = [...(this._cachedAttacks || []), ...activeStateAttacks]
+			.filter(attack => !attack.isSpell && attack.id)
+			.map(attack => attack.riteWeaponId
+				? {...attack, id: attack.riteWeaponId, name: "Predatory Strikes"}
+				: attack);
+		return attacks.filter((attack, ix) => attacks.findIndex(it => it.id === attack.id) === ix);
+	}
+
+	_resolveHybridBloodlustAtTurnStart () {
+		const check = this._state.getHybridBloodlustCheck?.();
+		if (!check) return;
+		if (check.automaticFailure) {
+			JqueryUtil.doToast({type: "danger", content: "Bloodlust automatically fails: move toward the nearest creature and take the Attack action against it."});
+			return;
+		}
+		const rollResult = this._page.rollD20({mode: check.advantage ? "advantage" : "normal"});
+		const total = rollResult.roll + check.bonus;
+		const failed = total < check.dc;
+		this._page.showDiceResult({
+			title: `Bloodlust Wisdom Save${check.advantage ? " (Advantage)" : ""}`,
+			roll: rollResult.roll,
+			modifier: check.bonus,
+			total,
+			resultClass: failed ? "charsheet__dice-result-total--fumble" : "",
+			resultNote: failed ? "Failure — attack the nearest creature." : "Success — you retain control.",
+			subtitle: this._page.formatD20Breakdown(rollResult, check.bonus),
+		});
 	}
 
 	_renderAttackItem (attack, reachCtx = {}) {
@@ -7591,16 +7638,18 @@ class CharacterSheetCombat {
 	 */
 	renderCombatDefenses () {
 		// Get base defenses from character state
-		const resistances = this._state.getResistances?.() || [];
-		const immunities = this._state.getImmunities?.() || [];
-		const vulnerabilities = this._state.getVulnerabilities?.() || [];
-		const conditionImmunities = this._state.getConditionImmunities?.() || [];
+		const effectiveDefenses = this._state.getEffectiveDefenses?.() || {};
+		const resistances = effectiveDefenses.resistances || this._state.getResistances?.() || [];
+		const conditionalResistances = effectiveDefenses.conditionalResistances || [];
+		const immunities = effectiveDefenses.immunities || this._state.getImmunities?.() || [];
+		const vulnerabilities = effectiveDefenses.vulnerabilities || this._state.getVulnerabilities?.() || [];
+		const conditionImmunities = effectiveDefenses.conditionImmunities || this._state.getConditionImmunities?.() || [];
 
 		// Also get defenses from active states (like Rage giving resistance to B/P/S)
 		// Strip "damage:" prefix to match base resistance format
 		const activeStateEffects = this._state.getActiveStateEffects?.() || [];
 		const stateResistances = activeStateEffects
-			.filter(e => e.type === "resistance")
+			.filter(e => e.type === "resistance" && !e.conditional)
 			.map(e => (e.target || "").replace(/^damage:/i, ""));
 		const stateImmunities = activeStateEffects
 			.filter(e => e.type === "immunity")
@@ -7618,11 +7667,16 @@ class CharacterSheetCombat {
 		// Render resistances
 		const resistancesEl = document.getElementById("charsheet-resistances");
 		if (resistancesEl) {
-			if (allResistances.length) {
-				resistancesEl.innerHTML = allResistances.map(r => {
+			if (allResistances.length || conditionalResistances.length) {
+				const unconditionalHtml = allResistances.map(r => {
 					const isFromState = stateResistances.includes(r) && !resistances.includes(r);
 					return `<span class="badge ${isFromState ? "badge-warning" : "badge-success"} mr-1" title="${isFromState ? "From active state" : "Base resistance"}">${this._formatDamageType(r)}</span>`;
 				}).join("");
+				const conditionalHtml = conditionalResistances.map(r => {
+					const condition = CharacterSheetClassUtils.escapeHtml(r.conditional);
+					return `<span class="badge badge-warning mr-1" title="Conditional resistance: ${condition}">${this._formatDamageType(r.type)} (${condition})</span>`;
+				}).join("");
+				resistancesEl.innerHTML = unconditionalHtml + conditionalHtml;
 			} else {
 				resistancesEl.innerHTML = `<span class="ve-muted">—</span>`;
 			}
@@ -9519,6 +9573,7 @@ class CharacterSheetCombat {
 				JqueryUtil.doToast({type: "info", content: "Combat ended."});
 			} else {
 				this._state.startCombat();
+				this._resolveHybridBloodlustAtTurnStart();
 				this._lastSneakAttackRoundUsed = null;
 				this._sneakAttackEnabled = false;
 				this._sneakAttackHasAdjacentAlly = false;
@@ -9538,6 +9593,7 @@ class CharacterSheetCombat {
 
 		document.getElementById("charsheet-combat-next-round").onclick = () => {
 			const expired = this._state.advanceRound?.() || [];
+			this._resolveHybridBloodlustAtTurnStart();
 			const round = this._state.getCombatRound?.() || 0;
 			this._resetTurnActionUsage();
 			this._sneakAttackHasAdjacentAlly = false;

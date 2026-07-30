@@ -16,7 +16,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 
 ### ACTIVE_STATE_TYPES (24 types defined)
 
-Core states: `rage`, `bladesong`, `wildShape`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
+Core states: `rage`, `bladesong`, `wildShape`, `hybridTransformation`, `crimsonRite`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
 
 Each state type defines:
 ```javascript
@@ -77,6 +77,26 @@ When Rage (or any state with `breaksConcentration: true`) activates:
 
 Steady Aim has TWO effects: `advantage` on next attack + `speedZero` (speed = 0).
 After one attack, `_consumeOnAttackStates()` removes ONLY the advantage effect. The `speedZero` survives until turn end.
+
+### Blood Hunter Runtime States
+
+`hybridTransformation` is activated through
+`state.activateHybridTransformation()`, which spends its shared short-rest pool
+unless level 18 mastery makes activation free. The state stores level-scaled
+custom effects so save/load preserves its Predatory Strike and defenses.
+Conditional resistance effects retain their condition in
+`getEffectiveDefenses().conditionalResistances`, allowing the Defenses UI to
+show qualified protection without promoting it to unconditional resistance.
+Predatory Strike is included in the combat module's canonical weapon picker so
+Crimson Rite can scope its rider to the transformed natural weapon; its
+bludgeoning and slashing attack rows share that rite identity. Combat start and
+round advancement both resolve Bloodlust and regeneration, 0 HP automatically
+reverts the Lycan, and rests end finite transformations but preserve level 18
+mastery.
+`crimsonRite` is created from a selected `CR` optional feature and stores
+`weaponId` on its `extraDamage` effect; combat damage filters that rider to the
+chosen weapon. Both activations use dedicated controller paths because they
+also pay resources or HP before the state is created.
 
 ## Combat System
 

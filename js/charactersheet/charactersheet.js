@@ -3506,6 +3506,13 @@ class CharacterSheetPage {
 			highJumpRunning = 3 + strMod; // High jump = 3 + Str mod in feet
 		}
 
+		const calc = this._state.getFeatureCalculations();
+		const isHybrid = this._state.isStateTypeActive("hybridTransformation");
+		if (isHybrid && calc.hasStalkersProwess) {
+			longJumpRunning += calc.longJumpBonus || 0;
+			highJumpRunning += calc.highJumpBonus || 0;
+		}
+
 		// Apply jump multiplier from active states (e.g. Step of the Wind)
 		const jumpMultiplier = this._state.getJumpMultiplierFromStates?.() || 1;
 		longJumpRunning = Math.floor(longJumpRunning * jumpMultiplier);
@@ -3772,8 +3779,18 @@ class CharacterSheetPage {
 		};
 
 		// Resistances
-		if (defenses.resistances.length > 0) {
-			const resistanceText = defenses.resistances.map(formatType).join(", ");
+		const conditionalResistanceGroups = Object.entries(
+			(defenses.conditionalResistances || []).reduce((groups, resistance) => {
+				(groups[resistance.conditional] ||= []).push(resistance.type);
+				return groups;
+			}, {}),
+		).map(([conditional, types]) => `${types.map(formatType).join(", ")} (${conditional})`);
+		const resistanceParts = [
+			...defenses.resistances.map(formatType),
+			...conditionalResistanceGroups,
+		];
+		if (resistanceParts.length > 0) {
+			const resistanceText = resistanceParts.join("; ");
 			(/** @type {*} */ (document.getElementById("charsheet-resistances"))).textContent = resistanceText;
 		} else {
 			(/** @type {*} */ (document.getElementById("charsheet-resistances"))).textContent = "—";
@@ -8450,6 +8467,7 @@ class CharacterSheetPage {
 	 */
 	async _pHandleR20FeatureActivation (feature, resource, resourceCost = 1) {
 		const name = (feature?.name || "").toLowerCase();
+		if (feature?.optionalFeatureTypes?.includes("BC") || name.startsWith("blood curse of ")) return this._pUseBloodMaledict(feature);
 		switch (name) {
 			case "healing hands": return this._pUseHealingHands(feature, resource, resourceCost);
 			case "guided strike": return this._pUseGuidedStrike(feature, resource, resourceCost);
@@ -8463,6 +8481,30 @@ class CharacterSheetPage {
 		// (e.g. damage bursts) fall through to the generic limited-use pipeline unchanged.
 		if (feature?._manifestationRequiresSave) return this._pUseManifestationSaveOption(feature, resource, resourceCost);
 		return false;
+	}
+
+	async _pUseBloodMaledict (feature = null) {
+		const resource = this._state.getResource?.("Blood Maledict");
+		if (!resource || resource.current < 1) {
+			JqueryUtil.doToast({type: "warning", content: "No Blood Maledict uses remain."});
+			return true;
+		}
+		const amplify = await InputUiUtil.pGetUserBoolean({
+			title: "Invoke Blood Curse",
+			htmlDescription: `Amplify this curse? Amplifying costs one roll of your Hemocraft Die (${this._state.getFeatureCalculations().hemocraftDie}) as unavoidable necrotic damage.`,
+			textYes: "Amplify",
+			textNo: "Invoke Normally",
+		});
+		if (amplify == null) return true;
+		this._state.useBloodMaledict({amplify});
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderActiveStates();
+		this._renderCharacter();
+		const curseName = feature?.name || "Blood curse";
+		const saveDc = this._state.getFeatureCalculations().hemocraftSaveDc;
+		JqueryUtil.doToast({type: "success", content: `${curseName} invoked${amplify ? " and amplified" : ""}. Hemocraft save DC ${saveDc}.`});
+		return true;
 	}
 
 	/** (S2 contract) Spend a save-requiring Divine Manifestation option and surface its save DC. */
@@ -8987,6 +9029,46 @@ class CharacterSheetPage {
 		// generic resource/toggle pipeline. Each handler owns its own resource consumption
 		// and UI, then returns true to short-circuit. Generic features fall through unchanged.
 		if (await this._pHandleR20FeatureActivation(feature, resource, resourceCost)) return;
+
+		if (stateTypeId === "hybridTransformation") {
+			if (!this._state.activateHybridTransformation()) {
+				JqueryUtil.doToast({type: "warning", content: "No Hybrid Transformation uses remain."});
+				return;
+			}
+			this._saveCurrentCharacter();
+			this._renderResources();
+			this._renderActiveStates();
+			this._combat?.render?.();
+			this._renderCharacter();
+			return;
+		}
+
+		if (stateTypeId === "crimsonRite") {
+			const weapons = this._combat?.getAvailableWeaponAttacks?.() || [];
+			if (!weapons.length) {
+				JqueryUtil.doToast({type: "warning", content: "Add or equip a weapon before activating a Crimson Rite."});
+				return;
+			}
+			let weapon = weapons.length === 1 ? weapons[0] : null;
+			if (weapons.length > 1) {
+				const weaponId = await InputUiUtil.pGetUserEnum({
+					title: feature.name,
+					htmlDescription: "Choose the weapon to empower with this Crimson Rite.",
+					values: weapons.map(attack => attack.id),
+					fnDisplay: id => weapons.find(attack => attack.id === id)?.name || id,
+					isResolveItem: true,
+				});
+				if (weaponId == null) return;
+				weapon = weapons.find(attack => attack.id === weaponId);
+			}
+			if (!this._state.activateCrimsonRite(feature.name, {weaponId: weapon?.id, weaponName: weapon?.name})) return;
+			this._saveCurrentCharacter();
+			this._renderResources();
+			this._renderActiveStates();
+			this._combat?.render?.();
+			this._renderCharacter();
+			return;
+		}
 
 		// (R42/B4) DF narrative boons are 1/day toggles: route through the OWNED
 		// toggleDivineFavorBoonState() choke point (which consumes the daily use, refuses when

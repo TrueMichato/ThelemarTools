@@ -2299,6 +2299,21 @@ class CharacterSheetClassUtils {
 			if (!Array.isArray(entries)) return;
 
 			for (/** @type {*} */ const entry of entries) {
+				if (/** @type {*} */ typeof entry === "object"
+					&& entry.type === "abilityDc"
+					&& Array.isArray(entry.attributes)
+					&& entry.attributes.length > 1) {
+					results.push({
+						count: 1,
+						options: entry.attributes.map((ability) => ({
+							name: Parser.attAbvToFull(ability),
+							type: "inline",
+							source: feature.source,
+							entries: [`Use ${Parser.attAbvToFull(ability)} for ${entry.name || feature.name}.`],
+						})),
+					});
+				}
+
 				if (/** @type {*} */ typeof entry === "object" && entry.type === "options") {
 					const count = entry.count || 1;
 					const options = [];
