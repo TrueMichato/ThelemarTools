@@ -700,6 +700,19 @@ export class LevelUpPage {
 						.find(b => /Level Up to/i.test(b.textContent || ""));
 				if (!btn) return false;
 				(window as unknown as {__levelupErr?: string}).__levelupErr = undefined;
+				// Toasts auto-hide after 5s, so a validation rejection is long
+				// gone by the time `expectModalClosed` times out. Record them
+				// as they appear instead.
+				const w = window as unknown as {__levelupToasts?: string[]; __levelupToastObs?: MutationObserver};
+				w.__levelupToasts = [];
+				w.__levelupToastObs?.disconnect();
+				w.__levelupToastObs = new MutationObserver(() => {
+					document.querySelectorAll(".toast__wrp-content").forEach(n => {
+						const text = (n.textContent || "").trim();
+						if (text && !w.__levelupToasts!.includes(text)) w.__levelupToasts!.push(text);
+					});
+				});
+				w.__levelupToastObs.observe(document.body, {childList: true, subtree: true});
 				const onErr = (e: ErrorEvent) => {
 					(window as unknown as {__levelupErr?: string}).__levelupErr = String(e.error?.stack || e.message);
 				};
@@ -858,10 +871,67 @@ export class LevelUpPage {
 	}
 
 	/**
-	 * Verify modal is closed after completion
+	 * Resolve any pending "<Feature> — Choose <thing>" modals.
+	 *
+	 * These are raised by the sheet AFTER a level-up applies (see
+	 * `_pPromptFeatureChoice` in charactersheet.js) for features whose choice
+	 * can't be made inside the wizard. They are plain modals stacked over
+	 * everything, and while one is open the next level-up wizard cannot close
+	 * — so a single unresolved prompt strands the rest of a build.
+	 *
+	 * Picks the FIRST concrete option rather than "Decide later", so the
+	 * feature actually acquires its choice and downstream effect probes have
+	 * something to assert against.
+	 *
+	 * @returns the number of prompts resolved.
+	 */
+	async resolvePendingFeatureChoices (maxPrompts = 10): Promise<number> {
+		let resolved = 0;
+		for (let i = 0; i < maxPrompts; i++) {
+			const clicked = await this.page.evaluate(() => {
+				const wrp = document.querySelector<HTMLElement>(".charsheet__feature-choice");
+				if (!wrp) return false;
+				const btn = wrp.querySelector<HTMLButtonElement>(".charsheet__feature-choice-opt")
+					|| wrp.querySelector<HTMLButtonElement>('[data-act="defer"]');
+				if (!btn) return false;
+				btn.click();
+				return true;
+			}).catch(() => false);
+			if (!clicked) break;
+			resolved++;
+			await this.page.waitForTimeout(250);
+		}
+		return resolved;
+	}
+
+	/**
+	 * Verify modal is closed after completion.
+	 *
+	 * On failure, surface WHY the wizard refused to close — the runtime error
+	 * captured by `finish()` and any visible toast (the wizard rejects Finish
+	 * with a toast when a required choice is unfilled). Without this the
+	 * failure is an opaque "expected not visible, received visible".
 	 */
 	async expectModalClosed (): Promise<void> {
-		await expect(this.modalContainer).not.toBeVisible({timeout: 10000});
+		try {
+			await expect(this.modalContainer).not.toBeVisible({timeout: 10000});
+		} catch (e) {
+			const diag = await this.page.evaluate(() => {
+				const w = window as unknown as {__levelupErr?: string; __levelupToasts?: string[]};
+				return {err: w.__levelupErr, toasts: (w.__levelupToasts || []).slice(0, 5)};
+			}).catch(() => ({err: undefined, toasts: [] as string[]}));
+
+			const parts = [
+				diag.err ? `runtime error: ${diag.err}` : null,
+				diag.toasts.length ? `toast(s): ${diag.toasts.join(" | ")}` : null,
+			].filter(Boolean);
+
+			if (!parts.length) throw e;
+			throw new Error(
+				`Level-up wizard did not close after Finish — ${parts.join("; ")}`,
+				{cause: e},
+			);
+		}
 	}
 
 	/**

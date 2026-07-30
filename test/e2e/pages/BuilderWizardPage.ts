@@ -112,12 +112,47 @@ export class BuilderWizardPage {
 		await this.page.waitForTimeout(200);
 	}
 
+	// ========== NAME STEP ==========
+
+	/**
+	 * Complete the Builder's opening "Name Your Character" step and advance.
+	 *
+	 * Tolerant by design: if the name step is not on screen (either because the
+	 * wizard no longer opens on it, or because a caller already advanced past
+	 * it) this is a no-op, so the harness survives a step-order change instead
+	 * of hanging on a selector that will never appear.
+	 *
+	 * @returns `true` if the name step was filled and dismissed.
+	 */
+	async completeNameStep (name: string): Promise<boolean> {
+		const input = this.page.locator("#builder-name-step");
+		if (!(await input.isVisible().catch(() => false))) return false;
+		await input.fill(name);
+		await this.clickNext();
+		return true;
+	}
+
 	// ========== RACE STEP ==========
+
+	/**
+	 * Ensure the wizard is on the Race step, dismissing the opening Name step
+	 * if it is still showing.
+	 *
+	 * Called by the race selectors so every caller that drives the wizard
+	 * directly (rather than via `createCharacterViaWizard`) is covered. A
+	 * placeholder name is used; callers that care set the real one via
+	 * `completeNameStep` or the final Details step.
+	 */
+	private async _ensureOnRaceStep (): Promise<void> {
+		if (await this.raceList.isVisible().catch(() => false)) return;
+		await this.completeNameStep("E2E Character");
+	}
 
 	/**
 	 * Select a race by name from the list
 	 */
 	async selectRace (raceName: string): Promise<void> {
+		await this._ensureOnRaceStep();
 		await waitForListItems(this.page, "#builder-race-list");
 		const raceItem = this.raceList.locator(`.charsheet__builder-list-item`).filter({
 			has: this.page.locator(`.charsheet__builder-list-item-name`, {hasText: raceName}),
@@ -130,6 +165,7 @@ export class BuilderWizardPage {
 	 * Select a race by exact name and source (e.g., "Human", "PHB")
 	 */
 	async selectRaceExact (raceName: string, sourceAbbv: string): Promise<void> {
+		await this._ensureOnRaceStep();
 		await waitForListItems(this.page, "#builder-race-list");
 		// Skip separator/header rows that have no name node (would otherwise hang).
 		const items = this.raceList.locator(`.charsheet__builder-list-item`).filter({
@@ -358,6 +394,30 @@ export class BuilderWizardPage {
 	}
 
 	/**
+	 * Top the class-step skill picker up to the number the class actually
+	 * requires, reading the live `Selected: X/Y` counter.
+	 *
+	 * Presets carry a hand-written `skillCount`, which drifts whenever a class
+	 * changes how many skills it grants (and TGTT classes differ from their
+	 * PHB counterparts). An under-filled picker silently gates Next, so the
+	 * wizard stalls on the Class step rather than failing loudly.
+	 */
+	async topUpClassSkillsToRequired (): Promise<void> {
+		const section = this.page.locator(".charsheet__builder-skill-selection").first();
+		if (await section.count() === 0) return;
+
+		const counter = section.locator(".skill-count").first();
+		if (await counter.count() === 0) return;
+
+		const text = (await section.textContent().catch(() => "")) || "";
+		const match = text.match(/Selected:\s*(\d+)\s*\/\s*(\d+)/);
+		if (!match) return;
+
+		const remaining = parseInt(match[2], 10) - parseInt(match[1], 10);
+		if (remaining > 0) await this.selectFirstAvailableSkills(remaining);
+	}
+
+	/**
 	 * Pick traditions then methods inside the TGTT
 	 * `.charsheet__builder-combat-methods` region. No-op when absent.
 	 * Reads `Selected: N/M` counters to know how many to pick.
@@ -576,6 +636,55 @@ export class BuilderWizardPage {
 					await this.page.waitForTimeout(100);
 					if (await cb.isChecked()) selected++;
 				}
+			}
+		}
+	}
+
+	/**
+	 * Fill every empty class-feat progression dropdown (Fighter "Class Feats",
+	 * TGTT feat progressions, etc.).
+	 *
+	 * These render as `.charsheet__opt-feat-progression-slot > select` and gate
+	 * the Class step: `_validateOptFeatureFeatProgressionPicks` requires both a
+	 * chosen feat AND a complete choice-spec for it. To stay deterministic and
+	 * fast the helper prefers the first option that renders NO additional
+	 * choices; only if every candidate needs sub-choices does it fall back to
+	 * the first option plus a best-effort auto-fill.
+	 *
+	 * No-op when no progression slots are present.
+	 */
+	async selectClassFeatProgressions (maxCandidates = 30): Promise<void> {
+		const slots = this.page.locator(".charsheet__opt-feat-progression-slot");
+		const slotCount = await slots.count();
+
+		for (let i = 0; i < slotCount; i++) {
+			const slot = slots.nth(i);
+			const select = slot.locator("select").first();
+			if (await select.count() === 0) continue;
+			if (await select.inputValue()) continue; // already chosen
+
+			const values: string[] = await select
+				.locator("option")
+				.evaluateAll(opts => (opts as HTMLOptionElement[]).map(o => o.value).filter(Boolean));
+			if (!values.length) continue;
+
+			const choices = slot.locator(".charsheet__opt-feat-progression-choices");
+			let settled = false;
+			for (const value of values.slice(0, maxCandidates)) {
+				await select.selectOption(value);
+				await this.page.waitForTimeout(80);
+				// A choice-free feat leaves the choices container empty — nothing
+				// else to satisfy, so this pick can't block validation.
+				if (await choices.locator("select, button, input").count() === 0) {
+					settled = true;
+					break;
+				}
+			}
+
+			if (!settled) {
+				await select.selectOption(values[0]);
+				await this.page.waitForTimeout(150);
+				await this.autoFillRemainingSelections();
 			}
 		}
 	}
