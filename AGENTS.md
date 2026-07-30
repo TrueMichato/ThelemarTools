@@ -143,6 +143,7 @@ Modules assign to `globalThis` | Tests use ES `import` then `globalThis.ClassNam
 - **Save migrations**: `loadFromJson()` runs `_migrateFeatures()`, `_migrateModifiers()`, `_migrateSpells()`. New fields need backward-compatible defaults.
 - **TGTT everywhere**: Thelemar homebrew (combat traditions, dreamwalker, custom subclasses) gated by settings flags — don't break.
 - **Conditional modifiers gate by default**: Entries with truthy `conditional` (text-parsed) or registry sub-typed `save:advantage:<sub>` / `check:disadvantage:<sub>` are NOT auto-applied. `aggregateModifiers(type, {appliedConditionalIds?})` surfaces them in `result.conditionalsAvailable`; the four roll handlers (`_rollAbilityCheck` / `_rollSavingThrow` / `_rollSkillCheck` / `_rollAttack`) show `_pPickConditionalModifiers` for per-roll opt-in. Escape hatch: `settings.skipConditionalPrompt`. No "always apply" mode by design.
+- **Crafting materials are inventory items, not a parallel ledger.** Crafting consumes via `setItemQuantity`/`removeItem` — the same rows the variant-component cast picker reads — so a component spent on a craft leaves the cast picker automatically. `data/crafting.json` is 2.5 MB and lazily loaded via `pGetCraftingCatalog()`. Harvesting is **Dex** (Arcadia 11), Cooking is **Wis**; only 19 of 456 craftables have a DC, so Craft is a commit dialog, not a roll.
 - **Favorites in `_data.favorites[]`**: Cap 8. Stable IDs `"type:idSuffix"`. Resolve via `_resolveFavorite` (handles renames). Orphan cleanup is manual (`cleanupOrphanedFavorites()` / Actions-hub toast button) to protect against transient data-load failures. Items use a parallel legacy starring system.
 
 ### Active WIP — Check Before Modifying
@@ -171,6 +172,7 @@ Root: `.agents/skills/charactersheet-development/references/`
 |Active states, combat, NPC export, rest, spell/item data shapes|[subsystem-details.md](.agents/skills/charactersheet-development/references/subsystem-details.md)|
 |Toggle abilities effect types, supported states|[docs/charactersheet/08-toggle-abilities.md](docs/charactersheet/08-toggle-abilities.md)|
 |Full known limitations matrix|[docs/charactersheet/10-known-limitations.md](docs/charactersheet/10-known-limitations.md)|
+|Crafting, harvesting & cooking on the sheet — the three flows, the dual-role Aboleth Eye problem, the shared-stack invariant|[docs/charactersheet/16-crafting.md](docs/charactersheet/16-crafting.md)|
 |Future roadmap and planned improvements|[docs/charactersheet/11-future-roadmap.md](docs/charactersheet/11-future-roadmap.md)|
 |Contributing guide and coding standards|[docs/charactersheet/12-contributing-guide.md](docs/charactersheet/12-contributing-guide.md)|
 |TGTT Thelemar homebrew system|[docs/charactersheet/13-tgtt-thelemar-homebrew.md](docs/charactersheet/13-tgtt-thelemar-homebrew.md)|
@@ -223,6 +225,30 @@ Root: `.agents/skills/dmscreen-development/references/`
 |All 19 activities with RM deltas, pace interactions, crit detection|[docs/dmscreen/05-journey-activities.md](docs/dmscreen/05-journey-activities.md)|
 |Board event sync, player data mapping, manual mode|[docs/dmscreen/06-party-journey-integration.md](docs/dmscreen/06-party-journey-integration.md)|
 |SCSS class hierarchy, color conventions, night mode|[docs/dmscreen/07-styling-guide.md](docs/dmscreen/07-styling-guide.md)|
+
+## Crafting & Harvesting Hub
+
+`crafting.html` is a single filterable reference spanning ~1,860 harvestable materials, ~456 craftables, and 40 crafting rules drawn from six books (Hamund's Harvesting Handbook I/II/III, Hamund's Herbalism Handbook, Arcadia 8, Arcadia 11, The Complete Crafter), plus a Harvest Lookup tool (creature → every part, merged across books) and a Crafting Planner (craftables → aggregated material shopping list).
+
+### Critical Facts
+
+- **`data/crafting.json` is GENERATED — never hand-edit it.** Regenerate with `npm run gen:crafting` (or `npm run gen`). Source books are fetched from the URLs in `homebrew/index.json` and cached in a gitignored `.cache/crafting/`.
+- Three props on one page: `craftingMaterial` (MAT), `craftingRecipe` (CRF), `craftingRule` (RUL).
+- **Almost all source data is prose-locked** — Hamund's materials exist only as table rows, ingredients only as free text. The generator lifts them into structured entities; that is the whole point of the page.
+- **`data/items-variant-components-ar8.json` stays the character sheet's source of truth** for Arcadia 8 spell components. The generator only ever *reads* it.
+- Effect tags are coarse and hybrid: pattern-matched from prose + Ar8's structured effects + fallbacks. Correct a mis-tag in `data/crafting-effect-overrides.json`, never in `data/crafting.json`.
+- Values are **copper pieces**; weights are pounds. Identity key is `name|source`.
+- Duplicates across books are kept separate and cross-linked via `alsoIn`, not merged.
+
+### Detailed Reference Docs — Read Before Editing Crafting Code
+
+|When to read|File|
+|---|---|
+|Page structure, entity types, filters, tools, file map|[docs/crafting/01-overview.md](docs/crafting/01-overview.md)|
+|Full `craftingMaterial` / `craftingRecipe` / `craftingRule` shapes|[docs/crafting/02-data-model.md](docs/crafting/02-data-model.md)|
+|Generator pipeline, source books, name resolution, ingredient matching, reading the report|[docs/crafting/03-generator.md](docs/crafting/03-generator.md)|
+|Effect-tag taxonomy, how tags are assigned, correcting or adding a tag|[docs/crafting/04-effect-tags.md](docs/crafting/04-effect-tags.md)|
+|The character sheet's harvest / craft / cook flows|[docs/charactersheet/16-crafting.md](docs/charactersheet/16-crafting.md)|
 
 ## Troubleshooting — Common Errors & Fixes
 

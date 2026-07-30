@@ -85,6 +85,16 @@ class CharacterSheetInventory {
 				this._showAddCustomItem();
 				return;
 			}
+			// Harvest / Craft — the two crafting flows live behind the inventory, because a
+			// material is just another thing you carry
+			if (e.target.closest("#charsheet-btn-harvest")) {
+				this._page._crafting?.pShowHarvestModal();
+				return;
+			}
+			if (e.target.closest("#charsheet-btn-craft")) {
+				this._page._crafting?.pShowCraftWorkbench();
+				return;
+			}
 
 			// --- Item row action buttons (delegated, dynamic) ---
 			const _getItemId = (target) => target.closest(".charsheet__item")?.dataset.itemId;
@@ -1140,6 +1150,7 @@ class CharacterSheetInventory {
 			<div class="charsheet__item-info-modal">
 				<div class="ve-flex gap-2 mb-2 ve-flex-wrap">
 					${typeTag ? `<span class="charsheet__modal-list-item-badge">${typeTag}</span>` : ""}
+					${this._getItemSecondaryTags(item).map(tag => `<span class="charsheet__modal-list-item-badge">${tag}</span>`).join("")}
 					${rarity ? `<span class="charsheet__modal-list-item-badge">${rarity}</span>` : ""}
 					${item.reqAttune ? `<span class="charsheet__modal-list-item-badge">🔗 Attunement</span>` : ""}
 					${this._state.isMonkWeapon?.(item) ? `<span class="charsheet__modal-list-item-badge">🥋 Monk Weapon</span>` : ""}
@@ -1249,7 +1260,23 @@ class CharacterSheetInventory {
 		if (item.type === "AT" || item.type === "T") return "Tool";
 		if (typeBase === "$G") return "Gemstone";
 		if (item._isEmpoweredGemstone) return "Empowered Gem";
+		if (this._isCraftingMaterial(item)) return "Material";
 		return "";
+	}
+
+	/**
+	 * Extra badges an item earns beyond its primary type tag.
+	 *
+	 * A spell component that is also a crafting material — an Aboleth Eye enhances *legend lore*
+	 * and crafts a Lens of Forgotten History — groups under Spell Components, so without this its
+	 * second role would be invisible.
+	 *
+	 * @returns {string[]}
+	 */
+	_getItemSecondaryTags (item) {
+		const out = [];
+		if (this._isVariantComponent(item) && this._isCraftingMaterial(item)) out.push("Material");
+		return out;
 	}
 
 	/**
@@ -5489,6 +5516,11 @@ class CharacterSheetInventory {
 	 * @returns {string} Category name
 	 */
 	_getItemCategory (item) {
+		// Spell components first: an Arcadia 8 component is *also* a crafting material (an Aboleth
+		// Eye both enhances legend lore and crafts a Lens of Forgotten History), and the castable
+		// role is the rarer, more consequential one. Casting itself never reads this — it resolves
+		// purely from `item.variantComponent` — so this is display grouping only.
+		if (this._isVariantComponent(item)) return "Spell Components";
 		if (item.weapon) return "Weapons";
 		const typeBase = item.type?.split("|")[0];
 		if (item.armor || ["LA", "MA", "HA"].includes(typeBase)) return "Armor";
@@ -5500,9 +5532,20 @@ class CharacterSheetInventory {
 		if (item.type === "RG") return "Wondrous Items";
 		if (item.wondrous) return "Wondrous Items";
 		if (item.type === "AT" || item.type === "T") return "Tools";
+		if (this._isCraftingMaterial(item)) return "Crafting Materials";
 		if (item.type === "G" || item.type === "SCF") return "Adventuring Gear";
 		if (typeBase === "$G" || item._isEmpoweredGemstone) return "Gemstones";
 		return "Other";
+	}
+
+	/**
+	 * A harvested or gathered crafting input that is *not* a spell component.
+	 *
+	 * Materials the sheet adds itself are marked, because a harvested creature part is otherwise
+	 * indistinguishable from ordinary gear by type alone (both are `"G"`).
+	 */
+	_isCraftingMaterial (item) {
+		return !!item._isCraftingMaterial;
 	}
 
 	/**
@@ -5518,6 +5561,8 @@ class CharacterSheetInventory {
 			"Consumables": "🧪",
 			"Wondrous Items": "✨",
 			"Tools": "🔧",
+			"Spell Components": "🧫",
+			"Crafting Materials": "🧺",
 			"Adventuring Gear": "🎒",
 			"Gemstones": "💎",
 			"Other": "📦",
@@ -5595,7 +5640,7 @@ class CharacterSheetInventory {
 		}
 
 		// Group items by category
-		const categoryOrder = ["Starred", "Weapons", "Armor", "Consumables", "Wondrous Items", "Gemstones", "Tools", "Adventuring Gear", "Other"];
+		const categoryOrder = ["Starred", "Weapons", "Armor", "Consumables", "Spell Components", "Wondrous Items", "Gemstones", "Tools", "Crafting Materials", "Adventuring Gear", "Other"];
 		const categories = {};
 
 		// Separate starred items for the Starred category (if not filtering by starred)
@@ -6125,8 +6170,18 @@ class CharacterSheetInventory {
 		this._renderEquippedItems();
 		this._renderInventoryQuiver();
 		this._renderAttunedItems();
+		this._syncCraftingButtons();
 		// Sync armor state from equipped items (important on character load)
 		this._syncArmorState();
+	}
+
+	/** Hide the Harvest / Craft buttons when the campaign isn't using crafting. */
+	_syncCraftingButtons () {
+		const isEnabled = this._page.isCraftingEnabled?.() !== false;
+		["#charsheet-btn-harvest", "#charsheet-btn-craft"].forEach(sel => {
+			const btn = document.querySelector(sel);
+			if (btn) btn.style.display = isEnabled ? "" : "none";
+		});
 	}
 
 	/**

@@ -1192,7 +1192,29 @@ export class CharacterSheetPlayMode {
 		this._renderAttacks();
 		this._renderSpellsQuick();
 		this._renderFeaturesQuick();
+		this._renderCrafting();
 		this._renderResources();
+	}
+
+	/**
+	 * Harvest / Craft / Cook, reachable without leaving play mode — the harvest question arrives
+	 * mid-session, right after something dies.
+	 */
+	_renderCrafting () {
+		if (this._page.isCraftingEnabled?.() === false) return;
+
+		const card = this._makeCard(this._elActionsHub, "feature", "Crafting");
+		const row = this._ce("div", "pm-crafting", card);
+
+		const addBtn = (label, title, onClick) => {
+			const btn = this._ce("button", "pm-crafting__btn", row);
+			btn.textContent = label;
+			btn.title = title;
+			this._makeClickable(btn, title, onClick);
+		};
+
+		addBtn("🧺 Harvest", "Harvest materials from a creature you've felled", () => this._page._crafting?.pShowHarvestModal());
+		addBtn("🔨 Craft", "See what you can make with what you're carrying", () => this._page._crafting?.pShowCraftWorkbench());
 	}
 
 	_renderFavoritesBar () {

@@ -155,7 +155,9 @@ export class PartyTrackerCharacterSerializer {
 		culture: "wis",
 		endurance: "con",
 		engineering: "int",
-		harvesting: "wis",
+		// Dexterity per Arcadia 11 — must match the character sheet's own mapping, or a
+		// character's Harvesting modifier differs between the sheet and the DC calculator.
+		harvesting: "dex",
 		linguistics: "wis",
 		might: "str",
 	};

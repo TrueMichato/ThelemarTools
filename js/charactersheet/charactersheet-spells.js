@@ -3290,9 +3290,24 @@ class CharacterSheetSpells {
 
 		if (!selected.length) return {cancelled: false, variantComponent: null};
 
+		// Components that offer a menu of uses (distilled dragon's blood) need one more choice:
+		// which of them to invoke. Potency decides how many, not which.
+		for (const pick of selected) {
+			const chosen = await this._pChooseComponentUses(pick);
+			if (chosen === null) return {cancelled: true, variantComponent: null};
+			if (chosen.length) {
+				pick.uses = chosen;
+				pick.effects = [
+					...pick.effects.filter(eff => eff.type !== "text"),
+					...chosen.map(use => ({type: "text", text: `{@b ${use.name}.} ${use.entry}`})),
+				];
+			}
+		}
+
 		// Merge all selected components into one variantComponent object
 		const mergedEffects = selected.flatMap(s => s.effects);
 		const mergedNames = selected.map(s => s.itemName).join(" + ");
+		const mergedUses = selected.flatMap(s => s.uses || []);
 		return {
 			cancelled: false,
 			variantComponent: {
@@ -3300,9 +3315,58 @@ class CharacterSheetSpells {
 				itemId: selected[0].itemId, // backward compat: first component ID
 				itemName: mergedNames,
 				effects: mergedEffects,
+				...(mergedUses.length ? {uses: mergedUses} : {}),
 				componentCount: selected.length,
 			},
 		};
+	}
+
+	/**
+	 * Ask which of a component's declared uses to invoke.
+	 *
+	 * Distilled dragon's blood carries all twelve uses regardless of potency; `usesPerCasting`
+	 * governs how many may be drawn from one vial (1 for a wyrmling, 4 for an ancient). A
+	 * component with no `uses` array needs no choice and resolves silently.
+	 *
+	 * @param {{itemId: string, itemName: string}} pick
+	 * @returns {Promise<?Array<{key: string, name: string, entry: string}>>} The chosen uses, an
+	 *   empty array when the component declares none, or `null` if the player cancelled.
+	 */
+	async _pChooseComponentUses (pick) {
+		const invItem = this._state.getInventory().find(it => it.id === pick.itemId);
+		const vc = invItem?.item?.variantComponent;
+		const uses = vc?.uses;
+		if (!uses?.length) return [];
+
+		const nAllowed = Math.min(vc.usesPerCasting || 1, uses.length);
+		const chosen = [];
+		let remaining = [...uses];
+
+		while (chosen.length < nAllowed && remaining.length) {
+			const nLeft = nAllowed - chosen.length;
+			const labels = remaining.map(use => `${use.name} \u2014 ${Renderer.stripTags(use.entry)}`);
+			// Only optional once at least one is picked; the first is the point of using the vial
+			if (chosen.length) labels.unshift(`Done \u2014 invoke only ${chosen.length}`);
+
+			const choice = await InputUiUtil.pGetUserEnum({
+				title: `${pick.itemName} \u2014 choose ${nLeft} more`,
+				htmlDescription: `<div>This vial can invoke <strong>${nAllowed}</strong> of the Twelve Uses.${chosen.length ? `<br><span class="text-success">Chosen: ${chosen.map(u => u.name).join(", ")}</span>` : ""}</div>`,
+				values: labels,
+				fnDisplay: v => v,
+				isResolveItem: true,
+			});
+
+			if (choice == null) return null;
+			if (chosen.length && choice === labels[0]) break;
+
+			const ix = labels.indexOf(choice) - (chosen.length ? 1 : 0);
+			if (ix < 0 || ix >= remaining.length) break;
+
+			chosen.push(remaining[ix]);
+			remaining = remaining.filter((_, i) => i !== ix);
+		}
+
+		return chosen;
 	}
 
 	/**

@@ -95,6 +95,9 @@ class CharacterSheetPage {
 		this._optionalFeaturesData = [];
 		this._combatMethodsData = [];
 		this._itemUpgradesData = [];
+		// `data/crafting.json` is ~2.5 MB, so it is fetched on first use rather than at load.
+		// See `pGetCraftingCatalog()`.
+		this._pCraftingCatalog = null;
 		this._divineFavorData = [];
 		this._skillsData = [];
 		this._conditionsData = [];
@@ -168,6 +171,10 @@ class CharacterSheetPage {
 		try {
 			this._upgrades = new CharacterSheetUpgrades(this);
 		} catch (e) { console.error("Failed to init upgrades:", e); }
+
+		try {
+			this._crafting = new CharacterSheetCrafting(this, this._state);
+		} catch (e) { console.error("Failed to init crafting:", e); }
 
 		try {
 			this._playMode = new CharacterSheetPlayMode(this);
@@ -12096,7 +12103,17 @@ class CharacterSheetPage {
 		await this._saveCurrentCharacter?.();
 	}
 
-	async _rollSkillCheck (skillKey, skillName, event, overrideAbility = null) {
+	/**
+	 * @param {string} skillKey
+	 * @param {string} skillName
+	 * @param {Event} [event]
+	 * @param {?string} [overrideAbility]
+	 * @param {object} [opts]
+	 * @param {?number} [opts.dc] When given, the result is annotated with success or failure and
+	 *   the outcome is returned — used by the crafting flows, which must branch on the result.
+	 * @returns {Promise<{total: number, roll: number, mode: string, isSuccess: ?boolean, isNat20: boolean, isNat1: boolean}>}
+	 */
+	async _rollSkillCheck (skillKey, skillName, event, overrideAbility = null, opts = {}) {
 		const mod = overrideAbility
 			? this._state.getSkillModWithAbility(skillKey, overrideAbility)
 			: this._state.getSkillMod(skillKey);
@@ -12211,6 +12228,15 @@ class CharacterSheetPage {
 			resultNote = resultNote ? `${resultNote}\n${appliedCondsStr}` : appliedCondsStr;
 		}
 
+		// Against a DC, say plainly whether it landed. The crafting flows branch on this, and every
+		// other skill check gets the annotation for free when a caller supplies one.
+		const dc = opts.dc ?? null;
+		const isSuccess = dc == null ? null : totalWithDice >= dc;
+		if (dc != null) {
+			const verdict = isSuccess ? `Success vs DC ${dc}` : `Failure vs DC ${dc}`;
+			resultNote = resultNote ? `${resultNote}\n${verdict}` : verdict;
+		}
+
 		const abilityLabel = overrideAbility ? ` (${overrideAbility.toUpperCase()})` : "";
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const stateEffectStr = (effAdvantage || effDisadvantage) ? this._getActiveStateEffectLabel(effAdvantage, effDisadvantage) : "";
@@ -12240,6 +12266,15 @@ class CharacterSheetPage {
 			breakdown: skillBreakdown,
 			resultNote,
 		});
+
+		return {
+			total: totalWithDice,
+			roll: rollResult.roll,
+			mode: rollResult.mode,
+			isSuccess,
+			isNat20: rollResult.roll === 20,
+			isNat1: rollResult.roll === 1,
+		};
 	}
 
 	/**
@@ -14118,6 +14153,51 @@ class CharacterSheetPage {
 			</label>
 		</div>`;
 
+		/* ----- Crafting, harvesting & cooking ----- */
+
+		const craftingSettings = /** @type {*} */ (this._state.getSettings()) || {};
+		const currentEnableCrafting = craftingSettings.enableCrafting !== false;
+
+		const crafting_masterToggle = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
+			<label class="charsheet__settings-checkbox-label">
+				<input type="checkbox" id="settings-enable-crafting" ${currentEnableCrafting ? "checked" : ""}>
+				<span class="charsheet__settings-checkbox-text">
+					<span class="charsheet__settings-checkbox-title">🧺 Enable Crafting &amp; Harvesting</span>
+					<span class="charsheet__settings-checkbox-desc">Harvest materials from creatures, craft items from them, and cook meals</span>
+				</span>
+			</label>
+		</div>`;
+
+		const crafting_dangerousHarvest = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox charsheet__settings-option--sub">
+			<label class="charsheet__settings-checkbox-label">
+				<input type="checkbox" id="settings-crafting-dangerous" ${craftingSettings.craftingDangerousHarvest ? "checked" : ""}>
+				<span class="charsheet__settings-checkbox-text">
+					<span class="charsheet__settings-checkbox-title">☠️ Dangerous Materials</span>
+					<span class="charsheet__settings-checkbox-desc">Hamund's optional rule: botching a harvest on a venom, acid, or breath sac turns it on you</span>
+				</span>
+			</label>
+		</div>`;
+
+		const crafting_strictGating = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox charsheet__settings-option--sub">
+			<label class="charsheet__settings-checkbox-label">
+				<input type="checkbox" id="settings-crafting-strict" ${craftingSettings.craftingStrictCrafterGating ? "checked" : ""}>
+				<span class="charsheet__settings-checkbox-text">
+					<span class="charsheet__settings-checkbox-title">🔒 Enforce Crafter Professions</span>
+					<span class="charsheet__settings-checkbox-desc">Block craftables you lack the profession for. Off by default — the sheet advises, the DM decides</span>
+				</span>
+			</label>
+		</div>`;
+
+		const crafting_consumeOnFailure = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox charsheet__settings-option--sub">
+			<label class="charsheet__settings-checkbox-label">
+				<input type="checkbox" id="settings-crafting-consume-fail" ${craftingSettings.craftingConsumeOnFailure ? "checked" : ""}>
+				<span class="charsheet__settings-checkbox-text">
+					<span class="charsheet__settings-checkbox-title">💥 Lose Materials on a Failed Craft</span>
+					<span class="charsheet__settings-checkbox-desc">For tables that houserule a crafting check — no source book defines one</span>
+				</span>
+			</label>
+		</div>`;
+
 		// Spell list settings
 		const currentIncludeCoreSpells = (/** @type {*} */ (this._state.getSettings()))?.includeCoreSpellsForHomebrew !== false;
 		const includeCoreSpells = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox">
@@ -14271,6 +14351,17 @@ class CharacterSheetPage {
 					${thelemar_asiFeat}
 					${thelemar_itemUtilization}
 					${thelemar_spellRarity}
+				</div>
+			</div>
+
+			<div class="charsheet__settings-section">
+				<div class="charsheet__settings-section-title">🧺 Crafting &amp; Harvesting</div>
+				<p class="charsheet__settings-section-intro">Harvest materials from what you kill, then turn them into gear and meals.</p>
+				${crafting_masterToggle}
+				<div class="charsheet__settings-thelemar-sub">
+					${crafting_dangerousHarvest}
+					${crafting_strictGating}
+					${crafting_consumeOnFailure}
 				</div>
 			</div>
 		</div>`;
@@ -14451,6 +14542,34 @@ class CharacterSheetPage {
 			this._state.setSetting("thelemar_spellRarity", (/** @type {*} */ (e.target)).checked);
 			updateMasterToggleState();
 		});
+
+		/* ----- Crafting handlers ----- */
+
+		const updateCraftingSubToggles = () => {
+			const isEnabled = modalInner.querySelector("#settings-enable-crafting").checked;
+			["#settings-crafting-dangerous", "#settings-crafting-strict", "#settings-crafting-consume-fail"]
+				.forEach(sel => { modalInner.querySelector(sel).disabled = !isEnabled; });
+		};
+
+		modalInner.querySelector("#settings-enable-crafting").addEventListener("change", (e) => {
+			this._state.setSetting("enableCrafting", (/** @type {*} */ (e.target)).checked);
+			updateCraftingSubToggles();
+			this._inventory?.render?.();
+		});
+
+		modalInner.querySelector("#settings-crafting-dangerous").addEventListener("change", (e) => {
+			this._state.setSetting("craftingDangerousHarvest", (/** @type {*} */ (e.target)).checked);
+		});
+
+		modalInner.querySelector("#settings-crafting-strict").addEventListener("change", (e) => {
+			this._state.setSetting("craftingStrictCrafterGating", (/** @type {*} */ (e.target)).checked);
+		});
+
+		modalInner.querySelector("#settings-crafting-consume-fail").addEventListener("change", (e) => {
+			this._state.setSetting("craftingConsumeOnFailure", (/** @type {*} */ (e.target)).checked);
+		});
+
+		updateCraftingSubToggles();
 
 		// Include core spells for homebrew classes handler
 		modalInner.querySelector("#settings-include-core-spells").addEventListener("change", (e) => {
@@ -15465,6 +15584,42 @@ class CharacterSheetPage {
 	getCombatMethodEntities () { return this._combatMethodsData; }
 	getItemUpgrades () { return this._itemUpgradesData; }
 	getUpgradesModule () { return this._upgrades; }
+
+	/**
+	 * Fetch the crafting catalog (materials, craftables, rules) on first use.
+	 *
+	 * `data/crafting.json` is ~2.5 MB — an order of magnitude larger than anything else the sheet
+	 * loads — and most characters never harvest or craft, so it stays out of the initial
+	 * `Promise.all` and is fetched when a crafting surface first asks for it. The promise is
+	 * cached, so concurrent callers share one request and a failed load is not retried in a loop.
+	 *
+	 * Indexes are built once, here, and handed to the state so every crafting surface reads the
+	 * same view of the data.
+	 *
+	 * @returns {Promise<?object>} The catalog, or `null` if it could not be loaded.
+	 */
+	async pGetCraftingCatalog () {
+		if (this._pCraftingCatalog) return this._pCraftingCatalog;
+
+		this._pCraftingCatalog = (async () => {
+			try {
+				const json = await DataUtil.loadJSON(`${Renderer.get().baseUrl}data/crafting.json`);
+				this._state.setCraftingCatalog(json);
+				return this._state.getCraftingCatalog();
+			} catch (e) {
+				// Non-fatal: the crafting surfaces show an empty state rather than breaking the sheet
+				// eslint-disable-next-line no-console
+				console.warn("[CharSheet] Failed to load the crafting catalog:", e);
+				return null;
+			}
+		})();
+
+		return this._pCraftingCatalog;
+	}
+
+	/** Whether crafting surfaces should be offered at all. */
+	isCraftingEnabled () { return (/** @type {*} */ (this._state.getSettings()))?.enableCrafting !== false; }
+
 	getSkillsData () { return this._skillsData; }
 	getConditionsData () { return this._conditionsData; }
 	getState () { return this._state; }

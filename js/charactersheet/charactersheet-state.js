@@ -4613,6 +4613,21 @@ class CharacterSheetState {
 				speedEmojiLabels: true,
 				// Show the redundant top-level "Abilities" tab (Overview already shows scores). Default OFF.
 				showAbilitiesTab: false,
+
+				// Crafting, harvesting and cooking. The master toggle is ON — the flows are
+				// opt-in by nature (a character who never harvests never opens them) and hiding
+				// them by default would make them undiscoverable.
+				enableCrafting: true,
+				// Hamund's "Harvesting Dangerous Materials": a failed harvest of a material whose
+				// Use: effect deals damage turns that effect on the harvester. Grim; default OFF.
+				craftingDangerousHarvest: false,
+				// Block craftables whose crafter profession the character lacks. Default OFF —
+				// the sheet advises, the DM decides.
+				craftingStrictCrafterGating: false,
+				// Consume ingredients even when a craft check fails. No rulebook defines this for
+				// the 437 craftables that have no check, so it exists only for tables that
+				// houserule one. Default OFF.
+				craftingConsumeOnFailure: false,
 			},
 
 			// Ammunition consumption tracking for current combat
@@ -4717,6 +4732,7 @@ class CharacterSheetState {
 		// for this TGTT-first fork. Runs before feature/effect reapplication so
 		// enableTgtt-sensitive pipelines (metamagic filtering, etc.) see the value.
 		this._migrateEnableTgttDefault();
+		this._migrateCraftingSettingsDefaults();
 
 		// Ensure acFormulas array exists
 		if (!Array.isArray(this._data.acFormulas)) {
@@ -5863,6 +5879,35 @@ class CharacterSheetState {
 		const s = this._data.settings;
 		if (s.enableTgtt === undefined || s.enableTgtt === null) {
 			s.enableTgtt = true;
+		}
+	}
+
+	/**
+	 * Backfill the crafting/harvesting settings for saves that predate them.
+	 *
+	 * Same shallow-merge problem as {@link _migrateEnableTgttDefault}: an older save's `settings`
+	 * object replaces the default wholesale, so these keys arrive `undefined` and every
+	 * `settings.craftingX === false` guard would read as "not disabled" while
+	 * `settings.enableCrafting` reads as "not enabled". Set them explicitly instead of relying on
+	 * truthiness.
+	 *
+	 * Idempotent — an explicit `true`/`false` is preserved, so a deliberate opt-out survives.
+	 */
+	_migrateCraftingSettingsDefaults () {
+		if (!this._data.settings || typeof this._data.settings !== "object") {
+			this._data.settings = {};
+		}
+		const s = this._data.settings;
+
+		const defaults = {
+			enableCrafting: true,
+			craftingDangerousHarvest: false,
+			craftingStrictCrafterGating: false,
+			craftingConsumeOnFailure: false,
+		};
+
+		for (const [key, value] of Object.entries(defaults)) {
+			if (s[key] === undefined || s[key] === null) s[key] = value;
 		}
 	}
 
@@ -26821,7 +26866,10 @@ class CharacterSheetState {
 
 				let isMatch = false;
 
-				if (se.match.spell) {
+				if (se.match.any) {
+					// Components that enhance any spell (e.g. distilled dragon's blood)
+					isMatch = true;
+				} else if (se.match.spell) {
 					// Match by exact UID first, then fall back to name-only match
 					// so PHB components work with XPHB spells and vice versa
 					const matchUid = se.match.spell.toLowerCase();
@@ -26927,6 +26975,7 @@ class CharacterSheetState {
 		for (const se of invItem.item.variantComponent.spellEffects) {
 			if (!se.match) continue;
 
+			if (se.match.any) return se;
 			if (se.match.spell) {
 				const matchUid = se.match.spell.toLowerCase();
 				const matchName = matchUid.split("|")[0];
@@ -31811,6 +31860,176 @@ class CharacterSheetState {
 	 */
 	setCombatMethodCatalog (combatMethodEntities) {
 		this._combatMethodCatalog = Array.isArray(combatMethodEntities) ? combatMethodEntities : [];
+	}
+
+	// =====================================================================
+	// CRAFTING, HARVESTING & COOKING
+	// ---------------------------------------------------------------------
+	// The catalog is generated (`data/crafting.json`) and shared with
+	// `crafting.html`, so both surfaces describe the same world. It is loaded
+	// lazily by `CharacterSheet.pGetCraftingCatalog()` — nothing here fetches.
+	//
+	// Materials are looked up by a NORMALISED NAME, not by `name|source`,
+	// because the books disagree: an Aboleth Eye exists in both Arcadia 8 (a
+	// spell component) and Hamund's (a 375 gp creature part that crafts a Lens
+	// of Forgotten History). They are one physical object, so the player owns
+	// ONE of them and both roles resolve to the same inventory row.
+	//
+	// Arcadia 8 has precedence: it owns identity, weight and `variantComponent`.
+	// A twin from another book may only ADD what Arcadia 8 lacks.
+	// =====================================================================
+
+	/**
+	 * Parentheticals that are packaging, not identity — "Salamander Scale (large pouch)" and
+	 * "Salamander Scale" are the same material, so an ingredient reference to either must resolve.
+	 *
+	 * Age and CR qualifiers are the opposite: "Dragon Blood (Ancient)" is a genuinely different
+	 * (and far pricier) material from "Dragon Blood (Wyrmling)", so those must survive the key or
+	 * four tiers collapse into one.
+	 */
+	static _RE_PACKAGING_PARENTHETICAL = /^\s*(?:\d+\s*)?(?:x\s*)?(?:small|large|big|tiny)?\s*(?:pouch|pouches|bag|bags|vial|vials|bottle|bottles|flask|flasks|jar|jars|sack|sacks|bunch|sprig|portion|portions|handful|set)\s*$/i;
+
+	/**
+	 * Normalised material key — case- and punctuation-insensitive, with packaging suffixes dropped
+	 * but identity-bearing qualifiers kept.
+	 */
+	static normaliseMaterialKey (name) {
+		return `${name ?? ""}`
+			.replace(/\s*\(([^)]*)\)\s*/g, (match, inner) => (this._RE_PACKAGING_PARENTHETICAL.test(inner) ? " " : ` ${inner} `))
+			.toLowerCase()
+			.replace(/[\u2018\u2019]/g, "'")
+			.replace(/[^a-z0-9]+/g, " ")
+			.trim();
+	}
+
+	/** Rank a material's source: lower wins identity when twins are merged. */
+	static _getMaterialSourceRank (source) {
+		const ix = ["AR8", "TGTT"].indexOf(`${source ?? ""}`.toUpperCase());
+		return ~ix ? ix : Number.MAX_SAFE_INTEGER;
+	}
+
+	/**
+	 * Index the generated crafting catalog.
+	 *
+	 * @param {object} catalog Parsed `data/crafting.json`.
+	 */
+	setCraftingCatalog (catalog) {
+		const materials = catalog?.craftingMaterial || [];
+		const recipes = catalog?.craftingRecipe || [];
+		const rules = catalog?.craftingRule || [];
+
+		this._craftingCatalog = {
+			materials,
+			recipes,
+			rules,
+			/** @type {Map<string, object>} Merged logical materials, keyed by normalised name. */
+			materialsByKey: this.constructor._buildMergedMaterials(materials),
+			/** @type {Map<string, object>} Craftables by `name|source`. */
+			recipesByUid: new Map(recipes.map(r => [`${r.name}|${r.source}`.toLowerCase(), r])),
+			/** @type {Map<string, object[]>} Materials grouped by the creature they come from. */
+			materialsByCreature: this.constructor._buildMaterialsByCreature(materials),
+		};
+	}
+
+	getCraftingCatalog () { return this._craftingCatalog || null; }
+
+	/**
+	 * Collapse `alsoIn` twins into one logical material.
+	 *
+	 * The highest-ranked source (Arcadia 8, then Thelemar, then the handbooks) supplies identity,
+	 * weight, value and `variantComponent`. Lower-ranked twins contribute only what the winner
+	 * lacks — the craftables it feeds, an alternative harvest DC, a trade value — and are kept
+	 * verbatim under `twins` so the UI can say "Hamund's lists this at 45 lb / 375 gp" without
+	 * ever applying those figures to encumbrance.
+	 */
+	static _buildMergedMaterials (materials) {
+		/** @type {Map<string, object[]>} */
+		const grouped = new Map();
+		for (const mat of materials) {
+			const key = this.normaliseMaterialKey(mat.name);
+			if (!key) continue;
+			if (!grouped.has(key)) grouped.set(key, []);
+			grouped.get(key).push(mat);
+		}
+
+		const out = new Map();
+
+		for (const [key, group] of grouped) {
+			const sorted = [...group].sort((a, b) => this._getMaterialSourceRank(a.source) - this._getMaterialSourceRank(b.source));
+			const [primary, ...twins] = sorted;
+
+			const usedInRecipes = [];
+			const seenRecipeUids = new Set();
+			for (const mat of sorted) {
+				for (const ref of mat.usedInRecipes || []) {
+					if (seenRecipeUids.has(ref.uid)) continue;
+					seenRecipeUids.add(ref.uid);
+					usedInRecipes.push(ref);
+				}
+			}
+
+			out.set(key, {
+				key,
+				name: primary.name,
+				source: primary.source,
+				materialCategory: primary.materialCategory,
+				harvest: primary.harvest,
+				// Only ever read from the primary — a twin's weight would silently rewrite encumbrance
+				weight: primary.weight,
+				value: primary.value ?? sorted.find(m => m.value != null)?.value ?? null,
+				variantComponent: primary.variantComponent ?? sorted.find(m => m.variantComponent)?.variantComponent ?? null,
+				spells: primary.spells ?? sorted.find(m => m.spells?.length)?.spells ?? [],
+				effectTags: [...new Set(sorted.flatMap(m => m.effectTags || []))].sort(),
+				hasUseEffect: sorted.some(m => m.hasUseEffect),
+				hasMechanicalEffect: sorted.some(m => m.hasMechanicalEffect),
+				entries: primary.entries || [],
+				usedInRecipes,
+				// Every printing, primary first, for the "also described in" disclosure
+				printings: sorted.map(m => ({
+					name: m.name,
+					source: m.source,
+					page: m.page,
+					harvestDc: m.harvest?.dc ?? null,
+					value: m.value ?? null,
+					weight: m.weight ?? null,
+				})),
+				twins: twins.map(m => ({name: m.name, source: m.source})),
+			});
+		}
+
+		return out;
+	}
+
+	/** Group materials by the creature they are harvested from, for the Harvest flow. */
+	static _buildMaterialsByCreature (materials) {
+		/** @type {Map<string, object[]>} */
+		const out = new Map();
+		for (const mat of materials) {
+			const creature = mat.harvest?.creature?.name;
+			if (!creature) continue;
+			const key = creature.toLowerCase();
+			if (!out.has(key)) out.set(key, []);
+			out.get(key).push(mat);
+		}
+		for (const list of out.values()) {
+			list.sort((a, b) => (a.harvest.dc ?? 99) - (b.harvest.dc ?? 99) || `${a.name}`.localeCompare(b.name));
+		}
+		return out;
+	}
+
+	/**
+	 * Resolve a name — an inventory row's, or an ingredient reference — to its logical material.
+	 * Normalised, so an Arcadia 8 "Aboleth Eye" satisfies a Hamund's `aboleth eye|hhhvi` ingredient.
+	 */
+	getCraftingMaterialByName (name) {
+		if (!this._craftingCatalog) return null;
+		return this._craftingCatalog.materialsByKey.get(this.constructor.normaliseMaterialKey(name)) || null;
+	}
+
+	/** Every harvestable part of a creature, merged across all source books. */
+	getHarvestablesForCreature (creatureName) {
+		if (!this._craftingCatalog || !creatureName) return [];
+		return this._craftingCatalog.materialsByCreature.get(`${creatureName}`.toLowerCase()) || [];
 	}
 
 	// =====================================================================
@@ -40747,7 +40966,9 @@ class CharacterSheetState {
 			culture: "wis",
 			endurance: "con",
 			engineering: "int",
-			harvesting: "wis",
+			// Arcadia 11 defines Harvesting as Dexterity-based — the act of cutting usable parts
+			// free without ruining them, not of knowing which parts are useful.
+			harvesting: "dex",
 			linguistics: "wis",
 			might: "str",
 		};
