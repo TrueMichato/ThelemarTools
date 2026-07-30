@@ -4,7 +4,8 @@
  *
  * Invariants:
  *   - perLevel.length === totalLevel
- *   - sum(levelTotal) + flatBonus.value + perLevelBonus.value === total === getMaxHp()
+ *   - sum(levelTotal) + flatBonus.value + perLevelBonus.value + spellEffects.value
+ *     + maxHpReduction.value === total === getMaxHp()
  *   - L1 always uses max hit die ("max" source)
  *   - rolled levels report source "rolled" with rolled = stored die value (clamped to current hit die)
  *   - missing rolls report source "average"
@@ -252,7 +253,7 @@ describe("CharacterSheetHpBreakdown", () => {
 
 			const bd = state.getHpBreakdown();
 			const sumLevels = bd.perLevel.reduce((acc, e) => acc + e.levelTotal, 0);
-			expect(sumLevels + bd.flatBonus.value + bd.perLevelBonus.value).toBe(bd.total);
+			expect(sumLevels + bd.flatBonus.value + bd.perLevelBonus.value + bd.spellEffects.value + bd.maxHpReduction.value).toBe(bd.total);
 			expect(bd.total).toBe(state.getMaxHp());
 		});
 
@@ -270,6 +271,72 @@ describe("CharacterSheetHpBreakdown", () => {
 
 			const bd = state.getHpBreakdown();
 			expect(bd.total).toBe(state.getMaxHp());
+		});
+	});
+
+	describe("Maximum HP reduction", () => {
+		beforeEach(() => {
+			state.addClass({name: "Fighter", source: "PHB", level: 3});
+			recordLevels(state, [
+				{level: 1, className: "Fighter"},
+				{level: 2, className: "Fighter"},
+				{level: 3, className: "Fighter"},
+			]);
+			state.recalculateHp({syncCurrent: true});
+		});
+
+		it("surfaces an explicit negative component and preserves the sum invariant", () => {
+			state.setMaxHpReduction(9);
+
+			const bd = state.getHpBreakdown();
+			const componentsTotal = bd.perLevel.reduce((acc, e) => acc + e.levelTotal, 0)
+				+ bd.flatBonus.value
+				+ bd.perLevelBonus.value
+				+ bd.spellEffects.value
+				+ bd.maxHpReduction.value;
+
+			expect(bd.maxHpReduction).toEqual({configured: 9, value: -9});
+			expect(componentsTotal).toBe(bd.total);
+			expect(bd.total).toBe(state.getMaxHp());
+		});
+
+		it("caps only the applied component at the 1 HP floor", () => {
+			state.setMaxHpReduction(100);
+
+			const bd = state.getHpBreakdown();
+			const componentsTotal = bd.perLevel.reduce((acc, e) => acc + e.levelTotal, 0)
+				+ bd.flatBonus.value
+				+ bd.perLevelBonus.value
+				+ bd.spellEffects.value
+				+ bd.maxHpReduction.value;
+
+			expect(bd.maxHpReduction).toEqual({configured: 100, value: -27});
+			expect(componentsTotal).toBe(1);
+			expect(bd.total).toBe(1);
+			expect(bd.total).toBe(state.getMaxHp());
+		});
+
+		it("backfills zero for old saves without the field", () => {
+			const oldSave = state.toJson();
+			delete oldSave.hp.maxHpReduction;
+
+			const loaded = new CharacterSheetState();
+			loaded.loadFromJson(oldSave);
+
+			expect(loaded.getMaxHpReduction()).toBe(0);
+			expect(loaded.getHpBreakdown().maxHpReduction).toEqual({configured: 0, value: 0});
+		});
+
+		it("round-trips a configured reduction larger than the amount applied", () => {
+			state.setMaxHpReduction(100);
+			const saved = state.toJson();
+
+			const loaded = new CharacterSheetState();
+			loaded.loadFromJson(saved);
+
+			expect(loaded.getMaxHpReduction()).toBe(100);
+			expect(loaded.getMaxHp()).toBe(1);
+			expect(loaded.getHpBreakdown().maxHpReduction).toEqual({configured: 100, value: -27});
 		});
 	});
 

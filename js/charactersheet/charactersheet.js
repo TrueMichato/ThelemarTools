@@ -1243,6 +1243,20 @@ class CharacterSheetPage {
 			this._renderHp(); // Update HP bar
 		});
 
+		const applyMaxHpReduction = (value) => {
+			this._state.setMaxHpReduction(value);
+			this._saveCurrentCharacter();
+			this._renderHp();
+			this._renderConditions();
+		};
+		document.getElementById("charsheet-ipt-hp-max-reduction").addEventListener("change", (e) => {
+			applyMaxHpReduction((/** @type {*} */ (e.target)).value);
+		});
+		document.getElementById("charsheet-btn-hp-max-reduction-clear").addEventListener("click", () => {
+			applyMaxHpReduction(0);
+			document.getElementById("charsheet-ipt-hp-max-reduction").focus();
+		});
+
 		document.getElementById("charsheet-btn-heal").addEventListener("click", () => this._onHeal());
 		document.getElementById("charsheet-btn-damage").addEventListener("click", () => this._onDamage());
 
@@ -3363,10 +3377,26 @@ class CharacterSheetPage {
 		const currentHp = this._state.getCurrentHp();
 		const maxHp = this._state.getMaxHp();
 		const tempHp = this._state.getTempHp();
+		const maxHpReduction = this._state.getMaxHpReduction();
 
 		(/** @type {*} */ (document.getElementById("charsheet-ipt-hp-current"))).value = currentHp;
-		(/** @type {*} */ (document.getElementById("charsheet-disp-hp-max"))).textContent = maxHp;
+		const maxHpEl = /** @type {HTMLElement} */ (document.getElementById("charsheet-disp-hp-max"));
+		maxHpEl.textContent = maxHp;
+		maxHpEl.classList.toggle("charsheet__hp-max--reduced", maxHpReduction > 0);
+		maxHpEl.title = maxHpReduction > 0
+			? `Effective maximum HP (${maxHpReduction} reduction configured)`
+			: "Maximum HP";
 		(/** @type {*} */ (document.getElementById("charsheet-ipt-hp-temp"))).value = tempHp;
+		(/** @type {*} */ (document.getElementById("charsheet-ipt-hp-max-reduction"))).value = maxHpReduction;
+
+		const reductionControl = document.getElementById("charsheet-hp-max-reduction-control");
+		const reductionClear = /** @type {HTMLButtonElement} */ (document.getElementById("charsheet-btn-hp-max-reduction-clear"));
+		const reductionStatus = document.getElementById("charsheet-hp-max-reduction-status");
+		reductionControl.classList.toggle("charsheet__hp-box--reduction-active", maxHpReduction > 0);
+		reductionClear.hidden = maxHpReduction === 0;
+		reductionStatus.textContent = maxHpReduction > 0
+			? `-${maxHpReduction} maximum HP active`
+			: "No reduction";
 
 		// Update HP bar fill width and color
 		const hpPercent = maxHp > 0 ? Math.max(0, Math.min(100, (currentHp / maxHp) * 100)) : 0;
@@ -13422,6 +13452,26 @@ class CharacterSheetPage {
 					</div>
 				`);
 			});
+		}
+
+		if (bd.maxHpReduction.configured > 0) {
+			const appliedReduction = Math.abs(bd.maxHpReduction.value);
+			const reductionNote = appliedReduction < bd.maxHpReduction.configured
+				? `${bd.maxHpReduction.configured} configured; limited by 1 HP minimum`
+				: "temporary effect";
+			contentEl.insertAdjacentHTML("beforeend", `
+				<div class="charsheet__ac-modal-equipment-title mt-2">📉 Reductions</div>
+				<div class="charsheet__ac-modal-breakdown">
+					<div class="charsheet__ac-modal-item">
+						<span class="charsheet__ac-modal-item-name">
+							<span class="charsheet__ac-modal-item-icon">🩸</span>
+							Maximum HP Reduction
+							<span class="charsheet__ac-modal-item-subtype">${reductionNote}</span>
+						</span>
+						<span class="charsheet__ac-modal-item-value charsheet__ac-modal-item-value--negative">${bd.maxHpReduction.value}</span>
+					</div>
+				</div>
+			`);
 		}
 
 		// Total row

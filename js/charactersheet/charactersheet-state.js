@@ -4221,6 +4221,7 @@ class CharacterSheetState {
 				current: 0,
 				max: 0,
 				temp: 0,
+				maxHpReduction: 0,
 			},
 
 			// Hit dice - keyed by die type
@@ -8479,6 +8480,22 @@ class CharacterSheetState {
 
 	getCurrentHp () { return this._data.hp.current; }
 
+	getMaxHpReduction () {
+		const reduction = Number(this._data.hp.maxHpReduction);
+		if (!Number.isFinite(reduction)) return 0;
+		return Math.max(0, Math.floor(reduction));
+	}
+
+	setMaxHpReduction (reduction) {
+		const sanitized = Number(reduction);
+		this._data.hp.maxHpReduction = Number.isFinite(sanitized)
+			? Math.max(0, Math.floor(sanitized))
+			: 0;
+		this._recalculateMaxHp();
+		this._updateBloodiedCondition();
+		return this._data.hp.maxHpReduction;
+	}
+
 	setMaxHp (hp) {
 		this._data.hp.max = hp;
 		// Cap current HP if it exceeds new max
@@ -8548,6 +8565,10 @@ class CharacterSheetState {
 		// getActiveStateEffects), so toggling the state on/off updates max HP live.
 		hp += this._aggregateActiveStateHpEffects().total;
 
+		// Apply temporary maximum-HP reductions last so they reduce the complete
+		// maximum, including feature and spell-effect increases such as Aid.
+		hp -= this.getMaxHpReduction();
+
 		return Math.max(1, hp);
 	}
 
@@ -8606,6 +8627,7 @@ class CharacterSheetState {
 	 *   }>,
 	 *   flatBonus: {value: number, sources: Array<{name: string, value: number}>},
 	 *   perLevelBonus: {perLevelValue: number, totalLevels: number, value: number, sources: Array<{name: string, value: number}>},
+	 *   maxHpReduction: {configured: number, value: number},
 	 *   tempHp: number,
 	 *   current: number,
 	 *   legacyFallback: boolean
@@ -8714,16 +8736,20 @@ class CharacterSheetState {
 
 		const perLevelBonusValue = perLevelValue * totalLevel;
 		const spellEffectsAgg = this._aggregateActiveStateHpEffects();
-		const total = perLevel.reduce((acc, e) => acc + e.levelTotal, 0) + flatValue + perLevelBonusValue + spellEffectsAgg.total;
+		const unreducedTotal = perLevel.reduce((acc, e) => acc + e.levelTotal, 0) + flatValue + perLevelBonusValue + spellEffectsAgg.total;
+		const configuredReduction = this.getMaxHpReduction();
+		const appliedReduction = Math.min(configuredReduction, Math.max(0, unreducedTotal - 1));
+		const total = Math.max(1, unreducedTotal - appliedReduction);
 
 		return {
-			total: Math.max(1, total),
+			total,
 			totalLevel,
 			conMod,
 			perLevel,
 			flatBonus: {value: flatValue, sources: flatSources},
 			perLevelBonus: {perLevelValue, totalLevels: totalLevel, value: perLevelBonusValue, sources: perLevelSources},
 			spellEffects: {value: spellEffectsAgg.total, sources: spellEffectsAgg.sources},
+			maxHpReduction: {configured: configuredReduction, value: appliedReduction ? -appliedReduction : 0},
 			tempHp: this._data.hp.temp || 0,
 			current: this._data.hp.current || 0,
 			legacyFallback: !useHistory,
