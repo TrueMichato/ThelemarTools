@@ -4687,12 +4687,8 @@ class CharacterSheetState {
 
 		// Divine Favor (TGTT) — backward-compatible nested-merge so old saves get defaults
 		this._data.divineFavor = {...this._getDefaultState().divineFavor, ...this._data.divineFavor};
-		// `_applied` is a runtime reconciliation ledger tracking the exact ability-score
-		// deltas this subsystem pushed onto customModifiers. Those customModifiers ability
-		// caches are rebuilt from registered feature effects on load (divine favour is NOT a
-		// registered feature), so the persisted deltas are wiped out from under us. Reset the
-		// ledger to empty so the post-load applyDivineFavorEffects() re-applies fresh instead
-		// of reversing a delta that no longer exists (which would leave a phantom negative).
+		// `_applied` is the obsolete pre-named-modifier reconciliation ledger. Keep accepting
+		// old saves, but never replay its cached deltas.
 		this._data.divineFavor._applied = [];
 		if (!this._data.divineFavor.chosenBoons || typeof this._data.divineFavor.chosenBoons !== "object") this._data.divineFavor.chosenBoons = {};
 
@@ -4706,6 +4702,12 @@ class CharacterSheetState {
 		if (!Array.isArray(this._data.namedModifiers)) {
 			this._data.namedModifiers = [];
 		}
+		this._data.namedModifiers.forEach(modifier => {
+			if (!modifier?.derivedSkill) return;
+			const normalized = this._normalizeDerivedSkillDescriptor(modifier.type, modifier.derivedSkill);
+			if (normalized) modifier.derivedSkill = normalized;
+			else delete modifier.derivedSkill;
+		});
 
 		// Backfill the master TGTT toggle for saves that predate it. `settings` is
 		// merged shallowly above (no nested default merge), so an old save's settings
@@ -9464,31 +9466,7 @@ class CharacterSheetState {
 	}
 
 	getSkillMod (skill) {
-		// Normalize skill key to lowercase without spaces
-		const normalizedSkill = skill.toLowerCase().replace(/\s+/g, "");
-
-		// Lore skills (TGTT variant rule): proficiency bonus + flat per-skill bonus,
-		// no ability mod. Item bonuses, custom mods, and stance/state bonuses still apply.
-		// Per TGTT p.29: "The bonus for each skill does not include an attribute bonus,
-		// only the proficiency bonus." The stored `bonus` is an additional flat extra
-		// (set at inception, bumped by Lore Mastery).
-		const loreSkill = this._getLoreSkillEntry(normalizedSkill);
-		if (loreSkill) {
-			const pb = this.getProficiencyBonus();
-			const custom = this.getSkillCustomMod(normalizedSkill);
-			const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
-			const stateBonus = this.getSkillBonusFromStates(normalizedSkill, null);
-			const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
-			// Note: exhaustion is intentionally NOT applied here. The display stays
-			// "pure"; the penalty is applied once at roll time (_rollSkillCheck).
-			return pb + (loreSkill.bonus || 0) + custom + itemBonus + stateBonus + stanceBonus;
-		}
-
-		// Resolve the effective ability (base map + persistent pin + feature auto-MAX)
-		// via the single resolver so this never drifts from getSkillBreakdown / the roll path.
-		const ability = this._resolveSkillAbility(normalizedSkill).ability;
-
-		return this.getSkillModWithAbility(normalizedSkill, ability);
+		return this._getSkillModResolved(this._normalizeSkillKey(skill));
 	}
 
 	/**
@@ -9498,9 +9476,71 @@ class CharacterSheetState {
 	 * @returns {number} The total skill modifier
 	 */
 	getSkillModWithAbility (skill, ability) {
+		return this._getSkillModResolved(this._normalizeSkillKey(skill), {ability});
+	}
+
+	_normalizeSkillKey (skill) {
+		return String(skill || "").toLowerCase().replace(/\s+/g, "");
+	}
+
+	_normalizeDerivedSkillDescriptor (type, descriptor) {
+		if (!type?.startsWith("skill:") || !descriptor || typeof descriptor !== "object") return null;
+		const target = this._normalizeSkillKey(type.slice("skill:".length));
+		const source = this._normalizeSkillKey(descriptor.source);
+		if (!target || target === "all" || !source || source === target) return null;
+		const out = {
+			source,
+			mode: descriptor.mode === "score" ? "score" : "modifier",
+		};
+		const delta = Number(descriptor.delta);
+		if (Number.isFinite(delta) && delta !== 0) out.delta = delta;
+		return out;
+	}
+
+	_getDerivedSkillModifier (skill) {
+		const normalizedSkill = this._normalizeSkillKey(skill);
+		return (this._data.namedModifiers || []).find(modifier => {
+			if (!modifier.enabled || modifier.type !== `skill:${normalizedSkill}`) return false;
+			return !!this._normalizeDerivedSkillDescriptor(modifier.type, modifier.derivedSkill);
+		}) || null;
+	}
+
+	_getSkillModResolved (skill, {ability, visited = new Set()} = {}) {
+		const normalizedSkill = this._normalizeSkillKey(skill);
+		if (!normalizedSkill || visited.has(normalizedSkill)) return 0;
+		const nextVisited = new Set(visited);
+		nextVisited.add(normalizedSkill);
+
+		const derivedModifier = this._getDerivedSkillModifier(normalizedSkill);
+		if (derivedModifier) {
+			const derivedSkill = this._normalizeDerivedSkillDescriptor(derivedModifier.type, derivedModifier.derivedSkill);
+			const sourceTotal = this._getSkillModResolved(derivedSkill.source, {visited: nextVisited});
+			const trackedTotal = sourceTotal + (derivedSkill.mode === "score" ? 10 : 0);
+			const delta = derivedSkill.delta ?? (Number(derivedModifier.value) || 0);
+			// Exact, non-derived skill bonuses remain useful as specialised training deltas.
+			// Global skill/check/item/state contributions already flow through the source.
+			const targetSpecificBonus = this._data.customModifiers.skills?.[normalizedSkill] || 0;
+			return trackedTotal + delta + targetSpecificBonus;
+		}
+
+		// Lore skills (TGTT variant rule): proficiency bonus + flat per-skill bonus,
+		// no ability mod. Item bonuses, custom mods, and stance/state bonuses still apply.
+		const loreSkill = this._getLoreSkillEntry(normalizedSkill);
+		if (loreSkill) {
+			const pb = this.getProficiencyBonus();
+			const custom = this.getSkillCustomMod(normalizedSkill);
+			const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
+			const stateBonus = this.getSkillBonusFromStates(normalizedSkill, null);
+			const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
+			return pb + (loreSkill.bonus || 0) + custom + itemBonus + stateBonus + stanceBonus;
+		}
+
+		const resolvedAbility = ability === undefined
+			? this._resolveSkillAbility(normalizedSkill).ability
+			: ability;
 		// If no ability, only use proficiency and bonuses (flat skill check)
-		const mod = ability ? this.getAbilityMod(ability) : 0;
-		const profLevel = this.getSkillProficiency(skill);
+		const mod = resolvedAbility ? this.getAbilityMod(resolvedAbility) : 0;
+		const profLevel = this.getSkillProficiency(normalizedSkill);
 
 		let profBonus = profLevel * this.getProficiencyBonus();
 
@@ -9511,26 +9551,26 @@ class CharacterSheetState {
 
 		// Get custom modifiers (specific skill + "all skills" bonus)
 		// Note: This already includes namedModifiers via _recalculateCustomModifiers()
-		const custom = this.getSkillCustomMod(skill);
+		const custom = this.getSkillCustomMod(normalizedSkill);
 
 		// Add item bonuses (ability check bonus from magic items)
 		const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
 
 		// Get feature modifiers that need dynamic calculation (abilityMod-based effects)
 		// Note: Basic value modifiers are already in custom via _recalculateCustomModifiers
-		const dynamicFeatureBonus = this._getDynamicSkillFeatureBonus(skill);
+		const dynamicFeatureBonus = this._getDynamicSkillFeatureBonus(normalizedSkill);
 
 		// Get ability check modifiers (since skill checks ARE ability checks)
 		// Note: This already includes namedModifiers via _recalculateCustomModifiers()
-		const abilityCheckBonus = ability ? this.getAbilityCheckCustomMod(ability) : 0;
+		const abilityCheckBonus = resolvedAbility ? this.getAbilityCheckCustomMod(resolvedAbility) : 0;
 
 		// Get bonus from active states (check:ability type bonuses). Route by the ABILITY
 		// ARGUMENT (the effective/override ability) so alternate-ability rolls don't misroute
 		// state bonuses through the skill's default ability.
-		const stateBonus = this.getSkillBonusFromStates(skill, ability || this.getSkillAbility(skill));
+		const stateBonus = this.getSkillBonusFromStates(normalizedSkill, resolvedAbility || this.getSkillAbility(normalizedSkill));
 
 		// Combat stance skill bonus (Thelemar homebrew)
-		const stanceBonus = this._getStanceSkillBonus(skill);
+		const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
 
 		// Note: exhaustion is intentionally NOT applied here. The display stays
 		// "pure"; the penalty is applied once at roll time (_rollSkillCheck).
@@ -9565,6 +9605,7 @@ class CharacterSheetState {
 		const skillModifiers = this.getNamedModifiersByType(`skill:${skill}`);
 
 		skillModifiers.forEach(mod => {
+			if (mod.derivedSkill) return;
 			// Only handle abilityMod-based effects here
 			// value-based and proficiencyBonus-based are already in customModifiers via _recalculateCustomModifiers
 			if (mod.abilityMod) {
@@ -9615,6 +9656,7 @@ class CharacterSheetState {
 		let total = 0;
 
 		skillModifiers.forEach(mod => {
+			if (mod.derivedSkill) return;
 			if (mod.proficiencyBonus) {
 				total += this.getProficiencyBonus();
 			} else if (mod.abilityMod) {
@@ -9665,14 +9707,31 @@ class CharacterSheetState {
 	 * Add a custom skill
 	 * @param {string} name - The skill name
 	 * @param {string} ability - The associated ability (str, dex, con, int, wis, cha)
+	 * @param {{derivedSkill?: {source:string, mode?:string, delta?:number}}} [opts]
 	 */
-	addCustomSkill (name, ability) {
+	addCustomSkill (name, ability, {derivedSkill} = {}) {
 		const key = name.toLowerCase().replace(/\s+/g, "");
 		// Don't add if already exists
 		if (this._data.customSkills.some(s => s.name.toLowerCase().replace(/\s+/g, "") === key)) {
 			return false;
 		}
 		this._data.customSkills.push({name, ability});
+		if (derivedSkill) {
+			const sourceFeatureId = `customSkill:${key}`;
+			const modifierId = this.addNamedModifier({
+				name: `${name}: Derived Skill`,
+				type: `skill:${key}`,
+				value: 0,
+				enabled: true,
+				sourceFeatureId,
+				sourceType: "customSkill",
+				derivedSkill,
+			});
+			if (!modifierId) {
+				this._data.customSkills.pop();
+				return false;
+			}
+		}
 		return true;
 	}
 
@@ -9690,6 +9749,7 @@ class CharacterSheetState {
 			// And drop any persistent ability pin so a re-added skill of the same
 			// name doesn't inherit a ghost override.
 			if (this._data.skillAbilityOverrides) delete this._data.skillAbilityOverrides[key];
+			this.removeModifiersByFeature(`customSkill:${key}`);
 			return true;
 		}
 		return false;
@@ -10329,6 +10389,38 @@ class CharacterSheetState {
 	 */
 	getSkillBreakdown (skill) {
 		const normalizedSkill = skill.toLowerCase().replace(/\s+/g, "");
+
+		const derivedModifier = this._getDerivedSkillModifier(normalizedSkill);
+		if (derivedModifier) {
+			const derivedSkill = this._normalizeDerivedSkillDescriptor(derivedModifier.type, derivedModifier.derivedSkill);
+			const sourceTotal = this._getSkillModResolved(derivedSkill.source, {visited: new Set([normalizedSkill])});
+			const trackedTotal = sourceTotal + (derivedSkill.mode === "score" ? 10 : 0);
+			const sourceEntry = (this._data.customSkills || []).find(entry => this._normalizeSkillKey(entry.name) === derivedSkill.source);
+			const sourceName = sourceEntry?.name || `${derivedSkill.source.charAt(0).toUpperCase()}${derivedSkill.source.slice(1)}`;
+			const components = [{
+				type: "derived",
+				name: `Derived from ${sourceName} (${derivedSkill.mode})`,
+				value: trackedTotal,
+				icon: "🔗",
+				isCanonical: true,
+			}];
+			const delta = derivedSkill.delta ?? (Number(derivedModifier.value) || 0);
+			if (delta) components.push({type: "custom", name: `${derivedModifier.name || "Derived skill"} delta`, value: delta, icon: "⚙️", isCanonical: false});
+			const targetSpecificBonus = this._data.customModifiers.skills?.[normalizedSkill] || 0;
+			if (targetSpecificBonus) {
+				const namedComps = this._getSkillNamedModifierComponents(normalizedSkill, {includeAll: false});
+				let itemized = 0;
+				namedComps.forEach(component => {
+					components.push({type: "custom", name: component.name, value: component.value, icon: "⚙️", isCanonical: false});
+					itemized += component.value;
+				});
+				const residual = targetSpecificBonus - itemized;
+				if (residual) components.push({type: "custom", name: "Custom Modifier", value: residual, icon: "⚙️", isCanonical: false});
+			}
+			const total = components.reduce((sum, component) => sum + component.value, 0);
+			const canonical = components.filter(component => component.isCanonical).reduce((sum, component) => sum + component.value, 0);
+			return {total, canonical, components, ability: null};
+		}
 
 		// Lore skills (TGTT): proficiency bonus + flat per-skill bonus, no ability mod.
 		const loreSkill = this._getLoreSkillEntry(normalizedSkill);
@@ -38094,6 +38186,7 @@ class CharacterSheetState {
 			abilityMod: effect.abilityMod,
 			perLevel: effect.perLevel,
 			perClassLevel: effect.perClassLevel,
+			derivedSkill: effect.derivedSkill,
 		});
 		return true;
 	}
@@ -39417,6 +39510,17 @@ class CharacterSheetState {
 			note: modifier.note || "",
 			enabled: modifier.enabled !== false,
 		};
+		if (modifier.derivedSkill) {
+			const derivedSkill = this._normalizeDerivedSkillDescriptor(newModifier.type, modifier.derivedSkill);
+			if (!derivedSkill) return null;
+			const hasExisting = this._data.namedModifiers.some(existing =>
+				existing.enabled
+				&& existing.type === newModifier.type
+				&& existing.derivedSkill,
+			);
+			if (hasExisting) return null;
+			newModifier.derivedSkill = derivedSkill;
+		}
 
 		// Source tracking
 		if (modifier.sourceFeatureId) newModifier.sourceFeatureId = modifier.sourceFeatureId;
@@ -39479,9 +39583,30 @@ class CharacterSheetState {
 	updateNamedModifier (id, updates) {
 		const modifier = this._data.namedModifiers.find(m => m.id === id);
 		if (modifier) {
+			if (Object.hasOwn(updates, "derivedSkill")) {
+				if (updates.derivedSkill) {
+					const type = updates.type || modifier.type;
+					const derivedSkill = this._normalizeDerivedSkillDescriptor(type, updates.derivedSkill);
+					if (!derivedSkill) return false;
+					const hasExisting = this._data.namedModifiers.some(existing =>
+						existing.id !== id
+							&& existing.enabled
+							&& existing.type === type
+							&& existing.derivedSkill,
+					);
+					if (hasExisting) return false;
+					updates = {...updates, derivedSkill};
+				} else {
+					delete modifier.derivedSkill;
+					updates = {...updates};
+					delete updates.derivedSkill;
+				}
+			}
 			Object.assign(modifier, updates);
 			this._recalculateCustomModifiers();
+			return true;
 		}
+		return false;
 	}
 
 	/**
@@ -39585,13 +39710,15 @@ class CharacterSheetState {
 	 * Mirrors the skill handling in _recalculateCustomModifiers; abilityMod-based skill
 	 * modifiers contribute 0 here (they surface separately as the "Feature Bonus" line).
 	 * @param {string} normalizedSkill - Skill key (lowercase, no spaces)
+	 * @param {{includeAll?: boolean}} [opts]
 	 * @returns {Array<{name:string, value:number}>}
 	 */
-	_getSkillNamedModifierComponents (normalizedSkill) {
+	_getSkillNamedModifierComponents (normalizedSkill, {includeAll = true} = {}) {
 		const out = [];
 		(this._data.namedModifiers || []).forEach(mod => {
 			if (!mod.enabled) return;
-			if (mod.type !== `skill:${normalizedSkill}` && mod.type !== "skill:all") return;
+			if (mod.type !== `skill:${normalizedSkill}` && (mod.type !== "skill:all" || !includeAll)) return;
+			if (mod.derivedSkill) return;
 			const value = this._getNamedModifierEffectiveValue(mod);
 			if (!value) return;
 			out.push({name: mod.name || "Custom Modifier", value});
@@ -39765,6 +39892,7 @@ class CharacterSheetState {
 							if (abl === "dex") cm.initiative += value;
 						}
 					} else if (mod.type.startsWith("skill:")) {
+						if (mod.derivedSkill) break;
 						// Handle skill:stealth, skill:athletics, etc.
 						const skill = mod.type.split(":")[1];
 						if (skill === "all") {

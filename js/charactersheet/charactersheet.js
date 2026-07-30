@@ -14855,6 +14855,11 @@ class CharacterSheetPage {
 				if (mod.proficiencyBonus) effects.push(`<span class="text-info">+Prof</span>`);
 				if (mod.halfProficiency) effects.push(`<span class="text-info">+½Prof</span>`);
 				if (mod.abilityMod) effects.push(`<span class="text-info">+${mod.abilityMod.toUpperCase()}</span>`);
+				if (mod.derivedSkill) {
+					const source = mod.derivedSkill.source.charAt(0).toUpperCase() + mod.derivedSkill.source.slice(1);
+					const delta = mod.derivedSkill.delta || 0;
+					effects.push(`<span class="text-info">Tracks ${source} (${mod.derivedSkill.mode || "modifier"})${delta ? ` ${delta > 0 ? "+" : ""}${delta}` : ""}</span>`);
+				}
 
 				const effectsStr = effects.length ? effects.join(" ") : `<span class="ve-muted">+0</span>`;
 
@@ -14910,11 +14915,18 @@ class CharacterSheetPage {
 		const updateCustomSkillVisibility = (formEl) => {
 			const type = formEl.querySelector("#mod-type").value;
 			const customSkillFields = formEl.querySelector(".charsheet__modifier-form-row--custom-skill");
+			const derivedFields = formEl.querySelector(".charsheet__modifier-form-row--derived-skill");
+			const isSkill = type.startsWith("skill:") && type !== "skill:all";
 			if (type === "skill:custom" || type === "passive:custom") {
 				customSkillFields.style.display = "";
 			} else {
 				customSkillFields.style.display = "none";
 			}
+			derivedFields.style.display = isSkill ? "" : "none";
+			const isDerived = isSkill && formEl.querySelector("#mod-skill-calculation").value === "derived";
+			formEl.querySelector(".charsheet__modifier-form-derived-controls").style.display = isDerived ? "" : "none";
+			formEl.querySelector(".charsheet__modifier-form-field--value").style.display = isDerived ? "none" : "";
+			formEl.querySelector(".charsheet__modifier-form-field--scaling").style.display = isDerived ? "none" : "";
 		};
 
 		// Show edit/add form
@@ -14934,6 +14946,10 @@ class CharacterSheetPage {
 			const conditionalInput = formEl.querySelector("#mod-conditional");
 			const customSkillInput = formEl.querySelector("#mod-custom-skill");
 			const customSkillAbilitySelect = formEl.querySelector("#mod-custom-skill-ability");
+			const skillCalculationSelect = formEl.querySelector("#mod-skill-calculation");
+			const derivedSourceSelect = formEl.querySelector("#mod-derived-source");
+			const derivedModeSelect = formEl.querySelector("#mod-derived-mode");
+			const derivedDeltaInput = formEl.querySelector("#mod-derived-delta");
 
 			if (existingMod) {
 				nameInput.value = existingMod.name;
@@ -14964,6 +14980,10 @@ class CharacterSheetPage {
 				conditionalInput.value = existingMod.conditional || "";
 				customSkillInput.value = existingMod.customSkillName || "";
 				customSkillAbilitySelect.value = existingMod.customSkillAbility || "";
+				skillCalculationSelect.value = existingMod.derivedSkill ? "derived" : "";
+				derivedSourceSelect.value = existingMod.derivedSkill?.source || "";
+				derivedModeSelect.value = existingMod.derivedSkill?.mode === "score" ? "score" : "modifier";
+				derivedDeltaInput.value = existingMod.derivedSkill?.delta || 0;
 				formEl.dataset.editingId = existingMod.id;
 				formEl.querySelector(".charsheet__modifier-form-title-text").textContent = "Edit Modifier";
 			} else {
@@ -14979,6 +14999,10 @@ class CharacterSheetPage {
 				conditionalInput.value = "";
 				customSkillInput.value = "";
 				customSkillAbilitySelect.value = "";
+				skillCalculationSelect.value = "";
+				derivedSourceSelect.value = "";
+				derivedModeSelect.value = "modifier";
+				derivedDeltaInput.value = 0;
 				delete formEl.dataset.editingId;
 				formEl.querySelector(".charsheet__modifier-form-title-text").textContent = "Add Modifier";
 			}
@@ -15066,6 +15090,36 @@ class CharacterSheetPage {
 							<option value="wis">Wisdom</option>
 							<option value="cha">Charisma</option>
 						</select>
+					</div>
+				</div>
+				<div class="charsheet__modifier-form-row charsheet__modifier-form-row--derived-skill" style="display: none;">
+					<div class="charsheet__modifier-form-field">
+						<label class="charsheet__modifier-form-label">Calculation</label>
+						<select class="ve-form-control form-control--minimal" id="mod-skill-calculation">
+							<option value="">Add a bonus</option>
+							<option value="derived">Track another skill</option>
+						</select>
+					</div>
+					<div class="charsheet__modifier-form-derived-controls">
+						<div class="charsheet__modifier-form-derived-copy">This skill's total will match the selected source; its own ability and proficiency are replaced.</div>
+						<div class="charsheet__modifier-form-field">
+							<label class="charsheet__modifier-form-label">Source Skill</label>
+							<select class="ve-form-control form-control--minimal" id="mod-derived-source">
+								<option value="">Choose a skill</option>
+								${skills.map(skill => `<option value="${skill.name.toLowerCase().replace(/\s+/g, "")}">${skill.name}</option>`).join("")}
+							</select>
+						</div>
+						<div class="charsheet__modifier-form-field">
+							<label class="charsheet__modifier-form-label">Track</label>
+							<select class="ve-form-control form-control--minimal" id="mod-derived-mode">
+								<option value="modifier">Check modifier</option>
+								<option value="score">Passive-style score (10 + modifier)</option>
+							</select>
+						</div>
+						<div class="charsheet__modifier-form-field">
+							<label class="charsheet__modifier-form-label">Delta</label>
+							<input type="number" class="ve-form-control form-control--minimal" id="mod-derived-delta" value="0">
+						</div>
 					</div>
 				</div>
 				<div class="charsheet__modifier-form-row">
@@ -15226,7 +15280,7 @@ class CharacterSheetPage {
 
 		// Bind type change to show/hide custom skill fields
 		modalInner.addEventListener("change", function (e) {
-			if (e.target.id !== "mod-type") return;
+			if (e.target.id !== "mod-type" && e.target.id !== "mod-skill-calculation") return;
 			updateCustomSkillVisibility(modalInner.querySelector("#charsheet-modifier-form"));
 		});
 
@@ -15245,6 +15299,10 @@ class CharacterSheetPage {
 			const conditional = formEl.querySelector("#mod-conditional").value.trim();
 			const customSkillName = formEl.querySelector("#mod-custom-skill").value.trim();
 			const customSkillAbility = formEl.querySelector("#mod-custom-skill-ability").value;
+			const skillCalculation = formEl.querySelector("#mod-skill-calculation").value;
+			const derivedSource = formEl.querySelector("#mod-derived-source").value;
+			const derivedMode = formEl.querySelector("#mod-derived-mode").value;
+			const derivedDelta = parseInt(formEl.querySelector("#mod-derived-delta").value) || 0;
 
 			if (!name) {
 				JqueryUtil.doToast({type: "warning", content: "Please enter a name for the modifier."});
@@ -15264,13 +15322,32 @@ class CharacterSheetPage {
 
 			// Build modifier object with only non-empty properties
 			const modifier = {name, type, value, enabled: true};
+			if (skillCalculation === "derived") {
+				const targetSkill = type.slice("skill:".length);
+				if (!derivedSource) {
+					JqueryUtil.doToast({type: "warning", content: "Please choose a source skill to track."});
+					return;
+				}
+				if (targetSkill === derivedSource) {
+					JqueryUtil.doToast({type: "warning", content: "A skill cannot track itself."});
+					return;
+				}
+				modifier.value = 0;
+				modifier.derivedSkill = {source: derivedSource, mode: derivedMode === "score" ? "score" : "modifier"};
+				if (derivedDelta) modifier.derivedSkill.delta = derivedDelta;
+			} else {
+				modifier.derivedSkill = null;
+			}
 			if (note) modifier.note = note;
-			// Handle scaling options
-			if (scalingVal === "proficiencyBonus") modifier.proficiencyBonus = true;
-			else if (scalingVal === "halfProficiency") modifier.halfProficiency = true;
-			else if (scalingVal === "doubleProficiency") modifier.doubleProficiency = true;
-			else if (scalingVal?.startsWith("abilityMod:")) modifier.abilityMod = scalingVal.replace("abilityMod:", "");
-			else if (scalingVal === "perLevel") modifier.perLevel = true;
+			// Derived skills replace the target's calculation; stale hidden scaling must not
+			// survive when a flat modifier is edited into a mirror.
+			if (!modifier.derivedSkill) {
+				if (scalingVal === "proficiencyBonus") modifier.proficiencyBonus = true;
+				else if (scalingVal === "halfProficiency") modifier.halfProficiency = true;
+				else if (scalingVal === "doubleProficiency") modifier.doubleProficiency = true;
+				else if (scalingVal?.startsWith("abilityMod:")) modifier.abilityMod = scalingVal.replace("abilityMod:", "");
+				else if (scalingVal === "perLevel") modifier.perLevel = true;
+			}
 			if (advantageVal === "advantage") modifier.advantage = true;
 			if (advantageVal === "disadvantage") modifier.disadvantage = true;
 			if (minimumVal && !isNaN(parseInt(minimumVal))) modifier.setMinimum = parseInt(minimumVal);
@@ -16029,17 +16106,45 @@ class CharacterSheetPage {
 			{value: "wis", label: "Wisdom"},
 			{value: "cha", label: "Charisma"},
 		];
+		const sourceSkills = this.getSkillsList();
 
 		const formEl = ee`<div class="ve-flex-col">
 			<div class="ve-flex-v-center mb-2">
 				<label class="mr-2 w-100p">Skill Name:</label>
 				<input type="text" class="ve-form-control" id="custom-skill-name" placeholder="e.g. Brewing, Sailing">
 			</div>
-			<div class="ve-flex-v-center mb-3">
+			<div class="ve-flex-v-center mb-2">
+				<label class="mr-2 w-100p">Calculation:</label>
+				<select class="ve-form-control" id="custom-skill-calculation">
+					<option value="ability">Use an ability</option>
+					<option value="derived">Track another skill</option>
+				</select>
+			</div>
+			<div class="ve-flex-v-center mb-3" id="custom-skill-ability-row">
 				<label class="mr-2 w-100p">Ability:</label>
 				<select class="ve-form-control" id="custom-skill-ability">
 					${abilityOptions.map(a => `<option value="${a.value}">${a.label}</option>`).join("")}
 				</select>
+			</div>
+			<div class="charsheet__custom-skill-derived" id="custom-skill-derived" style="display: none;">
+				<div class="ve-muted ve-small mb-2">This skill's total will match the source skill; its own ability and proficiency are replaced.</div>
+				<div class="ve-flex-v-center mb-2">
+					<label class="mr-2 w-100p">Source:</label>
+					<select class="ve-form-control" id="custom-skill-derived-source">
+						${sourceSkills.map(skill => `<option value="${skill.name.toLowerCase().replace(/\s+/g, "")}">${skill.name}</option>`).join("")}
+					</select>
+				</div>
+				<div class="ve-flex-v-center mb-2">
+					<label class="mr-2 w-100p">Track:</label>
+					<select class="ve-form-control" id="custom-skill-derived-mode">
+						<option value="modifier">Check modifier</option>
+						<option value="score">Passive-style score (10 + modifier)</option>
+					</select>
+				</div>
+				<div class="ve-flex-v-center mb-3">
+					<label class="mr-2 w-100p">Delta:</label>
+					<input type="number" class="ve-form-control" id="custom-skill-derived-delta" value="0">
+				</div>
 			</div>
 			<div class="ve-flex-h-right">
 				<button class="ve-btn ve-btn-default mr-2" id="custom-skill-cancel">Cancel</button>
@@ -16050,14 +16155,23 @@ class CharacterSheetPage {
 
 		const nameEl = formEl.querySelector("#custom-skill-name");
 		const abilityEl = formEl.querySelector("#custom-skill-ability");
+		const calculationEl = formEl.querySelector("#custom-skill-calculation");
+		const abilityRowEl = formEl.querySelector("#custom-skill-ability-row");
+		const derivedEl = formEl.querySelector("#custom-skill-derived");
 		const addBtnEl = formEl.querySelector("#custom-skill-add");
 		const cancelBtn = formEl.querySelector("#custom-skill-cancel");
 
 		cancelBtn.addEventListener("click", () => doClose());
+		calculationEl.addEventListener("change", () => {
+			const isDerived = calculationEl.value === "derived";
+			abilityRowEl.style.display = isDerived ? "none" : "";
+			derivedEl.style.display = isDerived ? "" : "none";
+		});
 
 		addBtnEl.addEventListener("click", () => {
 			const name = nameEl.value.trim();
 			const ability = abilityEl.value;
+			const isDerived = calculationEl.value === "derived";
 
 			if (!name) {
 				JqueryUtil.doToast({type: "warning", content: "Please enter a skill name."});
@@ -16072,8 +16186,19 @@ class CharacterSheetPage {
 				return;
 			}
 
+			const derivedSource = formEl.querySelector("#custom-skill-derived-source").value;
+			if (isDerived && skillKey === derivedSource) {
+				JqueryUtil.doToast({type: "warning", content: "A skill cannot track itself."});
+				return;
+			}
+			const derivedMode = formEl.querySelector("#custom-skill-derived-mode").value;
+			const derivedDelta = parseInt(formEl.querySelector("#custom-skill-derived-delta").value) || 0;
+			const derivedSkill = isDerived
+				? {source: derivedSource, mode: derivedMode === "score" ? "score" : "modifier", ...(derivedDelta ? {delta: derivedDelta} : {})}
+				: null;
+
 			// Add the custom skill
-			this._state.addCustomSkill(name, ability);
+			this._state.addCustomSkill(name, isDerived ? null : ability, {derivedSkill});
 			this._renderSkills();
 			this._saveCurrentCharacter();
 
