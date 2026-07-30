@@ -1159,7 +1159,7 @@ class CharacterSheetInventory {
 					${item.value ? `<div><strong>Value:</strong> ${this._formatValue(item.value)}</div>` : ""}
 					${item.weight ? `<div><strong>Weight:</strong> ${item.weight} lb.</div>` : ""}
 					${item.ac ? `<div><strong>AC:</strong> ${item.ac}${item.dexterityMax ? ` (max Dex ${item.dexterityMax > 0 ? `+${item.dexterityMax}` : item.dexterityMax})` : ""}</div>` : ""}
-					${item.dmg1 ? `<div><strong>Damage:</strong> ${item.dmg1} ${item.dmgType ? Parser.dmgTypeToFull(item.dmgType) : ""}</div>` : ""}
+					${item.dmg1 ? `<div><strong>Damage:</strong> ${this._state.getWeaponDamageDie(item)}${item.dmg2 ? ` (${item.dmg1} 1H / ${item.dmg2} 2H)` : ""} ${item.dmgType ? Parser.dmgTypeToFull(item.dmgType) : ""}</div>` : ""}
 					${item.property?.length ? `<div><strong>Properties:</strong> ${item.property.map(p => this._formatProperty(p)).join(", ")}</div>` : ""}
 				</div>
 				${item.entries?.length ? `
@@ -1362,8 +1362,10 @@ class CharacterSheetInventory {
 			// weapon. Drives base-item detection for effects scoped to a weapon TYPE (e.g.
 			// Bracers of Archery → any longbow/shortbow, including a "Frost Shortbow").
 			baseItem: item.baseItem || null,
-			damage: item.dmg1 ? `${item.dmg1} ${Parser.dmgTypeToFull(item.dmgType)}` : null,
+			damage: item.dmg1 ? `${this._state.getWeaponDamageDie(item)} ${Parser.dmgTypeToFull(item.dmgType)}` : null,
 			dmg1: item.dmg1 || null,
+			dmg2: item.dmg2 || null,
+			handsUsed: item.dmg2 ? (Math.max(1, Math.floor(Number(item.handsUsed))) || 1) : 1,
 			dmgType: item.dmgType || null,
 			properties: item.property || [],
 			mastery: item.mastery || [],
@@ -4608,7 +4610,9 @@ class CharacterSheetInventory {
 
 		// Weapon stats
 		if (item.weapon) {
-			html += `<p><strong>Damage:</strong> ${item.dmg1 || "—"} ${item.dmgType ? Parser.dmgTypeToFull(item.dmgType) : ""}</p>`;
+			const damageDie = this._state.getWeaponDamageDie(item);
+			const versatileBreakdown = item.dmg2 ? ` <span class="ve-muted">(${item.dmg1} 1H / ${item.dmg2} 2H)</span>` : "";
+			html += `<p><strong>Damage:</strong> ${damageDie}${versatileBreakdown} ${item.dmgType ? Parser.dmgTypeToFull(item.dmgType) : ""}</p>`;
 			if (item.property?.length) {
 				html += `<p><strong>Properties:</strong> ${item.property.map(p => this._formatProperty(p)).join(", ")}</p>`;
 			}

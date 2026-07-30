@@ -299,6 +299,12 @@
 		padding: 0.5rem;
 	}
 
+	.charsheet__attack-hands-btn {
+		min-width: 44px;
+		min-height: 44px;
+		padding: 0.5rem;
+	}
+
 	/* ====================================================================
 	   Ability Scores Grid — Touch Optimized
 	   ==================================================================== */

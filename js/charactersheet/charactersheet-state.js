@@ -25067,6 +25067,38 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Resolve the base damage die for a weapon from its persisted hand count.
+	 * Missing/invalid hand state preserves the legacy one-handed behavior.
+	 *
+	 * @param {object} item
+	 * @returns {string}
+	 */
+	getWeaponDamageDie (item) {
+		const oneHanded = item?.dmg1 || (item?.damage ? String(item.damage).split(" ")[0] : null) || "1d4";
+		if (!item?.dmg2) return oneHanded;
+
+		const parsedHands = Math.floor(Number(item.handsUsed));
+		const handsUsed = Number.isFinite(parsedHands) && parsedHands >= 1 ? parsedHands : 1;
+		return handsUsed >= 2 ? item.dmg2 : oneHanded;
+	}
+
+	/**
+	 * Persist the number of hands used with an inventory weapon.
+	 *
+	 * @param {string} itemId
+	 * @param {number} handsUsed
+	 * @returns {boolean}
+	 */
+	setItemHandsUsed (itemId, handsUsed) {
+		const invItem = (this._data.inventory || []).find(i => i.id === itemId);
+		if (!invItem?.item) return false;
+
+		const parsedHands = Math.floor(Number(handsUsed));
+		invItem.item.handsUsed = Number.isFinite(parsedHands) && parsedHands >= 1 ? parsedHands : 1;
+		return true;
+	}
+
+	/**
 	 * Persist weapon attack overrides onto the backing inventory item.
 	 *
 	 * `getItems()` returns SHALLOW copies of `_data.inventory[].item`, so the combat
@@ -28913,7 +28945,7 @@ class CharacterSheetState {
 		const profBonus = this._isWeaponProficient(item) ? this.getProficiencyBonus() : 0;
 		const attackBonus = abilityMod + profBonus + (this._data.customModifiers.attackBonus || 0);
 
-		const damageDie = item.dmg1 || (item.damage ? item.damage.split(" ")[0] : null) || "1d4";
+		const damageDie = this.getWeaponDamageDie(item);
 		const damageBonus = abilityMod + (this._data.customModifiers.damageBonus || 0);
 		const damage = `${damageDie}${damageBonus >= 0 ? "+" : ""}${damageBonus}`;
 

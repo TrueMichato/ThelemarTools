@@ -5421,6 +5421,41 @@
 	color: var(--cs-danger, #ef4444);
 }
 
+.charsheet__attack-hands {
+	display: inline-flex;
+	overflow: hidden;
+	border: 1px solid var(--cs-border, rgba(127, 127, 127, 0.35));
+	border-radius: var(--cs-radius-sm, 6px);
+	background: var(--cs-surface-2, rgba(127, 127, 127, 0.06));
+}
+
+.charsheet__attack-hands-btn {
+	min-width: 2rem;
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	border: 0;
+	border-right: 1px solid var(--cs-border, rgba(127, 127, 127, 0.35));
+	background: transparent;
+	color: var(--cs-text-secondary, inherit);
+	font-size: var(--cs-text-sm, 0.85rem);
+	font-weight: var(--cs-weight-semibold, 600);
+	cursor: pointer;
+}
+
+.charsheet__attack-hands-btn:last-child {
+	border-right: 0;
+}
+
+.charsheet__attack-hands-btn:hover,
+.charsheet__attack-hands-btn:focus-visible {
+	background: var(--cs-primary-light, rgba(99, 102, 241, 0.14));
+	color: var(--cs-text-primary, inherit);
+}
+
+.charsheet__attack-hands-btn--active {
+	background: var(--cs-primary, #6366f1);
+	color: #fff;
+}
+
 /* ========================================================================
    Quiver — active ammunition selector (Bug #3) + compact summary
    ======================================================================== */

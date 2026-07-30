@@ -893,6 +893,7 @@ describe("#14 auto-attack builder keeps sourceItem for the direct getEffectiveIt
 		combat._state = {
 			getAttacks: () => [],
 			getItems: () => [weapon],
+			getWeaponDamageDie: item => item.dmg1,
 			isMonkWeapon: () => false,
 			getEffectiveItemBonuses: () => effectiveBonuses,
 			getFeatureCalculations: () => ({}),

@@ -22,6 +22,7 @@ function makeCombat ({attacks = [], items = [], temporaryAttacks = [], activeSta
 	combat._state = {
 		getAttacks: () => attacks,
 		getItems: () => items,
+		getWeaponDamageDie: item => item.handsUsed >= 2 && item.dmg2 ? item.dmg2 : (item.dmg1 || item.damage),
 		getTemporaryAttacks: () => temporaryAttacks,
 		getActiveStateAttacks: () => activeStateAttacks,
 		getSpells: () => spells,

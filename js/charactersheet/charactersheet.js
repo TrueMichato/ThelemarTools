@@ -9190,8 +9190,7 @@ class CharacterSheetPage {
 				const attackBonus = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponAttack || 0);
 				const damageBonus = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponDamage || 0);
 
-				// Extract raw damage die — prefer dmg1 (raw), fall back to parsing from formatted damage string
-				let baseDamageDie = weapon.dmg1 || (weapon.damage ? weapon.damage.split(" ")[0] : null) || "1d6";
+				let baseDamageDie = this._state.getWeaponDamageDie(weapon);
 				let baseDamageType = weapon.dmgType
 					? Parser.dmgTypeToFull(weapon.dmgType)
 					: (weapon.damageType || (weapon.damage ? weapon.damage.split(" ").slice(1).join(" ") : null) || "slashing");
