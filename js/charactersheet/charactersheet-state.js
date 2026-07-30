@@ -11373,8 +11373,21 @@ class CharacterSheetState {
 		return bonus;
 	}
 
+	/**
+	 * Dark Augmentation (Blood Hunter 10): +5 walking speed.
+	 *
+	 * Derived straight from the class level rather than from
+	 * `getFeatureCalculations().darkAugmentationSpeedBonus`, matching the
+	 * convention used by every other speed-pipeline bonus getter (see
+	 * `getAdeptSpeedBonus`). This is load-bearing: `getSpeedByType()` calls
+	 * this getter, and `getFeatureCalculations()` reads speeds back for
+	 * features such as Stormborn (Tempest Cleric 17, fly speed = walk speed).
+	 * Routing this through `getFeatureCalculations()` closes that loop into
+	 * infinite recursion for any character who could have both.
+	 * @returns {number}
+	 */
 	getDarkAugmentationSpeedBonus () {
-		return this.getFeatureCalculations().darkAugmentationSpeedBonus || 0;
+		return (this._getBloodHunterClass()?.level || 0) >= 10 ? 5 : 0;
 	}
 
 	/**
