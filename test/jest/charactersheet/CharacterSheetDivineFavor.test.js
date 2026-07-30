@@ -304,6 +304,61 @@ describe("Divine Favor — Apostle boon (favour 50): +2 score & +2 max", () => {
 		expect(s.getAbilityScore("cha")).toBe(15);
 		expect(s.getAbilityScoreMax("cha")).toBe(22);
 	});
+
+	test("Lunaria-shaped WIS remains 21 across recalc, render-equivalent reconciliation, and load-save-load", () => {
+		const makeLunaria = () => {
+			const state = makeState();
+			state.setSetting("enforceAbilityScoreCap", true);
+			state.setAbilityBase("wis", 17);
+			state.setAbilityBonus("wis", 1);
+			state.addCustomAbility({
+				name: "IP ASI",
+				mode: "passive",
+				effects: [{type: "ability:wis", value: 1}],
+			});
+			state.setDivineFavorGod("Pan|TGTT");
+			state.setDivineFavorLevel(50);
+			state.setDivineFavorBoonChoice("pan-apostle-asi", "wis");
+			return state;
+		};
+
+		const expectStable = state => {
+			expect(state.getAbilityScore("wis")).toBe(21);
+			expect(state.getAbilityScoreMax("wis")).toBe(22);
+			expect(state._data.namedModifiers.filter(m => m._divineFavor && m.type === "ability:wis")).toHaveLength(1);
+			expect(state._data.namedModifiers.filter(m => m._divineFavor && m.type === "abilityMax:wis")).toHaveLength(1);
+		};
+
+		const original = makeLunaria();
+		expectStable(original);
+
+		// Features → Overview ultimately re-runs modifier reconciliation before repainting.
+		original._recalculateCustomModifiers();
+		original._recalculateCustomModifiers();
+		expectStable(original);
+
+		const loaded = makeState();
+		loaded.loadFromJson(original.toJson());
+		loaded.applyDivineFavorEffects();
+		expectStable(loaded);
+
+		const reloaded = makeState();
+		reloaded.loadFromJson(loaded.toJson());
+		reloaded.applyDivineFavorEffects();
+		expectStable(reloaded);
+
+		const ipAsi = reloaded._data.namedModifiers.find(m => m.name === "IP ASI: ability:wis");
+		expect(ipAsi).toBeDefined();
+		reloaded.toggleNamedModifier(ipAsi.id);
+		expect(reloaded.getAbilityScore("wis")).toBe(20);
+		reloaded.toggleNamedModifier(ipAsi.id);
+		expectStable(reloaded);
+
+		reloaded.setDivineFavorLevel(49);
+		expect(reloaded.getAbilityScore("wis")).toBe(19);
+		expect(reloaded.getAbilityScoreMax("wis")).toBe(20);
+		expect(reloaded._data.namedModifiers.filter(m => m._divineFavor && m.type.startsWith("ability"))).toHaveLength(0);
+	});
 });
 
 describe("Divine Favor — idempotency", () => {

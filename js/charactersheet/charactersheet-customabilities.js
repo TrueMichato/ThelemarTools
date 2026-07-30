@@ -547,6 +547,7 @@ class CharacterSheetCustomAbilities {
 	static effectHasBehavior (eff) {
 		if (!eff || !eff.type) return false;
 		const type = String(eff.type);
+		if (eff.derivedSkill?.source) return true;
 
 		// Type-only families: their mere presence is meaningful regardless of `value`. Defensive
 		// arrays grant the trait by type; `reach` defaults to +5 when value is absent/0
@@ -882,18 +883,32 @@ class CharacterSheetCustomAbilities {
 			effects.forEach((effect, idx) => {
 				const isAbilityMaxType = effect.type?.startsWith("abilityMax:");
 				const isAbilityType = effect.type?.startsWith("ability:") || isAbilityMaxType;
+				const isSkillType = effect.type?.startsWith("skill:") && effect.type !== "skill:all";
+				const isDerivedSkill = isSkillType && !!effect.derivedSkill;
+				const targetSkill = effect.type?.slice("skill:".length) || "";
+				const skillOptions = (sheet.getSkillsList?.() || [])
+					.map(skill => ({
+						key: skill.name.toLowerCase().replace(/\s+/g, ""),
+						name: skill.name,
+					}))
+					.filter(skill => skill.key !== targetSkill);
+				const selectedSource = effect.derivedSkill?.source || skillOptions[0]?.key || "";
 				const row = document.createElement("div");
 				row.className = "custom-abilities__effect-row";
 				row.innerHTML = `
 					<div class="custom-abilities__effect-row-main">
 						<select class="ve-form-control custom-abilities__effect-type">${typeOptionsHtml}</select>
+						<select class="ve-form-control custom-abilities__effect-calculation" style="width: 135px; ${isSkillType ? "" : "display: none;"}" title="Add a bonus or track another skill">
+							<option value="" ${!isDerivedSkill ? "selected" : ""}>Add Bonus</option>
+							<option value="derived" ${isDerivedSkill ? "selected" : ""}>Track Skill</option>
+						</select>
 						<select class="ve-form-control custom-abilities__effect-mode" style="width: 85px; ${isAbilityType ? "" : "display: none;"}" title="Add to score or set score to value">
 							<option value="" ${!effect.mode ? "selected" : ""}>Add</option>
 							<option value="set" ${effect.mode === "set" ? "selected" : ""}>Set To</option>
 						</select>
-						<input type="number" class="ve-form-control custom-abilities__effect-value" placeholder="${isAbilityType && effect.mode === "set" ? (isAbilityMaxType ? "24" : "19") : "±0"}" value="${effect.value || 0}" style="width: 70px;" title="Bonus added to the roll/score">
-						<span class="custom-abilities__effect-preview ve-muted" title="How this bonus is applied">${effect.mode === "set" ? `= ${effect.value || 0}` : CharacterSheetCustomAbilities.formatEffectBonus(effect.value || 0)}</span>
-						<select class="ve-form-control custom-abilities__effect-scaling" style="width: 145px;" title="Add a stat-based bonus">
+						<input type="number" class="ve-form-control custom-abilities__effect-value" placeholder="${isAbilityType && effect.mode === "set" ? (isAbilityMaxType ? "24" : "19") : "±0"}" value="${effect.value || 0}" style="width: 70px; ${isDerivedSkill ? "display: none;" : ""}" title="Bonus added to the roll/score">
+						<span class="custom-abilities__effect-preview ve-muted" style="${isDerivedSkill ? "display: none;" : ""}" title="How this bonus is applied">${effect.mode === "set" ? `= ${effect.value || 0}` : CharacterSheetCustomAbilities.formatEffectBonus(effect.value || 0)}</span>
+						<select class="ve-form-control custom-abilities__effect-scaling" style="width: 145px; ${isDerivedSkill ? "display: none;" : ""}" title="Add a stat-based bonus">
 							<option value="">Fixed Only</option>
 							<optgroup label="Proficiency">
 								<option value="proficiencyBonus" ${effect.proficiencyBonus ? "selected" : ""}>+ Prof Bonus</option>
@@ -915,6 +930,19 @@ class CharacterSheetCustomAbilities {
 						</select>
 						${effect.perClassLevel ? `<select class="ve-form-control custom-abilities__effect-class-level" style="width: 110px;">${this.getClassOptionsHtml(state, effect.perClassLevel)}</select>` : ""}
 					</div>
+					${isDerivedSkill ? `
+						<div class="custom-abilities__effect-derived">
+							<span class="ve-muted">This skill's total will match</span>
+							<select class="ve-form-control custom-abilities__effect-derived-source">
+								${skillOptions.map(skill => `<option value="${skill.key}" ${skill.key === selectedSource ? "selected" : ""}>${skill.name}</option>`).join("")}
+							</select>
+							<select class="ve-form-control custom-abilities__effect-derived-mode">
+								<option value="modifier" ${effect.derivedSkill?.mode !== "score" ? "selected" : ""}>Check modifier</option>
+								<option value="score" ${effect.derivedSkill?.mode === "score" ? "selected" : ""}>Passive-style score (10 + modifier)</option>
+							</select>
+							<label class="ve-flex-v-center mb-0"><span class="ve-muted mr-1">Delta</span><input type="number" class="ve-form-control custom-abilities__effect-derived-delta" value="${effect.derivedSkill?.delta || 0}" style="width: 65px;"></label>
+						</div>
+					` : ""}
 					<div class="custom-abilities__effect-row-extra">
 						<select class="ve-form-control custom-abilities__effect-advdis" style="width: 120px;">
 							<option value="">Normal</option>
@@ -957,6 +985,7 @@ class CharacterSheetCustomAbilities {
 
 				// Bind change handlers
 				const typeEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-type"));
+				const calculationEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-calculation"));
 				const modeEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-mode"));
 				const valueEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-value"));
 				const previewEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-preview"));
@@ -972,12 +1001,33 @@ class CharacterSheetCustomAbilities {
 				typeEl.addEventListener("change", (/** @type {*} */ e) => {
 					effects[idx].type = e.target.value;
 					const isAbility = e.target.value.startsWith("ability:") || e.target.value.startsWith("abilityMax:");
+					const isSkill = e.target.value.startsWith("skill:") && e.target.value !== "skill:all";
 					modeEl.style.display = isAbility ? "" : "none";
 					if (!isAbility) {
 						delete effects[idx].mode;
 						valueEl.placeholder = "±0";
 					}
-					updatePreview();
+					if (!isSkill) delete effects[idx].derivedSkill;
+					render();
+				});
+				calculationEl.addEventListener("change", (/** @type {*} */ e) => {
+					if (e.target.value === "derived") {
+						const target = effects[idx].type.slice("skill:".length);
+						const source = (sheet.getSkillsList?.() || [])
+							.map(skill => skill.name.toLowerCase().replace(/\s+/g, ""))
+							.find(skill => skill !== target);
+						if (source) effects[idx].derivedSkill = {source, mode: "modifier"};
+						effects[idx].value = 0;
+						delete effects[idx].proficiencyBonus;
+						delete effects[idx].halfProficiency;
+						delete effects[idx].doubleProficiency;
+						delete effects[idx].abilityMod;
+						delete effects[idx].perLevel;
+						delete effects[idx].perClassLevel;
+					} else {
+						delete effects[idx].derivedSkill;
+					}
+					render();
 				});
 				modeEl.addEventListener("change", (/** @type {*} */ e) => {
 					if (e.target.value === "set") {
@@ -993,6 +1043,20 @@ class CharacterSheetCustomAbilities {
 					effects[idx].value = parseInt(e.target.value) || 0;
 					updatePreview();
 				});
+				const derivedSourceEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-derived-source"));
+				if (derivedSourceEl) {
+					derivedSourceEl.addEventListener("change", (/** @type {*} */ e) => {
+						effects[idx].derivedSkill.source = e.target.value;
+					});
+					(/** @type {*} */ (row.querySelector(".custom-abilities__effect-derived-mode"))).addEventListener("change", (/** @type {*} */ e) => {
+						effects[idx].derivedSkill.mode = e.target.value === "score" ? "score" : "modifier";
+					});
+					(/** @type {*} */ (row.querySelector(".custom-abilities__effect-derived-delta"))).addEventListener("input", (/** @type {*} */ e) => {
+						const delta = parseInt(e.target.value) || 0;
+						if (delta) effects[idx].derivedSkill.delta = delta;
+						else delete effects[idx].derivedSkill.delta;
+					});
+				}
 
 				// Scaling dropdown handler
 				const scalingEl = /** @type {*} */ (row.querySelector(".custom-abilities__effect-scaling"));

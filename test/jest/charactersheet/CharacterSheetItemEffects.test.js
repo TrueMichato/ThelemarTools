@@ -236,6 +236,15 @@ describe("Bug #8 — shared catalog & effects editor (one pipeline for items + a
 		expect(typeof render).toBe("function");
 		expect(() => render()).not.toThrow();
 	});
+
+	it("the shared ability/item effect filter preserves a zero-value derived-skill effect", () => {
+		const effect = {
+			type: "skill:spellcraft",
+			value: 0,
+			derivedSkill: {source: "arcana", mode: "modifier", delta: 2},
+		};
+		expect(CharacterSheetCustomAbilities.effectHasBehavior(effect)).toBe(true);
+	});
 });
 
 describe("Bug #8 — custom-item modal wiring (source-pinned)", () => {
