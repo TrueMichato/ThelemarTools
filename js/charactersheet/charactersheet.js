@@ -9524,8 +9524,9 @@ class CharacterSheetPage {
 			const attackReach = this._state.getAttackReach?.(attack, {meleeReach: overviewReachCtx.meleeReach});
 			const isThrownRange = attack.range && String(attack.range).includes("/");
 			const hasReachProp = (attack.properties || []).some(p => String(p).split("|")[0].toUpperCase() === "R");
-			if (attackReach != null && !isThrownRange && (overviewReachCtx.reachBonus !== 0 || hasReachProp)) {
-				rangeStr = `${attackReach} ft.`;
+			const attackReachBonus = Number(attack.reachBonus) || 0;
+			if (attackReach != null && !isThrownRange && (overviewReachCtx.reachBonus !== 0 || hasReachProp || attackReachBonus !== 0)) {
+				rangeStr = `${attackReach} ft.${attack.reachCondition === "onYourTurn" ? " on your turn" : ""}`;
 			}
 
 			// Format properties (abbreviated)

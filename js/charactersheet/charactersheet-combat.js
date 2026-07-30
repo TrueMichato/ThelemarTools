@@ -5071,18 +5071,21 @@ class CharacterSheetCombat {
 		const isThrown = rangeStr.includes("/");
 		const hasReachProp = (attack.properties || []).some(p => String(p).split("|")[0].toUpperCase() === "R");
 		const reachBonus = reachCtx.reachBonus ?? (this._state.getReachBonus?.() ?? 0);
+		const attackReachBonus = Number(attack.reachBonus) || 0;
 		const reach = this._state.getAttackReach?.(attack, {meleeReach: reachCtx.meleeReach});
 
 		// Only override when melee, not thrown, and reach is actually modified.
-		if (reach == null || isThrown || (reachBonus === 0 && !hasReachProp)) {
+		if (reach == null || isThrown || (reachBonus === 0 && !hasReachProp && attackReachBonus === 0)) {
 			return {rangeHtml: rawRange, reach};
 		}
 
 		const breakdown = [`Base ${CharacterSheetState.BASE_MELEE_REACH} ft`];
 		if (reachBonus) breakdown.push(`${reachBonus > 0 ? "+" : ""}${reachBonus} ft (reach modifiers)`);
 		if (hasReachProp) breakdown.push(`+${CharacterSheetState.REACH_PROPERTY_BONUS} ft (Reach property)`);
+		if (attackReachBonus) breakdown.push(`+${attackReachBonus} ft${attack.reachCondition === "onYourTurn" ? " (on your turn)" : ""}`);
 		const title = `Melee reach: ${reach} ft\n${breakdown.join("\n")}`;
-		return {rangeHtml: `<span class="ve-muted" title="${title}">${reach} ft.</span>`, reach};
+		const condition = attack.reachCondition === "onYourTurn" ? " on your turn" : "";
+		return {rangeHtml: `<span class="ve-muted" title="${title}">${reach} ft.${condition}</span>`, reach};
 	}
 
 	/**

@@ -123,6 +123,10 @@ describe("Bug #4 — the initiative ROLL HANDLER consumes the mode", () => {
 					formatD20Breakdown: () => "",
 				},
 				_triggerInitiativeRecovery: () => {},
+				// Real implementation — `_rollInitiative` consumes a pending Battle Master
+				// check bonus. It only reads `this._pendingBattleMasterCheck`, so binding the
+				// real method keeps this exercising production code rather than a fake.
+				consumeBattleMasterCheckBonus: CharacterSheetCombat.prototype.consumeBattleMasterCheckBonus,
 			};
 			CharacterSheetCombat.prototype._rollInitiative.call(fakeThis, /* event */ undefined);
 		} finally {

@@ -237,6 +237,53 @@ character's reaction while combat tracking is active.
 
 ### Combat Stances (TGTT/Homebrew)
 
+#### Astral Self (Way of the Astral Self Monk)
+
+Four cooperating states — `astralArms` (level 3), `astralVisage` (6),
+`astralBody` (11) and `awakenedAstralSelf` (17). They demonstrate three
+patterns worth reusing:
+
+**State dependencies.** `astralBody` declares
+`requiresStates: ["astralArms", "astralVisage"]` and cannot be activated
+until both are present. It also declares `endConditions` naming its
+prerequisites, so it tears down automatically when either ends.
+
+```javascript
+astralBody: {
+    requiresStates: ["astralArms", "astralVisage"],
+    endConditions: ["Arms or Visage ends", "You are incapacitated or die"],
+    activationAction: "free",
+    resourceCost: 0,
+    trigger: {label: "Deflect Energy", actionType: "reaction", effectType: "damageReduction"},
+}
+```
+
+**Conditional, relative reach.** Astral Arms grants an attack whose reach is
+*five feet greater than normal, on your turn only* — not a flat ten feet. The
+granted attack carries `reachBonus` and `reachCondition` rather than an
+absolute `reach`, so it composes correctly with a Large creature, the Reach
+weapon property and any other reach modifier:
+
+```javascript
+{damage: martialArtsDice, damageType: "force", abilityMod: "wis",
+ reachBonus: 5, reachCondition: "onYourTurn", isMelee: true}
+```
+
+`getAttackReach(attack, {isOwnTurn})` returns `base + reachProperty +
+attackReachBonus`, zeroing the bonus when `reachCondition` is `onYourTurn`
+and the roll is off-turn. Prefer this shape over a hardcoded reach for any
+future feature that extends reach situationally.
+
+**Generic incapacitated/death teardown.** `_deactivateStatesForEndCondition()`
+reads each state's own `endConditions` strings and deactivates every active
+state whose conditions mention incapacitation, unconsciousness or death. It is
+called from `setCurrentHp()`, `setHp()`, `addCondition()` and
+`setConditions()`, so any state that documents such an end condition gets
+correct teardown for free — no per-feature hook. This replaced a hardcoded
+`deactivateState("hybridTransformation")` at 0 HP; Blood Hunter's Lycan
+transformation now tears down through the same path because its
+`endConditions` already listed `"Unconscious"`.
+
 #### Heavy Stance (Adamant Mountain)
 ```javascript
 heavyStance: {
