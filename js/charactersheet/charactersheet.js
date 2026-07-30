@@ -1228,7 +1228,9 @@ class CharacterSheetPage {
 		bind("charsheet-btn-multiclass", "click", () => this._levelUp?.showMulticlass());
 		bind("charsheet-btn-quickbuild", "click", () => this._quickBuild?.showQuickBuild());
 		bind("charsheet-btn-xp-add", "click", () => this._onXpAdd());
-		bind("charsheet-btn-xp-set", "click", () => this._onXpSet());
+		if (document.getElementById("charsheet-btn-xp-set")) {
+			document.getElementById("charsheet-btn-xp-set").addEventListener("click", () => this._onXpSet());
+		}
 		bind("charsheet-ipt-xp-add", "keydown", (e) => {
 			if (e.key !== "Enter") return;
 			e.preventDefault();
