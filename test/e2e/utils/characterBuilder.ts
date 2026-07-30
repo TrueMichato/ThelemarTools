@@ -217,6 +217,21 @@ export const PRESET_FULL_ARCANE_ARCHER_HOCHLING: CharacterPreset = {
 	subclassSource: "TGTT",
 };
 
+/** XPHB Battle Master Fighter */
+export const PRESET_FULL_BATTLE_MASTER_FIGHTER: CharacterPreset = {
+	race: "Aarakocra",
+	raceSource: "MPMM",
+	className: "Fighter",
+	classSource: "TGTT",
+	background: "Soldier",
+	bgSource: "PHB'24",
+	name: "Tarin Battlewise",
+	skillCount: 2,
+	masteryCount: 3,
+	subclassName: "Battle Master",
+	subclassSource: "XPHB",
+};
+
 /** 3. Bladesinger Wizard Tabaxi (TGTT) */
 export const PRESET_FULL_BLADESINGER_TABAXI: CharacterPreset = {
 	race: "Tabaxi",

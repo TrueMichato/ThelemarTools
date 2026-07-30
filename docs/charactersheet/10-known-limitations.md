@@ -173,6 +173,7 @@ The 2024 revision introduced significant changes. Current coverage:
 - ✅ Updated spell slot progression
 - ✅ Revised ability score improvements
 - ✅ Fighter XPHB Weapon Mastery slots + Tactical Master swap
+- ✅ Fighter XPHB Battle Master maneuver picks/swaps, scalable Superiority Dice pool, per-use STR/DEX DCs, maneuver Use controls, Know Your Enemy, and Relentless
 - ✅ Active state mutual exclusivity (Rage/Bladesong)
 - ✅ Rage breaks concentration on activation
 - ✅ Active state duration tracking with round counter + auto-expire

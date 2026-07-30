@@ -104,6 +104,26 @@ total = abilityMod + profBonus + weaponBonus + featureAttackBonus + stateAttackB
 
 All 8 XPHB properties tracked: Cleave, Graze, Nick, Push, Sap, Slow, Topple, Vex. Slots scale by class/level.
 
+### XPHB Battle Master Maneuvers
+
+- XPHB `MV:B` options use the generic optional-feature picker at cumulative
+  counts 3/5/7/9 (levels 3/7/10/15), with one optional replacement whenever
+  that progression grants new maneuvers.
+- `battleMasterSuperiorityDice` is a persistent short-rest resource whose max
+  scales 4/5/6 while preserving the number of spent dice during level changes.
+- Every known maneuver is a generic limited activatable linked to that pool.
+  Its descriptor defines action economy, save requirement, damage rider, and
+  whether Relentless can replace the resource spend.
+- Save maneuvers prompt between `maneuverSaveDcStr` and
+  `maneuverSaveDcDex` per use. Damage maneuvers arm an attack-bound, crit-aware
+  one-shot rider and enforce one maneuver per attack; Precision Attack adjusts
+  the latest attack; Rally reports an ally-only temporary-HP result.
+- Replacement snapshots preserve the maneuver they replaced so reload and
+  level-down replay produce the correct known set. Feature-choice proficiency
+  grants are source-tracked so Student of War tears down cleanly.
+- XPHB Relentless is tracked once per turn and supplies a d8 instead of
+  spending a superiority die. Turn advance resets the allowance.
+
 ## Spell Data Format
 
 ### Known/Prepared Spells (`_data.spellcasting.spellsKnown[]`)
