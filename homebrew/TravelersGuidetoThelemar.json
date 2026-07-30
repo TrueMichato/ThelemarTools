@@ -3321,6 +3321,22 @@
 	],
 	"spell": [
 		{
+			"name": "5e Aura of Purity",
+			"source": "TGTT",
+			"_copy": {
+				"name": "Aura of Purity",
+				"source": "PHB"
+			}
+		},
+		{
+			"name": "5e Sending",
+			"source": "TGTT",
+			"_copy": {
+				"name": "Sending",
+				"source": "PHB"
+			}
+		},
+		{
 			"name": "Goodberry",
 			"source": "TGTT",
 			"_copy": {
