@@ -8473,12 +8473,16 @@ class CharacterSheetPage {
 			return true;
 		}
 		const name = (feature?.name || "").toLowerCase();
+		if (CharacterSheetState.getBattleMasterManeuverDefinition(feature)) {
+			return this._pUseBattleMasterManeuver(feature, resource, resourceCost);
+		}
 		switch (name) {
 			case "healing hands": return this._pUseHealingHands(feature, resource, resourceCost);
 			case "guided strike": return this._pUseGuidedStrike(feature, resource, resourceCost);
 			case "forked tongue": return this._pOpenForkedTongueSwap(feature);
 			case "baleful interdict": return this._pUseBalefulInterdict(feature);
 			case "song of defense": return this._pUseSongOfDefense(feature);
+			case "know your enemy": return this._pUseKnowYourEnemy(feature, resource);
 		}
 		// (S2 contract) Generic save-prompt for any synthesized Divine Manifestation option that
 		// carries a save (_manifestationRequiresSave). Surfaces the DC + ability so the player
@@ -8486,6 +8490,130 @@ class CharacterSheetPage {
 		// (e.g. damage bursts) fall through to the generic limited-use pipeline unchanged.
 		if (feature?._manifestationRequiresSave) return this._pUseManifestationSaveOption(feature, resource, resourceCost);
 		return false;
+	}
+
+	async _pUseBattleMasterManeuver (feature, resource, resourceCost = 1) {
+		const definition = CharacterSheetState.getBattleMasterManeuverDefinition(feature);
+		if (!definition) return false;
+		if (definition.action !== "special" && !this._combat?.canUseBattleMasterAction?.(definition.action)) {
+			JqueryUtil.doToast({type: "warning", content: `${definition.action === "bonus" ? "Bonus Action" : "Reaction"} already used this round.`});
+			return true;
+		}
+		if (!this._combat?.canUseBattleMasterManeuver?.(definition)) {
+			JqueryUtil.doToast({type: "warning", content: "This maneuver needs an eligible attack, and only one maneuver can be used per attack."});
+			return true;
+		}
+
+		const calc = this._state.getFeatureCalculations();
+		const canUseRelentless = !!this._combat?.canUseRelentless?.();
+		const hasDie = !!resource && resource.current >= resourceCost;
+		if (!hasDie && !canUseRelentless) {
+			JqueryUtil.doToast({type: "warning", content: "No Superiority Dice remaining."});
+			return true;
+		}
+
+		let usedRelentless = !hasDie;
+		if (hasDie && canUseRelentless) {
+			const spendMode = await InputUiUtil.pGetUserEnum({
+				title: `${feature.name} — Choose Die`,
+				values: ["superiority", "relentless"],
+				fnDisplay: mode => mode === "superiority"
+					? `Spend one Superiority Die (${calc.superiorityDie})`
+					: "Relentless (free d8, once this turn)",
+				isResolveItem: true,
+			});
+			if (!spendMode) return true;
+			usedRelentless = spendMode === "relentless";
+		}
+
+		let dc = null;
+		if (definition.save) {
+			const ability = await InputUiUtil.pGetUserEnum({
+				title: `${feature.name} — Saving Throw DC`,
+				values: ["str", "dex"],
+				fnDisplay: abv => `${abv.toUpperCase()} — DC ${abv === "str" ? calc.maneuverSaveDcStr : calc.maneuverSaveDcDex}`,
+				isResolveItem: true,
+			});
+			if (!ability) return true;
+			dc = ability === "str" ? calc.maneuverSaveDcStr : calc.maneuverSaveDcDex;
+		}
+
+		let modifier = 0;
+		let modifierAbility = null;
+		if (definition.modifierChoice?.length) {
+			modifierAbility = await InputUiUtil.pGetUserEnum({
+				title: `${feature.name} — Ability Modifier`,
+				values: definition.modifierChoice,
+				fnDisplay: abv => {
+					const mod = this._state.getAbilityMod(abv);
+					return `${abv.toUpperCase()} (${mod >= 0 ? `+${mod}` : mod})`;
+				},
+				isResolveItem: true,
+			});
+			if (!modifierAbility) return true;
+			modifier = this._state.getAbilityMod(modifierAbility);
+		}
+
+		let target = "self";
+		if (definition.targetChoice?.length) {
+			target = await InputUiUtil.pGetUserEnum({
+				title: `${feature.name} — AC Recipient`,
+				values: definition.targetChoice,
+				fnDisplay: value => value === "self" ? "Your character" : "The other creature",
+				isResolveItem: true,
+			});
+			if (!target) return true;
+		}
+
+		if (!usedRelentless) this._state.setResourceCurrent(resource.id, resource.current - resourceCost);
+		const die = usedRelentless ? "d8" : calc.superiorityDie;
+		const sides = parseInt(die.slice(1));
+		const roll = typeof RollerUtil !== "undefined" ? RollerUtil.randomise(sides) : Math.ceil(Math.random() * sides);
+		this._combat?.applyBattleMasterManeuver?.({feature, definition, roll, die, dc, modifier, modifierAbility, target, usedRelentless});
+
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderActiveStates();
+		this._features?.render?.();
+		this._combat?.renderCombatResources?.();
+		return true;
+	}
+
+	async _pUseKnowYourEnemy (feature, resource) {
+		if (!resource) return false;
+		if (!this._combat?.canUseBattleMasterAction?.("bonus")) {
+			JqueryUtil.doToast({type: "warning", content: "Bonus Action already used this round."});
+			return true;
+		}
+		if (resource.current <= 0) {
+			const superiority = this._state.getSuperiorityDice?.();
+			if (!superiority?.current) {
+				JqueryUtil.doToast({type: "warning", content: "Know Your Enemy has no uses remaining."});
+				return true;
+			}
+			const restore = await InputUiUtil.pGetUserEnum({
+				title: "Know Your Enemy",
+				values: ["restore"],
+				fnDisplay: () => "Spend one Superiority Die to restore and use Know Your Enemy",
+				isResolveItem: true,
+			});
+			if (!restore) return true;
+			if (!this._state.restoreKnowYourEnemyWithSuperiorityDie()) return true;
+		}
+
+		const live = this._state.getResources().find(r => r.id === resource.id);
+		if (!live?.current) return true;
+		this._state.setResourceCurrent(live.id, live.current - 1);
+		this._combat?.consumeBattleMasterAction?.("bonus");
+		JqueryUtil.doToast({
+			type: "info",
+			content: "Know Your Enemy: learn the target's Immunities, Resistances, and Vulnerabilities.",
+			autoHideTime: 10000,
+		});
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._features?.render?.();
+		return true;
 	}
 
 	/** (S2 contract) Spend a save-requiring Divine Manifestation option and surface its save DC. */
@@ -11337,17 +11465,19 @@ class CharacterSheetPage {
 	 * Show a small modal asking the player to pick ONE option for a pending feature
 	 * choice. Returns the selection (skill key string for kind "skill", or a
 	 * `{name, source}` object for kind "cantrip"/"subfeature"), or `null` if deferred.
-	 * @param {{id: string, featureName?: string, kind: "skill"|"cantrip"|"subfeature", options: Array}} choice
+	 * @param {{id: string, featureName?: string, kind: "skill"|"tool"|"cantrip"|"subfeature", options: Array}} choice
 	 * @returns {Promise<string|{name: string, source: string}|null>}
 	 */
 	async _pPickFeatureChoice (choice) {
 		if (!choice || !Array.isArray(choice.options) || !choice.options.length) return null;
 		const isSkill = choice.kind === "skill";
+		const isTool = choice.kind === "tool";
 		const isSubfeature = choice.kind === "subfeature";
-		const kindLabel = isSkill ? "a Skill Proficiency" : isSubfeature ? "an Option" : "a Cantrip";
+		const kindLabel = isSkill ? "a Skill Proficiency" : isTool ? "an Artisan's Tool" : isSubfeature ? "an Option" : "a Cantrip";
 
 		const optionLabel = (opt) => {
 			if (isSkill) return this._formatSkillKeyLabel(opt);
+			if (isTool) return String(opt);
 			const src = opt.source ? ` <span class="ve-muted ve-small">(${(Parser.sourceJsonToAbv?.(opt.source) || opt.source)})</span>` : "";
 			// Subfeature options carry a short description (Divine Order roles, specialties,
 			// principles, …) — surface it beneath the name so the pick is informed.
@@ -12238,7 +12368,8 @@ class CharacterSheetPage {
 		// Buff dice (e.g. Guidance's 1d4) rolled into the total. Match against the
 		// underlying ability check so generic "check" buffs apply to skills.
 		const stateDice = this._rollStateDiceBonuses(checkType);
-		const totalWithDice = total + (stateDice ? stateDice.total : 0);
+		const maneuverBonus = this._combat?.consumeBattleMasterCheckBonus?.(`check:${overrideAbility || skillAbility}:${skillKey}`);
+		const totalWithDice = total + (stateDice ? stateDice.total : 0) + (maneuverBonus?.roll || 0);
 
 		// Thelemar crit visual cues
 		let resultClass = "";
@@ -12255,6 +12386,11 @@ class CharacterSheetPage {
 		}
 		if (redCant.note) {
 			resultNote = resultNote ? `${resultNote}\n${redCant.note}` : redCant.note;
+		}
+		if (maneuverBonus) {
+			resultNote = resultNote
+				? `${resultNote}\n+${maneuverBonus.roll} ${maneuverBonus.name}`
+				: `+${maneuverBonus.roll} ${maneuverBonus.name}`;
 		}
 
 		const appliedCondsStr = this._formatAppliedConditionalsNote(appliedConditionals);
@@ -12419,7 +12555,8 @@ class CharacterSheetPage {
 
 		// Buff dice (e.g. Gift of Alacrity's 1d8) rolled into the total.
 		const stateDice = this._rollStateDiceBonuses("initiative");
-		const totalWithDice = total + (stateDice ? stateDice.total : 0);
+		const maneuverBonus = this._combat?.consumeBattleMasterCheckBonus?.("initiative");
+		const totalWithDice = total + (stateDice ? stateDice.total : 0) + (maneuverBonus?.roll || 0);
 
 		// Thelemar crit visual cues
 		let resultClass = "";
@@ -12433,7 +12570,8 @@ class CharacterSheetPage {
 		}
 
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
-		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
+		const diceBonusStr = (stateDice ? ` ${stateDice.breakdownStr}` : "")
+			+ (maneuverBonus ? ` + ${maneuverBonus.roll} [${maneuverBonus.name}]` : "");
 		await this.pAnimateD20(rollResult);
 		this._showDiceResult(
 			`Initiative${this._getModeLabel(rollResult.mode)}`,

@@ -147,13 +147,24 @@ survivorHealing: "5+CON",
 **Battle Master**
 ```javascript
 superiorityDice: 4 | 5 | 6,       // L3: 4, L7: 5, L15: 6
-superiorityDieSize: "d8" | "d10" | "d12",  // L3: d8, L10: d10, L18: d12
-maneuverSaveDc: 8 + profBonus + STR|DEX,
+superiorityDie: "d8" | "d10" | "d12",  // L3: d8, L10: d10, L18: d12
+maneuverSaveDcStr: 8 + profBonus + STR,
+maneuverSaveDcDex: 8 + profBonus + DEX,
+maneuverSaveDc: Math.max(maneuverSaveDcStr, maneuverSaveDcDex), // display fallback
 maneuversKnown: 3 | 5 | 7 | 9,    // Scales with level
 hasStudentOfWar: true,            // Level 3+
-hasKnowYourEnemy: true,           // Level 7+ (PHB) or 9+ (XPHB)
+hasKnowYourEnemy: true,            // Level 7+
 hasRelentless: true,              // Level 15+
 ```
+
+XPHB maneuver picks use the generic optional-feature progression and can
+replace one known maneuver at each maneuver-gain level. Each selected maneuver
+is rendered as a usable ability linked to the persistent **Superiority Dice**
+short-rest pool. Save maneuvers prompt for Strength or Dexterity on every use;
+attack riders are bound to one attack and double their die on a critical hit,
+Precision Attack adjusts the latest attack, and Rally surfaces the ally's
+temporary HP result. XPHB Relentless supplies one free d8 maneuver per turn
+rather than restoring a die on initiative.
 
 **Eldritch Knight**
 ```javascript

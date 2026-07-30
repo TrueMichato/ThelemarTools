@@ -3776,6 +3776,36 @@ class CharacterSheetState {
 	/** Extra reach granted by a weapon's "Reach" property, in feet. */
 	static REACH_PROPERTY_BONUS = 5;
 
+	static BATTLE_MASTER_MANEUVERS = {
+		"ambush": {action: "special", rollKind: "check", rollTargets: ["initiative", "check:dex:stealth"], appliesTo: "Initiative or Stealth check"},
+		"bait and switch": {action: "special", rollKind: "ac", targetChoice: ["self", "ally"], appliesTo: "AC until the start of your next turn"},
+		"commander's strike": {action: "special", rollKind: "allyDamage", appliesTo: "ally's reaction attack damage"},
+		"commanding presence": {action: "special", rollKind: "check", rollTargets: ["check:cha:intimidation", "check:cha:performance", "check:cha:persuasion"], appliesTo: "Intimidation, Performance, or Persuasion check"},
+		"disarming attack": {action: "special", rollKind: "damage", attackBound: true, save: "str", appliesTo: "attack damage; target drops an object on a failed save"},
+		"distracting strike": {action: "special", rollKind: "damage", attackBound: true, appliesTo: "attack damage; next ally attack has Advantage"},
+		"evasive footwork": {action: "bonus", rollKind: "ac", appliesTo: "AC until the start of your next turn"},
+		"feinting attack": {action: "bonus", rollKind: "damage", damageTiming: "nextAttack", appliesTo: "next attack damage; next attack has Advantage"},
+		"goading attack": {action: "special", rollKind: "damage", attackBound: true, save: "wis", appliesTo: "attack damage; target has Disadvantage against others on a failed save"},
+		"lunging attack": {action: "bonus", rollKind: "damage", damageTiming: "nextAttack", appliesTo: "next melee attack damage after a Dash"},
+		"maneuvering attack": {action: "special", rollKind: "damage", attackBound: true, appliesTo: "attack damage; ally can move with its Reaction"},
+		"menacing attack": {action: "special", rollKind: "damage", attackBound: true, save: "wis", appliesTo: "attack damage; target is Frightened on a failed save"},
+		"parry": {action: "reaction", rollKind: "reduction", modifierChoice: ["str", "dex"], appliesTo: "damage reduction"},
+		"precision attack": {action: "special", rollKind: "attack", attackBound: true, appliesTo: "the triggering attack roll"},
+		"pushing attack": {action: "special", rollKind: "damage", attackBound: true, save: "str", appliesTo: "attack damage; target is pushed on a failed save"},
+		"rally": {action: "bonus", rollKind: "allyTempHp", appliesTo: "an ally's temporary HP"},
+		"riposte": {action: "reaction", rollKind: "damage", damageTiming: "nextAttack", appliesTo: "reaction attack damage"},
+		"sweeping attack": {action: "special", rollKind: "secondaryDamage", attackBound: true, appliesTo: "a second creature's damage"},
+		"tactical assessment": {action: "special", rollKind: "check", rollTargets: ["check:int:history", "check:int:investigation", "check:wis:insight"], appliesTo: "History, Investigation, or Insight check"},
+		"trip attack": {action: "special", rollKind: "damage", attackBound: true, save: "str", appliesTo: "attack damage; target is Prone on a failed save"},
+	};
+
+	static getBattleMasterManeuverDefinition (feature) {
+		if (!feature?.optionalFeatureTypes?.includes("MV:B")) return null;
+		if (feature.source !== Parser.SRC_XPHB) return null;
+		const definition = this.BATTLE_MASTER_MANEUVERS[(feature.name || "").toLowerCase()];
+		return definition ? {...definition} : null;
+	}
+
 	constructor () {
 		this._data = this._getDefaultState();
 		// Optional full spell database, injected by the controller after data
@@ -4576,6 +4606,7 @@ class CharacterSheetState {
 			// `seedSubclassFeatureChoices` from re-offering the same skill pick on every
 			// later level-up (the catch-up backfill re-lists earlier subclass features).
 			fulfilledFeatureSkillChoices: [],
+			fulfilledFeatureToolChoices: [],
 			// Durable record of chosen structured sub-features (Divine Order role,
 			// Blessed Strikes option, Principles of Devotion, Specialties, …) so higher-
 			// level upgrades can find earlier picks (e.g. Improved Blessed Strikes L14
@@ -4653,6 +4684,7 @@ class CharacterSheetState {
 	}
 
 	toJson () {
+		this._ensureBattleMasterSuperiorityDice();
 		return MiscUtil.copyFast(this._data);
 	}
 
@@ -6945,6 +6977,7 @@ class CharacterSheetState {
 		this.calculateSpellSlots();
 		// Apply class feature effects (resistances, immunities, proficiencies, etc.)
 		this.applyClassFeatureEffects();
+		this._ensureBattleMasterSuperiorityDice();
 		// Recalculate companion stats (HP, AC, etc. may scale with level/PB)
 		this.recalculateAllCompanions();
 	}
@@ -6971,6 +7004,7 @@ class CharacterSheetState {
 		this.calculateSpellSlots();
 		// Re-apply class feature effects for new level
 		this.applyClassFeatureEffects();
+		this._ensureBattleMasterSuperiorityDice();
 
 		return true;
 	}
@@ -6985,6 +7019,7 @@ class CharacterSheetState {
 		this.calculateSpellSlots();
 		// Re-apply class feature effects after class removal
 		this.applyClassFeatureEffects();
+		this._ensureBattleMasterSuperiorityDice();
 	}
 
 	/**
@@ -7402,6 +7437,7 @@ class CharacterSheetState {
 
 		// 13. Remove history entry
 		this.removeLevelHistoryEntry(targetLevel);
+		if (choices.optionalFeatures?.some(feature => feature?._replaces?.name)) this._reapplyHistoryOptionalFeatures();
 
 		// 13b. Re-index higher total levels down by one so an otherwise-complete history stays
 		//      contiguous (1..N) and the character is not flipped to "legacy". No-op for the
@@ -14215,17 +14251,33 @@ class CharacterSheetState {
 	// =========================================================================
 
 	getPendingFeatureChoices () {
+		this._ensureStudentOfWarChoices();
 		return [...(this._data.pendingFeatureChoices || [])];
 	}
 
 	hasPendingFeatureChoices () {
+		this._ensureStudentOfWarChoices();
 		return (this._data.pendingFeatureChoices?.length || 0) > 0;
+	}
+
+	_ensureStudentOfWarChoices () {
+		const feature = this._data.features?.find(f => (f.name || "").toLowerCase() === "student of war" && f.source === "XPHB");
+		if (!feature) return;
+		const fighterSkills = ["acrobatics", "animal handling", "athletics", "history", "insight", "intimidation", "persuasion", "perception", "survival"];
+		const artisanTools = ["Alchemist's Supplies", "Brewer's Supplies", "Calligrapher's Supplies", "Carpenter's Tools", "Cartographer's Tools", "Cobbler's Tools", "Cook's Utensils", "Glassblower's Tools", "Jeweler's Tools", "Leatherworker's Tools", "Mason's Tools", "Painter's Supplies", "Potter's Tools", "Smith's Tools", "Tinker's Tools", "Weaver's Tools", "Woodcarver's Tools"];
+		if (!this.hasFulfilledFeatureSkillChoice(feature.name)) {
+			this.addPendingFeatureChoice({featureName: feature.name, featureId: feature.id, kind: "skill", options: fighterSkills, count: 1});
+		}
+		const toolFulfilled = (this._data.fulfilledFeatureToolChoices || []).includes(feature.name.toLowerCase());
+		if (!toolFulfilled) {
+			this.addPendingFeatureChoice({featureName: feature.name, featureId: feature.id, kind: "tool", options: artisanTools, count: 1});
+		}
 	}
 
 	/**
 	 * Queue a prose-parsed feature choice. Deduped by featureId + kind + option
 	 * signature so respec/level-up replays don't stack duplicate prompts.
-	 * @param {{featureName?: string, featureId?: string, featureSource?: string, level?: number, kind: "skill"|"cantrip"|"subfeature", options: Array, count?: number, unique?: boolean}} choice
+	 * @param {{featureName?: string, featureId?: string, featureSource?: string, level?: number, kind: "skill"|"tool"|"cantrip"|"subfeature", options: Array, count?: number, unique?: boolean}} choice
 	 * @returns {boolean} True if a new choice was queued.
 	 */
 	addPendingFeatureChoice (choice) {
@@ -14317,13 +14369,31 @@ class CharacterSheetState {
 			if (choice.expertiseIfProficient && (this._data.skillProficiencies?.[skillKey] || 0) >= 1) {
 				this.setSkillProficiency(skillKey, 2);
 			} else {
-				this.addSkillProficiency(skillKey);
+				const trackSource = `feature-choice:${choice.featureId || choice.featureName}`;
+				const existingLevel = this._data.skillProficiencies?.[skillKey] || 0;
+				if (existingLevel >= 1 && !this._data.grantedProficiencies?.skills?.[skillKey]?.length) {
+					this._trackGrantedProficiency("skills", skillKey, "base");
+				}
+				if (existingLevel < 1) this.addSkillProficiency(skillKey);
+				this._trackGrantedProficiency("skills", skillKey, trackSource);
 			}
 			// Record that this feature's seeded skill choice is resolved so a later
 			// level-up (which re-lists earlier subclass features via the catch-up
 			// backfill) does not re-offer it. Skill proficiencies carry no source, so
 			// this marker is the only durable proof of fulfillment.
 			this._recordFulfilledFeatureSkillChoice(choice.featureName);
+		} else if (choice.kind === "tool") {
+			const tool = String(selection);
+			const toolKey = tool.toLowerCase();
+			const trackSource = `feature-choice:${choice.featureId || choice.featureName}`;
+			if (this.hasToolProficiency(tool) && !this._data.grantedProficiencies?.tools?.[toolKey]?.length) {
+				this._trackGrantedProficiency("tools", toolKey, "base");
+			}
+			this.addToolProficiency(tool);
+			this._trackGrantedProficiency("tools", toolKey, trackSource);
+			if (!Array.isArray(this._data.fulfilledFeatureToolChoices)) this._data.fulfilledFeatureToolChoices = [];
+			const key = String(choice.featureName || "").toLowerCase();
+			if (key && !this._data.fulfilledFeatureToolChoices.includes(key)) this._data.fulfilledFeatureToolChoices.push(key);
 		} else if (choice.kind === "cantrip") {
 			const sel = typeof selection === "string"
 				? choice.options.find(o => o.name?.toLowerCase() === selection.toLowerCase())
@@ -14849,6 +14919,25 @@ class CharacterSheetState {
 		if (!feature) return {claimedSkills, claimedSpells};
 
 		const {skillChoices, cantripChoices} = FeatureChoiceParser.extractChoices(feature);
+		if ((feature.name || "").toLowerCase() === "student of war" && feature.source === "XPHB") {
+			const fighterSkills = ["acrobatics", "animal handling", "athletics", "history", "insight", "intimidation", "persuasion", "perception", "survival"];
+			const artisanTools = ["Alchemist's Supplies", "Brewer's Supplies", "Calligrapher's Supplies", "Carpenter's Tools", "Cartographer's Tools", "Cobbler's Tools", "Cook's Utensils", "Glassblower's Tools", "Jeweler's Tools", "Leatherworker's Tools", "Mason's Tools", "Painter's Supplies", "Potter's Tools", "Smith's Tools", "Tinker's Tools", "Weaver's Tools", "Woodcarver's Tools"];
+			this.addPendingFeatureChoice({
+				featureName: feature.name,
+				featureId,
+				kind: "skill",
+				options: fighterSkills,
+				count: 1,
+			});
+			this.addPendingFeatureChoice({
+				featureName: feature.name,
+				featureId,
+				kind: "tool",
+				options: artisanTools,
+				count: 1,
+			});
+			fighterSkills.forEach(skill => claimedSkills.add(skill));
+		}
 
 		// A racial trait's prose may restate a skill choice that is ALSO encoded
 		// structurally on the race as `skillProficiencies.choose` — the authoritative
@@ -17724,18 +17813,24 @@ class CharacterSheetState {
 						const maneuversKnown = level >= 15 ? 9 : level >= 10 ? 7 : level >= 7 ? 5 : 3;
 						calculations.maneuversKnown = maneuversKnown;
 
-						// Maneuver save DC
-						const maneuverDc = 8 + profBonus + Math.max(this.getAbilityMod("str"), this.getAbilityMod("dex")) - exhaustionPenalty;
-						calculations.maneuverSaveDc = maneuverDc;
+						// Maneuver save DC. XPHB lets the player choose STR or DEX for
+						// each maneuver, so preserve both values for the use-time picker.
+						const maneuverSaveDcStr = 8 + profBonus + this.getAbilityMod("str") - exhaustionPenalty;
+						const maneuverSaveDcDex = 8 + profBonus + this.getAbilityMod("dex") - exhaustionPenalty;
+						calculations.maneuverSaveDcStr = maneuverSaveDcStr;
+						calculations.maneuverSaveDcDex = maneuverSaveDcDex;
+						calculations.maneuverSaveDc = Math.max(maneuverSaveDcStr, maneuverSaveDcDex);
 
-						// Know Your Enemy (level 7, PHB only)
-						if (!isBM2024 && level >= 7) {
+						// Know Your Enemy is available from level 7 in both editions.
+						if (level >= 7) {
 							calculations.hasKnowYourEnemy = true;
 						}
 
-						// Relentless (level 15): Regain 1 die on initiative if none
+						// XPHB Relentless uses a free d8 once per turn. PHB's version
+						// instead restores one die when initiative is rolled with none.
 						if (level >= 15) {
 							calculations.hasRelentless = true;
+							calculations.relentlessDie = isBM2024 ? "d8" : null;
 						}
 					}
 
@@ -29883,7 +29978,71 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Resources
-	getResources () { return [...this._data.resources]; }
+	getResources () {
+		this._ensureBattleMasterSuperiorityDice();
+		return [...this._data.resources];
+	}
+
+	/**
+	 * Ensure an XPHB/PHB Battle Master's shared maneuver pool exists and tracks
+	 * level-based maximum changes without gifting back already-expended dice.
+	 */
+	_ensureBattleMasterSuperiorityDice () {
+		const fighter = this._data.classes?.find(cls =>
+			(cls.name || "").toLowerCase() === "fighter"
+			&& (cls.subclass?.shortName || "").toLowerCase() === "battle master",
+		);
+		if (!fighter || (fighter.level || 0) < 3) {
+			this._data.resources = (this._data.resources || []).filter(r => r.resourceType !== "battleMasterSuperiorityDice");
+			return null;
+		}
+
+		const max = fighter.level >= 15 ? 6 : fighter.level >= 7 ? 5 : 4;
+		let resource = this._data.resources?.find(r => r.name === "Superiority Dice");
+		if (!resource) {
+			resource = {
+				id: CryptUtil.uid(),
+				name: "Superiority Dice",
+				current: max,
+				max,
+				recharge: "short",
+				resourceType: "battleMasterSuperiorityDice",
+			};
+			this._data.resources.push(resource);
+			return resource;
+		}
+
+		const previousMax = resource.max ?? max;
+		const previousCurrent = resource.current ?? previousMax;
+		const expended = Math.max(0, previousMax - previousCurrent);
+		resource.current = Math.max(0, Math.min(max, max - expended));
+		resource.max = max;
+		resource.recharge = "short";
+		resource.resourceType = "battleMasterSuperiorityDice";
+		return resource;
+	}
+
+	getSuperiorityDice () {
+		const resource = this._ensureBattleMasterSuperiorityDice();
+		return resource ? {...resource} : null;
+	}
+
+	useSuperiorityDie () {
+		const resource = this._ensureBattleMasterSuperiorityDice();
+		if (!resource || resource.current <= 0) return false;
+		resource.current--;
+		return true;
+	}
+
+	restoreKnowYourEnemyWithSuperiorityDie () {
+		const feature = this._data.features?.find(f => (f.name || "").toLowerCase() === "know your enemy");
+		if (!feature?.uses || feature.uses.current >= feature.uses.max) return false;
+		if (!this.useSuperiorityDie()) return false;
+		feature.uses.current++;
+		const resource = this._data.resources?.find(r => r.featureId === feature.id || r.name === feature.name);
+		if (resource) resource.current = feature.uses.current;
+		return true;
+	}
 
 	/**
 	 * (R23 #6) The canonical set of GENERIC resource pools to surface in the bare
@@ -31684,6 +31843,7 @@ class CharacterSheetState {
 
 			for (const snapshot of snapshots) {
 				if (!snapshot?.name) continue;
+				if (snapshot._replaces?.name) this.removeFeature(snapshot._replaces.name, snapshot._replaces.source);
 
 				const optionalFeatureTypes = snapshot.optionalFeatureTypes
 					|| (typeof snapshot.type === "string" ? snapshot.type.split("_") : []);
@@ -31974,6 +32134,7 @@ class CharacterSheetState {
 			const grantedMethods = CharacterSheetClassUtils.resolveGrantedCombatMethods(feature, this._combatMethodCatalog);
 			grantedMethods.forEach(method => this.addFeature(method));
 		}
+		if ((feature.name || "").toLowerCase() === "combat superiority") this._ensureBattleMasterSuperiorityDice();
 
 		// Return true when a NEW feature was added (false above on dedupe). Callers that
 		// pair a non-idempotent side effect with the add (e.g. ASI base-score writes in the
@@ -33732,6 +33893,19 @@ class CharacterSheetState {
 
 		// Remove associated resource if it was auto-added
 		if (feature) {
+			const choiceSource = `feature-choice:${feature.id}`;
+			for (const [type, remove] of [
+				["skills", name => this.setSkillProficiency(name, 0)],
+				["tools", name => this.removeToolProficiency(name)],
+			]) {
+				for (const name of Object.keys(this._data.grantedProficiencies?.[type] || {})) {
+					if (!this._data.grantedProficiencies[type][name].includes(choiceSource)) continue;
+					if (this._untrackGrantedProficiency(type, name, choiceSource)) remove(name);
+				}
+			}
+			const featureKey = feature.name.toLowerCase();
+			this._data.fulfilledFeatureSkillChoices = (this._data.fulfilledFeatureSkillChoices || []).filter(name => name !== featureKey);
+			this._data.fulfilledFeatureToolChoices = (this._data.fulfilledFeatureToolChoices || []).filter(name => name !== featureKey);
 			this._data.resources = this._data.resources.filter(r => r.featureId !== feature.id && r.name !== feature.name);
 			// Remove associated attack if it was auto-added (natural weapon)
 			this._data.attacks = this._data.attacks.filter(a => a.featureId !== feature.id && a.sourceFeature !== feature.name);
@@ -43326,6 +43500,24 @@ class CharacterSheetState {
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 		const name = feature.name?.toLowerCase() || "";
 
+		const maneuver = this.getBattleMasterManeuverDefinition(feature);
+		if (maneuver) {
+			return {
+				stateTypeId: "custom",
+				isCustom: true,
+				isDataDriven: true,
+				interactionMode: "limited",
+				isToggle: false,
+				isInstant: true,
+				matchedBy: "battleMasterManeuver",
+				activationAction: maneuver.action,
+				resourceName: "Superiority Dice",
+				resourceCost: 1,
+				superiorityDiceCost: 1,
+				maneuver,
+			};
+		}
+
 		// ===== DATA-DRIVEN ACTIVATABLE SUPPORT =====
 		// If the feature has explicit activatable data, use that directly
 		if (feature.activatable) {
@@ -45026,6 +45218,9 @@ class CharacterSheetState {
 				if (biResource) {
 					resource = {...biResource, cost: activationInfo.bardicInspirationCost};
 				}
+			} else if (activationInfo.superiorityDiceCost) {
+				const superiorityResource = resources.find(r => r.name === "Superiority Dice");
+				if (superiorityResource) resource = {...superiorityResource, cost: activationInfo.superiorityDiceCost};
 			} else if (stateType?.resourceName) {
 				// Check state type's default resource
 				// Special case: Stamina is tracked separately, not in resources array

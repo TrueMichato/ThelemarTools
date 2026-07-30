@@ -317,6 +317,7 @@ class CharacterSheetQuickBuild {
 				classSource,
 				classLevel,
 				classData,
+				subclass,
 				features,
 				needsSubclass,
 				hasAsi,
@@ -2407,6 +2408,7 @@ class CharacterSheetQuickBuild {
 						className: analysis.className,
 						classSource: analysis.classSource,
 						classData: analysis.classData,
+						subclassSource: analysis.subclass?.source,
 						maxClassLevel: analysis.classLevel,
 					};
 				}
@@ -2654,12 +2656,21 @@ class CharacterSheetQuickBuild {
 		const settings = this._state.getSettings() || {};
 		const showAll = settings.showAllOptFeatureVersions || false;
 		const enableTgtt = !!settings.enableTgtt;
-		const classSource = gain?.classSource || null;
+		const classSource = gain?.classSource || gain?.classData?.source || null;
+		const progressionSource = gain.subclassSource
+			|| this._classAllocations.find(alloc => alloc.className === gain.className && (!classSource || alloc.classSource === classSource))?.subclass?.source
+			|| this._state.getClasses()
+				.find(cls => cls.name === gain.className && (!classSource || cls.source === classSource))
+				?.subclass?.source || classSource;
 		const editionFiltered = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(
-			CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(filtered, {showAll}),
+			CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(filtered, {showAll, preserveFeatureTypes: ["MV:B"]}),
 			{enableTgtt, classSource},
 		);
-		const sourceFiltered = this._page.filterByAllowedSources(editionFiltered);
+		const sourceFiltered = CharacterSheetClassUtils.filterOptionalFeaturesForProgressionSource(
+			this._page.filterByAllowedSources(editionFiltered),
+			gain.featureTypes,
+			progressionSource,
+		);
 
 		const existingCountMap = new Map();
 		for (const existing of existingOptFeatures) {
