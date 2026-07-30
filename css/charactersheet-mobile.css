@@ -1036,6 +1036,10 @@
 	.charsheet__companion-stat {
 		min-height: 36px;
 	}
+
+	.charsheet__companion-quick-rolls {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
 }
 
 /* ========================================================================

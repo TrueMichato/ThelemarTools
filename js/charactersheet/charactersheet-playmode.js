@@ -2662,6 +2662,12 @@ export class CharacterSheetPlayMode {
 			// ── Interactive controls (B4) ────────────────────────────
 			const controls = this._ce("div", "pm-companion__controls", card);
 
+			const initiative = this._state.getCompanionInitiative?.(comp.id) || 0;
+			const initiativeBtn = this._ce("button", "pm-companion__ctrl-btn", controls);
+			this._setIconLabel(initiativeBtn, "initiative", ` Initiative ${this._fmtMod(initiative)}`);
+			initiativeBtn.title = `Roll initiative for ${comp.customName || comp.name || "companion"}`;
+			initiativeBtn.addEventListener("click", () => this._page._rollCompanionInitiative?.(comp));
+
 			// Heal button
 			const healBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--heal", controls);
 			this._setIconLabel(healBtn, "heal", " Heal");
@@ -2685,7 +2691,10 @@ export class CharacterSheetPlayMode {
 			const compNoteBtn = this._ce("button", `pm-companion__ctrl-btn pm-note-btn${compNote ? " pm-note-btn--active" : ""}`, controls);
 			this._setIconLabel(compNoteBtn, "edit", " Note");
 			compNoteBtn.title = compNote ? `Note: ${compNote.slice(0, 60)}${compNote.length > 60 ? "…" : ""}` : "Add note";
-			compNoteBtn.addEventListener("click", () => this._showEntityNoteModal("companion", comp.id, comp.name || "Companion", () => this._openDrawerByType("companions")));
+			compNoteBtn.addEventListener("click", () => this._showEntityNoteModal("companion", comp.id, comp.name || "Companion", () => {
+				this._persistCompanionMutation();
+				this._openDrawerByType("companions");
+			}));
 
 			// Dismiss button
 			const dismissBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--dismiss", controls);
@@ -2694,6 +2703,7 @@ export class CharacterSheetPlayMode {
 			dismissBtn.addEventListener("click", () => {
 				if (!confirm(`Remove ${comp.name || "this companion"}?`)) return;
 				this._state.removeCompanion(comp.id);
+				this._persistCompanionMutation();
 				this._logActivity("companion", `Dismissed ${comp.name || "companion"}`);
 				this._openDrawerByType("companions");
 			});
@@ -2714,6 +2724,7 @@ export class CharacterSheetPlayMode {
 					const val = parseInt(hpInput.value);
 					if (!isNaN(val)) {
 						this._state.setCompanionHp(comp.id, val);
+						this._persistCompanionMutation();
 						this._logActivity("companion", `${comp.name} HP → ${val}/${comp.hp.max}`);
 					}
 				});
@@ -2837,19 +2848,23 @@ export class CharacterSheetPlayMode {
 	}
 
 	/** D7: Delegate to existing companion/summon pickers, or show add-custom fallback */
-	_addBuiltinCompanion (type) {
+	async _addBuiltinCompanion (type) {
+		const hasFindGreaterSteed = (this._state.getSpells?.() || [])
+			.some(spell => spell.name?.toLowerCase() === "find greater steed");
 		const typeToHandler = {
-			"familiar": "_showFamiliarPicker",
-			"beast-companion": "_showBeastCompanionPicker",
-			"drake": "_showDrakePicker",
-			"steel-defender": "_showSteelDefenderPicker",
-			"wild-shape": "_showWildShapePicker",
-			"wild-companion": "_showWildCompanionPicker",
-			"find-steed": "_showFindSteedPicker",
+			"familiar": {name: "_onSummonFamiliar", args: []},
+			"beast-companion": {name: "_onSummonBeastCompanion", args: []},
+			"drake": {name: "_onSummonDrake", args: []},
+			"steel-defender": {name: "_onSummonSteelDefender", args: []},
+			"wild-shape": {name: "_onWildShape", args: []},
+			"wild-companion": {name: "_onWildCompanion", args: []},
+			"find-steed": {name: "_onFindSteed", args: [hasFindGreaterSteed]},
 		};
-		const handlerName = typeToHandler[type];
-		if (handlerName && this._page._companions?.[handlerName]) {
-			this._page._companions[handlerName]();
+		const handlerMeta = typeToHandler[type];
+		const handler = handlerMeta ? this._page[handlerMeta.name] : null;
+		if (typeof handler === "function") {
+			await handler.call(this._page, ...handlerMeta.args);
+			this._openDrawerByType("companions");
 		} else {
 			// Fallback: open custom modal pre-filled with type info
 			const typeLabels = {
@@ -2928,6 +2943,7 @@ export class CharacterSheetPlayMode {
 				ac: parseInt(acInput.value) || 12,
 				speed: {walk: parseInt(speedInput.value) || 30},
 			});
+			this._persistCompanionMutation();
 			this._logActivity("companion", `Added companion: ${name}`);
 			close();
 			this._openDrawerByType("companions");
@@ -2935,6 +2951,10 @@ export class CharacterSheetPlayMode {
 
 		document.body.appendChild(overlay);
 		nameInput.focus();
+	}
+
+	_persistCompanionMutation () {
+		return this._page.saveCharacter?.();
 	}
 
 	// ─── Favorites System ───────────────────────────────────────
@@ -3883,6 +3903,7 @@ export class CharacterSheetPlayMode {
 					this._logActivity("damage", `${comp.name} took ${hpLost} damage → ${remaining} HP${suffix}`);
 				}
 			}
+			this._persistCompanionMutation();
 			close();
 			this._openDrawerByType("companions");
 		};
@@ -3990,7 +4011,10 @@ export class CharacterSheetPlayMode {
 		this._setIconLabel(noteBtn, "edit", " Note");
 		noteBtn.addEventListener("click", () => {
 			overlay.remove();
-			this._showEntityNoteModal("companion", comp.id, comp.name || "Companion", () => this._openDrawerByType("companions"));
+			this._showEntityNoteModal("companion", comp.id, comp.name || "Companion", () => {
+				this._persistCompanionMutation();
+				this._openDrawerByType("companions");
+			});
 		});
 		const closeBtn = this._ce("button", "pm-modal__btn pm-modal__btn--cancel", btnRow);
 		closeBtn.textContent = "Close";

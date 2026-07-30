@@ -1,11 +1,161 @@
 
 import "./setup.js"; // Import first to set up mocks
+import {jest} from "@jest/globals";
+import {CharacterSheetPlayMode} from "../../../js/charactersheet/charactersheet-playmode.js";
 
 let CharacterSheetState;
 let state;
 
 beforeAll(async () => {
 	CharacterSheetState = (await import("../../../js/charactersheet/charactersheet-state.js")).CharacterSheetState;
+});
+
+describe("Companion Play Mode persistence", () => {
+	const makeNode = (tag) => ({
+		tag,
+		children: [],
+		style: {},
+		classList: {add () {}, remove () {}, toggle () {}, contains () { return false; }},
+		_handlers: {},
+		appendChild (child) {
+			this.children.push(child);
+			child.parentElement = this;
+			return child;
+		},
+		addEventListener (type, handler) { this._handlers[type] = handler; },
+		click () { this._handlers.click?.({target: this, currentTarget: this}); },
+		focus () {},
+		remove () { this.removed = true; },
+		replaceChildren (...children) { this.children = children; },
+		setAttribute () {},
+	});
+
+	const makePlayMode = (state, pageOverrides = {}) => {
+		const saved = [];
+		const page = {
+			getState: () => state,
+			saveCharacter: jest.fn(() => saved.push(state.toJson())),
+			...pageOverrides,
+		};
+		const playMode = new CharacterSheetPlayMode(page);
+		const nodes = [];
+		playMode._ce = (tag, cls, parent) => {
+			const node = makeNode(tag);
+			node.className = cls || "";
+			nodes.push(node);
+			parent?.appendChild(node);
+			return node;
+		};
+		playMode._setIconLabel = (node, icon, label) => { node.textContent = label.trim(); };
+		playMode._logActivity = jest.fn();
+		playMode._openDrawerByType = jest.fn();
+		return {playMode, page, saved, nodes};
+	};
+
+	let previousDocument;
+	beforeEach(() => {
+		previousDocument = globalThis.document;
+		globalThis.document = {body: makeNode("body")};
+	});
+	afterEach(() => { globalThis.document = previousDocument; });
+
+	test("custom companion UI action persists a blob which survives reload", () => {
+		const original = new CharacterSheetState();
+		const {playMode, page, saved, nodes} = makePlayMode(original);
+
+		playMode._showCustomCompanionModal();
+		nodes.find(node => node.placeholder?.startsWith("e.g. Familiar")).value = "Button the Owl";
+		nodes.find(node => node.tag === "button" && node.textContent === "Add").click();
+
+		expect(original.getCompanions().map(it => it.name)).toEqual(["Button the Owl"]);
+		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+		expect(saved[0].companions.map(it => it.name)).toEqual(["Button the Owl"]);
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(saved[0]);
+		expect(restored.getCompanions().map(it => it.name)).toEqual(["Button the Owl"]);
+	});
+
+	test("built-in familiar action persists through the real page handler without adding a second save", async () => {
+		const state = new CharacterSheetState();
+		const {playMode, page, saved} = makePlayMode(state);
+		page._onSummonFamiliar = jest.fn(async () => {
+			state.addCompanion({
+				name: "Delegated Owl",
+				type: CharacterSheetState.COMPANION_TYPES.FAMILIAR,
+				abilities: {dex: 14},
+			});
+			page.saveCharacter();
+		});
+		playMode._showCustomCompanionModal = jest.fn();
+
+		await playMode._addBuiltinCompanion("familiar");
+
+		expect(page._onSummonFamiliar).toHaveBeenCalledTimes(1);
+		expect(playMode._showCustomCompanionModal).not.toHaveBeenCalled();
+		expect(playMode._openDrawerByType).toHaveBeenCalledWith("companions");
+		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+		expect(saved[0].companions.map(it => it.name)).toEqual(["Delegated Owl"]);
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(saved[0]);
+		expect(restored.getCompanions().map(it => it.name)).toEqual(["Delegated Owl"]);
+	});
+
+	test("Find Steed delegation preserves Greater Steed capability", async () => {
+		const steedState = new CharacterSheetState();
+		steedState.addSpell({name: "Find Greater Steed", source: "XGE", level: 4}, true);
+		const onFindSteed = jest.fn(async () => {});
+		const {playMode} = makePlayMode(steedState, {_onFindSteed: onFindSteed});
+
+		await playMode._addBuiltinCompanion("find-steed");
+
+		expect(onFindSteed).toHaveBeenCalledWith(true);
+	});
+
+	test("companion drawer persists inline HP edits and exposes the initiative roll", () => {
+		const drawerState = new CharacterSheetState();
+		const companionId = drawerState.addCompanion({
+			name: "Quickling",
+			type: "familiar",
+			hp: {max: 10, current: 10},
+			abilities: {str: 4, dex: 20, con: 10, int: 10, wis: 12, cha: 8},
+		});
+		const rollCompanionInitiative = jest.fn();
+		const {playMode, page, nodes} = makePlayMode(drawerState, {_rollCompanionInitiative: rollCompanionInitiative});
+		playMode._makeCard = (container) => {
+			const card = makeNode("div");
+			container.appendChild(card);
+			return card;
+		};
+
+		playMode._renderCompanionsDrawer(makeNode("div"));
+
+		const initiativeButton = nodes.find(node => node.title === "Roll initiative for Quickling");
+		initiativeButton.click();
+		expect(rollCompanionInitiative).toHaveBeenCalledWith(drawerState.getCompanion(companionId));
+
+		const hpInput = nodes.find(node => node.className === "pm-companion__hp-input");
+		hpInput.value = "4";
+		hpInput._handlers.change();
+		expect(drawerState.getCompanion(companionId).hp.current).toBe(4);
+		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("Companion initiative", () => {
+	test("uses the companion Dexterity modifier rather than the player's initiative", () => {
+		const initiativeState = new CharacterSheetState();
+		initiativeState.setAbilityBase("dex", 20);
+		const companionId = initiativeState.addCompanion({
+			name: "Slow Familiar",
+			type: "familiar",
+			abilities: {str: 3, dex: 8, con: 10, int: 3, wis: 12, cha: 7},
+		});
+
+		expect(initiativeState.getInitiative()).not.toBe(-1);
+		expect(initiativeState.getCompanionInitiative(companionId)).toBe(-1);
+	});
 });
 
 describe("Character Sheet Companions", () => {
