@@ -16293,11 +16293,35 @@ class CharacterSheetState {
 						calculations.hasRadiantSunBolt = true;
 						calculations.radiantSunBoltRange = 30;
 						calculations.radiantSunBoltDamage = martialArtsDice;
+						calculations.radiantSunBoltAttackBonus = profBonus + this.getAbilityMod("dex");
+						calculations.radiantSunBoltDamageBonus = this.getAbilityMod("dex");
+						calculations.radiantSunBoltBonusActionCost = 1;
+						calculations.radiantSunBoltBonusActionAttacks = 2;
+						(calculations.grantedAttacks ||= []).push({
+							id: "feature_radiant-sun-bolt",
+							name: "Radiant Sun Bolt",
+							sourceFeature: "Radiant Sun Bolt",
+							isMelee: false,
+							isRanged: true,
+							isSpell: true,
+							isSpellAttack: true,
+							abilityMod: "dex",
+							damage: martialArtsDice,
+							damageType: "radiant",
+							range: "30 ft.",
+							attackBonus: 0,
+							damageBonus: 0,
+							properties: [],
+							actionType: "action",
+						});
 
 						// Searing Arc Strike (level 6) - burning hands after Attack action
 						if (level >= 6) {
 							calculations.hasSearingArcStrike = true;
 							calculations.searingArcStrikeCost = 2; // base cost, +1 per additional level
+							calculations.searingArcStrikeMaxCost = Math.floor(level / 2);
+							calculations.searingArcStrikeMaxSpellLevel = calculations.searingArcStrikeMaxCost - 1;
+							calculations.searingArcStrikeDc = kiDc;
 						}
 
 						// Searing Sunburst (level 11) - radiant AoE
@@ -16305,12 +16329,18 @@ class CharacterSheetState {
 							calculations.hasSearingSunburst = true;
 							calculations.searingSunburstDamage = "2d6";
 							calculations.searingSunburstDc = kiDc;
+							calculations.searingSunburstRange = 150;
+							calculations.searingSunburstRadius = 20;
+							calculations.searingSunburstMaxCost = 3;
+							calculations.searingSunburstDamagePerKi = "2d6";
 						}
 
 						// Sun Shield (level 17) - bright light aura, retribution damage
 						if (level >= 17) {
 							calculations.hasSunShield = true;
 							calculations.sunShieldDamage = 5 + this.getAbilityMod("wis");
+							calculations.sunShieldBrightLightRange = 30;
+							calculations.sunShieldDimLightRange = 60;
 						}
 					}
 
@@ -41939,6 +41969,20 @@ class CharacterSheetState {
 			activationAction: "bonus",
 			exclusiveWith: ["rage"], // Cannot bladesong and rage simultaneously
 		},
+		sunShield: {
+			id: "sunShield",
+			name: "Sun Shield",
+			icon: "☀️",
+			description: "Sheds bright light for 30 feet and dim light for another 30 feet; retaliate against a melee attacker for 5 + WIS radiant damage",
+			effects: [
+				{type: "retaliationDamage", target: "meleeAttacker", value: 5, abilityMod: "wis", damageType: "radiant"},
+			],
+			trigger: {label: "Retaliate", actionType: "reaction", effectType: "retaliationDamage"},
+			duration: "Until extinguished",
+			endConditions: ["Extinguished as a bonus action"],
+			detectPatterns: ["^sun shield$", "wreathed in a luminous.*aura"],
+			activationAction: "bonus",
+		},
 		dancing: {
 			id: "dancing",
 			name: "Dancing",
@@ -43096,6 +43140,9 @@ class CharacterSheetState {
 		"patient defense": "combat",
 		"step of the wind": "combat",
 		"slow fall": "combat",
+		"radiant sun bolt": "combat",
+		"searing arc strike": "combat",
+		"searing sunburst": "combat",
 
 		// === Fighter action-economy features (surfaced via the dedicated Combat-tab
 		// Fighter section, not as toggle states). Second Wind / Action Surge are real
@@ -43526,6 +43573,23 @@ class CharacterSheetState {
 			};
 		}
 
+		// Sun Shield carries a triggered retaliation effect which prose parsing cannot
+		// represent. Preserve the complete state definition instead of replacing it
+		// with partial light/aura output.
+		if (name === "sun shield" || /wreathed in a luminous.*aura/i.test(text)) {
+			const sunShieldStateType = this.ACTIVE_STATE_TYPES.sunShield;
+			return {
+				stateTypeId: "sunShield",
+				stateType: sunShieldStateType,
+				matchedBy: "name",
+				activationAction: activationAction || sunShieldStateType.activationAction,
+				effects: sunShieldStateType.effects,
+				duration: toggleAnalysis.duration || sunShieldStateType.duration,
+				endConditions: toggleAnalysis.endConditions.length > 0 ? toggleAnalysis.endConditions : sunShieldStateType.endConditions,
+				isToggle: true,
+			};
+		}
+
 		// ===== CHECK AGAINST KNOWN STATE TYPES =====
 		for (const [stateTypeId, stateType] of Object.entries(this.ACTIVE_STATE_TYPES)) {
 			// Skip generic types that shouldn't match by name
@@ -43894,6 +43958,11 @@ class CharacterSheetState {
 				case "extraDamage":
 					summaries.push(`+${effect.value}${effect.damageType ? ` ${effect.damageType}` : ""} damage`);
 					break;
+				case "retaliationDamage": {
+					const ability = effect.abilityMod ? ` + ${effect.abilityMod.toUpperCase()} mod` : "";
+					summaries.push(`${effect.value || 0}${ability}${effect.damageType ? ` ${effect.damageType}` : ""} damage to a melee attacker`);
+					break;
+				}
 				case "tempHp":
 					summaries.push(`Gain ${effect.value} temp HP`);
 					break;
@@ -46225,6 +46294,41 @@ class CharacterSheetState {
 			}
 		}
 		return effects;
+	}
+
+	/**
+	 * Resolve a trigger exposed by an active state, including ability-scaled values.
+	 * Any state type can opt in with a `trigger` definition and a matching effect.
+	 * @param {string} stateTypeId
+	 * @returns {object|null}
+	 */
+	getActiveStateTrigger (stateTypeId) {
+		if (!this.isStateTypeActive(stateTypeId)) return null;
+		const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId];
+		if (!stateType?.trigger) return null;
+		const effect = this.getActiveStateEffects()
+			.find(it => it.stateTypeId === stateTypeId && it.type === stateType.trigger.effectType);
+		if (!effect) return null;
+		const value = (Number(effect.value) || 0)
+			+ (effect.abilityMod ? this.getAbilityMod(effect.abilityMod) : 0);
+		return {
+			...stateType.trigger,
+			stateTypeId,
+			stateName: stateType.name,
+			stateIcon: stateType.icon,
+			effect: {...effect, resolvedValue: value},
+		};
+	}
+
+	/**
+	 * Resolve always-available attacks granted by class/subclass calculations.
+	 * @returns {Array<object>}
+	 */
+	getFeatureGrantedAttacks () {
+		return (this.getFeatureCalculations().grantedAttacks || []).map(attack => ({
+			...attack,
+			isFeatureAttack: true,
+		}));
 	}
 
 	/**

@@ -14,9 +14,9 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 
 ## Active States / Toggle Abilities
 
-### ACTIVE_STATE_TYPES (24 types defined)
+### ACTIVE_STATE_TYPES (25 types defined)
 
-Core states: `rage`, `bladesong`, `wildShape`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
+Core states: `rage`, `bladesong`, `sunShield`, `wildShape`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
 
 Each state type defines:
 ```javascript
@@ -30,6 +30,11 @@ Each state type defines:
     resourceName: "Rage",
     resourceCost: 1,
     activationAction: "bonus",   // "bonus"|"action"|"free"|"reaction"
+    trigger: {                    // Optional in-play effect control
+        label: "Retaliate",
+        actionType: "reaction",
+        effectType: "retaliationDamage",
+    },
     exclusiveWith: ["bladesong"], // Mutual exclusivity
     breaksConcentration: true,   // Rage breaks concentration on activate
     detectPatterns: ["^rage$"],  // Regex for auto-detection from feature text
@@ -99,6 +104,35 @@ total = abilityMod + profBonus + weaponBonus + featureAttackBonus + stateAttackB
 ### Action Economy Tracking
 
 `_turnActionUsage`: tracks `{action, bonus, reaction}` booleans per turn. Reset on turn advance.
+
+### Calculation-Granted Attacks
+
+Class and subclass calculations can append attack descriptors to
+`calculations.grantedAttacks`. `getFeatureGrantedAttacks()` marks them as
+feature-owned, and the Combat attack assembly merges them with configured,
+automatic, temporary, and active-state attacks. Keep the descriptor's
+`attackBonus` and `damageBonus` limited to bonuses beyond its configured
+`abilityMod`; the normal attack renderer and rollers add the ability modifier
+and proficiency bonus. Radiant Sun Bolt uses this path so its `damage` tracks
+the Monk's edition-aware Martial Arts die.
+
+### Variable Point Spending
+
+Combat actions whose effect scales with committed Ki/Focus use
+`_getVariablePointSpendConfig()` and `_pChooseVariablePointSpend()`. The
+calculation layer supplies minimum and maximum spend; the chooser clamps that
+range to the current shared point pool, returns the selected amount, and the
+normal action pipeline performs the single canonical deduction. Searing Arc
+Strike and Searing Sunburst then pass the selected amount to their computed
+save/damage execution.
+
+### Triggered Active-State Effects
+
+An active-state type can define `trigger: {label, actionType, effectType}` and
+a matching effect. `getActiveStateTrigger()` resolves `value + abilityMod`;
+Combat renders a trigger button and consumes the configured action type when it
+executes. Sun Shield uses this reusable path for its `5 + WIS` radiant
+retaliation and reaction cost.
 
 ### Weapon Mastery Effects
 

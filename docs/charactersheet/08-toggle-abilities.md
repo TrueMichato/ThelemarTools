@@ -55,6 +55,7 @@ static ACTIVE_STATE_TYPES = {
 | `icon` | string | Emoji icon |
 | `description` | string | Brief description |
 | `effects` | array | Mechanical effects while active |
+| `trigger` | object | Optional in-play control `{label, actionType, effectType}` backed by a matching active effect |
 | `duration` | string | How long it lasts |
 | `endConditions` | array | Ways the state can end |
 | `resourceName` | string | Resource consumed (e.g., "Rage", "Ki Points") |
@@ -181,6 +182,34 @@ patientDefense: {
     activationAction: "bonus",
 }
 ```
+
+#### Sun Shield (Sun Soul Monk)
+```javascript
+sunShield: {
+    effects: [
+        {
+            type: "retaliationDamage",
+            target: "meleeAttacker",
+            value: 5,
+            abilityMod: "wis",
+            damageType: "radiant",
+        },
+    ],
+    trigger: {
+        label: "Retaliate",
+        actionType: "reaction",
+        effectType: "retaliationDamage",
+    },
+    duration: "Until extinguished",
+    activationAction: "bonus",
+}
+```
+
+Triggered active-state effects are resolved through
+`getActiveStateTrigger()`. It adds any configured ability modifier to the
+effect value, then the Combat tab renders the trigger as a real action-economy
+control. Sun Shield therefore deals `5 + WIS` radiant damage and consumes the
+character's reaction while combat tracking is active.
 
 ### Combat Stances (TGTT/Homebrew)
 

@@ -270,6 +270,24 @@ emptyBodyCost: 4,
 hasDisciplinedSurvivor: true,     // Level 14+
 hasSuperiorDefense: true,         // Level 18+
 superiorDefenseCost: 3,
+
+// Sun Soul (XGE)
+hasRadiantSunBolt: true,           // Subclass level 3+
+radiantSunBoltDamage: martialArtsDie,
+radiantSunBoltAttackBonus: profBonus + DEX,
+radiantSunBoltDamageBonus: DEX,
+grantedAttacks: [{                 // Canonical Combat-tab attack descriptor
+    name: "Radiant Sun Bolt",
+    abilityMod: "dex",
+    damage: martialArtsDie,
+    damageType: "radiant",
+    range: "30 ft.",
+}],
+searingArcStrikeMaxCost: floor(level / 2), // Level 6+
+searingArcStrikeDc: kiSaveDc,
+searingSunburstDc: kiSaveDc,       // Level 11+
+searingSunburstMaxCost: 3,
+sunShieldDamage: 5 + WIS,          // Level 17+
 ```
 
 ### Paladin

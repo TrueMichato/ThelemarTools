@@ -96,6 +96,20 @@ _renderWeaponQuickSelect($container) {
 }
 ```
 
+### Feature-Granted Attacks
+
+`renderAttacks()` also merges `state.getFeatureGrantedAttacks()` into the
+canonical attack list. These descriptors come from feature calculations and
+are marked as feature-owned, so they use the normal attack/damage roll path but
+cannot be edited or removed independently. The descriptor's `damage` is the
+final die expression after class substitutions; for example, Radiant Sun
+Bolt's radiant damage tracks the Monk's current Martial Arts die.
+
+Feature attacks configure their ability through `abilityMod`. Their
+`attackBonus` and `damageBonus` fields contain only additional bonuses; the
+normal renderer and roller add the configured ability modifier and proficiency
+bonus.
+
 ### Attack Bonus Calculation
 
 ```javascript
