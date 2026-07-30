@@ -1435,7 +1435,7 @@ export class CharacterSheetPlayMode {
 			const abilityMod = isRanged ? "dex" : ((hasFinesse && this._state.getAbilityMod("dex") >= this._state.getAbilityMod("str")) ? "dex" : "str");
 			const attackBonus = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponAttack || 0);
 			const damageBonus = (weapon.bonusWeapon || 0) + (weapon.bonusWeaponDamage || 0);
-			const baseDamageDie = weapon.dmg1 || "1d6";
+			const baseDamageDie = this._state.getWeaponDamageDie(weapon);
 			const baseDamageType = weapon.dmgType ? Parser.dmgTypeToFull?.(weapon.dmgType) : "slashing";
 
 			attacks.push({

@@ -2086,23 +2086,16 @@ class CharacterSheetSpells {
 
 		// Cantrips don't use slots
 		if (spell.level === 0) {
+			const weaponChannelChoice = CharacterSheetSpells.getWeaponChannelCantripInfo(spellData)
+				? {spell, spellData}
+				: null;
 			const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: 0, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 			if (activeMetamagicChoice?.cancelled) return;
 			if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
-			if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
-				JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
-				return;
-			}
-			if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 			// Variant spell component selection (cantrips)
 			const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
 			if (variantComponentChoice?.cancelled) return;
-			if (variantComponentChoice?.variantComponent) {
-				for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
-					this._state.consumeVariantComponent(id);
-				}
-			}
 
 			const castMeta = this._getNormalizedCastMeta({
 				spell,
@@ -2115,7 +2108,38 @@ class CharacterSheetSpells {
 				},
 			});
 
-			await this._showCastResult(spell, 0, false, false, castMeta);
+			if (
+				weaponChannelChoice
+				&& activeMetamagicChoice?.metamagic
+				&& this._state.getSorceryPoints().current < activeMetamagicChoice.metamagic.cost
+			) {
+				JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
+				return;
+			}
+
+			if (weaponChannelChoice) {
+				const didChannel = await this._page._combat?.pChannelSpellFromCast?.(weaponChannelChoice);
+				if (!didChannel) {
+					if (!this._page._combat?.pChannelSpellFromCast) {
+						JqueryUtil.doToast({type: "warning", content: "Combat is unavailable, so this weapon-channel spell could not be cast."});
+					}
+					return;
+				}
+			}
+
+			if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
+				JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
+				return;
+			}
+			if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
+
+			if (variantComponentChoice?.variantComponent) {
+				for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
+					this._state.consumeVariantComponent(id);
+				}
+			}
+
+			if (!weaponChannelChoice) await this._showCastResult(spell, 0, false, false, castMeta);
 			await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
 			// Set concentration for concentration cantrips (rare but possible)
 			const vcRemovesConc0 = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");

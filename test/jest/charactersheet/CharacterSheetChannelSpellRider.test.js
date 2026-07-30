@@ -13,8 +13,10 @@
 import {jest} from "@jest/globals";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-combat.js";
+import "../../../js/charactersheet/charactersheet-spells.js";
 
 const CharacterSheetCombat = globalThis.CharacterSheetCombat;
+const CharacterSheetSpells = globalThis.CharacterSheetSpells;
 
 function makeCombat (overrides = {}) {
 	const combat = Object.create(CharacterSheetCombat.prototype);
@@ -155,6 +157,195 @@ describe("_onChannelSpellButton arms AFTER rolling the attack", () => {
 		combat._armChannelSpellRider = jest.fn(() => order.push("arm"));
 		await combat._onChannelSpellButton("atk-1", {});
 		expect(order).toEqual(["attack", "arm"]);
+	});
+});
+
+describe("Spells-tab weapon-channel bridge", () => {
+	const choice = {
+		spell: {id: "bb", name: "Booming Blade", source: "TCE", level: 0},
+		spellData: {
+			name: "Booming Blade",
+			source: "TCE",
+			level: 0,
+			duration: [{type: "round", duration: {type: "round", amount: 1}}],
+			entries: ["You brandish the weapon used in the spell's casting and make a melee attack with it against one creature within 5 feet of you."],
+			scalingLevelDice: [
+				{label: "thunder damage on moving", scaling: {"1": "1d8", "5": "2d8"}},
+				{label: "thunder damage on hit", scaling: {"5": "1d8"}},
+			],
+			damageInflict: ["thunder"],
+		},
+	};
+
+	afterEach(() => {
+		jest.restoreAllMocks();
+	});
+
+	it("prompts for an eligible weapon, then rolls before arming", async () => {
+		const combat = makeCombat();
+		combat._cachedAttacks = [
+			{id: "unarmed", name: "Unarmed Strike", isMelee: true, isUnarmedStrike: true, damage: "1", damageType: "bludgeoning"},
+			{id: "sword", name: "Longsword", isMelee: true, damage: "1d8", damageType: "slashing"},
+			{id: "staff", name: "Quarterstaff", isMelee: true, damage: "1d6", damageType: "bludgeoning"},
+		];
+		const order = [];
+		combat._rollAttack = jest.fn(() => { order.push("attack"); return true; });
+		combat._armChannelSpellRider = jest.fn(() => order.push("arm"));
+		globalThis.InputUiUtil.pGetUserEnum = jest.fn(async () => 1);
+
+		expect(await combat.pChannelSpellFromCast(choice)).toBe(true);
+		expect(globalThis.InputUiUtil.pGetUserEnum).toHaveBeenCalledWith(expect.objectContaining({
+			values: ["Longsword (1d8 slashing)", "Quarterstaff (1d6 bludgeoning)"],
+		}));
+		expect(combat._rollAttack).toHaveBeenCalledWith("staff", {});
+		expect(order).toEqual(["attack", "arm"]);
+	});
+
+	it("cancels cleanly when no eligible weapon exists", async () => {
+		const combat = makeCombat();
+		combat._cachedAttacks = [{id: "unarmed", name: "Unarmed Strike", isMelee: true, isUnarmedStrike: true}];
+		combat._rollAttack = jest.fn();
+		const toastSpy = jest.spyOn(globalThis.JqueryUtil, "doToast");
+		expect(await combat.pChannelSpellFromCast(choice)).toBe(false);
+		expect(combat._rollAttack).not.toHaveBeenCalled();
+		expect(toastSpy).toHaveBeenCalledWith(expect.objectContaining({
+			content: expect.stringMatching(/requires an equipped melee weapon/i),
+		}));
+	});
+
+	it("does not consume cast resources when the weapon bridge is cancelled", async () => {
+		const spells = Object.create(CharacterSheetSpells.prototype);
+		spells._state = {
+			getSpells: () => [choice.spell],
+			isConcentrating: () => false,
+			getSorceryPoints: () => ({current: 3, max: 3}),
+			useSorceryPoint: jest.fn(),
+			consumeVariantComponent: jest.fn(),
+		};
+		spells._allSpells = [choice.spellData];
+		spells._page = {
+			saveCharacter: jest.fn(),
+			_combat: {pChannelSpellFromCast: jest.fn(async () => false)},
+		};
+		spells._resolveMetamagicChoice = jest.fn(async () => ({
+			cancelled: false,
+			metamagic: {name: "Quickened Spell", cost: 2},
+		}));
+		spells._pHandleCastingConstraints = jest.fn(async () => true);
+		spells._resolveVariantComponentChoice = jest.fn(async () => ({
+			cancelled: false,
+			variantComponent: {itemId: "component"},
+		}));
+		spells._pConsumeMaterialComponent = jest.fn();
+		spells._showCastResult = jest.fn();
+
+		await spells._castSpell(choice.spell.id, {withMetamagic: true});
+
+		expect(spells._state.useSorceryPoint).not.toHaveBeenCalled();
+		expect(spells._state.consumeVariantComponent).not.toHaveBeenCalled();
+		expect(spells._pConsumeMaterialComponent).not.toHaveBeenCalled();
+		expect(spells._page.saveCharacter).not.toHaveBeenCalled();
+	});
+
+	it("does not roll a weapon attack when the chosen metamagic is unaffordable", async () => {
+		const channelSpy = jest.fn();
+		const spells = Object.create(CharacterSheetSpells.prototype);
+		spells._state = {
+			getSpells: () => [choice.spell],
+			isConcentrating: () => false,
+			getSorceryPoints: () => ({current: 1, max: 3}),
+			useSorceryPoint: jest.fn(),
+		};
+		spells._allSpells = [choice.spellData];
+		spells._page = {saveCharacter: jest.fn(), _combat: {pChannelSpellFromCast: channelSpy}};
+		spells._resolveMetamagicChoice = jest.fn(async () => ({
+			cancelled: false,
+			metamagic: {name: "Quickened Spell", cost: 2},
+		}));
+		spells._pHandleCastingConstraints = jest.fn(async () => true);
+		spells._resolveVariantComponentChoice = jest.fn(async () => ({cancelled: false}));
+		spells._pConsumeMaterialComponent = jest.fn();
+
+		await spells._castSpell(choice.spell.id, {withMetamagic: true});
+
+		expect(channelSpy).not.toHaveBeenCalled();
+		expect(spells._state.useSorceryPoint).not.toHaveBeenCalled();
+	});
+
+	it("Spells-tab Cast arms the real rider and the next weapon damage roll folds it into the total", async () => {
+		const attack = {
+			id: "auto_sword",
+			name: "Longsword",
+			damage: "1d8",
+			damageType: "slashing",
+			abilityMod: "str",
+			isMelee: true,
+			isAutoGenerated: true,
+			sourceItem: {id: "sword", name: "Longsword", dmg1: "1d8", dmg2: "1d10", handsUsed: 1},
+		};
+		const combat = makeCombat();
+		combat._cachedAttacks = [attack];
+		combat._state = {
+			getCombatRound: () => 1,
+			getAttacks: () => [attack],
+			getTemporaryAttacks: () => [],
+			getActiveStateAttacks: () => [],
+			getWeaponDamageDie: item => item.dmg1,
+			isMonkWeapon: () => false,
+			getEffectiveItemBonuses: () => ({}),
+			getWeaponAbilityMod: () => 3,
+			getNamedModifiersByType: () => [],
+			getItemWeaponScopedDamageContributions: () => [],
+			getFeatureCalculations: () => ({}),
+			getExtraDamageFromStates: () => [],
+			getTotalLevel: () => 5,
+			getSpellcastingAbilityForSpell: () => "int",
+			getSpellcastingAbility: () => "int",
+			getAbilityMod: () => 2,
+		};
+		combat._rollAttack = jest.fn(() => true);
+		combat._promptUseCombatMethod = async () => null;
+		combat._canApplySneakAttack = () => false;
+		combat._getSelectedAmmoForWeapon = () => null;
+		combat._parseDamage = (dice, isCrit) => {
+			const total = dice === "1d8" ? 8 : 0;
+			return {total: isCrit ? total * 2 : total, sides: 8, rolls: [total]};
+		};
+		combat._page.showDiceResult = jest.fn();
+		combat._page.pAnimateDamageDice = jest.fn();
+
+		const spells = Object.create(CharacterSheetSpells.prototype);
+		spells._state = {
+			getSpells: () => [choice.spell],
+			isConcentrating: () => false,
+			getTotalLevel: () => 5,
+			getSpellcastingAbilityForSpell: () => "int",
+			getSpellcastingAbility: () => "int",
+			getAbilityMod: () => 2,
+		};
+		spells._allSpells = [choice.spellData];
+		spells._page = {saveCharacter: jest.fn(), _combat: combat, pAnimateDamageDice: jest.fn()};
+		combat._page._spells = spells;
+		spells._resolveMetamagicChoice = jest.fn(async () => ({cancelled: false, metamagic: null}));
+		spells._pHandleCastingConstraints = jest.fn(async () => true);
+		spells._resolveVariantComponentChoice = jest.fn(async () => ({cancelled: false}));
+		spells._pConsumeMaterialComponent = jest.fn(async () => {});
+		spells._showCastResult = jest.fn();
+
+		await spells._castSpell(choice.spell.id, {withMetamagic: false});
+		expect(combat._pendingSpellRider).toMatchObject({
+			attackId: attack.id,
+			spellName: "Booming Blade",
+			dice: "1d8",
+		});
+		expect(spells._showCastResult).not.toHaveBeenCalled();
+
+		await combat._rollDamage(attack.id);
+		expect(combat._page.showDiceResult).toHaveBeenCalledWith(expect.objectContaining({
+			total: expect.stringContaining("= 19"),
+			subtitle: expect.stringContaining("Booming Blade on hit 1d8"),
+		}));
+		expect(combat._pendingSpellRider).toBeNull();
 	});
 });
 
