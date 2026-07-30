@@ -274,4 +274,92 @@ describe("CharacterSheetMaxHpCalculation", () => {
 			expect(state.getMaxHp()).toBe(max);
 		});
 	});
+
+	describe("Maximum HP reduction", () => {
+		beforeEach(() => {
+			state.addClass({name: "Fighter", source: "PHB", level: 3});
+			recordLevels(state, [
+				{level: 1, className: "Fighter"},
+				{level: 2, className: "Fighter"},
+				{level: 3, className: "Fighter"},
+			]);
+			state.recalculateHp({syncCurrent: true});
+		});
+
+		it("reduces effective max HP and clamps current HP", () => {
+			expect(state.getMaxHp()).toBe(28);
+
+			state.setMaxHpReduction(10);
+
+			expect(state.getMaxHpReduction()).toBe(10);
+			expect(state.getMaxHp()).toBe(18);
+			expect(state.getCurrentHp()).toBe(18);
+		});
+
+		it("restores max HP without healing when the reduction is removed", () => {
+			state.setMaxHpReduction(10);
+			state.setCurrentHp(7);
+
+			state.setMaxHpReduction(0);
+
+			expect(state.getMaxHp()).toBe(28);
+			expect(state.getCurrentHp()).toBe(7);
+		});
+
+		it("never reduces effective max HP below 1", () => {
+			state.setMaxHpReduction(100);
+
+			expect(state.getMaxHpReduction()).toBe(100);
+			expect(state.getMaxHp()).toBe(1);
+			expect(state.getCurrentHp()).toBe(1);
+		});
+
+		it("sanitizes setter input and corrupt persisted values", () => {
+			expect(state.setMaxHpReduction(4.9)).toBe(4);
+			expect(state.getMaxHp()).toBe(24);
+
+			expect(state.setMaxHpReduction(-20)).toBe(0);
+			expect(state.getMaxHp()).toBe(28);
+
+			state._data.hp.maxHpReduction = "invalid";
+			state.recalculateHp();
+			expect(state.getMaxHpReduction()).toBe(0);
+			expect(state.getMaxHp()).toBe(28);
+		});
+
+		it("recomputes Bloodied against the reduced maximum", () => {
+			state.setCurrentHp(14);
+			expect(state.hasCondition("bloodied")).toBe(true);
+
+			state.setMaxHpReduction(10);
+
+			expect(state.getMaxHp()).toBe(18);
+			expect(state.getCurrentHp()).toBe(14);
+			expect(state.hasCondition("bloodied")).toBe(false);
+		});
+
+		it("re-applies Bloodied when removing a reduction raises the threshold", () => {
+			state.setMaxHpReduction(10);
+			state.setCurrentHp(12);
+			expect(state.hasCondition("bloodied")).toBe(false);
+
+			state.setMaxHpReduction(0);
+
+			expect(state.getCurrentHp()).toBe(12);
+			expect(state.hasCondition("bloodied")).toBe(true);
+		});
+
+		it("remains applied through CON and level recalculations", () => {
+			state.setMaxHpReduction(5);
+
+			state.setAbilityBase("con", 16);
+			state.recalculateHp();
+			expect(state.getMaxHp()).toBe(26);
+
+			state.addClass({name: "Wizard", source: "PHB", level: 1});
+			state.recalculateHp();
+			expect(state.getMaxHpReduction()).toBe(5);
+			expect(state.getMaxHp()).toBe(33);
+		});
+	});
 });

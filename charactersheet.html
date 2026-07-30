@@ -584,7 +584,7 @@
 									</div>
 								</div>
 							</div>
-							<div class="ve-flex charsheet__hp-inputs">
+							<div class="ve-flex ve-flex-wrap charsheet__hp-inputs">
 								<div class="charsheet__hp-box charsheet__hp-box--current">
 									<div class="charsheet__hp-label">Current HP</div>
 									<div class="ve-flex-v-center ve-flex-h-center">
@@ -601,6 +601,14 @@
 									<div class="charsheet__hp-label">Temp HP</div>
 									<input type="number" class="ve-form-control form-control--minimal charsheet__ipt-hp charsheet__ipt-hp--temp" id="charsheet-ipt-hp-temp" value="0" min="0" title="Temporary HP (absorbed before regular HP)">
 									<div class="charsheet__hp-temp-hint">Absorbs damage first</div>
+								</div>
+								<div class="charsheet__hp-box charsheet__hp-box--reduction" id="charsheet-hp-max-reduction-control">
+									<label class="charsheet__hp-label" for="charsheet-ipt-hp-max-reduction">Max HP Reduction</label>
+									<div class="ve-flex-v-center ve-flex-h-center charsheet__hp-reduction-input-row">
+										<input type="number" class="ve-form-control form-control--minimal charsheet__ipt-hp charsheet__ipt-hp--reduction" id="charsheet-ipt-hp-max-reduction" value="0" min="0" step="1" inputmode="numeric" aria-describedby="charsheet-hp-max-reduction-status" title="Temporary reduction to your maximum hit points">
+										<button type="button" class="ve-btn ve-btn-xs ve-btn-danger charsheet__hp-reduction-clear" id="charsheet-btn-hp-max-reduction-clear" aria-label="Remove maximum hit point reduction" title="Remove maximum HP reduction">×</button>
+									</div>
+									<div class="charsheet__hp-temp-hint charsheet__hp-reduction-status" id="charsheet-hp-max-reduction-status" aria-live="polite">No reduction</div>
 								</div>
 							</div>
 						</div>
