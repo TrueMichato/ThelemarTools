@@ -202,6 +202,20 @@ export const PRESET_FULL_MERCY_MONK_CHANGELING: CharacterPreset = {
 	subclassSource: "TGTT",
 };
 
+/** Astral Self Monk Changeling (TCE subclass on the TGTT Monk chassis). */
+export const PRESET_FULL_ASTRAL_SELF_MONK_CHANGELING: CharacterPreset = {
+	race: "Changeling",
+	raceSource: "TGTT",
+	className: "Monk",
+	classSource: "TGTT",
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Astra Manyhands",
+	skillCount: 2,
+	subclassName: "Way of the Astral Self",
+	subclassSource: "TCE",
+};
+
 /** 2. Arcane Archer Fighter Hochling (TGTT) */
 export const PRESET_FULL_ARCANE_ARCHER_HOCHLING: CharacterPreset = {
 	race: "Hochling",

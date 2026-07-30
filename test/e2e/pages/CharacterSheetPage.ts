@@ -300,6 +300,11 @@ export class CharacterSheetPage {
 			throw new Error(`activateFeature(${featureName}): no visible toggle button within 5s. Feature may be passive on the sheet — see docs/charactersheet/known-bugs.md.`);
 		}
 		await btn.click({timeout: 5000});
+		const choiceModal = this.page.locator(".ui-modal__inner:visible").filter({hasText: `${featureName} — Choose`}).last();
+		if (await choiceModal.count()) {
+			const choice = choiceModal.locator("button.ve-btn").filter({hasNotText: /^Close$/}).first();
+			if (await choice.count()) await choice.click({timeout: 5000});
+		}
 		await this.page.waitForTimeout(200);
 	}
 
