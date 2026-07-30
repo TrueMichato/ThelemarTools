@@ -8347,6 +8347,7 @@ class CharacterSheetPage {
 
 		if (isEndable) {
 			row.querySelector(".charsheet__end-state-btn").addEventListener("click", () => {
+				if (state.stateTypeId === "sunShield" && !this._tryConsumeActiveStateToggleAction(state.stateTypeId, stateType)) return;
 				if (isSpellEffect) {
 					// For spell effects that grant conditions, also remove those conditions
 					if (state.grantsConditions?.length > 0) {
@@ -8982,6 +8983,7 @@ class CharacterSheetPage {
 	 * Activate a feature's state, deducting resource cost if applicable
 	 */
 	async _activateFeatureState (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
+		if (!this._tryConsumeActiveStateToggleAction(stateTypeId, stateType, activationInfo)) return;
 		// ===== R20: name-keyed homebrew ability "Use" behaviors =====
 		// Intercept the Illrigger/Hochling abilities that need bespoke effects BEFORE the
 		// generic resource/toggle pipeline. Each handler owns its own resource consumption
@@ -9167,6 +9169,11 @@ class CharacterSheetPage {
 		this._renderResources();
 		this._renderActiveStates();
 		this._renderCharacter();
+	}
+
+	_tryConsumeActiveStateToggleAction (stateTypeId, stateType, activationInfo = null) {
+		if (stateTypeId !== "sunShield" || !this._state.isInCombat?.()) return true;
+		return this._combat?._tryConsumeStateToggleAction?.(stateType, activationInfo) ?? true;
 	}
 
 	_renderAttacks () {
