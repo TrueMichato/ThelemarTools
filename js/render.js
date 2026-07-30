@@ -15340,6 +15340,40 @@ Renderer.homecraft = class {
 	}
 };
 
+Renderer.crafting = class {
+	/**
+	 * Compact stat block for hovers and search previews. The full stat block lives in
+	 * `js/render-crafting.js`; this is a deliberately leaner summary.
+	 */
+	static getCompactRenderedString (ent) {
+		const renderer = Renderer.get();
+
+		const ptSubtitle = [
+			Parser.craftingCategoryToFull(ent.materialCategory || ent.recipeCategory || ent.ruleCategory),
+			ent.rarity && ent.rarity !== "none" && ent.rarity !== "unknown" ? ent.rarity.toTitleCase() : null,
+			ent.crafter ? `crafted by ${ent.crafter}` : null,
+		].filter(Boolean).join(" \u2022 ");
+
+		const metaParts = [];
+		if (ent.harvest?.dc != null) metaParts.push(`<b>Harvest DC:</b> ${renderer.render(`{@dc ${ent.harvest.dc}}`)}`);
+		if (ent.craftDC != null) metaParts.push(`<b>Crafting DC:</b> ${renderer.render(`{@dc ${ent.craftDC}}`)}`);
+		if (ent.harvest?.creature?.name) metaParts.push(`<b>From:</b> ${renderer.render(`{@creature ${ent.harvest.creature.name}${ent.harvest.creature.source ? `|${ent.harvest.creature.source}` : "|"}}`)}`);
+		if (ent.harvest?.biome) metaParts.push(`<b>Biome:</b> ${ent.harvest.biome}`);
+		if (ent.value != null) metaParts.push(`<b>Value:</b> ${Parser.getDisplayCurrency(CurrencyUtil.doSimplifyCoins({cp: ent.value}))}`);
+
+		const ptIngredients = ent.ingredients?.length
+			? `<tr><td colspan="6"><b>Ingredients:</b> ${ent.ingredients.map(it => `${it.quantity != null && (it.quantity !== 1 || it.unit) ? `${it.quantity}${it.unit ? ` ${it.unit}` : "\u00d7"} ` : ""}${it.name.qq()}`).join(", ")}</td></tr>`
+			: "";
+
+		return `${Renderer.utils.getExcludedTr({entity: ent, dataProp: ent.__prop, page: UrlUtil.PG_CRAFTING})}
+		${Renderer.utils.getNameTr(ent, {page: UrlUtil.PG_CRAFTING})}
+		${ptSubtitle ? `<tr><td colspan="6" class="ve-pt-0"><i>${ptSubtitle}</i></td></tr>` : ""}
+		${metaParts.length ? `<tr><td colspan="6" class="ve-pt-1">${metaParts.join(" &bull; ")}</td></tr>` : ""}
+		${ptIngredients}
+		<tr><td colspan="6" class="ve-pt-2">${renderer.render({entries: ent.entries || []}, 1)}</td></tr>`;
+	}
+};
+
 Renderer.card = class {
 	static getFullEntries (ent, {backCredit = null} = {}) {
 		const entries = [...ent.entries || []];
@@ -17690,6 +17724,7 @@ Renderer.hover = class {
 			case UrlUtil.PG_DECKS: return Renderer.deck.getCompactRenderedString.bind(Renderer.deck);
 			case UrlUtil.PG_BASTIONS: return Renderer.bastion.getCompactRenderedString.bind(Renderer.bastion);
 			case UrlUtil.PG_COMBAT_METHODS: return Renderer.combatmethod.getCompactRenderedString.bind(Renderer.combatmethod);
+			case UrlUtil.PG_CRAFTING: return Renderer.crafting.getCompactRenderedString.bind(Renderer.crafting);
 			// region props
 			case "classfeature":
 			case "classFeature":

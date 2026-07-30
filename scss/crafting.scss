@@ -1,0 +1,180 @@
+@use "vars/vars";
+@use "vars/vars-night";
+
+@layer vetools {
+	/* ----- Stat block ----- */
+
+	.crafting {
+		&__ {
+			&meta-line {
+				line-height: 1.5;
+			}
+
+			&meta-label {
+				font-weight: 600;
+
+				&::after {
+					content: ":";
+				}
+			}
+
+			&tags {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 4px;
+			}
+
+			&tag {
+				padding: 1px 7px;
+				border: 1px solid vars.$rgb-border-grey--trans;
+				border-radius: 10px;
+				font-size: 12px;
+				line-height: 16px;
+				cursor: pointer;
+				white-space: nowrap;
+
+				&:hover {
+					border-color: currentcolor;
+					text-decoration: none;
+				}
+			}
+
+			&ingredient-group {
+				margin-top: 4px;
+				font-style: italic;
+			}
+
+			&ingredients {
+				margin: 2px 0 0;
+				padding-left: 20px;
+			}
+
+			&outcomes {
+				margin: 0;
+				padding-left: 20px;
+			}
+
+			&outcome-tier {
+				font-weight: 600;
+			}
+		}
+	}
+
+	.ve-night-mode .crafting {
+		&__ {
+			&tag {
+				border-color: vars-night.$rgb-border-grey--trans-night;
+			}
+		}
+	}
+
+	/* ----- Harvest Lookup / Crafting Planner modals ----- */
+
+	.crafting-tool {
+		&__ {
+			&results {
+				display: flex;
+				flex-direction: column;
+				gap: 12px;
+			}
+
+			&creature,
+			&section {
+				border: 1px solid vars.$rgb-border-grey--trans;
+				border-radius: 3px;
+				padding: 6px 8px;
+			}
+
+			&creature-head,
+			&section-head {
+				display: flex;
+				align-items: baseline;
+				margin-bottom: 4px;
+				padding-bottom: 3px;
+				border-bottom: 1px solid vars.$rgb-border-grey--trans-muted;
+			}
+
+			&creature-name,
+			&section-head {
+				font-weight: 600;
+			}
+
+			&table {
+				font-size: 12px;
+
+				th,
+				td {
+					padding: 2px 6px;
+					vertical-align: top;
+				}
+
+				th {
+					white-space: nowrap;
+				}
+			}
+
+			&row--alt td {
+				opacity: 0.75;
+			}
+
+			&picker {
+				position: absolute;
+				z-index: 10;
+				left: 0;
+				right: 0;
+				max-height: 260px;
+				overflow-y: auto;
+				background: vars.$rgb-bg;
+				border: 1px solid vars.$rgb-border-grey--trans;
+				border-top: none;
+
+				&:empty {
+					display: none;
+				}
+			}
+
+			&picker-row {
+				padding: 3px 8px;
+				cursor: pointer;
+
+				&:hover {
+					background: vars.$rgb-border-grey--trans-muted;
+				}
+			}
+
+			&totals {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 16px;
+				margin-top: 6px;
+				padding-top: 4px;
+				border-top: 1px solid vars.$rgb-border-grey--trans-muted;
+				font-size: 12px;
+			}
+		}
+	}
+
+	.ve-night-mode .crafting-tool {
+		&__ {
+			&creature,
+			&section,
+			&picker {
+				border-color: vars-night.$rgb-border-grey--trans-night;
+			}
+
+			&picker {
+				background: vars-night.$rgb-bg--night;
+			}
+
+			&creature-head,
+			&section-head,
+			&totals {
+				border-color: vars-night.$rgb-border-grey--trans-night;
+			}
+
+			&picker-row:hover {
+				background: vars-night.$rgb-bg--alt-night;
+			}
+		}
+	}
+}

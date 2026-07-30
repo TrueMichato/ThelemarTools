@@ -9,6 +9,7 @@
 	"scripts": {
 		"version-bump": "npm version -m \"chore(version): bump\"",
 		"gen": "node node/generate-all.js",
+		"gen:crafting": "node node/generate-crafting-data.js",
 		"gen:search-index": "node node/generate-search-index.js",
 		"gen:pages": "node node/generate-pages.js",
 		"clean-jsons": "node node/clean-jsons.js",

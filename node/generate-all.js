@@ -8,6 +8,7 @@ async function main () {
 	await (await import("./generate-tables-data.js")).default;
 	await import("./generate-subclass-lookup.js");
 	await (await import("./generate-variantrules-data.js")).default;
+	await (await import("./generate-crafting-data.js")).default;
 	await (await import("./generate-spell-source-lookup.js")).default;
 	await import("./generate-nav-adventure-book-index.js");
 	await import("./generate-all-maps.js");

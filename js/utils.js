@@ -3655,6 +3655,7 @@ globalThis.UrlUtil = class {
 	static PG_DECKS = "decks.html";
 	static PG_BASTIONS = "bastions.html";
 	static PG_ITEM_UPGRADES = "itemupgrades.html";
+	static PG_CRAFTING = "crafting.html";
 
 	static URL_TO_HASH_GENERIC = (it) => UrlUtil.encodeArrayForHash(it.name, it.source);
 
@@ -4043,6 +4044,7 @@ UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_HOMECRAFTS] = UrlUtil.URL_TO_HASH_GENERIC
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_DECKS] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_BASTIONS] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_ITEM_UPGRADES] = UrlUtil.URL_TO_HASH_GENERIC;
+UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CRAFTING] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CLASS_SUBCLASS_FEATURES] = (it) => (it.__prop === "subclassFeature" || it.subclassSource) ? UrlUtil.URL_TO_HASH_BUILDER["subclassFeature"](it) : UrlUtil.URL_TO_HASH_BUILDER["classFeature"](it);
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CREATURE_FEATURES] = UrlUtil.URL_TO_HASH_GENERIC;
 UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_VEHICLE_FEATURES] = UrlUtil.URL_TO_HASH_GENERIC;
@@ -4089,6 +4091,9 @@ UrlUtil.URL_TO_HASH_BUILDER["tableGroup"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.
 UrlUtil.URL_TO_HASH_BUILDER["vehicle"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_VEHICLES];
 UrlUtil.URL_TO_HASH_BUILDER["vehicleUpgrade"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_VEHICLES];
 UrlUtil.URL_TO_HASH_BUILDER["itemUpgrade"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_ITEM_UPGRADES];
+UrlUtil.URL_TO_HASH_BUILDER["craftingMaterial"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CRAFTING];
+UrlUtil.URL_TO_HASH_BUILDER["craftingRecipe"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CRAFTING];
+UrlUtil.URL_TO_HASH_BUILDER["craftingRule"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CRAFTING];
 UrlUtil.URL_TO_HASH_BUILDER["action"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_ACTIONS];
 UrlUtil.URL_TO_HASH_BUILDER["language"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_LANGUAGES];
 UrlUtil.URL_TO_HASH_BUILDER["charoption"] = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CHAR_CREATION_OPTIONS];
@@ -4187,6 +4192,7 @@ UrlUtil.PG_TO_NAME[UrlUtil.PG_MAPS] = "Maps";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_DECKS] = "Decks";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_BASTIONS] = "Bastions";
 UrlUtil.PG_TO_NAME[UrlUtil.PG_ITEM_UPGRADES] = "Item Upgrades";
+UrlUtil.PG_TO_NAME[UrlUtil.PG_CRAFTING] = "Crafting & Harvesting";
 
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_CREATURE] = UrlUtil.PG_BESTIARY;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_SPELL] = UrlUtil.PG_SPELLS;
@@ -4240,6 +4246,9 @@ UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_LEGENDARY_GROUP] = null;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_CHAR_CREATION_OPTIONS] = UrlUtil.PG_CHAR_CREATION_OPTIONS;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_RECIPE] = UrlUtil.PG_RECIPES;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_CROCHET_PATTERN] = UrlUtil.PG_HOMECRAFTS;
+UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_CRAFTING_MATERIAL] = UrlUtil.PG_CRAFTING;
+UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_CRAFTING_RECIPE] = UrlUtil.PG_CRAFTING;
+UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_CRAFTING_RULE] = UrlUtil.PG_CRAFTING;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_STATUS] = UrlUtil.PG_CONDITIONS_DISEASES;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_DECK] = UrlUtil.PG_DECKS;
 UrlUtil.CAT_TO_PAGE[Parser.CAT_ID_FACILITY] = UrlUtil.PG_BASTIONS;
@@ -4289,6 +4298,7 @@ UrlUtil.SUBLIST_PAGES = {
 	[UrlUtil.PG_HOMECRAFTS]: true,
 	[UrlUtil.PG_DECKS]: true,
 	[UrlUtil.PG_BASTIONS]: true,
+	[UrlUtil.PG_CRAFTING]: true,
 };
 
 UrlUtil.FAUX_PAGES = {
@@ -4317,6 +4327,11 @@ UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_REWARDS] = ["reward"];
 UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_TRAPS_HAZARDS] = ["trap", "hazard"];
 UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_VARIANTRULES] = ["variantrule"];
 UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_ITEM_UPGRADES] = ["itemUpgrade"];
+UrlUtil.PAGE_TO_PROPS[UrlUtil.PG_CRAFTING] = ["craftingMaterial", "craftingRecipe", "craftingRule"];
+
+UrlUtil.PROP_TO_PAGE["craftingMaterial"] = UrlUtil.PG_CRAFTING;
+UrlUtil.PROP_TO_PAGE["craftingRecipe"] = UrlUtil.PG_CRAFTING;
+UrlUtil.PROP_TO_PAGE["craftingRule"] = UrlUtil.PG_CRAFTING;
 
 UrlUtil.PROP_TO_PAGE["spell"] = UrlUtil.PG_SPELLS;
 UrlUtil.PROP_TO_PAGE["item"] = UrlUtil.PG_ITEMS;
@@ -7582,6 +7597,21 @@ globalThis.DataUtil = class {
 	static itemUpgrade = class extends _DataUtilPropConfigSingleSource {
 		static _PAGE = UrlUtil.PG_ITEM_UPGRADES;
 		static _FILENAME = "itemupgrades.json";
+	};
+
+	static craftingMaterial = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = UrlUtil.PG_CRAFTING;
+		static _FILENAME = "crafting.json";
+	};
+
+	static craftingRecipe = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = UrlUtil.PG_CRAFTING;
+		static _FILENAME = "crafting.json";
+	};
+
+	static craftingRule = class extends _DataUtilPropConfigSingleSource {
+		static _PAGE = UrlUtil.PG_CRAFTING;
+		static _FILENAME = "crafting.json";
 	};
 
 	static combatmethod = class extends _DataUtilPropConfigSingleSource {

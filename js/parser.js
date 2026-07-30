@@ -2422,6 +2422,53 @@ Parser.itemUpgradeTypeToEquipmentType = function (type) {
 	return "Other";
 };
 
+/* ----- Crafting & Harvesting ----- */
+
+Parser.CRAFTING_PROP_TO_ABV = {
+	"craftingMaterial": "MAT",
+	"craftingRecipe": "CRF",
+	"craftingRule": "RUL",
+};
+
+Parser.craftingPropToAbv = function (prop) {
+	return Parser.CRAFTING_PROP_TO_ABV[prop] ?? "?";
+};
+
+/** Ordered so the filter reads from "raw input" through to "finished thing". */
+Parser.CRAFTING_MATERIAL_CATEGORIES = ["creature part", "herb", "mineral", "food ingredient", "spell component", "other"];
+
+Parser.CRAFTING_RECIPE_CATEGORIES = ["item", "potion", "scroll", "dish", "curse"];
+
+Parser.CRAFTING_RULE_CATEGORIES = ["harvesting", "crafting", "cooking", "components", "materials"];
+
+Parser.craftingCategoryToFull = function (category) {
+	if (!category) return "\u2014";
+	return `${category}`.toTitleCase();
+};
+
+/** Shelf life bands from Arcadia 11. */
+Parser.CRAFTING_SHELF_LIFE_TO_FULL = {
+	"short": "Short (1 week)",
+	"medium": "Medium (1 month)",
+	"long": "Long (4 months)",
+};
+
+Parser.craftingShelfLifeToFull = function (shelfLife) {
+	if (!shelfLife) return null;
+	return Parser.CRAFTING_SHELF_LIFE_TO_FULL[`${shelfLife}`.toLowerCase()] ?? `${shelfLife}`.toTitleCase();
+};
+
+/**
+ * Format a harvestable quantity, which may be a fixed count or a die expression.
+ * @param {{quantity: ?number, quantityRoll: ?string}} harvest
+ */
+Parser.craftingQuantityToFull = function (harvest) {
+	if (!harvest) return "\u2014";
+	if (harvest.quantityRoll) return `{@dice ${harvest.quantityRoll}}`;
+	if (harvest.quantity == null) return "\u2014";
+	return `${harvest.quantity}`;
+};
+
 Parser._ALIGNMENT_ABV_TO_FULL = {
 	"L": "lawful",
 	"N": "neutral",
@@ -2559,6 +2606,9 @@ Parser.CAT_ID_VEHICLE_UPGRADE_OTHER = 56;
 Parser.CAT_ID_CROCHET_PATTERN = 57;
 Parser.CAT_ID_COMBAT_METHOD = 58;
 Parser.CAT_ID_MONSTER_GROUP = 59;
+Parser.CAT_ID_CRAFTING_MATERIAL = 60;
+Parser.CAT_ID_CRAFTING_RECIPE = 61;
+Parser.CAT_ID_CRAFTING_RULE = 62;
 
 Parser.CAT_ID_GROUPS = {
 	"optionalfeature": [
@@ -2645,6 +2695,9 @@ Parser.CAT_ID_TO_FULL[Parser.CAT_ID_SENSES] = "Sense";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_ITEM_MASTERY] = "Item Mastery";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_COMBAT_METHOD] = "Combat Method";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_MONSTER_GROUP] = "Monster Group";
+Parser.CAT_ID_TO_FULL[Parser.CAT_ID_CRAFTING_MATERIAL] = "Crafting Material";
+Parser.CAT_ID_TO_FULL[Parser.CAT_ID_CRAFTING_RECIPE] = "Craftable";
+Parser.CAT_ID_TO_FULL[Parser.CAT_ID_CRAFTING_RULE] = "Crafting Rule";
 
 Parser.pageCategoryToFull = function (catId) {
 	return Parser._parse_aToB(Parser.CAT_ID_TO_FULL, catId);
@@ -2711,6 +2764,9 @@ Parser.CAT_ID_TO_PROP[Parser.CAT_ID_SKILLS] = "skill";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_COMBAT_METHOD] = "combatMethod";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_SENSES] = "sense";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_ITEM_MASTERY] = "itemMastery";
+Parser.CAT_ID_TO_PROP[Parser.CAT_ID_CRAFTING_MATERIAL] = "craftingMaterial";
+Parser.CAT_ID_TO_PROP[Parser.CAT_ID_CRAFTING_RECIPE] = "craftingRecipe";
+Parser.CAT_ID_TO_PROP[Parser.CAT_ID_CRAFTING_RULE] = "craftingRule";
 
 Parser.pageCategoryToProp = function (catId) {
 	return Parser._parse_aToB(Parser.CAT_ID_TO_PROP, catId);
@@ -4542,6 +4598,9 @@ Parser.PROP_TO_DISPLAY_NAME = {
 	"charoption": "Other Character Creation Option",
 	"encounterShape": "Encounter Shape",
 	"crochetPattern": "Crochet Pattern",
+	"craftingMaterial": "Material",
+	"craftingRecipe": "Craftable",
+	"craftingRule": "Crafting Rule",
 
 	"bonus": "Bonus Action",
 	"legendary": "Legendary Action",

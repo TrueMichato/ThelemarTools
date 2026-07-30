@@ -632,6 +632,7 @@
 			"type": "G",
 			"rarity": "unknown",
 			"weight": 0.5,
+			"value": 35000,
 			"entries": [
 				"A vial of blood from a {@creature unicorn}. When used as a variant spell component for HP restoration spells, roll one additional die. For {@spell aid}, HP max and current increase by additional 10."
 			],
@@ -707,6 +708,7 @@
 			"type": "G",
 			"rarity": "unknown",
 			"weight": 1,
+			"value": 280000,
 			"entries": [
 				"A horn from a {@creature unicorn}. When used as a variant spell component for {@spell shield}, you gain a +7 bonus to AC until the start of your next turn."
 			],
@@ -1847,6 +1849,7 @@
 			"type": "G",
 			"rarity": "unknown",
 			"weight": 0.5,
+			"value": 200000,
 			"entries": [
 				"A vial of blood from a {@creature troll}. When used as a variant spell component for {@spell heal}, the target regains 20 HP at the start of each turn for a number of rounds equal to the spell slot level. Acid or fire damage stops it. While active, target dies only at 0 HP without regaining."
 			],
@@ -1929,6 +1932,7 @@
 			"type": "G",
 			"rarity": "unknown",
 			"weight": 0.5,
+			"value": 20000,
 			"entries": [
 				"A foot from an {@creature ettercap}. When used as a variant spell component for {@spell spider climb}, you can target one additional creature within range."
 			],

@@ -6,16 +6,16 @@
 	<!--5ETOOLS_ANALYTICS-->
 	<!--5ETOOLS_ADCODE-->
 	<meta charset="utf-8">
-	<meta name="description" content="">
+	<meta name="description" content="Harvestable materials, craftable items, cooking recipes and crafting rules, searchable and filterable by effect.">
 	<meta http-equiv="X-UA-Compatible" content="IE=edge">
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 	<meta name="mobile-web-app-capable" content="yes">
 
-	<title>Item Upgrades - ThelemarTools</title>
+	<title>Crafting &amp; Harvesting - ThelemarTools</title>
 
 	<link rel="stylesheet" href="css/bootstrap.css">
 	<link rel="stylesheet" href="css/main.css">
-	<link rel="stylesheet" href="css/itemupgrades.css">
+	<link rel="stylesheet" href="css/crafting.css">
 	<link rel="stylesheet" href="css/tgtt-filter.css">
 
 	<!-- Favicons -->
@@ -70,7 +70,7 @@
 
 	<header class="hidden-xs hidden-sm page__header">
 		<div class="container ve-flex-v-baseline">
-			<h1 class="page__title ve-no-wrap ve-my-0" id="page__title">Item Upgrades</h1>
+			<h1 class="page__title ve-no-wrap ve-my-0" id="page__title">Crafting &amp; Harvesting</h1>
 			<p class="page__subtitle ve-no-wrap ve-my-0" id="page__subtitle">Search by name on the left, click a name to display on the right.</p>
 		</div>
 	</header>
@@ -93,12 +93,11 @@
 
 				<div id="filtertools" class="ve-input-group ve-input-group--bottom ve-flex ve-no-shrink">
 					<button type="button" class="ve-col-0-3 ve-btn ve-btn-default ve-btn-xs ve-p-0 ve-lst__btn-collapse-all-previews ve-no-select" name="list-toggle-all-previews">[+]</button>
-					<button type="button" class="ve-col-2-5 sort ve-btn ve-btn-default ve-btn-xs" data-sort="name">Name</button>
-					<button type="button" class="ve-col-1-8 sort ve-btn ve-btn-default ve-btn-xs" data-sort="category">Category</button>
-					<button type="button" class="ve-col-1-5 sort ve-btn ve-btn-default ve-btn-xs" data-sort="tier">Tier</button>
-					<button type="button" class="ve-col-1-2 sort ve-btn ve-btn-default ve-btn-xs" data-sort="type">Type</button>
-					<button type="button" class="ve-col-1-5 sort ve-btn ve-btn-default ve-btn-xs" data-sort="cost">Cost</button>
-					<button type="button" class="ve-col-1 sort ve-btn ve-btn-default ve-btn-xs" data-sort="prerequisite">Prereq</button>
+					<button type="button" class="ve-col-1-2 sort ve-btn ve-btn-default ve-btn-xs" data-sort="type" title="Material, Craftable or Rule">Type</button>
+					<button type="button" class="ve-col-3-8 sort ve-btn ve-btn-default ve-btn-xs" data-sort="name">Name</button>
+					<button type="button" class="ve-col-2-2 sort ve-btn ve-btn-default ve-btn-xs" data-sort="category">Category</button>
+					<button type="button" class="ve-col-1-1 sort ve-btn ve-btn-default ve-btn-xs" data-sort="dc" title="Harvesting or crafting DC">DC</button>
+					<button type="button" class="ve-col-1-4 sort ve-btn ve-btn-default ve-btn-xs" data-sort="value">Value</button>
 					<button type="button" class="sort ve-btn ve-btn-default ve-btn-xs ve-grow ve-text-center" data-sort="source">Source</button>
 				</div>
 
@@ -110,12 +109,11 @@
 			<div id="contentwrapper" class="view-col ve-flex-4">
 				<div id="sublistcontainer" class="sublist sublist--resizable no-print">
 					<div id="sublistsort" class="ve-btn-group sublist__wrp-cols">
-						<button type="button" class="ve-col-3 sort ve-btn ve-btn-default ve-btn-xs" data-sort="name">Name</button>
-						<button type="button" class="ve-col-2-5 sort ve-btn ve-btn-default ve-btn-xs" data-sort="category">Category</button>
-						<button type="button" class="ve-col-2 sort ve-btn ve-btn-default ve-btn-xs" data-sort="tier">Tier</button>
 						<button type="button" class="ve-col-1-5 sort ve-btn ve-btn-default ve-btn-xs" data-sort="type">Type</button>
-						<button type="button" class="ve-col-1 sort ve-btn ve-btn-default ve-btn-xs" data-sort="cost">Cost</button>
-						<button type="button" class="ve-col-2 sort ve-btn ve-btn-default ve-btn-xs" data-sort="source">Source</button>
+						<button type="button" class="ve-col-5 sort ve-btn ve-btn-default ve-btn-xs" data-sort="name">Name</button>
+						<button type="button" class="ve-col-2-5 sort ve-btn ve-btn-default ve-btn-xs" data-sort="category">Category</button>
+						<button type="button" class="ve-col-1-5 sort ve-btn ve-btn-default ve-btn-xs" data-sort="dc">DC</button>
+						<button type="button" class="ve-col-1-5 sort ve-btn ve-btn-default ve-btn-xs" data-sort="value">Value</button>
 					</div>
 
 					<div id="sublist" class="list"></div>
@@ -128,12 +126,14 @@
 				<div id="wrp-pagecontent" class="ve-relative wrp-stats-table">
 					<table id="pagecontent" class="ve-w-100 ve-stats">
 						<tr><th class="ve-tbl-border" colspan="6"></th></tr>
-						<tr><td colspan="6" class="initial-message initial-message--med">Select an upgrade from the list to view it here</td></tr>
+						<tr><td colspan="6" class="initial-message initial-message--med">Select an entry from the list to view it here</td></tr>
 						<tr><th class="ve-tbl-border" colspan="6"></th></tr>
 					</table>
 				</div>
 
 				<div class="ve-flex-vh-center ve-mt-2 no-print">
+					<button type="button" class="ve-btn ve-btn-default ve-btn-xs ve-mr-2" id="btn-harvest-lookup" title="Look up everything harvestable from a single creature">Harvest Lookup</button>
+					<button type="button" class="ve-btn ve-btn-default ve-btn-xs ve-mr-2" id="btn-crafting-planner" title="Turn your pinned craftables into a material shopping list">Crafting Planner</button>
 					<button type="button" class="ve-btn ve-btn-default ve-btn-xs ve-mr-2" id="btn-book">Printer View</button>
 					<div class="ve-flex-v-center ve-btn-group" id="btngroup-manager">
 						<button type="button" class="ve-btn ve-btn-xs ve-btn-primary" name="manage-content">Manage Content</button>
@@ -168,9 +168,9 @@
 <script type="text/javascript" defer src="js/hist.js"></script>
 <script type="text/javascript" defer src="js/listpage.js"></script>
 <script type="text/javascript" defer src="js/filter-common.js"></script>
-<script type="text/javascript" defer src="js/filter-itemupgrades.js"></script>
+<script type="text/javascript" defer src="js/filter-crafting.js"></script>
 <script type="text/javascript" defer src="js/tgtt-filter.js"></script>
-<script type="module" src="js/itemupgrades.js"></script>
+<script type="module" src="js/crafting.js"></script>
 <script type="module" defer src="js/list2.js"></script>
 <script type="text/javascript" defer src="lib/elasticlunr.js"></script>
 

@@ -115,6 +115,7 @@ class NavBar {
 		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "deities.html", aText: "Deities"});
 		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "items.html", aText: "Items"});
 		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "itemupgrades.html", aText: "Item Upgrades"});
+		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "crafting.html", aText: "Crafting & Harvesting"});
 		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "languages.html", aText: "Languages"});
 		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "rewards.html", aText: "Supernatural Gifts & Rewards"});
 		this._addElement_li({keyPath: [NavBar._CAT_REFERENCES], page: "psionics.html", aText: "Psionics"});

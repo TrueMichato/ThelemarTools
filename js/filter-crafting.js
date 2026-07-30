@@ -1,0 +1,308 @@
+"use strict";
+
+/**
+ * Filters for the Crafting & Harvesting hub.
+ *
+ * The page spans three entity kinds — materials, craftables and rules — so most filters only apply
+ * to a subset. `PageFilterBase` handles that naturally: an entity with no value for a filter simply
+ * never matches a positive selection on it.
+ *
+ * The headline filter is Effect Tags, which is grouped by the taxonomy the data generator uses.
+ */
+class PageFilterCrafting extends PageFilterBase {
+	/* -------------------------------------------- */
+	/* Static                                       */
+	/* -------------------------------------------- */
+
+	static _PROP_TO_ABV = {
+		"craftingMaterial": "MAT",
+		"craftingRecipe": "CRF",
+		"craftingRule": "RUL",
+	};
+
+	static getTypeAbbreviation (prop) {
+		return this._PROP_TO_ABV[prop] ?? "?";
+	}
+
+	/** Which taxonomy group an effect tag belongs to; mirrors the generator's EFFECT_TAG_GROUPS. */
+	static EFFECT_TAG_GROUPS = {
+		"Damage Type": ["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison damage", "psychic", "radiant", "slashing", "thunder"],
+		"Restoration": ["healing", "temporary hit points", "cures condition", "cures disease", "neutralises poison", "revives"],
+		"Protection": ["resistance", "immunity", "vulnerability", "armour class", "absorbs damage"],
+		"Rolls": ["advantage", "disadvantage", "ability score", "skill bonus", "attack bonus", "saving throw bonus", "critical hit"],
+		"Conditions": ["blinded", "charmed", "deafened", "frightened", "grappled", "incapacitated", "invisible", "paralysed", "petrified", "poisoned", "prone", "restrained", "stunned", "unconscious"],
+		"Movement": ["flying speed", "swimming speed", "climbing speed", "burrowing speed", "increased speed", "teleportation", "planar travel"],
+		"Senses": ["darkvision", "blindsight", "tremorsense", "truesight", "detects magic", "scrying"],
+		"Magic": ["grants spell", "spell component", "concentration", "summoning", "animates dead", "shapechanging", "wild magic", "dispels magic", "counters magic"],
+		"Mechanics": ["forces a saving throw", "area of effect", "requires an action", "lasting effect", "single use"],
+		"Crafting Use": ["armour material", "weapon material", "ammunition", "poison crafting", "potion crafting", "food", "crafting ingredient", "spell reagent", "trade good"],
+		"Utility": ["light source", "adhesive", "acid solvent", "waterproofing", "disguise", "language", "communication"],
+	};
+
+	static _EFFECT_TAG_TO_GROUP = Object.entries(PageFilterCrafting.EFFECT_TAG_GROUPS)
+		.reduce((acc, [group, tags]) => {
+			tags.forEach(tag => acc[tag] = group);
+			return acc;
+		}, {});
+
+	static getEffectTagGroup (tag) {
+		return this._EFFECT_TAG_TO_GROUP[tag] ?? "Other";
+	}
+
+	static _ascSortEffectTag (a, b) {
+		const groupOrder = Object.keys(PageFilterCrafting.EFFECT_TAG_GROUPS);
+		const ixA = groupOrder.indexOf(PageFilterCrafting.getEffectTagGroup(a.item));
+		const ixB = groupOrder.indexOf(PageFilterCrafting.getEffectTagGroup(b.item));
+		return SortUtil.ascSort(~ixA ? ixA : Number.MAX_SAFE_INTEGER, ~ixB ? ixB : Number.MAX_SAFE_INTEGER)
+			|| SortUtil.ascSortLower(a.item, b.item);
+	}
+
+	/** Column sorting for the list. */
+	static sortCrafting (itemA, itemB, options) {
+		switch (options.sortBy) {
+			case "type":
+			case "category":
+			case "source":
+				return SortUtil.ascSortLower(itemA.values[options.sortBy], itemB.values[options.sortBy]) || SortUtil.listSort(itemA, itemB, options);
+			case "dc":
+			case "value":
+				// Entries with no DC/value sort last regardless of direction
+				return SortUtil.ascSort(itemA.values[options.sortBy] ?? Number.MAX_SAFE_INTEGER, itemB.values[options.sortBy] ?? Number.MAX_SAFE_INTEGER)
+					|| SortUtil.listSort(itemA, itemB, options);
+			default:
+				return SortUtil.listSort(itemA, itemB, options);
+		}
+	}
+
+	/* -------------------------------------------- */
+	/* Construction                                 */
+	/* -------------------------------------------- */
+
+	constructor () {
+		super();
+
+		this._typeFilter = new Filter({
+			header: "Type",
+			items: ["craftingMaterial", "craftingRecipe", "craftingRule"],
+			displayFn: it => Parser.getPropDisplayName(it),
+			itemSortFn: null,
+		});
+
+		this._categoryFilter = new Filter({
+			header: "Category",
+			items: [...new Set([
+				...Parser.CRAFTING_MATERIAL_CATEGORIES,
+				...Parser.CRAFTING_RECIPE_CATEGORIES,
+				...Parser.CRAFTING_RULE_CATEGORIES,
+			])],
+			displayFn: Parser.craftingCategoryToFull,
+			groupFn: it => {
+				if (Parser.CRAFTING_MATERIAL_CATEGORIES.includes(it)) return "Material";
+				if (Parser.CRAFTING_RECIPE_CATEGORIES.includes(it)) return "Craftable";
+				return "Rule";
+			},
+			itemSortFn: null,
+		});
+
+		this._effectTagFilter = new Filter({
+			header: "Effect",
+			items: Object.values(PageFilterCrafting.EFFECT_TAG_GROUPS).flat(),
+			displayFn: it => it.toTitleCase(),
+			groupFn: it => PageFilterCrafting.getEffectTagGroup(it),
+			itemSortFn: PageFilterCrafting._ascSortEffectTag.bind(PageFilterCrafting),
+		});
+
+		/* ----- Harvesting ----- */
+
+		this._creatureFilter = new SearchableFilter({header: "Source Creature"});
+
+		this._creatureTypeFilter = new Filter({
+			header: "Creature Type",
+			displayFn: it => `${it}`.toTitleCase(),
+		});
+
+		this._crFilter = new RangeFilter({
+			header: "Creature CR",
+			isLabelled: true,
+			labelSortFn: SortUtil.ascSortCr,
+			labels: [...Parser.CRS],
+		});
+
+		this._harvestDcFilter = new RangeFilter({header: "Harvest DC", min: 5, max: 30, isAllowGreater: true});
+
+		this._biomeFilter = new Filter({header: "Biome", displayFn: it => `${it}`.toTitleCase()});
+
+		this._shelfLifeFilter = new Filter({
+			header: "Shelf Life",
+			items: ["short", "medium", "long"],
+			displayFn: Parser.craftingShelfLifeToFull,
+			itemSortFn: null,
+		});
+
+		/* ----- Crafting ----- */
+
+		this._crafterFilter = new Filter({header: "Crafter", displayFn: it => `${it}`.toTitleCase()});
+
+		this._craftDcFilter = new RangeFilter({header: "Crafting DC", min: 5, max: 30, isAllowGreater: true});
+
+		this._rarityFilter = new Filter({
+			header: "Rarity",
+			items: [...Parser.ITEM_RARITIES].filter(it => it !== "none" && it !== "unknown"),
+			displayFn: it => `${it}`.toTitleCase(),
+			itemSortFn: null,
+		});
+
+		this._spellFilter = new SearchableFilter({header: "Variant Component For Spell"});
+
+		/* ----- Economy ----- */
+
+		this._valueFilter = new RangeFilter({
+			header: "Value",
+			isLabelled: true,
+			isAllowGreater: true,
+			labelSortFn: null,
+			labels: [
+				0,
+				...[...new Array(9)].map((_, i) => (i + 1) * 10),
+				...[...new Array(9)].map((_, i) => (i + 1) * 100),
+				...[...new Array(9)].map((_, i) => (i + 1) * 1_000),
+				...[...new Array(9)].map((_, i) => (i + 1) * 10_000),
+				...[...new Array(10)].map((_, i) => (i + 1) * 100_000),
+			],
+			labelDisplayFn: it => !it ? "None" : Parser.getDisplayCurrency(CurrencyUtil.doSimplifyCoins({cp: it})),
+		});
+
+		this._weightFilter = new RangeFilter({header: "Weight", min: 0, max: 100, isAllowGreater: true, suffix: " lb."});
+
+		this._miscFilter = new Filter({
+			header: "Miscellaneous",
+			items: [
+				"Has Mechanical Effect",
+				"Has Use Effect",
+				"Requires Preparation",
+				"Craftable From",
+				"Has Ingredients",
+				"Has Structured Spell Effects",
+				"Appears In Multiple Books",
+				"SRD",
+				"Legacy",
+			],
+			isMiscFilter: true,
+			deselFn: PageFilterBase.defaultMiscellaneousDeselFn.bind(PageFilterBase),
+		});
+
+		this._harvestFilter = new MultiFilter({
+			header: "Harvesting",
+			filters: [this._creatureFilter, this._creatureTypeFilter, this._crFilter, this._harvestDcFilter, this._biomeFilter, this._shelfLifeFilter],
+			isAddDropdownToggle: true,
+		});
+
+		this._craftFilter = new MultiFilter({
+			header: "Crafting",
+			filters: [this._crafterFilter, this._craftDcFilter, this._rarityFilter, this._spellFilter],
+			isAddDropdownToggle: true,
+		});
+	}
+
+	/* -------------------------------------------- */
+	/* Mutation                                     */
+	/* -------------------------------------------- */
+
+	static mutateForFilters (ent) {
+		this._mutateForFilters_commonSources(ent);
+		this._mutateForFilters_commonMisc(ent);
+
+		ent._fCategory = ent.materialCategory || ent.recipeCategory || ent.ruleCategory || null;
+
+		ent._fEffectTags = ent.effectTags || [];
+
+		const harvest = ent.harvest || {};
+		ent._fCreature = harvest.creature?.name || null;
+		ent._fCreatureType = harvest.creatureType || null;
+		ent._fCr = harvest.cr != null ? Parser.numberToCr(harvest.cr) : null;
+		ent._fHarvestDc = harvest.dc ?? null;
+		ent._fBiome = harvest.biome || null;
+		ent._fShelfLife = harvest.shelfLife || null;
+
+		ent._fCrafter = ent.crafter || null;
+		ent._fCraftDc = ent.craftDC ?? null;
+		ent._fRarity = ent.rarity && ent.rarity !== "none" && ent.rarity !== "unknown" ? ent.rarity : null;
+		ent._fSpells = (ent.spells || []).map(sp => sp.name.toTitleCase());
+
+		ent._fValue = ent.value ?? null;
+		ent._fWeight = ent.weight ?? null;
+
+		if (ent.hasMechanicalEffect) ent._fMisc.push("Has Mechanical Effect");
+		if (ent.hasUseEffect) ent._fMisc.push("Has Use Effect");
+		if (ent.harvest?.requiresPreparation) ent._fMisc.push("Requires Preparation");
+		if ((ent.usedInRecipes || []).length) ent._fMisc.push("Craftable From");
+		if ((ent.ingredients || []).length) ent._fMisc.push("Has Ingredients");
+		if (ent.variantComponent?.spellEffects?.length) ent._fMisc.push("Has Structured Spell Effects");
+		if ((ent.alsoIn || []).length) ent._fMisc.push("Appears In Multiple Books");
+	}
+
+	addToFilters (ent, isExcluded) {
+		if (isExcluded) return;
+
+		this._sourceFilter.addItem(ent._fSources);
+		this._typeFilter.addItem(ent.__prop);
+		this._categoryFilter.addItem(ent._fCategory);
+		this._effectTagFilter.addItem(ent._fEffectTags);
+		this._creatureFilter.addItem(ent._fCreature);
+		this._creatureTypeFilter.addItem(ent._fCreatureType);
+		this._crFilter.addItem(ent._fCr);
+		this._harvestDcFilter.addItem(ent._fHarvestDc);
+		this._biomeFilter.addItem(ent._fBiome);
+		this._shelfLifeFilter.addItem(ent._fShelfLife);
+		this._crafterFilter.addItem(ent._fCrafter);
+		this._craftDcFilter.addItem(ent._fCraftDc);
+		this._rarityFilter.addItem(ent._fRarity);
+		this._spellFilter.addItem(ent._fSpells);
+		this._valueFilter.addItem(ent._fValue);
+		this._weightFilter.addItem(ent._fWeight);
+		this._miscFilter.addItem(ent._fMisc);
+	}
+
+	async _pPopulateBoxOptions (opts) {
+		opts.filters = [
+			this._sourceFilter,
+			this._typeFilter,
+			this._categoryFilter,
+			this._effectTagFilter,
+			this._harvestFilter,
+			this._craftFilter,
+			this._valueFilter,
+			this._weightFilter,
+			this._miscFilter,
+		];
+	}
+
+	toDisplay (values, ent) {
+		return this._filterBox.toDisplay(
+			values,
+			ent._fSources,
+			ent.__prop,
+			ent._fCategory,
+			ent._fEffectTags,
+			[
+				ent._fCreature,
+				ent._fCreatureType,
+				ent._fCr,
+				ent._fHarvestDc,
+				ent._fBiome,
+				ent._fShelfLife,
+			],
+			[
+				ent._fCrafter,
+				ent._fCraftDc,
+				ent._fRarity,
+				ent._fSpells,
+			],
+			ent._fValue,
+			ent._fWeight,
+			ent._fMisc,
+		);
+	}
+}
+
+globalThis.PageFilterCrafting = PageFilterCrafting;

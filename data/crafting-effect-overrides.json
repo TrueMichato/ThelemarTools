@@ -1,0 +1,9 @@
+{
+	"_readme": [
+		"Hand-curated corrections to the effect tags that node/generate-crafting-data.js derives from prose.",
+		"Keys are `name|source` in lowercase; values may `add` and/or `remove` tags.",
+		"Valid tag names are listed in EFFECT_TAG_GROUPS in node/generate-crafting-data/crafting-effect-tags.js.",
+		"Overrides are applied last, so they always win. Re-run `npm run gen:crafting` after editing."
+	],
+	"overrides": {}
+}

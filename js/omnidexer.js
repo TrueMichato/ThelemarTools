@@ -1308,6 +1308,42 @@ class IndexableFileCrochetPatterns extends IndexableFile {
 	}
 }
 
+class IndexableFileCraftingMaterials extends IndexableFile {
+	constructor () {
+		super({
+			category: Parser.CAT_ID_CRAFTING_MATERIAL,
+			file: "crafting.json",
+			listProp: "craftingMaterial",
+			baseUrl: UrlUtil.PG_CRAFTING,
+			isHover: true,
+		});
+	}
+}
+
+class IndexableFileCraftingRecipes extends IndexableFile {
+	constructor () {
+		super({
+			category: Parser.CAT_ID_CRAFTING_RECIPE,
+			file: "crafting.json",
+			listProp: "craftingRecipe",
+			baseUrl: UrlUtil.PG_CRAFTING,
+			isHover: true,
+		});
+	}
+}
+
+class IndexableFileCraftingRules extends IndexableFile {
+	constructor () {
+		super({
+			category: Parser.CAT_ID_CRAFTING_RULE,
+			file: "crafting.json",
+			listProp: "craftingRule",
+			baseUrl: UrlUtil.PG_CRAFTING,
+			isHover: true,
+		});
+	}
+}
+
 class IndexableFileSkills extends IndexableFile {
 	constructor () {
 		super({
@@ -1458,6 +1494,9 @@ Omnidexer.TO_INDEX = [
 	new IndexableFileCharCreationOptions(),
 	new IndexableFileRecipes(),
 	new IndexableFileCrochetPatterns(),
+	new IndexableFileCraftingMaterials(),
+	new IndexableFileCraftingRecipes(),
+	new IndexableFileCraftingRules(),
 	new IndexableFileSkills(),
 	new IndexableFileSenses(),
 ];

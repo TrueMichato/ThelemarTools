@@ -195,6 +195,14 @@ class DataTypeLoaderItemUpgrade extends DataTypeLoaderSingleSource {
 	_filename = "itemupgrades.json";
 }
 
+/** All three crafting props share one generated data file. */
+class DataTypeLoaderCrafting extends DataTypeLoaderSingleSource {
+	static PROPS = ["craftingMaterial", "craftingRecipe", "craftingRule"];
+	static PAGE = UrlUtil.PG_CRAFTING;
+
+	_filename = "crafting.json";
+}
+
 class DataTypeLoaderCombatMethod extends DataTypeLoaderSingleSource {
 	static PROPS = ["combatMethod"];
 	static PAGE = UrlUtil.PG_COMBAT_METHODS;
@@ -1243,6 +1251,9 @@ export class DataLoader {
 		"language": UrlUtil.PG_LANGUAGES,
 		"recipe": UrlUtil.PG_RECIPES,
 		"crochetPattern": UrlUtil.PG_HOMECRAFTS,
+		"craftingMaterial": UrlUtil.PG_CRAFTING,
+		"craftingRecipe": UrlUtil.PG_CRAFTING,
+		"craftingRule": UrlUtil.PG_CRAFTING,
 		"facility": UrlUtil.PG_BASTIONS,
 		"classFeature": UrlUtil.PG_CLASS_SUBCLASS_FEATURES,
 		"subclassFeature": UrlUtil.PG_CLASS_SUBCLASS_FEATURES,
@@ -1327,6 +1338,7 @@ export class DataLoader {
 		DataTypeLoaderFeat.register({fnRegister});
 		DataTypeLoaderOptionalfeature.register({fnRegister});
 		DataTypeLoaderItemUpgrade.register({fnRegister});
+		DataTypeLoaderCrafting.register({fnRegister});
 		DataTypeLoaderCombatMethod.register({fnRegister});
 		DataTypeLoaderReward.register({fnRegister});
 		DataTypeLoaderCharoption.register({fnRegister});
