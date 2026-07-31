@@ -8,6 +8,8 @@ Toggle abilities are features that can be activated and deactivated, providing t
 
 - Standard D&D abilities (Rage, Wild Shape, Patient Defense)
 - Wizard features (Bladesong)
+- Blood Hunter hemocraft (Crimson Rite and Order of the Lycan's Hybrid Transformation)
+- Way of the Astral Self manifestations (Arms, Visage, Body, and Awakened)
 - Combat stances (from various homebrew sources)
 - Custom/homebrew toggle abilities
 - Automatic detection and categorization
@@ -55,6 +57,7 @@ static ACTIVE_STATE_TYPES = {
 | `icon` | string | Emoji icon |
 | `description` | string | Brief description |
 | `effects` | array | Mechanical effects while active |
+| `trigger` | object | Optional in-play control `{label, actionType, effectType}` backed by a matching active effect |
 | `duration` | string | How long it lasts |
 | `endConditions` | array | Ways the state can end |
 | `resourceName` | string | Resource consumed (e.g., "Rage", "Ki Points") |
@@ -65,6 +68,20 @@ static ACTIVE_STATE_TYPES = {
 | `requiresClassLevel` | number | Minimum level (optional) |
 | `isGeneric` | boolean | If true, effects parsed from feature |
 | `useFeatureDescription` | boolean | Show feature description instead of generic |
+
+### Astral Self state lifecycle
+
+The four Astral Self manifestations are separate active states. Arms and Visage
+can be activated independently, Body requires both, and Awakened activates the
+complete set while deducting its five-point cost only once. Dependency teardown
+is bidirectional: ending Arms or Visage ends Body and Awakened, while ending
+Awakened ends all three components. Their `endConditions` also route through the
+generic incapacitation/0-HP teardown path.
+
+Arms uses `variablePointSpend` so the level 6+ UI can offer Arms for one
+Ki/Focus point or Arms plus Visage for two. Visage and Body expose resolved
+`trigger` controls for speech modes and Deflect Energy; the trigger resolver
+applies ranges, ability modifiers, and action-economy costs before rendering.
 
 ---
 
@@ -155,6 +172,29 @@ wildShape: {
 }
 ```
 
+#### Hybrid Transformation (Blood Hunter: Order of the Lycan)
+
+Hybrid Transformation uses a short-rest pool (one use at level 3, two at level
+11, unlimited at level 18). Its state supplies Strength check/save advantage,
+conditional nonsilvered nonmagical B/P/S resistance, the Predatory Strike
+natural weapon, transformed walking-speed bonus, Lycan attack/damage scaling,
+and the non-heavy-armor AC bonus. Conditional resistance metadata remains
+qualified in the Defenses display rather than appearing as unconditional B/P/S
+resistance.
+Level 11 regeneration is applied when combat rounds advance while the Lycan is
+below half hit points, including the first turn when combat starts. Starting a
+turn below half hit points also rolls the
+Bloodlust Wisdom save (with Brand of the Voracious advantage, or automatic
+failure while concentrating/Raging). Finite transformations end during a rest;
+level 18 mastery transformations remain active until manually ended. Any Lycan
+automatically reverts at 0 HP.
+
+Crimson Rite is a separate active state created from a selected `CR` optional
+feature. Activation rolls the Hemocraft Die as an HP cost, records the selected
+weapon (including Predatory Strike), and adds the rite's typed damage only to
+that weapon. Predatory Strike exposes both its bludgeoning and slashing damage
+choices as rollable attacks while sharing one rite-empowered weapon identity.
+
 #### Reckless Attack (Barbarian)
 ```javascript
 recklessAttack: {
@@ -182,7 +222,82 @@ patientDefense: {
 }
 ```
 
+#### Sun Shield (Sun Soul Monk)
+```javascript
+sunShield: {
+    effects: [
+        {
+            type: "retaliationDamage",
+            target: "meleeAttacker",
+            value: 5,
+            abilityMod: "wis",
+            damageType: "radiant",
+        },
+    ],
+    trigger: {
+        label: "Retaliate",
+        actionType: "reaction",
+        effectType: "retaliationDamage",
+    },
+    duration: "Until extinguished",
+    activationAction: "bonus",
+}
+```
+
+Triggered active-state effects are resolved through
+`getActiveStateTrigger()`. It adds any configured ability modifier to the
+effect value, then the Combat tab renders the trigger as a real action-economy
+control. Sun Shield therefore deals `5 + WIS` radiant damage and consumes the
+character's reaction while combat tracking is active.
+
 ### Combat Stances (TGTT/Homebrew)
+
+#### Astral Self (Way of the Astral Self Monk)
+
+Four cooperating states — `astralArms` (level 3), `astralVisage` (6),
+`astralBody` (11) and `awakenedAstralSelf` (17). They demonstrate three
+patterns worth reusing:
+
+**State dependencies.** `astralBody` declares
+`requiresStates: ["astralArms", "astralVisage"]` and cannot be activated
+until both are present. It also declares `endConditions` naming its
+prerequisites, so it tears down automatically when either ends.
+
+```javascript
+astralBody: {
+    requiresStates: ["astralArms", "astralVisage"],
+    endConditions: ["Arms or Visage ends", "You are incapacitated or die"],
+    activationAction: "free",
+    resourceCost: 0,
+    trigger: {label: "Deflect Energy", actionType: "reaction", effectType: "damageReduction"},
+}
+```
+
+**Conditional, relative reach.** Astral Arms grants an attack whose reach is
+*five feet greater than normal, on your turn only* — not a flat ten feet. The
+granted attack carries `reachBonus` and `reachCondition` rather than an
+absolute `reach`, so it composes correctly with a Large creature, the Reach
+weapon property and any other reach modifier:
+
+```javascript
+{damage: martialArtsDice, damageType: "force", abilityMod: "wis",
+ reachBonus: 5, reachCondition: "onYourTurn", isMelee: true}
+```
+
+`getAttackReach(attack, {isOwnTurn})` returns `base + reachProperty +
+attackReachBonus`, zeroing the bonus when `reachCondition` is `onYourTurn`
+and the roll is off-turn. Prefer this shape over a hardcoded reach for any
+future feature that extends reach situationally.
+
+**Generic incapacitated/death teardown.** `_deactivateStatesForEndCondition()`
+reads each state's own `endConditions` strings and deactivates every active
+state whose conditions mention incapacitation, unconsciousness or death. It is
+called from `setCurrentHp()`, `setHp()`, `addCondition()` and
+`setConditions()`, so any state that documents such an end condition gets
+correct teardown for free — no per-feature hook. This replaced a hardcoded
+`deactivateState("hybridTransformation")` at 0 HP; Blood Hunter's Lycan
+transformation now tears down through the same path because its
+`endConditions` already listed `"Unconscious"`.
 
 #### Heavy Stance (Adamant Mountain)
 ```javascript

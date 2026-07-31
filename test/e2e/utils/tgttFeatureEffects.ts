@@ -382,7 +382,32 @@ export const XGE_ARCANE_SHOT_EFFECTS: Record<string, EffectCheck[]> = {
 };
 
 /** XPHB Battle Master Maneuvers. */
-export const XPHB_MANEUVER_EFFECTS: Record<string, EffectCheck[]> = {};
+const _maneuverActivatable = (name: string): EffectCheck[] => [
+	{kind: "pickActivatable", matchAny: [new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")], min: 1},
+];
+
+export const XPHB_MANEUVER_EFFECTS: Record<string, EffectCheck[]> = {
+	"Ambush": _maneuverActivatable("Ambush"),
+	"Bait and Switch": _maneuverActivatable("Bait and Switch"),
+	"Commander's Strike": _maneuverActivatable("Commander's Strike"),
+	"Commanding Presence": _maneuverActivatable("Commanding Presence"),
+	"Disarming Attack": _maneuverActivatable("Disarming Attack"),
+	"Distracting Strike": _maneuverActivatable("Distracting Strike"),
+	"Evasive Footwork": _maneuverActivatable("Evasive Footwork"),
+	"Feinting Attack": _maneuverActivatable("Feinting Attack"),
+	"Goading Attack": _maneuverActivatable("Goading Attack"),
+	"Lunging Attack": _maneuverActivatable("Lunging Attack"),
+	"Maneuvering Attack": _maneuverActivatable("Maneuvering Attack"),
+	"Menacing Attack": _maneuverActivatable("Menacing Attack"),
+	"Parry": _maneuverActivatable("Parry"),
+	"Precision Attack": _maneuverActivatable("Precision Attack"),
+	"Pushing Attack": _maneuverActivatable("Pushing Attack"),
+	"Rally": _maneuverActivatable("Rally"),
+	"Riposte": _maneuverActivatable("Riposte"),
+	"Sweeping Attack": _maneuverActivatable("Sweeping Attack"),
+	"Tactical Assessment": _maneuverActivatable("Tactical Assessment"),
+	"Trip Attack": _maneuverActivatable("Trip Attack"),
+};
 
 /** XPHB Pact Boons. */
 export const XPHB_PACT_BOON_EFFECTS: Record<string, EffectCheck[]> = {

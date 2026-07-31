@@ -2053,6 +2053,8 @@ class CharacterSheetLevelUp {
 		// the Illrigger Interdict-boon progression, never the generic feat/epic-boon slot.
 		const feats = this._page.filterByAllowedSources(this._page.getFeats() || [])
 			.filter((/** @type {*} */ f) => !CharacterSheetClassUtils.isInterdictBoonEntry(f));
+		const getFeatChoices = (/** @type {*} */ feat) =>
+			CharacterSheetClassUtils.buildFeatChoicesSpec(feat, {state: this._state, page: this._page});
 
 		// === Epic Boon section (level 19 for XPHB / TGTT classes) ===
 		if (isEpicBoonLevel) {
@@ -2139,18 +2141,6 @@ class CharacterSheetLevelUp {
 		const featSearch = e_({outer: `<input type="text" class="ve-form-control mb-2" placeholder="Search feats...">`});
 		const featList = e_({outer: `<div class="charsheet__levelup-feats-list"></div>`});
 		const featChoicesContainer = e_({outer: `<div class="charsheet__levelup-feat-choices"></div>`});
-
-		// Helper to detect if feat has choices.
-		// Declared as a `function` (not `const` arrow) so it is hoisted
-		// to the top of `_renderAsiSelection` — the Epic Boon section
-		// (rendered earlier in the function body) needs to call it.
-		// We capture `this` into `self` because strict-mode `function`
-		// declarations don't inherit lexical `this`, so the optional-feature
-		// branch below previously crashed for any feat with `optionalfeatureProgression`.
-		const self = this;
-		function getFeatChoices (/** @type {*} */ feat) {
-			return CharacterSheetClassUtils.buildFeatChoicesSpec(feat, {state: self._state, page: self._page});
-		}
 
 		const renderFeats = (filter = "") => {
 			featList.innerHTML = "";
@@ -2849,7 +2839,7 @@ class CharacterSheetLevelUp {
 		const classSource = classData?.source || null;
 		let showAll = showAllSetting;
 		let allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(
-			CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll}),
+			CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll, preserveFeatureTypes: ["MV:B"]}),
 			{enableTgtt, classSource},
 		);
 		const existingOptFeatures = this._state.getFeatures().filter((/** @type {*} */ f) => f.featureType === "Optional Feature");
@@ -2872,7 +2862,7 @@ class CharacterSheetLevelUp {
 
 		const renderFeatures = () => {
 			allOptFeatures = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(
-				CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll}),
+				CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(allOptFeaturesRaw, {showAll, preserveFeatureTypes: ["MV:B"]}),
 				{enableTgtt, classSource},
 			);
 			container.innerHTML = "";
@@ -3356,6 +3346,7 @@ class CharacterSheetLevelUp {
 	 */
 	_renderStandardOptionalFeaturesLevelUp (/** @type {*} */ container, /** @type {*} */ gain, /** @type {*} */ allOptFeatures, /** @type {*} */ existingOptFeatures, /** @type {*} */ onSelect, /** @type {*} */ featureKey, /** @type {*} */ levelContext = null) {
 		/** @type {*[]} */ const selectedForType = [];
+		let replacementTarget = null;
 
 		// Build prereq context and delegate to the shared eligibility filter so the
 		// builder (level 1) and level-up paths agree on what counts as selectable.
@@ -3390,7 +3381,15 @@ class CharacterSheetLevelUp {
 			state: this._state,
 		};
 
-		const availableOptions = CharacterSheetClassUtils.getEligibleOptionalFeatures(allOptFeatures, {
+		const progressionSource = this._state.getClasses()
+			.find(cls => cls.name === levelContext?.className && (!levelContext?.classSource || cls.source === levelContext.classSource))
+			?.subclass?.source || levelContext?.classSource;
+		const progressionOptions = CharacterSheetClassUtils.filterOptionalFeaturesForProgressionSource(
+			allOptFeatures,
+			gain.featureTypes,
+			progressionSource,
+		);
+		const availableOptions = CharacterSheetClassUtils.getEligibleOptionalFeatures(progressionOptions, {
 			featureTypes: gain.featureTypes,
 			prereqContext,
 			alreadyKnown: existingOptFeatures,
@@ -3400,11 +3399,55 @@ class CharacterSheetLevelUp {
 			<div class="charsheet__levelup-opt-gain mb-3">
 				<p><strong>${gain.name}:</strong> Choose ${gain.newCount} new option${gain.newCount > 1 ? "s" : ""}</p>
 				<div class="charsheet__levelup-opt-list"></div>
-				<div class="ve-small ve-muted mt-1">Selected: <span class="opt-count">0</span>/${gain.newCount}</div>
+				<div class="ve-small ve-muted mt-1">Selected: <span class="opt-count">0</span>/<span class="opt-target">${gain.newCount}</span></div>
 			</div>
 		`});
 
 		const list = gainSection.querySelector(".charsheet__levelup-opt-list");
+		const knownForType = existingOptFeatures.filter((/** @type {*} */ feature) =>
+			feature.optionalFeatureTypes?.some((/** @type {*} */ ft) => gain.featureTypes.includes(ft)),
+		);
+		const getMaxSelections = () => gain.newCount + (replacementTarget ? 1 : 0);
+		const syncReplacement = () => {
+			selectedForType.forEach((/** @type {*} */ opt) => { delete opt._replaces; });
+			if (replacementTarget && selectedForType.length > gain.newCount) {
+				selectedForType[gain.newCount]._replaces = {
+					name: replacementTarget.name,
+					source: replacementTarget.source,
+				};
+			}
+			gainSection.querySelector(".opt-count").textContent = selectedForType.length;
+			gainSection.querySelector(".opt-target").textContent = getMaxSelections();
+			onSelect(featureKey, [...selectedForType]);
+		};
+
+		if (gain.replacementCount && knownForType.length) {
+			const replaceRow = e_({outer: `
+				<div class="ve-flex-v-center mb-2 p-2" style="border: 1px solid var(--cs-border); border-radius: 4px;">
+					<label class="mr-2 mb-0"><input type="checkbox" class="mr-1"> Replace one known maneuver</label>
+					<select class="form-control input-xs" disabled>
+						${knownForType.map((/** @type {*} */ feature, ix) => `<option value="${ix}">${feature.name}</option>`).join("")}
+					</select>
+				</div>
+			`});
+			const cb = replaceRow.querySelector("input");
+			const sel = replaceRow.querySelector("select");
+			cb.addEventListener("change", () => {
+				if (!cb.checked && selectedForType.length > gain.newCount) {
+					cb.checked = true;
+					JqueryUtil.doToast({type: "warning", content: "Unselect the replacement maneuver before disabling the swap."});
+					return;
+				}
+				sel.disabled = !cb.checked;
+				replacementTarget = cb.checked ? knownForType[Number(sel.value) || 0] : null;
+				syncReplacement();
+			});
+			sel.addEventListener("change", () => {
+				replacementTarget = knownForType[Number(sel.value) || 0];
+				syncReplacement();
+			});
+			list.append(replaceRow);
+		}
 
 		const selectableOptions = availableOptions.filter((/** @type {*} */ opt) => opt._selectable);
 		if (!selectableOptions.length && !availableOptions.some((/** @type {*} */ opt) => opt._alreadyKnown || !opt._meetsPrereqs)) {
@@ -3475,7 +3518,7 @@ class CharacterSheetLevelUp {
 
 				item.querySelector("input").addEventListener("change", (/** @type {*} */ e) => {
 					if (e.target.checked) {
-						if (selectedForType.length < gain.newCount) {
+						if (selectedForType.length < getMaxSelections()) {
 							selectedForType.push(opt);
 							item.style.background = "var(--rgb-link-opacity-10)";
 							// Bug 8: render feat-progression picker if this opt grants any feats.
@@ -3490,7 +3533,7 @@ class CharacterSheetLevelUp {
 							}
 						} else {
 							e.target.checked = false;
-							JqueryUtil.doToast({type: "warning", content: `You can only choose ${gain.newCount} ${gain.name}.`});
+							JqueryUtil.doToast({type: "warning", content: `You can only choose ${getMaxSelections()} ${gain.name}.`});
 						}
 					} else {
 						const idx = selectedForType.findIndex((/** @type {*} */ s) => s.name === opt.name && s.source === opt.source);
@@ -3501,8 +3544,7 @@ class CharacterSheetLevelUp {
 						progressionContainer.style.display = "none";
 						progressionContainer.innerHTML = "";
 					}
-					gainSection.querySelector(".opt-count").textContent = selectedForType.length;
-					onSelect(featureKey, [...selectedForType]);
+					syncReplacement();
 				});
 
 				list.append(item, progressionContainer);
@@ -4544,6 +4586,9 @@ class CharacterSheetLevelUp {
 				// featureKey is like "EI" or "MM" or "CTM:1_CTM:2_..." - the feature types joined
 				const featureTypes = featureKey.split("_");
 				for (const opt of opts) {
+					if (opt._replaces?.name) {
+						this._state.removeFeature(opt._replaces.name, opt._replaces.source);
+					}
 					// Use the original feature's featureType if available (e.g., ["CTM:1AM", "CTM:2AM"])
 					// This preserves the full type info including tradition codes
 					const originalTypes = opt.featureType || featureTypes;
@@ -4983,6 +5028,7 @@ class CharacterSheetLevelUp {
 						name: opt.name,
 						source: opt.source,
 						type: key, // e.g., "EI", "MM"
+						...(opt._replaces ? {_replaces: {...opt._replaces}} : {}),
 					});
 					optFeatureReplay.push(CharacterSheetClassUtils.buildHistoryFeatureSnapshot(opt, {
 						type: key,

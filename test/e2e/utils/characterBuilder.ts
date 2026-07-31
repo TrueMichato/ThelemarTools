@@ -202,6 +202,20 @@ export const PRESET_FULL_MERCY_MONK_CHANGELING: CharacterPreset = {
 	subclassSource: "TGTT",
 };
 
+/** Astral Self Monk Changeling (TCE subclass on the TGTT Monk chassis). */
+export const PRESET_FULL_ASTRAL_SELF_MONK_CHANGELING: CharacterPreset = {
+	race: "Changeling",
+	raceSource: "TGTT",
+	className: "Monk",
+	classSource: "TGTT",
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Astra Manyhands",
+	skillCount: 2,
+	subclassName: "Way of the Astral Self",
+	subclassSource: "TCE",
+};
+
 /** 2. Arcane Archer Fighter Hochling (TGTT) */
 export const PRESET_FULL_ARCANE_ARCHER_HOCHLING: CharacterPreset = {
 	race: "Hochling",
@@ -215,6 +229,21 @@ export const PRESET_FULL_ARCANE_ARCHER_HOCHLING: CharacterPreset = {
 	masteryCount: 3,
 	subclassName: "Arcane Archer",
 	subclassSource: "TGTT",
+};
+
+/** XPHB Battle Master Fighter */
+export const PRESET_FULL_BATTLE_MASTER_FIGHTER: CharacterPreset = {
+	race: "Aarakocra",
+	raceSource: "MPMM",
+	className: "Fighter",
+	classSource: "TGTT",
+	background: "Soldier",
+	bgSource: "PHB'24",
+	name: "Tarin Battlewise",
+	skillCount: 2,
+	masteryCount: 3,
+	subclassName: "Battle Master",
+	subclassSource: "XPHB",
 };
 
 /** 3. Bladesinger Wizard Tabaxi (TGTT) */
@@ -521,9 +550,17 @@ export async function createCharacterViaWizard (
 	await page.locator("#charsheet-btn-new").click();
 	await charSheet.switchToTab(charSheet.tabBuilder);
 
-	// Builder steps (current order, see js/charactersheet/charactersheet-builder.js):
-	//   1. Race  →  2. Background  →  3. Class  →  4. Abilities
-	//   5. Equipment  →  6. Spells  →  7. Details
+	// Builder steps (current order, see js/charactersheet/charactersheet-builder.js
+	// `_renderStepContent`): 0. Name → 1. Race → 2. Background → 3. Class →
+	// 4. Abilities → 5. Equipment → 6. Spells → 7. Details.
+	//
+	// Step 0 was added in 4f059f9a; the harness previously jumped straight to
+	// the Race step and stalled on `#builder-race-list` forever (CS-BUG-025).
+	// `completeNameStep` is a no-op if the step is absent, so this stays
+	// correct if the order changes again.
+
+	// Step 0: Name
+	await builder.completeNameStep(preset.name);
 
 	// Step 1: Race
 	await builder.selectRaceExact(preset.race, preset.raceSource);
@@ -557,6 +594,9 @@ export async function createCharacterViaWizard (
 	if (preset.skillCount) {
 		await builder.selectFirstAvailableSkills(preset.skillCount);
 	}
+	// Presets' `skillCount` can under-count what the class grants; top up from
+	// the live counter so the picker never silently gates Next.
+	await builder.topUpClassSkillsToRequired();
 	// Expertise (Rogue / Bard / TGTT-Ranger) — must come AFTER class skills
 	// are picked so the expertise list isn't empty.
 	await builder.selectFirstAvailableExpertise(4);
@@ -581,6 +621,9 @@ export async function createCharacterViaWizard (
 	// pickers under the optional-features region — these gate Next when
 	// unfilled. The helper is a no-op when the section is absent.
 	await builder.selectCombatTraditionsAndMethods();
+	// Class-feat progressions (Fighter "Class Feats" etc.) render as required
+	// dropdowns that block Next until each slot holds a fully-specified feat.
+	await builder.selectClassFeatProgressions();
 	// Always try feature options (harmless if none exist)
 	await builder.selectFirstAvailableFeatureOptions(10);
 	await builder.clickNext();
@@ -613,11 +656,16 @@ export async function createCharacterViaWizard (
 	// (Note: the builder doesn't refresh `#charsheet-sel-character` after
 	// save, so we don't assert on the dropdown here — only on the
 	// in-memory state, which is what every other module reads.)
+	//
+	// The class check matters: the name is set by the wizard's FIRST step, so
+	// a name-only guard also passes when the wizard silently stalled partway
+	// (e.g. blocked by an unfilled required picker) and never finished.
 	await page.waitForFunction(
 		(name) => {
 			const cs: any = (globalThis as any).charSheet;
 			if (!cs?._currentCharacterId) return false;
-			return cs?._state?.getName?.() === name;
+			if (cs?._state?.getName?.() !== name) return false;
+			return (cs?._state?.getClasses?.() || []).length > 0;
 		},
 		preset.name,
 		{timeout: 10_000},
@@ -731,6 +779,10 @@ export async function levelUpTo (
 		const t0 = Date.now();
 		if (page.isClosed()) throw new Error(`levelUpTo: page closed before reaching L${lvl} (last reached L${lvl - 1})`);
 
+		// A feature-choice prompt left over from the previous level blocks this
+		// one's wizard from closing — clear it before opening the next.
+		await levelUp.resolvePendingFeatureChoices();
+
 		// When `opts.targetClassName` is provided, bypass the Level Up
 		// button entirely and call the production API directly. This
 		// sidesteps the multiclass class-picker modal that
@@ -784,6 +836,7 @@ export async function levelUpTo (
 
 		// Finish this level
 		await levelUp.finish();
+		await levelUp.resolvePendingFeatureChoices();
 		await levelUp.expectModalClosed();
 		await page.waitForTimeout(100);
 

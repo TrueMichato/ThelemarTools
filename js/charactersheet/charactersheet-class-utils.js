@@ -351,10 +351,11 @@ class CharacterSheetClassUtils {
 	 * @param {object} [opts] - Options
 	 * @param {object} opts
 	 * @param {boolean} [opts.showAll=false] - If true, skip deduplication and return all features
+	 * @param {Array<string>} [opts.preserveFeatureTypes] - Feature types whose source variants must remain available for a later progression-source filter
 	 * @returns {Array<*>} Deduplicated optional features
 	 */
 	static deduplicateOptFeaturesByEdition (/** @type {*} */ optFeatures, /** @type {*} */ opts = {}) {
-		const {showAll = false} = opts;
+		const {showAll = false, preserveFeatureTypes = []} = opts;
 		if (!optFeatures?.length) return optFeatures;
 		if (showAll) return optFeatures;
 
@@ -369,7 +370,8 @@ class CharacterSheetClassUtils {
 		// Group by lowercase name
 		const groups = new Map();
 		for (/** @type {*} */ const opt of optFeatures) {
-			const key = opt.name.toLowerCase();
+			const shouldPreserveSource = (opt.featureType || []).some((/** @type {*} */ type) => preserveFeatureTypes.includes(type));
+			const key = `${opt.name.toLowerCase()}${shouldPreserveSource ? `|${opt.source || ""}` : ""}`;
 			if (!groups.has(key)) {
 				groups.set(key, []);
 			}
@@ -2299,6 +2301,21 @@ class CharacterSheetClassUtils {
 			if (!Array.isArray(entries)) return;
 
 			for (/** @type {*} */ const entry of entries) {
+				if (/** @type {*} */ typeof entry === "object"
+					&& entry.type === "abilityDc"
+					&& Array.isArray(entry.attributes)
+					&& entry.attributes.length > 1) {
+					results.push({
+						count: 1,
+						options: entry.attributes.map((ability) => ({
+							name: Parser.attAbvToFull(ability),
+							type: "inline",
+							source: feature.source,
+							entries: [`Use ${Parser.attAbvToFull(ability)} for ${entry.name || feature.name}.`],
+						})),
+					});
+				}
+
 				if (/** @type {*} */ typeof entry === "object" && entry.type === "options") {
 					const count = entry.count || 1;
 					const options = [];
@@ -5007,6 +5024,7 @@ class CharacterSheetClassUtils {
 			languageProficiencies: outFeature.languageProficiencies,
 			skillToolLanguageProficiencies: outFeature.skillToolLanguageProficiencies,
 			savingThrowProficiencies: outFeature.savingThrowProficiencies,
+			_replaces: outFeature._replaces,
 		};
 
 		if (!snapshot.ref) {
@@ -6738,6 +6756,16 @@ class CharacterSheetClassUtils {
 		return 0;
 	}
 
+	static filterOptionalFeaturesForProgressionSource (options, featureTypes, progressionSource) {
+		if (featureTypes?.includes("MV:B") && progressionSource !== Parser.SRC_PHB) {
+			return (options || []).filter(opt => opt.source === Parser.SRC_XPHB);
+		}
+		if (featureTypes?.includes("MV:B") && progressionSource === Parser.SRC_PHB) {
+			return (options || []).filter(opt => opt.source !== Parser.SRC_XPHB);
+		}
+		return options || [];
+	}
+
 	/**
 	 * Compute optional feature gains between currentLevel and newLevel.
 	 *
@@ -6785,8 +6813,6 @@ class CharacterSheetClassUtils {
 
 			const countAtCurrent = CharacterSheetClassUtils._readOptFeatureProgressionCount(optFeatProg.progression, currentLevel);
 			const countAtNew = CharacterSheetClassUtils._readOptFeatureProgressionCount(optFeatProg.progression, newLevel);
-			void countAtCurrent;
-
 			const existingOptFeatures = state.getFeatures().filter((/** @type {*} */ f) => f.featureType === "Optional Feature");
 
 			const matchesFeatureType = (/** @type {*} */ optFeatTypes) => {
@@ -6807,6 +6833,7 @@ class CharacterSheetClassUtils {
 					currentCount: existingOfType,
 					totalCount: countAtNew,
 					newCount: newOptionsCount,
+					replacementCount: featureTypes.includes("MV:B") && countAtNew > countAtCurrent && existingOfType > 0 ? 1 : 0,
 					required: optFeatProg.required || false,
 				});
 			}

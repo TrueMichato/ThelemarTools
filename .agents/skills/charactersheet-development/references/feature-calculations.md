@@ -101,6 +101,32 @@ if (subclassName) {
 ### Active States
 Active states (Rage, Bladesong) provide bonuses that layer on top of feature calculations. The combat module calls `getBonusFromStates(type)` to aggregate these. Feature calculations tell you *what* the character has; active states tell you what's *currently active*.
 
+Blood Hunter (BH2022) follows this split: `getFeatureCalculations()` owns
+Hemocraft scaling, save DCs, known-option counts, Brand values, and Lycan
+level thresholds. Crimson Rite and Hybrid Transformation create runtime active
+states with typed damage, weapon scope, defenses, AC, and natural attacks.
+Their pools are synchronized by `ensureBloodHunterResources()` so Builder,
+Level-Up, Quick Build, saved characters, and the active-state UI share one
+current/max value.
+
+Way of the Astral Self follows the same split. Calculations own level gates,
+Martial Arts dice, activation burst/DC data, `grantedAttacks`, damage riders,
+and Astral Barrage allowance. Runtime active states own whether Arms, Visage,
+Body, or Awakened currently applies. Do not add an Awakened `2d10` bonus-damage
+field: TCE grants Armor of the Spirit and Astral Barrage, not bonus damage.
+
+Astral Arms uses the generic `finesseWis` pseudo-ability to resolve the best
+permitted Strength, Dexterity, or Wisdom modifier. It also demonstrates
+attack-scoped metadata: `reachBonus: 5` plus
+`reachCondition: "onYourTurn"` is resolved by `getAttackReach()`, rather than
+changing global melee reach. Its descriptor's `damage` is already the final
+Martial Arts die and must be consumed unchanged by damage rollers.
+
+Multi-attribute `abilityDc` entries are generic feature choices. Builder,
+Level-Up, and Quick Build persist the selected ability in level-history
+`featureChoices`; calculations should read that durable choice and provide a
+backward-compatible fallback only for legacy saves.
+
 **Aggregation order**: named modifiers → active state bonuses → special bonuses (rage damage, sneak attack dice, critical dice). Stacking is additive unless explicitly noted otherwise.
 
 **Hierarchical effect matching**: When checking for bonuses, the system searches hierarchically:

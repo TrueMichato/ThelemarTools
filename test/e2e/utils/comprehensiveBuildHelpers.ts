@@ -650,6 +650,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "toggleGrantsResistance"; damageType: string}
 	| {kind: "toggleGrantsAdvantage"; rollType: string}
 	| {kind: "toggleGrantsImmunity"; damageType: string}
+	| {kind: "toggleAddsAttack"; namePattern: string | RegExp}
 
 	// === Roll: clicking the button doesn't throw ===
 	| {kind: "rollAbilityCheck"; ability: AblKey}
@@ -721,6 +722,7 @@ const _TOGGLE_EFFECT_KINDS = new Set([
 	"toggleGrantsResistance",
 	"toggleGrantsAdvantage",
 	"toggleGrantsImmunity",
+	"toggleAddsAttack",
 ]);
 
 function _checkNumeric (
@@ -1014,6 +1016,8 @@ async function _runToggleEffect (
 	afterImm: string[],
 	advProbes: Map<string, {advBefore: boolean; advAfter: boolean}>,
 	abilityModsBefore: Record<string, number>,
+	beforeAttackNames: string[],
+	afterAttackNames: string[],
 ): Promise<void> {
 	switch (e.kind) {
 		case "togglePlusAc": {
@@ -1057,6 +1061,14 @@ async function _runToggleEffect (
 			if (!probe) throw new Error(`internal: no adv probe captured for "${e.rollType}"`);
 			if (probe.advBefore) throw new Error(`already had advantage on "${e.rollType}" before toggle — can't probe`);
 			if (!probe.advAfter) throw new Error(`expected advantage on "${e.rollType}" after toggle, but state.getAdvantageState reports none`);
+			return;
+		}
+		case "toggleAddsAttack": {
+			const re = e.namePattern instanceof RegExp ? e.namePattern : new RegExp(e.namePattern, "i");
+			if (beforeAttackNames.some(name => re.test(name))) throw new Error(`attack matching ${re} already present before toggle`);
+			if (!afterAttackNames.some(name => re.test(name))) {
+				throw new Error(`attack matching ${re} not granted by toggle. seen=[${afterAttackNames.slice(0, 15).join(", ")}]`);
+			}
 			return;
 		}
 	}
@@ -1246,6 +1258,7 @@ export async function assertFeaturesMatrix (
 						const before = await charSheet.snapshotEffectiveStats();
 						const beforeRes = await charSheet.getResistances();
 						const beforeImm = await charSheet.getImmunities();
+						const beforeAttackNames = await charSheet.getAttackNames();
 						const advProbes = new Map<string, {advBefore: boolean; advAfter: boolean}>();
 						for (const eff of toggleEffects) {
 							if (eff.kind === "toggleGrantsAdvantage") {
@@ -1260,6 +1273,7 @@ export async function assertFeaturesMatrix (
 							const after = await charSheet.snapshotEffectiveStats();
 							const afterRes = await charSheet.getResistances();
 							const afterImm = await charSheet.getImmunities();
+							const afterAttackNames = await charSheet.getAttackNames();
 							for (const eff of toggleEffects) {
 								if (eff.kind === "toggleGrantsAdvantage") {
 									const s = await charSheet.getAdvantageState(eff.rollType);
@@ -1269,7 +1283,7 @@ export async function assertFeaturesMatrix (
 							}
 							for (const eff of toggleEffects) {
 								try {
-									await _runToggleEffect(eff, before, after, beforeRes, afterRes, beforeImm, afterImm, advProbes, before.abilityMods);
+									await _runToggleEffect(eff, before, after, beforeRes, afterRes, beforeImm, afterImm, advProbes, before.abilityMods, beforeAttackNames, afterAttackNames);
 								} catch (eErr: any) {
 									errors.push(`${label} effect ${eff.kind}: ${eErr.message}`);
 								}

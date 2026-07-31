@@ -14,9 +14,15 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 
 ## Active States / Toggle Abilities
 
-### ACTIVE_STATE_TYPES (24 types defined)
+### ACTIVE_STATE_TYPES
 
-Core states: `rage`, `bladesong`, `wildShape`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
+Core states: `rage`, `bladesong`, `sunShield`, `wildShape`, `hybridTransformation`, `crimsonRite`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
+
+Astral Self states: `astralArms`, `astralVisage`, `astralBody`,
+`awakenedAstralSelf`. Body uses `requiresStates`; ending a prerequisite
+cascades through dependents. All four declare incapacitation/death
+`endConditions`, which are enforced by the shared condition and 0-HP teardown
+path.
 
 Each state type defines:
 ```javascript
@@ -30,6 +36,11 @@ Each state type defines:
     resourceName: "Rage",
     resourceCost: 1,
     activationAction: "bonus",   // "bonus"|"action"|"free"|"reaction"
+    trigger: {                    // Optional in-play effect control
+        label: "Retaliate",
+        actionType: "reaction",
+        effectType: "retaliationDamage",
+    },
     exclusiveWith: ["bladesong"], // Mutual exclusivity
     breaksConcentration: true,   // Rage breaks concentration on activate
     detectPatterns: ["^rage$"],  // Regex for auto-detection from feature text
@@ -78,6 +89,26 @@ When Rage (or any state with `breaksConcentration: true`) activates:
 Steady Aim has TWO effects: `advantage` on next attack + `speedZero` (speed = 0).
 After one attack, `_consumeOnAttackStates()` removes ONLY the advantage effect. The `speedZero` survives until turn end.
 
+### Blood Hunter Runtime States
+
+`hybridTransformation` is activated through
+`state.activateHybridTransformation()`, which spends its shared short-rest pool
+unless level 18 mastery makes activation free. The state stores level-scaled
+custom effects so save/load preserves its Predatory Strike and defenses.
+Conditional resistance effects retain their condition in
+`getEffectiveDefenses().conditionalResistances`, allowing the Defenses UI to
+show qualified protection without promoting it to unconditional resistance.
+Predatory Strike is included in the combat module's canonical weapon picker so
+Crimson Rite can scope its rider to the transformed natural weapon; its
+bludgeoning and slashing attack rows share that rite identity. Combat start and
+round advancement both resolve Bloodlust and regeneration, 0 HP automatically
+reverts the Lycan, and rests end finite transformations but preserve level 18
+mastery.
+`crimsonRite` is created from a selected `CR` optional feature and stores
+`weaponId` on its `extraDamage` effect; combat damage filters that rider to the
+chosen weapon. Both activations use dedicated controller paths because they
+also pay resources or HP before the state is created.
+
 ## Combat System
 
 ### Attack Bonus Calculation
@@ -100,9 +131,71 @@ total = abilityMod + profBonus + weaponBonus + featureAttackBonus + stateAttackB
 
 `_turnActionUsage`: tracks `{action, bonus, reaction}` booleans per turn. Reset on turn advance.
 
+### Calculation-Granted Attacks
+
+Class and subclass calculations can append attack descriptors to
+`calculations.grantedAttacks`. `getFeatureGrantedAttacks()` marks them as
+feature-owned, and the Combat attack assembly merges them with configured,
+automatic, temporary, and active-state attacks. Keep the descriptor's
+`attackBonus` and `damageBonus` limited to bonuses beyond its configured
+`abilityMod`; the normal attack renderer and rollers add the ability modifier
+and proficiency bonus. Radiant Sun Bolt uses this path so its `damage` tracks
+the Monk's edition-aware Martial Arts die. Astral Arms uses the same path with
+the best STR/DEX/WIS modifier (`finesseWis`), force damage, and attack-scoped
+`reachBonus`/`reachCondition` metadata.
+Damage rollers consume the assembled `attack.damage`; they never re-derive the
+Monk die from an item.
+
+### Variable Point Spending
+
+Combat actions whose effect scales with committed Ki/Focus use
+`_getVariablePointSpendConfig()` and `_pChooseVariablePointSpend()`. The
+calculation layer supplies minimum and maximum spend; the chooser clamps that
+range to the current shared point pool, returns the selected amount, and the
+normal action pipeline performs the single canonical deduction. Searing Arc
+Strike and Searing Sunburst then pass the selected amount to their computed
+save/damage execution. Astral Arms uses the same chooser for its one-point
+activation or two-point Arms-plus-Visage activation.
+
+### Triggered Active-State Effects
+
+An active-state type can define `trigger: {label, actionType, effectType}` and
+a matching effect. `getActiveStateTrigger()` resolves `value + abilityMod`;
+Combat renders a trigger button and consumes the configured action type when it
+executes. Sun Shield uses this reusable path for its `5 + WIS` radiant
+retaliation and reaction cost. Astral Visage resolves its 60/600-foot speech
+choices through trigger metadata; Astral Body resolves `1d10 + WIS` Deflect
+Energy and consumes the reaction.
+
+Astral Self also uses the transient Attack-action tracker. Empowered Arms is an
+Astral-Arms-only once-per-turn damage rider, while Astral Barrage permits a
+third attack only when every attack recorded for that Attack action is an
+Astral Arms attack; bonus-action, reaction, spell, weapon, and ordinary
+unarmed attacks do not qualify.
+
 ### Weapon Mastery Effects
 
 All 8 XPHB properties tracked: Cleave, Graze, Nick, Push, Sap, Slow, Topple, Vex. Slots scale by class/level.
+
+### XPHB Battle Master Maneuvers
+
+- XPHB `MV:B` options use the generic optional-feature picker at cumulative
+  counts 3/5/7/9 (levels 3/7/10/15), with one optional replacement whenever
+  that progression grants new maneuvers.
+- `battleMasterSuperiorityDice` is a persistent short-rest resource whose max
+  scales 4/5/6 while preserving the number of spent dice during level changes.
+- Every known maneuver is a generic limited activatable linked to that pool.
+  Its descriptor defines action economy, save requirement, damage rider, and
+  whether Relentless can replace the resource spend.
+- Save maneuvers prompt between `maneuverSaveDcStr` and
+  `maneuverSaveDcDex` per use. Damage maneuvers arm an attack-bound, crit-aware
+  one-shot rider and enforce one maneuver per attack; Precision Attack adjusts
+  the latest attack; Rally reports an ally-only temporary-HP result.
+- Replacement snapshots preserve the maneuver they replaced so reload and
+  level-down replay produce the correct known set. Feature-choice proficiency
+  grants are source-tracked so Student of War tears down cleanly.
+- XPHB Relentless is tracked once per turn and supplies a d8 instead of
+  spending a superiority die. Turn advance resets the allowance.
 
 ## Spell Data Format
 

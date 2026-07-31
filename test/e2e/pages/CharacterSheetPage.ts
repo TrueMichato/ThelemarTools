@@ -244,6 +244,11 @@ export class CharacterSheetPage {
 
 	// ========== TGTT — FEATURE TOGGLES & RESOURCES ==========
 
+	private _getFeatureActivationPattern (featureName: string): RegExp {
+		const keyword = featureName.split(/\s+/).find(word => !/^(a|an|of|the|your)$/i.test(word)) || featureName;
+		return new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+	}
+
 	/**
 	 * Get every feature card visible on the Features tab — passive AND
 	 * toggleable. Use this for "feature exists at level X" assertions
@@ -271,12 +276,12 @@ export class CharacterSheetPage {
 	 * click a nonexistent button.
 	 */
 	async getToggleableFeatureNames (): Promise<string[]> {
-		await this.switchToTab(this.tabFeatures);
-		const toggles = this.page.locator(".charsheet__feature-toggle, [data-testid='feature-toggle']");
-		const count = await toggles.count();
+		await this.switchToTab(this.tabOverview);
+		const activatableRows = this.page.locator(".charsheet__activatable-row");
+		const count = await activatableRows.count();
 		const names: string[] = [];
 		for (let i = 0; i < count; i++) {
-			const text = await toggles.nth(i).textContent({timeout: 1000}).catch(() => null);
+			const text = await activatableRows.nth(i).locator(".charsheet__state-name").textContent({timeout: 1000}).catch(() => null);
 			if (text && text.trim()) names.push(text.trim());
 		}
 		return names;
@@ -286,11 +291,9 @@ export class CharacterSheetPage {
 	 * Activate a toggleable feature by name (e.g. "Bladesong", "Hexblade's Curse").
 	 */
 	async activateFeature (featureName: string): Promise<void> {
-		await this.switchToTab(this.tabFeatures);
-		const toggle = this.page
-			.locator(".charsheet__feature-toggle, [data-testid='feature-toggle']")
-			.filter({hasText: featureName});
-		const btn = toggle.locator("button, .charsheet__feature-toggle-btn").first();
+		await this.switchToTab(this.tabOverview);
+		const activatableRow = this.page.locator(".charsheet__activatable-row").filter({hasText: this._getFeatureActivationPattern(featureName)}).first();
+		const btn = activatableRow.locator(".charsheet__activate-btn");
 		// Hard timeout: missing toggle must fail fast, not hang the whole test.
 		// (Helps us cleanly distinguish "feature not toggleable" from
 		// "general infra wedge" in triage.)
@@ -300,6 +303,11 @@ export class CharacterSheetPage {
 			throw new Error(`activateFeature(${featureName}): no visible toggle button within 5s. Feature may be passive on the sheet — see docs/charactersheet/known-bugs.md.`);
 		}
 		await btn.click({timeout: 5000});
+		const choiceModal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
+		if (await choiceModal.count()) {
+			const choice = choiceModal.locator("button.ve-btn").filter({hasText: /Spend \d+/}).first();
+			if (await choice.count()) await choice.click({timeout: 5000});
+		}
 		await this.page.waitForTimeout(200);
 	}
 
@@ -307,23 +315,23 @@ export class CharacterSheetPage {
 	 * Deactivate a toggleable feature by name.
 	 */
 	async deactivateFeature (featureName: string): Promise<void> {
-		await this.activateFeature(featureName); // toggle off
+		await this.switchToTab(this.tabOverview);
+		const activeRow = this.page.locator(".charsheet__state-row.charsheet__state--active").filter({hasText: this._getFeatureActivationPattern(featureName)}).first();
+		const endBtn = activeRow.locator(".charsheet__end-state-btn");
+		if (await endBtn.count()) {
+			await endBtn.click({timeout: 5000});
+			await this.page.waitForTimeout(200);
+			return;
+		}
+		throw new Error(`deactivateFeature(${featureName}): no active state row with an End control.`);
 	}
 
 	/**
 	 * Check whether a feature is currently active (has "active" class or aria attribute).
 	 */
 	async isFeatureActive (featureName: string): Promise<boolean> {
-		await this.switchToTab(this.tabFeatures);
-		const toggle = this.page
-			.locator(".charsheet__feature-toggle, [data-testid='feature-toggle']")
-			.filter({hasText: featureName});
-		const hasActive = await toggle.evaluate(el => {
-			return el.classList.contains("active")
-				|| el.querySelector(".active") !== null
-				|| el.getAttribute("aria-pressed") === "true";
-		});
-		return hasActive;
+		await this.switchToTab(this.tabOverview);
+		return this.page.locator(".charsheet__state-row.charsheet__state--active").filter({hasText: this._getFeatureActivationPattern(featureName)}).count().then(count => count > 0);
 	}
 
 	// ========== TGTT — RESOURCE TRACKERS ==========

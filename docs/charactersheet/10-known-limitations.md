@@ -74,6 +74,27 @@ All Ranger subclasses are fully implemented:
 - **Swarmkeeper**: `gatheredSwarmDamage`, `writhingTideFlySpeed`, `swarmingDispersalUses`
 - **Drakewarden**: `drakeProfBonus`, `drakesBreathDamage`, `drakesBreathDc`
 
+#### Blood Hunter (BH2022) and Order of the Lycan ✅
+- Hunter's Bane records the Intelligence/Wisdom Hemocraft choice through the generic multi-attribute `abilityDc` feature-option path. Blood Curse, Crimson Rite, and Fighting Style selections use the generic optional-feature progression shared by Builder, Level-Up, and Quick Build.
+- Blood Maledict, Brand of Castigation, and Hybrid Transformation have synchronized rest resources. Amplification and Crimson Rite activation pay their Hemocraft Die HP costs.
+- Hybrid Transformation changes AC, Strength rolls, qualified defenses, attacks, damage, speed/jumps, regeneration, and Bloodlust saves; its level 18 mastery is unlimited and grants Blood Curse of the Howl.
+- Sanguine Mastery rerolls automated Hemocraft costs or Crimson Rite damage once per combat round and keeps the player-favorable result; qualifying Crimson Rite criticals restore and persist one Blood Maledict use.
+- The sheet has no enemy stat model, so target-side Blood Curse debuffs are resolved from the surfaced curse text and Hemocraft save DC rather than persisted on an enemy record.
+
+#### Monk: Way of the Astral Self (TCE) ✅
+- Arms, Visage, Body, and Awakened are mechanically complete active states with
+  shared Ki/Focus spending, prerequisites, cascading teardown, duration, and
+  incapacitation/0-HP expiry.
+- Astral Arms is a feature-owned force attack using the best permitted
+  Strength, Dexterity, or Wisdom modifier and the current Martial Arts die. Its
+  reach is increased by 5 feet only on the Monk's turn.
+- Astral Sight, Wisdom of the Spirit, both Word of the Spirit modes, Deflect
+  Energy, Empowered Arms, Armor of the Spirit, and Astral Barrage are wired to
+  senses, roll modes, trigger controls, damage riders, AC, reaction tracking,
+  and Attack-action qualification.
+- The former `2d10` Awakened bonus-damage calculation was removed because no
+  such damage exists in the TCE feature.
+
 ---
 
 ## Remaining Implementation Gaps
@@ -143,7 +164,7 @@ it("should produce 2 elixirs at level 6", () => {
 | **Cover bonuses** | Missing | No tracking for half/three-quarters cover |
 | **Flanking** | Missing | Optional rule not implemented |
 | **Multi-target attacks** | ✅ Implemented | Whirlpool Strike multi-target modal (`_showWhirlpoolStrikeModal`) with creature count → per-hit damage. Generic AoE distribution not yet supported for other features. |
-| **Reaction tracking** | Missing | No per-round reaction usage tracking |
+| **Reaction tracking** | ✅ Implemented | Shared per-turn action economy enforces reaction costs for active-state triggers such as Deflect Energy and Sun Shield |
 
 ### Resource Management
 
@@ -175,6 +196,7 @@ The 2024 revision introduced significant changes. Current coverage:
 - ✅ Updated spell slot progression
 - ✅ Revised ability score improvements
 - ✅ Fighter XPHB Weapon Mastery slots + Tactical Master swap
+- ✅ Fighter XPHB Battle Master maneuver picks/swaps, scalable Superiority Dice pool, per-use STR/DEX DCs, maneuver Use controls, Know Your Enemy, and Relentless
 - ✅ Active state mutual exclusivity (Rage/Bladesong)
 - ✅ Rage breaks concentration on activation
 - ✅ Active state duration tracking with round counter + auto-expire
