@@ -1514,9 +1514,12 @@ export class CharacterSheetPlayMode {
 		attacks.forEach(attack => {
 			const abilityMod = this._state.getWeaponAbilityMod(attack);
 			const profBonus = this._state.getProficiencyBonus();
-			const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0);
+			const weaponId = attack.riteWeaponId || attack.id;
+			const stateAttackBonus = this._state.getBonusFromStates?.("attack", {weaponId}) || 0;
+			const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + stateAttackBonus;
 			const totalDmgBonus = abilityMod + (attack.damageBonus || 0);
 			const dmgStr = totalDmgBonus >= 0 ? `${attack.damage}+${totalDmgBonus}` : `${attack.damage}${totalDmgBonus}`;
+			const damageTypes = this._state.getWeaponDamageTypeChoices?.(weaponId, attack.damageType) || [attack.damageType];
 
 			const row = this._ce("div", "pm-attack", card);
 
@@ -1529,7 +1532,7 @@ export class CharacterSheetPlayMode {
 			const dmg = this._ce("span", "pm-attack__damage", row);
 			dmg.textContent = dmgStr;
 			const type = this._ce("span", "pm-attack__type", row);
-			type.textContent = attack.damageType || "";
+			type.textContent = damageTypes.filter(Boolean).join("/");
 
 			// Attack range
 			if (attack.range) {

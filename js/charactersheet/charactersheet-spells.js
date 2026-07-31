@@ -2405,10 +2405,15 @@ class CharacterSheetSpells {
 
 		// Cast is committed (not cancelled / refunded) — consume any gold-cost material component.
 		await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
+		const triggeredFeatures = this._state.applyCommittedSpellCastTriggers?.(spell) || [];
 
 		this.renderSlots();
 		this._page._renderQuickSpells(); // Update overview spell slots
 		if (selectedSlot.isNoSlotResource) this._page._renderResources?.(); // Refresh resource tracker (e.g. Star Map)
+		if (triggeredFeatures.length) {
+			this._page._updateAllCalculations?.();
+			this._page._renderActiveStates?.();
+		}
 		this._page.saveCharacter();
 	}
 

@@ -110,7 +110,7 @@ export interface CharacterSpec {
 		 * observable; if the resource isn't online (max=0), the probe
 		 * is a no-op rather than a failure.
 		 */
-		shortRestRestores?: {resourceName: string; expectAfter: number} | {skip: true};
+		shortRestRestores?: {resourceName: string; expectAfter?: number; spend?: number} | {skip: true};
 		/**
 		 * Concentration probe. Starts concentration on the named spell,
 		 * triggers `thenAction` (raw damage or activating Rage), then
@@ -431,8 +431,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 					if (sr.expectBonusAtLeast != null) {
 						expect(result.bonus, `${sr.name} bonus floor`).toBeGreaterThanOrEqual(sr.expectBonusAtLeast);
 					}
-					// Don't fail if button missing — log for visibility only.
-					if (!result.clicked) console.log(`[usage probe] skill roll button for ${sr.name} not visible at L${atLevel}`);
+					expect(result.clicked, `skill roll row for ${sr.name} should be clickable`).toBe(true);
 				}
 
 				// — Short rest restoration — spend then verify restoration.
@@ -440,10 +439,10 @@ export function describeCharacter (spec: CharacterSpec): void {
 				//   short rest), since exact post-rest values are caster/level
 				//   dependent and brittle for spec-author guesses.
 				if (usage.shortRestRestores && !(usage.shortRestRestores as any).skip) {
-					const sr = usage.shortRestRestores as {resourceName: string; expectAfter?: number};
+					const sr = usage.shortRestRestores as {resourceName: string; expectAfter?: number; spend?: number};
 					const before = await charSheet.getResource(sr.resourceName).catch(() => null);
 					if (before && before.max > 0) {
-						await charSheet.useResourceByName(sr.resourceName, 1).catch(() => null);
+						await charSheet.useResourceByName(sr.resourceName, sr.spend || 1).catch(() => null);
 						await charSheet.triggerShortRest();
 						const after = await charSheet.getResource(sr.resourceName).catch(() => ({current: -1, max: -1}));
 						if (sr.expectAfter != null) {

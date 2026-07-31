@@ -263,7 +263,7 @@ describe("Character Sheet Toggle Abilities", () => {
 
 		test("should detect limited-use activatable from feature uses without keyworded resource text", () => {
 			const feature = {
-				name: "Holy Nimbus",
+				name: "Radiant Apotheosis",
 				description: "As an action, you can emanate bright light and gain a radiant aura.",
 				uses: {current: 1, max: 1, recharge: "long"},
 			};
@@ -272,7 +272,7 @@ describe("Character Sheet Toggle Abilities", () => {
 			expect(result).not.toBeNull();
 			expect(result.matchedBy).toBe("featureUses");
 			expect(result.interactionMode).toBe("limited");
-			expect(result.resourceName).toBe("Holy Nimbus");
+			expect(result.resourceName).toBe("Radiant Apotheosis");
 			expect(result.resourceCost).toBe(1);
 		});
 	});
@@ -596,19 +596,19 @@ describe("Character Sheet Toggle Abilities", () => {
 
 		test("should include limited-use features with uses as activatable resources", () => {
 			charState.addFeature({
-				name: "Holy Nimbus",
+				name: "Radiant Apotheosis",
 				description: "As an action, you can emanate bright light and gain a radiant aura.",
 				uses: {current: 1, max: 1, recharge: "long"},
 			});
 
 			const activatables = charState.getActivatableFeatures();
-			const holyNimbus = activatables.find(a => a.feature.name === "Holy Nimbus");
+			const radiantApotheosis = activatables.find(a => a.feature.name === "Radiant Apotheosis");
 
-			expect(holyNimbus).toBeDefined();
-			expect(holyNimbus.interactionMode).toBe("limited");
-			expect(holyNimbus.resource).toBeDefined();
-			expect(holyNimbus.resource.current).toBe(1);
-			expect(holyNimbus.resource.max).toBe(1);
+			expect(radiantApotheosis).toBeDefined();
+			expect(radiantApotheosis.interactionMode).toBe("limited");
+			expect(radiantApotheosis.resource).toBeDefined();
+			expect(radiantApotheosis.resource.current).toBe(1);
+			expect(radiantApotheosis.resource.max).toBe(1);
 		});
 
 		test("should expose toggleable custom abilities with normalized interaction mode", () => {
