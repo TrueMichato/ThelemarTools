@@ -52,6 +52,8 @@ export interface CharacterPreset {
 	 * the "obvious" pick non-deterministic.
 	 */
 	preferredFeatProgressionPattern?: RegExp;
+	/** Additional homebrew JSON URLs required by this build. */
+	homebrewUrls?: string[];
 }
 
 // NOTE: All legacy PRESETs use `classSource: "TGTT"` because the character-sheet
@@ -301,6 +303,27 @@ export const PRESET_FULL_CHAMPION_FIGHTER: CharacterPreset = {
 	// creation AND the L7 level-up) — "archery" simply won't match once
 	// Archery is already known, so it's a no-op fallback at L7.
 	preferredFeatProgressionPattern: /^(archery|blind fighting)\b/i,
+};
+
+/** TGS4 Shadow Knight Fighter */
+export const PRESET_FULL_SHADOW_KNIGHT_FIGHTER: CharacterPreset = {
+	race: "Aarakocra",
+	raceSource: "MPMM",
+	className: "Fighter",
+	classSource: "PHB",
+	prioritySources: ["PHB"],
+	background: "Soldier",
+	bgSource: "PHB",
+	name: "Nyx Gloamward",
+	skillCount: 2,
+	masteryCount: 3,
+	optFeatCount: 1,
+	subclassName: "Shadow Knight",
+	subclassSource: "GriffonsSaddlebag4",
+	preferredFeatProgressionPattern: /^archery\b/i,
+	homebrewUrls: [
+		"https://raw.githubusercontent.com/TheGiddyLimit/homebrew/refs/heads/master/collection/Griffin%20Macaulay%3B%20The%20Griffon's%20Saddlebag%2C%20Book%204.json",
+	],
 };
 
 /** 3. Bladesinger Wizard Tabaxi (TGTT) */

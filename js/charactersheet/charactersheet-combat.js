@@ -1370,7 +1370,8 @@ class CharacterSheetCombat {
 		// "attack:melee:str") onto every roll, granting advantage to ranged attacks.
 		let stateMode;
 		const maneuverAdvantage = !!this._pendingBattleMasterAttackAdvantage;
-		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType) || maneuverAdvantage;
+		const shadowTargetAdvantage = !!this._shadowKnightDarkTarget && !!attack.isManifestShadowWeapon;
+		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType) || maneuverAdvantage || shadowTargetAdvantage;
 		const resoluteWeaponDisadvantage = this._state.isStateTypeActive?.("resoluteStance") && !attack.isSpell;
 		const hasDisadvantage = this._state.hasDisadvantageFromStates?.(attackType) || resoluteWeaponDisadvantage;
 		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
@@ -1749,7 +1750,62 @@ class CharacterSheetCombat {
 					&& !!this._state.getFeatureCalculations?.().hasRemarkableAthlete,
 				handler: (ctx) => this._pShowRemarkableAthleteMoveReminder(ctx),
 			},
+			{
+				id: "shadowKnightTriggers",
+				predicate: (ctx) => (!!ctx.attack?.isShadowWeapon || !!ctx.attack?.countsAsShadowWeapon)
+					&& !!this._state.getFeatureCalculations?.().hasShadowKnight,
+				handler: (ctx) => this._pHandleShadowKnightHit(ctx),
+			},
 		];
+	}
+
+	async _pHandleShadowKnightHit (ctx) {
+		if (ctx.isFumble) return;
+		const didAttackHaveAdvantage = ctx.rollResult?.mode === "advantage";
+		if (!ctx.isCrit) {
+			const didHit = await InputUiUtil.pGetUserBoolean({
+				title: "Shadow Weapon Attack",
+				htmlDescription: "Did this shadow weapon attack hit its target?",
+				textYes: "Hit",
+				textNo: "Miss",
+			});
+			if (!didHit) return;
+		}
+
+		const shadowcasting = this._state.getShadowcastingResource?.();
+		if ((shadowcasting?.current || 0) > 0) {
+			const useShadowbite = await InputUiUtil.pGetUserBoolean({
+				title: "Shadowbite",
+				htmlDescription: `Use Shadowbite on this hit? The target makes a DC ${this._state.getFeatureCalculations().shadowcastingSaveDc} Constitution save${didAttackHaveAdvantage ? " with disadvantage" : ""}. On a failure, roll 1d8 psychic damage and its next attack has disadvantage.`,
+				textYes: "Use Shadowbite",
+				textNo: "Skip",
+			});
+			if (useShadowbite) {
+				const result = this._state.useShadowbite?.({hadAttackAdvantage: didAttackHaveAdvantage});
+				if (result) {
+					const damage = this._page.rollDice?.(1, 8) ?? 0;
+					JqueryUtil.doToast({
+						type: "success",
+						content: `Shadowbite: DC ${result.saveDc} CON save${result.saveDisadvantage ? " with disadvantage" : ""}. On failure: ${damage} psychic damage; target's next attack has disadvantage before the end of your next turn.`,
+					});
+				}
+			}
+		}
+
+		const shadowSneak = this._state.getShadowSneakResource?.();
+		if ((shadowSneak?.current || 0) > 0) {
+			const useShadowSneak = await InputUiUtil.pGetUserBoolean({
+				title: "Shadow Sneak",
+				htmlDescription: "Teleport to an unoccupied space within 5 feet of the target and become invisible until the start of your next turn, or until you attack or cast a spell?",
+				textYes: "Use Shadow Sneak",
+				textNo: "Skip",
+			});
+			if (useShadowSneak && this._state.useShadowSneak?.()) {
+				JqueryUtil.doToast({type: "success", content: "Shadow Sneak: teleport within 5 feet of the target; you are now Invisible."});
+			}
+		}
+		this._page.saveCharacter?.();
+		this._page.renderCharacter?.();
 	}
 
 	/**
@@ -2489,10 +2545,12 @@ class CharacterSheetCombat {
 			const typeDef = CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId];
 			if (!typeDef?.consumeOnAttack) continue;
 
-			// Remove advantage effects but keep other effects (speedZero) active
-			// We do this by replacing the state's effects with only non-advantage effects
+			// Most consume-on-attack states only lose their advantage component (Steady Aim).
+			// States whose rules end on any attack (Shadow Sneak invisibility, the
+			// Improved Shadowcasting attack permission) deactivate completely.
+			const endsOnAttack = typeDef.endConditions?.some(condition => /make an attack|until.*attack/i.test(condition));
 			const remaining = (typeDef.effects || []).filter(e => e.type !== "advantage");
-			if (remaining.length > 0) {
+			if (!endsOnAttack && remaining.length > 0) {
 				// Keep the state active but without advantage
 				this._state.updateActiveStateEffects?.(state.stateTypeId, remaining);
 			} else {
@@ -3823,6 +3881,19 @@ class CharacterSheetCombat {
 		const featureAttacks = this._state.getFeatureGrantedAttacks?.() || [];
 		for (const attack of featureAttacks) {
 			if (!attacks.some(existing => existing.id === attack.id)) attacks.push(attack);
+		}
+
+		const coatedWeapon = this._state.getUmbralCoatedWeapon?.();
+		if (coatedWeapon?.weaponId) {
+			attacks = attacks.map(attack => attack.id === coatedWeapon.weaponId
+				? {
+					...attack,
+					range: "Melee or 20/60 ft.",
+					countsAsShadowWeapon: true,
+					properties: [...new Set([...(attack.properties || []), "Thrown"])],
+					umbralCoated: true,
+				}
+				: attack);
 		}
 
 		this._cachedAttacks = [...attacks];
@@ -10881,6 +10952,52 @@ class CharacterSheetCombat {
 				</div>`;
 		}
 
+		// ===== Shadow Knight (TGS4) =====
+		if (calcs.hasShadowKnight) {
+			const shadowcasting = this._state.getShadowcastingResource?.();
+			const shadowSneak = this._state.getShadowSneakResource?.();
+			const coated = this._state.getUmbralCoatedWeapon?.();
+			const dimTargetOn = !!this._shadowKnightDarkTarget;
+			const shadowState = (id) => !!this._state.isStateTypeActive?.(id);
+			const selfInDarkness = shadowState("shadowKnightDimLight");
+			html += `
+				<div class="charsheet__combat-shadow-knight cs-combat-feature mb-3">
+					<div class="cs-combat-feature__title">
+						${csCombatIcon("spark")}<span>Shadow Knight</span>
+						${csCombatPoolCaption(shadowcasting?.current || 0, shadowcasting?.max || 0, {recharge: "short/long rest"})}
+					</div>
+					<div class="ve-small ve-muted mt-1">Shadowcasting save DC <span class="bold">${calcs.shadowcastingSaveDc}</span>. Shadow weapons use the better of Strength or Dexterity and deal psychic damage.</div>
+					<div class="cs-combat-feature__options mt-2" role="group" aria-label="Shadow Knight controls">
+						<button class="cs-combat-btn charsheet__combat-shadow-light" title="Toggle when the target is in dim light or darkness">${csCombatIcon(dimTargetOn ? "check" : "spark")}<span>Dark target: ${dimTargetOn ? "ON (advantage)" : "OFF"}</span></button>
+						<button class="cs-combat-btn charsheet__combat-shadow-coat" title="Coat a held physical weapon for 1 hour">${csCombatIcon("stance")}<span>${coated ? `Coated: ${coated.weaponName || "weapon"}` : "Umbral Coating"}</span></button>
+						${calcs.hasUmbralWarrior ? `<button class="cs-combat-btn charsheet__combat-shadow-self-light" title="Toggle Shadow Knight defenses while you are in dim light or darkness">${csCombatIcon(selfInDarkness ? "check" : "shield")}<span>Self in darkness: ${selfInDarkness ? "ON" : "OFF"}</span></button>` : ""}
+					</div>
+					<div class="cs-combat-feature__summary"><span class="bold">Shadowbite:</span> offered after every shadow-weapon attack; failed DC ${calcs.shadowcastingSaveDc} CON save takes <span class="bold">1d8 psychic</span> and has disadvantage on its next attack. The save has disadvantage when your attack had advantage.</div>`;
+			if (calcs.hasImprovedShadowcasting) {
+				html += `
+					<div class="cs-combat-feature__options mt-2" role="group" aria-label="Improved Shadowcasting options">
+						<button class="cs-combat-btn charsheet__combat-shadow-option" data-option="Cloak of Shadow" ${(shadowcasting?.current || 0) ? "" : "disabled"}>${csCombatActionChip("action")}<span>Cloak of Shadow</span></button>
+						<button class="cs-combat-btn charsheet__combat-shadow-option" data-option="Darkness" ${(shadowcasting?.current || 0) ? "" : "disabled"}>${csCombatActionChip("action")}<span>Darkness</span></button>
+						<button class="cs-combat-btn charsheet__combat-shadow-option" data-option="Eyes of the Dark" ${(shadowcasting?.current || 0) ? "" : "disabled"}>${csCombatActionChip("bonus")}<span>Eyes of the Dark</span></button>
+					</div>
+					<div class="cs-combat-feature__summary"><span class="bold">Improved Shadowcasting:</span> Cloak of Shadow or Darkness arms one shadow-weapon attack as a bonus action.</div>
+					${shadowState("shadowCloak") ? `<div class="cs-combat-notice cs-combat-notice--success mt-1">Cloak of Shadow active: up to four chosen creatures have advantage on Stealth checks.</div>` : ""}
+					${shadowState("shadowKnightDarkness") ? `<div class="cs-combat-notice cs-combat-notice--success mt-1">Darkness active: concentrating on a 15-foot-radius sphere for up to 10 minutes.</div>` : ""}
+					${shadowState("eyesOfTheDark") ? `<div class="cs-combat-notice cs-combat-notice--success mt-1">Eyes of the Dark active: up to four chosen creatures gain 60-foot Dark Gaze for 1 hour.</div>` : ""}
+					${shadowState("improvedShadowcastingAttack") ? `<div class="cs-combat-notice cs-combat-notice--success mt-1">Bonus-action shadow-weapon attack available.</div>` : ""}`;
+			}
+			if (calcs.hasShadowSneak) {
+				html += `<div class="cs-combat-feature__summary"><span class="bold">Shadow Sneak (${shadowSneak?.current || 0}/${shadowSneak?.max || 1}):</span> offered after a shadow-weapon attack; teleport within 5 feet of the target and become Invisible until your next turn, attack, or spell.</div>`;
+			}
+			if (calcs.hasUmbralWarrior) {
+				html += `<div class="cs-combat-feature__summary"><span class="bold">Umbral Warrior:</span> armor never imposes Stealth disadvantage; dim light/darkness grants conditional advantage on Dexterity saves.</div>`;
+			}
+			if (calcs.hasCoverOfDarkness) {
+				html += `<div class="cs-combat-feature__summary"><span class="bold">Cover of Darkness:</span> conditional half cover in dim light/darkness (+2 AC and +2 Dexterity saves).</div>`;
+			}
+			html += `</div>`;
+		}
+
 		// ===== Battle Tactics (TGTT) =====
 		const battleTactics = this._state.getBattleTactics?.() || [];
 		if (battleTactics.length) {
@@ -11005,6 +11122,50 @@ class CharacterSheetCombat {
 		block.querySelector(".charsheet__combat-fighter-as-reset")?.addEventListener("click", () => {
 			this._state.restoreActionSurge?.();
 			refresh();
+		});
+		block.querySelector(".charsheet__combat-shadow-light")?.addEventListener("click", () => {
+			this._shadowKnightDarkTarget = !this._shadowKnightDarkTarget;
+			this.renderCombatFighter();
+			this.renderAttacks();
+		});
+		block.querySelector(".charsheet__combat-shadow-self-light")?.addEventListener("click", () => {
+			const next = !this._state.isStateTypeActive?.("shadowKnightDimLight");
+			this._state.setShadowKnightDimLightActive?.(next);
+			refresh();
+		});
+		block.querySelector(".charsheet__combat-shadow-coat")?.addEventListener("click", async () => {
+			const weapons = (this.getAvailableWeaponAttacks?.() || []).filter(attack => attack.sourceItem && !attack.isSpell && !attack.isShadowWeapon);
+			if (!weapons.length) {
+				JqueryUtil.doToast({type: "warning", content: "Equip a physical weapon before using Umbral Coating."});
+				return;
+			}
+			let weapon = weapons[0];
+			if (weapons.length > 1) {
+				const weaponId = await InputUiUtil.pGetUserEnum({
+					title: "Umbral Coating",
+					htmlDescription: "Choose a physical weapon to coat in shadowstuff for 1 hour.",
+					values: weapons.map(attack => attack.id),
+					fnDisplay: id => weapons.find(attack => attack.id === id)?.name || id,
+					isResolveItem: true,
+				});
+				if (weaponId == null) return;
+				weapon = weapons.find(attack => attack.id === weaponId);
+			}
+			if (this._state.coatShadowWeapon?.({weaponId: weapon.id, weaponName: weapon.name})) refresh();
+		});
+		block.querySelectorAll(".charsheet__combat-shadow-option").forEach((/** @type {*} */ btn) => {
+			btn.addEventListener("click", () => {
+				const result = this._state.useShadowcastingOption?.(btn.dataset.option);
+				if (!result) {
+					JqueryUtil.doToast({type: "warning", content: "No Shadowcasting uses remaining."});
+					return;
+				}
+				JqueryUtil.doToast({
+					type: "success",
+					content: `${result.option} used.${result.grantsBonusActionAttack ? " Improved Shadowcasting grants one bonus-action shadow-weapon attack." : ""}`,
+				});
+				refresh();
+			});
 		});
 		// Conditional battle-tactic to-hit toggles (e.g. High Ground +2 ranged). These are
 		// combat-local and transient (not saved): flip the in-memory flag and re-render the

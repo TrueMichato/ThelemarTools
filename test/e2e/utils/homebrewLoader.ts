@@ -9,7 +9,43 @@ const THELEMAR_URL = "/TravelersGuidetoThelemar.json";
  * Uses the site's own BrewUtil2.pAddBrewFromUrl() on the character sheet page,
  * then refreshes the character sheet's internal data via page reload.
  */
-export async function gotoWithThelemar (page: Page): Promise<void> {
+export async function gotoWithThelemar (
+	page: Page,
+	additionalBrewUrls: string[] = [],
+	{subclassName, className}: {subclassName?: string; className?: string} = {},
+): Promise<void> {
+	// Only suppress the site's homebrew/index.json fan-out when this call
+	// supplies its own brew. Specs that rely on the auto-imported brew set
+	// (e.g. TGTT races such as Minotaur) must keep the real fan-out, or
+	// character creation fails with "Could not find race ...".
+	if (additionalBrewUrls.length) {
+		await page.route("**/homebrew/index.json", route => route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify({toImport: []}),
+		}));
+	}
+	const additionalBrews = await Promise.all(additionalBrewUrls.map(async url => {
+		const response = await page.request.get(url, {timeout: 30_000});
+		if (!response.ok()) throw new Error(`Failed to download additional homebrew "${url}": HTTP ${response.status()}`);
+		const brew = await response.json();
+		if (!subclassName) return brew;
+		return {
+			_meta: brew._meta,
+			subclass: (brew.subclass || []).filter((it: any) =>
+				(it.shortName === subclassName || it.name === subclassName)
+				&& (!className || it.className === className)),
+			subclassFeature: (brew.subclassFeature || []).filter((it: any) =>
+				it.subclassShortName === subclassName
+				&& (!className || it.className === className)),
+		};
+	}));
+	for (let i = 0; i < additionalBrews.length; ++i) {
+		await page.route(`**/__e2e-homebrew-${i}.json`, route => route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify(additionalBrews[i]),
+		}));
+	}
+
 	// Navigate to character sheet and wait for full init
 	await page.goto("/charactersheet.html");
 	await page.waitForFunction(
@@ -18,14 +54,17 @@ export async function gotoWithThelemar (page: Page): Promise<void> {
 	);
 
 	// Load the brew using the site's own API
-	const result = await page.evaluate(async (url: string) => {
+	const result = await page.evaluate(async ({url, additionalBrewCount}: {url: string; additionalBrewCount: number}) => {
 		try {
 			await (window as any).BrewUtil2.pAddBrewFromUrl(url);
+			for (let i = 0; i < additionalBrewCount; ++i) {
+				await (window as any).BrewUtil2.pAddBrewFromUrl(`/__e2e-homebrew-${i}.json`);
+			}
 			return "OK";
 		} catch (e: any) {
 			return "ERROR: " + e.message;
 		}
-	}, THELEMAR_URL);
+	}, {url: THELEMAR_URL, additionalBrewCount: additionalBrews.length});
 
 	if (result !== "OK") {
 		throw new Error(`Failed to load Thelemar homebrew: ${result}`);

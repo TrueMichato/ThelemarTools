@@ -11222,6 +11222,7 @@ class CharacterSheetState {
 	hasArmorStealthDisadvantage () {
 		const armor = this._data.ac.armor;
 		if (!armor || !armor.stealth) return false;
+		if (this.getFeatureCalculations().hasUmbralWarrior) return false;
 
 		// Check for Medium Armor Master (removes stealth disadvantage from medium armor)
 		if (armor.type === "medium") {
@@ -18216,6 +18217,72 @@ class CharacterSheetState {
 						}
 					}
 
+					// Shadow Knight (The Griffon's Saddlebag 4). Source-gated because
+					// subclass short names are not globally unique across homebrew.
+					if (cls.subclass?.shortName === "Shadow Knight"
+						&& cls.subclass?.source === "GriffonsSaddlebag4"
+						&& level >= 3) {
+						calculations.hasShadowKnight = true;
+						calculations.hasDarkGaze = true;
+						calculations.darkGazeRange = 60;
+						calculations.darkGazeSeesMagicalDarkness = true;
+						calculations.hasManifestShadow = true;
+						calculations.shadowcastingSaveDc = 8 + profBonus + this.getAbilityMod("wis") - exhaustionPenalty;
+						calculations.shadowcastingUses = profBonus;
+						calculations.shadowbiteDamage = "1d8";
+						calculations.grantedAttacks = [
+							...(calculations.grantedAttacks || []),
+							{
+								id: "feature-shadow-weapon-one-handed",
+								name: "Shadow Weapon (One-Handed)",
+								damage: "1d8",
+								damageType: "psychic",
+								abilityMod: "finesse",
+								isMelee: true,
+								isRanged: false,
+								range: "Melee or 20/60 ft.",
+								properties: ["Finesse", "Light", "Thrown"],
+								isShadowWeapon: true,
+								isManifestShadowWeapon: true,
+								ignoresLongRangeDisadvantage: true,
+								conditionalAdvantage: "Target is in dim light or darkness",
+								sourceFeature: "Manifest Shadow",
+							},
+							{
+								id: "feature-shadow-weapon-two-handed",
+								name: "Shadow Weapon (Two-Handed)",
+								damage: "1d10",
+								damageType: "psychic",
+								abilityMod: "finesse",
+								isMelee: true,
+								isRanged: false,
+								range: "Melee or 20/60 ft.",
+								properties: ["Finesse", "Light", "Thrown", "Two-Handed"],
+								isShadowWeapon: true,
+								isManifestShadowWeapon: true,
+								ignoresLongRangeDisadvantage: true,
+								conditionalAdvantage: "Target is in dim light or darkness",
+								sourceFeature: "Manifest Shadow",
+							},
+						];
+
+						if (level >= 7) {
+							calculations.hasUmbralWarrior = true;
+						}
+						if (level >= 10) {
+							calculations.hasImprovedShadowcasting = true;
+							calculations.shadowcastingOptions = ["Shadowbite", "Umbral Coating", "Cloak of Shadow", "Darkness", "Eyes of the Dark"];
+						} else {
+							calculations.shadowcastingOptions = ["Shadowbite", "Umbral Coating"];
+						}
+						if (level >= 15) calculations.hasShadowSneak = true;
+						if (level >= 18) {
+							calculations.hasCoverOfDarkness = true;
+							calculations.coverOfDarknessAcBonus = 2;
+							calculations.coverOfDarknessDexSaveBonus = 2;
+						}
+					}
+
 					// Cavalier subclass
 					if (cls.subclass?.shortName === "Cavalier") {
 						// Unwavering Mark uses per long rest = STR mod (min 1)
@@ -24009,6 +24076,16 @@ class CharacterSheetState {
 		// Indomitable (Fighter 9): reroll failed saves
 		if (calculations.hasIndomitable && calculations.indomitableUses) {
 			// Tracked as a resource
+		}
+
+		if (calculations.hasDarkGaze && !alreadyProcessed("Dark Gaze")) {
+			effects.push({
+				type: "sense",
+				sense: "darkvision",
+				range: calculations.darkGazeRange,
+				source: "Dark Gaze",
+				special: "seesInMagicalDarkness",
+			});
 		}
 
 		// =========================================================
@@ -30296,7 +30373,148 @@ class CharacterSheetState {
 	// #region Resources
 	getResources () {
 		this._ensureBattleMasterSuperiorityDice();
+		this._ensureShadowKnightResources();
 		return [...this._data.resources];
+	}
+
+	_getShadowKnightClass () {
+		return (this._data.classes || []).find(cls =>
+			(cls.name || "").toLowerCase() === "fighter"
+			&& cls.subclass?.shortName === "Shadow Knight"
+			&& cls.subclass?.source === "GriffonsSaddlebag4",
+		) || null;
+	}
+
+	_ensureShadowKnightResources () {
+		const fighter = this._getShadowKnightClass();
+		const level = fighter?.level || 0;
+		const ensure = ({name, max, resourceType}) => {
+			let resource = this._data.resources.find(r => r.resourceType === resourceType || r.name === name);
+			if (!resource) {
+				resource = {id: CryptUtil.uid(), name, current: max, max, recharge: "short", resourceType};
+				this._data.resources.push(resource);
+				return resource;
+			}
+			const expended = Math.max(0, (resource.max ?? max) - (resource.current ?? resource.max ?? max));
+			resource.max = max;
+			resource.current = Math.max(0, max - expended);
+			resource.recharge = "short";
+			resource.resourceType = resourceType;
+			return resource;
+		};
+
+		if (level < 3) {
+			this._data.resources = this._data.resources.filter(r => r.resourceType !== "shadowKnightShadowcasting" && r.resourceType !== "shadowKnightShadowSneak");
+			return;
+		}
+		ensure({name: "Shadowcasting", max: this.getProficiencyBonus(), resourceType: "shadowKnightShadowcasting"});
+		if (level >= 15) ensure({name: "Shadow Sneak", max: 1, resourceType: "shadowKnightShadowSneak"});
+		else this._data.resources = this._data.resources.filter(r => r.resourceType !== "shadowKnightShadowSneak");
+	}
+
+	getShadowcastingResource () {
+		this._ensureShadowKnightResources();
+		const resource = this._data.resources.find(r => r.resourceType === "shadowKnightShadowcasting");
+		return resource ? {...resource} : null;
+	}
+
+	getShadowSneakResource () {
+		this._ensureShadowKnightResources();
+		const resource = this._data.resources.find(r => r.resourceType === "shadowKnightShadowSneak");
+		return resource ? {...resource} : null;
+	}
+
+	_consumeShadowKnightResource (resourceType) {
+		this._ensureShadowKnightResources();
+		const resource = this._data.resources.find(r => r.resourceType === resourceType);
+		if (!resource || resource.current <= 0) return false;
+		resource.current--;
+		return true;
+	}
+
+	useShadowbite ({hadAttackAdvantage = false} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasShadowKnight || !this._consumeShadowKnightResource("shadowKnightShadowcasting")) return null;
+		return {
+			damage: calc.shadowbiteDamage,
+			damageType: "psychic",
+			saveAbility: "con",
+			saveDc: calc.shadowcastingSaveDc,
+			saveDisadvantage: !!hadAttackAdvantage,
+			targetNextAttackDisadvantage: true,
+			targetEffectExpires: "end of your next turn",
+		};
+	}
+
+	useShadowcastingOption (optionName) {
+		const calc = this.getFeatureCalculations();
+		const option = String(optionName || "").toLowerCase();
+		const requiredLevel = ["cloak of shadow", "darkness", "eyes of the dark"].includes(option) ? 10 : 3;
+		if (!calc.hasShadowKnight || this.getClassLevel("Fighter") < requiredLevel) return null;
+		if (!this._consumeShadowKnightResource("shadowKnightShadowcasting")) return null;
+
+		const actionType = option === "cloak of shadow" || option === "darkness" ? "action" : "bonus";
+		if (option === "cloak of shadow") this.activateState("shadowCloak");
+		if (option === "darkness") {
+			this.consumeStatesEndingOnSpellCast();
+			this.activateState("shadowKnightDarkness", {
+				isSpellEffect: true,
+				concentration: true,
+				spellName: "Darkness",
+			});
+			this.setConcentration({name: "Darkness", level: 2, source: "Shadowcasting"});
+		}
+		if (option === "eyes of the dark") this.activateState("eyesOfTheDark");
+		if (calc.hasImprovedShadowcasting && actionType === "action") this.activateState("improvedShadowcastingAttack");
+		return {
+			option: optionName,
+			actionType,
+			saveDc: calc.shadowcastingSaveDc,
+			grantsBonusActionAttack: calc.hasImprovedShadowcasting && actionType === "action",
+		};
+	}
+
+	coatShadowWeapon ({weaponId, weaponName} = {}) {
+		if (!this.getFeatureCalculations().hasShadowKnight || !weaponId) return false;
+		if (!this._consumeShadowKnightResource("shadowKnightShadowcasting")) return false;
+		this.activateState("umbralCoating", {weaponId, weaponName});
+		return true;
+	}
+
+	getUmbralCoatedWeapon () {
+		const state = this._data.activeStates.find(s => s.active && s.stateTypeId === "umbralCoating");
+		return state ? {weaponId: state.weaponId, weaponName: state.weaponName} : null;
+	}
+
+	useShadowSneak () {
+		if (!this.getFeatureCalculations().hasShadowSneak || !this._consumeShadowKnightResource("shadowKnightShadowSneak")) return false;
+		this.activateState("shadowSneak");
+		return true;
+	}
+
+	setShadowKnightDimLightActive (isActive) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasUmbralWarrior) return false;
+		if (!isActive) {
+			this.deactivateState("shadowKnightDimLight");
+			return false;
+		}
+		const customEffects = [{type: "advantage", target: "save:dex"}];
+		if (calc.hasCoverOfDarkness) {
+			customEffects.push(
+				{type: "bonus", target: "ac", value: 2},
+				{type: "bonus", target: "save:dex", value: 2},
+			);
+		}
+		this.activateState("shadowKnightDimLight", {customEffects});
+		return true;
+	}
+
+	consumeStatesEndingOnSpellCast () {
+		for (const state of this._data.activeStates || []) {
+			if (!state.active) continue;
+			if (CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]?.endOnSpellCast) this.deactivateState(state.stateTypeId);
+		}
 	}
 
 	/**
@@ -42788,6 +43006,80 @@ class CharacterSheetState {
 			activationAction: "bonus",
 			isGeneric: true,
 		},
+		umbralCoating: {
+			id: "umbralCoating",
+			name: "Umbral Coating",
+			icon: "🌑",
+			description: "The chosen physical weapon is a shadow weapon and gains Thrown (20/60) for 1 hour.",
+			effects: [{type: "info", label: "Coated weapon: Thrown (20/60), returnable as a bonus action, and counts as a shadow weapon."}],
+			duration: "1 hour",
+			endConditions: ["1 hour", "Coat another weapon"],
+			activationAction: "bonus",
+		},
+		shadowCloak: {
+			id: "shadowCloak",
+			name: "Cloak of Shadow",
+			icon: "🌘",
+			description: "Up to four chosen creatures have advantage on Dexterity (Stealth) checks.",
+			effects: [{type: "advantage", target: "skill:stealth"}],
+			duration: "1 hour",
+			endConditions: ["1 hour"],
+			activationAction: "action",
+		},
+		shadowKnightDarkness: {
+			id: "shadowKnightDarkness",
+			name: "Darkness",
+			icon: "⚫",
+			description: "A concentration-based 15-foot-radius sphere of magical darkness.",
+			effects: [{type: "info", label: "Magical darkness in a 15-foot-radius sphere; concentration, up to 10 minutes."}],
+			duration: "10 minutes",
+			endConditions: ["Concentration ends"],
+			activationAction: "action",
+		},
+		shadowKnightDimLight: {
+			id: "shadowKnightDimLight",
+			name: "Umbral Warrior: Dim Light/Darkness",
+			icon: "🌒",
+			description: "Conditional Shadow Knight defenses while you are in dim light or darkness.",
+			effects: [],
+			duration: "While in dim light or darkness",
+			endConditions: ["Leave dim light or darkness"],
+			activationAction: "free",
+		},
+		eyesOfTheDark: {
+			id: "eyesOfTheDark",
+			name: "Eyes of the Dark",
+			icon: "👁️",
+			description: "Up to four chosen creatures gain Dark Gaze for 1 hour.",
+			effects: [{type: "sense", target: "darkvision", value: 60, magicalDarkness: true}],
+			duration: "1 hour",
+			endConditions: ["1 hour"],
+			activationAction: "bonus",
+		},
+		improvedShadowcastingAttack: {
+			id: "improvedShadowcastingAttack",
+			name: "Improved Shadowcasting Attack",
+			icon: "⚔️",
+			description: "You can make one shadow-weapon attack as a bonus action.",
+			effects: [{type: "info", label: "One shadow-weapon attack is available as a bonus action."}],
+			duration: "Until used",
+			endConditions: ["Make an attack"],
+			consumeOnAttack: true,
+			activationAction: "free",
+		},
+		shadowSneak: {
+			id: "shadowSneak",
+			name: "Shadow Sneak",
+			icon: "👤",
+			description: "Teleport within 5 feet of the target and become invisible.",
+			effects: [{type: "info", label: "Invisible until the start of your next turn, or until you attack or cast a spell."}],
+			duration: "Until the start of your next turn",
+			endConditions: ["Start of your next turn", "Make an attack", "Cast a spell"],
+			consumeOnAttack: true,
+			endOnSpellCast: true,
+			addsConditions: ["invisible"],
+			activationAction: "free",
+		},
 		concentration: {
 			id: "concentration",
 			name: "Concentrating",
@@ -46834,6 +47126,8 @@ class CharacterSheetState {
 			if (options.customEffects) existing.customEffects = options.customEffects;
 			if (options.beastData !== undefined) existing.beastData = options.beastData;
 			if (options.zodiacForm !== undefined) existing.zodiacForm = options.zodiacForm;
+			if (options.weaponId !== undefined) existing.weaponId = options.weaponId;
+			if (options.weaponName !== undefined) existing.weaponName = options.weaponName;
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
@@ -46868,6 +47162,8 @@ class CharacterSheetState {
 			beastData: options.beastData || null,
 			// For Zodiac Form (Circle of the Zodiac): the chosen constellation
 			zodiacForm: options.zodiacForm || null,
+			weaponId: options.weaponId || null,
+			weaponName: options.weaponName || null,
 		};
 
 		this._data.activeStates.push(state);
