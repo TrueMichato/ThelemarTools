@@ -1217,3 +1217,57 @@ picking up a server that is still shutting down), **not** an
 stayed up throughout. An earlier suspicion that the boot wait in
 `gotoWithThelemar` was too short was also wrong — measured boot is
 ~11s initial and ~10s post-brew, well inside the existing budget.
+
+---
+
+## CS-BUG-029 — the USE probe's skill-roll check silently degrades to a no-op
+
+**Status**: open (harness). Documented, **not yet fixed** — deliberately
+deferred so shared E2E files stay stable while Wave 3 branches land.
+
+**Symptom**: runs log lines like
+
+```
+[usage probe] skill roll button for Athletics not visible at L5
+[usage probe] skill roll button for Intimidation not visible at L5
+```
+
+and still report the test as **passed**.
+
+**Why it matters**: "USE probes passed" is weaker evidence than it looks.
+When this fires, the probe never verifies that a skill roll is actually
+clickable — it only verifies that the *bonus* is a finite number and
+clears any `expectBonusAtLeast` floor. The click path is unverified, and
+nothing in the summary output says so.
+
+**Two independent causes, both live:**
+
+1. **The tolerance is asymmetric.** `characterSpecFactory.ts:441` logs and
+   continues (`// Don't fail if button missing — log for visibility only.`),
+   while `comprehensiveBuildHelpers.ts:991` **throws** for the identical
+   condition (`skill roll button for "<skill>" not found`). The same
+   underlying failure is fatal on one path and invisible on the other.
+2. **A hard-coded timeout that ignores the global budget.**
+   `CharacterSheetPage.rollSkill` gates on
+   `target.isVisible({timeout: 1500})` (`CharacterSheetPage.ts:819`). That
+   1500 ms is a literal — it does **not** scale with `PW_TIMEOUT_MS`. Under
+   the concurrent-worktree load documented in CS-BUG-028's note, boot and
+   tab-switch routinely exceed it, so `clicked` comes back `false` for a
+   perfectly healthy sheet.
+
+Note the `rollSkill` *implementation* is correct and already carries the
+CS-BUG-027 fix — it clicks the ROW, because `.charsheet__skill-roll` /
+`.charsheet__skill-bonus` do not exist in the markup. This is not a
+regression of that fix.
+
+**Observed**: two different specs, two different skills, on a clean tree —
+`tgtt-tdcsr-juggernaut-barbarian` (Athletics) and
+`tgtt-horror-warlock-theocracian` (Intimidation), both at `f68edacb`, both
+in runs that otherwise reported all green.
+
+**Suggested fix** (when shared harness files are safe to touch again):
+- scale the visibility gate with the global budget, e.g.
+  `Math.max(1500, PW_TIMEOUT_MS / 20)`, instead of a bare literal;
+- make the two paths agree. Per the suite's own "coverage gaps stay
+  visible" rule, a silent `console.log` is the wrong default — either fail,
+  or surface it as an explicit skip with a reason, but do not pass quietly.
