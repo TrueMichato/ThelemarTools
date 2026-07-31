@@ -2147,6 +2147,7 @@ class CharacterSheetSpells {
 				this._state.setConcentration?.({name: spell.name, level: 0, appliedMetamagic: castMeta?.appliedMetamagic || null});
 				this._updateConcentrationUI();
 			}
+			this._state.consumeStatesEndingOnSpellCast?.();
 			this._page.saveCharacter();
 			return;
 		}
@@ -2220,6 +2221,7 @@ class CharacterSheetSpells {
 					this._state.setConcentration?.({name: spell.name, level: spell.level, appliedMetamagic: castMeta?.appliedMetamagic || null});
 					this._updateConcentrationUI();
 				}
+				this._state.consumeStatesEndingOnSpellCast?.();
 				this._page.saveCharacter();
 				return;
 			}
@@ -2405,6 +2407,7 @@ class CharacterSheetSpells {
 
 		// Cast is committed (not cancelled / refunded) — consume any gold-cost material component.
 		await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
+		this._state.consumeStatesEndingOnSpellCast?.();
 
 		this.renderSlots();
 		this._page._renderQuickSpells(); // Update overview spell slots
@@ -2453,6 +2456,7 @@ class CharacterSheetSpells {
 			this._updateConcentrationUI();
 		}
 
+		this._state.consumeStatesEndingOnSpellCast?.();
 		this._page.saveCharacter();
 	}
 

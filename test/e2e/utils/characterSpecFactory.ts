@@ -165,7 +165,10 @@ export interface CharacterSpec {
 	featuresMatrix?: FeatureCheck[];
 }
 
-const MEGA_TIMEOUT_MS = 360_000; // 6 min — generous, matches existing capstone tests
+const MEGA_TIMEOUT_MS = Math.max(
+	360_000,
+	Number(process.env.PW_TIMEOUT_MS ?? 0) * 3,
+); // Scale with the supported per-test override on contended shared machines.
 const MIDTIER_TIMEOUT_MS = 180_000;
 // L5 loadout walks 4 level-ups + creation + loadout + toggle probe.
 // Empirically that needs ~6-9 minutes per spec on the slower characters
@@ -184,10 +187,13 @@ export function describeCharacter (spec: CharacterSpec): void {
 
 	test.describe(`${displayName} — comprehensive build`, () => {
 		test.beforeEach(async ({page}) => {
-			if (preset.prioritySources?.length && !preset.prioritySources.includes("TGTT")) {
+			if (preset.prioritySources?.length && !preset.prioritySources.includes("TGTT") && !preset.homebrewUrls?.length) {
 				await new CharacterSheetPage(page).goto();
 			} else {
-				await gotoWithThelemar(page);
+				await gotoWithThelemar(page, preset.homebrewUrls, {
+					subclassName: preset.subclassName,
+					className: preset.className,
+				});
 			}
 		});
 

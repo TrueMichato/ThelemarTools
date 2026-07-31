@@ -1232,7 +1232,9 @@ export class CharacterSheetPage {
 	/** Click an attack-row's roll button by attack name; throws-aware. */
 	async clickAttackRoll (attackName: string | RegExp): Promise<{clicked: boolean; threwError: boolean; errorMessage?: string}> {
 		await this.switchToTab(this.tabCombat);
-		const reSrc = attackName instanceof RegExp ? attackName.source : attackName;
+		const reSrc = attackName instanceof RegExp
+			? attackName.source
+			: attackName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 		const reFlags = attackName instanceof RegExp ? attackName.flags : "i";
 		return this.page.evaluate(({src, flags}) => {
 			const re = new RegExp(src, flags);
