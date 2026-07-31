@@ -188,7 +188,12 @@ class CharacterSheetLevelUp {
 		// granting level (L3) it is null until chosen, then recomputed in the picker below.
 		let optionalFeatureGains = CharacterSheetClassUtils.getOptionalFeatureGains(classData, classEntry.level, newLevel, this._state, fullClassSubclassData);
 		// Class-level featProgression (2024/TGTT Fighting Style etc.); excludes Epic Boon (handled by ASI flow).
-		const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(classData, classEntry.level, newLevel);
+		// Includes the SUBCLASS's own featProgression too (e.g. XPHB Champion Fighter's
+		// Additional Fighting Style at L7) via `fullClassSubclassData` — by the level the
+		// subclass grants an additional feat progression, the subclass itself was already
+		// chosen (at an earlier level), so `fullClassSubclassData` is populated here without
+		// needing the subclass-selection-callback recompute that `optionalFeatureGains` uses.
+		const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(classData, classEntry.level, newLevel, fullClassSubclassData);
 		featureOptionGroups = CharacterSheetClassUtils.getFeatureOptionsForLevel(currentFeatures, newLevel, this._page.getClassFeatures())
 			// Filter out option groups where ALL options are optional features — those are
 			// handled by optionalfeatureProgression in the Class Options step (e.g. Metamagic)
@@ -2054,6 +2059,15 @@ class CharacterSheetLevelUp {
 		const feats = this._page.filterByAllowedSources(this._page.getFeats() || [])
 			.filter((/** @type {*} */ f) => !CharacterSheetClassUtils.isInterdictBoonEntry(f));
 
+		// Captured before `getFeatChoices` below so the Epic Boon section
+		// (which calls `getFeatChoices` earlier in this function body, at
+		// L19 Epic Boon levels) doesn't hit a temporal-dead-zone
+		// ReferenceError on `self`. `function` declarations hoist, but a
+		// `const` initializer only runs when its line is reached — the
+		// Epic Boon section previously ran first and crashed the whole
+		// level-up modal for any class at level 19.
+		const self = this;
+
 		// === Epic Boon section (level 19 for XPHB / TGTT classes) ===
 		if (isEpicBoonLevel) {
 			const epicBoons = feats.filter((/** @type {*} */ f) => f.category === "EB");
@@ -2144,10 +2158,10 @@ class CharacterSheetLevelUp {
 		// Declared as a `function` (not `const` arrow) so it is hoisted
 		// to the top of `_renderAsiSelection` — the Epic Boon section
 		// (rendered earlier in the function body) needs to call it.
-		// We capture `this` into `self` because strict-mode `function`
-		// declarations don't inherit lexical `this`, so the optional-feature
-		// branch below previously crashed for any feat with `optionalfeatureProgression`.
-		const self = this;
+		// We capture `this` into `self` (declared above, before the Epic
+		// Boon section) because strict-mode `function` declarations don't
+		// inherit lexical `this`, so the optional-feature branch below
+		// would otherwise crash for any feat with `optionalfeatureProgression`.
 		function getFeatChoices (/** @type {*} */ feat) {
 			return CharacterSheetClassUtils.buildFeatChoicesSpec(feat, {state: self._state, page: self._page});
 		}

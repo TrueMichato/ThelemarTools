@@ -132,6 +132,19 @@ mechanical effect lands on the sheet (see
 [Effect verification](#effect-verification-every-feature-should-do-something)
 below).
 
+**Weapon Mastery `kind: "pick"` matching.** `buildWeaponMasteryChecks()`
+rows use `kind: "pick"`, but Weapon Mastery selections have **no dedicated
+per-weapon feature-card row** on the Features tab — only the generic
+"Weapon Mastery" class-feature card renders there. `assertFeaturesMatrix`'s
+`"pick"` case therefore searches a union pool of
+`getActivatableFeatureNames()` **and** `getWeaponMasteryNames()` (the plain
+weapon names, `|source` suffix stripped) so these checks can actually match.
+This union is scoped to the `"pick"` case only — `"passive"`/`"toggle"`
+checks still search `allFeatures` alone, since those DO have dedicated
+feature-card rows. If you add a new pick-style effect whose selection
+doesn't surface as its own Features-tab row, extend this same pool rather
+than special-casing your spec.
+
 ## Effect verification: every feature should *do* something
 
 > **First-class requirement.** A test that asserts a feature exists on

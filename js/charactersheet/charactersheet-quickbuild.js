@@ -229,8 +229,10 @@ class CharacterSheetQuickBuild {
 				classData, classLevel, runningOptionalFeatureCounts, subclass,
 			);
 
-			// Class-level featProgression picks (2024/TGTT Fighting Style etc.); excludes Epic Boon.
-			const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(classData, classLevel - 1, classLevel);
+			// Class-level featProgression picks (2024/TGTT Fighting Style etc.); excludes
+			// Epic Boon. Also includes the SUBCLASS's own featProgression (e.g. XPHB
+			// Champion Fighter's Additional Fighting Style at L7) via `subclass`.
+			const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(classData, classLevel - 1, classLevel, subclass);
 
 			const featureOptions = this._getFeatureOptionsForLevel(features, classLevel)
 				// Filter out option groups where ALL options are optional features — those are

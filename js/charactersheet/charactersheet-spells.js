@@ -7730,7 +7730,7 @@ class CharacterSheetSpells {
 		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
 		const total = rollResult.roll + totalBonus;
 
-		const critRange = this._state.getCriticalRange?.() || 20;
+		const critRange = this._state.getCriticalRange?.("spell") || 20;
 		let resultClass = "";
 		let resultNote = "";
 		if (rollResult.roll >= critRange) {

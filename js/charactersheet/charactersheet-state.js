@@ -10872,6 +10872,21 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Resolve the advantage/disadvantage mode for a death saving throw.
+	 *
+	 * Mirrors `getInitiativeRollMode()`: delegates to `getAdvantageState("deathSave")`
+	 * so named-modifier advantage (e.g. Champion Survivor's Defy Death,
+	 * `deathSave:advantage`) and active-state advantage/disadvantage effects are
+	 * both honored by `_rollDeathSave`. DOM-free and unit-testable.
+	 *
+	 * @returns {{advantage: boolean, disadvantage: boolean}}
+	 */
+	getDeathSaveRollMode () {
+		const adv = this.getAdvantageState("deathSave");
+		return {advantage: !!adv.advantage, disadvantage: !!adv.disadvantage};
+	}
+
+	/**
 	 * Get a breakdown of spell attack bonus components.
 	 *
 	 * Each component carries an `isCanonical` flag distinguishing intrinsic
@@ -11686,10 +11701,10 @@ class CharacterSheetState {
 			bonuses.push({name: "Rakish Audacity", value: calc.initiativeBonus});
 		}
 
-		// XPHB Champion Fighter L7 — Remarkable Athlete: +PB to initiative
-		if (calc.hasRemarkableAthlete && calc.initiativeBonus) {
-			bonuses.push({name: "Remarkable Athlete", value: calc.initiativeBonus});
-		}
+		// NOTE: XPHB Champion Fighter L3 — Remarkable Athlete grants ADVANTAGE on
+		// Initiative rolls, not a flat bonus (see `getInitiativeRollMode()` /
+		// `_aggregateCalculationBasedEffects` → `initiative:advantage`), so it is
+		// intentionally NOT listed here.
 
 		return bonuses;
 	}
@@ -17867,45 +17882,82 @@ class CharacterSheetState {
 						}
 					}
 
-					// Champion subclass
-					if (cls.subclass?.shortName === "Champion") {
+					// Champion subclass. Guarded by `level >= 3` (the level the subclass — and
+					// its first features — are actually granted) so a malformed/mid-respec
+					// save that still carries `subclass.shortName === "Champion"` below L3
+					// never leaks Improved Critical/Remarkable Athlete early.
+					if (cls.subclass?.shortName === "Champion" && level >= 3) {
 						const subSource = cls.subclass?.source || source;
 						const isChampion2024 = CharacterSheetClassUtils.is2024Source(subSource);
 
-						// Improved Critical (level 3): crit on 19-20
-						calculations.criticalRange = level >= 15 ? 18 : 19; // Superior Critical at 15
+						// Improved Critical (level 3): weapon/Unarmed Strike attacks crit on
+						// 19-20; Superior Critical (level 15) narrows that further to 18-20.
+						// Both editions share this progression. Spell attacks never benefit —
+						// see `getCriticalRange(kind)`'s weapon/spell scoping.
+						calculations.criticalRange = level >= 15 ? 18 : 19;
 						calculations.hasCriticalRange = true;
+						calculations.hasSuperiorCritical = level >= 15;
 
-						// Remarkable Athlete (level 7)
-						if (level >= 7) {
-							if (isChampion2024) {
-								// XPHB: Add Heroic Inspiration on Initiative roll, jump distance bonus
-								calculations.hasRemarkableAthlete = true;
-								calculations.initiativeBonus = profBonus;
-							} else {
-								// PHB: Add half proficiency to STR/DEX/CON checks without proficiency
+						if (isChampion2024) {
+							// XPHB Remarkable Athlete (level 3): Advantage on Initiative rolls
+							// and Strength (Athletics) checks — modeled as declarative
+							// `initiative:advantage` / `skill:athletics:advantage` named
+							// modifiers (see `_aggregateCalculationBasedEffects`), NOT a flat
+							// bonus. Also grants a post-crit "move up to half Speed without
+							// provoking Opportunity Attacks" affordance, surfaced by the
+							// `championRemarkableAthleteMove` post-attack hook in combat.js.
+							calculations.hasRemarkableAthlete = true;
+
+							// Additional Fighting Style (level 7): a second Fighting Style
+							// feat, granted via the subclass's own `featProgression` entry
+							// (`getClassFeatProgressionGains(classData, prevLevel, newLevel,
+							// subclassData)`), same generic pipeline as the base class's L1
+							// Fighting Style pick. `hasAdditionalFightingStyle` is purely
+							// informational (feature-list / respec display); the actual feat
+							// grant + its mechanics flow through the standard feat pipeline.
+							if (level >= 7) {
+								calculations.hasAdditionalFightingStyle = true;
+							}
+
+							// Heroic Warrior (level 10): at the start of your turn in combat,
+							// gain Heroic Inspiration if you don't already have it. Applied by
+							// the generic `getTurnStartEffects()` / `applyTurnStartEffects()`
+							// resolver (called from `startCombat()` / `advanceRound()`).
+							if (level >= 10) {
+								calculations.hasHeroicWarrior = true;
+							}
+
+							// Survivor (level 18): Defy Death (advantage on death saves; a
+							// death-save roll of 18-20 gets the natural-20 benefit) + Heroic
+							// Rally (heal 5 + CON mod at the start of each turn while Bloodied
+							// and alive). Defy Death's advantage is modeled as a declarative
+							// `deathSave:advantage` named modifier; the 18-20 nat-20 range and
+							// Heroic Rally healing are consumed directly by combat.js /
+							// `getTurnStartEffects()`.
+							if (level >= 18) {
+								const conMod = this.getAbilityMod("con");
+								calculations.hasChampionSurvivor = true;
+								calculations.hasChampionSurvivorDefyDeath = true;
+								calculations.championSurvivorDeathSaveNatRange = 18;
+								calculations.championSurvivorHealing = 5 + conMod;
+							}
+						} else {
+							// PHB Remarkable Athlete (level 7): add half proficiency (round up)
+							// to unproficient STR/DEX/CON checks. Numeric-only; not yet wired
+							// into a roll handler (pre-existing PHB limitation, out of scope).
+							if (level >= 7) {
 								calculations.remarkableAthleteBonus = Math.floor(profBonus / 2);
 							}
-						}
 
-						// Additional Fighting Style (level 10, PHB only)
-						if (!isChampion2024 && level >= 10) {
-							calculations.hasAdditionalFightingStyle = true;
-						}
+							// Additional Fighting Style (level 10, PHB)
+							if (level >= 10) {
+								calculations.hasAdditionalFightingStyle = true;
+							}
 
-						// Heroic Warrior (XPHB level 10): Gain Heroic Inspiration on short/long rest
-						if (isChampion2024 && level >= 10) {
-							calculations.hasHeroicWarrior = true;
-						}
-
-						// Survivor (level 18)
-						if (level >= 18) {
-							if (isChampion2024) {
-								// XPHB: Heal 5 + CON mod at start of turn when below half HP
-								const conMod = this.getAbilityMod("con");
-								calculations.survivorHealing = 5 + conMod;
-							} else {
-								// PHB: Heal 5 + CON mod when below half HP, not at 0
+							// Survivor (level 18, PHB): heal 5 + CON mod at the start of each
+							// turn when at half HP or less (not while at 0 HP). No Defy Death
+							// in PHB — advantage on death saves is XPHB-only.
+							if (level >= 18) {
 								const conMod = this.getAbilityMod("con");
 								calculations.survivorHealing = 5 + conMod;
 							}
@@ -23595,6 +23647,38 @@ class CharacterSheetState {
 				modType: "initiative:advantage",
 				value: 1,
 				source: "Feral Instinct",
+			});
+		}
+
+		// XPHB Champion Fighter (level 3) — Remarkable Athlete: advantage on Initiative
+		// rolls and Strength (Athletics) checks. Declarative named modifiers so the
+		// existing generic advantage aggregator (`getAdvantageState`/`getInitiativeRollMode`)
+		// picks them up the same way as Feral Instinct's initiative advantage above.
+		if (calculations.hasRemarkableAthlete && !alreadyProcessed("Remarkable Athlete")) {
+			effects.push({
+				type: "modifier",
+				modType: "initiative:advantage",
+				value: 1,
+				source: "Remarkable Athlete",
+			});
+			effects.push({
+				type: "modifier",
+				modType: "skill:athletics:advantage",
+				value: 1,
+				source: "Remarkable Athlete",
+			});
+		}
+
+		// XPHB Champion Fighter (level 18) — Survivor: Defy Death grants advantage on
+		// death saving throws. The "roll 18-20 counts as a natural 20" half of Defy
+		// Death is applied directly in combat.js's death-save roll handler (it isn't a
+		// simple advantage/disadvantage/bonus shape this aggregator models).
+		if (calculations.hasChampionSurvivorDefyDeath && !alreadyProcessed("Defy Death")) {
+			effects.push({
+				type: "modifier",
+				modType: "deathSave:advantage",
+				value: 1,
+				source: "Defy Death",
 			});
 		}
 
@@ -30364,6 +30448,76 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Generic, declarative "start of your turn in combat" effect resolver.
+	 *
+	 * Several passive features only trigger at the start of a turn (as opposed to
+	 * a rest, an attack, or a manual toggle) — e.g. XPHB Champion Fighter's Heroic
+	 * Warrior (grant Heroic Inspiration if absent) and Survivor's Heroic Rally
+	 * (heal while Bloodied). Rather than scattering feature-specific checks across
+	 * `startCombat()`/`advanceRound()`, features describe WHAT should happen here,
+	 * and `applyTurnStartEffects()` (below) resolves HOW to apply it. This mirrors
+	 * `applyHybridRegenerationAtTurnStart()`'s existing turn-start hook, generalized
+	 * for reuse by any future "start of turn" feature.
+	 *
+	 * @returns {Array<{type: "heal"|"grantInspiration", amount?: number, source: string}>}
+	 */
+	getTurnStartEffects () {
+		const calc = this.getFeatureCalculations();
+		const effects = [];
+
+		// XPHB Champion Fighter (level 10) — Heroic Warrior: gain Heroic Inspiration
+		// at the start of your turn if you don't already have it.
+		if (calc.hasHeroicWarrior && !this.hasInspiration()) {
+			effects.push({type: "grantInspiration", source: "Heroic Warrior"});
+		}
+
+		// XPHB Champion Fighter (level 18) — Survivor's Heroic Rally: heal 5 + CON
+		// mod at the start of each of your turns while Bloodied (HP <= half max) and
+		// still alive (HP >= 1).
+		if (calc.hasChampionSurvivor && calc.championSurvivorHealing && this.isBloodied()) {
+			effects.push({type: "heal", amount: calc.championSurvivorHealing, source: "Heroic Rally"});
+		}
+
+		return effects;
+	}
+
+	/**
+	 * Apply the declarative `getTurnStartEffects()` list to character state (grants
+	 * Inspiration, heals HP as applicable — capped at max HP via `heal()`). Called
+	 * from both `startCombat()` (the start of the character's first turn) and
+	 * `advanceRound()` (the start of every subsequent turn), alongside the existing
+	 * `applyHybridRegenerationAtTurnStart()` call.
+	 * @returns {Array<{type: string, amount?: number, source: string}>} the effects applied, for UI feedback
+	 */
+	applyTurnStartEffects () {
+		const effects = this.getTurnStartEffects();
+		for (const effect of effects) {
+			if (effect.type === "grantInspiration") {
+				if (!this.hasInspiration()) this.setInspiration(true);
+			} else if (effect.type === "heal" && effect.amount) {
+				this.heal(effect.amount);
+			}
+		}
+		// Non-persisted side channel so combat/play-mode UI can build a toast
+		// message describing what just fired, without changing the pre-existing
+		// return shapes of `startCombat()` (void) / `advanceRound()` (expired states
+		// array) that other call sites already depend on.
+		this._lastTurnStartEffects = effects;
+		return effects;
+	}
+
+	/**
+	 * The turn-start effects (Heroic Warrior's Inspiration grant, Heroic Rally's
+	 * healing, etc.) applied by the most recent `applyTurnStartEffects()` call —
+	 * i.e. the most recent `startCombat()` or `advanceRound()`. Purely for UI
+	 * feedback (toasts); not persisted.
+	 * @returns {Array<{type: string, amount?: number, source: string}>}
+	 */
+	getLastTurnStartEffects () {
+		return this._lastTurnStartEffects || [];
+	}
+
+	/**
 	 * (R23 #6) The canonical set of GENERIC resource pools to surface in the bare
 	 * resource lists — the Overview "Resources" panel and the Combat "Combat Resources"
 	 * panel. A resource is excluded when its linked feature is either:
@@ -30405,9 +30559,9 @@ class CharacterSheetState {
 
 	/**
 	 * (S3 #9/#10/#17) SYNTHETIC combat-resource descriptors for limited-use Fighter
-	 * abilities that are tracked outside `_data.resources` (Second Wind via feature
-	 * uses, Arcane Shot via `_data.arcaneShot`, Indomitable via `_data.indomitable`).
-	 * Shaped exactly like a real resource ({id, name, current, max, recharge}) plus a
+	 * abilities that are tracked outside `_data.resources` (Second Wind and Action
+	 * Surge via feature uses, Arcane Shot via `_data.arcaneShot`, Indomitable via
+	 * `_data.indomitable`). Shaped exactly like a real resource ({id, name, current, max, recharge}) plus a
 	 * `synthetic` flag and a `kind` discriminator so the Combat "Combat Resources"
 	 * panel can render them as pips with a dedicated spend/restore handler.
 	 *
@@ -30430,6 +30584,20 @@ class CharacterSheetState {
 					recharge: "short",
 					synthetic: true,
 					kind: "secondWind",
+				});
+			}
+		}
+		if (this.hasFeature?.("Action Surge")) {
+			const max = this.getActionSurgeUsesMax();
+			if (max > 0) {
+				out.push({
+					id: "__synthetic-action-surge",
+					name: "Action Surge",
+					current: this.getActionSurgeUsesRemaining(),
+					max,
+					recharge: "short",
+					synthetic: true,
+					kind: "actionSurge",
 				});
 			}
 		}
@@ -30475,6 +30643,7 @@ class CharacterSheetState {
 	setSyntheticCombatResourceRemaining (kind, n) {
 		switch (kind) {
 			case "secondWind": return this.setSecondWindUsesRemaining(n);
+			case "actionSurge": return this.setActionSurgeRemaining(n);
 			case "arcaneShot": return this.setArcaneShotRemaining(n);
 			case "indomitable": return this.setIndomitableRemaining(n);
 			default: return false;
@@ -35772,25 +35941,38 @@ class CharacterSheetState {
 	/**
 	 * Get the critical hit range (lowest number that crits)
 	 * Considers Champion Fighter, Battle Tactics, custom abilities, and other sources
+	 *
+	 * @param {"weapon"|"spell"} [kind] - The kind of attack being rolled. Weapon/Unarmed
+	 *   Strike attack sources of an expanded crit range (e.g. Champion's Improved/Superior
+	 *   Critical, a weapon's `critThreshold`) are scoped to `"weapon"` (the default) and
+	 *   never leak into spell attack rolls — 5e text is explicit that these expand the
+	 *   crit range only for "attack rolls with weapons and Unarmed Strikes". Homebrew
+	 *   active-state effects (`critRange` / `critRange:expand`) are intentionally left
+	 *   unscoped so broadly-worded custom abilities keep applying to any attack kind,
+	 *   as they did before this parameter was introduced.
 	 * @returns {number} The lowest roll that scores a critical hit (default 20)
 	 */
-	getCriticalRange () {
+	getCriticalRange (kind = "weapon") {
 		let critRange = 20;
 		let totalExpansion = 0;
 
-		// Check Champion Fighter (already in getFeatureCalculations)
+		// Check Champion Fighter (already in getFeatureCalculations). Weapon/Unarmed
+		// Strike only — never applies to spell attacks (Improved/Superior Critical text).
 		const calcs = this.getFeatureCalculations();
-		if (calcs.criticalRange && calcs.criticalRange < critRange) {
+		if (kind !== "spell" && calcs.criticalRange && calcs.criticalRange < critRange) {
 			critRange = calcs.criticalRange;
 		}
 
-		// Check magic item critThreshold (e.g., Sword of Sharpness with critThreshold: 19)
+		// Check magic item critThreshold (e.g., Sword of Sharpness with critThreshold: 19).
+		// Weapon-only — an item's threshold describes attacks made with THAT weapon.
 		const itemCrit = this._data.itemBonuses?.critThreshold;
-		if (itemCrit && itemCrit < critRange) {
+		if (kind !== "spell" && itemCrit && itemCrit < critRange) {
 			critRange = itemCrit;
 		}
 
-		// Check active state effects for expanded crit range (e.g., Hexblade's Curse, homebrew)
+		// Check active state effects for expanded crit range (e.g., Hexblade's Curse, homebrew).
+		// Left unscoped by attack kind: these are user/DM-authored broadly-worded effects
+		// (not RAW weapon-only text), so they keep applying to any attack kind as before.
 		const effects = this.getActiveStateEffects();
 		for (const e of effects) {
 			// Absolute critical range (takes minimum)
@@ -37126,6 +37308,23 @@ class CharacterSheetState {
 		this.ensureFighterFeatureUses();
 		const f = this.getFeature("Action Surge");
 		if (f?.uses) this.setFeatureUses(f.id, f.uses.max);
+	}
+
+	/**
+	 * Set the remaining Action Surge uses directly (clamped to [0, max]).
+	 * Mirrors {@link setSecondWindUsesRemaining} — powers the Combat-tab
+	 * synthetic-resource pip control (see `getSyntheticCombatResources`).
+	 * @param {number} n - desired remaining uses.
+	 * @returns {boolean} True if an Action Surge feature exists and was updated.
+	 */
+	setActionSurgeRemaining (n) {
+		this.ensureFighterFeatureUses();
+		const f = this.getFeature("Action Surge");
+		if (!f?.uses) return false;
+		const max = Math.max(0, f.uses.max || 0);
+		const next = Math.max(0, Math.min(Math.floor(Number(n) || 0), max));
+		this.setFeatureUses(f.id, next);
+		return true;
 	}
 	// #endregion
 
@@ -46741,6 +46940,7 @@ class CharacterSheetState {
 		this._data.combatRound = 1;
 		this._data.sanguineMasteryLastRerollRound = null;
 		this.applyHybridRegenerationAtTurnStart();
+		this.applyTurnStartEffects();
 
 		// Stamp activatedAtRound on any already-active states that didn't have one
 		for (const state of this._data.activeStates) {
@@ -46787,6 +46987,7 @@ class CharacterSheetState {
 		this._data.combatRound++;
 		this._data.sanguineMasteryLastRerollRound = null;
 		this.applyHybridRegenerationAtTurnStart();
+		this.applyTurnStartEffects();
 		const expired = [];
 		const oldMax = this._data.hp.max || 0;
 		let anyExpiredHpMaxIncrease = false;

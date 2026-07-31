@@ -106,20 +106,21 @@ describe("Initiative Bonuses (live feature aggregator)", () => {
 		});
 	});
 
-	describe("2024 Champion Fighter — Remarkable Athlete (+PB)", () => {
-		it("adds proficiency bonus to initiative at level 7", () => {
+	describe("2024 Champion Fighter — Remarkable Athlete (advantage, not a flat bonus)", () => {
+		it("grants advantage on Initiative at level 3 without adding a flat numeric bonus", () => {
 			const state = new CharacterSheetState();
 			state.setRace({name: "Human", source: "XPHB"});
-			state.addClass({name: "Fighter", source: "XPHB", level: 7, subclass: {name: "Champion", shortName: "Champion", source: "XPHB"}});
+			state.addClass({name: "Fighter", source: "XPHB", level: 3, subclass: {name: "Champion", shortName: "Champion", source: "XPHB"}});
 			state.setAbilityBase("dex", 14); // +2
 
-			// Level 7 PB = +3
-			expect(state.getInitiative()).toBe(5); // DEX +2 + PB +3
+			// XPHB Remarkable Athlete is advantage-based (Initiative + Athletics), not a
+			// flat proficiency-bonus addition — that's the 2014 half-prof mechanic.
+			expect(state.getInitiative()).toBe(2); // DEX +2, no numeric Remarkable Athlete term
+			expect(state.getInitiativeRollMode().advantage).toBe(true);
 
 			const breakdown = state.getInitiativeBreakdown();
 			const ra = breakdown.components.find(c => c.name === "Remarkable Athlete");
-			expect(ra).toBeTruthy();
-			expect(ra.value).toBe(3);
+			expect(ra).toBeFalsy();
 		});
 	});
 

@@ -157,15 +157,67 @@ hasStudiedAttacks: true,          // Level 13+
 
 #### Fighter Subclasses
 
-**Champion**
+**Champion** (guarded by `level >= 3`, the level the subclass is actually granted)
 ```javascript
-improvedCriticalRange: 19 | 18,   // L3: 19-20, L15: 18-20
-hasRemarkableAthlete: true,       // Level 7+
-remarkableAthleteBonus: number,
-hasAdditionalFightingStyle: true, // Level 10+
-hasSurvivor: true,                // Level 18+
-survivorHealing: "5+CON",
+// Shared by PHB and XPHB — Improved Critical (L3) / Superior Critical (L15)
+criticalRange: 19 | 18,             // L3: 19-20, L15: 18-20 (weapon/Unarmed
+                                     // Strike attacks only — never spell attacks)
+hasCriticalRange: true,
+hasSuperiorCritical: true,          // Level 15+
+
+// PHB Champion
+remarkableAthleteBonus: number,     // L7+: half proficiency (round up) added
+                                     // to unproficient STR/DEX/CON checks
+hasAdditionalFightingStyle: true,   // L10+ (PHB level gate)
+survivorHealing: "5+CON",           // L18+: heal at start of turn while at
+                                     // half HP or less (not while at 0 HP);
+                                     // no Defy Death advantage in PHB
+
+// XPHB Champion — level gates differ from PHB
+hasRemarkableAthlete: true,         // L3+ (XPHB — NOT L7; advantage on
+                                     // Initiative + Athletics checks, plus a
+                                     // post-crit "move up to half Speed
+                                     // without opportunity attacks" affordance
+                                     // surfaced by the `championRemarkableAthleteMove`
+                                     // post-attack hook in combat.js)
+hasAdditionalFightingStyle: true,   // L7+ (XPHB — a 2nd Fighting Style pick,
+                                     // via the shared subclass `featProgression`
+                                     // path, NOT L10)
+hasHeroicWarrior: true,             // L10+ (XPHB — grants Heroic Inspiration
+                                     // at the start of a combat turn if absent;
+                                     // driven by the generic turn-start
+                                     // resolver, see below)
+hasChampionSurvivor: true,          // L18+
+hasChampionSurvivorDefyDeath: true, // Advantage on death saves; a death-save
+                                     // roll of 18-20 gets the natural-20 benefit
+championSurvivorDeathSaveNatRange: 18,
+championSurvivorHealing: 5 + conMod, // Heroic Rally: heal at start of each
+                                     // turn while Bloodied (HP <= half max)
+                                     // and alive (HP >= 1), capped at max
 ```
+
+The critical-hit range (`criticalRange`) is scoped to **weapon and Unarmed
+Strike attacks only** — it does not widen spell-attack crit ranges. See
+`getCriticalRange(kind)` on `CharacterSheetState`, called from both
+`charactersheet-combat.js` (weapon/unarmed attacks, default `kind: "weapon"`)
+and `charactersheet-spells.js` (`kind: "spell"`), so a single shared method
+scopes the effect rather than each renderer re-deriving it.
+
+**Generic "start of combat turn" resolver** — `getTurnStartEffects()` (pure,
+declarative: derives WHAT should happen from `getFeatureCalculations()`) and
+`applyTurnStartEffects()` (resolves HOW: grants Inspiration, heals via the
+existing `heal()` capped-at-max path) on `CharacterSheetState`, called from
+both `startCombat()` (first turn) and `advanceRound()` (every subsequent
+turn) in `charactersheet-combat.js`, alongside the pre-existing
+`applyHybridRegenerationAtTurnStart()` call. A class-agnostic hook other
+subclasses can register against by adding a `calc.hasXyz` flag and a branch
+in `getTurnStartEffects()` — no per-class turn-start UI needs to be
+hand-rolled elsewhere. Champion's Heroic Warrior (L10 XPHB) and Survivor's
+Heroic Rally (L18 XPHB) are both implemented purely as declarative entries
+this resolver interprets. `applyTurnStartEffects()` returns the effects it
+applied (e.g. `[{type: "grantInspiration", source: "Heroic Warrior"}, {type: "heal", amount: 6, source: "Heroic Rally"}]`);
+`getLastTurnStartEffects()` exposes the same list afterward (non-persisted)
+for UI toasts.
 
 **Battle Master**
 ```javascript

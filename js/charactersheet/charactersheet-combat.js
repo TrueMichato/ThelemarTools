@@ -1629,7 +1629,10 @@ class CharacterSheetCombat {
 		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
 		const total = rollResult.roll + totalBonus;
 
-		const critRange = this._state.getCriticalRange?.() || 20;
+		// "spell" kind: Champion Improved/Superior Critical never expands the crit
+		// range for spell attacks (RAW text is weapon/Unarmed Strike only) — see
+		// `getCriticalRange(kind)`.
+		const critRange = this._state.getCriticalRange?.("spell") || 20;
 		let resultClass = "";
 		let resultNote = "";
 		if (rollResult.roll >= critRange) {
@@ -1724,7 +1727,38 @@ class CharacterSheetCombat {
 					&& (this._state.getSealsAvailable?.() || 0) > 0,
 				handler: (ctx) => this._pPlaceBalefulInterdictSeal(ctx),
 			},
+			{
+				// XPHB Champion Fighter L3 — Remarkable Athlete: immediately after scoring a
+				// critical hit with a weapon or Unarmed Strike attack, you may move up to
+				// half your Speed without provoking Opportunity Attacks. This hook only ever
+				// runs from the weapon-attack roller (`_rollAttack`, which also covers Unarmed
+				// Strike attacks), so `!ctx.attack?.isSpell` is a defensive, RAW-faithful
+				// guard rather than a functional necessity today. Purely a reminder/toast —
+				// the sheet does not track battle-map positioning, so it surfaces the
+				// computed half-Speed distance rather than mutating movement state.
+				id: "championRemarkableAthleteMove",
+				predicate: (ctx) => ctx.isCrit
+					&& !ctx.attack?.isSpell
+					&& !!this._state.getFeatureCalculations?.().hasRemarkableAthlete,
+				handler: (ctx) => this._pShowRemarkableAthleteMoveReminder(ctx),
+			},
 		];
+	}
+
+	/**
+	 * Remarkable Athlete (XPHB Champion Fighter L3) post-crit affordance: surface a
+	 * toast reminding the player they may move up to half their Speed without
+	 * provoking Opportunity Attacks. Non-blocking; never mutates movement/speed
+	 * state (the sheet does not model battle-map position).
+	 * @param {*} ctx
+	 */
+	async _pShowRemarkableAthleteMoveReminder (ctx) {
+		const halfSpeed = Math.floor((this._state.getWalkSpeed?.() || 0) / 2);
+		JqueryUtil.doToast({
+			type: "success",
+			content: `Remarkable Athlete: critical hit with ${ctx.attack?.name || "your attack"}! `
+				+ `You may move up to ${halfSpeed} ft. without provoking Opportunity Attacks.`,
+		});
 	}
 
 	/**
@@ -3459,28 +3493,40 @@ class CharacterSheetCombat {
 				deathSaves.failures = Math.min(3, deathSaves.failures + 1);
 			}
 		} else {
-			// Roll death save
-			const roll = this._page.rollDice(1, 20);
-			void this._page.pAnimateD20?.({roll, mode: "normal"});
+			// Roll death save. Champion Survivor's Defy Death (XPHB L18) grants advantage
+			// via `deathSave:advantage` (see `getDeathSaveRollMode()`); Thelemar's crit-roll
+			// homebrew is suppressed (isAttack: true) since death saves already hardcode
+			// their own nat-1/nat-20(+Defy Death 18-20) special cases below.
+			const deathMode = this._state.getDeathSaveRollMode?.() || {advantage: false, disadvantage: false};
+			const rollResult = this._page.rollD20({stateAdvantage: deathMode.advantage, stateDisadvantage: deathMode.disadvantage, isAttack: true});
+			const roll = rollResult.roll;
+			void this._page.pAnimateD20?.(rollResult);
 
+			const modeLabel = this._page.getModeLabel?.(rollResult.mode) || "";
 			// C9: Disciplined Survivor adds proficiency bonus to death saves
 			const calc = this._state.getFeatureCalculations?.() || {};
 			const profBonus = calc.hasDeathSaveProficiency ? (this._state.getProficiencyBonus?.() || 0) : 0;
 			const total = roll + profBonus;
 			const profNote = profBonus > 0 ? ` (+${profBonus} prof)` : "";
 
-			if (roll === 20) {
-				// Natural 20: regain 1 HP
+			// Champion Survivor's Defy Death (XPHB L18): a roll of 18-20 counts as a
+			// natural 20 (regain 1 HP, stabilize). PHB/pre-18 characters keep the strict
+			// natural-20-only rule.
+			const natRange = calc.hasChampionSurvivorDefyDeath ? (calc.championSurvivorDeathSaveNatRange || 18) : 20;
+
+			if (roll >= natRange) {
+				// Natural 20 (or Defy Death's 18-20): regain 1 HP
 				this._state.heal(1);
 				this._resetDeathSaves();
-				JqueryUtil.doToast({type: "success", content: "Natural 20! You regain 1 HP and are stable!"});
+				const defyDeathNote = roll < 20 ? " (Defy Death!)" : "";
+				JqueryUtil.doToast({type: "success", content: `Natural 20${defyDeathNote}! You regain 1 HP and are stable!`});
 				this._page.renderCharacter();
 				return;
 			} else if (roll === 1) {
 				// Natural 1: 2 failures
 				deathSaves.failures = Math.min(3, deathSaves.failures + 2);
 				this._page.showDiceResult({
-					title: "Death Save",
+					title: `Death Save${modeLabel}`,
 					roll,
 					total,
 					resultClass: "text-danger",
@@ -3489,7 +3535,7 @@ class CharacterSheetCombat {
 			} else if (total >= 10) {
 				deathSaves.successes = Math.min(3, deathSaves.successes + 1);
 				this._page.showDiceResult({
-					title: "Death Save",
+					title: `Death Save${modeLabel}`,
 					roll,
 					total,
 					resultClass: "text-success",
@@ -3498,7 +3544,7 @@ class CharacterSheetCombat {
 			} else {
 				deathSaves.failures = Math.min(3, deathSaves.failures + 1);
 				this._page.showDiceResult({
-					title: "Death Save",
+					title: `Death Save${modeLabel}`,
 					roll,
 					total,
 					resultClass: "text-danger",
@@ -9969,6 +10015,24 @@ class CharacterSheetCombat {
 	}
 
 	/**
+	 * Surface a toast for any turn-start effects applied by the most recent
+	 * `startCombat()`/`advanceRound()` call (Heroic Warrior's Heroic Inspiration
+	 * grant, Champion Survivor's Heroic Rally heal, etc. — see
+	 * `CharacterSheetState#getTurnStartEffects`/`applyTurnStartEffects`). Generic:
+	 * any future turn-start effect source is surfaced automatically.
+	 */
+	_toastTurnStartEffects () {
+		const effects = this._state.getLastTurnStartEffects?.() || [];
+		for (const effect of effects) {
+			if (effect.type === "grantInspiration") {
+				JqueryUtil.doToast({type: "success", content: `${effect.source}: gained Heroic Inspiration!`});
+			} else if (effect.type === "heal" && effect.amount) {
+				JqueryUtil.doToast({type: "success", content: `${effect.source}: healed ${effect.amount} HP.`});
+			}
+		}
+	}
+
+	/**
 	 * Initialise combat tracker button handlers (called once on first render)
 	 */
 	_initCombatTracker () {
@@ -9999,6 +10063,7 @@ class CharacterSheetCombat {
 				this._resetTurnActionUsage();
 				this._resetCunningStrikeSelections();
 				JqueryUtil.doToast({type: "success", content: "Combat started — Round 1!"});
+				this._toastTurnStartEffects();
 			}
 			this.renderCombatStates();
 			this.renderCombatActions();
@@ -10021,6 +10086,7 @@ class CharacterSheetCombat {
 			} else {
 				JqueryUtil.doToast({type: "info", content: `Round ${round}`});
 			}
+			this._toastTurnStartEffects();
 
 			this.renderCombatStates();
 			this.renderCombatActions();

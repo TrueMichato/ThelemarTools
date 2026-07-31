@@ -123,6 +123,10 @@ describe("Bug #4 — the initiative ROLL HANDLER consumes the mode", () => {
 					formatD20Breakdown: () => "",
 				},
 				_triggerInitiativeRecovery: () => {},
+				// `_rollInitiative` also consumes any pending Battle Master check-roll
+				// bonus (e.g. Know Your Enemy) via `this.consumeBattleMasterCheckBonus`;
+				// stub it as "no pending bonus" (mirrors the real no-pending-check return).
+				consumeBattleMasterCheckBonus: () => null,
 			};
 			CharacterSheetCombat.prototype._rollInitiative.call(fakeThis, /* event */ undefined);
 		} finally {

@@ -984,6 +984,7 @@ describe("Phase C: Death Save with Proficiency Bonus (C9)", () => {
 		combat._state = mockState;
 		combat._page = {
 			rollDice: () => rollResult,
+			rollD20: () => ({roll: rollResult, roll1: rollResult, roll2: rollResult, mode: "normal"}),
 			showDiceResult: (result) => toasts.push({_diceResult: true, ...result}),
 			renderCharacter: () => {},
 			saveCharacter: () => {},

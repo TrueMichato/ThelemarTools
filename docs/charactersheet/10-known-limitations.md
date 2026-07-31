@@ -183,6 +183,7 @@ The 2024 revision introduced significant changes. Current coverage:
 - ✅ Revised ability score improvements
 - ✅ Fighter XPHB Weapon Mastery slots + Tactical Master swap
 - ✅ Fighter XPHB Battle Master maneuver picks/swaps, scalable Superiority Dice pool, per-use STR/DEX DCs, maneuver Use controls, Know Your Enemy, and Relentless
+- ✅ Fighter XPHB Champion: Improved/Superior Critical (weapon/Unarmed Strike-scoped 19-20 → 18-20, never spell attacks), Remarkable Athlete (L3 Initiative + Athletics advantage, post-crit half-Speed move affordance), Additional Fighting Style (L7 second Fighting Style feat pick via the shared subclass `featProgression` pipeline), Heroic Warrior (L10 turn-start Heroic Inspiration grant), Survivor (L18 Defy Death death-save advantage + 18-20 nat-20 range, Heroic Rally turn-start healing while Bloodied) — all via the generic `getTurnStartEffects()`/`applyTurnStartEffects()` turn-start resolver
 - ✅ Active state mutual exclusivity (Rage/Bladesong)
 - ✅ Rage breaks concentration on activation
 - ✅ Active state duration tracking with round counter + auto-expire

@@ -185,28 +185,33 @@ _rollAttack(attackId, event) {
 
 ### Critical Hit Detection
 
-Accounts for features like Champion's Improved Critical:
+Accounts for features like Champion's Improved/Superior Critical — **scoped
+to weapon and Unarmed Strike attacks only**, so spell attacks never inherit
+a widened crit range:
 
 ```javascript
 _isCriticalHit(roll, attack) {
-    const calc = this._state.getFeatureCalculations();
-    
-    // Default critical range
-    let critRange = 20;
-    
-    // Improved Critical (Champion Fighter)
-    if (calc.improvedCriticalRange) {
-        critRange = calc.improvedCriticalRange;
-    }
-    
+    // getCriticalRange() takes the attack's kind explicitly (e.g. "weapon",
+    // "unarmed", "spell") rather than reading one global number — this is
+    // what keeps Champion's Improved/Superior Critical from leaking into
+    // spell attacks for multiclass/Eldritch Knight-style builds.
+    let critRange = this._state.getCriticalRange(attack.kind ?? "weapon");
+
     // Hexblade's Curse
     if (this._state.isStateTypeActive("hexbladescurse")) {
         critRange = Math.min(critRange, 19);
     }
-    
+
     return roll >= critRange;
 }
 ```
+
+`getCriticalRange(attackKind)` lives on `CharacterSheetState` and is shared
+by both `charactersheet-combat.js` (weapon/unarmed/flurry attacks) and
+`charactersheet-spells.js` (spell attacks) — the single source of truth for
+"what beats a natural 20 for this specific attack", so any future subclass
+that widens crit range only needs to gate its contribution by attack kind
+inside that one method, not duplicate scoping logic in each renderer.
 
 ### Rolling Damage
 

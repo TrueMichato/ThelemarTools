@@ -173,6 +173,8 @@ Every `featuresMatrix` entry that points at a feature with a
 | Pickable activatable feature row (Battle Tactic, Metamagic, …) | `pickActivatable` |
 | Pickable toggleable feature row | `pickToggleable` |
 | Adds a spell to the spellbook / list | `spells` (matrix entry) or `spellInList` |
+| Grants/upgrades a limited-use resource pool | `resource` (checks `resourceMax`; accepts a single number or a `[lo, hi]` range for level-scaling checkpoints, e.g. Action Surge's 1→2 uses at L17) |
+| Widens/narrows the critical-hit threshold | `criticalRange` (checks `exact`, or `max` when a later feature will further improve — i.e. numerically lower — the value at a higher level, e.g. Champion's Improved Critical `max: 19` staying valid once Superior Critical narrows it to 18) |
 | Wires a roll button | `rollAbilityCheck` / `rollSkillCheck` / weapon `attackName` (in usage) |
 | **Per-pick effect attached only when the named pick surfaced** | `pickedFeatureGrants` (Phase 11 — see below) |
 | Pure narrative / cinematic (Wish, Divine Intervention, capstone) | none — add `// no measurable derived effect: <reason>` comment |

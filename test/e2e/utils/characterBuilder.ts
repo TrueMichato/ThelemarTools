@@ -37,6 +37,17 @@ export interface CharacterPreset {
 	 * level-up wizards instead of relying on auto-fill. See pickSignatureSpells.
 	 */
 	signatureSpells?: string[];
+	/**
+	 * Optional preference regex tested against each class-feat-progression
+	 * option's visible text (e.g. Fighter L1 "Fighting Style") during
+	 * wizard creation. Passed through to `selectClassFeatProgressions` so a
+	 * spec can pin a SPECIFIC, deterministic pick (e.g. `/^archery /i`)
+	 * instead of whatever lands first alphabetically — homebrew sources can
+	 * inject extra same-category feats ("Advanced Weapon Proficiency (FS)"
+	 * from GrimHollowPG24 sorts before "Archery") that would otherwise make
+	 * the "obvious" pick non-deterministic.
+	 */
+	preferredFeatProgressionPattern?: RegExp;
 }
 
 // NOTE: All legacy PRESETs use `classSource: "TGTT"` because the character-sheet
@@ -230,6 +241,31 @@ export const PRESET_FULL_BATTLE_MASTER_FIGHTER: CharacterPreset = {
 	masteryCount: 3,
 	subclassName: "Battle Master",
 	subclassSource: "XPHB",
+};
+
+/** XPHB Champion Fighter */
+export const PRESET_FULL_CHAMPION_FIGHTER: CharacterPreset = {
+	race: "Aarakocra",
+	raceSource: "MPMM",
+	className: "Fighter",
+	classSource: "TGTT",
+	background: "Soldier",
+	bgSource: "PHB'24",
+	name: "Corin Steeltriumph",
+	skillCount: 2,
+	masteryCount: 3,
+	subclassName: "Champion",
+	subclassSource: "XPHB",
+	// Pin the L1 Fighting Style pick to Archery (deterministic, mechanically
+	// probeable: unconditional +2 ranged attack bonus) and the L7 Additional
+	// Fighting Style pick to Blind Fighting (a genuinely NEW, distinct style).
+	// Without this, homebrew sources (e.g. GrimHollowPG24's "Advanced Weapon
+	// Proficiency (FS)") can sort alphabetically ahead of both and get
+	// auto-picked instead. Both patterns live in one regex since this same
+	// preset object drives every `levelUpTo` call across the spec (L1
+	// creation AND the L7 level-up) — "archery" simply won't match once
+	// Archery is already known, so it's a no-op fallback at L7.
+	preferredFeatProgressionPattern: /^(archery|blind fighting)\b/i,
 };
 
 /** 3. Bladesinger Wizard Tabaxi (TGTT) */
@@ -609,7 +645,7 @@ export async function createCharacterViaWizard (
 	await builder.selectCombatTraditionsAndMethods();
 	// Class-feat progressions (Fighter "Class Feats" etc.) render as required
 	// dropdowns that block Next until each slot holds a fully-specified feat.
-	await builder.selectClassFeatProgressions();
+	await builder.selectClassFeatProgressions(30, preset.preferredFeatProgressionPattern);
 	// Always try feature options (harmless if none exist)
 	await builder.selectFirstAvailableFeatureOptions(10);
 	await builder.clickNext();
@@ -739,7 +775,7 @@ export async function pHandleLevelUpClassPicker (page: Page, targetClassName?: s
 export async function levelUpTo (
 	page: Page,
 	targetLevel: number,
-	opts?: {subclassName?: string; subclassSource?: string; signatureSpells?: string[]; targetClassName?: string},
+	opts?: {subclassName?: string; subclassSource?: string; signatureSpells?: string[]; targetClassName?: string; preferredFeatProgressionPattern?: RegExp},
 ): Promise<void> {
 	const charSheet = new CharacterSheetPage(page);
 	const levelUp = new LevelUpPage(page);
@@ -818,7 +854,7 @@ export async function levelUpTo (
 		}
 
 		// Auto-fill all remaining selections (skills, spells, feats, etc.)
-		await levelUp.autoFillAllSelections();
+		await levelUp.autoFillAllSelections({preferredFeatProgressionPattern: opts?.preferredFeatProgressionPattern});
 
 		// Finish this level
 		await levelUp.finish();

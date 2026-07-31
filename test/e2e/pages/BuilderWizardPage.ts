@@ -652,8 +652,18 @@ export class BuilderWizardPage {
 	 * the first option plus a best-effort auto-fill.
 	 *
 	 * No-op when no progression slots are present.
+	 *
+	 * @param maxCandidates - cap on how many options to probe per slot.
+	 * @param preferredNamePattern - optional regex tested against each
+	 *   option's visible text (e.g. `/^archery /i`). Matching candidates are
+	 *   tried FIRST, before falling back to DOM order. Some homebrew sources
+	 *   (e.g. GrimHollowPG24) inject extra same-category feats that can sort
+	 *   alphabetically ahead of the "obvious" pick (e.g. "Advanced Weapon
+	 *   Proficiency (FS)" sorts before "Archery" for XPHB Fighting Style) —
+	 *   pass this when a test needs a SPECIFIC, deterministic pick to probe
+	 *   that pick's mechanical effect, rather than whatever lands first.
 	 */
-	async selectClassFeatProgressions (maxCandidates = 30): Promise<void> {
+	async selectClassFeatProgressions (maxCandidates = 30, preferredNamePattern?: RegExp): Promise<void> {
 		const slots = this.page.locator(".charsheet__opt-feat-progression-slot");
 		const slotCount = await slots.count();
 
@@ -663,10 +673,21 @@ export class BuilderWizardPage {
 			if (await select.count() === 0) continue;
 			if (await select.inputValue()) continue; // already chosen
 
-			const values: string[] = await select
+			const options: {value: string; text: string}[] = await select
 				.locator("option")
-				.evaluateAll(opts => (opts as HTMLOptionElement[]).map(o => o.value).filter(Boolean));
-			if (!values.length) continue;
+				.evaluateAll(opts => (opts as HTMLOptionElement[])
+					.filter(o => o.value)
+					.map(o => ({value: o.value, text: o.textContent || ""})));
+			if (!options.length) continue;
+
+			let values = options.map(o => o.value);
+			if (preferredNamePattern) {
+				const preferred = options.filter(o => preferredNamePattern.test(o.text)).map(o => o.value);
+				if (preferred.length) {
+					const rest = values.filter(v => !preferred.includes(v));
+					values = [...preferred, ...rest];
+				}
+			}
 
 			const choices = slot.locator(".charsheet__opt-feat-progression-choices");
 			let settled = false;

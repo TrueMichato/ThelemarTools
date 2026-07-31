@@ -363,8 +363,16 @@ export class LevelUpPage {
 	/**
 	 * Auto-fill all remaining required selections in the level-up wizard.
 	 * Uses jQuery to find and check unchecked checkboxes in sections that need more selections.
+	 *
+	 * @param opts.preferredFeatProgressionPattern - optional regex tested
+	 *   against each class-feat-progression option's visible text (e.g.
+	 *   Champion L7 "Additional Fighting Style"). Matching candidates are
+	 *   tried FIRST — mirrors `BuilderWizardPage.selectClassFeatProgressions`'s
+	 *   same-named parameter so callers can pin a deterministic pick across
+	 *   BOTH the L1 wizard and later level-ups (homebrew sources can inject
+	 *   extra same-category feats that sort ahead of the "obvious" pick).
 	 */
-	async autoFillAllSelections (): Promise<void> {
+	async autoFillAllSelections (opts?: {preferredFeatProgressionPattern?: RegExp}): Promise<void> {
 		// First, force every accordion expanded so all sub-pickers
 		// (including optional ones like Wizard's Spellbook) render their
 		// inputs. Note: clicking accordion headers triggers single-open
@@ -376,6 +384,59 @@ export class LevelUpPage {
 			for (const acc of accordions) acc.classList.add("expanded");
 		});
 		await this.page.waitForTimeout(300);
+
+		// Class-feat progressions gained AT this level-up (e.g. Champion L7
+		// "Additional Fighting Style") render the same
+		// `.charsheet__opt-feat-progression-slot > select` markup as the L1
+		// builder wizard, but nothing else in this auto-fill pass drives a
+		// bare `<select>` — the counter/checkbox/radio passes below only
+		// handle checkboxes and radios. Without this, a required
+		// feat-progression slot gained mid-level-up would silently block
+		// `finish()`. Mirrors `BuilderWizardPage.selectClassFeatProgressions`:
+		// prefer a caller-supplied pattern, then any choice-free option,
+		// falling back to the first candidate + auto-fill of its sub-choices.
+		{
+			const slots = this.page.locator(".charsheet__opt-feat-progression-slot");
+			const slotCount = await slots.count();
+			for (let i = 0; i < slotCount; i++) {
+				const slot = slots.nth(i);
+				const select = slot.locator("select").first();
+				if (await select.count() === 0) continue;
+				if (await select.inputValue()) continue; // already chosen
+
+				const options: {value: string; text: string}[] = await select
+					.locator("option")
+					.evaluateAll(opts => (opts as HTMLOptionElement[])
+						.filter(o => o.value)
+						.map(o => ({value: o.value, text: o.textContent || ""})));
+				if (!options.length) continue;
+
+				let values = options.map(o => o.value);
+				const pattern = opts?.preferredFeatProgressionPattern;
+				if (pattern) {
+					const preferred = options.filter(o => pattern.test(o.text)).map(o => o.value);
+					if (preferred.length) {
+						const rest = values.filter(v => !preferred.includes(v));
+						values = [...preferred, ...rest];
+					}
+				}
+
+				const choices = slot.locator(".charsheet__opt-feat-progression-choices");
+				let settled = false;
+				for (const value of values.slice(0, 30)) {
+					await select.selectOption(value);
+					await this.page.waitForTimeout(80);
+					if (await choices.locator("select, button, input").count() === 0) {
+						settled = true;
+						break;
+					}
+				}
+				if (!settled) {
+					await select.selectOption(values[0]);
+					await this.page.waitForTimeout(150);
+				}
+			}
+		}
 
 		// Enable any "Show all source versions" toggles so additional
 		// combat-methods / optional-feature variants become selectable.

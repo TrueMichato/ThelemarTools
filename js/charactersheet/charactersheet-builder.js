@@ -485,7 +485,7 @@ class CharacterSheetBuilder {
 				}
 				// Validate class-level featProgression feats (Fighting Style, etc.)
 				{
-					const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(this._selectedClass, 0, 1);
+					const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(this._selectedClass, 0, 1, this._selectedSubclass);
 					if (classFeatProgressionGains.length) {
 						const levelUp = this._page.getLevelUpHelper?.();
 						if (levelUp && typeof levelUp._validateOptFeatureFeatProgressionPicks === "function") {
@@ -4715,7 +4715,9 @@ class CharacterSheetBuilder {
 		}
 
 		// Class-level featProgression feats (Fighting Style, etc.) — e.g. XPHB Fighter at L1.
-		const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(cls, 0, 1);
+		// Also picks up a level-1-granted subclass's own featProgression (`this._selectedSubclass`),
+		// e.g. a hypothetical Divine Domain/Patron with its own feat progression at L1.
+		const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(cls, 0, 1, this._selectedSubclass);
 		if (classFeatProgressionGains.length) {
 			const classFeatSection = this._renderClassFeatProgression(cls, classFeatProgressionGains);
 			if (classFeatSection) content.append(classFeatSection);
