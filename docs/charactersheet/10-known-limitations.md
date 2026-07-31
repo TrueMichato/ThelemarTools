@@ -34,7 +34,12 @@ All Druid circles are fully implemented:
 #### Cleric Domains ✅
 All 14 Cleric domains are fully implemented:
 - **Life**: `discipleOfLifeBonus`, `preserveLifeHealing`, `blessedHealerBonus`, `divineStrikeDamage`
-- **Light**: `wardingFlareUses`, `radianceOfTheDawnDamage`
+- **Light (PHB/XPHB edition-aware)**: PHB progression remains unchanged. XPHB
+  starts at Cleric 3, grants its ten always-prepared domain spells at levels
+  3/5/7/9, and mechanically supports Radiance of the Dawn through the shared
+  Channel Divinity pool, Warding Flare as a Wisdom-sized reaction pool,
+  Improved Warding Flare short-rest recovery and temporary HP, and Corona of
+  Light activation plus Fire/Radiant enemy-save disadvantage.
 - **War**: `warPriestUses`, `guidedStrikeBonus`, `avatarOfBattleResistance`
 - **Knowledge**: `visionOfThePastUses`
 - **Nature**: `dampenElementsUses`, `divineStrikeDamage`

@@ -3817,6 +3817,8 @@ class CharacterSheetSpells {
 					saveNote = "; first target rolls at disadvantage";
 				} else if (vcSaveDisadv) {
 					saveNote = "; target saves at disadvantage (🧪)";
+				} else if (this._state.getCoronaOfLightSaveDisadvantage?.(spellData)) {
+					saveNote = "; enemies in Corona of Light's bright light save at disadvantage";
 				}
 				const gamblerDcNote = gamblerModRoll ? ` <span class="ve-muted">(🎲 ${gamblerModRoll.dice}: ${gamblerModRoll.total})</span>` : "";
 				const vcDcNote = vcDcModVal ? ` <span class="text-info">(🧪 ${vcDcModVal > 0 ? "+" : ""}${vcDcModVal} DC)</span>` : "";

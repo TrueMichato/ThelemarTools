@@ -165,6 +165,8 @@ Every `featuresMatrix` entry that points at a feature with a
 | Feature type | EffectCheck kind |
 |---|---|
 | Adds a flat number to a save / skill / AC / DC / speed / initiative | `saveBonus` / `skillBonus` / `ac` / `spellSaveDc` / `speed` / `initiative` |
+| Grants spell slots | `spellSlots` |
+| Restores a feature-owned use pool | `longRestRestoresFeatureUses` / `shortRestRestoresFeatureUses` |
 | Grants advantage / disadvantage on a roll | `advantage` (passive) or `toggleGrantsAdvantage` (toggle) |
 | Grants resistance / immunity / vulnerability | `resistance` / `immunity` / `vulnerability` |
 | Toggle that changes a derived stat while active | `toggleAcDelta` / `toggleSpeedDelta` / `toggleSaveDelta` / `toggleSkillDelta` / `toggleAttackDelta` / `toggleDamageDelta` |

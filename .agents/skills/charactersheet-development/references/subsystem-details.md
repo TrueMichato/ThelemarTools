@@ -16,13 +16,26 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 
 ### ACTIVE_STATE_TYPES
 
-Core states: `rage`, `bladesong`, `sunShield`, `wildShape`, `hybridTransformation`, `crimsonRite`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
+Core states: `rage`, `bladesong`, `sunShield`, `wildShape`, `hybridTransformation`, `crimsonRite`, `wardingFlare`, `coronaOfLight`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
 
 Astral Self states: `astralArms`, `astralVisage`, `astralBody`,
 `awakenedAstralSelf`. Body uses `requiresStates`; ending a prerequisite
 cascades through dependents. All four declare incapacitation/death
 `endConditions`, which are enforced by the shared condition and 0-HP teardown
 path.
+
+### XPHB Light Domain
+
+`Radiance of the Dawn` is a curated limited-use activation linked to the shared
+`Channel Divinity` feature/resource; its handler spends that pool, rolls
+`2d10 + Cleric level` radiant damage, and reports Constitution-save-for-half
+and magical-darkness dispelling. `wardingFlare` is a one-attack
+`attacksAgainst` disadvantage state backed by a Wisdom-modifier feature-use
+pool. At Cleric 6 it recharges on a Short Rest and rolls `2d6 + WIS` temporary
+HP. `coronaOfLight` is a one-minute, Wisdom-use aura; spell rendering calls
+`getCoronaOfLightSaveDisadvantage(spell)` and only annotates saving throws for
+Fire/Radiant damage spells. Radiance uses
+`hasCoronaOfLightRadianceDisadvantage()` for the same target-side effect.
 
 Each state type defines:
 ```javascript

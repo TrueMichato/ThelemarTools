@@ -182,7 +182,11 @@ export function describeCharacter (spec: CharacterSpec): void {
 
 	test.describe(`${displayName} — comprehensive build`, () => {
 		test.beforeEach(async ({page}) => {
-			await gotoWithThelemar(page);
+			if (preset.prioritySources?.length && !preset.prioritySources.includes("TGTT")) {
+				await new CharacterSheetPage(page).goto();
+			} else {
+				await gotoWithThelemar(page);
+			}
 		});
 
 		test.afterEach(async ({page}) => {
@@ -368,8 +372,9 @@ export function describeCharacter (spec: CharacterSpec): void {
 						: usage.attackName;
 					const matched = names.find(n => matchRe.test(n));
 					if (matched) {
-						const clicked = await charSheet.clickAttackRoll(matched);
-						expect(clicked, `attack roll for ${matched} should be clickable`).toBe(true);
+						const result = await charSheet.clickAttackRoll(matched);
+						expect(result.clicked, `attack roll for ${matched} should be clickable`).toBe(true);
+						expect(result.threwError, `attack roll for ${matched} should not throw`).toBe(false);
 					} else if (names.length > 0) {
 						// Some attack rendered but not the expected one — log
 						// the actual list so future regressions are easier

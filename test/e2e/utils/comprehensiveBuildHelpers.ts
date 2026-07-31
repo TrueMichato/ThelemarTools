@@ -624,6 +624,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "abilityMod"; ability: AblKey; min?: number; exact?: number}
 	| {kind: "ac"; min?: number; exact?: number}
 	| {kind: "spellSaveDc"; min?: number; exact?: number}
+	| {kind: "spellSlots"; level: number; min: number}
 	| {kind: "speed"; type?: SpeedType; min?: number; exact?: number}
 	| {kind: "initiative"; min?: number; exact?: number}
 	| {kind: "resistance"; damageType: string}
@@ -669,6 +670,8 @@ export type EffectCheck = _EffectCommon & (
 	// === Resource semantics extension ===
 	| {kind: "longRestRestores"; resource: string; toMax?: boolean}
 	| {kind: "shortRestRestores"; resource: string; toMax?: boolean}
+	| {kind: "longRestRestoresFeatureUses"; feature: string}
+	| {kind: "shortRestRestoresFeatureUses"; feature: string}
 
 	// === Phase 8: per-pick + scaling stat probes ===
 	// Verify a named attack row has bonus ≥ N (or exact). Useful
@@ -775,6 +778,11 @@ async function _runPassiveOrRollEffect (
 			const dc = await charSheet.getSpellSaveDC().catch(() => null);
 			if (dc == null) throw new Error(`spell save DC not readable from sheet`);
 			_checkNumeric(dc, e, `spellSaveDc`);
+			return;
+		}
+		case "spellSlots": {
+			const slots = await charSheet.getSpellSlots(e.level);
+			if (slots.max < e.min) throw new Error(`level-${e.level} spell slots ${slots.max} < ${e.min}`);
 			return;
 		}
 		case "speed": {
@@ -925,6 +933,24 @@ async function _runPassiveOrRollEffect (
 			const after = await charSheet.getResource(e.resource).catch(() => afterSpend);
 			const target = e.toMax === false ? (before.current) : before.max;
 			if (after.current < target) throw new Error(`expected ${isShort ? "short" : "long"} rest to restore "${e.resource}" to ≥${target}, got ${after.current}/${after.max}`);
+			return;
+		}
+		case "longRestRestoresFeatureUses":
+		case "shortRestRestoresFeatureUses": {
+			const isShort = e.kind === "shortRestRestoresFeatureUses";
+			if (isShort) await charSheet.triggerShortRest();
+			else await charSheet.triggerLongRest();
+			const before = await charSheet.getFeatureUses(e.feature);
+			if (before.max <= 0) throw new Error(`feature uses for "${e.feature}" not tracked`);
+			if (!await charSheet.spendFeatureUse(e.feature)) throw new Error(`could not spend a use of "${e.feature}"`);
+			const afterSpend = await charSheet.getFeatureUses(e.feature);
+			if (afterSpend.current !== before.current - 1) throw new Error(`spending "${e.feature}" did not decrement its uses`);
+			if (isShort) await charSheet.triggerShortRest();
+			else await charSheet.triggerLongRest();
+			const afterRest = await charSheet.getFeatureUses(e.feature);
+			if (afterRest.current !== afterRest.max) {
+				throw new Error(`expected ${isShort ? "short" : "long"} rest to restore "${e.feature}" to ${afterRest.max}, got ${afterRest.current}`);
+			}
 			return;
 		}
 

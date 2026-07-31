@@ -19387,33 +19387,39 @@ class CharacterSheetState {
 							}
 							case "light domain":
 							case "light": {
-								// Bonus cantrip: Light
-								calculations.hasBonusLightCantrip = true;
-
-								// Warding Flare (level 1): WIS mod uses
-								calculations.hasWardingFlare = true;
-								calculations.wardingFlareUses = Math.max(1, wisMod);
-
-								// Channel Divinity: Radiance of the Dawn (level 2)
-								if (level >= 2) {
-									calculations.hasRadianceOfTheDawn = true;
-									calculations.radianceOfTheDawnDamage = `2d10+${level}`;
-								}
-
-								// Improved Flare (level 6): use on others within 30 ft
-								if (level >= 6) {
-									calculations.hasImprovedFlare = true;
-								}
-
-								// Potent Spellcasting (level 8): add WIS to cantrip damage
-								if (!is2024 && level >= 8) {
-									calculations.hasPotentSpellcasting = true;
-									calculations.potentSpellcastingBonus = wisMod;
-								}
-
-								// Corona of Light (level 17)
-								if (level >= 17) {
-									calculations.hasCoronaOfLight = true;
+								if (is2024) {
+									if (level >= 3) {
+										calculations.hasWardingFlare = true;
+										calculations.wardingFlareUses = Math.max(1, wisMod);
+										calculations.wardingFlareRecharge = level >= 6 ? "short" : "long";
+										calculations.hasRadianceOfTheDawn = true;
+										calculations.radianceOfTheDawnDamage = `2d10+${level}`;
+										calculations.radianceOfTheDawnSaveDc = 8 + profBonus + wisMod;
+									}
+									if (level >= 6) {
+										calculations.hasImprovedFlare = true;
+										calculations.improvedWardingFlareTempHp = `2d6+${wisMod}`;
+									}
+									if (level >= 17) {
+										calculations.hasCoronaOfLight = true;
+										calculations.coronaOfLightUses = Math.max(1, wisMod);
+										calculations.coronaOfLightBrightRadius = 60;
+										calculations.coronaOfLightDimRadius = 90;
+									}
+								} else {
+									calculations.hasBonusLightCantrip = true;
+									calculations.hasWardingFlare = true;
+									calculations.wardingFlareUses = Math.max(1, wisMod);
+									if (level >= 2) {
+										calculations.hasRadianceOfTheDawn = true;
+										calculations.radianceOfTheDawnDamage = `2d10+${level}`;
+									}
+									if (level >= 6) calculations.hasImprovedFlare = true;
+									if (level >= 8) {
+										calculations.hasPotentSpellcasting = true;
+										calculations.potentSpellcastingBonus = wisMod;
+									}
+									if (level >= 17) calculations.hasCoronaOfLight = true;
 								}
 								break;
 							}
@@ -30636,6 +30642,16 @@ class CharacterSheetState {
 		return out;
 	}
 
+	getCoronaOfLightSaveDisadvantage (spellData) {
+		if (!this.isStateTypeActive("coronaOfLight") || !spellData?.savingThrow?.length) return false;
+		const damageTypes = this._extractSpellDamageTypes(spellData);
+		return damageTypes.has("fire") || damageTypes.has("radiant");
+	}
+
+	hasCoronaOfLightRadianceDisadvantage () {
+		return this.isStateTypeActive("coronaOfLight");
+	}
+
 	setResourceCurrent (resourceId, current) {
 		const resource = this._data.resources.find(r => r.id === resourceId);
 		if (resource) {
@@ -30739,32 +30755,38 @@ class CharacterSheetState {
 			// Curated TGTT overrides win over the generic parser here too, so a later
 			// ability/level recalculation can't silently re-inflate a curated tracker
 			// (e.g. Healing Salves back to 1 + WIS doses).
-			const newUses = this._getCuratedFeatureUses(item)
+			const curatedUses = this._getCuratedFeatureUses(item);
+			const newUses = curatedUses
 				|| FeatureUsesParser.parseUses(item.description, getAbilityMod, getProfBonus);
 
 			if (newUses) {
 				// Update feature/feat uses
-				const dataItem = item.featureType
-					? this._data.features.find(f => f.id === item.id)
-					: this._data.feats.find(f => f.id === item.id);
+				const dataItem = this._data.features.find(f => f.id === item.id)
+					|| this._data.feats.find(f => f.id === item.id);
 
-				if (dataItem?.uses && dataItem.uses.max !== newUses.max) {
-					const diff = newUses.max - dataItem.uses.max;
-					dataItem.uses.max = newUses.max;
-					// Increase current if max increased (don't decrease)
-					if (diff > 0) {
-						dataItem.uses.current = Math.min(dataItem.uses.current + diff, newUses.max);
+				if (dataItem?.uses) {
+					if (dataItem.uses.max !== newUses.max) {
+						const diff = newUses.max - dataItem.uses.max;
+						dataItem.uses.max = newUses.max;
+						// Increase current if max increased (don't decrease)
+						if (diff > 0) {
+							dataItem.uses.current = Math.min(dataItem.uses.current + diff, newUses.max);
+						}
 					}
+					if (curatedUses) dataItem.uses.recharge = newUses.recharge;
 				}
 
 				// Update associated resource
 				const resource = this._data.resources.find(r => r.name === item.name);
-				if (resource && resource.max !== newUses.max) {
-					const diff = newUses.max - resource.max;
-					resource.max = newUses.max;
-					if (diff > 0) {
-						resource.current = Math.min(resource.current + diff, newUses.max);
+				if (resource) {
+					if (resource.max !== newUses.max) {
+						const diff = newUses.max - resource.max;
+						resource.max = newUses.max;
+						if (diff > 0) {
+							resource.current = Math.min(resource.current + diff, newUses.max);
+						}
 					}
+					if (curatedUses) resource.recharge = newUses.recharge;
 				}
 			}
 		});
@@ -33417,6 +33439,15 @@ class CharacterSheetState {
 	 */
 	_getCuratedFeatureUses (feature) {
 		const name = (feature.name || "").toLowerCase();
+		const source = feature.classSource || feature.source;
+
+		if (source === "XPHB" && name === "warding flare") {
+			const clericLevel = this.getClassLevel("Cleric");
+			return {max: Math.max(1, this.getAbilityMod("wis")), recharge: clericLevel >= 6 ? "short" : "long"};
+		}
+		if (source === "XPHB" && name === "corona of light") {
+			return {max: Math.max(1, this.getAbilityMod("wis")), recharge: "long"};
+		}
 
 		// Aasimar "Healing Hands" (DMG/VGM/MPMM/XPHB) is a single action, once per
 		// long rest. The generic parser mis-reads "roll a number of d4s equal to
@@ -42588,6 +42619,30 @@ class CharacterSheetState {
 			detectPatterns: ["^sun shield$", "wreathed in a luminous.*aura"],
 			activationAction: "bonus",
 		},
+		wardingFlare: {
+			id: "wardingFlare",
+			name: "Warding Flare",
+			icon: "✨",
+			description: "The triggering attack roll has disadvantage.",
+			effects: [
+				{type: "disadvantage", target: "attacksAgainst"},
+			],
+			duration: "One triggering attack",
+			endConditions: ["The triggering attack resolves"],
+		},
+		coronaOfLight: {
+			id: "coronaOfLight",
+			name: "Corona of Light",
+			icon: "☀️",
+			description: "Bright light for 60 feet and dim light for another 30 feet; enemies in the bright light have disadvantage on saves against Radiance of the Dawn and Fire or Radiant spells.",
+			effects: [
+				{type: "enemySaveDisadvantage", target: "radianceOfTheDawn"},
+				{type: "enemySaveDisadvantage", target: "spellDamage", damageTypes: ["fire", "radiant"]},
+			],
+			duration: "1 minute",
+			endConditions: ["Dismissed", "Duration expires"],
+			activationAction: "action",
+		},
 		astralArms: {
 			id: "astralArms",
 			name: "Arms of the Astral Self",
@@ -44011,6 +44066,30 @@ class CharacterSheetState {
 
 		const rawText = feature.description || CharacterSheetState._featureTextFromEntries(feature) || "";
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
+		const isXphbLight = (feature.classSource || feature.source) === "XPHB"
+			&& (feature.subclassShortName || "").toLowerCase() === "light";
+		if (isXphbLight && name === "radiance of the dawn") {
+			return this._buildAbilityActivationInfo(feature, rawText, text, {resourceName: "Channel Divinity"});
+		}
+		if (isXphbLight && name === "warding flare") {
+			return {
+				...this._buildAbilityActivationInfo(feature, rawText, text, {resourceName: "Warding Flare"}),
+				stateTypeId: "wardingFlare",
+				stateType: this.ACTIVE_STATE_TYPES.wardingFlare,
+				activationAction: "reaction",
+			};
+		}
+		if (isXphbLight && name === "corona of light") {
+			return {
+				stateTypeId: "coronaOfLight",
+				stateType: this.ACTIVE_STATE_TYPES.coronaOfLight,
+				matchedBy: "xphbLight",
+				activationAction: "action",
+				interactionMode: "toggle",
+				isToggle: true,
+				duration: "1 minute",
+			};
+		}
 		if (isCrimsonRite) {
 			return {
 				stateTypeId: "crimsonRite",

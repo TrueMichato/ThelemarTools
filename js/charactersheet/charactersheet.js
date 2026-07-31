@@ -8497,6 +8497,8 @@ class CharacterSheetPage {
 		switch (name) {
 			case "healing hands": return this._pUseHealingHands(feature, resource, resourceCost);
 			case "guided strike": return this._pUseGuidedStrike(feature, resource, resourceCost);
+			case "radiance of the dawn": return this._pUseRadianceOfTheDawn(feature, resource, resourceCost);
+			case "warding flare": return this._pUseWardingFlare(feature, resource, resourceCost);
 			case "forked tongue": return this._pOpenForkedTongueSwap(feature);
 			case "baleful interdict": return this._pUseBalefulInterdict(feature);
 			case "song of defense": return this._pUseSongOfDefense(feature);
@@ -8508,6 +8510,63 @@ class CharacterSheetPage {
 		// (e.g. damage bursts) fall through to the generic limited-use pipeline unchanged.
 		if (feature?._manifestationRequiresSave) return this._pUseManifestationSaveOption(feature, resource, resourceCost);
 		return false;
+	}
+
+	_pUseRadianceOfTheDawn (feature, resource, resourceCost = 1) {
+		if ((feature.classSource || feature.source) !== "XPHB") return false;
+		if (!resource || resource.current < resourceCost) {
+			JqueryUtil.doToast({type: "warning", content: "Radiance of the Dawn requires an available Channel Divinity use."});
+			return true;
+		}
+		const calc = this._state.getFeatureCalculations();
+		const rolls = [RollerUtil.randomise(10), RollerUtil.randomise(10)];
+		const total = rolls[0] + rolls[1] + this._state.getClassLevel("Cleric");
+		this._state.setResourceCurrent(resource.id, resource.current - resourceCost);
+		const corona = this._state.hasCoronaOfLightRadianceDisadvantage();
+		const saveNote = corona ? " Enemies in Corona of Light's bright light save with disadvantage." : "";
+		this._showDiceResult(
+			"Radiance of the Dawn",
+			total,
+			`2d10 + Cleric level radiant damage (${rolls.join(" + ")} + ${this._state.getClassLevel("Cleric")}); DC ${calc.radianceOfTheDawnSaveDc} Constitution save for half. Magical darkness in the 30-foot emanation is dispelled.${saveNote}`,
+		);
+		this._saveCurrentCharacter();
+		this._renderResources();
+		return true;
+	}
+
+	_pUseWardingFlare (feature, resource, resourceCost = 1) {
+		if ((feature.classSource || feature.source) !== "XPHB") return false;
+		if (!resource || resource.current < resourceCost) {
+			JqueryUtil.doToast({type: "warning", content: "Warding Flare has no uses remaining."});
+			return true;
+		}
+		this._state.setResourceCurrent(resource.id, resource.current - resourceCost);
+		this._state.activateState("wardingFlare", {sourceFeatureId: feature.id});
+
+		const calc = this._state.getFeatureCalculations();
+		if (!calc.hasImprovedFlare) {
+			JqueryUtil.doToast({type: "success", content: "✨ Warding Flare: impose disadvantage on the triggering attack roll."});
+		} else {
+			const rolls = [RollerUtil.randomise(6), RollerUtil.randomise(6)];
+			const tempHp = Math.max(0, rolls[0] + rolls[1] + this._state.getAbilityMod("wis"));
+			const toastEl = e_({tag: "span", html: `<span>✨ <strong>Warding Flare</strong>: impose disadvantage. The attack's target can gain <strong>${tempHp}</strong> temporary HP (2d6 + WIS).</span> <button class="ve-btn ve-btn-xs ve-btn-primary btn-apply-to-self ml-2">Apply to Self</button>`});
+			const applyBtn = toastEl.querySelector(".btn-apply-to-self");
+			applyBtn?.addEventListener("click", (evt) => {
+				evt.stopPropagation();
+				if (applyBtn.disabled) return;
+				applyBtn.disabled = true;
+				if (tempHp > this._state.getTempHp()) this._state.setTempHp(tempHp);
+				applyBtn.textContent = "✓ Applied to Self";
+				this._saveCurrentCharacter();
+				this._renderHp?.();
+			});
+			JqueryUtil.doToast({type: "success", content: toastEl, autoHideTime: 15000});
+		}
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderActiveStates();
+		this._combat?.renderCombatStates?.();
+		return true;
 	}
 
 	async _pUseBattleMasterManeuver (feature, resource, resourceCost = 1) {
