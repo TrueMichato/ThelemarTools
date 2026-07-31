@@ -9,6 +9,7 @@ Toggle abilities are features that can be activated and deactivated, providing t
 - Standard D&D abilities (Rage, Wild Shape, Patient Defense)
 - Wizard features (Bladesong)
 - Blood Hunter hemocraft (Crimson Rite and Order of the Lycan's Hybrid Transformation)
+- Way of the Astral Self manifestations (Arms, Visage, Body, and Awakened)
 - Combat stances (from various homebrew sources)
 - Custom/homebrew toggle abilities
 - Automatic detection and categorization
@@ -67,6 +68,20 @@ static ACTIVE_STATE_TYPES = {
 | `requiresClassLevel` | number | Minimum level (optional) |
 | `isGeneric` | boolean | If true, effects parsed from feature |
 | `useFeatureDescription` | boolean | Show feature description instead of generic |
+
+### Astral Self state lifecycle
+
+The four Astral Self manifestations are separate active states. Arms and Visage
+can be activated independently, Body requires both, and Awakened activates the
+complete set while deducting its five-point cost only once. Dependency teardown
+is bidirectional: ending Arms or Visage ends Body and Awakened, while ending
+Awakened ends all three components. Their `endConditions` also route through the
+generic incapacitation/0-HP teardown path.
+
+Arms uses `variablePointSpend` so the level 6+ UI can offer Arms for one
+Ki/Focus point or Arms plus Visage for two. Visage and Body expose resolved
+`trigger` controls for speech modes and Deflect Energy; the trigger resolver
+applies ranges, ability modifiers, and action-economy costs before rendering.
 
 ---
 

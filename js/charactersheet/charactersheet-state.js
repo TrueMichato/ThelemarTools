@@ -8380,13 +8380,14 @@ class CharacterSheetState {
 
 	/**
 	 * Resolve a weapon attack/damage ability key to a modifier WITHOUT any
-	 * active-state overrides. Handles the "finesse" (max STR/DEX) and
-	 * "spellcasting" (max INT/WIS/CHA) pseudo-keys; otherwise the plain mod.
-	 * @param {string} abilityKey - "str"|"dex"|...|"finesse"|"spellcasting"
+	 * active-state overrides. Handles player-choice pseudo-keys; otherwise the
+	 * plain ability modifier.
+	 * @param {string} abilityKey - "str"|"dex"|...|"finesse"|"finesseWis"|"spellcasting"
 	 * @returns {number}
 	 */
 	_resolveBaseWeaponAbilityMod (abilityKey) {
 		if (abilityKey === "finesse") return Math.max(this.getAbilityMod("str"), this.getAbilityMod("dex"));
+		if (abilityKey === "finesseWis") return Math.max(this.getAbilityMod("str"), this.getAbilityMod("dex"), this.getAbilityMod("wis"));
 		if (abilityKey === "spellcasting") return Math.max(this.getAbilityMod("int"), this.getAbilityMod("wis"), this.getAbilityMod("cha"));
 		return this.getAbilityMod(abilityKey);
 	}
@@ -16643,7 +16644,7 @@ class CharacterSheetState {
 							sourceFeature: "Astral Arms",
 							damage: martialArtsDice,
 							damageType: "force",
-							abilityMod: "wis",
+							abilityMod: "finesseWis",
 							reachBonus: calculations.armsOfAstralSelfReachBonus,
 							reachCondition: "onYourTurn",
 							range: `${this.getMeleeReach()} ft`,

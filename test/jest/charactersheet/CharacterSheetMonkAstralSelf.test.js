@@ -55,12 +55,29 @@ describe("Way of the Astral Self — computed mechanics", () => {
 			name: "Astral Arms",
 			damage: die,
 			damageType: "force",
-			abilityMod: "wis",
+			abilityMod: "finesseWis",
 			reachBonus: 5,
 			reachCondition: "onYourTurn",
 			isUnarmedStrike: true,
 			isFeatureAttack: true,
 		}));
+	});
+
+	it("uses the best permitted STR, DEX, or WIS modifier for Astral Arms", () => {
+		const state = getAstralState(3);
+		state.activateState("astralArms");
+		const attack = state.getFeatureGrantedAttacks()[0];
+		const combat = getCombatHarness(state);
+
+		state.setAbilityBase("str", 10);
+		state.setAbilityBase("dex", 18);
+		state.setAbilityBase("wis", 12);
+		expect(state.getWeaponAbilityMod(attack)).toBe(4);
+		expect(combat._resolveAttackAbilityKey(attack, true)).toBe("dex");
+
+		state.setAbilityBase("wis", 20);
+		expect(state.getWeaponAbilityMod(attack)).toBe(5);
+		expect(combat._resolveAttackAbilityKey(attack, true)).toBe("wis");
 	});
 
 	it("adds 5 feet to normal reach only on the Monk's turn", () => {

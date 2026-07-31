@@ -2053,6 +2053,8 @@ class CharacterSheetLevelUp {
 		// the Illrigger Interdict-boon progression, never the generic feat/epic-boon slot.
 		const feats = this._page.filterByAllowedSources(this._page.getFeats() || [])
 			.filter((/** @type {*} */ f) => !CharacterSheetClassUtils.isInterdictBoonEntry(f));
+		const getFeatChoices = (/** @type {*} */ feat) =>
+			CharacterSheetClassUtils.buildFeatChoicesSpec(feat, {state: this._state, page: this._page});
 
 		// === Epic Boon section (level 19 for XPHB / TGTT classes) ===
 		if (isEpicBoonLevel) {
@@ -2139,18 +2141,6 @@ class CharacterSheetLevelUp {
 		const featSearch = e_({outer: `<input type="text" class="ve-form-control mb-2" placeholder="Search feats...">`});
 		const featList = e_({outer: `<div class="charsheet__levelup-feats-list"></div>`});
 		const featChoicesContainer = e_({outer: `<div class="charsheet__levelup-feat-choices"></div>`});
-
-		// Helper to detect if feat has choices.
-		// Declared as a `function` (not `const` arrow) so it is hoisted
-		// to the top of `_renderAsiSelection` — the Epic Boon section
-		// (rendered earlier in the function body) needs to call it.
-		// We capture `this` into `self` because strict-mode `function`
-		// declarations don't inherit lexical `this`, so the optional-feature
-		// branch below previously crashed for any feat with `optionalfeatureProgression`.
-		const self = this;
-		function getFeatChoices (/** @type {*} */ feat) {
-			return CharacterSheetClassUtils.buildFeatChoicesSpec(feat, {state: self._state, page: self._page});
-		}
 
 		const renderFeats = (filter = "") => {
 			featList.innerHTML = "";

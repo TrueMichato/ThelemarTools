@@ -14,9 +14,15 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 
 ## Active States / Toggle Abilities
 
-### ACTIVE_STATE_TYPES (40 types defined)
+### ACTIVE_STATE_TYPES
 
 Core states: `rage`, `bladesong`, `sunShield`, `wildShape`, `hybridTransformation`, `crimsonRite`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
+
+Astral Self states: `astralArms`, `astralVisage`, `astralBody`,
+`awakenedAstralSelf`. Body uses `requiresStates`; ending a prerequisite
+cascades through dependents. All four declare incapacitation/death
+`endConditions`, which are enforced by the shared condition and 0-HP teardown
+path.
 
 Each state type defines:
 ```javascript
@@ -134,7 +140,11 @@ automatic, temporary, and active-state attacks. Keep the descriptor's
 `attackBonus` and `damageBonus` limited to bonuses beyond its configured
 `abilityMod`; the normal attack renderer and rollers add the ability modifier
 and proficiency bonus. Radiant Sun Bolt uses this path so its `damage` tracks
-the Monk's edition-aware Martial Arts die.
+the Monk's edition-aware Martial Arts die. Astral Arms uses the same path with
+the best STR/DEX/WIS modifier (`finesseWis`), force damage, and attack-scoped
+`reachBonus`/`reachCondition` metadata.
+Damage rollers consume the assembled `attack.damage`; they never re-derive the
+Monk die from an item.
 
 ### Variable Point Spending
 
@@ -144,7 +154,8 @@ calculation layer supplies minimum and maximum spend; the chooser clamps that
 range to the current shared point pool, returns the selected amount, and the
 normal action pipeline performs the single canonical deduction. Searing Arc
 Strike and Searing Sunburst then pass the selected amount to their computed
-save/damage execution.
+save/damage execution. Astral Arms uses the same chooser for its one-point
+activation or two-point Arms-plus-Visage activation.
 
 ### Triggered Active-State Effects
 
@@ -152,7 +163,15 @@ An active-state type can define `trigger: {label, actionType, effectType}` and
 a matching effect. `getActiveStateTrigger()` resolves `value + abilityMod`;
 Combat renders a trigger button and consumes the configured action type when it
 executes. Sun Shield uses this reusable path for its `5 + WIS` radiant
-retaliation and reaction cost.
+retaliation and reaction cost. Astral Visage resolves its 60/600-foot speech
+choices through trigger metadata; Astral Body resolves `1d10 + WIS` Deflect
+Energy and consumes the reaction.
+
+Astral Self also uses the transient Attack-action tracker. Empowered Arms is an
+Astral-Arms-only once-per-turn damage rider, while Astral Barrage permits a
+third attack only when every attack recorded for that Attack action is an
+Astral Arms attack; bonus-action, reaction, spell, weapon, and ordinary
+unarmed attacks do not qualify.
 
 ### Weapon Mastery Effects
 

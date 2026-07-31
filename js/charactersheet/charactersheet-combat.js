@@ -1309,6 +1309,7 @@ class CharacterSheetCombat {
 		const key = attack?.abilityMod || (isMelee ? "str" : "dex");
 		const abilityMod = (a) => this._state.getAbilityMod?.(a) ?? 0;
 		if (key === "finesse") return abilityMod("str") >= abilityMod("dex") ? "str" : "dex";
+		if (key === "finesseWis") return ["str", "dex", "wis"].reduce((best, a) => (abilityMod(a) > abilityMod(best) ? a : best), "str");
 		if (key === "spellcasting") {
 			return ["int", "wis", "cha"].reduce((best, a) => (abilityMod(a) > abilityMod(best) ? a : best), "int");
 		}

@@ -103,12 +103,22 @@ canonical attack list. These descriptors come from feature calculations and
 are marked as feature-owned, so they use the normal attack/damage roll path but
 cannot be edited or removed independently. The descriptor's `damage` is the
 final die expression after class substitutions; for example, Radiant Sun
-Bolt's radiant damage tracks the Monk's current Martial Arts die.
+Bolt's radiant damage tracks the Monk's current Martial Arts die. Astral Arms
+uses the same path for a force attack using the best permitted STR/DEX/WIS
+modifier and carries
+`reachBonus: 5`/`reachCondition: "onYourTurn"` so only that row gains reach,
+and only during the Monk's turn.
 
 Feature attacks configure their ability through `abilityMod`. Their
 `attackBonus` and `damageBonus` fields contain only additional bonuses; the
 normal renderer and roller add the configured ability modifier and proficiency
 bonus.
+
+The transient Attack-action tracker records attack provenance separately from
+bonus-action, reaction, and spell attacks. Astral Barrage consults that record
+to permit a third Astral Arms attack only while the current Attack action
+contains exclusively Astral Arms attacks. Empowered Arms uses the shared
+once-per-turn damage-rider path and is scoped to the same feature-owned row.
 
 ### Attack Bonus Calculation
 

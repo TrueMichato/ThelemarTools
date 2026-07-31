@@ -109,6 +109,19 @@ Their pools are synchronized by `ensureBloodHunterResources()` so Builder,
 Level-Up, Quick Build, saved characters, and the active-state UI share one
 current/max value.
 
+Way of the Astral Self follows the same split. Calculations own level gates,
+Martial Arts dice, activation burst/DC data, `grantedAttacks`, damage riders,
+and Astral Barrage allowance. Runtime active states own whether Arms, Visage,
+Body, or Awakened currently applies. Do not add an Awakened `2d10` bonus-damage
+field: TCE grants Armor of the Spirit and Astral Barrage, not bonus damage.
+
+Astral Arms uses the generic `finesseWis` pseudo-ability to resolve the best
+permitted Strength, Dexterity, or Wisdom modifier. It also demonstrates
+attack-scoped metadata: `reachBonus: 5` plus
+`reachCondition: "onYourTurn"` is resolved by `getAttackReach()`, rather than
+changing global melee reach. Its descriptor's `damage` is already the final
+Martial Arts die and must be consumed unchanged by damage rollers.
+
 Multi-attribute `abilityDc` entries are generic feature choices. Builder,
 Level-Up, and Quick Build persist the selected ability in level-history
 `featureChoices`; calculations should read that durable choice and provide a

@@ -43,6 +43,8 @@ export interface CharacterSpec {
 	midTierLoadout?: InventoryItemRef[];
 	/** Toggle that should produce a non-zero AC OR DC delta when activated. */
 	signatureToggle?: string | RegExp;
+	/** Attack row granted by a signature toggle instead of an AC/DC delta. */
+	signatureToggleAddsAttack?: string | RegExp;
 	/** Per-milestone expectations indexed by character level. */
 	milestones?: Partial<Record<number, MilestoneExpect>>;
 	/** Set true to skip the L1→20 mega test (e.g. for multiclass cases handled separately). */
@@ -239,7 +241,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 		// suite without proportional coverage gain.  Renamed from "L7"
 		// for honesty about what the test actually walks.
 		if ((midTierLoadout?.length || signatureToggle) && !skipL7) {
-			test(`L5 loadout: installs gear + signature toggle changes derived stats`, async ({page}) => {
+			test(`L5 loadout: installs gear + signature toggle produces its mechanical effect`, async ({page}) => {
 				test.setTimeout(L7_TIMEOUT_MS);
 				const {charSheet} = await createCharacterViaWizard(page, preset);
 				await levelUpTo(page, 5, {...subclassOpts, signatureSpells: preset.signatureSpells});
@@ -257,6 +259,22 @@ export function describeCharacter (spec: CharacterSpec): void {
 				}
 
 				if (signatureToggle) {
+					if (spec.signatureToggleAddsAttack) {
+						const attackPattern = spec.signatureToggleAddsAttack instanceof RegExp
+							? spec.signatureToggleAddsAttack
+							: new RegExp(spec.signatureToggleAddsAttack, "i");
+						const toggleName = typeof signatureToggle === "string"
+							? signatureToggle
+							: (await charSheet.getToggleableFeatureNames()).find(name => signatureToggle.test(name));
+						expect(toggleName, `toggle ${signatureToggle} should surface`).toBeTruthy();
+						const before = await charSheet.getAttackNames();
+						await charSheet.activateFeature(toggleName!);
+						const after = await charSheet.getAttackNames();
+						expect(before.some(name => attackPattern.test(name)), `${attackPattern} should not exist before ${signatureToggle} activates`).toBe(false);
+						expect(after.some(name => attackPattern.test(name)), `${attackPattern} should appear after ${signatureToggle} activates`).toBe(true);
+						await charSheet.deactivateFeature(toggleName!);
+						return;
+					}
 					const delta = await probeToggleDelta(charSheet, signatureToggle);
 					if (delta == null) {
 						// Signature feature isn't expressed as a UI toggle on
@@ -290,7 +308,10 @@ export function describeCharacter (spec: CharacterSpec): void {
 				await charSheet.expectLevel(cp);
 				const m = milestones[cp];
 				if (m) await assertMilestone(charSheet, m);
-				if (featuresMatrix?.length) await assertFeaturesMatrix(charSheet, featuresMatrix, cp);
+				if (featuresMatrix?.length) {
+					await charSheet.triggerLongRest();
+					await assertFeaturesMatrix(charSheet, featuresMatrix, cp);
+				}
 			}
 		});
 
@@ -312,6 +333,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 					await levelUpTo(page, cp, {...subclassOpts, signatureSpells: preset.signatureSpells});
 					cursor = cp;
 					await charSheet.expectLevel(cp);
+					await charSheet.triggerLongRest();
 					await assertFeaturesMatrix(charSheet, featuresMatrix, cp);
 				}
 			});
