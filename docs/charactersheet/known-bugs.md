@@ -1298,9 +1298,9 @@ loadouts would red the suite, so the two halves must land together.
 
 ## CS-BUG-031 — 4 comprehensive specs fail at character creation (wizard stalls on an unfilled required picker)
 
-**Status**: open (harness or product — not yet separated). **Pre-existing, not
-a regression**: reproduced identically at `6ebe4b34`, the pre-batch base,
-before any of the 11 subclass merges landed.
+**Status**: **RESOLVED** — harness bug, fixed in the same commit as this update.
+**Pre-existing, not a regression**: reproduced identically at `6ebe4b34`, the
+pre-batch base, before any of the 11 subclass merges landed.
 
 **Affected specs** (every test in them, not just the USE probe — `L1: creates
 … via builder wizard` fails too):
@@ -1328,7 +1328,8 @@ gate does **not** help (verified: scaling it changed nothing), so do not
 "fix" this by widening the timeout — that would only convert a hard failure
 back into the silent-stall case the guard was added to catch.
 
-**Lead**: the 4 failures are 3 Rogues + 1 Ranger, and pass-by-comparison
+**Lead (WRONG — recorded so the reasoning error isn't repeated)**: the 4
+failures are 3 Rogues + 1 Ranger, and pass-by-comparison
 builds (`tgtt-bastion-paladin-bugbear`, `tgtt-chained-fury-barbarian-minotaur`)
 are classes *without* level-1 Expertise. The harness does handle Expertise
 (`characterBuilder.ts:735` → `selectFirstAvailableExpertise(4)`, commented for
@@ -1337,11 +1338,60 @@ Prime suspect is the separate `Choose 1` feature group
 (`Expertise Training (TGTT)`), which is a *feature choice*, not one of the
 expertise skill checkboxes `selectFirstAvailableExpertise` ticks.
 
+**Actual root cause**: the *language* picker, not Expertise at all. The
+blocking toast is `"Please select 1 languages from Thieves' Cant."`, preceded
+by repeated `"You can only choose 1 options."`.
+
+The product migrated the class-feature language chooser to the same grouped
+**checkbox-pill grid** used by the race / background language choosers
+(`charactersheet-builder.js:~5542` Thieves' Cant, `~5590` Forked Tongue), and
+the harness helper was never updated. `selectAllClassFeatureLanguages()` still
+only understood a `<select>` — so it grabbed the picker's **source-filter
+`<select>`**, set it to an arbitrary source (which *hides* most language pills,
+marking them `--hidden`), and never ticked a language. The live counter stayed
+`Selected: 0/1` and the Class step refused to advance.
+
+Markup contract the helper must honour:
+
+| Selector | Role |
+|---|---|
+| `.charsheet__builder-class-lang-selection` | container (one per language choice) |
+| `.charsheet__builder-lang-source-filter` | source filter `<select>` — **never touch it**; setting it makes the picker unfillable |
+| `.charsheet__builder-lang-pill` | label wrapping the checkbox; `--hidden` when filtered out, `--disabled` at max |
+| `Selected: X/N` text | the product's own live counter — drive off this |
+
+**Fix**: rewrote `selectAllClassFeatureLanguages()` (`BuilderWizardPage.ts`) to
+iterate every `.charsheet__builder-class-lang-selection`, parse the live
+`Selected: X/N` counter, and tick visible/enabled pill checkboxes until the
+requirement is met, re-reading the counter after each tick. A `<select>`
+fallback remains for any legacy chooser, explicitly excluding the source
+filter.
+
 **Why it went unnoticed**: these specs were last touched on 2026-05-17
 ("e2e tests upgrades"), and that change re-verified only **one** of the seven
 upgraded specs (`bastion-paladin`, per the coverage note above). The other six
 were never run. Suite-wide green was therefore never established for them.
 
-**Impact**: 4 of 25 comprehensive specs contribute no coverage at all today.
+Compounding it, `clickNext` (`BuilderWizardPage.ts:101`) clicks and waits 500 ms
+**without verifying the wizard advanced**. A blocked step silently stays put,
+every later step no-ops on absent selectors, and the failure only surfaces
+10 s later at a guard far from the cause.
+
+**Diagnostic technique that cracked it** (reusable): a throwaway spec that
+monkey-patches `BuilderWizardPage.prototype.clickNext` to log
+`charSheet._builder._currentStep` before/after each click, and wraps
+`JqueryUtil.doToast` to capture validation messages. Product validation lives in
+`_validateCurrentStep()` (`charactersheet-builder.js:372+`); case 3 = Class, each
+gate emitting a distinct toast.
+
+**Verification**: all four specs plus the `tgtt-battle-master-fighter` neighbour
+at `PW_WORKERS=1` → **36 passed / 13 skipped / 0 failed**. (Neighbour run per the
+shared-harness rule: `BuilderWizardPage.ts` is used by every spec.)
+
+**Impact before fix**: 4 of 25 comprehensive specs contributed no coverage at
+all.
+
+**Do NOT** "fix" a recurrence by widening the `characterBuilder.ts:796` guard —
+that guard is what surfaced this bug; widening it restores the silent stall.
 
 ---

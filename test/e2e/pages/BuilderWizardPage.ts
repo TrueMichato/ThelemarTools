@@ -1,5 +1,5 @@
 import {Locator, Page, expect} from "@playwright/test";
-import {waitForListItems} from "../utils/waitHelpers";
+import {waitForListItems, uiGate} from "../utils/waitHelpers";
 
 /**
  * Page Object Model for the Character Builder wizard
@@ -483,23 +483,66 @@ export class BuilderWizardPage {
 	 * non-empty option per dropdown to avoid duplicate-language validation.
 	 */
 	async selectAllClassFeatureLanguages (): Promise<void> {
-		const section = this.page.locator(".charsheet__builder-class-lang-selection").first();
-		if ((await section.count()) === 0) return;
-		const selects = section.locator("select");
-		const total = await selects.count();
-		const used = new Set<string>();
-		for (let i = 0; i < total; i++) {
-			const sel = selects.nth(i);
-			const current = await sel.inputValue();
-			if (current) { used.add(current); continue; }
-			const opts = sel.locator("option");
-			const optCount = await opts.count();
-			for (let j = 1; j < optCount; j++) {
-				const v = await opts.nth(j).getAttribute("value");
-				if (!v || used.has(v)) continue;
-				await sel.selectOption(v);
-				used.add(v);
-				break;
+		const sections = this.page.locator(".charsheet__builder-class-lang-selection");
+		const nSections = await sections.count();
+		if (nSections === 0) return;
+
+		for (let s = 0; s < nSections; s++) {
+			const section = sections.nth(s);
+
+			// Drive off the section's OWN live counter ("Selected: 0/1") rather
+			// than a guessed count — both the Thieves' Cant and Forked Tongue
+			// regions render it, with different counter spans but identical text.
+			const readCounts = async (): Promise<{sel: number; req: number}> => {
+				const txt = (await section.textContent().catch(() => "")) || "";
+				const m = /Selected:\s*(\d+)\s*\/\s*(\d+)/.exec(txt);
+				return m ? {sel: Number(m[1]), req: Number(m[2])} : {sel: 0, req: 0};
+			};
+
+			let {sel, req} = await readCounts();
+			if (req === 0 || sel >= req) continue;
+
+			// Primary: the grouped checkbox-pill widget this picker actually
+			// uses (same one as the race / background language choosers).
+			// Skip pills the product has hidden (source/search filter) or
+			// disabled (max reached) — clicking those is what produced the
+			// "You can only choose 1 options." toasts.
+			const pills = section.locator(
+				".charsheet__builder-lang-pill:not(.charsheet__builder-lang-pill--hidden)"
+				+ ":not(.charsheet__builder-lang-pill--disabled) input[type='checkbox']",
+			);
+			const nPills = await pills.count();
+			for (let i = 0; i < nPills && sel < req; i++) {
+				const cb = pills.nth(i);
+				try {
+					if (await cb.isChecked()) continue;
+					await cb.check({timeout: uiGate(2000)});
+					await this.page.waitForTimeout(60);
+				} catch { continue; }
+				({sel} = await readCounts());
+			}
+			if (sel >= req) continue;
+
+			// Fallback: legacy <select>-based pickers. Never touch the source
+			// filter — selecting a source hides most of the language list and
+			// leaves the picker unfillable.
+			const selects = section.locator("select:not(.charsheet__builder-lang-source-filter)");
+			const total = await selects.count();
+			const used = new Set<string>();
+			for (let i = 0; i < total && sel < req; i++) {
+				const sl = selects.nth(i);
+				const current = await sl.inputValue().catch(() => "");
+				if (current) { used.add(current); continue; }
+				const opts = sl.locator("option");
+				const optCount = await opts.count();
+				for (let j = 1; j < optCount; j++) {
+					const v = await opts.nth(j).getAttribute("value");
+					if (!v || used.has(v)) continue;
+					await sl.selectOption(v).catch(() => null);
+					used.add(v);
+					break;
+				}
+				({sel} = await readCounts());
 			}
 		}
 	}

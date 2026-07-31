@@ -45,6 +45,18 @@ export interface CharacterSpec {
 	signatureToggle?: string | RegExp;
 	/** Attack row granted by a signature toggle instead of an AC/DC delta. */
 	signatureToggleAddsAttack?: string | RegExp;
+	/**
+	 * Reason this build's signature toggle produces no *observable* derived
+	 * effect, so the delta assertion is skipped while the toggle is still
+	 * required to surface and activate.
+	 *
+	 * Use only where the feature genuinely has no derived stat effect to
+	 * observe — e.g. TGTT Gambler, whose signature abilities alter dice
+	 * outcomes (reroll, treat nat-1 as nat-20, roll on a d100 table) rather
+	 * than AC/DC/speed/attacks/damage. Do NOT use it to silence a toggle that
+	 * *should* have an effect but doesn't; that's a product bug worth failing.
+	 */
+	signatureToggleNoDerivedEffect?: string;
 	/** Per-milestone expectations indexed by character level. */
 	milestones?: Partial<Record<number, MilestoneExpect>>;
 	/** Set true to skip the L1→20 mega test (e.g. for multiclass cases handled separately). */
@@ -295,6 +307,13 @@ export function describeCharacter (spec: CharacterSpec): void {
 						// the toggle at the milestone level when one
 						// arrives — skip rather than fail here.
 						console.log(`[spec ${displayName}] L5 loadout: no toggle for ${signatureToggle}; skipping toggle probe`);
+					} else if (spec.signatureToggleNoDerivedEffect) {
+						// The toggle surfaced and activated (probeToggleDelta
+						// returned a delta), which is the part we can verify.
+						// Only the unobservable stat delta is waived, and the
+						// reason is printed so the gap stays visible.
+						console.log(`[spec ${displayName}] L5 loadout: toggle ${signatureToggle} surfaced and activated; `
+							+ `derived-effect assertion waived — ${spec.signatureToggleNoDerivedEffect}`);
 					} else {
 						// We only require *some* derived effect.  Specific magnitude
 						// is asserted in per-character tests where the rules nail

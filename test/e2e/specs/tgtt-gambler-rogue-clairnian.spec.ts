@@ -18,6 +18,11 @@ describeCharacter({
 	preset: PRESET_FULL_GAMBLER_CLAIRNIAN,
 	displayName: "Gambler Rogue Clairnian",
 	signatureToggle: /gambler|folly|fortune|luck/i,
+	// TGTT Gambler's signature abilities alter dice OUTCOMES (roll twice on the
+	// Gambler's Table, treat a natural 1 as a natural 20, cast-as-a-bet d100)
+	// rather than any derived stat, so probeToggleDelta has nothing to observe.
+	// The toggle is still required to surface and activate.
+	signatureToggleNoDerivedEffect: "Gambler abilities modify dice outcomes, not AC/DC/speed/attacks/damage",
 	usage: {
 		atLevel: 5,
 		castSpellSlotLevel: 1,
