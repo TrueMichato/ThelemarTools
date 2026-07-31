@@ -1371,7 +1371,8 @@ class CharacterSheetCombat {
 		let stateMode;
 		const maneuverAdvantage = !!this._pendingBattleMasterAttackAdvantage;
 		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType) || maneuverAdvantage;
-		const hasDisadvantage = this._state.hasDisadvantageFromStates?.(attackType);
+		const resoluteWeaponDisadvantage = this._state.isStateTypeActive?.("resoluteStance") && !attack.isSpell;
+		const hasDisadvantage = this._state.hasDisadvantageFromStates?.(attackType) || resoluteWeaponDisadvantage;
 		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
 
@@ -2563,6 +2564,7 @@ class CharacterSheetCombat {
 			// No active effect yet — check for weapon-modifier methods targeting this weapon
 			methodEffectApplied = await this._promptUseCombatMethod(attack);
 		}
+		const juggernautTarget = await this._pChooseJuggernautTargetContext(attack);
 
 		// Resolve auto-generated weapon damage live so a hands-used change cannot leave a
 		// stale cached die. Explicit/custom attack damage remains authoritative.
@@ -2700,6 +2702,16 @@ class CharacterSheetCombat {
 				if (oncePerTurn) this._markRiderUsedThisTurn(rider.id);
 			}
 
+			if (juggernautTarget === "construct") {
+				const constructDice = this._state.getFeatureCalculations?.().demolishingMightConstructDamage;
+				if (constructDice) {
+					const constructRoll = rollTypedDamage(constructDice, attack.damageType);
+					riderDamageTotal += constructRoll.total;
+					riderParts.push({name: "Demolishing Might", dice: constructDice, total: constructRoll.total, type: attack.damageType});
+					riderRollsForAnim.push(constructRoll);
+				}
+			}
+
 			// Standing weapon-UPGRADE damage-dice riders (#14): e.g. a Saw-toothed weapon
 			// deals +1d4 slashing on a hit. Unlike the feature riders above, these are
 			// AUTO-applied on EVERY hit — no manual toggle, no once-per-turn gate — because
@@ -2806,7 +2818,12 @@ class CharacterSheetCombat {
 
 		const {damage: battleMasterDamage, name: battleMasterName} = this._consumeBattleMasterDamage(attackId, isCrit);
 		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderSameTypeTotal + doubleshotDamage + battleMasterDamage;
-		const total = baseDamageTotal + riderDiffTypeTotal + handOfHarmDamage + methodEffectDamage + channelSpellDamage;
+		const totalBeforeTargetMultiplier = baseDamageTotal + riderDiffTypeTotal + handOfHarmDamage + methodEffectDamage + channelSpellDamage;
+		const targetMultiplier = ["object", "structure"].includes(juggernautTarget)
+			? (this._state.getFeatureCalculations?.().demolishingMightObjectMultiplier || 1)
+			: 1;
+		const total = totalBeforeTargetMultiplier * targetMultiplier;
+		const juggernautOutcome = await this._pResolveJuggernautHitEffects(attack);
 
 		// Build subtitle with breakdown
 		let subtitle = `${damageExpression}${isCrit ? " (crit)" : ""} + ${abilityMod} (${attack.abilityMod || "STR"})`;
@@ -2835,6 +2852,8 @@ class CharacterSheetCombat {
 		if (channelSpellDamage) subtitle += ` | <strong style="color:#e056fd">+${channelSpellDamage} ${channelSpell.damageType}</strong> (${channelSpell.spellName} on hit ${channelSpell.dice})`;
 		if (channelSpellMaximized) subtitle += " | <strong>Destructive Wrath: maximized</strong>";
 		if (destructiveWrathApplied) subtitle += " | <strong>Destructive Wrath: maximized</strong>";
+		if (targetMultiplier > 1) subtitle += ` | <strong>Demolishing Might: ×${targetMultiplier} vs ${juggernautTarget}</strong>`;
+		if (juggernautOutcome) subtitle += ` | ${juggernautOutcome}`;
 		const triggeredDamageTypes = new Set([attack.damageType, ...riderParts.map(it => it.type), channelSpell?.damageType].filter(Boolean));
 		const triggeredEffects = [...triggeredDamageTypes].flatMap(type => this._state.getTriggeredDamageEffects?.(type) || []);
 		triggeredEffects.push(...channelSpellTriggeredEffects);
@@ -2860,8 +2879,9 @@ class CharacterSheetCombat {
 		if (channelSpellDamage) typedExtras.push(`${channelSpellDamage} ${channelSpell.damageType}`);
 		let totalTitle;
 		if (typedExtras.length) {
-			totalTitle = `${baseDamageTotal} ${attack.damageType} + ${typedExtras.join(" + ")} = ${total}`;
+			totalTitle = `${baseDamageTotal} ${attack.damageType} + ${typedExtras.join(" + ")} = ${totalBeforeTargetMultiplier}`;
 		}
+		if (targetMultiplier > 1) totalTitle = `${totalTitle || totalBeforeTargetMultiplier} × ${targetMultiplier} = ${total}`;
 		// Collect the actual dice rolled (count + type + per-die values) so the
 		// animation reflects the real roll (e.g. 1d8 + 2d6 sneak) rather than a
 		// single hard-coded d20. Each damage component contributes a group.
@@ -2930,6 +2950,101 @@ class CharacterSheetCombat {
 				this.renderAttacks?.();
 			}
 		}
+	}
+
+	async _pChooseJuggernautTargetContext (attack) {
+		const calc = this._state.getFeatureCalculations?.() || {};
+		if (!calc.hasDemolishingMight || attack.isSpell || !this._getAttackRollKind(attack).isMelee) return "normal";
+		const choice = await this._showCombatActionChoiceModal(
+			{name: "Demolishing Might — Target"},
+			[
+				{id: "normal", name: "Creature", description: "Resolve normal weapon damage."},
+				{id: "construct", name: "Construct", description: `Add ${calc.demolishingMightConstructDamage} weapon damage (doubled on a critical hit).`},
+				{id: "object", name: "Object", description: `Double the final damage total (×${calc.demolishingMightObjectMultiplier}).`},
+				{id: "structure", name: "Structure", description: `Double the final damage total (×${calc.demolishingMightObjectMultiplier}).`},
+			],
+		);
+		return choice?.id || "normal";
+	}
+
+	async _pResolveJuggernautHitEffects (attack) {
+		const calc = this._state.getFeatureCalculations?.() || {};
+		if (!calc.hasThunderousBlows
+				|| !this._state.isStateTypeActive?.("rage")
+				|| attack.isSpell
+				|| !this._getAttackRollKind(attack).isMelee) return "";
+
+		const usePush = await this._showCombatActionChoiceModal(
+			{name: "Thunderous Blows"},
+			[
+				{id: "push", name: "Push", description: `Push the target up to ${calc.thunderousBlowsDistance} feet.`},
+				{id: "skip", name: "Do Not Push", description: "Resolve the hit without forced movement."},
+			],
+		);
+		if (usePush?.id !== "push") return "";
+
+		const distances = [];
+		for (let distance = 5; distance <= calc.thunderousBlowsDistance; distance += 5) {
+			distances.push({id: `${distance}`, name: `${distance} ft`, description: `Push the target ${distance} feet.`});
+		}
+		const distanceChoice = await this._showCombatActionChoiceModal({name: "Thunderous Blows — Distance"}, distances);
+		if (!distanceChoice) return "";
+		const distance = Number(distanceChoice.id);
+		const directionChoice = await this._showCombatActionChoiceModal(
+			{name: "Thunderous Blows — Direction"},
+			[
+				{id: "away", name: "Away", description: "Push directly away from you."},
+				{id: "left", name: "Left", description: "Push to your left."},
+				{id: "right", name: "Right", description: "Push to your right."},
+				{id: "toward", name: "Toward", description: "Push toward you."},
+			],
+		);
+		if (!directionChoice) return "";
+
+		const sizeChoice = await this._showCombatActionChoiceModal(
+			{name: "Thunderous Blows — Target Size"},
+			[
+				{id: "large", name: "Large or Smaller", description: "The push succeeds without a save."},
+				{id: "huge", name: "Huge or Larger", description: `The target must fail a DC ${calc.juggernautSaveDc} Strength save.`},
+			],
+		);
+		let pushed = true;
+		let saveText = "";
+		if (sizeChoice?.id === "huge") {
+			const saveChoice = await this._showCombatActionChoiceModal(
+				{name: `Thunderous Blows — DC ${calc.juggernautSaveDc} Strength Save`},
+				[
+					{id: "fail", name: "Failed Save", description: "Apply the push."},
+					{id: "success", name: "Successful Save", description: "The target resists the push."},
+				],
+			);
+			pushed = saveChoice?.id === "fail";
+			saveText = `; Huge+ target ${pushed ? "failed" : "passed"} DC ${calc.juggernautSaveDc} STR`;
+		}
+		if (!pushed) return `Thunderous Blows: no push${saveText}`;
+
+		let outcome = `Thunderous Blows: pushed ${distance} ft ${directionChoice.id}${saveText}`;
+		if (!calc.hasHurricaneStrike || distance < 5 || !this._isActionTypeAvailable("reaction")) return outcome;
+
+		const hurricaneChoice = await this._showCombatActionChoiceModal(
+			{name: "Hurricane Strike"},
+			[
+				{id: "use", name: "Use Reaction", description: "Leap into the vacated space; the target makes the same Strength save against being knocked Prone."},
+				{id: "skip", name: "Keep Reaction", description: "Do not leap or attempt to knock the target Prone."},
+			],
+		);
+		if (hurricaneChoice?.id !== "use") return outcome;
+		this._consumeActionType("reaction");
+		const hurricaneSave = await this._showCombatActionChoiceModal(
+			{name: `Hurricane Strike — DC ${calc.juggernautSaveDc} Strength Save`},
+			[
+				{id: "fail", name: "Failed Save", description: "The target is knocked Prone."},
+				{id: "success", name: "Successful Save", description: "The target remains standing."},
+			],
+		);
+		const prone = hurricaneSave?.id === "fail";
+		outcome += `; Hurricane Strike reaction spent, leap resolved, target ${prone ? "Prone" : "standing"} (DC ${calc.juggernautSaveDc} STR); one ally may spend its reaction to make a melee attack`;
+		return outcome;
 	}
 
 	_isSneakAttackWeaponEligible (attack) {

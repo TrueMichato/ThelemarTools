@@ -366,6 +366,21 @@ export const PRESET_FULL_CHAINED_FURY_MINOTAUR: CharacterPreset = {
 	subclassSource: "TGTT",
 };
 
+/** TDCSR Path of the Juggernaut Barbarian */
+export const PRESET_FULL_JUGGERNAUT_BARBARIAN: CharacterPreset = {
+	race: "Minotaur",
+	raceSource: "TGTT",
+	className: "Barbarian",
+	classSource: "TGTT",
+	background: "Soldier",
+	bgSource: "PHB'24",
+	name: "Kordran Stonewake",
+	skillCount: 2,
+	masteryCount: 2,
+	subclassName: "Path of the Juggernaut",
+	subclassSource: "TGTT-2014",
+};
+
 /** 10. Time Domain Cleric (TGTT) — race not specified by user; default to a flexible TGTT race. */
 export const PRESET_FULL_TIME_CLERIC: CharacterPreset = {
 	race: "Aarakocra",

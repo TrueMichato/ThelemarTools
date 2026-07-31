@@ -16,7 +16,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 
 ### ACTIVE_STATE_TYPES
 
-Core states: `rage`, `bladesong`, `sunShield`, `wildShape`, `hybridTransformation`, `crimsonRite`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
+Core states: `rage`, `resoluteStance`, `bladesong`, `sunShield`, `wildShape`, `hybridTransformation`, `crimsonRite`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
 
 Astral Self states: `astralArms`, `astralVisage`, `astralBody`,
 `awakenedAstralSelf`. Body uses `requiresStates`; ending a prerequisite
@@ -83,6 +83,14 @@ When Rage (or any state with `breaksConcentration: true`) activates:
 2. Finds ALL states with `isSpellEffect && concentration`
 3. Removes conditions those states granted (via `grantsConditions`)
 4. Disables currently-concentrating custom abilities
+
+### Subclass-Scoped State Effects
+
+`getActiveStateEffects()` can append state-specific supplemental effects
+without mutating a shared `ACTIVE_STATE_TYPES` entry. Juggernaut Rage uses this
+for temporary condition, speed-reduction, and forced-movement immunities.
+Condition-derived states are filtered by active `conditionImmunity` effects,
+but remain persisted so their mechanics resume after the immunity ends.
 
 ### Steady Aim Two-Phase Pattern
 
@@ -172,6 +180,14 @@ Astral-Arms-only once-per-turn damage rider, while Astral Barrage permits a
 third attack only when every attack recorded for that Attack action is an
 Astral Arms attack; bonus-action, reaction, spell, weapon, and ordinary
 unarmed attacks do not qualify.
+
+### Target-Context Damage and Chained Hit Triggers
+
+Per-hit target context belongs in `_rollDamage`, not persistent character
+state. Demolishing Might demonstrates crit-compatible conditional rider dice
+and a multiplier applied after the complete damage total. Thunderous Blows
+demonstrates post-hit movement resolution; Hurricane Strike chains from its
+resolved push and consumes the normal reaction tracker.
 
 ### Weapon Mastery Effects
 

@@ -110,7 +110,9 @@ applies ranges, ability modifiers, and action-economy costs before rendering.
 ```javascript
 {type: "resistance", target: "damage:bludgeoning"}
 {type: "resistance", target: "damage:fire"}
-{type: "immunity", target: "condition:frightened"}
+{type: "conditionImmunity", target: "frightened"}
+{type: "speedReductionImmunity"}
+{type: "forcedMovementImmunity", target: "ground"}
 ```
 
 ### Special Effects
@@ -144,6 +146,20 @@ rage: {
     activationAction: "bonus",
 }
 ```
+
+Rage can receive subclass-scoped supplemental effects without changing the
+global `rage` definition. Path of the Juggernaut uses this path for Spirit of
+the Mountain (Prone and involuntary ground-movement immunity) and Unstoppable
+(Frightened, Paralyzed, Prone, and Stunned immunity plus ignored speed
+reductions). Existing conditions remain stored but their active-state effects
+are suppressed while the immunity applies, then resume when Rage ends.
+
+#### Resolute Stance (Juggernaut Barbarian)
+
+`resoluteStance` is a free, start-of-turn state which expires at the start of
+the next turn. It grants Grappled immunity, imposes disadvantage on the
+Juggernaut's weapon attacks, and exposes disadvantage on attacks against the
+Juggernaut through the normal defense-effect pipeline.
 
 #### Bladesong (Bladesinger Wizard)
 ```javascript

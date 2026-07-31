@@ -122,6 +122,14 @@ attack-scoped metadata: `reachBonus: 5` plus
 changing global melee reach. Its descriptor's `damage` is already the final
 Martial Arts die and must be consumed unchanged by damage rollers.
 
+Path of the Juggernaut follows the same split with a source-safe subclass
+match (`TalDoreiCampaignSettingReborn`, plus the pinned `TGTT-2014` adapter
+which copies that entity onto the fork's `TGTT` Barbarian). Calculations own the push distance,
+shared `8 + PB + STR` save DC, Demolishing Might dice/multiplier, and level
+flags. Runtime Rage supplementation owns Spirit of the Mountain and
+Unstoppable defenses; `resoluteStance` owns its one-turn effects. Target
+context remains transient in the canonical damage flow.
+
 Multi-attribute `abilityDc` entries are generic feature choices. Builder,
 Level-Up, and Quick Build persist the selected ability in level-history
 `featureChoices`; calculations should read that durable choice and provide a
@@ -135,6 +143,10 @@ backward-compatible fallback only for legacy saves.
 
 ### Condition → State Bridge
 Conditions (Frightened, Poisoned, etc.) create parallel active states with `isCondition: true`. This allows conditions to use the same bonus/effect infrastructure as toggle abilities.
+
+Active `conditionImmunity` effects suppress matching condition-state effects
+without deleting the stored condition. This is required for temporary
+immunities: ending the granting state restores the still-present condition.
 
 ### Conditional Effects
 Some state effects have a `conditional` field (e.g., `"while concentrating"`) that is evaluated at effect collection time. The effect only applies when the condition is met.
