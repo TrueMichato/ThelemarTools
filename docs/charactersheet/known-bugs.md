@@ -1222,52 +1222,77 @@ stayed up throughout. An earlier suspicion that the boot wait in
 
 ## CS-BUG-029 — the USE probe's skill-roll check silently degrades to a no-op
 
-**Status**: open (harness). Documented, **not yet fixed** — deliberately
-deferred so shared E2E files stay stable while Wave 3 branches land.
+**Status**: **RESOLVED** (2026-07-31). Root cause was found to be a wrong tab
+switch, fixed incidentally by the Oath of Devotion branch (`6a6a8203`) and
+verified on the merged tree. The residual timeout-scaling half was fixed
+separately (see *Resolution* below).
+
+**Root cause** (was mis-attributed while open): `rollSkill` called
+`switchToTab(this.tabAbilities)`. Skills do **not** render there — they render
+into `#charsheet-skills`, which lives inside the *Overview* pane
+(`charactersheet.html:565`, within `#charsheet-tab-overview`). Because
+`#charsheet-tab-abilities` genuinely exists, the switch **succeeded** and
+navigated away from the rows, so the visibility gate correctly reported "not
+visible" and the probe returned `clicked: false`. The original code carried a
+comment asserting skill rolls "live there in the 2024-style sheet", which was
+simply wrong — and that confident-but-incorrect comment is why the real cause
+went unnoticed.
+
+**Resolution**:
+1. `6a6a8203` (Oath of Devotion) switched to `tabOverview` and tightened
+   `characterSpecFactory.ts:440` from log-and-continue to a hard
+   `expect(result.clicked).toBe(true)`.
+2. Follow-up on the merged tree replaced the hard-coded visibility/click gates
+   with `uiGate()`, which scales with `PW_TIMEOUT_MS`. This matters *more* now
+   that (1) made the check a hard assertion: a fixed 1.5s gate would convert
+   contention — the exact condition `PW_TIMEOUT_MS` is raised to absorb — into
+   a spurious failure.
+3. An accurate comment was added at the tab switch specifically warning against
+   "fixing" it back to `tabAbilities`.
+
+**Verification**: Juggernaut USE probe passed with no warning; Warlock +
+Battle Master ran **12 passed / 4 skipped**, matching the trusted `f68edacb`
+baseline exactly, with no `[skillRoll]` warnings in either.
+
+**Lesson**: a code comment is not evidence. The wrong tab survived because the
+comment explaining it read as authoritative; the fix took minutes once the
+markup was actually checked.
+
+---
+
+## CS-BUG-030 — the USE probe's attack-roll check silently degrades to a no-op
+
+**Status**: open (harness + spec authoring). Same anti-pattern as CS-BUG-029,
+found while verifying its fix.
 
 **Symptom**: runs log lines like
 
 ```
-[usage probe] skill roll button for Athletics not visible at L5
-[usage probe] skill roll button for Intimidation not visible at L5
+[usage probe] attack name /longsword|greatsword|.../i not found; rendered=["Talons Natural","Unarmed Strike"]
+[usage probe] attack name /dagger|crossbow|quarterstaff/i not found; rendered=["Unarmed Strike","Devastating Strike Natural"]
 ```
 
-and still report the test as **passed**.
+and still report the test as **passed** (`characterSpecFactory.ts:389-394`
+logs and continues, rationalised as "the preset might have renamed the
+weapon").
 
-**Why it matters**: "USE probes passed" is weaker evidence than it looks.
-When this fires, the probe never verifies that a skill roll is actually
-clickable — it only verifies that the *bonus* is a finite number and
-clears any `expectBonusAtLeast` floor. The click path is unverified, and
-nothing in the summary output says so.
+**Why it matters**: when this fires, the spec's attack-roll verification does
+not run at all. Observed on `tgtt-battle-master-fighter` — a spec whose entire
+subject is *weapon* maneuvers — where no weapon attack was ever rolled.
 
-**Two independent causes, both live:**
+**Root cause is NOT a rename.** The characters have no weapon. **24 of the 25**
+specs that declare `usage.attackName` never put a weapon in `midTierLoadout`;
+they rely on preset-granted starting equipment. Where the preset doesn't grant
+a matching weapon, the probe quietly dies.
 
-1. **The tolerance is asymmetric.** `characterSpecFactory.ts:441` logs and
-   continues (`// Don't fail if button missing — log for visibility only.`),
-   while `comprehensiveBuildHelpers.ts:991` **throws** for the identical
-   condition (`skill roll button for "<skill>" not found`). The same
-   underlying failure is fatal on one path and invisible on the other.
-2. **A hard-coded timeout that ignores the global budget.**
-   `CharacterSheetPage.rollSkill` gates on
-   `target.isVisible({timeout: 1500})` (`CharacterSheetPage.ts:819`). That
-   1500 ms is a literal — it does **not** scale with `PW_TIMEOUT_MS`. Under
-   the concurrent-worktree load documented in CS-BUG-028's note, boot and
-   tab-switch routinely exceed it, so `clicked` comes back `false` for a
-   perfectly healthy sheet.
+**Scope evidence**: not uniformly dead — `tgtt-tdcsr-juggernaut-barbarian`
+matched its attack and logged no warning. Observed dead in **2 of the 3** specs
+actually exercised on 2026-07-31.
 
-Note the `rollSkill` *implementation* is correct and already carries the
-CS-BUG-027 fix — it clicks the ROW, because `.charsheet__skill-roll` /
-`.charsheet__skill-bonus` do not exist in the markup. This is not a
-regression of that fix.
+**Suggested fix** (deliberately not applied — it is a scope decision, not a
+mechanical change): make the mismatch fail loudly, then add an explicit weapon
+to each affected spec's `midTierLoadout`. Failing first without fixing the
+loadouts would red the suite, so the two halves must land together.
 
-**Observed**: two different specs, two different skills, on a clean tree —
-`tgtt-tdcsr-juggernaut-barbarian` (Athletics) and
-`tgtt-horror-warlock-theocracian` (Intimidation), both at `f68edacb`, both
-in runs that otherwise reported all green.
+---
 
-**Suggested fix** (when shared harness files are safe to touch again):
-- scale the visibility gate with the global budget, e.g.
-  `Math.max(1500, PW_TIMEOUT_MS / 20)`, instead of a bare literal;
-- make the two paths agree. Per the suite's own "coverage gaps stay
-  visible" rule, a silent `console.log` is the wrong default — either fail,
-  or surface it as an explicit skip with a reason, but do not pass quietly.

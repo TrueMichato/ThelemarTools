@@ -2,6 +2,19 @@ import {Locator, Page, expect} from "@playwright/test";
 import {waitForToolsLoaded} from "../utils/waitHelpers";
 
 /**
+ * Short in-page interaction gates scale with the per-test budget.
+ *
+ * `PW_TIMEOUT_MS` is raised on contended machines (see `playwright.config.ts`),
+ * but a hard-coded gate would not follow it — so contention that the per-test
+ * timeout was explicitly widened to absorb would still trip the gate.  That
+ * matters because callers such as the `skillRoll` probe assert on the result
+ * (`characterSpecFactory.ts:440`), which turns a slow render into a hard
+ * failure rather than a retry.  Never scales below the 60s-default baseline.
+ */
+const UI_GATE_SCALE = Math.max(1, Number(process.env.PW_TIMEOUT_MS ?? 60_000) / 60_000);
+const uiGate = (ms: number): number => Math.round(ms * UI_GATE_SCALE);
+
+/**
  * Page Object Model for the Character Sheet page
  * Provides common navigation and interaction methods
  */
@@ -809,6 +822,11 @@ export class CharacterSheetPage {
 	 */
 	async rollSkill (skill: string): Promise<{bonus: number; clicked: boolean}> {
 		const bonus = await this.getSkillBonus(skill);
+		// Skills render into `#charsheet-skills`, which lives inside the
+		// OVERVIEW tab pane (`charactersheet.html:565` within
+		// `#charsheet-tab-overview`).  Do not "fix" this to `tabAbilities`:
+		// that pane exists, so the switch succeeds and silently navigates away
+		// from the rows, leaving nothing to click.
 		await this.switchToTab(this.tabOverview).catch(() => null);
 		const re = new RegExp(`\\b${skill}\\b`, "i");
 		const row = this.page
@@ -821,9 +839,9 @@ export class CharacterSheetPage {
 		// Prefer a real button if one ever appears, else click the row.
 		const btn = row.locator(".charsheet__skill-roll, button").first();
 		const target = await btn.count().then(n => n > 0).catch(() => false) ? btn : row;
-		const visible = await target.isVisible({timeout: 1500}).catch(() => false);
+		const visible = await target.isVisible({timeout: uiGate(1500)}).catch(() => false);
 		if (!visible) return {bonus, clicked: false};
-		await target.click({timeout: 2000}).catch(() => null);
+		await target.click({timeout: uiGate(2000)}).catch(() => null);
 		await this.page.waitForTimeout(100);
 		// A skill check can raise a product prompt (e.g. XPHB Tactical Mind).
 		// Leaving it open would block every later interaction.
