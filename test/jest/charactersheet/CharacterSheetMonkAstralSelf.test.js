@@ -55,11 +55,40 @@ describe("Way of the Astral Self — computed mechanics", () => {
 			name: "Astral Arms",
 			damage: die,
 			damageType: "force",
-			abilityMod: "wis",
-			reach: 10,
+			abilityMod: "finesseWis",
+			reachBonus: 5,
+			reachCondition: "onYourTurn",
 			isUnarmedStrike: true,
 			isFeatureAttack: true,
 		}));
+	});
+
+	it("uses the best permitted STR, DEX, or WIS modifier for Astral Arms", () => {
+		const state = getAstralState(3);
+		state.activateState("astralArms");
+		const attack = state.getFeatureGrantedAttacks()[0];
+		const combat = getCombatHarness(state);
+
+		state.setAbilityBase("str", 10);
+		state.setAbilityBase("dex", 18);
+		state.setAbilityBase("wis", 12);
+		expect(state.getWeaponAbilityMod(attack)).toBe(4);
+		expect(combat._resolveAttackAbilityKey(attack, true)).toBe("dex");
+
+		state.setAbilityBase("wis", 20);
+		expect(state.getWeaponAbilityMod(attack)).toBe(5);
+		expect(combat._resolveAttackAbilityKey(attack, true)).toBe("wis");
+	});
+
+	it("adds 5 feet to normal reach only on the Monk's turn", () => {
+		const state = getAstralState(3);
+		state._data.namedModifiers.push({name: "Long-Limbed", type: "reach", value: 5, enabled: true});
+		state.activateState("astralArms");
+		const attack = state.getFeatureGrantedAttacks()[0];
+
+		expect(state.getMeleeReach()).toBe(10);
+		expect(state.getAttackReach(attack, {isOwnTurn: true})).toBe(15);
+		expect(state.getAttackReach(attack, {isOwnTurn: false})).toBe(10);
 	});
 
 	it("uses Wisdom for Strength checks and saves only while the arms are active", () => {
@@ -144,6 +173,23 @@ describe("Way of the Astral Self — computed mechanics", () => {
 		expect(state.isStateTypeActive("astralArms")).toBe(false);
 		expect(state.isStateTypeActive("astralVisage")).toBe(false);
 		expect(state.isStateTypeActive("astralBody")).toBe(false);
+	});
+
+	it("ends every manifested component at 0 HP or when incapacitated", () => {
+		const state = getAstralState(17);
+		state.activateState("awakenedAstralSelf");
+		state.setCurrentHp(0);
+		for (const stateTypeId of ["astralArms", "astralVisage", "astralBody", "awakenedAstralSelf"]) {
+			expect(state.isStateTypeActive(stateTypeId)).toBe(false);
+		}
+
+		state.setCurrentHp(1);
+		state.activateState("awakenedAstralSelf");
+		state._resolveConditionEffects = jest.fn().mockReturnValue({effects: [{type: "incapacitated", value: true}]});
+		state.addCondition("incapacitated");
+		for (const stateTypeId of ["astralArms", "astralVisage", "astralBody", "awakenedAstralSelf"]) {
+			expect(state.isStateTypeActive(stateTypeId)).toBe(false);
+		}
 	});
 });
 

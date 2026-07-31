@@ -6794,7 +6794,7 @@ class CharacterSheetState {
 	 * @param {number} [ctx.meleeReach] - Precomputed getMeleeReach().
 	 * @returns {number|null} Reach in feet, or null for non-melee attacks.
 	 */
-	getAttackReach (attack, {meleeReach} = {}) {
+	getAttackReach (attack, {meleeReach, isOwnTurn = true} = {}) {
 		if (!attack) return null;
 		if (attack.isMelee === false) return null; // explicitly ranged
 
@@ -6808,7 +6808,10 @@ class CharacterSheetState {
 
 		const base = meleeReach != null ? meleeReach : this.getMeleeReach();
 		const hasReachProp = (attack.properties || []).some(p => String(p).split("|")[0].toUpperCase() === "R");
-		return base + (hasReachProp ? CharacterSheetState.REACH_PROPERTY_BONUS : 0);
+		const attackReachBonus = attack.reachCondition === "onYourTurn" && !isOwnTurn
+			? 0
+			: Number(attack.reachBonus) || 0;
+		return base + (hasReachProp ? CharacterSheetState.REACH_PROPERTY_BONUS : 0) + attackReachBonus;
 	}
 
 	getRaceName () {
@@ -8377,13 +8380,14 @@ class CharacterSheetState {
 
 	/**
 	 * Resolve a weapon attack/damage ability key to a modifier WITHOUT any
-	 * active-state overrides. Handles the "finesse" (max STR/DEX) and
-	 * "spellcasting" (max INT/WIS/CHA) pseudo-keys; otherwise the plain mod.
-	 * @param {string} abilityKey - "str"|"dex"|...|"finesse"|"spellcasting"
+	 * active-state overrides. Handles player-choice pseudo-keys; otherwise the
+	 * plain ability modifier.
+	 * @param {string} abilityKey - "str"|"dex"|...|"finesse"|"finesseWis"|"spellcasting"
 	 * @returns {number}
 	 */
 	_resolveBaseWeaponAbilityMod (abilityKey) {
 		if (abilityKey === "finesse") return Math.max(this.getAbilityMod("str"), this.getAbilityMod("dex"));
+		if (abilityKey === "finesseWis") return Math.max(this.getAbilityMod("str"), this.getAbilityMod("dex"), this.getAbilityMod("wis"));
 		if (abilityKey === "spellcasting") return Math.max(this.getAbilityMod("int"), this.getAbilityMod("wis"), this.getAbilityMod("cha"));
 		return this.getAbilityMod(abilityKey);
 	}
@@ -8564,7 +8568,7 @@ class CharacterSheetState {
 	// #region HP
 	setCurrentHp (hp) {
 		this._data.hp.current = Math.max(0, Math.min(hp, this.getMaxHp()));
-		if (this._data.hp.current === 0) this.deactivateState("hybridTransformation");
+		if (this._data.hp.current === 0) this._deactivateStatesForEndCondition({isIncapacitated: true});
 		this._updateBloodiedCondition();
 	}
 
@@ -8976,6 +8980,7 @@ class CharacterSheetState {
 		this._data.hp.current = Math.max(0, current);
 		if (max !== undefined) this._data.hp.max = max;
 		if (temp !== undefined) this._data.hp.temp = Math.max(0, temp);
+		if (this._data.hp.current === 0) this._deactivateStatesForEndCondition({isIncapacitated: true});
 		this._updateBloodiedCondition();
 	}
 
@@ -16623,7 +16628,8 @@ class CharacterSheetState {
 						// Arms of the Astral Self (level 3)
 						calculations.hasArmsOfAstralSelf = true;
 						calculations.armsOfAstralSelfCost = 1;
-						calculations.armsOfAstralSelfReach = 10;
+						calculations.armsOfAstralSelfReachBonus = 5;
+						calculations.armsOfAstralSelfReach = this.getMeleeReach() + calculations.armsOfAstralSelfReachBonus;
 						calculations.armsOfAstralSelfDamage = martialArtsDice;
 						calculations.astralArmsActivationBurst = {
 							damage: martialArtsDice.replace(/^(\d+)/, (_, count) => `${Number(count) * 2}`),
@@ -16638,9 +16644,10 @@ class CharacterSheetState {
 							sourceFeature: "Astral Arms",
 							damage: martialArtsDice,
 							damageType: "force",
-							abilityMod: "wis",
-							reach: 10,
-							range: "10 ft",
+							abilityMod: "finesseWis",
+							reachBonus: calculations.armsOfAstralSelfReachBonus,
+							reachCondition: "onYourTurn",
+							range: `${this.getMeleeReach()} ft`,
 							isMelee: true,
 							isUnarmedStrike: true,
 							actionType: "action",
@@ -29381,12 +29388,11 @@ class CharacterSheetState {
 
 			// Auto-break concentration if the condition causes incapacitation
 			// RAW: Incapacitated creatures can't concentrate (PHB/XPHB)
-			if (this._data.concentrating) {
-				const condDef = this._resolveConditionEffects(condObj.name, condObj.source);
-				const isIncapacitating = condDef?.effects?.some(e => e.type === "incapacitated" && e.value);
-				if (isIncapacitating) {
-					this.breakConcentration();
-				}
+			const condDef = this._resolveConditionEffects(condObj.name, condObj.source);
+			const isIncapacitating = condDef?.effects?.some(e => e.type === "incapacitated" && e.value);
+			if (isIncapacitating) {
+				if (this._data.concentrating) this.breakConcentration();
+				this._deactivateStatesForEndCondition({isIncapacitated: true});
 			}
 
 			return true;
@@ -29505,6 +29511,10 @@ class CharacterSheetState {
 			}
 		}
 		this._data.conditions = [...newConditions];
+		const isIncapacitating = newConditions.some(condObj =>
+			this._resolveConditionEffects(condObj.name, condObj.source)?.effects?.some(e => e.type === "incapacitated" && e.value),
+		);
+		if (isIncapacitating) this._deactivateStatesForEndCondition({isIncapacitated: true});
 	}
 
 	/**
@@ -42637,7 +42647,7 @@ class CharacterSheetState {
 			}],
 			trigger: {label: "Deflect Energy", actionType: "reaction", effectType: "damageReduction"},
 			duration: "While Arms and Visage are active",
-			endConditions: ["Arms or Visage ends"],
+			endConditions: ["Arms or Visage ends", "You are incapacitated or die"],
 			requiresStates: ["astralArms", "astralVisage"],
 			activationAction: "free",
 			resourceCost: 0,
@@ -46817,6 +46827,18 @@ class CharacterSheetState {
 		if (stateTypeId === "awakenedAstralSelf") {
 			for (const componentId of ["astralBody", "astralVisage", "astralArms"]) this.deactivateState(componentId);
 		}
+	}
+
+	_deactivateStatesForEndCondition ({isIncapacitated = false, isDead = false} = {}) {
+		const shouldEnd = (stateType) => (stateType?.endConditions || []).some(condition => {
+			const normalized = condition.toLowerCase();
+			if (isIncapacitated && (normalized.includes("incapacitat") || normalized.includes("unconscious"))) return true;
+			return isDead && (normalized.includes("dead") || normalized.includes("die") || normalized.includes("killed"));
+		});
+		const activeTypeIds = this._data.activeStates
+			.filter(state => state.active && shouldEnd(CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]))
+			.map(state => state.stateTypeId);
+		for (const stateTypeId of activeTypeIds) this.deactivateState(stateTypeId);
 	}
 
 	/**

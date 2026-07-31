@@ -123,6 +123,7 @@ describe("Bug #4 — the initiative ROLL HANDLER consumes the mode", () => {
 					formatD20Breakdown: () => "",
 				},
 				_triggerInitiativeRecovery: () => {},
+				consumeBattleMasterCheckBonus: () => null,
 			};
 			CharacterSheetCombat.prototype._rollInitiative.call(fakeThis, /* event */ undefined);
 		} finally {
