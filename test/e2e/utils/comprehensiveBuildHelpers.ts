@@ -490,7 +490,7 @@ export async function assertMilestone (charSheet: CharacterSheetPage, expected: 
 export async function probeToggleDelta (
 	charSheet: CharacterSheetPage,
 	featureName: string | RegExp,
-): Promise<{acDelta: number; dcDelta: number} | null> {
+): Promise<{acDelta: number; dcDelta: number; changed: boolean} | null> {
 	const re = featureName instanceof RegExp ? featureName : new RegExp(featureName, "i");
 	if (charSheet.page.isClosed()) throw new Error(`probeToggleDelta(${re}): page already closed`);
 	const features = await charSheet.getToggleableFeatureNames();
@@ -501,20 +501,54 @@ export async function probeToggleDelta (
 	// expressed as on/off toggles, and that's not a product bug.
 	if (!match) return null;
 
-	const acBefore = await charSheet.getAC().catch(() => -1);
-	const dcBefore = await charSheet.getSpellSaveDC().catch(() => -1);
+	// AC and the spell save DC are only two of the surfaces a toggle can move,
+	// and plenty of signature toggles move NEITHER: Rage grants a melee damage
+	// bonus, b/p/s resistance and STR advantage, changing no AC and no DC. A
+	// probe limited to AC/DC reports those as "no effect", which is a harness
+	// gap rather than a product bug. So also snapshot the other cheap derived
+	// surfaces a toggle realistically alters, and expose an aggregate
+	// `changed` flag for callers that only need "did SOMETHING happen".
+	const snapshot = async () => {
+		const attacks = (await charSheet.getAttackNames().catch(() => [] as string[])).slice().sort();
+		// Rage-style toggles express themselves in the DAMAGE of existing
+		// attacks rather than in any headline stat, so read each attack's
+		// damage string. Bounded to keep the probe cheap.
+		const damage: string[] = [];
+		for (const name of attacks.slice(0, 6)) {
+			const d = await charSheet.getAttackDamageString(name).catch(() => null);
+			damage.push(`${name}=${d ?? ""}`);
+		}
+		return {
+			ac: await charSheet.getAC().catch(() => -1),
+			dc: await charSheet.getSpellSaveDC().catch(() => -1),
+			resistances: (await charSheet.getResistances().catch(() => [] as string[])).slice().sort().join("|"),
+			speed: await charSheet.getSpeed().catch(() => -1),
+			attacks: attacks.join("|"),
+			damage: damage.join("|"),
+		};
+	};
+
+	const before = await snapshot();
 
 	await charSheet.activateFeature(match);
 	await charSheet.page.waitForTimeout(250);
 
-	const acAfter = await charSheet.getAC().catch(() => acBefore);
-	const dcAfter = await charSheet.getSpellSaveDC().catch(() => dcBefore);
+	const after = await snapshot();
 
 	// toggle off so subsequent assertions see the resting baseline
 	await charSheet.deactivateFeature(match);
 	await charSheet.page.waitForTimeout(150);
 
-	return {acDelta: acAfter - acBefore, dcDelta: dcAfter - dcBefore};
+	const acDelta = after.ac - before.ac;
+	const dcDelta = after.dc - before.dc;
+	const changed = acDelta !== 0
+		|| dcDelta !== 0
+		|| after.resistances !== before.resistances
+		|| after.speed !== before.speed
+		|| after.attacks !== before.attacks
+		|| after.damage !== before.damage;
+
+	return {acDelta, dcDelta, changed};
 }
 
 // ───────────────────────────────────────────────────────────────────────
@@ -1245,11 +1279,15 @@ export async function assertFeaturesMatrix (
 						if (!delta) throw new Error(`probeToggleDelta returned null (toggle vanished)`);
 						const acOK = Math.abs(delta.acDelta) > 0;
 						const dcOK = Math.abs(delta.dcDelta) > 0;
-						const ok = (want === "any" && (acOK || dcOK))
+						// "any" means "some derived effect", so it accepts the
+						// wider `changed` surface (resistances/speed/attacks/
+						// damage) — a Rage-style toggle moves no AC and no DC.
+						// "ac"/"dc" stay strict: they name the surface on purpose.
+						const ok = (want === "any" && delta.changed)
 							|| (want === "ac" && acOK)
 							|| (want === "dc" && dcOK);
 						if (!ok) {
-							throw new Error(`toggleDelta=${want} failed; observed acDelta=${delta.acDelta} dcDelta=${delta.dcDelta}`);
+							throw new Error(`toggleDelta=${want} failed; observed acDelta=${delta.acDelta} dcDelta=${delta.dcDelta} changed=${delta.changed}`);
 						}
 					} else {
 						// just confirm it activates without error

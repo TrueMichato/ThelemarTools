@@ -288,8 +288,11 @@ export function describeCharacter (spec: CharacterSpec): void {
 					} else {
 						// We only require *some* derived effect.  Specific magnitude
 						// is asserted in per-character tests where the rules nail
-						// down the exact delta.
-						expect(Math.abs(delta.acDelta) + Math.abs(delta.dcDelta), `toggle ${signatureToggle} should produce a stat delta`).toBeGreaterThan(0);
+						// down the exact delta. `changed` covers toggles whose
+						// effect is not an AC/DC number (Rage: damage bonus +
+						// resistances), which AC/DC alone would misreport as
+						// "no effect".
+						expect(delta.changed, `toggle ${signatureToggle} should produce a derived effect (ac/dc/resistances/speed/attacks/damage)`).toBe(true);
 					}
 				}
 			});
@@ -370,8 +373,9 @@ export function describeCharacter (spec: CharacterSpec): void {
 						: usage.attackName;
 					const matched = names.find(n => matchRe.test(n));
 					if (matched) {
-						const clicked = await charSheet.clickAttackRoll(matched);
-						expect(clicked, `attack roll for ${matched} should be clickable`).toBe(true);
+						const roll = await charSheet.clickAttackRoll(matched);
+						expect(roll.clicked, `attack roll for ${matched} should be clickable`).toBe(true);
+						expect(roll.threwError, `attack roll for ${matched} threw: ${roll.errorMessage ?? ""}`).toBe(false);
 					} else if (names.length > 0) {
 						// Some attack rendered but not the expected one — log
 						// the actual list so future regressions are easier
@@ -723,7 +727,8 @@ async function _runMulticlassUsageProbe (
 		const matched = names.find(n => re.test(n));
 		if (matched) {
 			const ok = await charSheet.clickAttackRoll(matched);
-			expect(ok, `[${legLabel}] attack ${matched} clickable`).toBe(true);
+			expect(ok.clicked, `[${legLabel}] attack ${matched} clickable`).toBe(true);
+			expect(ok.threwError, `[${legLabel}] attack ${matched} threw: ${ok.errorMessage ?? ""}`).toBe(false);
 		} else if (names.length > 0) {
 			console.log(`[${legLabel} usage] attack ${re} not found; rendered=${JSON.stringify(names)}`);
 		}

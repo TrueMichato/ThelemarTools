@@ -17,7 +17,7 @@ test.describe("Overview Tab", () => {
 		for (const abl of abilities) {
 			const scoreEl = page.locator(`#charsheet-ability-${abl}-score`);
 			if (await scoreEl.count() > 0 && await scoreEl.isVisible()) {
-				const score = await charSheet.getAbilityScore(abl);
+				const {score} = await charSheet.getAbilityScore(abl);
 				expect(score).toBeGreaterThanOrEqual(8);
 				expect(score).toBeLessThanOrEqual(20);
 			}

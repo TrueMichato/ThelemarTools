@@ -155,12 +155,6 @@ export class CharacterSheetPage {
 
 	// ========== ABILITY SCORES ==========
 
-	async getAbilityScore (ability: "str" | "dex" | "con" | "int" | "wis" | "cha"): Promise<number> {
-		const scoreEl = this.page.locator(`#charsheet-ability-${ability}-score`);
-		const text = await scoreEl.textContent();
-		return parseInt(text || "10", 10);
-	}
-
 	async getAbilityModifier (ability: "str" | "dex" | "con" | "int" | "wis" | "cha"): Promise<number> {
 		const modEl = this.page.locator(`#charsheet-ability-${ability}-mod`);
 		const text = await modEl.textContent();
@@ -212,15 +206,6 @@ export class CharacterSheetPage {
 	async getInitiative (): Promise<string> {
 		const text = await this.dispInitiative.textContent();
 		return text || "+0";
-	}
-
-	async getSpeed (): Promise<number> {
-		// The Overview speed display may render emoji labels (speedEmojiLabels
-		// setting, default ON), so prefer the canonical plain-text form exposed
-		// via data-speed-text; fall back to the visible text for word-label mode.
-		const canonical = await this.dispSpeed.getAttribute("data-speed-text");
-		const text = canonical ?? (await this.dispSpeed.textContent());
-		return parseInt(text || "30", 10);
 	}
 
 	// ========== CONDITIONS ==========
@@ -689,18 +674,6 @@ export class CharacterSheetPage {
 	 * dice systems route differently — so callers should wrap with state
 	 * checks if they need precise verification.
 	 */
-	async clickAttackRoll (attackName: string): Promise<boolean> {
-		await this.switchToTab(this.tabCombat);
-		const item = this.page.locator(".charsheet__attack-item")
-			.filter({hasText: new RegExp(attackName, "i")})
-			.first();
-		if (await item.count() === 0) return false;
-		const rollBtn = item.locator(".charsheet__attack-roll").first();
-		if (await rollBtn.count() === 0) return false;
-		await rollBtn.click({timeout: 5000}).catch(() => null);
-		await this.page.waitForTimeout(150);
-		return true;
-	}
 
 	/** Read an attack-bonus string from a named attack row (e.g. "+5"). */
 	async getAttackBonus (attackName: string): Promise<string | null> {

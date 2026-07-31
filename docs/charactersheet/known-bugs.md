@@ -1132,3 +1132,69 @@ cast/attack/resource/rest at L5" times out in `waitForToolsLoaded`
 during the initial `goto` — the known `gotoWithThelemar` page-load
 flake. Confirmed identical at `cdc45536` in a detached worktree, so it
 is unrelated to these fixes.
+
+---
+
+## CS-BUG-028 — E2E harness reports false failures for toggles that move no AC/DC, and three page-object methods are shadowed duplicates
+
+**Status**: **Fixed**.
+
+Surfaced while merging the TDCSR Juggernaut branch, whose spec failed on
+`toggle /rage/i should produce a stat delta` and `attack roll for Unarmed
+Strike should be clickable`. Both reproduced on the source branch itself,
+so neither was merge-induced — and neither was a product bug.
+
+### (a) `probeToggleDelta` only measured AC and the spell save DC
+
+The helper's own comment says callers "only require *some* derived
+effect", but it returned `{acDelta, dcDelta}` and the assertions summed
+those two numbers. Plenty of signature toggles move neither: **Rage**
+grants a melee damage bonus, bludgeoning/piercing/slashing resistance and
+STR advantage — no AC change, no DC change. Every Rage-style toggle was
+therefore reported as having no effect.
+
+`probeToggleDelta` now snapshots the other cheap derived surfaces a
+toggle realistically alters — resistances, speed, attack list, and the
+damage string of each rendered attack (bounded to 6) — and returns an
+aggregate `changed` flag alongside the existing deltas. The
+`signatureToggle` assertion and the feature matrix's `toggleDelta: "any"`
+both use `changed`; explicit `toggleDelta: "ac"` / `"dc"` stay strict,
+because those name a surface deliberately.
+
+### (b) Three `CharacterSheetPage` methods were defined twice
+
+`clickAttackRoll`, `getAbilityScore` and `getSpeed` each had two
+definitions in the same class. In JS the **later** definition silently
+wins, so the earlier one was dead code — and callers had been written
+against the dead signature:
+
+| Method | Dead (earlier) | Live (later) |
+|---|---|---|
+| `clickAttackRoll` | `Promise<boolean>` | `Promise<{clicked, threwError, errorMessage?}>` |
+| `getAbilityScore` | `Promise<number>` | `Promise<{score, mod}>` |
+| `getSpeed` | DOM text parse | `state.getSpeed(type)` |
+
+`expect(clicked).toBe(true)` compared an **object** to `true`, so the
+check failed *whenever the attack existed* — the failure was guaranteed,
+not flaky, for every spec using `usage.attackName`. `getAbilityScore` had
+the same shape mismatch in `overview-tab.spec.ts` and
+`thelemar-homebrew.spec.ts`.
+
+Deleted the three dead definitions and corrected the callers to the live
+shapes (attack-roll callers now also assert `threwError === false`, which
+the object form makes available for free). `getSpeed`'s two forms were
+behaviourally compatible, so only the dead code was removed.
+
+**Verification**: `tgtt-tdcsr-juggernaut-barbarian.spec.ts` 6 passed / 2
+skipped (was 3 failed). No regressions:
+`tgtt-arcane-archer-fighter-hochling.spec.ts` +
+`tgtt-champion-fighter-xphb.spec.ts` together 12 passed / 4 skipped.
+
+**Note on a misattributed symptom**: intermittent
+`net::ERR_CONNECTION_REFUSED at localhost:8080` during these runs is a
+startup race between back-to-back Playwright runs (`reuseExistingServer`
+picking up a server that is still shutting down), **not** an
+`http-server` crash. Confirmed by polling the port for a whole run: it
+stayed up throughout. An earlier suspicion that the boot wait in
+`gotoWithThelemar` was too short was also wrong — measured boot is
+~11s initial and ~10s post-brew, well inside the existing budget.
