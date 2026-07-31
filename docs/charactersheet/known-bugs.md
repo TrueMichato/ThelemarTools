@@ -1190,6 +1190,25 @@ skipped (was 3 failed). No regressions:
 `tgtt-arcane-archer-fighter-hochling.spec.ts` +
 `tgtt-champion-fighter-xphb.spec.ts` together 12 passed / 4 skipped.
 
+**Independently corroborated by three sessions.** Both defects were hit by
+subclass work that had no knowledge of each other, which is the strongest
+evidence they were harness bugs rather than product bugs:
+
+| Session | Defect hit | What they did |
+|---|---|---|
+| Barbarian Juggernaut (TDCSR) | (a) + (b) | surfaced both; reproduced on its own branch |
+| Monk Astral Self (TCE) | (a) | its L5 signature-toggle probe asserted an AC/DC delta that Astral Arms does not move; worked around it by asserting `toggleAddsAttack` instead |
+| Cleric Light Domain (XPHB) | (b) | independently made the same `clickAttackRoll` shape fix |
+
+Astral's response was to add a **generic** `toggleAddsAttack` `EffectCheck`
+kind (`comprehensiveBuildHelpers.ts`), which is the right layer — but it
+addresses a different surface. `toggleAddsAttack` is opt-in per
+`featuresMatrix` entry; the `signatureToggle` assertion and
+`toggleDelta: "any"` still ran through `probeToggleDelta` and so still saw
+only AC/DC. The two fixes are complementary: theirs lets a spec *declare*
+that a toggle grants an attack, mine makes the default probe stop reporting
+"no effect" for toggles that move resistances, speed, or the attack list.
+
 **Note on a misattributed symptom**: intermittent
 `net::ERR_CONNECTION_REFUSED at localhost:8080` during these runs is a
 startup race between back-to-back Playwright runs (`reuseExistingServer`
