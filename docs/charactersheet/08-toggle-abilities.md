@@ -10,6 +10,7 @@ Toggle abilities are features that can be activated and deactivated, providing t
 - Wizard features (Bladesong)
 - Blood Hunter hemocraft (Crimson Rite and Order of the Lycan's Hybrid Transformation)
 - Way of the Astral Self manifestations (Arms, Visage, Body, and Awakened)
+- XPHB Light Domain reactions and auras (Warding Flare and Corona of Light)
 - Combat stances (from various homebrew sources)
 - Custom/homebrew toggle abilities
 - Automatic detection and categorization
@@ -77,6 +78,18 @@ complete set while deducting its five-point cost only once. Dependency teardown
 is bidirectional: ending Arms or Visage ends Body and Awakened, while ending
 Awakened ends all three components. Their `endConditions` also route through the
 generic incapacitation/0-HP teardown path.
+
+### XPHB Light Domain states
+
+- **Warding Flare** is a one-attack reaction state. Activating it spends one use
+  from the Wisdom-sized Warding Flare pool and records disadvantage for the
+  triggering attack against the Cleric. At Cleric 6, the pool recharges on a
+  Short or Long Rest and activation also rolls `2d6 + Wisdom modifier` temporary
+  HP, with a direct Apply to Self control.
+- **Corona of Light** is an action-activated, one-minute aura with 60 feet of
+  bright light plus 30 feet of dim light. It spends one use from its
+  Wisdom-sized pool, can be dismissed, and marks enemy saves against Radiance
+  of the Dawn and Fire/Radiant-damage spells as disadvantaged while active.
 
 Arms uses `variablePointSpend` so the level 6+ UI can offer Arms for one
 Ki/Focus point or Arms plus Visage for two. Visage and Body expose resolved

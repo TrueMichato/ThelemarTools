@@ -184,7 +184,11 @@ export function describeCharacter (spec: CharacterSpec): void {
 
 	test.describe(`${displayName} — comprehensive build`, () => {
 		test.beforeEach(async ({page}) => {
-			await gotoWithThelemar(page);
+			if (preset.prioritySources?.length && !preset.prioritySources.includes("TGTT")) {
+				await new CharacterSheetPage(page).goto();
+			} else {
+				await gotoWithThelemar(page);
+			}
 		});
 
 		test.afterEach(async ({page}) => {

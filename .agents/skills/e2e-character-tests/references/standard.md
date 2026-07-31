@@ -178,7 +178,8 @@ stay clean). Use this decision tree:
 | Toggle that adds/removes speed while active | toggle delta | `togglePlusSpeed` |
 | Toggle that grants resistance / advantage / immunity | toggle flag | `toggleGrantsResistance`, `toggleGrantsAdvantage`, `toggleGrantsImmunity` |
 | Adds a roll button (Bardic Inspiration, Channel Divinity option, …) | roll | `rollAbilityCheck`, `rollSavingThrow`, `rollSkillCheck`, `rollAttack`, `rollInitiative` |
-| Restores a resource on long / short rest | resource | `longRestRestores`, `shortRestRestores` |
+| Restores a resource or feature-owned use pool on long / short rest | resource | `longRestRestores`, `shortRestRestores`, `longRestRestoresFeatureUses`, `shortRestRestoresFeatureUses` |
+| Grants spell slots at a level | spellcasting | `spellSlots` |
 | Adds an attack to the Combat tab | attack | `attackPresent` |
 | Modifies attack-bonus / damage line | attack | `attackBonus`, `attackDamageContains` |
 | Sneak Attack / martial-arts / inspiration die size | dice | `sneakAttackDice`, `martialArtsDie`, `bardicInspirationDie` |

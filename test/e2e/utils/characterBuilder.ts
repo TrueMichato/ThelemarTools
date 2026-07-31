@@ -20,6 +20,10 @@ export interface CharacterPreset {
 	subrace?: string;
 	className: string;
 	classSource: string;
+	/** Override the sheet's source-priority filter before the Builder renders. */
+	prioritySources?: string[];
+	/** Disable per-roll conditional pickers for deterministic lifecycle probes. */
+	skipConditionalPrompt?: boolean;
 	background: string;
 	bgSource: string;
 	name: string;
@@ -84,6 +88,23 @@ export const PRESET_CLERIC: CharacterPreset = {
 	name: "Test Cleric",
 	skillCount: 2,
 	optFeatCount: 1,
+};
+
+export const PRESET_FULL_XPHB_LIGHT_CLERIC: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	className: "Cleric",
+	classSource: "PHB'24",
+	prioritySources: ["XPHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Solana Dawnkeeper",
+	skillCount: 2,
+	optFeatCount: 1,
+	subclassName: "Light Domain",
+	subclassSource: "PHB'24",
+	signatureSpells: ["Sacred Flame", "Bless", "Cure Wounds"],
 };
 
 /** Bard — spellcaster with known spells */
@@ -599,6 +620,8 @@ export async function createCharacterViaWizard (
 	// "Create New Character" placeholder, breaking every later flow that
 	// depends on a loaded character (Level Up, Multiclass, etc.).
 	await page.locator("#charsheet-btn-new").click();
+	if (preset.prioritySources?.length) await charSheet.setPrioritySources(preset.prioritySources);
+	if (preset.skipConditionalPrompt) await charSheet.setStateSetting("skipConditionalPrompt", true);
 	await charSheet.switchToTab(charSheet.tabBuilder);
 
 	// Builder steps (current order, see js/charactersheet/charactersheet-builder.js

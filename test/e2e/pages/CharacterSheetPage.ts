@@ -114,6 +114,20 @@ export class CharacterSheetPage {
 		this.btnExhaustionRemove = page.locator("#charsheet-btn-exhaustion-remove");
 	}
 
+	async setPrioritySources (sources: string[]): Promise<void> {
+		await this.page.evaluate((nextSources) => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?._state?.setSetting?.("prioritySources", nextSources);
+			cs?._builder?.render?.();
+		}, sources);
+	}
+
+	async setStateSetting (key: string, value: unknown): Promise<void> {
+		await this.page.evaluate(({settingKey, settingValue}) => {
+			(globalThis as any).charSheet?._state?.setSetting?.(settingKey, settingValue);
+		}, {settingKey: key, settingValue: value});
+	}
+
 	async goto (): Promise<void> {
 		await this.page.goto("/charactersheet.html");
 		await waitForToolsLoaded(this.page);
@@ -327,15 +341,29 @@ export class CharacterSheetPage {
 		await this.switchToTab(this.tabOverview);
 		const activatableRow = this.page.locator(".charsheet__activatable-row").filter({hasText: this._getFeatureActivationPattern(featureName)}).first();
 		const btn = activatableRow.locator(".charsheet__activate-btn");
-		// Hard timeout: missing toggle must fail fast, not hang the whole test.
-		// (Helps us cleanly distinguish "feature not toggleable" from
-		// "general infra wedge" in triage.)
-		try {
-			await btn.waitFor({state: "visible", timeout: 5000});
-		} catch (e) {
-			throw new Error(`activateFeature(${featureName}): no visible toggle button within 5s. Feature may be passive on the sheet — see docs/charactersheet/known-bugs.md.`);
+		if (await btn.isVisible().catch(() => false)) {
+			await btn.click({timeout: 5000});
+		} else {
+			await this.switchToTab(this.tabFeatures);
+			const exactName = new RegExp(`^\\s*${featureName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i");
+			const featureCard = this.page.locator(".charsheet__feature").filter({
+				has: this.page.locator(".charsheet__feature-name").filter({hasText: exactName}),
+			}).first();
+			const useBtn = featureCard.locator(".charsheet__feature-use");
+			try {
+				await useBtn.waitFor({state: "visible", timeout: 5000});
+			} catch (e) {
+				const diagnostic = await this.page.evaluate((name) => {
+					const cs: any = (globalThis as any).charSheet;
+					const feature = cs?._state?.getFeatures?.().find((it: any) => it.name === name);
+					const activationInfo = (globalThis as any).CharacterSheetState?.detectActivatableFeature?.(feature);
+					const activatable = cs?._state?.getActivatableFeatures?.().find((it: any) => it.feature?.id === feature?.id);
+					return {feature: !!feature, activationInfo, activatable: !!activatable};
+				}, featureName);
+				throw new Error(`activateFeature(${featureName}): no visible Activate or Use control within 5s. diagnostic=${JSON.stringify(diagnostic)}`);
+			}
+			await useBtn.click({timeout: 5000});
 		}
-		await btn.click({timeout: 5000});
 		const choiceModal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
 		if (await choiceModal.count()) {
 			const choice = choiceModal.locator("button.ve-btn").filter({hasText: /Spend \d+/}).first();
@@ -462,6 +490,23 @@ export class CharacterSheetPage {
 		}
 
 		return {current: -1, max: -1};
+	}
+
+	async getFeatureUses (featureName: string): Promise<{current: number; max: number; recharge: string | null}> {
+		return this.page.evaluate((name) => {
+			const feature = (globalThis as any).charSheet?._state?.getFeature?.(name);
+			return {
+				current: feature?.uses?.current ?? -1,
+				max: feature?.uses?.max ?? -1,
+				recharge: feature?.uses?.recharge ?? null,
+			};
+		}, featureName);
+	}
+
+	async spendFeatureUse (featureName: string): Promise<boolean> {
+		return this.page.evaluate((name) => {
+			return !!(globalThis as any).charSheet?._state?.useFeature?.(name);
+		}, featureName);
 	}
 
 	// ========== TGTT — COMBAT TAB DCs ==========
@@ -653,6 +698,7 @@ export class CharacterSheetPage {
 		await this.page.evaluate(() => {
 			const cs: any = (globalThis as any).charSheet;
 			cs?._state?.onShortRest?.();
+			cs?._rest?._restoreResources?.("short");
 			cs?._renderCharacter?.();
 		});
 		await this.page.waitForTimeout(200);
@@ -662,6 +708,7 @@ export class CharacterSheetPage {
 		await this.page.evaluate(() => {
 			const cs: any = (globalThis as any).charSheet;
 			cs?._state?.onLongRest?.();
+			cs?._rest?._restoreResources?.("long");
 			cs?._renderCharacter?.();
 		});
 		await this.page.waitForTimeout(250);
