@@ -188,7 +188,12 @@ class CharacterSheetLevelUp {
 		// granting level (L3) it is null until chosen, then recomputed in the picker below.
 		let optionalFeatureGains = CharacterSheetClassUtils.getOptionalFeatureGains(classData, classEntry.level, newLevel, this._state, fullClassSubclassData);
 		// Class-level featProgression (2024/TGTT Fighting Style etc.); excludes Epic Boon (handled by ASI flow).
-		const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(classData, classEntry.level, newLevel);
+		// Includes the SUBCLASS's own featProgression too (e.g. XPHB Champion Fighter's
+		// Additional Fighting Style at L7) via `fullClassSubclassData` — by the level the
+		// subclass grants an additional feat progression, the subclass itself was already
+		// chosen (at an earlier level), so `fullClassSubclassData` is populated here without
+		// needing the subclass-selection-callback recompute that `optionalFeatureGains` uses.
+		const classFeatProgressionGains = CharacterSheetClassUtils.getClassFeatProgressionGains(classData, classEntry.level, newLevel, fullClassSubclassData);
 		featureOptionGroups = CharacterSheetClassUtils.getFeatureOptionsForLevel(currentFeatures, newLevel, this._page.getClassFeatures())
 			// Filter out option groups where ALL options are optional features — those are
 			// handled by optionalfeatureProgression in the Class Options step (e.g. Metamagic)
@@ -2055,6 +2060,15 @@ class CharacterSheetLevelUp {
 			.filter((/** @type {*} */ f) => !CharacterSheetClassUtils.isInterdictBoonEntry(f));
 		const getFeatChoices = (/** @type {*} */ feat) =>
 			CharacterSheetClassUtils.buildFeatChoicesSpec(feat, {state: this._state, page: this._page});
+
+		// Captured before `getFeatChoices` below so the Epic Boon section
+		// (which calls `getFeatChoices` earlier in this function body, at
+		// L19 Epic Boon levels) doesn't hit a temporal-dead-zone
+		// ReferenceError on `self`. `function` declarations hoist, but a
+		// `const` initializer only runs when its line is reached — the
+		// Epic Boon section previously ran first and crashed the whole
+		// level-up modal for any class at level 19.
+		const self = this;
 
 		// === Epic Boon section (level 19 for XPHB / TGTT classes) ===
 		if (isEpicBoonLevel) {

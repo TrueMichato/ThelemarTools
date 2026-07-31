@@ -25,6 +25,13 @@ import {defineConfig, devices} from "@playwright/test";
 const PW_WORKERS = process.env.CI ? 1 : Number(process.env.PW_WORKERS ?? 3);
 const PW_TIMEOUT_MS = Number(process.env.PW_TIMEOUT_MS ?? 60_000);
 const PW_EXPECT_TIMEOUT_MS = Number(process.env.PW_EXPECT_TIMEOUT_MS ?? 5_000);
+// Shared dev machines sometimes already have an unrelated static server
+// bound to :8080 (e.g. a different worktree's checkout). Since
+// `reuseExistingServer` happily reuses ANY server already answering on
+// that port — even one serving completely different source — allow an
+// override so a run can point at a guaranteed-fresh port for this
+// worktree instead of silently testing someone else's files.
+const PW_PORT = Number(process.env.PW_PORT ?? 8080);
 
 export default defineConfig({
 	testDir: "./test/e2e/specs",
@@ -45,7 +52,7 @@ export default defineConfig({
 	// per-test by the export hook itself.
 	outputDir: "./test-results/playwright-output",
 	use: {
-		baseURL: "http://localhost:8080",
+		baseURL: `http://localhost:${PW_PORT}`,
 		trace: "on-first-retry",
 		screenshot: "only-on-failure",
 		video: "retain-on-failure",
@@ -68,8 +75,8 @@ export default defineConfig({
 	 *   --silent  — keep Playwright's reporter output clean
 	 */
 	webServer: {
-		command: "npx http-server -p 8080 -c-1 --silent .",
-		url: "http://localhost:8080",
+		command: `npx http-server -p ${PW_PORT} -c-1 --silent .`,
+		url: `http://localhost:${PW_PORT}`,
 		reuseExistingServer: !process.env.CI,
 		timeout: 60_000,
 	},

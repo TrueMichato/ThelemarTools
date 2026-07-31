@@ -102,7 +102,11 @@ The sheet itself.  Most probes go through this.
 ### Core stats
 
 - `getAbilityScore(ab)` / `getCurrentHp()` / `getMaxHp()` /
-  `getTempHp()` / `setCurrentHp(hp)`.
+  `getTempHp()` / `setCurrentHp(hp)` — `setCurrentHp()` switches to the
+  Overview tab first (the HP input lives there and is hidden, not just
+  non-interactive, on other tabs — `.fill()` requires visibility and will
+  timeout otherwise); the getters use `.textContent()`/`.inputValue()`,
+  which don't require visibility, so they don't need the same guard.
 - `getAC()` / `getInitiative()` / `getSpeed()`.
 - `getCombatStat("ac" | "spellSaveDc" | "speed" | "initiative")` —
   preferred for delta probes.

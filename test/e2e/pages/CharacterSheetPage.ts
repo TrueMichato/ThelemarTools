@@ -184,7 +184,16 @@ export class CharacterSheetPage {
 		return parseInt(val || "0", 10);
 	}
 
+	/**
+	 * The HP inputs live on the Overview tab (`#charsheet-ipt-hp-current`),
+	 * so — same rationale as `getConditionBadges`/`removeCondition` above —
+	 * switch there first. Without this, a caller landing here right after a
+	 * Combat-tab probe (resource spend/restore, attack roll, etc.) would
+	 * `.fill()` a hidden, off-tab input and hang until the outer test
+	 * timeout fired instead of failing fast.
+	 */
 	async setCurrentHp (hp: number): Promise<void> {
+		await this.switchToTab(this.tabOverview).catch(() => null);
 		await this.hpCurrent.fill(String(hp));
 		await this.hpCurrent.press("Enter");
 		await this.page.waitForTimeout(100);
@@ -216,7 +225,16 @@ export class CharacterSheetPage {
 
 	// ========== CONDITIONS ==========
 
+	/**
+	 * The Conditions widget lives on the Overview tab (`#charsheet-conditions`),
+	 * so every DOM-driven condition method must switch there first — otherwise
+	 * `.click()`/`.count()` locators silently wait forever for an element that
+	 * simply isn't in the currently-rendered tab (Playwright element actions
+	 * have no default timeout; they'd hang until the enclosing test's overall
+	 * timeout fires rather than failing fast).
+	 */
 	async getConditionBadges (): Promise<string[]> {
+		await this.switchToTab(this.tabOverview).catch(() => null);
 		const badges = this.conditionsContainer.locator(".charsheet__condition-badge");
 		const count = await badges.count();
 		const names: string[] = [];
@@ -228,9 +246,10 @@ export class CharacterSheetPage {
 	}
 
 	async removeCondition (conditionText: string): Promise<void> {
+		await this.switchToTab(this.tabOverview).catch(() => null);
 		const badge = this.conditionsContainer.locator(".charsheet__condition-badge").filter({hasText: conditionText});
 		const removeBtn = badge.locator(".charsheet__condition-remove, .glyphicon-remove");
-		await removeBtn.click();
+		await removeBtn.click({timeout: 5000});
 		await this.page.waitForTimeout(100);
 	}
 
@@ -289,25 +308,6 @@ export class CharacterSheetPage {
 		await this.switchToTab(this.tabFeatures);
 		const nameEls = this.page.locator(".charsheet__feature .charsheet__feature-name");
 		const count = await nameEls.count();
-		const names: string[] = [];
-		for (let i = 0; i < count; i++) {
-			const text = await nameEls.nth(i).textContent({timeout: 1000}).catch(() => null);
-			if (text && text.trim()) names.push(text.trim());
-		}
-		return names;
-	}
-
-	/**
-	 * Names of the weapons this character has taken Weapon Mastery in
-	 * (XPHB). These are picks, but they are NOT features — they surface as
-	 * badges in the Combat tab's mastery group (`_renderWeaponMasteries`,
-	 * `charactersheet.js:4096`), so probing the feature list for them always
-	 * comes back empty.
-	 */
-	async getWeaponMasteryNames (): Promise<string[]> {
-		await this.switchToTab(this.tabCombat).catch(() => {});
-		const nameEls = this.page.locator("#charsheet-combat-masteries .charsheet__mastery-badge strong");
-		const count = await nameEls.count().catch(() => 0);
 		const names: string[] = [];
 		for (let i = 0; i < count; i++) {
 			const text = await nameEls.nth(i).textContent({timeout: 1000}).catch(() => null);
@@ -444,22 +444,23 @@ export class CharacterSheetPage {
 	): Promise<{current: number; max: number}> {
 		await this.switchToTab(this.tabCombat).catch(() => {});
 
-		// (2) Synthetic combat resource — pips are the source of truth.
+		// (2) Synthetic combat resource. Match on the NAME node rather than the
+		// item's whole text — the trailing `current/max (recharge)` caption and
+		// pip titles would otherwise let an unrelated item match by substring.
+		// That caption is also the authoritative current/max, so read it directly
+		// instead of counting pips.
 		const synthetic = this.page
 			.locator(".charsheet__combat-resource-item")
-			.filter({hasText: resourceName})
+			.filter({has: this.page.locator(".charsheet__combat-resource-name", {hasText: resourceName})})
 			.first();
 		if (await synthetic.waitFor({state: "attached", timeout: 2000}).then(() => true).catch(() => false)) {
-			const pips = synthetic.locator(".charsheet__resource-pip");
-			const max = await pips.count().catch(() => 0);
-			if (max > 0) {
-				// Spent pips carry `.used`; the remaining ones are the current value.
-				const current = await synthetic.locator(".charsheet__resource-pip:not(.used)").count().catch(() => 0);
-				return {current, max};
-			}
+			const text = await synthetic.locator(".ve-small.ve-muted").first().textContent({timeout: 2000}).catch(() => null);
+			const m = text?.match(/(-?\d+)\s*\/\s*(-?\d+)/);
+			if (m) return {current: parseInt(m[1], 10), max: parseInt(m[2], 10)};
 		}
 
-		// (3) Class combat-panel feature carrying a `csCombatPoolCaption` pool.
+		// (3) Class combat-panel feature carrying a `csCombatPoolCaption` pool
+		// (Action Surge). Not covered by (2) — it is not a synthetic resource.
 		const feature = this.page
 			.locator(".cs-combat-feature")
 			.filter({hasText: resourceName})
@@ -622,14 +623,35 @@ export class CharacterSheetPage {
 	/**
 	 * Spend N charges of a named resource (e.g. "Channel Divinity",
 	 * "Bardic Inspiration"). Returns remaining charges.
+	 *
+	 * Fighter's synthetic combat resources (Second Wind, Action Surge,
+	 * Indomitable) mirror a `_data.resources` row for legacy compatibility,
+	 * but the value actually DISPLAYED (via `getSyntheticCombatResources`)
+	 * is tracked separately on the feature itself, so the generic
+	 * `useResourceCharge` mutates a row nothing reads. Route those three by
+	 * name to their dedicated spend methods instead, which correctly update
+	 * the field the Combat-tab pips (and `getResource`'s fallback) read.
 	 */
 	async useResourceByName (resourceName: string, amount = 1): Promise<{ok: boolean; remaining: number}> {
 		const ok = await this.page.evaluate(({name, n}) => {
 			const cs: any = (globalThis as any).charSheet;
-			if (!cs?._state?.useResourceCharge) return false;
-			const result = cs._state.useResourceCharge(name, n);
+			const state = cs?._state;
+			if (!state) return false;
+			const syntheticSpenders: Record<string, () => boolean> = {
+				"second wind": () => state.useSecondWind?.(),
+				"action surge": () => state.useActionSurge?.(),
+				"indomitable": () => state.useIndomitable?.(),
+			};
+			const spender = syntheticSpenders[String(name).toLowerCase()];
+			let result: boolean;
+			if (spender) {
+				result = false;
+				for (let i = 0; i < n; i++) result = !!spender() || result;
+			} else {
+				result = !!state.useResourceCharge?.(name, n);
+			}
 			cs._renderCharacter?.();
-			return !!result;
+			return result;
 		}, {name: resourceName, n: amount});
 		await this.page.waitForTimeout(150);
 		const res = await this.getResource(resourceName).catch(() => ({current: -1, max: -1}));
@@ -1361,6 +1383,122 @@ export class CharacterSheetPage {
 			} catch (_) { return 0; }
 		});
 	}
+
+	/**
+	 * Read the current weapon-attack critical-hit range from
+	 * `getFeatureCalculations().criticalRange` (19 for Improved Critical,
+	 * 18 for Superior Critical). Returns 20 (the RAW default — no
+	 * expanded crit range) when the calc field isn't surfaced, so a
+	 * character without an expanding-crit feature reads as "no expansion"
+	 * rather than a false positive.
+	 */
+	async getCriticalRange (): Promise<number> {
+		return await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const st: any = cs?._state;
+			if (!st) return 20;
+			try {
+				const calc = st.getFeatureCalculations?.() || {};
+				return Number(calc.criticalRange ?? 20) || 20;
+			} catch (_) { return 20; }
+		});
+	}
+
+	/**
+	 * Read the total numeric bonus for a named modifier type straight from
+	 * `state.getModifierBonus(modType)` — the same generic aggregator that
+	 * backs every roll/attack/AC bonus on the sheet. Reusable for any
+	 * feat/style registered as a `{type: "modifier", modType: "..."}` bonus
+	 * (e.g. Archery Fighting Style's unconditional `attack:ranged` +2)
+	 * without requiring an actual equipped weapon for the probe to run.
+	 */
+	async getModifierBonus (modType: string): Promise<number> {
+		return await this.page.evaluate((type) => {
+			const cs: any = (globalThis as any).charSheet;
+			const st: any = cs?._state;
+			if (!st) return 0;
+			try { return Number(st.getModifierBonus?.(type)) || 0; } catch (_) { return 0; }
+		}, modType);
+	}
+
+	/** Whether the character currently has Heroic Inspiration. */
+	async hasInspiration (): Promise<boolean> {
+		return await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const st: any = cs?._state;
+			try { return !!st?.hasInspiration?.(); } catch (_) { return false; }
+		});
+	}
+
+	/** Explicitly clear Heroic Inspiration (for deterministic turn-start probes). */
+	async setInspiration (value: boolean): Promise<void> {
+		await this.page.evaluate((v) => {
+			const cs: any = (globalThis as any).charSheet;
+			const st: any = cs?._state;
+			st?.setInspiration?.(v);
+		}, value);
+	}
+
+	/**
+	 * Drive the generic "start of turn in combat" effect resolver
+	 * (`applyTurnStartEffects()` — Heroic Warrior's Inspiration grant,
+	 * Survivor's Heroic Rally healing, hybrid regeneration, etc.) directly
+	 * against state, then re-render. Returns the declarative effects list
+	 * that was applied, e.g. `[{type: "heal", amount: 7, source: "Heroic Rally"}]`.
+	 */
+	async applyTurnStartEffects (): Promise<Array<{type: string; amount?: number; source: string}>> {
+		return await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const st: any = cs?._state;
+			if (!st) return [];
+			try {
+				const effects = st.applyTurnStartEffects?.() || [];
+				cs?._renderCharacter?.();
+				return effects;
+			} catch (_) { return []; }
+		});
+	}
+
+	/**
+	 * Names of the weapons this character has taken Weapon Mastery in (XPHB).
+	 *
+	 * These are real picks that deliberately do NOT live in the feature list —
+	 * only the generic "Weapon Mastery" card renders there — so
+	 * `getActivatableFeatureNames()` can never confirm WHICH weapons were
+	 * chosen. Callers verifying a specific pick (`assertFeaturesMatrix`'s
+	 * `kind: "pick"`, via `buildWeaponMasteryChecks`) must search this list.
+	 *
+	 * Prefers the RENDERED Combat-tab badges (`_renderWeaponMasteries`,
+	 * `charactersheet.js:4096`) so a mastery that was chosen but never
+	 * displayed still fails the check. Falls back to state
+	 * (`getWeaponMasteries()`, which returns "Club|XPHB" entries) only when the
+	 * mastery container itself never rendered — i.e. the tab wasn't ready —
+	 * which would otherwise be an infra false failure rather than a real gap.
+	 */
+	async getWeaponMasteryNames (): Promise<string[]> {
+		await this.switchToTab(this.tabCombat).catch(() => {});
+
+		const container = this.page.locator("#charsheet-combat-masteries");
+		if (await container.count().catch(() => 0) > 0) {
+			const nameEls = container.locator(".charsheet__mastery-badge strong");
+			const count = await nameEls.count().catch(() => 0);
+			const names: string[] = [];
+			for (let i = 0; i < count; i++) {
+				const text = await nameEls.nth(i).textContent({timeout: 1000}).catch(() => null);
+				if (text && text.trim()) names.push(text.trim());
+			}
+			return names;
+		}
+
+		return await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const st: any = cs?._state;
+			try {
+				return (st?.getWeaponMasteries?.() || []).map((m: string) => String(m).split("|")[0]);
+			} catch (_) { return []; }
+		});
+	}
+
 
 	/**
 	 * List the warlock's known eldritch invocation names by

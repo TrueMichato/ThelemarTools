@@ -1018,6 +1018,17 @@ payment on it.
 
 ---
 
+## CS-BUG-026 — *(unused)*
+
+Reserved for a spell-attack critical-range leak (Champion's expanded crit
+range and magic-item `critThreshold` both applied to spell attacks through
+the shared `getCriticalRange()`). The XPHB Champion work fixed it inline
+instead of filing it — `getCriticalRange(kind)` now scopes both sources to
+`kind !== "spell"` (`charactersheet-state.js`). No entry was ever written;
+the ID is left retired so the numbering stays stable.
+
+---
+
 ## CS-BUG-027 — E2E harness probes three non-existent surfaces, producing false "not found" failures (resources, weapon masteries, skill rolls)
 
 **Status**: **Fixed**.

@@ -6863,39 +6863,49 @@ class CharacterSheetClassUtils {
 	 * @param {*} classData - The class data object (may have `featProgression`)
 	 * @param {number} prevLevel - The class level BEFORE this transition (0 for a fresh build)
 	 * @param {number} newLevel - The class level AFTER this transition
+	 * @param {*} [subclassData] - Optional subclass data object (may ALSO have its own
+	 *   `featProgression`, e.g. XPHB Champion Fighter's Additional Fighting Style at
+	 *   level 7). When provided, its gains are merged into the same returned array using
+	 *   the identical level-window logic — a subclass feat progression is just another
+	 *   progression source keyed by class level, not a separate mechanic.
 	 * @returns {Array<{progressionName: string, category: string[], count: number}>}
 	 */
-	static getClassFeatProgressionGains (/** @type {*} */ classData, /** @type {*} */ prevLevel, /** @type {*} */ newLevel) {
+	static getClassFeatProgressionGains (/** @type {*} */ classData, /** @type {*} */ prevLevel, /** @type {*} */ newLevel, /** @type {*} */ subclassData = null) {
 		/** @type {*[]} */ const gains = [];
-		if (!classData?.featProgression?.length) return gains;
 
 		const lo = Math.max(0, Number(prevLevel) || 0);
 		const hi = Number(newLevel) || 0;
 		if (hi <= lo) return gains;
 
-		for (const prog of classData.featProgression) {
-			const category = Array.isArray(prog.category) ? [...prog.category] : [];
-			// Epic Boon is handled by the dedicated ASI / Epic Boon flow — skip it here.
-			if (category.includes("EB")) continue;
+		const collect = (progressions) => {
+			if (!progressions?.length) return;
+			for (const prog of progressions) {
+				const category = Array.isArray(prog.category) ? [...prog.category] : [];
+				// Epic Boon is handled by the dedicated ASI / Epic Boon flow — skip it here.
+				if (category.includes("EB")) continue;
 
-			const map = prog.progression;
-			if (!map || typeof map !== "object") continue;
+				const map = prog.progression;
+				if (!map || typeof map !== "object") continue;
 
-			let count = 0;
-			if (Array.isArray(map)) {
-				for (let lvl = lo + 1; lvl <= hi; ++lvl) count += Number(map[lvl - 1]) || 0;
-			} else {
-				for (let lvl = lo + 1; lvl <= hi; ++lvl) count += Number(map[String(lvl)]) || 0;
+				let count = 0;
+				if (Array.isArray(map)) {
+					for (let lvl = lo + 1; lvl <= hi; ++lvl) count += Number(map[lvl - 1]) || 0;
+				} else {
+					for (let lvl = lo + 1; lvl <= hi; ++lvl) count += Number(map[String(lvl)]) || 0;
+				}
+
+				if (count > 0) {
+					gains.push({
+						progressionName: prog.name || "Feat",
+						category,
+						count,
+					});
+				}
 			}
+		};
 
-			if (count > 0) {
-				gains.push({
-					progressionName: prog.name || "Feat",
-					category,
-					count,
-				});
-			}
-		}
+		collect(classData?.featProgression);
+		collect(subclassData?.featProgression);
 
 		return gains;
 	}

@@ -4,7 +4,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 
 ## Contents
 - Active States / Toggle Abilities (ACTIVE_STATE_TYPES, storage, mutual exclusivity, bonus aggregation, concentration cascade, Steady Aim)
-- Combat System (attack bonus, sneak attack, action economy, weapon mastery)
+- Combat System (attack bonus, sneak attack, action economy, weapon mastery, critical hit range scoping, turn-start effect resolver, death save roll mode)
 - Spell Data Format (known/prepared, innate, spell slots)
 - Inventory Item Format (items, item bonuses, weapon bonus fields)
 - NPC Exporter (convertStateToMonster, CR estimation, custom source)
@@ -131,7 +131,51 @@ total = abilityMod + profBonus + weaponBonus + featureAttackBonus + stateAttackB
 
 `_turnActionUsage`: tracks `{action, bonus, reaction}` booleans per turn. Reset on turn advance.
 
-### Calculation-Granted Attacks
+### Critical Hit Range Scoping
+
+`CharacterSheetState#getCriticalRange(kind = "weapon")` is the single shared
+source of truth for "what beats a natural 20" — called from
+`charactersheet-combat.js` (weapon/unarmed/flurry attacks, default `"weapon"`)
+and `charactersheet-spells.js` (`"spell"`). Champion's Improved/Superior
+Critical (`calc.criticalRange`) and a magic item's `critThreshold` are both
+scoped to `kind !== "spell"` per RAW text ("attack rolls with weapons and
+Unarmed Strikes"); homebrew active-state `critRange`/`critRange:expand`
+effects are intentionally left unscoped (broadly-worded custom abilities keep
+applying to any attack kind). Any future feature that widens crit range only
+for a specific attack kind should add its own `kind !== "..."` guard inside
+this one method rather than duplicating scoping logic per renderer.
+
+### Turn-Start Effect Resolver
+
+`CharacterSheetState#getTurnStartEffects()` (pure, derives a declarative
+effect list from `getFeatureCalculations()`) + `#applyTurnStartEffects()`
+(applies it: grants Inspiration via `setInspiration()`, heals via the
+existing capped-at-max `heal()`) are the generic "start of your turn in
+combat" hook, called from both `startCombat()` and `advanceRound()` in
+`charactersheet-combat.js` alongside the pre-existing
+`applyHybridRegenerationAtTurnStart()`. Effects returned:
+`{type: "grantInspiration"|"heal", amount?, source}`. `getLastTurnStartEffects()`
+exposes the most recent run's effects afterward (non-persisted) for UI
+toasts. Add a new feature to this hook by (1) setting a `calc.hasXyz` flag in
+`getFeatureCalculations()`, (2) branching on it inside `getTurnStartEffects()`
+— no per-class turn-start UI needs to be written elsewhere. XPHB Champion's
+Heroic Warrior (L10) and Survivor's Heroic Rally (L18) are both implemented
+purely through this hook.
+
+### Death Save Roll Mode & Nat-Range Override
+
+`CharacterSheetState#getDeathSaveRollMode()` returns `{advantage, disadvantage}`
+consumed by the death-save roll handler in `charactersheet-combat.js` (e.g.
+XPHB Champion Survivor's Defy Death, L18, sets `advantage: true` via a
+declarative `deathSave:advantage` named modifier). Separately,
+`calc.hasChampionSurvivorDefyDeath` + `calc.championSurvivorDeathSaveNatRange`
+(18 for Champion) widen the natural-20-only "regain 1 HP and stabilize" rule
+to any roll `>= natRange` — PHB/pre-18 characters keep the strict
+natural-20-only behavior via the `natRange` default of `20`. Thelemar's
+generic crit-roll homebrew is suppressed on death-save rolls (`isAttack: true`)
+since death saves already hardcode their own nat-1/nat-20(+widened) cases.
+
+
 
 Class and subclass calculations can append attack descriptors to
 `calculations.grantedAttacks`. `getFeatureGrantedAttacks()` marks them as

@@ -723,6 +723,34 @@ export type EffectCheck = _EffectCommon & (
 	// damage). Sub-effects cannot themselves contain
 	// `pickedFeatureGrants` — no nesting.
 	| {kind: "pickedFeatureGrants"; pickName: string | RegExp; subEffects: EffectCheck[]}
+
+	// === Champion Fighter (XPHB) generic additions ===
+	// Read a named modifier's total numeric bonus straight from
+	// `getModifierBonus(modType)` — the same generic aggregator behind
+	// `getAdvantageState`. Reusable for any feat/feature registered as a
+	// `{type: "modifier", modType: "..."}` named bonus (e.g. Archery
+	// Fighting Style's unconditional `attack:ranged` +2) without needing
+	// an actual equipped weapon on the sheet for the probe to run.
+	| {kind: "modifierBonus"; modType: string; min?: number; exact?: number}
+	// Verify the weapon-attack critical-hit range from
+	// `getFeatureCalculations().criticalRange` — 19 for Improved Critical
+	// (L3), 18 for Superior Critical (L15). Generic: reusable by any
+	// future subclass that expands the crit range the same way. Use
+	// `max` (not `exact`) for a check whose level may be superseded by a
+	// LATER, stronger feature (e.g. L3's 19-20 is later improved to
+	// 18-20 by L15 Superior Critical) — `max` accepts "at least this
+	// good", so the L3 check keeps passing once the L15 feature lands.
+	| {kind: "criticalRange"; exact?: number; min?: number; max?: number}
+	// Drive the generic "start of turn in combat" resolver
+	// (`applyTurnStartEffects()`) directly and verify it granted Heroic
+	// Inspiration (Champion's Heroic Warrior, L10). Clears Inspiration
+	// first so the probe is deterministic regardless of prior state.
+	| {kind: "turnStartGrantsInspiration"}
+	// Drive the same resolver and verify it healed the character by at
+	// least `min` HP (Champion Survivor's Heroic Rally, L18). Optionally
+	// sets current HP to a Bloodied value first via `setHpFraction` (0-1
+	// of max HP) so the Bloodied gate is deterministically satisfied.
+	| {kind: "turnStartHeals"; min: number; setHpFraction?: number}
 );
 
 const _TOGGLE_EFFECT_KINDS = new Set([
@@ -736,11 +764,12 @@ const _TOGGLE_EFFECT_KINDS = new Set([
 
 function _checkNumeric (
 	actual: number,
-	e: {min?: number; exact?: number},
+	e: {min?: number; exact?: number; max?: number},
 	label: string,
 ): void {
 	if (e.exact != null && actual !== e.exact) throw new Error(`${label}=${actual}, expected exact=${e.exact}`);
 	if (e.min != null && actual < e.min) throw new Error(`${label}=${actual}, expected min=${e.min}`);
+	if (e.max != null && actual > e.max) throw new Error(`${label}=${actual}, expected max=${e.max}`);
 }
 
 function _hasDamageType (list: string[], dt: string): boolean {
@@ -974,6 +1003,39 @@ async function _runPassiveOrRollEffect (
 			if (n < e.minFaces) throw new Error(`MA die face=${n} < min=${e.minFaces}`);
 			return;
 		}
+		case "criticalRange": {
+			const n = await charSheet.getCriticalRange();
+			_checkNumeric(n, e, "criticalRange");
+			return;
+		}
+		case "modifierBonus": {
+			const n = await charSheet.getModifierBonus(e.modType);
+			_checkNumeric(n, e, `modifierBonus:${e.modType}`);
+			return;
+		}
+		case "turnStartGrantsInspiration": {
+			await charSheet.setInspiration(false);
+			const effects = await charSheet.applyTurnStartEffects();
+			const granted = effects.some(x => x.type === "grantInspiration");
+			if (!granted) throw new Error(`applyTurnStartEffects() did not grant Inspiration; got ${JSON.stringify(effects)}`);
+			const has = await charSheet.hasInspiration();
+			if (!has) throw new Error(`hasInspiration() is false after a turn-start Inspiration grant`);
+			return;
+		}
+		case "turnStartHeals": {
+			if (e.setHpFraction != null) {
+				const max = await charSheet.getMaxHp();
+				await charSheet.setCurrentHp(Math.max(1, Math.floor(max * e.setHpFraction)));
+			}
+			const before = await charSheet.getCurrentHp();
+			const effects = await charSheet.applyTurnStartEffects();
+			const healEffect = effects.find(x => x.type === "heal");
+			if (!healEffect) throw new Error(`applyTurnStartEffects() did not heal; got ${JSON.stringify(effects)}`);
+			const after = await charSheet.getCurrentHp();
+			const healed = after - before;
+			if (healed < e.min) throw new Error(`turn-start heal=${healed} < min=${e.min} (before=${before}, after=${after})`);
+			return;
+		}
 		case "pickToggleable": {
 			const allFeatures = await charSheet.getActivatableFeatureNames().catch(() => [] as string[]);
 			const toggleable = await charSheet.getToggleableFeatureNames().catch(() => [] as string[]);
@@ -1108,12 +1170,12 @@ export async function assertFeaturesMatrix (
 	const allFeatures = await charSheet.getActivatableFeatureNames().catch(() => [] as string[]);
 	const toggleable = await charSheet.getToggleableFeatureNames().catch(() => [] as string[]);
 	const knownSpells = await charSheet.getKnownSpellNames().catch(() => [] as string[]);
-	// Weapon Mastery picks are real picks that deliberately do NOT live in the
-	// feature list — they render as Combat-tab badges. Fold them into the pool
-	// that `kind: "pick"` searches so mastery checks can resolve. Additive only:
-	// this never hides a name the feature list already provided.
-	const masteryNames = await charSheet.getWeaponMasteryNames?.().catch(() => [] as string[]) ?? [];
-	const pickPool = [...allFeatures, ...masteryNames];
+	// Weapon Mastery picks (Club, Dagger, …) have NO dedicated per-weapon row
+	// on the Features tab — only the generic "Weapon Mastery" card renders
+	// there — so `kind: "pick"` checks built via `buildWeaponMasteryChecks`
+	// need this separate, state-backed name list unioned in below.
+	const weaponMasteryNames = await charSheet.getWeaponMasteryNames().catch(() => [] as string[]);
+	const pickSearchPool = [...allFeatures, ...weaponMasteryNames];
 
 	const errors: string[] = [];
 
@@ -1139,10 +1201,10 @@ export async function assertFeaturesMatrix (
 					const want = fc.pickedCount ?? 1;
 					const matchCount = fc.pickedFrom.filter(pf => {
 						const pfRe = pf instanceof RegExp ? pf : new RegExp(pf, "i");
-						return pickPool.some(f => pfRe.test(f));
+						return pickSearchPool.some(f => pfRe.test(f));
 					}).length;
 					if (matchCount < want) {
-						throw new Error(`expected ≥${want} of ${fc.pickedFrom.length} picks to surface, got ${matchCount}. seen=${pickPool.slice(0, 25).join(", ")}…`);
+						throw new Error(`expected ≥${want} of ${fc.pickedFrom.length} picks to surface, got ${matchCount}. seen=${pickSearchPool.slice(0, 25).join(", ")}…`);
 					}
 					break;
 				}

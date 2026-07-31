@@ -11,8 +11,14 @@
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import fs from "fs";
+import path from "path";
+import {fileURLToPath} from "url";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CharacterSheetState = globalThis.CharacterSheetState;
+const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+const CLASS_FIGHTER_DATA = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "..", "data", "class", "class-fighter.json"), "utf8"));
 
 // ==========================================================================
 // PART 1: CORE FIGHTER CLASS FEATURES (PHB)
@@ -1607,26 +1613,60 @@ describe("Champion Subclass (XPHB 2024)", () => {
 		expect(classes[0].subclass.name).toBe("Champion");
 	});
 
+	it("should NOT grant any Champion feature below level 3 (guard regression)", () => {
+		const belowLevelState = new CharacterSheetState();
+		belowLevelState.setRace({name: "Human", source: "XPHB"});
+		belowLevelState.addClass({name: "Fighter", source: "XPHB", level: 2});
+		const calculations = belowLevelState.getFeatureCalculations();
+		expect(calculations.hasCriticalRange).toBeFalsy();
+		expect(calculations.hasRemarkableAthlete).toBeFalsy();
+	});
+
 	describe("Improved Critical (XPHB Level 3)", () => {
-		it("should crit on 19-20 at level 3", () => {
+		it("should crit on 19-20 at level 3 for weapon attacks", () => {
 			const calculations = state.getFeatureCalculations();
+			expect(calculations.hasCriticalRange).toBe(true);
 			expect(calculations.criticalRange).toBe(19);
+			expect(state.getCriticalRange()).toBe(19);
+			expect(state.getCriticalRange("weapon")).toBe(19);
+		});
+
+		it("should NOT expand the crit range for spell attacks", () => {
+			// Bug fix regression: getCriticalRange() previously leaked Champion's
+			// weapon-only crit range into spell attacks.
+			expect(state.getCriticalRange("spell")).toBe(20);
 		});
 	});
 
-	describe("Remarkable Athlete (XPHB Level 7)", () => {
-		it("should have Remarkable Athlete at level 7", () => {
-			state.addClass({
-				name: "Fighter",
-				source: "XPHB",
-				level: 7,
-				subclass: {name: "Champion", shortName: "Champion", source: "XPHB"},
-			});
+	describe("Remarkable Athlete (XPHB Level 3)", () => {
+		it("should have Remarkable Athlete at level 3 (NOT gated behind level 7)", () => {
 			const calculations = state.getFeatureCalculations();
 			expect(calculations.hasRemarkableAthlete).toBe(true);
 		});
 
-		it("should add proficiency bonus to initiative", () => {
+		it("should grant advantage on Initiative rolls, not a flat numeric bonus", () => {
+			const initMode = state.getInitiativeRollMode();
+			expect(initMode.advantage).toBe(true);
+			expect(initMode.disadvantage).toBe(false);
+			// Regression guard: earlier (wrong) implementation modeled this as a flat
+			// +proficiency-bonus numeric initiative bonus instead of advantage.
+			const calculations = state.getFeatureCalculations();
+			expect(calculations.initiativeBonus).toBeUndefined();
+		});
+
+		it("should grant advantage on Strength (Athletics) checks", () => {
+			const adv = state.getAdvantageState("skill:athletics");
+			expect(adv.advantage).toBe(true);
+		});
+
+		it("should NOT grant advantage on unrelated skills", () => {
+			const adv = state.getAdvantageState("skill:perception");
+			expect(adv.advantage).toBe(false);
+		});
+	});
+
+	describe("Additional Fighting Style (XPHB Level 7)", () => {
+		it("should surface hasAdditionalFightingStyle at level 7 (not level 10)", () => {
 			state.addClass({
 				name: "Fighter",
 				source: "XPHB",
@@ -1634,31 +1674,171 @@ describe("Champion Subclass (XPHB 2024)", () => {
 				subclass: {name: "Champion", shortName: "Champion", source: "XPHB"},
 			});
 			const calculations = state.getFeatureCalculations();
-			expect(calculations.initiativeBonus).toBe(3);
+			expect(calculations.hasAdditionalFightingStyle).toBe(true);
+		});
+
+		it("should NOT surface hasAdditionalFightingStyle before level 7", () => {
+			const calculations = state.getFeatureCalculations(); // still level 3 from beforeEach
+			expect(calculations.hasAdditionalFightingStyle).toBeFalsy();
+		});
+
+		it("should grant a second Fighting Style feat pick via the subclass's own featProgression", () => {
+			const fighterClass = CLASS_FIGHTER_DATA.class.find((c) => c.source === "XPHB");
+			const champion = CLASS_FIGHTER_DATA.subclass.find((sc) => sc.shortName === "Champion" && sc.source === "XPHB");
+			expect(champion.featProgression).toBeDefined();
+			const gains = CharacterSheetClassUtils.getClassFeatProgressionGains(fighterClass, 6, 7, champion);
+			expect(gains.length).toBe(1);
+			expect(gains[0].category).toContain("FS");
+			expect(gains[0].count).toBe(1);
+		});
+
+		it("should NOT double-grant Additional Fighting Style across a level range that doesn't cross 7", () => {
+			const fighterClass = CLASS_FIGHTER_DATA.class.find((c) => c.source === "XPHB");
+			const champion = CLASS_FIGHTER_DATA.subclass.find((sc) => sc.shortName === "Champion" && sc.source === "XPHB");
+			const gains = CharacterSheetClassUtils.getClassFeatProgressionGains(fighterClass, 7, 8, champion);
+			expect(gains.length).toBe(0);
 		});
 	});
 
 	describe("Heroic Warrior (XPHB Level 10)", () => {
-		it("should have Heroic Warrior at level 10", () => {
+		beforeEach(() => {
 			state.addClass({
 				name: "Fighter",
 				source: "XPHB",
 				level: 10,
 				subclass: {name: "Champion", shortName: "Champion", source: "XPHB"},
 			});
+		});
+
+		it("should have Heroic Warrior at level 10", () => {
 			const calculations = state.getFeatureCalculations();
 			expect(calculations.hasHeroicWarrior).toBe(true);
 		});
 
-		it("should not have Additional Fighting Style in XPHB", () => {
+		it("should grant Heroic Inspiration at the start of turn if absent", () => {
+			expect(state.hasInspiration()).toBe(false);
+			const effects = state.getTurnStartEffects();
+			expect(effects.some((e) => e.type === "grantInspiration" && e.source === "Heroic Warrior")).toBe(true);
+			state.applyTurnStartEffects();
+			expect(state.hasInspiration()).toBe(true);
+		});
+
+		it("should NOT grant Heroic Inspiration again if already present", () => {
+			state.setInspiration(true);
+			const effects = state.getTurnStartEffects();
+			expect(effects.some((e) => e.type === "grantInspiration")).toBe(false);
+		});
+
+		it("should apply the Heroic Warrior grant from startCombat()/advanceRound()", () => {
+			state.startCombat();
+			expect(state.hasInspiration()).toBe(true);
+			state.setInspiration(false);
+			state.advanceRound();
+			expect(state.hasInspiration()).toBe(true);
+		});
+	});
+
+	describe("Superior Critical (XPHB Level 15)", () => {
+		it("should crit on 18-20 at level 15 (weapon only)", () => {
 			state.addClass({
 				name: "Fighter",
 				source: "XPHB",
-				level: 10,
+				level: 15,
 				subclass: {name: "Champion", shortName: "Champion", source: "XPHB"},
 			});
 			const calculations = state.getFeatureCalculations();
-			expect(calculations.hasAdditionalFightingStyle).toBeUndefined();
+			expect(calculations.criticalRange).toBe(18);
+			expect(state.getCriticalRange("weapon")).toBe(18);
+			expect(state.getCriticalRange("spell")).toBe(20);
+		});
+	});
+
+	describe("Survivor (XPHB Level 18)", () => {
+		beforeEach(() => {
+			state.addClass({
+				name: "Fighter",
+				source: "XPHB",
+				level: 18,
+				subclass: {name: "Champion", shortName: "Champion", source: "XPHB"},
+			});
+		});
+
+		it("should have Champion Survivor flags and 5 + CON mod healing at level 18", () => {
+			const calculations = state.getFeatureCalculations();
+			expect(calculations.hasChampionSurvivor).toBe(true);
+			expect(calculations.hasChampionSurvivorDefyDeath).toBe(true);
+			// CON 14 = +2 mod, 5 + 2 = 7
+			expect(calculations.championSurvivorHealing).toBe(7);
+		});
+
+		it("Defy Death: should grant advantage on death saving throws", () => {
+			const deathMode = state.getDeathSaveRollMode();
+			expect(deathMode.advantage).toBe(true);
+		});
+
+		it("Defy Death: a death-save roll of 18-20 should count as the natural-20 benefit", () => {
+			const calculations = state.getFeatureCalculations();
+			expect(calculations.championSurvivorDeathSaveNatRange).toBe(18);
+		});
+
+		it("Heroic Rally: should heal 5 + CON mod at start of turn while Bloodied and alive", () => {
+			state.setMaxHp(50);
+			state.setCurrentHp(20); // Bloodied (<= 25)
+			const effects = state.getTurnStartEffects();
+			const rally = effects.find((e) => e.source === "Heroic Rally");
+			expect(rally).toBeDefined();
+			expect(rally.amount).toBe(7);
+			state.applyTurnStartEffects();
+			expect(state.getCurrentHp()).toBe(27);
+		});
+
+		it("Heroic Rally: should NOT heal when not Bloodied", () => {
+			state.setMaxHp(50);
+			state.setCurrentHp(40); // above half — not Bloodied
+			const effects = state.getTurnStartEffects();
+			expect(effects.some((e) => e.source === "Heroic Rally")).toBe(false);
+		});
+
+		it("Heroic Rally: should NOT heal at 0 HP (not merely Bloodied — must be alive)", () => {
+			state.setMaxHp(50);
+			state.setCurrentHp(0);
+			const effects = state.getTurnStartEffects();
+			expect(effects.some((e) => e.source === "Heroic Rally")).toBe(false);
+		});
+	});
+
+	describe("PHB Champion regression (unaffected by XPHB changes)", () => {
+		it("PHB Remarkable Athlete (level 7) still uses the numeric half-proficiency bonus, not advantage", () => {
+			const phbState = new CharacterSheetState();
+			phbState.setRace({name: "Human", source: "PHB"});
+			phbState.addClass({
+				name: "Fighter",
+				source: "PHB",
+				level: 7,
+				subclass: {name: "Champion", shortName: "Champion", source: "PHB"},
+			});
+			const calculations = phbState.getFeatureCalculations();
+			expect(calculations.remarkableAthleteBonus).toBe(1);
+			expect(calculations.hasRemarkableAthlete).toBeUndefined();
+			const initMode = phbState.getInitiativeRollMode();
+			expect(initMode.advantage).toBe(false);
+		});
+
+		it("PHB Additional Fighting Style is still level 10, PHB Survivor has no Defy Death", () => {
+			const phbState = new CharacterSheetState();
+			phbState.setRace({name: "Human", source: "PHB"});
+			phbState.addClass({
+				name: "Fighter",
+				source: "PHB",
+				level: 18,
+				subclass: {name: "Champion", shortName: "Champion", source: "PHB"},
+			});
+			const calculations = phbState.getFeatureCalculations();
+			expect(calculations.hasAdditionalFightingStyle).toBe(true);
+			expect(calculations.survivorHealing).toBe(5); // 5 + CON mod (default CON 10 → mod 0)
+			expect(calculations.hasChampionSurvivorDefyDeath).toBeUndefined();
+			const deathMode = phbState.getDeathSaveRollMode();
+			expect(deathMode.advantage).toBe(false);
 		});
 	});
 });

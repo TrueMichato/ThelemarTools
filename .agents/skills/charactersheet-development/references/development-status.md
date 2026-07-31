@@ -87,6 +87,7 @@ Legacy characters (created before level history was implemented) show a badge an
 - Revised ASI
 - Epic Boon picker at level 19
 - Active state mutual exclusivity (Rage/Bladesong)
+- Fighter XPHB Champion: Improved/Superior Critical (weapon/Unarmed Strike-scoped), Remarkable Athlete (L3 Initiative/Athletics advantage + post-crit move affordance), Additional Fighting Style (L7, via subclass `featProgression`), Heroic Warrior (L10 turn-start Inspiration), Survivor (L18 Defy Death + Heroic Rally) — see `subsystem-details.md`'s Turn-Start Effect Resolver / Critical Hit Range Scoping / Death Save Roll Mode sections
 
 ### Partially Implemented
 - Species (formerly races) — structure supported, not all species complete
@@ -116,6 +117,7 @@ Active bugs are tracked in `bugs.md` at the project root. Key resolved items (fo
 - Specialty features (Observer, etc.) not applying passive skill bonuses — fixed parser
 - Race ASI accumulation bug — fixed clearing logic in builder wizard steps
 - Language hover errors — built dialect→parent mapping
+- Epic Boon section TDZ crash (`ReferenceError: Cannot access 'self' before initialization`) — `_renderAsiSelection` in `charactersheet-levelup.js` called `getFeatChoices()` from the L19 Epic Boon block before `const self = this;` (the binding `getFeatChoices`'s closure captures) had executed on its line; fixed by hoisting the `const self = this;` declaration above the Epic Boon section. Affected ANY class reaching level 19, not just Fighter/Champion — crashed the entire level-up modal.
 
 ## Test Audit Status
 

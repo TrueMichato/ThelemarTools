@@ -177,8 +177,10 @@ const L7_TIMEOUT_MS = 600_000;
 export function describeCharacter (spec: CharacterSpec): void {
 	const {preset, displayName, milestones = {}, midTierLoadout, signatureToggle, skipMega, skipL7, skipL3, skipL5, featuresMatrix} = spec;
 	const subclassOpts = preset.subclassName
-		? {subclassName: preset.subclassName, subclassSource: preset.subclassSource}
-		: undefined;
+		? {subclassName: preset.subclassName, subclassSource: preset.subclassSource, preferredFeatProgressionPattern: preset.preferredFeatProgressionPattern}
+		: preset.preferredFeatProgressionPattern
+			? {preferredFeatProgressionPattern: preset.preferredFeatProgressionPattern}
+			: undefined;
 
 	test.describe(`${displayName} — comprehensive build`, () => {
 		test.beforeEach(async ({page}) => {

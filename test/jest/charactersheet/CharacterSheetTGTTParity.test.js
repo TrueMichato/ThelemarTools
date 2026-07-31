@@ -215,11 +215,14 @@ describe("TGTT ↔ PHB/XPHB Feature Parity", () => {
 				state.setSubclass("Fighter", {name: "Champion", shortName: "Champion", source: "TGTT"});
 			});
 
-			it("has 2024 Remarkable Athlete (Heroic Inspiration + initiative bonus)", () => {
+			it("has 2024 Remarkable Athlete (advantage on Initiative + Athletics, not a flat bonus)", () => {
 				const calc = state.getFeatureCalculations();
 				expect(calc.hasRemarkableAthlete).toBe(true);
-				// 2024: initiative bonus = proficiency bonus (not half-prof to STR/DEX/CON)
-				expect(calc.initiativeBonus).toBeGreaterThan(0);
+				// 2024: advantage on Initiative and Strength (Athletics) checks — not a
+				// flat numeric bonus (that's the 2014 half-prof mechanic below).
+				expect(calc.initiativeBonus).toBeUndefined();
+				expect(state.getInitiativeRollMode().advantage).toBe(true);
+				expect(state.getAdvantageState("skill:athletics").advantage).toBe(true);
 			});
 
 			it("should NOT have remarkableAthleteBonus (2014 half-prof)", () => {

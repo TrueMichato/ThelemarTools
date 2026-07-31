@@ -770,6 +770,7 @@ export class CharacterSheetPlayMode {
 				} else {
 					this._logActivity("turn", `Round ${combatRound + 1}`);
 				}
+				this._logTurnStartEffects();
 				this._renderStatusBar();
 			});
 
@@ -789,8 +790,26 @@ export class CharacterSheetPlayMode {
 				this._state.startCombat?.();
 				this._page._combat?._resolveHybridBloodlustAtTurnStart?.();
 				this._logActivity("attack", "Combat started");
+				this._logTurnStartEffects();
 				this._renderStatusBar();
 			});
+		}
+	}
+
+	/**
+	 * Log any turn-start effects applied by the most recent `startCombat()`/
+	 * `advanceRound()` call (Heroic Warrior's Heroic Inspiration grant, Champion
+	 * Survivor's Heroic Rally heal, etc). Mirrors the equivalent toast helper in
+	 * `CharacterSheetCombat` — Play Mode surfaces feedback via the activity log.
+	 */
+	_logTurnStartEffects () {
+		const effects = this._state.getLastTurnStartEffects?.() || [];
+		for (const effect of effects) {
+			if (effect.type === "grantInspiration") {
+				this._logActivity("inspiration", `${effect.source}: gained Heroic Inspiration`);
+			} else if (effect.type === "heal" && effect.amount) {
+				this._logActivity("heal", `${effect.source}: healed ${effect.amount} HP`);
+			}
 		}
 	}
 
