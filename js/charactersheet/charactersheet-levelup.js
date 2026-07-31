@@ -489,6 +489,7 @@ class CharacterSheetLevelUp {
 			summaryItems.append(createSummaryItem("subclass", "📚", classData.subclassTitle || "Subclass", {required: true}));
 
 			const subclassContent = this._renderSubclassSelectionCompact(classData, async (/** @type {*} */ subclass) => {
+				subclass = CharacterSheetClassUtils.resolveFullSubclass(subclass, classData) || subclass;
 				selectedSubclass = subclass;
 				currentFeatures = CharacterSheetClassUtils.getLevelFeatures(classData, newLevel, subclass, this._page.getClassFeatures(), this._page.getSubclassFeatures());
 
@@ -582,21 +583,24 @@ class CharacterSheetLevelUp {
 				summaryItemEls.subclass.setStatus(true, subclass.name);
 				accordions.subclass.setComplete(true, subclass.shortName || subclass.name);
 
-				// Divine Soul: prompt for affinity immediately so spell picker can include Cleric spells
-				if (classEntry.name === "Sorcerer" && CharacterSheetClassUtils.isDivineSoulSubclass(subclass) && !CharacterSheetClassUtils.normalizeDivineSoulAffinity(selectedSubclassChoice)) {
-					const affinityOptions = CharacterSheetClassUtils.getDivineSoulAffinityOptions(subclass);
-					if (affinityOptions.length) {
-						const affinityChoice = await InputUiUtil.pGetUserEnum({
-							title: "Divine Soul Affinity",
-							values: affinityOptions,
-							fnDisplay: (/** @type {*} */ opt) => opt.name,
-							isResolveItem: true,
-							zIndex: 10002,
-							htmlDescription: "<div>Choose the Divine Soul affinity that grants your extra spell and Cleric spell access.</div>",
+				// Prompt for any subclass whose data defines a persisted named branch.
+				if (CharacterSheetClassUtils.hasNamedSubclassChoice(subclass) && !CharacterSheetClassUtils.normalizeSubclassChoice(selectedSubclassChoice)) {
+					const choiceOptions = CharacterSheetClassUtils.getNamedSubclassChoiceOptions(subclass);
+					const prompt = CharacterSheetClassUtils.getNamedSubclassChoicePrompt(subclass);
+					if (choiceOptions.length) {
+						subclassContent.querySelector(".charsheet__levelup-named-subclass-choice")?.remove();
+						const selChoice = e_({tag: "select", clazz: "form-control input-sm"});
+						selChoice.append(e_({tag: "option", val: "", txt: `Choose ${prompt?.title || "Subclass Path"}...`}));
+						for (const option of choiceOptions) selChoice.append(e_({tag: "option", val: option.key, txt: option.name}));
+						selChoice.addEventListener("change", () => {
+							selectedSubclassChoice = choiceOptions.find((/** @type {*} */ option) => option.key === selChoice.value) || null;
 						});
-						if (affinityChoice) {
-							selectedSubclassChoice = affinityChoice;
-						}
+						const choiceSection = e_({outer: `<div class="charsheet__levelup-named-subclass-choice ve-flex-col mt-2">
+							<label class="bold">${prompt?.title || "Subclass Choice"}</label>
+							<div class="ve-muted ve-small mb-1">${prompt?.description || "Choose your subclass path."}</div>
+						</div>`});
+						choiceSection.append(selChoice);
+						subclassContent.append(choiceSection);
 					}
 				}
 
@@ -1215,24 +1219,16 @@ class CharacterSheetLevelUp {
 				return;
 			}
 
-			const divineSoulSubclass = selectedSubclass || fullClassSubclassData;
-			if (classEntry.name === "Sorcerer" && CharacterSheetClassUtils.isDivineSoulSubclass(divineSoulSubclass) && !CharacterSheetClassUtils.normalizeDivineSoulAffinity(selectedSubclassChoice)) {
-				const affinityOptions = CharacterSheetClassUtils.getDivineSoulAffinityOptions(selectedSubclass);
-				if (!affinityOptions.length) {
-					JqueryUtil.doToast({type: "warning", content: "This Divine Soul subclass is missing its affinity options."});
+			const choiceSubclass = selectedSubclass || fullClassSubclassData;
+			if (CharacterSheetClassUtils.hasNamedSubclassChoice(choiceSubclass) && !CharacterSheetClassUtils.normalizeSubclassChoice(selectedSubclassChoice)) {
+				const choiceOptions = CharacterSheetClassUtils.getNamedSubclassChoiceOptions(choiceSubclass);
+				const prompt = CharacterSheetClassUtils.getNamedSubclassChoicePrompt(choiceSubclass);
+				if (!choiceOptions.length) {
+					JqueryUtil.doToast({type: "warning", content: "This subclass is missing its choice options."});
 					return;
 				}
-
-				selectedSubclassChoice = await InputUiUtil.pGetUserEnum({
-					title: "Divine Soul Affinity",
-					values: affinityOptions,
-					fnDisplay: (/** @type {*} */ opt) => opt.name,
-					isResolveItem: true,
-					zIndex: 10002,
-					htmlDescription: "<div>Choose the Divine Soul affinity that grants your extra spell and Cleric spell access.</div>",
-				});
-
-				if (!selectedSubclassChoice) return;
+				JqueryUtil.doToast({type: "warning", content: `Choose ${prompt?.title || "a subclass path"} in the Subclass section before finishing.`});
+				return;
 			}
 
 			if (hasAsi) {
@@ -2922,7 +2918,7 @@ class CharacterSheetLevelUp {
 				this._renderCombatMethodsLevelUp(container, classData, gain, newLevel, allOptFeatures, existingOptFeatures, onSelect, featureKey, {subclassGrantedTraditionCodes, existingSelections: existingSelections[featureKey] || [], activeSubclass});
 			} else {
 				// Standard optional feature rendering
-				this._renderStandardOptionalFeaturesLevelUp(container, gain, allOptFeatures, existingOptFeatures, onSelect, featureKey, levelContext);
+				this._renderStandardOptionalFeaturesLevelUp(container, gain, allOptFeatures, existingOptFeatures, onSelect, featureKey, levelContext, activeSubclass);
 			}
 		});
 	}
@@ -3358,7 +3354,7 @@ class CharacterSheetLevelUp {
 	/**
 	 * Render standard optional features (non-Combat Methods) during level-up
 	 */
-	_renderStandardOptionalFeaturesLevelUp (/** @type {*} */ container, /** @type {*} */ gain, /** @type {*} */ allOptFeatures, /** @type {*} */ existingOptFeatures, /** @type {*} */ onSelect, /** @type {*} */ featureKey, /** @type {*} */ levelContext = null) {
+	_renderStandardOptionalFeaturesLevelUp (/** @type {*} */ container, /** @type {*} */ gain, /** @type {*} */ allOptFeatures, /** @type {*} */ existingOptFeatures, /** @type {*} */ onSelect, /** @type {*} */ featureKey, /** @type {*} */ levelContext = null, /** @type {*} */ activeSubclass = null) {
 		/** @type {*[]} */ const selectedForType = [];
 		let replacementTarget = null;
 
@@ -3393,6 +3389,7 @@ class CharacterSheetLevelUp {
 			spells: this._state.getSpellsKnown?.() || [],
 			toolProficiencies: this._state.getToolProficiencies?.() || [],
 			state: this._state,
+			levelPrerequisiteClassAliases: CharacterSheetClassUtils.getOptionalFeaturePrerequisiteClassAliases(activeSubclass, gain.featureTypes),
 		};
 
 		const progressionSource = this._state.getClasses()
@@ -4462,6 +4459,8 @@ class CharacterSheetLevelUp {
 					casterProgression: selectedSubclass.casterProgression,
 					spellcastingAbility: selectedSubclass.spellcastingAbility,
 					additionalSpells: selectedSubclass.additionalSpells,
+					subSubclassSpells: selectedSubclass.subSubclassSpells,
+					optionalfeatureProgression: selectedSubclass.optionalfeatureProgression,
 				};
 				// Update class-level caster progression if subclass grants spellcasting (like Eldritch Knight)
 				if (selectedSubclass.casterProgression && !targetClass.casterProgression) {
@@ -4469,8 +4468,8 @@ class CharacterSheetLevelUp {
 					targetClass.spellcastingAbility = selectedSubclass.spellcastingAbility;
 				}
 			}
-			if (selectedSubclassChoice || CharacterSheetClassUtils.isDivineSoulSubclass(targetClass.subclass)) {
-				targetClass.subclassChoice = CharacterSheetClassUtils.normalizeDivineSoulAffinity(selectedSubclassChoice);
+			if (selectedSubclassChoice || CharacterSheetClassUtils.hasNamedSubclassChoice(targetClass.subclass)) {
+				targetClass.subclassChoice = CharacterSheetClassUtils.normalizeSubclassChoice(selectedSubclassChoice);
 			}
 		}
 		this._state.ensureXpMatchesLevel();
@@ -5029,7 +5028,7 @@ class CharacterSheetLevelUp {
 			};
 		}
 		if (selectedSubclassChoice) {
-			historyEntry.choices.subclassChoice = CharacterSheetClassUtils.normalizeDivineSoulAffinity(selectedSubclassChoice);
+			historyEntry.choices.subclassChoice = CharacterSheetClassUtils.normalizeSubclassChoice(selectedSubclassChoice);
 		}
 
 		// Record optional features (invocations, metamagic, etc.)

@@ -1282,10 +1282,12 @@ export async function assertFeaturesMatrix (
 				case "pick": {
 					if (!fc.pickedFrom?.length) throw new Error(`pickedFrom is required for kind="pick"`);
 					const want = fc.pickedCount ?? 1;
-					const matchCount = fc.pickedFrom.filter(pf => {
-						const pfRe = pf instanceof RegExp ? pf : new RegExp(pf, "i");
-						return pickSearchPool.some(f => pfRe.test(f));
-					}).length;
+					const pickPatterns = fc.pickedFrom.map(pf => pf instanceof RegExp ? pf : new RegExp(pf, "i"));
+					// Count surfaced picks, not distinct pool names: repeatable options and
+					// preserved source variants may legitimately share a display name.
+					const matchCount = pickSearchPool.filter(featureName =>
+						pickPatterns.some(pfRe => pfRe.test(featureName)),
+					).length;
 					if (matchCount < want) {
 						throw new Error(`expected ≥${want} of ${fc.pickedFrom.length} picks to surface, got ${matchCount}. seen=${pickSearchPool.slice(0, 25).join(", ")}…`);
 					}

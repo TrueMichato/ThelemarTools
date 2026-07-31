@@ -7467,7 +7467,9 @@ class CharacterSheetPage {
 					const icon = customAbility?.icon || stateType?.icon || "⚡";
 					// Use resource cost from description detection, or resource object, or default
 					const resourceCost = resource?.cost || activationInfo.staminaCost || stateType?.resourceCost || 1;
-					const hasResourceAvailable = !resource || resource.current >= resourceCost;
+					const hasResourceAvailable = !resource
+						|| resource.current >= resourceCost
+						|| (feature.name === "Unearthly Countenance" && this._state.canRestoreUnearthlyCountenanceUse?.());
 
 					// Determine if this is a limited-use ability (uses up charges, doesn't stay active)
 					const interactionMode = activationInfo.interactionMode || (activationInfo.isToggle ? "toggle" : "limited");
@@ -8503,6 +8505,9 @@ class CharacterSheetPage {
 			case "baleful interdict": return this._pUseBalefulInterdict(feature);
 			case "song of defense": return this._pUseSongOfDefense(feature);
 			case "know your enemy": return this._pUseKnowYourEnemy(feature, resource);
+			case "borrowed tongues and hides": return this._pUseDaemonologistSwitchSides();
+			case "unearthly countenance": return this._pUseUnearthlyCountenance();
+			case "eternal war eruption": return this._pUseEternalWarEruption();
 		}
 		// (S2 contract) Generic save-prompt for any synthesized Divine Manifestation option that
 		// carries a save (_manifestationRequiresSave). Surfaces the DC + ability so the player
@@ -8510,6 +8515,101 @@ class CharacterSheetPage {
 		// (e.g. damage bursts) fall through to the generic limited-use pipeline unchanged.
 		if (feature?._manifestationRequiresSave) return this._pUseManifestationSaveOption(feature, resource, resourceCost);
 		return false;
+	}
+
+	async _pUseDaemonologistSwitchSides () {
+		const switched = this._state.switchDaemonologistSide();
+		JqueryUtil.doToast({
+			type: switched ? "success" : "warning",
+			content: switched
+				? `Now siphoning power from ${this._state.getDaemonologistSide()?.name}.`
+				: "Switch Sides has no uses remaining.",
+		});
+		if (switched) {
+			this._saveCurrentCharacter();
+			this._renderResources();
+			this._renderCharacter();
+		}
+		return true;
+	}
+
+	async _pUseUnearthlyCountenance () {
+		const resource = this._state._getFeatureResourceByName?.("Unearthly Countenance");
+		if (!resource?.current) {
+			const slots = this._state.getSpellSlots();
+			const availableLevels = Object.keys(slots)
+				.map(Number)
+				.filter(level => level >= 5 && slots[level]?.current > 0)
+				.sort((a, b) => a - b);
+			if (!availableLevels.length) {
+				JqueryUtil.doToast({type: "warning", content: "Unearthly Countenance has no uses remaining and requires a level 5+ spell slot to restore."});
+				return true;
+			}
+			const slotLevel = await InputUiUtil.pGetUserEnum({
+				title: "Restore Unearthly Countenance",
+				htmlDescription: "<div>Expend a level 5+ spell slot to restore one use.</div>",
+				values: availableLevels,
+				fnDisplay: level => `${Parser.spLevelToFull(level)}-level slot`,
+				isResolveItem: true,
+			});
+			if (slotLevel == null || !this._state.restoreUnearthlyCountenanceUse(slotLevel)) return true;
+		}
+
+		if (!this._state.activateUnearthlyCountenance()) {
+			JqueryUtil.doToast({type: "warning", content: "Unearthly Countenance could not be activated."});
+			return true;
+		}
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderActiveStates();
+		this._combat?.render?.();
+		this._renderCharacter();
+		return true;
+	}
+
+	async _pUseEternalWarEruption () {
+		const slots = this._state.getSpellSlots();
+		const restorableLevels = Object.keys(slots)
+			.map(Number)
+			.filter(level => level >= 1 && level <= 5 && slots[level]?.current < slots[level]?.max)
+			.sort((a, b) => b - a);
+		let restoreSlotLevel = null;
+		if (restorableLevels.length) {
+			restoreSlotLevel = restorableLevels.length === 1
+				? restorableLevels[0]
+				: await InputUiUtil.pGetUserEnum({
+					title: "Eternal War Eruption — Restore a Slot",
+					values: restorableLevels,
+					fnDisplay: level => `${Parser.spLevelToFull(level)}-level slot`,
+					isResolveItem: true,
+				});
+			if (restoreSlotLevel == null) return true;
+		}
+		const switchSides = await InputUiUtil.pGetUserBoolean({
+			title: "Switch Sides?",
+			htmlDescription: "<div>As part of Eternal War Eruption, you can switch between Arch Daemon and Arch Seraph power.</div>",
+			textYes: "Switch",
+			textNo: "Keep Current Side",
+		});
+		if (switchSides == null) return true;
+		if (!this._state.useEternalWarEruption({restoreSlotLevel, switchSides})) {
+			JqueryUtil.doToast({type: "warning", content: "Eternal War Eruption has no uses remaining."});
+			return true;
+		}
+
+		const rolls = Array.from({length: 8}, () => RollerUtil.randomise(10));
+		const necrotic = rolls.slice(0, 4).reduce((sum, roll) => sum + roll, 0);
+		const radiant = rolls.slice(4).reduce((sum, roll) => sum + roll, 0);
+		const dc = this._state.getFeatureCalculations().eternalWarEruptionDc;
+		this._showDiceResult(
+			"Eternal War Eruption",
+			necrotic + radiant,
+			`${necrotic} necrotic + ${radiant} radiant damage; DC ${dc} Charisma save for half damage and no Blinded condition. On failure, Blinded until the end of its next turn.`,
+		);
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderCharacter();
+		return true;
 	}
 
 	_pUseRadianceOfTheDawn (feature, resource, resourceCost = 1) {
@@ -9246,7 +9346,8 @@ class CharacterSheetPage {
 			if (variableSpend == null) return;
 		}
 		const resolvedCost = variableSpend ?? resourceCost ?? stateType?.resourceCost ?? 1;
-		if (resource && resource.current < resolvedCost) {
+		const canRestoreDaemonologistUse = feature?.name?.toLowerCase() === "unearthly countenance";
+		if (resource && resource.current < resolvedCost && !canRestoreDaemonologistUse) {
 			JqueryUtil.doToast({type: "warning", content: `Not enough ${resource.name} remaining.`});
 			return;
 		}

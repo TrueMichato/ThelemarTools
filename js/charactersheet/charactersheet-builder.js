@@ -477,6 +477,12 @@ class CharacterSheetBuilder {
 						return false;
 					}
 				}
+				if (CharacterSheetClassUtils.hasNamedSubclassChoice(this._selectedSubclass)
+					&& !CharacterSheetClassUtils.normalizeSubclassChoice(this._divineSoulAffinity)) {
+					const prompt = CharacterSheetClassUtils.getNamedSubclassChoicePrompt(this._selectedSubclass);
+					JqueryUtil.doToast({type: "warning", content: `Please complete your ${prompt?.title || "subclass choice"}.`});
+					return false;
+				}
 				// Validate feature options selection (specialties, etc.)
 				const featureOptionsValidation = this._validateFeatureOptionSelections(this._selectedClass, 1);
 				if (!featureOptionsValidation.valid) {
@@ -595,6 +601,8 @@ class CharacterSheetBuilder {
 						casterProgression: this._selectedSubclass.casterProgression,
 						spellcastingAbility: this._selectedSubclass.spellcastingAbility,
 						additionalSpells: this._selectedSubclass.additionalSpells,
+						subSubclassSpells: this._selectedSubclass.subSubclassSpells,
+						optionalfeatureProgression: this._selectedSubclass.optionalfeatureProgression,
 					} : null,
 					subclassChoice: this._divineSoulAffinity,
 					casterProgression: casterProgressionBuilder,
@@ -666,8 +674,8 @@ class CharacterSheetBuilder {
 							shortName: this._selectedSubclass.shortName,
 							source: this._selectedSubclass.source,
 						};
-						if (CharacterSheetClassUtils.isDivineSoulSubclass(this._selectedSubclass) && this._divineSoulAffinity) {
-							level1History.choices.subclassChoice = CharacterSheetClassUtils.normalizeDivineSoulAffinity(this._divineSoulAffinity);
+						if (CharacterSheetClassUtils.hasNamedSubclassChoice(this._selectedSubclass) && this._divineSoulAffinity) {
+							level1History.choices.subclassChoice = CharacterSheetClassUtils.normalizeSubclassChoice(this._divineSoulAffinity);
 						}
 					}
 
@@ -2610,7 +2618,7 @@ class CharacterSheetBuilder {
 				classData: this._selectedClass,
 				targetLevel: this._quickBuildTargetLevel,
 				subclass: this._selectedSubclass || null,
-				subclassChoice: CharacterSheetClassUtils.normalizeDivineSoulAffinity(this._divineSoulAffinity),
+				subclassChoice: CharacterSheetClassUtils.normalizeSubclassChoice(this._divineSoulAffinity),
 			};
 		}
 		return null;
@@ -4822,18 +4830,16 @@ class CharacterSheetBuilder {
 				const resolved = CharacterSheetClassUtils.resolveFullSubclass(sc, cls) || sc;
 				this._selectedSubclass = resolved;
 
-				// Divine Soul (Sorcerer): prompt for affinity so its bonus / always-prepared
-				// spell resolves (getSubclassAlwaysPreparedSpells gates the affinity block on
-				// subclassChoice). Mirrors the level-up wizard's affinity prompt.
-				if (CharacterSheetClassUtils.isDivineSoulSubclass(resolved)) {
-					const affinityOptions = CharacterSheetClassUtils.getDivineSoulAffinityOptions?.(resolved) || [];
+				if (CharacterSheetClassUtils.hasNamedSubclassChoice(resolved)) {
+					const affinityOptions = CharacterSheetClassUtils.getNamedSubclassChoiceOptions(resolved);
+					const prompt = CharacterSheetClassUtils.getNamedSubclassChoicePrompt(resolved);
 					if (affinityOptions.length && InputUiUtil?.pGetUserEnum) {
 						const affinityChoice = await InputUiUtil.pGetUserEnum({
-							title: "Divine Soul Affinity",
+							title: prompt?.title || "Subclass Choice",
 							values: affinityOptions,
 							fnDisplay: (/** @type {*} */ opt) => opt.name,
 							isResolveItem: true,
-							htmlDescription: "<div>Choose the Divine Soul affinity that grants your extra spell and Cleric spell access.</div>",
+							htmlDescription: `<div>${prompt?.description || "Choose your subclass path."}</div>`,
 						});
 						if (affinityChoice) this._divineSoulAffinity = affinityChoice;
 					}

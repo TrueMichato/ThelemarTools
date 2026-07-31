@@ -659,6 +659,13 @@ class CharacterSheetRest {
 			else modalInner.append(primalFocusSelect.section);
 		}
 
+		const daemonologistSideSelect = this._buildDaemonologistSideSection();
+		if (daemonologistSideSelect) {
+			const dsTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (dsTarget?.parentNode) dsTarget.parentNode.insertBefore(daemonologistSideSelect.section, dsTarget);
+			else modalInner.append(daemonologistSideSelect.section);
+		}
+
 		// --- Forked Tongue language swap (Illrigger) ---
 		const forkedTongueSwap = this._buildForkedTongueLanguageSwapSection();
 		if (forkedTongueSwap) {
@@ -754,6 +761,7 @@ class CharacterSheetRest {
 
 			// Apply Primal Focus mode selection, if changed (free on a long rest)
 			const primalFocusChanged = primalFocusSelect?.apply() || false;
+			const daemonologistSideChanged = daemonologistSideSelect?.apply() || false;
 
 			// Forked Tongue: a new long rest re-enables the once-per-rest swap, then we
 			// apply any language swap the player chose in this dialog.
@@ -771,6 +779,7 @@ class CharacterSheetRest {
 
 			let message = "🌙 Long rest complete! All resources restored.";
 			if (primalFocusChanged) message += ` Primal Focus set to ${primalFocusChanged}.`;
+			if (daemonologistSideChanged) message += ` Fair and Foul set to ${daemonologistSideChanged}.`;
 			if (forkedTongueChanged) message += ` Forked Tongue: swapped ${forkedTongueChanged}.`;
 			if (terrorizingForceChanged) message += ` Terrorizing Force damage set to ${terrorizingForceChanged}.`;
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
@@ -910,6 +919,35 @@ class CharacterSheetRest {
 					return chosen === "predator" ? "Predator" : "Prey";
 				}
 				return false;
+			},
+		};
+	}
+
+	_buildDaemonologistSideSection () {
+		const currentSide = this._state.getDaemonologistSide?.();
+		if (!currentSide) return null;
+		const options = [
+			{key: "arch daemon", name: "Arch Daemon"},
+			{key: "arch seraph", name: "Arch Seraph"},
+		];
+		const sel = e_({tag: "select", clazz: "form-control input-sm charsheet__daemonologist-side-rest-select"});
+		for (const side of options) {
+			const opt = e_({tag: "option", val: side.key, txt: side.name});
+			if (side.key === currentSide.key) opt.selected = true;
+			sel.appendChild(opt);
+		}
+		const section = e_({outer: `<div class="charsheet__rest-section">
+			<div class="charsheet__rest-section-title">🪽 Fair and Foul</div>
+			<p class="ve-muted ve-small mb-2">Choose whether to siphon power from Arch Daemons or Arch Seraphs after this long rest:</p>
+		</div>`});
+		section.appendChild(sel);
+		return {
+			section,
+			apply: () => {
+				if (sel.value === currentSide.key) return false;
+				const chosen = options.find(side => side.key === sel.value);
+				if (!chosen || !this._state.setDaemonologistSide?.(chosen.name)) return false;
+				return chosen.name;
 			},
 		};
 	}

@@ -32,6 +32,7 @@ export interface CharacterPreset {
 	masteryCount?: number;
 	optFeatCount?: number;
 	divineSoulAffinity?: string;
+	namedSubclassChoice?: {title: string; name: string};
 	/** Subclass to select on level-up (e.g. "Bladesinging"). */
 	subclassName?: string;
 	/** Subclass source ("TGTT", "TGTT-2014", "TGTT-2024", ...). */
@@ -391,6 +392,23 @@ export const PRESET_FULL_CHRONURGY_NYUIDJ: CharacterPreset = {
 	subclassName: "Chronurgy Magic",
 	subclassSource: "TGTT-2014",
 	signatureSpells: ["Mage Hand", "Magic Missile"],
+};
+
+/** Daemonologist Wizard Dwarf (Grim Hollow 2024) */
+export const PRESET_FULL_DAEMONOLOGIST_DWARF: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	className: "Wizard",
+	classSource: "PHB'24",
+	prioritySources: ["XPHB", "GrimHollowPG24"],
+	background: "Sage",
+	bgSource: "PHB'24",
+	name: "Mordecai Ashenward",
+	skillCount: 2,
+	subclassName: "Daemonologist",
+	subclassSource: "GH:PG'24",
+	namedSubclassChoice: {title: "Fair and Foul", name: "Arch Daemon"},
+	signatureSpells: ["Mage Hand", "Magic Missile", "Shield"],
 };
 
 /** 8. College of Surrealism Bard Yuan-Ti (TGTT) */
@@ -827,7 +845,7 @@ export async function pHandleLevelUpClassPicker (page: Page, targetClassName?: s
 export async function levelUpTo (
 	page: Page,
 	targetLevel: number,
-	opts?: {subclassName?: string; subclassSource?: string; signatureSpells?: string[]; targetClassName?: string; preferredFeatProgressionPattern?: RegExp},
+	opts?: {subclassName?: string; subclassSource?: string; namedSubclassChoice?: {title: string; name: string}; signatureSpells?: string[]; targetClassName?: string; preferredFeatProgressionPattern?: RegExp},
 ): Promise<void> {
 	const charSheet = new CharacterSheetPage(page);
 	const levelUp = new LevelUpPage(page);
@@ -890,6 +908,9 @@ export async function levelUpTo (
 		if (opts?.subclassName && await levelUp.isAccordionVisible("subclass")) {
 			await levelUp.expandAccordion("subclass");
 			await levelUp.selectSubclass(opts.subclassName, opts.subclassSource);
+			if (opts.namedSubclassChoice) {
+				await levelUp.selectNamedSubclassChoice(opts.namedSubclassChoice.title, opts.namedSubclassChoice.name);
+			}
 		}
 
 		// HP: take average (most reliable for deterministic tests)
