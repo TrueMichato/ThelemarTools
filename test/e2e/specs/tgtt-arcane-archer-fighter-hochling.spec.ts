@@ -111,6 +111,7 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	// other Fighter-proficient save) and a Perception skill-roll probe.
 	{
 		level: 2,
+		untilLevel: 16,
 		name: /action surge/i,
 		kind: "resource",
 		resourceMax: 1,
@@ -126,7 +127,6 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /action surge/i,
 		kind: "resource",
 		resourceMax: 2,
-		skip: true, skipReason: "CS-BUG-018",
 		effects: [
 			{kind: "shortRestRestores", resource: "Action Surge"},
 		],
@@ -169,9 +169,9 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	// skill-roll probe (Fighter signature physical skill).
 	{
 		level: 9,
+		untilLevel: 12,
 		name: /indomitable/i,
 		kind: "resource",
-			skip: true, skipReason: "CS-BUG-018",
 		resourceMax: 1,
 		restoreOn: "long",
 		effects: [
@@ -181,9 +181,9 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 	},
 	{
 		level: 13,
+		untilLevel: 16,
 		name: /indomitable/i,
 		kind: "resource",
-			skip: true, skipReason: "CS-BUG-018",
 		resourceMax: 2,
 		effects: [
 			{kind: "longRestRestores", resource: "Indomitable"},
@@ -193,7 +193,6 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 		level: 17,
 		name: /indomitable/i,
 		kind: "resource",
-			skip: true, skipReason: "CS-BUG-018",
 		resourceMax: 3,
 		effects: [
 			{kind: "longRestRestores", resource: "Indomitable"},

@@ -125,7 +125,16 @@ export class CharacterSheetPage {
 		// scores). Reveal it on demand so flows that read ability/skill rows from
 		// that tab can click its otherwise-hidden nav link.
 		if (tab === this.tabAbilities) await this.ensureAbilitiesTabVisible();
-		await tab.click();
+		// Bounded: an open modal overlay swallows pointer events, and an unbounded
+		// click would silently retry until the ENTIRE test timeout expired instead
+		// of failing. Retry once after clearing transient prompts, then fail loudly.
+		const clicked = await tab.click({timeout: 5000}).then(() => true).catch(() => false);
+		if (!clicked) {
+			await this.dismissTransientModals();
+			await tab.click({timeout: 5000}).catch((err: Error) => {
+				throw new Error(`switchToTab: tab click blocked even after dismissing modals — an overlay is likely still open. Original: ${err.message}`);
+			});
+		}
 		await this.page.waitForTimeout(100);
 	}
 
@@ -256,10 +265,49 @@ export class CharacterSheetPage {
 	 * `getToggleableFeatureNames()` when you specifically need a
 	 * clickable toggle.
 	 */
+	/**
+	 * Best-effort dismissal of any transient modal the sheet raised in response
+	 * to a probe — e.g. the XPHB Fighter "Tactical Mind" prompt that follows an
+	 * ability/skill check and offers to spend a Second Wind use.
+	 *
+	 * These are legitimate product prompts, but a probe that leaves one open
+	 * wedges every subsequent interaction: the overlay swallows pointer events,
+	 * so the next tab click retries until the whole test timeout expires rather
+	 * than failing fast. Bounded and idempotent; safe to call when no modal is
+	 * open.
+	 */
+	async dismissTransientModals (maxRounds = 3): Promise<void> {
+		const overlay = this.page.locator(".ve-ui-modal__overlay");
+		for (let i = 0; i < maxRounds; i++) {
+			if (!await overlay.first().isVisible({timeout: 250}).catch(() => false)) return;
+			await this.page.keyboard.press("Escape").catch(() => {});
+			await this.page.waitForTimeout(100);
+		}
+	}
+
 	async getActivatableFeatureNames (): Promise<string[]> {
 		await this.switchToTab(this.tabFeatures);
 		const nameEls = this.page.locator(".charsheet__feature .charsheet__feature-name");
 		const count = await nameEls.count();
+		const names: string[] = [];
+		for (let i = 0; i < count; i++) {
+			const text = await nameEls.nth(i).textContent({timeout: 1000}).catch(() => null);
+			if (text && text.trim()) names.push(text.trim());
+		}
+		return names;
+	}
+
+	/**
+	 * Names of the weapons this character has taken Weapon Mastery in
+	 * (XPHB). These are picks, but they are NOT features — they surface as
+	 * badges in the Combat tab's mastery group (`_renderWeaponMasteries`,
+	 * `charactersheet.js:4096`), so probing the feature list for them always
+	 * comes back empty.
+	 */
+	async getWeaponMasteryNames (): Promise<string[]> {
+		await this.switchToTab(this.tabCombat).catch(() => {});
+		const nameEls = this.page.locator("#charsheet-combat-masteries .charsheet__mastery-badge strong");
+		const count = await nameEls.count().catch(() => 0);
 		const names: string[] = [];
 		for (let i = 0; i < count; i++) {
 			const text = await nameEls.nth(i).textContent({timeout: 1000}).catch(() => null);
@@ -339,8 +387,32 @@ export class CharacterSheetPage {
 	/**
 	 * Get the current/max value of a named resource (e.g. "Sorcery Points", "Stamina").
 	 * Bounded: returns {current: -1, max: -1} if the resource isn't rendered within 2s.
+	 *
+	 * Limited-use pools have THREE distinct canonical homes in the product, by
+	 * design — the generic Resources panel deliberately excludes pools that are
+	 * owned elsewhere so each surfaces exactly once
+	 * (`charactersheet-features.js:2196`). Probing only the generic panel makes
+	 * every `type: "resource"` check for a combat-owned pool a guaranteed false
+	 * failure (Second Wind / Action Surge / Arcane Shot / Indomitable), so all
+	 * three surfaces are searched:
+	 *
+	 *   1. `.charsheet__resource-row`          — generic Resources panel.
+	 *   2. `.charsheet__combat-resource-item`  — synthetic combat resources
+	 *      (`getSyntheticCombatResources`): Second Wind, Arcane Shot, Indomitable.
+	 *      Counted from pips, which carry the authoritative current/max.
+	 *   3. `.cs-combat-feature`                — class combat-panel features with a
+	 *      `csCombatPoolCaption` pool (Action Surge, …).
+	 *
+	 * Surfaces 2 and 3 live on the Combat tab, which is rendered lazily, so the
+	 * tab is opened once before they are probed.
 	 */
 	async getResource (resourceName: string): Promise<{current: number; max: number}> {
+		const parseNum = (s: string | null | undefined) => {
+			if (!s) return 0;
+			const m = String(s).match(/-?\d+/);
+			return m ? parseInt(m[0], 10) : 0;
+		};
+
 		const container = this.page
 			.locator(".charsheet__resource-row, .charsheet__resource-tracker, [data-testid='resource-tracker']")
 			.filter({hasText: resourceName})
@@ -348,21 +420,62 @@ export class CharacterSheetPage {
 		// Hard 2s presence check — missing resources must NOT hang the
 		// test budget on retried `.inputValue()` waits.
 		const present = await container.waitFor({state: "attached", timeout: 2000}).then(() => true).catch(() => false);
-		if (!present) return {current: -1, max: -1};
-		const currentEl = container.locator(".charsheet__resource-current, input").first();
-		const maxEl = container.locator(".charsheet__resource-max").first();
+		if (present) {
+			const currentEl = container.locator(".charsheet__resource-current, input").first();
+			const maxEl = container.locator(".charsheet__resource-max").first();
 
-		const currentText = await currentEl.inputValue({timeout: 2000})
-			.catch(() => currentEl.textContent({timeout: 2000}).catch(() => "0"));
-		const maxText = await maxEl.textContent({timeout: 2000}).catch(() => "0");
+			const currentText = await currentEl.inputValue({timeout: 2000})
+				.catch(() => currentEl.textContent({timeout: 2000}).catch(() => "0"));
+			const maxText = await maxEl.textContent({timeout: 2000}).catch(() => "0");
 
-		const parseNum = (s: string | null | undefined) => {
-			if (!s) return 0;
-			const m = String(s).match(/-?\d+/);
-			return m ? parseInt(m[0], 10) : 0;
-		};
+			return {current: parseNum(currentText as string), max: parseNum(maxText)};
+		}
 
-		return {current: parseNum(currentText as string), max: parseNum(maxText)};
+		return this._getCombatTabResource(resourceName, parseNum);
+	}
+
+	/**
+	 * Fallback for {@link getResource}: probe the two Combat-tab pool surfaces.
+	 * Returns `{current: -1, max: -1}` when the pool is genuinely absent.
+	 */
+	private async _getCombatTabResource (
+		resourceName: string,
+		parseNum: (s: string | null | undefined) => number,
+	): Promise<{current: number; max: number}> {
+		await this.switchToTab(this.tabCombat).catch(() => {});
+
+		// (2) Synthetic combat resource — pips are the source of truth.
+		const synthetic = this.page
+			.locator(".charsheet__combat-resource-item")
+			.filter({hasText: resourceName})
+			.first();
+		if (await synthetic.waitFor({state: "attached", timeout: 2000}).then(() => true).catch(() => false)) {
+			const pips = synthetic.locator(".charsheet__resource-pip");
+			const max = await pips.count().catch(() => 0);
+			if (max > 0) {
+				// Spent pips carry `.used`; the remaining ones are the current value.
+				const current = await synthetic.locator(".charsheet__resource-pip:not(.used)").count().catch(() => 0);
+				return {current, max};
+			}
+		}
+
+		// (3) Class combat-panel feature carrying a `csCombatPoolCaption` pool.
+		const feature = this.page
+			.locator(".cs-combat-feature")
+			.filter({hasText: resourceName})
+			.first();
+		if (await feature.waitFor({state: "attached", timeout: 2000}).then(() => true).catch(() => false)) {
+			const pool = feature.locator(".cs-combat-pool").first();
+			if (await pool.count().catch(() => 0) > 0) {
+				const currentText = await pool.locator(".cs-combat-pool__count").first().textContent({timeout: 2000}).catch(() => null);
+				const maxText = await pool.locator(".cs-combat-pool__max").first().textContent({timeout: 2000}).catch(() => null);
+				if (currentText !== null || maxText !== null) {
+					return {current: parseNum(currentText), max: parseNum(maxText)};
+				}
+			}
+		}
+
+		return {current: -1, max: -1};
 	}
 
 	// ========== TGTT — COMBAT TAB DCs ==========
@@ -655,11 +768,19 @@ export class CharacterSheetPage {
 			.locator(".charsheet__skill-row, [data-skill]")
 			.filter({hasText: re})
 			.first();
-		const btn = row.locator(".charsheet__skill-roll, .charsheet__skill-bonus, button").first();
-		const visible = await btn.isVisible({timeout: 1500}).catch(() => false);
+		// Skill rows are click-to-roll — the click handler is on the ROW itself
+		// (`charactersheet.js:3238`); `.charsheet__skill-roll` / `.charsheet__skill-bonus`
+		// do not exist in the markup (the modifier cell is `.charsheet__skill-mod`).
+		// Prefer a real button if one ever appears, else click the row.
+		const btn = row.locator(".charsheet__skill-roll, button").first();
+		const target = await btn.count().then(n => n > 0).catch(() => false) ? btn : row;
+		const visible = await target.isVisible({timeout: 1500}).catch(() => false);
 		if (!visible) return {bonus, clicked: false};
-		await btn.click({timeout: 2000}).catch(() => null);
+		await target.click({timeout: 2000}).catch(() => null);
 		await this.page.waitForTimeout(100);
+		// A skill check can raise a product prompt (e.g. XPHB Tactical Mind).
+		// Leaving it open would block every later interaction.
+		await this.dismissTransientModals();
 		return {bonus, clicked: true};
 	}
 
@@ -1051,9 +1172,14 @@ export class CharacterSheetPage {
 			const rows = document.querySelectorAll(".charsheet__skill-row, [data-skill]") as NodeListOf<HTMLElement>;
 			for (const row of Array.from(rows)) {
 				if (!re.test(row.textContent || "")) continue;
+				// Skill rows are click-to-roll: the handler is bound to the ROW
+				// (`charactersheet.js:3238`), and there is no inner roll button.
+				// Falling back to the row is what makes this probe work at all —
+				// searching only for a button reports "roll button not found" for
+				// every skill on every character.
 				const btn = row.querySelector(".charsheet__skill-roll, button") as HTMLElement | null;
-				if (!btn) continue;
-				try { btn.click(); return {clicked: true, threwError: false}; } catch (e: any) {
+				const target = btn ?? row;
+				try { target.click(); return {clicked: true, threwError: false}; } catch (e: any) {
 					return {clicked: true, threwError: true, errorMessage: String(e?.message ?? e)};
 				}
 			}

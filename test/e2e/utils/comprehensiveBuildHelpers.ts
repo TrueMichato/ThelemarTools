@@ -539,6 +539,15 @@ export async function probeToggleDelta (
 export interface FeatureCheck {
 	/** Total character level at which this feature is granted. */
 	level: number;
+	/**
+	 * Highest total character level at which this entry still applies
+	 * (inclusive). Use when a LATER entry supersedes this one — e.g. Action
+	 * Surge is a 1-use pool from L2 but becomes 2 uses at L17, so the L2 entry
+	 * must stop asserting `resourceMax: 1` at L17. Without this the superseded
+	 * entry keeps firing and reports the correct new value as a failure.
+	 * Omit for entries that hold for the rest of the build.
+	 */
+	untilLevel?: number;
 	/** Display name on the sheet (regex preferred for resilience). */
 	name: string | RegExp;
 	/** Check kind. */
@@ -857,12 +866,16 @@ async function _runPassiveOrRollEffect (
 		}
 		case "rollAbilityCheck": {
 			const r = await charSheet.clickAbilityRoll(e.ability, "check");
+			// Dismiss BEFORE asserting: a thrown assertion must not leave a
+			// product prompt open to wedge every later probe.
+			await charSheet.dismissTransientModals?.();
 			if (!r.clicked) throw new Error(`ability check button for ${e.ability} not found`);
 			if (r.threwError) throw new Error(`ability check ${e.ability} click threw: ${r.errorMessage ?? "unknown"}`);
 			return;
 		}
 		case "rollSavingThrow": {
 			const r = await charSheet.clickAbilityRoll(e.ability, "save");
+			await charSheet.dismissTransientModals?.();
 			if (!r.clicked) throw new Error(`save button for ${e.ability} not found`);
 			if (r.threwError) throw new Error(`save ${e.ability} click threw: ${r.errorMessage ?? "unknown"}`);
 			return;
@@ -888,18 +901,21 @@ async function _runPassiveOrRollEffect (
 			}
 			if (!skill) throw new Error(`rollSkillCheck requires either skill or proficientSkills:true`);
 			const r = await charSheet.clickSkillRollHard(skill);
+			await charSheet.dismissTransientModals?.();
 			if (!r.clicked) throw new Error(`skill roll button for "${skill}" not found`);
 			if (r.threwError) throw new Error(`skill ${skill} click threw: ${r.errorMessage ?? "unknown"}`);
 			return;
 		}
 		case "rollAttack": {
 			const r = await charSheet.clickAttackRoll(e.attackName);
+			await charSheet.dismissTransientModals?.();
 			if (!r.clicked) throw new Error(`attack roll button for ${e.attackName} not found`);
 			if (r.threwError) throw new Error(`attack click threw: ${r.errorMessage ?? "unknown"}`);
 			return;
 		}
 		case "rollInitiative": {
 			const r = await charSheet.clickInitiativeRoll();
+			await charSheet.dismissTransientModals?.();
 			if (!r.clicked) throw new Error(`initiative roll button not found`);
 			if (r.threwError) throw new Error(`initiative click threw: ${r.errorMessage ?? "unknown"}`);
 			return;
@@ -1092,11 +1108,18 @@ export async function assertFeaturesMatrix (
 	const allFeatures = await charSheet.getActivatableFeatureNames().catch(() => [] as string[]);
 	const toggleable = await charSheet.getToggleableFeatureNames().catch(() => [] as string[]);
 	const knownSpells = await charSheet.getKnownSpellNames().catch(() => [] as string[]);
+	// Weapon Mastery picks are real picks that deliberately do NOT live in the
+	// feature list — they render as Combat-tab badges. Fold them into the pool
+	// that `kind: "pick"` searches so mastery checks can resolve. Additive only:
+	// this never hides a name the feature list already provided.
+	const masteryNames = await charSheet.getWeaponMasteryNames?.().catch(() => [] as string[]) ?? [];
+	const pickPool = [...allFeatures, ...masteryNames];
 
 	const errors: string[] = [];
 
 	for (const fc of matrix) {
 		if (fc.level > currentLevel) continue;
+		if (fc.untilLevel != null && currentLevel > fc.untilLevel) continue;
 		if (fc.skip) continue;
 
 		const re = fc.name instanceof RegExp ? fc.name : new RegExp(fc.name, "i");
@@ -1116,10 +1139,10 @@ export async function assertFeaturesMatrix (
 					const want = fc.pickedCount ?? 1;
 					const matchCount = fc.pickedFrom.filter(pf => {
 						const pfRe = pf instanceof RegExp ? pf : new RegExp(pf, "i");
-						return allFeatures.some(f => pfRe.test(f));
+						return pickPool.some(f => pfRe.test(f));
 					}).length;
 					if (matchCount < want) {
-						throw new Error(`expected ≥${want} of ${fc.pickedFrom.length} picks to surface, got ${matchCount}. seen=${allFeatures.slice(0, 25).join(", ")}…`);
+						throw new Error(`expected ≥${want} of ${fc.pickedFrom.length} picks to surface, got ${matchCount}. seen=${pickPool.slice(0, 25).join(", ")}…`);
 					}
 					break;
 				}

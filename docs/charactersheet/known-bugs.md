@@ -35,7 +35,11 @@ failures encountered during validation matched existing entries):
   Invocations, Arcane Shot, Pact Boons (now visible via `skipReason`
   on every helper-emitted row).
 - **CS-BUG-013** still blocks Horror Warlock pact-magic slots.
-- **CS-BUG-018** still blocks several class resource maxes.
+- ~~**CS-BUG-018** still blocks several class resource maxes.~~
+  **Superseded** — CS-BUG-018 itself is Fixed, and the resource-max
+  failures attributed to it here were the harness resource-surface
+  blindness now tracked as **CS-BUG-027**. The Indomitable and Action
+  Surge maxes assert and pass.
 
 Infra note: three `beforeEach` hook timeouts under 3-worker parallel
 load (the original `gotoWithThelemar` flake — not a regression; the
@@ -637,7 +641,7 @@ sheet doesn't expose the toggle / resource UI for them.
 | Surrealism Bard | 3 | Warped Reality | toggle button absent |
 | Belly Dancer Rogue | 3 | Dance of the Country | toggle button absent |
 | Horror Warlock | 3 | Pact Boon pick | pick row not surfacing on sheet |
-| Mercy Monk | 3 | Implements of Mercy → Medicine proficiency | `skill:medicine=0`, no Medicine roll button |
+| Mercy Monk | 3 | Implements of Mercy → Medicine proficiency | `skill:medicine=0`. ⚠️ The "no Medicine roll button" half of this row was a **harness** defect (skill rows are click-to-roll, no button exists) — see **CS-BUG-027(c)**. Only `skill:medicine=0` remains open. |
 
 Notes for the eventual fix:
 - `Dance of the Country` is already registered as a `dancing` state
@@ -1011,3 +1015,109 @@ skipped (was 2 failed / 2 skipped), plus spot checks on
 The step-order-agnostic redesign suggested above is still worth doing;
 `completeNameStep`'s no-op-when-absent behaviour is a partial down
 payment on it.
+
+---
+
+## CS-BUG-027 — E2E harness probes three non-existent surfaces, producing false "not found" failures (resources, weapon masteries, skill rolls)
+
+**Status**: **Fixed**.
+
+Discovered while validating the merged wave-1/wave-2 base with
+`RUN_MEGA=1`. The MEGA progression test for
+`tgtt-arcane-archer-fighter-hochling.spec.ts` had **never passed** — it
+is gated behind `RUN_MEGA=1`, so the routine "6 passed / 2 skipped"
+result reported at `c3a66b36` never exercised it. Running it produced
+three failures at L3, every one of which was a harness defect rather
+than a product defect. Verified pre-existing by re-running at
+`c3a66b36` in a detached worktree: byte-identical error text.
+
+### (a) `getResource` only knew one of three resource surfaces
+
+The product deliberately gives each limited-use pool exactly one
+canonical home, and the generic Resources panel explicitly *excludes*
+pools owned elsewhere (`charactersheet-features.js:2196` — "so each
+surfaces in exactly one canonical home"). There are three surfaces:
+
+| Surface | Markup | Examples |
+|---|---|---|
+| Generic Resources panel | `.charsheet__resource-row` | Stamina, Ki, class pools |
+| Synthetic combat resources (`getSyntheticCombatResources`) | `.charsheet__combat-resource-item` + pips | Second Wind, Arcane Shot, Indomitable |
+| Class combat-panel features with a `csCombatPoolCaption` | `.cs-combat-feature` + `.cs-combat-pool__count/__max` | Action Surge |
+
+`CharacterSheetPage.getResource` queried only the first, so **every**
+`kind: "resource"` check for a combat-owned pool was a guaranteed
+false failure. Fixed by falling through all three (Combat tab is
+opened on demand, since surfaces 2 and 3 render lazily).
+
+### (b) Weapon Mastery picks were probed against the feature list
+
+`kind: "pick"` resolves names against
+`getActivatableFeatureNames()`. Weapon masteries are real picks but are
+*not* features — they render as Combat-tab badges
+(`_renderWeaponMasteries`, `charactersheet.js:4096`). So
+`buildWeaponMasteryChecks` could never pass. Fixed by adding
+`getWeaponMasteryNames()` and folding it into the pool that `pick`
+searches (additive — it can never hide a name the feature list already
+supplied).
+
+### (c) Skill-roll probes looked for a button that does not exist
+
+**This one had been misattributed to a product bug.** Skill rows are
+click-to-roll: the handler is bound to the ROW
+(`charactersheet.js:3238`), and there is no inner roll button.
+`clickSkillRollHard` searched for `.charsheet__skill-roll, button` and
+`rollSkill` searched for `.charsheet__skill-roll,
+.charsheet__skill-bonus, button` — the latter also naming a class that
+does not exist anywhere in the markup (the modifier cell is
+`.charsheet__skill-mod`). Both therefore reported "roll button not
+found" **for every skill on every character**. Fixed by falling back to
+clicking the row.
+
+> **Record correction.** The CS-BUG-017b row "Mercy Monk 3 —
+> Implements of Mercy → Medicine proficiency: `skill:medicine=0`, no
+> Medicine roll button" is **half wrong**: the *"no Medicine roll
+> button"* half is this harness defect, not a product defect. The
+> `skill:medicine=0` half is untouched and remains open. The other
+> CS-BUG-017b rows (absent *toggle* buttons, pick rows not surfacing)
+> are also untouched — only the skill-roll-button symptom is
+> reclassified.
+
+### (d) A product prompt left open wedged the whole run
+
+Once (a)–(c) were fixed the run advanced far enough to hit a real
+interaction bug in the harness: `rollAbilityCheck` triggers the XPHB
+Fighter **Tactical Mind** prompt (`charactersheet.js:12213`), a
+legitimate modal offering to spend a Second Wind use. Nothing dismissed
+it, so the next `switchToTab` click was intercepted by
+`.ve-ui-modal__overlay` and — because the click was unbounded —
+retried until the entire 360s test timeout expired instead of failing.
+
+Fixed on two levels: `dismissTransientModals()` is now called after
+every roll probe (*before* its assertions, so a thrown assertion cannot
+strand a modal), and `switchToTab` is bounded at 5s with one
+dismiss-and-retry before failing loudly.
+
+### (e) Superseded matrix rows kept asserting stale values
+
+`assertFeaturesMatrix` ran every entry with `level <= currentLevel`, so
+the L2 Action Surge row (`resourceMax: 1`) kept firing at L17 and
+reported the *correct* new value of 2 as a failure. Added an optional
+`untilLevel` bound to `FeatureCheck` and applied it to the Action Surge
+and Indomitable progressions.
+
+Also removed three stale `skip: "CS-BUG-018"` markers on the
+Indomitable rows: CS-BUG-018 is the Sorcerer Sorcery-Points off-by-one
+and is **Fixed**; with the bound in place all three Indomitable maxes
+(1 → 2 at L13 → 3 at L17) now assert and pass.
+
+**Verification**: `RUN_MEGA=1` MEGA L1→20 on
+`tgtt-arcane-archer-fighter-hochling.spec.ts` passes for the first
+time. Full normal run of that spec plus
+`tgtt-battle-master-fighter.spec.ts`: 11 passed, 4 skipped
+(MEGA/matrix-gated), 1 pre-existing failure (below).
+
+**Not fixed here**: `tgtt-battle-master-fighter.spec.ts` › "USE:
+cast/attack/resource/rest at L5" times out in `waitForToolsLoaded`
+during the initial `goto` — the known `gotoWithThelemar` page-load
+flake. Confirmed identical at `cdc45536` in a detached worktree, so it
+is unrelated to these fixes.
