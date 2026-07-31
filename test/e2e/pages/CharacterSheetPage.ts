@@ -1,18 +1,5 @@
 import {Locator, Page, expect} from "@playwright/test";
-import {waitForToolsLoaded} from "../utils/waitHelpers";
-
-/**
- * Short in-page interaction gates scale with the per-test budget.
- *
- * `PW_TIMEOUT_MS` is raised on contended machines (see `playwright.config.ts`),
- * but a hard-coded gate would not follow it — so contention that the per-test
- * timeout was explicitly widened to absorb would still trip the gate.  That
- * matters because callers such as the `skillRoll` probe assert on the result
- * (`characterSpecFactory.ts:440`), which turns a slow render into a hard
- * failure rather than a retry.  Never scales below the 60s-default baseline.
- */
-const UI_GATE_SCALE = Math.max(1, Number(process.env.PW_TIMEOUT_MS ?? 60_000) / 60_000);
-const uiGate = (ms: number): number => Math.round(ms * UI_GATE_SCALE);
+import {waitForToolsLoaded, uiGate} from "../utils/waitHelpers";
 
 /**
  * Page Object Model for the Character Sheet page

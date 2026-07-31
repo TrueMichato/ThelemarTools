@@ -1,6 +1,23 @@
 import {Page} from "@playwright/test";
 
 /**
+ * Scale a short, hard-coded in-page gate with the per-test budget.
+ *
+ * `PW_TIMEOUT_MS` (see `playwright.config.ts`) is raised on contended
+ * machines, but a bare literal cannot follow it — so the very contention the
+ * override exists to absorb still trips the gate. That produces failures whose
+ * page state is perfectly healthy, which is the hallmark of an infra failure
+ * masquerading as a product bug (see CS-BUG-029 / CS-BUG-030 in
+ * `docs/charactersheet/known-bugs.md`).
+ *
+ * Only ever scales *up*, and never below the 60s-default baseline, so this
+ * cannot mask a genuine regression — it can only stop a slow render being
+ * reported as a broken one.
+ */
+const UI_GATE_SCALE = Math.max(1, Number(process.env.PW_TIMEOUT_MS ?? 60_000) / 60_000);
+export const uiGate = (ms: number): number => Math.round(ms * UI_GATE_SCALE);
+
+/**
  * Wait for the character sheet page to fully load
  * Waits for the 'toolsLoaded' event which fires when all data is ready
  */

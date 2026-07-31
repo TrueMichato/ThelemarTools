@@ -1296,3 +1296,52 @@ loadouts would red the suite, so the two halves must land together.
 
 ---
 
+## CS-BUG-031 — 4 comprehensive specs fail at character creation (wizard stalls on an unfilled required picker)
+
+**Status**: open (harness or product — not yet separated). **Pre-existing, not
+a regression**: reproduced identically at `6ebe4b34`, the pre-batch base,
+before any of the 11 subclass merges landed.
+
+**Affected specs** (every test in them, not just the USE probe — `L1: creates
+… via builder wizard` fails too):
+
+- `tgtt-belly-dancer-rogue-jaknian.spec.ts`
+- `tgtt-gambler-rogue-clairnian.spec.ts`
+- `tgtt-trickster-rogue-goblin.spec.ts`
+- `tgtt-hunter-zodiac-centaur.spec.ts`
+
+**Symptom**: `TimeoutError: page.waitForFunction: Timeout 10000ms exceeded` at
+`characterBuilder.ts:796` — the post-`finishWizard` guard that confirms the
+character actually saved *and* has a class.
+
+**This is the guard working, not a flaky gate.** Its own comment predicts this
+case: the class check exists precisely because "a name-only guard also passes
+when the wizard silently stalled partway (e.g. blocked by an unfilled required
+picker) and never finished". The failure page snapshot confirms the wizard is
+still sitting on the Rogue class step with required choices outstanding —
+Skills (choose 4), Expertise (choose 2), a language, weapon mastery (choose 2),
+and a `Choose 1` group containing `Expertise Training (TGTT)`.
+
+**Not contention.** Reproduced with `PW_WORKERS=1`, single spec, on an idle
+machine, at `PW_TIMEOUT_MS=180000`. Deterministic across 3 runs. Raising the
+gate does **not** help (verified: scaling it changed nothing), so do not
+"fix" this by widening the timeout — that would only convert a hard failure
+back into the silent-stall case the guard was added to catch.
+
+**Lead**: the 4 failures are 3 Rogues + 1 Ranger, and pass-by-comparison
+builds (`tgtt-bastion-paladin-bugbear`, `tgtt-chained-fury-barbarian-minotaur`)
+are classes *without* level-1 Expertise. The harness does handle Expertise
+(`characterBuilder.ts:735` → `selectFirstAvailableExpertise(4)`, commented for
+"Rogue / Bard / TGTT-Ranger"), so the gap is narrower than "unsupported".
+Prime suspect is the separate `Choose 1` feature group
+(`Expertise Training (TGTT)`), which is a *feature choice*, not one of the
+expertise skill checkboxes `selectFirstAvailableExpertise` ticks.
+
+**Why it went unnoticed**: these specs were last touched on 2026-05-17
+("e2e tests upgrades"), and that change re-verified only **one** of the seven
+upgraded specs (`bastion-paladin`, per the coverage note above). The other six
+were never run. Suite-wide green was therefore never established for them.
+
+**Impact**: 4 of 25 comprehensive specs contribute no coverage at all today.
+
+---
