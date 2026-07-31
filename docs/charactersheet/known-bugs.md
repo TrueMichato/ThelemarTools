@@ -893,3 +893,87 @@ around the Spells → Details transition in
 ### E2E coverage
 `tgtt-horror-warlock-theocracian.spec.ts` L1 round-trip — left
 failing; documented here so it isn't re-triaged as a new failure.
+
+
+## CS-BUG-025 — E2E harness never advances past the Builder's "Name Your Character" step, so `createCharacterViaWizard` cannot build any character
+
+**Status**: Open
+**Surfaced by**: every spec that calls `createCharacterViaWizard` —
+confirmed on an unmodified `character-sheet-wip` checkout with
+`PW_WORKERS=1 npx playwright test tgtt-arcane-archer-fighter-hochling.spec.ts --grep L1`
+(2 failed / 2 skipped). Independently hit by the Battle Master
+subclass-support session while trying to run its 8 generated tests.
+**Component**: E2E harness (`test/e2e/utils/characterBuilder.ts`) vs
+Character Sheet · Builder step order
+(`js/charactersheet/charactersheet-builder.js`).
+
+### Symptom
+
+```
+TimeoutError: page.waitForFunction: Timeout 15000ms exceeded.
+  at waitForListItems (test/e2e/utils/waitHelpers.ts:34)
+  at BuilderWizardPage.selectRaceExact (test/e2e/pages/BuilderWizardPage.ts:133)
+  at createCharacterViaWizard (test/e2e/utils/characterBuilder.ts:529)
+```
+
+`#builder-race-list` never gains a `.charsheet__builder-list-item`,
+so the harness dies before a single character is created. Because
+this is in the shared factory path, **the whole comprehensive
+character-build suite is dark**, not just one spec.
+
+### Root cause
+
+The failure screenshot/`error-context.md` shows the wizard still
+parked on the **Name** step when `selectRaceExact` runs. The Builder
+stepper reads `✏ Name → 1 Species → 2 Background → 3 Class → …`, but
+`test/e2e/utils/characterBuilder.ts:524-529` still says:
+
+```js
+// Builder steps (current order, see js/charactersheet/charactersheet-builder.js):
+//   1. Race  →  2. Background  →  3. Class  →  4. Abilities
+//   5. Equipment  →  6. Spells  →  7. Details
+
+// Step 1: Race
+await builder.selectRaceExact(preset.race, preset.raceSource);
+```
+
+The name-first step was added by commit `4f059f9a` ("Fix
+builder/quickbuild ASI base inflation, orphaned racial modal,
+name-first step", 2026-06-09) — see the `<h4>Name Your Character</h4>`
+render at `charactersheet-builder.js:2665`. The harness was never
+updated to match, so it has been unable to reach the Species step
+since that date. This is harness/product drift, **not** a Builder
+regression: the Name step behaves correctly for a human user.
+
+### Suggested fix
+
+In `createCharacterViaWizard`, fill the name textbox and advance
+before touching the race list, and refresh the step-order comment:
+
+```js
+// Step 0: Name
+await page.getByRole("textbox", {name: "Enter character name"})
+	.fill(preset.name ?? "E2E Test Character");
+await builder.clickNext();
+
+// Step 1: Species
+await builder.selectRaceExact(preset.race, preset.raceSource);
+```
+
+Prefer making the harness step-order-agnostic (drive off the stepper
+labels, or expose a stable `data-testid` per step and a
+`builder.goToStep("species")` helper) so the next step-order change
+does not silently blind the suite again. Consider a cheap guard test
+that asserts the harness's assumed step order matches the rendered
+stepper, failing loudly instead of timing out.
+
+### E2E coverage
+
+All `test/e2e/specs/tgtt-*.spec.ts` comprehensive specs plus
+`builder-wizard.spec.ts` and `divine-soul-affinity.spec.ts` are
+affected. Note this blocker sits *in front of* several existing
+entries (CS-BUG-022/023/024), so those cannot be re-verified until
+this one is fixed.
+
+**Severity**: High — no product code is broken, but the entire
+character-build safety net is non-functional.

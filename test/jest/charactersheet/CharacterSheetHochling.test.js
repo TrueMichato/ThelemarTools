@@ -161,7 +161,7 @@ describe("Hochling — Divine Manifestation picker", () => {
 		expect(choice).not.toBeNull();
 		expect(choice.traitName).toBe("Divine Manifestation");
 		expect(choice.options.map((/** @type {*} */ o) => o.id)).toEqual([
-			"trickery", "light", "grave", "war", "peace", "order", "knowledge",
+			"trickery", "light", "tempest", "grave", "war", "peace", "order", "knowledge",
 			"nature", "forge", "death", "beauty", "blood", "time", "madness",
 			"lust", "darkness", "aasimar",
 		]);

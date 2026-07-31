@@ -2549,6 +2549,12 @@ class CharacterSheetBuilder {
 	 *   requested, so the caller can decide how (or whether) to continue the build.
 	 */
 	async _finishCharacterCore () {
+		// Builder/spawner-created state may not yet carry the page's feature catalogs. Attach
+		// them before finalization so wrapper features with refSubclassFeature children grant
+		// those children immediately (rather than only after a later save/load reconciliation).
+		this._state.setClassFeatureCatalog?.(this._page._classFeatures || [], this._page._subclassFeatures || []);
+		this._state.reconcileSubclassFeatureEntries?.();
+
 		// Recalculate max HP (CON may have changed since addClass) and fill to full
 		this._state.recalculateHp({syncCurrent: true});
 

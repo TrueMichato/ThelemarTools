@@ -5709,6 +5709,15 @@ class CharacterSheetSpells {
 		return {count, perDartDice: baseDice};
 	}
 
+	_getPrimaryRolledDamageType (entries, damageMatch, damageTypes = []) {
+		if (damageMatch?.index != null) {
+			const afterDice = entries.slice(damageMatch.index + damageMatch[0].length);
+			const typedMatch = afterDice.match(/^\s*(acid|cold|fire|force|lightning|necrotic|poison|psychic|radiant|thunder|bludgeoning|piercing|slashing)\s+damage/i);
+			if (typedMatch) return typedMatch[1].toLowerCase();
+		}
+		return damageTypes[0] || "damage";
+	}
+
 	_rollSpellDamage (spellData, slotLevel, baseLevel, appliedMetamagic = null, spell = null) {
 		// Weapon-channel cantrips (Booming/Green-Flame Blade) cast on their own roll ONLY
 		// the secondary/movement damage; the on-hit damage rides the weapon attack instead.
@@ -5759,25 +5768,32 @@ class CharacterSheetSpells {
 		// Roll the damage
 		try {
 			const isOvercharged = appliedMetamagic?.key === "overcharged";
+			const damageType = this._getPrimaryRolledDamageType(entries, damageMatch, damageTypes);
+			const isDestructiveWrath = !isOvercharged && this._state.canApplyPendingDamageMaximization?.(damageType);
 			const detail = this._rollDamageDiceDetailed(baseDice, {
-				maximize: isOvercharged,
+				maximize: isOvercharged || isDestructiveWrath,
 				diceMultiplier: projectile ? projectile.count : 1,
 			});
+			if (isDestructiveWrath) this._state.consumePendingDamageMaximization?.(damageType);
 			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
 			const total = detail.total + spellDamageBonus;
-			const damageType = damageTypes[0] || "damage";
 			const bonusStr = spellDamageBonus ? ` + ${spellDamageBonus} item` : "";
-			const metamagicLabel = isOvercharged ? " maximized" : "";
+			const maximizedLabel = (isOvercharged || isDestructiveWrath) ? " maximized" : "";
 			const diceLabel = projectile ? `${projectile.count}× ${baseDice}` : baseDice;
+			const triggeredEffects = this._state.getTriggeredDamageEffects?.(damageType) || [];
+			const push = triggeredEffects.find(it => it.type === "forcedMovement");
+			const pushText = push ? `<br>Thunderbolt Strike: You may push a ${push.maxTargetSize} or smaller target up to ${push.distance} feet ${push.direction}.` : "";
 
 			// Animate the actual dice that were rolled.
 			void this._page.pAnimateDamageDice?.(detail.groups);
 
 			return {
-				text: `<br>Damage: <strong>${total}</strong> ${damageType} (${diceLabel}${bonusStr}${metamagicLabel})`,
+				text: `<br>Damage: <strong>${total}</strong> ${damageType} (${diceLabel}${bonusStr}${maximizedLabel})${pushText}`,
 				total,
 				dice: diceLabel,
 				damageType,
+				maximized: isOvercharged || isDestructiveWrath,
+				triggeredEffects,
 			};
 		} catch (e) {
 			return null;
@@ -5805,23 +5821,30 @@ class CharacterSheetSpells {
 		}
 
 		try {
-			const isOvercharged = appliedMetamagic?.key === "overcharged";
-			const detail = this._rollDamageDiceDetailed(dice, {maximize: isOvercharged});
-			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
-			const total = detail.total + spellDamageBonus;
 			const damageTypes = spellData.damageInflict || [];
 			const damageType = damageTypes[0] || "damage";
+			const isOvercharged = appliedMetamagic?.key === "overcharged";
+			const isDestructiveWrath = !isOvercharged && this._state.canApplyPendingDamageMaximization?.(damageType);
+			const detail = this._rollDamageDiceDetailed(dice, {maximize: isOvercharged || isDestructiveWrath});
+			if (isDestructiveWrath) this._state.consumePendingDamageMaximization?.(damageType);
+			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
+			const total = detail.total + spellDamageBonus;
 			const bonusStr = spellDamageBonus ? ` + ${spellDamageBonus} item` : "";
-			const metamagicLabel = isOvercharged ? " maximized" : "";
+			const maximizedLabel = (isOvercharged || isDestructiveWrath) ? " maximized" : "";
+			const triggeredEffects = this._state.getTriggeredDamageEffects?.(damageType) || [];
+			const push = triggeredEffects.find(it => it.type === "forcedMovement");
+			const pushText = push ? `<br>Thunderbolt Strike: You may push a ${push.maxTargetSize} or smaller target up to ${push.distance} feet ${push.direction}.` : "";
 
 			// Animate the actual dice that were rolled.
 			void this._page.pAnimateDamageDice?.(detail.groups);
 
 			return {
-				text: `<br>Damage: <strong>${total}</strong> ${damageType} (${dice}${bonusStr}${metamagicLabel})`,
+				text: `<br>Damage: <strong>${total}</strong> ${damageType} (${dice}${bonusStr}${maximizedLabel})${pushText}`,
 				total,
 				dice,
 				damageType,
+				maximized: isOvercharged || isDestructiveWrath,
+				triggeredEffects,
 			};
 		} catch (e) {
 			return null;
@@ -5977,20 +6000,28 @@ class CharacterSheetSpells {
 		}
 		try {
 			const isOvercharged = appliedMetamagic?.key === "overcharged";
-			const detail = this._rollDamageDiceDetailed(channel.secondaryDice, {maximize: isOvercharged});
+			const damageType = channel.secondaryDamageType;
+			const isDestructiveWrath = !isOvercharged && this._state.canApplyPendingDamageMaximization?.(damageType);
+			const detail = this._rollDamageDiceDetailed(channel.secondaryDice, {maximize: isOvercharged || isDestructiveWrath});
+			if (isDestructiveWrath) this._state.consumePendingDamageMaximization?.(damageType);
 			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
 			const total = detail.total + spellDamageBonus;
 			const bonusStr = spellDamageBonus ? ` + ${spellDamageBonus} item` : "";
-			const metamagicLabel = isOvercharged ? " maximized" : "";
+			const maximizedLabel = (isOvercharged || isDestructiveWrath) ? " maximized" : "";
+			const triggeredEffects = this._state.getTriggeredDamageEffects?.(damageType) || [];
+			const push = triggeredEffects.find(it => it.type === "forcedMovement");
+			const pushText = push ? `<br>Thunderbolt Strike: You may push a ${push.maxTargetSize} or smaller target up to ${push.distance} feet ${push.direction}.` : "";
 
 			void this._page.pAnimateDamageDice?.(detail.groups);
 
 			return {
-				text: `<br>${channel.secondaryLabel}: <strong>${total}</strong> ${channel.secondaryDamageType} (${channel.secondaryDice}${bonusStr}${metamagicLabel})`
+				text: `<br>${channel.secondaryLabel}: <strong>${total}</strong> ${damageType} (${channel.secondaryDice}${bonusStr}${maximizedLabel})${pushText}`
 					+ `<br><span class="ve-muted">On-hit damage rides your weapon attack — use the ✨ button by your weapon.</span>`,
 				total,
 				dice: channel.secondaryDice,
-				damageType: channel.secondaryDamageType,
+				damageType,
+				maximized: isOvercharged || isDestructiveWrath,
+				triggeredEffects,
 				isWeaponChannel: true,
 			};
 		} catch (e) {

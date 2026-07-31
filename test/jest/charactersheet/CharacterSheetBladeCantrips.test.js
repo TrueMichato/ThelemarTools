@@ -10,6 +10,7 @@
  * with mock `_state`/`_page`, so the real logic runs without the page bootstrap.
  */
 
+import {jest} from "@jest/globals";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-spells.js";
@@ -198,6 +199,21 @@ describe("_rollWeaponChannelSecondary (cast alone rolls ONLY secondary/movement 
 		const res = spells._rollSpellDamage(BOOMING_BLADE, 0, 0, null, {name: "Booming Blade", source: "TCE"});
 		expect(res.isWeaponChannel).toBe(true);
 		expect(res.dice).toBe("2d8");
+	});
+
+	it("applies an armed typed maximizer and damage-triggered effects to secondary damage", () => {
+		const consume = jest.fn(() => true);
+		const spells = makeSpellsShell({
+			canApplyPendingDamageMaximization: type => type === "thunder",
+			consumePendingDamageMaximization: consume,
+			getTriggeredDamageEffects: type => type === "thunder" ? [{type: "forcedMovement", distance: 10, direction: "away", maxTargetSize: "Large"}] : [],
+		});
+		spells._rollDamageDiceDetailed = (dice, {maximize}) => ({total: maximize ? 16 : 2, groups: [{dice, values: maximize ? [8, 8] : [1, 1]}]});
+		const res = spells._rollSpellDamage(BOOMING_BLADE, 0, 0, null, {name: "Booming Blade", source: "TCE"});
+		expect(res).toMatchObject({total: 16, damageType: "thunder", maximized: true});
+		expect(res.triggeredEffects).toHaveLength(1);
+		expect(res.text).toMatch(/Thunderbolt Strike/i);
+		expect(consume).toHaveBeenCalledWith("thunder");
 	});
 });
 

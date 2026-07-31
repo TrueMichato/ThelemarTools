@@ -404,7 +404,20 @@ divineInterventionChance: level,  // % chance (PHB)
 
 hasDestroyUndead: true,           // Level 5+
 destroyUndeadCr: 0.5 | 1 | 2 | 3 | 4,  // Scales
+
+// PHB Tempest Domain
+hasWrathOfTheStorm: true,         // L1; WIS-mod reaction uses, long rest
+hasDestructiveWrath: true,        // L2; deferred lightning/thunder maximization
+hasThunderboltStrike: true,       // L6; optional 10-foot push on lightning damage
+divineStrikeDamage: "1d8" | "2d8", // L8/L14 thunder weapon rider
+hasStormborn: true,               // L17; fly speed equals walking speed
 ```
+
+Destructive Wrath uses the shared deferred-damage path: activation arms the effect without
+spending Channel Divinity, and the next eligible lightning or thunder roll consumes the pool
+and maximizes every die. Lightning damage resolution also emits Thunderbolt Strike's optional
+target-facing forced-movement result. Wrath of the Storm's per-use lightning/thunder choice is
+parsed into the combat action rather than stored as a permanent character choice.
 
 ### Druid
 

@@ -8,21 +8,18 @@
  * The generic stored-feature pipeline then surfaces them:
  *   • Wrath of the Storm            → a WIS-mod / long-rest use pool (resource) AND a
  *                                     Reaction entry in getActivatableFeatures().
- *   • Channel Divinity: Destructive → a spendable Channel-Divinity option in
- *     Wrath                           getActivatableFeatures() (channelDivinityCost) against
- *                                     the shared Channel Divinity resource.
- *   • Thunderbolt Strike            → a passive on-hit rider, visible verbatim in the
- *                                     Features panel (getFeatures), correctly NOT activatable.
- *
- * The three `has*` calculation flags are an alternate representation that nothing consumes;
- * these tests also lock in that the effect-aggregator no longer emits inert placeholder
- * effect objects (reaction / channelDivinityOption / pushRider) for them.
+ *   • Channel Divinity: Destructive → an armed one-shot maximizer which spends the shared
+ *     Wrath                           Channel Divinity pool only when eligible damage resolves.
+ *   • Thunderbolt Strike            → a target-facing forced-movement result emitted by
+ *                                     lightning damage resolution.
  */
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-spells.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const CharacterSheetSpells = globalThis.CharacterSheetSpells;
 
 // Verbatim (plain-text) rules from class-cleric.json, as the Builder renders `entries` into
 // `description` before calling addFeature.
@@ -82,7 +79,6 @@ const findResource = (state, name) =>
 	(state.getResources() || []).find(r => (r.name || "").toLowerCase() === name.toLowerCase());
 const findActivatable = (state, name) =>
 	(state.getActivatableFeatures?.() || []).find(a => (a.feature?.name || a.name) === name);
-const activationActionOf = (af) => af?.activationInfo?.activationAction || af?.activationAction;
 const cdCostOf = (af) => af?.activationInfo?.channelDivinityCost ?? af?.channelDivinityCost;
 
 describe("Tempest Domain — real feature surfaces", () => {
@@ -106,11 +102,20 @@ describe("Tempest Domain — real feature surfaces", () => {
 			expect(resource.max).toBeGreaterThanOrEqual(1);
 		});
 
-		it("surfaces as a usable Reaction in getActivatableFeatures", () => {
+		it("classifies as a usable Reaction with executable damage effects", () => {
 			const state = mkStoredTempest(1);
-			const af = findActivatable(state, "Wrath of the Storm");
-			expect(af).toBeTruthy();
-			expect(activationActionOf(af)).toBe("reaction");
+			const feature = state.getFeatures().find(f => f.name === "Wrath of the Storm");
+			const info = CharacterSheetState.detectActivatableFeature(feature);
+			expect(info).toMatchObject({
+				interactionMode: "reaction",
+				activationAction: "reaction",
+				combatActionEffects: {
+					rollDice: {
+						formula: "2d8",
+						damageTypeChoices: ["lightning", "thunder"],
+					},
+				},
+			});
 		});
 	});
 
@@ -133,6 +138,72 @@ describe("Tempest Domain — real feature surfaces", () => {
 			expect(af).toBeTruthy();
 			expect(cdCostOf(af)).toBeGreaterThanOrEqual(1);
 		});
+
+		it("maximizes the next lightning spell roll and consumes Channel Divinity only then", () => {
+			const state = mkStoredTempest(2);
+			const cd = findResource(state, "Channel Divinity");
+			const startingUses = cd.current;
+			expect(state.armDamageMaximization({
+				sourceName: "Channel Divinity: Destructive Wrath",
+				damageTypes: ["lightning", "thunder"],
+				resourceName: "Channel Divinity",
+			})).toBe(true);
+			expect(findResource(state, "Channel Divinity").current).toBe(startingUses);
+
+			const spells = Object.create(CharacterSheetSpells.prototype);
+			spells._state = state;
+			spells._page = {
+				rollDice: () => 1,
+				pAnimateDamageDice: () => {},
+			};
+			const result = spells._rollSpellDamage({
+				damageInflict: ["lightning"],
+				entries: ["A target takes {@damage 2d8} lightning damage."],
+			}, 1, 1);
+
+			expect(result.total).toBe(16);
+			expect(result.maximized).toBe(true);
+			expect(findResource(state, "Channel Divinity").current).toBe(startingUses - 1);
+			expect(state.getPendingDamageMaximization()).toBeNull();
+		});
+
+		it("does not consume the armed use on an ineligible damage type", () => {
+			const state = mkStoredTempest(2);
+			const startingUses = findResource(state, "Channel Divinity").current;
+			state.armDamageMaximization({
+				damageTypes: ["lightning", "thunder"],
+				resourceName: "Channel Divinity",
+			});
+
+			const spells = Object.create(CharacterSheetSpells.prototype);
+			spells._state = state;
+			spells._page = {rollDice: () => 1, pAnimateDamageDice: () => {}};
+			const result = spells._rollSpellDamage({
+				damageInflict: ["fire"],
+				entries: ["A target takes {@damage 2d8} fire damage."],
+			}, 1, 1);
+
+			expect(result.total).toBe(2);
+			expect(result.maximized).toBe(false);
+			expect(findResource(state, "Channel Divinity").current).toBe(startingUses);
+			expect(state.getPendingDamageMaximization()).toBeTruthy();
+		});
+
+		it("associates a multi-type spell's first rolled component with its adjacent damage type", () => {
+			const state = mkStoredTempest(9);
+			state.armDamageMaximization({
+				damageTypes: ["lightning", "thunder"],
+				resourceName: "Channel Divinity",
+			});
+			const spells = Object.create(CharacterSheetSpells.prototype);
+			spells._state = state;
+			spells._page = {rollDice: () => 1, pAnimateDamageDice: () => {}};
+			const result = spells._rollSpellDamage({
+				damageInflict: ["necrotic", "radiant", "thunder"],
+				entries: ["A target takes {@damage 5d6} thunder damage, as well as {@damage 5d6} radiant or necrotic damage."],
+			}, 5, 5);
+			expect(result).toMatchObject({damageType: "thunder", total: 30, maximized: true});
+		});
 	});
 
 	describe("Thunderbolt Strike (L6)", () => {
@@ -141,13 +212,45 @@ describe("Tempest Domain — real feature surfaces", () => {
 			expect(state.getFeatures().some(f => f.name === "Thunderbolt Strike")).toBe(false);
 		});
 
-		it("is a passive on-hit rider: visible in the Features panel, correctly NOT activatable", () => {
+		it("emits an optional 10-foot push result for lightning damage against Large-or-smaller targets", () => {
 			const state = mkStoredTempest(6);
 			const feature = state.getFeatures().find(f => f.name === "Thunderbolt Strike");
 			expect(feature).toBeTruthy();
-			expect(feature.description).toMatch(/push it up to 10 feet/i);
-			// It has no activation cost / action, so it must not appear as an activatable ability.
 			expect(findActivatable(state, "Thunderbolt Strike")).toBeFalsy();
+			expect(state.getTriggeredDamageEffects("lightning")).toEqual([expect.objectContaining({
+				type: "forcedMovement",
+				distance: 10,
+				direction: "away",
+				maxTargetSize: "Large",
+				optional: true,
+				source: "Thunderbolt Strike",
+			})]);
+			expect(state.getTriggeredDamageEffects("thunder")).toEqual([]);
+		});
+	});
+
+	describe("Wrath damage choice and Divine Strike", () => {
+		it("parses Wrath as a 2d8 lightning-or-thunder choice with the target's Dexterity save", () => {
+			const effects = CharacterSheetState._parseCombatActionEffects(
+				TEMPEST_FEATURE_DESCRIPTIONS["Wrath of the Storm"].toLowerCase(),
+				TEMPEST_FEATURE_DESCRIPTIONS["Wrath of the Storm"],
+			);
+			expect(effects.rollDice).toMatchObject({
+				type: "damage",
+				formula: "2d8",
+				damageTypeChoices: ["lightning", "thunder"],
+				saveAbility: "dex",
+			});
+		});
+
+		it.each([
+			[8, "1d8"],
+			[14, "2d8"],
+		])("adds the level-scaled thunder Divine Strike rider at Cleric %i", (level, dice) => {
+			const state = mkStoredTempest(level);
+			const rider = state.getFeatureCalculations().weaponDamageRiders
+				.find(it => it.id === "clericDivineStrike");
+			expect(rider).toMatchObject({dice, damageType: "thunder", perTurn: true});
 		});
 	});
 
