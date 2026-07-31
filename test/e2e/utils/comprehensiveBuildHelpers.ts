@@ -26,6 +26,8 @@ import {CharacterSheetPage} from "../pages/CharacterSheetPage";
 export interface InventoryItemRef {
 	name: string;
 	source?: string;
+	/** If true, equip the item after adding it. */
+	equipped?: boolean;
 	/** If true and the item has charges, treat as attuned magic item. */
 	attune?: boolean;
 }
@@ -42,7 +44,7 @@ export interface InventoryItemRef {
 export async function addInventoryItems (page: Page, items: InventoryItemRef[]): Promise<void> {
 	for (const item of items) {
 		if (page.isClosed()) throw new Error("addInventoryItems: page closed mid-loop (earlier failure?)");
-		const result = await page.evaluate(async ({name, source, attune}) => {
+		const result = await page.evaluate(async ({name, source, equipped, attune}) => {
 			const cs: any = (globalThis as any).charSheet;
 			if (!cs?._state) return {ok: false, reason: "charSheet not initialised"};
 
@@ -68,7 +70,7 @@ export async function addInventoryItems (page: Page, items: InventoryItemRef[]):
 				for (const nm of nameVariants) {
 					for (const src of sourceVariants) {
 						try {
-							await cs._state.addItemByName(nm, src, {attuned: !!attune});
+							await cs._state.addItemByName(nm, src, {equipped: !!equipped || !!attune, attuned: !!attune});
 							return {ok: true, via: `addItemByName(${nm}|${src})`};
 						} catch (e: any) { /* fall through */ }
 					}
@@ -105,7 +107,7 @@ export async function addInventoryItems (page: Page, items: InventoryItemRef[]):
 			// bypasses derived-stat updates.
 			if (typeof cs._state.addItem === "function") {
 				try {
-					cs._state.addItem(entry, 1, !!attune, !!attune);
+					cs._state.addItem(entry, 1, !!equipped || !!attune, !!attune);
 					// Inventory module owns the recalc that flows
 					// bonusAc / bonusSavingThrow / bonusWeaponAttack
 					// from equipped/attuned items into _data.ac.itemBonus
@@ -122,14 +124,14 @@ export async function addInventoryItems (page: Page, items: InventoryItemRef[]):
 				name: entry.name,
 				source: entry.source,
 				quantity: 1,
-				equipped: !!attune,
+				equipped: !!equipped || !!attune,
 				attuned: !!attune,
 			});
 			if (cs._state._data) cs._state._data.inventory = inv;
 			cs._state.markChanged?.();
 			cs.render?.();
 			return {ok: true, via: "manual-push"};
-		}, {name: item.name, source: item.source, attune: item.attune});
+		}, {name: item.name, source: item.source, equipped: item.equipped, attune: item.attune});
 
 		if (!result?.ok) {
 			throw new Error(`addInventoryItems: failed to add "${item.name}|${item.source || "*"}" — ${result?.reason}`);
@@ -677,6 +679,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "advantage"; rollType: string}
 	| {kind: "disadvantage"; rollType: string}
 	| {kind: "skillAdvantage"; skill: string}
+	| {kind: "conditionImmunity"; condition: string}
 	// `spellMatchMode` controls which TGTT-vs-first-party spell list
 	// the probe is meant to verify. Default is `"first-party"` for
 	// backward compatibility — existing matrices keep their semantics.
@@ -751,6 +754,10 @@ export type EffectCheck = _EffectCommon & (
 	// Mercy Monk unarmed strike, and other "feature creates an
 	// attack row" abilities.
 	| {kind: "attackPresent"; namePattern: string | RegExp}
+	| {kind: "weaponScopedState"; feature: string; attackBonusMin: number; alternateDamageType: string}
+	| {kind: "spellCastGrantsCover"; spell: string; source: string; acDelta: number; saveAbility: AblKey; saveDelta: number}
+	| {kind: "activeAuraMechanics"; feature: string; damageType: string; damageMin: number; conditionalRollType: string; conditionalIncludes: string}
+	| {kind: "restoreFeatureUseWithSpellSlot"; feature: string; slotLevel: number}
 	// === Phase 11: per-pick effect dispatch ===
 	// On a parent FeatureCheck of `kind: "pick"`, attach
 	// `pickedFeatureGrants` to declare effects that should fire ONLY
@@ -831,6 +838,16 @@ async function _runPassiveOrRollEffect (
 			const v = await charSheet.getSkillBonus(e.skill);
 			if (v == null) throw new Error(`skill bonus for "${e.skill}" not found`);
 			_checkNumeric(v as number, e, `skill:${e.skill}`);
+			return;
+		}
+		case "conditionImmunity": {
+			const immunities = await charSheet.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				return cs?._state?.getConditionImmunities?.() || [];
+			});
+			if (!immunities.some((it: string) => it.toLowerCase() === e.condition.toLowerCase())) {
+				throw new Error(`missing condition immunity "${e.condition}". seen=[${immunities.join(", ")}]`);
+			}
 			return;
 		}
 		case "abilityScore": {
@@ -1147,6 +1164,118 @@ async function _runPassiveOrRollEffect (
 				}
 			}
 			throw new Error(`pickActivatable: only ${hits} of expected ≥${need} matched picks could be activated. errors=[${errs.join(" | ")}]`);
+		}
+		case "weaponScopedState": {
+			await charSheet.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				if (!state) return;
+				const equippedWeapon = state.getItems?.().find((it: any) => it.equipped && (it.weapon || it.item?.weapon));
+				if (!equippedWeapon) state.addItem?.({name: "Devotion Test Sword", source: "XPHB", type: "M", weapon: true, dmg1: "1d8", dmgType: "S"}, 1, true);
+				cs._combat?.renderAttacks?.();
+				cs._renderCharacter?.();
+			});
+			await charSheet.activateFeature(e.feature);
+			const result = await charSheet.page.evaluate(({min, damageType}) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				const active = state?.getActiveStates?.().find((it: any) => it.active && it.stateTypeId === "sacredWeapon");
+				const weaponEffect = active?.customEffects?.find((it: any) => it.weaponId);
+				const weaponId = weaponEffect?.weaponId;
+				const attackBadge = weaponId
+					? document.querySelector(`.charsheet__attack-item[data-attack-id="${CSS.escape(weaponId)}"] .badge-primary`)
+					: null;
+				const overviewRow = Array.from(document.querySelectorAll(".charsheet__attack-row"))
+					.find(row => (row.querySelector(".charsheet__attack-name")?.textContent || "").includes(weaponEffect?.weaponName || "__missing__"));
+				return {
+					active: !!active,
+					weaponId,
+					bonus: weaponId ? state.getBonusFromStates?.("attack", {weaponId}) : 0,
+					otherBonus: state.getBonusFromStates?.("attack", {weaponId: "__other__"}) || 0,
+					damageTypes: weaponId ? state.getWeaponDamageTypeChoices?.(weaponId, "slashing") : [],
+					attackBadgeTitle: attackBadge?.getAttribute("title") || "",
+					overviewDamage: overviewRow?.querySelector(".charsheet__attack-damage")?.textContent || "",
+					min,
+					damageType,
+				};
+			}, {min: e.attackBonusMin, damageType: e.alternateDamageType});
+			if (!result.active || !result.weaponId) throw new Error(`"${e.feature}" did not create a weapon-scoped active state`);
+			if (result.bonus < e.attackBonusMin) throw new Error(`scoped attack bonus=${result.bonus}, expected >=${e.attackBonusMin}`);
+			if (result.otherBonus !== 0) throw new Error(`scoped attack bonus leaked to another weapon: ${result.otherBonus}`);
+			if (!result.attackBadgeTitle.includes("active state")) throw new Error(`rendered attack badge omitted the active-state bonus`);
+			if (!result.overviewDamage.toLowerCase().includes(e.alternateDamageType.toLowerCase())) throw new Error(`overview attack omitted alternate damage type "${e.alternateDamageType}"`);
+			if (!result.damageTypes.includes(e.alternateDamageType)) {
+				throw new Error(`alternate damage type "${e.alternateDamageType}" missing. seen=[${result.damageTypes.join(", ")}]`);
+			}
+			await charSheet.deactivateFeature(e.feature);
+			await charSheet.page.evaluate((featureName) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				const feature = state?.getFeatures?.().find((it: any) => it.name === featureName);
+				const resourceName = feature?.consumes?.name;
+				const resource = resourceName ? state.getResource?.(resourceName) : null;
+				if (resource) state.setResourceCurrent?.(resource.id, Math.min(resource.max, resource.current + 1));
+			}, e.feature);
+			return;
+		}
+		case "spellCastGrantsCover": {
+			const result = await charSheet.page.evaluate(({spell, source, saveAbility}) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				state.startCombat?.();
+				const before = {ac: state.getArmorClass(), save: state.getSaveMod(saveAbility)};
+				state.applyCommittedSpellCastTriggers?.({name: spell, source});
+				const active = state.isStateTypeActive?.("smiteOfProtection");
+				const after = {ac: state.getArmorClass(), save: state.getSaveMod(saveAbility)};
+				state.advanceRound?.();
+				return {before, after, active, expired: !state.isStateTypeActive?.("smiteOfProtection")};
+			}, {spell: e.spell, source: e.source, saveAbility: e.saveAbility});
+			if (!result.active) throw new Error(`${e.spell}|${e.source} did not activate cover`);
+			if (result.after.ac - result.before.ac !== e.acDelta) throw new Error(`cover AC delta=${result.after.ac - result.before.ac}, expected ${e.acDelta}`);
+			if (result.after.save - result.before.save !== e.saveDelta) throw new Error(`cover save delta=${result.after.save - result.before.save}, expected ${e.saveDelta}`);
+			if (!result.expired) throw new Error(`cover did not expire at the start of the next turn`);
+			return;
+		}
+		case "activeAuraMechanics": {
+			await charSheet.activateFeature(e.feature);
+			const result = await charSheet.page.evaluate(({rollType}) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				return {
+					damage: state.getEnemyTurnStartDamageEffects?.() || [],
+					modifiers: state.aggregateModifiers?.(rollType),
+					expectedDamage: Math.max(0, state.getAbilityMod?.("cha") + state.getProficiencyBonus?.()),
+				};
+			}, {rollType: e.conditionalRollType});
+			const damage = result.damage.find((it: any) => it.damageType === e.damageType);
+			if (!damage || damage.damage < e.damageMin) throw new Error(`enemy turn-start ${e.damageType} damage below ${e.damageMin}`);
+			if (damage.damage !== result.expectedDamage) {
+				throw new Error(`enemy turn-start ${e.damageType} damage=${damage.damage}, expected CHA modifier + PB = ${result.expectedDamage}`);
+			}
+			const conditional = result.modifiers?.conditionalsAvailable?.find((it: any) =>
+				String(it.conditional || "").toLowerCase().includes(e.conditionalIncludes.toLowerCase()));
+			if (!conditional?.advantage || result.modifiers.advantage) {
+				throw new Error(`conditional save advantage was not surfaced default-off`);
+			}
+			await charSheet.deactivateFeature(e.feature);
+			return;
+		}
+		case "restoreFeatureUseWithSpellSlot": {
+			const result = await charSheet.page.evaluate(({featureName, slotLevel}) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				const feature = state.getFeatures?.().find((it: any) => it.name === featureName);
+				const resource = state.getResources?.().find((it: any) => it.featureId === feature?.id || it.name === featureName);
+				if (!feature || !resource) return {ok: false, reason: "missing feature/resource"};
+				state.setResourceCurrent(resource.id, 0);
+				state.setSpellSlots(slotLevel, Math.max(1, state.getSpellSlotsMax(slotLevel)), 1);
+				const ok = state.restoreFeatureUseWithSpellSlot?.(feature.id, slotLevel);
+				return {ok, resource: state.getResources().find((it: any) => it.id === resource.id)?.current, slots: state.getSpellSlotsCurrent(slotLevel)};
+			}, {featureName: e.feature, slotLevel: e.slotLevel});
+			if (!result.ok || result.resource !== 1 || result.slots !== 0) {
+				throw new Error(`slot recovery failed: ${JSON.stringify(result)}`);
+			}
+			return;
 		}
 		case "attackPresent": {
 			const re = e.namePattern instanceof RegExp ? e.namePattern : new RegExp(e.namePattern, "i");

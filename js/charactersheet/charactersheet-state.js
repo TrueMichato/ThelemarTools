@@ -17476,11 +17476,11 @@ class CharacterSheetState {
 						// Sacred Weapon (level 3) - add CHA to attack rolls
 						if (level >= 3) {
 							calculations.hasSacredWeapon = true;
-							calculations.sacredWeaponBonus = Math.max(0, chaMod);
+							calculations.sacredWeaponBonus = Math.max(1, chaMod);
 						}
 
-						// Turn the Unholy (level 3)
-						if (level >= 3) {
+						// Turn the Unholy was replaced by Smite of Protection in the 2024 oath.
+						if (!isDevotion2024 && level >= 3) {
 							calculations.hasTurnTheUnholy = true;
 							calculations.turnTheUnholyDc = 8 + profBonus + chaMod;
 						}
@@ -17488,16 +17488,19 @@ class CharacterSheetState {
 						// Aura of Devotion (level 7) - immunity to charm
 						if (level >= 7) {
 							calculations.hasAuraOfDevotion = true;
+							calculations.auraOfDevotionRadius = auraRange;
 						}
 
-						// Smite of Protection (XPHB level 7) - grant temp HP on smite
-						if (isDevotion2024 && level >= 7) {
+						// Smite of Protection (XPHB level 15) - Half Cover after Divine Smite.
+						if (isDevotion2024 && level >= 15) {
 							calculations.hasSmiteOfProtection = true;
-							calculations.smiteOfProtectionTempHp = `1d8+${chaMod}`;
+							calculations.smiteOfProtectionAcBonus = 2;
+							calculations.smiteOfProtectionDexSaveBonus = 2;
+							calculations.smiteOfProtectionRadius = auraRange;
 						}
 
 						// Purity of Spirit (level 15) - protection from evil/good always on
-						if (level >= 15) {
+						if (!isDevotion2024 && level >= 15) {
 							calculations.hasPurityOfSpirit = true;
 						}
 
@@ -17505,8 +17508,9 @@ class CharacterSheetState {
 						if (level >= 20) {
 							calculations.hasHolyNimbus = true;
 							if (isDevotion2024) {
-								calculations.holyNimbusDamage = "10"; // 10 radiant per creature
+								calculations.holyNimbusDamage = Math.max(0, chaMod + profBonus);
 								calculations.holyNimbusAdvantage = true; // Advantage vs fiends/undead
+								calculations.holyNimbusUses = 1;
 							} else {
 								calculations.holyNimbusDamage = "10"; // 10 radiant per enemy
 							}
@@ -23959,6 +23963,9 @@ class CharacterSheetState {
 		if (calculations.hasAuraOfCourage && !alreadyProcessed("Aura of Courage")) {
 			effects.push({ type: "conditionImmunity", condition: "frightened", source: "Aura of Courage" });
 		}
+		if (calculations.hasAuraOfDevotion) {
+			effects.push({type: "conditionImmunity", condition: "charmed", source: "Aura of Devotion"});
+		}
 
 		// Aura of Protection (Paladin 6): CHA to saves for allies in aura
 		// (This affects allies, tracked but handled differently)
@@ -26913,6 +26920,11 @@ class CharacterSheetState {
 		}
 
 		this._data.inventory = this._data.inventory.filter(i => i.id !== itemId);
+		const sacredWeaponState = this._data.activeStates?.find(state =>
+			state.active
+			&& state.stateTypeId === "sacredWeapon"
+			&& (state.customEffects || []).some(effect => effect.inventoryItemId === itemId || effect.weaponId === itemId));
+		if (sacredWeaponState) this.deactivateState("sacredWeapon");
 
 		// An equipped upgraded armor/shield leaving inventory must drop its conditional modifiers.
 		this._recalculateItemUpgradeModifiers();
@@ -31083,6 +31095,25 @@ class CharacterSheetState {
 		return this.isStateTypeActive("coronaOfLight");
 	}
 
+	applyCommittedSpellCastTriggers (spell) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasSmiteOfProtection) return [];
+		if ((spell?.name || "").toLowerCase() !== "divine smite" || (spell?.source || "").toUpperCase() !== "XPHB") return [];
+		this.activateState("smiteOfProtection");
+		return ["Smite of Protection"];
+	}
+
+	restoreFeatureUseWithSpellSlot (featureId, slotLevel) {
+		const feature = this._data.features.find(it => it.id === featureId);
+		const resource = this._data.resources.find(it => it.featureId === featureId || it.name === feature?.name);
+		if (!feature || !resource || resource.current >= resource.max) return false;
+		const currentSlots = this.getSpellSlotsCurrent(slotLevel);
+		if (currentSlots < 1) return false;
+		this.setSpellSlotCurrent(slotLevel, currentSlots - 1);
+		this.setResourceCurrent(resource.id, resource.current + 1);
+		return true;
+	}
+
 	setResourceCurrent (resourceId, current) {
 		const resource = this._data.resources.find(r => r.id === resourceId);
 		if (resource) {
@@ -31147,6 +31178,8 @@ class CharacterSheetState {
 		this._data.resources.forEach(r => {
 			if (r.recharge === rechargeType || (rechargeType === "long" && r.recharge === "short")) {
 				r.current = r.max;
+			} else if (rechargeType === "short" && r.shortRestRecovery) {
+				r.current = Math.min(r.max, r.current + r.shortRestRecovery);
 			}
 		});
 
@@ -31155,6 +31188,8 @@ class CharacterSheetState {
 			if (f.uses) {
 				if (f.uses.recharge === rechargeType || (rechargeType === "long" && f.uses.recharge === "short")) {
 					f.uses.current = f.uses.max;
+				} else if (rechargeType === "short" && f.uses.shortRestRecovery) {
+					f.uses.current = Math.min(f.uses.max, f.uses.current + f.uses.shortRestRecovery);
 				}
 			}
 		});
@@ -31204,7 +31239,11 @@ class CharacterSheetState {
 							dataItem.uses.current = Math.min(dataItem.uses.current + diff, newUses.max);
 						}
 					}
-					if (curatedUses) dataItem.uses.recharge = newUses.recharge;
+					if (curatedUses) {
+						dataItem.uses.recharge = newUses.recharge;
+						if (newUses.shortRestRecovery != null) dataItem.uses.shortRestRecovery = newUses.shortRestRecovery;
+						else delete dataItem.uses.shortRestRecovery;
+					}
 				}
 
 				// Update associated resource
@@ -31217,7 +31256,11 @@ class CharacterSheetState {
 							resource.current = Math.min(resource.current + diff, newUses.max);
 						}
 					}
-					if (curatedUses) resource.recharge = newUses.recharge;
+					if (curatedUses) {
+						resource.recharge = newUses.recharge;
+						if (newUses.shortRestRecovery != null) resource.shortRestRecovery = newUses.shortRestRecovery;
+						else delete resource.shortRestRecovery;
+					}
 				}
 			}
 		});
@@ -32645,6 +32688,7 @@ class CharacterSheetState {
 			current: uses.current !== undefined ? uses.current : uses.max,
 			max: uses.max,
 			recharge: uses.recharge || feature.recharge,
+			...(uses.shortRestRecovery != null ? {shortRestRecovery: uses.shortRestRecovery} : {}),
 		};
 
 		if (uses.max > 0) {
@@ -32657,6 +32701,7 @@ class CharacterSheetState {
 					max: uses.max,
 					current: uses.current !== undefined ? uses.current : uses.max,
 					recharge: uses.recharge,
+					...(uses.shortRestRecovery != null ? {shortRestRecovery: uses.shortRestRecovery} : {}),
 					featureId: feature.id,
 				});
 			}
@@ -32861,6 +32906,7 @@ class CharacterSheetState {
 				current: uses.current !== undefined ? uses.current : uses.max,
 				max: uses.max,
 				recharge: uses.recharge || feature.recharge, // Allow recharge at feature level or inside uses
+				...(uses.shortRestRecovery != null ? {shortRestRecovery: uses.shortRestRecovery} : {}),
 			};
 		}
 
@@ -32898,6 +32944,7 @@ class CharacterSheetState {
 					max: uses.max,
 					current: uses.current !== undefined ? uses.current : uses.max,
 					recharge: uses.recharge,
+					...(uses.shortRestRecovery != null ? {shortRestRecovery: uses.shortRestRecovery} : {}),
 					featureId: featureData.id, // Link to feature
 				});
 			}
@@ -33866,7 +33913,7 @@ class CharacterSheetState {
 	 * touches same-named features from other sources.
 	 *
 	 * @param {object} feature
-	 * @returns {{max: number, recharge: string}|null}
+	 * @returns {{max: number, recharge: string, shortRestRecovery?: number}|null}
 	 */
 	_getCuratedFeatureUses (feature) {
 		const name = (feature.name || "").toLowerCase();
@@ -33878,6 +33925,12 @@ class CharacterSheetState {
 		}
 		if (source === "XPHB" && name === "corona of light") {
 			return {max: Math.max(1, this.getAbilityMod("wis")), recharge: "long"};
+		}
+		if (source === "XPHB" && name === "channel divinity" && feature.className === "Paladin") {
+			return {max: this.getClassLevel("Paladin") >= 11 ? 3 : 2, recharge: "long", shortRestRecovery: 1};
+		}
+		if (source === "XPHB" && name === "holy nimbus") {
+			return {max: 1, recharge: "long"};
 		}
 
 		// Aasimar "Healing Hands" (DMG/VGM/MPMM/XPHB) is a single action, once per
@@ -41823,7 +41876,10 @@ class CharacterSheetState {
 	 *   minimum, maximum, bonusDice, conditionalsAvailable, …}.
 	 */
 	aggregateModifiers (/** @type {string} */ type, /** @type {*} */ {appliedConditionalIds} = {}) {
-		const modifiers = this.getModifiersForType(type);
+		const modifiers = [
+			...this.getModifiersForType(type),
+			...this._getConditionalActiveStateModifiersForType(type),
+		];
 		const appliedIds = appliedConditionalIds instanceof Set ? appliedConditionalIds : null;
 
 		const result = {
@@ -42004,6 +42060,25 @@ class CharacterSheetState {
 		}
 
 		return result;
+	}
+
+	_getConditionalActiveStateModifiersForType (type) {
+		return this.getActiveStateEffects()
+			.filter(effect => effect.conditional && ["advantage", "disadvantage"].includes(effect.type))
+			.filter(effect => effect.target === type
+				|| (effect.target === "save" && type.startsWith("save:"))
+				|| (effect.target === "check" && type.startsWith("check:"))
+				|| (effect.target === "attack" && type.startsWith("attack")))
+			.map(effect => ({
+				id: `active-state-${effect.stateId}-${effect.type}-${effect.target}`,
+				name: effect.stateName || "Active State",
+				type,
+				value: 0,
+				advantage: effect.type === "advantage",
+				disadvantage: effect.type === "disadvantage",
+				conditional: effect.conditional,
+				sourceId: effect.stateId,
+			}));
 	}
 
 	/**
@@ -43193,6 +43268,46 @@ class CharacterSheetState {
 			duration: "1 minute",
 			endConditions: ["Dismissed", "Duration expires"],
 			activationAction: "action",
+		},
+		sacredWeapon: {
+			id: "sacredWeapon",
+			name: "Sacred Weapon",
+			icon: "⚔️",
+			description: "The chosen melee weapon adds your Charisma modifier (minimum +1) to attack rolls and can deal Radiant damage.",
+			effects: [],
+			duration: "10 minutes",
+			endConditions: ["You end the effect", "You are no longer carrying the weapon"],
+			activationAction: "attack",
+			resourceName: "Channel Divinity",
+			resourceCost: 1,
+		},
+		smiteOfProtection: {
+			id: "smiteOfProtection",
+			name: "Smite of Protection",
+			icon: "🛡️",
+			description: "You and allies in your Aura of Protection have Half Cover until the start of your next turn.",
+			effects: [
+				{type: "bonus", target: "ac", value: 2},
+				{type: "bonus", target: "save:dex", value: 2},
+			],
+			duration: "Until the start of your next turn",
+			endConditions: ["Start of your next turn"],
+		},
+		holyNimbus: {
+			id: "holyNimbus",
+			name: "Holy Nimbus",
+			icon: "☀️",
+			description: "A 30-foot sunlight aura harms enemies at the start of their turns and wards you against Fiends and Undead.",
+			effects: [
+				{type: "advantage", target: "save", conditional: "when the save is forced by a Fiend or Undead"},
+				{type: "enemyTurnStartDamage", damageType: "radiant", abilityMod: "cha", useProficiency: true, minimum: 0, radius: 30},
+				{type: "light", lightType: "sunlight", brightRadius: 30},
+			],
+			duration: "10 minutes",
+			endConditions: ["You end the effect"],
+			activationAction: "bonus",
+			resourceName: "Holy Nimbus",
+			resourceCost: 1,
 		},
 		astralArms: {
 			id: "astralArms",
@@ -44619,6 +44734,8 @@ class CharacterSheetState {
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 		const isXphbLight = (feature.classSource || feature.source) === "XPHB"
 			&& (feature.subclassShortName || "").toLowerCase() === "light";
+		const isXphbDevotion = (feature.classSource || feature.source) === "XPHB"
+			&& (feature.subclassShortName || "").toLowerCase() === "devotion";
 		if (isXphbLight && name === "radiance of the dawn") {
 			return this._buildAbilityActivationInfo(feature, rawText, text, {resourceName: "Channel Divinity"});
 		}
@@ -44639,6 +44756,40 @@ class CharacterSheetState {
 				interactionMode: "toggle",
 				isToggle: true,
 				duration: "1 minute",
+			};
+		}
+		if (isXphbDevotion && name === "sacred weapon") {
+			return {
+				stateTypeId: "sacredWeapon",
+				stateType: this.ACTIVE_STATE_TYPES.sacredWeapon,
+				matchedBy: "xphbDevotion",
+				activationAction: "attack",
+				interactionMode: "toggle",
+				isToggle: true,
+				duration: "10 minutes",
+				resourceName: "Channel Divinity",
+				resourceCost: 1,
+				needsWeaponChoice: true,
+				weaponFilter: "melee",
+				weaponScopedEffects: [
+					{type: "bonus", target: "attack", abilityMod: "cha", minimum: 1},
+					{type: "damageTypeChoice", choices: ["weapon", "radiant"]},
+					{type: "light", brightRadius: 20, dimRadius: 40},
+				],
+			};
+		}
+		if (isXphbDevotion && name === "holy nimbus") {
+			return {
+				stateTypeId: "holyNimbus",
+				stateType: this.ACTIVE_STATE_TYPES.holyNimbus,
+				matchedBy: "xphbDevotion",
+				activationAction: "bonus",
+				interactionMode: "toggle",
+				isToggle: true,
+				duration: "10 minutes",
+				resourceName: "Holy Nimbus",
+				resourceCost: 1,
+				restoreWithSpellSlotLevel: 5,
 			};
 		}
 		if (isCrimsonRite) {
@@ -47929,6 +48080,7 @@ class CharacterSheetState {
 		const effects = this.getActiveStateEffects();
 		return effects.some(e => {
 			if (e.type !== "advantage") return false;
+			if (e.conditional) return false;
 			// Skip "attacksAgainst" effects - those are for enemies attacking YOU, not your rolls
 			if (e.target?.includes("Against")) return false;
 			// Exact match
@@ -47959,6 +48111,7 @@ class CharacterSheetState {
 		const effects = this.getActiveStateEffects();
 		return effects.some(e => {
 			if (e.type !== "disadvantage") return false;
+			if (e.conditional) return false;
 			// Skip "attacksAgainst" effects - those are for enemies attacking YOU, not your rolls
 			if (e.target?.includes("Against")) return false;
 			// Exact match
@@ -47979,17 +48132,20 @@ class CharacterSheetState {
 	/**
 	 * Get bonus to a specific stat from active states
 	 * @param {string} target - The target (e.g., "ac", "attack", "damage")
+	 * @param {object} [context]
+	 * @param {string} [context.weaponId] - Scope weapon-bound effects to the rolled weapon.
 	 * @returns {number} The total bonus
 	 */
-	getBonusFromStates (target) {
+	getBonusFromStates (target, {weaponId = null} = {}) {
 		const effects = this.getActiveStateEffects();
 		let bonus = 0;
 		effects
 			.filter(e => e.type === "bonus" && e.target === target)
+			.filter(e => !e.weaponId || e.weaponId === weaponId)
 			.forEach(e => {
 				if (e.abilityMod) {
 					// Add ability modifier (e.g., Bladesong adds INT to AC)
-					bonus += this.getAbilityMod(e.abilityMod);
+					bonus += Math.max(e.minimum ?? -Infinity, this.getAbilityMod(e.abilityMod));
 				} else if (e.useProficiency) {
 					bonus += this.getProficiencyBonus();
 				} else {
@@ -47997,6 +48153,32 @@ class CharacterSheetState {
 				}
 			});
 		return bonus;
+	}
+
+	getWeaponDamageTypeChoices (weaponId, baseDamageType) {
+		const effect = this.getActiveStateEffects().find(it =>
+			it.type === "damageTypeChoice"
+			&& it.weaponId === weaponId);
+		if (!effect) return [baseDamageType];
+		return [...new Set((effect.choices || [])
+			.map(choice => choice === "weapon" ? baseDamageType : choice)
+			.filter(Boolean))];
+	}
+
+	getEnemyTurnStartDamageEffects () {
+		return this.getActiveStateEffects()
+			.filter(effect => effect.type === "enemyTurnStartDamage")
+			.map(effect => {
+				let damage = Number(effect.value) || 0;
+				if (effect.abilityMod) damage += this.getAbilityMod(effect.abilityMod);
+				if (effect.useProficiency) damage += this.getProficiencyBonus();
+				return {
+					source: effect.stateName,
+					damage: Math.max(effect.minimum ?? -Infinity, damage),
+					damageType: effect.damageType,
+					radius: effect.radius,
+				};
+			});
 	}
 
 	/**

@@ -1390,7 +1390,7 @@ class CharacterSheetCombat {
 		const featureAttackBonus = attackContributions.reduce((sum, c) => sum + (c.value || 0), 0);
 
 		// Get bonus from active states (activated abilities like combat stances)
-		const stateAttackBonus = this._state.getBonusFromStates?.("attack") || 0;
+		const stateAttackBonus = this._state.getBonusFromStates?.("attack", {weaponId: attack.riteWeaponId || attack.id}) || 0;
 
 		// Combat-tab-local contributors (e.g. Flanking) feed the SAME total via a
 		// generic pre-roll hook so other positional/tactical modifiers can plug in.
@@ -2664,6 +2664,17 @@ class CharacterSheetCombat {
 		const damageExpression = isAutoWeapon && attack.sourceItem?.attackOverrides?.damage == null
 			? this._getEffectiveWeaponDamageDie(attack.sourceItem)
 			: attack.damage;
+		const weaponDamageTypes = this._state.getWeaponDamageTypeChoices?.(attack.riteWeaponId || attack.id, attack.damageType) || [attack.damageType];
+		let weaponDamageType = weaponDamageTypes[0];
+		if (weaponDamageTypes.length > 1) {
+			weaponDamageType = await InputUiUtil.pGetUserEnum({
+				title: `${attack.name} — Choose Damage Type`,
+				values: weaponDamageTypes,
+				fnDisplay: it => it.charAt(0).toUpperCase() + it.slice(1),
+				isResolveItem: true,
+			});
+			if (!weaponDamageType) return;
+		}
 		let destructiveWrathApplied = false;
 		const rollTypedDamage = (formula, damageType, crit = isCrit) => {
 			const maximize = !destructiveWrathApplied && this._state.canApplyPendingDamageMaximization?.(damageType);
@@ -2671,7 +2682,7 @@ class CharacterSheetCombat {
 			if (maximize && this._state.consumePendingDamageMaximization?.(damageType)) destructiveWrathApplied = true;
 			return roll;
 		};
-		const damageRoll = rollTypedDamage(damageExpression, attack.damageType);
+		const damageRoll = rollTypedDamage(damageExpression, weaponDamageType);
 		const abilityMod = this._state.getWeaponAbilityMod(attack);
 
 		// Doubleshot (#20, S4-owned): a pending one-shot rider that grants +1 weapon
@@ -2713,7 +2724,7 @@ class CharacterSheetCombat {
 		const itemWeaponDamageBonus = itemWeaponDamageContribs.reduce((sum, c) => sum + (c.value || 0), 0);
 
 		// Get bonus from active states (activated abilities)
-		const stateDamageBonus = this._state.getBonusFromStates?.("damage") || 0;
+		const stateDamageBonus = this._state.getBonusFromStates?.("damage", {weaponId: attack.riteWeaponId || attack.id}) || 0;
 		const bloodHunterCalc = this._state.getFeatureCalculations?.() || {};
 		const hybridDamageBonus = this._state.isStateTypeActive?.("hybridTransformation") && this._getAttackRollKind(attack).isMelee && !attack.isSpell
 			? (bloodHunterCalc.hybridDamageBonus || 0)
@@ -2775,7 +2786,7 @@ class CharacterSheetCombat {
 		// Active ammunition (Bug #3): resolved once so its flat bonus folds into the
 		// weapon-typed total and its dice ride the riderParts pipeline. Null = Regular.
 		const ammoForDamage = !attack.isSpell ? this._getSelectedAmmoForWeapon(attack.sourceItem?.id) : null;
-		const weaponDamageTypeForAmmo = attack.damageType;
+		const weaponDamageTypeForAmmo = weaponDamageType;
 		let ammoFlatDamageBonus = 0;
 		if (!attack.isSpell) {
 			const weaponRiders = this._state.getFeatureCalculations?.()?.weaponDamageRiders || [];
@@ -2786,7 +2797,7 @@ class CharacterSheetCombat {
 				// hit (rider.perTurn === false) and are never marked used.
 				const oncePerTurn = rider.perTurn !== false;
 				if (oncePerTurn && !this._isRiderAvailableThisTurn(rider.id)) continue;
-				const riderRoll = rollTypedDamage(rider.dice, rider.damageType || attack.damageType);
+				const riderRoll = rollTypedDamage(rider.dice, rider.damageType || weaponDamageType);
 				riderDamageTotal += riderRoll.total;
 				riderParts.push({name: rider.name, dice: rider.dice, total: riderRoll.total, type: rider.damageType});
 				riderRollsForAnim.push(riderRoll);
@@ -2797,9 +2808,9 @@ class CharacterSheetCombat {
 			if (juggernautTarget === "construct") {
 				const constructDice = this._state.getFeatureCalculations?.().demolishingMightConstructDamage;
 				if (constructDice) {
-					const constructRoll = rollTypedDamage(constructDice, attack.damageType);
+					const constructRoll = rollTypedDamage(constructDice, weaponDamageType);
 					riderDamageTotal += constructRoll.total;
-					riderParts.push({name: "Demolishing Might", dice: constructDice, total: constructRoll.total, type: attack.damageType});
+					riderParts.push({name: "Demolishing Might", dice: constructDice, total: constructRoll.total, type: weaponDamageType});
 					riderRollsForAnim.push(constructRoll);
 				}
 			}
@@ -2899,7 +2910,6 @@ class CharacterSheetCombat {
 		// must be reported under THEIR type, not folded into the weapon-typed total (bugs
 		// #10/#12: Terrorizing Force / Hellish Avenger printed the weapon's type). Riders with
 		// no type (Colossus Slayer, Focused Quarry, …) share the weapon's type as before.
-		const weaponDamageType = attack.damageType;
 		let riderSameTypeTotal = 0;
 		const riderTypedParts = [];
 		for (const rp of riderParts) {
@@ -2938,7 +2948,7 @@ class CharacterSheetCombat {
 		// the trailing weapon-type word below.
 		if (doubleshotDamage) subtitle += ` + ${doubleshotDamage} (Doubleshot 2nd arrow ${doubleshotDie})`;
 		if (battleMasterDamage) subtitle += ` + ${battleMasterDamage} (${battleMasterName})`;
-		subtitle += ` ${attack.damageType}`;
+		subtitle += ` ${weaponDamageType}`;
 		if (handOfHarmDamage) subtitle += ` | <strong style="color:#9b59b6">+${handOfHarmDamage} necrotic</strong> (Hand of Harm ${handOfHarmFormula})`;
 		if (methodEffectDamage) subtitle += ` | <strong style="color:#c44">+${methodEffectDamage} ongoing</strong> (${methodEffectApplied.name} ${methodEffectFormula}${methodEffectApplied.ongoingSaveType ? `, ${methodEffectApplied.ongoingSaveType.charAt(0).toUpperCase() + methodEffectApplied.ongoingSaveType.slice(1)} DC ${methodEffectApplied.saveDc} to end` : ""})`;
 		if (channelSpellDamage) subtitle += ` | <strong style="color:#e056fd">+${channelSpellDamage} ${channelSpell.damageType}</strong> (${channelSpell.spellName} on hit ${channelSpell.dice})`;
@@ -2946,7 +2956,7 @@ class CharacterSheetCombat {
 		if (destructiveWrathApplied) subtitle += " | <strong>Destructive Wrath: maximized</strong>";
 		if (targetMultiplier > 1) subtitle += ` | <strong>Demolishing Might: ×${targetMultiplier} vs ${juggernautTarget}</strong>`;
 		if (juggernautOutcome) subtitle += ` | ${juggernautOutcome}`;
-		const triggeredDamageTypes = new Set([attack.damageType, ...riderParts.map(it => it.type), channelSpell?.damageType].filter(Boolean));
+		const triggeredDamageTypes = new Set([weaponDamageType, ...riderParts.map(it => it.type), channelSpell?.damageType].filter(Boolean));
 		const triggeredEffects = [...triggeredDamageTypes].flatMap(type => this._state.getTriggeredDamageEffects?.(type) || []);
 		triggeredEffects.push(...channelSpellTriggeredEffects);
 		const thunderboltStrike = triggeredEffects.find(it => it.type === "forcedMovement");
@@ -2971,7 +2981,7 @@ class CharacterSheetCombat {
 		if (channelSpellDamage) typedExtras.push(`${channelSpellDamage} ${channelSpell.damageType}`);
 		let totalTitle;
 		if (typedExtras.length) {
-			totalTitle = `${baseDamageTotal} ${attack.damageType} + ${typedExtras.join(" + ")} = ${totalBeforeTargetMultiplier}`;
+			totalTitle = `${baseDamageTotal} ${weaponDamageType} + ${typedExtras.join(" + ")} = ${totalBeforeTargetMultiplier}`;
 		}
 		if (targetMultiplier > 1) totalTitle = `${totalTitle || totalBeforeTargetMultiplier} × ${targetMultiplier} = ${total}`;
 		// Collect the actual dice rolled (count + type + per-die values) so the
@@ -4051,7 +4061,8 @@ class CharacterSheetCombat {
 		const {isMelee: attackIsMelee} = this._getAttackRollKind(attack);
 		const attackContributions = this._state.getAttackModifierContributions?.({isMelee: attackIsMelee}) || [];
 		const featureAttackBonus = attackContributions.reduce((sum, c) => sum + (c.value || 0), 0);
-		const totalAttackBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus;
+		const stateAttackBonus = this._state.getBonusFromStates?.("attack", {weaponId: attack.riteWeaponId || attack.id}) || 0;
+		const totalAttackBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + stateAttackBonus;
 		const totalDamageBonus = abilityMod + (attack.damageBonus || 0);
 		// Itemized tooltip for the to-hit badge so each contributing source is visible.
 		const atkBreakdownParts = [
@@ -4060,6 +4071,7 @@ class CharacterSheetCombat {
 		];
 		if (attack.attackBonus) atkBreakdownParts.push(`${attack.attackBonus >= 0 ? "+" : ""}${attack.attackBonus} weapon`);
 		attackContributions.forEach(c => atkBreakdownParts.push(`${c.value >= 0 ? "+" : ""}${c.value} ${c.name}`));
+		if (stateAttackBonus) atkBreakdownParts.push(`${stateAttackBonus >= 0 ? "+" : ""}${stateAttackBonus} active state`);
 		const atkBadgeTitle = atkBreakdownParts.join(", ");
 		const isAutoGenerated = attack.isAutoGenerated || attack.id?.startsWith?.("auto_");
 		const isNaturalWeapon = attack.isNaturalWeapon;

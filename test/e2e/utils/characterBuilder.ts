@@ -109,6 +109,24 @@ export const PRESET_FULL_XPHB_LIGHT_CLERIC: CharacterPreset = {
 	signatureSpells: ["Sacred Flame", "Bless", "Cure Wounds"],
 };
 
+export const PRESET_FULL_XPHB_DEVOTION_PALADIN: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	className: "Paladin",
+	classSource: "PHB'24",
+	prioritySources: ["XPHB"],
+	skipConditionalPrompt: true,
+	background: "Soldier",
+	bgSource: "PHB'24",
+	name: "Ser Calen Trueheart",
+	skillCount: 2,
+	masteryCount: 2,
+	optFeatCount: 1,
+	subclassName: "Oath of Devotion",
+	subclassSource: "PHB'24",
+	signatureSpells: ["Bless", "Divine Smite", "Shield of Faith"],
+};
+
 /** Bard — spellcaster with known spells */
 export const PRESET_BARD: CharacterPreset = {
 	race: "Aarakocra",

@@ -298,7 +298,7 @@ describe("Paladin Phase 2 Mechanics", () => {
 		state.setAbilityBase("cha", 18);
 	});
 
-	it("should detect capstone-style limited use features as activatable", () => {
+	it("should detect capstone-style limited-use states as activatable", () => {
 		state.addFeature({
 			name: "Holy Nimbus",
 			description: "As an action, you can emanate bright light and gain a radiant aura.",
@@ -311,7 +311,8 @@ describe("Paladin Phase 2 Mechanics", () => {
 		const holyNimbus = activatables.find(a => a.feature.name === "Holy Nimbus");
 
 		expect(holyNimbus).toBeDefined();
-		expect(holyNimbus.interactionMode).toBe("limited");
+		expect(holyNimbus.interactionMode).toBe("toggle");
+		expect(holyNimbus.stateTypeId).toBe("holyNimbus");
 		expect(holyNimbus.resource).toBeDefined();
 		expect(holyNimbus.resource.max).toBe(1);
 	});

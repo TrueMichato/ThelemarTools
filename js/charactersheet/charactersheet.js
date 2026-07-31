@@ -7468,6 +7468,11 @@ class CharacterSheetPage {
 					// Use resource cost from description detection, or resource object, or default
 					const resourceCost = resource?.cost || activationInfo.staminaCost || stateType?.resourceCost || 1;
 					const hasResourceAvailable = !resource || resource.current >= resourceCost;
+					const restoreSlotLevel = activationInfo.restoreWithSpellSlotLevel;
+					const canRestoreWithSlot = !!restoreSlotLevel
+						&& !!resource
+						&& resource.current < resource.max
+						&& this._state.getSpellSlotsCurrent(restoreSlotLevel) > 0;
 
 					// Determine if this is a limited-use ability (uses up charges, doesn't stay active)
 					const interactionMode = activationInfo.interactionMode || (activationInfo.isToggle ? "toggle" : "limited");
@@ -7506,6 +7511,9 @@ class CharacterSheetPage {
 							<div class="charsheet__state-controls ml-auto ve-flex-v-center">
 								${actionLabel ? `<span class="ve-small ve-muted mr-1">${actionLabel}</span>` : ""}
 								${resourceInfo ? `<span class="ve-small ve-muted mr-2" title="${resourceTooltip}">${resourceInfo}</span>` : ""}
+								${restoreSlotLevel ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__restore-with-slot-btn mr-1"
+									${canRestoreWithSlot ? "" : "disabled"}
+									title="Spend a level ${restoreSlotLevel} spell slot to restore one use">Slot ${restoreSlotLevel} → Use</button>` : ""}
 								<button class="ve-btn ve-btn-xs ve-btn-success charsheet__activate-btn" 
 									${!hasResourceAvailable ? `disabled title="Not enough ${resource?.name || "uses"} remaining"` : ""}>
 									${buttonText}
@@ -7516,6 +7524,13 @@ class CharacterSheetPage {
 
 					row.querySelector(".charsheet__activate-btn").addEventListener("click", () => {
 						this._activateFeatureState(feature, stateTypeId, stateType, resource, resourceCost, activationInfo);
+					});
+					row.querySelector(".charsheet__restore-with-slot-btn")?.addEventListener("click", () => {
+						if (!this._state.restoreFeatureUseWithSpellSlot(feature.id, restoreSlotLevel)) return;
+						this._saveCurrentCharacter();
+						this._renderResources();
+						this._renderActiveStates();
+						this._renderCharacter();
 					});
 
 					availableSection.append(row);
@@ -7559,6 +7574,23 @@ class CharacterSheetPage {
 						if (this._features) this._features._renderResources();
 						this._combat?.renderCombatStates?.();
 						this._renderCharacter();
+						return;
+					}
+					const sourceFeature = state.sourceFeatureId
+						? this._state.getFeatures().find(feature => feature.id === state.sourceFeatureId)
+						: null;
+					const activatable = sourceFeature
+						? this._state.getActivatableFeatures().find(it => it.feature.id === sourceFeature.id)
+						: null;
+					if (activatable?.resource) {
+						this._activateFeatureState(
+							sourceFeature,
+							activatable.stateTypeId,
+							activatable.activationInfo.stateType,
+							activatable.resource,
+							activatable.resource.cost || activatable.activationInfo.resourceCost || 1,
+							activatable.activationInfo,
+						);
 						return;
 					}
 					this._state.activateState(state.stateTypeId);
@@ -8041,6 +8073,7 @@ class CharacterSheetPage {
 		switch (actionType) {
 			case "bonus": return "🎯 Bonus";
 			case "action": return "⚔️ Action";
+			case "attack": return "⚔️ Attack";
 			case "reaction": return "↩️ Reaction";
 			case "free": return "✨ Free";
 			default: return "";
@@ -9316,6 +9349,31 @@ class CharacterSheetPage {
 
 		// Use passed cost, or fall back to state type default
 		const cost = resolvedCost;
+		let weaponScopedEffects = null;
+
+		if (activationInfo?.needsWeaponChoice) {
+			const weapons = (this._combat?.getAvailableWeaponAttacks?.() || [])
+				.filter(attack => attack.sourceItem)
+				.filter(attack => activationInfo.weaponFilter !== "melee"
+					|| (attack.isMelee !== false && !attack.isRanged));
+			if (!weapons.length) {
+				JqueryUtil.doToast({type: "warning", content: "Equip a melee weapon before using this feature."});
+				return;
+			}
+			const weapon = await InputUiUtil.pGetUserEnum({
+				title: `${feature.name} — Choose Weapon`,
+				values: weapons,
+				fnDisplay: it => it.name || "Weapon",
+				isResolveItem: true,
+			});
+			if (!weapon) return;
+			weaponScopedEffects = (activationInfo.weaponScopedEffects || []).map(effect => ({
+				...effect,
+				weaponId: weapon.id,
+				inventoryItemId: weapon.sourceItem?.id || null,
+				weaponName: weapon.name,
+			}));
+		}
 
 		// ===== ZODIAC FORM (Circle of the Zodiac): choose-before-deduct =====
 		// Open the constellation picker FIRST; only spend a Wild Shape use once
@@ -9462,7 +9520,7 @@ class CharacterSheetPage {
 				description: feature.description,
 				// Only use parsed effects for generic state types (like combatStance)
 				// Non-generic types (like recklessAttack, rage) use their predefined effects
-				customEffects: shouldParseEffects && parsedEffects?.length > 0 ? parsedEffects : null,
+				customEffects: weaponScopedEffects || (shouldParseEffects && parsedEffects?.length > 0 ? parsedEffects : null),
 			};
 			this._state.activateState(stateTypeId, customData);
 			const linkedStateId = stateType?.variablePointSpend?.linkedStateBySpend?.[variableSpend];
@@ -9570,11 +9628,15 @@ class CharacterSheetPage {
 		displayAttacks.forEach(attack => {
 			const abilityMod = this._state.getWeaponAbilityMod(attack);
 			const profBonus = this._state.getProficiencyBonus();
-			const totalAttackBonus = abilityMod + profBonus + (attack.attackBonus || 0);
+			const weaponId = attack.riteWeaponId || attack.id;
+			const stateAttackBonus = this._state.getBonusFromStates?.("attack", {weaponId}) || 0;
+			const totalAttackBonus = abilityMod + profBonus + (attack.attackBonus || 0) + stateAttackBonus;
 			const totalDamageBonus = abilityMod + (attack.damageBonus || 0);
 			const damageStr = totalDamageBonus >= 0
 				? `${attack.damage}+${totalDamageBonus}`
 				: `${attack.damage}${totalDamageBonus}`;
+			const damageTypes = this._state.getWeaponDamageTypeChoices?.(weaponId, attack.damageType) || [attack.damageType];
+			const damageTypeStr = damageTypes.filter(Boolean).join("/");
 
 			// Format range — reach-aware for melee attacks. Override the stored range
 			// only when reach is actually modified (character reach bonus or a Reach
@@ -9620,7 +9682,7 @@ class CharacterSheetPage {
 					</div>
 					<div class="charsheet__attack-stats">
 						<span class="charsheet__attack-bonus" title="Attack Bonus">${this._formatMod(totalAttackBonus)}</span>
-						<span class="charsheet__attack-damage" title="Damage">${damageStr} ${attack.damageType || ""}</span>
+						<span class="charsheet__attack-damage" title="Damage">${damageStr} ${damageTypeStr}</span>
 					</div>
 					<button class="ve-btn ve-btn-primary ve-btn-xs charsheet__attack-btn" title="Roll Attack">
 						<span class="glyphicon glyphicon-screenshot"></span> Roll
@@ -12780,6 +12842,19 @@ class CharacterSheetPage {
 		const aggregated = appliedConditionalIds.size
 			? this._state.aggregateModifiers(attackType, {appliedConditionalIds})
 			: probe;
+		const weaponId = attack.riteWeaponId || attack.id;
+		const stateAttackBonus = this._state.getBonusFromStates?.("attack", {weaponId}) || 0;
+		const weaponDamageTypes = this._state.getWeaponDamageTypeChoices?.(weaponId, attack.damageType) || [attack.damageType];
+		let weaponDamageType = weaponDamageTypes[0];
+		if (weaponDamageTypes.length > 1) {
+			weaponDamageType = await InputUiUtil.pGetUserEnum({
+				title: `${attack.name} — Choose Damage Type`,
+				values: weaponDamageTypes,
+				fnDisplay: it => it.charAt(0).toUpperCase() + it.slice(1),
+				isResolveItem: true,
+			});
+			if (!weaponDamageType) return;
+		}
 
 		// Check for advantage/disadvantage from active states + opted-in conditionals.
 		const hasAdvantage = this._state.hasAdvantageFromStates(attackType) || aggregated.advantage;
@@ -12796,7 +12871,7 @@ class CharacterSheetPage {
 		// INT). The weapon's normal mod is already baked into attack.attackBonus /
 		// attack.damage, so add only the (additive, never-baked-in) Bladesong delta.
 		const bladesongBonus = this._state.getBladesongWeaponBonus?.(attack) || 0;
-		const attackTotal = rollResult.roll + attack.attackBonus + conditionalAttackBonus + bladesongBonus - exhaustionPenalty;
+		const attackTotal = rollResult.roll + attack.attackBonus + conditionalAttackBonus + bladesongBonus + stateAttackBonus - exhaustionPenalty;
 
 		// Buff dice (e.g. Bless's 1d4) rolled into the attack total.
 		const stateDice = this._rollStateDiceBonuses(attackType);
@@ -12847,8 +12922,8 @@ class CharacterSheetPage {
 		this._showDiceResult(
 			`${attack.name}${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			attackTotalWithDice,
-			`Attack: ${this._formatD20Breakdown(rollResult, attack.attackBonus + bladesongBonus, exhaustionStr)}${diceBonusStr}
-			 Damage: ${attack.damage} = ${damageResult}${rageDamageStr}${stateDamageStr}${bladesongDamageStr}${totalBonusDamage > 0 ? ` → ${totalDamage}` : ""}`,
+			`Attack: ${this._formatD20Breakdown(rollResult, attack.attackBonus + bladesongBonus + stateAttackBonus, exhaustionStr)}${diceBonusStr}
+			 Damage: ${attack.damage} ${weaponDamageType || ""} = ${damageResult}${rageDamageStr}${stateDamageStr}${bladesongDamageStr}${totalBonusDamage > 0 ? ` → ${totalDamage}` : ""}`,
 			resultClass,
 			resultNote,
 		);

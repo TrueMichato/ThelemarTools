@@ -367,7 +367,15 @@ export class CharacterSheetPage {
 		const choiceModal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
 		if (await choiceModal.count()) {
 			const choice = choiceModal.locator("button.ve-btn").filter({hasText: /Spend \d+/}).first();
-			if (await choice.count()) await choice.click({timeout: 5000});
+			if (await choice.count()) {
+				await choice.click({timeout: 5000});
+			} else {
+				const enumSelect = choiceModal.locator("select.ve-form-control").first();
+				if (await enumSelect.count()) {
+					await enumSelect.selectOption({index: 1});
+					await choiceModal.getByRole("button", {name: /ok|confirm/i}).first().click({timeout: 5000});
+				}
+			}
 		}
 		await this.page.waitForTimeout(200);
 	}
@@ -790,21 +798,18 @@ export class CharacterSheetPage {
 	}
 
 	/**
-	 * "Roll" a skill check by clicking its roll button on the Abilities
+	 * "Roll" a skill check by clicking its row on the Overview
 	 * tab. Returns the read bonus and a flag indicating whether the roll
 	 * button was actually present and clickable. This is a smoke probe —
 	 * we don't assert dice outcome, only that:
 	 *   1. the bonus exists in state
 	 *   2. the button is wired up (no JS throw on click)
 	 *
-	 * If no clickable roll button exists, falls back to a state-only read
-	 * so the test can still assert the bonus value.
+	 * If no clickable row exists, the returned `clicked` flag is false.
 	 */
 	async rollSkill (skill: string): Promise<{bonus: number; clicked: boolean}> {
 		const bonus = await this.getSkillBonus(skill);
-		// Try the Abilities tab first; skill rolls live there in the
-		// 2024-style sheet, and on Combat tab in some legacy layouts.
-		await this.switchToTab(this.tabAbilities).catch(() => null);
+		await this.switchToTab(this.tabOverview).catch(() => null);
 		const re = new RegExp(`\\b${skill}\\b`, "i");
 		const row = this.page
 			.locator(".charsheet__skill-row, [data-skill]")
@@ -1208,7 +1213,7 @@ export class CharacterSheetPage {
 	 * page.evaluate so synchronous handler throws are captured.
 	 */
 	async clickSkillRollHard (skill: string): Promise<{clicked: boolean; threwError: boolean; errorMessage?: string}> {
-		await this.switchToTab(this.tabAbilities);
+		await this.switchToTab(this.tabOverview);
 		return this.page.evaluate((s) => {
 			const re = new RegExp(`\\b${s}\\b`, "i");
 			const rows = document.querySelectorAll(".charsheet__skill-row, [data-skill]") as NodeListOf<HTMLElement>;
