@@ -256,12 +256,17 @@ class NaturalWeaponParser {
 	/**
 	 * Check if feature text describes a natural weapon
 	 */
-	static isNaturalWeapon (text) {
+	static isNaturalWeapon (text, featureName = null) {
 		if (!text) return false;
 		const plainText = text.replace(/<[^>]*>/g, " ").toLowerCase();
-		// Handle both singular and plural forms: "natural weapon", "natural weapons", "natural melee weapons"
-		return /natural\s*(?:melee\s*)?weapons?|unarmed\s*strike.*(?:deal|damage)|melee\s*weapon\s*attack/i.test(plainText)
-			&& /\d+d\d+/i.test(plainText);
+		if (!/\d+d\d+/i.test(plainText)) return false;
+		if (/natural\s*(?:melee\s*)?weapons?|unarmed\s*strike.*(?:deal|damage)/i.test(plainText)) return true;
+		if (!/melee\s*weapon\s*attack/i.test(plainText)) return false;
+		if (featureName == null) return true;
+
+		const naturalWeaponName = /\b(?:talons?|claws?|bites?|fangs?|hooves?|horns?|tusks?|tails?|stings?|tentacles?|slams?|fists?)\b/i;
+		return naturalWeaponName.test(featureName)
+			|| new RegExp(`\\bwith (?:your|the) ${naturalWeaponName.source}`, "i").test(plainText);
 	}
 }
 
@@ -3775,6 +3780,20 @@ class CharacterSheetState {
 	static BASE_MELEE_REACH = 5;
 	/** Extra reach granted by a weapon's "Reach" property, in feet. */
 	static REACH_PROPERTY_BONUS = 5;
+
+	/**
+	 * Monotonic counter backing {@link _nextActiveStateId}. Active-state ids used
+	 * to be `${key}_${Date.now()}`, which collides whenever two states are added
+	 * within the same millisecond — trivially reachable both in tests and in the
+	 * app (e.g. a feature that applies several conditions at once). Anything that
+	 * keys state data by id then silently merges the colliding states.
+	 */
+	static _activeStateIdSeq = 0;
+
+	/** Build a process-unique active-state id. See {@link _activeStateIdSeq}. */
+	static _nextActiveStateId (key) {
+		return `${key}_${Date.now()}_${++CharacterSheetState._activeStateIdSeq}`;
+	}
 
 	static BATTLE_MASTER_MANEUVERS = {
 		"ambush": {action: "special", rollKind: "check", rollTargets: ["initiative", "check:dex:stealth"], appliesTo: "Initiative or Stealth check"},
@@ -11531,7 +11550,8 @@ class CharacterSheetState {
 		}
 
 		// Apply condition-based speed multiplier (Grappled/Restrained → 0, Slowed → ×0.5)
-		const speedMultiplier = this.getSpeedMultiplierFromConditions();
+		const ignoresSpeedReductions = this.hasSpeedReductionImmunityFromStates();
+		const speedMultiplier = ignoresSpeedReductions ? Math.max(1, this.getSpeedMultiplierFromConditions()) : this.getSpeedMultiplierFromConditions();
 
 		// Item speed bonuses from equipped/attuned magic items (e.g., Boots of Speed)
 		const itemSpeedBonus = this._data.itemBonuses?.speedBonus || {};
@@ -11548,7 +11568,7 @@ class CharacterSheetState {
 		const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus();
 		const rawWalk = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + darkAugmentationSpeedBonus + (itemSpeedBonus.walk || 0) + (itemSpeedBonus["*"] || 0);
 		const walkMultiplier = (itemSpeedMultiply.walk || 1) * (itemSpeedMultiply["*"] || 1);
-		const exhaustionSpeedPenalty = this._getExhaustionSpeedPenalty();
+		const exhaustionSpeedPenalty = ignoresSpeedReductions ? 0 : this._getExhaustionSpeedPenalty();
 		const walk = Math.max(0, Math.floor(rawWalk * walkMultiplier * speedMultiplier) - exhaustionSpeedPenalty);
 		const parts = [`${walk} ft.`];
 
@@ -11631,9 +11651,11 @@ class CharacterSheetState {
 		const adeptSpeedBonus = this.getAdeptSpeedBonus();
 		const gemstoneSpeedBonus = this.getGemstoneSpeedBonus();
 		const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus();
-		const armorPenalty = this.getArmorStrengthPenalty(); // -10 if STR requirement not met
+		const ignoresSpeedReductions = this.hasSpeedReductionImmunityFromStates();
+		const armorPenalty = ignoresSpeedReductions ? 0 : this.getArmorStrengthPenalty(); // -10 if STR requirement not met
 		const raw = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + darkAugmentationSpeedBonus + armorPenalty;
-		return Math.max(0, Math.floor(raw * this.getSpeedMultiplierFromConditions()) - this._getExhaustionSpeedPenalty());
+		const speedMultiplier = ignoresSpeedReductions ? Math.max(1, this.getSpeedMultiplierFromConditions()) : this.getSpeedMultiplierFromConditions();
+		return Math.max(0, Math.floor(raw * speedMultiplier) - (ignoresSpeedReductions ? 0 : this._getExhaustionSpeedPenalty()));
 	}
 
 	getSpeedByType (type) {
@@ -11642,7 +11664,8 @@ class CharacterSheetState {
 		const itemSpeedStatic = this._data.itemBonuses?.speedStatic || {};
 		const itemSpeedEqual = this._data.itemBonuses?.speedEqual || {};
 		const itemSpeedMultiply = this._data.itemBonuses?.speedMultiply || {};
-		const armorPenalty = this.getArmorStrengthPenalty(); // -10 if STR requirement not met
+		const ignoresSpeedReductions = this.hasSpeedReductionImmunityFromStates();
+		const armorPenalty = ignoresSpeedReductions ? 0 : this.getArmorStrengthPenalty(); // -10 if STR requirement not met
 
 		let base = this._data.speed[type] || 0;
 		// Apply static speed from items (e.g., Winged Boots granting fly 30)
@@ -11694,7 +11717,8 @@ class CharacterSheetState {
 		const typeMultiplier = (itemSpeedMultiply[type] || 1) * (itemSpeedMultiply["*"] || 1);
 
 		// Armor strength penalty applies to all movement types
-		return Math.max(0, Math.floor((base + bonus + armorPenalty) * typeMultiplier * this.getSpeedMultiplierFromConditions()) - this._getExhaustionSpeedPenalty());
+		const speedMultiplier = ignoresSpeedReductions ? Math.max(1, this.getSpeedMultiplierFromConditions()) : this.getSpeedMultiplierFromConditions();
+		return Math.max(0, Math.floor((base + bonus + armorPenalty) * typeMultiplier * speedMultiplier) - (ignoresSpeedReductions ? 0 : this._getExhaustionSpeedPenalty()));
 	}
 	// #endregion
 
@@ -17230,6 +17254,26 @@ class CharacterSheetState {
 								if (level >= 14) {
 									calculations.hasTravelAlongTheTree = true;
 								}
+								break;
+							}
+							case "path of the juggernaut":
+							case "juggernaut": {
+								if (!this._isJuggernautSubclass(cls.subclass)) break;
+
+								calculations.hasThunderousBlows = true;
+								calculations.thunderousBlowsDistance = level >= 10 ? 10 : 5;
+								calculations.juggernautSaveDc = 8 + profBonus + this.getAbilityMod("str");
+								calculations.hasSpiritOfTheMountain = true;
+
+								if (level >= 6) {
+									calculations.hasDemolishingMight = true;
+									calculations.demolishingMightConstructDamage = "1d8";
+									calculations.demolishingMightObjectMultiplier = 2;
+									calculations.hasResoluteStance = true;
+								}
+
+								if (level >= 10) calculations.hasHurricaneStrike = true;
+								if (level >= 14) calculations.hasUnstoppable = true;
 								break;
 							}
 							// ===== TGTT BARBARIAN SUBCLASSES =====
@@ -29681,7 +29725,7 @@ class CharacterSheetState {
 
 		// Add to active states with the condition's effects
 		const state = {
-			id: `${condKey}_${Date.now()}`,
+			id: CharacterSheetState._nextActiveStateId(condKey),
 			stateTypeId: condKey,
 			name: condDef.name || conditionName,
 			source: source,
@@ -32623,7 +32667,7 @@ class CharacterSheetState {
 		// Skip combat methods — they are not standalone attacks
 		const isCombatMethod = CharacterSheetClassUtils.isCombatMethod(feature);
 		const isStateScopedNaturalWeapon = feature.name === "Hybrid Transformation" && feature.className === "Blood Hunter";
-		if (!isCombatMethod && !isStateScopedNaturalWeapon && feature.description && NaturalWeaponParser.isNaturalWeapon(feature.description)) {
+		if (!isCombatMethod && !isStateScopedNaturalWeapon && feature.description && NaturalWeaponParser.isNaturalWeapon(feature.description, feature.name)) {
 			const naturalWeapon = NaturalWeaponParser.parseNaturalWeapon(feature.description, feature.name);
 			if (naturalWeapon) {
 				// TGTT house rule: natural weapons are finesse (use the better of STR/DEX).
@@ -42672,6 +42716,22 @@ class CharacterSheetState {
 			exclusiveWith: ["bladesong"], // Cannot rage and bladesong simultaneously
 			breaksConcentration: true, // Rage prevents maintaining concentration
 		},
+		resoluteStance: {
+			id: "resoluteStance",
+			name: "Resolute Stance",
+			icon: "⛰️",
+			description: "Brace until the start of your next turn: immunity to Grappled; weapon attacks by you and attacks against you have disadvantage.",
+			effects: [
+				{type: "conditionImmunity", target: "grappled"},
+				{type: "disadvantage", target: "attack", weaponOnly: true},
+				{type: "disadvantage", target: "attacksAgainst"},
+			],
+			trigger: {label: "Enter Stance", actionType: "free", effectType: "conditionImmunity"},
+			duration: "Until the start of your next turn",
+			endConditions: ["Start of your next turn"],
+			detectPatterns: ["resolute stance"],
+			activationAction: "free",
+		},
 		hybridTransformation: {
 			id: "hybridTransformation",
 			name: "Hybrid Transformation",
@@ -46702,7 +46762,7 @@ class CharacterSheetState {
 		}
 
 		const state = {
-			id: `${stateTypeId}_${Date.now()}`,
+			id: CharacterSheetState._nextActiveStateId(stateTypeId),
 			stateTypeId: stateTypeId,
 			name: options.name || stateType?.name || "Active State",
 			icon: options.icon || stateType?.icon || "⚡",
@@ -47267,11 +47327,33 @@ class CharacterSheetState {
 	 */
 	getActiveStateEffects () {
 		const effects = [];
+		// Keyed by the state OBJECT, not `state.id`: ids are only unique per
+		// millisecond (see `_nextActiveStateId`), and historic saves can still
+		// contain colliding ids. Keying on identity makes this correct
+		// regardless — a collision would otherwise make one state silently
+		// inherit the other's effects.
+		const activeRegularStateEffects = new Map();
+		for (const state of this._data.activeStates) {
+			if (!state.active || state.isCondition) continue;
+			const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId];
+			const stateEffects = [
+				...(state.customEffects || stateType?.effects || []),
+				...this._getSupplementalActiveStateEffects(state.stateTypeId),
+			];
+			activeRegularStateEffects.set(state, stateEffects);
+		}
+		const suppressedConditions = new Set(
+			[...activeRegularStateEffects.values()]
+				.flat()
+				.filter(effect => effect.type === "conditionImmunity")
+				.map(effect => `${effect.target || effect.condition || ""}`.toLowerCase()),
+		);
 		for (const state of this._data.activeStates) {
 			if (!state.active) continue;
 
 			// For condition-derived states, use customEffects directly
 			if (state.isCondition) {
+				if (suppressedConditions.has(`${state.conditionName || state.name || ""}`.toLowerCase())) continue;
 				const stateEffects = state.customEffects || [];
 				for (const effect of stateEffects) {
 					if (!this._isActiveStateEffectConditionMet(effect)) continue;
@@ -47292,7 +47374,7 @@ class CharacterSheetState {
 
 			// Use custom effects if provided, otherwise use state type's default effects
 			// For "custom" states without a stateType, only customEffects apply
-			const stateEffects = state.customEffects || stateType?.effects || [];
+			const stateEffects = activeRegularStateEffects.get(state) || [];
 
 			for (const effect of stateEffects) {
 				if (!this._isActiveStateEffectConditionMet(effect)) continue;
@@ -47306,6 +47388,32 @@ class CharacterSheetState {
 			}
 		}
 		return effects;
+	}
+
+	_getSupplementalActiveStateEffects (stateTypeId) {
+		if (stateTypeId !== "rage") return [];
+		const cls = this._data.classes.find(it => {
+			return it.name === "Barbarian" && this._isJuggernautSubclass(it.subclass);
+		});
+		if (!cls || cls.level < 3) return [];
+
+		const effects = [
+			{type: "conditionImmunity", target: "prone", source: "Spirit of the Mountain"},
+			{type: "forcedMovementImmunity", target: "ground", source: "Spirit of the Mountain"},
+		];
+		if (cls.level >= 14) {
+			for (const target of ["frightened", "paralyzed", "stunned"]) {
+				effects.push({type: "conditionImmunity", target, source: "Unstoppable"});
+			}
+			effects.push({type: "speedReductionImmunity", source: "Unstoppable"});
+		}
+		return effects;
+	}
+
+	_isJuggernautSubclass (subclass) {
+		const name = (subclass?.name || subclass?.shortName || "").toLowerCase();
+		if (name !== "path of the juggernaut" && name !== "juggernaut") return false;
+		return ["TalDoreiCampaignSettingReborn", "TGTT-2014"].includes(subclass?.source);
 	}
 
 	/**
@@ -47676,6 +47784,17 @@ class CharacterSheetState {
 		return effects.some(e =>
 			e.type === "conditionImmunity"
 			&& ((e.target || "").toLowerCase() === condLower || (e.condition || "").toLowerCase() === condLower),
+		);
+	}
+
+	hasSpeedReductionImmunityFromStates () {
+		return this.getActiveStateEffects().some(effect => effect.type === "speedReductionImmunity");
+	}
+
+	hasForcedMovementImmunityFromStates (movementType = "ground") {
+		return this.getActiveStateEffects().some(effect =>
+			effect.type === "forcedMovementImmunity"
+			&& (!effect.target || effect.target === movementType),
 		);
 	}
 

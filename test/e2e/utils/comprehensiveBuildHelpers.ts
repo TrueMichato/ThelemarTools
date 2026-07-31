@@ -635,6 +635,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "spellSaveDc"; min?: number; exact?: number}
 	| {kind: "speed"; type?: SpeedType; min?: number; exact?: number}
 	| {kind: "initiative"; min?: number; exact?: number}
+	| {kind: "featureCalculation"; property: string; min?: number; exact?: number | string | boolean}
 	| {kind: "resistance"; damageType: string}
 	| {kind: "immunity"; damageType: string}
 	| {kind: "vulnerability"; damageType: string}
@@ -659,6 +660,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "toggleGrantsResistance"; damageType: string}
 	| {kind: "toggleGrantsAdvantage"; rollType: string}
 	| {kind: "toggleGrantsImmunity"; damageType: string}
+	| {kind: "toggleGrantsConditionImmunity"; condition: string}
 	| {kind: "toggleAddsAttack"; namePattern: string | RegExp}
 
 	// === Roll: clicking the button doesn't throw ===
@@ -759,6 +761,7 @@ const _TOGGLE_EFFECT_KINDS = new Set([
 	"toggleGrantsResistance",
 	"toggleGrantsAdvantage",
 	"toggleGrantsImmunity",
+	"toggleGrantsConditionImmunity",
 	"toggleAddsAttack",
 ]);
 
@@ -823,6 +826,18 @@ async function _runPassiveOrRollEffect (
 		case "initiative": {
 			const v = await charSheet.getInitiativeBonusFromState();
 			_checkNumeric(v, e, `init`);
+			return;
+		}
+		case "featureCalculation": {
+			const value = await charSheet.page.evaluate((property) => {
+				const cs: any = (globalThis as any).charSheet;
+				return cs?._state?.getFeatureCalculations?.()?.[property] ?? null;
+			}, e.property);
+			if (e.exact !== undefined && value !== e.exact) throw new Error(`featureCalculation.${e.property}=${value}, expected ${e.exact}`);
+			if (e.min !== undefined && (!(typeof value === "number") || value < e.min)) {
+				throw new Error(`featureCalculation.${e.property}=${value}, expected >= ${e.min}`);
+			}
+			if (e.exact === undefined && e.min === undefined && value == null) throw new Error(`featureCalculation.${e.property} is absent`);
 			return;
 		}
 		case "resistance": {
@@ -1093,6 +1108,7 @@ async function _runToggleEffect (
 	beforeImm: string[],
 	afterImm: string[],
 	advProbes: Map<string, {advBefore: boolean; advAfter: boolean}>,
+	conditionImmunityProbes: Map<string, {before: boolean; after: boolean}>,
 	abilityModsBefore: Record<string, number>,
 	beforeAttackNames: string[],
 	afterAttackNames: string[],
@@ -1139,6 +1155,13 @@ async function _runToggleEffect (
 			if (!probe) throw new Error(`internal: no adv probe captured for "${e.rollType}"`);
 			if (probe.advBefore) throw new Error(`already had advantage on "${e.rollType}" before toggle — can't probe`);
 			if (!probe.advAfter) throw new Error(`expected advantage on "${e.rollType}" after toggle, but state.getAdvantageState reports none`);
+			return;
+		}
+		case "toggleGrantsConditionImmunity": {
+			const probe = conditionImmunityProbes.get(e.condition);
+			if (!probe) throw new Error(`internal: no condition-immunity probe captured for "${e.condition}"`);
+			if (probe.before) throw new Error(`already had condition immunity "${e.condition}" before toggle — can't probe`);
+			if (!probe.after) throw new Error(`expected condition immunity "${e.condition}" after toggle`);
 			return;
 		}
 		case "toggleAddsAttack": {
@@ -1345,10 +1368,18 @@ export async function assertFeaturesMatrix (
 						const beforeImm = await charSheet.getImmunities();
 						const beforeAttackNames = await charSheet.getAttackNames();
 						const advProbes = new Map<string, {advBefore: boolean; advAfter: boolean}>();
+						const conditionImmunityProbes = new Map<string, {before: boolean; after: boolean}>();
 						for (const eff of toggleEffects) {
 							if (eff.kind === "toggleGrantsAdvantage") {
 								const s = await charSheet.getAdvantageState(eff.rollType);
 								advProbes.set(eff.rollType, {advBefore: s.advantage, advAfter: false});
+							}
+							if (eff.kind === "toggleGrantsConditionImmunity") {
+								const before = await charSheet.page.evaluate((condition) => {
+									const cs: any = (globalThis as any).charSheet;
+									return !!cs?._state?.hasConditionImmunityFromStates?.(condition);
+								}, eff.condition);
+								conditionImmunityProbes.set(eff.condition, {before, after: false});
 							}
 						}
 						let activated = false;
@@ -1365,10 +1396,17 @@ export async function assertFeaturesMatrix (
 									const probe = advProbes.get(eff.rollType)!;
 									probe.advAfter = s.advantage;
 								}
+								if (eff.kind === "toggleGrantsConditionImmunity") {
+									const probe = conditionImmunityProbes.get(eff.condition)!;
+									probe.after = await charSheet.page.evaluate((condition) => {
+										const cs: any = (globalThis as any).charSheet;
+										return !!cs?._state?.hasConditionImmunityFromStates?.(condition);
+									}, eff.condition);
+								}
 							}
 							for (const eff of toggleEffects) {
 								try {
-									await _runToggleEffect(eff, before, after, beforeRes, afterRes, beforeImm, afterImm, advProbes, before.abilityMods, beforeAttackNames, afterAttackNames);
+									await _runToggleEffect(eff, before, after, beforeRes, afterRes, beforeImm, afterImm, advProbes, conditionImmunityProbes, before.abilityMods, beforeAttackNames, afterAttackNames);
 								} catch (eErr: any) {
 									errors.push(`${label} effect ${eff.kind}: ${eErr.message}`);
 								}

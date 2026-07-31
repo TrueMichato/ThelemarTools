@@ -114,6 +114,20 @@ Feature attacks configure their ability through `abilityMod`. Their
 normal renderer and roller add the configured ability modifier and proficiency
 bonus.
 
+### Per-Hit Target Context and Chained Outcomes
+
+Features whose result depends on the struck target collect transient context
+inside the canonical damage roll; they do not create a parallel encounter
+model. Path of the Juggernaut's Demolishing Might asks whether a melee weapon
+hit targets a creature, construct, object, or structure. Construct damage adds
+a crit-compatible `1d8`; object/structure damage doubles the final total.
+
+Raging Juggernaut melee hits then surface Thunderous Blows as a resolved
+post-hit choice (distance, direction, target size, and the Huge+ Strength
+save). At level 10, a successful push can chain Hurricane Strike, consume the
+character's reaction, resolve the shared Strength save against Prone, and
+record the ally reaction opportunity in the attack result.
+
 The transient Attack-action tracker records attack provenance separately from
 bonus-action, reaction, and spell attacks. Astral Barrage consults that record
 to permit a third Astral Arms attack only while the current Attack action

@@ -95,6 +95,20 @@ All Ranger subclasses are fully implemented:
 - The former `2d10` Awakened bonus-damage calculation was removed because no
   such damage exists in the TCE feature.
 
+#### Barbarian: Path of the Juggernaut (TDCSR) ✅
+
+- Thunderous Blows resolves push use, distance, direction, and Huge+ Strength
+  saves in the melee-hit damage flow; its range scales from 5 to 10 feet.
+- Demolishing Might applies crit-compatible construct damage and doubles the
+  final damage total against objects and structures.
+- Resolute Stance is a tracked start-of-turn state with Grappled immunity and
+  both outgoing weapon-attack and incoming-attack disadvantage.
+- Hurricane Strike spends the Juggernaut's reaction, resolves its Prone save,
+  and surfaces the ally reaction attack opportunity after a qualifying push.
+- Spirit of the Mountain and Unstoppable augment canonical Rage with
+  non-destructive condition suppression, forced-movement protection, and
+  speed-reduction immunity.
+
 ---
 
 ## Remaining Implementation Gaps

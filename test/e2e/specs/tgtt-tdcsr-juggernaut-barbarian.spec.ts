@@ -1,0 +1,125 @@
+import {describeCharacter} from "../utils/characterSpecFactory";
+import {PRESET_FULL_JUGGERNAUT_BARBARIAN} from "../utils/characterBuilder";
+import {buildSpecialtyChecks, buildWeaponMasteryChecks} from "../utils/tgttFeaturePools";
+
+describeCharacter({
+	preset: PRESET_FULL_JUGGERNAUT_BARBARIAN,
+	displayName: "TDCSR Juggernaut Barbarian",
+	signatureToggle: /rage/i,
+	usage: {
+		atLevel: 5,
+		useResourceName: "Rage",
+		attackName: /unarmed|club|quarterstaff/i,
+		skillRoll: {name: "Athletics"},
+		shortRestRestores: {skip: true},
+		concentrationCheck: {castSpell: "Bless", thenAction: "rage", expectActive: false},
+		deathSaves: true,
+		applyCondition: {skip: true},
+		featAbility: {skip: true},
+	},
+	milestones: {
+		1: {totalLevel: 1, expectToggles: [/rage/i], expectResources: {"Rage": 2}},
+		3: {totalLevel: 3, expectResources: {"Rage": 3}},
+		5: {totalLevel: 5, expectResources: {"Rage": 3}},
+		11: {totalLevel: 11, expectResources: {"Rage": 4}},
+		17: {totalLevel: 17, expectResources: {"Rage": 6}},
+		20: {totalLevel: 20, expectToggles: [/persistent rage|indomitable might/i]},
+	},
+	featuresMatrix: [
+		...buildWeaponMasteryChecks(["Club", "Dagger"], 1),
+		{
+			level: 1,
+			name: /^rage$/i,
+			kind: "toggle",
+			skip: true,
+			skipReason: "CS-BUG-017",
+			toggleDelta: "any",
+			effects: [
+				{kind: "toggleGrantsAdvantage", rollType: "save:str"},
+				{kind: "toggleGrantsResistance", damageType: "bludgeoning"},
+			],
+		},
+		{level: 1, name: /unarmored defense/i, kind: "passive", effects: [{kind: "rollSavingThrow", ability: "str"}]},
+		{level: 2, name: /reckless attack/i, kind: "toggle", skip: true, skipReason: "CS-BUG-017", toggleDelta: "none"},
+		{level: 2, name: /danger sense/i, kind: "passive"},
+		{level: 5, name: /extra attack/i, kind: "passive", effects: [{kind: "featureCalculation", property: "extraAttackCount", exact: 2}]},
+		{level: 5, name: /fast movement/i, kind: "passive", effects: [{kind: "speed", type: "walk", min: 40}]},
+		{level: 7, name: /feral instinct/i, kind: "passive", effects: [{kind: "rollInitiative"}]},
+		{level: 9, name: /brutal strike/i, kind: "passive", effects: [{kind: "featureCalculation", property: "brutalStrikeDamage", exact: "1d10"}]},
+		{level: 11, name: /relentless rage/i, kind: "passive", effects: [{kind: "featureCalculation", property: "relentlessRageBaseDc", exact: 10}]},
+		{level: 15, name: /persistent rage/i, kind: "passive", effects: [{kind: "featureCalculation", property: "hasPersistentRage", exact: true}]},
+		{level: 18, name: /indomitable might/i, kind: "passive", effects: [{kind: "featureCalculation", property: "hasIndomitableMight", exact: true}]},
+		{level: 20, name: /primal champion/i, kind: "passive", effects: [{kind: "featureCalculation", property: "hasPrimalChampion", exact: true}]},
+		{
+			level: 3,
+			name: /thunderous blows/i,
+			kind: "passive",
+			effects: [
+				{kind: "featureCalculation", property: "thunderousBlowsDistance", exact: 5},
+				{kind: "featureCalculation", property: "juggernautSaveDc", min: 12},
+			],
+		},
+		{
+			level: 3,
+			name: /spirit of the mountain/i,
+			kind: "passive",
+			effects: [{kind: "featureCalculation", property: "hasSpiritOfTheMountain", exact: true}],
+		},
+		{
+			level: 3,
+			name: /^rage$/i,
+			kind: "toggle",
+			skip: true,
+			skipReason: "CS-BUG-017",
+			toggleDelta: "any",
+			effects: [{kind: "toggleGrantsConditionImmunity", condition: "prone"}],
+		},
+		{
+			level: 6,
+			name: /demolishing might/i,
+			kind: "passive",
+			effects: [
+				{kind: "featureCalculation", property: "demolishingMightConstructDamage", exact: "1d8"},
+				{kind: "featureCalculation", property: "demolishingMightObjectMultiplier", exact: 2},
+			],
+		},
+		{
+			level: 6,
+			name: /resolute stance/i,
+			kind: "toggle",
+			toggleDelta: "none",
+			effects: [
+				{kind: "toggleGrantsConditionImmunity", condition: "grappled"},
+			],
+		},
+		{
+			level: 10,
+			name: /hurricane strike/i,
+			kind: "passive",
+			effects: [
+				{kind: "featureCalculation", property: "hasHurricaneStrike", exact: true},
+				{kind: "featureCalculation", property: "thunderousBlowsDistance", exact: 10},
+			],
+		},
+		{
+			level: 14,
+			name: /unstoppable/i,
+			kind: "passive",
+			effects: [{kind: "featureCalculation", property: "hasUnstoppable", exact: true}],
+		},
+		{
+			level: 14,
+			name: /^rage$/i,
+			kind: "toggle",
+			skip: true,
+			skipReason: "CS-BUG-017",
+			toggleDelta: "any",
+			effects: [
+				{kind: "toggleGrantsConditionImmunity", condition: "frightened"},
+				{kind: "toggleGrantsConditionImmunity", condition: "paralyzed"},
+				{kind: "toggleGrantsConditionImmunity", condition: "stunned"},
+			],
+		},
+		...buildSpecialtyChecks("Barbarian"),
+	],
+});
