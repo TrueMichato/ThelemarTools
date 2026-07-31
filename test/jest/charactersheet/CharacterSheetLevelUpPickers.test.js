@@ -112,7 +112,7 @@ describe("Bug #9 — level-up render wiring (source guards)", () => {
 		// All Class Options render call sites carry the leveling class identity + new level.
 		const matches = SRC.match(/levelContext:\s*\{className:\s*classEntry\.name,\s*classSource:\s*classEntry\.source,\s*newClassLevel:\s*newLevel\}/g) || [];
 		expect(matches.length).toBeGreaterThanOrEqual(1);
-		expect(SRC).toMatch(/_renderStandardOptionalFeaturesLevelUp \([^)]*levelContext\s*=\s*null\)/);
+		expect(SRC).toMatch(/_renderStandardOptionalFeaturesLevelUp \([^)]*levelContext\s*=\s*null/);
 	});
 
 	it("builds the prereq context from the POST-increment level (total +1, bumped class level)", () => {

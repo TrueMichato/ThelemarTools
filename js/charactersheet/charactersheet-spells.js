@@ -2363,12 +2363,18 @@ class CharacterSheetSpells {
 			}
 		}
 
+		const effectiveSlotLevel = this._state.getDaemonologistEffectiveCastLevel?.(spell, selectedSlot.level) ?? selectedSlot.level;
 		const castResult = await this._showCastResult(
 			spell,
-			selectedSlot.level,
+			effectiveSlotLevel,
 			selectedSlot.isPact,
 			false,
-			castMeta,
+			{
+				...castMeta,
+				...(effectiveSlotLevel !== selectedSlot.level
+					? {daemonologistActualSlotLevel: selectedSlot.level, daemonologistImprovedSpell: true}
+					: {}),
+			},
 		);
 
 		// If user cancelled (e.g. target selection), refund the slot / resource

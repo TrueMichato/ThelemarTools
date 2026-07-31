@@ -104,9 +104,24 @@ class CharacterSheetQuickBuild {
 	async showFromBuilder ({classData, targetLevel, subclass = null, subclassChoice = null}) {
 		const classKey = `${classData.name}_${classData.source}`;
 		const existingClass = this._state.getClasses().find(c => c.name === classData.name && c.source === classData.source);
-		const normalizedSubclassChoice = CharacterSheetClassUtils.normalizeDivineSoulAffinity(subclassChoice)
-			|| CharacterSheetClassUtils.normalizeDivineSoulAffinity(existingClass?.subclassChoice);
-		const resolvedSubclass = subclass || existingClass?.subclass || null;
+		let normalizedSubclassChoice = CharacterSheetClassUtils.normalizeSubclassChoice(subclassChoice)
+			|| CharacterSheetClassUtils.normalizeSubclassChoice(existingClass?.subclassChoice);
+		let resolvedSubclass = subclass || existingClass?.subclass || null;
+		if (CharacterSheetClassUtils.hasNamedSubclassChoice(resolvedSubclass) && !normalizedSubclassChoice) {
+			const options = CharacterSheetClassUtils.getNamedSubclassChoiceOptions(resolvedSubclass);
+			const prompt = CharacterSheetClassUtils.getNamedSubclassChoicePrompt(resolvedSubclass);
+			normalizedSubclassChoice = await InputUiUtil.pGetUserEnum({
+				title: prompt?.title || "Subclass Choice",
+				values: options,
+				fnDisplay: opt => opt.name,
+				isResolveItem: true,
+				zIndex: 10002,
+				htmlDescription: `<div>${prompt?.description || "Choose your subclass path."}</div>`,
+			});
+			// A cancelled handoff must not leave a preselected subclass whose required
+			// nested choice can no longer be opened from the Quick Build subclass step.
+			if (!normalizedSubclassChoice) resolvedSubclass = null;
+		}
 
 		this._fromLevel = 1; // Builder creates at level 1
 		this._targetLevel = targetLevel;
@@ -1345,15 +1360,16 @@ class CharacterSheetQuickBuild {
 					else nameSpan.append(subclassLink);
 					item.addEventListener("click", async () => {
 						let subclassChoice = null;
-						if (CharacterSheetClassUtils.isDivineSoulSubclass(sc)) {
-							const affinityOptions = CharacterSheetClassUtils.getDivineSoulAffinityOptions(sc);
+						if (CharacterSheetClassUtils.hasNamedSubclassChoice(sc)) {
+							const choiceOptions = CharacterSheetClassUtils.getNamedSubclassChoiceOptions(sc);
+							const prompt = CharacterSheetClassUtils.getNamedSubclassChoicePrompt(sc);
 							subclassChoice = await InputUiUtil.pGetUserEnum({
-								title: "Divine Soul Affinity",
-								values: affinityOptions,
+								title: prompt?.title || "Subclass Choice",
+								values: choiceOptions,
 								fnDisplay: opt => opt.name,
 								isResolveItem: true,
 								zIndex: 10002,
-								htmlDescription: "<div>Choose the Divine Soul affinity that grants your extra spell and Cleric spell access.</div>",
+								htmlDescription: `<div>${prompt?.description || "Choose your subclass path."}</div>`,
 							});
 							if (!subclassChoice) return;
 						}
@@ -1363,7 +1379,7 @@ class CharacterSheetQuickBuild {
 						item.classList.add("selected");
 						item.querySelector("input[type=radio]").checked = true;
 						this._selections.subclasses[key] = sc;
-						this._selections.subclassChoices[key] = CharacterSheetClassUtils.normalizeDivineSoulAffinity(subclassChoice);
+						this._selections.subclassChoices[key] = CharacterSheetClassUtils.normalizeSubclassChoice(subclassChoice);
 					});
 					return item;
 				};
@@ -1803,6 +1819,10 @@ class CharacterSheetQuickBuild {
 					spells: this._state.getSpellsKnown?.() || [],
 					toolProficiencies: this._state.getToolProficiencies?.() || [],
 					state: this._state,
+					levelPrerequisiteClassAliases: CharacterSheetClassUtils.getOptionalFeaturePrerequisiteClassAliases(
+						this._classAllocations.find(alloc => alloc.className === gain.className && (!gain.classSource || alloc.classSource === gain.classSource))?.subclass,
+						gain.featureTypes,
+					),
 				};
 
 				choices.optionalFeatures = featOptSpecs.map(spec => ({
@@ -2664,6 +2684,12 @@ class CharacterSheetQuickBuild {
 			|| this._state.getClasses()
 				.find(cls => cls.name === gain.className && (!classSource || cls.source === classSource))
 				?.subclass?.source || classSource;
+		const activeSubclass = this._classAllocations
+			.find(alloc => alloc.className === gain.className && (!classSource || alloc.classSource === classSource))
+			?.subclass
+			|| this._state.getClasses()
+				.find(cls => cls.name === gain.className && (!classSource || cls.source === classSource))
+				?.subclass;
 		const editionFiltered = CharacterSheetClassUtils.filterOptFeaturesForTgttMetamagic(
 			CharacterSheetClassUtils.deduplicateOptFeaturesByEdition(filtered, {showAll, preserveFeatureTypes: ["MV:B"]}),
 			{enableTgtt, classSource},
@@ -2699,6 +2725,7 @@ class CharacterSheetQuickBuild {
 			spells: this._state.getSpellsKnown?.() || [],
 			toolProficiencies: this._state.getToolProficiencies?.() || [],
 			state: this._state,
+			levelPrerequisiteClassAliases: CharacterSheetClassUtils.getOptionalFeaturePrerequisiteClassAliases(activeSubclass, gain.featureTypes),
 		};
 
 		const enrichedOptions = sourceFiltered.map(opt => {
@@ -4784,6 +4811,8 @@ class CharacterSheetQuickBuild {
 						casterProgression: selectedSubclass.casterProgression,
 						spellcastingAbility: selectedSubclass.spellcastingAbility,
 						additionalSpells: selectedSubclass.additionalSpells,
+						subSubclassSpells: selectedSubclass.subSubclassSpells,
+						optionalfeatureProgression: selectedSubclass.optionalfeatureProgression,
 					};
 					if (selectedSubclass.casterProgression && !targetClass.casterProgression) {
 						targetClass.casterProgression = selectedSubclass.casterProgression;
@@ -4809,6 +4838,8 @@ class CharacterSheetQuickBuild {
 							casterProgression: selectedSubclass.casterProgression,
 							spellcastingAbility: selectedSubclass.spellcastingAbility,
 							additionalSpells: selectedSubclass.additionalSpells,
+							subSubclassSpells: selectedSubclass.subSubclassSpells,
+							optionalfeatureProgression: selectedSubclass.optionalfeatureProgression,
 						}
 						: null,
 					subclassChoice: this._selections.subclassChoices[`${className}_${classSource}`] || null,
@@ -5015,10 +5046,12 @@ class CharacterSheetQuickBuild {
 			});
 		}
 
-		const divineSoulClass = this._classAllocations.find(a => CharacterSheetClassUtils.isDivineSoulSubclass(this._selections.subclasses[`${a.className}_${a.classSource}`]));
-		if (divineSoulClass) {
-			this._state.setSubclassChoice(divineSoulClass.className, this._selections.subclassChoices[`${divineSoulClass.className}_${divineSoulClass.classSource}`]);
-			this._state.ensureDivineSoulKnownSpell(divineSoulClass.className);
+		const choiceClasses = this._classAllocations.filter(a => CharacterSheetClassUtils.hasNamedSubclassChoice(this._selections.subclasses[`${a.className}_${a.classSource}`]));
+		for (const choiceClass of choiceClasses) {
+			this._state.setSubclassChoice(choiceClass.className, this._selections.subclassChoices[`${choiceClass.className}_${choiceClass.classSource}`]);
+			if (CharacterSheetClassUtils.isDivineSoulSubclass(this._selections.subclasses[`${choiceClass.className}_${choiceClass.classSource}`])) {
+				this._state.ensureDivineSoulKnownSpell(choiceClass.className);
+			}
 		}
 
 		// Apply prepared spells (XPHB Warlock, etc.)
@@ -5337,7 +5370,7 @@ class CharacterSheetQuickBuild {
 		if (analysis.needsSubclass && subclass) {
 			entry.choices.subclass = {name: subclass.name, shortName: subclass.shortName, source: subclass.source};
 			const subclassChoice = this._selections.subclassChoices[`${analysis.className}_${analysis.classSource}`];
-			if (subclassChoice) entry.choices.subclassChoice = CharacterSheetClassUtils.normalizeDivineSoulAffinity(subclassChoice);
+			if (subclassChoice) entry.choices.subclassChoice = CharacterSheetClassUtils.normalizeSubclassChoice(subclassChoice);
 		}
 
 		// Optional features

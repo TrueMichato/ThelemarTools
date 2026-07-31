@@ -3981,6 +3981,7 @@ class CharacterSheetState {
 		if (src.prepared && !target.prepared) target.prepared = true;
 		if (src.spellcastingAbility && !target.spellcastingAbility) target.spellcastingAbility = src.spellcastingAbility;
 		if (src.isDivineSoulAffinity && !target.isDivineSoulAffinity) target.isDivineSoulAffinity = true;
+		if (src.isSubclassChoiceSpell && !target.isSubclassChoiceSpell) target.isSubclassChoiceSpell = true;
 		if (src.inSpellbook && !target.inSpellbook) target.inSpellbook = true;
 		if (target.linkedResourceId == null && src.linkedResourceId != null) target.linkedResourceId = src.linkedResourceId;
 		// Innate use tracking: keep the higher max, but NEVER restore spent uses — the
@@ -6982,12 +6983,12 @@ class CharacterSheetState {
 				existing.subclass = classData.subclass;
 			}
 			if (classData.subclassChoice !== undefined) {
-				existing.subclassChoice = CharacterSheetClassUtils.normalizeDivineSoulAffinity(classData.subclassChoice);
+				existing.subclassChoice = CharacterSheetClassUtils.normalizeSubclassChoice(classData.subclassChoice);
 			}
 		} else {
 			this._data.classes.push({
 				...classData,
-				subclassChoice: CharacterSheetClassUtils.normalizeDivineSoulAffinity(classData.subclassChoice),
+				subclassChoice: CharacterSheetClassUtils.normalizeSubclassChoice(classData.subclassChoice),
 			});
 		}
 		this._syncXpToCurrentLevelFloor();
@@ -7357,6 +7358,9 @@ class CharacterSheetState {
 				const prevEffective = CharacterSheetClassUtils.getEffectiveDivineSoulSpell(classEntry.subclass, classEntry.subclassChoice, classEntry.divineSoulSpellOverride);
 				if (prevEffective) this._removeDivineSoulAffinityEntry(classEntry.subclass, className, prevEffective);
 			}
+			if (CharacterSheetClassUtils.hasNamedSubclassChoice(classEntry.subclass)) {
+				this._reconcileSubclassChoiceSpellGrants(classEntry, []);
+			}
 			classEntry.subclass = null;
 			if (classEntry.divineSoulSpellOverride) delete classEntry.divineSoulSpellOverride;
 			// Clear any per-subclass selection (e.g. Divine Soul affinity) so re-leveling re-prompts cleanly.
@@ -7533,6 +7537,7 @@ class CharacterSheetState {
 		if (classEntry) {
 			const wasDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(classEntry.subclass);
 			const willBeDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(subclass);
+			const willHaveNamedChoice = CharacterSheetClassUtils.hasNamedSubclassChoice(subclass);
 			// Switching away from Divine Soul: remove the orphaned affinity spell
 			// (computed from the OLD subclass) before reassigning.
 			if (wasDivineSoul && !willBeDivineSoul) {
@@ -7540,8 +7545,10 @@ class CharacterSheetState {
 				if (prevEffective) this._removeDivineSoulAffinityEntry(classEntry.subclass, className, prevEffective);
 			}
 			classEntry.subclass = subclass;
-			if (!willBeDivineSoul) {
+			if (!willHaveNamedChoice) {
 				classEntry.subclassChoice = null;
+			}
+			if (!willBeDivineSoul) {
 				// The affinity-spell override only makes sense for Divine Soul.
 				if (classEntry.divineSoulSpellOverride) delete classEntry.divineSoulSpellOverride;
 			}
@@ -7552,20 +7559,20 @@ class CharacterSheetState {
 
 	getSubclassChoice (className) {
 		const classEntry = this._data.classes.find(c => c.name === className);
-		return CharacterSheetClassUtils.normalizeDivineSoulAffinity(classEntry?.subclassChoice);
+		return CharacterSheetClassUtils.normalizeSubclassChoice(classEntry?.subclassChoice);
 	}
 
 	setSubclassChoice (className, subclassChoice) {
 		const classEntry = this._data.classes.find(c => c.name === className);
 		if (!classEntry) return false;
-		const prevKey = CharacterSheetClassUtils.normalizeDivineSoulAffinity(classEntry.subclassChoice)?.key;
+		const prevKey = CharacterSheetClassUtils.normalizeSubclassChoice(classEntry.subclassChoice)?.key;
 		// Resolve the previously-granted affinity spell BEFORE mutating so we can
 		// clean it up if the affinity actually changes.
 		const prevEffective = CharacterSheetClassUtils.isDivineSoulSubclass(classEntry.subclass)
 			? CharacterSheetClassUtils.getEffectiveDivineSoulSpell(classEntry.subclass, classEntry.subclassChoice, classEntry.divineSoulSpellOverride)
 			: null;
 
-		classEntry.subclassChoice = CharacterSheetClassUtils.normalizeDivineSoulAffinity(subclassChoice);
+		classEntry.subclassChoice = CharacterSheetClassUtils.normalizeSubclassChoice(subclassChoice);
 		const newKey = classEntry.subclassChoice?.key;
 
 		if (prevKey !== newKey) {
@@ -7575,7 +7582,118 @@ class CharacterSheetState {
 			// Remove the stale affinity grant so the new affinity's spell (added by
 			// the next populateSubclassSpells) doesn't leave an orphan behind.
 			if (prevEffective) this._removeDivineSoulAffinityEntry(classEntry.subclass, className, prevEffective);
+			// Divine Soul retains its explicit affinity-spell insertion flow.
+			if (CharacterSheetClassUtils.isDaemonologistSubclass(classEntry.subclass)) {
+				this.populateSubclassSpells();
+				this.applyClassFeatureEffects();
+			}
 		}
+		return true;
+	}
+
+	getDaemonologistClass () {
+		return (this._data.classes || []).find(cls =>
+			cls.name === "Wizard"
+			&& CharacterSheetClassUtils.isDaemonologistSubclass(this.getEffectiveSubclassForClass(cls)),
+		) || null;
+	}
+
+	getDaemonologistSide () {
+		return CharacterSheetClassUtils.normalizeSubclassChoice(this.getDaemonologistClass()?.subclassChoice);
+	}
+
+	setDaemonologistSide (subclassChoice) {
+		const cls = this.getDaemonologistClass();
+		if (!cls) return false;
+		const choice = CharacterSheetClassUtils.normalizeSubclassChoice(subclassChoice);
+		if (!["arch daemon", "arch seraph"].includes(choice?.key)) return false;
+		return this.setSubclassChoice(cls.name, choice);
+	}
+
+	_getFeatureResourceByName (featureName) {
+		const feature = (this._data.features || []).find(it => it.name === featureName);
+		if (!feature) return null;
+		return (this._data.resources || []).find(resource =>
+			resource.featureId === feature.id || resource.name === feature.name,
+		) || null;
+	}
+
+	switchDaemonologistSide ({consumeUse = true} = {}) {
+		const cls = this.getDaemonologistClass();
+		if (!cls || (cls.level || 0) < 6) return false;
+		const current = this.getDaemonologistSide();
+		if (!current) return false;
+		if (consumeUse) {
+			const resource = this._getFeatureResourceByName("Borrowed Tongues and Hides");
+			if (!resource || resource.current < 1) return false;
+			this.setResourceCurrent(resource.id, resource.current - 1);
+		}
+		return this.setDaemonologistSide(current.key === "arch daemon" ? "Arch Seraph" : "Arch Daemon");
+	}
+
+	canCommunicateWithCreatureType (creatureType) {
+		const calculations = this.getFeatureCalculations();
+		return calculations.hasBorrowedTonguesAndHides
+			&& calculations.daemonologistCommunicationCreatureType === String(creatureType || "").toLowerCase();
+	}
+
+	isDaemonologistTableSpell (spell) {
+		if (!spell?.name) return false;
+		const cls = this.getDaemonologistClass();
+		const tables = cls?.subclass?.subSubclassSpells;
+		if (!tables) return false;
+		const id = `${spell.name}|${spell.source || Parser.SRC_PHB}`.toLowerCase();
+		return Object.values(tables).flat().some(ref => String(ref).toLowerCase() === id);
+	}
+
+	getDaemonologistEffectiveCastLevel (spell, slotLevel) {
+		if (!Number.isInteger(slotLevel) || slotLevel < 1) return slotLevel;
+		if (!this.isStateTypeActive("unearthlyCountenance") || !this.isDaemonologistTableSpell(spell)) return slotLevel;
+		return Math.min(9, slotLevel + 1);
+	}
+
+	restoreUnearthlyCountenanceUse (slotLevel) {
+		const cls = this.getDaemonologistClass();
+		if (!cls || (cls.level || 0) < 10 || slotLevel < 5 || slotLevel > 9) return false;
+		const slot = this._data.spellcasting.spellSlots[slotLevel];
+		const resource = this._getFeatureResourceByName("Unearthly Countenance");
+		if (!slot || slot.current < 1 || !resource || resource.current >= resource.max) return false;
+		slot.current--;
+		this.setResourceCurrent(resource.id, resource.current + 1);
+		return true;
+	}
+
+	canRestoreUnearthlyCountenanceUse () {
+		const resource = this._getFeatureResourceByName("Unearthly Countenance");
+		if (!resource || resource.current >= resource.max) return false;
+		return Object.entries(this._data.spellcasting.spellSlots || {})
+			.some(([level, slot]) => Number(level) >= 5 && slot.current > 0);
+	}
+
+	activateUnearthlyCountenance () {
+		const cls = this.getDaemonologistClass();
+		if (!cls || (cls.level || 0) < 10) return false;
+		const resource = this._getFeatureResourceByName("Unearthly Countenance");
+		if (!resource || resource.current < 1) return false;
+		this.setResourceCurrent(resource.id, resource.current - 1);
+		return !!this.activateState("unearthlyCountenance", {
+			sourceFeatureId: (this._data.features || []).find(it => it.name === "Unearthly Countenance")?.id,
+		});
+	}
+
+	useEternalWarEruption ({restoreSlotLevel = null, switchSides = false} = {}) {
+		const cls = this.getDaemonologistClass();
+		if (!cls || (cls.level || 0) < 14) return false;
+		const resource = this._getFeatureResourceByName("Eternal War Eruption");
+		if (!resource || resource.current < 1) return false;
+		if (restoreSlotLevel != null) {
+			const slot = this._data.spellcasting.spellSlots[restoreSlotLevel];
+			if (restoreSlotLevel < 1 || restoreSlotLevel > 5 || !slot || slot.current >= slot.max) return false;
+		}
+
+		this.setResourceCurrent(resource.id, resource.current - 1);
+		if (restoreSlotLevel != null) this._data.spellcasting.spellSlots[restoreSlotLevel].current++;
+		if (switchSides) this.switchDaemonologistSide({consumeUse: false});
 		return true;
 	}
 
@@ -13414,6 +13532,7 @@ class CharacterSheetState {
 		if (!additionalSpells?.length) return [];
 
 		const isDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(subclassData);
+		const hasNamedChoice = CharacterSheetClassUtils.hasNamedSubclassChoice(subclassData);
 		// The Divine Soul affinity spell is swappable: resolve the *effective*
 		// grant (override || alignment default) and tag it so the spells tab can
 		// offer a Swap control instead of the usual "Locked" button.
@@ -13421,9 +13540,9 @@ class CharacterSheetState {
 			? CharacterSheetClassUtils.getEffectiveDivineSoulSpell(subclassData, cls.subclassChoice, cls.divineSoulSpellOverride)
 			: null;
 
-		const spellBlocks = isDivineSoul
+		const spellBlocks = hasNamedChoice
 			? (() => {
-				const chosenBlock = CharacterSheetClassUtils.getDivineSoulAffinityBlock(subclassData, cls.subclassChoice);
+				const chosenBlock = CharacterSheetClassUtils.getNamedSubclassChoiceBlock(subclassData, cls.subclassChoice);
 				return chosenBlock ? [chosenBlock] : [];
 			})()
 			: additionalSpells;
@@ -13438,7 +13557,7 @@ class CharacterSheetState {
 					for (const spellRef of CharacterSheetState._flattenAdditionalSpellsLevelValue(spells)) {
 						const parsed = this._parseSpellReference(spellRef);
 						if (parsed) {
-							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls));
+							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls, hasNamedChoice ? {isSubclassChoiceSpell: true} : undefined));
 						}
 					}
 				}
@@ -13462,7 +13581,10 @@ class CharacterSheetState {
 							parsed = this._parseSpellReference(spellRef);
 						}
 						if (parsed) {
-							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls, extra));
+							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls, {
+								...(hasNamedChoice ? {isSubclassChoiceSpell: true} : {}),
+								...(extra || {}),
+							}));
 						}
 					}
 				}
@@ -13479,7 +13601,7 @@ class CharacterSheetState {
 					for (const spellRef of CharacterSheetState._flattenAdditionalSpellsLevelValue(spells)) {
 						const parsed = this._parseSpellReference(spellRef);
 						if (parsed) {
-							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls));
+							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls, hasNamedChoice ? {isSubclassChoiceSpell: true} : undefined));
 						}
 					}
 				}
@@ -13560,6 +13682,47 @@ class CharacterSheetState {
 		return null;
 	}
 
+	_reconcileSubclassChoiceSpellGrants (cls, desiredSpells) {
+		const desiredIds = new Set(desiredSpells.map(spell => `${spell.name}|${spell.source}`.toLowerCase()));
+		const reconcile = spell => {
+			if (!spell.isSubclassChoiceSpell) return true;
+			const owners = Array.isArray(spell.subclassChoiceGrantOwners)
+				? spell.subclassChoiceGrantOwners
+				: [spell.subclassChoiceClass || spell.sourceClass].filter(Boolean);
+			if (!owners.includes(cls.name) || desiredIds.has(`${spell.name}|${spell.source}`.toLowerCase())) return true;
+
+			spell.subclassChoiceGrantOwners = owners.filter(owner => owner !== cls.name);
+			if (spell.subclassChoiceGrantOwners.length) return true;
+
+			const original = spell.subclassChoiceOriginalMetadata;
+			if (!original) return false;
+			for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass"]) delete spell[key];
+			Object.assign(spell, original);
+			delete spell.isSubclassChoiceSpell;
+			delete spell.subclassChoiceClass;
+			delete spell.subclassChoiceGrantOwners;
+			delete spell.subclassChoiceOriginalMetadata;
+			return true;
+		};
+		this._data.spellcasting.spellsKnown = this._data.spellcasting.spellsKnown.filter(reconcile);
+		this._data.spellcasting.cantripsKnown = this._data.spellcasting.cantripsKnown.filter(reconcile);
+	}
+
+	_addSubclassChoiceSpellOwner (spell, cls) {
+		if (!spell.isSubclassChoiceSpell) {
+			const original = {};
+			for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass"]) {
+				if (Object.hasOwn(spell, key)) original[key] = spell[key];
+			}
+			spell.subclassChoiceOriginalMetadata = original;
+		}
+		const owners = new Set(spell.subclassChoiceGrantOwners || []);
+		owners.add(cls.name);
+		spell.subclassChoiceGrantOwners = [...owners];
+		spell.subclassChoiceClass = cls.name;
+		spell.isSubclassChoiceSpell = true;
+	}
+
 	/**
 	 * Populate subclass spells as always-prepared for all classes.
 	 * Call this after class/subclass changes to ensure domain/oath/circle spells are populated.
@@ -13570,6 +13733,9 @@ class CharacterSheetState {
 
 		for (const cls of (this._data.classes || [])) {
 			const spells = this.getSubclassAlwaysPreparedSpells(cls);
+			if (CharacterSheetClassUtils.hasNamedSubclassChoice(cls.subclass)) {
+				this._reconcileSubclassChoiceSpellGrants(cls, spells);
+			}
 
 			// Bug #5: reconcile stale auto-grants. If this subclass previously auto-granted a
 			// cantrip (sourceFeature "<subclass> Spells") that a feature CHOICE of the same
@@ -13614,15 +13780,20 @@ class CharacterSheetState {
 							subschools: spell.subschools,
 							sourceFeature: spell.sourceFeature,
 							sourceClass: spell.sourceClass || cls.name,
+							isSubclassChoiceSpell: spell.isSubclassChoiceSpell || false,
+							...(spell.isSubclassChoiceSpell ? {subclassChoiceClass: cls.name, subclassChoiceGrantOwners: [cls.name]} : {}),
 						});
 						totalAdded++;
-					} else if (spell.sourceFeature && !existingCantrip.sourceFeature) {
+					} else {
+						if (spell.isSubclassChoiceSpell) this._addSubclassChoiceSpellOwner(existingCantrip, cls);
+						if (spell.sourceFeature && !existingCantrip.sourceFeature) {
 						// A cantrip that was previously added without attribution (e.g.
 						// player-picked before the subclass was chosen) is now granted by
 						// the subclass — stamp it so it's recognised as feature-granted and
 						// stops counting against the cantrip cap.
-						existingCantrip.sourceFeature = spell.sourceFeature;
-						existingCantrip.sourceClass = spell.sourceClass || cls.name;
+							existingCantrip.sourceFeature = spell.sourceFeature;
+							existingCantrip.sourceClass = spell.sourceClass || cls.name;
+						}
 					}
 					continue;
 				}
@@ -13634,6 +13805,7 @@ class CharacterSheetState {
 				);
 
 				if (existing) {
+					if (spell.isSubclassChoiceSpell) this._addSubclassChoiceSpellOwner(existing, cls);
 					// Mark as always prepared if not already
 					if (!existing.alwaysPrepared) {
 						existing.alwaysPrepared = true;
@@ -13660,6 +13832,7 @@ class CharacterSheetState {
 					this.addSpell({
 						...spell,
 						alwaysPrepared: true,
+						...(spell.isSubclassChoiceSpell ? {subclassChoiceClass: cls.name, subclassChoiceGrantOwners: [cls.name]} : {}),
 					}, true); // prepared = true
 					totalAdded++;
 				}
@@ -14071,6 +14244,7 @@ class CharacterSheetState {
 				subschools: spell.subschools || [],
 				spellcastingAbility: spell.spellcastingAbility || null,
 				isDivineSoulAffinity: spell.isDivineSoulAffinity || false,
+				isSubclassChoiceSpell: spell.isSubclassChoiceSpell || false,
 				grantedByClass: spell.grantedByClass || false,
 			});
 		}
@@ -14104,6 +14278,7 @@ class CharacterSheetState {
 				sourceClass: spell.sourceClass || null,
 				spellcastingAbility: spell.spellcastingAbility || null,
 				subschools: spell.subschools || [],
+				isSubclassChoiceSpell: spell.isSubclassChoiceSpell || false,
 				grantedByClass: spell.grantedByClass || false,
 			});
 		}
@@ -18574,13 +18749,6 @@ class CharacterSheetState {
 						calculations.invocationsKnown = invocationsKnown;
 					}
 
-					// Apply Eldritch Invocation registry effects (calc flags, sense flags,
-					// passive-stat bonuses). Spell grants and skill profs ride the
-					// existing optional-feature ingestion pipeline.
-					this._applyWarlockInvocationEffects(calculations, {
-						tgttEnabled: !!this._data?.settings?.enableTgtt,
-					});
-
 					// Pact Boon (PHB level 3)
 					if (!is2024 && level >= 3) {
 						calculations.hasPactBoon = true;
@@ -22113,6 +22281,42 @@ class CharacterSheetState {
 								break;
 							}
 
+							case "Daemonologist": {
+								const choice = CharacterSheetClassUtils.normalizeSubclassChoice(cls.subclassChoice);
+								const isArchDaemon = choice?.key === "arch daemon";
+								const isArchSeraph = choice?.key === "arch seraph";
+								calculations.hasDaemonologist = true;
+								calculations.hasFairAndFoul = true;
+								calculations.daemonologistSide = choice?.name || null;
+								calculations.hasStolenSecrets = true;
+								calculations.invocationCastingAbility = "int";
+
+								if (level >= 6) {
+									calculations.hasBorrowedTonguesAndHides = true;
+									calculations.hasDaemonologistSwitchSides = true;
+									calculations.daemonologistResistance = isArchDaemon ? "necrotic" : isArchSeraph ? "radiant" : null;
+									calculations.daemonologistCommunicationCreatureType = isArchDaemon ? "fiend" : isArchSeraph ? "celestial" : null;
+								}
+
+								if (level >= 10) {
+									calculations.hasUnearthlyCountenance = true;
+									calculations.unearthlyCountenanceDurationMinutes = 10;
+									calculations.unearthlyCountenanceFlySpeed = 60;
+									calculations.unearthlyCountenanceImprovedSpellLevels = 1;
+								}
+
+								if (level >= 14) {
+									calculations.hasEternalWarEruption = true;
+									calculations.eternalWarEruptionDc = calculations.spellSaveDc;
+									calculations.eternalWarEruptionNecroticDamage = "4d10";
+									calculations.eternalWarEruptionRadiantDamage = "4d10";
+									calculations.eternalWarEruptionRadius = 30;
+									calculations.eternalWarEruptionRange = 120;
+									calculations.eternalWarEruptionMaxRestoredSlotLevel = 5;
+								}
+								break;
+							}
+
 							// =====================================================================
 							// TGTT Order of the Animal Accomplice (Wizard Subclass)
 							// =====================================================================
@@ -23211,6 +23415,14 @@ class CharacterSheetState {
 		// =====================================================
 		this._applyClericDomainCalculations(calculations);
 
+		// Eldritch Invocations can be granted by a class or subclass progression
+		// (Daemonologist Wizards use the same EI entities as Warlocks).
+		if (this.getClassLevel("Warlock") > 0 || this.getDaemonologistClass()) {
+			this._applyWarlockInvocationEffects(calculations, {
+				tgttEnabled: !!this._data?.settings?.enableTgtt,
+			});
+		}
+
 		// Attacks per Attack action — single source of truth for the combat tab. Combines
 		// the legacy getNumberOfAttacks() resolver (Fighter 2/3/4 scaling, martial classes,
 		// generic "Extra Attack" feature) with the calc flags so Illrigger (hasExtraAttack
@@ -24120,6 +24332,21 @@ class CharacterSheetState {
 			});
 		}
 
+		for (const invocation of calculations._invocationEffects || []) {
+			for (const skill of invocation.skills || []) {
+				effects.push({type: "skillProficiency", skill, level: 1, source: invocation.name});
+			}
+			for (const sense of invocation.senses || []) {
+				effects.push({
+					type: "sense",
+					sense: sense.type,
+					range: sense.range,
+					source: sense.source || invocation.name,
+					special: sense.special,
+				});
+			}
+		}
+
 		// Hurl Through Hell (Fiend 14): banish target briefly
 		// (Active ability, not passive)
 
@@ -24456,6 +24683,14 @@ class CharacterSheetState {
 				source: "Bladesong",
 				conditional: "while Bladesong is active",
 				enabled: false,
+			});
+		}
+
+		if (calculations.hasBorrowedTonguesAndHides && calculations.daemonologistResistance) {
+			effects.push({
+				type: "resistance",
+				damageType: calculations.daemonologistResistance,
+				source: "Borrowed Tongues and Hides",
 			});
 		}
 
@@ -33932,6 +34167,11 @@ class CharacterSheetState {
 		if (source === "XPHB" && name === "holy nimbus") {
 			return {max: 1, recharge: "long"};
 		}
+		if (feature.source === "GrimHollowPG24") {
+			if (name === "borrowed tongues and hides") return {max: 1, recharge: "long"};
+			if (name === "unearthly countenance") return {max: 1, recharge: "long"};
+			if (name === "eternal war eruption") return {max: 1, recharge: "long"};
+		}
 
 		// Aasimar "Healing Hands" (DMG/VGM/MPMM/XPHB) is a single action, once per
 		// long rest. The generic parser mis-reads "roll a number of d4s equal to
@@ -34683,6 +34923,11 @@ class CharacterSheetState {
 		const {allSpells, skipAdditionalSpellChoices, claimedSpells} = opts;
 		let spells = [];
 		let hasPendingChoices = false;
+		const invocationAbility = feature.optionalFeatureTypes?.includes("EI")
+			&& feature.className === "Wizard"
+			&& CharacterSheetClassUtils.isDaemonologistSubclass(this.getDaemonologistClass()?.subclass)
+			? "int"
+			: null;
 
 		// First try structured additionalSpells data (from official content)
 		if (feature.additionalSpells) {
@@ -34722,7 +34967,7 @@ class CharacterSheetState {
 					innate: spell.innate,
 					uses: spell.uses,
 					recharge: spell.recharge,
-					ability: spell.ability,
+					ability: invocationAbility || spell.ability,
 					prepared: spell.prepared,
 				});
 				hasPendingChoices = true;
@@ -34742,6 +34987,7 @@ class CharacterSheetState {
 						atWill: spell.atWill,
 						uses: spell.uses,
 						recharge: spell.recharge || "long",
+						ability: invocationAbility || spell.ability,
 					}));
 				} else {
 					this.addInnateSpell({
@@ -34752,6 +34998,7 @@ class CharacterSheetState {
 						uses: spell.uses,
 						recharge: spell.recharge || "long",
 						sourceFeature: feature.name,
+						spellcastingAbility: invocationAbility || spell.ability,
 					});
 				}
 			} else if (spell.level === 0) {
@@ -34759,13 +35006,16 @@ class CharacterSheetState {
 				if (fullSpell) {
 					this.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(fullSpell, {
 						sourceFeature: feature.name,
-						sourceClass: null,
+						sourceClass: invocationAbility ? "Wizard" : null,
+						ability: invocationAbility || spell.ability,
 					}));
 				} else {
 					this.addCantrip({
 						name: spell.name,
 						source: spell.source,
 						sourceFeature: feature.name,
+						sourceClass: invocationAbility ? "Wizard" : null,
+						spellcastingAbility: invocationAbility || spell.ability,
 					});
 				}
 			} else {
@@ -34773,8 +35023,9 @@ class CharacterSheetState {
 				if (fullSpell) {
 					this.addSpell(CharacterSheetClassUtils.buildSpellStateObject(fullSpell, {
 						sourceFeature: feature.name,
-						sourceClass: null,
+						sourceClass: invocationAbility ? "Wizard" : null,
 						prepared: spell.prepared,
+						ability: invocationAbility || spell.ability,
 					}));
 				} else {
 					this.addSpell({
@@ -34783,6 +35034,8 @@ class CharacterSheetState {
 						level: spell.level || 1,
 						prepared: spell.prepared,
 						sourceFeature: feature.name,
+						sourceClass: invocationAbility ? "Wizard" : null,
+						spellcastingAbility: invocationAbility || spell.ability,
 					});
 				}
 			}
@@ -43040,6 +43293,22 @@ class CharacterSheetState {
 			exclusiveWith: ["bladesong"], // Cannot rage and bladesong simultaneously
 			breaksConcentration: true, // Rage prevents maintaining concentration
 		},
+		unearthlyCountenance: {
+			id: "unearthlyCountenance",
+			name: "Unearthly Countenance",
+			icon: "🪽",
+			description: "Advantage on Charisma checks, 60-foot flying speed, and improved Daemonologist table spells",
+			effects: [
+				{type: "advantage", target: "check:cha"},
+				{type: "bonus", target: "speed:fly", value: 60},
+			],
+			duration: "10 minutes",
+			endConditions: ["Duration expires", "Incapacitated", "Killed"],
+			resourceName: "Unearthly Countenance",
+			resourceCost: 1,
+			detectPatterns: ["^unearthly countenance$"],
+			activationAction: "bonus",
+		},
 		resoluteStance: {
 			id: "resoluteStance",
 			name: "Resolute Stance",
@@ -44732,6 +45001,45 @@ class CharacterSheetState {
 
 		const rawText = feature.description || CharacterSheetState._featureTextFromEntries(feature) || "";
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
+		const isDaemonologistFeature = (feature.source || feature.subclassSource) === "GrimHollowPG24"
+			&& (feature.subclassShortName || feature.subclassName || "Daemonologist").toLowerCase() === "daemonologist";
+		if (isDaemonologistFeature && name === "borrowed tongues and hides") {
+			return {
+				stateTypeId: "custom",
+				isCustom: true,
+				isDataDriven: true,
+				interactionMode: "limited",
+				isInstant: true,
+				activationAction: "bonus",
+				resourceName: "Borrowed Tongues and Hides",
+				resourceCost: 1,
+			};
+		}
+		if (isDaemonologistFeature && name === "unearthly countenance") {
+			return {
+				stateTypeId: "unearthlyCountenance",
+				stateType: this.ACTIVE_STATE_TYPES.unearthlyCountenance,
+				matchedBy: "daemonologist",
+				activationAction: "bonus",
+				interactionMode: "toggle",
+				isToggle: true,
+				duration: "10 minutes",
+				resourceName: "Unearthly Countenance",
+				resourceCost: 1,
+			};
+		}
+		if (isDaemonologistFeature && name === "eternal war eruption") {
+			return {
+				stateTypeId: "custom",
+				isCustom: true,
+				isDataDriven: true,
+				interactionMode: "limited",
+				isInstant: true,
+				activationAction: "magic",
+				resourceName: "Eternal War Eruption",
+				resourceCost: 1,
+			};
+		}
 		const isXphbLight = (feature.classSource || feature.source) === "XPHB"
 			&& (feature.subclassShortName || "").toLowerCase() === "light";
 		const isXphbDevotion = (feature.classSource || feature.source) === "XPHB"
@@ -51572,6 +51880,13 @@ class CharacterSheetState {
 						calculations[k] = v;
 					}
 				}
+			}
+			if (entry.skills?.length || entry.senses?.length) {
+				(calculations._invocationEffects ||= []).push({
+					name: feature.name,
+					skills: entry.skills || [],
+					senses: entry.senses || [],
+				});
 			}
 		}
 	}

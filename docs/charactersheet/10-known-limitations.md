@@ -43,6 +43,15 @@ All 14 Cleric domains are fully implemented:
 - **War**: `warPriestUses`, `guidedStrikeBonus`, `avatarOfBattleResistance`
 - **Knowledge**: `visionOfThePastUses`
 - **Nature**: `dampenElementsUses`, `divineStrikeDamage`
+
+#### Wizard Traditions ✅
+- **Daemonologist (Grim Hollow Player's Guide 2024)**: Persists and gates the
+  Arch Daemon/Arch Seraph path across Builder, Level-Up, and Quick Build;
+  grants its path-specific spells; supports Wizard-owned Eldritch Invocation
+  picks at levels 3, 6, and 14 with Intelligence casting; and implements
+  Borrowed Tongues and Hides, Unearthly Countenance, and Eternal War Eruption
+  through the shared resource, active-state, spell-slot, and optional-feature
+  systems.
 - **Tempest**: WIS-based Wrath reaction pool with per-use damage choice, deferred Destructive
   Wrath maximization using Channel Divinity, Thunderbolt Strike forced-movement results,
   `divineStrikeDamage`, martial/heavy proficiencies, and Stormborn fly speed

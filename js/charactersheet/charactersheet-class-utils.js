@@ -1330,7 +1330,7 @@ class CharacterSheetClassUtils {
 	static checkPrerequisites (/** @type {*} */ prerequisite, /** @type {*} */ context) {
 		if (!prerequisite?.length) return {met: true, reasons: []};
 
-		const {classes = [], totalLevel = 0, existingFeatures = [], cantrips = [], spells = [], toolProficiencies = [], state = null} = context;
+		const {classes = [], totalLevel = 0, existingFeatures = [], cantrips = [], spells = [], toolProficiencies = [], state = null, levelPrerequisiteClassAliases = {}} = context;
 		const reasons = [];
 
 		// Normalized-tool matcher: prefer state.hasToolProficiency (already
@@ -1351,9 +1351,12 @@ class CharacterSheetClassUtils {
 				const reqLevel = prereq.level.level || prereq.level;
 				if (/** @type {*} */ prereq.level.class) {
 					const className = prereq.level.class.name?.toLowerCase();
-					const classMatch = classes.find((/** @type {*} */ c) => c.name.toLowerCase() === className);
+					const alias = Object.entries(levelPrerequisiteClassAliases)
+						.find(([from]) => from.toLowerCase() === className)?.[1];
+					const effectiveClassName = alias?.toLowerCase() || className;
+					const classMatch = classes.find((/** @type {*} */ c) => c.name.toLowerCase() === effectiveClassName);
 					if (!classMatch || classMatch.level < reqLevel) {
-						const classLabel = prereq.level.class.name || "class";
+						const classLabel = alias || prereq.level.class.name || "class";
 						reasons.push(`Level ${reqLevel} ${classLabel}`);
 					}
 				} else if (totalLevel < reqLevel) {
@@ -1471,7 +1474,7 @@ class CharacterSheetClassUtils {
 	 * @private
 	 */
 	static _checkSpellChoosePrereq (/** @type {*} */ spellReq, /** @type {*} */ context) {
-		const {cantrips = [], spells = []} = context;
+		const {cantrips = [], spells = [], levelPrerequisiteClassAliases = {}} = context;
 		const chooseStr = spellReq.choose || "";
 		const parts = chooseStr.split("|");
 
@@ -1484,13 +1487,17 @@ class CharacterSheetClassUtils {
 			if (key === "class") requiredClass = val?.toLowerCase();
 		}
 
+		const aliasedClass = Object.entries(levelPrerequisiteClassAliases)
+			.find(([fromClass]) => fromClass.toLowerCase() === requiredClass)?.[1]
+			?.toLowerCase();
+		const allowedClasses = new Set([requiredClass, aliasedClass].filter(Boolean));
 		const pool = requiredLevel === 0 ? cantrips : [...cantrips, ...spells];
 		return pool.some((/** @type {*} */ s) => {
 			if (requiredLevel !== null && requiredLevel === 0 && !cantrips.includes(s)) return false;
 			if (/** @type {*} */ requiredLevel !== null && requiredLevel > 0) {
 				if (s.level !== undefined && s.level !== requiredLevel) return false;
 			}
-			if (requiredClass && s.sourceClass?.toLowerCase() !== requiredClass) return false;
+			if (requiredClass && !allowedClasses.has(s.sourceClass?.toLowerCase())) return false;
 			return true;
 		});
 	}
@@ -1846,10 +1853,10 @@ class CharacterSheetClassUtils {
 		const spellId = `${String(spell.name).trim().toLowerCase()}|${String(spell.source || Parser.SRC_PHB).trim().toLowerCase()}`;
 		const subclassChoice = opts.subclassChoice;
 
-		const relevantBlocks = this.isDivineSoulSubclass(subclass)
+		const relevantBlocks = this.hasNamedSubclassChoice(subclass)
 			? (() => {
-				const affinityBlock = this.getDivineSoulAffinityBlock(subclass, subclassChoice);
-				return affinityBlock ? [affinityBlock] : [];
+				const choiceBlock = this.getNamedSubclassChoiceBlock(subclass, subclassChoice);
+				return choiceBlock ? [choiceBlock] : [];
 			})()
 			: subclass.additionalSpells;
 
@@ -1931,6 +1938,14 @@ class CharacterSheetClassUtils {
 		return [subclass.name, subclass.shortName]
 			.filter(Boolean)
 			.some((/** @type {*} */ name) => String(name).toLowerCase() === "divine soul");
+	}
+
+	static isDaemonologistSubclass (/** @type {*} */ subclass) {
+		if (!subclass?.name && !subclass?.shortName) return false;
+		return [subclass.name, subclass.shortName]
+			.filter(Boolean)
+			.some((/** @type {*} */ name) => String(name).toLowerCase() === "daemonologist")
+			&& subclass.source === "GrimHollowPG24";
 	}
 
 	/**
@@ -2019,23 +2034,63 @@ class CharacterSheetClassUtils {
 		};
 	}
 
+	static normalizeSubclassChoice (/** @type {*} */ choice) {
+		return this.normalizeDivineSoulAffinity(choice);
+	}
+
+	static hasNamedSubclassChoice (/** @type {*} */ subclass) {
+		return this.isDivineSoulSubclass(subclass)
+			|| (this.isDaemonologistSubclass(subclass) && (subclass.additionalSpells || []).some((/** @type {*} */ block) => block?.name));
+	}
+
+	static getNamedSubclassChoiceOptions (/** @type {*} */ subclass) {
+		if (!this.hasNamedSubclassChoice(subclass)) return [];
+		const allowedNames = this.isDaemonologistSubclass(subclass)
+			? new Set(["arch daemon", "arch seraph"])
+			: null;
+		return (subclass.additionalSpells || [])
+			.filter((/** @type {*} */ block) => block?.name && (!allowedNames || allowedNames.has(String(block.name).toLowerCase())))
+			.map((/** @type {*} */ block) => this.normalizeSubclassChoice(block.name))
+			.filter(Boolean);
+	}
+
+	static getNamedSubclassChoiceBlock (/** @type {*} */ subclass, /** @type {*} */ subclassChoice) {
+		if (!this.hasNamedSubclassChoice(subclass)) return null;
+		const normalized = this.normalizeSubclassChoice(subclassChoice);
+		if (!normalized) return null;
+		return (subclass.additionalSpells || []).find((/** @type {*} */ block) =>
+			this.normalizeSubclassChoice(block?.name)?.key === normalized.key) || null;
+	}
+
+	static getNamedSubclassChoicePrompt (/** @type {*} */ subclass) {
+		if (this.isDivineSoulSubclass(subclass)) {
+			return {
+				title: "Divine Soul Affinity",
+				description: "Choose the Divine Soul affinity that grants your extra spell and Cleric spell access.",
+			};
+		}
+		if (this.isDaemonologistSubclass(subclass)) {
+			return {
+				title: "Fair and Foul",
+				description: "Choose whether you begin by siphoning power from Arch Daemons or Arch Seraphs.",
+			};
+		}
+		return null;
+	}
+
+	static getOptionalFeaturePrerequisiteClassAliases (/** @type {*} */ subclass, /** @type {*} */ featureTypes) {
+		if (!this.isDaemonologistSubclass(subclass) || !featureTypes?.includes("EI")) return {};
+		return {Warlock: "Wizard"};
+	}
+
 	static getDivineSoulAffinityOptions (/** @type {*} */ subclass) {
 		if (!this.isDivineSoulSubclass(subclass)) return [];
-		return (subclass.additionalSpells || [])
-			.filter((/** @type {*} */ block) => block?.name)
-			.map((/** @type {*} */ block) => this.normalizeDivineSoulAffinity(block.name))
-			.filter(Boolean);
+		return this.getNamedSubclassChoiceOptions(subclass);
 	}
 
 	static getDivineSoulAffinityBlock (/** @type {*} */ subclass, /** @type {*} */ subclassChoice) {
 		if (!this.isDivineSoulSubclass(subclass)) return null;
-		const normalized = this.normalizeDivineSoulAffinity(subclassChoice);
-		if (!normalized) return null;
-
-		return (subclass.additionalSpells || []).find((/** @type {*} */ block) => {
-			const blockChoice = this.normalizeDivineSoulAffinity(block?.name);
-			return blockChoice?.key === normalized.key;
-		}) || null;
+		return this.getNamedSubclassChoiceBlock(subclass, subclassChoice);
 	}
 
 	static getDivineSoulKnownSpell (/** @type {*} */ subclass, /** @type {*} */ subclassChoice) {
@@ -4833,7 +4888,7 @@ class CharacterSheetClassUtils {
 	 * @param {boolean} [opts.inSpellbook=false] - Whether spell is in spellbook
 	 * @returns {*} Spell state object
 	 */
-	static buildSpellStateObject (/** @type {*} */ spell, {sourceFeature, sourceClass, prepared = false, inSpellbook = false}) {
+	static buildSpellStateObject (/** @type {*} */ spell, {sourceFeature, sourceClass, prepared = false, inSpellbook = false, ability = null}) {
 		return {
 			name: spell.name,
 			source: spell.source,
@@ -4845,6 +4900,7 @@ class CharacterSheetClassUtils {
 			inSpellbook,
 			sourceFeature,
 			sourceClass,
+			spellcastingAbility: ability || null,
 			castingTime: CharacterSheetClassUtils.getSpellCastingTime(spell),
 			range: CharacterSheetClassUtils.getSpellRange(spell),
 			components: CharacterSheetClassUtils.getSpellComponents(spell),
@@ -4888,7 +4944,7 @@ class CharacterSheetClassUtils {
 	 * @param {string} [opts.recharge="long"]
 	 * @returns {*} Innate spell state object
 	 */
-	static buildInnateSpellStateObject (/** @type {*} */ spell, {sourceFeature, atWill = false, uses, recharge = "long"}) {
+	static buildInnateSpellStateObject (/** @type {*} */ spell, {sourceFeature, atWill = false, uses, recharge = "long", ability = null}) {
 		return {
 			name: spell.name,
 			source: spell.source,
@@ -4898,6 +4954,7 @@ class CharacterSheetClassUtils {
 			uses,
 			recharge,
 			sourceFeature,
+			spellcastingAbility: ability || null,
 			castingTime: CharacterSheetClassUtils.getSpellCastingTime(spell),
 			range: CharacterSheetClassUtils.getSpellRange(spell),
 			components: CharacterSheetClassUtils.getSpellComponents(spell),

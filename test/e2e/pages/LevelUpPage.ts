@@ -886,14 +886,30 @@ export class LevelUpPage {
 	}
 
 	async expectDivineSoulAffinityModalVisible (): Promise<void> {
-		await expect(this.page.locator(".ui-modal__inner").filter({hasText: "Divine Soul Affinity"}).last()).toBeVisible();
+		await this.expectNamedSubclassChoiceModalVisible("Divine Soul Affinity");
 	}
 
 	async selectDivineSoulAffinity (affinityName: string): Promise<void> {
-		const modal = this.page.locator(".ui-modal__inner").filter({hasText: "Divine Soul Affinity"}).last();
-		await modal.waitFor({state: "visible", timeout: 10000});
+		await this.selectNamedSubclassChoice("Divine Soul Affinity", affinityName);
+	}
+
+	async expectNamedSubclassChoiceModalVisible (title: string): Promise<void> {
+		await expect(this.page.locator(".ui-modal__inner").filter({hasText: title}).last()).toBeVisible();
+	}
+
+	async selectNamedSubclassChoice (title: string, choiceName: string): Promise<void> {
+		const inline = this.page.locator(".charsheet__levelup-named-subclass-choice").filter({hasText: title}).last();
+		const modal = this.page.locator(".ui-modal__inner").filter({hasText: title}).last();
+		await this.page.locator(".charsheet__levelup-named-subclass-choice, .ui-modal__inner")
+			.filter({hasText: title})
+			.last()
+			.waitFor({state: "attached", timeout: 10000});
+		if (await inline.count()) {
+			await inline.locator("select").selectOption({label: choiceName}, {force: true});
+			return;
+		}
 		const select = modal.locator("select").first();
-		await select.selectOption({label: affinityName});
+		await select.selectOption({label: choiceName});
 		await modal.getByRole("button", {name: "OK"}).click();
 		await modal.waitFor({state: "hidden", timeout: 10000});
 	}
