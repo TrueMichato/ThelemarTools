@@ -109,7 +109,7 @@ function findInertRows (src) {
 			line: src.slice(0, m.index).split("\n").length,
 			window: `L${lo}-${hi}`,
 			name: (obj.match(/name:\s*([^,\n]+)/)?.[1] || "?").trim().slice(0, 40),
-			hasProbes: /\beffects:\s*\[|\bpickedCount:/.test(obj),
+			hasProbes: RE_HAS_PROBES.test(obj),
 		});
 	}
 	return out;
@@ -129,6 +129,19 @@ function readBracketed (src, start) {
 	}
 	return null;
 }
+
+// Count regex literals in a pool body. Generated pools are anchored
+// (`/^Foo$/i`) but hand-written inline pools in specs are not
+// (`/archery/i`), so anchoring the count on `/^` silently reports every
+// inline pool as size 0 — which reads as "unresolvable" and makes the
+// reachability check skip exactly the rows a human wrote by hand.
+// Match an `effects:` block, tolerating an inline TypeScript type
+// assertion (`effects: <EffectCheck[]>[…]`). Three specs use that form,
+// and matching only `effects: [` reported them as having no probes at
+// all — including inside the inert-window detector, where it downgraded
+// a dead probe to "no probes attached".
+const RE_EFFECTS = /\beffects:\s*(?:<[^>]*>\s*)?\[/;
+const RE_HAS_PROBES = /\beffects:\s*(?:<[^>]*>\s*)?\[|\bpickedCount:/;
 
 // Count regex literals in a pool body. Generated pools are anchored
 // (`/^Foo$/i`) but hand-written inline pools in specs are not
@@ -338,11 +351,18 @@ function auditSpec (specPath) {
 	// Heuristic: a FeatureCheck row begins with `{level: <n>` and closes
 	// at the matching `}`. We count one entry per `level:` followed by a
 	// number within a matrix-shaped block.
-	const entryMatches = src.match(/\{\s*level:\s*\d+,\s*name:/g) || [];
+	//
+	// Anchored on `{ level: N,` and NOT on `{ level: N, name:` — a row's
+	// second key is `untilLevel` whenever it is tiered, and tiering is the
+	// idiom this suite has been converging on. The stricter anchor missed
+	// 102 entries across 27 of 39 specs, all of them tiered rows, so the
+	// denominator shrank exactly where a spec was best written and every
+	// coverage figure came out overstated.
+	const entryMatches = src.match(/\{\s*level:\s*\d+\s*,/g) || [];
 	const entryCount = entryMatches.length;
 
 	// `effects:` blocks attached to entries.
-	const effectsBlocks = src.match(/\beffects:\s*\[/g) || [];
+	const effectsBlocks = src.match(new RegExp(RE_EFFECTS.source, "g")) || [];
 	const effectsCount = effectsBlocks.length;
 
 	// Reason-style comments — both literal `// no measurable …` and
