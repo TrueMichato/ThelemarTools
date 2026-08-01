@@ -31,11 +31,19 @@ const ASTRAL_SELF_MONK_FEATURES: FeatureCheck[] = [
 		level: 3,
 		name: "Focus Points",
 		kind: "resource",
+		// CS-BUG-018 is Fixed/superseded (see known-bugs.md), so this skip was
+		// stale and left the Monk's core resource unasserted. Focus Points equal
+		// the Monk level, so each matrix checkpoint needs its own tier —
+		// `untilLevel` stops an earlier entry firing once the pool has grown
+		// (this is the CS-BUG-035 pattern).
+		untilLevel: 4,
 		resourceMax: 3,
-		skip: true,
-		skipReason: "CS-BUG-018",
 		effects: [{kind: "shortRestRestores", resource: "Focus Points"}],
 	},
+	{level: 5, name: "Focus Points", kind: "resource", untilLevel: 10, resourceMax: 5},
+	{level: 11, name: "Focus Points", kind: "resource", untilLevel: 16, resourceMax: 11},
+	{level: 17, name: "Focus Points", kind: "resource", untilLevel: 19, resourceMax: 17},
+	{level: 20, name: "Focus Points", kind: "resource", resourceMax: 20},
 	{level: 2, name: /unarmored movement/i, kind: "passive", effects: [{kind: "speed", min: 30}]},
 	{level: 3, name: /deflect attacks/i, kind: "passive"},
 	{level: 3, name: /forms of your astral self/i, kind: "passive"},

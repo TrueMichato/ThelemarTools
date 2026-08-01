@@ -21,28 +21,45 @@ const BATTLE_MASTER_FEATURES_MATRIX: FeatureCheck[] = [
 		level: 2,
 		name: /action surge/i,
 		kind: "resource",
+		// CS-BUG-035: the matrix re-evaluates every earlier entry at each later
+		// checkpoint, so a fixed max on a GROWING pool is stale the moment it
+		// grows. `untilLevel` is the harness's mechanism for exactly this — its
+		// own docs use Action Surge as the worked example. Prefer it over a
+		// loose [min,max] range so each tier stays exactly asserted.
+		untilLevel: 16,
 		resourceMax: 1,
 		restoreOn: "short",
 		effects: [{kind: "shortRestRestores", resource: "Action Surge"}],
 	},
+	{level: 17, name: /action surge/i, kind: "resource", resourceMax: 2},
 	{
 		level: 3,
 		name: /superiority dice/i,
 		kind: "resource",
+		// CS-BUG-035: XPHB grows the pool 4 -> 5 (L7) -> 6 (L15). Same
+		// `untilLevel` treatment as Action Surge above; each tier keeps an
+		// exact expectation instead of a loosened range.
+		untilLevel: 6,
 		resourceMax: 4,
 		restoreOn: "short",
 		effects: [{kind: "shortRestRestores", resource: "Superiority Dice"}],
 	},
+	{level: 7, name: /superiority dice/i, kind: "resource", untilLevel: 14, resourceMax: 5},
+	{level: 15, name: /superiority dice/i, kind: "resource", resourceMax: 6},
 	...buildAnyManeuverChecks(["XPHB"]),
 	{level: 3, name: /student of war/i, kind: "passive"},
 	{level: 5, name: /extra attack/i, kind: "passive"},
 	{
 		level: 7,
 		name: /know your enemy/i,
-		kind: "resource",
-		resourceMax: 1,
-		restoreOn: "long",
-		effects: [{kind: "longRestRestores", resource: "Know Your Enemy"}],
+		// CS-BUG-035: NOT `kind: "resource"`. XPHB Know Your Enemy is a
+		// 1/long-rest feature use, and `getGenericPoolResources()` deliberately
+		// excludes resources whose feature already renders as an ability row
+		// with a Use button, so it never appears as a resource row. Probing the
+		// feature-use surface asserts strictly more than the old resource probe
+		// did: spend a use, long rest, verify it came back.
+		kind: "passive",
+		effects: [{kind: "longRestRestoresFeatureUses", feature: "Know Your Enemy"}],
 	},
 	{level: 10, name: /improved combat superiority/i, kind: "passive"},
 	{level: 15, name: /relentless/i, kind: "passive"},

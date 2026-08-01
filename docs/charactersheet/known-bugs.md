@@ -1621,31 +1621,62 @@ class of defect cannot be caught without the gated selections.
 
 ## CS-BUG-035 — Battle Master feature matrix fails at L11
 
-**Status**: open. **Pre-existing** — reproduced byte-identically at pristine
-`d6a25d23` in a throwaway worktree, so unrelated to the CS-BUG-033/034 work.
+**Status**: RESOLVED (spec authoring in `tgtt-battle-master-fighter.spec.ts`).
+Both failures were expectation bugs; the product was correct in both cases.
 
-**Repro**:
+### 1. Growing pools asserted with a fixed max
 
-```bash
-RUN_MATRIX=1 PW_PORT=8090 PW_TIMEOUT_MS=180000 PW_WORKERS=1 \
-  npx playwright test tgtt-battle-master-fighter -g "Features matrix" --reporter=line
+The matrix re-evaluates **every** earlier entry at each later checkpoint
+(3, 5, 11, 17, 20). A pool that grows with level therefore makes its own
+earlier entry fail: Superiority Dice go 4 -> 5 (L7) -> 6 (L15), so the L3
+entry's `resourceMax: 4` was stale from L11 onward.
+
+`FeatureCheck.untilLevel` exists for exactly this, and its own documentation
+uses Action Surge as the worked example. Each tier now gets its own entry with
+an exact max, rather than a loosened `[min, max]` range:
+
+```ts
+{level: 3,  name: /superiority dice/i, kind: "resource", untilLevel: 6,  resourceMax: 4, ...},
+{level: 7,  name: /superiority dice/i, kind: "resource", untilLevel: 14, resourceMax: 5},
+{level: 15, name: /superiority dice/i, kind: "resource", resourceMax: 6},
 ```
 
-```
-featuresMatrix at L11 (2 failures):
-  - L3 /superiority dice/i (resource): resource max=5 expected 4
-  - L7 /know your enemy/i (resource): resource not found on sheet
-```
+**Fixing this exposed a second, identical failure that had been masked** by the
+run aborting at L11 first: Action Surge goes 1 -> 2 uses at Fighter 17. Same
+treatment.
 
-**Analysis** (not yet separated, same discipline as CS-BUG-032):
+### 2. `Know Your Enemy` is not a resource row, by design
 
-- *Superiority Dice* — the product is **correct**: XPHB grants 5 dice at level 7.
-  The matrix re-evaluates every earlier entry at each later checkpoint, so the
-  L3 entry's `resourceMax: 4` is stale by L11. Almost certainly a spec-authoring
-  fix (make the expectation level-aware), not a product change.
-- *Know Your Enemy* — needs separating: either the spec declares it as a
-  `resource` when it surfaces as a feature use, or the pool is genuinely not
-  surfaced.
+XPHB Know Your Enemy is a 1/long-rest **feature use** with a Superiority-Die
+restore. `getGenericPoolResources()` deliberately excludes any resource whose
+linked feature already renders as an ability row with a Use button, so it does
+not — and should not — appear as a resource row. `kind: "resource"` was simply
+the wrong probe.
+
+Re-declared as `kind: "passive"` with a
+`{kind: "longRestRestoresFeatureUses", feature: "Know Your Enemy"}` effect,
+which asserts strictly **more** than the old resource probe: spend a use, take
+a long rest, verify it came back.
+
+### Stale `CS-BUG-018` skips
+
+CS-BUG-018 is Fixed/superseded, but ~15 entries across 9 specs still carry
+`skip: true, skipReason: "CS-BUG-018"`, leaving core resource pools (Rage,
+Sorcery Points, Focus Points) unasserted. The Astral Self Monk's **Focus
+Points** was un-skipped here (it powers every Astral Self form, so it is in
+scope for the "every ability has an actual effect" bar) and now asserts all
+five tiers. The remaining stale skips are in specs outside that scope and are
+tracked as follow-up — un-skipping each requires the same `untilLevel` tiering.
+
+**Verification**: Battle Master matrix 1 passed; full Battle Master with
+`RUN_MEGA=1` 7 passed / 1 gated skip; Astral Self matrix 1 passed.
+
+### Lesson
+
+**Fixing the first failure in a grouped assertion reveals the ones it was
+masking.** The matrix throws on the first checkpoint with errors, so an early
+stale expectation hides every later one. Budget for a second and third round
+rather than treating the first green run as completion.
 
 ---
 
