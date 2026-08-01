@@ -44022,7 +44022,17 @@ class CharacterSheetState {
 		// — that sentinel must NOT leak into the numeric total (e.g. Moloch's Blessing
 		// giving +1 instead of advantage). Modifiers that carry an explicit numeric
 		// `value` alongside an `advantage` field (custom abilities) keep it.
-		let value = mod._advFromType ? 0 : (mod.value || 0);
+		//
+		// `value` may be a SYMBOLIC token ("attunedItems", "strScore", …) rather than a
+		// number — see _resolveSymbolicModifierValue. This is the SECOND chokepoint that
+		// must understand that vocabulary: `_getNamedModifierEffectiveValue` feeds the
+		// cached customModifiers totals, while this one feeds `aggregateModifiers` and
+		// the attack itemizer. Without resolution here, `result.bonus += value` performs
+		// STRING CONCATENATION — an Artificer 20 produced
+		// aggregateModifiers("save:all").bonus === "1attunedItems" (CS-BUG-038).
+		// Unresolvable tokens (dice strings, semantic markers) contribute 0, matching
+		// the other chokepoint.
+		let value = mod._advFromType ? 0 : (this._resolveSymbolicModifierValue(mod.value) ?? 0);
 
 		// Per-level modifiers
 		if (mod.perLevel) {
@@ -44045,7 +44055,10 @@ class CharacterSheetState {
 			value += this.getProficiencyBonus() * 2;
 		}
 
-		return value;
+		// Mirrors the same guard on `_getNamedModifierEffectiveValue`: a NaN reaching
+		// `result.bonus += value` would poison the whole aggregate, and every downstream
+		// reader, with a single un-attributable NaN.
+		return Number.isFinite(value) ? value : 0;
 	}
 
 	/**
