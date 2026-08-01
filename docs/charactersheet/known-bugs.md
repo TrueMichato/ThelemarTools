@@ -2165,6 +2165,17 @@ its own id, since it shares this pipeline and cannot currently be triggered.
 > | `parseEffectsFromDescription` swim | same shape |
 > | `parseEffectsFromDescription` climb | same shape |
 >
+> > **AMENDMENT (Wicked Witch merge).** The count above is now **five**, not
+> > four: `ACTIVE_STATE_TYPES.flyMyPretty` (Wicked Witch 14) emits
+> > `{target: "speed:fly", value: 60}`. The *conclusion* is unaffected — it is
+> > a grant ("60-foot flying speed"), so `Math.max` remains the correct
+> > combine and no discriminator is needed. Recorded because the argument
+> > above rests on an enumeration, and **an enumeration is a claim with an
+> > expiry date**: every new curated active state is a potential emitter, so
+> > the count must be re-derived rather than cited. Re-derive with
+> > `git grep -n 'target: "speed:' -- js/charactersheet/` and discard the
+> > `speed:walk` hits, which are outside the guard entirely.
+>
 > The three parser regexes match **only** `gain`/`have a <X>ing speed` phrasing.
 > They cannot match "your flying speed increases by 10", so no additive typed
 > effect can be produced by this pipeline at all. The genuinely additive
