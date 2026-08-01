@@ -215,6 +215,11 @@ describeCharacter({
 	preset: PRESET_FULL_SURREALISM_YUANTI,
 	displayName: "College of Surrealism Bard Yuan-Ti",
 	signatureToggle: /bardic inspiration|surreal|illusion|mockery/i,
+	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
+	// the USE attack probe can actually roll.
+	midTierLoadout: [
+		{name: "Rapier", equipped: true},
+	],
 	usage: {
 		atLevel: 5,
 		castSpellSlotLevel: 1,

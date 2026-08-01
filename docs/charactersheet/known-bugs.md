@@ -1262,8 +1262,8 @@ markup was actually checked.
 
 ## CS-BUG-030 — the USE probe's attack-roll check silently degrades to a no-op
 
-**Status**: open (harness + spec authoring). Same anti-pattern as CS-BUG-029,
-found while verifying its fix.
+**Status**: **RESOLVED** — harness fix + spec pre-equip, landed together.
+Same anti-pattern as CS-BUG-029, found while verifying its fix.
 
 **Symptom**: runs log lines like
 
@@ -1280,19 +1280,52 @@ weapon").
 not run at all. Observed on `tgtt-battle-master-fighter` — a spec whose entire
 subject is *weapon* maneuvers — where no weapon attack was ever rolled.
 
-**Root cause is NOT a rename.** The characters have no weapon. **24 of the 25**
-specs that declare `usage.attackName` never put a weapon in `midTierLoadout`;
-they rely on preset-granted starting equipment. Where the preset doesn't grant
-a matching weapon, the probe quietly dies.
+**Root cause is NOT a rename.** The characters have no *equipped* weapon. The
+suite already knew this: ~13 specs carry the skipReason *"TGTT preset
+deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"* on their
+matrix `rollAttack` checks. The matrix opted out **explicitly**; the USE probe
+opted out **silently**.
 
-**Scope evidence**: not uniformly dead — `tgtt-tdcsr-juggernaut-barbarian`
-matched its attack and logged no warning. Observed dead in **2 of the 3** specs
-actually exercised on 2026-07-31.
+**Measured scope**: **17 dead probes across 16 specs** (`tgtt-hunter-zodiac-centaur`
+declares two characters) — every spec except 8. The earlier "24 specs" figure
+came from a static "no weapon in `midTierLoadout`" scan and the "13" figure was
+measured before CS-BUG-031 was fixed, while 4 specs still died at creation and
+never reached their probe. 13 + 4 = 17.
 
-**Suggested fix** (deliberately not applied — it is a scope decision, not a
-mechanical change): make the mismatch fail loudly, then add an explicit weapon
-to each affected spec's `midTierLoadout`. Failing first without fixing the
-loadouts would red the suite, so the two halves must land together.
+**Three defects, all required to fix it:**
+
+1. **The probe degraded silently** (`characterSpecFactory.ts`) — a declared
+   `usage.attackName` that matched nothing logged and passed. Now a hard
+   failure, with `usage.attackNameOptional` as the documented opt-out. The same
+   degrade existed in the multiclass leg probe (`runLegUsageProbe`) and was
+   fixed identically.
+2. **The USE test never installed `midTierLoadout` at all.** Only the *L5
+   loadout* test did. So adding weapons to specs would not, on its own, have
+   fixed anything — the probe could only ever see preset-granted gear. The USE
+   test now installs the loadout after reaching its level.
+3. **`addInventoryItems` silently dropped `equipped: true` for items already in
+   inventory** (`comprehensiveBuildHelpers.ts`). `state.addItem()` merges into an
+   existing stack and bumps only `quantity`; the requested equipped/attuned
+   state is discarded. This is why two Sorcerer specs still failed after the
+   first two fixes: Sorcerer starting gear *already contains a Dagger* (and a
+   Light Crossbow, which matched the regex), unequipped — so "add an equipped
+   Dagger" merged into the existing unequipped row and rendered no attack. The
+   helper now forces the equipped/attuned state via `state.setItemEquipped()`
+   after the merge.
+
+   This one is worth remembering beyond this bug: **`equipped: true` was a
+   no-op for any preset-granted item**, which is precisely what
+   `InventoryItemRef.equipped` was added for.
+
+**Fix**: all 16 specs got an explicit weapon in `midTierLoadout` matching their
+declared `attackName`. The one multiclass leg that declares `attackName`
+(`Ranger 6 / Druid 14 Centaur`) is marked `attackNameOptional` with a reason —
+multiclass legs have no loadout hook.
+
+**Follow-up (not done here)**: with pre-equip now working, the ~13 matrix
+`rollAttack` checks skipped for "TGTT preset deliberately ships unarmed" could
+be re-enabled. That needs the MEGA matrix path to install a loadout too, which
+is a separate change.
 
 ---
 
@@ -1393,5 +1426,42 @@ all.
 
 **Do NOT** "fix" a recurrence by widening the `characterBuilder.ts:796` guard —
 that guard is what surfaced this bug; widening it restores the silent stall.
+
+---
+
+## CS-BUG-032 — two signature toggles produce no derived effect at L5
+
+**Status**: open (product or spec-authoring — not yet separated).
+**Pre-existing, not a regression**: proven by reverting the CS-BUG-030 loadout
+additions for exactly these two specs and re-running — both fail identically
+without them.
+
+**Affected**:
+
+- `tgtt-bastion-paladin-bugbear` — `/bastion|sentinel|guardian|aura|smite|channel divinity|protect/i`
+- `tgtt-jester-bard-dendulra` — `/juggle|jaunt|jest|prankster|pantomime|fool|laughing|witty|agility|dazzling|tumbler|disengagement|ridiculous/i`
+
+**Symptom**: `toggle … should produce a derived effect
+(ac/dc/resistances/speed/attacks/damage)` at the `L5 loadout` test. A toggle
+matching the pattern *does* surface and activate (`probeToggleDelta` returns a
+delta, not `null`) but nothing measurable changes.
+
+**Why it surfaced now**: it was previously masked. Both specs failed earlier in
+the same test at the `gear should affect AC, attack, or DC` assertion, which
+aborted before the toggle probe ran. Fixing that (CS-BUG-030) exposed this.
+
+**Two candidate causes, not yet separated:**
+
+1. **Spec authoring** — the pattern matches a *passive* feature rather than the
+   build's real signature toggle (e.g. Paladin `Aura of Protection` is a passive
+   save bonus; several Jester acts are reminders). If so, retarget the pattern,
+   or use `signatureToggleAddsAttack` / `signatureToggleNoDerivedEffect` (added
+   for the TGTT Gambler, whose abilities alter dice outcomes rather than stats).
+2. **Product gap** — the toggle is genuinely inert on the sheet, which is a real
+   bug against the "every ability has an actual effect" bar.
+
+**Do not** silence this by deleting `signatureToggle`; that removes the check
+entirely and silently. Separate the two causes first — inspect which feature
+name actually matched via `getToggleableFeatureNames()`.
 
 ---

@@ -23,6 +23,11 @@ describeCharacter({
 	// rather than any derived stat, so probeToggleDelta has nothing to observe.
 	// The toggle is still required to surface and activate.
 	signatureToggleNoDerivedEffect: "Gambler abilities modify dice outcomes, not AC/DC/speed/attacks/damage",
+	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
+	// the USE attack probe can actually roll.
+	midTierLoadout: [
+		{name: "Dagger", equipped: true},
+	],
 	usage: {
 		atLevel: 5,
 		castSpellSlotLevel: 1,

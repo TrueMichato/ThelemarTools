@@ -108,6 +108,22 @@ export async function addInventoryItems (page: Page, items: InventoryItemRef[]):
 			if (typeof cs._state.addItem === "function") {
 				try {
 					cs._state.addItem(entry, 1, !!equipped || !!attune, !!attune);
+					// addItem() MERGES into an existing stack when the item is
+					// already in inventory (preset starting gear), bumping only
+					// `quantity` — the requested equipped/attuned state is
+					// silently dropped. Force it afterwards so `equipped: true`
+					// means the same thing for preset-granted and newly-added
+					// items alike (CS-BUG-030).
+					if (equipped || attune) {
+						const row = (cs._state._data?.inventory ?? []).find((i: any) =>
+							i?.item?.name?.toLowerCase() === entry.name?.toLowerCase()
+							&& i?.item?.source === entry.source);
+						if (row && !row.equipped) {
+							if (typeof cs._state.setItemEquipped === "function" && row.id) cs._state.setItemEquipped(row.id, true);
+							else row.equipped = true;
+						}
+						if (row && attune) row.attuned = true;
+					}
 					// Inventory module owns the recalc that flows
 					// bonusAc / bonusSavingThrow / bonusWeaponAttack
 					// from equipped/attuned items into _data.ac.itemBonus
@@ -145,7 +161,7 @@ export async function addInventoryItems (page: Page, items: InventoryItemRef[]):
  * verify that adding magical equipment actually changes the derived
  * combat stats.
  */
-export async function readCombatStats (charSheet: CharacterSheetPage): Promise<{ac: number; firstAttackBonus: number | null; spellSaveDc: number | null}> {
+export async function readCombatStats (charSheet: CharacterSheetPage): Promise<{ac: number; firstAttackBonus: number | null; spellSaveDc: number | null; attackNames: string[]}> {
 	const ac = await charSheet.getAC().catch(() => -1);
 	const firstAttackBonus = await charSheet.page.evaluate(() => {
 		const cs: any = (globalThis as any).charSheet;
@@ -156,7 +172,11 @@ export async function readCombatStats (charSheet: CharacterSheetPage): Promise<{
 			: typeof a?.toHit === "number" ? a.toHit : null;
 	});
 	const spellSaveDc = await charSheet.getSpellSaveDC().catch(() => null);
-	return {ac, firstAttackBonus, spellSaveDc};
+	// Weapons change neither AC nor spell DC, and `firstAttackBonus` only ever
+	// reads attacks[0] (Unarmed Strike). Without the attack list, equipping a
+	// weapon looks like "no effect" (CS-BUG-030).
+	const attackNames = await charSheet.getAttackNames().catch(() => [] as string[]);
+	return {ac, firstAttackBonus, spellSaveDc, attackNames};
 }
 
 // ───────────────────────────────────────────────────────────────────────

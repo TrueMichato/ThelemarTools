@@ -17,6 +17,11 @@ describeCharacter({
 	preset: PRESET_FULL_HORROR_THEOCRACIAN,
 	displayName: "The Horror Warlock Theocracian",
 	signatureToggle: /horror|invocation|pact|hex|dark|terror|eldritch/i,
+	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
+	// the USE attack probe can actually roll.
+	midTierLoadout: [
+		{name: "Dagger", equipped: true},
+	],
 	usage: {
 		atLevel: 5,
 		// CS-BUG-013: Horror Warlock pact slots not registered → cast/attack/USE probe hangs.

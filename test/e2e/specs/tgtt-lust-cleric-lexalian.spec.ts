@@ -154,6 +154,11 @@ describeCharacter({
 	preset: PRESET_FULL_LUST_LEXALIAN,
 	displayName: "Lust Domain Cleric Lexalian",
 	signatureToggle: /channel divinity|charm|lust|allure|persuasion|seduction|domain/i,
+	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
+	// the USE attack probe can actually roll.
+	midTierLoadout: [
+		{name: "Mace", equipped: true},
+	],
 	usage: {
 		atLevel: 5,
 		castSpellSlotLevel: 1,

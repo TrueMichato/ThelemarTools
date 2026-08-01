@@ -17,6 +17,11 @@ describeCharacter({
 	preset: PRESET_FULL_BELLY_DANCER_JAKNIAN,
 	displayName: "Belly Dancer Rogue Jaknian",
 	signatureToggle: /dance of the country|dance/i,
+	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
+	// the USE attack probe can actually roll.
+	midTierLoadout: [
+		{name: "Rapier", equipped: true},
+	],
 	usage: {
 		atLevel: 5,
 		useResourceName: "Dance of the Country",

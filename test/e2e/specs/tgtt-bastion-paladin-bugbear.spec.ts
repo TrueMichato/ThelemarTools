@@ -17,6 +17,11 @@ describeCharacter({
 	preset: PRESET_FULL_BASTION_BUGBEAR,
 	displayName: "Oath of Bastion Paladin Bugbear",
 	signatureToggle: /bastion|sentinel|guardian|aura|smite|channel divinity|protect/i,
+	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
+	// the USE attack probe can actually roll.
+	midTierLoadout: [
+		{name: "Longsword", equipped: true},
+	],
 	usage: {
 		atLevel: 5,
 		castSpellSlotLevel: 1,

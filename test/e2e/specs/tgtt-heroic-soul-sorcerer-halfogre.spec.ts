@@ -220,6 +220,11 @@ describeCharacter({
 	preset: PRESET_FULL_HEROIC_SOUL_HALFOGRE,
 	displayName: "Heroic Soul Sorcerer Half-Ogre",
 	signatureToggle: /over soul|legendary weapon|manifest legend|hero/i,
+	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
+	// the USE attack probe can actually roll.
+	midTierLoadout: [
+		{name: "Dagger", equipped: true},
+	],
 	usage: {
 		atLevel: 5,
 		castSpellSlotLevel: 1,

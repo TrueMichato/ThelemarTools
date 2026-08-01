@@ -159,6 +159,9 @@ describeCharacter({
 	skipMega: false,
 	midTierLoadout: [
 		{name: "Cloak of Protection", source: "XDMG", attune: true},
+		// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a
+		// weapon the USE attack probe can actually roll.
+		{name: "Longsword", equipped: true},
 	],
 	signatureToggle: /action surge|second wind/i,
 	usage: {

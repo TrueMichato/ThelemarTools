@@ -16,6 +16,11 @@ describeCharacter({
 	preset: PRESET_FULL_TIME_CLERIC,
 	displayName: "Time Domain Cleric",
 	signatureToggle: /channel divinity|time|temporal|destroy undead/i,
+	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
+	// the USE attack probe can actually roll.
+	midTierLoadout: [
+		{name: "Mace", equipped: true},
+	],
 	usage: {
 		atLevel: 5,
 		castSpellSlotLevel: 1,

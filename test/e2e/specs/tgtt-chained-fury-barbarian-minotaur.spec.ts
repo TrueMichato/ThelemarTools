@@ -17,6 +17,9 @@ describeCharacter({
 	displayName: "Chained Fury Barbarian Minotaur",
 	midTierLoadout: [
 		{name: "Cloak of Protection", source: "XDMG", attune: true},
+		// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a
+		// weapon the USE attack probe can actually roll.
+		{name: "Greataxe", equipped: true},
 	],
 	signatureToggle: /rage|reckless attack|chained/i,
 	usage: {

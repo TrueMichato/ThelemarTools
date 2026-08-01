@@ -100,6 +100,13 @@ export interface CharacterSpec {
 		 * roll click — the click only needs to not throw.
 		 */
 		attackName?: string | RegExp;
+		/**
+		 * Waive the hard requirement that `attackName` matches a rendered
+		 * attack. Use ONLY for builds that genuinely have no matching weapon
+		 * attack at the probe level; otherwise install the weapon via
+		 * `midTierLoadout` so the attack-roll probe actually runs.
+		 */
+		attackNameOptional?: boolean;
 		/** If set, also runs a long-rest probe and asserts spell slots restored. */
 		expectLongRestRestores?: boolean;
 		/**
@@ -279,7 +286,11 @@ export function describeCharacter (spec: CharacterSpec): void {
 					const acChanged = before.ac !== after.ac;
 					const atkChanged = (before.firstAttackBonus ?? -1) !== (after.firstAttackBonus ?? -1);
 					const dcChanged = (before.spellSaveDc ?? -1) !== (after.spellSaveDc ?? -1);
-					expect(acChanged || atkChanged || dcChanged, `gear should affect AC, attack, or DC. before=${JSON.stringify(before)} after=${JSON.stringify(after)}`).toBe(true);
+					// A newly equipped weapon changes neither AC nor DC, and
+					// `firstAttackBonus` only reads attacks[0] — so the new
+					// attack row is the observable effect (CS-BUG-030).
+					const attacksChanged = before.attackNames.join("|") !== after.attackNames.join("|");
+					expect(acChanged || atkChanged || dcChanged || attacksChanged, `gear should affect AC, attack, or DC. before=${JSON.stringify(before)} after=${JSON.stringify(after)}`).toBe(true);
 				}
 
 				if (signatureToggle) {
@@ -389,12 +400,21 @@ export function describeCharacter (spec: CharacterSpec): void {
 				}
 				await charSheet.expectLevel(atLevel);
 
+				// Install the declared loadout before probing. Without this
+				// the attack probe can only ever see preset-granted gear —
+				// and TGTT presets deliberately ship unarmed, which is what
+				// made this probe silently no-op (CS-BUG-030).
+				if (midTierLoadout?.length) {
+					await addInventoryItems(page, midTierLoadout);
+				}
+
 				// — Attack — verify the attack row exists with a parsable
-				//   bonus and the roll click does not throw. If no
-				//   attacks are rendered (preset doesn't equip a
-				//   weapon), skip the probe rather than fail — players
-				//   can install gear via midTierLoadout for strict
-				//   attack-roll coverage.
+				//   bonus and the roll click does not throw. A declared
+				//   `usage.attackName` that never matches is a coverage
+				//   hole, not an acceptable outcome: install the weapon via
+				//   `midTierLoadout` (or fix the pattern). Opt out
+				//   deliberately with `usage.attackNameOptional` when the
+				//   build genuinely has no weapon attack.
 				if (usage.attackName) {
 					const names = await charSheet.getAttackNames();
 					const matchRe = typeof usage.attackName === "string"
@@ -405,12 +425,15 @@ export function describeCharacter (spec: CharacterSpec): void {
 						const roll = await charSheet.clickAttackRoll(matched);
 						expect(roll.clicked, `attack roll for ${matched} should be clickable`).toBe(true);
 						expect(roll.threwError, `attack roll for ${matched} threw: ${roll.errorMessage ?? ""}`).toBe(false);
-					} else if (names.length > 0) {
-						// Some attack rendered but not the expected one — log
-						// the actual list so future regressions are easier
-						// to diagnose. Don't fail: the preset might have
-						// renamed the weapon.
-						console.log(`[usage probe] attack name ${matchRe} not found; rendered=${JSON.stringify(names)}`);
+					} else if (usage.attackNameOptional) {
+						console.log(`[usage probe] attack name ${matchRe} not found (declared optional); rendered=${JSON.stringify(names)}`);
+					} else {
+						expect(
+							matched,
+							`attack ${matchRe} should be rendered so the attack-roll probe actually runs. `
+							+ `rendered=${JSON.stringify(names)}. Add the weapon to midTierLoadout, correct the `
+							+ `pattern, or set usage.attackNameOptional if this build has no weapon attack.`,
+						).toBeTruthy();
 					}
 				}
 
@@ -610,6 +633,8 @@ export interface MulticlassCharacterSpec {
 		castSpellSlotLevel?: number;
 		useResourceName?: string;
 		attackName?: string | RegExp;
+		/** Waive the hard `attackName` match for this leg (see `usage.attackNameOptional`). */
+		attackNameOptional?: boolean;
 		skillRoll?: {name: string} | {skip: true};
 		skip?: boolean;
 	} | null>;
@@ -757,8 +782,15 @@ async function _runMulticlassUsageProbe (
 			const ok = await charSheet.clickAttackRoll(matched);
 			expect(ok.clicked, `[${legLabel}] attack ${matched} clickable`).toBe(true);
 			expect(ok.threwError, `[${legLabel}] attack ${matched} threw: ${ok.errorMessage ?? ""}`).toBe(false);
-		} else if (names.length > 0) {
-			console.log(`[${legLabel} usage] attack ${re} not found; rendered=${JSON.stringify(names)}`);
+		} else if (probe.attackNameOptional) {
+			console.log(`[${legLabel} usage] attack ${re} not found (declared optional); rendered=${JSON.stringify(names)}`);
+		} else {
+			expect(
+				matched,
+				`[${legLabel}] attack ${re} should be rendered so the attack-roll probe actually runs. `
+				+ `rendered=${JSON.stringify(names)}. Add the weapon to the loadout, correct the pattern, `
+				+ `or set attackNameOptional for this leg.`,
+			).toBeTruthy();
 		}
 	}
 

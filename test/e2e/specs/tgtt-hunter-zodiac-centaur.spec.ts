@@ -342,6 +342,11 @@ describeCharacter({
 	preset: PRESET_FULL_HUNTER_CENTAUR,
 	displayName: "Hunter Ranger Centaur",
 	signatureToggle: /hunter|hunter's mark|colossus|horde/i,
+	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
+	// the USE attack probe can actually roll.
+	midTierLoadout: [
+		{name: "Longbow", equipped: true},
+	],
 	usage: {
 		atLevel: 5,
 		castSpellSlotLevel: 1,
@@ -369,6 +374,11 @@ describeCharacter({
 	preset: PRESET_FULL_ZODIAC_CENTAUR,
 	displayName: "Zodiac Druid Centaur",
 	signatureToggle: /zodiac|starry|wild shape|stellar/i,
+	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
+	// the USE attack probe can actually roll.
+	midTierLoadout: [
+		{name: "Quarterstaff", equipped: true},
+	],
 	usage: {
 		atLevel: 5,
 		castSpellSlotLevel: 1,
@@ -407,6 +417,9 @@ describeMulticlassCharacter({
 		{
 			castSpellSlotLevel: 1,
 			attackName: /longbow|shortbow/i,
+			// Multiclass legs have no loadout hook, and the TGTT Ranger preset
+			// ships unarmed, so the bow can never render here (CS-BUG-030).
+			attackNameOptional: true,
 			skillRoll: {name: "Stealth"},
 		},
 		// After Druid 20 — full 9th-level access + Wild Shape resource + Nature roll

@@ -18,6 +18,11 @@ describeCharacter({
 	preset: PRESET_FULL_TRICKSTER_GOBLIN,
 	displayName: "Trickster Rogue Goblin",
 	signatureToggle: /disarming strike|trip attack|swing away|deafening strike|blinding strike|noise maker|rebounding throw|weaponized debris|rapid deployment|trick/i,
+	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
+	// the USE attack probe can actually roll.
+	midTierLoadout: [
+		{name: "Shortsword", equipped: true},
+	],
 	usage: {
 		atLevel: 5,
 		// CS-BUG-012: Trickster Dice resource not surfaced; useResourceName + shortRest skipped

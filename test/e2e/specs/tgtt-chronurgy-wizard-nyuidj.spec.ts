@@ -149,6 +149,11 @@ describeCharacter({
 	preset: PRESET_FULL_CHRONURGY_NYUIDJ,
 	displayName: "Chronurgy Wizard Nyuidj",
 	signatureToggle: /chronal|convergent|temporal|momentary/i,
+	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
+	// the USE attack probe can actually roll.
+	midTierLoadout: [
+		{name: "Quarterstaff", equipped: true},
+	],
 	usage: {
 		atLevel: 5,
 		castSpellSlotLevel: 1,
