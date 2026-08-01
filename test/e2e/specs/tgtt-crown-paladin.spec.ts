@@ -19,9 +19,11 @@ import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
  */
 const CROWN_FEATURES: FeatureCheck[] = [
 	// ── L1: half-caster chassis ─────────────────────────────────────────
-	// Lay on Hands renders as an activatable ability row with a Use button, so
-	// `getGenericPoolResources()` deliberately EXCLUDES it — probe the feature's
-	// own uses + long-rest restore rather than `kind: "resource"`.
+	// Lay on Hands is BOTH an activatable ability row and a trackable pool: since
+	// `e85036b1` `getGenericPoolResources()` deliberately RETAINS classified
+	// limited-use abilities, so it surfaces on the play tabs and `kind: "resource"`
+	// is a valid probe for it. Both surfaces are asserted — the pool size below
+	// (tiered, because it scales) and spend → long rest → restored here.
 	{
 		level: 1,
 		name: /lay on hands/i,
@@ -32,6 +34,14 @@ const CROWN_FEATURES: FeatureCheck[] = [
 			{kind: "rollInitiative"},
 		],
 	},
+	// The pool is `level * 5`, so it needs ONE entry per matrix checkpoint with
+	// `untilLevel`: a single fixed `resourceMax` would be re-evaluated at every
+	// later checkpoint and report the correct new value as a failure.
+	{level: 1, untilLevel: 4, name: "Lay on Hands", kind: "resource", resourceMax: 15},
+	{level: 5, untilLevel: 10, name: "Lay on Hands", kind: "resource", resourceMax: 25},
+	{level: 11, untilLevel: 16, name: "Lay on Hands", kind: "resource", resourceMax: 55},
+	{level: 17, untilLevel: 19, name: "Lay on Hands", kind: "resource", resourceMax: 85},
+	{level: 20, name: "Lay on Hands", kind: "resource", resourceMax: 100},
 	{
 		level: 1,
 		name: /divine sense/i,
@@ -59,8 +69,8 @@ const CROWN_FEATURES: FeatureCheck[] = [
 	// 2024 Paladin scales 2 → 3, and only the Cleric reaches 3 at L18) — see
 	// `_getChannelDivinityUsesForClass` / CS-BUG-033. The matrix re-evaluates this
 	// row at every later checkpoint, which is exactly the regression guard we want.
-	// Channel Divinity renders as an activatable row so it is excluded from
-	// `getGenericPoolResources()`; probe the feature's own uses instead.
+	// It surfaces BOTH as a feature with its own uses and — since `e85036b1` —
+	// as a generic pool, so both are asserted.
 	{
 		level: 3,
 		name: /^channel divinity$/i,
@@ -70,6 +80,7 @@ const CROWN_FEATURES: FeatureCheck[] = [
 			{kind: "shortRestRestoresFeatureUses", feature: "Channel Divinity"},
 		],
 	},
+	{level: 3, name: "Channel Divinity", kind: "resource", resourceMax: 1, restoreOn: "short"},
 	{
 		level: 3,
 		name: /oath spells/i,
@@ -278,16 +289,18 @@ describeCharacter({
 	usage: {
 		atLevel: 5,
 		castSpellSlotLevel: 1,
-		// Channel Divinity is NOT a generic resource pool for the 2014 Paladin — it
-		// renders as an activatable ability row, so `getGenericPoolResources()` (and
-		// therefore `getResource()`) never sees it. Drive Lay on Hands here and cover
-		// Channel Divinity's short-rest recovery via `shortRestRestoresFeatureUses`
-		// in the matrix instead.
+		// Both Lay on Hands and Channel Divinity are real generic pools (`e85036b1`),
+		// but the USE probe drives only one; Channel Divinity's spend + short-rest
+		// recovery is covered by the matrix row above, so drive the bigger pool here.
 		useResourceName: "Lay on Hands",
 		expectLongRestRestores: true,
 		attackName: /longsword/i,
 		skillRoll: {name: "Persuasion"},
-		shortRestRestores: {skip: true},
+		// Channel Divinity is a real short-rest pool on the 2014 Paladin as of
+		// CS-BUG-054 (before it, no pool existed at all and the ability was
+		// unlimited), and it reaches this surface because `getGenericPoolResources()`
+		// retains classified limited-use abilities.
+		shortRestRestores: {resourceName: "Channel Divinity"},
 		concentrationCheck: {castSpell: "Bless", thenAction: "damage", expectActive: false},
 		deathSaves: true,
 		applyCondition: {name: "Restrained"},
