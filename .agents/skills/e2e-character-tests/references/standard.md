@@ -173,10 +173,11 @@ stay clean). Use this decision tree:
 | "You have advantage on X" | flag | `advantage`, `skillAdvantage` |
 | "You have disadvantage on X" | flag | `disadvantage` |
 | Damage resistance / immunity / vulnerability | flag | `resistance`, `immunity`, `vulnerability` |
-| Adds a spell to a list / known | spell | `spellInList`, `cantripCount` |
+| Adds a spell to a list / known | spell | `spellInList` (searches known spells **and** cantrips, so subclass-granted cantrips count), `cantripCount` |
 | Toggle that adds/removes AC while active | toggle delta | `togglePlusAc` |
-| Toggle that adds/removes speed while active | toggle delta | `togglePlusSpeed` |
+| Toggle that adds/removes speed while active | toggle delta | `togglePlusSpeed` (walking speed only), `toggleGrantsSpeed` (any speed type; `equalsWalk` for "equal to your Speed" grants) |
 | Toggle that grants resistance / advantage / immunity | toggle flag | `toggleGrantsResistance`, `toggleGrantsAdvantage`, `toggleGrantsImmunity` |
+| Toggle whose activation fires a save-for-damage / reaction burst | toggle trigger | `activeStateTrigger` (`label`, `actionType`, `damageType`, `damageMin`, `damageFormula`, `dcMin`) |
 | Adds a roll button (Bardic Inspiration, Channel Divinity option, …) | roll | `rollAbilityCheck`, `rollSavingThrow`, `rollSkillCheck`, `rollAttack`, `rollInitiative` |
 | Restores a resource or feature-owned use pool on long / short rest | resource | `longRestRestores`, `shortRestRestores`, `longRestRestoresFeatureUses`, `shortRestRestoresFeatureUses` |
 | Grants spell slots at a level | spellcasting | `spellSlots` |

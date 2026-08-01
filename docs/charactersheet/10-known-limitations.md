@@ -30,6 +30,22 @@ All Druid circles are fully implemented:
 - **Spores**: `haloOfSporesDamage`, `symbioticEntityTempHp`, `fungalInfestationUses`
 - **Stars**: `starryFormUses`, `cosmicOmenUses`, `archerFormDamage`, `chaliceFormHealing`
 - **Wildfire**: `wildfireSpiritHp`, `cauterizingFlamesUses`, `blazingRevivalHp`
+- **Sea (XPHB 2024)**: Wrath of the Sea is a real Wild-Shape-fuelled Emanation —
+  a `wrathOfTheSea` active state costing 1 use (2 to cover both the druid and an
+  ally), whose Ocean Spray bonus-action trigger resolves a Constitution save
+  against the druid's own spell save DC for `max(1, WIS mod)`d6 Cold damage and a
+  15-foot push of a Large-or-smaller target. Aquatic Affinity emits a computed
+  swim speed equal to the walking speed and widens the Emanation from 5 ft to
+  10 ft. Stormborn (`hasSeaStormborn`, deliberately NOT the Tempest Cleric's
+  `hasStormborn`) attaches Cold/Lightning/Thunder resistance and a fly speed
+  equal to the walking speed **to the active state**, so both vanish the moment
+  the Emanation ends. Oceanic Gift adds the `self` / `ally` / `both` placement
+  prompt at activation; an ally placement keeps the druid's DC and dice but
+  moves Stormborn's benefits off the druid.
+  *Deliberate scope limit*: the sheet models one character, so an ally-placed
+  Emanation cannot show the resistances and fly speed on the ally — it correctly
+  withholds them from the druid, and the placement plus its Wild Shape cost are
+  observable through `getWrathOfTheSeaAction(placement)`.
 
 #### Cleric Domains ✅
 All 14 Cleric domains are fully implemented:

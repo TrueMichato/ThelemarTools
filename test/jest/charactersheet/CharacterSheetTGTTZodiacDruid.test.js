@@ -385,13 +385,13 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 	// WILD SHAPE USES PROGRESSION
 	// =========================================================================
 	describe("Wild Shape Uses Progression", () => {
-		// Standard Druid: 2 uses at L2+, Archdruid (L20) grants unlimited
+		// 2024 Druid Features table: 2 uses at L2-5, 3 at L6-16, 4 at L17-20.
 		const wsProgression = [
 			{level: 3, expected: 2},
-			{level: 6, expected: 2},
-			{level: 10, expected: 2},
-			{level: 14, expected: 2},
-			{level: 18, expected: 2},
+			{level: 6, expected: 3},
+			{level: 10, expected: 3},
+			{level: 14, expected: 3},
+			{level: 18, expected: 4},
 		];
 
 		wsProgression.forEach(({level, expected}) => {
@@ -406,14 +406,19 @@ describe("TGTT Zodiac Druid (Circle of the Stars)", () => {
 			});
 		});
 
-		it("should have unlimited (Infinity) Wild Shape uses at Druid level 20 (Archdruid)", () => {
+		// The 2024 Archdruid does NOT grant unlimited Wild Shape: "Evergreen Wild
+		// Shape" refunds ONE expended use when you roll Initiative on an empty
+		// pool. The pool itself stays at the table value.
+		it("should keep the table's four Wild Shape uses at Druid level 20 (Archdruid)", () => {
 			const s = new CharacterSheetState();
 			s.addClass({name: "Druid",
 				source: "TGTT",
 				level: 20,
 				subclass: {name: "Circle of the Stars", shortName: "Stars", source: "TGTT"}});
 			s.setAbilityBase("wis", 18);
-			expect(s.getFeatureCalculations().wildShapeUses).toBe(Infinity);
+			const calc = s.getFeatureCalculations();
+			expect(calc.wildShapeUses).toBe(4);
+			expect(calc.hasEvergreenWildShape).toBe(true);
 		});
 	});
 
