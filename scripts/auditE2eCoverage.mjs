@@ -11,6 +11,14 @@
 // comments are flagged as warnings (advisory — does not exit non-zero by
 // default; pass `--strict` to exit 1 on any warning).
 //
+// It also reports INERT LEVEL WINDOWS: matrix rows whose
+// `[level, untilLevel]` span contains none of the MEGA checkpoints, and
+// which therefore never execute. These are worse than a `skip: true`
+// because they leave no marker to grep for, and without this check they
+// would still count towards `effects` — laundering dead probes as
+// coverage. The checkpoint list is read out of `characterSpecFactory.ts`
+// so it cannot drift.
+//
 // This is purposely a regex-based scan rather than a full TS parser — the
 // matrix shape is uniform enough (FeatureCheck object literals in array
 // expressions) that regex handles it well, and we keep the script
@@ -22,6 +30,7 @@ import {fileURLToPath} from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SPECS_DIR = path.join(ROOT, "test", "e2e", "specs");
+const FACTORY_PATH = path.join(ROOT, "test", "e2e", "utils", "characterSpecFactory.ts");
 const STRICT = process.argv.includes("--strict");
 const QUIET = process.argv.includes("--quiet");
 
@@ -29,6 +38,66 @@ const COVERAGE_WARN_THRESHOLD = 0.80;
 
 function log (...args) { if (!QUIET) console.log(...args); }
 function warn (...args) { console.warn(...args); }
+
+/**
+ * The MEGA matrix only evaluates the features matrix at a fixed set of
+ * levels. Read them out of the factory rather than hard-coding, so this
+ * audit cannot silently drift if the checkpoint list changes.
+ */
+function readCheckpoints () {
+	const FALLBACK = [3, 5, 11, 17, 20];
+	try {
+		const src = fs.readFileSync(FACTORY_PATH, "utf8");
+		const m = src.match(/const\s+checkpoints\s*=\s*\[([\d,\s]+)\]/);
+		if (!m) return FALLBACK;
+		const parsed = m[1].split(",").map(s => Number(s.trim())).filter(Number.isFinite);
+		return parsed.length ? parsed : FALLBACK;
+	} catch {
+		return FALLBACK;
+	}
+}
+
+const CHECKPOINTS = readCheckpoints();
+
+/** Extract the balanced `{...}` literal that starts at `start`. */
+function readObjectLiteral (src, start) {
+	let depth = 0;
+	for (let j = start; j < src.length; ++j) {
+		if (src[j] === "{") ++depth;
+		else if (src[j] === "}" && --depth === 0) return src.slice(start, j + 1);
+	}
+	return null;
+}
+
+/**
+ * A features-matrix row is only ever evaluated at a checkpoint that falls
+ * inside its `[level, untilLevel]` window. A row whose window contains no
+ * checkpoint NEVER RUNS — its probes are dead code that nothing reports,
+ * which is strictly worse than a `skip: true` because there is no marker
+ * to grep for. Without this check such rows still count towards
+ * `effects`, so the audit would launder them as covered.
+ */
+function findInertRows (src) {
+	const out = [];
+	const re = /\{\s*level:\s*(\d+)/g;
+	let m;
+	while ((m = re.exec(src)) !== null) {
+		const obj = readObjectLiteral(src, m.index);
+		if (!obj) continue;
+		const until = obj.match(/untilLevel:\s*(\d+)/);
+		if (!until) continue; // open-ended windows always reach the last checkpoint
+		const lo = Number(m[1]);
+		const hi = Number(until[1]);
+		if (CHECKPOINTS.some(c => c >= lo && c <= hi)) continue;
+		out.push({
+			line: src.slice(0, m.index).split("\n").length,
+			window: `L${lo}-${hi}`,
+			name: (obj.match(/name:\s*([^,\n]+)/)?.[1] || "?").trim().slice(0, 40),
+			hasProbes: /\beffects:\s*\[|\bpickedCount:/.test(obj),
+		});
+	}
+	return out;
+}
 
 function listSpecs () {
 	return fs.readdirSync(SPECS_DIR)
@@ -73,8 +142,12 @@ function auditSpec (specPath) {
 
 	// "Effective" coverage: hand-written effects + reason comments +
 	// helper usage + skipReason annotations (each represents a row
-	// that's been deliberately accounted for).
-	const effective = effectsCount + reasonCount + helperCount + skipReasonCount;
+	// that's been deliberately accounted for). Rows sitting in an inert
+	// level window are subtracted back out — they carry probes that can
+	// never execute, so counting them would overstate coverage.
+	const inertRows = findInertRows(src);
+	const inertWithProbes = inertRows.filter(r => r.hasProbes).length;
+	const effective = effectsCount + reasonCount + helperCount + skipReasonCount - inertWithProbes;
 	const coverage = entryCount === 0 ? 1 : effective / entryCount;
 
 	const status =
@@ -90,6 +163,8 @@ function auditSpec (specPath) {
 		reasonCount,
 		skipCount,
 		helperCount,
+		inertRows,
+		inertWithProbes,
 		coverage,
 		status,
 	};
@@ -110,14 +185,14 @@ function main () {
 	log("");
 	log("E2E spec EffectCheck coverage:");
 	log("─".repeat(96));
-	log(`  ${padR("spec", 48)} ${padL("entries", 8)} ${padL("effects", 8)} ${padL("helpers", 8)} ${padL("reason", 7)} ${padL("skip", 5)} ${padL("cov", 6)}  status`);
+	log(`  ${padR("spec", 48)} ${padL("entries", 8)} ${padL("effects", 8)} ${padL("helpers", 8)} ${padL("reason", 7)} ${padL("skip", 5)} ${padL("inert", 6)} ${padL("cov", 6)}  status`);
 	log("─".repeat(96));
 	let warnings = 0;
 	for (const r of results) {
 		const pct = r.entryCount === 0 ? "—   " : `${(r.coverage * 100).toFixed(0).padStart(3)}%`;
 		const tag = r.status === "LOW" ? "⚠ LOW " : r.status === "FULL" ? "✓ FULL" : r.status === "EMPTY" ? "  EMPTY" : "  OK  ";
 		if (r.status === "LOW") warnings++;
-		log(`  ${padR(r.fileName, 48)} ${padL(r.entryCount, 8)} ${padL(r.effectsCount, 8)} ${padL(r.helperCount, 8)} ${padL(r.reasonCount, 7)} ${padL(r.skipCount, 5)} ${padL(pct, 6)}  ${tag}`);
+		log(`  ${padR(r.fileName, 48)} ${padL(r.entryCount, 8)} ${padL(r.effectsCount, 8)} ${padL(r.helperCount, 8)} ${padL(r.reasonCount, 7)} ${padL(r.skipCount, 5)} ${padL(r.inertWithProbes || "", 6)} ${padL(pct, 6)}  ${tag}`);
 	}
 	log("─".repeat(96));
 	const totalEntries = results.reduce((a, r) => a + r.entryCount, 0);
@@ -127,12 +202,31 @@ function main () {
 	log(`  ${padR(`TOTAL (${results.length} specs)`, 48)} ${padL(totalEntries, 8)} ${padL(totalEffects, 8)} ${padL(totalHelpers, 8)} ${padL(totalReasons, 7)}`);
 	log("");
 	log(`  Threshold: <${(COVERAGE_WARN_THRESHOLD * 100).toFixed(0)}% effective coverage flags as LOW.`);
-	log(`  Effective = effects + reason-comments + helper-uses + skipReason annotations.`);
+	log(`  Effective = effects + reason-comments + helper-uses + skipReason annotations − inert rows.`);
 	log("");
+
+	const inertSpecs = results.filter(r => r.inertRows.length);
+	const totalInertProbes = results.reduce((a, r) => a + r.inertWithProbes, 0);
+	if (inertSpecs.length) {
+		log(`  ⚠ Inert level windows — never evaluated at any checkpoint [${CHECKPOINTS.join(", ")}]:`);
+		log("");
+		for (const r of inertSpecs) {
+			for (const row of r.inertRows) {
+				const tag = row.hasProbes ? "probes NEVER RUN" : "no probes attached";
+				log(`      ${padR(r.fileName, 46)} ${padR(row.window, 8)} line ${padR(row.line, 5)} ${padR(row.name, 40)} ${tag}`);
+			}
+		}
+		log("");
+		log(`  ${totalInertProbes} row(s) carry probes that can never execute, across ${inertSpecs.length} spec(s).`);
+		log(`  Unlike \`skip: true\` these leave no marker — widen untilLevel to reach a`);
+		log(`  checkpoint, or move the row's level to one.`);
+		log("");
+	}
+
 	if (warnings > 0) {
 		log(`  ${warnings} spec(s) below threshold.`);
-		if (STRICT) process.exit(1);
 	}
+	if (STRICT && (warnings > 0 || totalInertProbes > 0)) process.exit(1);
 }
 
 main();
