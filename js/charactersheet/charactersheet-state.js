@@ -7754,7 +7754,7 @@ class CharacterSheetState {
 		if (classEntry) {
 			const wasDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(classEntry.subclass);
 			const willBeDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(subclass);
-			const willHaveNamedChoice = CharacterSheetClassUtils.hasNamedSubclassChoice(subclass);
+			const willHaveNamedChoice = CharacterSheetClassUtils.hasSubclassChoicePrompt(subclass);
 			// Switching away from Divine Soul: remove the orphaned affinity spell
 			// (computed from the OLD subclass) before reassigning.
 			if (wasDivineSoul && !willBeDivineSoul) {
@@ -14120,6 +14120,93 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Declarative, level-gated spell grants for subclasses whose spell list lives
+	 * somewhere neither `additionalSpells` nor `SpellGrantParser` can reach.
+	 *
+	 * The parser only ever sees prose: `getFeatureSpellText()` walks `entries` and
+	 * `items` and never descends into a `type: "table"` node's `rows`. A subclass
+	 * that publishes its spells as a TABLE — the 5etools house style for
+	 * multi-column spell progressions — therefore grants nothing at all, and the
+	 * shipped `additionalSpells` block is frequently a partial transcription of
+	 * that table (Lunar Sorcery ships only the Full Moon column of three).
+	 *
+	 * Rather than teach the parser to read tables — which would over-grant for the
+	 * many CHOOSE-ONE spell tables (Circle of the Land's terrain columns, warlock
+	 * expanded lists) — this registry states the grant explicitly, and the entries
+	 * flow through the ordinary always-prepared pipeline (enrichment, cantrip
+	 * routing, dedupe, `sourceFeature` attribution) exactly like `additionalSpells`.
+	 *
+	 * Keys are `"<Class name>|<subclass shortName or name>"`. Each entry is
+	 * `{name, source?, minLevel?, cantrip?, grantedBy?}` where `minLevel` is the
+	 * CLASS level at which the grant unlocks (default 1).
+	 *
+	 * @type {Record<string, Array<{name: string, source?: string, minLevel?: number, cantrip?: boolean, grantedBy?: string}>>}
+	 */
+	static FEATURE_SPELL_GRANTS = {
+		// Lunar Sorcery (DSotDQ p34). RAW you learn EVERY spell on the Lunar Spells
+		// table — all three phase columns — and the chosen phase gates the free
+		// casts / Lunar Boons schools / Empowerment / Phenomenon instead. The
+		// shipped data encodes only the Full Moon column, so all fifteen are
+		// declared here and the partial `additionalSpells` block dedupes away.
+		"Sorcerer|Lunar": [
+			{name: "Sacred Flame", source: "PHB", cantrip: true, grantedBy: "Moon Fire"},
+			{name: "Shield", source: "PHB", minLevel: 1, grantedBy: "Lunar Embodiment"},
+			{name: "Ray of Sickness", source: "PHB", minLevel: 1, grantedBy: "Lunar Embodiment"},
+			{name: "Color Spray", source: "PHB", minLevel: 1, grantedBy: "Lunar Embodiment"},
+			{name: "Lesser Restoration", source: "PHB", minLevel: 3, grantedBy: "Lunar Embodiment"},
+			{name: "Blindness/Deafness", source: "PHB", minLevel: 3, grantedBy: "Lunar Embodiment"},
+			{name: "Alter Self", source: "PHB", minLevel: 3, grantedBy: "Lunar Embodiment"},
+			{name: "Dispel Magic", source: "PHB", minLevel: 5, grantedBy: "Lunar Embodiment"},
+			{name: "Vampiric Touch", source: "PHB", minLevel: 5, grantedBy: "Lunar Embodiment"},
+			{name: "Phantom Steed", source: "PHB", minLevel: 5, grantedBy: "Lunar Embodiment"},
+			{name: "Death Ward", source: "PHB", minLevel: 7, grantedBy: "Lunar Embodiment"},
+			{name: "Confusion", source: "PHB", minLevel: 7, grantedBy: "Lunar Embodiment"},
+			{name: "Hallucinatory Terrain", source: "PHB", minLevel: 7, grantedBy: "Lunar Embodiment"},
+			{name: "Rary's Telepathic Bond", source: "PHB", minLevel: 9, grantedBy: "Lunar Embodiment"},
+			{name: "Hold Monster", source: "PHB", minLevel: 9, grantedBy: "Lunar Embodiment"},
+			{name: "Mislead", source: "PHB", minLevel: 9, grantedBy: "Lunar Embodiment"},
+		],
+	};
+
+	/**
+	 * Resolve the declarative spell grants (see {@link FEATURE_SPELL_GRANTS}) that a
+	 * class entry has unlocked at its current level.
+	 *
+	 * Static and pure: it reads only the class entry, so it is safe to call from the
+	 * always-prepared pipeline without re-entering `getFeatureCalculations()`.
+	 *
+	 * @param {*} cls A `_data.classes[]` entry (with `subclass`).
+	 * @returns {Array<{name: string, source: string, minLevel: number, cantrip: boolean, grantedBy: string|null}>}
+	 */
+	static getFeatureGrantedSpells (cls) {
+		const subclass = cls?.subclass;
+		if (!cls?.name || !subclass) return [];
+		const level = cls.level || 0;
+		const keys = [subclass.shortName, subclass.name]
+			.filter(Boolean)
+			.map(it => `${cls.name}|${it}`);
+		const seen = new Set();
+		const out = [];
+		for (const key of keys) {
+			for (const grant of (CharacterSheetState.FEATURE_SPELL_GRANTS[key] || [])) {
+				const minLevel = grant.minLevel ?? 1;
+				if (level < minLevel) continue;
+				const id = `${grant.name}|${grant.source || Parser.SRC_PHB}`.toLowerCase();
+				if (seen.has(id)) continue;
+				seen.add(id);
+				out.push({
+					name: grant.name,
+					source: grant.source || Parser.SRC_PHB,
+					minLevel,
+					cantrip: !!grant.cantrip,
+					grantedBy: grant.grantedBy || null,
+				});
+			}
+		}
+		return out;
+	}
+
+	/**
 	 * Get the list of always-prepared spells from a subclass's additionalSpells data.
 	 * This handles domain spells (Cleric), oath spells (Paladin), circle spells (Druid),
 	 * expanded spell lists (Warlock), etc.
@@ -14133,9 +14220,23 @@ class CharacterSheetState {
 		const characterLevel = cls.level || 0;
 		const result = [];
 
+		// Declarative grants first (see FEATURE_SPELL_GRANTS): these cover spell lists
+		// the shipped data cannot express, and they are INDEPENDENT of additionalSpells
+		// — a subclass may have one, the other, or both. Any overlap dedupes downstream
+		// in `populateSubclassSpells()`.
+		for (const grant of CharacterSheetState.getFeatureGrantedSpells(cls)) {
+			const parsed = this._parseSpellReference(`${grant.name}|${grant.source}${grant.cantrip ? "#c" : ""}`);
+			if (!parsed) continue;
+			// Attribute the grant to the FEATURE that gives it rather than to a
+			// generic "<Subclass> Spells" bucket, so the sheet can tell the player
+			// which feature is responsible (Lunar Sorcery grants from two).
+			const extra = grant.grantedBy ? {sourceFeature: grant.grantedBy} : {};
+			result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls, extra));
+		}
+
 		// Check additionalSpells on the subclass object
 		const additionalSpells = subclassData.additionalSpells;
-		if (!additionalSpells?.length) return [];
+		if (!additionalSpells?.length) return result;
 
 		const isDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(subclassData);
 		const hasNamedChoice = CharacterSheetClassUtils.hasNamedSubclassChoice(subclassData);
@@ -20345,32 +20446,64 @@ class CharacterSheetState {
 								}
 								break;
 							}
+							// =====================================================================
+							// Lunar Sorcery (Sorcerer Subclass, DSotDQ)
+							//
+							// The lunar PHASE is the centrepiece: it is a live, switchable
+							// state (three mutually-exclusive `ACTIVE_STATE_TYPES` entries,
+							// seeded from `subclassChoice`) and it gates four real mechanics —
+							// which 1st-level Lunar spell is free, which two schools Lunar
+							// Boons discounts, which Lunar Empowerment passive is live, and
+							// which Lunar Phenomenon the bonus action produces.
+							//
+							// It does NOT gate spell knowledge: RAW you learn every spell on
+							// the Lunar Spells table. The shipped data encodes only the Full
+							// Moon column, so all fifteen are granted declaratively via
+							// `FEATURE_SPELL_GRANTS` instead.
+							// =====================================================================
 							case "Lunar Sorcery":
 							case "Lunar": {
-								// Lunar Embodiment (level 1/3)
 								const subclassLevel = is2024 ? 3 : 1;
-								if (level >= subclassLevel) {
-									calculations.hasLunarEmbodiment = true;
-								}
-								// Moon Fire (level 1/3)
-								if (level >= subclassLevel) {
-									calculations.hasMoonFire = true;
-								}
-								// Lunar Boons (level 6)
+								if (level < subclassLevel) break;
+
+								const phase = this.getLunarPhase();
+
+								calculations.hasLunarEmbodiment = true;
+								calculations.lunarPhase = phase?.key || null;
+								calculations.lunarPhaseName = phase?.name || null;
+								calculations.lunarPhaseOptions = Object.values(CharacterSheetState.LUNAR_PHASES)
+									.map(p => ({key: p.key, name: p.name, icon: p.icon}));
+								calculations.lunarFreeSpell = phase ? {...phase.freeSpell} : null;
+								calculations.lunarEmbodimentFreeCasts = this.getLunarFreeCasts().filter(it => it.available).length;
+
+								// Moon Fire — Sacred Flame, cast against two creatures within
+								// 5 ft of each other, and it does not count against cantrips known.
+								calculations.hasMoonFire = true;
+								calculations.moonFireCantrip = "Sacred Flame";
+								calculations.moonFireTargets = 2;
+								calculations.moonFireTargetSpacingFt = 5;
+
 								if (level >= 6) {
 									calculations.hasLunarBoons = true;
-								}
-								// Waxing and Waning (level 6)
-								if (level >= 6) {
+									calculations.lunarBoonsMax = profBonus;
+									calculations.lunarBoonsSchools = phase ? [...phase.schools] : [];
+									calculations.lunarBoonsSchoolNames = phase ? [...phase.schoolNames] : [];
+									calculations.lunarBoonsDiscount = 1;
+
 									calculations.hasWaxingAndWaning = true;
+									calculations.waxingAndWaningCost = 1;
 								}
-								// Lunar Empowerment (level 14)
+
 								if (level >= 14) {
 									calculations.hasLunarEmpowerment = true;
+									calculations.lunarEmpowermentText = phase?.empowermentText || null;
 								}
-								// Lunar Phenomenon (level 18)
+
 								if (level >= 18) {
 									calculations.hasLunarPhenomenon = true;
+									calculations.lunarPhenomenonSorceryPointCost = 5;
+									calculations.lunarPhenomenonSaveDc = this.getSpellSaveDC("Sorcerer");
+									calculations.lunarPhenomenonEffect = phase ? {...phase.phenomenon} : null;
 								}
 								break;
 							}
@@ -31795,6 +31928,7 @@ class CharacterSheetState {
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
 		this._ensureMeteorKnightResources();
+		this._ensureLunarResources();
 		this.ensureBloodHunterResources();
 		this.ensureTalentResources();
 		this._ensureChannelDivinityUses();
@@ -32270,6 +32404,430 @@ class CharacterSheetState {
 		resource.current--;
 		return true;
 	}
+
+	// #region Lunar Sorcery (Sorcerer, DSotDQ)
+	/**
+	 * The three Lunar Embodiment phases. Everything phase-dependent in the subclass
+	 * reads this ONE table, so a phase is never re-described at a call site:
+	 *
+	 * - `freeSpell`  the 1st-level Lunar spell Lunar Embodiment lets you cast free,
+	 * - `schools`    the two schools Lunar Boons discounts,
+	 * - `empowerment` the level-14 Lunar Empowerment passive effects,
+	 * - `phenomenon` the level-18 Lunar Phenomenon bonus-action power.
+	 *
+	 * NOTE the phase does NOT gate which spells are known — RAW you learn every
+	 * spell on the Lunar Spells table (all three columns); see FEATURE_SPELL_GRANTS.
+	 * @type {Record<string, *>}
+	 */
+	static LUNAR_PHASES = {
+		"full moon": {
+			key: "full moon",
+			name: "Full Moon",
+			icon: "🌕",
+			stateId: "lunarPhaseFull",
+			freeSpell: {name: "Shield", source: "PHB"},
+			schools: ["A", "D"],
+			schoolNames: ["Abjuration", "Divination"],
+			empowerment: [],
+			empowermentText: "As a bonus action you shed bright light in a 10-foot radius and dim light for an additional 10 feet. You have advantage on Investigation and Perception checks made within that light.",
+			phenomenon: {
+				name: "Full Moon: Blinding Moonlight",
+				text: "Each creature of your choice within 30 feet must succeed on a Constitution saving throw or be Blinded until the end of your next turn. A creature that succeeds is instead healed.",
+				save: "con",
+				condition: "blinded",
+				healDice: "3d8",
+			},
+		},
+		"new moon": {
+			key: "new moon",
+			name: "New Moon",
+			icon: "🌑",
+			stateId: "lunarPhaseNew",
+			freeSpell: {name: "Ray of Sickness", source: "PHB"},
+			schools: ["E", "N"],
+			schoolNames: ["Enchantment", "Necromancy"],
+			empowerment: [
+				{type: "advantage", target: "skill:stealth"},
+				{type: "disadvantage", target: "attacksAgainst", conditional: "While you are entirely within darkness"},
+			],
+			empowermentText: "You have advantage on Stealth checks, and while you are entirely within darkness attack rolls against you have disadvantage.",
+			phenomenon: {
+				name: "New Moon: Devouring Dark",
+				text: "Each creature of your choice within 30 feet must succeed on a Dexterity saving throw or take necrotic damage and have its speed reduced to 0 until the end of your next turn. You then become Invisible until the end of your next turn.",
+				save: "dex",
+				damageDice: "3d10",
+				damageType: "necrotic",
+			},
+		},
+		"crescent moon": {
+			key: "crescent moon",
+			name: "Crescent Moon",
+			icon: "🌙",
+			stateId: "lunarPhaseCrescent",
+			freeSpell: {name: "Color Spray", source: "PHB"},
+			schools: ["I", "T"],
+			schoolNames: ["Illusion", "Transmutation"],
+			// CS-BUG-050: a resistance target MUST be namespaced `damage:<type>` —
+			// a bare damage type is silently inert.
+			empowerment: [
+				{type: "resistance", target: "damage:necrotic"},
+				{type: "resistance", target: "damage:radiant"},
+			],
+			empowermentText: "You have resistance to necrotic and radiant damage.",
+			phenomenon: {
+				name: "Crescent Moon: Moonlit Step",
+				text: "You teleport up to 60 feet to an unoccupied space you can see, bringing one willing creature within 5 feet with you. Until the end of your next turn, you and that creature have resistance to all damage.",
+				teleportFeet: 60,
+			},
+		},
+	};
+
+	/** Normalize any spelling of a phase ("Full Moon", "full", "lunarPhaseFull") to a registry key. */
+	static normalizeLunarPhaseKey (value) {
+		if (!value) return null;
+		const raw = String(typeof value === "object" ? (value.key || value.name || "") : value).trim().toLowerCase();
+		if (!raw) return null;
+		if (CharacterSheetState.LUNAR_PHASES[raw]) return raw;
+		for (const phase of Object.values(CharacterSheetState.LUNAR_PHASES)) {
+			if (phase.stateId.toLowerCase() === raw) return phase.key;
+			if (phase.name.toLowerCase() === raw) return phase.key;
+			// "full" / "new" / "crescent"
+			if (phase.key.split(" ")[0] === raw) return phase.key;
+		}
+		return null;
+	}
+
+	/** The `_data.classes[]` entry carrying the Lunar Sorcery subclass, or null. */
+	_getLunarSorceryClass () {
+		return (this._data.classes || [])
+			.find(cls => CharacterSheetClassUtils.isLunarSorcerySubclass(cls?.subclass)) || null;
+	}
+
+	/**
+	 * Ensure exactly one lunar phase state exists and is active, seeded from the
+	 * `subclassChoice` the wizards recorded.
+	 *
+	 * The persisted `subclassChoice` is only a SEED, never the source of truth: a
+	 * player who switches phase mid-adventure (Waxing and Waning) must not have that
+	 * undone by the next level-up re-reading `subclassChoice`. So this only seeds
+	 * when NO phase is currently active. It also re-derives the level-14 Lunar
+	 * Empowerment `customEffects` on every call, which is what makes the passives
+	 * appear the moment the character reaches 14th level without a re-toggle.
+	 */
+	_ensureLunarPhase () {
+		const cls = this._getLunarSorceryClass();
+		const phaseIds = Object.values(CharacterSheetState.LUNAR_PHASES).map(p => p.stateId);
+
+		if (!cls) {
+			// Subclass removed / respecced away: drop the orphaned phase states.
+			if (Array.isArray(this._data.activeStates) && this._data.activeStates.some(s => phaseIds.includes(s.stateTypeId))) {
+				this._data.activeStates = this._data.activeStates.filter(s => !phaseIds.includes(s.stateTypeId) && s.stateTypeId !== "lunarMoonlight");
+			}
+			return;
+		}
+
+		if (!Array.isArray(this._data.activeStates)) this._data.activeStates = [];
+
+		const hasEmpowerment = (cls.level || 0) >= 14;
+		let active = this._data.activeStates.find(s => phaseIds.includes(s.stateTypeId) && s.active);
+
+		if (!active) {
+			const seedKey = CharacterSheetState.normalizeLunarPhaseKey(cls.subclassChoice) || "full moon";
+			this.setLunarPhase(seedKey, {free: true});
+			active = this._data.activeStates.find(s => phaseIds.includes(s.stateTypeId) && s.active);
+		}
+
+		// Re-derive the level-gated Empowerment effects for EVERY phase state (not
+		// just the active one) — toggling an inactive phase back on only flips
+		// `active` and never re-derives.
+		for (const st of this._data.activeStates) {
+			if (!phaseIds.includes(st.stateTypeId)) continue;
+			const phase = Object.values(CharacterSheetState.LUNAR_PHASES).find(p => p.stateId === st.stateTypeId);
+			st.customEffects = hasEmpowerment ? phase.empowerment.map(e => ({...e})) : [];
+		}
+		if (!hasEmpowerment) {
+			this._data.activeStates = this._data.activeStates.filter(s => s.stateTypeId !== "lunarMoonlight");
+		}
+	}
+
+	/**
+	 * The live lunar phase.
+	 * @returns {*|null} `{key, name, icon, stateId, freeSpell, schools, schoolNames, ...}` or null.
+	 */
+	getLunarPhase () {
+		if (!this._getLunarSorceryClass()) return null;
+		this._ensureLunarPhase();
+		const active = (this._data.activeStates || [])
+			.find(s => s.active && Object.values(CharacterSheetState.LUNAR_PHASES).some(p => p.stateId === s.stateTypeId));
+		if (!active) return null;
+		const phase = Object.values(CharacterSheetState.LUNAR_PHASES).find(p => p.stateId === active.stateTypeId);
+		return phase ? {...phase} : null;
+	}
+
+	/**
+	 * Switch the lunar phase. THE single mutator.
+	 *
+	 * @param {string} phaseKey Any accepted spelling (see normalizeLunarPhaseKey).
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.free] Skip the sorcery-point cost (long rest / initial seed).
+	 * @param {boolean} [opts.bonusAction] Waxing and Waning: spend 1 sorcery point.
+	 * @returns {{success: boolean, reason?: string, phase?: *, sorceryPointsSpent?: number}}
+	 */
+	setLunarPhase (phaseKey, {free = false, bonusAction = false} = {}) {
+		const cls = this._getLunarSorceryClass();
+		if (!cls) return {success: false, reason: "Not a Lunar Sorcery sorcerer"};
+		const key = CharacterSheetState.normalizeLunarPhaseKey(phaseKey);
+		if (!key) return {success: false, reason: `Unknown lunar phase "${phaseKey}"`};
+		const phase = CharacterSheetState.LUNAR_PHASES[key];
+
+		let spent = 0;
+		if (bonusAction && !free) {
+			if ((cls.level || 0) < 6) return {success: false, reason: "Waxing and Waning requires 6th level"};
+			const sp = this.getSorceryPoints();
+			if ((sp?.current || 0) < 1) return {success: false, reason: "Requires 1 sorcery point"};
+			if (!this.useSorceryPoint(1)) return {success: false, reason: "Requires 1 sorcery point"};
+			spent = 1;
+		}
+
+		// Mutual exclusivity is declared on the state definitions too, but activate
+		// explicitly here so the seed path (which runs before any UI) is deterministic.
+		for (const other of Object.values(CharacterSheetState.LUNAR_PHASES)) {
+			if (other.stateId !== phase.stateId) this.deactivateState(other.stateId);
+		}
+		this.deactivateState("lunarMoonlight");
+		this.activateState(phase.stateId, {
+			customEffects: (cls.level || 0) >= 14 ? phase.empowerment.map(e => ({...e})) : [],
+		});
+		cls.subclassChoice = phase.name;
+		return {success: true, phase: {...phase}, sorceryPointsSpent: spent};
+	}
+
+	/**
+	 * Lunar Embodiment / Waxing and Waning free casts.
+	 *
+	 * Lunar Embodiment gives ONE free cast of the current phase's 1st-level Lunar
+	 * spell per long rest. Waxing and Waning (6th) upgrades that to one free cast
+	 * PER PHASE, so the pool is tracked per phase rather than as a single counter —
+	 * otherwise switching phase would let you re-spend the same charge.
+	 * @returns {Array<{phase: string, phaseName: string, spell: *, used: boolean, available: boolean, reason: string|null}>}
+	 */
+	getLunarFreeCasts () {
+		const cls = this._getLunarSorceryClass();
+		if (!cls) return [];
+		const level = cls.level || 0;
+		const subclassLevel = CharacterSheetState._isOneEditionSubclass(cls.subclass) ? 3 : 1;
+		if (level < subclassLevel) return [];
+
+		const perPhase = level >= 6;
+		const current = this.getLunarPhase();
+		const used = new Set(this._data.lunarEmbodiment?.usedPhases || []);
+
+		return Object.values(CharacterSheetState.LUNAR_PHASES).map(phase => {
+			const isUsed = used.has(phase.key);
+			const isCurrent = current?.key === phase.key;
+			const reason = isUsed
+				? "Already used — regained on a long rest"
+				: (!perPhase && !isCurrent)
+					? "Only your current phase's spell is free before 6th level"
+					: null;
+			return {
+				phase: phase.key,
+				phaseName: phase.name,
+				spell: {...phase.freeSpell},
+				used: isUsed,
+				available: !reason,
+				reason,
+			};
+		});
+	}
+
+	/**
+	 * Spend a Lunar Embodiment free cast.
+	 * @param {string} [phaseKey] Defaults to the current phase.
+	 * @returns {{success: boolean, reason?: string, spell?: *, phase?: string}}
+	 */
+	useLunarFreeCast (phaseKey = null) {
+		const key = CharacterSheetState.normalizeLunarPhaseKey(phaseKey) || this.getLunarPhase()?.key;
+		if (!key) return {success: false, reason: "No lunar phase active"};
+		const entry = this.getLunarFreeCasts().find(it => it.phase === key);
+		if (!entry) return {success: false, reason: "Lunar Embodiment is not available"};
+		if (!entry.available) return {success: false, reason: entry.reason};
+
+		if (!this._data.lunarEmbodiment) this._data.lunarEmbodiment = {usedPhases: []};
+		if (!Array.isArray(this._data.lunarEmbodiment.usedPhases)) this._data.lunarEmbodiment.usedPhases = [];
+		this._data.lunarEmbodiment.usedPhases.push(key);
+		return {success: true, spell: {...entry.spell}, phase: key};
+	}
+
+	_ensureLunarResources () {
+		// Reconcile the phase here too, not just from the Lunar calculation branch:
+		// `getResources()` is the one entry point that runs for EVERY character, so
+		// this is what tears the phase states down when the subclass is swapped away.
+		this._ensureLunarPhase();
+		const cls = this._getLunarSorceryClass();
+		const level = cls?.level || 0;
+		const drop = (type) => { this._data.resources = this._data.resources.filter(r => r.resourceType !== type); };
+
+		if (level < 6) drop("lunarBoons");
+		else {
+			const max = this.getProficiencyBonus();
+			let resource = this._data.resources.find(r => r.resourceType === "lunarBoons");
+			if (!resource) {
+				resource = {id: CryptUtil.uid(), name: "Lunar Boons", current: max, max, recharge: "long", resourceType: "lunarBoons"};
+				this._data.resources.push(resource);
+			} else {
+				const expended = Math.max(0, (resource.max ?? max) - (resource.current ?? resource.max ?? max));
+				resource.max = max;
+				resource.current = Math.max(0, max - expended);
+				resource.recharge = "long";
+			}
+		}
+
+		if (level < 18) drop("lunarPhenomenon");
+		else {
+			const max = Object.keys(CharacterSheetState.LUNAR_PHASES).length;
+			let resource = this._data.resources.find(r => r.resourceType === "lunarPhenomenon");
+			if (!resource) {
+				resource = {id: CryptUtil.uid(), name: "Lunar Phenomenon", current: max, max, recharge: "long", resourceType: "lunarPhenomenon"};
+				this._data.resources.push(resource);
+			} else {
+				const expended = Math.max(0, (resource.max ?? max) - (resource.current ?? resource.max ?? max));
+				resource.max = max;
+				resource.current = Math.max(0, max - expended);
+				resource.recharge = "long";
+			}
+		}
+	}
+
+	getLunarBoonsResource () {
+		this._ensureLunarResources();
+		const resource = this._data.resources.find(r => r.resourceType === "lunarBoons");
+		return resource ? {...resource} : null;
+	}
+
+	getLunarPhenomenonResource () {
+		this._ensureLunarResources();
+		const resource = this._data.resources.find(r => r.resourceType === "lunarPhenomenon");
+		return resource ? {...resource} : null;
+	}
+
+	/**
+	 * Lunar Boons: metamagic applied to a spell of one of the current phase's two
+	 * schools costs 1 sorcery point less (minimum 0), a number of times per long
+	 * rest equal to your proficiency bonus.
+	 *
+	 * Pure and side-effect free so the discount is testable independently of which
+	 * metamagic catalogue is in play — {@link getMetamagicCost} only knows
+	 * `TGTT_METAMAGIC`, a pre-existing gap this deliberately does not inherit.
+	 *
+	 * @param {number} baseCost
+	 * @param {string} school A one-letter 5etools school code, or a school name.
+	 * @returns {{cost: number, discounted: boolean, saved: number, phase: string|null, reason: string|null}}
+	 */
+	getLunarBoonsDiscountedCost (baseCost, school) {
+		const base = Number(baseCost);
+		const none = (reason) => ({cost: base, discounted: false, saved: 0, phase: null, reason});
+		if (!Number.isFinite(base)) return none("No base cost");
+
+		const cls = this._getLunarSorceryClass();
+		if (!cls || (cls.level || 0) < 6) return none(null);
+		const phase = this.getLunarPhase();
+		if (!phase) return none("No lunar phase active");
+
+		const code = CharacterSheetState._normalizeSpellSchoolCode(school);
+		if (!code || !phase.schools.includes(code)) {
+			return {...none(`Lunar Boons applies to ${phase.schoolNames.join(" and ")} spells`), phase: phase.key};
+		}
+		const resource = this.getLunarBoonsResource();
+		if (!resource || resource.current <= 0) {
+			return {...none("No Lunar Boons uses remain"), phase: phase.key};
+		}
+		if (base <= 0) return {...none(null), phase: phase.key};
+
+		return {cost: Math.max(0, base - 1), discounted: true, saved: 1, phase: phase.key, reason: null};
+	}
+
+	/** Spend one Lunar Boons use. Call this only when a discounted metamagic is actually applied. */
+	consumeLunarBoon () {
+		this._ensureLunarResources();
+		const resource = this._data.resources.find(r => r.resourceType === "lunarBoons");
+		if (!resource || resource.current <= 0) return false;
+		resource.current--;
+		return true;
+	}
+
+	/** Map a school name or code to the one-letter 5etools code. */
+	static _normalizeSpellSchoolCode (school) {
+		if (!school) return null;
+		const raw = String(school).trim();
+		if (raw.length === 1) return raw.toUpperCase();
+		const byName = {
+			abjuration: "A",
+			conjuration: "C",
+			divination: "D",
+			enchantment: "E",
+			evocation: "V",
+			illusion: "I",
+			necromancy: "N",
+			transmutation: "T",
+		};
+		return byName[raw.toLowerCase()] || null;
+	}
+
+	/**
+	 * Lunar Phenomenon (18th): once per long rest per phase, as a bonus action,
+	 * produce the current phase's effect. You may also produce it again by spending
+	 * 5 sorcery points.
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.spendSorceryPoints] Force the 5-sorcery-point route.
+	 * @returns {{success: boolean, reason?: string, phenomenon?: *, saveDc?: number, sorceryPointsSpent?: number}}
+	 */
+	useLunarPhenomenon ({spendSorceryPoints = false} = {}) {
+		const cls = this._getLunarSorceryClass();
+		if (!cls) return {success: false, reason: "Not a Lunar Sorcery sorcerer"};
+		if ((cls.level || 0) < 18) return {success: false, reason: "Lunar Phenomenon requires 18th level"};
+		const phase = this.getLunarPhase();
+		if (!phase) return {success: false, reason: "No lunar phase active"};
+
+		const used = new Set(this._data.lunarPhenomenon?.usedPhases || []);
+		const freeAvailable = !used.has(phase.key);
+
+		let spent = 0;
+		if (freeAvailable && !spendSorceryPoints) {
+			this._ensureLunarResources();
+			const resource = this._data.resources.find(r => r.resourceType === "lunarPhenomenon");
+			if (resource && resource.current > 0) resource.current--;
+			if (!this._data.lunarPhenomenon) this._data.lunarPhenomenon = {usedPhases: []};
+			if (!Array.isArray(this._data.lunarPhenomenon.usedPhases)) this._data.lunarPhenomenon.usedPhases = [];
+			this._data.lunarPhenomenon.usedPhases.push(phase.key);
+		} else {
+			const sp = this.getSorceryPoints();
+			if ((sp?.current || 0) < 5) return {success: false, reason: "Requires 5 sorcery points"};
+			if (!this.useSorceryPoint(5)) return {success: false, reason: "Requires 5 sorcery points"};
+			spent = 5;
+		}
+
+		return {
+			success: true,
+			phenomenon: {...phase.phenomenon, phase: phase.key, phaseName: phase.name},
+			saveDc: this.getSpellSaveDC("Sorcerer"),
+			sorceryPointsSpent: spent,
+		};
+	}
+
+	/** Restore every Lunar Sorcery per-long-rest track. Called from {@link onLongRest}. */
+	resetLunarSorceryOnLongRest () {
+		if (!this._getLunarSorceryClass()) return;
+		this._data.lunarEmbodiment = {usedPhases: []};
+		this._data.lunarPhenomenon = {usedPhases: []};
+		this._ensureLunarResources();
+	}
+
+	/** True when the 2024 (XPHB / "one") chassis is in play, which moves subclass entry to level 3. */
+	static _isOneEditionSubclass (subclass) {
+		return subclass?.edition === "one" || subclass?.classSource === "XPHB" || subclass?.source === "XPHB";
+	}
+	// #endregion
 
 	useShadowbite ({hadAttackAdvantage = false} = {}) {
 		const calc = this.getFeatureCalculations();
@@ -45797,6 +46355,61 @@ class CharacterSheetState {
 			detectPatterns: ["^unearthly countenance$"],
 			activationAction: "bonus",
 		},
+		lunarPhaseFull: {
+			id: "lunarPhaseFull",
+			name: "Full Moon",
+			icon: "🌕",
+			description: "Lunar Embodiment: Full Moon. Free cast of Shield; Lunar Boons discounts Abjuration and Divination; at 14th level you shed 10 ft bright / 10 ft dim light and have advantage on Investigation and Perception within it.",
+			effects: [],
+			duration: "Until you change phase or finish a long rest",
+			endConditions: ["You change lunar phase"],
+			detectPatterns: ["^full moon$"],
+			activationAction: "free",
+			exclusiveWith: ["lunarPhaseNew", "lunarPhaseCrescent"],
+			preferCuratedEffects: true,
+		},
+		lunarPhaseNew: {
+			id: "lunarPhaseNew",
+			name: "New Moon",
+			icon: "🌑",
+			description: "Lunar Embodiment: New Moon. Free cast of Ray of Sickness; Lunar Boons discounts Enchantment and Necromancy; at 14th level you have advantage on Stealth, and attacks against you have disadvantage while you are entirely within darkness.",
+			effects: [],
+			duration: "Until you change phase or finish a long rest",
+			endConditions: ["You change lunar phase"],
+			detectPatterns: ["^new moon$"],
+			activationAction: "free",
+			exclusiveWith: ["lunarPhaseFull", "lunarPhaseCrescent"],
+			preferCuratedEffects: true,
+		},
+		lunarPhaseCrescent: {
+			id: "lunarPhaseCrescent",
+			name: "Crescent Moon",
+			icon: "🌙",
+			description: "Lunar Embodiment: Crescent Moon. Free cast of Color Spray; Lunar Boons discounts Illusion and Transmutation; at 14th level you have resistance to necrotic and radiant damage.",
+			effects: [],
+			duration: "Until you change phase or finish a long rest",
+			endConditions: ["You change lunar phase"],
+			detectPatterns: ["^crescent moon$"],
+			activationAction: "free",
+			exclusiveWith: ["lunarPhaseFull", "lunarPhaseNew"],
+			preferCuratedEffects: true,
+		},
+		lunarMoonlight: {
+			id: "lunarMoonlight",
+			name: "Lunar Moonlight",
+			icon: "💡",
+			description: "Full Moon empowerment: you shed bright light in a 10-foot radius and dim light for an additional 10 feet, and have advantage on Investigation and Perception checks made within that light.",
+			effects: [
+				{type: "advantage", target: "skill:investigation", conditional: "For checks made within your moonlight"},
+				{type: "advantage", target: "skill:perception", conditional: "For checks made within your moonlight"},
+			],
+			duration: "Until you dismiss it or change phase",
+			endConditions: ["You change lunar phase", "Dismissed"],
+			detectPatterns: ["^lunar moonlight$"],
+			activationAction: "bonus",
+			requiresStates: ["lunarPhaseFull"],
+			preferCuratedEffects: true,
+		},
 		resoluteStance: {
 			id: "resoluteStance",
 			name: "Resolute Stance",
@@ -53870,6 +54483,11 @@ class CharacterSheetState {
 		// Recover all resources
 		this.recoverResources("long");
 		this.recoverResources("dawn");
+		// Lunar Sorcery per-phase tracks are not plain resources (they are keyed by
+		// phase so switching phase cannot re-spend the same charge), so restore them
+		// explicitly. The phase itself is re-chosen after a long rest — that is a
+		// player decision, so it is offered by the UI rather than forced here.
+		this.resetLunarSorceryOnLongRest();
 
 		// Recover Mystic Arcanum (Warlock)
 		this.resetMysticArcanum();
@@ -54795,18 +55413,24 @@ class CharacterSheetState {
 	 * @param {number} spellLevel - Effective spell level for the cast
 	 * @returns {number|null} Sorcery point cost, or null if invalid
 	 */
-	getMetamagicCost (key, spellLevel = 0) {
+	getMetamagicCost (key, spellLevel = 0, {school = null} = {}) {
 		const meta = CharacterSheetState.TGTT_METAMAGIC[key];
 		if (!meta) return null;
 
 		const effectiveLevel = Math.max(1, spellLevel || 0);
-		if (typeof meta.cost === "number") return meta.cost;
+		const base = typeof meta.cost === "number"
+			? meta.cost
+			: meta.cost === "level"
+				? effectiveLevel
+				: meta.cost === "halfLevel"
+					? Math.max(1, Math.ceil(effectiveLevel / 2))
+					: null;
+		if (base == null) return null;
 
-		switch (meta.cost) {
-			case "level": return effectiveLevel;
-			case "halfLevel": return Math.max(1, Math.ceil(effectiveLevel / 2));
-			default: return null;
-		}
+		// Lunar Boons (Lunar Sorcery, 6th) shaves 1 sorcery point off metamagic
+		// applied to a spell of the current phase's two schools. Callers that know
+		// the spell pass its school; everyone else gets the undiscounted cost.
+		return school ? this.getLunarBoonsDiscountedCost(base, school).cost : base;
 	}
 
 	/**
@@ -54822,7 +55446,10 @@ class CharacterSheetState {
 		const effectiveLevel = slotLevel ?? (/** @type {*} */ (spell))?.level ?? 0;
 
 		return this.getKnownActiveMetamagics().map(meta => {
-			const cost = this.getMetamagicCost(meta.key, effectiveLevel);
+			const school = (/** @type {*} */ (spellData))?.school || null;
+			const baseCost = this.getMetamagicCost(meta.key, effectiveLevel);
+			const boon = baseCost == null ? null : this.getLunarBoonsDiscountedCost(baseCost, school);
+			const cost = boon?.discounted ? boon.cost : baseCost;
 			const availability = this._getActiveMetamagicAvailability(meta.key, /** @type {*} */ ({spell, spellData, slotLevel: effectiveLevel}));
 			const isAffordable = cost != null && currentSp >= cost;
 			const unavailableReason = availability.unavailableReason
@@ -54831,6 +55458,8 @@ class CharacterSheetState {
 			return {
 				...meta,
 				cost,
+				baseCost,
+				lunarBoonApplied: !!boon?.discounted,
 				isAvailable: availability.isAvailable && isAffordable,
 				unavailableReason,
 			};

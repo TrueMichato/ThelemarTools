@@ -22,8 +22,8 @@ describe("QuickBuild exit confirmation modal — z-index plumbing", () => {
 		expect(Number(zMatch[1])).toBeGreaterThan(9999);
 	});
 
-	test("named subclass picker pGetUserEnum passes zIndex above 9999", () => {
-		const reBlock = /getNamedSubclassChoicePrompt[\s\S]*?pGetUserEnum\([^)]*?title:\s*prompt\?\.title[\s\S]*?\}\)/;
+	test("subclass choice picker pGetUserEnum passes zIndex above 9999", () => {
+		const reBlock = /getSubclassChoicePrompt[\s\S]*?pGetUserEnum\([^)]*?title:\s*prompt\?\.title[\s\S]*?\}\)/;
 		const match = quickBuildSrc.match(reBlock);
 		expect(match).not.toBeNull();
 		const block = match[0];

@@ -2105,6 +2105,27 @@ class CharacterSheetClassUtils {
 			&& subclass.source === "GrimHollowPG24";
 	}
 
+	static isLunarSorcerySubclass (/** @type {*} */ subclass) {
+		if (!subclass?.name && !subclass?.shortName) return false;
+		return [subclass.name, subclass.shortName]
+			.filter(Boolean)
+			.some((/** @type {*} */ name) => ["lunar", "lunar sorcery"].includes(String(name).toLowerCase()));
+	}
+
+	/**
+	 * The three Lunar Embodiment phases (DSotDQ p34), in book order.
+	 *
+	 * The phase is a *runtime* state — re-chosen on every long rest and switchable
+	 * as a bonus action from 6th level — but it still needs an initial pick at the
+	 * moment the subclass is taken, which is what the wizards surface.
+	 * @type {Array<{key: string, name: string}>}
+	 */
+	static LUNAR_PHASE_OPTIONS = [
+		{key: "full moon", name: "Full Moon"},
+		{key: "new moon", name: "New Moon"},
+		{key: "crescent moon", name: "Crescent Moon"},
+	];
+
 	/**
 	 * Canonical "spells known" casters. In both 2014 and 2024 these classes use a fixed
 	 * personal spell list (swap one on level-up), unlike prepared casters who re-prepare
@@ -2233,6 +2254,50 @@ class CharacterSheetClassUtils {
 			};
 		}
 		return null;
+	}
+
+	// ==========================================================================
+	// Subclass choice PROMPT vs subclass choice SPELL-BLOCK GATING
+	//
+	// `hasNamedSubclassChoice()` above answers a NARROW question: "does this
+	// subclass's `additionalSpells` split into named blocks of which exactly ONE
+	// is granted?" Divine Soul and the Daemonologist do; that predicate therefore
+	// gates spell-block selection (`getSubclassAlwaysPreparedSpells`,
+	// `subclassAdditionalSpellsIncludeSpell`, `_reconcileSubclassChoiceSpellGrants`).
+	//
+	// The wizards were using the same predicate for a DIFFERENT question: "does
+	// this subclass need an up-front pick before the character is playable?" Those
+	// two coincided until Lunar Sorcery, which needs the pick (its Lunar Embodiment
+	// phase) but grants EVERY spell on its table regardless of the pick. Conflating
+	// them would have silently dropped ten of its fifteen spells.
+	//
+	// The trio below answers the wizard question only. Builder, Level-Up and Quick
+	// Build all consume it, so a new subclass needing an up-front pick gets all
+	// three surfaces for free by extending these three methods.
+	// ==========================================================================
+
+	/** True when Builder / Level-Up / Quick Build must collect a pick for this subclass. */
+	static hasSubclassChoicePrompt (/** @type {*} */ subclass) {
+		return this.hasNamedSubclassChoice(subclass) || this.isLunarSorcerySubclass(subclass);
+	}
+
+	/** The `{key, name}` options for the wizard pick. */
+	static getSubclassChoiceOptions (/** @type {*} */ subclass) {
+		if (this.isLunarSorcerySubclass(subclass)) {
+			return CharacterSheetClassUtils.LUNAR_PHASE_OPTIONS.map(it => ({...it}));
+		}
+		return this.getNamedSubclassChoiceOptions(subclass);
+	}
+
+	/** The `{title, description}` copy for the wizard pick. */
+	static getSubclassChoicePrompt (/** @type {*} */ subclass) {
+		if (this.isLunarSorcerySubclass(subclass)) {
+			return {
+				title: "Lunar Embodiment",
+				description: "Choose the lunar phase your magic manifests. You re-choose it after every long rest, and from 6th level Waxing and Waning lets you switch as a bonus action for 1 sorcery point.",
+			};
+		}
+		return this.getNamedSubclassChoicePrompt(subclass);
 	}
 
 	static getOptionalFeaturePrerequisiteClassAliases (/** @type {*} */ subclass, /** @type {*} */ featureTypes) {

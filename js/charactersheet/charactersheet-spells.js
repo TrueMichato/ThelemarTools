@@ -2181,7 +2181,10 @@ class CharacterSheetSpells {
 				JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 				return;
 			}
-			if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
+			if (activeMetamagicChoice?.metamagic) {
+				this._consumeLunarBoonIfApplied(activeMetamagicChoice.metamagic);
+				this._refreshSorceryPointUI();
+			}
 
 			if (variantComponentChoice?.variantComponent) {
 				for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
@@ -2241,7 +2244,10 @@ class CharacterSheetSpells {
 					JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 					return;
 				}
-				if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
+				if (activeMetamagicChoice?.metamagic) {
+					this._consumeLunarBoonIfApplied(activeMetamagicChoice.metamagic);
+					this._refreshSorceryPointUI();
+				}
 
 				// Variant spell component selection (ritual)
 				const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
@@ -2355,7 +2361,10 @@ class CharacterSheetSpells {
 			JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 			return;
 		}
-		if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
+		if (activeMetamagicChoice?.metamagic) {
+			this._consumeLunarBoonIfApplied(activeMetamagicChoice.metamagic);
+			this._refreshSorceryPointUI();
+		}
 
 		// Variant spell component selection
 		const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
@@ -2980,6 +2989,16 @@ class CharacterSheetSpells {
 	 * never under-charges. Otherwise falls back to the interactive picker (or none).
 	 * @returns {Promise<{cancelled: boolean, metamagic: (object|null)}>}
 	 */
+	/**
+	 * Lunar Boons (Lunar Sorcery, 6th) already shaved a sorcery point off the cost that
+	 * was just paid — spend the use that paid for it. Called at every site that pays a
+	 * metamagic cost, so the pool can never drift from the discount actually granted.
+	 * @param {*} metamagic The resolved metamagic (from `getCastableActiveMetamagics`).
+	 */
+	_consumeLunarBoonIfApplied (metamagic) {
+		if (metamagic?.lunarBoonApplied) this._state.consumeLunarBoon?.();
+	}
+
 	async _resolveMetamagicChoice ({spell, spellData, slotLevel, isExplicit = false, shouldPrompt = true, decision = null}) {
 		if (decision && Object.prototype.hasOwnProperty.call(decision, "metamagic")) {
 			if (!decision.metamagic) return {cancelled: false, metamagic: null};
@@ -3069,15 +3088,16 @@ class CharacterSheetSpells {
 		const metamagics = this._state.getCastableActiveMetamagics?.({spell, spellData, slotLevel: isCantrip ? 0 : spell.level}) || [];
 		const availableMm = metamagics.filter(m => m.isAvailable);
 		for (const meta of availableMm) {
+			const boonNote = meta.lunarBoonApplied ? ` · 🌙 Lunar Boons (was ${meta.baseCost} SP)` : "";
 			items.push({
 				label: `🌀 ${meta.name}`,
-				sublabel: `${meta.cost} SP`,
+				sublabel: `${meta.cost} SP${boonNote}`,
 				onSelect: () => this._castSpell(spellId, {decision: {...baseDecision, metamagic: {key: meta.key, name: meta.name, cost: meta.cost}}}),
 			});
 			if (isFeywildShardAttuned) {
 				items.push({
 					label: `🌀 ${meta.name} + ✨ Feywild Shard`,
-					sublabel: `${meta.cost} SP · discharge shard (Wild Magic Surge)`,
+					sublabel: `${meta.cost} SP${boonNote} · discharge shard (Wild Magic Surge)`,
 					onSelect: () => this._castSpell(spellId, {decision: {...baseDecision, metamagic: {key: meta.key, name: meta.name, cost: meta.cost}, feywildShard: true}}),
 				});
 			}
@@ -3246,7 +3266,7 @@ class CharacterSheetSpells {
 				html: `
 					<span class="charsheet__mm-picker-option-head split-v-center">
 						<span class="charsheet__mm-picker-reference-name bold">${this._getMetamagicHoverLink(meta)}</span>
-						<span class="charsheet__mm-picker-reference-cost ml-2">${meta.cost} SP</span>
+						<span class="charsheet__mm-picker-reference-cost ml-2">${meta.cost} SP${meta.lunarBoonApplied ? ` <span class="ve-muted">🌙 was ${meta.baseCost}</span>` : ""}</span>
 					</span>
 					${meta.description ? `<span class="charsheet__mm-picker-reference-desc ve-muted ve-small ve-block">${meta.description}</span>` : ""}
 				`,

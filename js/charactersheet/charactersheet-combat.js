@@ -5704,6 +5704,7 @@ class CharacterSheetCombat {
 			() => this.renderCombatRanger(),
 			() => this.renderCombatDruidResources(),
 			() => this.renderCombatFighter(),
+			() => this.renderCombatLunarSorcery(),
 			() => this.renderCombatVitality(),
 			() => this.renderCombatDefenses(),
 			() => this.renderCombatConditions(),
@@ -11334,6 +11335,157 @@ class CharacterSheetCombat {
 	 *
 	 * Visible only for a character that actually has Vitality of the Tree (World Tree, L3+).
 	 */
+	/**
+	 * Lunar Sorcery (Sorcerer, DSotDQ) — the lunar phase is the whole subclass, so it
+	 * gets a dedicated panel rather than being scattered across the generic surfaces.
+	 *
+	 * The panel is the ONLY place the phase can be switched in play, and every control
+	 * on it is gated by the same state the mechanics read, so there is no way for the
+	 * displayed phase and the applied phase to disagree.
+	 */
+	renderCombatLunarSorcery () {
+		const section = document.getElementById("charsheet-combat-lunar-section");
+		const container = document.getElementById("charsheet-combat-lunar");
+		if (!section || !container) return;
+
+		const calcs = this._state.getFeatureCalculations?.() || {};
+		if (!calcs.hasLunarEmbodiment) {
+			section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		section.style.display = "";
+		container.innerHTML = "";
+
+		const phase = this._state.getLunarPhase?.();
+		const options = calcs.lunarPhaseOptions || [];
+		const freeCasts = this._state.getLunarFreeCasts?.() || [];
+		const boons = this._state.getLunarBoonsResource?.();
+		const phenomenon = this._state.getLunarPhenomenonResource?.();
+		const sp = this._state.getSorceryPoints?.() || {current: 0, max: 0};
+		const canSwitch = !!calcs.hasWaxingAndWaning;
+		const switchCost = calcs.waxingAndWaningCost || 1;
+		const moonlightOn = !!this._state.isStateTypeActive?.("lunarMoonlight");
+
+		let html = `
+			<div class="charsheet__combat-lunar cs-combat-feature mb-3">
+				<div class="cs-combat-feature__title">
+					${csCombatIcon("spark")}<span>Lunar Embodiment</span>
+					${canSwitch ? csCombatActionChip("bonus", {labelOverride: `Bonus · ${switchCost} SP to switch`}) : csCombatActionChip("free", {labelOverride: "Chosen after each long rest"})}
+				</div>
+				<div class="ve-small ve-muted mt-1">Current phase: <span class="bold">${phase ? `${phase.icon} ${phase.name}` : "None"}</span>. You know every spell on the Lunar Spells table; the phase decides which one you cast for free, which schools Lunar Boons discounts${calcs.hasLunarEmpowerment ? ", which Lunar Empowerment passive is live" : ""}${calcs.hasLunarPhenomenon ? " and which Lunar Phenomenon you can unleash" : ""}.</div>
+				<div class="cs-combat-feature__options mt-2" role="group" aria-label="Lunar phase">`;
+		for (const opt of options) {
+			const isCurrent = phase?.key === opt.key;
+			const affordable = !canSwitch || isCurrent || sp.current >= switchCost;
+			const title = isCurrent
+				? "This is your current lunar phase"
+				: canSwitch
+					? (affordable ? `Waxing and Waning: switch as a bonus action for ${switchCost} sorcery point` : "Not enough sorcery points")
+					: "Switching phase requires Waxing and Waning (6th level); a long rest lets you re-choose";
+			html += `<button class="cs-combat-btn ${isCurrent ? "cs-combat-btn--primary" : ""} charsheet__combat-lunar-phase" data-lunar-phase="${opt.key}" ${isCurrent || !affordable ? "disabled" : ""} aria-pressed="${isCurrent}" title="${title}">${opt.icon}<span>${opt.name}${isCurrent ? " (current)" : ""}</span></button>`;
+		}
+		html += `</div>`;
+
+		// --- Free casts (Lunar Embodiment / Waxing and Waning) ---
+		if (freeCasts.length) {
+			html += `
+				<div class="cs-combat-feature__summary mt-2"><span class="bold">Free cast:</span> once per long rest you cast the 1st-level spell of your phase without a slot${canSwitch ? " — Waxing and Waning gives you one free cast per phase" : ""}.</div>
+				<div class="cs-combat-feature__options" role="group" aria-label="Lunar Embodiment free casts">`;
+			for (const fc of freeCasts) {
+				html += `<button class="cs-combat-btn cs-combat-btn--spend charsheet__combat-lunar-freecast" data-lunar-phase="${fc.phase}" ${fc.available ? "" : "disabled"} title="${fc.reason || `Cast ${fc.spell.name} for free`}">${csCombatIcon("spark")}<span>${fc.spell.name}${fc.used ? " (used)" : ""}</span></button>`;
+			}
+			html += `</div>`;
+		}
+
+		// --- Lunar Boons ---
+		if (calcs.hasLunarBoons) {
+			const schoolNames = (calcs.lunarBoonsSchoolNames || []).join(" and ");
+			html += `
+				<div class="cs-combat-feature__summary mt-2">
+					${csCombatIcon("spark")} <span class="bold">Lunar Boons</span> ${csCombatPoolCaption(boons?.current || 0, boons?.max || 0, {recharge: "long rest"})}
+					<div class="ve-small ve-muted mt-1">Metamagic applied to a <span class="bold">${schoolNames || "—"}</span> spell costs ${calcs.lunarBoonsDiscount} sorcery point less (minimum 0). The discount is applied automatically in the cast menu.</div>
+				</div>`;
+		}
+
+		// --- Lunar Empowerment ---
+		if (calcs.hasLunarEmpowerment) {
+			html += `<div class="cs-combat-feature__summary mt-2">${csCombatIcon("shield")} <span class="bold">Lunar Empowerment:</span> ${calcs.lunarEmpowermentText || ""}</div>`;
+			if (phase?.key === "full moon") {
+				html += `
+					<div class="cs-combat-feature__options" role="group" aria-label="Lunar moonlight">
+						<button class="cs-combat-btn ${moonlightOn ? "cs-combat-btn--primary" : ""} charsheet__combat-lunar-moonlight" aria-pressed="${moonlightOn}" title="Shed 10 ft bright / 10 ft dim light and gain advantage on Investigation and Perception within it">${csCombatActionChip("bonus")}<span>Moonlight: ${moonlightOn ? "ON" : "OFF"}</span></button>
+					</div>`;
+			}
+		}
+
+		// --- Lunar Phenomenon ---
+		if (calcs.hasLunarPhenomenon) {
+			const effect = calcs.lunarPhenomenonEffect;
+			const spCost = calcs.lunarPhenomenonSorceryPointCost;
+			const freeLeft = phenomenon?.current || 0;
+			html += `
+				<div class="cs-combat-feature__summary mt-2">
+					${csCombatIcon("surge")} <span class="bold">Lunar Phenomenon</span> ${csCombatPoolCaption(freeLeft, phenomenon?.max || 0, {recharge: "long rest · one per phase"})}
+					<div class="ve-small ve-muted mt-1"><span class="bold">${effect?.name || ""}</span> — ${effect?.text || ""} Save DC <span class="bold">${calcs.lunarPhenomenonSaveDc}</span>.</div>
+				</div>
+				<div class="cs-combat-feature__options" role="group" aria-label="Lunar Phenomenon">
+					<button class="cs-combat-btn cs-combat-btn--spend charsheet__combat-lunar-phenomenon" data-lunar-sp="0" ${freeLeft > 0 ? "" : "disabled"} title="Use this phase's free Lunar Phenomenon">${csCombatActionChip("bonus")}<span>Unleash (free)</span></button>
+					<button class="cs-combat-btn charsheet__combat-lunar-phenomenon" data-lunar-sp="1" ${sp.current >= spCost ? "" : "disabled"} title="Unleash again by spending ${spCost} sorcery points">${csCombatActionChip("bonus")}<span>Unleash (${spCost} SP)</span></button>
+				</div>`;
+		}
+
+		html += `</div>`;
+		container.innerHTML = html;
+		this._bindLunarSorceryHandlers(container);
+	}
+
+	_bindLunarSorceryHandlers (container) {
+		const refresh = (msg, type = "info") => {
+			if (msg) JqueryUtil.doToast({type, content: msg});
+			this._page?.saveCharacter?.();
+			this.renderCombatLunarSorcery();
+			this.renderCombatResources?.();
+			this.renderCombatStates?.();
+			this.renderCombatDefenses?.();
+			CharacterSheetCombat._refreshMetamagicDashboards?.(this._state, this._page);
+		};
+
+		container.querySelectorAll(".charsheet__combat-lunar-phase").forEach(btn => {
+			btn.addEventListener("click", () => {
+				const key = btn.getAttribute("data-lunar-phase");
+				const calcs = this._state.getFeatureCalculations?.() || {};
+				const res = this._state.setLunarPhase(key, {bonusAction: !!calcs.hasWaxingAndWaning});
+				if (!res.success) return JqueryUtil.doToast({type: "warning", content: res.reason});
+				refresh(`Lunar phase: ${res.phase.name}${res.sorceryPointsSpent ? ` (−${res.sorceryPointsSpent} SP)` : ""}`, "success");
+			});
+		});
+
+		container.querySelectorAll(".charsheet__combat-lunar-freecast").forEach(btn => {
+			btn.addEventListener("click", () => {
+				const res = this._state.useLunarFreeCast(btn.getAttribute("data-lunar-phase"));
+				if (!res.success) return JqueryUtil.doToast({type: "warning", content: res.reason});
+				refresh(`Cast ${res.spell.name} for free.`, "success");
+			});
+		});
+
+		container.querySelectorAll(".charsheet__combat-lunar-moonlight").forEach(btn => {
+			btn.addEventListener("click", () => {
+				if (this._state.isStateTypeActive?.("lunarMoonlight")) this._state.deactivateState("lunarMoonlight");
+				else this._state.activateState("lunarMoonlight");
+				refresh(null);
+			});
+		});
+
+		container.querySelectorAll(".charsheet__combat-lunar-phenomenon").forEach(btn => {
+			btn.addEventListener("click", () => {
+				const res = this._state.useLunarPhenomenon({spendSorceryPoints: btn.getAttribute("data-lunar-sp") === "1"});
+				if (!res.success) return JqueryUtil.doToast({type: "warning", content: res.reason});
+				refresh(`${res.phenomenon.name} — save DC ${res.saveDc}${res.sorceryPointsSpent ? ` (−${res.sorceryPointsSpent} SP)` : ""}`, "success");
+			});
+		});
+	}
+
 	renderCombatVitality () {
 		const section = document.getElementById("charsheet-combat-vitality-section");
 		const container = document.getElementById("charsheet-combat-vitality");

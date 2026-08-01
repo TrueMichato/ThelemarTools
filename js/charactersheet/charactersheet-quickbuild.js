@@ -107,9 +107,9 @@ class CharacterSheetQuickBuild {
 		let normalizedSubclassChoice = CharacterSheetClassUtils.normalizeSubclassChoice(subclassChoice)
 			|| CharacterSheetClassUtils.normalizeSubclassChoice(existingClass?.subclassChoice);
 		let resolvedSubclass = subclass || existingClass?.subclass || null;
-		if (CharacterSheetClassUtils.hasNamedSubclassChoice(resolvedSubclass) && !normalizedSubclassChoice) {
-			const options = CharacterSheetClassUtils.getNamedSubclassChoiceOptions(resolvedSubclass);
-			const prompt = CharacterSheetClassUtils.getNamedSubclassChoicePrompt(resolvedSubclass);
+		if (CharacterSheetClassUtils.hasSubclassChoicePrompt(resolvedSubclass) && !normalizedSubclassChoice) {
+			const options = CharacterSheetClassUtils.getSubclassChoiceOptions(resolvedSubclass);
+			const prompt = CharacterSheetClassUtils.getSubclassChoicePrompt(resolvedSubclass);
 			normalizedSubclassChoice = await InputUiUtil.pGetUserEnum({
 				title: prompt?.title || "Subclass Choice",
 				values: options,
@@ -1360,9 +1360,9 @@ class CharacterSheetQuickBuild {
 					else nameSpan.append(subclassLink);
 					item.addEventListener("click", async () => {
 						let subclassChoice = null;
-						if (CharacterSheetClassUtils.hasNamedSubclassChoice(sc)) {
-							const choiceOptions = CharacterSheetClassUtils.getNamedSubclassChoiceOptions(sc);
-							const prompt = CharacterSheetClassUtils.getNamedSubclassChoicePrompt(sc);
+						if (CharacterSheetClassUtils.hasSubclassChoicePrompt(sc)) {
+							const choiceOptions = CharacterSheetClassUtils.getSubclassChoiceOptions(sc);
+							const prompt = CharacterSheetClassUtils.getSubclassChoicePrompt(sc);
 							subclassChoice = await InputUiUtil.pGetUserEnum({
 								title: prompt?.title || "Subclass Choice",
 								values: choiceOptions,
@@ -5046,7 +5046,7 @@ class CharacterSheetQuickBuild {
 			});
 		}
 
-		const choiceClasses = this._classAllocations.filter(a => CharacterSheetClassUtils.hasNamedSubclassChoice(this._selections.subclasses[`${a.className}_${a.classSource}`]));
+		const choiceClasses = this._classAllocations.filter(a => CharacterSheetClassUtils.hasSubclassChoicePrompt(this._selections.subclasses[`${a.className}_${a.classSource}`]));
 		for (const choiceClass of choiceClasses) {
 			this._state.setSubclassChoice(choiceClass.className, this._selections.subclassChoices[`${choiceClass.className}_${choiceClass.classSource}`]);
 			if (CharacterSheetClassUtils.isDivineSoulSubclass(this._selections.subclasses[`${choiceClass.className}_${choiceClass.classSource}`])) {

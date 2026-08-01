@@ -11225,6 +11225,7 @@ class CharacterSheetPage {
 		if (!confirm) return;
 
 		this._state.onLongRest();
+		await this._pOfferLunarPhaseRepick();
 		this._saveCurrentCharacter();
 		this._renderCharacter();
 
@@ -11234,6 +11235,30 @@ class CharacterSheetPage {
 			message += ` Exhaustion reduced to ${exhaustionAfter}.`;
 		}
 		JqueryUtil.doToast({type: "success", content: message});
+	}
+
+	/**
+	 * Lunar Sorcery: "Whenever you finish a long rest, you can choose which of the
+	 * phases you embody." That is a player decision, so it is OFFERED here rather than
+	 * forced — dismissing the prompt keeps the phase you went to sleep in. The pick is
+	 * free (no sorcery point), unlike the Waxing and Waning bonus-action switch.
+	 */
+	async _pOfferLunarPhaseRepick () {
+		if (!this._state.getFeatureCalculations?.().hasLunarEmbodiment) return;
+		const current = this._state.getLunarPhase?.();
+		const options = Object.values(globalThis.CharacterSheetState.LUNAR_PHASES)
+			.map(it => ({key: it.key, name: `${it.icon} ${it.name}`}));
+		if (!options.length || !InputUiUtil?.pGetUserEnum) return;
+
+		const choice = await InputUiUtil.pGetUserEnum({
+			title: "Lunar Embodiment",
+			values: options,
+			fnDisplay: (/** @type {*} */ opt) => opt.name,
+			isResolveItem: true,
+			htmlDescription: `<div>Choose the lunar phase you embody until your next long rest.${current ? ` You are currently embodying <strong>${current.name}</strong>.` : ""}</div>`,
+		});
+		if (!choice) return;
+		this._state.setLunarPhase(choice.key, {free: true});
 	}
 
 	_toggleInspiration () {
