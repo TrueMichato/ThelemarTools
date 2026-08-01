@@ -3364,6 +3364,13 @@ class CharacterSheetClassUtils {
 									level: feature.level,
 									entries: feature.entries,
 									isSubclassFeature: true,
+									// (CS-BUG-079) Preserve the activation marker. Only the
+									// refSubclassFeature expansion below used to copy it, so a
+									// subclass option collected through THIS path lost its
+									// `consumes` tag and could not be linked to its shared pool.
+									// `uses` is deliberately NOT propagated here: it would mint a
+									// new resource pool for features that merely document a count.
+									...(feature.consumes ? {consumes: feature.consumes} : {}),
 								});
 							}
 						} else if (typeof feature === "string") {
@@ -3397,6 +3404,13 @@ class CharacterSheetClassUtils {
 									level: featureLevel,
 									entries: fullFeature?.entries,
 									isSubclassFeature: true,
+									// (CS-BUG-079) Preserve the activation marker. Only the
+									// refSubclassFeature expansion below used to copy it, so a
+									// subclass option collected through THIS path lost its
+									// `consumes` tag and could not be linked to its shared pool.
+									// `uses` is deliberately NOT propagated here: it would mint a
+									// new resource pool for features that merely document a count.
+									...(fullFeature?.consumes ? {consumes: fullFeature.consumes} : {}),
 								});
 							}
 						}
@@ -3432,6 +3446,13 @@ class CharacterSheetClassUtils {
 							level: featureLevel,
 							entries: fullFeature?.entries,
 							isSubclassFeature: true,
+							// (CS-BUG-079) Preserve the activation marker. Only the
+							// refSubclassFeature expansion below used to copy it, so a
+							// subclass option collected through THIS path lost its
+							// `consumes` tag and could not be linked to its shared pool.
+							// `uses` is deliberately NOT propagated here: it would mint a
+							// new resource pool for features that merely document a count.
+							...(fullFeature?.consumes ? {consumes: fullFeature.consumes} : {}),
 						});
 					}
 				}
@@ -3461,6 +3482,13 @@ class CharacterSheetClassUtils {
 					level: feature.level,
 					entries: feature.entries,
 					isSubclassFeature: true,
+					// (CS-BUG-079) Preserve the activation marker. Only the
+					// refSubclassFeature expansion below used to copy it, so a
+					// subclass option collected through THIS path lost its
+					// `consumes` tag and could not be linked to its shared pool.
+					// `uses` is deliberately NOT propagated here: it would mint a
+					// new resource pool for features that merely document a count.
+					...(feature.consumes ? {consumes: feature.consumes} : {}),
 				});
 			});
 		}
@@ -5703,7 +5731,13 @@ class CharacterSheetClassUtils {
 	static updateClassResources (/** @type {*} */ state, /** @type {*} */ classEntry, /** @type {*} */ newLevel, /** @type {*} */ classData) {
 		const resourceDefs = {
 			"Barbarian": [
-				{name: "Rage", maxByLevel: [2, 2, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 999], recharge: "long"},
+				{name: "Rage",
+					maxByLevel: (/** @type {*} */ lvl) => CharacterSheetState.getRageUsesMaxForClass({
+						name: "Barbarian",
+						source: classEntry.source || classData.source,
+						level: lvl,
+					}),
+					recharge: "long"},
 			],
 			"Monk": [
 				{name: "__MONK_RESOURCE__", maxByLevel: (/** @type {*} */ lvl) => lvl >= 2 ? lvl : 0, recharge: "short"},

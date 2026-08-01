@@ -4818,6 +4818,10 @@ class CharacterSheetState {
 			// Pending spell choices (from feats/features that grant spell selection)
 			// Each choice: {id, featureName, featureId, filter, innate, uses, recharge, ability}
 			pendingSpellChoices: [],
+			// Keys of re-derivable spell-choice slots (subclass `additionalSpells`
+			// `{choose}` grants) the player has already filled, so a later read never
+			// re-offers a pick that was already made. See `_ensureSubclassSpellChoices`.
+			fulfilledSpellChoiceSlots: [],
 			// Pending feature choices parsed from prose "either A or B" grants
 			// (e.g. Arcane Archer Lore: pick a skill proficiency + a cantrip).
 			// Each choice: {id, featureName, featureId, kind: "skill"|"cantrip", options, count}
@@ -13053,6 +13057,71 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * True when `spell` counts as one of `className`'s cantrips/spells for the purposes
+	 * of a class feature that scopes itself to "any <class> cantrip".
+	 *
+	 * Attribution order: an explicit `sourceClass` on the sheet entry wins — that is how
+	 * "for you, these cantrips count as cleric cantrips" (Arcana Domain's Arcane Initiate,
+	 * Nature Domain's Acolyte of Nature, …) is represented — then the spell's own class
+	 * list, resolved through the catalog when the stored entry is a lean stub.
+	 * @param {*} spell A sheet spell entry, or null to ask about the class in general.
+	 * @param {string} [className]
+	 * @returns {boolean}
+	 */
+	spellCountsForClass (spell, className) {
+		if (!className) return false;
+		if (!spell) return true;
+
+		const target = String(className).toLowerCase();
+		if (spell.sourceClass && String(spell.sourceClass).toLowerCase() === target) return true;
+		// A spell explicitly attributed to a DIFFERENT class is not this class's.
+		if (spell.sourceClass) return false;
+
+		const full = this._resolveFullSpellData(spell) || spell;
+		try {
+			if (CharacterSheetClassUtils.spellIsForClass(full, className)) return true;
+		} catch (e) { /* catalog unavailable — fall through */ }
+
+		// Unattributed and unresolvable: attribute it to the only spellcasting class the
+		// character has, so a single-classed Cleric's cantrips still benefit.
+		const casters = (this._data.classes || []).filter(c => this.getSpellcastingAbilityForClass(c));
+		return casters.length === 1 && String(casters[0].name).toLowerCase() === target;
+	}
+
+	/**
+	 * Flat damage bonus a class feature adds to a CANTRIP's damage.
+	 *
+	 * Potent Spellcasting ("you add your Wisdom modifier to the damage you deal with any
+	 * cleric cantrip" — most Cleric domains, and the Druid's Circle of the Land /
+	 * Elemental Fury option) has always been computed into
+	 * `getFeatureCalculations().potentSpellcastingBonus`, but nothing ever READ it, so the
+	 * feature was pure decoration on every subclass that grants it (CS-BUG-076).
+	 *
+	 * Scoped to the granting class's cantrips so a Cleric/Wizard multiclass does not add
+	 * Wisdom to a wizard cantrip.
+	 * @param {*} [spell] The cantrip being rolled. Omit for the headline value.
+	 * @returns {{bonus: number, sources: Array<{name: string, value: number}>}}
+	 */
+	getCantripDamageBonus (spell = null) {
+		/** @type {{bonus: number, sources: Array<{name: string, value: number}>}} */
+		const out = {bonus: 0, sources: []};
+
+		// Level is `undefined` on stored cantrip entries (they live in their own list), so
+		// only reject an entry that positively declares a non-zero level.
+		if (spell && spell.level != null && spell.level !== 0) return out;
+
+		const calc = this.getFeatureCalculations();
+		const potent = calc.potentSpellcastingBonus;
+		if (Number.isFinite(potent) && potent > 0
+			&& this.spellCountsForClass(spell, calc.potentSpellcastingClass)) {
+			out.bonus += potent;
+			out.sources.push({name: "Potent Spellcasting", value: potent});
+		}
+
+		return out;
+	}
+
+	/**
 	 * Resolve the spellcasting ability abbreviation for a class entry (or class
 	 * name). Subclass-derived casters override the base class ability.
 	 * @param {object|string} clsOrName - Class entry ({name, source, subclass, spellcastingAbility}) or class name
@@ -13451,6 +13520,27 @@ class CharacterSheetState {
 	getSpellSlotsMax (level) {
 		const slot = this._data.spellcasting.spellSlots[level];
 		return slot ? slot.max : 0;
+	}
+
+	/**
+	 * The highest spell-slot level the character has any slots of (0 when none).
+	 *
+	 * Several features cap themselves at "the level of the spell slot you use" —
+	 * e.g. the Arcana Domain's Spell Breaker ends a spell of level <= the slot spent on
+	 * the healing spell — so the practical ceiling is the biggest slot on the sheet.
+	 * Pact slots count: a Warlock's pact slot is a spell slot for this purpose.
+	 * @returns {number}
+	 */
+	getHighestSpellSlotLevel () {
+		let highest = 0;
+		for (const [levelKey, slot] of Object.entries(this._data.spellcasting.spellSlots || {})) {
+			const level = parseInt(levelKey);
+			if (!Number.isFinite(level)) continue;
+			if ((slot?.max || 0) > 0 && level > highest) highest = level;
+		}
+		const pact = this._data.spellcasting.pactSlots;
+		if ((pact?.max || 0) > 0 && (pact.level || 0) > highest) highest = pact.level;
+		return highest;
 	}
 
 	getPactSlots () {
@@ -15142,6 +15232,7 @@ class CharacterSheetState {
 
 	// Pending spell choice management
 	getPendingSpellChoices () {
+		this._ensureSubclassSpellChoices();
 		return [...(this._data.pendingSpellChoices || [])];
 	}
 
@@ -15149,6 +15240,12 @@ class CharacterSheetState {
 		if (!this._data.pendingSpellChoices) {
 			this._data.pendingSpellChoices = [];
 		}
+
+		// A `slotKey` identifies one re-derivable grant slot (see
+		// `_ensureSubclassSpellChoices`). Those are re-minted on every read, so they must
+		// never stack duplicates. Feat-driven choices carry no key and keep the historical
+		// push-always behaviour (a feat taken twice legitimately grants twice).
+		if (choice.slotKey && this._data.pendingSpellChoices.some(c => c.slotKey === choice.slotKey)) return;
 
 		const pendingChoice = {
 			id: CryptUtil.uid(),
@@ -15161,6 +15258,10 @@ class CharacterSheetState {
 			ability: choice.ability,
 			prepared: choice.prepared,
 			subschools: choice.subschools || [],
+			...(choice.slotKey ? {slotKey: choice.slotKey} : {}),
+			...(choice.sourceClass ? {sourceClass: choice.sourceClass} : {}),
+			...(choice.alwaysPrepared ? {alwaysPrepared: true} : {}),
+			...(choice.level != null ? {level: choice.level} : {}),
 		};
 
 		this._data.pendingSpellChoices.push(pendingChoice);
@@ -15179,7 +15280,123 @@ class CharacterSheetState {
 	}
 
 	hasPendingSpellChoices () {
+		this._ensureSubclassSpellChoices();
 		return (this._data.pendingSpellChoices?.length || 0) > 0;
+	}
+
+	/**
+	 * Stable identifier for one re-derivable spell-choice slot.
+	 * @param {*} parts
+	 * @returns {string}
+	 * @private
+	 */
+	static _spellChoiceSlotKey (parts) {
+		return ["subclassSpell", ...parts].map(p => String(p ?? "").toLowerCase()).join("|");
+	}
+
+	/**
+	 * Every `{choose: "<filter>"}` slot a class's SUBCLASS grants at its current level.
+	 *
+	 * `additionalSpells` blocks mix fixed refs (`"detect magic"`) with player CHOICES
+	 * (`{"choose": "level=0|class=Wizard", "count": 2}` — Arcana Domain's Arcane Initiate;
+	 * `{"choose": "level=6|class=Wizard"}` — its Arcane Mastery). The always-prepared
+	 * walker ({@link getSubclassAlwaysPreparedSpells}) resolves refs through
+	 * `_parseSpellReference`, which returns `null` for a choose object, so every such
+	 * choice was silently DROPPED — the player was never asked and never got the spells
+	 * (CS-BUG-075). This is the choose-shaped counterpart of that walker: same block
+	 * traversal, same level gating, same named-choice narrowing.
+	 * @returns {Array<object>} One entry per pick the player still owes or has made.
+	 */
+	getSubclassSpellChoiceSlots () {
+		const out = [];
+
+		for (const cls of (this._data.classes || [])) {
+			const subclass = cls?.subclass;
+			const blocks = subclass?.additionalSpells;
+			if (!Array.isArray(blocks) || !blocks.length) continue;
+
+			// Mirror getSubclassAlwaysPreparedSpells: a named-choice subclass (e.g. the
+			// Daemonologist's pact) only grants the block the player picked.
+			const hasNamedChoice = CharacterSheetClassUtils.hasNamedSubclassChoice(subclass);
+			const spellBlocks = hasNamedChoice
+				? [CharacterSheetClassUtils.getNamedSubclassChoiceBlock(subclass, cls.subclassChoice)].filter(Boolean)
+				: blocks;
+
+			const subclassLabel = subclass.shortName || subclass.name || "";
+			const featureName = `${subclass.name || subclassLabel} Spells`;
+
+			spellBlocks.forEach((block, blockIdx) => {
+				for (const kind of ["known", "prepared", "innate"]) {
+					const section = block?.[kind];
+					if (!section || typeof section !== "object") continue;
+
+					for (const [levelKey, levelValue] of Object.entries(section)) {
+						const reqLevel = parseInt(levelKey);
+						if (isNaN(reqLevel)) continue;
+						if (reqLevel > 0 && (cls.level || 0) < reqLevel) continue;
+
+						const refs = CharacterSheetState._flattenAdditionalSpellsLevelValue(levelValue);
+						refs.forEach((ref, refIdx) => {
+							// Only STRING filters are pickable here — the object form
+							// (`{choose: {from: [...]}}`) is a different, fixed-option shape.
+							if (!ref || typeof ref !== "object" || typeof ref.choose !== "string") return;
+							const count = Number.isInteger(ref.count) && ref.count > 0 ? ref.count : 1;
+							for (let i = 0; i < count; i++) {
+								out.push({
+									slotKey: CharacterSheetState._spellChoiceSlotKey([
+										cls.name, subclassLabel, subclass.source, blockIdx, kind, levelKey, refIdx, i,
+									]),
+									className: cls.name,
+									featureName,
+									filter: ref.choose,
+									unlockLevel: reqLevel,
+									// `prepared` blocks are the domain/oath/circle "always prepared"
+									// grant; `known`/`innate` are simply added to the list.
+									prepared: kind === "prepared",
+									alwaysPrepared: kind === "prepared",
+									innate: kind === "innate",
+									sourceClass: cls.name,
+									ability: subclass.spellcastingAbility || cls.spellcastingAbility || null,
+								});
+							}
+						});
+					}
+				}
+			});
+		}
+
+		return out;
+	}
+
+	/**
+	 * Queue any subclass spell-choice slot the player has not yet filled.
+	 *
+	 * Called from the pending-choice readers (mirroring `_ensureStudentOfWarChoices`) so
+	 * every flow that already drains the queue — Builder, LevelUp, QuickBuild and the
+	 * Features tab all call `processPendingSpellChoices()` — surfaces these picks with no
+	 * new UI. Idempotent: fulfilled slots are recorded by key, and `addPendingSpellChoice`
+	 * refuses to re-queue a key that is already pending.
+	 * @private
+	 */
+	_ensureSubclassSpellChoices () {
+		const slots = this.getSubclassSpellChoiceSlots();
+		if (!slots.length) return;
+		const fulfilled = new Set(this._data.fulfilledSpellChoiceSlots || []);
+		for (const slot of slots) {
+			if (fulfilled.has(slot.slotKey)) continue;
+			this.addPendingSpellChoice(slot);
+		}
+	}
+
+	/**
+	 * Record a re-derivable choice slot as filled so it is never re-offered.
+	 * @param {string} [slotKey]
+	 * @private
+	 */
+	_recordFulfilledSpellChoiceSlot (slotKey) {
+		if (!slotKey) return;
+		if (!Array.isArray(this._data.fulfilledSpellChoiceSlots)) this._data.fulfilledSpellChoiceSlots = [];
+		if (!this._data.fulfilledSpellChoiceSlots.includes(slotKey)) this._data.fulfilledSpellChoiceSlots.push(slotKey);
 	}
 
 	/**
@@ -15215,6 +15432,9 @@ class CharacterSheetState {
 				level: spell.level,
 				school: spell.school,
 				prepared: choice.prepared,
+				// A `prepared`-block subclass grant (domain/oath/circle spells) is ALWAYS
+				// prepared and doesn't count against the prepared limit.
+				...(choice.alwaysPrepared ? {alwaysPrepared: true} : {}),
 				ritual: spell.ritual || false,
 				concentration: spell.concentration || false,
 				// Attribute the pick to the granting feature so it is recognised as
@@ -15224,8 +15444,11 @@ class CharacterSheetState {
 				sourceFeature: choice.featureName || null,
 				sourceClass: choice.sourceClass || null,
 				spellcastingAbility: choice.ability || null,
-			});
+			}, choice.alwaysPrepared ? true : choice.prepared);
 		}
+
+		// Re-derivable slots (subclass `additionalSpells` choices) must not be re-offered.
+		this._recordFulfilledSpellChoiceSlot(choice.slotKey);
 
 		// Remove the fulfilled choice
 		this.removePendingSpellChoice(choiceId);
@@ -17925,13 +18148,8 @@ class CharacterSheetState {
 					// Number of rages per long rest
 					// PHB: 2/3/4/5/6/unlimited at levels 1/3/6/12/17/20
 					// XPHB: 2/3/4/5/6 at levels 1/3/6/12/17 (no unlimited at 20)
-					if (isXPHB) {
-						const ragesPerDay = level >= 17 ? 6 : level >= 12 ? 5 : level >= 6 ? 4 : level >= 3 ? 3 : 2;
-						calculations.ragesPerDay = ragesPerDay;
-					} else {
-						const ragesPerDay = level >= 20 ? Infinity : level >= 17 ? 6 : level >= 12 ? 5 : level >= 6 ? 4 : level >= 3 ? 3 : 2;
-						calculations.ragesPerDay = ragesPerDay;
-					}
+					const rageUsesMax = CharacterSheetState.getRageUsesMaxForClass(cls);
+					calculations.ragesPerDay = rageUsesMax === 999 ? Infinity : rageUsesMax;
 
 					// Brutal Critical (PHB only) - extra damage dice on critical
 					// Levels 9, 13, 17 add +1/+2/+3 dice
@@ -20637,8 +20855,11 @@ class CharacterSheetState {
 					calculations.hasRitualCasting = true;
 					calculations.ritualCastingMode = "prepared";
 
-					// Channel Divinity DC is spell save DC
-					calculations.channelDivinityDc = this.getSpellSaveDc();
+					// Channel Divinity DC is the cleric's spell save DC. Resolve it through
+					// the class rather than the global spellcasting ability so it is correct
+					// for a multiclass — and non-null before the sheet has committed a
+					// global spellcasting ability.
+					calculations.channelDivinityDc = this.getFeatureSaveDc({className: cls.name});
 
 					// Channel Divinity uses progression
 					// PHB/XPHB: 1 use at level 2, 2 at level 6, 3 at level 18
@@ -21113,18 +21334,36 @@ class CharacterSheetState {
 							}
 							case "arcana domain":
 							case "arcana": {
-								// Arcane Initiate (level 1): 2 wizard cantrips
+								// Arcane Initiate (level 1): Arcana proficiency + 2 wizard
+								// cantrips that count as cleric cantrips (so Potent
+								// Spellcasting applies to them). The picks themselves are
+								// surfaced from the subclass's `additionalSpells` choose
+								// block by `getSubclassSpellChoiceSlots()`.
 								calculations.hasArcaneInitiate = true;
 								calculations.bonusWizardCantrips = 2;
 
 								// Channel Divinity: Arcane Abjuration (level 2)
 								if (level >= 2) {
 									calculations.hasArcaneAbjuration = true;
+									calculations.arcaneAbjurationDc = this.getFeatureSaveDc({className: cls.name});
+									calculations.arcaneAbjurationRange = 30;
+									calculations.arcaneAbjurationDuration = 1; // minute
+									// Banishment rider (level 5+): highest CR banished.
+									if (level >= 5) {
+										calculations.arcaneAbjurationBanishCr = level >= 17 ? 4
+											: level >= 14 ? 3
+												: level >= 11 ? 2
+													: level >= 8 ? 1
+														: 0.5;
+									}
 								}
 
-								// Spell Breaker (level 6)
+								// Spell Breaker (level 6): healing with a spell of 1st level
+								// or higher also ends one spell of level <= the slot used, so
+								// the ceiling is the character's highest available slot.
 								if (level >= 6) {
 									calculations.hasSpellBreaker = true;
+									calculations.spellBreakerMaxSpellLevel = this.getHighestSpellSlotLevel();
 								}
 
 								// Potent Spellcasting (level 8)
@@ -21133,9 +21372,11 @@ class CharacterSheetState {
 									calculations.potentSpellcastingBonus = wisMod;
 								}
 
-								// Arcane Mastery (level 17)
+								// Arcane Mastery (level 17): four wizard spells, one each of
+								// 6th/7th/8th/9th, become always-prepared domain spells.
 								if (level >= 17) {
 									calculations.hasArcaneMastery = true;
+									calculations.arcaneMasterySpellLevels = [6, 7, 8, 9];
 								}
 								break;
 							}
@@ -21330,6 +21571,14 @@ class CharacterSheetState {
 								break;
 							}
 						}
+					}
+
+					// Potent Spellcasting is granted by many domains and always reads
+					// "add your Wisdom modifier to the damage you deal with any CLERIC
+					// cantrip" — record the owning class so the damage roll can scope the
+					// bonus to that class's cantrips instead of every cantrip on the sheet.
+					if (calculations.hasPotentSpellcasting && !calculations.potentSpellcastingClass) {
+						calculations.potentSpellcastingClass = cls.name;
 					}
 					break;
 				}
@@ -21910,6 +22159,11 @@ class CharacterSheetState {
 								break;
 							}
 						}
+					}
+
+					// See the Cleric case: scope Potent Spellcasting to its owning class.
+					if (calculations.hasPotentSpellcasting && !calculations.potentSpellcastingClass) {
+						calculations.potentSpellcastingClass = cls.name;
 					}
 					break;
 				}
@@ -31931,6 +32185,24 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Rage uses granted by a Barbarian class entry. PHB uses 999 as the
+	 * player-facing unlimited sentinel; XPHB and TGTT remain capped at 6.
+	 * @param {object} cls A `_data.classes` entry.
+	 * @returns {number}
+	 */
+	static getRageUsesMaxForClass (cls) {
+		if ((cls?.name || "").toLowerCase() !== "barbarian") return 0;
+		const level = cls?.level || 0;
+		if (level <= 0) return 0;
+		if (level >= 20 && cls?.source !== "XPHB" && cls?.source !== "TGTT") return 999;
+		if (level >= 17) return 6;
+		if (level >= 12) return 5;
+		if (level >= 6) return 4;
+		if (level >= 3) return 3;
+		return 2;
+	}
+
+	/**
 	 * Sorcery Points granted by a single class entry, per its own Font of Magic
 	 * progression. THE single source of truth for the pool size — the Sorcerer
 	 * branch of {@link getFeatureCalculations}, {@link _ensureSorceryPoints} and
@@ -32099,9 +32371,13 @@ class CharacterSheetState {
 	 * directly rather than calling `getFeatureCalculations()`, which would recurse back
 	 * through `getResources()`.
 	 *
-	 * Only ever RAISES the max, and takes the largest contribution across classes. A
-	 * Cleric/Paladin multiclass shares one on-sheet pool, and lowering could clobber a
-	 * homebrew or subclass contribution that legitimately pushed the pool higher.
+	 * The class table is AUTHORITATIVE in both directions (CS-BUG-078). `addFeature`'s
+	 * prose parser reads a use count out of the whole feature description, and the 2014
+	 * Cleric's Channel Divinity text advertises its FUTURE tiers in the same paragraph
+	 * ("Beginning at 6th level, you can use your Channel Divinity twice between rests"),
+	 * so a 2nd-level cleric was minted with a two-use pool. While this method only ever
+	 * RAISED the max, that over-count was permanent. Multiclass is still safe because
+	 * `desiredMax` is the largest contribution across every class the character has.
 	 * @private
 	 */
 	_ensureChannelDivinityUses () {
@@ -32138,8 +32414,8 @@ class CharacterSheetState {
 		// feature text and reset the FEATURE back to its grant-time maximum while the
 		// resource is already correct — and rest restoration reads the feature, so
 		// returning early on the resource alone would silently restore only 2 of 3 uses.
-		const resourceStale = (resource.max ?? 0) < desiredMax;
-		const featureStale = !!feature?.uses && (feature.uses.max ?? 0) < desiredMax;
+		const resourceStale = (resource.max ?? 0) !== desiredMax;
+		const featureStale = !!feature?.uses && (feature.uses.max ?? 0) !== desiredMax;
 		if (!resourceStale && !featureStale) return;
 
 		if (resourceStale) {
@@ -32153,7 +32429,7 @@ class CharacterSheetState {
 		if (feature && !feature.uses) feature.uses = {current: desiredMax, max: desiredMax, per: "short"};
 		if (feature?.uses) {
 			feature.uses.max = desiredMax;
-			feature.uses.current = Math.max(feature.uses.current ?? 0, resource.current ?? 0);
+			feature.uses.current = Math.min(desiredMax, Math.max(feature.uses.current ?? 0, resource.current ?? 0));
 		}
 	}
 
@@ -48218,6 +48494,27 @@ class CharacterSheetState {
 					resourceCost: feature.consumes.amount || 1,
 				});
 			}
+		}
+
+		// ===== CHANNEL DIVINITY OPTIONS (CS-BUG-079) =====
+		// Every subclass Channel Divinity option in every source follows the
+		// "Channel Divinity: <Option>" naming convention. PALADIN oaths are additionally
+		// tagged in the class data with `consumes: {name: "Channel Divinity"}` and so are
+		// handled by the branch above, but the 2014 CLERIC domains carry NO such tag — so
+		// options like "Channel Divinity: Arcane Abjuration" fell through to generic
+		// pattern detection, came back with no `interactionMode`, never linked to the
+		// shared pool, and could therefore be used an unlimited number of times. Only
+		// per-domain entries hard-coded into `FEATURE_CLASSIFICATION_OVERRIDES` (Tempest's
+		// Destructive Wrath) escaped it; classify the whole convention instead.
+		//
+		// Options carrying their OWN use pool (TCE's "Channel Divinity: Harness Divine
+		// Power" is PB/long rest on top of the Channel Divinity it spends) are left alone
+		// so the more specific pool keeps owning the row.
+		if (!(feature.uses?.max > 0) && /^channel\s+divinity\s*:/i.test(feature.name || "")) {
+			return this._buildAbilityActivationInfo(feature, rawText, text, {
+				resourceName: "Channel Divinity",
+				resourceCost: 1,
+			});
 		}
 
 		// ===== RACE-MANIFESTATION CHILD ABILITIES (R20 #5/#6, S2 contract) =====

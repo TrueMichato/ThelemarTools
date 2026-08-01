@@ -523,14 +523,23 @@ export class CharacterSheetPage {
 	 * Read the spell save DC displayed on the Combat tab.
 	 */
 	async getSpellSaveDC (): Promise<number> {
-		await this.switchToTab(this.tabCombat);
-		const dcEl = this.page.locator("#charsheet-disp-spell-save-dc, .charsheet__spell-dc-value").first();
-		// Bounded: the DC selector isn't always rendered (e.g. martial
-		// classes), so don't let textContent's no-timeout default hang
-		// the test. Returning 0 lets the caller treat it as "not
-		// present" without aborting.
+		// The DC lives on the SPELLS tab, inside the per-class spellcasting card
+		// (`#charsheet-spell-dc` on the primary card). The historical selectors below
+		// (`#charsheet-disp-spell-save-dc` / `.charsheet__spell-dc-value`) do not exist
+		// anywhere in the product any more, so this probe silently returned 0 for every
+		// caster — which is why the `spellSaveDc` EffectCheck was skipped suite-wide.
+		// Kept in the selector list so an older build still resolves.
+		await this.switchToTab(this.tabSpells).catch(() => {});
+		const dcEl = this.page.locator("#charsheet-spell-dc, .charsheet__spell-dc, #charsheet-disp-spell-save-dc, .charsheet__spell-dc-value").first();
 		const text = await dcEl.textContent({timeout: 2000}).catch(() => null);
-		return parseInt(text || "0", 10);
+		const parsed = parseInt((text || "").replace(/[^\d-]/g, "") || "0", 10);
+		if (parsed > 0) return parsed;
+		// Gambler-style rolled DCs render a formula, and a freshly-rendered card can be
+		// mid-update; fall back to the model so the caller gets the real number.
+		return this.page.evaluate(() => {
+			const st = (globalThis as never as {charSheet?: {_state?: {getSpellSaveDC?: () => number}}}).charSheet?._state;
+			return st?.getSpellSaveDC?.() ?? 0;
+		}).catch(() => 0);
 	}
 
 	/**
@@ -606,6 +615,11 @@ export class CharacterSheetPage {
 	async getKnownSpellNames (): Promise<string[]> {
 		return this.page.evaluate(() => {
 			const state = globalThis.charSheet?._state;
+			// `getKnownSpells()` is an alias for `getSpellsKnown()` and therefore omits
+			// CANTRIPS entirely; `getSpells()` is the accessor that merges both lists
+			// (cantrips normalised to `level: 0`). Prefer it so cantrip-granting features
+			// are actually probeable, and fall back for older builds.
+			if (state?.getSpells) return state.getSpells().map(spell => spell.name);
 			if (!state?.getKnownSpells) return [];
 			return state.getKnownSpells().map(spell => spell.name);
 		});
@@ -632,7 +646,19 @@ export class CharacterSheetPage {
 		await el.waitFor({state: "attached", timeout: 5000}).catch(() => null);
 		const text = await el.textContent({timeout: 2000}).catch(() => "");
 		const m = (text || "").match(/-?\d+/);
-		return m ? parseInt(m[0], 10) : 0;
+		if (m) return parseInt(m[0], 10);
+		// There is no `#charsheet-disp-spell-save-dc` element on the sheet — the DC is
+		// rendered inside the spells tab header, not as a top-line combat stat — so this
+		// probe used to return a hard 0 for EVERY build (which is why every spec skipped
+		// it under CS-BUG-016). Fall back to the state API, the same source
+		// `getStatSnapshot()` already reads.
+		if (kind === "spellSaveDc") {
+			return this.page.evaluate(() => {
+				const st: any = (globalThis as any).charSheet?._state;
+				return st?.getSpellSaveDC?.() ?? 0;
+			});
+		}
+		return 0;
 	}
 
 	/**
@@ -1362,10 +1388,13 @@ export class CharacterSheetPage {
 		return this.page.evaluate(() => {
 			const cs: any = (globalThis as any).charSheet;
 			const state = cs?._state;
-			if (!state?.getKnownSpells) return {};
+			// See `getKnownSpellNames` — `getKnownSpells()` excludes cantrips, which made
+			// the `cantripCount` probe structurally incapable of ever returning non-zero.
+			const read = state?.getSpells ? () => state.getSpells() : state?.getKnownSpells ? () => state.getKnownSpells() : null;
+			if (!read) return {};
 			const out: Record<number, string[]> = {};
 			try {
-				const spells = state.getKnownSpells() || [];
+				const spells = read() || [];
 				for (const sp of spells) {
 					const lvl = sp.level ?? 0;
 					if (!out[lvl]) out[lvl] = [];

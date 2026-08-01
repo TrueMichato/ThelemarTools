@@ -817,6 +817,33 @@ export const PRESET_FULL_NECROMANCER_WIZARD: CharacterPreset = {
 };
 
 /**
+ * Arcana Domain Cleric (SCAG, PHB 2014 chassis).
+ *
+ * `abilityPriority` puts the standard array's 15 in WISDOM. The harness default is
+ * STR-first, which would leave this cleric at WIS 10 (+0) and make Potent Spellcasting's
+ * "+WIS to cantrip damage" indistinguishable from the feature doing nothing.
+ *
+ * Dwarf/Acolyte (both PHB) is the proven 2014 pairing — see PRESET_FULL_CROWN_PALADIN
+ * for why "Human" stalls the Species step.
+ */
+export const PRESET_FULL_ARCANA_CLERIC: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB",
+	className: "Cleric",
+	classSource: "PHB",
+	prioritySources: ["PHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB",
+	name: "Yssira Runekeeper",
+	skillCount: 2,
+	abilityPriority: ["wis", "con", "str", "dex", "int", "cha"],
+	subclassName: "Arcana Domain",
+	subclassSource: "SCAG",
+	signatureSpells: ["Sacred Flame", "Bless", "Cure Wounds"],
+};
+
+/**
  * Shadow Magic Sorcerer (XGE subclass on the PHB-2014 Sorcerer chassis).
  *
  * PHB rather than TGTT deliberately: `Shadow Magic` carries `classSource: "PHB"`, PHB
@@ -911,6 +938,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_LUST_LEXALIAN,
 	PRESET_FULL_HORROR_THEOCRACIAN,
 	PRESET_FULL_CREATION_BARD_CHANGELING,
+	PRESET_FULL_ARCANA_CLERIC,
 	PRESET_FULL_SHADOW_MAGIC_SORCERER,
 	PRESET_FULL_WICKED_WITCH_SORCERER,
 ];

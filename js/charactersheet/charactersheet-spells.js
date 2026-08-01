@@ -5891,6 +5891,23 @@ class CharacterSheetSpells {
 		return damageTypes[0] || "damage";
 	}
 
+	/**
+	 * Flat feature damage bonus for a CANTRIP (Potent Spellcasting & friends).
+	 *
+	 * Merges the catalog record (for its class list) with the sheet entry (for its
+	 * `sourceClass` attribution — how "these count as cleric cantrips" is represented)
+	 * so the state can scope the bonus to the granting class.
+	 * @param {*} spell Sheet spell entry, may be null.
+	 * @param {*} spellData Catalog spell record.
+	 * @returns {{bonus: number, sources: Array<{name: string, value: number}>}}
+	 */
+	_getCantripDamageBonus (spell, spellData) {
+		const level = spellData?.level ?? spell?.level;
+		if (level !== 0) return {bonus: 0, sources: []};
+		const entry = {...(spellData || {}), ...(spell || {}), level: 0};
+		return this._state.getCantripDamageBonus?.(entry) || {bonus: 0, sources: []};
+	}
+
 	_rollSpellDamage (spellData, slotLevel, baseLevel, appliedMetamagic = null, spell = null) {
 		// Weapon-channel cantrips (Booming/Green-Flame Blade) cast on their own roll ONLY
 		// the secondary/movement damage; the on-hit damage rides the weapon attack instead.
@@ -5899,7 +5916,7 @@ class CharacterSheetSpells {
 
 		// Check for cantrip scaling
 		if (spellData.scalingLevelDice) {
-			return this._rollCantripDamage(spellData, appliedMetamagic);
+			return this._rollCantripDamage(spellData, appliedMetamagic, spell);
 		}
 
 		// Look for damage dice in spell entries
@@ -5949,8 +5966,10 @@ class CharacterSheetSpells {
 			});
 			if (isDestructiveWrath) this._state.consumePendingDamageMaximization?.(damageType);
 			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
-			const total = detail.total + spellDamageBonus;
-			const bonusStr = spellDamageBonus ? ` + ${spellDamageBonus} item` : "";
+			const featureBonus = this._getCantripDamageBonus(spell, spellData);
+			const total = detail.total + spellDamageBonus + featureBonus.bonus;
+			const bonusStr = (spellDamageBonus ? ` + ${spellDamageBonus} item` : "")
+				+ featureBonus.sources.map(s => ` + ${s.value} ${s.name}`).join("");
 			const maximizedLabel = (isOvercharged || isDestructiveWrath) ? " maximized" : "";
 			const diceLabel = projectile ? `${projectile.count}× ${baseDice}` : baseDice;
 			const triggeredEffects = this._state.getTriggeredDamageEffects?.(damageType) || [];
@@ -5976,7 +5995,7 @@ class CharacterSheetSpells {
 	/**
 	 * @returns {*}
 	 */
-	_rollCantripDamage (spellData, appliedMetamagic = null) {
+	_rollCantripDamage (spellData, appliedMetamagic = null, spell = null) {
 		const characterLevel = this._state.getTotalLevel();
 		const scaling = Array.isArray(spellData.scalingLevelDice)
 			? spellData.scalingLevelDice[0]
@@ -6001,8 +6020,10 @@ class CharacterSheetSpells {
 			const detail = this._rollDamageDiceDetailed(dice, {maximize: isOvercharged || isDestructiveWrath});
 			if (isDestructiveWrath) this._state.consumePendingDamageMaximization?.(damageType);
 			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
-			const total = detail.total + spellDamageBonus;
-			const bonusStr = spellDamageBonus ? ` + ${spellDamageBonus} item` : "";
+			const featureBonus = this._getCantripDamageBonus(spell, spellData);
+			const total = detail.total + spellDamageBonus + featureBonus.bonus;
+			const bonusStr = (spellDamageBonus ? ` + ${spellDamageBonus} item` : "")
+				+ featureBonus.sources.map(s => ` + ${s.value} ${s.name}`).join("");
 			const maximizedLabel = (isOvercharged || isDestructiveWrath) ? " maximized" : "";
 			const triggeredEffects = this._state.getTriggeredDamageEffects?.(damageType) || [];
 			const push = triggeredEffects.find(it => it.type === "forcedMovement");
@@ -8102,8 +8123,19 @@ class CharacterSheetSpells {
 
 	/**
 	 * Show a spell picker modal filtered for a specific choice (e.g., from Fey Touched feat)
+	 *
+	 * Resolves when the modal CLOSES, not when it opens (CS-BUG-077). A grant that offers
+	 * several picks from one list — the Arcana Domain's Arcane Initiate is two wizard
+	 * cantrips — is drained by a sequential `for … await` loop in
+	 * `processPendingSpellChoices()`. While this returned early, every picker in that loop
+	 * opened at once and each snapshotted `knownSpellIds` BEFORE any pick was made, so the
+	 * same spell was still offered as selectable in the second modal. Picking it twice
+	 * silently collapsed to a single spell (`addSpell` de-dupes) while both choice slots
+	 * were recorded as fulfilled — the player lost a cantrip with no feedback.
+	 *
 	 * @param {object} choice - The pending spell choice object from state
 	 * @param {function} onSelect - Callback when spell is selected
+	 * @returns {Promise<void>} Resolves once the picker has closed.
 	 */
 	async showFilteredSpellPicker (choice, onSelect) {
 		const criteria = this._parseSpellFilter(choice.filter);
@@ -8125,10 +8157,14 @@ class CharacterSheetSpells {
 			...this._state.getInnateSpells().map(s => `${s.name}|${s.source}`),
 		];
 
+		let resolveClosed;
+		const pClosed = new Promise(resolve => { resolveClosed = resolve; });
+
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Choose Spell: ${choice.featureName}`,
 			isMinHeight0: true,
 			zIndex: 10002, // Above QuickBuild/LevelUp modals
+			cbClose: () => resolveClosed(),
 		});
 
 		// Description
@@ -8202,6 +8238,8 @@ class CharacterSheetSpells {
 		{ const _cl = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
 			<button class="ve-btn ve-btn-default">Cancel</button>
 		</div>`; modalInner.append(_cl); _cl.querySelector("button").addEventListener("click", () => doClose(false)); }
+
+		return pClosed;
 	}
 
 	/**
