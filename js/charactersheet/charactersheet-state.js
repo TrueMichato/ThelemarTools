@@ -566,6 +566,36 @@ class SpellGrantParser {
 	}
 
 	/**
+	 * Best text to scan for prose spell grants on a feature.
+	 *
+	 * A feature carries BOTH a raw `entries` array (5etools tags intact) and a
+	 * `description` string. For homebrew loaded through the site renderer the
+	 * `description` is already-rendered HTML — every `{@spell feather fall}` has
+	 * become an `<a href="spells.html#…">`, which the tag scanner cannot see. So the
+	 * raw entries win whenever they actually carry tags, and `description` remains the
+	 * fallback for features stored without entries.
+	 *
+	 * @param {*} feature
+	 * @returns {string}
+	 */
+	static getFeatureSpellText (feature) {
+		const parts = [];
+		const visit = (node) => {
+			if (typeof node === "string") return void parts.push(node);
+			if (Array.isArray(node)) return void node.forEach(visit);
+			if (!node || typeof node !== "object") return;
+			visit(node.entries);
+			visit(node.items);
+		};
+		visit(feature?.entries);
+		const raw = parts.join("\n");
+		const description = typeof feature?.description === "string" ? feature.description : "";
+		if (/\{@spell/i.test(raw)) return raw;
+		if (/\{@spell/i.test(description)) return description;
+		return raw || description;
+	}
+
+	/**
 	 * Parse spell references from feature description text
 	 * Fallback for when additionalSpells is not available
 	 */
@@ -573,6 +603,13 @@ class SpellGrantParser {
 		if (!text) return [];
 
 		const spells = [];
+
+		// A feature-wide expenditure clause ("You can cast each of these spells once with
+		// this feature … until you finish a long rest") frequently sits several sentences
+		// away from the spell tags it governs, outside the local context window below.
+		// Resolving it once per feature keeps multi-spell grants innate + tracked instead
+		// of silently degrading them into permanently-known spells.
+		const featureWideRecharge = this._parseFeatureWideCastingLimit(text);
 
 		// Look for {@spell SpellName} or {@spell SpellName|Source} references
 		const spellPattern = /\{@spell\s+([^}|]+)(?:\|([^}]+))?\}/gi;
@@ -588,8 +625,12 @@ class SpellGrantParser {
 			const context = contextBefore + contextAfter;
 
 			const isAtWill = /at will|at-will|without expending/i.test(context);
-			const isOnce = /once|one time/i.test(context) && /rest|dawn|day/i.test(context);
-			const recharge = /short rest/i.test(context) ? "short" : (/long rest|dawn|day/i.test(context) ? "long" : null);
+			const localOnce = /once|one time/i.test(context) && /rest|dawn|day/i.test(context);
+			// An at-will grant is never limited, so the feature-wide clause can only ever
+			// promote an otherwise-unlimited grant into a tracked one.
+			const isOnce = localOnce || (!isAtWill && !!featureWideRecharge);
+			const localRecharge = /short rest/i.test(context) ? "short" : (/long rest|dawn|day/i.test(context) ? "long" : null);
+			const recharge = localRecharge || (isOnce ? featureWideRecharge : null);
 
 			spells.push({
 				name: (/** @type {*} */ (spellName)).toTitleCase(),
@@ -599,21 +640,71 @@ class SpellGrantParser {
 				uses: isOnce ? 1 : (isAtWill ? null : undefined),
 				recharge: recharge,
 				sourceFeature: featureName,
+				minLevel: this._parseSpellGrantMinLevel(contextBefore),
 			});
 		}
 
-		// Deduplicate by name
+		// Deduplicate by identity AND level gate: a feature may legitimately mention the
+		// same spell twice at different tiers ("you learn feather fall" at 3rd, "you can
+		// cast feather fall at will" at 15th). Collapsing those into one entry silently
+		// discarded the upgrade, so the gate is part of the key.
 		const uniqueSpells = [];
 		const seen = new Set();
 		spells.forEach(s => {
-			const key = `${s.name}|${s.source}`.toLowerCase();
+			const key = `${s.name}|${s.source}|${s.minLevel ?? ""}`.toLowerCase();
 			if (!seen.has(key)) {
 				seen.add(key);
 				uniqueSpells.push(s);
 			}
 		});
 
+		// Ascending gate order so a later tier always merges ON TOP of an earlier one.
+		uniqueSpells.sort((a, b) => (a.minLevel || 0) - (b.minLevel || 0));
+
 		return uniqueSpells;
+	}
+
+	/**
+	 * Extract a feature-wide "each of these spells is expended and recovers on a rest"
+	 * clause, e.g. "You can cast each of these spells once with this feature, and once
+	 * you cast a spell in this way, you can not do so again until you finish a long rest."
+	 *
+	 * Deliberately tight: the casting verb, the "once" limiter and the rest clause must
+	 * all appear in ONE sentence, so an unrelated once-per-rest ability mentioned
+	 * elsewhere in the same feature cannot retro-limit a permanent spell grant.
+	 *
+	 * @param {string} text Full feature text.
+	 * @returns {"short"|"long"|null}
+	 * @private
+	 */
+	static _parseFeatureWideCastingLimit (text) {
+		if (!text) return null;
+		const m = /[^.!?\n]*\bcast\b[^.!?\n]*\bonce\b[^.!?\n]*\b(short|long) rest\b[^.!?\n]*/i.exec(text);
+		if (!m) return null;
+		return m[1].toLowerCase() === "short" ? "short" : "long";
+	}
+
+	/**
+	 * Extract the CLASS LEVEL at which a prose spell grant unlocks, e.g. "At 10th level in
+	 * this class, you also learn the {@spell levitate} spell" → 10.
+	 *
+	 * Generic: multi-tier prose grants are ubiquitous in homebrew subclasses, and without
+	 * this every later-level spell was granted immediately at the level the FEATURE was
+	 * gained. Only the text after the last sentence boundary is scanned, so an unrelated
+	 * level mention in a preceding sentence cannot leak a spurious gate.
+	 *
+	 * @param {string} contextBefore Lowercased text immediately preceding the spell tag.
+	 * @returns {number|null} The gating class level, or null when the grant is immediate.
+	 * @private
+	 */
+	static _parseSpellGrantMinLevel (contextBefore) {
+		if (!contextBefore) return null;
+		// Keep only the current sentence/clause.
+		const sentence = contextBefore.split(/[.!?\n]/).pop() || "";
+		const m = /(?:at|by|when you reach|upon reaching)\s+(\d+)(?:st|nd|rd|th)\s+level/i.exec(sentence);
+		if (!m) return null;
+		const lvl = Number(m[1]);
+		return Number.isFinite(lvl) && lvl > 1 ? lvl : null;
 	}
 
 	/**
@@ -4091,6 +4182,14 @@ class CharacterSheetState {
 				if ((Number(target.uses.current) || 0) > target.uses.max) target.uses.current = target.uses.max;
 			}
 			if (src.recharge && !target.recharge) target.recharge = src.recharge;
+		}
+		// An at-will grant is strictly a superset of a limited one (e.g. Meteor Knight's
+		// Reduce Gravity upgrading feather fall/jump to at-will at 15th level), so it wins
+		// and the now-meaningless use tracking is dropped.
+		if (src.atWill && !target.atWill) {
+			target.atWill = true;
+			delete target.uses;
+			delete target.recharge;
 		}
 		return target;
 	}
@@ -14914,6 +15013,7 @@ class CharacterSheetState {
 
 	// Innate spell management
 	getInnateSpells () {
+		this.reconcileDeferredFeatureSpells();
 		return [...(this._data.spellcasting.innateSpells || [])];
 	}
 
@@ -19134,6 +19234,91 @@ class CharacterSheetState {
 							calculations.hasCoverOfDarkness = true;
 							calculations.coverOfDarknessAcBonus = 2;
 							calculations.coverOfDarknessDexSaveBonus = 2;
+						}
+					}
+
+					// Meteor Knight (The Griffon's Saddlebag 3). Source-gated for the same
+					// reason as Shadow Knight above — homebrew short names are not globally
+					// unique. Every value here is derived (never hard-coded per level) so the
+					// pool/damage/range tiers stay correct through level-up and respec.
+					if (CharacterSheetState.isMeteorKnightSubclass(cls.subclass) && level >= 3) {
+						const intMod = this.getAbilityMod("int");
+						calculations.hasMeteorKnight = true;
+
+						// --- Satellite Mastery (3) ---
+						calculations.hasSatelliteMastery = true;
+						// Bound-missile capacity = proficiency bonus.
+						calculations.satelliteMax = profBonus;
+						// Damage die steps at 10 and 18; range doubles at 10.
+						calculations.satelliteDamage = level >= 18 ? "1d8" : level >= 10 ? "1d6" : "1d4";
+						calculations.satelliteRange = level >= 10 ? 60 : 30;
+						// Intelligence is the attack ability and the damage modifier. This is a
+						// ranged SPELL attack, so it is proficiency-added by the feature text.
+						calculations.satelliteAbility = "int";
+						calculations.satelliteAttackBonus = profBonus + intMod;
+						calculations.satelliteDamageBonus = intMod;
+						calculations.satelliteDamageType = "bludgeoning or piercing";
+						// "Being within 5 feet of a hostile creature does not impose
+						// disadvantage on your ranged attack rolls with this feature."
+						calculations.satelliteIgnoresCloseQuartersDisadvantage = true;
+						calculations.satelliteRecallRange = 120;
+						calculations.grantedAttacks = [
+							...(calculations.grantedAttacks || []),
+							{
+								id: "feature_meteor-knight-satellite",
+								name: "Satellite",
+								sourceFeature: "Satellite Mastery",
+								isMelee: false,
+								isRanged: true,
+								isSpell: true,
+								isSpellAttack: true,
+								isSatellite: true,
+								abilityMod: "int",
+								damage: calculations.satelliteDamage,
+								damageType: "bludgeoning",
+								range: `${calculations.satelliteRange} ft.`,
+								attackBonus: 0,
+								damageBonus: 0,
+								properties: [],
+								actionType: "bonus",
+								ignoresCloseQuartersDisadvantage: true,
+							},
+						];
+
+						// --- Reduce Gravity (3 / 10 / 15) ---
+						calculations.hasReduceGravity = true;
+						calculations.reduceGravitySpells = level >= 10
+							? ["Feather Fall", "Jump", "Levitate"]
+							: ["Feather Fall", "Jump"];
+						// At 15 feather fall and jump lose their per-long-rest limit; levitate
+						// keeps its single use.
+						calculations.reduceGravityAtWillSpells = level >= 15 ? ["Feather Fall", "Jump"] : [];
+
+						// --- Course Correct (7) ---
+						if (level >= 7) {
+							calculations.hasCourseCorrect = true;
+							// Contested Intelligence check that explicitly adds proficiency.
+							calculations.courseCorrectCheckBonus = intMod + profBonus;
+							calculations.courseCorrectRange = 10;
+						}
+
+						// --- Improved Satellite Mastery (10) ---
+						if (level >= 10) {
+							calculations.hasImprovedSatelliteMastery = true;
+							calculations.satelliteReturnsOnMiss = true;
+							calculations.satelliteRecallOnActionSurge = true;
+						}
+
+						// --- Increase Gravity (15) ---
+						if (level >= 15) {
+							calculations.hasIncreaseGravity = true;
+							calculations.increaseGravityShoveBonus = intMod;
+						}
+
+						// --- Satellite Barrage (18) ---
+						if (level >= 18) {
+							calculations.hasSatelliteBarrage = true;
+							calculations.satelliteBarrageMaxAttacks = calculations.satelliteMax;
 						}
 					}
 
@@ -24885,6 +25070,41 @@ class CharacterSheetState {
 			});
 		}
 
+		// Meteor Knight Fighter (level 15) — Increase Gravity.
+		//  1. Advantage on ANY ability check or saving throw made to resist being pushed,
+		//     pulled or knocked prone. Emitted as `check:advantage:*` / `save:advantage:*`
+		//     conditional sub-typed modifiers so the existing per-roll opt-in picker
+		//     (`aggregateModifiers().conditionalsAvailable`) offers them on every ability
+		//     check / save rather than silently auto-applying to unrelated rolls.
+		//  2. Add the Intelligence modifier to shove ability checks — a Strength
+		//     (Athletics) check in both editions, so a gated `skill:athletics` bonus.
+		if (calculations.hasIncreaseGravity && !alreadyProcessed("Increase Gravity")) {
+			const forcedMovementCondition = "to resist being pushed, pulled, or knocked prone";
+			effects.push({
+				type: "modifier",
+				modType: "check:advantage:forcedmovement",
+				value: 1,
+				source: "Increase Gravity",
+				conditional: forcedMovementCondition,
+			});
+			effects.push({
+				type: "modifier",
+				modType: "save:advantage:forcedmovement",
+				value: 1,
+				source: "Increase Gravity",
+				conditional: forcedMovementCondition,
+			});
+			if (calculations.increaseGravityShoveBonus) {
+				effects.push({
+					type: "modifier",
+					modType: "skill:athletics",
+					value: calculations.increaseGravityShoveBonus,
+					source: "Increase Gravity",
+					conditional: "when you shove a creature",
+				});
+			}
+		}
+
 		// Storm Soul resistances (Storm Herald)
 		if (calculations.stormSoulResistance) {
 			effects.push({
@@ -25893,6 +26113,9 @@ class CharacterSheetState {
 		// Populate spellbook spells granted by a FEATURE (e.g. Undead Thralls adds
 		// Animate Dead to the wizard's spellbook). Idempotent reconcile.
 		this.populateFeatureGrantedSpellbookSpells();
+		// Release any prose-parsed spell grants whose level gate has now been reached
+		// (e.g. "At 10th level in this class, you also learn levitate"). Idempotent.
+		this.reconcileDeferredFeatureSpells();
 
 		const calculations = this.getFeatureCalculations();
 		const effects = calculations._effects || [];
@@ -26241,14 +26464,22 @@ class CharacterSheetState {
 
 			// ===== GENERIC MODIFIERS =====
 			case "modifier": {
-				// Conditional advantage/disadvantage modifiers (e.g. Danger Sense's
-				// "save:dex:advantage … against effects you can see", Forked Tongue's
-				// "check:wis:advantage … to ascertain true intentions") must stay
-				// ENABLED so getModifiersForType() can see them; aggregateModifiers()
-				// then gates them off by default and surfaces them in
-				// conditionalsAvailable for the per-roll opt-in picker. Disabling them
-				// here hid them from the picker entirely. A purely numeric conditional
-				// bonus keeps the original disabled-by-default behaviour.
+				// Conditional modifiers that carry an advantage/disadvantage flag (e.g.
+				// Danger Sense's "save:dex:advantage … against effects you can see")
+				// stay ENABLED: they contribute 0 to the numeric quick-total (the
+				// adv/dis sentinel is zeroed in _recalculateCustomModifiers), so the
+				// only thing being enabled buys them is visibility to
+				// getModifiersForType()/getAdvantageState().
+				//
+				// A purely NUMERIC conditional bonus (e.g. Increase Gravity's "+INT to
+				// Athletics when you shove") must stay DISABLED. `_recalculateCustomModifiers`
+				// gates on `enabled` alone and never on `conditional`, so enabling one
+				// leaks its value into customModifiers and therefore into getSkillMod()/
+				// getSaveMod() — i.e. it would apply to EVERY roll, not just the
+				// conditional one. Disabling costs nothing: aggregateModifiers() still
+				// surfaces disabled conditionals in `conditionalsAvailable`, so the
+				// per-roll opt-in picker keeps offering them. (CS-BUG-065 was withdrawn
+				// after this was measured; see docs/charactersheet/known-bugs.md.)
 				const {advantage: advFromType, disadvantage: disFromType} = this._parseModifierType(effect.modType);
 				const carriesAdvFlag = advFromType || disFromType || effect.advantage || effect.disadvantage;
 				this._addClassFeatureModifier({
@@ -31563,6 +31794,7 @@ class CharacterSheetState {
 	getResources () {
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
+		this._ensureMeteorKnightResources();
 		this.ensureBloodHunterResources();
 		this.ensureTalentResources();
 		this._ensureChannelDivinityUses();
@@ -31807,6 +32039,190 @@ class CharacterSheetState {
 			&& cls.subclass?.source === "GriffonsSaddlebag4",
 		) || null;
 	}
+
+	// =========================================================================
+	// Meteor Knight (The Griffon's Saddlebag 3)
+	// =========================================================================
+	// #region meteor-knight
+
+	/**
+	 * Identity predicate for the Meteor Knight Fighter archetype. Source-gated: homebrew
+	 * subclass short names are not globally unique, so every Meteor Knight code path
+	 * funnels through this one check rather than repeating the string comparison.
+	 * @param {*} subclass A `_data.classes[].subclass` entry.
+	 * @returns {boolean}
+	 */
+	static isMeteorKnightSubclass (subclass) {
+		return (subclass?.shortName || subclass?.name) === "Meteor Knight"
+			&& subclass?.source === "GriffonsSaddlebag3";
+	}
+
+	/** @returns {object|null} The Fighter class entry carrying the Meteor Knight archetype. */
+	_getMeteorKnightClass () {
+		return (this._data.classes || []).find(cls =>
+			(cls.name || "").toLowerCase() === "fighter"
+			&& CharacterSheetState.isMeteorKnightSubclass(cls.subclass),
+		) || null;
+	}
+
+	/** @returns {boolean} True when the character is a Meteor Knight of at least level 3. */
+	hasMeteorKnight () {
+		return (this._getMeteorKnightClass()?.level || 0) >= 3;
+	}
+
+	/**
+	 * Reconcile the "Satellites" pool — the number of bound missiles currently ORBITING
+	 * (i.e. available to launch). Max is the proficiency bonus, so it re-scales at
+	 * Fighter 5/9/13/17 exactly like every other PB-derived pool.
+	 *
+	 * Recharge is `long`: a long rest is the natural point at which a knight re-binds a
+	 * full complement. In play the pool is topped back up by the Recall action
+	 * ({@link recallSatellites}) or, from level 10, automatically by Action Surge — both
+	 * of which are the rules-accurate refill paths.
+	 *
+	 * Mirrors `_ensureShadowKnightResources`: derives from the class level directly (never
+	 * `getFeatureCalculations()`, which would recurse back through `getResources()`), and
+	 * preserves the number of expended satellites across a max change.
+	 * @private
+	 */
+	_ensureMeteorKnightResources () {
+		const level = this._getMeteorKnightClass()?.level || 0;
+		if (level < 3) {
+			this._data.resources = (this._data.resources || []).filter(r => r.resourceType !== "meteorKnightSatellites");
+			return;
+		}
+		const max = Math.max(1, this.getProficiencyBonus());
+		let resource = this._data.resources.find(r => r.resourceType === "meteorKnightSatellites"
+			|| r.name === CharacterSheetState.METEOR_KNIGHT_SATELLITE_POOL_NAME);
+		if (!resource) {
+			resource = {
+				id: CryptUtil.uid(),
+				name: CharacterSheetState.METEOR_KNIGHT_SATELLITE_POOL_NAME,
+				current: max,
+				max,
+				recharge: "long",
+				resourceType: "meteorKnightSatellites",
+			};
+			this._data.resources.push(resource);
+			return;
+		}
+		const expended = Math.max(0, (resource.max ?? max) - (resource.current ?? resource.max ?? max));
+		resource.name = CharacterSheetState.METEOR_KNIGHT_SATELLITE_POOL_NAME;
+		resource.max = max;
+		resource.current = Math.max(0, max - expended);
+		resource.recharge = "long";
+		resource.resourceType = "meteorKnightSatellites";
+	}
+
+	/** @returns {object|null} A copy of the live Satellites pool, or null when not a Meteor Knight. */
+	getSatelliteResource () {
+		this._ensureMeteorKnightResources();
+		const resource = this._data.resources.find(r => r.resourceType === "meteorKnightSatellites");
+		return resource ? {...resource} : null;
+	}
+
+	/** @returns {number} Satellites currently in orbit (launchable right now). */
+	getSatellitesOrbiting () {
+		return this.getSatelliteResource()?.current ?? 0;
+	}
+
+	/** @returns {number} Maximum bindable satellites (= proficiency bonus). */
+	getSatellitesMax () {
+		return this.getSatelliteResource()?.max ?? 0;
+	}
+
+	/**
+	 * Set the number of orbiting satellites, clamped to [0, max]. Single write path so
+	 * every surface (combat pips, Recall button, barrage) agrees.
+	 * @param {number} n
+	 * @returns {boolean} True when a Meteor Knight pool existed and was updated.
+	 */
+	setSatellitesOrbiting (n) {
+		this._ensureMeteorKnightResources();
+		const resource = this._data.resources.find(r => r.resourceType === "meteorKnightSatellites");
+		if (!resource) return false;
+		resource.current = Math.max(0, Math.min(Number(n) || 0, resource.max));
+		return true;
+	}
+
+	/**
+	 * Bind one more missile to yourself (action; requires touching the object). Caps at
+	 * the proficiency-bonus maximum — the feature's "a different missile ceases to be
+	 * bound" clause means the count never exceeds the cap.
+	 * @returns {boolean} True when a satellite was added.
+	 */
+	bindSatellite () {
+		const before = this.getSatellitesOrbiting();
+		const max = this.getSatellitesMax();
+		if (!max || before >= max) return false;
+		return this.setSatellitesOrbiting(before + 1);
+	}
+
+	/**
+	 * Launch one orbiting satellite (the bonus-action ranged spell attack). Returns the
+	 * full attack profile so the caller can roll it, or null when nothing is in orbit.
+	 * @returns {object|null}
+	 */
+	fireSatellite () {
+		if (!this.hasMeteorKnight()) return null;
+		const orbiting = this.getSatellitesOrbiting();
+		if (orbiting <= 0) return null;
+		this.setSatellitesOrbiting(orbiting - 1);
+		return {...this.getSatelliteAttackProfile(), remaining: this.getSatellitesOrbiting()};
+	}
+
+	/**
+	 * Recall every satellite within 120 feet (action), returning the pool to full. Also
+	 * the mechanism Improved Satellite Mastery reuses on Action Surge.
+	 * @returns {number} How many satellites returned to orbit.
+	 */
+	recallSatellites () {
+		if (!this.hasMeteorKnight()) return 0;
+		const before = this.getSatellitesOrbiting();
+		const max = this.getSatellitesMax();
+		this.setSatellitesOrbiting(max);
+		return Math.max(0, max - before);
+	}
+
+	/**
+	 * The rollable profile for a satellite attack: a ranged SPELL attack that uses
+	 * Intelligence for both the attack roll and the damage bonus, and adds proficiency.
+	 * @returns {{attackBonus: number, damage: string, damageBonus: number, damageType: string, range: number, ability: string, actionType: string, ignoresCloseQuartersDisadvantage: boolean}}
+	 */
+	getSatelliteAttackProfile () {
+		const calcs = this.getFeatureCalculations();
+		return {
+			attackBonus: calcs.satelliteAttackBonus || 0,
+			damage: calcs.satelliteDamage || "1d4",
+			damageBonus: calcs.satelliteDamageBonus || 0,
+			damageType: calcs.satelliteDamageType || "bludgeoning or piercing",
+			range: calcs.satelliteRange || 30,
+			ability: "int",
+			actionType: "bonus",
+			ignoresCloseQuartersDisadvantage: !!calcs.satelliteIgnoresCloseQuartersDisadvantage,
+		};
+	}
+
+	/**
+	 * Course Correct (7): the total bonus on the contested Intelligence check made to
+	 * redirect or ensnare an incoming missile — Intelligence modifier PLUS proficiency
+	 * bonus (the feature adds proficiency explicitly).
+	 * @returns {number} 0 when the character lacks Course Correct.
+	 */
+	getCourseCorrectCheckBonus () {
+		return this.getFeatureCalculations().courseCorrectCheckBonus || 0;
+	}
+
+	/**
+	 * Satellite Barrage (18): the number of ranged spell attacks the action can make —
+	 * capped by satellites currently in orbit, never by the theoretical maximum.
+	 * @returns {number} 0 when the character lacks Satellite Barrage.
+	 */
+	getSatelliteBarrageMaxAttacks () {
+		if (!this.getFeatureCalculations().hasSatelliteBarrage) return 0;
+		return this.getSatellitesOrbiting();
+	}
+	// #endregion
 
 	_ensureShadowKnightResources () {
 		const fighter = this._getShadowKnightClass();
@@ -36654,9 +37070,14 @@ class CharacterSheetState {
 		// First try structured additionalSpells data (from official content)
 		if (feature.additionalSpells) {
 			spells = SpellGrantParser.parseAdditionalSpells(feature.additionalSpells, feature.name);
-		} else if (feature.description && SpellGrantParser.grantsSpells(feature.description)) {
-			// Fall back to parsing from description (for homebrew or missing data)
-			spells = SpellGrantParser.parseSpellsFromText(feature.description, feature.name);
+		} else {
+			// Fall back to parsing from prose (for homebrew or missing data). Raw
+			// `entries` are preferred over the rendered `description`, whose {@spell}
+			// tags have already been expanded into anchors the scanner can't read.
+			const spellText = SpellGrantParser.getFeatureSpellText(feature);
+			if (SpellGrantParser.grantsSpells(spellText)) {
+				spells = SpellGrantParser.parseSpellsFromText(spellText, feature.name);
+			}
 		}
 
 		// Drop spells already handled as a player CHOICE (e.g. Arcane Archer Lore's
@@ -36665,6 +37086,13 @@ class CharacterSheetState {
 			spells = spells.filter(s => !(s?.name && claimedSpells.has(s.name.toLowerCase())));
 		}
 
+		if (!spells.length) return false;
+
+		// LEVEL-GATED tiers ("At 10th level in this class, you also learn levitate") are
+		// held back until the class level catches up, then applied by
+		// `reconcileDeferredFeatureSpells()`. Without this every later-level grant landed
+		// immediately at the level the feature itself was gained.
+		spells = this._partitionLevelGatedSpellGrants(feature, featureId, spells);
 		if (!spells.length) return false;
 
 		spells.forEach(spell => {
@@ -36764,6 +37192,112 @@ class CharacterSheetState {
 		});
 
 		return hasPendingChoices;
+	}
+
+	/**
+	 * The class level that gates a feature's level-scaled grants. Prose gates are always
+	 * phrased "at Nth level IN THIS CLASS", so the feature's own class is authoritative;
+	 * class-less features (racial traits, feats) fall back to total level.
+	 * @param {object} feature
+	 * @returns {number}
+	 * @private
+	 */
+	_getFeatureGateLevel (feature) {
+		if (feature?.className) return this.getClassLevel(feature.className) || 0;
+		return this.getTotalLevel() || 0;
+	}
+
+	/**
+	 * Split parsed spell grants into the ones applicable NOW and the ones still gated
+	 * behind a higher class level. The gated tiers are stashed on the owning feature as
+	 * `_deferredSpellGrants` so {@link reconcileDeferredFeatureSpells} can release them
+	 * on a later level-up without re-parsing.
+	 *
+	 * Generic by design: any feature whose prose says "At Nth level … you also learn X"
+	 * (or "…you can cast X at will") now behaves correctly, homebrew included.
+	 *
+	 * @param {object} feature
+	 * @param {string} featureId
+	 * @param {Array<object>} spells
+	 * @returns {Array<object>} the immediately-applicable grants.
+	 * @private
+	 */
+	_partitionLevelGatedSpellGrants (feature, featureId, spells) {
+		const gated = spells.filter(s => s?.minLevel && s.minLevel > this._getFeatureGateLevel(feature));
+		if (gated.length) {
+			const stored = this._data.features.find(f => f.id === featureId) || feature;
+			if (stored) stored._deferredSpellGrants = gated;
+		}
+		return spells.filter(s => !gated.includes(s));
+	}
+
+	/**
+	 * Release any level-gated spell grants whose class level has since been reached.
+	 * Idempotent and cheap: features carry `_deferredSpellGrants` only while something is
+	 * genuinely still pending, and each released tier is removed from the list.
+	 *
+	 * Called from `applyClassFeatureEffects()` (every level-up / respec / build path) and
+	 * from `getInnateSpells()` (read-path safety net, mirroring the reconcile-on-read
+	 * convention `getResources()` already uses).
+	 *
+	 * @returns {Array<string>} names of the spells released by this pass.
+	 */
+	reconcileDeferredFeatureSpells () {
+		const released = [];
+		for (const feature of this._data.features || []) {
+			const pending = feature?._deferredSpellGrants;
+			if (!Array.isArray(pending) || !pending.length) continue;
+			const gateLevel = this._getFeatureGateLevel(feature);
+			const ready = pending.filter(s => (s.minLevel || 0) <= gateLevel);
+			if (!ready.length) continue;
+			feature._deferredSpellGrants = pending.filter(s => !ready.includes(s));
+			if (!feature._deferredSpellGrants.length) delete feature._deferredSpellGrants;
+			// Ascending gate order so a later at-will tier merges on top of an earlier one.
+			ready.sort((a, b) => (a.minLevel || 0) - (b.minLevel || 0));
+			for (const spell of ready) {
+				this._applyParsedSpellGrant(feature, spell);
+				released.push(spell.name);
+			}
+		}
+		return released;
+	}
+
+	/**
+	 * Apply a single parsed spell grant (innate / cantrip / known) for a feature. Shared
+	 * by the deferred-release path so it can never drift from the initial grant.
+	 * @param {object} feature
+	 * @param {object} spell
+	 * @private
+	 */
+	_applyParsedSpellGrant (feature, spell) {
+		if (spell.innate) {
+			this.addInnateSpell({
+				name: spell.name,
+				source: spell.source,
+				level: spell.level,
+				atWill: spell.atWill,
+				uses: spell.uses,
+				recharge: spell.recharge || "long",
+				sourceFeature: feature.name,
+				spellcastingAbility: spell.ability,
+			});
+		} else if (spell.level === 0) {
+			this.addCantrip({
+				name: spell.name,
+				source: spell.source,
+				sourceFeature: feature.name,
+				spellcastingAbility: spell.ability,
+			});
+		} else {
+			this.addSpell({
+				name: spell.name,
+				source: spell.source,
+				level: spell.level || 1,
+				prepared: spell.prepared,
+				sourceFeature: feature.name,
+				spellcastingAbility: spell.ability,
+			});
+		}
 	}
 
 	removeFeature (featureIdOrName, source) {
@@ -39673,6 +40207,11 @@ class CharacterSheetState {
 
 	/**
 	 * Spend one Action Surge use.
+	 *
+	 * Improved Satellite Mastery (Meteor Knight 10) rides on this: "all satellites within
+	 * 120 feet of you return to your orbit when you use your Action Surge". Applied here
+	 * — the single spend path — so every surface that surges (combat button, spawner,
+	 * play mode) gets the refill, not just the one that happened to remember.
 	 * @returns {boolean} True if a use was spent.
 	 */
 	useActionSurge () {
@@ -39680,6 +40219,7 @@ class CharacterSheetState {
 		const f = this.getFeature("Action Surge");
 		if (!f?.uses || f.uses.current <= 0) return false;
 		this.setFeatureUses(f.id, f.uses.current - 1);
+		if (this.getFeatureCalculations().satelliteRecallOnActionSurge) this.recallSatellites();
 		return true;
 	}
 
@@ -51735,6 +52275,9 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Companions (Beast Companions, Familiars, Summons, Steel Defenders, Drakes)
+
+	/** Player-facing label of the Meteor Knight satellite pool (single source of truth). */
+	static METEOR_KNIGHT_SATELLITE_POOL_NAME = "Satellites";
 
 	// =========================================================================
 	// COMPANION TYPES — Categorizes companions by origin mechanic

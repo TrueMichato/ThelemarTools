@@ -2383,3 +2383,197 @@ Lunar / Spellfire / Wicked Witch / Shadow Sorcery should take it.
 Sorcery Points machinery" asserts both ladders explicitly.
 
 ---
+
+## CS-BUG-065 — WITHDRAWN (the "fix" was a regression; reverted)
+
+**Status**: WITHDRAWN — not a bug. The change filed under this ID was reverted
+because it introduced a shipped, player-visible regression.
+**Severity**: n/a (the reverted change was high severity)
+**Filed by**: Meteor Knight batch, from Increase Gravity (Meteor Knight 15)
+"+ your Intelligence modifier to shove ability checks"
+
+### What was claimed
+
+That a `FeatureEffectRegistry` `modifier` effect carrying a `conditional`
+string but no `advantage`/`disadvantage` flag was stored `enabled: false` and
+therefore "never reached `aggregateModifiers()` at all — not as an applied
+bonus and not in `result.conditionalsAvailable`", with "**no** code path
+anywhere that could turn it back on".
+
+### Why that is false
+
+Measured on a live `fighter/meteor knight/15/aarakocra` with the original
+(`enabled: false`) code:
+
+```
+inConditionals: true          <- it IS offered by the per-roll picker
+shoveBonus:     1             <- carrying its correct value
+baseBonus:      0             <- correctly gated off by default
+optInBonus:     1             <- appliedConditionalIds moves it
+```
+
+`aggregateModifiers()` surfaces **disabled** conditionals in
+`conditionalsAvailable` — the premise that `enabled: false` hid them was
+simply wrong. The same is visible in Jest: the pre-existing shove test passes
+both with and without the change, which is why its "regression pin" was
+green-on-revert and proved nothing.
+
+### What the change actually did
+
+`_recalculateCustomModifiers()` gates on `mod.enabled` **alone** and never on
+`mod.conditional`. So storing a numeric conditional `enabled: true` leaks its
+value into `customModifiers.skills` — and from there into `getSkillMod()`,
+which is both the number printed on the sheet and the modifier every skill
+roll uses.
+
+Measured, same character, INT +1:
+
+| | `getSkillMod("athletics")` |
+|---|---|
+| original code | **5** (correct) |
+| with the "fix" | **6** — the shove-only bonus applied to *every* Athletics check |
+
+This violates the documented invariant that conditional modifiers are not
+auto-applied. It is also inconsistent across the three roll handlers, because
+they compose differently:
+
+- `_rollSkillCheck` / `_rollSavingThrow` use `getSkillMod()` / `baseMod` only
+  and never add `aggregated.bonus` -> the conditional applies **always**.
+- `_rollAbilityCheck` adds `aggregated.bonus` **on top of** `baseMod` -> an
+  opted-in conditional `check:*` modifier is **double-counted**.
+
+So the change traded "offered but inert at roll time" for "silently always on,
+and double-counted on ability checks". Both are wrong; the second is worse
+because it puts a wrong number on the character sheet.
+
+### Resolution
+
+Reverted to:
+
+```js
+enabled: effect.enabled !== false && (carriesAdvFlag || !effect.conditional),
+```
+
+Disabling a numeric conditional costs nothing (the picker still offers it) and
+is currently the only thing keeping it out of the quick-total.
+
+### Regression pins (falsified)
+
+`test/jest/charactersheet/CharacterSheetMeteorKnight.test.js` gains two tests
+that pin the *player-facing* surface rather than the aggregator:
+
+- `does NOT leak the conditional shove bonus into the plain Athletics modifier`
+  — asserts `getSkillCustomMod("athletics") === 0` and that the L15 character's
+  displayed Athletics matches an otherwise-identical L14 control (PB is 5 at
+  both levels), with a PREMISE guard asserting the conditional is genuinely
+  present and genuinely carries +4.
+- `keeps the numeric conditional out of the enabled quick-total but still
+  offers it` — asserts `enabled === false` *and* that it still appears in
+  `conditionalsAvailable`, pinning both halves of the trade-off.
+
+Both verified **red** when the reverted expression is re-applied, and green
+after. Note the first pin was *vacuous* in its initial form: it compared
+before/after around `applyClassFeatureEffects()`, but `addClass()` already
+applies feature effects, so the baseline was pre-polluted and the test passed
+under the regression. It also needs an explicit `_recalculateCustomModifiers()`
+— without it the quick-total is never rebuilt and the leak cannot be observed.
+
+Full charactersheet suite: 432 suites / 13,100 tests green.
+
+### Genuine follow-up left open
+
+Opting a **numeric** conditional in via the picker does not change a skill or
+save roll total, because `_rollSkillCheck` and `_rollSavingThrow` never consume
+`aggregated.bonus`. That is a real, pre-existing gap — it predates this batch
+and is not what CS-BUG-065 described. Fixing it means reconciling the three
+roll handlers' composition conventions (and removing the resulting
+double-count risk in `_rollAbilityCheck`), which is a generic change, not a
+subclass one.
+
+---
+
+## CS-BUG-066 — prose spell grants were parsed from rendered HTML, so every homebrew "You learn the {@spell x} spell" grant was silently dropped
+
+**Status**: FIXED (Meteor Knight batch)
+**Severity**: high — an entire category of homebrew feature grants nothing
+**Surfaced by**: Reduce Gravity (Meteor Knight 3) — *feather fall* / *jump* /
+*levitate* never appeared in `getInnateSpells()`
+
+### Symptom
+
+A homebrew feature whose text grants spells in prose granted **nothing**.
+`getInnateSpells()` and the spellbook were both empty; the feature rendered
+its description perfectly, which is exactly the "renders but does nothing"
+failure mode.
+
+### Root cause
+
+`_processFeatureSpells()` read `feature.description`. For features stored
+through the site renderer that string is already-rendered **HTML**:
+
+```html
+<div class="ve-rd__b">…You learn the
+<a href="spells.html#feather%20fall_phb">feather fall</a> …</div>
+```
+
+`SpellGrantParser.grantsSpells()` tests for `/\{@spell/`, so it matched
+nothing and the parser was never even invoked. The same feature object
+carried an intact raw `entries` array with `{@spell feather fall}` tags
+still in place — the parser was simply reading the wrong field.
+
+### Fix
+
+New generic `SpellGrantParser.getFeatureSpellText(feature)` walks the raw
+`entries` tree (including nested `entries` / `items`) and returns it when it
+carries `{@spell …}` tags, falling back to `description` otherwise. This
+mirrors the existing `FeatureChoiceParser._getRawText()` convention, and
+because the selection is driven by "which text actually has tags" it cannot
+regress features that only ever had a `description`.
+
+### Regression pins
+
+`CharacterSheetMeteorKnight.test.js` — "parses prose spell grants from raw
+entries when the description is rendered HTML". Verified in-browser via
+`charSheet.spawn("fighter/meteor knight/3")`: `getInnateSpells()` went from
+`[]` to `["Feather Fall", "Jump"]`, and to all three with the at-will upgrade
+at 15.
+
+---
+
+## CS-BUG-067 — feature-wide "cast each once per long rest" clauses were out of the parser's context window, upgrading limited grants to permanent ones
+
+**Status**: FIXED (Meteor Knight batch)
+**Severity**: medium — turns a 1/long-rest grant into an unlimited one
+**Surfaced by**: Reduce Gravity (Meteor Knight 3)
+
+### Symptom
+
+Reduce Gravity's *feather fall* / *jump* arrived with no `uses` and no
+`recharge` — i.e. as permanently-available innate spells — even though the
+feature says "You can cast each of these spells once with this feature, and
+once you cast a spell in this way, you can not do so again until you finish
+a long rest."
+
+### Root cause
+
+`SpellGrantParser.parseSpellsFromText()` looked for usage limits in a
+±100/200-character window around each `{@spell}` tag. A feature that names
+its spells in one sentence and states the shared limit two sentences later
+falls outside that window entirely. This is the normal way homebrew is
+written, so the failure is systemic rather than specific to this subclass.
+
+### Fix
+
+New `SpellGrantParser._parseFeatureWideCastingLimit(text)` scans the whole
+feature for a **single sentence** containing all three of `cast`, `once` and
+`short|long rest`, and returns that rest type. `parseSpellsFromText()`
+computes it once and uses it as a fallback for any spell that found no local
+limit and is not at-will. The single-sentence constraint is what keeps it
+from over-firing: an unrelated "once per long rest" elsewhere in the feature
+cannot bind to the word "cast" in a different sentence.
+
+### Regression pins
+
+`CharacterSheetMeteorKnight.test.js` — asserts `uses: {current: 1, max: 1}`
+and `recharge: "long"` on the level-3 grants, and that the level-15 at-will
+upgrade *clears* both.

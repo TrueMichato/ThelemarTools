@@ -11,7 +11,7 @@ For the full *what* and *why* of every check, see the
 the skill reference at
 [`.agents/skills/e2e-character-tests/references/standard.md`](../../.agents/skills/e2e-character-tests/references/standard.md).
 
-## TGTT character specs (20)
+## TGTT character specs (24)
 
 | # | Spec file | Build | Levels | What it proves |
 |---|---|---|---|---|
@@ -38,7 +38,8 @@ the skill reference at
 | 21 | `tgtt-crown-paladin.spec.ts` | Oath of the Crown Paladin (SCAG) · Dwarf | 1–20 | Channel Divinity pool on a **2014** Paladin (CS-BUG-054), Champion Challenge save DC + Turn the Tide healing resolved from the character (CS-BUG-053), Divine Allegiance damage transfer, Unyielding Spirit conditional save advantage (CS-BUG-052), Exalted Champion active state (CS-BUG-050/051). |
 | 22 | `tgtt-creation-bard.spec.ts` | College of Creation Bard · Changeling | 1–20 | Mote of Potential riders derived from the live CHA save DC / CHA mod, Performance of Creation's scaling gp+size cap creating a REAL inventory item, the 2nd-level-slot alternative, the Dancing Item summoned through the generic `CLASS_SUMMON` companion machinery, and Creative Crescendo's explicit `null` gp-cap removal. |
 | 23 | `tgtt-sea-druid.spec.ts` | Circle of the Sea Druid (XPHB 2024) · Human | 1–20 | Wrath of the Sea as a Wild-Shape-fuelled Emanation (CON save at the druid's spell save DC, WIS-scaled Cold damage, 15-ft push, bonus-action Ocean Spray trigger), the 2024 Wild Shape pool progression 2/3/4, Aquatic Affinity's computed swim speed and 5→10 ft Emanation, Stormborn's Emanation-gated Cold/Lightning/Thunder resistance and fly-speed-equals-walk, Oceanic Gift's self/ally/both placements and doubled Wild Shape cost. |
-| 24 | `tgtt-shadow-magic-sorcerer.spec.ts` | Shadow Magic Sorcerer (XGE) · Dwarf | 1–20 | The Sorcery Points ladder asserted for real off the unified `getSorceryPointsMaxForClass()` (CS-BUG-080/084), Eyes of the Dark's class-granted darkvision 120 superseding a Dwarf's racial 60 (CS-BUG-082), Strength of the Grave driving the generic zero-HP intervention registry through `takeDamage()` (CS-BUG-081) with radiant/critical negative controls, Hound of Ill Omen as a `CLASS_SUMMON` with declarative `scaling.tempHpPerLevel`, Shadow Walk's dim-light gate probed as a refusal, and Umbral Form's 11 curated `damage:<type>` resistances (CS-BUG-050). |
+| 24 | `tgtt-meteor-knight-fighter.spec.ts` | Meteor Knight Fighter · Aarakocra (homebrew subclass, `GriffonsSaddlebag3`) | 1–20 | Intelligence-keyed ranged **spell** attack from a proficiency-sized Satellites pool, 3/10/18 damage + 3/10 range tiers, level-gated prose spell grants (feather fall + jump at 3, levitate deferred to 10, at-will at 15), Course Correct's proficiency-added contest, Action Surge recall, Increase Gravity opt-in conditionals, Satellite Barrage capstone. |
+| 25 | `tgtt-shadow-magic-sorcerer.spec.ts` | Shadow Magic Sorcerer (XGE) · Dwarf | 1–20 | The Sorcery Points ladder asserted for real off the unified `getSorceryPointsMaxForClass()` (CS-BUG-080/084), Eyes of the Dark's class-granted darkvision 120 superseding a Dwarf's racial 60 (CS-BUG-082), Strength of the Grave driving the generic zero-HP intervention registry through `takeDamage()` (CS-BUG-081) with radiant/critical negative controls, Hound of Ill Omen as a `CLASS_SUMMON` with declarative `scaling.tempHpPerLevel`, Shadow Walk's dim-light gate probed as a refusal, and Umbral Form's 11 curated `damage:<type>` resistances (CS-BUG-050). |
 
 ## Other specs
 
