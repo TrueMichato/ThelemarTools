@@ -1445,6 +1445,30 @@ class CharacterSheetFeatures {
 			});
 		}
 
+		if (calculations.hasMoteOfPotential) {
+			stats.push({
+				label: "Mote DC",
+				value: calculations.moteOfPotentialDc,
+				title: "Mote of Potential: Constitution save DC when the die is used on an attack roll (your spell save DC)",
+			});
+		}
+
+		if (calculations.hasPerformanceOfCreation) {
+			stats.push({
+				label: "Created Item",
+				value: `${calculations.createdItemMaxSize}${calculations.createdItemMaxGp != null ? ` / ${calculations.createdItemMaxGp} gp` : " / no gp cap"}`,
+				title: `Performance of Creation: up to ${calculations.createdItemMaxCount} item${calculations.createdItemMaxCount > 1 ? "s" : ""} at a time, lasting ${calculations.createdItemDuration}`,
+			});
+		}
+
+		if (calculations.hasAnimatingPerformance) {
+			stats.push({
+				label: "Dancing Item",
+				value: `AC ${calculations.dancingItemAc} / ${calculations.dancingItemHp} HP`,
+				title: `Animating Performance: Force-Empowered Slam ${calculations.dancingItemAttackBonus >= 0 ? "+" : ""}${calculations.dancingItemAttackBonus} to hit, ${calculations.dancingItemDamage} ${calculations.dancingItemDamageType} damage`,
+			});
+		}
+
 		if (calculations.eldritchBlastBeams) {
 			stats.push({
 				label: "Eldritch Blast",

@@ -53,6 +53,14 @@ export interface CharacterPreset {
 	 * the "obvious" pick non-deterministic.
 	 */
 	preferredFeatProgressionPattern?: RegExp;
+	/**
+	 * Ability priority for the standard-array assignment step, best score
+	 * first (e.g. `["cha", "dex", "con", "wis", "int", "str"]`). Omit to keep
+	 * the historical STR-first default. Spellcaster presets should set this —
+	 * the default otherwise puts an 8 in the spellcasting ability, which makes
+	 * save DCs and mod-scaled pools unrepresentative of real play.
+	 */
+	abilityPriority?: string[];
 	/** Additional homebrew JSON URLs required by this build. */
 	homebrewUrls?: string[];
 }
@@ -284,6 +292,24 @@ export const PRESET_FULL_ASTRAL_SELF_MONK_CHANGELING: CharacterPreset = {
 	skillCount: 2,
 	subclassName: "Way of the Astral Self",
 	subclassSource: "TCE",
+};
+
+/** College of Creation Bard Changeling (TCE subclass on the TGTT Bard chassis). */
+export const PRESET_FULL_CREATION_BARD_CHANGELING: CharacterPreset = {
+	race: "Changeling",
+	raceSource: "TGTT",
+	className: "Bard",
+	classSource: "TGTT",
+	background: "Entertainer",
+	bgSource: "PHB'24",
+	name: "Aria Songwright",
+	skillCount: 3,
+	subclassName: "College of Creation",
+	subclassSource: "TCE",
+	// Bard: CHA is the spellcasting ability and drives the Mote of Potential
+	// save DC, the Dancing Item's to-hit and Creative Crescendo's item count.
+	abilityPriority: ["cha", "dex", "con", "wis", "int", "str"],
+	signatureSpells: ["Vicious Mockery", "Healing Word"],
 };
 
 /** Way of the Sun Soul Monk Changeling (XGE subclass on the TGTT Monk chassis). */
@@ -776,6 +802,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_TRICKSTER_GOBLIN,
 	PRESET_FULL_LUST_LEXALIAN,
 	PRESET_FULL_HORROR_THEOCRACIAN,
+	PRESET_FULL_CREATION_BARD_CHANGELING,
 ];
 
 /**
@@ -889,7 +916,7 @@ export async function createCharacterViaWizard (
 	await builder.clickNext();
 
 	// Step 4: Abilities
-	await builder.assignStandardArrayDefaults();
+	await builder.assignStandardArrayDefaults(preset.abilityPriority);
 	await builder.clickNext();
 
 	// Step 5: Equipment — take gold (simplest)

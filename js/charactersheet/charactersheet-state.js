@@ -50,7 +50,18 @@ class FeatureUsesParser {
 		if (!recharge) return null;
 
 		// Pattern: "X times" or "X uses"
-		const timesMatch = plainText.match(/(\d+)\s*(?:times?|uses?)/);
+		//
+		// GUARD (generic): "N times <noun phrase>" is MULTIPLICATION, not a use
+		// count — e.g. the Bard's Performance of Creation ("the gp value of the
+		// item can't be more than 20 times your bard level") or a Dancing Item's
+		// "five times your bard level" HP formula. Reading those as "20 uses" /
+		// "5 uses" mints a bogus resource pool on the sheet. A genuine frequency
+		// reads "3 times per day", "3 times, and you regain…", "3 times before…",
+		// never "3 times your/the/its <thing>". Skip only that shape and keep
+		// scanning, so a later clause ("once you do so… long rest") still wins.
+		// The `\b` is load-bearing: without it the engine escapes the lookahead by
+		// backtracking "times" → "time" and leaving the "s" to break the `\s+`.
+		const timesMatch = plainText.match(/(\d+)\s*(?:times?|uses?)\b(?!\s+(?:your|the|a|an|its|his|her|their|that)\b)/);
 		if (timesMatch) {
 			uses = parseInt(timesMatch[1]);
 		}
@@ -21462,32 +21473,51 @@ class CharacterSheetState {
 							}
 
 							case "College of Creation": {
-								// Mote of Potential (level 3) - enhance Bardic Inspiration
+								// Mote of Potential (level 3) — every Bardic Inspiration die you
+								// hand out carries a mode-dependent rider. All three riders are
+								// resolved by `rollMoteOfPotential()`.
 								calculations.hasMoteOfPotential = true;
 								calculations.moteOfPotentialDie = inspirationDie;
+								// Attack-roll mode: CON save against YOUR spell save DC or take
+								// thunder damage equal to the Bardic Inspiration die rolled.
+								calculations.moteOfPotentialDc = this.getSpellSaveDcForAbility("cha");
+								calculations.moteOfPotentialSave = "con";
 								calculations.moteAbilityCheckBonus = inspirationDie; // Roll twice, use highest
 								calculations.moteAttackDamage = inspirationDie; // Thunder damage to target + nearby
+								calculations.moteAttackDamageType = "thunder";
 								calculations.moteSavingThrowTempHp = `${inspirationDie} + ${chaMod}`; // Temp HP on save
+								calculations.moteSavingThrowTempHpBonus = chaMod;
 
-								// Performance of Creation (level 3) - create nonmagical item
+								// Performance of Creation (level 3) — create nonmagical item(s).
 								calculations.hasPerformanceOfCreation = true;
-								calculations.createdItemMaxGp = level * 20;
+								// `null` === "no gp limit" (Creative Crescendo removes the cap).
+								calculations.createdItemMaxGp = level >= 14 ? null : level * 20;
 								calculations.createdItemMaxSize = level >= 14 ? "Huge" : level >= 6 ? "Large" : "Medium";
-								calculations.createdItemDuration = level >= 14 ? "hours" : "hours"; // Equal to proficiency bonus hours
+								calculations.createdItemDurationHours = profBonus;
+								calculations.createdItemDuration = `${profBonus} hours`;
+								calculations.createdItemMaxCount = 1;
+								// Re-using the feature costs a 2nd-level-or-higher slot.
+								calculations.performanceOfCreationSlotLevel = 2;
 
-								// Animating Performance (level 6) - animate Large or smaller object
+								// Animating Performance (level 6) — animate a Large or smaller
+								// object as a Dancing Item companion (TCE stat block).
 								if (level >= 6) {
 									calculations.hasAnimatingPerformance = true;
 									calculations.dancingItemHp = 10 + 5 * level;
 									calculations.dancingItemAc = 16;
-									calculations.dancingItemAttackBonus = profBonus + chaMod;
+									calculations.dancingItemAttackBonus = this.getSpellAttackBonusForAbility("cha");
 									calculations.dancingItemDamage = `1d10 + ${profBonus}`;
+									calculations.dancingItemDamageType = "force";
+									// Re-using the feature costs a 3rd-level-or-higher slot.
+									calculations.animatingPerformanceSlotLevel = 3;
 								}
 
-								// Creative Crescendo (level 14) - create multiple items
+								// Creative Crescendo (level 14) — more items at once, no gp cap.
 								if (level >= 14) {
 									calculations.hasCreativeCrescendo = true;
-									calculations.simultaneousCreations = Math.max(1, chaMod);
+									calculations.createdItemMaxCount = Math.max(2, chaMod);
+									// Legacy alias retained for saved characters / older probes.
+									calculations.simultaneousCreations = calculations.createdItemMaxCount;
 								}
 								break;
 							}
@@ -31135,6 +31165,7 @@ class CharacterSheetState {
 		this.ensureBloodHunterResources();
 		this.ensureTalentResources();
 		this._ensureChannelDivinityUses();
+		this._ensureCreationBardUses();
 		return [...this._data.resources];
 	}
 
@@ -47036,6 +47067,13 @@ class CharacterSheetState {
 			// their text (e.g. Font of Inspiration, Jester's Act cost riders).
 			{pattern: /^bardic inspiration$/i, stateTypeId: "custom"},
 
+			// College of Creation (TCE): Mote of Potential is a RESOLVER, not a
+			// spender. The Bardic Inspiration die it rides was already deducted
+			// when the die was handed out, so it must surface as a zero-cost
+			// instant ability — never as a toggle and never with a BI cost.
+			// Anchored to the exact name so no other feature's prose matches.
+			{pattern: /^mote of potential$/i, stateTypeId: "custom", isInstant: true},
+
 			// Warlock abilities
 			// (Eldritch Invocation catch-all removed — invocations are routed through
 			// WARLOCK_INVOCATION_REGISTRY and default to passive; toggle/trigger ones
@@ -50800,6 +50838,7 @@ class CharacterSheetState {
 		SUMMON: "summon", // Conjure/Summon spells (concentration-linked)
 		MOUNT: "mount", // Find Steed / Find Greater Steed
 		INFERNAL: "infernal", // TGTT Fiendish Bloodline summons
+		CLASS_SUMMON: "class_summon", // Class/subclass feature summons that scale off the summoner
 		CUSTOM: "custom", // User-created companions
 	};
 
@@ -51007,6 +51046,12 @@ class CharacterSheetState {
 			count: companionData.count || 1,
 			hpArray: companionData.hpArray || null, // Array of {current, max} for individual HP tracking
 			groupId: companionData.groupId || null,
+
+			// Declarative scaling descriptor (see `_recalculateScaledCompanion`).
+			// Any companion whose stat block is written in terms of the summoner's
+			// class level / proficiency bonus / spellcasting ability stores the
+			// formula here instead of growing a bespoke `recalculateCompanion` case.
+			scaling: companionData.scaling ? {...companionData.scaling} : null,
 		};
 
 		this._data.companions.push(companion);
@@ -51418,6 +51463,14 @@ class CharacterSheetState {
 		const calculations = this.getFeatureCalculations();
 		const profBonus = this.getProficiencyBonus();
 
+		// A companion carrying a declarative `scaling` descriptor is resolved
+		// generically, regardless of its `type`. This is the path any new
+		// feature-granted summon should take.
+		if (companion.scaling) {
+			this._recalculateScaledCompanion(companion);
+			return;
+		}
+
 		switch (companion.type) {
 			case CharacterSheetState.COMPANION_TYPES.STEEL_DEFENDER: {
 				const intMod = this.getAbilityMod("int");
@@ -51485,6 +51538,68 @@ class CharacterSheetState {
 	 */
 	recalculateAllCompanions () {
 		(this._data.companions || []).forEach(c => this.recalculateCompanion(c.id));
+	}
+
+	/**
+	 * Resolve a companion whose stat block is written in terms of its summoner —
+	 * "10 + five times your bard level" HP, "your spell attack modifier" to hit,
+	 * "1d10 + PB" damage. The formula lives on `companion.scaling` so that every
+	 * feature-granted summon shares one implementation instead of adding a case to
+	 * {@link recalculateCompanion}.
+	 *
+	 * Supported descriptor keys (all optional):
+	 *  - `className`     — class whose level drives the formulas (e.g. "Bard").
+	 *  - `hpBase`        — flat HP term.
+	 *  - `hpPerLevel`    — HP added per class level.
+	 *  - `ac`            — fixed AC.
+	 *  - `attackAbility` — spellcasting ability whose attack bonus the summon uses.
+	 *  - `attackName`    — name of the attack whose bonus/damage are re-rendered.
+	 *  - `damageDice`    — dice term of the attack ("1d10").
+	 *  - `damageAddProf` — when true, proficiency bonus is added to damage.
+	 *  - `damageType`    — damage type string ("force").
+	 *
+	 * @param {object} companion - The companion record (mutated in place).
+	 * @private
+	 */
+	_recalculateScaledCompanion (companion) {
+		const s = companion.scaling || {};
+		const profBonus = this.getProficiencyBonus();
+		const level = s.className ? this._getClassLevel(s.className) : this.getTotalLevel();
+
+		companion.profBonus = profBonus;
+
+		if (s.hpBase != null || s.hpPerLevel != null) {
+			// A summon whose class has been dropped entirely (multiclass respec)
+			// keeps its last known HP rather than collapsing to the flat base.
+			if (level > 0) {
+				const max = Math.max(1, (s.hpBase || 0) + (s.hpPerLevel || 0) * level);
+				const wasFull = companion.hp.current >= companion.hp.max;
+				companion.hp.max = max;
+				companion.hp.current = wasFull ? max : Math.min(companion.hp.current, max);
+			}
+		}
+
+		if (s.ac != null) companion.ac = s.ac;
+
+		if (s.attackName) {
+			const toHit = s.attackAbility ? this.getSpellAttackBonusForAbility(s.attackAbility) : profBonus;
+			const dmgBonus = s.damageAddProf ? profBonus : 0;
+			const damage = `${s.damageDice || "1d6"}${dmgBonus ? ` + ${dmgBonus}` : ""}${s.damageType ? ` ${s.damageType}` : ""}`;
+			const entry = `${CharacterSheetState._formatSignedBonus(toHit)} to hit, reach 5 ft., one target you can see. Hit: ${damage} damage.`;
+			const rewrite = list => {
+				const found = (list || []).find(a => a.name === s.attackName);
+				if (found) found.entries = [entry];
+				return !!found;
+			};
+			if (!rewrite(companion.actions)) (companion.actions ||= []).push({name: s.attackName, entries: [entry]});
+			if (!rewrite(companion.attacks)) (companion.attacks ||= []).push({name: s.attackName, entries: [entry]});
+		}
+	}
+
+	/** Format a numeric bonus with an explicit sign ("+7" / "-1"). @private */
+	static _formatSignedBonus (n) {
+		const v = Number(n) || 0;
+		return v >= 0 ? `+${v}` : `${v}`;
 	}
 
 	/**
@@ -51846,6 +51961,380 @@ class CharacterSheetState {
 
 	// #endregion
 
+	// =========================================================================
+	// COLLEGE OF CREATION (Bard, TCE)
+	// =========================================================================
+	// #region College of Creation
+	//
+	// Three interlocking mechanics, all resolved here so the Features tab, the
+	// Combat tab and the Companions panel cannot disagree:
+	//
+	//   Mote of Potential (3)     — a mode-dependent rider on every Bardic
+	//                               Inspiration die you hand out. It rides an
+	//                               ALREADY-SPENT die, so resolving it must never
+	//                               deduct a second Bardic Inspiration use.
+	//   Performance of Creation (3) — conjures real inventory items under a gp /
+	//                               size / count cap that scales with level.
+	//   Animating Performance (6) — summons the TCE `Dancing Item` through the
+	//                               generic `CLASS_SUMMON` companion machinery.
+	//   Creative Crescendo (14)   — raises the item count and drops the gp cap.
+
+	/** The Bard class entry carrying the College of Creation, or null. @private */
+	_getCreationBardClass () {
+		return (this._data.classes || []).find(cls =>
+			(cls.name || "").toLowerCase() === "bard"
+			&& /creation/i.test(cls.subclass?.shortName || cls.subclass?.name || ""),
+		) || null;
+	}
+
+	/** Marker stamped on every inventory item minted by Performance of Creation. */
+	static PERFORMANCE_OF_CREATION_ORIGIN = "Performance of Creation";
+	static ANIMATING_PERFORMANCE_ORIGIN = "Animating Performance";
+
+	/**
+	 * Features whose "Use" handler resolves its own cost and can offer an
+	 * ALTERNATIVE payment (a spell slot, a different pool). The generic pre-flight
+	 * "not enough <resource>" guard in `_activateFeatureState` must not reject
+	 * these — otherwise the alternative can never be reached once the primary pool
+	 * is empty. Keep this list to features that provably consume something in
+	 * their own handler.
+	 * @param {object} feature
+	 * @returns {boolean}
+	 */
+	static featureOwnsItsCost (feature) {
+		const name = (feature?.name || "").toLowerCase().trim();
+		return name === "performance of creation"
+			|| name === "animating performance"
+			// Mote of Potential rides an already-spent Bardic Inspiration die.
+			|| name === "mote of potential";
+	}
+
+	/**
+	 * Both College of Creation actions are explicitly "once … until you finish a
+	 * long rest". Saved characters built before the `FeatureUsesParser` multiplier
+	 * guard landed carry a bogus 20-use pool for Performance of Creation (the
+	 * parser read "20 times your bard level" as a use count), so this clamps the
+	 * pool DOWN as well as up. Mirrors `_ensureChannelDivinityUses`.
+	 * @private
+	 */
+	_ensureCreationBardUses () {
+		if (!this._getCreationBardClass()) return;
+		for (const name of [
+			CharacterSheetState.PERFORMANCE_OF_CREATION_ORIGIN,
+			CharacterSheetState.ANIMATING_PERFORMANCE_ORIGIN,
+		]) {
+			const feature = (this._data.features || []).find(f => f.name === name);
+			if (!feature?.uses) continue;
+			const resource = (this._data.resources || []).find(r => r.featureId === feature.id || r.name === name);
+			const featureOk = feature.uses.max === 1 && feature.uses.recharge === "long";
+			const resourceOk = !resource || (resource.max === 1 && resource.recharge === "long");
+			if (featureOk && resourceOk) continue;
+			const spent = feature.uses.current < feature.uses.max || (resource && resource.current < resource.max);
+			feature.uses.max = 1;
+			feature.uses.recharge = "long";
+			feature.uses.current = spent ? 0 : 1;
+			if (resource) {
+				resource.max = 1;
+				resource.recharge = "long";
+				resource.current = feature.uses.current;
+			}
+		}
+	}
+
+	// ---- Mote of Potential ----------------------------------------------------
+
+	/**
+	 * The three riders a mote can produce, with every number already resolved
+	 * against the character's current Bardic Inspiration die, Charisma modifier
+	 * and spell save DC. Returns `[]` for a character without the feature.
+	 * @returns {Array<{id: string, label: string, description: string, die: string,
+	 *   dc?: number, save?: string, damageType?: string, tempHpBonus?: number}>}
+	 */
+	getMoteOfPotentialModes () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasMoteOfPotential) return [];
+		const die = calc.moteOfPotentialDie;
+		return [
+			{
+				id: "check",
+				label: "Ability Check",
+				die,
+				description: `Roll the ${die} again and choose which roll to use.`,
+			},
+			{
+				id: "attack",
+				label: "Attack Roll",
+				die,
+				dc: calc.moteOfPotentialDc,
+				save: calc.moteOfPotentialSave,
+				damageType: calc.moteAttackDamageType,
+				description: `The target and each creature you choose within 5 feet must succeed on a DC ${calc.moteOfPotentialDc} Constitution saving throw or take thunder damage equal to the ${die} rolled.`,
+			},
+			{
+				id: "save",
+				label: "Saving Throw",
+				die,
+				tempHpBonus: calc.moteSavingThrowTempHpBonus,
+				description: `The creature gains temporary hit points equal to the ${die} rolled + ${calc.moteSavingThrowTempHpBonus} (minimum 1).`,
+			},
+		];
+	}
+
+	/**
+	 * Resolve a mote. Deliberately spends NO resource: the Bardic Inspiration die
+	 * was already deducted when the die was handed out, so charging again here
+	 * would double-count the pool.
+	 *
+	 * @param {("check"|"attack"|"save")} modeId
+	 * @param {object} [opts]
+	 * @param {number} [opts.roll] - Force the Bardic Inspiration die result (tests).
+	 * @param {number} [opts.secondRoll] - Force the Ability Check mode's re-roll.
+	 * @param {boolean} [opts.applyTempHpToSelf] - Apply the Saving Throw mode's
+	 *        temporary hit points to this character (when the bard holds the die).
+	 * @returns {object|null} Resolution result, or null when the mode is unknown.
+	 */
+	rollMoteOfPotential (modeId, opts = {}) {
+		const mode = this.getMoteOfPotentialModes().find(m => m.id === modeId);
+		if (!mode) return null;
+
+		const faces = Number(String(mode.die).match(/d(\d+)/i)?.[1]) || 6;
+		const roll = n => (Number.isFinite(n)
+			? Math.max(1, Math.min(faces, Math.floor(n)))
+			: (typeof RollerUtil !== "undefined" && RollerUtil.randomise ? RollerUtil.randomise(faces) : 1));
+
+		const first = roll(opts.roll);
+		const base = {mode: mode.id, label: mode.label, die: mode.die, roll: first};
+
+		switch (mode.id) {
+			case "check": {
+				const second = roll(opts.secondRoll);
+				return {...base, rolls: [first, second], result: Math.max(first, second)};
+			}
+			case "attack":
+				return {...base, damage: first, damageType: mode.damageType, dc: mode.dc, save: mode.save};
+			case "save": {
+				const tempHp = Math.max(1, first + (mode.tempHpBonus || 0));
+				if (opts.applyTempHpToSelf) this.setTempHp(Math.max(this.getTempHp() || 0, tempHp));
+				return {...base, tempHp, applied: !!opts.applyTempHpToSelf};
+			}
+		}
+		return null;
+	}
+
+	// ---- shared cost resolution ----------------------------------------------
+
+	/**
+	 * Spend the cost of a College of Creation action: either its single
+	 * long-rest use, or a spell slot at/above `minSlotLevel`.
+	 * @param {string} featureName
+	 * @param {number} minSlotLevel
+	 * @param {number|null} spellSlotLevel - null spends the long-rest use.
+	 * @returns {{ok: boolean, error?: string, spent?: string}}
+	 * @private
+	 */
+	_spendCreationCost (featureName, minSlotLevel, spellSlotLevel) {
+		if (spellSlotLevel == null) {
+			this._ensureCreationBardUses();
+			const feature = this.getFeature(featureName);
+			if (!feature?.uses) return {ok: false, error: `${featureName} has no use pool.`};
+			if (feature.uses.current <= 0) {
+				return {ok: false, error: `No ${featureName} uses remain — expend a level ${minSlotLevel}+ spell slot instead.`};
+			}
+			this.setFeatureUses(feature.id, feature.uses.current - 1);
+			return {ok: true, spent: "use"};
+		}
+
+		const level = Math.floor(Number(spellSlotLevel) || 0);
+		if (level < minSlotLevel) {
+			return {ok: false, error: `${featureName} needs a spell slot of level ${minSlotLevel} or higher.`};
+		}
+		if (!this.useSpellSlot(level)) return {ok: false, error: `No level ${level} spell slots remain.`};
+		return {ok: true, spent: `slot${level}`};
+	}
+
+	// ---- Performance of Creation ----------------------------------------------
+
+	/** Every inventory item currently sustained by Performance of Creation. */
+	getPerformanceOfCreationItems () {
+		return (this._data.inventory || [])
+			.filter(inv => inv.item?._createdBy === CharacterSheetState.PERFORMANCE_OF_CREATION_ORIGIN)
+			.map(inv => ({...inv.item, id: inv.id, quantity: inv.quantity}));
+	}
+
+	/**
+	 * Size categories Performance of Creation can reach, smallest first. Used to
+	 * validate a requested size against `createdItemMaxSize`.
+	 */
+	static CREATED_ITEM_SIZES = ["Tiny", "Small", "Medium", "Large", "Huge"];
+
+	/**
+	 * Create a nonmagical item with Performance of Creation.
+	 *
+	 * @param {object} opts
+	 * @param {string} opts.name - The item to conjure.
+	 * @param {number} [opts.valueGp=0] - Its gp value (capped at 20 × bard level
+	 *        until Creative Crescendo removes the cap).
+	 * @param {string} [opts.size="Tiny"] - Size category.
+	 * @param {number|null} [opts.spellSlotLevel=null] - Spend a 2nd+ level slot
+	 *        instead of the long-rest use.
+	 * @param {number} [opts.quantity=1]
+	 * @returns {{ok: boolean, error?: string, item?: object, replaced?: Array<string>, spent?: string}}
+	 */
+	createPerformanceOfCreationItem (opts = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasPerformanceOfCreation) return {ok: false, error: "Performance of Creation is not available."};
+
+		const name = (opts.name || "").trim();
+		if (!name) return {ok: false, error: "Name the item you are creating."};
+
+		const valueGp = Math.max(0, Number(opts.valueGp) || 0);
+		if (calc.createdItemMaxGp != null && valueGp > calc.createdItemMaxGp) {
+			return {ok: false, error: `Value exceeds the ${calc.createdItemMaxGp} gp limit at this level.`};
+		}
+
+		const size = opts.size || "Tiny";
+		const sizes = CharacterSheetState.CREATED_ITEM_SIZES;
+		const maxSizeIdx = sizes.indexOf(calc.createdItemMaxSize);
+		const sizeIdx = sizes.indexOf(size);
+		if (sizeIdx < 0) return {ok: false, error: `Unknown size "${size}".`};
+		if (sizeIdx > maxSizeIdx) return {ok: false, error: `You can only create ${calc.createdItemMaxSize} or smaller items.`};
+
+		// Creative Crescendo: only ONE of the simultaneous items may be at the
+		// maximum size; the rest must be Small or Tiny.
+		const existing = this.getPerformanceOfCreationItems();
+		if (calc.hasCreativeCrescendo && sizeIdx === maxSizeIdx
+			&& existing.some(it => sizes.indexOf(it._createdSize) === maxSizeIdx)) {
+			return {ok: false, error: `Only one created item can be ${calc.createdItemMaxSize}; the rest must be Small or Tiny.`};
+		}
+
+		const spend = this._spendCreationCost(CharacterSheetState.PERFORMANCE_OF_CREATION_ORIGIN, calc.performanceOfCreationSlotLevel, opts.spellSlotLevel ?? null);
+		if (!spend.ok) return spend;
+
+		// Enforce the simultaneous-item cap by vanishing the oldest items first.
+		const replaced = [];
+		const maxCount = Math.max(1, calc.createdItemMaxCount || 1);
+		while (existing.length >= maxCount) {
+			const oldest = existing.shift();
+			replaced.push(oldest.name);
+			this.removeItem(oldest.id);
+		}
+
+		this.addItem({
+			name,
+			source: "TCE",
+			type: "G",
+			// 5etools item values are copper pieces.
+			value: Math.round(valueGp * 100),
+			rarity: "none",
+			_isCustom: true,
+			_createdBy: CharacterSheetState.PERFORMANCE_OF_CREATION_ORIGIN,
+			_createdSize: size,
+			_createdExpiresHours: calc.createdItemDurationHours,
+			entries: [`Created by Performance of Creation. It glimmers softly and vanishes after ${calc.createdItemDurationHours} hours.`],
+		}, Math.max(1, Math.floor(Number(opts.quantity) || 1)));
+
+		const item = this.getPerformanceOfCreationItems().find(it => it.name === name) || null;
+		return {ok: true, item, replaced, spent: spend.spent};
+	}
+
+	/**
+	 * Vanish one created item, or every created item when no id is supplied.
+	 * @param {string} [itemId]
+	 * @returns {number} Number of items removed.
+	 */
+	dismissPerformanceOfCreationItems (itemId = null) {
+		const targets = this.getPerformanceOfCreationItems()
+			.filter(it => itemId == null || it.id === itemId);
+		targets.forEach(it => this.removeItem(it.id));
+		return targets.length;
+	}
+
+	// ---- Animating Performance -------------------------------------------------
+
+	/** The live Dancing Item companion, or null. */
+	getDancingItem () {
+		return (this._data.companions || []).find(c =>
+			c.origin === CharacterSheetState.ANIMATING_PERFORMANCE_ORIGIN) || null;
+	}
+
+	/**
+	 * Animate an object as a `Dancing Item` (TCE). Only one may exist at a time —
+	 * a second animation makes the first inanimate. Registers through the generic
+	 * `CLASS_SUMMON` machinery so its HP / to-hit / damage re-scale on level-up.
+	 *
+	 * @param {object} [opts]
+	 * @param {string} [opts.itemName] - Player-facing name of the animated object.
+	 * @param {number|null} [opts.spellSlotLevel=null] - Spend a 3rd+ level slot
+	 *        instead of the long-rest use.
+	 * @returns {{ok: boolean, error?: string, companionId?: string, replaced?: string, spent?: string}}
+	 */
+	animateDancingItem (opts = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasAnimatingPerformance) return {ok: false, error: "Animating Performance is not available."};
+
+		const spend = this._spendCreationCost(CharacterSheetState.ANIMATING_PERFORMANCE_ORIGIN, calc.animatingPerformanceSlotLevel, opts.spellSlotLevel ?? null);
+		if (!spend.ok) return spend;
+
+		const existing = this.getDancingItem();
+		const replaced = existing ? (existing.customName || existing.name) : null;
+		if (existing) this.removeCompanion(existing.id);
+
+		const companionId = this.addCompanion({
+			name: "Dancing Item",
+			source: "TCE",
+			type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+			origin: CharacterSheetState.ANIMATING_PERFORMANCE_ORIGIN,
+			customName: (opts.itemName || "").trim() || null,
+			creatureType: "construct",
+			size: "L",
+			abilities: {str: 18, dex: 14, con: 16, int: 4, wis: 10, cha: 6},
+			ac: calc.dancingItemAc,
+			hp: {max: calc.dancingItemHp, current: calc.dancingItemHp},
+			speed: {walk: 30, fly: 30},
+			senses: ["darkvision 60 ft."],
+			passive: 10,
+			languages: ["understands the languages you speak"],
+			immunities: ["poison", "psychic"],
+			conditionImmunities: ["charmed", "exhaustion", "poisoned", "frightened"],
+			traits: [
+				{name: "Immutable Form", entries: ["The item is immune to any spell or effect that would alter its form."]},
+				{name: "Irrepressible Dance", entries: ["When any creature starts its turn within 10 feet of the item, the item can increase or decrease (your choice) the walking speed of that creature by 10 feet until the end of the turn, provided the item isn't incapacitated."]},
+			],
+			scaling: {
+				className: "Bard",
+				hpBase: 10,
+				hpPerLevel: 5,
+				ac: 16,
+				attackName: "Force-Empowered Slam",
+				attackAbility: "cha",
+				damageDice: "1d10",
+				damageAddProf: true,
+				damageType: "force",
+			},
+		});
+
+		this.recalculateCompanion(companionId);
+		return {ok: true, companionId, replaced, spent: spend.spent};
+	}
+
+	/** Make the Dancing Item inanimate. @returns {boolean} True if one was dismissed. */
+	dismissDancingItem () {
+		const existing = this.getDancingItem();
+		if (!existing) return false;
+		return this.removeCompanion(existing.id);
+	}
+
+	/**
+	 * Both College of Creation constructs are shorter-lived than a long rest
+	 * (proficiency-bonus hours / 1 hour), so a long rest always clears them.
+	 * @private
+	 */
+	_clearCreationBardConstructs () {
+		this.dismissPerformanceOfCreationItems();
+		this.dismissDancingItem();
+	}
+	// #endregion
+
 	// #region Rest
 	onShortRest () {
 		// Clear active states that end on rest
@@ -51937,6 +52426,10 @@ class CharacterSheetState {
 
 		// Restore companions on long rest
 		this.restCompanions("long");
+
+		// College of Creation constructs are far shorter-lived than a long rest
+		// (proficiency-bonus hours for items, 1 hour for a Dancing Item).
+		this._clearCreationBardConstructs();
 
 		// Clear all temporary attacks (from variant components, etc.)
 		this.clearTemporaryAttacks();
