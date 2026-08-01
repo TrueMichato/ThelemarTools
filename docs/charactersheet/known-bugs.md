@@ -2500,3 +2500,101 @@ cannot bind to the word "cast" in a different sentence.
 `CharacterSheetMeteorKnight.test.js` — asserts `uses: {current: 1, max: 1}`
 and `recharge: "long"` on the level-3 grants, and that the level-15 at-will
 upgrade *clears* both.
+
+---
+
+## CS-BUG-086 — a species trait whose NAME collides with a combat method was reclassified as one
+
+**Status**: RESOLVED.
+
+**Affected**: any character whose species grants a trait sharing a name with a
+TGTT combat method. Enumerated against the shipped data: **Centaur** (GGR,
+MPMM, and the TGTT `_copy` of them) → **`Charge`**, and **Kender** (DSotDQ) →
+**`Taunt`**. The collision surface is the 321-name `combatMethod` catalogue, so
+any future homebrew species trait with a generic combat name joins it.
+
+**Symptom** — the racial trait was stored as a combat method. Measured on a
+wizard-built Centaur Hunter Ranger 3, `getCombatMethods()` returned **4** where
+the class table grants **3**:
+
+```json
+{"name": "Charge", "_entityType": "combatMethod", "tradition": "Rapid Current",
+ "degree": 1, "staminaCost": 1, "featureType": "Species"}
+```
+
+`featureType: "Species"` — its true origin — sits alongside combat-method
+markers it should never have. User-visible consequences: the racial trait
+appears in the Combat Methods UI grouped under a tradition the character never
+took, it acquires a **1-point stamina cost**, and the character appears to know
+one more method than the class table allows — which also lets a genuinely lost
+pick hide behind it.
+
+**Root cause** — `_repairCombatMethodMarkers()`
+(`js/charactersheet/charactersheet-state.js`) matched the catalogue on
+**name + source alone**:
+
+```js
+const entity = this._combatMethodCatalog.find(m =>
+    m?._entityType === "combatMethod"
+    && (m.name || "").toLowerCase() === name
+    && (m.source || "").toLowerCase() === source);
+```
+
+Its only guard was `hasTypePrefix(f, ["BT", "AS"])` — Battle Tactics and Arcane
+Shots. Nothing excluded a species / background / feat trait. A TGTT-sourced
+species matches on source too, so the racial `Charge` matched the TGTT method
+`Charge` exactly and was stamped.
+
+Note this is a *repair* pass whose whole job is to re-hydrate methods that lost
+their markers (CS-BUG report #14, "Doubleshot does nothing"), so it deliberately
+trusts name+source. The defect is that "lost its markers" and "never was one"
+are indistinguishable under that predicate.
+
+**Fix** — skip features tagged as belonging to another entity kind, unless they
+carry a real CTM marker; and undo exactly the fields the pass writes, so it is
+its own inverse and repairs saves already mis-stamped:
+
+```js
+const FOREIGN_ORIGIN_TYPES = /^(species|race|subrace|lineage|background|feat)$/i;
+…
+if (isForeignOrigin(f) && !hasTypePrefix(f, ["CTM:"])) {
+    if (f._entityType === "combatMethod") delete f._entityType;
+    delete f.tradition; delete f.degree; delete f.staminaCost;
+    continue;
+}
+```
+
+The CTM escape hatch keeps the guard from being over-broad: a homebrew species
+that legitimately grants a real combat method still repairs.
+
+**Why the suite missed it** — Combat Methods had **no assertion anywhere in the
+E2E suite**. `TGTT_COMBAT_METHODS_BY_TRADITION` existed as a fully-populated
+constant with zero consumers, and the two specs that mention the feature both
+asserted only that the parent `Combat Methods` row exists, under the comment
+*"Pick-kind would require enumerating all options; treat as passive listing."*
+
+**Discovered by** the new `buildCombatMethodChecks()` helper, while validating
+its own falsification — the count assertion failed at L3 reporting
+`getCombatMethods().length=4, expected 3`.
+
+⚠️ **Do not assert combat methods with `kind: "pick"` over
+`TGTT_COMBAT_METHODS_BY_TRADITION`.** That was the helper's first design and it
+is unsound: the union of 321 generic name patterns matches features that are not
+combat methods, so `matchCount` is inflated by a race/class-dependent amount.
+The very first run scored 4 matches against 3 real methods — for the same
+`Charge` collision, but through the *harness*, and it would still have been
+wrong after this product fix. Use `stateCall` on `getCombatMethods()`, which
+filters structurally via `CharacterSheetClassUtils.isCombatMethod()`.
+
+### Regression pins
+
+`CharacterSheetCombatMethodRepair.test.js` — describe block
+*"CS-BUG-086 — species traits that share a name with a combat method"*.
+**Falsified: 2 of 5 go red on revert**, both on assertions
+(`Received: "combatMethod"`), not TypeErrors. The other three are deliberate
+no-regression controls — a premise guard that the collision exists at all, plus
+the two over-broadness controls (a genuine same-named method still repairs; a
+species trait carrying CTM markers survives) — which must stay green either way.
+
+E2E: `tgtt-hunter-zodiac-centaur.spec.ts` fails at L3 without the fix and passes
+with it, so the new helper pins this end-to-end as well.

@@ -35784,9 +35784,35 @@ class CharacterSheetState {
 			return types.some(ft => typeof ft === "string" && prefixes.some(p => ft.startsWith(p)));
 		};
 
+		// A species / background / feat trait can legitimately share a NAME with a
+		// combat method — Centaur's "Charge" and Kender's "Taunt" both collide with
+		// TGTT methods, and a homebrew race carrying the same source matches on
+		// name + source alone. Such a trait is not a combat method: stamping it made
+		// it surface in the Combat Methods UI under a tradition the character never
+		// took, with a stamina cost attached. Only reclassify a feature that is
+		// either already recognised as a combat method (it carries CTM markers) or
+		// is not tagged as belonging to another entity kind.
+		const FOREIGN_ORIGIN_TYPES = /^(species|race|subrace|lineage|background|feat)$/i;
+		const isForeignOrigin = (/** @type {*} */ feature) => {
+			const types = Array.isArray(feature.featureType)
+				? feature.featureType
+				: (feature.featureType ? [feature.featureType] : []);
+			return types.some(ft => typeof ft === "string" && FOREIGN_ORIGIN_TYPES.test(ft));
+		};
+
 		for (const f of this._data.features) {
 			// Never reclassify a Battle Tactic / Arcane Shot optionalfeature as a combat method.
 			if (hasTypePrefix(f, ["BT", "AS"])) continue;
+
+			if (isForeignOrigin(f) && !hasTypePrefix(f, ["CTM:"])) {
+				// Repair saves already mis-stamped by an earlier run of this pass:
+				// undo exactly the fields it writes, so the pass is its own inverse.
+				if (f._entityType === "combatMethod") delete f._entityType;
+				delete f.tradition;
+				delete f.degree;
+				delete f.staminaCost;
+				continue;
+			}
 
 			const name = (f.name || "").toLowerCase();
 			const source = (f.source || "").toLowerCase();

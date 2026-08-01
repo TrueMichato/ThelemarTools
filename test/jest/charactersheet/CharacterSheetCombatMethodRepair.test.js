@@ -198,3 +198,85 @@ describe("Combat-method marker repair (repro: D_kaios Petri, Fighter 9 TGTT Arca
 		for (const name of MALFORMED_NAMES) expect(names.has(name)).toBe(true);
 	});
 });
+
+/**
+ * CS-BUG-086 — a species trait whose NAME collides with a combat method was being
+ * reclassified as one.
+ *
+ * `_repairCombatMethodMarkers()` matched the catalog on name + source alone, guarding
+ * only Battle Tactic / Arcane Shot optionalfeatures. A Centaur's "Charge" and a
+ * Kender's "Taunt" both collide with TGTT methods, and a TGTT-sourced species matches
+ * on source too — so the racial trait was stamped with `_entityType: "combatMethod"`,
+ * a `tradition` the character never took, and a `staminaCost`.
+ *
+ * Measured on a wizard-built Centaur Hunter Ranger 3: `getCombatMethods()` returned 4
+ * against a class-table value of 3, the extra being the racial Charge, carrying
+ * `tradition: "Rapid Current"` and `staminaCost: 1` while still tagged
+ * `featureType: "Species"`.
+ */
+describe("CS-BUG-086 — species traits that share a name with a combat method", () => {
+	const CENTAUR_CHARGE = {name: "Charge", source: "TGTT", featureType: "Species", description: "If you move 30 feet straight toward a target…"};
+	const COLLIDING_CATALOG = [
+		{name: "Charge", source: "TGTT", tradition: "Rapid Current", degree: 1, staminaCost: 1, _entityType: "combatMethod", optionalFeatureTypes: ["CTM:1"], entries: ["Bonus Action (1 Stamina Point)."]},
+		...CATALOG,
+	];
+
+	const stateWith = features => {
+		const state = new CharacterSheetState();
+		state._data.features = features.map(f => ({...f}));
+		state.setCombatMethodCatalog(COLLIDING_CATALOG);
+		return state;
+	};
+
+	it("premise: the catalog really does contain a method named like the racial trait", () => {
+		// Without this the test could pass for the wrong reason (nothing to collide with).
+		expect(COLLIDING_CATALOG.some(m => m.name === CENTAUR_CHARGE.name && m.source === CENTAUR_CHARGE.source)).toBe(true);
+	});
+
+	it("does NOT reclassify the racial trait as a combat method", () => {
+		const state = stateWith([CENTAUR_CHARGE]);
+		state._repairCombatMethodMarkers();
+
+		const charge = state._data.features.find(f => f.name === "Charge");
+		expect(charge._entityType).toBeUndefined();
+		expect(charge.tradition).toBeUndefined();
+		expect(charge.staminaCost).toBeUndefined();
+		expect(CharacterSheetClassUtils.isCombatMethod(charge)).toBe(false);
+		expect(state.getCombatMethods().map(m => m.name)).not.toContain("Charge");
+	});
+
+	it("repairs a save already mis-stamped by an earlier run", () => {
+		const state = stateWith([{...CENTAUR_CHARGE, _entityType: "combatMethod", tradition: "Rapid Current", degree: 1, staminaCost: 1}]);
+		state._repairCombatMethodMarkers();
+
+		const charge = state._data.features.find(f => f.name === "Charge");
+		expect(charge._entityType).toBeUndefined();
+		expect(charge.tradition).toBeUndefined();
+		expect(charge.staminaCost).toBeUndefined();
+		expect(state.getCombatMethods().map(m => m.name)).not.toContain("Charge");
+	});
+
+	it("still repairs a genuine same-named method — the guard is not over-broad", () => {
+		// Same name and source, but stored as an Optional Feature rather than a Species
+		// trait: this one IS a combat method and must still be re-hydrated.
+		const state = stateWith([{name: "Charge", source: "TGTT", featureType: "Optional Feature"}]);
+		state._repairCombatMethodMarkers();
+
+		const charge = state._data.features.find(f => f.name === "Charge");
+		expect(charge._entityType).toBe("combatMethod");
+		expect(charge.tradition).toBe("Rapid Current");
+		expect(charge.staminaCost).toBe(1);
+		expect(state.getCombatMethods().map(m => m.name)).toContain("Charge");
+	});
+
+	it("keeps a species trait that legitimately carries CTM markers", () => {
+		// A homebrew species could grant a real combat method outright. The guard only
+		// skips foreign-origin features with no CTM marker, so this must survive.
+		const state = stateWith([{name: "Charge", source: "TGTT", featureType: "Species", optionalFeatureTypes: ["CTM:1"]}]);
+		state._repairCombatMethodMarkers();
+
+		const charge = state._data.features.find(f => f.name === "Charge");
+		expect(CharacterSheetClassUtils.isCombatMethod(charge)).toBe(true);
+		expect(charge.tradition).toBe("Rapid Current");
+	});
+});
