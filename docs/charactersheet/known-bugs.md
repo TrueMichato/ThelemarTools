@@ -1465,3 +1465,33 @@ entirely and silently. Separate the two causes first — inspect which feature
 name actually matched via `getToggleableFeatureNames()`.
 
 ---
+
+## CS-BUG-033 — PHB Cleric Channel Divinity pool stays at two uses after level 18
+
+**Status**: open (product).
+
+**Affected**: PHB 2014 Clerics at levels 18-20, reproduced by
+`tgtt-tempest-cleric.spec.ts`.
+
+**Symptom**: the character reaches Cleric 20 and
+`getFeatureCalculations().channelDivinityUses` correctly returns `3`, but the
+player-facing `Channel Divinity` resource still has `max: 2`. The PHB feature
+text grants three uses beginning at Cleric 18.
+
+**Repro**:
+
+```bash
+RUN_MEGA=1 PW_PORT=8081 PW_TIMEOUT_MS=180000 PW_WORKERS=1 \
+  npx playwright test test/e2e/specs/tgtt-tempest-cleric.spec.ts \
+  --reporter=line -g 'MEGA L1→20 with milestone asserts'
+```
+
+**Suspected root cause**: level-up recalculates `channelDivinityUses`, but the
+existing resource/feature-owned use pool is not reconciled from `2` to `3`
+when the level-18 improvement lands.
+
+**Test handling**: the Tempest matrix still asserts the computed level-18
+maximum is `3`; the player-facing resource assertion is explicitly skipped
+with this bug ID.
+
+---

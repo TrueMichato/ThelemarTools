@@ -312,6 +312,15 @@ export function describeCharacter (spec: CharacterSpec): void {
 					}
 					const delta = await probeToggleDelta(charSheet, signatureToggle);
 					if (delta == null) {
+						if (spec.signatureToggleNoDerivedEffect) {
+							const re = signatureToggle instanceof RegExp ? signatureToggle : new RegExp(signatureToggle, "i");
+							const match = (await charSheet.getActivatableFeatureNames()).find(name => re.test(name));
+							expect(match, `instant activatable ${signatureToggle} should surface`).toBeTruthy();
+							await charSheet.activateFeature(match!);
+							console.log(`[spec ${displayName}] L5 loadout: instant ability ${match} surfaced and activated; `
+								+ `derived-effect assertion waived — ${spec.signatureToggleNoDerivedEffect}`);
+							return;
+						}
 						// Signature feature isn't expressed as a UI toggle on
 						// this class (e.g. Cleric's Channel Divinity is a
 						// resource counter). The MEGA test still asserts

@@ -110,6 +110,23 @@ export const PRESET_FULL_XPHB_LIGHT_CLERIC: CharacterPreset = {
 	signatureSpells: ["Sacred Flame", "Bless", "Cure Wounds"],
 };
 
+/** PHB 2014 Tempest Domain Cleric. */
+export const PRESET_FULL_TEMPEST_CLERIC: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB",
+	className: "Cleric",
+	classSource: "PHB",
+	prioritySources: ["PHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB",
+	name: "Thora Stormward",
+	skillCount: 2,
+	subclassName: "Tempest Domain",
+	subclassSource: "PHB",
+	signatureSpells: ["Sacred Flame", "Bless", "Cure Wounds"],
+};
+
 export const PRESET_FULL_XPHB_DEVOTION_PALADIN: CharacterPreset = {
 	race: "Dwarf",
 	raceSource: "PHB'24",
