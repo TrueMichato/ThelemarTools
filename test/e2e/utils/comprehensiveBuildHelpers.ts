@@ -712,7 +712,16 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "speed"; type?: SpeedType; min?: number; exact?: number}
 	| {kind: "speedEquals"; left: SpeedType; right: SpeedType}
 	| {kind: "initiative"; min?: number; exact?: number}
-	| {kind: "featureCalculation"; property: string; min?: number; exact?: number | string | boolean}
+	| {kind: "featureCalculation"; property: string; min?: number; exact?: number | string | boolean; isNull?: boolean}
+	// Assert a `getFeatureCalculations()` number is DERIVED from a live
+	// character statistic rather than hard-coded. Far stronger than a
+	// loose `min` floor when the build's ability scores aren't pinned by
+	// the preset (the wizard's auto-fill can hand a Bard CHA 8).
+	//   abilityMod        → getAbilityMod(ability)
+	//   spellSaveDc       → getSpellSaveDcForAbility(ability)
+	//   spellAttackBonus  → getSpellAttackBonusForAbility(ability)
+	//   proficiencyBonus  → getProficiencyBonus()
+	| {kind: "featureCalculationDerivedFrom"; property: string; equals: "abilityMod" | "spellSaveDc" | "spellAttackBonus" | "proficiencyBonus"; ability?: AblKey; offset?: number}
 	// Generic escape hatch: call a `CharacterSheetState` method and assert on the
 	// returned value. Use when a feature's mechanic is exposed through a bespoke
 	// state API rather than a flat calculation field (e.g. a computed cost, a
@@ -917,6 +926,45 @@ export type EffectCheck = _EffectCommon & (
 	// === Stateful class-mechanic probes ===
 	| {kind: "featureChoiceCalculation"; className: string; featureName: string; expectedChoice: string; property: string; expectedValue: string; dcProperty?: string}
 	| {kind: "bloodMaledictAmplification"; hpCost: number}
+	// === Generic class-summon probe ===
+	// Drive any "feature summons a statblock companion" mechanic
+	// through its state API and verify the resulting companion's
+	// derived numbers. Reusable by any class summon that registers a
+	// `COMPANION_TYPES.CLASS_SUMMON` companion with a `scaling`
+	// descriptor (Animating Performance's Dancing Item today; Summon
+	// Beast / Steel Defender / Drake Companion tomorrow).
+	// `method` / `dismissMethod` name no-required-arg methods on
+	// `CharacterSheetState`.
+	| {
+		kind: "classSummon";
+		method: string;
+		args?: unknown[];
+		/** Take a long/short rest first so limited-use costs are deterministic. */
+		restFirst?: "long" | "short";
+		dismissMethod?: string;
+		namePattern: string;
+		hpExact?: number;
+		hpMin?: number;
+		ac?: number;
+		attackNamePattern?: string;
+		attackBonusMin?: number;
+		damageContains?: string;
+	}
+	// === Generic "feature creates an inventory item" probe ===
+	// Invoke a creator method on `CharacterSheetState`, verify a
+	// matching inventory row appeared (optionally under a gp value
+	// cap), then invoke the cleanup method and verify it's gone.
+	| {
+		kind: "createsInventoryItem";
+		method: string;
+		args?: unknown[];
+		/** Take a long/short rest first so limited-use costs are deterministic. */
+		restFirst?: "long" | "short";
+		cleanupMethod?: string;
+		namePattern: string;
+		maxValueGp?: number;
+		expectCount?: number;
+	}
 	| {kind: "crimsonRiteMechanics"; hpCosts: [number, number]}
 	| {kind: "hybridTransformationMechanics"}
 
@@ -1031,15 +1079,143 @@ async function _runPassiveOrRollEffect (
 			return;
 		}
 		case "featureCalculation": {
-			const value = await charSheet.page.evaluate((property) => {
+			const probe = await charSheet.page.evaluate((property) => {
 				const cs: any = (globalThis as any).charSheet;
-				return cs?._state?.getFeatureCalculations?.()?.[property] ?? null;
+				const calc = cs?._state?.getFeatureCalculations?.();
+				return {present: !!calc && Object.prototype.hasOwnProperty.call(calc, property), value: calc?.[property] ?? null};
 			}, e.property);
+			const value = probe.value;
+			if (e.isNull !== undefined) {
+				// Distinguishes an explicit `null` sentinel (e.g. "no gp cap")
+				// from a property the calculation never emitted at all.
+				if (!probe.present) throw new Error(`featureCalculation.${e.property} is absent (expected present, null=${e.isNull})`);
+				const isNull = value === null;
+				if (isNull !== e.isNull) throw new Error(`featureCalculation.${e.property}=${value}, expected ${e.isNull ? "null" : "non-null"}`);
+			}
 			if (e.exact !== undefined && value !== e.exact) throw new Error(`featureCalculation.${e.property}=${value}, expected ${e.exact}`);
 			if (e.min !== undefined && (!(typeof value === "number") || value < e.min)) {
 				throw new Error(`featureCalculation.${e.property}=${value}, expected >= ${e.min}`);
 			}
-			if (e.exact === undefined && e.min === undefined && value == null) throw new Error(`featureCalculation.${e.property} is absent`);
+			if (e.exact === undefined && e.min === undefined && e.isNull === undefined && value == null) throw new Error(`featureCalculation.${e.property} is absent`);
+			return;
+		}
+		case "classSummon": {
+			const res = await charSheet.page.evaluate((cfg) => {
+				const st: any = (globalThis as any).charSheet?._state;
+				if (!st) return {err: "no state"};
+				const fn = st[cfg.method];
+				if (typeof fn !== "function") return {err: `state.${cfg.method} is not a function`};
+				if (cfg.restFirst === "long") st.onLongRest?.();
+				else if (cfg.restFirst === "short") st.onShortRest?.();
+				let summoned: any;
+				try { summoned = fn.apply(st, cfg.args || []); } catch (e: any) { return {err: `${cfg.method} threw: ${e?.message}`}; }
+				if (!summoned) return {err: `${cfg.method} returned falsy`};
+				if (summoned.ok === false) return {err: `${cfg.method} refused: ${summoned.error}`};
+				const re = new RegExp(cfg.namePattern, "i");
+				const comp = (st.getCompanions?.() || []).find((c: any) => re.test(c?.name || ""));
+				if (!comp) return {err: `no companion matching ${cfg.namePattern}; seen=[${(st.getCompanions?.() || []).map((c: any) => c.name).join(", ")}]`};
+				const atks = [...(comp.attacks || []), ...(comp.actions || [])];
+				const flat = (a: any) => [a?.damage, a?.desc, ...(Array.isArray(a?.entries) ? a.entries : [a?.entries])].filter(Boolean).join(" ");
+				const out = {
+					err: null as string | null,
+					hp: comp.hp?.max ?? comp.maxHp ?? null,
+					ac: comp.ac ?? null,
+					attacks: atks.map((a: any) => {
+						const text = flat(a);
+						const m = /([+-]\d+)\s*to hit/i.exec(text);
+						return {name: a?.name || "", bonus: a?.attackBonus ?? (m ? Number(m[1]) : null), dmg: text};
+					}),
+					dismissed: null as boolean | null,
+				};
+				if (cfg.dismissMethod && typeof st[cfg.dismissMethod] === "function") {
+					try { st[cfg.dismissMethod](); } catch (e) { /* reported below via dismissed */ }
+					out.dismissed = !(st.getCompanions?.() || []).some((c: any) => re.test(c?.name || ""));
+				}
+				return out;
+			}, {
+				method: e.method,
+				args: (e.args || []) as unknown[],
+				restFirst: e.restFirst,
+				dismissMethod: e.dismissMethod,
+				namePattern: typeof e.namePattern === "string" ? e.namePattern : String(e.namePattern),
+			});
+			if (res.err) throw new Error(`classSummon(${e.method}): ${res.err}`);
+			if (e.hpExact != null && res.hp !== e.hpExact) throw new Error(`classSummon(${e.method}) hp=${res.hp}, expected ${e.hpExact}`);
+			if (e.hpMin != null && !(typeof res.hp === "number" && res.hp >= e.hpMin)) throw new Error(`classSummon(${e.method}) hp=${res.hp}, expected >= ${e.hpMin}`);
+			if (e.ac != null && res.ac !== e.ac) throw new Error(`classSummon(${e.method}) ac=${res.ac}, expected ${e.ac}`);
+			if (e.attackNamePattern) {
+				const are = new RegExp(e.attackNamePattern, "i");
+				const hit = (res.attacks || []).find((a: any) => are.test(a.name));
+				if (!hit) throw new Error(`classSummon(${e.method}) no attack matching ${e.attackNamePattern}; seen=[${(res.attacks || []).map((a: any) => a.name).join(", ")}]`);
+				if (e.attackBonusMin != null && !(Number(hit.bonus) >= e.attackBonusMin)) throw new Error(`classSummon(${e.method}) attack bonus=${hit.bonus}, expected >= ${e.attackBonusMin}`);
+				if (e.damageContains && !String(hit.dmg).toLowerCase().includes(e.damageContains.toLowerCase())) throw new Error(`classSummon(${e.method}) damage "${hit.dmg}" missing "${e.damageContains}"`);
+			}
+			if (e.dismissMethod && res.dismissed === false) throw new Error(`classSummon(${e.method}) ${e.dismissMethod} did not remove the companion`);
+			return;
+		}
+		case "createsInventoryItem": {
+			const res = await charSheet.page.evaluate((cfg) => {
+				const st: any = (globalThis as any).charSheet?._state;
+				if (!st) return {err: "no state"};
+				const fn = st[cfg.method];
+				if (typeof fn !== "function") return {err: `state.${cfg.method} is not a function`};
+				if (cfg.restFirst === "long") st.onLongRest?.();
+				else if (cfg.restFirst === "short") st.onShortRest?.();
+				let created: any;
+				try { created = fn.apply(st, cfg.args || []); } catch (err: any) { return {err: `${cfg.method} threw: ${err?.message}`}; }
+				if (!created) return {err: `${cfg.method} returned falsy`};
+				if (created.ok === false) return {err: `${cfg.method} refused: ${created.error}`};
+				const re = new RegExp(cfg.namePattern, "i");
+				const matches = (st.getInventory?.() || []).filter((it: any) => re.test(it?.item?.name || it?.name || ""));
+				const out = {
+					err: null as string | null,
+					count: matches.length,
+					valuesCp: matches.map((it: any) => (it?.item?.value ?? it?.value ?? null)),
+					cleared: null as boolean | null,
+				};
+				if (cfg.cleanupMethod && typeof st[cfg.cleanupMethod] === "function") {
+					try { st[cfg.cleanupMethod](); } catch (err) { /* reported via cleared */ }
+					out.cleared = !(st.getInventory?.() || []).some((it: any) => re.test(it?.item?.name || it?.name || ""));
+				}
+				return out;
+			}, {
+				method: e.method,
+				args: (e.args || []) as unknown[],
+				restFirst: e.restFirst,
+				cleanupMethod: e.cleanupMethod,
+				namePattern: typeof e.namePattern === "string" ? e.namePattern : String(e.namePattern),
+			});
+			if (res.err) throw new Error(`createsInventoryItem(${e.method}): ${res.err}`);
+			const wanted = e.expectCount ?? 1;
+			if (res.count < wanted) throw new Error(`createsInventoryItem(${e.method}) found ${res.count} matching "${e.namePattern}", expected >= ${wanted}`);
+			if (e.maxValueGp != null) {
+				for (const cp of res.valuesCp) {
+					if (cp != null && Number(cp) > e.maxValueGp * 100) throw new Error(`createsInventoryItem(${e.method}) item value ${Number(cp) / 100} gp exceeds cap ${e.maxValueGp} gp`);
+				}
+			}
+			if (e.cleanupMethod && res.cleared === false) throw new Error(`createsInventoryItem(${e.method}) ${e.cleanupMethod} did not remove the created item(s)`);
+			return;
+		}
+		case "featureCalculationDerivedFrom": {
+			const res = await charSheet.page.evaluate((cfg) => {
+				const st: any = (globalThis as any).charSheet?._state;
+				if (!st) return {err: "no state"};
+				const calc = st.getFeatureCalculations?.() || {};
+				if (!Object.prototype.hasOwnProperty.call(calc, cfg.property)) return {err: `featureCalculation.${cfg.property} is absent`};
+				let expected: number | null = null;
+				switch (cfg.equals) {
+					case "abilityMod": expected = st.getAbilityMod?.(cfg.ability); break;
+					case "spellSaveDc": expected = st.getSpellSaveDcForAbility?.(cfg.ability); break;
+					case "spellAttackBonus": expected = st.getSpellAttackBonusForAbility?.(cfg.ability); break;
+					case "proficiencyBonus": expected = st.getProficiencyBonus?.(); break;
+				}
+				return {err: null as string | null, actual: calc[cfg.property], expected};
+			}, {property: e.property, equals: e.equals, ability: e.ability});
+			if (res.err) throw new Error(`featureCalculationDerivedFrom: ${res.err}`);
+			const want = Number(res.expected) + (e.offset ?? 0);
+			if (Number(res.actual) !== want) {
+				throw new Error(`featureCalculation.${e.property}=${res.actual}, expected ${e.equals}(${e.ability ?? ""})${e.offset ? ` + ${e.offset}` : ""} = ${want}`);
+			}
 			return;
 		}
 		case "stateCall": {

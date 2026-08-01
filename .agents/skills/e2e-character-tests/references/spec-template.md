@@ -181,6 +181,11 @@ Every `featuresMatrix` entry that points at a feature with a
 | Widens/narrows the critical-hit threshold | `criticalRange` (checks `exact`, or `max` when a later feature will further improve — i.e. numerically lower — the value at a higher level, e.g. Champion's Improved Critical `max: 19` staying valid once Superior Critical narrows it to 18) |
 | Wires a roll button | `rollAbilityCheck` / `rollSkillCheck` / weapon `attackName` (in usage) |
 | **Per-pick effect attached only when the named pick surfaced** | `pickedFeatureGrants` (Phase 11 — see below) |
+| Exposes a number on `getFeatureCalculations()` | `featureCalculation` (`exact` / `min`, or `isNull: true` for an explicit "no cap" sentinel that must be *present and null*, never absent) |
+| That number is supposed to be **derived** from a live stat, not hard-coded | `featureCalculationDerivedFrom` (`equals: "abilityMod" \| "spellSaveDc" \| "spellAttackBonus" \| "proficiencyBonus"`) — use this instead of a loose `min` floor whenever the preset doesn't pin ability scores; the wizard's auto-fill can hand a Bard CHA 8 |
+| Summons a statblock companion that scales with class level | `classSummon` (drives the state API, asserts HP / AC / attack bonus / damage, then dismisses; `restFirst: "long"` makes the limited-use cost deterministic) |
+| Creates a real inventory item | `createsInventoryItem` (invokes the creator, asserts the row landed under `maxValueGp`, then invokes `cleanupMethod`) |
+| Trades a spell slot for a feature use | `restoreFeatureUseWithSpellSlot` |
 | Pure narrative / cinematic (Wish, Divine Intervention, capstone) | none — add `// no measurable derived effect: <reason>` comment |
 
 **Per-pick effects (`pickedFeatureGrants`).**  When a `kind: "pick"`

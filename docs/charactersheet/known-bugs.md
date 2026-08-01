@@ -1759,7 +1759,8 @@ shape (`"ac"`, `"speed:walk"`, `"save:wis"`) can never be mistaken for a damage
 type. New code should still emit `damage:<type>`; this makes the reader
 tolerant rather than blessing the bare form.
 
-**Regression pins**: `CharacterSheetCrownPaladin.test.js` §Exalted Champion.
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-050 and
+§Exalted Champion. Verified to fail with the bare-form branch reverted.
 
 ---
 
@@ -1784,8 +1785,10 @@ own — and an early `return null` for it in `detectActivatableFeature`. Detecte
 **structurally**, never by name, so it covers every oath, domain and patron
 that uses the same shape.
 
-**Regression pins**: `CharacterSheetCrownPaladin.test.js` §Channel Divinity
-wrapper (4 tests, including two negative controls).
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-051 (7 tests).
+Note the fixture is the umbrella **as the sheet renders it** — with the referenced
+options expanded inline — because a fixture carrying only the bare `entries` passes
+with the guard removed and proves nothing. Verified to fail with the guard disabled.
 
 ---
 
@@ -1822,7 +1825,8 @@ mandatory `(?<!dis)` lookbehind so "disadvantage on …" can never be inverted
 into a buff.
 
 **Regression pins**: `CharacterSheetCrownPaladin.test.js` §Unyielding Spirit
-(8 tests, including the `disadvantage` inversion control).
+(8 tests, including the `disadvantage` inversion control). Both halves verified
+independently — reverting the dedup key fails 3, reverting the reader fails 2.
 
 ---
 
@@ -1860,8 +1864,11 @@ Two supporting generic changes landed with it:
   ability modifier folded into the formula, idempotently. All three call sites
   (combat-tab enrichment, roll modal, dice roller) go through it.
 
-**Regression pins**: `CharacterSheetCrownPaladin.test.js` §Champion Challenge
-and §Turn the Tide; the `combatAction` probes in `tgtt-crown-paladin.spec.ts`.
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-053, which goes
+through `detectActivatableFeature` on a feature shaped as the sheet actually grants
+it (`consumes: {name: "Channel Divinity"}`, no `uses` of its own — measured on a
+live build), not through the parser directly; plus the `combatAction` probes in
+`tgtt-crown-paladin.spec.ts`. Verified to fail with the fix reverted.
 
 ---
 
@@ -1887,8 +1894,71 @@ reconciling the max of one that already exists. `_getChannelDivinityUsesForClass
 remains the single source of truth for the count, so this stays consistent with
 CS-BUG-033 and the `CharacterSheetChannelDivinityScaling` suite.
 
-**Regression pins**: `CharacterSheetCrownPaladin.test.js` §Channel Divinity
-pool; the `shortRestRestores` matrix probe in `tgtt-crown-paladin.spec.ts`.
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-054 (7 tests,
+including a guard on the bug's premise — that the prose alone mints nothing — and a
+cross-check that the 2024 Paladin still scales 2 → 3); the `kind: "resource"` matrix
+row and the USE probe's `shortRestRestores` in `tgtt-crown-paladin.spec.ts`.
+Verified to fail with the creation block reverted.
+
+---
+
+## CS-BUG-055 — `FeatureUsesParser` read "N times your <class> level" as a use count
+
+**Status**: Fixed.
+**Surfaced by**: College of Creation Bard implementation — a spawned
+`bard/creation/14/gnome` showed `Performance of Creation` at **20/20 uses**.
+
+**Root cause**: `FeatureUsesParser.parseUses`
+(`js/charactersheet/charactersheet-state.js`) matched a leading
+`(\d+)\s*(?:times?|uses?)` anywhere in the feature text. Performance of
+Creation's description contains *"a nonmagical item … worth no more than
+20 times your bard level in gp"*, so "20 times" was harvested as a use
+count. Any feature whose text contains an `N times <noun>` **multiplier**
+was affected, not just this subclass.
+
+**Fix**: the pattern now carries a negative lookahead for the nouns that
+mark a multiplier:
+
+```js
+/(\d+)\s*(?:times?|uses?)\b(?!\s+(?:your|the|a|an|its|his|her|their|that)\b)/
+```
+
+The `\b` after the alternation is **load-bearing**. Without it the regex
+engine escapes the lookahead by backtracking `times` → `time`, leaving the
+`s` to break `\s+`, and the bug silently returns. A regression test in
+`test/jest/charactersheet/CharacterSheetCreationBard.test.js` (PART 1) was
+verified to fail with `Received: 20` before the `\b` was added.
+
+With the guard in place the text falls through to the `\bonce\b` pattern
+and yields the correct 1 use per long rest.
+
+---
+
+## CS-BUG-056 — E2E builds put an 8 in every caster's spellcasting ability
+
+**Status**: Fixed (opt-in).
+**Surfaced by**: `tgtt-creation-bard.spec.ts` — `moteOfPotentialDc` came
+back as **9** (8 + prof 2 + CHA mod −1), because
+`BuilderWizardPage.assignStandardArrayDefaults()` hard-coded
+STR 15 / DEX 14 / CON 13 / INT 12 / WIS 10 / **CHA 8** for every build in
+the suite. Every spellcaster spec was therefore exercising a dump-stat
+caster, and any probe asserting a realistic DC/mod floor had to be either
+skipped or loosened into meaninglessness.
+
+**Fix**: `assignStandardArrayDefaults(priority?)` now accepts an ability
+order (best score first) and `CharacterPreset.abilityPriority` threads it
+through `createCharacterViaWizard`. Omitting it preserves the historical
+STR-first order byte-for-byte, so existing presets are unaffected —
+verified by re-running `tgtt-jester-bard-dendulra.spec.ts` after the
+change. `PRESET_FULL_CREATION_BARD_CHANGELING` sets
+`["cha", "dex", "con", "wis", "int", "str"]`.
+
+**Follow-up (not done here)**: the other caster presets
+(Bladesinger, Chronurgy, Surrealism, Time/Lust Domain, Heroic Soul,
+Horror Warlock, Jester) would all benefit from the same one-line
+addition, which would also let several `CS-BUG-016`-skipped
+`spellSaveDc` / `cantripCount` probes be re-enabled. Deliberately left
+out of this change so the blast radius stays confined to one spec.
 
 ---
 
