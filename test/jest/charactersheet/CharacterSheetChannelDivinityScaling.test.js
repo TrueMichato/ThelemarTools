@@ -10,6 +10,11 @@
  * These tests deliberately assert against the RESOURCE, not against
  * `getFeatureCalculations()`. The pre-existing Cleric suite only checked the
  * calculation, which is exactly why this bug went unnoticed.
+ *
+ * CS-BUG-078 later made the reconciler authoritative in BOTH directions: the same
+ * grant-time parser also OVER-counts, because the 2014 Cleric's level-2 prose already
+ * advertises the 6th- and 18th-level tiers. The original "never lowers a pool that is
+ * already larger" case has been replaced accordingly.
  */
 
 import "./setup.js";
@@ -71,11 +76,20 @@ describe("Channel Divinity use scaling (CS-BUG-033)", () => {
 		expect(getChannelDivinityResource().max).toBe(2);
 	});
 
-	it("never lowers a pool that is already larger than the progression", () => {
+	it("lowers a pool that the prose parser over-counted (CS-BUG-078, supersedes the CS-BUG-033 one-way guard)", () => {
+		// The 2014 Cleric's Channel Divinity prose advertises its FUTURE tiers in the same
+		// paragraph the 2nd-level cleric gains ("Beginning at 6th level, you can use your
+		// Channel Divinity twice between rests"), and `addFeature`'s use-parser reads that
+		// "twice". CS-BUG-033 originally made this reconciler raise-only, which left that
+		// over-count permanent — a 2nd-level cleric shipped with two uses. The class table
+		// is authoritative in BOTH directions; multiclass is unaffected because
+		// `desiredMax` is the largest contribution across every class.
 		state.addClass({name: "Cleric", source: "PHB", level: 2});
 		addChannelDivinity({current: 2, max: 2});
 
-		expect(getChannelDivinityResource().max).toBe(2);
+		const resource = getChannelDivinityResource();
+		expect(resource.max).toBe(1);
+		expect(resource.current).toBeLessThanOrEqual(1);
 	});
 
 	it("keeps the owning feature's own use pool in step", () => {

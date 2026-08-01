@@ -1891,3 +1891,173 @@ CS-BUG-033 and the `CharacterSheetChannelDivinityScaling` suite.
 pool; the `shortRestRestores` matrix probe in `tgtt-crown-paladin.spec.ts`.
 
 ---
+
+## CS-BUG-075 — a subclass spell grant with a `{choose}` block was silently dropped
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: Arcana Domain's Arcane Initiate grants "two cantrips of your
+choice from the wizard spell list". No pick-list ever appeared — in the
+Builder, in Level-Up, or in Quick Build — and no cantrip was added. The
+feature rendered as prose and did nothing.
+
+**Root cause**: `getSubclassAlwaysPreparedSpells()` walks a subclass's
+`additionalSpells` block and resolves every entry through
+`_parseSpellReference()`. That helper handles a **string** (`"detect magic"`,
+`"magic missile|phb"`) and returns `null` for anything else. A choose block is
+an **object** — `{choose: "level=0|class=Wizard", count: 2}` — so it fell out
+of the walk entirely. There is no other reader of `additionalSpells`, so **no
+subclass in the whole product could offer a player-chosen spell**; the shape
+had simply never been implemented.
+
+**Fix**: a parallel, choose-shaped walker rather than a per-subclass
+special-case. New `getSubclassSpellChoiceSlots()` walks the same
+`additionalSpells` structure, keeps only `{choose}` entries whose level gate
+the character has met, and expands each `count` into that many stable slots
+keyed by `_spellChoiceSlotKey()` (class / subclass / category / level /
+index). `_ensureSubclassSpellChoices()` reconciles those slots against
+`_data.fulfilledSpellChoiceSlots` and mints a pending choice for each unfilled
+one; `getPendingSpellChoices()` and `hasPendingSpellChoices()` call it first,
+so all three creation flows — which already call
+`processPendingSpellChoices()` — surface the picker with no flow-specific
+work. `fulfillSpellChoice()` records the slot so a choice is never re-offered,
+and honours `alwaysPrepared` so a granted spell does not eat the prepared
+limit.
+
+This lights up Arcane Mastery (four picks: one each of 6th/7th/8th/9th level)
+by the same mechanism, and every other `{choose}` grant in the data.
+
+**Regression pins**: `CharacterSheetArcanaCleric.test.js` §Arcane Initiate's
+two wizard cantrips and §Arcane Mastery is a four-part pick-list; the
+`stateCall getSubclassSpellChoiceSlots` / `getPendingSpellChoices` and
+`cantripCount` probes in `tgtt-arcana-cleric.spec.ts`.
+
+---
+
+## CS-BUG-076 — `potentSpellcastingBonus` was computed by ten subclasses and read by nothing
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: Potent Spellcasting (Arcana / Knowledge / Life… Cleric, and
+Druid's Potent Spellcasting) claims to add the Wisdom modifier to cantrip
+damage. Rolling a cantrip produced the base dice only.
+
+**Root cause**: `getFeatureCalculations()` sets `potentSpellcastingBonus` in
+roughly ten subclass branches, but a repo-wide search found **no consumer** —
+the number existed purely to be displayed.
+
+**Fix**: generic, not per-subclass. New
+`state.getCantripDamageBonus(spell)` returns `{bonus, sources}` and is scoped
+by a new `calculations.potentSpellcastingClass` (set alongside the bonus in
+the Cleric and Druid branches) via a new `spellCountsForClass(spell,
+className)` helper — so a Cleric/Wizard multiclass does not add Wisdom to
+their *wizard* cantrips. `charactersheet-spells.js` `_rollCantripDamage()`
+adds `bonus` and labels it in the breakdown; `charactersheet-features.js`
+shows a "Cantrip Damage +N" stat badge.
+
+Arcane Initiate's wizard cantrips *count as cleric cantrips*, so they receive
+the bonus — asserted explicitly.
+
+**Deliberately out of scope**: the weapon-channel cantrips (Booming Blade,
+Green-Flame Blade) do not route through `_rollCantripDamage`, so they do not
+pick the bonus up. RAW this is contested; it is noted rather than silently
+implemented either way.
+
+**Regression pins**: `CharacterSheetArcanaCleric.test.js` §Potent Spellcasting
+(including negative controls for level, non-cantrips and other-class
+cantrips); the `stateCall getCantripDamageBonus` probes in
+`tgtt-arcana-cleric.spec.ts`.
+
+---
+
+## CS-BUG-077 — `showFilteredSpellPicker` resolved before the modal closed, so batched picks collapsed
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: Arcane Initiate grants **two** wizard cantrips. Only one ever
+landed. `processPendingSpellChoices()` marked both slots fulfilled, so the
+second was never re-offered.
+
+**Root cause**: `showFilteredSpellPicker` is `async` but returned as soon as
+`CharacterSheetModal.pGetShow` had rendered — not when the user had picked.
+`processPendingSpellChoices()` awaits it in a `for … of` loop, so every picker
+in the batch opened at once, each holding the `knownSpellIds` snapshot taken
+before *any* pick. Two picks of the same top-of-list cantrip then collapsed to
+one via `addSpell`'s dedupe.
+
+**Fix**: `showFilteredSpellPicker` now returns a promise that settles on modal
+close (`cbClose`), so the loop is genuinely sequential and each picker sees the
+spells chosen before it.
+
+**Regression pin**: the `cantripCount` probe in `tgtt-arcana-cleric.spec.ts`
+(the two Arcane Initiate picks are the only guaranteed cantrips on that build,
+so a collapse fails the matrix).
+
+---
+
+## CS-BUG-078 — the 2014 Cleric's Channel Divinity pool was 2 uses at level 2
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: a 2nd-level 2014 Cleric had **two** Channel Divinity uses on the
+sheet instead of one, all the way to level 5.
+
+**Root cause**: the pool is minted by `addFeature`'s grant-time prose parser,
+and the 2014 Cleric's level-2 feature text advertises its future tiers in the
+same paragraph — "Beginning at 6th level, you can use your Channel Divinity
+**twice** between rests". The parser read that "twice".
+`_ensureChannelDivinityUses` (the CS-BUG-033 reconciler) only ever **raised**
+the max, so the over-count was permanent. The CS-BUG-033 suite even encoded
+the one-way behaviour as intended ("never lowers a pool that is already larger
+than the progression").
+
+**Fix**: `_getChannelDivinityUsesForClass` is authoritative in **both**
+directions. `resourceStale` / `featureStale` compare with `!==` rather than
+`<`, and `feature.uses.current` is clamped to the new max. Multiclass stays
+safe because `desiredMax` is the largest contribution across every class.
+The superseded CS-BUG-033 case has been rewritten in place.
+
+**Regression pins**:
+`CharacterSheetChannelDivinityScaling.test.js` §lowers a pool that the prose
+parser over-counted; `CharacterSheetArcanaCleric.test.js` §Cleric Channel
+Divinity pool is capped and scales 1 → 2 → 3; the tiered `Channel Divinity`
+resource rows in `tgtt-arcana-cleric.spec.ts`.
+
+---
+
+## CS-BUG-079 — 2014 Cleric domain Channel Divinity options were unclassified and unlimited
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: "Channel Divinity: Arcane Abjuration" surfaced with no
+`interactionMode`, was not linked to the Channel Divinity pool, and could be
+used an unbounded number of times. Its Wisdom save never rolled.
+
+**Root cause**: `data/class/class-paladin.json` tags every oath's Channel
+Divinity option with `consumes: {name: "Channel Divinity"}`, which
+`detectActivatableFeature`'s generic `consumes` branch picks up.
+`data/class/class-cleric.json` carries **no such tag**, so every 2014 domain
+option fell through to generic pattern detection. Only options hard-coded into
+`FEATURE_CLASSIFICATION_OVERRIDES` (Tempest's Destructive Wrath) escaped —
+which is per-subclass special-casing of exactly the kind this codebase avoids.
+
+**Fix**: classify the naming convention instead. Every Channel Divinity option
+in every source is named `Channel Divinity: <Option>`, so
+`detectActivatableFeature` now routes any feature matching
+`/^channel\s+divinity\s*:/i` through `_buildAbilityActivationInfo` with
+`resourceName: "Channel Divinity"`. Placed **after** the `consumes` branch and
+the classification-override block, so Paladin oaths and Destructive Wrath keep
+their existing paths unchanged. Options carrying their **own** use pool (TCE's
+"Channel Divinity: Harness Divine Power", PB/long rest) are excluded so the
+more specific pool keeps owning the row.
+
+Because the option now classifies as an `"ability"`, it inherits the CS-BUG-053
+fix and its save DC resolves from the character through `getFeatureSaveDc()`.
+
+**Regression pins**: `CharacterSheetArcanaCleric.test.js` §Arcane Abjuration is
+a usable Channel Divinity option (including the `consumes`-tagged and
+own-pool negative controls); the `combatAction` + `resource` probes in
+`tgtt-arcana-cleric.spec.ts`; `tgtt-tempest-cleric.spec.ts` and
+`tgtt-crown-paladin.spec.ts` re-run green as the no-change guards.
+
+---

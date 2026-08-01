@@ -36,6 +36,7 @@ the skill reference at
 | 19 | `tgtt-necromancer-wizard.spec.ts` | School of Necromancy Wizard · Human | 1–20 | Necromancy Savant scribe discount, Grim Harvest healing math, Undead Thralls companion buffs + Animate Dead grant, Inured to Undeath necrotic resistance **and** HP-max-reduction immunity, Command Undead save DC. |
 | 20 | `tgtt-talent-chronopath.spec.ts` | Chronopath Talent · Human (homebrew base class, `TalPsi`) | 1–20 | Whole MCDM Talent base class: psionic strain penalties on AC/speed/HP/proficiency/advantage/healing, manifestation tests, derived 1st-order + higher-order power pickers, Psionic Exertions, Psychic Boost, Psionic Bastion, Shielded Mind, Ignore Strain, and every Chronopath ability. |
 | 21 | `tgtt-crown-paladin.spec.ts` | Oath of the Crown Paladin (SCAG) · Dwarf | 1–20 | Channel Divinity pool on a **2014** Paladin (CS-BUG-054), Champion Challenge save DC + Turn the Tide healing resolved from the character (CS-BUG-053), Divine Allegiance damage transfer, Unyielding Spirit conditional save advantage (CS-BUG-052), Exalted Champion active state (CS-BUG-050/051). |
+| 22 | `tgtt-arcana-cleric.spec.ts` | Arcana Domain Cleric (SCAG) · Dwarf | 1–20 | Player-chosen subclass spell grants — two wizard cantrips at L1 and four wizard spells (6th/7th/8th/9th) at L17 (CS-BUG-075/077), Potent Spellcasting adding WIS to cantrip damage (CS-BUG-076), the 2014 Cleric Channel Divinity pool 1→2→3 (CS-BUG-078), Arcane Abjuration classified + DC-resolved off the character (CS-BUG-079), Spell Breaker slot ceiling. |
 
 ## Other specs
 

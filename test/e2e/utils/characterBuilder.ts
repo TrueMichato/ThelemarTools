@@ -53,6 +53,13 @@ export interface CharacterPreset {
 	 * the "obvious" pick non-deterministic.
 	 */
 	preferredFeatProgressionPattern?: RegExp;
+	/**
+	 * Ability abbreviations, highest-standard-array-score first, used to steer the
+	 * Abilities step. Defaults to str/dex/con/int/wis/cha (i.e. STR 15), which leaves a
+	 * caster at a +0 spellcasting modifier and makes any "add your <ability> modifier"
+	 * feature unassertable. Casters should put their spellcasting ability first.
+	 */
+	abilityPriority?: string[];
 	/** Additional homebrew JSON URLs required by this build. */
 	homebrewUrls?: string[];
 }
@@ -753,6 +760,33 @@ export const PRESET_FULL_NECROMANCER_WIZARD: CharacterPreset = {
 	signatureSpells: ["Chill Touch", "False Life"],
 };
 
+/**
+ * #22. Arcana Domain Cleric (SCAG, PHB 2014 chassis).
+ *
+ * `abilityPriority` puts the standard array's 15 in WISDOM. The harness default is
+ * STR-first, which would leave this cleric at WIS 10 (+0) and make Potent Spellcasting's
+ * "+WIS to cantrip damage" indistinguishable from the feature doing nothing.
+ *
+ * Dwarf/Acolyte (both PHB) is the proven 2014 pairing — see PRESET_FULL_CROWN_PALADIN
+ * for why "Human" stalls the Species step.
+ */
+export const PRESET_FULL_ARCANA_CLERIC: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB",
+	className: "Cleric",
+	classSource: "PHB",
+	prioritySources: ["PHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB",
+	name: "Yssira Runekeeper",
+	skillCount: 2,
+	abilityPriority: ["wis", "con", "str", "dex", "int", "cha"],
+	subclassName: "Arcana Domain",
+	subclassSource: "SCAG",
+	signatureSpells: ["Sacred Flame", "Bless", "Cure Wounds"],
+};
+
 /** Convenience array of all comprehensive presets — handy for parameterised smoke tests. */
 export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_MERCY_MONK_CHANGELING,
@@ -776,6 +810,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_TRICKSTER_GOBLIN,
 	PRESET_FULL_LUST_LEXALIAN,
 	PRESET_FULL_HORROR_THEOCRACIAN,
+	PRESET_FULL_ARCANA_CLERIC,
 ];
 
 /**
@@ -889,7 +924,7 @@ export async function createCharacterViaWizard (
 	await builder.clickNext();
 
 	// Step 4: Abilities
-	await builder.assignStandardArrayDefaults();
+	await builder.assignStandardArrayDefaults(preset.abilityPriority);
 	await builder.clickNext();
 
 	// Step 5: Equipment — take gold (simplest)

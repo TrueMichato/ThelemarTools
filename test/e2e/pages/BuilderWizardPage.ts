@@ -968,19 +968,31 @@ export class BuilderWizardPage {
 	}
 
 	/**
-	 * Assign standard array ability scores using a sensible default distribution
+	 * Assign standard array ability scores using a sensible default distribution.
 	 * Standard array: 15, 14, 13, 12, 10, 8
-	 * Default assigns: STR=15, DEX=14, CON=13, INT=12, WIS=10, CHA=8
+	 *
+	 * Default assigns STR=15, DEX=14, CON=13, INT=12, WIS=10, CHA=8 — i.e. every build
+	 * is STR-primary. That is fine for martials but leaves a caster at a +0 spellcasting
+	 * modifier, which makes any "adds your <ability> modifier to X" feature unassertable
+	 * (a +0 bonus is indistinguishable from the feature doing nothing). Pass `priority`
+	 * to reorder which ability receives which score — the array itself is unchanged, so
+	 * point-buy legality and every other derived stat stay comparable.
+	 * @param priority Ability abbreviations highest-score-first. Abilities omitted from
+	 *   the list keep their default relative order and receive the remaining scores.
 	 */
-	async assignStandardArrayDefaults (): Promise<void> {
-		const assignments: Array<{score: number; ability: string}> = [
-			{score: 15, ability: "str"},
-			{score: 14, ability: "dex"},
-			{score: 13, ability: "con"},
-			{score: 12, ability: "int"},
-			{score: 10, ability: "wis"},
-			{score: 8, ability: "cha"},
-		];
+	async assignStandardArrayDefaults (priority?: string[]): Promise<void> {
+		const DEFAULT_ORDER = ["str", "dex", "con", "int", "wis", "cha"];
+		const SCORES = [15, 14, 13, 12, 10, 8];
+
+		const order = priority?.length
+			? [
+				...priority.map(a => a.toLowerCase()).filter(a => DEFAULT_ORDER.includes(a)),
+				...DEFAULT_ORDER.filter(a => !priority.map(p => p.toLowerCase()).includes(a)),
+			]
+			: DEFAULT_ORDER;
+
+		const assignments: Array<{score: number; ability: string}> = order
+			.map((ability, i) => ({score: SCORES[i], ability}));
 
 		for (const {score, ability} of assignments) {
 			// Per-iteration retry — the badge layout reflows after each
@@ -1149,6 +1161,48 @@ export class BuilderWizardPage {
 		await this.btnNext.click();
 		// Wait for the character sheet to load
 		await this.page.waitForTimeout(500);
+		// `_finishCharacterCore` drains the pending spell/feature choice queues BEFORE
+		// it saves, so an unresolved picker strands the whole creation.
+		await this.resolvePostFinishChoices();
+	}
+
+	/**
+	 * Resolve any choice modal the Builder raises AFTER Finish is clicked.
+	 *
+	 * `_finishCharacterCore` drains both pending-choice queues
+	 * (`processPendingSpellChoices` then `processPendingFeatureChoices`) and only THEN
+	 * calls `saveCharacter()`. Any subclass that grants a player-chosen spell — an
+	 * `additionalSpells` `{choose}` block such as the Arcana Domain's two wizard cantrips,
+	 * or a seeded Moon-Bard-style bonus cantrip — therefore blocks creation on a modal
+	 * that nothing in the harness was clicking, and `createCharacterViaWizard`'s wait for
+	 * `_currentCharacterId` times out.
+	 *
+	 * Mirrors `LevelUpPage.resolvePendingFeatureChoices`: same DOM contract, same
+	 * top-most-first ordering (picks can chain, and a chained modal stacks above its
+	 * parent), and the same preference for a CONCRETE option over "Decide later" so
+	 * downstream effect probes have something to assert against. A no-op when no modal
+	 * is open, so it is safe on every existing build.
+	 * @returns the number of prompts resolved.
+	 */
+	async resolvePostFinishChoices (maxPrompts = 12): Promise<number> {
+		let resolved = 0;
+		for (let i = 0; i < maxPrompts; i++) {
+			const clicked = await this.page.evaluate(() => {
+				const prompts = Array.from(document.querySelectorAll<HTMLElement>(".charsheet__feature-choice, .spell-choice-list"));
+				const wrp = prompts[prompts.length - 1];
+				if (!wrp) return false;
+				const btn = wrp.querySelector<HTMLButtonElement>(".charsheet__feature-choice-opt")
+					|| wrp.querySelector<HTMLButtonElement>(".spell-choice-select")
+					|| wrp.querySelector<HTMLButtonElement>('[data-act="defer"]');
+				if (!btn) return false;
+				btn.click();
+				return true;
+			}).catch(() => false);
+			if (!clicked) break;
+			resolved++;
+			await this.page.waitForTimeout(250);
+		}
+		return resolved;
 	}
 
 	/**
