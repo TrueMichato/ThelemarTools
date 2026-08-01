@@ -20753,6 +20753,70 @@ class CharacterSheetState {
 								}
 								break;
 							}
+
+							// =====================================================================
+							// Spellfire Sorcery (FRHoF Sorcerer subclass) — 2024, subclass at L3
+							// =====================================================================
+							case "Spellfire Sorcery":
+							case "Spellfire": {
+								const chaMod = this.getAbilityMod("cha");
+								// Honed Spellfire (L14) improves both Spellfire Burst options.
+								const honed = level >= 14;
+
+								// The subclass and all of its base features arrive at L3 (2024
+								// chassis). Gate so an artificially early subclass assignment
+								// (or a broken save) can't surface L3 kit at L1–L2.
+								if (level >= 3) {
+									// Spellfire Burst (L3) — once per turn, when you spend at least
+									// 1 Sorcery Point on the Magic action or a Bonus Action, you may
+									// unleash Bolstering Flames or Radiant Fire. The trigger and the
+									// once-per-turn limit are enforced by `useSpellfireBurst()`.
+									calculations.hasSpellfireBurst = true;
+									calculations.spellfireBurstUsesPerTurn = 1;
+									calculations.spellfireBurstMinSorceryPoints = 1;
+
+									// Radiant Fire (L3) — 1d4 Fire or Radiant damage within 30 ft,
+									// increasing to 1d8 with Honed Spellfire.
+									calculations.hasRadiantFire = true;
+									calculations.radiantFireDamage = honed ? "1d8" : "1d4";
+									calculations.radiantFireRange = 30;
+									calculations.radiantFireDamageTypes = ["fire", "radiant"];
+
+									// Bolstering Flames (L3) — grant Temp HP = 1d4 + CHA modifier to
+									// yourself or a creature within 30 ft. Honed Spellfire adds your
+									// Sorcerer level to the total.
+									calculations.hasBolsteringFlames = true;
+									calculations.bolsteringFlamesTempHpDie = "1d4";
+									calculations.bolsteringFlamesTempHpBonus = chaMod + (honed ? level : 0);
+									calculations.bolsteringFlamesRange = 30;
+								}
+
+								// Honed Spellfire (L14) — the scaling above already reflects it;
+								// keep an explicit flag for display/probing.
+								if (honed) calculations.hasHonedSpellfire = true;
+
+								// Absorb Spells (L6) — Counterspell is always prepared (data
+								// `additionalSpells`), and a target failing its save against your
+								// Counterspell refunds 1d4 Sorcery Points.
+								if (level >= 6) {
+									calculations.hasAbsorbSpells = true;
+									calculations.absorbSpellsSorceryPointRegain = "1d4";
+								}
+
+								// Crown of Spellfire (L18) — while your altered Innate Sorcery is
+								// active you gain a 60 ft fly speed (and can hover), Spell
+								// Avoidance, and Burning Life Force. Restoring the use costs 5
+								// Sorcery Points.
+								if (level >= 18) {
+									calculations.hasCrownOfSpellfire = true;
+									calculations.crownOfSpellfireFlySpeed = 60;
+									calculations.crownOfSpellfireRestoreCost = 5;
+									// Burning Life Force caps the expended Hit Point Dice at your
+									// CHA modifier (minimum of one).
+									calculations.crownBurningLifeForceMaxDice = Math.max(1, chaMod);
+								}
+								break;
+							}
 						}
 					}
 					break;
@@ -46399,6 +46463,24 @@ class CharacterSheetState {
 			resourceName: "Sorcery Points",
 			resourceCost: 6,
 		},
+		crownOfSpellfire: {
+			id: "crownOfSpellfire",
+			name: "Crown of Spellfire",
+			icon: "👑",
+			description: "Your altered Innate Sorcery crowns you in spellfire: you gain a 60-foot Fly Speed and can hover, you have Spell Avoidance (no damage on a successful save against a save-for-half effect, half on a failure), and once per turn when you take damage you can use Burning Life Force to expend Hit Point Dice and reduce it.",
+			// CS-BUG-050: use a curated, explicit flySpeed effect. Prose-parsing
+			// "you gain a Fly Speed of 60 feet" is unreliable, so pin the value.
+			preferCuratedEffects: true,
+			effects: [
+				{type: "flySpeed", value: 60},
+			],
+			duration: "1 minute",
+			endConditions: ["Innate Sorcery ends", "Duration expires", "You are incapacitated", "You die"],
+			activationAction: "bonus",
+			// The base use rides on Innate Sorcery; restoring a spent use costs 5 SP
+			// (handled by restoreCrownOfSpellfire), so activation itself is free.
+			resourceCost: 0,
+		},
 		astralArms: {
 			id: "astralArms",
 			name: "Arms of the Astral Self",
@@ -48007,6 +48089,28 @@ class CharacterSheetState {
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 		const psionic = this._detectPsionicActivation(feature, rawText, text);
 		if (psionic) return psionic;
+		// (CS-BUG-092) Crown of Spellfire (Spellfire 18) — a free "alter Innate Sorcery"
+		// toggle, NOT a resource spender. Its prose mentions "spend 5 Sorcery Points"
+		// (the *restore* cost, handled by restoreCrownOfSpellfire()). Left to the generic
+		// parser, that "5 Sorcery Points" becomes an activation cost AND the `.includes("sorcery")`
+		// resource matcher grabs the "Innate Sorcery" use pool (2 uses) instead of Sorcery Points,
+		// so the Activate button renders permanently DISABLED (2 < 5). Return an explicit
+		// zero-cost toggle bound to the crownOfSpellfire state so the button is actionable.
+		if (name === "crown of spellfire"
+			&& (feature.subclassShortName === "Spellfire" || (feature.source || feature.subclassSource) === "FRHoF")) {
+			return {
+				stateTypeId: "crownOfSpellfire",
+				stateType: this.ACTIVE_STATE_TYPES.crownOfSpellfire,
+				matchedBy: "spellfire",
+				activationAction: "bonus",
+				interactionMode: "toggle",
+				isToggle: true,
+				duration: this.ACTIVE_STATE_TYPES.crownOfSpellfire.duration,
+				endConditions: this.ACTIVE_STATE_TYPES.crownOfSpellfire.endConditions,
+				effects: this.ACTIVE_STATE_TYPES.crownOfSpellfire.effects,
+				resourceCost: 0,
+			};
+		}
 		const isDaemonologistFeature = (feature.source || feature.subclassSource) === "GrimHollowPG24"
 			&& (feature.subclassShortName || feature.subclassName || "Daemonologist").toLowerCase() === "daemonologist";
 		if (isDaemonologistFeature && name === "borrowed tongues and hides") {
@@ -54704,6 +54808,230 @@ class CharacterSheetState {
 		const dist = distance == null ? range : Math.floor(Number(distance) || 0);
 		if (dist > range) return {ok: false, error: `Shadow Walk can teleport you up to ${range} feet.`, range};
 		return {ok: true, distance: dist, range, action: calc.shadowWalkAction || "bonus"};
+	}
+	// #endregion
+
+	// #region Spellfire Sorcery (FRHoF Sorcerer)
+	/**
+	 * Bolstering Flames (Spellfire 3). Grant Temporary Hit Points equal to
+	 * `1d4 + your Charisma modifier` (plus your Sorcerer level once Honed
+	 * Spellfire is online) to yourself or a creature within 30 ft.
+	 *
+	 * When the target is yourself this performs the REAL mutation — it calls
+	 * {@link setTempHp}, so the granted Temp HP show up on the sheet and obey the
+	 * "higher value wins, no stacking" rule. When the target is an ally the roll
+	 * is still returned so the DM can apply it, but your own Temp HP are left
+	 * untouched.
+	 *
+	 * @param {object} [opts]
+	 * @param {"self"|"ally"} [opts.target="self"]
+	 * @param {number|null} [opts.roll=null] explicit d4 result (for deterministic use/tests).
+	 * @returns {{ok: boolean, error?: string, tempHp?: number, applied?: boolean, target?: string, range?: number}}
+	 */
+	useBolsteringFlames ({target = "self", roll = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasBolsteringFlames) return {ok: false, error: "You don't have Bolstering Flames."};
+
+		const die = roll == null ? this._rollDiceExpression(calc.bolsteringFlamesTempHpDie || "1d4") : Math.floor(Number(roll) || 0);
+		const bonus = calc.bolsteringFlamesTempHpBonus ?? this.getAbilityMod("cha");
+		const tempHp = Math.max(1, die + bonus);
+		const range = calc.bolsteringFlamesRange ?? 30;
+
+		if (target === "self") {
+			this.setTempHp(tempHp);
+			return {ok: true, tempHp, applied: true, target, range};
+		}
+		return {ok: true, tempHp, applied: false, target: "ally", range};
+	}
+
+	/**
+	 * Radiant Fire (Spellfire 3). One creature within 30 ft takes `1d4` Fire OR
+	 * Radiant damage (your choice), increasing to `1d8` with Honed Spellfire.
+	 *
+	 * There is no self-effect to mutate, so this method publishes the live
+	 * damage die, the chosen damage type and the range, and rolls the total —
+	 * the returned `total` is the value a DM applies. The damage TYPE is a
+	 * per-use choice, never a persisted build decision.
+	 *
+	 * @param {object} [opts]
+	 * @param {"fire"|"radiant"} [opts.damageType="fire"]
+	 * @param {number|null} [opts.roll=null] explicit die result (for deterministic use/tests).
+	 * @returns {{ok: boolean, error?: string, total?: number, damage?: string, damageType?: string, range?: number}}
+	 */
+	useRadiantFire ({damageType = "fire", roll = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasRadiantFire) return {ok: false, error: "You don't have Radiant Fire."};
+
+		const allowed = calc.radiantFireDamageTypes || ["fire", "radiant"];
+		const chosen = allowed.includes(damageType) ? damageType : allowed[0];
+		const expr = calc.radiantFireDamage || "1d4";
+		const total = roll == null ? this._rollDiceExpression(expr) : Math.floor(Number(roll) || 0);
+		return {ok: true, total, damage: expr, damageType: chosen, range: calc.radiantFireRange ?? 30};
+	}
+
+	/**
+	 * Spellfire Burst (Spellfire 3). Once per turn, when you spend at least one
+	 * Sorcery Point to take the Magic action or a Bonus Action, you may unleash
+	 * Bolstering Flames OR Radiant Fire.
+	 *
+	 * This method OWNS the two gates the prose describes:
+	 *   1. the once-per-turn limit — tracked on `_data.spellfireBurstUsedThisTurn`
+	 *      and cleared by {@link resetSpellfireBurstTurn};
+	 *   2. the "spent at least one Sorcery Point this action" trigger.
+	 * On success it dispatches to {@link useBolsteringFlames} / {@link useRadiantFire}
+	 * and marks the turn used, so a second call in the same turn is refused.
+	 *
+	 * @param {object} opts
+	 * @param {"bolstering"|"radiant"} opts.effect which effect to unleash.
+	 * @param {boolean} [opts.spentSorceryPoint=true] whether the triggering action spent ≥1 SP.
+	 * @param {object} [opts.effectOpts={}] forwarded to the chosen effect method.
+	 * @returns {{ok: boolean, error?: string, effect?: string, result?: object}}
+	 */
+	useSpellfireBurst ({effect, spentSorceryPoint = true, effectOpts = {}} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasSpellfireBurst) return {ok: false, error: "You don't have Spellfire Burst."};
+		if (!spentSorceryPoint) {
+			return {ok: false, error: "Spellfire Burst triggers only when you spend at least one Sorcery Point on the Magic action or a Bonus Action."};
+		}
+		if (this._data.spellfireBurstUsedThisTurn) {
+			return {ok: false, error: "You've already used Spellfire Burst this turn."};
+		}
+
+		let result;
+		if (effect === "bolstering") result = this.useBolsteringFlames(effectOpts);
+		else if (effect === "radiant") result = this.useRadiantFire(effectOpts);
+		else return {ok: false, error: "Choose Bolstering Flames (\"bolstering\") or Radiant Fire (\"radiant\")."};
+
+		if (!result.ok) return result;
+		this._data.spellfireBurstUsedThisTurn = true;
+		return {ok: true, effect, result};
+	}
+
+	/** Clear the once-per-turn Spellfire Burst lock (call at the start of your turn). */
+	resetSpellfireBurstTurn () {
+		this._data.spellfireBurstUsedThisTurn = false;
+	}
+
+	/**
+	 * Absorb Spells (Spellfire 6). Counterspell is always prepared (via the
+	 * subclass `additionalSpells`); when a target FAILS its save against your
+	 * Counterspell you regain `1d4` Sorcery Points.
+	 *
+	 * This performs the REAL mutation — it raises your current Sorcery Points
+	 * (clamped to your maximum) via {@link setSorceryPoints}, so the pool on the
+	 * sheet actually refills.
+	 *
+	 * @param {object} [opts]
+	 * @param {number|null} [opts.roll=null] explicit d4 result (for deterministic use/tests).
+	 * @returns {{ok: boolean, error?: string, regained?: number, sorceryPoints?: object}}
+	 */
+	regainSorceryPointsFromAbsorbSpells ({roll = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasAbsorbSpells) return {ok: false, error: "You don't have Absorb Spells."};
+
+		const rolled = roll == null ? this._rollDiceExpression(calc.absorbSpellsSorceryPointRegain || "1d4") : Math.floor(Number(roll) || 0);
+		const sp = this.getSorceryPoints();
+		const before = sp.current;
+		const next = Math.min(sp.max, before + Math.max(0, rolled));
+		this.setSorceryPoints({current: next, max: sp.max});
+		return {ok: true, regained: next - before, sorceryPoints: this.getSorceryPoints()};
+	}
+
+	/**
+	 * Crown of Spellfire (Spellfire 18) — restore the altered Innate Sorcery use
+	 * by spending 5 Sorcery Points. This performs the REAL spend via
+	 * {@link useSorceryPoint} and (re)activates the {@link crownOfSpellfire}
+	 * active state so the 60 ft fly speed lands on {@link getSpeed}.
+	 *
+	 * @returns {{ok: boolean, error?: string, cost?: number, sorceryPointsRemaining?: number, stateId?: string}}
+	 */
+	restoreCrownOfSpellfire () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCrownOfSpellfire) return {ok: false, error: "You don't have Crown of Spellfire."};
+
+		const cost = calc.crownOfSpellfireRestoreCost ?? 5;
+		const sp = this.getSorceryPoints();
+		if (sp.current < cost) return {ok: false, error: `Restoring Crown of Spellfire costs ${cost} Sorcery Points (you have ${sp.current}).`};
+		if (!this.useSorceryPoint(cost)) return {ok: false, error: "Could not spend Sorcery Points."};
+
+		let stateId = null;
+		if (!this.isStateTypeActive("crownOfSpellfire")) stateId = this.activateState("crownOfSpellfire");
+		else stateId = (this.getActiveStates().find(s => s.stateTypeId === "crownOfSpellfire") || {}).id || null;
+
+		return {ok: true, cost, sorceryPointsRemaining: this.getSorceryPoints().current, stateId};
+	}
+
+	/**
+	 * Burning Life Force (part of Crown of Spellfire, L18). Once per turn when
+	 * you take damage while your altered Innate Sorcery is active, you may
+	 * expend up to your Charisma modifier (minimum one) in Hit Point Dice and
+	 * reduce the damage by the total rolled.
+	 *
+	 * This performs the REAL mutation — it decrements the Hit Point Dice pools
+	 * via {@link adjustHitDieCurrent} (expending, NOT healing), so the dice
+	 * actually leave your pool. Only usable while the crown state is active.
+	 *
+	 * @param {object} [opts]
+	 * @param {number} [opts.diceToSpend] how many Hit Point Dice to expend (clamped to the cap and to what you have).
+	 * @param {number|null} [opts.roll=null] explicit total for the expended dice (deterministic use/tests).
+	 * @param {number} [opts.incomingDamage] damage being taken (the reduction is clamped to it).
+	 * @returns {{ok: boolean, error?: string, diceSpent?: number, reduction?: number, hitDiceRemaining?: object}}
+	 */
+	useBurningLifeForce ({diceToSpend = null, roll = null, incomingDamage = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCrownOfSpellfire) return {ok: false, error: "You don't have Crown of Spellfire."};
+		if (!this.isStateTypeActive("crownOfSpellfire")) {
+			return {ok: false, error: "Burning Life Force works only while your altered Innate Sorcery (Crown of Spellfire) is active."};
+		}
+
+		const cap = calc.crownBurningLifeForceMaxDice ?? Math.max(1, this.getAbilityMod("cha"));
+		let want = diceToSpend == null ? cap : Math.floor(Number(diceToSpend) || 0);
+		want = Math.max(0, Math.min(cap, want));
+		if (want <= 0) return {ok: false, error: "You must expend at least one Hit Point Die."};
+
+		// Expend the largest-faced spendable dice first — real mutation, no heal.
+		let spent = 0;
+		let rolledTotal = 0;
+		for (let i = 0; i < want; i++) {
+			const dieType = this.getLargestSpendableHitDieType();
+			if (!dieType) break;
+			this.adjustHitDieCurrent(dieType, -1);
+			spent++;
+			if (roll == null) rolledTotal += this._rollDiceExpression(`1${dieType}`);
+		}
+		if (spent === 0) return {ok: false, error: "You have no Hit Point Dice to expend."};
+
+		let reduction = roll == null ? rolledTotal : Math.floor(Number(roll) || 0);
+		if (incomingDamage != null) reduction = Math.min(reduction, Math.max(0, Math.floor(Number(incomingDamage) || 0)));
+		return {ok: true, diceSpent: spent, reduction, hitDiceRemaining: this.getHitDiceByType()};
+	}
+
+	/**
+	 * Spell Avoidance (part of Crown of Spellfire, L18). While your altered
+	 * Innate Sorcery is active, when you're subjected to an effect that lets you
+	 * make a saving throw to take only half damage, you instead take NO damage on
+	 * a success and only half on a failure.
+	 *
+	 * Returns the damage you actually take. Only rewrites the outcome while the
+	 * crown state is active; otherwise it applies the normal save-for-half rule.
+	 *
+	 * @param {object} opts
+	 * @param {boolean} opts.saveSuccess whether you succeeded on the saving throw.
+	 * @param {number} opts.damage the full damage of the effect.
+	 * @returns {{ok: boolean, error?: string, damageTaken?: number, avoided?: boolean, active?: boolean}}
+	 */
+	resolveSpellAvoidance ({saveSuccess = false, damage = 0} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCrownOfSpellfire) return {ok: false, error: "You don't have Crown of Spellfire."};
+
+		const full = Math.max(0, Math.floor(Number(damage) || 0));
+		const active = this.isStateTypeActive("crownOfSpellfire");
+		if (!active) {
+			// Normal save-for-half.
+			return {ok: true, active: false, avoided: false, damageTaken: saveSuccess ? Math.floor(full / 2) : full};
+		}
+		if (saveSuccess) return {ok: true, active: true, avoided: true, damageTaken: 0};
+		return {ok: true, active: true, avoided: false, damageTaken: Math.floor(full / 2)};
 	}
 	// #endregion
 
