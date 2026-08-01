@@ -33,6 +33,21 @@ const SPELL_GOLD_CONSUME = {name: "Revivify", source: "PHB", level: 3, component
 const SPELL_GOLD_KEEP = {name: "Chromatic Orb", source: "PHB", level: 1, components: {v: true, s: true, m: {text: "a diamond worth at least 50 gp", cost: 5000}}};
 // No material component at all.
 const SPELL_NO_MATERIAL = {name: "Shield", source: "PHB", level: 1, components: {v: true, s: true}};
+// Weapon-channel cantrip: its material component IS the melee weapon you attack with,
+// so it must never be blocked by the focus/gold-cost gate (Booming Blade / Green-Flame
+// Blade). Shaped like the real TCE data so getWeaponChannelCantripInfo() recognises it.
+const SPELL_BLADE_CANTRIP = {
+	name: "Booming Blade",
+	source: "TCE",
+	level: 0,
+	components: {s: true, m: {text: "a melee weapon worth at least 1 sp", cost: 10}},
+	scalingLevelDice: [
+		{label: "thunder damage on moving", scaling: {5: "1d8", 11: "2d8", 17: "3d8"}},
+		{label: "thunder damage on hit", scaling: {5: "1d8", 11: "2d8", 17: "3d8"}},
+	],
+	entries: ["You brandish the weapon used in the spell's casting and make a melee attack with it against one creature within 5 feet of you."],
+	damageInflict: ["thunder"],
+};
 
 function makeState () {
 	const state = new CharacterSheetState();
@@ -309,6 +324,28 @@ describe("_checkCastingConstraints material gate", () => {
 		const spells = makeSpells(state, [SPELL_GOLD_CONSUME]);
 		const {block} = spells._checkCastingConstraints(SPELL_GOLD_CONSUME, SPELL_GOLD_CONSUME, null, {enforceMaterial: true});
 		expect(block).toBeNull();
+	});
+
+	// Regression (Booming Blade): the material component of a weapon-channel cantrip is the
+	// melee weapon used to make the attack. The generic focus/gold-cost gate cannot see that
+	// weapon as the component, so before the fix it hard-blocked the cast ("worth at least
+	// 0 gp") BEFORE the weapon-channel branch that prompts for the weapon could ever run —
+	// the normal Cast button silently did nothing. The gate must waive it; the channel flow
+	// enforces the equipped-weapon requirement itself with a precise message.
+	it("does NOT block a weapon-channel cantrip (Booming Blade) with no focus and no weapon", () => {
+		const state = makeState(); // empty inventory: no focus, no weapon
+		const spells = makeSpells(state, [SPELL_BLADE_CANTRIP]);
+		// Self-validate: the fixture is genuinely classified as a weapon-channel cantrip,
+		// otherwise the assertion below would be vacuous.
+		expect(CharacterSheetSpells.getWeaponChannelCantripInfo(SPELL_BLADE_CANTRIP)).toBeTruthy();
+		const {block} = spells._checkCastingConstraints(SPELL_BLADE_CANTRIP, SPELL_BLADE_CANTRIP, null, {enforceMaterial: true});
+		expect(block).toBeNull();
+	});
+
+	it("_getMaterialComponentBlock waives a weapon-channel cantrip (the weapon IS the component)", () => {
+		const state = makeState();
+		const spells = makeSpells(state, [SPELL_BLADE_CANTRIP]);
+		expect(spells._getMaterialComponentBlock(SPELL_BLADE_CANTRIP, SPELL_BLADE_CANTRIP)).toBeNull();
 	});
 });
 

@@ -71,11 +71,14 @@ class CraftingSublistManager extends SublistManager {
 class CraftingPage extends ListPage {
 	constructor () {
 		const pageFilter = new PageFilterCrafting();
+		const listSyntax = new ListSyntaxCrafting({fnGetDataList: () => this._dataList});
 
 		super({
 			dataSource: DataUtil.craftingMaterial.loadJSON.bind(DataUtil.craftingMaterial),
 
 			pageFilter,
+
+			listSyntax,
 
 			dataProps: ["craftingMaterial", "craftingRecipe", "craftingRule"],
 
@@ -93,6 +96,7 @@ class CraftingPage extends ListPage {
 
 		this._harvestLookup = null;
 		this._planner = null;
+		this._listSyntaxCrafting = listSyntax;
 	}
 
 	getListItem (ent, ixEnt, isExcluded) {
@@ -160,6 +164,111 @@ class CraftingPage extends ListPage {
 	async pOnLoad () {
 		await super.pOnLoad();
 		this._initTools();
+		this._initSearchRescue();
+	}
+
+	/**
+	 * The default search deliberately covers names and metadata only — folding descriptions into it
+	 * would bury "Dragon Blood" under every entry that merely mentions dragons. That precision has a
+	 * cost: searching "exhaustion" finds nothing, even though twenty entries cure or cause it, and
+	 * the `text:` syntax that would find them is discoverable only by hovering the search box.
+	 *
+	 * So when a plain search comes up empty, offer the full-text search it should have been, with
+	 * the count it would return. The dead end becomes the signpost.
+	 */
+	_initSearchRescue () {
+		const iptSearch = document.getElementById("lst__search");
+		const wrpRescue = document.getElementById("crafting-search-rescue");
+		if (!iptSearch || !wrpRescue) return;
+
+		this._initSearchPlaceholder(iptSearch);
+
+		this._list.on("updated", () => this._doUpdateSearchRescue({iptSearch, wrpRescue}));
+		this._doUpdateSearchRescue({iptSearch, wrpRescue});
+	}
+
+	/** Longest first; the widest one that fits the search box is used. */
+	static _SEARCH_PLACEHOLDERS = [
+		`Search by name, or text:"exhaustion" to search inside`,
+		`Search name, or text:"exhaustion"`,
+		`Search, or text:"exhaustion"`,
+		`Search, or text:"..."`,
+	];
+
+	/**
+	 * The hint only teaches if it is readable in full — a placeholder truncated mid-example is worse
+	 * than a short one. The room available does not track the viewport (the list column narrows when
+	 * the two-column layout engages, so a 1024px window offers *less* space than a 768px one), so
+	 * measure the box itself rather than guess at a breakpoint.
+	 */
+	_initSearchPlaceholder (iptSearch) {
+		const getTextWidth = (() => {
+			const ctx = document.createElement("canvas").getContext("2d");
+			return (text, font) => { ctx.font = font; return ctx.measureText(text).width; };
+		})();
+
+		const apply = () => {
+			const styles = getComputedStyle(iptSearch);
+			const font = `${styles.fontSize} ${styles.fontFamily}`;
+			// Leave room for the search glass and clear affordances flanking the text.
+			const avail = iptSearch.clientWidth - 28;
+			const placeholders = this.constructor._SEARCH_PLACEHOLDERS;
+			const fitting = placeholders.find(it => getTextWidth(it, font) < avail);
+			iptSearch.setAttribute("placeholder", fitting || placeholders.at(-1));
+		};
+
+		if (typeof ResizeObserver !== "undefined") new ResizeObserver(apply).observe(iptSearch);
+		apply();
+	}
+
+	static _RE_SEARCH_COMMAND = /^\s*(?:ingredient|name|stats|info|text)s?:/i;
+
+	_doUpdateSearchRescue ({iptSearch, wrpRescue}) {
+		const term = (iptSearch.value || "").trim().toLowerCase();
+
+		// A search that already uses the syntax has nothing left to offer, and one with hits is not
+		// stuck. Only a plain search that found nothing is at an impasse.
+		const isRescuable = term
+			&& !this.constructor._RE_SEARCH_COMMAND.test(term)
+			&& !this._list.visibleItems.length;
+		if (!isRescuable) return wrpRescue.classList.add("ve-hidden");
+
+		const count = this._getFullTextMatchCount(term);
+		if (!count) return wrpRescue.classList.add("ve-hidden");
+
+		wrpRescue.classList.remove("ve-hidden");
+		wrpRescue.innerHTML = "";
+
+		const dispTerm = document.createElement("span");
+		dispTerm.className = "crafting-search-rescue__term";
+		dispTerm.textContent = `\u201c${term}\u201d`;
+
+		const btn = ee`<button type="button" class="ve-btn ve-btn-xxs ve-btn-primary crafting-search-rescue__btn">Search inside text (${count})</button>`
+			.onn("click", () => {
+				iptSearch.value = `text:"${term}"`;
+				iptSearch.dispatchEvent(new Event("keyup", {bubbles: true}));
+				iptSearch.focus();
+			});
+
+		const eleMsg = document.createElement("span");
+		eleMsg.className = "crafting-search-rescue__msg";
+		eleMsg.append("No name matches ", dispTerm, ".");
+
+		wrpRescue.append(eleMsg, btn);
+	}
+
+	/**
+	 * Counts entries whose text matches, through the same filters the list is currently applying, so
+	 * the number offered is the number that will appear. Populates the cache `text:` reads, making
+	 * the search that follows the click instant.
+	 */
+	_getFullTextMatchCount (term) {
+		const matching = this._list.items
+			.filter(li => {
+				if (li.data._textCacheStats == null) li.data._textCacheStats = this._listSyntaxCrafting.getSearchCacheStats(this._dataList[li.ix]);
+				return li.data._textCacheStats.includes(term);
+			});
+		return this._list.getFilteredItems({items: matching}).length;
 	}
 
 	_initTools () {

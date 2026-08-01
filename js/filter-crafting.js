@@ -306,3 +306,77 @@ class PageFilterCrafting extends PageFilterBase {
 }
 
 globalThis.PageFilterCrafting = PageFilterCrafting;
+
+/**
+ * Search syntax for the hub, powering `text:"query"` and friends.
+ *
+ * The inherited syntax indexes `entries` alone, which on this page misses most of what anyone
+ * would actually search for. The Arcadia 11 dishes keep their flavour text in `entries` and the
+ * benefit that matters — "You gain 5 temporary hit points" — in `outcomes`; a material's link to
+ * the things it makes lives in `usedInRecipes`; and an Arcadia 8 component's spell effect sits
+ * under `variantComponent`. All of it is prose a player wants to search by effect.
+ *
+ * Indexing is lazy and memoised per row by the base class, so none of this costs anything until
+ * a text search is actually run.
+ */
+class ListSyntaxCrafting extends ListUiUtil.ListSyntax {
+	static _INDEXABLE_PROPS_ENTRIES = [
+		"entries",
+		// Where the Arcadia 11 dish benefits live; `entries` holds only flavour text.
+		"outcomes",
+		"ingredients",
+		"componentGroups",
+		"harvest",
+		"usedInRecipes",
+		"variantComponent",
+		"effectTags",
+	];
+
+	static _INDEXABLE_PROPS_INGREDIENTS = [
+		"ingredients",
+		"componentGroups",
+	];
+
+	build () {
+		return {
+			...super.build(),
+
+			// Longest-first: the parser matches this un-anchored at the end, so `ingredient` must
+			// be offered before any prefix of it could win.
+			reCommand: /^(?<command>ingredient|name|stats|info|text)/,
+
+			ingredient: {
+				help: `\`ingredient:"query"\` (/query/ for regex; \`ingredient:! ...\` to invert) to search by what a craftable consumes.`,
+				fn: (listItem, searchTerm) => {
+					if (listItem.data._textCacheIngredients == null) listItem.data._textCacheIngredients = this._getSearchCacheIngredients(this._dataList[listItem.ix]);
+					return this._listSyntax_isTextMatch(listItem.data._textCacheIngredients, searchTerm);
+				},
+			},
+		};
+	}
+
+	_getSearchCacheIngredients (entity) {
+		return this._getSearchCache_entries(entity, {indexableProps: this.constructor._INDEXABLE_PROPS_INGREDIENTS});
+	}
+
+	static _RE_TAG = /\{@\w+ ([^{}]+)}/g;
+
+	/**
+	 * `stripTags` keeps only a tag's display text, so `{@condition exhaustion|PHB|exhausted}` indexes
+	 * as "exhausted" and a search for "exhaustion" — the name of the thing itself — misses it.
+	 * Index the tag's target alongside its display text so both spellings find the entry.
+	 */
+	_getSearchCache_handleString (ptrOut, str) {
+		super._getSearchCache_handleString(ptrOut, str);
+
+		for (const [, payload] of str.matchAll(this.constructor._RE_TAG)) {
+			const name = payload.split("|")[0].trim().toLowerCase();
+			if (name) ptrOut._ += `${name} -- `;
+		}
+	}
+
+	/** Exposed so the page can offer a full-text search when a plain one finds nothing. */
+	getSearchCacheStats (entity) { return this._getSearchCacheStats(entity); }
+}
+
+globalThis.ListSyntaxCrafting = ListSyntaxCrafting;

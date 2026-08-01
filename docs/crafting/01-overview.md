@@ -50,6 +50,39 @@ Materials are further split by `materialCategory`: **creature part**, **herb**, 
 
 Clicking any effect tag in a stat block applies that Effect filter immediately.
 
+## Search
+
+The search box matches **names and list metadata** — deliberately, so that searching `dragon`
+surfaces Dragon Blood rather than burying it under every entry whose description mentions dragons.
+
+To search the prose itself, use a command prefix:
+
+| Command | Searches |
+|---|---|
+| `text:"query"` | everything below, plus fluff |
+| `stats:"query"` | name, entries, dish outcomes, ingredients, harvest info, linked recipes, variant-component spell effects, effect tags |
+| `name:"query"` | name only |
+| `ingredient:"query"` | what a craftable consumes — the one axis with no equivalent filter |
+
+Wrap a query in `/slashes/` for a regex, or add `!` (`text:! query`) to invert it.
+
+Two things this page indexes that the stock 5etools syntax does not:
+
+- **Dish outcomes.** The Arcadia 11 dishes keep flavour text in `entries` and the actual benefit in
+  `outcomes`, so `A Perfect Roast` reads "Any bonehead can throw a deer on a spit" in prose and
+  "You gain 5 temporary hit points" in structured data. Indexing `entries` alone makes every dish
+  unsearchable by what it does.
+- **Tag targets.** `Renderer.stripTags` keeps only a tag's display text, so
+  `{@condition exhaustion|PHB|exhausted}` would index as "exhausted" and a search for the
+  condition's own name would miss it. Both spellings are indexed.
+
+Indexing is lazy and memoised per row: it costs nothing until a text search is actually run, then
+roughly 100 ms once to index all ~2,375 entries (~1.5 MB) and ~1 ms per query after that.
+
+**If a plain search finds nothing** but the text search would find something, the page says so and
+offers the full-text search with the number of results it would return, honouring whatever filters
+are active. That is how most people will discover the syntax exists.
+
 ## Cross-links
 
 The generator builds a bidirectional material ↔ craftable graph, so:
@@ -87,7 +120,7 @@ Implemented in `js/crafting/crafting-planner.js`.
 |---|---|
 | `crafting.html` | Page shell |
 | `js/crafting.js` | `ListPage` controller + sublist manager |
-| `js/filter-crafting.js` | `PageFilterCrafting` |
+| `js/filter-crafting.js` | `PageFilterCrafting` + `ListSyntaxCrafting` (full-text search) |
 | `js/render-crafting.js` | Full stat blocks for the three entity types |
 | `js/crafting/crafting-harvest-lookup.js` | Harvest Lookup tool |
 | `js/crafting/crafting-planner.js` | Crafting Planner tool |

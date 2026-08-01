@@ -11,7 +11,7 @@ For the full *what* and *why* of every check, see the
 the skill reference at
 [`.agents/skills/e2e-character-tests/references/standard.md`](../../.agents/skills/e2e-character-tests/references/standard.md).
 
-## TGTT character specs (18)
+## TGTT character specs (19)
 
 | # | Spec file | Build | Levels | What it proves |
 |---|---|---|---|---|
@@ -33,7 +33,8 @@ the skill reference at
 | 16 | `tgtt-trickster-rogue-goblin.spec.ts` | Trickster Rogue · Goblin | 1–20 | Trickster Tricks pick-list, Sneak Attack scaling, Cunning Action, weapon mastery. |
 | 17 | `tgtt-lust-cleric-lexalian.spec.ts` | Lust Domain Cleric · Lexalian Children | 1–20 | Lust domain features, Channel Divinity uses, full caster slot table. |
 | 18 | `tgtt-horror-warlock-theocracian.spec.ts` | Horror Warlock · Theocracian Children | 1–20 | Horror subclass features, Eldritch Invocations pick-list, pact slots short-rest restore. |
-| 19 | `tgtt-crown-paladin.spec.ts` | Oath of the Crown Paladin (SCAG) · Dwarf | 1–20 | Channel Divinity pool on a **2014** Paladin (CS-BUG-054), Champion Challenge save DC + Turn the Tide healing resolved from the character (CS-BUG-053), Divine Allegiance damage transfer, Unyielding Spirit conditional save advantage (CS-BUG-052), Exalted Champion active state (CS-BUG-050/051). |
+| 19 | `tgtt-necromancer-wizard.spec.ts` | School of Necromancy Wizard · Human | 1–20 | Necromancy Savant scribe discount, Grim Harvest healing math, Undead Thralls companion buffs + Animate Dead grant, Inured to Undeath necrotic resistance **and** HP-max-reduction immunity, Command Undead save DC. |
+| 20 | `tgtt-crown-paladin.spec.ts` | Oath of the Crown Paladin (SCAG) · Dwarf | 1–20 | Channel Divinity pool on a **2014** Paladin (CS-BUG-054), Champion Challenge save DC + Turn the Tide healing resolved from the character (CS-BUG-053), Divine Allegiance damage transfer, Unyielding Spirit conditional save advantage (CS-BUG-052), Exalted Champion active state (CS-BUG-050/051). |
 
 ## Other specs
 

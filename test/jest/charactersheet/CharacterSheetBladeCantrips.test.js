@@ -330,6 +330,13 @@ describe("_buildCastOptionItems", () => {
 		expect(items).toHaveLength(1);
 		expect(items[0].label).toMatch(/Roll/);
 		expect(items[0].sublabel).toMatch(/rides your weapon attack/i);
+		// The menu item must roll ONLY the standalone secondary damage — NOT channel a
+		// fresh weapon attack (that is the ✨ button / primary Cast). It signals this with
+		// `decision.secondaryOnly`, which makes _castSpell skip the channel branch.
+		const calls = [];
+		spells._castSpell = (id, opts) => calls.push(opts);
+		items[0].onSelect();
+		expect(calls[0].decision).toMatchObject({skipComponentPrompt: true, secondaryOnly: true});
 	});
 });
 

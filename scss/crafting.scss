@@ -68,6 +68,49 @@
 		}
 	}
 
+	/* ----- Zero-result full-text rescue ----- */
+
+	.crafting-search-rescue {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-wrap: wrap;
+		gap: 8px;
+		padding: 10px 8px;
+		border-bottom: 1px solid vars.$rgb-border-grey--trans-muted;
+		font-size: 12px;
+		line-height: 1.4;
+
+		&__ {
+			&msg {
+				// Deliberately the standard body colour, not the muted one: this line only appears
+				// when someone is stuck, so it has to be readable. Restraint comes from the size and
+				// the centred placement, not from washing the text out (muted grey measures 3.8:1
+				// against the night background, under WCAG AA).
+				color: vars.$rgb-font;
+			}
+
+			&term {
+				font-weight: bold;
+			}
+
+			&btn {
+				// WCAG 2.2 target size (minimum); the shared xxs button is 20px tall, which is an
+				// awkward tap on the phone-width layout where this is most likely to be hit.
+				min-height: 24px;
+				padding-inline: 10px;
+			}
+		}
+	}
+
+	.ve-night-mode .crafting-search-rescue {
+		border-bottom-color: vars-night.$rgb-border-grey--trans-night;
+
+		&__msg {
+			color: vars-night.$rgb-font--night;
+		}
+	}
+
 	/* ----- Harvest Lookup / Crafting Planner modals ----- */
 
 	.crafting-tool {
