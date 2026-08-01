@@ -41,11 +41,15 @@ const addBoon = (state, name) => {
 // #6 — Overview vs Combat resource consistency
 // ==========================================================================
 describe("#6 getGenericPoolResources — single canonical resource set", () => {
-	it("keeps true pools with no linked feature and drops activatable-ability pools", () => {
+	it("keeps true pools with no linked feature AND classified limited-use ability pools", () => {
 		const state = buildHellspeaker(15);
 		// A true pool with no resolvable feature is always kept.
 		state.addResource({name: "Invoke Hell", max: 1});
-		// A resource linked to an activatable ability is surfaced in the Abilities area, not here.
+		// (R47) A resource linked to a classified limited-use ability is now ALSO surfaced
+		// here as a trackable spend/restore pool — the Overview + Combat play tabs have no
+		// abilities area of their own, so it otherwise rendered nowhere on either tab. Its
+		// rich Use button still lives in the Features-tab abilities area; the two stay in
+		// sync via setResourceCurrent()/setFeatureUses().
 		const healingHands = {
 			name: "Healing Hands",
 			description: "As an action, you can touch a creature and restore a number of hit points equal to your level. Once you use this trait, you can't use it again until you finish a long rest.",
@@ -61,7 +65,7 @@ describe("#6 getGenericPoolResources — single canonical resource set", () => {
 
 		const names = state.getGenericPoolResources().map(r => r.name);
 		expect(names).toContain("Invoke Hell");
-		expect(names).not.toContain("Healing Hands");
+		expect(names).toContain("Healing Hands");
 	});
 
 	it("excludes interdiction-managed pools (Baleful Interdict, Charm Enemy)", () => {

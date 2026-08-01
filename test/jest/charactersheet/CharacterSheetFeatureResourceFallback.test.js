@@ -180,3 +180,61 @@ describe("entries-only feature resource save migration", () => {
 		expect(state.getResources()).toHaveLength(FEATURES.length);
 	});
 });
+
+// ==========================================================================
+// (R47) A limited-use feature with a POPULATED description is classified as an
+// activatable ability (the real saved shape — Chronurgy's Chronal Shift, a Divine
+// Soul's Favored by the Gods, a 2024 Warlock's Magical Cunning all carry rendered
+// description HTML mentioning "as a reaction" / "once you use this feature"). The
+// earlier fallback fixtures used `description: null`, which does NOT trip the
+// ability classifier, so they never reproduced the in-browser bug where these
+// pools vanished from BOTH the Overview and Combat resource trackers. These tests
+// pin the real scenario: a classified ability MUST still surface in the pool.
+// ==========================================================================
+describe("classified limited-use abilities surface in the generic resource pool", () => {
+	const REAL = [
+		{
+			name: "Chronal Shift",
+			source: "EGW",
+			description: "<p>As a reaction, after you or a creature you can see within 30 feet of you makes an attack roll, an ability check, or a saving throw, you can force the creature to reroll. You can use this ability twice, and you regain any expended uses when you finish a long rest.</p>",
+			expected: {max: 2, recharge: "long"},
+		},
+		{
+			name: "Favored by the Gods",
+			source: "XGE",
+			description: "<p>If you fail a saving throw or miss with an attack roll, you can roll 2d4 and add it to the total. Once you use this feature, you can't use it again until you finish a short or long rest.</p>",
+			expected: {max: 1, recharge: "short"},
+		},
+	];
+
+	it.each(REAL)("$name is classified as an ability AND kept in getGenericPoolResources()", ({expected, ...rawFeature}) => {
+		const state = new CharacterSheetState();
+		state.addFeature({...rawFeature});
+		const feature = state.getFeatures().find(it => it.name === rawFeature.name);
+
+		// Self-validate: this is the real ability-classified path, not the description:null path.
+		const info = CharacterSheetState.detectActivatableFeature(feature);
+		expect(CharacterSheetState.isActivatableAbilityEntry({feature, activationInfo: info, interactionMode: info?.interactionMode})).toBe(true);
+
+		expect(state.getGenericPoolResources()).toEqual(
+			expect.arrayContaining([expect.objectContaining({name: rawFeature.name, featureId: feature.id})]),
+		);
+	});
+
+	it("spending the pool row stays in sync with the linked feature uses (no drift)", () => {
+		const state = new CharacterSheetState();
+		state.addFeature({...REAL[0]});
+		const feature = state.getFeatures().find(it => it.name === "Chronal Shift");
+		const resource = state.getResources().find(it => it.name === "Chronal Shift");
+
+		// Spend from the resource-tracker side.
+		state.setResourceCurrent(resource.id, resource.current - 1);
+		expect(state.getFeature("Chronal Shift").uses.current).toBe(1);
+		expect(state.getGenericPoolResources().find(r => r.name === "Chronal Shift").current).toBe(1);
+
+		// Spend from the feature-card (Features-tab) side.
+		state.setFeatureUses(feature.id, 0);
+		expect(state.getResources().find(r => r.id === resource.id).current).toBe(0);
+		expect(state.getGenericPoolResources().find(r => r.name === "Chronal Shift").current).toBe(0);
+	});
+});

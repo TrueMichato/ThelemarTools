@@ -31229,13 +31229,25 @@ class CharacterSheetState {
 	/**
 	 * (R23 #6) The canonical set of GENERIC resource pools to surface in the bare
 	 * resource lists — the Overview "Resources" panel and the Combat "Combat Resources"
-	 * panel. A resource is excluded when its linked feature is either:
-	 *   - an activatable ability (surfaced in the Abilities area with its own Use control), or
-	 *   - hidden-from-generic-surfaces (interdiction-managed pools like the seal pool / Charm
-	 *     Enemy, or a redundant "<X> Improvement" passive rider).
-	 * Resources with no resolvable linked feature (e.g. "Invoke Hell") are kept.
+	 * panel.
 	 *
-	 * Both surfaces now derive from this single helper so the two lists are ALWAYS identical
+	 * (R47) A limited-use ABILITY (Chronal Shift, Favored by the Gods, Magical Cunning,
+	 * Healing Hands, Guided Strike, …) is now KEPT here as a trackable spend/restore pool,
+	 * in addition to the rich Use button it renders in the Features-tab abilities area. The
+	 * Overview + Combat tabs are the play surfaces, and they have no abilities area of their
+	 * own, so a classified ability used to render NOWHERE on either tab — a limited-use pool
+	 * the player needs mid-combat was invisible unless they switched to the Features tab.
+	 * setResourceCurrent()/setFeatureUses() keep the pip counter and the ability's use badge
+	 * in lockstep, so spending on either surface never drifts. The Features-tab Resources
+	 * panel keeps its own ability exclusion (features.js), so the ability is not duplicated
+	 * as both a card and a bare row within that one view.
+	 *
+	 * A resource is excluded only when its linked feature is hidden-from-generic-surfaces
+	 * (interdiction-managed pools like the seal pool / Charm Enemy, or a redundant
+	 * "<X> Improvement" passive rider) — those have a dedicated first-class home. Resources
+	 * with no resolvable linked feature (e.g. "Invoke Hell") are kept.
+	 *
+	 * Both surfaces derive from this single helper so the two lists are ALWAYS identical
 	 * (previously the Overview rendered the raw list while Combat filtered, so interdiction
 	 * pools + passive riders leaked into the Overview only). Consumes — never edits — the
 	 * S-A classification predicates.
@@ -31258,9 +31270,10 @@ class CharacterSheetState {
 				? allFeatures.find(f => f.id === r.featureId)
 				: allFeatures.find(f => (f.name || "") === (r.name || ""));
 			if (!linked) return true;
-			const info = CharacterSheetState.detectActivatableFeature?.(linked);
-			const isAbility = CharacterSheetState.isActivatableAbilityEntry?.({feature: linked, activationInfo: info, interactionMode: info?.interactionMode});
-			if (isAbility) return false;
+			// (R47) Classified limited-use abilities are intentionally RETAINED here (see
+			// method doc) so they surface as trackable pools on the play tabs. Only the
+			// interdiction-managed / redundant-rider pools — which own a dedicated panel —
+			// are dropped.
 			if (CharacterSheetState.isHiddenFromGenericAbilitySurfaces?.(linked, allFeatures)) return false;
 			return true;
 		});
