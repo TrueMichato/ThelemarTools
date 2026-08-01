@@ -330,7 +330,11 @@ Increase Gravity is encoded as *conditional* modifiers rather than flat ones —
 advantage on `check:advantage:forcedmovement` / `save:advantage:forcedmovement`
 plus `skill:athletics +INT` gated on "when you shove a creature" — so the
 bonuses are offered per roll instead of leaking onto unrelated Athletics
-checks.
+checks. Note the pre-existing generic gap recorded under CS-BUG-065: opting a
+*numeric* conditional in does not currently move a skill or save roll total,
+because `_rollSkillCheck` / `_rollSavingThrow` never consume
+`aggregated.bonus`. The advantage half works; the +INT is offered and
+displayed but not yet summed by those two handlers.
 
 ### Rogue
 
