@@ -285,6 +285,53 @@ hasArcaneCharge: true,            // Level 15+
 hasImprovedWarMagic: true,        // Level 18+
 ```
 
+**Meteor Knight** (`GriffonsSaddlebag3`)
+
+Source-gated on `CharacterSheetState.isMeteorKnightSubclass()`. Every feature is
+a fixed grant — the subclass carries **no player choices**, so Builder /
+Level-Up / Quick Build have nothing extra to surface.
+
+```javascript
+hasMeteorKnight: true,                              // Level 3+
+hasSatelliteMastery: true,                          // Level 3+
+satelliteMax: profBonus,                            // bindable satellites
+satelliteDamage: "1d4" | "1d6" | "1d8",             // L3 / L10 / L18
+satelliteRange: 30 | 60,                            // L3 / L10
+satelliteAbility: "int",                            // NOT Strength or Dexterity
+satelliteAttackBonus: profBonus + INT,
+satelliteDamageBonus: INT,
+satelliteIgnoresCloseQuartersDisadvantage: true,
+satelliteRecallRange: 120,
+hasReduceGravity: true,                             // Level 3+
+reduceGravitySpells: ["Feather Fall", "Jump", …],   // + Levitate at 10
+reduceGravityAtWillSpells: ["Feather Fall", "Jump"],// Level 15+
+hasCourseCorrect: true,                             // Level 7+
+courseCorrectCheckBonus: INT + profBonus,           // contest adds PB explicitly
+courseCorrectRange: 10,
+hasImprovedSatelliteMastery: true,                  // Level 10+
+satelliteReturnsOnMiss: true,
+satelliteRecallOnActionSurge: true,
+hasIncreaseGravity: true,                           // Level 15+
+increaseGravityShoveBonus: INT,
+hasSatelliteBarrage: true,                          // Level 18+
+satelliteBarrageMaxAttacks: satellitesOrbiting,
+```
+
+The satellite is a real, rollable attack — `grantedAttacks` receives an
+Intelligence-keyed ranged **spell** attack (`isSpellAttack: true`,
+`actionType: "bonus"`, `ignoresCloseQuartersDisadvantage: true`) so it appears
+in the attack list and rolls like any other. Orbiting satellites live in a
+reconciled **"Satellites"** resource pool
+(`resourceType: "meteorKnightSatellites"`, max = proficiency bonus) driven by
+`bindSatellite()` / `fireSatellite()` / `recallSatellites()`;
+`useActionSurge()` calls `recallSatellites()` from level 10.
+
+Increase Gravity is encoded as *conditional* modifiers rather than flat ones —
+advantage on `check:advantage:forcedmovement` / `save:advantage:forcedmovement`
+plus `skill:athletics +INT` gated on "when you shove a creature" — so the
+bonuses are offered per roll instead of leaking onto unrelated Athletics
+checks.
+
 ### Rogue
 
 ```javascript
@@ -732,6 +779,41 @@ is **idempotent and re-basing** — a stored `companion.createdUndeadBonus` mark
 means a level-up re-applies the *new* totals instead of stacking.
 `charactersheet-spells.js` calls it automatically when Animate Dead raises
 Skeletons/Zombies via `_pShowRaiseUndeadPicker`.
+
+### Prose spell grants — raw entries, level gating, feature-wide limits
+
+`SpellGrantParser` is the fallback for features that grant spells in prose
+rather than through a structured `additionalSpells` block — i.e. essentially
+all homebrew. Three generic behaviours matter:
+
+**1. Raw entries beat the rendered description.**
+`SpellGrantParser.getFeatureSpellText(feature)` walks the feature's raw
+`entries` tree and returns it whenever it carries `{@spell …}` tags, falling
+back to `feature.description`. A stored feature's `description` is often
+already-rendered HTML in which every tag has become an `<a href>`, so parsing
+it finds nothing. Selection is driven by "which text actually has tags", so
+description-only features are unaffected. See CS-BUG-066.
+
+**2. "At Nth level you also learn X" is honoured.**
+`parseSpellsFromText()` stamps each parsed spell with a `minLevel` derived from
+the sentence that introduced it (`at 10th level`, `when you reach 15th
+level`, …). `_processFeatureSpells()` grants only the spells the character
+qualifies for and stashes the rest on `feature._deferredSpellGrants`;
+`reconcileDeferredFeatureSpells()` (called from `getInnateSpells()` and
+`applyClassFeatureEffects()`) releases them as the class level rises. Gate
+levels are compared against the **granting class's** level, not total level,
+so multiclassing does not unlock a tier early.
+
+**3. A shared casting limit stated once binds every spell in the feature.**
+`_parseFeatureWideCastingLimit()` looks for a *single sentence* containing
+`cast`, `once` and `short|long rest` and uses it as the fallback limit for any
+spell that found no local one. Without it, "You learn X and Y. … You can cast
+each of these spells once until you finish a long rest" produced two unlimited
+innate spells. See CS-BUG-067.
+
+An at-will re-grant of an already-granted spell **upgrades** it —
+`_mergeSpellMetadata()` sets `atWill` and drops `uses`/`recharge` — which is how
+Reduce Gravity's level-15 tier works.
 
 ---
 

@@ -11,7 +11,7 @@ For the full *what* and *why* of every check, see the
 the skill reference at
 [`.agents/skills/e2e-character-tests/references/standard.md`](../../.agents/skills/e2e-character-tests/references/standard.md).
 
-## TGTT character specs (20)
+## TGTT character specs (21)
 
 | # | Spec file | Build | Levels | What it proves |
 |---|---|---|---|---|
@@ -35,6 +35,8 @@ the skill reference at
 | 18 | `tgtt-horror-warlock-theocracian.spec.ts` | Horror Warlock · Theocracian Children | 1–20 | Horror subclass features, Eldritch Invocations pick-list, pact slots short-rest restore. |
 | 19 | `tgtt-necromancer-wizard.spec.ts` | School of Necromancy Wizard · Human | 1–20 | Necromancy Savant scribe discount, Grim Harvest healing math, Undead Thralls companion buffs + Animate Dead grant, Inured to Undeath necrotic resistance **and** HP-max-reduction immunity, Command Undead save DC. |
 | 20 | `tgtt-talent-chronopath.spec.ts` | Chronopath Talent · Human (homebrew base class, `TalPsi`) | 1–20 | Whole MCDM Talent base class: psionic strain penalties on AC/speed/HP/proficiency/advantage/healing, manifestation tests, derived 1st-order + higher-order power pickers, Psionic Exertions, Psychic Boost, Psionic Bastion, Shielded Mind, Ignore Strain, and every Chronopath ability. |
+
+| 21 | `tgtt-meteor-knight-fighter.spec.ts` | Meteor Knight Fighter · Aarakocra (homebrew subclass, `GriffonsSaddlebag3`) | 1–20 | Intelligence-keyed ranged **spell** attack from a proficiency-sized Satellites pool, 3/10/18 damage + 3/10 range tiers, level-gated prose spell grants (feather fall + jump at 3, levitate deferred to 10, at-will at 15), Course Correct's proficiency-added contest, Action Surge recall, Increase Gravity opt-in conditionals, Satellite Barrage capstone. |
 
 ## Other specs
 

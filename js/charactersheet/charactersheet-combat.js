@@ -11012,6 +11012,41 @@ class CharacterSheetCombat {
 			html += `</div>`;
 		}
 
+		// ===== Meteor Knight (TGS3) =====
+		if (calcs.hasMeteorKnight) {
+			const satellites = this._state.getSatelliteResource?.();
+			const orbiting = satellites?.current || 0;
+			const satMax = satellites?.max || 0;
+			const dmgBonus = calcs.satelliteDamageBonus || 0;
+			const dmgBonusStr = dmgBonus >= 0 ? `+ ${dmgBonus}` : `- ${Math.abs(dmgBonus)}`;
+			html += `
+				<div class="charsheet__combat-meteor-knight cs-combat-feature mb-3">
+					<div class="cs-combat-feature__title">
+						${csCombatIcon("spark")}<span>Meteor Knight</span>
+						${csCombatPoolCaption(orbiting, satMax, {recharge: "long rest / Recall"})}
+					</div>
+					<div class="ve-small ve-muted mt-1">Satellite attack <span class="bold">${calcs.satelliteAttackBonus >= 0 ? "+" : ""}${calcs.satelliteAttackBonus}</span> to hit, <span class="bold">${calcs.satelliteDamage} ${dmgBonusStr}</span> bludgeoning or piercing, range <span class="bold">${calcs.satelliteRange} ft</span>. Intelligence is your attack ability; being within 5 feet of a hostile creature never imposes disadvantage.</div>
+					<div class="cs-combat-feature__options mt-2" role="group" aria-label="Meteor Knight satellite controls">
+						<button class="cs-combat-btn cs-combat-btn--spend charsheet__combat-meteor-fire" ${orbiting > 0 ? "" : "disabled"} title="Launch one orbiting satellite (bonus action ranged spell attack)">${csCombatActionChip("bonus")}<span>Launch satellite</span></button>
+						<button class="cs-combat-btn charsheet__combat-meteor-bind" ${orbiting < satMax ? "" : "disabled"} title="Bind one more missile to yourself (action; you must be touching it)">${csCombatActionChip("action")}<span>Bind</span></button>
+						<button class="cs-combat-btn charsheet__combat-meteor-recall" ${orbiting < satMax ? "" : "disabled"} title="Recall every satellite within ${calcs.satelliteRecallRange} feet back into orbit">${csCombatActionChip("action")}<span>Recall all</span></button>
+					</div>`;
+			if (calcs.hasCourseCorrect) {
+				html += `<div class="cs-combat-feature__summary">${csCombatActionChip("reaction")} <span class="bold">Course Correct:</span> when a launched missile passes within ${calcs.courseCorrectRange} ft, contest Intelligence <span class="bold">${calcs.courseCorrectCheckBonus >= 0 ? "+" : ""}${calcs.courseCorrectCheckBonus}</span> (Intelligence + proficiency) against the attack roll to redirect it or claim it as a satellite.</div>`;
+			}
+			if (calcs.hasImprovedSatelliteMastery) {
+				html += `<div class="cs-combat-feature__summary"><span class="bold">Improved Satellite Mastery:</span> once per turn a missed satellite flies straight back to orbit, and every satellite returns automatically when you use Action Surge.</div>`;
+			}
+			if (calcs.hasIncreaseGravity) {
+				html += `<div class="cs-combat-feature__summary"><span class="bold">Increase Gravity:</span> conditional advantage on checks and saves to resist being pushed, pulled or knocked prone, and +${calcs.increaseGravityShoveBonus} (Intelligence) on shove checks.</div>`;
+			}
+			if (calcs.hasSatelliteBarrage) {
+				const barrage = this._state.getSatelliteBarrageMaxAttacks?.() || 0;
+				html += `<div class="cs-combat-feature__summary">${csCombatActionChip("action")} <span class="bold">Satellite Barrage:</span> once on your turn, make up to <span class="bold">${barrage}</span> ranged spell attacks — one per orbiting satellite.</div>`;
+			}
+			html += `</div>`;
+		}
+
 		// ===== Battle Tactics (TGTT) =====
 		const battleTactics = this._state.getBattleTactics?.() || [];
 		if (battleTactics.length) {
@@ -11141,6 +11176,28 @@ class CharacterSheetCombat {
 			this._shadowKnightDarkTarget = !this._shadowKnightDarkTarget;
 			this.renderCombatFighter();
 			this.renderAttacks();
+		});
+		block.querySelector(".charsheet__combat-meteor-fire")?.addEventListener("click", () => {
+			const profile = this._state.fireSatellite?.();
+			if (!profile) {
+				JqueryUtil.doToast({type: "warning", content: "No satellites in orbit! Bind or recall one first."});
+				return;
+			}
+			refresh();
+			const bonus = profile.damageBonus >= 0 ? `+${profile.damageBonus}` : `${profile.damageBonus}`;
+			JqueryUtil.doToast({type: "success", content: `Satellite launched: ranged spell attack ${profile.attackBonus >= 0 ? "+" : ""}${profile.attackBonus}, ${profile.damage}${bonus} damage (${profile.remaining} left in orbit)`});
+		});
+		block.querySelector(".charsheet__combat-meteor-bind")?.addEventListener("click", () => {
+			if (!this._state.bindSatellite?.()) {
+				JqueryUtil.doToast({type: "warning", content: "You already have the maximum number of satellites bound."});
+				return;
+			}
+			refresh();
+		});
+		block.querySelector(".charsheet__combat-meteor-recall")?.addEventListener("click", () => {
+			const returned = this._state.recallSatellites?.() || 0;
+			refresh();
+			JqueryUtil.doToast({type: "success", content: `Recalled ${returned} satellite${returned === 1 ? "" : "s"} into orbit.`});
 		});
 		block.querySelector(".charsheet__combat-shadow-self-light")?.addEventListener("click", () => {
 			const next = !this._state.isStateTypeActive?.("shadowKnightDimLight");
