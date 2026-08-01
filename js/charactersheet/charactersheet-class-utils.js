@@ -5129,7 +5129,7 @@ class CharacterSheetClassUtils {
 	 * @param {string} [opts.recharge="long"]
 	 * @returns {*} Innate spell state object
 	 */
-	static buildInnateSpellStateObject (/** @type {*} */ spell, {sourceFeature, atWill = false, uses, recharge = "long", ability = null}) {
+	static buildInnateSpellStateObject (/** @type {*} */ spell, {sourceFeature, atWill = false, uses, recharge = "long", ability = null, ritualOnly = false}) {
 		return {
 			name: spell.name,
 			source: spell.source,
@@ -5146,6 +5146,9 @@ class CharacterSheetClassUtils {
 			duration: CharacterSheetClassUtils.getSpellDuration(spell),
 			concentration: CharacterSheetClassUtils.spellIsConcentration(spell),
 			ritual: CharacterSheetClassUtils.spellIsRitual(spell),
+			// A grant that reads "but only as a ritual" — the caster can never spend a
+			// slot on it. Kept separate from `ritual` (which is just the spell's tag).
+			ritualOnly,
 			subschools: spell.subschools || [],
 		};
 	}

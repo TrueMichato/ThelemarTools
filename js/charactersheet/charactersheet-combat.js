@@ -2868,9 +2868,13 @@ class CharacterSheetCombat {
 		const totalBonus = abilityMod + (attack.damageBonus || 0) + featureDamageBonus + itemWeaponDamageBonus + rageBonus + stateDamageBonus + hybridDamageBonus + critDamageBonus + spellDamageBonus + ammoFlatDamageBonus;
 
 		// Get extra damage dice from active states (e.g., Hex, Flame Tongue)
+		const isMeleeForExtraDamage = this._getAttackRollKind(attack).isMelee && !attack.isSpell;
 		const extraDamageEntries = (this._state.getExtraDamageFromStates?.() || [])
 			.filter(entry => !entry.weaponId || entry.weaponId === (attack.riteWeaponId || attack.id))
-			.filter(entry => !attack.isSpell || !entry.isCrimsonRite);
+			.filter(entry => !attack.isSpell || !entry.isCrimsonRite)
+			// `meleeOnly` riders (e.g. Steel Hawk's Launch bonus damage) only apply to
+			// melee weapon attacks.
+			.filter(entry => !entry.meleeOnly || isMeleeForExtraDamage);
 		let extraDamageTotal = 0;
 		const extraDamageParts = [];
 		for (const entry of extraDamageEntries) {
@@ -3594,6 +3598,18 @@ class CharacterSheetCombat {
 		const kiMax = this._state.getKiPoints?.() || 0;
 		const kiCurrent = this._state.getKiPointsCurrent?.() || 0;
 
+		// Predatory Instinct (Steel Hawk Fighter 15): automatic, no prompt — "when you
+		// roll initiative and have no uses of Launch remaining, you regain one use".
+		// Runs first so it can't be short-circuited by an awaited Monk prompt below.
+		const launchRegained = this._state.restoreLaunchOnInitiative?.() || 0;
+		if (launchRegained > 0) {
+			this._page.renderCharacter?.();
+			JqueryUtil.doToast({
+				type: "success",
+				content: `Predatory Instinct: regained ${launchRegained} use of Launch.`,
+			});
+		}
+
 		// Uncanny Metabolism (1/long rest, optional — player chooses)
 		if (calc.hasUncannyMetabolism && kiCurrent < kiMax) {
 			const feature = this._state.getFeature("Uncanny Metabolism");
@@ -4264,7 +4280,12 @@ class CharacterSheetCombat {
 
 	_renderHandsUsedToggle (attack) {
 		const weapon = attack?.sourceItem;
-		if (!weapon?.id || !weapon.dmg2) return "";
+		if (!weapon?.id) return "";
+		// Effective profile, so a feature-granted versatile property (Steel Hawk's
+		// Nimble Lancer) surfaces the 1H/2H toggle on a weapon whose printed statblock
+		// has no `dmg2`.
+		const profile = this._state.getEffectiveWeaponDamageProfile?.(weapon) || {dmg1: weapon.dmg1, dmg2: weapon.dmg2};
+		if (!profile.dmg2) return "";
 
 		const parsedHands = Math.floor(Number(weapon.handsUsed));
 		const handsUsed = Number.isFinite(parsedHands) && parsedHands >= 2 ? 2 : 1;
@@ -4273,7 +4294,7 @@ class CharacterSheetCombat {
 			class="charsheet__attack-hands-btn${handsUsed === count ? " charsheet__attack-hands-btn--active" : ""}"
 			data-hands-used="${count}"
 			aria-pressed="${handsUsed === count}"
-			title="Use ${count === 1 ? "one hand" : "two hands"} (${count === 1 ? weapon.dmg1 : weapon.dmg2} damage)"
+			title="Use ${count === 1 ? "one hand" : "two hands"} (${count === 1 ? profile.dmg1 : profile.dmg2} damage)"
 		>${count}H</button>`;
 
 		return `<div class="charsheet__attack-hands" data-item-id="${weapon.id}" role="group" aria-label="${weapon.name || attack.name}: hands used">
@@ -11104,6 +11125,44 @@ class CharacterSheetCombat {
 			html += `</div>`;
 		}
 
+		// ===== Steel Hawk (TGS2) =====
+		if (calcs.hasSteelHawk) {
+			const launch = this._state.getLaunchResource?.();
+			const launchLeft = launch?.current || 0;
+			const launchMax = launch?.max || 0;
+			const momentumArmed = this._state.hasLaunchMomentum?.();
+			const canImproved = this._state.canUseImprovedLaunch?.();
+			html += `
+				<div class="charsheet__combat-steel-hawk cs-combat-feature mb-3">
+					<div class="cs-combat-feature__title">
+						${csCombatIcon("spark")}<span>Steel Hawk</span>
+						${csCombatPoolCaption(launchLeft, launchMax, {recharge: "short or long rest"})}
+					</div>
+					<div class="ve-small ve-muted mt-1">Leap up to <span class="bold">${calcs.launchDistance} ft</span> combined horizontally and vertically without provoking opportunity attacks, and subtract up to <span class="bold">${calcs.launchFallReduction} ft</span> from a fall taken immediately afterwards. A melee weapon attack made immediately after (or during) the leap has <span class="bold">advantage</span> and deals an extra <span class="bold">${calcs.launchBonusDamage}</span> damage of the weapon's type${calcs.launchCriticalRange ? `, scoring a critical hit on a <span class="bold">${calcs.launchCriticalRange}-20</span>` : ""}.</div>
+					<div class="cs-combat-feature__options mt-2" role="group" aria-label="Steel Hawk Launch controls">
+						<button class="cs-combat-btn cs-combat-btn--spend charsheet__combat-steelhawk-launch" ${launchLeft > 0 ? "" : "disabled"} title="Spend one use of Launch and arm the momentum rider on your next melee weapon attack">${csCombatActionChip("bonus")}<span>Launch (${calcs.launchDistance} ft)</span></button>
+						${calcs.hasImprovedLaunch ? `<button class="cs-combat-btn cs-combat-btn--spend charsheet__combat-steelhawk-launch-improved" ${launchLeft > 0 && canImproved ? "" : "disabled"} title="Push beyond your limits: leap up to ${calcs.improvedLaunchDistance} ft and take no falling damage until you land again. Costs a use of Launch, this feature's once-per-rest use, and one level of exhaustion.">${csCombatActionChip("bonus")}<span>Improved Launch (${calcs.improvedLaunchDistance} ft)</span></button>` : ""}
+						${calcs.hasEagleEye ? `<button class="cs-combat-btn charsheet__combat-steelhawk-eagle-eye${this._state.isEagleEyeSightActive?.() ? " cs-combat-btn--active" : ""}" aria-pressed="${!!this._state.isEagleEyeSightActive?.()}" title="Double your proficiency bonus on sight-based Wisdom (Perception) checks">${csCombatActionChip("free")}<span>Eagle Eye sight</span></button>` : ""}
+					</div>
+					${momentumArmed ? `<div class="cs-combat-notice cs-combat-notice--success mt-1">Launch momentum armed: your next melee weapon attack has advantage and deals an extra ${calcs.launchBonusDamage}${calcs.launchCriticalRange ? `, critting on ${calcs.launchCriticalRange}-20` : ""}.</div>` : ""}`;
+			if (calcs.hasNimbleLancer) {
+				html += `<div class="cs-combat-feature__summary"><span class="bold">Nimble Lancer:</span> lances are versatile for you while unmounted (<span class="bold">${calcs.nimbleLancerOneHandedDamage}</span> one-handed / <span class="bold">${calcs.nimbleLancerTwoHandedDamage}</span> two-handed), a Launch-fuelled lance hit always counts as two-handed, and hitting a creature within 5 ft with a lance lets you move up to ${calcs.nimbleLancerDisengageDistance} ft away from it without provoking an opportunity attack.</div>`;
+			}
+			if (calcs.hasSteelGrace) {
+				html += `<div class="cs-combat-feature__summary">${csCombatActionChip("reaction")} <span class="bold">Steel Grace:</span> spend a use of Launch on any Dexterity saving throw to take no damage on a success and half on a failure. Armor never imposes disadvantage on your Stealth checks.</div>`;
+			}
+			if (calcs.hasEagleEye) {
+				html += `<div class="cs-combat-feature__summary"><span class="bold">Eagle Eye:</span> a flying creature hit by your Launch attack must make a DC <span class="bold">${calcs.steelHawkSaveDc}</span> Strength saving throw or have its speed reduced to 0 until the start of its next turn.</div>`;
+			}
+			if (calcs.hasPredatoryInstinct) {
+				html += `<div class="cs-combat-feature__summary"><span class="bold">Predatory Instinct:</span> advantage on initiative rolls; rolling initiative with no uses of Launch left regains one automatically.</div>`;
+			}
+			if (calcs.hasImprovedLaunch) {
+				html += `<div class="cs-combat-feature__summary"><span class="bold">Improved Launch:</span> a creature hit by your Launch melee attack must succeed on a DC <span class="bold">${calcs.steelHawkSaveDc}</span> Strength saving throw or be knocked prone.</div>`;
+			}
+			html += `</div>`;
+		}
+
 		// ===== Battle Tactics (TGTT) =====
 		const battleTactics = this._state.getBattleTactics?.() || [];
 		if (battleTactics.length) {
@@ -11256,6 +11315,35 @@ class CharacterSheetCombat {
 			refresh();
 			JqueryUtil.doToast({type: "success", content: `Recalled ${returned} satellite${returned === 1 ? "" : "s"} into orbit.`});
 		});
+		const doLaunch = (improved) => {
+			const profile = this._state.useLaunch?.({improved});
+			if (!profile) {
+				JqueryUtil.doToast({
+					type: "warning",
+					content: improved
+						? "Improved Launch is unavailable — you need a use of Launch, its once-per-rest use, and fewer than two levels of exhaustion."
+						: "No uses of Launch remaining (and you can't Launch while your speed is 0).",
+				});
+				return;
+			}
+			refresh();
+			const crit = profile.criticalRange < 20 ? `, crits on ${profile.criticalRange}-20` : "";
+			const fall = profile.ignoresFallDamage
+				? " You take no falling damage until you land again, and gain a level of exhaustion."
+				: ` Subtract up to ${profile.fallReduction} ft from a fall taken immediately afterwards.`;
+			JqueryUtil.doToast({
+				type: "success",
+				content: `Launched ${profile.distance} ft. Next melee weapon attack has advantage and deals an extra ${profile.bonusDamage}${crit}.${fall} (${profile.remaining} use${profile.remaining === 1 ? "" : "s"} left)`,
+			});
+		};
+		block.querySelector(".charsheet__combat-steelhawk-launch")?.addEventListener("click", () => doLaunch(false));
+		block.querySelector(".charsheet__combat-steelhawk-launch-improved")?.addEventListener("click", () => doLaunch(true));
+		block.querySelector(".charsheet__combat-steelhawk-eagle-eye")?.addEventListener("click", () => {
+			this._state.setEagleEyeSightActive?.(!this._state.isEagleEyeSightActive?.());
+			refresh();
+			this._page.renderCharacter?.();
+		});
+
 		block.querySelector(".charsheet__combat-shadow-self-light")?.addEventListener("click", () => {
 			const next = !this._state.isStateTypeActive?.("shadowKnightDimLight");
 			this._state.setShadowKnightDimLightActive?.(next);
