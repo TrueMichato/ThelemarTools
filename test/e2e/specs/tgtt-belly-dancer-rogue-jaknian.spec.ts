@@ -53,11 +53,12 @@ describeCharacter({
 		// or die by it).
 		{
 			level: 1,
+			untilLevel: 2,
 			name: /sneak attack/i,
 			kind: "passive",
 			effects: [
 				{kind: "rollInitiative"},
-				{kind: "sneakAttackDice", min: 1, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "sneakAttackDice", exact: 1},
 			],
 		},
 		{level: 1, name: /thieves['’]? cant/i, kind: "passive"},
@@ -66,11 +67,12 @@ describeCharacter({
 		// save roll button (rogue is proficient).
 		{
 			level: 5,
+			untilLevel: 6,
 			name: /uncanny dodge/i,
 			kind: "passive",
 			effects: [
 				{kind: "rollSavingThrow", ability: "dex"},
-				{kind: "sneakAttackDice", min: 3, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "sneakAttackDice", exact: 3},
 			],
 		},
 		// Evasion converts DEX saves into half-on-fail; rogue is also
@@ -84,28 +86,36 @@ describeCharacter({
 			skip: true, skipReason: "CS-BUG-017",
 			effects: [
 				{kind: "rollSavingThrow", ability: "int"},
-				{kind: "sneakAttackDice", min: 4, skip: true, skipReason: "CS-BUG-018"},
 			],
+		},
+		{
+			level: 7,
+			untilLevel: 8,
+			name: /sneak attack/i,
+			kind: "passive",
+			effects: [{kind: "sneakAttackDice", exact: 4}],
 		},
 		// Reliable Talent treats any proficient skill check d20 < 10 as
 		// a 10. Acrobatics is rogue-signature; assert the skill button
 		// click handler is wired.
 		{
 			level: 11,
+			untilLevel: 12,
 			name: /reliable talent/i,
 			kind: "passive",
 			effects: [
 				{kind: "rollSkillCheck", skill: "acrobatics", skip: true, skipReason: "CS-BUG-017"},
-				{kind: "sneakAttackDice", min: 6, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "sneakAttackDice", exact: 6},
 			],
 		},
 		{level: 14, name: /blindsense/i, kind: "passive"},
 		{
 			level: 15,
+			untilLevel: 16,
 			name: /slippery mind/i,
 			kind: "passive",
 			effects: [
-				{kind: "sneakAttackDice", min: 8, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "sneakAttackDice", exact: 8},
 			],
 		},
 		{level: 18, name: /elusive/i, kind: "passive"},
@@ -114,7 +124,7 @@ describeCharacter({
 			name: /stroke of luck/i,
 			kind: "passive",
 			effects: [
-				{kind: "sneakAttackDice", min: 10, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "sneakAttackDice", exact: 10},
 			],
 		},
 
@@ -125,10 +135,11 @@ describeCharacter({
 		// numeric assertion off and rely on the feature-presence check.
 		{
 			level: 3,
+			untilLevel: 4,
 			name: /bonus proficiency/i,
 			kind: "passive",
 			effects: [
-				{kind: "sneakAttackDice", min: 2, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "sneakAttackDice", exact: 2},
 			],
 		},
 		// Dance of the Country — bladesong-like AC buff (+CHA mod) when
@@ -161,40 +172,39 @@ describeCharacter({
 			level: 3,
 			name: "Dance of the Country",
 			kind: "resource",
-			skip: true, skipReason: "CS-BUG-018",
-			resourceMax: 2, // PB at L3
+			untilLevel: 4,
+			resourceMax: 2,
 			restoreOn: "short",
 		},
 		{
 			level: 5,
 			name: "Dance of the Country",
 			kind: "resource",
-			skip: true, skipReason: "CS-BUG-018",
-			resourceMax: 3, // PB at L5
+			untilLevel: 10,
+			resourceMax: 3,
 			restoreOn: "short",
 		},
 		{
-			level: 9,
+			level: 11,
 			name: "Dance of the Country",
 			kind: "resource",
-			skip: true, skipReason: "CS-BUG-018",
-			resourceMax: 4, // PB at L9
-			restoreOn: "short",
-		},
-		{
-			level: 13,
-			name: "Dance of the Country",
-			kind: "resource",
-			skip: true, skipReason: "CS-BUG-018",
-			resourceMax: 5, // PB at L13
+			untilLevel: 16,
+			resourceMax: 4,
 			restoreOn: "short",
 		},
 		{
 			level: 17,
 			name: "Dance of the Country",
 			kind: "resource",
-			skip: true, skipReason: "CS-BUG-018",
-			resourceMax: 6, // PB at L17
+			untilLevel: 19,
+			resourceMax: 6,
+			restoreOn: "short",
+		},
+		{
+			level: 20,
+			name: "Dance of the Country",
+			kind: "resource",
+			resourceMax: 6,
 			restoreOn: "short",
 		},
 		// Tantalizing Shivers fires a Charisma (Performance) check vs
@@ -202,19 +212,21 @@ describeCharacter({
 		// skill roll button at this level.
 		{
 			level: 9,
+			untilLevel: 10,
 			name: /tantalizing shivers/i,
 			kind: "passive",
 			effects: [
 				{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
-				{kind: "sneakAttackDice", min: 5, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "sneakAttackDice", exact: 5},
 			],
 		},
 		{
 			level: 13,
+			untilLevel: 14,
 			name: /fluid step/i,
 			kind: "passive",
 			effects: [
-				{kind: "sneakAttackDice", min: 7, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "sneakAttackDice", exact: 7},
 			],
 		},
 		// Percussive Strike sets a save DC = 8 + PB + CHA mod for hostile
@@ -223,11 +235,12 @@ describeCharacter({
 		// roll button to cover the ability-check probe quota.
 		{
 			level: 17,
+			untilLevel: 19,
 			name: /percussive strike/i,
 			kind: "passive",
 			effects: [
 				{kind: "rollAbilityCheck", ability: "cha"},
-				{kind: "sneakAttackDice", min: 9, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "sneakAttackDice", exact: 9},
 			],
 		},
 		// Jaknian race traits (Trade Secrets: Persuasion or Investigation
