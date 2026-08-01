@@ -328,7 +328,13 @@ export function describeCharacter (spec: CharacterSpec): void {
 						// resource counter). The MEGA test still asserts
 						// the toggle at the milestone level when one
 						// arrives — skip rather than fail here.
-						console.log(`[spec ${displayName}] L5 loadout: no toggle for ${signatureToggle}; skipping toggle probe`);
+						// Always print what WAS toggleable. A bare "no toggle
+						// found" makes a mis-authored pattern indistinguishable
+						// from a genuinely toggle-less class, which is how
+						// CS-BUG-032's probe stayed silently dead.
+						const toggleables = await charSheet.getToggleableFeatureNames().catch(() => [] as string[]);
+						console.log(`[spec ${displayName}] L5 loadout: no toggle for ${signatureToggle}; skipping toggle probe `
+							+ `(toggleable rows present: ${toggleables.length ? toggleables.join(", ") : "none"})`);
 					} else if (spec.signatureToggleNoDerivedEffect) {
 						// The toggle surfaced and activated (probeToggleDelta
 						// returned a delta), which is the part we can verify.

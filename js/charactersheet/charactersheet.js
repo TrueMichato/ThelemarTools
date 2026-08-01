@@ -1507,7 +1507,7 @@ class CharacterSheetPage {
 		this._currentCharacterId = CryptUtil.uid();
 		this._isLevelUpBannerDismissed = false;
 		this._state.reset();
-		this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || []);
+		this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || [], this._optionalFeaturesData || []);
 		this._state.setId(this._currentCharacterId);
 		this._renderCharacter();
 	}
@@ -16203,7 +16203,7 @@ class CharacterSheetPage {
 			// Re-hydrate + reconcile auto-granted combat methods (e.g. Ranger Primal Focus
 			// Upgrade's Singular Focus / Groundshatter), now that the class-feature catalog
 			// and combat-method catalog are both available.
-			this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || []);
+			this._state.setClassFeatureCatalog(this._classFeatures || [], this._subclassFeatures || [], this._optionalFeaturesData || []);
 			// (R48 Bug 1) Provide the brew-merged full class-object catalog so class-level
 			// always-prepared spells (TGTT Cleric Ceremony/Thaumaturgy, Ranger Hunter's Mark,
 			// etc.) can be resolved — the lean stored `_data.classes[]` drops the class

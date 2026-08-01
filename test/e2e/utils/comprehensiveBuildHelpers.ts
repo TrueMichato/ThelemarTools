@@ -540,6 +540,15 @@ export async function probeToggleDelta (
 			const d = await charSheet.getAttackDamageString(name).catch(() => null);
 			damage.push(`${name}=${d ?? ""}`);
 		}
+		// Some toggles move NOTHING numeric — their whole effect is an advantage
+		// flag (e.g. Bastion Paladin's Undaunted: "advantage on ability checks and
+		// attack rolls"). Without this the probe reported a working ability as
+		// "no effect", which is a harness gap, not a product gap.
+		const advantage: string[] = [];
+		for (const rollType of ["attack", "check:str", "check:dex", "save:con"]) {
+			const a = await charSheet.getAdvantageState(rollType).catch(() => null);
+			advantage.push(`${rollType}=${a ? `${a.advantage}/${a.disadvantage}` : ""}`);
+		}
 		return {
 			ac: await charSheet.getAC().catch(() => -1),
 			dc: await charSheet.getSpellSaveDC().catch(() => -1),
@@ -547,6 +556,7 @@ export async function probeToggleDelta (
 			speed: await charSheet.getSpeed().catch(() => -1),
 			attacks: attacks.join("|"),
 			damage: damage.join("|"),
+			advantage: advantage.join("|"),
 		};
 	};
 
@@ -568,7 +578,8 @@ export async function probeToggleDelta (
 		|| after.resistances !== before.resistances
 		|| after.speed !== before.speed
 		|| after.attacks !== before.attacks
-		|| after.damage !== before.damage;
+		|| after.damage !== before.damage
+		|| after.advantage !== before.advantage;
 
 	return {acDelta, dcDelta, changed};
 }

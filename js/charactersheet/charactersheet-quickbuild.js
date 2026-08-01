@@ -5092,7 +5092,7 @@ class CharacterSheetQuickBuild {
 
 		// Expand refSubclassFeature wrappers added during this batch before choices/effects are
 		// finalized. This covers official PHB domains as well as shifted-level homebrew copies.
-		this._state.setClassFeatureCatalog?.(this._page._classFeatures || [], this._page._subclassFeatures || []);
+		this._state.setClassFeatureCatalog?.(this._page._classFeatures || [], this._page._subclassFeatures || [], this._page.getOptionalFeatures?.() || []);
 		this._state.reconcileSubclassFeatureEntries?.();
 
 		// Seed subclass-feature prose choices the generic FeatureChoiceParser does not

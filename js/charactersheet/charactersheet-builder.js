@@ -2575,7 +2575,7 @@ class CharacterSheetBuilder {
 		// Builder/spawner-created state may not yet carry the page's feature catalogs. Attach
 		// them before finalization so wrapper features with refSubclassFeature children grant
 		// those children immediately (rather than only after a later save/load reconciliation).
-		this._state.setClassFeatureCatalog?.(this._page._classFeatures || [], this._page._subclassFeatures || []);
+		this._state.setClassFeatureCatalog?.(this._page._classFeatures || [], this._page._subclassFeatures || [], this._page.getOptionalFeatures?.() || []);
 		this._state.reconcileSubclassFeatureEntries?.();
 
 		// Recalculate max HP (CON may have changed since addClass) and fill to full

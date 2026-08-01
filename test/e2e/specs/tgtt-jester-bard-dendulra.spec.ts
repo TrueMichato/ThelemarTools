@@ -18,6 +18,13 @@ describeCharacter({
 	preset: PRESET_FULL_JESTER_DENDULRA,
 	displayName: "College of Jesters Bard Dendulra",
 	signatureToggle: /juggle|jaunt|jest|prankster|pantomime|fool|laughing|witty|agility|dazzling|tumbler|disengagement|ridiculous/i,
+	// CS-BUG-032: the only Jester's Act that surfaces as a TOGGLE is Pantomime, and
+	// its whole effect (speed 0, disadvantage on attacks) lands on the charmed target,
+	// which a single-character sheet cannot model. The acts with self effects —
+	// notably Jester's Agility (+PB AC for a turn) — are limited-use "Use" abilities
+	// rather than toggles; their mechanics are pinned by
+	// test/jest/charactersheet/CharacterSheetFeatureTextEffects.test.js.
+	signatureToggleNoDerivedEffect: "Pantomime is target-facing; self-effect acts are Use abilities, covered by Jest",
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [

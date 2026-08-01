@@ -5186,7 +5186,7 @@ class CharacterSheetLevelUp {
 		// Expand any refSubclassFeature wrapper gained at this level before passive effects and
 		// pending choices are finalized. The catalogs live on the page, while a fresh state
 		// created by Builder/spawn does not necessarily inherit them.
-		this._state.setClassFeatureCatalog?.(this._page._classFeatures || [], this._page._subclassFeatures || []);
+		this._state.setClassFeatureCatalog?.(this._page._classFeatures || [], this._page._subclassFeatures || [], this._page.getOptionalFeatures?.() || []);
 		this._state.reconcileSubclassFeatureEntries?.();
 
 		// Surface passive feature effects picked this level-up (R20 #15). The wizard

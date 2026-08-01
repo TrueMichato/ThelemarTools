@@ -1431,38 +1431,103 @@ that guard is what surfaced this bug; widening it restores the silent stall.
 
 ## CS-BUG-032 — two signature toggles produce no derived effect at L5
 
-**Status**: open (product or spec-authoring — not yet separated).
-**Pre-existing, not a regression**: proven by reverting the CS-BUG-030 loadout
-additions for exactly these two specs and re-running — both fail identically
-without them.
+**Status**: RESOLVED (`parseEffectsFromDescription` / `_effectMatchesType` /
+`resolveFeatureRef` / `_buildAbilityActivationInfo` / rage `detectPatterns` /
+`probeToggleDelta` / both spec patterns).
 
-**Affected**:
+**Filed as an either/or — "spec authoring OR product gap". It was neither.**
+Separating the two causes uncovered **seven distinct defects**, five of them
+real product bugs with a blast radius far wider than these two specs. The two
+originally-suspected features (Sentry's Lingering Aura, Pantomime) genuinely
+are target/ally-facing, so `changed: false` was correct behaviour for them —
+but investigating *why* is what exposed everything below.
 
-- `tgtt-bastion-paladin-bugbear` — `/bastion|sentinel|guardian|aura|smite|channel divinity|protect/i`
-- `tgtt-jester-bard-dendulra` — `/juggle|jaunt|jest|prankster|pantomime|fool|laughing|witty|agility|dazzling|tumbler|disengagement|ridiculous/i`
+### 1. `advantage on …` matched `disadvantage on …` (most severe)
 
-**Symptom**: `toggle … should produce a derived effect
-(ac/dc/resistances/speed/attacks/damage)` at the `L5 loadout` test. A toggle
-matching the pattern *does* surface and activate (`probeToggleDelta` returns a
-delta, not `null`) but nothing measurable changes.
+`advantage on attack rolls` is a literal **substring** of `disadvantage on
+attack rolls`. All **26** `advantage on …` patterns in
+`parseEffectsFromDescription` were affected, so any feature describing a debuff
+it inflicts on an **enemy** granted the *player* the corresponding buff. The
+Jester's Pantomime ("the creature … has disadvantage on attack rolls") handed
+the Bard `{type: "advantage", target: "attack"}`.
 
-**Why it surfaced now**: it was previously masked. Both specs failed earlier in
-the same test at the `gear should affect AC, attack, or DC` assertion, which
-aborted before the toggle probe ran. Fixing that (CS-BUG-030) exposed this.
+Fixed with a `(?<!dis)` negative lookbehind on every one. Regression case:
+`"advantage on Dexterity saving throws and creatures have disadvantage on
+attack rolls against you"` must yield `save:dex` **only**.
 
-**Two candidate causes, not yet separated:**
+### 2. A bare category target did not match its subtypes
 
-1. **Spec authoring** — the pattern matches a *passive* feature rather than the
-   build's real signature toggle (e.g. Paladin `Aura of Protection` is a passive
-   save bonus; several Jester acts are reminders). If so, retarget the pattern,
-   or use `signatureToggleAddsAttack` / `signatureToggleNoDerivedEffect` (added
-   for the TGTT Gambler, whose abilities alter dice outcomes rather than stats).
-2. **Product gap** — the toggle is genuinely inert on the sheet, which is a real
-   bug against the "every ability has an actual effect" bar.
+`_effectMatchesType` required an exact target string, so an effect targeting
+`check` did not match a query for `check:str`. Three roll-time consumers and
+`_getConditionalActiveStateModifiersForType` already honoured the bare
+category, so the vocabulary was being interpreted inconsistently.
 
-**Do not** silence this by deleting `signatureToggle`; that removes the check
-entirely and silently. Separate the two causes first — inspect which feature
-name actually matched via `getToggleableFeatureNames()`.
+Beyond the toggles: a state granting "advantage on saving throws" was
+**silently invisible to the concentration check**, which asks
+`getAdvantageState("save:con")`.
+
+### 3. "tragedies" classified a Bard feature as Barbarian Rage
+
+`ACTIVE_STATE_TYPES.rage.detectPatterns` contained the unanchored
+`you can.*rage`, tested against the **whole rendered description** — which
+bleeds in adjacent flavour sidebars. The XPHB Bard's "A Bard's Repertoire"
+sidebar mentions **trage**dies, so the passive *Jack of All Trades* was
+detected as Rage, handing a Bard b/p/s resistance, STR advantage and rage
+damage. Fixed with word boundaries (`\brage\b`), which still correctly
+rejects "enrage".
+
+### 4. `refOptionalfeature` options resolved to empty stubs
+
+`resolveFeatureRef` branched only on `classFeature` / `subclassFeature`.
+Options declared as `refOptionalfeature` fell through to `null`, and
+`_fulfillSubfeatureChoice` then added `{name, source, entries: []}` — an
+ability with **no text**, therefore no parsed effects. `_applyFeatureOptionsForLevel`
+only iterates *selected* options, so these were genuinely picked abilities
+rendering blank, not leaked UI noise. Fixed by threading an optional-feature
+catalog through `setClassFeatureCatalog` (third parameter) and adding a
+resolver branch.
+
+### 5. Parsed duration was discarded
+
+`_buildAbilityActivationInfo` dropped the duration `analyzeToggleability`
+had already parsed, so every timed self-buff was stored as "Instant".
+
+### 6. Harness — `probeToggleDelta` had no advantage dimension
+
+It snapshotted AC/DC/resistances/speed/attacks/damage. An ability whose entire
+effect is an advantage flag therefore always read as "no effect". Now also
+snapshots `getAdvantageState` for `attack`, `check:str`, `check:dex`,
+`save:con`.
+
+### 7. Harness — the "no toggle found" skip was silent
+
+It reported only the pattern that failed to match, never what *was* toggleable,
+which is precisely how a mis-authored pattern stays indistinguishable from a
+genuinely toggle-less class. It now prints the toggleable rows it saw.
+
+That immediately paid for itself: the Bastion spec had been retargeted to
+`/undaunted/i` on the strength of a **spawner-built** character, but `Undaunted`
+is one of **fourteen** L3 *Specialty* options, so a wizard-built character
+usually does not have it — the probe was silently skipping. Both specs now
+target a guaranteed toggle.
+
+### Verification
+
+24 Jest tests in `CharacterSheetFeatureTextEffects.test.js`, **proven to fail
+16/24** with `charactersheet-state.js` reverted (the 8 survivors are the
+intended no-op controls). Full Jest 425 suites / 12,705 tests. E2E: Bastion
+6 passed, Jester 6 passed, Juggernaut (Rage blast-radius neighbour) 6 passed.
+
+### Lessons
+
+- **Do not trust your own bug report's suggested fix.** This one framed the
+  question as a binary and the answer was outside both options.
+- **A substring relationship between an antonym pair is a systematic hazard**,
+  not a one-off typo — audit every sibling pattern, not just the failing one.
+- **Unanchored `detectPatterns` are tested against text you did not write.**
+  Rendered descriptions include neighbouring sidebars.
+- **Measure, do not infer.** The "tragedies" cause was unguessable; every root
+  cause here came from dumping real in-browser state.
 
 ---
 

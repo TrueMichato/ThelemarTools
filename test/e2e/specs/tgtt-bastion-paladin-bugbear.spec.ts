@@ -16,7 +16,16 @@ import {buildSpecialtyChecks, buildWeaponMasteryChecks} from "../utils/tgttFeatu
 describeCharacter({
 	preset: PRESET_FULL_BASTION_BUGBEAR,
 	displayName: "Oath of Bastion Paladin Bugbear",
-	signatureToggle: /bastion|sentinel|guardian|aura|smite|channel divinity|protect/i,
+	// CS-BUG-032: measured, not assumed. At L5 the only toggleable rows this
+	// build ever has are "Divine Sense" and "Channel Divinity: Sentry's
+	// Lingering Aura" — and the aura's entire effect lands on an ALLY, so no
+	// self-facing stat can move. "Undaunted" (advantage on ability checks and
+	// attack rolls) looked like the right target but is one of FOURTEEN L3
+	// Specialty options, so it is not guaranteed to be picked; targeting it
+	// made the probe silently skip. Target the guaranteed aura and waive only
+	// the unobservable delta.
+	signatureToggle: /sentry's lingering aura/i,
+	signatureToggleNoDerivedEffect: "Sentry's Lingering Aura is ally-facing (a chosen ally gains the benefit); the sheet models one character, so no self-facing stat can move. Activation itself is still asserted.",
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [

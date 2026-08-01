@@ -15094,6 +15094,17 @@ class CharacterSheetState {
 				&& (!ref.subclassSource || eq(c.subclassSource, ref.subclassSource))
 				&& (ref.level == null || Number(c.level) === Number(ref.level))) || null;
 		}
+		if (ref.refType === "optionalfeature") {
+			// Options declared as `refOptionalfeature` (a common pattern for homebrew
+			// "… Options" features, e.g. Jester's Acts) live in the optional-feature
+			// catalog, NOT the class catalog. Without this branch they fell through to
+			// the classFeature search, resolved to null, and were added as empty stubs —
+			// the feature appeared on the sheet with no text and therefore no effects.
+			const pool = this._optionalFeatureCatalog || [];
+			return pool.find(c => nameMatch(c) && (!ref.source || eq(c.source, ref.source)))
+				|| pool.find(c => nameMatch(c))
+				|| null;
+		}
 		// classFeature (default) — search class catalog, then subclass as a fallback.
 		const classPool = this._classFeatureCatalog || [];
 		const found = classPool.find(c => nameMatch(c)
@@ -34079,10 +34090,14 @@ class CharacterSheetState {
 	 * lost its `grantsCombatMethods`). Set by the page after loading site + brew data.
 	 * @param {Array<*>} classFeatures
 	 * @param {Array<*>} [subclassFeatures]
+	 * @param {Array<*>} [optionalFeatures] Optional-feature catalog, needed so options declared
+	 *        as `refOptionalfeature` inside an "… Options" feature resolve to their real rules
+	 *        text instead of an empty stub.
 	 */
-	setClassFeatureCatalog (classFeatures, subclassFeatures) {
+	setClassFeatureCatalog (classFeatures, subclassFeatures, optionalFeatures) {
 		this._classFeatureCatalog = Array.isArray(classFeatures) ? classFeatures : [];
 		this._subclassFeatureCatalog = Array.isArray(subclassFeatures) ? subclassFeatures : [];
+		this._optionalFeatureCatalog = Array.isArray(optionalFeatures) ? optionalFeatures : [];
 	}
 
 	/**
@@ -42577,6 +42592,18 @@ class CharacterSheetState {
 		const targetParts = effectTarget.split(":");
 		const typeParts = type.split(":");
 
+		// A bare category target ("check", "save", "attack") applies to EVERY subtype
+		// in that category. `_getConditionalActiveStateModifiersForType` and the
+		// roll-time bonus consumers already read it this way, so without this branch
+		// the same effect vocabulary meant different things in different aggregators —
+		// e.g. a state granting "advantage on saving throws" was silently missed by
+		// the concentration check, which asks for "save:con".
+		if (targetParts.length === 1) {
+			if (typeParts[0] === targetParts[0]) return true;
+			// A skill check IS an ability check.
+			if (targetParts[0] === "check" && typeParts[0] === "skill") return true;
+		}
+
 		// Category match (e.g., "check:str" matches "skill:athletics" if athletics uses STR)
 		if (targetParts[0] === "check" && typeParts[0] === "skill") {
 			const skillAbility = this.getSkillAbility(typeParts[1]);
@@ -43413,7 +43440,12 @@ class CharacterSheetState {
 			endConditions: ["No attack or damage taken for 1 turn", "Knocked unconscious", "Ended as bonus action"],
 			resourceName: "Rage",
 			resourceCost: 1,
-			detectPatterns: ["^rage$", "enter.*rage", "you can.*rage"],
+			// Word boundaries are mandatory: without them "rage" matches INSIDE ordinary
+			// words, and since detectPatterns are tested against the whole rendered
+			// description (which can include unrelated flavour sidebars), the Bard's
+			// "Repertoire" text — "...classic tragedies..." — made Jack of All Trades
+			// detect as Barbarian Rage, handing a Bard rage resistances and STR advantage.
+			detectPatterns: ["^rage$", "enter\\b.*\\brage\\b", "you can\\b.*\\brage\\b"],
 			activationAction: "bonus",
 			exclusiveWith: ["bladesong"], // Cannot rage and bladesong simultaneously
 			breaksConcentration: true, // Rage prevents maintaining concentration
@@ -44440,6 +44472,12 @@ class CharacterSheetState {
 			effects.push({type: "bonus", target: "ac", abilityMod: "con"});
 		}
 
+		// AC bonus equal to the proficiency bonus (e.g. Jester's Agility)
+		if (/bonus to (?:your )?(?:ac|armor class) equal to (?:your )?proficiency/i.test(text)
+			|| /add (?:your )?proficiency bonus to (?:your )?(?:ac|armor class)/i.test(text)) {
+			effects.push({type: "bonus", target: "ac", useProficiency: true});
+		}
+
 		// Attack bonuses
 		const attackBonusMatch = text.match(/(?:\+)?(\d+) (?:bonus )?to (?:attack|weapon attack|melee attack|ranged attack) rolls?/i);
 		if (attackBonusMatch) {
@@ -44471,59 +44509,67 @@ class CharacterSheetState {
 			effects.push({type: "bonus", target: "save", useProficiency: true});
 		}
 
-		// Advantage on attacks - general
-		if (/advantage on (?:all )?(?:melee )?(?:attack|weapon attack) rolls?/i.test(text)) {
+		// Advantage on attacks - general. The second alternative covers coordinated
+		// lists ("advantage on ability checks and attack rolls"), where the phrase
+		// "attack rolls" does not immediately follow "advantage on".
+		if (/(?<!dis)advantage on (?:all )?(?:melee )?(?:attack|weapon attack) rolls?/i.test(text)
+			|| /(?<!dis)advantage on [^.;]{0,80}?\band (?:on )?(?:all )?(?:melee |ranged )?(?:weapon )?attack rolls?/i.test(text)) {
 			effects.push({type: "advantage", target: "attack"});
 		}
 		// Advantage on melee attacks specifically
-		if (/advantage on melee (?:attack|weapon attack) rolls?/i.test(text) && !/advantage on all/i.test(text)) {
+		if (/(?<!dis)advantage on melee (?:attack|weapon attack) rolls?/i.test(text) && !/(?<!dis)advantage on all/i.test(text)) {
 			effects.push({type: "advantage", target: "attack:melee"});
 		}
 		// Advantage on ranged attacks
-		if (/advantage on ranged (?:attack|weapon attack) rolls?/i.test(text)) {
+		if (/(?<!dis)advantage on ranged (?:attack|weapon attack) rolls?/i.test(text)) {
 			effects.push({type: "advantage", target: "attack:ranged"});
 		}
 
 		// Advantage on saving throws
-		if (/advantage on (?:all )?(?:saving throws?|saves)/i.test(text)) {
+		if (/(?<!dis)advantage on (?:all )?(?:saving throws?|saves)/i.test(text)) {
 			effects.push({type: "advantage", target: "save"});
 		}
-		if (/advantage on strength (?:saving throws?|saves)/i.test(text)) {
+		if (/(?<!dis)advantage on strength (?:saving throws?|saves)/i.test(text)) {
 			effects.push({type: "advantage", target: "save:str"});
 		}
-		if (/advantage on dexterity (?:saving throws?|saves)/i.test(text)) {
+		if (/(?<!dis)advantage on dexterity (?:saving throws?|saves)/i.test(text)) {
 			effects.push({type: "advantage", target: "save:dex"});
 		}
-		if (/advantage on constitution (?:saving throws?|saves)/i.test(text)) {
+		if (/(?<!dis)advantage on constitution (?:saving throws?|saves)/i.test(text)) {
 			effects.push({type: "advantage", target: "save:con"});
 		}
-		if (/advantage on intelligence (?:saving throws?|saves)/i.test(text)) {
+		if (/(?<!dis)advantage on intelligence (?:saving throws?|saves)/i.test(text)) {
 			effects.push({type: "advantage", target: "save:int"});
 		}
-		if (/advantage on wisdom (?:saving throws?|saves)/i.test(text)) {
+		if (/(?<!dis)advantage on wisdom (?:saving throws?|saves)/i.test(text)) {
 			effects.push({type: "advantage", target: "save:wis"});
 		}
-		if (/advantage on charisma (?:saving throws?|saves)/i.test(text)) {
+		if (/(?<!dis)advantage on charisma (?:saving throws?|saves)/i.test(text)) {
 			effects.push({type: "advantage", target: "save:cha"});
 		}
 
 		// Advantage on ability checks
-		if (/advantage on (?:strength|str) (?:\()?(?:athletics)?(?:\))? checks?/i.test(text)) {
+		// Untyped "ability checks" applies to every ability; the bare "check" target
+		// matches any "check:*" roll type.
+		if (/(?<!dis)advantage on (?:all )?ability checks?/i.test(text)) {
+			effects.push({type: "advantage", target: "check"});
+		}
+		if (/(?<!dis)advantage on (?:strength|str) (?:\()?(?:athletics)?(?:\))? checks?/i.test(text)) {
 			effects.push({type: "advantage", target: "check:str"});
 		}
-		if (/advantage on (?:dexterity|dex) (?:\()?(?:acrobatics|stealth)?(?:\))? checks?/i.test(text)) {
+		if (/(?<!dis)advantage on (?:dexterity|dex) (?:\()?(?:acrobatics|stealth)?(?:\))? checks?/i.test(text)) {
 			effects.push({type: "advantage", target: "check:dex"});
 		}
-		if (/advantage on (?:constitution|con) checks?/i.test(text)) {
+		if (/(?<!dis)advantage on (?:constitution|con) checks?/i.test(text)) {
 			effects.push({type: "advantage", target: "check:con"});
 		}
-		if (/advantage on (?:intelligence|int) checks?/i.test(text)) {
+		if (/(?<!dis)advantage on (?:intelligence|int) checks?/i.test(text)) {
 			effects.push({type: "advantage", target: "check:int"});
 		}
-		if (/advantage on (?:wisdom|wis) (?:\()?(?:perception)?(?:\))? checks?/i.test(text)) {
+		if (/(?<!dis)advantage on (?:wisdom|wis) (?:\()?(?:perception)?(?:\))? checks?/i.test(text)) {
 			effects.push({type: "advantage", target: "check:wis"});
 		}
-		if (/advantage on (?:charisma|cha) checks?/i.test(text)) {
+		if (/(?<!dis)advantage on (?:charisma|cha) checks?/i.test(text)) {
 			effects.push({type: "advantage", target: "check:cha"});
 		}
 
@@ -44580,7 +44626,7 @@ class CharacterSheetState {
 		}
 
 		// Advantage on initiative
-		if (/advantage on initiative/i.test(text)) {
+		if (/(?<!dis)advantage on initiative/i.test(text)) {
 			effects.push({type: "advantage", target: "initiative"});
 		}
 
@@ -44591,42 +44637,42 @@ class CharacterSheetState {
 
 		// ===== SKILL ADVANTAGES =====
 		// Advantage on Acrobatics specifically
-		if (/advantage on (?:dexterity \()?acrobatics(?:\))?/i.test(text)) {
+		if (/(?<!dis)advantage on (?:dexterity \()?acrobatics(?:\))?/i.test(text)) {
 			effects.push({type: "advantage", target: "skill:acrobatics"});
 		}
 
 		// Advantage on Stealth
-		if (/advantage on (?:dexterity \()?stealth(?:\))?/i.test(text)) {
+		if (/(?<!dis)advantage on (?:dexterity \()?stealth(?:\))?/i.test(text)) {
 			effects.push({type: "advantage", target: "skill:stealth"});
 		}
 
 		// Advantage on Perception
-		if (/advantage on (?:wisdom \()?perception(?:\))?/i.test(text)) {
+		if (/(?<!dis)advantage on (?:wisdom \()?perception(?:\))?/i.test(text)) {
 			effects.push({type: "advantage", target: "skill:perception"});
 		}
 
 		// Advantage on Athletics
-		if (/advantage on (?:strength \()?athletics(?:\))?/i.test(text)) {
+		if (/(?<!dis)advantage on (?:strength \()?athletics(?:\))?/i.test(text)) {
 			effects.push({type: "advantage", target: "skill:athletics"});
 		}
 
 		// Advantage on Intimidation
-		if (/advantage on (?:charisma \()?intimidation(?:\))?/i.test(text)) {
+		if (/(?<!dis)advantage on (?:charisma \()?intimidation(?:\))?/i.test(text)) {
 			effects.push({type: "advantage", target: "skill:intimidation"});
 		}
 
 		// Advantage on Insight
-		if (/advantage on (?:wisdom \()?insight(?:\))?/i.test(text)) {
+		if (/(?<!dis)advantage on (?:wisdom \()?insight(?:\))?/i.test(text)) {
 			effects.push({type: "advantage", target: "skill:insight"});
 		}
 
 		// Advantage on Deception
-		if (/advantage on (?:charisma \()?deception(?:\))?/i.test(text)) {
+		if (/(?<!dis)advantage on (?:charisma \()?deception(?:\))?/i.test(text)) {
 			effects.push({type: "advantage", target: "skill:deception"});
 		}
 
 		// Advantage on Performance
-		if (/advantage on (?:charisma \()?performance(?:\))?/i.test(text)) {
+		if (/(?<!dis)advantage on (?:charisma \()?performance(?:\))?/i.test(text)) {
 			effects.push({type: "advantage", target: "skill:performance"});
 		}
 
@@ -44672,7 +44718,7 @@ class CharacterSheetState {
 		}
 
 		// Grapple improvements
-		if (/advantage on (?:checks? )?(?:to )?(?:grapple|maintain.*grapple)/i.test(text)) {
+		if (/(?<!dis)advantage on (?:checks? )?(?:to )?(?:grapple|maintain.*grapple)/i.test(text)) {
 			effects.push({type: "advantage", target: "grapple"});
 		}
 
@@ -45065,6 +45111,11 @@ class CharacterSheetState {
 			interactionMode: "limited",
 			activationAction,
 			effects: this.parseEffectsFromDescription(rawText),
+			// A limited-use ability can still apply a TIMED self-buff (e.g. Jester's Agility —
+			// "a bonus to AC equal to your proficiency bonus until the start of your next
+			// turn"). Without carrying the parsed duration the activation pipeline stored the
+			// resulting state as "Instant", so the buff had no stated lifetime.
+			duration: this.analyzeToggleability(rawText)?.duration || undefined,
 			isToggle: false,
 			isInstant: true,
 			staminaCost,
