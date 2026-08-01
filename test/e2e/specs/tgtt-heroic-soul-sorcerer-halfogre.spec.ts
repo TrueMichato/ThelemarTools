@@ -87,7 +87,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 3,  name: /metamagic/i, kind: "pick", pickedCount: 2,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
-			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-084: liftable. TGTT Sorcery Points are `level + 1` (not `level`) — see getSorceryPointsMaxForClass(). To unskip, set resourceMax to level+1 AND add `untilLevel` to every tier: the matrix re-evaluates each earlier row at checkpoints [3,5,11,17,20], and this pool grows every level.", min: 1, matchAny: [
+			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-018 (NOT liftable — do not unskip): metamagic is a CAST-TIME mechanic, not a toggle. charactersheet-combat.js:5806/:5827/:6048 deliberately exclude optionalFeatureTypes ['MM'] from the activatable surface because the Metamagic Dashboard owns it, so the '.*active' patterns below can NEVER match and this probe is structurally unsatisfiable. Assert metamagic with stateCall instead: {kind: 'stateCall', method: 'getKnownMetamagicKeys', path: 'length'} and {kind: 'stateCall', method: 'getMetamagicCost', args: [key, slotLevel]} — see tgtt-shadow-magic-sorcerer.spec.ts. (Name-matching probes are also unsafe: a spawned build surfaces unpicked options.)", min: 1, matchAny: [
 				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
 				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
 				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
@@ -96,7 +96,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 10, name: /metamagic/i, kind: "pick", pickedCount: 3,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
-			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-084: liftable. TGTT Sorcery Points are `level + 1` (not `level`) — see getSorceryPointsMaxForClass(). To unskip, set resourceMax to level+1 AND add `untilLevel` to every tier: the matrix re-evaluates each earlier row at checkpoints [3,5,11,17,20], and this pool grows every level.", min: 1, matchAny: [
+			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-018 (NOT liftable — do not unskip): metamagic is a CAST-TIME mechanic, not a toggle. charactersheet-combat.js:5806/:5827/:6048 deliberately exclude optionalFeatureTypes ['MM'] from the activatable surface because the Metamagic Dashboard owns it, so the '.*active' patterns below can NEVER match and this probe is structurally unsatisfiable. Assert metamagic with stateCall instead: {kind: 'stateCall', method: 'getKnownMetamagicKeys', path: 'length'} and {kind: 'stateCall', method: 'getMetamagicCost', args: [key, slotLevel]} — see tgtt-shadow-magic-sorcerer.spec.ts. (Name-matching probes are also unsafe: a spawned build surfaces unpicked options.)", min: 1, matchAny: [
 				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
 				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
 				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
@@ -105,7 +105,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
-			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-084: liftable. TGTT Sorcery Points are `level + 1` (not `level`) — see getSorceryPointsMaxForClass(). To unskip, set resourceMax to level+1 AND add `untilLevel` to every tier: the matrix re-evaluates each earlier row at checkpoints [3,5,11,17,20], and this pool grows every level.", min: 1, matchAny: [
+			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-018 (NOT liftable — do not unskip): metamagic is a CAST-TIME mechanic, not a toggle. charactersheet-combat.js:5806/:5827/:6048 deliberately exclude optionalFeatureTypes ['MM'] from the activatable surface because the Metamagic Dashboard owns it, so the '.*active' patterns below can NEVER match and this probe is structurally unsatisfiable. Assert metamagic with stateCall instead: {kind: 'stateCall', method: 'getKnownMetamagicKeys', path: 'length'} and {kind: 'stateCall', method: 'getMetamagicCost', args: [key, slotLevel]} — see tgtt-shadow-magic-sorcerer.spec.ts. (Name-matching probes are also unsafe: a spawned build surfaces unpicked options.)", min: 1, matchAny: [
 				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
 				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
 				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
