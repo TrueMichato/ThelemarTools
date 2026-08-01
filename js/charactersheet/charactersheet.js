@@ -742,7 +742,10 @@ class CharacterSheetPage {
 			this._classes.forEach(cls => {
 				try {
 					CharacterSheetClassUtils.deriveOptionalFeatureProgressions(cls, this._classFeatures, this._optionalFeaturesData);
-				} catch (e) { console.warn(`Failed to derive optional feature progression for ${cls?.name}`, e); }
+				} catch (e) {
+					// eslint-disable-next-line no-console
+					console.warn(`[CharSheet] Failed to derive optional feature progression for ${cls?.name}`, e);
+				}
 			});
 		}
 
@@ -763,7 +766,10 @@ class CharacterSheetPage {
 					const known = new Set(this._optionalFeaturesData.map(of => `${of.name}|${of.source}`.toLowerCase()));
 					const fresh = synthetic.filter(of => !known.has(`${of.name}|${of.source}`.toLowerCase()));
 					if (fresh.length) this._optionalFeaturesData = [...this._optionalFeaturesData, ...fresh];
-				} catch (e) { console.warn(`Failed to attach psionic powers to ${cls?.name}`, e); }
+				} catch (e) {
+					// eslint-disable-next-line no-console
+					console.warn(`[CharSheet] Failed to attach psionic powers to ${cls?.name}`, e);
+				}
 			});
 		}
 	}

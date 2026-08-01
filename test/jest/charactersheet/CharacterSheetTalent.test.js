@@ -353,7 +353,8 @@ describe("Chronopath (TalPsi) — subclass features have mechanical effects", ()
 		expect(res.strain).toBe(state.getProficiencyBonus());
 	});
 
-	it("charges Time Pocket three strain and reports its save and damage", () => {		const state = getTalentState({level: 14, chronopath: true});
+	it("charges Time Pocket three strain and reports its save and damage", () => {
+		const state = getTalentState({level: 14, chronopath: true});
 		const res = state.useTimePocket("soul");
 		expect(res).toMatchObject({strain: 3, damage: "6d10", damageType: "psychic", saveAbility: "cha", duration: "1d4 + 1 rounds"});
 		expect(state.getStrain().soul).toBe(3);
