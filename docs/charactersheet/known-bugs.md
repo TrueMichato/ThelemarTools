@@ -1583,3 +1583,25 @@ featuresMatrix at L11 (2 failures):
   surfaced.
 
 ---
+
+## CS-BUG-036 — Sun Shield light ranges are dead calculation metadata
+
+**Status**: open.
+
+The Way of the Sun Soul Monk's level-17 **Sun Shield** correctly activates an
+active state and exposes its reaction-triggered radiant retaliation, but its
+30-foot bright-light and 60-foot dim-light ranges exist only on
+`getFeatureCalculations()` as `sunShieldBrightLightRange` and
+`sunShieldDimLightRange`.
+
+The `sunShield` active-state definition contains only the retaliation-damage
+effect, and no character-sheet renderer or state consumer reads either light
+range. Activating Sun Shield therefore produces no observable light effect on
+the sheet. The comprehensive Sun Soul E2E spec verifies the real retaliation
+trigger and explicitly skips the two light-effect probes against this bug.
+
+**Expected**: activating Sun Shield should expose the configured bright and dim
+light ranges through the active state and a rendered or otherwise player-visible
+lighting surface.
+
+---

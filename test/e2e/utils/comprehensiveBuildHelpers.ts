@@ -781,6 +781,29 @@ export type EffectCheck = _EffectCommon & (
 	// Mercy Monk unarmed strike, and other "feature creates an
 	// attack row" abilities.
 	| {kind: "attackPresent"; namePattern: string | RegExp}
+	| {kind: "grantedAttack"; name: string; damage?: string; damageType?: string; range?: string; usesMartialArtsDie?: boolean; isSpellAttack?: boolean}
+	| {kind: "attackQualifiesThisTurn"; attackName: string | RegExp; sourceFeature?: string}
+	| {
+		kind: "combatFeatureAction";
+		feature: string;
+		resource: string;
+		spend: number;
+		qualifyingAttackSourceFeature?: string;
+		qualifyingAttackName?: string;
+		expectVariableSpend?: boolean;
+		expectAttackCount?: number;
+		expectSaveDamage?: {saveAbility: string; damage: string; damageType: string};
+	}
+	| {
+		kind: "activeStateTrigger";
+		feature: string;
+		stateTypeId: string;
+		label: string;
+		actionType: string;
+		damageType: string;
+		damageMin: number;
+	}
+	| {kind: "activeStateLight"; feature: string; stateTypeId: string; bright: number; dim: number}
 	| {kind: "weaponScopedState"; feature: string; attackBonusMin: number; alternateDamageType: string}
 	| {kind: "spellCastGrantsCover"; spell: string; source: string; acDelta: number; saveAbility: AblKey; saveDelta: number}
 	| {kind: "activeAuraMechanics"; feature: string; damageType: string; damageMin: number; conditionalRollType: string; conditionalIncludes: string}
@@ -1400,6 +1423,81 @@ async function _runPassiveOrRollEffect (
 			const names = await charSheet.getAttackNames();
 			if (!names.some(n => re.test(n))) {
 				throw new Error(`no attack matching ${re} present. seen=[${names.slice(0, 15).join(", ")}]`);
+			}
+			return;
+		}
+		case "grantedAttack": {
+			const attack = await charSheet.getGrantedAttack(e.name);
+			if (!attack) throw new Error(`granted attack "${e.name}" is absent`);
+			if (e.damage && attack.damage !== e.damage) throw new Error(`${e.name} damage=${attack.damage}, expected ${e.damage}`);
+			if (e.damageType && attack.damageType.toLowerCase() !== e.damageType.toLowerCase()) {
+				throw new Error(`${e.name} damage type=${attack.damageType}, expected ${e.damageType}`);
+			}
+			if (e.range && attack.range !== e.range) throw new Error(`${e.name} range=${attack.range}, expected ${e.range}`);
+			if (e.isSpellAttack != null && attack.isSpellAttack !== e.isSpellAttack) {
+				throw new Error(`${e.name} isSpellAttack=${attack.isSpellAttack}, expected ${e.isSpellAttack}`);
+			}
+			if (e.usesMartialArtsDie && attack.damage !== attack.martialArtsDie) {
+				throw new Error(`${e.name} damage=${attack.damage}, current Martial Arts die=${attack.martialArtsDie}`);
+			}
+			return;
+		}
+		case "attackQualifiesThisTurn": {
+			const result = await charSheet.probeAttackQualification(e.attackName, e.sourceFeature);
+			if (!result.clicked || result.threwError || !result.hasAttackAction || !result.hasSourceFeature) {
+				throw new Error(`attack qualification failed: ${JSON.stringify(result)}`);
+			}
+			return;
+		}
+		case "combatFeatureAction": {
+			const result = await charSheet.probeCombatFeatureAction({
+				feature: e.feature,
+				spend: e.spend,
+				qualifyingAttackSourceFeature: e.qualifyingAttackSourceFeature,
+				qualifyingAttackName: e.qualifyingAttackName,
+			});
+			if (result.afterBlocked != null && result.afterBlocked !== result.before) {
+				throw new Error(`${e.feature} spent ${result.before - result.afterBlocked} ${e.resource} before its qualifying attack`);
+			}
+			if (result.after !== result.before - e.spend) {
+				throw new Error(`${e.feature} left ${result.after} ${e.resource}; expected ${result.before - e.spend}`);
+			}
+			if (!!result.variableSpendConfig !== !!e.expectVariableSpend) {
+				throw new Error(`${e.feature} variable-spend chooser=${!!result.variableSpendConfig}, expected ${!!e.expectVariableSpend}`);
+			}
+			if (result.variableSpendConfig && (e.spend < result.variableSpendConfig.min || e.spend > result.variableSpendConfig.max)) {
+				throw new Error(`${e.feature} spend ${e.spend} outside chooser range ${result.variableSpendConfig.min}-${result.variableSpendConfig.max}`);
+			}
+			if (e.expectAttackCount != null) {
+				if (result.output?.kind !== "attackVolley" || result.output.count !== e.expectAttackCount) {
+					throw new Error(`${e.feature} output=${JSON.stringify(result.output)}, expected ${e.expectAttackCount} attacks`);
+				}
+			}
+			if (e.expectSaveDamage) {
+				if (result.output?.kind !== "saveDamage"
+					|| result.output.saveAbility !== e.expectSaveDamage.saveAbility
+					|| result.output.damage !== e.expectSaveDamage.damage
+					|| result.output.damageType !== e.expectSaveDamage.damageType) {
+					throw new Error(`${e.feature} output=${JSON.stringify(result.output)}, expected ${JSON.stringify(e.expectSaveDamage)}`);
+				}
+			}
+			return;
+		}
+		case "activeStateTrigger": {
+			const result = await charSheet.probeActiveStateTrigger(e.feature, e.stateTypeId);
+			if (!result.active || !result.used || !result.reactionUsed) {
+				throw new Error(`${e.feature} trigger did not activate and consume its reaction: ${JSON.stringify(result)}`);
+			}
+			if (result.label !== e.label || result.actionType !== e.actionType || result.damageType !== e.damageType) {
+				throw new Error(`${e.feature} trigger metadata mismatch: ${JSON.stringify(result)}`);
+			}
+			if (result.damage < e.damageMin) throw new Error(`${e.feature} retaliation=${result.damage}, expected >=${e.damageMin}`);
+			return;
+		}
+		case "activeStateLight": {
+			const result = await charSheet.probeActiveStateLight(e.feature, e.stateTypeId);
+			if (result.bright !== e.bright || result.dim !== e.dim || !result.rendered) {
+				throw new Error(`${e.feature} active light=${JSON.stringify(result)}, expected bright=${e.bright} dim=${e.dim} and rendered`);
 			}
 			return;
 		}

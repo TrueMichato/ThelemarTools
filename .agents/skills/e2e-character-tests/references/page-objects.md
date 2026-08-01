@@ -144,6 +144,17 @@ The sheet itself.  Most probes go through this.
 - `clickAttackRoll(name): boolean` — returns true if button found and
   clicked successfully.
 - `getAttackBonus(name): string | null`.
+- `getGrantedAttack(name)` — reads a feature-granted attack and its
+  current Martial Arts die from state.
+- `probeCombatFeatureAction(opts)` — exercises point spending, optional
+  per-turn attack qualification, and attack/save output for a combat feature.
+- `probeAttackQualification(attackName, sourceFeature?)` — rolls a rendered
+  attack in combat and verifies the production roll path records Attack-action
+  qualification metadata for the turn.
+- `probeActiveStateTrigger(feature, stateTypeId)` — activates a state,
+  resolves its trigger, and reports action use and damage.
+- `probeActiveStateLight(feature, stateTypeId)` — verifies an activated
+  state's light effect exists in state and renders its bright/dim ranges.
 
 ### Skills (new in Phase 4)
 
