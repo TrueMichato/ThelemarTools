@@ -734,6 +734,14 @@ export type EffectCheck = _EffectCommon & (
 		min?: number;
 		exact?: number | string | boolean | null;
 		contains?: string;
+		/**
+		 * Call the method purely for its SIDE EFFECT and assert nothing about the return
+		 * value. Without this an assertion-free `stateCall` fails with "is absent" as soon
+		 * as the method returns `undefined`, which rules out every setter/mutator — and
+		 * driving a mutation then probing the consequence is exactly how a
+		 * mechanical-effect probe is built (`setCurrentHp` → `takeDamage` → `getCurrentHp`).
+		 */
+		ignoreResult?: boolean;
 	}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
@@ -1254,7 +1262,7 @@ async function _runPassiveOrRollEffect (
 					throw new Error(`${label}=${JSON.stringify(actual)}, expected to contain "${e.contains}"`);
 				}
 			}
-			if (e.exact === undefined && e.min === undefined && e.contains === undefined && actual == null) {
+			if (!e.ignoreResult && e.exact === undefined && e.min === undefined && e.contains === undefined && actual == null) {
 				throw new Error(`${label} is absent`);
 			}
 			return;

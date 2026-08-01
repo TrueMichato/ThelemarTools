@@ -8780,6 +8780,15 @@ class CharacterSheetPage {
 			case "mote of potential": return this._pUseMoteOfPotential(feature);
 			case "performance of creation": return this._pUsePerformanceOfCreation(feature);
 			case "animating performance": return this._pUseAnimatingPerformance(feature);
+			// Shadow Magic (XGE Sorcerer)
+			case "hound of ill omen": return this._pUseHoundOfIllOmen(feature);
+			case "shadow walk": return this._pUseShadowWalk(feature);
+		}
+		// GENERIC: any feature that publishes resource-castable spells
+		// (`calculations.resourceCastSpells`, e.g. Eyes of the Dark's *darkness* for 2
+		// Sorcery Points) gets a cast affordance without a name-matched branch.
+		if (this._state.getResourceCastableSpells?.().some(s => s.grantedBy === feature?.name)) {
+			return this._pCastSpellWithResource(feature);
 		}
 		// (S2 contract) Generic save-prompt for any synthesized Divine Manifestation option that
 		// carries a save (_manifestationRequiresSave). Surfaces the DC + ability so the player
@@ -10043,6 +10052,105 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * GENERIC: cast one of the character's resource-castable spells
+	 * (`CharacterSheetState.getResourceCastableSpells()`), spending the declared resource
+	 * instead of a spell slot. Driven entirely by `calculations.resourceCastSpells`, so a new
+	 * subclass adds a data entry rather than a handler.
+	 * @private
+	 */
+	async _pCastSpellWithResource (feature) {
+		const offers = (this._state.getResourceCastableSpells() || [])
+			.filter(s => !feature?.name || s.grantedBy === feature.name);
+		if (!offers.length) return false;
+
+		let choice = offers[0];
+		if (offers.length > 1) {
+			choice = await InputUiUtil.pGetUserEnum({
+				title: `${feature?.name || "Cast"} — choose a spell`,
+				values: offers,
+				fnDisplay: o => `${o.spell} (${o.cost} ${o.resourceName})`,
+				isResolveItem: true,
+			});
+			if (!choice) return true;
+		}
+
+		if (!choice.available) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: `Not enough ${choice.resourceName} (need ${choice.cost}, have ${choice.resourceCurrent}).`}));
+			return true;
+		}
+
+		const res = this._state.castSpellWithResource(choice.spell);
+		if (!res) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: `Could not cast ${choice.spell}.`}));
+			return true;
+		}
+
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderActiveStates?.();
+		this._spells?.render?.();
+		this._features?.render?.();
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `🌑 Cast <strong>${res.spell}</strong> for ${res.spent} ${res.resourceName} (${res.resourceRemaining} left).${res.note ? ` ${res.note}` : ""}`,
+		}));
+		return true;
+	}
+
+	/**
+	 * Hound of Ill Omen (Shadow Magic 6). Spends 3 Sorcery Points and registers the
+	 * dire-wolf-derived summon through the generic CLASS_SUMMON companion machinery.
+	 * @private
+	 */
+	async _pUseHoundOfIllOmen (feature) {
+		const res = this._state.summonHoundOfIllOmen();
+		if (!res.ok) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+			return true;
+		}
+
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderCompanions?.();
+		this._features?.render?.();
+		const calc = this._state.getFeatureCalculations();
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `🐺 <strong>Hound of Ill Omen</strong> appears with ${res.companion?.hp?.temp ?? calc.houndOfIllOmenTempHp} temporary hit points (${res.sorceryPointsRemaining} Sorcery Points left). While within 5 ft of its target, that target has disadvantage on saves against your spells.`,
+		}));
+		return true;
+	}
+
+	/**
+	 * Shadow Walk (Shadow Magic 14). A bonus-action 120 ft teleport gated on dim light or
+	 * darkness at BOTH ends — the state method enforces the gate, this handler collects it.
+	 * @private
+	 */
+	async _pUseShadowWalk (feature) {
+		const calc = this._state.getFeatureCalculations();
+		const lit = await InputUiUtil.pGetUserBoolean({
+			title: "Shadow Walk",
+			htmlDescription: `<div>Teleport up to <strong>${calc.shadowWalkRange ?? 120} feet</strong> as a bonus action. Are you <em>and</em> your destination in dim light or darkness?</div>`,
+			textYes: "Yes — both in shadow",
+			textNo: "No",
+		});
+		if (lit == null) return true;
+
+		const res = this._state.useShadowWalk({
+			inDimLightOrDarkness: lit,
+			destinationInDimLightOrDarkness: lit,
+		});
+		if (!res.ok) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+			return true;
+		}
+
+		this._rollHistory?.addRoll({title: "Shadow Walk", total: res.distance, breakdown: `Teleport up to ${res.range} ft (bonus action)`});
+		JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `🌒 <strong>Shadow Walk</strong>: teleported up to ${res.distance} feet.`}));
+		return true;
+	}
+
+	/**
 	 * (R21) Canonical "Use this ability" path for the features/abilities area. Routes the
 	 * resolved activatable entry through {@link _activateFeatureState} (which dispatches to the
 	 * bespoke R20 handlers — Healing Hands roll+apply, Guided Strike +10, Forked Tongue swap,
@@ -10754,23 +10862,10 @@ class CharacterSheetPage {
 
 		if (amount == null || amount <= 0) return;
 
-		let remaining = amount;
-		let tempHp = this._state.getTempHp();
-		let currentHp = this._state.getCurrentHp();
-
-		// Temp HP absorbs damage first
-		if (tempHp > 0) {
-			const tempAbsorbed = Math.min(tempHp, remaining);
-			tempHp -= tempAbsorbed;
-			remaining -= tempAbsorbed;
-			this._state.setTempHp(tempHp);
-		}
-
-		// Apply remaining damage to HP
-		if (remaining > 0) {
-			currentHp = Math.max(0, currentHp - remaining);
-			this._state.setCurrentHp(currentHp);
-		}
+		// CS-BUG-081: route through the model. This method used to hand-roll the temp-HP and
+		// current-HP arithmetic, which meant Death Ward — and every other drop-to-0
+		// intervention — could never fire from the sheet's own Damage button.
+		this._state.takeDamage(amount);
 
 		this._saveCurrentCharacter();
 		this._renderHp();
@@ -10778,10 +10873,91 @@ class CharacterSheetPage {
 
 		this._showDiceResult("Damage", amount, `Took ${amount} damage`);
 
+		// Offer any drop-to-0 intervention the character has (Strength of the Grave, …).
+		await this._pOfferZeroHpIntervention();
+
 		// Prompt for concentration check if concentrating
 		if (this._state.isConcentrating?.()) {
 			await this._promptConcentrationCheck(amount);
 		}
+	}
+
+	/**
+	 * GENERIC: when damage has just taken the character to 0 hit points and they have a
+	 * "drop to 1 instead" feature, collect the facts the feature cares about (damage type,
+	 * critical hit), roll the save, and apply the result.
+	 *
+	 * Driven by `CharacterSheetState.ZERO_HP_INTERVENTIONS`, so a new subclass adds a
+	 * registry entry rather than a branch here.
+	 * @private
+	 */
+	async _pOfferZeroHpIntervention () {
+		const pending = this._state.getPendingZeroHpIntervention?.();
+		if (!pending) return;
+
+		const candidate = pending.interventions.find(i => i.available) || pending.interventions[0];
+		if (!candidate) return;
+
+		// Ask only for the facts that actually gate this feature.
+		let damageType = pending.damageType;
+		let isCritical = pending.isCritical;
+		if (!pending.damageTypeStated && candidate.excludedDamageTypes.length) {
+			const wasExcluded = await InputUiUtil.pGetUserBoolean({
+				title: candidate.name,
+				htmlDescription: `<div>You dropped to 0 hit points. Was the damage <strong>${candidate.excludedDamageTypes.join(" or ")}</strong>?</div>`,
+				textYes: "Yes",
+				textNo: "No",
+			});
+			if (wasExcluded == null) { this._state.clearPendingZeroHpIntervention(); return; }
+			if (wasExcluded) damageType = candidate.excludedDamageTypes[0];
+		}
+		if (candidate.excludeCritical && !isCritical) {
+			const wasCrit = await InputUiUtil.pGetUserBoolean({
+				title: candidate.name,
+				htmlDescription: `<div>Was it a <strong>critical hit</strong>?</div>`,
+				textYes: "Yes",
+				textNo: "No",
+			});
+			if (wasCrit == null) { this._state.clearPendingZeroHpIntervention(); return; }
+			isCritical = wasCrit;
+		}
+
+		const recheck = this._state.getZeroHpInterventions({damage: pending.damage, damageType, isCritical})
+			.find(i => i.id === candidate.id);
+		if (!recheck?.available) {
+			if (recheck?.unavailableReason) JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: recheck.unavailableReason}));
+			this._state.clearPendingZeroHpIntervention();
+			return;
+		}
+
+		const abv = String(recheck.saveAbility || "").toUpperCase();
+		const use = await InputUiUtil.pGetUserBoolean({
+			title: recheck.name,
+			htmlDescription: `<div>You dropped to 0 hit points. Make a <strong>${abv} saving throw (DC ${recheck.dc}</strong> = ${recheck.dcFormula}) to drop to <strong>1 hit point</strong> instead? Your ${abv} save is ${recheck.saveModifier >= 0 ? "+" : ""}${recheck.saveModifier}. (${recheck.usesRemaining}/${recheck.usesMax} uses)</div>`,
+			textYes: "Roll the save",
+			textNo: "Decline",
+		});
+		if (!use) { this._state.clearPendingZeroHpIntervention(); return; }
+
+		const result = this._state.applyZeroHpIntervention(candidate.id, {damageType, isCritical});
+		if (!result?.applied) { this._state.clearPendingZeroHpIntervention(); return; }
+
+		this._rollHistory?.addRoll({
+			title: `${result.name} (${abv} save)`,
+			total: result.total,
+			breakdown: `d20 [${result.roll}] ${result.total - result.roll >= 0 ? "+" : ""}${result.total - result.roll} vs DC ${result.dc}`,
+		});
+		this._saveCurrentCharacter();
+		this._renderHp?.();
+		this._renderConditions?.();
+		this._renderResources?.();
+		this._features?.render?.();
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: result.success ? "success" : "warning",
+			content: result.success
+				? `💀 <strong>${result.name}</strong>: rolled ${result.total} vs DC ${result.dc} — you stay up at <strong>1 hit point</strong>.`
+				: `💀 <strong>${result.name}</strong>: rolled ${result.total} vs DC ${result.dc} — you drop to 0 hit points.`,
+		}));
 	}
 
 	/**
