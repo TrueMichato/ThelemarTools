@@ -2027,6 +2027,38 @@ the Sea session), so this class of dead probe cannot recur. The Daemonologist
 spec was migrated to `{kind: "toggleGrantsSpeed", type: "fly", min: 60}` and now
 genuinely asserts the 60 ft.
 
+**Known latent seam left in place (measured, NOT shipped-reachable)**: after this
+fix there are **two** vocabularies by which an active state can grant a movement
+type, and they **add** rather than take the maximum.
+
+- *Bonus vocabulary* — `{type: "bonus", target: "speed:fly", value: 60}`, summed
+  by `getSpeedBonusFromStates()`. This is what the curated states and every
+  prose-parsed grant emit, and it is the head this fix repaired.
+- *Read-site vocabulary* — `{type: "flySpeed", value: N}` or
+  `{type: "flySpeed", equalToWalk: true}`, resolved directly inside
+  `getSpeedByType()`. This is what the Fly spell and Stormborn use. It never
+  crossed the `base === 0` guard, which is why Stormborn was green throughout and
+  did not catch the bug.
+
+Measured on a Daemonologist Wizard 10 (walk 30): the bonus head alone gives
+**60**; adding an `equalToWalk` grant on top gives **90**, not 60. By RAW two
+sources each granting a flying speed should give the higher, not the sum.
+
+Deliberately not fixed here. It is **unreachable today** — the only two live
+emitters are Unearthly Countenance (Daemonologist 10) and Stormborn (Tempest
+Cleric 17), which would require character level 27 — and a real fix cannot be
+made at the read site, because the `bonus` vocabulary is genuinely ambiguous: the
+same shape expresses both "grant a 60 ft fly speed" and "add +10 to the fly speed
+you already have", and only the first should max rather than sum. Disambiguating
+requires changing the emitters, including `parseEffectsFromDescription`. Recorded
+rather than filed as its own id, since it shares this pipeline and cannot
+currently be triggered.
+
+Verified unchanged by this fix: `getSpeedByType("fly")` agrees with
+`getSpeed("fly")` on the bonus head (both **60**); Stormborn still reads **30**
+= walking speed; and a generic `{target: "speed", value: 10}` still yields a
+climb speed of **0** even with two fly-granting states active.
+
 ---
 
 ## CS-BUG-060 — Circle of the Sea's Wrath of the Sea was description-only, and Stormborn collided with the Tempest Cleric
@@ -2202,3 +2234,145 @@ unskipped probe there was `{kind: "rollAbilityCheck"}`, which asserts only that 
 roll *occurred*, not that its total was a number.
 
 ---
+
+## CS-BUG-065 — numeric conditional modifiers were disabled at registration, so they could never be opted into
+
+**Status**: FIXED (Meteor Knight batch)
+**Severity**: high — silently deletes a whole class of feature bonuses
+**Surfaced by**: Increase Gravity (Meteor Knight 15) "+ your Intelligence
+modifier to shove ability checks"
+
+### Symptom
+
+A `FeatureEffectRegistry` `modifier` effect that carried a `conditional`
+string but no `advantage` / `disadvantage` flag was stored with
+`enabled: false`. `getModifiersForType()` skips any modifier whose `enabled`
+is falsy, so the modifier never reached `aggregateModifiers()` at all — not
+as an applied bonus and not in `result.conditionalsAvailable`. The per-roll
+opt-in prompt therefore never offered it, and there was **no** code path
+anywhere that could turn it back on.
+
+### Root cause
+
+`_applyFeatureEffect()`'s `case "modifier"`:
+
+```js
+enabled: effect.enabled !== false && (carriesAdvFlag || !effect.conditional),
+```
+
+The `enabled` flag was being made to do the job of `conditional`. That
+double-duty was both redundant and lossy: `aggregateModifiers()` **already**
+gates on `mod.conditional` and routes such modifiers into
+`conditionalsAvailable` rather than into `bonus`. Advantage-flavoured
+conditionals escaped the bug only because of the `carriesAdvFlag` exemption,
+which is why the defect went unnoticed — every conditional shipped so far
+happened to be an advantage.
+
+### Fix
+
+```js
+enabled: effect.enabled !== false,
+```
+
+`enabled` now means only what its name says ("is this modifier live at all"),
+and `conditional` alone decides gating. Registration is lossless; the four
+roll handlers surface the modifier through `_pPickConditionalModifiers` as
+designed.
+
+### Regression pins
+
+`test/jest/charactersheet/CharacterSheetMeteorKnight.test.js` — the Increase
+Gravity shove test asserts the modifier appears in
+`aggregateModifiers("skill:athletics").conditionalsAvailable` and that
+passing its id in `appliedConditionalIds` actually moves `bonus`. Verified to
+go red with the old expression restored. Full charactersheet suite (429
+suites / 12961 tests) stays green with the change, confirming nothing relied
+on the auto-disable.
+
+---
+
+## CS-BUG-066 — prose spell grants were parsed from rendered HTML, so every homebrew "You learn the {@spell x} spell" grant was silently dropped
+
+**Status**: FIXED (Meteor Knight batch)
+**Severity**: high — an entire category of homebrew feature grants nothing
+**Surfaced by**: Reduce Gravity (Meteor Knight 3) — *feather fall* / *jump* /
+*levitate* never appeared in `getInnateSpells()`
+
+### Symptom
+
+A homebrew feature whose text grants spells in prose granted **nothing**.
+`getInnateSpells()` and the spellbook were both empty; the feature rendered
+its description perfectly, which is exactly the "renders but does nothing"
+failure mode.
+
+### Root cause
+
+`_processFeatureSpells()` read `feature.description`. For features stored
+through the site renderer that string is already-rendered **HTML**:
+
+```html
+<div class="ve-rd__b">…You learn the
+<a href="spells.html#feather%20fall_phb">feather fall</a> …</div>
+```
+
+`SpellGrantParser.grantsSpells()` tests for `/\{@spell/`, so it matched
+nothing and the parser was never even invoked. The same feature object
+carried an intact raw `entries` array with `{@spell feather fall}` tags
+still in place — the parser was simply reading the wrong field.
+
+### Fix
+
+New generic `SpellGrantParser.getFeatureSpellText(feature)` walks the raw
+`entries` tree (including nested `entries` / `items`) and returns it when it
+carries `{@spell …}` tags, falling back to `description` otherwise. This
+mirrors the existing `FeatureChoiceParser._getRawText()` convention, and
+because the selection is driven by "which text actually has tags" it cannot
+regress features that only ever had a `description`.
+
+### Regression pins
+
+`CharacterSheetMeteorKnight.test.js` — "parses prose spell grants from raw
+entries when the description is rendered HTML". Verified in-browser via
+`charSheet.spawn("fighter/meteor knight/3")`: `getInnateSpells()` went from
+`[]` to `["Feather Fall", "Jump"]`, and to all three with the at-will upgrade
+at 15.
+
+---
+
+## CS-BUG-067 — feature-wide "cast each once per long rest" clauses were out of the parser's context window, upgrading limited grants to permanent ones
+
+**Status**: FIXED (Meteor Knight batch)
+**Severity**: medium — turns a 1/long-rest grant into an unlimited one
+**Surfaced by**: Reduce Gravity (Meteor Knight 3)
+
+### Symptom
+
+Reduce Gravity's *feather fall* / *jump* arrived with no `uses` and no
+`recharge` — i.e. as permanently-available innate spells — even though the
+feature says "You can cast each of these spells once with this feature, and
+once you cast a spell in this way, you can not do so again until you finish
+a long rest."
+
+### Root cause
+
+`SpellGrantParser.parseSpellsFromText()` looked for usage limits in a
+±100/200-character window around each `{@spell}` tag. A feature that names
+its spells in one sentence and states the shared limit two sentences later
+falls outside that window entirely. This is the normal way homebrew is
+written, so the failure is systemic rather than specific to this subclass.
+
+### Fix
+
+New `SpellGrantParser._parseFeatureWideCastingLimit(text)` scans the whole
+feature for a **single sentence** containing all three of `cast`, `once` and
+`short|long rest`, and returns that rest type. `parseSpellsFromText()`
+computes it once and uses it as a fallback for any spell that found no local
+limit and is not at-will. The single-sentence constraint is what keeps it
+from over-firing: an unrelated "once per long rest" elsewhere in the feature
+cannot bind to the word "cast" in a different sentence.
+
+### Regression pins
+
+`CharacterSheetMeteorKnight.test.js` — asserts `uses: {current: 1, max: 1}`
+and `recharge: "long"` on the level-3 grants, and that the level-15 at-will
+upgrade *clears* both.
