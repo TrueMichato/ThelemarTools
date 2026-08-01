@@ -115,6 +115,45 @@ function findInertRows (src) {
 	return out;
 }
 
+/**
+ * Count rows that carry no `effects:` of their own but whose FEATURE is
+ * asserted by a sibling row of the same `name` elsewhere in the spec.
+ *
+ * The counters above are file-wide tallies, so a spec is effectively
+ * scored per ROW. That is the wrong granularity for two idioms this
+ * suite deliberately uses:
+ *
+ *   - a TIERED resource states its `resourceMax` once per tier but
+ *     attaches the restore probe only to the first tier;
+ *   - a PICKED feature keeps a plain "it appears" row and puts the
+ *     `pickedFeatureGrants` / stateCall probes on the picker row.
+ *
+ * In both cases the question worth asking is "is this feature's effect
+ * asserted anywhere?", not "is it asserted on this row?". Scoring per
+ * row marks well-covered specs LOW, and a LOW that is an artifact is
+ * worse than no signal at all — it trains readers to ignore the column
+ * that is supposed to flag genuinely uncovered work.
+ */
+function countSiblingCoveredRows (src) {
+	const byName = new Map();
+	const re = /\{\s*level:\s*\d+\s*,/g;
+	let m;
+	while ((m = re.exec(src)) !== null) {
+		const obj = readObjectLiteral(src, m.index);
+		if (!obj) continue;
+		const name = obj.match(/name:\s*("[^"]*"|\/[^/\n]*\/[a-z]*)/)?.[1];
+		if (!name) continue;
+		if (!byName.has(name)) byName.set(name, []);
+		byName.get(name).push(RE_EFFECTS.test(obj));
+	}
+	let credited = 0;
+	for (const flags of byName.values()) {
+		if (!flags.some(Boolean)) continue; // nothing asserts this feature at all
+		credited += flags.filter(has => !has).length;
+	}
+	return credited;
+}
+
 const POOLS_PATH = path.join(ROOT, "test", "e2e", "utils", "tgttFeaturePools.ts");
 
 /** Extract the balanced `[...]` or `{...}` literal starting at `start`. */
@@ -392,7 +431,8 @@ function auditSpec (specPath) {
 	const inertRows = findInertRows(src);
 	const inertWithProbes = inertRows.filter(r => r.hasProbes).length;
 	const unreachablePicks = findUnreachablePicks(src);
-	const effective = effectsCount + reasonCount + helperCount + skipReasonCount - inertWithProbes;
+	const siblingCovered = countSiblingCoveredRows(src);
+	const effective = effectsCount + reasonCount + helperCount + skipReasonCount + siblingCovered - inertWithProbes;
 	const coverage = entryCount === 0 ? 1 : effective / entryCount;
 
 	const status =
@@ -448,7 +488,7 @@ function main () {
 	log(`  ${padR(`TOTAL (${results.length} specs)`, 48)} ${padL(totalEntries, 8)} ${padL(totalEffects, 8)} ${padL(totalHelpers, 8)} ${padL(totalReasons, 7)}`);
 	log("");
 	log(`  Threshold: <${(COVERAGE_WARN_THRESHOLD * 100).toFixed(0)}% effective coverage flags as LOW.`);
-	log(`  Effective = effects + reason-comments + helper-uses + skipReason annotations − inert rows.`);
+	log(`  Effective = effects + reason-comments + helper-uses + skipReason annotations\n            + rows whose feature a sibling row asserts − inert rows.`);
 	log("");
 
 	const inertSpecs = results.filter(r => r.inertRows.length);
