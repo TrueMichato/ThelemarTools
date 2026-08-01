@@ -2233,6 +2233,46 @@ reaches those levels was `{skip: true}` under `CS-BUG-018`, and the sole
 unskipped probe there was `{kind: "rollAbilityCheck"}`, which asserts only that a
 roll *occurred*, not that its total was a number.
 
+### Addendum — the SECOND chokepoint (fixed separately)
+
+The fix above hardened `_getNamedModifierEffectiveValue`, which feeds the cached
+`customModifiers` totals. That is **not the only** place a stored modifier becomes
+a number. `_resolveNamedModifierNumericValue` (dating from 2026-06-27, so it
+predates the original fix) feeds `aggregateModifiers()` and the attack itemizer,
+and it still read `mod.value` raw.
+
+Measured in-browser on `artificer/battle smith/20/human` **after** the original
+fix had landed:
+
+```
+getSaveMod("str"|"dex"|"con"|"int"|"wis"|"cha")  ->  2, 3, 12, 12, 1, 0   (correct)
+aggregateModifiers("save:all").bonus            ->  "1attunedItems"      (a STRING)
+```
+
+All six per-save values were already correct — which is exactly **why the
+existing per-save regression tests did not catch it**. Soul of Artifice registers
+a numeric row *and* a symbolic row on the same `save:all` type, so the aggregate
+performed `1 + "attunedItems"`.
+
+⚠️ **Generalisable lesson**: when hardening a value-resolution defect, grep for
+*sibling resolvers*, not just for raw readers of the field. The original audit
+hunted consumers reading `mod.value` directly and missed a second **resolver**
+method, because it looked like a fix rather than a bypass. Two chokepoints now
+exist and both are commented as such so they cannot drift apart.
+
+**No double-count check** (the assertion most likely to catch an over-broad
+resolver): `wizard/bladesinger/11/elf` still reads AC `11 → 15` and concentration
+`+2 → +6` with INT mod 4 — the modifier applied **once**. Bladesong's two named
+modifiers are a deliberately `enabled: false` duplicate of the active-state path;
+the resolver must not revive them, and does not.
+
+**Recursion note**: resolving `"strScore"` calls `getAbilityScore("str")`, which
+looks like an infinite loop for Indomitable Might. It is not: that modifier's type
+is `ability:str:minimum`, a *sub-typed* variant which the ability-score
+aggregation deliberately skips, so the resolver is never re-entered from inside
+`getAbilityScore()`. Verified live — `barbarian/chained fury/18/minotaur` returns
+STR `20` with zero page errors.
+
 ---
 
 ## CS-BUG-065 — numeric conditional modifiers were disabled at registration, so they could never be opted into
