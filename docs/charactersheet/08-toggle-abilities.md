@@ -357,6 +357,64 @@ whatever `parseEffectsFromDescription` extracts from the feature text. Use it
 whenever the prose is lossy — here the parse duplicated bludgeoning and dropped
 the "from nonmagical weapons" caveat. Without the flag, a non-empty parse wins.
 
+#### Launch Momentum (Steel Hawk Fighter, `GriffonsSaddlebag2`)
+
+```javascript
+launchMomentum: {
+    name: "Launch Momentum",
+    icon: "🦅",
+    activationAction: "bonus",
+    // Armed by useLaunch(); eaten by the next melee attack.
+    consumeOnAttack: true,
+    // "Launch" is a generic English word — never name-detect it.
+    noNameDetect: true,
+}
+```
+
+The effects are supplied per-activation by `getLaunchMomentumEffects()` rather
+than being fixed on the state type, because all three riders are level-scaled:
+
+```javascript
+[
+    {type: "advantage", target: "attack:melee"},
+    // "of the weapon's type" — left untyped so the roller reports it under the
+    // weapon's own damage type instead of inventing one.
+    {type: "extraDamage", value: "1d8"|"1d10"|"1d12", damageType: "", meleeOnly: true},
+    {type: "critRange", value: 19},   // Eagle Eye, level 10+ only
+]
+```
+
+Two conventions worth copying:
+
+**`meleeOnly` is honoured by the damage roller.** `getExtraDamageFromStates()`
+propagates the flag and `_rollDamage` filters on it, so a rider that reads "on a
+melee weapon attack" cannot leak onto a ranged attack or a spell.
+
+**`target: "attack:melee"` matches a `"attack:melee:str"` query.** Both
+advantage aggregators — `hasAdvantageFromStates()` (the roll path) and
+`_effectMatchesType()` (the badge path, via `getAdvantageState()`) — honour the
+hierarchical attack prefix. They did not agree before CS-BUG-087.
+
+#### Eagle Eye Sight (Steel Hawk Fighter, `GriffonsSaddlebag2`)
+
+```javascript
+eagleEyeSight: {
+    name: "Eagle Eye Sight",
+    icon: "👁️‍🗨️",
+    activationAction: "free",
+    noNameDetect: true,
+}
+```
+
+A player-driven toggle rather than a passive bonus, because the doubled
+proficiency applies only to **sight-based** Wisdom (Perception) checks and the
+sheet cannot know which checks those are. `setEagleEyeSightActive(true)` supplies
+`customEffects: [{type: "bonus", target: "skill:perception", value: …}]`, where
+the value is **0** when Perception is already expertise — doubling an
+already-doubled bonus is worth nothing. Note this state is why CS-BUG-086 was
+found: `skill:<name>` bonus targets were being discarded outright by
+`getSkillBonusFromStates()`.
+
 ### Combat Stances (TGTT/Homebrew)
 
 #### Astral Self (Way of the Astral Self Monk)

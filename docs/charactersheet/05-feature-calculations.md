@@ -332,6 +332,71 @@ plus `skill:athletics +INT` gated on "when you shove a creature" — so the
 bonuses are offered per roll instead of leaking onto unrelated Athletics
 checks.
 
+**Steel Hawk** (`GriffonsSaddlebag2`)
+
+Source-gated on `CharacterSheetState.isSteelHawkSubclass()`. Like Meteor Knight
+it carries **no player choices** — every feature is a fixed grant, so Builder /
+Level-Up / Quick Build have nothing extra to surface beyond the subclass pick.
+
+```javascript
+hasSteelHawk: true,                                 // Level 3+
+hasLaunch: true,                                    // Level 3+
+launchUses: 3 | 4 | 5,                              // L3 / L7 / L15, short-or-long rest
+launchDistance: 15 | 30,                            // L3 / L7 (combined H+V leap)
+launchBonusDamage: "1d8" | "1d10" | "1d12",         // L3 / L10 / L18
+launchFallReduction: 30,                            // display-only (no fall-damage system)
+launchProvokesOpportunityAttacks: false,
+hasNimbleLancer: true,                              // Level 3+
+nimbleLancerOneHandedDamage: "1d8",
+nimbleLancerTwoHandedDamage: "1d12",
+nimbleLancerDisengageDistance: 5,
+hasBirdCaller: true,                                // Level 3+
+birdCallerRitualSpells: ["Animal Messenger"],
+hasSteelGrace: true,                                // Level 7+
+ignoresArmorStealthDisadvantage: true,              // GENERIC flag, see below
+hasLaunchEvasion: true,
+launchEvasionCost: 1,
+hasEagleEye: true,                                  // Level 10+
+launchCriticalRange: 19,                            // only while momentum is armed
+eagleEyeSightBonus: profBonus,
+eagleEyeGrantsPerception: true,
+steelHawkSaveDc: 8 + profBonus + STR - exhaustionPenalty,
+hasPredatoryInstinct: true,                         // Level 15+
+predatoryInstinctInitiativeRefill: 1,
+hasImprovedLaunch: true,                            // Level 18+
+improvedLaunchDistance: 90,
+improvedLaunchExhaustionCost: 1,
+improvedLaunchMaxExhaustion: 1,                     // blocked at 2+ exhaustion
+```
+
+Launch is a **short-or-long-rest pool** (`resourceType: "steelHawkLaunch"`,
+name `"Launch"`) spent by `useLaunch()`, which arms the `launchMomentum` active
+state. That state carries the whole rider — `{type: "advantage", target:
+"attack:melee"}`, a `meleeOnly` `extraDamage` die of the tier size, and (from
+level 10) `{type: "critRange", value: 19}` — and is `consumeOnAttack`, so the
+next melee attack eats it. Improved Launch adds a second, separate
+once-per-rest pool (`steelHawkImprovedLaunch`, name `"Improved Launch"`) that
+exists only from level 18 and additionally charges a level of exhaustion.
+
+Three of Steel Hawk's flags are deliberately **generic**, not bespoke:
+
+- `ignoresArmorStealthDisadvantage` is consumed by
+  `hasArmorStealthDisadvantage()` alongside the older `hasUmbralWarrior`, so any
+  future "armor never imposes Stealth disadvantage" feature can reuse it.
+- Nimble Lancer's synthesised versatile lance profile is resolved by the new
+  generic `getEffectiveWeaponDamageProfile(item)`, which every damage read-site
+  (damage roll, hands-used toggle, inventory detail) now goes through — so a
+  feature-granted weapon property is no longer a display-only string.
+- Bird Caller's *animal messenger* uses generic **ritual-only** innate-spell
+  support (`ritualOnly` on the parsed grant, persisted through
+  `addInnateSpell`), which replaces the bogus `1/day` the parser previously
+  invented for any "you can cast X as a ritual" grant.
+
+Eagle Eye's doubled proficiency on sight-based Perception is a player-toggled
+active state (`eagleEyeSight`) rather than a passive bonus, because the doubling
+applies only to *sight-based* checks. It is correctly worth **zero** on top of
+existing Perception expertise, which already doubles the bonus.
+
 ### Rogue
 
 ```javascript
