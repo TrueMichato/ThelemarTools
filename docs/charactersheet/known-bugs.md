@@ -1732,3 +1732,63 @@ no-op controls) and the now-unskipped `activeStateLight` probe in
 `tgtt-sun-soul-monk.spec.ts`.
 
 ---
+
+## CS-BUG-055 — `FeatureUsesParser` read "N times your <class> level" as a use count
+
+**Status**: Fixed.
+**Surfaced by**: College of Creation Bard implementation — a spawned
+`bard/creation/14/gnome` showed `Performance of Creation` at **20/20 uses**.
+
+**Root cause**: `FeatureUsesParser.parseUses`
+(`js/charactersheet/charactersheet-state.js`) matched a leading
+`(\d+)\s*(?:times?|uses?)` anywhere in the feature text. Performance of
+Creation's description contains *"a nonmagical item … worth no more than
+20 times your bard level in gp"*, so "20 times" was harvested as a use
+count. Any feature whose text contains an `N times <noun>` **multiplier**
+was affected, not just this subclass.
+
+**Fix**: the pattern now carries a negative lookahead for the nouns that
+mark a multiplier:
+
+```js
+/(\d+)\s*(?:times?|uses?)\b(?!\s+(?:your|the|a|an|its|his|her|their|that)\b)/
+```
+
+The `\b` after the alternation is **load-bearing**. Without it the regex
+engine escapes the lookahead by backtracking `times` → `time`, leaving the
+`s` to break `\s+`, and the bug silently returns. A regression test in
+`test/jest/charactersheet/CharacterSheetCreationBard.test.js` (PART 1) was
+verified to fail with `Received: 20` before the `\b` was added.
+
+With the guard in place the text falls through to the `\bonce\b` pattern
+and yields the correct 1 use per long rest.
+
+---
+
+## CS-BUG-056 — E2E builds put an 8 in every caster's spellcasting ability
+
+**Status**: Fixed (opt-in).
+**Surfaced by**: `tgtt-creation-bard.spec.ts` — `moteOfPotentialDc` came
+back as **9** (8 + prof 2 + CHA mod −1), because
+`BuilderWizardPage.assignStandardArrayDefaults()` hard-coded
+STR 15 / DEX 14 / CON 13 / INT 12 / WIS 10 / **CHA 8** for every build in
+the suite. Every spellcaster spec was therefore exercising a dump-stat
+caster, and any probe asserting a realistic DC/mod floor had to be either
+skipped or loosened into meaninglessness.
+
+**Fix**: `assignStandardArrayDefaults(priority?)` now accepts an ability
+order (best score first) and `CharacterPreset.abilityPriority` threads it
+through `createCharacterViaWizard`. Omitting it preserves the historical
+STR-first order byte-for-byte, so existing presets are unaffected —
+verified by re-running `tgtt-jester-bard-dendulra.spec.ts` after the
+change. `PRESET_FULL_CREATION_BARD_CHANGELING` sets
+`["cha", "dex", "con", "wis", "int", "str"]`.
+
+**Follow-up (not done here)**: the other caster presets
+(Bladesinger, Chronurgy, Surrealism, Time/Lust Domain, Heroic Soul,
+Horror Warlock, Jester) would all benefit from the same one-line
+addition, which would also let several `CS-BUG-016`-skipped
+`spellSaveDc` / `cantripCount` probes be re-enabled. Deliberately left
+out of this change so the blast radius stays confined to one spec.
+
+---

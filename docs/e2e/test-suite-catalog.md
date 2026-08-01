@@ -33,6 +33,7 @@ the skill reference at
 | 16 | `tgtt-trickster-rogue-goblin.spec.ts` | Trickster Rogue · Goblin | 1–20 | Trickster Tricks pick-list, Sneak Attack scaling, Cunning Action, weapon mastery. |
 | 17 | `tgtt-lust-cleric-lexalian.spec.ts` | Lust Domain Cleric · Lexalian Children | 1–20 | Lust domain features, Channel Divinity uses, full caster slot table. |
 | 18 | `tgtt-horror-warlock-theocracian.spec.ts` | Horror Warlock · Theocracian Children | 1–20 | Horror subclass features, Eldritch Invocations pick-list, pact slots short-rest restore. |
+| 19 | `tgtt-creation-bard.spec.ts` | College of Creation Bard · Changeling | 1–20 | Mote of Potential riders derived from the live CHA save DC / CHA mod, Performance of Creation's scaling gp+size cap creating a REAL inventory item, the 2nd-level-slot alternative, the Dancing Item summoned through the generic `CLASS_SUMMON` companion machinery, and Creative Crescendo's explicit `null` gp-cap removal. |
 
 ## Other specs
 

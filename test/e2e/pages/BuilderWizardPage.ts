@@ -925,16 +925,23 @@ export class BuilderWizardPage {
 	 * Assign standard array ability scores using a sensible default distribution
 	 * Standard array: 15, 14, 13, 12, 10, 8
 	 * Default assigns: STR=15, DEX=14, CON=13, INT=12, WIS=10, CHA=8
+	 *
+	 * `priority` overrides the ability order the array is poured into, best
+	 * score first. Presets for spellcasters should set it (e.g.
+	 * `["cha", "dex", "con", "wis", "int", "str"]`) — the STR-first default
+	 * otherwise builds every caster with an 8 in its spellcasting ability,
+	 * which makes save DCs and mod-scaled pools unrepresentative.
+	 * Unlisted abilities keep their default relative order.
 	 */
-	async assignStandardArrayDefaults (): Promise<void> {
-		const assignments: Array<{score: number; ability: string}> = [
-			{score: 15, ability: "str"},
-			{score: 14, ability: "dex"},
-			{score: 13, ability: "con"},
-			{score: 12, ability: "int"},
-			{score: 10, ability: "wis"},
-			{score: 8, ability: "cha"},
-		];
+	async assignStandardArrayDefaults (priority?: string[]): Promise<void> {
+		const DEFAULT_ORDER = ["str", "dex", "con", "int", "wis", "cha"];
+		const order = priority?.length
+			? [...priority.map(it => it.toLowerCase()), ...DEFAULT_ORDER.filter(it => !priority.map(p => p.toLowerCase()).includes(it))]
+			: DEFAULT_ORDER;
+		const scores = [15, 14, 13, 12, 10, 8];
+		const assignments: Array<{score: number; ability: string}> = order
+			.slice(0, scores.length)
+			.map((ability, i) => ({score: scores[i], ability}));
 
 		for (const {score, ability} of assignments) {
 			// Per-iteration retry — the badge layout reflows after each

@@ -2032,6 +2032,15 @@ class CharacterSheetPage {
 			container.append(btn);
 		}
 
+		// College of Creation Bard - Animating Performance (Dancing Item)
+		if (calculations.hasAnimatingPerformance) {
+			const btn = e_({outer: `<button class="ve-btn ve-btn-info" style="white-space: nowrap;" title="Animate a Large or smaller nonmagical object as a Dancing Item">
+				<span class="glyphicon glyphicon-plus mr-1"></span>💃 Animate Object
+			</button>`});
+			btn.addEventListener("click", () => this._pUseAnimatingPerformance(this._state.getFeature("Animating Performance")));
+			container.append(btn);
+		}
+
 		// Druid - Wild Shape / Wild Companion / Zodiac Form are managed via the
 		// dedicated Druid Resources modal (proper uses/recharge + form selection)
 		// instead of individual buttons or the generic active-states list.
@@ -8630,6 +8639,10 @@ class CharacterSheetPage {
 			case "borrowed tongues and hides": return this._pUseDaemonologistSwitchSides();
 			case "unearthly countenance": return this._pUseUnearthlyCountenance();
 			case "eternal war eruption": return this._pUseEternalWarEruption();
+			// College of Creation (TCE)
+			case "mote of potential": return this._pUseMoteOfPotential(feature);
+			case "performance of creation": return this._pUsePerformanceOfCreation(feature);
+			case "animating performance": return this._pUseAnimatingPerformance(feature);
 		}
 		// (S2 contract) Generic save-prompt for any synthesized Divine Manifestation option that
 		// carries a save (_manifestationRequiresSave). Surfaces the DC + ability so the player
@@ -9429,6 +9442,191 @@ class CharacterSheetPage {
 		return null;
 	}
 
+	// ===== College of Creation (TCE) =====
+
+	/**
+	 * Ask HOW a College of Creation action is being paid for. Both actions are
+	 * "once per long rest, or by expending a spell slot of level N or higher", so
+	 * when the long-rest use is spent the player must still be able to reach the
+	 * slot alternative.
+	 * @param {string} featureName
+	 * @param {number} minSlotLevel
+	 * @returns {Promise<{cancelled: boolean, spellSlotLevel?: number|null}>}
+	 * @private
+	 */
+	async _pResolveCreationCost (featureName, minSlotLevel) {
+		const feature = this._state.getFeature(featureName);
+		const hasUse = (feature?.uses?.current ?? 0) > 0;
+
+		const slots = this._state.getSpellSlots?.() || {};
+		const availableSlots = Object.keys(slots)
+			.map(Number)
+			.filter(lvl => lvl >= minSlotLevel && (slots[lvl]?.current ?? 0) > 0)
+			.sort((a, b) => a - b);
+
+		if (hasUse && !availableSlots.length) return {cancelled: false, spellSlotLevel: null};
+		if (!hasUse && !availableSlots.length) {
+			JqueryUtil.doToast({type: "warning", content: `No ${featureName} uses remain, and no level ${minSlotLevel}+ spell slots are available.`});
+			return {cancelled: true};
+		}
+
+		const options = [
+			...(hasUse ? [{label: `Free use (1/long rest) — ${feature.uses.current}/${feature.uses.max} left`, level: null}] : []),
+			...availableSlots.map(lvl => ({label: `Expend a level ${lvl} spell slot (${slots[lvl].current}/${slots[lvl].max} left)`, level: lvl})),
+		];
+		const chosen = await InputUiUtil.pGetUserEnum({
+			title: `${featureName} — Cost`,
+			values: options,
+			fnDisplay: o => o.label,
+			isResolveItem: true,
+		});
+		if (!chosen) return {cancelled: true};
+		return {cancelled: false, spellSlotLevel: chosen.level};
+	}
+
+	/**
+	 * Mote of Potential (Bard 3, College of Creation). Resolves the mode-dependent
+	 * rider on a Bardic Inspiration die that has ALREADY been handed out — so it
+	 * deliberately spends nothing here (charging again would double-count the pool).
+	 * @private
+	 */
+	async _pUseMoteOfPotential (feature) {
+		const modes = this._state.getMoteOfPotentialModes();
+		if (!modes.length) return true;
+
+		const mode = await InputUiUtil.pGetUserEnum({
+			title: "Mote of Potential",
+			htmlDescription: `<div class="ve-mb-2 ve-small">The Bardic Inspiration die was already spent when you gave it out — resolving the mote costs nothing extra. Choose what the recipient used the die on:</div>`,
+			values: modes,
+			fnDisplay: m => `${m.label} — ${m.description}`,
+			isResolveItem: true,
+		});
+		if (!mode) return true;
+
+		const res = this._state.rollMoteOfPotential(mode.id);
+		if (!res) return true;
+
+		let html;
+		switch (res.mode) {
+			case "check":
+				html = `🎵 <strong>Mote of Potential</strong> (Ability Check): rolled the ${res.die} twice — [${res.rolls.join(", ")}] — keep <strong>${res.result}</strong>.`;
+				break;
+			case "attack":
+				html = `🎵 <strong>Mote of Potential</strong> (Attack Roll): the target and each creature you choose within 5 ft. must make a <strong>DC ${res.dc}</strong> ${Parser.attAbvToFull(res.save)} save or take <strong>${res.damage} ${res.damageType}</strong> damage.`;
+				break;
+			case "save":
+				html = `🎵 <strong>Mote of Potential</strong> (Saving Throw): the creature gains <strong>${res.tempHp} temporary hit points</strong>.`;
+				break;
+		}
+
+		this._rollHistory?.addRoll({title: `Mote of Potential (${res.label})`, total: res.mode === "check" ? res.result : (res.tempHp ?? res.damage), breakdown: `${res.die}: [${(res.rolls || [res.roll]).join(", ")}]`});
+
+		if (res.mode === "save") {
+			const toastEl = e_({tag: "span", html: `<span>${html}</span> <button class="ve-btn ve-btn-xs ve-btn-primary btn-apply-to-self ml-2">Apply to Self</button>`});
+			const btn = toastEl.querySelector(".btn-apply-to-self");
+			btn?.addEventListener("click", evt => {
+				evt.stopPropagation();
+				if (btn.disabled) return;
+				btn.disabled = true;
+				this._state.setTempHp(Math.max(this._state.getTempHp() || 0, res.tempHp));
+				btn.textContent = "✓ Applied to Self";
+				this._saveCurrentCharacter();
+				this._renderHp?.();
+				JqueryUtil.doToast({type: "success", content: `Gained ${res.tempHp} temporary hit points.`});
+			});
+			JqueryUtil.doToast({type: "success", content: toastEl, autoHideTime: 12000});
+		} else {
+			JqueryUtil.doToast({type: "success", content: e_({tag: "span", html}), autoHideTime: 10000});
+		}
+		return true;
+	}
+
+	/**
+	 * Performance of Creation (Bard 3, College of Creation). Conjures a real
+	 * inventory item under the level-scaled gp / size / count caps.
+	 * @private
+	 */
+	async _pUsePerformanceOfCreation (feature) {
+		const calc = this._state.getFeatureCalculations();
+
+		const name = await InputUiUtil.pGetUserString({
+			title: "Performance of Creation — Create an Item",
+			default: "Rope",
+		});
+		if (!name) return true;
+
+		const sizes = CharacterSheetState.CREATED_ITEM_SIZES
+			.slice(0, CharacterSheetState.CREATED_ITEM_SIZES.indexOf(calc.createdItemMaxSize) + 1);
+		const size = await InputUiUtil.pGetUserEnum({
+			title: `${name} — Size`,
+			values: sizes,
+			default: sizes[sizes.length - 1],
+			isResolveItem: true,
+		});
+		if (!size) return true;
+
+		let valueGp = 0;
+		if (calc.createdItemMaxGp != null) {
+			const entered = await InputUiUtil.pGetUserNumber({
+				title: `${name} — Value in gp (max ${calc.createdItemMaxGp})`,
+				default: 0,
+				min: 0,
+				max: calc.createdItemMaxGp,
+			});
+			if (entered == null) return true;
+			valueGp = entered;
+		}
+
+		const cost = await this._pResolveCreationCost("Performance of Creation", calc.performanceOfCreationSlotLevel);
+		if (cost.cancelled) return true;
+
+		const res = this._state.createPerformanceOfCreationItem({name, size, valueGp, spellSlotLevel: cost.spellSlotLevel});
+		if (!res.ok) {
+			JqueryUtil.doToast({type: "warning", content: res.error});
+			return true;
+		}
+
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._inventory?.render?.();
+		this._features?.render?.();
+		const vanished = res.replaced?.length ? ` ${res.replaced.join(", ")} vanished.` : "";
+		JqueryUtil.doToast({type: "success", content: `🎼 Created ${size} ${name} (${calc.createdItemDurationHours} hours).${vanished}`});
+		return true;
+	}
+
+	/**
+	 * Animating Performance (Bard 6, College of Creation). Registers the TCE
+	 * Dancing Item through the generic CLASS_SUMMON companion machinery.
+	 * @private
+	 */
+	async _pUseAnimatingPerformance (feature) {
+		const calc = this._state.getFeatureCalculations();
+
+		const itemName = await InputUiUtil.pGetUserString({
+			title: "Animating Performance — Animate a Large or smaller nonmagical object",
+			default: "Dancing Item",
+		});
+		if (!itemName) return true;
+
+		const cost = await this._pResolveCreationCost("Animating Performance", calc.animatingPerformanceSlotLevel);
+		if (cost.cancelled) return true;
+
+		const res = this._state.animateDancingItem({itemName, spellSlotLevel: cost.spellSlotLevel});
+		if (!res.ok) {
+			JqueryUtil.doToast({type: "warning", content: res.error});
+			return true;
+		}
+
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderCompanions?.();
+		this._features?.render?.();
+		const replaced = res.replaced ? ` ${res.replaced} became inanimate.` : "";
+		JqueryUtil.doToast({type: "success", content: `💃 ${itemName} animates! HP ${calc.dancingItemHp}, AC ${calc.dancingItemAc}, Force-Empowered Slam ${calc.dancingItemAttackBonus >= 0 ? "+" : ""}${calc.dancingItemAttackBonus} to hit.${replaced}`});
+		return true;
+	}
+
 	/**
 	 * (R21) Canonical "Use this ability" path for the features/abilities area. Routes the
 	 * resolved activatable entry through {@link _activateFeatureState} (which dispatches to the
@@ -9469,7 +9667,10 @@ class CharacterSheetPage {
 		}
 		const resolvedCost = variableSpend ?? resourceCost ?? stateType?.resourceCost ?? 1;
 		const canRestoreDaemonologistUse = feature?.name?.toLowerCase() === "unearthly countenance";
-		if (resource && resource.current < resolvedCost && !canRestoreDaemonologistUse) {
+		// Features that resolve their own cost (and can offer an alternative payment,
+		// e.g. a spell slot) must reach their handler even with an empty primary pool.
+		const ownsItsCost = CharacterSheetState.featureOwnsItsCost?.(feature);
+		if (resource && resource.current < resolvedCost && !canRestoreDaemonologistUse && !ownsItsCost) {
 			JqueryUtil.doToast({type: "warning", content: `Not enough ${resource.name} remaining.`});
 			return;
 		}
