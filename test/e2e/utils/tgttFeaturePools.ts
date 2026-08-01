@@ -802,6 +802,25 @@ export const TGTT_COMBAT_METHODS_BY_TRADITION: Record<string, RegExp[]> = {
 	],
 };
 
+// ── Combat Method progression per class (TGTT) ──
+// "Methods Known" straight off each class table, indexed by class level - 1
+// (so [0] is level 1). This is the number of methods a character PICKS.
+export const TGTT_COMBAT_METHODS_KNOWN: Record<string, number[]> = {
+	"Barbarian": [0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11],
+	"Fighter": [3, 4, 4, 5, 6, 7, 7, 8, 9, 10, 10, 11, 12, 13, 13, 14, 15, 16, 16, 17],
+	"Monk": [0, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10],
+	"Paladin": [0, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8],
+	"Ranger": [0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11],
+	"Rogue": [0, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8],
+};
+
+// Methods GRANTED outright by a class feature (not picked). These stack on top
+// of the table above, so a character's total = table value + every grant whose
+// level they have reached.
+export const TGTT_COMBAT_METHOD_AUTO_GRANTS: Record<string, Array<{level: number; names: string[]}>> = {
+	"Ranger": [{level: 6, names: ["Groundshatter", "Singular Focus"]}],
+};
+
 // ── Cross-source first-party picker pools ──
 // One named export per (featureType × source). Specs that pick from
 // multiple sources should use the buildAny*Checks helpers below to
@@ -1247,6 +1266,103 @@ export function buildPactBoonChecks (
 	return buildOptionalFeatureChecks(
 		/Pact Boon/i, TGTT_PACT_BOONS, TGTT_PACT_BOON_EFFECTS, progression, levelMap,
 	);
+}
+
+/**
+ * TGTT Combat Methods — the pick-list shared by Barbarian / Fighter / Monk /
+ * Paladin / Ranger / Rogue.
+ *
+ * This helper is shaped differently from every other `build*Checks` above, for
+ * two measured reasons.
+ *
+ * **1. WHICH methods a character holds is not deterministic.** Tradition access
+ * is a build-time choice, so two characters of the same class, subclass and
+ * level routinely hold disjoint method sets — spawning the same build
+ * repeatedly yields a different tradition mix each time. Anchoring on specific
+ * method names would be flaky. What IS deterministic is HOW MANY they hold:
+ * the class table's "Methods Known" column, plus any outright grants.
+ *
+ * **2. `kind: "pick"` over `TGTT_COMBAT_METHODS_BY_TRADITION` is UNSOUND, and
+ * this was measured, not assumed.** That constant unions to 321 name patterns,
+ * many of them generic single words, and they collide with features that are
+ * not combat methods at all. A wizard-built Centaur Ranger 3 scored 4 matches
+ * against a true count of 3: the extra was `Charge`, a *Centaur racial trait*
+ * sharing a name with a combat method. A collision count varies by race and
+ * class, so such an assertion is neither tight nor stable — it can be satisfied
+ * by features that are not combat methods.
+ *
+ * So the count is asserted through the product's own structural API instead.
+ * `getCombatMethods()` filters `_data.features` with
+ * `CharacterSheetClassUtils.isCombatMethod()`, which is immune to name
+ * collisions, and `stateCall` compares it with `exact` rather than a lower
+ * bound — so this catches a LOST pick and a SPURIOUS extra alike.
+ *
+ * ⚠️ `exact` is NOT monotone-safe. The features matrix re-evaluates every
+ * earlier entry at each later checkpoint, so a fixed exact count would fail by
+ * construction as the pool grows. Each tier therefore carries `untilLevel`,
+ * closing at the level below the next milestone.
+ *
+ * Auto-granted methods (Ranger's Primal Focus Upgrade at L6 is the only one in
+ * the dataset today) are counted into the expected total AND asserted by name
+ * — via `contains` on the same structural API, so a same-named racial cannot
+ * satisfy them. Counting them is what stops a lost pick hiding behind a grant.
+ *
+ * @param className   Class whose "Methods Known" ladder to assert.
+ * @param opts.maxClassLevel  Highest level actually reached IN THIS CLASS.
+ *                         Required for multiclass legs: a Ranger 6 / Druid 14
+ *                         never gains Ranger 7+, so emitting the full ladder
+ *                         would assert Ranger-13 counts at character level 13.
+ * @param opts.levelMap    class-level \u2192 character-level, for multiclass specs.
+ */
+export function buildCombatMethodChecks (
+	className: string,
+	opts?: {maxClassLevel?: number; levelMap?: Record<number, number>},
+): FeatureCheck[] {
+	const ladder = TGTT_COMBAT_METHODS_KNOWN[className];
+	if (!ladder?.length) return [];
+
+	const cap = opts?.maxClassLevel ?? ladder.length;
+	const grants = (TGTT_COMBAT_METHOD_AUTO_GRANTS[className] ?? []).filter(g => g.level <= cap);
+	const grantedBy = (level: number): number => grants
+		.filter(g => g.level <= level)
+		.reduce((n, g) => n + g.names.length, 0);
+
+	// One milestone per level where the total actually moves.
+	const milestones: {level: number; total: number}[] = [];
+	let prevTotal = 0;
+	ladder.forEach((picked, idx) => {
+		const level = idx + 1;
+		if (level > cap) return;
+		const total = picked + grantedBy(level);
+		if (total <= prevTotal) return;
+		prevTotal = total;
+		milestones.push({level, total});
+	});
+
+	const checks: FeatureCheck[] = milestones.map((m, idx) => {
+		const next = milestones[idx + 1];
+		return {
+			level: applyLevelMap(m.level, opts?.levelMap),
+			// `untilLevel` is mandatory here — see the `exact` note above.
+			...(next ? {untilLevel: applyLevelMap(next.level - 1, opts?.levelMap)} : {}),
+			name: /combat methods/i,
+			kind: "passive" as const,
+			effects: [{kind: "stateCall" as const, method: "getCombatMethods", path: "length", exact: m.total}],
+		};
+	});
+
+	// Outright grants are deterministic, so assert them by name — through the
+	// same structural API, so a same-named racial trait cannot satisfy them.
+	for (const g of grants) {
+		checks.push({
+			level: applyLevelMap(g.level, opts?.levelMap),
+			name: /combat methods/i,
+			kind: "passive" as const,
+			effects: g.names.map(name => ({kind: "stateCall" as const, method: "getCombatMethods", contains: name})),
+		});
+	}
+
+	return checks.sort((a, b) => a.level - b.level);
 }
 
 /** Dreamwalker subclass calls/customs and studies/specials. */

@@ -210,6 +210,50 @@ const combatMethodsByTraditionEntries = Object.entries(combatMethodsByTradition)
 	.sort((a, b) => a[0].localeCompare(b[0]))
 	.map(([t, set]) => [t, [...set]]);
 
+// ── Combat method progression, per class ─────────────────────────────────────
+// How MANY methods a character knows is a class-table column ("Methods Known"),
+// so it is data rather than derivation. WHICH methods they know is not
+// knowable here: tradition access is a build-time choice, so two characters of
+// the same class and level can hold disjoint method sets.
+const combatMethodsKnown = {};
+for (const c of (data.class ?? [])) {
+	for (const g of (c.classTableGroups ?? [])) {
+		const idx = (g.colLabels ?? []).findIndex(l => /methods known/i.test(String(l)));
+		if (idx < 0) continue;
+		const vals = (g.rows ?? []).map(r => {
+			let v = r?.[idx];
+			if (v && typeof v === "object") v = v.value ?? 0;
+			const n = Number(v);
+			return Number.isFinite(n) ? n : 0;
+		});
+		if (vals.some(v => v > 0)) combatMethodsKnown[c.name] = vals;
+	}
+}
+
+// A few features GRANT a method outright instead of adding a pick. Those stack
+// ON TOP of the class table, so the total a character holds is table + grants.
+// Counting them matters: without them the expected total is too low, and a
+// too-low expectation would silently mask that many genuinely-lost picks.
+const combatMethodAutoGrants = {};
+const combatMethodSubclassGrants = [];
+for (const kind of ["classFeature", "subclassFeature"]) {
+	for (const f of (data[kind] ?? [])) {
+		const text = JSON.stringify(f.entries ?? "");
+		const names = [...text.matchAll(/gain the \{@combatmethod ([^}|]+)/gi)].map(m => m[1].trim());
+		if (!names.length) continue;
+		// Subclass-scoped grants would make the total depend on the subclass, which
+		// a per-CLASS helper cannot express. None exist today; surface loudly rather
+		// than silently skewing every count for that class if one is ever added.
+		if (kind === "subclassFeature") {
+			combatMethodSubclassGrants.push(`${f.className}/${f.subclassShortName} L${f.level} ${f.name}`);
+			continue;
+		}
+		(combatMethodsKnown[f.className] ? (combatMethodAutoGrants[f.className] ??= []) : [])
+			.push({level: f.level, names: [...new Set(names)].sort()});
+	}
+}
+for (const list of Object.values(combatMethodAutoGrants)) list.sort((a, b) => a.level - b.level);
+
 // ── Render ────────────────────────────────────────────────────────────────
 
 const header = `/**
@@ -313,6 +357,26 @@ ${combatMethodsByTraditionEntries
 		.map(([t, names]) => `\t${JSON.stringify(t)}: ${renderRegexArray(names, 1)},`)
 		.join("\n")}
 };
+
+// ── Combat Method progression per class (TGTT) ──
+// "Methods Known" straight off each class table, indexed by class level - 1
+// (so [0] is level 1). This is the number of methods a character PICKS.
+export const TGTT_COMBAT_METHODS_KNOWN: Record<string, number[]> = {
+${Object.keys(combatMethodsKnown).sort()
+		.map(cls => `\t${JSON.stringify(cls)}: [${combatMethodsKnown[cls].join(", ")}],`)
+		.join("\n")}
+};
+
+// Methods GRANTED outright by a class feature (not picked). These stack on top
+// of the table above, so a character's total = table value + every grant whose
+// level they have reached.
+export const TGTT_COMBAT_METHOD_AUTO_GRANTS: Record<string, Array<{level: number; names: string[]}>> = {
+${Object.keys(combatMethodAutoGrants).sort()
+		.map(cls => `\t${JSON.stringify(cls)}: [${combatMethodAutoGrants[cls]
+			.map(g => `{level: ${g.level}, names: [${g.names.map(n => JSON.stringify(n)).join(", ")}]}`)
+			.join(", ")}],`)
+		.join("\n")}
+};
 `;
 
 // Cross-source pool blocks (one named export per (featureType, source)).
@@ -386,6 +450,15 @@ console.log(`  Precise Strikes:        ${preciseStrikes.length}`);
 console.log(`  Pact Boons:             ${pactBoons.length}`);
 console.log(`  Dreamwalker (C/S):      ${dreamwalkerCustoms.length}/${dreamwalkerSpecials.length}`);
 console.log(`  Combat Method traditions: ${combatMethodsByTraditionEntries.length}`);
+console.log(`  Combat Method progressions: ${Object.keys(combatMethodsKnown).sort().join(", ")}`);
+for (const [cls, grants] of Object.entries(combatMethodAutoGrants).sort()) {
+	console.log(`    auto-granted (${cls}): ${grants.map(g => `L${g.level} ${g.names.join("+")}`).join(", ")}`);
+}
+if (combatMethodSubclassGrants.length) {
+	console.log(`  ⚠️  SUBCLASS-scoped combat-method grants found — buildCombatMethodChecks`);
+	console.log(`      counts are per-CLASS and cannot represent these. Handle explicitly:`);
+	for (const g of combatMethodSubclassGrants) console.log(`        ${g}`);
+}
 console.log(`  Cross-source pools:`);
 for (const t of Object.keys(FIRSTPARTY_BUCKETS).sort()) {
 	for (const src of FIRSTPARTY_BUCKETS[t]) {
