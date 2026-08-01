@@ -23443,3 +23443,69 @@ color: var(--cs-text-primary, #f1f5f9);
 	background: var(--cs-primary, #6366f1);
 	color: #fff;
 }
+
+/* ========================================================================
+   Lunar Sorcery combat panel (DSotDQ Sorcerer)
+   The phase is a recurring player choice, so the selector reads as a real
+   segmented control: the active phase is filled, the others are outlined
+   affordances. Moonlit indigo rather than the Illrigger ruby so the two
+   additive panels never read as the same feature.
+   ======================================================================== */
+.charsheet__lunar-panel {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-sm, 8px);
+	color: var(--cs-text-primary, #f1f5f9);
+}
+
+.charsheet__lunar-summary {
+	gap: var(--cs-space-sm, 8px);
+	padding: 0.5rem 0.7rem;
+	border: 1px solid var(--cs-primary, #6366f1);
+	border-radius: var(--cs-radius-sm, 6px);
+	background: rgba(99, 102, 241, 0.15);
+}
+
+.charsheet__lunar-summary strong {
+	font-weight: 700;
+	color: var(--cs-text-primary, #f1f5f9);
+}
+
+.charsheet__lunar-phase.cs-combat-btn--active {
+	border-color: var(--cs-primary, #6366f1);
+	background: var(--cs-primary, #6366f1);
+	color: #fff;
+}
+
+/* A disabled non-active phase means "you cannot afford the shift", which is
+   information — keep it legible rather than ghosting it away. */
+.charsheet__lunar-phase[disabled]:not(.cs-combat-btn--active) {
+	opacity: 0.65;
+}
+
+.charsheet__lunar-switch {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin: 0;
+	padding: 0.3rem 0.55rem;
+	border: 1px solid var(--cs-border, rgba(148, 163, 184, 0.35));
+	border-radius: var(--cs-radius-sm, 6px);
+	font-weight: 500;
+	cursor: pointer;
+}
+
+.charsheet__lunar-switch:hover {
+	border-color: var(--cs-primary, #6366f1);
+}
+
+.charsheet__lunar-switch input {
+	margin: 0;
+}
+
+.charsheet__lunar-phenomenon {
+	padding: 0.5rem 0.7rem;
+	border: 1px solid var(--cs-border, rgba(148, 163, 184, 0.35));
+	border-radius: var(--cs-radius-sm, 6px);
+	background: rgba(99, 102, 241, 0.08);
+}
