@@ -26180,22 +26180,30 @@ class CharacterSheetState {
 
 			// ===== GENERIC MODIFIERS =====
 			case "modifier": {
-				// Conditional modifiers (e.g. Danger Sense's "save:dex:advantage …
-				// against effects you can see", Increase Gravity's "+INT to Athletics
-				// when you shove") must stay ENABLED so getModifiersForType() can see
-				// them; aggregateModifiers() then gates EVERY modifier carrying a
-				// `conditional` off by default and surfaces it in conditionalsAvailable
-				// for the per-roll opt-in picker. Disabling them here hid them from the
-				// picker entirely — which used to be the only safeguard against
-				// auto-application, but has been redundant since the aggregator learned
-				// to gate. Numeric conditionals were still being disabled, which made
-				// them permanently unreachable (CS-BUG-065).
+				// Conditional modifiers that carry an advantage/disadvantage flag (e.g.
+				// Danger Sense's "save:dex:advantage … against effects you can see")
+				// stay ENABLED: they contribute 0 to the numeric quick-total (the
+				// adv/dis sentinel is zeroed in _recalculateCustomModifiers), so the
+				// only thing being enabled buys them is visibility to
+				// getModifiersForType()/getAdvantageState().
+				//
+				// A purely NUMERIC conditional bonus (e.g. Increase Gravity's "+INT to
+				// Athletics when you shove") must stay DISABLED. `_recalculateCustomModifiers`
+				// gates on `enabled` alone and never on `conditional`, so enabling one
+				// leaks its value into customModifiers and therefore into getSkillMod()/
+				// getSaveMod() — i.e. it would apply to EVERY roll, not just the
+				// conditional one. Disabling costs nothing: aggregateModifiers() still
+				// surfaces disabled conditionals in `conditionalsAvailable`, so the
+				// per-roll opt-in picker keeps offering them. (CS-BUG-065 was withdrawn
+				// after this was measured; see docs/charactersheet/known-bugs.md.)
+				const {advantage: advFromType, disadvantage: disFromType} = this._parseModifierType(effect.modType);
+				const carriesAdvFlag = advFromType || disFromType || effect.advantage || effect.disadvantage;
 				this._addClassFeatureModifier({
 					name: effect.source,
 					type: effect.modType,
 					value: effect.value,
 					note: effect.conditional ? `From ${effect.source} - ${effect.conditional}` : `From ${effect.source}`,
-					enabled: effect.enabled !== false,
+					enabled: effect.enabled !== false && (carriesAdvFlag || !effect.conditional),
 					conditional: effect.conditional,
 					// Pass through special modifier properties
 					sizeIncrease: effect.sizeIncrease,

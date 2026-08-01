@@ -2027,6 +2027,70 @@ the Sea session), so this class of dead probe cannot recur. The Daemonologist
 spec was migrated to `{kind: "toggleGrantsSpeed", type: "fly", min: 60}` and now
 genuinely asserts the 60 ft.
 
+**Known latent seam left in place (measured, NOT shipped-reachable)**: after this
+fix there are **two** vocabularies by which an active state can grant a movement
+type, and they **add** rather than take the maximum.
+
+- *Bonus vocabulary* — `{type: "bonus", target: "speed:fly", value: 60}`, summed
+  by `getSpeedBonusFromStates()`. This is what the curated states and every
+  prose-parsed grant emit, and it is the head this fix repaired.
+- *Read-site vocabulary* — `{type: "flySpeed", value: N}` or
+  `{type: "flySpeed", equalToWalk: true}`, resolved directly inside
+  `getSpeedByType()`. This is what the Fly spell and Stormborn use. It never
+  crossed the `base === 0` guard, which is why Stormborn was green throughout and
+  did not catch the bug.
+
+Measured on a Daemonologist Wizard 10 (walk 30): the bonus head alone gives
+**60**; adding an `equalToWalk` grant on top gives **90**, not 60. By RAW two
+sources each granting a flying speed should give the higher, not the sum.
+
+Deliberately not fixed here. It is **unreachable today** — the only two live
+emitters are Unearthly Countenance (Daemonologist 10) and Stormborn (Tempest
+Cleric 17), which would require character level 27. Recorded rather than filed as
+its own id, since it shares this pipeline and cannot currently be triggered.
+
+> **CORRECTION (audited after the Circle of the Sea session's read-back).** This
+> entry originally claimed a fix "cannot be made at the read site, because the
+> `bonus` vocabulary is genuinely ambiguous — the same shape expresses both
+> 'grant a 60 ft fly speed' and 'add +10 to the fly speed you already have'".
+> **That is false for type-specific targets.** Enumerated, there are exactly
+> **four** emitters of a `{type: "bonus", target: "speed:<fly|swim|climb|burrow>"}`
+> effect, and **all four are grants**:
+>
+> | Emitter | Shape |
+> |---|---|
+> | `ACTIVE_STATE_TYPES.unearthlyCountenance` | `{target: "speed:fly", value: 60}` |
+> | `parseEffectsFromDescription` fly | regex `/(?:gain\|have) (?:a )?flying speed …/i` |
+> | `parseEffectsFromDescription` swim | same shape |
+> | `parseEffectsFromDescription` climb | same shape |
+>
+> The three parser regexes match **only** `gain`/`have a <X>ing speed` phrasing.
+> They cannot match "your flying speed increases by 10", so no additive typed
+> effect can be produced by this pipeline at all. The genuinely additive
+> vocabulary lives elsewhere: the generic `{type: "speed", value: 10}` effect
+> (walking, e.g. the artifact "Speed Increase" property) and the **named
+> modifier** `speed:fly` modType, which is a different pipeline summed into
+> `customModifiers.speed.fly` by `_recalculateCustomModifiers()`.
+>
+> So the remediation is **much cheaper than recorded**: within the *effect*
+> pipeline, type-specific `speed:<type>` contributions are grants and should be
+> combined with `Math.max` — against each other and against the `equalToWalk`
+> read-site head — rather than summed. No parser change and no new discriminator
+> field are required. `equalToWalk` is already unambiguously a grant, so once the
+> effect head maxes, the read-site head can fold into it (value resolved from the
+> walk speed at read time) and the pipeline returns to a single head.
+>
+> Two guards any such fix must keep, both already pinned by the PREMISE tests in
+> `CharacterSheetActiveStateEngine.test.js`: a generic `{target: "speed"}` must
+> still never conjure a movement type, and the **named-modifier** `speed:<type>`
+> path must stay additive — maxing there would silently delete a player's
+> hand-entered "+10 fly" custom modifier.
+
+Verified unchanged by this fix: `getSpeedByType("fly")` agrees with
+`getSpeed("fly")` on the bonus head (both **60**); Stormborn still reads **30**
+= walking speed; and a generic `{target: "speed", value: 10}` still yields a
+climb speed of **0** even with two fly-granting states active.
+
 ---
 
 ## CS-BUG-060 — Circle of the Sea's Wrath of the Sea was description-only, and Stormborn collided with the Tempest Cleric
@@ -2203,59 +2267,111 @@ roll *occurred*, not that its total was a number.
 
 ---
 
-## CS-BUG-065 — numeric conditional modifiers were disabled at registration, so they could never be opted into
+## CS-BUG-065 — WITHDRAWN (the "fix" was a regression; reverted)
 
-**Status**: FIXED (Meteor Knight batch)
-**Severity**: high — silently deletes a whole class of feature bonuses
-**Surfaced by**: Increase Gravity (Meteor Knight 15) "+ your Intelligence
-modifier to shove ability checks"
+**Status**: WITHDRAWN — not a bug. The change filed under this ID was reverted
+because it introduced a shipped, player-visible regression.
+**Severity**: n/a (the reverted change was high severity)
+**Filed by**: Meteor Knight batch, from Increase Gravity (Meteor Knight 15)
+"+ your Intelligence modifier to shove ability checks"
 
-### Symptom
+### What was claimed
 
-A `FeatureEffectRegistry` `modifier` effect that carried a `conditional`
-string but no `advantage` / `disadvantage` flag was stored with
-`enabled: false`. `getModifiersForType()` skips any modifier whose `enabled`
-is falsy, so the modifier never reached `aggregateModifiers()` at all — not
-as an applied bonus and not in `result.conditionalsAvailable`. The per-roll
-opt-in prompt therefore never offered it, and there was **no** code path
-anywhere that could turn it back on.
+That a `FeatureEffectRegistry` `modifier` effect carrying a `conditional`
+string but no `advantage`/`disadvantage` flag was stored `enabled: false` and
+therefore "never reached `aggregateModifiers()` at all — not as an applied
+bonus and not in `result.conditionalsAvailable`", with "**no** code path
+anywhere that could turn it back on".
 
-### Root cause
+### Why that is false
 
-`_applyFeatureEffect()`'s `case "modifier"`:
+Measured on a live `fighter/meteor knight/15/aarakocra` with the original
+(`enabled: false`) code:
+
+```
+inConditionals: true          <- it IS offered by the per-roll picker
+shoveBonus:     1             <- carrying its correct value
+baseBonus:      0             <- correctly gated off by default
+optInBonus:     1             <- appliedConditionalIds moves it
+```
+
+`aggregateModifiers()` surfaces **disabled** conditionals in
+`conditionalsAvailable` — the premise that `enabled: false` hid them was
+simply wrong. The same is visible in Jest: the pre-existing shove test passes
+both with and without the change, which is why its "regression pin" was
+green-on-revert and proved nothing.
+
+### What the change actually did
+
+`_recalculateCustomModifiers()` gates on `mod.enabled` **alone** and never on
+`mod.conditional`. So storing a numeric conditional `enabled: true` leaks its
+value into `customModifiers.skills` — and from there into `getSkillMod()`,
+which is both the number printed on the sheet and the modifier every skill
+roll uses.
+
+Measured, same character, INT +1:
+
+| | `getSkillMod("athletics")` |
+|---|---|
+| original code | **5** (correct) |
+| with the "fix" | **6** — the shove-only bonus applied to *every* Athletics check |
+
+This violates the documented invariant that conditional modifiers are not
+auto-applied. It is also inconsistent across the three roll handlers, because
+they compose differently:
+
+- `_rollSkillCheck` / `_rollSavingThrow` use `getSkillMod()` / `baseMod` only
+  and never add `aggregated.bonus` -> the conditional applies **always**.
+- `_rollAbilityCheck` adds `aggregated.bonus` **on top of** `baseMod` -> an
+  opted-in conditional `check:*` modifier is **double-counted**.
+
+So the change traded "offered but inert at roll time" for "silently always on,
+and double-counted on ability checks". Both are wrong; the second is worse
+because it puts a wrong number on the character sheet.
+
+### Resolution
+
+Reverted to:
 
 ```js
 enabled: effect.enabled !== false && (carriesAdvFlag || !effect.conditional),
 ```
 
-The `enabled` flag was being made to do the job of `conditional`. That
-double-duty was both redundant and lossy: `aggregateModifiers()` **already**
-gates on `mod.conditional` and routes such modifiers into
-`conditionalsAvailable` rather than into `bonus`. Advantage-flavoured
-conditionals escaped the bug only because of the `carriesAdvFlag` exemption,
-which is why the defect went unnoticed — every conditional shipped so far
-happened to be an advantage.
+Disabling a numeric conditional costs nothing (the picker still offers it) and
+is currently the only thing keeping it out of the quick-total.
 
-### Fix
+### Regression pins (falsified)
 
-```js
-enabled: effect.enabled !== false,
-```
+`test/jest/charactersheet/CharacterSheetMeteorKnight.test.js` gains two tests
+that pin the *player-facing* surface rather than the aggregator:
 
-`enabled` now means only what its name says ("is this modifier live at all"),
-and `conditional` alone decides gating. Registration is lossless; the four
-roll handlers surface the modifier through `_pPickConditionalModifiers` as
-designed.
+- `does NOT leak the conditional shove bonus into the plain Athletics modifier`
+  — asserts `getSkillCustomMod("athletics") === 0` and that the L15 character's
+  displayed Athletics matches an otherwise-identical L14 control (PB is 5 at
+  both levels), with a PREMISE guard asserting the conditional is genuinely
+  present and genuinely carries +4.
+- `keeps the numeric conditional out of the enabled quick-total but still
+  offers it` — asserts `enabled === false` *and* that it still appears in
+  `conditionalsAvailable`, pinning both halves of the trade-off.
 
-### Regression pins
+Both verified **red** when the reverted expression is re-applied, and green
+after. Note the first pin was *vacuous* in its initial form: it compared
+before/after around `applyClassFeatureEffects()`, but `addClass()` already
+applies feature effects, so the baseline was pre-polluted and the test passed
+under the regression. It also needs an explicit `_recalculateCustomModifiers()`
+— without it the quick-total is never rebuilt and the leak cannot be observed.
 
-`test/jest/charactersheet/CharacterSheetMeteorKnight.test.js` — the Increase
-Gravity shove test asserts the modifier appears in
-`aggregateModifiers("skill:athletics").conditionalsAvailable` and that
-passing its id in `appliedConditionalIds` actually moves `bonus`. Verified to
-go red with the old expression restored. Full charactersheet suite (429
-suites / 12961 tests) stays green with the change, confirming nothing relied
-on the auto-disable.
+Full charactersheet suite: 432 suites / 13,100 tests green.
+
+### Genuine follow-up left open
+
+Opting a **numeric** conditional in via the picker does not change a skill or
+save roll total, because `_rollSkillCheck` and `_rollSavingThrow` never consume
+`aggregated.bonus`. That is a real, pre-existing gap — it predates this batch
+and is not what CS-BUG-065 described. Fixing it means reconciling the three
+roll handlers' composition conventions (and removing the resulting
+double-count risk in `_rollAbilityCheck`), which is a generic change, not a
+subclass one.
 
 ---
 
