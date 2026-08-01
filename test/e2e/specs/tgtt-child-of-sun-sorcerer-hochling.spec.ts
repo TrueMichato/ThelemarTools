@@ -6,7 +6,7 @@ import {buildSpecialtyChecks, buildAnyMetamagicChecks, TGTT_METAMAGIC} from "../
 // ── Child of the Sun Sorcerer L1→20 features matrix ──────────────────
 // Sorcerer base (PHB classic — TGTT uses PHB Sorc table):
 //   L2 Font of Magic / Sorcery Points (= Sorc level, long-rest restore)
-//   L3 Metamagic — pick 2; +1 at L10 (3 total); +1 at L17 (4 total)
+//   L3 Metamagic — 3 known; 5 total at L10; 7 total at L17
 //   L20 Sorcerous Restoration — short-rest recovery of up to 4 SP
 // Child of the Sun Bloodline subclass (TGTT, copies Ar2 base):
 //   L1 Glimpse of the Sun — passive on the sheet (cantrip rider)
@@ -17,7 +17,7 @@ import {buildSpecialtyChecks, buildAnyMetamagicChecks, TGTT_METAMAGIC} from "../
 //   L6 Sunlit Path (passive) / L14 Grasping the Sun / L18 Bright Zenith
 const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 	// ── Sorcerer base ────────────────────────────────────────────
-	// Sorcery Points pool scales with sorcerer level from L2; Font
+	// TGTT Sorcery Points equal sorcerer level + 1 from L1; Font
 	// of Magic → long-rest restore until Sorcerous Restoration.
 	// L3 anchor also carries the Hochling racial probes (Aasimar copy:
 	// resistance to necrotic + radiant, Light cantrip via Light Bearer)
@@ -27,7 +27,7 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 		name: "Sorcery Points",
 		kind: "resource",
 		untilLevel: 4,
-		resourceMax: 3,
+		resourceMax: 4,
 		restoreOn: "long",
 		effects: [
 			{kind: "longRestRestores", resource: "Sorcery Points"},
@@ -46,7 +46,7 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 		],
 	},
-	{level: 5,  name: "Sorcery Points", kind: "resource", untilLevel: 10, resourceMax: 5,
+	{level: 5,  name: "Sorcery Points", kind: "resource", untilLevel: 10, resourceMax: 6,
 		effects: [
 			{kind: "rollSavingThrow", ability: "cha"},
 			{kind: "rollAbilityCheck", ability: "cha"},
@@ -58,34 +58,42 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			// Sorcerer starting kit gives a dagger / light crossbow.
 			{kind: "rollAttack", attackName: /dagger|crossbow|fire bolt|quarterstaff/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		]},
-	{level: 11, name: "Sorcery Points", kind: "resource", untilLevel: 16, resourceMax: 11},
-	{level: 17, name: "Sorcery Points", kind: "resource", untilLevel: 19, resourceMax: 17},
-	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20},
+	{level: 11, name: "Sorcery Points", kind: "resource", untilLevel: 16, resourceMax: 12},
+	{level: 17, name: "Sorcery Points", kind: "resource", untilLevel: 19, resourceMax: 18},
+	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 21},
 
-	// Metamagic picks: 2 at L3, +1 at L10, +1 at L17.
+	// TGTT Metamagic picks: 3 at L3, 5 at L10, 7 at L17.
 	// The auto-picker's deterministic first choice is Aimed Spell.
 	// Active metamagic is selected per cast, not exposed as a standing
 	// toggle, so probe the known-only and cast-time state APIs directly.
-	{level: 3,  name: /metamagic/i, kind: "pick", pickedCount: 2,
+	{level: 3, untilLevel: 9, name: /metamagic/i, kind: "pick", pickedCount: 3,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
+			{kind: "stateCall", method: "getKnownMetamagicKeys", path: "length", exact: 3},
 			{kind: "stateCall", method: "getKnownActiveMetamagics", contains: "Aimed Spell"},
+			{kind: "stateCall", method: "getMetamagicCost", args: ["aimed", 1], exact: 2},
 			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], contains: "Aimed Spell"},
 			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], path: "0.cost", exact: 2},
 		]},
-	{level: 10, name: /metamagic/i, kind: "pick", pickedCount: 3,
-		pickedFrom: TGTT_METAMAGIC,
+	{level: 3, untilLevel: 3, name: /font of magic/i, kind: "passive",
 		effects: [
-			{kind: "stateCall", method: "getKnownActiveMetamagics", contains: "Aimed Spell"},
-			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], contains: "Aimed Spell"},
-			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], path: "0.cost", exact: 2},
+			{kind: "stateCall", method: "onLongRest", ignoreResult: true},
+			{kind: "stateCall", method: "getSorceryPoints", path: "current", exact: 4},
+			{kind: "stateCall", method: "useSorceryPoint", args: [2], exact: true},
+			{kind: "stateCall", method: "getSorceryPoints", path: "current", exact: 2},
+			{kind: "stateCall", method: "onLongRest", ignoreResult: true},
 		]},
-	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4,
+	{level: 10, untilLevel: 16, name: /metamagic/i, kind: "pick", pickedCount: 5,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
+			{kind: "stateCall", method: "getKnownMetamagicKeys", path: "length", exact: 5},
 			{kind: "stateCall", method: "getKnownActiveMetamagics", contains: "Aimed Spell"},
-			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], contains: "Aimed Spell"},
-			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], path: "0.cost", exact: 2},
+		]},
+	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 7,
+		pickedFrom: TGTT_METAMAGIC,
+		effects: [
+			{kind: "stateCall", method: "getKnownMetamagicKeys", path: "length", exact: 7},
+			{kind: "stateCall", method: "getKnownActiveMetamagics", contains: "Aimed Spell"},
 		]},
 
 	// Phase H additive coverage: helper-driven per-pick effect probes

@@ -6,7 +6,7 @@ import {buildSpecialtyChecks, buildAnyMetamagicChecks, TGTT_METAMAGIC} from "../
 // ── Heroic Soul Sorcerer L1→20 features matrix ───────────────────────
 // Sorcerer base (PHB / TGTT-sourced subclass):
 //   L2 Font of Magic / Sorcery Points (= Sorc level, long-rest restore)
-//   L3 Metamagic — pick 2 (then +1 at L10, +1 at L17 → 3, then 4)
+//   L3 Metamagic — 3 known; 5 total at L10; 7 total at L17
 //   L20 Sorcerous Restoration — short-rest restore of up to 4 SP
 // Heroic Soul subclass (TGTT):
 //   L1 Heroic Spells (passive — adds spells to learnable list)
@@ -20,7 +20,7 @@ import {buildSpecialtyChecks, buildAnyMetamagicChecks, TGTT_METAMAGIC} from "../
 //   L18 Eternal Hero (passive — Over Soul always on, downed-rider)
 const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// ── Sorcerer base ────────────────────────────────────────────
-	// Font of Magic / Sorcery Points: pool = Sorc level from L2.
+	// Font of Magic / Sorcery Points: TGTT pool = Sorc level + 1 from L1.
 	// Long-rest restore (Sorcery Points do NOT come back on a short
 	// rest until Sorcerous Restoration at L20).
 	// L3 anchor also carries Half-Ogre racial probes (STR base 15 +
@@ -34,7 +34,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 		name: "Sorcery Points",
 		kind: "resource",
 		untilLevel: 4,
-		resourceMax: 3,
+		resourceMax: 4,
 		restoreOn: "long",
 		effects: [
 			{kind: "longRestRestores", resource: "Sorcery Points"},
@@ -59,7 +59,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// bump CHA either, so the DC stays in the 9-11 band across mid
 	// tiers and any `min:` floor would be either trivially true or
 	// noisy.
-	{level: 5,  name: "Sorcery Points", kind: "resource", untilLevel: 10, resourceMax: 5,
+	{level: 5,  name: "Sorcery Points", kind: "resource", untilLevel: 10, resourceMax: 6,
 		effects: [
 			{kind: "rollSavingThrow", ability: "cha"},
 			{kind: "rollAbilityCheck", ability: "cha"},
@@ -71,37 +71,45 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// auto-build has had several ASIs targeting CHA on the primary
 	// caster class; PB=4 + CHA mod ≥ 1 keeps the floor comfortably
 	// above DC 13 even on a slow-CHA path.
-	{level: 11, name: "Sorcery Points", kind: "resource", untilLevel: 16, resourceMax: 11,
+	{level: 11, name: "Sorcery Points", kind: "resource", untilLevel: 16, resourceMax: 12,
 		effects: [
 			{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
 		]},
-	{level: 17, name: "Sorcery Points", kind: "resource", untilLevel: 19, resourceMax: 17},
-	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20},
+	{level: 17, name: "Sorcery Points", kind: "resource", untilLevel: 19, resourceMax: 18},
+	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 21},
 
-	// Metamagic picks scale 2 → 3 → 4 across L3 / L10 / L17.
+	// TGTT Metamagic picks scale 3 → 5 → 7 across L3 / L10 / L17.
 	// The auto-picker's deterministic first choice is Aimed Spell.
 	// Active metamagic is selected per cast, not exposed as a standing
 	// toggle, so probe the known-only and cast-time state APIs directly.
-	{level: 3,  name: /metamagic/i, kind: "pick", pickedCount: 2,
+	{level: 3, untilLevel: 9, name: /metamagic/i, kind: "pick", pickedCount: 3,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
+			{kind: "stateCall", method: "getKnownMetamagicKeys", path: "length", exact: 3},
 			{kind: "stateCall", method: "getKnownActiveMetamagics", contains: "Aimed Spell"},
+			{kind: "stateCall", method: "getMetamagicCost", args: ["aimed", 1], exact: 2},
 			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], contains: "Aimed Spell"},
 			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], path: "0.cost", exact: 2},
 		]},
-	{level: 10, name: /metamagic/i, kind: "pick", pickedCount: 3,
-		pickedFrom: TGTT_METAMAGIC,
+	{level: 3, untilLevel: 3, name: /font of magic/i, kind: "passive",
 		effects: [
-			{kind: "stateCall", method: "getKnownActiveMetamagics", contains: "Aimed Spell"},
-			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], contains: "Aimed Spell"},
-			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], path: "0.cost", exact: 2},
+			{kind: "stateCall", method: "onLongRest", ignoreResult: true},
+			{kind: "stateCall", method: "getSorceryPoints", path: "current", exact: 4},
+			{kind: "stateCall", method: "useSorceryPoint", args: [2], exact: true},
+			{kind: "stateCall", method: "getSorceryPoints", path: "current", exact: 2},
+			{kind: "stateCall", method: "onLongRest", ignoreResult: true},
 		]},
-	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4,
+	{level: 10, untilLevel: 16, name: /metamagic/i, kind: "pick", pickedCount: 5,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
+			{kind: "stateCall", method: "getKnownMetamagicKeys", path: "length", exact: 5},
 			{kind: "stateCall", method: "getKnownActiveMetamagics", contains: "Aimed Spell"},
-			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], contains: "Aimed Spell"},
-			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], path: "0.cost", exact: 2},
+		]},
+	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 7,
+		pickedFrom: TGTT_METAMAGIC,
+		effects: [
+			{kind: "stateCall", method: "getKnownMetamagicKeys", path: "length", exact: 7},
+			{kind: "stateCall", method: "getKnownActiveMetamagics", contains: "Aimed Spell"},
 		]},
 
 	// Phase H additive coverage: helper-driven per-pick effect probes
@@ -200,7 +208,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
  *     Legendary Weapon manifests
  *   - Combat Methods (L3) — Stamina pool = 2× prof bonus, restores
  *     on short or long rest
- *   - 2 Metamagic options picked at L3 (Sorcerer baseline) — at
+ *   - 3 Metamagic options picked at L3 (TGTT Sorcerer baseline) — at
  *     least one must surface as a toggle/feature
  *   - Manifest Legend (L14) — long-rest 3-sorcery-point bigger toggle
  *   - Eternal Hero (L18) — capstone-ish
