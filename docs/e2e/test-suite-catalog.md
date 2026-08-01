@@ -34,6 +34,7 @@ the skill reference at
 | 17 | `tgtt-lust-cleric-lexalian.spec.ts` | Lust Domain Cleric · Lexalian Children | 1–20 | Lust domain features, Channel Divinity uses, full caster slot table. |
 | 18 | `tgtt-horror-warlock-theocracian.spec.ts` | Horror Warlock · Theocracian Children | 1–20 | Horror subclass features, Eldritch Invocations pick-list, pact slots short-rest restore. |
 | 19 | `tgtt-necromancer-wizard.spec.ts` | School of Necromancy Wizard · Human | 1–20 | Necromancy Savant scribe discount, Grim Harvest healing math, Undead Thralls companion buffs + Animate Dead grant, Inured to Undeath necrotic resistance **and** HP-max-reduction immunity, Command Undead save DC. |
+| 20 | `tgtt-sea-druid.spec.ts` | Circle of the Sea Druid (XPHB 2024) · Human | 1–20 | Wrath of the Sea as a Wild-Shape-fuelled Emanation (CON save at the druid's spell save DC, WIS-scaled Cold damage, 15-ft push, bonus-action Ocean Spray trigger), the 2024 Wild Shape pool progression 2/3/4, Aquatic Affinity's computed swim speed and 5→10 ft Emanation, Stormborn's Emanation-gated Cold/Lightning/Thunder resistance and fly-speed-equals-walk, Oceanic Gift's self/ally/both placements and doubled Wild Shape cost. |
 
 ## Other specs
 

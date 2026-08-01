@@ -1732,3 +1732,92 @@ no-op controls) and the now-unskipped `activeStateLight` probe in
 `tgtt-sun-soul-monk.spec.ts`.
 
 ---
+
+## CS-BUG-060 — Circle of the Sea's Wrath of the Sea was description-only, and Stormborn collided with the Tempest Cleric
+
+**Status**: RESOLVED (Circle of the Sea Druid implementation).
+
+**Affected**: Circle of the Sea Druid (XPHB 2024), all levels 3-20.
+
+**Symptom**: every one of the subclass's four features rendered as text and did
+nothing measurable.
+
+- **Wrath of the Sea** produced a flat `1d10` from a level-indexed table with no
+  save DC, no save ability, no push, no emanation range and no Wild Shape cost.
+  The real feature is `max(1, WIS mod)`d6 Cold, a Constitution save against the
+  druid's own spell save DC, and a 15-foot push of a Large-or-smaller target.
+  `detectActivatableFeature()` also mis-classified it as a `wildShape`
+  transformation, so activating it tried to turn the druid into a beast.
+- **Aquatic Affinity** set an inert `swimSpeed: 60` calculation that no speed
+  consumer read, and never widened the Emanation.
+- **Stormborn** set `hasStormborn` — the *Tempest Cleric's* L17 key — which is
+  wired to an unconditional `{type: "speed", speedType: "fly", equalToWalk:
+  true}` emission. A Sea Druid therefore flew permanently from level 10, with or
+  without the Emanation, and gained none of its three resistances.
+- **Oceanic Gift** exposed an invented `oceanicGiftTargets` count and no
+  placement choice or cost.
+
+**Root cause**: the calculation block was written from the feature *names*
+rather than the feature text, and reused a foreign calculation key.
+
+**Fix**: replaced the calculation block with values derived from the XPHB text,
+renamed Stormborn's key to `hasSeaStormborn`, and added a generic
+`wrathOfTheSea` active state whose effects are supplied per-level and
+per-placement:
+
+- `saveDamageBurst` is a new *generic* `trigger.effectType`: the state emits
+  unresolved scaling hints (`diceAbility`, `diceMinimum`, `dieSize`,
+  `dcCalculation`) and `getActiveStateTrigger()` resolves them, which keeps the
+  effect provider out of the `getSpeed → getActiveStateEffects` re-entrancy
+  cycle.
+- `equalToWalk` is now honoured on **active-state** speed effects, resolved at
+  the read site in `getSpeed()` / `getSpeedByType()`.
+- `placement` is now persisted on an active-state record and passed to
+  `_getSupplementalActiveStateEffects`, so an ally-placed Emanation withholds
+  Stormborn's benefits from the druid while keeping the druid's DC and dice.
+- `_extractCondition()` learned the phrasing `while active`, without which the
+  description-text modifier pipeline registered Stormborn's fly speed as an
+  always-on named modifier in parallel with the (correctly gated) active state.
+
+**Tests**: 24 mechanical assertions in
+`test/jest/charactersheet/CharacterSheetDruid.test.js` (21 of which go red
+against the pre-fix file) and the full matrix in
+`test/e2e/specs/tgtt-sea-druid.spec.ts`.
+
+---
+
+## CS-BUG-061 — XPHB Wild Shape pool never scaled past two uses, and Archdruid granted an unlimited pool
+
+**Status**: RESOLVED.
+
+**Affected**: every 2024 (XPHB / TGTT) Druid from level 6 up — Circle of the
+Sea, Stars, Zodiac, Moon, Wild Companion, and anything else fuelled by the pool.
+
+**Symptom**: `getFeatureCalculations().wildShapeUses` was a hard-coded `2` for
+both editions, and the on-sheet "Wild Shape" resource stayed at max 2 at every
+level. Separately, `hasArchdruid` set `wildShapeUses = Infinity` at level 20.
+
+**Root cause**: two independent errors.
+
+1. The 2024 Druid Features table has a **Wild Shape column** — 2 uses at levels
+   2-5, 3 at 6-16, 4 at 17-20 — which the calculation ignored. On top of that,
+   `addFeature` parses the count out of the feature text ("You can use Wild
+   Shape twice") once at grant time and never re-scales, so even a corrected
+   calculation would not have moved the player-facing pool. This is exactly the
+   failure mode CS-BUG-033 fixed for Channel Divinity.
+2. The 2024 Archdruid does **not** grant unlimited Wild Shape. Its "Evergreen
+   Wild Shape" benefit refunds *one* expended use whenever you roll Initiative
+   with an empty pool.
+
+**Fix**: `wildShapeUses` now follows the table for `isXPHB` druids and stays at
+a flat 2 for PHB 2014. A new `_ensureWildShapeUses()` — modelled directly on
+`_ensureChannelDivinityUses()` — re-scales the on-sheet resource and the owning
+feature's use pool from `getResources()` and `getWildShapeResource()`, raising
+only, and never refilling a partly spent pool. Archdruid now sets
+`hasEvergreenWildShape` and leaves the pool at 4.
+
+**Found by**: `test/e2e/specs/tgtt-sea-druid.spec.ts` — the L11 matrix
+checkpoint could not activate Wrath of the Sea twice because the pool was
+starved at 2.
+
+---

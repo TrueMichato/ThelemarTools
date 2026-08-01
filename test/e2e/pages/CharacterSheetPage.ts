@@ -1127,7 +1127,10 @@ export class CharacterSheetPage {
 		actionType: string;
 		damageType: string;
 		damage: number;
+		damageFormula: string;
+		dc: number;
 		used: boolean;
+		actionUsed: boolean;
 		reactionUsed: boolean;
 	}> {
 		await this.activateFeature(feature);
@@ -1140,13 +1143,19 @@ export class CharacterSheetPage {
 				state?.startCombat?.();
 				combat?._resetTurnActionUsage?.();
 				const used = combat?._useActiveStateTrigger?.(stateId) === true;
+				// Read whichever action type the trigger actually declares, so
+				// bonus-action / action triggers are covered as well as reactions.
+				const actionType = trigger?.actionType || "";
 				return {
 					active: !!trigger,
 					label: trigger?.label || "",
-					actionType: trigger?.actionType || "",
+					actionType,
 					damageType: trigger?.effect?.damageType || "",
 					damage: trigger?.effect?.resolvedValue || 0,
+					damageFormula: trigger?.effect?.resolvedDamage || "",
+					dc: trigger?.effect?.resolvedDc ?? 0,
 					used,
+					actionUsed: !!combat?._turnActionUsage?.[actionType],
 					reactionUsed: !!combat?._turnActionUsage?.reaction,
 				};
 			} finally {
@@ -1329,8 +1338,27 @@ export class CharacterSheetPage {
 	 * Returns a map {0: [cantrips], 1: [...], ...}. Useful for "subclass
 	 * granted these L3 spells" assertions.
 	 */
-	async getKnownSpellsByLevel (): Promise<Record<number, string[]>> {
+	/**
+	 * Cantrip names known to the character.
+	 *
+	 * The sheet keeps cantrips in a list of their own
+	 * (`_data.spellcasting.cantripsKnown`), so `getKnownSpellNames()` — which
+	 * reads `getKnownSpells()` — never sees them. Any subclass that grants a
+	 * cantrip through `additionalSpells` (e.g. Circle of the Sea's Ray of
+	 * Frost) is therefore invisible to a spell-list probe unless the two lists
+	 * are unioned.
+	 */
+	async getCantripNames (): Promise<string[]> {
 		return this.page.evaluate(() => {
+			const state: any = (globalThis as any).charSheet?._state;
+			if (typeof state?.getCantripsKnown !== "function") return [] as string[];
+			try {
+				return (state.getCantripsKnown() || []).map((spell: any) => spell?.name).filter(Boolean);
+			} catch (_) { return [] as string[]; }
+		});
+	}
+
+	async getKnownSpellsByLevel (): Promise<Record<number, string[]>> {		return this.page.evaluate(() => {
 			const cs: any = (globalThis as any).charSheet;
 			const state = cs?._state;
 			if (!state?.getKnownSpells) return {};

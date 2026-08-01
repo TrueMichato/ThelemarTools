@@ -8180,6 +8180,26 @@ class CharacterSheetCombat {
 				`${effect.resolvedDamage} force damage; DEX save DC ${effect.resolvedDc} negates (chosen creatures within ${effect.range} ft)`,
 			);
 		}
+		// Generic "one creature in my Emanation makes a save or takes damage (and
+		// is pushed)" burst. Any state type can opt in by exposing an effect of
+		// this shape; nothing here is Circle-of-the-Sea specific.
+		if (effect.type === "saveDamageBurst") {
+			const roll = this._parseDamage(effect.resolvedDamage || "1d6");
+			const saveName = (effect.saveAbility || "con").toUpperCase();
+			const detail = [
+				`${effect.resolvedDamage} ${effect.damageType || ""} damage`.replace(/\s+/g, " ").trim(),
+				`${saveName} save DC ${effect.resolvedDc} negates`,
+				`one creature you can see in the ${effect.range}-ft Emanation`,
+			];
+			if (effect.pushDistance) {
+				detail.push(`on a failure, ${effect.maxPushSize ? `${effect.maxPushSize} or smaller ` : ""}targets are pushed up to ${effect.pushDistance} ft away from you`);
+			}
+			this._page._showDiceResult?.(
+				`${trigger.stateName} — ${trigger.label}`,
+				roll.total,
+				detail.join("; "),
+			);
+		}
 		if (!skipActionCost) this._consumeActionType(trigger.actionType);
 		this.renderCombatStates();
 		return true;

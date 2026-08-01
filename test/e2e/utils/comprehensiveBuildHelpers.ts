@@ -746,6 +746,14 @@ export type EffectCheck = _EffectCommon & (
 	// === Toggle: snapshot before, activate, snapshot diff, deactivate ===
 	| {kind: "togglePlusAc"; whenActive: number | "abilityMod"; ability?: AblKey}
 	| {kind: "togglePlusSpeed"; type?: SpeedType; delta: number}
+	// Verify a toggle GRANTS a movement type the character doesn't otherwise
+	// have (fly/swim/climb/burrow). `togglePlusSpeed` only asserts for walk,
+	// so it silently passes for every other type — use this instead for
+	// "while X is active you have a Fly Speed equal to your Speed" features
+	// (Circle of the Sea's Stormborn, Aasimar Heavenly Wings, Fly, …).
+	// `equalsWalk` additionally pins the granted speed to the walking speed
+	// measured while the toggle is on.
+	| {kind: "toggleGrantsSpeed"; type: SpeedType; equalsWalk?: boolean; min?: number}
 	| {kind: "toggleGrantsResistance"; damageType: string}
 	| {kind: "toggleGrantsAdvantage"; rollType: string}
 	| {kind: "toggleGrantsImmunity"; damageType: string}
@@ -826,6 +834,11 @@ export type EffectCheck = _EffectCommon & (
 		actionType: string;
 		damageType: string;
 		damageMin: number;
+		// Optional: pin the resolved dice formula (e.g. "1d6") and the minimum
+		// resolved save DC for triggers whose payload is a dice pool + save
+		// rather than a flat ability-scaled number.
+		damageFormula?: string;
+		dcMin?: number;
 	}
 	| {kind: "activeStateLight"; feature: string; stateTypeId: string; bright: number; dim: number}
 	| {kind: "weaponScopedState"; feature: string; attackBonusMin: number; alternateDamageType: string}
@@ -882,6 +895,7 @@ export type EffectCheck = _EffectCommon & (
 const _TOGGLE_EFFECT_KINDS = new Set([
 	"togglePlusAc",
 	"togglePlusSpeed",
+	"toggleGrantsSpeed",
 	"toggleGrantsResistance",
 	"toggleGrantsAdvantage",
 	"toggleGrantsImmunity",
@@ -1163,9 +1177,14 @@ async function _runPassiveOrRollEffect (
 			// "first-party" and "tgtt-flavor" both use exact-name lookup.
 			// The mode is metadata for skipReason annotations and human
 			// review; the runtime check is identical.
+			// Cantrips live in their own list on the sheet, so a subclass that
+			// grants one through `additionalSpells` only shows up once both
+			// lists are unioned.
+			const cantrips = await charSheet.getCantripNames().catch(() => [] as string[]);
+			const pool = [...known, ...cantrips];
 			const want = e.spell.toLowerCase();
-			if (!known.some(n => n.toLowerCase() === want)) {
-				throw new Error(`spell "${e.spell}" not in spellbook [${mode}]. seen=${known.slice(0, 30).join(", ")}…`);
+			if (!pool.some(n => n.toLowerCase() === want)) {
+				throw new Error(`spell "${e.spell}" not in spellbook [${mode}]. seen=${pool.slice(0, 30).join(", ")}…`);
 			}
 			return;
 		}
@@ -1682,13 +1701,21 @@ async function _runPassiveOrRollEffect (
 		}
 		case "activeStateTrigger": {
 			const result = await charSheet.probeActiveStateTrigger(e.feature, e.stateTypeId);
-			if (!result.active || !result.used || !result.reactionUsed) {
-				throw new Error(`${e.feature} trigger did not activate and consume its reaction: ${JSON.stringify(result)}`);
+			// `actionUsed` reads whichever action type the trigger declares, so a
+			// bonus-action trigger is covered as well as the original reaction case.
+			if (!result.active || !result.used || !result.actionUsed) {
+				throw new Error(`${e.feature} trigger did not activate and consume its ${result.actionType || "action"}: ${JSON.stringify(result)}`);
 			}
 			if (result.label !== e.label || result.actionType !== e.actionType || result.damageType !== e.damageType) {
 				throw new Error(`${e.feature} trigger metadata mismatch: ${JSON.stringify(result)}`);
 			}
 			if (result.damage < e.damageMin) throw new Error(`${e.feature} retaliation=${result.damage}, expected >=${e.damageMin}`);
+			if (e.damageFormula != null && result.damageFormula !== e.damageFormula) {
+				throw new Error(`${e.feature} trigger damage formula=${result.damageFormula}, expected ${e.damageFormula}`);
+			}
+			if (e.dcMin != null && !(result.dc >= e.dcMin)) {
+				throw new Error(`${e.feature} trigger DC=${result.dc}, expected >=${e.dcMin}`);
+			}
 			return;
 		}
 		case "activeStateLight": {
@@ -1714,6 +1741,7 @@ async function _runToggleEffect (
 	abilityModsBefore: Record<string, number>,
 	beforeAttackNames: string[],
 	afterAttackNames: string[],
+	speedProbes: Map<string, {before: number; after: number; walkAfter: number}>,
 ): Promise<void> {
 	switch (e.kind) {
 		case "togglePlusAc": {
@@ -1736,6 +1764,17 @@ async function _runToggleEffect (
 				if (delta !== e.delta) throw new Error(`speed:${t} delta on toggle = ${delta}, expected ${e.delta}`);
 			}
 			// non-walk: caller would need to check via getSpeed before+after manually; skip
+			return;
+		}
+		case "toggleGrantsSpeed": {
+			const probe = speedProbes.get(e.type);
+			if (!probe) throw new Error(`internal: no speed probe captured for "${e.type}"`);
+			if (probe.before > 0) throw new Error(`already had a ${e.type} speed (${probe.before}) before toggle — can't probe`);
+			if (!(probe.after > 0)) throw new Error(`expected a ${e.type} speed after toggle, got ${probe.after}`);
+			if (e.min != null && probe.after < e.min) throw new Error(`speed:${e.type}=${probe.after} after toggle, expected >=${e.min}`);
+			if (e.equalsWalk && probe.after !== probe.walkAfter) {
+				throw new Error(`speed:${e.type}=${probe.after} after toggle, expected to equal walk speed ${probe.walkAfter}`);
+			}
 			return;
 		}
 		case "toggleGrantsResistance": {
@@ -1965,6 +2004,7 @@ export async function assertFeaturesMatrix (
 						const beforeAttackNames = await charSheet.getAttackNames();
 						const advProbes = new Map<string, {advBefore: boolean; advAfter: boolean}>();
 						const conditionImmunityProbes = new Map<string, {before: boolean; after: boolean}>();
+						const speedProbes = new Map<string, {before: number; after: number; walkAfter: number}>();
 						for (const eff of toggleEffects) {
 							if (eff.kind === "toggleGrantsAdvantage") {
 								const s = await charSheet.getAdvantageState(eff.rollType);
@@ -1976,6 +2016,9 @@ export async function assertFeaturesMatrix (
 									return !!cs?._state?.hasConditionImmunityFromStates?.(condition);
 								}, eff.condition);
 								conditionImmunityProbes.set(eff.condition, {before, after: false});
+							}
+							if (eff.kind === "toggleGrantsSpeed") {
+								speedProbes.set(eff.type, {before: await charSheet.getSpeed(eff.type), after: 0, walkAfter: 0});
 							}
 						}
 						let activated = false;
@@ -1999,10 +2042,15 @@ export async function assertFeaturesMatrix (
 										return !!cs?._state?.hasConditionImmunityFromStates?.(condition);
 									}, eff.condition);
 								}
+								if (eff.kind === "toggleGrantsSpeed") {
+									const probe = speedProbes.get(eff.type)!;
+									probe.after = await charSheet.getSpeed(eff.type);
+									probe.walkAfter = await charSheet.getSpeed("walk");
+								}
 							}
 							for (const eff of toggleEffects) {
 								try {
-									await _runToggleEffect(eff, before, after, beforeRes, afterRes, beforeImm, afterImm, advProbes, conditionImmunityProbes, before.abilityMods, beforeAttackNames, afterAttackNames);
+									await _runToggleEffect(eff, before, after, beforeRes, afterRes, beforeImm, afterImm, advProbes, conditionImmunityProbes, before.abilityMods, beforeAttackNames, afterAttackNames, speedProbes);
 								} catch (eErr: any) {
 									errors.push(`${label} effect ${eff.kind}: ${eErr.message}`);
 								}
