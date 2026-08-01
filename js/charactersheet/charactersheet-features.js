@@ -1485,6 +1485,16 @@ class CharacterSheetFeatures {
 			});
 		}
 
+		// Potent Spellcasting (most Cleric domains, Druid Circle of the Land / Elemental
+		// Fury): a flat modifier added to every cantrip of the granting class.
+		if (calculations.potentSpellcastingBonus > 0) {
+			stats.push({
+				label: "Cantrip Damage",
+				value: `+${calculations.potentSpellcastingBonus}`,
+				title: `Potent Spellcasting — added to the damage of every ${calculations.potentSpellcastingClass || "class"} cantrip`,
+			});
+		}
+
 		if (calculations.wildShapeDc) {
 			stats.push({
 				label: "Wild Shape DC",

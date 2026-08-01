@@ -508,6 +508,50 @@ CS-BUG-050 through CS-BUG-054 in `known-bugs.md` — each was a generic defect o
 a shared path, not a Crown-specific gap. Adding a `has*` flag is the *first*
 step of supporting a feature, never the last.
 
+### Cleric — Arcana Domain (SCAG, 2014)
+
+```javascript
+// Arcana Domain (SCAG)
+hasArcaneInitiate: true,          // L1
+bonusWizardCantrips: 2,           // L1 — a real pick-list, see below
+hasArcaneAbjuration: true,        // L2
+arcaneAbjurationDc: 8 + profBonus + WIS,   // via getFeatureSaveDc()
+arcaneAbjurationRange: 30,
+arcaneAbjurationDuration: 1,      // minutes
+arcaneAbjurationBanishCr: 0.5 | 1 | 2 | 3 | 4,   // L5 / L8 / L11 / L14 / L17
+hasSpellBreaker: true,            // L6
+spellBreakerMaxSpellLevel: <highest spell slot level the character HAS>,
+hasPotentSpellcasting: true,      // L8
+potentSpellcastingBonus: WIS,
+potentSpellcastingClass: "Cleric",
+hasArcaneMastery: true,           // L17
+arcaneMasterySpellLevels: [6, 7, 8, 9],
+```
+
+**Arcana is the worked example for player-CHOSEN grants.** Arcane Initiate
+("two cantrips of your choice from the wizard spell list") and Arcane Mastery
+("choose four spells… one 6th, one 7th, one 8th, one 9th") are the first
+subclass grants in the product that require the *player* to pick. They are
+implemented generically, from the data:
+
+- `getSubclassSpellChoiceSlots()` walks the subclass's `additionalSpells`
+  block for `{choose: "level=0|class=Wizard", count: 2}` entries — the shape
+  that `_parseSpellReference()` silently dropped (CS-BUG-075) — and expands
+  each into stable, level-gated slots.
+- `_ensureSubclassSpellChoices()` reconciles those slots against
+  `_data.fulfilledSpellChoiceSlots` and mints pending choices, so the Builder,
+  Level-Up and Quick Build all surface the picker with no flow-specific code:
+  they already call `processPendingSpellChoices()`.
+- Arcane Mastery's picks are marked `alwaysPrepared`, so they behave as domain
+  spells rather than eating the prepared limit.
+
+**Potent Spellcasting is the worked example for "a calculation is not a
+mechanic".** `potentSpellcastingBonus` had been computed by ~10 subclass
+branches and read by nothing (CS-BUG-076). The consumer is generic:
+`state.getCantripDamageBonus(spell)` scoped by `potentSpellcastingClass`, wired
+into `_rollCantripDamage()` and shown as a "Cantrip Damage" stat badge. Arcane
+Initiate's wizard cantrips *count as cleric cantrips*, so they receive it.
+
 ### Wizard
 
 ```javascript
