@@ -933,6 +933,9 @@ export const PRESET_FULL_WICKED_WITCH_SORCERER: CharacterPreset = {
 	// the TGTT spell picker does not surface "Shield" in the L1 view, and the retry
 	// loop that chases it costs the L1 round-trip test most of its 60 s budget.
 	signatureSpells: ["Fire Bolt", "Burning Hands"],
+};
+
+/**
  * Lunar Sorcery Sorcerer (DSotDQ subclass on the PHB-2014 Sorcerer chassis).
  *
  * PHB rather than XPHB deliberately: `Lunar Sorcery` exists for BOTH `classSource`
