@@ -4837,6 +4837,10 @@ class CharacterSheetState {
 			chosenSubfeatures: [],
 			// TGTT passive metamagic tuning state
 			tunedMetamagics: [],
+			// Wicked Witch (Ar8 Sorcerer): the Granny's Gifts ward, the Fly, My Pretty
+			// enchanted object, and any conjured Coven Calling duplicates. Null until the
+			// origin's abilities are actually used.
+			wickedWitch: {grannysWard: null, flyingItem: null, covenDuplicates: null},
 
 			// Sheet settings/options
 			settings: {
@@ -15234,13 +15238,28 @@ class CharacterSheetState {
 	// =========================================================================
 
 	getPendingFeatureChoices () {
-		this._ensureStudentOfWarChoices();
+		this._ensureSeededFeatureChoices();
 		return [...(this._data.pendingFeatureChoices || [])];
 	}
 
 	hasPendingFeatureChoices () {
-		this._ensureStudentOfWarChoices();
+		this._ensureSeededFeatureChoices();
 		return (this._data.pendingFeatureChoices?.length || 0) > 0;
+	}
+
+	/**
+	 * Catch-up seeding for feature choices whose prompt is NOT produced by the generic
+	 * prose parsers. Called from both pending-choice readers, so Builder, Level-Up and
+	 * Quick Build all surface these picks — including after a reload, where the
+	 * feature-add path that would normally seed them never ran.
+	 *
+	 * Every seeder must be idempotent: `addPendingFeatureChoice` dedupes by signature and
+	 * each seeder additionally short-circuits once its choice has been resolved.
+	 * @private
+	 */
+	_ensureSeededFeatureChoices () {
+		this._ensureStudentOfWarChoices();
+		this._ensureHagAncestorChoice();
 	}
 
 	_ensureStudentOfWarChoices () {
@@ -20527,6 +20546,82 @@ class CharacterSheetState {
 									calculations.brightZenithBlindRange = 40;
 									calculations.brightZenithBlindsight = 100;
 									calculations.brightZenithDuration = 1; // minute
+								}
+								break;
+							}
+							case "Wicked Witch":
+							case "Wicked Witch Sorcerous Origin": {
+								// Wicked Witch (Arcadia 8 Sorcerer, re-parented onto the TGTT
+								// chassis by `homebrew/TravelersGuidetoThelemar.json`). On the Ar8
+								// original the origin lands at sorcerer 1; on the TGTT / XPHB
+								// chassis Sorcerous Origin is a LEVEL 3 feature, so the L1 block
+								// gates on `subclassLevel`, exactly like every other origin here.
+								const subclassLevel = is2024 ? 3 : 1;
+
+								// ── Granny's Gifts (L1) ──────────────────────────────────
+								// Half of it is the always-prepared spell ladder, which the
+								// GENERIC `additionalSpells` pipeline already grants. The other
+								// half is a real, choosable long-rest boon: you or one creature
+								// within 30 ft gains advantage on saves against being charmed or
+								// frightened. `setGrannysWardTarget()` applies it.
+								if (level >= subclassLevel) {
+									calculations.hasGrannysGifts = true;
+									calculations.grannysWardRange = 30;
+									calculations.grannysWardConditions = ["charmed", "frightened"];
+									// The replaceable-spell clause: any enchantment or illusion
+									// spell from the sorcerer, warlock or wizard list.
+									calculations.grannysGiftsSwapSchools = ["enchantment", "illusion"];
+									calculations.grannysGiftsSwapClasses = ["sorcerer", "warlock", "wizard"];
+								}
+
+								// ── Hag Ancestor (L1) ────────────────────────────────────
+								// A three-way player CHOICE whose pick drives a language, a skill
+								// proficiency and — most importantly — the "specialty" school
+								// that halves Clever Little Witch / Coven Calling costs.
+								if (level >= subclassLevel) {
+									calculations.hasHagAncestor = true;
+									calculations.hasHagInfluenceAdvantage = true;
+									const kind = this.getHagAncestorKind();
+									if (kind) {
+										const def = CharacterSheetState.HAG_ANCESTOR_KINDS[kind];
+										calculations.hagAncestorKind = kind;
+										calculations.hagAncestorSpecialty = def.specialty;
+										calculations.hagAncestorLanguage = def.language;
+										calculations.hagAncestorSkill = def.skill;
+									}
+								}
+
+								// ── Clever Little Witch (L6) ─────────────────────────────
+								// Reaction: reflect a single-target spell back at its caster for
+								// Sorcery Points equal to the spell's level — HALVED (rounded
+								// down) when the spell belongs to your ancestor's specialty.
+								if (level >= 6) {
+									calculations.hasCleverLittleWitch = true;
+									calculations.cleverLittleWitchRange = 15;
+									calculations.cleverLittleWitchAction = "reaction";
+									calculations.cleverLittleWitchMaxSpellLevel = 9;
+								}
+
+								// ── Fly, My Pretty (L14) ─────────────────────────────────
+								// Enchant one Small/Medium object on a long rest; riding it grants
+								// a 60 ft flying speed and immunity to being charmed or frightened.
+								if (level >= 14) {
+									calculations.hasFlyMyPretty = true;
+									calculations.flyMyPrettyFlySpeed = 60;
+									calculations.flyMyPrettyImmunities = ["charmed", "frightened"];
+								}
+
+								// ── Coven Calling (L18) ──────────────────────────────────
+								// Clever Little Witch may instead throw back ANY spell you saw the
+								// triggering creature cast in the last minute, and 2 Sorcery Points
+								// conjure two *mirror image*-like duplicates that can each cast a
+								// known L1–3 instantaneous spell for its level in Sorcery Points.
+								if (level >= 18) {
+									calculations.hasCovenCalling = true;
+									calculations.covenCallingRecallMinutes = 1;
+									calculations.covenDuplicateCost = 2;
+									calculations.covenDuplicateCount = 2;
+									calculations.covenDuplicateMaxSpellLevel = 3;
 								}
 								break;
 							}
@@ -25839,6 +25934,36 @@ class CharacterSheetState {
 
 		// Bright Zenith (Sun Bloodline 18): AoE blind + blindsight, 6 SP cost
 		// (Active ability, tracked as SP cost)
+
+		// Hag Ancestor (Wicked Witch 1): the ancestry pick's three passive grants —
+		// the ancestral language, a bonus skill proficiency, and advantage on Charisma
+		// checks made to influence hags. Emitted from the CALCULATIONS rather than the
+		// name-keyed registry so the grant follows the stored pick (and so re-picking on
+		// a respec re-derives cleanly) instead of being hard-wired to one option name.
+		if (calculations.hasHagAncestor && calculations.hagAncestorKind && !alreadyProcessed("Hag Ancestor")) {
+			effects.push({
+				type: "language",
+				language: calculations.hagAncestorLanguage,
+				source: "Hag Ancestor",
+			});
+			effects.push({
+				type: "skillProficiency",
+				skill: calculations.hagAncestorSkill,
+				source: "Hag Ancestor",
+			});
+		}
+
+		// Hag Ancestor also grants advantage on Charisma checks to influence hags. This
+		// is independent of the ancestry pick, so it is gated only on the feature.
+		if (calculations.hasHagInfluenceAdvantage && !alreadyProcessed("Hag Ancestor")) {
+			effects.push({
+				type: "modifier",
+				modType: "check:cha:advantage",
+				value: 1,
+				source: "Hag Ancestor",
+				conditional: "on checks made to influence a hag",
+			});
+		}
 
 		// =========================================================
 		// BARD FEATURES
@@ -45797,6 +45922,23 @@ class CharacterSheetState {
 			detectPatterns: ["^unearthly countenance$"],
 			activationAction: "bonus",
 		},
+		flyMyPretty: {
+			id: "flyMyPretty",
+			name: "Fly, My Pretty",
+			icon: "🧹",
+			description: "Riding your enchanted object: 60-foot flying speed (hover); you can't be charmed or frightened.",
+			effects: [
+				{type: "bonus", target: "speed:fly", value: 60},
+				{type: "conditionImmunity", target: "charmed"},
+				{type: "conditionImmunity", target: "frightened"},
+			],
+			duration: "While riding the enchanted object",
+			endConditions: ["You dismount", "The command word is spoken again", "You enchant a different object"],
+			// No resource: the enchantment is the long-rest cost, and mounting is free
+			// thereafter. Speaking the command word is an action or a bonus action.
+			detectPatterns: ["^fly, my pretty$"],
+			activationAction: "bonus",
+		},
 		resoluteStance: {
 			id: "resoluteStance",
 			name: "Resolute Stance",
@@ -47474,6 +47616,24 @@ class CharacterSheetState {
 		"divine allegiance": "ability",
 		"channel divinity: destructive wrath": "ability",
 		"blood maledict": "passive",
+
+		// === Wicked Witch (Ar8 Sorcerer, TGTT chassis) ===
+		// Granny's Gifts is half an always-prepared spell ladder (generic) and half a
+		// long-rest ward you point at yourself or an ally — a click, not a toggle. Its
+		// Use button is wired by name in charactersheet.js (_pUseGrannysGifts).
+		"granny's gifts": "ability",
+		// Hag Ancestor is a one-time ancestry pick whose grants are all passive; without
+		// this its "you have advantage on Charisma checks…" phrasing reads as a toggle.
+		"hag ancestor": "passive",
+		// A reaction that spends a variable number of Sorcery Points computed from the
+		// reflected spell's level and school — routed as an "ability" so it gets a Use
+		// button that can prompt for both (_pUseCleverLittleWitch).
+		"clever little witch": "ability",
+		// Two separate activations (recall-cast and 2-SP duplicates) behind one button.
+		"coven calling": "ability",
+		// "Fly, My Pretty" IS a genuine toggle (the flyMyPretty active state), but the
+		// enchantment step has to happen first, so the Use button opens that flow.
+		"fly, my pretty": "ability",
 
 		// === Reactions wrongly detected as activatable toggle states ===
 		"deflect attacks": "reaction",
@@ -53913,6 +54073,24 @@ class CharacterSheetState {
 
 		// Clear all temporary attacks (from variant components, etc.)
 		this.clearTemporaryAttacks();
+
+		// Wicked Witch: Granny's Gifts is re-chosen on every long rest, and Coven
+		// Calling's duplicates plus the Fly, My Pretty ride do not survive a rest.
+		this._resetWickedWitchOnLongRest();
+	}
+
+	/**
+	 * Long-rest bookkeeping for the Wicked Witch origin. The ward is deliberately
+	 * CLEARED rather than silently renewed: RAW makes it a fresh choice each rest
+	 * ("when you finish a long rest, choose…"), so leaving it in place would hand the
+	 * player a boon they never picked. `setGrannysWardTarget()` re-arms it.
+	 * @private
+	 */
+	_resetWickedWitchOnLongRest () {
+		if (!this._data.wickedWitch) return;
+		this.clearGrannysWard();
+		this.dismissCovenDuplicates();
+		if (this.isStateActive?.("flyMyPretty")) this.deactivateState("flyMyPretty");
 	}
 
 	/**
@@ -54420,6 +54598,374 @@ class CharacterSheetState {
 		const dist = distance == null ? range : Math.floor(Number(distance) || 0);
 		if (dist > range) return {ok: false, error: `Shadow Walk can teleport you up to ${range} feet.`, range};
 		return {ok: true, distance: dist, range, action: calc.shadowWalkAction || "bonus"};
+	}
+	// #endregion
+
+	// #region Wicked Witch (Arcadia 8 Sorcerer)
+
+	/**
+	 * The three hag ancestries offered by Hag Ancestor (Wicked Witch 1), keyed by the
+	 * value stored on the character. Everything the subclass derives from the pick —
+	 * the halved-cost "specialty" school, the bonus language and the bonus skill —
+	 * lives here so the picker, the calculations and the cost maths can never drift.
+	 *
+	 * @type {Record<string, {name: string, specialty: string, language: string, skill: string, skillLabel: string}>}
+	 */
+	static HAG_ANCESTOR_KINDS = {
+		Green: {name: "Green", specialty: "illusion", language: "Sylvan", skill: "deception", skillLabel: "Deception"},
+		Night: {name: "Night", specialty: "enchantment", language: "Abyssal", skill: "insight", skillLabel: "Insight"},
+		Sea: {name: "Sea", specialty: "transmutation", language: "Primordial (Aquan)", skill: "intimidation", skillLabel: "Intimidation"},
+	};
+
+	/** Parent-feature name under which the ancestry pick is recorded. */
+	static HAG_ANCESTOR_PARENT = "Hag Ancestor";
+
+	/** Feature-option name for a given ancestry kind, e.g. `"Green Hag Ancestor"`. */
+	static getHagAncestorOptionName (kind) { return `${kind} Hag Ancestor`; }
+
+	/**
+	 * The three ancestry options as pending-choice option records. Kept as a builder
+	 * (not a frozen constant) so each option carries its own prose — the Features tab
+	 * renders it, and the pick is stored through the ordinary `chosenSubfeatures`
+	 * pipeline like every other structured sub-feature choice.
+	 * @returns {Array<{name: string, source: string, entries: string[]}>}
+	 */
+	static getHagAncestorOptions () {
+		return Object.values(CharacterSheetState.HAG_ANCESTOR_KINDS).map(def => ({
+			name: CharacterSheetState.getHagAncestorOptionName(def.name),
+			source: "Ar8",
+			description: `Magic specialty: ${def.specialty.toTitleCase()} · Language: ${def.language} · Skill: ${def.skillLabel}`,
+			entries: [
+				`Your ancestor was a ${def.name.toLowerCase()} hag. Your magic specialty is ${def.specialty}, `
+				+ `you can speak, read, and write ${def.language}, and you gain proficiency in the ${def.skillLabel} skill.`,
+			],
+		}));
+	}
+
+	/**
+	 * The chosen hag ancestry (`"Green"` / `"Night"` / `"Sea"`), or null.
+	 *
+	 * Read from the durable `chosenSubfeatures` record first, falling back to a present
+	 * feature — Builder / Quick Build add the sub-feature without always leaving a
+	 * pending-choice record behind, exactly as {@link getChosenBlessedStrikesOption} has
+	 * to cope with.
+	 * @returns {?string}
+	 */
+	getHagAncestorKind () {
+		const match = (name) => {
+			const m = /^(green|night|sea)\b/i.exec(String(name || "").trim());
+			if (!m) return null;
+			return m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
+		};
+		const rec = (this._data.chosenSubfeatures || []).find(r =>
+			String(r.parent || "").toLowerCase() === CharacterSheetState.HAG_ANCESTOR_PARENT.toLowerCase());
+		if (rec) {
+			const kind = match(rec.name);
+			if (kind) return kind;
+		}
+		const feat = (this._data.features || []).find(f =>
+			String(f.parentFeature || "").toLowerCase() === CharacterSheetState.HAG_ANCESTOR_PARENT.toLowerCase()
+			&& match(f.name));
+		return feat ? match(feat.name) : null;
+	}
+
+	/**
+	 * The school of magic that halves Clever Little Witch / Coven Calling costs, or null
+	 * when no ancestry has been chosen yet.
+	 * @returns {?string}
+	 */
+	getHagAncestorSpecialtySchool () {
+		const kind = this.getHagAncestorKind();
+		return kind ? CharacterSheetState.HAG_ANCESTOR_KINDS[kind].specialty : null;
+	}
+
+	/**
+	 * Seed the Hag Ancestor ancestry pick, if the feature is present and no ancestry has
+	 * been chosen yet. Idempotent (the pending queue dedupes by signature), so it is safe
+	 * to call from the feature-add path AND from the pending-choice drain that Builder,
+	 * Level-Up and Quick Build all read — which is what makes the choice surface in all
+	 * three wizards without three copies of this code.
+	 * @returns {boolean} true if a new choice was queued.
+	 * @private
+	 */
+	_ensureHagAncestorChoice () {
+		const feature = (this._data.features || []).find(f =>
+			String(f.name || "").toLowerCase() === CharacterSheetState.HAG_ANCESTOR_PARENT.toLowerCase());
+		if (!feature) return false;
+		if (this.getHagAncestorKind()) return false;
+		return this.addPendingFeatureChoice({
+			featureName: feature.name,
+			featureId: feature.id || feature.name,
+			featureSource: feature.source,
+			featureClass: feature.className,
+			featureClassSource: feature.classSource,
+			level: feature.level,
+			kind: "subfeature",
+			options: CharacterSheetState.getHagAncestorOptions(),
+			count: 1,
+		});
+	}
+
+	// ── Granny's Gifts: the long-rest ward ──────────────────────────────────────
+
+	/** Stable display name of the named modifiers the ward installs. */
+	static GRANNYS_WARD_MODIFIER_NAME = "Granny's Gifts (Ancestral Ward)";
+
+	/**
+	 * Granny's Gifts (Wicked Witch 1), second half: "When you finish a long rest, choose
+	 * yourself or a creature within 30 feet of you that you can see. The target has
+	 * advantage on saving throws against being charmed or frightened until the end of
+	 * your next long rest or until you die."
+	 *
+	 * The ward is a genuine mechanical grant when you keep it for yourself — two
+	 * conditional `save:advantage:*` named modifiers, which flow through the same
+	 * per-roll opt-in path as every other sub-typed conditional. Pointing it at an ally
+	 * records the recipient without touching your own saves, which is the only honest
+	 * model: the sheet tracks one character.
+	 *
+	 * @param {string} [target="self"] `"self"` or an ally's name.
+	 * @param {object} [opts]
+	 * @param {number} [opts.distance=0] how far away the ally is, in feet. The 30 ft
+	 *        clause is a real limit, so a target beyond `grannysWardRange` is refused.
+	 * @returns {{ok: boolean, error?: string, target?: string, isSelf?: boolean, conditions?: string[], range?: number}}
+	 */
+	setGrannysWardTarget (target = "self", {distance = 0} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasGrannysGifts) return {ok: false, error: "You don't have Granny's Gifts."};
+		const name = String(target || "").trim() || "self";
+		const isSelf = name.toLowerCase() === "self" || name.toLowerCase() === "yourself";
+
+		const range = calc.grannysWardRange ?? 30;
+		const dist = isSelf ? 0 : Math.max(0, Math.floor(Number(distance) || 0));
+		if (dist > range) {
+			return {ok: false, error: `Granny's Gifts only reaches a creature within ${range} feet.`, range};
+		}
+
+		this.clearGrannysWard();
+
+		const conditions = calc.grannysWardConditions || ["charmed", "frightened"];
+		if (isSelf) {
+			conditions.forEach(condition => {
+				this.addNamedModifier({
+					name: CharacterSheetState.GRANNYS_WARD_MODIFIER_NAME,
+					type: `save:advantage:${condition}`,
+					value: 1,
+					sourceType: "classFeature",
+					note: `Granny's Gifts — advantage on saves against being ${condition}`,
+					duration: "Until the end of your next long rest",
+				});
+			});
+		}
+
+		if (!this._data.wickedWitch) this._data.wickedWitch = {};
+		this._data.wickedWitch.grannysWard = {
+			target: isSelf ? "self" : name,
+			isSelf,
+			conditions: [...conditions],
+			range,
+			distance: dist,
+		};
+		return {ok: true, target: isSelf ? "self" : name, isSelf, conditions: [...conditions], range};
+	}
+
+	/** The active Granny's Gifts ward, or null. */
+	getGrannysWard () {
+		return this._data.wickedWitch?.grannysWard || null;
+	}
+
+	/** Remove the ward and any modifiers it installed. Idempotent. */
+	clearGrannysWard () {
+		(this._data.namedModifiers || [])
+			.filter(m => m.name === CharacterSheetState.GRANNYS_WARD_MODIFIER_NAME)
+			.map(m => m.id)
+			.forEach(id => this.removeNamedModifier(id));
+		if (this._data.wickedWitch) this._data.wickedWitch.grannysWard = null;
+		return true;
+	}
+
+	// ── Clever Little Witch / Coven Calling ─────────────────────────────────────
+
+	/**
+	 * Sorcery-Point cost to throw a spell back with Clever Little Witch (Wicked Witch 6).
+	 *
+	 * RAW: "spend a number of sorcery points equal to the spell's level … and if it is
+	 * from your ancestor's specialty school, it costs half the number of sorcery points
+	 * (rounded down)." The halving is the whole reason the ancestry pick has to be a real
+	 * stored choice rather than flavour, and the floor means a 1st-level specialty spell
+	 * is free.
+	 *
+	 * @param {number} spellLevel 1–9.
+	 * @param {?string} [school] school name or 5etools single-letter code.
+	 * @returns {?number} cost in Sorcery Points, or null for an invalid level.
+	 */
+	getCleverLittleWitchCost (spellLevel, school = null) {
+		const lvl = Math.floor(Number(spellLevel));
+		if (!Number.isFinite(lvl) || lvl < 1 || lvl > 9) return null;
+		return this.isHagSpecialtySchool(school) ? Math.floor(lvl / 2) : lvl;
+	}
+
+	/**
+	 * True when `school` is the school your hag ancestor specialises in. Accepts the
+	 * 5etools single-letter school codes (`"I"`, `"E"`, `"T"`) as well as full names,
+	 * because spell records on the sheet carry the letter form.
+	 * @param {?string} school
+	 * @returns {boolean}
+	 */
+	isHagSpecialtySchool (school) {
+		const specialty = this.getHagAncestorSpecialtySchool();
+		if (!specialty || !school) return false;
+		const SCHOOL_BY_CODE = {a: "abjuration", c: "conjuration", d: "divination", e: "enchantment", v: "evocation", i: "illusion", n: "necromancy", t: "transmutation"};
+		const raw = String(school).trim().toLowerCase();
+		const normalized = raw.length === 1 ? (SCHOOL_BY_CODE[raw] || raw) : raw;
+		return normalized === specialty;
+	}
+
+	/**
+	 * Clever Little Witch (Wicked Witch 6). Spends the computed Sorcery Points and reports
+	 * the DC / attack bonus the reflected spell uses (yours, not the original caster's).
+	 *
+	 * From level 18 (Coven Calling) the same reaction may instead throw back any spell you
+	 * saw the triggering creature cast in the last minute — pass `{recalled: true}`, which
+	 * is refused until Coven Calling is online.
+	 *
+	 * @param {object} opts
+	 * @param {number} opts.spellLevel level of the spell being reflected (1–9).
+	 * @param {?string} [opts.school] the spell's school, for the specialty discount.
+	 * @param {boolean} [opts.recalled=false] Coven Calling's "any spell you saw it cast".
+	 * @param {number} [opts.distance=0] distance in feet to the ally targeted by the spell.
+	 * @returns {{ok: boolean, error?: string, cost?: number, discounted?: boolean, spellSaveDc?: number, spellAttackBonus?: number, sorceryPointsRemaining?: number}}
+	 */
+	useCleverLittleWitch ({spellLevel, school = null, recalled = false, distance = 0} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCleverLittleWitch) return {ok: false, error: "You don't have Clever Little Witch."};
+		if (recalled && !calc.hasCovenCalling) {
+			return {ok: false, error: "Throwing back a spell you merely saw cast requires Coven Calling (18th level)."};
+		}
+		const range = calc.cleverLittleWitchRange ?? 15;
+		const dist = Math.max(0, Math.floor(Number(distance) || 0));
+		if (dist > range) return {ok: false, error: `Clever Little Witch only protects you and allies within ${range} feet.`, range};
+
+		const cost = this.getCleverLittleWitchCost(spellLevel, school);
+		if (cost == null) return {ok: false, error: "Clever Little Witch only works on spells of 1st level or higher."};
+
+		const sp = this.getSorceryPoints();
+		if (sp.current < cost) return {ok: false, error: `That costs ${cost} Sorcery Points (you have ${sp.current}).`, cost};
+		// A halved 1st-level specialty spell costs 0 — nothing to spend, but still a use.
+		if (cost > 0 && !this.useSorceryPoint(cost)) return {ok: false, error: "Could not spend Sorcery Points."};
+
+		return {
+			ok: true,
+			cost,
+			discounted: this.isHagSpecialtySchool(school),
+			recalled: !!recalled,
+			spellSaveDc: this.getSpellSaveDc(),
+			spellAttackBonus: this.getSpellAttackBonus(),
+			sorceryPointsRemaining: this.getSorceryPoints().current,
+		};
+	}
+
+	/**
+	 * Coven Calling (Wicked Witch 18), second half. Two hag-like duplicates appear in your
+	 * space for 2 Sorcery Points; each may take one action to cast a spell you know of
+	 * 1st–3rd level with an instantaneous duration, for its level in Sorcery Points.
+	 *
+	 * Tracked as a first-class resource rather than prose because both halves cost the
+	 * real Sorcery Point pool and both are exhaustible.
+	 *
+	 * @returns {{ok: boolean, error?: string, count?: number, sorceryPointsRemaining?: number}}
+	 */
+	conjureCovenDuplicates () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCovenCalling) return {ok: false, error: "You don't have Coven Calling."};
+		const cost = calc.covenDuplicateCost ?? 2;
+		const sp = this.getSorceryPoints();
+		if (sp.current < cost) return {ok: false, error: `Coven Calling costs ${cost} Sorcery Points (you have ${sp.current}).`};
+		if (!this.useSorceryPoint(cost)) return {ok: false, error: "Could not spend Sorcery Points."};
+
+		const count = calc.covenDuplicateCount ?? 2;
+		if (!this._data.wickedWitch) this._data.wickedWitch = {};
+		this._data.wickedWitch.covenDuplicates = {
+			count,
+			remaining: count,
+			maxSpellLevel: calc.covenDuplicateMaxSpellLevel ?? 3,
+		};
+		return {ok: true, count, sorceryPointsRemaining: this.getSorceryPoints().current};
+	}
+
+	/** The active Coven Calling duplicates, or null. */
+	getCovenDuplicates () {
+		return this._data.wickedWitch?.covenDuplicates || null;
+	}
+
+	/**
+	 * Spend one duplicate's action to cast a known instantaneous spell of 1st–3rd level,
+	 * paying its level in Sorcery Points.
+	 * @param {number} spellLevel 1–3.
+	 * @returns {{ok: boolean, error?: string, cost?: number, duplicatesRemaining?: number, sorceryPointsRemaining?: number}}
+	 */
+	castCovenDuplicateSpell (spellLevel) {
+		const dupes = this.getCovenDuplicates();
+		if (!dupes || dupes.remaining <= 0) return {ok: false, error: "You have no Coven Calling duplicates left to act."};
+		const lvl = Math.floor(Number(spellLevel));
+		if (!Number.isFinite(lvl) || lvl < 1 || lvl > (dupes.maxSpellLevel ?? 3)) {
+			return {ok: false, error: `A duplicate can only cast a spell of 1st to ${dupes.maxSpellLevel ?? 3}rd level.`};
+		}
+		const sp = this.getSorceryPoints();
+		if (sp.current < lvl) return {ok: false, error: `That costs ${lvl} Sorcery Points (you have ${sp.current}).`, cost: lvl};
+		if (!this.useSorceryPoint(lvl)) return {ok: false, error: "Could not spend Sorcery Points."};
+
+		dupes.remaining -= 1;
+		return {ok: true, cost: lvl, duplicatesRemaining: dupes.remaining, sorceryPointsRemaining: this.getSorceryPoints().current};
+	}
+
+	/** Dismiss the Coven Calling duplicates. */
+	dismissCovenDuplicates () {
+		if (!this._data.wickedWitch?.covenDuplicates) return false;
+		this._data.wickedWitch.covenDuplicates = null;
+		return true;
+	}
+
+	// ── Fly, My Pretty ─────────────────────────────────────────────────────────
+
+	/**
+	 * Fly, My Pretty (Wicked Witch 14). Enchant one Small or Medium object on a long rest.
+	 * Enchanting a new one un-enchants the previous, per RAW, so this replaces rather than
+	 * stacks — and dismounts you if you were riding the old one.
+	 *
+	 * @param {object} [opts]
+	 * @param {string} [opts.item="Broom"] the object enchanted.
+	 * @param {string} [opts.commandWord="Fly"] the word that starts/stops the hover.
+	 * @returns {{ok: boolean, error?: string, item?: string, commandWord?: string, flySpeed?: number, replaced?: ?string}}
+	 */
+	enchantFlyingItem ({item = "Broom", commandWord = "Fly"} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasFlyMyPretty) return {ok: false, error: "You don't have Fly, My Pretty."};
+		const previous = this.getFlyingItem();
+		if (previous && this.isStateActive?.("flyMyPretty")) this.deactivateState("flyMyPretty");
+		if (!this._data.wickedWitch) this._data.wickedWitch = {};
+		this._data.wickedWitch.flyingItem = {
+			item: String(item || "Broom").trim() || "Broom",
+			commandWord: String(commandWord || "Fly").trim() || "Fly",
+			flySpeed: calc.flyMyPrettyFlySpeed ?? 60,
+		};
+		return {
+			ok: true,
+			...this._data.wickedWitch.flyingItem,
+			replaced: previous ? previous.item : null,
+		};
+	}
+
+	/** The currently enchanted flying object, or null. */
+	getFlyingItem () {
+		return this._data.wickedWitch?.flyingItem || null;
+	}
+
+	/** Un-enchant the flying object (and stop riding it). */
+	clearFlyingItem () {
+		if (!this._data.wickedWitch?.flyingItem) return false;
+		if (this.isStateActive?.("flyMyPretty")) this.deactivateState("flyMyPretty");
+		this._data.wickedWitch.flyingItem = null;
+		return true;
 	}
 	// #endregion
 

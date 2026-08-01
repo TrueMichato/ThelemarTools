@@ -1210,3 +1210,140 @@ A dire wolf re-typed to size M / monstrosity, registered through
 The temp HP is *additional* to the dire wolf's own 37 HP, which is why it uses
 the new `tempHpPerLevel` key rather than `hpPerLevel`. No bespoke recalculation
 path — `recalculateCompanion()` re-derives it on every level-up.
+
+## Wicked Witch (Sorcerer, Arcadia 8 → TGTT)
+
+Published under `case "Wicked Witch": case "Wicked Witch Sorcerous Origin":`.
+
+The subclass reaches the sheet through a `_copy` in
+`homebrew/TravelersGuidetoThelemar.json` that re-parents
+`Wicked Witch Sorcerous Origin|Ar8` — authored for `classSource: "PHB"` — onto
+`classSource: "TGTT"`. Two chassis consequences drive everything below:
+
+* The origin is a **level 3** feature on TGTT/XPHB, so the two "L1" Ar8 features
+  gate on `subclassLevel = is2024 ? 3 : 1` like every other origin here. The
+  L6 / L14 / L18 features keep their literal Ar8 levels, which is also the level
+  at which `CharacterSheetClassUtils` adds them.
+* Sorcery Points are **`level + 1` from L1** on this chassis
+  (`getSorceryPointsMaxForClass()`), not `level` from L2.
+
+```javascript
+// L3 (subclassLevel) — Granny's Gifts
+hasGrannysGifts: true,
+grannysWardRange: 30,
+grannysWardConditions: ["charmed", "frightened"],
+grannysGiftsSwapSchools: ["enchantment", "illusion"],
+grannysGiftsSwapClasses: ["sorcerer", "warlock", "wizard"],
+
+// L3 (subclassLevel) — Hag Ancestor
+hasHagAncestor: true,
+hasHagInfluenceAdvantage: true,
+hagAncestorKind: "Green" | "Night" | "Sea",   // only once the pick is made
+hagAncestorSpecialty: "illusion" | "enchantment" | "transmutation",
+hagAncestorLanguage: "Sylvan" | "Abyssal" | "Primordial (Aquan)",
+hagAncestorSkill: "deception" | "insight" | "intimidation",
+
+// L6 — Clever Little Witch
+hasCleverLittleWitch: true,
+cleverLittleWitchRange: 15,
+cleverLittleWitchAction: "reaction",
+cleverLittleWitchMaxSpellLevel: 9,
+
+// L14 — Fly, My Pretty
+hasFlyMyPretty: true,
+flyMyPrettyFlySpeed: 60,
+flyMyPrettyImmunities: ["charmed", "frightened"],
+
+// L18 — Coven Calling
+hasCovenCalling: true,
+covenCallingRecallMinutes: 1,
+covenDuplicateCost: 2,
+covenDuplicateCount: 2,
+covenDuplicateMaxSpellLevel: 3,
+```
+
+### Hag Ancestor — one pick, four mechanics
+
+`HAG_ANCESTOR_KINDS` maps each hag to a specialty school, a language and a skill.
+`_ensureHagAncestorChoice()` seeds a `kind: "subfeature"` pending choice from
+`_ensureSeededFeatureChoices()`, which both `getPendingFeatureChoices()` and
+`hasPendingFeatureChoices()` call — so the pick reaches the Builder, Level-Up,
+Quick Build, Respec and the Features tab through the one existing drain.
+
+The pick then drives, via `_getClassFeatureEffects()`:
+
+| Grant | Effect emitted |
+|---|---|
+| Language | `{type: "language", language}` |
+| Skill proficiency | `{type: "skillProficiency", skill}` |
+| Specialty school | read by `isHagSpecialtySchool()` / `getCleverLittleWitchCost()` |
+| Influence advantage | `{type: "modifier", modType: "check:cha:advantage", conditional: "on checks made to influence a hag"}` |
+
+The CHA-check advantage is **conditional**, so it is offered to the per-roll
+opt-in picker and never leaks into a plain Charisma check.
+
+> **Timing fix (generic).** Effects are applied *before* the pending-choice
+> queue drains (`addClass()` → `applyClassFeatureEffects()` →
+> `processPendingFeatureChoices()`), so a parent feature whose effects are gated
+> on a sub-feature pick used to land a whole level late. `charactersheet.js`
+> `processPendingFeatureChoices()` now re-runs `applyClassFeatureEffects()` when
+> it resolved anything. This benefits every structured choice, not just this one.
+
+### Granny's Gifts — a real, precisely-typed ward
+
+`setGrannysWardTarget(target, {distance})` installs two named modifiers typed
+`save:advantage:charmed` / `save:advantage:frightened` when the ward is kept for
+yourself, and records the recipient without touching your saves when it goes to
+an ally. Distance is checked against `grannysWardRange`, so the 30 ft clause is
+mechanical rather than prose. `onLongRest()` clears it, because RAW re-chooses
+the target every rest.
+
+The precise typing matters: the generic `FeatureModifierParser` reads the same
+prose as a blanket `save:all` conditional. That parsed pair remains available in
+the opt-in picker (text-parsed conditionals are deliberately not dropped —
+CS-BUG-053), but only the explicit ward *applies* advantage, and only to charm
+and fear saves.
+
+### Clever Little Witch — the specialty discount is the mechanic
+
+`getCleverLittleWitchCost(spellLevel, school)` returns the spell's level in
+Sorcery Points, **halved and floored** when the school matches
+`hagAncestorSpecialty` — so a 5th-level illusion costs 2 to a Green hag's
+descendant where a 5th-level evocation costs 5, and a 1st-level specialty spell
+is free. Both the full school name and the 5etools single-letter code (`"I"`)
+are accepted, because spell records carry the letter form.
+
+`useCleverLittleWitch({spellLevel, school, recalled, distance})` spends through
+`useSorceryPoint()` — the same method the production cast path calls — and
+reports the DC and attack bonus the reflected spell uses (yours, not the
+original caster's). `recalled: true` is Coven Calling's "any spell you saw it
+cast in the last minute" mode and is refused before level 18.
+
+### Fly, My Pretty — an active state, not a passive grant
+
+`enchantFlyingItem({item, commandWord})` records one enchanted object; enchanting
+a new one un-enchants (and dismounts) the old, per RAW. Riding it is the
+`flyMyPretty` entry in `ACTIVE_STATE_TYPES`:
+
+```javascript
+effects: [
+    {type: "bonus", target: "speed:fly", value: 60},
+    {type: "conditionImmunity", target: "charmed"},
+    {type: "conditionImmunity", target: "frightened"},
+]
+```
+
+so `getSpeed("fly")` goes 0 → 60 → 0 and `getConditionImmunities()` gains and
+loses both conditions around the toggle.
+
+### Coven Calling — two duplicates, both spending real points
+
+`conjureCovenDuplicates()` spends `covenDuplicateCost` and stores
+`{count, remaining, maxSpellLevel}`. `castCovenDuplicateSpell(level)` spends one
+duplicate's action and the spell's level in Sorcery Points, refusing anything
+outside 1st–3rd. `dismissCovenDuplicates()` and `onLongRest()` clear them.
+
+All four abilities are registered in `FEATURE_CLASSIFICATION_OVERRIDES`
+(`"granny's gifts"`, `"clever little witch"`, `"fly, my pretty"`,
+`"coven calling"` as `"ability"`, `"hag ancestor"` as `"passive"`) so they
+surface with a Use affordance and Hag Ancestor correctly does not.
