@@ -566,6 +566,36 @@ class SpellGrantParser {
 	}
 
 	/**
+	 * Best text to scan for prose spell grants on a feature.
+	 *
+	 * A feature carries BOTH a raw `entries` array (5etools tags intact) and a
+	 * `description` string. For homebrew loaded through the site renderer the
+	 * `description` is already-rendered HTML — every `{@spell feather fall}` has
+	 * become an `<a href="spells.html#…">`, which the tag scanner cannot see. So the
+	 * raw entries win whenever they actually carry tags, and `description` remains the
+	 * fallback for features stored without entries.
+	 *
+	 * @param {*} feature
+	 * @returns {string}
+	 */
+	static getFeatureSpellText (feature) {
+		const parts = [];
+		const visit = (node) => {
+			if (typeof node === "string") return void parts.push(node);
+			if (Array.isArray(node)) return void node.forEach(visit);
+			if (!node || typeof node !== "object") return;
+			visit(node.entries);
+			visit(node.items);
+		};
+		visit(feature?.entries);
+		const raw = parts.join("\n");
+		const description = typeof feature?.description === "string" ? feature.description : "";
+		if (/\{@spell/i.test(raw)) return raw;
+		if (/\{@spell/i.test(description)) return description;
+		return raw || description;
+	}
+
+	/**
 	 * Parse spell references from feature description text
 	 * Fallback for when additionalSpells is not available
 	 */
@@ -573,6 +603,13 @@ class SpellGrantParser {
 		if (!text) return [];
 
 		const spells = [];
+
+		// A feature-wide expenditure clause ("You can cast each of these spells once with
+		// this feature … until you finish a long rest") frequently sits several sentences
+		// away from the spell tags it governs, outside the local context window below.
+		// Resolving it once per feature keeps multi-spell grants innate + tracked instead
+		// of silently degrading them into permanently-known spells.
+		const featureWideRecharge = this._parseFeatureWideCastingLimit(text);
 
 		// Look for {@spell SpellName} or {@spell SpellName|Source} references
 		const spellPattern = /\{@spell\s+([^}|]+)(?:\|([^}]+))?\}/gi;
@@ -588,8 +625,12 @@ class SpellGrantParser {
 			const context = contextBefore + contextAfter;
 
 			const isAtWill = /at will|at-will|without expending/i.test(context);
-			const isOnce = /once|one time/i.test(context) && /rest|dawn|day/i.test(context);
-			const recharge = /short rest/i.test(context) ? "short" : (/long rest|dawn|day/i.test(context) ? "long" : null);
+			const localOnce = /once|one time/i.test(context) && /rest|dawn|day/i.test(context);
+			// An at-will grant is never limited, so the feature-wide clause can only ever
+			// promote an otherwise-unlimited grant into a tracked one.
+			const isOnce = localOnce || (!isAtWill && !!featureWideRecharge);
+			const localRecharge = /short rest/i.test(context) ? "short" : (/long rest|dawn|day/i.test(context) ? "long" : null);
+			const recharge = localRecharge || (isOnce ? featureWideRecharge : null);
 
 			spells.push({
 				name: (/** @type {*} */ (spellName)).toTitleCase(),
@@ -599,21 +640,71 @@ class SpellGrantParser {
 				uses: isOnce ? 1 : (isAtWill ? null : undefined),
 				recharge: recharge,
 				sourceFeature: featureName,
+				minLevel: this._parseSpellGrantMinLevel(contextBefore),
 			});
 		}
 
-		// Deduplicate by name
+		// Deduplicate by identity AND level gate: a feature may legitimately mention the
+		// same spell twice at different tiers ("you learn feather fall" at 3rd, "you can
+		// cast feather fall at will" at 15th). Collapsing those into one entry silently
+		// discarded the upgrade, so the gate is part of the key.
 		const uniqueSpells = [];
 		const seen = new Set();
 		spells.forEach(s => {
-			const key = `${s.name}|${s.source}`.toLowerCase();
+			const key = `${s.name}|${s.source}|${s.minLevel ?? ""}`.toLowerCase();
 			if (!seen.has(key)) {
 				seen.add(key);
 				uniqueSpells.push(s);
 			}
 		});
 
+		// Ascending gate order so a later tier always merges ON TOP of an earlier one.
+		uniqueSpells.sort((a, b) => (a.minLevel || 0) - (b.minLevel || 0));
+
 		return uniqueSpells;
+	}
+
+	/**
+	 * Extract a feature-wide "each of these spells is expended and recovers on a rest"
+	 * clause, e.g. "You can cast each of these spells once with this feature, and once
+	 * you cast a spell in this way, you can not do so again until you finish a long rest."
+	 *
+	 * Deliberately tight: the casting verb, the "once" limiter and the rest clause must
+	 * all appear in ONE sentence, so an unrelated once-per-rest ability mentioned
+	 * elsewhere in the same feature cannot retro-limit a permanent spell grant.
+	 *
+	 * @param {string} text Full feature text.
+	 * @returns {"short"|"long"|null}
+	 * @private
+	 */
+	static _parseFeatureWideCastingLimit (text) {
+		if (!text) return null;
+		const m = /[^.!?\n]*\bcast\b[^.!?\n]*\bonce\b[^.!?\n]*\b(short|long) rest\b[^.!?\n]*/i.exec(text);
+		if (!m) return null;
+		return m[1].toLowerCase() === "short" ? "short" : "long";
+	}
+
+	/**
+	 * Extract the CLASS LEVEL at which a prose spell grant unlocks, e.g. "At 10th level in
+	 * this class, you also learn the {@spell levitate} spell" → 10.
+	 *
+	 * Generic: multi-tier prose grants are ubiquitous in homebrew subclasses, and without
+	 * this every later-level spell was granted immediately at the level the FEATURE was
+	 * gained. Only the text after the last sentence boundary is scanned, so an unrelated
+	 * level mention in a preceding sentence cannot leak a spurious gate.
+	 *
+	 * @param {string} contextBefore Lowercased text immediately preceding the spell tag.
+	 * @returns {number|null} The gating class level, or null when the grant is immediate.
+	 * @private
+	 */
+	static _parseSpellGrantMinLevel (contextBefore) {
+		if (!contextBefore) return null;
+		// Keep only the current sentence/clause.
+		const sentence = contextBefore.split(/[.!?\n]/).pop() || "";
+		const m = /(?:at|by|when you reach|upon reaching)\s+(\d+)(?:st|nd|rd|th)\s+level/i.exec(sentence);
+		if (!m) return null;
+		const lvl = Number(m[1]);
+		return Number.isFinite(lvl) && lvl > 1 ? lvl : null;
 	}
 
 	/**
@@ -4091,6 +4182,14 @@ class CharacterSheetState {
 				if ((Number(target.uses.current) || 0) > target.uses.max) target.uses.current = target.uses.max;
 			}
 			if (src.recharge && !target.recharge) target.recharge = src.recharge;
+		}
+		// An at-will grant is strictly a superset of a limited one (e.g. Meteor Knight's
+		// Reduce Gravity upgrading feather fall/jump to at-will at 15th level), so it wins
+		// and the now-meaningless use tracking is dropped.
+		if (src.atWill && !target.atWill) {
+			target.atWill = true;
+			delete target.uses;
+			delete target.recharge;
 		}
 		return target;
 	}
@@ -9230,13 +9329,17 @@ class CharacterSheetState {
 	 * @param {boolean} [opts.unpreventable=false] Damage that "can't be reduced or prevented in
 	 *        any way" (Divine Allegiance, Beacon of Hope-style riders, several homebrew pacts).
 	 *        Bypasses temporary hit points AND Death Ward — both are "prevention" in RAW terms.
+	 * @param {string|null} [opts.damageType=null] Damage type, lowercase ("radiant", "fire", …).
+	 *        Consumed by {@link getZeroHpInterventions}; `null` means "not stated".
+	 * @param {boolean} [opts.isCritical=false] Whether the damage came from a critical hit.
 	 * @returns {boolean} True if damage was taken
 	 */
-	takeDamage (damage, {unpreventable = false} = {}) {
+	takeDamage (damage, {unpreventable = false, damageType = null, isCritical = false} = {}) {
 		if (damage <= 0) return false;
 
 		const startingHp = this._data.hp.current;
 		const maxHp = this.getMaxHp();
+		const rawDamage = damage;
 
 		// Consume temp HP first
 		if (!unpreventable && this._data.hp.temp > 0) {
@@ -9264,6 +9367,12 @@ class CharacterSheetState {
 				this._updateBloodiedCondition();
 				return true;
 			}
+
+			// No automatic ward — arm the generic 0-HP intervention offer instead. Nothing is
+			// applied here: a Strength-of-the-Grave-style feature is a CHOICE (it costs a
+			// once-per-long-rest use on a success), so the caller decides via
+			// `getPendingZeroHpIntervention()` / `applyZeroHpIntervention()`.
+			this._armZeroHpIntervention({damage, rawDamage, damageType, isCritical, hpBefore: startingHp});
 		}
 
 		// Check for massive damage death (damage remaining after reaching 0 >= max HP)
@@ -9277,6 +9386,223 @@ class CharacterSheetState {
 
 		return true;
 	}
+
+	// #region Zero-HP interventions
+	/**
+	 * DECLARATIVE registry of "when damage reduces you to 0 hit points, you can instead drop
+	 * to 1" features. Adding a new one is a data edit — no branching in {@link takeDamage},
+	 * no bespoke recalculation path, and every consumer (state API, Jest, the sheet's damage
+	 * prompt, E2E `stateCall` probes) picks it up for free.
+	 *
+	 * Each entry:
+	 * - `id`             stable key used by {@link applyZeroHpIntervention}
+	 * - `featureName`    the feature that grants it (also where the once-per-rest use lives)
+	 * - `calcFlag`       `getFeatureCalculations()` boolean that gates availability
+	 * - `saveAbility`    ability for the save, or `null` for an automatic (no-roll) drop-to-1
+	 * - `dcBase`         DC constant …
+	 * - `dcAddsDamage`   … plus the damage taken, when true
+	 * - `excludedDamageTypes` damage types that switch the feature off entirely
+	 * - `excludeCritical`      true when a critical hit switches the feature off
+	 * - `spendOn`        `"success"` (use consumed only when it works) or `"attempt"`
+	 * - `usesMax` / `recharge` the once-per-rest budget reconciled by
+	 *                    {@link _ensureZeroHpInterventionUses}
+	 * @type {Array<object>}
+	 */
+	static ZERO_HP_INTERVENTIONS = [
+		{
+			id: "strengthOfTheGrave",
+			featureName: "Strength of the Grave",
+			calcFlag: "hasStrengthOfTheGrave",
+			saveAbility: "cha",
+			dcBase: 5,
+			dcAddsDamage: true,
+			excludedDamageTypes: ["radiant"],
+			excludeCritical: true,
+			spendOn: "success",
+			usesMax: 1,
+			recharge: "long",
+			description: "Charisma save (DC 5 + the damage taken) to drop to 1 hit point instead of 0. Unavailable against radiant damage or a critical hit.",
+		},
+	];
+
+	/**
+	 * Every zero-HP intervention this character actually has, already resolved against the
+	 * trigger context so the caller sees a live DC, the save modifier, remaining uses and —
+	 * when it does not apply — WHY.
+	 *
+	 * @param {object} [ctx]
+	 * @param {number} [ctx.damage=0] damage that reduced the character to 0.
+	 * @param {string|null} [ctx.damageType=null] lowercase damage type, or null for "unstated".
+	 * @param {boolean} [ctx.isCritical=false] whether it came from a critical hit.
+	 * @returns {Array<object>} descriptors; `available` is the single boolean to branch on.
+	 */
+	getZeroHpInterventions ({damage = 0, damageType = null, isCritical = false} = {}) {
+		const calc = this.getFeatureCalculations();
+		const out = [];
+		for (const def of CharacterSheetState.ZERO_HP_INTERVENTIONS) {
+			if (!calc[def.calcFlag]) continue;
+
+			const feature = (this._data.features || []).find(f => f.name === def.featureName);
+			const usesRemaining = feature?.uses ? (feature.uses.current ?? 0) : def.usesMax;
+			const dmgType = damageType ? String(damageType).toLowerCase() : null;
+
+			let unavailableReason = null;
+			if (usesRemaining <= 0) unavailableReason = `${def.featureName} has no uses remaining (recharges on a ${def.recharge} rest).`;
+			else if (def.excludeCritical && isCritical) unavailableReason = `${def.featureName} can't be used when a critical hit reduces you to 0 hit points.`;
+			else if (dmgType && (def.excludedDamageTypes || []).includes(dmgType)) unavailableReason = `${def.featureName} can't be used against ${dmgType} damage.`;
+
+			const dc = (def.dcBase || 0) + (def.dcAddsDamage ? Math.max(0, Math.floor(Number(damage) || 0)) : 0);
+			out.push({
+				id: def.id,
+				name: def.featureName,
+				description: def.description,
+				saveAbility: def.saveAbility,
+				saveModifier: def.saveAbility ? this.getSaveMod(def.saveAbility) : 0,
+				dc,
+				dcFormula: def.dcAddsDamage ? `${def.dcBase} + damage taken` : `${def.dcBase}`,
+				excludedDamageTypes: [...(def.excludedDamageTypes || [])],
+				excludeCritical: !!def.excludeCritical,
+				spendOn: def.spendOn,
+				usesRemaining,
+				usesMax: feature?.uses?.max ?? def.usesMax,
+				recharge: def.recharge,
+				available: !unavailableReason,
+				unavailableReason,
+			});
+		}
+		return out;
+	}
+
+	/**
+	 * Record the fact that damage just took the character to 0 HP, so the UI (or a test)
+	 * can offer any eligible intervention. Never applied automatically — see
+	 * {@link ZERO_HP_INTERVENTIONS}.
+	 * @private
+	 */
+	_armZeroHpIntervention ({damage, rawDamage, damageType, isCritical, hpBefore}) {
+		const candidates = this.getZeroHpInterventions({damage, damageType, isCritical});
+		if (!candidates.length) return;
+		this._data._pendingZeroHpIntervention = {
+			damage,
+			rawDamage,
+			damageType: damageType ? String(damageType).toLowerCase() : null,
+			damageTypeStated: damageType != null,
+			isCritical: !!isCritical,
+			hpBefore,
+		};
+	}
+
+	/**
+	 * The armed 0-HP trigger, if any, with its interventions re-resolved against the
+	 * CURRENT state (so spending the use elsewhere immediately closes the offer).
+	 * @returns {object|null}
+	 */
+	getPendingZeroHpIntervention () {
+		const pending = this._data._pendingZeroHpIntervention;
+		if (!pending) return null;
+		// The offer only stands while the character is still at 0 HP.
+		if (this._data.hp.current > 0) return null;
+		const interventions = this.getZeroHpInterventions(pending);
+		if (!interventions.length) return null;
+		return {...pending, interventions};
+	}
+
+	/** Discard the armed 0-HP trigger (declined, or resolved some other way). */
+	clearPendingZeroHpIntervention () {
+		delete this._data._pendingZeroHpIntervention;
+	}
+
+	/**
+	 * Resolve a zero-HP intervention.
+	 *
+	 * @param {string} id one of {@link ZERO_HP_INTERVENTIONS}' ids.
+	 * @param {object} [opts]
+	 * @param {number} [opts.roll] the raw d20 (the save modifier is added for you).
+	 * @param {number} [opts.total] a pre-computed save total, overriding `roll`.
+	 * @param {string|null} [opts.damageType] refine the damage type if it was unstated.
+	 * @param {boolean} [opts.isCritical] refine the critical flag if it was unstated.
+	 * @returns {object|null} `{applied, success, dc, roll, total, hp, usesRemaining}` or null
+	 *   when there is nothing to resolve / the feature does not apply.
+	 */
+	applyZeroHpIntervention (id, {roll = null, total = null, damageType, isCritical} = {}) {
+		const pending = this._data._pendingZeroHpIntervention;
+		if (!pending) return null;
+		if (this._data.hp.current > 0) return null;
+
+		if (damageType !== undefined) {
+			pending.damageType = damageType ? String(damageType).toLowerCase() : null;
+			pending.damageTypeStated = true;
+		}
+		if (isCritical !== undefined) pending.isCritical = !!isCritical;
+
+		const def = CharacterSheetState.ZERO_HP_INTERVENTIONS.find(d => d.id === id);
+		if (!def) return null;
+		const info = this.getZeroHpInterventions(pending).find(i => i.id === id);
+		if (!info) return null;
+		if (!info.available) return {applied: false, success: false, ...info};
+
+		let d20 = roll;
+		if (total == null && d20 == null) d20 = RollerUtil.randomise(20);
+		const saveTotal = total != null ? Math.floor(total) : (Math.floor(d20) + info.saveModifier);
+		const success = def.saveAbility ? saveTotal >= info.dc : true;
+
+		if (success) {
+			this._data.hp.current = 1;
+			this.resetDeathSaves();
+			this._data.massiveDamageDeath = false;
+			this._updateBloodiedCondition();
+		}
+
+		if (success || def.spendOn === "attempt") this._spendZeroHpInterventionUse(def);
+
+		this.clearPendingZeroHpIntervention();
+
+		return {
+			applied: true,
+			id: def.id,
+			name: def.featureName,
+			success,
+			dc: info.dc,
+			saveAbility: def.saveAbility,
+			roll: d20,
+			total: saveTotal,
+			hp: this._data.hp.current,
+			usesRemaining: this.getZeroHpInterventions({damage: 0}).find(i => i.id === id)?.usesRemaining ?? 0,
+		};
+	}
+
+	/** @private */
+	_spendZeroHpInterventionUse (def) {
+		const feature = (this._data.features || []).find(f => f.name === def.featureName);
+		if (!feature?.uses) return;
+		feature.uses.current = Math.max(0, (feature.uses.current ?? 0) - 1);
+		const resource = (this._data.resources || []).find(r => r.featureId === feature.id || r.name === def.featureName);
+		if (resource) resource.current = feature.uses.current;
+	}
+
+	/**
+	 * Give every zero-HP intervention the character has a real, rest-recharging use budget on
+	 * its own feature, so it renders as a use badge and long rest restores it through the
+	 * ordinary feature-uses path. Mirrors {@link _ensureCreationBardUses}.
+	 * @private
+	 */
+	_ensureZeroHpInterventionUses () {
+		let calc = null;
+		for (const def of CharacterSheetState.ZERO_HP_INTERVENTIONS) {
+			const feature = (this._data.features || []).find(f => f.name === def.featureName);
+			if (!feature) continue;
+			if (feature.uses?.max === def.usesMax && feature.uses?.recharge === def.recharge) continue;
+			calc = calc || this.getFeatureCalculations();
+			if (!calc[def.calcFlag]) continue;
+			const spent = feature.uses ? (feature.uses.current ?? 0) < (feature.uses.max ?? 0) : false;
+			feature.uses = {
+				current: spent ? 0 : def.usesMax,
+				max: def.usesMax,
+				recharge: def.recharge,
+			};
+		}
+	}
+	// #endregion
 
 	/**
 	 * Divine Allegiance (Oath of the Crown, level 7): when a creature within 5 feet takes
@@ -14777,6 +15103,7 @@ class CharacterSheetState {
 
 	// Innate spell management
 	getInnateSpells () {
+		this.reconcileDeferredFeatureSpells();
 		return [...(this._data.spellcasting.innateSpells || [])];
 	}
 
@@ -19133,6 +19460,91 @@ class CharacterSheetState {
 						}
 					}
 
+					// Meteor Knight (The Griffon's Saddlebag 3). Source-gated for the same
+					// reason as Shadow Knight above — homebrew short names are not globally
+					// unique. Every value here is derived (never hard-coded per level) so the
+					// pool/damage/range tiers stay correct through level-up and respec.
+					if (CharacterSheetState.isMeteorKnightSubclass(cls.subclass) && level >= 3) {
+						const intMod = this.getAbilityMod("int");
+						calculations.hasMeteorKnight = true;
+
+						// --- Satellite Mastery (3) ---
+						calculations.hasSatelliteMastery = true;
+						// Bound-missile capacity = proficiency bonus.
+						calculations.satelliteMax = profBonus;
+						// Damage die steps at 10 and 18; range doubles at 10.
+						calculations.satelliteDamage = level >= 18 ? "1d8" : level >= 10 ? "1d6" : "1d4";
+						calculations.satelliteRange = level >= 10 ? 60 : 30;
+						// Intelligence is the attack ability and the damage modifier. This is a
+						// ranged SPELL attack, so it is proficiency-added by the feature text.
+						calculations.satelliteAbility = "int";
+						calculations.satelliteAttackBonus = profBonus + intMod;
+						calculations.satelliteDamageBonus = intMod;
+						calculations.satelliteDamageType = "bludgeoning or piercing";
+						// "Being within 5 feet of a hostile creature does not impose
+						// disadvantage on your ranged attack rolls with this feature."
+						calculations.satelliteIgnoresCloseQuartersDisadvantage = true;
+						calculations.satelliteRecallRange = 120;
+						calculations.grantedAttacks = [
+							...(calculations.grantedAttacks || []),
+							{
+								id: "feature_meteor-knight-satellite",
+								name: "Satellite",
+								sourceFeature: "Satellite Mastery",
+								isMelee: false,
+								isRanged: true,
+								isSpell: true,
+								isSpellAttack: true,
+								isSatellite: true,
+								abilityMod: "int",
+								damage: calculations.satelliteDamage,
+								damageType: "bludgeoning",
+								range: `${calculations.satelliteRange} ft.`,
+								attackBonus: 0,
+								damageBonus: 0,
+								properties: [],
+								actionType: "bonus",
+								ignoresCloseQuartersDisadvantage: true,
+							},
+						];
+
+						// --- Reduce Gravity (3 / 10 / 15) ---
+						calculations.hasReduceGravity = true;
+						calculations.reduceGravitySpells = level >= 10
+							? ["Feather Fall", "Jump", "Levitate"]
+							: ["Feather Fall", "Jump"];
+						// At 15 feather fall and jump lose their per-long-rest limit; levitate
+						// keeps its single use.
+						calculations.reduceGravityAtWillSpells = level >= 15 ? ["Feather Fall", "Jump"] : [];
+
+						// --- Course Correct (7) ---
+						if (level >= 7) {
+							calculations.hasCourseCorrect = true;
+							// Contested Intelligence check that explicitly adds proficiency.
+							calculations.courseCorrectCheckBonus = intMod + profBonus;
+							calculations.courseCorrectRange = 10;
+						}
+
+						// --- Improved Satellite Mastery (10) ---
+						if (level >= 10) {
+							calculations.hasImprovedSatelliteMastery = true;
+							calculations.satelliteReturnsOnMiss = true;
+							calculations.satelliteRecallOnActionSurge = true;
+						}
+
+						// --- Increase Gravity (15) ---
+						if (level >= 15) {
+							calculations.hasIncreaseGravity = true;
+							calculations.increaseGravityShoveBonus = intMod;
+						}
+
+						// --- Satellite Barrage (18) ---
+						if (level >= 18) {
+							calculations.hasSatelliteBarrage = true;
+							calculations.satelliteBarrageMaxAttacks = calculations.satelliteMax;
+						}
+					}
+
 					// Cavalier subclass
 					if (cls.subclass?.shortName === "Cavalier") {
 						// Unwavering Mark uses per long rest = STR mod (min 1)
@@ -19846,14 +20258,17 @@ class CharacterSheetState {
 						calculations.spellsKnown = spellsKnown;
 					}
 
-					// Font of Magic / Sorcery Points
-					if (source === "TGTT") {
-						// TGTT: Font of Magic starts at L1, SP = level + 1 (L1=2, L2=3, ..., L20=21)
-						calculations.hasFontOfMagic = true;
-						calculations.sorceryPoints = level + 1;
-					} else if (level >= 2) {
-						calculations.hasFontOfMagic = true;
-						calculations.sorceryPoints = level;
+					// Font of Magic / Sorcery Points.
+					// CS-BUG-080: the count lives in exactly one place —
+					// `getSorceryPointsMaxForClass` — so the calculation, the
+					// level-up resource writer and `_ensureSorceryPoints` can
+					// never disagree again.
+					{
+						const sp = CharacterSheetState.getSorceryPointsMaxForClass(cls);
+						if (sp > 0) {
+							calculations.hasFontOfMagic = true;
+							calculations.sorceryPoints = sp;
+						}
 					}
 
 					// Metamagic options count
@@ -19997,26 +20412,63 @@ class CharacterSheetState {
 								const subclassLevel = is2024 ? 3 : 1;
 								if (level >= subclassLevel) {
 									calculations.hasEyesOfTheDark = true;
+									// Consumed generically by `_getClassFeatureEffects()`, which emits a
+									// `type: "sense"` effect so the range actually reaches `getSenses()`.
 									calculations.darkvision = 120;
+									calculations.darkvisionSource = "Eyes of the Dark";
+								}
+								// Eyes of the Dark, second half: at sorcerer level 3 you learn `darkness`
+								// for free, and can cast it for 2 Sorcery Points instead of a slot — in
+								// which case you can see through the darkness you create.
+								if (level >= 3 && (level >= subclassLevel)) {
+									calculations.eyesOfTheDarkGrantsDarkness = true;
+									calculations.darknessSorceryPointCost = 2;
+									// Generic resource-cast descriptor — see `getResourceCastableSpells()`.
+									calculations.resourceCastSpells = [
+										...(calculations.resourceCastSpells || []),
+										{
+											spell: "Darkness",
+											source: "PHB",
+											level: 2,
+											concentration: true,
+											cost: 2,
+											resource: "Sorcery Points",
+											grantedBy: "Eyes of the Dark",
+											note: "You can see through the darkness this casting creates.",
+											riders: {seeThroughOwnDarkness: true},
+										},
+									];
 								}
 								// Strength of the Grave (level 1/3)
 								if (level >= subclassLevel) {
 									calculations.hasStrengthOfTheGrave = true;
 									calculations.strengthOfTheGraveDc = 5; // + damage taken
+									calculations.strengthOfTheGraveSaveAbility = "cha";
 								}
 								// Hound of Ill Omen (level 6)
 								if (level >= 6) {
 									calculations.hasHoundOfIllOmen = true;
 									calculations.houndCost = 3;
+									calculations.houndOfIllOmenCost = 3;
+									// RAW: the hound "appears with a number of temporary hit points
+									// equal to half your sorcerer level" — on top of the dire wolf's
+									// own hit points, which it keeps.
+									calculations.houndOfIllOmenTempHp = Math.floor(level / 2);
+									calculations.houndOfIllOmenRange = 120;
+									calculations.houndOfIllOmenDurationMinutes = 5;
 								}
 								// Shadow Walk (level 14)
 								if (level >= 14) {
 									calculations.hasShadowWalk = true;
+									calculations.shadowWalkRange = 120;
+									calculations.shadowWalkAction = "bonus";
 								}
 								// Umbral Form (level 18)
 								if (level >= 18) {
 									calculations.hasUmbralForm = true;
 									calculations.umbralFormCost = 6;
+									calculations.umbralFormDurationMinutes = 1;
+									calculations.umbralFormResistanceExceptions = ["force", "radiant"];
 								}
 								break;
 							}
@@ -24877,6 +25329,41 @@ class CharacterSheetState {
 			});
 		}
 
+		// Meteor Knight Fighter (level 15) — Increase Gravity.
+		//  1. Advantage on ANY ability check or saving throw made to resist being pushed,
+		//     pulled or knocked prone. Emitted as `check:advantage:*` / `save:advantage:*`
+		//     conditional sub-typed modifiers so the existing per-roll opt-in picker
+		//     (`aggregateModifiers().conditionalsAvailable`) offers them on every ability
+		//     check / save rather than silently auto-applying to unrelated rolls.
+		//  2. Add the Intelligence modifier to shove ability checks — a Strength
+		//     (Athletics) check in both editions, so a gated `skill:athletics` bonus.
+		if (calculations.hasIncreaseGravity && !alreadyProcessed("Increase Gravity")) {
+			const forcedMovementCondition = "to resist being pushed, pulled, or knocked prone";
+			effects.push({
+				type: "modifier",
+				modType: "check:advantage:forcedmovement",
+				value: 1,
+				source: "Increase Gravity",
+				conditional: forcedMovementCondition,
+			});
+			effects.push({
+				type: "modifier",
+				modType: "save:advantage:forcedmovement",
+				value: 1,
+				source: "Increase Gravity",
+				conditional: forcedMovementCondition,
+			});
+			if (calculations.increaseGravityShoveBonus) {
+				effects.push({
+					type: "modifier",
+					modType: "skill:athletics",
+					value: calculations.increaseGravityShoveBonus,
+					source: "Increase Gravity",
+					conditional: "when you shove a creature",
+				});
+			}
+		}
+
 		// Storm Soul resistances (Storm Herald)
 		if (calculations.stormSoulResistance) {
 			effects.push({
@@ -25522,6 +26009,23 @@ class CharacterSheetState {
 		// SORCERER FEATURES
 		// =========================================================
 
+		// GENERIC: any class/subclass calculation that declares a flat darkvision range
+		// (`calculations.darkvision`, labelled by `calculations.darkvisionSource`) becomes a
+		// real sense. CS-BUG-082: `calculations.darkvision` had NO consumer anywhere in the
+		// codebase, so Eyes of the Dark's 120 ft was pure text — `getSenses().darkvision`
+		// stayed at whatever the species granted.
+		if (calculations.darkvision > 0) {
+			const dvSource = calculations.darkvisionSource || "Class Feature";
+			if (!alreadyProcessed(dvSource)) {
+				effects.push({
+					type: "sense",
+					sense: "darkvision",
+					range: calculations.darkvision,
+					source: dvSource,
+				});
+			}
+		}
+
 		// Draconic Resilience: +1 HP per level, unarmored AC = 13 + DEX
 		if (calculations.hasDraconicResilience && !alreadyProcessed("Draconic Resilience")) {
 			effects.push({
@@ -25868,6 +26372,9 @@ class CharacterSheetState {
 		// Populate spellbook spells granted by a FEATURE (e.g. Undead Thralls adds
 		// Animate Dead to the wizard's spellbook). Idempotent reconcile.
 		this.populateFeatureGrantedSpellbookSpells();
+		// Release any prose-parsed spell grants whose level gate has now been reached
+		// (e.g. "At 10th level in this class, you also learn levitate"). Idempotent.
+		this.reconcileDeferredFeatureSpells();
 
 		const calculations = this.getFeatureCalculations();
 		const effects = calculations._effects || [];
@@ -26216,14 +26723,22 @@ class CharacterSheetState {
 
 			// ===== GENERIC MODIFIERS =====
 			case "modifier": {
-				// Conditional advantage/disadvantage modifiers (e.g. Danger Sense's
-				// "save:dex:advantage … against effects you can see", Forked Tongue's
-				// "check:wis:advantage … to ascertain true intentions") must stay
-				// ENABLED so getModifiersForType() can see them; aggregateModifiers()
-				// then gates them off by default and surfaces them in
-				// conditionalsAvailable for the per-roll opt-in picker. Disabling them
-				// here hid them from the picker entirely. A purely numeric conditional
-				// bonus keeps the original disabled-by-default behaviour.
+				// Conditional modifiers that carry an advantage/disadvantage flag (e.g.
+				// Danger Sense's "save:dex:advantage … against effects you can see")
+				// stay ENABLED: they contribute 0 to the numeric quick-total (the
+				// adv/dis sentinel is zeroed in _recalculateCustomModifiers), so the
+				// only thing being enabled buys them is visibility to
+				// getModifiersForType()/getAdvantageState().
+				//
+				// A purely NUMERIC conditional bonus (e.g. Increase Gravity's "+INT to
+				// Athletics when you shove") must stay DISABLED. `_recalculateCustomModifiers`
+				// gates on `enabled` alone and never on `conditional`, so enabling one
+				// leaks its value into customModifiers and therefore into getSkillMod()/
+				// getSaveMod() — i.e. it would apply to EVERY roll, not just the
+				// conditional one. Disabling costs nothing: aggregateModifiers() still
+				// surfaces disabled conditionals in `conditionalsAvailable`, so the
+				// per-roll opt-in picker keeps offering them. (CS-BUG-065 was withdrawn
+				// after this was measured; see docs/charactersheet/known-bugs.md.)
 				const {advantage: advFromType, disadvantage: disFromType} = this._parseModifierType(effect.modType);
 				const carriesAdvFlag = advFromType || disFromType || effect.advantage || effect.disadvantage;
 				this._addClassFeatureModifier({
@@ -31538,12 +32053,86 @@ class CharacterSheetState {
 	getResources () {
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
+		this._ensureMeteorKnightResources();
 		this.ensureBloodHunterResources();
 		this.ensureTalentResources();
 		this._ensureChannelDivinityUses();
 		this._ensureWildShapeUses();
 		this._ensureCreationBardUses();
+		this._ensureSorceryPoints();
+		this._ensureZeroHpInterventionUses();
 		return [...this._data.resources];
+	}
+
+	/**
+	 * Sorcery Points granted by a single class entry, per its own Font of Magic
+	 * progression. THE single source of truth for the pool size — the Sorcerer
+	 * branch of {@link getFeatureCalculations}, {@link _ensureSorceryPoints} and
+	 * `CharacterSheetClassUtils.updateClassResources` all read it.
+	 *
+	 * CS-BUG-080: those three surfaces previously each carried their own copy of
+	 * the formula and DISAGREED for the TGTT chassis — `getFeatureCalculations()`
+	 * said `level + 1` while the level-up writer said `level`.
+	 *
+	 * CS-BUG-084: the disagreement was resolved the wrong way round by
+	 * CS-BUG-018. The TGTT Sorcerer class table in
+	 * `homebrew/TravelersGuidetoThelemar.json` reads 2, 3, 4, ... 21 for levels
+	 * 1..20 — i.e. `level + 1`, because TGTT grants Font of Magic at level 1 and
+	 * still starts the column at 2. `updateClassResources` was therefore made one
+	 * point STINGY at every level, and the two existing TGTT Sorcerer E2E specs
+	 * blanket-skipped their whole Sorcery Points ladder rather than assert a
+	 * number the sheet got wrong. The table wins.
+	 *
+	 * @param {object} cls A `_data.classes` entry.
+	 * @returns {number} 0 when the class grants no Sorcery Points at its level.
+	 */
+	static getSorceryPointsMaxForClass (cls) {
+		if ((cls?.name || "").toLowerCase() !== "sorcerer") return 0;
+		const level = cls?.level || 0;
+		if (level <= 0) return 0;
+		// TGTT grants Font of Magic at L1 and its table starts at 2 → `level + 1`.
+		// PHB/XPHB grant it at L2 and their table starts at 2 → `level`.
+		if (cls?.source === "TGTT") return level + 1;
+		return level >= 2 ? level : 0;
+	}
+
+	/**
+	 * Create / re-scale the player-facing "Sorcery Points" pool from the class
+	 * table, mirroring {@link _ensureChannelDivinityUses}.
+	 *
+	 * Previously the pool existed only if `CharacterSheetClassUtils.updateClassResources`
+	 * had run, i.e. only for characters built through the Level-Up or Quick Build
+	 * wizards. A Sorcerer that arrived any other way — `spawn`, a save predating
+	 * the resource, a multiclass leg added programmatically — had Font of Magic,
+	 * a Metamagic list and subclass features that spend Sorcery Points, but no
+	 * pool to spend from.
+	 *
+	 * Only ever RAISES the max (largest contribution across classes), so a
+	 * homebrew or item effect that legitimately pushed the pool higher is never
+	 * clobbered.
+	 * @private
+	 */
+	_ensureSorceryPoints () {
+		// CREATE-ONLY, deliberately. Re-scaling an existing pool on level-up is
+		// `CharacterSheetClassUtils.updateClassResources`'s job; reconciling here as
+		// well would fight two legitimate in-place writers of `max`:
+		//   - `setSorceryPoints()`, the explicit player/DM override, and
+		//   - TGTT passive Metamagic tuning, which LOCKS points by LOWERING `max`
+		//     (see `tuneMetamagic`) — a reconciler would silently untune every
+		//     metamagic the moment anything called `getResources()`.
+		if ((this._data.resources || []).some(r => r.name === "Sorcery Points")) return;
+
+		const desiredMax = (this._data.classes || [])
+			.reduce((max, cls) => Math.max(max, CharacterSheetState.getSorceryPointsMaxForClass(cls)), 0);
+		if (desiredMax <= 0) return;
+
+		(this._data.resources = this._data.resources || []).push({
+			id: CryptUtil.uid(),
+			name: "Sorcery Points",
+			current: desiredMax,
+			max: desiredMax,
+			recharge: "long",
+		});
 	}
 
 	/**
@@ -31713,6 +32302,190 @@ class CharacterSheetState {
 			&& cls.subclass?.source === "GriffonsSaddlebag4",
 		) || null;
 	}
+
+	// =========================================================================
+	// Meteor Knight (The Griffon's Saddlebag 3)
+	// =========================================================================
+	// #region meteor-knight
+
+	/**
+	 * Identity predicate for the Meteor Knight Fighter archetype. Source-gated: homebrew
+	 * subclass short names are not globally unique, so every Meteor Knight code path
+	 * funnels through this one check rather than repeating the string comparison.
+	 * @param {*} subclass A `_data.classes[].subclass` entry.
+	 * @returns {boolean}
+	 */
+	static isMeteorKnightSubclass (subclass) {
+		return (subclass?.shortName || subclass?.name) === "Meteor Knight"
+			&& subclass?.source === "GriffonsSaddlebag3";
+	}
+
+	/** @returns {object|null} The Fighter class entry carrying the Meteor Knight archetype. */
+	_getMeteorKnightClass () {
+		return (this._data.classes || []).find(cls =>
+			(cls.name || "").toLowerCase() === "fighter"
+			&& CharacterSheetState.isMeteorKnightSubclass(cls.subclass),
+		) || null;
+	}
+
+	/** @returns {boolean} True when the character is a Meteor Knight of at least level 3. */
+	hasMeteorKnight () {
+		return (this._getMeteorKnightClass()?.level || 0) >= 3;
+	}
+
+	/**
+	 * Reconcile the "Satellites" pool — the number of bound missiles currently ORBITING
+	 * (i.e. available to launch). Max is the proficiency bonus, so it re-scales at
+	 * Fighter 5/9/13/17 exactly like every other PB-derived pool.
+	 *
+	 * Recharge is `long`: a long rest is the natural point at which a knight re-binds a
+	 * full complement. In play the pool is topped back up by the Recall action
+	 * ({@link recallSatellites}) or, from level 10, automatically by Action Surge — both
+	 * of which are the rules-accurate refill paths.
+	 *
+	 * Mirrors `_ensureShadowKnightResources`: derives from the class level directly (never
+	 * `getFeatureCalculations()`, which would recurse back through `getResources()`), and
+	 * preserves the number of expended satellites across a max change.
+	 * @private
+	 */
+	_ensureMeteorKnightResources () {
+		const level = this._getMeteorKnightClass()?.level || 0;
+		if (level < 3) {
+			this._data.resources = (this._data.resources || []).filter(r => r.resourceType !== "meteorKnightSatellites");
+			return;
+		}
+		const max = Math.max(1, this.getProficiencyBonus());
+		let resource = this._data.resources.find(r => r.resourceType === "meteorKnightSatellites"
+			|| r.name === CharacterSheetState.METEOR_KNIGHT_SATELLITE_POOL_NAME);
+		if (!resource) {
+			resource = {
+				id: CryptUtil.uid(),
+				name: CharacterSheetState.METEOR_KNIGHT_SATELLITE_POOL_NAME,
+				current: max,
+				max,
+				recharge: "long",
+				resourceType: "meteorKnightSatellites",
+			};
+			this._data.resources.push(resource);
+			return;
+		}
+		const expended = Math.max(0, (resource.max ?? max) - (resource.current ?? resource.max ?? max));
+		resource.name = CharacterSheetState.METEOR_KNIGHT_SATELLITE_POOL_NAME;
+		resource.max = max;
+		resource.current = Math.max(0, max - expended);
+		resource.recharge = "long";
+		resource.resourceType = "meteorKnightSatellites";
+	}
+
+	/** @returns {object|null} A copy of the live Satellites pool, or null when not a Meteor Knight. */
+	getSatelliteResource () {
+		this._ensureMeteorKnightResources();
+		const resource = this._data.resources.find(r => r.resourceType === "meteorKnightSatellites");
+		return resource ? {...resource} : null;
+	}
+
+	/** @returns {number} Satellites currently in orbit (launchable right now). */
+	getSatellitesOrbiting () {
+		return this.getSatelliteResource()?.current ?? 0;
+	}
+
+	/** @returns {number} Maximum bindable satellites (= proficiency bonus). */
+	getSatellitesMax () {
+		return this.getSatelliteResource()?.max ?? 0;
+	}
+
+	/**
+	 * Set the number of orbiting satellites, clamped to [0, max]. Single write path so
+	 * every surface (combat pips, Recall button, barrage) agrees.
+	 * @param {number} n
+	 * @returns {boolean} True when a Meteor Knight pool existed and was updated.
+	 */
+	setSatellitesOrbiting (n) {
+		this._ensureMeteorKnightResources();
+		const resource = this._data.resources.find(r => r.resourceType === "meteorKnightSatellites");
+		if (!resource) return false;
+		resource.current = Math.max(0, Math.min(Number(n) || 0, resource.max));
+		return true;
+	}
+
+	/**
+	 * Bind one more missile to yourself (action; requires touching the object). Caps at
+	 * the proficiency-bonus maximum — the feature's "a different missile ceases to be
+	 * bound" clause means the count never exceeds the cap.
+	 * @returns {boolean} True when a satellite was added.
+	 */
+	bindSatellite () {
+		const before = this.getSatellitesOrbiting();
+		const max = this.getSatellitesMax();
+		if (!max || before >= max) return false;
+		return this.setSatellitesOrbiting(before + 1);
+	}
+
+	/**
+	 * Launch one orbiting satellite (the bonus-action ranged spell attack). Returns the
+	 * full attack profile so the caller can roll it, or null when nothing is in orbit.
+	 * @returns {object|null}
+	 */
+	fireSatellite () {
+		if (!this.hasMeteorKnight()) return null;
+		const orbiting = this.getSatellitesOrbiting();
+		if (orbiting <= 0) return null;
+		this.setSatellitesOrbiting(orbiting - 1);
+		return {...this.getSatelliteAttackProfile(), remaining: this.getSatellitesOrbiting()};
+	}
+
+	/**
+	 * Recall every satellite within 120 feet (action), returning the pool to full. Also
+	 * the mechanism Improved Satellite Mastery reuses on Action Surge.
+	 * @returns {number} How many satellites returned to orbit.
+	 */
+	recallSatellites () {
+		if (!this.hasMeteorKnight()) return 0;
+		const before = this.getSatellitesOrbiting();
+		const max = this.getSatellitesMax();
+		this.setSatellitesOrbiting(max);
+		return Math.max(0, max - before);
+	}
+
+	/**
+	 * The rollable profile for a satellite attack: a ranged SPELL attack that uses
+	 * Intelligence for both the attack roll and the damage bonus, and adds proficiency.
+	 * @returns {{attackBonus: number, damage: string, damageBonus: number, damageType: string, range: number, ability: string, actionType: string, ignoresCloseQuartersDisadvantage: boolean}}
+	 */
+	getSatelliteAttackProfile () {
+		const calcs = this.getFeatureCalculations();
+		return {
+			attackBonus: calcs.satelliteAttackBonus || 0,
+			damage: calcs.satelliteDamage || "1d4",
+			damageBonus: calcs.satelliteDamageBonus || 0,
+			damageType: calcs.satelliteDamageType || "bludgeoning or piercing",
+			range: calcs.satelliteRange || 30,
+			ability: "int",
+			actionType: "bonus",
+			ignoresCloseQuartersDisadvantage: !!calcs.satelliteIgnoresCloseQuartersDisadvantage,
+		};
+	}
+
+	/**
+	 * Course Correct (7): the total bonus on the contested Intelligence check made to
+	 * redirect or ensnare an incoming missile — Intelligence modifier PLUS proficiency
+	 * bonus (the feature adds proficiency explicitly).
+	 * @returns {number} 0 when the character lacks Course Correct.
+	 */
+	getCourseCorrectCheckBonus () {
+		return this.getFeatureCalculations().courseCorrectCheckBonus || 0;
+	}
+
+	/**
+	 * Satellite Barrage (18): the number of ranged spell attacks the action can make —
+	 * capped by satellites currently in orbit, never by the theoretical maximum.
+	 * @returns {number} 0 when the character lacks Satellite Barrage.
+	 */
+	getSatelliteBarrageMaxAttacks () {
+		if (!this.getFeatureCalculations().hasSatelliteBarrage) return 0;
+		return this.getSatellitesOrbiting();
+	}
+	// #endregion
 
 	_ensureShadowKnightResources () {
 		const fighter = this._getShadowKnightClass();
@@ -36560,9 +37333,14 @@ class CharacterSheetState {
 		// First try structured additionalSpells data (from official content)
 		if (feature.additionalSpells) {
 			spells = SpellGrantParser.parseAdditionalSpells(feature.additionalSpells, feature.name);
-		} else if (feature.description && SpellGrantParser.grantsSpells(feature.description)) {
-			// Fall back to parsing from description (for homebrew or missing data)
-			spells = SpellGrantParser.parseSpellsFromText(feature.description, feature.name);
+		} else {
+			// Fall back to parsing from prose (for homebrew or missing data). Raw
+			// `entries` are preferred over the rendered `description`, whose {@spell}
+			// tags have already been expanded into anchors the scanner can't read.
+			const spellText = SpellGrantParser.getFeatureSpellText(feature);
+			if (SpellGrantParser.grantsSpells(spellText)) {
+				spells = SpellGrantParser.parseSpellsFromText(spellText, feature.name);
+			}
 		}
 
 		// Drop spells already handled as a player CHOICE (e.g. Arcane Archer Lore's
@@ -36571,6 +37349,13 @@ class CharacterSheetState {
 			spells = spells.filter(s => !(s?.name && claimedSpells.has(s.name.toLowerCase())));
 		}
 
+		if (!spells.length) return false;
+
+		// LEVEL-GATED tiers ("At 10th level in this class, you also learn levitate") are
+		// held back until the class level catches up, then applied by
+		// `reconcileDeferredFeatureSpells()`. Without this every later-level grant landed
+		// immediately at the level the feature itself was gained.
+		spells = this._partitionLevelGatedSpellGrants(feature, featureId, spells);
 		if (!spells.length) return false;
 
 		spells.forEach(spell => {
@@ -36670,6 +37455,112 @@ class CharacterSheetState {
 		});
 
 		return hasPendingChoices;
+	}
+
+	/**
+	 * The class level that gates a feature's level-scaled grants. Prose gates are always
+	 * phrased "at Nth level IN THIS CLASS", so the feature's own class is authoritative;
+	 * class-less features (racial traits, feats) fall back to total level.
+	 * @param {object} feature
+	 * @returns {number}
+	 * @private
+	 */
+	_getFeatureGateLevel (feature) {
+		if (feature?.className) return this.getClassLevel(feature.className) || 0;
+		return this.getTotalLevel() || 0;
+	}
+
+	/**
+	 * Split parsed spell grants into the ones applicable NOW and the ones still gated
+	 * behind a higher class level. The gated tiers are stashed on the owning feature as
+	 * `_deferredSpellGrants` so {@link reconcileDeferredFeatureSpells} can release them
+	 * on a later level-up without re-parsing.
+	 *
+	 * Generic by design: any feature whose prose says "At Nth level … you also learn X"
+	 * (or "…you can cast X at will") now behaves correctly, homebrew included.
+	 *
+	 * @param {object} feature
+	 * @param {string} featureId
+	 * @param {Array<object>} spells
+	 * @returns {Array<object>} the immediately-applicable grants.
+	 * @private
+	 */
+	_partitionLevelGatedSpellGrants (feature, featureId, spells) {
+		const gated = spells.filter(s => s?.minLevel && s.minLevel > this._getFeatureGateLevel(feature));
+		if (gated.length) {
+			const stored = this._data.features.find(f => f.id === featureId) || feature;
+			if (stored) stored._deferredSpellGrants = gated;
+		}
+		return spells.filter(s => !gated.includes(s));
+	}
+
+	/**
+	 * Release any level-gated spell grants whose class level has since been reached.
+	 * Idempotent and cheap: features carry `_deferredSpellGrants` only while something is
+	 * genuinely still pending, and each released tier is removed from the list.
+	 *
+	 * Called from `applyClassFeatureEffects()` (every level-up / respec / build path) and
+	 * from `getInnateSpells()` (read-path safety net, mirroring the reconcile-on-read
+	 * convention `getResources()` already uses).
+	 *
+	 * @returns {Array<string>} names of the spells released by this pass.
+	 */
+	reconcileDeferredFeatureSpells () {
+		const released = [];
+		for (const feature of this._data.features || []) {
+			const pending = feature?._deferredSpellGrants;
+			if (!Array.isArray(pending) || !pending.length) continue;
+			const gateLevel = this._getFeatureGateLevel(feature);
+			const ready = pending.filter(s => (s.minLevel || 0) <= gateLevel);
+			if (!ready.length) continue;
+			feature._deferredSpellGrants = pending.filter(s => !ready.includes(s));
+			if (!feature._deferredSpellGrants.length) delete feature._deferredSpellGrants;
+			// Ascending gate order so a later at-will tier merges on top of an earlier one.
+			ready.sort((a, b) => (a.minLevel || 0) - (b.minLevel || 0));
+			for (const spell of ready) {
+				this._applyParsedSpellGrant(feature, spell);
+				released.push(spell.name);
+			}
+		}
+		return released;
+	}
+
+	/**
+	 * Apply a single parsed spell grant (innate / cantrip / known) for a feature. Shared
+	 * by the deferred-release path so it can never drift from the initial grant.
+	 * @param {object} feature
+	 * @param {object} spell
+	 * @private
+	 */
+	_applyParsedSpellGrant (feature, spell) {
+		if (spell.innate) {
+			this.addInnateSpell({
+				name: spell.name,
+				source: spell.source,
+				level: spell.level,
+				atWill: spell.atWill,
+				uses: spell.uses,
+				recharge: spell.recharge || "long",
+				sourceFeature: feature.name,
+				spellcastingAbility: spell.ability,
+			});
+		} else if (spell.level === 0) {
+			this.addCantrip({
+				name: spell.name,
+				source: spell.source,
+				sourceFeature: feature.name,
+				spellcastingAbility: spell.ability,
+			});
+		} else {
+			this.addSpell({
+				name: spell.name,
+				source: spell.source,
+				level: spell.level || 1,
+				prepared: spell.prepared,
+				sourceFeature: feature.name,
+				spellcastingAbility: spell.ability,
+			});
+		}
 	}
 
 	removeFeature (featureIdOrName, source) {
@@ -39579,6 +40470,11 @@ class CharacterSheetState {
 
 	/**
 	 * Spend one Action Surge use.
+	 *
+	 * Improved Satellite Mastery (Meteor Knight 10) rides on this: "all satellites within
+	 * 120 feet of you return to your orbit when you use your Action Surge". Applied here
+	 * — the single spend path — so every surface that surges (combat button, spawner,
+	 * play mode) gets the refill, not just the one that happened to remember.
 	 * @returns {boolean} True if a use was spent.
 	 */
 	useActionSurge () {
@@ -39586,6 +40482,7 @@ class CharacterSheetState {
 		const f = this.getFeature("Action Surge");
 		if (!f?.uses || f.uses.current <= 0) return false;
 		this.setFeatureUses(f.id, f.uses.current - 1);
+		if (this.getFeatureCalculations().satelliteRecallOnActionSurge) this.recallSatellites();
 		return true;
 	}
 
@@ -43753,7 +44650,17 @@ class CharacterSheetState {
 		// — that sentinel must NOT leak into the numeric total (e.g. Moloch's Blessing
 		// giving +1 instead of advantage). Modifiers that carry an explicit numeric
 		// `value` alongside an `advantage` field (custom abilities) keep it.
-		let value = mod._advFromType ? 0 : (mod.value || 0);
+		//
+		// `value` may be a SYMBOLIC token ("attunedItems", "strScore", …) rather than a
+		// number — see _resolveSymbolicModifierValue. This is the SECOND chokepoint that
+		// must understand that vocabulary: `_getNamedModifierEffectiveValue` feeds the
+		// cached customModifiers totals, while this one feeds `aggregateModifiers` and
+		// the attack itemizer. Without resolution here, `result.bonus += value` performs
+		// STRING CONCATENATION — an Artificer 20 produced
+		// aggregateModifiers("save:all").bonus === "1attunedItems" (CS-BUG-038).
+		// Unresolvable tokens (dice strings, semantic markers) contribute 0, matching
+		// the other chokepoint.
+		let value = mod._advFromType ? 0 : (this._resolveSymbolicModifierValue(mod.value) ?? 0);
 
 		// Per-level modifiers
 		if (mod.perLevel) {
@@ -43776,7 +44683,10 @@ class CharacterSheetState {
 			value += this.getProficiencyBonus() * 2;
 		}
 
-		return value;
+		// Mirrors the same guard on `_getNamedModifierEffectiveValue`: a NaN reaching
+		// `result.bonus += value` would poison the whole aggregate, and every downstream
+		// reader, with a single un-attributable NaN.
+		return Number.isFinite(value) ? value : 0;
 	}
 
 	/**
@@ -45193,6 +46103,7 @@ class CharacterSheetState {
 		},
 		umbralCoating: {
 			id: "umbralCoating",
+			noNameDetect: true,
 			name: "Umbral Coating",
 			icon: "🌑",
 			description: "The chosen physical weapon is a shadow weapon and gains Thrown (20/60) for 1 hour.",
@@ -45203,6 +46114,7 @@ class CharacterSheetState {
 		},
 		shadowCloak: {
 			id: "shadowCloak",
+			noNameDetect: true,
 			name: "Cloak of Shadow",
 			icon: "🌘",
 			description: "Up to four chosen creatures have advantage on Dexterity (Stealth) checks.",
@@ -45213,6 +46125,9 @@ class CharacterSheetState {
 		},
 		shadowKnightDarkness: {
 			id: "shadowKnightDarkness",
+			// CS-BUG-083: applied only via `applyShadowcastingOption` — never name-detected,
+			// or every feature literally called "Darkness" would be hijacked into it.
+			noNameDetect: true,
 			name: "Darkness",
 			icon: "⚫",
 			description: "A concentration-based 15-foot-radius sphere of magical darkness.",
@@ -45233,6 +46148,11 @@ class CharacterSheetState {
 		},
 		eyesOfTheDark: {
 			id: "eyesOfTheDark",
+			// CS-BUG-083: Shadow Knight shadowcasting option, applied only via
+			// `applyShadowcastingOption`. Without this the Shadow Magic sorcerer's
+			// (passive) "Eyes of the Dark" was detected as THIS state and rendered as a
+			// toggle granting four allies Dark Gaze.
+			noNameDetect: true,
 			name: "Eyes of the Dark",
 			icon: "👁️",
 			description: "Up to four chosen creatures gain Dark Gaze for 1 hour.",
@@ -45450,6 +46370,34 @@ class CharacterSheetState {
 			activationAction: "action",
 			resourceName: "Exalted Champion",
 			resourceCost: 1,
+		},
+		umbralForm: {
+			id: "umbralForm",
+			name: "Umbral Form",
+			icon: "🌑",
+			description: "You transform into a shadowy form: you have resistance to all damage except force and radiant, and you can move through creatures and objects as if they were difficult terrain (taking 5 force damage if you end your turn inside one).",
+			// CS-BUG-050: curated, explicitly `damage:`-namespaced resistances. A bare damage
+			// type here is silently inert, and prose-parsing "all damage except force and
+			// radiant" cannot enumerate the set.
+			preferCuratedEffects: true,
+			effects: [
+				{type: "resistance", target: "damage:acid"},
+				{type: "resistance", target: "damage:bludgeoning"},
+				{type: "resistance", target: "damage:cold"},
+				{type: "resistance", target: "damage:fire"},
+				{type: "resistance", target: "damage:lightning"},
+				{type: "resistance", target: "damage:necrotic"},
+				{type: "resistance", target: "damage:piercing"},
+				{type: "resistance", target: "damage:poison"},
+				{type: "resistance", target: "damage:psychic"},
+				{type: "resistance", target: "damage:slashing"},
+				{type: "resistance", target: "damage:thunder"},
+			],
+			duration: "1 minute",
+			endConditions: ["Duration expires", "You are incapacitated", "You die", "You end it as a bonus action"],
+			activationAction: "bonus",
+			resourceName: "Sorcery Points",
+			resourceCost: 6,
 		},
 		astralArms: {
 			id: "astralArms",
@@ -46738,6 +47686,11 @@ class CharacterSheetState {
 		"stunning strike": "combat",
 		"instant step": "combat",
 		"shadow walk": "combat",
+		// Shadow Magic (XGE Sorcerer). Half passive (120 ft darkvision, applied as a class
+		// feature effect), half active: from sorcerer 3 it lets you cast `darkness` for 2
+		// Sorcery Points. Classified as an "ability" so the cast has a Use button; the click
+		// is served by the GENERIC resource-cast handler, not a name-matched branch.
+		"eyes of the dark": "ability",
 		"religious training": "combat",
 		"instant strike": "combat",
 		"whirlpool strike": "combat",
@@ -47354,10 +48307,20 @@ class CharacterSheetState {
 		// and any future option that uses the same convention — so the wrapper stays
 		// passive while its options carry the uses.
 		if (feature.consumes?.name && feature.consumes.name !== "Stamina") {
-			return this._buildAbilityActivationInfo(feature, rawText, text, {
-				resourceName: feature.consumes.name,
-				resourceCost: feature.consumes.amount || 1,
-			});
+			// GENERIC: `consumes` declares a COST, not a classification. When the feature is
+			// ALSO a known active state (matched by name), fall through to the ACTIVE_STATE_TYPES
+			// detection below so the state — and its curated effects — win. Otherwise a toggle
+			// whose JSON carries a cost (Umbral Form: `consumes: {name: "Sorcery Point",
+			// amount: 6}`) is mis-classified as a one-shot ability and its resistances are
+			// never applied.
+			const isKnownState = Object.values(this.ACTIVE_STATE_TYPES)
+				.some(st => !st?.noNameDetect && String(st?.name || "").toLowerCase() === name);
+			if (!isKnownState) {
+				return this._buildAbilityActivationInfo(feature, rawText, text, {
+					resourceName: feature.consumes.name,
+					resourceCost: feature.consumes.amount || 1,
+				});
+			}
 		}
 
 		// ===== CHANNEL DIVINITY OPTIONS (CS-BUG-079) =====
@@ -47546,6 +48509,11 @@ class CharacterSheetState {
 		for (const [stateTypeId, stateType] of Object.entries(this.ACTIVE_STATE_TYPES)) {
 			// Skip generic types that shouldn't match by name
 			if (stateType.isGeneric && !stateType.detectPatterns?.length) continue;
+			// CS-BUG-083: states that are ONLY ever applied programmatically (the Shadow
+			// Knight's shadowcasting options) must never be name-matched — their names
+			// ("Eyes of the Dark", "Darkness") collide with real features from other
+			// classes, hijacking them into the wrong state with the wrong effects.
+			if (stateType.noNameDetect) continue;
 
 			// Check name match
 			if (name === stateType.name.toLowerCase()) {
@@ -51605,6 +52573,9 @@ class CharacterSheetState {
 
 	// #region Companions (Beast Companions, Familiars, Summons, Steel Defenders, Drakes)
 
+	/** Player-facing label of the Meteor Knight satellite pool (single source of truth). */
+	static METEOR_KNIGHT_SATELLITE_POOL_NAME = "Satellites";
+
 	// =========================================================================
 	// COMPANION TYPES — Categorizes companions by origin mechanic
 	// =========================================================================
@@ -52359,6 +53330,20 @@ class CharacterSheetState {
 		}
 
 		if (s.ac != null) companion.ac = s.ac;
+
+		// Temporary hit points expressed in terms of the summoner's level
+		// ("temporary hit points equal to half your sorcerer level"). Declarative, so any
+		// summon can use it without a bespoke recalculation branch.
+		if (s.tempHpBase != null || s.tempHpPerLevel != null) {
+			if (level > 0) {
+				const temp = Math.max(0, Math.floor((s.tempHpBase || 0) + (s.tempHpPerLevel || 0) * level));
+				companion.hp = companion.hp || {max: 0, current: 0, temp: 0};
+				// Temporary hit points never stack: RAW you take the higher pool. Re-scaling
+				// on level-up should raise them, but must not resurrect spent ones.
+				companion.hp.temp = Math.max(companion.hp.temp || 0, temp);
+				companion.tempHpMax = temp;
+			}
+		}
 
 		if (s.attackName) {
 			const toHit = s.attackAbility ? this.getSpellAttackBonusForAbility(s.attackAbility) : profBonus;
@@ -53435,6 +54420,10 @@ class CharacterSheetState {
 	 * @returns {object} {current, max}
 	 */
 	_getSpResource () {
+		// CS-BUG-080: mint the pool on demand so `getSorceryPoints()`, Font of Magic
+		// conversion and every subclass ability that spends points work on ANY Sorcerer —
+		// not just one that went through the Level-Up / Quick Build wizard.
+		this._ensureSorceryPoints();
 		return this._data.resources.find(r => r.name === "Sorcery Points") || null;
 	}
 
@@ -53503,6 +54492,220 @@ class CharacterSheetState {
 		res.current += recovered;
 		return recovered;
 	}
+
+	// #region Resource-cast spells (generic)
+	/**
+	 * Spells a class feature lets you cast by spending a RESOURCE instead of a spell slot
+	 * (Eyes of the Dark's *darkness* for 2 Sorcery Points, and any future equivalent).
+	 *
+	 * Entirely declarative: a subclass publishes
+	 * `calculations.resourceCastSpells = [{spell, source, level, cost, resource, grantedBy,
+	 * concentration, note, riders}]` and this method resolves each descriptor against the live
+	 * resource pool. No per-subclass branch here or in the UI.
+	 *
+	 * @returns {Array<object>} `[{spell, source, level, cost, resourceName, resourceCurrent,
+	 *   available, grantedBy, note, concentration, riders, active}]`
+	 */
+	getResourceCastableSpells () {
+		const defs = this.getFeatureCalculations().resourceCastSpells;
+		if (!Array.isArray(defs) || !defs.length) return [];
+		const active = this._data.activeResourceCastSpells || [];
+		return defs.map(def => {
+			const resource = (this.getResources() || []).find(r => r.name === def.resource);
+			const cost = def.cost ?? 1;
+			return {
+				spell: def.spell,
+				source: def.source || null,
+				level: def.level ?? null,
+				cost,
+				resourceName: def.resource,
+				resourceCurrent: resource?.current ?? 0,
+				resourceMax: resource?.max ?? 0,
+				available: (resource?.current ?? 0) >= cost,
+				grantedBy: def.grantedBy || null,
+				note: def.note || null,
+				concentration: !!def.concentration,
+				riders: {...(def.riders || {})},
+				active: active.some(a => a.spell?.toLowerCase() === String(def.spell).toLowerCase()),
+			};
+		});
+	}
+
+	/**
+	 * Cast one of {@link getResourceCastableSpells} by spending its resource.
+	 * Starts concentration when the spell needs it and records the casting so its riders
+	 * (e.g. "you can see through your own darkness") stay observable until it ends.
+	 *
+	 * @param {string} spellName
+	 * @returns {object|null} the resolved descriptor with `spent`/`resourceRemaining`, or null
+	 *   when the spell isn't offered or the resource is short.
+	 */
+	castSpellWithResource (spellName) {
+		const key = String(spellName || "").toLowerCase();
+		const info = this.getResourceCastableSpells().find(s => s.spell.toLowerCase() === key);
+		if (!info || !info.available) return null;
+
+		const resource = (this.getResources() || []).find(r => r.name === info.resourceName);
+		if (!resource || resource.current < info.cost) return null;
+		this.setResourceCurrent(resource.id, resource.current - info.cost);
+
+		this._data.activeResourceCastSpells = (this._data.activeResourceCastSpells || [])
+			.filter(a => a.spell?.toLowerCase() !== key);
+		this._data.activeResourceCastSpells.push({
+			spell: info.spell,
+			source: info.source,
+			grantedBy: info.grantedBy,
+			riders: {...info.riders},
+		});
+
+		if (info.concentration) this.setConcentration({name: info.spell, level: info.level || 0, source: info.grantedBy || "Resource cast"});
+
+		return {...info, spent: info.cost, resourceRemaining: this.getResources().find(r => r.name === info.resourceName)?.current ?? 0, active: true};
+	}
+
+	/** Currently-running resource-cast spells (see {@link castSpellWithResource}). */
+	getActiveResourceCastSpells () {
+		return [...(this._data.activeResourceCastSpells || [])];
+	}
+
+	/**
+	 * End a resource-cast spell, dropping its riders (and its concentration if it owned it).
+	 * @param {string} spellName
+	 * @returns {boolean} true if something was ended
+	 */
+	endResourceCastSpell (spellName) {
+		const key = String(spellName || "").toLowerCase();
+		const before = (this._data.activeResourceCastSpells || []).length;
+		this._data.activeResourceCastSpells = (this._data.activeResourceCastSpells || [])
+			.filter(a => a.spell?.toLowerCase() !== key);
+		const ended = this._data.activeResourceCastSpells.length !== before;
+		if (ended && this.getConcentration()?.spellName?.toLowerCase() === key) this.breakConcentration?.();
+		return ended;
+	}
+
+	/**
+	 * Eyes of the Dark: true while a *darkness* you cast with Sorcery Points is running, which
+	 * is the only case in which you can see through it.
+	 * @returns {boolean}
+	 */
+	canSeeThroughOwnDarkness () {
+		return (this._data.activeResourceCastSpells || []).some(a => a.riders?.seeThroughOwnDarkness);
+	}
+	// #endregion
+
+	// #region Shadow Magic (XGE Sorcerer)
+	/** Canonical companion name for the Shadow Magic sorcerer's Hound of Ill Omen. */
+	static HOUND_OF_ILL_OMEN_NAME = "Hound of Ill Omen";
+
+	/**
+	 * Hound of Ill Omen (Shadow Magic 6). Spends 3 Sorcery Points to summon a dire wolf whose
+	 * statistics are unchanged EXCEPT: it is Medium, a monstrosity, and it appears with
+	 * temporary hit points equal to half your sorcerer level.
+	 *
+	 * Registered through the GENERIC {@link COMPANION_TYPES}`.CLASS_SUMMON` path with a
+	 * declarative `scaling` descriptor, so {@link recalculateCompanion} keeps the temporary
+	 * hit points correct as the sorcerer levels — there is no bespoke recalculation code.
+	 *
+	 * @returns {{ok: boolean, error?: string, companion?: object, sorceryPointsRemaining?: number}}
+	 */
+	summonHoundOfIllOmen () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasHoundOfIllOmen) return {ok: false, error: "You don't have Hound of Ill Omen."};
+
+		const cost = calc.houndOfIllOmenCost ?? 3;
+		const sp = this.getSorceryPoints();
+		if (sp.current < cost) return {ok: false, error: `Hound of Ill Omen costs ${cost} Sorcery Points (you have ${sp.current}).`};
+
+		// One hound at a time — a second casting replaces the first.
+		const existing = this.getHoundOfIllOmen();
+		const replaced = existing ? existing.name : null;
+		if (existing) this.removeCompanion(existing.id);
+
+		if (!this.useSorceryPoint(cost)) return {ok: false, error: "Could not spend Sorcery Points."};
+
+		const companionId = this.addCompanion({
+			name: CharacterSheetState.HOUND_OF_ILL_OMEN_NAME,
+			type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+			creatureName: "Dire Wolf",
+			creatureSource: "MM",
+			// RAW: "uses the dire wolf's statistics", changed to Medium monstrosity.
+			size: "M",
+			creatureType: "monstrosity",
+			ac: 14,
+			hp: {max: 37, current: 37, temp: calc.houndOfIllOmenTempHp || 0},
+			speed: {walk: 50},
+			abilities: {str: 17, dex: 15, con: 15, int: 3, wis: 12, cha: 7},
+			skillProficiencies: ["perception", "stealth"],
+			attacks: [{
+				name: "Bite",
+				attackBonus: 5,
+				damage: "2d6+3",
+				damageType: "piercing",
+				range: "5 ft.",
+				description: "If the target is a creature, it must succeed on a DC 13 Strength saving throw or be knocked prone.",
+			}],
+			traits: [
+				{name: "Keen Hearing and Smell", description: "The hound has advantage on Wisdom (Perception) checks that rely on hearing or smell."},
+				{name: "Pack Tactics", description: "The hound has advantage on an attack roll against a creature if at least one of the hound's allies is within 5 feet of the creature and the ally isn't incapacitated."},
+				{name: "Shadow Stride", description: "The hound can move through other creatures and objects as if they were difficult terrain, taking 5 force damage if it ends its turn inside an object."},
+				{name: "Bound to the Quarry", description: "The hound always knows its target's location and has disadvantage-inflicting presence: while within 5 feet of the target, the target has disadvantage on saving throws against any spell you cast."},
+			],
+			// Declarative scaling — consumed by the generic `_recalculateScaledCompanion()`.
+			scaling: {
+				className: "Sorcerer",
+				tempHpPerLevel: 0.5,
+			},
+			summonedBy: "Hound of Ill Omen",
+			durationMinutes: calc.houndOfIllOmenDurationMinutes ?? 5,
+		});
+
+		// The generic scaling pass is what actually sets the temporary hit points, so the
+		// value can never drift from `scaling.tempHpPerLevel`.
+		this.recalculateCompanion(companionId);
+		const companion = this.getCompanion(companionId);
+
+		return {ok: true, companion, replaced, sorceryPointsRemaining: this.getSorceryPoints().current};
+	}
+
+	/** The active Hound of Ill Omen, or null. */
+	getHoundOfIllOmen () {
+		return (this.getCompanions() || []).find(c => c.name === CharacterSheetState.HOUND_OF_ILL_OMEN_NAME) || null;
+	}
+
+	/** Dismiss the Hound of Ill Omen (0 HP, target drops, or 5 minutes elapse). */
+	dismissHoundOfIllOmen () {
+		const hound = this.getHoundOfIllOmen();
+		if (!hound) return false;
+		this.removeCompanion(hound.id);
+		return true;
+	}
+
+	/**
+	 * Shadow Walk (Shadow Magic 14). A bonus-action 120 ft teleport, usable only while you are
+	 * in dim light or darkness and only to a space that is also in dim light or darkness.
+	 *
+	 * There is no resource cost, so this method exists to (a) publish the live range and
+	 * (b) enforce the lighting gate rather than leaving it as prose.
+	 *
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.inDimLightOrDarkness=true] whether YOU are in dim light/darkness.
+	 * @param {boolean} [opts.destinationInDimLightOrDarkness=true] whether the DESTINATION is.
+	 * @param {number} [opts.distance] distance in feet, defaults to the maximum.
+	 * @returns {{ok: boolean, error?: string, distance?: number, range?: number, action?: string}}
+	 */
+	useShadowWalk ({inDimLightOrDarkness = true, destinationInDimLightOrDarkness = true, distance = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasShadowWalk) return {ok: false, error: "You don't have Shadow Walk."};
+		const range = calc.shadowWalkRange ?? 120;
+		// Your own *darkness* counts, and so does any active state that darkens your space.
+		const selfShrouded = inDimLightOrDarkness || this.canSeeThroughOwnDarkness();
+		if (!selfShrouded) return {ok: false, error: "Shadow Walk requires you to be in dim light or darkness.", range};
+		if (!destinationInDimLightOrDarkness) return {ok: false, error: "Shadow Walk requires the destination to be in dim light or darkness.", range};
+		const dist = distance == null ? range : Math.floor(Number(distance) || 0);
+		if (dist > range) return {ok: false, error: `Shadow Walk can teleport you up to ${range} feet.`, range};
+		return {ok: true, distance: dist, range, action: calc.shadowWalkAction || "bonus"};
+	}
+	// #endregion
 
 	// #region Font of Magic (Sorcery Point ↔ Spell Slot Conversion)
 

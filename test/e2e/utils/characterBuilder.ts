@@ -418,6 +418,27 @@ export const PRESET_FULL_SHADOW_KNIGHT_FIGHTER: CharacterPreset = {
 	],
 };
 
+/** 2b. Meteor Knight Fighter (The Griffon's Saddlebag, Book 3) */
+export const PRESET_FULL_METEOR_KNIGHT_FIGHTER: CharacterPreset = {
+	race: "Aarakocra",
+	raceSource: "MPMM",
+	className: "Fighter",
+	classSource: "PHB",
+	prioritySources: ["PHB"],
+	background: "Soldier",
+	bgSource: "PHB",
+	name: "Vex Starfall",
+	skillCount: 2,
+	masteryCount: 3,
+	optFeatCount: 1,
+	subclassName: "Meteor Knight",
+	subclassSource: "GriffonsSaddlebag3",
+	preferredFeatProgressionPattern: /^archery\b/i,
+	homebrewUrls: [
+		"https://raw.githubusercontent.com/TheGiddyLimit/homebrew/refs/heads/master/collection/Griffin%20Macaulay%3B%20The%20Griffon's%20Saddlebag%2C%20Book%203.json",
+	],
+};
+
 /** 3. Bladesinger Wizard Tabaxi (TGTT) */
 export const PRESET_FULL_BLADESINGER_TABAXI: CharacterPreset = {
 	race: "Tabaxi",
@@ -796,7 +817,7 @@ export const PRESET_FULL_NECROMANCER_WIZARD: CharacterPreset = {
 };
 
 /**
- * #22. Arcana Domain Cleric (SCAG, PHB 2014 chassis).
+ * Arcana Domain Cleric (SCAG, PHB 2014 chassis).
  *
  * `abilityPriority` puts the standard array's 15 in WISDOM. The harness default is
  * STR-first, which would leave this cleric at WIS 10 (+0) and make Potent Spellcasting's
@@ -820,6 +841,37 @@ export const PRESET_FULL_ARCANA_CLERIC: CharacterPreset = {
 	subclassName: "Arcana Domain",
 	subclassSource: "SCAG",
 	signatureSpells: ["Sacred Flame", "Bless", "Cure Wounds"],
+};
+
+/**
+ * Shadow Magic Sorcerer (XGE subclass on the PHB-2014 Sorcerer chassis).
+ *
+ * PHB rather than TGTT deliberately: `Shadow Magic` carries `classSource: "PHB"`, PHB
+ * Sorcerer picks its Sorcerous Origin at LEVEL 1 (so the subclass is online for the whole
+ * ladder), and the PHB chassis keeps the TGTT Specialty / passive-Metamagic pickers out of
+ * the way of the subclass probes.
+ *
+ * Dwarf/Acolyte for the same reason as the Crown Paladin: the 2024 Human's mandatory
+ * Origin Feat pick stalls the Species step.
+ */
+export const PRESET_FULL_SHADOW_MAGIC_SORCERER: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB",
+	className: "Sorcerer",
+	classSource: "PHB",
+	prioritySources: ["PHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB",
+	name: "Nyx Duskwhisper",
+	skillCount: 2,
+	subclassName: "Shadow Magic",
+	subclassSource: "XGE",
+	// CS-BUG-056: without this the standard array is assigned STR-first and the Sorcerer
+	// lands on CHA 8 — which would make the Strength of the Grave save modifier, every
+	// spell save DC and the Umbral Form / Hound costs unrepresentative.
+	abilityPriority: ["cha", "con", "dex", "wis", "int", "str"],
+	signatureSpells: ["Fire Bolt", "Shield"],
 };
 
 /** Convenience array of all comprehensive presets — handy for parameterised smoke tests. */
@@ -847,6 +899,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_HORROR_THEOCRACIAN,
 	PRESET_FULL_CREATION_BARD_CHANGELING,
 	PRESET_FULL_ARCANA_CLERIC,
+	PRESET_FULL_SHADOW_MAGIC_SORCERER,
 ];
 
 /**
@@ -917,6 +970,13 @@ export async function createCharacterViaWizard (
 		await builder.setQuickBuildTargetLevel(preset.quickBuildTargetLevel);
 	}
 	await page.waitForTimeout(500);
+	// Classes whose subclass arrives at LEVEL 1 (PHB-2014 Sorcerer / Warlock / Cleric /
+	// Druid) render the choice right here in the Class step. It must be picked BEFORE the
+	// skill / optional-feature pickers, because selecting it can add its own sub-pickers.
+	// No-op for every class that gains its subclass later.
+	if (preset.subclassName && await builder.hasLevel1SubclassSelection()) {
+		await builder.selectLevel1Subclass(preset.subclassName, preset.subclassSource);
+	}
 	if (preset.skillCount) {
 		await builder.selectFirstAvailableSkills(preset.skillCount);
 	}

@@ -5739,12 +5739,14 @@ class CharacterSheetClassUtils {
 			"Sorcerer": [
 				{name: "Sorcery Points",
 					maxByLevel: (/** @type {*} */ lvl) => {
-						const isTGTT = classEntry.source === "TGTT" || classData.source === "TGTT";
-						// TGTT Sorcerer grants Font of Magic at L1 (not L2 like XPHB),
-						// so SP = sorcerer level from L1 onward. Was previously
-						// `lvl + 1` (CS-BUG-018: off-by-one — L1=2/L3=4 instead of 1/3).
-						if (isTGTT) return lvl;
-						return lvl >= 2 ? lvl : 0;
+						// CS-BUG-080: single source of truth shared with
+						// `getFeatureCalculations()` and `_ensureSorceryPoints()`.
+						// TGTT Sorcerer grants Font of Magic at L1 (not L2 like
+						// XPHB), so SP = sorcerer level from L1 onward. Was
+						// previously `lvl + 1` here (CS-BUG-018) and STILL was in
+						// the calculation copy until CS-BUG-080.
+						const source = classEntry.source === "TGTT" || classData.source === "TGTT" ? "TGTT" : classData.source;
+						return CharacterSheetState.getSorceryPointsMaxForClass({name: "Sorcerer", source, level: lvl});
 					},
 					recharge: "long"},
 			],

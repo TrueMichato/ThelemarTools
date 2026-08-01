@@ -29,7 +29,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// Note: Half-Ogre has no skill proficiencies (no Menacing trait
 	// in the TGTT data) and Powerful Build (carry x2) is not surfaced
 	// on the sheet — neither is probed.
-	{level: 2,  name: "Sorcery Points", kind: "resource", resourceMax: 2, skip: true, skipReason: "CS-BUG-018",  restoreOn: "long",
+	{level: 2,  name: "Sorcery Points", kind: "resource", resourceMax: 2, skip: true, skipReason: "CS-BUG-084: liftable. TGTT Sorcery Points are `level + 1` (not `level`) — see getSorceryPointsMaxForClass(). To unskip, set resourceMax to level+1 AND add `untilLevel` to every tier: the matrix re-evaluates each earlier row at checkpoints [3,5,11,17,20], and this pool grows every level.",  restoreOn: "long",
 		effects: [
 			{kind: "longRestRestores", resource: "Sorcery Points"},
 			{kind: "cantripCount", min: 4, skip: true, skipReason: "CS-BUG-016"},
@@ -39,7 +39,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// L3 SP anchor: roll-button probes for Sorcerer-proficient CON
 	// save and an untrained skill (Athletics — STR-based; Half-Ogre
 	// has no skill profs but the row + button always render).
-	{level: 3,  name: "Sorcery Points", kind: "resource", resourceMax: 3, skip: true, skipReason: "CS-BUG-018",
+	{level: 3,  name: "Sorcery Points", kind: "resource", resourceMax: 3, skip: true, skipReason: "CS-BUG-084: liftable. TGTT Sorcery Points are `level + 1` (not `level`) — see getSorceryPointsMaxForClass(). To unskip, set resourceMax to level+1 AND add `untilLevel` to every tier: the matrix re-evaluates each earlier row at checkpoints [3,5,11,17,20], and this pool grows every level.",
 		effects: [
 			{kind: "rollSavingThrow", ability: "con"},
 			{kind: "rollSkillCheck", skill: "athletics"},
@@ -55,7 +55,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// bump CHA either, so the DC stays in the 9-11 band across mid
 	// tiers and any `min:` floor would be either trivially true or
 	// noisy.
-	{level: 5,  name: "Sorcery Points", kind: "resource", resourceMax: 5, skip: true, skipReason: "CS-BUG-018",
+	{level: 5,  name: "Sorcery Points", kind: "resource", resourceMax: 5, skip: true, skipReason: "CS-BUG-084: liftable. TGTT Sorcery Points are `level + 1` (not `level`) — see getSorceryPointsMaxForClass(). To unskip, set resourceMax to level+1 AND add `untilLevel` to every tier: the matrix re-evaluates each earlier row at checkpoints [3,5,11,17,20], and this pool grows every level.",
 		effects: [
 			{kind: "rollSavingThrow", ability: "cha"},
 			{kind: "rollAbilityCheck", ability: "cha"},
@@ -67,12 +67,12 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// auto-build has had several ASIs targeting CHA on the primary
 	// caster class; PB=4 + CHA mod ≥ 1 keeps the floor comfortably
 	// above DC 13 even on a slow-CHA path.
-	{level: 11, name: "Sorcery Points", kind: "resource", resourceMax: 11, skip: true, skipReason: "CS-BUG-018",
+	{level: 11, name: "Sorcery Points", kind: "resource", resourceMax: 11, skip: true, skipReason: "CS-BUG-084: liftable. TGTT Sorcery Points are `level + 1` (not `level`) — see getSorceryPointsMaxForClass(). To unskip, set resourceMax to level+1 AND add `untilLevel` to every tier: the matrix re-evaluates each earlier row at checkpoints [3,5,11,17,20], and this pool grows every level.",
 		effects: [
 			{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
 		]},
-	{level: 17, name: "Sorcery Points", kind: "resource", resourceMax: 17, skip: true, skipReason: "CS-BUG-018",},
-	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20, skip: true, skipReason: "CS-BUG-018",},
+	{level: 17, name: "Sorcery Points", kind: "resource", resourceMax: 17, skip: true, skipReason: "CS-BUG-084: liftable. TGTT Sorcery Points are `level + 1` (not `level`) — see getSorceryPointsMaxForClass(). To unskip, set resourceMax to level+1 AND add `untilLevel` to every tier: the matrix re-evaluates each earlier row at checkpoints [3,5,11,17,20], and this pool grows every level.",},
+	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20, skip: true, skipReason: "CS-BUG-084: liftable. TGTT Sorcery Points are `level + 1` (not `level`) — see getSorceryPointsMaxForClass(). To unskip, set resourceMax to level+1 AND add `untilLevel` to every tier: the matrix re-evaluates each earlier row at checkpoints [3,5,11,17,20], and this pool grows every level.",},
 
 	// Metamagic picks scale 2 → 3 → 4 across L3 / L10 / L17.
 	// `pickedCount` is the lower bound — passing means at least N of
@@ -87,7 +87,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 3,  name: /metamagic/i, kind: "pick", pickedCount: 2,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
-			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-018", min: 1, matchAny: [
+			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-084: liftable. TGTT Sorcery Points are `level + 1` (not `level`) — see getSorceryPointsMaxForClass(). To unskip, set resourceMax to level+1 AND add `untilLevel` to every tier: the matrix re-evaluates each earlier row at checkpoints [3,5,11,17,20], and this pool grows every level.", min: 1, matchAny: [
 				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
 				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
 				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
@@ -96,7 +96,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 10, name: /metamagic/i, kind: "pick", pickedCount: 3,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
-			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-018", min: 1, matchAny: [
+			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-084: liftable. TGTT Sorcery Points are `level + 1` (not `level`) — see getSorceryPointsMaxForClass(). To unskip, set resourceMax to level+1 AND add `untilLevel` to every tier: the matrix re-evaluates each earlier row at checkpoints [3,5,11,17,20], and this pool grows every level.", min: 1, matchAny: [
 				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
 				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
 				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
@@ -105,7 +105,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
-			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-018", min: 1, matchAny: [
+			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-084: liftable. TGTT Sorcery Points are `level + 1` (not `level`) — see getSorceryPointsMaxForClass(). To unskip, set resourceMax to level+1 AND add `untilLevel` to every tier: the matrix re-evaluates each earlier row at checkpoints [3,5,11,17,20], and this pool grows every level.", min: 1, matchAny: [
 				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
 				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
 				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,

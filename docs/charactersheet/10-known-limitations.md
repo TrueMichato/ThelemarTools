@@ -250,13 +250,14 @@ it("should produce 2 elixirs at level 6", () => {
 | **Multi-target attacks** | ✅ Implemented | Whirlpool Strike multi-target modal (`_showWhirlpoolStrikeModal`) with creature count → per-hit damage. Generic AoE distribution not yet supported for other features. |
 | **Reaction tracking** | ✅ Implemented | Shared per-turn action economy enforces reaction costs for active-state triggers such as Deflect Energy and Sun Shield |
 | **Damage transfer to self** | ✅ Implemented | `state.useDivineAllegiance(damage)` + `takeDamage(dmg, {unpreventable: true})`. Powers Crown Paladin's Divine Allegiance; reusable by any "you take the damage instead" feature. |
+| **Zero-HP interventions** | ✅ Implemented | Declarative `ZERO_HP_INTERVENTIONS` registry on `takeDamage()`: Death Ward plus Strength of the Grave (CHA save DC 5 + damage, not vs radiant or a crit, use spent only on success). Add a registry entry rather than a new branch. Note CS-BUG-081 — the sheet's Damage button now routes through `takeDamage()`, so these actually fire from the UI. |
 | **Ally-facing aura riders** | Partial | Self-facing aura effects apply; effects the character grants to *other* creatures (e.g. Exalted Champion's "allies within 30 ft have advantage on death saves and Wisdom saves against your Channel Divinity") are descriptive only — the sheet models one character, so there is no ally to apply them to. |
 
 ### Resource Management
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| **Font of Magic** | ✅ Implemented | SP ↔ slot conversion with 2014/2024 rules |
+| **Font of Magic** | ✅ Implemented | SP ↔ slot conversion with 2014/2024 rules. Pool size has one source of truth, `CharacterSheetState.getSorceryPointsMaxForClass()` (CS-BUG-080/084); `_ensureSorceryPoints()` is create-only so it never fights `setSorceryPoints()` or TGTT metamagic tuning. |
 | **Mystic Arcanum** | ✅ Implemented | Per-level usage tracking, long rest recovery |
 | **Natural Recovery** | ✅ Implemented | Land Druid slot recovery (mirrors Arcane Recovery) |
 | **Concentration saves** | ✅ Implemented | DC calc, bonus aggregation, advantage detection |

@@ -285,6 +285,57 @@ hasArcaneCharge: true,            // Level 15+
 hasImprovedWarMagic: true,        // Level 18+
 ```
 
+**Meteor Knight** (`GriffonsSaddlebag3`)
+
+Source-gated on `CharacterSheetState.isMeteorKnightSubclass()`. Every feature is
+a fixed grant — the subclass carries **no player choices**, so Builder /
+Level-Up / Quick Build have nothing extra to surface.
+
+```javascript
+hasMeteorKnight: true,                              // Level 3+
+hasSatelliteMastery: true,                          // Level 3+
+satelliteMax: profBonus,                            // bindable satellites
+satelliteDamage: "1d4" | "1d6" | "1d8",             // L3 / L10 / L18
+satelliteRange: 30 | 60,                            // L3 / L10
+satelliteAbility: "int",                            // NOT Strength or Dexterity
+satelliteAttackBonus: profBonus + INT,
+satelliteDamageBonus: INT,
+satelliteIgnoresCloseQuartersDisadvantage: true,
+satelliteRecallRange: 120,
+hasReduceGravity: true,                             // Level 3+
+reduceGravitySpells: ["Feather Fall", "Jump", …],   // + Levitate at 10
+reduceGravityAtWillSpells: ["Feather Fall", "Jump"],// Level 15+
+hasCourseCorrect: true,                             // Level 7+
+courseCorrectCheckBonus: INT + profBonus,           // contest adds PB explicitly
+courseCorrectRange: 10,
+hasImprovedSatelliteMastery: true,                  // Level 10+
+satelliteReturnsOnMiss: true,
+satelliteRecallOnActionSurge: true,
+hasIncreaseGravity: true,                           // Level 15+
+increaseGravityShoveBonus: INT,
+hasSatelliteBarrage: true,                          // Level 18+
+satelliteBarrageMaxAttacks: satellitesOrbiting,
+```
+
+The satellite is a real, rollable attack — `grantedAttacks` receives an
+Intelligence-keyed ranged **spell** attack (`isSpellAttack: true`,
+`actionType: "bonus"`, `ignoresCloseQuartersDisadvantage: true`) so it appears
+in the attack list and rolls like any other. Orbiting satellites live in a
+reconciled **"Satellites"** resource pool
+(`resourceType: "meteorKnightSatellites"`, max = proficiency bonus) driven by
+`bindSatellite()` / `fireSatellite()` / `recallSatellites()`;
+`useActionSurge()` calls `recallSatellites()` from level 10.
+
+Increase Gravity is encoded as *conditional* modifiers rather than flat ones —
+advantage on `check:advantage:forcedmovement` / `save:advantage:forcedmovement`
+plus `skill:athletics +INT` gated on "when you shove a creature" — so the
+bonuses are offered per roll instead of leaking onto unrelated Athletics
+checks. Note the pre-existing generic gap recorded under CS-BUG-065: opting a
+*numeric* conditional in does not currently move a skill or save roll total,
+because `_rollSkillCheck` / `_rollSavingThrow` never consume
+`aggregated.bonus`. The advantage half works; the +INT is offered and
+displayed but not yet summed by those two handlers.
+
 ### Rogue
 
 ```javascript
@@ -665,12 +716,35 @@ spellcastingAbility: "cha",
 spellSaveDc: 8 + profBonus + CHA,
 spellAttackBonus: profBonus + CHA,
 
-sorceryPoints: level,             // = sorcerer level
+sorceryPoints: <see below>,       // single source of truth
 hasMetamagic: true,               // Level 3+
 metamagicKnown: 2 | 3 | 4,        // L3: 2, L10: 3, L17: 4
 
 hasSorcerousRestoration: true,    // Level 20+
 ```
+
+**Sorcery Points have exactly one formula**, `static
+CharacterSheetState.getSorceryPointsMaxForClass(cls)`:
+
+| Source | Max | First level |
+|---|---|---|
+| PHB / XPHB | `level` | 2 (Font of Magic) |
+| TGTT (Thelemar) | `level + 1` | 1 |
+
+Three surfaces read it and none of them re-derive it:
+`getFeatureCalculations()`, `CharacterSheetClassUtils.CLASS_RESOURCES`
+(Builder / Level-Up / Quick Build), and `_ensureSorceryPoints()` in the
+`getResources()` ensure-chain. Before CS-BUG-080 there were three
+formulas, two of which disagreed (CS-BUG-084), and no ensure-hook at all —
+so an imported or hand-built Sorcerer had **no pool**, and every
+`consumes: {name: "Sorcery Point"}` feature was dead.
+
+`_ensureSorceryPoints()` is **create-only** on purpose. `setSorceryPoints()`
+and the TGTT `tuneMetamagic()` / `detuneMetamagic()` pair both mutate
+`resource.max` in place — tuning *locks* points by lowering the max — so a
+reconciling ensure-hook would untune every metamagic the moment anything
+called `getResources()`. Re-scaling on level-up belongs to
+`updateClassResources()`.
 
 ### Ranger
 
@@ -794,6 +868,49 @@ is **idempotent and re-basing** — a stored `companion.createdUndeadBonus` mark
 means a level-up re-applies the *new* totals instead of stacking.
 `charactersheet-spells.js` calls it automatically when Animate Dead raises
 Skeletons/Zombies via `_pShowRaiseUndeadPicker`.
+
+### Prose spell grants — raw entries, level gating, feature-wide limits
+
+`SpellGrantParser` is the fallback for features that grant spells in prose
+rather than through a structured `additionalSpells` block — i.e. essentially
+all homebrew. Three generic behaviours matter:
+
+**1. Raw entries beat the rendered description.**
+`SpellGrantParser.getFeatureSpellText(feature)` walks the feature's raw
+`entries` tree and returns it whenever it carries `{@spell …}` tags, falling
+back to `feature.description`. A stored feature's `description` is often
+already-rendered HTML in which every tag has become an `<a href>`, so parsing
+it finds nothing. Selection is driven by "which text actually has tags", so
+description-only features are unaffected. See CS-BUG-066.
+
+**2. "At Nth level you also learn X" is honoured.**
+`parseSpellsFromText()` stamps each parsed spell with a `minLevel` derived from
+the sentence that introduced it (`at 10th level`, `when you reach 15th
+level`, …). `_processFeatureSpells()` grants only the spells the character
+qualifies for and stashes the rest on `feature._deferredSpellGrants`;
+`reconcileDeferredFeatureSpells()` (called from `getInnateSpells()` and
+`applyClassFeatureEffects()`) releases them as the class level rises. Gate
+levels are compared against the **granting class's** level, not total level,
+so multiclassing does not unlock a tier early.
+
+**3. A shared casting limit stated once binds every spell in the feature.**
+`_parseFeatureWideCastingLimit()` looks for a *single sentence* containing
+`cast`, `once` and `short|long rest` and uses it as the fallback limit for any
+spell that found no local one. Without it, "You learn X and Y. … You can cast
+each of these spells once until you finish a long rest" produced two unlimited
+innate spells. See CS-BUG-067.
+
+An at-will re-grant of an already-granted spell **upgrades** it —
+`_mergeSpellMetadata()` sets `atWill` and drops `uses`/`recharge` — which is how
+Reduce Gravity's level-15 tier works.
+
+All three behaviours are pinned in `CharacterSheetMeteorKnight.test.js` and each
+pin has been **measured** against a faithful negative control on the full
+`charactersheet/` suite (13,100 tests): reverting (1) turns 1 test red,
+reverting (2) — by making `_parseSpellGrantMinLevel()` return `null`
+unconditionally, which restores pre-feature semantics without deleting a symbol
+— turns 5 red, and reverting (3) to the original local-context-only
+`isOnce`/`recharge` expressions turns 5 red.
 
 ---
 
@@ -991,6 +1108,7 @@ multiclass respec re-derives HP, AC, to-hit and damage automatically.
 | `damageDice` | Damage dice expression |
 | `damageAddProf` | Adds the proficiency bonus to damage |
 | `damageType` | Damage type appended to the damage line |
+| `tempHpBase` / `tempHpPerLevel` | `temp = max(existing, tempHpBase + tempHpPerLevel × level)`, recorded as `companion.tempHpMax` |
 
 Semantics worth knowing:
 
@@ -1024,3 +1142,115 @@ every created item and the Dancing Item before the pools refill.
 ---
 
 *Previous: [State Management](./04-state-management.md) | Next: [Combat System](./06-combat-system.md)*
+
+## Shadow Magic (Sorcerer, XGE)
+
+Published under `case "Shadow Magic": case "Shadow":`. The subclass gate is
+`is2024 ? 3 : 1` — the 2014 Sorcerer picks its origin at **level 1**, which is
+also why the Builder renders a subclass radio list on the very first step.
+
+```javascript
+// L1 — Eyes of the Dark
+hasEyesOfTheDark: true,
+darkvision: 120,                       // → generic sense effect, see below
+darkvisionSource: "Eyes of the Dark",
+eyesOfTheDarkGrantsDarkness: level >= 3,
+darknessSorceryPointCost: 2,
+resourceCastSpells: [{spell: "Darkness", resource: "Sorcery Points", cost: 2, …}],
+
+// L1 — Strength of the Grave
+hasStrengthOfTheGrave: true,
+strengthOfTheGraveDc: 5,               // + damage taken, resolved at trigger time
+strengthOfTheGraveSaveAbility: "cha",
+
+// L6 — Hound of Ill Omen
+hasHoundOfIllOmen: true,
+houndOfIllOmenCost: 3,
+houndOfIllOmenTempHp: Math.floor(level / 2),
+houndOfIllOmenRange: 120,
+houndOfIllOmenDurationMinutes: 5,
+
+// L14 — Shadow Walk
+hasShadowWalk: true,
+shadowWalkRange: 120,
+shadowWalkAction: "bonus",
+
+// L18 — Umbral Form
+hasUmbralForm: true,
+umbralFormCost: 6,
+umbralFormDurationMinutes: 1,
+umbralFormResistanceExceptions: ["force", "radiant"],
+```
+
+Four of these ride generic engine mechanisms rather than subclass code.
+
+### `darkvision` — generic sense effect
+
+`_getClassFeatureEffects()` turns any `calculations.darkvision > 0` into
+`{type: "sense", sense: "darkvision", range, source}`. Before CS-BUG-082 six
+subclasses wrote this calculation and **nothing read it**, so class-granted
+darkvision did not exist. The sense pipeline takes the maximum, so a Dwarf's
+racial 60 and Eyes of the Dark's 120 resolve to 120 in either application
+order.
+
+### Zero-HP interventions — declarative registry
+
+Strength of the Grave is a *trigger*, not an activatable, so it hangs off
+`takeDamage()`:
+
+```javascript
+static ZERO_HP_INTERVENTIONS = {
+    strengthOfTheGrave: {
+        featureName: "Strength of the Grave",
+        gate: "hasStrengthOfTheGrave",
+        saveAbility: "cha",
+        dcBase: 5,
+        dcAddsDamage: true,          // DC = 5 + damage taken
+        excludedDamageTypes: ["radiant"],
+        excludedOnCritical: true,
+        hpOnSuccess: 1,
+        spendUseOn: "success",       // a failed save does NOT burn the use
+        recharge: "long",
+    },
+};
+```
+
+`takeDamage(damage, {damageType, isCritical})` arms a pending intervention when
+HP reaches 0 and no Death Ward fires;
+`getPendingZeroHpIntervention()` / `applyZeroHpIntervention(id, {roll, total})`
+resolve it. `charactersheet.js` `_pOfferZeroHpIntervention()` prompts only for
+the facts the sheet cannot know (was it radiant? was it a crit?).
+
+**`_onDamage()` now routes through `takeDamage()`** (CS-BUG-081). It previously
+hand-rolled the temp/current-HP arithmetic, which meant *every* hook on
+`takeDamage` — including the pre-existing Death Ward branch — was unreachable
+from the sheet's own Damage button.
+
+### `resourceCastSpells` — generic resource-cast spells
+
+Any feature calculation may publish:
+
+```javascript
+resourceCastSpells: [{
+    spell: "Darkness",
+    resource: "Sorcery Points",
+    cost: 2,
+    seeThrough: true,             // caster ignores its own obscurement
+    feature: "Eyes of the Dark",
+}],
+```
+
+`getResourceCastableSpells()`, `castSpellWithResource(name)`,
+`getActiveResourceCastSpells()` and `endResourceCastSpell(name)` operate on it,
+and `charactersheet.js` routes any activation of a feature publishing
+`resourceCastSpells` to `_pCastSpellWithResource` without a per-subclass case.
+`canSeeThroughOwnDarkness()` reads the `seeThrough` flag of an *active* entry —
+casting *darkness* from a spell slot correctly does **not** grant the sight.
+
+### Hound of Ill Omen — `CLASS_SUMMON` + `scaling`
+
+A dire wolf re-typed to size M / monstrosity, registered through
+`addCompanion()` with `scaling: {className: "Sorcerer", tempHpPerLevel: 0.5}`.
+The temp HP is *additional* to the dire wolf's own 37 HP, which is why it uses
+the new `tempHpPerLevel` key rather than `hpPerLevel`. No bespoke recalculation
+path — `recalculateCompanion()` re-derives it on every level-up.

@@ -62,13 +62,18 @@ describeCharacter({
 		// path on top of the resource pool size.
 		{
 			level: 1,
+			untilLevel: 4,
 			name: /lay on hands/i,
-			kind: "resource", skip: true, skipReason: "CS-BUG-018",
-			resourceMax: [5, 5],
+			kind: "resource",
+			resourceMax: 15,
 			effects: [
 				{kind: "longRestRestores", resource: "Lay on Hands"},
 			],
 		},
+		{level: 5, untilLevel: 10, name: /lay on hands/i, kind: "resource", resourceMax: 25},
+		{level: 11, untilLevel: 16, name: /lay on hands/i, kind: "resource", resourceMax: 55},
+		{level: 17, untilLevel: 19, name: /lay on hands/i, kind: "resource", resourceMax: 85},
+		{level: 20, name: /lay on hands/i, kind: "resource", resourceMax: 100},
 		// Weapon Mastery is the L1 catch-all entry — piggyback the
 		// always-on roll-button probes (one weapon attack + initiative)
 		// here so they fire at every checkpoint from L1 upward.

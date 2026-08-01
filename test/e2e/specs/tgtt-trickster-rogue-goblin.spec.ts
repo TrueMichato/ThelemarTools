@@ -56,15 +56,14 @@ describeCharacter({
 		// initiative probe (Rogues are dex-init characters).
 		{
 			level: 1,
+			untilLevel: 4,
 			name: /sneak attack/i,
 			kind: "passive",
 			effects: [
 				{kind: "rollSkillCheck", skill: "stealth", skip: true, skipReason: "CS-BUG-017"},
 				{kind: "rollAttack", attackName: /rapier|shortsword|dagger|crossbow/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 				{kind: "rollInitiative"},
-				// Phase 8: Sneak Attack scales 1d6 → 10d6 across levels.
-				// L1 anchor — at least 1d6 from L1 onward.
-				{kind: "sneakAttackDice", min: 1, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "sneakAttackDice", exact: 2},
 			],
 		},
 		// Cunning Action = Disengage/Hide as bonus action; both are
@@ -82,11 +81,13 @@ describeCharacter({
 		// reactive damage reduction. No effect.
 		{
 			level: 5,
+			untilLevel: 10,
 			name: /uncanny dodge/i,
 			kind: "passive",
-			// Phase 8: at L5+ Sneak Attack is 3d6+ (matrix L5/11/17/20).
+			// Uncanny Dodge's reactive damage reduction has no state-facing
+			// effect to probe; pin the Rogue's exact L5 Sneak Attack tier.
 			effects: [
-				{kind: "sneakAttackDice", min: 3, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "sneakAttackDice", exact: 3},
 			],
 		},
 		// Evasion: succeed = no dmg, fail = half on dex saves.
@@ -106,12 +107,13 @@ describeCharacter({
 		// pipeline didn't break under the Reliable Talent override.
 		{
 			level: 11,
+			untilLevel: 16,
 			name: /reliable talent/i,
 			kind: "passive",
 			effects: [
 				{kind: "rollSavingThrow", ability: "int"},
-				// Phase 8: at L11+ Sneak Attack is 6d6+ (matrix L11/17/20).
-				{kind: "sneakAttackDice", min: 6, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "featureCalculation", property: "reliableTalentMinimum", exact: 10},
+				{kind: "sneakAttackDice", exact: 6},
 			],
 		},
 		// Stroke of Luck — once-per-short-rest reroll/auto-20. Surfaces
@@ -121,10 +123,11 @@ describeCharacter({
 			level: 20,
 			name: /stroke of luck/i,
 			kind: "passive",
+			// Stroke of Luck is a player-chosen auto-20 with no persistent
+			// state-facing effect; pin the Rogue's exact capstone damage tier.
 			effects: [
 				{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
-				// Phase 8: at L20 Sneak Attack caps at 10d6.
-				{kind: "sneakAttackDice", min: 10, skip: true, skipReason: "CS-BUG-018"},
+				{kind: "sneakAttackDice", exact: 10},
 			],
 		},
 
@@ -280,11 +283,8 @@ describeCharacter({
 			name: /master of mischief/i,
 			kind: "passive",
 			skip: true, skipReason: "CS-BUG-017",
-			// Phase 8: at L17+ Sneak Attack is 9d6+ (matrix L17/20).
-			effects: [
-				{kind: "sneakAttackDice", min: 9, skip: true, skipReason: "CS-BUG-018"},
-			],
 		},
+		{level: 17, untilLevel: 19, name: /sneak attack/i, kind: "passive", effects: [{kind: "sneakAttackDice", exact: 9}]},
 		// CS-BUG-017: specialty pick count short past L11. Keep the helper
 		// in the matrix (no-blind-spots doctrine) with every emitted row
 		// marked skip+skipReason via withSkipReason.

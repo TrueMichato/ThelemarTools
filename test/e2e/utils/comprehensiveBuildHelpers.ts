@@ -734,6 +734,14 @@ export type EffectCheck = _EffectCommon & (
 		min?: number;
 		exact?: number | string | boolean | null;
 		contains?: string;
+		/**
+		 * Call the method purely for its SIDE EFFECT and assert nothing about the return
+		 * value. Without this an assertion-free `stateCall` fails with "is absent" as soon
+		 * as the method returns `undefined`, which rules out every setter/mutator — and
+		 * driving a mutation then probing the consequence is exactly how a
+		 * mechanical-effect probe is built (`setCurrentHp` → `takeDamage` → `getCurrentHp`).
+		 */
+		ignoreResult?: boolean;
 	}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
@@ -1245,12 +1253,16 @@ async function _runPassiveOrRollEffect (
 			if (e.exact !== undefined && actual !== e.exact) throw new Error(`${label}=${JSON.stringify(actual)}, expected ${JSON.stringify(e.exact)}`);
 			if (e.min !== undefined && (typeof actual !== "number" || actual < e.min)) throw new Error(`${label}=${JSON.stringify(actual)}, expected >= ${e.min}`);
 			if (e.contains !== undefined) {
-				const list = Array.isArray(actual) ? actual : [actual];
-				if (!list.some(it => String(it).toLowerCase().includes(e.contains!.toLowerCase()))) {
+				// Object elements stringify to "[object Object]", which can never match a
+				// meaningful needle — JSON them instead so `contains` works on arrays of
+				// records (e.g. `getInnateSpells()` → [{name: "Feather Fall", …}]).
+				const render = (it: unknown) => (it && typeof it === "object" ? JSON.stringify(it) : String(it));
+				const list = (Array.isArray(actual) ? actual : [actual]).map(render);
+				if (!list.some(it => it.toLowerCase().includes(e.contains!.toLowerCase()))) {
 					throw new Error(`${label}=${JSON.stringify(actual)}, expected to contain "${e.contains}"`);
 				}
 			}
-			if (e.exact === undefined && e.min === undefined && e.contains === undefined && actual == null) {
+			if (!e.ignoreResult && e.exact === undefined && e.min === undefined && e.contains === undefined && actual == null) {
 				throw new Error(`${label} is absent`);
 			}
 			return;

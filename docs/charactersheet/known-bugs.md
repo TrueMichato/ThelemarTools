@@ -2046,13 +2046,45 @@ sources each granting a flying speed should give the higher, not the sum.
 
 Deliberately not fixed here. It is **unreachable today** — the only two live
 emitters are Unearthly Countenance (Daemonologist 10) and Stormborn (Tempest
-Cleric 17), which would require character level 27 — and a real fix cannot be
-made at the read site, because the `bonus` vocabulary is genuinely ambiguous: the
-same shape expresses both "grant a 60 ft fly speed" and "add +10 to the fly speed
-you already have", and only the first should max rather than sum. Disambiguating
-requires changing the emitters, including `parseEffectsFromDescription`. Recorded
-rather than filed as its own id, since it shares this pipeline and cannot
-currently be triggered.
+Cleric 17), which would require character level 27. Recorded rather than filed as
+its own id, since it shares this pipeline and cannot currently be triggered.
+
+> **CORRECTION (audited after the Circle of the Sea session's read-back).** This
+> entry originally claimed a fix "cannot be made at the read site, because the
+> `bonus` vocabulary is genuinely ambiguous — the same shape expresses both
+> 'grant a 60 ft fly speed' and 'add +10 to the fly speed you already have'".
+> **That is false for type-specific targets.** Enumerated, there are exactly
+> **four** emitters of a `{type: "bonus", target: "speed:<fly|swim|climb|burrow>"}`
+> effect, and **all four are grants**:
+>
+> | Emitter | Shape |
+> |---|---|
+> | `ACTIVE_STATE_TYPES.unearthlyCountenance` | `{target: "speed:fly", value: 60}` |
+> | `parseEffectsFromDescription` fly | regex `/(?:gain\|have) (?:a )?flying speed …/i` |
+> | `parseEffectsFromDescription` swim | same shape |
+> | `parseEffectsFromDescription` climb | same shape |
+>
+> The three parser regexes match **only** `gain`/`have a <X>ing speed` phrasing.
+> They cannot match "your flying speed increases by 10", so no additive typed
+> effect can be produced by this pipeline at all. The genuinely additive
+> vocabulary lives elsewhere: the generic `{type: "speed", value: 10}` effect
+> (walking, e.g. the artifact "Speed Increase" property) and the **named
+> modifier** `speed:fly` modType, which is a different pipeline summed into
+> `customModifiers.speed.fly` by `_recalculateCustomModifiers()`.
+>
+> So the remediation is **much cheaper than recorded**: within the *effect*
+> pipeline, type-specific `speed:<type>` contributions are grants and should be
+> combined with `Math.max` — against each other and against the `equalToWalk`
+> read-site head — rather than summed. No parser change and no new discriminator
+> field are required. `equalToWalk` is already unambiguously a grant, so once the
+> effect head maxes, the read-site head can fold into it (value resolved from the
+> walk speed at read time) and the pipeline returns to a single head.
+>
+> Two guards any such fix must keep, both already pinned by the PREMISE tests in
+> `CharacterSheetActiveStateEngine.test.js`: a generic `{target: "speed"}` must
+> still never conjure a movement type, and the **named-modifier** `speed:<type>`
+> path must stay additive — maxing there would silently delete a player's
+> hand-entered "+10 fly" custom modifier.
 
 Verified unchanged by this fix: `getSpeedByType("fly")` agrees with
 `getSpeed("fly")` on the bonus head (both **60**); Stormborn still reads **30**
@@ -2232,6 +2264,44 @@ would concatenate.
 reaches those levels was `{skip: true}` under `CS-BUG-018`, and the sole
 unskipped probe there was `{kind: "rollAbilityCheck"}`, which asserts only that a
 roll *occurred*, not that its total was a number.
+## CS-BUG-080 — Sorcery Points had three independent formulas and no creator
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Magic Sorcerer implementation (pathfinder session for
+five Sorcerer subclasses).
+
+**Root cause**: the size of the Sorcery Points pool was computed in three
+places that did not agree and were not connected:
+
+| Surface | Formula | Used by |
+|---|---|---|
+| `getFeatureCalculations()` Sorcerer branch | TGTT `level + 1`, else `level` | feature rows, E2E `featureCalculation` probes |
+| `CharacterSheetClassUtils.CLASS_RESOURCES` → `updateClassResources` | `level` for every source | Builder / Level-Up / Quick Build |
+| *(nothing)* | — | `getResources()` on a hand-built or imported character |
+
+The third row is the real defect: `getResources()` had ensure-hooks for Ki,
+Channel Divinity, Rage and others, but **none for Sorcery Points**. A Sorcerer
+that never went through `updateClassResources` — a JSON import, a respec, a
+Jest fixture, a `spawn()` — simply had no pool, so every `consumes:
+{name: "Sorcery Point"}` feature was unusable.
+
+**Fix**: `static CharacterSheetState.getSorceryPointsMaxForClass(cls)` is now
+the single source of truth. `charactersheet-class-utils.js` delegates to it,
+the `getFeatureCalculations()` Sorcerer branch delegates to it, and a new
+`_ensureSorceryPoints()` joins the `getResources()` ensure-chain.
+
+`_ensureSorceryPoints()` is deliberately **create-only** — it early-returns if
+a "Sorcery Points" resource already exists. Two legitimate writers mutate
+`resource.max` in place: `setSorceryPoints()` (explicit override) and the TGTT
+`tuneMetamagic()` / `detuneMetamagic()` pair, which *locks* points by lowering
+`max`. A reconciling ensure-hook silently untunes every metamagic the moment
+anything calls `getResources()`. Subtracting `getLockedSorceryPoints()` was
+tried and still broke `setSorceryPoints(5)` fixtures. Re-scaling on level-up
+remains `updateClassResources`' job.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §"base-class
+Sorcery Points machinery" (create-only, PHB ladder, TGTT ladder, tuning
+survives `getResources()`).
 
 ---
 
@@ -2441,3 +2511,364 @@ have no spec in this suite; they are propagated on the same code path but
 unverified end-to-end.
 
 ---
+## CS-BUG-081 — the sheet's Damage button bypassed `takeDamage()` entirely
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Magic Sorcerer — Strength of the Grave never fired
+from the UI even though the state method worked in Jest.
+
+**Root cause**: `charactersheet.js` `_onDamage()` hand-rolled the temp-HP /
+current-HP arithmetic and wrote `setHp()` directly, never calling
+`this._state.takeDamage()`. Every hook hanging off `takeDamage` was therefore
+unreachable from the sheet's own Damage control — including the pre-existing
+**Death Ward** branch, which could only ever fire from code paths that called
+the state method directly.
+
+**Fix**: `_onDamage()` now routes through `this._state.takeDamage(amount)` and
+then awaits `_pOfferZeroHpIntervention()`.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §Strength of
+the Grave (the state-level path); the `takeDamage` →
+`applyZeroHpIntervention` `stateCall` chain in
+`tgtt-shadow-magic-sorcerer.spec.ts`.
+
+---
+
+## CS-BUG-082 — `calculations.darkvision` was written by six subclasses and read by nobody
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Magic Sorcerer — Eyes of the Dark published
+`calculations.darkvision = 120` and the sheet's senses stayed at the racial 60.
+
+**Root cause**: several class/subclass feature blocks publish a `darkvision`
+calculation, but `_getClassFeatureEffects()` had no case that turned it into
+anything. Grepping for consumers of `calculations.darkvision` returned zero
+hits outside the writers themselves. Darkvision granted by a *class* feature
+simply did not exist.
+
+**Fix**: `_getClassFeatureEffects()` now emits a generic
+`{type: "sense", sense: "darkvision", range, source}` effect for any
+`calculations.darkvision > 0`, feeding the existing sense-effect pipeline. The
+sense machinery already takes the maximum, so a racial 60 and a class 120
+resolve correctly in either application order.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §Eyes of the
+Dark; the `getSenses` `stateCall` in the E2E matrix (verified against a Dwarf,
+whose racial darkvision 60 must be superseded).
+
+---
+
+## CS-BUG-083 — active-state name matching hijacked identically-named features from other sources
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Magic Sorcerer — "Eyes of the Dark" classified as the
+**TGTT Shadow Knight** toggle of the same name, so a Sorcerer's passive
+darkvision feature rendered as an activatable state it does not have.
+
+**Root cause**: `static detectActivatableFeature()` walks `ACTIVE_STATE_TYPES`
+and matches purely on feature name. It is static, so it has no character
+context and cannot ask "does this character actually have the Shadow Knight
+version?". Four TGTT Shadow Knight states carry names generic enough to
+collide with unrelated content.
+
+**Fix**: an opt-in data flag, `noNameDetect: true`, on the state definition.
+The name-match loop `continue`s past any state carrying it; such states are
+reached only through an explicit `activateState(key)` call or a classification
+override. Applied to `shadowKnightDarkness`, `eyesOfTheDark`, `umbralCoating`
+and `shadowCloak`. Shadow Magic's own passive then falls to
+`FEATURE_CLASSIFICATION_OVERRIDES` (`"eyes of the dark": "ability"`).
+
+Restructuring was also required: the generic `consumes` branch sits ~170 lines
+*before* the name-match loop, and `activationAction` / `toggleAnalysis` /
+`parsedEffects` are all declared after it, so referencing them from the earlier
+branch throws a TDZ `ReferenceError`. The branch now falls through instead of
+returning.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §Eyes of the
+Dark classification; the Shadow Knight suites (unchanged and still green).
+
+---
+
+## CS-BUG-084 — TGTT Sorcery Points were one short at every level
+
+**Status**: Fixed. **Supersedes the resolution of CS-BUG-018.**
+**Surfaced by**: Shadow Magic Sorcerer — unifying the three formulas above
+forced the disagreement into the open.
+
+**Root cause**: the Thelemar Sorcerer's own class table
+(`homebrew/TravelersGuidetoThelemar.json` → Sorcerer `classTableGroups` →
+`["Sorcery Points"]`) reads `[2], [3], [4] … [21]` for levels 1–20, i.e.
+**`level + 1`**, and points start at **level 1**, not level 2. CS-BUG-018
+resolved the `getFeatureCalculations()` ↔ `updateClassResources` disagreement
+by changing the *correct* side to match the wrong one, making the pool one
+point stingy at every level and absent at level 1.
+
+Nobody caught it because both existing TGTT Sorcerer E2E specs
+(`tgtt-child-of-sun-sorcerer-hochling.spec.ts`,
+`tgtt-heroic-soul-sorcerer-halfogre.spec.ts`) blanket-skip their entire
+Sorcery Points ladder with `skipReason: "CS-BUG-018"` rather than assert a
+number they could not reconcile.
+
+**Fix**: `getSorceryPointsMaxForClass()` returns `level + 1` for TGTT and
+`level >= 2 ? level : 0` for PHB/XPHB, and every surface now reads it.
+
+**Follow-up available**: the CS-BUG-018 skips in the two neighbouring Sorcerer
+specs are now liftable with `level + 1` values. Left in place here so the
+blast radius of this change stays inside one subclass; whoever picks up
+Lunar / Spellfire / Wicked Witch / Shadow Sorcery should take it.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §"base-class
+Sorcery Points machinery" asserts both ladders explicitly.
+
+### Addendum — the SECOND chokepoint (fixed separately)
+
+The fix above hardened `_getNamedModifierEffectiveValue`, which feeds the cached
+`customModifiers` totals. That is **not the only** place a stored modifier becomes
+a number. `_resolveNamedModifierNumericValue` (dating from 2026-06-27, so it
+predates the original fix) feeds `aggregateModifiers()` and the attack itemizer,
+and it still read `mod.value` raw.
+
+Measured in-browser on `artificer/battle smith/20/human` **after** the original
+fix had landed:
+
+```
+getSaveMod("str"|"dex"|"con"|"int"|"wis"|"cha")  ->  2, 3, 12, 12, 1, 0   (correct)
+aggregateModifiers("save:all").bonus            ->  "1attunedItems"      (a STRING)
+```
+
+All six per-save values were already correct — which is exactly **why the
+existing per-save regression tests did not catch it**. Soul of Artifice registers
+a numeric row *and* a symbolic row on the same `save:all` type, so the aggregate
+performed `1 + "attunedItems"`.
+
+⚠️ **Generalisable lesson**: when hardening a value-resolution defect, grep for
+*sibling resolvers*, not just for raw readers of the field. The original audit
+hunted consumers reading `mod.value` directly and missed a second **resolver**
+method, because it looked like a fix rather than a bypass. Two chokepoints now
+exist and both are commented as such so they cannot drift apart.
+
+**No double-count check** (the assertion most likely to catch an over-broad
+resolver): `wizard/bladesinger/11/elf` still reads AC `11 → 15` and concentration
+`+2 → +6` with INT mod 4 — the modifier applied **once**. Bladesong's two named
+modifiers are a deliberately `enabled: false` duplicate of the active-state path;
+the resolver must not revive them, and does not.
+
+**Recursion note**: resolving `"strScore"` calls `getAbilityScore("str")`, which
+looks like an infinite loop for Indomitable Might. It is not: that modifier's type
+is `ability:str:minimum`, a *sub-typed* variant which the ability-score
+aggregation deliberately skips, so the resolver is never re-entered from inside
+`getAbilityScore()`. Verified live — `barbarian/chained fury/18/minotaur` returns
+STR `20` with zero page errors.
+
+---
+
+## CS-BUG-065 — WITHDRAWN (the "fix" was a regression; reverted)
+
+**Status**: WITHDRAWN — not a bug. The change filed under this ID was reverted
+because it introduced a shipped, player-visible regression.
+**Severity**: n/a (the reverted change was high severity)
+**Filed by**: Meteor Knight batch, from Increase Gravity (Meteor Knight 15)
+"+ your Intelligence modifier to shove ability checks"
+
+### What was claimed
+
+That a `FeatureEffectRegistry` `modifier` effect carrying a `conditional`
+string but no `advantage`/`disadvantage` flag was stored `enabled: false` and
+therefore "never reached `aggregateModifiers()` at all — not as an applied
+bonus and not in `result.conditionalsAvailable`", with "**no** code path
+anywhere that could turn it back on".
+
+### Why that is false
+
+Measured on a live `fighter/meteor knight/15/aarakocra` with the original
+(`enabled: false`) code:
+
+```
+inConditionals: true          <- it IS offered by the per-roll picker
+shoveBonus:     1             <- carrying its correct value
+baseBonus:      0             <- correctly gated off by default
+optInBonus:     1             <- appliedConditionalIds moves it
+```
+
+`aggregateModifiers()` surfaces **disabled** conditionals in
+`conditionalsAvailable` — the premise that `enabled: false` hid them was
+simply wrong. The same is visible in Jest: the pre-existing shove test passes
+both with and without the change, which is why its "regression pin" was
+green-on-revert and proved nothing.
+
+### What the change actually did
+
+`_recalculateCustomModifiers()` gates on `mod.enabled` **alone** and never on
+`mod.conditional`. So storing a numeric conditional `enabled: true` leaks its
+value into `customModifiers.skills` — and from there into `getSkillMod()`,
+which is both the number printed on the sheet and the modifier every skill
+roll uses.
+
+Measured, same character, INT +1:
+
+| | `getSkillMod("athletics")` |
+|---|---|
+| original code | **5** (correct) |
+| with the "fix" | **6** — the shove-only bonus applied to *every* Athletics check |
+
+This violates the documented invariant that conditional modifiers are not
+auto-applied. It is also inconsistent across the three roll handlers, because
+they compose differently:
+
+- `_rollSkillCheck` / `_rollSavingThrow` use `getSkillMod()` / `baseMod` only
+  and never add `aggregated.bonus` -> the conditional applies **always**.
+- `_rollAbilityCheck` adds `aggregated.bonus` **on top of** `baseMod` -> an
+  opted-in conditional `check:*` modifier is **double-counted**.
+
+So the change traded "offered but inert at roll time" for "silently always on,
+and double-counted on ability checks". Both are wrong; the second is worse
+because it puts a wrong number on the character sheet.
+
+### Resolution
+
+Reverted to:
+
+```js
+enabled: effect.enabled !== false && (carriesAdvFlag || !effect.conditional),
+```
+
+Disabling a numeric conditional costs nothing (the picker still offers it) and
+is currently the only thing keeping it out of the quick-total.
+
+### Regression pins (falsified)
+
+`test/jest/charactersheet/CharacterSheetMeteorKnight.test.js` gains two tests
+that pin the *player-facing* surface rather than the aggregator:
+
+- `does NOT leak the conditional shove bonus into the plain Athletics modifier`
+  — asserts `getSkillCustomMod("athletics") === 0` and that the L15 character's
+  displayed Athletics matches an otherwise-identical L14 control (PB is 5 at
+  both levels), with a PREMISE guard asserting the conditional is genuinely
+  present and genuinely carries +4.
+- `keeps the numeric conditional out of the enabled quick-total but still
+  offers it` — asserts `enabled === false` *and* that it still appears in
+  `conditionalsAvailable`, pinning both halves of the trade-off.
+
+Both verified **red** when the reverted expression is re-applied, and green
+after. Note the first pin was *vacuous* in its initial form: it compared
+before/after around `applyClassFeatureEffects()`, but `addClass()` already
+applies feature effects, so the baseline was pre-polluted and the test passed
+under the regression. It also needs an explicit `_recalculateCustomModifiers()`
+— without it the quick-total is never rebuilt and the leak cannot be observed.
+
+Full charactersheet suite: 432 suites / 13,100 tests green.
+
+### Genuine follow-up left open
+
+Opting a **numeric** conditional in via the picker does not change a skill or
+save roll total, because `_rollSkillCheck` and `_rollSavingThrow` never consume
+`aggregated.bonus`. That is a real, pre-existing gap — it predates this batch
+and is not what CS-BUG-065 described. Fixing it means reconciling the three
+roll handlers' composition conventions (and removing the resulting
+double-count risk in `_rollAbilityCheck`), which is a generic change, not a
+subclass one.
+
+---
+
+## CS-BUG-066 — prose spell grants were parsed from rendered HTML, so every homebrew "You learn the {@spell x} spell" grant was silently dropped
+
+**Status**: FIXED (Meteor Knight batch)
+**Severity**: high — an entire category of homebrew feature grants nothing
+**Surfaced by**: Reduce Gravity (Meteor Knight 3) — *feather fall* / *jump* /
+*levitate* never appeared in `getInnateSpells()`
+
+### Symptom
+
+A homebrew feature whose text grants spells in prose granted **nothing**.
+`getInnateSpells()` and the spellbook were both empty; the feature rendered
+its description perfectly, which is exactly the "renders but does nothing"
+failure mode.
+
+### Root cause
+
+`_processFeatureSpells()` read `feature.description`. For features stored
+through the site renderer that string is already-rendered **HTML**:
+
+```html
+<div class="ve-rd__b">…You learn the
+<a href="spells.html#feather%20fall_phb">feather fall</a> …</div>
+```
+
+`SpellGrantParser.grantsSpells()` tests for `/\{@spell/`, so it matched
+nothing and the parser was never even invoked. The same feature object
+carried an intact raw `entries` array with `{@spell feather fall}` tags
+still in place — the parser was simply reading the wrong field.
+
+### Fix
+
+New generic `SpellGrantParser.getFeatureSpellText(feature)` walks the raw
+`entries` tree (including nested `entries` / `items`) and returns it when it
+carries `{@spell …}` tags, falling back to `description` otherwise. This
+mirrors the existing `FeatureChoiceParser._getRawText()` convention, and
+because the selection is driven by "which text actually has tags" it cannot
+regress features that only ever had a `description`.
+
+### Regression pins
+
+`CharacterSheetMeteorKnight.test.js` — "parses prose spell grants from raw
+entries when the description is rendered HTML". Verified in-browser via
+`charSheet.spawn("fighter/meteor knight/3")`: `getInnateSpells()` went from
+`[]` to `["Feather Fall", "Jump"]`, and to all three with the at-will upgrade
+at 15.
+
+**Falsified**: restoring the literal prior `feature.description` expression
+turns **1 test red** on the full `charactersheet/` suite. Measured twice —
+once by the implementing session, once independently at merge time.
+
+---
+
+## CS-BUG-067 — feature-wide "cast each once per long rest" clauses were out of the parser's context window, upgrading limited grants to permanent ones
+
+**Status**: FIXED (Meteor Knight batch)
+**Severity**: medium — turns a 1/long-rest grant into an unlimited one
+**Surfaced by**: Reduce Gravity (Meteor Knight 3)
+
+### Symptom
+
+Reduce Gravity's *feather fall* / *jump* arrived with no `uses` and no
+`recharge` — i.e. as permanently-available innate spells — even though the
+feature says "You can cast each of these spells once with this feature, and
+once you cast a spell in this way, you can not do so again until you finish
+a long rest."
+
+### Root cause
+
+`SpellGrantParser.parseSpellsFromText()` looked for usage limits in a
+±100/200-character window around each `{@spell}` tag. A feature that names
+its spells in one sentence and states the shared limit two sentences later
+falls outside that window entirely. This is the normal way homebrew is
+written, so the failure is systemic rather than specific to this subclass.
+
+### Fix
+
+New `SpellGrantParser._parseFeatureWideCastingLimit(text)` scans the whole
+feature for a **single sentence** containing all three of `cast`, `once` and
+`short|long rest`, and returns that rest type. `parseSpellsFromText()`
+computes it once and uses it as a fallback for any spell that found no local
+limit and is not at-will. The single-sentence constraint is what keeps it
+from over-firing: an unrelated "once per long rest" elsewhere in the feature
+cannot bind to the word "cast" in a different sentence.
+
+### Regression pins
+
+`CharacterSheetMeteorKnight.test.js` — asserts `uses: {current: 1, max: 1}`
+and `recharge: "long"` on the level-3 grants, and that the level-15 at-will
+upgrade *clears* both.
+
+**Falsified**: restoring the original local-context-only expressions
+
+```js
+const isOnce = /once|one time/i.test(context) && /rest|dawn|day/i.test(context);
+const recharge = /short rest/i.test(context) ? "short" : (/long rest|dawn|day/i.test(context) ? "long" : null);
+```
+
+turns **5 tests red** on the full `charactersheet/` suite. Measured
+independently at merge time and again by the implementing session; both runs
+agree on 5. Keep `_parseFeatureWideCastingLimit()` defined when running this
+control — deleting it as well produces a `ReferenceError` and an inflated red
+count that proves nothing.

@@ -354,6 +354,50 @@ export class BuilderWizardPage {
 	}
 
 	/**
+	 * Classes that gain their subclass at LEVEL 1 (PHB-2014 Sorcerer, Warlock, Cleric,
+	 * Druid…) render the choice inside the Builder's Class step as a radio list, not as
+	 * the `#builder-subclass-select` dropdown `selectSubclass()` drives. Before this
+	 * existed the harness had no way to pick one at all: `createCharacterViaWizard`
+	 * silently produced `subclass: null`, and only the L3 Level-Up path could ever set a
+	 * subclass — so every PHB-2014 preset whose subclass arrives at L1 built a bare class.
+	 *
+	 * @see js/charactersheet/charactersheet-builder.js `_renderClassSubclassSelection`
+	 */
+	async hasLevel1SubclassSelection (): Promise<boolean> {
+		return await this.page.locator(".charsheet__builder-subclass-list").isVisible().catch(() => false);
+	}
+
+	/**
+	 * Pick a level-1 subclass from the Builder's Class step.
+	 * @param subclassName Exact rendered subclass name.
+	 * @param subclassSource Optional JSON source key; disambiguates same-named
+	 *   subclasses by the rendered abbreviation next to the label.
+	 */
+	async selectLevel1Subclass (subclassName: string, subclassSource?: string): Promise<void> {
+		const list = this.page.locator(".charsheet__builder-subclass-list");
+		await list.waitFor({state: "visible", timeout: 10000});
+		let option = list.locator(".charsheet__builder-subclass-option")
+			.filter({hasText: subclassName});
+		if (subclassSource) {
+			const abbv = await this.page.evaluate(
+				(src) => (globalThis as any).Parser?.sourceJsonToAbv?.(src) ?? src,
+				subclassSource,
+			);
+			const scoped = option.filter({hasText: abbv});
+			if (await scoped.count()) option = scoped;
+		}
+		const radio = option.first().locator("input[type=radio]");
+		if (!await radio.count()) {
+			const seen = await list.locator(".charsheet__builder-subclass-option").allInnerTexts();
+			throw new Error(`Level-1 subclass "${subclassName}" not offered. seen=[${seen.join(" | ")}]`);
+		}
+		await radio.check();
+		// The change handler resolves the full subclass, may open a named-choice modal,
+		// and re-renders the class preview. Give it room before the next picker runs.
+		await this.page.waitForTimeout(400);
+	}
+
+	/**
 	 * Select skill proficiency if available
 	 */
 	async selectSkillProficiency (skillName: string): Promise<void> {
