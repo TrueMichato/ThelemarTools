@@ -1578,9 +1578,15 @@ export class CharacterSheetPage {
 	}
 
 	/**
-	 * Read the rogue's sneak-attack dice count from
-	 * `getFeatureCalculations().sneakAttackDice`.  Returns 0 when
-	 * the calc isn't surfaced (non-rogue, build hasn't loaded).
+	 * Read the rogue's sneak-attack dice COUNT from
+	 * `getFeatureCalculations().sneakAttack.dice`, which the state
+	 * stores as a dice STRING like `"6d6"` — so parse off the leading
+	 * count.  Returns 0 when the calc isn't surfaced (non-rogue, build
+	 * hasn't loaded).
+	 *
+	 * NOTE: there is no flat `calc.sneakAttackDice` key.  Reading one
+	 * yields `undefined` → 0, which silently passes a `min: 0` probe
+	 * and fails every real one (CS-BUG-018 skips, 19 of them).
 	 */
 	async getSneakAttackDiceCount (): Promise<number> {
 		return await this.page.evaluate(() => {
@@ -1589,7 +1595,11 @@ export class CharacterSheetPage {
 			if (!st) return 0;
 			try {
 				const calc = st.getFeatureCalculations?.() || {};
-				return Number(calc.sneakAttackDice ?? 0) || 0;
+				const raw = calc.sneakAttack?.dice;
+				if (raw == null) return 0;
+				// "6d6" → 6; a bare number stays itself.
+				const m = /^\s*(\d+)\s*d/i.exec(String(raw));
+				return m ? Number(m[1]) : (Number(raw) || 0);
 			} catch (_) { return 0; }
 		});
 	}

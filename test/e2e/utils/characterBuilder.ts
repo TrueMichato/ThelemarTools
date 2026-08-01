@@ -53,6 +53,14 @@ export interface CharacterPreset {
 	 * the "obvious" pick non-deterministic.
 	 */
 	preferredFeatProgressionPattern?: RegExp;
+	/**
+	 * Ability priority for the standard-array assignment step, best score
+	 * first (e.g. `["cha", "dex", "con", "wis", "int", "str"]`). Omit to keep
+	 * the historical STR-first default. Spellcaster presets should set this —
+	 * the default otherwise puts an 8 in the spellcasting ability, which makes
+	 * save DCs and mod-scaled pools unrepresentative of real play.
+	 */
+	abilityPriority?: string[];
 	/** Additional homebrew JSON URLs required by this build. */
 	homebrewUrls?: string[];
 }
@@ -284,6 +292,24 @@ export const PRESET_FULL_ASTRAL_SELF_MONK_CHANGELING: CharacterPreset = {
 	skillCount: 2,
 	subclassName: "Way of the Astral Self",
 	subclassSource: "TCE",
+};
+
+/** College of Creation Bard Changeling (TCE subclass on the TGTT Bard chassis). */
+export const PRESET_FULL_CREATION_BARD_CHANGELING: CharacterPreset = {
+	race: "Changeling",
+	raceSource: "TGTT",
+	className: "Bard",
+	classSource: "TGTT",
+	background: "Entertainer",
+	bgSource: "PHB'24",
+	name: "Aria Songwright",
+	skillCount: 3,
+	subclassName: "College of Creation",
+	subclassSource: "TCE",
+	// Bard: CHA is the spellcasting ability and drives the Mote of Potential
+	// save DC, the Dancing Item's to-hit and Creative Crescendo's item count.
+	abilityPriority: ["cha", "dex", "con", "wis", "int", "str"],
+	signatureSpells: ["Vicious Mockery", "Healing Word"],
 };
 
 /** Way of the Sun Soul Monk Changeling (XGE subclass on the TGTT Monk chassis). */
@@ -624,6 +650,36 @@ export const PRESET_FULL_BASTION_BUGBEAR: CharacterPreset = {
 	subclassSource: "TGTT",
 };
 
+/**
+ * 14b. Oath of the Crown Paladin (SCAG, PHB 2014 chassis).
+ *
+ * `prioritySources: ["PHB"]` keeps the wizard on the 2014 Paladin so the SCAG oath is
+ * actually offered at L3; `skipConditionalPrompt` stops Unyielding Spirit's gated save
+ * advantage from opening the per-roll opt-in picker mid-probe.
+ */
+export const PRESET_FULL_CROWN_PALADIN: CharacterPreset = {
+	// Dwarf/Acolyte rather than Human/Noble: the 2014+2024 "Human" rows both match
+	// `sourceText.includes("PHB")`, and the 2024 Human's mandatory Origin Feat pick is
+	// not something `selectAllRacialChoices()` can satisfy, so the wizard stalls on the
+	// Species step. Dwarf/PHB + Acolyte/PHB is the proven 2014 pairing.
+	race: "Dwarf",
+	raceSource: "PHB",
+	className: "Paladin",
+	classSource: "PHB",
+	prioritySources: ["PHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB",
+	name: "Aldric Crownward",
+	skillCount: 2,
+	subclassName: "Oath of the Crown",
+	subclassSource: "SCAG",
+	// Steer the L2 Fighting Style pick to Defense. "Blessed Warrior" chains a
+	// cantrip chooser on top of the Fighting Style modal, which is a strictly
+	// noisier path to drive.
+	preferredFeatProgressionPattern: /^defense\b/i,
+};
+
 /** 15. Heroic Soul Sorcerer Half-Ogre (TGTT) — Over Soul + Stamina + Metamagic. */
 export const PRESET_FULL_HEROIC_SOUL_HALFOGRE: CharacterPreset = {
 	race: "Half-Ogre",
@@ -762,10 +818,12 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_BELLY_DANCER_JAKNIAN,
 	PRESET_FULL_JESTER_DENDULRA,
 	PRESET_FULL_BASTION_BUGBEAR,
+	PRESET_FULL_CROWN_PALADIN,
 	PRESET_FULL_HEROIC_SOUL_HALFOGRE,
 	PRESET_FULL_TRICKSTER_GOBLIN,
 	PRESET_FULL_LUST_LEXALIAN,
 	PRESET_FULL_HORROR_THEOCRACIAN,
+	PRESET_FULL_CREATION_BARD_CHANGELING,
 ];
 
 /**
@@ -879,7 +937,7 @@ export async function createCharacterViaWizard (
 	await builder.clickNext();
 
 	// Step 4: Abilities
-	await builder.assignStandardArrayDefaults();
+	await builder.assignStandardArrayDefaults(preset.abilityPriority);
 	await builder.clickNext();
 
 	// Step 5: Equipment — take gold (simplest)
@@ -1047,7 +1105,23 @@ export async function levelUpTo (
 			await page.waitForTimeout(200);
 		} else {
 			await charSheet.btnLevelUp.waitFor({state: "visible", timeout: 5000});
-			await charSheet.btnLevelUp.click();
+			// A feature-choice modal raised ASYNCHRONOUSLY by the previous
+			// level (PHB'14 Fighting Style at Paladin/Ranger L2, Fighter L1,
+			// …) lands after `resolvePendingFeatureChoices()` above has
+			// already run, and its overlay then swallows every click on the
+			// Level Up button — the run dies with a 15-minute
+			// "subtree intercepts pointer events" retry loop rather than a
+			// useful error. Resolve-and-retry instead of clicking blind.
+			for (let attempt = 0; ; attempt++) {
+				try {
+					await charSheet.btnLevelUp.click({timeout: 5000});
+					break;
+				} catch (e) {
+					if (attempt >= 4) throw e;
+					await levelUp.resolvePendingFeatureChoices();
+					await page.waitForTimeout(400);
+				}
+			}
 			await page.waitForTimeout(300);
 			// Only single-class characters reach this branch in normal
 			// flow (multiclass tests pass `targetClassName` and use the

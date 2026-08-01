@@ -484,7 +484,25 @@ improvedSmiteDamage: "1d8",
 // XPHB: Radiant Strikes (L11)
 hasRadiantStrikes: true,
 radiantStrikesDamage: "1d8",
+
+// Oath of the Crown (SCAG)
+hasChampionChallenge: true,       // L3
+championChallengeDc: 8 + profBonus + CHA,
+hasTurnTheTide: true,             // L3
+turnTheTideHealing: "1d6+CHA",
+hasDivineAllegiance: true,        // L7
+hasUnyieldingSpirit: true,        // L15
+hasExaltedChampion: true,         // L20
 ```
+
+**Crown is worth reading as a worked example** of the "a calculation is not a
+mechanic" rule. Every flag above existed before the subclass was supported, and
+the sheet still did nothing: the challenge forced no save, the tide healed
+nothing, Divine Allegiance had no way to move damage, Unyielding Spirit
+registered no modifier, and Exalted Champion's resistances were inert. See
+CS-BUG-050 through CS-BUG-054 in `known-bugs.md` — each was a generic defect on
+a shared path, not a Crown-specific gap. Adding a `has*` flag is the *first*
+step of supporting a feature, never the last.
 
 ### Wizard
 
@@ -962,6 +980,84 @@ The sub-type slot accepts conditions (`frightened`, `poisoned`, …), damage typ
 | `_buildConditionalModId(mod)` | Deterministic ID for picker dedup; strips `:advantage:` / `:disadvantage:` from base type |
 
 See [State Management → Modifier Aggregation API](./04-state-management.md#modifier-aggregation-api) for `aggregateModifiers` opt forwarding and the `conditionalsAvailable` return field.
+
+
+---
+
+## Class summons — the generic `CLASS_SUMMON` companion
+
+Features that summon a statblock whose numbers **scale with class level**
+(College of Creation's *Dancing Item* today; Steel Defender, Drake
+Companion, Summon Beast tomorrow) do **not** get a bespoke recalculation
+path. They register through the shared companion machinery with
+`type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON` and a
+declarative `scaling` descriptor:
+
+```javascript
+this.addCompanion({
+    name: "Dancing Item",
+    source: "TCE",
+    type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+    origin: CharacterSheetState.ANIMATING_PERFORMANCE_ORIGIN,
+    ac: calc.dancingItemAc,
+    hp: {max: calc.dancingItemHp, current: calc.dancingItemHp},
+    scaling: {
+        className: "Bard",
+        hpBase: 10,
+        hpPerLevel: 5,
+        ac: 16,
+        attackName: "Force-Empowered Slam",
+        attackAbility: "cha",       // to-hit = getSpellAttackBonusForAbility("cha")
+        damageDice: "1d10",
+        damageAddProf: true,        // + proficiency bonus
+        damageType: "force",
+    },
+});
+```
+
+`recalculateCompanion()` short-circuits to `_recalculateScaledCompanion()`
+whenever `companion.scaling` is present, so every level-up, ASI and
+multiclass respec re-derives HP, AC, to-hit and damage automatically.
+
+| `scaling` key | Effect |
+|---|---|
+| `className` | Level source; omit to use total character level |
+| `hpBase` / `hpPerLevel` | `max = hpBase + hpPerLevel × level` |
+| `ac` | Flat AC |
+| `attackName` | Action + attack row name (created if absent, rewritten if present) |
+| `attackAbility` | To-hit = `getSpellAttackBonusForAbility(ability)`; omit for a bare proficiency bonus |
+| `damageDice` | Damage dice expression |
+| `damageAddProf` | Adds the proficiency bonus to damage |
+| `damageType` | Damage type appended to the damage line |
+
+Semantics worth knowing:
+
+- **A damaged summon is never silently healed.** HP is refilled to the new
+  max only when it was at full before the recalculation; otherwise it is
+  clamped.
+- **Dropping the class does not collapse the summon.** If `className`
+  resolves to level 0 (multiclass respec), the last known HP is kept.
+- `scaling` survives `toJson()` / `loadFromJson()`, so a saved character
+  re-derives correctly on the next level-up.
+
+## College of Creation (Bard, TCE)
+
+| Level | Feature | Calculation keys | What actually happens |
+|---|---|---|---|
+| 3 | Mote of Potential | `hasMoteOfPotential`, `moteOfPotentialDie`, `moteAbilityCheckBonus`, `moteAttackDamage`, `moteAttackDamageType`, `moteOfPotentialSave`, `moteOfPotentialDc`, `moteSavingThrowTempHp`, `moteSavingThrowTempHpBonus` | `getMoteOfPotentialModes()` returns the three resolved modes; `rollMoteOfPotential(modeId, opts)` rolls the rider and (opt-in) applies temp HP. Costs **nothing** — the Bardic Inspiration die was already spent when it was handed out. |
+| 3 | Performance of Creation | `hasPerformanceOfCreation`, `createdItemMaxGp`, `createdItemMaxSize`, `createdItemMaxCount`, `createdItemDurationHours`, `performanceOfCreationSlotLevel` | `createPerformanceOfCreationItem({name, valueGp, size, spellSlotLevel})` puts a real `_isCustom` item into inventory, enforcing the gp cap (`20 × bard level`), the size cap (Medium → Large @6 → Huge @14) and the simultaneous-item cap; `dismissPerformanceOfCreationItems(id?)` vanishes them. |
+| 6 | Animating Performance | `hasAnimatingPerformance`, `dancingItemHp`, `dancingItemAc`, `dancingItemAttackBonus`, `dancingItemDamage`, `dancingItemDamageType`, `animatingPerformanceSlotLevel` | `animateDancingItem({itemName, spellSlotLevel})` registers the scaling `CLASS_SUMMON` companion above; `dismissDancingItem()` removes it. |
+| 14 | Creative Crescendo | `hasCreativeCrescendo`, `createdItemMaxCount` = `max(2, CHA mod)`, `createdItemMaxGp` = **`null`** | `null` is the JSON-safe "no gp cap" sentinel — it is *present and null*, never absent, so a probe can tell "cap removed" apart from "calculation forgot the key". Only one simultaneous item may be at the maximum size. |
+
+Both `Performance of Creation` and `Animating Performance` accept the RAW
+"unless you expend a spell slot of Nth level or higher" alternative:
+passing `spellSlotLevel` spends the slot instead of the long-rest use.
+`CharacterSheetState.featureOwnsItsCost(feature)` tells the UI layer that
+these features manage their own cost, so the generic activation guard
+does not refuse them when the use pool is empty.
+
+`onLongRest()` calls `_clearCreationBardConstructs()`, which vanishes
+every created item and the Dancing Item before the pools refill.
 
 ---
 

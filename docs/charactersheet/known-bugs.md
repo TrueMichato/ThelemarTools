@@ -1733,6 +1733,233 @@ no-op controls) and the now-unskipped `activeStateLight` probe in
 
 ---
 
+## CS-BUG-050 — every prose-parsed resistance / immunity / vulnerability on an active state was silently inert
+
+**Status**: FIXED (Oath of the Crown Paladin batch)
+
+**Symptom**: activating a state whose damage defences came from its own
+description (rather than from a curated `effects` array) changed nothing.
+`getResistances()`, `getImmunities()`, `getVulnerabilities()` and
+`getConditionImmunities()` all returned the same values before and after
+activation.
+
+**Root cause**: two vocabularies for the same idea. The curated
+`SPELL_BUFF_REGISTRY` form is `{type: "resistance", damageType: "fire"}`, which
+is normalised to `target: "damage:fire"` at registration time, and the readers
+(`_getResistancesFromStates` et al.) filtered on
+`e.target?.startsWith("damage:")`. But `parseEffectsFromDescription` emits the
+**bare** form — `{type: "resistance", target: "fire"}`. Every prose-parsed
+defence therefore failed the filter and was dropped.
+
+**Fix**: a single generic normaliser, `_getDamageDefenceFromStates(effectType,
+conditional)`, that all four readers delegate to. It accepts both the
+`damage:<type>` and the bare form, resolving the latter through a
+`static DAMAGE_TYPES` whitelist so that non-damage targets that share the flat
+shape (`"ac"`, `"speed:walk"`, `"save:wis"`) can never be mistaken for a damage
+type. New code should still emit `damage:<type>`; this makes the reader
+tolerant rather than blessing the bare form.
+
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-050 and
+§Exalted Champion. Verified to fail with the bare-form branch reverted.
+
+---
+
+## CS-BUG-051 — a subclass "Channel Divinity" umbrella minted a phantom, resource-less second ability row
+
+**Status**: FIXED (Oath of the Crown Paladin batch)
+
+**Symptom**: a Crown Paladin at L3 showed **two** "Channel Divinity" entries in
+the activatable list — the real class feature carrying the use pool, and a
+second one from the oath that spent nothing and did nothing.
+
+**Root cause**: many subclasses model their Channel Divinity options as an
+umbrella feature whose `entries` are one line of prose plus N
+`refSubclassFeature` pointers. `detectActivatableFeature` flattened those
+entries to text, saw activation-looking prose, and built an ability row for the
+wrapper itself — even though the wrapper has no `uses` of its own and every
+option it points at is already surfaced separately.
+
+**Fix**: `static isReferenceWrapperFeature(feature)` — true when a feature has
+at least one `ref*` entry, no other structured content, and no `uses` of its
+own — and an early `return null` for it in `detectActivatableFeature`. Detected
+**structurally**, never by name, so it covers every oath, domain and patron
+that uses the same shape.
+
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-051 (7 tests).
+Note the fixture is the umbrella **as the sheet renders it** — with the referenced
+options expanded inline — because a fixture carrying only the bare `entries` passes
+with the guard removed and proves nothing. Verified to fail with the guard disabled.
+
+---
+
+## CS-BUG-052 — text-parsed conditional modifiers never reached the per-roll opt-in picker
+
+**Status**: FIXED (Oath of the Crown Paladin batch)
+
+**Symptom**: Unyielding Spirit ("you have advantage on saving throws to avoid
+becoming paralyzed or stunned") registered modifiers but they never appeared in
+`aggregateModifiers("save:con").conditionalsAvailable`, so the roll-time
+picker never offered them and the advantage could not be taken at all.
+
+**Root cause**: two independent defects on the same path.
+1. `_processFeatureModifiers`'s idempotency guard keyed on
+   `type|target|value|source` and ignored `conditional`, so a feature that
+   grants the *same* advantage under two *different* conditions collapsed into
+   one modifier — Unyielding Spirit lost "stunned" entirely.
+2. `getModifiersForType` skipped every `!mod.enabled` modifier, but
+   conditionals are deliberately registered with `enabled: false` (they must
+   not auto-apply). Text-parsed conditionals were therefore double-gated into
+   invisibility: off by design, then dropped by the reader.
+
+**Fix**: (1) `conditional` is part of the dedup identity key. (2) the reader
+lets disabled-but-conditional modifiers through
+(`if (!mod.enabled && !mod.conditional) return;`), preserving the Modifiers-UI
+"off" display semantics for genuinely disabled entries.
+
+Also generalised the `FeatureModifierParser` save-advantage patterns while
+here: a new condition-gated matcher understands "to avoid/resist/end/prevent
+being/becoming X" and "against being/becoming X" over a 16-condition
+vocabulary and multi-condition lists, emitting one conditional `save:all`
+modifier per condition. Every `advantage on …` literal on that path carries the
+mandatory `(?<!dis)` lookbehind so "disadvantage on …" can never be inverted
+into a buff.
+
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §Unyielding Spirit
+(8 tests, including the `disadvantage` inversion control). Both halves verified
+independently — reverting the dedup key fails 3, reverting the reader fails 2.
+
+---
+
+## CS-BUG-053 — "ability"-classified activatables could never roll anything
+
+**Status**: FIXED (Oath of the Crown Paladin batch)
+
+**Symptom**: Champion Challenge rendered a Use button that spent Channel
+Divinity but never prompted the Wisdom save it exists to force; Turn the Tide
+spent a use and healed nothing. The prose was on screen; the mechanic was not.
+
+**Root cause**: `detectActivatableFeature` has two nearby return sites. The
+`"combat"` / `"reaction"` classification path calls
+`_parseCombatActionEffects` and returns the result as `combatActionEffects`.
+The `"ability"` path — `_buildAbilityActivationInfo`, which handles **every**
+Channel Divinity option, every Invoke Hell option, and every other limited-use
+instant — did not. The roll surfaces read `combatActionEffects`, so for that
+whole family of features there was nothing to roll.
+
+**Fix**: `_buildAbilityActivationInfo` now parses and returns
+`combatActionEffects` like its sibling. One line; it un-breaks an entire
+feature family rather than one subclass.
+
+Two supporting generic changes landed with it:
+- `_parseCombatActionEffects` learned the "regains hit points equal to NdM +
+  your <Ability> modifier (minimum of K)" shape, emitting `abilityMod` and
+  `minimum`.
+- Because that parser is **static** (no character context), a save it finds
+  carries `dc: null` and a heal carries a symbolic `abilityMod`. Previously the
+  action modal hard-fell-back to **DC 10** for any such save. New
+  `_resolveCombatActionEffects(effects, feature)` in `charactersheet-combat.js`
+  resolves both against the live character — the DC via the new
+  `state.getFeatureSaveDc(feature)` (prefers the owning class's spell save DC,
+  falls back to the global one, else null rather than a bogus number) and the
+  ability modifier folded into the formula, idempotently. All three call sites
+  (combat-tab enrichment, roll modal, dice roller) go through it.
+
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-053, which goes
+through `detectActivatableFeature` on a feature shaped as the sheet actually grants
+it (`consumes: {name: "Channel Divinity"}`, no `uses` of its own — measured on a
+live build), not through the parser directly; plus the `combatAction` probes in
+`tgtt-crown-paladin.spec.ts`. Verified to fail with the fix reverted.
+
+---
+
+## CS-BUG-054 — the 2014 Paladin's Channel Divinity was unlimited
+
+**Status**: FIXED (Oath of the Crown Paladin batch)
+
+**Symptom**: no "Channel Divinity" resource appeared in `getResources()` for a
+2014 (PHB) Paladin at any level, and every oath's Channel Divinity options
+could be used an unbounded number of times.
+
+**Root cause**: the use pool was minted opportunistically by `addFeature`'s
+prose parse. The 2024 Paladin's feature text names a count ("you can use it
+twice"), so it worked; the **2014** Paladin's text names none — it only says
+"You must then finish a short or long rest to use your Channel Divinity again"
+— so nothing was created, and the sibling of CS-BUG-033 went unnoticed because
+that fix only addressed *scaling* of an already-existing pool.
+
+**Fix**: `_ensureChannelDivinityUses` (called from `getResources()`) now
+**creates** the resource and the backing `feature.uses` when the class table
+says the character should have uses but no pool exists, instead of only
+reconciling the max of one that already exists. `_getChannelDivinityUsesForClass`
+remains the single source of truth for the count, so this stays consistent with
+CS-BUG-033 and the `CharacterSheetChannelDivinityScaling` suite.
+
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-054 (7 tests,
+including a guard on the bug's premise — that the prose alone mints nothing — and a
+cross-check that the 2024 Paladin still scales 2 → 3); the `kind: "resource"` matrix
+row and the USE probe's `shortRestRestores` in `tgtt-crown-paladin.spec.ts`.
+Verified to fail with the creation block reverted.
+
+---
+
+## CS-BUG-055 — `FeatureUsesParser` read "N times your <class> level" as a use count
+
+**Status**: Fixed.
+**Surfaced by**: College of Creation Bard implementation — a spawned
+`bard/creation/14/gnome` showed `Performance of Creation` at **20/20 uses**.
+
+**Root cause**: `FeatureUsesParser.parseUses`
+(`js/charactersheet/charactersheet-state.js`) matched a leading
+`(\d+)\s*(?:times?|uses?)` anywhere in the feature text. Performance of
+Creation's description contains *"a nonmagical item … worth no more than
+20 times your bard level in gp"*, so "20 times" was harvested as a use
+count. Any feature whose text contains an `N times <noun>` **multiplier**
+was affected, not just this subclass.
+
+**Fix**: the pattern now carries a negative lookahead for the nouns that
+mark a multiplier:
+
+```js
+/(\d+)\s*(?:times?|uses?)\b(?!\s+(?:your|the|a|an|its|his|her|their|that)\b)/
+```
+
+The `\b` after the alternation is **load-bearing**. Without it the regex
+engine escapes the lookahead by backtracking `times` → `time`, leaving the
+`s` to break `\s+`, and the bug silently returns. A regression test in
+`test/jest/charactersheet/CharacterSheetCreationBard.test.js` (PART 1) was
+verified to fail with `Received: 20` before the `\b` was added.
+
+With the guard in place the text falls through to the `\bonce\b` pattern
+and yields the correct 1 use per long rest.
+
+---
+
+## CS-BUG-056 — E2E builds put an 8 in every caster's spellcasting ability
+
+**Status**: Fixed (opt-in).
+**Surfaced by**: `tgtt-creation-bard.spec.ts` — `moteOfPotentialDc` came
+back as **9** (8 + prof 2 + CHA mod −1), because
+`BuilderWizardPage.assignStandardArrayDefaults()` hard-coded
+STR 15 / DEX 14 / CON 13 / INT 12 / WIS 10 / **CHA 8** for every build in
+the suite. Every spellcaster spec was therefore exercising a dump-stat
+caster, and any probe asserting a realistic DC/mod floor had to be either
+skipped or loosened into meaninglessness.
+
+**Fix**: `assignStandardArrayDefaults(priority?)` now accepts an ability
+order (best score first) and `CharacterPreset.abilityPriority` threads it
+through `createCharacterViaWizard`. Omitting it preserves the historical
+STR-first order byte-for-byte, so existing presets are unaffected —
+verified by re-running `tgtt-jester-bard-dendulra.spec.ts` after the
+change. `PRESET_FULL_CREATION_BARD_CHANGELING` sets
+`["cha", "dex", "con", "wis", "int", "str"]`.
+
+**Follow-up (not done here)**: the other caster presets
+(Bladesinger, Chronurgy, Surrealism, Time/Lust Domain, Heroic Soul,
+Horror Warlock, Jester) would all benefit from the same one-line
+addition, which would also let several `CS-BUG-016`-skipped
+`spellSaveDc` / `cantripCount` probes be re-enabled. Deliberately left
+out of this change so the blast radius stays confined to one spec.
+
 ---
 
 ## CS-BUG-065 — numeric conditional modifiers were disabled at registration, so they could never be opted into

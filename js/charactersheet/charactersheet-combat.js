@@ -5929,6 +5929,7 @@ class CharacterSheetCombat {
 				const textClean = desc.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").toLowerCase();
 				feature.combatActionEffects = CharacterSheetState._parseCombatActionEffects?.(textClean, desc) || null;
 			}
+			this._resolveCombatActionEffects(feature.combatActionEffects, feature);
 
 			// Merge calculation-driven effects for features with pre-computed data
 			const calc = this._state.getFeatureCalculations?.() || {};
@@ -5954,11 +5955,44 @@ class CharacterSheetCombat {
 		}
 	}
 
+	/**
+	 * Resolve the character-dependent placeholders `_parseCombatActionEffects` cannot fill in.
+	 *
+	 * That parser is static (no character context), so features whose prose says
+	 * "must make a Wisdom saving throw" without a literal DC, or "regains hit points equal to
+	 * 1d6 + your Charisma modifier", come back with `dc: null` / a symbolic `abilityMod`. The
+	 * action modal previously fell back to a hardcoded **DC 10** and dropped the ability
+	 * modifier entirely, so e.g. Champion Challenge advertised the wrong DC and Turn the Tide
+	 * offered no healing button at all.
+	 *
+	 * Mutates in place (the effects object is cached on the feature).
+	 * @param {object|null} effects
+	 * @returns {object|null} the same effects object
+	 */
+	_resolveCombatActionEffects (effects, feature = null) {
+		const roll = effects?.rollDice;
+		if (!roll) return effects;
+
+		// A feature that forces a save without naming a DC uses the character's own save DC.
+		if (roll.saveAbility && (roll.dc == null)) {
+			const dc = this._state.getFeatureSaveDc?.(feature);
+			if (Number.isFinite(dc) && dc > 0) roll.dc = dc;
+		}
+
+		// "+ your <ability> modifier" → a concrete number the dice roller understands.
+		if (roll.abilityMod && !roll._abilityModResolved) {
+			const mod = this._state.getAbilityMod?.(roll.abilityMod) ?? 0;
+			if (mod) roll.formula = `${roll.formula}${mod > 0 ? "+" : "-"}${Math.abs(mod)}`;
+			roll._abilityModResolved = true;
+		}
+
+		return effects;
+	}
+
 	/* ====================================================================
 	   Action Economy overview (B9) — a read-only "what can I do this turn"
 	   division that buckets the character's attacks, spells, features, and
 	   custom abilities under Action / Bonus Action / Reaction headers.
-
 	   This aggregates DIRECTLY from four independent sources; it deliberately
 	   does NOT reuse the "Available to Activate" activatable filter (which
 	   excludes combat/reaction-typed items) nor the renderCombatActions
@@ -6963,6 +6997,7 @@ class CharacterSheetCombat {
 	 */
 	_rollCombatActionDice (feature, diceConfig) {
 		if (!diceConfig) return;
+		this._resolveCombatActionEffects({rollDice: diceConfig}, feature);
 
 		const type = diceConfig.type || "damage";
 
@@ -7001,6 +7036,7 @@ class CharacterSheetCombat {
 			const damageType = diceConfig.damageType || null;
 			const shouldMaximize = type === "damage" && this._state.canApplyPendingDamageMaximization?.(damageType);
 			const result = this._parseDamage(formula, false, {maximize: shouldMaximize});
+			if (diceConfig.minimum != null && result.total < diceConfig.minimum) result.total = diceConfig.minimum;
 			if (shouldMaximize) this._state.consumePendingDamageMaximization?.(damageType);
 			const label = diceConfig.label || (type === "healing" ? "Healing" : "Damage");
 			const saveDc = diceConfig.saveAbility ? (diceConfig.dc || this._state.getSpellSaveDC?.("Cleric")) : null;
@@ -7913,6 +7949,7 @@ class CharacterSheetCombat {
 	 * @returns {*} The roll section element
 	 */
 	_renderModalRollSection (diceConfig, feature) {
+		this._resolveCombatActionEffects({rollDice: diceConfig}, feature);
 		const section = e_({outer: `<div class="charsheet__action-modal-rolls mb-3 p-2" style="background: var(--bg-faint, #f8f9fa); border-radius: 4px;"></div>`});
 		section.append(e_({outer: `<div class="bold mb-2">🎲 Dice</div>`}));
 
