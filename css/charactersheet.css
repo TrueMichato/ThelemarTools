@@ -34,6 +34,55 @@
 }
 
 /* ========================================================================
+   Character-sheet modals
+
+   Every dialog opened through `CharacterSheetModal.pGetShow` carries `.cs-modal`.
+   The class exists to give body-portalled modals the two things they cannot
+   inherit through the DOM: the sheet's chosen typeface, and the sheet's muted
+   ink. Both tokens live on `.charsheet-page` / `body[data-font]`, and a modal is
+   a sibling of the page, not a descendant.
+   ======================================================================== */
+.cs-modal {
+	font-family: var(--cs-font-family, inherit);
+}
+
+/* The site-wide `.ve-muted` is a flat `#777` — 4.48:1 on white and 3.63:1 on a
+   striped row, both under AA. Inside a CS modal it should speak the sheet's own
+   secondary ink instead. This catches the many small `ve-muted` spans nested
+   inside correctly-tokenised parents, where the site class wins on specificity.
+
+   Layered because `.ve-muted{color:#777!important}` lives in `@layer vetools`,
+   and for `!important` declarations layer order is inverted — an unlayered
+   `!important` would lose to it. Same layer + higher specificity + later source
+   order wins cleanly, and fixes every one of the sheet's ~90 modals at once. */
+@layer vetools {
+	.cs-modal .ve-muted {
+		color: var(--cs-text-muted, #5b6675) !important;
+	}
+}
+
+.cs-modal__btn-close {
+	min-width: 1.75rem;
+	min-height: 1.75rem;
+	line-height: 1;
+}
+
+/* `InputUiUtil.pGetUserGenericButton` wraps every `htmlDescription` in a *row*
+   flex container (`utils-ui.js`: `<div class="ve-flex ve-w-100 ve-mb-1">`), so a
+   description made of several block elements is laid out as columns. Short prose
+   happens to wrap back into something readable; the moment one child is wide —
+   a rendered entry with a table, say — the rest collapse into one-word columns.
+
+   Every description on this sheet is prose, so the row is never what the caller
+   meant. Scoped to the sheet's own page rather than fixed in shared site code,
+   and pinned to the exact class trio that wrapper emits. These dialogs come from
+   `UiUtil.getShowModal` directly and so never carry `.cs-modal`, which is why the
+   hook is the page class. */
+body.is-charsheet-page .ve-ui-modal__scroller > .ve-flex.ve-w-100.ve-mb-1 {
+	flex-direction: column;
+}
+
+/* ========================================================================
    Custom Scrollbars
    ======================================================================== */
 .charsheet__attacks-list::-webkit-scrollbar,
@@ -1483,28 +1532,39 @@
 	color: var(--cs-danger, #ef4444);
 }
 
-/* Font family application */
-.charsheet-page[data-font="system"] {
+/* Font family application.
+   The `body[data-font]` half of each pair exists for modals: `UiUtil` portals them to
+   `document.body`, which sits ABOVE `.charsheet-page` in the tree, so a token declared only on
+   the page can never reach them. `charactersheet.js` mirrors both `data-font` and `data-textsize`
+   onto `<body>` for exactly this reason. Without it every dialog on the sheet renders in
+   UA-default Arial. */
+.charsheet-page[data-font="system"],
+body[data-font="system"] {
 	--cs-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
-.charsheet-page[data-font="serif"] {
+.charsheet-page[data-font="serif"],
+body[data-font="serif"] {
 	--cs-font-family: Georgia, "Times New Roman", Times, serif;
 }
 
-.charsheet-page[data-font="mono"] {
+.charsheet-page[data-font="mono"],
+body[data-font="mono"] {
 	--cs-font-family: "SF Mono", Monaco, "Cascadia Code", Consolas, monospace;
 }
 
-.charsheet-page[data-font="fantasy"] {
+.charsheet-page[data-font="fantasy"],
+body[data-font="fantasy"] {
 	--cs-font-family: "Cinzel", "Palatino Linotype", "Book Antiqua", serif;
 }
 
-.charsheet-page[data-font="hubot"] {
+.charsheet-page[data-font="hubot"],
+body[data-font="hubot"] {
 	--cs-font-family: "Hubot Sans", "Mona Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.charsheet-page[data-font="readable"] {
+.charsheet-page[data-font="readable"],
+body[data-font="readable"] {
 	--cs-font-family: "Atkinson Hyperlegible", "Verdana", "Trebuchet MS", sans-serif;
 }
 
@@ -20596,7 +20656,11 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	color: var(--cs-danger, #dc3545);
 }
 
-/* Rarity badges — compact, theme-safe */
+/* Rarity badges — compact, theme-safe.
+   Colours are darkened from the canonical D&D rarity hues to carry white text at the badge's
+   0.7em size: `#059669` and `#d97706` measured 3.81:1 and 3.20:1, both under AA for text this
+   small. The replacements are the sheet's own day-mode ink tokens, so the badges now speak the
+   same colour language as every other coloured label on the sheet. */
 .charsheet__rarity-badge--common,
 .charsheet__rarity-badge--uncommon,
 .charsheet__rarity-badge--rare,
@@ -20609,10 +20673,10 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 	line-height: 1.4;
 }
 .charsheet__rarity-badge--common { background: #6b7280; }
-.charsheet__rarity-badge--uncommon { background: #059669; }
+.charsheet__rarity-badge--uncommon { background: #047857; }
 .charsheet__rarity-badge--rare { background: #2563eb; }
 .charsheet__rarity-badge--very-rare { background: #7c3aed; }
-.charsheet__rarity-badge--legendary { background: #d97706; }
+.charsheet__rarity-badge--legendary { background: #b45309; }
 
 .charsheet__empower-result .alert {
 	border-radius: var(--cs-radius-md, 10px);
@@ -22100,29 +22164,96 @@ color: var(--cs-text-primary, #f1f5f9);
 	display: flex;
 	flex-direction: column;
 	gap: var(--cs-space-md, 16px);
+	/* The Harvest modal opens on a single prompt line, so the shell is sized to content. This
+	   keeps a long result list from pushing the modal past the viewport. */
+	max-height: 60vh;
+}
+
+/* The Craft workbench opens at full height, where the 60vh cap leaves a band of dead white below
+   the list. There it should take whatever the shell has. */
+.cs-crafting__results--fill {
+	max-height: none;
+	flex: 1 1 auto;
+	min-height: 0;
 }
 
 .cs-crafting__creature,
 .cs-crafting__band {
-	border: 1px solid var(--cs-border, #334155);
-	border-radius: var(--cs-radius-sm, 4px);
-	padding: var(--cs-space-sm, 8px);
+	border: 1px solid var(--cs-border);
+	border-radius: var(--cs-radius-sm);
+	padding: var(--cs-space-sm);
 }
 
 .cs-crafting__creature-head,
 .cs-crafting__band-head {
 	display: flex;
 	align-items: baseline;
-	gap: var(--cs-space-xs, 4px);
-	margin-bottom: var(--cs-space-xs, 4px);
-	padding-bottom: var(--cs-space-2xs, 2px);
-	border-bottom: 1px solid var(--cs-border, #334155);
+	gap: var(--cs-space-xs);
+	margin-bottom: var(--cs-space-xs);
+	padding-bottom: var(--cs-space-2xs);
+	border-bottom: 1px solid var(--cs-border);
 	font-weight: var(--cs-weight-semibold, 600);
 }
 
 .cs-crafting__band-head {
 	cursor: pointer;
 	user-select: none;
+}
+
+/* ----- Foraging & carcass yields -----
+   The other half of the harvesting rule. A category strip rather than a second table header,
+   because the columns are identical and repeating them reads as a different kind of thing. */
+.cs-crafting__foraged-cat {
+	margin-top: var(--cs-space-xs);
+	font-size: 0.75rem;
+	font-weight: var(--cs-weight-semibold, 600);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--cs-text-secondary);
+}
+
+.cs-crafting__carcass {
+	margin-top: var(--cs-space-xs);
+	border-top: 1px solid var(--cs-border);
+	padding-top: var(--cs-space-xs);
+}
+
+.cs-crafting__carcass > summary {
+	cursor: pointer;
+	user-select: none;
+	min-height: 1.75rem;
+	display: flex;
+	align-items: center;
+	color: var(--cs-text-secondary);
+	font-size: 0.85em;
+}
+
+.cs-crafting__carcass[open] > summary {
+	color: var(--cs-text-primary);
+}
+
+/* A component group is a label for the rows beneath it, not an ingredient. */
+.cs-crafting__ing-group {
+	list-style: none;
+	margin-left: calc(var(--cs-space-sm) * -1);
+	margin-top: var(--cs-space-2xs);
+	font-size: 0.75rem;
+	font-weight: var(--cs-weight-semibold, 600);
+	letter-spacing: 0.03em;
+	text-transform: uppercase;
+	color: var(--cs-text-secondary);
+}
+
+/* The band counts are the workbench's headline answer — "you can make 4 things right now" — so
+   they read as data, not as an afterthought in parentheses. */
+.cs-crafting__band-count {
+	color: var(--cs-text-secondary);
+	font-variant-numeric: tabular-nums;
+}
+
+.cs-crafting__band[open] > .cs-crafting__band-head .cs-crafting__band-count,
+.cs-crafting__band:first-child > .cs-crafting__band-head .cs-crafting__band-count {
+	color: var(--cs-text-primary);
 }
 
 .cs-crafting__creature-name {
@@ -22135,7 +22266,7 @@ color: var(--cs-text-primary, #f1f5f9);
 
 .cs-crafting__table th,
 .cs-crafting__table td {
-	padding: var(--cs-space-2xs, 2px) var(--cs-space-xs, 4px);
+	padding: var(--cs-space-2xs) var(--cs-space-xs);
 	vertical-align: top;
 }
 
@@ -22143,11 +22274,53 @@ color: var(--cs-text-primary, #f1f5f9);
 	white-space: nowrap;
 }
 
+.cs-crafting__cell-act {
+	white-space: nowrap;
+}
+
+.cs-crafting__cell-act > * + * {
+	margin-left: var(--cs-space-2xs);
+}
+
+/* `ve-btn-xxs` renders ~27x20, which is under the 24px minimum even with a mouse — and every one
+   of these commits or destroys something. A floor here rather than a size class swap, so the
+   buttons keep the sheet's own scale. */
+.cs-crafting__btn-roll,
+.cs-crafting__btn-printings,
+.cs-crafting__btn-make,
+.cs-crafting__btn-source {
+	min-height: 1.75rem;
+	padding-inline: var(--cs-space-xs);
+}
+
+/* ----- Alternate printings ----- */
+
+.cs-crafting__row-printings > td {
+	padding-top: 0;
+	background: var(--cs-bg-elevated);
+}
+
+.cs-crafting__printing {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-xs);
+	padding: var(--cs-space-2xs) var(--cs-space-xs);
+	font-size: var(--cs-text-xs, 12px);
+}
+
+.cs-crafting__printing-src {
+	font-weight: var(--cs-weight-semibold, 600);
+}
+
+.cs-crafting__printing > :last-child {
+	margin-left: auto;
+}
+
 /* ----- Craft workbench ----- */
 
 .cs-crafting__recipe {
-	padding: var(--cs-space-xs, 4px) 0;
-	border-top: 1px solid var(--cs-border, #334155);
+	padding: var(--cs-space-xs) 0;
+	border-top: 1px solid var(--cs-border);
 }
 
 .cs-crafting__recipe:first-of-type {
@@ -22157,7 +22330,7 @@ color: var(--cs-text-primary, #f1f5f9);
 .cs-crafting__recipe-head {
 	display: flex;
 	align-items: center;
-	gap: var(--cs-space-2xs, 2px);
+	gap: var(--cs-space-2xs);
 	flex-wrap: wrap;
 }
 
@@ -22172,44 +22345,211 @@ color: var(--cs-text-primary, #f1f5f9);
 .cs-crafting__chips {
 	display: inline-flex;
 	flex-wrap: wrap;
-	gap: var(--cs-space-2xs, 2px);
+	gap: var(--cs-space-2xs);
 }
 
 .cs-crafting__chip {
-	padding: 0 var(--cs-space-xs, 4px);
-	border: 1px solid var(--cs-border, #334155);
+	padding: 0 var(--cs-space-xs);
+	/* The chip's outline is the only thing separating it from the row, so it takes the 3:1
+	   control border rather than the 1.2:1 decorative one. */
+	border: 1px solid var(--cs-border-control);
 	border-radius: 10px;
 	font-size: var(--cs-text-xs, 12px);
 	line-height: 16px;
 	white-space: nowrap;
 }
 
+.cs-crafting__chip-rarity {
+	align-self: center;
+}
+
 .cs-crafting__chip--ok {
-	border-color: var(--cs-success, #10b981);
-	color: var(--cs-success-text, var(--cs-success, #10b981));
+	border-color: var(--cs-success);
+	color: var(--cs-success-text, var(--cs-success));
 }
 
 .cs-crafting__chip--warn {
-	border-color: var(--cs-warning, #f59e0b);
-	color: var(--cs-warning-text, var(--cs-warning, #f59e0b));
+	border-color: var(--cs-warning);
+	color: var(--cs-warning-text, var(--cs-warning));
 }
 
 .cs-crafting__ingredients {
-	margin: var(--cs-space-2xs, 2px) 0 0;
-	padding-left: var(--cs-space-lg, 24px);
+	margin: var(--cs-space-2xs) 0 0;
+	padding-left: var(--cs-space-lg);
 	font-size: var(--cs-text-xs, 12px);
 }
 
+.cs-crafting__ingredients > li {
+	display: flex;
+	align-items: baseline;
+	gap: var(--cs-space-2xs);
+}
+
 .cs-crafting__ing--held {
-	color: var(--cs-success-text, var(--cs-success, #10b981));
+	color: var(--cs-success-text, var(--cs-success));
 }
 
 .cs-crafting__ing--missing {
-	color: var(--cs-text-muted, #98a5b8);
+	color: var(--cs-text-muted);
+}
+
+/* A repeat is the same requirement seen from another component group. It has to stay visible so
+   the group reads completely, but it must not compete with the row that carries the real count. */
+.cs-crafting__ing--repeat {
+	opacity: 0.62;
+	font-style: italic;
+}
+
+/* A missing ingredient names the creature it comes from and opens Harvest on it — the shopping
+   list's whole reason to exist. Quiet by default; it is a way out, not a call to action. */
+.cs-crafting__btn-source {
+	padding: 0 var(--cs-space-xs);
+	border: 1px solid transparent;
+	border-radius: 10px;
+	background: none;
+	color: var(--cs-primary-strong, #4f46e5);
+	font-size: inherit;
+	line-height: 16px;
+	white-space: nowrap;
+	cursor: pointer;
+	transition: border-color var(--cs-transition-fast, 150ms) var(--cs-ease-out-quart, ease-out);
+}
+
+.cs-crafting__btn-source:hover,
+.cs-crafting__btn-source:focus-visible {
+	border-color: var(--cs-border-control);
+	text-decoration: underline;
 }
 
 .cs-crafting__warning {
-	color: var(--cs-warning-text, var(--cs-warning, #f59e0b));
+	color: var(--cs-warning-text, var(--cs-warning));
+}
+
+/* ----- Narrow hosts -----
+   The modal root carries `.cs-adaptive-panel`, so these respond to the modal's own width. A
+   seven-column table cannot survive a phone, and a right-aligned action button that follows the
+   title's length gives every row a different tap position. */
+@container cs-panel (max-width: 480px) {
+	.cs-crafting__table thead {
+		display: none;
+	}
+
+	.cs-crafting__table,
+	.cs-crafting__table tbody,
+	.cs-crafting__table tr,
+	.cs-crafting__table td {
+		display: block;
+		width: 100%;
+	}
+
+	.cs-crafting__table tr {
+		padding: var(--cs-space-xs) 0;
+		border-top: 1px solid var(--cs-border);
+	}
+
+	/* DC, name and value read as one line; the rest becomes a labelled second line. */
+	.cs-crafting__table td:nth-child(1),
+	.cs-crafting__table td:nth-child(2),
+	.cs-crafting__table td:nth-child(5) {
+		display: inline;
+		width: auto;
+		text-align: left;
+	}
+
+	.cs-crafting__table td:nth-child(1)::before {
+		content: "DC ";
+		color: var(--cs-text-muted);
+	}
+
+	.cs-crafting__table td:nth-child(3)::before { content: "Qty "; color: var(--cs-text-muted); }
+	.cs-crafting__table td:nth-child(4)::before { content: "Time "; color: var(--cs-text-muted); }
+	.cs-crafting__table td:nth-child(6)::before { content: "Source "; color: var(--cs-text-muted); }
+
+	.cs-crafting__table td:nth-child(3),
+	.cs-crafting__table td:nth-child(4),
+	.cs-crafting__table td:nth-child(6) {
+		display: inline-block;
+		width: auto;
+		margin-right: var(--cs-space-sm);
+		text-align: left;
+	}
+
+	/* Qualified by `td` so it outranks the `display: block` above it — otherwise the actions stay
+	   block-level and the button keeps its content width instead of spanning the row. */
+	.cs-crafting__table td.cs-crafting__cell-act {
+		display: flex;
+		gap: var(--cs-space-xs);
+		margin-top: var(--cs-space-xs);
+	}
+
+	.cs-crafting__table td.cs-crafting__cell-act > * {
+		flex: 1;
+	}
+
+	/* An em-dash with no label is noise once the row is stacked. */
+	.cs-crafting__table td.cs-crafting__cell--empty {
+		display: none;
+	}
+
+	/* Narrow means phone-shaped, whatever the pointer reports. */
+	.cs-crafting__btn-roll,
+	.cs-crafting__btn-printings,
+	.cs-crafting__btn-make,
+	.cs-crafting__btn-source {
+		min-height: 2.75rem;
+		padding-inline: var(--cs-space-sm);
+	}
+
+	.cs-crafting__row-printings > td {
+		width: 100%;
+	}
+
+	/* Fixed two-row layout so the action button holds one position down the list instead of
+	   drifting with each recipe's title length. */
+	.cs-crafting__recipe-head {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		align-items: start;
+		row-gap: var(--cs-space-2xs);
+	}
+
+	.cs-crafting__recipe-head > .cs-crafting__recipe-name {
+		grid-column: 1;
+	}
+
+	.cs-crafting__recipe-head > .cs-crafting__btn-make {
+		grid-column: 2;
+		grid-row: 1 / span 2;
+		align-self: center;
+		margin-left: var(--cs-space-xs);
+	}
+
+	.cs-crafting__recipe-head > .cs-crafting__chips {
+		grid-column: 1;
+		margin-left: 0;
+	}
+
+	.cs-crafting__ingredients > li {
+		flex-wrap: wrap;
+	}
+}
+
+/* A finger has no hover state and no pixel precision. On a coarse pointer the crafting actions
+   take the platform minimum rather than the desk-mouse `ve-btn-xxs` sizing. */
+@media (pointer: coarse) {
+	.cs-crafting__btn-roll,
+	.cs-crafting__btn-printings,
+	.cs-crafting__btn-make,
+	.cs-crafting__btn-source {
+		min-height: 44px;
+		min-width: 44px;
+		padding-inline: var(--cs-space-sm);
+	}
+
+	.cs-crafting__band-head {
+		min-height: 44px;
+		align-items: center;
+	}
 }
 
 /* ----- Play-mode Actions hub card ----- */

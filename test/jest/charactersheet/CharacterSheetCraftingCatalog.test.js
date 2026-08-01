@@ -199,14 +199,18 @@ describe("Crafting catalog", () => {
 	});
 
 	describe("harvestables by creature", () => {
-		it("returns every part of a creature across books, sorted by DC", () => {
+		// The player owns one eye, so the Harvest modal must offer one row for it — not one row
+		// per book that happens to describe it. The books' disagreements ride along as printings.
+		it("collapses the twins into one row, carrying both printings", () => {
 			const parts = state.getHarvestablesForCreature("Aboleth");
 
-			expect(parts.map(p => `${p.source}:${p.harvest.dc}`)).toEqual(["Ar8:17", "HHHVI:20"]);
+			expect(parts).toHaveLength(1);
+			expect(parts[0].source).toBe("Ar8");
+			expect(parts[0].printings.map(pr => `${pr.source}:${pr.harvestDc}`)).toEqual(["Ar8:17", "HHHVI:20"]);
 		});
 
 		it("is case-insensitive", () => {
-			expect(state.getHarvestablesForCreature("aboleth")).toHaveLength(2);
+			expect(state.getHarvestablesForCreature("aboleth")).toHaveLength(1);
 		});
 
 		it("returns an empty list for a creature with nothing to harvest", () => {
@@ -324,8 +328,23 @@ describe("Crafting catalog against the real generated data", () => {
 		const parts = state.getHarvestablesForCreature("Aboleth");
 
 		expect(parts.length).toBeGreaterThan(5);
-		// Sorted by ascending DC
-		const dcs = parts.map(p => p.harvest.dc ?? 99);
-		expect([...dcs].sort((a, b) => a - b)).toEqual(dcs);
+		// No two rows are the same physical part
+		const keys = parts.map(p => CharacterSheetState.normaliseMaterialKey(p.name));
+		expect(new Set(keys).size).toBe(keys.length);
+	});
+
+	it("leads with what is worth the trouble, and sinks what cannot be rolled", () => {
+		const parts = state.getHarvestablesForCreature("Aboleth");
+
+		// Rollable parts first — a row with no recorded DC is a reference entry, not an action
+		const ixFirstUnrollable = parts.findIndex(p => p.harvest?.dc == null);
+		if (ixFirstUnrollable !== -1) {
+			expect(parts.slice(ixFirstUnrollable).every(p => p.harvest?.dc == null)).toBe(true);
+		}
+
+		// Then by value, descending, so the decision the player is actually making reads first
+		const rollable = parts.filter(p => p.harvest?.dc != null && p.value != null);
+		const values = rollable.map(p => p.value);
+		expect([...values].sort((a, b) => b - a)).toEqual(values);
 	});
 });

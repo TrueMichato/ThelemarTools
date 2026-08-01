@@ -3,6 +3,8 @@
  * Handles item upgrade application, gemstone empowerment, socketing, and mechanical effects
  */
 
+import {CharacterSheetModal} from "./charactersheet-modal.js";
+
 // Project globals — typed via globalThis cast for TypeScript checkJs
 const {e_, ee, InputUiUtil, Renderer} = /** @type {*} */ (globalThis);
 
@@ -264,7 +266,7 @@ class CharacterSheetUpgrades {
 		const totalGold = this._state.getTotalGold();
 		const rulesRef = CharacterSheetUpgrades.getRulesReference(item);
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Upgrade: ${item.name}`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -580,7 +582,7 @@ class CharacterSheetUpgrades {
 		const hasGemEmpowerment = this._state.isProficientInSkill("gemempowerment");
 		const gemEmpowermentMod = this._state.getSkillMod("gemempowerment");
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: opts.fromInventoryGem ? `Empower: ${opts.fromInventoryGem.name}` : "Gemstone Empowerment",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -715,7 +717,7 @@ class CharacterSheetUpgrades {
 		const gemEmpowermentMod = this._state.getSkillMod("gemempowerment");
 		const minRoll = Math.max(1, dc - gemEmpowermentMod);
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Empower: ${gemName}`,
 			isMinHeight0: true,
 		});
@@ -941,7 +943,7 @@ class CharacterSheetUpgrades {
 			i._isEmpoweredGemstone && i._gemstoneData,
 		);
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Socket Gemstone: ${item.name}`,
 			isMinHeight0: true,
 			isWidth100: true,

@@ -22,6 +22,8 @@
  */
 
 // Project globals — typed via globalThis cast for TypeScript checkJs
+import {CharacterSheetModal} from "./charactersheet-modal.js";
+
 const {e_} = /** @type {*} */ (globalThis);
 
 class CharacterSheetDruidResources {
@@ -575,7 +577,7 @@ class CharacterSheetDruidResources {
 		}
 
 		const maxCr = options.maxCr;
-		const {eleModalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Learn a Wild Shape Form",
 			isWidth100: true,
 			isMinHeight0: true,

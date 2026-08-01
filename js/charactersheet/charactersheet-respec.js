@@ -552,7 +552,7 @@ class CharacterSheetRespec {
 	 * @param {Function} doRemove - Callback that performs the removal and returns {success, reason?}
 	 */
 	async _showRemoveLevelModal (preview, doRemove) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Remove ${preview.className} Level ${preview.classLevel}?`,
 			isMinHeight0: true,
 			cbClose: () => {},
@@ -1010,7 +1010,7 @@ class CharacterSheetRespec {
 	 * @param {Array} editableChoices - Editable choices
 	 */
 	async _showEditModal (level, history, editableChoices) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Edit Level ${level} Choices`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -1101,7 +1101,7 @@ class CharacterSheetRespec {
 	}
 
 	async _editCombatTraditions (level, history, closeParentModal) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Change Level ${level} Combat Traditions`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -1229,7 +1229,7 @@ class CharacterSheetRespec {
 	 * Modeled on LevelUp's _renderMethodsForLevelUp.
 	 */
 	async _editCombatMethods (level, history, choice, closeParentModal) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Change Combat Methods (Level ${level})`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -1441,7 +1441,7 @@ class CharacterSheetRespec {
 	}
 
 	async _editWeaponMasteries (level, history, closeParentModal) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Change Level ${level} Weapon Masteries`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -1565,7 +1565,7 @@ class CharacterSheetRespec {
 	 * @param {Function} closeParentModal - Function to close parent modal
 	 */
 	async _editOptionalFeatures (level, history, choice, closeParentModal) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Change ${choice.label}`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -1821,7 +1821,7 @@ class CharacterSheetRespec {
 	 * @param {Function} closeParentModal - Function to close parent modal
 	 */
 	async _editAsi (level, history, closeParentModal) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Change Level ${level} Ability Score Improvement`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -1920,7 +1920,7 @@ class CharacterSheetRespec {
 	 * @param {Function} closeParentModal - Function to close parent modal
 	 */
 	async _editFeat (level, history, closeParentModal) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Change Level ${level} Feat`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -2032,7 +2032,7 @@ class CharacterSheetRespec {
 			return;
 		}
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Change ${entry.progressionName || "Class Feat"}`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -2158,7 +2158,7 @@ class CharacterSheetRespec {
 	 * @param {Function} closeParentModal - Function to close parent modal
 	 */
 	async _editFeatureChoice (level, history, choice, closeParentModal) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Change ${choice.label}`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -2504,7 +2504,7 @@ class CharacterSheetRespec {
 			return;
 		}
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Change ${history.class.name} Subclass`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -2821,7 +2821,7 @@ class CharacterSheetRespec {
 	async _editRace (level, history, closeParentModal) {
 		const races = this._page.filterByAllowedSources(this._page.getRaces());
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Change Species",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -2975,7 +2975,7 @@ class CharacterSheetRespec {
 	async _editBackground (level, history, closeParentModal) {
 		const backgrounds = this._page.filterByAllowedSources(this._page.getBackgrounds());
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Change Background",
 			isMinHeight0: true,
 			isWidth100: true,

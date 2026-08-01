@@ -1,3 +1,5 @@
+import {CharacterSheetModal} from "./charactersheet-modal.js";
+
 /**
  * sourceFeature values assigned to player-chosen spells by the Builder, LevelUp, and QuickBuild flows.
  * Spells with these labels count against known/prepared limits; orphans (sourceFeature == null) and
@@ -582,7 +584,7 @@ class CharacterSheetSpells {
 	async _pShowSpellPickerModal (spells, {targetClass = null, ownClassConfigs = []} = {}) {
 		const knownSpellIds = this._state.getSpells().map(s => `${s.name}|${s.source}`);
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "✨ Add Spell",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -1800,7 +1802,7 @@ class CharacterSheetSpells {
 	}
 
 	async _showSpellInfoFromData (spell) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: spell.name,
 			isMinHeight0: true,
 			zIndex: 10002, // Above Quick Build overlay (9999) and toasts (10001)
@@ -3150,7 +3152,7 @@ class CharacterSheetSpells {
 		let resolveOuter;
 		const pResult = new Promise(resolve => { resolveOuter = resolve; });
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Cast ${spell.name} — Metamagic`,
 			isMinHeight0: true,
 			cbClose: () => resolveOuter(result),
@@ -4140,7 +4142,7 @@ class CharacterSheetSpells {
 		const table = CharacterSheetState.GAMBLER_GAMBLING_TABLE;
 		if (!table || !table.length) return;
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "\u{1F3B0} Gambling Table",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -4541,7 +4543,7 @@ class CharacterSheetSpells {
 			return a.name.localeCompare(b.name);
 		});
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `✨ ${spell.name} - Choose Creature`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -4831,7 +4833,7 @@ class CharacterSheetSpells {
 			? "Select a form for your Fey familiar. Cost: 1 Wild Shape use or spell slot."
 			: "Select a beast to serve you. Your familiar appears within 10 feet.";
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: modalTitle,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -7972,7 +7974,7 @@ class CharacterSheetSpells {
 			...this._state.getInnateSpells().map(s => `${s.name}|${s.source}`),
 		];
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Choose Spell: ${choice.featureName}`,
 			isMinHeight0: true,
 			zIndex: 10002, // Above QuickBuild/LevelUp modals
@@ -8055,7 +8057,7 @@ class CharacterSheetSpells {
 	 * Show spell info in a modal
 	 */
 	async _showSpellInfoModal (spell) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: spell.name,
 			isMinHeight0: true,
 			zIndex: 10003, // Above spell picker modal (10002)
@@ -8228,7 +8230,7 @@ class CharacterSheetSpells {
 		let resolveOuter;
 		const pResult = new Promise(resolve => { resolveOuter = resolve; });
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "📝 Scribe Spell",
 			isMinHeight0: true,
 			cbClose: () => resolveOuter(result),
@@ -8405,7 +8407,7 @@ class CharacterSheetSpells {
 	async _pPickSwapSpell ({title, prompt, spells}) {
 		return new Promise((resolve) => {
 			(async () => {
-				const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+				const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 					title,
 					isMinHeight0: true,
 					zIndex: 10002,
@@ -8527,7 +8529,7 @@ class CharacterSheetSpells {
 
 		return new Promise((resolve) => {
 			(async () => {
-				const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+				const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 					title,
 					isMinHeight0: true,
 					zIndex: 10002,

@@ -33478,6 +33478,8 @@ class CharacterSheetState {
 			recipesByUid: new Map(recipes.map(r => [`${r.name}|${r.source}`.toLowerCase(), r])),
 			/** @type {Map<string, object[]>} Materials grouped by the creature they come from. */
 			materialsByCreature: this.constructor._buildMaterialsByCreature(materials),
+			/** @type {object[]} Materials gathered from the land rather than cut from a corpse. */
+			foragedMaterials: this.constructor._buildForagedMaterials(materials),
 		};
 	}
 
@@ -33550,21 +33552,66 @@ class CharacterSheetState {
 		return out;
 	}
 
-	/** Group materials by the creature they are harvested from, for the Harvest flow. */
+	/**
+	 * Group harvestables by the creature they come from.
+	 *
+	 * Two things matter here, and the raw catalog gets both wrong for the Harvest modal:
+	 *
+	 *   Duplicates. Arcadia 8 and Hamund's both describe an Aboleth Eye, so the raw array lists
+	 *   an Aboleth's parts thirteen times when there are really seven of them. Merging inside each
+	 *   creature — rather than reusing the global `materialsByKey` — keeps a part named "Hide" on
+	 *   the creature it was actually taken from, and leaves each row's `printings` describing only
+	 *   the books that documented *that* creature's version.
+	 *
+	 *   Order. DC-ascending puts the worthless easy parts first, which is backwards: a player
+	 *   standing over a corpse with limited time wants the valuable parts at the top, and the DC
+	 *   is what they weigh that against. Parts with no recorded DC can't be rolled at all, so they
+	 *   sink below everything rollable regardless of value.
+	 */
 	static _buildMaterialsByCreature (materials) {
 		/** @type {Map<string, object[]>} */
-		const out = new Map();
+		const raw = new Map();
 		for (const mat of materials) {
 			const creature = mat.harvest?.creature?.name;
 			if (!creature) continue;
 			const key = creature.toLowerCase();
-			if (!out.has(key)) out.set(key, []);
-			out.get(key).push(mat);
+			if (!raw.has(key)) raw.set(key, []);
+			raw.get(key).push(mat);
 		}
-		for (const list of out.values()) {
-			list.sort((a, b) => (a.harvest.dc ?? 99) - (b.harvest.dc ?? 99) || `${a.name}`.localeCompare(b.name));
+
+		/** @type {Map<string, object[]>} */
+		const out = new Map();
+		for (const [key, group] of raw) {
+			const merged = [...this._buildMergedMaterials(group).values()];
+			merged.sort((a, b) => {
+				const rollableA = a.harvest?.dc != null ? 0 : 1;
+				const rollableB = b.harvest?.dc != null ? 0 : 1;
+				if (rollableA !== rollableB) return rollableA - rollableB;
+				return (b.value ?? -1) - (a.value ?? -1) || `${a.name}`.localeCompare(b.name);
+			});
+			out.set(key, merged);
 		}
 		return out;
+	}
+
+	/**
+	 * Everything you gather rather than butcher.
+	 *
+	 * Arcadia 11 states the rule plainly: harvesting is "collecting usable ingredients, either
+	 * from the earth or from a dead creature". The Harvest modal was built creature-first, which
+	 * is right for the common case but leaves 238 materials — every herb in Hamund's Herbalism
+	 * Handbook, the Complete Crafter's minerals, and all thirteen Arcadia 11 food ingredients —
+	 * with no route into the game at all. Since nine of the nineteen Arcadia 11 dishes need
+	 * nothing but those food ingredients, the omission made the entire cooking system unusable.
+	 *
+	 * Sorted by category then name, because these are browsed rather than looked up: a player
+	 * gathering in a forest wants to see what herbs exist, not to already know the name.
+	 */
+	static _buildForagedMaterials (materials) {
+		const foraged = materials.filter(mat => !mat.harvest?.creature?.name);
+		return [...this._buildMergedMaterials(foraged).values()]
+			.sort((a, b) => `${a.materialCategory || "\uffff"}`.localeCompare(`${b.materialCategory || "\uffff"}`)
+				|| `${a.name}`.localeCompare(b.name));
 	}
 
 	/**
@@ -33580,6 +33627,11 @@ class CharacterSheetState {
 	getHarvestablesForCreature (creatureName) {
 		if (!this._craftingCatalog || !creatureName) return [];
 		return this._craftingCatalog.materialsByCreature.get(`${creatureName}`.toLowerCase()) || [];
+	}
+
+	/** Everything gathered from the land — herbs, minerals, and the pantry staples. */
+	getForagedMaterials () {
+		return this._craftingCatalog?.foragedMaterials || [];
 	}
 
 	// =====================================================================

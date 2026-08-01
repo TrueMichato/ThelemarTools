@@ -2,6 +2,8 @@
  * Character Sheet Combat Manager
  * Handles attacks, weapons, and combat-related actions
  */
+import {CharacterSheetModal} from "./charactersheet-modal.js";
+
 const {e_, ee} = /** @type {*} */ (globalThis);
 
 /* ========================================================================
@@ -576,7 +578,7 @@ class CharacterSheetCombat {
 			abilityMod: "str",
 		};
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `${isEdit ? "⚔️ Edit" : "➕ Add"} Attack`,
 			isMinHeight0: true,
 		});
@@ -945,7 +947,7 @@ class CharacterSheetCombat {
 			abilityMod: overrides.abilityMod ?? (isRanged ? "dex" : (hasFinesse ? "finesse" : "str")),
 		};
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `⚔️ Edit ${weapon.name}`,
 			isMinHeight0: true,
 		});
@@ -1162,7 +1164,7 @@ class CharacterSheetCombat {
 	 * @deprecated Use _pShowWeaponAttackModal instead for full editing
 	 */
 	async _pShowWeaponBonusModal (weapon) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `⚔️ Edit ${weapon.name} Bonuses`,
 			isMinHeight0: true,
 		});
@@ -1881,7 +1883,7 @@ class CharacterSheetCombat {
 		let resolveOuter = null;
 		let isResolved = false;
 		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Arcane Shot — ${ctx.attack?.name || "Ranged Attack"}`,
 			isMinHeight0: true,
 			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } csRestoreModalFocus(trigger); },
@@ -2059,7 +2061,7 @@ class CharacterSheetCombat {
 		let resolveOuter = null;
 		let isResolved = false;
 		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Critical Hit Effect — ${ctx.attack?.name || "Weapon"}`,
 			isMinHeight0: true,
 			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } csRestoreModalFocus(trigger); },
@@ -2427,7 +2429,7 @@ class CharacterSheetCombat {
 	async _showQuiverModal () {
 		const quiver = this._state.getEquippedQuiver?.();
 		if (!quiver) return;
-		const {eleModalInner: modalInner} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner} = await CharacterSheetModal.pGetShow({
 			title: `🏹 Quiver — ${quiver.name}`,
 			isMinHeight0: true,
 		});
@@ -4486,7 +4488,7 @@ class CharacterSheetCombat {
 
 		let resolveOuter = null;
 		let isResolved = false;
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Baleful Interdict — ${ctx.attack?.name || "Weapon Attack"}`,
 			isMinHeight0: true,
 			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } },
@@ -4895,7 +4897,7 @@ class CharacterSheetCombat {
 				</div>`
 			: "";
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Place Baleful Interdict Seal",
 			isMinHeight0: true,
 		});
@@ -4961,7 +4963,7 @@ class CharacterSheetCombat {
 				</div>`
 			: "";
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Move Seals (within 30 ft)",
 			isMinHeight0: true,
 		});
@@ -5032,7 +5034,7 @@ class CharacterSheetCombat {
 				</div>`
 			: "";
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Slippery Ploy — Place a Seal (reaction)",
 			isMinHeight0: true,
 		});
@@ -7038,7 +7040,7 @@ class CharacterSheetCombat {
 		// so focus can return there when the choice is made or cancelled.
 		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
 
-		const {eleModalInner: modalInner, doClose, pGetResolved} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
 			title: `${feature.name} — Choose`,
 			isMinHeight0: true,
 			zIndex: 10003,
@@ -7565,7 +7567,7 @@ class CharacterSheetCombat {
 	 * and calculates escalating bonus damage per subsequent hit.
 	 */
 	async _showWhirlpoolStrikeModal (feature) {
-		const {eleModalInner: modalInner, doClose, pGetResolved} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
 			title: `${feature.name} — Multi-Target Attack`,
 			isMinHeight0: true,
 			zIndex: 10003,
@@ -7745,7 +7747,7 @@ class CharacterSheetCombat {
 	 * interactive dice rolls, and a Use button.
 	 */
 	async _showCombatActionModal (feature) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: feature.name,
 			isMinHeight0: true,
 			zIndex: 10002,
@@ -11901,7 +11903,7 @@ class CharacterSheetCombat {
 		const maxDegree = this._getCharacterMaxDegree();
 		const maxMethods = this._getCharacterMaxMethods();
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Combat Methods",
 			isMinHeight0: true,
 			isWidth100: true,

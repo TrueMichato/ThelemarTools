@@ -2,6 +2,8 @@
  * Character Sheet Inventory Manager
  * Handles items, equipment, currency, and encumbrance
  */
+import {CharacterSheetModal} from "./charactersheet-modal.js";
+
 const {e_, ee} = /** @type {*} */ (globalThis);
 
 class CharacterSheetInventory {
@@ -362,7 +364,7 @@ class CharacterSheetInventory {
 		// Filter items by allowed sources
 		const items = this._page.filterByAllowedSources(this._allItems);
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -1098,6 +1100,7 @@ class CharacterSheetInventory {
 		const type = item.type?.toLowerCase();
 		if (type === "p") return true; // Potion
 		if (type === "sc") return true; // Scroll
+		if (type === "fd") return true; // Food and drink — an Arcadia 11 dish is eaten, not carried
 		if (item.poison) return true;
 		if (item.name?.toLowerCase().includes("potion")) return true;
 		if (item.name?.toLowerCase().includes("scroll")) return true;
@@ -1136,7 +1139,7 @@ class CharacterSheetInventory {
 	}
 
 	async _showItemInfoFromData (item) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: item.name,
 			isMinHeight0: true,
 		});
@@ -1914,7 +1917,7 @@ class CharacterSheetInventory {
 	async _showAddCustomItem (opts = {}) {
 		const {prefillItem = null, editItemId = null} = opts;
 		const isEdit = !!editItemId;
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: isEdit ? "✏️ Modify Item" : "✨ Create Custom Item",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -4066,6 +4069,119 @@ class CharacterSheetInventory {
 	}
 
 	/**
+	 * Whether an item should be USED by eating it. Arcadia 11 grants a cooked dish's benefit to
+	 * "creatures who eat the prepared food", so the dish is an object that sits in a pack until
+	 * somebody does — which only works if the sheet offers a way to.
+	 * @param {object} item - The item data
+	 * @returns {boolean}
+	 */
+	_isFoodConsumable (item) {
+		return this._getConsumableTypeCode(item) === "fd";
+	}
+
+	/**
+	 * Eat a dish: show what it does, confirm, consume.
+	 *
+	 * Most Arcadia 11 benefits are prose that lands on a later roll — "advantage on *a* Strength
+	 * ability check", "you can use a bonus action to exhale fire" — and have no honest home on the
+	 * sheet. The measurable subset is applied automatically and named above the confirm, so the
+	 * player can see exactly where the boundary falls between what the sheet tracks and what they
+	 * do. See `CharacterSheetCrafting.getSafeDishEffects`.
+	 * @param {object} item - The item data
+	 * @returns {Promise<boolean>} Whether it was eaten.
+	 */
+	async _useFood (item) {
+		const renderer = Renderer.get();
+		const benefits = (item.entries || []).filter(e => e?.type === "entries" && e.entries?.length);
+		const effects = this._getFoodEffects(item, benefits);
+
+		const isEaten = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+			title: `Eat ${item.name}?`,
+			htmlDescription: `${benefits.map(b => `<div class="mb-2">${renderer.render(b, 2)}</div>`).join("")}
+				${effects.length ? `<p class="ve-small ve-muted mb-1">The sheet will apply: ${effects.map(e => this.constructor._describeFoodEffect(e)).join(", ").qq()}. Anything else above is yours to invoke.</p>` : ""}
+				<p class="ve-small ve-muted">The portion is eaten.</p>`,
+			textYes: "Eat it",
+			textNo: "Not now",
+		}));
+		if (!isEaten) return false;
+
+		this._applyFoodEffects(item, effects);
+		return true;
+	}
+
+	/**
+	 * The effects of eating that the sheet is willing to apply itself.
+	 * Delegated to `CharacterSheetCrafting` so the allowlist has one home; absent that module
+	 * (unit tests import inventory alone) eating still works and simply applies nothing.
+	 * @param {object} item - The item data
+	 * @param {Array<object>} benefits - The rendered benefit blocks
+	 * @returns {Array<object>}
+	 */
+	_getFoodEffects (item, benefits) {
+		const fnGet = globalThis.CharacterSheetCrafting?.getSafeDishEffects;
+		if (!fnGet) return [];
+
+		const text = benefits
+			.flatMap(b => b.entries)
+			.map(e => typeof e === "string" ? e : JSON.stringify(e))
+			.join(" ");
+		return fnGet.call(globalThis.CharacterSheetCrafting, text);
+	}
+
+	/** Short human phrase for one applied effect, for the confirmation dialog. */
+	static _describeFoodEffect (fx) {
+		if (fx.type === "tempHp") return `${fx.value} temporary hit points`;
+		if (fx.type === "resistance") return `resistance to ${String(fx.target).replace(/^damage:/, "")}`;
+		if (fx.type === "immunity") return `immunity to ${String(fx.target).replace(/^damage:/, "")}`;
+		if (fx.type === "advantage") return `advantage on ${String(fx.target).replace(/^(check|skill|save):/, "")}`;
+		if (fx.type === "bonus") return `+${fx.value} ${fx.target}`;
+		return fx.type;
+	}
+
+	/**
+	 * Grant what eating grants.
+	 *
+	 * Temporary hit points are immediate and do not stack (RAW: take the better). Everything else
+	 * is a lasting grant, so it becomes one dismissible active state named after the dish — the
+	 * durations in Arcadia 11 are almost all "until you finish a long rest", which the active-state
+	 * system has no notion of, so the player ends it when the fiction says it ends.
+	 * @param {object} item - The item data
+	 * @param {Array<object>} effects - Allowlisted effects
+	 */
+	_applyFoodEffects (item, effects) {
+		if (!effects.length) return;
+
+		const applied = [];
+
+		const tempHp = effects.filter(e => e.type === "tempHp").map(e => parseInt(e.value, 10) || 0).sort((a, b) => b - a)[0];
+		if (tempHp > 0) {
+			const current = this._state.getTempHp() || 0;
+			if (tempHp > current) {
+				this._state.setTempHp(tempHp);
+				applied.push(`${tempHp} temp HP`);
+			} else {
+				// RAW temporary hit points never stack — but silently doing nothing reads as a bug
+				// when the dish's whole benefit was the temp HP.
+				applied.push(`no temp HP (you already have ${current})`);
+			}
+		}
+
+		const lasting = effects.filter(e => e.type !== "tempHp");
+		if (lasting.length) {
+			this._state.addActiveState("custom", {
+				name: item.name,
+				icon: "\ud83c\udf72",
+				description: `From eating ${item.name}.`,
+				sourceFeatureId: `dish_${item.name}`,
+				customEffects: lasting.map(e => ({...e})),
+			});
+			applied.push(...lasting.map(e => this.constructor._describeFoodEffect(e)));
+		}
+
+		if (applied.length) JqueryUtil.doToast({type: "success", content: `Ate ${item.name} \u2014 ${applied.join(", ")}.`});
+	}
+
+	/**
 	 * Use a consumable item (potion or scroll).
 	 *
 	 * Dispatch uses the same robust detection as the list-building `_isConsumable`
@@ -4088,6 +4204,8 @@ class CharacterSheetInventory {
 			consumed = await this._useScroll(item, {maximize});
 		} else if (this._isPotionConsumable(item)) {
 			consumed = await this._usePotion(item, {maximize});
+		} else if (this._isFoodConsumable(item)) {
+			consumed = await this._useFood(item);
 		}
 
 		if (consumed) {
@@ -4291,7 +4409,7 @@ class CharacterSheetInventory {
 		// Try to find full item data
 		const itemData = this._allItems.find(i => i.name === item.name && i.source === item.source);
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: item.name,
 			isMinHeight0: true,
 		});
@@ -4427,7 +4545,7 @@ class CharacterSheetInventory {
 		const requirements = this._state.getArtifactPropertyRequirements(itemId);
 		const selectedProperties = this._state.getArtifactProperties(itemId);
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `${item.name} - Artifact Properties`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -5805,7 +5923,11 @@ class CharacterSheetInventory {
 			&& (!item.requiresAttunement || item.attuned)
 			&& (item.chargesCurrent ?? item.charges ?? 0) > 0;
 		const hasNote = !!this._state.getItemNote(item.id);
-		const isConsumable = item.type === "P" || item.type === "SC"; // Potion or Scroll
+		// The one predicate, not a third stricter copy of it. This was `item.type === "P" || "SC"`,
+		// which meant a `"P|DMG"` potion, a lowercase type, a poison, or anything name-matched was
+		// listed on the Consumables tab and then offered no way to consume it — the same strictness
+		// already fixed in the *dispatch* path but left behind here.
+		const isConsumable = this._isConsumable(item);
 		const isArtifact = item.rarity === "artifact";
 		const artifactNeedsConfig = isArtifact && item.artifactProperties?.hasRequirements && !this._state.isArtifactFullyConfigured(item.id);
 		const canUpgrade = CharacterSheetUpgrades.isWeapon(item) || CharacterSheetUpgrades.isArmor(item) || CharacterSheetUpgrades.isShield(item);

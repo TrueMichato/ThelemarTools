@@ -11,6 +11,7 @@ import {CharacterSheetLevelUp} from "./charactersheet-levelup.js";
 import {CharacterSheetLayout} from "./charactersheet-layout.js";
 import {CharacterSheetNotes} from "./charactersheet-notes.js";
 import {CharacterSheetRollHistory} from "./charactersheet-rollhistory.js";
+import {CharacterSheetModal} from "./charactersheet-modal.js";
 import {CharacterSheetCustomAbilities} from "./charactersheet-customabilities.js";
 import {CharacterSheetQuickBuild} from "./charactersheet-quickbuild.js";
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
@@ -2563,7 +2564,7 @@ class CharacterSheetPage {
 	 * Add custom companion manually
 	 */
 	async _onAddCustomCompanion () {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "➕ Add Custom Companion",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -5138,7 +5139,7 @@ class CharacterSheetPage {
 	}
 
 	async _showCompanionStatBlock (companion) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `📋 ${companion.customName || companion.name}`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -10610,6 +10611,8 @@ class CharacterSheetPage {
 			const page = /** @type {*} */ (document.querySelector(".charsheet-page"));
 			page.setAttribute("data-textsize", size);
 			page.style.setProperty("--cs-text-scale", size / 100);
+			// Mirrored onto <body> for body-portalled modals, which sit outside `.charsheet-page`.
+			document.body.setAttribute("data-textsize", String(size));
 			// Set root font-size so ALL rem-based content scales — including modals/popups appended to body
 			document.documentElement.style.fontSize = `${size}%`;
 			document.documentElement.style.setProperty("--cs-text-scale", String(size / 100));
@@ -10755,6 +10758,10 @@ class CharacterSheetPage {
 		const applyFont = (font) => {
 			const page = document.querySelector(".charsheet-page");
 			page.setAttribute("data-font", font);
+			// Mirrored onto <body> so modals — which `UiUtil` portals to `document.body`, outside
+			// `.charsheet-page` — can still resolve `--cs-font-family`. Without this every dialog
+			// on the sheet renders in UA-default Arial regardless of the chosen face.
+			document.body.setAttribute("data-font", font);
 
 			// Update UI
 			options.querySelectorAll(".charsheet__font-option--active").forEach(el => el.classList.remove("charsheet__font-option--active"));
@@ -11174,7 +11181,7 @@ class CharacterSheetPage {
 			return;
 		}
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "🩹 Add Condition",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -11697,7 +11704,7 @@ class CharacterSheetPage {
 
 		let resolveOuter = null;
 		let isResolved = false;
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Conditional Modifiers — ${rollLabel}`,
 			isMinHeight0: true,
 			cbClose: () => {
@@ -11867,7 +11874,7 @@ class CharacterSheetPage {
 		// CS-BUG #10). Stack above the overlay so the pick is always reachable. Mirrors the
 		// 10000+ values the QuickBuild flow uses for its own modals.
 		const isOverlayUp = typeof document !== "undefined" && document.body?.classList?.contains("has-quickbuild-overlay");
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `${choice.featureName || "Feature"} — Choose ${kindLabel}`,
 			isMinHeight0: true,
 			...(isOverlayUp ? {zIndex: 10001} : {}),
@@ -12051,7 +12058,7 @@ class CharacterSheetPage {
 
 		let resolveOuter = null;
 		let isResolved = false;
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Red Cant",
 			isMinHeight0: true,
 			cbClose: () => {
@@ -13791,7 +13798,7 @@ class CharacterSheetPage {
 	async _showAcBreakdownModal () {
 		const breakdown = this._state.getAcBreakdown();
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "🛡️ Armor Class Breakdown",
 			isMinHeight0: true,
 		});
@@ -13929,7 +13936,7 @@ class CharacterSheetPage {
 			.map(type => ({type, breakdown: this._state.getSpeedBreakdown(type)}))
 			.filter(({breakdown}) => breakdown.total > 0 || breakdown.components.length > 0);
 
-		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = await CharacterSheetModal.pGetShow({
 			title: "🏃 Speed Breakdown",
 			isMinHeight0: true,
 			hasFooter: true,
@@ -13983,7 +13990,7 @@ class CharacterSheetPage {
 	async _showHpBreakdownModal () {
 		const bd = this._state.getHpBreakdown();
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "❤️ Hit Points Breakdown",
 			isMinHeight0: true,
 		});
@@ -14551,7 +14558,7 @@ class CharacterSheetPage {
 
 	// #region Settings Modal
 	async _showSettingsModal () {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "⚙️ Sheet Settings",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -15425,7 +15432,7 @@ class CharacterSheetPage {
 	 * Show the custom modifiers management modal
 	 */
 	async _showCustomModifiersModal () {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "🎯 Custom Modifiers",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -16650,7 +16657,7 @@ class CharacterSheetPage {
 
 		return new Promise((resolve) => {
 			(async () => {
-				const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+				const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 					title: count > 1 ? `${title} (Choose ${count})` : title,
 					isMinHeight0: true,
 					isWidth100: true,
@@ -16876,7 +16883,7 @@ class CharacterSheetPage {
 	 * Show modal for adding a custom skill
 	 */
 	async _showAddCustomSkillModal () {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Add Custom Skill",
 			isMinHeight0: true,
 		});
@@ -17005,7 +17012,7 @@ class CharacterSheetPage {
 	 * Default chips are +2/+4/+6 with a numeric override for DM discretion.
 	 */
 	async _showAddLoreSkillModal () {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Add Lore Skill",
 			isMinHeight0: true,
 		});
@@ -17104,7 +17111,7 @@ class CharacterSheetPage {
 	 * per-roll ability menu (right-click a skill) is unaffected and always wins for that one roll.
 	 */
 	async _showSkillAbilitiesModal () {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Skill Abilities",
 			isMinHeight0: true,
 		});
@@ -17210,7 +17217,7 @@ class CharacterSheetPage {
 			resolveOuter(value);
 		};
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Lore Mastery — Choose",
 			isMinHeight0: true,
 			cbClose: () => resolveOnce(null),
@@ -17363,7 +17370,7 @@ class CharacterSheetPage {
 	 * Show modal for editing base ability scores
 	 */
 	async _showEditAbilityScoresModal () {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Edit Ability Scores",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -17486,7 +17493,7 @@ class CharacterSheetPage {
 	 * Show modal for editing proficiencies and languages
 	 */
 	async _showEditProficienciesModal () {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Edit Proficiencies & Languages",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -17567,7 +17574,7 @@ class CharacterSheetPage {
 		// Determine max masteries from class features
 		const maxMasteries = this._getMaxWeaponMasteries();
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Edit Weapon Masteries",
 			isMinHeight0: true,
 			isWidth100: true,

@@ -63,10 +63,11 @@ class CharacterSheetSpawnPrompts {
 		}
 
 		// ── Watchdog: any other modal ──
-		// Bespoke pickers build their own modal via `UiUtil.pGetShowModal`. We can't
-		// answer those generically, but we can refuse to hang: record the title and
-		// close immediately (every such picker resolves `null` on close, i.e. the
-		// same path as a player pressing Escape).
+		// Bespoke pickers build their own modal via `CharacterSheetModal.pGetShow`, which
+		// resolves `UiUtil.pGetShowModal` at call time precisely so this patch still catches
+		// them. We can't answer those generically, but we can refuse to hang: record the title
+		// and close immediately (every such picker resolves `null` on close, i.e. the same path
+		// as a player pressing Escape).
 		if (UiUtil?.pGetShowModal) {
 			this._patch(UiUtil, "pGetShowModal", async (/** @type {*} */ opts) => this._answerUnknownModal(UiUtil, opts));
 		}

@@ -3,6 +3,8 @@
  * Manages sticky notes and entity notes (on items, spells, features, etc.)
  */
 
+import {CharacterSheetModal} from "./charactersheet-modal.js";
+
 // Project globals — typed via globalThis cast for TypeScript checkJs
 const {e_, InputUiUtil} = /** @type {*} */ (globalThis);
 
@@ -455,7 +457,7 @@ export class CharacterSheetNotes {
 		const existingNote = noteId ? this._state.getStickyNote(noteId) : null;
 		const isNew = !existingNote;
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: isNew ? "📋 Add Sticky Note" : "📌 Edit Sticky Note",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -647,7 +649,7 @@ export class CharacterSheetNotes {
 	async showNoteModal (entityType, entityId, entityName, onSave) {
 		const currentNote = this._state.getEntityNote(entityType, entityId);
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `📝 Note: ${entityName}`,
 			isMinHeight0: true,
 		});

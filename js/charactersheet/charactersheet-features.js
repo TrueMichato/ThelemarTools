@@ -2,6 +2,8 @@
  * Character Sheet Features Manager
  * Handles class features, racial traits, feats, and other abilities
  */
+import {CharacterSheetModal} from "./charactersheet-modal.js";
+
 const {e_, ee} = /** @type {*} */ (globalThis);
 
 class CharacterSheetFeatures {
@@ -247,7 +249,7 @@ class CharacterSheetFeatures {
 	async _pShowFeatPickerModal () {
 		const knownFeatNames = this._state.getFeats().map(f => f.name.toLowerCase());
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "🎖️ Add Feat",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -729,7 +731,7 @@ class CharacterSheetFeatures {
 	}
 
 	async _showFeatInfo (feat) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: feat.name,
 			isMinHeight0: true,
 		});
@@ -773,7 +775,7 @@ class CharacterSheetFeatures {
 			return;
 		}
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -2484,7 +2486,7 @@ class CharacterSheetFeatures {
 			const cancelBtn = e_({outer: `<button class="ve-btn ve-btn-default mr-2">Cancel</button>`});
 			cancelBtn.addEventListener("click", () => { doResolve(null); doClose(); });
 
-			UiUtil.pGetShowModal({
+			CharacterSheetModal.pGetShow({
 				title: `Choices for ${feat.name}`,
 				isMinHeight0: true,
 				cbClose: () => doResolve(null),

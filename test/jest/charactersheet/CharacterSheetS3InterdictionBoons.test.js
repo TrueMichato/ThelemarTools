@@ -270,7 +270,9 @@ describe("R25 S7 — source-pin: Red Cant uses the polished modal, not a plain c
 		const m = SOURCE.match(/async _pPromptRedCant \([\s\S]*?\n\t\}/);
 		expect(m).not.toBeNull();
 		const body = m[0];
-		expect(body).toMatch(/UiUtil\.pGetShowModal/);
+		// Routed through the shared character-sheet wrapper, which adds the dialog role,
+		// the close button, Escape-from-input and focus restore on top of `UiUtil.pGetShowModal`.
+		expect(body).toMatch(/CharacterSheetModal\.pGetShow/);
 		expect(body).toMatch(/charsheet__red-cant/);
 		expect(body).toMatch(/data-act="confirm"/);
 		expect(body).toMatch(/data-act="decline"/);

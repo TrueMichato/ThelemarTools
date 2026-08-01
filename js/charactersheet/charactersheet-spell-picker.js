@@ -4,6 +4,8 @@
  * Single source of truth for all spell-picking UIs (known spells, cantrips, wizard spellbook).
  */
 
+import {CharacterSheetModal} from "./charactersheet-modal.js";
+
 // Project globals — typed via globalThis cast for TypeScript checkJs
 const {e_, ee} = /** @type {*} */ (globalThis);
 
@@ -770,7 +772,7 @@ class CharacterSheetSpellPicker {
 	 * @param {Object} spell - Spell data object
 	 */
 	static async showSpellInfoModal (spell) {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: spell.name,
 			isMinHeight0: true,
 			zIndex: 10002,

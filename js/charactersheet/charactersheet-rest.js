@@ -3,6 +3,8 @@
  * Manages short rest, long rest, and recovery mechanics
  */
 
+import {CharacterSheetModal} from "./charactersheet-modal.js";
+
 // Project globals — typed via globalThis cast for TypeScript checkJs
 const {e_, ee} = /** @type {*} */ (globalThis);
 
@@ -51,7 +53,7 @@ class CharacterSheetRest {
 			return;
 		}
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "😴 Short Rest",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -513,7 +515,7 @@ class CharacterSheetRest {
 			.filter(it => CharacterSheetState.itemRechargesOnRest(it, "long") && (it.chargesCurrent ?? it.charges) < it.charges)
 			.map(it => ({name: it.name, formula: CharacterSheetState.getItemRechargeFormula(it)}));
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "🌙 Long Rest",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -1127,7 +1129,7 @@ class CharacterSheetRest {
 			return;
 		}
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "👅 Forked Tongue — Swap Language",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -1335,7 +1337,7 @@ class CharacterSheetRest {
 
 		const dice = calcs.gamblerSpellsPreparedDice || "2d4";
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "\u{1F3B2} Gambler: Roll for Prepared Spells",
 			isMinHeight0: true,
 		});
@@ -1387,7 +1389,7 @@ class CharacterSheetRest {
 		const currentMemo = this._state.getScribingMemorizedSpell();
 		const maxLevel = this._state.getScribingMaxSpellLevel();
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "📖 Scribing Spellbook — Memorize Spell",
 			isMinHeight0: true,
 		});

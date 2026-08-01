@@ -4,6 +4,7 @@
 - Module Map
 - Data Flow (Initialization, Update Cycle, Event Communication, Module Init Order)
 - CSS Conventions
+- Modals
 - Data Validation Patterns
 - State Serialization
 - Key Integration Points
@@ -233,6 +234,42 @@ Combat, Spells *and* Overview tabs all render from one code path) must adapt to 
 layer also owes clearance to what it covers: the mobile tab bar publishes
 `--cs-tabbar-height` (with `env(safe-area-inset-bottom)`), and scrollers it can occlude
 pad by that value rather than re-stacking shared site chrome.
+
+## Modals
+
+**Never call `UiUtil.pGetShowModal` from character-sheet code.** Use
+`CharacterSheetModal.pGetShow` (`js/charactersheet/charactersheet-modal.js`) — identical signature
+and return shape, so migrating a call site is a rename and nothing else.
+
+The wrapper adds what no individual dialog should have to remember:
+
+| Adds | Why |
+|---|---|
+| `role="dialog"`, `aria-modal="true"`, `aria-labelledby` on the header | Otherwise a screen reader reads the page behind the modal |
+| A close **X** in the header, via `eleTitleSplit` | `UiUtil` only renders one under `isFullscreenModal`, which *also* swaps in an overlay blind and fullscreen header/footer variants — far too much to opt into for a button |
+| Escape that works **from inside an input** | `UiUtil`'s document-level handler bails on `EventUtil.isInInput`, and several sheet modals autofocus a search field on open |
+| A Tab focus trap scoped to `eleModal` | |
+| Focus restored to the element that opened the modal | Without it focus lands on `<body>` and keyboard users restart from the top of the page |
+| `.cs-modal` on `eleModal` | The styling hook that gives modals the sheet's font and muted-text token — modals are portalled to `document.body`, outside `.charsheet-page` |
+
+Escape hatch: `opts.isSkipCharacterSheetEnhancements` behaves exactly like the raw `UiUtil` call.
+
+### Four things about it are load-bearing
+
+1. **`UiUtil.pGetShowModal` is resolved at call time, never captured at module load.**
+   `CharacterSheetSpawnPrompts` monkey-patches that method to auto-answer dialogs during `?spawn=`
+   builds and E2E runs; a captured reference silently bypasses the patch and hangs the harness.
+2. **`eleModal` may be absent.** The spawn harness's fallback stub returns only `eleModalInner`,
+   `doClose`, `pGetResolved` and `doAutoResize`, so every enhancement is guarded by an early return.
+3. **A caller's `cbClose` is composed with, never replaced** — dozens of sites use it to persist
+   state. Focus restore runs *after* the caller's callback, so a follow-up modal's own trigger
+   capture wins.
+4. **`.cs-modal` is not `.cs-adaptive-panel`.** `container-type: inline-size` implies inline-size
+   containment, and most sheet modals size to their content, so containerising the shell collapses
+   it to zero width. A content root **inside** an `isWidth100` modal may opt in individually.
+
+`CharacterSheetModal.test.js` locks the whole contract, including the missing-`eleModal` guard and
+the `cbClose` composition.
 
 ### Data Validation Patterns
 

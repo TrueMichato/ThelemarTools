@@ -2,6 +2,7 @@
  * Character Sheet Export/Import Handler
  * Handles saving, loading, exporting, and importing character data
  */
+import {CharacterSheetModal} from "./charactersheet-modal.js";
 import {CharacterSheetNpcExporter} from "./charactersheet-npc-exporter.js";
 import {CharacterSheetPdf} from "./charactersheet-pdf.js";
 
@@ -36,7 +37,7 @@ class CharacterSheetExport {
 		const jsonStr = JSON.stringify(characterData, null, 2);
 		const characterName = this._state.getName() || "character";
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "📤 Export Character",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -160,7 +161,7 @@ class CharacterSheetExport {
 	}
 
 	async _showImportDialog () {
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "📥 Import Character",
 			isMinHeight0: true,
 		});
@@ -286,7 +287,7 @@ class CharacterSheetExport {
 			});
 			let sourceMeta = CharacterSheetNpcExporter.getDefaultSourceMeta(sourceConfig);
 
-			const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+			const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 				title: "👹 Export Character as NPC",
 				isMinHeight0: true,
 				isWidth100: true,

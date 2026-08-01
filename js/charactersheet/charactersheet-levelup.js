@@ -3,8 +3,11 @@
  * Handles level up process including class features, ability score improvements, subclass selection
  */
 
+import {CharacterSheetModal} from "./charactersheet-modal.js";
+
 // Project globals — destructured from globalThis so the TypeScript checkJs
 // language service has typed names to reference. Zero runtime impact.
+
 const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlUtil, CharacterSheetClassUtils} = /** @type {*} */ (globalThis);
 
 class CharacterSheetLevelUp {
@@ -113,7 +116,7 @@ class CharacterSheetLevelUp {
 	/** @param {*} arg */
 
 	async _pShowLevelUpModal ({classData, classEntry, newLevel, newFeatures, hasAsi, needsSubclass, fullSubclassData = null}) {
-		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = await CharacterSheetModal.pGetShow({
 			title: `🎉 Level Up: ${classEntry.name} → Level ${newLevel}`,
 			isMinHeight0: true,
 			isWidth100: true,
@@ -5328,7 +5331,7 @@ class CharacterSheetLevelUp {
 			});
 		};
 
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "📚 Add New Class (Multiclass)",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -5615,7 +5618,7 @@ class CharacterSheetLevelUp {
 		}
 
 		// Show choices modal
-		const {eleModalInner: modalInner, doClose} = await UiUtil.pGetShowModal({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `${selectedClass.name} - Level 1 Choices`,
 			isMinHeight0: true,
 			isWidth100: true,
