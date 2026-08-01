@@ -1962,6 +1962,88 @@ out of this change so the blast radius stays confined to one spec.
 
 ---
 
+## CS-BUG-086 — active-state bonuses targeting `skill:<name>` were silently discarded
+
+**Status**: RESOLVED (this branch).
+
+**Affected**: every active state whose effects use the ability-agnostic
+`skill:<name>` / `skill:all` bonus vocabulary. The live victim found in-tree
+is the **buff registry's Pass Without Trace**, which emits
+`{type: "bonus", target: "skill:stealth", value: 10}` as a `selfEffects`
+entry (`charactersheet-state.js` ~:55083). `_applyBuffFromRegistry`
+(`charactersheet.js` :8178-8201) turns that into `customEffects` on a
+`custom` active state, so it reached `getSkillBonusFromStates()` — which
+threw it away.
+
+**Symptom**: applying Pass Without Trace moved the displayed Stealth
+modifier by **0** instead of **+10**. Because `_rollSkillCheck` goes through
+`getSkillMod()`, the roll total was wrong too, not just the display.
+
+**Root cause**: `getSkillBonusFromStates(skill, ability)` only ever matched
+the *ability-keyed* `check:` hierarchy — `check:<ability>:<skill>`,
+`check:<ability>`, `check`. The `skill:` vocabulary is used freely
+everywhere else in the effect system (named modifiers, calculation-based
+effects, `_effectMatchesType`), so a state author had no way to know one
+aggregator spoke a narrower dialect. Nothing warned; the effect just
+evaporated.
+
+**Fix**: `getSkillBonusFromStates()` now additionally matches a
+case/whitespace-normalised `skill:<skillName>` and `skill:all`. These are
+deliberately **ability-agnostic**: a `skill:stealth` bonus survives an
+ability swap on the skill, which is the whole point of the vocabulary.
+
+**Regression pin**: `test/jest/charactersheet/CharacterSheetSteelHawk.test.js`
+→ `CS-BUG-086: active-state bonuses targeting skill:<name>` (5 tests:
+Pass Without Trace's +10 reaches the modifier, `skill:all` fans out,
+scoping does not leak to other skills, survives an ability swap, drops on
+deactivation). **Falsified**: reverting only the `isSkillTarget` branch
+turns **5** of 13142 red.
+
+---
+
+## CS-BUG-087 — the two advantage aggregators disagreed about hierarchical attack targets
+
+**Status**: RESOLVED (this branch).
+
+**Affected**: any active state granting advantage on a *category* of attack
+(`target: "attack:melee"`, `"attack:ranged"`, `"attack"`) when queried with
+a more specific roll type (`"attack:melee:str"`).
+
+**Symptom**: `hasAdvantageFromStates("attack:melee:str")` returned `true`
+(so the actual roll made by `_rollAttack` DID get advantage) while
+`getAdvantageState("attack:melee:str").advantage` returned `false`. The
+roll and the badge that explains the roll disagreed.
+
+**Root cause**: `hasAdvantageFromStates()` has an explicit attack-prefix
+branch:
+
+```js
+if (e.target.startsWith("attack") && rollType.startsWith("attack")) {
+    if (rollType.startsWith(e.target)) return true;
+    if (e.target.startsWith(rollType)) return true;
+}
+```
+
+`_effectMatchesType()` — which backs `getAdvantageState()` and
+`_getConditionalActiveStateModifiersForType()` — had no equivalent. It
+handled `check:` → `skill:` category matching and exact matches only, so
+`("attack:melee", "attack:melee:str")` fell through to `false`.
+
+**Fix**: `_effectMatchesType()` gained the same hierarchical attack branch,
+segment-anchored (`type.startsWith(`${effectTarget}:`)`) so `attack:melee`
+can never accidentally match a hypothetical `attack:meleeSomething`.
+
+**Not a Steel Hawk bug**: Launch's momentum state exposed it, but the
+inconsistency is generic and predates this branch.
+
+**Regression pin**:
+`test/jest/charactersheet/CharacterSheetSteelHawk.test.js` → *"grants
+ADVANTAGE on melee attacks while armed — on BOTH aggregators"*, which
+asserts both functions agree AND that a ranged attack still gets nothing.
+**Falsified**: removing only the attack branch turns **1** of 13142 red.
+
+---
+
 ## CS-BUG-085 — every active state that GRANTS a non-walk movement type was silently zeroed
 
 **Status**: RESOLVED.

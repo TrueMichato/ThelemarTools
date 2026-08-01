@@ -625,19 +625,26 @@ class SpellGrantParser {
 			const context = contextBefore + contextAfter;
 
 			const isAtWill = /at will|at-will|without expending/i.test(context);
+			// "…but only as a ritual" (Steel Hawk's Bird Caller, Ritual Caster-shaped
+			// grants). A ritual-only grant has no per-rest budget — the limiter is the
+			// 10-minute casting time — so it is at-will in the resource sense. Without
+			// this it fell through to `uses: undefined`, which the innate-spell renderer
+			// labels with a bogus "1/day" badge.
+			const isRitualOnly = /only as a ritual|as a ritual only|only if .{0,20}ritual/i.test(context);
 			const localOnce = /once|one time/i.test(context) && /rest|dawn|day/i.test(context);
 			// An at-will grant is never limited, so the feature-wide clause can only ever
 			// promote an otherwise-unlimited grant into a tracked one.
-			const isOnce = localOnce || (!isAtWill && !!featureWideRecharge);
+			const isOnce = !isRitualOnly && (localOnce || (!isAtWill && !!featureWideRecharge));
 			const localRecharge = /short rest/i.test(context) ? "short" : (/long rest|dawn|day/i.test(context) ? "long" : null);
 			const recharge = localRecharge || (isOnce ? featureWideRecharge : null);
 
 			spells.push({
 				name: (/** @type {*} */ (spellName)).toTitleCase(),
 				source,
-				innate: isAtWill || isOnce,
-				atWill: isAtWill,
-				uses: isOnce ? 1 : (isAtWill ? null : undefined),
+				innate: isAtWill || isOnce || isRitualOnly,
+				atWill: isAtWill || isRitualOnly,
+				ritualOnly: isRitualOnly,
+				uses: isOnce ? 1 : ((isAtWill || isRitualOnly) ? null : undefined),
 				recharge: recharge,
 				sourceFeature: featureName,
 				minLevel: this._parseSpellGrantMinLevel(contextBefore),
@@ -11684,7 +11691,11 @@ class CharacterSheetState {
 	hasArmorStealthDisadvantage () {
 		const armor = this._data.ac.armor;
 		if (!armor || !armor.stealth) return false;
-		if (this.getFeatureCalculations().hasUmbralWarrior) return false;
+		// Generic escape hatch: any feature that says "armor never imposes disadvantage on
+		// Stealth" sets `ignoresArmorStealthDisadvantage` (Steel Hawk's Steel Grace, …).
+		// `hasUmbralWarrior` predates the generic flag and is kept for back-compat.
+		const stealthCalcs = this.getFeatureCalculations();
+		if (stealthCalcs.hasUmbralWarrior || stealthCalcs.ignoresArmorStealthDisadvantage) return false;
 
 		// Check for Medium Armor Master (removes stealth disadvantage from medium armor)
 		if (armor.type === "medium") {
@@ -14830,6 +14841,10 @@ class CharacterSheetState {
 			components: spell.components || "",
 			concentration: spell.concentration || false,
 			ritual: spell.ritual || false,
+			// "…but only as a ritual" — the spell can ONLY be cast with the ritual tag
+			// (10 minutes, no slot). Distinct from `ritual`, which merely says the spell
+			// HAS the ritual tag and may also be cast normally.
+			ritualOnly: spell.ritualOnly || false,
 		};
 
 		// Bug #13: preserve a per-spell chosen casting ability (e.g. a racial innate spell
@@ -19092,6 +19107,82 @@ class CharacterSheetState {
 						if (level >= 18) {
 							calculations.hasSatelliteBarrage = true;
 							calculations.satelliteBarrageMaxAttacks = calculations.satelliteMax;
+						}
+					}
+
+					// Steel Hawk (The Griffon's Saddlebag 2). Source-gated like Shadow Knight
+					// and Meteor Knight above — homebrew short names are not globally unique.
+					// Every tier is derived from `level` so level-up / respec stay correct.
+					if (CharacterSheetState.isSteelHawkSubclass(cls.subclass) && level >= 3) {
+						const strMod = this.getAbilityMod("str");
+						calculations.hasSteelHawk = true;
+
+						// --- Launch (3 / 7 / 10 / 15 / 18) ---
+						calculations.hasLaunch = true;
+						// Uses between short/long rests: 3 → 4 at 7th → 5 at 15th.
+						calculations.launchUses = level >= 15 ? 5 : level >= 7 ? 4 : 3;
+						// Combined horizontal + vertical leap distance.
+						calculations.launchDistance = level >= 7 ? 30 : 15;
+						// The momentum rider on a melee weapon attack made immediately after
+						// (or during) the leap: advantage plus a weapon-typed damage die.
+						calculations.launchBonusDamage = level >= 18 ? "1d12" : level >= 10 ? "1d10" : "1d8";
+						// "you can subtract up to 30 feet from the fall when calculating
+						// falling damage" — always available, independent of Improved Launch.
+						calculations.launchFallReduction = 30;
+						calculations.launchProvokesOpportunityAttacks = false;
+
+						// --- Nimble Lancer (3) ---
+						calculations.hasNimbleLancer = true;
+						calculations.nimbleLancerOneHandedDamage = "1d8";
+						calculations.nimbleLancerTwoHandedDamage = "1d12";
+						calculations.nimbleLancerDisengageDistance = 5;
+
+						// --- Bird Caller (3) ---
+						calculations.hasBirdCaller = true;
+						calculations.birdCallerRitualSpells = ["Animal Messenger"];
+
+						// --- Steel Grace (7) ---
+						if (level >= 7) {
+							calculations.hasSteelGrace = true;
+							// Generic flag consumed by hasArmorStealthDisadvantage().
+							calculations.ignoresArmorStealthDisadvantage = true;
+							// A Launch-fuelled Evasion: no damage on a successful Dexterity
+							// save, half on a failure. Same shape as the Rogue's Evasion, but
+							// it costs a Launch use and a reaction.
+							calculations.hasLaunchEvasion = true;
+							calculations.launchEvasionCost = 1;
+						}
+
+						// --- Eagle Eye (10) ---
+						if (level >= 10) {
+							calculations.hasEagleEye = true;
+							// The Launch attack (and only that attack) crits on 19-20.
+							calculations.launchCriticalRange = 19;
+							// Sight-based Wisdom (Perception) doubles proficiency — modelled as
+							// a player-toggled state so it reaches the displayed skill modifier
+							// AND the roll total (see `eagleEyeSight` in ACTIVE_STATE_TYPES).
+							calculations.eagleEyeSightBonus = profBonus;
+							calculations.eagleEyeGrantsPerception = true;
+							// Save DC shared by Eagle Eye's speed-to-0 rider and Improved
+							// Launch's prone rider: 8 + proficiency bonus + Strength modifier.
+							// DC contract: the exhaustion penalty is baked in exactly once, here.
+							calculations.steelHawkSaveDc = 8 + profBonus + strMod - exhaustionPenalty;
+						}
+
+						// --- Predatory Instinct (15) ---
+						if (level >= 15) {
+							calculations.hasPredatoryInstinct = true;
+							calculations.predatoryInstinctInitiativeRefill = 1;
+						}
+
+						// --- Improved Launch (18) ---
+						if (level >= 18) {
+							calculations.hasImprovedLaunch = true;
+							calculations.improvedLaunchDistance = 90;
+							calculations.improvedLaunchExhaustionCost = 1;
+							// "You can't use this feature in this way if you're suffering from
+							// two or more levels of exhaustion."
+							calculations.improvedLaunchMaxExhaustion = 1;
 						}
 					}
 
@@ -24708,6 +24799,37 @@ class CharacterSheetState {
 			});
 		}
 
+		// Steel Hawk (TGS2 Fighter): Eagle Eye's automatic Perception proficiency,
+		// Predatory Instinct's initiative advantage, and Bird Caller's conditional
+		// Animal Handling advantage. Advantage-carrying modifiers stay `enabled: true`
+		// even when conditional (only NUMERIC conditionals must be disabled — see
+		// CS-BUG-065); `aggregateModifiers` still routes them into `conditionalsAvailable`.
+		if (calculations.hasEagleEye && !alreadyProcessed("Eagle Eye")) {
+			effects.push({
+				type: "skillProficiency",
+				skill: "perception",
+				level: 1,
+				source: "Eagle Eye",
+			});
+		}
+		if (calculations.hasPredatoryInstinct && !alreadyProcessed("Predatory Instinct")) {
+			effects.push({
+				type: "modifier",
+				modType: "initiative:advantage",
+				value: 1,
+				source: "Predatory Instinct",
+			});
+		}
+		if (calculations.hasBirdCaller && !alreadyProcessed("Bird Caller")) {
+			effects.push({
+				type: "modifier",
+				modType: "skill:animal handling:advantage",
+				value: 1,
+				source: "Bird Caller",
+				conditional: "when interacting with a beast that has an innate flying speed",
+			});
+		}
+
 		// Superior Defense (XPHB Monk 18): spend 3 focus for resistance to one damage type
 		if (calculations.hasSuperiorDefense && !alreadyProcessed("Superior Defense")) {
 			effects.push({
@@ -26626,6 +26748,35 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * The damage profile a weapon actually has for THIS character, after feature-granted
+	 * property changes. Generic seam: a feature that grants (or rewrites) a weapon's
+	 * versatile property registers here rather than mutating the inventory item, so the
+	 * grant survives re-equipping, respec and save/load, and disappears the moment the
+	 * feature does.
+	 *
+	 * Currently the only contributor is Steel Hawk's Nimble Lancer ("Lances have the
+	 * versatile property for you while you're not mounted, dealing 1d8 … with one hand
+	 * and 1d12 … with two").
+	 *
+	 * @param {object} item An inventory item / `attack.sourceItem`.
+	 * @returns {{dmg1: string|null, dmg2: string|null}}
+	 */
+	getEffectiveWeaponDamageProfile (item) {
+		const dmg1 = item?.dmg1 || (item?.damage ? String(item.damage).split(" ")[0] : null) || null;
+		let dmg2 = item?.dmg2 || null;
+
+		// Cheap name gate FIRST — `getNimbleLancerLanceDamage` reaches
+		// `getFeatureCalculations()`, and this helper runs once per rendered weapon row.
+		const name = `${item?.name || ""}`.toLowerCase();
+		if (/\blance\b/.test(name)) {
+			const lance = this.getNimbleLancerLanceDamage(item);
+			if (lance) return {dmg1: lance.oneHanded, dmg2: lance.twoHanded};
+		}
+
+		return {dmg1, dmg2};
+	}
+
+	/**
 	 * Resolve the base damage die for a weapon from its persisted hand count.
 	 * Missing/invalid hand state preserves the legacy one-handed behavior.
 	 *
@@ -26633,12 +26784,13 @@ class CharacterSheetState {
 	 * @returns {string}
 	 */
 	getWeaponDamageDie (item) {
-		const oneHanded = item?.dmg1 || (item?.damage ? String(item.damage).split(" ")[0] : null) || "1d4";
-		if (!item?.dmg2) return oneHanded;
+		const profile = this.getEffectiveWeaponDamageProfile(item);
+		const oneHanded = profile.dmg1 || "1d4";
+		if (!profile.dmg2) return oneHanded;
 
 		const parsedHands = Math.floor(Number(item.handsUsed));
 		const handsUsed = Number.isFinite(parsedHands) && parsedHands >= 1 ? parsedHands : 1;
-		return handsUsed >= 2 ? item.dmg2 : oneHanded;
+		return handsUsed >= 2 ? profile.dmg2 : oneHanded;
 	}
 
 	/**
@@ -31511,6 +31663,7 @@ class CharacterSheetState {
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
 		this._ensureMeteorKnightResources();
+		this._ensureSteelHawkResources();
 		this.ensureBloodHunterResources();
 		this.ensureTalentResources();
 		this._ensureChannelDivinityUses();
@@ -31865,6 +32018,279 @@ class CharacterSheetState {
 		if (!this.getFeatureCalculations().hasSatelliteBarrage) return 0;
 		return this.getSatellitesOrbiting();
 	}
+	// #endregion
+
+	// =========================================================================
+	// Steel Hawk (The Griffon's Saddlebag 2)
+	// =========================================================================
+	// #region steel-hawk
+
+	/**
+	 * Identity predicate for the Steel Hawk Fighter archetype. Source-gated for the
+	 * same reason as Meteor Knight: homebrew subclass short names are not globally
+	 * unique, so every Steel Hawk code path funnels through this one check.
+	 * @param {*} subclass A `_data.classes[].subclass` entry.
+	 * @returns {boolean}
+	 */
+	static isSteelHawkSubclass (subclass) {
+		return (subclass?.shortName || subclass?.name) === "Steel Hawk"
+			&& subclass?.source === "GriffonsSaddlebag2";
+	}
+
+	/** @returns {object|null} The Fighter class entry carrying the Steel Hawk archetype. */
+	_getSteelHawkClass () {
+		return (this._data.classes || []).find(cls =>
+			(cls.name || "").toLowerCase() === "fighter"
+			&& CharacterSheetState.isSteelHawkSubclass(cls.subclass),
+		) || null;
+	}
+
+	/** @returns {boolean} True when the character is a Steel Hawk of at least level 3. */
+	hasSteelHawk () {
+		return (this._getSteelHawkClass()?.level || 0) >= 3;
+	}
+
+	/**
+	 * Reconcile the "Launch" pool (3 uses, 4 from 7th, 5 from 15th; short rest).
+	 *
+	 * Mirrors `_ensureMeteorKnightResources`: derives from the class level directly
+	 * (never `getFeatureCalculations()`, which would recurse back through
+	 * `getResources()`), and preserves the number of expended uses across a max change
+	 * so levelling up hands the player the new headroom without silently refilling.
+	 * @private
+	 */
+	_ensureSteelHawkResources () {
+		const level = this._getSteelHawkClass()?.level || 0;
+		if (level < 3) {
+			this._data.resources = (this._data.resources || []).filter(r =>
+				r.resourceType !== "steelHawkLaunch" && r.resourceType !== "steelHawkImprovedLaunch");
+			return;
+		}
+		const ensure = ({name, max, resourceType, recharge}) => {
+			let resource = this._data.resources.find(r => r.resourceType === resourceType || r.name === name);
+			if (!resource) {
+				resource = {id: CryptUtil.uid(), name, current: max, max, recharge, resourceType};
+				this._data.resources.push(resource);
+				return resource;
+			}
+			const expended = Math.max(0, (resource.max ?? max) - (resource.current ?? resource.max ?? max));
+			resource.name = name;
+			resource.max = max;
+			resource.current = Math.max(0, max - expended);
+			resource.recharge = recharge;
+			resource.resourceType = resourceType;
+			return resource;
+		};
+
+		ensure({
+			name: CharacterSheetState.STEEL_HAWK_LAUNCH_POOL_NAME,
+			max: level >= 15 ? 5 : level >= 7 ? 4 : 3,
+			resourceType: "steelHawkLaunch",
+			recharge: "short",
+		});
+
+		// Improved Launch's "push yourself beyond your normal limits" mode is its own
+		// once-per-rest budget, separate from the Launch pool it also spends.
+		if (level >= 18) {
+			ensure({
+				name: CharacterSheetState.STEEL_HAWK_IMPROVED_LAUNCH_POOL_NAME,
+				max: 1,
+				resourceType: "steelHawkImprovedLaunch",
+				recharge: "short",
+			});
+		} else {
+			this._data.resources = (this._data.resources || []).filter(r => r.resourceType !== "steelHawkImprovedLaunch");
+		}
+	}
+
+	/**
+	 * @param {string} resourceType
+	 * @returns {object|null} A copy of the live pool, or null when absent.
+	 * @private
+	 */
+	_getSteelHawkResource (resourceType) {
+		this._ensureSteelHawkResources();
+		const resource = this._data.resources.find(r => r.resourceType === resourceType);
+		return resource ? {...resource} : null;
+	}
+
+	/** @returns {object|null} A copy of the live Launch pool, or null when not a Steel Hawk. */
+	getLaunchResource () { return this._getSteelHawkResource("steelHawkLaunch"); }
+
+	/** @returns {number} Launch uses remaining before the next short rest. */
+	getLaunchUsesRemaining () { return this.getLaunchResource()?.current ?? 0; }
+
+	/** @returns {number} Maximum Launch uses between rests (3 / 4 at 7th / 5 at 15th). */
+	getLaunchUsesMax () { return this.getLaunchResource()?.max ?? 0; }
+
+	/**
+	 * Set the remaining Launch uses, clamped to [0, max]. Single write path so the
+	 * combat panel, the resource tracker and Predatory Instinct all agree.
+	 * @param {number} n
+	 * @returns {boolean} True when a Launch pool existed and was updated.
+	 */
+	setLaunchUsesRemaining (n) {
+		this._ensureSteelHawkResources();
+		const resource = this._data.resources.find(r => r.resourceType === "steelHawkLaunch");
+		if (!resource) return false;
+		resource.current = Math.max(0, Math.min(Number(n) || 0, resource.max));
+		return true;
+	}
+
+	/**
+	 * Spend one Launch use and arm the momentum rider — the `launchMomentum` active
+	 * state which grants advantage plus a weapon-typed bonus die on the next melee
+	 * weapon attack (and, from Eagle Eye, a 19-20 critical range on it).
+	 *
+	 * `improved` opts into Improved Launch's 90-foot push, which additionally spends
+	 * that feature's own once-per-rest budget and inflicts a level of exhaustion.
+	 *
+	 * @param {{improved?: boolean}} [opts]
+	 * @returns {object|null} A descriptor of the leap, or null when it can't be used.
+	 */
+	useLaunch ({improved = false} = {}) {
+		if (!this.hasSteelHawk()) return null;
+		const calcs = this.getFeatureCalculations();
+		// "You can't use this feature if your speed is 0." `getSpeed()` with no argument
+		// returns a formatted DISPLAY string ("30 ft."), so the numeric walking speed
+		// must be asked for by type.
+		if (this.getSpeed("walk") <= 0) return null;
+		const remaining = this.getLaunchUsesRemaining();
+		if (remaining <= 0) return null;
+
+		let usedImproved = false;
+		if (improved) {
+			if (!this.canUseImprovedLaunch()) return null;
+			const pool = this._data.resources.find(r => r.resourceType === "steelHawkImprovedLaunch");
+			if (pool) pool.current = Math.max(0, (pool.current || 0) - 1);
+			this.addExhaustion(calcs.improvedLaunchExhaustionCost || 1);
+			usedImproved = true;
+		}
+
+		this.setLaunchUsesRemaining(remaining - 1);
+		this.activateState("launchMomentum", {customEffects: this.getLaunchMomentumEffects()});
+
+		return {
+			distance: usedImproved ? (calcs.improvedLaunchDistance || 90) : (calcs.launchDistance || 15),
+			improved: usedImproved,
+			bonusDamage: calcs.launchBonusDamage || "1d8",
+			criticalRange: calcs.launchCriticalRange || 20,
+			fallReduction: usedImproved ? null : (calcs.launchFallReduction || 30),
+			ignoresFallDamage: usedImproved,
+			remaining: this.getLaunchUsesRemaining(),
+		};
+	}
+
+	/**
+	 * The momentum rider's effect list, resolved at activation time because both the
+	 * bonus die and the critical range scale with Fighter level.
+	 * @returns {Array<object>}
+	 */
+	getLaunchMomentumEffects () {
+		const calcs = this.getFeatureCalculations();
+		const effects = [
+			{type: "advantage", target: "attack:melee"},
+			// Damage "of the weapon's type" — left untyped so the damage roller reports
+			// it under the weapon's own type rather than inventing one.
+			{type: "extraDamage", value: calcs.launchBonusDamage || "1d8", damageType: "", meleeOnly: true},
+		];
+		if (calcs.launchCriticalRange && calcs.launchCriticalRange < 20) {
+			effects.push({type: "critRange", value: calcs.launchCriticalRange});
+		}
+		return effects;
+	}
+
+	/** @returns {boolean} True while a spent Launch is still arming the next melee attack. */
+	hasLaunchMomentum () { return this.isStateTypeActive("launchMomentum"); }
+
+	/**
+	 * Improved Launch (18) gate: needs the feature, an unspent once-per-rest use, and
+	 * fewer than two levels of exhaustion ("You can't use this feature in this way if
+	 * you're suffering from two or more levels of exhaustion").
+	 * @returns {boolean}
+	 */
+	canUseImprovedLaunch () {
+		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasImprovedLaunch) return false;
+		if (this.getExhaustion() > (calcs.improvedLaunchMaxExhaustion ?? 1)) return false;
+		const pool = this._getSteelHawkResource("steelHawkImprovedLaunch");
+		return (pool?.current || 0) > 0;
+	}
+
+	/**
+	 * Steel Grace (7): spend a Launch use as a reaction to a Dexterity saving throw for
+	 * an Evasion-shaped result — no damage on a success, half on a failure.
+	 * @param {{success: boolean, damage?: number}} params
+	 * @returns {{damage: number, spent: boolean}|null} null when unavailable.
+	 */
+	useLaunchEvasion ({success, damage = 0} = /** @type {*} */ ({})) {
+		if (!this.getFeatureCalculations().hasLaunchEvasion) return null;
+		const remaining = this.getLaunchUsesRemaining();
+		if (remaining <= 0) return null;
+		this.setLaunchUsesRemaining(remaining - 1);
+		return {damage: success ? 0 : Math.floor((Number(damage) || 0) / 2), spent: true};
+	}
+
+	/**
+	 * Predatory Instinct (15): "when you roll initiative and have no uses of Launch
+	 * remaining, you regain one". Idempotent — a call with uses left is a no-op.
+	 * @returns {number} How many uses were regained (0 or 1).
+	 */
+	restoreLaunchOnInitiative () {
+		if (!this.getFeatureCalculations().hasPredatoryInstinct) return 0;
+		if (this.getLaunchUsesRemaining() > 0) return 0;
+		const refill = this.getFeatureCalculations().predatoryInstinctInitiativeRefill || 1;
+		this.setLaunchUsesRemaining(refill);
+		return refill;
+	}
+
+	/**
+	 * Nimble Lancer (3): the versatile damage profile a lance gains for a Steel Hawk
+	 * while not mounted. Returns null for a non-Steel-Hawk or a non-lance weapon.
+	 * @param {*} attack An attack / weapon descriptor.
+	 * @returns {{oneHanded: string, twoHanded: string}|null}
+	 */
+	getNimbleLancerLanceDamage (attack) {
+		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasNimbleLancer) return null;
+		const name = `${attack?.name || attack?.sourceItem?.name || ""}`.toLowerCase();
+		if (!/\blance\b/.test(name)) return null;
+		return {
+			oneHanded: calcs.nimbleLancerOneHandedDamage || "1d8",
+			twoHanded: calcs.nimbleLancerTwoHandedDamage || "1d12",
+		};
+	}
+
+	/**
+	 * Eagle Eye (10): toggle the sight-based Wisdom (Perception) doubling. Modelled as
+	 * an active state rather than a numeric conditional modifier because
+	 * `getSkillBonusFromStates` is consumed by BOTH the displayed skill modifier and
+	 * the roll total, whereas an opted-in numeric conditional currently moves neither
+	 * (see CS-BUG-065's "genuine follow-up left open").
+	 * @param {boolean} on
+	 * @returns {boolean} True when the toggle was applied.
+	 */
+	setEagleEyeSightActive (on) {
+		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasEagleEye) return false;
+		if (!on) {
+			this.deactivateState("eagleEyeSight");
+			return true;
+		}
+		this.activateState("eagleEyeSight", {
+			// "your proficiency bonus is doubled" — worth nothing on top of existing
+			// expertise, which already doubles it.
+			customEffects: [{
+				type: "bonus",
+				target: "skill:perception",
+				value: this.getSkillProficiency("perception") >= 2 ? 0 : (calcs.eagleEyeSightBonus || 0),
+			}],
+		});
+		return true;
+	}
+
+	/** @returns {boolean} True while Eagle Eye's sight-based Perception doubling is on. */
+	isEagleEyeSightActive () { return this.isStateTypeActive("eagleEyeSight"); }
 	// #endregion
 
 	_ensureShadowKnightResources () {
@@ -36781,6 +37207,7 @@ class CharacterSheetState {
 						uses: spell.uses,
 						recharge: spell.recharge || "long",
 						ability: invocationAbility || spell.ability,
+						ritualOnly: spell.ritualOnly,
 					}));
 				} else {
 					this.addInnateSpell({
@@ -36792,6 +37219,8 @@ class CharacterSheetState {
 						recharge: spell.recharge || "long",
 						sourceFeature: feature.name,
 						spellcastingAbility: invocationAbility || spell.ability,
+						ritualOnly: spell.ritualOnly,
+						ritual: spell.ritualOnly || undefined,
 					});
 				}
 			} else if (spell.level === 0) {
@@ -44568,6 +44997,15 @@ class CharacterSheetState {
 			return targetParts[1] === "all" || targetParts[1] === skillAbility;
 		}
 
+		// Hierarchical attack targets, matching `hasAdvantageFromStates` (the path the
+		// actual attack roll takes). A less specific effect target ("attack:melee")
+		// applies to a more specific query ("attack:melee:str") and vice versa. Without
+		// this the two advantage aggregators disagreed: a state granting advantage on
+		// melee attacks moved the roll but reported `advantage: false` here.
+		if (targetParts[0] === "attack" && typeParts[0] === "attack") {
+			if (type.startsWith(`${effectTarget}:`) || effectTarget.startsWith(`${type}:`)) return true;
+		}
+
 		// "all" matches
 		if (targetParts[1] === "all" && targetParts[0] === typeParts[0]) return true;
 
@@ -45942,6 +46380,40 @@ class CharacterSheetState {
 			requiresClass: "rogue",
 			requiresClassLevel: 3,
 			consumeOnAttack: true, // Deactivate advantage after next attack roll (speed stays 0)
+		},
+		// ===== STEEL HAWK (The Griffon's Saddlebag 2) =====
+		launchMomentum: {
+			id: "launchMomentum",
+			name: "Launch Momentum",
+			icon: "🦅",
+			description: "You are mid-leap: your next melee weapon attack has advantage and deals an extra weapon-typed die (and, from Eagle Eye, crits on 19-20).",
+			// Placeholder defaults. `useLaunch()` always activates the state with
+			// `customEffects` from `getLaunchMomentumEffects()`, because both the die and
+			// the critical range scale with Fighter level.
+			effects: [
+				{type: "advantage", target: "attack:melee"},
+				{type: "extraDamage", value: "1d8", damageType: "", meleeOnly: true},
+			],
+			duration: "Until your next melee weapon attack",
+			endConditions: ["Make an attack"],
+			activationAction: "bonus",
+			consumeOnAttack: true,
+			// "Launch Momentum" is a synthetic label with no matching feature name; the
+			// real feature is called Launch, which is far too generic a word to name-match.
+			noNameDetect: true,
+		},
+		eagleEyeSight: {
+			id: "eagleEyeSight",
+			name: "Eagle Eye (Sight)",
+			icon: "👁️‍🗨️",
+			description: "Your proficiency bonus is doubled for Wisdom (Perception) checks that rely on sight.",
+			// Replaced at activation time by `setEagleEyeSightActive()` with the live
+			// proficiency bonus.
+			effects: [{type: "bonus", target: "skill:perception", value: 0}],
+			duration: "While the check relies on sight",
+			endConditions: ["The check does not rely on sight"],
+			activationAction: "free",
+			noNameDetect: true,
 		},
 		// ===== RACE TRAIT ACTIVATABLE STATES =====
 		shellDefense: {
@@ -51023,7 +51495,17 @@ class CharacterSheetState {
 
 	/**
 	 * Get bonus to a specific skill from active states
-	 * Handles hierarchical targets like "check:str:athletics" or "check:str"
+	 * Handles hierarchical targets like "check:str:athletics" or "check:str", plus the
+	 * ability-agnostic `skill:<key>` / `skill:all` vocabulary.
+	 *
+	 * Two target vocabularies reach this method and BOTH must be honoured (CS-BUG-086):
+	 *   - `check:<ability>[:<skill>]` — the hierarchical ability-check family.
+	 *   - `skill:<key>` / `skill:all` — the ability-agnostic family emitted by the buff
+	 *     registry (e.g. Pass Without Trace's +10 Stealth), by the custom-ability effect
+	 *     builder, and by `summarizeEffects`. Matching only the `check:` family silently
+	 *     dropped every one of these bonuses from both the displayed modifier and the roll.
+	 * `skill:` targets deliberately ignore `ability`, so they keep working when a feature
+	 * has swapped the skill's governing ability.
 	 * @param {string} skill - The skill key (e.g., "athletics")
 	 * @param {string} ability - The ability associated with the skill (e.g., "str")
 	 * @returns {number} The total bonus from active states
@@ -51031,6 +51513,7 @@ class CharacterSheetState {
 	getSkillBonusFromStates (skill, ability) {
 		const effects = this.getActiveStateEffects();
 		let bonus = 0;
+		const normalizedSkill = String(skill || "").toLowerCase().trim();
 
 		// Skip combatStance effects — the stance-specific system (_getStanceSkillBonus) is authoritative
 		effects.filter(e => e.type === "bonus" && e.stateTypeId !== "combatStance").forEach(e => {
@@ -51040,8 +51523,12 @@ class CharacterSheetState {
 			const abilityTarget = `check:${ability}`;
 			// Check for generic check match: "check" applies to all ability checks
 			const genericTarget = "check";
+			// Ability-agnostic vocabulary: "skill:stealth" / "skill:all"
+			const normalizedEffectTarget = String(e.target || "").toLowerCase().trim();
+			const isSkillTarget = normalizedSkill
+				&& (normalizedEffectTarget === `skill:${normalizedSkill}` || normalizedEffectTarget === "skill:all");
 
-			if (e.target === exactTarget || e.target === abilityTarget || e.target === genericTarget) {
+			if (isSkillTarget || e.target === exactTarget || e.target === abilityTarget || e.target === genericTarget) {
 				if (e.useProficiency) {
 					bonus += this.getProficiencyBonus();
 				} else {
@@ -51209,6 +51696,9 @@ class CharacterSheetState {
 				source: e.stateName || "state effect",
 				weaponId: e.weaponId || null,
 				isCrimsonRite: !!e.isCrimsonRite,
+				// Scoping flags — consumed by the damage roller so a rider that reads
+				// "on a melee weapon attack" can't leak onto ranged attacks or spells.
+				meleeOnly: !!e.meleeOnly,
 			}));
 	}
 
@@ -51863,6 +52353,12 @@ class CharacterSheetState {
 
 	/** Player-facing label of the Meteor Knight satellite pool (single source of truth). */
 	static METEOR_KNIGHT_SATELLITE_POOL_NAME = "Satellites";
+
+	/** Player-facing label of the Steel Hawk Launch pool (single source of truth). */
+	static STEEL_HAWK_LAUNCH_POOL_NAME = "Launch";
+
+	/** Player-facing label of the Steel Hawk Improved Launch (push) pool. */
+	static STEEL_HAWK_IMPROVED_LAUNCH_POOL_NAME = "Improved Launch";
 
 	// =========================================================================
 	// COMPANION TYPES — Categorizes companions by origin mechanic
