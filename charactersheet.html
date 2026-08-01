@@ -592,7 +592,7 @@
 										<span class="charsheet__hp-separator">/</span>
 										<span class="charsheet__hp-max" id="charsheet-disp-hp-max">0</span>
 									</div>
-									<div class="ve-flex ve-flex-h-center mt-2 charsheet__hp-buttons">
+									<div class="ve-flex ve-flex-h-center ve-flex-wrap mt-2 charsheet__hp-buttons">
 										<button class="ve-btn ve-btn-success ve-btn-xs mr-1 charsheet__hp-btn charsheet__hp-btn--heal" id="charsheet-btn-heal" title="Add HP (healing)"><span class="charsheet__hp-btn-icon">💚</span> Heal</button>
 										<button class="ve-btn ve-btn-danger ve-btn-xs charsheet__hp-btn charsheet__hp-btn--damage" id="charsheet-btn-damage" title="Remove HP (damage)"><span class="charsheet__hp-btn-icon">💔</span> Damage</button>
 									</div>
@@ -602,14 +602,24 @@
 									<input type="number" class="ve-form-control form-control--minimal charsheet__ipt-hp charsheet__ipt-hp--temp" id="charsheet-ipt-hp-temp" value="0" min="0" title="Temporary HP (absorbed before regular HP)">
 									<div class="charsheet__hp-temp-hint">Absorbs damage first</div>
 								</div>
-								<div class="charsheet__hp-box charsheet__hp-box--reduction" id="charsheet-hp-max-reduction-control">
-									<label class="charsheet__hp-label" for="charsheet-ipt-hp-max-reduction">Max HP Reduction</label>
-									<div class="ve-flex-v-center ve-flex-h-center charsheet__hp-reduction-input-row">
-										<input type="number" class="ve-form-control form-control--minimal charsheet__ipt-hp charsheet__ipt-hp--reduction" id="charsheet-ipt-hp-max-reduction" value="0" min="0" step="1" inputmode="numeric" aria-describedby="charsheet-hp-max-reduction-status" title="Temporary reduction to your maximum hit points">
-										<button type="button" class="ve-btn ve-btn-xs ve-btn-danger charsheet__hp-reduction-clear" id="charsheet-btn-hp-max-reduction-clear" aria-label="Remove maximum hit point reduction" title="Remove maximum HP reduction">×</button>
-									</div>
-									<div class="charsheet__hp-temp-hint charsheet__hp-reduction-status" id="charsheet-hp-max-reduction-status" aria-live="polite">No reduction</div>
+							</div>
+							<!-- Max HP Reduction — rarely used, so it is collapsed behind a quiet affordance and expands inline on demand -->
+							<div class="charsheet__hp-reduction" id="charsheet-hp-max-reduction-control">
+								<div class="charsheet__hp-reduction-bar">
+									<button type="button" class="charsheet__hp-reduction-trigger" id="charsheet-btn-hp-max-reduction-toggle" aria-expanded="false" aria-controls="charsheet-hp-max-reduction-editor" aria-label="Add maximum HP reduction" title="Reduce your maximum HP">
+										<span class="charsheet__hp-reduction-trigger-icon" id="charsheet-hp-max-reduction-trigger-icon" aria-hidden="true">＋</span>
+										<span class="charsheet__hp-reduction-trigger-label" id="charsheet-hp-max-reduction-trigger-label">Max HP reduction</span>
+										<span class="charsheet__hp-reduction-chevron" aria-hidden="true">⌄</span>
+									</button>
+									<button type="button" class="charsheet__hp-reduction-quickclear" id="charsheet-btn-hp-max-reduction-clear" aria-label="Remove maximum hit point reduction" title="Remove maximum HP reduction" hidden>×</button>
 								</div>
+								<div class="charsheet__hp-reduction-editor" id="charsheet-hp-max-reduction-editor" hidden>
+									<div class="ve-flex-v-center charsheet__hp-reduction-input-row">
+										<label class="charsheet__hp-label charsheet__hp-reduction-editor-label" for="charsheet-ipt-hp-max-reduction">Reduce max HP by</label>
+										<input type="number" class="ve-form-control form-control--minimal charsheet__ipt-hp charsheet__ipt-hp--reduction" id="charsheet-ipt-hp-max-reduction" value="0" min="0" step="1" inputmode="numeric" aria-describedby="charsheet-hp-max-reduction-status" title="Temporary reduction to your maximum hit points">
+									</div>
+								</div>
+								<div class="charsheet__hp-reduction-status sr-only" id="charsheet-hp-max-reduction-status" aria-live="polite">No maximum HP reduction</div>
 							</div>
 						</div>
 

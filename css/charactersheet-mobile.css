@@ -352,6 +352,15 @@
 		flex: 1;
 	}
 
+	.charsheet__hp-reduction-trigger,
+	.charsheet__hp-reduction-quickclear {
+		min-height: 44px;
+	}
+
+	.charsheet__hp-reduction-quickclear {
+		width: 44px;
+	}
+
 	/* ====================================================================
 	   Currency Grid — Compact Horizontal
 	   ==================================================================== */

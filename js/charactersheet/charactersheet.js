@@ -1267,12 +1267,24 @@ class CharacterSheetPage {
 			this._renderHp();
 			this._renderConditions();
 		};
+		bind("charsheet-btn-hp-max-reduction-toggle", "click", () => {
+			const trigger = document.getElementById("charsheet-btn-hp-max-reduction-toggle");
+			const isOpen = trigger?.getAttribute("aria-expanded") === "true";
+			this._setHpReductionEditorOpen(!isOpen, {focus: true});
+		});
 		bind("charsheet-ipt-hp-max-reduction", "change", (e) => {
 			applyMaxHpReduction((/** @type {*} */ (e.target)).value);
+			this._setHpReductionEditorOpen(false, {focus: true});
+		});
+		bind("charsheet-ipt-hp-max-reduction", "keydown", (e) => {
+			if ((/** @type {KeyboardEvent} */ (e)).key !== "Escape") return;
+			const input = /** @type {HTMLInputElement} */ (e.target);
+			input.value = String(this._state.getMaxHpReduction());
+			this._setHpReductionEditorOpen(false, {focus: true});
 		});
 		bind("charsheet-btn-hp-max-reduction-clear", "click", () => {
 			applyMaxHpReduction(0);
-			document.getElementById("charsheet-ipt-hp-max-reduction")?.focus();
+			this._setHpReductionEditorOpen(false, {focus: true});
 		});
 
 		bind("charsheet-btn-heal", "click", () => this._onHeal());
@@ -3388,6 +3400,22 @@ class CharacterSheetPage {
 		container.append(section);
 	}
 
+	_setHpReductionEditorOpen (open, {focus = false} = {}) {
+		const trigger = document.getElementById("charsheet-btn-hp-max-reduction-toggle");
+		const editor = /** @type {HTMLElement} */ (document.getElementById("charsheet-hp-max-reduction-editor"));
+		if (!trigger || !editor) return;
+		trigger.setAttribute("aria-expanded", open ? "true" : "false");
+		editor.hidden = !open;
+		if (!focus) return;
+		if (open) {
+			const input = /** @type {HTMLInputElement} */ (document.getElementById("charsheet-ipt-hp-max-reduction"));
+			input?.focus?.();
+			input?.select?.();
+		} else {
+			trigger.focus?.();
+		}
+	}
+
 	_renderHp () {
 		const currentHp = this._state.getCurrentHp();
 		const maxHp = this._state.getMaxHp();
@@ -3407,11 +3435,23 @@ class CharacterSheetPage {
 		const reductionControl = document.getElementById("charsheet-hp-max-reduction-control");
 		const reductionClear = /** @type {HTMLButtonElement} */ (document.getElementById("charsheet-btn-hp-max-reduction-clear"));
 		const reductionStatus = document.getElementById("charsheet-hp-max-reduction-status");
-		reductionControl.classList.toggle("charsheet__hp-box--reduction-active", maxHpReduction > 0);
-		reductionClear.hidden = maxHpReduction === 0;
-		reductionStatus.textContent = maxHpReduction > 0
-			? `-${maxHpReduction} maximum HP active`
-			: "No reduction";
+		const reductionTrigger = document.getElementById("charsheet-btn-hp-max-reduction-toggle");
+		const reductionIcon = document.getElementById("charsheet-hp-max-reduction-trigger-icon");
+		const reductionLabel = document.getElementById("charsheet-hp-max-reduction-trigger-label");
+		const isReduced = maxHpReduction > 0;
+		if (reductionControl) reductionControl.classList.toggle("charsheet__hp-reduction--active", isReduced);
+		if (reductionClear) reductionClear.hidden = !isReduced;
+		if (reductionIcon) reductionIcon.textContent = isReduced ? "📉" : "＋";
+		if (reductionLabel) reductionLabel.textContent = isReduced ? `Max HP −${maxHpReduction}` : "Max HP reduction";
+		if (reductionTrigger) {
+			reductionTrigger.title = isReduced ? `Maximum HP reduced by ${maxHpReduction} — edit` : "Reduce your maximum HP";
+			reductionTrigger.setAttribute("aria-label", isReduced ? `Maximum HP reduced by ${maxHpReduction}. Edit reduction.` : "Add maximum HP reduction");
+		}
+		if (reductionStatus) {
+			reductionStatus.textContent = isReduced
+				? `Maximum HP reduced by ${maxHpReduction}`
+				: "No maximum HP reduction";
+		}
 
 		// Update HP bar fill width and color
 		const hpPercent = maxHp > 0 ? Math.max(0, Math.min(100, (currentHp / maxHp) * 100)) : 0;
