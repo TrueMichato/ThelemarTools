@@ -2264,6 +2264,155 @@ would concatenate.
 reaches those levels was `{skip: true}` under `CS-BUG-018`, and the sole
 unskipped probe there was `{kind: "rollAbilityCheck"}`, which asserts only that a
 roll *occurred*, not that its total was a number.
+## CS-BUG-080 — Sorcery Points had three independent formulas and no creator
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Magic Sorcerer implementation (pathfinder session for
+five Sorcerer subclasses).
+
+**Root cause**: the size of the Sorcery Points pool was computed in three
+places that did not agree and were not connected:
+
+| Surface | Formula | Used by |
+|---|---|---|
+| `getFeatureCalculations()` Sorcerer branch | TGTT `level + 1`, else `level` | feature rows, E2E `featureCalculation` probes |
+| `CharacterSheetClassUtils.CLASS_RESOURCES` → `updateClassResources` | `level` for every source | Builder / Level-Up / Quick Build |
+| *(nothing)* | — | `getResources()` on a hand-built or imported character |
+
+The third row is the real defect: `getResources()` had ensure-hooks for Ki,
+Channel Divinity, Rage and others, but **none for Sorcery Points**. A Sorcerer
+that never went through `updateClassResources` — a JSON import, a respec, a
+Jest fixture, a `spawn()` — simply had no pool, so every `consumes:
+{name: "Sorcery Point"}` feature was unusable.
+
+**Fix**: `static CharacterSheetState.getSorceryPointsMaxForClass(cls)` is now
+the single source of truth. `charactersheet-class-utils.js` delegates to it,
+the `getFeatureCalculations()` Sorcerer branch delegates to it, and a new
+`_ensureSorceryPoints()` joins the `getResources()` ensure-chain.
+
+`_ensureSorceryPoints()` is deliberately **create-only** — it early-returns if
+a "Sorcery Points" resource already exists. Two legitimate writers mutate
+`resource.max` in place: `setSorceryPoints()` (explicit override) and the TGTT
+`tuneMetamagic()` / `detuneMetamagic()` pair, which *locks* points by lowering
+`max`. A reconciling ensure-hook silently untunes every metamagic the moment
+anything calls `getResources()`. Subtracting `getLockedSorceryPoints()` was
+tried and still broke `setSorceryPoints(5)` fixtures. Re-scaling on level-up
+remains `updateClassResources`' job.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §"base-class
+Sorcery Points machinery" (create-only, PHB ladder, TGTT ladder, tuning
+survives `getResources()`).
+
+---
+
+## CS-BUG-081 — the sheet's Damage button bypassed `takeDamage()` entirely
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Magic Sorcerer — Strength of the Grave never fired
+from the UI even though the state method worked in Jest.
+
+**Root cause**: `charactersheet.js` `_onDamage()` hand-rolled the temp-HP /
+current-HP arithmetic and wrote `setHp()` directly, never calling
+`this._state.takeDamage()`. Every hook hanging off `takeDamage` was therefore
+unreachable from the sheet's own Damage control — including the pre-existing
+**Death Ward** branch, which could only ever fire from code paths that called
+the state method directly.
+
+**Fix**: `_onDamage()` now routes through `this._state.takeDamage(amount)` and
+then awaits `_pOfferZeroHpIntervention()`.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §Strength of
+the Grave (the state-level path); the `takeDamage` →
+`applyZeroHpIntervention` `stateCall` chain in
+`tgtt-shadow-magic-sorcerer.spec.ts`.
+
+---
+
+## CS-BUG-082 — `calculations.darkvision` was written by six subclasses and read by nobody
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Magic Sorcerer — Eyes of the Dark published
+`calculations.darkvision = 120` and the sheet's senses stayed at the racial 60.
+
+**Root cause**: several class/subclass feature blocks publish a `darkvision`
+calculation, but `_getClassFeatureEffects()` had no case that turned it into
+anything. Grepping for consumers of `calculations.darkvision` returned zero
+hits outside the writers themselves. Darkvision granted by a *class* feature
+simply did not exist.
+
+**Fix**: `_getClassFeatureEffects()` now emits a generic
+`{type: "sense", sense: "darkvision", range, source}` effect for any
+`calculations.darkvision > 0`, feeding the existing sense-effect pipeline. The
+sense machinery already takes the maximum, so a racial 60 and a class 120
+resolve correctly in either application order.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §Eyes of the
+Dark; the `getSenses` `stateCall` in the E2E matrix (verified against a Dwarf,
+whose racial darkvision 60 must be superseded).
+
+---
+
+## CS-BUG-083 — active-state name matching hijacked identically-named features from other sources
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Magic Sorcerer — "Eyes of the Dark" classified as the
+**TGTT Shadow Knight** toggle of the same name, so a Sorcerer's passive
+darkvision feature rendered as an activatable state it does not have.
+
+**Root cause**: `static detectActivatableFeature()` walks `ACTIVE_STATE_TYPES`
+and matches purely on feature name. It is static, so it has no character
+context and cannot ask "does this character actually have the Shadow Knight
+version?". Four TGTT Shadow Knight states carry names generic enough to
+collide with unrelated content.
+
+**Fix**: an opt-in data flag, `noNameDetect: true`, on the state definition.
+The name-match loop `continue`s past any state carrying it; such states are
+reached only through an explicit `activateState(key)` call or a classification
+override. Applied to `shadowKnightDarkness`, `eyesOfTheDark`, `umbralCoating`
+and `shadowCloak`. Shadow Magic's own passive then falls to
+`FEATURE_CLASSIFICATION_OVERRIDES` (`"eyes of the dark": "ability"`).
+
+Restructuring was also required: the generic `consumes` branch sits ~170 lines
+*before* the name-match loop, and `activationAction` / `toggleAnalysis` /
+`parsedEffects` are all declared after it, so referencing them from the earlier
+branch throws a TDZ `ReferenceError`. The branch now falls through instead of
+returning.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §Eyes of the
+Dark classification; the Shadow Knight suites (unchanged and still green).
+
+---
+
+## CS-BUG-084 — TGTT Sorcery Points were one short at every level
+
+**Status**: Fixed. **Supersedes the resolution of CS-BUG-018.**
+**Surfaced by**: Shadow Magic Sorcerer — unifying the three formulas above
+forced the disagreement into the open.
+
+**Root cause**: the Thelemar Sorcerer's own class table
+(`homebrew/TravelersGuidetoThelemar.json` → Sorcerer `classTableGroups` →
+`["Sorcery Points"]`) reads `[2], [3], [4] … [21]` for levels 1–20, i.e.
+**`level + 1`**, and points start at **level 1**, not level 2. CS-BUG-018
+resolved the `getFeatureCalculations()` ↔ `updateClassResources` disagreement
+by changing the *correct* side to match the wrong one, making the pool one
+point stingy at every level and absent at level 1.
+
+Nobody caught it because both existing TGTT Sorcerer E2E specs
+(`tgtt-child-of-sun-sorcerer-hochling.spec.ts`,
+`tgtt-heroic-soul-sorcerer-halfogre.spec.ts`) blanket-skip their entire
+Sorcery Points ladder with `skipReason: "CS-BUG-018"` rather than assert a
+number they could not reconcile.
+
+**Fix**: `getSorceryPointsMaxForClass()` returns `level + 1` for TGTT and
+`level >= 2 ? level : 0` for PHB/XPHB, and every surface now reads it.
+
+**Follow-up available**: the CS-BUG-018 skips in the two neighbouring Sorcerer
+specs are now liftable with `level + 1` values. Left in place here so the
+blast radius of this change stays inside one subclass; whoever picks up
+Lunar / Spellfire / Wicked Witch / Shadow Sorcery should take it.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §"base-class
+Sorcery Points machinery" asserts both ladders explicitly.
 
 ### Addendum — the SECOND chokepoint (fixed separately)
 

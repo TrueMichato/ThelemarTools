@@ -357,6 +357,48 @@ whatever `parseEffectsFromDescription` extracts from the feature text. Use it
 whenever the prose is lossy — here the parse duplicated bludgeoning and dropped
 the "from nonmagical weapons" caveat. Without the flag, a non-empty parse wins.
 
+#### Umbral Form (Shadow Magic Sorcerer, L18)
+
+```javascript
+umbralForm: {
+    preferCuratedEffects: true,
+    effects: [
+        {type: "resistance", target: "damage:acid"},
+        {type: "resistance", target: "damage:bludgeoning"},
+        // …9 more: cold, fire, lightning, necrotic, piercing, poison,
+        //          psychic, slashing, thunder — every type EXCEPT force
+        //          and radiant.
+    ],
+    duration: "1 minute",
+    activationAction: "bonus",
+    resourceName: "Sorcery Points",
+    resourceCost: 6,
+}
+```
+
+"Resistance to all damage except force and radiant" has to be enumerated. There
+is no exclusion syntax, and there deliberately isn't one — a wildcard-minus-list
+form would have to be re-resolved every time the damage-type table changes, and
+`_getDamageDefenceFromStates` would lose its whitelist guarantee. Eleven explicit
+`damage:<type>` entries are also self-documenting at the call site and let a test
+assert the exact count (11 while active), which is a stronger probe than "force
+is not in the list".
+
+`resourceCost: 6` on the state definition is what `getActivatableFeatures()`
+resolves the Sorcery Point spend from; `_findResource` matches
+`"Sorcery Points"` bidirectionally, so a feature declaring
+`consumes: {name: "Sorcery Point"}` (singular) resolves to the same pool.
+
+**Name collisions.** Umbral Form's sibling states in the TGTT Shadow Knight
+tree (`eyesOfTheDark`, `umbralCoating`, `shadowCloak`, `shadowKnightDarkness`)
+all carry `noNameDetect: true` — see CS-BUG-083. `detectActivatableFeature()`
+is static and matches purely on feature name, so without the flag a Shadow
+Magic Sorcerer's *passive* "Eyes of the Dark" was classified as the Shadow
+Knight's activatable state of the same name. Add `noNameDetect: true` to any
+state whose name is generic enough to appear in unrelated content; such states
+are then reachable only through an explicit `activateState(key)` call or a
+`FEATURE_CLASSIFICATION_OVERRIDES` entry.
+
 ### Combat Stances (TGTT/Homebrew)
 
 #### Astral Self (Way of the Astral Self Monk)
