@@ -837,6 +837,14 @@ An at-will re-grant of an already-granted spell **upgrades** it —
 `_mergeSpellMetadata()` sets `atWill` and drops `uses`/`recharge` — which is how
 Reduce Gravity's level-15 tier works.
 
+All three behaviours are pinned in `CharacterSheetMeteorKnight.test.js` and each
+pin has been **measured** against a faithful negative control on the full
+`charactersheet/` suite (13,100 tests): reverting (1) turns 1 test red,
+reverting (2) — by making `_parseSpellGrantMinLevel()` return `null`
+unconditionally, which restores pre-feature semantics without deleting a symbol
+— turns 5 red, and reverting (3) to the original local-context-only
+`isOnce`/`recharge` expressions turns 5 red.
+
 ---
 
 ## Usage in UI Components

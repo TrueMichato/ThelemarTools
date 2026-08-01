@@ -2421,6 +2421,10 @@ entries when the description is rendered HTML". Verified in-browser via
 `[]` to `["Feather Fall", "Jump"]`, and to all three with the at-will upgrade
 at 15.
 
+**Falsified**: restoring the literal prior `feature.description` expression
+turns **1 test red** on the full `charactersheet/` suite. Measured twice —
+once by the implementing session, once independently at merge time.
+
 ---
 
 ## CS-BUG-067 — feature-wide "cast each once per long rest" clauses were out of the parser's context window, upgrading limited grants to permanent ones
@@ -2460,3 +2464,16 @@ cannot bind to the word "cast" in a different sentence.
 `CharacterSheetMeteorKnight.test.js` — asserts `uses: {current: 1, max: 1}`
 and `recharge: "long"` on the level-3 grants, and that the level-15 at-will
 upgrade *clears* both.
+
+**Falsified**: restoring the original local-context-only expressions
+
+```js
+const isOnce = /once|one time/i.test(context) && /rest|dawn|day/i.test(context);
+const recharge = /short rest/i.test(context) ? "short" : (/long rest|dawn|day/i.test(context) ? "long" : null);
+```
+
+turns **5 tests red** on the full `charactersheet/` suite. Measured
+independently at merge time and again by the implementing session; both runs
+agree on 5. Keep `_parseFeatureWideCastingLimit()` defined when running this
+control — deleting it as well produces a `ReferenceError` and an inflated red
+count that proves nothing.
