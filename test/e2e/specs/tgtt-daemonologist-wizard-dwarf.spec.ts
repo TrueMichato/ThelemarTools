@@ -24,7 +24,11 @@ const DAEMONOLOGIST_FEATURES: FeatureCheck[] = [
 	// Scholar's expertise target is auto-picked and therefore not deterministic.
 	{level: 2, name: /scholar/i, kind: "passive"},
 	{level: 3, name: /fair and foul/i, kind: "passive", effects: [
-		{kind: "spellInList", spell: "Bane", spellMatchMode: "any", level: 1},
+		// Deliberately NOT `spellMatchMode: "any"`: that mode drops the name
+		// assertion entirely and only counts spells at `level`, so it would
+		// pass on any wizard with a single level-1 spell without ever looking
+		// for Bane. The default `first-party` mode does the exact-name lookup.
+		{kind: "spellInList", spell: "Bane"},
 	]},
 	{level: 6, name: /borrowed tongues and hides/i, kind: "passive", effects: [
 		{kind: "resistance", damageType: "necrotic"},

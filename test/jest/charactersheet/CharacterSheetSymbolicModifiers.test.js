@@ -270,4 +270,61 @@ describe("CS-BUG-038 — symbolic modifier values resolve to numbers", () => {
 			expect(state._data.customModifiers.initiative).toBe(state.getProficiencyBonus());
 		});
 	});
+
+	/**
+	 * There are TWO chokepoints that turn a stored modifier into a number, not one:
+	 *   - `_getNamedModifierEffectiveValue`  → feeds the cached customModifiers totals
+	 *   - `_resolveNamedModifierNumericValue` → feeds `aggregateModifiers` + the attack itemizer
+	 * The original fix hardened only the first. `aggregateModifiers("save:all").bonus`
+	 * therefore still returned the STRING "1attunedItems" on a live Artificer 20 —
+	 * measured in-browser at HEAD, with all six `getSaveMod()` values already correct,
+	 * which is exactly why the per-save assertions above did not catch it.
+	 */
+	describe("second chokepoint: aggregateModifiers must resolve symbolic values too", () => {
+		/** Reproduces the real Artificer 20 shape: a numeric row AND a symbolic row on the same type. */
+		function makeArtificerSaveState () {
+			const state = makeState();
+			state.addNamedModifier({name: "Soul of Artifice Base", type: "save:all", value: 1, sourceType: "classFeature"});
+			state.addNamedModifier({name: "Soul of Artifice", type: "save:all", value: "attunedItems", sourceType: "classFeature"});
+			state._recalculateCustomModifiers();
+			return state;
+		}
+
+		it("returns a NUMBER, not the concatenated string \"1attunedItems\"", () => {
+			const state = makeArtificerSaveState();
+
+			// PREMISE: the symbolic token really is stored, enabled, and would concatenate.
+			expectStoredValue(state, "Soul of Artifice", "attunedItems");
+			expect(state._data.namedModifiers.find(m => m.name === "Soul of Artifice").enabled).not.toBe(false);
+
+			const agg = state.aggregateModifiers("save:all");
+			// Exact value, not merely isFinite — a wrong-but-numeric result passes isFinite.
+			expect(agg.bonus).toBe(1);
+			expect(typeof agg.bonus).toBe("number");
+			expect(String(agg.bonus)).not.toMatch(/attunedItems/);
+		});
+
+		it("tracks the LIVE attunement count through the aggregate path", () => {
+			const state = makeArtificerSaveState();
+			expect(state.aggregateModifiers("save:all").bonus).toBe(1);
+
+			// Attune two items -> "attunedItems" must resolve to 2, so the total becomes 1 + 2.
+			state.getAttunedItems = () => [{name: "A"}, {name: "B"}];
+			expect(state.aggregateModifiers("save:all").bonus).toBe(3);
+		});
+
+		it("does not let an unresolvable token poison the aggregate", () => {
+			const state = makeState();
+			state.addNamedModifier({name: "Charger", type: "damage:charge", value: "1d8", sourceType: "feat"});
+			state._recalculateCustomModifiers();
+
+			expectStoredValue(state, "Charger", "1d8");
+
+			const agg = state.aggregateModifiers("damage:charge");
+			// A dice token belongs to the dice channel; it contributes 0 to the flat total
+			// rather than concatenating into "01d8".
+			expect(agg.bonus).toBe(0);
+			expect(typeof agg.bonus).toBe("number");
+		});
+	});
 });

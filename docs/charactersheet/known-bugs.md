@@ -2046,13 +2046,45 @@ sources each granting a flying speed should give the higher, not the sum.
 
 Deliberately not fixed here. It is **unreachable today** — the only two live
 emitters are Unearthly Countenance (Daemonologist 10) and Stormborn (Tempest
-Cleric 17), which would require character level 27 — and a real fix cannot be
-made at the read site, because the `bonus` vocabulary is genuinely ambiguous: the
-same shape expresses both "grant a 60 ft fly speed" and "add +10 to the fly speed
-you already have", and only the first should max rather than sum. Disambiguating
-requires changing the emitters, including `parseEffectsFromDescription`. Recorded
-rather than filed as its own id, since it shares this pipeline and cannot
-currently be triggered.
+Cleric 17), which would require character level 27. Recorded rather than filed as
+its own id, since it shares this pipeline and cannot currently be triggered.
+
+> **CORRECTION (audited after the Circle of the Sea session's read-back).** This
+> entry originally claimed a fix "cannot be made at the read site, because the
+> `bonus` vocabulary is genuinely ambiguous — the same shape expresses both
+> 'grant a 60 ft fly speed' and 'add +10 to the fly speed you already have'".
+> **That is false for type-specific targets.** Enumerated, there are exactly
+> **four** emitters of a `{type: "bonus", target: "speed:<fly|swim|climb|burrow>"}`
+> effect, and **all four are grants**:
+>
+> | Emitter | Shape |
+> |---|---|
+> | `ACTIVE_STATE_TYPES.unearthlyCountenance` | `{target: "speed:fly", value: 60}` |
+> | `parseEffectsFromDescription` fly | regex `/(?:gain\|have) (?:a )?flying speed …/i` |
+> | `parseEffectsFromDescription` swim | same shape |
+> | `parseEffectsFromDescription` climb | same shape |
+>
+> The three parser regexes match **only** `gain`/`have a <X>ing speed` phrasing.
+> They cannot match "your flying speed increases by 10", so no additive typed
+> effect can be produced by this pipeline at all. The genuinely additive
+> vocabulary lives elsewhere: the generic `{type: "speed", value: 10}` effect
+> (walking, e.g. the artifact "Speed Increase" property) and the **named
+> modifier** `speed:fly` modType, which is a different pipeline summed into
+> `customModifiers.speed.fly` by `_recalculateCustomModifiers()`.
+>
+> So the remediation is **much cheaper than recorded**: within the *effect*
+> pipeline, type-specific `speed:<type>` contributions are grants and should be
+> combined with `Math.max` — against each other and against the `equalToWalk`
+> read-site head — rather than summed. No parser change and no new discriminator
+> field are required. `equalToWalk` is already unambiguously a grant, so once the
+> effect head maxes, the read-site head can fold into it (value resolved from the
+> walk speed at read time) and the pipeline returns to a single head.
+>
+> Two guards any such fix must keep, both already pinned by the PREMISE tests in
+> `CharacterSheetActiveStateEngine.test.js`: a generic `{target: "speed"}` must
+> still never conjure a movement type, and the **named-modifier** `speed:<type>`
+> path must stay additive — maxing there would silently delete a player's
+> hand-entered "+10 fly" custom modifier.
 
 Verified unchanged by this fix: `getSpeedByType("fly")` agrees with
 `getSpeed("fly")` on the bonus head (both **60**); Stormborn still reads **30**
@@ -2381,6 +2413,46 @@ Lunar / Spellfire / Wicked Witch / Shadow Sorcery should take it.
 
 **Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §"base-class
 Sorcery Points machinery" asserts both ladders explicitly.
+
+### Addendum — the SECOND chokepoint (fixed separately)
+
+The fix above hardened `_getNamedModifierEffectiveValue`, which feeds the cached
+`customModifiers` totals. That is **not the only** place a stored modifier becomes
+a number. `_resolveNamedModifierNumericValue` (dating from 2026-06-27, so it
+predates the original fix) feeds `aggregateModifiers()` and the attack itemizer,
+and it still read `mod.value` raw.
+
+Measured in-browser on `artificer/battle smith/20/human` **after** the original
+fix had landed:
+
+```
+getSaveMod("str"|"dex"|"con"|"int"|"wis"|"cha")  ->  2, 3, 12, 12, 1, 0   (correct)
+aggregateModifiers("save:all").bonus            ->  "1attunedItems"      (a STRING)
+```
+
+All six per-save values were already correct — which is exactly **why the
+existing per-save regression tests did not catch it**. Soul of Artifice registers
+a numeric row *and* a symbolic row on the same `save:all` type, so the aggregate
+performed `1 + "attunedItems"`.
+
+⚠️ **Generalisable lesson**: when hardening a value-resolution defect, grep for
+*sibling resolvers*, not just for raw readers of the field. The original audit
+hunted consumers reading `mod.value` directly and missed a second **resolver**
+method, because it looked like a fix rather than a bypass. Two chokepoints now
+exist and both are commented as such so they cannot drift apart.
+
+**No double-count check** (the assertion most likely to catch an over-broad
+resolver): `wizard/bladesinger/11/elf` still reads AC `11 → 15` and concentration
+`+2 → +6` with INT mod 4 — the modifier applied **once**. Bladesong's two named
+modifiers are a deliberately `enabled: false` duplicate of the active-state path;
+the resolver must not revive them, and does not.
+
+**Recursion note**: resolving `"strScore"` calls `getAbilityScore("str")`, which
+looks like an infinite loop for Indomitable Might. It is not: that modifier's type
+is `ability:str:minimum`, a *sub-typed* variant which the ability-score
+aggregation deliberately skips, so the resolver is never re-entered from inside
+`getAbilityScore()`. Verified live — `barbarian/chained fury/18/minotaur` returns
+STR `20` with zero page errors.
 
 ---
 
