@@ -2027,6 +2027,38 @@ the Sea session), so this class of dead probe cannot recur. The Daemonologist
 spec was migrated to `{kind: "toggleGrantsSpeed", type: "fly", min: 60}` and now
 genuinely asserts the 60 ft.
 
+**Known latent seam left in place (measured, NOT shipped-reachable)**: after this
+fix there are **two** vocabularies by which an active state can grant a movement
+type, and they **add** rather than take the maximum.
+
+- *Bonus vocabulary* — `{type: "bonus", target: "speed:fly", value: 60}`, summed
+  by `getSpeedBonusFromStates()`. This is what the curated states and every
+  prose-parsed grant emit, and it is the head this fix repaired.
+- *Read-site vocabulary* — `{type: "flySpeed", value: N}` or
+  `{type: "flySpeed", equalToWalk: true}`, resolved directly inside
+  `getSpeedByType()`. This is what the Fly spell and Stormborn use. It never
+  crossed the `base === 0` guard, which is why Stormborn was green throughout and
+  did not catch the bug.
+
+Measured on a Daemonologist Wizard 10 (walk 30): the bonus head alone gives
+**60**; adding an `equalToWalk` grant on top gives **90**, not 60. By RAW two
+sources each granting a flying speed should give the higher, not the sum.
+
+Deliberately not fixed here. It is **unreachable today** — the only two live
+emitters are Unearthly Countenance (Daemonologist 10) and Stormborn (Tempest
+Cleric 17), which would require character level 27 — and a real fix cannot be
+made at the read site, because the `bonus` vocabulary is genuinely ambiguous: the
+same shape expresses both "grant a 60 ft fly speed" and "add +10 to the fly speed
+you already have", and only the first should max rather than sum. Disambiguating
+requires changing the emitters, including `parseEffectsFromDescription`. Recorded
+rather than filed as its own id, since it shares this pipeline and cannot
+currently be triggered.
+
+Verified unchanged by this fix: `getSpeedByType("fly")` agrees with
+`getSpeed("fly")` on the bonus head (both **60**); Stormborn still reads **30**
+= walking speed; and a generic `{target: "speed", value: 10}` still yields a
+climb speed of **0** even with two fly-granting states active.
+
 ---
 
 ## CS-BUG-060 — Circle of the Sea's Wrath of the Sea was description-only, and Stormborn collided with the Tempest Cleric
