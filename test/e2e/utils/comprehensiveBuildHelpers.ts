@@ -864,6 +864,17 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "bloodMaledictAmplification"; hpCost: number}
 	| {kind: "crimsonRiteMechanics"; hpCosts: [number, number]}
 	| {kind: "hybridTransformationMechanics"}
+
+	// Psionic strain (MCDM Talent). Drives the three strain tracks up through their
+	// effect thresholds and asserts each debuff is REALLY applied to the derived
+	// numbers (AC, speed, hit point maximum, skill/save proficiency, disadvantage),
+	// then clears strain and asserts everything returns to baseline.
+	| {kind: "psionicStrainMechanics"}
+
+	// A manifestation test for a power of `order`, with the manifestation die forced,
+	// asserting the strain charged matches the class rule (roll > score → none,
+	// roll === score → 1, roll < score → order).
+	| {kind: "manifestationTest"; order: number; roll: number; expectStrain: number}
 );
 
 const _TOGGLE_EFFECT_KINDS = new Set([
@@ -1415,6 +1426,108 @@ async function _runPassiveOrRollEffect (
 			if (result.expectedRegeneration > 0 && (result.regenerated !== result.expectedRegeneration || result.hpDelta !== result.expectedRegeneration)) {
 				throw new Error(`Hybrid regeneration=${result.regenerated}/${result.hpDelta}, expected ${result.expectedRegeneration}`);
 			}
+			return;
+		}
+		case "psionicStrainMechanics": {
+			const result = await charSheet.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				if (!state?.getStrainMaximum) return {ok: false, reason: "strain API missing"};
+				const max = state.getStrainMaximum();
+				if (!max) return {ok: false, reason: "not a Talent"};
+				const skill = Object.keys(state.getSkillProficiencies() || {})[0] || null;
+				state.clearStrain();
+				state.setIgnoredStrainTrack?.(null);
+				state.setCurrentHp(state.getMaxHp());
+				const base = {
+					ac: state.getAc(),
+					speed: state.getWalkSpeed(),
+					maxHp: state.getMaxHp(),
+					skillMod: skill ? state.getSkillMod(skill) : null,
+					saveProf: state.hasSaveProficiency("int"),
+					strCheckDis: !!state.getAdvantageState("check:str")?.disadvantage,
+					deathSaveDis: !!state.getAdvantageState("deathSave")?.disadvantage,
+				};
+
+				// Body 3 → speed halved; body 7 → hit point maximum halved.
+				state.addStrain(3, "body");
+				const bodyThree = {speed: state.getWalkSpeed(), strCheckDis: !!state.getAdvantageState("check:str")?.disadvantage};
+				state.clearStrain();
+				state.addStrain(7, "body");
+				const bodySeven = {maxHp: state.getMaxHp(), strSaveDis: !!state.getAdvantageState("save:str")?.disadvantage};
+
+				// Mind 3 → skill proficiency lost; mind 5 → −5 AC; mind 7 → save proficiency lost.
+				state.clearStrain();
+				state.addStrain(3, "mind");
+				const mindThree = {skillMod: skill ? state.getSkillMod(skill) : null};
+				state.clearStrain();
+				state.addStrain(5, "mind");
+				const mindFive = {ac: state.getAc()};
+				state.clearStrain();
+				state.addStrain(7, "mind");
+				const mindSeven = {saveProf: state.hasSaveProficiency("int")};
+
+				// Soul 3 → death saves at disadvantage; soul 7 → supernatural healing halved.
+				state.clearStrain();
+				state.addStrain(3, "soul");
+				const soulThree = {deathSaveDis: !!state.getAdvantageState("deathSave")?.disadvantage};
+				state.clearStrain();
+				state.addStrain(7, "soul");
+				state.setCurrentHp(1);
+				state.heal(10, {supernatural: true});
+				const soulSeven = {healed: state.getCurrentHp() - 1};
+
+				// Overflow is refused, never silently clamped past the maximum.
+				state.clearStrain();
+				state.addStrain(max, "body");
+				const overflow = state.addStrain(1, "mind");
+
+				// A long rest clears every track.
+				state.clearStrain();
+				state.addStrain(2, "mind");
+				const beforeRest = state.getTotalStrain();
+				state.longRest?.();
+				state.onLongRest?.();
+				const afterRest = state.getTotalStrain();
+
+				state.clearStrain();
+				state.setCurrentHp(state.getMaxHp());
+				const restored = {
+					ac: state.getAc(),
+					speed: state.getWalkSpeed(),
+					maxHp: state.getMaxHp(),
+					skillMod: skill ? state.getSkillMod(skill) : null,
+					saveProf: state.hasSaveProficiency("int"),
+				};
+				return {ok: true, max, skill, base, bodyThree, bodySeven, mindThree, mindFive, mindSeven, soulThree, soulSeven, overflow, beforeRest, afterRest, restored};
+			});
+			if (!result.ok) throw new Error(`psionicStrainMechanics unavailable: ${JSON.stringify(result)}`);
+			if (result.bodyThree.speed !== Math.floor(result.base.speed / 2)) throw new Error(`body strain 3 speed=${result.bodyThree.speed}, expected ${Math.floor(result.base.speed / 2)}`);
+			if (!result.bodyThree.strCheckDis) throw new Error(`body strain did not impose disadvantage on Strength checks`);
+			if (result.bodySeven.maxHp !== Math.max(1, Math.floor(result.base.maxHp / 2))) throw new Error(`body strain 7 maxHp=${result.bodySeven.maxHp}, expected half of ${result.base.maxHp}`);
+			if (!result.bodySeven.strSaveDis) throw new Error(`body strain 5 did not impose disadvantage on Strength saves`);
+			if (result.skill && result.mindThree.skillMod === result.base.skillMod) throw new Error(`mind strain 3 did not strip skill proficiency (${result.skill} stayed at ${result.base.skillMod})`);
+			if (result.mindFive.ac !== result.base.ac - 5) throw new Error(`mind strain 5 AC=${result.mindFive.ac}, expected ${result.base.ac - 5}`);
+			if (result.base.saveProf && result.mindSeven.saveProf) throw new Error(`mind strain 7 did not strip saving-throw proficiency`);
+			if (!result.soulThree.deathSaveDis) throw new Error(`soul strain 3 did not impose disadvantage on death saves`);
+			if (result.soulSeven.healed !== 5) throw new Error(`soul strain 7 supernatural healing=${result.soulSeven.healed}, expected 5 (half of 10)`);
+			if (!result.overflow.overflow || result.overflow.applied !== 0) throw new Error(`strain past the maximum was applied instead of refused: ${JSON.stringify(result.overflow)}`);
+			if (result.beforeRest === 0 || result.afterRest !== 0) throw new Error(`long rest did not clear strain (${result.beforeRest} → ${result.afterRest})`);
+			if (result.restored.ac !== result.base.ac || result.restored.speed !== result.base.speed || result.restored.maxHp !== result.base.maxHp) {
+				throw new Error(`clearing strain did not restore baseline: ${JSON.stringify(result.restored)} vs ${JSON.stringify(result.base)}`);
+			}
+			return;
+		}
+		case "manifestationTest": {
+			const result = await charSheet.page.evaluate((args) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				if (!state?.rollManifestationTest) return {ok: false, reason: "manifestation API missing"};
+				state.clearStrain();
+				const test = state.rollManifestationTest(args.order, {roll: args.roll, track: "mind", apply: true});
+				return {ok: true, test, total: state.getTotalStrain(), die: state.getManifestationDie(), maxOrder: state.getMaxPowerOrder()};
+			}, e);
+			if (!result.ok) throw new Error(`manifestationTest unavailable: ${JSON.stringify(result)}`);
+			if (result.test.strain !== e.expectStrain) throw new Error(`manifestation test order=${e.order} roll=${e.roll} strain=${result.test.strain}, expected ${e.expectStrain}`);
+			if (result.total !== e.expectStrain) throw new Error(`manifestation test applied ${result.total} strain, expected ${e.expectStrain}`);
 			return;
 		}
 		case "pickToggleable": {

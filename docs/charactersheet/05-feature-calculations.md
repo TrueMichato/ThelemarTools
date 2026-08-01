@@ -52,6 +52,36 @@ const calculations = state.getFeatureCalculations();
 
 ## Class Feature Breakdowns
 
+### Talent (TalPsi)
+
+The MCDM Talent is a full homebrew base class with no spellcasting; its
+resource economy is **psionic strain** (see
+[17-talent-psionics.md](17-talent-psionics.md)).
+
+```javascript
+manifestationAbility: "int",
+manifestationDie: "1d4" | "1d6" | "1d8",   // L1-4 / L5-12 / L13-20
+maxPowerOrder: 2 | 3 | 4 | 5 | 6,          // L1 / L5 / L9 / L13 / L17
+firstOrderPowersKnown: 4 | 5 | 6,          // L1 / L4 / L10
+higherOrderPowersKnown: level + 1,
+strainMaximum: 4 + talentLevel,
+powerSaveDc: 8 + proficiency + INT modifier,
+powerAttackBonus: proficiency + INT modifier,
+psionicExertionsKnown: 1 | 2 | 3 | 4,      // L3 / L7 / L11 / L15
+psychicBoostUses: 1 | 2 | 3,               // L7 / L12 / L17
+hasPsionicBastion: true,                   // L11
+hasShieldedMind: true,                     // L18
+hasIgnoreStrain: true,                     // L20
+```
+
+Chronopath adds `chronopathyAdeptUses` / `rapidManifestationUses` (INT modifier,
+minimum 1), `decayDamagePerStrain` (`2d10`), `decayDc`, `hasFickleReadiness`,
+and `timePocketDamage` / `timePocketDc`.
+
+Both power pools and the Psionic Exertion list are surfaced through the
+**generic optional-feature progression** machinery, so Builder, Level-Up and
+Quick Build all present the picks with no per-class UI.
+
 ### Blood Hunter (BH2022)
 
 ```javascript

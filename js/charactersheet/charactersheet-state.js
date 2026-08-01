@@ -2066,20 +2066,32 @@ class FeatureModifierParser {
 		// CONDITION IMMUNITY (Generic)
 		// ===================
 		// "immune to the charmed condition", "immunity to being frightened"
-		// "can't be charmed", "cannot be frightened"
+		// "can't be charmed", "cannot be charmed or frightened"
+		// Lists are supported the same way damage immunity lists are ("A, B, and C" /
+		// "A or B") so a single sentence granting several condition immunities — common in
+		// homebrew — yields one modifier per condition instead of only the first.
+		const condList = "charmed|frightened|poisoned|paralyzed|stunned|petrified|blinded|deafened|prone|exhaustion|grappled|restrained|incapacitated";
+		const condSep = "\\s*(?:,\\s*(?:and\\s+|or\\s+)?|\\s+and\\s+|\\s+or\\s+)";
+		const condGroup = `((?:${condList})(?:${condSep}(?:${condList}))*)`;
 		const condImmunityPatterns = [
-			/(?:immune|immunity)\s+to\s+(?:the\s+)?(?:being\s+)?(charmed|frightened|poisoned|paralyzed|stunned|petrified|blinded|deafened|prone|exhaustion|grappled|restrained|incapacitated)(?:\s+condition)?/gi,
-			/(?:can't|cannot)\s+be\s+(charmed|frightened|poisoned|paralyzed|stunned|petrified|blinded|deafened|prone|grappled|restrained|incapacitated)/gi,
+			new RegExp(`(?:immune|immunity)\\s+to\\s+(?:the\\s+)?(?:being\\s+)?${condGroup}(?:\\s+condition)?`, "gi"),
+			new RegExp(`(?:can't|cannot)\\s+be\\s+${condGroup}`, "gi"),
 		];
 		condImmunityPatterns.forEach(pattern => {
 			let cimMatch;
 			while ((cimMatch = pattern.exec(plainText)) !== null) {
-				modifiers.push({
-					type: `conditionImmunity:${cimMatch[1].toLowerCase()}`,
-					value: 0,
-					note: sourceName,
-					isConditionImmunity: true,
-				});
+				cimMatch[1]
+					.split(new RegExp(condSep, "i"))
+					.map(c => c.trim().toLowerCase())
+					.filter(c => new RegExp(`^(?:${condList})$`, "i").test(c))
+					.forEach(condition => {
+						modifiers.push({
+							type: `conditionImmunity:${condition}`,
+							value: 0,
+							note: sourceName,
+							isConditionImmunity: true,
+						});
+					});
 			}
 		});
 
@@ -2646,6 +2658,18 @@ const FeatureEffectRegistry = {
 
 		// ======= WIZARD =======
 		// (Most wizard features are school-specific)
+
+		// ======= TALENT (MCDM "The Talent and Psionics", TalPsi) =======
+		this.register("Psionic Bastion", [
+			{type: "conditionImmunity", condition: "charmed"},
+			{type: "conditionImmunity", condition: "frightened"},
+			{type: "resistance", damageType: "psychic"},
+		]);
+		this.register("Shielded Mind", [
+			{type: "modifier", modType: "save:int:advantage", value: 1},
+			{type: "modifier", modType: "save:wis:advantage", value: 1},
+			{type: "modifier", modType: "save:cha:advantage", value: 1},
+		]);
 	},
 
 	/**
@@ -4486,6 +4510,13 @@ class CharacterSheetState {
 			// Exhaustion level (0-6, with 6 being death in 2014 rules, or -1d6 penalty in 2024)
 			exhaustion: 0,
 
+			// Psionic strain (MCDM Talent, source TalPsi). Three independent tracks whose
+			// combined total must never exceed the strain maximum. See `getStrainState()`.
+			psionicStrain: {body: 0, mind: 0, soul: 0},
+			// "Ignore Strain" (Talent 20) — the track whose EFFECTS are suppressed until the
+			// next long rest. One of "body" | "mind" | "soul" | null.
+			psionicStrainIgnored: null,
+
 			// Resources (class features, racial abilities, etc.)
 			resources: [], // [{id, name, current, max, recharge: "short"|"long"|"dawn"}]
 			pendingDamageMaximization: null, // Deferred one-shot damage maximization (e.g. Destructive Wrath)
@@ -4831,6 +4862,19 @@ class CharacterSheetState {
 		// Ensure activeCombatMethodEffects array exists
 		if (!Array.isArray(this._data.activeCombatMethodEffects)) {
 			this._data.activeCombatMethodEffects = [];
+		}
+
+		// Ensure the psionic strain tracks exist (saves predating the Talent class).
+		if (!this._data.psionicStrain || typeof this._data.psionicStrain !== "object") {
+			this._data.psionicStrain = {body: 0, mind: 0, soul: 0};
+		} else {
+			for (const track of CharacterSheetState.PSIONIC_STRAIN_TRACKS) {
+				const raw = Number(this._data.psionicStrain[track]);
+				this._data.psionicStrain[track] = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
+			}
+		}
+		if (!CharacterSheetState.PSIONIC_STRAIN_TRACKS.includes(this._data.psionicStrainIgnored)) {
+			this._data.psionicStrainIgnored = null;
 		}
 
 		// Ensure temporaryAttacks array exists (variant components system)
@@ -7002,6 +7046,7 @@ class CharacterSheetState {
 		this.applyClassFeatureEffects();
 		this._ensureBattleMasterSuperiorityDice();
 		this.ensureBloodHunterResources();
+		this.ensureTalentResources();
 		// Recalculate companion stats (HP, AC, etc. may scale with level/PB)
 		this.recalculateAllCompanions();
 	}
@@ -8736,8 +8781,10 @@ class CharacterSheetState {
 	}
 
 	getMaxHp () {
-		if (this._data.hp.max > 0) return this._data.hp.max;
-		return this._calculateMaxHp();
+		const base = this._data.hp.max > 0 ? this._data.hp.max : this._calculateMaxHp();
+		// Psionic body strain (Talent, 7+ body strain) halves the hit point maximum.
+		if (this._isStrainHalvingMaxHp()) return Math.max(1, Math.floor(base / 2));
+		return base;
 	}
 
 	_calculateMaxHp () {
@@ -8799,6 +8846,9 @@ class CharacterSheetState {
 		// Apply temporary maximum-HP reductions last so they reduce the complete
 		// maximum, including feature and spell-effect increases such as Aid.
 		hp -= this.getMaxHpReduction();
+
+		// Psionic body strain (Talent, 7+ body strain) halves the hit point maximum.
+		// Applied in getMaxHp() so an explicitly-set maximum is halved too.
 
 		return Math.max(1, hp);
 	}
@@ -9019,10 +9069,20 @@ class CharacterSheetState {
 	getTempHp () { return this._data.hp.temp; }
 
 	// Unified HP methods for rest.js compatibility
-	heal (amount) {
+	/**
+	 * Restore hit points.
+	 * @param {number} amount hit points to restore
+	 * @param {*} [opts]
+	 * @param {boolean} [opts.supernatural] whether the healing comes from a spell, power or
+	 *   other supernatural effect. Psionic soul strain (Talent, 7+) halves such healing.
+	 */
+	heal (amount, {supernatural = false} = {}) {
 		const maxHp = this.getMaxHp();
 		const wasAtZero = this._data.hp.current === 0;
-		this._data.hp.current = Math.min(maxHp, this._data.hp.current + amount);
+		const effective = supernatural && this._getActiveStrainState()?.halveSupernaturalHealing
+			? Math.floor(Math.max(0, amount) / 2)
+			: amount;
+		this._data.hp.current = Math.min(maxHp, this._data.hp.current + effective);
 
 		// Reset death saves when healing from 0 HP
 		if (wasAtZero && this._data.hp.current > 0) {
@@ -9170,6 +9230,7 @@ class CharacterSheetState {
 			"Wizard": 6,
 			"Artificer": 8,
 			"Blood Hunter": 10,
+			"Talent": 6,
 		};
 		return hitDice[className] || 8;
 	}
@@ -9504,6 +9565,8 @@ class CharacterSheetState {
 	}
 
 	hasSaveProficiency (ability) {
+		// Psionic mind strain (Talent, 7+ mind strain) strips ALL saving-throw proficiencies.
+		if (this._isStrainSuppressingSaveProficiency()) return false;
 		return this._data.saveProficiencies.includes(ability);
 	}
 
@@ -9676,6 +9739,19 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Proficiency level as it applies to ROLLS and DISPLAY right now, after transient
+	 * suppression effects. Currently only psionic mind strain (Talent, 3+ mind strain)
+	 * suppresses skill proficiency; the raw grant stays intact in `getSkillProficiency`
+	 * so level-up / expertise / respec logic keeps seeing the character's real training.
+	 * @param {string} skill - The skill name
+	 * @returns {number} 0 = none, 1 = proficient, 2 = expertise
+	 */
+	getEffectiveSkillProficiency (skill) {
+		if (this._isStrainSuppressingSkillProficiency()) return 0;
+		return this.getSkillProficiency(skill);
+	}
+
+	/**
 	 * Get all skill proficiencies as a map.
 	 * @returns {Object.<string, number>} Map of skill name to proficiency level (0=none, 1=proficient, 2=expertise)
 	 */
@@ -9800,7 +9876,7 @@ class CharacterSheetState {
 			: ability;
 		// If no ability, only use proficiency and bonuses (flat skill check)
 		const mod = resolvedAbility ? this.getAbilityMod(resolvedAbility) : 0;
-		const profLevel = this.getSkillProficiency(normalizedSkill);
+		const profLevel = this.getEffectiveSkillProficiency(normalizedSkill);
 
 		let profBonus = profLevel * this.getProficiencyBonus();
 
@@ -10222,6 +10298,10 @@ class CharacterSheetState {
 			if (e.type !== "minAc") continue;
 			if (e.value > ac) ac = e.value;
 		}
+
+		// Psionic mind strain (Talent 5+ mind strain): flat -5 AC. Applied after the
+		// minimum-AC floor because it is a penalty the floor does not protect against.
+		ac -= this._getStrainAcPenalty();
 
 		return ac;
 	}
@@ -10747,7 +10827,7 @@ class CharacterSheetState {
 			components.push({type: "ability", name: abilityLabel, value: mod, icon: "🎲", isCanonical: true});
 		}
 
-		const profLevel = this.getSkillProficiency(normalizedSkill);
+		const profLevel = this.getEffectiveSkillProficiency(normalizedSkill);
 		const profBonus = this.getProficiencyBonus();
 		if (profLevel === 2) {
 			components.push({type: "proficiency", name: "Expertise (2×)", value: profLevel * profBonus, icon: "🌟", isCanonical: true});
@@ -15731,6 +15811,60 @@ class CharacterSheetState {
 			const level = cls.level || 1;
 
 			switch (className) {
+				case "Talent": {
+					// MCDM "The Talent and Psionics" (TalPsi). Intelligence is the
+					// manifestation ability for every derived number.
+					const intMod = this.getAbilityMod("int");
+					calculations.hasPsionicPowers = true;
+					calculations.manifestationAbility = "int";
+					calculations.manifestationDie = level >= 13 ? "1d8" : level >= 5 ? "1d6" : "1d4";
+					calculations.powerSaveDc = 8 + profBonus + intMod - exhaustionPenalty;
+					// Power attack rolls are d20 rolls — exhaustion is applied at roll time only.
+					calculations.powerAttackBonus = profBonus + intMod;
+					calculations.strainMaximum = 4 + level;
+					calculations.maxPowerOrder = level >= 17 ? 6 : level >= 13 ? 5 : level >= 9 ? 4 : level >= 5 ? 3 : 2;
+					calculations.firstOrderPowersKnown = level >= 10 ? 6 : level >= 4 ? 5 : 4;
+					calculations.higherOrderPowersKnown = level + 1;
+					calculations.hasStrainToMaintain = true;
+					if (level >= 3) calculations.psionicExertionsKnown = level >= 15 ? 4 : level >= 11 ? 3 : level >= 7 ? 2 : 1;
+					if (level >= 7) {
+						calculations.hasPsychicBoost = true;
+						calculations.psychicBoostUses = level >= 17 ? 3 : level >= 12 ? 2 : 1;
+						calculations.psychicBoostStrainRemoved = profBonus;
+					}
+					if (level >= 11) calculations.hasPsionicBastion = true;
+					if (level >= 18) calculations.hasShieldedMind = true;
+					if (level >= 20) calculations.hasIgnoreStrain = true;
+
+					const talentSubclass = this.getEffectiveSubclassForClass(cls);
+					const talentSubclassName = talentSubclass?.shortName || talentSubclass?.name || "";
+					if (/chronopath/i.test(talentSubclassName) && level >= 2) {
+						const chronoUses = Math.max(1, intMod);
+						calculations.hasChronopathyAdept = true;
+						calculations.chronopathyAdeptUses = chronoUses;
+						calculations.hasRapidManifestation = true;
+						calculations.rapidManifestationUses = chronoUses;
+						if (level >= 6) {
+							calculations.hasDecay = true;
+							calculations.decayMaxStrain = profBonus;
+							calculations.decayDamagePerStrain = "2d10";
+							calculations.decayDamageType = "necrotic";
+							calculations.decayDc = calculations.powerSaveDc;
+							calculations.decaySaveAbility = "wis";
+						}
+						if (level >= 10) calculations.hasFickleReadiness = true;
+						if (level >= 14) {
+							calculations.hasTimePocket = true;
+							calculations.timePocketDamage = "6d10";
+							calculations.timePocketDamageType = "psychic";
+							calculations.timePocketStrainCost = 3;
+							calculations.timePocketDc = calculations.powerSaveDc;
+							calculations.timePocketSaveAbility = "cha";
+							calculations.timePocketDuration = "1d4 + 1 rounds";
+						}
+					}
+					break;
+				}
 				case "Blood Hunter": {
 					const hemocraftChoice = (this._data.levelHistory || [])
 						.filter(h => h.class?.name === "Blood Hunter")
@@ -30173,6 +30307,10 @@ class CharacterSheetState {
 			multiplier *= e.value;
 		});
 
+		// Psionic body strain (Talent, 3+ body strain) halves speed. Routed through the
+		// shared multiplier so every speed type, breakdown and consumer sees it at once.
+		if (this._isStrainSpeedHalved()) multiplier *= 0.5;
+
 		return multiplier;
 	}
 
@@ -30672,6 +30810,7 @@ class CharacterSheetState {
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
 		this.ensureBloodHunterResources();
+		this.ensureTalentResources();
 		this._ensureChannelDivinityUses();
 		return [...this._data.resources];
 	}
@@ -30953,11 +31092,468 @@ class CharacterSheetState {
 		return true;
 	}
 
+	// #region Talent (TalPsi) — psionic strain
+	//
+	// Strain is the Talent's signature cost currency. Unlike a spend-down pool it counts
+	// UP across three independent tracks (body / mind / soul); crossing the strain maximum
+	// kills the character, and every odd threshold in a track turns on a cumulative
+	// debuff. The debuffs deliberately reuse the SAME plumbing exhaustion does — a numeric
+	// helper per affected getter — rather than a parallel effect system, so the strain
+	// penalties compose with items, active states and conditions automatically.
+
+	/**
+	 * The Talent class entry, if the character has one.
+	 * @returns {*} class entry or null
+	 */
+	_getTalentClass () {
+		return (this._data.classes || []).find(cls => cls.name === "Talent" && (!cls.source || cls.source === "TalPsi")) || null;
+	}
+
+	/** @returns {number} Talent class level (0 when not a Talent). */
+	getTalentLevel () {
+		return this._getTalentClass()?.level || 0;
+	}
+
+	/**
+	 * Strain maximum from the Talent table: 5 at 1st level, +1 per level (24 at 20th).
+	 * @returns {number} 0 when the character is not a Talent
+	 */
+	getStrainMaximum () {
+		const level = this.getTalentLevel();
+		if (!level) return 0;
+		return 4 + level;
+	}
+
+	/**
+	 * The manifestation die, from the Talent table.
+	 * @returns {string} "1d4" | "1d6" | "1d8" (empty string when not a Talent)
+	 */
+	getManifestationDie () {
+		const level = this.getTalentLevel();
+		if (!level) return "";
+		return level >= 13 ? "1d8" : level >= 5 ? "1d6" : "1d4";
+	}
+
+	/**
+	 * The highest power order this Talent can learn and manifest.
+	 * @returns {number} 0 when not a Talent
+	 */
+	getMaxPowerOrder () {
+		const level = this.getTalentLevel();
+		if (!level) return 0;
+		return level >= 17 ? 6 : level >= 13 ? 5 : level >= 9 ? 4 : level >= 5 ? 3 : 2;
+	}
+
+	/**
+	 * Number of 1st-order powers known, from the Talent table.
+	 * @returns {number} 0 when not a Talent
+	 */
+	getFirstOrderPowersKnown () {
+		const level = this.getTalentLevel();
+		if (!level) return 0;
+		return level >= 10 ? 6 : level >= 4 ? 5 : 4;
+	}
+
+	/**
+	 * Total number of powers of 2nd order or higher known: 2 at 1st level, +1 per level.
+	 * @returns {number} 0 when not a Talent
+	 */
+	getHigherOrderPowersKnown () {
+		const level = this.getTalentLevel();
+		if (!level) return 0;
+		return level + 1;
+	}
+
+	/** @returns {{body: number, mind: number, soul: number}} A copy of the strain tracks. */
+	getStrain () {
+		const raw = this._data.psionicStrain || {};
+		return {
+			body: Math.max(0, Math.floor(Number(raw.body) || 0)),
+			mind: Math.max(0, Math.floor(Number(raw.mind) || 0)),
+			soul: Math.max(0, Math.floor(Number(raw.soul) || 0)),
+		};
+	}
+
+	/** @returns {number} Combined strain across all three tracks. */
+	getTotalStrain () {
+		const s = this.getStrain();
+		return s.body + s.mind + s.soul;
+	}
+
+	/** @returns {string|null} The track whose effects are suppressed by Ignore Strain (Talent 20). */
+	getIgnoredStrainTrack () {
+		return this._data.psionicStrainIgnored || null;
+	}
+
+	/**
+	 * Choose the strain track to suppress with Ignore Strain (Talent 20).
+	 * @param {string|null} track "body" | "mind" | "soul" | null
+	 * @returns {boolean} whether the choice was accepted
+	 */
+	setIgnoredStrainTrack (track) {
+		if (track != null && !CharacterSheetState.PSIONIC_STRAIN_TRACKS.includes(track)) return false;
+		if (track != null && !this.getFeatureCalculations().hasIgnoreStrain) return false;
+		this._data.psionicStrainIgnored = track;
+		return true;
+	}
+
+	/**
+	 * Add strain to a track. Never silently exceeds the strain maximum — the caller gets
+	 * `overflow: true` back so the UI can offer the RAW choice ("manifest then die" vs
+	 * "don't manifest and drop to 0 hp").
+	 * @param {number} amount strain to add (clamped to >= 0)
+	 * @param {string} [track] "body" | "mind" | "soul"
+	 * @returns {{applied: number, overflow: boolean, total: number, max: number}}
+	 */
+	addStrain (amount, track = "body") {
+		const max = this.getStrainMaximum();
+		const add = Math.max(0, Math.floor(Number(amount) || 0));
+		const key = CharacterSheetState.PSIONIC_STRAIN_TRACKS.includes(track) ? track : "body";
+		if (!max) return {applied: 0, overflow: false, total: this.getTotalStrain(), max};
+		const current = this.getTotalStrain();
+		const overflow = current + add > max;
+		const applied = overflow ? Math.max(0, max - current) : add;
+		this._data.psionicStrain[key] = this.getStrain()[key] + applied;
+		return {applied, overflow, total: this.getTotalStrain(), max};
+	}
+
+	/**
+	 * Remove strain from a track (or spread across tracks when `track` is omitted).
+	 * @param {number} amount strain to remove
+	 * @param {string} [track] "body" | "mind" | "soul"; omit to drain body → mind → soul
+	 * @returns {number} strain actually removed
+	 */
+	removeStrain (amount, track = null) {
+		let remaining = Math.max(0, Math.floor(Number(amount) || 0));
+		if (!remaining) return 0;
+		const order = track && CharacterSheetState.PSIONIC_STRAIN_TRACKS.includes(track)
+			? [track]
+			: [...CharacterSheetState.PSIONIC_STRAIN_TRACKS];
+		let removed = 0;
+		for (const key of order) {
+			if (remaining <= 0) break;
+			const have = this.getStrain()[key];
+			const take = Math.min(have, remaining);
+			this._data.psionicStrain[key] = have - take;
+			remaining -= take;
+			removed += take;
+		}
+		return removed;
+	}
+
+	/** Reset all strain tracks to 0 (a long rest, or a fresh life after death). */
+	clearStrain () {
+		this._data.psionicStrain = {body: 0, mind: 0, soul: 0};
+	}
+
+	/**
+	 * Resolve the RAW choice offered when strain would exceed the maximum: either manifest
+	 * the power and die, or decline it and drop to 0 hit points.
+	 *
+	 * `addStrain` deliberately refuses overflow so this choice is never made silently.
+	 *
+	 * @param {*} opts
+	 * @param {boolean} opts.manifest true to manifest anyway (and die)
+	 * @param {number} [opts.strain] strain that would have been gained
+	 * @param {string} [opts.track] track to charge when manifesting
+	 * @returns {*} `{outcome: "died"|"unconscious"}`
+	 */
+	resolveStrainOverflow ({manifest, strain = 0, track = "body"} = /** @type {*} */ ({})) {
+		if (!this.getStrainMaximum()) return null;
+		if (manifest) {
+			const key = CharacterSheetState.PSIONIC_STRAIN_TRACKS.includes(track) ? track : "body";
+			this._data.psionicStrain[key] = (this._data.psionicStrain[key] || 0) + Math.max(0, Math.floor(Number(strain) || 0));
+			this.setCurrentHp(0);
+			this.setDeathSaves({successes: 0, failures: 3});
+			return {outcome: "died"};
+		}
+		this.setCurrentHp(0);
+		return {outcome: "unconscious"};
+	}
+
+	/**
+	 * How many effect thresholds a track has crossed. Effects land at 1, 3, 5 and 7 strain.
+	 * A track suppressed by Ignore Strain (Talent 20) always reports 0.
+	 * @param {string} track "body" | "mind" | "soul"
+	 * @returns {number} 0-4
+	 */
+	getStrainTier (track) {
+		if (!CharacterSheetState.PSIONIC_STRAIN_TRACKS.includes(track)) return 0;
+		if (this.getIgnoredStrainTrack() === track) return 0;
+		const value = this.getStrain()[track];
+		if (value >= 7) return 4;
+		if (value >= 5) return 3;
+		if (value >= 3) return 2;
+		if (value >= 1) return 1;
+		return 0;
+	}
+
+	/**
+	 * A structured summary of every active strain effect, for display and for the
+	 * mechanical hooks below.
+	 * @returns {*} strain state summary
+	 */
+	/**
+	 * Human-readable list of the strain effects a track is CURRENTLY imposing.
+	 *
+	 * Drives the strain tracker's per-track summary so a player can see, without
+	 * cross-referencing the class table, exactly which penalties are live.
+	 *
+	 * @param {string} track "body" | "mind" | "soul"
+	 * @returns {string[]}
+	 */
+	getStrainTrackEffects (track) {
+		const tier = this.getStrainTier(track);
+		const byTrack = {
+			body: ["disadvantage on Str/Dex checks", "speed halved", "disadvantage on Str/Dex saves", "hit point maximum halved"],
+			mind: ["can't Dash, Disengage or Dodge", "lose skill proficiencies", "−5 AC", "lose saving throw proficiencies"],
+			soul: ["disadvantage on Wis/Cha checks", "disadvantage on death saves", "disadvantage on Wis/Cha saves", "supernatural healing halved"],
+		};
+		return (byTrack[track] || []).slice(0, Math.max(0, Math.min(4, tier)));
+	}
+
+	getStrainState () {
+		const strain = this.getStrain();
+		const max = this.getStrainMaximum();
+		const body = this.getStrainTier("body");
+		const mind = this.getStrainTier("mind");
+		const soul = this.getStrainTier("soul");
+		return {
+			...strain,
+			total: strain.body + strain.mind + strain.soul,
+			max,
+			ignored: this.getIgnoredStrainTrack(),
+			tiers: {body, mind, soul},
+			// Body
+			disadvantageStrDexChecks: body >= 1,
+			speedHalved: body >= 2,
+			disadvantageStrDexSaves: body >= 3,
+			hpMaxHalved: body >= 4,
+			// Mind
+			noDashDisengageDodge: mind >= 1,
+			loseSkillProficiencies: mind >= 2,
+			acPenalty: mind >= 3 ? 5 : 0,
+			loseSaveProficiencies: mind >= 4,
+			// Soul
+			disadvantageWisChaChecks: soul >= 1,
+			disadvantageDeathSaves: soul >= 2,
+			disadvantageWisChaSaves: soul >= 3,
+			halveSupernaturalHealing: soul >= 4,
+		};
+	}
+
+	/** @returns {*} Strain state, or null when the character has no strain effects at all. */
+	_getActiveStrainState () {
+		if (!this.getTalentLevel()) return null;
+		const st = this.getStrainState();
+		return st.total > 0 ? st : null;
+	}
+
+	/** @returns {number} AC penalty from mind strain (0 or 5). */
+	_getStrainAcPenalty () {
+		return this._getActiveStrainState()?.acPenalty || 0;
+	}
+
+	/** @returns {boolean} Whether body strain halves the character's speed. */
+	_isStrainSpeedHalved () {
+		return !!this._getActiveStrainState()?.speedHalved;
+	}
+
+	/** @returns {boolean} Whether mind strain has stripped all skill proficiencies. */
+	_isStrainSuppressingSkillProficiency () {
+		return !!this._getActiveStrainState()?.loseSkillProficiencies;
+	}
+
+	/** @returns {boolean} Whether mind strain has stripped all saving-throw proficiencies. */
+	_isStrainSuppressingSaveProficiency () {
+		return !!this._getActiveStrainState()?.loseSaveProficiencies;
+	}
+
+	/** @returns {boolean} Whether body strain halves the hit point maximum. */
+	_isStrainHalvingMaxHp () {
+		return !!this._getActiveStrainState()?.hpMaxHalved;
+	}
+
+	/**
+	 * Whether strain imposes disadvantage on a given d20 roll type, using the same
+	 * `check:<abl>` / `save:<abl>` / `skill:<name>` vocabulary as `getAdvantageState`.
+	 * @param {string} type roll type
+	 * @returns {boolean}
+	 */
+	hasStrainDisadvantage (type) {
+		const st = this._getActiveStrainState();
+		if (!st || !type) return false;
+		const [kind, rawSub] = String(type).split(":");
+		let sub = rawSub;
+		if (kind === "skill") {
+			const abl = this.getSkillAbility?.(rawSub);
+			if (!abl) return false;
+			sub = abl;
+		} else if (kind !== "check" && kind !== "save") return false;
+		const isCheck = kind === "check" || kind === "skill";
+		if (isCheck) {
+			if (st.disadvantageStrDexChecks && (sub === "str" || sub === "dex")) return true;
+			if (st.disadvantageWisChaChecks && (sub === "wis" || sub === "cha")) return true;
+			return false;
+		}
+		if (st.disadvantageStrDexSaves && (sub === "str" || sub === "dex")) return true;
+		if (st.disadvantageWisChaSaves && (sub === "wis" || sub === "cha")) return true;
+		return false;
+	}
+
+	/** @returns {boolean} Whether soul strain imposes disadvantage on death saving throws. */
+	hasStrainDeathSaveDisadvantage () {
+		return !!this._getActiveStrainState()?.disadvantageDeathSaves;
+	}
+
+	/**
+	 * Spend a Hit Die on a short rest to remove 1 strain instead of regaining hit points
+	 * (Talent 1, "Reducing Strain").
+	 * @param {string} track "body" | "mind" | "soul"
+	 * @returns {boolean} whether a die was spent
+	 */
+	spendHitDieToRemoveStrain (track = "body") {
+		if (!this.getTalentLevel()) return false;
+		if (this.getTotalStrain() <= 0) return false;
+		const pools = this._data.hitDice && typeof this._data.hitDice === "object" ? this._data.hitDice : {};
+		const pool = Object.values(pools).find(hd => (Number(hd?.current) || 0) > 0);
+		if (!pool) return false;
+		pool.current--;
+		this.removeStrain(1, track);
+		return true;
+	}
+
+	/**
+	 * Psychic Boost (Talent 7): spend a use to remove strain equal to the proficiency bonus.
+	 * @param {string} track "body" | "mind" | "soul"
+	 * @returns {{removed: number}|null} null when unavailable
+	 */
+	usePsychicBoost (track = "body") {
+		this.ensureTalentResources();
+		const resource = (this._data.resources || []).find(r => r.name === "Psychic Boost");
+		if (!resource || resource.current < 1) return null;
+		resource.current--;
+		const feature = this._data.features?.find(f => f.name === "Psychic Boost");
+		if (feature?.uses) feature.uses.current = resource.current;
+		const removed = this.removeStrain(this.getProficiencyBonus(), track);
+		return {removed};
+	}
+
+	/**
+	 * Roll a manifestation test for a power of the given order (Talent 1).
+	 *
+	 * Manifestation score = order + one per OTHER power currently concentrated on. Rolling
+	 * higher than the score is clean; equal costs 1 strain; lower costs strain equal to the
+	 * power's order. Strain that would break the maximum is reported as `overflow` and is
+	 * NOT applied — the caller resolves the RAW "die or drop to 0 hp" choice.
+	 *
+	 * @param {number} order the power's base order (1-6)
+	 * @param {*} [opts]
+	 * @param {number} [opts.roll] forced manifestation-die result (tests)
+	 * @param {number} [opts.concentratingOn] number of other powers being concentrated on
+	 * @param {string} [opts.track] strain track to charge
+	 * @param {boolean} [opts.apply] whether to actually apply the strain (default true)
+	 * @returns {*} test result
+	 */
+	rollManifestationTest (order, {roll = null, concentratingOn = 0, track = "body", apply = true} = {}) {
+		const level = this.getTalentLevel();
+		if (!level) return null;
+		const baseOrder = Math.max(1, Math.floor(Number(order) || 1));
+		// 1st-order powers never require a manifestation test.
+		if (baseOrder <= 1) {
+			return {order: baseOrder, score: 0, roll: 0, strain: 0, applied: 0, overflow: false, outcome: "automatic"};
+		}
+		const score = baseOrder + Math.max(0, Math.floor(Number(concentratingOn) || 0));
+		const faces = Number((this.getManifestationDie().match(/d(\d+)/i) || [])[1]) || 4;
+		const result = Number.isFinite(roll) ? Math.max(1, Math.floor(Number(roll))) : RollerUtil.randomise(faces);
+		const strain = result > score ? 0 : result === score ? 1 : baseOrder;
+		const outcome = result > score ? "clean" : result === score ? "grazed" : "strained";
+		let applied = 0;
+		let overflow = false;
+		if (strain > 0) {
+			const projected = this.getTotalStrain() + strain;
+			overflow = projected > this.getStrainMaximum();
+			if (apply && !overflow) applied = this.addStrain(strain, track).applied;
+		}
+		return {order: baseOrder, score, roll: result, die: this.getManifestationDie(), strain, applied, overflow, outcome};
+	}
+
+	/**
+	 * Strain to Maintain (Talent 1): pay strain equal to the summed order of the powers
+	 * being concentrated on instead of dropping concentration.
+	 * @param {number} summedOrder sum of the orders of the maintained powers
+	 * @param {string} [track]
+	 * @returns {{applied: number, overflow: boolean, total: number, max: number}|null}
+	 */
+	payStrainToMaintain (summedOrder, track = "mind") {
+		if (!this.getTalentLevel()) return null;
+		const cost = Math.max(1, Math.floor(Number(summedOrder) || 1));
+		const projected = this.getTotalStrain() + cost;
+		if (projected > this.getStrainMaximum()) {
+			return {applied: 0, overflow: true, total: this.getTotalStrain(), max: this.getStrainMaximum()};
+		}
+		return this.addStrain(cost, track);
+	}
+
+	/**
+	 * Create / resize the Talent's level-scaled pools. Mirrors
+	 * `ensureBloodHunterResources` — idempotent, safe to call on every read path.
+	 */
+	ensureTalentResources () {
+		const cls = this._getTalentClass();
+		if (!cls) return;
+		const level = cls.level || 1;
+		if (level >= 7) {
+			const boosts = level >= 17 ? 3 : level >= 12 ? 2 : 1;
+			this._resizeFeatureBackedResource("Psychic Boost", boosts, "long");
+		}
+		const effectiveSubclass = this.getEffectiveSubclassForClass(cls);
+		const subclassName = effectiveSubclass?.shortName || effectiveSubclass?.name || "";
+		if (/chronopath/i.test(subclassName) && level >= 2) {
+			const intUses = Math.max(1, this.getAbilityMod("int"));
+			this._resizeFeatureBackedResource("Chronopathy Adept", intUses, "long");
+			this._resizeFeatureBackedResource("Rapid Manifestation", intUses, "long");
+		}
+	}
+
+	/**
+	 * Decay (Chronopath 6): gain up to `strain` strain while touching a Construct to deal
+	 * 2d10 necrotic per strain gained.
+	 * @param {number} strainAmount strain to spend (clamped to the proficiency bonus)
+	 * @param {string} [track]
+	 * @returns {*} null when unavailable
+	 */
+	useDecay (strainAmount = 1, track = "body") {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasDecay) return null;
+		const cost = Math.max(1, Math.min(Math.floor(Number(strainAmount) || 1), this.getProficiencyBonus()));
+		const projected = this.getTotalStrain() + cost;
+		if (projected > this.getStrainMaximum()) return {overflow: true, strain: 0, damage: null, dc: calc.powerSaveDc};
+		const res = this.addStrain(cost, track);
+		return {overflow: false, strain: res.applied, damage: `${res.applied * 2}d10`, damageType: "necrotic", saveAbility: "wis", dc: calc.powerSaveDc};
+	}
+
+	/**
+	 * Time Pocket (Chronopath 14): gain 3 strain to banish a creature for 1d4 + 1 rounds.
+	 * @param {string} [track]
+	 * @returns {*} null when unavailable
+	 */
+	useTimePocket (track = "mind") {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasTimePocket) return null;
+		const projected = this.getTotalStrain() + 3;
+		if (projected > this.getStrainMaximum()) return {overflow: true, strain: 0, damage: null, dc: calc.powerSaveDc};
+		const res = this.addStrain(3, track);
+		return {overflow: false, strain: res.applied, damage: "6d10", damageType: "psychic", saveAbility: "cha", dc: calc.powerSaveDc, duration: "1d4 + 1 rounds"};
+	}
+
+	// #endregion
+
 	_getBloodHunterClass () {
 		return (this._data.classes || []).find(cls => cls.name === "Blood Hunter" && (!cls.source || cls.source === "BH2022")) || null;
 	}
 
-	_resizeBloodHunterResource (name, max, recharge, featureName = name) {
+	_resizeFeatureBackedResource (name, max, recharge, featureName = name) {
 		const feature = this._data.features.find(f => f.name === featureName);
 		let resource = this._data.resources.find(r => r.name === name);
 		if (!resource) {
@@ -30982,8 +31578,8 @@ class CharacterSheetState {
 		if (!cls) return;
 		const level = cls.level || 1;
 		const maledictMax = level >= 17 ? 4 : level >= 13 ? 3 : level >= 6 ? 2 : 1;
-		this._resizeBloodHunterResource("Blood Maledict", maledictMax, "short");
-		if (level >= 6) this._resizeBloodHunterResource("Brand of Castigation", 1, "short");
+		this._resizeFeatureBackedResource("Blood Maledict", maledictMax, "short");
+		if (level >= 6) this._resizeFeatureBackedResource("Brand of Castigation", 1, "short");
 
 		const effectiveSubclass = this.getEffectiveSubclassForClass(cls);
 		const isLycan = /lycan/i.test(effectiveSubclass?.name || effectiveSubclass?.shortName || "");
@@ -30991,7 +31587,7 @@ class CharacterSheetState {
 			// Mastery makes transformation free; retain a finite legacy pool so saves and
 			// generic resource renderers never have to serialize/render Infinity.
 			const hybridMax = level >= 11 ? 2 : 1;
-			this._resizeBloodHunterResource("Hybrid Transformation", hybridMax, "short");
+			this._resizeFeatureBackedResource("Hybrid Transformation", hybridMax, "short");
 			if (level >= 18 && !this._data.features.some(f => f.name === "Blood Curse of the Howl")) {
 				this._data.features.push({
 					id: "bh2022-blood-curse-of-the-howl",
@@ -33393,6 +33989,7 @@ class CharacterSheetState {
 		// Check if this feature grants modifiers to rolls, AC, etc.
 		this._processFeatureModifiers(feature, featureData.id, {claimedSkills});
 		this.ensureBloodHunterResources();
+		this.ensureTalentResources();
 
 		// (5ET-843) Apply structured proficiency grants declared on the feature itself
 		// (`skillProficiencies` / `toolProficiencies` / `languageProficiencies`). This
@@ -42622,6 +43219,14 @@ class CharacterSheetState {
 			});
 		});
 
+		// Psionic strain (Talent) — body/soul strain impose disadvantage on specific
+		// check and save families; soul strain 3+ hits death saves. Folded in before
+		// the removal pass so "you can't have disadvantage" effects still cancel it.
+		if (this.hasStrainDisadvantage(type) || (type === "deathSave" && this.hasStrainDeathSaveDisadvantage())) {
+			hasDisadvantage = true;
+			if (!agg.sources.includes("Psionic Strain")) agg.sources.push("Psionic Strain");
+		}
+
 		// Apply removals
 		if (agg.removeAdvantage) hasAdvantage = false;
 		if (agg.removeDisadvantage) hasDisadvantage = false;
@@ -43482,6 +44087,9 @@ class CharacterSheetState {
 		if (!name) return false;
 		return CharacterSheetState.ZODIAC_FORM_DEFS.some(def => (def.name || "").toLowerCase() === name);
 	}
+
+	/** The three psionic strain tracks (MCDM Talent). Order matters: strain drains body → mind → soul. */
+	static PSIONIC_STRAIN_TRACKS = ["body", "mind", "soul"];
 
 	/**
 	 * State type definitions with their effects
@@ -45221,6 +45829,53 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Detect activation for psionics — powers themselves, and any feature whose cost
+	 * is psionic strain rather than a use pool.
+	 *
+	 * This is deliberately generic rather than a Talent/Chronopath special-case: any
+	 * manifester whose powers are republished as optional features (see
+	 * `CharacterSheetClassUtils.PSIONIC_MANIFESTERS`) gets a Use button that runs the
+	 * manifestation test, and ANY feature — class, subclass or homebrew — that says
+	 * "you gain N strain" becomes a real, strain-charging action instead of inert text.
+	 *
+	 * Returning `null` leaves the feature to the normal detection pipeline.
+	 *
+	 * @param {object} feature
+	 * @param {string} rawText - raw (HTML) description
+	 * @param {string} text - lowercased, tag-stripped description
+	 * @returns {object|null}
+	 */
+	static _detectPsionicActivation (feature, rawText, text) {
+		const psionicOrder = feature?._psionicOrder;
+		const isPsionicPower = psionicOrder != null
+			&& (feature?.optionalFeatureTypes || []).some(it => typeof it === "string" && it.startsWith("PsiP"));
+
+		// "you gain 3 strain", "gain up to your proficiency bonus strain", "gain 1 strain while…"
+		const strainMatch = text.match(/gain (?:up to )?(\d+|your proficiency bonus) strain/);
+		if (!isPsionicPower && !strainMatch) return null;
+
+		const base = this._buildAbilityActivationInfo(feature, rawText, text, {resourceName: feature?.uses?.max > 0 ? feature.name : null});
+		const strainCost = strainMatch
+			? (strainMatch[1] === "your proficiency bonus" ? "proficiencyBonus" : parseInt(strainMatch[1], 10))
+			: null;
+		const isVariableStrain = !!strainMatch && /gain up to /.test(text);
+
+		return {
+			...base,
+			matchedBy: isPsionicPower ? "psionicPower" : "psionicStrainCost",
+			// Manifesting a power always takes the power's own action cost; the generic
+			// parser above already read "as an action"/"as a bonus action" from the text.
+			isPsionicPower,
+			psionicOrder: isPsionicPower ? psionicOrder : null,
+			// A 1st-order power is manifested freely; 2nd-order and higher require a
+			// manifestation test whose failure charges strain equal to the power's order.
+			requiresManifestationTest: isPsionicPower && psionicOrder >= 2,
+			strainCost,
+			isVariableStrainCost: isVariableStrain,
+		};
+	}
+
+	/**
 	 * Detect activatable features from a feature's description
 	 * Uses intelligent text analysis to determine if an ability is toggle-able
 	 * @param {object} feature - The feature object with name and description
@@ -45244,6 +45899,8 @@ class CharacterSheetState {
 
 		const rawText = feature.description || CharacterSheetState._featureTextFromEntries(feature) || "";
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
+		const psionic = this._detectPsionicActivation(feature, rawText, text);
+		if (psionic) return psionic;
 		const isDaemonologistFeature = (feature.source || feature.subclassSource) === "GrimHollowPG24"
 			&& (feature.subclassShortName || feature.subclassName || "Daemonologist").toLowerCase() === "daemonologist";
 		if (isDaemonologistFeature && name === "borrowed tongues and hides") {
@@ -47068,6 +47725,7 @@ class CharacterSheetState {
 		// to the SAME use rather than each spawning its own.
 		this.ensureDivineManifestationPool();
 		this.ensureBloodHunterResources();
+		this.ensureTalentResources();
 		const resources = this.getResources();
 
 		for (const feature of this._data.features) {
@@ -50579,6 +51237,13 @@ class CharacterSheetState {
 		// Reduce exhaustion by 1 level (if any) - applies to both 2014 and 2024 rules
 		if (this._data.exhaustion > 0) {
 			this._data.exhaustion = Math.max(0, this._data.exhaustion - 1);
+		}
+
+		// Psionic strain (Talent) resets to 0 on a long rest, and the Ignore Strain
+		// (Talent 20) choice is re-made each long rest, so clear the previous pick.
+		if (this.getTalentLevel()) {
+			this.clearStrain();
+			this._data.psionicStrainIgnored = null;
 		}
 
 		// Recover stamina (Thelemar: recovers on any rest)

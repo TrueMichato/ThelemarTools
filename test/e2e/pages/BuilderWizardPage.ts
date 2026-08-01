@@ -418,6 +418,52 @@ export class BuilderWizardPage {
 	}
 
 	/**
+	 * Fill every optional-feature group on the current step up to the count it
+	 * declares ("Choose N" / "Selected: x/N"), skipping combat-method DOM.
+	 *
+	 * `selectFirstAvailableOptionalFeatures(count)` walks labels in document
+	 * order until it has ticked `count` boxes, which is fine when a class has a
+	 * single group but silently under-fills when it has several — MCDM's Talent
+	 * opens with THREE required groups at level 1 (1st-Order Powers ×4, Powers
+	 * Known ×2, plus the class skill picker). Under-filling leaves Next gated
+	 * and the wizard stalls with no diagnostic.
+	 *
+	 * Reads each section's own counter, so it is a no-op for every group already
+	 * satisfied and never over-picks (the builder rejects clicks past the cap).
+	 */
+	async topUpOptionalFeatureGroupsToRequired (): Promise<void> {
+		const sections = this.page.locator(".charsheet__builder-opt-feat-section");
+		const nSections = await sections.count();
+		for (let s = 0; s < nSections; s++) {
+			const section = sections.nth(s);
+			const isCombatMethodSection = await section.evaluate(
+				(el: HTMLElement) => !!el.closest(".charsheet__builder-combat-methods"),
+			).catch(() => false);
+			if (isCombatMethodSection) continue;
+
+			const text = (await section.textContent().catch(() => "")) || "";
+			const match = text.match(/Selected:\s*(\d+)\s*\/\s*(\d+)/);
+			if (!match) continue;
+			let remaining = parseInt(match[2], 10) - parseInt(match[1], 10);
+			if (remaining <= 0) continue;
+
+			const boxes = section.locator("input[type='checkbox']");
+			const nBoxes = await boxes.count();
+			for (let i = 0; i < nBoxes && remaining > 0; i++) {
+				const cb = boxes.nth(i);
+				try {
+					if (!(await cb.isVisible())) continue;
+					if (await cb.isChecked()) continue;
+					await cb.scrollIntoViewIfNeeded();
+					await cb.check({timeout: 1500});
+					await this.page.waitForTimeout(100);
+					if (await cb.isChecked()) remaining--;
+				} catch { /* keep scanning — a rejected click just means the cap was hit */ }
+			}
+		}
+	}
+
+	/**
 	 * Pick traditions then methods inside the TGTT
 	 * `.charsheet__builder-combat-methods` region. No-op when absent.
 	 * Reads `Selected: N/M` counters to know how many to pick.

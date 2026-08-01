@@ -11,7 +11,7 @@ For the full *what* and *why* of every check, see the
 the skill reference at
 [`.agents/skills/e2e-character-tests/references/standard.md`](../../.agents/skills/e2e-character-tests/references/standard.md).
 
-## TGTT character specs (18)
+## TGTT character specs (19)
 
 | # | Spec file | Build | Levels | What it proves |
 |---|---|---|---|---|
@@ -33,6 +33,7 @@ the skill reference at
 | 16 | `tgtt-trickster-rogue-goblin.spec.ts` | Trickster Rogue · Goblin | 1–20 | Trickster Tricks pick-list, Sneak Attack scaling, Cunning Action, weapon mastery. |
 | 17 | `tgtt-lust-cleric-lexalian.spec.ts` | Lust Domain Cleric · Lexalian Children | 1–20 | Lust domain features, Channel Divinity uses, full caster slot table. |
 | 18 | `tgtt-horror-warlock-theocracian.spec.ts` | Horror Warlock · Theocracian Children | 1–20 | Horror subclass features, Eldritch Invocations pick-list, pact slots short-rest restore. |
+| 19 | `tgtt-talent-chronopath.spec.ts` | Chronopath Talent · Human (homebrew base class, `TalPsi`) | 1–20 | Whole MCDM Talent base class: psionic strain penalties on AC/speed/HP/proficiency/advantage/healing, manifestation tests, derived 1st-order + higher-order power pickers, Psionic Exertions, Psychic Boost, Psionic Bastion, Shielded Mind, Ignore Strain, and every Chronopath ability. |
 
 ## Other specs
 
