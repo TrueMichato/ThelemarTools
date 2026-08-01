@@ -8626,6 +8626,7 @@ class CharacterSheetPage {
 			case "forked tongue": return this._pOpenForkedTongueSwap(feature);
 			case "baleful interdict": return this._pUseBalefulInterdict(feature);
 			case "song of defense": return this._pUseSongOfDefense(feature);
+			case "divine allegiance": return this._pUseDivineAllegiance(feature);
 			case "know your enemy": return this._pUseKnowYourEnemy(feature, resource);
 			case "borrowed tongues and hides": return this._pUseDaemonologistSwitchSides();
 			case "unearthly countenance": return this._pUseUnearthlyCountenance();
@@ -9020,6 +9021,39 @@ class CharacterSheetPage {
 		});
 
 		JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: toastEl, autoHideTime: 15000}));
+		return true;
+	}
+
+	/**
+	 * (Oath of the Crown, SCAG L7) Use Divine Allegiance: as a reaction, take all of the damage
+	 * a creature within 5 feet would have taken. Prompts for the amount, then applies it as
+	 * unpreventable damage (bypassing temporary hit points and Death Ward, per RAW: "This
+	 * damage to you can't be reduced or prevented in any way").
+	 * @param {object} feature
+	 * @returns {Promise<boolean>} true (handled)
+	 */
+	async _pUseDivineAllegiance (feature) {
+		const raw = await InputUiUtil.pGetUserNumber({
+			title: "Divine Allegiance",
+			default: 1,
+			min: 1,
+			int: true,
+		});
+		if (raw == null) return true;
+
+		const result = this._state.useDivineAllegiance(raw);
+		if (!result) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "🛡️ Divine Allegiance is unavailable."}));
+			return true;
+		}
+
+		this._saveCurrentCharacter();
+		this._renderHp?.();
+		this._renderCharacter?.();
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: result.droppedToZero ? "warning" : "success",
+			content: `🛡️ Divine Allegiance: you take ${result.damageTransferred} damage instead (HP ${result.hpBefore} → ${result.hpAfter}). This damage can't be reduced or prevented.`,
+		}));
 		return true;
 	}
 

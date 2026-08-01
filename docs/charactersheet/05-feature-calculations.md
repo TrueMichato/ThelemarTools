@@ -407,7 +407,25 @@ improvedSmiteDamage: "1d8",
 // XPHB: Radiant Strikes (L11)
 hasRadiantStrikes: true,
 radiantStrikesDamage: "1d8",
+
+// Oath of the Crown (SCAG)
+hasChampionChallenge: true,       // L3
+championChallengeDc: 8 + profBonus + CHA,
+hasTurnTheTide: true,             // L3
+turnTheTideHealing: "1d6+CHA",
+hasDivineAllegiance: true,        // L7
+hasUnyieldingSpirit: true,        // L15
+hasExaltedChampion: true,         // L20
 ```
+
+**Crown is worth reading as a worked example** of the "a calculation is not a
+mechanic" rule. Every flag above existed before the subclass was supported, and
+the sheet still did nothing: the challenge forced no save, the tide healed
+nothing, Divine Allegiance had no way to move damage, Unyielding Spirit
+registered no modifier, and Exalted Champion's resistances were inert. See
+CS-BUG-050 through CS-BUG-054 in `known-bugs.md` — each was a generic defect on
+a shared path, not a Crown-specific gap. Adding a `has*` flag is the *first*
+step of supporting a feature, never the last.
 
 ### Wizard
 

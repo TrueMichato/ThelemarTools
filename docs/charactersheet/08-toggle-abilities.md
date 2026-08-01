@@ -279,6 +279,38 @@ effect value, then the Combat tab renders the trigger as a real action-economy
 control. Sun Shield therefore deals `5 + WIS` radiant damage and consumes the
 character's reaction while combat tracking is active.
 
+#### Exalted Champion (Oath of the Crown Paladin, L20)
+
+```javascript
+exaltedChampion: {
+    preferCuratedEffects: true,
+    effects: [
+        {type: "resistance", target: "damage:bludgeoning"},
+        {type: "resistance", target: "damage:piercing"},
+        {type: "resistance", target: "damage:slashing"},
+        {type: "advantage", target: "save:wis"},
+    ],
+    duration: "1 hour",
+    activationAction: "action",
+    resourceName: "Exalted Champion",
+}
+```
+
+Two conventions this state exists to demonstrate:
+
+**Damage-defence targets must be namespaced.** A `resistance` / `immunity` /
+`vulnerability` effect is read through `_getDamageDefenceFromStates`, which
+accepts `damage:<type>` (the canonical form — always emit this) and, since
+CS-BUG-050, a bare damage type from the prose parser. Non-damage targets such
+as `"ac"` or `"speed:walk"` are whitelist-rejected, so they can never be
+mistaken for a damage type. Advantage, by contrast, uses the **bare** form:
+`save:wis`, `check:wis`, `skill:perception`.
+
+**`preferCuratedEffects: true`** pins the curated `effects` array in place of
+whatever `parseEffectsFromDescription` extracts from the feature text. Use it
+whenever the prose is lossy — here the parse duplicated bludgeoning and dropped
+the "from nonmagical weapons" caveat. Without the flag, a non-empty parse wins.
+
 ### Combat Stances (TGTT/Homebrew)
 
 #### Astral Self (Way of the Astral Self Monk)
