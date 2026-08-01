@@ -2151,12 +2151,16 @@ async function _runToggleEffect (
 		}
 		case "togglePlusSpeed": {
 			const t = e.type ?? "walk";
-			// speed snapshot is walk-only; if asking for non-walk, fall through
-			if (t === "walk") {
-				const delta = after.walkSpeed - before.walkSpeed;
-				if (delta !== e.delta) throw new Error(`speed:${t} delta on toggle = ${delta}, expected ${e.delta}`);
+			// The before/after snapshot only carries walkSpeed, so this kind can
+			// ONLY assert on walk. It used to `return` silently for every other
+			// type, which meant a probe like `{type: "fly", delta: 60}` passed
+			// while asserting nothing at all. Fail loudly instead and point at
+			// the kind that does capture non-walk speeds.
+			if (t !== "walk") {
+				throw new Error(`togglePlusSpeed cannot assert on speed:${t} — the toggle snapshot is walk-only. Use {kind: "toggleGrantsSpeed", type: "${t}", …} instead.`);
 			}
-			// non-walk: caller would need to check via getSpeed before+after manually; skip
+			const delta = after.walkSpeed - before.walkSpeed;
+			if (delta !== e.delta) throw new Error(`speed:${t} delta on toggle = ${delta}, expected ${e.delta}`);
 			return;
 		}
 		case "toggleGrantsSpeed": {

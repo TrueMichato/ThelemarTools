@@ -12068,8 +12068,18 @@ class CharacterSheetState {
 		}
 
 		// For non-walk speeds, only apply bonuses if character has that movement type
-		// (base > 0, or equalToWalk modifier grants it)
-		if (type !== "walk" && base === 0) {
+		// (base > 0, or equalToWalk modifier grants it) — a flat "+10 speed" must
+		// not conjure a climb speed for a character who has none.
+		//
+		// An active state CAN grant a movement type outright, though ("you gain a
+		// flying speed of 60 feet" — the Fly spell, Unearthly Countenance, and
+		// every prose-parsed equivalent). Those arrive as
+		// {type: "bonus", target: "speed:fly"}, so they land in `bonus` rather than
+		// `base`, and this guard used to discard them before `bonus` was ever
+		// added — silently returning 0 for every such feature. Only a
+		// TYPE-SPECIFIC grant counts here, which is what keeps the generic
+		// "+10 speed" case above still correct.
+		if (type !== "walk" && base === 0 && this._getGrantedSpeedFromStates(type) <= 0) {
 			return 0;
 		}
 
@@ -30786,6 +30796,35 @@ class CharacterSheetState {
 	 * @param {string} [speedType="walk"] - The speed type ("walk", "fly", "swim", "climb", "burrow")
 	 * @returns {number} Total speed bonus from active states
 	 */
+	/**
+	 * Speed GRANTED to a non-walk movement type by an active state.
+	 *
+	 * Distinct from `getSpeedBonusFromStates()`, which sums every applicable
+	 * bonus including the generic `target: "speed"` form. Only a TYPE-SPECIFIC
+	 * target counts as granting the movement type, so a flat "+10 speed" state
+	 * can still never conjure a fly speed for a character who cannot fly.
+	 *
+	 * Used solely by `getSpeed()` to decide whether the "character must already
+	 * have this movement type" guard applies.
+	 *
+	 * @param {string} speedType
+	 * @returns {number}
+	 */
+	_getGrantedSpeedFromStates (speedType) {
+		if (speedType === "walk") return 0;
+		let granted = 0;
+		for (const e of this.getActiveStateEffects()) {
+			if (e.type !== "bonus" || e.target !== `speed:${speedType}`) continue;
+			let value;
+			if (e.value === "walking") value = this.getWalkSpeed();
+			else if (e.abilityMod) value = this.getAbilityMod(e.abilityMod);
+			else if (e.useProficiency) value = this.getProficiencyBonus();
+			else value = Number(e.value) || 0;
+			granted = Math.max(granted, value);
+		}
+		return granted;
+	}
+
 	getSpeedBonusFromStates (speedType = "walk") {
 		const effects = this.getActiveStateEffects();
 		let bonus = 0;
@@ -30797,8 +30836,14 @@ class CharacterSheetState {
 					bonus += this.getAbilityMod(e.abilityMod);
 				} else if (e.useProficiency) {
 					bonus += this.getProficiencyBonus();
+				} else if (e.value === "walking") {
+					// parseEffectsFromDescription emits the literal "walking" for
+					// "a flying speed equal to your walking speed". Left raw it
+					// string-concatenates (0 + "walking" -> "0walking") and the
+					// caller's Math.floor turns the whole speed into NaN.
+					bonus += speedType === "walk" ? 0 : this.getWalkSpeed();
 				} else {
-					bonus += e.value || 0;
+					bonus += Number(e.value) || 0;
 				}
 			}
 		}

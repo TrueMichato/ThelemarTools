@@ -1962,6 +1962,73 @@ out of this change so the blast radius stays confined to one spec.
 
 ---
 
+## CS-BUG-085 — every active state that GRANTS a non-walk movement type was silently zeroed
+
+**Status**: RESOLVED.
+
+**Affected**: any active state granting a fly / swim / climb / burrow speed —
+the curated `unearthlyCountenance` (Daemonologist Wizard L10, "60-foot flying
+speed") and, far more broadly, **everything `parseEffectsFromDescription`
+produces** from "you gain a flying speed of 60 feet" and its swim/climb
+equivalents (`charactersheet-state.js` ~:46016/46022/46028).
+
+**Symptom**: `getSpeed("fly")` returned **0** with the state active. On a
+Daemonologist Wizard L10 with Unearthly Countenance toggled on, the sheet showed
+no flying speed at all.
+
+**Root cause** — the same reader/writer vocabulary drift as CS-BUG-050, in a
+different pipeline. `getSpeed()` guards non-walk speeds behind "the character
+must already have this movement type":
+
+```js
+if (type !== "walk" && base === 0) return 0;
+```
+
+That guard is correct for a flat `+10 speed` — it must not conjure a climb speed
+for a character who has none. But a state that **grants** the movement type
+outright emits `{type: "bonus", target: "speed:fly", value: 60}`, which lands in
+the `bonus` term, not `base`. The guard fired first and returned 0, discarding a
+`bonus` that `getSpeedBonusFromStates()` had already computed correctly.
+
+The read loop immediately above it only recognised the *other* vocabulary,
+`{type: "flySpeed"}`, which is what the Fly spell emits — so spell-granted flight
+worked and state-granted flight did not.
+
+**Second defect, same site**: the parser emits the literal string `"walking"` for
+"a flying speed equal to your walking speed". `getSpeedBonusFromStates()` did
+`bonus += e.value || 0`, so that string-concatenated (`0 + "walking"` →
+`"0walking"`) and the caller's `Math.floor` turned the whole speed into **NaN** —
+the same symbolic-token class as CS-BUG-038.
+
+**Fix**: new `_getGrantedSpeedFromStates(type)` reads only **type-specific**
+targets (`speed:fly`, never the generic `speed`), so the guard becomes
+`base === 0 && _getGrantedSpeedFromStates(type) <= 0`. The flat "+10 speed"
+protection is preserved by construction. `getSpeedBonusFromStates()` now resolves
+`"walking"` to `getWalkSpeed()` and coerces with `Number(...)`.
+
+**Why it survived this long**: every pre-existing test seeded the base speed
+first — `CharacterSheetActiveStateEngine.test.js` did `state.setSpeed("fly", 60)`
+before adding the bonus — so none of them ever crossed the `base === 0` guard.
+The E2E probe that should have caught it, `tgtt-daemonologist-wizard-dwarf.spec.ts`,
+used `{kind: "togglePlusSpeed", type: "fly", delta: 60}`, and `togglePlusSpeed`
+**silently returned for every non-walk type**. It had been green since batch 1
+while asserting nothing.
+
+**Regression pin — falsified**: `CharacterSheetActiveStateEngine.test.js`
+§CS-BUG-085, 6 tests. Reverting both halves of the fix turns **4** of them red
+(granted fly, granted swim, the `"walking"` NaN case, and the prose-parsed case);
+the two `PREMISE:` tests stay green by design — they guard the behaviour the fix
+must *not* change (no fly speed by default, and a generic "+10 speed" still
+conjures nothing).
+
+**Harness hardening shipped alongside**: `togglePlusSpeed` now **throws** for any
+non-walk type, pointing the author at `toggleGrantsSpeed` (added by the Circle of
+the Sea session), so this class of dead probe cannot recur. The Daemonologist
+spec was migrated to `{kind: "toggleGrantsSpeed", type: "fly", min: 60}` and now
+genuinely asserts the 60 ft.
+
+---
+
 ## CS-BUG-060 — Circle of the Sea's Wrath of the Sea was description-only, and Stormborn collided with the Tempest Cleric
 
 **Status**: RESOLVED (Circle of the Sea Druid implementation).

@@ -1358,7 +1358,8 @@ export class CharacterSheetPage {
 		});
 	}
 
-	async getKnownSpellsByLevel (): Promise<Record<number, string[]>> {		return this.page.evaluate(() => {
+	async getKnownSpellsByLevel (): Promise<Record<number, string[]>> {
+		return this.page.evaluate(() => {
 			const cs: any = (globalThis as any).charSheet;
 			const state = cs?._state;
 			if (!state?.getKnownSpells) return {};
