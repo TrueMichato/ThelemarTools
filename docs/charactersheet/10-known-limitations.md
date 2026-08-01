@@ -101,6 +101,33 @@ All Ranger subclasses are fully implemented:
 - **Swarmkeeper**: `gatheredSwarmDamage`, `writhingTideFlySpeed`, `swarmingDispersalUses`
 - **Drakewarden**: `drakeProfBonus`, `drakesBreathDamage`, `drakesBreathDc`
 
+#### Talent (TalPsi) and Chronopath ✅
+
+- The whole base class is supported: the class table (manifestation die, max
+  power order, both power-pool sizes, strain maximum, power save DC / attack
+  bonus), Psionic Exertion, Psychic Boost, Psionic Bastion, Shielded Mind and
+  Ignore Strain.
+- **Psionic strain is a real subsystem**, not a display. All twelve threshold
+  penalties are applied by the same getters every other mechanic uses — AC,
+  speed, hit point maximum, skill proficiency, save proficiency, the advantage
+  funnel, death saves and supernatural healing. See
+  [17-talent-psionics.md](17-talent-psionics.md).
+- Strain refuses to exceed the maximum; the RAW "manifest and die / decline and
+  drop to 0 hp" choice is a real API (`resolveStrainOverflow`).
+- Every Talent choice — 1st-order powers, higher-order powers and Psionic
+  Exertions — is surfaced in Builder, Level-Up and Quick Build through
+  **generic** engines (`deriveOptionalFeatureProgressions` and the
+  `PSIONIC_MANIFESTERS` republishing layer), with no per-class picker UI.
+- Psionic powers and any feature whose text charges strain are activatable
+  through a generic detector, so Chronopath's Decay, Time Pocket and Fickle
+  Readiness are Use-button actions rather than paragraphs.
+- **Out of scope:** the other six Psionic Specializations (Cryokineticist,
+  Metamorph, Nomad, Oracle, Psychic Warrior, Telekinetic) get the base class
+  and its pickers but no specialization-specific calculations. The 103 psionic
+  powers are pickable and activatable but their individual per-power effects
+  (damage, saves, riders) are rendered from their source text rather than
+  modelled.
+
 #### Blood Hunter (BH2022) and Order of the Lycan ✅
 - Hunter's Bane records the Intelligence/Wisdom Hemocraft choice through the generic multi-attribute `abilityDc` feature-option path. Blood Curse, Crimson Rite, and Fighting Style selections use the generic optional-feature progression shared by Builder, Level-Up, and Quick Build.
 - Blood Maledict, Brand of Castigation, and Hybrid Transformation have synchronized rest resources. Amplification and Crimson Rite activation pay their Hemocraft Die HP costs.

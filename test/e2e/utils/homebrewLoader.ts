@@ -41,6 +41,10 @@ export async function gotoWithThelemar (
 				class: classes,
 				classFeature: (brew.classFeature || []).filter((it: any) => !className || it.className === className),
 				optionalfeature: brew.optionalfeature || [],
+				// A homebrew base class may also learn `psionic` powers (MCDM's Talent).
+				// Those are republished as synthetic optional features by the sheet, so
+				// dropping them here would silently remove the class's core choice.
+				...(brew.psionic?.length ? {psionic: brew.psionic} : {}),
 			} : {}),
 			subclass: subclasses,
 			subclassFeature: (brew.subclassFeature || []).filter((it: any) =>

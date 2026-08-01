@@ -685,6 +685,29 @@ export const PRESET_FULL_LYCAN_BLOOD_HUNTER: CharacterPreset = {
 	],
 };
 
+/** TalPsi Chronopath Talent (MCDM "The Talent and Psionics") — psionic strain + powers. */
+export const PRESET_FULL_TALENT_CHRONOPATH: CharacterPreset = {
+	race: "Human",
+	raceSource: "PHB'24",
+	className: "Talent",
+	// `classSource` / `subclassSource` are matched against the source ABBREVIATION the
+	// sheet renders, which for this brew is "TAP" (`_meta.sources[0].abbreviation`),
+	// not the JSON source key "TalPsi" used by `prioritySources`.
+	classSource: "TAP",
+	prioritySources: ["TalPsi"],
+	skipConditionalPrompt: true,
+	background: "Sage",
+	bgSource: "PHB'24",
+	name: "Ilyra Timeweave",
+	skillCount: 2,
+	optFeatCount: 1,
+	subclassName: "Chronopath",
+	subclassSource: "TAP",
+	homebrewUrls: [
+		"https://raw.githubusercontent.com/TheGiddyLimit/homebrew/refs/heads/master/class/MCDM%20Productions%3B%20The%20Talent%20and%20Psionics.json",
+	],
+};
+
 /** School of Necromancy Wizard (PHB subclass via TGTT-2014). */
 export const PRESET_FULL_NECROMANCER_WIZARD: CharacterPreset = {
 	race: "Human",
@@ -818,6 +841,11 @@ export async function createCharacterViaWizard (
 		// always attempt to fill any optional-feature picker that's present.
 		await builder.selectFirstAvailableOptionalFeatures(5);
 	}
+	// A class can open with SEVERAL required optional-feature groups (MCDM's
+	// Talent has two power pickers at level 1 on top of its skill picker), which
+	// the count-based helper above under-fills. Top each group up to its own
+	// declared count so Next is never silently gated.
+	await builder.topUpOptionalFeatureGroupsToRequired();
 	// TGTT Fighter / Paladin / etc. expose Combat Traditions + Methods
 	// pickers under the optional-features region — these gate Next when
 	// unfilled. The helper is a no-op when the section is absent.

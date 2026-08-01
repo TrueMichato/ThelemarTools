@@ -94,6 +94,7 @@ class CharacterSheetPage {
 		this._itemsData = [];
 		this._featsData = [];
 		this._optionalFeaturesData = [];
+		this._psionicsData = [];
 		this._combatMethodsData = [];
 		this._itemUpgradesData = [];
 		// `data/crafting.json` is ~2.5 MB, so it is fetched on first use rather than at load.
@@ -725,6 +726,45 @@ class CharacterSheetPage {
 		// Languages
 		if (brewData.language?.length) {
 			this._languagesData = [...this._languagesData, ...MiscUtil.copyFast(brewData.language)];
+		}
+
+		// Psionic powers (MCDM "The Talent and Psionics", UA Mystic disciplines, …)
+		if (brewData.psionic?.length) {
+			const brewPsionics = MiscUtil.copyFast(brewData.psionic).map(p => ({...p, _entityType: "psionicPower"}));
+			this._psionicsData = [...(this._psionicsData || []), ...brewPsionics];
+		}
+
+		// Classes that enumerate their optional-feature choices only as inline
+		// `refOptionalfeature` entries get a machine-readable progression synthesised here,
+		// so the Builder / Level-Up / Quick Build pickers surface the choice. Generic; runs
+		// for site data and brew alike. See `deriveOptionalFeatureProgressions`.
+		if (brewData.class?.length) {
+			this._classes.forEach(cls => {
+				try {
+					CharacterSheetClassUtils.deriveOptionalFeatureProgressions(cls, this._classFeatures, this._optionalFeaturesData);
+				} catch (e) { console.warn(`Failed to derive optional feature progression for ${cls?.name}`, e); }
+			});
+		}
+
+		// Psionic manifesters (e.g. the Talent) learn `psionic` powers, which 5etools does
+		// not link to a class. Republish those powers as synthetic optional features so the
+		// generic optional-feature picker surfaces the "which powers do you learn?" choice
+		// in all three build flows. Runs after both class and psionic merging.
+		if (brewData.class?.length || brewData.psionic?.length) {
+			this._classes.forEach(cls => {
+				try {
+					const synthetic = CharacterSheetClassUtils.augmentClassWithPsionicPowers(cls, this._psionicsData);
+					if (!synthetic.length) return;
+					const cfg = CharacterSheetClassUtils.getPsionicManifesterConfig(cls);
+					if (cfg && globalThis.Parser?.OPT_FEATURE_TYPE_TO_FULL) {
+						Parser.OPT_FEATURE_TYPE_TO_FULL[cfg.firstOrderType] ||= cfg.firstOrderName;
+						Parser.OPT_FEATURE_TYPE_TO_FULL[cfg.higherOrderType] ||= cfg.higherOrderName;
+					}
+					const known = new Set(this._optionalFeaturesData.map(of => `${of.name}|${of.source}`.toLowerCase()));
+					const fresh = synthetic.filter(of => !known.has(`${of.name}|${of.source}`.toLowerCase()));
+					if (fresh.length) this._optionalFeaturesData = [...this._optionalFeaturesData, ...fresh];
+				} catch (e) { console.warn(`Failed to attach psionic powers to ${cls?.name}`, e); }
+			});
 		}
 	}
 
@@ -3191,7 +3231,7 @@ class CharacterSheetPage {
 
 		skills.forEach(skill => {
 			const skillKey = skill.name.toLowerCase().replace(/\s+/g, "");
-			const profLevel = this._state.getSkillProficiency(skillKey);
+			const profLevel = this._state.getEffectiveSkillProficiency(skillKey);
 			const breakdown = this._state.getSkillBreakdown(skillKey);
 			const effective = breakdown.total;
 			const canonical = breakdown.canonical ?? breakdown.total;
@@ -6051,7 +6091,7 @@ class CharacterSheetPage {
 					<div class="charsheet__ability-hero-skills">
 						${relatedSkills.map(s => {
 		const skillKey = s.name.toLowerCase().replace(/\s+/g, "");
-		const profLevel = this._state.getSkillProficiency(skillKey);
+		const profLevel = this._state.getEffectiveSkillProficiency(skillKey);
 		const skillMod = this._state.getSkillMod(skillKey);
 		const skillModStr = skillMod >= 0 ? `+${skillMod}` : `${skillMod}`;
 		let profIcon = "○";
@@ -6139,7 +6179,7 @@ class CharacterSheetPage {
 		passiveSkills.forEach(passive => {
 			const skillMod = this._state.getSkillMod(passive.key);
 			const passiveScore = this._state.getPassiveScore(passive.key);
-			const profLevel = this._state.getSkillProficiency(passive.key);
+			const profLevel = this._state.getEffectiveSkillProficiency(passive.key);
 			let profIcon = "○";
 			if (profLevel === 2) profIcon = "◉";
 			else if (profLevel === 1) profIcon = "●";
@@ -6204,7 +6244,7 @@ class CharacterSheetPage {
 
 			skillsByAbility[abl].forEach(skill => {
 				const skillKey = skill.name.toLowerCase().replace(/\s+/g, "");
-				const profLevel = this._state.getSkillProficiency(skillKey);
+				const profLevel = this._state.getEffectiveSkillProficiency(skillKey);
 				const mod = this._state.getSkillMod(skillKey);
 				const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
 				const passiveScore = 10 + mod;
@@ -6233,6 +6273,84 @@ class CharacterSheetPage {
 		mainContent.append(skillsSection);
 
 		container.append(mainContent);
+	}
+
+	/**
+	 * Render the psionic strain tracker (MCDM Talent) into the Resources panel.
+	 *
+	 * Strain is the only "resource" on the sheet that counts UP and whose value directly
+	 * degrades derived stats, so the tracker shows each track's tier, the penalties that
+	 * tier has already imposed, and — at Talent 20 — which track Ignore Strain suppresses.
+	 *
+	 * @param {HTMLElement} container
+	 * @returns {boolean} true when a tracker was rendered
+	 */
+	_renderPsionicStrainTracker (container) {
+		const state = this._state;
+		const max = state.getStrainMaximum?.() || 0;
+		if (!max) return false;
+
+		const strain = state.getStrain();
+		const total = state.getTotalStrain();
+		const canIgnore = !!state.getFeatureCalculations().hasIgnoreStrain;
+		const ignored = state.getIgnoredStrainTrack();
+
+		const wrp = e_({outer: `
+			<div class="charsheet__resource-row ve-flex-col" data-resource-id="psionic-strain" style="align-items: stretch;">
+				<div class="ve-flex-v-center">
+					<span class="charsheet__resource-name">Psionic Strain</span>
+					<span class="charsheet__resource-recharge ve-muted ve-small ml-2">(Long)</span>
+					<div class="charsheet__resource-uses ml-auto">
+						<span class="charsheet__resource-current">${total}</span>
+						<span class="charsheet__resource-max">/ ${max}</span>
+					</div>
+				</div>
+				<div class="charsheet__strain-tracks mt-1"></div>
+				${canIgnore ? `<label class="ve-flex-v-center ve-small mt-1" style="gap:.35rem;">Ignore Strain suppresses
+					<select class="ve-form-control form-control--minimal charsheet__strain-ignore" style="width:7rem;">
+						<option value="">None</option>
+						${CharacterSheetState.PSIONIC_STRAIN_TRACKS.map(t => `<option value="${t}" ${ignored === t ? "selected" : ""}>${t[0].toUpperCase()}${t.slice(1)}</option>`).join("")}
+					</select></label>` : ""}
+			</div>
+		`});
+
+		const tracks = wrp.querySelector(".charsheet__strain-tracks");
+		CharacterSheetState.PSIONIC_STRAIN_TRACKS.forEach(track => {
+			const value = strain[track] || 0;
+			const effects = state.getStrainTrackEffects(track);
+			const row = e_({outer: `
+				<div class="ve-flex-v-center ve-small mb-1">
+					<span style="width: 3.5rem;">${track[0].toUpperCase()}${track.slice(1)}</span>
+					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__strain-dec" ${value <= 0 ? "disabled" : ""}>−</button>
+					<span class="mx-1" style="min-width: 1.5rem; text-align: center;">${value}</span>
+					<button class="ve-btn ve-btn-xs ve-btn-danger charsheet__strain-inc" ${total >= max ? "disabled" : ""}>+</button>
+					<span class="ve-muted ml-2">${ignored === track ? "ignored" : (effects.join("; ") || "no effect")}</span>
+				</div>
+			`});
+			row.querySelector(".charsheet__strain-inc").addEventListener("click", () => {
+				state.addStrain(1, track);
+				this._saveCurrentCharacter();
+				this._renderCharacter();
+			});
+			row.querySelector(".charsheet__strain-dec").addEventListener("click", () => {
+				state.removeStrain(1, track);
+				this._saveCurrentCharacter();
+				this._renderCharacter();
+			});
+			tracks.append(row);
+		});
+
+		const eleIgnore = wrp.querySelector(".charsheet__strain-ignore");
+		if (eleIgnore) {
+			eleIgnore.addEventListener("change", (/** @type {*} */ evt) => {
+				state.setIgnoredStrainTrack(evt.target.value || null);
+				this._saveCurrentCharacter();
+				this._renderCharacter();
+			});
+		}
+
+		container.append(wrp);
+		return true;
 	}
 
 	_renderResources () {
@@ -6323,7 +6441,11 @@ class CharacterSheetPage {
 			}
 		}
 
-		if (!resources.length && !usesCombatSystem && !customLimited.length) {
+		// Psionic strain (MCDM Talent) is a resource that counts UP across three tracks and
+		// applies real penalties, so it belongs in the Resources panel next to Stamina.
+		const hasStrainTracker = this._renderPsionicStrainTracker(container);
+
+		if (!resources.length && !usesCombatSystem && !customLimited.length && !hasStrainTracker) {
 			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No class-granted resources yet</div>`;
 			return;
 		}
@@ -8618,6 +8740,12 @@ class CharacterSheetPage {
 			return this._pUseBattleMasterManeuver(feature, resource, resourceCost);
 		}
 		if (feature?.optionalFeatureTypes?.includes("BC") || name.startsWith("blood curse of ")) return this._pUseBloodMaledict(feature);
+		// Psionics (MCDM Talent and any other manifester wired through
+		// `CharacterSheetClassUtils.PSIONIC_MANIFESTERS`). Manifesting a power runs the
+		// manifestation test; any feature whose cost is strain charges that strain.
+		if (activationInfo?.isPsionicPower || activationInfo?.strainCost != null) {
+			return this._pUsePsionicAbility(feature, activationInfo, resource, resourceCost);
+		}
 		switch (name) {
 			case "healing hands": return this._pUseHealingHands(feature, resource, resourceCost);
 			case "guided strike": return this._pUseGuidedStrike(feature, resource, resourceCost);
@@ -8639,6 +8767,167 @@ class CharacterSheetPage {
 		// (e.g. damage bursts) fall through to the generic limited-use pipeline unchanged.
 		if (feature?._manifestationRequiresSave) return this._pUseManifestationSaveOption(feature, resource, resourceCost);
 		return false;
+	}
+
+	/**
+	 * Describe the mechanical outcome of a strain-spending ability using ONLY the
+	 * feature-calculation naming convention, so any class or subclass gets a real
+	 * outcome readout without a name-matched branch here.
+	 *
+	 * For a feature called "Time Pocket" this reads `timePocketDamage`,
+	 * `timePocketDamagePerStrain`, `timePocketDamageType`, `timePocketDc`,
+	 * `timePocketSaveAbility` and `timePocketDuration` off `getFeatureCalculations()`.
+	 *
+	 * @param {*} feature
+	 * @param {number} strainSpent strain actually applied
+	 * @returns {string[]} zero or more HTML lines
+	 */
+	_getStrainAbilityOutcomeLines (feature, strainSpent) {
+		const calc = this._state.getFeatureCalculations();
+		const key = String(feature?.name || "")
+			.replace(/[^a-zA-Z0-9 ]/g, "")
+			.trim()
+			.split(/\s+/)
+			.map((word, i) => (i ? word[0].toUpperCase() + word.slice(1).toLowerCase() : word.toLowerCase()))
+			.join("");
+		if (!key) return [];
+
+		const perStrain = calc[`${key}DamagePerStrain`];
+		const flat = calc[`${key}Damage`];
+		const damage = perStrain && strainSpent ? `${strainSpent}× ${perStrain}` : flat;
+		const dc = calc[`${key}Dc`];
+		const saveAbility = calc[`${key}SaveAbility`];
+		const duration = calc[`${key}Duration`];
+		const damageType = calc[`${key}DamageType`] || "";
+		if (!damage && !dc) return [];
+
+		const parts = [];
+		if (dc) parts.push(`Target makes a DC <strong>${dc}</strong>${saveAbility ? ` ${Parser.attAbvToFull(saveAbility)}` : ""} saving throw`);
+		if (damage) parts.push(`${parts.length ? "or takes" : "Deals"} <strong>${damage}</strong>${damageType ? ` ${damageType}` : ""} damage`);
+		const lines = [`${parts.join(" ")}.`];
+		if (duration) lines.push(`<span class="ve-muted">Duration: ${duration}.</span>`);
+		return lines;
+	}
+
+	/**
+	 * Use a psionic ability: manifest a power (running its manifestation test) and/or pay
+	 * the strain the feature costs.
+	 *
+	 * Strain is the manifester's real currency, so this is the point where "the sheet
+	 * displays the ability" becomes "the sheet applies the ability": the roll is made, the
+	 * strain is charged to a track the player picks, and every strain-driven penalty
+	 * (AC, speed, hit point maximum, proficiencies, advantage) recomputes immediately.
+	 *
+	 * @param {object} feature
+	 * @param {object} activationInfo - from `detectActivatableFeature`
+	 * @param {object|null} resource
+	 * @param {number} resourceCost
+	 * @returns {Promise<boolean>} always true — the click is fully handled here
+	 */
+	async _pUsePsionicAbility (feature, activationInfo, resource, resourceCost = 1) {
+		const state = this._state;
+		const strainMax = state.getStrainMaximum?.() || 0;
+		if (!strainMax) return false;
+
+		const order = activationInfo.psionicOrder;
+		const pbCost = state.getProficiencyBonus();
+		const flatCost = activationInfo.strainCost === "proficiencyBonus" ? pbCost : activationInfo.strainCost;
+
+		const trackOptions = CharacterSheetState.PSIONIC_STRAIN_TRACKS
+			.map(track => `<option value="${track}">${track[0].toUpperCase()}${track.slice(1)}</option>`)
+			.join("");
+		const costLabel = flatCost == null
+			? ""
+			: `<div class="mb-2">Cost: <strong>${activationInfo.isVariableStrainCost ? `up to ${flatCost}` : flatCost} strain</strong></div>`;
+		const amountRow = flatCost != null && activationInfo.isVariableStrainCost
+			? `<label class="ve-flex-v-center mb-2" style="gap:.5rem;">Strain to gain
+					<input type="number" class="ve-form-control form-control--minimal" id="psi-strain-amount" min="1" max="${flatCost}" value="${flatCost}" style="width:5rem;">
+				</label>`
+			: "";
+		const testRow = activationInfo.requiresManifestationTest
+			? `<div class="mb-2">Manifestation test: <strong>${state.getManifestationDie()}</strong> vs. score
+					<strong>${order}</strong> + 1 per other power you are concentrating on.</div>
+				<label class="ve-flex-v-center mb-2" style="gap:.5rem;">Powers already concentrated on
+					<input type="number" class="ve-form-control form-control--minimal" id="psi-concentrating" min="0" value="0" style="width:5rem;">
+				</label>`
+			: "";
+
+		const {eleModalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: `🧠 ${feature.name}`,
+			isMinHeight0: true,
+		});
+		const strain = state.getStrain();
+		const wrp = e_({
+			outer: `<div class="ve-flex-col p-2">
+				${costLabel}
+				${amountRow}
+				${testRow}
+				<label class="ve-flex-v-center mb-2" style="gap:.5rem;">Strain track
+					<select class="ve-form-control form-control--minimal" id="psi-strain-track" style="width:9rem;">${trackOptions}</select>
+				</label>
+				<div class="ve-small ve-muted mb-2">Current strain — body ${strain.body}, mind ${strain.mind}, soul ${strain.soul} (max ${strainMax}).</div>
+				<div class="ve-flex" style="gap:.5rem;">
+					<button class="ve-btn ve-btn-primary" id="psi-confirm">${activationInfo.requiresManifestationTest ? "Manifest" : "Use"}</button>
+					<button class="ve-btn ve-btn-default" id="psi-cancel">Cancel</button>
+				</div>
+				<div class="mt-2" id="psi-result"></div>
+			</div>`,
+		});
+		eleModalInner.appendChild(wrp);
+
+		const eleResult = wrp.querySelector("#psi-result");
+		wrp.querySelector("#psi-cancel").addEventListener("click", () => doClose(false));
+		wrp.querySelector("#psi-confirm").addEventListener("click", () => {
+			const track = /** @type {*} */ (wrp.querySelector("#psi-strain-track")).value;
+			const lines = [];
+
+			if (activationInfo.requiresManifestationTest) {
+				const concentrating = Number(/** @type {*} */ (wrp.querySelector("#psi-concentrating"))?.value || 0);
+				const test = state.rollManifestationTest(order, {track, concentratingOn: concentrating, apply: true});
+				lines.push(`Rolled <strong>${test.roll}</strong> on ${test.die} vs. score <strong>${test.score}</strong> — ${test.strain ? `<strong>${test.strain} strain</strong>` : "no strain"}.`);
+				if (test.overflow) {
+					lines.push(`<span class="ve-error">This exceeds your strain maximum (${strainMax}). Either manifest the power and die, or don't manifest it and drop to 0 hit points.</span>`);
+					lines.push(`<button class="ve-btn ve-btn-xs ve-btn-danger mr-1" data-psi-overflow="manifest" data-psi-strain="${test.strain}" data-psi-track="${track}">Manifest and die</button>`
+						+ `<button class="ve-btn ve-btn-xs ve-btn-default" data-psi-overflow="decline">Don't manifest (drop to 0 hp)</button>`);
+				}
+			}
+
+			if (flatCost != null) {
+				const requested = activationInfo.isVariableStrainCost
+					? Math.max(1, Math.min(flatCost, Number(/** @type {*} */ (wrp.querySelector("#psi-strain-amount"))?.value || flatCost)))
+					: flatCost;
+				const applied = state.addStrain(requested, track);
+				lines.push(applied.overflow
+					? `<span class="ve-error">Gaining ${requested} strain would exceed your maximum (${strainMax}); no strain was applied.</span>`
+					: `Gained <strong>${applied.applied} ${track} strain</strong>.`);
+				if (!applied.overflow) lines.push(...this._getStrainAbilityOutcomeLines(feature, applied.applied));
+			}
+
+			const total = state.getTotalStrain();
+			lines.push(`<span class="ve-muted">Total strain now ${total}/${strainMax}.</span>`);
+			eleResult.innerHTML = lines.map(it => `<div class="mb-1">${it}</div>`).join("");
+			eleResult.querySelectorAll("[data-psi-overflow]").forEach((/** @type {*} */ btn) => {
+				btn.addEventListener("click", () => {
+					const res = state.resolveStrainOverflow({
+						manifest: btn.dataset.psiOverflow === "manifest",
+						strain: Number(btn.dataset.psiStrain || 0),
+						track: btn.dataset.psiTrack || "body",
+					});
+					JqueryUtil.doToast({type: "danger", content: res?.outcome === "died" ? "You manifested the power and died." : "You declined the power and dropped to 0 hit points."});
+					this._saveCurrentCharacter();
+					this._renderCharacter();
+					doClose(true);
+				});
+			});
+
+			if (resource?.id) {
+				const live = state.getResources().find(r => r.id === resource.id);
+				if (live) state.setResourceCurrent(live.id, Math.max(0, live.current - resourceCost));
+			}
+			this._saveCurrentCharacter();
+			this._renderCharacter();
+		});
+		return true;
 	}
 
 	/**
@@ -16273,6 +16562,8 @@ class CharacterSheetPage {
 	getItems () { return this._itemsData; }
 	getFeats () { return this._featsData; }
 	getOptionalFeatures () { return this._optionalFeaturesData; }
+	/** @returns {Array<*>} All known psionic powers (site data + brew). */
+	getPsionicPowers () { return this._psionicsData; }
 	getCombatMethodEntities () { return this._combatMethodsData; }
 	getItemUpgrades () { return this._itemUpgradesData; }
 	getUpgradesModule () { return this._upgrades; }
