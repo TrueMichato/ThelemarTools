@@ -2691,8 +2691,26 @@ const FeatureEffectRegistry = {
 		this.register("Feral Instinct", [
 			{type: "modifier", modType: "initiative:advantage", value: 1},
 		]);
+		// Indomitable Might (Barbarian 18). RAW PHB: "if your total for a Strength
+		// check is less than your Strength score, you can use that score in place of
+		// the total." XPHB extends this to Strength saving throws.
+		//
+		// This is a floor on the TOTAL, and it is three different things from the two
+		// floors that already exist here:
+		//   - NOT a floor on the ability SCORE (the old `ability:str:minimum` modType,
+		//     which no reader consumed, so the feature rendered but did nothing);
+		//   - NOT a floor on the d20 DIE (`skillMinimum` / Reliable Talent).
+		// See CS-BUG-088.
 		this.register("Indomitable Might", [
-			{type: "modifier", modType: "ability:str:minimum", value: "strScore"},
+			{
+				type: "checkTotalFloor",
+				ability: "str",
+				floorFrom: "abilityScore",
+				// Editions whose wording also covers saving throws. Resolved against the
+				// feature's own `source` at apply time via `__editionAware` below.
+				savesInEditions: ["XPHB"],
+				__editionAware: true,
+			},
 		]);
 
 		// ======= BARD =======
@@ -24648,7 +24666,11 @@ class CharacterSheetState {
 				// Try to get effects from the registry by feature name
 				const registryEffects = FeatureEffectRegistry.getEffects(feature.name);
 				if (registryEffects.length > 0) {
-					effects.push(...registryEffects);
+					// Effects that opt in with `__editionAware` need the FEATURE's own source
+					// (e.g. "PHB" vs "XPHB") to resolve edition-divergent wording. Opt-in by
+					// design: every other effect is passed through byte-identically, so this
+					// cannot change behaviour for anything that does not ask for it.
+					effects.push(...registryEffects.map(e => (e.__editionAware ? {...e, featureSource: feature.source} : e)));
 					processedFeatures.add(feature.name.toLowerCase());
 				}
 
@@ -26277,6 +26299,27 @@ class CharacterSheetState {
 					source: effect.source,
 				};
 				return `${effect.source}: minimum ${effect.minimum} on d20 for ${effect.skill || "proficient"} checks`;
+			}
+
+			case "checkTotalFloor": {
+				// Floor on the TOTAL of a check (Indomitable Might), as opposed to
+				// `skillMinimum` above which floors the d20 die. Only the RULE is stored
+				// here -- never the value -- because the floor is a live ability score that
+				// must follow ASIs, Primal Champion, Wild Shape and item bonuses. Baking a
+				// number at grant time is exactly the class of bug CS-BUG-038 fixed.
+				if (!this._data.rollFloors) this._data.rollFloors = {};
+				if (!this._data.rollFloors.checkTotal) this._data.rollFloors.checkTotal = {};
+				const abl = effect.ability;
+				if (!abl) return null;
+				const includeSaves = Array.isArray(effect.savesInEditions)
+					&& effect.savesInEditions.some(s => String(s).toLowerCase() === String(effect.featureSource || "").toLowerCase());
+				this._data.rollFloors.checkTotal[abl] = {
+					floorFrom: effect.floorFrom || "abilityScore",
+					includeSaves,
+					source: effect.source,
+				};
+				const ablUp = abl.toUpperCase();
+				return `${effect.source}: ${ablUp} check total treated as at least your ${ablUp} score${includeSaves ? " (checks and saves)" : ""}`;
 			}
 
 			case "skillBonus": {
@@ -44627,7 +44670,8 @@ class CharacterSheetState {
 			disadvantage: false,
 			removeAdvantage: false,
 			removeDisadvantage: false,
-			minimum: null, // Minimum roll result (Reliable Talent)
+			minimum: null, // Minimum d20 ROLL result (Reliable Talent)
+			totalMinimum: null, // Minimum final TOTAL (Indomitable Might) -- distinct from `minimum`
 			maximum: null, // Maximum roll result
 			setValue: null, // Override with set value
 			multiplier: 1, // Result multiplier
@@ -44767,6 +44811,32 @@ class CharacterSheetState {
 					const meetsReq = !floor.requiresProficiency || this.getSkillProficiency(specific) >= 1;
 					if (meetsReq) {
 						result.minimum = result.minimum == null ? floor.minimum : Math.max(result.minimum, floor.minimum);
+						if (floor.source && !result.sources.includes(floor.source)) {
+							result.sources.push(floor.source);
+						}
+					}
+				}
+			}
+		}
+
+		// Apply TOTAL floors (e.g. Indomitable Might: "if your total for a Strength check
+		// is less than your Strength score, you can use that score in place of the total").
+		// Emitted on `check:<abl>` / `save:<abl>`, which is the chokepoint all three roll
+		// handlers already aggregate -- a Strength SKILL check aggregates `check:str` too
+		// (charactersheet.js `checkType`), so Athletics is covered without a second rule,
+		// and a skill whose ability has been swapped away from STR correctly stops matching.
+		if (this._data.rollFloors?.checkTotal) {
+			const parts = type.split(":");
+			const category = parts[0];
+			const specific = parts[1];
+			if ((category === "check" || category === "save") && specific) {
+				const floor = this._data.rollFloors.checkTotal[specific];
+				// 2014 wording covers checks only; 2024 adds saving throws.
+				if (floor && (category === "check" || floor.includeSaves)) {
+					// Read LIVE so the floor tracks ASIs / Primal Champion / Wild Shape.
+					const floorVal = floor.floorFrom === "abilityScore" ? this.getAbilityScore(specific) : null;
+					if (Number.isFinite(floorVal)) {
+						result.totalMinimum = result.totalMinimum == null ? floorVal : Math.max(result.totalMinimum, floorVal);
 						if (floor.source && !result.sources.includes(floor.source)) {
 							result.sources.push(floor.source);
 						}

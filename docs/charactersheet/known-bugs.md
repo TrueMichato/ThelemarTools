@@ -2860,3 +2860,114 @@ and Ranger is one of the two TGTT classes with no subclass grants. Wiring it
 into a Monk spec produced a red that turned out to be two independent defects
 stacked: a harness gap (the helper ignored subclass grants) *and* this product
 bug underneath it. Validating on N=1 class would have shipped both.
+
+---
+
+## CS-BUG-088 — Indomitable Might rendered but did nothing, and was modelled on the wrong rule
+
+**Status:** Fixed
+**Severity:** Medium (a capstone-tier class feature with zero mechanical effect)
+**Area:** `charactersheet-state.js` (FeatureEffectRegistry, `aggregateModifiers`), `charactersheet.js` (roll handlers)
+
+### Symptom
+
+Indomitable Might (Barbarian 18) appeared on the Features tab and did **nothing**.
+Measured live on `barbarian/chained fury/18/minotaur` before the fix:
+
+```
+namedModifiers -> {name: "Indomitable Might", type: "ability:str:minimum", value: "strScore"}
+aggregateModifiers("ability:str:minimum") -> bonus 0, sources []
+aggregateModifiers("check:str")           -> bonus 0, minimum null
+getAdvantageState("check:str")            -> no minimum, sources []
+_data.rollFloors                          -> {}   (empty)
+```
+
+The modifier was created and then read by **no one**. This is precisely the
+"description-only rendering" the subclass batch's acceptance bar forbids.
+
+### Root cause — two independent defects
+
+**1. No consumer.** It was registered as
+`{type: "modifier", modType: "ability:str:minimum", value: "strScore"}`.
+`ability:str:minimum` had exactly one emitter and zero readers suite-wide, so
+the value never reached a roll.
+
+**2. The modType encoded the wrong rule — the more important defect.**
+RAW is a floor on the **total of a check**, not on the **ability score**:
+
+> PHB: "if your total for a Strength check is less than your Strength score, you can use that score in place of the total."
+> XPHB: "…for a Strength check **or Strength saving throw**…"
+
+So simply adding a handler for `ability:str:minimum` would have produced a
+*correct-looking number enforcing the wrong rule* — a Strength score reading 20
+when RAW never modifies the score. The model had to change, not just the wiring.
+
+Three floors now coexist and must not be conflated:
+
+| Concept | Floors | Example |
+|---|---|---|
+| `skillMinimum` → `aggregate.minimum` | the **d20 die** | Reliable Talent |
+| `checkTotalFloor` → `aggregate.totalMinimum` | the **final total** | Indomitable Might |
+| ability-score bonuses | the **score** | what the old modType wrongly implied |
+
+### Fix
+
+- Registry: `{type: "checkTotalFloor", ability: "str", floorFrom: "abilityScore", savesInEditions: ["XPHB"], __editionAware: true}`.
+  Only the *rule* is stored, never a number — the floor is read live from
+  `getAbilityScore()` so it tracks ASIs, Primal Champion and Wild Shape. (Baking
+  the value at grant time is the CS-BUG-038 failure mode.)
+- `aggregateModifiers` emits `result.totalMinimum` on `check:<abl>` / `save:<abl>`.
+  **A Strength skill check already aggregates `check:str`** (`checkType` in
+  `_rollSkillCheck`), so Athletics is covered by the same rule with no second
+  entry — and a skill whose ability has been swapped away from STR correctly
+  stops matching.
+- New shared helper `_applyTotalFloor(total, floor)` applied in all three roll
+  handlers *after* every modifier and buff die, because RAW floors the total.
+- Edition divergence resolved from the **feature's own `source`**, threaded in
+  opt-in via `__editionAware`. Every other registry effect is passed through
+  byte-identically, so this cannot change behaviour for anything that does not
+  ask for it. (The alternative — making the class-feature lookup source-aware
+  like the feat lookup — was rejected: all 23 source-keyed registrations are
+  feats/race traits, so it would have changed a shared path for one feature.)
+
+RAW says "you **can** use that score", but the floor can only ever raise a total,
+never lower it, so it is auto-applied and disclosed in the result note rather
+than prompted — matching the existing die-floor and ability-swap conventions.
+
+### Verification
+
+End-to-end with a stubbed natural 1 on `barbarian/chained fury/20/minotaur`
+(STR 24) — displayed totals:
+
+```
+Strength Check   8 -> 24   "Total raised to 24 (was 8)"
+Athletics Check 20 -> 24   "Total raised to 24 (was 20)"   (skill path)
+Strength Save   14 -> 24   "Total raised to 24 (was 14)"   (XPHB only)
+Dexterity Check  3         untouched
+L17 control                nothing floored anywhere
+```
+
+The floor reads 20 at level 18 and 24 at level 20 — it tracks Primal Champion
+live rather than baking the grant-time score.
+
+### Regression pins — `test/jest/charactersheet/CharacterSheetIndomitableMight.test.js` (9)
+
+Staged falsification (a single full revert would have flattered the set):
+
+| Reverted | Red | Notes |
+|---|---|---|
+| aggregate emission only | **4** | all assertions, zero TypeErrors |
+| edition tagging only | **1** | exactly the XPHB-saves pin |
+| registry to pre-fix state | **5** | the true shipped-bug red count |
+
+The 4 pins that survive every revert are **negative controls** (no leak to other
+abilities, no feature ⇒ no floor, die-floor untouched, score/mod unchanged).
+They assert *absence*, so by construction they cannot go red on a revert; they
+guard against over-application, which is the opposite failure.
+
+### How it was found
+
+Assigned as "add an `ability:<abl>:minimum` handler". Probing the modifier live
+before writing any code showed it was inert *and* that the target was wrong, so
+the handler would have been the wrong fix. Measuring the value rather than
+interpreting the ticket is what changed the outcome.
