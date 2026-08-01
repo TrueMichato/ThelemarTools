@@ -895,6 +895,46 @@ export const PRESET_FULL_SHADOW_MAGIC_SORCERER: CharacterPreset = {
 	signatureSpells: ["Fire Bolt", "Shield"],
 };
 
+/**
+ * Wicked Witch Sorcerer (Arcadia 8 subclass re-parented onto the TGTT Sorcerer chassis).
+ *
+ * The subclass reaches the sheet as a `_copy` in `homebrew/TravelersGuidetoThelemar.json`
+ * (`source: "TGTT-AR"`, `classSource: "TGTT"`) of `Wicked Witch Sorcerous Origin|Ar8`,
+ * so BOTH brews must be loaded: Thelemar via the sheet's own `homebrew/index.json`
+ * fan-out (which already lists every Arcadia issue), and nothing extra here — supplying
+ * `homebrewUrls` would SUPPRESS the fan-out and break the copy target.
+ *
+ * `subclassSource` is the source ABBREVIATION the sheet renders for `TGTT-AR`, which is
+ * `"AR"` (`_meta.sources[3].abbreviation`), not the JSON key.
+ *
+ * Chassis consequences (they differ from every PHB-Sorcerer preset):
+ *   - Sorcerous Origin arrives at **level 3**, not level 1.
+ *   - Font of Magic is a **level 1** feature, so Sorcery Points = `level + 1` from L1
+ *     (`CharacterSheetState.getSorceryPointsMaxForClass()`).
+ *   - The chassis adds its own Specialty (L4/8/12/16/20) and Metamagic pickers.
+ */
+export const PRESET_FULL_WICKED_WITCH_SORCERER: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB",
+	className: "Sorcerer",
+	classSource: "TGTT",
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB",
+	name: "Morgath Thornwhistle",
+	skillCount: 2,
+	subclassName: "Wicked Witch Sorcerous Origin",
+	subclassSource: "AR",
+	// CS-BUG-056: the standard array is otherwise assigned STR-first, landing the Sorcerer
+	// on CHA 8 — which would make every spell save DC and the Clever Little Witch
+	// reflection DC unrepresentative.
+	abilityPriority: ["cha", "con", "dex", "wis", "int", "str"],
+	// Matched to PRESET_FULL_CHILD_OF_SUN_HOCHLING, the other TGTT-chassis sorcerer:
+	// the TGTT spell picker does not surface "Shield" in the L1 view, and the retry
+	// loop that chases it costs the L1 round-trip test most of its 60 s budget.
+	signatureSpells: ["Fire Bolt", "Burning Hands"],
+};
+
 /** Convenience array of all comprehensive presets — handy for parameterised smoke tests. */
 export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_MERCY_MONK_CHANGELING,
@@ -921,6 +961,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_CREATION_BARD_CHANGELING,
 	PRESET_FULL_ARCANA_CLERIC,
 	PRESET_FULL_SHADOW_MAGIC_SORCERER,
+	PRESET_FULL_WICKED_WITCH_SORCERER,
 ];
 
 /**
