@@ -249,6 +249,25 @@ issue numbers stay stable.
 
 ## Resolved
 
+### CS-BUG-086 — XPHB/TGTT Barbarian Rage pool becomes unlimited at level 20
+
+**Status**: Fixed.
+**Surfaced by**: `tgtt-chained-fury-barbarian-minotaur.spec.ts` after
+retiring its CS-BUG-018 resource skips. The L20 matrix read a Rage
+maximum of `999` instead of the TGTT table's exact `6`.
+
+**Root cause**: `CharacterSheetClassUtils.updateClassResources()` used
+one PHB progression array for every Barbarian source. Its L20 value was
+the PHB unlimited-use sentinel (`999`), even though XPHB and TGTT remain
+capped at six uses.
+
+**Fix**: Added a source-aware `getRageUsesMaxForClass()` single source
+of truth and routed both feature calculations and the level-up resource
+writer through it. PHB keeps the unlimited sentinel; XPHB/TGTT remain
+at six. A parameterized Jest regression covers all three sources.
+
+---
+
 ### CS-BUG-005 — `getFeatChoices` Temporal Dead Zone at L19 (Epic Boon)
 
 **Status**: Fixed by hoisting `getFeatChoices` to a function declaration.

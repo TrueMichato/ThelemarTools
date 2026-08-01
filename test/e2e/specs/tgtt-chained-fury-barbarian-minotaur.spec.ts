@@ -6,7 +6,7 @@ import {buildSpecialtyChecks, buildWeaponMasteryChecks} from "../utils/tgttFeatu
  * #9 — Chained Fury Barbarian Minotaur (TGTT) — L1→20.
  *
  * Coverage focus:
- *   - Rage uses scale per Barbarian table (2/3/4/4/5/5/6/6/unlimited)
+ *   - Rage uses scale per Barbarian table (2/3/4/5/6)
  *   - Rage damage bonus scales (+2/+3/+4) and applies on the toggle
  *   - Reckless Attack at L2, Extra Attack at L5
  *   - Path of the Chained Fury subclass features at L3, L6, L10, L14
@@ -65,19 +65,24 @@ describeCharacter({
 		// Rage uses pool — re-checked at scaling thresholds.
 		{
 			level: 1,
+			untilLevel: 2,
 			name: "Rage",
-			kind: "resource", skip: true, skipReason: "CS-BUG-018",
+			kind: "resource",
 			resourceMax: 2,
+		},
+		{
+			level: 3,
+			untilLevel: 5,
+			name: "Rage",
+			kind: "resource",
+			resourceMax: 3,
 			effects: [
 				{kind: "longRestRestores", resource: "Rage"},
 			],
 		},
-		{level: 3,  name: "Rage", kind: "resource", resourceMax: 3, skip: true, skipReason: "CS-BUG-018"},
-		{level: 6,  name: "Rage", kind: "resource", resourceMax: 4, skip: true, skipReason: "CS-BUG-018"},
-		{level: 12, name: "Rage", kind: "resource", resourceMax: 5, skip: true, skipReason: "CS-BUG-018"},
-		{level: 17, name: "Rage", kind: "resource", resourceMax: 6, skip: true, skipReason: "CS-BUG-018"},
-		// L20 grants unlimited rages — accept any high value or sentinel.
-		{level: 20, name: "Rage", kind: "resource", resourceMax: [6, 999], skip: true, skipReason: "CS-BUG-018"},
+		{level: 6,  untilLevel: 11, name: "Rage", kind: "resource", resourceMax: 4},
+		{level: 12, untilLevel: 16, name: "Rage", kind: "resource", resourceMax: 5},
+		{level: 17, name: "Rage", kind: "resource", resourceMax: 6},
 
 		{
 			level: 1,
@@ -163,9 +168,10 @@ describeCharacter({
 			name: /primal champion/i,
 			kind: "passive",
 			effects: [
-				// Primal Champion: +4 STR & CON, max raised to 24. Probe via abilityScore floor.
-				{kind: "abilityScore", ability: "str", min: 24, skip: true, skipReason: "CS-BUG-018"},
-				{kind: "abilityScore", ability: "con", min: 24, skip: true, skipReason: "CS-BUG-018"},
+				// The wizard build's pre-capstone scores are STR 19 / CON 13, so
+				// assert Primal Champion's +4 contribution rather than a false 24 floor.
+				{kind: "stateCall", method: "getAbilityBonusBreakdown", args: ["str"], path: "contributions", contains: "\"source\":\"primalChampion\",\"label\":\"Primal Champion\",\"amount\":4"},
+				{kind: "stateCall", method: "getAbilityBonusBreakdown", args: ["con"], path: "contributions", contains: "\"source\":\"primalChampion\",\"label\":\"Primal Champion\",\"amount\":4"},
 			],
 		},
 
