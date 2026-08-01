@@ -23,27 +23,31 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// Font of Magic / Sorcery Points: pool = Sorc level from L2.
 	// Long-rest restore (Sorcery Points do NOT come back on a short
 	// rest until Sorcerous Restoration at L20).
-	// L2 anchor also carries Half-Ogre racial probes (STR base 15 +
+	// L3 anchor also carries Half-Ogre racial probes (STR base 15 +
 	// race +2 = 17 — `min: 14` is a safe floor across all ASI paths)
 	// and the Sorcerer cantrip-count baseline (4 cantrips at L1+).
 	// Note: Half-Ogre has no skill proficiencies (no Menacing trait
 	// in the TGTT data) and Powerful Build (carry x2) is not surfaced
 	// on the sheet — neither is probed.
-	{level: 2,  name: "Sorcery Points", kind: "resource", resourceMax: 2, skip: true, skipReason: "CS-BUG-018",  restoreOn: "long",
+	{
+		level: 3,
+		name: "Sorcery Points",
+		kind: "resource",
+		untilLevel: 4,
+		resourceMax: 3,
+		restoreOn: "long",
 		effects: [
 			{kind: "longRestRestores", resource: "Sorcery Points"},
 			{kind: "cantripCount", min: 4, skip: true, skipReason: "CS-BUG-016"},
 			// Half-Ogre +2 STR racial bonus floor.
 			{kind: "abilityScore", ability: "str", min: 14},
-		]},
-	// L3 SP anchor: roll-button probes for Sorcerer-proficient CON
-	// save and an untrained skill (Athletics — STR-based; Half-Ogre
-	// has no skill profs but the row + button always render).
-	{level: 3,  name: "Sorcery Points", kind: "resource", resourceMax: 3, skip: true, skipReason: "CS-BUG-018",
-		effects: [
+			// L3 SP anchor: roll-button probes for Sorcerer-proficient CON
+			// save and an untrained skill (Athletics — STR-based; Half-Ogre
+			// has no skill profs but the row + button always render).
 			{kind: "rollSavingThrow", ability: "con"},
 			{kind: "rollSkillCheck", skill: "athletics"},
-		]},
+		],
+	},
 	// L5 SP anchor: Sorcerer's other proficient save (CHA), CHA
 	// ability-check button, and the auto-equipped melee/ranged
 	// weapon attack (Sorcerer starting kit gives dagger / light
@@ -55,7 +59,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// bump CHA either, so the DC stays in the 9-11 band across mid
 	// tiers and any `min:` floor would be either trivially true or
 	// noisy.
-	{level: 5,  name: "Sorcery Points", kind: "resource", resourceMax: 5, skip: true, skipReason: "CS-BUG-018",
+	{level: 5,  name: "Sorcery Points", kind: "resource", untilLevel: 10, resourceMax: 5,
 		effects: [
 			{kind: "rollSavingThrow", ability: "cha"},
 			{kind: "rollAbilityCheck", ability: "cha"},
@@ -67,57 +71,43 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// auto-build has had several ASIs targeting CHA on the primary
 	// caster class; PB=4 + CHA mod ≥ 1 keeps the floor comfortably
 	// above DC 13 even on a slow-CHA path.
-	{level: 11, name: "Sorcery Points", kind: "resource", resourceMax: 11, skip: true, skipReason: "CS-BUG-018",
+	{level: 11, name: "Sorcery Points", kind: "resource", untilLevel: 16, resourceMax: 11,
 		effects: [
 			{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
 		]},
-	{level: 17, name: "Sorcery Points", kind: "resource", resourceMax: 17, skip: true, skipReason: "CS-BUG-018",},
-	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20, skip: true, skipReason: "CS-BUG-018",},
+	{level: 17, name: "Sorcery Points", kind: "resource", untilLevel: 19, resourceMax: 17},
+	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20},
 
 	// Metamagic picks scale 2 → 3 → 4 across L3 / L10 / L17.
-	// `pickedCount` is the lower bound — passing means at least N of
-	// the listed Metamagic options surfaced as feature entries.
-	// `pickToggleable` then verifies that ≥1 of the picked options is
-	// an Active metamagic surfaced as a toggle on the sheet. The
-	// `matchAny` list intentionally enumerates ONLY the active
-	// metamagic options (TGTT splits metamagic into Active and
-	// Passive — Passive options like Careful / Distant / Empowered /
-	// Extended / Resonant / Split / Supple / Transmuted / Warding
-	// don't surface as toggles, so listing them would be noise).
+	// The auto-picker's deterministic first choice is Aimed Spell.
+	// Active metamagic is selected per cast, not exposed as a standing
+	// toggle, so probe the known-only and cast-time state APIs directly.
 	{level: 3,  name: /metamagic/i, kind: "pick", pickedCount: 2,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
-			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-018", min: 1, matchAny: [
-				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
-				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
-				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
-			]},
+			{kind: "stateCall", method: "getKnownActiveMetamagics", contains: "Aimed Spell"},
+			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], contains: "Aimed Spell"},
+			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], path: "0.cost", exact: 2},
 		]},
 	{level: 10, name: /metamagic/i, kind: "pick", pickedCount: 3,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
-			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-018", min: 1, matchAny: [
-				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
-				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
-				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
-			]},
+			{kind: "stateCall", method: "getKnownActiveMetamagics", contains: "Aimed Spell"},
+			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], contains: "Aimed Spell"},
+			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], path: "0.cost", exact: 2},
 		]},
 	{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4,
 		pickedFrom: TGTT_METAMAGIC,
 		effects: [
-			{kind: "pickToggleable", skip: true, skipReason: "CS-BUG-018", min: 1, matchAny: [
-				/aimed spell.*active/i, /bestowed spell.*active/i, /bouncing spell.*active/i, /focused spell.*active/i,
-				/lingering spell.*active/i, /overcharged spell.*active/i, /seeking spell.*active/i, /vampiric spell.*active/i,
-				/quickened spell.*active/i, /twinned spell.*active/i, /subtle spell.*active/i, /heightened spell.*active/i,
-			]},
+			{kind: "stateCall", method: "getKnownActiveMetamagics", contains: "Aimed Spell"},
+			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], contains: "Aimed Spell"},
+			{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 1}], path: "0.cost", exact: 2},
 		]},
 
 	// Phase H additive coverage: helper-driven per-pick effect probes
 	// (`pickedFeatureGrants` for the auto-picker's deterministic first
-	// choice). Complements the rich rows above which assert the
-	// `pickToggleable` surface (gated by CS-BUG-018). If the per-pick
-	// grant probe turns out to be blocked by the same picker-rendering
-	// bug, wrap this spread in `withSkipReason(…, "CS-BUG-017")`.
+	// choice). Complements the rich rows above which assert ownership
+	// and cast-time availability through the metamagic state APIs.
 	...buildAnyMetamagicChecks(["TGTT"]),
 
 	// Sorcerous Restoration at L20 — short-rest recovery of up to 4 SP.
