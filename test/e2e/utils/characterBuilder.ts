@@ -439,6 +439,27 @@ export const PRESET_FULL_METEOR_KNIGHT_FIGHTER: CharacterPreset = {
 	],
 };
 
+/** 2c. Steel Hawk Fighter (The Griffon's Saddlebag, Book 2) */
+export const PRESET_FULL_STEEL_HAWK_FIGHTER: CharacterPreset = {
+	race: "Aarakocra",
+	raceSource: "MPMM",
+	className: "Fighter",
+	classSource: "PHB",
+	prioritySources: ["PHB"],
+	background: "Soldier",
+	bgSource: "PHB",
+	name: "Ryn Skytalon",
+	skillCount: 2,
+	masteryCount: 3,
+	optFeatCount: 1,
+	subclassName: "Steel Hawk",
+	subclassSource: "GriffonsSaddlebag2",
+	preferredFeatProgressionPattern: /^archery\b/i,
+	homebrewUrls: [
+		"https://raw.githubusercontent.com/TheGiddyLimit/homebrew/refs/heads/master/collection/Griffin%20Macaulay%3B%20The%20Griffon's%20Saddlebag%2C%20Book%202.json",
+	],
+};
+
 /** 3. Bladesinger Wizard Tabaxi (TGTT) */
 export const PRESET_FULL_BLADESINGER_TABAXI: CharacterPreset = {
 	race: "Tabaxi",

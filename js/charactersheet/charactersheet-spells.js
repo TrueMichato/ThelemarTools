@@ -7320,7 +7320,11 @@ class CharacterSheetSpells {
 
 		// Build usage info
 		let usageInfo;
-		if (spell.atWill) {
+		if (spell.ritualOnly) {
+			// "…but only as a ritual": no per-rest budget, but also not freely castable —
+			// labelling it "At Will" (or, worse, the "1/day" fallback) misstates the rule.
+			usageInfo = "<span class=\"badge badge-info\" title=\"Can only be cast as a ritual (10 minutes, no spell slot)\">Ritual Only</span>";
+		} else if (spell.atWill) {
 			usageInfo = "<span class=\"badge badge-success\">At Will</span>";
 		} else if (spell.uses) {
 			// Build pips: filled = available, empty (used class) = spent
