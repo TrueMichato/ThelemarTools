@@ -31,13 +31,20 @@ beforeAll(async () => {
 	CharacterSheetDruidResources = (await import("../../../js/charactersheet/charactersheet-druid-resources.js")).CharacterSheetDruidResources;
 });
 
-/** A Zodiac druid with a Wild Shape pool, plus a stub page the module can drive. */
+/**
+ * A Zodiac druid with a Wild Shape pool, plus a stub page the module can drive.
+ *
+ * Level 5 on purpose: the 2024 Druid Features table gives 2 Wild Shape uses at
+ * levels 2-5 and 3 from level 6, and `getWildShapeResource()` re-scales a stale
+ * pool up to the level-correct maximum. Pinning the fixture below that step keeps
+ * the two-use arithmetic these tests assert on honest.
+ */
 function makeZodiacDruid ({current = 2, max = 2} = {}) {
 	const state = new CharacterSheetState();
 	state.addClass({
 		name: "Druid",
 		source: "TGTT",
-		level: 9,
+		level: 5,
 		subclass: {name: "Circle of the Zodiac", shortName: "Zodiac", source: "TGTT"},
 	});
 	state.setAbilityBase("wis", 18);

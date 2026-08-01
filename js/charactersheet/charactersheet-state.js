@@ -50,7 +50,18 @@ class FeatureUsesParser {
 		if (!recharge) return null;
 
 		// Pattern: "X times" or "X uses"
-		const timesMatch = plainText.match(/(\d+)\s*(?:times?|uses?)/);
+		//
+		// GUARD (generic): "N times <noun phrase>" is MULTIPLICATION, not a use
+		// count — e.g. the Bard's Performance of Creation ("the gp value of the
+		// item can't be more than 20 times your bard level") or a Dancing Item's
+		// "five times your bard level" HP formula. Reading those as "20 uses" /
+		// "5 uses" mints a bogus resource pool on the sheet. A genuine frequency
+		// reads "3 times per day", "3 times, and you regain…", "3 times before…",
+		// never "3 times your/the/its <thing>". Skip only that shape and keep
+		// scanning, so a later clause ("once you do so… long rest") still wins.
+		// The `\b` is load-bearing: without it the engine escapes the lookahead by
+		// backtracking "times" → "time" and leaving the "s" to break the `\s+`.
+		const timesMatch = plainText.match(/(\d+)\s*(?:times?|uses?)\b(?!\s+(?:your|the|a|an|its|his|her|their|that)\b)/);
 		if (timesMatch) {
 			uses = parseInt(timesMatch[1]);
 		}
@@ -2416,6 +2427,14 @@ class FeatureModifierParser {
 			// the transformation is active).
 			/until\s+(?:the\s+)?(?:transformation|change)\s+ends/i,
 			/while\s+(?:you\s+(?:are|['’]re)\s+)?transformed/i,
+			// Grants gated on a mode/feature currently being switched on, e.g.
+			// Circle of the Sea's Stormborn ("Your Wrath of the Sea confers two
+			// more benefits while active… You gain a Fly Speed equal to your
+			// Speed"). Like the transformation case above, such a grant must NOT
+			// be applied at base: the active state that owns the mode supplies it
+			// while it runs.
+			/while\s+(?:your|the|this)\s+[^.,;]{2,40}?\s+is\s+active/i,
+			/\bwhile\s+active\b/i,
 		];
 
 		for (const pattern of conditions) {
@@ -6843,7 +6862,8 @@ class CharacterSheetState {
 		// 1) Named modifiers (user / ability toggleable reach mods)
 		for (const mod of (this._data.namedModifiers || [])) {
 			if (mod.type === "reach" && mod.enabled) {
-				contributions.push({source: mod.name || "Modifier", value: mod.value || 0});
+				// Resolve symbolic values before this feeds arithmetic/display (CS-BUG-038).
+				contributions.push({source: mod.name || "Modifier", value: this._resolveSymbolicModifierValue(mod.value) ?? 0});
 			}
 		}
 
@@ -8327,11 +8347,14 @@ class CharacterSheetState {
 			return this._data.namedModifiers
 				?.filter(m => m.enabled && m.type === `sense:${senseType}`)
 				?.reduce((total, m) => {
+					// Symbolic values ("proficiency", "conModx2", …) must be resolved to a
+					// number before arithmetic, or `+` concatenates (CS-BUG-038).
+					const v = this._resolveSymbolicModifierValue(m.value) ?? 0;
 					// If setValue is true, take the max value; otherwise add
 					if (m.setValue) {
-						return Math.max(total, m.value || 0);
+						return Math.max(total, v);
 					}
-					return total + (m.value || 0);
+					return total + v;
 				}, 0) || 0;
 		};
 
@@ -8358,10 +8381,12 @@ class CharacterSheetState {
 		const namedBonus = this._data.namedModifiers
 			?.filter(m => m.enabled && m.type === `sense:${sense}`)
 			?.reduce((total, m) => {
+				// See getSenses(): resolve symbolic values before arithmetic (CS-BUG-038).
+				const v = this._resolveSymbolicModifierValue(m.value) ?? 0;
 				if (m.setValue) {
-					return Math.max(total, m.value || 0);
+					return Math.max(total, v);
 				}
-				return total + (m.value || 0);
+				return total + v;
 			}, 0) || 0;
 
 		// Mirror getSenses(): floor across base/custom/item/state, plus additive named + item bonuses
@@ -9084,7 +9109,10 @@ class CharacterSheetState {
 		let flatValue = 0;
 		let perLevelValue = 0;
 		hpMods.forEach(m => {
-			const v = m.value || 0;
+			// Resolve symbolic values before arithmetic (CS-BUG-038). The resolver is used
+			// rather than _getNamedModifierEffectiveValue because `perLevel` is applied
+			// locally below — the helper would double-apply it.
+			const v = this._resolveSymbolicModifierValue(m.value) ?? 0;
 			if (m.perLevel) {
 				perLevelValue += v;
 				perLevelSources.push({name: m.name || "Unnamed", value: v});
@@ -10139,7 +10167,9 @@ class CharacterSheetState {
 				if (mod.minValue != null) v = Math.max(mod.minValue, v);
 				total += v;
 			} else {
-				total += mod.value || 0;
+				// Resolve symbolic values before arithmetic (CS-BUG-038); `proficiencyBonus`
+				// and `abilityMod` are handled by the branches above.
+				total += this._resolveSymbolicModifierValue(mod.value) ?? 0;
 			}
 		});
 
@@ -11953,10 +11983,14 @@ class CharacterSheetState {
 		// Apply spell-granted speeds (e.g., Fly spell: flySpeed 60)
 		const activeEffects = this.getActiveStateEffects();
 		for (const e of activeEffects) {
-			if (e.type === "flySpeed") effectiveFly = Math.max(effectiveFly, e.value || 0);
-			else if (e.type === "swimSpeed") effectiveSwim = Math.max(effectiveSwim, e.value || 0);
-			else if (e.type === "climbSpeed") effectiveClimb = Math.max(effectiveClimb, e.value || 0);
-			else if (e.type === "burrowSpeed") effectiveBurrow = Math.max(effectiveBurrow, e.value || 0);
+			// `equalToWalk` resolves against the already-computed raw walking
+			// speed, mirroring `getSpeedByType`, so an active state can grant
+			// "fly/swim equal to your Speed" without re-entering this method.
+			const granted = e.equalToWalk ? rawWalk : (e.value || 0);
+			if (e.type === "flySpeed") effectiveFly = Math.max(effectiveFly, granted);
+			else if (e.type === "swimSpeed") effectiveSwim = Math.max(effectiveSwim, granted);
+			else if (e.type === "climbSpeed") effectiveClimb = Math.max(effectiveClimb, granted);
+			else if (e.type === "burrowSpeed") effectiveBurrow = Math.max(effectiveBurrow, granted);
 		}
 		effectiveSwim = Math.max(effectiveSwim, applyEqual("swim"));
 		effectiveClimb = Math.max(effectiveClimb, applyEqual("climb"));
@@ -12042,12 +12076,25 @@ class CharacterSheetState {
 		const spellSpeedType = `${type}Speed`; // e.g., "flySpeed", "swimSpeed"
 		const activeEffects = this.getActiveStateEffects();
 		for (const e of activeEffects) {
-			if (e.type === spellSpeedType) base = Math.max(base, e.value || 0);
+			// `equalToWalk` is resolved HERE, at the read site, rather than baked
+			// into the effect: computing the walking speed while producing active
+			// state effects would re-enter the speed pipeline.
+			if (e.type === spellSpeedType) base = Math.max(base, e.equalToWalk ? this.getWalkSpeed() : (e.value || 0));
 		}
 
 		// For non-walk speeds, only apply bonuses if character has that movement type
-		// (base > 0, or equalToWalk modifier grants it)
-		if (type !== "walk" && base === 0) {
+		// (base > 0, or equalToWalk modifier grants it) — a flat "+10 speed" must
+		// not conjure a climb speed for a character who has none.
+		//
+		// An active state CAN grant a movement type outright, though ("you gain a
+		// flying speed of 60 feet" — the Fly spell, Unearthly Countenance, and
+		// every prose-parsed equivalent). Those arrive as
+		// {type: "bonus", target: "speed:fly"}, so they land in `bonus` rather than
+		// `base`, and this guard used to discard them before `bonus` was ever
+		// added — silently returning 0 for every such feature. Only a
+		// TYPE-SPECIFIC grant counts here, which is what keeps the generic
+		// "+10 speed" case above still correct.
+		if (type !== "walk" && base === 0 && this._getGrantedSpeedFromStates(type) <= 0) {
 			return 0;
 		}
 
@@ -21026,9 +21073,14 @@ class CharacterSheetState {
 						}
 					}
 
-					// Wild Shape uses: 2 per short/long rest (both PHB and XPHB)
+					// Wild Shape uses.
+					//  - PHB 2014: a flat 2 per short/long rest at every level.
+					//  - XPHB 2024: the "Wild Shape" column of the Druid Features
+					//    table — 2 at levels 2-5, 3 at 6-16, 4 at 17-20.
 					if (level >= 2) {
-						calculations.wildShapeUses = 2;
+						calculations.wildShapeUses = isXPHB
+							? (level >= 17 ? 4 : (level >= 6 ? 3 : 2))
+							: 2;
 					}
 
 					// Wild Companion (TCE optional feature for PHB, standard for XPHB at level 2)
@@ -21097,9 +21149,12 @@ class CharacterSheetState {
 					// Archdruid (level 20 both PHB and XPHB)
 					if (level >= 20) {
 						calculations.hasArchdruid = true;
-						// XPHB: Can use Wild Shape unlimited times
+						// XPHB Archdruid does NOT grant unlimited Wild Shape — its
+						// "Evergreen Wild Shape" benefit refunds ONE expended use
+						// whenever you roll Initiative with an empty pool. The pool
+						// itself stays at the table value (4).
 						if (isXPHB) {
-							calculations.wildShapeUses = Infinity;
+							calculations.hasEvergreenWildShape = true;
 						}
 					}
 
@@ -21507,30 +21562,57 @@ class CharacterSheetState {
 							}
 							case "circle of the sea":
 							case "sea": {
-								// XPHB only
-								// Wrath of the Sea (level 3) - bonus action cold/lightning damage
+								// Circle of the Sea (XPHB 2024). Every number here is read
+								// back by `getWrathOfTheSeaAction()`, the `wrathOfTheSea`
+								// active state and the Combat-tab trigger, so this block is
+								// the single source of truth for the whole subclass.
 								if (level >= 3) {
+									// Wrath of the Sea — Bonus Action, expend a Wild Shape
+									// use to manifest an Emanation of ocean spray. On
+									// manifestation and as a Bonus Action on later turns, one
+									// creature in the Emanation makes a CON save against the
+									// druid's spell save DC or takes Cold damage and, if Large
+									// or smaller, is pushed up to 15 feet away.
 									calculations.hasWrathOfTheSea = true;
-									const wrathDamage = level >= 17 ? "1d12" : level >= 11 ? "1d10" : level >= 5 ? "1d8" : "1d4";
-									calculations.wrathOfTheSeaDamage = wrathDamage;
+									calculations.wrathOfTheSeaDiceCount = Math.max(1, wisMod);
+									calculations.wrathOfTheSeaDamage = `${Math.max(1, wisMod)}d6`;
+									calculations.wrathOfTheSeaDamageType = "cold";
+									calculations.wrathOfTheSeaSaveAbility = "con";
+									calculations.wrathOfTheSeaDc = this.getSpellSaveDc();
+									calculations.wrathOfTheSeaPush = 15;
+									calculations.wrathOfTheSeaMaxPushSize = "Large";
+									// Aquatic Affinity widens the Emanation from 5 ft to 10 ft.
+									calculations.wrathOfTheSeaEmanation = level >= 6 ? 10 : 5;
+									calculations.wrathOfTheSeaWildShapeCost = 1;
+									calculations.wrathOfTheSeaDuration = "10 minutes";
 								}
 
-								// Aquatic Affinity (level 6) - swim speed, water breathing
-								if (level >= 6) {
-									calculations.hasAquaticAffinity = true;
-									calculations.swimSpeed = 60;
-								}
+								// Aquatic Affinity (level 6) — Emanation grows to 10 ft (above)
+								// and the druid gains a Swim Speed equal to their Speed. The
+								// swim speed itself is emitted as an `equalToWalk` speed effect
+								// in `_aggregateCalculationBasedEffects` so it tracks any later
+								// walking-speed change instead of freezing a number here.
+								if (level >= 6) calculations.hasAquaticAffinity = true;
 
-								// Stormborn (level 10) - fly speed in rain/storm
+								// Stormborn (level 10) — while Wrath of the Sea is active the
+								// druid gains a Fly Speed equal to their Speed and Resistance to
+								// Cold, Lightning and Thunder damage. Deliberately NOT named
+								// `hasStormborn`: that key belongs to the Tempest Domain
+								// Cleric's level-17 feature, whose always-on fly speed would
+								// otherwise leak onto this druid.
 								if (level >= 10) {
-									calculations.hasStormborn = true;
-									calculations.stormFlySpeed = 60;
+									calculations.hasSeaStormborn = true;
+									calculations.seaStormbornResistances = ["cold", "lightning", "thunder"];
 								}
 
-								// Oceanic Gift (level 14) - grant benefits to allies
+								// Oceanic Gift (level 14) — manifest the Emanation around one
+								// willing creature within 60 ft instead of yourself (it uses
+								// your spell save DC and Wisdom modifier), or around both you
+								// and that creature for two Wild Shape uses instead of one.
 								if (level >= 14) {
 									calculations.hasOceanicGift = true;
-									calculations.oceanicGiftTargets = Math.max(1, wisMod);
+									calculations.oceanicGiftRange = 60;
+									calculations.oceanicGiftBothCost = 2;
 								}
 								break;
 							}
@@ -21721,32 +21803,51 @@ class CharacterSheetState {
 							}
 
 							case "College of Creation": {
-								// Mote of Potential (level 3) - enhance Bardic Inspiration
+								// Mote of Potential (level 3) — every Bardic Inspiration die you
+								// hand out carries a mode-dependent rider. All three riders are
+								// resolved by `rollMoteOfPotential()`.
 								calculations.hasMoteOfPotential = true;
 								calculations.moteOfPotentialDie = inspirationDie;
+								// Attack-roll mode: CON save against YOUR spell save DC or take
+								// thunder damage equal to the Bardic Inspiration die rolled.
+								calculations.moteOfPotentialDc = this.getSpellSaveDcForAbility("cha");
+								calculations.moteOfPotentialSave = "con";
 								calculations.moteAbilityCheckBonus = inspirationDie; // Roll twice, use highest
 								calculations.moteAttackDamage = inspirationDie; // Thunder damage to target + nearby
+								calculations.moteAttackDamageType = "thunder";
 								calculations.moteSavingThrowTempHp = `${inspirationDie} + ${chaMod}`; // Temp HP on save
+								calculations.moteSavingThrowTempHpBonus = chaMod;
 
-								// Performance of Creation (level 3) - create nonmagical item
+								// Performance of Creation (level 3) — create nonmagical item(s).
 								calculations.hasPerformanceOfCreation = true;
-								calculations.createdItemMaxGp = level * 20;
+								// `null` === "no gp limit" (Creative Crescendo removes the cap).
+								calculations.createdItemMaxGp = level >= 14 ? null : level * 20;
 								calculations.createdItemMaxSize = level >= 14 ? "Huge" : level >= 6 ? "Large" : "Medium";
-								calculations.createdItemDuration = level >= 14 ? "hours" : "hours"; // Equal to proficiency bonus hours
+								calculations.createdItemDurationHours = profBonus;
+								calculations.createdItemDuration = `${profBonus} hours`;
+								calculations.createdItemMaxCount = 1;
+								// Re-using the feature costs a 2nd-level-or-higher slot.
+								calculations.performanceOfCreationSlotLevel = 2;
 
-								// Animating Performance (level 6) - animate Large or smaller object
+								// Animating Performance (level 6) — animate a Large or smaller
+								// object as a Dancing Item companion (TCE stat block).
 								if (level >= 6) {
 									calculations.hasAnimatingPerformance = true;
 									calculations.dancingItemHp = 10 + 5 * level;
 									calculations.dancingItemAc = 16;
-									calculations.dancingItemAttackBonus = profBonus + chaMod;
+									calculations.dancingItemAttackBonus = this.getSpellAttackBonusForAbility("cha");
 									calculations.dancingItemDamage = `1d10 + ${profBonus}`;
+									calculations.dancingItemDamageType = "force";
+									// Re-using the feature costs a 3rd-level-or-higher slot.
+									calculations.animatingPerformanceSlotLevel = 3;
 								}
 
-								// Creative Crescendo (level 14) - create multiple items
+								// Creative Crescendo (level 14) — more items at once, no gp cap.
 								if (level >= 14) {
 									calculations.hasCreativeCrescendo = true;
-									calculations.simultaneousCreations = Math.max(1, chaMod);
+									calculations.createdItemMaxCount = Math.max(2, chaMod);
+									// Legacy alias retained for saved characters / older probes.
+									calculations.simultaneousCreations = calculations.createdItemMaxCount;
 								}
 								break;
 							}
@@ -25716,6 +25817,17 @@ class CharacterSheetState {
 		// Wrath is a stored Reaction with a parsed damage-type choice; Destructive Wrath arms
 		// a deferred one-shot maximizer; and lightning damage asks getTriggeredDamageEffects()
 		// for Thunderbolt Strike's optional push. No inert placeholder effects are emitted here.
+
+		// =========================================================
+		// DRUID CIRCLE — derived speeds (owned block)
+		// =========================================================
+		// Aquatic Affinity (Circle of the Sea L6): a Swim Speed equal to your
+		// Speed. Emitted as an equalToWalk speed modifier (same generic path as
+		// Tempest's Stormborn) so it tracks any later walking-speed change
+		// instead of freezing today's number into a calculation field.
+		if (calculations.hasAquaticAffinity) {
+			effects.push({type: "speed", speedType: "swim", equalToWalk: true, source: "Aquatic Affinity"});
+		}
 
 		// =========================================================
 		// SUBCLASS-GRANTED COMBAT TRADITIONS (TGTT)
@@ -30954,6 +31066,35 @@ class CharacterSheetState {
 	 * @param {string} [speedType="walk"] - The speed type ("walk", "fly", "swim", "climb", "burrow")
 	 * @returns {number} Total speed bonus from active states
 	 */
+	/**
+	 * Speed GRANTED to a non-walk movement type by an active state.
+	 *
+	 * Distinct from `getSpeedBonusFromStates()`, which sums every applicable
+	 * bonus including the generic `target: "speed"` form. Only a TYPE-SPECIFIC
+	 * target counts as granting the movement type, so a flat "+10 speed" state
+	 * can still never conjure a fly speed for a character who cannot fly.
+	 *
+	 * Used solely by `getSpeed()` to decide whether the "character must already
+	 * have this movement type" guard applies.
+	 *
+	 * @param {string} speedType
+	 * @returns {number}
+	 */
+	_getGrantedSpeedFromStates (speedType) {
+		if (speedType === "walk") return 0;
+		let granted = 0;
+		for (const e of this.getActiveStateEffects()) {
+			if (e.type !== "bonus" || e.target !== `speed:${speedType}`) continue;
+			let value;
+			if (e.value === "walking") value = this.getWalkSpeed();
+			else if (e.abilityMod) value = this.getAbilityMod(e.abilityMod);
+			else if (e.useProficiency) value = this.getProficiencyBonus();
+			else value = Number(e.value) || 0;
+			granted = Math.max(granted, value);
+		}
+		return granted;
+	}
+
 	getSpeedBonusFromStates (speedType = "walk") {
 		const effects = this.getActiveStateEffects();
 		let bonus = 0;
@@ -30965,8 +31106,14 @@ class CharacterSheetState {
 					bonus += this.getAbilityMod(e.abilityMod);
 				} else if (e.useProficiency) {
 					bonus += this.getProficiencyBonus();
+				} else if (e.value === "walking") {
+					// parseEffectsFromDescription emits the literal "walking" for
+					// "a flying speed equal to your walking speed". Left raw it
+					// string-concatenates (0 + "walking" -> "0walking") and the
+					// caller's Math.floor turns the whole speed into NaN.
+					bonus += speedType === "walk" ? 0 : this.getWalkSpeed();
 				} else {
-					bonus += e.value || 0;
+					bonus += Number(e.value) || 0;
 				}
 			}
 		}
@@ -31394,7 +31541,69 @@ class CharacterSheetState {
 		this.ensureBloodHunterResources();
 		this.ensureTalentResources();
 		this._ensureChannelDivinityUses();
+		this._ensureWildShapeUses();
+		this._ensureCreationBardUses();
 		return [...this._data.resources];
+	}
+
+	/**
+	 * Wild Shape uses granted by a single class entry, per its own progression.
+	 *  - PHB 2014: a flat 2 from level 2.
+	 *  - XPHB 2024: the "Wild Shape" column of the Druid Features table —
+	 *    2 at levels 2-5, 3 at 6-16, 4 at 17-20.
+	 * @param {object} cls A `_data.classes` entry.
+	 * @returns {number} 0 when the class grants no Wild Shape at its current level.
+	 * @private
+	 */
+	static _getWildShapeUsesForClass (cls) {
+		if ((cls?.name || "").toLowerCase() !== "druid") return 0;
+		const level = cls?.level || 0;
+		if (level < 2) return 0;
+		const is2024 = cls?.source === "XPHB" || cls?.source === "TGTT" || cls?.subclass?.source === "XPHB";
+		if (!is2024) return 2;
+		return level >= 17 ? 4 : (level >= 6 ? 3 : 2);
+	}
+
+	/**
+	 * Re-scale the player-facing "Wild Shape" pool to the character's current level.
+	 *
+	 * `addFeature` parses the use count out of the feature text at grant-time
+	 * ("You can use Wild Shape twice") and never re-scales it, so an XPHB Druid who
+	 * levels past 6 or 17 keeps a stale max of 2 forever — which in turn starves
+	 * every subclass feature fuelled by the pool (Wrath of the Sea, Starry Form,
+	 * Zodiac Form, Wild Companion…). Mirrors {@link _ensureChannelDivinityUses}:
+	 * derive from class level directly rather than calling `getFeatureCalculations()`,
+	 * which would recurse back through `getResources()`.
+	 *
+	 * Only ever RAISES the max, so a homebrew or subclass contribution that
+	 * legitimately pushed the pool higher is never clobbered.
+	 * @private
+	 */
+	_ensureWildShapeUses () {
+		const desiredMax = (this._data.classes || [])
+			.reduce((max, cls) => Math.max(max, CharacterSheetState._getWildShapeUsesForClass(cls)), 0);
+		if (desiredMax <= 0) return;
+
+		const resource = (this._data.resources || []).find(r => (r.name || "").trim().toLowerCase() === "wild shape");
+		if (!resource) return;
+
+		const feature = this._data.features?.find(f => f.id === resource.featureId)
+			|| this._data.features?.find(f => f.name === "Wild Shape");
+
+		const resourceStale = (resource.max ?? 0) < desiredMax;
+		const featureStale = !!feature?.uses && (feature.uses.max ?? 0) < desiredMax;
+		if (!resourceStale && !featureStale) return;
+
+		if (resourceStale) {
+			const wasFull = (resource.current ?? 0) >= (resource.max ?? 0);
+			resource.max = desiredMax;
+			resource.current = wasFull ? desiredMax : Math.min(resource.current ?? 0, desiredMax);
+		}
+
+		if (feature?.uses) {
+			feature.uses.max = desiredMax;
+			feature.uses.current = Math.max(feature.uses.current ?? 0, resource.current ?? 0);
+		}
 	}
 
 	/**
@@ -35752,15 +35961,18 @@ class CharacterSheetState {
 
 				// ---- Generic modifier (initiative, AC, concentration, passive, etc.) ----
 				case "modifier": {
-					const modValue = effect.value === "proficiency" ? 0 : (effect.value || 0);
 					const mod = {
 						name: `${featData.name}`,
 						type: effect.modType,
-						value: modValue,
+						// Symbolic tokens ("proficiency", "strMod", …) are passed through
+						// verbatim and resolved live by _resolveSymbolicModifierValue;
+						// addNamedModifier performs the "proficiency" → proficiencyBonus
+						// flag conversion, so duplicating it here only risked the two
+						// copies drifting apart (CS-BUG-038).
+						value: effect.value,
 						sourceFeatureId: featData.id,
 						sourceType: "feat",
 					};
-					if (effect.value === "proficiency") mod.proficiencyBonus = true;
 					if (effect.advantage) mod.advantage = true;
 					if (effect.disadvantage) mod.disadvantage = true;
 					if (effect.conditional) {
@@ -38774,7 +38986,8 @@ class CharacterSheetState {
 		for (const mod of staminaMods) {
 			// Conditional (opt-in) modifiers never contribute to a standing pool size.
 			if (mod.conditional) continue;
-			calculatedMax += (mod.value || 0);
+			// Resolve symbolic values before arithmetic (CS-BUG-038).
+			calculatedMax += this._resolveSymbolicModifierValue(mod.value) ?? 0;
 		}
 
 		const previousMax = this._data.staminaMax;
@@ -42917,7 +43130,20 @@ class CharacterSheetState {
 	 * @returns {number} The effective value
 	 */
 	_getNamedModifierEffectiveValue (mod) {
-		let value = mod.value || 0;
+		// Named modifiers may carry a SYMBOLIC value token ("strScore", "attunedItems",
+		// …) instead of a literal number — see _resolveSymbolicModifierValue. Resolving
+		// here (rather than at addNamedModifier time) keeps the value LIVE: Soul of
+		// Artifice must track attunement as the player attunes and un-attunes, and a
+		// snapshot taken at grant time would freeze it. Unresolvable tokens become 0
+		// instead of surviving as strings into the arithmetic below, where `+=` would
+		// concatenate rather than add (CS-BUG-038).
+		let value = this._resolveSymbolicModifierValue(mod.value);
+		if (value == null) {
+			if (mod.value != null && mod.value !== 0 && mod.value !== "") {
+				this._warnUnresolvedModifierValue(mod);
+			}
+			value = 0;
+		}
 		if (mod.perLevel) {
 			const totalLevel = this.getTotalLevel() || 1;
 			value = value * totalLevel;
@@ -42925,7 +43151,80 @@ class CharacterSheetState {
 		if (mod.proficiencyBonus) {
 			value += this.getProficiencyBonus();
 		}
-		return value;
+		return Number.isFinite(value) ? value : 0;
+	}
+
+	/**
+	 * Resolve a named-modifier `value` to a live number.
+	 *
+	 * The feature/feat/racial effect registries express some modifier values
+	 * SYMBOLICALLY rather than numerically — e.g. Soul of Artifice grants a bonus to
+	 * every save equal to the number of items you have attuned, which cannot be known
+	 * when the feature is granted. Historically only the single token "proficiency" was
+	 * understood (and only at two of the sites that needed it), so every other token
+	 * survived as a raw STRING into `_recalculateCustomModifiers`, whose `+=` then
+	 * performed string concatenation: a Barbarian 18+ rendered STR as
+	 * `"200strScore00"` and an Artificer 20 rendered all six saves as
+	 * `"11attunedItems000000"` — literal garbage on the sheet (CS-BUG-038).
+	 *
+	 * This is the single place that vocabulary is defined. Every consumer reaches it
+	 * through `_getNamedModifierEffectiveValue`, so the numeric-safety guarantee cannot
+	 * drift between the quick-total path and the itemizers.
+	 *
+	 * Returns `null` — NOT 0 — for anything it cannot resolve, so the caller can
+	 * distinguish "resolved to zero" from "did not understand this" and warn once.
+	 * Non-scalar tokens (dice strings like "1d8", semantic markers like "all") are
+	 * deliberately unresolvable: they belong to the dice/recovery channels, not to a
+	 * flat numeric total, and contributing 0 to the scalar is the correct behaviour.
+	 *
+	 * @param {number|string|null|undefined} value - Raw modifier value
+	 * @returns {number|null} Live numeric value, or null if not resolvable
+	 */
+	_resolveSymbolicModifierValue (value) {
+		if (typeof value === "number") return Number.isFinite(value) ? value : null;
+		if (value == null) return 0;
+		if (typeof value !== "string") return null;
+
+		const token = value.trim();
+		if (!token) return 0;
+
+		// Numeric strings ("3", "-1", "2.5") — common when a value round-trips a save.
+		if (/^[+-]?\d+(?:\.\d+)?$/.test(token)) return Number(token);
+
+		switch (token) {
+			// `proficiency` is normally converted to the `proficiencyBonus` flag by
+			// addNamedModifier; resolved here too so a modifier that reached storage by
+			// another path (e.g. an older save) still behaves.
+			case "proficiency": return 0;
+			case "attunedItems": return (this.getAttunedItems() || []).length;
+			case "level": return this.getTotalLevel() || 0;
+			case "conModx2": return (this.getAbilityMod("con") || 0) * 2;
+		}
+
+		const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
+		// "<abl>Score" → the live ability score; "<abl>Mod" / bare "<abl>" → its modifier.
+		const mScore = /^([a-z]{3})Score$/.exec(token);
+		if (mScore && ABILITIES.includes(mScore[1])) return this.getAbilityScore(mScore[1]) || 0;
+		const mMod = /^([a-z]{3})Mod$/.exec(token);
+		if (mMod && ABILITIES.includes(mMod[1])) return this.getAbilityMod(mMod[1]) || 0;
+		if (ABILITIES.includes(token)) return this.getAbilityMod(token) || 0;
+
+		return null;
+	}
+
+	/**
+	 * Warn (once per token+type pair) that a named modifier carries a value this build
+	 * cannot resolve to a number. Deduped because _recalculateCustomModifiers runs on
+	 * every state change and an un-deduped warning would flood the console.
+	 * @param {object} mod - The offending named modifier
+	 */
+	_warnUnresolvedModifierValue (mod) {
+		this._unresolvedModifierWarnings = this._unresolvedModifierWarnings || new Set();
+		const key = `${mod.type}|${mod.value}`;
+		if (this._unresolvedModifierWarnings.has(key)) return;
+		this._unresolvedModifierWarnings.add(key);
+		// eslint-disable-next-line no-console
+		console.warn(`[CharSheet State] Named modifier "${mod.name || "?"}" (${mod.type}) has an unresolvable value ${JSON.stringify(mod.value)}; treating as 0.`);
 	}
 
 	/**
@@ -43167,7 +43466,19 @@ class CharacterSheetState {
 						}
 					} else if (mod.type.startsWith("ability:")) {
 						// Handle ability:str, ability:dex, etc.
-						const abl = mod.type.split(":")[1];
+						// ONLY the bare two-segment form is an ability-score contribution.
+						// Sub-typed variants (e.g. "ability:str:minimum", Indomitable
+						// Might) describe a DIFFERENT mechanic — a floor on Strength
+						// *checks*, not a bonus to the score — and have no handler here.
+						// They used to fall through to the additive branch below, where
+						// their symbolic value corrupted the score (CS-BUG-038). The
+						// itemizer `_getAbilityNamedModifierComponents` has always used
+						// strict equality, so this also brings the two paths onto one
+						// predicate instead of letting them disagree about the same
+						// modifier.
+						const abilityParts = mod.type.split(":");
+						if (abilityParts.length !== 2) break;
+						const abl = abilityParts[1];
 						if (mod.mode === "set") {
 							// "Set to X" mode - takes the highest value
 							nextAbilityScoreStatic[abl] = Math.max(nextAbilityScoreStatic[abl] || 0, value);
@@ -45265,6 +45576,36 @@ class CharacterSheetState {
 			needsFormChoice: true, // Activation opens a form-selection modal
 			exclusiveWith: ["wildShape"], // Zodiac Form and Wild Shape share the same resource/body
 		},
+		// Circle of the Sea (XPHB) — Wrath of the Sea. A Wild-Shape-fuelled
+		// Emanation of ocean spray. The per-level numbers (Emanation size,
+		// damage dice, DC, Stormborn's resistances / fly speed) are supplied
+		// live by `_getSupplementalActiveStateEffects` so they track level and
+		// placement instead of being frozen at activation time.
+		wrathOfTheSea: {
+			id: "wrathOfTheSea",
+			name: "Wrath of the Sea",
+			icon: "🌊",
+			description: "An Emanation of ocean spray surrounds you (or an ally, with Oceanic Gift). As a Bonus Action on each of your turns you can force one creature in the Emanation to make a Constitution save against your spell save DC, taking Cold damage and being pushed away on a failure.",
+			effects: [],
+			duration: "10 minutes",
+			endConditions: ["Dismissed (no action)", "Manifested again", "Incapacitated", "Duration expires"],
+			resourceName: "Wild Shape",
+			resourceCost: 1,
+			detectPatterns: [], // Detection handled explicitly in detectActivatableFeature
+			useFeatureDescription: true,
+			activationAction: "bonus",
+			// The emanation and the beast form both consume the same Wild Shape
+			// body/resource, and manifesting again ends the previous emanation.
+			exclusiveWith: ["wildShape", "zodiacForm"],
+			// Bonus-action burst, fired once automatically on manifestation and
+			// repeatable on later turns from the Combat tab.
+			trigger: {
+				label: "Ocean Spray",
+				actionType: "bonus",
+				effectType: "saveDamageBurst",
+				onActivate: true,
+			},
+		},
 		patientDefense: {
 			id: "patientDefense",
 			name: "Patient Defense",
@@ -46812,6 +47153,34 @@ class CharacterSheetState {
 				restoreWithSpellSlotLevel: 5,
 			};
 		}
+		// ===== CIRCLE OF THE SEA (XPHB Druid) =====
+		// Wrath of the Sea is a Wild-Shape-fuelled Emanation toggle; the other
+		// three features are passive riders on it (or on the druid) and must NOT
+		// fall through to the generic text heuristics, which mis-read
+		// "Stormborn" as the Tempest Cleric feature and "Wrath of the Sea" /
+		// "Oceanic Gift" as Wild Shape transformations.
+		const isXphbSea = (feature.classSource || feature.source) === "XPHB"
+			&& (feature.subclassShortName || "").toLowerCase() === "sea";
+		if (isXphbSea && name === "wrath of the sea") {
+			return {
+				stateTypeId: "wrathOfTheSea",
+				stateType: this.ACTIVE_STATE_TYPES.wrathOfTheSea,
+				matchedBy: "xphbSea",
+				activationAction: "bonus",
+				interactionMode: "toggle",
+				isToggle: true,
+				duration: "10 minutes",
+				resourceName: "Wild Shape",
+				resourceCost: 1,
+				// Oceanic Gift (L14) turns activation into a placement choice; the
+				// sheet only opens the picker when more than one placement exists.
+				needsPlacementChoice: true,
+			};
+		}
+		if (isXphbSea && ["circle of the sea", "circle of the sea spells", "aquatic affinity", "stormborn", "oceanic gift"].includes(name)) {
+			return {interactionMode: "passive", matchedBy: "xphbSea", isPassive: true};
+		}
+
 		if (isCrimsonRite) {
 			return {
 				stateTypeId: "crimsonRite",
@@ -47319,6 +47688,13 @@ class CharacterSheetState {
 			// never over-matches features that merely reference Bardic Inspiration in
 			// their text (e.g. Font of Inspiration, Jester's Act cost riders).
 			{pattern: /^bardic inspiration$/i, stateTypeId: "custom"},
+
+			// College of Creation (TCE): Mote of Potential is a RESOLVER, not a
+			// spender. The Bardic Inspiration die it rides was already deducted
+			// when the die was handed out, so it must surface as a zero-cost
+			// instant ability — never as a toggle and never with a BI cost.
+			// Anchored to the exact name so no other feature's prose matches.
+			{pattern: /^mote of potential$/i, stateTypeId: "custom", isInstant: true},
 
 			// Warlock abilities
 			// (Eldritch Invocation catch-all removed — invocations are routed through
@@ -48877,6 +49253,7 @@ class CharacterSheetState {
 	 * @returns {object|null}
 	 */
 	getWildShapeResource () {
+		this._ensureWildShapeUses();
 		const resources = this._data.resources || [];
 		const wsFeature = (this._data.features || []).find(f => /^wild shape$/i.test((f.name || "").trim()));
 		if (wsFeature) {
@@ -49328,6 +49705,7 @@ class CharacterSheetState {
 			if (options.customEffects) existing.customEffects = options.customEffects;
 			if (options.beastData !== undefined) existing.beastData = options.beastData;
 			if (options.zodiacForm !== undefined) existing.zodiacForm = options.zodiacForm;
+			if (options.placement !== undefined) existing.placement = options.placement;
 			if (options.weaponId !== undefined) existing.weaponId = options.weaponId;
 			if (options.weaponName !== undefined) existing.weaponName = options.weaponName;
 			// Re-parse duration on reactivation
@@ -49364,6 +49742,10 @@ class CharacterSheetState {
 			beastData: options.beastData || null,
 			// For Zodiac Form (Circle of the Zodiac): the chosen constellation
 			zodiacForm: options.zodiacForm || null,
+			// For Emanation states (e.g. Wrath of the Sea): where the aura was
+			// manifested — "self", "ally" or "both". Read back by
+			// _getSupplementalActiveStateEffects to decide whose benefits apply.
+			placement: options.placement || null,
 			weaponId: options.weaponId || null,
 			weaponName: options.weaponName || null,
 		};
@@ -49479,6 +49861,7 @@ class CharacterSheetState {
 			if (options.customEffects) existing.customEffects = options.customEffects;
 			if (options.beastData !== undefined) existing.beastData = options.beastData;
 			if (options.zodiacForm !== undefined) existing.zodiacForm = options.zodiacForm;
+			if (options.placement !== undefined) existing.placement = options.placement;
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
@@ -49915,7 +50298,7 @@ class CharacterSheetState {
 			const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId];
 			const stateEffects = [
 				...(state.customEffects || stateType?.effects || []),
-				...this._getSupplementalActiveStateEffects(state.stateTypeId),
+				...this._getSupplementalActiveStateEffects(state.stateTypeId, state),
 			];
 			activeRegularStateEffects.set(state, stateEffects);
 		}
@@ -49967,7 +50350,8 @@ class CharacterSheetState {
 		return effects;
 	}
 
-	_getSupplementalActiveStateEffects (stateTypeId) {
+	_getSupplementalActiveStateEffects (stateTypeId, state = null) {
+		if (stateTypeId === "wrathOfTheSea") return this._getWrathOfTheSeaStateEffects(state);
 		if (stateTypeId !== "rage") return [];
 		const cls = this._data.classes.find(it => {
 			return it.name === "Barbarian" && this._isJuggernautSubclass(it.subclass);
@@ -49994,6 +50378,138 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Resolve the druid class entry for Circle of the Sea, if the character has it.
+	 * Reads stored class data ONLY — never `getFeatureCalculations()` — because
+	 * this runs inside `getActiveStateEffects()`, which the speed pipeline calls.
+	 * Going through the calculations would close the
+	 * `getSpeed → getActiveStateEffects → getFeatureCalculations → getSpeed` cycle
+	 * guarded by CharacterSheetSpeedCalcRecursion.test.js.
+	 * @returns {object|null}
+	 */
+	_getCircleOfTheSeaClass () {
+		return this._data.classes.find(cls => {
+			if ((cls.name || "").toLowerCase() !== "druid") return false;
+			const sub = `${cls.subclass?.shortName || cls.subclass?.name || ""}`.toLowerCase();
+			return sub === "sea" || sub === "circle of the sea";
+		}) || null;
+	}
+
+	/**
+	 * Live effects for the `wrathOfTheSea` active state.
+	 *
+	 * The burst descriptor is emitted with UNRESOLVED scaling hints
+	 * (`diceAbility` / `dcCalculation`) rather than concrete numbers so that this
+	 * method stays free of `getFeatureCalculations()` (see
+	 * `_getCircleOfTheSeaClass`). `getActiveStateTrigger()` — which is outside the
+	 * speed pipeline — resolves them.
+	 *
+	 * Stormborn's benefits are benefits OF the Emanation, so they only apply when
+	 * the Emanation actually surrounds the druid: with Oceanic Gift the druid can
+	 * place it on an ally instead, and then gets nothing.
+	 * @param {object|null} state The stored active-state record (carries `placement`).
+	 * @returns {Array<object>}
+	 */
+	_getWrathOfTheSeaStateEffects (state = null) {
+		const cls = this._getCircleOfTheSeaClass();
+		if (!cls || (cls.level || 0) < 3) return [];
+
+		const level = cls.level;
+		const placement = state?.placement || "self";
+		const surroundsSelf = placement !== "ally";
+
+		const effects = [{
+			type: "saveDamageBurst",
+			source: "Wrath of the Sea",
+			label: "Ocean Spray",
+			diceAbility: "wis",
+			diceMinimum: 1,
+			dieSize: 6,
+			damageType: "cold",
+			saveAbility: "con",
+			dcCalculation: "spellSaveDc",
+			range: level >= 6 ? 10 : 5,
+			pushDistance: 15,
+			maxPushSize: "Large",
+			placement,
+		}];
+
+		// Stormborn (L10)
+		if (level >= 10 && surroundsSelf) {
+			for (const damageType of ["cold", "lightning", "thunder"]) {
+				// NOTE: `_getResistancesFromStates` only honours `damage:`-prefixed
+				// targets — a bare damage type is silently inert here.
+				effects.push({type: "resistance", target: `damage:${damageType}`, source: "Stormborn"});
+			}
+			effects.push({type: "flySpeed", equalToWalk: true, source: "Stormborn"});
+		}
+
+		return effects;
+	}
+
+	/**
+	 * Resolved mechanics for Wrath of the Sea (Circle of the Sea, XPHB).
+	 *
+	 * Public because the Emanation is the subclass's whole engine: the Combat-tab
+	 * trigger, the Oceanic Gift placement modal, the Features-tab summary and the
+	 * E2E probes all read the same numbers from here.
+	 * @param {"self"|"ally"|"both"} [placement] Where the Emanation is manifested.
+	 * @returns {object|null} `null` when the character isn't a Circle of the Sea druid.
+	 */
+	getWrathOfTheSeaAction (placement = "self") {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasWrathOfTheSea) return null;
+		return {
+			placement,
+			dc: calc.wrathOfTheSeaDc,
+			saveAbility: calc.wrathOfTheSeaSaveAbility,
+			diceCount: calc.wrathOfTheSeaDiceCount,
+			damage: calc.wrathOfTheSeaDamage,
+			damageType: calc.wrathOfTheSeaDamageType,
+			emanation: calc.wrathOfTheSeaEmanation,
+			pushDistance: calc.wrathOfTheSeaPush,
+			maxPushSize: calc.wrathOfTheSeaMaxPushSize,
+			duration: calc.wrathOfTheSeaDuration,
+			actionType: "bonus",
+			resourceName: "Wild Shape",
+			cost: this.getWrathOfTheSeaWildShapeCost(placement),
+			placements: this.getWrathOfTheSeaPlacements(),
+			grantsResistances: (calc.hasSeaStormborn && placement !== "ally") ? calc.seaStormbornResistances : [],
+			grantsFlySpeed: !!calc.hasSeaStormborn && placement !== "ally",
+		};
+	}
+
+	/**
+	 * Wild Shape uses spent to manifest Wrath of the Sea at a given placement.
+	 * Oceanic Gift (L14) lets the druid cover themselves AND an ally for two uses.
+	 * @param {"self"|"ally"|"both"} [placement]
+	 * @returns {number}
+	 */
+	getWrathOfTheSeaWildShapeCost (placement = "self") {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasWrathOfTheSea) return 0;
+		if (placement === "both") return calc.hasOceanicGift ? (calc.oceanicGiftBothCost || 2) : (calc.wrathOfTheSeaWildShapeCost || 1);
+		return calc.wrathOfTheSeaWildShapeCost || 1;
+	}
+
+	/**
+	 * The placements available for the Emanation. Before Oceanic Gift there is
+	 * only one; at L14 the druid can target a willing creature within 60 feet
+	 * instead of, or in addition to, themselves.
+	 * @returns {Array<{id: string, name: string, cost: number, range: number}>}
+	 */
+	getWrathOfTheSeaPlacements () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasWrathOfTheSea) return [];
+		const placements = [{id: "self", name: "Around yourself", cost: calc.wrathOfTheSeaWildShapeCost || 1, range: 0}];
+		if (calc.hasOceanicGift) {
+			const range = calc.oceanicGiftRange || 60;
+			placements.push({id: "ally", name: `A willing creature within ${range} ft.`, cost: calc.wrathOfTheSeaWildShapeCost || 1, range});
+			placements.push({id: "both", name: `Both you and a willing creature within ${range} ft.`, cost: calc.oceanicGiftBothCost || 2, range});
+		}
+		return placements;
+	}
+
+	/**
 	 * Resolve a trigger exposed by an active state, including ability-scaled values.
 	 * Any state type can opt in with a `trigger` definition and a matching effect.
 	 * @param {string} stateTypeId
@@ -50014,6 +50530,23 @@ class CharacterSheetState {
 			resolvedDamage = (calculations.martialArtsDie || calculations.astralArmsDamage || "1d4")
 				.replace(/^(\d+)/, (_, count) => `${Number(count) * 2}`);
 		}
+		// Ability-scaled dice pools (e.g. "a number of d6s equal to your Wisdom
+		// modifier, minimum one"). Resolved HERE rather than in the effect
+		// producer so the producer stays outside the speed-pipeline cycle.
+		if (!resolvedDamage && effect.diceAbility) {
+			const count = Math.max(effect.diceMinimum ?? 1, this.getAbilityMod(effect.diceAbility));
+			resolvedDamage = `${count}d${effect.dieSize || 6}`;
+		}
+		// DC resolution, most specific first: an explicit DC on the effect, then a
+		// named calculation source, then the monk-style ki/focus fallback that
+		// predates this generalisation.
+		let resolvedDc = null;
+		if (effect.saveAbility) {
+			if (effect.dc != null) resolvedDc = effect.dc;
+			else if (effect.dcCalculation === "spellSaveDc") resolvedDc = this.getSpellSaveDc();
+			else if (effect.dcCalculation) resolvedDc = calculations[effect.dcCalculation] ?? null;
+			else resolvedDc = calculations.kiSaveDc ?? calculations.focusSaveDc ?? null;
+		}
 		return {
 			...stateType.trigger,
 			stateTypeId,
@@ -50023,7 +50556,7 @@ class CharacterSheetState {
 				...effect,
 				resolvedValue: value,
 				resolvedDamage,
-				resolvedDc: effect.saveAbility ? (calculations.kiSaveDc ?? calculations.focusSaveDc ?? null) : null,
+				resolvedDc,
 			},
 		};
 	}
@@ -51084,6 +51617,7 @@ class CharacterSheetState {
 		SUMMON: "summon", // Conjure/Summon spells (concentration-linked)
 		MOUNT: "mount", // Find Steed / Find Greater Steed
 		INFERNAL: "infernal", // TGTT Fiendish Bloodline summons
+		CLASS_SUMMON: "class_summon", // Class/subclass feature summons that scale off the summoner
 		CUSTOM: "custom", // User-created companions
 	};
 
@@ -51291,6 +51825,12 @@ class CharacterSheetState {
 			count: companionData.count || 1,
 			hpArray: companionData.hpArray || null, // Array of {current, max} for individual HP tracking
 			groupId: companionData.groupId || null,
+
+			// Declarative scaling descriptor (see `_recalculateScaledCompanion`).
+			// Any companion whose stat block is written in terms of the summoner's
+			// class level / proficiency bonus / spellcasting ability stores the
+			// formula here instead of growing a bespoke `recalculateCompanion` case.
+			scaling: companionData.scaling ? {...companionData.scaling} : null,
 		};
 
 		this._data.companions.push(companion);
@@ -51702,6 +52242,14 @@ class CharacterSheetState {
 		const calculations = this.getFeatureCalculations();
 		const profBonus = this.getProficiencyBonus();
 
+		// A companion carrying a declarative `scaling` descriptor is resolved
+		// generically, regardless of its `type`. This is the path any new
+		// feature-granted summon should take.
+		if (companion.scaling) {
+			this._recalculateScaledCompanion(companion);
+			return;
+		}
+
 		switch (companion.type) {
 			case CharacterSheetState.COMPANION_TYPES.STEEL_DEFENDER: {
 				const intMod = this.getAbilityMod("int");
@@ -51769,6 +52317,68 @@ class CharacterSheetState {
 	 */
 	recalculateAllCompanions () {
 		(this._data.companions || []).forEach(c => this.recalculateCompanion(c.id));
+	}
+
+	/**
+	 * Resolve a companion whose stat block is written in terms of its summoner —
+	 * "10 + five times your bard level" HP, "your spell attack modifier" to hit,
+	 * "1d10 + PB" damage. The formula lives on `companion.scaling` so that every
+	 * feature-granted summon shares one implementation instead of adding a case to
+	 * {@link recalculateCompanion}.
+	 *
+	 * Supported descriptor keys (all optional):
+	 *  - `className`     — class whose level drives the formulas (e.g. "Bard").
+	 *  - `hpBase`        — flat HP term.
+	 *  - `hpPerLevel`    — HP added per class level.
+	 *  - `ac`            — fixed AC.
+	 *  - `attackAbility` — spellcasting ability whose attack bonus the summon uses.
+	 *  - `attackName`    — name of the attack whose bonus/damage are re-rendered.
+	 *  - `damageDice`    — dice term of the attack ("1d10").
+	 *  - `damageAddProf` — when true, proficiency bonus is added to damage.
+	 *  - `damageType`    — damage type string ("force").
+	 *
+	 * @param {object} companion - The companion record (mutated in place).
+	 * @private
+	 */
+	_recalculateScaledCompanion (companion) {
+		const s = companion.scaling || {};
+		const profBonus = this.getProficiencyBonus();
+		const level = s.className ? this._getClassLevel(s.className) : this.getTotalLevel();
+
+		companion.profBonus = profBonus;
+
+		if (s.hpBase != null || s.hpPerLevel != null) {
+			// A summon whose class has been dropped entirely (multiclass respec)
+			// keeps its last known HP rather than collapsing to the flat base.
+			if (level > 0) {
+				const max = Math.max(1, (s.hpBase || 0) + (s.hpPerLevel || 0) * level);
+				const wasFull = companion.hp.current >= companion.hp.max;
+				companion.hp.max = max;
+				companion.hp.current = wasFull ? max : Math.min(companion.hp.current, max);
+			}
+		}
+
+		if (s.ac != null) companion.ac = s.ac;
+
+		if (s.attackName) {
+			const toHit = s.attackAbility ? this.getSpellAttackBonusForAbility(s.attackAbility) : profBonus;
+			const dmgBonus = s.damageAddProf ? profBonus : 0;
+			const damage = `${s.damageDice || "1d6"}${dmgBonus ? ` + ${dmgBonus}` : ""}${s.damageType ? ` ${s.damageType}` : ""}`;
+			const entry = `${CharacterSheetState._formatSignedBonus(toHit)} to hit, reach 5 ft., one target you can see. Hit: ${damage} damage.`;
+			const rewrite = list => {
+				const found = (list || []).find(a => a.name === s.attackName);
+				if (found) found.entries = [entry];
+				return !!found;
+			};
+			if (!rewrite(companion.actions)) (companion.actions ||= []).push({name: s.attackName, entries: [entry]});
+			if (!rewrite(companion.attacks)) (companion.attacks ||= []).push({name: s.attackName, entries: [entry]});
+		}
+	}
+
+	/** Format a numeric bonus with an explicit sign ("+7" / "-1"). @private */
+	static _formatSignedBonus (n) {
+		const v = Number(n) || 0;
+		return v >= 0 ? `+${v}` : `${v}`;
 	}
 
 	/**
@@ -52130,6 +52740,380 @@ class CharacterSheetState {
 
 	// #endregion
 
+	// =========================================================================
+	// COLLEGE OF CREATION (Bard, TCE)
+	// =========================================================================
+	// #region College of Creation
+	//
+	// Three interlocking mechanics, all resolved here so the Features tab, the
+	// Combat tab and the Companions panel cannot disagree:
+	//
+	//   Mote of Potential (3)     — a mode-dependent rider on every Bardic
+	//                               Inspiration die you hand out. It rides an
+	//                               ALREADY-SPENT die, so resolving it must never
+	//                               deduct a second Bardic Inspiration use.
+	//   Performance of Creation (3) — conjures real inventory items under a gp /
+	//                               size / count cap that scales with level.
+	//   Animating Performance (6) — summons the TCE `Dancing Item` through the
+	//                               generic `CLASS_SUMMON` companion machinery.
+	//   Creative Crescendo (14)   — raises the item count and drops the gp cap.
+
+	/** The Bard class entry carrying the College of Creation, or null. @private */
+	_getCreationBardClass () {
+		return (this._data.classes || []).find(cls =>
+			(cls.name || "").toLowerCase() === "bard"
+			&& /creation/i.test(cls.subclass?.shortName || cls.subclass?.name || ""),
+		) || null;
+	}
+
+	/** Marker stamped on every inventory item minted by Performance of Creation. */
+	static PERFORMANCE_OF_CREATION_ORIGIN = "Performance of Creation";
+	static ANIMATING_PERFORMANCE_ORIGIN = "Animating Performance";
+
+	/**
+	 * Features whose "Use" handler resolves its own cost and can offer an
+	 * ALTERNATIVE payment (a spell slot, a different pool). The generic pre-flight
+	 * "not enough <resource>" guard in `_activateFeatureState` must not reject
+	 * these — otherwise the alternative can never be reached once the primary pool
+	 * is empty. Keep this list to features that provably consume something in
+	 * their own handler.
+	 * @param {object} feature
+	 * @returns {boolean}
+	 */
+	static featureOwnsItsCost (feature) {
+		const name = (feature?.name || "").toLowerCase().trim();
+		return name === "performance of creation"
+			|| name === "animating performance"
+			// Mote of Potential rides an already-spent Bardic Inspiration die.
+			|| name === "mote of potential";
+	}
+
+	/**
+	 * Both College of Creation actions are explicitly "once … until you finish a
+	 * long rest". Saved characters built before the `FeatureUsesParser` multiplier
+	 * guard landed carry a bogus 20-use pool for Performance of Creation (the
+	 * parser read "20 times your bard level" as a use count), so this clamps the
+	 * pool DOWN as well as up. Mirrors `_ensureChannelDivinityUses`.
+	 * @private
+	 */
+	_ensureCreationBardUses () {
+		if (!this._getCreationBardClass()) return;
+		for (const name of [
+			CharacterSheetState.PERFORMANCE_OF_CREATION_ORIGIN,
+			CharacterSheetState.ANIMATING_PERFORMANCE_ORIGIN,
+		]) {
+			const feature = (this._data.features || []).find(f => f.name === name);
+			if (!feature?.uses) continue;
+			const resource = (this._data.resources || []).find(r => r.featureId === feature.id || r.name === name);
+			const featureOk = feature.uses.max === 1 && feature.uses.recharge === "long";
+			const resourceOk = !resource || (resource.max === 1 && resource.recharge === "long");
+			if (featureOk && resourceOk) continue;
+			const spent = feature.uses.current < feature.uses.max || (resource && resource.current < resource.max);
+			feature.uses.max = 1;
+			feature.uses.recharge = "long";
+			feature.uses.current = spent ? 0 : 1;
+			if (resource) {
+				resource.max = 1;
+				resource.recharge = "long";
+				resource.current = feature.uses.current;
+			}
+		}
+	}
+
+	// ---- Mote of Potential ----------------------------------------------------
+
+	/**
+	 * The three riders a mote can produce, with every number already resolved
+	 * against the character's current Bardic Inspiration die, Charisma modifier
+	 * and spell save DC. Returns `[]` for a character without the feature.
+	 * @returns {Array<{id: string, label: string, description: string, die: string,
+	 *   dc?: number, save?: string, damageType?: string, tempHpBonus?: number}>}
+	 */
+	getMoteOfPotentialModes () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasMoteOfPotential) return [];
+		const die = calc.moteOfPotentialDie;
+		return [
+			{
+				id: "check",
+				label: "Ability Check",
+				die,
+				description: `Roll the ${die} again and choose which roll to use.`,
+			},
+			{
+				id: "attack",
+				label: "Attack Roll",
+				die,
+				dc: calc.moteOfPotentialDc,
+				save: calc.moteOfPotentialSave,
+				damageType: calc.moteAttackDamageType,
+				description: `The target and each creature you choose within 5 feet must succeed on a DC ${calc.moteOfPotentialDc} Constitution saving throw or take thunder damage equal to the ${die} rolled.`,
+			},
+			{
+				id: "save",
+				label: "Saving Throw",
+				die,
+				tempHpBonus: calc.moteSavingThrowTempHpBonus,
+				description: `The creature gains temporary hit points equal to the ${die} rolled + ${calc.moteSavingThrowTempHpBonus} (minimum 1).`,
+			},
+		];
+	}
+
+	/**
+	 * Resolve a mote. Deliberately spends NO resource: the Bardic Inspiration die
+	 * was already deducted when the die was handed out, so charging again here
+	 * would double-count the pool.
+	 *
+	 * @param {("check"|"attack"|"save")} modeId
+	 * @param {object} [opts]
+	 * @param {number} [opts.roll] - Force the Bardic Inspiration die result (tests).
+	 * @param {number} [opts.secondRoll] - Force the Ability Check mode's re-roll.
+	 * @param {boolean} [opts.applyTempHpToSelf] - Apply the Saving Throw mode's
+	 *        temporary hit points to this character (when the bard holds the die).
+	 * @returns {object|null} Resolution result, or null when the mode is unknown.
+	 */
+	rollMoteOfPotential (modeId, opts = {}) {
+		const mode = this.getMoteOfPotentialModes().find(m => m.id === modeId);
+		if (!mode) return null;
+
+		const faces = Number(String(mode.die).match(/d(\d+)/i)?.[1]) || 6;
+		const roll = n => (Number.isFinite(n)
+			? Math.max(1, Math.min(faces, Math.floor(n)))
+			: (typeof RollerUtil !== "undefined" && RollerUtil.randomise ? RollerUtil.randomise(faces) : 1));
+
+		const first = roll(opts.roll);
+		const base = {mode: mode.id, label: mode.label, die: mode.die, roll: first};
+
+		switch (mode.id) {
+			case "check": {
+				const second = roll(opts.secondRoll);
+				return {...base, rolls: [first, second], result: Math.max(first, second)};
+			}
+			case "attack":
+				return {...base, damage: first, damageType: mode.damageType, dc: mode.dc, save: mode.save};
+			case "save": {
+				const tempHp = Math.max(1, first + (mode.tempHpBonus || 0));
+				if (opts.applyTempHpToSelf) this.setTempHp(Math.max(this.getTempHp() || 0, tempHp));
+				return {...base, tempHp, applied: !!opts.applyTempHpToSelf};
+			}
+		}
+		return null;
+	}
+
+	// ---- shared cost resolution ----------------------------------------------
+
+	/**
+	 * Spend the cost of a College of Creation action: either its single
+	 * long-rest use, or a spell slot at/above `minSlotLevel`.
+	 * @param {string} featureName
+	 * @param {number} minSlotLevel
+	 * @param {number|null} spellSlotLevel - null spends the long-rest use.
+	 * @returns {{ok: boolean, error?: string, spent?: string}}
+	 * @private
+	 */
+	_spendCreationCost (featureName, minSlotLevel, spellSlotLevel) {
+		if (spellSlotLevel == null) {
+			this._ensureCreationBardUses();
+			const feature = this.getFeature(featureName);
+			if (!feature?.uses) return {ok: false, error: `${featureName} has no use pool.`};
+			if (feature.uses.current <= 0) {
+				return {ok: false, error: `No ${featureName} uses remain — expend a level ${minSlotLevel}+ spell slot instead.`};
+			}
+			this.setFeatureUses(feature.id, feature.uses.current - 1);
+			return {ok: true, spent: "use"};
+		}
+
+		const level = Math.floor(Number(spellSlotLevel) || 0);
+		if (level < minSlotLevel) {
+			return {ok: false, error: `${featureName} needs a spell slot of level ${minSlotLevel} or higher.`};
+		}
+		if (!this.useSpellSlot(level)) return {ok: false, error: `No level ${level} spell slots remain.`};
+		return {ok: true, spent: `slot${level}`};
+	}
+
+	// ---- Performance of Creation ----------------------------------------------
+
+	/** Every inventory item currently sustained by Performance of Creation. */
+	getPerformanceOfCreationItems () {
+		return (this._data.inventory || [])
+			.filter(inv => inv.item?._createdBy === CharacterSheetState.PERFORMANCE_OF_CREATION_ORIGIN)
+			.map(inv => ({...inv.item, id: inv.id, quantity: inv.quantity}));
+	}
+
+	/**
+	 * Size categories Performance of Creation can reach, smallest first. Used to
+	 * validate a requested size against `createdItemMaxSize`.
+	 */
+	static CREATED_ITEM_SIZES = ["Tiny", "Small", "Medium", "Large", "Huge"];
+
+	/**
+	 * Create a nonmagical item with Performance of Creation.
+	 *
+	 * @param {object} opts
+	 * @param {string} opts.name - The item to conjure.
+	 * @param {number} [opts.valueGp=0] - Its gp value (capped at 20 × bard level
+	 *        until Creative Crescendo removes the cap).
+	 * @param {string} [opts.size="Tiny"] - Size category.
+	 * @param {number|null} [opts.spellSlotLevel=null] - Spend a 2nd+ level slot
+	 *        instead of the long-rest use.
+	 * @param {number} [opts.quantity=1]
+	 * @returns {{ok: boolean, error?: string, item?: object, replaced?: Array<string>, spent?: string}}
+	 */
+	createPerformanceOfCreationItem (opts = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasPerformanceOfCreation) return {ok: false, error: "Performance of Creation is not available."};
+
+		const name = (opts.name || "").trim();
+		if (!name) return {ok: false, error: "Name the item you are creating."};
+
+		const valueGp = Math.max(0, Number(opts.valueGp) || 0);
+		if (calc.createdItemMaxGp != null && valueGp > calc.createdItemMaxGp) {
+			return {ok: false, error: `Value exceeds the ${calc.createdItemMaxGp} gp limit at this level.`};
+		}
+
+		const size = opts.size || "Tiny";
+		const sizes = CharacterSheetState.CREATED_ITEM_SIZES;
+		const maxSizeIdx = sizes.indexOf(calc.createdItemMaxSize);
+		const sizeIdx = sizes.indexOf(size);
+		if (sizeIdx < 0) return {ok: false, error: `Unknown size "${size}".`};
+		if (sizeIdx > maxSizeIdx) return {ok: false, error: `You can only create ${calc.createdItemMaxSize} or smaller items.`};
+
+		// Creative Crescendo: only ONE of the simultaneous items may be at the
+		// maximum size; the rest must be Small or Tiny.
+		const existing = this.getPerformanceOfCreationItems();
+		if (calc.hasCreativeCrescendo && sizeIdx === maxSizeIdx
+			&& existing.some(it => sizes.indexOf(it._createdSize) === maxSizeIdx)) {
+			return {ok: false, error: `Only one created item can be ${calc.createdItemMaxSize}; the rest must be Small or Tiny.`};
+		}
+
+		const spend = this._spendCreationCost(CharacterSheetState.PERFORMANCE_OF_CREATION_ORIGIN, calc.performanceOfCreationSlotLevel, opts.spellSlotLevel ?? null);
+		if (!spend.ok) return spend;
+
+		// Enforce the simultaneous-item cap by vanishing the oldest items first.
+		const replaced = [];
+		const maxCount = Math.max(1, calc.createdItemMaxCount || 1);
+		while (existing.length >= maxCount) {
+			const oldest = existing.shift();
+			replaced.push(oldest.name);
+			this.removeItem(oldest.id);
+		}
+
+		this.addItem({
+			name,
+			source: "TCE",
+			type: "G",
+			// 5etools item values are copper pieces.
+			value: Math.round(valueGp * 100),
+			rarity: "none",
+			_isCustom: true,
+			_createdBy: CharacterSheetState.PERFORMANCE_OF_CREATION_ORIGIN,
+			_createdSize: size,
+			_createdExpiresHours: calc.createdItemDurationHours,
+			entries: [`Created by Performance of Creation. It glimmers softly and vanishes after ${calc.createdItemDurationHours} hours.`],
+		}, Math.max(1, Math.floor(Number(opts.quantity) || 1)));
+
+		const item = this.getPerformanceOfCreationItems().find(it => it.name === name) || null;
+		return {ok: true, item, replaced, spent: spend.spent};
+	}
+
+	/**
+	 * Vanish one created item, or every created item when no id is supplied.
+	 * @param {string} [itemId]
+	 * @returns {number} Number of items removed.
+	 */
+	dismissPerformanceOfCreationItems (itemId = null) {
+		const targets = this.getPerformanceOfCreationItems()
+			.filter(it => itemId == null || it.id === itemId);
+		targets.forEach(it => this.removeItem(it.id));
+		return targets.length;
+	}
+
+	// ---- Animating Performance -------------------------------------------------
+
+	/** The live Dancing Item companion, or null. */
+	getDancingItem () {
+		return (this._data.companions || []).find(c =>
+			c.origin === CharacterSheetState.ANIMATING_PERFORMANCE_ORIGIN) || null;
+	}
+
+	/**
+	 * Animate an object as a `Dancing Item` (TCE). Only one may exist at a time —
+	 * a second animation makes the first inanimate. Registers through the generic
+	 * `CLASS_SUMMON` machinery so its HP / to-hit / damage re-scale on level-up.
+	 *
+	 * @param {object} [opts]
+	 * @param {string} [opts.itemName] - Player-facing name of the animated object.
+	 * @param {number|null} [opts.spellSlotLevel=null] - Spend a 3rd+ level slot
+	 *        instead of the long-rest use.
+	 * @returns {{ok: boolean, error?: string, companionId?: string, replaced?: string, spent?: string}}
+	 */
+	animateDancingItem (opts = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasAnimatingPerformance) return {ok: false, error: "Animating Performance is not available."};
+
+		const spend = this._spendCreationCost(CharacterSheetState.ANIMATING_PERFORMANCE_ORIGIN, calc.animatingPerformanceSlotLevel, opts.spellSlotLevel ?? null);
+		if (!spend.ok) return spend;
+
+		const existing = this.getDancingItem();
+		const replaced = existing ? (existing.customName || existing.name) : null;
+		if (existing) this.removeCompanion(existing.id);
+
+		const companionId = this.addCompanion({
+			name: "Dancing Item",
+			source: "TCE",
+			type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+			origin: CharacterSheetState.ANIMATING_PERFORMANCE_ORIGIN,
+			customName: (opts.itemName || "").trim() || null,
+			creatureType: "construct",
+			size: "L",
+			abilities: {str: 18, dex: 14, con: 16, int: 4, wis: 10, cha: 6},
+			ac: calc.dancingItemAc,
+			hp: {max: calc.dancingItemHp, current: calc.dancingItemHp},
+			speed: {walk: 30, fly: 30},
+			senses: ["darkvision 60 ft."],
+			passive: 10,
+			languages: ["understands the languages you speak"],
+			immunities: ["poison", "psychic"],
+			conditionImmunities: ["charmed", "exhaustion", "poisoned", "frightened"],
+			traits: [
+				{name: "Immutable Form", entries: ["The item is immune to any spell or effect that would alter its form."]},
+				{name: "Irrepressible Dance", entries: ["When any creature starts its turn within 10 feet of the item, the item can increase or decrease (your choice) the walking speed of that creature by 10 feet until the end of the turn, provided the item isn't incapacitated."]},
+			],
+			scaling: {
+				className: "Bard",
+				hpBase: 10,
+				hpPerLevel: 5,
+				ac: 16,
+				attackName: "Force-Empowered Slam",
+				attackAbility: "cha",
+				damageDice: "1d10",
+				damageAddProf: true,
+				damageType: "force",
+			},
+		});
+
+		this.recalculateCompanion(companionId);
+		return {ok: true, companionId, replaced, spent: spend.spent};
+	}
+
+	/** Make the Dancing Item inanimate. @returns {boolean} True if one was dismissed. */
+	dismissDancingItem () {
+		const existing = this.getDancingItem();
+		if (!existing) return false;
+		return this.removeCompanion(existing.id);
+	}
+
+	/**
+	 * Both College of Creation constructs are shorter-lived than a long rest
+	 * (proficiency-bonus hours / 1 hour), so a long rest always clears them.
+	 * @private
+	 */
+	_clearCreationBardConstructs () {
+		this.dismissPerformanceOfCreationItems();
+		this.dismissDancingItem();
+	}
+	// #endregion
+
 	// #region Rest
 	onShortRest () {
 		// Clear active states that end on rest
@@ -52221,6 +53205,10 @@ class CharacterSheetState {
 
 		// Restore companions on long rest
 		this.restCompanions("long");
+
+		// College of Creation constructs are far shorter-lived than a long rest
+		// (proficiency-bonus hours for items, 1 hour for a Dancing Item).
+		this._clearCreationBardConstructs();
 
 		// Clear all temporary attacks (from variant components, etc.)
 		this.clearTemporaryAttacks();

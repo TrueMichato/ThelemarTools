@@ -712,7 +712,16 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "speed"; type?: SpeedType; min?: number; exact?: number}
 	| {kind: "speedEquals"; left: SpeedType; right: SpeedType}
 	| {kind: "initiative"; min?: number; exact?: number}
-	| {kind: "featureCalculation"; property: string; min?: number; exact?: number | string | boolean}
+	| {kind: "featureCalculation"; property: string; min?: number; exact?: number | string | boolean; isNull?: boolean}
+	// Assert a `getFeatureCalculations()` number is DERIVED from a live
+	// character statistic rather than hard-coded. Far stronger than a
+	// loose `min` floor when the build's ability scores aren't pinned by
+	// the preset (the wizard's auto-fill can hand a Bard CHA 8).
+	//   abilityMod        → getAbilityMod(ability)
+	//   spellSaveDc       → getSpellSaveDcForAbility(ability)
+	//   spellAttackBonus  → getSpellAttackBonusForAbility(ability)
+	//   proficiencyBonus  → getProficiencyBonus()
+	| {kind: "featureCalculationDerivedFrom"; property: string; equals: "abilityMod" | "spellSaveDc" | "spellAttackBonus" | "proficiencyBonus"; ability?: AblKey; offset?: number}
 	// Generic escape hatch: call a `CharacterSheetState` method and assert on the
 	// returned value. Use when a feature's mechanic is exposed through a bespoke
 	// state API rather than a flat calculation field (e.g. a computed cost, a
@@ -762,6 +771,14 @@ export type EffectCheck = _EffectCommon & (
 	// === Toggle: snapshot before, activate, snapshot diff, deactivate ===
 	| {kind: "togglePlusAc"; whenActive: number | "abilityMod"; ability?: AblKey}
 	| {kind: "togglePlusSpeed"; type?: SpeedType; delta: number}
+	// Verify a toggle GRANTS a movement type the character doesn't otherwise
+	// have (fly/swim/climb/burrow). `togglePlusSpeed` only asserts for walk,
+	// so it silently passes for every other type — use this instead for
+	// "while X is active you have a Fly Speed equal to your Speed" features
+	// (Circle of the Sea's Stormborn, Aasimar Heavenly Wings, Fly, …).
+	// `equalsWalk` additionally pins the granted speed to the walking speed
+	// measured while the toggle is on.
+	| {kind: "toggleGrantsSpeed"; type: SpeedType; equalsWalk?: boolean; min?: number}
 	| {kind: "toggleGrantsResistance"; damageType: string}
 	| {kind: "toggleGrantsAdvantage"; rollType: string}
 	| {kind: "toggleGrantsImmunity"; damageType: string}
@@ -799,8 +816,9 @@ export type EffectCheck = _EffectCommon & (
 	// hunter's prey ("colossus"/"prey"), elemental rune adders
 	// ("fire", "lightning"), or generic "+1d6"-style riders.
 	| {kind: "attackDamageContains"; attackName: string | RegExp; needle: string}
-	// Verify the rogue's sneak attack die count from
-	// `getFeatureCalculations().sneakAttackDice`. Number of d6.
+	// Verify the rogue's sneak attack die COUNT, parsed from
+	// `getFeatureCalculations().sneakAttack.dice` (a string, e.g.
+	// "6d6"). Number of d6. There is no flat `sneakAttackDice` key.
 	| {kind: "sneakAttackDice"; min?: number; exact?: number}
 	// Verify the bard's BI die FACE size. minFaces of 6/8/10/12.
 	| {kind: "bardicInspirationDie"; minFaces: number}
@@ -842,6 +860,11 @@ export type EffectCheck = _EffectCommon & (
 		actionType: string;
 		damageType: string;
 		damageMin: number;
+		// Optional: pin the resolved dice formula (e.g. "1d6") and the minimum
+		// resolved save DC for triggers whose payload is a dice pool + save
+		// rather than a flat ability-scaled number.
+		damageFormula?: string;
+		dcMin?: number;
 	}
 	| {kind: "activeStateLight"; feature: string; stateTypeId: string; bright: number; dim: number}
 	| {kind: "weaponScopedState"; feature: string; attackBonusMin: number; alternateDamageType: string}
@@ -904,6 +927,45 @@ export type EffectCheck = _EffectCommon & (
 	// === Stateful class-mechanic probes ===
 	| {kind: "featureChoiceCalculation"; className: string; featureName: string; expectedChoice: string; property: string; expectedValue: string; dcProperty?: string}
 	| {kind: "bloodMaledictAmplification"; hpCost: number}
+	// === Generic class-summon probe ===
+	// Drive any "feature summons a statblock companion" mechanic
+	// through its state API and verify the resulting companion's
+	// derived numbers. Reusable by any class summon that registers a
+	// `COMPANION_TYPES.CLASS_SUMMON` companion with a `scaling`
+	// descriptor (Animating Performance's Dancing Item today; Summon
+	// Beast / Steel Defender / Drake Companion tomorrow).
+	// `method` / `dismissMethod` name no-required-arg methods on
+	// `CharacterSheetState`.
+	| {
+		kind: "classSummon";
+		method: string;
+		args?: unknown[];
+		/** Take a long/short rest first so limited-use costs are deterministic. */
+		restFirst?: "long" | "short";
+		dismissMethod?: string;
+		namePattern: string;
+		hpExact?: number;
+		hpMin?: number;
+		ac?: number;
+		attackNamePattern?: string;
+		attackBonusMin?: number;
+		damageContains?: string;
+	}
+	// === Generic "feature creates an inventory item" probe ===
+	// Invoke a creator method on `CharacterSheetState`, verify a
+	// matching inventory row appeared (optionally under a gp value
+	// cap), then invoke the cleanup method and verify it's gone.
+	| {
+		kind: "createsInventoryItem";
+		method: string;
+		args?: unknown[];
+		/** Take a long/short rest first so limited-use costs are deterministic. */
+		restFirst?: "long" | "short";
+		cleanupMethod?: string;
+		namePattern: string;
+		maxValueGp?: number;
+		expectCount?: number;
+	}
 	| {kind: "crimsonRiteMechanics"; hpCosts: [number, number]}
 	| {kind: "hybridTransformationMechanics"}
 
@@ -922,6 +984,7 @@ export type EffectCheck = _EffectCommon & (
 const _TOGGLE_EFFECT_KINDS = new Set([
 	"togglePlusAc",
 	"togglePlusSpeed",
+	"toggleGrantsSpeed",
 	"toggleGrantsResistance",
 	"toggleGrantsAdvantage",
 	"toggleGrantsImmunity",
@@ -1017,15 +1080,143 @@ async function _runPassiveOrRollEffect (
 			return;
 		}
 		case "featureCalculation": {
-			const value = await charSheet.page.evaluate((property) => {
+			const probe = await charSheet.page.evaluate((property) => {
 				const cs: any = (globalThis as any).charSheet;
-				return cs?._state?.getFeatureCalculations?.()?.[property] ?? null;
+				const calc = cs?._state?.getFeatureCalculations?.();
+				return {present: !!calc && Object.prototype.hasOwnProperty.call(calc, property), value: calc?.[property] ?? null};
 			}, e.property);
+			const value = probe.value;
+			if (e.isNull !== undefined) {
+				// Distinguishes an explicit `null` sentinel (e.g. "no gp cap")
+				// from a property the calculation never emitted at all.
+				if (!probe.present) throw new Error(`featureCalculation.${e.property} is absent (expected present, null=${e.isNull})`);
+				const isNull = value === null;
+				if (isNull !== e.isNull) throw new Error(`featureCalculation.${e.property}=${value}, expected ${e.isNull ? "null" : "non-null"}`);
+			}
 			if (e.exact !== undefined && value !== e.exact) throw new Error(`featureCalculation.${e.property}=${value}, expected ${e.exact}`);
 			if (e.min !== undefined && (!(typeof value === "number") || value < e.min)) {
 				throw new Error(`featureCalculation.${e.property}=${value}, expected >= ${e.min}`);
 			}
-			if (e.exact === undefined && e.min === undefined && value == null) throw new Error(`featureCalculation.${e.property} is absent`);
+			if (e.exact === undefined && e.min === undefined && e.isNull === undefined && value == null) throw new Error(`featureCalculation.${e.property} is absent`);
+			return;
+		}
+		case "classSummon": {
+			const res = await charSheet.page.evaluate((cfg) => {
+				const st: any = (globalThis as any).charSheet?._state;
+				if (!st) return {err: "no state"};
+				const fn = st[cfg.method];
+				if (typeof fn !== "function") return {err: `state.${cfg.method} is not a function`};
+				if (cfg.restFirst === "long") st.onLongRest?.();
+				else if (cfg.restFirst === "short") st.onShortRest?.();
+				let summoned: any;
+				try { summoned = fn.apply(st, cfg.args || []); } catch (e: any) { return {err: `${cfg.method} threw: ${e?.message}`}; }
+				if (!summoned) return {err: `${cfg.method} returned falsy`};
+				if (summoned.ok === false) return {err: `${cfg.method} refused: ${summoned.error}`};
+				const re = new RegExp(cfg.namePattern, "i");
+				const comp = (st.getCompanions?.() || []).find((c: any) => re.test(c?.name || ""));
+				if (!comp) return {err: `no companion matching ${cfg.namePattern}; seen=[${(st.getCompanions?.() || []).map((c: any) => c.name).join(", ")}]`};
+				const atks = [...(comp.attacks || []), ...(comp.actions || [])];
+				const flat = (a: any) => [a?.damage, a?.desc, ...(Array.isArray(a?.entries) ? a.entries : [a?.entries])].filter(Boolean).join(" ");
+				const out = {
+					err: null as string | null,
+					hp: comp.hp?.max ?? comp.maxHp ?? null,
+					ac: comp.ac ?? null,
+					attacks: atks.map((a: any) => {
+						const text = flat(a);
+						const m = /([+-]\d+)\s*to hit/i.exec(text);
+						return {name: a?.name || "", bonus: a?.attackBonus ?? (m ? Number(m[1]) : null), dmg: text};
+					}),
+					dismissed: null as boolean | null,
+				};
+				if (cfg.dismissMethod && typeof st[cfg.dismissMethod] === "function") {
+					try { st[cfg.dismissMethod](); } catch (e) { /* reported below via dismissed */ }
+					out.dismissed = !(st.getCompanions?.() || []).some((c: any) => re.test(c?.name || ""));
+				}
+				return out;
+			}, {
+				method: e.method,
+				args: (e.args || []) as unknown[],
+				restFirst: e.restFirst,
+				dismissMethod: e.dismissMethod,
+				namePattern: typeof e.namePattern === "string" ? e.namePattern : String(e.namePattern),
+			});
+			if (res.err) throw new Error(`classSummon(${e.method}): ${res.err}`);
+			if (e.hpExact != null && res.hp !== e.hpExact) throw new Error(`classSummon(${e.method}) hp=${res.hp}, expected ${e.hpExact}`);
+			if (e.hpMin != null && !(typeof res.hp === "number" && res.hp >= e.hpMin)) throw new Error(`classSummon(${e.method}) hp=${res.hp}, expected >= ${e.hpMin}`);
+			if (e.ac != null && res.ac !== e.ac) throw new Error(`classSummon(${e.method}) ac=${res.ac}, expected ${e.ac}`);
+			if (e.attackNamePattern) {
+				const are = new RegExp(e.attackNamePattern, "i");
+				const hit = (res.attacks || []).find((a: any) => are.test(a.name));
+				if (!hit) throw new Error(`classSummon(${e.method}) no attack matching ${e.attackNamePattern}; seen=[${(res.attacks || []).map((a: any) => a.name).join(", ")}]`);
+				if (e.attackBonusMin != null && !(Number(hit.bonus) >= e.attackBonusMin)) throw new Error(`classSummon(${e.method}) attack bonus=${hit.bonus}, expected >= ${e.attackBonusMin}`);
+				if (e.damageContains && !String(hit.dmg).toLowerCase().includes(e.damageContains.toLowerCase())) throw new Error(`classSummon(${e.method}) damage "${hit.dmg}" missing "${e.damageContains}"`);
+			}
+			if (e.dismissMethod && res.dismissed === false) throw new Error(`classSummon(${e.method}) ${e.dismissMethod} did not remove the companion`);
+			return;
+		}
+		case "createsInventoryItem": {
+			const res = await charSheet.page.evaluate((cfg) => {
+				const st: any = (globalThis as any).charSheet?._state;
+				if (!st) return {err: "no state"};
+				const fn = st[cfg.method];
+				if (typeof fn !== "function") return {err: `state.${cfg.method} is not a function`};
+				if (cfg.restFirst === "long") st.onLongRest?.();
+				else if (cfg.restFirst === "short") st.onShortRest?.();
+				let created: any;
+				try { created = fn.apply(st, cfg.args || []); } catch (err: any) { return {err: `${cfg.method} threw: ${err?.message}`}; }
+				if (!created) return {err: `${cfg.method} returned falsy`};
+				if (created.ok === false) return {err: `${cfg.method} refused: ${created.error}`};
+				const re = new RegExp(cfg.namePattern, "i");
+				const matches = (st.getInventory?.() || []).filter((it: any) => re.test(it?.item?.name || it?.name || ""));
+				const out = {
+					err: null as string | null,
+					count: matches.length,
+					valuesCp: matches.map((it: any) => (it?.item?.value ?? it?.value ?? null)),
+					cleared: null as boolean | null,
+				};
+				if (cfg.cleanupMethod && typeof st[cfg.cleanupMethod] === "function") {
+					try { st[cfg.cleanupMethod](); } catch (err) { /* reported via cleared */ }
+					out.cleared = !(st.getInventory?.() || []).some((it: any) => re.test(it?.item?.name || it?.name || ""));
+				}
+				return out;
+			}, {
+				method: e.method,
+				args: (e.args || []) as unknown[],
+				restFirst: e.restFirst,
+				cleanupMethod: e.cleanupMethod,
+				namePattern: typeof e.namePattern === "string" ? e.namePattern : String(e.namePattern),
+			});
+			if (res.err) throw new Error(`createsInventoryItem(${e.method}): ${res.err}`);
+			const wanted = e.expectCount ?? 1;
+			if (res.count < wanted) throw new Error(`createsInventoryItem(${e.method}) found ${res.count} matching "${e.namePattern}", expected >= ${wanted}`);
+			if (e.maxValueGp != null) {
+				for (const cp of res.valuesCp) {
+					if (cp != null && Number(cp) > e.maxValueGp * 100) throw new Error(`createsInventoryItem(${e.method}) item value ${Number(cp) / 100} gp exceeds cap ${e.maxValueGp} gp`);
+				}
+			}
+			if (e.cleanupMethod && res.cleared === false) throw new Error(`createsInventoryItem(${e.method}) ${e.cleanupMethod} did not remove the created item(s)`);
+			return;
+		}
+		case "featureCalculationDerivedFrom": {
+			const res = await charSheet.page.evaluate((cfg) => {
+				const st: any = (globalThis as any).charSheet?._state;
+				if (!st) return {err: "no state"};
+				const calc = st.getFeatureCalculations?.() || {};
+				if (!Object.prototype.hasOwnProperty.call(calc, cfg.property)) return {err: `featureCalculation.${cfg.property} is absent`};
+				let expected: number | null = null;
+				switch (cfg.equals) {
+					case "abilityMod": expected = st.getAbilityMod?.(cfg.ability); break;
+					case "spellSaveDc": expected = st.getSpellSaveDcForAbility?.(cfg.ability); break;
+					case "spellAttackBonus": expected = st.getSpellAttackBonusForAbility?.(cfg.ability); break;
+					case "proficiencyBonus": expected = st.getProficiencyBonus?.(); break;
+				}
+				return {err: null as string | null, actual: calc[cfg.property], expected};
+			}, {property: e.property, equals: e.equals, ability: e.ability});
+			if (res.err) throw new Error(`featureCalculationDerivedFrom: ${res.err}`);
+			const want = Number(res.expected) + (e.offset ?? 0);
+			if (Number(res.actual) !== want) {
+				throw new Error(`featureCalculation.${e.property}=${res.actual}, expected ${e.equals}(${e.ability ?? ""})${e.offset ? ` + ${e.offset}` : ""} = ${want}`);
+			}
 			return;
 		}
 		case "stateCall": {
@@ -1220,9 +1411,14 @@ async function _runPassiveOrRollEffect (
 			// "first-party" and "tgtt-flavor" both use exact-name lookup.
 			// The mode is metadata for skipReason annotations and human
 			// review; the runtime check is identical.
+			// Cantrips live in their own list on the sheet, so a subclass that
+			// grants one through `additionalSpells` only shows up once both
+			// lists are unioned.
+			const cantrips = await charSheet.getCantripNames().catch(() => [] as string[]);
+			const pool = [...known, ...cantrips];
 			const want = e.spell.toLowerCase();
-			if (!known.some(n => n.toLowerCase() === want)) {
-				throw new Error(`spell "${e.spell}" not in spellbook [${mode}]. seen=${known.slice(0, 30).join(", ")}…`);
+			if (!pool.some(n => n.toLowerCase() === want)) {
+				throw new Error(`spell "${e.spell}" not in spellbook [${mode}]. seen=${pool.slice(0, 30).join(", ")}…`);
 			}
 			return;
 		}
@@ -1898,13 +2094,21 @@ async function _runPassiveOrRollEffect (
 		}
 		case "activeStateTrigger": {
 			const result = await charSheet.probeActiveStateTrigger(e.feature, e.stateTypeId);
-			if (!result.active || !result.used || !result.reactionUsed) {
-				throw new Error(`${e.feature} trigger did not activate and consume its reaction: ${JSON.stringify(result)}`);
+			// `actionUsed` reads whichever action type the trigger declares, so a
+			// bonus-action trigger is covered as well as the original reaction case.
+			if (!result.active || !result.used || !result.actionUsed) {
+				throw new Error(`${e.feature} trigger did not activate and consume its ${result.actionType || "action"}: ${JSON.stringify(result)}`);
 			}
 			if (result.label !== e.label || result.actionType !== e.actionType || result.damageType !== e.damageType) {
 				throw new Error(`${e.feature} trigger metadata mismatch: ${JSON.stringify(result)}`);
 			}
 			if (result.damage < e.damageMin) throw new Error(`${e.feature} retaliation=${result.damage}, expected >=${e.damageMin}`);
+			if (e.damageFormula != null && result.damageFormula !== e.damageFormula) {
+				throw new Error(`${e.feature} trigger damage formula=${result.damageFormula}, expected ${e.damageFormula}`);
+			}
+			if (e.dcMin != null && !(result.dc >= e.dcMin)) {
+				throw new Error(`${e.feature} trigger DC=${result.dc}, expected >=${e.dcMin}`);
+			}
 			return;
 		}
 		case "activeStateLight": {
@@ -1930,6 +2134,7 @@ async function _runToggleEffect (
 	abilityModsBefore: Record<string, number>,
 	beforeAttackNames: string[],
 	afterAttackNames: string[],
+	speedProbes: Map<string, {before: number; after: number; walkAfter: number}>,
 ): Promise<void> {
 	switch (e.kind) {
 		case "togglePlusAc": {
@@ -1946,12 +2151,27 @@ async function _runToggleEffect (
 		}
 		case "togglePlusSpeed": {
 			const t = e.type ?? "walk";
-			// speed snapshot is walk-only; if asking for non-walk, fall through
-			if (t === "walk") {
-				const delta = after.walkSpeed - before.walkSpeed;
-				if (delta !== e.delta) throw new Error(`speed:${t} delta on toggle = ${delta}, expected ${e.delta}`);
+			// The before/after snapshot only carries walkSpeed, so this kind can
+			// ONLY assert on walk. It used to `return` silently for every other
+			// type, which meant a probe like `{type: "fly", delta: 60}` passed
+			// while asserting nothing at all. Fail loudly instead and point at
+			// the kind that does capture non-walk speeds.
+			if (t !== "walk") {
+				throw new Error(`togglePlusSpeed cannot assert on speed:${t} — the toggle snapshot is walk-only. Use {kind: "toggleGrantsSpeed", type: "${t}", …} instead.`);
 			}
-			// non-walk: caller would need to check via getSpeed before+after manually; skip
+			const delta = after.walkSpeed - before.walkSpeed;
+			if (delta !== e.delta) throw new Error(`speed:${t} delta on toggle = ${delta}, expected ${e.delta}`);
+			return;
+		}
+		case "toggleGrantsSpeed": {
+			const probe = speedProbes.get(e.type);
+			if (!probe) throw new Error(`internal: no speed probe captured for "${e.type}"`);
+			if (probe.before > 0) throw new Error(`already had a ${e.type} speed (${probe.before}) before toggle — can't probe`);
+			if (!(probe.after > 0)) throw new Error(`expected a ${e.type} speed after toggle, got ${probe.after}`);
+			if (e.min != null && probe.after < e.min) throw new Error(`speed:${e.type}=${probe.after} after toggle, expected >=${e.min}`);
+			if (e.equalsWalk && probe.after !== probe.walkAfter) {
+				throw new Error(`speed:${e.type}=${probe.after} after toggle, expected to equal walk speed ${probe.walkAfter}`);
+			}
 			return;
 		}
 		case "toggleGrantsResistance": {
@@ -2181,6 +2401,7 @@ export async function assertFeaturesMatrix (
 						const beforeAttackNames = await charSheet.getAttackNames();
 						const advProbes = new Map<string, {advBefore: boolean; advAfter: boolean}>();
 						const conditionImmunityProbes = new Map<string, {before: boolean; after: boolean}>();
+						const speedProbes = new Map<string, {before: number; after: number; walkAfter: number}>();
 						for (const eff of toggleEffects) {
 							if (eff.kind === "toggleGrantsAdvantage") {
 								const s = await charSheet.getAdvantageState(eff.rollType);
@@ -2192,6 +2413,9 @@ export async function assertFeaturesMatrix (
 									return !!cs?._state?.hasConditionImmunityFromStates?.(condition);
 								}, eff.condition);
 								conditionImmunityProbes.set(eff.condition, {before, after: false});
+							}
+							if (eff.kind === "toggleGrantsSpeed") {
+								speedProbes.set(eff.type, {before: await charSheet.getSpeed(eff.type), after: 0, walkAfter: 0});
 							}
 						}
 						let activated = false;
@@ -2215,10 +2439,15 @@ export async function assertFeaturesMatrix (
 										return !!cs?._state?.hasConditionImmunityFromStates?.(condition);
 									}, eff.condition);
 								}
+								if (eff.kind === "toggleGrantsSpeed") {
+									const probe = speedProbes.get(eff.type)!;
+									probe.after = await charSheet.getSpeed(eff.type);
+									probe.walkAfter = await charSheet.getSpeed("walk");
+								}
 							}
 							for (const eff of toggleEffects) {
 								try {
-									await _runToggleEffect(eff, before, after, beforeRes, afterRes, beforeImm, afterImm, advProbes, conditionImmunityProbes, before.abilityMods, beforeAttackNames, afterAttackNames);
+									await _runToggleEffect(eff, before, after, beforeRes, afterRes, beforeImm, afterImm, advProbes, conditionImmunityProbes, before.abilityMods, beforeAttackNames, afterAttackNames, speedProbes);
 								} catch (eErr: any) {
 									errors.push(`${label} effect ${eff.kind}: ${eErr.message}`);
 								}

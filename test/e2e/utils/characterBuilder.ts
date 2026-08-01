@@ -54,10 +54,11 @@ export interface CharacterPreset {
 	 */
 	preferredFeatProgressionPattern?: RegExp;
 	/**
-	 * Ability abbreviations, highest-standard-array-score first, used to steer the
-	 * Abilities step. Defaults to str/dex/con/int/wis/cha (i.e. STR 15), which leaves a
-	 * caster at a +0 spellcasting modifier and makes any "add your <ability> modifier"
-	 * feature unassertable. Casters should put their spellcasting ability first.
+	 * Ability priority for the standard-array assignment step, best score
+	 * first (e.g. `["cha", "dex", "con", "wis", "int", "str"]`). Omit to keep
+	 * the historical STR-first default. Spellcaster presets should set this —
+	 * the default otherwise puts an 8 in the spellcasting ability, which makes
+	 * save DCs and mod-scaled pools unrepresentative of real play.
 	 */
 	abilityPriority?: string[];
 	/** Additional homebrew JSON URLs required by this build. */
@@ -117,8 +118,24 @@ export const PRESET_FULL_XPHB_LIGHT_CLERIC: CharacterPreset = {
 	signatureSpells: ["Sacred Flame", "Bless", "Cure Wounds"],
 };
 
-/** PHB 2014 Tempest Domain Cleric. */
-export const PRESET_FULL_TEMPEST_CLERIC: CharacterPreset = {
+/** XPHB 2024 Circle of the Sea Druid. */
+export const PRESET_FULL_SEA_DRUID: CharacterPreset = {
+	race: "Human",
+	raceSource: "PHB'24",
+	className: "Druid",
+	classSource: "PHB'24",
+	prioritySources: ["XPHB"],
+	skipConditionalPrompt: true,
+	background: "Hermit",
+	bgSource: "PHB'24",
+	name: "Nerida Tidecaller",
+	skillCount: 2,
+	optFeatCount: 1,
+	subclassName: "Circle of the Sea",
+	subclassSource: "PHB'24",
+	signatureSpells: ["Druidcraft", "Cure Wounds", "Entangle"],
+};
+/** PHB 2014 Tempest Domain Cleric. */export const PRESET_FULL_TEMPEST_CLERIC: CharacterPreset = {
 	race: "Dwarf",
 	raceSource: "PHB",
 	className: "Cleric",
@@ -291,6 +308,24 @@ export const PRESET_FULL_ASTRAL_SELF_MONK_CHANGELING: CharacterPreset = {
 	skillCount: 2,
 	subclassName: "Way of the Astral Self",
 	subclassSource: "TCE",
+};
+
+/** College of Creation Bard Changeling (TCE subclass on the TGTT Bard chassis). */
+export const PRESET_FULL_CREATION_BARD_CHANGELING: CharacterPreset = {
+	race: "Changeling",
+	raceSource: "TGTT",
+	className: "Bard",
+	classSource: "TGTT",
+	background: "Entertainer",
+	bgSource: "PHB'24",
+	name: "Aria Songwright",
+	skillCount: 3,
+	subclassName: "College of Creation",
+	subclassSource: "TCE",
+	// Bard: CHA is the spellcasting ability and drives the Mote of Potential
+	// save DC, the Dancing Item's to-hit and Creative Crescendo's item count.
+	abilityPriority: ["cha", "dex", "con", "wis", "int", "str"],
+	signatureSpells: ["Vicious Mockery", "Healing Word"],
 };
 
 /** Way of the Sun Soul Monk Changeling (XGE subclass on the TGTT Monk chassis). */
@@ -810,6 +845,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_TRICKSTER_GOBLIN,
 	PRESET_FULL_LUST_LEXALIAN,
 	PRESET_FULL_HORROR_THEOCRACIAN,
+	PRESET_FULL_CREATION_BARD_CHANGELING,
 	PRESET_FULL_ARCANA_CLERIC,
 ];
 

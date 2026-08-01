@@ -970,29 +970,24 @@ export class BuilderWizardPage {
 	/**
 	 * Assign standard array ability scores using a sensible default distribution.
 	 * Standard array: 15, 14, 13, 12, 10, 8
+	 * Default assigns: STR=15, DEX=14, CON=13, INT=12, WIS=10, CHA=8
 	 *
-	 * Default assigns STR=15, DEX=14, CON=13, INT=12, WIS=10, CHA=8 — i.e. every build
-	 * is STR-primary. That is fine for martials but leaves a caster at a +0 spellcasting
-	 * modifier, which makes any "adds your <ability> modifier to X" feature unassertable
-	 * (a +0 bonus is indistinguishable from the feature doing nothing). Pass `priority`
-	 * to reorder which ability receives which score — the array itself is unchanged, so
-	 * point-buy legality and every other derived stat stay comparable.
-	 * @param priority Ability abbreviations highest-score-first. Abilities omitted from
-	 *   the list keep their default relative order and receive the remaining scores.
+	 * `priority` overrides the ability order the array is poured into, best
+	 * score first. Presets for spellcasters should set it (e.g.
+	 * `["cha", "dex", "con", "wis", "int", "str"]`) — the STR-first default
+	 * otherwise builds every caster with an 8 in its spellcasting ability,
+	 * which makes save DCs and mod-scaled pools unrepresentative.
+	 * Unlisted abilities keep their default relative order.
 	 */
 	async assignStandardArrayDefaults (priority?: string[]): Promise<void> {
 		const DEFAULT_ORDER = ["str", "dex", "con", "int", "wis", "cha"];
-		const SCORES = [15, 14, 13, 12, 10, 8];
-
 		const order = priority?.length
-			? [
-				...priority.map(a => a.toLowerCase()).filter(a => DEFAULT_ORDER.includes(a)),
-				...DEFAULT_ORDER.filter(a => !priority.map(p => p.toLowerCase()).includes(a)),
-			]
+			? [...priority.map(it => it.toLowerCase()), ...DEFAULT_ORDER.filter(it => !priority.map(p => p.toLowerCase()).includes(it))]
 			: DEFAULT_ORDER;
-
+		const scores = [15, 14, 13, 12, 10, 8];
 		const assignments: Array<{score: number; ability: string}> = order
-			.map((ability, i) => ({score: SCORES[i], ability}));
+			.slice(0, scores.length)
+			.map((ability, i) => ({score: scores[i], ability}));
 
 		for (const {score, ability} of assignments) {
 			// Per-iteration retry — the badge layout reflows after each

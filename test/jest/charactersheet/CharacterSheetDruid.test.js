@@ -10,6 +10,7 @@
  */
 
 import "./setup.js";
+import {jest} from "@jest/globals";
 import "../../../js/charactersheet/charactersheet-state.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
@@ -1285,10 +1286,58 @@ describe("Druid Core Class Features (XPHB 2024)", () => {
 			expect(calculations.hasArchdruid).toBe(true);
 		});
 
-		it("should have unlimited Wild Shape uses at level 20", () => {
+		// XPHB Archdruid grants "Evergreen Wild Shape" (refund one use on
+		// Initiative with an empty pool), NOT an unlimited pool.
+		it("should keep four Wild Shape uses at level 20 and gain Evergreen Wild Shape", () => {
 			state.addClass({name: "Druid", source: "XPHB", level: 20});
 			const calculations = state.getFeatureCalculations();
-			expect(calculations.wildShapeUses).toBe(Infinity);
+			expect(calculations.wildShapeUses).toBe(4);
+			expect(calculations.hasEvergreenWildShape).toBe(true);
+		});
+
+		it("should scale Wild Shape uses off the 2024 Druid Features table", () => {
+			for (const [level, expected] of [[2, 2], [5, 2], [6, 3], [16, 3], [17, 4], [20, 4]]) {
+				const s = new CharacterSheetState();
+				s.addClass({name: "Druid", source: "XPHB", level});
+				expect(s.getFeatureCalculations().wildShapeUses).toBe(expected);
+			}
+		});
+
+		it("should keep the PHB 2014 Druid on a flat two Wild Shape uses", () => {
+			for (const level of [2, 6, 17, 20]) {
+				const s = new CharacterSheetState();
+				s.addClass({name: "Druid", source: "PHB", level});
+				expect(s.getFeatureCalculations().wildShapeUses).toBe(2);
+			}
+		});
+
+		// The feature text says "You can use Wild Shape twice" and is parsed once
+		// at grant time, so without re-scaling the on-sheet POOL stays at 2 forever
+		// — starving every subclass feature fuelled by it.
+		it("should re-scale a stale on-sheet Wild Shape pool to the level-correct max", () => {
+			const s = new CharacterSheetState();
+			s.addClass({name: "Druid", source: "XPHB", level: 2});
+			s.addFeature({name: "Wild Shape", source: "XPHB", uses: {current: 2, max: 2, recharge: "short"}});
+			expect(s.getWildShapeResource().max).toBe(2);
+
+			s._data.classes[0].level = 6;
+			expect(s.getWildShapeResource().max).toBe(3);
+			expect(s.getWildShapeResource().current).toBe(3);
+
+			s._data.classes[0].level = 17;
+			expect(s.getWildShapeResource().max).toBe(4);
+		});
+
+		it("should not refill a partly spent Wild Shape pool when it re-scales", () => {
+			const s = new CharacterSheetState();
+			s.addClass({name: "Druid", source: "XPHB", level: 2});
+			s.addFeature({name: "Wild Shape", source: "XPHB", uses: {current: 2, max: 2, recharge: "short"}});
+			s.spendWildShapeUse(1);
+			expect(s.getWildShapeResource().current).toBe(1);
+
+			s._data.classes[0].level = 6;
+			expect(s.getWildShapeResource().max).toBe(3);
+			expect(s.getWildShapeResource().current).toBe(1);
 		});
 	});
 
@@ -1441,75 +1490,236 @@ describe("Circle of the Moon (XPHB 2024)", () => {
 // ==========================================================================
 // PART 14: CIRCLE OF THE SEA (XPHB 2024 EXCLUSIVE)
 // ==========================================================================
+// Every test here asserts a MECHANICAL effect (a computed number, a speed, a
+// resistance, a resource cost) rather than merely that the feature exists.
 describe("Circle of the Sea (XPHB 2024)", () => {
-	let state;
-
-	beforeEach(() => {
-		state = new CharacterSheetState();
+	const mkSea = (level, {wis = 16} = {}) => {
+		const state = new CharacterSheetState();
 		state.setRace({name: "Human", source: "XPHB"});
 		state.addClass({
 			name: "Druid",
 			source: "XPHB",
-			level: 3,
+			level,
 			subclass: {name: "Circle of the Sea", shortName: "Sea", source: "XPHB"},
 		});
-		state.setAbilityBase("wis", 16);
-	});
+		state.setAbilityBase("wis", wis);
+		state.setSpellcastingAbility("wis");
+		return state;
+	};
 
-	it("should gain subclass at level 3", () => {
-		const classes = state.getClasses();
-		expect(classes[0].subclass).toBeDefined();
-		expect(classes[0].subclass.name).toBe("Circle of the Sea");
+	/** Manifest the Emanation the way the sheet does, then read the sheet back. */
+	const manifest = (state, placement = "self") => {
+		state.activateState("wrathOfTheSea", {name: "Wrath of the Sea", placement});
+	};
+
+	it("gains the subclass at level 3", () => {
+		const state = mkSea(3);
+		expect(state.getClasses()[0].subclass.name).toBe("Circle of the Sea");
 	});
 
 	describe("Wrath of the Sea (Level 3)", () => {
-		it("should have Wrath of the Sea at level 3", () => {
-			expect(state.getTotalLevel()).toBe(3);
+		it("scales its damage with the Wisdom modifier, not the druid level", () => {
+			// WIS 16 → +3 → 3d6, at level 3 AND at level 20.
+			expect(mkSea(3).getFeatureCalculations().wrathOfTheSeaDamage).toBe("3d6");
+			expect(mkSea(20).getFeatureCalculations().wrathOfTheSeaDamage).toBe("3d6");
+			// WIS 20 → +5 → 5d6.
+			expect(mkSea(3, {wis: 20}).getFeatureCalculations().wrathOfTheSeaDamage).toBe("5d6");
 		});
 
-		it("should deal 1d4 cold or lightning damage scaling to higher dice", () => {
-			// Level 3: 1d4
-			// Level 10: 1d6
-			// Level 14: 1d8
-			const druidLevel = 3;
-			const wrathDie = druidLevel >= 14 ? "1d8" : druidLevel >= 10 ? "1d6" : "1d4";
-			expect(wrathDie).toBe("1d4");
+		it("enforces the one-die minimum for a non-positive Wisdom modifier", () => {
+			const calc = mkSea(3, {wis: 8}).getFeatureCalculations();
+			expect(calc.wrathOfTheSeaDiceCount).toBe(1);
+			expect(calc.wrathOfTheSeaDamage).toBe("1d6");
 		});
-	});
 
-	describe("Aquatic Affinity (Level 6)", () => {
-		it("should have Aquatic Affinity at level 6", () => {
-			state.addClass({
-				name: "Druid",
-				source: "XPHB",
-				level: 6,
-				subclass: {name: "Circle of the Sea", shortName: "Sea", source: "XPHB"},
+		it("deals Cold damage against a Constitution save at the druid's spell save DC", () => {
+			const state = mkSea(3);
+			const calc = state.getFeatureCalculations();
+			expect(calc.wrathOfTheSeaDamageType).toBe("cold");
+			expect(calc.wrathOfTheSeaSaveAbility).toBe("con");
+			expect(calc.wrathOfTheSeaDc).toBe(state.getSpellSaveDc());
+		});
+
+		it("pushes Large or smaller targets 15 feet", () => {
+			const calc = mkSea(3).getFeatureCalculations();
+			expect(calc.wrathOfTheSeaPush).toBe(15);
+			expect(calc.wrathOfTheSeaMaxPushSize).toBe("Large");
+		});
+
+		it("costs one Wild Shape use and is a 5-foot Emanation before level 6", () => {
+			const state = mkSea(3);
+			expect(state.getFeatureCalculations().wrathOfTheSeaEmanation).toBe(5);
+			expect(state.getWrathOfTheSeaWildShapeCost()).toBe(1);
+		});
+
+		it("detects as a Wild-Shape-fuelled toggle, not as a Wild Shape transformation", () => {
+			const info = CharacterSheetState.detectActivatableFeature({
+				name: "Wrath of the Sea",
+				classSource: "XPHB",
+				subclassShortName: "Sea",
+				description: "As a Bonus Action, you can expend a use of Wild Shape to manifest an aura of ocean spray.",
 			});
-			expect(state.getTotalLevel()).toBe(6);
+			expect(info.stateTypeId).toBe("wrathOfTheSea");
+			expect(info.interactionMode).toBe("toggle");
+			expect(info.resourceName).toBe("Wild Shape");
+			expect(info.resourceCost).toBe(1);
 		});
-	});
 
-	describe("Stormborn (Level 10)", () => {
-		it("should have Stormborn at level 10", () => {
-			state.addClass({
-				name: "Druid",
-				source: "XPHB",
-				level: 10,
-				subclass: {name: "Circle of the Sea", shortName: "Sea", source: "XPHB"},
-			});
-			expect(state.getTotalLevel()).toBe(10);
+		it("exposes a resolvable bonus-action trigger while manifested", () => {
+			const state = mkSea(3);
+			expect(state.getActiveStateTrigger("wrathOfTheSea")).toBeNull();
+
+			manifest(state);
+			const trigger = state.getActiveStateTrigger("wrathOfTheSea");
+			expect(trigger.label).toBe("Ocean Spray");
+			expect(trigger.actionType).toBe("bonus");
+			expect(trigger.effect.resolvedDamage).toBe("3d6");
+			expect(trigger.effect.resolvedDc).toBe(state.getSpellSaveDc());
+			expect(trigger.effect.damageType).toBe("cold");
+			expect(trigger.effect.pushDistance).toBe(15);
+			expect(trigger.effect.range).toBe(5);
 		});
-	});
 
-	describe("Oceanic Gift (Level 14)", () => {
-		it("should have Oceanic Gift at level 14", () => {
+		it("returns no action bundle for a druid of another circle", () => {
+			const state = new CharacterSheetState();
 			state.addClass({
 				name: "Druid",
 				source: "XPHB",
 				level: 14,
-				subclass: {name: "Circle of the Sea", shortName: "Sea", source: "XPHB"},
+				subclass: {name: "Circle of the Moon", shortName: "Moon", source: "XPHB"},
 			});
-			expect(state.getTotalLevel()).toBe(14);
+			expect(state.getWrathOfTheSeaAction()).toBeNull();
+			expect(state.getWrathOfTheSeaPlacements()).toEqual([]);
+		});
+	});
+
+	describe("Aquatic Affinity (Level 6)", () => {
+		it("grants a swim speed equal to the walking speed", () => {
+			const before = mkSea(5);
+			expect(before.getSpeedByType("swim")).toBe(0);
+
+			const state = mkSea(6);
+			expect(state.getSpeedByType("swim")).toBe(state.getWalkSpeed());
+			expect(state.getSpeedByType("swim")).toBe(30);
+		});
+
+		it("tracks later walking-speed changes instead of freezing a number", () => {
+			const state = mkSea(6);
+			state.setSpeed("walk", 40);
+			expect(state.getSpeedByType("swim")).toBe(40);
+			expect(state.getSpeed()).toContain("swim 40 ft.");
+		});
+
+		it("widens the Emanation from 5 to 10 feet", () => {
+			expect(mkSea(5).getFeatureCalculations().wrathOfTheSeaEmanation).toBe(5);
+			expect(mkSea(6).getFeatureCalculations().wrathOfTheSeaEmanation).toBe(10);
+
+			const state = mkSea(6);
+			manifest(state);
+			expect(state.getActiveStateTrigger("wrathOfTheSea").effect.range).toBe(10);
+		});
+	});
+
+	describe("Stormborn (Level 10)", () => {
+		it("grants nothing until the Emanation is manifested", () => {
+			const state = mkSea(10);
+			expect(state.getResistances()).toEqual([]);
+			expect(state.getSpeedByType("fly")).toBe(0);
+		});
+
+		it("grants Cold, Lightning and Thunder resistance while manifested", () => {
+			const state = mkSea(10);
+			manifest(state);
+			const res = state.getResistances().map(r => r.toLowerCase());
+			expect(res).toEqual(expect.arrayContaining(["cold", "lightning", "thunder"]));
+
+			state.deactivateState("wrathOfTheSea");
+			expect(state.getResistances()).toEqual([]);
+		});
+
+		it("grants a fly speed equal to the walking speed while manifested", () => {
+			const state = mkSea(10);
+			manifest(state);
+			expect(state.getSpeedByType("fly")).toBe(state.getWalkSpeed());
+			expect(state.getSpeed()).toContain("fly 30 ft.");
+
+			state.deactivateState("wrathOfTheSea");
+			expect(state.getSpeedByType("fly")).toBe(0);
+		});
+
+		it("does not fire below level 10", () => {
+			const state = mkSea(9);
+			manifest(state);
+			expect(state.getResistances()).toEqual([]);
+			expect(state.getSpeedByType("fly")).toBe(0);
+		});
+
+		it("does not leak the Tempest Cleric's always-on Stormborn fly speed", () => {
+			const state = mkSea(20);
+			expect(state.getFeatureCalculations().hasStormborn).toBeUndefined();
+			expect(state.getFeatureCalculations().hasSeaStormborn).toBe(true);
+			expect(state.getSpeedByType("fly")).toBe(0);
+		});
+	});
+
+	describe("Oceanic Gift (Level 14)", () => {
+		it("offers only the self placement before level 14", () => {
+			const placements = mkSea(13).getWrathOfTheSeaPlacements();
+			expect(placements.map(p => p.id)).toEqual(["self"]);
+		});
+
+		it("offers self / ally / both placements at level 14", () => {
+			const placements = mkSea(14).getWrathOfTheSeaPlacements();
+			expect(placements.map(p => p.id)).toEqual(["self", "ally", "both"]);
+			expect(placements.find(p => p.id === "ally").range).toBe(60);
+		});
+
+		it("charges two Wild Shape uses to cover both the druid and an ally", () => {
+			const state = mkSea(14);
+			expect(state.getWrathOfTheSeaWildShapeCost("self")).toBe(1);
+			expect(state.getWrathOfTheSeaWildShapeCost("ally")).toBe(1);
+			expect(state.getWrathOfTheSeaWildShapeCost("both")).toBe(2);
+		});
+
+		it("withholds Stormborn's benefits when the Emanation is placed on an ally", () => {
+			const state = mkSea(14);
+			manifest(state, "ally");
+			expect(state.getResistances()).toEqual([]);
+			expect(state.getSpeedByType("fly")).toBe(0);
+
+			state.deactivateState("wrathOfTheSea");
+			manifest(state, "both");
+			expect(state.getResistances().map(r => r.toLowerCase()))
+				.toEqual(expect.arrayContaining(["cold", "lightning", "thunder"]));
+			expect(state.getSpeedByType("fly")).toBe(state.getWalkSpeed());
+		});
+
+		it("reports the ally's Emanation with the druid's own DC and dice", () => {
+			const state = mkSea(14, {wis: 20});
+			const action = state.getWrathOfTheSeaAction("ally");
+			expect(action.damage).toBe("5d6");
+			expect(action.dc).toBe(state.getSpellSaveDc());
+			expect(action.grantsResistances).toEqual([]);
+			expect(action.grantsFlySpeed).toBe(false);
+		});
+	});
+
+	describe("re-entrancy", () => {
+		it("resolves speeds while the Emanation is active without recursing", () => {
+			const state = mkSea(20);
+			manifest(state);
+			expect(() => state.getSpeed()).not.toThrow();
+			expect(() => state.getSpeedByType("fly")).not.toThrow();
+			expect(() => state.getFeatureCalculations()).not.toThrow();
+		});
+
+		it("produces the Emanation's state effects without consulting getFeatureCalculations", () => {
+			const state = mkSea(20);
+			manifest(state);
+			const spy = jest.spyOn(state, "getFeatureCalculations");
+			expect(state.getActiveStateEffects().some(e => e.type === "saveDamageBurst")).toBe(true);
+			expect(spy).not.toHaveBeenCalled();
+			spy.mockRestore();
 		});
 	});
 });

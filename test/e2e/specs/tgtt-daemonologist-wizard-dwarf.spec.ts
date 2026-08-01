@@ -30,7 +30,7 @@ const DAEMONOLOGIST_FEATURES: FeatureCheck[] = [
 		{kind: "resistance", damageType: "necrotic"},
 	]},
 	{level: 10, name: /unearthly countenance/i, kind: "passive", effects: [
-		{kind: "togglePlusSpeed", type: "fly", delta: 60},
+		{kind: "toggleGrantsSpeed", type: "fly", min: 60},
 		{kind: "toggleGrantsAdvantage", rollType: "check:cha"},
 	]},
 	{level: 14, name: /eternal war eruption/i, kind: "passive", effects: [

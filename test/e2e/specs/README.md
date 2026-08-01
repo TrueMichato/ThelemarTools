@@ -55,6 +55,7 @@ Eighteen spec files (`tgtt-*.spec.ts`) drive the full builder → level-up → l
 |16 | `tgtt-trickster-rogue-goblin.spec.ts`           | Trickster Rogue Goblin                             | 1→20 |
 |17 | `tgtt-lust-cleric-lexalian.spec.ts`             | Lust Domain Cleric Lexalian                        | 1→20 |
 |18 | `tgtt-horror-warlock-theocracian.spec.ts`       | Horror Warlock Theocracian                         | 1→20 |
+|19 | `tgtt-creation-bard.spec.ts`                    | College of Creation Bard Changeling                | 1→20 |
 
 The `tgtt-player-party.spec.ts` file is a separate party-import smoke test (not part of the comprehensive build standard).
 
