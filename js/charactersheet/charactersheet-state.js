@@ -30166,6 +30166,45 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Aggregate the light the character currently SHEDS from active states.
+	 *
+	 * Generic over any active-state effect of the form
+	 * `{type: "light", brightRange, dimRange}`, so any future feature, spell
+	 * effect or item that emits light surfaces automatically by declaring that
+	 * effect — no per-feature rendering code.
+	 *
+	 * Ranges are TOTAL radii, matching how the source books phrase it and how
+	 * the existing `*BrightLightRange` / `*DimLightRange` calculations are
+	 * already expressed: "bright light for 30 feet and dim light for another
+	 * 30 feet" is `{brightRange: 30, dimRange: 60}`.
+	 *
+	 * Light does NOT stack — overlapping sources do not brighten an area — so
+	 * the brightest single radius of each band wins. `dimRange` is floored at
+	 * `brightRange` because an area lit brightly is at least dimly lit, which
+	 * keeps a malformed effect from rendering a dim radius inside its own
+	 * bright one.
+	 *
+	 * @returns {{brightRange: number, dimRange: number, sources: Array<string>}}
+	 *   Zeroed ranges and an empty source list when nothing is shedding light.
+	 */
+	getEmittedLight () {
+		let brightRange = 0;
+		let dimRange = 0;
+		const sources = [];
+		for (const e of this.getActiveStateEffects()) {
+			if (e.type !== "light") continue;
+			const bright = Number(e.brightRange) || 0;
+			const dim = Number(e.dimRange) || 0;
+			if (bright <= 0 && dim <= 0) continue;
+			brightRange = Math.max(brightRange, bright);
+			dimRange = Math.max(dimRange, dim);
+			const name = e.stateName || CharacterSheetState.ACTIVE_STATE_TYPES[e.stateTypeId]?.name;
+			if (name && !sources.includes(name)) sources.push(name);
+		}
+		return {brightRange, dimRange: Math.max(brightRange, dimRange), sources};
+	}
+
+	/**
 	 * Get jump distance multiplier from active states (e.g. Step of the Wind doubles jump distance)
 	 * @returns {number} Jump distance multiplier (default 1)
 	 */
@@ -43593,6 +43632,7 @@ class CharacterSheetState {
 			description: "Sheds bright light for 30 feet and dim light for another 30 feet; retaliate against a melee attacker for 5 + WIS radiant damage",
 			effects: [
 				{type: "retaliationDamage", target: "meleeAttacker", value: 5, abilityMod: "wis", damageType: "radiant"},
+				{type: "light", brightRange: 30, dimRange: 60},
 			],
 			trigger: {label: "Retaliate", actionType: "reaction", effectType: "retaliationDamage"},
 			duration: "Until extinguished",
@@ -43619,6 +43659,7 @@ class CharacterSheetState {
 			effects: [
 				{type: "enemySaveDisadvantage", target: "radianceOfTheDawn"},
 				{type: "enemySaveDisadvantage", target: "spellDamage", damageTypes: ["fire", "radiant"]},
+				{type: "light", brightRange: 60, dimRange: 90},
 			],
 			duration: "1 minute",
 			endConditions: ["Dismissed", "Duration expires"],
@@ -45917,6 +45958,15 @@ class CharacterSheetState {
 				case "sense":
 					summaries.push(`${effect.target} ${effect.value} ft${effect.magicalDarkness ? " (including magical darkness)" : ""}`);
 					break;
+				case "light": {
+					const bright = Number(effect.brightRange) || 0;
+					const dim = Math.max(bright, Number(effect.dimRange) || 0);
+					const lightParts = [];
+					if (bright > 0) lightParts.push(`${bright} ft bright light`);
+					if (dim > bright) lightParts.push(`${dim} ft dim light`);
+					if (lightParts.length) summaries.push(`Sheds ${lightParts.join(", ")}`);
+					break;
+				}
 				case "abilitySubstitution":
 					summaries.push(`May use ${effect.ability?.toUpperCase()} for ${effect.targets?.map(target => this._formatTarget(target)).join(" and ")}`);
 					break;

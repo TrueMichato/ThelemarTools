@@ -202,15 +202,12 @@ const SUN_SOUL_MONK_FEATURES: FeatureCheck[] = [
 			},
 			{kind: "featureCalculation", property: "sunShieldBrightLightRange", exact: 30},
 			{kind: "featureCalculation", property: "sunShieldDimLightRange", exact: 60},
-			// blocked by CS-BUG-036: the calculations are correct, but no active-state/UI light effect exists.
 			{
 				kind: "activeStateLight",
 				feature: "Sun Shield",
 				stateTypeId: "sunShield",
 				bright: 30,
 				dim: 60,
-				skip: true,
-				skipReason: "CS-BUG-036",
 			},
 		],
 	},

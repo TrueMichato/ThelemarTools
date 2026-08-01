@@ -3722,6 +3722,39 @@ class CharacterSheetPage {
 			});
 		}
 
+		// Light the character SHEDS (Sun Shield, Corona of Light, …). Rendered from the
+		// generic `getEmittedLight()` aggregator, so any active state declaring a
+		// `{type: "light"}` effect surfaces here with no extra code. Sits with the senses
+		// because it is the other half of "what can be seen" — and unlike a sense it also
+		// tells the player what they are giving away to everyone else. Only rendered while
+		// something is actually lit.
+		const emittedLight = this._state.getEmittedLight?.();
+		if (emittedLight && (emittedLight.brightRange > 0 || emittedLight.dimRange > 0)) {
+			const item = document.createElement("div");
+			item.className = "charsheet__sense-item";
+			const src = emittedLight.sources.length ? ` (${emittedLight.sources.join(", ")})` : "";
+			item.title = `You shed light${src}. Bright light does not stack — the brightest source wins.`;
+
+			const icon = document.createElement("span");
+			icon.className = "charsheet__sense-icon";
+			icon.setAttribute("aria-hidden", "true");
+			icon.textContent = "🔆";
+
+			const name = document.createElement("span");
+			name.className = "charsheet__sense-name";
+			name.textContent = "Sheds light";
+
+			const range = document.createElement("span");
+			range.className = "charsheet__sense-range";
+			const parts = [];
+			if (emittedLight.brightRange > 0) parts.push(`${emittedLight.brightRange} ft. bright`);
+			if (emittedLight.dimRange > emittedLight.brightRange) parts.push(`${emittedLight.dimRange} ft. dim`);
+			range.textContent = parts.join(" / ");
+
+			item.append(icon, name, range);
+			container.append(item);
+		}
+
 		// (R37 #10) Reading speed (TGTT "Reading Books"): show it alongside senses on the
 		// Overview when the TGTT homebrew is enabled. Pages/hour = (1 + INTmod×2) × 30.
 		// Reading Books is a TGTT linguistics rule, so gate on the granular
@@ -8377,6 +8410,14 @@ class CharacterSheetPage {
 				if (e.type === "advantage" && e.target === "attack") return "Advantage on attacks";
 				if (e.type === "resistance") return `Resist ${(e.target || "").replace("damage:", "")}`;
 				if (e.type === "ac") return `+${e.value || ""} AC`;
+				if (e.type === "light") {
+					const bright = Number(e.brightRange) || 0;
+					const dim = Math.max(bright, Number(e.dimRange) || 0);
+					const parts = [];
+					if (bright > 0) parts.push(`${bright} ft. bright light`);
+					if (dim > bright) parts.push(`${dim} ft. dim light`);
+					return parts.length ? `Sheds ${parts.join(", ")}` : null;
+				}
 				return null;
 			}).filter(Boolean);
 			if (labels.length) {

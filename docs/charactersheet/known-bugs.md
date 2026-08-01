@@ -1586,22 +1586,53 @@ featuresMatrix at L11 (2 failures):
 
 ## CS-BUG-036 — Sun Shield light ranges are dead calculation metadata
 
-**Status**: open.
+**Status**: RESOLVED.
 
-The Way of the Sun Soul Monk's level-17 **Sun Shield** correctly activates an
-active state and exposes its reaction-triggered radiant retaliation, but its
-30-foot bright-light and 60-foot dim-light ranges exist only on
-`getFeatureCalculations()` as `sunShieldBrightLightRange` and
-`sunShieldDimLightRange`.
+**Affected**: Way of the Sun Soul Monk (**Sun Shield**, L17) and Light Domain
+Cleric (**Corona of Light**, L6) — both shed light in their source text.
 
-The `sunShield` active-state definition contains only the retaliation-damage
-effect, and no character-sheet renderer or state consumer reads either light
-range. Activating Sun Shield therefore produces no observable light effect on
-the sheet. The comprehensive Sun Soul E2E spec verifies the real retaliation
-trigger and explicitly skips the two light-effect probes against this bug.
+**Symptom**: both features correctly activated an active state and exposed
+their other mechanics, but their light radii existed only on
+`getFeatureCalculations()` (`sunShieldBrightLightRange` /
+`sunShieldDimLightRange`, and Corona's equivalent). No renderer and no state
+consumer read either value, so activating them produced no observable light on
+the sheet — a direct violation of the "every ability has an actual effect" bar.
 
-**Expected**: activating Sun Shield should expose the configured bright and dim
-light ranges through the active state and a rendered or otherwise player-visible
-lighting surface.
+**Root cause**: the active-state effect vocabulary had no way to express
+emitted light at all. There were 40-plus effect types (`sense`, `resistance`,
+`setSpeed`, ...) but nothing for light, so the ranges had nowhere to live
+except as inert calculation metadata. Note this is the opposite of the usual
+failure: the calculations were always *correct*, which is precisely why
+asserting them (as the pre-existing tests did) could never catch it.
+
+**Fix**:
+1. Added a generic `{type: "light", brightRange, dimRange}` active-state
+   effect. Ranges are TOTAL radii, matching both the source-book phrasing
+   ("bright light for 30 feet and dim light for another 30 feet" ->
+   `{brightRange: 30, dimRange: 60}`) and the existing calculation values.
+2. Added `getEmittedLight()`, which aggregates every active `light` effect.
+   Light does **not** stack, so the brightest single radius wins per band;
+   `dimRange` is floored at `brightRange` so a malformed effect cannot render
+   a dim radius inside its own bright one.
+3. Rendered it on three surfaces: the Overview **Senses** panel (a new
+   "Sheds light" row — it is the other half of "what can be seen", and unlike
+   a sense it tells the player what they are giving away), the inline
+   active-state row label, and `summarizeEffects()`.
+4. Declared the effect on `sunShield` (30/60) and `coronaOfLight` (60/90).
+
+Any future feature, spell effect or item that emits light now surfaces on all
+three surfaces by declaring the effect alone — no per-feature rendering code.
+
+**Not covered**: Zodiac Form also sheds light (`zodiacFormBrightLight`), but it
+is an `isGeneric: true` state whose `customEffects` *replace* the base effects
+at activation, so it needs the `_getSupplementalActiveStateEffects()` hook
+rather than a base-effect declaration. Left alone deliberately — it is outside
+the subclass batch and the change is not mechanical.
+
+**Regression pins**: `test/jest/charactersheet/CharacterSheetEmittedLight.test.js`
+(11 tests, asserting the *aggregator*, not the calculations; verified to fail
+8/11 with the two declarations removed, the 3 survivors being the intended
+no-op controls) and the now-unskipped `activeStateLight` probe in
+`tgtt-sun-soul-monk.spec.ts`.
 
 ---
