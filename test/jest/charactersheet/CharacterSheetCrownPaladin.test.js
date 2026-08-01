@@ -11,6 +11,7 @@
  *  - CS-BUG-051 pure reference-wrapper features minting ghost ability rows
  *  - CS-BUG-052 same-type conditional modifiers from one feature collapsing into one
  *  - CS-BUG-053 text-parsed conditional modifiers never reaching the opt-in picker
+ *  - CS-BUG-054 the 2014 Paladin's Channel Divinity pool never being created at all
  */
 
 import "./setup.js";
@@ -78,6 +79,45 @@ describe("Crown — Turn the Tide produces a usable healing roll", () => {
 // ==========================================================================
 // Champion Challenge (L3) — a real save DC
 // ==========================================================================
+// The parser above is only half the contract: the ROLL SURFACES read
+// `detectActivatableFeature(feature).combatActionEffects`, and the "ability"
+// classification path — which every Channel Divinity option takes — used to return
+// none, so the parse was correct and the Use button still rolled nothing (CS-BUG-053).
+describe("CS-BUG-053 — \"ability\"-classified activatables carry their roll effects", () => {
+	// Shaped exactly as the sheet stores them (measured on a live build): an oath's
+	// Channel Divinity options are granted with `consumes: {name: "Channel Divinity"}`
+	// and NO `uses` of their own, so they take the generic `consumes` route into
+	// `_buildAbilityActivationInfo` — the path that returned no roll effects.
+	const options = [
+		["Champion Challenge", TXT_CHAMPION_CHALLENGE, {type: "save", saveAbility: "wis", dc: null}],
+		["Turn the Tide", TXT_TURN_THE_TIDE, {type: "healing", formula: "1d6", abilityMod: "cha", minimum: 1}],
+	];
+	const asGranted = (name, text) => ({
+		name,
+		source: "SCAG",
+		level: 3,
+		className: "Paladin",
+		consumes: {name: "Channel Divinity"},
+		description: text,
+		entries: [text],
+	});
+
+	it.each(options)("%s reaches the roll surfaces through detectActivatableFeature", (name, text, expected) => {
+		const info = CharacterSheetState.detectActivatableFeature(asGranted(name, text));
+		// Premise guard: this IS the limited-use "ability" path, not the combat path.
+		expect(info?.interactionMode).toBe("limited");
+		expect(info?.combatActionEffects?.rollDice).toEqual(expect.objectContaining(expected));
+	});
+
+	it("links both options to the shared Channel Divinity pool rather than a private one", () => {
+		for (const [name, text] of options) {
+			const info = CharacterSheetState.detectActivatableFeature(asGranted(name, text));
+			expect(info?.resourceName).toBe("Channel Divinity");
+			expect(info?.resourceCost).toBe(1);
+		}
+	});
+});
+
 describe("Crown — Champion Challenge forces a Wisdom save at the character's DC", () => {
 	it("parses the save ability but leaves the DC for the character to supply", () => {
 		const fx = CharacterSheetState._parseCombatActionEffects(TXT_CHAMPION_CHALLENGE.toLowerCase(), TXT_CHAMPION_CHALLENGE);
@@ -357,8 +397,35 @@ describe("CS-BUG-051 — pure reference-wrapper features are not activatable", (
 		expect(CharacterSheetState.isReferenceWrapperFeature(crownChannelDivinityWrapper)).toBe(true);
 	});
 
-	it("refuses to make it activatable, so it can't duplicate the class-level row", () => {
+	// The sheet renders a wrapper with its referenced options EXPANDED INLINE, so the
+	// feature it actually classifies carries the options' activation prose. That is what
+	// made the umbrella look activatable; a fixture with only the bare entries would pass
+	// this test with the guard removed and prove nothing.
+	const crownChannelDivinityAsRendered = {
+		...crownChannelDivinityWrapper,
+		description: `When you take this oath at 3rd level, you gain the following two Channel Divinity options. ${TXT_CHAMPION_CHALLENGE} ${TXT_TURN_THE_TIDE}`,
+	};
+
+	it("refuses to make the AS-RENDERED umbrella activatable, so it can't duplicate the class-level row", () => {
+		// Premise guard: without the wrapper check this text is unmistakably activatable.
+		expect(CharacterSheetState.analyzeToggleability(crownChannelDivinityAsRendered.description)).toBeTruthy();
+		expect(CharacterSheetState.detectActivatableFeature(crownChannelDivinityAsRendered)).toBeNull();
+	});
+
+	it("still refuses when the wrapper carries only its bare entries", () => {
 		expect(CharacterSheetState.detectActivatableFeature(crownChannelDivinityWrapper)).toBeNull();
+	});
+
+	it("leaves the REFERENCED options themselves fully activatable", () => {
+		const championChallenge = {
+			name: "Channel Divinity: Champion Challenge",
+			source: "SCAG",
+			level: 3,
+			description: TXT_CHAMPION_CHALLENGE,
+			entries: [TXT_CHAMPION_CHALLENGE],
+		};
+		expect(CharacterSheetState.isReferenceWrapperFeature(championChallenge)).toBe(false);
+		expect(CharacterSheetState.detectActivatableFeature(championChallenge)).not.toBeNull();
 	});
 
 	it("does NOT treat the resource-bearing class feature as a wrapper", () => {
@@ -388,6 +455,86 @@ describe("CS-BUG-051 — pure reference-wrapper features are not activatable", (
 // ==========================================================================
 // Oath spells — the always-prepared list
 // ==========================================================================
+// ==========================================================================
+// CS-BUG-054 — the 2014 Paladin's Channel Divinity pool
+// ==========================================================================
+// The pool is normally minted by `addFeature` parsing a count out of the feature text.
+// The 2014 Paladin's text names none, so nothing was created and every oath's Channel
+// Divinity options were unlimited. `_ensureChannelDivinityUses` (reached through
+// `getResources()`) must now CREATE the pool from the class table, not merely reconcile
+// the max of one that already exists.
+const TXT_CHANNEL_DIVINITY_PHB = "Your oath allows you to channel divine energy to fuel magical effects. Each Channel Divinity option provided by your oath explains how to use it. When you use your Channel Divinity, you choose which option to use. You must then finish a short or long rest to use your Channel Divinity again.";
+
+describe("CS-BUG-054 — the 2014 Paladin's Channel Divinity is capped, not unlimited", () => {
+	function makePaladinWithChannelDivinity ({level = 3, source = "PHB"} = {}) {
+		const state = new CharacterSheetState();
+		state.addClass({
+			name: "Paladin",
+			source,
+			level,
+			subclass: {name: "Oath of the Crown", shortName: "Crown", source: "SCAG"},
+		});
+		state.addFeature({
+			name: "Channel Divinity",
+			source,
+			level: 3,
+			className: "Paladin",
+			description: TXT_CHANNEL_DIVINITY_PHB,
+			entries: [TXT_CHANNEL_DIVINITY_PHB],
+		});
+		return state;
+	}
+
+	it("mints no pool from the prose alone — the text names no number", () => {
+		const state = makePaladinWithChannelDivinity();
+		// Guard the premise of the bug: if the parser ever learns to infer "once" from
+		// the rest clause, this flips and the creation block below becomes redundant.
+		const raw = (state._data.resources || []).find(r => r.name === "Channel Divinity");
+		expect(raw).toBeUndefined();
+	});
+
+	it("creates a 1-use, short-rest pool once the resources are resolved", () => {
+		const state = makePaladinWithChannelDivinity();
+		const resource = state.getResources().find(r => r.name === "Channel Divinity");
+		expect(resource).toBeDefined();
+		expect(resource.max).toBe(1);
+		expect(resource.current).toBe(1);
+		expect(resource.recharge).toBe("short");
+	});
+
+	it("backs the owning feature's own uses too, so rest restoration agrees", () => {
+		const state = makePaladinWithChannelDivinity();
+		state.getResources();
+		const feature = state.getFeature("Channel Divinity");
+		expect(feature.uses).toEqual(expect.objectContaining({current: 1, max: 1, per: "short"}));
+	});
+
+	it("stays at a single use at every level — only the 2024 Paladin scales", () => {
+		for (const level of [3, 6, 11, 17, 20]) {
+			const state = makePaladinWithChannelDivinity({level});
+			expect(state.getResources().find(r => r.name === "Channel Divinity").max).toBe(1);
+		}
+	});
+
+	it("still gives the 2024 Paladin its scaled pool (consistency with CS-BUG-033)", () => {
+		expect(CharacterSheetState._getChannelDivinityUsesForClass({name: "Paladin", source: "XPHB", level: 3})).toBe(2);
+		expect(CharacterSheetState._getChannelDivinityUsesForClass({name: "Paladin", source: "XPHB", level: 11})).toBe(3);
+		expect(CharacterSheetState._getChannelDivinityUsesForClass({name: "Paladin", source: "PHB", level: 20})).toBe(1);
+	});
+
+	it("creates nothing before level 3, when the class grants no Channel Divinity", () => {
+		const state = makePaladinWithChannelDivinity({level: 2});
+		expect(state.getResources().find(r => r.name === "Channel Divinity")).toBeUndefined();
+	});
+
+	it("is idempotent — resolving twice does not stack a second pool", () => {
+		const state = makePaladinWithChannelDivinity();
+		state.getResources();
+		state.getResources();
+		expect((state._data.resources || []).filter(r => r.name === "Channel Divinity")).toHaveLength(1);
+	});
+});
+
 describe("Crown — the oath spell list", () => {
 	it("marks the level-3 oath spells always-prepared", () => {
 		// The spell list is data-driven; assert the calculation surface that gates it so the

@@ -1759,7 +1759,8 @@ shape (`"ac"`, `"speed:walk"`, `"save:wis"`) can never be mistaken for a damage
 type. New code should still emit `damage:<type>`; this makes the reader
 tolerant rather than blessing the bare form.
 
-**Regression pins**: `CharacterSheetCrownPaladin.test.js` §Exalted Champion.
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-050 and
+§Exalted Champion. Verified to fail with the bare-form branch reverted.
 
 ---
 
@@ -1784,8 +1785,10 @@ own — and an early `return null` for it in `detectActivatableFeature`. Detecte
 **structurally**, never by name, so it covers every oath, domain and patron
 that uses the same shape.
 
-**Regression pins**: `CharacterSheetCrownPaladin.test.js` §Channel Divinity
-wrapper (4 tests, including two negative controls).
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-051 (7 tests).
+Note the fixture is the umbrella **as the sheet renders it** — with the referenced
+options expanded inline — because a fixture carrying only the bare `entries` passes
+with the guard removed and proves nothing. Verified to fail with the guard disabled.
 
 ---
 
@@ -1822,7 +1825,8 @@ mandatory `(?<!dis)` lookbehind so "disadvantage on …" can never be inverted
 into a buff.
 
 **Regression pins**: `CharacterSheetCrownPaladin.test.js` §Unyielding Spirit
-(8 tests, including the `disadvantage` inversion control).
+(8 tests, including the `disadvantage` inversion control). Both halves verified
+independently — reverting the dedup key fails 3, reverting the reader fails 2.
 
 ---
 
@@ -1860,8 +1864,11 @@ Two supporting generic changes landed with it:
   ability modifier folded into the formula, idempotently. All three call sites
   (combat-tab enrichment, roll modal, dice roller) go through it.
 
-**Regression pins**: `CharacterSheetCrownPaladin.test.js` §Champion Challenge
-and §Turn the Tide; the `combatAction` probes in `tgtt-crown-paladin.spec.ts`.
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-053, which goes
+through `detectActivatableFeature` on a feature shaped as the sheet actually grants
+it (`consumes: {name: "Channel Divinity"}`, no `uses` of its own — measured on a
+live build), not through the parser directly; plus the `combatAction` probes in
+`tgtt-crown-paladin.spec.ts`. Verified to fail with the fix reverted.
 
 ---
 
@@ -1887,8 +1894,14 @@ reconciling the max of one that already exists. `_getChannelDivinityUsesForClass
 remains the single source of truth for the count, so this stays consistent with
 CS-BUG-033 and the `CharacterSheetChannelDivinityScaling` suite.
 
-**Regression pins**: `CharacterSheetCrownPaladin.test.js` §Channel Divinity
-pool; the `shortRestRestores` matrix probe in `tgtt-crown-paladin.spec.ts`.
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-054 (7 tests,
+including a guard on the bug's premise — that the prose alone mints nothing — and a
+cross-check that the 2024 Paladin still scales 2 → 3); the `kind: "resource"` matrix
+row and the USE probe's `shortRestRestores` in `tgtt-crown-paladin.spec.ts`.
+Verified to fail with the creation block reverted.
+
+---
+
 ## CS-BUG-055 — `FeatureUsesParser` read "N times your <class> level" as a use count
 
 **Status**: Fixed.
