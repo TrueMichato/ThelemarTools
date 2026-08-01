@@ -1210,3 +1210,113 @@ A dire wolf re-typed to size M / monstrosity, registered through
 The temp HP is *additional* to the dire wolf's own 37 HP, which is why it uses
 the new `tempHpPerLevel` key rather than `hpPerLevel`. No bespoke recalculation
 path — `recalculateCompanion()` re-derives it on every level-up.
+
+---
+
+## Lunar Sorcery (Sorcerer, DSotDQ)
+
+Published under `case "Lunar Sorcery": case "Lunar":`. The subclass exists for
+both the 2014 (`PHB`) and 2024 (`XPHB`) Sorcerer chassis; the gate is
+`is2024 ? 3 : 1`, so on the 2014 chassis every lunar feature is a plain
+sorcerer-level gate from level 1.
+
+The subclass is built around a **recurring player choice** — the lunar phase.
+It is not a note on the Features tab: the phase is stored state, it is switched
+from a dedicated Combat-tab panel, and four separate engine paths read it.
+
+```javascript
+// L1 — Lunar Sorcery / Lunar Embodiment
+hasLunarSorcery: true,
+hasLunarEmbodiment: true,
+lunarPhase: "full" | "new" | "crescent",      // ← the live choice
+lunarPhaseName: "Full Moon",
+lunarPhaseSchools: ["Abjuration", "Divination"],
+lunarSpellTableRows: 5,                        // rows unlocked at this level
+lunarFreeCastCount: 1,                         // 3 from L6 (one per phase)
+
+// L1 — Moon Fire
+hasMoonFire: true,
+moonFireSpell: "Sacred Flame",
+moonFireTargetCount: 2,
+moonFireTargetSeparation: 5,
+
+// L6 — Lunar Boons
+hasLunarBoons: true,
+lunarBoonsUses: <proficiency bonus>,
+lunarBoonsReduction: 1,                        // sorcery points off a metamagic
+
+// L6 — Waxing and Waning
+hasWaxingAndWaning: true,
+waxingAndWaningCost: 1,
+waxingAndWaningAction: "bonus",
+
+// L14 — Lunar Empowerment
+hasLunarEmpowerment: true,
+lunarEmpowermentSummary: "…",                  // phase-dependent
+lunarEmpowermentResistances: ["necrotic", "radiant"],   // Crescent only
+lunarMoonlightRadius: 10,
+
+// L18 — Lunar Phenomenon
+hasLunarPhenomenon: true,
+lunarPhenomenonCost: 5,                        // SP cost for a re-use
+lunarPhenomenonRange: 30,
+lunarPhenomenonAction: "bonus",
+lunarPhenomenonDamage: "3d10",                 // phase-dependent
+lunarPhenomenonHealing: "3d8",                 // Full Moon only
+```
+
+### The phase is stored state, not a calculation
+
+`_data.lunarPhase` is the single source of truth and `setLunarPhase()` is its
+only writer. Everything else is derived:
+
+| Reader | What the phase changes |
+|---|---|
+| `getLunarSpellsForPhase()` / `getLunarFreeCastOptions()` | which of the 15 table spells the free 1/long-rest cast may pick |
+| `getCastableActiveMetamagics()` | Lunar Boons knocks 1 SP off a metamagic applied to a spell of the phase's two schools |
+| `getResistances()` / `getAdvantageState()` | Lunar Empowerment's L14 passives |
+| `getLunarPhenomenon()` | which burst L18 produces, its save ability, damage and healing |
+
+`LUNAR_PHASES` is a declarative descriptor table (schools, empowerment,
+phenomenon, spell column) — adding or re-tuning a phase touches data, not
+branches.
+
+### L14 passives ride the active-state engine
+
+Three `ACTIVE_STATE_TYPES` entries (`lunarPhaseFull`, `lunarPhaseNew`,
+`lunarPhaseCrescent`) mirror the stored phase; `setLunarPhase()` keeps exactly
+one of them active. Their `effects` arrays are **empty** — the real effects are
+produced at read time by `_getSupplementalActiveStateEffects()` →
+`_getLunarPhaseStateEffects()`, which returns `[]` below sorcerer 14 and
+otherwise emits:
+
+- **Full Moon** — advantage on Investigation and Perception, but only while the
+  bonus-action moonlight is actually shed (`_data.lunarMoonlight`).
+- **New Moon** — advantage on Stealth always; attacks against you have
+  disadvantage while `_data.lunarInDarkness`.
+- **Crescent Moon** — `damage:necrotic` and `damage:radiant` resistance.
+
+Two conventions matter here. Resistance targets are `damage:<type>`-namespaced
+(CS-BUG-050), and all three states carry `noNameDetect: true` so the generic
+activatable surface cannot hijack them (CS-BUG-083) — the dedicated Combat-tab
+panel owns the UI, the same way the Metamagic Dashboard does.
+
+`_getLunarPhaseStateEffects()` reads stored class data only. It must never call
+`getFeatureCalculations()`, which would recurse — the same rule
+`_getCircleOfTheSeaClass()` follows.
+
+> **Generic fix shipped with this subclass.** `getAdvantageState()` hand-rolled
+> its own active-state effect collection from `stateType.effects` plus
+> `state.customEffects` and never consulted `_getSupplementalActiveStateEffects()`.
+> Any advantage produced by the supplemental hook reached `getResistances()` but
+> was invisible to `getAdvantageState()`. It now folds the supplemental effects
+> in, which fixes the hook for every subclass that uses it, not just this one.
+
+### Lunar Boons is spent on the real cast path
+
+`getCastableActiveMetamagics()` resolves the discount and returns `baseCost`,
+`lunarBoonApplied` and `lunarBoonSchool` alongside the usual `cost`.
+`charactersheet-spells.js` routes all three former
+`useSorceryPoint(metamagic.cost)` call sites through a single
+`_spendMetamagicCost()` helper, so a boon use is burned **only** when the
+discounted cost is actually paid — never on a preview, never twice.
