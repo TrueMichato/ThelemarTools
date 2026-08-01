@@ -323,6 +323,15 @@ class CharacterSheetSpells {
 			if (spell) this._pSwapDivineSoulAffinity(spell);
 		});
 
+		// Swap a generic granted spell (GRANTED_SPELL_SWAP_RULES — e.g. Granny's Gifts)
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const btn = e.target.closest(".charsheet__spell-swap-granted");
+			if (!btn) return;
+			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
+			const spell = this._state.getSpells().find(s => (s.id || `${s.name}|${s.source}`) === spellId);
+			if (spell) this._pSwapGrantedSpell(spell);
+		});
+
 		// Toggle prepared
 		document.addEventListener("click", (/** @type {*} */ e) => {
 			const btn = e.target.closest(".charsheet__spell-prepared");
@@ -7655,6 +7664,7 @@ class CharacterSheetSpells {
 					${dcBadge ? `<div class="charsheet__spell-item-details ve-muted ve-small">${dcBadge}</div>` : ""}
 					${metamagicNotes.length ? `<div class="charsheet__spell-item-details charsheet__metamagic-mod ve-small">${metamagicNotes.join(" · ")}</div>` : ""}
 					${spell.isDivineSoulAffinity ? `<div class="charsheet__spell-item-details ve-muted ve-small"><span class="glyphicon glyphicon-info-sign mr-1"></span>Divine Soul affinity spell — may be swapped for another Cleric spell.</div>` : ""}
+					${spell.grantedSwapRuleId ? `<div class="charsheet__spell-item-details ve-muted ve-small"><span class="glyphicon glyphicon-info-sign mr-1"></span>${CharacterSheetState.GRANTED_SPELL_SWAP_RULES[spell.grantedSwapRuleId]?.label || "Granted spell — may be swapped."}${spell.isSwappedGrantedSpell && spell.grantedSwapOriginalName ? ` <em>(replaces ${spell.grantedSwapOriginalName})</em>` : ""}</div>` : ""}
 				</div>
 				<div class="charsheet__spell-item-actions">
 					${prepButtonHtml}
@@ -7672,6 +7682,10 @@ class CharacterSheetSpells {
 						</button>
 					` : spell.isDivineSoulAffinity ? `
 						<button class="ve-btn ve-btn-xs ve-btn-info charsheet__spell-swap-affinity" title="Swap this Divine Soul spell for another Cleric spell">
+							<span class="glyphicon glyphicon-refresh mr-1"></span>Swap
+						</button>
+					` : spell.grantedSwapRuleId ? `
+						<button class="ve-btn ve-btn-xs ve-btn-info charsheet__spell-swap-granted" title="Swap this granted spell for another">
 							<span class="glyphicon glyphicon-refresh mr-1"></span>Swap
 						</button>
 					` : `
@@ -8590,6 +8604,56 @@ class CharacterSheetSpells {
 
 		this._renderSpellList();
 		this._page?.saveCharacter?.();
+	}
+
+	/**
+	 * Swap a granted subclass spell for another matching the subclass's declared
+	 * `GRANTED_SPELL_SWAP_RULES` filter (e.g. the Wicked Witch's Granny's Gifts —
+	 * "an enchantment or illusion spell of the same level from the sorcerer, warlock
+	 * or wizard spell list"). Entirely table-driven: no subclass name appears here.
+	 * @param {object} grantedSpell The granted spell entry the player clicked Swap on.
+	 */
+	async _pSwapGrantedSpell (grantedSpell) {
+		const rule = CharacterSheetState.GRANTED_SPELL_SWAP_RULES[grantedSpell.grantedSwapRuleId];
+		if (!rule) return;
+		const className = grantedSpell.sourceClass || "Sorcerer";
+		const level = grantedSpell.level ?? 1;
+		const currentId = `${(grantedSpell.name || "").toLowerCase()}|${(grantedSpell.source || Parser.SRC_PHB).toLowerCase()}`;
+
+		const candidates = CharacterSheetState
+			.getGrantedSpellSwapOptions(this._allSpells || [], rule.filter, level)
+			.filter(s => `${s.name.toLowerCase()}|${(s.source || "").toLowerCase()}` !== currentId)
+			.sort((a, b) => a.name.localeCompare(b.name));
+
+		if (!candidates.length) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "No legal replacement spells are loaded."}));
+			return;
+		}
+
+		const chosen = await this._pPickSwapSpell({
+			title: `Swap ${rule.featureName} Spell`,
+			prompt: `${rule.prompt} to replace <em>${grantedSpell.name}</em>:`,
+			spells: candidates,
+		});
+		if (!chosen) return;
+
+		const res = this._state.applyGrantedSpellSwap({
+			className,
+			featureName: rule.featureName,
+			originalSpell: {name: grantedSpell.name, source: grantedSpell.source},
+			replacementSpell: {name: chosen.name, source: chosen.source, level: chosen.level, school: chosen.school},
+		});
+		if (!res.ok) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+			return;
+		}
+
+		this._renderSpellList();
+		this._page?.saveCharacter?.();
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `🔮 <strong>${chosen.name}</strong> replaces <em>${grantedSpell.name}</em> as your ${rule.featureName} spell.`,
+		}));
 	}
 
 	/**

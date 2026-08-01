@@ -1951,6 +1951,7 @@ class CharacterSheetFeatures {
 					${combatMethodBadge}
 					${derivedEffectBadge}
 					${intransigentBadge}
+					${CharacterSheetClassUtils.getFeatureStatusBadgeHtml(feature.name, this._state)}
 					<div class="charsheet__feature-actions">
 						${showUseBtn ? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__feature-use" title="${isAbility ? "Use this ability" : "Use Feature"}">Use</button>` : ""}
 						<button class="ve-btn ve-btn-xs ${this._state.getFeatureNote?.(feature.id) ? "ve-btn-warning" : "ve-btn-default"} charsheet__feature-note" title="${this._state.getFeatureNote?.(feature.id) ? "Edit Note" : "Add Note"}">

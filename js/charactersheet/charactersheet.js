@@ -8783,6 +8783,11 @@ class CharacterSheetPage {
 			// Shadow Magic (XGE Sorcerer)
 			case "hound of ill omen": return this._pUseHoundOfIllOmen(feature);
 			case "shadow walk": return this._pUseShadowWalk(feature);
+			// Wicked Witch (Ar8 / TGTT-AR Sorcerer)
+			case "granny's gifts": return this._pUseGrannysGifts(feature);
+			case "clever little witch": return this._pUseCleverLittleWitch(feature);
+			case "fly, my pretty": return this._pUseFlyMyPretty(feature);
+			case "coven calling": return this._pUseCovenCalling(feature);
 		}
 		// GENERIC: any feature that publishes resource-castable spells
 		// (`calculations.resourceCastSpells`, e.g. Eyes of the Dark's *darkness* for 2
@@ -10147,6 +10152,235 @@ class CharacterSheetPage {
 
 		this._rollHistory?.addRoll({title: "Shadow Walk", total: res.distance, breakdown: `Teleport up to ${res.range} ft (bonus action)`});
 		JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `🌒 <strong>Shadow Walk</strong>: teleported up to ${res.distance} feet.`}));
+		return true;
+	}
+
+	// ===== Wicked Witch Sorcerous Origin (Arcadia 8 `Ar8` / TGTT `TGTT-AR`) =====
+
+	/**
+	 * Granny's Gifts. The clickable half is the long-rest ward: "choose yourself or one
+	 * creature you can see within 30 feet". Warding yourself registers real
+	 * `save:advantage:charmed|frightened` modifiers; warding an ally records a displayed
+	 * designation (the sheet has no cross-character machinery — see
+	 * docs/charactersheet/10-known-limitations.md).
+	 * @private
+	 */
+	async _pUseGrannysGifts (feature) {
+		const calc = this._state.getFeatureCalculations();
+		const range = calc.grannysGiftsWardRange ?? 30;
+		const SELF = "Yourself";
+		const ALLY = `An ally within ${range} feet`;
+		const CLEAR = "Clear the current ward";
+		const choices = this._state.getGrannysGiftsWard() ? [SELF, ALLY, CLEAR] : [SELF, ALLY];
+		const picked = await InputUiUtil.pGetUserEnum({
+			title: "Granny's Gifts",
+			htmlDescription: `<div>Choose who has <strong>advantage on saving throws against being charmed or frightened</strong> until your next long rest.</div>`,
+			values: choices,
+			isResolveItem: true,
+		});
+		if (picked == null) return true;
+
+		if (picked === CLEAR) {
+			this._state.clearGrannysGiftsWard();
+			this._saveCurrentCharacter();
+			this._renderCharacter();
+			this._features?.render?.();
+			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "Granny's ward cleared."}));
+			return true;
+		}
+
+		let targetName = null;
+		if (picked === ALLY) {
+			targetName = await InputUiUtil.pGetUserString({title: "Granny's Gifts", default: ""});
+			if (targetName == null) return true;
+		}
+
+		const res = this._state.setGrannysGiftsWard({target: picked === SELF ? "self" : "ally", targetName});
+		if (!res.ok) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+			return true;
+		}
+		this._saveCurrentCharacter();
+		this._renderCharacter();
+		this._features?.render?.();
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `🧿 <strong>Granny's Gifts</strong>: ${res.ward.targetName} has advantage on saves against being charmed or frightened until your next long rest.`,
+		}));
+		return true;
+	}
+
+	/**
+	 * Clever Little Witch (6). A reaction that spends Sorcery Points equal to the
+	 * triggering spell's level — halved (rounded down) when that spell belongs to your
+	 * Hag Ancestor's specialty school. At 18 Coven Calling additionally lets you cast any
+	 * spell you saw that creature cast in the last minute, so the prompt offers both.
+	 * @private
+	 */
+	async _pUseCleverLittleWitch (feature) {
+		const calc = this._state.getFeatureCalculations();
+		const specialty = calc.hagAncestorSpecialtySchool;
+
+		const level = await InputUiUtil.pGetUserEnum({
+			title: "Clever Little Witch",
+			htmlDescription: `<div>Reflect a spell cast at you from within <strong>${calc.cleverLittleWitchRange ?? 15} feet</strong>. What level was it?</div>`,
+			values: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+			fnDisplay: lvl => `${Parser.getOrdinalForm(lvl)} level`,
+			isResolveItem: true,
+		});
+		if (level == null) return true;
+
+		let isSpecialty = false;
+		if (specialty) {
+			const answer = await InputUiUtil.pGetUserBoolean({
+				title: "Clever Little Witch",
+				htmlDescription: `<div>Was that spell from the school of <strong>${specialty}</strong> (your ancestor's specialty)? If so it costs half as many Sorcery Points, rounded down.</div>`,
+				textYes: `Yes — ${specialty}`,
+				textNo: "No",
+			});
+			if (answer == null) return true;
+			isSpecialty = !!answer;
+		}
+
+		const res = this._state.useCleverLittleWitch({spellLevel: level, school: isSpecialty ? specialty : null});
+		if (!res.ok) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+			return true;
+		}
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._features?.render?.();
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `🪞 <strong>Clever Little Witch</strong>: reflected a ${Parser.getOrdinalForm(level)}-level spell for <strong>${res.cost}</strong> Sorcery Point${res.cost === 1 ? "" : "s"}${res.discounted ? " (specialty discount)" : ""}. It uses your spell save DC ${res.spellSaveDc} / attack ${res.spellAttackBonus >= 0 ? "+" : ""}${res.spellAttackBonus}. ${res.sorceryPointsRemaining} left.`,
+		}));
+		return true;
+	}
+
+	/**
+	 * Fly, My Pretty (14). Enchant one Small or Medium object with a command word; the
+	 * ride itself is the `flyMyPretty` active state (fly 60 + immunity to charmed and
+	 * frightened), toggled from the Active States panel.
+	 * @private
+	 */
+	async _pUseFlyMyPretty (feature) {
+		const existing = this._state.getEnchantedFlyingItem();
+		if (existing) {
+			const replace = await InputUiUtil.pGetUserBoolean({
+				title: "Fly, My Pretty",
+				htmlDescription: `<div>You have already enchanted <strong>${existing.itemName}</strong> (command word "${existing.commandWord}"). Enchanting another object ends that enchantment.</div>`,
+				textYes: "Enchant a different object",
+				textNo: "Keep the current one",
+			});
+			if (replace == null || !replace) return true;
+		}
+
+		const itemName = await InputUiUtil.pGetUserString({title: "Fly, My Pretty — which Small or Medium object?", default: existing?.itemName || ""});
+		if (itemName == null) return true;
+		const commandWord = await InputUiUtil.pGetUserString({title: "Fly, My Pretty — choose a command word", default: ""});
+		if (commandWord == null) return true;
+
+		const res = this._state.enchantFlyingItem({itemName, commandWord});
+		if (!res.ok) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+			return true;
+		}
+		this._saveCurrentCharacter();
+		this._renderActiveStates();
+		this._renderCharacter();
+		this._features?.render?.();
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `🧹 <strong>${res.item.itemName}</strong> is enchanted (command word "${res.item.commandWord}"). Toggle <em>Fly, My Pretty</em> in Active States while you ride it for a ${res.item.flySpeed} ft flying speed and immunity to being charmed or frightened.${res.replaced ? ` The enchantment on ${res.replaced} ends.` : ""}`,
+		}));
+		return true;
+	}
+
+	/**
+	 * Coven Calling (18). Two hag duplicates for 2 Sorcery Points, or dismiss the
+	 * standing pair. Each duplicate can cast one known 1st–3rd-level instantaneous spell
+	 * for Sorcery Points equal to its level.
+	 * @private
+	 */
+	async _pUseCovenCalling (feature) {
+		const standing = this._state.getCovenDuplicates();
+		if (standing.length) {
+			const SPELL = "Have a duplicate cast a spell";
+			const RESUMMON = "Summon a fresh pair (2 SP)";
+			const DISMISS = "Dismiss the duplicates";
+			const picked = await InputUiUtil.pGetUserEnum({
+				title: "Coven Calling",
+				htmlDescription: `<div>${standing.length} duplicate${standing.length === 1 ? "" : "s"} still standing.</div>`,
+				values: [SPELL, RESUMMON, DISMISS],
+				isResolveItem: true,
+			});
+			if (picked == null) return true;
+			if (picked === DISMISS) {
+				this._state.dismissCovenDuplicates();
+				this._saveCurrentCharacter();
+				this._renderCompanions?.();
+				JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "The duplicates wink out."}));
+				return true;
+			}
+			if (picked === SPELL) return this._pCastWithCovenDuplicate();
+		}
+
+		const res = this._state.summonCovenDuplicates();
+		if (!res.ok) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+			return true;
+		}
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderCompanions?.();
+		this._features?.render?.();
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `🜲 <strong>Coven Calling</strong>: two duplicates appear and act immediately after your turn (${res.sorceryPointsRemaining} Sorcery Points left).`,
+		}));
+		return true;
+	}
+
+	/** Spend Sorcery Points to have a Coven Calling duplicate cast a known spell. @private */
+	async _pCastWithCovenDuplicate () {
+		const calc = this._state.getFeatureCalculations();
+		const maxLevel = calc.covenCallingMaxDuplicateSpellLevel ?? 3;
+		const candidates = (this._state.getSpellsKnown?.() || [])
+			.filter(s => s.level >= 1 && s.level <= maxLevel);
+		if (!candidates.length) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: `You know no spells of ${maxLevel}rd level or lower for a duplicate to cast.`}));
+			return true;
+		}
+		const idx = await InputUiUtil.pGetUserEnum({
+			title: "Coven Calling — duplicate's spell",
+			htmlDescription: `<div>A duplicate can cast one spell you know of ${maxLevel}rd level or lower that has an <strong>instantaneous</strong> duration, costing Sorcery Points equal to its level.</div>`,
+			values: candidates.map((_, i) => i),
+			fnDisplay: i => `${candidates[i].name} (${Parser.getOrdinalForm(candidates[i].level)})`,
+			isResolveItem: true,
+		});
+		if (idx == null) return true;
+		const spell = candidates[idx];
+
+		const instantaneous = /instantaneous/i.test(String(spell.duration || ""))
+			|| await InputUiUtil.pGetUserBoolean({
+				title: "Coven Calling",
+				htmlDescription: `<div>Does <strong>${spell.name}</strong> have an instantaneous duration?</div>`,
+				textYes: "Yes",
+				textNo: "No",
+			});
+		if (instantaneous == null) return true;
+
+		const res = this._state.castWithCovenDuplicate({spellName: spell.name, spellLevel: spell.level, instantaneous: !!instantaneous});
+		if (!res.ok) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+			return true;
+		}
+		this._saveCurrentCharacter();
+		this._renderResources();
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `🜲 A duplicate casts <strong>${res.spellName}</strong> for ${res.cost} Sorcery Point${res.cost === 1 ? "" : "s"} (${res.sorceryPointsRemaining} left).`,
+		}));
 		return true;
 	}
 

@@ -2634,6 +2634,7 @@ const FeatureEffectRegistry = {
 		this._registerInterdictBoonEffects();
 		this._registerIllriggerSpecialtyEffects();
 		this._registerClericFeatureEffects();
+		this._registerWickedWitchFeatures();
 	},
 
 	/**
@@ -3699,6 +3700,36 @@ const FeatureEffectRegistry = {
 		// die-scaling by level + de-dup across sources), not as static effects.
 	},
 
+	// =====================================================================
+	// WICKED WITCH SORCERER (Arcadia 8 `Ar8`, republished by TGTT as
+	// `TGTT-AR`). Self-contained block. The three Hag Ancestor options are
+	// synthetic sub-features seeded by
+	// `CharacterSheetClassUtils.TABLE_DRIVEN_SUBFEATURE_CHOICES`; registering
+	// their grants by NAME here means the language + skill proficiency apply
+	// through whichever flow added them (Builder / LevelUp / QuickBuild /
+	// respec replay / save load), with no reliance on prose parsing.
+	// =====================================================================
+	_registerWickedWitchFeatures () {
+		this.register("Hag Ancestor: Green Hag", [
+			{type: "language", language: "Sylvan"},
+			{type: "skillProficiency", skill: "deception", level: 1},
+		]);
+		this.register("Hag Ancestor: Night Hag", [
+			{type: "language", language: "Abyssal"},
+			{type: "skillProficiency", skill: "insight", level: 1},
+		]);
+		this.register("Hag Ancestor: Sea Hag", [
+			{type: "language", language: "Primordial"},
+			{type: "skillProficiency", skill: "intimidation", level: 1},
+		]);
+		// "you have advantage on Charisma checks made to influence hags" — a genuinely
+		// narrow circumstance, so it is stored as a CONDITIONAL advantage modifier and
+		// surfaced per-roll by `_pPickConditionalModifiers` rather than applied blindly.
+		this.register("Hag Ancestor", [
+			{type: "modifier", modType: "check:cha:advantage", value: 1, conditional: "to influence hags"},
+		]);
+	},
+
 	/**
 	 * Register a feature's effects in the registry
 	 * @param {string} featureName - The name of the feature
@@ -4175,6 +4206,13 @@ class CharacterSheetState {
 		if (src.prepared && !target.prepared) target.prepared = true;
 		if (src.spellcastingAbility && !target.spellcastingAbility) target.spellcastingAbility = src.spellcastingAbility;
 		if (src.isDivineSoulAffinity && !target.isDivineSoulAffinity) target.isDivineSoulAffinity = true;
+		// Generic granted-spell swap tagging (see `GRANTED_SPELL_SWAP_RULES`).
+		if (src.grantedSwapRuleId && !target.grantedSwapRuleId) {
+			target.grantedSwapRuleId = src.grantedSwapRuleId;
+			target.grantedSwapFeatureName = src.grantedSwapFeatureName || null;
+			target.grantedSwapOriginalName = src.grantedSwapOriginalName || null;
+		}
+		if (src.isSwappedGrantedSpell && !target.isSwappedGrantedSpell) target.isSwappedGrantedSpell = true;
 		if (src.isSubclassChoiceSpell && !target.isSubclassChoiceSpell) target.isSubclassChoiceSpell = true;
 		if (src.inSpellbook && !target.inSpellbook) target.inSpellbook = true;
 		if (target.linkedResourceId == null && src.linkedResourceId != null) target.linkedResourceId = src.linkedResourceId;
@@ -14287,6 +14325,24 @@ class CharacterSheetState {
 						} else {
 							parsed = this._parseSpellReference(spellRef);
 						}
+						// GENERIC granted-spell replacement (Wicked Witch "Granny's Gifts":
+						// "you can replace one spell you gained from this feature with
+						// another spell of the same level"). Applies to any subclass whose
+						// player has recorded an override for this class + spell.
+						const swapped = this._applyGrantedSpellOverride(parsed, cls);
+						if (swapped !== parsed) extra = {...(extra || {}), isSwappedGrantedSpell: true, replacedSpellName: parsed?.name || null};
+						parsed = swapped;
+						// Flag the entry so the Spells tab can offer the generic Swap
+						// affordance (mirrors `isDivineSoulAffinity`, but table-driven).
+						const swapRule = CharacterSheetState.getGrantedSpellSwapRule(subclassData);
+						if (swapRule) {
+							extra = {
+								...(extra || {}),
+								grantedSwapRuleId: swapRule.id,
+								grantedSwapFeatureName: swapRule.featureName,
+								grantedSwapOriginalName: (extra?.replacedSpellName) || parsed?.name || null,
+							};
+						}
 						if (parsed) {
 							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls, {
 								...(hasNamedChoice ? {isSubclassChoiceSpell: true} : {}),
@@ -14326,6 +14382,215 @@ class CharacterSheetState {
 		}
 
 		return result;
+	}
+
+	// --- Generic granted-spell replacement -------------------------------------
+	//
+	// Some subclasses let the player swap a spell the subclass GRANTED for another
+	// matching a filter — the Wicked Witch's Granny's Gifts ("you can replace one
+	// spell you gained from this feature with another spell of the same level" from
+	// the enchantment/illusion school on the sorcerer, warlock or wizard list). The
+	// pick is stored per class + original spell so it survives reload and respec, and
+	// is applied inside the SAME always-prepared walk every subclass uses — nothing
+	// subclass-specific reaches the spell list.
+
+	/**
+	 * Declarative swap rules, keyed `"<subclass shortName or name>|<source>"` in lower
+	 * case. Adding another "you may replace a granted spell" subclass is one entry here —
+	 * the walker, the state store and the Spells-tab affordance are all generic.
+	 * @type {Object<string, {featureName: string, label: string, prompt: string, filter: {schools?: string[], classes?: string[], sameLevel?: boolean}}>}
+	 */
+	static GRANTED_SPELL_SWAP_RULES = {
+		"wicked witch|ar8": {
+			featureName: "Granny's Gifts",
+			label: "Granny's Gifts spell — may be swapped for an enchantment or illusion spell of the same level.",
+			prompt: "Choose an <strong>enchantment or illusion</strong> spell of the same level from the sorcerer, warlock or wizard spell list",
+			filter: {schools: ["enchantment", "illusion"], classes: ["Sorcerer", "Warlock", "Wizard"], sameLevel: true},
+		},
+	};
+
+	/**
+	 * The granted-spell swap rule for a subclass, if it has one.
+	 * @param {*} subclassData resolved subclass object.
+	 * @returns {?{id: string, featureName: string, label: string, prompt: string, filter: object}}
+	 */
+	static getGrantedSpellSwapRule (subclassData) {
+		if (!subclassData) return null;
+		const src = String(subclassData.source || "").toLowerCase();
+		for (const nm of [subclassData.shortName, subclassData.name]) {
+			if (!nm) continue;
+			const id = `${String(nm).toLowerCase()}|${src}`;
+			const rule = CharacterSheetState.GRANTED_SPELL_SWAP_RULES[id];
+			if (rule) return {id, ...rule};
+			// Source-agnostic fallback: the same subclass republished under another
+			// source (TGTT re-publishes Arcadia content as `TGTT-AR`) keeps its rule.
+			const loose = Object.entries(CharacterSheetState.GRANTED_SPELL_SWAP_RULES)
+				.find(([key]) => key.split("|")[0] === String(nm).toLowerCase());
+			if (loose) return {id: loose[0], ...loose[1]};
+		}
+		return null;
+	}
+
+	/**
+	 * All recorded granted-spell overrides, optionally scoped to one class.
+	 * @param {?string} [className]
+	 * @returns {Array<{className: string, featureName: string, original: {name: string, source: ?string}, replacement: {name: string, source: ?string, level: ?number, school: ?string}}>}
+	 */
+	getGrantedSpellOverrides (className = null) {
+		const all = this._data.grantedSpellOverrides || [];
+		if (!className) return [...all];
+		const want = String(className).toLowerCase();
+		return all.filter(o => String(o.className || "").toLowerCase() === want);
+	}
+
+	/**
+	 * Record (or replace) a granted-spell swap.
+	 * @param {object} opts
+	 * @param {string} opts.className owning class (e.g. "Sorcerer").
+	 * @param {string} opts.featureName granting feature (e.g. "Granny's Gifts").
+	 * @param {string|{name: string, source?: string}} opts.originalSpell the granted spell being replaced.
+	 * @param {string|{name: string, source?: string, level?: number, school?: string}} opts.replacementSpell
+	 * @returns {{ok: boolean, error?: string, override?: object}}
+	 */
+	setGrantedSpellOverride ({className, featureName, originalSpell, replacementSpell} = {}) {
+		const asRef = (s) => (typeof s === "string" ? {name: s, source: null} : (s ? {...s} : null));
+		const orig = asRef(originalSpell);
+		const repl = asRef(replacementSpell);
+		if (!className || !orig?.name || !repl?.name) return {ok: false, error: "A class, the granted spell and its replacement are all required."};
+		if (String(orig.name).toLowerCase() === String(repl.name).toLowerCase()) {
+			return {ok: false, error: "Choose a different spell."};
+		}
+		if (!Array.isArray(this._data.grantedSpellOverrides)) this._data.grantedSpellOverrides = [];
+		// One override per granted spell, and (RAW) one swap per feature at a time.
+		this._data.grantedSpellOverrides = this._data.grantedSpellOverrides.filter(o =>
+			!(String(o.className || "").toLowerCase() === String(className).toLowerCase()
+				&& String(o.featureName || "").toLowerCase() === String(featureName || "").toLowerCase()));
+		const override = {className, featureName: featureName || null, original: orig, replacement: repl};
+		this._data.grantedSpellOverrides.push(override);
+		return {ok: true, override};
+	}
+
+	/**
+	 * Apply a granted-spell swap end-to-end: targeted-remove the currently granted
+	 * entry (never a broad `removeSubclassSpells`, which could delete a colliding
+	 * player-owned spell), record the override, then repopulate so the replacement is
+	 * added as always-prepared and re-tagged. Mirrors `swapDivineSoulAffinitySpell`
+	 * but is driven entirely by `GRANTED_SPELL_SWAP_RULES`.
+	 * @param {object} opts
+	 * @param {string} opts.className
+	 * @param {string} opts.featureName
+	 * @param {{name: string, source?: string}} opts.originalSpell the entry currently on the list.
+	 * @param {{name: string, source?: string, level?: number, school?: string}} opts.replacementSpell
+	 * @returns {{ok: boolean, error?: string, override?: object}}
+	 */
+	applyGrantedSpellSwap ({className, featureName, originalSpell, replacementSpell} = {}) {
+		// The stored override always keys off the ORIGINAL published grant, so a second
+		// swap of an already-swapped slot still resolves back to the printed spell.
+		const prior = this.getGrantedSpellOverrides(className)
+			.find(o => String(o.featureName || "").toLowerCase() === String(featureName || "").toLowerCase());
+		const printedName = prior?.original?.name || originalSpell?.name;
+		const printedSource = prior?.original?.source ?? originalSpell?.source ?? null;
+
+		const res = this.setGrantedSpellOverride({
+			className,
+			featureName,
+			originalSpell: {name: printedName, source: printedSource},
+			replacementSpell,
+		});
+		if (!res.ok) return res;
+
+		this._removeGrantedSwapEntry(className, originalSpell);
+		// A swap that returns to a different slot must also drop the previous
+		// replacement, which is no longer granted by anything.
+		if (prior?.replacement?.name
+			&& String(prior.replacement.name).toLowerCase() !== String(originalSpell?.name || "").toLowerCase()) {
+			this._removeGrantedSwapEntry(className, prior.replacement);
+		}
+		this.populateSubclassSpells();
+		return res;
+	}
+
+	/**
+	 * Targeted removal of one granted-swap entry. Only drops an always-prepared entry
+	 * carrying a `grantedSwapRuleId` (or an exact name+class match on a legacy entry),
+	 * so a player-owned copy of the same spell survives.
+	 * @param {string} className
+	 * @param {{name: string, source?: string}} ref
+	 * @private
+	 */
+	_removeGrantedSwapEntry (className, ref) {
+		if (!ref?.name) return;
+		const want = String(ref.name).toLowerCase();
+		const wantClass = String(className || "").toLowerCase();
+		this._data.spellcasting.spellsKnown = this._data.spellcasting.spellsKnown.filter(s => {
+			if (String(s.name || "").toLowerCase() !== want) return true;
+			if (!s.alwaysPrepared) return true;
+			if (s.grantedSwapRuleId) return false;
+			return !(String(s.sourceClass || "").toLowerCase() === wantClass && /Spells$/i.test(s.sourceFeature || ""));
+		});
+	}
+
+	/**
+	 * Drop a granted-spell swap, restoring the original grant.
+	 * @param {object} opts
+	 * @param {string} opts.className
+	 * @param {?string} [opts.featureName]
+	 * @returns {boolean} whether an override was removed.
+	 */
+	clearGrantedSpellOverride ({className, featureName = null} = {}) {
+		if (!Array.isArray(this._data.grantedSpellOverrides)) return false;
+		const before = this._data.grantedSpellOverrides.length;
+		this._data.grantedSpellOverrides = this._data.grantedSpellOverrides.filter(o => {
+			if (String(o.className || "").toLowerCase() !== String(className || "").toLowerCase()) return true;
+			if (featureName && String(o.featureName || "").toLowerCase() !== String(featureName).toLowerCase()) return true;
+			return false;
+		});
+		return this._data.grantedSpellOverrides.length !== before;
+	}
+
+	/**
+	 * Substitute a granted spell for its recorded replacement, if any.
+	 * @param {*} parsed output of `_parseSpellReference`.
+	 * @param {*} cls the owning class entry.
+	 * @returns {*} the replacement reference, or `parsed` unchanged.
+	 * @private
+	 */
+	_applyGrantedSpellOverride (parsed, cls) {
+		if (!parsed?.name) return parsed;
+		const overrides = this.getGrantedSpellOverrides(cls?.name);
+		if (!overrides.length) return parsed;
+		const hit = overrides.find(o => String(o.original?.name || "").toLowerCase() === String(parsed.name).toLowerCase());
+		if (!hit) return parsed;
+		const replaced = this._parseSpellReference(
+			hit.replacement.source ? `${hit.replacement.name}|${hit.replacement.source}` : hit.replacement.name,
+		);
+		return replaced || parsed;
+	}
+
+	/**
+	 * Build the legal replacement pool for a granted-spell swap from a filter
+	 * descriptor (as published by `getFeatureCalculations().grannysGiftsSwapFilter`).
+	 * Generic: any `{schools, classes, sameLevel}` descriptor works.
+	 * @param {Array<*>} allSpells full spell database.
+	 * @param {{schools?: string[], classes?: string[], sameLevel?: boolean}} filter
+	 * @param {number} level the granted spell's level (used when `sameLevel`).
+	 * @returns {Array<{name: string, source: string, level: number, school: string}>}
+	 */
+	static getGrantedSpellSwapOptions (allSpells, filter, level) {
+		if (!Array.isArray(allSpells) || !filter) return [];
+		const wantSchools = (filter.schools || []).map(s => String(s).toLowerCase());
+		const wantClasses = (filter.classes || []).map(c => String(c).toLowerCase());
+		return allSpells
+			.filter(sp => {
+				if (filter.sameLevel && Number(sp.level) !== Number(level)) return false;
+				if (wantSchools.length && !wantSchools.some(s => CharacterSheetState._isSameSpellSchool(sp.school, s))) return false;
+				if (wantClasses.length) {
+					const onAnyList = (filter.classes || []).some(cn => CharacterSheetClassUtils.spellIsForClass(sp, cn));
+					if (!onAnyList) return false;
+				}
+				return true;
+			})
+			.map(sp => ({name: sp.name, source: sp.source, level: sp.level, school: sp.school}));
 	}
 
 	/**
@@ -14526,6 +14791,13 @@ class CharacterSheetState {
 					// explicit migration step.
 					if (spell.isDivineSoulAffinity && !existing.isDivineSoulAffinity) {
 						existing.isDivineSoulAffinity = true;
+					}
+					// Same for the generic granted-spell swap tags, so old saves gain the
+					// Swap affordance on load without an explicit migration step.
+					if (spell.grantedSwapRuleId && !existing.grantedSwapRuleId) {
+						existing.grantedSwapRuleId = spell.grantedSwapRuleId;
+						existing.grantedSwapFeatureName = spell.grantedSwapFeatureName || null;
+						existing.grantedSwapOriginalName = spell.grantedSwapOriginalName || null;
 					}
 					// Self-heal saves created before subclass-spell enrichment:
 					// backfill a missing/null level (and school) so the spell is no
@@ -15054,6 +15326,10 @@ class CharacterSheetState {
 				subschools: spell.subschools || [],
 				spellcastingAbility: spell.spellcastingAbility || null,
 				isDivineSoulAffinity: spell.isDivineSoulAffinity || false,
+				grantedSwapRuleId: spell.grantedSwapRuleId || null,
+				grantedSwapFeatureName: spell.grantedSwapFeatureName || null,
+				grantedSwapOriginalName: spell.grantedSwapOriginalName || null,
+				isSwappedGrantedSpell: spell.isSwappedGrantedSpell || false,
 				isSubclassChoiceSpell: spell.isSubclassChoiceSpell || false,
 				grantedByClass: spell.grantedByClass || false,
 			});
@@ -16134,6 +16410,38 @@ class CharacterSheetState {
 		if (has("divine strike")) return "Divine Strike";
 		if (has("potent spellcasting")) return "Potent Spellcasting";
 		return null;
+	}
+
+	/**
+	 * The Wicked Witch Sorcerer's chosen Hag Ancestor, resolved from the durable
+	 * `chosenSubfeatures` record and falling back to an applied option feature (the
+	 * inline Builder / QuickBuild paths add the sub-feature without recording a
+	 * pending-choice resolution). Mirrors {@link getChosenBlessedStrikesOption}.
+	 *
+	 * The `specialtySchool` is the mechanically load-bearing half: Clever Little Witch
+	 * (L6) and Coven Calling (L18) halve their Sorcery Point cost for spells of that
+	 * school.
+	 * @returns {?{option: string, kind: string, specialtySchool: string, language: string, skill: string}}
+	 */
+	getHagAncestorKind () {
+		const optionName = (() => {
+			const fromChosen = (this._data.chosenSubfeatures || []).find(r =>
+				String(r.parent || "").toLowerCase() === "hag ancestor");
+			if (fromChosen?.name) return fromChosen.name;
+			const applied = (this._data.features || []).find(f =>
+				/^hag ancestor: /i.test(String(f?.name || "")));
+			return applied?.name || null;
+		})();
+		if (!optionName) return null;
+		const meta = CharacterSheetClassUtils.getTableDrivenOptionMeta("Hag Ancestor", optionName);
+		if (!meta) return null;
+		return {
+			option: optionName,
+			kind: meta.ancestorKind,
+			specialtySchool: meta.specialtySchool,
+			language: meta.language,
+			skill: meta.skill,
+		};
 	}
 
 	/**
@@ -20555,6 +20863,70 @@ class CharacterSheetState {
 									calculations.umbralFormCost = 6;
 									calculations.umbralFormDurationMinutes = 1;
 									calculations.umbralFormResistanceExceptions = ["force", "radiant"];
+								}
+								break;
+							}
+							case "Wicked Witch":
+							case "Wicked Witch Sorcerous Origin": {
+								// Arcadia 8 (`Ar8`), republished by TGTT as `TGTT-AR`. The Ar8
+								// features are authored at levels 1/6/14/18, but on a chassis
+								// that picks its Sorcerous Origin at 3 (XPHB / TGTT) the two
+								// "1st level" features arrive at 3 — the same gate every other
+								// origin above uses.
+								const subclassLevel = is2024 ? 3 : 1;
+								const ancestor = this.getHagAncestorKind();
+								if (level >= subclassLevel) {
+									// --- Granny's Gifts -------------------------------------
+									// The ten granted spells themselves come through the
+									// GENERIC `additionalSpells.known` path
+									// (`getSubclassAlwaysPreparedSpells`); what is bespoke here
+									// is the long-rest ward and the swap allowance.
+									calculations.hasGrannysGifts = true;
+									calculations.grannysGiftsWardRange = 30;
+									calculations.grannysGiftsWardConditions = ["charmed", "frightened"];
+									calculations.grannysGiftsWardTarget = this.getGrannysGiftsWard()?.target || null;
+									// "you can replace one spell you gained from this feature
+									// with another spell of the same level" — an enchantment or
+									// illusion from the sorcerer / warlock / wizard list.
+									calculations.grannysGiftsSwapFilter = {
+										schools: ["Enchantment", "Illusion"],
+										classes: ["Sorcerer", "Warlock", "Wizard"],
+										sameLevel: true,
+									};
+
+									// --- Hag Ancestor ---------------------------------------
+									calculations.hasHagAncestor = true;
+									calculations.hagAncestorKind = ancestor?.kind || null;
+									calculations.hagAncestorSpecialtySchool = ancestor?.specialtySchool || null;
+									calculations.hagAncestorLanguage = ancestor?.language || null;
+									calculations.hagAncestorSkill = ancestor?.skill || null;
+								}
+								// --- Clever Little Witch (level 6) --------------------------
+								if (level >= 6) {
+									calculations.hasCleverLittleWitch = true;
+									calculations.cleverLittleWitchRange = 15;
+									calculations.cleverLittleWitchAction = "reaction";
+									calculations.cleverLittleWitchResource = "Sorcery Points";
+									// Cost is the reflected spell's level, halved and rounded
+									// down when that spell belongs to the ancestor's specialty
+									// school. `getCleverLittleWitchCost()` is the single source
+									// of truth; this is the descriptor the UI reads.
+									calculations.cleverLittleWitchDiscountSchool = ancestor?.specialtySchool || null;
+								}
+								// --- Fly, My Pretty (level 14) -----------------------------
+								if (level >= 14) {
+									calculations.hasFlyMyPretty = true;
+									calculations.flyMyPrettyFlySpeed = 60;
+									calculations.flyMyPrettyItem = this.getEnchantedFlyingItem()?.itemName || null;
+									calculations.flyMyPrettyRiderConditionImmunities = ["charmed", "frightened"];
+								}
+								// --- Coven Calling (level 18) ------------------------------
+								if (level >= 18) {
+									calculations.hasCovenCalling = true;
+									calculations.covenCallingDuplicateCost = 2;
+									calculations.covenCallingDuplicateCount = 2;
+									calculations.covenCallingMaxDuplicateSpellLevel = 3;
+									calculations.covenCallingSeenSpellWindowMinutes = 1;
 								}
 								break;
 							}
@@ -46495,6 +46867,26 @@ class CharacterSheetState {
 			exclusiveWith: ["bladesong"], // Cannot rage and bladesong simultaneously
 			breaksConcentration: true, // Rage prevents maintaining concentration
 		},
+		// --- Wicked Witch Sorcerer (Ar8 / TGTT-AR), level 14 ---------------------
+		// "While a creature is riding the object, it hovers … it has a flying speed of
+		// 60 feet … and the rider can't be charmed or frightened." A toggle, because
+		// the benefits apply only while you are actually riding it.
+		flyMyPretty: {
+			id: "flyMyPretty",
+			name: "Fly, My Pretty",
+			icon: "🧹",
+			description: "Riding your enchanted object: hover with a 60-foot flying speed and immunity to being charmed or frightened.",
+			effects: [
+				{type: "bonus", target: "speed:fly", value: 60},
+				{type: "conditionImmunity", target: "charmed"},
+				{type: "conditionImmunity", target: "frightened"},
+			],
+			preferCuratedEffects: true,
+			duration: "While riding the enchanted object",
+			endConditions: ["You stop riding the object", "The object is destroyed", "You enchant a different object"],
+			detectPatterns: ["^fly, my pretty$"],
+			activationAction: "special",
+		},
 		unearthlyCountenance: {
 			id: "unearthlyCountenance",
 			name: "Unearthly Countenance",
@@ -48287,6 +48679,22 @@ class CharacterSheetState {
 		"vitality of the tree": "passive",
 		"vitality surge": "passive",
 		"life-giving force": "passive",
+
+		// === Wicked Witch Sorcerer (Arcadia 8 `Ar8` / TGTT `TGTT-AR`) ===========
+		// Granny's Gifts grants ten spells (handled by the always-prepared path) plus a
+		// long-rest ward choice. Its clickable half is that choice, so it is a limited-use
+		// ABILITY, never a persistent toggle.
+		"granny's gifts": "ability",
+		// Hag Ancestor only publishes a specialty school + language + skill; the grants are
+		// registered by name in FeatureEffectRegistry and its Charisma-vs-hags rider is a
+		// conditional modifier. Nothing to activate.
+		"hag ancestor": "passive",
+		// Clever Little Witch is explicitly "when a creature you can see within 15 feet of
+		// you casts a spell, you can use your reaction…" — a reaction, not a toggle.
+		"clever little witch": "reaction",
+		// Coven Calling's active half is an ACTION that spends 2 sorcery points to summon
+		// two duplicates; its Clever Little Witch upgrade is resolved at reaction time.
+		"coven calling": "ability",
 	};
 
 	/**
@@ -54682,6 +55090,14 @@ class CharacterSheetState {
 			this._data.psionicStrainIgnored = null;
 		}
 
+		// Granny's Gifts (Wicked Witch Sorcerer): the ward is chosen anew on every long
+		// rest, so drop the old one (and its named modifiers) rather than stacking.
+		this.clearGrannysGiftsWard();
+		// Coven Calling's "spells you've seen in the last minute" window cannot survive a
+		// rest, and the duplicates are destroyed by any damage long before one ends.
+		this.clearSeenSpells();
+		this.dismissCovenDuplicates();
+
 		// Recover stamina (Thelemar: recovers on any rest)
 		this.restoreStamina();
 
@@ -55213,6 +55629,402 @@ class CharacterSheetState {
 		const dist = distance == null ? range : Math.floor(Number(distance) || 0);
 		if (dist > range) return {ok: false, error: `Shadow Walk can teleport you up to ${range} feet.`, range};
 		return {ok: true, distance: dist, range, action: calc.shadowWalkAction || "bonus"};
+	}
+	// #endregion
+
+	// #region Wicked Witch Sorcerer (Arcadia 8 `Ar8` / TGTT `TGTT-AR`)
+
+	/** The two conditions Granny's Gifts wards against. */
+	static GRANNYS_GIFTS_WARD_CONDITIONS = ["charmed", "frightened"];
+
+	/** Companion name used for the two Coven Calling hag duplicates. */
+	static COVEN_DUPLICATE_NAME = "Hag Duplicate";
+
+	/**
+	 * Lazily-created container for all Wicked Witch durable state. Kept under a single
+	 * key so `toJson()`/`loadFromJson()` round-trip it without per-field migrations.
+	 * @returns {{ward: ?object, flyingItem: ?object, seenSpells: object[]}}
+	 * @private
+	 */
+	_getWickedWitchState () {
+		if (!this._data.wickedWitch || typeof this._data.wickedWitch !== "object") {
+			this._data.wickedWitch = {ward: null, flyingItem: null, seenSpells: []};
+		}
+		const ww = this._data.wickedWitch;
+		if (!Array.isArray(ww.seenSpells)) ww.seenSpells = [];
+		if (ww.ward === undefined) ww.ward = null;
+		if (ww.flyingItem === undefined) ww.flyingItem = null;
+		return ww;
+	}
+
+	// --- Granny's Gifts: the long-rest ward -------------------------------------
+
+	/**
+	 * The active Granny's Gifts ward, or null.
+	 * @returns {?{target: string, targetName: ?string, conditions: string[], modifierIds: string[]}}
+	 */
+	getGrannysGiftsWard () {
+		return this._getWickedWitchState().ward || null;
+	}
+
+	/**
+	 * Granny's Gifts: "Whenever you finish a long rest, choose yourself or one creature
+	 * you can see within 30 feet of you. The chosen creature has advantage on saving
+	 * throws against being charmed or frightened."
+	 *
+	 * When the target is YOU the ward registers two real `save:advantage:<condition>`
+	 * named modifiers, so it changes sheet output rather than being prose. When the
+	 * target is an ally the sheet has no cross-character machinery (see
+	 * docs/charactersheet/10-known-limitations.md), so the ward is recorded as a
+	 * displayed designation with no self-modifiers.
+	 *
+	 * @param {object} [opts]
+	 * @param {"self"|"ally"} [opts.target="self"]
+	 * @param {?string} [opts.targetName] required when `target` is `"ally"`.
+	 * @returns {{ok: boolean, error?: string, ward?: object}}
+	 */
+	setGrannysGiftsWard ({target = "self", targetName = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasGrannysGifts) return {ok: false, error: "You don't have Granny's Gifts."};
+		const tgt = String(target).toLowerCase();
+		if (tgt !== "self" && tgt !== "ally") return {ok: false, error: `Unknown ward target "${target}".`};
+		if (tgt === "ally" && !String(targetName || "").trim()) {
+			return {ok: false, error: "Name the ally you are warding."};
+		}
+
+		// A new ward always supersedes the old one.
+		this.clearGrannysGiftsWard();
+
+		const conditions = [...CharacterSheetState.GRANNYS_GIFTS_WARD_CONDITIONS];
+		const modifierIds = [];
+		if (tgt === "self") {
+			conditions.forEach(cond => {
+				const id = this.addNamedModifier({
+					name: `Granny's Gifts (${cond})`,
+					type: `save:advantage:${cond}`,
+					value: 1,
+					note: `Advantage on saving throws against being ${cond}.`,
+					sourceFeatureId: "grannys-gifts",
+					sourceType: "classFeature",
+					duration: "Until your next long rest",
+				});
+				if (id) modifierIds.push(id);
+			});
+		}
+
+		const ward = {
+			target: tgt,
+			targetName: tgt === "self" ? (this.getName?.() || "You") : String(targetName).trim(),
+			conditions,
+			modifierIds,
+		};
+		this._getWickedWitchState().ward = ward;
+		return {ok: true, ward};
+	}
+
+	/**
+	 * Drop the current ward and its named modifiers. Called on every long rest so the
+	 * choice is genuinely re-made rather than accumulating.
+	 * @returns {boolean} whether a ward was cleared.
+	 */
+	clearGrannysGiftsWard () {
+		const ww = this._getWickedWitchState();
+		if (!ww.ward) return false;
+		(ww.ward.modifierIds || []).forEach(id => this.removeNamedModifier(id));
+		ww.ward = null;
+		return true;
+	}
+
+	// --- Clever Little Witch (6) ------------------------------------------------
+
+	/**
+	 * Sorcery Point cost to reflect a spell with Clever Little Witch.
+	 *
+	 * "you can spend a number of sorcery points equal to the spell's level to cast that
+	 * spell back at its caster … If the spell is from your specialty school, you only
+	 * need to spend half that number of sorcery points, rounded down."
+	 *
+	 * Rounding down means a 1st-level specialty-school spell is FREE — that is RAW, and
+	 * is why the floor is not clamped to a minimum of 1.
+	 *
+	 * @param {number} spellLevel the triggering spell's level.
+	 * @param {?string} [school] the triggering spell's school (name or 5etools code).
+	 * @returns {?number} the cost in Sorcery Points, or null if the spell can't be reflected.
+	 */
+	getCleverLittleWitchCost (spellLevel, school = null) {
+		const lvl = Math.floor(Number(spellLevel));
+		if (!Number.isFinite(lvl) || lvl < 1) return null;
+		const specialty = this.getFeatureCalculations().hagAncestorSpecialtySchool;
+		if (specialty && CharacterSheetState._isSameSpellSchool(school, specialty)) {
+			return Math.floor(lvl / 2);
+		}
+		return lvl;
+	}
+
+	/**
+	 * Compare a spell school given either as a full name ("Illusion") or a 5etools
+	 * single-letter code ("I"). Case-insensitive.
+	 * @param {?string} a
+	 * @param {?string} b
+	 * @returns {boolean}
+	 * @private
+	 */
+	static _isSameSpellSchool (a, b) {
+		const norm = (s) => {
+			const raw = String(s || "").trim().toLowerCase();
+			if (!raw) return "";
+			const byCode = {a: "abjuration", c: "conjuration", d: "divination", e: "enchantment", v: "evocation", i: "illusion", n: "necromancy", t: "transmutation"};
+			return raw.length === 1 ? (byCode[raw] || raw) : raw;
+		};
+		const na = norm(a);
+		const nb = norm(b);
+		return !!na && na === nb;
+	}
+
+	/**
+	 * Spend Sorcery Points to reflect a spell with Clever Little Witch.
+	 * @param {object} opts
+	 * @param {number} opts.spellLevel
+	 * @param {?string} [opts.school]
+	 * @param {?string} [opts.spellName]
+	 * @param {?number} [opts.distance] distance to the caster in feet.
+	 * @returns {{ok: boolean, error?: string, cost?: number, discounted?: boolean, range?: number, sorceryPointsRemaining?: number}}
+	 */
+	useCleverLittleWitch ({spellLevel, school = null, spellName = null, distance = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCleverLittleWitch) return {ok: false, error: "You don't have Clever Little Witch."};
+		const range = calc.cleverLittleWitchRange ?? 15;
+		if (distance != null && Number(distance) > range) {
+			return {ok: false, error: `Clever Little Witch only reaches ${range} feet.`, range};
+		}
+		const cost = this.getCleverLittleWitchCost(spellLevel, school);
+		if (cost == null) {
+			return {ok: false, error: "Clever Little Witch only works on spells of 1st level or higher.", range};
+		}
+		const sp = this.getSorceryPoints();
+		if (cost > 0 && sp.current < cost) {
+			return {ok: false, error: `Reflecting that spell costs ${cost} Sorcery Points (you have ${sp.current}).`, cost, range};
+		}
+		if (cost > 0 && !this.useSorceryPoint(cost)) {
+			return {ok: false, error: "Could not spend Sorcery Points.", cost, range};
+		}
+		return {
+			ok: true,
+			cost,
+			discounted: cost !== Math.floor(Number(spellLevel)),
+			spellName,
+			range,
+			spellSaveDc: this.getSpellSaveDC(),
+			spellAttackBonus: this.getSpellAttackBonus(),
+			sorceryPointsRemaining: this.getSorceryPoints().current,
+		};
+	}
+
+	// --- Fly, My Pretty (14) ----------------------------------------------------
+
+	/**
+	 * The currently enchanted Fly, My Pretty object, or null.
+	 * @returns {?{itemName: string, commandWord: string, flySpeed: number}}
+	 */
+	getEnchantedFlyingItem () {
+		return this._getWickedWitchState().flyingItem || null;
+	}
+
+	/**
+	 * Fly, My Pretty: "whenever you finish a long rest, you can touch one Small or Medium
+	 * object … choose a command word". Enchanting a new object ends the previous
+	 * enchantment, so this is a strict one-at-a-time replacement.
+	 * @param {object} opts
+	 * @param {string} opts.itemName
+	 * @param {string} opts.commandWord
+	 * @returns {{ok: boolean, error?: string, item?: object, replaced?: ?string}}
+	 */
+	enchantFlyingItem ({itemName, commandWord} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasFlyMyPretty) return {ok: false, error: "You don't have Fly, My Pretty."};
+		const nm = String(itemName || "").trim();
+		if (!nm) return {ok: false, error: "Name the object you are enchanting."};
+		const word = String(commandWord || "").trim();
+		if (!word) return {ok: false, error: "Choose a command word."};
+
+		const ww = this._getWickedWitchState();
+		const replaced = ww.flyingItem?.itemName || null;
+		ww.flyingItem = {itemName: nm, commandWord: word, flySpeed: calc.flyMyPrettyFlySpeed ?? 60};
+		return {ok: true, item: ww.flyingItem, replaced};
+	}
+
+	/** End the Fly, My Pretty enchantment (and stop riding it). */
+	dismissEnchantedFlyingItem () {
+		const ww = this._getWickedWitchState();
+		if (!ww.flyingItem) return false;
+		ww.flyingItem = null;
+		if (this.isStateActive?.("flyMyPretty")) this.deactivateState("flyMyPretty");
+		return true;
+	}
+
+	// --- Coven Calling (18) -----------------------------------------------------
+
+	/**
+	 * Record a spell you saw a creature cast, so Coven Calling can offer it as a Clever
+	 * Little Witch alternative ("any spell you have seen that creature cast in the last
+	 * minute"). Entries older than the one-minute window are pruned on read.
+	 * @param {object} opts
+	 * @param {string} opts.spellName
+	 * @param {number} opts.spellLevel
+	 * @param {?string} [opts.school]
+	 * @param {?string} [opts.casterName]
+	 * @param {?number} [opts.round] combat round the spell was seen on (10 rounds = 1 minute).
+	 * @returns {?object} the recorded entry.
+	 */
+	recordSeenSpell ({spellName, spellLevel, school = null, casterName = null, round = null} = {}) {
+		const nm = String(spellName || "").trim();
+		if (!nm) return null;
+		const entry = {
+			spellName: nm,
+			spellLevel: Math.floor(Number(spellLevel) || 0),
+			school: school || null,
+			casterName: casterName || null,
+			round: round == null ? null : Math.floor(Number(round) || 0),
+			seenAt: Date.now(),
+		};
+		this._getWickedWitchState().seenSpells.push(entry);
+		return entry;
+	}
+
+	/**
+	 * Spells seen in the last minute, optionally filtered to one caster.
+	 * @param {object} [opts]
+	 * @param {?string} [opts.casterName]
+	 * @param {?number} [opts.currentRound]
+	 * @returns {object[]}
+	 */
+	getSeenSpells ({casterName = null, currentRound = null} = {}) {
+		const ww = this._getWickedWitchState();
+		const windowMs = 60_000;
+		const now = Date.now();
+		ww.seenSpells = ww.seenSpells.filter(e => {
+			if (currentRound != null && e.round != null) return (currentRound - e.round) <= 10;
+			return (now - (e.seenAt || 0)) <= windowMs;
+		});
+		if (!casterName) return [...ww.seenSpells];
+		const want = String(casterName).toLowerCase();
+		return ww.seenSpells.filter(e => String(e.casterName || "").toLowerCase() === want);
+	}
+
+	/** Forget every seen spell (combat ended, or the minute lapsed). */
+	clearSeenSpells () {
+		this._getWickedWitchState().seenSpells = [];
+	}
+
+	/**
+	 * Coven Calling's Clever Little Witch upgrade: instead of reflecting the triggering
+	 * spell, cast ANY spell you saw that creature cast in the last minute, at the same
+	 * cost (and the same specialty-school discount).
+	 * @param {object} opts
+	 * @param {string} opts.spellName the seen spell you are casting instead.
+	 * @param {?string} [opts.casterName]
+	 * @param {?number} [opts.currentRound]
+	 * @param {?number} [opts.distance]
+	 * @returns {{ok: boolean, error?: string, cost?: number, spellName?: string}}
+	 */
+	useCovenCallingReflection ({spellName, casterName = null, currentRound = null, distance = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCovenCalling) return {ok: false, error: "You don't have Coven Calling."};
+		const want = String(spellName || "").trim().toLowerCase();
+		const seen = this.getSeenSpells({casterName, currentRound})
+			.find(e => e.spellName.toLowerCase() === want);
+		if (!seen) return {ok: false, error: `You haven't seen ${spellName || "that spell"} cast in the last minute.`};
+		return this.useCleverLittleWitch({
+			spellLevel: seen.spellLevel,
+			school: seen.school,
+			spellName: seen.spellName,
+			distance,
+		});
+	}
+
+	/** The active Coven Calling duplicates. */
+	getCovenDuplicates () {
+		return (this.getCompanions() || []).filter(c => c.name?.startsWith(CharacterSheetState.COVEN_DUPLICATE_NAME));
+	}
+
+	/**
+	 * Coven Calling: "As an action, you can spend 2 sorcery points to create two
+	 * duplicates of yourself … They act immediately after your turn."
+	 *
+	 * The duplicates are registered through the GENERIC `COMPANION_TYPES.CLASS_SUMMON`
+	 * path so they appear in the companions panel, roll initiative alongside you and are
+	 * cleaned up by the normal companion lifecycle.
+	 * @returns {{ok: boolean, error?: string, duplicates?: object[], sorceryPointsRemaining?: number}}
+	 */
+	summonCovenDuplicates () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCovenCalling) return {ok: false, error: "You don't have Coven Calling."};
+		const cost = calc.covenCallingDuplicateCost ?? 2;
+		const sp = this.getSorceryPoints();
+		if (sp.current < cost) return {ok: false, error: `Coven Calling costs ${cost} Sorcery Points (you have ${sp.current}).`};
+
+		// A fresh casting replaces any duplicates still standing.
+		this.dismissCovenDuplicates();
+		if (!this.useSorceryPoint(cost)) return {ok: false, error: "Could not spend Sorcery Points."};
+
+		const count = calc.covenCallingDuplicateCount ?? 2;
+		const ids = [];
+		for (let i = 1; i <= count; ++i) {
+			ids.push(this.addCompanion({
+				name: `${CharacterSheetState.COVEN_DUPLICATE_NAME} ${i}`,
+				type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+				creatureName: "Hag Duplicate",
+				size: "M",
+				creatureType: "fey",
+				ac: 10 + this.getAbilityMod("dex"),
+				hp: {max: 1, current: 1},
+				speed: {walk: this.getSpeedByType("walk") || 30},
+				summonedBy: "Coven Calling",
+				traits: [
+					{name: "Illusory", description: "The duplicate is destroyed by any damage. It mimics your actions, and acts immediately after your turn."},
+					{name: "Borrowed Magic", description: `The duplicate can cast one spell you know of 3rd level or lower that has an instantaneous duration, costing you sorcery points equal to the spell's level.`},
+				],
+			}));
+		}
+
+		return {
+			ok: true,
+			duplicates: ids.map(id => this.getCompanion(id)).filter(Boolean),
+			sorceryPointsRemaining: this.getSorceryPoints().current,
+		};
+	}
+
+	/** Dismiss every Coven Calling duplicate. */
+	dismissCovenDuplicates () {
+		const dups = this.getCovenDuplicates();
+		if (!dups.length) return false;
+		dups.forEach(d => this.removeCompanion(d.id));
+		return true;
+	}
+
+	/**
+	 * Have one of the duplicates cast a spell: "one spell you know of 3rd level or lower
+	 * that has an instantaneous duration … costing you sorcery points equal to the
+	 * spell's level."
+	 * @param {object} opts
+	 * @param {string} opts.spellName
+	 * @param {number} opts.spellLevel
+	 * @param {boolean} [opts.instantaneous=true]
+	 * @returns {{ok: boolean, error?: string, cost?: number, sorceryPointsRemaining?: number}}
+	 */
+	castWithCovenDuplicate ({spellName, spellLevel, instantaneous = true} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCovenCalling) return {ok: false, error: "You don't have Coven Calling."};
+		if (!this.getCovenDuplicates().length) return {ok: false, error: "You have no Coven Calling duplicates."};
+		const maxLevel = calc.covenCallingMaxDuplicateSpellLevel ?? 3;
+		const lvl = Math.floor(Number(spellLevel));
+		if (!Number.isFinite(lvl) || lvl < 1) return {ok: false, error: "A duplicate can only cast spells of 1st level or higher."};
+		if (lvl > maxLevel) return {ok: false, error: `A duplicate can only cast spells of ${maxLevel}rd level or lower.`};
+		if (!instantaneous) return {ok: false, error: "A duplicate can only cast spells with an instantaneous duration."};
+		const sp = this.getSorceryPoints();
+		if (sp.current < lvl) return {ok: false, error: `That costs ${lvl} Sorcery Points (you have ${sp.current}).`};
+		if (!this.useSorceryPoint(lvl)) return {ok: false, error: "Could not spend Sorcery Points."};
+		return {ok: true, cost: lvl, spellName, sorceryPointsRemaining: this.getSorceryPoints().current};
 	}
 	// #endregion
 

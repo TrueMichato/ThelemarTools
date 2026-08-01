@@ -3060,6 +3060,179 @@ class CharacterSheetClassUtils {
 		return out.sort((a, b) => a.name.localeCompare(b.name));
 	}
 
+	// =========================================================================
+	// Table-driven sub-feature choices.
+	//
+	// Some subclass features present a real, mechanically-load-bearing choice as
+	// PROSE plus a `{@table …}` reference rather than as structured
+	// `refSubclassFeature` options ("choose your ancestor's kind or determine it
+	// randomly on the Ancestor Kind table … The magic specialty associated with each
+	// hag is used by features you gain later"). `FeatureChoiceParser` cannot see
+	// those, and the character sheet does not load `table` data at all, so the rows
+	// are mirrored here as a declarative registry and fed through the SAME
+	// pending-feature-choice pipeline every flow already drains.
+	//
+	// Each option is a synthetic sub-feature: `_fulfillSubfeatureChoice` adds it as a
+	// real feature, so the name-keyed `FeatureEffectRegistry` grants its language /
+	// skill proficiency, and the pick is recorded durably in `_data.chosenSubfeatures`
+	// (surviving reload, respec and multiclass scoping) where
+	// `getFeatureCalculations()` reads it back.
+	//
+	// Adding another such subclass is ONE registry entry.
+	// =========================================================================
+
+	/**
+	 * GENERIC live-state badges for the Features tab header, keyed by lowercase feature
+	 * name. Each builder is a pure `(state) => ?{text, title, cls}` — it reads state and
+	 * returns a badge, or null when the feature has nothing live to report.
+	 *
+	 * This is the reusable answer to "an ability whose current state is neither a use
+	 * counter nor a toggle" (a designated ward target, an enchanted object, a standing
+	 * pair of summons). Before this existed, such state was invisible unless a subclass
+	 * hand-rolled a bespoke block (cf. Primal Focus).
+	 * @type {Record<string, (state: *) => ?{text: string, title: string, cls?: string}>}
+	 */
+	static FEATURE_STATUS_BADGES = {
+		"granny's gifts": (state) => {
+			const ward = state.getGrannysGiftsWard?.();
+			if (!ward) return {text: "🧿 No ward", title: "Choose yourself or an ally to ward after your next long rest.", cls: "badge-secondary"};
+			return {
+				text: `🧿 ${ward.targetName}`,
+				title: `${ward.targetName} has advantage on saving throws against being ${ward.conditions.join(" or ")} until your next long rest.`,
+				cls: "badge-info",
+			};
+		},
+		"hag ancestor": (state) => {
+			const anc = state.getHagAncestorKind?.();
+			if (!anc?.kind) return {text: "❓ Ancestor unchosen", title: "Choose Green, Night or Sea hag ancestry.", cls: "badge-danger"};
+			return {
+				text: `🧹 ${anc.kind} · ${anc.specialtySchool}`,
+				title: `${anc.kind} hag ancestry — specialty school ${anc.specialtySchool}, ${anc.language}, ${anc.skill}.`,
+				cls: "badge-info",
+			};
+		},
+		"clever little witch": (state) => {
+			const anc = state.getHagAncestorKind?.();
+			if (!anc?.specialtySchool) return null;
+			return {
+				text: `½ on ${anc.specialtySchool}`,
+				title: `Reflecting a ${anc.specialtySchool} spell costs half the sorcery points, rounded down.`,
+				cls: "badge-secondary",
+			};
+		},
+		"fly, my pretty": (state) => {
+			const item = state.getEnchantedFlyingItem?.();
+			if (!item) return {text: "🧹 Nothing enchanted", title: "Enchant a Small or Medium object after a long rest.", cls: "badge-secondary"};
+			return {text: `🧹 ${item.itemName}`, title: `Command word "${item.commandWord}" — a rider hovers with a ${item.flySpeed} ft flying speed.`, cls: "badge-info"};
+		},
+		"coven calling": (state) => {
+			const dups = state.getCovenDuplicates?.() || [];
+			if (!dups.length) return null;
+			return {text: `🜲 ${dups.length}`, title: `${dups.length} duplicate${dups.length === 1 ? "" : "s"} standing.`, cls: "badge-info"};
+		},
+	};
+
+	/**
+	 * Header badge HTML for a feature's live state, or "" when it has none.
+	 * @param {string} featureName
+	 * @param {*} state CharacterSheetState
+	 * @returns {string}
+	 */
+	static getFeatureStatusBadgeHtml (featureName, state) {
+		if (!featureName || !state) return "";
+		const build = CharacterSheetClassUtils.FEATURE_STATUS_BADGES[String(featureName).toLowerCase()];
+		if (!build) return "";
+		let badge = null;
+		try { badge = build(state); } catch (ignored) { return ""; }
+		if (!badge?.text) return "";
+		const title = String(badge.title || "").replace(/"/g, "&quot;");
+		return `<span class="badge ${badge.cls || "badge-secondary"}" title="${title}">${badge.text}</span>`;
+	}
+
+	/**
+	 * Declarative mirrors of published choice tables, keyed `featureName|featureSource`
+	 * (both lowercase). `meta` carries the mechanical payload later features read;
+	 * `entries` is the option's own rules text, rendered on the Features tab.
+	 * @type {Record<string, {options: Array<{name: string, source: string, shortName: string, description: string, entries: string[], meta: Record<string, *>}>}>}
+	 */
+	static TABLE_DRIVEN_SUBFEATURE_CHOICES = {
+		// Wicked Witch Sorcerous Origin (Arcadia 8) — "Ancestor Kind" table.
+		// Republished verbatim by TGTT as `TGTT-AR`, so both source keys map here.
+		"hag ancestor|ar8": CharacterSheetClassUtils._buildHagAncestorOptions("Ar8"),
+		"hag ancestor|tgtt-ar": CharacterSheetClassUtils._buildHagAncestorOptions("TGTT-AR"),
+	};
+
+	/**
+	 * The three Ancestor Kind rows, as synthetic sub-features.
+	 *
+	 * NOTE the deliberate asymmetry, which is in the source and is not a bug: the Sea
+	 * hag's specialty is **Transmutation** while Granny's Gifts' replacement pool is
+	 * enchantment/illusion only. The specialty governs the Clever Little Witch /
+	 * Coven Calling discount; the spell list governs the swap pool. They are
+	 * independent.
+	 * @param {string} source Source abbreviation to stamp on the synthetic options.
+	 * @returns {{options: Array<*>}}
+	 */
+	static _buildHagAncestorOptions (/** @type {*} */ source) {
+		/** @type {Array<{kind: string, school: string, language: string, skill: string, skillKey: string}>} */
+		const rows = [
+			{kind: "Green", school: "Illusion", language: "Sylvan", skill: "Deception", skillKey: "deception"},
+			{kind: "Night", school: "Enchantment", language: "Abyssal", skill: "Insight", skillKey: "insight"},
+			{kind: "Sea", school: "Transmutation", language: "Primordial", skill: "Intimidation", skillKey: "intimidation"},
+		];
+		return {
+			options: rows.map(row => ({
+				name: `Hag Ancestor: ${row.kind} Hag`,
+				shortName: row.kind,
+				source,
+				description: `${row.school} specialty · ${row.language} · ${row.skill} proficiency`,
+				entries: [
+					`Your ancestor was a ${row.kind.toLowerCase()} hag. Your ancestor's magic specialty is the school of ${row.school.toLowerCase()}, which is used by features you gain later.`,
+					`You can speak, read, and write ${row.language}, and you gain proficiency in the ${row.skill} skill.`,
+				],
+				meta: {
+					ancestorKind: row.kind,
+					specialtySchool: row.school,
+					language: row.language,
+					skill: row.skillKey,
+				},
+			})),
+		};
+	}
+
+	/**
+	 * Look up the table-driven choice a feature offers, if any.
+	 * @param {*} feature
+	 * @returns {{options: Array<*>}|null}
+	 */
+	static findTableDrivenSubfeatureChoiceInFeature (/** @type {*} */ feature) {
+		const name = String(feature?.name || "").trim().toLowerCase();
+		const source = String(feature?.source || "").trim().toLowerCase();
+		if (!name) return null;
+		const exact = CharacterSheetClassUtils.TABLE_DRIVEN_SUBFEATURE_CHOICES[`${name}|${source}`];
+		if (exact) return exact;
+		// Source-agnostic fallback: a republished copy of the same feature under a
+		// different source key must still offer the choice.
+		const anySource = Object.entries(CharacterSheetClassUtils.TABLE_DRIVEN_SUBFEATURE_CHOICES)
+			.find(([key]) => key.split("|")[0] === name);
+		return anySource ? anySource[1] : null;
+	}
+
+	/**
+	 * The `meta` payload of a chosen table-driven option, resolved from a durable
+	 * `chosenSubfeatures` record (or an already-applied feature) by option NAME.
+	 * @param {string} featureName Parent feature (e.g. "Hag Ancestor").
+	 * @param {string} optionName Chosen option name (e.g. "Hag Ancestor: Green Hag").
+	 * @returns {Record<string, *>|null}
+	 */
+	static getTableDrivenOptionMeta (/** @type {*} */ featureName, /** @type {*} */ optionName) {
+		const registryEntry = CharacterSheetClassUtils.findTableDrivenSubfeatureChoiceInFeature({name: featureName});
+		if (!registryEntry) return null;
+		const opt = registryEntry.options.find((/** @type {*} */ o) =>
+			String(o.name).toLowerCase() === String(optionName || "").toLowerCase());
+		return opt ? opt.meta : null;
+	}
+
 	/**
 	 * Seed pending feature choices (skill proficiency + bonus off-list cantrip) for any
 	 * subclass features in `features` that grant them (e.g. Moon Bard "Primal Lore").
@@ -3101,6 +3274,32 @@ class CharacterSheetClassUtils {
 						featureId,
 						kind: "cantrip",
 						options,
+						count: 1,
+					})) seeded = true;
+				}
+			}
+
+			// Table-driven prose choices (Wicked Witch "Hag Ancestor", …) — a real
+			// mechanical pick the source publishes as a table rather than as structured
+			// options. Same guards as the structured branch below: skip once resolved for
+			// this parent-instance, or once an option feature is already applied.
+			const tableChoice = CharacterSheetClassUtils.findTableDrivenSubfeatureChoiceInFeature(feature);
+			if (tableChoice?.options?.length >= 2) {
+				const alreadyResolved = typeof state.hasChosenSubfeatureForParent === "function"
+					&& state.hasChosenSubfeatureForParent(feature.name, null, null, feature.className, feature.classSource);
+				const optionNames = new Set(tableChoice.options.map((/** @type {*} */ o) => String(o.name).toLowerCase()));
+				const alreadyApplied = (state._data?.features || []).some((/** @type {*} */ f) =>
+					optionNames.has(String(f?.name || "").toLowerCase()));
+				if (!alreadyResolved && !alreadyApplied) {
+					if (state.addPendingFeatureChoice({
+						featureName: feature.name,
+						featureId,
+						featureSource: feature.source,
+						featureClass: feature.className,
+						featureClassSource: feature.classSource,
+						level: feature.level,
+						kind: "subfeature",
+						options: tableChoice.options,
 						count: 1,
 					})) seeded = true;
 				}
