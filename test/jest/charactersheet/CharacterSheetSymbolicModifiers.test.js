@@ -195,6 +195,64 @@ describe("CS-BUG-038 — symbolic modifier values resolve to numbers", () => {
 		});
 	});
 
+	describe("readers that bypass _getNamedModifierEffectiveValue are hardened too", () => {
+		// These paths read `mod.value` directly (they apply their own perLevel /
+		// proficiency rules), so the chokepoint alone does not protect them. No SHIPPING
+		// registry entry currently puts a symbolic token on these types — this pins the
+		// latent hazard so the next one that does cannot render concatenated garbage.
+		//
+		// Each case below was FALSIFIED by reverting the hardening and confirming it goes
+		// red. `_getSkillFeatureBonus` is deliberately absent: it was hardened too, but it
+		// currently has ZERO callers, so any test of it would be green-on-revert and would
+		// prove nothing.
+		const CASES = [
+			{type: "sense:darkvision", read: st => st.getSense("darkvision"), label: "getSense"},
+			{type: "reach", read: st => st.getReachContributions().reduce((t, c) => t + c.value, 0), label: "getReachContributions"},
+		];
+
+		CASES.forEach(({type, read, label}) => {
+			it(`${label} resolves a symbolic value instead of concatenating it`, () => {
+				const state = makeState();
+				state.addNamedModifier({name: "Probe", type, value: "conModx2", sourceType: "classFeature"});
+				state._recalculateCustomModifiers();
+
+				expectStoredValue(state, "Probe", "conModx2");
+
+				const got = read(state);
+				expect(typeof got).toBe("number");
+				expect(Number.isFinite(got)).toBe(true);
+				expect(String(got)).not.toMatch(/conModx2/);
+			});
+		});
+
+		it("getSenses() matches getSense() for a symbolic sense modifier", () => {
+			const state = makeState();
+			state.addNamedModifier({name: "Probe", type: "sense:darkvision", value: "conModx2", sourceType: "classFeature"});
+			state._recalculateCustomModifiers();
+			expectStoredValue(state, "Probe", "conModx2");
+			expect(state.getSenses().darkvision).toBe(state.getSense("darkvision"));
+			expect(Number.isFinite(state.getSenses().darkvision)).toBe(true);
+		});
+
+		it("getHpBreakdown's per-source display rows stay numeric", () => {
+			const state = makeState();
+			state.addNamedModifier({name: "Probe", type: "hp", value: "conModx2", sourceType: "classFeature"});
+			state._recalculateCustomModifiers();
+
+			expectStoredValue(state, "Probe", "conModx2");
+
+			// NB: assert on the SOURCE ROWS, not on `.total`. The total is reconciled
+			// against `customModifiers.hp` a few lines later and so is immune by accident —
+			// an assertion on it is green-on-revert and proves nothing. The source rows are
+			// what the breakdown UI actually renders.
+			const row = state.getHpBreakdown().flatBonus.sources.find(s => s.name === "Probe");
+			expect(row).toBeDefined();
+			expect(typeof row.value).toBe("number");
+			expect(Number.isFinite(row.value)).toBe(true);
+			expect(String(row.value)).not.toMatch(/conModx2/);
+		});
+	});
+
 	describe("no regression to the one token that already worked", () => {
 		it("still converts \"proficiency\" into a proficiency-bonus flag", () => {
 			const state = makeState();

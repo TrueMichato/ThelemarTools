@@ -6850,7 +6850,8 @@ class CharacterSheetState {
 		// 1) Named modifiers (user / ability toggleable reach mods)
 		for (const mod of (this._data.namedModifiers || [])) {
 			if (mod.type === "reach" && mod.enabled) {
-				contributions.push({source: mod.name || "Modifier", value: mod.value || 0});
+				// Resolve symbolic values before this feeds arithmetic/display (CS-BUG-038).
+				contributions.push({source: mod.name || "Modifier", value: this._resolveSymbolicModifierValue(mod.value) ?? 0});
 			}
 		}
 
@@ -8334,11 +8335,14 @@ class CharacterSheetState {
 			return this._data.namedModifiers
 				?.filter(m => m.enabled && m.type === `sense:${senseType}`)
 				?.reduce((total, m) => {
+					// Symbolic values ("proficiency", "conModx2", …) must be resolved to a
+					// number before arithmetic, or `+` concatenates (CS-BUG-038).
+					const v = this._resolveSymbolicModifierValue(m.value) ?? 0;
 					// If setValue is true, take the max value; otherwise add
 					if (m.setValue) {
-						return Math.max(total, m.value || 0);
+						return Math.max(total, v);
 					}
-					return total + (m.value || 0);
+					return total + v;
 				}, 0) || 0;
 		};
 
@@ -8365,10 +8369,12 @@ class CharacterSheetState {
 		const namedBonus = this._data.namedModifiers
 			?.filter(m => m.enabled && m.type === `sense:${sense}`)
 			?.reduce((total, m) => {
+				// See getSenses(): resolve symbolic values before arithmetic (CS-BUG-038).
+				const v = this._resolveSymbolicModifierValue(m.value) ?? 0;
 				if (m.setValue) {
-					return Math.max(total, m.value || 0);
+					return Math.max(total, v);
 				}
-				return total + (m.value || 0);
+				return total + v;
 			}, 0) || 0;
 
 		// Mirror getSenses(): floor across base/custom/item/state, plus additive named + item bonuses
@@ -9091,7 +9097,10 @@ class CharacterSheetState {
 		let flatValue = 0;
 		let perLevelValue = 0;
 		hpMods.forEach(m => {
-			const v = m.value || 0;
+			// Resolve symbolic values before arithmetic (CS-BUG-038). The resolver is used
+			// rather than _getNamedModifierEffectiveValue because `perLevel` is applied
+			// locally below — the helper would double-apply it.
+			const v = this._resolveSymbolicModifierValue(m.value) ?? 0;
 			if (m.perLevel) {
 				perLevelValue += v;
 				perLevelSources.push({name: m.name || "Unnamed", value: v});
@@ -10146,7 +10155,9 @@ class CharacterSheetState {
 				if (mod.minValue != null) v = Math.max(mod.minValue, v);
 				total += v;
 			} else {
-				total += mod.value || 0;
+				// Resolve symbolic values before arithmetic (CS-BUG-038); `proficiencyBonus`
+				// and `abilityMod` are handled by the branches above.
+				total += this._resolveSymbolicModifierValue(mod.value) ?? 0;
 			}
 		});
 
@@ -38545,7 +38556,8 @@ class CharacterSheetState {
 		for (const mod of staminaMods) {
 			// Conditional (opt-in) modifiers never contribute to a standing pool size.
 			if (mod.conditional) continue;
-			calculatedMax += (mod.value || 0);
+			// Resolve symbolic values before arithmetic (CS-BUG-038).
+			calculatedMax += this._resolveSymbolicModifierValue(mod.value) ?? 0;
 		}
 
 		const previousMax = this._data.staminaMax;
