@@ -22,6 +22,8 @@ describeCharacter({
 	preset: PRESET_FULL_<NAME>,
 	displayName: "<Display Name>",
 	signatureToggle: /<class-defining toggle regex>/i,
+	// Or, when no true toggle exists by L5:
+	// signatureToggleSkip: {skip: true, reason: "<why no L5 toggle applies>"},
 	midTierLoadout: [
 		{name: "Cloak of Protection", source: "XDMG", attune: true},
 	],

@@ -973,6 +973,222 @@ export class CharacterSheetPage {
 	// actually produces its declared mechanical effect — not just that
 	// it appears in the feature list.
 
+	async getGrantedAttack (name: string): Promise<{
+		name: string;
+		damage: string;
+		damageType: string;
+		range: string;
+		isSpellAttack: boolean;
+		martialArtsDie: string;
+	} | null> {
+		return this.page.evaluate((attackName) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			const attack = state?.getFeatureGrantedAttacks?.()
+				.find((it: any) => it.name?.toLowerCase() === attackName.toLowerCase());
+			if (!attack) return null;
+			return {
+				name: attack.name,
+				damage: attack.damage,
+				damageType: attack.damageType,
+				range: attack.range,
+				isSpellAttack: !!attack.isSpellAttack,
+				martialArtsDie: state.getFeatureCalculations?.()?.martialArtsDie || "",
+			};
+		}, name);
+	}
+
+	async probeCombatFeatureAction (opts: {
+		feature: string;
+		spend: number;
+		qualifyingAttackSourceFeature?: string;
+		qualifyingAttackName?: string;
+	}): Promise<{
+		before: number;
+		afterBlocked: number | null;
+		after: number;
+		variableSpendConfig: {min: number; max: number; resourceName: string} | null;
+		output: {kind: "attackVolley"; count: number} | {kind: "saveDamage"; dc: number; saveAbility: string; damage: string; damageType: string} | null;
+	}> {
+		return this.page.evaluate(async (config) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			const combat = cs?._combat;
+			const feature = state?.getFeatures?.()
+				.find((it: any) => it.name?.toLowerCase() === config.feature.toLowerCase());
+			if (!state || !combat || !feature) throw new Error(`Missing combat feature "${config.feature}"`);
+
+			const originalPoints = state.getKiPointsCurrent?.() ?? 0;
+			const resource = state.getResources?.()
+				.find((it: any) => /^(focus|ki) points$/i.test(it.name || ""));
+			if (resource) state.setKiPointsCurrent?.(resource.max);
+			const before = state.getKiPointsCurrent?.() ?? 0;
+			const calculations = state.getFeatureCalculations?.() || {};
+			const variableSpendConfig = combat._getVariablePointSpendConfig?.(feature, calculations) || null;
+			const originalChoose = combat._pChooseVariablePointSpend;
+			const originalVolley = combat._executeFeatureAttackVolley;
+			const originalSaveDamage = combat._executeFeatureSaveDamage;
+			let output: any = null;
+
+			try {
+				combat._pChooseVariablePointSpend = async () => config.spend;
+				combat._executeFeatureAttackVolley = (_feature: any, details: any) => {
+					output = {kind: "attackVolley", count: details.count};
+					return originalVolley.call(combat, _feature, details);
+				};
+				combat._executeFeatureSaveDamage = (_feature: any, details: any) => {
+					output = {kind: "saveDamage", ...details};
+					return originalSaveDamage.call(combat, _feature, details);
+				};
+				state.startCombat?.();
+				combat._resetTurnActionUsage?.();
+
+				const needsQualification = !!(config.qualifyingAttackSourceFeature || config.qualifyingAttackName);
+				let afterBlocked: number | null = null;
+				if (needsQualification) {
+					await combat._useCombatAction(feature);
+					afterBlocked = state.getKiPointsCurrent?.() ?? 0;
+				}
+
+				if (config.qualifyingAttackSourceFeature) {
+					const attack = state.getFeatureGrantedAttacks?.()
+						.find((it: any) => it.sourceFeature === config.qualifyingAttackSourceFeature);
+					if (!attack) throw new Error(`Missing granted attack from "${config.qualifyingAttackSourceFeature}"`);
+					combat._rollAttack?.(attack.id);
+				} else if (config.qualifyingAttackName) {
+					const attack = combat.getAvailableWeaponAttacks?.()
+						.find((it: any) => it.name?.toLowerCase() === config.qualifyingAttackName?.toLowerCase());
+					if (!attack) throw new Error(`Missing rendered attack "${config.qualifyingAttackName}"`);
+					combat._rollAttack?.(attack.id);
+				}
+
+				await combat._useCombatAction(feature);
+				return {
+					before,
+					afterBlocked,
+					after: state.getKiPointsCurrent?.() ?? 0,
+					variableSpendConfig: variableSpendConfig
+						? {
+							min: variableSpendConfig.min,
+							max: variableSpendConfig.max,
+							resourceName: variableSpendConfig.resourceName,
+						}
+						: null,
+					output,
+				};
+			} finally {
+				combat._pChooseVariablePointSpend = originalChoose;
+				combat._executeFeatureAttackVolley = originalVolley;
+				combat._executeFeatureSaveDamage = originalSaveDamage;
+				state.setKiPointsCurrent?.(originalPoints);
+				state.endCombat?.();
+				cs._renderCharacter?.();
+			}
+		}, opts);
+	}
+
+	async probeAttackQualification (attackName: string | RegExp, sourceFeature?: string): Promise<{
+		clicked: boolean;
+		threwError: boolean;
+		hasAttackAction: boolean;
+		hasSourceFeature: boolean;
+	}> {
+		await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?._state?.startCombat?.();
+			cs?._combat?._resetTurnActionUsage?.();
+		});
+		try {
+			const roll = await this.clickAttackRoll(attackName);
+			await this.dismissTransientModals();
+			const qualification = await this.page.evaluate((source) => {
+				const combat: any = (globalThis as any).charSheet?._combat;
+				const usage = combat?._turnAttackUsage;
+				return {
+					hasAttackAction: !!usage?.hasAttackAction,
+					hasSourceFeature: source
+						? !!usage?.attackActionFeatureIds?.has(source.toLowerCase())
+						: true,
+				};
+			}, sourceFeature || "");
+			return {...roll, ...qualification};
+		} finally {
+			await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				cs?._state?.endCombat?.();
+				cs?._combat?._resetTurnActionUsage?.();
+			});
+		}
+	}
+
+	async probeActiveStateTrigger (feature: string, stateTypeId: string): Promise<{
+		active: boolean;
+		label: string;
+		actionType: string;
+		damageType: string;
+		damage: number;
+		used: boolean;
+		reactionUsed: boolean;
+	}> {
+		await this.activateFeature(feature);
+		return this.page.evaluate(({stateId}) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			const combat = cs?._combat;
+			try {
+				const trigger = state?.getActiveStateTrigger?.(stateId);
+				state?.startCombat?.();
+				combat?._resetTurnActionUsage?.();
+				const used = combat?._useActiveStateTrigger?.(stateId) === true;
+				return {
+					active: !!trigger,
+					label: trigger?.label || "",
+					actionType: trigger?.actionType || "",
+					damageType: trigger?.effect?.damageType || "",
+					damage: trigger?.effect?.resolvedValue || 0,
+					used,
+					reactionUsed: !!combat?._turnActionUsage?.reaction,
+				};
+			} finally {
+				state?.deactivateState?.(stateId);
+				state?.endCombat?.();
+				combat?._resetTurnActionUsage?.();
+				cs?._renderCharacter?.();
+			}
+		}, {stateId: stateTypeId});
+	}
+
+	async probeActiveStateLight (feature: string, stateTypeId: string): Promise<{
+		bright: number;
+		dim: number;
+		rendered: boolean;
+	}> {
+		await this.activateFeature(feature);
+		try {
+			const effect = await this.page.evaluate((stateId) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return state?.getActiveStateEffects?.()
+					.find((it: any) => it.stateTypeId === stateId && it.type === "light") || null;
+			}, stateTypeId);
+			await this.switchToTab(this.tabOverview);
+			const activeRow = this.page.locator(".charsheet__state-row.charsheet__state--active")
+				.filter({hasText: this._getFeatureActivationPattern(feature)})
+				.first();
+			const text = await activeRow.textContent().catch(() => "");
+			return {
+				bright: Number(effect?.brightRange || 0),
+				dim: Number(effect?.dimRange || 0),
+				rendered: /bright light|dim light/i.test(text || ""),
+			};
+		} finally {
+			await this.page.evaluate((stateId) => {
+				const cs: any = (globalThis as any).charSheet;
+				cs?._state?.deactivateState?.(stateId);
+				cs?._renderCharacter?.();
+			}, stateTypeId);
+		}
+	}
+
 	/**
 	 * Read a saving throw modifier directly from state. Includes ability
 	 * mod + proficiency (if proficient) + state bonuses (Aura of

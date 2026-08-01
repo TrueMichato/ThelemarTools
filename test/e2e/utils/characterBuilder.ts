@@ -269,6 +269,20 @@ export const PRESET_FULL_ASTRAL_SELF_MONK_CHANGELING: CharacterPreset = {
 	subclassSource: "TCE",
 };
 
+/** Way of the Sun Soul Monk Changeling (XGE subclass on the TGTT Monk chassis). */
+export const PRESET_FULL_SUN_SOUL_MONK_CHANGELING: CharacterPreset = {
+	race: "Changeling",
+	raceSource: "TGTT",
+	className: "Monk",
+	classSource: "TGTT",
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Sol Radiant",
+	skillCount: 2,
+	subclassName: "Way of the Sun Soul",
+	subclassSource: "XGE",
+};
+
 /** 2. Arcane Archer Fighter Hochling (TGTT) */
 export const PRESET_FULL_ARCANE_ARCHER_HOCHLING: CharacterPreset = {
 	race: "Hochling",
@@ -636,6 +650,7 @@ export const PRESET_FULL_HORROR_THEOCRACIAN: CharacterPreset = {
 /** Convenience array of all comprehensive presets — handy for parameterised smoke tests. */
 export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_MERCY_MONK_CHANGELING,
+	PRESET_FULL_SUN_SOUL_MONK_CHANGELING,
 	PRESET_FULL_ARCANE_ARCHER_HOCHLING,
 	PRESET_FULL_BLADESINGER_TABAXI,
 	PRESET_FULL_HUNTER_CENTAUR,

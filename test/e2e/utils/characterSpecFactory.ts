@@ -43,6 +43,8 @@ export interface CharacterSpec {
 	midTierLoadout?: InventoryItemRef[];
 	/** Toggle that should produce a non-zero AC OR DC delta when activated. */
 	signatureToggle?: string | RegExp;
+	/** Explicit opt-out when the build has no toggle online at the L5 checkpoint. */
+	signatureToggleSkip?: {skip: true; reason: string};
 	/** Attack row granted by a signature toggle instead of an AC/DC delta. */
 	signatureToggleAddsAttack?: string | RegExp;
 	/**
@@ -197,7 +199,7 @@ const MIDTIER_TIMEOUT_MS = 180_000;
 const L7_TIMEOUT_MS = 600_000;
 
 export function describeCharacter (spec: CharacterSpec): void {
-	const {preset, displayName, milestones = {}, midTierLoadout, signatureToggle, skipMega, skipL7, skipL3, skipL5, featuresMatrix} = spec;
+	const {preset, displayName, milestones = {}, midTierLoadout, signatureToggle, signatureToggleSkip, skipMega, skipL7, skipL3, skipL5, featuresMatrix} = spec;
 	const subclassOpts = preset.subclassName
 		? {subclassName: preset.subclassName, subclassSource: preset.subclassSource, namedSubclassChoice: preset.namedSubclassChoice, preferredFeatProgressionPattern: preset.preferredFeatProgressionPattern}
 		: preset.preferredFeatProgressionPattern
@@ -271,7 +273,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 		// level-up adds ~80s of wizard auto-fill, which inflates the
 		// suite without proportional coverage gain.  Renamed from "L7"
 		// for honesty about what the test actually walks.
-		if ((midTierLoadout?.length || signatureToggle) && !skipL7) {
+		if ((midTierLoadout?.length || signatureToggle || signatureToggleSkip) && !skipL7) {
 			test(`L5 loadout: installs gear + signature toggle produces its mechanical effect`, async ({page}) => {
 				test.setTimeout(L7_TIMEOUT_MS);
 				const {charSheet} = await createCharacterViaWizard(page, preset);
@@ -334,6 +336,8 @@ export function describeCharacter (spec: CharacterSpec): void {
 						// "no effect".
 						expect(delta.changed, `toggle ${signatureToggle} should produce a derived effect (ac/dc/resistances/speed/attacks/damage)`).toBe(true);
 					}
+				} else if (signatureToggleSkip) {
+					console.log(`[spec ${displayName}] L5 signature toggle skipped — ${signatureToggleSkip.reason}`);
 				}
 			});
 		}
