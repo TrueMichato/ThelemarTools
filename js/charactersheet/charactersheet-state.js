@@ -30621,6 +30621,7 @@ class CharacterSheetState {
 	getResources () {
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
+		this.ensureBloodHunterResources();
 		return [...this._data.resources];
 	}
 
@@ -30997,7 +30998,7 @@ class CharacterSheetState {
 	}
 
 	getHybridBloodlustCheck () {
-		if (this._data.hybridBloodlustTurnStartRound === this._data.combatRound) {
+		if (this._data.inCombat && this._data.hybridBloodlustTurnStartRound === this._data.combatRound) {
 			return this._data.hybridBloodlustTurnStartCheck;
 		}
 		return this._getCurrentHybridBloodlustCheck();
@@ -31116,7 +31117,7 @@ class CharacterSheetState {
 	getGenericPoolResources () {
 		const allFeatures = this.getFeatures?.() || [];
 		const hasHybridMastery = !!this.getFeatureCalculations().hasHybridTransformationMastery;
-		return (this._data.resources || []).filter(r => {
+		return this.getResources().filter(r => {
 			if (hasHybridMastery && r.name === "Hybrid Transformation") return false;
 			const linked = r.featureId
 				? allFeatures.find(f => f.id === r.featureId)

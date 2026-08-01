@@ -817,6 +817,12 @@ export type EffectCheck = _EffectCommon & (
 	// sets current HP to a Bloodied value first via `setHpFraction` (0-1
 	// of max HP) so the Bloodied gate is deterministically satisfied.
 	| {kind: "turnStartHeals"; min: number; setHpFraction?: number}
+
+	// === Stateful class-mechanic probes ===
+	| {kind: "featureChoiceCalculation"; className: string; featureName: string; expectedChoice: string; property: string; expectedValue: string; dcProperty?: string}
+	| {kind: "bloodMaledictAmplification"; hpCost: number}
+	| {kind: "crimsonRiteMechanics"; hpCosts: [number, number]}
+	| {kind: "hybridTransformationMechanics"}
 );
 
 const _TOGGLE_EFFECT_KINDS = new Set([
@@ -1146,6 +1152,137 @@ async function _runPassiveOrRollEffect (
 			const after = await charSheet.getCurrentHp();
 			const healed = after - before;
 			if (healed < e.min) throw new Error(`turn-start heal=${healed} < min=${e.min} (before=${before}, after=${after})`);
+			return;
+		}
+		case "featureChoiceCalculation": {
+			const result = await charSheet.page.evaluate((args) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const choice = (state?._data?.levelHistory || [])
+					.filter((entry: any) => entry.class?.name === args.className)
+					.flatMap((entry: any) => entry.choices?.featureChoices || [])
+					.find((it: any) => it.featureName === args.featureName)?.choice;
+				const calculations = state?.getFeatureCalculations?.() || {};
+				const ability = String(args.expectedChoice || "").slice(0, 3).toLowerCase();
+				return {
+					choice,
+					value: calculations[args.property],
+					dc: args.dcProperty ? calculations[args.dcProperty] : null,
+					expectedDc: args.dcProperty ? 8 + state.getProficiencyBonus() + state.getAbilityMod(ability) : null,
+				};
+			}, e);
+			if (result.choice !== e.expectedChoice) throw new Error(`${e.featureName} choice=${result.choice}, expected ${e.expectedChoice}`);
+			if (result.value !== e.expectedValue) throw new Error(`featureCalculation.${e.property}=${result.value}, expected ${e.expectedValue}`);
+			if (e.dcProperty && result.dc !== result.expectedDc) throw new Error(`featureCalculation.${e.dcProperty}=${result.dc}, expected choice-driven DC ${result.expectedDc}`);
+			return;
+		}
+		case "bloodMaledictAmplification": {
+			const result = await charSheet.page.evaluate((hpCost) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				state.ensureBloodHunterResources?.();
+				const resource = state.getResource?.("Blood Maledict");
+				if (!resource) return {ok: false, reason: "missing resource"};
+				state.setResourceCurrent(resource.id, resource.max);
+				state.setCurrentHp(state.getMaxHp());
+				state.setTempHp(7);
+				const before = {hp: state.getCurrentHp(), tempHp: state.getTempHp(), uses: resource.max};
+				const used = state.useBloodMaledict?.({amplify: true, roll: hpCost});
+				const afterUse = {hp: state.getCurrentHp(), tempHp: state.getTempHp(), uses: state.getResource("Blood Maledict").current};
+				state.onShortRest?.();
+				return {ok: true, used, before, afterUse, afterRest: state.getResource("Blood Maledict").current, max: resource.max};
+			}, e.hpCost);
+			if (!result.ok || !result.used) throw new Error(`amplified Blood Maledict failed: ${JSON.stringify(result)}`);
+			if (result.before.hp - result.afterUse.hp !== e.hpCost) throw new Error(`amplification HP cost=${result.before.hp - result.afterUse.hp}, expected ${e.hpCost}`);
+			if (result.afterUse.tempHp !== result.before.tempHp) throw new Error(`amplification incorrectly consumed temporary HP`);
+			if (result.afterUse.uses !== result.before.uses - 1) throw new Error(`Blood Maledict use did not decrement`);
+			if (result.afterRest !== result.max) throw new Error(`short rest restored Blood Maledict to ${result.afterRest}/${result.max}`);
+			return;
+		}
+		case "crimsonRiteMechanics": {
+			const result = await charSheet.page.evaluate((hpCosts) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const rite = state.getFeatures?.().find((it: any) => it.optionalFeatureTypes?.includes("CR"))?.name;
+				if (!rite) return {ok: false, reason: "missing selected rite"};
+				state.setCurrentHp(state.getMaxHp());
+				state.setTempHp(9);
+				const beforeHp = state.getCurrentHp();
+				const beforeTempHp = state.getTempHp();
+				const first = state.activateCrimsonRite?.(rite, {roll: hpCosts[0], weaponId: "e2e-rite-longsword", weaponName: "Longsword"});
+				const second = state.activateCrimsonRite?.(rite, {roll: hpCosts[1], weaponId: "e2e-rite-longbow", weaponName: "Longbow"});
+				return {
+					ok: true,
+					first,
+					second,
+					hpSpent: beforeHp - state.getCurrentHp(),
+					tempHpSpent: beforeTempHp - state.getTempHp(),
+					effects: state.getExtraDamageFromStates?.().filter((it: any) => it.isCrimsonRite) || [],
+				};
+			}, e.hpCosts);
+			if (!result.ok || !result.first || !result.second) throw new Error(`Crimson Rite activation failed: ${JSON.stringify(result)}`);
+			if (result.hpSpent !== e.hpCosts[0] + e.hpCosts[1]) throw new Error(`Crimson Rite HP cost=${result.hpSpent}, expected ${e.hpCosts[0] + e.hpCosts[1]}`);
+			if (result.tempHpSpent !== 0) throw new Error(`Crimson Rite incorrectly consumed temporary HP`);
+			for (const weaponId of ["e2e-rite-longsword", "e2e-rite-longbow"]) {
+				const rider = result.effects.find((it: any) => it.weaponId === weaponId);
+				if (!rider?.dice || !rider?.damageType) throw new Error(`typed Crimson Rite rider missing for ${weaponId}: ${JSON.stringify(result.effects)}`);
+			}
+			return;
+		}
+		case "hybridTransformationMechanics": {
+			const result = await charSheet.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				const state: any = cs?._state;
+				state.ensureBloodHunterResources?.();
+				const resource = state.getResource?.("Hybrid Transformation");
+				if (resource) state.setResourceCurrent(resource.id, resource.max);
+				const beforeAc = state.getAc();
+				const activated = state.activateHybridTransformation?.();
+				cs?._combat?.render?.();
+				const calc = state.getFeatureCalculations?.() || {};
+				const defenses = state.getEffectiveDefenses?.() || {};
+				const availableWeapons = cs?._combat?.getAvailableWeaponAttacks?.() || [];
+				const predatory = availableWeapons.find((it: any) => /predatory strike/i.test(it.name));
+				const rite = state.getFeatures?.().find((it: any) => it.optionalFeatureTypes?.includes("CR"))?.name;
+				const riteActivated = rite && predatory
+					? state.activateCrimsonRite(rite, {roll: 2, weaponId: predatory.riteWeaponId || predatory.id, weaponName: predatory.name})
+					: false;
+				const riteOnNaturalWeapon = state.getExtraDamageFromStates?.().some((it: any) =>
+					it.isCrimsonRite && it.weaponId === "hybrid-predatory-strikes");
+				state.setCurrentHp(Math.max(1, Math.floor(state.getMaxHp() * 0.4)));
+				const bloodlust = state.getHybridBloodlustCheck?.();
+				const hpBeforeRegen = state.getCurrentHp();
+				const regenerated = state.applyHybridRegenerationAtTurnStart?.() || 0;
+				const output = {
+					activated,
+					acDelta: state.getAc() - beforeAc,
+					strCheckAdvantage: !!state.getAdvantageState?.("check:str")?.advantage,
+					strSaveAdvantage: !!state.getAdvantageState?.("save:str")?.advantage,
+					conditionalResistances: defenses.conditionalResistances || [],
+					availableWeaponNames: availableWeapons.map((it: any) => it.name),
+					riteActivated: !!riteActivated,
+					riteOnNaturalWeapon,
+					bloodlust,
+					expectedBloodlustAdvantage: !!calc.hasBrandOfTheVoracious,
+					regenerated,
+					hpDelta: state.getCurrentHp() - hpBeforeRegen,
+					expectedRegeneration: calc.hybridRegeneration || 0,
+				};
+				state.deactivateState?.("hybridTransformation");
+				if (resource) state.setResourceCurrent(resource.id, resource.max);
+				return output;
+			});
+			if (!result.activated) throw new Error(`Hybrid Transformation did not activate`);
+			if (result.acDelta !== 1) throw new Error(`Hybrid Transformation AC delta=${result.acDelta}, expected 1`);
+			if (!result.strCheckAdvantage || !result.strSaveAdvantage) throw new Error(`Hybrid Transformation omitted Strength advantage`);
+			for (const type of ["bludgeoning", "piercing", "slashing"]) {
+				const defense = result.conditionalResistances.find((it: any) => it.type === type);
+				if (!defense?.conditional?.includes("nonsilvered")) throw new Error(`conditional ${type} resistance metadata missing`);
+			}
+			if (!result.availableWeaponNames.some((name: string) => /predatory strike/i.test(name))) throw new Error(`canonical weapon picker omitted active-state Predatory Strikes`);
+			if (!result.riteActivated || !result.riteOnNaturalWeapon) throw new Error(`Crimson Rite could not target the active-state natural weapon`);
+			if (!result.bloodlust || result.bloodlust.dc !== 8) throw new Error(`Bloodlust save not surfaced below half HP`);
+			if (result.bloodlust.advantage !== result.expectedBloodlustAdvantage) throw new Error(`Bloodlust advantage=${result.bloodlust.advantage}, expected ${result.expectedBloodlustAdvantage}`);
+			if (result.expectedRegeneration > 0 && (result.regenerated !== result.expectedRegeneration || result.hpDelta !== result.expectedRegeneration)) {
+				throw new Error(`Hybrid regeneration=${result.regenerated}/${result.hpDelta}, expected ${result.expectedRegeneration}`);
+			}
 			return;
 		}
 		case "pickToggleable": {

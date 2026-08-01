@@ -283,6 +283,8 @@ describe("Blood Hunter (BH2022)", () => {
 			advantage: true,
 			automaticFailure: false,
 		});
+		state.applyHybridRegenerationAtTurnStart();
+		state.setCurrentHp(49);
 		state.setConcentrating({spellName: "Hex"});
 		expect(state.getHybridBloodlustCheck().automaticFailure).toBe(true);
 	});

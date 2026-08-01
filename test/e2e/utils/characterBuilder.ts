@@ -633,6 +633,27 @@ export const PRESET_FULL_HORROR_THEOCRACIAN: CharacterPreset = {
 	signatureSpells: ["Eldritch Blast", "Hex"],
 };
 
+/** BH2022 Order of the Lycan Blood Hunter. */
+export const PRESET_FULL_LYCAN_BLOOD_HUNTER: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	className: "Blood Hunter",
+	classSource: "BH2022",
+	prioritySources: ["BH2022"],
+	skipConditionalPrompt: true,
+	background: "Soldier",
+	bgSource: "PHB'24",
+	name: "Varek Moonfang",
+	skillCount: 3,
+	optFeatCount: 1,
+	subclassName: "Order of the Lycan",
+	subclassSource: "BH2022",
+	preferredFeatProgressionPattern: /^archery\b/i,
+	homebrewUrls: [
+		"https://raw.githubusercontent.com/TheGiddyLimit/homebrew/refs/heads/master/class/Matthew%20Mercer%3B%20Blood%20Hunter%20(2022).json",
+	],
+};
+
 /** Convenience array of all comprehensive presets — handy for parameterised smoke tests. */
 export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_MERCY_MONK_CHANGELING,

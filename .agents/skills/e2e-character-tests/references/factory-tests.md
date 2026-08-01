@@ -93,6 +93,8 @@ the L3 / L5 / MEGA tests by `assertFeaturesMatrix` in
   `initiative`, `spellSaveDc`, `advantage`, `resistance`, `immunity`,
   `vulnerability`, `attackPresent`, `attackBonus`,
   `attackDamageContains`, `pickActivatable`, `pickToggleable`,
+  `featureChoiceCalculation`, `bloodMaledictAmplification`,
+  `crimsonRiteMechanics`, `hybridTransformationMechanics`,
   `rollAbilityCheck`, `rollSkillCheck`, `spells`, …) run individually
   against the page in the order declared.
 - **Toggle deltas** (`toggleAcDelta`, `toggleSpeedDelta`,
