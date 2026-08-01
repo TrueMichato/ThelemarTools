@@ -152,7 +152,11 @@ describeCharacter({
 			effects: [
 				{kind: "featureCalculation", property: "eyesOfTheDarkGrantsDarkness", exact: true},
 				{kind: "featureCalculation", property: "darknessSorceryPointCost", exact: 2},
-				{kind: "spellInList", spell: "Darkness", spellMatchMode: "any", level: 2},
+				// Exact-name lookup, deliberately: `spellMatchMode: "any"` DROPS the name
+				// assertion and only counts spells at a given level, which both proves less
+				// and depends on `getKnownSpells()` reporting a level for subclass
+				// always-prepared entries. The name is the thing under test.
+				{kind: "spellInList", spell: "Darkness"},
 				// The generic resource-cast descriptor, and the cast actually working.
 				{kind: "stateCall", method: "getResourceCastableSpells", path: "length", exact: 1},
 				{kind: "stateCall", method: "getResourceCastableSpells", path: "0.spell", exact: "Darkness"},
