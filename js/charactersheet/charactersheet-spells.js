@@ -2088,7 +2088,12 @@ class CharacterSheetSpells {
 
 		// Cantrips don't use slots
 		if (spell.level === 0) {
-			const weaponChannelChoice = CharacterSheetSpells.getWeaponChannelCantripInfo(spellData)
+			// A weapon-channel cantrip (Booming/Green-Flame Blade) normally routes the whole
+			// cast through the weapon-attack channel flow (prompt for weapon → arm the on-hit
+			// rider). The cast-options menu's "Roll secondary" entry opts out via
+			// `decision.secondaryOnly` so it rolls ONLY the standalone secondary/movement
+			// damage (the later, target-moved hit) instead of channelling a fresh attack.
+			const weaponChannelChoice = (CharacterSheetSpells.getWeaponChannelCantripInfo(spellData) && !decision?.secondaryOnly)
 				? {spell, spellData}
 				: null;
 			const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: 0, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
@@ -2760,6 +2765,17 @@ class CharacterSheetSpells {
 			|| this._state.getSpellMaterialComponentInfo?.(spell);
 		if (!info) return null;
 
+		// A weapon-channel cantrip's material component IS the melee weapon used to make
+		// the attack — Booming Blade / Green-Flame Blade (and clones) read "a melee weapon
+		// worth at least 1 sp". That weapon is supplied by the channel flow, which requires
+		// an equipped melee weapon, prompts to pick one when several qualify, and reports a
+		// precise "equip a melee weapon" message when none is available. The generic
+		// focus / gold-cost gate cannot see the weapon as the component (it looks for a
+		// focus, pouch, or a named/valued inventory item), so it must not pre-empt the cast
+		// — otherwise the cantrip hard-blocks with a nonsensical "worth at least 0 gp"
+		// message and the weapon-channel branch is never reached.
+		if (CharacterSheetSpells.getWeaponChannelCantripInfo(spellData)) return null;
+
 		// Rule 3: a matching variant component the player owns waives the requirement.
 		if ((this._state.getMatchingVariantComponents?.(spell, spellData) || []).length) return null;
 
@@ -2973,7 +2989,7 @@ class CharacterSheetSpells {
 			items.push({
 				label: `⚔ Roll ${secLabel}`,
 				sublabel: "On-hit damage rides your weapon attack (use the ✨ button by your weapon)",
-				onSelect: () => this._castSpell(spellId, {withMetamagic: false, decision: {skipComponentPrompt: true}}),
+				onSelect: () => this._castSpell(spellId, {withMetamagic: false, decision: {skipComponentPrompt: true, secondaryOnly: true}}),
 			});
 			return items;
 		}

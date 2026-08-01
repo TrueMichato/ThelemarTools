@@ -361,6 +361,31 @@ describe("Spells-tab weapon-channel bridge", () => {
 		}));
 		expect(combat._pendingSpellRider).toBeNull();
 	});
+
+	it("secondaryOnly decision skips the channel bridge and rolls the standalone secondary damage", async () => {
+		// The cast-options menu's "⚔ Roll secondary" entry passes decision.secondaryOnly.
+		// That must NOT channel a fresh weapon attack (no pChannelSpellFromCast, no rider) —
+		// it rolls only the standalone secondary/movement damage via _showCastResult.
+		const channelSpy = jest.fn(async () => true);
+		const spells = Object.create(CharacterSheetSpells.prototype);
+		spells._state = {
+			getSpells: () => [choice.spell],
+			isConcentrating: () => false,
+			consumeStatesEndingOnSpellCast: jest.fn(),
+		};
+		spells._allSpells = [choice.spellData];
+		spells._page = {saveCharacter: jest.fn(), _combat: {pChannelSpellFromCast: channelSpy}};
+		spells._resolveMetamagicChoice = jest.fn(async () => ({cancelled: false, metamagic: null}));
+		spells._pHandleCastingConstraints = jest.fn(async () => true);
+		spells._resolveVariantComponentChoice = jest.fn(async () => ({cancelled: false}));
+		spells._pConsumeMaterialComponent = jest.fn(async () => {});
+		spells._showCastResult = jest.fn();
+
+		await spells._castSpell(choice.spell.id, {withMetamagic: false, decision: {skipComponentPrompt: true, secondaryOnly: true}});
+
+		expect(channelSpy).not.toHaveBeenCalled();
+		expect(spells._showCastResult).toHaveBeenCalledWith(choice.spell, 0, false, false, expect.anything());
+	});
 });
 
 describe("rider is discarded on unrelated re-renders / weapon removal", () => {
