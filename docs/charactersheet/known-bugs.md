@@ -1465,3 +1465,121 @@ entirely and silently. Separate the two causes first — inspect which feature
 name actually matched via `getToggleableFeatureNames()`.
 
 ---
+
+## CS-BUG-033 — PHB Cleric Channel Divinity pool stays at two uses after level 18
+
+**Status**: RESOLVED.
+
+**Affected**: PHB 2014 Clerics at levels 18-20, reproduced by
+`tgtt-tempest-cleric.spec.ts`. The XPHB Paladin pool (3 uses at level 11) had
+the identical defect.
+
+**Symptom**: the character reaches Cleric 20 and
+`getFeatureCalculations().channelDivinityUses` correctly returns `3`, but the
+player-facing `Channel Divinity` resource still has `max: 2`. The PHB feature
+text grants three uses beginning at Cleric 18.
+
+**Repro**:
+
+```bash
+RUN_MEGA=1 RUN_MATRIX=1 PW_PORT=8081 PW_TIMEOUT_MS=180000 PW_WORKERS=1 \
+  npx playwright test test/e2e/specs/tgtt-tempest-cleric.spec.ts --reporter=line
+```
+
+**Root cause — three separate defects.** The filed "suspected root cause" (no
+re-scaling on level-up) was real but was *not* what the E2E run was hitting:
+
+1. **State (`charactersheet-state.js`)** — `addFeature` parses the use count out
+   of the feature text at grant-time ("twice") and never re-scales it. Added
+   `_ensureChannelDivinityUses()`, called from `getResources()` alongside the
+   existing `_ensureBattleMasterSuperiorityDice` / `_ensureShadowKnightResources`
+   reconcilers. It derives the maximum from class level directly (never from
+   `getFeatureCalculations()`, which would recurse back through `getResources()`),
+   only ever *raises* the maximum, takes the largest contribution across classes
+   sharing the pool, and keeps the owning feature's own `uses` in step — rest
+   restoration reads the feature, so a stale feature restores only 2 of 3.
+   Progression lives in `_getChannelDivinityUsesForClass`, covering Cleric
+   (1/2/3 at 2/6/18) and Paladin (XPHB 2/3 at 3/11; classic 1 per rest).
+
+2. **Rendering (`getGenericPoolResources`)** — *the actual cause of the
+   player-facing staleness.* The Overview Resources panel read
+   `this._data.resources` **directly**, bypassing `getResources()` and therefore
+   every reconciler. The pool stayed visibly stale until some other surface
+   happened to reconcile it, which is why the matrix test (which long-rests
+   first) saw `max: 3` while the milestone test, asserting immediately after
+   level-up, saw `max: 2`. It now sources from `getResources()`, so Superiority
+   Dice and the Shadow Knight pools benefit identically.
+
+3. **Harness** — see CS-BUG-034; the `shortRestRestores` probe could never pass.
+
+**Verification**: new `CharacterSheetChannelDivinityScaling.test.js` (17 tests,
+asserting the *resource*, not `getFeatureCalculations()` — the pre-existing
+Cleric suite only checked the calculation, which is exactly why this went
+unnoticed). Confirmed genuine by disabling the reconciler and watching 7 of them
+fail while the negative controls stayed green. Browser-verified at L17/18/20
+(2/2, 3/3, 3/3). Tempest spec now passes 8/8 with `RUN_MEGA` **and**
+`RUN_MATRIX`, with both previously-waived assertions re-enabled. Light Domain
+Cleric and Oath of Devotion Paladin matrices pass.
+
+---
+
+## CS-BUG-034 — rest/spend effect probes called state methods that do not exist
+
+**Status**: RESOLVED.
+
+**Affected**: the `shortRestRestores` / `longRestRestores` `EffectCheck` and the
+`featuresMatrix` `restoreOn` restoration probe, in
+`test/e2e/utils/comprehensiveBuildHelpers.ts`. 27 specs declare one or both.
+
+**Symptom**: the probes called `cs._state.shortRest?.()`, `cs._state.longRest?.()`
+and `cs._state.spendResource?.(name, n)`. None of those methods exist — the real
+API is `onShortRest()` / `onLongRest()` / `useResourceCharge()`. Because every
+call used optional-call syntax, the mismatch was swallowed silently:
+
+- the spend no-opped, so the probe fell into its own "API absent" soft skip and
+  passed without asserting anything; and
+- where a spend did land, the rest no-opped, so the check could never pass and
+  the resource looked permanently unrestorable.
+
+This is why CS-BUG-033 first surfaced as `expected short rest to restore
+"Channel Divinity" to ≥3, got 2/3` — the rest never happened.
+
+**Fix**: both probes now drive the page object (`charSheet.useResourceByName`,
+`charSheet.triggerShortRest`, `charSheet.triggerLongRest`), which is what the
+already-working `usage.shortRestRestores` path in `characterSpecFactory.ts` uses.
+
+**Note for future work**: these probes only execute under `RUN_MEGA` /
+`RUN_MATRIX`. A default 6-passed/2-skipped run does not exercise them, so this
+class of defect cannot be caught without the gated selections.
+
+---
+
+## CS-BUG-035 — Battle Master feature matrix fails at L11
+
+**Status**: open. **Pre-existing** — reproduced byte-identically at pristine
+`d6a25d23` in a throwaway worktree, so unrelated to the CS-BUG-033/034 work.
+
+**Repro**:
+
+```bash
+RUN_MATRIX=1 PW_PORT=8090 PW_TIMEOUT_MS=180000 PW_WORKERS=1 \
+  npx playwright test tgtt-battle-master-fighter -g "Features matrix" --reporter=line
+```
+
+```
+featuresMatrix at L11 (2 failures):
+  - L3 /superiority dice/i (resource): resource max=5 expected 4
+  - L7 /know your enemy/i (resource): resource not found on sheet
+```
+
+**Analysis** (not yet separated, same discipline as CS-BUG-032):
+
+- *Superiority Dice* — the product is **correct**: XPHB grants 5 dice at level 7.
+  The matrix re-evaluates every earlier entry at each later checkpoint, so the
+  L3 entry's `resourceMax: 4` is stale by L11. Almost certainly a spec-authoring
+  fix (make the expectation level-aware), not a product change.
+- *Know Your Enemy* — needs separating: either the spec declares it as a
+  `resource` when it surfaces as a feature use, or the pool is genuinely not
+  surfaced.
+
+---

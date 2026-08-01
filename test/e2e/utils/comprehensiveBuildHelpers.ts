@@ -691,8 +691,15 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "spellSaveDc"; min?: number; exact?: number}
 	| {kind: "spellSlots"; level: number; min: number}
 	| {kind: "speed"; type?: SpeedType; min?: number; exact?: number}
+	| {kind: "speedEquals"; left: SpeedType; right: SpeedType}
 	| {kind: "initiative"; min?: number; exact?: number}
 	| {kind: "featureCalculation"; property: string; min?: number; exact?: number | string | boolean}
+	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
+	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
+	| {kind: "combatAction"; feature: string; interactionMode: string; formula: string; damageTypes: string[]; saveAbility: AblKey}
+	| {kind: "deferredDamageMaximizer"; feature: string; resource: string; eligibleType: string; ineligibleType: string}
+	| {kind: "triggeredDamageEffect"; damageType: string; effectType: string; distance?: number; direction?: string; maxTargetSize?: string; optional?: boolean}
+	| {kind: "weaponDamageRider"; id: string; dice: string; damageType: string; perTurn?: boolean}
 	| {kind: "resistance"; damageType: string}
 	| {kind: "immunity"; damageType: string}
 	| {kind: "vulnerability"; damageType: string}
@@ -908,6 +915,15 @@ async function _runPassiveOrRollEffect (
 			_checkNumeric(v, e, `speed:${e.type ?? "walk"}`);
 			return;
 		}
+		case "speedEquals": {
+			const [left, right] = await Promise.all([
+				charSheet.getSpeed(e.left),
+				charSheet.getSpeed(e.right),
+			]);
+			if (left !== right) throw new Error(`speed:${e.left}=${left}, expected speed:${e.right}=${right}`);
+			if (left <= 0) throw new Error(`speed:${e.left}=${left}, expected a positive speed`);
+			return;
+		}
 		case "initiative": {
 			const v = await charSheet.getInitiativeBonusFromState();
 			_checkNumeric(v, e, `init`);
@@ -923,6 +939,89 @@ async function _runPassiveOrRollEffect (
 				throw new Error(`featureCalculation.${e.property}=${value}, expected >= ${e.min}`);
 			}
 			if (e.exact === undefined && e.min === undefined && value == null) throw new Error(`featureCalculation.${e.property} is absent`);
+			return;
+		}
+		case "proficiency": {
+			const proficiencies = await charSheet.page.evaluate((type) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return type === "armor"
+					? state?.getArmorProficiencies?.() || []
+					: state?.getWeaponProficiencies?.() || [];
+			}, e.proficiencyType);
+			const needle = e.includes.toLowerCase();
+			if (!proficiencies.some((it: string) => it.toLowerCase().includes(needle))) {
+				throw new Error(`${e.proficiencyType} proficiency "${e.includes}" missing. seen=[${proficiencies.join(", ")}]`);
+			}
+			return;
+		}
+		case "featureUsesEqualAbilityMod": {
+			const [uses, ability] = await Promise.all([
+				charSheet.getFeatureUses(e.feature),
+				charSheet.getAbilityScore(e.ability),
+			]);
+			const expected = Math.max(e.minimum ?? 0, ability.mod);
+			if (uses.max !== expected) throw new Error(`${e.feature} uses=${uses.max}, expected max(${e.minimum ?? 0}, ${e.ability} mod ${ability.mod})=${expected}`);
+			if (uses.recharge !== e.recharge) throw new Error(`${e.feature} recharge=${uses.recharge}, expected ${e.recharge}`);
+			return;
+		}
+		case "combatAction": {
+			const result = await charSheet.page.evaluate((featureName) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const feature = state?.getFeature?.(featureName);
+				return feature ? state?.constructor?.detectActivatableFeature?.(feature) : null;
+			}, e.feature);
+			const rollDice = result?.combatActionEffects?.rollDice;
+			if (result?.interactionMode !== e.interactionMode) throw new Error(`${e.feature} interactionMode=${result?.interactionMode}, expected ${e.interactionMode}`);
+			if (rollDice?.formula !== e.formula) throw new Error(`${e.feature} formula=${rollDice?.formula}, expected ${e.formula}`);
+			if (rollDice?.saveAbility !== e.saveAbility) throw new Error(`${e.feature} save=${rollDice?.saveAbility}, expected ${e.saveAbility}`);
+			for (const damageType of e.damageTypes) {
+				if (!rollDice?.damageTypeChoices?.includes(damageType)) throw new Error(`${e.feature} missing damage type choice "${damageType}"`);
+			}
+			return;
+		}
+		case "deferredDamageMaximizer": {
+			const before = await charSheet.getResource(e.resource);
+			await charSheet.activateFeature(e.feature);
+			const result = await charSheet.page.evaluate(({resource, eligibleType, ineligibleType}) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const armed = state?.getPendingDamageMaximization?.();
+				const afterArm = state?.getResource?.(resource)?.current;
+				const rejected = state?.consumePendingDamageMaximization?.(ineligibleType);
+				const afterRejected = state?.getResource?.(resource)?.current;
+				const stillArmed = state?.getPendingDamageMaximization?.();
+				const consumed = state?.consumePendingDamageMaximization?.(eligibleType);
+				const afterConsumed = state?.getResource?.(resource)?.current;
+				const cleared = state?.getPendingDamageMaximization?.();
+				return {armed, afterArm, rejected, afterRejected, stillArmed, consumed, afterConsumed, cleared};
+			}, {resource: e.resource, eligibleType: e.eligibleType, ineligibleType: e.ineligibleType});
+			if (!result.armed) throw new Error(`${e.feature} did not arm deferred damage maximization`);
+			if (result.afterArm !== before.current) throw new Error(`${e.feature} spent ${e.resource} on activation`);
+			if (result.rejected || result.afterRejected !== before.current || !result.stillArmed) throw new Error(`${e.feature} was consumed by ineligible ${e.ineligibleType} damage`);
+			if (!result.consumed || result.afterConsumed !== before.current - 1 || result.cleared) throw new Error(`${e.feature} did not consume exactly one ${e.resource} use on ${e.eligibleType} damage`);
+			return;
+		}
+		case "triggeredDamageEffect": {
+			const effects = await charSheet.page.evaluate((damageType) => {
+				return (globalThis as any).charSheet?._state?.getTriggeredDamageEffects?.(damageType) || [];
+			}, e.damageType);
+			const effect = effects.find((it: any) => it.type === e.effectType);
+			if (!effect) throw new Error(`${e.damageType} damage did not emit "${e.effectType}". seen=${JSON.stringify(effects)}`);
+			for (const property of ["distance", "direction", "maxTargetSize", "optional"] as const) {
+				if (e[property] !== undefined && effect[property] !== e[property]) {
+					throw new Error(`${e.effectType}.${property}=${effect[property]}, expected ${e[property]}`);
+				}
+			}
+			return;
+		}
+		case "weaponDamageRider": {
+			const riders = await charSheet.page.evaluate(() => {
+				return (globalThis as any).charSheet?._state?.getFeatureCalculations?.()?.weaponDamageRiders || [];
+			});
+			const rider = riders.find((it: any) => it.id === e.id);
+			if (!rider) throw new Error(`weapon damage rider "${e.id}" missing. seen=${JSON.stringify(riders)}`);
+			if (rider.dice !== e.dice) throw new Error(`${e.id}.dice=${rider.dice}, expected ${e.dice}`);
+			if (rider.damageType !== e.damageType) throw new Error(`${e.id}.damageType=${rider.damageType}, expected ${e.damageType}`);
+			if (e.perTurn !== undefined && rider.perTurn !== e.perTurn) throw new Error(`${e.id}.perTurn=${rider.perTurn}, expected ${e.perTurn}`);
 			return;
 		}
 		case "resistance": {
@@ -1054,19 +1153,18 @@ async function _runPassiveOrRollEffect (
 			const isShort = e.kind === "shortRestRestores";
 			const before = await charSheet.getResource(e.resource).catch(() => null);
 			if (!before || before.max <= 0) throw new Error(`resource "${e.resource}" not on sheet`);
-			// spend one charge programmatically
-			await charSheet.page.evaluate(([nm]) => {
-				const cs: any = (globalThis as any).charSheet;
-				cs?._state?.spendResource?.(nm, 1);
-				cs?._renderCharacter?.();
-			}, [e.resource] as const);
+			// Spend one charge through the page object. `_state.spendResource` does not
+			// exist — the optional call silently no-opped, so this probe used to fall
+			// straight into its own "API absent" soft skip (CS-BUG-034).
+			await charSheet.useResourceByName(e.resource, 1).catch(() => null);
 			const afterSpend = await charSheet.getResource(e.resource).catch(() => before);
-			if (afterSpend.current >= before.current) return; // spendResource API absent; soft skip
-			await charSheet.page.evaluate((short) => {
-				const cs: any = (globalThis as any).charSheet;
-				if (short) cs?._state?.shortRest?.(); else cs?._state?.longRest?.();
-				cs?._renderCharacter?.();
-			}, isShort);
+			if (afterSpend.current >= before.current) return; // resource could not be spent; soft skip
+			// The page object drives the real rest UI. Calling `_state.shortRest()`
+			// here would be a silent no-op: the state method is `onShortRest`, and the
+			// optional-call syntax swallowed the mismatch, so this check could never
+			// pass once the spend succeeded (CS-BUG-034).
+			if (isShort) await charSheet.triggerShortRest();
+			else await charSheet.triggerLongRest();
 			const after = await charSheet.getResource(e.resource).catch(() => afterSpend);
 			const target = e.toMax === false ? (before.current) : before.max;
 			if (after.current < target) throw new Error(`expected ${isShort ? "short" : "long"} rest to restore "${e.resource}" to ≥${target}, got ${after.current}/${after.max}`);
@@ -1629,32 +1727,20 @@ export async function assertFeaturesMatrix (
 						// restoration probe: spend 1, rest, check restoration
 						const before = r.current;
 						if (before <= 0) break; // can't probe an empty pool
-						await charSheet.page.evaluate(([nm]) => {
-							const cs: any = (globalThis as any).charSheet;
-							cs?._state?.spendResource?.(nm, 1);
-							cs?._renderCharacter?.();
-						}, [nameStr] as const);
+						await charSheet.useResourceByName(nameStr, 1).catch(() => null);
 						const afterSpend = await charSheet.getResource(nameStr).catch(() => r);
 						if (afterSpend.current >= before) {
-							// spendResource API not present — skip restore probe quietly
+							// resource could not be spent — skip the restore probe quietly
 							break;
 						}
-						// short rest
-						await charSheet.page.evaluate(() => {
-							const cs: any = (globalThis as any).charSheet;
-							cs?._state?.shortRest?.();
-							cs?._renderCharacter?.();
-						});
+						// short rest — via the page object; `_state.shortRest` does not exist
+						await charSheet.triggerShortRest();
 						const afterShort = await charSheet.getResource(nameStr).catch(() => afterSpend);
 						const shortRestored = afterShort.current >= before;
 						// long rest
 						let longRestored = shortRestored;
 						if (!shortRestored && (fc.restoreOn === "long" || fc.restoreOn === "either")) {
-							await charSheet.page.evaluate(() => {
-								const cs: any = (globalThis as any).charSheet;
-								cs?._state?.longRest?.();
-								cs?._renderCharacter?.();
-							});
+							await charSheet.triggerLongRest();
 							const afterLong = await charSheet.getResource(nameStr).catch(() => afterShort);
 							longRestored = afterLong.current >= before;
 						}
