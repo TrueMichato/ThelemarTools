@@ -2752,6 +2752,16 @@ const FeatureEffectRegistry = {
 			{type: "acBonus", value: "int", conditional: "while Bladesong is active", enabled: false},
 			{type: "modifier", modType: "concentration", value: "int", conditional: "while Bladesong is active", enabled: false},
 		]);
+
+		// School of Necromancy — Inured to Undeath (level 10):
+		// "you have resistance to necrotic damage, and your hit point maximum can't be reduced."
+		// Both halves are unconditional passives, so they belong here rather than in a
+		// calculation flag; `hpMaxReductionImmunity` is the generic effect any feature with
+		// the same wording can reuse.
+		this.register("Inured to Undeath", [
+			{type: "resistance", damageType: "necrotic"},
+			{type: "hpMaxReductionImmunity"},
+		]);
 	},
 
 	/**
@@ -8722,10 +8732,47 @@ class CharacterSheetState {
 
 	getCurrentHp () { return this._data.hp.current; }
 
+	/**
+	 * Effective maximum-HP reduction, in hit points.
+	 *
+	 * Returns 0 while the character is immune to hit point maximum reduction
+	 * (see {@link isImmuneToMaxHpReduction}) — the configured value is preserved in
+	 * state so removing the source of immunity restores it. Use
+	 * {@link getConfiguredMaxHpReduction} to read the raw, un-gated number for UI.
+	 * @returns {number}
+	 */
 	getMaxHpReduction () {
+		if (this.isImmuneToMaxHpReduction()) return 0;
+		return this.getConfiguredMaxHpReduction();
+	}
+
+	/**
+	 * The raw stored maximum-HP reduction, ignoring immunity. The HP-reduction control
+	 * shows this so the player's own input is never silently discarded.
+	 * @returns {number}
+	 */
+	getConfiguredMaxHpReduction () {
 		const reduction = Number(this._data.hp.maxHpReduction);
 		if (!Number.isFinite(reduction)) return 0;
 		return Math.max(0, Math.floor(reduction));
+	}
+
+	/**
+	 * Whether a feature makes this character's hit point maximum unreducible
+	 * ("your hit point maximum can't be reduced" — Inured to Undeath, homebrew equivalents).
+	 * Populated generically by the `hpMaxReductionImmunity` feature effect.
+	 * @returns {boolean}
+	 */
+	isImmuneToMaxHpReduction () {
+		return (this._data._classFeatureHpMaxReductionImmunities || []).length > 0;
+	}
+
+	/**
+	 * Names of the features granting hit-point-maximum-reduction immunity, for UI credit.
+	 * @returns {string[]}
+	 */
+	getMaxHpReductionImmunitySources () {
+		return [...(this._data._classFeatureHpMaxReductionImmunities || [])];
 	}
 
 	setMaxHpReduction (reduction) {
@@ -8979,9 +9026,10 @@ class CharacterSheetState {
 		const perLevelBonusValue = perLevelValue * totalLevel;
 		const spellEffectsAgg = this._aggregateActiveStateHpEffects();
 		const unreducedTotal = perLevel.reduce((acc, e) => acc + e.levelTotal, 0) + flatValue + perLevelBonusValue + spellEffectsAgg.total;
-		const configuredReduction = this.getMaxHpReduction();
-		const appliedReduction = Math.min(configuredReduction, Math.max(0, unreducedTotal - 1));
+		const configuredReduction = this.getConfiguredMaxHpReduction();
+		const appliedReduction = Math.min(this.getMaxHpReduction(), Math.max(0, unreducedTotal - 1));
 		const total = Math.max(1, unreducedTotal - appliedReduction);
+		const reductionImmunitySources = this.getMaxHpReductionImmunitySources();
 
 		return {
 			total,
@@ -8991,7 +9039,15 @@ class CharacterSheetState {
 			flatBonus: {value: flatValue, sources: flatSources},
 			perLevelBonus: {perLevelValue, totalLevels: totalLevel, value: perLevelBonusValue, sources: perLevelSources},
 			spellEffects: {value: spellEffectsAgg.total, sources: spellEffectsAgg.sources},
-			maxHpReduction: {configured: configuredReduction, value: appliedReduction ? -appliedReduction : 0},
+			maxHpReduction: {
+				configured: configuredReduction,
+				value: appliedReduction ? -appliedReduction : 0,
+				// Set when a feature makes the maximum unreducible; the raw player-entered
+				// number is preserved (`ignored`) so the UI can explain why it does nothing.
+				isImmune: reductionImmunitySources.length > 0,
+				immunitySources: reductionImmunitySources,
+				ignored: reductionImmunitySources.length > 0 ? this.getConfiguredMaxHpReduction() : 0,
+			},
 			tempHp: this._data.hp.temp || 0,
 			current: this._data.hp.current || 0,
 			legacyFallback: !useHistory,
@@ -14074,6 +14130,109 @@ class CharacterSheetState {
 		}
 
 		return totalAdded;
+	}
+
+	/**
+	 * Reconcile spells a FEATURE adds to the spellbook (as opposed to always-prepared
+	 * class/subclass grants). The canonical case is the School of Necromancy's Undead
+	 * Thralls — "you add the animate dead spell to your spellbook if it is not there
+	 * already" — but any feature can opt in by pushing onto
+	 * `calculations.grantedSpellbookSpells`.
+	 *
+	 * Semantics deliberately differ from {@link populateClassSpells}:
+	 *  - the spell lands in the spellbook (`inSpellbook: true`), NOT prepared, because
+	 *    the rules add it to the book, not to the prepared list;
+	 *  - entries are tagged `grantedByFeature: true` so a level-down / subclass change
+	 *    prunes exactly our own grants and never a player-scribed copy of the same spell.
+	 *
+	 * Catalog-gated and idempotent, so it is safe to call on every effect application.
+	 * @returns {number} count of spells newly added
+	 */
+	populateFeatureGrantedSpellbookSpells () {
+		const sc = this._data.spellcasting;
+		if (!sc) return 0;
+		sc.spellsKnown = sc.spellsKnown || [];
+
+		const desired = this.getFeatureCalculations().grantedSpellbookSpells || [];
+		const keyOf = s => `${(s.name || "").toLowerCase()}|${(s.source || "").toLowerCase()}`;
+		const desiredKeys = new Set(desired.map(keyOf));
+
+		// Prune stale grants (feature lost via level-down / respec / subclass change).
+		sc.spellsKnown = sc.spellsKnown.filter(s => !(s.grantedByFeature === true && !desiredKeys.has(keyOf(s))));
+
+		let totalAdded = 0;
+		for (const grant of desired) {
+			const full = this._resolveFullSpellData(grant) || null;
+			const existing = sc.spellsKnown.find(s => keyOf(s) === keyOf(grant));
+			if (existing) {
+				// Already in the book (player-scribed or our own prior grant) — the rules say
+				// "if it is not there already", so leave ownership alone and only make sure it
+				// really is flagged as a spellbook entry.
+				existing.inSpellbook = true;
+				if (existing.grantedByFeature) existing.sourceFeature = grant.sourceFeature || existing.sourceFeature;
+				continue;
+			}
+			this.addSpell({
+				name: full?.name || grant.name,
+				source: full?.source || grant.source,
+				level: full?.level ?? grant.level ?? 3,
+				school: full?.school || grant.school,
+				ritual: full ? CharacterSheetClassUtils.spellIsRitual(full) : false,
+				concentration: full ? CharacterSheetClassUtils.spellIsConcentration(full) : false,
+				castingTime: full ? CharacterSheetClassUtils.getSpellCastingTime(full) : "",
+				range: full ? CharacterSheetClassUtils.getSpellRange(full) : "",
+				components: full ? CharacterSheetClassUtils.getSpellComponents(full) : "",
+				duration: full ? CharacterSheetClassUtils.getSpellDuration(full) : "",
+				subschools: full?.subschools || [],
+				inSpellbook: true,
+				sourceFeature: grant.sourceFeature || null,
+				grantedByFeature: true,
+			}, false);
+			const added = sc.spellsKnown.find(s => keyOf(s) === keyOf(grant));
+			if (added) {
+				added.inSpellbook = true;
+				added.grantedByFeature = true;
+				added.sourceFeature = grant.sourceFeature || null;
+			}
+			totalAdded++;
+		}
+
+		return totalAdded;
+	}
+
+	/**
+	 * Gold and downtime needed to copy a spell into the spellbook, honoring every
+	 * `<School> Savant`-style discount the character has.
+	 *
+	 * Baseline is the PHB wizard rule: 50 gp and 2 hours per spell level. Discounts come
+	 * from `calculations.spellbookScribeDiscounts` (`{school, multiplier, source}`), which
+	 * the generic Savant block populates for all eight Arcane Traditions — so this one
+	 * method covers Abjuration through Transmutation, not just Necromancy.
+	 *
+	 * @param {{level?: number, school?: string}} spell
+	 * @returns {{gp: number, hours: number, baseGp: number, baseHours: number, multiplier: number, sources: string[]}}
+	 */
+	getSpellbookScribeCost (spell) {
+		const level = Math.max(0, Number(spell?.level) || 0);
+		const baseGp = level * 50;
+		const baseHours = level * 2;
+
+		const discounts = (this.getFeatureCalculations().spellbookScribeDiscounts || [])
+			.filter(d => d.school && spell?.school && String(d.school).toUpperCase() === String(spell.school).toUpperCase());
+
+		// Multiple sources multiply (the halvings compose); clamped so a stack can never
+		// produce a negative or free-plus cost.
+		const multiplier = discounts.reduce((acc, d) => acc * (Number(d.multiplier) || 1), 1);
+		const clamped = Math.min(1, Math.max(0, multiplier));
+
+		return {
+			gp: Math.ceil(baseGp * clamped),
+			hours: Math.ceil(baseHours * clamped),
+			baseGp,
+			baseHours,
+			multiplier: clamped,
+			sources: discounts.map(d => d.source).filter(Boolean),
+		};
 	}
 
 	/**
@@ -22116,22 +22275,44 @@ class CharacterSheetState {
 							}
 
 							case "School of Necromancy":
-							case "Necromancy": {
-								// Necromancy Savant (level 2)
+							case "Necromancy":
+							case "Necromancer": {
+								// Necromancy Savant (level 2/3) — half gp/time to copy Necromancy
+								// spells into the spellbook. Present in both the PHB subclass and
+								// the XPHB `_copy` of it (there is no distinct XPHB Necromancer),
+								// so it is NOT gated on edition. The discount itself is applied
+								// generically below via `spellbookScribeDiscounts`.
 								calculations.hasNecromancySavant = true;
 
-								// Grim Harvest (level 2)
+								// Grim Harvest (level 2/3) — 1/turn on a kill with a levelled
+								// spell, regain 2× the slot level (3× for a Necromancy spell).
 								calculations.hasGrimHarvest = true;
-								calculations.grimHarvestHealing = "2x spell level"; // or 3x for necromancy
+								calculations.grimHarvestMultiplier = 2;
+								calculations.grimHarvestNecromancyMultiplier = 3;
 
 								// Undead Thralls (level 6)
 								if (level >= 6) {
 									calculations.hasUndeadThralls = true;
 									calculations.undeadThrallsHpBonus = level;
 									calculations.undeadThrallsDamageBonus = profBonus;
+									calculations.undeadThrallsExtraTargets = 1;
+									// Generic created-undead buff bundle (read by
+									// getCreatedUndeadBonuses()); any future feature can add to it.
+									calculations.createdUndeadHpBonus = level;
+									calculations.createdUndeadDamageBonus = profBonus;
+									calculations.createdUndeadExtraTargets = 1;
+									calculations.createdUndeadBonusSources = ["Undead Thralls"];
+									// Animate Dead is added to the spellbook if not already there.
+									(calculations.grantedSpellbookSpells ||= []).push({
+										name: "Animate Dead",
+										source: "PHB",
+										sourceFeature: "Undead Thralls",
+									});
 								}
 
-								// Inured to Undeath (level 10)
+								// Inured to Undeath (level 10) — necrotic resistance + immunity to
+								// hit point maximum reduction. Both applied via the generic
+								// FeatureEffectRegistry entry for "Inured to Undeath".
 								if (level >= 10) {
 									calculations.hasInuredToUndeath = true;
 								}
@@ -22140,6 +22321,8 @@ class CharacterSheetState {
 								if (level >= 14) {
 									calculations.hasCommandUndead = true;
 									calculations.commandUndeadDc = 8 + profBonus + intMod;
+									calculations.commandUndeadRange = 60;
+									calculations.commandUndeadSaveAbility = "cha";
 								}
 								break;
 							}
@@ -22395,6 +22578,20 @@ class CharacterSheetState {
 								}
 								break;
 							}
+						}
+
+						// ===== GENERIC: "<School> Savant" spellbook-scribing discount =====
+						// Every 2014 Arcane Tradition halves the gold and time needed to copy a
+						// spell of its own school into the spellbook. Rather than repeating the
+						// rule in eight `case` blocks, derive it once from the `has<School>Savant`
+						// flags the cases already set. Consumed by getSpellbookScribeCost().
+						for (const [flag, meta] of Object.entries(CharacterSheetState.WIZARD_SAVANT_SCHOOLS)) {
+							if (!calculations[flag]) continue;
+							(calculations.spellbookScribeDiscounts ||= []).push({
+								school: meta.school,
+								multiplier: 0.5,
+								source: meta.source,
+							});
 						}
 					}
 					break;
@@ -24751,6 +24948,15 @@ class CharacterSheetState {
 		// Portent (Divination): roll d20s to replace rolls
 		// (Tracked as a resource with specific values)
 
+		// Inured to Undeath (School of Necromancy 10): necrotic resistance + the hit point
+		// maximum can't be reduced. The FeatureEffectRegistry entry covers the normal path
+		// (the stored "Inured to Undeath" feature); this calculation fallback keeps the
+		// mechanics live for saves/imports whose feature list is incomplete.
+		if (calculations.hasInuredToUndeath && !alreadyProcessed("Inured to Undeath")) {
+			effects.push({type: "resistance", damageType: "necrotic", source: "Inured to Undeath"});
+			effects.push({type: "hpMaxReductionImmunity", source: "Inured to Undeath"});
+		}
+
 		// =========================================================
 		// SORCERER FEATURES
 		// =========================================================
@@ -25087,6 +25293,9 @@ class CharacterSheetState {
 		// e.g. TGTT Cleric Ceremony/Thaumaturgy, Ranger Hunter's Mark). Catalog-gated
 		// + idempotent reconcile; no-ops until setClassCatalog has run.
 		this.populateClassSpells();
+		// Populate spellbook spells granted by a FEATURE (e.g. Undead Thralls adds
+		// Animate Dead to the wizard's spellbook). Idempotent reconcile.
+		this.populateFeatureGrantedSpellbookSpells();
 
 		const calculations = this.getFeatureCalculations();
 		const effects = calculations._effects || [];
@@ -25164,6 +25373,20 @@ class CharacterSheetState {
 			case "immunity": {
 				this._addClassFeatureImmunity(effect.damageType);
 				return `${effect.source}: ${effect.damageType} immunity`;
+			}
+
+			// ===== HIT POINT MAXIMUM REDUCTION IMMUNITY =====
+			// Generic hook for "your hit point maximum can't be reduced" (Necromancy
+			// wizard's Inured to Undeath, and any homebrew feature that says the same).
+			// Consumed by getMaxHpReduction(), which returns 0 while immune, so every
+			// downstream max-HP consumer (sheet header, HP breakdown, PDF, play mode)
+			// gets the correct number without knowing about the feature.
+			case "hpMaxReductionImmunity": {
+				if (!this._data._classFeatureHpMaxReductionImmunities) this._data._classFeatureHpMaxReductionImmunities = [];
+				if (!this._data._classFeatureHpMaxReductionImmunities.includes(effect.source)) {
+					this._data._classFeatureHpMaxReductionImmunities.push(effect.source);
+				}
+				return `${effect.source}: hit point maximum can't be reduced`;
 			}
 
 			case "conditionImmunity": {
@@ -25608,6 +25831,9 @@ class CharacterSheetState {
 			});
 		}
 		this._data._classFeatureImmunities = [];
+
+		// Remove class feature hit-point-maximum-reduction immunities
+		this._data._classFeatureHpMaxReductionImmunities = [];
 
 		// Remove class feature condition immunities
 		if (this._data._classFeatureConditionImmunities) {
@@ -45032,6 +45258,24 @@ class CharacterSheetState {
 	 * Only add entries here when the generic detection pipeline gets it wrong.
 	 * Prefer fixing detection patterns or adding to excludedNames for broad categories.
 	 */
+	/**
+	 * `has<School>Savant` calculation flag → the spell school it discounts, plus the
+	 * feature name to credit. Drives the generic spellbook-scribing discount (all eight
+	 * 2014 Arcane Traditions halve the gp/time to copy a spell of their own school), so
+	 * the rule lives in ONE place instead of eight subclass `case` blocks.
+	 * School codes match `Parser` single-letter spell schools.
+	 */
+	static WIZARD_SAVANT_SCHOOLS = {
+		hasAbjurationSavant: {school: "A", source: "Abjuration Savant"},
+		hasConjurationSavant: {school: "C", source: "Conjuration Savant"},
+		hasDivinationSavant: {school: "D", source: "Divination Savant"},
+		hasEnchantmentSavant: {school: "E", source: "Enchantment Savant"},
+		hasEvocationSavant: {school: "V", source: "Evocation Savant"},
+		hasIllusionSavant: {school: "I", source: "Illusion Savant"},
+		hasNecromancySavant: {school: "N", source: "Necromancy Savant"},
+		hasTransmutationSavant: {school: "T", source: "Transmutation Savant"},
+	};
+
 	static FEATURE_CLASSIFICATION_OVERRIDES = {
 		// === Passive features wrongly detected as activatable states ===
 		"monk's focus": "passive",
@@ -45139,6 +45383,23 @@ class CharacterSheetState {
 		// one-shot ACTION ("spend 2 stamina to end one poison/disease"), so classify it as a
 		// limited-use ability — never an Active-State toggle.
 		"purge toxins": "ability",
+
+		// === School of Necromancy (PHB Wizard) ===
+		// (Necromancer) Grim Harvest triggers on a kill ("Once per turn when you kill one or
+		// more creatures with a spell of 1st level or higher, you regain hit points…"), so it
+		// is a TRIGGERED, one-shot ability with a bespoke prompt (slot level + school → heal),
+		// never a persistent toggle. Command Undead is a plain ACTION resolved by the target's
+		// Charisma save against the wizard's spell save DC — also an ability, not a state.
+		// Both click handlers are wired by name in charactersheet.js.
+		"grim harvest": "ability",
+		"command undead": "ability",
+		// Necromancy Savant (downtime scribing discount), Undead Thralls (spellbook grant +
+		// created-undead buffs) and Inured to Undeath (necrotic resistance + unreducible HP
+		// maximum) are all PASSIVE — their mechanics are applied by the state engine, so they
+		// must not leak into the Active-States panel as meaningless toggles.
+		"necromancy savant": "passive",
+		"undead thralls": "passive",
+		"inured to undeath": "passive",
 
 		// === Barbarian: Path of the World Tree (XPHB) & TGTT specialty (R40 #5/#6/#8) ===
 		// (R40 #5) "Path of Drowning Springs" (TGTT Barbarian specialty) is a BONUS-ACTION
@@ -50587,10 +50848,128 @@ class CharacterSheetState {
 		};
 	}
 
+	/**
+	 * Hit points regained by Grim Harvest (School of Necromancy 2/3) for a kill made with a
+	 * spell of the given slot level. 2× the level normally, 3× for a Necromancy spell; the
+	 * multipliers are read from the calculations so a homebrew variant can retune them.
+	 *
+	 * Returns `null` when the character does not have the feature, so callers can fail loudly.
+	 *
+	 * @param {number} spellLevel slot level used (1-9; cantrips never qualify)
+	 * @param {boolean} isNecromancy whether the spell was from the Necromancy school
+	 * @returns {?{total: number, spellLevel: number, multiplier: number, isNecromancy: boolean}}
+	 */
+	calculateGrimHarvestHealing (spellLevel, isNecromancy = false) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasGrimHarvest) return null;
+		const level = Math.max(0, Math.min(9, Number(spellLevel) || 0));
+		if (!level) return {total: 0, spellLevel: 0, multiplier: 0, isNecromancy: !!isNecromancy};
+		const multiplier = isNecromancy
+			? (Number(calc.grimHarvestNecromancyMultiplier) || 3)
+			: (Number(calc.grimHarvestMultiplier) || 2);
+		return {total: level * multiplier, spellLevel: level, multiplier, isNecromancy: !!isNecromancy};
+	}
+
+	/**
+	 * Save DC / ability / range for Command Undead (School of Necromancy 14).
+	 * The DC is the wizard's spell save DC; it is computed in the calculations block so it
+	 * tracks proficiency bonus and Intelligence automatically.
+	 * @returns {?{dc: number, ability: string, range: number}}
+	 */
+	getCommandUndeadInfo () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCommandUndead) return null;
+		return {
+			dc: Number(calc.commandUndeadDc) || 0,
+			ability: calc.commandUndeadSaveAbility || "cha",
+			range: Number(calc.commandUndeadRange) || 60,
+		};
+	}
+
+	/**
+
+	 * spell. Generic: reads the `createdUndead*` calculation fields, so any feature
+	 * (official or homebrew) that sets them participates. Today the only contributor is
+	 * the School of Necromancy's Undead Thralls.
+	 *
+	 * @returns {{hpBonus: number, damageBonus: number, extraTargets: number, sources: string[], hasAny: boolean}}
+	 */
+	getCreatedUndeadBonuses () {
+		const calc = this.getFeatureCalculations();
+		const hpBonus = Math.max(0, Number(calc.createdUndeadHpBonus) || 0);
+		const damageBonus = Math.max(0, Number(calc.createdUndeadDamageBonus) || 0);
+		const extraTargets = Math.max(0, Number(calc.createdUndeadExtraTargets) || 0);
+		return {
+			hpBonus,
+			damageBonus,
+			extraTargets,
+			sources: [...(calc.createdUndeadBonusSources || [])],
+			hasAny: !!(hpBonus || damageBonus || extraTargets),
+		};
+	}
+
+	/**
+	 * Apply {@link getCreatedUndeadBonuses} to an already-created companion: raise its hit
+	 * point maximum (and current HP, since it enters play at full) and add the damage bonus
+	 * to every weapon attack it has.
+	 *
+	 * Idempotent — the applied bundle is recorded on the companion as
+	 * `createdUndeadBonus`, so re-running (e.g. a re-render or a reload) never double-buffs.
+	 * A LATER call with different numbers (the wizard levelled up) re-bases from the stored
+	 * bundle rather than stacking.
+	 *
+	 * @param {string} companionId
+	 * @returns {?{hpBonus: number, damageBonus: number, sources: string[]}} what was applied, or null
+	 */
+	applyCreatedUndeadBonuses (companionId) {
+		const companion = this.getCompanion(companionId);
+		if (!companion) return null;
+		const bonuses = this.getCreatedUndeadBonuses();
+		if (!bonuses.hpBonus && !bonuses.damageBonus) return null;
+
+		const prior = companion.createdUndeadBonus || {hpBonus: 0, damageBonus: 0};
+
+		// --- HP: re-base off the previously applied bonus so repeat calls are safe.
+		const hpDelta = bonuses.hpBonus - (prior.hpBonus || 0);
+		if (hpDelta) {
+			companion.hp.max = Math.max(1, (companion.hp.max || 1) + hpDelta);
+			companion.hp.current = Math.max(1, Math.min(companion.hp.max, (companion.hp.current || 0) + hpDelta));
+			if (Array.isArray(companion.hpArray)) {
+				companion.hpArray = companion.hpArray.map(entry => ({
+					max: Math.max(1, (entry.max || 1) + hpDelta),
+					current: Math.max(1, Math.min((entry.max || 1) + hpDelta, (entry.current || 0) + hpDelta)),
+				}));
+			}
+		}
+
+		// --- Damage: annotate the attack rows so the bonus is visible where it is rolled.
+		const dmgDelta = bonuses.damageBonus - (prior.damageBonus || 0);
+		if (dmgDelta && Array.isArray(companion.attacks)) {
+			companion.attacks = companion.attacks.map(attack => ({
+				...attack,
+				damageBonus: (Number(attack.damageBonus) || 0) + dmgDelta,
+			}));
+		}
+
+		companion.createdUndeadBonus = {
+			hpBonus: bonuses.hpBonus,
+			damageBonus: bonuses.damageBonus,
+			sources: bonuses.sources,
+		};
+		return companion.createdUndeadBonus;
+	}
+
+	/**
+	 * Parse a raw bestiary stat block via the shared normalizer, then add an active
+	 * companion (fresh HP = max).
+	 *
+	 * `options.count` creates a GROUP (e.g. several skeletons raised by one Animate Dead):
+	 * a `hpArray` with one entry per member is generated so each member's HP is tracked
+	 * individually, matching the shape `_createConjuredCreatures` produces.
+	 */
 	addCompanionFromBestiary (creature, type, origin, options = {}) {
-		// Parse the raw stat block via the shared normalizer, then add an active
-		// companion (fresh HP = max). Behaviour-preserving wrapper.
 		const rec = this._parseBestiaryCreatureToBeastRecord(creature);
+		const count = Math.max(1, Number(options.count) || 1);
 
 		const companionId = this.addCompanion({
 			...rec,
@@ -50598,6 +50977,13 @@ class CharacterSheetState {
 			origin,
 			customName: options.customName || null,
 			hp: {max: rec.hp.max, current: rec.hp.max, temp: 0},
+			...(count > 1
+				? {
+					count,
+					groupId: options.groupId || `grp_${CryptUtil.uid()}`,
+					hpArray: Array.from({length: count}, () => ({max: rec.hp.max, current: rec.hp.max})),
+				}
+				: {}),
 			concentrationLinked: options.concentrationLinked || false,
 			sourceFeatureId: options.sourceFeatureId || null,
 		});

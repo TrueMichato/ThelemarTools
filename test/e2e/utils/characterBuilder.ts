@@ -711,6 +711,21 @@ export const PRESET_FULL_LYCAN_BLOOD_HUNTER: CharacterPreset = {
 	],
 };
 
+/** School of Necromancy Wizard (PHB subclass via TGTT-2014). */
+export const PRESET_FULL_NECROMANCER_WIZARD: CharacterPreset = {
+	race: "Human",
+	raceSource: "PHB'24",
+	className: "Wizard",
+	classSource: "TGTT",
+	background: "Sage",
+	bgSource: "PHB'24",
+	name: "Malifar Boneweaver",
+	skillCount: 2,
+	subclassName: "School of Necromancy",
+	subclassSource: "TGTT-2014",
+	signatureSpells: ["Chill Touch", "False Life"],
+};
+
 /** Convenience array of all comprehensive presets — handy for parameterised smoke tests. */
 export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_MERCY_MONK_CHANGELING,

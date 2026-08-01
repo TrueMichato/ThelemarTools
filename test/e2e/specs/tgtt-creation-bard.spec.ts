@@ -146,6 +146,20 @@ describeCharacter({
 				{kind: "featureCalculationDerivedFrom", property: "moteOfPotentialDc", equals: "spellSaveDc", ability: "cha"},
 				// Temp-HP rider adds the caster's CHA modifier.
 				{kind: "featureCalculationDerivedFrom", property: "moteSavingThrowTempHpBonus", equals: "abilityMod", ability: "cha"},
+				// The branching mechanic itself: three distinct modes, each
+				// resolved with its own numbers. Probed through the bespoke
+				// state API with `stateCall` rather than flat calc fields.
+				{kind: "stateCall", method: "getMoteOfPotentialModes", path: "length", exact: 3},
+				{kind: "stateCall", method: "getMoteOfPotentialModes", path: "1.damageType", exact: "thunder"},
+				{kind: "stateCall", method: "getMoteOfPotentialModes", path: "2.id", exact: "save"},
+				// Attack mode: forcing a 4 on the die yields 4 thunder damage.
+				{kind: "stateCall", method: "rollMoteOfPotential", args: ["attack", {roll: 4}], path: "damage", exact: 4},
+				// Ability-check mode: given rolls of 3 and 6 the better roll wins.
+				{kind: "stateCall", method: "rollMoteOfPotential", args: ["check", {roll: 3, secondRoll: 6}], path: "result", exact: 6},
+				// Save mode: temp HP = die roll + CHA mod, floor 1.
+				{kind: "stateCall", method: "rollMoteOfPotential", args: ["save", {roll: 5}], path: "tempHp", min: 6},
+				// Spending a mote must NOT deduct another Bardic Inspiration die.
+				{kind: "longRestRestores", resource: "Bardic Inspiration"},
 			],
 		},
 		// The BI die (and therefore every mote rider) grows with level.
@@ -187,6 +201,11 @@ describeCharacter({
 		// A once-per-long-rest "Use" ability that puts a REAL item into
 		// inventory, under a value cap of 20 × bard level and a size cap
 		// that steps Medium → Large (L6) → Huge (L14).
+		// e85036b1 makes classified limited-use abilities surface in
+		// `getGenericPoolResources()`, so the pool is genuinely rendered —
+		// verified live post-merge. `kind: "resource"` is therefore valid
+		// here, and the passive row below asserts strictly more on top.
+		{level: 3, name: /performance of creation/i, kind: "resource", resourceMax: 1},
 		{
 			level: 3,
 			untilLevel: 3,
@@ -246,6 +265,7 @@ describeCharacter({
 		// companion machinery. HP = 10 + 5 × bard level, AC 16, a
 		// Force-Empowered Slam at the CHA spell attack bonus dealing
 		// 1d10 + PB force.
+		{level: 6, name: /animating performance/i, kind: "resource", resourceMax: 1},
 		{
 			level: 6,
 			untilLevel: 11,

@@ -8639,6 +8639,8 @@ class CharacterSheetPage {
 			case "borrowed tongues and hides": return this._pUseDaemonologistSwitchSides();
 			case "unearthly countenance": return this._pUseUnearthlyCountenance();
 			case "eternal war eruption": return this._pUseEternalWarEruption();
+			case "grim harvest": return this._pUseGrimHarvest(feature);
+			case "command undead": return this._pUseCommandUndead(feature);
 			// College of Creation (TCE)
 			case "mote of potential": return this._pUseMoteOfPotential(feature);
 			case "performance of creation": return this._pUsePerformanceOfCreation(feature);
@@ -8650,6 +8652,90 @@ class CharacterSheetPage {
 		// (e.g. damage bursts) fall through to the generic limited-use pipeline unchanged.
 		if (feature?._manifestationRequiresSave) return this._pUseManifestationSaveOption(feature, resource, resourceCost);
 		return false;
+	}
+
+	/**
+	 * Grim Harvest (School of Necromancy 2/3). Triggered, not toggled: the player killed
+	 * something with a levelled spell, so we ask which slot level and whether it was a
+	 * Necromancy spell, then apply the healing directly to the character.
+	 *
+	 * Unlimited uses by the rules (once per turn, which the sheet cannot police), so nothing
+	 * is consumed — the button exists to compute and APPLY the healing, not to spend a resource.
+	 */
+	async _pUseGrimHarvest (feature) {
+		const spellLevel = await InputUiUtil.pGetUserEnum({
+			title: "Grim Harvest",
+			htmlDescription: "<div>You killed one or more creatures with a spell of 1st level or higher. What level slot did you spend?</div>",
+			values: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+			fnDisplay: level => `${Parser.spLevelToFull(level)}-level spell`,
+			isResolveItem: true,
+		});
+		if (spellLevel == null) return true;
+
+		const isNecromancy = await InputUiUtil.pGetUserBoolean({
+			title: "Grim Harvest",
+			htmlDescription: "<div>Was it a Necromancy spell? (Necromancy spells heal 3× the level instead of 2×.)</div>",
+			textYes: "Necromancy spell",
+			textNo: "Other school",
+		});
+		if (isNecromancy == null) return true;
+
+		const heal = this._state.calculateGrimHarvestHealing(spellLevel, isNecromancy);
+		if (!heal?.total) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "Grim Harvest could not be resolved."}));
+			return true;
+		}
+
+		const hp = this._state.getHp();
+		const newHp = Math.min(hp.max, hp.current + heal.total);
+		const healed = newHp - hp.current;
+		this._state.setHp(newHp, hp.max);
+
+		this._rollHistory?.addRoll({
+			title: "Grim Harvest",
+			total: heal.total,
+			breakdown: `${heal.multiplier} × ${Parser.spLevelToFull(heal.spellLevel)}-level${isNecromancy ? " (Necromancy)" : ""}`,
+		});
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `💀 <strong>Grim Harvest</strong>: regained <strong>${healed}</strong> HP (${heal.multiplier} × level ${heal.spellLevel}${isNecromancy ? ", Necromancy" : ""}).`,
+		}));
+
+		this._saveCurrentCharacter();
+		this._renderHp?.();
+		this._renderResources();
+		this._renderActiveStates?.();
+		return true;
+	}
+
+	/**
+	 * Command Undead (School of Necromancy 14). An action with no resource cost: surface the
+	 * live save DC (which tracks proficiency + Intelligence) and the rules riders the player
+	 * has to enforce at the table, and log it so the DC is in the roll history.
+	 */
+	async _pUseCommandUndead (feature) {
+		const info = this._state.getCommandUndeadInfo();
+		if (!info) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: "Command Undead is not available."}));
+			return true;
+		}
+		const abilityLabel = Parser.attAbvToFull(info.ability);
+		this._showDiceResult?.(
+			"Command Undead",
+			info.dc,
+			`Target undead within ${info.range} ft. makes a ${abilityLabel} save vs. DC ${info.dc}`,
+		);
+		this._rollHistory?.addRoll({
+			title: "Command Undead (save DC)",
+			total: info.dc,
+			breakdown: `${abilityLabel} save, ${info.range} ft.`,
+		});
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "info",
+			content: `☠️ <strong>Command Undead</strong>: undead within ${info.range} ft. must succeed on a DC <strong>${info.dc}</strong> ${abilityLabel} saving throw or be charmed by you. Intelligence 13+ targets have advantage; a target with Intelligence 8+ repeats the save every hour, and one with Intelligence 12+ repeats it every hour it takes damage from you.`,
+			autoHideTime: 14000,
+		}));
+		return true;
 	}
 
 	async _pUseDaemonologistSwitchSides () {

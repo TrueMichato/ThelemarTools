@@ -295,7 +295,7 @@ describe("CharacterSheetHpBreakdown", () => {
 				+ bd.spellEffects.value
 				+ bd.maxHpReduction.value;
 
-			expect(bd.maxHpReduction).toEqual({configured: 9, value: -9});
+			expect(bd.maxHpReduction).toEqual({configured: 9, value: -9, isImmune: false, immunitySources: [], ignored: 0});
 			expect(componentsTotal).toBe(bd.total);
 			expect(bd.total).toBe(state.getMaxHp());
 		});
@@ -310,7 +310,7 @@ describe("CharacterSheetHpBreakdown", () => {
 				+ bd.spellEffects.value
 				+ bd.maxHpReduction.value;
 
-			expect(bd.maxHpReduction).toEqual({configured: 100, value: -27});
+			expect(bd.maxHpReduction).toEqual({configured: 100, value: -27, isImmune: false, immunitySources: [], ignored: 0});
 			expect(componentsTotal).toBe(1);
 			expect(bd.total).toBe(1);
 			expect(bd.total).toBe(state.getMaxHp());
@@ -324,7 +324,7 @@ describe("CharacterSheetHpBreakdown", () => {
 			loaded.loadFromJson(oldSave);
 
 			expect(loaded.getMaxHpReduction()).toBe(0);
-			expect(loaded.getHpBreakdown().maxHpReduction).toEqual({configured: 0, value: 0});
+			expect(loaded.getHpBreakdown().maxHpReduction).toEqual({configured: 0, value: 0, isImmune: false, immunitySources: [], ignored: 0});
 		});
 
 		it("round-trips a configured reduction larger than the amount applied", () => {
@@ -336,7 +336,34 @@ describe("CharacterSheetHpBreakdown", () => {
 
 			expect(loaded.getMaxHpReduction()).toBe(100);
 			expect(loaded.getMaxHp()).toBe(1);
-			expect(loaded.getHpBreakdown().maxHpReduction).toEqual({configured: 100, value: -27});
+			expect(loaded.getHpBreakdown().maxHpReduction).toEqual({configured: 100, value: -27, isImmune: false, immunitySources: [], ignored: 0});
+		});
+
+		it("zeroes the applied component and preserves the configured value when the character is immune", () => {
+			// Generic `hpMaxReductionImmunity` effect (School of Necromancy's Inured to
+			// Undeath is the canonical source): the reduction stays on file but is inert.
+			const immune = new CharacterSheetState();
+			immune.setRace({name: "Human", source: "PHB"});
+			immune.addClass({
+				name: "Wizard",
+				source: "PHB",
+				level: 10,
+				subclass: {name: "School of Necromancy", source: "PHB", shortName: "Necromancy"},
+			});
+			immune.setAbilityBase("con", 14);
+			immune.applyClassFeatureEffects();
+
+			const unreduced = immune.getMaxHp();
+			immune.setMaxHpReduction(9);
+
+			const bd = immune.getHpBreakdown();
+			expect(bd.maxHpReduction.isImmune).toBe(true);
+			expect(bd.maxHpReduction.value).toBe(0);
+			expect(bd.maxHpReduction.ignored).toBe(9);
+			expect(bd.maxHpReduction.configured).toBe(9);
+			expect(bd.maxHpReduction.immunitySources).toContain("Inured to Undeath");
+			expect(immune.getMaxHp()).toBe(unreduced);
+			expect(bd.total).toBe(immune.getMaxHp());
 		});
 	});
 
