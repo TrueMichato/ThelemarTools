@@ -5703,7 +5703,13 @@ class CharacterSheetClassUtils {
 	static updateClassResources (/** @type {*} */ state, /** @type {*} */ classEntry, /** @type {*} */ newLevel, /** @type {*} */ classData) {
 		const resourceDefs = {
 			"Barbarian": [
-				{name: "Rage", maxByLevel: [2, 2, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 999], recharge: "long"},
+				{name: "Rage",
+					maxByLevel: (/** @type {*} */ lvl) => CharacterSheetState.getRageUsesMaxForClass({
+						name: "Barbarian",
+						source: classEntry.source || classData.source,
+						level: lvl,
+					}),
+					recharge: "long"},
 			],
 			"Monk": [
 				{name: "__MONK_RESOURCE__", maxByLevel: (/** @type {*} */ lvl) => lvl >= 2 ? lvl : 0, recharge: "short"},
