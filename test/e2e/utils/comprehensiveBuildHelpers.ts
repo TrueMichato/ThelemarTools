@@ -816,8 +816,9 @@ export type EffectCheck = _EffectCommon & (
 	// hunter's prey ("colossus"/"prey"), elemental rune adders
 	// ("fire", "lightning"), or generic "+1d6"-style riders.
 	| {kind: "attackDamageContains"; attackName: string | RegExp; needle: string}
-	// Verify the rogue's sneak attack die count from
-	// `getFeatureCalculations().sneakAttackDice`. Number of d6.
+	// Verify the rogue's sneak attack die COUNT, parsed from
+	// `getFeatureCalculations().sneakAttack.dice` (a string, e.g.
+	// "6d6"). Number of d6. There is no flat `sneakAttackDice` key.
 	| {kind: "sneakAttackDice"; min?: number; exact?: number}
 	// Verify the bard's BI die FACE size. minFaces of 6/8/10/12.
 	| {kind: "bardicInspirationDie"; minFaces: number}
