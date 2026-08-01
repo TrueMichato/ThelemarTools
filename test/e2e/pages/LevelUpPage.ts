@@ -966,9 +966,18 @@ export class LevelUpPage {
 		let resolved = 0;
 		for (let i = 0; i < maxPrompts; i++) {
 			const clicked = await this.page.evaluate(() => {
-				const wrp = document.querySelector<HTMLElement>(".charsheet__feature-choice");
+				// Resolve the TOP-MOST prompt first. Some picks chain (PHB'14 Fighting
+				// Style → "Blessed Warrior" → a cantrip chooser), and the chained modal
+				// stacks ABOVE its parent, so always clearing the first-in-DOM prompt
+				// leaves the chained one up and its overlay then swallows every
+				// subsequent click on the sheet.
+				const prompts = Array.from(document.querySelectorAll<HTMLElement>(".charsheet__feature-choice, .spell-choice-list"));
+				const wrp = prompts[prompts.length - 1];
 				if (!wrp) return false;
 				const btn = wrp.querySelector<HTMLButtonElement>(".charsheet__feature-choice-opt")
+					// The chained spell chooser has no "defer" — pick the first
+					// still-selectable spell so the modal actually closes.
+					|| wrp.querySelector<HTMLButtonElement>(".spell-choice-select")
 					|| wrp.querySelector<HTMLButtonElement>('[data-act="defer"]');
 				if (!btn) return false;
 				btn.click();

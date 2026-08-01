@@ -249,6 +249,8 @@ it("should produce 2 elixirs at level 6", () => {
 | **Flanking** | Missing | Optional rule not implemented |
 | **Multi-target attacks** | ✅ Implemented | Whirlpool Strike multi-target modal (`_showWhirlpoolStrikeModal`) with creature count → per-hit damage. Generic AoE distribution not yet supported for other features. |
 | **Reaction tracking** | ✅ Implemented | Shared per-turn action economy enforces reaction costs for active-state triggers such as Deflect Energy and Sun Shield |
+| **Damage transfer to self** | ✅ Implemented | `state.useDivineAllegiance(damage)` + `takeDamage(dmg, {unpreventable: true})`. Powers Crown Paladin's Divine Allegiance; reusable by any "you take the damage instead" feature. |
+| **Ally-facing aura riders** | Partial | Self-facing aura effects apply; effects the character grants to *other* creatures (e.g. Exalted Champion's "allies within 30 ft have advantage on death saves and Wisdom saves against your Channel Divinity") are descriptive only — the sheet models one character, so there is no ally to apply them to. |
 
 ### Resource Management
 
