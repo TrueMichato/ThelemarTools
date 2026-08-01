@@ -448,6 +448,31 @@ hasSongOfVictory: true,           // Level 14+
 songOfVictoryDamage: INT,
 ```
 
+**School of Necromancy** (PHB L2 / XPHB L3; alias `Necromancer`)
+```javascript
+hasNecromancySavant: true,        // Level 2/3+ — halves spellbook scribe cost
+                                  //   for Necromancy spells (see below)
+hasGrimHarvest: true,             // Level 2/3+
+grimHarvestMultiplier: 2,         // HP regained = 2 × spell level on a kill
+grimHarvestNecromancyMultiplier: 3, //  …3 × if the killing spell is Necromancy
+
+hasUndeadThralls: true,           // Level 6+
+undeadThrallsHpBonus: wizardLevel,
+undeadThrallsDamageBonus: profBonus,
+createdUndeadHpBonus: wizardLevel,   // generic companion-buff bundle
+createdUndeadDamageBonus: profBonus,
+createdUndeadExtraTargets: 1,
+grantedSpellbookSpells: [{name: "Animate Dead", source: "PHB", …}],
+
+hasInuredToUndeath: true,         // Level 10+ (registry: necrotic resistance
+                                  //   + hpMaxReductionImmunity)
+
+hasCommandUndead: true,           // Level 14+
+commandUndeadDc: spellSaveDc,
+commandUndeadRange: 60,
+commandUndeadSaveAbility: "cha",
+```
+
 ### Warlock
 
 ```javascript
@@ -598,6 +623,85 @@ hasMagicItemSavant: true,         // Level 14+
 hasMagicItemMaster: true,         // Level 18+
 hasSoulOfArtifice: true,          // Level 20+
 ```
+
+---
+
+---
+
+## Generic Engine Mechanisms
+
+These are **class-agnostic** primitives. A subclass opts in by setting a
+calculation field or registering a `FeatureEffectRegistry` entry; the engine
+does the rest. Prefer extending one of these over adding a per-subclass branch.
+
+### `hpMaxReductionImmunity` — effect type
+
+A `FeatureEffectRegistry` effect that makes the character immune to hit-point
+**maximum** reduction (Inured to Undeath, Death Ward-style protections, …).
+
+```javascript
+FeatureEffectRegistry.register("Inured to Undeath", [
+    {type: "resistance", damageType: "necrotic"},
+    {type: "hpMaxReductionImmunity"},
+]);
+```
+
+The configured reduction is **retained, not erased** — it simply stops being
+applied, so removing the immunity restores the old behaviour.
+
+| API | Returns |
+|---|---|
+| `getMaxHpReduction()` | `0` while immune, otherwise the configured value |
+| `getConfiguredMaxHpReduction()` | Always the raw configured value |
+| `isImmuneToMaxHpReduction()` | `true`/`false` |
+| `getMaxHpReductionImmunitySources()` | Feature names granting the immunity |
+
+`getHpBreakdown().maxHpReduction` gains `isImmune`, `immunitySources` and
+`ignored` alongside the existing `configured` / `appliedReduction`.
+
+### `spellbookScribeDiscounts` — calculation array
+
+Any feature can push `{school, multiplier, source}` onto
+`calculations.spellbookScribeDiscounts`. `getSpellbookScribeCost(spell)` starts
+from the 50 gp / 2 hr-per-level baseline and multiplies every matching entry
+(clamped to 0–1):
+
+```javascript
+state.getSpellbookScribeCost({level: 3, school: "N"});
+// → {gp: 75, hours: 3, baseGp: 150, baseHours: 6,
+//    multiplier: 0.5, sources: ["Necromancy Savant"]}
+```
+
+All **eight** Wizard `<School> Savant` traditions are wired through a single
+loop over `CharacterSheetState.WIZARD_SAVANT_SCHOOLS`, so Abjuration Savant,
+Evocation Savant etc. get the discount for free. The spell-add flow surfaces the
+cost as a toast with a working "Pay N gp" button.
+
+### `grantedSpellbookSpells` — calculation array
+
+A feature can push `{name, source, sourceFeature}` to grant a spell **into the
+spellbook** (learnable/castable, but not auto-prepared). Handled by
+`populateFeatureGrantedSpellbookSpells()`, which mirrors `populateClassSpells()`
+and prunes only its own grants when the feature goes away. Used by Undead
+Thralls to grant `animate dead`.
+
+### `createdUndead*` — companion buff bundle
+
+Features that improve creatures the character summons/animates set:
+
+| Calculation | Effect |
+|---|---|
+| `createdUndeadHpBonus` | HP added to each created undead |
+| `createdUndeadDamageBonus` | Weapon-damage bonus on each of its attacks |
+| `createdUndeadExtraTargets` | Extra creatures the raising spell affects |
+| `createdUndeadBonusSources` | Feature names, for display |
+
+`getCreatedUndeadBonuses()` returns the resolved bundle;
+`applyCreatedUndeadBonuses(companionId)` applies it to a companion. Application
+is **idempotent and re-basing** — a stored `companion.createdUndeadBonus` marker
+means a level-up re-applies the *new* totals instead of stacking.
+`charactersheet-spells.js` calls it automatically when Animate Dead raises
+Skeletons/Zombies via `_pShowRaiseUndeadPicker`.
 
 ---
 

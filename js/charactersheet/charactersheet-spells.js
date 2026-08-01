@@ -2004,11 +2004,54 @@ class CharacterSheetSpells {
 
 		this._renderSpellList();
 		this._renderSpellcastingStats();
+		// A wizard copying a spell into the spellbook pays gold + downtime. Surface the
+		// real cost (halved for schools the character is a Savant of) with a one-click
+		// deduction, so the Savant discount is an actual number the player spends rather
+		// than a line of feature text.
+		if (isWizardTarget && spell.level > 0) this._showSpellbookScribeCost(spell);
 		// Update combat spells tab (cantrips are auto-prepared)
 		if (this._page._combat) {
 			this._page._combat.renderCombatSpells();
 		}
 		this._page.saveCharacter();
+	}
+
+	/**
+	 * Toast the gp + downtime cost of copying a spell into the wizard's spellbook, with a
+	 * button that actually deducts the gold. The cost comes from
+	 * `CharacterSheetState#getSpellbookScribeCost`, which applies every `<School> Savant`
+	 * discount the character has — so a School of Necromancy wizard sees (and pays) half
+	 * price for Necromancy spells and full price for everything else.
+	 */
+	_showSpellbookScribeCost (spell) {
+		const cost = this._state.getSpellbookScribeCost?.({level: spell.level, school: spell.school});
+		if (!cost || !cost.baseGp) return;
+
+		const isDiscounted = cost.multiplier < 1;
+		const discountNote = isDiscounted
+			? ` <span class="ve-muted"><s>${cost.baseGp} gp / ${cost.baseHours} hr</s> — ${cost.sources.join(", ")}</span>`
+			: "";
+		const toastEl = e_({
+			tag: "span",
+			html: `<span>📖 <strong>${spell.name}</strong> costs <strong>${cost.gp} gp</strong> and <strong>${cost.hours} hr</strong> to copy into your spellbook.${discountNote}</span> <button class="ve-btn ve-btn-xs ve-btn-primary btn-pay-scribe-cost ml-2">Pay ${cost.gp} gp</button>`,
+		});
+		const payBtn = toastEl.querySelector(".btn-pay-scribe-cost");
+		payBtn?.addEventListener("click", (evt) => {
+			evt.stopPropagation();
+			if (payBtn.disabled) return;
+			const gold = this._state.getCurrency?.("gp") || 0;
+			if (gold < cost.gp) {
+				JqueryUtil.doToast({type: "warning", content: `Not enough gold (${gold} gp available, ${cost.gp} gp needed).`});
+				return;
+			}
+			payBtn.disabled = true;
+			this._state.setCurrency("gp", gold - cost.gp);
+			payBtn.textContent = `✓ Paid ${cost.gp} gp`;
+			this._page.saveCharacter?.();
+			this._page._renderInventory?.();
+			JqueryUtil.doToast({type: "success", content: `📖 Spent ${cost.gp} gp and ${cost.hours} hr scribing ${spell.name}.`});
+		});
+		JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: toastEl, autoHideTime: 12000}));
 	}
 
 	_getCastingTime (spell) {
@@ -4090,7 +4133,10 @@ class CharacterSheetSpells {
 		}
 
 		// Check for special spell triggers (Find Familiar, etc.)
-		await this._handleSpecialSpellTriggers(spell);
+		// The slot level actually spent is passed through so upcast-scaled summons
+		// (Animate Dead's extra corpses, Conjure/Summon tiers) use the real level rather
+		// than the spell's base level.
+		await this._handleSpecialSpellTriggers(spell, slotLevel);
 	}
 
 	/**
@@ -4259,8 +4305,9 @@ class CharacterSheetSpells {
 	/**
 	 * Handle special triggers for specific spells like Find Familiar
 	 */
-	async _handleSpecialSpellTriggers (spell) {
+	async _handleSpecialSpellTriggers (spell, slotLevel = null) {
 		const spellNameLower = spell.name.toLowerCase();
+		const castLevel = Number(slotLevel) || Number(spell.level) || 0;
 
 		// Find Familiar - show familiar picker (with Pact of the Chain expansion if applicable)
 		if (spellNameLower === "find familiar") {
@@ -4303,7 +4350,29 @@ class CharacterSheetSpells {
 
 		const summonInfo = summonSpells[spellNameLower];
 		if (summonInfo) {
-			await this._pShowSummonPicker(spell, summonInfo);
+			await this._pShowSummonPicker(spell, summonInfo, castLevel);
+			return;
+		}
+
+		// Reanimation spells — create actual undead companions from the bestiary. Unlike the
+		// Summon* spells these are real stat blocks and are NOT concentration-linked, so they
+		// persist. `countAtBase` + `perExtraLevel` express the upcast scaling, and the
+		// character's generic created-undead bonuses (School of Necromancy's Undead Thralls,
+		// or any homebrew feature that sets the same calculation fields) are applied on top.
+		const raiseUndeadConfig = {
+			"animate dead": {
+				baseSpellLevel: 3,
+				countAtBase: 1,
+				perExtraLevel: 2,
+				forms: [
+					{name: "Skeleton", source: "MM"},
+					{name: "Zombie", source: "MM"},
+				],
+			},
+		};
+		const raiseConfig = raiseUndeadConfig[spellNameLower];
+		if (raiseConfig) {
+			await this._pShowRaiseUndeadPicker(spell, raiseConfig, castLevel);
 			return;
 		}
 
@@ -4331,10 +4400,76 @@ class CharacterSheetSpells {
 	}
 
 	/**
+	 * Reanimation picker (Animate Dead and friends).
+	 *
+	 * Creates real bestiary creatures as persistent (non-concentration) undead companions,
+	 * scaled by the slot level actually spent, and then applies the character's generic
+	 * created-undead bonuses so a School of Necromancy wizard's thralls really are tougher
+	 * and hit harder — the numbers land on the companion, not just in the description.
+	 *
+	 * @param {object} spell the spell being cast
+	 * @param {{baseSpellLevel: number, countAtBase: number, perExtraLevel: number, forms: {name: string, source: string}[]}} config
+	 * @param {number} castLevel slot level actually spent
+	 */
+	async _pShowRaiseUndeadPicker (spell, config, castLevel) {
+		const slotLevel = Math.max(config.baseSpellLevel, Number(castLevel) || config.baseSpellLevel);
+		const bonuses = this._state.getCreatedUndeadBonuses?.() || {hpBonus: 0, damageBonus: 0, extraTargets: 0, sources: []};
+
+		const baseCount = config.countAtBase + (config.perExtraLevel * (slotLevel - config.baseSpellLevel));
+		const maxCount = baseCount + (bonuses.extraTargets || 0);
+
+		const chosenFormName = await InputUiUtil.pGetUserEnum({
+			title: `${spell.name} — Choose Undead`,
+			htmlDescription: `<div>Raise up to <strong>${maxCount}</strong> undead with a ${Parser.spLevelToFull(slotLevel)}-level slot${bonuses.extraTargets ? ` (${baseCount} + ${bonuses.extraTargets} from ${bonuses.sources.join(", ") || "your features"})` : ""}.</div>`,
+			values: config.forms.map(f => f.name),
+			isResolveItem: true,
+		});
+		if (!chosenFormName) return;
+
+		const count = await InputUiUtil.pGetUserEnum({
+			title: `${spell.name} — How Many?`,
+			htmlDescription: `<div>How many ${chosenFormName}s are you raising?</div>`,
+			values: Array.from({length: maxCount}, (_, i) => i + 1),
+			isResolveItem: true,
+		});
+		if (count == null) return;
+
+		const form = config.forms.find(f => f.name === chosenFormName);
+		const bestiaryData = await DataLoader.pCacheAndGetAllSite(UrlUtil.PG_BESTIARY);
+		const creature = bestiaryData.find(c => c.name === form.name && c.source === form.source)
+			|| bestiaryData.find(c => c.name === form.name);
+		if (!creature) {
+			JqueryUtil.doToast({type: "warning", content: `Could not find a stat block for ${form.name}.`});
+			return;
+		}
+
+		const companionId = this._state.addCompanionFromBestiary?.(
+			creature,
+			CharacterSheetState.COMPANION_TYPES.SUMMON,
+			spell.name,
+			{concentrationLinked: false, count},
+		);
+
+		let applied = null;
+		if (companionId) applied = this._state.applyCreatedUndeadBonuses?.(companionId) || null;
+
+		this._page?._saveCurrentCharacter?.();
+		this._page?._renderCompanions?.();
+
+		const bonusNote = applied && (applied.hpBonus || applied.damageBonus)
+			? ` <span class="ve-muted">(${applied.sources.join(", ")}: +${applied.hpBonus} HP, +${applied.damageBonus} weapon damage)</span>`
+			: "";
+		JqueryUtil.doToast({
+			type: "success",
+			content: `💀 Raised ${count > 1 ? `${count}× ` : ""}${creature.name} with ${spell.name}.${bonusNote}`,
+		});
+	}
+
+	/**
 	 * Show summon spell picker (for Summon Beast, Summon Celestial, etc.)
 	 */
-	async _pShowSummonPicker (spell, summonInfo) {
-		const slotLevel = spell.level || 2; // Minimum level for summon spells
+	async _pShowSummonPicker (spell, summonInfo, castLevel = null) {
+		const slotLevel = Number(castLevel) || spell.level || 2; // Minimum level for summon spells
 		const pb = this._state.getProficiencyBonus?.() || 2;
 		const spellMod = this._state.getAbilityMod?.(this._state.getSpellcastingAbility?.() || "int") || 0;
 
