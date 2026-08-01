@@ -801,3 +801,84 @@ describe("Active State Effects Engine", () => {
 		});
 	});
 });
+
+// =====================================================================
+// CS-BUG-085 — active states that GRANT a non-walk movement type
+//
+// `getSpeed()` guards non-walk speeds behind "the character must already
+// have this movement type", which is right for a flat "+10 speed" but
+// wrong for a state that grants the movement type outright. Those are
+// emitted as {type: "bonus", target: "speed:fly"}, so they land in the
+// bonus term — and the guard returned 0 before the bonus was ever added.
+//
+// This silently zeroed EVERY granted fly/swim/climb speed: the curated
+// Unearthly Countenance state (Daemonologist Wizard L10) and, far more
+// broadly, everything parseEffectsFromDescription produces from "you gain
+// a flying speed of 60 feet" and its swim/climb equivalents.
+//
+// Note why it survived: every pre-existing test seeded the base speed
+// first (e.g. `setSpeed("fly", 60)` above), so none of them ever crossed
+// the base === 0 guard.
+// =====================================================================
+describe("CS-BUG-085: active states granting a non-walk movement type", () => {
+	let s2;
+	beforeEach(() => {
+		s2 = new CharacterSheetState();
+		s2.setAbilityBase("int", 16);
+	});
+
+	test("PREMISE: the character has no fly speed to begin with", () => {
+		expect(s2.getSpeed("fly")).toBe(0);
+	});
+
+	test("PREMISE: a flat generic '+10 speed' state must NOT conjure a fly speed", () => {
+		s2.addActiveState("custom", {
+			name: "Longstrider",
+			customEffects: [{type: "bonus", target: "speed", value: 10}],
+		});
+		// The behaviour the guard exists to protect. It must survive the fix.
+		expect(s2.getSpeed("fly")).toBe(0);
+	});
+
+	test("a state granting 'speed:fly' 60 produces a 60 ft fly speed", () => {
+		s2.addActiveState("custom", {
+			name: "Unearthly Countenance",
+			customEffects: [{type: "bonus", target: "speed:fly", value: 60}],
+		});
+		expect(s2.getSpeed("fly")).toBe(60);
+	});
+
+	test("a granted swim speed is likewise honoured", () => {
+		s2.addActiveState("custom", {
+			name: "Sea Legs",
+			customEffects: [{type: "bonus", target: "speed:swim", value: 30}],
+		});
+		expect(s2.getSpeed("swim")).toBe(30);
+	});
+
+	test("value 'walking' resolves to the walking speed rather than NaN", () => {
+		// parseEffectsFromDescription emits the literal string "walking" for
+		// "a flying speed equal to your walking speed"; left raw it
+		// string-concatenates and Math.floor turns the speed into NaN.
+		s2.addActiveState("custom", {
+			name: "Winged",
+			customEffects: [{type: "bonus", target: "speed:fly", value: "walking"}],
+		});
+		const fly = s2.getSpeed("fly");
+		expect(Number.isFinite(fly)).toBe(true);
+		expect(fly).toBe(s2.getWalkSpeed());
+	});
+
+	test("prose-parsed 'you gain a flying speed of 60 feet' reaches getSpeed", () => {
+		const effects = CharacterSheetState.parseEffectsFromDescription(
+			"While active, you gain a flying speed of 60 feet.",
+		);
+		const flyEffect = effects.find(e => e.target === "speed:fly");
+		// Premise: the parser really does emit the bare bonus form.
+		expect(flyEffect).toBeTruthy();
+		expect(flyEffect.type).toBe("bonus");
+
+		s2.addActiveState("custom", {name: "Prose Flight", customEffects: effects});
+		expect(s2.getSpeed("fly")).toBe(60);
+	});
+});

@@ -30,6 +30,22 @@ All Druid circles are fully implemented:
 - **Spores**: `haloOfSporesDamage`, `symbioticEntityTempHp`, `fungalInfestationUses`
 - **Stars**: `starryFormUses`, `cosmicOmenUses`, `archerFormDamage`, `chaliceFormHealing`
 - **Wildfire**: `wildfireSpiritHp`, `cauterizingFlamesUses`, `blazingRevivalHp`
+- **Sea (XPHB 2024)**: Wrath of the Sea is a real Wild-Shape-fuelled Emanation —
+  a `wrathOfTheSea` active state costing 1 use (2 to cover both the druid and an
+  ally), whose Ocean Spray bonus-action trigger resolves a Constitution save
+  against the druid's own spell save DC for `max(1, WIS mod)`d6 Cold damage and a
+  15-foot push of a Large-or-smaller target. Aquatic Affinity emits a computed
+  swim speed equal to the walking speed and widens the Emanation from 5 ft to
+  10 ft. Stormborn (`hasSeaStormborn`, deliberately NOT the Tempest Cleric's
+  `hasStormborn`) attaches Cold/Lightning/Thunder resistance and a fly speed
+  equal to the walking speed **to the active state**, so both vanish the moment
+  the Emanation ends. Oceanic Gift adds the `self` / `ally` / `both` placement
+  prompt at activation; an ally placement keeps the druid's DC and dice but
+  moves Stormborn's benefits off the druid.
+  *Deliberate scope limit*: the sheet models one character, so an ally-placed
+  Emanation cannot show the resistances and fly speed on the ally — it correctly
+  withholds them from the druid, and the placement plus its Wild Shape cost are
+  observable through `getWrathOfTheSeaAction(placement)`.
 
 #### Cleric Domains ✅
 All 14 Cleric domains are fully implemented:
@@ -234,13 +250,14 @@ it("should produce 2 elixirs at level 6", () => {
 | **Multi-target attacks** | ✅ Implemented | Whirlpool Strike multi-target modal (`_showWhirlpoolStrikeModal`) with creature count → per-hit damage. Generic AoE distribution not yet supported for other features. |
 | **Reaction tracking** | ✅ Implemented | Shared per-turn action economy enforces reaction costs for active-state triggers such as Deflect Energy and Sun Shield |
 | **Damage transfer to self** | ✅ Implemented | `state.useDivineAllegiance(damage)` + `takeDamage(dmg, {unpreventable: true})`. Powers Crown Paladin's Divine Allegiance; reusable by any "you take the damage instead" feature. |
+| **Zero-HP interventions** | ✅ Implemented | Declarative `ZERO_HP_INTERVENTIONS` registry on `takeDamage()`: Death Ward plus Strength of the Grave (CHA save DC 5 + damage, not vs radiant or a crit, use spent only on success). Add a registry entry rather than a new branch. Note CS-BUG-081 — the sheet's Damage button now routes through `takeDamage()`, so these actually fire from the UI. |
 | **Ally-facing aura riders** | Partial | Self-facing aura effects apply; effects the character grants to *other* creatures (e.g. Exalted Champion's "allies within 30 ft have advantage on death saves and Wisdom saves against your Channel Divinity") are descriptive only — the sheet models one character, so there is no ally to apply them to. |
 
 ### Resource Management
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| **Font of Magic** | ✅ Implemented | SP ↔ slot conversion with 2014/2024 rules |
+| **Font of Magic** | ✅ Implemented | SP ↔ slot conversion with 2014/2024 rules. Pool size has one source of truth, `CharacterSheetState.getSorceryPointsMaxForClass()` (CS-BUG-080/084); `_ensureSorceryPoints()` is create-only so it never fights `setSorceryPoints()` or TGTT metamagic tuning. |
 | **Mystic Arcanum** | ✅ Implemented | Per-level usage tracking, long rest recovery |
 | **Natural Recovery** | ✅ Implemented | Land Druid slot recovery (mirrors Arcane Recovery) |
 | **Concentration saves** | ✅ Implemented | DC calc, bonus aggregation, advantage detection |

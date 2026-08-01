@@ -1759,7 +1759,8 @@ shape (`"ac"`, `"speed:walk"`, `"save:wis"`) can never be mistaken for a damage
 type. New code should still emit `damage:<type>`; this makes the reader
 tolerant rather than blessing the bare form.
 
-**Regression pins**: `CharacterSheetCrownPaladin.test.js` §Exalted Champion.
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-050 and
+§Exalted Champion. Verified to fail with the bare-form branch reverted.
 
 ---
 
@@ -1784,8 +1785,10 @@ own — and an early `return null` for it in `detectActivatableFeature`. Detecte
 **structurally**, never by name, so it covers every oath, domain and patron
 that uses the same shape.
 
-**Regression pins**: `CharacterSheetCrownPaladin.test.js` §Channel Divinity
-wrapper (4 tests, including two negative controls).
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-051 (7 tests).
+Note the fixture is the umbrella **as the sheet renders it** — with the referenced
+options expanded inline — because a fixture carrying only the bare `entries` passes
+with the guard removed and proves nothing. Verified to fail with the guard disabled.
 
 ---
 
@@ -1822,7 +1825,8 @@ mandatory `(?<!dis)` lookbehind so "disadvantage on …" can never be inverted
 into a buff.
 
 **Regression pins**: `CharacterSheetCrownPaladin.test.js` §Unyielding Spirit
-(8 tests, including the `disadvantage` inversion control).
+(8 tests, including the `disadvantage` inversion control). Both halves verified
+independently — reverting the dedup key fails 3, reverting the reader fails 2.
 
 ---
 
@@ -1860,8 +1864,11 @@ Two supporting generic changes landed with it:
   ability modifier folded into the formula, idempotently. All three call sites
   (combat-tab enrichment, roll modal, dice roller) go through it.
 
-**Regression pins**: `CharacterSheetCrownPaladin.test.js` §Champion Challenge
-and §Turn the Tide; the `combatAction` probes in `tgtt-crown-paladin.spec.ts`.
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-053, which goes
+through `detectActivatableFeature` on a feature shaped as the sheet actually grants
+it (`consumes: {name: "Channel Divinity"}`, no `uses` of its own — measured on a
+live build), not through the parser directly; plus the `combatAction` probes in
+`tgtt-crown-paladin.spec.ts`. Verified to fail with the fix reverted.
 
 ---
 
@@ -1887,8 +1894,14 @@ reconciling the max of one that already exists. `_getChannelDivinityUsesForClass
 remains the single source of truth for the count, so this stays consistent with
 CS-BUG-033 and the `CharacterSheetChannelDivinityScaling` suite.
 
-**Regression pins**: `CharacterSheetCrownPaladin.test.js` §Channel Divinity
-pool; the `shortRestRestores` matrix probe in `tgtt-crown-paladin.spec.ts`.
+**Regression pins**: `CharacterSheetCrownPaladin.test.js` §CS-BUG-054 (7 tests,
+including a guard on the bug's premise — that the prose alone mints nothing — and a
+cross-check that the 2024 Paladin still scales 2 → 3); the `kind: "resource"` matrix
+row and the USE probe's `shortRestRestores` in `tgtt-crown-paladin.spec.ts`.
+Verified to fail with the creation block reverted.
+
+---
+
 ## CS-BUG-055 — `FeatureUsesParser` read "N times your <class> level" as a use count
 
 **Status**: Fixed.
@@ -1949,6 +1962,276 @@ out of this change so the blast radius stays confined to one spec.
 
 ---
 
+## CS-BUG-085 — every active state that GRANTS a non-walk movement type was silently zeroed
+
+**Status**: RESOLVED.
+
+**Affected**: any active state granting a fly / swim / climb / burrow speed —
+the curated `unearthlyCountenance` (Daemonologist Wizard L10, "60-foot flying
+speed") and, far more broadly, **everything `parseEffectsFromDescription`
+produces** from "you gain a flying speed of 60 feet" and its swim/climb
+equivalents (`charactersheet-state.js` ~:46016/46022/46028).
+
+**Symptom**: `getSpeed("fly")` returned **0** with the state active. On a
+Daemonologist Wizard L10 with Unearthly Countenance toggled on, the sheet showed
+no flying speed at all.
+
+**Root cause** — the same reader/writer vocabulary drift as CS-BUG-050, in a
+different pipeline. `getSpeed()` guards non-walk speeds behind "the character
+must already have this movement type":
+
+```js
+if (type !== "walk" && base === 0) return 0;
+```
+
+That guard is correct for a flat `+10 speed` — it must not conjure a climb speed
+for a character who has none. But a state that **grants** the movement type
+outright emits `{type: "bonus", target: "speed:fly", value: 60}`, which lands in
+the `bonus` term, not `base`. The guard fired first and returned 0, discarding a
+`bonus` that `getSpeedBonusFromStates()` had already computed correctly.
+
+The read loop immediately above it only recognised the *other* vocabulary,
+`{type: "flySpeed"}`, which is what the Fly spell emits — so spell-granted flight
+worked and state-granted flight did not.
+
+**Second defect, same site**: the parser emits the literal string `"walking"` for
+"a flying speed equal to your walking speed". `getSpeedBonusFromStates()` did
+`bonus += e.value || 0`, so that string-concatenated (`0 + "walking"` →
+`"0walking"`) and the caller's `Math.floor` turned the whole speed into **NaN** —
+the same symbolic-token class as CS-BUG-038.
+
+**Fix**: new `_getGrantedSpeedFromStates(type)` reads only **type-specific**
+targets (`speed:fly`, never the generic `speed`), so the guard becomes
+`base === 0 && _getGrantedSpeedFromStates(type) <= 0`. The flat "+10 speed"
+protection is preserved by construction. `getSpeedBonusFromStates()` now resolves
+`"walking"` to `getWalkSpeed()` and coerces with `Number(...)`.
+
+**Why it survived this long**: every pre-existing test seeded the base speed
+first — `CharacterSheetActiveStateEngine.test.js` did `state.setSpeed("fly", 60)`
+before adding the bonus — so none of them ever crossed the `base === 0` guard.
+The E2E probe that should have caught it, `tgtt-daemonologist-wizard-dwarf.spec.ts`,
+used `{kind: "togglePlusSpeed", type: "fly", delta: 60}`, and `togglePlusSpeed`
+**silently returned for every non-walk type**. It had been green since batch 1
+while asserting nothing.
+
+**Regression pin — falsified**: `CharacterSheetActiveStateEngine.test.js`
+§CS-BUG-085, 6 tests. Reverting both halves of the fix turns **4** of them red
+(granted fly, granted swim, the `"walking"` NaN case, and the prose-parsed case);
+the two `PREMISE:` tests stay green by design — they guard the behaviour the fix
+must *not* change (no fly speed by default, and a generic "+10 speed" still
+conjures nothing).
+
+**Harness hardening shipped alongside**: `togglePlusSpeed` now **throws** for any
+non-walk type, pointing the author at `toggleGrantsSpeed` (added by the Circle of
+the Sea session), so this class of dead probe cannot recur. The Daemonologist
+spec was migrated to `{kind: "toggleGrantsSpeed", type: "fly", min: 60}` and now
+genuinely asserts the 60 ft.
+
+**Known latent seam left in place (measured, NOT shipped-reachable)**: after this
+fix there are **two** vocabularies by which an active state can grant a movement
+type, and they **add** rather than take the maximum.
+
+- *Bonus vocabulary* — `{type: "bonus", target: "speed:fly", value: 60}`, summed
+  by `getSpeedBonusFromStates()`. This is what the curated states and every
+  prose-parsed grant emit, and it is the head this fix repaired.
+- *Read-site vocabulary* — `{type: "flySpeed", value: N}` or
+  `{type: "flySpeed", equalToWalk: true}`, resolved directly inside
+  `getSpeedByType()`. This is what the Fly spell and Stormborn use. It never
+  crossed the `base === 0` guard, which is why Stormborn was green throughout and
+  did not catch the bug.
+
+Measured on a Daemonologist Wizard 10 (walk 30): the bonus head alone gives
+**60**; adding an `equalToWalk` grant on top gives **90**, not 60. By RAW two
+sources each granting a flying speed should give the higher, not the sum.
+
+Deliberately not fixed here. It is **unreachable today** — the only two live
+emitters are Unearthly Countenance (Daemonologist 10) and Stormborn (Tempest
+Cleric 17), which would require character level 27 — and a real fix cannot be
+made at the read site, because the `bonus` vocabulary is genuinely ambiguous: the
+same shape expresses both "grant a 60 ft fly speed" and "add +10 to the fly speed
+you already have", and only the first should max rather than sum. Disambiguating
+requires changing the emitters, including `parseEffectsFromDescription`. Recorded
+rather than filed as its own id, since it shares this pipeline and cannot
+currently be triggered.
+
+Verified unchanged by this fix: `getSpeedByType("fly")` agrees with
+`getSpeed("fly")` on the bonus head (both **60**); Stormborn still reads **30**
+= walking speed; and a generic `{target: "speed", value: 10}` still yields a
+climb speed of **0** even with two fly-granting states active.
+
+---
+
+## CS-BUG-060 — Circle of the Sea's Wrath of the Sea was description-only, and Stormborn collided with the Tempest Cleric
+
+**Status**: RESOLVED (Circle of the Sea Druid implementation).
+
+**Affected**: Circle of the Sea Druid (XPHB 2024), all levels 3-20.
+
+**Symptom**: every one of the subclass's four features rendered as text and did
+nothing measurable.
+
+- **Wrath of the Sea** produced a flat `1d10` from a level-indexed table with no
+  save DC, no save ability, no push, no emanation range and no Wild Shape cost.
+  The real feature is `max(1, WIS mod)`d6 Cold, a Constitution save against the
+  druid's own spell save DC, and a 15-foot push of a Large-or-smaller target.
+  `detectActivatableFeature()` also mis-classified it as a `wildShape`
+  transformation, so activating it tried to turn the druid into a beast.
+- **Aquatic Affinity** set an inert `swimSpeed: 60` calculation that no speed
+  consumer read, and never widened the Emanation.
+- **Stormborn** set `hasStormborn` — the *Tempest Cleric's* L17 key — which is
+  wired to an unconditional `{type: "speed", speedType: "fly", equalToWalk:
+  true}` emission. A Sea Druid therefore flew permanently from level 10, with or
+  without the Emanation, and gained none of its three resistances.
+- **Oceanic Gift** exposed an invented `oceanicGiftTargets` count and no
+  placement choice or cost.
+
+**Root cause**: the calculation block was written from the feature *names*
+rather than the feature text, and reused a foreign calculation key.
+
+**Fix**: replaced the calculation block with values derived from the XPHB text,
+renamed Stormborn's key to `hasSeaStormborn`, and added a generic
+`wrathOfTheSea` active state whose effects are supplied per-level and
+per-placement:
+
+- `saveDamageBurst` is a new *generic* `trigger.effectType`: the state emits
+  unresolved scaling hints (`diceAbility`, `diceMinimum`, `dieSize`,
+  `dcCalculation`) and `getActiveStateTrigger()` resolves them, which keeps the
+  effect provider out of the `getSpeed → getActiveStateEffects` re-entrancy
+  cycle.
+- `equalToWalk` is now honoured on **active-state** speed effects, resolved at
+  the read site in `getSpeed()` / `getSpeedByType()`.
+- `placement` is now persisted on an active-state record and passed to
+  `_getSupplementalActiveStateEffects`, so an ally-placed Emanation withholds
+  Stormborn's benefits from the druid while keeping the druid's DC and dice.
+- `_extractCondition()` learned the phrasing `while active`, without which the
+  description-text modifier pipeline registered Stormborn's fly speed as an
+  always-on named modifier in parallel with the (correctly gated) active state.
+
+**Tests**: 24 mechanical assertions in
+`test/jest/charactersheet/CharacterSheetDruid.test.js` (21 of which go red
+against the pre-fix file) and the full matrix in
+`test/e2e/specs/tgtt-sea-druid.spec.ts`.
+
+---
+
+## CS-BUG-061 — XPHB Wild Shape pool never scaled past two uses, and Archdruid granted an unlimited pool
+
+**Status**: RESOLVED.
+
+**Affected**: every 2024 (XPHB / TGTT) Druid from level 6 up — Circle of the
+Sea, Stars, Zodiac, Moon, Wild Companion, and anything else fuelled by the pool.
+
+**Symptom**: `getFeatureCalculations().wildShapeUses` was a hard-coded `2` for
+both editions, and the on-sheet "Wild Shape" resource stayed at max 2 at every
+level. Separately, `hasArchdruid` set `wildShapeUses = Infinity` at level 20.
+
+**Root cause**: two independent errors.
+
+1. The 2024 Druid Features table has a **Wild Shape column** — 2 uses at levels
+   2-5, 3 at 6-16, 4 at 17-20 — which the calculation ignored. On top of that,
+   `addFeature` parses the count out of the feature text ("You can use Wild
+   Shape twice") once at grant time and never re-scales, so even a corrected
+   calculation would not have moved the player-facing pool. This is exactly the
+   failure mode CS-BUG-033 fixed for Channel Divinity.
+2. The 2024 Archdruid does **not** grant unlimited Wild Shape. Its "Evergreen
+   Wild Shape" benefit refunds *one* expended use whenever you roll Initiative
+   with an empty pool.
+
+**Fix**: `wildShapeUses` now follows the table for `isXPHB` druids and stays at
+a flat 2 for PHB 2014. A new `_ensureWildShapeUses()` — modelled directly on
+`_ensureChannelDivinityUses()` — re-scales the on-sheet resource and the owning
+feature's use pool from `getResources()` and `getWildShapeResource()`, raising
+only, and never refilling a partly spent pool. Archdruid now sets
+`hasEvergreenWildShape` and leaves the pool at 4.
+
+**Found by**: `test/e2e/specs/tgtt-sea-druid.spec.ts` — the L11 matrix
+checkpoint could not activate Wrath of the Sea twice because the pool was
+starved at 2.
+
+---
+
+## CS-BUG-038 — symbolic modifier values were string-concatenated, rendering `NaN` and literal garbage on the sheet
+
+**Status**: FIXED
+
+**Severity**: Critical — user-visible numeric corruption on the main sheet for
+*every* Barbarian at level 18+ and *every* Artificer at level 20, regardless of
+subclass, race or homebrew settings.
+
+**Symptom** (measured, `barbarian/chained fury/18/minotaur`): the sheet rendered
+
+```
+STR   200strScore00   NaN(NaN)
+      Saving Throw NaN · Athletics NaN
+```
+
+The identical build at L17 was clean; the corruption appeared the instant
+**Indomitable Might** (Barbarian 18) was granted. `artificer/battle smith/20`
+was worse — all six saving throws returned the literal string
+`"11attunedItems000000"` via **Soul of Artifice**.
+
+**Root cause**: the feature/feat/racial effect registries express some modifier
+values *symbolically* rather than numerically, because the number is not knowable
+when the feature is granted (Soul of Artifice scales with how many items you have
+attuned *right now*). But only the single token `"proficiency"` was ever
+understood, and only at the storage site. Every other token — `"strScore"`,
+`"attunedItems"`, `"conModx2"`, `"strMod"` — survived as a raw **string** through
+`_getNamedModifierEffectiveValue`, whose `let value = mod.value || 0` performed no
+coercion. `_recalculateCustomModifiers` then did `+= value` into numeric total
+maps, so JavaScript concatenated instead of adding:
+`0 + "strScore"` → `"0strScore"`.
+
+A **second, independent defect** compounded it: `_recalculateCustomModifiers`
+matched ability modifiers with `mod.type.startsWith("ability:")` and read
+`split(":")[1]`, so the sub-typed `"ability:str:minimum"` (Indomitable Might — a
+floor on Strength *checks*, not a bonus to the score) was silently treated as an
+additive score bonus. The itemizer `_getAbilityNamedModifierComponents` used
+strict `!== "ability:str"` and ignored the same modifier, so the two paths
+disagreed about it.
+
+**Fix** — one resolver at the single chokepoint, not a fourth one-off ternary:
+
+1. New `_resolveSymbolicModifierValue(value)` defines the whole token vocabulary
+   in one place (`<abl>Score`, `<abl>Mod`, bare `<abl>`, `attunedItems`, `level`,
+   `conModx2`, `proficiency`, numeric strings). It returns `null` — not `0` — for
+   anything it cannot resolve, so the caller can distinguish "resolved to zero"
+   from "did not understand this".
+2. `_getNamedModifierEffectiveValue` resolves through it and ends with a
+   `Number.isFinite` guard. All five consumers (the quick-total path and the
+   three itemizers) already funnel through this method, so the numeric-safety
+   guarantee cannot drift between them. Resolving here rather than at
+   `addNamedModifier` time keeps the value **live**: Soul of Artifice tracks
+   attunement as the player attunes and un-attunes.
+3. Unresolvable tokens contribute `0` and emit a deduped `console.warn`, so the
+   next such registry entry is caught instead of shipping silently.
+4. The `ability:` branch now matches only the bare two-segment form, bringing it
+   onto the same predicate the itemizer already used.
+5. The redundant `"proficiency"` ternary in `_processFeatRegistryEffects` was
+   removed — `addNamedModifier` already performs that exact conversion, so the
+   duplicate only risked the two copies drifting.
+
+**Not fixed here** (recorded, out of scope): `ability:<abl>:minimum` still has no
+*handler* — Indomitable Might's actual rule (treat a Strength check below your
+score as if you had rolled your score) remains unimplemented. It now contributes
+nothing instead of contributing garbage.
+
+**Regression pins**: `CharacterSheetSymbolicModifiers.test.js` (9 tests).
+Falsified by reverting: **7 of 9 go red** on a full revert of the product change,
+and the `ability:` sub-type guard is independently pinned by 1 test under a
+targeted revert. The remaining 2 are deliberate no-regression controls (bare
+`ability:str` still additive; `"proficiency"` still becomes a flag).
+
+⚠️ Note for future pins of this shape: an `isFinite` assertion passes **vacuously**
+against an unresolved-but-additive value — with the resolver in place but the
+sub-type guard reverted, STR became `36`, which is perfectly finite. Only the
+exact-value assertion (`toBe(18)`) caught it. Every test here carries a premise
+guard asserting the symbolic token really is stored on the modifier and really
+would concatenate.
+
+**Why the suite missed it**: every STR assertion at L18-20 in the one spec that
+reaches those levels was `{skip: true}` under `CS-BUG-018`, and the sole
+unskipped probe there was `{kind: "rollAbilityCheck"}`, which asserts only that a
+roll *occurred*, not that its total was a number.
 ## CS-BUG-080 — Sorcery Points had three independent formulas and no creator
 
 **Status**: Fixed.

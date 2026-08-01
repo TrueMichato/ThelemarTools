@@ -1127,7 +1127,10 @@ export class CharacterSheetPage {
 		actionType: string;
 		damageType: string;
 		damage: number;
+		damageFormula: string;
+		dc: number;
 		used: boolean;
+		actionUsed: boolean;
 		reactionUsed: boolean;
 	}> {
 		await this.activateFeature(feature);
@@ -1140,13 +1143,19 @@ export class CharacterSheetPage {
 				state?.startCombat?.();
 				combat?._resetTurnActionUsage?.();
 				const used = combat?._useActiveStateTrigger?.(stateId) === true;
+				// Read whichever action type the trigger actually declares, so
+				// bonus-action / action triggers are covered as well as reactions.
+				const actionType = trigger?.actionType || "";
 				return {
 					active: !!trigger,
 					label: trigger?.label || "",
-					actionType: trigger?.actionType || "",
+					actionType,
 					damageType: trigger?.effect?.damageType || "",
 					damage: trigger?.effect?.resolvedValue || 0,
+					damageFormula: trigger?.effect?.resolvedDamage || "",
+					dc: trigger?.effect?.resolvedDc ?? 0,
 					used,
+					actionUsed: !!combat?._turnActionUsage?.[actionType],
 					reactionUsed: !!combat?._turnActionUsage?.reaction,
 				};
 			} finally {
@@ -1329,6 +1338,26 @@ export class CharacterSheetPage {
 	 * Returns a map {0: [cantrips], 1: [...], ...}. Useful for "subclass
 	 * granted these L3 spells" assertions.
 	 */
+	/**
+	 * Cantrip names known to the character.
+	 *
+	 * The sheet keeps cantrips in a list of their own
+	 * (`_data.spellcasting.cantripsKnown`), so `getKnownSpellNames()` — which
+	 * reads `getKnownSpells()` — never sees them. Any subclass that grants a
+	 * cantrip through `additionalSpells` (e.g. Circle of the Sea's Ray of
+	 * Frost) is therefore invisible to a spell-list probe unless the two lists
+	 * are unioned.
+	 */
+	async getCantripNames (): Promise<string[]> {
+		return this.page.evaluate(() => {
+			const state: any = (globalThis as any).charSheet?._state;
+			if (typeof state?.getCantripsKnown !== "function") return [] as string[];
+			try {
+				return (state.getCantripsKnown() || []).map((spell: any) => spell?.name).filter(Boolean);
+			} catch (_) { return [] as string[]; }
+		});
+	}
+
 	async getKnownSpellsByLevel (): Promise<Record<number, string[]>> {
 		return this.page.evaluate(() => {
 			const cs: any = (globalThis as any).charSheet;
@@ -1578,9 +1607,15 @@ export class CharacterSheetPage {
 	}
 
 	/**
-	 * Read the rogue's sneak-attack dice count from
-	 * `getFeatureCalculations().sneakAttackDice`.  Returns 0 when
-	 * the calc isn't surfaced (non-rogue, build hasn't loaded).
+	 * Read the rogue's sneak-attack dice COUNT from
+	 * `getFeatureCalculations().sneakAttack.dice`, which the state
+	 * stores as a dice STRING like `"6d6"` — so parse off the leading
+	 * count.  Returns 0 when the calc isn't surfaced (non-rogue, build
+	 * hasn't loaded).
+	 *
+	 * NOTE: there is no flat `calc.sneakAttackDice` key.  Reading one
+	 * yields `undefined` → 0, which silently passes a `min: 0` probe
+	 * and fails every real one (CS-BUG-018 skips, 19 of them).
 	 */
 	async getSneakAttackDiceCount (): Promise<number> {
 		return await this.page.evaluate(() => {
@@ -1589,7 +1624,11 @@ export class CharacterSheetPage {
 			if (!st) return 0;
 			try {
 				const calc = st.getFeatureCalculations?.() || {};
-				return Number(calc.sneakAttackDice ?? 0) || 0;
+				const raw = calc.sneakAttack?.dice;
+				if (raw == null) return 0;
+				// "6d6" → 6; a bare number stays itself.
+				const m = /^\s*(\d+)\s*d/i.exec(String(raw));
+				return m ? Number(m[1]) : (Number(raw) || 0);
 			} catch (_) { return 0; }
 		});
 	}
