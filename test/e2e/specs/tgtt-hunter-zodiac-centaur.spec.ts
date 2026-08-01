@@ -42,7 +42,7 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 	// Focus) asserted by name. Previously this was a lone `passive`
 	// on the parent row, which asserted nothing about the methods.
 	{level: 2, name: /combat methods/i, kind: "passive"},
-	...buildCombatMethodChecks("Ranger"),
+	...buildCombatMethodChecks("Ranger", {subclassName: "Hunter"}),
 	// L3 Hunter's Lore — passive subclass info feature.
 	{level: 3, name: /hunter's lore|hunters lore/i, kind: "passive"},
 	{level: 3, name: /hunter's prey|hunters prey/i, kind: "pick",
@@ -268,7 +268,7 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	// Primal Focus Upgrade boundary, so this leg also asserts the two
 	// outright-granted methods by name.
 	{level: 2, name: /combat methods/i, kind: "passive"},
-	...buildCombatMethodChecks("Ranger", {maxClassLevel: 6}),
+	...buildCombatMethodChecks("Ranger", {subclassName: "Hunter", maxClassLevel: 6}),
 	// Hunter subclass arrives at L3 (Ranger 3). Hunter's Prey is a
 	// pick from Colossus Slayer / Horde Breaker (XPHB) plus Giant
 	// Killer (PHB legacy carry-over).

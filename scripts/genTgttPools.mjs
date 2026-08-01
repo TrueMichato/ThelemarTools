@@ -234,25 +234,41 @@ for (const c of (data.class ?? [])) {
 // ON TOP of the class table, so the total a character holds is table + grants.
 // Counting them matters: without them the expected total is too low, and a
 // too-low expectation would silently mask that many genuinely-lost picks.
+//
+// There are TWO shapes, and they need separate scans:
+//   1. NAMED class grants — "gain the {@combatmethod Groundshatter}". Ranger's
+//      Primal Focus Upgrade is the only one. These can be asserted by name.
+//   2. UNNAMED subclass grants — "you learn one additional method from this
+//      tradition". 27 of these exist (Fighter 11, Monk 14, Paladin 1, Rogue 1),
+//      and Eldritch Knight grants TWO. They carry no name, so they can only
+//      feed the COUNT, and they make the total subclass-dependent.
 const combatMethodAutoGrants = {};
-const combatMethodSubclassGrants = [];
+const combatMethodSubclassGrants = {};
+const WORD_NUM = {a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5};
 for (const kind of ["classFeature", "subclassFeature"]) {
 	for (const f of (data[kind] ?? [])) {
 		const text = JSON.stringify(f.entries ?? "");
+		if (!combatMethodsKnown[f.className]) continue;
+
 		const names = [...text.matchAll(/gain the \{@combatmethod ([^}|]+)/gi)].map(m => m[1].trim());
-		if (!names.length) continue;
-		// Subclass-scoped grants would make the total depend on the subclass, which
-		// a per-CLASS helper cannot express. None exist today; surface loudly rather
-		// than silently skewing every count for that class if one is ever added.
-		if (kind === "subclassFeature") {
-			combatMethodSubclassGrants.push(`${f.className}/${f.subclassShortName} L${f.level} ${f.name}`);
+		if (names.length && kind === "classFeature") {
+			(combatMethodAutoGrants[f.className] ??= [])
+				.push({level: f.level, names: [...new Set(names)].sort()});
 			continue;
 		}
-		(combatMethodsKnown[f.className] ? (combatMethodAutoGrants[f.className] ??= []) : [])
-			.push({level: f.level, names: [...new Set(names)].sort()});
+
+		if (kind !== "subclassFeature") continue;
+		const m = /learn\s+(\w+)\s+additional\s+methods?/i.exec(text);
+		const count = m ? WORD_NUM[m[1].toLowerCase()] ?? Number(m[1]) : null;
+		if (!count || !Number.isFinite(count)) continue;
+		((combatMethodSubclassGrants[f.className] ??= {})[f.subclassShortName] ??= [])
+			.push({level: f.level, count});
 	}
 }
 for (const list of Object.values(combatMethodAutoGrants)) list.sort((a, b) => a.level - b.level);
+for (const bySub of Object.values(combatMethodSubclassGrants)) {
+	for (const list of Object.values(bySub)) list.sort((a, b) => a.level - b.level);
+}
 
 // ── Render ────────────────────────────────────────────────────────────────
 
@@ -377,6 +393,22 @@ ${Object.keys(combatMethodAutoGrants).sort()
 			.join(", ")}],`)
 		.join("\n")}
 };
+
+// Methods granted outright by a SUBCLASS feature — "you learn one additional
+// method from this tradition". These carry no method name, so they can only
+// feed the expected COUNT, and they make the total subclass-dependent: a
+// TGTT Monk 3 picks 2 from the class table and is granted 1 more by whichever
+// subclass it took, for a true total of 3. Omitting them under-counts by
+// exactly the grant, which is indistinguishable from a lost pick.
+export const TGTT_COMBAT_METHOD_SUBCLASS_GRANTS: Record<string, Record<string, Array<{level: number; count: number}>>> = {
+${Object.keys(combatMethodSubclassGrants).sort()
+		.map(cls => `\t${JSON.stringify(cls)}: {\n${Object.keys(combatMethodSubclassGrants[cls]).sort()
+			.map(sub => `\t\t${JSON.stringify(sub)}: [${combatMethodSubclassGrants[cls][sub]
+				.map(g => `{level: ${g.level}, count: ${g.count}}`)
+				.join(", ")}],`)
+			.join("\n")}\n\t},`)
+		.join("\n")}
+};
 `;
 
 // Cross-source pool blocks (one named export per (featureType, source)).
@@ -454,10 +486,10 @@ console.log(`  Combat Method progressions: ${Object.keys(combatMethodsKnown).sor
 for (const [cls, grants] of Object.entries(combatMethodAutoGrants).sort()) {
 	console.log(`    auto-granted (${cls}): ${grants.map(g => `L${g.level} ${g.names.join("+")}`).join(", ")}`);
 }
-if (combatMethodSubclassGrants.length) {
-	console.log(`  ⚠️  SUBCLASS-scoped combat-method grants found — buildCombatMethodChecks`);
-	console.log(`      counts are per-CLASS and cannot represent these. Handle explicitly:`);
-	for (const g of combatMethodSubclassGrants) console.log(`        ${g}`);
+for (const [cls, bySub] of Object.entries(combatMethodSubclassGrants).sort()) {
+	const subs = Object.entries(bySub).sort();
+	const total = subs.reduce((n, [, list]) => n + list.reduce((m, g) => m + g.count, 0), 0);
+	console.log(`    subclass-granted (${cls}): ${subs.length} subclasses, ${total} methods total`);
 }
 console.log(`  Cross-source pools:`);
 for (const t of Object.keys(FIRSTPARTY_BUCKETS).sort()) {

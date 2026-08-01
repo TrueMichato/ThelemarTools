@@ -821,6 +821,50 @@ export const TGTT_COMBAT_METHOD_AUTO_GRANTS: Record<string, Array<{level: number
 	"Ranger": [{level: 6, names: ["Groundshatter", "Singular Focus"]}],
 };
 
+// Methods granted outright by a SUBCLASS feature — "you learn one additional
+// method from this tradition". These carry no method name, so they can only
+// feed the expected COUNT, and they make the total subclass-dependent: a
+// TGTT Monk 3 picks 2 from the class table and is granted 1 more by whichever
+// subclass it took, for a true total of 3. Omitting them under-counts by
+// exactly the grant, which is indistinguishable from a lost pick.
+export const TGTT_COMBAT_METHOD_SUBCLASS_GRANTS: Record<string, Record<string, Array<{level: number; count: number}>>> = {
+	"Fighter": {
+		"Arcane Archer": [{level: 3, count: 1}],
+		"Battle Master": [{level: 3, count: 1}],
+		"Cavalier": [{level: 3, count: 1}],
+		"Champion": [{level: 3, count: 1}],
+		"Echo Knight": [{level: 3, count: 1}],
+		"Eldritch Knight": [{level: 3, count: 2}],
+		"Psi Warrior": [{level: 3, count: 1}],
+		"Purple Dragon Knight (Banneret)": [{level: 3, count: 1}],
+		"Rune Knight": [{level: 3, count: 1}],
+		"Samurai": [{level: 3, count: 1}],
+		"Warder": [{level: 3, count: 1}],
+	},
+	"Monk": {
+		"Ascendant Dragon": [{level: 3, count: 1}],
+		"Astral Self": [{level: 3, count: 1}],
+		"Cobalt Soul": [{level: 3, count: 1}],
+		"Debilitation": [{level: 3, count: 1}],
+		"Drunken Master": [{level: 3, count: 1}],
+		"Elements": [{level: 3, count: 1}],
+		"Five Animals": [{level: 3, count: 1}],
+		"Kensei": [{level: 3, count: 1}],
+		"Long Death": [{level: 3, count: 1}],
+		"Mercy": [{level: 3, count: 1}],
+		"Open Hand": [{level: 3, count: 1}],
+		"Shackled": [{level: 3, count: 1}],
+		"Shadow": [{level: 3, count: 1}],
+		"Sun Soul": [{level: 3, count: 1}],
+	},
+	"Paladin": {
+		"Oathbreaker": [{level: 3, count: 1}],
+	},
+	"Rogue": {
+		"Swashbuckler": [{level: 3, count: 1}],
+	},
+};
+
 // ── Cross-source first-party picker pools ──
 // One named export per (featureType × source). Specs that pick from
 // multiple sources should use the buildAny*Checks helpers below to
@@ -1307,7 +1351,29 @@ export function buildPactBoonChecks (
  * — via `contains` on the same structural API, so a same-named racial cannot
  * satisfy them. Counting them is what stops a lost pick hiding behind a grant.
  *
+ * 🔴 **PASS `subclassName` OR THE COUNT WILL BE TOO LOW.** 27 subclasses grant
+ * an extra method outright — "you learn one additional method from this
+ * tradition" — across Fighter (11), Monk (14), Paladin (Oathbreaker) and Rogue
+ * (Swashbuckler); Eldritch Knight grants TWO. These carry no method name, so
+ * they can only feed the count. A TGTT Monk 3 picks 2 from the class table and
+ * is granted 1 by its subclass, for a true total of 3 — measured, after an
+ * Astral Self run failed with `length=3, expected 2`. Omitting the grant
+ * under-counts by exactly the grant, which is indistinguishable from a lost
+ * pick, so this is a false red rather than a missed one. Barbarian and Ranger
+ * have NO subclass grants, which is why a Ranger-only validation missed this.
+ *
+ * 🔴 **ONLY VALID ON A `classSource: "TGTT"` PRESET.** Combat Methods are a
+ * TGTT class feature; a PHB / XPHB build of the same class has none, and this
+ * helper would then assert a whole ladder against a constant zero. Not every
+ * spec for an eligible class qualifies — e.g. `PRESET_FULL_METEOR_KNIGHT_FIGHTER`
+ * and `PRESET_FULL_SHADOW_KNIGHT_FIGHTER` are both `classSource: "PHB"`, so the
+ * Fighter ladder must NOT be spread into those specs even though Fighter is an
+ * eligible class. Check the preset's `classSource` before adding a spread.
+ *
  * @param className   Class whose "Methods Known" ladder to assert.
+ * @param opts.subclassName   Subclass short name, e.g. "Astral Self". Required
+ *                         whenever the subclass appears in
+ *                         `TGTT_COMBAT_METHOD_SUBCLASS_GRANTS`.
  * @param opts.maxClassLevel  Highest level actually reached IN THIS CLASS.
  *                         Required for multiclass legs: a Ranger 6 / Druid 14
  *                         never gains Ranger 7+, so emitting the full ladder
@@ -1316,16 +1382,22 @@ export function buildPactBoonChecks (
  */
 export function buildCombatMethodChecks (
 	className: string,
-	opts?: {maxClassLevel?: number; levelMap?: Record<number, number>},
+	opts?: {subclassName?: string; maxClassLevel?: number; levelMap?: Record<number, number>},
 ): FeatureCheck[] {
 	const ladder = TGTT_COMBAT_METHODS_KNOWN[className];
 	if (!ladder?.length) return [];
 
 	const cap = opts?.maxClassLevel ?? ladder.length;
 	const grants = (TGTT_COMBAT_METHOD_AUTO_GRANTS[className] ?? []).filter(g => g.level <= cap);
+	const subGrants = (opts?.subclassName
+		? TGTT_COMBAT_METHOD_SUBCLASS_GRANTS[className]?.[opts.subclassName] ?? []
+		: []).filter(g => g.level <= cap);
 	const grantedBy = (level: number): number => grants
 		.filter(g => g.level <= level)
-		.reduce((n, g) => n + g.names.length, 0);
+		.reduce((n, g) => n + g.names.length, 0)
+		+ subGrants
+			.filter(g => g.level <= level)
+			.reduce((n, g) => n + g.count, 0);
 
 	// One milestone per level where the total actually moves.
 	const milestones: {level: number; total: number}[] = [];
