@@ -933,6 +933,35 @@ export const PRESET_FULL_WICKED_WITCH_SORCERER: CharacterPreset = {
 	// the TGTT spell picker does not surface "Shield" in the L1 view, and the retry
 	// loop that chases it costs the L1 round-trip test most of its 60 s budget.
 	signatureSpells: ["Fire Bolt", "Burning Hands"],
+ * Lunar Sorcery Sorcerer (DSotDQ subclass on the PHB-2014 Sorcerer chassis).
+ *
+ * PHB rather than XPHB deliberately: `Lunar Sorcery` exists for BOTH `classSource`
+ * values, but the XPHB copy is pinned to level 3 while the PHB one is online at LEVEL 1
+ * — so on the PHB chassis every feature gate is a plain sorcerer-level gate and the
+ * L1→L20 matrix covers all seven features. It also keeps the TGTT Specialty / passive
+ * Metamagic pickers out of the way of the subclass probes.
+ *
+ * Dwarf/Acolyte for the same reason as the Shadow Magic Sorcerer: the 2024 Human's
+ * mandatory Origin Feat pick stalls the Species step.
+ */
+export const PRESET_FULL_LUNAR_SORCERY_SORCERER: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB",
+	className: "Sorcerer",
+	classSource: "PHB",
+	prioritySources: ["PHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB",
+	name: "Selene Tidewane",
+	skillCount: 2,
+	subclassName: "Lunar Sorcery",
+	subclassSource: "DSotDQ",
+	// CS-BUG-056: without this the standard array is assigned STR-first and the Sorcerer
+	// lands on CHA 8 — which would make every spell save DC, and therefore the Lunar
+	// Phenomenon save DC, unrepresentative.
+	abilityPriority: ["cha", "con", "dex", "wis", "int", "str"],
+	signatureSpells: ["Fire Bolt", "Shield"],
 };
 
 /** Convenience array of all comprehensive presets — handy for parameterised smoke tests. */
@@ -962,6 +991,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_ARCANA_CLERIC,
 	PRESET_FULL_SHADOW_MAGIC_SORCERER,
 	PRESET_FULL_WICKED_WITCH_SORCERER,
+	PRESET_FULL_LUNAR_SORCERY_SORCERER,
 ];
 
 /**

@@ -2869,6 +2869,8 @@ class CharacterSheetPage {
 			// Additive Illrigger Infernal Conduit + Combat Masteries panels (gated).
 			this._combat.renderCombatConduit?.();
 			this._combat.renderCombatMasteries?.();
+			// Additive Lunar Sorcery panel (gated; self-hides without Lunar Embodiment).
+			this._combat.renderCombatLunar?.();
 		}
 		if (this._respec) this._respec.render();
 		if (this._playMode && this._state.getViewMode() === "play") this._playMode.render();
@@ -18522,6 +18524,8 @@ class CharacterSheetPage {
 				this._features?.render();
 				this._combat?.renderCombatInterdiction?.();
 				this._combat?.renderCombatConduit?.();
+				// Lunar Phenomenon's save DC is CHA-derived too.
+				this._combat?.renderCombatLunar?.();
 				this._saveCurrentCharacter();
 			},
 		});
