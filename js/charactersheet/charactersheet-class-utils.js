@@ -20,6 +20,163 @@ class CharacterSheetClassUtils {
 	 */
 	static RACE_MANIFESTATION_POOL_NAME = "Divine Manifestation";
 
+	// ==========================================
+	// Psionic manifesters (5etools `psionic` prop)
+	// ==========================================
+
+	/**
+	 * Classes that learn `psionic` powers rather than spells.
+	 *
+	 * 5etools models psionic powers as their own top-level `psionic` prop with no link
+	 * back to the class that learns them — there is no `classPsionicList` analogue of
+	 * `fromClassList`. This table supplies the missing link DECLARATIVELY (data, not
+	 * branching code): everything downstream — building the pickers, gating by order,
+	 * counting how many powers are known at each level — is generic and reads only from
+	 * here, so adding another psionic class is a data edit.
+	 *
+	 * `firstOrderType` / `higherOrderType` must not be prefixes of one another: the
+	 * optional-feature engine matches feature types with `startsWith`.
+	 *
+	 * @type {Record<string, *>}
+	 */
+	static PSIONIC_MANIFESTERS = {
+		"talent|talpsi": {
+			className: "Talent",
+			classSource: "TalPsi",
+			powerSource: "TalPsi",
+			firstOrderType: "PsiP1",
+			higherOrderType: "PsiPH",
+			firstOrderName: "1st-Order Powers",
+			higherOrderName: "Powers Known",
+			// 1st-order powers known, keyed by threshold level (Talent table).
+			firstOrderProgression: {1: 4, 4: 5, 10: 6},
+			// Powers of 2nd order or higher known = talent level + 1.
+			higherOrderPerLevel: (/** @type {number} */ level) => level + 1,
+			// Class level at which each power order becomes learnable/manifestable.
+			orderUnlockLevels: {2: 1, 3: 5, 4: 9, 5: 13, 6: 17},
+			manifestationAbility: "int",
+		},
+	};
+
+	/**
+	 * Look up the psionic-manifester config for a class entity (or plain name/source).
+	 * @param {*} classNameOrEntity class entity, or class name string
+	 * @param {string} [classSource]
+	 * @returns {*} config or null
+	 */
+	static getPsionicManifesterConfig (/** @type {*} */ classNameOrEntity, /** @type {*} */ classSource = null) {
+		const name = typeof classNameOrEntity === "string" ? classNameOrEntity : classNameOrEntity?.name;
+		const source = typeof classNameOrEntity === "string" ? classSource : (classNameOrEntity?.source ?? classSource);
+		if (!name) return null;
+		return CharacterSheetClassUtils.PSIONIC_MANIFESTERS[`${name}|${source || ""}`.toLowerCase()]
+			// Tolerate a missing source (saved characters record only the class name).
+			|| Object.values(CharacterSheetClassUtils.PSIONIC_MANIFESTERS)
+				.find((/** @type {*} */ cfg) => cfg.className.toLowerCase() === name.toLowerCase())
+			|| null;
+	}
+
+	/**
+	 * Parse a psionic power's `order` string ("3rd-Order") into a number.
+	 * @param {*} power
+	 * @returns {number} 0 when unparseable
+	 */
+	static getPsionicPowerOrder (/** @type {*} */ power) {
+		const raw = power?.order;
+		if (typeof raw === "number") return raw;
+		const m = /^(\d+)/.exec(String(raw || ""));
+		return m ? Number(m[1]) : 0;
+	}
+
+	/**
+	 * Turn a pool of `psionic` powers into synthetic `optionalfeature` entities so the
+	 * EXISTING optional-feature picker engine surfaces them in the Builder, Level-Up and
+	 * Quick Build flows with no new per-flow UI.
+	 *
+	 * Powers of 2nd order or higher carry a class-level prerequisite derived from
+	 * `orderUnlockLevels`, so the picker greys out powers the character can't yet learn
+	 * for exactly the same reason it greys out an unmet invocation prerequisite.
+	 *
+	 * @param {Array<*>} psionics all known psionic powers
+	 * @param {*} config a `PSIONIC_MANIFESTERS` entry
+	 * @returns {Array<*>} synthetic optional features
+	 */
+	static buildPsionicOptionalFeatures (/** @type {*} */ psionics, /** @type {*} */ config) {
+		if (!Array.isArray(psionics) || !config) return [];
+		return psionics
+			.filter(p => !config.powerSource || (p?.source || "").toLowerCase() === config.powerSource.toLowerCase())
+			.map(power => {
+				const order = CharacterSheetClassUtils.getPsionicPowerOrder(power);
+				if (!order) return null;
+				const isFirst = order === 1;
+				const unlockLevel = isFirst ? 1 : (config.orderUnlockLevels?.[order] || 1);
+				/** @type {*} */ const out = {
+					...power,
+					featureType: [isFirst ? config.firstOrderType : config.higherOrderType],
+					_entityType: "psionicPower",
+					_psionicOrder: order,
+					_psionicPowerType: power.type || null,
+					// Keep the original discipline code out of the optional-feature `type`
+					// slot, which the renderer treats as a feature-type code.
+					type: undefined,
+				};
+				if (unlockLevel > 1) {
+					out.prerequisite = [
+						...(power.prerequisite || []),
+						{level: {level: unlockLevel, class: {name: config.className, visible: true}}},
+					];
+				}
+				return out;
+			})
+			.filter(Boolean);
+	}
+
+	/**
+	 * Build the two `optionalfeatureProgression` entries a psionic manifester needs.
+	 * @param {*} config a `PSIONIC_MANIFESTERS` entry
+	 * @param {number} [maxLevel]
+	 * @returns {Array<*>}
+	 */
+	static buildPsionicProgressions (/** @type {*} */ config, /** @type {number} */ maxLevel = 20) {
+		if (!config) return [];
+		/** @type {Record<number, number>} */ const higher = {};
+		for (let lvl = 1; lvl <= maxLevel; ++lvl) higher[lvl] = config.higherOrderPerLevel(lvl);
+		return [
+			{
+				name: config.firstOrderName,
+				featureType: [config.firstOrderType],
+				progression: {...config.firstOrderProgression},
+				required: true,
+				_derived: true,
+			},
+			{
+				name: config.higherOrderName,
+				featureType: [config.higherOrderType],
+				progression: higher,
+				required: true,
+				_derived: true,
+			},
+		];
+	}
+
+	/**
+	 * Attach psionic power pickers to a class entity, idempotently.
+	 * @param {*} classEntity
+	 * @param {Array<*>} psionics
+	 * @returns {Array<*>} the synthetic optional features created (empty when N/A)
+	 */
+	static augmentClassWithPsionicPowers (/** @type {*} */ classEntity, /** @type {*} */ psionics) {
+		const config = CharacterSheetClassUtils.getPsionicManifesterConfig(classEntity);
+		if (!config) return [];
+		const existing = new Set((classEntity.optionalfeatureProgression || []).flatMap((/** @type {*} */ p) => p.featureType || []));
+		if (!existing.has(config.firstOrderType)) {
+			classEntity.optionalfeatureProgression = [
+				...(classEntity.optionalfeatureProgression || []),
+				...CharacterSheetClassUtils.buildPsionicProgressions(config),
+			];
+		}
+		return CharacterSheetClassUtils.buildPsionicOptionalFeatures(psionics, config);
+	}
+
 	/**
 	 * The 18 standard D&D 5e skills, as proper display names. Shared by the
 	 * feature skill sub-choice pickers so the list lives in exactly one place.
@@ -6785,6 +6942,110 @@ class CharacterSheetClassUtils {
 			!!src && ((Array.isArray(src.spells) && src.spells.length > 0)
 				|| (Array.isArray(src.cantrips) && src.cantrips.length > 0)),
 		);
+	}
+
+	/**
+	 * Derive an `optionalfeatureProgression` for a class that declares its optional-feature
+	 * choices ONLY as inline `refOptionalfeature` entries.
+	 *
+	 * 5etools class JSON is allowed to enumerate optional features inside a class feature's
+	 * `entries` (`{"type": "refOptionalfeature", "optionalfeature": "Name|Source"}`) without
+	 * ALSO declaring the machine-readable `optionalfeatureProgression` block that the sheet's
+	 * three build flows read. When that happens the class renders its options as prose and
+	 * the player is never asked to choose — the exact failure mode this derivation exists to
+	 * prevent. MCDM's Talent ("Psionic Exertion", TalPsi) is the motivating case, but the
+	 * logic is entirely generic: any class or brew with the same shape gets a picker for free.
+	 *
+	 * Two signals are combined:
+	 *  - the ENUMERATING feature (the one carrying `refOptionalfeature` entries) contributes
+	 *    a count of 1 at its own level;
+	 *  - any sibling feature whose prose points back at it with a
+	 *    `{@classFeature <Name>|<Class>|<Source>|<Level>}` tag is treated as an "additional
+	 *    option" improvement and contributes +1 at ITS level.
+	 *
+	 * The featureType is looked up from the referenced optional features themselves, so no
+	 * per-class registry is needed.
+	 *
+	 * Mutates `classData` in place (idempotent — an existing progression for the same
+	 * featureType is never overwritten, so hand-authored data always wins).
+	 *
+	 * @param {*} classData class entity
+	 * @param {Array<*>} classFeatures all classFeature entities (any class; filtered here)
+	 * @param {Array<*>} optionalFeatures all optionalfeature entities, for featureType lookup
+	 * @returns {boolean} whether a progression was added
+	 */
+	static deriveOptionalFeatureProgressions (/** @type {*} */ classData, /** @type {*} */ classFeatures, /** @type {*} */ optionalFeatures) {
+		if (!classData?.name || !Array.isArray(classFeatures) || !classFeatures.length) return false;
+
+		const own = classFeatures.filter(f =>
+			f?.className === classData.name
+			&& (!f.classSource || !classData.source || f.classSource === classData.source));
+		if (!own.length) return false;
+
+		const optByUid = new Map();
+		(optionalFeatures || []).forEach(of => {
+			if (!of?.name) return;
+			optByUid.set(`${of.name}|${of.source || ""}`.toLowerCase(), of);
+		});
+
+		const existingTypes = new Set(
+			(classData.optionalfeatureProgression || []).flatMap((/** @type {*} */ p) => p.featureType || []),
+		);
+
+		/** Collect every `refOptionalfeature` uid nested anywhere in an entries tree. */
+		const collectRefs = (/** @type {*} */ node, /** @type {Set<string>} */ acc) => {
+			if (!node) return;
+			if (Array.isArray(node)) return node.forEach(n => collectRefs(n, acc));
+			if (typeof node !== "object") return;
+			if (node.type === "refOptionalfeature" && typeof node.optionalfeature === "string") acc.add(node.optionalfeature);
+			collectRefs(node.entries, acc);
+			collectRefs(node.items, acc);
+		};
+
+		let added = false;
+
+		own.forEach(feature => {
+			/** @type {Set<string>} */ const refs = new Set();
+			collectRefs(feature.entries, refs);
+			if (!refs.size) return;
+
+			const featureTypes = [...new Set([...refs]
+				.map(uid => optByUid.get(uid.toLowerCase()))
+				.flatMap(of => of?.featureType || []))];
+			if (!featureTypes.length) return;
+			// Never shadow hand-authored data.
+			if (featureTypes.some(ft => existingTypes.has(ft))) return;
+
+			/** @type {Record<number, number>} */ const progression = {};
+			const baseLevel = Number(feature.level) || 1;
+			progression[baseLevel] = 1;
+
+			// "you gain an additional {@classFeature Psionic Exertion|Talent|TalPsi|3} option"
+			const backRef = new RegExp(
+				`\\{@classFeature\\s+${feature.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\|`,
+				"i",
+			);
+			const improvementLevels = own
+				.filter(other => other !== feature && backRef.test(JSON.stringify(other.entries || "")))
+				.map(other => Number(other.level) || 0)
+				.filter(lvl => lvl > baseLevel)
+				.sort((a, b) => a - b);
+
+			let count = 1;
+			improvementLevels.forEach(lvl => { progression[lvl] = ++count; });
+
+			classData.optionalfeatureProgression = classData.optionalfeatureProgression || [];
+			classData.optionalfeatureProgression.push({
+				name: feature.name,
+				featureType: featureTypes,
+				progression,
+				_derived: true,
+			});
+			featureTypes.forEach(ft => existingTypes.add(ft));
+			added = true;
+		});
+
+		return added;
 	}
 
 	/**
