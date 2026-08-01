@@ -184,6 +184,8 @@ stay clean). Use this decision tree:
 | Modifies attack-bonus / damage line | attack | `attackBonus`, `attackDamageContains` |
 | Sneak Attack / martial-arts / inspiration die size | dice | `sneakAttackDice`, `martialArtsDie`, `bardicInspirationDie` |
 | Pick-list option (Metamagic, Invocation, Maneuver, …) | pick | `pickActivatable`, `pickToggleable`, `pickedFeatureGrants` |
+| Persists a feature choice which drives calculations | choice | `featureChoiceCalculation` |
+| Stateful Blood Hunter mechanics | class mechanic | `bloodMaledictAmplification`, `crimsonRiteMechanics`, `hybridTransformationMechanics` |
 
 ### Canonical examples (one per family)
 

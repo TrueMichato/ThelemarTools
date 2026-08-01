@@ -30621,6 +30621,7 @@ class CharacterSheetState {
 	getResources () {
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
+		this.ensureBloodHunterResources();
 		this._ensureChannelDivinityUses();
 		return [...this._data.resources];
 	}
@@ -31074,7 +31075,7 @@ class CharacterSheetState {
 	}
 
 	getHybridBloodlustCheck () {
-		if (this._data.hybridBloodlustTurnStartRound === this._data.combatRound) {
+		if (this._data.inCombat && this._data.hybridBloodlustTurnStartRound === this._data.combatRound) {
 			return this._data.hybridBloodlustTurnStartCheck;
 		}
 		return this._getCurrentHybridBloodlustCheck();
@@ -31195,9 +31196,9 @@ class CharacterSheetState {
 		const hasHybridMastery = !!this.getFeatureCalculations().hasHybridTransformationMastery;
 		// Source from `getResources()`, not `_data.resources`: the Overview Resources
 		// panel is a player-facing surface and must see the same level-scaling
-		// reconciliation (Superiority Dice, Shadow Knight pools, Channel Divinity) that
-		// every other resource reader gets. Reading the raw array left this panel showing
-		// a stale maximum until some other surface happened to reconcile it (CS-BUG-033).
+		// reconciliation (Superiority Dice, Shadow Knight pools, Blood Hunter pools,
+		// Channel Divinity) that every other resource reader gets. Reading the raw array
+		// left this panel showing a stale maximum until another surface reconciled it.
 		return this.getResources().filter(r => {
 			if (hasHybridMastery && r.name === "Hybrid Transformation") return false;
 			const linked = r.featureId

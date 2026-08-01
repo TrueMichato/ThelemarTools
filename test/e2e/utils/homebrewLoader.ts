@@ -29,13 +29,22 @@ export async function gotoWithThelemar (
 		if (!response.ok()) throw new Error(`Failed to download additional homebrew "${url}": HTTP ${response.status()}`);
 		const brew = await response.json();
 		if (!subclassName) return brew;
+		const classes = (brew.class || []).filter((it: any) => !className || it.name === className);
+		const isHomebrewClass = classes.length > 0;
+		const subclasses = (brew.subclass || []).filter((it: any) =>
+			(it.shortName === subclassName || it.name === subclassName)
+			&& (!className || it.className === className));
+		const subclassShortNames = new Set(subclasses.map((it: any) => it.shortName));
 		return {
 			_meta: brew._meta,
-			subclass: (brew.subclass || []).filter((it: any) =>
-				(it.shortName === subclassName || it.name === subclassName)
-				&& (!className || it.className === className)),
+			...(isHomebrewClass ? {
+				class: classes,
+				classFeature: (brew.classFeature || []).filter((it: any) => !className || it.className === className),
+				optionalfeature: brew.optionalfeature || [],
+			} : {}),
+			subclass: subclasses,
 			subclassFeature: (brew.subclassFeature || []).filter((it: any) =>
-				it.subclassShortName === subclassName
+				subclassShortNames.has(it.subclassShortName)
 				&& (!className || it.className === className)),
 		};
 	}));
