@@ -31192,14 +31192,17 @@ class CharacterSheetState {
 	 * @returns {Array<object>} the displayable generic resource pools.
 	 */
 	getGenericPoolResources () {
-		const allFeatures = this.getFeatures?.() || [];
-		const hasHybridMastery = !!this.getFeatureCalculations().hasHybridTransformationMastery;
 		// Source from `getResources()`, not `_data.resources`: the Overview Resources
 		// panel is a player-facing surface and must see the same level-scaling
 		// reconciliation (Superiority Dice, Shadow Knight pools, Blood Hunter pools,
 		// Channel Divinity) that every other resource reader gets. Reading the raw array
 		// left this panel showing a stale maximum until another surface reconciled it.
-		return this.getResources().filter(r => {
+		// Resolve it FIRST: the reconcilers may also append features (e.g. Blood Curse of
+		// the Howl at Blood Hunter 18), so a feature list snapshotted earlier goes stale.
+		const resources = this.getResources();
+		const allFeatures = this.getFeatures?.() || [];
+		const hasHybridMastery = !!this.getFeatureCalculations().hasHybridTransformationMastery;
+		return resources.filter(r => {
 			if (hasHybridMastery && r.name === "Hybrid Transformation") return false;
 			const linked = r.featureId
 				? allFeatures.find(f => f.id === r.featureId)
