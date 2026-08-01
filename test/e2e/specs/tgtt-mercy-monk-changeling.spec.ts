@@ -3,7 +3,6 @@ import {PRESET_FULL_MERCY_MONK_CHANGELING} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
 import {
 	buildSpecialtyChecks,
-	buildPreciseStrikeChecks,
 	withSkipReason,
 } from "../utils/tgttFeaturePools";
 
@@ -87,15 +86,16 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 	// Focus Points resource — also the home of the short-rest restore
 	// probe (monks regain all Focus Points on a short rest per XPHB).
 	{
-		level: 3,  name: "Focus Points", kind: "resource", skip: true, skipReason: "CS-BUG-018", resourceMax: 3,
+		level: 3, name: "Focus Points", kind: "resource",
+		untilLevel: 4, resourceMax: 3,
 		effects: [
 			{kind: "shortRestRestores", resource: "Focus Points"},
 		],
 	},
-	{level: 5,  name: "Focus Points", kind: "resource", skip: true, skipReason: "CS-BUG-018", resourceMax: 5},
-	{level: 11, name: "Focus Points", kind: "resource", skip: true, skipReason: "CS-BUG-018", resourceMax: 11},
-	{level: 17, name: "Focus Points", kind: "resource", skip: true, skipReason: "CS-BUG-018", resourceMax: 17},
-	{level: 20, name: "Focus Points", kind: "resource", skip: true, skipReason: "CS-BUG-018", resourceMax: 20},
+	{level: 5,  name: "Focus Points", kind: "resource", untilLevel: 10, resourceMax: 5},
+	{level: 11, name: "Focus Points", kind: "resource", untilLevel: 16, resourceMax: 11},
+	{level: 17, name: "Focus Points", kind: "resource", untilLevel: 19, resourceMax: 17},
+	{level: 20, name: "Focus Points", kind: "resource", resourceMax: 20},
 	// Deflect Attacks (XPHB L3 — replaces 2014 Deflect Missiles).
 	// No clean state probe (it's a reaction-time rider, not a passive
 	// stat or toggle).
@@ -172,11 +172,6 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 	// Phase H: doctrinal `buildSpecialtyChecks` invocation replaces
 	// 10 hand-rolled rows; still gated by CS-BUG-017.
 	...withSkipReason(buildSpecialtyChecks("Monk"), "CS-BUG-017"),
-	// Precise Strike Methods (TGTT) — Mercy Monastic Tradition grants
-	// the picker at L3 (cum 3), +1 each at L6/11/17 (cum 4/5/6).
-	// `buildPreciseStrikeChecks` attaches per-pick effect probes for
-	// the auto-picker's first choice.
-	...buildPreciseStrikeChecks(),
 	{level: 8,  name: /unhindered flurry/i, kind: "passive"},
 
 	// ── Subclass — Warrior of Mercy (XPHB, exposed via TGTT) ─────────
@@ -265,4 +260,3 @@ describeCharacter({
 	},
 	featuresMatrix: MERCY_MONK_FEATURES_MATRIX,
 });
-

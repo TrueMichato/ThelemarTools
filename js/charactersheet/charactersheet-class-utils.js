@@ -3364,6 +3364,13 @@ class CharacterSheetClassUtils {
 									level: feature.level,
 									entries: feature.entries,
 									isSubclassFeature: true,
+									// (CS-BUG-079) Preserve the activation marker. Only the
+									// refSubclassFeature expansion below used to copy it, so a
+									// subclass option collected through THIS path lost its
+									// `consumes` tag and could not be linked to its shared pool.
+									// `uses` is deliberately NOT propagated here: it would mint a
+									// new resource pool for features that merely document a count.
+									...(feature.consumes ? {consumes: feature.consumes} : {}),
 								});
 							}
 						} else if (typeof feature === "string") {
@@ -3397,6 +3404,13 @@ class CharacterSheetClassUtils {
 									level: featureLevel,
 									entries: fullFeature?.entries,
 									isSubclassFeature: true,
+									// (CS-BUG-079) Preserve the activation marker. Only the
+									// refSubclassFeature expansion below used to copy it, so a
+									// subclass option collected through THIS path lost its
+									// `consumes` tag and could not be linked to its shared pool.
+									// `uses` is deliberately NOT propagated here: it would mint a
+									// new resource pool for features that merely document a count.
+									...(fullFeature?.consumes ? {consumes: fullFeature.consumes} : {}),
 								});
 							}
 						}
@@ -3432,6 +3446,13 @@ class CharacterSheetClassUtils {
 							level: featureLevel,
 							entries: fullFeature?.entries,
 							isSubclassFeature: true,
+							// (CS-BUG-079) Preserve the activation marker. Only the
+							// refSubclassFeature expansion below used to copy it, so a
+							// subclass option collected through THIS path lost its
+							// `consumes` tag and could not be linked to its shared pool.
+							// `uses` is deliberately NOT propagated here: it would mint a
+							// new resource pool for features that merely document a count.
+							...(fullFeature?.consumes ? {consumes: fullFeature.consumes} : {}),
 						});
 					}
 				}
@@ -3461,6 +3482,13 @@ class CharacterSheetClassUtils {
 					level: feature.level,
 					entries: feature.entries,
 					isSubclassFeature: true,
+					// (CS-BUG-079) Preserve the activation marker. Only the
+					// refSubclassFeature expansion below used to copy it, so a
+					// subclass option collected through THIS path lost its
+					// `consumes` tag and could not be linked to its shared pool.
+					// `uses` is deliberately NOT propagated here: it would mint a
+					// new resource pool for features that merely document a count.
+					...(feature.consumes ? {consumes: feature.consumes} : {}),
 				});
 			});
 		}
@@ -5714,12 +5742,14 @@ class CharacterSheetClassUtils {
 			"Sorcerer": [
 				{name: "Sorcery Points",
 					maxByLevel: (/** @type {*} */ lvl) => {
-						const isTGTT = classEntry.source === "TGTT" || classData.source === "TGTT";
-						// TGTT Sorcerer grants Font of Magic at L1 (not L2 like XPHB),
-						// so SP = sorcerer level from L1 onward. Was previously
-						// `lvl + 1` (CS-BUG-018: off-by-one — L1=2/L3=4 instead of 1/3).
-						if (isTGTT) return lvl;
-						return lvl >= 2 ? lvl : 0;
+						// CS-BUG-080: single source of truth shared with
+						// `getFeatureCalculations()` and `_ensureSorceryPoints()`.
+						// TGTT Sorcerer grants Font of Magic at L1 (not L2 like
+						// XPHB), so SP = sorcerer level from L1 onward. Was
+						// previously `lvl + 1` here (CS-BUG-018) and STILL was in
+						// the calculation copy until CS-BUG-080.
+						const source = classEntry.source === "TGTT" || classData.source === "TGTT" ? "TGTT" : classData.source;
+						return CharacterSheetState.getSorceryPointsMaxForClass({name: "Sorcerer", source, level: lvl});
 					},
 					recharge: "long"},
 			],

@@ -354,6 +354,50 @@ export class BuilderWizardPage {
 	}
 
 	/**
+	 * Classes that gain their subclass at LEVEL 1 (PHB-2014 Sorcerer, Warlock, Cleric,
+	 * Druid…) render the choice inside the Builder's Class step as a radio list, not as
+	 * the `#builder-subclass-select` dropdown `selectSubclass()` drives. Before this
+	 * existed the harness had no way to pick one at all: `createCharacterViaWizard`
+	 * silently produced `subclass: null`, and only the L3 Level-Up path could ever set a
+	 * subclass — so every PHB-2014 preset whose subclass arrives at L1 built a bare class.
+	 *
+	 * @see js/charactersheet/charactersheet-builder.js `_renderClassSubclassSelection`
+	 */
+	async hasLevel1SubclassSelection (): Promise<boolean> {
+		return await this.page.locator(".charsheet__builder-subclass-list").isVisible().catch(() => false);
+	}
+
+	/**
+	 * Pick a level-1 subclass from the Builder's Class step.
+	 * @param subclassName Exact rendered subclass name.
+	 * @param subclassSource Optional JSON source key; disambiguates same-named
+	 *   subclasses by the rendered abbreviation next to the label.
+	 */
+	async selectLevel1Subclass (subclassName: string, subclassSource?: string): Promise<void> {
+		const list = this.page.locator(".charsheet__builder-subclass-list");
+		await list.waitFor({state: "visible", timeout: 10000});
+		let option = list.locator(".charsheet__builder-subclass-option")
+			.filter({hasText: subclassName});
+		if (subclassSource) {
+			const abbv = await this.page.evaluate(
+				(src) => (globalThis as any).Parser?.sourceJsonToAbv?.(src) ?? src,
+				subclassSource,
+			);
+			const scoped = option.filter({hasText: abbv});
+			if (await scoped.count()) option = scoped;
+		}
+		const radio = option.first().locator("input[type=radio]");
+		if (!await radio.count()) {
+			const seen = await list.locator(".charsheet__builder-subclass-option").allInnerTexts();
+			throw new Error(`Level-1 subclass "${subclassName}" not offered. seen=[${seen.join(" | ")}]`);
+		}
+		await radio.check();
+		// The change handler resolves the full subclass, may open a named-choice modal,
+		// and re-renders the class preview. Give it room before the next picker runs.
+		await this.page.waitForTimeout(400);
+	}
+
+	/**
 	 * Select skill proficiency if available
 	 */
 	async selectSkillProficiency (skillName: string): Promise<void> {
@@ -968,7 +1012,7 @@ export class BuilderWizardPage {
 	}
 
 	/**
-	 * Assign standard array ability scores using a sensible default distribution
+	 * Assign standard array ability scores using a sensible default distribution.
 	 * Standard array: 15, 14, 13, 12, 10, 8
 	 * Default assigns: STR=15, DEX=14, CON=13, INT=12, WIS=10, CHA=8
 	 *
@@ -1156,6 +1200,48 @@ export class BuilderWizardPage {
 		await this.btnNext.click();
 		// Wait for the character sheet to load
 		await this.page.waitForTimeout(500);
+		// `_finishCharacterCore` drains the pending spell/feature choice queues BEFORE
+		// it saves, so an unresolved picker strands the whole creation.
+		await this.resolvePostFinishChoices();
+	}
+
+	/**
+	 * Resolve any choice modal the Builder raises AFTER Finish is clicked.
+	 *
+	 * `_finishCharacterCore` drains both pending-choice queues
+	 * (`processPendingSpellChoices` then `processPendingFeatureChoices`) and only THEN
+	 * calls `saveCharacter()`. Any subclass that grants a player-chosen spell — an
+	 * `additionalSpells` `{choose}` block such as the Arcana Domain's two wizard cantrips,
+	 * or a seeded Moon-Bard-style bonus cantrip — therefore blocks creation on a modal
+	 * that nothing in the harness was clicking, and `createCharacterViaWizard`'s wait for
+	 * `_currentCharacterId` times out.
+	 *
+	 * Mirrors `LevelUpPage.resolvePendingFeatureChoices`: same DOM contract, same
+	 * top-most-first ordering (picks can chain, and a chained modal stacks above its
+	 * parent), and the same preference for a CONCRETE option over "Decide later" so
+	 * downstream effect probes have something to assert against. A no-op when no modal
+	 * is open, so it is safe on every existing build.
+	 * @returns the number of prompts resolved.
+	 */
+	async resolvePostFinishChoices (maxPrompts = 12): Promise<number> {
+		let resolved = 0;
+		for (let i = 0; i < maxPrompts; i++) {
+			const clicked = await this.page.evaluate(() => {
+				const prompts = Array.from(document.querySelectorAll<HTMLElement>(".charsheet__feature-choice, .spell-choice-list"));
+				const wrp = prompts[prompts.length - 1];
+				if (!wrp) return false;
+				const btn = wrp.querySelector<HTMLButtonElement>(".charsheet__feature-choice-opt")
+					|| wrp.querySelector<HTMLButtonElement>(".spell-choice-select")
+					|| wrp.querySelector<HTMLButtonElement>('[data-act="defer"]');
+				if (!btn) return false;
+				btn.click();
+				return true;
+			}).catch(() => false);
+			if (!clicked) break;
+			resolved++;
+			await this.page.waitForTimeout(250);
+		}
+		return resolved;
 	}
 
 	/**

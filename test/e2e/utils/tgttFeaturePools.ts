@@ -1,7 +1,7 @@
 /**
  * TGTT Feature Pools — Auto-generated. Do not edit by hand.
  *
- * Source:        homebrew/TravelersGuidetoThelemar.json (sha256:85673b654374)
+ * Source:        homebrew/TravelersGuidetoThelemar.json (sha256:0d24f1e1636c)
  * Generator:     scripts/genTgttPools.mjs
  * Regenerate:    node scripts/genTgttPools.mjs
  *
@@ -48,6 +48,7 @@ export const TGTT_SPECIALTIES: Record<string, RegExp[]> = {
 		/^Path of Lean Winters$/i,
 		/^Path of Scorching Summers$/i,
 		/^Sharpened Senses$/i,
+		/^Unyielding Might$/i,
 	],
 	Bard: [
 		/^Bewitching Companion$/i,
@@ -578,7 +579,7 @@ export const TGTT_COMBAT_METHODS_BY_TRADITION: Record<string, RegExp[]> = {
 		/^This is Yours$/i,
 	],
 	"Eldritch Blackguard": [
-		/^Blackguard’s Blight$/i,
+		/^Blackguard's Blight$/i,
 		/^Darkstalkers$/i,
 		/^Deathgrip$/i,
 		/^Dreadful Edge$/i,
@@ -618,10 +619,10 @@ export const TGTT_COMBAT_METHODS_BY_TRADITION: Record<string, RegExp[]> = {
 		/^Blind Stance$/i,
 		/^Calculated Trajectory$/i,
 		/^Elusive Maneuvering$/i,
-		/^Gunner’s Focus$/i,
+		/^Gunner's Focus$/i,
 		/^Kinesthetic Geometry$/i,
 		/^Martial Alacrity$/i,
-		/^Pilot’s Trance Stance$/i,
+		/^Pilot's Trance Stance$/i,
 		/^Psychosomatic Encouragement$/i,
 		/^Starfield Vision$/i,
 		/^Sympathetic Heart Stop$/i,

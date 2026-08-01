@@ -2128,13 +2128,45 @@ sources each granting a flying speed should give the higher, not the sum.
 
 Deliberately not fixed here. It is **unreachable today** — the only two live
 emitters are Unearthly Countenance (Daemonologist 10) and Stormborn (Tempest
-Cleric 17), which would require character level 27 — and a real fix cannot be
-made at the read site, because the `bonus` vocabulary is genuinely ambiguous: the
-same shape expresses both "grant a 60 ft fly speed" and "add +10 to the fly speed
-you already have", and only the first should max rather than sum. Disambiguating
-requires changing the emitters, including `parseEffectsFromDescription`. Recorded
-rather than filed as its own id, since it shares this pipeline and cannot
-currently be triggered.
+Cleric 17), which would require character level 27. Recorded rather than filed as
+its own id, since it shares this pipeline and cannot currently be triggered.
+
+> **CORRECTION (audited after the Circle of the Sea session's read-back).** This
+> entry originally claimed a fix "cannot be made at the read site, because the
+> `bonus` vocabulary is genuinely ambiguous — the same shape expresses both
+> 'grant a 60 ft fly speed' and 'add +10 to the fly speed you already have'".
+> **That is false for type-specific targets.** Enumerated, there are exactly
+> **four** emitters of a `{type: "bonus", target: "speed:<fly|swim|climb|burrow>"}`
+> effect, and **all four are grants**:
+>
+> | Emitter | Shape |
+> |---|---|
+> | `ACTIVE_STATE_TYPES.unearthlyCountenance` | `{target: "speed:fly", value: 60}` |
+> | `parseEffectsFromDescription` fly | regex `/(?:gain\|have) (?:a )?flying speed …/i` |
+> | `parseEffectsFromDescription` swim | same shape |
+> | `parseEffectsFromDescription` climb | same shape |
+>
+> The three parser regexes match **only** `gain`/`have a <X>ing speed` phrasing.
+> They cannot match "your flying speed increases by 10", so no additive typed
+> effect can be produced by this pipeline at all. The genuinely additive
+> vocabulary lives elsewhere: the generic `{type: "speed", value: 10}` effect
+> (walking, e.g. the artifact "Speed Increase" property) and the **named
+> modifier** `speed:fly` modType, which is a different pipeline summed into
+> `customModifiers.speed.fly` by `_recalculateCustomModifiers()`.
+>
+> So the remediation is **much cheaper than recorded**: within the *effect*
+> pipeline, type-specific `speed:<type>` contributions are grants and should be
+> combined with `Math.max` — against each other and against the `equalToWalk`
+> read-site head — rather than summed. No parser change and no new discriminator
+> field are required. `equalToWalk` is already unambiguously a grant, so once the
+> effect head maxes, the read-site head can fold into it (value resolved from the
+> walk speed at read time) and the pipeline returns to a single head.
+>
+> Two guards any such fix must keep, both already pinned by the PREMISE tests in
+> `CharacterSheetActiveStateEngine.test.js`: a generic `{target: "speed"}` must
+> still never conjure a movement type, and the **named-modifier** `speed:<type>`
+> path must stay additive — maxing there would silently delete a player's
+> hand-entered "+10 fly" custom modifier.
 
 Verified unchanged by this fix: `getSpeedByType("fly")` agrees with
 `getSpeed("fly")` on the bonus head (both **60**); Stormborn still reads **30**
@@ -2314,6 +2346,401 @@ would concatenate.
 reaches those levels was `{skip: true}` under `CS-BUG-018`, and the sole
 unskipped probe there was `{kind: "rollAbilityCheck"}`, which asserts only that a
 roll *occurred*, not that its total was a number.
+## CS-BUG-080 — Sorcery Points had three independent formulas and no creator
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Magic Sorcerer implementation (pathfinder session for
+five Sorcerer subclasses).
+
+**Root cause**: the size of the Sorcery Points pool was computed in three
+places that did not agree and were not connected:
+
+| Surface | Formula | Used by |
+|---|---|---|
+| `getFeatureCalculations()` Sorcerer branch | TGTT `level + 1`, else `level` | feature rows, E2E `featureCalculation` probes |
+| `CharacterSheetClassUtils.CLASS_RESOURCES` → `updateClassResources` | `level` for every source | Builder / Level-Up / Quick Build |
+| *(nothing)* | — | `getResources()` on a hand-built or imported character |
+
+The third row is the real defect: `getResources()` had ensure-hooks for Ki,
+Channel Divinity, Rage and others, but **none for Sorcery Points**. A Sorcerer
+that never went through `updateClassResources` — a JSON import, a respec, a
+Jest fixture, a `spawn()` — simply had no pool, so every `consumes:
+{name: "Sorcery Point"}` feature was unusable.
+
+**Fix**: `static CharacterSheetState.getSorceryPointsMaxForClass(cls)` is now
+the single source of truth. `charactersheet-class-utils.js` delegates to it,
+the `getFeatureCalculations()` Sorcerer branch delegates to it, and a new
+`_ensureSorceryPoints()` joins the `getResources()` ensure-chain.
+
+`_ensureSorceryPoints()` is deliberately **create-only** — it early-returns if
+a "Sorcery Points" resource already exists. Two legitimate writers mutate
+`resource.max` in place: `setSorceryPoints()` (explicit override) and the TGTT
+`tuneMetamagic()` / `detuneMetamagic()` pair, which *locks* points by lowering
+`max`. A reconciling ensure-hook silently untunes every metamagic the moment
+anything calls `getResources()`. Subtracting `getLockedSorceryPoints()` was
+tried and still broke `setSorceryPoints(5)` fixtures. Re-scaling on level-up
+remains `updateClassResources`' job.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §"base-class
+Sorcery Points machinery" (create-only, PHB ladder, TGTT ladder, tuning
+survives `getResources()`).
+
+---
+
+## CS-BUG-075 — a subclass spell grant with a `{choose}` block was silently dropped
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: Arcana Domain's Arcane Initiate grants "two cantrips of your
+choice from the wizard spell list". No pick-list ever appeared — in the
+Builder, in Level-Up, or in Quick Build — and no cantrip was added. The
+feature rendered as prose and did nothing.
+
+**Root cause**: `getSubclassAlwaysPreparedSpells()` walks a subclass's
+`additionalSpells` block and resolves every entry through
+`_parseSpellReference()`. That helper handles a **string** (`"detect magic"`,
+`"magic missile|phb"`) and returns `null` for anything else. A choose block is
+an **object** — `{choose: "level=0|class=Wizard", count: 2}` — so it fell out
+of the walk entirely. There is no other reader of `additionalSpells`, so **no
+subclass in the whole product could offer a player-chosen spell**; the shape
+had simply never been implemented.
+
+**Fix**: a parallel, choose-shaped walker rather than a per-subclass
+special-case. New `getSubclassSpellChoiceSlots()` walks the same
+`additionalSpells` structure, keeps only `{choose}` entries whose level gate
+the character has met, and expands each `count` into that many stable slots
+keyed by `_spellChoiceSlotKey()` (class / subclass / category / level /
+index). `_ensureSubclassSpellChoices()` reconciles those slots against
+`_data.fulfilledSpellChoiceSlots` and mints a pending choice for each unfilled
+one; `getPendingSpellChoices()` and `hasPendingSpellChoices()` call it first,
+so all three creation flows — which already call
+`processPendingSpellChoices()` — surface the picker with no flow-specific
+work. `fulfillSpellChoice()` records the slot so a choice is never re-offered,
+and honours `alwaysPrepared` so a granted spell does not eat the prepared
+limit.
+
+This lights up Arcane Mastery (four picks: one each of 6th/7th/8th/9th level)
+by the same mechanism, and every other `{choose}` grant in the data.
+
+**Regression pins**: `CharacterSheetArcanaCleric.test.js` §Arcane Initiate's
+two wizard cantrips and §Arcane Mastery is a four-part pick-list; the
+`stateCall getSubclassSpellChoiceSlots` / `getPendingSpellChoices` and
+`cantripCount` probes in `tgtt-arcana-cleric.spec.ts`.
+
+---
+
+## CS-BUG-076 — `potentSpellcastingBonus` was computed by ten subclasses and read by nothing
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: Potent Spellcasting (Arcana / Knowledge / Life… Cleric, and
+Druid's Potent Spellcasting) claims to add the Wisdom modifier to cantrip
+damage. Rolling a cantrip produced the base dice only.
+
+**Root cause**: `getFeatureCalculations()` sets `potentSpellcastingBonus` in
+roughly ten subclass branches, but a repo-wide search found **no consumer** —
+the number existed purely to be displayed.
+
+**Fix**: generic, not per-subclass. New
+`state.getCantripDamageBonus(spell)` returns `{bonus, sources}` and is scoped
+by a new `calculations.potentSpellcastingClass` (set alongside the bonus in
+the Cleric and Druid branches) via a new `spellCountsForClass(spell,
+className)` helper — so a Cleric/Wizard multiclass does not add Wisdom to
+their *wizard* cantrips. `charactersheet-spells.js` `_rollCantripDamage()`
+adds `bonus` and labels it in the breakdown; `charactersheet-features.js`
+shows a "Cantrip Damage +N" stat badge.
+
+Arcane Initiate's wizard cantrips *count as cleric cantrips*, so they receive
+the bonus — asserted explicitly.
+
+**Deliberately out of scope**: the weapon-channel cantrips (Booming Blade,
+Green-Flame Blade) do not route through `_rollCantripDamage`, so they do not
+pick the bonus up. RAW this is contested; it is noted rather than silently
+implemented either way.
+
+**Regression pins**: `CharacterSheetArcanaCleric.test.js` §Potent Spellcasting
+(including negative controls for level, non-cantrips and other-class
+cantrips); the `stateCall getCantripDamageBonus` probes in
+`tgtt-arcana-cleric.spec.ts`.
+
+---
+
+## CS-BUG-077 — `showFilteredSpellPicker` resolved before the modal closed, so batched picks collapsed
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: Arcane Initiate grants **two** wizard cantrips. Only one ever
+landed. `processPendingSpellChoices()` marked both slots fulfilled, so the
+second was never re-offered.
+
+**Root cause**: `showFilteredSpellPicker` is `async` but returned as soon as
+`CharacterSheetModal.pGetShow` had rendered — not when the user had picked.
+`processPendingSpellChoices()` awaits it in a `for … of` loop, so every picker
+in the batch opened at once, each holding the `knownSpellIds` snapshot taken
+before *any* pick. Two picks of the same top-of-list cantrip then collapsed to
+one via `addSpell`'s dedupe.
+
+**Fix**: `showFilteredSpellPicker` now returns a promise that settles on modal
+close (`cbClose`), so the loop is genuinely sequential and each picker sees the
+spells chosen before it.
+
+**Regression pin**: the `cantripCount` probe in `tgtt-arcana-cleric.spec.ts`
+(the two Arcane Initiate picks are the only guaranteed cantrips on that build,
+so a collapse fails the matrix).
+
+---
+
+## CS-BUG-078 — the 2014 Cleric's Channel Divinity pool was 2 uses at level 2
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: a 2nd-level 2014 Cleric had **two** Channel Divinity uses on the
+sheet instead of one, all the way to level 5.
+
+**Root cause**: the pool is minted by `addFeature`'s grant-time prose parser,
+and the 2014 Cleric's level-2 feature text advertises its future tiers in the
+same paragraph — "Beginning at 6th level, you can use your Channel Divinity
+**twice** between rests". The parser read that "twice".
+`_ensureChannelDivinityUses` (the CS-BUG-033 reconciler) only ever **raised**
+the max, so the over-count was permanent. The CS-BUG-033 suite even encoded
+the one-way behaviour as intended ("never lowers a pool that is already larger
+than the progression").
+
+**Fix**: `_getChannelDivinityUsesForClass` is authoritative in **both**
+directions. `resourceStale` / `featureStale` compare with `!==` rather than
+`<`, and `feature.uses.current` is clamped to the new max. Multiclass stays
+safe because `desiredMax` is the largest contribution across every class.
+The superseded CS-BUG-033 case has been rewritten in place.
+
+**Regression pins**:
+`CharacterSheetChannelDivinityScaling.test.js` §lowers a pool that the prose
+parser over-counted; `CharacterSheetArcanaCleric.test.js` §Cleric Channel
+Divinity pool is capped and scales 1 → 2 → 3; the tiered `Channel Divinity`
+resource rows in `tgtt-arcana-cleric.spec.ts`.
+
+---
+
+## CS-BUG-079 — 2014 Cleric domain Channel Divinity options were unclassified and unlimited
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: "Channel Divinity: Arcane Abjuration" surfaced with no
+`interactionMode`, was not linked to the Channel Divinity pool, and could be
+used an unbounded number of times. Its Wisdom save never rolled.
+
+**Root cause** (measured, and *not* what it first looked like). There are
+**two** independent causes producing the same symptom:
+
+1. **The tag is dropped on the way to the sheet.** `class-cleric.json`'s L2
+   SCAG entry for Arcane Abjuration *does* carry
+   `consumes: {name: "Channel Divinity"}` — but the exported live character
+   showed `consumes: None`. `CharacterSheetClassUtils` builds subclass features
+   at **five** sites, and only the `refSubclassFeature` expansion copied
+   `consumes` / `uses`; the other four whitelist a fixed key set and silently
+   dropped them. Paladin oaths reach the sheet through the ref-expansion path,
+   which is why Crown's Champion Challenge / Turn the Tide *did* arrive tagged
+   and this looked like a data difference between the two classes.
+2. **Many options genuinely ship untagged.** 18 of the 40
+   `Channel Divinity*` entries in `class-cleric.json` carry no `consumes` at
+   all — including Tempest's Destructive Wrath, which is precisely why it
+   needed a hard-coded `FEATURE_CLASSIFICATION_OVERRIDES` entry. That is
+   per-subclass special-casing of exactly the kind this codebase avoids.
+
+**Fix**, in two generic parts.
+
+*(1) Propagate the tag.* The four subclass-feature construction sites in
+`charactersheet-class-utils.js` now spread `consumes` through, matching the
+ref-expansion site. This is the true root-cause fix and reaches **113**
+`subclassFeature` entries across six pools — Channel Divinity (54), Sorcery
+Point (16), Psionic Energy Die (15), Ki (14), Focus Point (9) and Wild Shape
+(5) — every one of which previously failed to link when collected through one
+of those four paths. `uses` is deliberately **not** propagated: it would mint a
+new resource pool for features that merely document a count.
+
+*(2) Classify the naming convention* as the safety net for the 18 options that
+carry no tag in the data at all. Every Channel Divinity option
+in every source is named `Channel Divinity: <Option>`, so
+`detectActivatableFeature` now routes any feature matching
+`/^channel\s+divinity\s*:/i` through `_buildAbilityActivationInfo` with
+`resourceName: "Channel Divinity"`. Placed **after** the `consumes` branch and
+the classification-override block, so Paladin oaths and Destructive Wrath keep
+their existing paths unchanged. Options carrying their **own** use pool (TCE's
+"Channel Divinity: Harness Divine Power", PB/long rest) are excluded so the
+more specific pool keeps owning the row.
+
+Because the option now classifies as an `"ability"`, it inherits the CS-BUG-053
+fix and its save DC resolves from the character through `getFeatureSaveDc()`.
+
+**Regression pins**: `CharacterSheetArcanaCleric.test.js` §Arcane Abjuration is
+a usable Channel Divinity option (including the `consumes`-tagged and
+own-pool negative controls); the `combatAction` + `resource` probes in
+`tgtt-arcana-cleric.spec.ts`.
+
+Part (1) needs a pin of its **own**: because part (2) independently classifies
+the feature, every other probe on the row stays green with the tag still
+missing — reverting the four spreads left the whole matrix green. The dedicated
+pin is the `stateCall` probe on the L2 Arcane Abjuration row asserting
+`getFeature("Channel Divinity: Arcane Abjuration").consumes.name ===
+"Channel Divinity"`. Falsified: with the four spreads reverted it fails with
+`consumes.name=null` and is the *only* failure in the matrix; restored, green.
+
+**Blast-radius validation for part (1)**, one spec per affected pool:
+`tgtt-tempest-cleric` + `tgtt-crown-paladin` (Channel Divinity),
+`tgtt-sea-druid` (Wild Shape), `tgtt-mercy-monk-changeling` (Ki),
+`tgtt-child-of-sun-sorcerer-hochling` (Sorcery Point) — all green.
+**Not covered**: Focus Point (2024 Monk) and Psionic Energy Die (Psi Warrior)
+have no spec in this suite; they are propagated on the same code path but
+unverified end-to-end.
+
+---
+## CS-BUG-081 — the sheet's Damage button bypassed `takeDamage()` entirely
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Magic Sorcerer — Strength of the Grave never fired
+from the UI even though the state method worked in Jest.
+
+**Root cause**: `charactersheet.js` `_onDamage()` hand-rolled the temp-HP /
+current-HP arithmetic and wrote `setHp()` directly, never calling
+`this._state.takeDamage()`. Every hook hanging off `takeDamage` was therefore
+unreachable from the sheet's own Damage control — including the pre-existing
+**Death Ward** branch, which could only ever fire from code paths that called
+the state method directly.
+
+**Fix**: `_onDamage()` now routes through `this._state.takeDamage(amount)` and
+then awaits `_pOfferZeroHpIntervention()`.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §Strength of
+the Grave (the state-level path); the `takeDamage` →
+`applyZeroHpIntervention` `stateCall` chain in
+`tgtt-shadow-magic-sorcerer.spec.ts`.
+
+---
+
+## CS-BUG-082 — `calculations.darkvision` was written by six subclasses and read by nobody
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Magic Sorcerer — Eyes of the Dark published
+`calculations.darkvision = 120` and the sheet's senses stayed at the racial 60.
+
+**Root cause**: several class/subclass feature blocks publish a `darkvision`
+calculation, but `_getClassFeatureEffects()` had no case that turned it into
+anything. Grepping for consumers of `calculations.darkvision` returned zero
+hits outside the writers themselves. Darkvision granted by a *class* feature
+simply did not exist.
+
+**Fix**: `_getClassFeatureEffects()` now emits a generic
+`{type: "sense", sense: "darkvision", range, source}` effect for any
+`calculations.darkvision > 0`, feeding the existing sense-effect pipeline. The
+sense machinery already takes the maximum, so a racial 60 and a class 120
+resolve correctly in either application order.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §Eyes of the
+Dark; the `getSenses` `stateCall` in the E2E matrix (verified against a Dwarf,
+whose racial darkvision 60 must be superseded).
+
+---
+
+## CS-BUG-083 — active-state name matching hijacked identically-named features from other sources
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Magic Sorcerer — "Eyes of the Dark" classified as the
+**TGTT Shadow Knight** toggle of the same name, so a Sorcerer's passive
+darkvision feature rendered as an activatable state it does not have.
+
+**Root cause**: `static detectActivatableFeature()` walks `ACTIVE_STATE_TYPES`
+and matches purely on feature name. It is static, so it has no character
+context and cannot ask "does this character actually have the Shadow Knight
+version?". Four TGTT Shadow Knight states carry names generic enough to
+collide with unrelated content.
+
+**Fix**: an opt-in data flag, `noNameDetect: true`, on the state definition.
+The name-match loop `continue`s past any state carrying it; such states are
+reached only through an explicit `activateState(key)` call or a classification
+override. Applied to `shadowKnightDarkness`, `eyesOfTheDark`, `umbralCoating`
+and `shadowCloak`. Shadow Magic's own passive then falls to
+`FEATURE_CLASSIFICATION_OVERRIDES` (`"eyes of the dark": "ability"`).
+
+Restructuring was also required: the generic `consumes` branch sits ~170 lines
+*before* the name-match loop, and `activationAction` / `toggleAnalysis` /
+`parsedEffects` are all declared after it, so referencing them from the earlier
+branch throws a TDZ `ReferenceError`. The branch now falls through instead of
+returning.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §Eyes of the
+Dark classification; the Shadow Knight suites (unchanged and still green).
+
+---
+
+## CS-BUG-084 — TGTT Sorcery Points were one short at every level
+
+**Status**: Fixed. **Supersedes the resolution of CS-BUG-018.**
+**Surfaced by**: Shadow Magic Sorcerer — unifying the three formulas above
+forced the disagreement into the open.
+
+**Root cause**: the Thelemar Sorcerer's own class table
+(`homebrew/TravelersGuidetoThelemar.json` → Sorcerer `classTableGroups` →
+`["Sorcery Points"]`) reads `[2], [3], [4] … [21]` for levels 1–20, i.e.
+**`level + 1`**, and points start at **level 1**, not level 2. CS-BUG-018
+resolved the `getFeatureCalculations()` ↔ `updateClassResources` disagreement
+by changing the *correct* side to match the wrong one, making the pool one
+point stingy at every level and absent at level 1.
+
+Nobody caught it because both existing TGTT Sorcerer E2E specs
+(`tgtt-child-of-sun-sorcerer-hochling.spec.ts`,
+`tgtt-heroic-soul-sorcerer-halfogre.spec.ts`) blanket-skip their entire
+Sorcery Points ladder with `skipReason: "CS-BUG-018"` rather than assert a
+number they could not reconcile.
+
+**Fix**: `getSorceryPointsMaxForClass()` returns `level + 1` for TGTT and
+`level >= 2 ? level : 0` for PHB/XPHB, and every surface now reads it.
+
+**Follow-up available**: the CS-BUG-018 skips in the two neighbouring Sorcerer
+specs are now liftable with `level + 1` values. Left in place here so the
+blast radius of this change stays inside one subclass; whoever picks up
+Lunar / Spellfire / Wicked Witch / Shadow Sorcery should take it.
+
+**Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §"base-class
+Sorcery Points machinery" asserts both ladders explicitly.
+
+### Addendum — the SECOND chokepoint (fixed separately)
+
+The fix above hardened `_getNamedModifierEffectiveValue`, which feeds the cached
+`customModifiers` totals. That is **not the only** place a stored modifier becomes
+a number. `_resolveNamedModifierNumericValue` (dating from 2026-06-27, so it
+predates the original fix) feeds `aggregateModifiers()` and the attack itemizer,
+and it still read `mod.value` raw.
+
+Measured in-browser on `artificer/battle smith/20/human` **after** the original
+fix had landed:
+
+```
+getSaveMod("str"|"dex"|"con"|"int"|"wis"|"cha")  ->  2, 3, 12, 12, 1, 0   (correct)
+aggregateModifiers("save:all").bonus            ->  "1attunedItems"      (a STRING)
+```
+
+All six per-save values were already correct — which is exactly **why the
+existing per-save regression tests did not catch it**. Soul of Artifice registers
+a numeric row *and* a symbolic row on the same `save:all` type, so the aggregate
+performed `1 + "attunedItems"`.
+
+⚠️ **Generalisable lesson**: when hardening a value-resolution defect, grep for
+*sibling resolvers*, not just for raw readers of the field. The original audit
+hunted consumers reading `mod.value` directly and missed a second **resolver**
+method, because it looked like a fix rather than a bypass. Two chokepoints now
+exist and both are commented as such so they cannot drift apart.
+
+**No double-count check** (the assertion most likely to catch an over-broad
+resolver): `wizard/bladesinger/11/elf` still reads AC `11 → 15` and concentration
+`+2 → +6` with INT mod 4 — the modifier applied **once**. Bladesong's two named
+modifiers are a deliberately `enabled: false` duplicate of the active-state path;
+the resolver must not revive them, and does not.
+
+**Recursion note**: resolving `"strScore"` calls `getAbilityScore("str")`, which
+looks like an infinite loop for Indomitable Might. It is not: that modifier's type
+is `ability:str:minimum`, a *sub-typed* variant which the ability-score
+aggregation deliberately skips, so the resolver is never re-entered from inside
+`getAbilityScore()`. Verified live — `barbarian/chained fury/18/minotaur` returns
+STR `20` with zero page errors.
 
 ---
 
@@ -2471,6 +2898,10 @@ entries when the description is rendered HTML". Verified in-browser via
 `[]` to `["Feather Fall", "Jump"]`, and to all three with the at-will upgrade
 at 15.
 
+**Falsified**: restoring the literal prior `feature.description` expression
+turns **1 test red** on the full `charactersheet/` suite. Measured twice —
+once by the implementing session, once independently at merge time.
+
 ---
 
 ## CS-BUG-067 — feature-wide "cast each once per long rest" clauses were out of the parser's context window, upgrading limited grants to permanent ones
@@ -2510,3 +2941,16 @@ cannot bind to the word "cast" in a different sentence.
 `CharacterSheetMeteorKnight.test.js` — asserts `uses: {current: 1, max: 1}`
 and `recharge: "long"` on the level-3 grants, and that the level-15 at-will
 upgrade *clears* both.
+
+**Falsified**: restoring the original local-context-only expressions
+
+```js
+const isOnce = /once|one time/i.test(context) && /rest|dawn|day/i.test(context);
+const recharge = /short rest/i.test(context) ? "short" : (/long rest|dawn|day/i.test(context) ? "long" : null);
+```
+
+turns **5 tests red** on the full `charactersheet/` suite. Measured
+independently at merge time and again by the implementing session; both runs
+agree on 5. Keep `_parseFeatureWideCastingLimit()` defined when running this
+control — deleting it as well produces a `ReferenceError` and an inflated red
+count that proves nothing.
