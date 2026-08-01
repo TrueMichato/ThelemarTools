@@ -887,6 +887,19 @@ globalThis.FeatureChoiceParser = FeatureChoiceParser;
  */
 class FeatureModifierParser {
 	/**
+	 * The 5e conditions a feature can plausibly grant a gated saving-throw advantage against
+	 * ("advantage on saving throws to avoid becoming paralyzed or stunned"). Used to filter the
+	 * free-text capture in `parseModifiers` so incidental words ("knocked", "the") never become
+	 * modifiers.
+	 * @type {Set<string>}
+	 */
+	static SAVE_GATING_CONDITIONS = new Set([
+		"blinded", "charmed", "deafened", "exhausted", "frightened", "grappled",
+		"incapacitated", "invisible", "paralyzed", "paralysed", "petrified", "poisoned",
+		"prone", "restrained", "stunned", "unconscious",
+	]);
+
+	/**
 	 * Parse feature/item text to extract modifiers
 	 * @param {string} text - The feature description text (can include HTML)
 	 * @param {string} sourceName - Name of the feature/item granting the modifier
@@ -1445,15 +1458,14 @@ class FeatureModifierParser {
 		// "advantage on saving throws to avoid being knocked prone"
 		// "advantage on saving throws made to resist the effects of X"
 		const advantageSavePatterns = [
-			{pattern: /advantage\s+on\s+saving\s+throws?\s+(?:and\s+ability\s+checks?\s+)?to\s+avoid\s+being\s+knocked\s+prone/gi, condition: "to avoid being knocked prone"},
-			{pattern: /advantage\s+on\s+saving\s+throws?\s+(?:made\s+)?to\s+resist\s+(?:the\s+effects?\s+of\s+)?extreme\s+heat\s+or\s+cold/gi, condition: "against extreme heat or cold"},
-			{pattern: /advantage\s+on\s+saving\s+throws?\s+(?:made\s+)?to\s+resist\s+(?:the\s+effects?\s+of\s+)?cold\s+weather/gi, condition: "against cold weather"},
-			{pattern: /advantage\s+on\s+saving\s+throws?\s+(?:made\s+)?to\s+resist\s+(?:the\s+effects?\s+of\s+)?hot\s+weather/gi, condition: "against hot weather"},
-			{pattern: /advantage\s+on\s+(?:checks?\s+and\s+)?saving\s+throws?\s+to\s+avoid\s+drowning/gi, condition: "to avoid drowning"},
-			{pattern: /advantage\s+on\s+saving\s+throws?\s+against\s+being\s+(?:charmed|frightened|poisoned)/gi, condition: (m) => `against being ${m[0].match(/charmed|frightened|poisoned/i)[0].toLowerCase()}`},
-			{pattern: /advantage\s+on\s+saving\s+throws?\s+against\s+(?:poison|disease|magic|spells?)/gi, condition: (m) => `against ${m[0].match(/poison|disease|magic|spells?/i)[0].toLowerCase()}`},
+			{pattern: /(?<!dis)advantage\s+on\s+saving\s+throws?\s+(?:and\s+ability\s+checks?\s+)?to\s+avoid\s+being\s+knocked\s+prone/gi, condition: "to avoid being knocked prone"},
+			{pattern: /(?<!dis)advantage\s+on\s+saving\s+throws?\s+(?:made\s+)?to\s+resist\s+(?:the\s+effects?\s+of\s+)?extreme\s+heat\s+or\s+cold/gi, condition: "against extreme heat or cold"},
+			{pattern: /(?<!dis)advantage\s+on\s+saving\s+throws?\s+(?:made\s+)?to\s+resist\s+(?:the\s+effects?\s+of\s+)?cold\s+weather/gi, condition: "against cold weather"},
+			{pattern: /(?<!dis)advantage\s+on\s+saving\s+throws?\s+(?:made\s+)?to\s+resist\s+(?:the\s+effects?\s+of\s+)?hot\s+weather/gi, condition: "against hot weather"},
+			{pattern: /(?<!dis)advantage\s+on\s+(?:checks?\s+and\s+)?saving\s+throws?\s+to\s+avoid\s+drowning/gi, condition: "to avoid drowning"},
+			{pattern: /(?<!dis)advantage\s+on\s+saving\s+throws?\s+against\s+(?:poison|disease|magic|spells?)/gi, condition: (m) => `against ${m[0].match(/poison|disease|magic|spells?/i)[0].toLowerCase()}`},
 			// Concentration save advantage (War Caster, Eldritch Mind, etc.)
-			{pattern: /advantage\s+on\s+(?:constitution\s+)?(?:saving\s+throws?\s+)?(?:that\s+you\s+make\s+)?to\s+maintain\s+(?:your\s+)?concentration/gi, condition: null, target: "concentration"},
+			{pattern: /(?<!dis)advantage\s+on\s+(?:constitution\s+)?(?:saving\s+throws?\s+)?(?:that\s+you\s+make\s+)?to\s+maintain\s+(?:your\s+)?concentration/gi, condition: null, target: "concentration"},
 		];
 		advantageSavePatterns.forEach(({pattern, condition, target}) => {
 			if (pattern.test(plainText)) {
@@ -1467,6 +1479,37 @@ class FeatureModifierParser {
 				});
 			}
 		});
+
+		// --- Condition-gated save advantage ("against being X", "to avoid becoming X or Y") ---
+		// Covers the whole 5e condition roster and BOTH canonical phrasings, plus multi-condition
+		// lists ("paralyzed or stunned", "charmed, frightened, or poisoned"). Emitting one
+		// modifier per named condition — rather than one blob — is what lets
+		// `_isConditionalSaveSubtype` / `getModifiersForType` present them as individually
+		// opt-in conditional modifiers at roll time (Unyielding Spirit, Aura of Protection
+		// riders, Fey Ancestry-style traits, …).
+		//
+		// The `(?<!dis)` lookbehind is mandatory: without it "creatures have DISadvantage on
+		// saving throws against being frightened by you" — an enemy debuff — parses as a
+		// self-buff.
+		const conditionGatedSaveRe = /(?<!dis)advantage\s+on\s+(?:all\s+)?saving\s+throws?\s+(?:made\s+)?(?:to\s+(?:avoid|resist|end|prevent)\s+(?:being|becoming)|against\s+(?:being|becoming)|to\s+resist\s+becoming)\s+((?:[a-z]+(?:\s*,\s*|\s+or\s+|\s+and\s+))*[a-z]+)/gi;
+		const seenConditionGated = new Set();
+		for (const match of plainText.matchAll(conditionGatedSaveRe)) {
+			const named = (match[1] || "").split(/\s*,\s*|\s+or\s+|\s+and\s+/)
+				.map(s => s.trim().toLowerCase())
+				.filter(s => FeatureModifierParser.SAVE_GATING_CONDITIONS.has(s));
+			for (const cond of named) {
+				if (seenConditionGated.has(cond)) continue;
+				seenConditionGated.add(cond);
+				modifiers.push({
+					type: "save:all",
+					value: 0,
+					note: sourceName,
+					advantage: true,
+					conditional: `against being ${cond}`,
+					conditionName: cond,
+				});
+			}
+		}
 
 		// ===================
 		// ADVANTAGE ON ABILITY CHECKS (Conditional)
@@ -9151,16 +9194,20 @@ class CharacterSheetState {
 	/**
 	 * Take damage, consuming temp HP first
 	 * @param {number} damage - Amount of damage to take
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.unpreventable=false] Damage that "can't be reduced or prevented in
+	 *        any way" (Divine Allegiance, Beacon of Hope-style riders, several homebrew pacts).
+	 *        Bypasses temporary hit points AND Death Ward — both are "prevention" in RAW terms.
 	 * @returns {boolean} True if damage was taken
 	 */
-	takeDamage (damage) {
+	takeDamage (damage, {unpreventable = false} = {}) {
 		if (damage <= 0) return false;
 
 		const startingHp = this._data.hp.current;
 		const maxHp = this.getMaxHp();
 
 		// Consume temp HP first
-		if (this._data.hp.temp > 0) {
+		if (!unpreventable && this._data.hp.temp > 0) {
 			if (this._data.hp.temp >= damage) {
 				this._data.hp.temp -= damage;
 				this._updateBloodiedCondition();
@@ -9175,7 +9222,7 @@ class CharacterSheetState {
 		this._data.hp.current = Math.max(0, this._data.hp.current - damage);
 
 		// Death Ward: if character would drop to 0 HP, set to 1 instead and consume the ward
-		if (this._data.hp.current === 0 && startingHp > 0) {
+		if (!unpreventable && this._data.hp.current === 0 && startingHp > 0) {
 			const effects = this.getActiveStateEffects();
 			const deathWardEffect = effects.find(e => e.type === "deathWard");
 			if (deathWardEffect) {
@@ -9200,8 +9247,40 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Check if character is unconscious (at 0 HP)
-	 * @returns {boolean} True if unconscious
+	 * Divine Allegiance (Oath of the Crown, level 7): when a creature within 5 feet takes
+	 * damage, spend your reaction to substitute your own health — the creature takes none and
+	 * you take the same amount instead. RAW: "This damage to you can't be reduced or prevented
+	 * in any way", so it is applied as `unpreventable` (bypassing temporary hit points, Death
+	 * Ward, and any other prevention).
+	 *
+	 * The transfer has no uses of its own (it costs only the reaction), so nothing is spent
+	 * beyond the hit points.
+	 * @param {number} damage the damage the protected creature would have taken
+	 * @returns {object|null} a descriptor of what happened, or null if unavailable/no-op
+	 */
+	useDivineAllegiance (damage) {
+		if (!this.getFeatureCalculations?.()?.hasDivineAllegiance) return null;
+		const amount = Math.max(0, Math.floor(Number(damage) || 0));
+		if (!amount) return null;
+
+		const hpBefore = this.getHp().current;
+		const tempHpBefore = this.getTempHp();
+		this.takeDamage(amount, {unpreventable: true});
+		const hpAfter = this.getHp().current;
+
+		return {
+			applied: true,
+			damageTransferred: amount,
+			hpBefore,
+			hpAfter,
+			tempHpBefore,
+			tempHpAfter: this.getTempHp(),
+			droppedToZero: hpBefore > 0 && hpAfter === 0,
+		};
+	}
+
+	/**
+	 * Check if character is unconscious (at 0 HP)	 * @returns {boolean} True if unconscious
 	 */
 	isUnconscious () {
 		return this._data.hp.current === 0;
@@ -12497,6 +12576,24 @@ class CharacterSheetState {
 		const ability = this._data.spellcasting.ability;
 		if (!ability) return null;
 		return this.getSpellSaveDcForAbility(ability);
+	}
+
+	/**
+	 * The save DC a non-spell FEATURE imposes.
+	 *
+	 * Class/subclass features that force a saving throw ("each creature … must make a Wisdom
+	 * saving throw") almost never state a number — RAW they use the granting class's spell save
+	 * DC (8 + proficiency + the class's spellcasting ability modifier). Prefer the owning
+	 * class's DC when the feature knows which class granted it, so a multiclassed character
+	 * gets the right one, and fall back to the character's global spell save DC.
+	 * @param {object} [feature] the feature imposing the save (uses its `className`)
+	 * @returns {number|null}
+	 */
+	getFeatureSaveDc (feature = null) {
+		const byClass = feature?.className ? this.getSpellSaveDC(feature.className) : null;
+		if (Number.isFinite(byClass)) return byClass;
+		const global = this.getSpellSaveDc();
+		return Number.isFinite(global) ? global : null;
 	}
 
 	/**
@@ -31089,11 +31186,30 @@ class CharacterSheetState {
 			.reduce((max, cls) => Math.max(max, CharacterSheetState._getChannelDivinityUsesForClass(cls)), 0);
 		if (desiredMax <= 0) return;
 
-		const resource = (this._data.resources || []).find(r => r.name === "Channel Divinity");
-		if (!resource) return;
-
-		const feature = this._data.features?.find(f => f.id === resource.featureId)
+		let resource = (this._data.resources || []).find(r => r.name === "Channel Divinity");
+		const feature = (resource && this._data.features?.find(f => f.id === resource.featureId))
 			|| this._data.features?.find(f => f.name === "Channel Divinity");
+
+		// CS-BUG-054: the pool is normally minted by `addFeature` parsing a use count out
+		// of the feature's prose ("you can use your Channel Divinity twice"). The 2014
+		// PALADIN's Channel Divinity text names no number at all — it only says "You must
+		// then finish a short or long rest to use your Channel Divinity again" — so no
+		// pool was ever created and every oath's Channel Divinity options were unlimited.
+		// The correct count is already known from the class table, so create the pool here
+		// rather than teach the prose parser to infer "once" from a rest clause.
+		if (!resource) {
+			if (!feature) return;
+			resource = {
+				id: CryptUtil.uid(),
+				name: "Channel Divinity",
+				current: desiredMax,
+				max: desiredMax,
+				recharge: "short",
+				featureId: feature.id,
+			};
+			(this._data.resources = this._data.resources || []).push(resource);
+			if (!feature.uses) feature.uses = {current: desiredMax, max: desiredMax, per: "short"};
+		}
 
 		// Both surfaces are checked independently. A later level-up can re-parse the
 		// feature text and reset the FEATURE back to its grant-time maximum while the
@@ -31111,6 +31227,7 @@ class CharacterSheetState {
 
 		// Keep the owning feature's own use pool in step, so the Features tab, the
 		// Combat Resources pips and rest restoration cannot disagree.
+		if (feature && !feature.uses) feature.uses = {current: desiredMax, max: desiredMax, per: "short"};
 		if (feature?.uses) {
 			feature.uses.max = desiredMax;
 			feature.uses.current = Math.max(feature.uses.current ?? 0, resource.current ?? 0);
@@ -35800,11 +35917,19 @@ class CharacterSheetState {
 			// flows (addFeat), the same feature's prose could be parsed more than once.
 			// Skip if an equivalent modifier from the same source already exists so we
 			// never double-apply a parsed effect.
+			//
+			// (CS-BUG-052) `conditional` is part of the identity. One feature routinely grants
+			// several DISTINCT conditional modifiers that share a type and a value — Unyielding
+			// Spirit's "advantage on saving throws to avoid becoming paralyzed or stunned" is
+			// two `save:all` advantage entries — and without this the second (and third, …)
+			// were silently swallowed as duplicates, so only the first condition was ever
+			// offered at roll time.
 			const isDuplicate = this._data.namedModifiers.some(existing =>
 				existing.sourceFeatureId === featureId
 				&& existing.type === modifierData.type
 				&& (existing.newAbility || null) === (modifierData.newAbility || null)
 				&& (existing.abilityMod || null) === (modifierData.abilityMod || null)
+				&& (existing.conditional || null) === (modifierData.conditional || null)
 				&& (existing.value || 0) === (modifierData.value || 0),
 			);
 			if (isDuplicate) return;
@@ -36837,13 +36962,28 @@ class CharacterSheetState {
 		}
 
 		// --- Healing roll ---
-		const healMatch = text.match(/(?:regains?|heals?|restores?) (\d+d\d+(?:\s*\+\s*\w+)?)\s*hit points/i);
-		if (healMatch) {
+		// Two phrasings:
+		//   "regains 2d8 hit points"                                  → literal formula
+		//   "regains hit points equal to 1d6 + your Charisma modifier (minimum of 1)"
+		// The second form is extremely common on class/subclass features (Turn the Tide, Lay on
+		// Hands riders, Preserve Life variants, …) and used to parse to nothing at all, so the
+		// action modal offered no healing button. The ability modifier is left symbolic here —
+		// this parser is static and has no character — and is resolved to a number by the
+		// combat-tab enrichment (`_resolveCombatActionEffects`).
+		const healMatch = text.match(/(?:regains?|heals?|restores?) (\d+d\d+)(?:\s*\+\s*(\w+))?\s*hit points/i);
+		const healEqualMatch = healMatch ? null : text.match(/(?:regains?|heals?|restores?)\s+hit points\s+equal to\s+(\d+d\d+)(?:\s*\+\s*(?:your\s+)?(\w+)(?:\s+modifier)?)?/i);
+		const healHit = healMatch || healEqualMatch;
+		if (healHit) {
+			const bonusTok = (healHit[2] || "").toLowerCase();
+			const abilityMod = CharacterSheetState.ABILITY_FROM_TOKEN?.[bonusTok] || null;
 			effects.rollDice = {
 				type: "healing",
-				formula: healMatch[1].replace(/\s+/g, ""),
+				formula: /^\d+$/.test(bonusTok) ? `${healHit[1]}+${bonusTok}` : healHit[1],
 				label: "Healing",
 			};
+			if (abilityMod) effects.rollDice.abilityMod = abilityMod;
+			const minMatch = text.match(/\(minimum of (\d+)\)/i);
+			if (minMatch) effects.rollDice.minimum = parseInt(minMatch[1], 10);
 			hasEffect = true;
 		}
 
@@ -38369,6 +38509,8 @@ class CharacterSheetState {
 		// Add bonus stamina from parsed feature modifiers (e.g., "You gain 2 additional stamina points")
 		const staminaMods = this.getModifiersForType("resource:stamina");
 		for (const mod of staminaMods) {
+			// Conditional (opt-in) modifiers never contribute to a standing pool size.
+			if (mod.conditional) continue;
 			calculatedMax += (mod.value || 0);
 		}
 
@@ -39761,42 +39903,102 @@ class CharacterSheetState {
 
 	// --- Internal state defense extractors ---
 
+	/**
+	 * The canonical 13 D&D 5e damage types. Used to decide whether a bare active-state effect
+	 * `target` (as emitted by prose parsing) names a damage type.
+	 * @type {Set<string>}
+	 */
+	static DAMAGE_TYPES = new Set([
+		"acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic",
+		"piercing", "poison", "psychic", "radiant", "slashing", "thunder",
+	]);
+
+	/**
+	 * Map every spelling a prose parser can encounter ("charisma", "cha", "CHA") to the
+	 * canonical three-letter ability key used throughout the sheet.
+	 * @type {Record<string, string>}
+	 */
+	static ABILITY_FROM_TOKEN = {
+		str: "str",
+		strength: "str",
+		dex: "dex",
+		dexterity: "dex",
+		con: "con",
+		constitution: "con",
+		int: "int",
+		intelligence: "int",
+		wis: "wis",
+		wisdom: "wis",
+		cha: "cha",
+		charisma: "cha",
+	};
+
+	/**
+	 * (CS-BUG-050) Resolve an active-state effect `target` to a damage type.
+	 *
+	 * Two producers write these effects and they disagree on shape:
+	 *  - the curated `SPELL_BUFF_REGISTRY` / `ACTIVE_STATE_TYPES` entries emit the namespaced
+	 *    `"damage:<type>"` form;
+	 *  - `parseEffectsFromDescription` (prose parsing, used for every homebrew/uncurated
+	 *    feature that becomes an active state) emits the BARE `"<type>"` form.
+	 *
+	 * The readers below only ever understood the namespaced form, so every prose-parsed
+	 * resistance/immunity/vulnerability on an active state was silently inert. Accept both,
+	 * but only promote a bare target when it is a KNOWN damage type — otherwise unrelated
+	 * bare targets (`"ac"`, `"speed:walk"`, `"save:wis"`, …) would be mistaken for damage
+	 * types.
+	 * @param {string} target
+	 * @returns {string|null} the damage type, or null if this target isn't a damage target
+	 * @private
+	 */
+	static _damageTypeFromEffectTarget (target) {
+		if (!target || typeof target !== "string") return null;
+		const clean = target.trim().toLowerCase();
+		if (clean.startsWith("damage:")) return clean.slice("damage:".length) || null;
+		return CharacterSheetState.DAMAGE_TYPES.has(clean) ? clean : null;
+	}
+
+	/**
+	 * Collect the damage types active states grant for a given defence effect type,
+	 * de-duplicated and normalised across both target shapes.
+	 * @param {string} effectType one of "resistance" | "immunity" | "vulnerability"
+	 * @param {boolean} conditional whether to keep conditional (true) or unconditional (false) entries
+	 * @private
+	 */
+	_getDamageDefenceFromStates (effectType, conditional = false) {
+		const out = [];
+		const seen = new Set();
+		for (const e of this.getActiveStateEffects()) {
+			if (e.type !== effectType) continue;
+			if (!!e.conditional !== conditional) continue;
+			const dmgType = CharacterSheetState._damageTypeFromEffectTarget(e.target);
+			if (!dmgType) continue;
+			const key = conditional ? `${dmgType}|${e.conditional}` : dmgType;
+			if (seen.has(key)) continue;
+			seen.add(key);
+			out.push(conditional ? {type: dmgType, conditional: e.conditional} : dmgType);
+		}
+		return out;
+	}
+
 	/** @private */
 	_getResistancesFromStates () {
-		const effects = this.getActiveStateEffects();
-		return effects
-			.filter(e => e.type === "resistance" && e.target?.startsWith("damage:") && !e.conditional)
-			.map(e => e.target.replace("damage:", ""));
+		return this._getDamageDefenceFromStates("resistance", false);
 	}
 
 	/** @private */
 	_getConditionalResistancesFromStates () {
-		const seen = new Set();
-		return this.getActiveStateEffects()
-			.filter(e => e.type === "resistance" && e.target?.startsWith("damage:") && e.conditional)
-			.map(e => ({type: e.target.replace("damage:", ""), conditional: e.conditional}))
-			.filter(e => {
-				const key = `${e.type}|${e.conditional}`;
-				if (seen.has(key)) return false;
-				seen.add(key);
-				return true;
-			});
+		return this._getDamageDefenceFromStates("resistance", true);
 	}
 
 	/** @private */
 	_getImmunitiesFromStates () {
-		const effects = this.getActiveStateEffects();
-		return effects
-			.filter(e => e.type === "immunity" && e.target?.startsWith("damage:"))
-			.map(e => e.target.replace("damage:", ""));
+		return this._getDamageDefenceFromStates("immunity", false);
 	}
 
 	/** @private */
 	_getVulnerabilitiesFromStates () {
-		const effects = this.getActiveStateEffects();
-		return effects
-			.filter(e => e.type === "vulnerability" && e.target?.startsWith("damage:"))
-			.map(e => e.target.replace("damage:", ""));
+		return this._getDamageDefenceFromStates("vulnerability", false);
 	}
 
 	/** @private */
@@ -43042,7 +43244,16 @@ class CharacterSheetState {
 		const matchingMods = [];
 
 		this._data.namedModifiers.forEach(mod => {
-			if (!mod.enabled) return;
+			// (CS-BUG-053) A text-parsed CONDITIONAL modifier is registered with
+			// `enabled: false` by `_processFeatureModifiers` ("conditional modifiers start
+			// disabled"), which predates the roll-time opt-in gating in `aggregateModifiers`.
+			// Dropping them here double-gated them into invisibility: the conditional picker
+			// never saw them, so features like Unyielding Spirit ("advantage on saving throws
+			// to avoid becoming paralyzed or stunned") or Pious Soul had no mechanical effect
+			// at all. Let conditionals through — `aggregateModifiers` refuses to APPLY them
+			// unless the caller opts in, and the numeric consumers
+			// (`getAttackModifierContributions`, the stamina pool) skip them explicitly.
+			if (!mod.enabled && !mod.conditional) return;
 
 			// Parse the modifier type to extract advantage/disadvantage flags
 			const {baseType, advantage, disadvantage} = this._parseModifierType(mod.type);
@@ -44636,6 +44847,36 @@ class CharacterSheetState {
 			resourceName: "Holy Nimbus",
 			resourceCost: 1,
 		},
+		/**
+		 * Oath of the Crown, level 20 (SCAG). A one-hour, once-per-long-rest transformation.
+		 *
+		 * `preferCuratedEffects` matters here: the prose parser reads "resistance to
+		 * bludgeoning, piercing, and slashing damage from nonmagical weapons" as three bare,
+		 * partially duplicated resistances and drops the Wisdom-save advantage's companion ally
+		 * clause, so the curated set below is authoritative.
+		 *
+		 * The two ally-facing riders (allies within 30 ft gain advantage on death saving throws
+		 * and on Wisdom saves) are intentionally descriptive only — the sheet models one
+		 * character, and there is no ally-aura surface to write them to.
+		 */
+		exaltedChampion: {
+			id: "exaltedChampion",
+			name: "Exalted Champion",
+			icon: "👑",
+			description: "For 1 hour you have resistance to bludgeoning, piercing, and slashing damage from nonmagical weapons and advantage on Wisdom saving throws; allies within 30 feet share the Wisdom-save advantage and have advantage on death saving throws.",
+			preferCuratedEffects: true,
+			effects: [
+				{type: "resistance", target: "damage:bludgeoning"},
+				{type: "resistance", target: "damage:piercing"},
+				{type: "resistance", target: "damage:slashing"},
+				{type: "advantage", target: "save:wis"},
+			],
+			duration: "1 hour",
+			endConditions: ["Duration expires", "You end the effect"],
+			activationAction: "action",
+			resourceName: "Exalted Champion",
+			resourceCost: 1,
+		},
 		astralArms: {
 			id: "astralArms",
 			name: "Arms of the Astral Self",
@@ -45931,6 +46172,12 @@ class CharacterSheetState {
 		// _buildAbilityActivationInfo → the generic Abilities list with a Use button, whose
 		// click effect is wired by name in charactersheet.js (_pUseSongOfDefense).
 		"song of defense": "ability",
+		// (Oath of the Crown, SCAG L7) A reaction that substitutes your own health for an
+		// ally's damage. "ability" routes it through _buildAbilityActivationInfo so it gets a
+		// Use button in the Abilities list; the click is wired by name in charactersheet.js
+		// (_pUseDivineAllegiance), exactly like Song of Defense — the other reaction-shaped
+		// ability with no uses of its own.
+		"divine allegiance": "ability",
 		"channel divinity: destructive wrath": "ability",
 		"blood maledict": "passive",
 
@@ -46050,6 +46297,13 @@ class CharacterSheetState {
 			// turn"). Without carrying the parsed duration the activation pipeline stored the
 			// resulting state as "Instant", so the buff had no stated lifetime.
 			duration: this.analyzeToggleability(rawText)?.duration || undefined,
+			// CS-BUG-053: "ability"-classified activatables (every Channel Divinity
+			// option, Invoke Hell option, …) rendered a Use button that could never roll
+			// anything — this path returned no `combatActionEffects`, unlike the
+			// "combat"/"reaction" path below, so a save ("must make a Wisdom saving
+			// throw") or a heal ("regains 1d6 + your Charisma modifier hit points") was
+			// pure prose. Parse them here too; the roll surfaces read this field.
+			combatActionEffects: this._parseCombatActionEffects(text, rawText),
 			isToggle: false,
 			isInstant: true,
 			staminaCost,
@@ -46137,12 +46391,46 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * (CS-BUG-051) Is this feature a pure *reference wrapper*?
+	 *
+	 * Many subclasses ship an umbrella feature whose whole job is to introduce the options it
+	 * grants — e.g. Oath of the Crown's "Channel Divinity", whose `entries` are one line of
+	 * prose plus two `refSubclassFeature` pointers at Champion Challenge and Turn the Tide.
+	 * The referenced children are themselves loaded as features and get their own ability
+	 * rows, so the wrapper must never mint a *second*, resource-less row of its own — which is
+	 * exactly what happened to every oath/domain that names its umbrella "Channel Divinity",
+	 * duplicating the class-level row.
+	 *
+	 * A wrapper is recognised structurally (≥1 `ref*` entry and no non-string content of its
+	 * own), never by name, so this covers Oaths, Domains, Circles and homebrew alike without
+	 * touching features that legitimately mix references with their own mechanics.
+	 * @param {object} feature
+	 * @returns {boolean}
+	 */
+	static isReferenceWrapperFeature (feature) {
+		const entries = feature?.entries;
+		if (!Array.isArray(entries) || !entries.length) return false;
+		// Own limited uses ⇒ it is a real resource-bearing feature, not a pure wrapper.
+		if (feature.uses?.max > 0) return false;
+		let nRefs = 0;
+		for (const entry of entries) {
+			if (typeof entry === "string") continue;
+			if (typeof entry?.type === "string" && /^ref[A-Z]/.test(entry.type)) { ++nRefs; continue; }
+			return false; // structured content of its own ⇒ not a pure wrapper
+		}
+		return nRefs > 0;
+	}
+
+	/**
 	 * Detect activatable features from a feature's description
 	 * Uses intelligent text analysis to determine if an ability is toggle-able
 	 * @param {object} feature - The feature object with name and description
 	 * @returns {object|null} Activation info if this feature is activatable
 	 */
 	static detectActivatableFeature (feature) {
+		// (CS-BUG-051) Pure "here are the options you gained" wrappers are never independently
+		// activatable — their children carry the mechanics and their own rows.
+		if (CharacterSheetState.isReferenceWrapperFeature(feature)) return null;
 		const name = feature?.name?.toLowerCase() || "";
 		const isCrimsonRite = feature?.optionalFeatureTypes?.includes("CR");
 		const isBloodCurse = feature?.optionalFeatureTypes?.includes("BC");
@@ -46614,7 +46902,7 @@ class CharacterSheetState {
 					stateType,
 					matchedBy: "name",
 					activationAction: activationAction || stateType.activationAction,
-					effects: parsedEffects.length > 0 ? parsedEffects : stateType.effects,
+					effects: (stateType.preferCuratedEffects && stateType.effects?.length) || parsedEffects.length === 0 ? stateType.effects : parsedEffects,
 					duration: toggleAnalysis.duration || stateType.duration,
 					endConditions: toggleAnalysis.endConditions.length > 0 ? toggleAnalysis.endConditions : stateType.endConditions,
 					staminaCost,
@@ -46638,7 +46926,7 @@ class CharacterSheetState {
 							stateType,
 							matchedBy: "pattern",
 							activationAction: activationAction || stateType.activationAction,
-							effects: parsedEffects.length > 0 ? parsedEffects : stateType.effects,
+							effects: (stateType.preferCuratedEffects && stateType.effects?.length) || parsedEffects.length === 0 ? stateType.effects : parsedEffects,
 							duration: toggleAnalysis.duration || stateType.duration,
 							endConditions: toggleAnalysis.endConditions.length > 0 ? toggleAnalysis.endConditions : stateType.endConditions,
 							staminaCost,

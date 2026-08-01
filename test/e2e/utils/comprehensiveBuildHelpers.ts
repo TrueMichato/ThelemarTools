@@ -728,7 +728,10 @@ export type EffectCheck = _EffectCommon & (
 	}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
-	| {kind: "combatAction"; feature: string; interactionMode: string; formula: string; damageTypes: string[]; saveAbility: AblKey}
+	// `damageTypes` / `saveAbility` are optional so the same probe covers HEALING actions
+	// (Turn the Tide) and saves whose DC is inherited from the character rather than
+	// written into the prose (`saveDcFromCharacter`).
+	| {kind: "combatAction"; feature: string; interactionMode: string; formula?: string; damageTypes?: string[]; saveAbility?: AblKey; rollType?: string; abilityMod?: AblKey; minimum?: number; saveDcFromCharacter?: boolean}
 	| {kind: "deferredDamageMaximizer"; feature: string; resource: string; eligibleType: string; ineligibleType: string}
 	| {kind: "triggeredDamageEffect"; damageType: string; effectType: string; distance?: number; direction?: string; maxTargetSize?: string; optional?: boolean}
 	| {kind: "weaponDamageRider"; id: string; dice: string; damageType: string; perTurn?: boolean}
@@ -736,6 +739,11 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "immunity"; damageType: string}
 	| {kind: "vulnerability"; damageType: string}
 	| {kind: "advantage"; rollType: string}
+	// A GATED advantage: the feature registers a conditional modifier that must NOT be
+	// auto-applied, but must be offered to the per-roll opt-in picker and must actually
+	// grant advantage once opted in. This is the observable contract for any "advantage
+	// on saves against being <condition>"-style feature (Unyielding Spirit, Pious Soul…).
+	| {kind: "conditionalAdvantage"; rollType: string; conditionalIncludes: string; sourceIncludes?: string}
 	| {kind: "disadvantage"; rollType: string}
 	| {kind: "skillAdvantage"; skill: string}
 	| {kind: "conditionImmunity"; condition: string}
@@ -840,6 +848,19 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "spellCastGrantsCover"; spell: string; source: string; acDelta: number; saveAbility: AblKey; saveDelta: number}
 	| {kind: "activeAuraMechanics"; feature: string; damageType: string; damageMin: number; conditionalRollType: string; conditionalIncludes: string}
 	| {kind: "restoreFeatureUseWithSpellSlot"; feature: string; slotLevel: number}
+	// Generic "call a state API and assert the observable delta" probe. The escape hatch
+	// for features whose entire mechanic is a state mutation with no persistent derived
+	// stat — damage transfer, self-inflicted costs, forced HP movement, … Keeps such
+	// features from degrading into existence-only assertions.
+	| {
+		kind: "stateMethodEffect";
+		method: string;
+		args?: unknown[];
+		setup?: {hp?: number; tempHp?: number};
+		expectHpDelta?: number;
+		expectTempHpDelta?: number;
+		expectReturns?: Record<string, unknown>;
+	}
 	// === Phase 11: per-pick effect dispatch ===
 	// On a parent FeatureCheck of `kind: "pick"`, attach
 	// `pickedFeatureGrants` to declare effects that should fire ONLY
@@ -1074,10 +1095,27 @@ async function _runPassiveOrRollEffect (
 			}, e.feature);
 			const rollDice = result?.combatActionEffects?.rollDice;
 			if (result?.interactionMode !== e.interactionMode) throw new Error(`${e.feature} interactionMode=${result?.interactionMode}, expected ${e.interactionMode}`);
-			if (rollDice?.formula !== e.formula) throw new Error(`${e.feature} formula=${rollDice?.formula}, expected ${e.formula}`);
-			if (rollDice?.saveAbility !== e.saveAbility) throw new Error(`${e.feature} save=${rollDice?.saveAbility}, expected ${e.saveAbility}`);
-			for (const damageType of e.damageTypes) {
+			if (e.formula != null && rollDice?.formula !== e.formula) throw new Error(`${e.feature} formula=${rollDice?.formula}, expected ${e.formula}`);
+			if (e.rollType && rollDice?.type !== e.rollType) throw new Error(`${e.feature} type=${rollDice?.type}, expected ${e.rollType}`);
+			if (e.saveAbility && rollDice?.saveAbility !== e.saveAbility) throw new Error(`${e.feature} save=${rollDice?.saveAbility}, expected ${e.saveAbility}`);
+			if (e.abilityMod && rollDice?.abilityMod !== e.abilityMod) throw new Error(`${e.feature} abilityMod=${rollDice?.abilityMod}, expected ${e.abilityMod}`);
+			if (e.minimum != null && rollDice?.minimum !== e.minimum) throw new Error(`${e.feature} minimum=${rollDice?.minimum}, expected ${e.minimum}`);
+			for (const damageType of e.damageTypes || []) {
 				if (!rollDice?.damageTypeChoices?.includes(damageType)) throw new Error(`${e.feature} missing damage type choice "${damageType}"`);
+			}
+			if (e.saveDcFromCharacter) {
+				// The prose names no DC; the sheet must resolve it from the character rather
+				// than fall back to a hard-coded 10.
+				const dcs = await charSheet.page.evaluate((featureName) => {
+					const cs: any = (globalThis as any).charSheet;
+					const state = cs?._state;
+					const feature = state?.getFeature?.(featureName);
+					const effects = feature ? state?.constructor?.detectActivatableFeature?.(feature)?.combatActionEffects : null;
+					cs?._combat?._resolveCombatActionEffects?.(effects, feature);
+					return {resolved: effects?.rollDice?.dc ?? null, expected: state?.getFeatureSaveDc?.(feature) ?? null};
+				}, e.feature);
+				if (dcs.expected == null) throw new Error(`${e.feature}: character exposes no feature save DC to resolve against`);
+				if (dcs.resolved !== dcs.expected) throw new Error(`${e.feature} save DC=${dcs.resolved}, expected the character's ${dcs.expected}`);
 			}
 			return;
 		}
@@ -1693,6 +1731,63 @@ async function _runPassiveOrRollEffect (
 			if (result.after.ac - result.before.ac !== e.acDelta) throw new Error(`cover AC delta=${result.after.ac - result.before.ac}, expected ${e.acDelta}`);
 			if (result.after.save - result.before.save !== e.saveDelta) throw new Error(`cover save delta=${result.after.save - result.before.save}, expected ${e.saveDelta}`);
 			if (!result.expired) throw new Error(`cover did not expire at the start of the next turn`);
+			return;
+		}
+		case "conditionalAdvantage": {
+			const result = await charSheet.page.evaluate(({rollType, conditionalIncludes}) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const base = state?.aggregateModifiers?.(rollType) || {};
+				const match = (base.conditionalsAvailable || []).find((it: any) =>
+					String(it.conditional || "").toLowerCase().includes(conditionalIncludes.toLowerCase()));
+				const opted = match
+					? state?.aggregateModifiers?.(rollType, {appliedConditionalIds: new Set([match.id])})
+					: null;
+				return {
+					defaultAdvantage: !!base.advantage,
+					offered: match ? {advantage: !!match.advantage, name: String(match.name || "")} : null,
+					available: (base.conditionalsAvailable || []).map((it: any) => String(it.conditional || "")),
+					optedAdvantage: !!opted?.advantage,
+				};
+			}, {rollType: e.rollType, conditionalIncludes: e.conditionalIncludes});
+			if (!result.offered) {
+				throw new Error(`no conditional on ${e.rollType} matching "${e.conditionalIncludes}" (available: ${JSON.stringify(result.available)})`);
+			}
+			if (!result.offered.advantage) throw new Error(`conditional "${e.conditionalIncludes}" is offered but does not carry advantage`);
+			if (result.defaultAdvantage) throw new Error(`conditional "${e.conditionalIncludes}" leaked into the DEFAULT ${e.rollType} roll (must be opt-in)`);
+			if (!result.optedAdvantage) throw new Error(`opting into "${e.conditionalIncludes}" did not grant advantage on ${e.rollType}`);
+			if (e.sourceIncludes && !result.offered.name.toLowerCase().includes(e.sourceIncludes.toLowerCase())) {
+				throw new Error(`conditional source="${result.offered.name}", expected to include "${e.sourceIncludes}"`);
+			}
+			return;
+		}
+		case "stateMethodEffect": {
+			const result = await charSheet.page.evaluate(({method, args, setup}) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				if (typeof state?.[method] !== "function") return {missing: true};
+				if (setup?.hp != null) state.setCurrentHp?.(setup.hp);
+				if (setup?.tempHp != null) state.setTempHp?.(setup.tempHp);
+				const hpBefore = state.getCurrentHp?.();
+				const tempBefore = state.getTempHp?.();
+				const returned = state[method](...(args || []));
+				return {
+					missing: false,
+					hpDelta: state.getCurrentHp?.() - hpBefore,
+					tempHpDelta: state.getTempHp?.() - tempBefore,
+					returned,
+				};
+			}, {method: e.method, args: e.args || [], setup: e.setup || null});
+			if (result.missing) throw new Error(`state API "${e.method}" does not exist`);
+			if (e.expectHpDelta != null && result.hpDelta !== e.expectHpDelta) {
+				throw new Error(`${e.method} HP delta=${result.hpDelta}, expected ${e.expectHpDelta}`);
+			}
+			if (e.expectTempHpDelta != null && result.tempHpDelta !== e.expectTempHpDelta) {
+				throw new Error(`${e.method} temp HP delta=${result.tempHpDelta}, expected ${e.expectTempHpDelta}`);
+			}
+			for (const [k, v] of Object.entries(e.expectReturns || {})) {
+				if ((result.returned as any)?.[k] !== v) {
+					throw new Error(`${e.method}().${k}=${JSON.stringify((result.returned as any)?.[k])}, expected ${JSON.stringify(v)}`);
+				}
+			}
 			return;
 		}
 		case "activeAuraMechanics": {

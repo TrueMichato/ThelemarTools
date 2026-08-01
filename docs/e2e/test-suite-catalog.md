@@ -35,6 +35,7 @@ the skill reference at
 | 18 | `tgtt-horror-warlock-theocracian.spec.ts` | Horror Warlock · Theocracian Children | 1–20 | Horror subclass features, Eldritch Invocations pick-list, pact slots short-rest restore. |
 | 19 | `tgtt-necromancer-wizard.spec.ts` | School of Necromancy Wizard · Human | 1–20 | Necromancy Savant scribe discount, Grim Harvest healing math, Undead Thralls companion buffs + Animate Dead grant, Inured to Undeath necrotic resistance **and** HP-max-reduction immunity, Command Undead save DC. |
 | 20 | `tgtt-talent-chronopath.spec.ts` | Chronopath Talent · Human (homebrew base class, `TalPsi`) | 1–20 | Whole MCDM Talent base class: psionic strain penalties on AC/speed/HP/proficiency/advantage/healing, manifestation tests, derived 1st-order + higher-order power pickers, Psionic Exertions, Psychic Boost, Psionic Bastion, Shielded Mind, Ignore Strain, and every Chronopath ability. |
+| 21 | `tgtt-crown-paladin.spec.ts` | Oath of the Crown Paladin (SCAG) · Dwarf | 1–20 | Channel Divinity pool on a **2014** Paladin (CS-BUG-054), Champion Challenge save DC + Turn the Tide healing resolved from the character (CS-BUG-053), Divine Allegiance damage transfer, Unyielding Spirit conditional save advantage (CS-BUG-052), Exalted Champion active state (CS-BUG-050/051). |
 
 ## Other specs
 
