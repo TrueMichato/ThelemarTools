@@ -1245,8 +1245,12 @@ async function _runPassiveOrRollEffect (
 			if (e.exact !== undefined && actual !== e.exact) throw new Error(`${label}=${JSON.stringify(actual)}, expected ${JSON.stringify(e.exact)}`);
 			if (e.min !== undefined && (typeof actual !== "number" || actual < e.min)) throw new Error(`${label}=${JSON.stringify(actual)}, expected >= ${e.min}`);
 			if (e.contains !== undefined) {
-				const list = Array.isArray(actual) ? actual : [actual];
-				if (!list.some(it => String(it).toLowerCase().includes(e.contains!.toLowerCase()))) {
+				// Object elements stringify to "[object Object]", which can never match a
+				// meaningful needle — JSON them instead so `contains` works on arrays of
+				// records (e.g. `getInnateSpells()` → [{name: "Feather Fall", …}]).
+				const render = (it: unknown) => (it && typeof it === "object" ? JSON.stringify(it) : String(it));
+				const list = (Array.isArray(actual) ? actual : [actual]).map(render);
+				if (!list.some(it => it.toLowerCase().includes(e.contains!.toLowerCase()))) {
 					throw new Error(`${label}=${JSON.stringify(actual)}, expected to contain "${e.contains}"`);
 				}
 			}
