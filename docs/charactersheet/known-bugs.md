@@ -249,7 +249,7 @@ issue numbers stay stable.
 
 ## Resolved
 
-### CS-BUG-086 — XPHB/TGTT Barbarian Rage pool becomes unlimited at level 20
+### CS-BUG-097 — XPHB/TGTT Barbarian Rage pool becomes unlimited at level 20
 
 **Status**: Fixed.
 **Surfaced by**: `tgtt-chained-fury-barbarian-minotaur.spec.ts` after
