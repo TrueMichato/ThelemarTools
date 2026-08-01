@@ -58,7 +58,8 @@ const TALENT_FEATURES: FeatureCheck[] = [
 	{
 		level: 2,
 		name: /chronopathy adept/i,
-		kind: "passive",
+		kind: "resource",
+		resourceMax: [1, 5],
 		effects: [
 			{kind: "featureCalculation", property: "hasChronopathyAdept", exact: true},
 			{kind: "featureUsesEqualAbilityMod", feature: "Chronopathy Adept", ability: "int", minimum: 1, recharge: "long"},
@@ -68,7 +69,8 @@ const TALENT_FEATURES: FeatureCheck[] = [
 	{
 		level: 2,
 		name: /rapid manifestation/i,
-		kind: "passive",
+		kind: "resource",
+		resourceMax: [1, 5],
 		effects: [
 			{kind: "featureCalculation", property: "hasRapidManifestation", exact: true},
 			{kind: "featureUsesEqualAbilityMod", feature: "Rapid Manifestation", ability: "int", minimum: 1, recharge: "long"},
@@ -121,11 +123,14 @@ const TALENT_FEATURES: FeatureCheck[] = [
 		level: 7,
 		untilLevel: 11,
 		name: /psychic boost/i,
-		kind: "passive",
+		kind: "resource",
+		resourceMax: 1,
 		effects: [
 			{kind: "featureCalculation", property: "hasPsychicBoost", exact: true},
 			{kind: "featureCalculation", property: "psychicBoostUses", exact: 1},
 			{kind: "longRestRestoresFeatureUses", feature: "Psychic Boost"},
+			// Talent's own strain-clearing API, reachable only through a bespoke state call.
+			{kind: "stateCall", method: "getStrainMaximum", min: 11},
 		],
 	},
 	{
@@ -203,7 +208,9 @@ const TALENT_FEATURES: FeatureCheck[] = [
 		level: 12,
 		untilLevel: 16,
 		name: /psychic boost \(two uses\)/i,
-		kind: "passive",
+		kind: "resource",
+		resourceName: "Psychic Boost",
+		resourceMax: 2,
 		effects: [{kind: "featureCalculation", property: "psychicBoostUses", exact: 2}],
 	},
 
@@ -258,7 +265,9 @@ const TALENT_FEATURES: FeatureCheck[] = [
 	{
 		level: 17,
 		name: /psychic boost \(three uses\)/i,
-		kind: "passive",
+		kind: "resource",
+		resourceName: "Psychic Boost",
+		resourceMax: 3,
 		effects: [{kind: "featureCalculation", property: "psychicBoostUses", exact: 3}],
 	},
 
@@ -282,7 +291,14 @@ const TALENT_FEATURES: FeatureCheck[] = [
 		level: 20,
 		name: /ignore strain/i,
 		kind: "passive",
-		effects: [{kind: "featureCalculation", property: "hasIgnoreStrain", exact: true}],
+		effects: [
+			{kind: "featureCalculation", property: "hasIgnoreStrain", exact: true},
+			// Bespoke state APIs the flat calculation fields can't express.
+			{kind: "stateCall", method: "getStrainMaximum", exact: 24},
+			{kind: "stateCall", method: "getStrainState", path: "max", exact: 24},
+			{kind: "stateCall", method: "getManifestationDie", exact: "1d8"},
+			{kind: "stateCall", method: "getHigherOrderPowersKnown", exact: 21},
+		],
 	},
 ];
 

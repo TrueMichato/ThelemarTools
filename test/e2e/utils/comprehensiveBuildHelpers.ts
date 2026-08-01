@@ -631,6 +631,14 @@ export interface FeatureCheck {
 	/** For kind="resource": expected pool max — exact or [min,max]. */
 	resourceMax?: number | [number, number];
 	/**
+	 * For kind="resource": the tracker's own label, when it differs from the
+	 * feature name. Feature rows are frequently tiered ("Psychic Boost (three
+	 * uses)") while the pool they resize keeps one stable name ("Psychic
+	 * Boost"). Without this override the probe hunts the sheet for the tier
+	 * label and wrongly reports the pool as missing.
+	 */
+	resourceName?: string;
+	/**
 	 * For kind="resource": which rest restores the resource.
 	 *  - omit       → don't test restoration (just pool size)
 	 *  - "short"    → spend 1, short-rest, expect restored
@@ -705,6 +713,19 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "speedEquals"; left: SpeedType; right: SpeedType}
 	| {kind: "initiative"; min?: number; exact?: number}
 	| {kind: "featureCalculation"; property: string; min?: number; exact?: number | string | boolean}
+	// Generic escape hatch: call a `CharacterSheetState` method and assert on the
+	// returned value. Use when a feature's mechanic is exposed through a bespoke
+	// state API rather than a flat calculation field (e.g. a computed cost, a
+	// derived bundle). `path` is a dot/bracket path into the return value.
+	| {
+		kind: "stateCall";
+		method: string;
+		args?: unknown[];
+		path?: string;
+		min?: number;
+		exact?: number | string | boolean | null;
+		contains?: string;
+	}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
 	| {kind: "combatAction"; feature: string; interactionMode: string; formula: string; damageTypes: string[]; saveAbility: AblKey}
@@ -984,6 +1005,42 @@ async function _runPassiveOrRollEffect (
 				throw new Error(`featureCalculation.${e.property}=${value}, expected >= ${e.min}`);
 			}
 			if (e.exact === undefined && e.min === undefined && value == null) throw new Error(`featureCalculation.${e.property} is absent`);
+			return;
+		}
+		case "stateCall": {
+			const value = await charSheet.page.evaluate(({method, args, path}) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				if (typeof state?.[method] !== "function") return {__missing: true};
+				let result: any;
+				try {
+					result = state[method](...(args ?? []));
+				} catch (err) {
+					return {__threw: String(err)};
+				}
+				if (!path) return {value: result};
+				let cursor = result;
+				for (const seg of path.split(".")) {
+					if (cursor == null) return {value: null};
+					cursor = cursor[seg];
+				}
+				return {value: cursor};
+			}, {method: e.method, args: (e.args ?? []) as unknown[], path: e.path ?? ""});
+
+			const label = `${e.method}(${(e.args ?? []).map(a => JSON.stringify(a)).join(", ")})${e.path ? `.${e.path}` : ""}`;
+			if ((value as any).__missing) throw new Error(`${label}: state method is missing`);
+			if ((value as any).__threw) throw new Error(`${label} threw: ${(value as any).__threw}`);
+			const actual = (value as any).value;
+			if (e.exact !== undefined && actual !== e.exact) throw new Error(`${label}=${JSON.stringify(actual)}, expected ${JSON.stringify(e.exact)}`);
+			if (e.min !== undefined && (typeof actual !== "number" || actual < e.min)) throw new Error(`${label}=${JSON.stringify(actual)}, expected >= ${e.min}`);
+			if (e.contains !== undefined) {
+				const list = Array.isArray(actual) ? actual : [actual];
+				if (!list.some(it => String(it).toLowerCase().includes(e.contains!.toLowerCase()))) {
+					throw new Error(`${label}=${JSON.stringify(actual)}, expected to contain "${e.contains}"`);
+				}
+			}
+			if (e.exact === undefined && e.min === undefined && e.contains === undefined && actual == null) {
+				throw new Error(`${label} is absent`);
+			}
 			return;
 		}
 		case "proficiency": {
@@ -1932,7 +1989,7 @@ export async function assertFeaturesMatrix (
 				}
 
 				case "resource": {
-					const nameStr = fc.name instanceof RegExp ? fc.name.source : fc.name;
+					const nameStr = fc.resourceName ?? (fc.name instanceof RegExp ? fc.name.source : fc.name);
 					const r = await charSheet.getResource(nameStr).catch(() => ({current: -1, max: -1}));
 					if (r.max < 0) throw new Error(`resource not found on sheet`);
 					if (fc.resourceMax != null) {

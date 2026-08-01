@@ -45,6 +45,19 @@ All 14 Cleric domains are fully implemented:
 - **Nature**: `dampenElementsUses`, `divineStrikeDamage`
 
 #### Wizard Traditions ✅
+- **School of Necromancy (PHB, L2 / XPHB L3)**: Necromancy Savant halves the
+  spellbook scribe cost for Necromancy spells (surfaced as a toast with a
+  working "Pay N gp" button); Grim Harvest is an activatable ability that
+  prompts for slot level + school and actually restores HP; Undead Thralls
+  grants *animate dead* into the spellbook, adds one extra target to the raise,
+  and buffs every created undead companion (+wizard level HP, +proficiency
+  bonus weapon damage); Inured to Undeath applies necrotic resistance **and**
+  real immunity to hit-point-maximum reduction; Command Undead surfaces the
+  live CHA save DC at 60 ft.
+  *Deliberate scope limit*: Grim Harvest's "once per turn" cap is not enforced
+  — the sheet has no combat tracker with enemy hit points, so there is no
+  reliable "you killed a creature" signal to hang a lockout on. It is a manual
+  Use action, matching how every other kill-triggered feature is handled.
 - **Daemonologist (Grim Hollow Player's Guide 2024)**: Persists and gates the
   Arch Daemon/Arch Seraph path across Builder, Level-Up, and Quick Build;
   grants its path-specific spells; supports Wizard-owned Eldritch Invocation

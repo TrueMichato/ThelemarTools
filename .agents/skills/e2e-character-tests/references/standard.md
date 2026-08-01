@@ -186,6 +186,7 @@ stay clean). Use this decision tree:
 | Pick-list option (Metamagic, Invocation, Maneuver, …) | pick | `pickActivatable`, `pickToggleable`, `pickedFeatureGrants` |
 | Persists a feature choice which drives calculations | choice | `featureChoiceCalculation` |
 | Stateful Blood Hunter mechanics | class mechanic | `bloodMaledictAmplification`, `crimsonRiteMechanics`, `hybridTransformationMechanics` |
+| Mechanic exposed only through a bespoke state API (computed cost, derived bundle, immunity flag, …) | escape hatch | `stateCall` |
 
 ### Canonical examples (one per family)
 
@@ -217,6 +218,17 @@ stay clean). Use this decision tree:
 // Attack rider — Hexblade's Curse damage
 {level: 1, name: /Hexblade's Curse/i, kind: "passive", effects: [
     {kind: "attackDamageContains", attackName: /any/, contains: /\+\s*prof/i},
+]}
+
+// Escape hatch — a mechanic that lives behind a bespoke state API.
+// Calls `charSheet._state.<method>(...args)` and walks `path` into the
+// result. Supports `exact`, `min` and `contains` (array or scalar).
+// Use only when no flat `featureCalculation` field exposes the mechanic.
+{level: 10, name: /Inured to Undeath/i, kind: "passive", effects: [
+    {kind: "resistance", damageType: "necrotic"},
+    {kind: "stateCall", method: "isImmuneToMaxHpReduction", exact: true},
+    {kind: "stateCall", method: "getSpellbookScribeCost",
+        args: [{level: 3, school: "N"}], path: "gp", exact: 75},
 ]}
 
 // Roll button — Bardic Inspiration
