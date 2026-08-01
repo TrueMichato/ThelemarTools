@@ -118,8 +118,24 @@ export const PRESET_FULL_XPHB_LIGHT_CLERIC: CharacterPreset = {
 	signatureSpells: ["Sacred Flame", "Bless", "Cure Wounds"],
 };
 
-/** PHB 2014 Tempest Domain Cleric. */
-export const PRESET_FULL_TEMPEST_CLERIC: CharacterPreset = {
+/** XPHB 2024 Circle of the Sea Druid. */
+export const PRESET_FULL_SEA_DRUID: CharacterPreset = {
+	race: "Human",
+	raceSource: "PHB'24",
+	className: "Druid",
+	classSource: "PHB'24",
+	prioritySources: ["XPHB"],
+	skipConditionalPrompt: true,
+	background: "Hermit",
+	bgSource: "PHB'24",
+	name: "Nerida Tidecaller",
+	skillCount: 2,
+	optFeatCount: 1,
+	subclassName: "Circle of the Sea",
+	subclassSource: "PHB'24",
+	signatureSpells: ["Druidcraft", "Cure Wounds", "Entangle"],
+};
+/** PHB 2014 Tempest Domain Cleric. */export const PRESET_FULL_TEMPEST_CLERIC: CharacterPreset = {
 	race: "Dwarf",
 	raceSource: "PHB",
 	className: "Cleric",

@@ -137,6 +137,52 @@ applies ranges, ability modifiers, and action-economy costs before rendering.
 {type: "note", value: "Description text"}     // Informational note
 ```
 
+### Speeds that track the walking speed
+
+An active state can grant a speed that is *equal to* the character's walking
+speed rather than a fixed number. Set `equalToWalk` instead of `value`; it is
+resolved at the READ site (`getSpeed()` / `getSpeedByType()`), so a later boot
+of Speed or a racial bonus is picked up automatically and the effect never
+caches a stale number.
+
+```javascript
+{type: "flySpeed", equalToWalk: true}   // e.g. Circle of the Sea's Stormborn
+{type: "swimSpeed", value: 30}          // a plain fixed value still works
+```
+
+> **Gotcha.** The description-text modifier pipeline is a *second, independent*
+> source of speed grants: `_processFeatureModifiers` registers a `speed:<type>`
+> `equalToWalk` named modifier parsed straight out of the feature's prose, and
+> it is enabled unless `_extractCondition` recognises a gating phrase. A feature
+> whose text reads "…confers two more benefits **while active**" needs that
+> phrasing in `_extractCondition`, or the speed leaks as an always-on bonus even
+> though the active state is off.
+
+### Save-for-damage bursts (`trigger.effectType: "saveDamageBurst"`)
+
+A state whose `trigger` declares `effectType: "saveDamageBurst"` gets a generic
+"roll damage, name the save" button in the combat panel. The state's effect
+descriptor may leave the scaling **unresolved** — `getActiveStateTrigger()`
+resolves it — which keeps the effect provider out of the speed/calculation
+re-entrancy cycle:
+
+| Field | Meaning |
+|---|---|
+| `diceAbility` / `diceMinimum` / `dieSize` | `max(diceMinimum, mod(diceAbility))` dice of `dieSize` → `resolvedDamage` |
+| `damage` | a literal formula, used when no `diceAbility` is given |
+| `dcCalculation: "spellSaveDc"` | resolve the DC live → `resolvedDc` |
+| `dc` | a literal DC, wins over `dcCalculation` |
+| `saveAbility`, `damageType`, `range`, `pushDistance`, `maxPushSize` | surfaced in the roll result |
+
+### Placement-aware states
+
+`addActiveState` / `activateState` persist a `placement` string alongside the
+other whitelisted option keys. `_getSupplementalActiveStateEffects(stateTypeId,
+state)` receives the live state record, so a state can emit different effects
+depending on where the player put it — Circle of the Sea's Oceanic Gift uses
+this to withhold Stormborn's resistances and fly speed when the Emanation is
+placed on an ally rather than on the druid.
+
 ---
 
 ## Supported Toggle Abilities

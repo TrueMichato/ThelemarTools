@@ -10154,7 +10154,7 @@ class CharacterSheetPage {
 		}
 
 		// Use passed cost, or fall back to state type default
-		const cost = resolvedCost;
+		let cost = resolvedCost;
 		let weaponScopedEffects = null;
 
 		if (activationInfo?.needsWeaponChoice) {
@@ -10226,6 +10226,37 @@ class CharacterSheetPage {
 			this._combatModule?.renderCombatStates?.();
 			this._renderCharacter();
 			return;
+		}
+
+		// ===== WRATH OF THE SEA (Circle of the Sea): placement choice =====
+		// Oceanic Gift (L14) lets the Emanation be manifested around a willing
+		// creature within 60 ft instead of the druid — or around both, for two
+		// Wild Shape uses. Ask FIRST, then spend, so cancelling costs nothing.
+		let wrathPlacement = null;
+		if (activationInfo?.needsPlacementChoice && stateTypeId === "wrathOfTheSea") {
+			const placements = this._state.getWrathOfTheSeaPlacements?.() || [];
+			let chosen = placements.length ? placements[0] : null;
+			if (placements.length > 1) {
+				chosen = await InputUiUtil.pGetUserEnum({
+					title: `${feature.name} — Where does the Emanation manifest?`,
+					values: placements,
+					fnDisplay: it => `${it.name} (${it.cost} Wild Shape use${it.cost === 1 ? "" : "s"})`,
+					isResolveItem: true,
+				});
+				if (!chosen) return; // Cancelled — zero mutation
+			}
+			wrathPlacement = chosen?.id || "self";
+			cost = chosen?.cost ?? cost;
+			// Re-read the resource by id after the modal: a concurrent action may
+			// have spent it while the picker was open.
+			const liveResource = resource && !resource.isStamina
+				? this._state.getResources().find(r => r.id === resource.id)
+				: resource;
+			if (liveResource && liveResource.current < cost) {
+				JqueryUtil.doToast({type: "warning", content: `Not enough ${resource.name} remaining.`});
+				return;
+			}
+			if (liveResource) resource = liveResource;
 		}
 
 		// Deduct resource cost if applicable
@@ -10328,6 +10359,7 @@ class CharacterSheetPage {
 				// Non-generic types (like recklessAttack, rage) use their predefined effects
 				customEffects: weaponScopedEffects || (shouldParseEffects && parsedEffects?.length > 0 ? parsedEffects : null),
 			};
+			if (wrathPlacement) customData.placement = wrathPlacement;
 			this._state.activateState(stateTypeId, customData);
 			const linkedStateId = stateType?.variablePointSpend?.linkedStateBySpend?.[variableSpend];
 			if (linkedStateId) this._state.activateState(linkedStateId);

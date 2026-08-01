@@ -2427,6 +2427,14 @@ class FeatureModifierParser {
 			// the transformation is active).
 			/until\s+(?:the\s+)?(?:transformation|change)\s+ends/i,
 			/while\s+(?:you\s+(?:are|['’]re)\s+)?transformed/i,
+			// Grants gated on a mode/feature currently being switched on, e.g.
+			// Circle of the Sea's Stormborn ("Your Wrath of the Sea confers two
+			// more benefits while active… You gain a Fly Speed equal to your
+			// Speed"). Like the transformation case above, such a grant must NOT
+			// be applied at base: the active state that owns the mode supplies it
+			// while it runs.
+			/while\s+(?:your|the|this)\s+[^.,;]{2,40}?\s+is\s+active/i,
+			/\bwhile\s+active\b/i,
 		];
 
 		for (const pattern of conditions) {
@@ -11960,10 +11968,14 @@ class CharacterSheetState {
 		// Apply spell-granted speeds (e.g., Fly spell: flySpeed 60)
 		const activeEffects = this.getActiveStateEffects();
 		for (const e of activeEffects) {
-			if (e.type === "flySpeed") effectiveFly = Math.max(effectiveFly, e.value || 0);
-			else if (e.type === "swimSpeed") effectiveSwim = Math.max(effectiveSwim, e.value || 0);
-			else if (e.type === "climbSpeed") effectiveClimb = Math.max(effectiveClimb, e.value || 0);
-			else if (e.type === "burrowSpeed") effectiveBurrow = Math.max(effectiveBurrow, e.value || 0);
+			// `equalToWalk` resolves against the already-computed raw walking
+			// speed, mirroring `getSpeedByType`, so an active state can grant
+			// "fly/swim equal to your Speed" without re-entering this method.
+			const granted = e.equalToWalk ? rawWalk : (e.value || 0);
+			if (e.type === "flySpeed") effectiveFly = Math.max(effectiveFly, granted);
+			else if (e.type === "swimSpeed") effectiveSwim = Math.max(effectiveSwim, granted);
+			else if (e.type === "climbSpeed") effectiveClimb = Math.max(effectiveClimb, granted);
+			else if (e.type === "burrowSpeed") effectiveBurrow = Math.max(effectiveBurrow, granted);
 		}
 		effectiveSwim = Math.max(effectiveSwim, applyEqual("swim"));
 		effectiveClimb = Math.max(effectiveClimb, applyEqual("climb"));
@@ -12049,7 +12061,10 @@ class CharacterSheetState {
 		const spellSpeedType = `${type}Speed`; // e.g., "flySpeed", "swimSpeed"
 		const activeEffects = this.getActiveStateEffects();
 		for (const e of activeEffects) {
-			if (e.type === spellSpeedType) base = Math.max(base, e.value || 0);
+			// `equalToWalk` is resolved HERE, at the read site, rather than baked
+			// into the effect: computing the walking speed while producing active
+			// state effects would re-enter the speed pipeline.
+			if (e.type === spellSpeedType) base = Math.max(base, e.equalToWalk ? this.getWalkSpeed() : (e.value || 0));
 		}
 
 		// For non-walk speeds, only apply bonuses if character has that movement type
@@ -20783,9 +20798,14 @@ class CharacterSheetState {
 						}
 					}
 
-					// Wild Shape uses: 2 per short/long rest (both PHB and XPHB)
+					// Wild Shape uses.
+					//  - PHB 2014: a flat 2 per short/long rest at every level.
+					//  - XPHB 2024: the "Wild Shape" column of the Druid Features
+					//    table — 2 at levels 2-5, 3 at 6-16, 4 at 17-20.
 					if (level >= 2) {
-						calculations.wildShapeUses = 2;
+						calculations.wildShapeUses = isXPHB
+							? (level >= 17 ? 4 : (level >= 6 ? 3 : 2))
+							: 2;
 					}
 
 					// Wild Companion (TCE optional feature for PHB, standard for XPHB at level 2)
@@ -20854,9 +20874,12 @@ class CharacterSheetState {
 					// Archdruid (level 20 both PHB and XPHB)
 					if (level >= 20) {
 						calculations.hasArchdruid = true;
-						// XPHB: Can use Wild Shape unlimited times
+						// XPHB Archdruid does NOT grant unlimited Wild Shape — its
+						// "Evergreen Wild Shape" benefit refunds ONE expended use
+						// whenever you roll Initiative with an empty pool. The pool
+						// itself stays at the table value (4).
 						if (isXPHB) {
-							calculations.wildShapeUses = Infinity;
+							calculations.hasEvergreenWildShape = true;
 						}
 					}
 
@@ -21264,30 +21287,57 @@ class CharacterSheetState {
 							}
 							case "circle of the sea":
 							case "sea": {
-								// XPHB only
-								// Wrath of the Sea (level 3) - bonus action cold/lightning damage
+								// Circle of the Sea (XPHB 2024). Every number here is read
+								// back by `getWrathOfTheSeaAction()`, the `wrathOfTheSea`
+								// active state and the Combat-tab trigger, so this block is
+								// the single source of truth for the whole subclass.
 								if (level >= 3) {
+									// Wrath of the Sea — Bonus Action, expend a Wild Shape
+									// use to manifest an Emanation of ocean spray. On
+									// manifestation and as a Bonus Action on later turns, one
+									// creature in the Emanation makes a CON save against the
+									// druid's spell save DC or takes Cold damage and, if Large
+									// or smaller, is pushed up to 15 feet away.
 									calculations.hasWrathOfTheSea = true;
-									const wrathDamage = level >= 17 ? "1d12" : level >= 11 ? "1d10" : level >= 5 ? "1d8" : "1d4";
-									calculations.wrathOfTheSeaDamage = wrathDamage;
+									calculations.wrathOfTheSeaDiceCount = Math.max(1, wisMod);
+									calculations.wrathOfTheSeaDamage = `${Math.max(1, wisMod)}d6`;
+									calculations.wrathOfTheSeaDamageType = "cold";
+									calculations.wrathOfTheSeaSaveAbility = "con";
+									calculations.wrathOfTheSeaDc = this.getSpellSaveDc();
+									calculations.wrathOfTheSeaPush = 15;
+									calculations.wrathOfTheSeaMaxPushSize = "Large";
+									// Aquatic Affinity widens the Emanation from 5 ft to 10 ft.
+									calculations.wrathOfTheSeaEmanation = level >= 6 ? 10 : 5;
+									calculations.wrathOfTheSeaWildShapeCost = 1;
+									calculations.wrathOfTheSeaDuration = "10 minutes";
 								}
 
-								// Aquatic Affinity (level 6) - swim speed, water breathing
-								if (level >= 6) {
-									calculations.hasAquaticAffinity = true;
-									calculations.swimSpeed = 60;
-								}
+								// Aquatic Affinity (level 6) — Emanation grows to 10 ft (above)
+								// and the druid gains a Swim Speed equal to their Speed. The
+								// swim speed itself is emitted as an `equalToWalk` speed effect
+								// in `_aggregateCalculationBasedEffects` so it tracks any later
+								// walking-speed change instead of freezing a number here.
+								if (level >= 6) calculations.hasAquaticAffinity = true;
 
-								// Stormborn (level 10) - fly speed in rain/storm
+								// Stormborn (level 10) — while Wrath of the Sea is active the
+								// druid gains a Fly Speed equal to their Speed and Resistance to
+								// Cold, Lightning and Thunder damage. Deliberately NOT named
+								// `hasStormborn`: that key belongs to the Tempest Domain
+								// Cleric's level-17 feature, whose always-on fly speed would
+								// otherwise leak onto this druid.
 								if (level >= 10) {
-									calculations.hasStormborn = true;
-									calculations.stormFlySpeed = 60;
+									calculations.hasSeaStormborn = true;
+									calculations.seaStormbornResistances = ["cold", "lightning", "thunder"];
 								}
 
-								// Oceanic Gift (level 14) - grant benefits to allies
+								// Oceanic Gift (level 14) — manifest the Emanation around one
+								// willing creature within 60 ft instead of yourself (it uses
+								// your spell save DC and Wisdom modifier), or around both you
+								// and that creature for two Wild Shape uses instead of one.
 								if (level >= 14) {
 									calculations.hasOceanicGift = true;
-									calculations.oceanicGiftTargets = Math.max(1, wisMod);
+									calculations.oceanicGiftRange = 60;
+									calculations.oceanicGiftBothCost = 2;
 								}
 								break;
 							}
@@ -25487,6 +25537,17 @@ class CharacterSheetState {
 		// Wrath is a stored Reaction with a parsed damage-type choice; Destructive Wrath arms
 		// a deferred one-shot maximizer; and lightning damage asks getTriggeredDamageEffects()
 		// for Thunderbolt Strike's optional push. No inert placeholder effects are emitted here.
+
+		// =========================================================
+		// DRUID CIRCLE — derived speeds (owned block)
+		// =========================================================
+		// Aquatic Affinity (Circle of the Sea L6): a Swim Speed equal to your
+		// Speed. Emitted as an equalToWalk speed modifier (same generic path as
+		// Tempest's Stormborn) so it tracks any later walking-speed change
+		// instead of freezing today's number into a calculation field.
+		if (calculations.hasAquaticAffinity) {
+			effects.push({type: "speed", speedType: "swim", equalToWalk: true, source: "Aquatic Affinity"});
+		}
 
 		// =========================================================
 		// SUBCLASS-GRANTED COMBAT TRADITIONS (TGTT)
@@ -31165,8 +31226,69 @@ class CharacterSheetState {
 		this.ensureBloodHunterResources();
 		this.ensureTalentResources();
 		this._ensureChannelDivinityUses();
+		this._ensureWildShapeUses();
 		this._ensureCreationBardUses();
 		return [...this._data.resources];
+	}
+
+	/**
+	 * Wild Shape uses granted by a single class entry, per its own progression.
+	 *  - PHB 2014: a flat 2 from level 2.
+	 *  - XPHB 2024: the "Wild Shape" column of the Druid Features table —
+	 *    2 at levels 2-5, 3 at 6-16, 4 at 17-20.
+	 * @param {object} cls A `_data.classes` entry.
+	 * @returns {number} 0 when the class grants no Wild Shape at its current level.
+	 * @private
+	 */
+	static _getWildShapeUsesForClass (cls) {
+		if ((cls?.name || "").toLowerCase() !== "druid") return 0;
+		const level = cls?.level || 0;
+		if (level < 2) return 0;
+		const is2024 = cls?.source === "XPHB" || cls?.source === "TGTT" || cls?.subclass?.source === "XPHB";
+		if (!is2024) return 2;
+		return level >= 17 ? 4 : (level >= 6 ? 3 : 2);
+	}
+
+	/**
+	 * Re-scale the player-facing "Wild Shape" pool to the character's current level.
+	 *
+	 * `addFeature` parses the use count out of the feature text at grant-time
+	 * ("You can use Wild Shape twice") and never re-scales it, so an XPHB Druid who
+	 * levels past 6 or 17 keeps a stale max of 2 forever — which in turn starves
+	 * every subclass feature fuelled by the pool (Wrath of the Sea, Starry Form,
+	 * Zodiac Form, Wild Companion…). Mirrors {@link _ensureChannelDivinityUses}:
+	 * derive from class level directly rather than calling `getFeatureCalculations()`,
+	 * which would recurse back through `getResources()`.
+	 *
+	 * Only ever RAISES the max, so a homebrew or subclass contribution that
+	 * legitimately pushed the pool higher is never clobbered.
+	 * @private
+	 */
+	_ensureWildShapeUses () {
+		const desiredMax = (this._data.classes || [])
+			.reduce((max, cls) => Math.max(max, CharacterSheetState._getWildShapeUsesForClass(cls)), 0);
+		if (desiredMax <= 0) return;
+
+		const resource = (this._data.resources || []).find(r => (r.name || "").trim().toLowerCase() === "wild shape");
+		if (!resource) return;
+
+		const feature = this._data.features?.find(f => f.id === resource.featureId)
+			|| this._data.features?.find(f => f.name === "Wild Shape");
+
+		const resourceStale = (resource.max ?? 0) < desiredMax;
+		const featureStale = !!feature?.uses && (feature.uses.max ?? 0) < desiredMax;
+		if (!resourceStale && !featureStale) return;
+
+		if (resourceStale) {
+			const wasFull = (resource.current ?? 0) >= (resource.max ?? 0);
+			resource.max = desiredMax;
+			resource.current = wasFull ? desiredMax : Math.min(resource.current ?? 0, desiredMax);
+		}
+
+		if (feature?.uses) {
+			feature.uses.max = desiredMax;
+			feature.uses.current = Math.max(feature.uses.current ?? 0, resource.current ?? 0);
+		}
 	}
 
 	/**
@@ -45033,6 +45155,36 @@ class CharacterSheetState {
 			needsFormChoice: true, // Activation opens a form-selection modal
 			exclusiveWith: ["wildShape"], // Zodiac Form and Wild Shape share the same resource/body
 		},
+		// Circle of the Sea (XPHB) — Wrath of the Sea. A Wild-Shape-fuelled
+		// Emanation of ocean spray. The per-level numbers (Emanation size,
+		// damage dice, DC, Stormborn's resistances / fly speed) are supplied
+		// live by `_getSupplementalActiveStateEffects` so they track level and
+		// placement instead of being frozen at activation time.
+		wrathOfTheSea: {
+			id: "wrathOfTheSea",
+			name: "Wrath of the Sea",
+			icon: "🌊",
+			description: "An Emanation of ocean spray surrounds you (or an ally, with Oceanic Gift). As a Bonus Action on each of your turns you can force one creature in the Emanation to make a Constitution save against your spell save DC, taking Cold damage and being pushed away on a failure.",
+			effects: [],
+			duration: "10 minutes",
+			endConditions: ["Dismissed (no action)", "Manifested again", "Incapacitated", "Duration expires"],
+			resourceName: "Wild Shape",
+			resourceCost: 1,
+			detectPatterns: [], // Detection handled explicitly in detectActivatableFeature
+			useFeatureDescription: true,
+			activationAction: "bonus",
+			// The emanation and the beast form both consume the same Wild Shape
+			// body/resource, and manifesting again ends the previous emanation.
+			exclusiveWith: ["wildShape", "zodiacForm"],
+			// Bonus-action burst, fired once automatically on manifestation and
+			// repeatable on later turns from the Combat tab.
+			trigger: {
+				label: "Ocean Spray",
+				actionType: "bonus",
+				effectType: "saveDamageBurst",
+				onActivate: true,
+			},
+		},
 		patientDefense: {
 			id: "patientDefense",
 			name: "Patient Defense",
@@ -46580,6 +46732,34 @@ class CharacterSheetState {
 				restoreWithSpellSlotLevel: 5,
 			};
 		}
+		// ===== CIRCLE OF THE SEA (XPHB Druid) =====
+		// Wrath of the Sea is a Wild-Shape-fuelled Emanation toggle; the other
+		// three features are passive riders on it (or on the druid) and must NOT
+		// fall through to the generic text heuristics, which mis-read
+		// "Stormborn" as the Tempest Cleric feature and "Wrath of the Sea" /
+		// "Oceanic Gift" as Wild Shape transformations.
+		const isXphbSea = (feature.classSource || feature.source) === "XPHB"
+			&& (feature.subclassShortName || "").toLowerCase() === "sea";
+		if (isXphbSea && name === "wrath of the sea") {
+			return {
+				stateTypeId: "wrathOfTheSea",
+				stateType: this.ACTIVE_STATE_TYPES.wrathOfTheSea,
+				matchedBy: "xphbSea",
+				activationAction: "bonus",
+				interactionMode: "toggle",
+				isToggle: true,
+				duration: "10 minutes",
+				resourceName: "Wild Shape",
+				resourceCost: 1,
+				// Oceanic Gift (L14) turns activation into a placement choice; the
+				// sheet only opens the picker when more than one placement exists.
+				needsPlacementChoice: true,
+			};
+		}
+		if (isXphbSea && ["circle of the sea", "circle of the sea spells", "aquatic affinity", "stormborn", "oceanic gift"].includes(name)) {
+			return {interactionMode: "passive", matchedBy: "xphbSea", isPassive: true};
+		}
+
 		if (isCrimsonRite) {
 			return {
 				stateTypeId: "crimsonRite",
@@ -48631,6 +48811,7 @@ class CharacterSheetState {
 	 * @returns {object|null}
 	 */
 	getWildShapeResource () {
+		this._ensureWildShapeUses();
 		const resources = this._data.resources || [];
 		const wsFeature = (this._data.features || []).find(f => /^wild shape$/i.test((f.name || "").trim()));
 		if (wsFeature) {
@@ -49082,6 +49263,7 @@ class CharacterSheetState {
 			if (options.customEffects) existing.customEffects = options.customEffects;
 			if (options.beastData !== undefined) existing.beastData = options.beastData;
 			if (options.zodiacForm !== undefined) existing.zodiacForm = options.zodiacForm;
+			if (options.placement !== undefined) existing.placement = options.placement;
 			if (options.weaponId !== undefined) existing.weaponId = options.weaponId;
 			if (options.weaponName !== undefined) existing.weaponName = options.weaponName;
 			// Re-parse duration on reactivation
@@ -49118,6 +49300,10 @@ class CharacterSheetState {
 			beastData: options.beastData || null,
 			// For Zodiac Form (Circle of the Zodiac): the chosen constellation
 			zodiacForm: options.zodiacForm || null,
+			// For Emanation states (e.g. Wrath of the Sea): where the aura was
+			// manifested — "self", "ally" or "both". Read back by
+			// _getSupplementalActiveStateEffects to decide whose benefits apply.
+			placement: options.placement || null,
 			weaponId: options.weaponId || null,
 			weaponName: options.weaponName || null,
 		};
@@ -49233,6 +49419,7 @@ class CharacterSheetState {
 			if (options.customEffects) existing.customEffects = options.customEffects;
 			if (options.beastData !== undefined) existing.beastData = options.beastData;
 			if (options.zodiacForm !== undefined) existing.zodiacForm = options.zodiacForm;
+			if (options.placement !== undefined) existing.placement = options.placement;
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
@@ -49669,7 +49856,7 @@ class CharacterSheetState {
 			const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId];
 			const stateEffects = [
 				...(state.customEffects || stateType?.effects || []),
-				...this._getSupplementalActiveStateEffects(state.stateTypeId),
+				...this._getSupplementalActiveStateEffects(state.stateTypeId, state),
 			];
 			activeRegularStateEffects.set(state, stateEffects);
 		}
@@ -49721,7 +49908,8 @@ class CharacterSheetState {
 		return effects;
 	}
 
-	_getSupplementalActiveStateEffects (stateTypeId) {
+	_getSupplementalActiveStateEffects (stateTypeId, state = null) {
+		if (stateTypeId === "wrathOfTheSea") return this._getWrathOfTheSeaStateEffects(state);
 		if (stateTypeId !== "rage") return [];
 		const cls = this._data.classes.find(it => {
 			return it.name === "Barbarian" && this._isJuggernautSubclass(it.subclass);
@@ -49748,6 +49936,138 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Resolve the druid class entry for Circle of the Sea, if the character has it.
+	 * Reads stored class data ONLY — never `getFeatureCalculations()` — because
+	 * this runs inside `getActiveStateEffects()`, which the speed pipeline calls.
+	 * Going through the calculations would close the
+	 * `getSpeed → getActiveStateEffects → getFeatureCalculations → getSpeed` cycle
+	 * guarded by CharacterSheetSpeedCalcRecursion.test.js.
+	 * @returns {object|null}
+	 */
+	_getCircleOfTheSeaClass () {
+		return this._data.classes.find(cls => {
+			if ((cls.name || "").toLowerCase() !== "druid") return false;
+			const sub = `${cls.subclass?.shortName || cls.subclass?.name || ""}`.toLowerCase();
+			return sub === "sea" || sub === "circle of the sea";
+		}) || null;
+	}
+
+	/**
+	 * Live effects for the `wrathOfTheSea` active state.
+	 *
+	 * The burst descriptor is emitted with UNRESOLVED scaling hints
+	 * (`diceAbility` / `dcCalculation`) rather than concrete numbers so that this
+	 * method stays free of `getFeatureCalculations()` (see
+	 * `_getCircleOfTheSeaClass`). `getActiveStateTrigger()` — which is outside the
+	 * speed pipeline — resolves them.
+	 *
+	 * Stormborn's benefits are benefits OF the Emanation, so they only apply when
+	 * the Emanation actually surrounds the druid: with Oceanic Gift the druid can
+	 * place it on an ally instead, and then gets nothing.
+	 * @param {object|null} state The stored active-state record (carries `placement`).
+	 * @returns {Array<object>}
+	 */
+	_getWrathOfTheSeaStateEffects (state = null) {
+		const cls = this._getCircleOfTheSeaClass();
+		if (!cls || (cls.level || 0) < 3) return [];
+
+		const level = cls.level;
+		const placement = state?.placement || "self";
+		const surroundsSelf = placement !== "ally";
+
+		const effects = [{
+			type: "saveDamageBurst",
+			source: "Wrath of the Sea",
+			label: "Ocean Spray",
+			diceAbility: "wis",
+			diceMinimum: 1,
+			dieSize: 6,
+			damageType: "cold",
+			saveAbility: "con",
+			dcCalculation: "spellSaveDc",
+			range: level >= 6 ? 10 : 5,
+			pushDistance: 15,
+			maxPushSize: "Large",
+			placement,
+		}];
+
+		// Stormborn (L10)
+		if (level >= 10 && surroundsSelf) {
+			for (const damageType of ["cold", "lightning", "thunder"]) {
+				// NOTE: `_getResistancesFromStates` only honours `damage:`-prefixed
+				// targets — a bare damage type is silently inert here.
+				effects.push({type: "resistance", target: `damage:${damageType}`, source: "Stormborn"});
+			}
+			effects.push({type: "flySpeed", equalToWalk: true, source: "Stormborn"});
+		}
+
+		return effects;
+	}
+
+	/**
+	 * Resolved mechanics for Wrath of the Sea (Circle of the Sea, XPHB).
+	 *
+	 * Public because the Emanation is the subclass's whole engine: the Combat-tab
+	 * trigger, the Oceanic Gift placement modal, the Features-tab summary and the
+	 * E2E probes all read the same numbers from here.
+	 * @param {"self"|"ally"|"both"} [placement] Where the Emanation is manifested.
+	 * @returns {object|null} `null` when the character isn't a Circle of the Sea druid.
+	 */
+	getWrathOfTheSeaAction (placement = "self") {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasWrathOfTheSea) return null;
+		return {
+			placement,
+			dc: calc.wrathOfTheSeaDc,
+			saveAbility: calc.wrathOfTheSeaSaveAbility,
+			diceCount: calc.wrathOfTheSeaDiceCount,
+			damage: calc.wrathOfTheSeaDamage,
+			damageType: calc.wrathOfTheSeaDamageType,
+			emanation: calc.wrathOfTheSeaEmanation,
+			pushDistance: calc.wrathOfTheSeaPush,
+			maxPushSize: calc.wrathOfTheSeaMaxPushSize,
+			duration: calc.wrathOfTheSeaDuration,
+			actionType: "bonus",
+			resourceName: "Wild Shape",
+			cost: this.getWrathOfTheSeaWildShapeCost(placement),
+			placements: this.getWrathOfTheSeaPlacements(),
+			grantsResistances: (calc.hasSeaStormborn && placement !== "ally") ? calc.seaStormbornResistances : [],
+			grantsFlySpeed: !!calc.hasSeaStormborn && placement !== "ally",
+		};
+	}
+
+	/**
+	 * Wild Shape uses spent to manifest Wrath of the Sea at a given placement.
+	 * Oceanic Gift (L14) lets the druid cover themselves AND an ally for two uses.
+	 * @param {"self"|"ally"|"both"} [placement]
+	 * @returns {number}
+	 */
+	getWrathOfTheSeaWildShapeCost (placement = "self") {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasWrathOfTheSea) return 0;
+		if (placement === "both") return calc.hasOceanicGift ? (calc.oceanicGiftBothCost || 2) : (calc.wrathOfTheSeaWildShapeCost || 1);
+		return calc.wrathOfTheSeaWildShapeCost || 1;
+	}
+
+	/**
+	 * The placements available for the Emanation. Before Oceanic Gift there is
+	 * only one; at L14 the druid can target a willing creature within 60 feet
+	 * instead of, or in addition to, themselves.
+	 * @returns {Array<{id: string, name: string, cost: number, range: number}>}
+	 */
+	getWrathOfTheSeaPlacements () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasWrathOfTheSea) return [];
+		const placements = [{id: "self", name: "Around yourself", cost: calc.wrathOfTheSeaWildShapeCost || 1, range: 0}];
+		if (calc.hasOceanicGift) {
+			const range = calc.oceanicGiftRange || 60;
+			placements.push({id: "ally", name: `A willing creature within ${range} ft.`, cost: calc.wrathOfTheSeaWildShapeCost || 1, range});
+			placements.push({id: "both", name: `Both you and a willing creature within ${range} ft.`, cost: calc.oceanicGiftBothCost || 2, range});
+		}
+		return placements;
+	}
+
+	/**
 	 * Resolve a trigger exposed by an active state, including ability-scaled values.
 	 * Any state type can opt in with a `trigger` definition and a matching effect.
 	 * @param {string} stateTypeId
@@ -49768,6 +50088,23 @@ class CharacterSheetState {
 			resolvedDamage = (calculations.martialArtsDie || calculations.astralArmsDamage || "1d4")
 				.replace(/^(\d+)/, (_, count) => `${Number(count) * 2}`);
 		}
+		// Ability-scaled dice pools (e.g. "a number of d6s equal to your Wisdom
+		// modifier, minimum one"). Resolved HERE rather than in the effect
+		// producer so the producer stays outside the speed-pipeline cycle.
+		if (!resolvedDamage && effect.diceAbility) {
+			const count = Math.max(effect.diceMinimum ?? 1, this.getAbilityMod(effect.diceAbility));
+			resolvedDamage = `${count}d${effect.dieSize || 6}`;
+		}
+		// DC resolution, most specific first: an explicit DC on the effect, then a
+		// named calculation source, then the monk-style ki/focus fallback that
+		// predates this generalisation.
+		let resolvedDc = null;
+		if (effect.saveAbility) {
+			if (effect.dc != null) resolvedDc = effect.dc;
+			else if (effect.dcCalculation === "spellSaveDc") resolvedDc = this.getSpellSaveDc();
+			else if (effect.dcCalculation) resolvedDc = calculations[effect.dcCalculation] ?? null;
+			else resolvedDc = calculations.kiSaveDc ?? calculations.focusSaveDc ?? null;
+		}
 		return {
 			...stateType.trigger,
 			stateTypeId,
@@ -49777,7 +50114,7 @@ class CharacterSheetState {
 				...effect,
 				resolvedValue: value,
 				resolvedDamage,
-				resolvedDc: effect.saveAbility ? (calculations.kiSaveDc ?? calculations.focusSaveDc ?? null) : null,
+				resolvedDc,
 			},
 		};
 	}
