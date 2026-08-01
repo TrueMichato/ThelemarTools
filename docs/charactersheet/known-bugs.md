@@ -2235,59 +2235,111 @@ roll *occurred*, not that its total was a number.
 
 ---
 
-## CS-BUG-065 — numeric conditional modifiers were disabled at registration, so they could never be opted into
+## CS-BUG-065 — WITHDRAWN (the "fix" was a regression; reverted)
 
-**Status**: FIXED (Meteor Knight batch)
-**Severity**: high — silently deletes a whole class of feature bonuses
-**Surfaced by**: Increase Gravity (Meteor Knight 15) "+ your Intelligence
-modifier to shove ability checks"
+**Status**: WITHDRAWN — not a bug. The change filed under this ID was reverted
+because it introduced a shipped, player-visible regression.
+**Severity**: n/a (the reverted change was high severity)
+**Filed by**: Meteor Knight batch, from Increase Gravity (Meteor Knight 15)
+"+ your Intelligence modifier to shove ability checks"
 
-### Symptom
+### What was claimed
 
-A `FeatureEffectRegistry` `modifier` effect that carried a `conditional`
-string but no `advantage` / `disadvantage` flag was stored with
-`enabled: false`. `getModifiersForType()` skips any modifier whose `enabled`
-is falsy, so the modifier never reached `aggregateModifiers()` at all — not
-as an applied bonus and not in `result.conditionalsAvailable`. The per-roll
-opt-in prompt therefore never offered it, and there was **no** code path
-anywhere that could turn it back on.
+That a `FeatureEffectRegistry` `modifier` effect carrying a `conditional`
+string but no `advantage`/`disadvantage` flag was stored `enabled: false` and
+therefore "never reached `aggregateModifiers()` at all — not as an applied
+bonus and not in `result.conditionalsAvailable`", with "**no** code path
+anywhere that could turn it back on".
 
-### Root cause
+### Why that is false
 
-`_applyFeatureEffect()`'s `case "modifier"`:
+Measured on a live `fighter/meteor knight/15/aarakocra` with the original
+(`enabled: false`) code:
+
+```
+inConditionals: true          <- it IS offered by the per-roll picker
+shoveBonus:     1             <- carrying its correct value
+baseBonus:      0             <- correctly gated off by default
+optInBonus:     1             <- appliedConditionalIds moves it
+```
+
+`aggregateModifiers()` surfaces **disabled** conditionals in
+`conditionalsAvailable` — the premise that `enabled: false` hid them was
+simply wrong. The same is visible in Jest: the pre-existing shove test passes
+both with and without the change, which is why its "regression pin" was
+green-on-revert and proved nothing.
+
+### What the change actually did
+
+`_recalculateCustomModifiers()` gates on `mod.enabled` **alone** and never on
+`mod.conditional`. So storing a numeric conditional `enabled: true` leaks its
+value into `customModifiers.skills` — and from there into `getSkillMod()`,
+which is both the number printed on the sheet and the modifier every skill
+roll uses.
+
+Measured, same character, INT +1:
+
+| | `getSkillMod("athletics")` |
+|---|---|
+| original code | **5** (correct) |
+| with the "fix" | **6** — the shove-only bonus applied to *every* Athletics check |
+
+This violates the documented invariant that conditional modifiers are not
+auto-applied. It is also inconsistent across the three roll handlers, because
+they compose differently:
+
+- `_rollSkillCheck` / `_rollSavingThrow` use `getSkillMod()` / `baseMod` only
+  and never add `aggregated.bonus` -> the conditional applies **always**.
+- `_rollAbilityCheck` adds `aggregated.bonus` **on top of** `baseMod` -> an
+  opted-in conditional `check:*` modifier is **double-counted**.
+
+So the change traded "offered but inert at roll time" for "silently always on,
+and double-counted on ability checks". Both are wrong; the second is worse
+because it puts a wrong number on the character sheet.
+
+### Resolution
+
+Reverted to:
 
 ```js
 enabled: effect.enabled !== false && (carriesAdvFlag || !effect.conditional),
 ```
 
-The `enabled` flag was being made to do the job of `conditional`. That
-double-duty was both redundant and lossy: `aggregateModifiers()` **already**
-gates on `mod.conditional` and routes such modifiers into
-`conditionalsAvailable` rather than into `bonus`. Advantage-flavoured
-conditionals escaped the bug only because of the `carriesAdvFlag` exemption,
-which is why the defect went unnoticed — every conditional shipped so far
-happened to be an advantage.
+Disabling a numeric conditional costs nothing (the picker still offers it) and
+is currently the only thing keeping it out of the quick-total.
 
-### Fix
+### Regression pins (falsified)
 
-```js
-enabled: effect.enabled !== false,
-```
+`test/jest/charactersheet/CharacterSheetMeteorKnight.test.js` gains two tests
+that pin the *player-facing* surface rather than the aggregator:
 
-`enabled` now means only what its name says ("is this modifier live at all"),
-and `conditional` alone decides gating. Registration is lossless; the four
-roll handlers surface the modifier through `_pPickConditionalModifiers` as
-designed.
+- `does NOT leak the conditional shove bonus into the plain Athletics modifier`
+  — asserts `getSkillCustomMod("athletics") === 0` and that the L15 character's
+  displayed Athletics matches an otherwise-identical L14 control (PB is 5 at
+  both levels), with a PREMISE guard asserting the conditional is genuinely
+  present and genuinely carries +4.
+- `keeps the numeric conditional out of the enabled quick-total but still
+  offers it` — asserts `enabled === false` *and* that it still appears in
+  `conditionalsAvailable`, pinning both halves of the trade-off.
 
-### Regression pins
+Both verified **red** when the reverted expression is re-applied, and green
+after. Note the first pin was *vacuous* in its initial form: it compared
+before/after around `applyClassFeatureEffects()`, but `addClass()` already
+applies feature effects, so the baseline was pre-polluted and the test passed
+under the regression. It also needs an explicit `_recalculateCustomModifiers()`
+— without it the quick-total is never rebuilt and the leak cannot be observed.
 
-`test/jest/charactersheet/CharacterSheetMeteorKnight.test.js` — the Increase
-Gravity shove test asserts the modifier appears in
-`aggregateModifiers("skill:athletics").conditionalsAvailable` and that
-passing its id in `appliedConditionalIds` actually moves `bonus`. Verified to
-go red with the old expression restored. Full charactersheet suite (429
-suites / 12961 tests) stays green with the change, confirming nothing relied
-on the auto-disable.
+Full charactersheet suite: 432 suites / 13,100 tests green.
+
+### Genuine follow-up left open
+
+Opting a **numeric** conditional in via the picker does not change a skill or
+save roll total, because `_rollSkillCheck` and `_rollSavingThrow` never consume
+`aggregated.bonus`. That is a real, pre-existing gap — it predates this batch
+and is not what CS-BUG-065 described. Fixing it means reconciling the three
+roll handlers' composition conventions (and removing the resulting
+double-count risk in `_rollAbilityCheck`), which is a generic change, not a
+subclass one.
 
 ---
 

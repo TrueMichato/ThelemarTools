@@ -333,6 +333,52 @@ describe("Meteor Knight: Increase Gravity (15)", () => {
 		expect(optIn.bonus).toBe(4);
 	});
 
+	// CS-BUG-065 was filed claiming numeric conditionals were "permanently
+	// unreachable" and fixed by storing them `enabled: true`. That was a
+	// REGRESSION: `_recalculateCustomModifiers` gates on `enabled` alone and
+	// never on `conditional`, so enabling the modifier leaked its value into
+	// customModifiers and therefore into the *displayed* skill modifier —
+	// Athletics read +INT on every check, not just shoves. These pin the
+	// invariant in the surface the player actually sees.
+	it("does NOT leak the conditional shove bonus into the plain Athletics modifier", () => {
+		const state = makeMeteorKnight(15, {int: 18});
+		state.applyClassFeatureEffects();
+		// The quick-total map is what getSkillMod() reads; rebuild it the way the
+		// live sheet does after features are applied, or this assertion is vacuous.
+		state._recalculateCustomModifiers();
+
+		// PREMISE: the conditional modifier really is present and really does
+		// carry a non-zero value — otherwise the assertions below are vacuous.
+		const shove = state.aggregateModifiers("skill:athletics").conditionalsAvailable
+			.find(m => /shove/i.test(m.conditional || ""));
+		expect(shove).toBeTruthy();
+		expect(shove.bonus).toBe(4);
+
+		// The leak surface: a conditional must contribute 0 to the quick-total.
+		expect(state.getSkillCustomMod("athletics")).toBe(0);
+
+		// And the displayed modifier must match an otherwise-identical character
+		// who has not yet earned Increase Gravity (PB is 5 at both 14 and 15).
+		const control = makeMeteorKnight(14, {int: 18});
+		control.applyClassFeatureEffects();
+		control._recalculateCustomModifiers();
+		expect(state.getSkillMod("athletics")).toBe(control.getSkillMod("athletics"));
+	});
+
+	it("keeps the numeric conditional out of the enabled quick-total but still offers it", () => {
+		const state = makeMeteorKnight(15, {int: 18});
+		state.applyClassFeatureEffects();
+
+		const stored = (state._data.namedModifiers || [])
+			.find(m => m.type === "skill:athletics" && /shove/i.test(m.conditional || ""));
+		expect(stored).toBeTruthy();
+		// Disabled is what keeps it out of _recalculateCustomModifiers…
+		expect(stored.enabled).toBe(false);
+		// …and it costs nothing: the per-roll picker still sees it.
+		expect(state.aggregateModifiers("skill:athletics").conditionalsAvailable
+			.some(m => /shove/i.test(m.conditional || ""))).toBe(true);
+	});
+
 	it("grants nothing before level 15", () => {
 		const state = makeMeteorKnight(14, {int: 18});
 		state.applyClassFeatureEffects();
