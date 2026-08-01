@@ -2117,3 +2117,88 @@ checkpoint could not activate Wrath of the Sea twice because the pool was
 starved at 2.
 
 ---
+
+## CS-BUG-038 — symbolic modifier values were string-concatenated, rendering `NaN` and literal garbage on the sheet
+
+**Status**: FIXED
+
+**Severity**: Critical — user-visible numeric corruption on the main sheet for
+*every* Barbarian at level 18+ and *every* Artificer at level 20, regardless of
+subclass, race or homebrew settings.
+
+**Symptom** (measured, `barbarian/chained fury/18/minotaur`): the sheet rendered
+
+```
+STR   200strScore00   NaN(NaN)
+      Saving Throw NaN · Athletics NaN
+```
+
+The identical build at L17 was clean; the corruption appeared the instant
+**Indomitable Might** (Barbarian 18) was granted. `artificer/battle smith/20`
+was worse — all six saving throws returned the literal string
+`"11attunedItems000000"` via **Soul of Artifice**.
+
+**Root cause**: the feature/feat/racial effect registries express some modifier
+values *symbolically* rather than numerically, because the number is not knowable
+when the feature is granted (Soul of Artifice scales with how many items you have
+attuned *right now*). But only the single token `"proficiency"` was ever
+understood, and only at the storage site. Every other token — `"strScore"`,
+`"attunedItems"`, `"conModx2"`, `"strMod"` — survived as a raw **string** through
+`_getNamedModifierEffectiveValue`, whose `let value = mod.value || 0` performed no
+coercion. `_recalculateCustomModifiers` then did `+= value` into numeric total
+maps, so JavaScript concatenated instead of adding:
+`0 + "strScore"` → `"0strScore"`.
+
+A **second, independent defect** compounded it: `_recalculateCustomModifiers`
+matched ability modifiers with `mod.type.startsWith("ability:")` and read
+`split(":")[1]`, so the sub-typed `"ability:str:minimum"` (Indomitable Might — a
+floor on Strength *checks*, not a bonus to the score) was silently treated as an
+additive score bonus. The itemizer `_getAbilityNamedModifierComponents` used
+strict `!== "ability:str"` and ignored the same modifier, so the two paths
+disagreed about it.
+
+**Fix** — one resolver at the single chokepoint, not a fourth one-off ternary:
+
+1. New `_resolveSymbolicModifierValue(value)` defines the whole token vocabulary
+   in one place (`<abl>Score`, `<abl>Mod`, bare `<abl>`, `attunedItems`, `level`,
+   `conModx2`, `proficiency`, numeric strings). It returns `null` — not `0` — for
+   anything it cannot resolve, so the caller can distinguish "resolved to zero"
+   from "did not understand this".
+2. `_getNamedModifierEffectiveValue` resolves through it and ends with a
+   `Number.isFinite` guard. All five consumers (the quick-total path and the
+   three itemizers) already funnel through this method, so the numeric-safety
+   guarantee cannot drift between them. Resolving here rather than at
+   `addNamedModifier` time keeps the value **live**: Soul of Artifice tracks
+   attunement as the player attunes and un-attunes.
+3. Unresolvable tokens contribute `0` and emit a deduped `console.warn`, so the
+   next such registry entry is caught instead of shipping silently.
+4. The `ability:` branch now matches only the bare two-segment form, bringing it
+   onto the same predicate the itemizer already used.
+5. The redundant `"proficiency"` ternary in `_processFeatRegistryEffects` was
+   removed — `addNamedModifier` already performs that exact conversion, so the
+   duplicate only risked the two copies drifting.
+
+**Not fixed here** (recorded, out of scope): `ability:<abl>:minimum` still has no
+*handler* — Indomitable Might's actual rule (treat a Strength check below your
+score as if you had rolled your score) remains unimplemented. It now contributes
+nothing instead of contributing garbage.
+
+**Regression pins**: `CharacterSheetSymbolicModifiers.test.js` (9 tests).
+Falsified by reverting: **7 of 9 go red** on a full revert of the product change,
+and the `ability:` sub-type guard is independently pinned by 1 test under a
+targeted revert. The remaining 2 are deliberate no-regression controls (bare
+`ability:str` still additive; `"proficiency"` still becomes a flag).
+
+⚠️ Note for future pins of this shape: an `isFinite` assertion passes **vacuously**
+against an unresolved-but-additive value — with the resolver in place but the
+sub-type guard reverted, STR became `36`, which is perfectly finite. Only the
+exact-value assertion (`toBe(18)`) caught it. Every test here carries a premise
+guard asserting the symbolic token really is stored on the modifier and really
+would concatenate.
+
+**Why the suite missed it**: every STR assertion at L18-20 in the one spec that
+reaches those levels was `{skip: true}` under `CS-BUG-018`, and the sole
+unskipped probe there was `{kind: "rollAbilityCheck"}`, which asserts only that a
+roll *occurred*, not that its total was a number.
+
+---
