@@ -30621,7 +30621,84 @@ class CharacterSheetState {
 	getResources () {
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
+		this._ensureChannelDivinityUses();
 		return [...this._data.resources];
+	}
+
+	/**
+	 * Channel Divinity uses granted by a single class entry, per its own progression.
+	 * @param {object} cls A `_data.classes` entry.
+	 * @returns {number} 0 when the class grants no Channel Divinity at its current level.
+	 * @private
+	 */
+	static _getChannelDivinityUsesForClass (cls) {
+		const name = (cls?.name || "").toLowerCase();
+		const level = cls?.level || 0;
+		const is2024 = cls?.source === "XPHB" || cls?.source === "TGTT";
+
+		if (name === "cleric") {
+			// PHB/XPHB alike: 1 use at level 2, 2 at level 6, 3 at level 18.
+			if (level < 2) return 0;
+			return level >= 18 ? 3 : level >= 6 ? 2 : 1;
+		}
+
+		if (name === "paladin") {
+			if (level < 3) return 0;
+			// XPHB: 2 uses at level 3, 3 at level 11. PHB: a single use per rest.
+			if (!is2024) return 1;
+			return level >= 11 ? 3 : 2;
+		}
+
+		return 0;
+	}
+
+	/**
+	 * Re-scale the player-facing "Channel Divinity" pool to the character's current level.
+	 *
+	 * `addFeature` parses the use count out of the feature text at grant-time ("twice")
+	 * and never re-scales it, so a Cleric who levels past 6 or 18 — or an XPHB Paladin who
+	 * levels past 11 — keeps a stale max even though
+	 * `getFeatureCalculations().channelDivinityUses` reports the correct number
+	 * (CS-BUG-033). Mirrors `_ensureBattleMasterSuperiorityDice`: derive from class level
+	 * directly rather than calling `getFeatureCalculations()`, which would recurse back
+	 * through `getResources()`.
+	 *
+	 * Only ever RAISES the max, and takes the largest contribution across classes. A
+	 * Cleric/Paladin multiclass shares one on-sheet pool, and lowering could clobber a
+	 * homebrew or subclass contribution that legitimately pushed the pool higher.
+	 * @private
+	 */
+	_ensureChannelDivinityUses () {
+		const desiredMax = (this._data.classes || [])
+			.reduce((max, cls) => Math.max(max, CharacterSheetState._getChannelDivinityUsesForClass(cls)), 0);
+		if (desiredMax <= 0) return;
+
+		const resource = (this._data.resources || []).find(r => r.name === "Channel Divinity");
+		if (!resource) return;
+
+		const feature = this._data.features?.find(f => f.id === resource.featureId)
+			|| this._data.features?.find(f => f.name === "Channel Divinity");
+
+		// Both surfaces are checked independently. A later level-up can re-parse the
+		// feature text and reset the FEATURE back to its grant-time maximum while the
+		// resource is already correct — and rest restoration reads the feature, so
+		// returning early on the resource alone would silently restore only 2 of 3 uses.
+		const resourceStale = (resource.max ?? 0) < desiredMax;
+		const featureStale = !!feature?.uses && (feature.uses.max ?? 0) < desiredMax;
+		if (!resourceStale && !featureStale) return;
+
+		if (resourceStale) {
+			const wasFull = (resource.current ?? 0) >= (resource.max ?? 0);
+			resource.max = desiredMax;
+			resource.current = wasFull ? desiredMax : Math.min(resource.current ?? 0, desiredMax);
+		}
+
+		// Keep the owning feature's own use pool in step, so the Features tab, the
+		// Combat Resources pips and rest restoration cannot disagree.
+		if (feature?.uses) {
+			feature.uses.max = desiredMax;
+			feature.uses.current = Math.max(feature.uses.current ?? 0, resource.current ?? 0);
+		}
 	}
 
 	_getShadowKnightClass () {
@@ -31116,7 +31193,12 @@ class CharacterSheetState {
 	getGenericPoolResources () {
 		const allFeatures = this.getFeatures?.() || [];
 		const hasHybridMastery = !!this.getFeatureCalculations().hasHybridTransformationMastery;
-		return (this._data.resources || []).filter(r => {
+		// Source from `getResources()`, not `_data.resources`: the Overview Resources
+		// panel is a player-facing surface and must see the same level-scaling
+		// reconciliation (Superiority Dice, Shadow Knight pools, Channel Divinity) that
+		// every other resource reader gets. Reading the raw array left this panel showing
+		// a stale maximum until some other surface happened to reconcile it (CS-BUG-033).
+		return this.getResources().filter(r => {
 			if (hasHybridMastery && r.name === "Hybrid Transformation") return false;
 			const linked = r.featureId
 				? allFeatures.find(f => f.id === r.featureId)

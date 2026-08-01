@@ -1147,19 +1147,18 @@ async function _runPassiveOrRollEffect (
 			const isShort = e.kind === "shortRestRestores";
 			const before = await charSheet.getResource(e.resource).catch(() => null);
 			if (!before || before.max <= 0) throw new Error(`resource "${e.resource}" not on sheet`);
-			// spend one charge programmatically
-			await charSheet.page.evaluate(([nm]) => {
-				const cs: any = (globalThis as any).charSheet;
-				cs?._state?.spendResource?.(nm, 1);
-				cs?._renderCharacter?.();
-			}, [e.resource] as const);
+			// Spend one charge through the page object. `_state.spendResource` does not
+			// exist — the optional call silently no-opped, so this probe used to fall
+			// straight into its own "API absent" soft skip (CS-BUG-034).
+			await charSheet.useResourceByName(e.resource, 1).catch(() => null);
 			const afterSpend = await charSheet.getResource(e.resource).catch(() => before);
-			if (afterSpend.current >= before.current) return; // spendResource API absent; soft skip
-			await charSheet.page.evaluate((short) => {
-				const cs: any = (globalThis as any).charSheet;
-				if (short) cs?._state?.shortRest?.(); else cs?._state?.longRest?.();
-				cs?._renderCharacter?.();
-			}, isShort);
+			if (afterSpend.current >= before.current) return; // resource could not be spent; soft skip
+			// The page object drives the real rest UI. Calling `_state.shortRest()`
+			// here would be a silent no-op: the state method is `onShortRest`, and the
+			// optional-call syntax swallowed the mismatch, so this check could never
+			// pass once the spend succeeded (CS-BUG-034).
+			if (isShort) await charSheet.triggerShortRest();
+			else await charSheet.triggerLongRest();
 			const after = await charSheet.getResource(e.resource).catch(() => afterSpend);
 			const target = e.toMax === false ? (before.current) : before.max;
 			if (after.current < target) throw new Error(`expected ${isShort ? "short" : "long"} rest to restore "${e.resource}" to ≥${target}, got ${after.current}/${after.max}`);
@@ -1591,32 +1590,20 @@ export async function assertFeaturesMatrix (
 						// restoration probe: spend 1, rest, check restoration
 						const before = r.current;
 						if (before <= 0) break; // can't probe an empty pool
-						await charSheet.page.evaluate(([nm]) => {
-							const cs: any = (globalThis as any).charSheet;
-							cs?._state?.spendResource?.(nm, 1);
-							cs?._renderCharacter?.();
-						}, [nameStr] as const);
+						await charSheet.useResourceByName(nameStr, 1).catch(() => null);
 						const afterSpend = await charSheet.getResource(nameStr).catch(() => r);
 						if (afterSpend.current >= before) {
-							// spendResource API not present — skip restore probe quietly
+							// resource could not be spent — skip the restore probe quietly
 							break;
 						}
-						// short rest
-						await charSheet.page.evaluate(() => {
-							const cs: any = (globalThis as any).charSheet;
-							cs?._state?.shortRest?.();
-							cs?._renderCharacter?.();
-						});
+						// short rest — via the page object; `_state.shortRest` does not exist
+						await charSheet.triggerShortRest();
 						const afterShort = await charSheet.getResource(nameStr).catch(() => afterSpend);
 						const shortRestored = afterShort.current >= before;
 						// long rest
 						let longRestored = shortRestored;
 						if (!shortRestored && (fc.restoreOn === "long" || fc.restoreOn === "either")) {
-							await charSheet.page.evaluate(() => {
-								const cs: any = (globalThis as any).charSheet;
-								cs?._state?.longRest?.();
-								cs?._renderCharacter?.();
-							});
+							await charSheet.triggerLongRest();
 							const afterLong = await charSheet.getResource(nameStr).catch(() => afterShort);
 							longRestored = afterLong.current >= before;
 						}

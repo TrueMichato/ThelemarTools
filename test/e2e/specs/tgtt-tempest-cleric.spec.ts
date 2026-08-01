@@ -130,8 +130,7 @@ const TEMPEST_FEATURES: FeatureCheck[] = [
 		kind: "passive",
 		effects: [
 			{kind: "featureCalculation", property: "channelDivinityUses", exact: 3},
-			// CS-BUG-033: the computed maximum is 3, but the player-facing pool stays at 2.
-			{kind: "shortRestRestores", resource: "Channel Divinity", skip: true, skipReason: "CS-BUG-033"},
+			{kind: "shortRestRestores", resource: "Channel Divinity"},
 		],
 	},
 ];
@@ -173,8 +172,8 @@ describeCharacter({
 		5: {totalLevel: 5, spellSlots: {3: 2}, expectResources: {"Channel Divinity": 1}},
 		11: {totalLevel: 11, spellSlots: {6: 1}, expectResources: {"Channel Divinity": 2}},
 		17: {totalLevel: 17, spellSlots: {9: 1}, expectResources: {"Channel Divinity": 2}},
-		// CS-BUG-033 blocks asserting the PHB L18 three-use Channel Divinity pool.
-		20: {totalLevel: 20, spellSlots: {9: 1}},
+		// The PHB L18 improvement takes the shared pool to three uses (CS-BUG-033).
+		20: {totalLevel: 20, spellSlots: {9: 1}, expectResources: {"Channel Divinity": 3}},
 	},
 	featuresMatrix: TEMPEST_FEATURES,
 });
