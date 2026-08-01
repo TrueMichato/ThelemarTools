@@ -35520,15 +35520,18 @@ class CharacterSheetState {
 
 				// ---- Generic modifier (initiative, AC, concentration, passive, etc.) ----
 				case "modifier": {
-					const modValue = effect.value === "proficiency" ? 0 : (effect.value || 0);
 					const mod = {
 						name: `${featData.name}`,
 						type: effect.modType,
-						value: modValue,
+						// Symbolic tokens ("proficiency", "strMod", …) are passed through
+						// verbatim and resolved live by _resolveSymbolicModifierValue;
+						// addNamedModifier performs the "proficiency" → proficiencyBonus
+						// flag conversion, so duplicating it here only risked the two
+						// copies drifting apart (CS-BUG-038).
+						value: effect.value,
 						sourceFeatureId: featData.id,
 						sourceType: "feat",
 					};
-					if (effect.value === "proficiency") mod.proficiencyBonus = true;
 					if (effect.advantage) mod.advantage = true;
 					if (effect.disadvantage) mod.disadvantage = true;
 					if (effect.conditional) {
@@ -42685,7 +42688,20 @@ class CharacterSheetState {
 	 * @returns {number} The effective value
 	 */
 	_getNamedModifierEffectiveValue (mod) {
-		let value = mod.value || 0;
+		// Named modifiers may carry a SYMBOLIC value token ("strScore", "attunedItems",
+		// …) instead of a literal number — see _resolveSymbolicModifierValue. Resolving
+		// here (rather than at addNamedModifier time) keeps the value LIVE: Soul of
+		// Artifice must track attunement as the player attunes and un-attunes, and a
+		// snapshot taken at grant time would freeze it. Unresolvable tokens become 0
+		// instead of surviving as strings into the arithmetic below, where `+=` would
+		// concatenate rather than add (CS-BUG-038).
+		let value = this._resolveSymbolicModifierValue(mod.value);
+		if (value == null) {
+			if (mod.value != null && mod.value !== 0 && mod.value !== "") {
+				this._warnUnresolvedModifierValue(mod);
+			}
+			value = 0;
+		}
 		if (mod.perLevel) {
 			const totalLevel = this.getTotalLevel() || 1;
 			value = value * totalLevel;
@@ -42693,7 +42709,80 @@ class CharacterSheetState {
 		if (mod.proficiencyBonus) {
 			value += this.getProficiencyBonus();
 		}
-		return value;
+		return Number.isFinite(value) ? value : 0;
+	}
+
+	/**
+	 * Resolve a named-modifier `value` to a live number.
+	 *
+	 * The feature/feat/racial effect registries express some modifier values
+	 * SYMBOLICALLY rather than numerically — e.g. Soul of Artifice grants a bonus to
+	 * every save equal to the number of items you have attuned, which cannot be known
+	 * when the feature is granted. Historically only the single token "proficiency" was
+	 * understood (and only at two of the sites that needed it), so every other token
+	 * survived as a raw STRING into `_recalculateCustomModifiers`, whose `+=` then
+	 * performed string concatenation: a Barbarian 18+ rendered STR as
+	 * `"200strScore00"` and an Artificer 20 rendered all six saves as
+	 * `"11attunedItems000000"` — literal garbage on the sheet (CS-BUG-038).
+	 *
+	 * This is the single place that vocabulary is defined. Every consumer reaches it
+	 * through `_getNamedModifierEffectiveValue`, so the numeric-safety guarantee cannot
+	 * drift between the quick-total path and the itemizers.
+	 *
+	 * Returns `null` — NOT 0 — for anything it cannot resolve, so the caller can
+	 * distinguish "resolved to zero" from "did not understand this" and warn once.
+	 * Non-scalar tokens (dice strings like "1d8", semantic markers like "all") are
+	 * deliberately unresolvable: they belong to the dice/recovery channels, not to a
+	 * flat numeric total, and contributing 0 to the scalar is the correct behaviour.
+	 *
+	 * @param {number|string|null|undefined} value - Raw modifier value
+	 * @returns {number|null} Live numeric value, or null if not resolvable
+	 */
+	_resolveSymbolicModifierValue (value) {
+		if (typeof value === "number") return Number.isFinite(value) ? value : null;
+		if (value == null) return 0;
+		if (typeof value !== "string") return null;
+
+		const token = value.trim();
+		if (!token) return 0;
+
+		// Numeric strings ("3", "-1", "2.5") — common when a value round-trips a save.
+		if (/^[+-]?\d+(?:\.\d+)?$/.test(token)) return Number(token);
+
+		switch (token) {
+			// `proficiency` is normally converted to the `proficiencyBonus` flag by
+			// addNamedModifier; resolved here too so a modifier that reached storage by
+			// another path (e.g. an older save) still behaves.
+			case "proficiency": return 0;
+			case "attunedItems": return (this.getAttunedItems() || []).length;
+			case "level": return this.getTotalLevel() || 0;
+			case "conModx2": return (this.getAbilityMod("con") || 0) * 2;
+		}
+
+		const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
+		// "<abl>Score" → the live ability score; "<abl>Mod" / bare "<abl>" → its modifier.
+		const mScore = /^([a-z]{3})Score$/.exec(token);
+		if (mScore && ABILITIES.includes(mScore[1])) return this.getAbilityScore(mScore[1]) || 0;
+		const mMod = /^([a-z]{3})Mod$/.exec(token);
+		if (mMod && ABILITIES.includes(mMod[1])) return this.getAbilityMod(mMod[1]) || 0;
+		if (ABILITIES.includes(token)) return this.getAbilityMod(token) || 0;
+
+		return null;
+	}
+
+	/**
+	 * Warn (once per token+type pair) that a named modifier carries a value this build
+	 * cannot resolve to a number. Deduped because _recalculateCustomModifiers runs on
+	 * every state change and an un-deduped warning would flood the console.
+	 * @param {object} mod - The offending named modifier
+	 */
+	_warnUnresolvedModifierValue (mod) {
+		this._unresolvedModifierWarnings = this._unresolvedModifierWarnings || new Set();
+		const key = `${mod.type}|${mod.value}`;
+		if (this._unresolvedModifierWarnings.has(key)) return;
+		this._unresolvedModifierWarnings.add(key);
+		// eslint-disable-next-line no-console
+		console.warn(`[CharSheet State] Named modifier "${mod.name || "?"}" (${mod.type}) has an unresolvable value ${JSON.stringify(mod.value)}; treating as 0.`);
 	}
 
 	/**
@@ -42935,7 +43024,19 @@ class CharacterSheetState {
 						}
 					} else if (mod.type.startsWith("ability:")) {
 						// Handle ability:str, ability:dex, etc.
-						const abl = mod.type.split(":")[1];
+						// ONLY the bare two-segment form is an ability-score contribution.
+						// Sub-typed variants (e.g. "ability:str:minimum", Indomitable
+						// Might) describe a DIFFERENT mechanic — a floor on Strength
+						// *checks*, not a bonus to the score — and have no handler here.
+						// They used to fall through to the additive branch below, where
+						// their symbolic value corrupted the score (CS-BUG-038). The
+						// itemizer `_getAbilityNamedModifierComponents` has always used
+						// strict equality, so this also brings the two paths onto one
+						// predicate instead of letting them disagree about the same
+						// modifier.
+						const abilityParts = mod.type.split(":");
+						if (abilityParts.length !== 2) break;
+						const abl = abilityParts[1];
 						if (mod.mode === "set") {
 							// "Set to X" mode - takes the highest value
 							nextAbilityScoreStatic[abl] = Math.max(nextAbilityScoreStatic[abl] || 0, value);
