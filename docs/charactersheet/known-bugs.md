@@ -2376,15 +2376,37 @@ resource rows in `tgtt-arcana-cleric.spec.ts`.
 `interactionMode`, was not linked to the Channel Divinity pool, and could be
 used an unbounded number of times. Its Wisdom save never rolled.
 
-**Root cause**: `data/class/class-paladin.json` tags every oath's Channel
-Divinity option with `consumes: {name: "Channel Divinity"}`, which
-`detectActivatableFeature`'s generic `consumes` branch picks up.
-`data/class/class-cleric.json` carries **no such tag**, so every 2014 domain
-option fell through to generic pattern detection. Only options hard-coded into
-`FEATURE_CLASSIFICATION_OVERRIDES` (Tempest's Destructive Wrath) escaped —
-which is per-subclass special-casing of exactly the kind this codebase avoids.
+**Root cause** (measured, and *not* what it first looked like). There are
+**two** independent causes producing the same symptom:
 
-**Fix**: classify the naming convention instead. Every Channel Divinity option
+1. **The tag is dropped on the way to the sheet.** `class-cleric.json`'s L2
+   SCAG entry for Arcane Abjuration *does* carry
+   `consumes: {name: "Channel Divinity"}` — but the exported live character
+   showed `consumes: None`. `CharacterSheetClassUtils` builds subclass features
+   at **five** sites, and only the `refSubclassFeature` expansion copied
+   `consumes` / `uses`; the other four whitelist a fixed key set and silently
+   dropped them. Paladin oaths reach the sheet through the ref-expansion path,
+   which is why Crown's Champion Challenge / Turn the Tide *did* arrive tagged
+   and this looked like a data difference between the two classes.
+2. **Many options genuinely ship untagged.** 18 of the 40
+   `Channel Divinity*` entries in `class-cleric.json` carry no `consumes` at
+   all — including Tempest's Destructive Wrath, which is precisely why it
+   needed a hard-coded `FEATURE_CLASSIFICATION_OVERRIDES` entry. That is
+   per-subclass special-casing of exactly the kind this codebase avoids.
+
+**Fix**, in two generic parts.
+
+*(1) Propagate the tag.* The four subclass-feature construction sites in
+`charactersheet-class-utils.js` now spread `consumes` through, matching the
+ref-expansion site. This is the true root-cause fix and reaches **113**
+`subclassFeature` entries across six pools — Channel Divinity (54), Sorcery
+Point (16), Psionic Energy Die (15), Ki (14), Focus Point (9) and Wild Shape
+(5) — every one of which previously failed to link when collected through one
+of those four paths. `uses` is deliberately **not** propagated: it would mint a
+new resource pool for features that merely document a count.
+
+*(2) Classify the naming convention* as the safety net for the 18 options that
+carry no tag in the data at all. Every Channel Divinity option
 in every source is named `Channel Divinity: <Option>`, so
 `detectActivatableFeature` now routes any feature matching
 `/^channel\s+divinity\s*:/i` through `_buildAbilityActivationInfo` with
@@ -2400,7 +2422,22 @@ fix and its save DC resolves from the character through `getFeatureSaveDc()`.
 **Regression pins**: `CharacterSheetArcanaCleric.test.js` §Arcane Abjuration is
 a usable Channel Divinity option (including the `consumes`-tagged and
 own-pool negative controls); the `combatAction` + `resource` probes in
-`tgtt-arcana-cleric.spec.ts`; `tgtt-tempest-cleric.spec.ts` and
-`tgtt-crown-paladin.spec.ts` re-run green as the no-change guards.
+`tgtt-arcana-cleric.spec.ts`.
+
+Part (1) needs a pin of its **own**: because part (2) independently classifies
+the feature, every other probe on the row stays green with the tag still
+missing — reverting the four spreads left the whole matrix green. The dedicated
+pin is the `stateCall` probe on the L2 Arcane Abjuration row asserting
+`getFeature("Channel Divinity: Arcane Abjuration").consumes.name ===
+"Channel Divinity"`. Falsified: with the four spreads reverted it fails with
+`consumes.name=null` and is the *only* failure in the matrix; restored, green.
+
+**Blast-radius validation for part (1)**, one spec per affected pool:
+`tgtt-tempest-cleric` + `tgtt-crown-paladin` (Channel Divinity),
+`tgtt-sea-druid` (Wild Shape), `tgtt-mercy-monk-changeling` (Ki),
+`tgtt-child-of-sun-sorcerer-hochling` (Sorcery Point) — all green.
+**Not covered**: Focus Point (2024 Monk) and Psionic Energy Die (Psi Warrior)
+have no spec in this suite; they are propagated on the same code path but
+unverified end-to-end.
 
 ---

@@ -128,6 +128,19 @@ const ARCANA_FEATURES: FeatureCheck[] = [
 				saveDcFromCharacter: true,
 			},
 			{kind: "stateCall", method: "getFeatureCalculations", path: "arcaneAbjurationDc", min: 12},
+			// The `consumes: {name: "Channel Divinity"}` tag exists in
+			// data/class/class-cleric.json but four of the five subclass-feature
+			// construction paths in charactersheet-class-utils.js used to drop it, so it
+			// never reached the sheet (CS-BUG-079 part 1). Pinned explicitly because the
+			// name-convention fallback (part 2) would otherwise keep every other probe on
+			// this row green with the tag still missing.
+			{
+				kind: "stateCall",
+				method: "getFeature",
+				args: ["Channel Divinity: Arcane Abjuration"],
+				path: "consumes.name",
+				exact: "Channel Divinity",
+			},
 		],
 	},
 	// Banishment rider — gated at L5 and stepping with level.
