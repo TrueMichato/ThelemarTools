@@ -18147,13 +18147,8 @@ class CharacterSheetState {
 					// Number of rages per long rest
 					// PHB: 2/3/4/5/6/unlimited at levels 1/3/6/12/17/20
 					// XPHB: 2/3/4/5/6 at levels 1/3/6/12/17 (no unlimited at 20)
-					if (isXPHB) {
-						const ragesPerDay = level >= 17 ? 6 : level >= 12 ? 5 : level >= 6 ? 4 : level >= 3 ? 3 : 2;
-						calculations.ragesPerDay = ragesPerDay;
-					} else {
-						const ragesPerDay = level >= 20 ? Infinity : level >= 17 ? 6 : level >= 12 ? 5 : level >= 6 ? 4 : level >= 3 ? 3 : 2;
-						calculations.ragesPerDay = ragesPerDay;
-					}
+					const rageUsesMax = CharacterSheetState.getRageUsesMaxForClass(cls);
+					calculations.ragesPerDay = rageUsesMax === 999 ? Infinity : rageUsesMax;
 
 					// Brutal Critical (PHB only) - extra damage dice on critical
 					// Levels 9, 13, 17 add +1/+2/+3 dice
@@ -32105,6 +32100,24 @@ class CharacterSheetState {
 		this._ensureSorceryPoints();
 		this._ensureZeroHpInterventionUses();
 		return [...this._data.resources];
+	}
+
+	/**
+	 * Rage uses granted by a Barbarian class entry. PHB uses 999 as the
+	 * player-facing unlimited sentinel; XPHB and TGTT remain capped at 6.
+	 * @param {object} cls A `_data.classes` entry.
+	 * @returns {number}
+	 */
+	static getRageUsesMaxForClass (cls) {
+		if ((cls?.name || "").toLowerCase() !== "barbarian") return 0;
+		const level = cls?.level || 0;
+		if (level <= 0) return 0;
+		if (level >= 20 && cls?.source !== "XPHB" && cls?.source !== "TGTT") return 999;
+		if (level >= 17) return 6;
+		if (level >= 12) return 5;
+		if (level >= 6) return 4;
+		if (level >= 3) return 3;
+		return 2;
 	}
 
 	/**
