@@ -2764,3 +2764,99 @@ species trait carrying CTM markers survives) — which must stay green either wa
 
 E2E: `tgtt-hunter-zodiac-centaur.spec.ts` fails at L3 without the fix and passes
 with it, so the new helper pins this end-to-end as well.
+## CS-BUG-087 — a subclass-granted combat method absorbed the next class-table increment
+
+**Status:** Fixed.
+**Affects:** 27 TGTT subclasses across 4 classes — Fighter 11 (Eldritch Knight
+grants **two**), Monk 14, Paladin 1 (Oathbreaker), Rogue 1 (Swashbuckler).
+Barbarian and Ranger grant none, which is exactly why this hid for so long.
+
+### Symptom
+
+Every one of those subclasses says, in prose, *"you learn one additional method
+from this tradition."* The character received it — and then never received the
+**next** method the class table owed them, and stayed one short for the rest of
+their career. On a wizard-built Astral Self Monk, measured:
+
+| Monk level | Class table | Expected (table + grant) | Actual |
+|---|---|---|---|
+| 3 | 2 | 3 | 3 ✅ |
+| 4 | 3 | 4 | 3 ❌ |
+| 5 | 3 | 4 | 3 ❌ |
+
+The L3 value being *correct* is what made this so quiet: the grant visibly
+arrived, so the feature looked implemented. The loss only shows up one level
+later, as a pick that is never offered.
+
+### Root cause
+
+`optionalfeatureProgression` for `CTM:*` stores a **cumulative total**, not a
+per-level delta. `CharacterSheetClassUtils.getOptionalFeatureGains()` computed:
+
+```js
+newOptionsCount = countAtNew - existingOfType;
+```
+
+`existingOfType` counts every CTM feature on the character — including the
+subclass-granted one. So at Monk 4 the table wanted 3 total, the character
+already held 3 (2 class picks + 1 grant), and the difference was 0. The grant
+had silently spent the class's next increment.
+
+The grant itself is added by a separate path
+(`charactersheet-levelup.js` ~:525, via `getSubclassBonusMethodCount()`), which
+fires once at the subclass-selection level. QuickBuild was **already correct** —
+it adds the bonus into `gain.totalNeeded` (`charactersheet-quickbuild.js`
+~:2456, ~:2492), so its arithmetic nets out. The Builder → Level-Up path was the
+odd one out.
+
+### Fix
+
+In `getOptionalFeatureGains()`, discount subclass-granted bonus methods from the
+"already known" count, **scoped to `CTM:*` only** — no other progression type
+(invocations, maneuvers, arcane shots, metamagic) has an additive-grant concept,
+so the blast radius is exactly TGTT combat methods.
+
+The discount is the *excess over the class table's total at the **current**
+level*, capped at the subclass allowance:
+
+```js
+alreadyGrantedBonus = Math.min(bonusAllowance, Math.max(0, existingOfType - countAtCurrent));
+```
+
+⚠️ **Why the inference rather than a flat `- bonusAllowance`:** at the
+subclass-selection level the grant has not been taken yet, so the excess is
+still 0 and the class path correctly contributes nothing — leaving the
+level-up module's own bonus augmentation to supply that single pick. A flat
+subtraction would make both paths offer it and hand the player **two** methods
+at the grant level. The clamp also keeps a hand-edited import carrying surplus
+methods from having the surplus read as grants.
+
+`totalCount` is reported as `countAtNew + alreadyGrantedBonus` so the picker
+header satisfies `currentCount + newCount === totalCount` instead of claiming a
+total lower than the character's own holding.
+
+### Regression pins
+
+`CharacterSheetCombatMethodBudget.test.js` — 8 tests.
+**Falsified: 4 of 8 go red on revert, all on assertions, zero TypeErrors.**
+The revert breaks the logic in place with the signature intact (sets the
+discount to 0), rather than deleting anything. Three of the four originally
+failed as `TypeError: Cannot read properties of undefined`; the tests were
+hardened with an explicit `expect(gain).toBeDefined()` so the failure is an
+assertion, per the rule that a red `TypeError` is not a falsification.
+
+The 4 that stay green are deliberate controls: the no-double-count guard at the
+grant level, the over-discount clamp, the subclass-driven control (no
+bonus-granting subclass → old arithmetic), and a non-CTM progression control.
+
+E2E: `tgtt-astral-self-monk-changeling.spec.ts` fails at L5 without the fix
+(`getCombatMethods().length=3, expected 4`) and passes L1→20 with it.
+
+### How it was found
+
+Not by interpreting a failure — by **validating a harness helper on a second
+class**. `buildCombatMethodChecks` had been built and verified on Ranger only,
+and Ranger is one of the two TGTT classes with no subclass grants. Wiring it
+into a Monk spec produced a red that turned out to be two independent defects
+stacked: a harness gap (the helper ignored subclass grants) *and* this product
+bug underneath it. Validating on N=1 class would have shipped both.
