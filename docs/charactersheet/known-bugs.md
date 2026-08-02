@@ -3919,6 +3919,47 @@ The regex is the right FEATURE matcher (`/^channel divinity$/i` correctly
 excludes "Channel Divinity: Temporal Manipulation"); only the pool lookup
 needs its own exact key.
 
+> **⚠️ Correction — the mechanism described above no longer exists. Do not
+> repair a row by reasoning from it.** The `.source` flattening was removed
+> in `b018a512` (merged). `assertFeaturesMatrix` now resolves a RegExp
+> `name` against the pool names actually on the sheet
+> (`CharacterSheetPage.getResourceNames()`) and **throws** when it matches
+> zero pools or more than one. So an anchored pattern such as
+> `/^channel divinity$/i` resolves correctly today; it is no longer
+> unmatchable, and it no longer *needs* a `resourceName` pin.
+>
+> What still stands: `resourceName` remains the correct pin for **genuine
+> ambiguity** (one pattern, two distinctly-named pools), and "never widen
+> the regex" is unchanged — widening trades a probe that cannot pass for
+> one that passes for the wrong reason.
+>
+> **What that fix deliberately does NOT do:** it does not make the
+> enumeration authoritative on its own. A resolver is only as good as the
+> surfaces its name list covers, and `getResourceNames()` originally
+> scraped **one** of the **three** surfaces `getResource()` reads (it falls
+> back to `_getCombatTabResource`, which probes
+> `.charsheet__combat-resource-item` and `.cs-combat-feature`/
+> `.cs-combat-pool`). Combat-tab-only pools — Indomitable, Action Surge —
+> therefore resolved to "matched none" although the getter would have found
+> them, throwing a genuine `featuresMatrix at L11` on
+> `tgtt-arcane-archer-fighter-hochling`. Closed in `03c60308`, together
+> with two defects behind it: combat-panel titles wrap the action caption
+> and the "2 / 2 remaining" line in the same node (take the first line),
+> and the same pool renders under two labels — `Second Wind` on the tracker
+> vs `💗Second Wind` on the combat panel — so exact-string dedupe reports
+> **false ambiguity** (group by a decoration-stripped key).
+>
+> The rule worth keeping: **a name-enumerating reader and the getter it
+> feeds must cover the same surfaces.** Splitting "which names exist" from
+> "fetch this name" across different selector sets is a silent-mismatch
+> generator.
+>
+> Note also that detector 4's own doc comment in
+> `scripts/auditE2eCoverage.mjs` still describes the pre-`b018a512`
+> resolution logic. Left as-is here rather than edited, since that file is
+> owned elsewhere — but its rationale is stale even though it currently
+> reports zero rows.
+
 Falsified against a real reproduction, per the standing rule that a guard
 which has never seen its own defect proves nothing: reintroducing the shape
 into the rewritten Time Domain spec — the version that had *measurably*
