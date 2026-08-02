@@ -5510,6 +5510,48 @@ rows assign no calc keys, and `blessedStrikesDamage: "1d8"` comes from the
 surviving row either way. Filed rather than fixed because a wrong one-liner here
 would look like a fix, pass a dedup-shaped test, and change nothing.
 
+### It does not self-heal on level-up — measured through the real wizard
+
+The open question above was whether a subsequent level-up would re-derive the
+row set and silently repair a pre-`8839135c` save. **It does not.** Measured by
+the originating session through `levelUpTo` (a real wizard run, not a state
+poke):
+
+```
+after load     {"blessedStrikes":["Divine Strike","Potent Spellcasting"], "lvl":7}
+after LEVEL-UP {"blessedStrikes":["Divine Strike","Potent Spellcasting"], "lvl":8}
+```
+
+So the duplicate is **permanent for the life of the save**, through any number
+of level-ups.
+
+Two mechanisms, both verified here rather than taken from the report — the
+second is more specific than the report states:
+
+1. **`addFeature` cannot see it.** `charactersheet-state.js:36414` dedups on
+   `(name, source, className, level)` and the very first line of the predicate
+   is `if (f.name !== feature.name) return false;`. The two stored rows are
+   *different names*, so the dedup declines on its first comparison.
+2. **There IS an earlier-level backfill, but it is gated off for a loaded
+   save.** `charactersheet-levelup.js:4440-4450` loops
+   `for (let earlierLevel = 1; earlierLevel < newLevel; …)` and recomputes
+   `getLevelFeatures` for every earlier level — but only inside
+   `if (!alreadyHadSubclass)` (`:4439`), which exists so the backfill fires
+   exactly once, at subclass acquisition. A Cleric 7 loaded from JSON already
+   has a subclass, so it never runs. **And it could not help if it did:** the
+   body is `newFeatures.push(...earlierSubclassFeatures)` — it can only add
+   rows, never remove one. Firing it would produce a *third* row, not heal the
+   pair.
+
+> **Probe hygiene, from the same investigation.** The first attempt at this
+> measurement called `st.addClassLevel?.("Cleric")` and reported "features len
+> delta 0". `grep -rn 'addClassLevel' js/charactersheet/` returns **nothing** —
+> the optional chain silently no-op'd, and the probe would have reported the
+> right conclusion on the strength of a call that never executed. Generalised
+> rule: **`?.` on the object under test converts "this API does not exist" — the
+> single most interesting possible result — into a silent pass, and must not
+> appear in a probe.**
+
 ### Also recorded: a benign state-shape change from the CS-BUG-104 fix
 
 Cunning Strike's `chosenSubfeatures` went **3 → 0** (branch (b) no longer runs,
