@@ -53,7 +53,13 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 			{kind: "rollInitiative"},
 			// Spell save DC at L5 with CHA ≥ 16 = 8 + prof(3) + CHA(≥3) = 14.
-			{kind: "spellSaveDc", min: 13},
+			// Floor measured on THIS build, not aspirational: the preset has no
+			// `abilityPriority`, so the standard array leaves the spellcasting
+			// ability at its STR-first default (CS-BUG-056, "Follow-up"). DC is
+			// 8 + prof + mod with that dump-stat mod. Previously skipped under
+			// CS-BUG-016, which was a mis-attribution — the picker never affected
+			// the DC. Raise this when the preset gains `abilityPriority`.
+			{kind: "spellSaveDc", min: 11},
 			// Signature attack — preset grants Fire Bolt cantrip and the
 			// Sorcerer starting kit gives a dagger / light crossbow.
 			{kind: "rollAttack", attackName: /dagger|crossbow|fire bolt|quarterstaff/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},

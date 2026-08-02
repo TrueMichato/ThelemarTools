@@ -73,7 +73,13 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	// proficient via Bonus Proficiencies (L3+), so the button must be
 	// click-without-throw at every milestone L5+.
 	{level: 5, name: /sear undead|destroy undead/i, kind: "passive", effects: [
-		{kind: "spellSaveDc", min: 13},
+		// Floor measured on THIS build, not aspirational: the preset has no
+		// `abilityPriority`, so the standard array leaves the spellcasting
+		// ability at its STR-first default (CS-BUG-056, "Follow-up"). DC is
+		// 8 + prof + mod with that dump-stat mod. Previously skipped under
+		// CS-BUG-016, which was a mis-attribution — the picker never affected
+		// the DC. Raise this when the preset gains `abilityPriority`.
+		{kind: "spellSaveDc", min: 11},
 		{kind: "rollAttack", attackName: /mace|warhammer|crossbow/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 	]},

@@ -171,6 +171,78 @@ Two authoring rules came out of it, both preset-safety issues:
 
 ## Open
 
+### CS-BUG-103 — Class-level always-prepared spells never reach a character built in the wizard
+
+**Status**: Open. Product bug, **not fixed here** — surfaced by a harness
+sweep (CS-BUG-016) and filed rather than patched.
+
+**Symptom**: A character created through the builder wizard never receives
+the always-prepared spells declared on the base CLASS object's
+`additionalSpells`. Measured on the E2E export artifacts:
+
+| Class | Declared grant | Present after wizard build? |
+|---|---|---|
+| Cleric (TGTT) | `prepared {"1": ["thaumaturgy\|xphb", "ceremony\|xphb"]}` | **No** — absent at L1, L3 and L5 |
+| Paladin (TGTT) | `prepared {"2": ["divine smite\|xphb"], "5": ["find steed\|xphb"]}` | **No** — absent at L3 |
+| Ranger (TGTT) | `prepared {"1": ["hunter's mark\|xphb"]}` | **No** (the E2E green was the preset's `signatureSpells` picking it by hand) |
+
+Subclass grants are unaffected — the Oath of Bastion paladin does receive
+Shield of Faith / Sanctuary — which is what makes the gap easy to miss.
+
+**Root cause**: `populateClassSpells()` is catalog-gated and no-ops until
+`setClassCatalog()` has run. There is exactly one call site:
+
+```
+$ git grep -n 'setClassCatalog' -- js/
+js/charactersheet/charactersheet-state.js:14648:  (doc comment)
+js/charactersheet/charactersheet-state.js:14767:  (doc comment)
+js/charactersheet/charactersheet-state.js:26718:  (doc comment)
+js/charactersheet/charactersheet-state.js:37054:  (doc comment)
+js/charactersheet/charactersheet-state.js:37058:  setClassCatalog (classes) {
+js/charactersheet/charactersheet.js:17405:    this._state.setClassCatalog(this._classes || []);
+```
+
+…and that line lives in `_reconcileClassFeatures()`, whose only callers are
+load-shaped:
+
+```
+$ git grep -n '_reconcileClassFeatures' -- js/
+js/charactersheet/charactersheet.js:1525:   _pLoadCharacter        (load from storage)
+js/charactersheet/charactersheet.js:1846:   _onDuplicateCharacter
+js/charactersheet/charactersheet.js:1869:   addCharacter           (only caller: charactersheet-export.js:259, import)
+js/charactersheet/charactersheet.js:2797:   _onImportCharacter
+js/charactersheet/charactersheet.js:17387:  _reconcileClassFeatures ()
+```
+
+The builder-wizard finish path is not among them, so a freshly built
+character has no class catalog. Level-up does re-run
+`applyClassFeatureEffects()` (`charactersheet-levelup.js:5205`), but
+`populateClassSpells()` inside it early-returns on the missing catalog —
+so the grant never lands at any level either.
+
+**Why the existing tests are green**: the state-level mechanism is
+correct and well covered by
+`test/jest/charactersheet/CharacterSheetClassAlwaysPreparedSpells.test.js`,
+which calls `setClassCatalog()` itself. Verified independently with a
+throwaway Jest probe: with the catalog set, Divine Smite lands at Paladin 3
+and is correctly absent at Paladin 1. This is a *correct calculation that
+nothing invokes* — the tests assert the mechanism, not the wiring.
+
+**Player impact**: every freshly built TGTT Cleric silently lacks Ceremony
+and Thaumaturgy; every TGTT Paladin lacks Divine Smite and Find Steed;
+every TGTT Ranger lacks Hunter's Mark. Saving and reloading the character
+repairs it (the load path sets the catalog and the reconcile is
+idempotent), which makes the bug look intermittent.
+
+**Suggested fix**: call `_reconcileClassFeatures()` (or at minimum
+`setClassCatalog()` + `applyClassFeatureEffects()`) on the builder-wizard
+finish path and after level-up, not only on load/import/duplicate.
+
+**Blocked assertion**: `tgtt-bastion-paladin-bugbear.spec.ts` L2
+`{kind: "spellInList", spell: "Divine Smite"}` is skipped with this id.
+
+---
+
 ### CS-BUG-002 — Subclass features not granted on level-up (TGTT 2024-style subclasses)
 
 **Status**: Fixed (Wave 3)

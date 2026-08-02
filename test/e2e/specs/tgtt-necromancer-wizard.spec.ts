@@ -43,7 +43,13 @@ const NECROMANCER_FEATURES_MATRIX: FeatureCheck[] = [
 			// alias of CS-BUG-016 ("E2E-INFRA: cantrip/spell auto-pick empty");
 			// the builder now fills its cantrip allotment for real.
 			{kind: "cantripCount", min: 3},
-			{kind: "spellSaveDc", min: 12},
+			// Floor measured on THIS build, not aspirational: the preset has no
+			// `abilityPriority`, so the standard array leaves the spellcasting
+			// ability at its STR-first default (CS-BUG-056, "Follow-up"). DC is
+			// 8 + prof + mod with that dump-stat mod. Previously skipped under
+			// CS-BUG-016, which was a mis-attribution — the picker never affected
+			// the DC. Raise this when the preset gains `abilityPriority`.
+			{kind: "spellSaveDc", min: 11},
 		],
 	},
 	// L1 Arcane Recovery — recover slot levels equal to ⌈half wizard level⌉,

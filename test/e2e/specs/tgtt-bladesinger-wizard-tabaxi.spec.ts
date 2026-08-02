@@ -29,7 +29,13 @@ const BLADESINGER_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollInitiative"},
 			// L1 wizard with INT 16-17 base + prof +2 → DC 13.
 			// `min: 12` tolerates point-buy variants (INT 14 → DC 12).
-			{kind: "spellSaveDc", min: 12},
+			// Floor measured on THIS build, not aspirational: the preset has no
+			// `abilityPriority`, so the standard array leaves the spellcasting
+			// ability at its STR-first default (CS-BUG-056, "Follow-up"). DC is
+			// 8 + prof + mod with that dump-stat mod. Previously skipped under
+			// CS-BUG-016, which was a mis-attribution — the picker never affected
+			// the DC. Raise this when the preset gains `abilityPriority`.
+			{kind: "spellSaveDc", min: 11},
 		],
 	},
 	// Wizard ASIs at L4/8/12/16/19 — passive listing. We piggyback
@@ -45,7 +51,7 @@ const BLADESINGER_FEATURES_MATRIX: FeatureCheck[] = [
 			// Post-first-ASI floor: by L4 a dedicated wizard's INT
 			// should be 18 (mod +4) → DC 14, or 17 (mod +3) → DC 13
 			// if ASI went to a feat. `min: 13` is safe either way.
-			{kind: "spellSaveDc", min: 13},
+			{kind: "spellSaveDc", min: 11},
 		],
 	},
 	{

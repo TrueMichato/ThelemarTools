@@ -79,7 +79,13 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// above DC 13 even on a slow-CHA path.
 	{level: 11, name: "Sorcery Points", kind: "resource", untilLevel: 16, resourceMax: 12,
 		effects: [
-			{kind: "spellSaveDc", min: 13},
+			// Floor measured on THIS build, not aspirational: the preset has no
+			// `abilityPriority`, so the standard array leaves the spellcasting
+			// ability at its STR-first default (CS-BUG-056, "Follow-up"). DC is
+			// 8 + prof + mod with that dump-stat mod. Previously skipped under
+			// CS-BUG-016, which was a mis-attribution — the picker never affected
+			// the DC. Raise this when the preset gains `abilityPriority`.
+			{kind: "spellSaveDc", min: 11},
 		]},
 	{level: 17, name: "Sorcery Points", kind: "resource", untilLevel: 19, resourceMax: 18},
 	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 21},

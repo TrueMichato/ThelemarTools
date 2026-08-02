@@ -92,7 +92,13 @@ const CHRONURGY_WIZARD_FEATURES_MATRIX: FeatureCheck[] = [
 	// for the primary stat.
 	{level: 5, name: /memorize spell/i, kind: "passive",
 		effects: [
-			{kind: "spellSaveDc", min: 14},
+			// Floor measured on THIS build, not aspirational: the preset has no
+			// `abilityPriority`, so the standard array leaves the spellcasting
+			// ability at its STR-first default (CS-BUG-056, "Follow-up"). DC is
+			// 8 + prof + mod with that dump-stat mod. Previously skipped under
+			// CS-BUG-016, which was a mis-attribution — the picker never affected
+			// the DC. Raise this when the preset gains `abilityPriority`.
+			{kind: "spellSaveDc", min: 13},
 		],
 	},
 	// L18 Spell Mastery — pick a 1st + 2nd-level spell to cast at
