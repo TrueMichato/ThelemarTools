@@ -24,7 +24,7 @@ const METAMAGIC_POOL: RegExp[] = [
  *
  * Coverage focus — every subclass feature must have an observable MECHANICAL effect, not
  * just a rendered description. Before this work the whole subclass rendered its text and
- * changed no number, roll, resource or toggle anywhere in `js/` (CS-BUG-094):
+ * changed no number, roll, resource or toggle anywhere in `js/` (CS-BUG-095):
  *
  *   - **Spellfire Spells** (L3) — always-prepared spells driven by the subclass
  *     `additionalSpells.prepared` data (Cure Wounds/Guiding Bolt/Lesser Restoration/
