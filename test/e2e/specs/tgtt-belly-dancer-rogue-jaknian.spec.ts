@@ -51,14 +51,18 @@ describeCharacter({
 		// only inside the attack listing). Use this entry to host a
 		// fundamental rogue roll-button probe (initiative — rogues live
 		// or die by it).
+		//
+		// Anchored at L3, not L1: a row only ever runs at a checkpoint
+		// inside its [level, untilLevel] window, and the checkpoints are
+		// [3, 5, 11, 17, 20]. An L1-2 window contains none of them, so
+		// everything hosted here was dead code that nothing reported.
 		{
-			level: 1,
-			untilLevel: 2,
+			level: 3,
+			untilLevel: 4,
 			name: /sneak attack/i,
 			kind: "passive",
 			effects: [
 				{kind: "rollInitiative"},
-				{kind: "sneakAttackDice", exact: 1},
 			],
 		},
 		{level: 1, name: /thieves['’]? cant/i, kind: "passive"},
@@ -88,13 +92,13 @@ describeCharacter({
 				{kind: "rollSavingThrow", ability: "int"},
 			],
 		},
-		{
-			level: 7,
-			untilLevel: 8,
-			name: /sneak attack/i,
-			kind: "passive",
-			effects: [{kind: "sneakAttackDice", exact: 4}],
-		},
+		// No L7-8 Sneak Attack row. Sneak Attack steps on every odd level,
+		// but the matrix samples [3, 5, 11, 17, 20], so only 2/3/6/9/10
+		// are ever observable — and each of those is asserted below. The
+		// values at L1, L7, L9, L13 and L15 (1/4/5/7/8) are correct on no
+		// sampled level, so a row asserting one cannot run: widening its
+		// window to reach a checkpoint changes the expected value. Those
+		// are not weaker assertions, they are unreachable ones.
 		// Reliable Talent treats any proficient skill check d20 < 10 as
 		// a 10. Acrobatics is rogue-signature; assert the skill button
 		// click handler is wired.
@@ -109,15 +113,9 @@ describeCharacter({
 			],
 		},
 		{level: 14, name: /blindsense/i, kind: "passive"},
-		{
-			level: 15,
-			untilLevel: 16,
-			name: /slippery mind/i,
-			kind: "passive",
-			effects: [
-				{kind: "sneakAttackDice", exact: 8},
-			],
-		},
+		// Open-ended like its blindsense/elusive siblings: an L15-16
+		// window contains no checkpoint, so this row never ran at all.
+		{level: 15, name: /slippery mind/i, kind: "passive"},
 		{level: 18, name: /elusive/i, kind: "passive"},
 		{
 			level: 20,
@@ -210,25 +208,19 @@ describeCharacter({
 		// Tantalizing Shivers fires a Charisma (Performance) check vs
 		// Wisdom (Insight) while Dancing — exercise the Performance
 		// skill roll button at this level.
+		//
+		// Open-ended: an L9-10 window contains no checkpoint, so this
+		// subclass feature had no live existence check at any level.
 		{
 			level: 9,
-			untilLevel: 10,
 			name: /tantalizing shivers/i,
 			kind: "passive",
 			effects: [
 				{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
-				{kind: "sneakAttackDice", exact: 5},
 			],
 		},
-		{
-			level: 13,
-			untilLevel: 14,
-			name: /fluid step/i,
-			kind: "passive",
-			effects: [
-				{kind: "sneakAttackDice", exact: 7},
-			],
-		},
+		// Open-ended for the same reason: L13-14 contains no checkpoint.
+		{level: 13, name: /fluid step/i, kind: "passive"},
 		// Percussive Strike sets a save DC = 8 + PB + CHA mod for hostile
 		// onlookers. The DC isn't surfaced as a feature-DC field, but
 		// CHA is the signature ability — exercise the CHA ability-check

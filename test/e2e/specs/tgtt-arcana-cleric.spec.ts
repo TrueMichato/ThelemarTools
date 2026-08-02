@@ -228,7 +228,23 @@ const ARCANA_FEATURES: FeatureCheck[] = [
 			{kind: "stateCall", method: "getFeatureCalculations", path: "arcaneMasterySpellLevels.length", exact: 4},
 			{kind: "stateCall", method: "getSubclassSpellChoiceSlots", path: "length", min: 6},
 			{kind: "stateCall", method: "getPendingSpellChoices", path: "length", exact: 0},
-			// The picks are real spells on the sheet, one per tier.
+			// The two stateCalls above are the load-bearing assertions here:
+			// six derived choice slots exist AND none is left pending, i.e.
+			// all six were actually drained.
+			//
+			// The four rows below are weaker than they look, and the comment
+			// they replace overclaimed. `spellMatchMode: "any"` does NOT relax
+			// the name match — it DELETES it: in "any" mode
+			// comprehensiveBuildHelpers.ts never reads `e.spell` and checks
+			// only `getKnownSpellsByLevel()[level].length >= 1`. So these
+			// assert "the sheet lists at least one spell at each of levels
+			// 6-9", not "the Arcane Mastery picks are on the sheet". They are
+			// honest only because `spell: ""` makes that explicit.
+			//
+			// NEVER reach for `spellMatchMode: "any"` to soften a flaky name
+			// check: `{spell: "Bane", spellMatchMode: "any"}` reads as a
+			// relaxed matcher but is a probe that CANNOT FAIL for the reason
+			// its author intended.
 			{kind: "spellInList", spell: "", spellMatchMode: "any", level: 6},
 			{kind: "spellInList", spell: "", spellMatchMode: "any", level: 7},
 			{kind: "spellInList", spell: "", spellMatchMode: "any", level: 8},

@@ -1132,7 +1132,27 @@ async function _runPassiveOrRollEffect (
 				const comp = (st.getCompanions?.() || []).find((c: any) => re.test(c?.name || ""));
 				if (!comp) return {err: `no companion matching ${cfg.namePattern}; seen=[${(st.getCompanions?.() || []).map((c: any) => c.name).join(", ")}]`};
 				const atks = [...(comp.attacks || []), ...(comp.actions || [])];
-				const flat = (a: any) => [a?.damage, a?.desc, ...(Array.isArray(a?.entries) ? a.entries : [a?.entries])].filter(Boolean).join(" ");
+				// `damageType` is part of the companion attack shape (see the
+				// Hound of Ill Omen's Bite: damage "2d6+3", damageType
+				// "piercing") but was omitted here, so `damageContains` could
+				// never match a companion carrying its type structurally
+				// rather than inlined into the damage string.
+				//
+				// `description` is deliberately NOT included, though the
+				// adjacent `desc` is almost certainly a typo for it. It is
+				// prose being fed to a `contains` matcher, so a future
+				// `damageContains: "fire"` would match a description reading
+				// "the target catches fire" — a false pass, which is the exact
+				// defect class this fix exists to remove. Add it only for a
+				// shape that demonstrably needs it.
+				//
+				// `desc` itself is retained but is currently DEAD, not load-bearing:
+				// `grep -nE '\bdesc:' js/charactersheet/charactersheet-state.js`
+				// returns zero hits, so no companion shape sets it today. It is
+				// harmless only for that reason. If some future companion starts
+				// populating `desc` with prose, it becomes exactly the false-pass
+				// hazard described above and should be dropped too.
+				const flat = (a: any) => [a?.damage, a?.damageType, a?.desc, ...(Array.isArray(a?.entries) ? a.entries : [a?.entries])].filter(Boolean).join(" ");
 				const out = {
 					err: null as string | null,
 					hp: comp.hp?.max ?? comp.maxHp ?? null,
@@ -1214,6 +1234,14 @@ async function _runPassiveOrRollEffect (
 			return;
 		}
 		case "featureCalculationDerivedFrom": {
+			// `abilityMod` / `spellSaveDc` / `spellAttackBonus` all resolve through an
+			// ability-keyed state getter. Omitting `ability` used to pass `undefined`
+			// straight through, and those getters answer 0 for an unknown ability — so
+			// the probe silently became "expected 0" and could never pass for the right
+			// reason. Fail loudly on the authoring mistake instead.
+			if (e.equals !== "proficiencyBonus" && !e.ability) {
+				throw new Error(`featureCalculationDerivedFrom(${e.property}): equals "${e.equals}" requires an \`ability\` — without it the comparison resolves to 0.`);
+			}
 			const res = await charSheet.page.evaluate((cfg) => {
 				const st: any = (globalThis as any).charSheet?._state;
 				if (!st) return {err: "no state"};
