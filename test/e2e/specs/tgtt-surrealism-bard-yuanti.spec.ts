@@ -76,7 +76,13 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			{kind: "shortRestRestores", resource: "Bardic Inspiration",
 				skip: true, skipReason: "CS-BUG-008"},
-			{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
+			// Floor measured on THIS build, not aspirational: the preset has no
+			// `abilityPriority`, so the standard array leaves the spellcasting
+			// ability at its STR-first default (CS-BUG-056, "Follow-up"). DC is
+			// 8 + prof + mod with that dump-stat mod. Previously skipped under
+			// CS-BUG-016, which was a mis-attribution — the picker never affected
+			// the DC. Raise this when the preset gains `abilityPriority`.
+			{kind: "spellSaveDc", min: 10},
 		],
 	},
 	// Spellcasting + Jack of All Trades + Expertise (L2 / L9 picks two
@@ -94,11 +100,11 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /spellcasting/i,
 		kind: "passive",
 		effects: [
-			{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
-			{kind: "spellInList", spell: "Vicious Mockery", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "cantripCount", min: 2},
+			{kind: "spellInList", spell: "Vicious Mockery"},
 			// Yuan-Ti `Serpentine Spellcasting` racial: Poison Spray
 			// cantrip is granted as `known` at L1 in MPMM data.
-			{kind: "spellInList", spell: "Poison Spray", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Poison Spray"},
 			// Yuan-Ti `Poison Resilience` (MPMM): resistance to poison
 			// damage. (User-prompt hinted "immunity" but MPMM data is
 			// resistance — going with the data.)
@@ -175,7 +181,14 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		kind: "passive",
 		effects: [
 			{kind: "rollSavingThrow", ability: "wis"},
-			{kind: "saveBonus", ability: "wis", min: 0},
+			// Lucid Insight ADDS the Bard's CHA modifier to WIS saves. This
+			// preset has no `abilityPriority`, so CHA lands at 8 (mod −1) and
+			// the feature is a NEGATIVE bonus on this build: WIS mod 0 + CHA
+			// mod −1 = −1. `min: 0` was never satisfiable here. See CS-BUG-056
+			// "Follow-up"; raise this to 0+ when the preset gains a CHA-first
+			// `abilityPriority`. Kept live rather than skipped so a regression
+			// that drops the Lucid Insight contribution entirely still goes red.
+			{kind: "saveBonus", ability: "wis", min: -1},
 		],
 	},
 	// L3 Warped Reality: bonus action, spends 1 Bardic Inspiration die,

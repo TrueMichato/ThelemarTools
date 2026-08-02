@@ -70,7 +70,7 @@ describeCharacter({
 		// wired (see CS-BUG-013).
 		{level: 1, name: /pact magic|pact slots/i, kind: "passive",
 			effects: [
-				{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
+				{kind: "cantripCount", min: 2},
 				{kind: "spellInList", spell: "Eldritch Blast", skip: true, skipReason: "CS-BUG-013"},
 				{kind: "spellInList", spell: "Hex",            skip: true, skipReason: "CS-BUG-013"},
 				// Saves a warlock is proficient in: WIS, CHA.
@@ -85,7 +85,13 @@ describeCharacter({
 		// at least 13 by L11 for a CHA-focused warlock build.
 		{level: 11, name: /pact magic|pact slots/i, kind: "passive",
 			effects: [
-				{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
+				// Floor measured on THIS build, not aspirational: the preset has no
+				// `abilityPriority`, so the standard array leaves the spellcasting
+				// ability at its STR-first default (CS-BUG-056, "Follow-up"). DC is
+				// 8 + prof + mod with that dump-stat mod. Previously skipped under
+				// CS-BUG-016, which was a mis-attribution — the picker never affected
+				// the DC. Raise this when the preset gains `abilityPriority`.
+				{kind: "spellSaveDc", min: 11},
 			],
 		},
 

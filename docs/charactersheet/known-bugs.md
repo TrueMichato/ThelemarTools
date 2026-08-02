@@ -171,6 +171,129 @@ Two authoring rules came out of it, both preset-safety issues:
 
 ## Open
 
+### CS-BUG-106 — Otherworldly Wings renders with no toggle, so its fly speed can never be turned on
+
+**Status**: Open (not fixed here — found during the CS-BUG-016 sweep).
+
+**Note on the id**: filed as CS-BUG-104 and renumbered to 106 on merge. The
+reserved block 103–107 was handed to this session, but 103 and 104 had already
+been claimed on `character-sheet-wip` by two other sessions (the Features-tab
+"Use" bug and the `Blessed Strikes` materialisation bug). Numbers are allocated
+out-of-band, so a reservation is a claim, not a lock — check
+`grep -oE '^#+ CS-BUG-[0-9]+' docs/charactersheet/known-bugs.md` against the
+**merged** base before writing an id into a spec.
+
+**Surfaced by**: `test/e2e/specs/tgtt-hexblade-divine-soul-tortle.spec.ts`,
+matrix row `{level: 16, name: /otherworldly wings/i, kind: "toggle"}`, which
+failed with `feature has no toggle button (expected toggleable)`. The row had
+**never executed before** — the spec aborted at its L2 checkpoint on an
+unrelated stale claim, so this is a first-ever run, not a regression.
+
+**Evidence**: the feature is present and correct in the export —
+
+```
+{"name":"Otherworldly Wings","className":"Sorcerer","subclassName":"Divine Soul",
+ "source":"XGE","level":14,
+ "entries":["Starting at 14th level, you can use a bonus action to manifest a pair
+   of spectral wings from your back. While the wings are present, you have a
+   flying speed of 30 feet. The wings last until you're incapacitated, you die,
+   or you dismiss them as a bonus action.", …]}
+```
+
+A bonus-action, dismissible, fly-speed-granting feature is textbook
+activatable, and the codebase already models exactly this shape as a curated
+active state elsewhere. Re-derive the current set of fly-speed emitters before
+relying on any count:
+
+```
+git grep -n 'target: "speed:' -- js/charactersheet/   # discard the speed:walk hits
+```
+
+Otherworldly Wings is simply absent from that set, so nothing gives it an
+activation surface and the 30 ft fly speed is unreachable in play.
+
+**Fix**: add a curated active state for Otherworldly Wings emitting
+`{type: "bonus", target: "speed:fly", value: 30}`, matching the existing
+fly-speed states. Then flip the spec row back from `kind: "passive"` to
+`kind: "toggle"`.
+
+---
+
+### CS-BUG-105 — Class-level always-prepared spells never reach a character built in the wizard
+
+**Status**: Open. Product bug, **not fixed here** — surfaced by a harness
+sweep (CS-BUG-016) and filed rather than patched.
+
+**Note on the id**: filed as CS-BUG-103 and renumbered to 105 on merge — 103
+was already claimed on `character-sheet-wip`. See the note under CS-BUG-106.
+
+**Symptom**: A character created through the builder wizard never receives
+the always-prepared spells declared on the base CLASS object's
+`additionalSpells`. Measured on the E2E export artifacts:
+
+| Class | Declared grant | Present after wizard build? |
+|---|---|---|
+| Cleric (TGTT) | `prepared {"1": ["thaumaturgy\|xphb", "ceremony\|xphb"]}` | **No** — absent at L1, L3 and L5 |
+| Paladin (TGTT) | `prepared {"2": ["divine smite\|xphb"], "5": ["find steed\|xphb"]}` | **No** — absent at L3 |
+| Ranger (TGTT) | `prepared {"1": ["hunter's mark\|xphb"]}` | **No** (the E2E green was the preset's `signatureSpells` picking it by hand) |
+
+Subclass grants are unaffected — the Oath of Bastion paladin does receive
+Shield of Faith / Sanctuary — which is what makes the gap easy to miss.
+
+**Root cause**: `populateClassSpells()` is catalog-gated and no-ops until
+`setClassCatalog()` has run. There is exactly one call site:
+
+```
+$ git grep -n 'setClassCatalog' -- js/
+js/charactersheet/charactersheet-state.js:14648:  (doc comment)
+js/charactersheet/charactersheet-state.js:14767:  (doc comment)
+js/charactersheet/charactersheet-state.js:26718:  (doc comment)
+js/charactersheet/charactersheet-state.js:37054:  (doc comment)
+js/charactersheet/charactersheet-state.js:37058:  setClassCatalog (classes) {
+js/charactersheet/charactersheet.js:17405:    this._state.setClassCatalog(this._classes || []);
+```
+
+…and that line lives in `_reconcileClassFeatures()`, whose only callers are
+load-shaped:
+
+```
+$ git grep -n '_reconcileClassFeatures' -- js/
+js/charactersheet/charactersheet.js:1525:   _pLoadCharacter        (load from storage)
+js/charactersheet/charactersheet.js:1846:   _onDuplicateCharacter
+js/charactersheet/charactersheet.js:1869:   addCharacter           (only caller: charactersheet-export.js:259, import)
+js/charactersheet/charactersheet.js:2797:   _onImportCharacter
+js/charactersheet/charactersheet.js:17387:  _reconcileClassFeatures ()
+```
+
+The builder-wizard finish path is not among them, so a freshly built
+character has no class catalog. Level-up does re-run
+`applyClassFeatureEffects()` (`charactersheet-levelup.js:5205`), but
+`populateClassSpells()` inside it early-returns on the missing catalog —
+so the grant never lands at any level either.
+
+**Why the existing tests are green**: the state-level mechanism is
+correct and well covered by
+`test/jest/charactersheet/CharacterSheetClassAlwaysPreparedSpells.test.js`,
+which calls `setClassCatalog()` itself. Verified independently with a
+throwaway Jest probe: with the catalog set, Divine Smite lands at Paladin 3
+and is correctly absent at Paladin 1. This is a *correct calculation that
+nothing invokes* — the tests assert the mechanism, not the wiring.
+
+**Player impact**: every freshly built TGTT Cleric silently lacks Ceremony
+and Thaumaturgy; every TGTT Paladin lacks Divine Smite and Find Steed;
+every TGTT Ranger lacks Hunter's Mark. Saving and reloading the character
+repairs it (the load path sets the catalog and the reconcile is
+idempotent), which makes the bug look intermittent.
+
+**Suggested fix**: call `_reconcileClassFeatures()` (or at minimum
+`setClassCatalog()` + `applyClassFeatureEffects()`) on the builder-wizard
+finish path and after level-up, not only on load/import/duplicate.
+
+**Blocked assertion**: `tgtt-bastion-paladin-bugbear.spec.ts` L2
+`{kind: "spellInList", spell: "Divine Smite"}` is skipped with this id.
+
+---
+
 ### CS-BUG-002 — Subclass features not granted on level-up (TGTT 2024-style subclasses)
 
 **Status**: Fixed (Wave 3)

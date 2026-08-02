@@ -27,9 +27,9 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	// Religion is INT-based and is granted by the Acolyte background;
 	// CHA ability checks and initiative also probed here.
 	{level: 1, name: /spellcasting/i, kind: "passive", effects: [
-		{kind: "cantripCount", min: 3, skip: true, skipReason: "CS-BUG-016"},
-		{kind: "spellInList", spell: "Sacred Flame", skip: true, skipReason: "CS-BUG-016"},
-		{kind: "spellInList", spell: "Cure Wounds", skip: true, skipReason: "CS-BUG-016"},
+		{kind: "cantripCount", min: 3},
+		{kind: "spellInList", spell: "Sacred Flame"},
+		{kind: "spellInList", spell: "Cure Wounds"},
 		{kind: "rollSavingThrow", ability: "wis"},
 		{kind: "rollSavingThrow", ability: "cha"},
 		{kind: "rollAbilityCheck", ability: "cha"},
@@ -73,7 +73,13 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	// proficient via Bonus Proficiencies (L3+), so the button must be
 	// click-without-throw at every milestone L5+.
 	{level: 5, name: /sear undead|destroy undead/i, kind: "passive", effects: [
-		{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
+		// Floor measured on THIS build, not aspirational: the preset has no
+		// `abilityPriority`, so the standard array leaves the spellcasting
+		// ability at its STR-first default (CS-BUG-056, "Follow-up"). DC is
+		// 8 + prof + mod with that dump-stat mod. Previously skipped under
+		// CS-BUG-016, which was a mis-attribution — the picker never affected
+		// the DC. Raise this when the preset gains `abilityPriority`.
+		{kind: "spellSaveDc", min: 11},
 		{kind: "rollAttack", attackName: /mace|warhammer|crossbow/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 	]},
@@ -104,31 +110,31 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	// Complement the kind:"spells" grantsSpells assertion with
 	// spellInList probes per spell so a missing spellbook entry fails
 	// loudly with the offending name (rather than the aggregated set).
-	{level: 3, name: /lust.*spells|domain spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016",
+	{level: 3, name: /lust.*spells|domain spells/i, kind: "spells",
 		grantsSpells: ["Charm Person", "Command", "Enthrall", "Suggestion"],
 		effects: [
-			{kind: "spellInList", spell: "Charm Person", skip: true, skipReason: "CS-BUG-016"},
-			{kind: "spellInList", spell: "Command", skip: true, skipReason: "CS-BUG-016"},
-			{kind: "spellInList", spell: "Enthrall", skip: true, skipReason: "CS-BUG-016"},
-			{kind: "spellInList", spell: "Suggestion", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Charm Person"},
+			{kind: "spellInList", spell: "Command"},
+			{kind: "spellInList", spell: "Enthrall"},
+			{kind: "spellInList", spell: "Suggestion"},
 		]},
-	{level: 5, name: /lust.*spells|domain spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016",
+	{level: 5, name: /lust.*spells|domain spells/i, kind: "spells",
 		grantsSpells: ["Detect Thoughts", "Hypnotic Pattern"],
 		effects: [
-			{kind: "spellInList", spell: "Detect Thoughts", skip: true, skipReason: "CS-BUG-016"},
-			{kind: "spellInList", spell: "Hypnotic Pattern", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Detect Thoughts"},
+			{kind: "spellInList", spell: "Hypnotic Pattern"},
 		]},
-	{level: 7, name: /lust.*spells|domain spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016",
+	{level: 7, name: /lust.*spells|domain spells/i, kind: "spells",
 		grantsSpells: ["Charm Monster", "Compulsion"],
 		effects: [
-			{kind: "spellInList", spell: "Charm Monster", skip: true, skipReason: "CS-BUG-016"},
-			{kind: "spellInList", spell: "Compulsion", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Charm Monster"},
+			{kind: "spellInList", spell: "Compulsion"},
 		]},
-	{level: 9, name: /lust.*spells|domain spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016",
+	{level: 9, name: /lust.*spells|domain spells/i, kind: "spells",
 		grantsSpells: ["Dominate Person", "Hold Monster"],
 		effects: [
-			{kind: "spellInList", spell: "Dominate Person", skip: true, skipReason: "CS-BUG-016"},
-			{kind: "spellInList", spell: "Hold Monster", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Dominate Person"},
+			{kind: "spellInList", spell: "Hold Monster"},
 		]},
 	// L6 Enchanting Presence — imposes disadvantage on a target's save
 	// vs. a 1st-level+ enchantment cast within 5 ft. Per-target,

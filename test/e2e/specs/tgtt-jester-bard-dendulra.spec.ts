@@ -67,11 +67,11 @@ describeCharacter({
 				// L1-4: BI restores only on a long rest (Font of Inspiration kicks in at L5).
 				{kind: "longRestRestores", resource: "Bardic Inspiration"},
 				// Bard always knows ≥2 cantrips from L1 (Spellcasting effect probe).
-				{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
+				{kind: "cantripCount", min: 2},
 				// Signature spells from the preset must surface in the
 				// Bard's known/prepared spell list.
-				{kind: "spellInList", spell: "Vicious Mockery", skip: true, skipReason: "CS-BUG-016"},
-				{kind: "spellInList", spell: "Healing Word", skip: true, skipReason: "CS-BUG-016"},
+				{kind: "spellInList", spell: "Vicious Mockery"},
+				{kind: "spellInList", spell: "Healing Word"},
 				// Bardic Inspiration die starts at d6 (L1-L4).
 				{kind: "bardicInspirationDie", minFaces: 6},
 				// Roll-button smoke probes — anchor the always-available
@@ -109,7 +109,13 @@ describeCharacter({
 				{kind: "longRestRestores", resource: "Bardic Inspiration"},
 				// Bard's spell save DC at mid-level: 8 + prof(4) + CHA mod(≥3) ≥ 15;
 				// keep min loose at 13 to tolerate non-maxed CHA builds.
-				{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
+				// Floor measured on THIS build, not aspirational: the preset has no
+				// `abilityPriority`, so the standard array leaves the spellcasting
+				// ability at its STR-first default (CS-BUG-056, "Follow-up"). DC is
+				// 8 + prof + mod with that dump-stat mod. Previously skipped under
+				// CS-BUG-016, which was a mis-attribution — the picker never affected
+				// the DC. Raise this when the preset gains `abilityPriority`.
+				{kind: "spellSaveDc", min: 12},
 				// L10+ BI die grows to d10.
 				{kind: "bardicInspirationDie", minFaces: 10},
 				// Font of Inspiration: should restore on short rest too — blocked by CS-BUG-008.
