@@ -395,6 +395,77 @@ issue numbers stay stable.
 
 ## Resolved
 
+### CS-BUG-104 — The level-up "Swap a Known Spell" list was empty for every known caster
+
+**Status**: Fixed.
+**Surfaced by**: reading `charactersheet-levelup.js:4218` while checking an
+unrelated set-enumeration claim about granted-spell handling.
+
+**Symptom.** Every Bard, Ranger, Sorcerer and Warlock, at every level from 2 to
+20, opened the optional "🔄 Swap Spell" accordion and was told **"No swappable
+spells known."** The PHB allowance to trade one known spell on level-up was
+entirely dead. Nothing errored, nothing was logged, and no test was red — the
+feature rendered its own empty-state message and returned.
+
+**Root cause — a comment and its code disagreeing.**
+
+```js
+// Get current known spells (level 1+, not feature-granted)
+.filter(s => s.level > 0 && !s.alwaysPrepared && !s.sourceFeature);
+```
+
+The comment says *not feature-granted*. The code says *has no attribution at
+all*. Those are different sets, and the codebase populates the difference: the
+Builder, QuickBuild and LevelUp all stamp a **positive** attribution onto every
+spell the player picks — `"Spells Known"`, `"Cantrips Known"`, `"Wizard
+Spellbook"`, `"Prepared Spells"` — at 15 assignment sites across four modules. So
+`!s.sourceFeature` rejected precisely the set the picker exists to offer and
+admitted only orphans, which a normally-built character has none of.
+
+Measured at the production call site (`getSpellsKnown()` on a level-4 Sorcerer
+holding two spells learned exactly the way LevelUp writes them):
+
+| | result |
+|---|---|
+| `getSpellsKnown()` | `Magic Missile (sf: "Spells Known")`, `Shield (sf: "Spells Known")` |
+| old filter `!s.sourceFeature` | `[]` |
+| fixed predicate | `["Magic Missile", "Shield"]` |
+
+**Fix.** The distinction already had a canonical predicate one file away —
+`CharacterSheetClassUtils.isPlayerChosenSpell`, whose docstring states exactly
+the intended semantics. Rather than inline a second expression of the same rule,
+the whole candidate test moved onto a named sibling,
+`CharacterSheetClassUtils.isSwappableKnownSpell(spell)`, and the level-up filter
+became a single call to it. Orphans stay swappable so pre-attribution saves don't
+regress; `alwaysPrepared` and feature attributions stay excluded.
+
+**Not a regression, and not adjacent to the level-up swap by accident.** Divine
+Soul's affinity spell has its own dedicated swap on the Spells tab
+(`_pSwapDivineSoulAffinity`), restricted to the Cleric list at the grant's level.
+The two swap surfaces are deliberately disjoint, and this fix preserves that: a
+subclass grant is still withheld from the level-up list.
+
+**Falsification** — four breaks, signature intact each time:
+
+| break | reds | sample |
+|---|---|---|
+| predicate reverted to `return !spell.sourceFeature` | **7** | `Expected: > 0 / Received: 0` |
+| over-corrected to `return true` (admit grants) | **2** | subclass + racial grants leak in |
+| `alwaysPrepared` guard removed | **1** | assertion |
+| `level > 0` guard removed | **1** | `Expected: false / Received: true` |
+
+The `level > 0` break initially produced **ZERO** reds. The cantrip test drove
+`addSpell`, and state routes cantrips to `cantripsKnown` — so `getSpellsKnown()`
+never yields one and the guard was unreachable from that test. It was passing on
+routing, not on the guard. Rewritten to assert the predicate directly, with the
+routing pinned as its own separate test so that if routing ever changes, the
+guard is known to be the only thing left holding. Same shape as the zero-red
+finding in CS-BUG-092: **a break that yields no reds usually means the tests stop
+short of the logic, not that the logic is dead.**
+
+**Pinned by**: `test/jest/charactersheet/CharacterSheetSpellSwapCandidates.test.js`
+(19 tests).
+
 ### CS-BUG-103 — Features-tab "Use" silently burned a limited use for any state-gated feature
 
 **Status**: Fixed.

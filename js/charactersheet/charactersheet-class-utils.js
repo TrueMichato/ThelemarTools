@@ -1325,6 +1325,38 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Returns true iff `spell` may be traded away by the level-up "Swap a Known
+	 * Spell" allowance.
+	 *
+	 * Swappable means a levelled spell the PLAYER picked. Note that "the player
+	 * picked it" is not the same as "it has no `sourceFeature`": the Builder,
+	 * QuickBuild and LevelUp all stamp a positive attribution ("Spells Known",
+	 * "Wizard Spellbook", …) onto every spell the player chooses. Testing
+	 * `!spell.sourceFeature` therefore selects only orphans and rejects the entire
+	 * intended set — which is what CS-BUG-104 was.
+	 *
+	 * Excluded, and why:
+	 *  - cantrips — the allowance is for levelled spells;
+	 *  - `alwaysPrepared` — subclass/feat grants the character never "knew";
+	 *  - any other feature attribution — a subclass or racial grant is not the
+	 *    player's to trade (Divine Soul's affinity spell has its own dedicated
+	 *    swap on the Spells tab, restricted to the Cleric list).
+	 *
+	 * Orphans (no attribution at all) remain swappable so characters saved before
+	 * attribution existed don't silently lose the feature.
+	 *
+	 * @param {*} spell
+	 * @returns {boolean}
+	 */
+	static isSwappableKnownSpell (spell) {
+		if (!spell) return false;
+		if (!(spell.level > 0)) return false;
+		if (spell.alwaysPrepared) return false;
+		if (!spell.sourceFeature) return true;
+		return CharacterSheetClassUtils.isPlayerChosenSpell(spell);
+	}
+
+	/**
 	 * Partition cantrips into three buckets so each can be rendered & counted
 	 * independently. Pure: no DOM, no state.
 	 * @param {Array<*>} cantrips
