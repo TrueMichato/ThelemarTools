@@ -3453,7 +3453,7 @@ instead. (Zero live instances; found by making the error myself.)
 
 ---
 
-## CS-BUG-092 — eleven feature calculations are WRITE-ONLY, and asserting them is not evidence of implementation
+## CS-BUG-093 — eleven feature calculations are WRITE-ONLY, and asserting them is not evidence of implementation
 
 **Status:** Open (finding; no product fix attempted here)
 

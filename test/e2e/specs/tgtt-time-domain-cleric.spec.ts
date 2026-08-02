@@ -103,7 +103,7 @@ describeCharacter({
 			name: /time domain spells/i,
 			kind: "passive",
 		},
-		// CS-BUG-092: the `has*` / `*Uses` / `*Dc` calc keys for Chronological
+		// CS-BUG-093: the `has*` / `*Uses` / `*Dc` calc keys for Chronological
 		// Interference, Temporal Manipulation, Eyes of the Future Past and
 		// Temporal Mastery are all WRITE-ONLY (one ref each in js/). They are
 		// redundant dead data rather than proof of inertness, though: the POOLS
