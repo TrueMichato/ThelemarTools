@@ -4924,8 +4924,40 @@ better tested*. That is worse than the >100% artefact: an impossible percentage
 announces itself, whereas a plausible percentage that ranks improvement as
 regression will be believed and acted on.
 
-Minimum repair is deleting `skipReasonCount` from the sum. That alone does not
-close root causes 1 and 2 below.
+Minimum repair is deleting `skipReasonCount` from the sum — **but that is
+measured to be insufficient.** Removing it takes the >100% rows from **11 to
+3**, not to 0:
+
+```
+tgtt-meteor-knight-fighter.spec.ts        13 entries  15 effects  0 helpers  →  115%  ✓ FULL
+tgtt-steel-hawk-fighter.spec.ts           13 entries  15 effects  0 helpers  →  115%  ✓ FULL
+tgtt-tdcsr-juggernaut-barbarian.spec.ts   21 entries  20 effects  2 helpers  →  124%  ✓ FULL
+```
+
+On the first two, `effectsCount` **alone exceeds `entryCount`** with every
+other term at zero. So the two "honest" terms are not commensurable either:
+`entryCount` counts `{level: N,` literals (`:683`) while `effectsCount` counts
+`effects:` blocks (`:687-688`), and a row may carry more than one. The
+numerator and denominator count different things throughout, which is why a
+ratio between them is not a coverage figure at all. **Deleting one term makes
+the artefact rarer without making the metric sound.**
+
+### The printed table cannot reproduce its own percentage
+
+Two of the four numerator terms are invisible in the output:
+
+- the printed **`skip`** column is `skipCount` = `/\bskip:\s*true\b/` (`:698-699`),
+  but the term added to `effective` is `skipReasonCount` = `/\bskipReason:\s*"/`
+  (`:700-701`). They diverge routinely — bladesinger **10 vs 7**, child-of-sun
+  **6 vs 3**, champion **2 vs 0**, arcana-cleric **1 vs 0**.
+- `siblingCovered` (`:719`) is added to the score and **printed nowhere**.
+
+A reader checking the arithmetic from the table gets a different number and
+concludes they have misread the columns. Worth recording that an earlier
+attempt to confirm the mechanism this way *appeared* to succeed by coincidence
+— child-of-sun's printed `skip` of 6 happens to equal `skipReasonCount` 3 plus
+`siblingCovered` 3, so `12 + 2 + 6 = 20` gave the right total for the wrong
+reason. Verify terms against the source, never against this table.
 
 ### Symptom
 
