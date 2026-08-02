@@ -3909,14 +3909,48 @@ resource, the Activate button is enabled and the toggle behaves as designed
 
 ### Why the regression test pins the READING, not the calculation
 
-The test asserts the **render-consumed** surface — `getActivatableFeatures()`
-returns the Crown row with `resource == null` — because that is the exact field
-`charactersheet.js` reads to decide whether to disable the button. A
-`getFeatureCalculations()` probe, or even a `stateCall` accessor, would be one
-more indirection that a broken parse could still satisfy; only the row the
-renderer actually consumes proves the button is live. (This is the same
-"pin the reading, never the calc" lesson as CS-BUG-093, applied to a toggle's
-enabled/disabled surface rather than a numeric bonus.)
+The Jest test asserts two surfaces: the `detectActivatableFeature` accessor
+(`resourceCost === 0`) and the **render-consumed** row
+(`getActivatableFeatures()` → `resource == null`, the exact field
+`charactersheet.js` reads to decide whether to disable the button).
+
+**⚠️ This entry originally claimed the row was the load-bearing assertion and
+dismissed the accessor as "one more indirection a broken parse could still
+satisfy". When measured, the reverse was true — and the row assertion was
+inert.** Neutralising the guard turned the **accessor** assertion red; Jest
+stops at the first failure, so the row assertion never executed. Commenting out
+the four accessor assertions and re-running with the break still applied gave
+**`27 passed`**: the row was `{"resource": null}` with *and* without the fix.
+
+The cause was the fixture, not the product. `SPELLFIRE_FEATURES` described Crown
+as *"…gaining Flight, Spell Avoidance, and Burning Life Force"* and **omitted
+"spend 5 Sorcery Points" entirely**, so the mis-parse this bug is about could
+not occur there: with no numeric cost in the prose the parser bound no resource,
+and the row looked correct even when broken.
+
+**Fixed.** The fixture now carries the restore sentence verbatim, so the test
+exercises the actual mis-parse. Re-measured: with the guard broken and the
+accessor assertions neutered, the row assertion **does** fail
+(`Expected: true, Received: false`). Both surfaces now discriminate, and the
+claim above is true rather than aspirational.
+
+> Take care adding prose to this fixture: an earlier attempt used *"Once per
+> Long Rest you can spend 5 Sorcery Points…"*, and the `Once per Long Rest`
+> clause independently created a 1/long-rest uses pool named "Crown of
+> Spellfire". That failed the row assertion **with the fix in place** — a
+> fixture artefact that looks exactly like a product regression.
+
+**The strongest pin for this bug remains the E2E probe**: the `featuresMatrix`
+L18 entry in `tgtt-spellfire-sorcerer.spec.ts` carries `kind: "toggle"`, which
+clicks the real rendered Activate button against real brew data. That is the
+probe whose timeout found the bug.
+
+**Lesson, stated correctly:** *"pin the reading, never the calc"* (CS-BUG-093) is
+a sound default, but **it does not self-verify**. A render-consumed assertion is
+exactly as inert as a calculation probe when the fixture cannot reach the
+failure mode. Being the surface the renderer reads does not make an assertion
+sensitive — only a targeted falsification shows that, and it must confirm *which*
+assertion went red.
 
 ### Falsification
 
@@ -3926,3 +3960,10 @@ fires and the generic mis-parse returns) turned the regression **red: 1 failure,
 `TypeError`/`ReferenceError`. Restored, it is green. The eight Spellfire methods
 carry their own seven in-place chokepoint falsifications (signatures kept:
 3/2/1/1/1/1/1 red).
+
+**But note which assertion went red.** That single failure is the accessor line,
+and it masks the inert row assertion behind it (see above). "A revert makes it
+red" is necessary, not sufficient: when a test has assertions ahead of the one
+you are relying on, the first failure hides whether the later one can fire at
+all. Neutralise the earlier assertions and re-run before claiming a surface is
+pinned.

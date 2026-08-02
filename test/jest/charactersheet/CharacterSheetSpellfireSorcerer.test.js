@@ -23,7 +23,7 @@ const SPELLFIRE_FEATURES = [
 	{level: 3, name: "Bolstering Flames", description: "You or one creature you can see within 30 feet of yourself gains Temporary Hit Points equal to 1d4 plus your Charisma modifier."},
 	{level: 6, name: "Absorb Spells", description: "You always have Counterspell prepared. Whenever a target fails the saving throw against a Counterspell you cast, you regain 1d4 Sorcery Points."},
 	{level: 14, name: "Honed Spellfire", description: "Your Spellfire Burst improves. You add your Sorcerer level to the Temporary Hit Points, and Radiant Fire deals 1d8 damage."},
-	{level: 18, name: "Crown of Spellfire", description: "When you use Innate Sorcery, you can alter it and infuse yourself with the essence of spellfire, gaining Flight, Spell Avoidance, and Burning Life Force."},
+	{level: 18, name: "Crown of Spellfire", description: "When you use Innate Sorcery, you can alter it and infuse yourself with the essence of spellfire, gaining Flight, Spell Avoidance, and Burning Life Force. While the crown persists, you can spend 5 Sorcery Points (no action required) to restore one use of Innate Sorcery."},
 ];
 
 /**
