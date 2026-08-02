@@ -4337,8 +4337,16 @@ the wrong assertion stayed green — i.e. the data was bent to fit the assertion
 
 ## CS-BUG-104 — a *resolved* `Blessed Strikes` choice still materialises both options, so `_data.chosenSubfeatures` and `_data.features` disagree — and a TGTT domain turns that into a visible duplicate
 
-**Status:** Open — display-only, mechanically single. Low severity, filed
-because it is reproducible and player-visible.
+**Status:** **Fixed** — the materialisation site now defers to the parser's
+verdict instead of re-deriving one from the entry shape. Pinned in both
+directions by `test/jest/charactersheet/CharacterSheetSubfeatureChoiceMaterialisation.test.js`.
+
+> **The parser was never the defect.** `FeatureChoiceParser.extractChoices()`
+> returned `{count: 1, options: [Divine Strike, Potent Spellcasting]}` for
+> Blessed Strikes throughout — correctly. Do not go looking in
+> `_extractStructuredChoices` for the grant; the grant was emitted by
+> `CharacterSheetClassUtils.getLevelFeatures`, which read the same entry shape
+> with a different rule. See "Fix as landed" for the enumerated population.
 
 **Root cause (measured at three stages; this entry's cause was relocated twice
 before reaching this one, and amended once after — see Provenance).**
@@ -4621,6 +4629,75 @@ marked *not located*.
    resolved by pointing at one table row. Had this entry asserted only a
    conclusion, the same exchange would have re-litigated the wrong stage
    indefinitely — which is exactly what its first two versions did.
+
+### Fix as landed
+
+Two edits, coupled — neither is safe alone.
+
+1. **`charactersheet-state.js`, `_extractStructuredChoices`.** The bare-sibling
+   encoding was admitted whenever the prose contained "one of the following".
+   It now additionally requires an **acquisition verb** within the same sentence
+   (`/\b(?:gain|gains|learn|learns|choose|select|pick)\b[^.]{0,60}?\bone of the following\b/i`),
+   because the phrase alone does not distinguish acquiring an option from
+   selecting one per use.
+2. **`charactersheet-class-utils.js`, `getLevelFeatures`.** The extraction loop
+   now skips any sibling ref the parser has already classified as a choice
+   option, via the new `getChoiceOptionNames()`. It **delegates** rather than
+   re-deciding: the two readers of this encoding disagreeing is the whole bug.
+
+**Why a shape test at the materialisation site cannot work — the enumerated
+population.** Exactly **seven** features in shipped data use the bare-sibling
+encoding (scan of `data/class/` + `homebrew/`; there are no homebrew instances):
+
+| Feature | Prose | Correct behaviour |
+|---|---|---|
+| Blessed Strikes (Cleric XPHB 7) | "You **gain** one of the following options" | pick one |
+| Cunning Strike (Rogue XPHB 5) | "you can **add** one of the following effects" | **learn all** |
+| Channel Divinity (Cleric XPHB 2) | "You start with two such effects" | learn all |
+| Ki (Monk PHB 2) | "You start knowing three such features" | learn all |
+| Monk's Focus (Monk XPHB 2) | "You start knowing three such features" | learn all |
+| Martial Arts (Monk XPHB 1) | "You gain the following benefits" | learn all |
+| Devious Strikes (Rogue XPHB 14) | "The following effects are now among your options" | learn all |
+
+Blessed Strikes and Cunning Strike are **structurally identical and
+semantically opposite**, so no rule local to the loop can separate them. Only
+five of the seven were ever ambiguous to the old prose test; Cunning Strike was
+its single false positive, and it was *harmless* only because the
+materialisation it should have suppressed short-circuited the prompt (branch (b)
+of `seedSubclassFeatureChoices`, which records already-applied children as
+chosen). Fixing the materialisation without also narrowing the prose test would
+have converted that latent false positive into a **visible Rogue regression** —
+all three Cunning Strike effects vanishing — i.e. traded a Cleric bug for a
+Rogue one. That was the originally-proposed fix, and it was refuted by
+measurement rather than by review.
+
+### Falsification
+
+Both directions were broken in place, signatures intact, with the red count
+predicted before measuring. Each predicted **2 red**; each produced exactly 2,
+all genuine value assertions (no `Type`/`ReferenceError`).
+
+| Break | Red | First failure |
+|---|---|---|
+| prose test reverted to the unguarded regex | **2** | `Expected length: 0 / Received length: 1` (Cunning Strike re-classified), then `Expected: 3 / Received: 0` (Rogue loses every effect) |
+| `getChoiceOptionNames` skip removed from the loop | **2** | Cleric 7 grants both options; the pending choice is `undefined` |
+
+The two controls stay green under both breaks by design: Monk 2 (three
+learn-all children) and the Blessed Strikes classification itself.
+
+The pinned surfaces are deliberately the **read** ones — what the sheet grants
+(`getLevelFeatures`) and what the player is offered
+(`seedSubclassFeatureChoices` → `addPendingFeatureChoice`) — not
+`extractChoices()` alone, which was correct before the fix and would therefore
+have pinned nothing.
+
+### Existing saves — no migration
+
+A character created before this fix already has **both** features in
+`_data.features`. There is no way to recover which the player intended, so no
+migration is attempted: leaving both is non-destructive and mechanically
+single (the calculations are idempotent, as recorded above). Respec is the
+remedy.
 
 ## CS-BUG-089 — a companion whose attack is declared structurally has no rollable attack at all
 

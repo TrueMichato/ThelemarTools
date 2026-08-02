@@ -773,8 +773,16 @@ class FeatureChoiceParser {
 	 *   1. An explicit `{type:"options", count, entries:[refClassFeature, …]}` group
 	 *      (e.g. Divine Order, Principles of Devotion, Specialties L3).
 	 *   2. A bare `{type:"entries", entries:[refClassFeature, refClassFeature]}` block
-	 *      whose siblings are ≥2 feature refs AND whose parent prose says "one of the
-	 *      following" / "choose one" (e.g. Blessed Strikes — no `options` wrapper).
+	 *      whose siblings are ≥2 feature refs AND whose parent prose ACQUIRES one of
+	 *      them ("You gain one of the following options of your choice" — Blessed
+	 *      Strikes, no `options` wrapper).
+	 *
+	 * Encoding 2 is shared by two semantically opposite features, so the shape alone
+	 * cannot classify it: Blessed Strikes (Cleric XPHB 7) is a permanent choose-one,
+	 * while Cunning Strike (Rogue XPHB 5) is an AT-USE menu whose options are all
+	 * learned ("When you deal Sneak Attack damage, you can add one of the following").
+	 * The prose test is therefore the discriminator and must require an ACQUISITION
+	 * verb, not merely the phrase "one of the following".
 	 *
 	 * When neither is present but the prose says "gain another/additional … from the
 	 * {@classFeature Ref}" (Specialties L7/11/15/20), a `fromRef` descriptor is emitted so
@@ -787,7 +795,11 @@ class FeatureChoiceParser {
 		const groups = [];
 		const entries = Array.isArray(feature?.entries) ? feature.entries : null;
 		const rawText = this._getRawText(feature);
-		const proseAllowsImplicit = /\bone of the following\b|\bchoose one\b/i.test(rawText);
+		// `[^.]{0,60}` keeps the verb and the phrase inside one sentence, so an
+		// acquisition verb in a neighbouring sentence cannot license an at-use menu.
+		// `\bchoose one\b` is retained verbatim: it already names the acquisition act.
+		const proseAllowsImplicit = /\b(?:gain|gains|learn|learns|choose|select|pick)\b[^.]{0,60}?\bone of the following\b/i.test(rawText)
+			|| /\bchoose one\b/i.test(rawText);
 
 		const visit = (node) => {
 			if (!node || typeof node !== "object") return;
