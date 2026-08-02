@@ -3689,3 +3689,131 @@ The blast radius of the original bug is **13 specs** measured behaviourally
 (fixed and broken blankers disagree), not the 7 found by pattern-matching
 apostrophes-in-regexes nor the 17 matched by a looser grep — that looser
 pattern also matches `//` comment openings, which are not instances.
+
+### Follow-up — SCALE CORRECTION: "eleven" understates this by an order of magnitude
+
+The heading above says eleven because eleven is what a hand audit of *two
+specs* found. Building the detector measured the real population, and the
+number is the most important thing in this entry:
+
+| population | count |
+|---|---|
+| calc keys assigned (`calculations.<key> =`) across `js/` | **2114** |
+| of those, never read by any static reference | **1504** (71%) |
+| calc keys the E2E specs actually probe | **239** |
+| **spec-probed keys that are write-only** | **93, across 16 specs** |
+
+So this is not a two-spec defect. It is the dominant idiom of the suite's
+`featureCalculation` probes, and it reaches 16 of 41 specs including
+`tgtt-lunar-sorcery-sorcerer` (20), `tgtt-talent-chronopath` (16) and
+`tgtt-arcana-cleric` (8).
+
+**Do not read that as "1504 unimplemented features."** Two reasons, both
+measured:
+
+1. **Write-only ≠ inert** (the distinction the original entry drew, now
+   load-bearing at scale). `layOnHandsPool` is write-only, and Lay on Hands
+   demonstrably works — via its own pool UI, not the calc key. Same shape for
+   Chronological Interference and Eyes of the Future Past, which work through
+   the generic feature-uses parser reading the homebrew entry.
+2. **A static reference count cannot see how this product reads calc keys.**
+   `charactersheet.js:8831-8837` builds the key from the feature's *display
+   name* at runtime — `calc[`${key}Dc`]`, `${key}Damage`, `${key}SaveAbility`,
+   `${key}DamagePerStrain`, `${key}DamageType`, `${key}Duration`. So "Decay"
+   reads `decayDc`, `decayDamageType`, `decaySaveAbility`… every one of which
+   a naive count calls write-only. There are two further dynamic paths:
+   `calculations[entry.calcFlag] = true` via the invocation registry
+   (`:57849`), and `getFeatureCalculation(key)` — a public getter by arbitrary
+   string, which in practice has exactly **one** caller passing the literal
+   `"rageDamage"`.
+
+What the finding *does* support, for all 93, is the narrower and always-true
+claim: **that probe is not watching the surface that would break.** It pins a
+value the product computes and discards, so it cannot fail when the feature's
+real path regresses — the same predetermined-outcome property as an inert
+level window, reached from the product side instead of the harness side.
+
+### Follow-up — detector shipped, and falsified before shipping
+
+`scripts/auditE2eCoverage.mjs` now reports write-only calc probes. Design
+notes that are consequences of measurement, not taste:
+
+- **Scoped to spec-probed keys.** Reporting all 1504 would be worse than
+  useless; noise is how a correct check gets switched off.
+- **Dynamic suffixes are discovered from source, not hardcoded**, and matching
+  keys are listed *separately* as candidates rather than silently dropped —
+  over-subtraction is also a way to be wrong. 13 keys land there.
+- **Never wired to `--strict`.** Reference counting cannot see data-driven
+  reads, so a gate here would be permanently red and therefore ignored.
+- **Scans `js/` only, never `docs/`.** This file and several spec comments now
+  quote these key names verbatim.
+
+Falsified on the shipped script with four planted controls in one run:
+
+| planted | expected | result |
+|---|---|---|
+| `zzPlantedWriteOnly` — assigned, probed, no reader | detected | **detected** ✅ |
+| `zzPlantedHasReader` — same, plus one `calc.zzPlantedHasReader` read | silent | silent ✅ |
+| `zzPlantedDynamicDc` — ends in a discovered dynamic suffix | candidate, not counted | candidate ✅ |
+| a **real** write-only key named only inside `//` and `/* */` comments | silent | silent ✅ |
+
+The fourth is the one that mattered, and the first version of it was **weak**:
+it named a key that was never assigned, so the `assigned.has(key)` guard would
+have filtered it no matter what the comment blanking did — testing the guard's
+front door rather than its decision. Rewritten to name a genuinely write-only
+key, then falsified by making `probedCalcKeys` read raw source instead of
+blanked: **94 → 96 probes across 17 → 18 specs**, with both comment-only
+references flagged. That is detector #3's failure mode (a check firing on its
+own documentation) caught *before* shipping rather than after.
+
+---
+
+## CS-BUG-094 — TGTT Cleric domains re-grant a feature the XPHB base class already gave, so it renders twice
+
+**Status:** Open — display-only, mechanically single. Low severity, filed
+because it is reproducible and player-visible.
+
+The 2024 (XPHB) Cleric grants **Divine Strike / Potent Spellcasting at level
+7** as a *base class* feature. The TGTT homebrew domains were written against
+the 2014 model, where the *domain* grants it at level 8. Both fire, so the
+feature is listed twice on the Features tab.
+
+Measured live through the spawner (`getFeatures()`, fields as returned):
+
+```
+cleric/time domain/8   → Potent Spellcasting ×2
+    {name: "Potent Spellcasting", lvl: 7, src: "XPHB", cls: "Cleric"}
+    {name: "Potent Spellcasting", lvl: 8, src: "TGTT", cls: "Cleric", sub: "Time"}
+
+cleric/blood domain/8  → Divine Strike ×2
+    {name: "Divine Strike", lvl: 7, src: "XPHB", cls: "Cleric"}
+    {name: "Divine Strike", lvl: 8, src: "TGTT", cls: "Cleric", sub: "Blood"}
+
+cleric/life domain/8, cleric/tempest domain/8 → no duplicate
+```
+
+**It does not double-count mechanically**, which is the half that decides the
+severity and the half a data grep cannot answer:
+
+```
+cleric/time domain/8   wisMod=5  potentSpellcastingBonus=5   (not 10)
+cleric/blood domain/8            divineStrike="1d8"          (not 2d8)
+```
+
+The calc keys are written by assignment (`calculations.x = …`), which is
+idempotent, so the second grant overwrites rather than accumulates. Cosmetic,
+not a rules violation.
+
+**Scope:** TGTT domains only. Non-TGTT domains are clean, because they inherit
+the XPHB grant alone.
+
+**Provenance, and a correction to how this was first reported.** It was
+originally raised as *"Potent Spellcasting appears twice at L8 and L18"*. The
+levels were wrong (they are 7 and 8) and the scope was too narrow (Divine
+Strike is affected identically). A data enumeration then found all 11
+occurrences of Potent Spellcasting at level 8 and none at 18, which correctly
+refuted the claim *as stated* — but the second source is the XPHB **base
+class**, not a domain, so it was outside the files searched. A first live
+probe also came back clean because it spawned `cleric//18`, and the auto-picker
+chose Order Domain — a non-TGTT domain, which is exactly the case that does not
+reproduce. The bug only appears when a **TGTT** domain is chosen explicitly.
