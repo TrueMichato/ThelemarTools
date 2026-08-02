@@ -601,6 +601,12 @@ export function describeCharacter (spec: CharacterSpec): void {
 
 		// ── Persistence smoke (export → re-import via state) ───────────
 		test(`L1 export round-trip preserves identity`, async ({page}) => {
+			// Same budget as the L1 smoke: this test also drives the full
+			// wizard, and on homebrew presets the `beforeEach` brew fan-out
+			// (~50 brew documents) eats most of the default 60s on its own.
+			// Without this the test flakes in `beforeEach`, which reads as a
+			// product failure but is pure harness starvation.
+			test.setTimeout(120_000);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
 			const exported = await page.evaluate(() => {
 				const cs: any = (globalThis as any).charSheet;

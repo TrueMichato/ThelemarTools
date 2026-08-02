@@ -15919,6 +15919,19 @@ class CharacterSheetState {
 		}
 
 		this.removePendingFeatureChoice(choiceId);
+
+		// A fulfilled `subfeature` choice adds a REAL feature (`_fulfillSubfeatureChoice`
+		// → `addFeature`), but the name-keyed `FeatureEffectRegistry` grants it carries —
+		// languages, skill proficiencies, conditional modifiers — are applied by
+		// `applyClassFeatureEffects()`, which every build flow already ran BEFORE the
+		// choice modal was answered. Without this recalc the chosen option is displayed
+		// but mechanically inert until some unrelated later action happens to recompute
+		// (measured: a Wicked Witch's Hag Ancestor granted no language until the next
+		// level-up). Recalculating here — rather than in the single UI drain — means
+		// Builder, Level-Up, Quick Build, Respec, save-load replay and direct callers all
+		// get the grants, and the contract is pinnable without a DOM.
+		if (choice.kind === "subfeature") this.applyClassFeatureEffects();
+
 		return true;
 	}
 
@@ -37758,6 +37771,18 @@ class CharacterSheetState {
 		// far away for _extractCondition to catch, so it would otherwise leak a PERMANENT +10
 		// speed that double-stacks with the active state. Mirrors the Shell Defense skip above.
 		if (feature.name === "Bladesong" || /while the bladesong is active/i.test(feature.description)) {
+			return;
+		}
+
+		// Granny's Gifts (Wicked Witch Sorcerer) ends with "you can choose yourself or one
+		// creature you can see within 30 feet of you. The chosen creature has advantage on
+		// saving throws against being charmed or frightened" — a long-rest CHOICE whose
+		// beneficiary may well be somebody else. The prose parser has no way to see the
+		// "chosen creature" indirection, so it would register the charm/fright conditionals
+		// on the witch permanently AND duplicate the ones `setGrannysGiftsWard({target:
+		// "self"})` registers deliberately. Skip it; the ward owns those modifiers.
+		// Mirrors the Shell Defense / Bladesong skips above.
+		if (feature.name === "Granny's Gifts") {
 			return;
 		}
 

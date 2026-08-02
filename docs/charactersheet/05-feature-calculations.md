@@ -1319,3 +1319,103 @@ A dire wolf re-typed to size M / monstrosity, registered through
 The temp HP is *additional* to the dire wolf's own 37 HP, which is why it uses
 the new `tempHpPerLevel` key rather than `hpPerLevel`. No bespoke recalculation
 path — `recalculateCompanion()` re-derives it on every level-up.
+
+## Wicked Witch (Sorcerer, `Ar8` / re-published as `TGTT-AR`)
+
+The Wicked Witch Sorcerous Origin is published by MCDM's *Arcadia* Issue 8 and
+re-published by the *Traveler's Guide to Thelemar* as a bare `_copy` onto the
+TGTT Sorcerer chassis. Two consequences follow and both are load-bearing:
+
+- The Ar8 brew ships **two** subclass entries — one `classSource: "PHB"`, one
+  `classSource: "XPHB"` — plus seven `subclassFeature` entries. Any lookup keyed
+  on a single entry will silently miss half the installs.
+- On the TGTT chassis the origin is chosen at **sorcerer level 3**, so the Ar8
+  "level 1" features (Granny's Gifts, Hag Ancestor) arrive at 3, while Clever
+  Little Witch / Fly, My Pretty / Coven Calling keep their own 6 / 14 / 18.
+  The calculation block resolves `subclassLevel = is2024 ? 3 : 1` rather than
+  hard-coding either.
+
+Sorcery Points come from `static getSorceryPointsMaxForClass(cls)` and nowhere
+else — `level + 1` on the TGTT chassis, `level` (from 2) on PHB/XPHB.
+
+### Table-driven sub-choices — a generic engine
+
+Hag Ancestor is "choose Green, Night or Sea" published **only** as prose plus a
+`{@table}` reference, and the character sheet does not load table data at all
+(there is no `DataUtil.table` anywhere in `js/charactersheet/`). Rather than a
+bespoke picker, `charactersheet-class-utils.js` gains:
+
+```javascript
+TABLE_DRIVEN_SUBFEATURE_CHOICES = {
+    "hag ancestor|ar8": {
+        prompt: "Choose your hag ancestor",
+        options: [{name: "Green Hag", entries: [...]}, ...],
+    },
+};
+```
+
+consumed by `findTableDrivenSubfeatureChoiceInFeature()` inside the existing
+`seedSubclassFeatureChoices()` loop — the single chokepoint that **Builder,
+Level-Up and Quick Build all drain**. Each option carries synthesised `entries`
+prose, so `_fulfillSubfeatureChoice()`'s existing fallback
+(`{name, source, entries}`) routes the language and skill proficiency through
+the normal parse pipeline. Adding another table-driven subclass later is one
+registry entry, not a new code path.
+
+`getHagAncestorKind()` reads the durable `_data.chosenSubfeatures` record, so
+the ancestor survives save/load and respec without a parallel store.
+
+**Deliberate source asymmetry:** the Sea hag's specialty is *Transmutation*
+while the Granny's Gifts replacement pool is enchantment/illusion only. That is
+Ar8 as written. The specialty school governs the L6/L18 discount; the spell list
+governs the swap pool. They are implemented independently.
+
+### `GRANTED_SPELL_SWAP_RULES` — generic granted-spell replacement
+
+Divine Soul already had a bespoke "swap the one granted spell" override.
+Granny's Gifts needs the same thing for ten spells across five levels, so the
+bespoke path was generalised into a declarative registry plus a
+`_data.grantedSpellOverrides` store:
+
+```javascript
+{feature, className, originalSpell, replacementSpell, level}
+```
+
+surfaced as a Swap affordance on the Spells tab. `getGrantedSpellSwapRule()`
+resolves by `featureName|source` with a source-agnostic fallback (the same
+subclass ships under `Ar8` and `TGTT-AR`). Divine Soul now runs through the same
+store.
+
+Three chokepoints propagate the swap flag and all three must be kept in sync:
+`_mergeSpellMetadata`, the `addSpell` allow-list, and the sync stamp in
+`populateSubclassSpells`.
+
+### Clever Little Witch (6) / Coven Calling (18)
+
+`getCleverLittleWitchCost(spellLevel, school)` halves **rounded down with no
+clamp**, so a 1st-level spell of your specialty school costs **0** sorcery
+points. That is RAW; a test pins it so nobody "fixes" it to 1.
+`useCleverLittleWitch()` spends the points and refuses on cantrips, insufficient
+points and out-of-range. Coven Calling widens the eligible spell set to anything
+in the `seenSpells` window and adds `summonCovenDuplicates()` (2 SP, two
+`CLASS_SUMMON` companions) / `castWithCovenDuplicate()` (SP = level, refuses
+above 3rd and refuses non-instantaneous) / `dismissCovenDuplicates()`.
+
+### Two generic fixes this subclass forced
+
+**`fulfillFeatureChoice()` now recalculates.** A `subfeature` choice granted a
+language and a skill proficiency that did not appear until *something else*
+happened to trigger `applyClassFeatureEffects()`. The recalc lives in **state**,
+not in `charactersheet.js::processPendingFeatureChoices()`, so it covers
+Builder, Level-Up, Quick Build, Respec, save-load replay and direct API callers
+alike — and is Jest-pinnable without a DOM. There is exactly one production
+caller of `fulfillFeatureChoice` (`charactersheet.js`), verified by grep.
+
+**`_processFeatureModifiers()` now skips `Granny's Gifts`.** Its prose ("the
+chosen creature has advantage on saving throws against being charmed or
+frightened") was text-parsed into permanent `save:all` conditionals **on the
+witch**, so an unwarded witch — and a witch who warded an *ally* — silently
+gained the benefit, and a self-ward produced duplicate rows in the per-roll
+conditional picker. The named early-return follows the established Shell Defense
+/ Bladesong / Zodiac Form precedent; the ward's own `setGrannysGiftsWard()`
+registers the real modifiers.

@@ -895,6 +895,38 @@ export const PRESET_FULL_SHADOW_MAGIC_SORCERER: CharacterPreset = {
 	signatureSpells: ["Fire Bolt", "Shield"],
 };
 
+/**
+ * Wicked Witch Sorcerous Origin (MCDM's *Arcadia* Issue 8, source `Ar8`) on the
+ * TGTT Sorcerer chassis.
+ *
+ * `homebrew/TravelersGuidetoThelemar.json` republishes the Arcadia subclass as a bare
+ * `_copy` under source `TGTT-AR`, so the Arcadia brew MUST be loaded alongside TGTT or
+ * the copy cannot resolve and the subclass renders empty.
+ *
+ * The TGTT Sorcerer picks its Sorcerous Origin at LEVEL 3 (not 1), and its Sorcery Point
+ * pool is `level + 1` from L1 — both differ from the PHB chassis.
+ */
+export const PRESET_FULL_WICKED_WITCH_SORCERER: CharacterPreset = {
+	race: "Hochling",
+	raceSource: "TGTT",
+	className: "Sorcerer",
+	classSource: "TGTT",
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Morgaine Cauldwell",
+	skillCount: 2,
+	subclassName: "Wicked Witch",
+	subclassSource: "TGTT-AR",
+	// CS-BUG-056: without this the standard array is assigned STR-first and the Sorcerer
+	// lands on CHA 8, which would make every spell save DC unrepresentative.
+	abilityPriority: ["cha", "con", "dex", "wis", "int", "str"],
+	signatureSpells: ["Fire Bolt", "Shield"],
+	// No `homebrewUrls`: the Arcadia 8 brew that defines the Wicked Witch is already
+	// part of the site's default `homebrew/index.json` fan-out, and TGTT republishes it
+	// onto the TGTT Sorcerer as `Wicked Witch|TGTT-AR`. Supplying an explicit brew URL
+	// would suppress that fan-out and drop the TGTT Sorcerer entirely.
+};
+
 /** Convenience array of all comprehensive presets — handy for parameterised smoke tests. */
 export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_MERCY_MONK_CHANGELING,
@@ -921,6 +953,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_CREATION_BARD_CHANGELING,
 	PRESET_FULL_ARCANA_CLERIC,
 	PRESET_FULL_SHADOW_MAGIC_SORCERER,
+	PRESET_FULL_WICKED_WITCH_SORCERER,
 ];
 
 /**

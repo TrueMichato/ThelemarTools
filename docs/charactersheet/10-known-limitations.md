@@ -434,6 +434,31 @@ See [Combat System → Conditional Modifier Picker](./06-combat-system.md#condit
 
 See [Components Reference → Favorites System](./03-components-reference.md#favorites-system).
 
+### No Ally-Targeting Machinery Anywhere on the Sheet
+
+The character sheet models exactly one creature. There is no ally roster, no
+targeting API, and no way to push a modifier onto another player's sheet
+(verified by grep, not assumed). Features that let you buff *another creature*
+therefore land in one of two buckets:
+
+- **Self-target** — real modifiers registered on this sheet.
+- **Ally-target** — a *displayed designation* plus its lifecycle (who was
+  chosen, when it expires), with no numeric effect anywhere.
+
+Granny's Gifts (Wicked Witch Sorcerer) is the current example: warding yourself
+registers real gated `save:advantage:charmed|frightened` conditionals, while
+warding an ally records the name, shows a Features-tab badge, and clears on the
+next long rest — and deliberately grants the witch nothing.
+
+### Swapping a Granted Spell Also Removes a Player-Owned Copy
+
+Spells coalesce by identity key (`name|source`). If a subclass grants *bane* as
+an always-prepared spell and the player *also* learned *bane* normally, both
+live in a single entry. Swapping the granted spell away (Granny's Gifts, Divine
+Soul) therefore removes the player-learned copy too. Pre-existing behaviour of
+the granted-spell store, now shared by both features rather than unique to
+Divine Soul.
+
 ---
 
 *Previous: [Testing Strategy](./09-testing-strategy.md) | Next: [Future Roadmap](./11-future-roadmap.md)*

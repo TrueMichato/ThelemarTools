@@ -200,6 +200,30 @@ describe("Hag Ancestor — the table-driven choice engine", () => {
 		expect(state._data.features.some(f => f.name === "Hag Ancestor: Sea Hag")).toBe(true);
 	});
 
+	// CS regression pin: fulfilling a `subfeature` choice must RECALCULATE, or the
+	// name-keyed registry grants (language / skill proficiency / conditional modifier)
+	// stay unapplied until some unrelated later action happens to recompute. Measured
+	// live in the browser: a level-3 Wicked Witch had `getLanguages() === ["Common",
+	// "Celestial"]` — no Sylvan — right after answering the Hag Ancestor modal, and only
+	// gained it on the NEXT level-up.
+	test("fulfilling the choice APPLIES its registry grants immediately, with no extra recalc", () => {
+		const state = makeWickedWitch(6, {ancestor: null});
+		const feature = state._data.features.find(f => f.name === "Hag Ancestor");
+		CharacterSheetClassUtils.seedSubclassFeatureChoices(state, [feature]);
+		const pending = state.getPendingFeatureChoices().find(c => c.featureName === "Hag Ancestor");
+
+		expect(state.getLanguages().map(l => l.toLowerCase())).not.toContain("sylvan");
+		expect(state.isSkillProficient("deception")).toBe(false);
+
+		state.fulfillFeatureChoice(pending.id, {name: "Hag Ancestor: Green Hag", source: "Ar8"});
+
+		// NO `applyClassFeatureEffects()` here on purpose — that is the whole point.
+		expect(state.getLanguages().map(l => l.toLowerCase())).toContain("sylvan");
+		expect(state.isSkillProficient("deception")).toBe(true);
+		expect(state.aggregateModifiers("check:cha").conditionalsAvailable
+			.some(c => /influence hags/i.test(c.conditional || ""))).toBe(true);
+	});
+
 	test.each([
 		["Green", "Illusion", "Sylvan", "deception"],
 		["Night", "Enchantment", "Abyssal", "insight"],
@@ -277,6 +301,39 @@ describe("Granny's Gifts — the long-rest ward", () => {
 	test("a sorcerer without the feature cannot ward", () => {
 		const state = makeWickedWitch(2);
 		expect(state.setGrannysGiftsWard({target: "self"}).ok).toBe(false);
+	});
+
+	// CS regression pin: the feature's own prose ("The chosen creature has advantage on
+	// saving throws against being charmed or frightened") is a "chosen creature"
+	// indirection the text parser cannot see. Left alone it registers the two
+	// conditionals on the witch PERMANENTLY — so an unwarded witch, and a witch who
+	// warded an ALLY, both silently gained the benefit, and a self-ward produced two
+	// identical rows in the per-roll conditional picker. Measured live: a level-3 witch
+	// showed `["against being charmed", "against being frightened", "against being
+	// charmed", "against being frightened"]` on `aggregateModifiers("save:wis")`.
+	const wardConditionals = (state) => (state.aggregateModifiers("save:wis").conditionalsAvailable || [])
+		.map(c => String(c.conditional || "").toLowerCase())
+		.filter(c => /charmed|frightened/.test(c));
+
+	test("the feature's prose does NOT auto-grant the ward to the witch", () => {
+		const state = makeWickedWitch(6);
+		expect(wardConditionals(state)).toHaveLength(0);
+	});
+
+	test("warding an ALLY leaves the witch with no charm/fright conditional at all", () => {
+		const state = makeWickedWitch(6);
+		state.setGrannysGiftsWard({target: "ally", targetName: "Sindri"});
+		expect(wardConditionals(state)).toHaveLength(0);
+	});
+
+	test("warding yourself offers each condition EXACTLY once to the per-roll picker", () => {
+		const state = makeWickedWitch(6);
+		state.setGrannysGiftsWard({target: "self"});
+		const offered = wardConditionals(state);
+		expect(offered.filter(c => c.includes("charmed"))).toHaveLength(1);
+		expect(offered.filter(c => c.includes("frightened"))).toHaveLength(1);
+		// …and it stays gated: a plain WIS save gets no free advantage.
+		expect(state.aggregateModifiers("save:wis").advantage).toBeFalsy();
 	});
 });
 
@@ -575,6 +632,17 @@ describe("Fly, My Pretty (14)", () => {
 		expect(state.dismissEnchantedFlyingItem()).toBe(true);
 		expect(state.isStateActive("flyMyPretty")).toBe(false);
 		expect(state.getEnchantedFlyingItem()).toBeNull();
+	});
+
+	// RAW gives exactly one end condition — "If you enchant another object, the previous
+	// enchantment ends" — so unlike the Granny's Gifts ward (explicitly re-chosen every
+	// long rest) the enchantment persists across rests. Pinned because the two features
+	// sit in the same long-rest hook and it would be easy to "tidy" this into it.
+	test("the enchantment survives a long rest — only a NEW object ends it", () => {
+		const state = makeWickedWitch(14);
+		state.enchantFlyingItem({itemName: "Broomstick", commandWord: "Up"});
+		state.onLongRest();
+		expect(state.getEnchantedFlyingItem()?.itemName).toBe("Broomstick");
 	});
 
 	test("a sorcerer below 14 cannot enchant an object", () => {

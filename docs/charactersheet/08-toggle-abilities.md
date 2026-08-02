@@ -399,6 +399,41 @@ state whose name is generic enough to appear in unrelated content; such states
 are then reachable only through an explicit `activateState(key)` call or a
 `FEATURE_CLASSIFICATION_OVERRIDES` entry.
 
+#### Fly, My Pretty (Wicked Witch Sorcerer, L14, `Ar8`)
+
+```javascript
+flyMyPretty: {
+    name: "Fly, My Pretty",
+    icon: "🧹",
+    effects: [
+        {type: "bonus", target: "speed:fly", value: 60},
+        {type: "conditionImmunity", target: "charmed"},
+        {type: "conditionImmunity", target: "frightened"},
+    ],
+    requiresClassLevel: 14,
+}
+```
+
+This state models *riding* the enchanted object, not owning it. The two halves
+are deliberately separate:
+
+- **Ownership** lives in durable state — `enchantFlyingItem({itemName,
+  commandWord})` / `getEnchantedFlyingItem()` / `dismissEnchantedFlyingItem()`.
+  RAW gives exactly one end condition ("if you enchant another object, the
+  previous enchantment ends"), so the enchantment **survives a long rest**. The
+  long-rest hook clears the Granny's Gifts ward, the Coven Calling seen-spell
+  window and the duplicates, but pointedly not the flying item; a Jest pin holds
+  that line because all four live in the same hook and it would be easy to
+  "tidy" the enchantment into it.
+- **Riding** is the toggle above. `enchantFlyingItem()` does not activate it —
+  a witch can own a broom and be standing next to it.
+
+`{type: "bonus", target: "speed:fly", value: 60}` is a **grant**, and it is the
+fifth typed non-walk speed emitter in the codebase (re-derive the set with
+`git grep -n 'target: "speed:' -- js/charactersheet/` — an enumeration like this
+has an expiry date). Typed speed grants combine with `Math.max`, so a Hochling's
+innate fly speed and the broom do not stack.
+
 #### Launch Momentum (Steel Hawk Fighter, `GriffonsSaddlebag2`)
 
 ```javascript
