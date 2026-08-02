@@ -4879,8 +4879,35 @@ runner no longer uses.
 
 ## CS-BUG-107 — an unanchored `/Roc/i` matches "Au**roc**hs", aborting the Zodiac Druid matrix at its FIRST checkpoint
 
-**Status:** Open (harness/authoring defect — **not** a product bug)
-**Surface:** `test/e2e/specs/tgtt-hunter-zodiac-centaur.spec.ts` → `buildZodiacFormChecks()`
+**Status:** **Fixed** (harness/authoring defect — **not** a product bug).
+**Surface:** `test/e2e/utils/tgttFeatureEffects.ts:441` → `ZODIAC_FORM_EFFECTS["Roc"]`
+
+> **Correction to this entry's original surface.** It first named
+> `test/e2e/specs/tgtt-hunter-zodiac-centaur.spec.ts` → `buildZodiacFormChecks()`.
+> That is wrong, and the mis-attribution cost a round trip: the pool in
+> `tgttFeaturePools.ts` was **already fully anchored** (`/^Roc$/i`,
+> `/^Aurochs$/i`) *before* this entry was filed —
+> `git show 71b64cde^:test/e2e/utils/tgttFeaturePools.ts` proves it, and
+> `git show --stat 71b64cde` shows that commit touched **only**
+> `known-bugs.md`. Reading the anchored pool and inferring the bug was
+> fixed was itself an error; the failure still reproduced verbatim on a
+> real run. The single unanchored pattern lived in a different,
+> **hand-written** file (`tgttFeatureEffects.ts` states "These maps are
+> NOT auto-generated"), which also retires the earlier claim that the fix
+> belonged in generated code and was therefore out of reach.
+>
+> Re-derive rather than trust either file name:
+> ```
+> grep -rnE '/[^/^]*Roc[^/$]*/' test/e2e/ | grep -v '\^Roc\$'
+> ```
+
+**Fix:** anchor the pattern — `matchAny: [/^Roc$/i]`. Verified
+`/Roc/i.test("Aurochs") === true` and `/^Roc$/i.test("Aurochs") === false`.
+
+A sweep for the same substring-collision shape across **every** map in
+that file — testing each `matchAny` pattern against every sibling key in
+its own map — returns **no other collisions**. Roc/Aurochs was the only
+instance.
 
 ### Symptom
 
