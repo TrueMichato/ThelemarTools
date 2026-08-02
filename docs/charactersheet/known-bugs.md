@@ -5044,6 +5044,44 @@ exist in spec source.** They are emitted at runtime by `buildCombatMethodChecks`
 returns. This is the same class of error already recorded in CS-BUG-087's notes:
 **a regex scan over source is not an enumeration.**
 
+> **Measured, and it is worse than "14 of the 16": `findInertRows()` finds
+> ZERO rows on ALL 43 specs.** Instrumented the audit in-tree to print its own
+> intermediate, then restored it byte-identical:
+>
+> ```
+> node scripts/auditE2eCoverage.mjs   (43 specs)
+> 43 × inertRows=0 withProbes=0
+> ```
+>
+> It misses even the two rows that *are* in spec source, for two different
+> reasons — one per detection cause:
+> - **Meteor Knight `L13..16`** — the object literal is `{`, then a two-line
+>   comment, then `level: 13` (`tgtt-meteor-knight-fighter.spec.ts:73-77`). The
+>   pattern is `/\{\s*level:\s*(\d+)/`, which allows only whitespace between the
+>   brace and the key. Comment ⇒ no match. (Cause 2.)
+> - **Wild Shape `L8..11`** (`tgtt-hunter-zodiac-centaur.spec.ts:328`) — matches
+>   the pattern fine, then survives `CHECKPOINTS.some(c => c >= lo && c <= hi)`
+>   because the global list contains **11**. Against the row's real legs
+>   `{6,20}` nothing lands. (Cause 4.)
+>
+> **Consequence — the formula's own guard against this defect has never fired.**
+> `:712-713` build `inertWithProbes` from the blind scanner and `:728` subtracts
+> it:
+>
+> ```js
+> const inertRows = findInertRows(src);
+> const inertWithProbes = inertRows.filter(r => r.hasProbes).length;
+> …
+> const effective = … + siblingCovered - inertWithProbes;   // always - 0
+> ```
+>
+> So the expression contains an explicit correction term intended to stop inert
+> rows being laundered into the score, wired to the one input structurally
+> incapable of finding them. It has evaluated to `0` for every spec, every run.
+> This is a sharper indictment than the >100% artefact, and it lives in the same
+> line. Credit to the `lunar-sorcery-sorcerer` session for the structural
+> argument; the "exactly 0 on 43 of 43" figure is the measurement of it.
+
 **4. The detector's model is wrong, not just its reach — it holds ONE global
 checkpoint list, and multiclass specs do not use it.** `characterSpecFactory.ts:907`
 
