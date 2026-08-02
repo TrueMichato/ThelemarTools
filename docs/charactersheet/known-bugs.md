@@ -3830,10 +3830,24 @@ classSummon(summonHoundOfIllOmen) damage "2d6+3" missing "piercing"
 Not a product bug: the companion sets `damageType: "piercing"` correctly.
 The `classSummon` reader in `comprehensiveBuildHelpers.ts` collected only
 `[damage, desc, entries]`, so `damageContains` could never match a
-companion carrying its type structurally rather than inline — and the
-field is `description`, not `desc`. A *cannot-PASS* defect living in the
-**shared harness**, latent for every future author. It was reachable only
-through the inert-window fix.
+companion carrying its type structurally rather than inline. A
+*cannot-PASS* defect living in the **shared harness**, latent for every
+future author. It was reachable only through the inert-window fix.
+
+> **⚠️ The fix adds `damageType` ONLY. Do not "complete" it by adding
+> `description`.** An earlier phrasing here — *"the field is `description`,
+> not `desc`"* — read as though `description` were the intended replacement.
+> It is not, and adding it reintroduces the defect class this fix removes:
+> `description` is **prose** fed to a `contains` matcher, so
+> `damageContains: "fire"` would be satisfied by a description reading *"the
+> target catches fire"* — a probe passing for the wrong reason. The exclusion
+> is a judgement, not an oversight, and is argued in the comment above
+> `comprehensiveBuildHelpers.ts`'s `const flat = …`.
+>
+> `desc` is retained but **dead**: `grep -cE '\bdesc:' js/charactersheet/charactersheet-state.js`
+> → **0**, versus **254** for `description:`. It is harmless only for that
+> reason; if a future companion shape starts populating `desc` with prose it
+> becomes the same hazard and should be dropped too.
 
 **Status: swept.** Inert level windows and unreachable pick thresholds are
 both at **zero** suite-wide. Run `node scripts/auditE2eCoverage.mjs` after
