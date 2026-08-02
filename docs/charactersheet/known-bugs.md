@@ -4873,7 +4873,7 @@ for the bug itself. Falsifying it required the second break above.
 
 **Status:** Open. Partially addressed — `913600e4` widened the offending
 windows that existed at the time and added `scripts/auditE2eCoverage.mjs`. The
-underlying hole is still open, and **13 rows are inert** — measured at `fae134bb`, re-measured at `380389fb`, unchanged (count corrected from 12; see Root cause 1).
+underlying hole is still open, and **16 rows are inert** — count corrected twice (12 -> 13 -> 16); see Root cause 1 and Root cause 4.
 
 **Affects:** `test/e2e/utils/characterSpecFactory.ts` (the MEGA and matrix
 loops) and `scripts/auditE2eCoverage.mjs` (the detector).
@@ -5012,12 +5012,48 @@ worse than no detector, because the badge actively discourages a second look.
 
 ### Root cause — two independent ones
 
-**1. `findInertRows()` scans spec source text, but 12 of the 13 rows do not
+**1. `findInertRows()` scans spec source text, but 14 of the 16 rows do not
 exist in spec source.** They are emitted at runtime by `buildCombatMethodChecks`
 (`test/e2e/utils/tgttFeaturePools.ts:1420`/`:1431`). A lexical scan of
 `test/e2e/specs/*.ts` is structurally incapable of seeing a row a helper
 returns. This is the same class of error already recorded in CS-BUG-087's notes:
 **a regex scan over source is not an enumeration.**
+
+**4. The detector's model is wrong, not just its reach — it holds ONE global
+checkpoint list, and multiclass specs do not use it.** `characterSpecFactory.ts:907`
+
+```js
+await assertFeaturesMatrix(charSheet, featuresMatrix, leg.toTotalLevel);
+```
+
+The multiclass path evaluates the matrix **once per leg, at that leg's total
+level**. For `tgtt-hunter-zodiac-centaur` the legs are `toTotalLevel: 6` (`:458`)
+and `20` (`:460`) — **two stops, not five**. So the *same file* feeds two call
+sites that need two different checkpoint sets, and `grep -c 'toTotalLevel'
+scripts/auditE2eCoverage.mjs` returns **0**: the tool has no concept of legs at
+all.
+
+Causes 1-3 are about what the detector can *see*. This one is about the model
+being wrong, so **a perfect `findInertRows()` still gets this file wrong.** The
+worked example is `tgtt-hunter-zodiac-centaur.spec.ts:328` — hand-written,
+lexically plain, no comment between brace and key, so every proposed scanner
+repair marks it live:
+
+```js
+{ level: 8, untilLevel: 11, name: /wild shape/i, kind: "resource", resourceMax: [2, 2], restoreOn: "short" }
+```
+
+`6 < 8` and `20 > 11`, so no leg lands inside the window.
+
+> ⚠️ **One correction to how this row is usually described.** It is *not* a
+> silent kill. The comment at `:323-327` states the inertness outright — *"the
+> multiclass matrix is evaluated once PER LEG … so the level-8 tier is inert
+> here and the `shortRestRestores` probe is relocated onto the level-12 tier
+> rather than dropped."* The author knew and compensated; what is lost is the
+> row's `resourceMax: [2,2]`, not the restore probe. That makes it a **perfect**
+> demonstration of root cause 4 — the detector calls live a row whose own
+> adjacent comment says it is dead — and a **poor** example of an author being
+> misled.
 
 > **Count corrected 12 → 13 (2026-08-02, still reproducing at `380389fb`).**
 > Both earlier figures were derived by reading, and both missed the same row: the
@@ -5037,13 +5073,24 @@ returns. This is the same class of error already recorded in CS-BUG-087's notes:
 >     if (!CP.some(c => c >= r.level && c <= (r.untilLevel ?? 20))) console.log(r.level, r.untilLevel);
 > ```
 >
-> | call site | rows | inert |
-> |---|---|---|
-> | `buildCombatMethodChecks("Monk", {subclassName: "Astral Self"})` | 10 | **5** — L2..2, L6..7, L8..9, L13..14, L15..16 |
-> | `buildCombatMethodChecks("Ranger", {subclassName: "Hunter"})` | 12 | **6** — L2..2, L6..6, L7..8, L9..10, L13..14, L15..16 |
-> | `…{maxClassLevel: 6}` (`:271`, the missed one) | 5 | **1** — L2..2 |
-> | Meteor Knight `L13..16` (hand-written, self-documented) | — | 1 |
-> | | | **13** |
+> | call site | checkpoint set | rows | inert |
+> |---|---|---|---|
+> | `buildCombatMethodChecks("Monk", {subclassName: "Astral Self"})` | `[3,5,11,17,20]` | 10 | **5** — L2..2, L6..7, L8..9, L13..14, L15..16 |
+> | `buildCombatMethodChecks("Ranger", {subclassName: "Hunter"})` (`:45`) | `[3,5,11,17,20]` | 12 | **6** — L2..2, L6..6, L7..8, L9..10, L13..14, L15..16 |
+> | `…{maxClassLevel: 6}` (`:271`, the missed one) | **`{6,20}`** | 5 | **3** — L2..2, L3..4, L5..5 |
+> | Wild Shape `L8..11` (`:328`, hand-written) | **`{6,20}`** | — | **1** |
+> | Meteor Knight `L13..16` (hand-written, self-documented) | `[3,5,11,17,20]` | — | 1 |
+> | | | | **16** |
+>
+> **Count corrected again, 13 → 16.** The `13` figure applied
+> `[3,5,11,17,20]` to every call site. That set is a property of the
+> **consuming spec**, not a constant — see root cause 4. The two `{6,20}` rows
+> above are what the wrong parameter hid, and the second of them is
+> hand-written. Negative controls, since they are the useful half:
+> `tgtt-hexblade-divine-soul-tortle` (legs `{2,20}`) is **clean** — its helpers
+> return no windowed rows — and the single-class loops apply no level-cap
+> filter, so no spec loses checkpoints to its own max level. The multiclass
+> defect is confined to one file.
 >
 > The gate is `comprehensiveBuildHelpers.ts:2311`
 > (`if (fc.untilLevel != null && currentLevel > fc.untilLevel) continue;`), so an
