@@ -3778,7 +3778,7 @@ own documentation) caught *before* shipping rather than after.
 
 ---
 
-## CS-BUG-094 — TGTT Cleric domains re-grant a feature the XPHB base class already gave, so it renders twice
+## CS-BUG-104 — TGTT Cleric domains re-grant a feature the XPHB base class already gave, so it renders twice
 
 **Status:** Open — display-only, mechanically single. Low severity, filed
 because it is reproducible and player-visible.
@@ -3816,6 +3816,26 @@ not a rules violation.
 
 **Scope:** TGTT domains only. Non-TGTT domains are clean, because they inherit
 the XPHB grant alone.
+
+**Surface observed on: the LIVE SHEET in a real browser**, via a Playwright
+probe — not Jest, and not a grep. Exact reproduction:
+
+```ts
+// test/e2e/specs/<temp>.spec.ts, run with PW_PORT=<distinct> PW_WORKERS=1
+await page.goto("/charactersheet.html", {waitUntil: "domcontentloaded"});
+await page.waitForFunction(() => (globalThis as any).charSheet?.spawn);
+await page.evaluate(async () => {
+    const cs = (globalThis as any).charSheet;
+    await cs.spawn("cleric/time domain/8", {save: false});
+    return cs._state.getFeatures().map(f => f.name)
+        .filter(n => /potent spellcasting/i.test(n));       // → 2 entries
+});
+```
+
+This distinction is load-bearing. Under **Jest** `getFeatures()` returns an
+empty array — no data load — so filtering it for a feature name yields nothing
+and *any* Jest-based observation of this bug is vacuous by construction. The
+browser is the only surface on which it is visible at all.
 
 **Provenance, and a correction to how this was first reported.** It was
 originally raised as *"Potent Spellcasting appears twice at L8 and L18"*. The
