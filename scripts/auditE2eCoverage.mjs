@@ -503,7 +503,14 @@ function main () {
 			}
 		}
 		log("");
-		log(`  ${totalInertProbes} row(s) carry probes that can never execute, across ${inertSpecs.length} spec(s).`);
+		const probeSpecs = inertSpecs.filter(r => r.inertWithProbes > 0);
+		if (totalInertProbes) {
+			log(`  ${totalInertProbes} row(s) carry probes that can never execute, across ${probeSpecs.length} spec(s).`);
+		}
+		const bare = inertSpecs.reduce((a, r) => a + r.inertRows.filter(x => !x.hasProbes).length, 0);
+		if (bare) {
+			log(`  ${bare} further inert row(s) attach no probes — the existence check itself never runs.`);
+		}
 		log(`  Unlike \`skip: true\` these leave no marker — widen untilLevel to reach a`);
 		log(`  checkpoint, or move the row's level to one.`);
 		log("");
