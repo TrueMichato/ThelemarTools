@@ -1254,3 +1254,148 @@ A dire wolf re-typed to size M / monstrosity, registered through
 The temp HP is *additional* to the dire wolf's own 37 HP, which is why it uses
 the new `tempHpPerLevel` key rather than `hpPerLevel`. No bespoke recalculation
 path — `recalculateCompanion()` re-derives it on every level-up.
+
+---
+
+## Shadow Sorcery (Sorcerer, RHW)
+
+The **2024 rework** of Shadow Magic, published under its own
+`case "Shadow Sorcery":` in the Sorcerer switch. It sits on the **XPHB**
+chassis (Innate Sorcery at 1, Font of Magic + Metamagic at 2, subclass at 3,
+Sorcery Points = level).
+
+> ⚠️ **`shortName` collision.** `"Shadow"` is the `shortName` of *three*
+> sorcerer subclasses — `Shadow Magic|XGE` (once per `classSource`) and
+> `Shadow Sorcery|RHW`. The calc switch is `switch (cls.subclass?.name)`, so
+> `case "Shadow"` routes to the XGE block; anything resolving by `shortName`
+> (including the E2E spawner shorthand `sorcerer/shadow/N/race`) is ambiguous
+> and must not be used. Address this subclass by **name + source**.
+>
+> Re-derive the collision set rather than trusting this note:
+> ```
+> python3 -c "import json;d=json.load(open('data/class/class-sorcerer.json'));[print(repr(s['name']),s['source'],repr(s.get('shortName')),s.get('classSource')) for s in d['subclass'] if 'shadow' in s['name'].lower()]"
+> ```
+
+```javascript
+// L3 — Power of Shadow → Eyes of the Dark
+hasPowerOfShadow: true,
+darkvision: 120,
+darkvisionSource: "Eyes of the Dark",
+blindsight: 10,                        // ← CS-BUG-098: the grant loop was darkvision-only
+blindsightSource: "Eyes of the Dark",
+seeThroughOwnSpellDarkness: true,      // Darkness created by a spell YOU cast
+
+// L3 — Power of Shadow → Strength of the Grave
+// (no dedicated calc flags; the intervention registry reads `hasPowerOfShadow`)
+
+// L6 — Beasts of Ill Omen
+hasBeastsOfIllOmen: true,
+beastsOfIllOmenCost: 3,
+resourceCastSpells: [{spell: "Summon Beast", resource: "Sorcery Points", cost: 3, …}],
+
+// L14 — Shadow Walk  (identical to XGE; RAW is unchanged)
+hasShadowWalk: true, shadowWalkRange: 120, shadowWalkAction: "bonus",
+
+// L18 — Umbral Form
+hasUmbralFormRhw: true,
+umbralFormRestoreCost: 6,              // RESTORES the use; does not pay for it
+umbralFormIncorporealDamage: "1d10",
+umbralFormIncorporealDamageType: "force",
+```
+
+### Five substantive divergences from Shadow Magic (XGE)
+
+The danger with this subclass is implementing XGE behaviour under an RHW name.
+Every row below is a place where reusing the XGE code is *wrong*:
+
+| Feature | XGE | RHW |
+|---|---|---|
+| Strength of the Grave | restores **1** HP; radiant and criticals excluded | restores **CHA mod + Sorcerer level**; **no** exclusions |
+| Eyes of the Dark | darkvision 120; casts *Darkness* for SP | darkvision 120 **+ blindsight 10**; **no** SP-cast Darkness |
+| Ill Omen (L6) | *Hound* — a scaled `CLASS_SUMMON` companion | *Beasts* — a **3-SP free cast of Summon Beast**, optional concentration |
+| Umbral Form (L18) | 6 SP to **enter**, 1 minute | bound to **Innate Sorcery**, 1/long rest, 6 SP **restores** the use |
+| Chassis | PHB 2014 (subclass at L1) | XPHB (subclass at L3, Innate Sorcery at L1) |
+
+Everything else — the zero-HP intervention pipeline, the resource-cast
+pipeline, the sense-grant bridge, the active-state form — is **reused**, not
+reimplemented.
+
+### `hpOnSuccess` — the zero-HP registry became parametric
+
+`ZERO_HP_INTERVENTIONS` entries previously left you on a hardcoded 1 HP.
+`hpOnSuccess` now accepts either a flat number or a descriptor:
+
+```javascript
+strengthOfTheGraveRhw: {
+    featureName: "Power of Shadow",       // the STORED feature (see below)
+    displayName: "Strength of the Grave", // what the prompt calls it
+    calcFlag: "hasPowerOfShadow",
+    saveAbility: "cha",
+    dcBase: 5,
+    dcAddsDamage: true,
+    // NO excludedDamageTypes and NO excludedOnCritical — unlike XGE
+    hpOnSuccess: {abilityMod: "cha", classLevel: "Sorcerer"},
+    spendUseOn: "success",
+    recharge: "long",
+},
+```
+
+`_resolveZeroHpInterventionHp()` resolves the descriptor, defaults to a flat 1
+and clamps into `[1, maxHp]`.
+
+> **The stored feature is `Power of Shadow`, not `Strength of the Grave`.**
+> Eyes of the Dark and Strength of the Grave are *nested named entries* inside
+> one JSON feature; nothing in the codebase splits nested entries into separate
+> features. The same is true of Incorporeal Movement / Shadow Resilience inside
+> Umbral Form. `displayName` exists so the prompt can still say the right thing.
+
+### Beasts of Ill Omen — a resource-cast with a player CHOICE
+
+Not a companion descriptor. The descriptor published by the calc block adds
+four keys the pipeline now understands:
+
+```javascript
+{
+    spell: "Summon Beast", resource: "Sorcery Points", cost: 3,
+    castingTime: "bonus",
+    concentrationOptional: true,      // ← the player CHOICE
+    waivedDurationMinutes: 1,         // duration if the waiver is taken
+    ignoresMaterialComponents: true,
+    ignoresPreparation: true,
+    replacesPrevious: true,           // recasting ends the earlier summon
+    summon: {forms: [...], baseLevel: 2},
+}
+```
+
+`castSpellWithResource(name, {waiveConcentration, summonForm})` honours the
+waiver **only when the descriptor offers it**, dismisses any previous summon,
+and creates a real companion via `_createResourceCastSummon()`.
+`charactersheet.js` `_pCastSpellWithResource()` asks both questions at cast
+time, so the concentration choice is surfaced rather than assumed.
+`getSummonSpiritStats({spellLevel, baseLevel})` is the extracted stat
+arithmetic, shared with the Spells tab's own summon picker.
+
+### Umbral Form — bound to Innate Sorcery
+
+`ACTIVE_STATE_TYPES.umbralFormRhw` carries `requiresStates: ["innateSorcery"]`,
+so `activateState()` refuses while Innate Sorcery is off and
+`deactivateState("innateSorcery")` **cascades** it off. It costs no resource:
+`activateUmbralForm()` spends one of its own 1/long-rest uses, and
+`restoreUmbralFormUse()` spends 6 Sorcery Points to buy a use back.
+
+Shadow Resilience is the same 11 curated `{target: "damage:<type>"}` effects
+XGE uses — RAW excludes **both** Force and Radiant in both editions.
+
+> `Umbral Form` is a name shared with Shadow Magic, so `detectActivatableFeature()`
+> disambiguates it by **source** through a `stateBySourceOverrides` table
+> consulted before the generic name-matching loop (`matchedBy: "nameAndSource"`).
+> The RHW state also sets `noNameDetect: true`.
+
+### Innate Sorcery (XPHB base feature)
+
+Implemented here because the subclass depends on it.
+`ACTIVE_STATE_TYPES.innateSorcery` publishes
+`[{bonus spellDc 1}, {advantage attack:spell}]`. The `spellDc` target was an
+advertised effect target with **no reader** before CS-BUG-099; see also
+CS-BUG-102, which was the same value failing to reach the Spells tab's own
+per-class card.

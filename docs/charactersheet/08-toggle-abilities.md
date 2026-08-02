@@ -399,6 +399,73 @@ state whose name is generic enough to appear in unrelated content; such states
 are then reachable only through an explicit `activateState(key)` call or a
 `FEATURE_CLASSIFICATION_OVERRIDES` entry.
 
+#### Umbral Form (Shadow **Sorcery** Sorcerer, RHW, L18)
+
+The 2024 rework shares its *name* with the XGE state above but almost none of
+its mechanics, which is why it needs a second state and a source-aware way to
+reach it.
+
+```javascript
+umbralFormRhw: {
+    noNameDetect: true,               // the name is taken; see below
+    preferCuratedEffects: true,
+    effects: [
+        // The same 11 curated `damage:<type>` resistances as `umbralForm` —
+        // RAW excludes BOTH force and radiant in both editions.
+        …,
+        {type: "info", text: "Incorporeal Movement: … 1d10 Force damage …"},
+    ],
+    requiresStates: ["innateSorcery"], // ← the binding
+    duration: "While Innate Sorcery is active",
+    activationAction: "free",
+    // NO resourceName / resourceCost: entering is FREE and costs one of the
+    // feature's own 1/long-rest uses. 6 Sorcery Points RESTORE a use instead.
+}
+```
+
+**Two mechanisms worth reusing.**
+
+`requiresStates` makes the binding bidirectional for free: `activateState()`
+returns `null` while Innate Sorcery is inactive, and `deactivateState(id)`
+already cascades off every state whose `requiresStates` names it — so ending
+Innate Sorcery ends Umbral Form and takes the 11 resistances with it, with no
+bespoke teardown code.
+
+**Disambiguating a name collision by SOURCE.** `noNameDetect: true` was not
+enough here: `Umbral Form|RHW` needs to reach *a* state, just not the XGE one.
+`detectActivatableFeature()` therefore consults a `stateBySourceOverrides` table
+**before** the generic name-matching loop:
+
+```javascript
+const stateBySourceOverrides = {"umbral form": {rhw: "umbralFormRhw"}};
+```
+
+A hit returns `matchedBy: "nameAndSource"`. Prefer this over inventing a
+distinct state name when the product name genuinely is shared — the player sees
+"Umbral Form" on both sheets and the feature list should say so.
+
+#### Innate Sorcery (Sorcerer, XPHB, L1)
+
+```javascript
+innateSorcery: {
+    preferCuratedEffects: true,
+    effects: [
+        {type: "bonus", target: "spellDc", value: 1},
+        {type: "advantage", target: "attack:spell"},
+    ],
+    duration: "1 minute",
+    activationAction: "bonus",
+    resourceName: "Innate Sorcery",
+    resourceCost: 1,
+}
+```
+
+A base-class feature, implemented alongside Shadow Sorcery because Umbral Form
+hangs off it. `spellDc` was an **advertised effect target with no reader**
+(CS-BUG-099), and the Spells tab's own per-class card then hand-rolled the DC
+and ignored it a second time (CS-BUG-102) — so a `{type: "bonus", target:
+"spellDc"}` effect is now worth checking end-to-end when you add one.
+
 ### Combat Stances (TGTT/Homebrew)
 
 #### Astral Self (Way of the Astral Self Monk)
