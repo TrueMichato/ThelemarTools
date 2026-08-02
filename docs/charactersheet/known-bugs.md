@@ -4374,7 +4374,7 @@ the wrong assertion stayed green — i.e. the data was bent to fit the assertion
 
 ---
 
-## CS-BUG-104 — a *resolved* `Blessed Strikes` choice still materialises both options, so `_data.chosenSubfeatures` and `_data.features` disagree — and a TGTT domain turns that into a visible duplicate
+## CS-BUG-104 — a *resolved* `Blessed Strikes` choice still materialises both options, contradicting the parser's own `count: 1` — and a TGTT domain turns that into a visible duplicate
 
 **Status:** **Fixed for newly-derived characters; NOT retroactive.** The
 materialisation site now defers to the parser's verdict instead of re-deriving
@@ -4393,13 +4393,14 @@ one from the entry shape. Pinned in both directions by
 **Root cause (measured at three stages; this entry's cause was relocated twice
 before reaching this one, and amended once after — see Provenance).**
 `Blessed Strikes` (Cleric XPHB L7) is a choose-one
-feature. The choice is extracted correctly and recorded correctly, and is then
-materialised incorrectly. Measured on `cleric/life domain/7`:
+feature. The choice is extracted correctly, then materialised incorrectly — and
+the pick record silently inherits that error rather than contradicting it (see
+the 2026-08-02 correction below). Measured on `cleric/life domain/7`:
 
 | stage | reading | verdict |
 |---|---|---|
 | extraction | `FeatureChoiceParser.extractChoices()` → `count: 1`, 2 options | **correct** |
-| pick record | `_data.chosenSubfeatures` → `Blessed Strikes → Divine Strike` (one) | **correct** |
+| pick record | `_data.chosenSubfeatures` → **both** options recorded | **WRONG** (see correction) |
 | materialisation | `_data.features` → **both** options, each `parentFeature: "Blessed Strikes"` | **WRONG** |
 
 ```
@@ -4413,9 +4414,65 @@ _data.features on cleric/life domain/7:
 _data.chosenSubfeatures: [… {parent: "Blessed Strikes", name: "Divine Strike"} …]
 ```
 
-**The bug is self-evidencing**: one state object holds both the correct record
-(one pick) and the incorrect materialisation (two rows). No comparison against
-the rules is needed to see the inconsistency.
+##### 🔴 Correction (2026-08-02) — the `pick record` row above was wrong, and so was the paragraph under it
+
+The row originally read:
+
+> | pick record | `_data.chosenSubfeatures` → `Blessed Strikes → Divine Strike` (one) | **correct** |
+
+and was followed by:
+
+> **The bug is self-evidencing**: one state object holds both the correct record
+> (one pick) and the incorrect materialisation (two rows). No comparison against
+> the rules is needed to see the inconsistency.
+
+Both are **refuted by measurement on the true pre-fix tree**. `c188b94b`'s fix is
+two coupled edits, so "pre-fix" must be materialised as the actual parent commit —
+reverting one edit yields a hybrid tree matching no commit that has ever existed:
+
+```
+git rev-parse c188b94b^                              -> f86af94e
+git checkout f86af94e -- js/charactersheet/charactersheet-class-utils.js \
+                         js/charactersheet/charactersheet-state.js
+grep -c 'choiceOptionNames' js/charactersheet/charactersheet-class-utils.js   -> 0   (fix absent)
+```
+
+On that tree, on the very build this entry names, `_data.chosenSubfeatures` holds
+**two** entries, not one:
+
+```
+cleric/life domain/7   (spawner)
+  option rows        : ["Divine Strike@L7", "Potent Spellcasting@L7"]
+  chosenSubfeatures  : ["Blessed Strikes@L7->Divine Strike",
+                        "Blessed Strikes@L7->Potent Spellcasting"]
+```
+
+The same reading was obtained independently on a **wizard**-built Cleric 7. So this
+is not spawner-vs-wizard path dependence — the row is wrong on both paths, including
+its own cited one.
+
+**How the error survived: the ellipsis.** The dump above is elided on both sides —
+`[… {parent: "Blessed Strikes", name: "Divine Strike"} …]` — and the second entry was
+inside one of those ellipses. The table row is an *interpretation* of an elided dump,
+and the dump as printed is equally compatible with the correct reading. A quoted
+excerpt that elides the part which would refute it reads exactly like a quoted excerpt
+that does not.
+
+**The consequence is the load-bearing half.** Recording inherits from materialisation:
+`seedSubclassFeatureChoices` branch (b) records a chosen subfeature for *every*
+materialised row. So the pre-fix state is **2 rows vs 2 records — internally
+consistent**. The "self-evidencing" claim is therefore backwards: the state object
+contains no inconsistency to notice, and the only thing that identifies two as wrong
+is the parser's own `count: 1` (equivalently, the rules text). The bug is
+**exactly not** self-evidencing, which is why it shipped.
+
+**The entry's conclusion is unaffected.** Extraction is still exonerated,
+materialisation is still the sole defect, and the fix in `c188b94b` is still correct
+and correctly targeted — this corrects the evidence for it, not the verdict. It is
+the third piece of evidence in this entry not to survive scrutiny (after the circular
+Cunning Strike counts and the malformed open question), while the conclusion has
+survived all three. Found by the `plan-cs-bug-018-skips` session, which retracted its
+own supporting measurement to get here.
 
 The duplicate you actually notice comes later — a TGTT domain grants its own
 same-named feature at L8, so the name now appears twice on the Features tab.
@@ -4585,13 +4642,25 @@ of the following" describes an at-use menu, not a level-up pick.
 >
 > | | (a) already-resolved guard `:3159` | (b) records from `_data.features` | counts |
 > |---|---|---|---|
-> | Blessed Strikes | **fires** — a real level-up choice exists | never reached | 1 rec / 2 mat → **genuine disagreement** |
+> | Blessed Strikes | ~~**fires** — a real level-up choice exists~~ | ~~never reached~~ | ~~1 rec / 2 mat → **genuine disagreement**~~ |
 > | Cunning Strike | doesn't fire — no level-up choice | **fires**, records all 3 | 3 / 3 → **manufactured agreement** |
 >
-> So the Blessed Strikes finding is *strengthened*: its record is independent and
-> still disagrees. Only the Cunning Strike corroboration dies. **The sound basis
+> ~~So the Blessed Strikes finding is *strengthened*: its record is independent and
+> still disagrees. Only the Cunning Strike corroboration dies.~~ **The sound basis
 > for "Cunning Strike is correct" is the rules text alone** — which is
 > independently true, so the conclusion stands; the evidence for it does not.
+>
+> 🔴 **The Blessed Strikes row of this table is itself refuted (2026-08-02).**
+> Measured on the true pre-fix tree (`f86af94e`), on both the spawner and wizard
+> paths, `_data.chosenSubfeatures` holds **two** entries for Blessed Strikes. Guard
+> (a) therefore does **not** fire on the seeding pass — nothing is recorded yet at
+> that point — so branch (b) runs and records one per materialised row, exactly as
+> it does for Cunning Strike. The counts are **2 rec / 2 mat → manufactured
+> agreement**, the same cell as the row below it, and Blessed Strikes' record is
+> *not* independent. The retraction this table was written to perform was correct
+> and did not go far enough: it removed the corroborating member and left the
+> remaining member's numbers un-remeasured. See the correction under the evidence
+> block at the top of this entry.
 >
 > This also kills a fix shape that looks obvious: *"filter the extracted rows
 > against `chosenSubfeatures`"* is circular by the above, and separately dead
@@ -4700,9 +4769,13 @@ reviewer fed the real data entry to `FeatureChoiceParser.extractChoices()` and
 got `count: 1` with two options — the extractor is **correct**, and had been
 since `9a03a9f8` (2026-07-03), a month before the report. My evidence had
 always come from `getFeatures()` / `_data.features`, a different surface from
-the one my sentence named. Probing the stage in between settled it:
-`_data.chosenSubfeatures` records exactly one pick, so recording is correct
-too, and the defect is strictly at materialisation.
+the one my sentence named. Probing the stage in between settled it: the defect is
+strictly at materialisation.
+(⚠️ This paragraph originally continued *"`_data.chosenSubfeatures` records exactly
+one pick, so recording is correct too"*. That clause is **refuted** — pre-fix it
+records **two**, because branch (b) records one per materialised row. The
+conclusion it was supporting — defect strictly at materialisation — is unchanged.
+See the 2026-08-02 correction at the top of this entry.)
 
 3. **Confirming the premise of a mechanism is not confirming the mechanism.**
    The data shape I cited was real and was verified; the behaviour I inferred
@@ -4795,6 +4868,52 @@ The pinned surfaces are deliberately the **read** ones — what the sheet grants
 (`seedSubclassFeatureChoices` → `addPendingFeatureChoice`) — not
 `extractChoices()` alone, which was correct before the fix and would therefore
 have pinned nothing.
+
+#### Complement added 2026-08-02 — the "fixed by granting nothing" hole
+
+The row `a Cleric 7 is granted NEITHER Blessed Strikes option` asserts
+`not.toContain("Divine Strike")` on the **unresolved** state. That is the correct
+pre-choice assertion, but it is one-sided: it would stay green if the bug were
+"fixed" by making `fulfillFeatureChoice` grant nothing at all. Flagged by the
+`plan-cs-bug-018-skips` session.
+
+Closed by `resolving the choice grants EXACTLY the picked option and not the
+other`, which drives the real resolution path — `seedSubclassFeatureChoices` →
+`getPendingFeatureChoices()` → `fulfillFeatureChoice(id, "Divine Strike")` — and
+asserts the picked option is present, the rejected one absent, and the pending
+queue drained. Two PREMISE guards (a choice exists; `count === 1`) keep it from
+degrading into a vacuous pass if seeding ever stops producing the choice.
+
+**Falsified**, break in place with the signature intact
+(`_fulfillSubfeatureChoice` → `if (false) this.addFeature(built);`):
+
+```
+✕ resolving the choice grants EXACTLY the picked option and not the other
+  Expected value: "Divine Strike"   Received array: ["Blessed Strikes"]
+✓ a Cleric 7 is granted NEITHER Blessed Strikes option        <- stayed GREEN
+Tests: 1 failed, 6 passed
+```
+
+The green row is the point: it demonstrates the hole rather than arguing it.
+
+⚠️ **This suite must `import "./setup.js"` before the product imports.**
+`jest.config.json` declares no global `setupFiles`, and `addPendingFeatureChoice`
+calls `CryptUtil.uid()` — omitting it yields `ReferenceError: CryptUtil is not
+defined` from inside the seeder, which reads like a product fault.
+
+#### Spawner and wizard diverge here — do not derive an expectation from a spawned build
+
+Measured post-fix on Cleric 7, the level that carries the choice:
+
+| path | `pendingChoices` | option rows |
+|---|---|---|
+| spawner | **0** — auto-resolves | `["Divine Strike"]` |
+| wizard | **1** — queues for the player | `[]` |
+
+Both are correct. A probe that reads option rows off a spawned build will report
+the choice as already made. The player-facing consumer that drains the queue is
+`charactersheet.js:13056 processPendingFeatureChoices()`, which drives one modal
+per pending choice at Builder-finalize, LevelUp and QuickBuild.
 
 ### Existing saves — no migration
 

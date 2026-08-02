@@ -13,6 +13,7 @@
  */
 
 import fs from "fs";
+import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 
@@ -104,6 +105,35 @@ describe("CS-BUG-104 — bare-sibling refs: choose-one vs learn-all", () => {
 			expect(blessed).toBeTruthy();
 			expect((blessed.options || []).map((o) => o.name).sort())
 				.toEqual(["Divine Strike", "Potent Spellcasting"]);
+		});
+
+		/**
+		 * The complement of "a Cleric 7 is granted NEITHER option". That assertion is
+		 * correct for the UNRESOLVED state, but on its own it would stay green if the
+		 * bug were "fixed" by never granting either option — a silent under-grant that
+		 * looks identical from the pre-choice side. This pins the other end: once the
+		 * player answers, they get exactly what they picked.
+		 */
+		it("resolving the choice grants EXACTLY the picked option and not the other", () => {
+			const features = materialise("class-cleric.json", "Cleric", "XPHB", 7);
+			const state = new CharacterSheetState();
+			state._data.features = features.map((f) => ({...f}));
+			ClassUtils.seedSubclassFeatureChoices(state, features, {});
+
+			const pending = state.getPendingFeatureChoices()
+				.find((c) => c.featureName === "Blessed Strikes");
+			expect(pending).toBeTruthy(); // PREMISE: the choice really was queued
+			expect(pending.count).toBe(1); // PREMISE: it is a choose-ONE
+
+			expect(state.fulfillFeatureChoice(pending.id, "Divine Strike")).toBe(true);
+
+			const names = state._data.features.map((f) => f.name);
+			expect(names).toContain("Divine Strike");
+			expect(names).not.toContain("Potent Spellcasting");
+
+			// and the choice is consumed, so it is not re-offered on the next level-up
+			expect(state.getPendingFeatureChoices()
+				.filter((c) => c.featureName === "Blessed Strikes")).toHaveLength(0);
 		});
 	});
 });
