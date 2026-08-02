@@ -11,10 +11,10 @@
 // comments are flagged as warnings (advisory — does not exit non-zero by
 // default; pass `--strict` to exit 1 on any warning).
 //
-// It also reports two classes of PREDETERMINED-OUTCOME PROBE — assertions
+// It also reports four classes of PREDETERMINED-OUTCOME PROBE — assertions
 // whose result is fixed by the harness's own shape, independent of any
-// product behaviour. Both have shipped here, and both read as product
-// findings until someone measures them:
+// product behaviour. All four have shipped here, and every one of them read
+// as a product finding until someone measured it:
 //
 //   1. INERT LEVEL WINDOWS — rows whose `[level, untilLevel]` span
 //      contains none of the MEGA checkpoints, and which therefore never
@@ -44,6 +44,49 @@
 //      A stale generated pool (one entry dropped, or a straight
 //      apostrophe turned curly so its regex can no longer match) makes
 //      the last milestone permanently red. Cannot PASS.
+//
+// COVERAGE is assertion-based: effects + helper-driven checks + rows whose
+// feature a sibling row asserts + rows blocked by a documented CS-BUG,
+// minus rows sitting in an inert window. Explanatory comments are counted
+// and shown in the `reason` column but do NOT raise coverage — knowing
+// about a gap is not the same as closing it, and crediting prose is how
+// tgtt-time-domain-cleric came to read 100% FULL while carrying exactly
+// ONE mechanical assertion across seventeen features.
+//
+//   3. VACUOUS SPELL NAME MATCHES — `spellMatchMode: "any"` paired with a
+//      non-empty `spell:`. The mode does not RELAX the name match, it
+//      DELETES it: in "any" mode the helper never reads `e.spell` and
+//      checks only `getKnownSpellsByLevel()[level].length >= 1`. So the
+//      probe still reads as a name assertion while asserting only that
+//      the character knows at least one spell of that level — something
+//      most builds satisfy incidentally. Passes for a DIFFERENT REASON
+//      than it appears to. `spell: ""` is the honest form and is ignored.
+//
+//      This is the third sibling of the property, and the one that was
+//      briefly thought to be undetectable-by-machine. It is not: the
+//      pairing is a purely static fact about the probe literal.
+//
+//   4. UNMATCHABLE RESOURCE NAMES — a `kind: "resource"` row whose `name`
+//      is a RegExp containing metacharacters, with no `resourceName`
+//      override. The matrix resolves the pool with `fc.name.source`, and
+//      `getResource()` filters on Playwright's `hasText: <string>` — a
+//      LITERAL substring match. So `/^channel divinity$/i` looks for a
+//      resource called "^channel divinity$" and always misses. Cannot PASS.
+//
+//      This one is mostly LATENT, which is what makes it the sharpest of
+//      the family: all six instances found suite-wide sit under a
+//      `skip: true` citing an UNRELATED product bug. They cost nothing
+//      today and detonate the moment someone lifts that skip — then
+//      present as "the product bug I just un-skipped is still broken",
+//      sending the next author to debug the product instead of the
+//      harness. So: a skipped assertion is not inert, it is ARMED. It
+//      freezes its own claim about the product AND any latent defect in
+//      the probe itself, and both stay invisible because the suite is green.
+//
+//      Fix by adding `resourceName: "<exact name>"`. Never widen the
+//      regex — it is the correct FEATURE matcher (`/^channel divinity$/i`
+//      properly excludes "Channel Divinity: Temporal Manipulation");
+//      only the pool lookup needs its own exact key.
 //
 // The checkpoint list is read out of `characterSpecFactory.ts` so it
 // cannot drift. Pool sizes are resolved conservatively — flat arrays,
@@ -132,42 +175,75 @@ function findInertRows (src) {
 }
 
 /**
- * Count rows that carry no `effects:` of their own but whose FEATURE is
- * asserted by a sibling row of the same `name` elsewhere in the spec.
+ * Classify every matrix row once, so a single bare row cannot be credited
+ * twice by two different mechanisms.
  *
- * The counters above are file-wide tallies, so a spec is effectively
- * scored per ROW. That is the wrong granularity for two idioms this
- * suite deliberately uses:
+ * A row with `effects:` is covered outright. A BARE row is accounted for
+ * if EITHER a sibling row of the same name carries the probes, OR the
+ * author left an explanatory comment immediately above it. Sibling cover
+ * wins, and rows carrying their own `skipReason` are left to the separate
+ * skipReason tally -- so the three credits are mutually exclusive.
  *
- *   - a TIERED resource states its `resourceMax` once per tier but
- *     attaches the restore probe only to the first tier;
- *   - a PICKED feature keeps a plain "it appears" row and puts the
- *     `pickedFeatureGrants` / stateCall probes on the picker row.
+ * This replaced a LEXICAL reason-comment counter that matched a fixed
+ * vocabulary (`no measurable`, `no clean probe`, `cinematic`, `narrative`,
+ * `CS-BUG-NNN`). That counter was not merely narrow, it was UNCORRELATED
+ * with the thing it claimed to measure, in both directions:
  *
- * In both cases the question worth asking is "is this feature's effect
- * asserted anywhere?", not "is it asserted on this row?". Scoring per
- * row marks well-covered specs LOW, and a LOW that is an artifact is
- * worse than no signal at all — it trains readers to ignore the column
- * that is supposed to flag genuinely uncovered work.
+ *   - tgtt-daemonologist-wizard-dwarf documents all five of its gaps
+ *     ("the factory has no ritual-cast probe", "no deterministic matrix
+ *     delta", "auto-picked and therefore not deterministic", ...) and
+ *     scored ZERO, because it used none of the blessed words. It was the
+ *     suite's worst-scoring spec at 32% as a direct result.
+ *   - tgtt-arcana-cleric scored SIX reason credits while having ZERO bare
+ *     rows -- pure phantom coverage, since there was no gap for any of
+ *     them to account for. tgtt-tempest-cleric likewise, and
+ *     battle-master / astral-self / shadow-magic each banked credits for
+ *     comments sitting on rows that already had effects.
+ *
+ * So it penalised authors for writing specific reasons instead of
+ * boilerplate, while rewarding specs that had nothing to explain. Being
+ * bounded by the bare-row count is what stops the second failure mode:
+ * you cannot be credited for explaining a gap you do not have.
  */
-function countSiblingCoveredRows (src) {
-	const byName = new Map();
+function classifyRows (src) {
+	const lines = src.split("\n");
+	const lineStarts = [];
+	{
+		let at = 0;
+		for (const ln of lines) { lineStarts.push(at); at += ln.length + 1; }
+	}
+	const lineOf = (idx) => {
+		let lo = 0; let hi = lineStarts.length - 1;
+		while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (lineStarts[mid] <= idx) lo = mid; else hi = mid - 1; }
+		return lo;
+	};
+
+	const rows = [];
 	const re = /\{\s*level:\s*\d+\s*,/g;
 	let m;
 	while ((m = re.exec(src)) !== null) {
 		const obj = readObjectLiteral(src, m.index);
 		if (!obj) continue;
-		const name = obj.match(/name:\s*("[^"]*"|\/[^/\n]*\/[a-z]*)/)?.[1];
-		if (!name) continue;
-		if (!byName.has(name)) byName.set(name, []);
-		byName.get(name).push(RE_EFFECTS.test(obj));
+		const name = obj.match(/name:\s*("[^"]*"|\/[^/\n]*\/[a-z]*)/)?.[1] || null;
+		let k = lineOf(m.index) - 1;
+		while (k >= 0 && /^\s*$/.test(lines[k])) --k;
+		const commented = k >= 0
+			&& /^\s*\/\//.test(lines[k])
+			&& !/^\s*\/\/\s*(TODO|FIXME|XXX)\b/i.test(lines[k]);
+		rows.push({name, hasEffects: RE_EFFECTS.test(obj), hasSkipReason: /\bskipReason:/.test(obj), commented});
 	}
-	let credited = 0;
-	for (const flags of byName.values()) {
-		if (!flags.some(Boolean)) continue; // nothing asserts this feature at all
-		credited += flags.filter(has => !has).length;
+
+	const assertedNames = new Set(rows.filter(r => r.hasEffects && r.name).map(r => r.name));
+	let siblingCovered = 0; let explained = 0; let bare = 0; let unaccounted = 0;
+	for (const r of rows) {
+		if (r.hasEffects) continue;
+		++bare;
+		if (r.name && assertedNames.has(r.name)) { ++siblingCovered; continue; }
+		if (r.hasSkipReason) continue; // counted by the skipReason tally
+		if (r.commented) { ++explained; continue; }
+		++unaccounted;
 	}
-	return credited;
+	return {siblingCovered, explained, bare, unaccounted};
 }
 
 const POOLS_PATH = path.join(ROOT, "test", "e2e", "utils", "tgttFeaturePools.ts");
@@ -306,6 +382,166 @@ function findUnreachablePicks (src) {
 	return out;
 }
 
+/**
+ * Blank out comments while PRESERVING length and newlines, so every index
+ * and reported line number stays valid against the original source.
+ *
+ * Needed because this file's own warning prose quotes the dangerous form
+ * verbatim (`{spell: "Bane", spellMatchMode: "any"}`) in four specs. A
+ * detector that fires on the documentation warning against it is noise,
+ * and noisy checks get switched off — which would cost us the real
+ * instances it exists to find.
+ *
+ * String and template literals are tracked so a `//` inside one is not
+ * mistaken for a comment, and REGEX literals are tracked so an apostrophe
+ * inside one (`name: /granny'?s gifts/i` — 7 specs carry this shape) does
+ * not open a phantom string that swallows every comment until the next
+ * apostrophe. That bug was live in the first version of this function and
+ * produced exactly the false positive it exists to prevent: proof that a
+ * tool for finding shape-determined results is itself subject to them.
+ */
+function blankComments (src) {
+	const out = src.split("");
+	let i = 0;
+	const n = src.length;
+	const blank = (from, to) => {
+		for (let k = from; k < to && k < n; ++k) if (out[k] !== "\n") out[k] = " ";
+	};
+	// A `/` starts a regex (rather than division) when the previous
+	// meaningful character opens an expression position.
+	const prevMeaningful = (at) => {
+		for (let k = at - 1; k >= 0; --k) if (!/\s/.test(src[k])) return src[k];
+		return "";
+	};
+	while (i < n) {
+		const c = src[i];
+		if (c === "\"" || c === "'" || c === "`") {
+			const quote = c;
+			++i;
+			while (i < n && src[i] !== quote) {
+				if (src[i] === "\\") ++i;
+				++i;
+			}
+			++i;
+			continue;
+		}
+		if (c === "/" && src[i + 1] === "/") {
+			let j = i;
+			while (j < n && src[j] !== "\n") ++j;
+			blank(i, j);
+			i = j;
+			continue;
+		}
+		if (c === "/" && src[i + 1] === "*") {
+			const j = src.indexOf("*/", i + 2);
+			const end = j < 0 ? n : j + 2;
+			blank(i, end);
+			i = end;
+			continue;
+		}
+		if (c === "/" && ":,([=!&|?{;+*%^~<>".includes(prevMeaningful(i))) {
+			let j = i + 1;
+			let inClass = false;
+			while (j < n && src[j] !== "\n") {
+				if (src[j] === "\\") { j += 2; continue; }
+				if (src[j] === "[") inClass = true;
+				else if (src[j] === "]") inClass = false;
+				else if (src[j] === "/" && !inClass) break;
+				++j;
+			}
+			i = j + 1;
+			continue;
+		}
+		++i;
+	}
+	return out.join("");
+}
+
+/**
+ * `spellMatchMode: "any"` does NOT relax the name match — it DELETES it.
+ * In "any" mode `comprehensiveBuildHelpers.ts` never reads `e.spell` and
+ * checks only `getKnownSpellsByLevel()[level].length >= 1`. So pairing it
+ * with a NON-EMPTY `spell:` yields a probe that cannot fail for the
+ * reason its author intended: the name is silently discarded while the
+ * spec still reads as a name assertion.
+ *
+ * `spell: ""` is the honest form — it makes "count only" explicit — so it
+ * is not reported.
+ */
+function findVacuousSpellMatches (rawSrc) {
+	const src = blankComments(rawSrc);
+	const out = [];
+	// Anchor on the mode and walk back to the enclosing `{`; key order
+	// inside a matrix effect is not fixed.
+	const re = /\bspellMatchMode:\s*["']any["']/g;
+	let m;
+	const seen = new Set();
+	while ((m = re.exec(src)) !== null) {
+		const open = enclosingBrace(src, m.index);
+		if (open < 0 || seen.has(open)) continue;
+		seen.add(open);
+		const obj = readObjectLiteral(src, open);
+		if (!obj) continue;
+		const spell = obj.match(/\bspell:\s*(["'])((?:\\.|(?!\1).)*)\1/);
+		if (!spell) continue; // no literal `spell:` — unresolvable, stay silent
+		if (spell[2].trim() === "") continue; // honest form
+		out.push({
+			where: `line ${src.slice(0, open).split("\n").length}`,
+			spell: spell[2].slice(0, 28),
+		});
+	}
+	return out;
+}
+
+/**
+ * Detector 4 — resource rows whose pool lookup can never match.
+ *
+ * `assertFeaturesMatrix` resolves a `kind: "resource"` row's pool with
+ * `fc.resourceName ?? (fc.name instanceof RegExp ? fc.name.source : fc.name)`,
+ * and `CharacterSheetPage.getResource()` filters with Playwright's
+ * `hasText: <string>` — a LITERAL, case-insensitive substring match. So a
+ * RegExp `name` is handed to the lookup as its raw `.source`: `/^channel
+ * divinity$/i` searches for a resource literally called "^channel divinity$".
+ * No rendered resource contains regex metacharacters, so the lookup always
+ * misses and line 2342 throws `resource not found on sheet`.
+ *
+ * This is the cannot-PASS half of the predetermined-outcome property, and it
+ * is mostly LATENT: every instance found so far sits under a `skip: true`
+ * citing an unrelated product bug. It detonates when someone lifts that skip
+ * — and then presents as "the product bug I just un-skipped is still broken",
+ * sending the next author to debug the product instead of the harness.
+ * The fix is never to widen the regex: add `resourceName: "<exact name>"`,
+ * which keeps the regex as the FEATURE matcher and gives the pool its own key.
+ */
+function findUnmatchableResourceNames (rawSrc) {
+	const src = blankComments(rawSrc);
+	const out = [];
+	// Metacharacters that cannot appear in a rendered resource label. `.` and
+	// `-` are deliberately excluded — they are legal literal text, so flagging
+	// them would produce false positives.
+	const FATAL = /[$^|\\[\]()*+?{}]/;
+	const re = /\bkind:\s*["']resource["']/g;
+	let m;
+	const seen = new Set();
+	while ((m = re.exec(src)) !== null) {
+		const open = enclosingBrace(src, m.index);
+		if (open < 0 || seen.has(open)) continue;
+		seen.add(open);
+		const obj = readObjectLiteral(src, open);
+		if (!obj) continue;
+		if (/\bresourceName:/.test(obj)) continue; // explicit override — fine
+		const nm = obj.match(/\bname:\s*\/((?:\\.|[^/\\])*)\//);
+		if (!nm) continue; // string name, or unresolvable — stay silent
+		if (!FATAL.test(nm[1])) continue;
+		out.push({
+			where: `line ${src.slice(0, open).split("\n").length}`,
+			name: nm[1].slice(0, 34),
+			latent: /\bskip:\s*true/.test(obj),
+		});
+	}
+	return out;
+}
+
 /** Index of the `{` opening the object literal containing `at`, or -1. */
 function enclosingBrace (src, at) {
 	let depth = 0;
@@ -420,13 +656,11 @@ function auditSpec (specPath) {
 	const effectsBlocks = src.match(new RegExp(RE_EFFECTS.source, "g")) || [];
 	const effectsCount = effectsBlocks.length;
 
-	// Reason-style comments — both literal `// no measurable …` and
-	// inline `// …no clean state probe…`/`CS-BUG-NNN` notes count as
-	// auditable acknowledgments that the row is intentionally
-	// existence-only. Anything explicitly labelled with a known
-	// blocking reason qualifies.
-	const reasonComments = src.match(/\/\/[^\n]*(no measurable|no clean (state )?probe|cinematic|CS-BUG-\d+|narrative|capstone[^\n]*no probe)[^\n]*/gi) || [];
-	const reasonCount = reasonComments.length;
+	// Bare rows whose gap the author explained in an adjacent comment.
+	// Structural, not lexical: see classifyRows() for why matching a fixed
+	// vocabulary measured the wrong thing in both directions.
+	const rowClasses = classifyRows(src);
+	const reasonCount = rowClasses.explained;
 
 	// `{skip: true,` skipped probes — and entry-level `skip: true` rows
 	// each carry a `skipReason` that documents why no probe runs.
@@ -447,8 +681,18 @@ function auditSpec (specPath) {
 	const inertRows = findInertRows(src);
 	const inertWithProbes = inertRows.filter(r => r.hasProbes).length;
 	const unreachablePicks = findUnreachablePicks(src);
-	const siblingCovered = countSiblingCoveredRows(src);
-	const effective = effectsCount + reasonCount + helperCount + skipReasonCount + siblingCovered - inertWithProbes;
+	const vacuousSpellMatches = findVacuousSpellMatches(src);
+	const unmatchableResources = findUnmatchableResourceNames(src);
+	const siblingCovered = rowClasses.siblingCovered;
+	// `reasonCount` is deliberately NOT added. An explanatory comment
+	// records that a gap is KNOWN; it does not make the feature verified.
+	// This batch's acceptance bar is that every ability a subclass provides
+	// is offered, shown, AND mechanically implemented — description-only
+	// was explicitly unacceptable — so a row whose only accounting is prose
+	// must keep counting against the spec. It is reported in its own
+	// column so the backlog stays visible rather than being laundered into
+	// the score.
+	const effective = effectsCount + helperCount + skipReasonCount + siblingCovered - inertWithProbes;
 	const coverage = entryCount === 0 ? 1 : effective / entryCount;
 
 	const status =
@@ -467,6 +711,8 @@ function auditSpec (specPath) {
 		inertRows,
 		inertWithProbes,
 		unreachablePicks,
+		vacuousSpellMatches,
+		unmatchableResources,
 		coverage,
 		status,
 	};
@@ -554,10 +800,42 @@ function main () {
 		log("");
 	}
 
+	const vacuousSpecs = results.filter(r => r.vacuousSpellMatches.length);
+	const totalVacuous = results.reduce((a, r) => a + r.vacuousSpellMatches.length, 0);
+	if (vacuousSpecs.length) {
+		log(`  ⚠ Vacuous spell name matches — \`spellMatchMode: "any"\` DELETES the name:`);
+		log("");
+		for (const r of vacuousSpecs) {
+			for (const row of r.vacuousSpellMatches) {
+				log(`      ${padR(r.fileName, 46)} ${padR(row.where, 30)} spell: "${row.spell}" is never read`);
+			}
+		}
+		log("");
+		log(`  ${totalVacuous} probe(s) name a spell that the matcher discards. In "any" mode`);
+		log(`  only \`getKnownSpellsByLevel()[level].length >= 1\` is checked, so these`);
+		log(`  cannot fail for the reason their author intended. Use exact-name mode,`);
+		log(`  or \`spell: ""\` to state "count only" honestly.`);
+		log("");
+	}
+
 	if (warnings > 0) {
 		log(`  ${warnings} spec(s) below threshold.`);
 	}
-	if (STRICT && (warnings > 0 || totalInertProbes > 0 || totalUnreachable > 0)) process.exit(1);
+	const unmatchSpecs = results.filter(r => r.unmatchableResources.length);
+	const totalUnmatch = results.reduce((a, r) => a + r.unmatchableResources.length, 0);
+	if (unmatchSpecs.length) {
+		log(`  \u26a0 Resource rows whose pool lookup can never match:`);
+		for (const r of unmatchSpecs) {
+			for (const row of r.unmatchableResources) {
+				log(`      ${padR(r.fileName, 46)} ${padR(row.where, 30)} name=/${row.name}/ ${row.latent ? "(latent — under skip:true)" : "(LIVE)"}`);
+			}
+		}
+		log(`  ${totalUnmatch} row(s) hand a RegExp \`.source\` to a literal substring match.`);
+		log(`  Add \`resourceName: "<exact name>"\`; do NOT widen the regex.`);
+		log(``);
+	}
+
+	if (STRICT && (warnings > 0 || totalInertProbes > 0 || totalUnreachable > 0 || totalVacuous > 0 || totalUnmatch > 0)) process.exit(1);
 }
 
 main();

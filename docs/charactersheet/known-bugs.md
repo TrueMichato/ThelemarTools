@@ -136,13 +136,36 @@ single-spec re-verify of bastion-paladin: 6/6 expected exports):
   `HUNTER_FEATURES_MATRIX` (L20 standalone leg) and
   `HUNTER_ZODIAC_MULTI_FEATURES_MATRIX` (multiclass Ranger leg).
 
-**Intentionally LOW.** `tgtt-time-domain-cleric.spec.ts` audits
-at 65% (LOW). Every probe in this matrix is gated on CS-BUG-015
-(TGTT Time Domain prepares TGTT-flavor spells in place of
-first-party domain spells, and Channel Divinity / spell-save-DC
-helpers return 0 on the build). Adding more checks here would
-create false failures, not real coverage — leave LOW until
-CS-BUG-015 is resolved.
+**Previously "intentionally LOW" — CORRECTED.**
+`tgtt-time-domain-cleric.spec.ts` used to audit at 24% with the note
+"every probe in this matrix is gated on CS-BUG-015 … leave LOW until
+CS-BUG-015 is resolved." That guidance outlived its premise:
+CS-BUG-015 is **Closed as Stale** (see its entry below), so the spec
+was carrying two `skipReason: "CS-BUG-015"` rows and ~8 prose gap
+comments deferring to a bug that no longer existed.
+
+Re-measured the product directly rather than trusting the spec (the
+spec is the artefact under suspicion, so it cannot be its own oracle).
+Every frozen claim was false: Channel Divinity **does** surface as a
+pool (1 / 2 / 3 at L2 / L6 / L18), and `getFeatureCalculations()`
+exposes `hasChronologicalInterference`, `chronologicalInterferenceUses`
+(= proficiency bonus), `hasRightOnTime`, `rightOnTimeBonus`,
+`hasTemporalManipulation`, `temporalManipulationDc`,
+`hasEyesOfFuturePast`, `eyesOfFuturePastUses` (= `max(1, wisMod)`),
+`hasPotentSpellcasting`, `potentSpellcastingBonus`,
+`potentSpellcastingClass` and `hasTemporalMastery`. Spec rewritten
+against those; matrix green L1→20. Coverage 24% → 61%.
+
+Two authoring rules came out of it, both preset-safety issues:
+
+- `PRESET_FULL_TIME_CLERIC` sets no `abilityPriority`, so this build's
+  **Wisdom is 10** and every Wis-derived value is 0 or its floor. Assert
+  such values with `featureCalculationDerivedFrom` /
+  `featureUsesEqualAbilityMod`, which pin the RELATIONSHIP. A literal
+  would be asserting the preset, not the product.
+- The two remaining bare-row clusters (domain-spell tiers, Divine
+  Intervention) are genuine gaps, not deferred ones, and are now
+  documented as such per-row.
 
 ---
 
@@ -3375,3 +3398,55 @@ does not relax the name match but **deletes** it — in `"any"` mode
 is checked. Those four probes correctly pass `spell: ""` and so are honest,
 but a `{spell: "Bane", spellMatchMode: "any"}` would be a probe that cannot
 fail. Never reach for `"any"` to soften a flaky name check.
+
+**Correction: that third sibling IS statically checkable, and so was a
+fourth.** Calling it "soft" was wrong. `spellMatchMode: "any"` with a
+non-empty `spell:` is a mechanical rule, and it is now detector 3 in
+`scripts/auditE2eCoverage.mjs`.
+
+Detector 4 came out of the Time Domain Cleric rewrite and is the sharpest
+of the family so far, because it is **latent rather than live**.
+`assertFeaturesMatrix` resolves a `kind: "resource"` row's pool with
+`fc.resourceName ?? (fc.name instanceof RegExp ? fc.name.source : fc.name)`,
+and `CharacterSheetPage.getResource()` filters with Playwright's
+`hasText: <string>` — a **literal, case-insensitive substring** match. So a
+RegExp `name` reaches the lookup as its raw `.source`: `/^channel divinity$/i`
+searches for a resource literally named `"^channel divinity$"`. Nothing
+rendered contains regex metacharacters, so the lookup always misses and the
+row throws `resource not found on sheet`.
+
+Six such rows exist suite-wide (`tgtt-bastion-paladin-bugbear.spec.ts:112`,
+`tgtt-horror-warlock-theocracian.spec.ts:53,60,61,62`,
+`tgtt-surrealism-bard-yuanti.spec.ts:34`) and **all six sit under a
+`skip: true` citing an unrelated product bug** (CS-BUG-017 / CS-BUG-013).
+That is what makes them dangerous. They cost nothing today; they detonate
+the moment someone lifts the skip — which is exactly what this batch has
+been doing — and then present as *"the product bug I just un-skipped is
+still broken."* The next author debugs the product instead of the harness.
+`tgtt-surrealism-bard-yuanti.spec.ts` even carries a correct,
+string-named sibling three lines below the broken one.
+
+Fix shape: **add `resourceName: "<exact name>"`; never widen the regex.**
+The regex is the right FEATURE matcher (`/^channel divinity$/i` correctly
+excludes "Channel Divinity: Temporal Manipulation"); only the pool lookup
+needs its own exact key.
+
+Falsified against a real reproduction, per the standing rule that a guard
+which has never seen its own defect proves nothing: reintroducing the shape
+into the rewritten Time Domain spec — the version that had *measurably*
+thrown `resource not found on sheet` — made the detector fire on all three
+rows and label them `(LIVE)`, distinct from the six `(latent)`. Restoring
+`resourceName` silenced it.
+
+The generalisation, now with four instances behind it: **a skipped
+assertion is not inert, it is armed.** It freezes not only its own claim
+about the product but any latent defect in the probe itself, and both stay
+invisible because the suite is green.
+
+A fifth instance of the same family was fixed in the shared harness at the
+same time. `featureCalculationDerivedFrom` resolves `abilityMod`,
+`spellSaveDc` and `spellAttackBonus` through ability-keyed state getters;
+omitting `ability` passed `undefined` through, those getters answer `0` for
+an unknown ability, and the probe silently became "expected 0" — it could
+never pass for the right reason. It now throws on the authoring mistake
+instead. (Zero live instances; found by making the error myself.)

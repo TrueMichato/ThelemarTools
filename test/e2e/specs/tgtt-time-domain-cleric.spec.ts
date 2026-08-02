@@ -68,17 +68,28 @@ describeCharacter({
 			],
 		},
 		// ── L2: Channel Divinity + Turn Undead ──────────────────────────
-		// Channel Divinity is the canonical short-rest cleric resource —
-		// but `getResource("Channel Divinity")` returns nothing on the
-		// TGTT Time Domain build at L2 (see CS-BUG-015). Pool-size and
-		// shortRestRestores probes therefore skipped until the resource
-		// surfaces under a stable name.
+		// The pool GROWS (1 / 2 / 3), so it needs one exact-max row per
+		// tier with `untilLevel` — the matrix re-evaluates every earlier
+		// row at each later checkpoint, so a single fixed max fails by
+		// construction. Tiers chosen so each contains a checkpoint from
+		// [3, 5, 11, 17, 20]: L2-5 -> {3,5}, L6-17 -> {11,17}, L18+ -> {20}.
 		{
 			level: 2,
+			untilLevel: 5,
 			name: /^channel divinity$/i,
-			kind: "passive",
-			skip: true,
-			skipReason: "CS-BUG-015",
+			// `kind: "resource"` stringifies a RegExp name to its `.source`, so the
+			// anchored form would look up a resource literally called
+			// "^channel divinity$" and never match. The regex is still the right
+			// FEATURE matcher (it excludes "Channel Divinity: Temporal Manipulation"),
+			// so keep it and give the pool lookup its own exact name.
+			resourceName: "Channel Divinity",
+			kind: "resource",
+			resourceMax: 1,
+			shortRestRestoresFeatureUses: true,
+			effects: [
+				{kind: "featureCalculation", property: "channelDivinityUses", exact: 1},
+				{kind: "featureCalculationDerivedFrom", property: "channelDivinityDc", equals: "spellSaveDc", ability: "wis"},
+			],
 		},
 		{level: 2, name: /turn undead/i, kind: "passive"},
 		// ── L3: Time Domain subclass features + 1st domain spell tier ───
@@ -92,14 +103,58 @@ describeCharacter({
 			name: /time domain spells/i,
 			kind: "passive",
 		},
-		// Reaction-based initiative re-order — no clean state probe; no effects.
-		{level: 3, name: /chronological interference/i, kind: "passive"},
-		// Initiative bonus is not exposed as a discrete addend — no effects.
-		{level: 3, name: /right on time/i, kind: "passive"},
+		// Reaction-based initiative re-order. The reaction itself has no
+		// clean roll probe, but its POOL is level-driven (= proficiency
+		// bonus) and its recharge is long — both assertable. Left
+		// open-ended deliberately: `derivedFrom` asserts the RELATIONSHIP,
+		// so one row stays correct at every checkpoint (2/3/4/6/6) and
+		// cannot rot into an inert window.
+		{
+			level: 3,
+			name: /chronological interference/i,
+			kind: "resource",
+			longRestRestoresFeatureUses: true,
+			effects: [
+				{kind: "featureCalculation", property: "hasChronologicalInterference", exact: true},
+				{
+					kind: "featureCalculationDerivedFrom",
+					property: "chronologicalInterferenceUses",
+					equals: "proficiencyBonus",
+				},
+			],
+		},
+		// Initiative bonus is not exposed as a discrete addend on the
+		// initiative row, but the derived value IS surfaced. Asserted as a
+		// relationship (= Wis mod) rather than a literal: the preset sets
+		// no `abilityPriority`, so this build's Wis is 10 and any absolute
+		// number here would be asserting the preset, not the product.
+		{
+			level: 3,
+			name: /right on time/i,
+			kind: "passive",
+			effects: [
+				{kind: "featureCalculation", property: "hasRightOnTime", exact: true},
+				{
+					kind: "featureCalculationDerivedFrom",
+					property: "rightOnTimeBonus",
+					equals: "abilityMod",
+					ability: "wis",
+				},
+			],
+		},
 		// CD: Temporal Manipulation is a reaction (advantage/disadvantage on
-		// another creature's d20). The sheet doesn't surface a self-targeted
-		// roll-mod from this — no effects.
-		{level: 3, name: /channel divinity: temporal manipulation/i, kind: "passive"},
+		// another creature's d20), so there is no self-targeted roll-mod to
+		// read. Its SAVE DC is a real mechanical effect and is asserted
+		// against the spell save DC it is derived from.
+		{
+			level: 3,
+			name: /channel divinity: temporal manipulation/i,
+			kind: "passive",
+			effects: [
+				{kind: "featureCalculation", property: "hasTemporalManipulation", exact: true},
+				{kind: "featureCalculationDerivedFrom", property: "temporalManipulationDc", equals: "spellSaveDc", ability: "wis"},
+			],
+		},
 		// ── L5: Destroy/Sear Undead + 2nd domain spell tier ─────────────
 		// Destroy/Sear Undead is a passive Turn Undead upgrade — no clean
 		// state probe per Phase-7 hint #4.
@@ -118,10 +173,35 @@ describeCharacter({
 		},
 		// ── L6: Eyes of the Future Past + CD pool grows ─────────────────
 		// Bonus-action toggle in the rules but the parent FeatureCheck is
-		// "passive" — no toggle button to drive. Leave probe-less.
-		{level: 6, name: /eyes of the future past/i, kind: "passive"},
-		// CD pool growth at L6 — same CS-BUG-015 caveat as the L2 entry.
-		{level: 6, name: /^channel divinity$/i, kind: "passive", skip: true, skipReason: "CS-BUG-015"},
+		// "passive" — no toggle button to drive. The uses pool is real
+		// though: product computes `Math.max(1, wisMod)`, which
+		// `featureUsesEqualAbilityMod` matches exactly (minimum included),
+		// and is preset-independent unlike a literal count.
+		{
+			level: 6,
+			name: /eyes of the future past/i,
+			kind: "passive",
+			effects: [
+				{kind: "featureCalculation", property: "hasEyesOfFuturePast", exact: true},
+				{
+					kind: "featureUsesEqualAbilityMod",
+					feature: "Eyes of the Future Past",
+					ability: "wis",
+					minimum: 1,
+					recharge: "long",
+				},
+			],
+		},
+		// CD pool grows to 2 at L6 and holds through L17 (checkpoints 11, 17).
+		{
+			level: 6,
+			untilLevel: 17,
+			name: /^channel divinity$/i,
+			resourceName: "Channel Divinity",
+			kind: "resource",
+			resourceMax: 2,
+			effects: [{kind: "featureCalculation", property: "channelDivinityUses", exact: 2}],
+		},
 		// ── L7: 3rd domain spell tier ───────────────────────────────────
 		{
 			level: 7,
@@ -129,15 +209,26 @@ describeCharacter({
 			kind: "passive",
 		},
 		// ── L8: Potent Spellcasting ─────────────────────────────────────
-		// Potent Spellcasting adds Wis to cantrip damage — no clean
-		// numeric probe on the sheet for cantrip-damage bonus, and the
-		// `getSpellSaveDC()` page helper currently returns 0 on the
-		// TGTT cleric build (probably reading from the wrong tab — see
-		// CS-BUG-015 follow-up). No effect probe until that's resolved.
+		// Adds Wis to cleric cantrip damage. There is no cantrip-damage
+		// addend to read off the sheet directly, but the product records
+		// both the bonus and the OWNING CLASS (so the damage roll scopes
+		// the bonus to cleric cantrips rather than every cantrip) — and
+		// both are assertable. The bonus is asserted as a relationship,
+		// not a literal, because the preset leaves Wis at 10.
 		{
 			level: 8,
 			name: /potent spellcasting/i,
 			kind: "passive",
+			effects: [
+				{kind: "featureCalculation", property: "hasPotentSpellcasting", exact: true},
+				{
+					kind: "featureCalculationDerivedFrom",
+					property: "potentSpellcastingBonus",
+					equals: "abilityMod",
+					ability: "wis",
+				},
+				{kind: "featureCalculation", property: "potentSpellcastingClass", exact: "Cleric"},
+			],
 		},
 		// ── L9: 4th domain spell tier ───────────────────────────────────
 		{
@@ -149,12 +240,24 @@ describeCharacter({
 		// Once-per-long-rest cinematic feature — no easy probe per hint #5.
 		{level: 10, name: /divine intervention/i, kind: "passive"},
 		// ── L17: Temporal Mastery capstone subclass feature ─────────────
-		// TGTT Time Domain spell list at L17 is TGTT-flavored, so we no
-		// longer assert specific spell names (CS-BUG-015).
+		// TGTT Time Domain spell list at L17 is TGTT-flavored, so we still
+		// don't assert specific spell names — but the capstone itself sets
+		// a real calculation flag, so its presence is now verified
+		// mechanically rather than by name alone.
 		{
 			level: 17,
 			name: /temporal mastery/i,
 			kind: "passive",
+			effects: [{kind: "featureCalculation", property: "hasTemporalMastery", exact: true}],
+		},
+		// ── L18: Channel Divinity reaches its final pool of 3 ───────────
+		{
+			level: 18,
+			name: /^channel divinity$/i,
+			resourceName: "Channel Divinity",
+			kind: "resource",
+			resourceMax: 3,
+			effects: [{kind: "featureCalculation", property: "channelDivinityUses", exact: 3}],
 		},
 		// ── L20: Divine Intervention auto-success ───────────────────────
 		// Auto-success rules upgrade — no probe per hint #5.
