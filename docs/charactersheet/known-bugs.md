@@ -4628,3 +4628,80 @@ the checkpoint list with `/const\s+checkpoints\s*=\s*\[([\d,\s]+)\]/` and
 **silently falls back** to a hardcoded default the moment that literal becomes a
 variable — so the detector would keep reporting against a checkpoint list the
 runner no longer uses.
+
+## CS-BUG-107 — an unanchored `/Roc/i` matches "Au**roc**hs", aborting the Zodiac Druid matrix at its FIRST checkpoint
+
+**Status:** Open (harness/authoring defect — **not** a product bug)
+**Surface:** `test/e2e/specs/tgtt-hunter-zodiac-centaur.spec.ts` → `buildZodiacFormChecks()`
+
+### Symptom
+
+`RUN_MATRIX=1` on `tgtt-hunter-zodiac-centaur` fails at L3:
+
+```
+featuresMatrix at L3 (1 failures):
+  - L3 /Zodiac Form: Month/i (passive) effect pickActivatable: only 0 of expected
+    >=1 matched picks could be activated.
+    errors=[Aurochs: activateFeature(Aurochs): no visible Activate or Use control
+    within 5s. diagnostic={"feature":true,"activationInfo":null,"activatable":false}]
+```
+
+Because the matrix throws on the first failing checkpoint, **checkpoints 5 / 11 /
+17 / 20 have never executed on this spec.** Every assertion above L3 — including
+the Wild Shape ladder, which its own comment flags as `UNVERIFIED` for exactly
+this reason — is unproven, while the spec's other seven tests pass. This is the
+inert-window failure shape arriving through a different door: not a row that is
+never reached, but a whole spec truncated at its first checkpoint.
+
+### Root cause (measured)
+
+`ZODIAC_FORM_EFFECTS` (`test/e2e/utils/tgttFeatureEffects.ts:440`) attaches the
+representative probe as an **unanchored** regex:
+
+```ts
+"Roc": [{kind: "pickActivatable", matchAny: [/Roc/i], min: 1}],
+```
+
+`/Roc/i.test("Aurochs") === true` — "Au**roc**hs" contains the substring. Aurochs
+is a *different* constellation in the same 12-member L3 pool, and its documented
+effect is a conditional STR-check advantage with no activatable control
+(`ZODIAC_FORM_EFFECTS["Aurochs"] = []`). The probe therefore matches, and tries
+to activate, a feature that was never meant to be activatable.
+
+This is the mirror of the widening hazard already recorded against detector 4:
+the fix for an unmatchable name is an **exact** name, never a looser regex,
+precisely because a loose one matches more than intended.
+
+### Second cause — anchoring alone may not be sufficient (NOT measured)
+
+`js/charactersheet/charactersheet-combat.js:9807` deliberately drops Zodiac Form
+from the generic activatable-states list:
+
+> `// Druid Wild Shape / Wild Companion / Zodiac Form are handled by the`
+> `// dedicated Druid Resources modal — drop them from the generic list`
+
+gated on `this._page?._druidResourcesEnabled`. If that gate is live in the E2E
+build, `Roc` is excluded from the same surface as `Aurochs` and anchoring to
+`/^Roc$/i` will change *which* name the probe reports without making it pass —
+i.e. `pickActivatable` is the wrong probe kind for this catalog, the same verdict
+already reached for metamagic (CS-BUG-018, `pickToggleable`).
+
+**This half is a hypothesis with a cited mechanism, not a measurement.** Whoever
+takes it should anchor the regex first and re-run; if the failure merely renames
+itself to `Roc`, re-target to the Druid Resources surface or drop the probe.
+
+### Proven pre-existing
+
+Not introduced by the CS-BUG-016 sweep, which touched only `spellInList` /
+`spellSaveDc` / `cantripCount` rows in this spec. Reproduced at the pre-merge
+commit `c87153b7` in a throwaway worktree: **byte-identical error text**, 1 failed
+/ 1 passed (4.7m).
+
+### Note on the surface
+
+`test/e2e/utils/tgttFeaturePools.ts` is **auto-generated** (`scripts/genTgttPools.mjs`).
+The editable sources are `scripts/_genTgttPools.helpers.ts` (`buildCatalogChecks`,
+`buildZodiacFormChecks`) and `test/e2e/utils/tgttFeatureEffects.ts`
+(`ZODIAC_FORM_EFFECTS`). Regenerate with `node scripts/genTgttPools.mjs` and
+confirm the diff is otherwise empty — a stale pool is itself a known source of
+false reds.
