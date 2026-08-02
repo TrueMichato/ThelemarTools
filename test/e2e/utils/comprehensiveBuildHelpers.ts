@@ -487,7 +487,25 @@ export async function assertMilestone (charSheet: CharacterSheetPage, expected: 
 	}
 
 	if (expected.pactSlots) {
-		const p = await charSheet.getPactSlots().catch(() => ({current: 0, max: 0, level: 0}));
+		// NOT `.catch(() => ({current: 0, max: 0, level: 0}))`. That is the
+		// CS-BUG-016 anti-pattern — it converts "I could not read the pact
+		// slot display" into "the character has no pact slots", which then
+		// fails as `pact slot level 0 < 1` and sends the reader hunting for
+		// a product bug. Measured on the hexblade multiclass build: the
+		// exported state held `pactSlots {current: 2, max: 2, level: 1}`
+		// while this line reported level 0. A spec only reaches here when it
+		// explicitly asked about pact slots, so an unreadable display is
+		// unambiguously an error and must say so.
+		let p: {current: number; max: number; level: number};
+		try {
+			p = await charSheet.getPactSlots();
+		} catch (e) {
+			throw new Error(
+				`assertMilestone: expected pact slots (${JSON.stringify(expected.pactSlots)}) `
+				+ `but reading them from the sheet failed: ${(e as Error)?.message ?? e}`,
+				{cause: e},
+			);
+		}
 		if (expected.pactSlots.level != null) expect(p.level, "pact slot level").toBeGreaterThanOrEqual(expected.pactSlots.level);
 		if (expected.pactSlots.max != null) expect(p.max, "pact slot max").toBeGreaterThanOrEqual(expected.pactSlots.max);
 	}

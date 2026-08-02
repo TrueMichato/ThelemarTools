@@ -386,6 +386,46 @@ export class LevelUpPage {
 		});
 		await this.page.waitForTimeout(300);
 
+		// A subclass whose data defines a persisted named branch (Divine
+		// Soul Affinity, and anything else `hasNamedSubclassChoice`
+		// returns true for) renders a `<select>` inside
+		// `.charsheet__levelup-named-subclass-choice`. The wizard REFUSES
+		// to finish while it is unset, with the toast "Choose <title> in
+		// the Subclass section before finishing."
+		//
+		// `levelUpTo` handles this when a caller passes an explicit
+		// `namedSubclassChoice`, but the multiclass factory carries the
+		// preference on the preset instead, so nothing filled it and the
+		// hexblade multiclass plan hung at the Sorcerer leg. This is a
+		// safety net, not an override: it only touches a select that is
+		// still on its empty placeholder, so the explicit path always
+		// wins. Generic on purpose — it covers every named-branch
+		// subclass, not just Divine Soul.
+		{
+			const choices = this.page.locator(".charsheet__levelup-named-subclass-choice select");
+			const nChoices = await choices.count();
+			for (let i = 0; i < nChoices; i++) {
+				const sel = choices.nth(i);
+				if (!await sel.isVisible().catch(() => false)) continue;
+				if (await sel.inputValue()) continue; // already chosen
+				const optionValues = await sel.locator("option").evaluateAll(
+					els => els.map(el => (el as HTMLOptionElement).value).filter(Boolean));
+				if (!optionValues.length) {
+					const label = (await this.page.locator(".charsheet__levelup-named-subclass-choice")
+						.nth(i).textContent())?.trim() ?? "(no label)";
+					throw new Error(
+						`autoFillAllSelections: named subclass choice "${label}" has a <select> `
+						+ `but no selectable options, so the wizard can never finish.`);
+				}
+				await sel.selectOption(optionValues[0], {force: true});
+				if (!await sel.inputValue()) {
+					throw new Error(
+						`autoFillAllSelections: failed to set named subclass choice to `
+						+ `"${optionValues[0]}" (options: ${JSON.stringify(optionValues)}).`);
+				}
+			}
+		}
+
 		// Class-feat progressions gained AT this level-up (e.g. Champion L7
 		// "Additional Fighting Style") render the same
 		// `.charsheet__opt-feat-progression-slot > select` markup as the L1

@@ -171,6 +171,46 @@ Two authoring rules came out of it, both preset-safety issues:
 
 ## Open
 
+### CS-BUG-104 — Otherworldly Wings renders with no toggle, so its fly speed can never be turned on
+
+**Status**: Open (not fixed here — found during the CS-BUG-016 sweep).
+
+**Surfaced by**: `test/e2e/specs/tgtt-hexblade-divine-soul-tortle.spec.ts`,
+matrix row `{level: 16, name: /otherworldly wings/i, kind: "toggle"}`, which
+failed with `feature has no toggle button (expected toggleable)`. The row had
+**never executed before** — the spec aborted at its L2 checkpoint on an
+unrelated stale claim, so this is a first-ever run, not a regression.
+
+**Evidence**: the feature is present and correct in the export —
+
+```
+{"name":"Otherworldly Wings","className":"Sorcerer","subclassName":"Divine Soul",
+ "source":"XGE","level":14,
+ "entries":["Starting at 14th level, you can use a bonus action to manifest a pair
+   of spectral wings from your back. While the wings are present, you have a
+   flying speed of 30 feet. The wings last until you're incapacitated, you die,
+   or you dismiss them as a bonus action.", …]}
+```
+
+A bonus-action, dismissible, fly-speed-granting feature is textbook
+activatable, and the codebase already models exactly this shape as a curated
+active state elsewhere. Re-derive the current set of fly-speed emitters before
+relying on any count:
+
+```
+git grep -n 'target: "speed:' -- js/charactersheet/   # discard the speed:walk hits
+```
+
+Otherworldly Wings is simply absent from that set, so nothing gives it an
+activation surface and the 30 ft fly speed is unreachable in play.
+
+**Fix**: add a curated active state for Otherworldly Wings emitting
+`{type: "bonus", target: "speed:fly", value: 30}`, matching the existing
+fly-speed states. Then flip the spec row back from `kind: "passive"` to
+`kind: "toggle"`.
+
+---
+
 ### CS-BUG-103 — Class-level always-prepared spells never reach a character built in the wizard
 
 **Status**: Open. Product bug, **not fixed here** — surfaced by a harness
