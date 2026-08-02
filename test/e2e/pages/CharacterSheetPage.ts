@@ -589,21 +589,26 @@ export class CharacterSheetPage {
 	 * Read a pact slot display (for Warlocks).
 	 */
 	async getPactSlots (): Promise<{current: number; max: number; level: number}> {
-		await this.switchToTab(this.tabSpells);
-		const pactContainer = this.page.locator(".charsheet__pact-slots, [data-testid='pact-slots']");
-		const currentEl = pactContainer.locator(".charsheet__slot-current, input").first();
-		const maxEl = pactContainer.locator(".charsheet__slot-max").first();
-		const levelEl = pactContainer.locator(".charsheet__pact-level").first();
-
-		const currentText = await currentEl.inputValue().catch(() => currentEl.textContent());
-		const maxText = await maxEl.textContent();
-		const levelText = await levelEl.textContent();
-
-		return {
-			current: parseInt(String(currentText) || "0", 10),
-			max: parseInt(maxText || "0", 10),
-			level: parseInt(levelText || "0", 10),
-		};
+		// Read from state, not the DOM. The previous implementation scraped
+		// `.charsheet__pact-slots` / `.charsheet__slot-current` /
+		// `.charsheet__slot-max` / `.charsheet__pact-level` — and NONE of
+		// those four class names exists anywhere in `js/`:
+		//   grep -rl 'charsheet__pact-slots' js/   -> (no matches)
+		// so this reader could never succeed. It is the same defect class as
+		// the CS-BUG-016 spell-picker selectors: a probe that cannot pass for
+		// a legitimate product state. It surfaced as a *false* `pact slot
+		// level 0 < 1` on the hexblade multiclass build whose exported state
+		// held `pactSlots {current: 2, max: 2, level: 1}`.
+		// `_state.getPactSlots()` (charactersheet-state.js:13763) is the
+		// accessor the product itself uses; `getSubclassChoice` above already
+		// establishes reading state via `page.evaluate` as the house pattern.
+		const fromState = await this.page.evaluate(() => {
+			const s = globalThis.charSheet?._state;
+			const p = s?.getPactSlots?.() ?? s?._data?.spellcasting?.pactSlots;
+			return p ? {current: p.current ?? 0, max: p.max ?? 0, level: p.level ?? 0} : null;
+		});
+		if (!fromState) throw new Error("getPactSlots: character state exposes neither getPactSlots() nor _data.spellcasting.pactSlots");
+		return fromState;
 	}
 
 	async getSubclassChoice (className: string): Promise<{key: string; name: string} | null> {

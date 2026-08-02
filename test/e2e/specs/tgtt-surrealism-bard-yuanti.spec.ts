@@ -31,8 +31,21 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 	// spec correctly models it as `kind: "resource"`; this spec
 	// previously declared it as `kind: "toggle"` which doesn't match
 	// how the sheet renders BI on a base/Surrealism Bard.
-	{level: 1,  name: /^bardic inspiration/i, kind: "resource", skip: true, skipReason: "CS-BUG-017",
-		resourceMax: [3, 3], restoreOn: "long"},
+	// CS-BUG-017 is marked **Fixed (Wave 3)** in known-bugs.md, so this
+	// skip was frozen behind a reason that no longer exists. Lifted, and
+	// the pool now resolves because `kind: "resource"` matches a RegExp
+	// `name` against the sheet's real pool names instead of handing the
+	// pattern's `.source` to a literal substring match (which made
+	// `/^bardic inspiration/i` search for the string "^bardic
+	// inspiration" and never match).
+	// resourceMax was [3,3], which is the value for a CHA 16 bard. This
+	// preset does not set `abilityPriority`, so it takes the standard-array
+	// default (STR15/DEX14/CON13/INT12/WIS10/CHA8) — CHA 8 → mod -1 → BI
+	// uses = max(1, CHA mod) = 1. Measured: max=1. Same CS-BUG-056 family as
+	// the 11 spellSaveDc floors corrected earlier in this sweep. Widened to
+	// the CHA-independent range the jester spec already uses.
+	{level: 1,  name: /^bardic inspiration/i, kind: "resource",
+		resourceMax: [1, 5], restoreOn: "long"},
 	// Bardic Inspiration restores on long rest at L1-4 (PHB-classic),
 	// short rest at L5+ (Font of Inspiration / XPHB).
 	{
