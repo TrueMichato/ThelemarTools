@@ -2868,9 +2868,13 @@ class CharacterSheetCombat {
 		const totalBonus = abilityMod + (attack.damageBonus || 0) + featureDamageBonus + itemWeaponDamageBonus + rageBonus + stateDamageBonus + hybridDamageBonus + critDamageBonus + spellDamageBonus + ammoFlatDamageBonus;
 
 		// Get extra damage dice from active states (e.g., Hex, Flame Tongue)
+		const isMeleeForExtraDamage = this._getAttackRollKind(attack).isMelee && !attack.isSpell;
 		const extraDamageEntries = (this._state.getExtraDamageFromStates?.() || [])
 			.filter(entry => !entry.weaponId || entry.weaponId === (attack.riteWeaponId || attack.id))
-			.filter(entry => !attack.isSpell || !entry.isCrimsonRite);
+			.filter(entry => !attack.isSpell || !entry.isCrimsonRite)
+			// `meleeOnly` riders (e.g. Steel Hawk's Launch bonus damage) only apply to
+			// melee weapon attacks.
+			.filter(entry => !entry.meleeOnly || isMeleeForExtraDamage);
 		let extraDamageTotal = 0;
 		const extraDamageParts = [];
 		for (const entry of extraDamageEntries) {
@@ -3594,6 +3598,18 @@ class CharacterSheetCombat {
 		const kiMax = this._state.getKiPoints?.() || 0;
 		const kiCurrent = this._state.getKiPointsCurrent?.() || 0;
 
+		// Predatory Instinct (Steel Hawk Fighter 15): automatic, no prompt — "when you
+		// roll initiative and have no uses of Launch remaining, you regain one use".
+		// Runs first so it can't be short-circuited by an awaited Monk prompt below.
+		const launchRegained = this._state.restoreLaunchOnInitiative?.() || 0;
+		if (launchRegained > 0) {
+			this._page.renderCharacter?.();
+			JqueryUtil.doToast({
+				type: "success",
+				content: `Predatory Instinct: regained ${launchRegained} use of Launch.`,
+			});
+		}
+
 		// Uncanny Metabolism (1/long rest, optional — player chooses)
 		if (calc.hasUncannyMetabolism && kiCurrent < kiMax) {
 			const feature = this._state.getFeature("Uncanny Metabolism");
@@ -4264,7 +4280,12 @@ class CharacterSheetCombat {
 
 	_renderHandsUsedToggle (attack) {
 		const weapon = attack?.sourceItem;
-		if (!weapon?.id || !weapon.dmg2) return "";
+		if (!weapon?.id) return "";
+		// Effective profile, so a feature-granted versatile property (Steel Hawk's
+		// Nimble Lancer) surfaces the 1H/2H toggle on a weapon whose printed statblock
+		// has no `dmg2`.
+		const profile = this._state.getEffectiveWeaponDamageProfile?.(weapon) || {dmg1: weapon.dmg1, dmg2: weapon.dmg2};
+		if (!profile.dmg2) return "";
 
 		const parsedHands = Math.floor(Number(weapon.handsUsed));
 		const handsUsed = Number.isFinite(parsedHands) && parsedHands >= 2 ? 2 : 1;
@@ -4273,7 +4294,7 @@ class CharacterSheetCombat {
 			class="charsheet__attack-hands-btn${handsUsed === count ? " charsheet__attack-hands-btn--active" : ""}"
 			data-hands-used="${count}"
 			aria-pressed="${handsUsed === count}"
-			title="Use ${count === 1 ? "one hand" : "two hands"} (${count === 1 ? weapon.dmg1 : weapon.dmg2} damage)"
+			title="Use ${count === 1 ? "one hand" : "two hands"} (${count === 1 ? profile.dmg1 : profile.dmg2} damage)"
 		>${count}H</button>`;
 
 		return `<div class="charsheet__attack-hands" data-item-id="${weapon.id}" role="group" aria-label="${weapon.name || attack.name}: hands used">
@@ -5183,6 +5204,166 @@ class CharacterSheetCombat {
 			if (res.selfDroppedToZero) toast += " You drop to 0 HP — unconscious and stabilized.";
 			JqueryUtil.doToast({type: isInvig ? "info" : "success", content: toast});
 
+			this._page.renderCharacter?.();
+			this._page.saveCharacter?.();
+		});
+	}
+
+	/**
+	 * Additive combat-tab Lunar Sorcery panel (DSotDQ Sorcerer). The lunar phase is a
+	 * choice the player re-makes every long rest (and, from 6, every turn they are
+	 * willing to pay a sorcery point for), so it gets a real control here rather than a
+	 * static note on the Features tab. The panel owns the phase the way the Metamagic
+	 * Dashboard owns metamagic — which is also why the three `lunarPhase*` active states
+	 * are `noNameDetect` and never appear as generic toggle rows.
+	 *
+	 * Surfaces, in order: the phase selector, the free lunar casts, Lunar Boons (6), the
+	 * Lunar Empowerment switches (14) and Lunar Phenomenon (18). Hidden entirely unless
+	 * the character has Lunar Embodiment.
+	 */
+	renderCombatLunar () {
+		const section = document.getElementById("charsheet-combat-lunar-section");
+		const container = document.getElementById("charsheet-combat-lunar");
+		if (!container) return;
+
+		if (!this._state.hasLunarSorcery?.()) {
+			if (section) section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		if (section) section.style.display = "";
+
+		const level = this._state.getLunarSorceryLevel();
+		const phases = this._state.getLunarPhases() || [];
+		const current = this._state.getLunarPhase();
+		const canShift = level >= 6;
+		const shiftCost = CharacterSheetState.LUNAR_PHASE_CHANGE_COST;
+		const sp = this._state.getSorceryPoints?.()?.current ?? 0;
+		const freeCasts = this._state.getLunarFreeCastOptions() || [];
+		const boons = this._state.getLunarBoonUses();
+		const boonSchools = this._state.getLunarBoonSchools();
+		const phenomenon = this._state.getLunarPhenomenon();
+		const moonFire = this._state.getMoonFireInfo();
+		const currentInfo = this._state.getLunarPhaseInfo();
+
+		const phaseBtns = phases.map(p => {
+			const isCur = p.id === current;
+			const disabled = isCur || (canShift && sp < shiftCost);
+			const title = isCur
+				? `Current phase — discounts ${p.schoolNames.join(" and ")} spells`
+				: (canShift
+					? `Waxing and Waning: bonus action, ${shiftCost} sorcery point`
+					: "Your phase changes when you finish a long rest");
+			return `<button class="cs-combat-btn charsheet__lunar-phase${isCur ? " cs-combat-btn--active" : ""}" type="button"
+				data-lunar-phase="${p.id}" ${disabled ? "disabled" : ""} title="${title}">
+				<span aria-hidden="true">${p.icon}</span><span>${p.name}</span></button>`;
+		}).join("");
+
+		const castBtns = freeCasts.length
+			? freeCasts.map(o => `<button class="cs-combat-btn cs-combat-btn--spend charsheet__lunar-cast" type="button"
+				data-lunar-cast="${o.phase}" ${o.available ? "" : "disabled"}
+				title="${o.available ? `Cast ${o.spell} without a spell slot` : (o.reason || "")}">
+				${csCombatIcon(o.used ? "used" : "spark")}<span>${o.spell}</span></button>`).join("")
+			: "";
+
+		const empowermentRows = [];
+		if (level >= 14 && current === "full") {
+			empowermentRows.push(`<label class="charsheet__lunar-switch" title="Bonus action: shed or douse 10 ft of bright moonlight (advantage on Investigation and Perception inside it)">
+				<input type="checkbox" class="charsheet__lunar-moonlight" ${currentInfo?.moonlightShed ? "checked" : ""}>
+				<span>🔆 Shedding moonlight (10 ft bright / 20 ft dim)</span></label>`);
+		}
+		if (level >= 14 && current === "new") {
+			empowermentRows.push(`<label class="charsheet__lunar-switch" title="While you are entirely in darkness, attack rolls against you have disadvantage">
+				<input type="checkbox" class="charsheet__lunar-darkness" ${currentInfo?.inDarkness ? "checked" : ""}>
+				<span>🌑 Entirely in darkness</span></label>`);
+		}
+
+		container.innerHTML = `
+			<div class="charsheet__lunar-panel">
+				<div class="charsheet__lunar-phases ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-2">${phaseBtns}</div>
+				<div class="charsheet__lunar-summary ve-flex ve-flex-v-center ve-flex-wrap gap-2 mb-2 ve-small">
+					<span title="Lunar Boons discounts metamagic on spells of these schools">${csCombatIcon("spark")} Phase schools:
+						<strong>${boonSchools.schoolNames.length ? boonSchools.schoolNames.join(" &amp; ") : (currentInfo?.schoolNames || []).join(" &amp; ")}</strong></span>
+					${moonFire ? `<span title="Moon Fire: you know ${moonFire.spell}, and can split it between two creatures within ${moonFire.targetSeparation} ft of each other">🔥 Moon Fire: <strong>${moonFire.spell}</strong> (${moonFire.maxTargets} targets)</span>` : ""}
+					${level >= 6 ? `<span title="Lunar Boons: one sorcery point off a metamagic on a phase-school spell; returns on a long rest">🌘 Lunar Boons <strong>${boons.current}</strong> / ${boons.max}</span>` : ""}
+				</div>
+				${castBtns ? `<div class="charsheet__lunar-casts ve-flex ve-flex-v-center ve-flex-wrap gap-1 mb-2">
+					<span class="ve-muted ve-small" title="Once per long rest per phase, cast the phase's 1st-level lunar spell without a slot">Free lunar cast:</span>${castBtns}</div>` : ""}
+				${empowermentRows.length ? `<div class="charsheet__lunar-empowerment mb-2">${empowermentRows.join("")}</div>` : ""}
+				${phenomenon ? `<div class="charsheet__lunar-phenomenon ve-flex ve-flex-v-center ve-flex-wrap gap-1">
+					<button class="cs-combat-btn cs-combat-btn--spend charsheet__lunar-phenomenon-use" type="button"
+						${phenomenon.available ? "" : "disabled"}
+						title="Bonus action. Free once per long rest, then ${phenomenon.reuseCost} sorcery points.">
+						${csCombatIcon("bonus")}<span>${phenomenon.phaseName} Phenomenon</span></button>
+					<span class="ve-muted ve-small">${phenomenon.usesRemaining} / ${phenomenon.usesMax} free${phenomenon.saveDc != null ? ` · DC ${phenomenon.saveDc}` : ""} · then ${phenomenon.reuseCost} SP</span>
+					<div class="ve-small w-100 mt-1">${phenomenon.summary}</div>
+				</div>` : ""}
+			</div>`;
+
+		container.querySelectorAll("[data-lunar-phase]").forEach(btn => btn.addEventListener("click", () => {
+			const phaseId = /** @type {HTMLElement} */ (btn).dataset.lunarPhase;
+			const res = canShift ? this._state.changeLunarPhase(phaseId) : this._state.chooseLunarPhaseOnRest(phaseId);
+			if (!res?.ok) { JqueryUtil.doToast({type: "warning", content: res?.error || "Could not change phase."}); return; }
+			const def = CharacterSheetState.getLunarPhaseDefinition(res.phase);
+			JqueryUtil.doToast({
+				type: "success",
+				content: `${def?.icon || ""} ${def?.name || res.phase}${res.spent ? ` — spent ${res.spent} sorcery point` : ""}.`,
+			});
+			this._page.renderCharacter?.();
+			this._page.saveCharacter?.();
+		}));
+
+		container.querySelectorAll("[data-lunar-cast]").forEach(btn => btn.addEventListener("click", () => {
+			const phaseId = /** @type {HTMLElement} */ (btn).dataset.lunarCast;
+			const res = this._state.castLunarFreeSpell(phaseId);
+			if (!res?.ok) { JqueryUtil.doToast({type: "warning", content: res?.error || "Could not cast that spell."}); return; }
+			JqueryUtil.doToast({type: "success", content: `Cast ${res.spell} without expending a spell slot.`});
+			this._page.renderCharacter?.();
+			this._page.saveCharacter?.();
+		}));
+
+		container.querySelector(".charsheet__lunar-moonlight")?.addEventListener("change", (evt) => {
+			const on = /** @type {HTMLInputElement} */ (evt.target).checked;
+			const res = this._state.toggleLunarMoonlight(on);
+			if (!res?.ok) { JqueryUtil.doToast({type: "warning", content: res?.error || "Could not toggle moonlight."}); }
+			this._page.renderCharacter?.();
+			this._page.saveCharacter?.();
+		});
+
+		container.querySelector(".charsheet__lunar-darkness")?.addEventListener("change", (evt) => {
+			this._state.setLunarInDarkness(/** @type {HTMLInputElement} */ (evt.target).checked);
+			this._page.renderCharacter?.();
+			this._page.saveCharacter?.();
+		});
+
+		container.querySelector(".charsheet__lunar-phenomenon-use")?.addEventListener("click", () => {
+			const res = this._state.useLunarPhenomenon();
+			if (!res?.ok) { JqueryUtil.doToast({type: "warning", content: res?.error || "Could not use Lunar Phenomenon."}); return; }
+			const info = CharacterSheetState.getLunarPhaseDefinition(res.phase);
+			const dmg = info?.phenomenon?.damage;
+			const heal = info?.phenomenon?.healing;
+			let rolled = null;
+			const diceExpr = dmg || heal;
+			if (diceExpr) { try { rolled = this._parseDamage(diceExpr, false); } catch (e) { rolled = null; } }
+			if (rolled) {
+				const diceGroups = [];
+				this._pushDiceGroup(diceGroups, rolled);
+				if (diceGroups.length) void this._page.pAnimateDamageDice?.(diceGroups);
+				this._page.showDiceResult?.({
+					title: `Lunar Phenomenon — ${info?.name || res.phase}`,
+					subtitle: dmg ? `${dmg} ${info.phenomenon.damageType}` : `${heal} healing`,
+					roll: rolled.total,
+					total: rolled.total,
+					resultClass: dmg ? "text-danger" : "text-success",
+					resultNote: res.saveDc != null ? ` DC ${res.saveDc} ${(info.phenomenon.saveAbility || "").toUpperCase()} save` : "",
+				});
+			}
+			JqueryUtil.doToast({
+				type: "success",
+				content: res.usedFreeUse
+					? `${info?.name || "Lunar"} Phenomenon (free use).`
+					: `${info?.name || "Lunar"} Phenomenon — spent ${res.spentSorceryPoints} sorcery points.`,
+			});
 			this._page.renderCharacter?.();
 			this._page.saveCharacter?.();
 		});
@@ -11104,6 +11285,44 @@ class CharacterSheetCombat {
 			html += `</div>`;
 		}
 
+		// ===== Steel Hawk (TGS2) =====
+		if (calcs.hasSteelHawk) {
+			const launch = this._state.getLaunchResource?.();
+			const launchLeft = launch?.current || 0;
+			const launchMax = launch?.max || 0;
+			const momentumArmed = this._state.hasLaunchMomentum?.();
+			const canImproved = this._state.canUseImprovedLaunch?.();
+			html += `
+				<div class="charsheet__combat-steel-hawk cs-combat-feature mb-3">
+					<div class="cs-combat-feature__title">
+						${csCombatIcon("spark")}<span>Steel Hawk</span>
+						${csCombatPoolCaption(launchLeft, launchMax, {recharge: "short or long rest"})}
+					</div>
+					<div class="ve-small ve-muted mt-1">Leap up to <span class="bold">${calcs.launchDistance} ft</span> combined horizontally and vertically without provoking opportunity attacks, and subtract up to <span class="bold">${calcs.launchFallReduction} ft</span> from a fall taken immediately afterwards. A melee weapon attack made immediately after (or during) the leap has <span class="bold">advantage</span> and deals an extra <span class="bold">${calcs.launchBonusDamage}</span> damage of the weapon's type${calcs.launchCriticalRange ? `, scoring a critical hit on a <span class="bold">${calcs.launchCriticalRange}-20</span>` : ""}.</div>
+					<div class="cs-combat-feature__options mt-2" role="group" aria-label="Steel Hawk Launch controls">
+						<button class="cs-combat-btn cs-combat-btn--spend charsheet__combat-steelhawk-launch" ${launchLeft > 0 ? "" : "disabled"} title="Spend one use of Launch and arm the momentum rider on your next melee weapon attack">${csCombatActionChip("bonus")}<span>Launch (${calcs.launchDistance} ft)</span></button>
+						${calcs.hasImprovedLaunch ? `<button class="cs-combat-btn cs-combat-btn--spend charsheet__combat-steelhawk-launch-improved" ${launchLeft > 0 && canImproved ? "" : "disabled"} title="Push beyond your limits: leap up to ${calcs.improvedLaunchDistance} ft and take no falling damage until you land again. Costs a use of Launch, this feature's once-per-rest use, and one level of exhaustion.">${csCombatActionChip("bonus")}<span>Improved Launch (${calcs.improvedLaunchDistance} ft)</span></button>` : ""}
+						${calcs.hasEagleEye ? `<button class="cs-combat-btn charsheet__combat-steelhawk-eagle-eye${this._state.isEagleEyeSightActive?.() ? " cs-combat-btn--active" : ""}" aria-pressed="${!!this._state.isEagleEyeSightActive?.()}" title="Double your proficiency bonus on sight-based Wisdom (Perception) checks">${csCombatActionChip("free")}<span>Eagle Eye sight</span></button>` : ""}
+					</div>
+					${momentumArmed ? `<div class="cs-combat-notice cs-combat-notice--success mt-1">Launch momentum armed: your next melee weapon attack has advantage and deals an extra ${calcs.launchBonusDamage}${calcs.launchCriticalRange ? `, critting on ${calcs.launchCriticalRange}-20` : ""}.</div>` : ""}`;
+			if (calcs.hasNimbleLancer) {
+				html += `<div class="cs-combat-feature__summary"><span class="bold">Nimble Lancer:</span> lances are versatile for you while unmounted (<span class="bold">${calcs.nimbleLancerOneHandedDamage}</span> one-handed / <span class="bold">${calcs.nimbleLancerTwoHandedDamage}</span> two-handed), a Launch-fuelled lance hit always counts as two-handed, and hitting a creature within 5 ft with a lance lets you move up to ${calcs.nimbleLancerDisengageDistance} ft away from it without provoking an opportunity attack.</div>`;
+			}
+			if (calcs.hasSteelGrace) {
+				html += `<div class="cs-combat-feature__summary">${csCombatActionChip("reaction")} <span class="bold">Steel Grace:</span> spend a use of Launch on any Dexterity saving throw to take no damage on a success and half on a failure. Armor never imposes disadvantage on your Stealth checks.</div>`;
+			}
+			if (calcs.hasEagleEye) {
+				html += `<div class="cs-combat-feature__summary"><span class="bold">Eagle Eye:</span> a flying creature hit by your Launch attack must make a DC <span class="bold">${calcs.steelHawkSaveDc}</span> Strength saving throw or have its speed reduced to 0 until the start of its next turn.</div>`;
+			}
+			if (calcs.hasPredatoryInstinct) {
+				html += `<div class="cs-combat-feature__summary"><span class="bold">Predatory Instinct:</span> advantage on initiative rolls; rolling initiative with no uses of Launch left regains one automatically.</div>`;
+			}
+			if (calcs.hasImprovedLaunch) {
+				html += `<div class="cs-combat-feature__summary"><span class="bold">Improved Launch:</span> a creature hit by your Launch melee attack must succeed on a DC <span class="bold">${calcs.steelHawkSaveDc}</span> Strength saving throw or be knocked prone.</div>`;
+			}
+			html += `</div>`;
+		}
+
 		// ===== Battle Tactics (TGTT) =====
 		const battleTactics = this._state.getBattleTactics?.() || [];
 		if (battleTactics.length) {
@@ -11256,6 +11475,35 @@ class CharacterSheetCombat {
 			refresh();
 			JqueryUtil.doToast({type: "success", content: `Recalled ${returned} satellite${returned === 1 ? "" : "s"} into orbit.`});
 		});
+		const doLaunch = (improved) => {
+			const profile = this._state.useLaunch?.({improved});
+			if (!profile) {
+				JqueryUtil.doToast({
+					type: "warning",
+					content: improved
+						? "Improved Launch is unavailable — you need a use of Launch, its once-per-rest use, and fewer than two levels of exhaustion."
+						: "No uses of Launch remaining (and you can't Launch while your speed is 0).",
+				});
+				return;
+			}
+			refresh();
+			const crit = profile.criticalRange < 20 ? `, crits on ${profile.criticalRange}-20` : "";
+			const fall = profile.ignoresFallDamage
+				? " You take no falling damage until you land again, and gain a level of exhaustion."
+				: ` Subtract up to ${profile.fallReduction} ft from a fall taken immediately afterwards.`;
+			JqueryUtil.doToast({
+				type: "success",
+				content: `Launched ${profile.distance} ft. Next melee weapon attack has advantage and deals an extra ${profile.bonusDamage}${crit}.${fall} (${profile.remaining} use${profile.remaining === 1 ? "" : "s"} left)`,
+			});
+		};
+		block.querySelector(".charsheet__combat-steelhawk-launch")?.addEventListener("click", () => doLaunch(false));
+		block.querySelector(".charsheet__combat-steelhawk-launch-improved")?.addEventListener("click", () => doLaunch(true));
+		block.querySelector(".charsheet__combat-steelhawk-eagle-eye")?.addEventListener("click", () => {
+			this._state.setEagleEyeSightActive?.(!this._state.isEagleEyeSightActive?.());
+			refresh();
+			this._page.renderCharacter?.();
+		});
+
 		block.querySelector(".charsheet__combat-shadow-self-light")?.addEventListener("click", () => {
 			const next = !this._state.isStateTypeActive?.("shadowKnightDimLight");
 			this._state.setShadowKnightDimLightActive?.(next);

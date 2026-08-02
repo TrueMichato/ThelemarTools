@@ -601,6 +601,11 @@ export function describeCharacter (spec: CharacterSpec): void {
 
 		// ── Persistence smoke (export → re-import via state) ───────────
 		test(`L1 export round-trip preserves identity`, async ({page}) => {
+			// Same full wizard walk as the L1 smoke above, so it needs the same
+			// budget. On the default 60s it sat exactly on the edge — Shadow Magic
+			// passed at 1.0m while Lunar Sorcery timed out at `fillDetails`, which
+			// reads as a product failure and is not one.
+			test.setTimeout(120_000);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
 			const exported = await page.evaluate(() => {
 				const cs: any = (globalThis as any).charSheet;

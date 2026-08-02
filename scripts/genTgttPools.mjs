@@ -210,6 +210,66 @@ const combatMethodsByTraditionEntries = Object.entries(combatMethodsByTradition)
 	.sort((a, b) => a[0].localeCompare(b[0]))
 	.map(([t, set]) => [t, [...set]]);
 
+// ── Combat method progression, per class ─────────────────────────────────────
+// How MANY methods a character knows is a class-table column ("Methods Known"),
+// so it is data rather than derivation. WHICH methods they know is not
+// knowable here: tradition access is a build-time choice, so two characters of
+// the same class and level can hold disjoint method sets.
+const combatMethodsKnown = {};
+for (const c of (data.class ?? [])) {
+	for (const g of (c.classTableGroups ?? [])) {
+		const idx = (g.colLabels ?? []).findIndex(l => /methods known/i.test(String(l)));
+		if (idx < 0) continue;
+		const vals = (g.rows ?? []).map(r => {
+			let v = r?.[idx];
+			if (v && typeof v === "object") v = v.value ?? 0;
+			const n = Number(v);
+			return Number.isFinite(n) ? n : 0;
+		});
+		if (vals.some(v => v > 0)) combatMethodsKnown[c.name] = vals;
+	}
+}
+
+// A few features GRANT a method outright instead of adding a pick. Those stack
+// ON TOP of the class table, so the total a character holds is table + grants.
+// Counting them matters: without them the expected total is too low, and a
+// too-low expectation would silently mask that many genuinely-lost picks.
+//
+// There are TWO shapes, and they need separate scans:
+//   1. NAMED class grants — "gain the {@combatmethod Groundshatter}". Ranger's
+//      Primal Focus Upgrade is the only one. These can be asserted by name.
+//   2. UNNAMED subclass grants — "you learn one additional method from this
+//      tradition". 27 of these exist (Fighter 11, Monk 14, Paladin 1, Rogue 1),
+//      and Eldritch Knight grants TWO. They carry no name, so they can only
+//      feed the COUNT, and they make the total subclass-dependent.
+const combatMethodAutoGrants = {};
+const combatMethodSubclassGrants = {};
+const WORD_NUM = {a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5};
+for (const kind of ["classFeature", "subclassFeature"]) {
+	for (const f of (data[kind] ?? [])) {
+		const text = JSON.stringify(f.entries ?? "");
+		if (!combatMethodsKnown[f.className]) continue;
+
+		const names = [...text.matchAll(/gain the \{@combatmethod ([^}|]+)/gi)].map(m => m[1].trim());
+		if (names.length && kind === "classFeature") {
+			(combatMethodAutoGrants[f.className] ??= [])
+				.push({level: f.level, names: [...new Set(names)].sort()});
+			continue;
+		}
+
+		if (kind !== "subclassFeature") continue;
+		const m = /learn\s+(\w+)\s+additional\s+methods?/i.exec(text);
+		const count = m ? WORD_NUM[m[1].toLowerCase()] ?? Number(m[1]) : null;
+		if (!count || !Number.isFinite(count)) continue;
+		((combatMethodSubclassGrants[f.className] ??= {})[f.subclassShortName] ??= [])
+			.push({level: f.level, count});
+	}
+}
+for (const list of Object.values(combatMethodAutoGrants)) list.sort((a, b) => a.level - b.level);
+for (const bySub of Object.values(combatMethodSubclassGrants)) {
+	for (const list of Object.values(bySub)) list.sort((a, b) => a.level - b.level);
+}
+
 // ── Render ────────────────────────────────────────────────────────────────
 
 const header = `/**
@@ -313,6 +373,42 @@ ${combatMethodsByTraditionEntries
 		.map(([t, names]) => `\t${JSON.stringify(t)}: ${renderRegexArray(names, 1)},`)
 		.join("\n")}
 };
+
+// ── Combat Method progression per class (TGTT) ──
+// "Methods Known" straight off each class table, indexed by class level - 1
+// (so [0] is level 1). This is the number of methods a character PICKS.
+export const TGTT_COMBAT_METHODS_KNOWN: Record<string, number[]> = {
+${Object.keys(combatMethodsKnown).sort()
+		.map(cls => `\t${JSON.stringify(cls)}: [${combatMethodsKnown[cls].join(", ")}],`)
+		.join("\n")}
+};
+
+// Methods GRANTED outright by a class feature (not picked). These stack on top
+// of the table above, so a character's total = table value + every grant whose
+// level they have reached.
+export const TGTT_COMBAT_METHOD_AUTO_GRANTS: Record<string, Array<{level: number; names: string[]}>> = {
+${Object.keys(combatMethodAutoGrants).sort()
+		.map(cls => `\t${JSON.stringify(cls)}: [${combatMethodAutoGrants[cls]
+			.map(g => `{level: ${g.level}, names: [${g.names.map(n => JSON.stringify(n)).join(", ")}]}`)
+			.join(", ")}],`)
+		.join("\n")}
+};
+
+// Methods granted outright by a SUBCLASS feature — "you learn one additional
+// method from this tradition". These carry no method name, so they can only
+// feed the expected COUNT, and they make the total subclass-dependent: a
+// TGTT Monk 3 picks 2 from the class table and is granted 1 more by whichever
+// subclass it took, for a true total of 3. Omitting them under-counts by
+// exactly the grant, which is indistinguishable from a lost pick.
+export const TGTT_COMBAT_METHOD_SUBCLASS_GRANTS: Record<string, Record<string, Array<{level: number; count: number}>>> = {
+${Object.keys(combatMethodSubclassGrants).sort()
+		.map(cls => `\t${JSON.stringify(cls)}: {\n${Object.keys(combatMethodSubclassGrants[cls]).sort()
+			.map(sub => `\t\t${JSON.stringify(sub)}: [${combatMethodSubclassGrants[cls][sub]
+				.map(g => `{level: ${g.level}, count: ${g.count}}`)
+				.join(", ")}],`)
+			.join("\n")}\n\t},`)
+		.join("\n")}
+};
 `;
 
 // Cross-source pool blocks (one named export per (featureType, source)).
@@ -386,6 +482,15 @@ console.log(`  Precise Strikes:        ${preciseStrikes.length}`);
 console.log(`  Pact Boons:             ${pactBoons.length}`);
 console.log(`  Dreamwalker (C/S):      ${dreamwalkerCustoms.length}/${dreamwalkerSpecials.length}`);
 console.log(`  Combat Method traditions: ${combatMethodsByTraditionEntries.length}`);
+console.log(`  Combat Method progressions: ${Object.keys(combatMethodsKnown).sort().join(", ")}`);
+for (const [cls, grants] of Object.entries(combatMethodAutoGrants).sort()) {
+	console.log(`    auto-granted (${cls}): ${grants.map(g => `L${g.level} ${g.names.join("+")}`).join(", ")}`);
+}
+for (const [cls, bySub] of Object.entries(combatMethodSubclassGrants).sort()) {
+	const subs = Object.entries(bySub).sort();
+	const total = subs.reduce((n, [, list]) => n + list.reduce((m, g) => m + g.count, 0), 0);
+	console.log(`    subclass-granted (${cls}): ${subs.length} subclasses, ${total} methods total`);
+}
 console.log(`  Cross-source pools:`);
 for (const t of Object.keys(FIRSTPARTY_BUCKETS).sort()) {
 	for (const src of FIRSTPARTY_BUCKETS[t]) {
