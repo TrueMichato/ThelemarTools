@@ -1219,6 +1219,14 @@ async function _runPassiveOrRollEffect (
 			return;
 		}
 		case "featureCalculationDerivedFrom": {
+			// `abilityMod` / `spellSaveDc` / `spellAttackBonus` all resolve through an
+			// ability-keyed state getter. Omitting `ability` used to pass `undefined`
+			// straight through, and those getters answer 0 for an unknown ability — so
+			// the probe silently became "expected 0" and could never pass for the right
+			// reason. Fail loudly on the authoring mistake instead.
+			if (e.equals !== "proficiencyBonus" && !e.ability) {
+				throw new Error(`featureCalculationDerivedFrom(${e.property}): equals "${e.equals}" requires an \`ability\` — without it the comparison resolves to 0.`);
+			}
 			const res = await charSheet.page.evaluate((cfg) => {
 				const st: any = (globalThis as any).charSheet?._state;
 				if (!st) return {err: "no state"};
