@@ -98,6 +98,26 @@ class CharacterSheetSpells {
 		if (typeof this._page._renderOverviewMetamagic === "function") this._page._renderOverviewMetamagic();
 		this._renderMetamagic();
 		if (this._page._combat) this._page._combat.renderCombatMetamagic();
+		if (this._page._combat?.renderCombatLunar) this._page._combat.renderCombatLunar();
+	}
+
+	/**
+	 * Pay for an active metamagic: spend its (already Lunar-Boons-discounted) sorcery
+	 * point cost, then burn the Lunar Boons use that produced the discount.
+	 *
+	 * The order matters. `getCastableActiveMetamagics()` reports the REDUCED cost so the
+	 * player sees the real price, but a discount that is only displayed must never
+	 * consume a use — so the boon is consumed here, after the points have actually been
+	 * paid, and only when the reduction really changed the cost.
+	 *
+	 * @param {object|null} metamagic entry from `getCastableActiveMetamagics()`.
+	 * @returns {boolean} false when the character cannot afford it (caller aborts).
+	 */
+	_spendMetamagicCost (metamagic) {
+		if (!metamagic) return true;
+		if (!this._state.useSorceryPoint(metamagic.cost)) return false;
+		if (metamagic.lunarBoonApplied) this._state.consumeLunarBoon(metamagic.lunarBoonSchool);
+		return true;
 	}
 
 	_renderMetamagic () {
@@ -2177,7 +2197,7 @@ class CharacterSheetSpells {
 				}
 			}
 
-			if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
+			if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
 				JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 				return;
 			}
@@ -2237,7 +2257,7 @@ class CharacterSheetSpells {
 				const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: spell.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 				if (activeMetamagicChoice?.cancelled) return;
 				if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
-				if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
+				if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
 					JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 					return;
 				}
@@ -2351,7 +2371,7 @@ class CharacterSheetSpells {
 		const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: selectedSlot.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 		if (activeMetamagicChoice?.cancelled) return;
 		if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
-		if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
+		if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
 			JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 			return;
 		}
@@ -7320,7 +7340,11 @@ class CharacterSheetSpells {
 
 		// Build usage info
 		let usageInfo;
-		if (spell.atWill) {
+		if (spell.ritualOnly) {
+			// "…but only as a ritual": no per-rest budget, but also not freely castable —
+			// labelling it "At Will" (or, worse, the "1/day" fallback) misstates the rule.
+			usageInfo = "<span class=\"badge badge-info\" title=\"Can only be cast as a ritual (10 minutes, no spell slot)\">Ritual Only</span>";
+		} else if (spell.atWill) {
 			usageInfo = "<span class=\"badge badge-success\">At Will</span>";
 		} else if (spell.uses) {
 			// Build pips: filled = available, empty (used class) = spent

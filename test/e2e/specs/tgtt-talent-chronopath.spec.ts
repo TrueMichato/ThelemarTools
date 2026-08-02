@@ -133,21 +133,12 @@ const TALENT_FEATURES: FeatureCheck[] = [
 			{kind: "stateCall", method: "getStrainMaximum", min: 11},
 		],
 	},
-	{
-		level: 7,
-		untilLevel: 10,
-		name: /psionic exertion improvement/i,
-		kind: "passive",
-		effects: [{kind: "featureCalculation", property: "psionicExertionsKnown", exact: 2}],
-	},
-	{
-		level: 7,
-		untilLevel: 10,
-		name: /psionic exertion/i,
-		kind: "pick",
-		pickedCount: 2,
-		pickedFrom: PSIONIC_EXERTIONS,
-	},
+	// No L7-10 Psionic Exertion rows. An L7-10 window reaches none of the
+	// checkpoints [3, 5, 11, 17, 20], so `psionicExertionsKnown: 2` and
+	// `pickedCount: 2` were compared against nothing — and 2 holds only on
+	// L7-10, so widening changes the value. The L11 and L15 rows use the
+	// same two regexes, so the feature and picker existence checks are
+	// unaffected; only the unobservable step is gone.
 
 	{level: 8, name: /ability score improvement/i, kind: "passive"},
 
@@ -204,24 +195,22 @@ const TALENT_FEATURES: FeatureCheck[] = [
 
 	// === Level 12 — Psychic Boost (two uses) ===
 	{level: 12, name: /ability score improvement/i, kind: "passive"},
-	{
-		level: 12,
-		untilLevel: 16,
-		name: /psychic boost \(two uses\)/i,
-		kind: "resource",
-		resourceName: "Psychic Boost",
-		resourceMax: 2,
-		effects: [{kind: "featureCalculation", property: "psychicBoostUses", exact: 2}],
-	},
+	// No row for the two-use tier. `psychicBoostUses` is
+	// `level >= 17 ? 3 : level >= 12 ? 2 : 1`, so 2 holds only on L12-16 —
+	// a window containing no checkpoint. Both observable values are
+	// asserted: 1 at L11 (L7 row) and 3 at L17/L20 (below).
 
 	// === Level 13 — 5th-order powers, d8 manifestation die ===
+	// Open-ended, and asserting only the manifestation die. `maxPowerOrder`
+	// is 5 solely on L13-16, which contains no checkpoint, so that value
+	// is unobservable and the L17 row covers 6. The die, by contrast, is
+	// `level >= 13 ? "1d8"` — permanent — so it stays true at L17 and L20
+	// and this row now actually runs.
 	{
 		level: 13,
-		untilLevel: 16,
 		name: /5th-order powers/i,
 		kind: "passive",
 		effects: [
-			{kind: "featureCalculation", property: "maxPowerOrder", exact: 5},
 			{kind: "featureCalculation", property: "manifestationDie", exact: "1d8"},
 		],
 	},

@@ -5129,7 +5129,7 @@ class CharacterSheetClassUtils {
 	 * @param {string} [opts.recharge="long"]
 	 * @returns {*} Innate spell state object
 	 */
-	static buildInnateSpellStateObject (/** @type {*} */ spell, {sourceFeature, atWill = false, uses, recharge = "long", ability = null}) {
+	static buildInnateSpellStateObject (/** @type {*} */ spell, {sourceFeature, atWill = false, uses, recharge = "long", ability = null, ritualOnly = false}) {
 		return {
 			name: spell.name,
 			source: spell.source,
@@ -5146,6 +5146,9 @@ class CharacterSheetClassUtils {
 			duration: CharacterSheetClassUtils.getSpellDuration(spell),
 			concentration: CharacterSheetClassUtils.spellIsConcentration(spell),
 			ritual: CharacterSheetClassUtils.spellIsRitual(spell),
+			// A grant that reads "but only as a ritual" — the caster can never spend a
+			// slot on it. Kept separate from `ritual` (which is just the spell's tag).
+			ritualOnly,
 			subschools: spell.subschools || [],
 		};
 	}
@@ -5731,7 +5734,13 @@ class CharacterSheetClassUtils {
 	static updateClassResources (/** @type {*} */ state, /** @type {*} */ classEntry, /** @type {*} */ newLevel, /** @type {*} */ classData) {
 		const resourceDefs = {
 			"Barbarian": [
-				{name: "Rage", maxByLevel: [2, 2, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 999], recharge: "long"},
+				{name: "Rage",
+					maxByLevel: (/** @type {*} */ lvl) => CharacterSheetState.getRageUsesMaxForClass({
+						name: "Barbarian",
+						source: classEntry.source || classData.source,
+						level: lvl,
+					}),
+					recharge: "long"},
 			],
 			"Monk": [
 				{name: "__MONK_RESOURCE__", maxByLevel: (/** @type {*} */ lvl) => lvl >= 2 ? lvl : 0, recharge: "short"},
@@ -7122,8 +7131,11 @@ class CharacterSheetClassUtils {
 	 * is merged only when its featureType set does NOT intersect any class-level
 	 * progression featureType — this prevents miscounting shared types (e.g. Champion's
 	 * subclass "FS:F" vs the Fighter class "FS:F", where a shared global count would
-	 * cancel the gain). CTM:* (TGTT combat methods) are skipped here; they are augmented
-	 * separately by the bonus-method path.
+	 * cancel the gain). A subclass CTM:* progression is skipped here (the level-up
+	 * bonus-method path owns that grant), but the CLASS-level CTM:* progression is
+	 * still processed — with subclass-granted bonus methods discounted from the
+	 * "already known" count so they don't absorb a class-table increment
+	 * (CS-BUG-091).
 	 *
 	 * @param {object} classData - The class data object
 	 * @param {number} currentLevel - Previous class level
@@ -7173,13 +7185,38 @@ class CharacterSheetClassUtils {
 				matchesFeatureType(f.optionalFeatureTypes),
 			).length;
 
-			const newOptionsCount = countAtNew - existingOfType;
+			// CS-BUG-091: a subclass-GRANTED combat method is ADDITIVE to the class
+			// table, not a draw against it. 27 TGTT subclasses say "you learn one
+			// additional method from this tradition" (Eldritch Knight says two).
+			// Because `optionalfeatureProgression` stores a CUMULATIVE total, letting a
+			// granted method sit in `existingOfType` silently absorbs the class table's
+			// NEXT increment, so the character is permanently one method short from the
+			// level after the grant onward. Discount only the bonuses ALREADY on the
+			// character — inferred as the excess over the class table's total at the
+			// CURRENT level, capped at the subclass allowance — so this composes with,
+			// rather than double-counting, the level-up path's own bonus augmentation at
+			// the subclass-selection level (where the excess is still 0).
+			// Scoped to CTM:* deliberately: every other progression type (invocations,
+			// maneuvers, arcane shots, metamagic) has no additive-grant concept.
+			let effectiveExisting = existingOfType;
+			let alreadyGrantedBonus = 0;
+			if (featureTypes.some((/** @type {*} */ ft) => ft.startsWith?.("CTM:"))) {
+				const bonusAllowance = CharacterSheetClassUtils.getSubclassBonusMethodCount(subclassData, classData?.source);
+				if (bonusAllowance > 0) {
+					alreadyGrantedBonus = Math.min(bonusAllowance, Math.max(0, existingOfType - countAtCurrent));
+					effectiveExisting = existingOfType - alreadyGrantedBonus;
+				}
+			}
+
+			const newOptionsCount = countAtNew - effectiveExisting;
 			if (/** @type {*} */ newOptionsCount > 0) {
 				gains.push({
 					featureTypes,
 					name,
 					currentCount: existingOfType,
-					totalCount: countAtNew,
+					// Keep the headline total consistent with what the character will
+					// actually know: currentCount + newCount === totalCount.
+					totalCount: countAtNew + alreadyGrantedBonus,
 					newCount: newOptionsCount,
 					replacementCount: featureTypes.includes("MV:B") && countAtNew > countAtCurrent && existingOfType > 0 ? 1 : 0,
 					required: optFeatProg.required || false,

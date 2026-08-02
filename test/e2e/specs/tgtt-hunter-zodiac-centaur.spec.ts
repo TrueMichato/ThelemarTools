@@ -1,7 +1,7 @@
 import {describeCharacter, describeMulticlassCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_HUNTER_CENTAUR, PRESET_FULL_ZODIAC_CENTAUR} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
-import {buildSpecialtyChecks, buildWeaponMasteryChecks, buildZodiacFormChecks} from "../utils/tgttFeaturePools";
+import {buildCombatMethodChecks, buildSpecialtyChecks, buildWeaponMasteryChecks, buildZodiacFormChecks} from "../utils/tgttFeaturePools";
 
 // ─────────────────────────────────────────────────────────────────────
 // Hunter Ranger L20 standalone features matrix (TGTT Ranger + XPHB
@@ -35,8 +35,14 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 	},
 	// L1 Favored Enemy / Primal Focus (TGTT-flavored opener).
 	{level: 1, name: /primal focus|favored enemy/i, kind: "passive"},
-	// L2 Combat Methods (TGTT). Treat as passive listing.
+	// L2 Combat Methods (TGTT). The parent feature row, plus the real
+	// per-method assertions from buildCombatMethodChecks: the count
+	// ladder off the Ranger class table, and the two methods Primal
+	// Focus Upgrade grants outright at L6 (Groundshatter / Singular
+	// Focus) asserted by name. Previously this was a lone `passive`
+	// on the parent row, which asserted nothing about the methods.
 	{level: 2, name: /combat methods/i, kind: "passive"},
+	...buildCombatMethodChecks("Ranger", {subclassName: "Hunter"}),
 	// L3 Hunter's Lore — passive subclass info feature.
 	{level: 3, name: /hunter's lore|hunters lore/i, kind: "passive"},
 	{level: 3, name: /hunter's prey|hunters prey/i, kind: "pick",
@@ -135,9 +141,23 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 	// L1 Primal Order — TGTT/XPHB primal-order pick (Magician /
 	// Warden). Both surface as feature listings; treat as passive.
 	{level: 1, name: /primal order/i, kind: "passive"},
-	// L2 Wild Shape — 2 uses, short-rest restored.
+	// L2 Wild Shape — short-rest restored, and the pool GROWS: TGTT
+	// Druid class table reads 2 uses at Druid 2-5, 3 at Druid 6-16,
+	// 4 at Druid 17+. A single `resourceMax: [2, 2]` at level 2 is
+	// re-evaluated at every later checkpoint and so fails by
+	// construction from L11 on — the CS-BUG-018 stale-ladder shape.
+	//
+	// ⚠️ UNVERIFIED, and deliberately disclosed as such: this matrix
+	// currently aborts at its FIRST checkpoint (L3) on an unrelated
+	// `Zodiac Form: Month` / Aurochs `pickActivatable` failure, so
+	// checkpoints 5/11/17/20 have never executed and this ladder
+	// cannot be run green today. Tiered from the class table rather
+	// than from a measurement, to save the next session the round it
+	// would otherwise burn once the L3 red is cleared. The identical
+	// ladder IS measured-and-green on the multiclass leg below.
 	{
 		level: 2,
+		untilLevel: 5,
 		name: /wild shape/i,
 		kind: "resource",
 		resourceMax: [2, 2],
@@ -146,6 +166,8 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "shortRestRestores", resource: "Wild Shape"},
 		],
 	},
+	{level: 6, untilLevel: 16, name: /wild shape/i, kind: "resource", resourceMax: [3, 3], restoreOn: "short"},
+	{level: 17, name: /wild shape/i, kind: "resource", resourceMax: [4, 4], restoreOn: "short"},
 	{level: 2, name: /wild companion/i, kind: "passive"},
 	// L3 Druid Circle (Zodiac).
 	{level: 3, name: /circle of the zodiac|druid circle/i, kind: "passive"},
@@ -240,9 +262,13 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollInitiative"},
 		],
 	},
-	// Combat Methods at L2 — TGTT-specific pick (varies). Pick-kind
-	// would require enumerating all options; treat as passive listing.
+	// Combat Methods at L2 — real per-method coverage on the Ranger
+	// leg. Capped at Ranger 6: the character switches to Druid after
+	// that, so the Ranger ladder freezes. Ranger 6 is exactly the
+	// Primal Focus Upgrade boundary, so this leg also asserts the two
+	// outright-granted methods by name.
 	{level: 2, name: /combat methods/i, kind: "passive"},
+	...buildCombatMethodChecks("Ranger", {subclassName: "Hunter", maxClassLevel: 6}),
 	// Hunter subclass arrives at L3 (Ranger 3). Hunter's Prey is a
 	// pick from Colossus Slayer / Horde Breaker (XPHB) plus Giant
 	// Killer (PHB legacy carry-over).
@@ -282,15 +308,36 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "spellSaveDc", min: 11, skip: true, skipReason: "CS-BUG-016"},
 		],
 	},
-	// Druid 2 = char L8: Wild Shape (resource, 2 uses, short rest)
-	// and Wild Companion (passive feature option). The shortRest
-	// restore probe layered on top of `restoreOn: "short"` doubles
-	// as a resource-mechanics smoke check.
+	// Druid 2 = char L8: Wild Shape (resource) and Wild Companion
+	// (passive feature option).
+	//
+	// Wild Shape uses GROW with Druid level — TGTT Druid class table
+	// reads 2 (Druid 2-5), 3 (Druid 6-16), 4 (Druid 17+). On this leg
+	// Druid level = char level - 6, so char 8-11 -> 2 and char 12-20
+	// -> 3; Druid 17 would need char 23 and is unreachable. A single
+	// fixed `resourceMax: [2, 2]` at level 8 therefore failed by
+	// construction (measured: `max=3 outside expected range [2,2]`),
+	// the same stale-ladder shape as CS-BUG-018. Tiered with
+	// `untilLevel` instead.
+	//
+	// Note the multiclass matrix is evaluated once PER LEG
+	// (`assertFeaturesMatrix(..., leg.toTotalLevel)`), i.e. only at
+	// char 6 and char 20 — so the level-8 tier is inert here and the
+	// `shortRestRestores` probe is relocated onto the level-12 tier
+	// rather than dropped.
 	{
 		level: 8,
+		untilLevel: 11,
 		name: /wild shape/i,
 		kind: "resource",
 		resourceMax: [2, 2],
+		restoreOn: "short",
+	},
+	{
+		level: 12,
+		name: /wild shape/i,
+		kind: "resource",
+		resourceMax: [3, 3],
 		restoreOn: "short",
 		effects: [
 			{kind: "shortRestRestores", resource: "Wild Shape"},

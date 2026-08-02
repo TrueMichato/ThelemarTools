@@ -10,9 +10,11 @@
  */
 
 import "./setup.js";
+import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
 
 // ==========================================================================
 // PART 1: CORE BARBARIAN CLASS FEATURES (PHB)
@@ -857,6 +859,17 @@ describe("Barbarian 2024 (XPHB) Core Features", () => {
 			expect(calculations.ragesPerDay).toBe(6);
 			// Explicitly NOT Infinity like PHB level 20
 			expect(calculations.ragesPerDay).not.toBe(Infinity);
+		});
+
+		it.each([
+			["PHB", 999],
+			["XPHB", 6],
+			["TGTT", 6],
+		])("writes the correct level-20 Rage resource for %s", (source, expectedMax) => {
+			const testState = new CharacterSheetState();
+			const classEntry = {name: "Barbarian", source, level: 20};
+			CharacterSheetClassUtils.updateClassResources(testState, classEntry, 20, classEntry);
+			expect(testState.getResource("Rage").max).toBe(expectedMax);
 		});
 	});
 

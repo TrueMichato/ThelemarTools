@@ -2869,6 +2869,8 @@ class CharacterSheetPage {
 			// Additive Illrigger Infernal Conduit + Combat Masteries panels (gated).
 			this._combat.renderCombatConduit?.();
 			this._combat.renderCombatMasteries?.();
+			// Additive Lunar Sorcery panel (gated; self-hides without Lunar Embodiment).
+			this._combat.renderCombatLunar?.();
 		}
 		if (this._respec) this._respec.render();
 		if (this._playMode && this._state.getViewMode() === "play") this._playMode.render();
@@ -8783,6 +8785,11 @@ class CharacterSheetPage {
 			// Shadow Magic (XGE Sorcerer)
 			case "hound of ill omen": return this._pUseHoundOfIllOmen(feature);
 			case "shadow walk": return this._pUseShadowWalk(feature);
+			// Wicked Witch (Ar8 Sorcerer)
+			case "granny's gifts": return this._pUseGrannysGifts(feature);
+			case "clever little witch": return this._pUseCleverLittleWitch(feature);
+			case "fly, my pretty": return this._pUseFlyMyPretty(feature);
+			case "coven calling": return this._pUseCovenCalling(feature);
 		}
 		// GENERIC: any feature that publishes resource-castable spells
 		// (`calculations.resourceCastSpells`, e.g. Eyes of the Dark's *darkness* for 2
@@ -10147,6 +10154,258 @@ class CharacterSheetPage {
 
 		this._rollHistory?.addRoll({title: "Shadow Walk", total: res.distance, breakdown: `Teleport up to ${res.range} ft (bonus action)`});
 		JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `🌒 <strong>Shadow Walk</strong>: teleported up to ${res.distance} feet.`}));
+		return true;
+	}
+
+	/**
+	 * Granny's Gifts (Wicked Witch 1). The always-prepared spell ladder is granted
+	 * generically; this button owns the *choosable* half — the long-rest ward. Keeping it
+	 * for yourself installs two real conditional `save:advantage:*` modifiers; naming an
+	 * ally records the recipient without touching your own saves.
+	 * @private
+	 */
+	async _pUseGrannysGifts (feature) {
+		const calc = this._state.getFeatureCalculations();
+		const range = calc.grannysWardRange ?? 30;
+		const current = this._state.getGrannysWard?.();
+		const OPT_SELF = "Yourself";
+		const OPT_ALLY = "An ally within range…";
+		const OPT_CLEAR = "Clear the current ward";
+		const values = current ? [OPT_SELF, OPT_ALLY, OPT_CLEAR] : [OPT_SELF, OPT_ALLY];
+
+		const choice = await InputUiUtil.pGetUserEnum({
+			title: "Granny's Gifts",
+			htmlDescription: `<div>Choose yourself or a creature within <strong>${range} feet</strong> that you can see. `
+				+ `The target has advantage on saving throws against being <em>charmed</em> or <em>frightened</em> until the end of your next long rest.`
+				+ `${current ? `<br><span class="ve-muted ve-small">Currently warding: ${current.isSelf ? "yourself" : current.target}</span>` : ""}</div>`,
+			values,
+			isResolveItem: true,
+		});
+		if (!choice) return true;
+
+		if (choice === OPT_CLEAR) {
+			this._state.clearGrannysWard();
+			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "🧿 <strong>Granny's Gifts</strong>: ward cleared."}));
+		} else {
+			let target = "self";
+			let distance = 0;
+			if (choice === OPT_ALLY) {
+				const name = await InputUiUtil.pGetUserString({title: "Who do you ward?", default: ""});
+				if (name == null) return true;
+				target = String(name).trim() || "an ally";
+				const feet = await InputUiUtil.pGetUserNumber({
+					title: "How far away are they?",
+					default: 0,
+					min: 0,
+					int: true,
+				});
+				if (feet == null) return true;
+				distance = feet;
+			}
+			const res = this._state.setGrannysWardTarget(target, {distance});
+			if (!res.ok) {
+				JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+				return true;
+			}
+			JqueryUtil.doToast(/** @type {*} */ ({
+				type: "success",
+				content: `🧿 <strong>Granny's Gifts</strong>: ${res.isSelf ? "you have" : `${res.target} has`} advantage on saves against being charmed or frightened.`
+					+ `${res.isSelf ? "" : " <span class=\"ve-small\">(tracked for reference — it modifies their sheet, not yours)</span>"}`,
+			}));
+		}
+
+		await this._saveCurrentCharacter?.();
+		this._renderResources?.();
+		this._features?.render?.();
+		return true;
+	}
+
+	/**
+	 * Clever Little Witch (Wicked Witch 6). Reflect a single-target spell back at its
+	 * caster. Cost is the spell's level in Sorcery Points, HALVED (rounded down) when the
+	 * spell belongs to your hag ancestor's specialty school — so both prompts are needed
+	 * before the spend, and the sheet shows the price before charging it.
+	 * @private
+	 */
+	async _pUseCleverLittleWitch (feature) {
+		const state = this._state;
+		const calc = state.getFeatureCalculations();
+		const specialty = state.getHagAncestorSpecialtySchool?.();
+		const canRecall = !!calc.hasCovenCalling;
+
+		const spellLevel = await InputUiUtil.pGetUserNumber({
+			title: "Clever Little Witch — spell level",
+			min: 1,
+			max: calc.cleverLittleWitchMaxSpellLevel ?? 9,
+			int: true,
+			default: 1,
+		});
+		if (spellLevel == null) return true;
+
+		let isSpecialty = false;
+		if (specialty) {
+			const ans = await InputUiUtil.pGetUserBoolean({
+				title: "Clever Little Witch",
+				htmlDescription: `<div>Is the spell a <strong>${specialty}</strong> spell? Your hag ancestor's specialty halves the cost (rounded down).</div>`,
+				textYes: `Yes — it's ${specialty}`,
+				textNo: "No",
+			});
+			if (ans == null) return true;
+			isSpecialty = !!ans;
+		}
+
+		let recalled = false;
+		if (canRecall) {
+			const ans = await InputUiUtil.pGetUserBoolean({
+				title: "Coven Calling",
+				htmlDescription: `<div>Instead of the triggering spell, cast <em>any</em> spell you saw that creature cast in the last minute?</div>`,
+				textYes: "Yes — a remembered spell",
+				textNo: "No — reflect the trigger",
+			});
+			if (ans == null) return true;
+			recalled = !!ans;
+		}
+
+		const res = state.useCleverLittleWitch({
+			spellLevel,
+			school: isSpecialty ? specialty : null,
+			recalled,
+		});
+		if (!res.ok) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+			return true;
+		}
+
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `🪞 <strong>Clever Little Witch</strong>: cast back a level ${spellLevel} spell for <strong>${res.cost}</strong> Sorcery Point${res.cost === 1 ? "" : "s"}`
+				+ `${res.discounted ? " (specialty — halved)" : ""}. Uses your DC ${res.spellSaveDc} / attack +${res.spellAttackBonus}.`
+				+ ` ${res.sorceryPointsRemaining} SP remaining.`,
+		}));
+
+		await this._saveCurrentCharacter?.();
+		this._renderResources?.();
+		this._features?.render?.();
+		return true;
+	}
+
+	/**
+	 * Fly, My Pretty (Wicked Witch 14). Enchant an object on a long rest, then mount or
+	 * dismount it — mounting activates the `flyMyPretty` state, which is what actually
+	 * grants the 60 ft flying speed and the charm/fear immunity.
+	 * @private
+	 */
+	async _pUseFlyMyPretty (feature) {
+		const state = this._state;
+		const enchanted = state.getFlyingItem?.();
+		const riding = state.isStateActive?.("flyMyPretty");
+		const OPT_ENCHANT = enchanted ? `Enchant a different object (replaces ${enchanted.item})` : "Enchant an object";
+		const OPT_RIDE = enchanted ? `Speak the command word — ride ${enchanted.item}` : null;
+		const OPT_LAND = "Speak the command word — land and dismount";
+		const values = [OPT_ENCHANT, ...(riding ? [OPT_LAND] : OPT_RIDE ? [OPT_RIDE] : [])];
+
+		const choice = await InputUiUtil.pGetUserEnum({
+			title: "Fly, My Pretty",
+			htmlDescription: `<div>Your enchanted object hovers with a flying speed of <strong>${state.getFeatureCalculations().flyMyPrettyFlySpeed ?? 60} feet</strong>, `
+				+ `and while flying on it you can't be charmed or frightened.`
+				+ `${enchanted ? `<br><span class="ve-muted ve-small">Enchanted: ${enchanted.item} — command word “${enchanted.commandWord}”</span>` : ""}</div>`,
+			values,
+			isResolveItem: true,
+		});
+		if (!choice) return true;
+
+		if (choice === OPT_ENCHANT) {
+			const item = await InputUiUtil.pGetUserString({title: "What do you enchant?", default: enchanted?.item || "Broom"});
+			if (item == null) return true;
+			const commandWord = await InputUiUtil.pGetUserString({title: "Command word", default: enchanted?.commandWord || "Fly"});
+			if (commandWord == null) return true;
+			const res = state.enchantFlyingItem({item, commandWord});
+			if (!res.ok) {
+				JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+				return true;
+			}
+			JqueryUtil.doToast(/** @type {*} */ ({
+				type: "success",
+				content: `🧹 <strong>Fly, My Pretty</strong>: ${res.item} is enchanted (“${res.commandWord}”).`
+					+ `${res.replaced ? ` ${res.replaced} is no longer enchanted.` : ""}`,
+			}));
+		} else if (choice === OPT_LAND) {
+			state.deactivateState("flyMyPretty");
+			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "🧹 <strong>Fly, My Pretty</strong>: you land and dismount."}));
+		} else {
+			state.activateState("flyMyPretty");
+			JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `🧹 <strong>Fly, My Pretty</strong>: hovering — 60 ft flying speed; you can't be charmed or frightened.`}));
+		}
+
+		await this._saveCurrentCharacter?.();
+		this._renderResources?.();
+		this._features?.render?.();
+		return true;
+	}
+
+	/**
+	 * Coven Calling (Wicked Witch 18), the duplicates half. Two hag-like duplicates for
+	 * 2 Sorcery Points; each may cast a known 1st–3rd-level instantaneous spell for its
+	 * level in Sorcery Points. (The recall-cast half rides on Clever Little Witch.)
+	 * @private
+	 */
+	async _pUseCovenCalling (feature) {
+		const state = this._state;
+		const dupes = state.getCovenDuplicates?.();
+		const calc = state.getFeatureCalculations();
+		const OPT_CONJURE = `Conjure ${calc.covenDuplicateCount ?? 2} duplicates (${calc.covenDuplicateCost ?? 2} SP)`;
+		const OPT_CAST = dupes?.remaining ? `A duplicate casts a spell (${dupes.remaining} left to act)` : null;
+		const OPT_DISMISS = dupes ? "Dismiss the duplicates" : null;
+		const values = [OPT_CONJURE, ...(OPT_CAST ? [OPT_CAST] : []), ...(OPT_DISMISS ? [OPT_DISMISS] : [])];
+
+		const choice = await InputUiUtil.pGetUserEnum({
+			title: "Coven Calling",
+			htmlDescription: `<div>Conjure two duplicates of yourself in the guise of hags. They function like <em>mirror image</em> and act immediately after you. `
+				+ `On its turn, a duplicate can take one action to cast a spell you know of 1st to ${calc.covenDuplicateMaxSpellLevel ?? 3}rd level with an instantaneous duration, `
+				+ `costing Sorcery Points equal to the spell's level.</div>`,
+			values,
+			isResolveItem: true,
+		});
+		if (!choice) return true;
+
+		let res;
+		if (choice === OPT_DISMISS) {
+			state.dismissCovenDuplicates();
+			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "🜛 <strong>Coven Calling</strong>: the duplicates fade."}));
+		} else if (choice === OPT_CAST) {
+			const lvl = await InputUiUtil.pGetUserNumber({
+				title: "Duplicate casts — spell level",
+				min: 1,
+				max: dupes.maxSpellLevel ?? 3,
+				int: true,
+				default: 1,
+			});
+			if (lvl == null) return true;
+			res = state.castCovenDuplicateSpell(lvl);
+			if (!res.ok) {
+				JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+				return true;
+			}
+			JqueryUtil.doToast(/** @type {*} */ ({
+				type: "success",
+				content: `🜛 <strong>Coven Calling</strong>: a duplicate casts a level ${lvl} spell for ${res.cost} SP. `
+					+ `${res.duplicatesRemaining} duplicate${res.duplicatesRemaining === 1 ? "" : "s"} left to act · ${res.sorceryPointsRemaining} SP remaining.`,
+			}));
+		} else {
+			res = state.conjureCovenDuplicates();
+			if (!res.ok) {
+				JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+				return true;
+			}
+			JqueryUtil.doToast(/** @type {*} */ ({
+				type: "success",
+				content: `🜛 <strong>Coven Calling</strong>: ${res.count} duplicates appear. ${res.sorceryPointsRemaining} SP remaining.`,
+			}));
+		}
+
+		await this._saveCurrentCharacter?.();
+		this._renderResources?.();
+		this._features?.render?.();
 		return true;
 	}
 
@@ -12696,6 +12955,14 @@ class CharacterSheetPage {
 			}
 
 			if (resolvedAny) {
+				// A resolved structured choice can UNLOCK effects on its PARENT feature —
+				// Hag Ancestor's language / skill proficiency / specialty school only exist
+				// once the player has picked which hag they descend from. Effects are
+				// applied before the queue is drained (addClass → applyClassFeatureEffects
+				// → processPendingFeatureChoices), so without this re-run the grant lands a
+				// whole level late. `applyClassFeatureEffects()` is idempotent — every
+				// `levelUp()` already calls it — so this is safe for every other choice.
+				this._state.applyClassFeatureEffects?.();
 				await this.saveCharacter?.();
 				this.renderCharacter?.();
 			}
@@ -13000,6 +13267,37 @@ class CharacterSheetPage {
 		});
 	}
 
+	/**
+	 * Apply a TOTAL floor to a finished d20 roll (Indomitable Might).
+	 *
+	 * Distinct from `aggregated.minimum`, which floors the d20 DIE (Reliable Talent):
+	 * this floors the FINAL TOTAL after every modifier and buff die, which is what
+	 * RAW says ("if your total for a Strength check is less than your Strength score,
+	 * you can use that score in place of the total").
+	 *
+	 * RAW phrases it as an option ("you can"), but it can only ever raise the total,
+	 * never lower it, so it is auto-applied and surfaced in the result note rather
+	 * than prompted -- matching the player-favourable convention already used for the
+	 * die floor and for ability swaps.
+	 *
+	 * @param {number} total The computed roll total.
+	 * @param {number|null|undefined} floor The floor from `aggregateModifiers().totalMinimum`.
+	 * @returns {{total: number, applied: boolean, note: string}}
+	 */
+	_applyTotalFloor (total, floor) {
+		if (!Number.isFinite(floor) || !Number.isFinite(total) || total >= floor) {
+			return {total, applied: false, note: ""};
+		}
+		return {
+			total: floor,
+			applied: true,
+			// "was N" rather than "rolled N": N is the pre-floor TOTAL, and phrasing it as
+			// "rolled" next to a d20 result reads as a natural roll (an Athletics total of
+			// 20 is not a natural 20).
+			note: `Total raised to ${floor} (was ${total})`,
+		};
+	}
+
 	async _rollAbilityCheck (ability, event) {
 		const substitutedAbility = this._state.getActiveAbilitySubstitution?.(`check:${ability}`);
 		const baseMod = this._state.getAbilityMod(substitutedAbility || ability);
@@ -13070,6 +13368,11 @@ class CharacterSheetPage {
 		const stateDice = this._rollStateDiceBonuses(aggType);
 		if (stateDice) total += stateDice.total;
 
+		// Total floor (Indomitable Might). Applied AFTER every bonus, because RAW floors
+		// "your total for a Strength check", not the die and not the modifier.
+		const totalFloor = this._applyTotalFloor(total, aggregated.totalMinimum);
+		total = totalFloor.total;
+
 		// Thelemar crit visual cues
 		let resultClass = "";
 		let resultNote = "";
@@ -13082,6 +13385,9 @@ class CharacterSheetPage {
 		}
 		if (minimumApplied) {
 			resultNote = resultNote ? `${resultNote} | Min ${aggregated.minimum} applied` : `Min ${aggregated.minimum} applied (rolled ${rollResult.roll})`;
+		}
+		if (totalFloor.note) {
+			resultNote = resultNote ? `${resultNote}\n${totalFloor.note}` : totalFloor.note;
 		}
 		if (redCant.note) {
 			resultNote = resultNote ? `${resultNote}\n${redCant.note}` : redCant.note;
@@ -13224,7 +13530,8 @@ class CharacterSheetPage {
 
 		// Buff dice (e.g. Bless's 1d4) rolled into the total.
 		const stateDice = this._rollStateDiceBonuses(aggType);
-		const totalWithDice = total + (stateDice ? stateDice.total : 0);
+		const totalFloor = this._applyTotalFloor(total + (stateDice ? stateDice.total : 0), aggregated.totalMinimum);
+		const totalWithDice = totalFloor.total;
 
 		// Thelemar crit visual cues
 		let resultClass = "";
@@ -13238,6 +13545,9 @@ class CharacterSheetPage {
 		}
 		if (minimumApplied) {
 			resultNote = resultNote ? `${resultNote} | Min ${aggregated.minimum} applied` : `Min ${aggregated.minimum} applied (rolled ${rollResult.roll})`;
+		}
+		if (totalFloor.note) {
+			resultNote = resultNote ? `${resultNote}\n${totalFloor.note}` : totalFloor.note;
 		}
 
 		// Passive defensive reminders (Evasion, Last Ditch Evasion, etc.).
@@ -13614,7 +13924,13 @@ class CharacterSheetPage {
 		// underlying ability check so generic "check" buffs apply to skills.
 		const stateDice = this._rollStateDiceBonuses(checkType);
 		const maneuverBonus = this._combat?.consumeBattleMasterCheckBonus?.(`check:${overrideAbility || skillAbility}:${skillKey}`);
-		const totalWithDice = total + (stateDice ? stateDice.total : 0) + (maneuverBonus?.roll || 0);
+		// Total floor (Indomitable Might). A Strength skill check IS a Strength check, so the
+		// floor arrives on `checkAggregated` (`check:str`) rather than the skill aggregate.
+		const totalFloor = this._applyTotalFloor(
+			total + (stateDice ? stateDice.total : 0) + (maneuverBonus?.roll || 0),
+			checkAggregated.totalMinimum,
+		);
+		const totalWithDice = totalFloor.total;
 
 		// Thelemar crit visual cues
 		let resultClass = "";
@@ -13628,6 +13944,9 @@ class CharacterSheetPage {
 		}
 		if (minimumApplied) {
 			resultNote = resultNote ? `${resultNote} | Min ${minimumValue} applied` : `Min ${minimumValue} applied (rolled ${rollResult.roll})`;
+		}
+		if (totalFloor.note) {
+			resultNote = resultNote ? `${resultNote}\n${totalFloor.note}` : totalFloor.note;
 		}
 		if (redCant.note) {
 			resultNote = resultNote ? `${resultNote}\n${redCant.note}` : redCant.note;
@@ -18257,6 +18576,8 @@ class CharacterSheetPage {
 				this._features?.render();
 				this._combat?.renderCombatInterdiction?.();
 				this._combat?.renderCombatConduit?.();
+				// Lunar Phenomenon's save DC is CHA-derived too.
+				this._combat?.renderCombatLunar?.();
 				this._saveCurrentCharacter();
 			},
 		});
