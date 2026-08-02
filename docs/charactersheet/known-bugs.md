@@ -4328,3 +4328,180 @@ too, and the defect is strictly at materialisation.
    sheet materialises both" and "`_data.features` contains both" look like the
    same sentence and are not. The first is a claim about a pipeline; the second
    is a reading. Only the second was ever taken.
+## CS-BUG-089 — a companion whose attack is declared structurally has no rollable attack at all
+
+**Status:** Fixed.
+**Affects:** every `CLASS_SUMMON` companion authored in the structured attack
+vocabulary. The reproducible victim in the shipped corpus is the **Hound of Ill
+Omen** (Shadow Magic Sorcerer 6). Any future curated summon written the same way
+inherits it, which is why the fix is at the point of entry rather than in the
+Hound.
+
+### Symptom
+
+Summon the Hound at level 6. It arrives with a fully specified Bite — `+5` to
+hit, `2d6+3` piercing, plus a DC 13 Strength save or prone — and the companion
+card renders **zero attack buttons**. There is nothing to click and nothing to
+roll. The damage is visible nowhere on the sheet.
+
+### Root cause — two vocabularies, one reader
+
+Companion attacks arrive in two shapes:
+
+| shape | example | who reads it |
+|---|---|---|
+| prose (bestiary) | `{name: "Bite", entries: ["{@atk mw} {@hit 5} to hit… {@damage 2d6+3}"]}` | everything |
+| structured (curated) | `{name: "Bite", attackBonus: 5, damage: "2d6+3", damageType: "piercing"}` | **nothing that renders or rolls** |
+
+`addCompanion()` stored the structured form verbatim as `companion.attacks` and
+initialised `actions: companionData.actions || []`. Every surface that produces
+a button or a roll reads `companion.actions` and parses 5etools prose out of
+`entries`:
+
+- `charactersheet.js:4853` — attack-button filter, `/\{@atk/` over `actions[].entries`
+- `charactersheet.js:5705` — the same filter, second render path
+- `charactersheet.js:5797` — `_rollCompanionAttack()`, `{@hit N}` / `{@damage X}` over `entries`
+- `charactersheet.js:5963` — companion attack list
+
+So a structured attack landed in a field no rendering or rolling path consults.
+
+**Enumerated, not assumed.** `git grep -n "\.attacks" -- js/charactersheet/`
+returns exactly two other readers of `companion.attacks`, and neither rescues
+this:
+
+1. `charactersheet-playmode.js:2835` / `:4013` do `comp.actions || comp.attacks || []`.
+   That fallback **never fires** — `addCompanion()` always writes an array to
+   `actions` and `[]` is truthy — and it renders only `name`/`entries` anyway,
+   neither of which a structured attack has.
+2. `_recalculateScaledCompanion()` rewrites both lists, but only when the
+   companion declares `scaling.attackName`. The Hound's descriptor is
+   `{className: "Sorcerer", tempHpPerLevel: 0.5}` — no `attackName` — so it is
+   never reached.
+
+This corrects an earlier and weaker-sounding but false claim that "nothing reads
+`companion.attacks`". Two things do; neither renders a button or rolls dice.
+
+### Fix
+
+`static CharacterSheetState._withStructuredAttackActions(actions, attacks)`,
+applied once at `addCompanion()`. It synthesises a prose action per structured
+attack that is not already represented, emitting exactly the tokens the four
+consumers parse (`{@atk}`, `{@hit N}`, `{@h}{@damage X} <type> damage.`) and
+appending any `description` so riders such as the prone save survive.
+
+Authored prose wins: an attack whose name already matches an action, or which
+already carries `entries`, is left untouched. `companion.attacks` is preserved
+unchanged, so the translation is purely additive and nothing that reads the
+structured form is disturbed.
+
+### Regression pins
+
+`test/jest/charactersheet/CharacterSheetShadowMagicSorcerer.test.js` — both
+assert the tokens the real consumers parse, applying the render predicate from
+`charactersheet.js:4853` verbatim rather than a paraphrase.
+
+Falsified by breaking the logic **in place**, signature kept — never by deleting
+the method, which would only prove the test touches new code:
+
+| break | red | failure |
+|---|---|---|
+| the fix absent entirely (pre-fix baseline) | 1 | `Expected length: 1 / Received length: 0` — zero attack buttons |
+| `seen.has(...)` collision guard removed | 1 | `Expected length: 1 / Received length: 2` — duplicate `Bite` row |
+| `{@damage …}` wrapper dropped from the emitted entry | 1 | damage list `Expected - 3 / Received + 1` |
+
+All three are real **assertion** failures, not `TypeError`.
+
+Honest note on pin 2: it is **green pre-fix**, because it asserts *precedence*
+and the total absence of translation satisfies that trivially. It is a guard
+against the fix over-reaching, not against the original bug — pin 1 is the pin
+for the bug itself. Falsifying it required the second break above.
+
+---
+
+## CS-BUG-069 — `featuresMatrix` rows in a level window with no checkpoint are never evaluated, and the detector that should catch them reports zero
+
+**Status:** Open. Partially addressed — `913600e4` widened the offending
+windows that existed at the time and added `scripts/auditE2eCoverage.mjs`. The
+underlying hole is still open, and **12 rows are inert at `fae134bb`**.
+
+**Affects:** `test/e2e/utils/characterSpecFactory.ts` (the MEGA and matrix
+loops) and `scripts/auditE2eCoverage.mjs` (the detector).
+
+### Symptom
+
+`assertFeaturesMatrix()` is only ever called at the checkpoints
+`[3, 5, 11, 17, 20]` (`characterSpecFactory.ts:366` and `:393`). A row is gated
+by `level` and `untilLevel`, so a row whose window contains no checkpoint is
+**never evaluated at all** — it looks like coverage in the spec, contributes to
+the coverage percentage, and asserts nothing, forever. It cannot fail, so it
+cannot report the regression it was written to catch.
+
+### Measured, by enumerating the parsed objects — not by scanning source
+
+Instrumenting `buildComprehensiveCharacterTests()` at collection time and
+running `npx playwright test --list`:
+
+```
+DEAD_WINDOW Astral Self Monk Changeling    :: L2..2   :: /combat methods/i (passive)
+DEAD_WINDOW Astral Self Monk Changeling    :: L6..7   :: /combat methods/i (passive)
+DEAD_WINDOW Astral Self Monk Changeling    :: L8..9   :: /combat methods/i (passive)
+DEAD_WINDOW Astral Self Monk Changeling    :: L13..14 :: /combat methods/i (passive)
+DEAD_WINDOW Astral Self Monk Changeling    :: L15..16 :: /combat methods/i (passive)
+DEAD_WINDOW Hunter Ranger Centaur          :: L2..2   :: /combat methods/i (passive)
+DEAD_WINDOW Hunter Ranger Centaur          :: L6..6   :: /combat methods/i (passive)
+DEAD_WINDOW Hunter Ranger Centaur          :: L7..8   :: /combat methods/i (passive)
+DEAD_WINDOW Hunter Ranger Centaur          :: L9..10  :: /combat methods/i (passive)
+DEAD_WINDOW Hunter Ranger Centaur          :: L13..14 :: /combat methods/i (passive)
+DEAD_WINDOW Hunter Ranger Centaur          :: L15..16 :: /combat methods/i (passive)
+DEAD_WINDOW Meteor Knight Fighter Aarakocra:: L13..16 :: /satellite mastery/i (resource)
+```
+
+Meanwhile `node scripts/auditE2eCoverage.mjs` prints an **empty `inert` column
+for all three specs**, and badges two of them as fully covered:
+
+```
+tgtt-hunter-zodiac-centaur.spec.ts    52 entries … inert (blank)  102%  ✓ FULL
+tgtt-meteor-knight-fighter.spec.ts    13 entries … inert (blank)  115%  ✓ FULL
+tgtt-astral-self-monk-changeling.ts   24 entries … inert (blank)   58%  ⚠ LOW
+```
+
+A spec scoring **✓ FULL at 102%** while carrying six never-executed rows is
+worse than no detector, because the badge actively discourages a second look.
+
+### Root cause — two independent ones
+
+**1. `findInertRows()` scans spec source text, but 11 of the 12 rows do not
+exist in spec source.** They are emitted at runtime by `buildCombatMethodChecks`
+(`test/e2e/utils/tgttFeaturePools.ts:1420`/`:1431`). A lexical scan of
+`test/e2e/specs/*.ts` is structurally incapable of seeing a row a helper
+returns. This is the same class of error already recorded in CS-BUG-087's notes:
+**a regex scan over source is not an enumeration.**
+
+**2. The regex is `/\{\s*level:\s*(\d+)/`, so a comment between `{` and
+`level:` blinds it.** That is precisely what a careful author writes on a row
+they know is inert — the Meteor Knight L13..16 row carries *"Not exercised by
+the current checkpoint list [3, 5, 11, 17, 20], but kept so the tier ladder is
+complete"* and is therefore invisible to the detector that exists to find it.
+
+### Why widening the window is the wrong fix
+
+All eleven undocumented rows sit on **intermediate progression tiers** — a
+Monk's combat methods at L6-7 differ from L8-9. Stretching `L13..14` out to
+touch L11 or L17 does not make the row run; it makes it assert a value that is
+**factually wrong for the level it now covers**. The previous sweep's widening
+was safe only for the specific rows it touched.
+
+### Suggested direction (not implemented here)
+
+Compute the checkpoint list *from* the matrix instead of hardcoding it: keep
+`[3, 5, 11, 17, 20]` as the base, then add one rescue stop per otherwise
+unreachable window (greedily shared between overlapping windows), and at a
+rescue stop assert **only** the entries that stop exists for — a full re-pass at
+every added level blows the MEGA timeout. A prototype of this made all of the
+above rows execute for the first time.
+
+If that lands, `scripts/auditE2eCoverage.mjs:131` must change with it: it reads
+the checkpoint list with `/const\s+checkpoints\s*=\s*\[([\d,\s]+)\]/` and
+**silently falls back** to a hardcoded default the moment that literal becomes a
+variable — so the detector would keep reporting against a checkpoint list the
+runner no longer uses.

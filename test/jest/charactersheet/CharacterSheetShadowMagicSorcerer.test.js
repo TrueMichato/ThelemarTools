@@ -401,6 +401,57 @@ describe("Shadow Magic Sorcerer — Hound of Ill Omen (level 6)", () => {
 		expect(state.summonHoundOfIllOmen()).toMatchObject({ok: false});
 		expect(state.getHoundOfIllOmen()).toBeNull();
 	});
+
+	// CS-BUG-089. The hound declares its Bite structurally (`attacks: [{attackBonus,
+	// damage, damageType}]`), but every surface that renders an attack button or rolls
+	// one reads `companion.actions` and parses 5etools prose out of `entries`:
+	//   charactersheet.js:4853  attack-button filter   — /\{@atk/ over actions[].entries
+	//   charactersheet.js:5705  the same filter again
+	//   charactersheet.js:5797  _rollCompanionAttack   — {@hit N} / {@damage X} over entries
+	//   charactersheet.js:5963  companion attack list
+	// so the hound arrived with a fully specified attack and NOTHING to roll. These pins
+	// assert the tokens those four consumers actually parse, not that a field exists.
+	it("exposes its structured Bite as a rollable prose action (CS-BUG-089)", () => {
+		const state = makeShadowSorcerer(6);
+		state.summonHoundOfIllOmen();
+		const hound = state.getHoundOfIllOmen();
+
+		// The render predicate at charactersheet.js:4853, applied verbatim.
+		const attackActions = (hound.actions || []).filter(a =>
+			a.entries?.some(e => typeof e === "string" && /\{@atk/.test(e)),
+		);
+		expect(attackActions).toHaveLength(1);
+		expect(attackActions[0].name).toBe("Bite");
+
+		// The roller at charactersheet.js:5805/:5809 reads exactly these two tokens.
+		const entry = attackActions[0].entries.find(e => typeof e === "string");
+		expect(entry.match(/\{@hit\s*(-?\d+)\}/)[1]).toBe("5");
+		expect([...entry.matchAll(/\{@damage\s+([^}]+)\}/g)].map(m => m[1].trim())).toEqual(["2d6+3"]);
+		expect(entry).toMatch(/piercing/);
+		// The prone rider is not lost in translation.
+		expect(entry).toMatch(/Strength saving throw or be knocked prone/);
+
+		// The structured source of truth is untouched — the translation is additive.
+		expect(hound.attacks[0]).toMatchObject({name: "Bite", attackBonus: 5, damage: "2d6+3"});
+	});
+
+	it("does not clobber a companion's own prose action of the same name (CS-BUG-089)", () => {
+		const state = makeShadowSorcerer(6);
+		const id = state.addCompanion({
+			name: "Test Summon",
+			type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+			actions: [{name: "Bite", entries: ["{@atk mw} {@hit 9} to hit, reach 10 ft. {@h}{@damage 4d8} authored damage."]}],
+			attacks: [{name: "Bite", attackBonus: 5, damage: "2d6+3", damageType: "piercing"}],
+		});
+		const comp = state.getCompanion(id);
+
+		// Authored prose wins; no duplicate "Bite" row is synthesised beside it.
+		expect(comp.actions.filter(a => a.name === "Bite")).toHaveLength(1);
+		const entry = comp.actions[0].entries[0];
+		expect(entry).toMatch(/\{@hit 9\}/);
+		expect(entry).toMatch(/authored damage/);
+		expect(entry).not.toMatch(/2d6\+3/);
+	});
 });
 
 describe("Shadow Magic Sorcerer — Shadow Walk (level 14)", () => {
