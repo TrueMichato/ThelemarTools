@@ -1124,12 +1124,20 @@ async function _runPassiveOrRollEffect (
 				const comp = (st.getCompanions?.() || []).find((c: any) => re.test(c?.name || ""));
 				if (!comp) return {err: `no companion matching ${cfg.namePattern}; seen=[${(st.getCompanions?.() || []).map((c: any) => c.name).join(", ")}]`};
 				const atks = [...(comp.attacks || []), ...(comp.actions || [])];
-				// `damageType` and `description` are part of the companion attack
-				// shape (see the Hound of Ill Omen's Bite) but were omitted here,
-				// so `damageContains` could never match a companion that carries
-				// its type structurally rather than inline in the damage string.
-				// Note the field is `description`, not `desc`.
-				const flat = (a: any) => [a?.damage, a?.damageType, a?.desc, a?.description, ...(Array.isArray(a?.entries) ? a.entries : [a?.entries])].filter(Boolean).join(" ");
+				// `damageType` is part of the companion attack shape (see the
+				// Hound of Ill Omen's Bite: damage "2d6+3", damageType
+				// "piercing") but was omitted here, so `damageContains` could
+				// never match a companion carrying its type structurally
+				// rather than inlined into the damage string.
+				//
+				// `description` is deliberately NOT included, though the
+				// adjacent `desc` is almost certainly a typo for it. It is
+				// prose being fed to a `contains` matcher, so a future
+				// `damageContains: "fire"` would match a description reading
+				// "the target catches fire" — a false pass, which is the exact
+				// defect class this fix exists to remove. Add it only for a
+				// shape that demonstrably needs it.
+				const flat = (a: any) => [a?.damage, a?.damageType, a?.desc, ...(Array.isArray(a?.entries) ? a.entries : [a?.entries])].filter(Boolean).join(" ");
 				const out = {
 					err: null as string | null,
 					hp: comp.hp?.max ?? comp.maxHp ?? null,

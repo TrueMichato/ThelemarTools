@@ -11,7 +11,7 @@
 // comments are flagged as warnings (advisory — does not exit non-zero by
 // default; pass `--strict` to exit 1 on any warning).
 //
-// It also reports two classes of PREDETERMINED-OUTCOME PROBE — assertions
+// It also reports three classes of PREDETERMINED-OUTCOME PROBE — assertions
 // whose result is fixed by the harness's own shape, independent of any
 // product behaviour. Both have shipped here, and both read as product
 // findings until someone measures them:
@@ -44,6 +44,19 @@
 //      A stale generated pool (one entry dropped, or a straight
 //      apostrophe turned curly so its regex can no longer match) makes
 //      the last milestone permanently red. Cannot PASS.
+//
+//   3. VACUOUS SPELL NAME MATCHES — `spellMatchMode: "any"` paired with a
+//      non-empty `spell:`. The mode does not RELAX the name match, it
+//      DELETES it: in "any" mode the helper never reads `e.spell` and
+//      checks only `getKnownSpellsByLevel()[level].length >= 1`. So the
+//      probe still reads as a name assertion while asserting only that
+//      the character knows at least one spell of that level — something
+//      most builds satisfy incidentally. Passes for a DIFFERENT REASON
+//      than it appears to. `spell: ""` is the honest form and is ignored.
+//
+//      This is the third sibling of the property, and the one that was
+//      briefly thought to be undetectable-by-machine. It is not: the
+//      pairing is a purely static fact about the probe literal.
 //
 // The checkpoint list is read out of `characterSpecFactory.ts` so it
 // cannot drift. Pool sizes are resolved conservatively — flat arrays,
@@ -306,6 +319,117 @@ function findUnreachablePicks (src) {
 	return out;
 }
 
+/**
+ * Blank out comments while PRESERVING length and newlines, so every index
+ * and reported line number stays valid against the original source.
+ *
+ * Needed because this file's own warning prose quotes the dangerous form
+ * verbatim (`{spell: "Bane", spellMatchMode: "any"}`) in four specs. A
+ * detector that fires on the documentation warning against it is noise,
+ * and noisy checks get switched off — which would cost us the real
+ * instances it exists to find.
+ *
+ * String and template literals are tracked so a `//` inside one is not
+ * mistaken for a comment, and REGEX literals are tracked so an apostrophe
+ * inside one (`name: /granny'?s gifts/i` — 7 specs carry this shape) does
+ * not open a phantom string that swallows every comment until the next
+ * apostrophe. That bug was live in the first version of this function and
+ * produced exactly the false positive it exists to prevent: proof that a
+ * tool for finding shape-determined results is itself subject to them.
+ */
+function blankComments (src) {
+	const out = src.split("");
+	let i = 0;
+	const n = src.length;
+	const blank = (from, to) => {
+		for (let k = from; k < to && k < n; ++k) if (out[k] !== "\n") out[k] = " ";
+	};
+	// A `/` starts a regex (rather than division) when the previous
+	// meaningful character opens an expression position.
+	const prevMeaningful = (at) => {
+		for (let k = at - 1; k >= 0; --k) if (!/\s/.test(src[k])) return src[k];
+		return "";
+	};
+	while (i < n) {
+		const c = src[i];
+		if (c === "\"" || c === "'" || c === "`") {
+			const quote = c;
+			++i;
+			while (i < n && src[i] !== quote) {
+				if (src[i] === "\\") ++i;
+				++i;
+			}
+			++i;
+			continue;
+		}
+		if (c === "/" && src[i + 1] === "/") {
+			let j = i;
+			while (j < n && src[j] !== "\n") ++j;
+			blank(i, j);
+			i = j;
+			continue;
+		}
+		if (c === "/" && src[i + 1] === "*") {
+			const j = src.indexOf("*/", i + 2);
+			const end = j < 0 ? n : j + 2;
+			blank(i, end);
+			i = end;
+			continue;
+		}
+		if (c === "/" && ":,([=!&|?{;+*%^~<>".includes(prevMeaningful(i))) {
+			let j = i + 1;
+			let inClass = false;
+			while (j < n && src[j] !== "\n") {
+				if (src[j] === "\\") { j += 2; continue; }
+				if (src[j] === "[") inClass = true;
+				else if (src[j] === "]") inClass = false;
+				else if (src[j] === "/" && !inClass) break;
+				++j;
+			}
+			i = j + 1;
+			continue;
+		}
+		++i;
+	}
+	return out.join("");
+}
+
+/**
+ * `spellMatchMode: "any"` does NOT relax the name match — it DELETES it.
+ * In "any" mode `comprehensiveBuildHelpers.ts` never reads `e.spell` and
+ * checks only `getKnownSpellsByLevel()[level].length >= 1`. So pairing it
+ * with a NON-EMPTY `spell:` yields a probe that cannot fail for the
+ * reason its author intended: the name is silently discarded while the
+ * spec still reads as a name assertion.
+ *
+ * `spell: ""` is the honest form — it makes "count only" explicit — so it
+ * is not reported.
+ */
+function findVacuousSpellMatches (rawSrc) {
+	const src = blankComments(rawSrc);
+	const out = [];
+	// Anchor on the mode and walk back to the enclosing `{`; key order
+	// inside a matrix effect is not fixed.
+	const re = /\bspellMatchMode:\s*["']any["']/g;
+	let m;
+	const seen = new Set();
+	while ((m = re.exec(src)) !== null) {
+		const open = enclosingBrace(src, m.index);
+		if (open < 0 || seen.has(open)) continue;
+		seen.add(open);
+		const obj = readObjectLiteral(src, open);
+		if (!obj) continue;
+		const spell = obj.match(/\bspell:\s*(["'])((?:\\.|(?!\1).)*)\1/);
+		if (!spell) continue; // no literal `spell:` — unresolvable, stay silent
+		if (spell[2].trim() === "") continue; // honest form
+		out.push({
+			where: `line ${src.slice(0, open).split("\n").length}`,
+			spell: spell[2].slice(0, 28),
+		});
+	}
+	return out;
+}
+
 /** Index of the `{` opening the object literal containing `at`, or -1. */
 function enclosingBrace (src, at) {
 	let depth = 0;
@@ -447,6 +571,7 @@ function auditSpec (specPath) {
 	const inertRows = findInertRows(src);
 	const inertWithProbes = inertRows.filter(r => r.hasProbes).length;
 	const unreachablePicks = findUnreachablePicks(src);
+	const vacuousSpellMatches = findVacuousSpellMatches(src);
 	const siblingCovered = countSiblingCoveredRows(src);
 	const effective = effectsCount + reasonCount + helperCount + skipReasonCount + siblingCovered - inertWithProbes;
 	const coverage = entryCount === 0 ? 1 : effective / entryCount;
@@ -467,6 +592,7 @@ function auditSpec (specPath) {
 		inertRows,
 		inertWithProbes,
 		unreachablePicks,
+		vacuousSpellMatches,
 		coverage,
 		status,
 	};
@@ -554,10 +680,28 @@ function main () {
 		log("");
 	}
 
+	const vacuousSpecs = results.filter(r => r.vacuousSpellMatches.length);
+	const totalVacuous = results.reduce((a, r) => a + r.vacuousSpellMatches.length, 0);
+	if (vacuousSpecs.length) {
+		log(`  ⚠ Vacuous spell name matches — \`spellMatchMode: "any"\` DELETES the name:`);
+		log("");
+		for (const r of vacuousSpecs) {
+			for (const row of r.vacuousSpellMatches) {
+				log(`      ${padR(r.fileName, 46)} ${padR(row.where, 30)} spell: "${row.spell}" is never read`);
+			}
+		}
+		log("");
+		log(`  ${totalVacuous} probe(s) name a spell that the matcher discards. In "any" mode`);
+		log(`  only \`getKnownSpellsByLevel()[level].length >= 1\` is checked, so these`);
+		log(`  cannot fail for the reason their author intended. Use exact-name mode,`);
+		log(`  or \`spell: ""\` to state "count only" honestly.`);
+		log("");
+	}
+
 	if (warnings > 0) {
 		log(`  ${warnings} spec(s) below threshold.`);
 	}
-	if (STRICT && (warnings > 0 || totalInertProbes > 0 || totalUnreachable > 0)) process.exit(1);
+	if (STRICT && (warnings > 0 || totalInertProbes > 0 || totalUnreachable > 0 || totalVacuous > 0)) process.exit(1);
 }
 
 main();
