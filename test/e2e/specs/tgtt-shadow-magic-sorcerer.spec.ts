@@ -104,16 +104,21 @@ describeCharacter({
 		// The pool grows at EVERY level, so one row per matrix checkpoint
 		// with `untilLevel` — an earlier row must never be re-evaluated
 		// against a later, larger pool.
+		//
+		// The ladder starts at L3, not L2: an L2-2 window contains no
+		// checkpoint ([3, 5, 11, 17, 20]), so the tier-1 row never ran —
+		// and it was the only one carrying the long-rest restore probe,
+		// which therefore never ran either. Restore now lives on the
+		// first tier that actually executes.
 		{
-			level: 2,
-			untilLevel: 2,
+			level: 3,
+			untilLevel: 4,
 			name: "Sorcery Points",
 			kind: "resource",
-			resourceMax: 2,
+			resourceMax: 3,
 			restoreOn: "long",
 			effects: [{kind: "longRestRestores", resource: "Sorcery Points"}],
 		},
-		{level: 3, untilLevel: 4, name: "Sorcery Points", kind: "resource", resourceMax: 3},
 		{level: 5, untilLevel: 10, name: "Sorcery Points", kind: "resource", resourceMax: 5},
 		{level: 11, untilLevel: 16, name: "Sorcery Points", kind: "resource", resourceMax: 11},
 		{level: 17, untilLevel: 19, name: "Sorcery Points", kind: "resource", resourceMax: 17},
@@ -277,9 +282,15 @@ describeCharacter({
 		// ══ Hound of Ill Omen (L6) ═══════════════════════════════════════
 		// A real CLASS_SUMMON companion built from the dire wolf, re-typed to
 		// Medium monstrosity, costing 3 Sorcery Points.
+		//
+		// Window runs to L16 so it reaches the L11 checkpoint. At L6-10 it
+		// reached none of [3, 5, 11, 17, 20], so this entire structural
+		// block — cost, range, AC, HP, the bite attack, the summon/dismiss
+		// round trip and the scaling descriptor — never executed. The L17
+		// row below re-checks only the level-scaled temp HP.
 		{
 			level: 6,
-			untilLevel: 10,
+			untilLevel: 16,
 			name: /hound of ill omen/i,
 			kind: "passive",
 			effects: [

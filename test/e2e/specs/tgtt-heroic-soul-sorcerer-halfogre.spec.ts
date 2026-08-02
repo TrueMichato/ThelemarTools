@@ -4,8 +4,14 @@ import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
 import {buildSpecialtyChecks, buildAnyMetamagicChecks, TGTT_METAMAGIC} from "../utils/tgttFeaturePools";
 
 // ── Heroic Soul Sorcerer L1→20 features matrix ───────────────────────
-// Sorcerer base (PHB / TGTT-sourced subclass):
-//   L2 Font of Magic / Sorcery Points (= Sorc level, long-rest restore)
+// Sorcerer base — the CLASS is TGTT-sourced, not just the subclass
+// (PRESET_FULL_HEROIC_SOUL_HALFOGRE sets classSource: "TGTT"), and that
+// is what drives the Sorcery Points ladder: getSorceryPointsMaxForClass()
+// keys on the CLASS source, returning `level + 1` for TGTT and
+// `level >= 2 ? level : 0` otherwise. Do not "correct" the maxes below to
+// the PHB ladder — a PHB-sourced Sorcerer (e.g. the Shadow Magic spec)
+// legitimately asserts different numbers from the same feature.
+//   L1 Font of Magic / Sorcery Points (= Sorc level + 1, long-rest restore)
 //   L3 Metamagic — 3 known; 5 total at L10; 7 total at L17
 //   L20 Sorcerous Restoration — short-rest restore of up to 4 SP
 // Heroic Soul subclass (TGTT):

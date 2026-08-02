@@ -63,13 +63,10 @@ describeCharacter({
 			],
 		},
 		// Rage uses pool — re-checked at scaling thresholds.
-		{
-			level: 1,
-			untilLevel: 2,
-			name: "Rage",
-			kind: "resource",
-			resourceMax: 2,
-		},
+		// No L1-2 or L12-16 tier: those windows reach none of the
+		// checkpoints [3, 5, 11, 17, 20], so `resourceMax` 2 and 5 were
+		// compared against nothing, and neither can be widened without
+		// changing the correct value. The observable steps are 3, 4 and 6.
 		{
 			level: 3,
 			untilLevel: 5,
@@ -81,7 +78,6 @@ describeCharacter({
 			],
 		},
 		{level: 6,  untilLevel: 11, name: "Rage", kind: "resource", resourceMax: 4},
-		{level: 12, untilLevel: 16, name: "Rage", kind: "resource", resourceMax: 5},
 		{level: 17, name: "Rage", kind: "resource", resourceMax: 6},
 
 		{

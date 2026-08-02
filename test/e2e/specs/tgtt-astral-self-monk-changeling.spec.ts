@@ -2,6 +2,7 @@ import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_ASTRAL_SELF_MONK_CHANGELING} from "../utils/characterBuilder";
 import type {FeatureCheck} from "../utils/comprehensiveBuildHelpers";
 import {
+	buildCombatMethodChecks,
 	buildSpecialtyChecks,
 } from "../utils/tgttFeaturePools";
 
@@ -86,6 +87,13 @@ const ASTRAL_SELF_MONK_FEATURES: FeatureCheck[] = [
 	{level: 18, name: /superior defense/i, kind: "passive"},
 	{level: 20, name: /body and mind/i, kind: "passive"},
 	...buildSpecialtyChecks("Monk").slice(0, 1),
+	// Combat Methods — count-based ladder through the product's own
+	// structural API. Monk's "Methods Known" column reads 0 at L1, so the
+	// first milestone is L2. Astral Self additionally GRANTS one method at
+	// L3 ("you learn one additional method from this tradition"), which the
+	// subclass-grant table folds into the expected totals — without it the
+	// ladder is one short at every level from 3 on.
+	...buildCombatMethodChecks("Monk", {subclassName: "Astral Self"}),
 ];
 
 describeCharacter({

@@ -13267,6 +13267,37 @@ class CharacterSheetPage {
 		});
 	}
 
+	/**
+	 * Apply a TOTAL floor to a finished d20 roll (Indomitable Might).
+	 *
+	 * Distinct from `aggregated.minimum`, which floors the d20 DIE (Reliable Talent):
+	 * this floors the FINAL TOTAL after every modifier and buff die, which is what
+	 * RAW says ("if your total for a Strength check is less than your Strength score,
+	 * you can use that score in place of the total").
+	 *
+	 * RAW phrases it as an option ("you can"), but it can only ever raise the total,
+	 * never lower it, so it is auto-applied and surfaced in the result note rather
+	 * than prompted -- matching the player-favourable convention already used for the
+	 * die floor and for ability swaps.
+	 *
+	 * @param {number} total The computed roll total.
+	 * @param {number|null|undefined} floor The floor from `aggregateModifiers().totalMinimum`.
+	 * @returns {{total: number, applied: boolean, note: string}}
+	 */
+	_applyTotalFloor (total, floor) {
+		if (!Number.isFinite(floor) || !Number.isFinite(total) || total >= floor) {
+			return {total, applied: false, note: ""};
+		}
+		return {
+			total: floor,
+			applied: true,
+			// "was N" rather than "rolled N": N is the pre-floor TOTAL, and phrasing it as
+			// "rolled" next to a d20 result reads as a natural roll (an Athletics total of
+			// 20 is not a natural 20).
+			note: `Total raised to ${floor} (was ${total})`,
+		};
+	}
+
 	async _rollAbilityCheck (ability, event) {
 		const substitutedAbility = this._state.getActiveAbilitySubstitution?.(`check:${ability}`);
 		const baseMod = this._state.getAbilityMod(substitutedAbility || ability);
@@ -13337,6 +13368,11 @@ class CharacterSheetPage {
 		const stateDice = this._rollStateDiceBonuses(aggType);
 		if (stateDice) total += stateDice.total;
 
+		// Total floor (Indomitable Might). Applied AFTER every bonus, because RAW floors
+		// "your total for a Strength check", not the die and not the modifier.
+		const totalFloor = this._applyTotalFloor(total, aggregated.totalMinimum);
+		total = totalFloor.total;
+
 		// Thelemar crit visual cues
 		let resultClass = "";
 		let resultNote = "";
@@ -13349,6 +13385,9 @@ class CharacterSheetPage {
 		}
 		if (minimumApplied) {
 			resultNote = resultNote ? `${resultNote} | Min ${aggregated.minimum} applied` : `Min ${aggregated.minimum} applied (rolled ${rollResult.roll})`;
+		}
+		if (totalFloor.note) {
+			resultNote = resultNote ? `${resultNote}\n${totalFloor.note}` : totalFloor.note;
 		}
 		if (redCant.note) {
 			resultNote = resultNote ? `${resultNote}\n${redCant.note}` : redCant.note;
@@ -13491,7 +13530,8 @@ class CharacterSheetPage {
 
 		// Buff dice (e.g. Bless's 1d4) rolled into the total.
 		const stateDice = this._rollStateDiceBonuses(aggType);
-		const totalWithDice = total + (stateDice ? stateDice.total : 0);
+		const totalFloor = this._applyTotalFloor(total + (stateDice ? stateDice.total : 0), aggregated.totalMinimum);
+		const totalWithDice = totalFloor.total;
 
 		// Thelemar crit visual cues
 		let resultClass = "";
@@ -13505,6 +13545,9 @@ class CharacterSheetPage {
 		}
 		if (minimumApplied) {
 			resultNote = resultNote ? `${resultNote} | Min ${aggregated.minimum} applied` : `Min ${aggregated.minimum} applied (rolled ${rollResult.roll})`;
+		}
+		if (totalFloor.note) {
+			resultNote = resultNote ? `${resultNote}\n${totalFloor.note}` : totalFloor.note;
 		}
 
 		// Passive defensive reminders (Evasion, Last Ditch Evasion, etc.).
@@ -13881,7 +13924,13 @@ class CharacterSheetPage {
 		// underlying ability check so generic "check" buffs apply to skills.
 		const stateDice = this._rollStateDiceBonuses(checkType);
 		const maneuverBonus = this._combat?.consumeBattleMasterCheckBonus?.(`check:${overrideAbility || skillAbility}:${skillKey}`);
-		const totalWithDice = total + (stateDice ? stateDice.total : 0) + (maneuverBonus?.roll || 0);
+		// Total floor (Indomitable Might). A Strength skill check IS a Strength check, so the
+		// floor arrives on `checkAggregated` (`check:str`) rather than the skill aggregate.
+		const totalFloor = this._applyTotalFloor(
+			total + (stateDice ? stateDice.total : 0) + (maneuverBonus?.roll || 0),
+			checkAggregated.totalMinimum,
+		);
+		const totalWithDice = totalFloor.total;
 
 		// Thelemar crit visual cues
 		let resultClass = "";
@@ -13895,6 +13944,9 @@ class CharacterSheetPage {
 		}
 		if (minimumApplied) {
 			resultNote = resultNote ? `${resultNote} | Min ${minimumValue} applied` : `Min ${minimumValue} applied (rolled ${rollResult.roll})`;
+		}
+		if (totalFloor.note) {
+			resultNote = resultNote ? `${resultNote}\n${totalFloor.note}` : totalFloor.note;
 		}
 		if (redCant.note) {
 			resultNote = resultNote ? `${resultNote}\n${redCant.note}` : redCant.note;

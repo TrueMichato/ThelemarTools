@@ -1124,7 +1124,12 @@ async function _runPassiveOrRollEffect (
 				const comp = (st.getCompanions?.() || []).find((c: any) => re.test(c?.name || ""));
 				if (!comp) return {err: `no companion matching ${cfg.namePattern}; seen=[${(st.getCompanions?.() || []).map((c: any) => c.name).join(", ")}]`};
 				const atks = [...(comp.attacks || []), ...(comp.actions || [])];
-				const flat = (a: any) => [a?.damage, a?.desc, ...(Array.isArray(a?.entries) ? a.entries : [a?.entries])].filter(Boolean).join(" ");
+				// `damageType` and `description` are part of the companion attack
+				// shape (see the Hound of Ill Omen's Bite) but were omitted here,
+				// so `damageContains` could never match a companion that carries
+				// its type structurally rather than inline in the damage string.
+				// Note the field is `description`, not `desc`.
+				const flat = (a: any) => [a?.damage, a?.damageType, a?.desc, a?.description, ...(Array.isArray(a?.entries) ? a.entries : [a?.entries])].filter(Boolean).join(" ");
 				const out = {
 					err: null as string | null,
 					hp: comp.hp?.max ?? comp.maxHp ?? null,

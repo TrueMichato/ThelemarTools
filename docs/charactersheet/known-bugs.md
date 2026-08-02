@@ -2984,3 +2984,394 @@ independently at merge time and again by the implementing session; both runs
 agree on 5. Keep `_parseFeatureWideCastingLimit()` defined when running this
 control — deleting it as well produces a `ReferenceError` and an inflated red
 count that proves nothing.
+
+---
+
+## CS-BUG-090 — a species trait whose NAME collides with a combat method was reclassified as one
+
+**Status**: RESOLVED.
+
+**Affected**: any character whose species grants a trait sharing a name with a
+TGTT combat method. Enumerated against the shipped data: **Centaur** (GGR,
+MPMM, and the TGTT `_copy` of them) → **`Charge`**, and **Kender** (DSotDQ) →
+**`Taunt`**. The collision surface is the 321-name `combatMethod` catalogue, so
+any future homebrew species trait with a generic combat name joins it.
+
+**Symptom** — the racial trait was stored as a combat method. Measured on a
+wizard-built Centaur Hunter Ranger 3, `getCombatMethods()` returned **4** where
+the class table grants **3**:
+
+```json
+{"name": "Charge", "_entityType": "combatMethod", "tradition": "Rapid Current",
+ "degree": 1, "staminaCost": 1, "featureType": "Species"}
+```
+
+`featureType: "Species"` — its true origin — sits alongside combat-method
+markers it should never have. User-visible consequences: the racial trait
+appears in the Combat Methods UI grouped under a tradition the character never
+took, it acquires a **1-point stamina cost**, and the character appears to know
+one more method than the class table allows — which also lets a genuinely lost
+pick hide behind it.
+
+**Root cause** — `_repairCombatMethodMarkers()`
+(`js/charactersheet/charactersheet-state.js`) matched the catalogue on
+**name + source alone**:
+
+```js
+const entity = this._combatMethodCatalog.find(m =>
+    m?._entityType === "combatMethod"
+    && (m.name || "").toLowerCase() === name
+    && (m.source || "").toLowerCase() === source);
+```
+
+Its only guard was `hasTypePrefix(f, ["BT", "AS"])` — Battle Tactics and Arcane
+Shots. Nothing excluded a species / background / feat trait. A TGTT-sourced
+species matches on source too, so the racial `Charge` matched the TGTT method
+`Charge` exactly and was stamped.
+
+Note this is a *repair* pass whose whole job is to re-hydrate methods that lost
+their markers (CS-BUG report #14, "Doubleshot does nothing"), so it deliberately
+trusts name+source. The defect is that "lost its markers" and "never was one"
+are indistinguishable under that predicate.
+
+**Fix** — skip features tagged as belonging to another entity kind, unless they
+carry a real CTM marker; and undo exactly the fields the pass writes, so it is
+its own inverse and repairs saves already mis-stamped:
+
+```js
+const FOREIGN_ORIGIN_TYPES = /^(species|race|subrace|lineage|background|feat)$/i;
+…
+if (isForeignOrigin(f) && !hasTypePrefix(f, ["CTM:"])) {
+    if (f._entityType === "combatMethod") delete f._entityType;
+    delete f.tradition; delete f.degree; delete f.staminaCost;
+    continue;
+}
+```
+
+The CTM escape hatch keeps the guard from being over-broad: a homebrew species
+that legitimately grants a real combat method still repairs.
+
+**Why the suite missed it** — Combat Methods had **no assertion anywhere in the
+E2E suite**. `TGTT_COMBAT_METHODS_BY_TRADITION` existed as a fully-populated
+constant with zero consumers, and the two specs that mention the feature both
+asserted only that the parent `Combat Methods` row exists, under the comment
+*"Pick-kind would require enumerating all options; treat as passive listing."*
+
+**Discovered by** the new `buildCombatMethodChecks()` helper, while validating
+its own falsification — the count assertion failed at L3 reporting
+`getCombatMethods().length=4, expected 3`.
+
+⚠️ **Do not assert combat methods with `kind: "pick"` over
+`TGTT_COMBAT_METHODS_BY_TRADITION`.** That was the helper's first design and it
+is unsound: the union of 321 generic name patterns matches features that are not
+combat methods, so `matchCount` is inflated by a race/class-dependent amount.
+The very first run scored 4 matches against 3 real methods — for the same
+`Charge` collision, but through the *harness*, and it would still have been
+wrong after this product fix. Use `stateCall` on `getCombatMethods()`, which
+filters structurally via `CharacterSheetClassUtils.isCombatMethod()`.
+
+### Regression pins
+
+`CharacterSheetCombatMethodRepair.test.js` — describe block
+*"CS-BUG-090 — species traits that share a name with a combat method"*.
+**Falsified: 2 of 5 go red on revert**, both on assertions
+(`Received: "combatMethod"`), not TypeErrors. The other three are deliberate
+no-regression controls — a premise guard that the collision exists at all, plus
+the two over-broadness controls (a genuine same-named method still repairs; a
+species trait carrying CTM markers survives) — which must stay green either way.
+
+E2E: `tgtt-hunter-zodiac-centaur.spec.ts` fails at L3 without the fix and passes
+with it, so the new helper pins this end-to-end as well.
+## CS-BUG-091 — a subclass-granted combat method absorbed the next class-table increment
+
+**Status:** Fixed.
+**Affects:** 27 TGTT subclasses across 4 classes — Fighter 11 (Eldritch Knight
+grants **two**), Monk 14, Paladin 1 (Oathbreaker), Rogue 1 (Swashbuckler).
+Barbarian and Ranger grant none, which is exactly why this hid for so long.
+
+### Symptom
+
+Every one of those subclasses says, in prose, *"you learn one additional method
+from this tradition."* The character received it — and then never received the
+**next** method the class table owed them, and stayed one short for the rest of
+their career. On a wizard-built Astral Self Monk, measured:
+
+| Monk level | Class table | Expected (table + grant) | Actual |
+|---|---|---|---|
+| 3 | 2 | 3 | 3 ✅ |
+| 4 | 3 | 4 | 3 ❌ |
+| 5 | 3 | 4 | 3 ❌ |
+
+The L3 value being *correct* is what made this so quiet: the grant visibly
+arrived, so the feature looked implemented. The loss only shows up one level
+later, as a pick that is never offered.
+
+### Root cause
+
+`optionalfeatureProgression` for `CTM:*` stores a **cumulative total**, not a
+per-level delta. `CharacterSheetClassUtils.getOptionalFeatureGains()` computed:
+
+```js
+newOptionsCount = countAtNew - existingOfType;
+```
+
+`existingOfType` counts every CTM feature on the character — including the
+subclass-granted one. So at Monk 4 the table wanted 3 total, the character
+already held 3 (2 class picks + 1 grant), and the difference was 0. The grant
+had silently spent the class's next increment.
+
+The grant itself is added by a separate path
+(`charactersheet-levelup.js` ~:525, via `getSubclassBonusMethodCount()`), which
+fires once at the subclass-selection level. QuickBuild was **already correct** —
+it adds the bonus into `gain.totalNeeded` (`charactersheet-quickbuild.js`
+~:2456, ~:2492), so its arithmetic nets out. The Builder → Level-Up path was the
+odd one out.
+
+### Fix
+
+In `getOptionalFeatureGains()`, discount subclass-granted bonus methods from the
+"already known" count, **scoped to `CTM:*` only** — no other progression type
+(invocations, maneuvers, arcane shots, metamagic) has an additive-grant concept,
+so the blast radius is exactly TGTT combat methods.
+
+The discount is the *excess over the class table's total at the **current**
+level*, capped at the subclass allowance:
+
+```js
+alreadyGrantedBonus = Math.min(bonusAllowance, Math.max(0, existingOfType - countAtCurrent));
+```
+
+⚠️ **Why the inference rather than a flat `- bonusAllowance`:** at the
+subclass-selection level the grant has not been taken yet, so the excess is
+still 0 and the class path correctly contributes nothing — leaving the
+level-up module's own bonus augmentation to supply that single pick. A flat
+subtraction would make both paths offer it and hand the player **two** methods
+at the grant level. The clamp also keeps a hand-edited import carrying surplus
+methods from having the surplus read as grants.
+
+`totalCount` is reported as `countAtNew + alreadyGrantedBonus` so the picker
+header satisfies `currentCount + newCount === totalCount` instead of claiming a
+total lower than the character's own holding.
+
+### Regression pins
+
+`CharacterSheetCombatMethodBudget.test.js` — 8 tests.
+**Falsified: 4 of 8 go red on revert, all on assertions, zero TypeErrors.**
+The revert breaks the logic in place with the signature intact (sets the
+discount to 0), rather than deleting anything. Three of the four originally
+failed as `TypeError: Cannot read properties of undefined`; the tests were
+hardened with an explicit `expect(gain).toBeDefined()` so the failure is an
+assertion, per the rule that a red `TypeError` is not a falsification.
+
+The 4 that stay green are deliberate controls: the no-double-count guard at the
+grant level, the over-discount clamp, the subclass-driven control (no
+bonus-granting subclass → old arithmetic), and a non-CTM progression control.
+
+E2E: `tgtt-astral-self-monk-changeling.spec.ts` fails at L5 without the fix
+(`getCombatMethods().length=3, expected 4`) and passes L1→20 with it.
+
+### How it was found
+
+Not by interpreting a failure — by **validating a harness helper on a second
+class**. `buildCombatMethodChecks` had been built and verified on Ranger only,
+and Ranger is one of the two TGTT classes with no subclass grants. Wiring it
+into a Monk spec produced a red that turned out to be two independent defects
+stacked: a harness gap (the helper ignored subclass grants) *and* this product
+bug underneath it. Validating on N=1 class would have shipped both.
+
+---
+
+## CS-BUG-088 — Indomitable Might rendered but did nothing, and was modelled on the wrong rule
+
+**Status:** Fixed
+**Severity:** Medium (a capstone-tier class feature with zero mechanical effect)
+**Area:** `charactersheet-state.js` (FeatureEffectRegistry, `aggregateModifiers`), `charactersheet.js` (roll handlers)
+
+### Symptom
+
+Indomitable Might (Barbarian 18) appeared on the Features tab and did **nothing**.
+Measured live on `barbarian/chained fury/18/minotaur` before the fix:
+
+```
+namedModifiers -> {name: "Indomitable Might", type: "ability:str:minimum", value: "strScore"}
+aggregateModifiers("ability:str:minimum") -> bonus 0, sources []
+aggregateModifiers("check:str")           -> bonus 0, minimum null
+getAdvantageState("check:str")            -> no minimum, sources []
+_data.rollFloors                          -> {}   (empty)
+```
+
+The modifier was created and then read by **no one**. This is precisely the
+"description-only rendering" the subclass batch's acceptance bar forbids.
+
+### Root cause — two independent defects
+
+**1. No consumer.** It was registered as
+`{type: "modifier", modType: "ability:str:minimum", value: "strScore"}`.
+`ability:str:minimum` had exactly one emitter and zero readers suite-wide, so
+the value never reached a roll.
+
+**2. The modType encoded the wrong rule — the more important defect.**
+RAW is a floor on the **total of a check**, not on the **ability score**:
+
+> PHB: "if your total for a Strength check is less than your Strength score, you can use that score in place of the total."
+> XPHB: "…for a Strength check **or Strength saving throw**…"
+
+So simply adding a handler for `ability:str:minimum` would have produced a
+*correct-looking number enforcing the wrong rule* — a Strength score reading 20
+when RAW never modifies the score. The model had to change, not just the wiring.
+
+Three floors now coexist and must not be conflated:
+
+| Concept | Floors | Example |
+|---|---|---|
+| `skillMinimum` → `aggregate.minimum` | the **d20 die** | Reliable Talent |
+| `checkTotalFloor` → `aggregate.totalMinimum` | the **final total** | Indomitable Might |
+| ability-score bonuses | the **score** | what the old modType wrongly implied |
+
+### Fix
+
+- Registry: `{type: "checkTotalFloor", ability: "str", floorFrom: "abilityScore", savesInEditions: ["XPHB"], __editionAware: true}`.
+  Only the *rule* is stored, never a number — the floor is read live from
+  `getAbilityScore()` so it tracks ASIs, Primal Champion and Wild Shape. (Baking
+  the value at grant time is the CS-BUG-038 failure mode.)
+- `aggregateModifiers` emits `result.totalMinimum` on `check:<abl>` / `save:<abl>`.
+  **A Strength skill check already aggregates `check:str`** (`checkType` in
+  `_rollSkillCheck`), so Athletics is covered by the same rule with no second
+  entry — and a skill whose ability has been swapped away from STR correctly
+  stops matching.
+- New shared helper `_applyTotalFloor(total, floor)` applied in all three roll
+  handlers *after* every modifier and buff die, because RAW floors the total.
+- Edition divergence resolved from the **feature's own `source`**, threaded in
+  opt-in via `__editionAware`. Every other registry effect is passed through
+  byte-identically, so this cannot change behaviour for anything that does not
+  ask for it. (The alternative — making the class-feature lookup source-aware
+  like the feat lookup — was rejected: all 23 source-keyed registrations are
+  feats/race traits, so it would have changed a shared path for one feature.)
+
+RAW says "you **can** use that score", but the floor can only ever raise a total,
+never lower it, so it is auto-applied and disclosed in the result note rather
+than prompted — matching the existing die-floor and ability-swap conventions.
+
+### Verification
+
+End-to-end with a stubbed natural 1 on `barbarian/chained fury/20/minotaur`
+(STR 24) — displayed totals:
+
+```
+Strength Check   8 -> 24   "Total raised to 24 (was 8)"
+Athletics Check 20 -> 24   "Total raised to 24 (was 20)"   (skill path)
+Strength Save   14 -> 24   "Total raised to 24 (was 14)"   (XPHB only)
+Dexterity Check  3         untouched
+L17 control                nothing floored anywhere
+```
+
+The floor reads 20 at level 18 and 24 at level 20 — it tracks Primal Champion
+live rather than baking the grant-time score.
+
+### Regression pins — `test/jest/charactersheet/CharacterSheetIndomitableMight.test.js` (9)
+
+Staged falsification (a single full revert would have flattered the set):
+
+| Reverted | Red | Notes |
+|---|---|---|
+| aggregate emission only | **4** | all assertions, zero TypeErrors |
+| edition tagging only | **1** | exactly the XPHB-saves pin |
+| registry to pre-fix state | **5** | the true shipped-bug red count |
+
+The 4 pins that survive every revert are **negative controls** (no leak to other
+abilities, no feature ⇒ no floor, die-floor untouched, score/mod unchanged).
+They assert *absence*, so by construction they cannot go red on a revert; they
+guard against over-application, which is the opposite failure.
+
+### How it was found
+
+Assigned as "add an `ability:<abl>:minimum` handler". Probing the modifier live
+before writing any code showed it was inert *and* that the target was wrong, so
+the handler would have been the wrong fix. Measuring the value rather than
+interpreting the ticket is what changed the outcome.
+
+---
+
+## Phase 17 — predetermined-outcome probe sweep (E2E harness, not a product bug)
+
+Not a CS-BUG: no product defect is described here. It is recorded in this
+file because it governs how much any *other* entry in this file can be
+trusted.
+
+A **predetermined-outcome probe** is an assertion whose result is fixed by
+the harness's own shape rather than by product behaviour. It has two
+halves, and both had shipped:
+
+- **Cannot FAIL** — inert level windows, no-op page-object helpers,
+  probes aimed at a surface the feature is deliberately excluded from.
+- **Cannot PASS** — a `pickedCount: N` against a pool of fewer than N
+  options; a `damageContains` against a field the reader never collects.
+
+The property is checkable **statically, before running anything**, which
+is the whole point: you cannot find these by running the suite.
+
+### Why an inert row is worse than a skipped one
+
+`scripts/auditE2eCoverage.mjs` flags rows whose `[level, untilLevel]`
+window contains none of the matrix checkpoints `[3, 5, 11, 17, 20]`. Such
+a row never executes — and unlike `skip: true` it leaves **no marker**, so
+it is invisible to both `grep` and human review, and it presents as a
+green spec.
+
+The damage is larger than a missing number. **The row's `name:` existence
+check dies along with its `effects:`**, so an inert row means the feature
+has no verification of any kind at any level. That is a silent hole
+straight through this batch's acceptance bar — *every ability a subclass
+provides must be offered, shown, and implemented*. Measured: three
+permanent Rogue subclass features (Tantalizing Shivers, Fluid Step,
+Slippery Mind) were wholly unverified this way, in a spec reporting green.
+
+Generally: **a skipped or inert assertion is a frozen claim about a moving
+target, and the freeze is invisible because the test stays green.** Live
+assertions are re-validated continuously; these are not. The discipline is
+therefore needed most exactly where nothing forces it.
+
+### Repair rule for an inert row
+
+Decide against the **product source**, never against the spec — the spec
+is the artefact under suspicion, so it cannot be its own oracle.
+
+- **Value unobservable** (the step holds only *between* checkpoints, e.g.
+  Rogue Sneak Attack 4d6 on L7-8) → **delete**. Widening the window to
+  reach a checkpoint changes the correct value, so there is nothing to
+  repair. Confirm first that every observable step is asserted elsewhere.
+- **Value permanent, window merely wrong** (e.g. `manifestationDie` is
+  `level >= 13 ? "1d8"`) → **widen, or drop `untilLevel` entirely**. Note
+  `findInertRows` skips open-ended rows, since those always reach the last
+  checkpoint.
+
+### A dead probe can hide a broken probe
+
+Un-deadening Shadow Magic's Hound of Ill Omen — whose entire structural
+block (cost, range, AC, HP, bite, summon/dismiss, scaling descriptor) had
+never run — immediately produced:
+
+```
+classSummon(summonHoundOfIllOmen) damage "2d6+3" missing "piercing"
+```
+
+Not a product bug: the companion sets `damageType: "piercing"` correctly.
+The `classSummon` reader in `comprehensiveBuildHelpers.ts` collected only
+`[damage, desc, entries]`, so `damageContains` could never match a
+companion carrying its type structurally rather than inline — and the
+field is `description`, not `desc`. A *cannot-PASS* defect living in the
+**shared harness**, latent for every future author. It was reachable only
+through the inert-window fix.
+
+**Status: swept.** Inert level windows and unreachable pick thresholds are
+both at **zero** suite-wide. Run `node scripts/auditE2eCoverage.mjs` after
+any `featuresMatrix` edit; `--strict` exits non-zero.
+
+What remains is a third, softer sibling that **no static check catches**: a
+probe that *passes for a different reason than its comment claims*. Known
+instance: `tgtt-arcana-cleric.spec.ts` uses `spellMatchMode: "any"`, which
+does not relax the name match but **deletes** it — in `"any"` mode
+`e.spell` is never read and only `getKnownSpellsByLevel()[level].length >= 1`
+is checked. Those four probes correctly pass `spell: ""` and so are honest,
+but a `{spell: "Bane", spellMatchMode: "any"}` would be a probe that cannot
+fail. Never reach for `"any"` to soften a flaky name check.
