@@ -4875,6 +4875,58 @@ underlying hole is still open, and **13 rows are inert** — measured at `fae134
 **Affects:** `test/e2e/utils/characterSpecFactory.ts` (the MEGA and matrix
 loops) and `scripts/auditE2eCoverage.mjs` (the detector).
 
+### The one-command falsification — no instrumentation needed
+
+`node scripts/auditE2eCoverage.mjs` prints **coverage percentages above 100%
+next to a ✓ FULL badge**. At `c1d8df7c`: **11 of 42 rows exceed 100%**, topping
+out at **168%** (`tgtt-trickster-rogue-goblin`). A coverage figure over 100% is
+arithmetically impossible, so the metric is unsound on its face — before any
+question of *which* rows it can see. This was on screen in every run of the
+script; the inert-row enumeration below required a collection-time probe to
+obtain the weaker result.
+
+> **Do not quote 174% / "14 of 42".** Those figures are real but were measured
+> at `406e3e96`, a pre-sweep tree, and do not reproduce at trunk — for the
+> reason immediately below. Re-derive before citing; this section's own numbers
+> will drift the same way.
+
+### 🔴 Sharper: the score counts a SKIPPED assertion as coverage, so lifting a skip makes coverage go DOWN
+
+`scripts/auditE2eCoverage.mjs:728`
+
+```js
+const effective = effectsCount + helperCount + skipReasonCount + siblingCovered - inertWithProbes;
+```
+
+`skipReasonCount` counts `skipReason: "…"` annotations — prose attached to an
+assertion that **does not run**. The comment eight lines above it argues, at
+length and correctly, that `reasonCount` must *not* be added because *"an
+explanatory comment records that a gap is KNOWN; it does not make the feature
+verified … a row whose only accounting is prose must keep counting against the
+spec."* The next statement adds the strictly weaker signal: prose on a row that
+is not merely unexplained but **disabled**. The function contradicts its own
+stated principle in adjacent lines.
+
+Consequence, measured across the CS-BUG-016 skip-lifting sweep (`406e3e96` →
+`c1d8df7c`), which is unambiguously an *increase* in verification:
+
+| spec | skips lifted | reported coverage |
+|---|---|---|
+| `tgtt-child-of-sun-sorcerer-hochling` | 19 → 6 (**13**) | 174% → **105%** |
+| `tgtt-lust-cleric-lexalian` | 26 → 8 (**18**) | 131% → **62%** (FULL → LOW) |
+| `tgtt-bladesinger-wizard-tabaxi` | 14 → 10 | 154% → **123%** |
+
+Both lift counts match the per-spec CS-BUG-016 skip inventory exactly (13 and
+18), which is what identifies the mechanism rather than merely correlating with
+it. **The metric moves in the wrong direction when coverage genuinely
+improves**, and it moved one spec from ✓ FULL to ⚠ LOW *as a result of being
+better tested*. That is worse than the >100% artefact: an impossible percentage
+announces itself, whereas a plausible percentage that ranks improvement as
+regression will be believed and acted on.
+
+Minimum repair is deleting `skipReasonCount` from the sum. That alone does not
+close root causes 1 and 2 below.
+
 ### Symptom
 
 `assertFeaturesMatrix()` is only ever called at the checkpoints
@@ -4905,13 +4957,20 @@ DEAD_WINDOW Meteor Knight Fighter Aarakocra:: L13..16 :: /satellite mastery/i (r
 ```
 
 Meanwhile `node scripts/auditE2eCoverage.mjs` prints an **empty `inert` column
-for all three specs**, and badges two of them as fully covered:
+for all three specs**, and badges two of them as fully covered (measured at
+`fae134bb`; see the drift note above):
 
 ```
 tgtt-hunter-zodiac-centaur.spec.ts    52 entries … inert (blank)  102%  ✓ FULL
 tgtt-meteor-knight-fighter.spec.ts    13 entries … inert (blank)  115%  ✓ FULL
 tgtt-astral-self-monk-changeling.ts   24 entries … inert (blank)   58%  ⚠ LOW
 ```
+
+> At `c1d8df7c` these read **85% OK / 115% ✓ FULL / 58% ⚠ LOW** — hunter-zodiac
+> dropped out of FULL only because the skip-lifting sweep removed skips it was
+> being credited for. The **`inert` column is still blank on all three, and on
+> all 18 specs**, which is the invariant part of this symptom; the percentages
+> are not.
 
 A spec scoring **✓ FULL at 102%** while carrying six never-executed rows is
 worse than no detector, because the badge actively discourages a second look.
