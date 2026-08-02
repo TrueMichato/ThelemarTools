@@ -5119,8 +5119,15 @@ measured to be insufficient.** Removing it takes the >100% rows from **11 to
 ```
 tgtt-meteor-knight-fighter.spec.ts        13 entries  15 effects  0 helpers  →  115%  ✓ FULL
 tgtt-steel-hawk-fighter.spec.ts           13 entries  15 effects  0 helpers  →  115%  ✓ FULL
-tgtt-tdcsr-juggernaut-barbarian.spec.ts   21 entries  20 effects  2 helpers  →  124%  ✓ FULL
+tgtt-tdcsr-juggernaut-barbarian.spec.ts   21 entries  20 effects  2 helpers  →  105%  ✓ FULL
 ```
+
+> **Correction (2026-08-03).** An earlier revision printed juggernaut's row as
+> **124%**, which is its *unpatched* badge. With `skipReasonCount` removed and
+> juggernaut's `skipReason = 4`, it must print `(20 + 2) / 21 = 105%`. Meteor
+> and steel-hawk are unaffected by the patch because their `skipReason` is **0**
+> — which is itself the tell that they are a different mechanism. The headline
+> "11 → 3" is unchanged. *(Caught by the `lunar-sorcery-sorcerer` session.)*
 
 On the first two, `effectsCount` **alone exceeds `entryCount`** with every
 other term at zero — and that is not a units mismatch, it is a **proof of
@@ -5137,16 +5144,52 @@ terms were incommensurable; that clause was false, and the argument built on it
 is withdrawn. *(Invariant supplied by the `lunar-sorcery-sorcerer` session; the
 919-row sweep is the check on it.)*
 
-The real cause is **root cause 5** below — `:683`'s comment blinding, the same
-defect as `:188` on the opposite side of the ratio. True coverage:
+The real cause **on those two** is **root cause 5** below — `:683`'s comment
+blinding, the same defect as `:188` on the opposite side of the ratio.
 
-| spec | `entryCount` | real rows | blinded | effects | true coverage |
-|---|---|---|---|---|---|
-| `tgtt-meteor-knight-fighter` | 13 | 15 | 2 | 15 | **100%** |
-| `tgtt-steel-hawk-fighter` | 13 | 15 | 2 | 15 | **100%** |
-| `tgtt-tdcsr-juggernaut-barbarian` | 21 | 22 | 1 | 20 | **91%** |
+| spec | badge | `entryCount` | real rows | blinded | `eff` | `help` | `skipReason` | true coverage |
+|---|---|---|---|---|---|---|---|---|
+| `tgtt-meteor-knight-fighter` | 115% | 13 | 15 | 2 | 15 | 0 | 0 | **100%** |
+| `tgtt-steel-hawk-fighter` | 115% | 13 | 15 | 2 | 15 | 0 | 0 | **100%** |
+| `tgtt-tdcsr-juggernaut-barbarian` | 124% | 21 | 22 | 1 | 20 | 2 | **4** | **118%** |
 
-All three are ≤ 100% once the denominator is correct.
+##### 🔴 Correction (2026-08-03) — juggernaut is the OTHER mechanism
+
+An earlier revision of this section listed all three as denominator undercounts
+and gave juggernaut a true coverage of **91%**. Both are wrong, and the error is
+the one this entry retracts elsewhere: **the terms were inferred from the
+percentage rather than measured.** `124% × 21 ≈ 26` admits more than one
+assignment, and the one chosen (`sibling = 4, skipReason = 0`) is the exact
+inverse of the truth. Measured by instrumenting a copy of the script *inside
+`scripts/`* so `ROOT` resolves, then deleting the copy:
+
+```
+TERMS tgtt-meteor-knight-fighter.spec.ts        eff=15 help=0 skipReason=0 sibling=0 inertWP=0 entry=13
+TERMS tgtt-steel-hawk-fighter.spec.ts           eff=15 help=0 skipReason=0 sibling=0 inertWP=0 entry=13
+TERMS tgtt-tdcsr-juggernaut-barbarian.spec.ts   eff=20 help=2 skipReason=4 sibling=0 inertWP=0 entry=21
+```
+
+Juggernaut has `eff = 20 ≤ entry = 21`, so **it never triggers the invariant
+above** — it is not, and never was, evidence for it. Its badge is root cause 4
+(`skipReasonCount`), and it stays impossible even against a correct denominator:
+`(20 + 2 + 4) / 22 = 118%`.
+
+**Each fix is load-bearing for a different spec, which is the argument for doing
+both:**
+
+| | numerator fix alone | denominator fix alone | both |
+|---|---|---|---|
+| meteor / steel (`skipReason = 0`) | no change, 115% | **100%** | 100% |
+| juggernaut (`blinded = 1`) | 105% | 118% | **100%** |
+
+*(Measurement and reconciliation supplied by the `lunar-sorcery-sorcerer`
+session; the 43-spec sweep and the term dump above are the check on them.)*
+
+**The invariant itself survives, swept rather than asserted.** Across all 43
+specs, exactly **two** have `effectsCount > entryCount` — meteor-knight and
+steel-hawk — and on both, `eff ≤ real rows`, so denominator undercount fully
+explains them. The invariant is sound; it is simply rarer than first implied, and
+it is **not** the mechanism behind most of the badges.
 
 **The conclusion survives its own retracted premise: deleting one term makes the
 artefact rarer without making the metric sound.** It is true for a different
@@ -5390,8 +5433,16 @@ Measured — the two 115% specs reproduce exactly, from source:
 ```
 tgtt-meteor-knight-fighter   entryCount=13  real rows=15  blinded=2  effects=15  ->  115%
 tgtt-steel-hawk-fighter      entryCount=13  real rows=15  blinded=2  effects=15  ->  115%
-tgtt-tdcsr-juggernaut-barbarian  entryCount=21  real=22  blinded=1  effects=20  ->   95%
 ```
+
+> **Correction (2026-08-03).** This block previously carried a third line,
+> `tgtt-tdcsr-juggernaut-barbarian … -> 95%`, listing it as a cause-5 spec.
+> It is not one: its measured terms are `eff=20 help=2 skipReason=4`, so
+> `eff ≤ entry` and its 124% badge is **cause 4**, not cause 5. The `95%` was
+> `20/21` — a hand-computed effects-over-entries ratio that is neither the badge
+> nor the true coverage. Juggernaut *is* blinded by one row (`21 → 22`), so
+> cause 5 touches it; that blinding is simply not what produced its badge. Full
+> reconciliation in the "juggernaut is the OTHER mechanism" block above.
 
 Both specs have 15 rows and 15 `effects:` blocks. **Coverage is genuinely 100%;
 the entire overshoot is the denominator losing 2 rows.** The four lost rows, and
