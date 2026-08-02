@@ -4044,3 +4044,93 @@ Honest note on pin 2: it is **green pre-fix**, because it asserts *precedence*
 and the total absence of translation satisfies that trivially. It is a guard
 against the fix over-reaching, not against the original bug — pin 1 is the pin
 for the bug itself. Falsifying it required the second break above.
+
+---
+
+## CS-BUG-069 — `featuresMatrix` rows in a level window with no checkpoint are never evaluated, and the detector that should catch them reports zero
+
+**Status:** Open. Partially addressed — `913600e4` widened the offending
+windows that existed at the time and added `scripts/auditE2eCoverage.mjs`. The
+underlying hole is still open, and **12 rows are inert at `fae134bb`**.
+
+**Affects:** `test/e2e/utils/characterSpecFactory.ts` (the MEGA and matrix
+loops) and `scripts/auditE2eCoverage.mjs` (the detector).
+
+### Symptom
+
+`assertFeaturesMatrix()` is only ever called at the checkpoints
+`[3, 5, 11, 17, 20]` (`characterSpecFactory.ts:366` and `:393`). A row is gated
+by `level` and `untilLevel`, so a row whose window contains no checkpoint is
+**never evaluated at all** — it looks like coverage in the spec, contributes to
+the coverage percentage, and asserts nothing, forever. It cannot fail, so it
+cannot report the regression it was written to catch.
+
+### Measured, by enumerating the parsed objects — not by scanning source
+
+Instrumenting `buildComprehensiveCharacterTests()` at collection time and
+running `npx playwright test --list`:
+
+```
+DEAD_WINDOW Astral Self Monk Changeling    :: L2..2   :: /combat methods/i (passive)
+DEAD_WINDOW Astral Self Monk Changeling    :: L6..7   :: /combat methods/i (passive)
+DEAD_WINDOW Astral Self Monk Changeling    :: L8..9   :: /combat methods/i (passive)
+DEAD_WINDOW Astral Self Monk Changeling    :: L13..14 :: /combat methods/i (passive)
+DEAD_WINDOW Astral Self Monk Changeling    :: L15..16 :: /combat methods/i (passive)
+DEAD_WINDOW Hunter Ranger Centaur          :: L2..2   :: /combat methods/i (passive)
+DEAD_WINDOW Hunter Ranger Centaur          :: L6..6   :: /combat methods/i (passive)
+DEAD_WINDOW Hunter Ranger Centaur          :: L7..8   :: /combat methods/i (passive)
+DEAD_WINDOW Hunter Ranger Centaur          :: L9..10  :: /combat methods/i (passive)
+DEAD_WINDOW Hunter Ranger Centaur          :: L13..14 :: /combat methods/i (passive)
+DEAD_WINDOW Hunter Ranger Centaur          :: L15..16 :: /combat methods/i (passive)
+DEAD_WINDOW Meteor Knight Fighter Aarakocra:: L13..16 :: /satellite mastery/i (resource)
+```
+
+Meanwhile `node scripts/auditE2eCoverage.mjs` prints an **empty `inert` column
+for all three specs**, and badges two of them as fully covered:
+
+```
+tgtt-hunter-zodiac-centaur.spec.ts    52 entries … inert (blank)  102%  ✓ FULL
+tgtt-meteor-knight-fighter.spec.ts    13 entries … inert (blank)  115%  ✓ FULL
+tgtt-astral-self-monk-changeling.ts   24 entries … inert (blank)   58%  ⚠ LOW
+```
+
+A spec scoring **✓ FULL at 102%** while carrying six never-executed rows is
+worse than no detector, because the badge actively discourages a second look.
+
+### Root cause — two independent ones
+
+**1. `findInertRows()` scans spec source text, but 11 of the 12 rows do not
+exist in spec source.** They are emitted at runtime by `buildCombatMethodChecks`
+(`test/e2e/utils/tgttFeaturePools.ts:1420`/`:1431`). A lexical scan of
+`test/e2e/specs/*.ts` is structurally incapable of seeing a row a helper
+returns. This is the same class of error already recorded in CS-BUG-087's notes:
+**a regex scan over source is not an enumeration.**
+
+**2. The regex is `/\{\s*level:\s*(\d+)/`, so a comment between `{` and
+`level:` blinds it.** That is precisely what a careful author writes on a row
+they know is inert — the Meteor Knight L13..16 row carries *"Not exercised by
+the current checkpoint list [3, 5, 11, 17, 20], but kept so the tier ladder is
+complete"* and is therefore invisible to the detector that exists to find it.
+
+### Why widening the window is the wrong fix
+
+All eleven undocumented rows sit on **intermediate progression tiers** — a
+Monk's combat methods at L6-7 differ from L8-9. Stretching `L13..14` out to
+touch L11 or L17 does not make the row run; it makes it assert a value that is
+**factually wrong for the level it now covers**. The previous sweep's widening
+was safe only for the specific rows it touched.
+
+### Suggested direction (not implemented here)
+
+Compute the checkpoint list *from* the matrix instead of hardcoding it: keep
+`[3, 5, 11, 17, 20]` as the base, then add one rescue stop per otherwise
+unreachable window (greedily shared between overlapping windows), and at a
+rescue stop assert **only** the entries that stop exists for — a full re-pass at
+every added level blows the MEGA timeout. A prototype of this made all of the
+above rows execute for the first time.
+
+If that lands, `scripts/auditE2eCoverage.mjs:131` must change with it: it reads
+the checkpoint list with `/const\s+checkpoints\s*=\s*\[([\d,\s]+)\]/` and
+**silently falls back** to a hardcoded default the moment that literal becomes a
+variable — so the detector would keep reporting against a checkpoint list the
+runner no longer uses.
