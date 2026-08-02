@@ -4216,7 +4216,7 @@ class CharacterSheetLevelUp {
 		// Get current known spells the player may trade away. The predicate is
 		// deliberately NOT `!s.sourceFeature`: every spell the player picks carries a
 		// positive attribution ("Spells Known", "Wizard Spellbook", …), so that test
-		// excluded precisely the spells this picker exists to offer (CS-BUG-104).
+		// excluded precisely the spells this picker exists to offer (CS-BUG-108).
 		const knownSpells = (this._state.getSpellsKnown?.() || [])
 			.filter((/** @type {*} */ s) => CharacterSheetClassUtils.isSwappableKnownSpell(s));
 

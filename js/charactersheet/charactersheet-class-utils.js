@@ -1333,7 +1333,7 @@ class CharacterSheetClassUtils {
 	 * QuickBuild and LevelUp all stamp a positive attribution ("Spells Known",
 	 * "Wizard Spellbook", …) onto every spell the player chooses. Testing
 	 * `!spell.sourceFeature` therefore selects only orphans and rejects the entire
-	 * intended set — which is what CS-BUG-104 was.
+	 * intended set — which is what CS-BUG-108 was.
 	 *
 	 * Excluded, and why:
 	 *  - cantrips — the allowance is for levelled spells;

@@ -1,5 +1,5 @@
 /**
- * CS-BUG-104 — the level-up "Swap a Known Spell" candidate list was empty for
+ * CS-BUG-108 — the level-up "Swap a Known Spell" candidate list was empty for
  * every known caster.
  *
  * `_renderSpellSwapSection` selected candidates with `!s.sourceFeature`, under a
@@ -41,7 +41,7 @@ function makeSorcerer (level = 4) {
 	return state;
 }
 
-describe("CS-BUG-104 — level-up spell swap candidate list", () => {
+describe("CS-BUG-108 — level-up spell swap candidate list", () => {
 	describe("player-chosen spells are offered", () => {
 		// Every attribution the Builder / QuickBuild / LevelUp actually stamp.
 		test.each([

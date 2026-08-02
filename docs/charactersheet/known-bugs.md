@@ -395,7 +395,7 @@ issue numbers stay stable.
 
 ## Resolved
 
-### CS-BUG-104 — The level-up "Swap a Known Spell" list was empty for every known caster
+### CS-BUG-108 — The level-up "Swap a Known Spell" list was empty for every known caster
 
 **Status**: Fixed.
 **Surfaced by**: reading `charactersheet-levelup.js:4218` while checking an
