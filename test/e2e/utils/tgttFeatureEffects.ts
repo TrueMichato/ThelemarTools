@@ -437,9 +437,21 @@ export const ZODIAC_FORM_EFFECTS: Record<string, EffectCheck[]> = {
 	"Horse": [],           // doubled walk speed (conditional)
 	"Octopus": [],         // swim speed + reach (conditional, needs water)
 	"Peacock": [],         // attacker WIS save (conditional)
-	"Roc": [
-		{kind: "pickActivatable", matchAny: [/Roc/i], min: 1},
-	],
+	// Existence-only, like all 11 sibling constellations. Roc reads "You
+	// can use your action to cast gust of wind or warding wind without
+	// expending a spell slot" — a free-CAST grant, not an activatable
+	// state, so the sheet correctly reports activatable: false. The
+	// `pickActivatable` probe that used to live here was unsatisfiable
+	// for the SAME reason its unanchored `/Roc/i` made Aurochs
+	// unsatisfiable (CS-BUG-107): none of the 12 Zodiac forms is a
+	// toggle. Anchoring the pattern only moved the failure from Aurochs
+	// onto Roc itself — measured, not assumed.
+	//
+	// A stronger probe than `[]` would assert the two granted spells are
+	// castable without a slot; there is no EffectCheck kind for
+	// free-cast riders today, so this stays existence-only deliberately
+	// rather than by omission.
+	"Roc": [],
 	"Bee": [],             // ranged spell attack (conditional)
 	"Hound": [],           // mark target (conditional)
 	"Cat": [],             // perception bonus (conditional)
