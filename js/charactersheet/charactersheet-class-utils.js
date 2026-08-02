@@ -3261,6 +3261,38 @@ class CharacterSheetClassUtils {
 		return parseInt(parts[parts.length - 1]);
 	}
 
+	/**
+	 * Names of the sub-features a parent feature offers as a level-up CHOICE, rather
+	 * than granting outright.
+	 *
+	 * The bare-sibling `refClassFeature` encoding is read by two places with different
+	 * rules: `FeatureChoiceParser._extractStructuredChoices` classifies it from the
+	 * prose, while `getLevelFeatures`'s extraction loop below materialises it from the
+	 * shape. Because the identical shape means "learn all" for Cunning Strike and
+	 * "learn one" for Blessed Strikes, no rule local to that loop can separate them —
+	 * so it defers to the parser's verdict here instead of re-deriving one.
+	 *
+	 * @param {*} feature
+	 * @returns {Set<string>} lower-cased option names; empty when the feature offers no choice.
+	 */
+	static getChoiceOptionNames (/** @type {*} */ feature) {
+		const out = new Set();
+		// `getLevelFeatures` is a static helper with no state handle, so the parser is
+		// reached through the global it publishes (charactersheet-state.js).
+		const parser = /** @type {*} */ (globalThis).FeatureChoiceParser;
+		if (typeof parser?.extractChoices !== "function") return out;
+		let groups;
+		try { groups = parser.extractChoices(feature)?.subfeatureChoices; } catch (e) { return out; }
+		if (!Array.isArray(groups)) return out;
+		for (const group of groups) {
+			if (!Array.isArray(group?.options)) continue;
+			for (const opt of group.options) {
+				if (opt?.name) out.add(String(opt.name).trim().toLowerCase());
+			}
+		}
+		return out;
+	}
+
 	static getLevelFeatures (/** @type {*} */ classData, /** @type {*} */ level, /** @type {*} */ subclass, /** @type {*} */ classFeatures = [], /** @type {*} */ subclassFeatures = []) {
 		/** @type {*[]} */ const features = [];
 
@@ -3346,10 +3378,14 @@ class CharacterSheetClassUtils {
 			// full classFeature objects but aren't listed in the top-level classFeatures array.
 			// IMPORTANT: Skip "options" type entries — those are player choices (Specialties, etc.)
 			// handled by findFeatureOptions/getFeatureOptionsForLevel, not automatic grants.
+			// Player choices encoded WITHOUT an `options` wrapper (bare sibling refs, e.g.
+			// Blessed Strikes) are skipped via getChoiceOptionNames, which defers to the
+			// parser rather than guessing from the shape — see that method for why.
 			const featureNames = new Set(features.map((/** @type {*} */ f) => f.name));
 			const extracted = [];
 			for (const feature of features) {
 				if (!feature.entries) continue;
+				const choiceOptionNames = CharacterSheetClassUtils.getChoiceOptionNames(feature);
 				for (/** @type {*} */ const entry of feature.entries) {
 					if (typeof entry !== "object" || !Array.isArray(entry.entries)) continue;
 					if (entry.type === "options") continue;
@@ -3357,6 +3393,7 @@ class CharacterSheetClassUtils {
 						if (sub?.type !== "refClassFeature" || !sub.classFeature) continue;
 						const refParts = sub.classFeature.split("|");
 						const refName = refParts[0];
+						if (choiceOptionNames.has(String(refName).trim().toLowerCase())) continue;
 						if (featureNames.has(refName)) continue;
 						const refData = CharacterSheetClassUtils.getClassFeatureDataFromRef(classFeatures, sub.classFeature);
 						if (!refData) continue;
