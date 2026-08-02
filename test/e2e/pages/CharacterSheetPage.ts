@@ -789,14 +789,41 @@ export class CharacterSheetPage {
 		return out;
 	}
 
-	/** List the resource names rendered on the sheet. */
+	/**
+	 * List the resource names rendered on the sheet.
+	 *
+	 * This MUST enumerate every surface {@link getResource} is able to read,
+	 * or a caller that resolves a name against this list will reject pools
+	 * that `getResource` would have found — a probe that cannot pass for a
+	 * legitimate data shape. `getResource` falls back to the two Combat-tab
+	 * surfaces, so both are included here:
+	 *   1. the resource tracker (`.charsheet__resource-row` / `-tracker`)
+	 *   2. synthetic combat resources (`.charsheet__combat-resource-name`)
+	 *   3. class combat-panel features that carry a pool — scoped with
+	 *      `:has(.cs-combat-pool)` to mirror the getter, which only returns a
+	 *      value for features that actually have one. Unscoped, this class
+	 *      also matches action-modal headings like "Effects on Use".
+	 *
+	 * Combat-tab nodes stay attached while other tabs are shown, so this
+	 * deliberately does NOT switch tabs — enumeration must be side-effect free.
+	 */
 	async getResourceNames (): Promise<string[]> {
-		const els = this.page.locator(".charsheet__resource-row .charsheet__resource-name, .charsheet__resource-tracker .charsheet__resource-name");
+		const els = this.page.locator([
+			".charsheet__resource-row .charsheet__resource-name",
+			".charsheet__resource-tracker .charsheet__resource-name",
+			".charsheet__combat-resource-name",
+			".cs-combat-feature:has(.cs-combat-pool) .cs-combat-feature__title",
+		].join(", "));
 		const count = await els.count();
 		const out: string[] = [];
 		for (let i = 0; i < count; i++) {
 			const t = await els.nth(i).textContent({timeout: 500}).catch(() => null);
-			if (t && t.trim()) out.push(t.trim());
+			// Some combat-panel titles wrap the action caption and the
+			// "2 / 2 remaining (short/long rest)" line inside the same node,
+			// so the raw text is the whole card. The pool NAME is its first
+			// line; keeping the rest would defeat name matching entirely.
+			const first = t?.split("\n")[0];
+			if (first && first.trim()) out.push(first.trim());
 		}
 		return out;
 	}
