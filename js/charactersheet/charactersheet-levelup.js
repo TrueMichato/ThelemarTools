@@ -4213,9 +4213,12 @@ class CharacterSheetLevelUp {
 		const listContainer = section.querySelector(".charsheet__levelup-spell-swap-list");
 		const pickerContainer = section.querySelector(".charsheet__levelup-spell-swap-picker");
 
-		// Get current known spells (level 1+, not feature-granted)
+		// Get current known spells the player may trade away. The predicate is
+		// deliberately NOT `!s.sourceFeature`: every spell the player picks carries a
+		// positive attribution ("Spells Known", "Wizard Spellbook", …), so that test
+		// excluded precisely the spells this picker exists to offer (CS-BUG-104).
 		const knownSpells = (this._state.getSpellsKnown?.() || [])
-			.filter((/** @type {*} */ s) => s.level > 0 && !s.alwaysPrepared && !s.sourceFeature);
+			.filter((/** @type {*} */ s) => CharacterSheetClassUtils.isSwappableKnownSpell(s));
 
 		if (knownSpells.length === 0) {
 			listContainer.insertAdjacentHTML("beforeend", `<p class="ve-muted ve-small">No swappable spells known.</p>`);
