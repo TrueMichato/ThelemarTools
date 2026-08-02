@@ -4283,6 +4283,28 @@ accessor. Restored, it is green (27/27). The eight Spellfire methods carry their
 own seven in-place chokepoint falsifications (signatures kept: 3/2/1/1/1/1/1
 red).
 
+### Correction to the record: commit `f03737f7`'s message is wrong
+
+An earlier attempt at this fix (`f03737f7`, superseded by `fae134bb`) changed the
+fixture only — **1 line, 0 assertions** — and kept `resource == null`. Its commit
+message reports that a fixture carrying the published *"until you finish a Long
+Rest"* clause **"independently created a 1/long-rest uses pool and failed the row
+assertion with the fix in place — a fixture artefact that mimics a product
+regression."**
+
+**That characterisation is backwards, and the message is in pushed history where
+`git log -- <this file>` will surface it as guidance.** The 1/Long-Rest pool is
+not an artefact: it is what the real published prose legitimately mints, and the
+failure it produced was the *correct* signal that `resource == null` was the
+wrong expectation. The response was to delete the true clause from the fixture so
+the wrong assertion stayed green — i.e. the data was bent to fit the assertion.
+
+> Generalised: when repairing a fixture makes an assertion go red, the first
+> hypothesis must be **"the assertion was always wrong"**, not "the fixture is
+> lying". A fixture that props up a wrong expectation *survives* fixture repair
+> by presenting the repair as a regression, which is strictly more dangerous than
+> one that merely keeps a pin inert.
+
 ---
 
 ## CS-BUG-104 — a *resolved* `Blessed Strikes` choice still materialises both options, so `_data.chosenSubfeatures` and `_data.features` disagree — and a TGTT domain turns that into a visible duplicate
