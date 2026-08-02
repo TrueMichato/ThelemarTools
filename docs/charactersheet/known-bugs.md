@@ -4793,7 +4793,7 @@ for the bug itself. Falsifying it required the second break above.
 
 **Status:** Open. Partially addressed — `913600e4` widened the offending
 windows that existed at the time and added `scripts/auditE2eCoverage.mjs`. The
-underlying hole is still open, and **12 rows are inert at `fae134bb`**.
+underlying hole is still open, and **13 rows are inert** — measured at `fae134bb`, re-measured at `380389fb`, unchanged (count corrected from 12; see Root cause 1).
 
 **Affects:** `test/e2e/utils/characterSpecFactory.ts` (the MEGA and matrix
 loops) and `scripts/auditE2eCoverage.mjs` (the detector).
@@ -4841,12 +4841,49 @@ worse than no detector, because the badge actively discourages a second look.
 
 ### Root cause — two independent ones
 
-**1. `findInertRows()` scans spec source text, but 11 of the 12 rows do not
+**1. `findInertRows()` scans spec source text, but 12 of the 13 rows do not
 exist in spec source.** They are emitted at runtime by `buildCombatMethodChecks`
 (`test/e2e/utils/tgttFeaturePools.ts:1420`/`:1431`). A lexical scan of
 `test/e2e/specs/*.ts` is structurally incapable of seeing a row a helper
 returns. This is the same class of error already recorded in CS-BUG-087's notes:
 **a regex scan over source is not an enumeration.**
+
+> **Count corrected 12 → 13 (2026-08-02, still reproducing at `380389fb`).**
+> Both earlier figures were derived by reading, and both missed the same row: the
+> **capped multiclass leg** `buildCombatMethodChecks("Ranger", {subclassName:
+> "Hunter", maxClassLevel: 6})` at `tgtt-hunter-zodiac-centaur.spec.ts:271` emits
+> its own inert `L2..2`, distinct from the uncapped call at `:45`. A second call
+> to the same helper in the same file is exactly what a by-eye pass elides.
+>
+> Enumerated at **runtime** — the only instrument that can see these rows at all,
+> which is root cause 1 restated as a method:
+>
+> ```ts
+> // npx tsx ./probe.mts, run IN-TREE (imports resolve from file location)
+> import {buildCombatMethodChecks} from "./test/e2e/utils/tgttFeaturePools.js";
+> const CP = [3, 5, 11, 17, 20];
+> for (const r of buildCombatMethodChecks("Ranger", {subclassName: "Hunter"}))
+>     if (!CP.some(c => c >= r.level && c <= (r.untilLevel ?? 20))) console.log(r.level, r.untilLevel);
+> ```
+>
+> | call site | rows | inert |
+> |---|---|---|
+> | `buildCombatMethodChecks("Monk", {subclassName: "Astral Self"})` | 10 | **5** — L2..2, L6..7, L8..9, L13..14, L15..16 |
+> | `buildCombatMethodChecks("Ranger", {subclassName: "Hunter"})` | 12 | **6** — L2..2, L6..6, L7..8, L9..10, L13..14, L15..16 |
+> | `…{maxClassLevel: 6}` (`:271`, the missed one) | 5 | **1** — L2..2 |
+> | Meteor Knight `L13..16` (hand-written, self-documented) | — | 1 |
+> | | | **13** |
+>
+> The gate is `comprehensiveBuildHelpers.ts:2311`
+> (`if (fc.untilLevel != null && currentLevel > fc.untilLevel) continue;`), so an
+> `untilLevel`-less row is unbounded above and only *windowed* rows can be inert.
+>
+> **And `RUN_MEGA` does not rescue what `RUN_MATRIX` misses.** Both loops declare
+> the same list independently — `characterSpecFactory.ts:366` and `:393` each read
+> `const checkpoints = [3, 5, 11, 17, 20]`. Worth stating because "the mega test
+> walks 1→20" is the natural assumption from its name, and it is false: it walks
+> five stops. The duplicated literal is also why any rescue mechanism has to
+> change two sites, not one.
 
 **2. The regex is `/\{\s*level:\s*(\d+)/`, so a comment between `{` and
 `level:` blinds it.** That is precisely what a careful author writes on a row
