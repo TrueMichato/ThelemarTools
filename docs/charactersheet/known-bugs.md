@@ -4963,12 +4963,37 @@ tgtt-tdcsr-juggernaut-barbarian.spec.ts   21 entries  20 effects  2 helpers  →
 ```
 
 On the first two, `effectsCount` **alone exceeds `entryCount`** with every
-other term at zero. So the two "honest" terms are not commensurable either:
-`entryCount` counts `{level: N,` literals (`:683`) while `effectsCount` counts
-`effects:` blocks (`:687-688`), and a row may carry more than one. The
-numerator and denominator count different things throughout, which is why a
-ratio between them is not a coverage figure at all. **Deleting one term makes
-the artefact rarer without making the metric sound.**
+other term at zero — and that is not a units mismatch, it is a **proof of
+denominator undercount**. An `effects:` block belongs to exactly one row, so
+`effectsCount ≤ (true row count)` holds unconditionally. Therefore:
+
+> **Any spec where `effectsCount > entryCount` is, by construction, a
+> denominator undercount. No other explanation is available.**
+
+Confirmed empirically as well as structurally — **919 rows scanned across all 43
+specs, zero carrying more than one `effects:` block.** An earlier revision of
+this entry asserted "a row may carry more than one" and used it to argue the two
+terms were incommensurable; that clause was false, and the argument built on it
+is withdrawn. *(Invariant supplied by the `lunar-sorcery-sorcerer` session; the
+919-row sweep is the check on it.)*
+
+The real cause is **root cause 5** below — `:683`'s comment blinding, the same
+defect as `:188` on the opposite side of the ratio. True coverage:
+
+| spec | `entryCount` | real rows | blinded | effects | true coverage |
+|---|---|---|---|---|---|
+| `tgtt-meteor-knight-fighter` | 13 | 15 | 2 | 15 | **100%** |
+| `tgtt-steel-hawk-fighter` | 13 | 15 | 2 | 15 | **100%** |
+| `tgtt-tdcsr-juggernaut-barbarian` | 21 | 22 | 1 | 20 | **91%** |
+
+All three are ≤ 100% once the denominator is correct.
+
+**The conclusion survives its own retracted premise: deleting one term makes the
+artefact rarer without making the metric sound.** It is true for a different
+reason than first recorded — the units mismatch is real and fatal for
+`helperCount` (root cause 6), but it is not what produced these three badges.
+The printed table contains its own disproof, and the two columns that expose it
+are already side by side.
 
 ### The printed table cannot reproduce its own percentage
 
@@ -5117,6 +5142,27 @@ repair marks it live:
 > demonstration of root cause 4 — the detector calls live a row whose own
 > adjacent comment says it is dead — and a **poor** example of an author being
 > misled.
+
+> **Consequence for the bug's character (2026-08-03).** With that correction, all
+> 16 rows fall into exactly two buckets: **14 invisible-by-construction**
+> (helper-emitted, so absent from spec source entirely) and **2 knowingly
+> documented** (Meteor Knight `L13..16` and this one, each with an adjacent
+> comment naming its own inertness). **There is not one case of an author being
+> misled.**
+>
+> That is a sharper indictment than "the detector missed 16 rows", because it
+> removes the consolation reading. The tool exists to tell an author that a row
+> they believe is live is dead. On this evidence it has never had that job to do:
+> where an author was capable of noticing, they noticed and wrote it down; where
+> they were not, the tool cannot see it either. **Its value proposition is
+> unrealised in both directions simultaneously** — which is also why no amount of
+> lexical repair reaches the 14, and why the 2 it could theoretically catch are
+> precisely the ones that need catching least.
+>
+> *(Framing supplied by the `lunar-sorcery-sorcerer` session, after retracting the
+> "silently killed" reading above. The relocation is verified complete: `:341-345`
+> carries `restoreOn: "short"` and `effects: [{kind: "shortRestRestores", resource:
+> "Wild Shape"}]` on the level-12 tier.)*
 
 > **Count corrected 12 → 13 (2026-08-02, still reproducing at `380389fb`).**
 > Both earlier figures were derived by reading, and both missed the same row: the
