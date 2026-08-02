@@ -2389,9 +2389,28 @@ export async function assertFeaturesMatrix (
 					else {
 						const pools = await charSheet.getResourceNames();
 						const hits = [...new Set(pools.filter(p => (fc.name as RegExp).test(p)))];
-						if (hits.length === 1) nameStr = hits[0];
-						else if (hits.length > 1) {
-							throw new Error(`resource pattern ${fc.name} is ambiguous — matched ${hits.length} distinctly-named pools: ${hits.join(", ")}. Pin it with resourceName: "<exact name>".`);
+						// The SAME logical pool is rendered on more than one
+						// surface with cosmetically different labels — the
+						// resource tracker shows "Second Wind" while the combat
+						// panel shows "💗Second Wind". Those are one pool, not
+						// two, so group by a decoration-stripped key before
+						// judging ambiguity; otherwise every emoji-labelled
+						// resource reports a false conflict.
+						const norm = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
+						const groups = new Map<string, string[]>();
+						for (const h of hits) {
+							const k = norm(h);
+							if (!groups.has(k)) groups.set(k, []);
+							groups.get(k)!.push(h);
+						}
+						if (groups.size === 1) {
+							// Prefer the undecorated label: `getResource` filters
+							// with a substring `hasText`, and the bare name is a
+							// substring of every decorated variant, so it matches
+							// whichever surface renders first.
+							nameStr = [...groups.values()][0].sort((a, b) => a.length - b.length)[0];
+						} else if (groups.size > 1) {
+							throw new Error(`resource pattern ${fc.name} is ambiguous — matched ${groups.size} distinct pools: ${[...groups.values()].map(v => v[0]).join(", ")}. Pin it with resourceName: "<exact name>".`);
 						} else {
 							throw new Error(`resource pattern ${fc.name} matched none of the ${pools.length} pools on the sheet: [${pools.join(", ")}]`);
 						}
