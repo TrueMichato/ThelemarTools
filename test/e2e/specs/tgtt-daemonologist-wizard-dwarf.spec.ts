@@ -49,11 +49,6 @@ const DAEMONOLOGIST_FEATURES: FeatureCheck[] = [
 		{kind: "featureCalculation", property: "ritualCastingMode", exact: "spellbook"},
 		{kind: "featureCalculation", property: "hasRitualAdept", exact: true},
 	]},
-	{level: 1, name: /ritual adept/i, kind: "passive", effects: [
-		{kind: "featureCalculation", property: "hasRitualCasting", exact: true},
-		{kind: "featureCalculation", property: "ritualCastingMode", exact: "spellbook"},
-		{kind: "featureCalculation", property: "hasRitualAdept", exact: true},
-	]},
 	// Arcane Recovery's slot-level CHOOSER is non-deterministic, but its budget
 	// is not: `ceil(level / 2)`. Likewise the spellbook grows `6 + (level-1)*2`.
 	// Both are level-driven ladders, so they need one exact tier per checkpoint
