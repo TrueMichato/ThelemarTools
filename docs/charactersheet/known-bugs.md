@@ -272,6 +272,200 @@ issue numbers stay stable.
 
 ## Resolved
 
+### CS-BUG-103 — Features-tab "Use" silently burned a limited use for any state-gated feature
+
+**Status**: Fixed.
+**Surfaced by**: `tgtt-shadow-sorcery-rhw-sorcerer.spec.ts` L18
+`pickActivatable(/umbral form/i)`, which clicked the Features-tab **Use**
+button and then found nothing active.
+
+**Measured live** on an exported L20 character, before the fix: clicking
+Use on Umbral Form while its prerequisite state (Innate Sorcery) was
+*not* running took `uses` from **1 to 0**, left `umbralFormRhw`
+**inactive**, and left Sorcery Points **unchanged**. The player paid a
+once-per-long-rest budget for nothing, with no message.
+
+**Root cause**: `CharacterSheetFeatures._useFeature()`
+(`js/charactersheet/charactersheet-features.js`) first asks
+`_getActivatableAbilityForFeature()`. That resolves through
+`getActivatableFeatures()`, which *correctly* skips any state whose
+`requiresStates` are unmet — so a gated feature is simply absent from
+the classified-ability branch and falls through to the bare
+"decrement a use" fallback below it.
+
+**Scope (enumerated, not assumed)**: `git grep -n "requiresStates"
+js/charactersheet/` returns exactly two state definitions —
+`umbralFormRhw` (`["innateSorcery"]`) and `astralBody`
+(`["astralArms", "astralVisage"]`) — plus three consumers
+(`getActivatableFeatures`, `activateState`, and the `deactivateState`
+cascade). `astralBody` has `resourceCost: 0` and no uses budget, so
+`umbralFormRhw` is the only feature that could actually lose something
+today; the defect and the fix are both generic, and any future gated
+state with a uses budget would have hit it.
+
+**Fix**: new `CharacterSheetState#getUnmetStateRequirementsForFeature(feature)`
+returns the *display names* of a feature's unmet prerequisite states;
+`_useFeature()` consults it before spending anything and toasts
+`"<name> requires <prereq> to be active."` instead of decrementing.
+
+**Known scope limit (deliberate)**: `isActivatableAbilityEntry()` returns
+false for any `isToggle` state, so the Features-tab Use button still
+falls to the bare decrement for *ungated* toggle-with-uses features
+(Rage, Bladesong, …). The Overview toggle row is the working surface for
+those. Widening that classification was judged out of scope here; the
+current contract is pinned by the test *"does NOT block the Features-tab
+use once Innate Sorcery is running"*.
+
+**Regression pin**: `CharacterSheetShadowSorceryRhw.test.js`, describe
+*"Gated activatable features do not burn a use from the Features tab
+(CS-BUG-103)"* — four tests, two of which drive
+`features._useFeature(id)` (the reading) rather than the new accessor.
+`return [];` as the first statement of
+`getUnmetStateRequirementsForFeature` turns **2 of 13,280** red
+(assertion failures, no `TypeError`).
+
+---
+
+### CS-BUG-102 — Spells-tab spell save DC ignored every active-state buff
+
+**Status**: Fixed.
+**Surfaced by**: `tgtt-shadow-sorcery-rhw-sorcerer.spec.ts` L5 loadout —
+`probeToggleDelta(/innate sorcery/i)` reported `changed=false` for a
+toggle whose entire mechanical effect is "+1 to your Sorcerer spell save
+DC" plus advantage on spell attacks.
+
+**Root cause**: `_buildSpellClassCard()`
+(`js/charactersheet/charactersheet-spells.js`) hand-rolled the DC as
+`8 + mod + prof` instead of asking the state. The Combat tab reads
+`getSpellcastingClassBreakdown()[].saveDc`, which routes through
+`getSpellSaveDcForAbility()` and *does* include state bonuses — so the
+two tabs showed two different DCs, and the Spells tab, the one a player
+actually casts from, showed the lower one.
+
+Scope is wider than Innate Sorcery: any custom ability registering a
+`{type: "bonus", target: "spellDc"}` effect (a documented target in the
+custom-ability editor) was invisible on the Spells tab.
+
+**Fix**: The card now folds `getBonusFromStates("spellDc")` into
+`canonicalDc` and into the Gambler rolled-DC branch's static term.
+Deliberately *not* done for the spell attack bonus:
+`_rollSpellsTabAttack` already adds `getBonusFromStates("attack:spell")`
+on top of the displayed value, so folding it into the display would
+double-count it on every roll.
+
+**Regression pin**: `CharacterSheetSpellsTabDc.test.js`, which builds a
+real card by calling `_buildSpellClassCard()` and reads back the DC the
+card wrote. Neutralizing `stateDcBonus` to `0` turns **2 of 13,280** red
+(assertion failures, no `TypeError`).
+
+**A tautological pin was caught and replaced.** The first pin for this
+bug lived in `CharacterSheetShadowSorceryRhw.test.js` and recomputed
+`8 + mod + prof + getBonusFromStates("spellDc")` by hand, then asserted
+the result tracked `getSpellSaveDcForAbility()`. It never touched
+`_buildSpellClassCard()`, so with the production fix neutralized the
+entire suite stayed **GREEN (435 suites / 13,276 tests)** — the exact
+"correct calculation that nothing reads" shape this bug *was*. Driving
+the card required a dedicated test file: `charactersheet-spells.js`
+captures its DOM helper at module load (`const {e_, ee} = globalThis;`
+line 11), so a DOM stub has to be installed before the module is
+imported, which per-file module isolation gives for free.
+
+---
+
+### CS-BUG-101 — Re-scaled feature uses did not reach the mirrored resource row
+
+**Status**: Fixed.
+**Surfaced by**: a live L20 probe of Shadow Sorcery (RHW) showing
+`Power of Shadow 5/5` in the resource tracker while the feature itself
+correctly carried 1 use per long rest.
+
+**Root cause**: `_ensureZeroHpInterventionUses()` re-scaled
+`feature.uses` when a definition's `usesMax` changed, but the resource
+row mirroring that feature was written once at grant time and never
+re-synced — so the tracker kept whatever number it was first given.
+
+**Fix**: the helper now also writes `max` / `recharge` / `current` back
+to the mirrored resource row, matching the pattern already used by
+`_ensureCreationBardUses`.
+
+---
+
+### CS-BUG-100 — `takeDamage()` never applied resistance, immunity or vulnerability
+
+**Status**: Fixed.
+**Surfaced by**: a live L20 probe of Shadow Sorcery (RHW) under Umbral
+Form — `getResistances()` listed 11 damage types and `takeDamage(20,
+{damageType: "fire"})` still removed 20 hit points.
+
+**Root cause**: two separate gaps that hid each other.
+`takeDamage()` accepted a `damageType` and used it only to gate zero-HP
+interventions; it never applied defenses. And the main sheet's Damage
+button (`_onDamage`) never *asked* for a damage type, so the only path
+that could have exercised defenses never supplied one. Play Mode had its
+own hand-rolled copy of the arithmetic on a different code path
+(`setCurrentHp`), which is why the model looked correct in that one
+place. This is the "correct calculation that nothing reads" shape: every
+resistance the model computed was decorative on the main sheet.
+
+**Enumeration**: `takeDamage` had exactly three callers at the time
+(`charactersheet.js` `_onDamage`, and `useDivineAllegiance` /
+Infernal Conduit in `charactersheet-state.js`), none passing a
+`damageType`, so adding defenses inside it could not double-apply.
+
+**Fix**: extracted `applyDamageDefenses(damage, damageType)` as the
+single source of the ×0 / ÷2 / ×2 arithmetic; `takeDamage()` applies it
+when a `damageType` is supplied unless `unpreventable` or the new
+`skipDefenses` is set; `_onDamage` now prompts for a damage type
+whenever the character has any defense; Play Mode routes through the
+shared helper instead of its own copy.
+
+**Regression pin**: asserted at the hit points that leave the sheet, not
+at `getResistances()`.
+
+---
+
+### CS-BUG-099 — `{type: "bonus", target: "spellDc"}` active-state effect had no consumer
+
+**Status**: Fixed.
+**Surfaced by**: implementing XPHB Innate Sorcery, whose whole effect is
+"+1 to your Sorcerer spell save DC" and advantage on spell attacks.
+
+**Root cause**: `spellDc` is an advertised effect target in the
+custom-ability editor's target list, but no reader existed —
+`getSpellSaveDcForAbility()` summed item bonuses, custom modifiers and
+the exhaustion penalty and stopped there. `attack:spell` was fully
+plumbed (`charactersheet-combat.js`, `charactersheet-spells.js`), which
+made the gap easy to miss.
+
+**Fix**: `getSpellSaveDcForAbility()` and both `getSpellSaveDC()`
+branches now add `getBonusFromStates("spellDc")`. See also CS-BUG-102,
+which was the same value failing to reach the Spells tab's own card.
+
+---
+
+### CS-BUG-098 — Sense grants were darkvision-only
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Sorcery (RHW) Eyes of the Dark, which grants
+120 ft darkvision **and** 10 ft blindsight.
+
+**Root cause**: the feature-calculation → `getSenses()` bridge read
+`calculations.darkvision` / `calculations.darkvisionSource` and nothing
+else, so a `calculations.blindsight` (or tremorsense/truesight) grant
+was computed and silently dropped.
+
+**Enumeration**: at the time of the fix there were **zero** existing
+assignments to `calculations.blindsight`, `.tremorsense` or
+`.truesight` anywhere in `js/`, so generalising the block is inert for
+every pre-existing build. Re-derive before relying on that:
+`git grep -nE 'calculations\.(blindsight|tremorsense|truesight)\s*=' -- js/`
+
+**Fix**: replaced the darkvision-only block with a loop over
+`["darkvision", "blindsight", "tremorsense", "truesight"]`, keeping the
+existing once-per-source guard.
+
+---
+
 ### CS-BUG-097 — XPHB/TGTT Barbarian Rage pool becomes unlimited at level 20
 
 **Status**: Fixed.
@@ -3808,6 +4002,92 @@ key, then falsified by making `probedCalcKeys` read raw source instead of
 blanked: **94 → 96 probes across 17 → 18 specs**, with both comment-only
 references flagged. That is detector #3's failure mode (a check firing on its
 own documentation) caught *before* shipping rather than after.
+
+---
+
+## CS-BUG-095 — a "restore" cost in prose was parsed as an activation cost, permanently disabling the toggle
+
+**Status:** Fixed.
+**Affects:** Crown of Spellfire (Spellfire Sorcery 18, *Forgotten Realms:
+Heroes of the Feywild* → `FRHoF`; `classSource: "XPHB"`). No other feature in
+the shipped corpus pairs a numeric Sorcery-Point *restore* cost with a toggle
+that rides another feature's uses, so this victim is currently unique — but the
+mis-parse is generic and any similarly-worded feature would inherit it.
+
+### Symptom
+
+Crown of Spellfire is a **free** "alter your Innate Sorcery" toggle: activating
+it costs nothing (it rides an existing Innate Sorcery use). Its prose only
+mentions Sorcery Points to describe *restoring* a spent use —
+
+> …you can't use it again until you finish a Long Rest unless you spend 5
+> Sorcery Points (no action required) to restore your use of it…
+
+The generic `detectActivatableFeature` read *"spend 5 Sorcery Points"* as the
+**activation** cost, and the `.includes("sorcery")` resource matcher bound it to
+the 2-use **Innate Sorcery** pool. The Activate button is disabled whenever its
+linked resource is short (`charactersheet.js`, the `2 < 5` guard), so the Crown
+row rendered **permanently disabled** — `isVisible() === true` but never
+actionable. The E2E toggle `.click()` timed out on a visible-but-dead control,
+which reads exactly like a flaky UI wait rather than a mis-parse.
+
+### Fix
+
+An explicit early return in `detectActivatableFeature`
+(`charactersheet-state.js`), placed just after the psionic check and mirroring
+the existing bespoke returns, that yields a clean **zero-cost** `crownOfSpellfire`
+toggle. It is name-guarded to `"crown of spellfire"` on a Spellfire/`FRHoF`
+character, so no other feature can reach it. With `resourceCost: 0` and no linked
+resource, the Activate button is enabled and the toggle behaves as designed
+(60-ft Fly + hover, Spell Avoidance, once-per-turn Burning Life Force).
+
+### Why the regression pins the READING — and what "the reading" actually is
+
+The load-bearing, render-consumed surface is **which resource
+`getActivatableFeatures()` binds to the Crown row**, because that is the field
+`charactersheet.js` charges the Activate button against:
+
+- **broken** → the row binds the shared **Sorcery-Point / Innate-Sorcery spend
+  pool** (`matchedBy: "name"`, `sorceryPointCost: 5`; in the field, a 2-use
+  Innate Sorcery pool → the `2 < 5` disable);
+- **fixed** → the row binds *at most* Crown's **own 1/Long-Rest use pool**
+  (`"Crown of Spellfire"`, `current 1 ≥ cost 1`), so the button stays live.
+
+**Correction (measured after review).** An earlier draft of this test asserted
+`crownRow.resource == null`, and an earlier draft of the fixture *paraphrased
+away* the "spend 5 Sorcery Points" clause. Both were wrong, and they masked each
+other: with the trigger prose removed the mis-parse had nothing to bite, so the
+row was `null` in **both** worlds and the assertion never discriminated (green
+under a neutralised guard). Two facts only surfaced once the fixture carried the
+**verbatim** published prose:
+
+1. The real prose legitimately mints a `feature.uses` **1/Long-Rest** pool, so
+   the *correct* fixed row carries a resource — it is **not** `null`. `resource
+   == null` was therefore never the right assertion.
+2. The discriminator is the **name** of the bound pool, not its presence. The
+   regression now asserts `resource.name` is **not** Sorcery-flavoured (and, if
+   present, is Crown's own pool), and asserts it **first**, so a leading accessor
+   failure can never mask it (the lesson from this review round: *"a revert makes
+   it red" is necessary but not sufficient — which assertion went red matters*).
+
+The `getFeatureCalculations()` / `stateCall` accessors below the row assertion
+are corroboration only. And the **field pin** — the probe that found the bug in
+the first place and cannot be fooled by a fixture — is the E2E `featuresMatrix`
+L18 row (`kind: "toggle"`), which `.click()`s the **real rendered** Activate
+button against the **real brew prose**; it passes 8/8.
+
+### Falsification
+
+Neutralising the early-return's guard condition **in place** (`if (false &&
+name === …`, signature kept, generic mis-parse restored) turned the regression
+**red: 1 failure**, and the first assertion to fail is the render-consumed
+row-binding one — `test/…/CharacterSheetSpellfireSorcerer.test.js:276`,
+`expect(/sorcer/i.test(boundName)).toBe(false)` → **`Expected false, Received
+true`** (the broken row binds `"Sorcery Points"`). A genuine wrong-value catch on
+the reading the renderer consumes, not a `TypeError`/`ReferenceError`, and not an
+accessor. Restored, it is green (27/27). The eight Spellfire methods carry their
+own seven in-place chokepoint falsifications (signatures kept: 3/2/1/1/1/1/1
+red).
 
 ---
 

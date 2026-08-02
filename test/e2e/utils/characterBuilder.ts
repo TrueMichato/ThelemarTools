@@ -896,6 +896,76 @@ export const PRESET_FULL_SHADOW_MAGIC_SORCERER: CharacterPreset = {
 };
 
 /**
+ * Sorcerer / Shadow Sorcery (RHW) — the 2024 rework of Shadow Magic, on the **XPHB**
+ * chassis (Innate Sorcery at 1, subclass at 3, Sorcery Points = level).
+ *
+ * `shortName` is `"Shadow"` for THREE sorcerer subclasses (`Shadow Magic|XGE` twice,
+ * once per classSource, and this one), so the shorthand spawner is ambiguous here and
+ * both `subclassName` AND `subclassSource` are mandatory — the *names* differ, so the
+ * name+source pair is unambiguous where the shortName is not.
+ *
+ * `prioritySources: ["XPHB"]` is likewise load-bearing: the sheet's source filter
+ * otherwise reduces `Sorcerer` to `Sorcerer|TGTT`, which carries its own 69-subclass
+ * list and a `level + 1` Sorcery Point progression — i.e. the wrong chassis.
+ */
+export const PRESET_FULL_SHADOW_SORCERY_RHW_SORCERER: CharacterPreset = {
+	race: "Human",
+	// The wizard labels 2024 content `PHB'24`, not `XPHB` — `selectRaceExact` matches
+	// the rendered label, so the abbreviation that works in data does NOT work here.
+	raceSource: "PHB'24",
+	className: "Sorcerer",
+	classSource: "PHB'24",
+	prioritySources: ["XPHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Vess Nightpall",
+	skillCount: 2,
+	optFeatCount: 1,
+	subclassName: "Shadow Sorcery",
+	subclassSource: "RHW",
+	// CS-BUG-056: without this the standard array is assigned STR-first and the Sorcerer
+	// lands on CHA 8 — which would make every spell save DC and, critically, the
+	// Strength of the Grave hit point total (CHA mod + Sorcerer level) unrepresentative.
+	abilityPriority: ["cha", "con", "dex", "wis", "int", "str"],
+	signatureSpells: ["Fire Bolt", "Shield"],
+};
+
+/**
+ * Spellfire Sorcery Sorcerer (FRHoF subclass on the XPHB / 2024 Sorcerer chassis).
+ *
+ * Unlike Shadow Magic (a 2014 PHB origin online from L1), Spellfire is a 2024 subclass and
+ * is therefore selected at LEVEL 3 — the factory handles the L3 subclass arrival exactly as
+ * it does for the XPHB Light Cleric and Sea Druid.
+ *
+ * `classSource: "PHB'24"` selects the XPHB Sorcerer; `subclassSource: "FRHoF"` selects the
+ * Spellfire Sorcery subclass (its `classSource` is XPHB). `optFeatCount: 1` accounts for the
+ * 2024 Background's Origin Feat. Dwarf/Acolyte for the same reason as the other 2024 presets:
+ * the 2024 Human's mandatory extra Origin-Feat pick stalls the Species step.
+ *
+ * CS-BUG-056: `abilityPriority` pins CHA first (else the standard array lands the Sorcerer on
+ * CHA 8, making every save DC, the Bolstering Flames Temp HP total and Burning Life Force cap
+ * unrepresentative). DEX/CON stay at 14/13 so HP, AC and initiative are untouched.
+ */
+export const PRESET_FULL_SPELLFIRE_SORCERER: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	className: "Sorcerer",
+	classSource: "PHB'24",
+	prioritySources: ["XPHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Ember Weavefire",
+	skillCount: 2,
+	optFeatCount: 1,
+	subclassName: "Spellfire Sorcery",
+	subclassSource: "FRHoF",
+	abilityPriority: ["cha", "con", "dex", "wis", "int", "str"],
+	signatureSpells: ["Fire Bolt", "Shield"],
+};
+
+/**
  * Wicked Witch Sorcerer (Arcadia 8 subclass re-parented onto the TGTT Sorcerer chassis).
  *
  * The subclass reaches the sheet as a `_copy` in `homebrew/TravelersGuidetoThelemar.json`
@@ -993,6 +1063,8 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_CREATION_BARD_CHANGELING,
 	PRESET_FULL_ARCANA_CLERIC,
 	PRESET_FULL_SHADOW_MAGIC_SORCERER,
+	PRESET_FULL_SHADOW_SORCERY_RHW_SORCERER,
+	PRESET_FULL_SPELLFIRE_SORCERER,
 	PRESET_FULL_WICKED_WITCH_SORCERER,
 	PRESET_FULL_LUNAR_SORCERY_SORCERER,
 ];

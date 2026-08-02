@@ -3371,22 +3371,15 @@ export class CharacterSheetPlayMode {
 			this._state.setCurrentHp(newHp);
 			this._logActivity("heal", `Healed ${newHp - current} HP (${current} → ${newHp})`);
 		} else {
-			// Apply resistance/immunity/vulnerability
-			let effective = val;
-			if (damageType) {
-				const immunities = this._state.getImmunities();
-				const resistances = this._state.getResistances();
-				const vulnerabilities = this._state.getVulnerabilities();
-				if (immunities.includes(damageType)) {
-					effective = 0;
-					this._logActivity("shield", `Immune to ${val} ${damageType} damage`);
-					this._renderStatusBar();
-					return;
-				} else if (resistances.includes(damageType)) {
-					effective = Math.floor(val / 2);
-				} else if (vulnerabilities.includes(damageType)) {
-					effective = val * 2;
-				}
+			// Apply resistance/immunity/vulnerability through the model's single source of
+			// truth (CS-BUG-100), so the preview above, this application and
+			// `CharacterSheetState.takeDamage()` cannot disagree about the number.
+			const defenses = this._state.applyDamageDefenses(val, damageType);
+			const effective = defenses.damage;
+			if (defenses.applied === "immunity") {
+				this._logActivity("shield", `Immune to ${val} ${damageType} damage`);
+				this._renderStatusBar();
+				return;
 			}
 
 			let remaining = effective;
