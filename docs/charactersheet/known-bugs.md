@@ -3811,39 +3811,50 @@ own documentation) caught *before* shipping rather than after.
 
 ---
 
-## CS-BUG-104 — `Blessed Strikes` grants BOTH of its two options, so every 2024 Cleric carries two inert rows — and a TGTT domain makes one of them a visible duplicate
+## CS-BUG-104 — a *resolved* `Blessed Strikes` choice still materialises both options, so `_data.chosenSubfeatures` and `_data.features` disagree — and a TGTT domain turns that into a visible duplicate
 
 **Status:** Open — display-only, mechanically single. Low severity, filed
 because it is reproducible and player-visible.
 
-**Root cause (measured; this corrects the original filing, which blamed the
-TGTT domains).** `Blessed Strikes` (Cleric, XPHB, level 7) is a *choose-one*
-feature. Its data encodes the two options as `refClassFeature` references:
+**Root cause (measured at three stages; this entry has been wrong twice before
+— see Provenance).** `Blessed Strikes` (Cleric XPHB L7) is a choose-one
+feature. The choice is extracted correctly and recorded correctly, and is then
+materialised incorrectly. Measured on `cleric/life domain/7`:
+
+| stage | reading | verdict |
+|---|---|---|
+| extraction | `FeatureChoiceParser.extractChoices()` → `count: 1`, 2 options | **correct** |
+| pick record | `_data.chosenSubfeatures` → `Blessed Strikes → Divine Strike` (one) | **correct** |
+| materialisation | `_data.features` → **both** options, each `parentFeature: "Blessed Strikes"` | **WRONG** |
 
 ```
-data/class/class-cleric.json — Blessed Strikes|Cleric|XPHB|7
-  "You gain one of the following options of your choice (if you get either
-   option from a Cleric subclass in an older book, use only the option you
-   choose for this feature)."
-     → refClassFeature  Divine Strike|Cleric|XPHB|7
-     → refClassFeature  Potent Spellcasting|Cleric|XPHB|7
+_data.features on cleric/life domain/7:
+    Divine Order         L1  parent=null
+    Protector            L1  parent=Divine Order          ← one option, correct
+    Blessed Strikes      L7  parent=null
+    Divine Strike        L7  parent=Blessed Strikes   ┐
+    Potent Spellcasting  L7  parent=Blessed Strikes   ┘ ← BOTH, only one was chosen
+
+_data.chosenSubfeatures: [… {parent: "Blessed Strikes", name: "Divine Strike"} …]
 ```
 
-The sheet materialises **both** referenced options as granted features. So
-*every* 2024 Cleric shows three rows at level 7 — `Blessed Strikes`, `Divine
-Strike`, and `Potent Spellcasting` — where the rules grant one. Confirmed on
-two unrelated domains, with no choice pending:
+**The bug is self-evidencing**: one state object holds both the correct record
+(one pick) and the incorrect materialisation (two rows). No comparison against
+the rules is needed to see the inconsistency.
 
-```
-cleric/life domain/7       → Blessed Strikes, Divine Strike, Potent Spellcasting
-cleric/knowledge domain/7  → Blessed Strikes, Divine Strike, Potent Spellcasting
-                             getPendingFeatureChoices() = 0 in both
-```
+The duplicate you actually notice comes later — a TGTT domain grants its own
+same-named feature at L8, so the name now appears twice on the Features tab.
+The official text names this exact interaction: *"if you get either option from
+a Cleric subclass in an older book, use only the option you choose for this
+feature."*
 
-The parenthetical in the official text is precisely the interaction that then
-goes wrong: a TGTT domain grants its own same-named feature at level 8, and
-because the level-7 option was never narrowed to one, the name now appears
-twice.
+**Not the parser.** `_extractStructuredChoices` (`charactersheet-state.js:768`)
+documents two encodings and names Blessed Strikes explicitly as the second
+(*"a bare `{type:"entries", entries:[refClassFeature, refClassFeature]}` block
+… no `options` wrapper"*). It handles it correctly. A reader sent to
+`FeatureChoiceParser` will find working code — the defect is downstream of
+both extraction and recording, at the site that adds the option rows. **That
+site was not located**; only the three readings above were measured.
 
 Measured live through the spawner (`getFeatures()`, fields as returned):
 
@@ -3917,25 +3928,46 @@ rows alone. This is why `cleric/life domain/8` (`TGTT-2024`) and
 `cleric/knowledge domain/8` (`TGTT-2014`) show no duplicate even though both
 *do* set `divineStrike*` calc keys.
 
-**The blast radius is one feature, and that was measured rather than assumed.**
+**The blast radius is one feature, and the obvious generalisation is false.**
 249 features across the class data use `refClassFeature`/`refSubclassFeature`,
 so the obvious inference is that the whole mechanism is broken. It is not — in
 almost all of those the references are a *grant list* (a subclass header naming
-the features it gives), where materialising every reference is correct. The
-failure is specific to the *choose-one* usage, and of the four 2024 choose-one
-class features, three resolve correctly:
+the features it gives), where materialising every reference is correct. Of the
+four 2024 choose-one class features, three resolve to exactly one option:
 
 ```
-Divine Order    (Cleric XPHB L1)  → Divine Order + Protector           ← one option  OK
-Primal Order    (Druid  XPHB L1)  → Primal Order + Warden              ← one option  OK
-Elemental Fury  (Druid  XPHB L7)  → Elemental Fury + Potent Spellcasting ← one option OK
-Blessed Strikes (Cleric XPHB L7)  → Blessed Strikes + Divine Strike
-                                                   + Potent Spellcasting ← BOTH    BUG
+Divine Order    (Cleric XPHB L1)  → Divine Order + Protector             ← one   OK
+Primal Order    (Druid  XPHB L1)  → Primal Order + Warden                ← one   OK
+Elemental Fury  (Druid  XPHB L7)  → Elemental Fury + Potent Spellcasting ← one   OK
+Blessed Strikes (Cleric XPHB L7)  → Blessed Strikes + BOTH options       ←      BUG
 ```
 
-`Blessed Strikes` is the lone outlier, which is what makes this a bug rather
-than a missing capability: the surrounding machinery demonstrably can narrow a
-choose-one feature to one option.
+**A hypothesis about *why*, raised and then refuted — recorded so nobody
+re-runs it.** The three correct ones all use encoding 1 (an explicit
+`type: "options"` wrapper); Blessed Strikes is the only one of the four using
+encoding 2 (bare `entries` siblings + "one of the following" prose). That
+looked like a clean discriminator. It is not. A data scan finds 7 encoding-2
+candidates, and spawning two of them shows the pick record and the
+materialisation **agree**:
+
+```
+rogue/thief/5     Cunning Strike  → 3 rows materialised, 3 recorded   consistent
+sorcerer/…/3      Spellfire Burst → 1 row materialised,  1 recorded   consistent
+```
+
+Cunning Strike also shows the scan's predicate is loose: its "choose one" is an
+**at-use** menu (spend Sneak Attack dice), not a level-up pick, so the 7 are not
+comparable things and the population is not really 7. **Blessed Strikes remains
+the only measured case where the pick record and the feature list disagree**,
+and no mechanism generalising beyond it has been established. The remaining
+encoding-2 candidates (`Armor Model` ×2, `Zodiac Form: Star Week`,
+`Elemental Smite`) are **unmeasured**.
+
+**Adjacent, unfiled, no id requested.** Life Domain sets `divineStrikeType`
+while Blood Domain sets `divineStrikeDamageType` — two key names for one
+concept, so at most one of them can be the key any reader consumes. Noticed
+while measuring the above; not investigated, and deliberately not filed on a
+single observation.
 
 **Adjacent, unfiled, no id requested.** Life Domain sets `divineStrikeType`
 while Blood Domain sets `divineStrikeDamageType` — two key names for one
@@ -3963,7 +3995,8 @@ empty array — no data load — so filtering it for a feature name yields nothi
 and *any* Jest-based observation of this bug is vacuous by construction. The
 browser is the only surface on which it is visible at all.
 
-**Provenance — this entry has now been wrong twice, in opposite directions.**
+**Provenance — this entry has now been wrong three times, and each correction
+moved the cause to a different file.**
 
 It was originally raised as *"Potent Spellcasting appears twice at L8 and
 L18"*. The levels were wrong (they are 7 and 8) and the scope was too narrow
@@ -3995,3 +4028,23 @@ level-7 rows are inert rather than overwritten, and showed the affected set is
 happened to be directionally right, which is the reason it survived review:
 an unenumerated claim that is accidentally true reads exactly like a measured
 one.
+
+The third correction is to the version that replaced it, which said the sheet
+*"materialises both options"* and implied the choice was never resolved. A
+reviewer fed the real data entry to `FeatureChoiceParser.extractChoices()` and
+got `count: 1` with two options — the extractor is **correct**, and had been
+since `9a03a9f8` (2026-07-03), a month before the report. My evidence had
+always come from `getFeatures()` / `_data.features`, a different surface from
+the one my sentence named. Probing the stage in between settled it:
+`_data.chosenSubfeatures` records exactly one pick, so recording is correct
+too, and the defect is strictly at materialisation.
+
+3. **Confirming the premise of a mechanism is not confirming the mechanism.**
+   The data shape I cited was real and was verified; the behaviour I inferred
+   from it was not, and one probe refuted it. Both of us stopped at the shape.
+   The cost of getting this wrong is specific and predictable: a registry entry
+   naming the wrong file sends the next reader into working code.
+4. **State the surface you measured, not the surface you believe in.** "The
+   sheet materialises both" and "`_data.features` contains both" look like the
+   same sentence and are not. The first is a claim about a pipeline; the second
+   is a reading. Only the second was ever taken.
