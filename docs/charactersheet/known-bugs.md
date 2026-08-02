@@ -5002,8 +5002,13 @@ neither fix reached.
 let saveDC = 8 + spellcastingMod + profBonus - exhaustionDcPenalty;
 ```
 
-with (`:3847`, `:3856`) `profBonus = this._state.getProficiencyBonus()` and
-`spellcastingMod = this._state.getAbilityMod(castingAbility)` — both raw. Only
+with (`:3847`, `:3856`) `profBonus = this._state.getProficiencyBonus()` raw, and
+`spellcastingMod` assigned **conditionally** — `= rollTotal`, a fresh per-cast die,
+in the Gambler branch (`:3858-3861`), and `= this._state.getAbilityMod(castingAbility)`
+only in the `else` (`:3867`). *(An earlier revision of this entry cited the `else`
+branch alone and called it "raw", which read as though the ability modifier were the
+only possible value. It is not, and that omission is load-bearing — see* **Why the
+accessor needed a parameter** *below.)* Only
 the variant-component modifier is added afterwards (`:3911`). It never consults
 `customModifiers.spellDc`, `itemBonuses.spellSaveDc`, or
 `getBonusFromStates("spellDc")`.
@@ -5034,11 +5039,28 @@ plain published magic items are affected with no homebrew involved — Rod of th
 Pact Keeper, Robe of the Archmagi, and anything else writing
 `itemBonuses.spellSaveDc`.
 
-**Suggested fix.** Do not add three more terms at `:3906` — that would be a
-*fourth* hand-rolled formula. Route it through the same state chokepoint the
-other two now use (`getSpellSaveDcForAbility()` / `getSpellSaveDC()`), then add
-the variant-component modifier on top, and update the `_rollMeta.dc.breakdown`
-string so the printed derivation matches the printed total.
+**Suggested fix (historical — written before the fix; ⚠️ INCOMPLETE, superseded
+by *Fix as landed* below. Kept because a reviewer implemented it literally and the
+result is instructive; do not follow it in isolation).** Do not add three more terms
+at `:3906` — that would be a *fourth* hand-rolled formula. Route it through the same
+state chokepoint the other two now use (`getSpellSaveDcForAbility()` /
+`getSpellSaveDC()`), then add the variant-component modifier on top, and update the
+`_rollMeta.dc.breakdown` string so the printed derivation matches the printed total.
+
+> **What this wording omits.** A bare `getSpellSaveDcForAbility(ability)` call uses
+> `getAbilityMod(ability)`, which on the Gambler path **replaces a rolled die with a
+> static modifier** — deleting that feature's mechanic on the only code path that
+> implements it, and printing a self-contradicting `Save DC: 15 (🎲 1d8: 6)` because
+> the roll badge at `:3922` survives independently. The landed fix therefore added
+> `opts.abilityModOverride`. A second reader also derived a double-subtracted
+> exhaustion term from this wording; that one the wording happens to avoid, but only
+> because `exhaustionDcPenalty` stays live in scope at `:3848` and is re-interpolated
+> into the breakdown at `:3925`, so an incremental patch can reintroduce it. Both are
+> now pinned.
+>
+> Corrected instruction, for anyone re-deriving this: *route the **value** through the
+> chokepoint, pass the rolled modifier in via `abilityModOverride`, and leave the local
+> exhaustion variable to the breakdown string alone.*
 
 **Note for whoever fixes it:** pin the **printed / roll-log reading**, not the
 formula. The first CS-BUG-102 pin asserted `8 + mod + prof + stateBonus` by
