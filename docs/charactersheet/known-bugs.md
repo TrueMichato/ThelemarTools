@@ -464,7 +464,35 @@ finding in CS-BUG-092: **a break that yields no reds usually means the tests sto
 short of the logic, not that the logic is dead.**
 
 **Pinned by**: `test/jest/charactersheet/CharacterSheetSpellSwapCandidates.test.js`
-(19 tests).
+(19 tests) — the **predicate**; and
+`test/jest/charactersheet/CharacterSheetSpellSwapRender.test.js` (3 tests) —
+the **call site**.
+
+**Why two pins.** The candidates file re-derives the filter locally
+(`spells.filter(s => ClassUtils.isSwappableKnownSpell(s))`) and asserts its
+coupling to `_renderSpellSwapSection` only in a comment. Measured: restoring the
+original `!s.sourceFeature` **at the call site** — i.e. reintroducing this exact
+bug — leaves all **19 green**, because the predicate it tests is still correct.
+The render pin drives the production method and reads what it wrote, so the same
+break fails **2 of 3** with the user-visible string:
+
+```
+Expected substring: not "No swappable spells known."
+Received string:        "<p class=\"ve-muted ve-small\">No swappable spells known.</p>"
+```
+
+Breaking the predicate instead also reds it (2 of 3), so the two pins overlap on
+the helper and only the render pin covers the wiring. Same shape as CS-BUG-102,
+where the state API was fixed and the renderer kept its own copy: **a helper
+extracted to fix a call-site bug leaves the call site itself unpinned unless
+something drives it.**
+
+**Note on E2E**: no Playwright spec exercises the swap accordion — a grep for
+`charsheet__levelup-spell-swap` / `charsheet__spell-swap-btn` across
+`test/e2e/**` returns nothing. That absence is why a dead core allowance
+survived: the feature renders its own empty state, so there is no error, no log
+and nothing red. The render pin above is a Jest-level substitute, not a
+replacement for a real level-up UI probe.
 
 ### CS-BUG-103 — Features-tab "Use" silently burned a limited use for any state-gated feature
 
