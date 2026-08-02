@@ -1125,7 +1125,14 @@ export async function createCharacterViaWizard (
 	// Step 6: Spells (renders for every class; only spellcasters have a
 	// "Starting Spells" heading, but the wizard still has a Next button to
 	// advance to step 7 either way).
-	await builder.autoFillStartingSpells({divineSoulAffinity: preset.divineSoulAffinity});
+	// CS-BUG-016: `signatureSpells` is documented as applying "during
+	// creation / level-up" but had only ever been passed to level-up, so
+	// L1 builds took an alphabetical auto-pick (or, before the picker
+	// driver was fixed, nothing at all).
+	await builder.autoFillStartingSpells({
+		divineSoulAffinity: preset.divineSoulAffinity,
+		signatureSpells: preset.signatureSpells,
+	});
 	await builder.clickNext();
 	// If we under-filled spells/cantrips, the wizard pops a "Skip Spell
 	// Selection?" confirmation modal — accept it so we reach Details.
@@ -1337,7 +1344,10 @@ export async function levelUpTo (
 		}
 
 		// Auto-fill all remaining selections (skills, spells, feats, etc.)
-		await levelUp.autoFillAllSelections({preferredFeatProgressionPattern: opts?.preferredFeatProgressionPattern});
+		await levelUp.autoFillAllSelections({
+			preferredFeatProgressionPattern: opts?.preferredFeatProgressionPattern,
+			signatureSpells: opts?.signatureSpells,
+		});
 
 		// Finish this level
 		await levelUp.finish();

@@ -184,43 +184,51 @@ export async function readCombatStats (charSheet: CharacterSheetPage): Promise<{
 // ───────────────────────────────────────────────────────────────────────
 
 /**
- * Inside an *open* level-up wizard or builder spells step, attempt to
- * deterministically tick the named spells.  Falls back gracefully if a
- * spell isn't on the available list (e.g. wrong level prereq).
+ * Inside an *open* level-up wizard or builder spells step, deterministically
+ * tick the named spells.
+ *
+ * CS-BUG-016: this used to hunt for `.charsheet__builder-spell-item`,
+ * `.charsheet__builder-list-item` and `.charsheet__modal-list-item`.
+ * None of those is what the spell picker renders — it renders
+ * `.charsheet__spell-picker-item` (see
+ * `CharacterSheetSpellPicker._renderGroupedSpellList`), and
+ * `.charsheet__builder-spell-item` does not exist anywhere in the
+ * product at all. Every candidate therefore missed, and the miss was
+ * reported with `console.warn` rather than a throw, so every preset's
+ * `signatureSpells` was silently discarded in BOTH wizards.
+ *
+ * It now delegates to the shared `pickPreferredSpells` driver and
+ * returns the outcome, so callers can distinguish "this class cannot
+ * learn that spell" (a legitimate miss) from "the picker was not
+ * there".
  */
-export async function pickSignatureSpells (page: Page, spellNames: string[]): Promise<void> {
-	for (const name of spellNames) {
-		// Try the level-up known-spells accordion first
-		const knownAccordion = page.locator('[data-accordion-id="knownspells"]');
-		const builderRoot = page.locator("#charsheet-builder");
+export async function pickSignatureSpells (page: Page, spellNames: string[]): Promise<{picked: string[]; missed: string[]}> {
+	const {pickPreferredSpells} = await import("../pages/spellPickerFill");
 
-		const candidates = [
-			knownAccordion.locator(".charsheet__modal-list-item").filter({hasText: name}).first(),
-			builderRoot.locator(".charsheet__builder-spell-item").filter({hasText: name}).first(),
-			page.locator(".charsheet__builder-list-item, .charsheet__modal-list-item").filter({hasText: name}).first(),
-		];
+	// Both wizards mount the same widget; search the level-up modal
+	// first, then the builder root, and merge the outcome.
+	const roots = [".charsheet__levelup-wizard", "#charsheet-builder"];
+	const picked: string[] = [];
+	let remaining = [...spellNames];
 
-		let added = false;
-		for (const cand of candidates) {
-			if (!(await cand.count())) continue;
-			if (!(await cand.isVisible().catch(() => false))) continue;
-			const toggle = cand.locator(".spell-toggle, button").filter({hasText: /add|\+/i}).first();
-			if (await toggle.count() && await toggle.isVisible()) {
-				await toggle.click().catch(() => {/* swallow */});
-			} else {
-				await cand.click().catch(() => {/* swallow */});
-			}
-			await page.waitForTimeout(120);
-			added = true;
-			break;
-		}
-		if (!added) {
-			// Not fatal — log via console so the test harness can pick it up.
-			// The caller's auto-fill will fill the remaining required slots.
-			// eslint-disable-next-line no-console
-			console.warn(`pickSignatureSpells: "${name}" not selectable in current view`);
-		}
+	for (const root of roots) {
+		if (!remaining.length) break;
+		if (!await page.locator(`${root} .charsheet__spell-picker-container`).count()) continue;
+		const res = await pickPreferredSpells(page, root, remaining);
+		picked.push(...res.picked);
+		remaining = res.missed;
 	}
+
+	for (const name of remaining) {
+		// Not fatal: a signature spell can legitimately be unavailable
+		// at this level (wrong level prereq, already known, or not on
+		// the class list for the chosen subclass). The caller's
+		// auto-fill will take the remaining slots.
+		// eslint-disable-next-line no-console
+		console.warn(`pickSignatureSpells: "${name}" not selectable in current view`);
+	}
+
+	return {picked, missed: remaining};
 }
 
 // ───────────────────────────────────────────────────────────────────────

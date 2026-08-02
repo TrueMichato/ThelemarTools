@@ -1,5 +1,6 @@
 import {Locator, Page, expect} from "@playwright/test";
 import {waitForListItems, uiGate} from "../utils/waitHelpers";
+import {fillSpellPickers} from "./spellPickerFill";
 
 /**
  * Page Object Model for the Character Builder wizard
@@ -938,12 +939,52 @@ export class BuilderWizardPage {
 		}
 	}
 
-	async autoFillStartingSpells (opts?: {divineSoulAffinity?: string}): Promise<void> {
-		const heading = this.page.getByRole("heading", {name: "Starting Spells"});
-		if (!await heading.count() || !await heading.isVisible()) return;
-
+	/**
+	 * Fill the builder's step-6 "Starting Spells" picker to its declared
+	 * requirement.
+	 *
+	 * CS-BUG-016: this used to read the pick counts out of prose with a
+	 * `|| "0"` fallback, and `_renderSpellsStep` renders an intro
+	 * paragraph ("Choose your starting spells as a <b>Bard</b>.") that
+	 * ALSO matches the `/Choose .* spells/i` filter and sorts ahead of
+	 * the real one inside the picker. `.first()` therefore selected a
+	 * digit-free decoy, both counts became `0`, and the method returned
+	 * claiming success having picked nothing — for every caster class,
+	 * not just the TGTT ones. (The tail of the old method looked for a
+	 * `button[name=/add/i]` that has never existed in this widget, so it
+	 * would have hung had the counts ever parsed.)
+	 *
+	 * It now delegates to the shared, verifying `fillSpellPickers`
+	 * driver, which throws rather than under-filling. The only silent
+	 * no-op left is the one we can PROVE: a non-caster, identified by
+	 * the explicit notice `_renderSpellsStep` emits for that branch.
+	 */
+	async autoFillStartingSpells (opts?: {divineSoulAffinity?: string; signatureSpells?: string[]}): Promise<void> {
 		const builderRoot = this.page.locator("#charsheet-builder");
+		const startingHeading = builderRoot.getByRole("heading", {name: "Starting Spells"});
+		const hasStartingSpells = await startingHeading.count() > 0 && await startingHeading.first().isVisible();
+
+		if (!hasStartingSpells) {
+			// `_renderSpellsStep` has exactly two branches. The
+			// non-caster one renders `<h4>Spells</h4>` plus this notice,
+			// and is a legitimate no-op. Anything else means we were
+			// called somewhere that is not the spells step at all, which
+			// the caller must hear about.
+			const nonCasterNotice = builderRoot.locator("p")
+				.filter({hasText: /does not require spell selection/i});
+			if (await nonCasterNotice.count() > 0) return;
+
+			const headings = await builderRoot.locator("h4, h5").allTextContents();
+			throw new Error(
+				`autoFillStartingSpells: neither the "Starting Spells" heading nor the non-caster `
+				+ `notice ("...does not require spell selection at level 1") is present, so this is `
+				+ `not the builder's spells step. Headings seen: [${headings.map(h => h.trim()).filter(Boolean).join(" | ")}]`,
+			);
+		}
+
 		if (opts?.divineSoulAffinity) {
+			// Selecting an affinity re-renders the whole step, so it has
+			// to happen before we read any picker state.
 			const affinitySection = builderRoot.locator(".charsheet__builder-feat-opt-section").filter({hasText: "Divine Soul Affinity"}).first();
 			if (await affinitySection.count()) {
 				const affinitySelect = affinitySection.locator("select").first();
@@ -952,34 +993,11 @@ export class BuilderWizardPage {
 			}
 		}
 
-		const controls = builderRoot.locator("select");
-		if (await controls.count() < 1) return;
-
-		const levelFilter = controls.first();
-		const summaryText = (await builderRoot.locator("p").filter({hasText: /Choose .* spells/i}).first().textContent()) || "";
-		const cantripCount = parseInt(summaryText.match(/and\s+(\d+)\s+cantrips?/i)?.[1] || "0", 10);
-		const spellCount = parseInt(summaryText.match(/Choose\s+(\d+)\s+spells?/i)?.[1] || "0", 10);
-
-		const addVisibleSpells = async (count: number) => {
-			for (let added = 0; added < count; added++) {
-				const addButton = builderRoot.getByRole("button", {name: /add/i}).filter({hasText: /add/i}).first();
-				await addButton.waitFor({state: "visible", timeout: 10000});
-				await addButton.click();
-				await this.page.waitForTimeout(100);
-			}
-		};
-
-		if (cantripCount > 0) {
-			await levelFilter.selectOption({label: "Cantrips"});
-			await this.page.waitForTimeout(200);
-			await addVisibleSpells(cantripCount);
-		}
-
-		if (spellCount > 0) {
-			await levelFilter.selectOption({label: "Level 1"});
-			await this.page.waitForTimeout(200);
-			await addVisibleSpells(spellCount);
-		}
+		await fillSpellPickers(this.page, "#charsheet-builder", {
+			context: "builder step 6 (Starting Spells)",
+			expectPickers: true,
+			preferredNames: opts?.signatureSpells,
+		});
 	}
 
 	// ========== ABILITIES STEP ==========

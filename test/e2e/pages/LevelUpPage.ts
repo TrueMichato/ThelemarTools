@@ -1,4 +1,5 @@
 import {Locator, Page, expect} from "@playwright/test";
+import {fillSpellPickers} from "./spellPickerFill";
 
 /**
  * Page Object Model for the Level-Up wizard modal
@@ -372,7 +373,7 @@ export class LevelUpPage {
 	 *   BOTH the L1 wizard and later level-ups (homebrew sources can inject
 	 *   extra same-category feats that sort ahead of the "obvious" pick).
 	 */
-	async autoFillAllSelections (opts?: {preferredFeatProgressionPattern?: RegExp}): Promise<void> {
+	async autoFillAllSelections (opts?: {preferredFeatProgressionPattern?: RegExp; signatureSpells?: string[]}): Promise<void> {
 		// First, force every accordion expanded so all sub-pickers
 		// (including optional ones like Wizard's Spellbook) render their
 		// inputs. Note: clicking accordion headers triggers single-open
@@ -702,37 +703,32 @@ export class LevelUpPage {
 		// Spell pickers (Wizard spellbook, Known caster spells/cantrips,
 		// Prepared caster spells/cantrips). These render their own
 		// progress headers `<current>/<max>` and use `.spell-toggle`
-		// buttons (`+` to add, `✓` to remove). The generic counter pass
-		// can't satisfy them. Loop a few times to fill all visible
-		// pickers.
+		// buttons (`+` to add, `✓` to remove), so the generic counter
+		// pass above can't satisfy them.
+		//
+		// CS-BUG-016: this used to collect every `+` button up-front and
+		// click them in a single `page.evaluate` batch, then repeat for
+		// 4 passes. The widget's `onToggle` calls `renderSpellList()`,
+		// which does `spellList.innerHTML = ""` — so the first click
+		// detached every other button in the captured array and their
+		// `.click()` calls were silent no-ops. That yielded ONE
+		// effective pick per pass, capped at 4, which is exactly the
+		// "first four entries of an alphabetically-sorted catalogue"
+		// symptom that was reported. `fillSpellPickers` re-queries after
+		// every click and verifies the counters actually reached their
+		// maxima.
+		//
+		// `allowInsufficientOptions` is set because a levelling
+		// character can legitimately already know every remaining
+		// candidate (the wizard then offers its "Skip Spell Selection?"
+		// confirmation, which `finish()` accepts). A counter that STALLS
+		// while `+` options remain still throws.
 		// ──────────────────────────────────────────────────────────────
-		for (let pass = 0; pass < 4; pass++) {
-			const clicked = await this.page.evaluate(() => {
-				const wizard = document.querySelector(".charsheet__levelup-wizard");
-				if (!wizard) return 0;
-				const pickers = Array.from(wizard.querySelectorAll<HTMLElement>(".charsheet__spell-picker-container"));
-				let total = 0;
-				for (const picker of pickers) {
-					const counters = Array.from(picker.querySelectorAll<HTMLElement>(".spell-counter-value, .cantrip-counter-value"));
-					for (const counter of counters) {
-						const isCantrip = counter.classList.contains("cantrip-counter-value");
-						const cur = parseInt(counter.querySelector(isCantrip ? ".cantrip-count-current" : ".spell-count-current")?.textContent || "0", 10);
-						const max = parseInt(counter.querySelector(isCantrip ? ".cantrip-count-max" : ".spell-count-max")?.textContent || "0", 10);
-						if (cur >= max) continue;
-						const need = max - cur;
-						const addBtns = Array.from(picker.querySelectorAll<HTMLButtonElement>("button.spell-toggle"))
-							.filter(b => (b.textContent || "").trim() === "+");
-						for (const btn of addBtns.slice(0, need)) {
-							btn.click();
-							total++;
-						}
-					}
-				}
-				return total;
-			});
-			if (clicked === 0) break;
-			await this.page.waitForTimeout(250);
-		}
+		await fillSpellPickers(this.page, ".charsheet__levelup-wizard", {
+			context: "level-up wizard",
+			allowInsufficientOptions: true,
+			preferredNames: opts?.signatureSpells,
+		});
 	}
 
 	// ========== COMPLETION ==========
