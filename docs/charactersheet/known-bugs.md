@@ -5035,7 +5035,7 @@ tgtt-astral-self-monk-changeling.ts   24 entries … inert (blank)   58%  ⚠ LO
 A spec scoring **✓ FULL at 102%** while carrying six never-executed rows is
 worse than no detector, because the badge actively discourages a second look.
 
-### Root cause — two independent ones
+### Root cause — six, not two
 
 **1. `findInertRows()` scans spec source text, but 14 of the 16 rows do not
 exist in spec source.** They are emitted at runtime by `buildCombatMethodChecks`
@@ -5171,6 +5171,69 @@ repair marks it live:
 they know is inert — the Meteor Knight L13..16 row carries *"Not exercised by
 the current checkpoint list [3, 5, 11, 17, 20], but kept so the tier ladder is
 complete"* and is therefore invisible to the detector that exists to find it.
+
+**5. The SAME blinding also afflicts the denominator — and it is what produces
+every surviving >100% row.** `:683` counts entries with
+`/\{\s*level:\s*\d+\s*,/g`: whitespace only between the brace and the key, the
+identical shape as cause 2, on the opposite side of the fraction. Cause 2 hides
+inert rows *from the detector*; cause 5 hides documented rows *from the
+denominator*.
+
+Measured — the two 115% specs reproduce exactly, from source:
+
+```
+tgtt-meteor-knight-fighter   entryCount=13  real rows=15  blinded=2  effects=15  ->  115%
+tgtt-steel-hawk-fighter      entryCount=13  real rows=15  blinded=2  effects=15  ->  115%
+tgtt-tdcsr-juggernaut-barbarian  entryCount=21  real=22  blinded=1  effects=20  ->   95%
+```
+
+Both specs have 15 rows and 15 `effects:` blocks. **Coverage is genuinely 100%;
+the entire overshoot is the denominator losing 2 rows.** The four lost rows, and
+what precedes each:
+
+```
+meteor-knight :76   level: 13   <- "// PB 5 (levels 13-16). Not exercised by the current checkpoint list…"
+meteor-knight :140  level: 10   <- "// The middle damage tier: 1d6 from 10 until Satellite Barrage bumps it…"
+steel-hawk    :61   level: 3    <- "// Damage tier 1: 1d8 from 3 until Eagle Eye bumps it at 10."
+steel-hawk    :205  level: 10   <- "// Damage tier 2 plus the widened crit range, both released at 10…"
+```
+
+All four are among the **best-documented rows in their files**. The metric
+penalises exactly the rows an author took most care over.
+
+> **The script diagnosed this itself and fixed a different instance of it.**
+> `:676-682`, verbatim, six lines above the offending regex: *"The stricter
+> anchor missed 102 entries across 27 of 39 specs, all of them tiered rows, so
+> **the denominator shrank exactly where a spec was best written and every
+> coverage figure came out overstated.**"* The author hit the failure mode via
+> the `name:` anchor, repaired that instance, wrote down the general rule — and
+> left a second instance of the same rule live in the next line. That is the
+> **third** self-indicting comment in this file, after `:178-185` (laundering)
+> and `:721-727` (prose is not verification). *Found by the
+> `lunar-sorcery-sorcerer` session; the 115% reproduction is the measurement of
+> it.*
+
+**6. `helperCount` counts distinct helper *functions*, not rows — and omits the
+one helper that matters most.** `:705` is `new Set(helperUsage).size` over a
+fixed alternation of 16 names, so three calls to `buildWeaponMasteryChecks`
+contribute **1**. Worse:
+
+```
+grep -c 'buildCombatMethodChecks' scripts/auditE2eCoverage.mjs   ->  0
+grep -rn 'buildCombatMethodChecks' test/e2e/specs/*.ts | wc -l   ->  6   (across 2 specs)
+```
+
+**The helper that emits 14 of the 16 inert rows is not in the alternation at
+all**, so it contributes **0** to the numerator — not 1. Those rows are
+mis-counted on *both* sides of the fraction: invisible to `entryCount` because
+they are not literals, and invisible to `helperCount` because the function is
+unlisted.
+
+**Consequence for any repair.** Dropping `skipReasonCount` takes 11 rows over
+100% down to 3; anchoring the entry regex past comments takes those 3 to 0. The
+two together remove every impossible figure — **and the metric is still
+unsound**, because causes 1, 4 and 6 are untouched and the tell is now gone. A
+partial repair here is worse than none: it buys silence, not correctness.
 
 ### Why widening the window is the wrong fix
 
