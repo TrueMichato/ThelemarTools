@@ -45,6 +45,14 @@
 //      apostrophe turned curly so its regex can no longer match) makes
 //      the last milestone permanently red. Cannot PASS.
 //
+// COVERAGE is assertion-based: effects + helper-driven checks + rows whose
+// feature a sibling row asserts + rows blocked by a documented CS-BUG,
+// minus rows sitting in an inert window. Explanatory comments are counted
+// and shown in the `reason` column but do NOT raise coverage — knowing
+// about a gap is not the same as closing it, and crediting prose is how
+// tgtt-time-domain-cleric came to read 100% FULL while carrying exactly
+// ONE mechanical assertion across seventeen features.
+//
 //   3. VACUOUS SPELL NAME MATCHES — `spellMatchMode: "any"` paired with a
 //      non-empty `spell:`. The mode does not RELAX the name match, it
 //      DELETES it: in "any" mode the helper never reads `e.spell` and
@@ -145,42 +153,75 @@ function findInertRows (src) {
 }
 
 /**
- * Count rows that carry no `effects:` of their own but whose FEATURE is
- * asserted by a sibling row of the same `name` elsewhere in the spec.
+ * Classify every matrix row once, so a single bare row cannot be credited
+ * twice by two different mechanisms.
  *
- * The counters above are file-wide tallies, so a spec is effectively
- * scored per ROW. That is the wrong granularity for two idioms this
- * suite deliberately uses:
+ * A row with `effects:` is covered outright. A BARE row is accounted for
+ * if EITHER a sibling row of the same name carries the probes, OR the
+ * author left an explanatory comment immediately above it. Sibling cover
+ * wins, and rows carrying their own `skipReason` are left to the separate
+ * skipReason tally -- so the three credits are mutually exclusive.
  *
- *   - a TIERED resource states its `resourceMax` once per tier but
- *     attaches the restore probe only to the first tier;
- *   - a PICKED feature keeps a plain "it appears" row and puts the
- *     `pickedFeatureGrants` / stateCall probes on the picker row.
+ * This replaced a LEXICAL reason-comment counter that matched a fixed
+ * vocabulary (`no measurable`, `no clean probe`, `cinematic`, `narrative`,
+ * `CS-BUG-NNN`). That counter was not merely narrow, it was UNCORRELATED
+ * with the thing it claimed to measure, in both directions:
  *
- * In both cases the question worth asking is "is this feature's effect
- * asserted anywhere?", not "is it asserted on this row?". Scoring per
- * row marks well-covered specs LOW, and a LOW that is an artifact is
- * worse than no signal at all — it trains readers to ignore the column
- * that is supposed to flag genuinely uncovered work.
+ *   - tgtt-daemonologist-wizard-dwarf documents all five of its gaps
+ *     ("the factory has no ritual-cast probe", "no deterministic matrix
+ *     delta", "auto-picked and therefore not deterministic", ...) and
+ *     scored ZERO, because it used none of the blessed words. It was the
+ *     suite's worst-scoring spec at 32% as a direct result.
+ *   - tgtt-arcana-cleric scored SIX reason credits while having ZERO bare
+ *     rows -- pure phantom coverage, since there was no gap for any of
+ *     them to account for. tgtt-tempest-cleric likewise, and
+ *     battle-master / astral-self / shadow-magic each banked credits for
+ *     comments sitting on rows that already had effects.
+ *
+ * So it penalised authors for writing specific reasons instead of
+ * boilerplate, while rewarding specs that had nothing to explain. Being
+ * bounded by the bare-row count is what stops the second failure mode:
+ * you cannot be credited for explaining a gap you do not have.
  */
-function countSiblingCoveredRows (src) {
-	const byName = new Map();
+function classifyRows (src) {
+	const lines = src.split("\n");
+	const lineStarts = [];
+	{
+		let at = 0;
+		for (const ln of lines) { lineStarts.push(at); at += ln.length + 1; }
+	}
+	const lineOf = (idx) => {
+		let lo = 0; let hi = lineStarts.length - 1;
+		while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (lineStarts[mid] <= idx) lo = mid; else hi = mid - 1; }
+		return lo;
+	};
+
+	const rows = [];
 	const re = /\{\s*level:\s*\d+\s*,/g;
 	let m;
 	while ((m = re.exec(src)) !== null) {
 		const obj = readObjectLiteral(src, m.index);
 		if (!obj) continue;
-		const name = obj.match(/name:\s*("[^"]*"|\/[^/\n]*\/[a-z]*)/)?.[1];
-		if (!name) continue;
-		if (!byName.has(name)) byName.set(name, []);
-		byName.get(name).push(RE_EFFECTS.test(obj));
+		const name = obj.match(/name:\s*("[^"]*"|\/[^/\n]*\/[a-z]*)/)?.[1] || null;
+		let k = lineOf(m.index) - 1;
+		while (k >= 0 && /^\s*$/.test(lines[k])) --k;
+		const commented = k >= 0
+			&& /^\s*\/\//.test(lines[k])
+			&& !/^\s*\/\/\s*(TODO|FIXME|XXX)\b/i.test(lines[k]);
+		rows.push({name, hasEffects: RE_EFFECTS.test(obj), hasSkipReason: /\bskipReason:/.test(obj), commented});
 	}
-	let credited = 0;
-	for (const flags of byName.values()) {
-		if (!flags.some(Boolean)) continue; // nothing asserts this feature at all
-		credited += flags.filter(has => !has).length;
+
+	const assertedNames = new Set(rows.filter(r => r.hasEffects && r.name).map(r => r.name));
+	let siblingCovered = 0; let explained = 0; let bare = 0; let unaccounted = 0;
+	for (const r of rows) {
+		if (r.hasEffects) continue;
+		++bare;
+		if (r.name && assertedNames.has(r.name)) { ++siblingCovered; continue; }
+		if (r.hasSkipReason) continue; // counted by the skipReason tally
+		if (r.commented) { ++explained; continue; }
+		++unaccounted;
 	}
-	return credited;
+	return {siblingCovered, explained, bare, unaccounted};
 }
 
 const POOLS_PATH = path.join(ROOT, "test", "e2e", "utils", "tgttFeaturePools.ts");
@@ -544,13 +585,11 @@ function auditSpec (specPath) {
 	const effectsBlocks = src.match(new RegExp(RE_EFFECTS.source, "g")) || [];
 	const effectsCount = effectsBlocks.length;
 
-	// Reason-style comments — both literal `// no measurable …` and
-	// inline `// …no clean state probe…`/`CS-BUG-NNN` notes count as
-	// auditable acknowledgments that the row is intentionally
-	// existence-only. Anything explicitly labelled with a known
-	// blocking reason qualifies.
-	const reasonComments = src.match(/\/\/[^\n]*(no measurable|no clean (state )?probe|cinematic|CS-BUG-\d+|narrative|capstone[^\n]*no probe)[^\n]*/gi) || [];
-	const reasonCount = reasonComments.length;
+	// Bare rows whose gap the author explained in an adjacent comment.
+	// Structural, not lexical: see classifyRows() for why matching a fixed
+	// vocabulary measured the wrong thing in both directions.
+	const rowClasses = classifyRows(src);
+	const reasonCount = rowClasses.explained;
 
 	// `{skip: true,` skipped probes — and entry-level `skip: true` rows
 	// each carry a `skipReason` that documents why no probe runs.
@@ -572,8 +611,16 @@ function auditSpec (specPath) {
 	const inertWithProbes = inertRows.filter(r => r.hasProbes).length;
 	const unreachablePicks = findUnreachablePicks(src);
 	const vacuousSpellMatches = findVacuousSpellMatches(src);
-	const siblingCovered = countSiblingCoveredRows(src);
-	const effective = effectsCount + reasonCount + helperCount + skipReasonCount + siblingCovered - inertWithProbes;
+	const siblingCovered = rowClasses.siblingCovered;
+	// `reasonCount` is deliberately NOT added. An explanatory comment
+	// records that a gap is KNOWN; it does not make the feature verified.
+	// This batch's acceptance bar is that every ability a subclass provides
+	// is offered, shown, AND mechanically implemented — description-only
+	// was explicitly unacceptable — so a row whose only accounting is prose
+	// must keep counting against the spec. It is reported in its own
+	// column so the backlog stays visible rather than being laundered into
+	// the score.
+	const effective = effectsCount + helperCount + skipReasonCount + siblingCovered - inertWithProbes;
 	const coverage = entryCount === 0 ? 1 : effective / entryCount;
 
 	const status =
