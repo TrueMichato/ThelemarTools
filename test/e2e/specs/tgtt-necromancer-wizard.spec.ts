@@ -39,10 +39,11 @@ const NECROMANCER_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollSavingThrow", ability: "int"},
 			{kind: "rollSavingThrow", ability: "wis"},
 			{kind: "rollInitiative"},
-			// Wizard L1 cantrips + first-party spell names are blocked by the
-			// documented E2E auto-pick gap, not by product code (CS-BUG-016 triage).
-			{kind: "cantripCount", min: 3, skip: true, skipReason: "E2E-INFRA: cantrip/spell auto-pick empty"},
-			{kind: "spellSaveDc", min: 12, skip: true, skipReason: "E2E-INFRA: cantrip/spell auto-pick empty"},
+			// Wizard L1 cantrips + spell save DC. These were skipped under an
+			// alias of CS-BUG-016 ("E2E-INFRA: cantrip/spell auto-pick empty");
+			// the builder now fills its cantrip allotment for real.
+			{kind: "cantripCount", min: 3},
+			{kind: "spellSaveDc", min: 12},
 		],
 	},
 	// L1 Arcane Recovery — recover slot levels equal to ⌈half wizard level⌉,

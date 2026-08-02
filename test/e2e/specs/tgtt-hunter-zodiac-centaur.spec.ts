@@ -24,7 +24,7 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /spellcasting/i,
 		kind: "passive",
 		effects: [
-			{kind: "spellInList", spell: "Hunter's Mark", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Hunter's Mark"},
 			// Centaur Equine Build base walk speed = 40 ft.
 			{kind: "speed", type: "walk", min: 40},
 			{kind: "rollSavingThrow", ability: "str"},
@@ -53,7 +53,7 @@ const HUNTER_FEATURES_MATRIX: FeatureCheck[] = [
 		kind: "passive",
 		effects: [
 			{kind: "rollAttack", attackName: /longbow|shortbow|scimitar/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
-			{kind: "spellSaveDc", min: 11, skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellSaveDc", min: 11},
 		],
 	},
 	// L6 Roving — XPHB Ranger speed-boost passive (no extra probe;
@@ -122,12 +122,12 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /spellcasting/i,
 		kind: "passive",
 		effects: [
-			{kind: "spellInList", spell: "Druidcraft", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Druidcraft"},
 			{kind: "speed", type: "walk", min: 40},
 			{kind: "rollSavingThrow", ability: "wis"},
 			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 			{kind: "rollInitiative"},
-			{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
+			{kind: "cantripCount", min: 2},
 		],
 	},
 	// L1 Druidic — passive subclass-language feature.
@@ -174,7 +174,7 @@ const ZODIAC_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /wild resurgence/i,
 		kind: "passive",
 		effects: [
-			{kind: "spellSaveDc", min: 11, skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellSaveDc", min: 11},
 		],
 	},
 	// L7 Elemental Fury — TGTT Druid passive (XPHB equivalent
@@ -232,7 +232,7 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /spellcasting/i,
 		kind: "passive",
 		effects: [
-			{kind: "spellInList", spell: "Hunter's Mark", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Hunter's Mark"},
 			{kind: "speed", type: "walk", min: 40},
 			{kind: "rollSavingThrow", ability: "str"},
 			{kind: "rollSavingThrow", ability: "dex"},
@@ -278,8 +278,8 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			{kind: "rollSavingThrow", ability: "wis"},
 			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
-			{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
-			{kind: "spellSaveDc", min: 11, skip: true, skipReason: "CS-BUG-016"},
+			{kind: "cantripCount", min: 2},
+			{kind: "spellSaveDc", min: 11},
 		],
 	},
 	// Druid 2 = char L8: Wild Shape (resource, 2 uses, short rest)
@@ -306,7 +306,7 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /circle of the zodiac|druid circle/i,
 		kind: "passive",
 		effects: [
-			{kind: "spellInList", spell: "Druidcraft", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Druidcraft"},
 		],
 	},
 	{level: 9, name: /zodiac form: month|zodiac form/i, kind: "passive"},

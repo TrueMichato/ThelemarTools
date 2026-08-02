@@ -36,8 +36,8 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	// Tortle race anchors — natural armor 17 base AC and walking
 	// speed 30 — since the matrix has no dedicated race entry.
 	{level: 1, name: /pact magic/i, kind: "passive", effects: [
-		{kind: "spellInList", spell: "Eldritch Blast", skip: true, skipReason: "CS-BUG-016"},
-		{kind: "spellInList", spell: "Hex", skip: true, skipReason: "CS-BUG-016"},
+		{kind: "spellInList", spell: "Eldritch Blast"},
+		{kind: "spellInList", spell: "Hex"},
 		{kind: "rollAttack", attackName: /eldritch blast/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
 		{kind: "rollSavingThrow", ability: "wis"},
 		{kind: "rollInitiative"},
@@ -83,7 +83,7 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 3, name: /divine magic|divine soul/i, kind: "pick",
 		pickedFrom: [/good/i, /evil/i, /lawful/i, /chaotic/i, /neutral/i],
 		effects: [
-			{kind: "spellInList", spell: "Cure Wounds", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Cure Wounds"},
 		]},
 	// Favored by the Gods restoration is already covered by the parent
 	// `restoreOn: "either"`. No additional effect probe needed.
@@ -103,7 +103,7 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	// total L4 (Sorc 2) prof bonus = 2 and a 16-CHA caster yields
 	// DC = 8 + 2 + 3 = 13. `min: 13` stays valid through L20.
 	{level: 4, name: /font of magic/i, kind: "passive", effects: [
-		{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
+		{kind: "spellSaveDc", min: 13},
 	]},
 	// L5 = Sorc 3: Metamagic — pick 2 options. `pickedCount` is the
 	// count floor; `pickToggleable` then verifies that ≥1 picked

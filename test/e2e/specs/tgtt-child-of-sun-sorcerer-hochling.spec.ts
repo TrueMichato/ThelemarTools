@@ -37,9 +37,9 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "resistance", damageType: "radiant"},
 			// Light cantrip — granted by Hochling/Aasimar Light Bearer
 			// (and re-granted by Glimpse of the Sun at L3).
-			{kind: "spellInList", spell: "Light", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Light"},
 			// Sorcerer L1 picks 4 cantrips (Sun Bloodline adds Light free).
-			{kind: "cantripCount", min: 4, skip: true, skipReason: "CS-BUG-016"},
+			{kind: "cantripCount", min: 4},
 			// Sorcerers are proficient in CON + CHA saves; CON button
 			// must exist and not throw on click.
 			{kind: "rollSavingThrow", ability: "con"},
@@ -53,7 +53,7 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 			{kind: "rollInitiative"},
 			// Spell save DC at L5 with CHA ≥ 16 = 8 + prof(3) + CHA(≥3) = 14.
-			{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellSaveDc", min: 13},
 			// Signature attack — preset grants Fire Bolt cantrip and the
 			// Sorcerer starting kit gives a dagger / light crossbow.
 			{kind: "rollAttack", attackName: /dagger|crossbow|fire bolt|quarterstaff/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
@@ -115,7 +115,7 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 	// SP-fueled flare reaction has no clean state probe.
 	{level: 3, name: /glimpse of the sun/i, kind: "passive",
 		effects: [
-			{kind: "spellInList", spell: "Light", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Light"},
 		]},
 	// Summer's Defiant Blood — passive damage rider that adds CHA mod
 	// to the next spell after being targeted. No state-observable
@@ -126,26 +126,26 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 	// "spells"` check verifies the spells appear via `grantsSpells`.
 	// `spellInList` effect probes are an additional independent
 	// assertion that the spell name ends up in the known-spells list.
-	{level: 3, name: /sun spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016",
+	{level: 3, name: /sun spells/i, kind: "spells",
 		grantsSpells: ["Continual Flame", "Flaming Sphere"],
 		effects: [
-			{kind: "spellInList", spell: "Continual Flame", skip: true, skipReason: "CS-BUG-016"},
-			{kind: "spellInList", spell: "Flaming Sphere", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Continual Flame"},
+			{kind: "spellInList", spell: "Flaming Sphere"},
 		]},
-	{level: 5, name: /sun spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016",
+	{level: 5, name: /sun spells/i, kind: "spells",
 		grantsSpells: ["Daylight"],
 		effects: [
-			{kind: "spellInList", spell: "Daylight", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Daylight"},
 		]},
-	{level: 7, name: /sun spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016",
+	{level: 7, name: /sun spells/i, kind: "spells",
 		grantsSpells: ["Fire Shield"],
 		effects: [
-			{kind: "spellInList", spell: "Fire Shield", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Fire Shield"},
 		]},
-	{level: 9, name: /sun spells/i, kind: "spells", skip: true, skipReason: "CS-BUG-016",
+	{level: 9, name: /sun spells/i, kind: "spells",
 		grantsSpells: ["Dawn"],
 		effects: [
-			{kind: "spellInList", spell: "Dawn", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Dawn"},
 		]},
 
 	// Higher-tier subclass features inherited from the Ar2 base

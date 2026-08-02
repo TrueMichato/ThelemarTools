@@ -38,7 +38,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 		restoreOn: "long",
 		effects: [
 			{kind: "longRestRestores", resource: "Sorcery Points"},
-			{kind: "cantripCount", min: 4, skip: true, skipReason: "CS-BUG-016"},
+			{kind: "cantripCount", min: 4},
 			// Half-Ogre +2 STR racial bonus floor.
 			{kind: "abilityScore", ability: "str", min: 14},
 			// L3 SP anchor: roll-button probes for Sorcerer-proficient CON
@@ -73,7 +73,7 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// above DC 13 even on a slow-CHA path.
 	{level: 11, name: "Sorcery Points", kind: "resource", untilLevel: 16, resourceMax: 12,
 		effects: [
-			{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellSaveDc", min: 13},
 		]},
 	{level: 17, name: "Sorcery Points", kind: "resource", untilLevel: 19, resourceMax: 18},
 	{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 21},
@@ -133,8 +133,8 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 	// block in the TGTT homebrew JSON.
 	{level: 1, name: /heroic spells/i, kind: "passive", skip: true, skipReason: "CS-BUG-017",
 		effects: [
-			{kind: "spellInList", spell: "Heroism", skip: true, skipReason: "CS-BUG-016"},
-			{kind: "spellInList", spell: "Shield", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Heroism"},
+			{kind: "spellInList", spell: "Shield"},
 		]},
 	// Over Soul — bonus-action toggle, costs 1 SP. Toggle button must
 	// exist; effect doesn't change AC or DC, so use `none`. The toggle

@@ -76,7 +76,7 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			{kind: "shortRestRestores", resource: "Bardic Inspiration",
 				skip: true, skipReason: "CS-BUG-008"},
-			{kind: "spellSaveDc", min: 13, skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellSaveDc", min: 13},
 		],
 	},
 	// Spellcasting + Jack of All Trades + Expertise (L2 / L9 picks two
@@ -94,11 +94,11 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		name: /spellcasting/i,
 		kind: "passive",
 		effects: [
-			{kind: "cantripCount", min: 2, skip: true, skipReason: "CS-BUG-016"},
-			{kind: "spellInList", spell: "Vicious Mockery", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "cantripCount", min: 2},
+			{kind: "spellInList", spell: "Vicious Mockery"},
 			// Yuan-Ti `Serpentine Spellcasting` racial: Poison Spray
 			// cantrip is granted as `known` at L1 in MPMM data.
-			{kind: "spellInList", spell: "Poison Spray", skip: true, skipReason: "CS-BUG-016"},
+			{kind: "spellInList", spell: "Poison Spray"},
 			// Yuan-Ti `Poison Resilience` (MPMM): resistance to poison
 			// damage. (User-prompt hinted "immunity" but MPMM data is
 			// resistance — going with the data.)

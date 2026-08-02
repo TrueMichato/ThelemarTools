@@ -64,11 +64,12 @@ const ARCANA_FEATURES: FeatureCheck[] = [
 			{kind: "stateCall", method: "getSubclassSpellChoiceSlots", path: "length", min: 2},
 			// …and the creation wizard actually drained them, so nothing is left pending.
 			{kind: "stateCall", method: "getPendingSpellChoices", path: "length", exact: 0},
-			// The Builder's own cantrip auto-pick lands ZERO cleric cantrips
-			// (pre-existing E2E-INFRA gap, see CS-BUG-016), so only the two Arcane
-			// Initiate picks are guaranteed here. They ARE the interesting ones: they
-			// prove the CS-BUG-075 choose-block walker and the CS-BUG-077 sequential
-			// picker both work end-to-end.
+			// Cleric L1 has 3 cantrips of its own plus the two Arcane Initiate
+			// picks. `min: 2` is kept deliberately loose: the Arcane Initiate pair
+			// is what this entry exists to prove — they exercise the CS-BUG-075
+			// choose-block walker and the CS-BUG-077 sequential picker end-to-end.
+			// (Before CS-BUG-016 was fixed the builder landed ZERO cleric cantrips,
+			// so those two picks were the only thing keeping this green.)
 			{kind: "cantripCount", min: 2},
 		],
 	},
