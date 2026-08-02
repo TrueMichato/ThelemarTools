@@ -4898,7 +4898,7 @@ for the bug itself. Falsifying it required the second break above.
 
 **Status:** Open. Partially addressed — `913600e4` widened the offending
 windows that existed at the time and added `scripts/auditE2eCoverage.mjs`. The
-underlying hole is still open, and **16 rows are inert** — count corrected twice (12 -> 13 -> 16); see Root cause 1 and Root cause 4.
+underlying hole is still open, and **16 rows are inert** — count corrected twice (12 -> 13 -> 16); see Root cause 1 and Root cause 4. SEVEN root causes are now recorded.
 
 **Affects:** `test/e2e/utils/characterSpecFactory.ts` (the MEGA and matrix
 loops) and `scripts/auditE2eCoverage.mjs` (the detector).
@@ -5035,7 +5035,7 @@ tgtt-astral-self-monk-changeling.ts   24 entries … inert (blank)   58%  ⚠ LO
 A spec scoring **✓ FULL at 102%** while carrying six never-executed rows is
 worse than no detector, because the badge actively discourages a second look.
 
-### Root cause — six, not two
+### Root cause — seven, not two
 
 **1. `findInertRows()` scans spec source text, but 14 of the 16 rows do not
 exist in spec source.** They are emitted at runtime by `buildCombatMethodChecks`
@@ -5234,6 +5234,61 @@ unlisted.
 two together remove every impossible figure — **and the metric is still
 unsound**, because causes 1, 4 and 6 are untouched and the tell is now gone. A
 partial repair here is worse than none: it buys silence, not correctness.
+
+**7. On a PARTIAL tree it warns, silently substitutes the wrong model, and
+prints an authoritative table anyway.** The script resolves `ROOT` from its own
+file location, so cross-tree measurement (`git archive … | tar -x -C /tmp/…` —
+the standard workflow for reproducing another session's numbers) easily produces
+a tree with `test/e2e/specs/` present and `test/e2e/utils/characterSpecFactory.ts`
+absent. Measured, three configurations:
+
+| tree | behaviour |
+|---|---|
+| full repo | correct |
+| script alone, outside the repo | warns, then **crashes** (`ENOENT … scandir '/private/tmp/test/e2e/specs'`) |
+| **specs present, `characterSpecFactory.ts` absent** | **warns twice, prints the full table, prints a verdict — "13 spec(s) below threshold"** |
+
+```
+[audit] WARNING: could not read the checkpoint list … Falling back to [3, 5, 11, 17, 20].
+[audit]          Coverage below may be WRONG.
+  …full table, every row badged…
+  13 spec(s) below threshold.
+```
+
+The crash case is safe — loud, and it stops. The middle case is the dangerous
+one, and note **what** it falls back to: the hardcoded `[3, 5, 11, 17, 20]`,
+i.e. exactly the constant root cause 4 establishes is the wrong model for
+multiclass specs. A partial materialisation therefore substitutes a known-wrong
+checkpoint list and reports a verdict on it. Same family as a `✓ FULL` badge
+over 168% — every failure mode of this tool is *legible but non-blocking*.
+
+> **Corollary for reviewers, learned the expensive way this batch.** Running a
+> fetched copy of this script against your own working tree produces a **hybrid
+> corresponding to no tree that has ever existed** — trunk's instrument over
+> stale specs. The `shadow-sorcery-rhw` session got `14 rows / max 174%` that way
+> and was one message from filing it as a falsification of the true `11 / 168`.
+> To reproduce another session's tooling measurement, materialise their **whole**
+> tree, and read the warning line before the table.
+
+### The strongest evidence for the inversion is a natural experiment, not the synthetic one
+
+The `- skipReasonCount` deletion (11 rows → 3) is a *synthetic* demonstration:
+the instrument was edited to produce it. A cleaner one arrived by accident. The
+hybrid tree above differs from trunk largely by **merged skip-lifting work**, so
+the same unmodified script over the same rows shows coverage *falling* as skips
+are genuinely fixed:
+
+| spec | stale tree | trunk | skips |
+|---|---|---|---|
+| `tgtt-lust-cleric-lexalian` | **131% ✓ FULL** | **62% ⚠ LOW** | 26 → 8 |
+| `tgtt-child-of-sun-sorcerer-hochling` | 174% | 105% | 19 → 6 |
+| `tgtt-hunter-zodiac-centaur` | 102% | 85% | 32 → 23 |
+| `tgtt-surrealism-bard-yuanti` | 110% | 90% | 16 → 12 |
+
+Lust-cleric is demoted **FULL → LOW by a 69-point fall caused entirely by fixing
+18 real skips.** Nobody touched the instrument; the drop was produced by merged
+work, in the direction that punishes it. That is stronger than the deletion
+experiment precisely because it cannot be attributed to the edit.
 
 ### Why widening the window is the wrong fix
 
