@@ -3778,15 +3778,39 @@ own documentation) caught *before* shipping rather than after.
 
 ---
 
-## CS-BUG-104 — TGTT Cleric domains re-grant a feature the XPHB base class already gave, so it renders twice
+## CS-BUG-104 — `Blessed Strikes` grants BOTH of its two options, so every 2024 Cleric carries two inert rows — and a TGTT domain makes one of them a visible duplicate
 
 **Status:** Open — display-only, mechanically single. Low severity, filed
 because it is reproducible and player-visible.
 
-The 2024 (XPHB) Cleric grants **Divine Strike / Potent Spellcasting at level
-7** as a *base class* feature. The TGTT homebrew domains were written against
-the 2014 model, where the *domain* grants it at level 8. Both fire, so the
-feature is listed twice on the Features tab.
+**Root cause (measured; this corrects the original filing, which blamed the
+TGTT domains).** `Blessed Strikes` (Cleric, XPHB, level 7) is a *choose-one*
+feature. Its data encodes the two options as `refClassFeature` references:
+
+```
+data/class/class-cleric.json — Blessed Strikes|Cleric|XPHB|7
+  "You gain one of the following options of your choice (if you get either
+   option from a Cleric subclass in an older book, use only the option you
+   choose for this feature)."
+     → refClassFeature  Divine Strike|Cleric|XPHB|7
+     → refClassFeature  Potent Spellcasting|Cleric|XPHB|7
+```
+
+The sheet materialises **both** referenced options as granted features. So
+*every* 2024 Cleric shows three rows at level 7 — `Blessed Strikes`, `Divine
+Strike`, and `Potent Spellcasting` — where the rules grant one. Confirmed on
+two unrelated domains, with no choice pending:
+
+```
+cleric/life domain/7       → Blessed Strikes, Divine Strike, Potent Spellcasting
+cleric/knowledge domain/7  → Blessed Strikes, Divine Strike, Potent Spellcasting
+                             getPendingFeatureChoices() = 0 in both
+```
+
+The parenthetical in the official text is precisely the interaction that then
+goes wrong: a TGTT domain grants its own same-named feature at level 8, and
+because the level-7 option was never narrowed to one, the name now appears
+twice.
 
 Measured live through the spawner (`getFeatures()`, fields as returned):
 
@@ -3807,15 +3831,84 @@ severity and the half a data grep cannot answer:
 
 ```
 cleric/time domain/8   wisMod=5  potentSpellcastingBonus=5   (not 10)
-cleric/blood domain/8            divineStrike="1d8"          (not 2d8)
+cleric/blood domain/8            divineStrikeDamage="1d8"    (not 2d8)
 ```
 
-The calc keys are written by assignment (`calculations.x = …`), which is
-idempotent, so the second grant overwrites rather than accumulates. Cosmetic,
-not a rules violation.
+**Correction to the mechanism originally given here.** This entry previously
+explained the single value by saying `calculations.x = …` is an assignment and
+therefore idempotent, so the second grant overwrites the first. That is true of
+assignment in general but is *not* what is happening. The level-7 rows assign
+nothing at all — there is never a second write to be idempotent about:
 
-**Scope:** TGTT domains only. Non-TGTT domains are clean, because they inherit
-the XPHB grant alone.
+```
+cleric/life domain/7  → blessedStrikesDamage="1d8"          ← only key set
+                        (no divineStrike*, no potentSpellcasting*)
+cleric/life domain/8  → + divineStrikeDamage, divineStrikeType, hasDivineStrike
+cleric/time domain/8  → + hasPotentSpellcasting, potentSpellcastingBonus=5
+```
+
+So the level-7 `Divine Strike` / `Potent Spellcasting` rows are **inert
+display rows**; the mechanics come entirely from the level-8 subclass grant.
+Cosmetic, not a rules violation.
+
+**Scope — enumerated, not inferred.** Two separate enumerations, both total
+over the content this repo loads:
+
+*Which features can collide at all.* Every `classFeature` in
+`data/class/class-*.json` (all sources, 283 XPHB entries among them) compared
+against all 224 TGTT `subclassFeature` entries, matched on `(className, name)`.
+`homebrew/TravelersGuidetoThelemar.json` is the only homebrew file in the repo
+that defines `subclassFeature` at all, so this pair is exhaustive.
+
+```
+TOTAL COLLIDING (class, featureName) PAIRS: 2
+  Cleric  Divine Strike        XPHB base L7  ↔  TGTT L8
+  Cleric  Potent Spellcasting  XPHB base L7  ↔  TGTT L8
+```
+
+**No other class is affected — zero collisions outside Cleric.**
+
+*Which domains.* 6 of the 8 TGTT-source Cleric domains:
+
+```
+AFFECTED  Blood   → Divine Strike        (confirmed live)
+          Time    → Potent Spellcasting  (confirmed live)
+          Beauty, Darkness, Lust, Madness → Potent Spellcasting
+                                            (data-enumerated, not spawned)
+CLEAN     Light, None
+```
+
+The other TGTT Cleric subclasses — 16 `TGTT-2014`, 2 `TGTT-2024`, 3 `TGTT-AR`
+— are clean; they carry no same-named level-8 grant and inherit the level-7
+rows alone. This is why `cleric/life domain/8` (`TGTT-2024`) and
+`cleric/knowledge domain/8` (`TGTT-2014`) show no duplicate even though both
+*do* set `divineStrike*` calc keys.
+
+**The blast radius is one feature, and that was measured rather than assumed.**
+249 features across the class data use `refClassFeature`/`refSubclassFeature`,
+so the obvious inference is that the whole mechanism is broken. It is not — in
+almost all of those the references are a *grant list* (a subclass header naming
+the features it gives), where materialising every reference is correct. The
+failure is specific to the *choose-one* usage, and of the four 2024 choose-one
+class features, three resolve correctly:
+
+```
+Divine Order    (Cleric XPHB L1)  → Divine Order + Protector           ← one option  OK
+Primal Order    (Druid  XPHB L1)  → Primal Order + Warden              ← one option  OK
+Elemental Fury  (Druid  XPHB L7)  → Elemental Fury + Potent Spellcasting ← one option OK
+Blessed Strikes (Cleric XPHB L7)  → Blessed Strikes + Divine Strike
+                                                   + Potent Spellcasting ← BOTH    BUG
+```
+
+`Blessed Strikes` is the lone outlier, which is what makes this a bug rather
+than a missing capability: the surrounding machinery demonstrably can narrow a
+choose-one feature to one option.
+
+**Adjacent, unfiled, no id requested.** Life Domain sets `divineStrikeType`
+while Blood Domain sets `divineStrikeDamageType` — two key names for one
+concept, so at most one of them can be the key any reader consumes. Noticed
+while measuring the above; not investigated, and deliberately not filed on a
+single observation.
 
 **Surface observed on: the LIVE SHEET in a real browser**, via a Playwright
 probe — not Jest, and not a grep. Exact reproduction:
@@ -3837,13 +3930,35 @@ empty array — no data load — so filtering it for a feature name yields nothi
 and *any* Jest-based observation of this bug is vacuous by construction. The
 browser is the only surface on which it is visible at all.
 
-**Provenance, and a correction to how this was first reported.** It was
-originally raised as *"Potent Spellcasting appears twice at L8 and L18"*. The
-levels were wrong (they are 7 and 8) and the scope was too narrow (Divine
-Strike is affected identically). A data enumeration then found all 11
+**Provenance — this entry has now been wrong twice, in opposite directions.**
+
+It was originally raised as *"Potent Spellcasting appears twice at L8 and
+L18"*. The levels were wrong (they are 7 and 8) and the scope was too narrow
+(Divine Strike is affected identically). A data enumeration then found all 11
 occurrences of Potent Spellcasting at level 8 and none at 18, which correctly
 refuted the claim *as stated* — but the second source is the XPHB **base
-class**, not a domain, so it was outside the files searched. A first live
-probe also came back clean because it spawned `cleric//18`, and the auto-picker
-chose Order Domain — a non-TGTT domain, which is exactly the case that does not
-reproduce. The bug only appears when a **TGTT** domain is chosen explicitly.
+class**, not a domain, so it was outside the files searched. A first live probe
+also came back clean because it spawned `cleric//18`, and the auto-picker chose
+Order Domain — a non-TGTT domain, which is exactly the case that does not
+reproduce.
+
+Two lessons, both paid for:
+
+1. **A garbled bug report can still be a true bug report.** The reporter's
+   *explanation* ("L8 and L18") was refutable and was refuted; the
+   *observation* ("two rows on the screen") was never investigated. When a
+   mechanism is wrong but someone claims to have seen something, the question
+   is "what would produce this observation?", not "is this explanation sound?"
+2. **A probe that cannot fail for the right reason proves nothing.** Spawning
+   `cleric//18` let the auto-picker choose the variable that selects the bug.
+   Pin every choice that matters.
+
+The second correction is to this entry's own first version, which named the
+TGTT domains as the cause and asserted `**Scope:** TGTT domains only` — an
+exhaustive-sounding claim made from exactly two measurements. Enumerating it
+properly moved the cause upstream to `Blessed Strikes`, showed that the
+level-7 rows are inert rather than overwritten, and showed the affected set is
+6 named domains and **no other class at all**. The original scope sentence
+happened to be directionally right, which is the reason it survived review:
+an unenumerated claim that is accidentally true reads exactly like a measured
+one.
