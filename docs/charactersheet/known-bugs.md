@@ -3516,3 +3516,42 @@ reads the rendered sheet), Eyes of the Future Past uses
 
 **Detection is mechanical and worth automating:** any `calculations.<key> =`
 whose key appears exactly once across `js/` is write-only by construction.
+
+### Follow-up — the blanker is now pinned, not trusted
+
+`scripts/auditE2eCoverage.mjs` self-checks its own comment blanker. Every
+detector in that script reads `blankComments(src)`, so a desynchronised
+blanker corrupts all of them simultaneously — and in the direction that is
+hardest to notice: comment prose **leaks into the code view and manufactures
+false positives**, rather than losing real code.
+
+The blanker had already shipped two bugs (it did not recognise regex
+literals, so an apostrophe in `/gambler's folly/i` opened a phantom string
+that swallowed the remainder of the file's comments). Both ran clean before
+and after the fix; only a deliberately planted instance separated them.
+
+Invariant: after blanking, no `//` may survive outside a string literal.
+Measured both directions rather than assumed —
+
+| blanker | leaks |
+|---|---|
+| shipped | **0** across all 54 specs |
+| regex branch disabled | **274** across 14 specs |
+
+`--strict` now exits 1 on any leak.
+
+Two negative results worth not re-deriving:
+
+- Quoted `//` is legitimate and is excluded. `spawn.spec.ts` writes
+  `"rogue//1/halfling"` for an empty subclass slot; the naive form of this
+  invariant has three standing false positives for that reason.
+- **The first invariant I wrote could never fire.** It asserted that real
+  `kind:` tokens survive blanking — but a phantom string makes the scanner
+  *skip* text rather than blank it, so the failure direction is leakage, not
+  loss. It ran green against a deliberately broken blanker. Recorded so
+  nobody rebuilds the version that cannot fail.
+
+The blast radius of the original bug is **13 specs** measured behaviourally
+(fixed and broken blankers disagree), not the 7 found by pattern-matching
+apostrophes-in-regexes nor the 17 matched by a looser grep — that looser
+pattern also matches `//` comment openings, which are not instances.

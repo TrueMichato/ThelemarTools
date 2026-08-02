@@ -11,6 +11,11 @@
 // comments are flagged as warnings (advisory — does not exit non-zero by
 // default; pass `--strict` to exit 1 on any warning).
 //
+// It SELF-CHECKS its own comment blanker (see `findCommentLeaks`), because
+// every detector below reads the blanked source and a desynchronised blanker
+// corrupts all of them at once, in the direction that manufactures false
+// positives rather than losing code.
+//
 // It also reports four classes of PREDETERMINED-OUTCOME PROBE — assertions
 // whose result is fixed by the harness's own shape, independent of any
 // product behaviour. All four have shipped here, and every one of them read
@@ -683,6 +688,7 @@ function auditSpec (specPath) {
 	const unreachablePicks = findUnreachablePicks(src);
 	const vacuousSpellMatches = findVacuousSpellMatches(src);
 	const unmatchableResources = findUnmatchableResourceNames(src);
+	const commentLeaks = findCommentLeaks(src);
 	const siblingCovered = rowClasses.siblingCovered;
 	// `reasonCount` is deliberately NOT added. An explanatory comment
 	// records that a gap is KNOWN; it does not make the feature verified.
@@ -713,9 +719,52 @@ function auditSpec (specPath) {
 		unreachablePicks,
 		vacuousSpellMatches,
 		unmatchableResources,
+		commentLeaks,
 		coverage,
 		status,
 	};
+}
+
+/**
+ * SELF-CHECK ON THE BLANKER ITSELF.
+ *
+ * Every detector in this file reads `blankComments(src)`, so a desynchronised
+ * blanker silently corrupts ALL of them at once — and does it in the direction
+ * that is hardest to notice: comment prose leaks into the "code" view and
+ * manufactures FALSE POSITIVES, rather than losing real code.
+ *
+ * That is not hypothetical. The blanker has already shipped two bugs (it did
+ * not recognise regex literals, so an apostrophe inside `/gambler's folly/i`
+ * opened a phantom string that swallowed the rest of the file's comments).
+ * Both ran clean before and after; only a deliberately planted instance
+ * separated them. A guard never observed firing is indistinguishable from a
+ * guard that cannot fire, so the blanker is now PINNED rather than trusted.
+ *
+ * The invariant: after blanking, no `//` may survive OUTSIDE a string literal.
+ * Quoted `//` is legitimate and excluded — `spawn.spec.ts` uses "rogue//1" to
+ * mean an empty subclass slot, which is why the naive form of this check has
+ * three standing false positives and this form has none.
+ *
+ * Measured both directions rather than assumed:
+ *   fixed blanker  →   0 leaks across all 54 specs
+ *   regex branch disabled → 274 leaks across 14 specs
+ *
+ * NOTE the first attempt at this invariant asserted that real `kind:` tokens
+ * survive blanking. It could never fire, because a phantom string makes the
+ * scanner SKIP text rather than blank it — the failure direction is leakage,
+ * not loss. It is recorded here so nobody rebuilds the version that cannot
+ * fail.
+ */
+function findCommentLeaks (rawSrc) {
+	const blanked = blankComments(rawSrc);
+	const out = [];
+	blanked.split("\n").forEach((line, i) => {
+		const unquoted = line
+			.replace(/"(?:[^"\\]|\\.)*"/g, "")
+			.replace(/'(?:[^'\\]|\\.)*'/g, "");
+		if (/\/\/[^\n]*\S/.test(unquoted)) out.push({line: i + 1, text: line.trim().slice(0, 80)});
+	});
+	return out;
 }
 
 function main () {
@@ -835,7 +884,19 @@ function main () {
 		log(``);
 	}
 
-	if (STRICT && (warnings > 0 || totalInertProbes > 0 || totalUnreachable > 0 || totalVacuous > 0 || totalUnmatch > 0)) process.exit(1);
+	const leakSpecs = results.filter(r => r.commentLeaks.length);
+	const totalLeaks = results.reduce((a, r) => a + r.commentLeaks.length, 0);
+	if (leakSpecs.length) {
+		log(`  \u26a0 BLANKER DESYNC — comment text leaked into the code view:`);
+		for (const r of leakSpecs) {
+			for (const row of r.commentLeaks.slice(0, 5)) log(`      ${padR(r.fileName, 46)} :${row.line}  ${row.text}`);
+		}
+		log(`  ${totalLeaks} leak(s). EVERY detector above reads the blanked source, so`);
+		log(`  treat their output as unreliable until this is zero.`);
+		log(``);
+	}
+
+	if (STRICT && (totalLeaks > 0 || warnings > 0 || totalInertProbes > 0 || totalUnreachable > 0 || totalVacuous > 0 || totalUnmatch > 0)) process.exit(1);
 }
 
 main();
