@@ -919,14 +919,39 @@ no structured `resources` payload, and the text-parser
 
 ### CS-BUG-013 — TGTT The Horror Warlock pact-magic slots not registered
 
-**Status**: Stale (Wave 1 triage — closing). Per
-`test-results/exports-for-validation/the-horror-warlock-theocracian/l5-extra-attack-3rd-level-slots-prof-3--passed.json`
-the L5 export now shows `spellcasting.pactSlots = {current: 2, max: 2,
-level: 3}` — the standard XPHB Warlock L5 pact table. The bug
-likely fixed itself in a downstream change to the spellcasting
-pipeline. Builder-side issue at the Spells step is tracked
-separately as **CS-BUG-024**. Re-file a new entry if a regression
-surfaces on a future MEGA run.
+**Status**: **Closed — disproved and its skips retired (CS-BUG-016 sweep).**
+Confirmed independently at L1, not just L5: a freshly-built L1 Horror
+Warlock export carries `spellcasting.pactSlots = {current: 1, max: 1,
+level: 1}`. Pact magic is wired correctly and always was at the levels
+this entry covered.
+
+Two consequences were cleaned up while retiring this entry:
+
+1. The four `kind: "resource"` matrix rows in
+   `tgtt-horror-warlock-theocracian.spec.ts` that looked for a
+   resource-tracker pool named "Pact Magic" were **unsatisfiable
+   regardless of this bug** — pact slots are modelled as spell slots
+   (`spellcasting.pactSlots`), so no such pool is ever created. Measured
+   pool list on that sheet at L1/L2 is `[Magical Cunning, Devastating
+   Strike]`. Same shape as the mercy-monk spec asserting a
+   Debilitation-only feature. Retired; the claim moved to
+   `milestones[*].pactSlots`, which probes the surface that exists.
+2. The `pactSlots` milestone assertions this entry had caused to be
+   dropped are **restored** at L1/3/5/11/17/20 and pass.
+
+**Related harness defect found while closing this** (fixed, not a product
+bug): `CharacterSheetPage.getPactSlots()` scraped
+`.charsheet__pact-slots`, `.charsheet__slot-current`,
+`.charsheet__slot-max` and `.charsheet__pact-level` — **none of which
+exists anywhere in `js/`** (`grep -rl 'charsheet__pact-slots' js/` →
+no matches). The reader could therefore never succeed, and reported
+`level 0`, which is what made pact slots *look* unregistered. It now
+reads `_state.getPactSlots()` (`charactersheet-state.js:13763`). This is
+the same "probe that cannot pass for a legitimate product state" class as
+CS-BUG-016 itself.
+
+Builder-side issue at the Spells step remains tracked separately as
+**CS-BUG-024**. Re-file a new entry if a regression surfaces.
 
 ---
 
