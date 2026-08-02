@@ -4406,25 +4406,38 @@ The official text names this exact interaction: *"if you get either option from
 a Cleric subclass in an older book, use only the option you choose for this
 feature."*
 
-**Not the parser.** `_extractStructuredChoices` (`charactersheet-state.js:768`)
+**Not the parser.** `_extractStructuredChoices` (`charactersheet-state.js:790`)
 documents two encodings and names Blessed Strikes explicitly as the second
 (*"a bare `{type:"entries", entries:[refClassFeature, refClassFeature]}` block
 … no `options` wrapper"*). It handles it correctly. A reader sent to
 `FeatureChoiceParser` will find working code.
 
 **The defect is a reader/writer drift between the parser and the grant site.**
-`charactersheet-class-utils.js:3319-3345` extracts `refClassFeature` sub-entries
+`charactersheet-class-utils.js:3386-3412` extracts `refClassFeature` sub-entries
 as *automatic grants* — the loop exists for Ki / Monk's Focus, where every ref
 genuinely is granted — and guards against player choices with a single test:
 
 ```js
-// :3315  IMPORTANT: Skip "options" type entries — those are player choices …
-if (entry.type === "options") continue;              // :3323 — the whole guard
+// :3379  IMPORTANT: Skip "options" type entries — those are player choices …
+if (entry.type === "options") continue;              // :3391 — the whole guard
 …
-extracted.push({name: refName, …, parentFeature: feature.name});   // :3340
+extracted.push({name: refName, …, parentFeature: feature.name});   // :3401
 ```
 
-| encoding | parser (`state.js:768`, since `9a03a9f8`) | grant site (`:3323`) |
+> **Line numbers here were re-derived on 2026-08-02 and WILL drift again.** The
+> previous set was stale by **+61 to +68** — *not a constant offset*, so they
+> cannot be repaired by adding a delta; each must be re-derived. Roughly a dozen
+> sessions edit this file concurrently, and an unrelated 32-line insertion above
+> the block moved every citation at once. Re-derive with:
+>
+> ```sh
+> grep -n 'IMPORTANT: Skip\|entry.type === "options") continue\|extracted.push' \
+>   js/charactersheet/charactersheet-class-utils.js
+> ```
+>
+> The quoted code above is the stable handle; the numbers are a convenience.
+
+| encoding | parser (`state.js:790`, since `9a03a9f8`) | grant site (`:3391`) |
 |---|---|---|
 | 1. `{type:"options", count, entries:[…]}` | handled | **skipped** ✅ |
 | 2. bare `{type:"entries", entries:[ref, ref]}` + "one of the following" prose | handled | **not skipped** 🔴 |
@@ -4432,7 +4445,7 @@ extracted.push({name: refName, …, parentFeature: feature.name});   // :3340
 The parser learned encoding 2 on 2026-07-03; the grant site still knows only
 encoding 1, so a Blessed Strikes falls through to the automatic-grant loop and
 both refs are pushed with `parentFeature: "Blessed Strikes"` — exactly the
-`_data.features` shape above. The comment at `:3315` states the intent is to
+`_data.features` shape above. The comment at `:3379` states the intent is to
 *skip player choices*, so this is an incomplete encoding check rather than a
 design decision.
 
@@ -4519,7 +4532,7 @@ parser's own predicate (recursive; bare un-named `entries` block, ≥2 refs,
 prose matching `/one of the following|choose one/i`):
 
 ```
-ENCODING 2 — falls through :3323          2 features, BOTH measured live
+ENCODING 2 — falls through :3391          2 features, BOTH measured live
   Blessed Strikes   Cleric XPHB L7   count=1  refs=2   → 2 rows   🔴 BUG
   Cunning Strike    Rogue  XPHB L5   count=1  refs=3   → 3 rows   ✅ benign
 
@@ -4535,18 +4548,68 @@ measured, **none unmeasured**.
 **🔴 The second member is why the obvious fix is wrong.** Cunning Strike hits
 the same unguarded path and is *display-correct anyway*: XPHB grants a Rogue
 all three effects (Poison / Trip / Withdraw) and picks between them **at use
-time**, so three rows is right. Its `_data.chosenSubfeatures` records three and
-`_data.features` holds three — consistent, measured on `rogue/thief/5`. The
-prose test is a false positive there: "one of the following" describes an
-at-use menu, not a level-up pick.
+time**, so three rows is right. The prose test is a false positive there: "one
+of the following" describes an at-use menu, not a level-up pick.
 
-So teaching `:3323` the parser's bare-sibling predicate — the natural fix, and
+> **🔴 RETRACTED EVIDENCE — the "3 recorded / 3 materialised, consistent on
+> `rogue/thief/5`" measurement that previously appeared here is CIRCULAR and
+> must not be cited.** The record is *downstream of* the materialisation, so the
+> two counts cannot disagree and their agreement corroborates nothing.
+>
+> Mechanism, verified in trunk: the extractor stamps every row it creates with
+> `parentFeature: feature.name` (`charactersheet-class-utils.js:3408`), and
+> branch **(b)** of the choice seeder (`:3162-3183`) then selects on exactly that
+> field — `String(f?.parentFeature||"").toLowerCase() === String(feature.name||"").toLowerCase()`
+> at `:3167-3169` — and calls `_recordChosenSubfeature` once per match (`:3172`).
+> Whatever materialises, records.
+>
+> It also explains **both** members, which is what makes it the real path rather
+> than a plausible one:
+>
+> | | (a) already-resolved guard `:3159` | (b) records from `_data.features` | counts |
+> |---|---|---|---|
+> | Blessed Strikes | **fires** — a real level-up choice exists | never reached | 1 rec / 2 mat → **genuine disagreement** |
+> | Cunning Strike | doesn't fire — no level-up choice | **fires**, records all 3 | 3 / 3 → **manufactured agreement** |
+>
+> So the Blessed Strikes finding is *strengthened*: its record is independent and
+> still disagrees. Only the Cunning Strike corroboration dies. **The sound basis
+> for "Cunning Strike is correct" is the rules text alone** — which is
+> independently true, so the conclusion stands; the evidence for it does not.
+>
+> This also kills a fix shape that looks obvious: *"filter the extracted rows
+> against `chosenSubfeatures`"* is circular by the above, and separately dead
+> because `getLevelFeatures` is called from `charactersheet-levelup.js:96/497/4415`
+> to compute **what the new level grants** — i.e. it runs *before* that level's
+> choice exists. The boundary the verdict must cross is **temporal**, not just
+> structural.
+>
+> And it answers the question this entry previously left open. *"Whether the
+> three rows survive via the choice-seeding path instead"* was malformed:
+> seeding does not keep rows alive, it **records rows materialisation already
+> produced**. Suppress the materialisation and there is nothing for branch (b) to
+> record.
+
+So teaching `:3391` the parser's bare-sibling predicate — the natural fix, and
 the one a reader will reach for first — would skip Cunning Strike too and risks
-trading a visible Cleric bug for a visible Rogue one. **Whether the three rows
-survive via the choice-seeding path instead was NOT measured**; that is the
-first thing to establish before touching `:3323`. The distinction the guard
-actually needs is *learn-one* vs *use-one*, which neither site currently
-encodes, and with n=2 both members must be re-measured after any change.
+trading a visible Cleric bug for a visible Rogue one. The distinction the guard
+actually needs is *learn-one* vs *use-one*, and with n=2 both members must be
+re-measured after any change.
+
+**A prose discriminator does exist** — an earlier revision of this entry claimed
+no shape-based rule could work, which is too strong:
+
+```
+Blessed Strikes  "You GAIN one of the following options OF YOUR CHOICE …"   learn-one
+Cunning Strike   "WHEN you deal Sneak Attack damage, you CAN ADD one of …"  use-one
+```
+
+Gain-clause vs trigger-clause. The parser matches both only because
+`/one of the following|choose one/i` tests the wrong half of the sentence. The
+argument against shipping such a rule is therefore **not** impossibility but
+sample size: a regex tuned on n=2 is a structural claim drawn from two examples.
+Stated this way because "a discriminator exists; the question is prose-matching
+vs plumbing the verdict through" invites a different decision than "shape cannot
+work."
 
 **Adjacent, unfiled, no id requested.** Life Domain sets `divineStrikeType`
 while Blood Domain sets `divineStrikeDamageType` — two key names for one
@@ -4642,7 +4705,7 @@ therefore "materialises both" was refuted. But this version of the entry *says*
 ***resolved*** choice materialises both. The challenge was aimed at a summary
 of the entry from which the word "resolved" had dropped, and the summary was
 never checked against the entry. Retracted in full by its author within
-minutes, who then located `class-utils.js:3323` — the finding this entry had
+minutes, who then located `class-utils.js:3391` — the finding this entry had
 marked *not located*.
 
 5. **A summary that drops one qualifier turns a correct claim into a
@@ -4818,7 +4881,7 @@ for the bug itself. Falsifying it required the second break above.
 
 **Status:** Open. Partially addressed — `913600e4` widened the offending
 windows that existed at the time and added `scripts/auditE2eCoverage.mjs`. The
-underlying hole is still open, and **12 rows are inert at `fae134bb`**.
+underlying hole is still open, and **13 rows are inert** — measured at `fae134bb`, re-measured at `380389fb`, unchanged (count corrected from 12; see Root cause 1).
 
 **Affects:** `test/e2e/utils/characterSpecFactory.ts` (the MEGA and matrix
 loops) and `scripts/auditE2eCoverage.mjs` (the detector).
@@ -4866,12 +4929,49 @@ worse than no detector, because the badge actively discourages a second look.
 
 ### Root cause — two independent ones
 
-**1. `findInertRows()` scans spec source text, but 11 of the 12 rows do not
+**1. `findInertRows()` scans spec source text, but 12 of the 13 rows do not
 exist in spec source.** They are emitted at runtime by `buildCombatMethodChecks`
 (`test/e2e/utils/tgttFeaturePools.ts:1420`/`:1431`). A lexical scan of
 `test/e2e/specs/*.ts` is structurally incapable of seeing a row a helper
 returns. This is the same class of error already recorded in CS-BUG-087's notes:
 **a regex scan over source is not an enumeration.**
+
+> **Count corrected 12 → 13 (2026-08-02, still reproducing at `380389fb`).**
+> Both earlier figures were derived by reading, and both missed the same row: the
+> **capped multiclass leg** `buildCombatMethodChecks("Ranger", {subclassName:
+> "Hunter", maxClassLevel: 6})` at `tgtt-hunter-zodiac-centaur.spec.ts:271` emits
+> its own inert `L2..2`, distinct from the uncapped call at `:45`. A second call
+> to the same helper in the same file is exactly what a by-eye pass elides.
+>
+> Enumerated at **runtime** — the only instrument that can see these rows at all,
+> which is root cause 1 restated as a method:
+>
+> ```ts
+> // npx tsx ./probe.mts, run IN-TREE (imports resolve from file location)
+> import {buildCombatMethodChecks} from "./test/e2e/utils/tgttFeaturePools.js";
+> const CP = [3, 5, 11, 17, 20];
+> for (const r of buildCombatMethodChecks("Ranger", {subclassName: "Hunter"}))
+>     if (!CP.some(c => c >= r.level && c <= (r.untilLevel ?? 20))) console.log(r.level, r.untilLevel);
+> ```
+>
+> | call site | rows | inert |
+> |---|---|---|
+> | `buildCombatMethodChecks("Monk", {subclassName: "Astral Self"})` | 10 | **5** — L2..2, L6..7, L8..9, L13..14, L15..16 |
+> | `buildCombatMethodChecks("Ranger", {subclassName: "Hunter"})` | 12 | **6** — L2..2, L6..6, L7..8, L9..10, L13..14, L15..16 |
+> | `…{maxClassLevel: 6}` (`:271`, the missed one) | 5 | **1** — L2..2 |
+> | Meteor Knight `L13..16` (hand-written, self-documented) | — | 1 |
+> | | | **13** |
+>
+> The gate is `comprehensiveBuildHelpers.ts:2311`
+> (`if (fc.untilLevel != null && currentLevel > fc.untilLevel) continue;`), so an
+> `untilLevel`-less row is unbounded above and only *windowed* rows can be inert.
+>
+> **And `RUN_MEGA` does not rescue what `RUN_MATRIX` misses.** Both loops declare
+> the same list independently — `characterSpecFactory.ts:366` and `:393` each read
+> `const checkpoints = [3, 5, 11, 17, 20]`. Worth stating because "the mega test
+> walks 1→20" is the natural assumption from its name, and it is false: it walks
+> five stops. The duplicated literal is also why any rescue mechanism has to
+> change two sites, not one.
 
 **2. The regex is `/\{\s*level:\s*(\d+)/`, so a comment between `{` and
 `level:` blinds it.** That is precisely what a careful author writes on a row
@@ -5027,8 +5127,13 @@ neither fix reached.
 let saveDC = 8 + spellcastingMod + profBonus - exhaustionDcPenalty;
 ```
 
-with (`:3847`, `:3856`) `profBonus = this._state.getProficiencyBonus()` and
-`spellcastingMod = this._state.getAbilityMod(castingAbility)` — both raw. Only
+with (`:3847`, `:3856`) `profBonus = this._state.getProficiencyBonus()` raw, and
+`spellcastingMod` assigned **conditionally** — `= rollTotal`, a fresh per-cast die,
+in the Gambler branch (`:3858-3861`), and `= this._state.getAbilityMod(castingAbility)`
+only in the `else` (`:3867`). *(An earlier revision of this entry cited the `else`
+branch alone and called it "raw", which read as though the ability modifier were the
+only possible value. It is not, and that omission is load-bearing — see* **Why the
+accessor needed a parameter** *below.)* Only
 the variant-component modifier is added afterwards (`:3911`). It never consults
 `customModifiers.spellDc`, `itemBonuses.spellSaveDc`, or
 `getBonusFromStates("spellDc")`.
@@ -5059,11 +5164,28 @@ plain published magic items are affected with no homebrew involved — Rod of th
 Pact Keeper, Robe of the Archmagi, and anything else writing
 `itemBonuses.spellSaveDc`.
 
-**Suggested fix.** Do not add three more terms at `:3906` — that would be a
-*fourth* hand-rolled formula. Route it through the same state chokepoint the
-other two now use (`getSpellSaveDcForAbility()` / `getSpellSaveDC()`), then add
-the variant-component modifier on top, and update the `_rollMeta.dc.breakdown`
-string so the printed derivation matches the printed total.
+**Suggested fix (historical — written before the fix; ⚠️ INCOMPLETE, superseded
+by *Fix as landed* below. Kept because a reviewer implemented it literally and the
+result is instructive; do not follow it in isolation).** Do not add three more terms
+at `:3906` — that would be a *fourth* hand-rolled formula. Route it through the same
+state chokepoint the other two now use (`getSpellSaveDcForAbility()` /
+`getSpellSaveDC()`), then add the variant-component modifier on top, and update the
+`_rollMeta.dc.breakdown` string so the printed derivation matches the printed total.
+
+> **What this wording omits.** A bare `getSpellSaveDcForAbility(ability)` call uses
+> `getAbilityMod(ability)`, which on the Gambler path **replaces a rolled die with a
+> static modifier** — deleting that feature's mechanic on the only code path that
+> implements it, and printing a self-contradicting `Save DC: 15 (🎲 1d8: 6)` because
+> the roll badge at `:3922` survives independently. The landed fix therefore added
+> `opts.abilityModOverride`. A second reader also derived a double-subtracted
+> exhaustion term from this wording; that one the wording happens to avoid, but only
+> because `exhaustionDcPenalty` stays live in scope at `:3848` and is re-interpolated
+> into the breakdown at `:3925`, so an incremental patch can reintroduce it. Both are
+> now pinned.
+>
+> Corrected instruction, for anyone re-deriving this: *route the **value** through the
+> chokepoint, pass the rolled modifier in via `abilityModOverride`, and leave the local
+> exhaustion variable to the breakdown string alone.*
 
 **Note for whoever fixes it:** pin the **printed / roll-log reading**, not the
 formula. The first CS-BUG-102 pin asserted `8 + mod + prof + stateBonus` by
@@ -5121,3 +5243,46 @@ other assertions are not comparing `null` to `null`) and the no-bonus baseline
 second break leaves the Gambler bonus-stacking row green because that row
 measures a *delta*, which the override does not change; the row it does move is
 the one that pins the substitution itself.
+
+### The two traps in the obvious repair
+
+A reviewing session, reading only the *plan* ("route `:3906` through the shared
+chokepoint"), independently derived two ways that instruction ships green while
+being wrong. Both are avoided in the landed fix, but the plan as worded does not
+say so, and the literal reading of it produces both. Recorded here because the
+next person to touch this line will read the sentence, not the diff.
+
+**Trap 1 — exhaustion subtracted twice.** `exhaustionDcPenalty` exists on *both*
+sides. `getSpellSaveDcForAbility` already subtracts it
+(`charactersheet-state.js:13172` / `:13180`), and the cast site still reads it
+locally. A route-through that keeps the local term *in the value* penalises an
+exhausted caster twice. Only a **Thelemar-rules** exhausted caster can reach it,
+so it fails no other configuration. The landed fix keeps the local variable for
+the *breakdown string only* and derives the residual by subtraction
+(`dcOtherBonuses`), so the value passes through the chokepoint exactly once.
+
+**Trap 2 — Gambler spellcasting flattened.** `charactersheet-spells.js:3861`
+assigns `spellcastingMod = rollTotal` — a fresh die rolled per cast. A bare
+`getSpellSaveDcForAbility(ability)` call uses `getAbilityMod(ability)` and would
+replace the rolled modifier with a static one. That is not a rounding error; it
+deletes the feature's whole mechanic on the only path that implements it. This
+is why `opts.abilityModOverride` exists, and why it overrides **the ability mod
+alone** rather than the DC.
+
+Amended plan wording, for anyone re-deriving this: *add the shared **bonus**
+terms at the cast site by routing the value through the chokepoint, passing the
+rolled modifier in as an override, and leave the local exhaustion variable to the
+breakdown string.*
+
+Trap 1 was correct in the landed code but **unpinned** — the pin had a Gambler
+block and no exhaustion case. Three rows added, and the trap broken in place to
+prove they bite:
+
+| break | predicted | measured |
+|---|---|---|
+| `getSpellSaveDcForAbility(...) - exhaustionDcPenalty` at the cast site | 2 red | **2 red** — `Expected: 12 / Received: 9` and `Expected: 16 / Received: 14` |
+
+The `PREMISE` row (exhaustion actually moves the canonical DC under Thelemar
+rules) stays green by design: it reads the accessor, not the cast output, so it
+proves the fixture reaches the penalty at all rather than comparing an unchanged
+number to itself.

@@ -178,6 +178,43 @@ describe("the cast output prints the same spell save DC as the rest of the sheet
 		expect(logged).toBe(printed);
 	});
 
+	// Exhaustion is the one term that exists on BOTH sides of the repair: the chokepoint
+	// subtracts it (charactersheet-state.js:13180) and the cast site still reads it locally
+	// to build the breakdown string. Routing through the chokepoint while keeping the local
+	// term in the VALUE would subtract it twice — and because only a Thelemar-rules exhausted
+	// caster can reach it, that mistake would ship green. Pinned so it cannot.
+	describe("a Thelemar-rules exhausted caster is penalised exactly once", () => {
+		function makeExhausted (level) {
+			const state = makeSorcerer();
+			state.setExhaustionRules("thelemar");
+			state.setExhaustion(level);
+			return state;
+		}
+
+		it("PREMISE: exhaustion actually moves the canonical DC under Thelemar rules", async () => {
+			// Without this the two assertions below would compare an unchanged number to itself.
+			const plain = makeSorcerer().getSpellSaveDcForAbility("cha");
+			expect(makeExhausted(3).getSpellSaveDcForAbility("cha")).toBe(plain - 3);
+		});
+
+		it("prints the canonical DC, not one with exhaustion double-counted", async () => {
+			const state = makeExhausted(3);
+			const {printed, logged} = await castAndReadDc(state);
+			expect(printed).toBe(state.getSpellSaveDcForAbility("cha"));
+			expect(logged).toBe(printed);
+		});
+
+		it("still layers the three bonus sources on top of the exhaustion penalty", async () => {
+			const state = makeExhausted(2);
+			const before = (await castAndReadDc(state)).printed;
+			state._data.customModifiers.spellDc = 2;
+			state._data.itemBonuses = {...(state._data.itemBonuses || {}), spellSaveDc: 1};
+			const {printed} = await castAndReadDc(state);
+			expect(printed).toBe(before + 3);
+			expect(printed).toBe(state.getSpellSaveDcForAbility("cha"));
+		});
+	});
+
 	// Gambler spellcasting rolls a die in place of the ability modifier, which is why the
 	// cast site cannot simply call the no-argument accessor. The override must replace the
 	// ABILITY MOD ONLY — every other term still applies.
