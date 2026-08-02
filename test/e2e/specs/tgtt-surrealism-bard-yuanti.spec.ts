@@ -44,7 +44,7 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 	// uses = max(1, CHA mod) = 1. Measured: max=1. Same CS-BUG-056 family as
 	// the 11 spellSaveDc floors corrected earlier in this sweep. Widened to
 	// the CHA-independent range the jester spec already uses.
-	{level: 1,  name: /^bardic inspiration/i, kind: "resource",
+	{level: 1,  name: /^bardic inspiration/i, resourceName: "Bardic Inspiration", kind: "resource",
 		resourceMax: [1, 5], restoreOn: "long"},
 	// Bardic Inspiration restores on long rest at L1-4 (PHB-classic),
 	// short rest at L5+ (Font of Inspiration / XPHB).

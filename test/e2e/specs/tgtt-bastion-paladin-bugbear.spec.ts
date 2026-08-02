@@ -121,6 +121,7 @@ describeCharacter({
 		{
 			level: 3,
 			name: /^channel divinity$/i,
+			resourceName: "Channel Divinity",
 			kind: "resource", // CS-BUG-017 is Fixed (Wave 3) — skip lifted.
 			resourceMax: [1, 3],
 			effects: [
