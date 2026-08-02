@@ -3450,6 +3450,94 @@ omitting `ability` passed `undefined` through, those getters answer `0` for
 an unknown ability, and the probe silently became "expected 0" — it could
 never pass for the right reason. It now throws on the authoring mistake
 instead. (Zero live instances; found by making the error myself.)
+---
+
+## CS-BUG-092 — prose that buffs a TARGET was parsed as a buff on the character
+
+**Status:** Fixed.
+**Affects:** every feature whose prose grants a condition-gated save advantage to
+somebody other than the character. The live victim is Granny's Gifts (Wicked
+Witch Sorcerer, *Arcadia* 8 → `TGTT-AR`); the same shape occurs in 5 other places
+in the shipped corpus (see the enumeration below).
+
+### Symptom
+
+`FeatureModifierParser` turns *"advantage on saving throws against being
+charmed"* into an opt-in conditional modifier on the character. The pattern is
+**subject-blind**, so Granny's Gifts —
+
+> …whenever you finish a long rest, you can choose yourself or one creature you
+> can see within 30 feet of you. **The target has advantage on saving throws
+> against being charmed or frightened**…
+
+— registered a permanent charm/fright advantage on the *witch*, regardless of
+whom she actually warded. Measured on `character-sheet-wip` at `911b98ba`, via
+`aggregateModifiers("save:wis").conditionalsAvailable`:
+
+| Ward state | Offered to the witch | Correct |
+|---|---|---|
+| warded nobody | `["against being charmed", "against being frightened"]` | `[]` |
+| warded an **ally** | `["against being charmed", "against being frightened"]` | `[]` |
+| warded **herself** | `["against being charmed", "against being frightened", "against being charmed", "against being frightened"]` | one row each |
+
+So the ward's only cost — giving the benefit away — was silently refunded, and a
+self-ward produced **duplicate** rows in the per-roll conditional picker (once
+from `setGrannysWardTarget()`'s real named modifier, once from the prose).
+
+### Root cause
+
+`conditionGatedSaveRe` matches the phrase, not the sentence's subject. The
+codebase already had one subject-blindness patch on this very regex — the
+`(?<!dis)` lookbehind, which stops *"creatures have **dis**advantage on saving
+throws against being frightened by you"* parsing as a self-buff — but nothing
+covered a third-party **beneficiary**.
+
+### Fix
+
+A generic guard, `FeatureModifierParser.isThirdPartySaveSubject(plainText,
+matchIndex)`, consulted by the condition-gated loop. It bounds the clause at the
+previous `.`/`;`/`:`, strips the `you` mentions that qualify *which* creature is
+picked rather than naming a beneficiary (`you can see`, `you choose`, `within 30
+feet of you`, `of you`…), and suppresses the match only when what remains is a
+third-party subject immediately followed by `has`/`have`.
+
+Deliberately conservative in both directions: any surviving `you`/`your` in the
+clause disables the guard, and the subject must be the *immediate* subject of the
+matched clause, so *"You have advantage … In addition, the target has advantage
+…"* keeps the first and drops the second.
+
+### Blast radius — enumerated, not assumed
+
+Run over every `.json` under `data/` and `homebrew/` with `@tags` stripped:
+**256** condition-gated matches, of which the guard suppresses exactly **6** —
+and all 6 are genuinely third-party:
+
+- `bestiary-mpmm.json`, `bestiary-mtf.json`, `trapshazards.json` — the same wild
+  magic table row, *"**The target** grows another head, causing **it** to have
+  advantage…"*
+- `book-ai.json` ×2 — *"**The creature** has…"* / *"**This creature** has…"*
+- `spells-phb.json` — *"For the duration, **the target** has advantage on saving
+  throws against being poisoned"* (a spell's target)
+
+Zero self-buffs suppressed. Re-derive with the script shape in this entry rather
+than citing the count — the corpus grows.
+
+### Regression pin
+
+`test/jest/charactersheet/CharacterSheetThirdPartySaveProse.test.js` — 20 tests.
+Falsified three ways, each break keeping the signature intact:
+
+| Break | Reds | Sample |
+|---|---|---|
+| `isThirdPartySaveSubject` → always `false` | 10 | `Expected length: 0 / Received array: ["against being charmed", "against being frightened"]` |
+| qualifier-stripping `replace`s neutered | 2 | `Expected: true / Received: false` |
+| subject regex → `return true` | 3 | `Expected: false / Received: true` |
+
+The third break originally produced **zero** reds: every negative control
+short-circuited on the `you` test, so nothing exercised the subject regex on its
+own. Three controls with neither a `you` nor a third-party subject
+(*"Dwarves have advantage…"*, *"Elves have advantage…"*, *"the wearer gains…"*)
+were added to close that hole.
 
 ---
 
