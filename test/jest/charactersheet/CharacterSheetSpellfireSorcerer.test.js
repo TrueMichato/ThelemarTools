@@ -251,7 +251,7 @@ describe("Crown of Spellfire — active state, fly speed, restore cost", () => {
 		expect(state.getSorceryPoints().current).toBe(4); // unspent
 	});
 
-	// CS-BUG-092 regression. Crown's prose says "spend 5 Sorcery Points" (the RESTORE
+	// CS-BUG-094 regression. Crown's prose says "spend 5 Sorcery Points" (the RESTORE
 	// cost). The generic parser turned that into an *activation* cost and, via the
 	// `.includes("sorcery")` resource matcher, bound it to the 2-use "Innate Sorcery"
 	// pool — so the rendered Activate button was permanently disabled (2 < 5) and could

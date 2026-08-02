@@ -48924,7 +48924,7 @@ class CharacterSheetState {
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 		const psionic = this._detectPsionicActivation(feature, rawText, text);
 		if (psionic) return psionic;
-		// (CS-BUG-092) Crown of Spellfire (Spellfire 18) — a free "alter Innate Sorcery"
+		// (CS-BUG-094) Crown of Spellfire (Spellfire 18) — a free "alter Innate Sorcery"
 		// toggle, NOT a resource spender. Its prose mentions "spend 5 Sorcery Points"
 		// (the *restore* cost, handled by restoreCrownOfSpellfire()). Left to the generic
 		// parser, that "5 Sorcery Points" becomes an activation cost AND the `.includes("sorcery")`
