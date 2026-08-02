@@ -1009,6 +1009,57 @@ class FeatureModifierParser {
 	]);
 
 	/**
+	 * Clause subjects that are somebody OTHER than the character whose sheet this is.
+	 *
+	 * A feature that buffs a *different* creature ("whenever you finish a long rest you
+	 * can choose yourself or one creature within 30 feet … **the target has advantage on
+	 * saving throws against being charmed or frightened**") reads, to a subject-blind
+	 * regex, exactly like a self-buff. The sheet models one character, so parsing that
+	 * sentence onto the character is simply wrong: it hands out a benefit that was never
+	 * granted, and — when the feature ALSO registers the real modifier for the self-target
+	 * case — it hands it out twice.
+	 *
+	 * Anchored on a trailing `has`/`have` so it only fires on the immediate subject of the
+	 * matched clause, not on any third-party noun anywhere in the sentence.
+	 *
+	 * Sibling in spirit to the `(?<!dis)` lookbehind below: both exist because the naive
+	 * pattern cannot tell who the sentence is about.
+	 */
+	static THIRD_PARTY_SAVE_SUBJECT_RE = /\b(?:the|that|this|each|one|a|an|chosen)\s+(?:chosen\s+)?(?:target|creature|ally|companion|beast|familiar|steed|mount|summon)\b[^.;]*?\b(?:has|have)\s*$/i;
+
+	/**
+	 * True when the prose match at `matchIndex` belongs to a clause whose subject is a
+	 * third party rather than the character.
+	 *
+	 * The clause is bounded by the previous sentence/semicolon break, so a feature that
+	 * says "You have advantage … In addition, the target has advantage …" is judged one
+	 * sentence at a time. Any mention of `you`/`your` in the clause makes it a self-buff
+	 * (or an inclusive "you or an ally … has advantage") and disables the guard.
+	 *
+	 * @param {string} plainText
+	 * @param {number} matchIndex index of the matched phrase within `plainText`
+	 * @returns {boolean}
+	 */
+	static isThirdPartySaveSubject (plainText, matchIndex) {
+		if (!plainText || !(matchIndex > 0)) return false;
+		const clauseStart = Math.max(
+			plainText.lastIndexOf(".", matchIndex - 1),
+			plainText.lastIndexOf(";", matchIndex - 1),
+			plainText.lastIndexOf(":", matchIndex - 1),
+		) + 1;
+		const clause = plainText.slice(clauseStart, matchIndex).toLowerCase()
+			// Strip the "you" mentions that qualify WHICH creature is picked rather than
+			// naming a beneficiary — "one creature you can see within 30 feet of you has
+			// advantage …" buffs the creature, not you. Without this the guard is defeated
+			// by the most common targeting phrasing in the whole ruleset.
+			.replace(/\byou\s+(?:can\s+(?:see|hear)|choose|are\s+aware\s+of)\b/g, "")
+			.replace(/\b(?:with)?in\s+\d+\s*(?:-|\s)?\s*(?:feet|foot|ft\.?)\s+of\s+you\b/g, "")
+			.replace(/\b(?:of|to|near|from|beside|around)\s+you\b/g, "");
+		if (/\byou\b|\byour\b|\byourself\b/.test(clause)) return false;
+		return FeatureModifierParser.THIRD_PARTY_SAVE_SUBJECT_RE.test(clause);
+	}
+
+	/**
 	 * Parse feature/item text to extract modifiers
 	 * @param {string} text - The feature description text (can include HTML)
 	 * @param {string} sourceName - Name of the feature/item granting the modifier
@@ -1603,6 +1654,9 @@ class FeatureModifierParser {
 		const conditionGatedSaveRe = /(?<!dis)advantage\s+on\s+(?:all\s+)?saving\s+throws?\s+(?:made\s+)?(?:to\s+(?:avoid|resist|end|prevent)\s+(?:being|becoming)|against\s+(?:being|becoming)|to\s+resist\s+becoming)\s+((?:[a-z]+(?:\s*,\s*|\s+or\s+|\s+and\s+))*[a-z]+)/gi;
 		const seenConditionGated = new Set();
 		for (const match of plainText.matchAll(conditionGatedSaveRe)) {
+			// "The target has advantage on saving throws against being charmed" buffs
+			// somebody else, not the character holding this sheet.
+			if (FeatureModifierParser.isThirdPartySaveSubject(plainText, match.index ?? -1)) continue;
 			const named = (match[1] || "").split(/\s*,\s*|\s+or\s+|\s+and\s+/)
 				.map(s => s.trim().toLowerCase())
 				.filter(s => FeatureModifierParser.SAVE_GATING_CONDITIONS.has(s));

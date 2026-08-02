@@ -1137,6 +1137,13 @@ async function _runPassiveOrRollEffect (
 				// "the target catches fire" — a false pass, which is the exact
 				// defect class this fix exists to remove. Add it only for a
 				// shape that demonstrably needs it.
+				//
+				// `desc` itself is retained but is currently DEAD, not load-bearing:
+				// `grep -nE '\bdesc:' js/charactersheet/charactersheet-state.js`
+				// returns zero hits, so no companion shape sets it today. It is
+				// harmless only for that reason. If some future companion starts
+				// populating `desc` with prose, it becomes exactly the false-pass
+				// hazard described above and should be dropped too.
 				const flat = (a: any) => [a?.damage, a?.damageType, a?.desc, ...(Array.isArray(a?.entries) ? a.entries : [a?.entries])].filter(Boolean).join(" ");
 				const out = {
 					err: null as string | null,

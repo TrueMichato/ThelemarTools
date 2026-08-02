@@ -3450,3 +3450,196 @@ omitting `ability` passed `undefined` through, those getters answer `0` for
 an unknown ability, and the probe silently became "expected 0" — it could
 never pass for the right reason. It now throws on the authoring mistake
 instead. (Zero live instances; found by making the error myself.)
+---
+
+## CS-BUG-092 — prose that buffs a TARGET was parsed as a buff on the character
+
+**Status:** Fixed.
+**Affects:** every feature whose prose grants a condition-gated save advantage to
+somebody other than the character. The live victim is Granny's Gifts (Wicked
+Witch Sorcerer, *Arcadia* 8 → `TGTT-AR`); the same shape occurs in 5 other places
+in the shipped corpus (see the enumeration below).
+
+### Symptom
+
+`FeatureModifierParser` turns *"advantage on saving throws against being
+charmed"* into an opt-in conditional modifier on the character. The pattern is
+**subject-blind**, so Granny's Gifts —
+
+> …whenever you finish a long rest, you can choose yourself or one creature you
+> can see within 30 feet of you. **The target has advantage on saving throws
+> against being charmed or frightened**…
+
+— registered a permanent charm/fright advantage on the *witch*, regardless of
+whom she actually warded. Measured on `character-sheet-wip` at `911b98ba`, via
+`aggregateModifiers("save:wis").conditionalsAvailable`:
+
+| Ward state | Offered to the witch | Correct |
+|---|---|---|
+| warded nobody | `["against being charmed", "against being frightened"]` | `[]` |
+| warded an **ally** | `["against being charmed", "against being frightened"]` | `[]` |
+| warded **herself** | `["against being charmed", "against being frightened", "against being charmed", "against being frightened"]` | one row each |
+
+So the ward's only cost — giving the benefit away — was silently refunded, and a
+self-ward produced **duplicate** rows in the per-roll conditional picker (once
+from `setGrannysWardTarget()`'s real named modifier, once from the prose).
+
+### Root cause
+
+`conditionGatedSaveRe` matches the phrase, not the sentence's subject. The
+codebase already had one subject-blindness patch on this very regex — the
+`(?<!dis)` lookbehind, which stops *"creatures have **dis**advantage on saving
+throws against being frightened by you"* parsing as a self-buff — but nothing
+covered a third-party **beneficiary**.
+
+### Fix
+
+A generic guard, `FeatureModifierParser.isThirdPartySaveSubject(plainText,
+matchIndex)`, consulted by the condition-gated loop. It bounds the clause at the
+previous `.`/`;`/`:`, strips the `you` mentions that qualify *which* creature is
+picked rather than naming a beneficiary (`you can see`, `you choose`, `within 30
+feet of you`, `of you`…), and suppresses the match only when what remains is a
+third-party subject immediately followed by `has`/`have`.
+
+Deliberately conservative in both directions: any surviving `you`/`your` in the
+clause disables the guard, and the subject must be the *immediate* subject of the
+matched clause, so *"You have advantage … In addition, the target has advantage
+…"* keeps the first and drops the second.
+
+### Blast radius — enumerated, not assumed
+
+Run over every `.json` under `data/` and `homebrew/` with `@tags` stripped:
+**256** condition-gated matches, of which the guard suppresses exactly **6** —
+and all 6 are genuinely third-party:
+
+- `bestiary-mpmm.json`, `bestiary-mtf.json`, `trapshazards.json` — the same wild
+  magic table row, *"**The target** grows another head, causing **it** to have
+  advantage…"*
+- `book-ai.json` ×2 — *"**The creature** has…"* / *"**This creature** has…"*
+- `spells-phb.json` — *"For the duration, **the target** has advantage on saving
+  throws against being poisoned"* (a spell's target)
+
+Zero self-buffs suppressed. Re-derive with the script shape in this entry rather
+than citing the count — the corpus grows.
+
+### Regression pin
+
+`test/jest/charactersheet/CharacterSheetThirdPartySaveProse.test.js` — 20 tests.
+Falsified three ways, each break keeping the signature intact:
+
+| Break | Reds | Sample |
+|---|---|---|
+| `isThirdPartySaveSubject` → always `false` | 10 | `Expected length: 0 / Received array: ["against being charmed", "against being frightened"]` |
+| qualifier-stripping `replace`s neutered | 2 | `Expected: true / Received: false` |
+| subject regex → `return true` | 3 | `Expected: false / Received: true` |
+
+The third break originally produced **zero** reds: every negative control
+short-circuited on the `you` test, so nothing exercised the subject regex on its
+own. Three controls with neither a `you` nor a third-party subject
+(*"Dwarves have advantage…"*, *"Elves have advantage…"*, *"the wearer gains…"*)
+were added to close that hole.
+
+---
+
+## CS-BUG-093 — eleven feature calculations are WRITE-ONLY, and asserting them is not evidence of implementation
+
+**Status:** Open (finding; no product fix attempted here)
+
+Found while raising `tgtt-time-domain-cleric` (24% → 61%) and
+`tgtt-daemonologist-wizard-dwarf` (32% → 70%). Both rewrites replaced prose
+gap comments with `featureCalculation` probes — and then the probes were
+audited against the standing rule that a **correct calculation nothing reads
+is the most common defect shape in this codebase**. Eleven of the keys have
+exactly one reference in `js/`: their own assignment.
+
+```
+$ for k in <key>; do echo "$k -> $(grep -rn "$k" js/ --include=*.js | wc -l)"; done
+```
+
+**Wizard** (`charactersheet-state.js`)
+`spellbookSpellsKnown` :23306 · `hasRitualAdept` :23317 ·
+`hasSpellMastery` :23337 · `hasSignatureSpells` :23342
+
+**Cleric / Time Domain** (`charactersheet-state.js`)
+`hasChronologicalInterference` + `chronologicalInterferenceUses` :21682-83 ·
+`hasTemporalManipulation` + `temporalManipulationDc` :21691-92 ·
+`hasEyesOfFuturePast` + `eyesOfFuturePastUses` :21696-97 ·
+`hasTemporalMastery` :21708
+
+Controls that prove the detection is not merely counting rare names:
+`potentSpellcastingBonus` 15 refs, `hasPotentSpellcasting` 12,
+`channelDivinityUses` 4, `arcaneRecoverySlotLevels` 2
+(`charactersheet-rest.js:193`), `rightOnTimeBonus` 3.
+
+### The important distinction — write-only ≠ inert
+
+These are **not** all "renders but does nothing". Chronological Interference
+and Eyes of the Future Past **do** surface as working pools with correct
+maxima (measured: 2/3/4/6/6 and `max(1, wisMod)`), because the generic
+feature-uses parser reads the homebrew entry, never the calc key. So for
+those the calc key is **redundant dead data** beside a working feature.
+
+For the four Wizard keys no such alternative surface was found; Spell
+Mastery ("cast 1st/2nd level at will"), Signature Spells and Ritual Adept
+have no pool and no observed consumer. Those are the candidates for
+genuinely-displayed-but-unimplemented, and they are the ones worth a product
+decision.
+
+### Why this matters beyond tidiness
+
+The batch bar is *offered, shown, **and** mechanically implemented*. A
+`featureCalculation` probe that passes against a write-only key satisfies
+none of the third clause — it proves the calculation RAN, not that anything
+depends on it. It is the calc-only anti-pattern arriving in the very sweep
+that exists to remove predetermined-outcome probes, which is exactly why the
+rule is "pin the READING, never `getFeatureCalculations()`" — and why a
+`stateCall` is not a reading either, only one more accessor.
+
+The two rewritten specs are annotated so a green run cannot be misread as
+proof of implementation. Where a real reading exists it is pinned instead:
+Channel Divinity / Chronological Interference use `kind: "resource"` (which
+reads the rendered sheet), Eyes of the Future Past uses
+`featureUsesEqualAbilityMod`, Unearthly Countenance uses `toggleGrantsSpeed`
+(`getSpeed`) — the grant that was itself dead until CS-BUG-085.
+
+**Detection is mechanical and worth automating:** any `calculations.<key> =`
+whose key appears exactly once across `js/` is write-only by construction.
+
+### Follow-up — the blanker is now pinned, not trusted
+
+`scripts/auditE2eCoverage.mjs` self-checks its own comment blanker. Every
+detector in that script reads `blankComments(src)`, so a desynchronised
+blanker corrupts all of them simultaneously — and in the direction that is
+hardest to notice: comment prose **leaks into the code view and manufactures
+false positives**, rather than losing real code.
+
+The blanker had already shipped two bugs (it did not recognise regex
+literals, so an apostrophe in `/gambler's folly/i` opened a phantom string
+that swallowed the remainder of the file's comments). Both ran clean before
+and after the fix; only a deliberately planted instance separated them.
+
+Invariant: after blanking, no `//` may survive outside a string literal.
+Measured both directions rather than assumed —
+
+| blanker | leaks |
+|---|---|
+| shipped | **0** across all 54 specs |
+| regex branch disabled | **274** across 14 specs |
+
+`--strict` now exits 1 on any leak.
+
+Two negative results worth not re-deriving:
+
+- Quoted `//` is legitimate and is excluded. `spawn.spec.ts` writes
+  `"rogue//1/halfling"` for an empty subclass slot; the naive form of this
+  invariant has three standing false positives for that reason.
+- **The first invariant I wrote could never fire.** It asserted that real
+  `kind:` tokens survive blanking — but a phantom string makes the scanner
+  *skip* text rather than blank it, so the failure direction is leakage, not
+  loss. It ran green against a deliberately broken blanker. Recorded so
+  nobody rebuilds the version that cannot fail.
+
+The blast radius of the original bug is **13 specs** measured behaviourally
+(fixed and broken blankers disagree), not the 7 found by pattern-matching
+apostrophes-in-regexes nor the 17 matched by a looser grep — that looser
+pattern also matches `//` comment openings, which are not instances.

@@ -103,6 +103,16 @@ describeCharacter({
 			name: /time domain spells/i,
 			kind: "passive",
 		},
+		// CS-BUG-093: the `has*` / `*Uses` / `*Dc` calc keys for Chronological
+		// Interference, Temporal Manipulation, Eyes of the Future Past and
+		// Temporal Mastery are all WRITE-ONLY (one ref each in js/). They are
+		// redundant dead data rather than proof of inertness, though: the POOLS
+		// genuinely work, because the generic feature-uses parser reads the
+		// homebrew entry and never the calc key. That is why the real readings
+		// are pinned alongside them here — `kind: "resource"` reads the rendered
+		// sheet and `featureUsesEqualAbilityMod` reads actual feature uses. The
+		// bare `featureCalculation` clauses are the weakest assertions in this
+		// file and should not be read as evidence of implementation on their own.
 		// Reaction-based initiative re-order. The reaction itself has no
 		// clean roll probe, but its POOL is level-driven (= proficiency
 		// bonus) and its recharge is long — both assertable. Left
