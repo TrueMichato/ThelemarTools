@@ -21,6 +21,9 @@ const DAEMONOLOGIST_FEATURES: FeatureCheck[] = [
 	// preparing. The factory has no ritual-cast probe, but the mode itself is a
 	// real mechanical value and distinguishes Wizard ("spellbook") from the
 	// "prepared" / "known" casters — so it is asserted rather than deferred.
+	// CS-BUG-092: `hasRitualAdept` is WRITE-ONLY (one ref in js/ — its own
+	// assignment), so that clause proves the calc ran, not that anything
+	// depends on it. `ritualCastingMode` (5 refs) is the load-bearing one.
 	{level: 1, name: /ritual adept/i, kind: "passive", effects: [
 		{kind: "featureCalculation", property: "hasRitualCasting", exact: true},
 		{kind: "featureCalculation", property: "ritualCastingMode", exact: "spellbook"},
@@ -35,6 +38,9 @@ const DAEMONOLOGIST_FEATURES: FeatureCheck[] = [
 	{level: 1, untilLevel: 4, name: /arcane recovery/i, kind: "passive", effects: [
 		{kind: "featureCalculation", property: "hasArcaneRecovery", exact: true},
 		{kind: "featureCalculation", property: "arcaneRecoverySlotLevels", exact: 2},
+		// CS-BUG-092: `spellbookSpellsKnown` is WRITE-ONLY — nothing enforces or
+		// displays the cap. `arcaneRecoverySlotLevels` IS read
+		// (charactersheet-rest.js:193), so that one is load-bearing.
 		{kind: "featureCalculation", property: "spellbookSpellsKnown", exact: 10},
 	]},
 	{level: 5, untilLevel: 10, name: /arcane recovery/i, kind: "passive", effects: [
@@ -93,6 +99,13 @@ const DAEMONOLOGIST_FEATURES: FeatureCheck[] = [
 	{level: 12, name: /ability score improvement/i, kind: "passive"},
 	{level: 16, name: /ability score improvement/i, kind: "passive"},
 	{level: 19, name: /ability score improvement|epic boon/i, kind: "passive"},
+	// CS-BUG-092: `hasSpellMastery` and `hasSignatureSpells` are WRITE-ONLY
+	// (one ref each in js/ — their own assignment) and no alternative reading
+	// surface was found: neither has a pool, and "cast 1st/2nd level at will"
+	// / "two 3rd-level always prepared" have no observed consumer. These two
+	// assertions therefore prove the calc RAN, not that the ability does
+	// anything. Do not read a green run here as implementation. By contrast
+	// `hasMemorizeSpell` (3 refs) is genuinely consumed.
 	// Memorize Spell, Spell Mastery and Signature Spells are choice-driven
 	// spellbook operations, so their PICKS aren't deterministic — but each
 	// grant sets a real calculation flag, so presence is now verified

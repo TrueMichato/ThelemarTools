@@ -3450,3 +3450,69 @@ omitting `ability` passed `undefined` through, those getters answer `0` for
 an unknown ability, and the probe silently became "expected 0" — it could
 never pass for the right reason. It now throws on the authoring mistake
 instead. (Zero live instances; found by making the error myself.)
+
+---
+
+## CS-BUG-092 — eleven feature calculations are WRITE-ONLY, and asserting them is not evidence of implementation
+
+**Status:** Open (finding; no product fix attempted here)
+
+Found while raising `tgtt-time-domain-cleric` (24% → 61%) and
+`tgtt-daemonologist-wizard-dwarf` (32% → 70%). Both rewrites replaced prose
+gap comments with `featureCalculation` probes — and then the probes were
+audited against the standing rule that a **correct calculation nothing reads
+is the most common defect shape in this codebase**. Eleven of the keys have
+exactly one reference in `js/`: their own assignment.
+
+```
+$ for k in <key>; do echo "$k -> $(grep -rn "$k" js/ --include=*.js | wc -l)"; done
+```
+
+**Wizard** (`charactersheet-state.js`)
+`spellbookSpellsKnown` :23306 · `hasRitualAdept` :23317 ·
+`hasSpellMastery` :23337 · `hasSignatureSpells` :23342
+
+**Cleric / Time Domain** (`charactersheet-state.js`)
+`hasChronologicalInterference` + `chronologicalInterferenceUses` :21682-83 ·
+`hasTemporalManipulation` + `temporalManipulationDc` :21691-92 ·
+`hasEyesOfFuturePast` + `eyesOfFuturePastUses` :21696-97 ·
+`hasTemporalMastery` :21708
+
+Controls that prove the detection is not merely counting rare names:
+`potentSpellcastingBonus` 15 refs, `hasPotentSpellcasting` 12,
+`channelDivinityUses` 4, `arcaneRecoverySlotLevels` 2
+(`charactersheet-rest.js:193`), `rightOnTimeBonus` 3.
+
+### The important distinction — write-only ≠ inert
+
+These are **not** all "renders but does nothing". Chronological Interference
+and Eyes of the Future Past **do** surface as working pools with correct
+maxima (measured: 2/3/4/6/6 and `max(1, wisMod)`), because the generic
+feature-uses parser reads the homebrew entry, never the calc key. So for
+those the calc key is **redundant dead data** beside a working feature.
+
+For the four Wizard keys no such alternative surface was found; Spell
+Mastery ("cast 1st/2nd level at will"), Signature Spells and Ritual Adept
+have no pool and no observed consumer. Those are the candidates for
+genuinely-displayed-but-unimplemented, and they are the ones worth a product
+decision.
+
+### Why this matters beyond tidiness
+
+The batch bar is *offered, shown, **and** mechanically implemented*. A
+`featureCalculation` probe that passes against a write-only key satisfies
+none of the third clause — it proves the calculation RAN, not that anything
+depends on it. It is the calc-only anti-pattern arriving in the very sweep
+that exists to remove predetermined-outcome probes, which is exactly why the
+rule is "pin the READING, never `getFeatureCalculations()`" — and why a
+`stateCall` is not a reading either, only one more accessor.
+
+The two rewritten specs are annotated so a green run cannot be misread as
+proof of implementation. Where a real reading exists it is pinned instead:
+Channel Divinity / Chronological Interference use `kind: "resource"` (which
+reads the rendered sheet), Eyes of the Future Past uses
+`featureUsesEqualAbilityMod`, Unearthly Countenance uses `toggleGrantsSpeed`
+(`getSpeed`) — the grant that was itself dead until CS-BUG-085.
+
+**Detection is mechanical and worth automating:** any `calculations.<key> =`
+whose key appears exactly once across `js/` is write-only by construction.
