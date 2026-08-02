@@ -4351,9 +4351,12 @@ the wrong assertion stayed green — i.e. the data was bent to fit the assertion
 
 ## CS-BUG-104 — a *resolved* `Blessed Strikes` choice still materialises both options, so `_data.chosenSubfeatures` and `_data.features` disagree — and a TGTT domain turns that into a visible duplicate
 
-**Status:** **Fixed** — the materialisation site now defers to the parser's
-verdict instead of re-deriving one from the entry shape. Pinned in both
-directions by `test/jest/charactersheet/CharacterSheetSubfeatureChoiceMaterialisation.test.js`.
+**Status:** **Fixed for newly-derived characters; NOT retroactive.** The
+materialisation site now defers to the parser's verdict instead of re-deriving
+one from the entry shape. Pinned in both directions by
+`test/jest/charactersheet/CharacterSheetSubfeatureChoiceMaterialisation.test.js`.
+**A character saved before `8839135c` keeps the duplicate rows forever** —
+`loadFromJson` never re-derives features from class data. See **CS-BUG-110**.
 
 > **The parser was never the defect.** `FeatureChoiceParser.extractChoices()`
 > returned `{count: 1, options: [Divine Strike, Potent Spellcasting]}` for
@@ -5366,3 +5369,66 @@ The `PREMISE` row (exhaustion actually moves the canonical DC under Thelemar
 rules) stays green by design: it reads the accessor, not the cast output, so it
 proves the fixture reaches the penalty at all rather than comparing an unchanged
 number to itself.
+
+---
+
+## CS-BUG-110 — CS-BUG-104's fix is prospective, so a character saved before it keeps the duplicate choose-one rows forever
+
+**Status:** Open. Display-only. Measured end-to-end by the `plan-cs-bug-018-skips`
+session; the *proposed* repair in that report is recorded below **and corrected**,
+because it does not fix either measured case.
+
+**Reproduction (a full round trip, not an inference).** On the fixed tree:
+
+```
+1. revert the CS-BUG-104 delegation
+2. spawn cleric/life domain/7, export toJson()   -> Blessed Strikes children = 2
+3. restore the fix
+4. load that JSON on the FIXED tree              -> still 2: ["Divine Strike","Potent Spellcasting"]
+```
+
+**Root cause.** `_migrateFeatures()` (`charactersheet-state.js:6546`) is a
+`.map()` over the stored `_data.features` array:
+
+```js
+this._data.features = this._data.features.map(f => { … });
+```
+
+A `map` can transform a row and can never remove one, and nothing else in
+`loadFromJson` re-derives features from class data. So CS-BUG-104 corrected the
+**derivation** while leaving the **stored result** untouched. Any Cleric 7+
+saved before `8839135c` still renders three rows at L7, and a TGTT Time Domain
+Cleric 8 still shows Potent Spellcasting twice.
+
+### ⚠️ The obvious repair does not work — do not ship it
+
+The originating report proposed *"a one-line dedup in `_migrateFeatures` keyed
+on `(name, parentFeature, level)`"*. That key is inert on both measured cases,
+by the report's own output:
+
+| case | rows | why the key keeps both |
+|---|---|---|
+| `cleric/life domain/7` | `["Divine Strike", "Potent Spellcasting"]` | **different names** — these are two *options* of one choice, not two copies of one row |
+| `cleric/time domain/8` | Potent Spellcasting ×2 | same name, but **levels 7 and 8** — `level` is in the key |
+
+The stored defect is an **over-grant of a choose-one group**, not a duplicated
+row, so no identity-based dedup can see it. A correct repair has to re-derive
+the group and keep the chosen option — and that is harder than it looks, because
+branch (b) of the choice seeder (`charactersheet-class-utils.js`, the
+`appliedFeatures.forEach(_recordChosenSubfeature)` path) records a chosen
+subfeature for **every materialised row**. A pre-fix save therefore has *both*
+options recorded as chosen, so `chosenSubfeatures` cannot arbitrate. (Same
+circularity already noted in CS-BUG-104's evidence section.)
+
+**Severity is display-only and unchanged from CS-BUG-104's own finding:** the L7
+rows assign no calc keys, and `blessedStrikesDamage: "1d8"` comes from the
+surviving row either way. Filed rather than fixed because a wrong one-liner here
+would look like a fix, pass a dedup-shaped test, and change nothing.
+
+### Also recorded: a benign state-shape change from the CS-BUG-104 fix
+
+Cunning Strike's `chosenSubfeatures` went **3 → 0** (branch (b) no longer runs,
+since narrowing means no group is produced). `_data.features` rows are
+unaffected, and display and mechanics read those, so this is believed benign —
+recorded because it will show up in save diffs and should not surprise the next
+reader.
