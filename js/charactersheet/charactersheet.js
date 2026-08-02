@@ -8785,6 +8785,11 @@ class CharacterSheetPage {
 			// Shadow Magic (XGE Sorcerer)
 			case "hound of ill omen": return this._pUseHoundOfIllOmen(feature);
 			case "shadow walk": return this._pUseShadowWalk(feature);
+			// Shadow Sorcery (RHW Sorcerer) — same feature NAME as the XGE capstone, so
+			// route on the calculation flag rather than let either claim the other's economy.
+			case "umbral form":
+				if (this._state.getFeatureCalculations().hasUmbralFormRhw) return this._pUseUmbralFormRhw();
+				break;
 			// Wicked Witch (Ar8 Sorcerer)
 			case "granny's gifts": return this._pUseGrannysGifts(feature);
 			case "clever little witch": return this._pUseCleverLittleWitch(feature);
@@ -10086,7 +10091,35 @@ class CharacterSheetPage {
 			return true;
 		}
 
-		const res = this._state.castSpellWithResource(choice.spell);
+		// PLAYER CHOICE: some resource casts let you waive Concentration (Shadow Sorcery's
+		// Beasts of Ill Omen — "you can choose to cast the spell without Concentration, in
+		// which case its duration becomes 1 minute"). This is a real decision with a real
+		// trade-off, so it must be ASKED, not assumed.
+		let waiveConcentration = false;
+		if (choice.concentrationOptional) {
+			const waiveLabel = `Without Concentration (${choice.waivedDurationMinutes ?? 1} minute${(choice.waivedDurationMinutes ?? 1) === 1 ? "" : "s"})`;
+			const picked = await InputUiUtil.pGetUserEnum({
+				title: `${choice.spell} — Concentration`,
+				htmlDescription: `<div>Casting without Concentration shortens the duration and lets you concentrate on something else. Recasting ends the earlier summon either way.</div>`,
+				values: ["With Concentration (full duration)", waiveLabel],
+				isResolveItem: true,
+			});
+			if (picked == null) return true;
+			waiveConcentration = picked === waiveLabel;
+		}
+
+		// PLAYER CHOICE: which spirit form the summon takes.
+		let summonForm = null;
+		if (choice.summon?.forms?.length > 1) {
+			summonForm = await InputUiUtil.pGetUserEnum({
+				title: `${choice.spell} — Choose Form`,
+				values: choice.summon.forms,
+				isResolveItem: true,
+			});
+			if (!summonForm) return true;
+		}
+
+		const res = this._state.castSpellWithResource(choice.spell, {waiveConcentration, summonForm});
 		if (!res) {
 			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: `Could not cast ${choice.spell}.`}));
 			return true;
@@ -10095,11 +10128,77 @@ class CharacterSheetPage {
 		this._saveCurrentCharacter();
 		this._renderResources();
 		this._renderActiveStates?.();
+		this._renderCompanions?.();
 		this._spells?.render?.();
 		this._features?.render?.();
+		const summonNote = res.companion ? ` ${res.companion.name} appears (HP ${res.companion.hp?.max}, AC ${res.companion.ac}).` : "";
+		const concNote = res.concentrationWaived ? ` No Concentration — lasts ${res.durationMinutes ?? 1} minute(s).` : (res.concentration ? " Concentration." : "");
 		JqueryUtil.doToast(/** @type {*} */ ({
 			type: "success",
-			content: `🌑 Cast <strong>${res.spell}</strong> for ${res.spent} ${res.resourceName} (${res.resourceRemaining} left).${res.note ? ` ${res.note}` : ""}`,
+			content: `🌑 Cast <strong>${res.spell}</strong> for ${res.spent} ${res.resourceName} (${res.resourceRemaining} left).${summonNote}${concNote}${res.note ? ` ${res.note}` : ""}`,
+		}));
+		return true;
+	}
+
+	/**
+	 * Umbral Form (Shadow Sorcery 18, RHW). Unlike the XGE feature of the same name this
+	 * costs no Sorcery Points to enter: it rides an active Innate Sorcery and burns a
+	 * once-per-Long-Rest use, which 6 Sorcery Points can buy back.
+	 * @private
+	 */
+	async _pUseUmbralFormRhw () {
+		const status = this._state.getUmbralFormStatus();
+		if (!status.has) return false;
+
+		if (status.active) {
+			this._state.endUmbralForm();
+			this._saveCurrentCharacter();
+			this._renderResources();
+			this._renderActiveStates?.();
+			this._features?.render?.();
+			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "🌑 Umbral Form ended."}));
+			return true;
+		}
+
+		if (!status.canActivate) {
+			// Out of uses but able to pay for another: offer the restore rather than a dead end.
+			if (status.canRestore) {
+				const yes = await InputUiUtil.pGetUserBoolean({
+					title: "Restore Umbral Form",
+					htmlDescription: `<div>${status.blockedReason}</div>`,
+					textYes: `Spend ${status.restoreCost} Sorcery Points`,
+					textNo: "Cancel",
+				});
+				if (!yes) return true;
+				const restored = this._state.restoreUmbralFormUse();
+				if (!restored.ok) {
+					JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: restored.error}));
+					return true;
+				}
+				this._saveCurrentCharacter();
+				this._renderResources();
+				this._features?.render?.();
+				JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `🌑 Umbral Form restored for ${restored.spent} Sorcery Points (${restored.sorceryPointsRemaining} left).`}));
+				return true;
+			}
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: status.blockedReason}));
+			return true;
+		}
+
+		const res = this._state.activateUmbralForm();
+		if (!res.ok) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+			return true;
+		}
+
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderActiveStates?.();
+		this._features?.render?.();
+		const calc = this._state.getFeatureCalculations();
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `🌑 <strong>Umbral Form</strong> — Resistance to all damage except Force and Radiant while Innate Sorcery lasts. You can move through creatures and objects as Difficult Terrain (${calc.umbralFormIncorporealDamage || "1d10"} Force damage if you end your turn inside one). ${res.usesRemaining} use(s) left.`,
 		}));
 		return true;
 	}
@@ -11121,23 +11220,48 @@ class CharacterSheetPage {
 
 		if (amount == null || amount <= 0) return;
 
+		// CS-BUG-100: ask for the damage type whenever the character actually has a defense
+		// that could change the number. Without it the sheet's Damage button applied the raw
+		// amount and every resistance the model computes — Umbral Form, Rage, Draconic
+		// Resilience, racial resistances — was decorative on this path.
+		let damageType = null;
+		const defended = [
+			...(this._state.getResistances?.() || []),
+			...(this._state.getImmunities?.() || []),
+			...(this._state.getVulnerabilities?.() || []),
+		];
+		if (defended.length) {
+			const NONE = "Untyped / no defense";
+			const values = [NONE, ...[...new Set(defended)].sort()];
+			const picked = await InputUiUtil.pGetUserEnum({
+				title: "Damage Type",
+				htmlDescription: `<div>Pick the damage type so your resistances, immunities and vulnerabilities apply.</div>`,
+				values,
+				isResolveItem: true,
+			});
+			if (picked && picked !== NONE) damageType = String(picked).toLowerCase();
+		}
+
+		const preview = this._state.applyDamageDefenses(amount, damageType);
+
 		// CS-BUG-081: route through the model. This method used to hand-roll the temp-HP and
 		// current-HP arithmetic, which meant Death Ward — and every other drop-to-0
 		// intervention — could never fire from the sheet's own Damage button.
-		this._state.takeDamage(amount);
+		this._state.takeDamage(amount, {damageType});
 
 		this._saveCurrentCharacter();
 		this._renderHp();
 		this._renderConditions(); // Update bloodied condition display
 
-		this._showDiceResult("Damage", amount, `Took ${amount} damage`);
+		const suffix = preview.applied ? ` (${amount} ${damageType} → ${preview.damage} after ${preview.applied})` : "";
+		this._showDiceResult("Damage", preview.damage, `Took ${preview.damage} damage${suffix}`);
 
 		// Offer any drop-to-0 intervention the character has (Strength of the Grave, …).
 		await this._pOfferZeroHpIntervention();
 
 		// Prompt for concentration check if concentrating
 		if (this._state.isConcentrating?.()) {
-			await this._promptConcentrationCheck(amount);
+			await this._promptConcentrationCheck(preview.damage);
 		}
 	}
 

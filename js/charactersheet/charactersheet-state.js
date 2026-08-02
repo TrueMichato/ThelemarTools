@@ -9406,6 +9406,27 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Apply immunity / resistance / vulnerability to a damage amount.
+	 *
+	 * The one place the ×0 / ÷2 / ×2 arithmetic lives, so the model's damage entry point and
+	 * any UI preview cannot disagree about the number. RAW ordering: immunity wins outright,
+	 * then resistance halves (rounding down), then vulnerability doubles.
+	 *
+	 * @param {number} damage
+	 * @param {string|null} damageType lowercase damage type
+	 * @returns {{damage: number, raw: number, applied: "immunity"|"resistance"|"vulnerability"|null}}
+	 */
+	applyDamageDefenses (damage, damageType) {
+		const raw = Math.max(0, Math.floor(Number(damage) || 0));
+		const type = damageType ? String(damageType).toLowerCase() : null;
+		if (!type) return {damage: raw, raw, applied: null};
+		if (this.hasImmunity(type)) return {damage: 0, raw, applied: "immunity"};
+		if (this.hasResistance(type)) return {damage: Math.floor(raw / 2), raw, applied: "resistance"};
+		if (this.hasVulnerability(type)) return {damage: raw * 2, raw, applied: "vulnerability"};
+		return {damage: raw, raw, applied: null};
+	}
+
+	/**
 	 * Take damage, consuming temp HP first
 	 * @param {number} damage - Amount of damage to take
 	 * @param {object} [opts]
@@ -9413,11 +9434,30 @@ class CharacterSheetState {
 	 *        any way" (Divine Allegiance, Beacon of Hope-style riders, several homebrew pacts).
 	 *        Bypasses temporary hit points AND Death Ward — both are "prevention" in RAW terms.
 	 * @param {string|null} [opts.damageType=null] Damage type, lowercase ("radiant", "fire", …).
-	 *        Consumed by {@link getZeroHpInterventions}; `null` means "not stated".
+	 *        Consumed by {@link getZeroHpInterventions} AND, since CS-BUG-100, by the
+	 *        immunity / resistance / vulnerability step below; `null` means "not stated".
 	 * @param {boolean} [opts.isCritical=false] Whether the damage came from a critical hit.
+	 * @param {boolean} [opts.skipDefenses=false] The caller has ALREADY halved/doubled/zeroed
+	 *        the amount for defenses (Play Mode's damage modal does its own arithmetic so it
+	 *        can show a preview). Prevents double-application.
 	 * @returns {boolean} True if damage was taken
 	 */
-	takeDamage (damage, {unpreventable = false, damageType = null, isCritical = false} = {}) {
+	takeDamage (damage, {unpreventable = false, damageType = null, isCritical = false, skipDefenses = false} = {}) {
+		if (damage <= 0) return false;
+
+		// CS-BUG-100: `damageType` was accepted and then used ONLY to gate zero-HP
+		// interventions — nothing halved the number. Every resistance the sheet computes
+		// (Umbral Form's "Resistance to all damage except Force and Radiant", Draconic
+		// Resilience, racial resistances, Rage) was therefore invisible to the model's own
+		// damage entry point: `getResistances()` listed them and no damage was ever reduced.
+		const defenses = !unpreventable && !skipDefenses && damageType
+			? this.applyDamageDefenses(damage, damageType)
+			: {damage, applied: null};
+		damage = defenses.damage;
+		if (damage <= 0 && defenses.applied === "immunity") {
+			this._updateBloodiedCondition();
+			return true;
+		}
 		if (damage <= 0) return false;
 
 		const startingHp = this._data.hp.current;
@@ -9489,6 +9529,15 @@ class CharacterSheetState {
 	 * - `spendOn`        `"success"` (use consumed only when it works) or `"attempt"`
 	 * - `usesMax` / `recharge` the once-per-rest budget reconciled by
 	 *                    {@link _ensureZeroHpInterventionUses}
+	 * - `displayName`    optional label when the granting feature is an umbrella whose name
+	 *                    is not the player-facing name of the benefit (Shadow Sorcery's
+	 *                    "Power of Shadow" grants "Strength of the Grave")
+	 * - `hpOnSuccess`    optional `{flat?, abilityMod?, classLevel?}` descriptor for the hit
+	 *                    point total a success leaves you on. Defaults to a flat 1 — the
+	 *                    XGE/Death Ward wording. Shadow Sorcery (RHW) instead sets you to
+	 *                    "your Charisma modifier plus your Sorcerer level", which is a
+	 *                    different NUMBER on the same pipeline; see
+	 *                    {@link _resolveZeroHpInterventionHp}.
 	 * @type {Array<object>}
 	 */
 	static ZERO_HP_INTERVENTIONS = [
@@ -9506,7 +9555,61 @@ class CharacterSheetState {
 			recharge: "long",
 			description: "Charisma save (DC 5 + the damage taken) to drop to 1 hit point instead of 0. Unavailable against radiant damage or a critical hit.",
 		},
+		{
+			// Shadow Sorcery (RHW) rewrites the SAME benefit with a different result and
+			// WITHOUT the two XGE exclusions: no radiant carve-out, no critical-hit
+			// carve-out, and a success leaves you on "your Charisma modifier plus your
+			// Sorcerer level" hit points rather than 1. Same pipeline, different data.
+			//
+			// `featureName` is the umbrella "Power of Shadow" because that is the feature the
+			// sheet actually stores — the RHW JSON nests Eyes of the Dark and Strength of the
+			// Grave as named sub-entries, and nothing in the codebase splits nested entries
+			// into separate features. The once-per-long-rest use therefore lives on Power of
+			// Shadow, which is also what `_ensureZeroHpInterventionUses` re-scales.
+			id: "strengthOfTheGraveRhw",
+			featureName: "Power of Shadow",
+			displayName: "Strength of the Grave",
+			calcFlag: "hasPowerOfShadow",
+			saveAbility: "cha",
+			dcBase: 5,
+			dcAddsDamage: true,
+			excludedDamageTypes: [],
+			excludeCritical: false,
+			spendOn: "success",
+			usesMax: 1,
+			recharge: "long",
+			hpOnSuccess: {abilityMod: "cha", classLevel: "Sorcerer"},
+			description: "Charisma save (DC 5 + the damage taken); on a success your hit points become your Charisma modifier plus your Sorcerer level instead of 0.",
+		},
 	];
+
+	/**
+	 * Hit points a successful zero-HP intervention leaves the character on.
+	 *
+	 * Declarative so the pipeline never has to know WHICH feature fired: the default is the
+	 * flat 1 of Death Ward / XGE's Strength of the Grave, and a descriptor can add an ability
+	 * modifier and/or a class level on top (Shadow Sorcery's "Charisma modifier plus your
+	 * Sorcerer level").
+	 *
+	 * Always at least 1 — a negative Charisma modifier at low level must not resolve to a
+	 * "success" that leaves you unconscious, and never above the hit point maximum.
+	 *
+	 * @param {object} def a {@link ZERO_HP_INTERVENTIONS} entry
+	 * @returns {number}
+	 * @private
+	 */
+	_resolveZeroHpInterventionHp (def) {
+		const spec = def?.hpOnSuccess;
+		if (!spec) return 1;
+		let hp = Number(spec.flat) || 0;
+		if (spec.abilityMod) hp += this.getAbilityMod(spec.abilityMod);
+		if (spec.classLevel) {
+			const cls = (this._data.classes || []).find(c => (c.name || "").toLowerCase() === String(spec.classLevel).toLowerCase());
+			hp += cls?.level || 0;
+		}
+		const maxHp = this.getMaxHp();
+		return Math.max(1, Math.min(maxHp > 0 ? maxHp : hp, Math.floor(hp)));
+	}
 
 	/**
 	 * Every zero-HP intervention this character actually has, already resolved against the
@@ -9530,14 +9633,16 @@ class CharacterSheetState {
 			const dmgType = damageType ? String(damageType).toLowerCase() : null;
 
 			let unavailableReason = null;
-			if (usesRemaining <= 0) unavailableReason = `${def.featureName} has no uses remaining (recharges on a ${def.recharge} rest).`;
-			else if (def.excludeCritical && isCritical) unavailableReason = `${def.featureName} can't be used when a critical hit reduces you to 0 hit points.`;
-			else if (dmgType && (def.excludedDamageTypes || []).includes(dmgType)) unavailableReason = `${def.featureName} can't be used against ${dmgType} damage.`;
+			const label = def.displayName || def.featureName;
+			if (usesRemaining <= 0) unavailableReason = `${label} has no uses remaining (recharges on a ${def.recharge} rest).`;
+			else if (def.excludeCritical && isCritical) unavailableReason = `${label} can't be used when a critical hit reduces you to 0 hit points.`;
+			else if (dmgType && (def.excludedDamageTypes || []).includes(dmgType)) unavailableReason = `${label} can't be used against ${dmgType} damage.`;
 
 			const dc = (def.dcBase || 0) + (def.dcAddsDamage ? Math.max(0, Math.floor(Number(damage) || 0)) : 0);
 			out.push({
 				id: def.id,
-				name: def.featureName,
+				name: def.displayName || def.featureName,
+				featureName: def.featureName,
 				description: def.description,
 				saveAbility: def.saveAbility,
 				saveModifier: def.saveAbility ? this.getSaveMod(def.saveAbility) : 0,
@@ -9546,6 +9651,7 @@ class CharacterSheetState {
 				excludedDamageTypes: [...(def.excludedDamageTypes || [])],
 				excludeCritical: !!def.excludeCritical,
 				spendOn: def.spendOn,
+				hpOnSuccess: this._resolveZeroHpInterventionHp(def),
 				usesRemaining,
 				usesMax: feature?.uses?.max ?? def.usesMax,
 				recharge: def.recharge,
@@ -9630,7 +9736,7 @@ class CharacterSheetState {
 		const success = def.saveAbility ? saveTotal >= info.dc : true;
 
 		if (success) {
-			this._data.hp.current = 1;
+			this._data.hp.current = info.hpOnSuccess;
 			this.resetDeathSaves();
 			this._data.massiveDamageDeath = false;
 			this._updateBloodiedCondition();
@@ -9643,7 +9749,8 @@ class CharacterSheetState {
 		return {
 			applied: true,
 			id: def.id,
-			name: def.featureName,
+			name: def.displayName || def.featureName,
+			featureName: def.featureName,
 			success,
 			dc: info.dc,
 			saveAbility: def.saveAbility,
@@ -9674,15 +9781,29 @@ class CharacterSheetState {
 		for (const def of CharacterSheetState.ZERO_HP_INTERVENTIONS) {
 			const feature = (this._data.features || []).find(f => f.name === def.featureName);
 			if (!feature) continue;
-			if (feature.uses?.max === def.usesMax && feature.uses?.recharge === def.recharge) continue;
+			const resource = (this._data.resources || []).find(r => r.featureId === feature.id || r.name === def.featureName);
+			const featureOk = feature.uses?.max === def.usesMax && feature.uses?.recharge === def.recharge;
+			const resourceOk = !resource || (resource.max === def.usesMax && resource.recharge === def.recharge);
+			if (featureOk && resourceOk) continue;
 			calc = calc || this.getFeatureCalculations();
 			if (!calc[def.calcFlag]) continue;
-			const spent = feature.uses ? (feature.uses.current ?? 0) < (feature.uses.max ?? 0) : false;
+			// CS-BUG-101: the FEATURE's uses were re-scaled but its mirrored RESOURCE row was
+			// not, so Shadow Sorcery's Power of Shadow rendered a "5/5" tracker (the
+			// feature-uses parser's Charisma-modifier guess) next to a feature that really
+			// has one use per Long Rest.
+			const spent = feature.uses
+				? (feature.uses.current ?? 0) < (feature.uses.max ?? 0)
+				: false;
 			feature.uses = {
 				current: spent ? 0 : def.usesMax,
 				max: def.usesMax,
 				recharge: def.recharge,
 			};
+			if (resource) {
+				resource.max = def.usesMax;
+				resource.recharge = def.recharge;
+				resource.current = feature.uses.current;
+			}
 		}
 	}
 	// #endregion
@@ -13033,7 +13154,11 @@ class CharacterSheetState {
 		const itemBonus = this._data.itemBonuses?.spellSaveDc || 0;
 		// Apply exhaustion DC penalty (Thelemar rules only)
 		const exhaustionPenalty = this._getExhaustionDcPenalty();
-		return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus - exhaustionPenalty;
+		// CS-BUG-099: `{type: "bonus", target: "spellDc"}` was a documented active-state
+		// effect target (see the custom-ability editor's target list) with NO consumer, so
+		// Innate Sorcery's "+1 to your Sorcerer spell save DC" was pure description.
+		const stateBonus = this.getBonusFromStates?.("spellDc") || 0;
+		return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus + stateBonus - exhaustionPenalty;
 	}
 
 	getSpellSaveDc () {
@@ -13071,7 +13196,8 @@ class CharacterSheetState {
 		if (classNameOrAbility && abilities.includes(classNameOrAbility.toLowerCase())) {
 			const ability = classNameOrAbility.toLowerCase();
 			const itemBonus = this._data.itemBonuses?.spellSaveDc || 0;
-			return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus;
+			const stateBonus = this.getBonusFromStates?.("spellDc") || 0;
+			return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus + stateBonus;
 		}
 
 		// If className specified, temporarily use that class's spellcasting ability
@@ -13090,7 +13216,8 @@ class CharacterSheetState {
 			const ability = spellcastingAbilities[classNameOrAbility];
 			if (ability) {
 				const itemBonus = this._data.itemBonuses?.spellSaveDc || 0;
-				return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus;
+				const stateBonus = this.getBonusFromStates?.("spellDc") || 0;
+				return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus + stateBonus;
 			}
 		}
 		return this.getSpellSaveDc();
@@ -20649,6 +20776,90 @@ class CharacterSheetState {
 								}
 								break;
 							}
+							case "Shadow Sorcery": {
+								// The 2024 rework of Shadow Magic. Deliberately a SEPARATE case rather
+								// than a fall-through: every one of its four benefits differs in value
+								// or economy from the XGE feature of the same name, and the shared
+								// `shortName: "Shadow"` above already routes ambiguously.
+								if (level >= 3) {
+									calculations.hasShadowSorcery = true;
+									calculations.hasPowerOfShadow = true;
+
+									// --- Eyes of the Dark ---
+									// Two senses from ONE feature. Both are consumed generically by
+									// `_getClassFeatureEffects()`, which emits `type: "sense"` effects so
+									// the ranges actually reach `getSenses()`.
+									calculations.hasEyesOfTheDarkRhw = true;
+									calculations.darkvision = 120;
+									calculations.darkvisionSource = "Eyes of the Dark";
+									calculations.blindsight = 10;
+									calculations.blindsightSource = "Eyes of the Dark";
+									// "If a spell you cast creates an area of Darkness, you can see
+									// normally through that spell's Darkness." Unlike XGE this is not
+									// tied to a Sorcery-Point cast — see `canSeeThroughOwnDarkness()`.
+									calculations.seeThroughOwnSpellDarkness = true;
+
+									// --- Strength of the Grave ---
+									// Same trigger as XGE, different RESULT, and without XGE's radiant
+									// and critical-hit carve-outs. Registered declaratively in
+									// `ZERO_HP_INTERVENTIONS` (id `strengthOfTheGraveRhw`) — note that
+									// `hasStrengthOfTheGrave` is deliberately NOT set, or the XGE entry
+									// would fire too and drop the character to 1 hit point.
+									calculations.strengthOfTheGraveDc = 5; // + damage taken
+									calculations.strengthOfTheGraveSaveAbility = "cha";
+									calculations.strengthOfTheGraveHp = this.getAbilityMod("cha") + level;
+								}
+								// --- Beasts of Ill Omen (level 6) ---
+								if (level >= 6) {
+									calculations.hasBeastsOfIllOmen = true;
+									calculations.beastsOfIllOmenCost = 3;
+									calculations.resourceCastSpells = [
+										...(calculations.resourceCastSpells || []),
+										{
+											spell: "Summon Beast",
+											source: "XPHB",
+											level: 2,
+											concentration: true,
+											concentrationOptional: true,
+											waivedDurationMinutes: 1,
+											castingTime: "bonus",
+											ignoresMaterialComponents: true,
+											ignoresPreparation: true,
+											replacesPrevious: true,
+											cost: 3,
+											resource: "Sorcery Points",
+											grantedBy: "Beasts of Ill Omen",
+											note: "Enemies within 5 feet of the summon have Disadvantage on saving throws against your spells.",
+											summon: {
+												baseLevel: 2,
+												creatureType: "beast",
+												forms: ["Bestial Spirit (Land)", "Bestial Spirit (Sea)", "Bestial Spirit (Sky)"],
+											},
+											riders: {enemiesNearSummonSaveDisadvantage: 5},
+										},
+									];
+								}
+								// --- Shadow Walk (level 14) --- identical to XGE.
+								if (level >= 14) {
+									calculations.hasShadowWalk = true;
+									calculations.shadowWalkRange = 120;
+									calculations.shadowWalkAction = "bonus";
+								}
+								// --- Umbral Form (level 18) ---
+								// Bound to Innate Sorcery: once per Long Rest, no activation cost, and
+								// 6 Sorcery Points RESTORES the use. `hasUmbralForm` is deliberately
+								// NOT set — that flag means the XGE 6-SP toggle.
+								if (level >= 18) {
+									calculations.hasUmbralFormRhw = true;
+									calculations.umbralFormBoundToInnateSorcery = true;
+									calculations.umbralFormUsesMax = 1;
+									calculations.umbralFormRestoreCost = 6;
+									calculations.umbralFormIncorporealDamage = "1d10";
+									calculations.umbralFormIncorporealDamageType = "force";
+									calculations.umbralFormResistanceExceptions = ["force", "radiant"];
+								}
+								break;
+							}
 							case "Storm Sorcery":
 							case "Storm": {
 								// Wind Speaker (level 1/3)
@@ -20960,6 +21171,70 @@ class CharacterSheetState {
 								}
 								break;
 							}
+							// =====================================================================
+							// Spellfire Sorcery (FRHoF Sorcerer subclass) — 2024, subclass at L3
+							// =====================================================================
+							case "Spellfire Sorcery":
+							case "Spellfire": {
+								const chaMod = this.getAbilityMod("cha");
+								// Honed Spellfire (L14) improves both Spellfire Burst options.
+								const honed = level >= 14;
+
+								// The subclass and all of its base features arrive at L3 (2024
+								// chassis). Gate so an artificially early subclass assignment
+								// (or a broken save) can't surface L3 kit at L1–L2.
+								if (level >= 3) {
+									// Spellfire Burst (L3) — once per turn, when you spend at least
+									// 1 Sorcery Point on the Magic action or a Bonus Action, you may
+									// unleash Bolstering Flames or Radiant Fire. The trigger and the
+									// once-per-turn limit are enforced by `useSpellfireBurst()`.
+									calculations.hasSpellfireBurst = true;
+									calculations.spellfireBurstUsesPerTurn = 1;
+									calculations.spellfireBurstMinSorceryPoints = 1;
+
+									// Radiant Fire (L3) — 1d4 Fire or Radiant damage within 30 ft,
+									// increasing to 1d8 with Honed Spellfire.
+									calculations.hasRadiantFire = true;
+									calculations.radiantFireDamage = honed ? "1d8" : "1d4";
+									calculations.radiantFireRange = 30;
+									calculations.radiantFireDamageTypes = ["fire", "radiant"];
+
+									// Bolstering Flames (L3) — grant Temp HP = 1d4 + CHA modifier to
+									// yourself or a creature within 30 ft. Honed Spellfire adds your
+									// Sorcerer level to the total.
+									calculations.hasBolsteringFlames = true;
+									calculations.bolsteringFlamesTempHpDie = "1d4";
+									calculations.bolsteringFlamesTempHpBonus = chaMod + (honed ? level : 0);
+									calculations.bolsteringFlamesRange = 30;
+								}
+
+								// Honed Spellfire (L14) — the scaling above already reflects it;
+								// keep an explicit flag for display/probing.
+								if (honed) calculations.hasHonedSpellfire = true;
+
+								// Absorb Spells (L6) — Counterspell is always prepared (data
+								// `additionalSpells`), and a target failing its save against your
+								// Counterspell refunds 1d4 Sorcery Points.
+								if (level >= 6) {
+									calculations.hasAbsorbSpells = true;
+									calculations.absorbSpellsSorceryPointRegain = "1d4";
+								}
+
+								// Crown of Spellfire (L18) — while your altered Innate Sorcery is
+								// active you gain a 60 ft fly speed (and can hover), Spell
+								// Avoidance, and Burning Life Force. Restoring the use costs 5
+								// Sorcery Points.
+								if (level >= 18) {
+									calculations.hasCrownOfSpellfire = true;
+									calculations.crownOfSpellfireFlySpeed = 60;
+									calculations.crownOfSpellfireRestoreCost = 5;
+									// Burning Life Force caps the expended Hit Point Dice at your
+									// CHA modifier (minimum of one).
+									calculations.crownBurningLifeForceMaxDice = Math.max(1, chaMod);
+								}
+								break;
+							}
+
 							case "Wicked Witch":
 							case "Wicked Witch Sorcerous Origin": {
 								// Wicked Witch (Arcadia 8 Sorcerer, re-parented onto the TGTT
@@ -26327,21 +26602,31 @@ class CharacterSheetState {
 		// SORCERER FEATURES
 		// =========================================================
 
-		// GENERIC: any class/subclass calculation that declares a flat darkvision range
-		// (`calculations.darkvision`, labelled by `calculations.darkvisionSource`) becomes a
-		// real sense. CS-BUG-082: `calculations.darkvision` had NO consumer anywhere in the
-		// codebase, so Eyes of the Dark's 120 ft was pure text — `getSenses().darkvision`
-		// stayed at whatever the species granted.
-		if (calculations.darkvision > 0) {
-			const dvSource = calculations.darkvisionSource || "Class Feature";
-			if (!alreadyProcessed(dvSource)) {
-				effects.push({
-					type: "sense",
-					sense: "darkvision",
-					range: calculations.darkvision,
-					source: dvSource,
-				});
-			}
+		// GENERIC: any class/subclass calculation that declares a flat sense range
+		// (`calculations.darkvision`, labelled by `calculations.darkvisionSource`, and the
+		// same pair for blindsight / tremorsense / truesight) becomes a real sense.
+		//
+		// CS-BUG-082: `calculations.darkvision` had NO consumer anywhere in the codebase, so
+		// Eyes of the Dark's 120 ft was pure text — `getSenses().darkvision` stayed at
+		// whatever the species granted.
+		//
+		// CS-BUG-098: the block was darkvision-only, so a feature granting TWO senses at once
+		// (Shadow Sorcery's Eyes of the Dark — "Darkvision 120 ft AND Blindsight 10 ft") could
+		// only ever land one of them; the description parser picked darkvision and blindsight
+		// was silently dropped. The `alreadyProcessed` guard is per-SOURCE and stays that way
+		// (it exists to avoid double-applying a feature the registry already handled), so the
+		// loop below deliberately checks it once per source rather than once per sense.
+		for (const senseName of ["darkvision", "blindsight", "tremorsense", "truesight"]) {
+			const range = calculations[senseName];
+			if (!(range > 0)) continue;
+			const senseSource = calculations[`${senseName}Source`] || "Class Feature";
+			if (alreadyProcessed(senseSource)) continue;
+			effects.push({
+				type: "sense",
+				sense: senseName,
+				range,
+				source: senseSource,
+			});
 		}
 
 		// Draconic Resilience: +1 HP per level, unarmored AC = 13 + DEX
@@ -32462,6 +32747,7 @@ class CharacterSheetState {
 		this._ensureSorceryPoints();
 		this._ensureLunarSorceryResources();
 		this._ensureZeroHpInterventionUses();
+		this._ensureUmbralFormUses();
 		return [...this._data.resources];
 	}
 
@@ -47182,6 +47468,75 @@ class CharacterSheetState {
 			resourceName: "Sorcery Points",
 			resourceCost: 6,
 		},
+		innateSorcery: {
+			id: "innateSorcery",
+			name: "Innate Sorcery",
+			icon: "✨",
+			description: "Your Sorcerer spell save DC increases by 1 and you have Advantage on the attack rolls of Sorcerer spells you cast.",
+			// Curated: the prose parser turns "the spell save DC of your Sorcerer spells
+			// increases by 1" into nothing usable, and the advantage clause is scoped to
+			// spell attacks specifically (not all attacks).
+			preferCuratedEffects: true,
+			effects: [
+				{type: "bonus", target: "spellDc", value: 1},
+				{type: "advantage", target: "attack:spell"},
+			],
+			duration: "1 minute",
+			endConditions: ["Duration expires", "You end it (no action)"],
+			activationAction: "bonus",
+			resourceName: "Innate Sorcery",
+			resourceCost: 1,
+		},
+		umbralFormRhw: {
+			id: "umbralFormRhw",
+			// Name-detection would send RHW's "Umbral Form" to the XGE `umbralForm` state
+			// above, which is a 6-Sorcery-Point, 1-minute, self-activated toggle. The RHW
+			// capstone has a completely different economy (see `activateUmbralForm`), so it
+			// is reached only through the name+source override in `detectActivatableFeature`.
+			noNameDetect: true,
+			name: "Umbral Form",
+			icon: "🌑",
+			description: "While Innate Sorcery is active you are a shadowy form: Resistance to all damage except Force and Radiant, and you can move through creatures and objects as Difficult Terrain (taking 1d10 Force damage if you end your turn inside one).",
+			// CS-BUG-050: curated, explicitly `damage:`-namespaced resistances. Identical set
+			// to the XGE form — both exclude Force AND Radiant.
+			preferCuratedEffects: true,
+			effects: [
+				{type: "resistance", target: "damage:acid"},
+				{type: "resistance", target: "damage:bludgeoning"},
+				{type: "resistance", target: "damage:cold"},
+				{type: "resistance", target: "damage:fire"},
+				{type: "resistance", target: "damage:lightning"},
+				{type: "resistance", target: "damage:necrotic"},
+				{type: "resistance", target: "damage:piercing"},
+				{type: "resistance", target: "damage:poison"},
+				{type: "resistance", target: "damage:psychic"},
+				{type: "resistance", target: "damage:slashing"},
+				{type: "resistance", target: "damage:thunder"},
+				{type: "info", label: "Incorporeal Movement: move through creatures and objects as Difficult Terrain; 1d10 Force damage if you end your turn inside one."},
+			],
+			requiresStates: ["innateSorcery"],
+			duration: "While Innate Sorcery is active",
+			endConditions: ["Innate Sorcery ends", "You end it (no action)"],
+			activationAction: "free",
+		},
+		crownOfSpellfire: {
+			id: "crownOfSpellfire",
+			name: "Crown of Spellfire",
+			icon: "👑",
+			description: "Your altered Innate Sorcery crowns you in spellfire: you gain a 60-foot Fly Speed and can hover, you have Spell Avoidance (no damage on a successful save against a save-for-half effect, half on a failure), and once per turn when you take damage you can use Burning Life Force to expend Hit Point Dice and reduce it.",
+			// CS-BUG-050: use a curated, explicit flySpeed effect. Prose-parsing
+			// "you gain a Fly Speed of 60 feet" is unreliable, so pin the value.
+			preferCuratedEffects: true,
+			effects: [
+				{type: "flySpeed", value: 60},
+			],
+			duration: "1 minute",
+			endConditions: ["Innate Sorcery ends", "Duration expires", "You are incapacitated", "You die"],
+			activationAction: "bonus",
+			// The base use rides on Innate Sorcery; restoring a spent use costs 5 SP
+			// (handled by restoreCrownOfSpellfire), so activation itself is free.
+			resourceCost: 0,
+		},
 		/*
 		 * Lunar Sorcery (DSotDQ Sorcerer) — the three Lunar Embodiment phases.
 		 *
@@ -48896,6 +49251,28 @@ class CharacterSheetState {
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 		const psionic = this._detectPsionicActivation(feature, rawText, text);
 		if (psionic) return psionic;
+		// (CS-BUG-095) Crown of Spellfire (Spellfire 18) — a free "alter Innate Sorcery"
+		// toggle, NOT a resource spender. Its prose mentions "spend 5 Sorcery Points"
+		// (the *restore* cost, handled by restoreCrownOfSpellfire()). Left to the generic
+		// parser, that "5 Sorcery Points" becomes an activation cost AND the `.includes("sorcery")`
+		// resource matcher grabs the "Innate Sorcery" use pool (2 uses) instead of Sorcery Points,
+		// so the Activate button renders permanently DISABLED (2 < 5). Return an explicit
+		// zero-cost toggle bound to the crownOfSpellfire state so the button is actionable.
+		if (name === "crown of spellfire"
+			&& (feature.subclassShortName === "Spellfire" || (feature.source || feature.subclassSource) === "FRHoF")) {
+			return {
+				stateTypeId: "crownOfSpellfire",
+				stateType: this.ACTIVE_STATE_TYPES.crownOfSpellfire,
+				matchedBy: "spellfire",
+				activationAction: "bonus",
+				interactionMode: "toggle",
+				isToggle: true,
+				duration: this.ACTIVE_STATE_TYPES.crownOfSpellfire.duration,
+				endConditions: this.ACTIVE_STATE_TYPES.crownOfSpellfire.endConditions,
+				effects: this.ACTIVE_STATE_TYPES.crownOfSpellfire.effects,
+				resourceCost: 0,
+			};
+		}
 		const isDaemonologistFeature = (feature.source || feature.subclassSource) === "GrimHollowPG24"
 			&& (feature.subclassShortName || feature.subclassName || "Daemonologist").toLowerCase() === "daemonologist";
 		if (isDaemonologistFeature && name === "borrowed tongues and hides") {
@@ -49395,6 +49772,31 @@ class CharacterSheetState {
 		}
 
 		// ===== CHECK AGAINST KNOWN STATE TYPES =====
+		// Same feature NAME, different subclass. Shadow Magic (XGE) and Shadow Sorcery (RHW)
+		// both name their level-18 capstone "Umbral Form", but the economies are unrelated:
+		// XGE spends 6 Sorcery Points to enter for a minute, RHW rides Innate Sorcery once
+		// per Long Rest and spends 6 Sorcery Points to RESTORE the use. Name matching alone
+		// silently gives an RHW sorcerer the XGE behaviour, so disambiguate on the feature's
+		// own source before the generic loop below can claim it.
+		const stateBySourceOverrides = {
+			"umbral form": {rhw: "umbralFormRhw"},
+		};
+		const sourceOverride = stateBySourceOverrides[name]?.[String(feature.source || "").toLowerCase()];
+		if (sourceOverride && this.ACTIVE_STATE_TYPES[sourceOverride]) {
+			const stateType = this.ACTIVE_STATE_TYPES[sourceOverride];
+			return {
+				stateTypeId: sourceOverride,
+				stateType,
+				matchedBy: "nameAndSource",
+				activationAction: stateType.activationAction,
+				effects: stateType.effects,
+				duration: stateType.duration,
+				endConditions: stateType.endConditions,
+				requiresStates: stateType.requiresStates,
+				isToggle: true,
+			};
+		}
+
 		for (const [stateTypeId, stateType] of Object.entries(this.ACTIVE_STATE_TYPES)) {
 			// Skip generic types that shouldn't match by name
 			if (stateType.isGeneric && !stateType.detectPatterns?.length) continue;
@@ -50774,6 +51176,31 @@ class CharacterSheetState {
 				.replace(/data-vet-source="[^"]*"/i, `data-vet-source="${newSrc}"`)
 				.replace(/data-vet-hash="[^"]*"/i, `data-vet-hash="${newHash}"`);
 		});
+	}
+
+	/**
+	 * The active-state prerequisites this feature would need, that are NOT currently met.
+	 *
+	 * `getActivatableFeatures()` deliberately HIDES a feature whose `requiresStates` gate
+	 * is unmet, so the Overview toggle row disappears until the prerequisite is running.
+	 * That is correct for the toggle list, but it also drops the feature out of the
+	 * "classified activatable ability" branch of the Features tab's Use button, where the
+	 * fallback is a bare use decrement (CS-BUG-103). Callers use this to tell "this feature
+	 * has no activation behaviour" apart from "this feature is gated right now".
+	 *
+	 * @param {*} feature
+	 * @returns {string[]} display names of the missing prerequisite states (empty when the
+	 *   feature is not a gated activatable, or its gate is already satisfied)
+	 */
+	getUnmetStateRequirementsForFeature (feature) {
+		if (!feature) return [];
+		const activationInfo = CharacterSheetState.detectActivatableFeature(feature);
+		const stateType = activationInfo?.stateType || CharacterSheetState.ACTIVE_STATE_TYPES[activationInfo?.stateTypeId];
+		const required = stateType?.requiresStates;
+		if (!required?.length) return [];
+		return required
+			.filter(requiredId => !this.isStateTypeActive(requiredId))
+			.map(requiredId => CharacterSheetState.ACTIVE_STATE_TYPES[requiredId]?.name || requiredId);
 	}
 
 	/**
@@ -55508,6 +55935,17 @@ class CharacterSheetState {
 	 * concentration, note, riders}]` and this method resolves each descriptor against the live
 	 * resource pool. No per-subclass branch here or in the UI.
 	 *
+	 * Optional descriptor fields, all added for Shadow Sorcery (RHW)'s Beasts of Ill Omen:
+	 * - `castingTime`          `"bonus"` / `"action"` — surfaced so the UI can label it.
+	 * - `concentrationOptional` the caster MAY waive concentration; see
+	 *                          {@link castSpellWithResource}'s `waiveConcentration`.
+	 * - `waivedDurationMinutes` the duration the spell falls back to when concentration is
+	 *                          waived (RHW: 1 minute).
+	 * - `ignoresMaterialComponents` / `ignoresPreparation` flavour flags for the cast dialog.
+	 * - `replacesPrevious`     recasting ends the earlier casting (RHW says so explicitly).
+	 * - `summon`               a {@link getSummonSpiritStats} descriptor; casting creates the
+	 *                          companion, ending the spell dismisses it.
+	 *
 	 * @returns {Array<object>} `[{spell, source, level, cost, resourceName, resourceCurrent,
 	 *   available, grantedBy, note, concentration, riders, active}]`
 	 */
@@ -55530,6 +55968,13 @@ class CharacterSheetState {
 				grantedBy: def.grantedBy || null,
 				note: def.note || null,
 				concentration: !!def.concentration,
+				concentrationOptional: !!def.concentrationOptional,
+				waivedDurationMinutes: def.waivedDurationMinutes ?? null,
+				castingTime: def.castingTime || "action",
+				ignoresMaterialComponents: !!def.ignoresMaterialComponents,
+				ignoresPreparation: !!def.ignoresPreparation,
+				replacesPrevious: !!def.replacesPrevious,
+				summon: def.summon ? {...def.summon} : null,
 				riders: {...(def.riders || {})},
 				active: active.some(a => a.spell?.toLowerCase() === String(def.spell).toLowerCase()),
 			};
@@ -55542,10 +55987,15 @@ class CharacterSheetState {
 	 * (e.g. "you can see through your own darkness") stay observable until it ends.
 	 *
 	 * @param {string} spellName
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.waiveConcentration=false] cast WITHOUT concentration, when the
+	 *   descriptor allows it (Beasts of Ill Omen). The duration falls back to
+	 *   `waivedDurationMinutes` and the casting still replaces any earlier one.
+	 * @param {string} [opts.summonForm] which form of a `summon` descriptor to create.
 	 * @returns {object|null} the resolved descriptor with `spent`/`resourceRemaining`, or null
 	 *   when the spell isn't offered or the resource is short.
 	 */
-	castSpellWithResource (spellName) {
+	castSpellWithResource (spellName, {waiveConcentration = false, summonForm = null} = {}) {
 		const key = String(spellName || "").toLowerCase();
 		const info = this.getResourceCastableSpells().find(s => s.spell.toLowerCase() === key);
 		if (!info || !info.available) return null;
@@ -55554,18 +56004,103 @@ class CharacterSheetState {
 		if (!resource || resource.current < info.cost) return null;
 		this.setResourceCurrent(resource.id, resource.current - info.cost);
 
+		// A waiver only takes effect when the descriptor offers one; asking to waive
+		// concentration on a spell that does not allow it must NOT silently succeed.
+		const waived = waiveConcentration && info.concentrationOptional;
+		const concentrating = info.concentration && !waived;
+
+		// "If you cast it again, the previous casting ends" — dismiss the earlier summon
+		// before the new record replaces it, or the companion would be orphaned.
+		const previous = (this._data.activeResourceCastSpells || []).find(a => a.spell?.toLowerCase() === key);
+		if (previous?.companionId) this.removeCompanion?.(previous.companionId);
+
 		this._data.activeResourceCastSpells = (this._data.activeResourceCastSpells || [])
 			.filter(a => a.spell?.toLowerCase() !== key);
-		this._data.activeResourceCastSpells.push({
+		const record = {
 			spell: info.spell,
 			source: info.source,
 			grantedBy: info.grantedBy,
+			concentration: concentrating,
+			durationMinutes: waived ? info.waivedDurationMinutes : null,
 			riders: {...info.riders},
+		};
+
+		let companion = null;
+		if (info.summon) {
+			companion = this._createResourceCastSummon(info, summonForm, concentrating);
+			if (companion) record.companionId = companion.id;
+		}
+
+		this._data.activeResourceCastSpells.push(record);
+
+		if (concentrating) this.setConcentration({name: info.spell, level: info.level || 0, source: info.grantedBy || "Resource cast"});
+
+		return {
+			...info,
+			spent: info.cost,
+			resourceRemaining: this.getResources().find(r => r.name === info.resourceName)?.current ?? 0,
+			active: true,
+			concentrationWaived: waived,
+			concentration: concentrating,
+			durationMinutes: record.durationMinutes,
+			companion,
+		};
+	}
+
+	/**
+	 * Statistics of a "summon" spell's spirit, as a pure function of the effective spell
+	 * level and the caster.
+	 *
+	 * Extracted from the spell-summon picker so a RESOURCE cast of the same spell (Beasts of
+	 * Ill Omen casts *Summon Beast* for Sorcery Points, with no slot at all) produces an
+	 * identical creature — the numbers cannot drift between the two entry points because
+	 * there is only one of them.
+	 *
+	 * @param {object} opts
+	 * @param {number} opts.spellLevel effective spell level the summon was cast at
+	 * @param {number} [opts.baseLevel=2] the spell's own minimum level
+	 * @returns {{hp: number, ac: number, attackBonus: number, damage: string}}
+	 */
+	getSummonSpiritStats ({spellLevel, baseLevel = 2} = {}) {
+		const lvl = Math.max(baseLevel, Math.floor(Number(spellLevel) || baseLevel));
+		const spellMod = this.getAbilityMod(this._data.spellcasting?.ability || "int");
+		return {
+			hp: 30 + 10 * (lvl - baseLevel),
+			ac: 11 + lvl,
+			attackBonus: this.getProficiencyBonus() + spellMod,
+			damage: `1d8 + ${3 + lvl}`,
+			spellLevel: lvl,
+		};
+	}
+
+	/** @private */
+	_createResourceCastSummon (info, summonForm, concentrating) {
+		const spec = info.summon;
+		const baseLevel = spec.baseLevel ?? 2;
+		const stats = this.getSummonSpiritStats({spellLevel: info.level ?? baseLevel, baseLevel});
+		const form = summonForm || (spec.forms || [])[0] || info.spell;
+		const pb = this.getProficiencyBonus();
+		const id = this.addCompanion({
+			name: form,
+			type: CharacterSheetState.COMPANION_TYPES.SUMMON,
+			origin: info.spell,
+			creatureType: spec.creatureType || "beast",
+			size: "M",
+			ac: stats.ac,
+			hp: {max: stats.hp, current: stats.hp},
+			speed: spec.speed ? {...spec.speed} : {walk: 30},
+			abilities: {str: 14, dex: 14, con: 14, int: 14, wis: 14, cha: 14},
+			senses: ["darkvision 60 ft."],
+			passive: 10 + pb,
+			actions: [
+				{name: "Multiattack", entries: [`The spirit makes a number of attacks equal to half this spell's level (rounded down).`]},
+				{name: "Attack", entries: [`Melee/Ranged Attack: +${stats.attackBonus} to hit, reach 5 ft. or range 60 ft. Hit: ${stats.damage} damage of a type matching the spirit.`]},
+			],
+			profBonus: pb,
+			source: info.grantedBy || info.spell,
+			concentrationLinked: concentrating,
 		});
-
-		if (info.concentration) this.setConcentration({name: info.spell, level: info.level || 0, source: info.grantedBy || "Resource cast"});
-
-		return {...info, spent: info.cost, resourceRemaining: this.getResources().find(r => r.name === info.resourceName)?.current ?? 0, active: true};
+		return (this._data.companions || []).find(c => c.id === id) || null;
 	}
 
 	/** Currently-running resource-cast spells (see {@link castSpellWithResource}). */
@@ -55580,10 +56115,12 @@ class CharacterSheetState {
 	 */
 	endResourceCastSpell (spellName) {
 		const key = String(spellName || "").toLowerCase();
-		const before = (this._data.activeResourceCastSpells || []).length;
-		this._data.activeResourceCastSpells = (this._data.activeResourceCastSpells || [])
-			.filter(a => a.spell?.toLowerCase() !== key);
+		const list = this._data.activeResourceCastSpells || [];
+		const record = list.find(a => a.spell?.toLowerCase() === key);
+		const before = list.length;
+		this._data.activeResourceCastSpells = list.filter(a => a.spell?.toLowerCase() !== key);
 		const ended = this._data.activeResourceCastSpells.length !== before;
+		if (ended && record?.companionId) this.removeCompanion?.(record.companionId);
 		if (ended && this.getConcentration()?.spellName?.toLowerCase() === key) this.breakConcentration?.();
 		return ended;
 	}
@@ -55591,11 +56128,30 @@ class CharacterSheetState {
 	/**
 	 * Eyes of the Dark: true while a *darkness* you cast with Sorcery Points is running, which
 	 * is the only case in which you can see through it.
+	 *
+	 * Shadow Sorcery (RHW) states the same benefit MORE broadly — "if a spell you cast creates
+	 * an area of Darkness, you can see normally through that spell's Darkness" — so it is not
+	 * tied to a resource cast at all. When `calculations.seeThroughOwnSpellDarkness` is set,
+	 * concentrating on any darkness-creating spell you cast is enough.
 	 * @returns {boolean}
 	 */
 	canSeeThroughOwnDarkness () {
-		return (this._data.activeResourceCastSpells || []).some(a => a.riders?.seeThroughOwnDarkness);
+		if ((this._data.activeResourceCastSpells || []).some(a => a.riders?.seeThroughOwnDarkness)) return true;
+		if (!this.getFeatureCalculations().seeThroughOwnSpellDarkness) return false;
+		const conc = this.getConcentration?.();
+		const name = (conc?.spellName || conc?.name || "").toLowerCase();
+		if (!name) return false;
+		return CharacterSheetState.DARKNESS_CREATING_SPELLS.some(s => name.includes(s));
 	}
+
+	/**
+	 * Spells whose area is literally Darkness, for "you can see through Darkness YOU created".
+	 * Deliberately a short curated list rather than a text search: the sheet has no structured
+	 * "creates darkness" flag on spell data, and a substring search for "darkness" would match
+	 * *Eyes of the Dark* style feature text and every spell that merely mentions it.
+	 * @type {Array<string>}
+	 */
+	static DARKNESS_CREATING_SPELLS = ["darkness", "hunger of hadar", "evard's black tentacles"];
 	// #endregion
 
 	// #region Shadow Magic (XGE Sorcerer)
@@ -55709,6 +56265,384 @@ class CharacterSheetState {
 		const dist = distance == null ? range : Math.floor(Number(distance) || 0);
 		if (dist > range) return {ok: false, error: `Shadow Walk can teleport you up to ${range} feet.`, range};
 		return {ok: true, distance: dist, range, action: calc.shadowWalkAction || "bonus"};
+	}
+	// #endregion
+
+	// #region Shadow Sorcery (RHW Sorcerer)
+	/**
+	 * Umbral Form (Shadow Sorcery 18) — the RHW rework, whose economy is unrelated to the
+	 * XGE feature of the same name.
+	 *
+	 * RAW: "When you use your Innate Sorcery feature, you can also adopt an Umbral Form …
+	 * Once you use this feature, you can't do so again until you finish a Long Rest unless
+	 * you spend 6 Sorcery Points to restore your use of it." So:
+	 * - Innate Sorcery must ALREADY be active (the state carries `requiresStates`).
+	 * - Entering costs NO Sorcery Points — it costs the once-per-Long-Rest use.
+	 * - 6 Sorcery Points buys the USE back, not the transformation.
+	 *
+	 * @returns {{has: boolean, active: boolean, usesRemaining: number, usesMax: number,
+	 *   innateSorceryActive: boolean, canActivate: boolean, blockedReason: string|null,
+	 *   restoreCost: number, canRestore: boolean, sorceryPoints: number}}
+	 */
+	getUmbralFormStatus () {
+		const calc = this.getFeatureCalculations();
+		const has = !!calc.hasUmbralFormRhw;
+		const usesMax = calc.umbralFormUsesMax ?? 1;
+		const restoreCost = calc.umbralFormRestoreCost ?? 6;
+		const feature = (this._data.features || []).find(f => f.name === "Umbral Form");
+		const usesRemaining = has ? (feature?.uses?.current ?? usesMax) : 0;
+		const innateSorceryActive = this.isStateTypeActive("innateSorcery");
+		const active = this.isStateTypeActive("umbralFormRhw");
+		const sp = this._getSpResource()?.current ?? 0;
+
+		let blockedReason = null;
+		if (!has) blockedReason = "You don't have Umbral Form.";
+		else if (active) blockedReason = "Umbral Form is already active.";
+		else if (!innateSorceryActive) blockedReason = "Umbral Form is adopted when you use Innate Sorcery — activate Innate Sorcery first.";
+		else if (usesRemaining <= 0) blockedReason = `No uses remaining — spend ${restoreCost} Sorcery Points to restore it, or finish a Long Rest.`;
+
+		return {
+			has,
+			active,
+			usesRemaining,
+			usesMax,
+			innateSorceryActive,
+			canActivate: !blockedReason,
+			blockedReason,
+			restoreCost,
+			canRestore: has && usesRemaining < usesMax && sp >= restoreCost,
+			sorceryPoints: sp,
+		};
+	}
+
+	/**
+	 * Adopt the Umbral Form. Spends the once-per-Long-Rest use (NOT Sorcery Points) and
+	 * activates the `umbralFormRhw` state, which grants the resistances for real.
+	 * @returns {{ok: boolean, error?: string, usesRemaining?: number, state?: object}}
+	 */
+	activateUmbralForm () {
+		const status = this.getUmbralFormStatus();
+		if (!status.canActivate) return {ok: false, error: status.blockedReason};
+
+		const feature = (this._data.features || []).find(f => f.name === "Umbral Form");
+		if (feature?.uses) {
+			feature.uses.current = Math.max(0, (feature.uses.current ?? status.usesMax) - 1);
+			const resource = (this._data.resources || []).find(r => r.featureId === feature.id || r.name === "Umbral Form");
+			if (resource) resource.current = feature.uses.current;
+		}
+
+		const state = this.activateState("umbralFormRhw", {source: "Umbral Form"});
+		if (!state) {
+			// Restore the use — the state refused (e.g. Innate Sorcery lapsed between the
+			// status check and here), so nothing should have been spent.
+			if (feature?.uses) feature.uses.current = Math.min(feature.uses.max ?? status.usesMax, (feature.uses.current ?? 0) + 1);
+			return {ok: false, error: "Umbral Form could not be activated."};
+		}
+		return {ok: true, usesRemaining: this.getUmbralFormStatus().usesRemaining, state};
+	}
+
+	/** End the Umbral Form (no action, per RAW). @returns {boolean} */
+	endUmbralForm () {
+		if (!this.isStateTypeActive("umbralFormRhw")) return false;
+		this.deactivateState("umbralFormRhw");
+		return true;
+	}
+
+	/**
+	 * "unless you spend 6 Sorcery Points to restore your use of it" — buy the use back.
+	 * @returns {{ok: boolean, error?: string, spent?: number, usesRemaining?: number, sorceryPointsRemaining?: number}}
+	 */
+	restoreUmbralFormUse () {
+		const status = this.getUmbralFormStatus();
+		if (!status.has) return {ok: false, error: "You don't have Umbral Form."};
+		if (status.usesRemaining >= status.usesMax) return {ok: false, error: "Umbral Form's use is already available."};
+		const res = this._getSpResource();
+		if (!res || res.current < status.restoreCost) return {ok: false, error: `You need ${status.restoreCost} Sorcery Points to restore Umbral Form.`};
+
+		this.setResourceCurrent(res.id, res.current - status.restoreCost);
+		const feature = (this._data.features || []).find(f => f.name === "Umbral Form");
+		if (feature?.uses) {
+			feature.uses.current = Math.min(feature.uses.max ?? status.usesMax, (feature.uses.current ?? 0) + 1);
+			const resource = (this._data.resources || []).find(r => r.featureId === feature.id || r.name === "Umbral Form");
+			if (resource) resource.current = feature.uses.current;
+		}
+		return {
+			ok: true,
+			spent: status.restoreCost,
+			usesRemaining: this.getUmbralFormStatus().usesRemaining,
+			sorceryPointsRemaining: this._getSpResource()?.current ?? 0,
+		};
+	}
+
+	/**
+	 * Give the RHW Umbral Form its once-per-Long-Rest budget on its own feature, so it
+	 * renders as a use badge and a Long Rest restores it through the ordinary feature-uses
+	 * path. Mirrors {@link _ensureZeroHpInterventionUses}.
+	 * @private
+	 */
+	_ensureUmbralFormUses () {
+		const feature = (this._data.features || []).find(f => f.name === "Umbral Form");
+		if (!feature) return;
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasUmbralFormRhw) return;
+		const usesMax = calc.umbralFormUsesMax ?? 1;
+		const resource = (this._data.resources || []).find(r => r.featureId === feature.id || r.name === "Umbral Form");
+		const featureOk = feature.uses?.max === usesMax && feature.uses?.recharge === "long";
+		const resourceOk = !resource || (resource.max === usesMax && resource.recharge === "long");
+		if (featureOk && resourceOk) return;
+		const spent = feature.uses ? (feature.uses.current ?? 0) < (feature.uses.max ?? 0) : false;
+		feature.uses = {current: spent ? 0 : usesMax, max: usesMax, recharge: "long"};
+		if (resource) {
+			resource.max = usesMax;
+			resource.recharge = "long";
+			resource.current = feature.uses.current;
+		}
+	}
+
+	/**
+	 * Beasts of Ill Omen (Shadow Sorcery 6): "you can expend 3 Sorcery Points to cast Summon
+	 * Beast as a Bonus Action, without expending a spell slot, without having the spell
+	 * prepared, and without Material components".
+	 *
+	 * Routed entirely through the generic {@link castSpellWithResource} pipeline, whose
+	 * descriptor lives in `calculations.resourceCastSpells`; this method exists only to give
+	 * the UI (and tests) a named, intention-revealing entry point and to normalize the
+	 * concentration choice.
+	 *
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.waiveConcentration=false] cast it WITHOUT Concentration; the
+	 *   duration becomes 1 minute and recasting ends the earlier one.
+	 * @param {string} [opts.form] which Bestial Spirit to summon.
+	 * @returns {object|null} the cast descriptor, or null when unavailable.
+	 */
+	castBeastsOfIllOmen ({waiveConcentration = false, form = null} = {}) {
+		if (!this.getFeatureCalculations().hasBeastsOfIllOmen) return null;
+		return this.castSpellWithResource("Summon Beast", {waiveConcentration, summonForm: form});
+	}
+
+	// #endregion
+
+	// #region Spellfire Sorcery (FRHoF Sorcerer)
+	/**
+	 * Bolstering Flames (Spellfire 3). Grant Temporary Hit Points equal to
+	 * `1d4 + your Charisma modifier` (plus your Sorcerer level once Honed
+	 * Spellfire is online) to yourself or a creature within 30 ft.
+	 *
+	 * When the target is yourself this performs the REAL mutation — it calls
+	 * {@link setTempHp}, so the granted Temp HP show up on the sheet and obey the
+	 * "higher value wins, no stacking" rule. When the target is an ally the roll
+	 * is still returned so the DM can apply it, but your own Temp HP are left
+	 * untouched.
+	 *
+	 * @param {object} [opts]
+	 * @param {"self"|"ally"} [opts.target="self"]
+	 * @param {number|null} [opts.roll=null] explicit d4 result (for deterministic use/tests).
+	 * @returns {{ok: boolean, error?: string, tempHp?: number, applied?: boolean, target?: string, range?: number}}
+	 */
+	useBolsteringFlames ({target = "self", roll = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasBolsteringFlames) return {ok: false, error: "You don't have Bolstering Flames."};
+
+		const die = roll == null ? this._rollDiceExpression(calc.bolsteringFlamesTempHpDie || "1d4") : Math.floor(Number(roll) || 0);
+		const bonus = calc.bolsteringFlamesTempHpBonus ?? this.getAbilityMod("cha");
+		const tempHp = Math.max(1, die + bonus);
+		const range = calc.bolsteringFlamesRange ?? 30;
+
+		if (target === "self") {
+			this.setTempHp(tempHp);
+			return {ok: true, tempHp, applied: true, target, range};
+		}
+		return {ok: true, tempHp, applied: false, target: "ally", range};
+	}
+
+	/**
+	 * Radiant Fire (Spellfire 3). One creature within 30 ft takes `1d4` Fire OR
+	 * Radiant damage (your choice), increasing to `1d8` with Honed Spellfire.
+	 *
+	 * There is no self-effect to mutate, so this method publishes the live
+	 * damage die, the chosen damage type and the range, and rolls the total —
+	 * the returned `total` is the value a DM applies. The damage TYPE is a
+	 * per-use choice, never a persisted build decision.
+	 *
+	 * @param {object} [opts]
+	 * @param {"fire"|"radiant"} [opts.damageType="fire"]
+	 * @param {number|null} [opts.roll=null] explicit die result (for deterministic use/tests).
+	 * @returns {{ok: boolean, error?: string, total?: number, damage?: string, damageType?: string, range?: number}}
+	 */
+	useRadiantFire ({damageType = "fire", roll = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasRadiantFire) return {ok: false, error: "You don't have Radiant Fire."};
+
+		const allowed = calc.radiantFireDamageTypes || ["fire", "radiant"];
+		const chosen = allowed.includes(damageType) ? damageType : allowed[0];
+		const expr = calc.radiantFireDamage || "1d4";
+		const total = roll == null ? this._rollDiceExpression(expr) : Math.floor(Number(roll) || 0);
+		return {ok: true, total, damage: expr, damageType: chosen, range: calc.radiantFireRange ?? 30};
+	}
+
+	/**
+	 * Spellfire Burst (Spellfire 3). Once per turn, when you spend at least one
+	 * Sorcery Point to take the Magic action or a Bonus Action, you may unleash
+	 * Bolstering Flames OR Radiant Fire.
+	 *
+	 * This method OWNS the two gates the prose describes:
+	 *   1. the once-per-turn limit — tracked on `_data.spellfireBurstUsedThisTurn`
+	 *      and cleared by {@link resetSpellfireBurstTurn};
+	 *   2. the "spent at least one Sorcery Point this action" trigger.
+	 * On success it dispatches to {@link useBolsteringFlames} / {@link useRadiantFire}
+	 * and marks the turn used, so a second call in the same turn is refused.
+	 *
+	 * @param {object} opts
+	 * @param {"bolstering"|"radiant"} opts.effect which effect to unleash.
+	 * @param {boolean} [opts.spentSorceryPoint=true] whether the triggering action spent ≥1 SP.
+	 * @param {object} [opts.effectOpts={}] forwarded to the chosen effect method.
+	 * @returns {{ok: boolean, error?: string, effect?: string, result?: object}}
+	 */
+	useSpellfireBurst ({effect, spentSorceryPoint = true, effectOpts = {}} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasSpellfireBurst) return {ok: false, error: "You don't have Spellfire Burst."};
+		if (!spentSorceryPoint) {
+			return {ok: false, error: "Spellfire Burst triggers only when you spend at least one Sorcery Point on the Magic action or a Bonus Action."};
+		}
+		if (this._data.spellfireBurstUsedThisTurn) {
+			return {ok: false, error: "You've already used Spellfire Burst this turn."};
+		}
+
+		let result;
+		if (effect === "bolstering") result = this.useBolsteringFlames(effectOpts);
+		else if (effect === "radiant") result = this.useRadiantFire(effectOpts);
+		else return {ok: false, error: "Choose Bolstering Flames (\"bolstering\") or Radiant Fire (\"radiant\")."};
+
+		if (!result.ok) return result;
+		this._data.spellfireBurstUsedThisTurn = true;
+		return {ok: true, effect, result};
+	}
+
+	/** Clear the once-per-turn Spellfire Burst lock (call at the start of your turn). */
+	resetSpellfireBurstTurn () {
+		this._data.spellfireBurstUsedThisTurn = false;
+	}
+
+	/**
+	 * Absorb Spells (Spellfire 6). Counterspell is always prepared (via the
+	 * subclass `additionalSpells`); when a target FAILS its save against your
+	 * Counterspell you regain `1d4` Sorcery Points.
+	 *
+	 * This performs the REAL mutation — it raises your current Sorcery Points
+	 * (clamped to your maximum) via {@link setSorceryPoints}, so the pool on the
+	 * sheet actually refills.
+	 *
+	 * @param {object} [opts]
+	 * @param {number|null} [opts.roll=null] explicit d4 result (for deterministic use/tests).
+	 * @returns {{ok: boolean, error?: string, regained?: number, sorceryPoints?: object}}
+	 */
+	regainSorceryPointsFromAbsorbSpells ({roll = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasAbsorbSpells) return {ok: false, error: "You don't have Absorb Spells."};
+
+		const rolled = roll == null ? this._rollDiceExpression(calc.absorbSpellsSorceryPointRegain || "1d4") : Math.floor(Number(roll) || 0);
+		const sp = this.getSorceryPoints();
+		const before = sp.current;
+		const next = Math.min(sp.max, before + Math.max(0, rolled));
+		this.setSorceryPoints({current: next, max: sp.max});
+		return {ok: true, regained: next - before, sorceryPoints: this.getSorceryPoints()};
+	}
+
+	/**
+	 * Crown of Spellfire (Spellfire 18) — restore the altered Innate Sorcery use
+	 * by spending 5 Sorcery Points. This performs the REAL spend via
+	 * {@link useSorceryPoint} and (re)activates the {@link crownOfSpellfire}
+	 * active state so the 60 ft fly speed lands on {@link getSpeed}.
+	 *
+	 * @returns {{ok: boolean, error?: string, cost?: number, sorceryPointsRemaining?: number, stateId?: string}}
+	 */
+	restoreCrownOfSpellfire () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCrownOfSpellfire) return {ok: false, error: "You don't have Crown of Spellfire."};
+
+		const cost = calc.crownOfSpellfireRestoreCost ?? 5;
+		const sp = this.getSorceryPoints();
+		if (sp.current < cost) return {ok: false, error: `Restoring Crown of Spellfire costs ${cost} Sorcery Points (you have ${sp.current}).`};
+		if (!this.useSorceryPoint(cost)) return {ok: false, error: "Could not spend Sorcery Points."};
+
+		let stateId = null;
+		if (!this.isStateTypeActive("crownOfSpellfire")) stateId = this.activateState("crownOfSpellfire");
+		else stateId = (this.getActiveStates().find(s => s.stateTypeId === "crownOfSpellfire") || {}).id || null;
+
+		return {ok: true, cost, sorceryPointsRemaining: this.getSorceryPoints().current, stateId};
+	}
+
+	/**
+	 * Burning Life Force (part of Crown of Spellfire, L18). Once per turn when
+	 * you take damage while your altered Innate Sorcery is active, you may
+	 * expend up to your Charisma modifier (minimum one) in Hit Point Dice and
+	 * reduce the damage by the total rolled.
+	 *
+	 * This performs the REAL mutation — it decrements the Hit Point Dice pools
+	 * via {@link adjustHitDieCurrent} (expending, NOT healing), so the dice
+	 * actually leave your pool. Only usable while the crown state is active.
+	 *
+	 * @param {object} [opts]
+	 * @param {number} [opts.diceToSpend] how many Hit Point Dice to expend (clamped to the cap and to what you have).
+	 * @param {number|null} [opts.roll=null] explicit total for the expended dice (deterministic use/tests).
+	 * @param {number} [opts.incomingDamage] damage being taken (the reduction is clamped to it).
+	 * @returns {{ok: boolean, error?: string, diceSpent?: number, reduction?: number, hitDiceRemaining?: object}}
+	 */
+	useBurningLifeForce ({diceToSpend = null, roll = null, incomingDamage = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCrownOfSpellfire) return {ok: false, error: "You don't have Crown of Spellfire."};
+		if (!this.isStateTypeActive("crownOfSpellfire")) {
+			return {ok: false, error: "Burning Life Force works only while your altered Innate Sorcery (Crown of Spellfire) is active."};
+		}
+
+		const cap = calc.crownBurningLifeForceMaxDice ?? Math.max(1, this.getAbilityMod("cha"));
+		let want = diceToSpend == null ? cap : Math.floor(Number(diceToSpend) || 0);
+		want = Math.max(0, Math.min(cap, want));
+		if (want <= 0) return {ok: false, error: "You must expend at least one Hit Point Die."};
+
+		// Expend the largest-faced spendable dice first — real mutation, no heal.
+		let spent = 0;
+		let rolledTotal = 0;
+		for (let i = 0; i < want; i++) {
+			const dieType = this.getLargestSpendableHitDieType();
+			if (!dieType) break;
+			this.adjustHitDieCurrent(dieType, -1);
+			spent++;
+			if (roll == null) rolledTotal += this._rollDiceExpression(`1${dieType}`);
+		}
+		if (spent === 0) return {ok: false, error: "You have no Hit Point Dice to expend."};
+
+		let reduction = roll == null ? rolledTotal : Math.floor(Number(roll) || 0);
+		if (incomingDamage != null) reduction = Math.min(reduction, Math.max(0, Math.floor(Number(incomingDamage) || 0)));
+		return {ok: true, diceSpent: spent, reduction, hitDiceRemaining: this.getHitDiceByType()};
+	}
+
+	/**
+	 * Spell Avoidance (part of Crown of Spellfire, L18). While your altered
+	 * Innate Sorcery is active, when you're subjected to an effect that lets you
+	 * make a saving throw to take only half damage, you instead take NO damage on
+	 * a success and only half on a failure.
+	 *
+	 * Returns the damage you actually take. Only rewrites the outcome while the
+	 * crown state is active; otherwise it applies the normal save-for-half rule.
+	 *
+	 * @param {object} opts
+	 * @param {boolean} opts.saveSuccess whether you succeeded on the saving throw.
+	 * @param {number} opts.damage the full damage of the effect.
+	 * @returns {{ok: boolean, error?: string, damageTaken?: number, avoided?: boolean, active?: boolean}}
+	 */
+	resolveSpellAvoidance ({saveSuccess = false, damage = 0} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCrownOfSpellfire) return {ok: false, error: "You don't have Crown of Spellfire."};
+
+		const full = Math.max(0, Math.floor(Number(damage) || 0));
+		const active = this.isStateTypeActive("crownOfSpellfire");
+		if (!active) {
+			// Normal save-for-half.
+			return {ok: true, active: false, avoided: false, damageTaken: saveSuccess ? Math.floor(full / 2) : full};
+		}
+		if (saveSuccess) return {ok: true, active: true, avoided: true, damageTaken: 0};
+		return {ok: true, active: true, avoided: false, damageTaken: Math.floor(full / 2)};
 	}
 	// #endregion
 

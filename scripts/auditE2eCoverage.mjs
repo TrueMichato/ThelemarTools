@@ -689,6 +689,7 @@ function auditSpec (specPath) {
 	const vacuousSpellMatches = findVacuousSpellMatches(src);
 	const unmatchableResources = findUnmatchableResourceNames(src);
 	const commentLeaks = findCommentLeaks(src);
+	const writeOnlyCalcs = findWriteOnlyCalcProbes(src);
 	const siblingCovered = rowClasses.siblingCovered;
 	// `reasonCount` is deliberately NOT added. An explanatory comment
 	// records that a gap is KNOWN; it does not make the feature verified.
@@ -720,6 +721,7 @@ function auditSpec (specPath) {
 		vacuousSpellMatches,
 		unmatchableResources,
 		commentLeaks,
+		writeOnlyCalcs,
 		coverage,
 		status,
 	};
@@ -747,7 +749,13 @@ function auditSpec (specPath) {
  *
  * Measured both directions rather than assumed:
  *   fixed blanker  →   0 leaks across all 54 specs
- *   regex branch disabled → 274 leaks across 14 specs
+ *   regex branch disabled → 274 leaks across 13 specs
+ *
+ * Use the LEAK COUNT to tell those apart, never the `--strict` exit code.
+ * Leaks are only one of six conditions in that gate, and two of the others
+ * (`warnings`, `totalUnmatch`) are non-zero on the shipped tree, so `--strict`
+ * exits 1 either way. "It is wired into --strict, therefore --strict
+ * discriminates" is true of the wiring and false of the observable.
  *
  * NOTE the first attempt at this invariant asserted that real `kind:` tokens
  * survive blanking. It could never fire, because a phantom string makes the
@@ -764,6 +772,131 @@ function findCommentLeaks (rawSrc) {
 			.replace(/'(?:[^'\\]|\\.)*'/g, "");
 		if (/\/\/[^\n]*\S/.test(unquoted)) out.push({line: i + 1, text: line.trim().slice(0, 80)});
 	});
+	return out;
+}
+
+/**
+ * WRITE-ONLY FEATURE CALCULATION KEYS (see CS-BUG-093).
+ *
+ * A `featureCalculation` probe asserts `getFeatureCalculations()[key]`. If
+ * NOTHING in `js/` ever reads that key, the probe pins a value the product
+ * computes and then discards — it cannot fail when the feature's real surface
+ * breaks, because it never touches that surface. That is the same
+ * predetermined-outcome property as an inert level window, arrived at from the
+ * product side rather than the harness side.
+ *
+ * Framing matters here and the entry deliberately does NOT say "this feature
+ * is unimplemented". Write-only is NOT the same as inert: several of these
+ * features work perfectly via a different path (the generic feature-uses
+ * parser reading the homebrew entry, a dedicated pool, a bespoke renderer),
+ * leaving the calc key as redundant dead data beside a working feature. What
+ * the check asserts is narrower and always true: THIS PROBE is not watching
+ * the surface that would break.
+ *
+ * ── Scope, and why it is not the whole population ──────────────────────
+ * 2114 calc keys are assigned; 1504 are never read by a static reference.
+ * Reporting all of them would be worse than useless — noise is how a correct
+ * check gets switched off — and a large share are false positives, because
+ * the product reads calc keys in ways no reference count can see:
+ *
+ *   1. SUFFIX READS.  `charactersheet.js` builds the key from the feature's
+ *      DISPLAY NAME at runtime: `calc[`${key}Dc`]`, `${key}Damage`,
+ *      `${key}SaveAbility`, … So "Decay" reads `decayDc` etc., and a naive
+ *      count calls all five of them write-only. Suffixes are discovered from
+ *      the source rather than hardcoded, and matching keys are listed
+ *      SEPARATELY as candidates instead of being silently dropped —
+ *      over-subtraction is also a way to be wrong.
+ *   2. DATA-DRIVEN FLAGS.  `calculations[entry.calcFlag] = true` and
+ *      `calc[def.calcFlag]` resolve through registries.
+ *   3. `getFeatureCalculation(key)` is a public getter by arbitrary string.
+ *      In practice it has exactly ONE caller, passing the literal
+ *      "rageDamage", so it is not a general escape hatch — but it is why
+ *      this check can never be sound enough to gate on.
+ *
+ * So the check is scoped to keys THE SPECS ACTUALLY PROBE. That is the
+ * audit's own subject matter, it is the actionable set, and it keeps the
+ * finding at a size someone will read.
+ *
+ * Deliberately NOT wired to `--strict`: it is a heuristic over a population
+ * with known-unresolvable false positives, and a permanently-red gate is a
+ * gate nobody runs.
+ *
+ * Scans `js/` ONLY — never `docs/`. `known-bugs.md` and several spec comments
+ * now quote these key names verbatim, and a check that fires on its own
+ * documentation is the failure mode detector #3 shipped with.
+ */
+function readCalcKeyUsage () {
+	const jsRoot = path.join(ROOT, "js");
+	const files = [];
+	(function walk (dir) {
+		let entries;
+		try { entries = fs.readdirSync(dir, {withFileTypes: true}); } catch { return; }
+		for (const e of entries) {
+			const p = path.join(dir, e.name);
+			if (e.isDirectory()) walk(p);
+			else if (e.name.endsWith(".js")) files.push(p);
+		}
+	})(jsRoot);
+
+	const lineHits = new Map(); // identifier -> number of LINES mentioning it
+	const assigned = new Map(); // calc key   -> "file:line" of first assignment
+	const suffixes = new Set(); // dynamically-constructed key suffixes
+	const RE_ID = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+	const RE_ASSIGN = /calculations\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)/g;
+	const RE_TPL = /(?:calc|calculations)\[`\$\{[^}]+\}([A-Za-z0-9_$]+)`\]/g;
+
+	for (const file of files) {
+		const rel = path.relative(ROOT, file);
+		const lines = fs.readFileSync(file, "utf8").split("\n");
+		for (let i = 0; i < lines.length; ++i) {
+			// Line-granularity matches the manual `grep -rn <key> js/ | wc -l`
+			// measurement this check was derived from, so the two agree.
+			for (const id of new Set(lines[i].match(RE_ID) || [])) lineHits.set(id, (lineHits.get(id) || 0) + 1);
+			let m;
+			RE_ASSIGN.lastIndex = 0;
+			while ((m = RE_ASSIGN.exec(lines[i])) !== null) if (!assigned.has(m[1])) assigned.set(m[1], `${rel}:${i + 1}`);
+			RE_TPL.lastIndex = 0;
+			while ((m = RE_TPL.exec(lines[i])) !== null) suffixes.add(m[1]);
+		}
+	}
+	return {lineHits, assigned, suffixes};
+}
+
+let _calcUsage = null;
+const calcUsage = () => (_calcUsage ||= readCalcKeyUsage());
+
+/** Calc keys a spec asserts through `featureCalculation*` probes. */
+function probedCalcKeys (rawSrc) {
+	// Blanked, not raw: a `property: "…"` inside a comment is prose, and
+	// crediting it would let documentation manufacture a finding.
+	const src = blankComments(rawSrc);
+	const out = [];
+	const re = /kind:\s*"featureCalculation(?:DerivedFrom)?"/g;
+	let m;
+	while ((m = re.exec(src)) !== null) {
+		const open = enclosingBrace(src, m.index);
+		if (open < 0) continue;
+		const body = readObjectLiteral(src, open);
+		if (!body) continue;
+		const prop = body.match(/\bproperty:\s*"([A-Za-z0-9_$]+)"/);
+		if (prop) out.push({key: prop[1], line: src.slice(0, m.index).split("\n").length});
+	}
+	return out;
+}
+
+function findWriteOnlyCalcProbes (rawSrc) {
+	const {lineHits, assigned, suffixes} = calcUsage();
+	const sufList = [...suffixes];
+	const seen = new Set();
+	const out = [];
+	for (const {key, line} of probedCalcKeys(rawSrc)) {
+		if (seen.has(key)) continue;
+		seen.add(key);
+		if (!assigned.has(key)) continue; // not a calc key at all
+		if (lineHits.get(key) !== 1) continue; // has a real reader
+		const dynamic = sufList.some(s => key.length > s.length && key.endsWith(s));
+		out.push({key, line, site: assigned.get(key), dynamic});
+	}
 	return out;
 }
 
@@ -870,6 +1003,42 @@ function main () {
 	if (warnings > 0) {
 		log(`  ${warnings} spec(s) below threshold.`);
 	}
+
+	const woSpecs = results.filter(r => r.writeOnlyCalcs.some(x => !x.dynamic));
+	const totalWo = results.reduce((a, r) => a + r.writeOnlyCalcs.filter(x => !x.dynamic).length, 0);
+	const totalWoDyn = results.reduce((a, r) => a + r.writeOnlyCalcs.filter(x => x.dynamic).length, 0);
+	if (woSpecs.length) {
+		log("");
+		log(`  \u26a0 featureCalculation probes on WRITE-ONLY keys (CS-BUG-093):`);
+		log("");
+		const SHOW = process.argv.includes("--write-only-full") ? Infinity : 6;
+		for (const r of woSpecs) {
+			const rows = r.writeOnlyCalcs.filter(x => !x.dynamic);
+			const head = rows.slice(0, SHOW);
+			for (const row of head) {
+				log(`      ${padR(r.fileName, 46)} line ${padR(row.line, 5)} ${padR(row.key, 34)} assigned ${row.site}`);
+			}
+			if (rows.length > head.length) {
+				log(`      ${padR(r.fileName, 46)} ${padL(`… and ${rows.length - head.length} more`, 12)}`);
+			}
+		}
+		log("");
+		log(`  ${totalWo} probe(s) across ${woSpecs.length} spec(s) assert a calc key that nothing in`);
+		log(`  js/ reads. The value is computed and discarded, so the probe cannot fail`);
+		log(`  when the feature's REAL surface breaks — it never touches it.`);
+		log(`  Write-only is NOT the same as unimplemented: many of these features work`);
+		log(`  through another path entirely, which is exactly why the probe is looking`);
+		log(`  in the wrong place. Prefer the reading surface (getSpeed, getResource,`);
+		log(`  aggregateModifiers, a rendered row) over getFeatureCalculations().`);
+		if (totalWoDyn) {
+			log(`  ${totalWoDyn} further key(s) end in a suffix the product builds dynamically`);
+			log(`  (calc[\`\${name}Dc\`] and friends) — excluded from the count as probably read.`);
+		}
+		log(`  Advisory only, never --strict: reference counting cannot see data-driven`);
+		log(`  reads, so a red gate here would be permanent and therefore ignored.`);
+		log("");
+	}
+
 	const unmatchSpecs = results.filter(r => r.unmatchableResources.length);
 	const totalUnmatch = results.reduce((a, r) => a + r.unmatchableResources.length, 0);
 	if (unmatchSpecs.length) {

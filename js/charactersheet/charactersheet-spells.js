@@ -4507,7 +4507,6 @@ class CharacterSheetSpells {
 	async _pShowSummonPicker (spell, summonInfo, castLevel = null) {
 		const slotLevel = Number(castLevel) || spell.level || 2; // Minimum level for summon spells
 		const pb = this._state.getProficiencyBonus?.() || 2;
-		const spellMod = this._state.getAbilityMod?.(this._state.getSpellcastingAbility?.() || "int") || 0;
 
 		// Choose form
 		const chosenForm = await InputUiUtil.pGetUserEnum({
@@ -4518,11 +4517,10 @@ class CharacterSheetSpells {
 		});
 		if (!chosenForm) return;
 
-		// Base stats scale with spell level
-		const hp = 30 + (10 * (slotLevel - 2)); // Scales by 10 HP per level above 2nd
-		const ac = 11 + slotLevel;
-		const attackBonus = pb + spellMod;
-		const damage = `1d8 + ${3 + slotLevel}`;
+		// Base stats scale with spell level. Single source of truth so a RESOURCE cast of the
+		// same spell (e.g. Shadow Sorcery's Beasts of Ill Omen casting Summon Beast for
+		// Sorcery Points) cannot produce a differently-statted spirit.
+		const {hp, ac, attackBonus, damage} = this._state.getSummonSpiritStats({spellLevel: slotLevel});
 
 		// Dismiss any existing concentration-linked companions
 		const existingSummons = this._state.getActiveCompanions?.()?.filter(c => c.concentrationLinked) || [];
@@ -7813,9 +7811,22 @@ class CharacterSheetSpells {
 		const customSpellDc = this._state._data?.customModifiers?.spellDc || 0;
 
 		// Phase-1 doctrine: exhaustion is roll-only, not applied to display.
+		//
+		// CS-BUG-102: this card hand-rolled `8 + mod + prof` and so was the ONLY spell
+		// save DC on the sheet that ignored active-state buffs. The Combat tab reads
+		// `getSpellcastingClassBreakdown()[].saveDc`, which routes through
+		// `getSpellSaveDcForAbility()` and DOES include them, so a character under
+		// Innate Sorcery (or any `{type: "bonus", target: "spellDc"}` custom ability)
+		// saw two different DCs on two tabs — and the Spells tab, the one a player
+		// actually casts from, showed the lower one.
+		//
+		// Deliberately NOT done for the attack bonus: `_rollSpellsTabAttack` already
+		// adds `getBonusFromStates("attack:spell")` on top of the displayed value, so
+		// folding it in here would double-count it on every roll.
+		const stateDcBonus = this._state.getBonusFromStates?.("spellDc") || 0;
 		const canonicalAttack = mod + prof;
 		const effectiveAttack = canonicalAttack + spellAttackBonus + customSpellAttack;
-		const canonicalDc = 8 + mod + prof;
+		const canonicalDc = 8 + mod + prof + stateDcBonus;
 		const effectiveDc = canonicalDc + spellDcBonus + customSpellDc;
 
 		const idAttr = (base) => isPrimary ? ` id="charsheet-spell-${base}"` : "";
@@ -7846,7 +7857,7 @@ class CharacterSheetSpells {
 		if (card.isRolledPrepared) {
 			// Gambler: DC/attack are rolled per cast (dice instead of a static mod).
 			const dice = calcs.gamblerModifierDice || card.preparedDice || "1d4";
-			const dcStatic = spellDcBonus + customSpellDc;
+			const dcStatic = spellDcBonus + customSpellDc + stateDcBonus;
 			const dcBonusStr = dcStatic > 0 ? ` + ${dcStatic}` : (dcStatic < 0 ? ` - ${Math.abs(dcStatic)}` : "");
 			dcEl.textContent = `${8 + prof} + ${dice}${dcBonusStr}`;
 			const atkStatic = spellAttackBonus + customSpellAttack;
