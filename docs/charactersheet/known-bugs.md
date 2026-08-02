@@ -4381,25 +4381,38 @@ The official text names this exact interaction: *"if you get either option from
 a Cleric subclass in an older book, use only the option you choose for this
 feature."*
 
-**Not the parser.** `_extractStructuredChoices` (`charactersheet-state.js:768`)
+**Not the parser.** `_extractStructuredChoices` (`charactersheet-state.js:790`)
 documents two encodings and names Blessed Strikes explicitly as the second
 (*"a bare `{type:"entries", entries:[refClassFeature, refClassFeature]}` block
 … no `options` wrapper"*). It handles it correctly. A reader sent to
 `FeatureChoiceParser` will find working code.
 
 **The defect is a reader/writer drift between the parser and the grant site.**
-`charactersheet-class-utils.js:3319-3345` extracts `refClassFeature` sub-entries
+`charactersheet-class-utils.js:3386-3412` extracts `refClassFeature` sub-entries
 as *automatic grants* — the loop exists for Ki / Monk's Focus, where every ref
 genuinely is granted — and guards against player choices with a single test:
 
 ```js
-// :3315  IMPORTANT: Skip "options" type entries — those are player choices …
-if (entry.type === "options") continue;              // :3323 — the whole guard
+// :3379  IMPORTANT: Skip "options" type entries — those are player choices …
+if (entry.type === "options") continue;              // :3391 — the whole guard
 …
-extracted.push({name: refName, …, parentFeature: feature.name});   // :3340
+extracted.push({name: refName, …, parentFeature: feature.name});   // :3401
 ```
 
-| encoding | parser (`state.js:768`, since `9a03a9f8`) | grant site (`:3323`) |
+> **Line numbers here were re-derived on 2026-08-02 and WILL drift again.** The
+> previous set was stale by **+61 to +68** — *not a constant offset*, so they
+> cannot be repaired by adding a delta; each must be re-derived. Roughly a dozen
+> sessions edit this file concurrently, and an unrelated 32-line insertion above
+> the block moved every citation at once. Re-derive with:
+>
+> ```sh
+> grep -n 'IMPORTANT: Skip\|entry.type === "options") continue\|extracted.push' \
+>   js/charactersheet/charactersheet-class-utils.js
+> ```
+>
+> The quoted code above is the stable handle; the numbers are a convenience.
+
+| encoding | parser (`state.js:790`, since `9a03a9f8`) | grant site (`:3391`) |
 |---|---|---|
 | 1. `{type:"options", count, entries:[…]}` | handled | **skipped** ✅ |
 | 2. bare `{type:"entries", entries:[ref, ref]}` + "one of the following" prose | handled | **not skipped** 🔴 |
@@ -4407,7 +4420,7 @@ extracted.push({name: refName, …, parentFeature: feature.name});   // :3340
 The parser learned encoding 2 on 2026-07-03; the grant site still knows only
 encoding 1, so a Blessed Strikes falls through to the automatic-grant loop and
 both refs are pushed with `parentFeature: "Blessed Strikes"` — exactly the
-`_data.features` shape above. The comment at `:3315` states the intent is to
+`_data.features` shape above. The comment at `:3379` states the intent is to
 *skip player choices*, so this is an incomplete encoding check rather than a
 design decision.
 
@@ -4494,7 +4507,7 @@ parser's own predicate (recursive; bare un-named `entries` block, ≥2 refs,
 prose matching `/one of the following|choose one/i`):
 
 ```
-ENCODING 2 — falls through :3323          2 features, BOTH measured live
+ENCODING 2 — falls through :3391          2 features, BOTH measured live
   Blessed Strikes   Cleric XPHB L7   count=1  refs=2   → 2 rows   🔴 BUG
   Cunning Strike    Rogue  XPHB L5   count=1  refs=3   → 3 rows   ✅ benign
 
@@ -4510,18 +4523,68 @@ measured, **none unmeasured**.
 **🔴 The second member is why the obvious fix is wrong.** Cunning Strike hits
 the same unguarded path and is *display-correct anyway*: XPHB grants a Rogue
 all three effects (Poison / Trip / Withdraw) and picks between them **at use
-time**, so three rows is right. Its `_data.chosenSubfeatures` records three and
-`_data.features` holds three — consistent, measured on `rogue/thief/5`. The
-prose test is a false positive there: "one of the following" describes an
-at-use menu, not a level-up pick.
+time**, so three rows is right. The prose test is a false positive there: "one
+of the following" describes an at-use menu, not a level-up pick.
 
-So teaching `:3323` the parser's bare-sibling predicate — the natural fix, and
+> **🔴 RETRACTED EVIDENCE — the "3 recorded / 3 materialised, consistent on
+> `rogue/thief/5`" measurement that previously appeared here is CIRCULAR and
+> must not be cited.** The record is *downstream of* the materialisation, so the
+> two counts cannot disagree and their agreement corroborates nothing.
+>
+> Mechanism, verified in trunk: the extractor stamps every row it creates with
+> `parentFeature: feature.name` (`charactersheet-class-utils.js:3408`), and
+> branch **(b)** of the choice seeder (`:3162-3183`) then selects on exactly that
+> field — `String(f?.parentFeature||"").toLowerCase() === String(feature.name||"").toLowerCase()`
+> at `:3167-3169` — and calls `_recordChosenSubfeature` once per match (`:3172`).
+> Whatever materialises, records.
+>
+> It also explains **both** members, which is what makes it the real path rather
+> than a plausible one:
+>
+> | | (a) already-resolved guard `:3159` | (b) records from `_data.features` | counts |
+> |---|---|---|---|
+> | Blessed Strikes | **fires** — a real level-up choice exists | never reached | 1 rec / 2 mat → **genuine disagreement** |
+> | Cunning Strike | doesn't fire — no level-up choice | **fires**, records all 3 | 3 / 3 → **manufactured agreement** |
+>
+> So the Blessed Strikes finding is *strengthened*: its record is independent and
+> still disagrees. Only the Cunning Strike corroboration dies. **The sound basis
+> for "Cunning Strike is correct" is the rules text alone** — which is
+> independently true, so the conclusion stands; the evidence for it does not.
+>
+> This also kills a fix shape that looks obvious: *"filter the extracted rows
+> against `chosenSubfeatures`"* is circular by the above, and separately dead
+> because `getLevelFeatures` is called from `charactersheet-levelup.js:96/497/4415`
+> to compute **what the new level grants** — i.e. it runs *before* that level's
+> choice exists. The boundary the verdict must cross is **temporal**, not just
+> structural.
+>
+> And it answers the question this entry previously left open. *"Whether the
+> three rows survive via the choice-seeding path instead"* was malformed:
+> seeding does not keep rows alive, it **records rows materialisation already
+> produced**. Suppress the materialisation and there is nothing for branch (b) to
+> record.
+
+So teaching `:3391` the parser's bare-sibling predicate — the natural fix, and
 the one a reader will reach for first — would skip Cunning Strike too and risks
-trading a visible Cleric bug for a visible Rogue one. **Whether the three rows
-survive via the choice-seeding path instead was NOT measured**; that is the
-first thing to establish before touching `:3323`. The distinction the guard
-actually needs is *learn-one* vs *use-one*, which neither site currently
-encodes, and with n=2 both members must be re-measured after any change.
+trading a visible Cleric bug for a visible Rogue one. The distinction the guard
+actually needs is *learn-one* vs *use-one*, and with n=2 both members must be
+re-measured after any change.
+
+**A prose discriminator does exist** — an earlier revision of this entry claimed
+no shape-based rule could work, which is too strong:
+
+```
+Blessed Strikes  "You GAIN one of the following options OF YOUR CHOICE …"   learn-one
+Cunning Strike   "WHEN you deal Sneak Attack damage, you CAN ADD one of …"  use-one
+```
+
+Gain-clause vs trigger-clause. The parser matches both only because
+`/one of the following|choose one/i` tests the wrong half of the sentence. The
+argument against shipping such a rule is therefore **not** impossibility but
+sample size: a regex tuned on n=2 is a structural claim drawn from two examples.
+Stated this way because "a discriminator exists; the question is prose-matching
+vs plumbing the verdict through" invites a different decision than "shape cannot
+work."
 
 **Adjacent, unfiled, no id requested.** Life Domain sets `divineStrikeType`
 while Blood Domain sets `divineStrikeDamageType` — two key names for one
@@ -4617,7 +4680,7 @@ therefore "materialises both" was refuted. But this version of the entry *says*
 ***resolved*** choice materialises both. The challenge was aimed at a summary
 of the entry from which the word "resolved" had dropped, and the summary was
 never checked against the entry. Retracted in full by its author within
-minutes, who then located `class-utils.js:3323` — the finding this entry had
+minutes, who then located `class-utils.js:3391` — the finding this entry had
 marked *not located*.
 
 5. **A summary that drops one qualifier turns a correct claim into a
