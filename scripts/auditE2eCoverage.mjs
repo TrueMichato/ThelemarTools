@@ -749,7 +749,13 @@ function auditSpec (specPath) {
  *
  * Measured both directions rather than assumed:
  *   fixed blanker  →   0 leaks across all 54 specs
- *   regex branch disabled → 274 leaks across 14 specs
+ *   regex branch disabled → 274 leaks across 13 specs
+ *
+ * Use the LEAK COUNT to tell those apart, never the `--strict` exit code.
+ * Leaks are only one of six conditions in that gate, and two of the others
+ * (`warnings`, `totalUnmatch`) are non-zero on the shipped tree, so `--strict`
+ * exits 1 either way. "It is wired into --strict, therefore --strict
+ * discriminates" is true of the wiring and false of the observable.
  *
  * NOTE the first attempt at this invariant asserted that real `kind:` tokens
  * survive blanking. It could never fire, because a phantom string makes the

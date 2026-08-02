@@ -3670,9 +3670,19 @@ Measured both directions rather than assumed —
 | blanker | leaks |
 |---|---|
 | shipped | **0** across all 54 specs |
-| regex branch disabled | **274** across 14 specs |
+| regex branch disabled | **274** across 13 specs |
 
-`--strict` now exits 1 on any leak.
+`--strict` counts leaks among its exit conditions — but note it does **not**
+discriminate on this axis today: `warnings` (8 LOW specs) and `totalUnmatch`
+(6 unmatched resource rows) already trip the same gate, so `--strict` exits 1
+on the shipped tree as well as the broken one. The **leak count** is the
+measurement that separates them; the exit code is not. Verified rather than
+inferred from the wiring:
+
+```
+shipped  --strict → exit 1
+broken   --strict → exit 1
+```
 
 Two negative results worth not re-deriving:
 
