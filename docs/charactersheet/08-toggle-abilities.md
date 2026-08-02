@@ -128,6 +128,26 @@ applies ranges, ability modifiers, and action-economy costs before rendering.
 {type: "forcedMovementImmunity", target: "ground"}
 ```
 
+> **`damage:<type>` is the house convention, but since CS-BUG-050 it is no
+> longer a *correctness* requirement.** Older guidance says a bare damage type
+> (`target: "fire"`) is "silently inert". That is **stale** — it describes
+> pre-CS-BUG-050 behaviour. `_damageTypeFromEffectTarget()`
+> (`charactersheet-state.js:41064`) now normalises **both** shapes: it strips a
+> `damage:` prefix when present, and otherwise falls back to
+> `DAMAGE_TYPES.has(clean)`. Its sibling's doc-comment says so explicitly —
+> *"de-duplicated and normalised across both target shapes"*.
+>
+> Measured: rewriting Umbral Form's `target: "damage:cold"` to a bare
+> `"cold"` left `getResistances()` **unchanged** (still 11 entries, still
+> containing `cold`); *deleting* the entry outright is what turns the
+> behavioural test red.
+>
+> Practical consequence for anyone writing an active state: **keep using the
+> prefix** for consistency and greppability, but do not expect a behavioural
+> test to catch a missing one. If you want the convention enforced, assert the
+> shape directly, e.g.
+> `expect(info.effects.every(e => e.target.startsWith("damage:"))).toBe(true)`.
+
 ### Special Effects
 
 ```javascript

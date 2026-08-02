@@ -2941,10 +2941,43 @@ number they could not reconcile.
 **Fix**: `getSorceryPointsMaxForClass()` returns `level + 1` for TGTT and
 `level >= 2 ? level : 0` for PHB/XPHB, and every surface now reads it.
 
-**Follow-up available**: the CS-BUG-018 skips in the two neighbouring Sorcerer
-specs are now liftable with `level + 1` values. Left in place here so the
-blast radius of this change stays inside one subclass; whoever picks up
-Lunar / Spellfire / Wicked Witch / Shadow Sorcery should take it.
+**Follow-up available — but only for HALF the skips. Read this before lifting
+anything.** Each of the two neighbouring Sorcerer specs carries **9** skipped
+rows, and they split into two groups that must be treated differently:
+
+| Rows | Kind | Liftable? |
+|---|---|---|
+| 6 per spec | `kind: "resource"`, `name: "Sorcery Points"` | **Yes** — set `resourceMax` to `level + 1` **and** add `untilLevel` to every tier (the matrix re-evaluates each earlier row at checkpoints `[3,5,11,17,20]`, and this pool grows every level) |
+| 3 per spec | `kind: "pickToggleable"` on the `/metamagic/i` rows | **No — structurally unsatisfiable. Do not unskip.** |
+
+The `pickToggleable` rows match on `/…spell.*active/i`, i.e. the **activatable**
+surface — but metamagic is deliberately excluded from it at three sites in
+`js/charactersheet/charactersheet-combat.js` (`:5806`, `:5827` — *"Skip metamagic
+features (managed via metamagic dashboard)"* — and `:6048`). Metamagic is a
+**cast-time** mechanic resolved through `getCastableActiveMetamagics()`, because
+its cost depends on the individual cast's slot level (`"level"` / `"halfLevel"`)
+and its legality on the individual spell. Lifting those six yields six
+guaranteed false reds sitting immediately beside the Sorcery Points rows, where
+they read as a regression in *this* fix.
+
+Assert metamagic with `stateCall` instead — see
+`tgtt-shadow-magic-sorcerer.spec.ts`:
+
+```ts
+{kind: "stateCall", method: "getKnownMetamagicKeys", path: "length", exact: 2},
+{kind: "stateCall", method: "getMetamagicCost", args: ["twinned", 3], exact: 3},
+```
+
+Name-matching probes are unsafe for a second, independent reason: on a
+**spawned** build the Features surface lists metamagic options the character has
+*not* picked, so a `/quickened spell.*active/i` probe can pass on a character
+that does not know it. (Measured: a **wizard-built** character does *not* leak —
+forcing `pickedCount: 20` returned `got 2`. The two builders differ whenever a
+level carries a choice.) `stateCall` is immune to both problems.
+
+Left in place here so the blast radius of this change stays inside one subclass;
+whoever picks up Lunar / Spellfire / Wicked Witch / Shadow Sorcery should take
+the six resource rows and leave the three metamagic rows alone.
 
 **Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §"base-class
 Sorcery Points machinery" asserts both ladders explicitly.
