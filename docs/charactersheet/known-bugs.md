@@ -4096,8 +4096,9 @@ red).
 **Status:** Open — display-only, mechanically single. Low severity, filed
 because it is reproducible and player-visible.
 
-**Root cause (measured at three stages; this entry has been wrong twice before
-— see Provenance).** `Blessed Strikes` (Cleric XPHB L7) is a choose-one
+**Root cause (measured at three stages; this entry's cause was relocated twice
+before reaching this one, and amended once after — see Provenance).**
+`Blessed Strikes` (Cleric XPHB L7) is a choose-one
 feature. The choice is extracted correctly and recorded correctly, and is then
 materialised incorrectly. Measured on `cleric/life domain/7`:
 
@@ -4132,9 +4133,31 @@ feature."*
 documents two encodings and names Blessed Strikes explicitly as the second
 (*"a bare `{type:"entries", entries:[refClassFeature, refClassFeature]}` block
 … no `options` wrapper"*). It handles it correctly. A reader sent to
-`FeatureChoiceParser` will find working code — the defect is downstream of
-both extraction and recording, at the site that adds the option rows. **That
-site was not located**; only the three readings above were measured.
+`FeatureChoiceParser` will find working code.
+
+**The defect is a reader/writer drift between the parser and the grant site.**
+`charactersheet-class-utils.js:3319-3345` extracts `refClassFeature` sub-entries
+as *automatic grants* — the loop exists for Ki / Monk's Focus, where every ref
+genuinely is granted — and guards against player choices with a single test:
+
+```js
+// :3315  IMPORTANT: Skip "options" type entries — those are player choices …
+if (entry.type === "options") continue;              // :3323 — the whole guard
+…
+extracted.push({name: refName, …, parentFeature: feature.name});   // :3340
+```
+
+| encoding | parser (`state.js:768`, since `9a03a9f8`) | grant site (`:3323`) |
+|---|---|---|
+| 1. `{type:"options", count, entries:[…]}` | handled | **skipped** ✅ |
+| 2. bare `{type:"entries", entries:[ref, ref]}` + "one of the following" prose | handled | **not skipped** 🔴 |
+
+The parser learned encoding 2 on 2026-07-03; the grant site still knows only
+encoding 1, so a Blessed Strikes falls through to the automatic-grant loop and
+both refs are pushed with `parentFeature: "Blessed Strikes"` — exactly the
+`_data.features` shape above. The comment at `:3315` states the intent is to
+*skip player choices*, so this is an incomplete encoding check rather than a
+design decision.
 
 Measured live through the spawner (`getFeatures()`, fields as returned):
 
@@ -4208,40 +4231,45 @@ rows alone. This is why `cleric/life domain/8` (`TGTT-2024`) and
 `cleric/knowledge domain/8` (`TGTT-2014`) show no duplicate even though both
 *do* set `divineStrike*` calc keys.
 
-**The blast radius is one feature, and the obvious generalisation is false.**
+**The blast radius is exactly two features — enumerated, not sampled.**
 249 features across the class data use `refClassFeature`/`refSubclassFeature`,
-so the obvious inference is that the whole mechanism is broken. It is not — in
-almost all of those the references are a *grant list* (a subclass header naming
-the features it gives), where materialising every reference is correct. Of the
-four 2024 choose-one class features, three resolve to exactly one option:
+so the tempting inference is that the mechanism is broken wholesale. It is not:
+in almost all of those the refs are a *grant list* (a subclass header naming
+what it gives), where materialising every ref is correct. Only encoding 2
+reaches the unguarded path. Classifying every `classFeature` and
+`subclassFeature` in `data/class/class-*.json` + `homebrew/*.json` with the
+parser's own predicate (recursive; bare un-named `entries` block, ≥2 refs,
+prose matching `/one of the following|choose one/i`):
 
 ```
-Divine Order    (Cleric XPHB L1)  → Divine Order + Protector             ← one   OK
-Primal Order    (Druid  XPHB L1)  → Primal Order + Warden                ← one   OK
-Elemental Fury  (Druid  XPHB L7)  → Elemental Fury + Potent Spellcasting ← one   OK
-Blessed Strikes (Cleric XPHB L7)  → Blessed Strikes + BOTH options       ←      BUG
+ENCODING 2 — falls through :3323          2 features, BOTH measured live
+  Blessed Strikes   Cleric XPHB L7   count=1  refs=2   → 2 rows   🔴 BUG
+  Cunning Strike    Rogue  XPHB L5   count=1  refs=3   → 3 rows   ✅ benign
+
+ENCODING 1 — correctly skipped           57 groups (Divine Order, Primal
+  Order, Elemental Fury, Specialties, Jester's Acts Options, …)   all fine
 ```
 
-**A hypothesis about *why*, raised and then refuted — recorded so nobody
-re-runs it.** The three correct ones all use encoding 1 (an explicit
-`type: "options"` wrapper); Blessed Strikes is the only one of the four using
-encoding 2 (bare `entries` siblings + "one of the following" prose). That
-looked like a clean discriminator. It is not. A data scan finds 7 encoding-2
-candidates, and spawning two of them shows the pick record and the
-materialisation **agree**:
+**This supersedes an earlier "7 candidates, 4 unmeasured" note in this entry.**
+That number came from a loose scan that did not require the prose test and did
+not recurse. With the parser's actual predicate the population is 2, both
+measured, **none unmeasured**.
 
-```
-rogue/thief/5     Cunning Strike  → 3 rows materialised, 3 recorded   consistent
-sorcerer/…/3      Spellfire Burst → 1 row materialised,  1 recorded   consistent
-```
+**🔴 The second member is why the obvious fix is wrong.** Cunning Strike hits
+the same unguarded path and is *display-correct anyway*: XPHB grants a Rogue
+all three effects (Poison / Trip / Withdraw) and picks between them **at use
+time**, so three rows is right. Its `_data.chosenSubfeatures` records three and
+`_data.features` holds three — consistent, measured on `rogue/thief/5`. The
+prose test is a false positive there: "one of the following" describes an
+at-use menu, not a level-up pick.
 
-Cunning Strike also shows the scan's predicate is loose: its "choose one" is an
-**at-use** menu (spend Sneak Attack dice), not a level-up pick, so the 7 are not
-comparable things and the population is not really 7. **Blessed Strikes remains
-the only measured case where the pick record and the feature list disagree**,
-and no mechanism generalising beyond it has been established. The remaining
-encoding-2 candidates (`Armor Model` ×2, `Zodiac Form: Star Week`,
-`Elemental Smite`) are **unmeasured**.
+So teaching `:3323` the parser's bare-sibling predicate — the natural fix, and
+the one a reader will reach for first — would skip Cunning Strike too and risks
+trading a visible Cleric bug for a visible Rogue one. **Whether the three rows
+survive via the choice-seeding path instead was NOT measured**; that is the
+first thing to establish before touching `:3323`. The distinction the guard
+actually needs is *learn-one* vs *use-one*, which neither site currently
+encodes, and with n=2 both members must be re-measured after any change.
 
 **Adjacent, unfiled, no id requested.** Life Domain sets `divineStrikeType`
 while Blood Domain sets `divineStrikeDamageType` — two key names for one
@@ -4275,8 +4303,8 @@ empty array — no data load — so filtering it for a feature name yields nothi
 and *any* Jest-based observation of this bug is vacuous by construction. The
 browser is the only surface on which it is visible at all.
 
-**Provenance — this entry has now been wrong three times, and each correction
-moved the cause to a different file.**
+**Provenance — this entry's cause was relocated three times, then amended
+once; each relocation moved it to a different file.**
 
 It was originally raised as *"Potent Spellcasting appears twice at L8 and
 L18"*. The levels were wrong (they are 7 and 8) and the scope was too narrow
@@ -4328,3 +4356,24 @@ too, and the defect is strictly at materialisation.
    sheet materialises both" and "`_data.features` contains both" look like the
    same sentence and are not. The first is a claim about a pipeline; the second
    is a reading. Only the second was ever taken.
+
+**A fourth round, which was not the entry being wrong — and is the reason the
+three-stage table is in it.** After the correction above landed, the entry was
+challenged again on the grounds that `extractChoices()` returns `count: 1` and
+therefore "materialises both" was refuted. But this version of the entry *says*
+`count: 1`, in a table row labelled **correct**, and its title says a
+***resolved*** choice materialises both. The challenge was aimed at a summary
+of the entry from which the word "resolved" had dropped, and the summary was
+never checked against the entry. Retracted in full by its author within
+minutes, who then located `class-utils.js:3323` — the finding this entry had
+marked *not located*.
+
+5. **A summary that drops one qualifier turns a correct claim into a
+   refutable one.** "A resolved choice still materialises both" and "the choice
+   is never resolved" differ by one word and point at opposite stages. Read the
+   primary source before contradicting it — including, and especially, when the
+   contradiction feels well-founded.
+6. **Structure is what makes an entry cheap to correct.** The challenge was
+   resolved by pointing at one table row. Had this entry asserted only a
+   conclusion, the same exchange would have re-litigated the wrong stage
+   indefinitely — which is exactly what its first two versions did.
