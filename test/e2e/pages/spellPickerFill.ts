@@ -145,27 +145,50 @@ export async function readSpellPickers (page: Page, rootSelector: string): Promi
  * Returns the name of the spell clicked, or `null` if there was nothing
  * left to click. One click per round-trip is deliberate — see invariant
  * (1) above.
+ *
+ * `avoidNames` holds display names already taken on this build. The
+ * catalogue contains genuinely distinct entries that share a display
+ * name (`Acid Splash|PHB` and `Acid Splash|XPHB` are two rows), so a
+ * naive "first `+` button" filler produces exports reading
+ * `["Acid Splash", "Acid Splash"]`. That is not a product bug, but it
+ * is an artifact a future reader will file as one, so prefer an unused
+ * name and fall back to a repeat only when nothing else is addable —
+ * the required COUNT is never traded away for the preference.
  */
-async function clickOneSpell (page: Page, rootSelector: string, containerIdx: number, kind: "cantrip" | "spell"): Promise<string | null> {
-	return page.evaluate(({sel, idx, wantCantrip}) => {
+async function clickOneSpell (
+	page: Page,
+	rootSelector: string,
+	containerIdx: number,
+	kind: "cantrip" | "spell",
+	avoidNames: Set<string> = new Set(),
+): Promise<string | null> {
+	return page.evaluate(({sel, idx, wantCantrip, avoid}) => {
 		const root = document.querySelector(sel);
 		if (!root) return null;
 		const container = root.querySelectorAll<HTMLElement>(".charsheet__spell-picker-container")[idx];
 		if (!container) return null;
 
+		const nameOf = (btn: HTMLButtonElement) => (btn.closest(".charsheet__spell-picker-item")
+			?.querySelector(".charsheet__spell-picker-item-name")?.textContent || "?").trim();
+
+		let fallback: HTMLButtonElement | null = null;
 		for (const section of Array.from(container.querySelectorAll(".charsheet__spell-picker-section"))) {
 			const title = section.querySelector(".charsheet__spell-picker-section-title")?.textContent || "";
 			if (/Cantrips/i.test(title) !== wantCantrip) continue;
-			const btn = Array.from(section.querySelectorAll<HTMLButtonElement>("button.spell-toggle"))
-				.find(b => (b.textContent || "").trim() === "+");
-			if (!btn) continue;
-			const name = (btn.closest(".charsheet__spell-picker-item")
-				?.querySelector(".charsheet__spell-picker-item-name")?.textContent || "?").trim();
-			btn.click();
-			return name;
+			for (const btn of Array.from(section.querySelectorAll<HTMLButtonElement>("button.spell-toggle"))) {
+				if ((btn.textContent || "").trim() !== "+") continue;
+				if (!fallback) fallback = btn;
+				if (avoid.includes(nameOf(btn).toLowerCase())) continue;
+				const name = nameOf(btn);
+				btn.click();
+				return name;
+			}
 		}
-		return null;
-	}, {sel: rootSelector, idx: containerIdx, wantCantrip: kind === "cantrip"});
+		if (!fallback) return null;
+		const name = nameOf(fallback);
+		fallback.click();
+		return name;
+	}, {sel: rootSelector, idx: containerIdx, wantCantrip: kind === "cantrip", avoid: [...avoidNames]});
 }
 
 function describeReports (reports: SpellPickerReport[]): string {
@@ -311,6 +334,10 @@ export async function fillSpellPickers (
 
 	let picked = 0;
 	const insufficient: string[] = [];
+	// Display names already on the sheet, so the generic filler can avoid
+	// same-name-different-source duplicates. Seeded with the preferred
+	// picks since those are already committed.
+	const takenNames = new Set(preferred.picked.map(n => n.toLowerCase()));
 	for (let idx = 0; idx < initial.length; idx++) {
 		for (const kind of ["cantrip", "spell"] as const) {
 			// Re-read rather than trusting `initial` — earlier picks in
@@ -335,9 +362,10 @@ export async function fillSpellPickers (
 			// `need` clicks should suffice; the small slack absorbs a
 			// click that lands on an option the widget rejects.
 			for (let attempt = 0; attempt < need + 5 && need > 0; attempt++) {
-				const name = await clickOneSpell(page, rootSelector, idx, kind);
+				const name = await clickOneSpell(page, rootSelector, idx, kind, takenNames);
 				if (name == null) break;
 				chosen.push(name);
+				takenNames.add(name.toLowerCase());
 				await page.waitForTimeout(60);
 
 				snapshot = (await readSpellPickers(page, rootSelector))[idx];
