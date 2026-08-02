@@ -4826,3 +4826,69 @@ The editable sources are `scripts/_genTgttPools.helpers.ts` (`buildCatalogChecks
 (`ZODIAC_FORM_EFFECTS`). Regenerate with `node scripts/genTgttPools.mjs` and
 confirm the diff is otherwise empty — a stale pool is itself a known source of
 false reds.
+
+---
+
+## CS-BUG-109 — the spell **cast output** still hand-rolls its own save DC, so item, custom and active-state DC bonuses vanish at the moment you cast
+
+**Status:** Open — measured, not fixed. Player-visible, and broader than the
+two DC bugs already fixed.
+
+**Relationship to CS-BUG-099 / CS-BUG-102.** Those fixed two of *three* sites.
+099 fixed the state API (`charactersheet-state.js:13160 / :13199 / :13219`,
+each now adding `getBonusFromStates?.("spellDc")`). 102 fixed the Spells-tab
+card (`_buildSpellClassCard()`, `charactersheet-spells.js:7826 / :7829`).
+CS-BUG-102's own entry says the fix covered *"the tab a player actually casts
+from"* — but the **cast output itself** is a third, separate computation that
+neither fix reached.
+
+**Root cause.** `charactersheet-spells.js:3906`, inside the cast flow:
+
+```js
+let saveDC = 8 + spellcastingMod + profBonus - exhaustionDcPenalty;
+```
+
+with (`:3847`, `:3856`) `profBonus = this._state.getProficiencyBonus()` and
+`spellcastingMod = this._state.getAbilityMod(castingAbility)` — both raw. Only
+the variant-component modifier is added afterwards (`:3911`). It never consults
+`customModifiers.spellDc`, `itemBonuses.spellSaveDc`, or
+`getBonusFromStates("spellDc")`.
+
+The value is then printed to the player and recorded for the roll log:
+
+```js
+attackInfo += `<br>Save DC: <strong>${saveDC}</strong> …`;   // :3922
+_rollMeta.dc = {total: saveDC, breakdown: `8 + ${spellcastingMod} + ${profBonus}…`};  // :3925
+```
+
+**Measured**, Sorcerer 5, CHA 18, `customModifiers.spellDc = 2`,
+`itemBonuses.spellSaveDc = 1`, **no active state at all**:
+
+| reading | value |
+|---|---|
+| `getSpellSaveDC("cha")` (state API, post-099) | **18** |
+| Spells-tab card (post-102) | **18** |
+| cast output / roll log (`:3906`) | **15** |
+
+A 3-point disagreement from item + custom bonuses alone; an active-state buff
+widens it further. So the card says 18, and clicking **Cast** on that same card
+prints "Save DC: **15**" — the number the table actually plays with.
+
+**Why this is wider than 102.** 102 was surfaced by an active-state toggle, so
+its framing is buff-centric. This site drops **item** bonuses too, which means
+plain published magic items are affected with no homebrew involved — Rod of the
+Pact Keeper, Robe of the Archmagi, and anything else writing
+`itemBonuses.spellSaveDc`.
+
+**Suggested fix.** Do not add three more terms at `:3906` — that would be a
+*fourth* hand-rolled formula. Route it through the same state chokepoint the
+other two now use (`getSpellSaveDcForAbility()` / `getSpellSaveDC()`), then add
+the variant-component modifier on top, and update the `_rollMeta.dc.breakdown`
+string so the printed derivation matches the printed total.
+
+**Note for whoever fixes it:** pin the **printed / roll-log reading**, not the
+formula. The first CS-BUG-102 pin asserted `8 + mod + prof + stateBonus` by
+hand and stayed green with the production fix neutralised (0 of 13,276 red) —
+the "correct calculation that nothing reads" shape. `CharacterSheetSpellsTabDc.test.js`
+shows the working pattern: stub the DOM **before** a dynamic `import()`, because
+`charactersheet-spells.js:11` destructures `e_`/`ee` at module load.
