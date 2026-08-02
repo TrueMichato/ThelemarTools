@@ -136,13 +136,36 @@ single-spec re-verify of bastion-paladin: 6/6 expected exports):
   `HUNTER_FEATURES_MATRIX` (L20 standalone leg) and
   `HUNTER_ZODIAC_MULTI_FEATURES_MATRIX` (multiclass Ranger leg).
 
-**Intentionally LOW.** `tgtt-time-domain-cleric.spec.ts` audits
-at 65% (LOW). Every probe in this matrix is gated on CS-BUG-015
-(TGTT Time Domain prepares TGTT-flavor spells in place of
-first-party domain spells, and Channel Divinity / spell-save-DC
-helpers return 0 on the build). Adding more checks here would
-create false failures, not real coverage — leave LOW until
-CS-BUG-015 is resolved.
+**Previously "intentionally LOW" — CORRECTED.**
+`tgtt-time-domain-cleric.spec.ts` used to audit at 24% with the note
+"every probe in this matrix is gated on CS-BUG-015 … leave LOW until
+CS-BUG-015 is resolved." That guidance outlived its premise:
+CS-BUG-015 is **Closed as Stale** (see its entry below), so the spec
+was carrying two `skipReason: "CS-BUG-015"` rows and ~8 prose gap
+comments deferring to a bug that no longer existed.
+
+Re-measured the product directly rather than trusting the spec (the
+spec is the artefact under suspicion, so it cannot be its own oracle).
+Every frozen claim was false: Channel Divinity **does** surface as a
+pool (1 / 2 / 3 at L2 / L6 / L18), and `getFeatureCalculations()`
+exposes `hasChronologicalInterference`, `chronologicalInterferenceUses`
+(= proficiency bonus), `hasRightOnTime`, `rightOnTimeBonus`,
+`hasTemporalManipulation`, `temporalManipulationDc`,
+`hasEyesOfFuturePast`, `eyesOfFuturePastUses` (= `max(1, wisMod)`),
+`hasPotentSpellcasting`, `potentSpellcastingBonus`,
+`potentSpellcastingClass` and `hasTemporalMastery`. Spec rewritten
+against those; matrix green L1→20. Coverage 24% → 61%.
+
+Two authoring rules came out of it, both preset-safety issues:
+
+- `PRESET_FULL_TIME_CLERIC` sets no `abilityPriority`, so this build's
+  **Wisdom is 10** and every Wis-derived value is 0 or its floor. Assert
+  such values with `featureCalculationDerivedFrom` /
+  `featureUsesEqualAbilityMod`, which pin the RELATIONSHIP. A literal
+  would be asserting the preset, not the product.
+- The two remaining bare-row clusters (domain-spell tiers, Divine
+  Intervention) are genuine gaps, not deferred ones, and are now
+  documented as such per-row.
 
 ---
 
@@ -248,6 +271,219 @@ issue numbers stay stable.
 ---
 
 ## Resolved
+
+### CS-BUG-103 — Features-tab "Use" silently burned a limited use for any state-gated feature
+
+**Status**: Fixed.
+**Surfaced by**: `tgtt-shadow-sorcery-rhw-sorcerer.spec.ts` L18
+`pickActivatable(/umbral form/i)`, which clicked the Features-tab **Use**
+button and then found nothing active.
+
+**Measured live** on an exported L20 character, before the fix: clicking
+Use on Umbral Form while its prerequisite state (Innate Sorcery) was
+*not* running took `uses` from **1 to 0**, left `umbralFormRhw`
+**inactive**, and left Sorcery Points **unchanged**. The player paid a
+once-per-long-rest budget for nothing, with no message.
+
+**Root cause**: `CharacterSheetFeatures._useFeature()`
+(`js/charactersheet/charactersheet-features.js`) first asks
+`_getActivatableAbilityForFeature()`. That resolves through
+`getActivatableFeatures()`, which *correctly* skips any state whose
+`requiresStates` are unmet — so a gated feature is simply absent from
+the classified-ability branch and falls through to the bare
+"decrement a use" fallback below it.
+
+**Scope (enumerated, not assumed)**: `git grep -n "requiresStates"
+js/charactersheet/` returns exactly two state definitions —
+`umbralFormRhw` (`["innateSorcery"]`) and `astralBody`
+(`["astralArms", "astralVisage"]`) — plus three consumers
+(`getActivatableFeatures`, `activateState`, and the `deactivateState`
+cascade). `astralBody` has `resourceCost: 0` and no uses budget, so
+`umbralFormRhw` is the only feature that could actually lose something
+today; the defect and the fix are both generic, and any future gated
+state with a uses budget would have hit it.
+
+**Fix**: new `CharacterSheetState#getUnmetStateRequirementsForFeature(feature)`
+returns the *display names* of a feature's unmet prerequisite states;
+`_useFeature()` consults it before spending anything and toasts
+`"<name> requires <prereq> to be active."` instead of decrementing.
+
+**Known scope limit (deliberate)**: `isActivatableAbilityEntry()` returns
+false for any `isToggle` state, so the Features-tab Use button still
+falls to the bare decrement for *ungated* toggle-with-uses features
+(Rage, Bladesong, …). The Overview toggle row is the working surface for
+those. Widening that classification was judged out of scope here; the
+current contract is pinned by the test *"does NOT block the Features-tab
+use once Innate Sorcery is running"*.
+
+**Regression pin**: `CharacterSheetShadowSorceryRhw.test.js`, describe
+*"Gated activatable features do not burn a use from the Features tab
+(CS-BUG-103)"* — four tests, two of which drive
+`features._useFeature(id)` (the reading) rather than the new accessor.
+`return [];` as the first statement of
+`getUnmetStateRequirementsForFeature` turns **2 of 13,280** red
+(assertion failures, no `TypeError`).
+
+---
+
+### CS-BUG-102 — Spells-tab spell save DC ignored every active-state buff
+
+**Status**: Fixed.
+**Surfaced by**: `tgtt-shadow-sorcery-rhw-sorcerer.spec.ts` L5 loadout —
+`probeToggleDelta(/innate sorcery/i)` reported `changed=false` for a
+toggle whose entire mechanical effect is "+1 to your Sorcerer spell save
+DC" plus advantage on spell attacks.
+
+**Root cause**: `_buildSpellClassCard()`
+(`js/charactersheet/charactersheet-spells.js`) hand-rolled the DC as
+`8 + mod + prof` instead of asking the state. The Combat tab reads
+`getSpellcastingClassBreakdown()[].saveDc`, which routes through
+`getSpellSaveDcForAbility()` and *does* include state bonuses — so the
+two tabs showed two different DCs, and the Spells tab, the one a player
+actually casts from, showed the lower one.
+
+Scope is wider than Innate Sorcery: any custom ability registering a
+`{type: "bonus", target: "spellDc"}` effect (a documented target in the
+custom-ability editor) was invisible on the Spells tab.
+
+**Fix**: The card now folds `getBonusFromStates("spellDc")` into
+`canonicalDc` and into the Gambler rolled-DC branch's static term.
+Deliberately *not* done for the spell attack bonus:
+`_rollSpellsTabAttack` already adds `getBonusFromStates("attack:spell")`
+on top of the displayed value, so folding it into the display would
+double-count it on every roll.
+
+**Regression pin**: `CharacterSheetSpellsTabDc.test.js`, which builds a
+real card by calling `_buildSpellClassCard()` and reads back the DC the
+card wrote. Neutralizing `stateDcBonus` to `0` turns **2 of 13,280** red
+(assertion failures, no `TypeError`).
+
+**A tautological pin was caught and replaced.** The first pin for this
+bug lived in `CharacterSheetShadowSorceryRhw.test.js` and recomputed
+`8 + mod + prof + getBonusFromStates("spellDc")` by hand, then asserted
+the result tracked `getSpellSaveDcForAbility()`. It never touched
+`_buildSpellClassCard()`, so with the production fix neutralized the
+entire suite stayed **GREEN (435 suites / 13,276 tests)** — the exact
+"correct calculation that nothing reads" shape this bug *was*. Driving
+the card required a dedicated test file: `charactersheet-spells.js`
+captures its DOM helper at module load (`const {e_, ee} = globalThis;`
+line 11), so a DOM stub has to be installed before the module is
+imported, which per-file module isolation gives for free.
+
+---
+
+### CS-BUG-101 — Re-scaled feature uses did not reach the mirrored resource row
+
+**Status**: Fixed.
+**Surfaced by**: a live L20 probe of Shadow Sorcery (RHW) showing
+`Power of Shadow 5/5` in the resource tracker while the feature itself
+correctly carried 1 use per long rest.
+
+**Root cause**: `_ensureZeroHpInterventionUses()` re-scaled
+`feature.uses` when a definition's `usesMax` changed, but the resource
+row mirroring that feature was written once at grant time and never
+re-synced — so the tracker kept whatever number it was first given.
+
+**Fix**: the helper now also writes `max` / `recharge` / `current` back
+to the mirrored resource row, matching the pattern already used by
+`_ensureCreationBardUses`.
+
+---
+
+### CS-BUG-100 — `takeDamage()` never applied resistance, immunity or vulnerability
+
+**Status**: Fixed.
+**Surfaced by**: a live L20 probe of Shadow Sorcery (RHW) under Umbral
+Form — `getResistances()` listed 11 damage types and `takeDamage(20,
+{damageType: "fire"})` still removed 20 hit points.
+
+**Root cause**: two separate gaps that hid each other.
+`takeDamage()` accepted a `damageType` and used it only to gate zero-HP
+interventions; it never applied defenses. And the main sheet's Damage
+button (`_onDamage`) never *asked* for a damage type, so the only path
+that could have exercised defenses never supplied one. Play Mode had its
+own hand-rolled copy of the arithmetic on a different code path
+(`setCurrentHp`), which is why the model looked correct in that one
+place. This is the "correct calculation that nothing reads" shape: every
+resistance the model computed was decorative on the main sheet.
+
+**Enumeration**: `takeDamage` had exactly three callers at the time
+(`charactersheet.js` `_onDamage`, and `useDivineAllegiance` /
+Infernal Conduit in `charactersheet-state.js`), none passing a
+`damageType`, so adding defenses inside it could not double-apply.
+
+**Fix**: extracted `applyDamageDefenses(damage, damageType)` as the
+single source of the ×0 / ÷2 / ×2 arithmetic; `takeDamage()` applies it
+when a `damageType` is supplied unless `unpreventable` or the new
+`skipDefenses` is set; `_onDamage` now prompts for a damage type
+whenever the character has any defense; Play Mode routes through the
+shared helper instead of its own copy.
+
+**Regression pin**: asserted at the hit points that leave the sheet, not
+at `getResistances()`.
+
+---
+
+### CS-BUG-099 — `{type: "bonus", target: "spellDc"}` active-state effect had no consumer
+
+**Status**: Fixed.
+**Surfaced by**: implementing XPHB Innate Sorcery, whose whole effect is
+"+1 to your Sorcerer spell save DC" and advantage on spell attacks.
+
+**Root cause**: `spellDc` is an advertised effect target in the
+custom-ability editor's target list, but no reader existed —
+`getSpellSaveDcForAbility()` summed item bonuses, custom modifiers and
+the exhaustion penalty and stopped there. `attack:spell` was fully
+plumbed (`charactersheet-combat.js`, `charactersheet-spells.js`), which
+made the gap easy to miss.
+
+**Fix**: `getSpellSaveDcForAbility()` and both `getSpellSaveDC()`
+branches now add `getBonusFromStates("spellDc")`. See also CS-BUG-102,
+which was the same value failing to reach the Spells tab's own card.
+
+---
+
+### CS-BUG-098 — Sense grants were darkvision-only
+
+**Status**: Fixed.
+**Surfaced by**: Shadow Sorcery (RHW) Eyes of the Dark, which grants
+120 ft darkvision **and** 10 ft blindsight.
+
+**Root cause**: the feature-calculation → `getSenses()` bridge read
+`calculations.darkvision` / `calculations.darkvisionSource` and nothing
+else, so a `calculations.blindsight` (or tremorsense/truesight) grant
+was computed and silently dropped.
+
+**Enumeration**: at the time of the fix there were **zero** existing
+assignments to `calculations.blindsight`, `.tremorsense` or
+`.truesight` anywhere in `js/`, so generalising the block is inert for
+every pre-existing build. Re-derive before relying on that:
+`git grep -nE 'calculations\.(blindsight|tremorsense|truesight)\s*=' -- js/`
+
+**Fix**: replaced the darkvision-only block with a loop over
+`["darkvision", "blindsight", "tremorsense", "truesight"]`, keeping the
+existing once-per-source guard.
+
+---
+
+### CS-BUG-097 — XPHB/TGTT Barbarian Rage pool becomes unlimited at level 20
+
+**Status**: Fixed.
+**Surfaced by**: `tgtt-chained-fury-barbarian-minotaur.spec.ts` after
+retiring its CS-BUG-018 resource skips. The L20 matrix read a Rage
+maximum of `999` instead of the TGTT table's exact `6`.
+
+**Root cause**: `CharacterSheetClassUtils.updateClassResources()` used
+one PHB progression array for every Barbarian source. Its L20 value was
+the PHB unlimited-use sentinel (`999`), even though XPHB and TGTT remain
+capped at six uses.
+
+**Fix**: Added a source-aware `getRageUsesMaxForClass()` single source
+of truth and routed both feature calculations and the level-up resource
+writer through it. PHB keeps the unlimited sentinel; XPHB/TGTT remain
+at six. A parameterized Jest regression covers all three sources.
+
+---
 
 ### CS-BUG-005 — `getFeatChoices` Temporal Dead Zone at L19 (Epic Boon)
 
@@ -1962,6 +2198,88 @@ out of this change so the blast radius stays confined to one spec.
 
 ---
 
+## CS-BUG-086 — active-state bonuses targeting `skill:<name>` were silently discarded
+
+**Status**: RESOLVED (this branch).
+
+**Affected**: every active state whose effects use the ability-agnostic
+`skill:<name>` / `skill:all` bonus vocabulary. The live victim found in-tree
+is the **buff registry's Pass Without Trace**, which emits
+`{type: "bonus", target: "skill:stealth", value: 10}` as a `selfEffects`
+entry (`charactersheet-state.js` ~:55083). `_applyBuffFromRegistry`
+(`charactersheet.js` :8178-8201) turns that into `customEffects` on a
+`custom` active state, so it reached `getSkillBonusFromStates()` — which
+threw it away.
+
+**Symptom**: applying Pass Without Trace moved the displayed Stealth
+modifier by **0** instead of **+10**. Because `_rollSkillCheck` goes through
+`getSkillMod()`, the roll total was wrong too, not just the display.
+
+**Root cause**: `getSkillBonusFromStates(skill, ability)` only ever matched
+the *ability-keyed* `check:` hierarchy — `check:<ability>:<skill>`,
+`check:<ability>`, `check`. The `skill:` vocabulary is used freely
+everywhere else in the effect system (named modifiers, calculation-based
+effects, `_effectMatchesType`), so a state author had no way to know one
+aggregator spoke a narrower dialect. Nothing warned; the effect just
+evaporated.
+
+**Fix**: `getSkillBonusFromStates()` now additionally matches a
+case/whitespace-normalised `skill:<skillName>` and `skill:all`. These are
+deliberately **ability-agnostic**: a `skill:stealth` bonus survives an
+ability swap on the skill, which is the whole point of the vocabulary.
+
+**Regression pin**: `test/jest/charactersheet/CharacterSheetSteelHawk.test.js`
+→ `CS-BUG-086: active-state bonuses targeting skill:<name>` (5 tests:
+Pass Without Trace's +10 reaches the modifier, `skill:all` fans out,
+scoping does not leak to other skills, survives an ability swap, drops on
+deactivation). **Falsified**: reverting only the `isSkillTarget` branch
+turns **5** of 13142 red.
+
+---
+
+## CS-BUG-087 — the two advantage aggregators disagreed about hierarchical attack targets
+
+**Status**: RESOLVED (this branch).
+
+**Affected**: any active state granting advantage on a *category* of attack
+(`target: "attack:melee"`, `"attack:ranged"`, `"attack"`) when queried with
+a more specific roll type (`"attack:melee:str"`).
+
+**Symptom**: `hasAdvantageFromStates("attack:melee:str")` returned `true`
+(so the actual roll made by `_rollAttack` DID get advantage) while
+`getAdvantageState("attack:melee:str").advantage` returned `false`. The
+roll and the badge that explains the roll disagreed.
+
+**Root cause**: `hasAdvantageFromStates()` has an explicit attack-prefix
+branch:
+
+```js
+if (e.target.startsWith("attack") && rollType.startsWith("attack")) {
+    if (rollType.startsWith(e.target)) return true;
+    if (e.target.startsWith(rollType)) return true;
+}
+```
+
+`_effectMatchesType()` — which backs `getAdvantageState()` and
+`_getConditionalActiveStateModifiersForType()` — had no equivalent. It
+handled `check:` → `skill:` category matching and exact matches only, so
+`("attack:melee", "attack:melee:str")` fell through to `false`.
+
+**Fix**: `_effectMatchesType()` gained the same hierarchical attack branch,
+segment-anchored (`type.startsWith(`${effectTarget}:`)`) so `attack:melee`
+can never accidentally match a hypothetical `attack:meleeSomething`.
+
+**Not a Steel Hawk bug**: Launch's momentum state exposed it, but the
+inconsistency is generic and predates this branch.
+
+**Regression pin**:
+`test/jest/charactersheet/CharacterSheetSteelHawk.test.js` → *"grants
+ADVANTAGE on melee attacks while armed — on BOTH aggregators"*, which
+asserts both functions agree AND that a ranged attack still gets nothing.
+**Falsified**: removing only the attack branch turns **1** of 13142 red.
+
+---
+
 ## CS-BUG-085 — every active state that GRANTS a non-walk movement type was silently zeroed
 
 **Status**: RESOLVED.
@@ -2064,6 +2382,17 @@ its own id, since it shares this pipeline and cannot currently be triggered.
 > | `parseEffectsFromDescription` swim | same shape |
 > | `parseEffectsFromDescription` climb | same shape |
 >
+> > **AMENDMENT (Wicked Witch merge).** The count above is now **five**, not
+> > four: `ACTIVE_STATE_TYPES.flyMyPretty` (Wicked Witch 14) emits
+> > `{target: "speed:fly", value: 60}`. The *conclusion* is unaffected — it is
+> > a grant ("60-foot flying speed"), so `Math.max` remains the correct
+> > combine and no discriminator is needed. Recorded because the argument
+> > above rests on an enumeration, and **an enumeration is a claim with an
+> > expiry date**: every new curated active state is a potential emitter, so
+> > the count must be re-derived rather than cited. Re-derive with
+> > `git grep -n 'target: "speed:' -- js/charactersheet/` and discard the
+> > `speed:walk` hits, which are outside the guard entirely.
+>
 > The three parser regexes match **only** `gain`/`have a <X>ing speed` phrasing.
 > They cannot match "your flying speed increases by 10", so no additive typed
 > effect can be produced by this pipeline at all. The genuinely additive
@@ -2090,266 +2419,6 @@ Verified unchanged by this fix: `getSpeedByType("fly")` agrees with
 `getSpeed("fly")` on the bonus head (both **60**); Stormborn still reads **30**
 = walking speed; and a generic `{target: "speed", value: 10}` still yields a
 climb speed of **0** even with two fly-granting states active.
-
----
-
-## CS-BUG-086 — a subclass whose spell list lives in a TABLE was granted nothing, and the shipped `additionalSpells` transcribed only one column
-
-**Status**: RESOLVED (Lunar Sorcery Sorcerer implementation).
-
-**Affected**: Lunar Sorcery Sorcerer (DSotDQ), all levels. Generically, any
-subclass whose spell progression is published as a `type: "table"` entry.
-
-**Symptom**: a Lunar Sorcery Sorcerer knew **5 of the 15** Lunar Spells. Ten
-spells — the entire New Moon and Crescent Moon columns — were never granted at
-any level.
-
-**Root cause — two independent halves.**
-
-1. `SpellGrantParser.getFeatureSpellText()` (`charactersheet-state.js` ~:581)
-   walks only `node.entries` and `node.items`. It never descends into a
-   `type: "table"` node's `rows`, so a table-published spell list is invisible to
-   the prose grant path. This is the 5etools house style for multi-column
-   progressions, so the blind spot is structural, not incidental.
-2. The shipped `data/class/class-sorcerer.json:1940-1971` compensates with a
-   *single* `additionalSpells` block named `"Full Moon"` — one of the table's
-   three columns. RAW ("You learn additional spells … as shown on the Lunar
-   Spells table") **every** column is learned; the phase gates other things.
-
-**Fix**: new declarative `static CharacterSheetState.FEATURE_SPELL_GRANTS`
-registry keyed `"<Class>|<subclass shortName or name>"`, resolved by the static,
-pure `getFeatureGrantedSpells(cls)` and applied **first** in
-`getSubclassAlwaysPreparedSpells()`. Grants then flow through the ordinary
-always-prepared pipeline (enrichment, cantrip routing, dedupe against the partial
-`additionalSpells`, `sourceFeature` attribution). `data/class/` is deliberately
-**not** modified — it is upstream-synced and only version-bump commits have ever
-touched it.
-
-**Why the parser was not taught to read tables**: it would over-grant for the
-many CHOOSE-ONE spell tables (Circle of the Land's terrain columns, Warlock
-expanded lists), turning a missing-spells bug into a wrong-spells bug across
-shipped content.
-
-**Correction to a claim made while fixing this**: the descriptor was first
-designed with a `doesNotCountAgainstKnown` flag. `git grep` over `js/` returns
-**zero** occurrences of that identifier — it does not exist. The convention
-actually *read* is `alwaysPrepared` + `sourceFeature`
-(`charactersheet-levelup.js` filters `s.level > 0 && !s.alwaysPrepared &&
-!s.sourceFeature`; `charactersheet-class-utils.js` filters granted cantrips by
-`sourceFeature`). Granted **cantrips** deliberately omit `alwaysPrepared`, so
-`sourceFeature`/`sourceClass` are the only readable flags there. Inventing the
-new field would have been exactly the dead-`hasXxx` anti-pattern this suite
-exists to kill.
-
-**Regression pin — falsified**: `CharacterSheetLunarSorcery.test.js`. Breaking
-`getFeatureGrantedSpells()` in place (keeping the signature) turns the grant
-tests red with real assertion failures, not `TypeError`.
-
----
-
-## CS-BUG-087 — `featuresMatrix` entries whose level window contained no checkpoint were silently never evaluated
-
-**Status**: RESOLVED (rescue checkpoints added; seven dead windows across three specs now execute).
-
-**Affected**: every E2E spec using `featuresMatrix`.
-
-**Symptom**: none — that is the bug. The suite stayed green while the entry
-asserted nothing, and the entry looked like coverage in review.
-
-**Root cause**: the MEGA and matrix runners in `characterSpecFactory.ts` only
-stop and evaluate at levels **[3, 5, 11, 17, 20]**. An entry declared
-`{level: 6, untilLevel: 10, …}` contains none of those, so
-`assertFeaturesMatrix` was never called with a `currentLevel` inside its window.
-Nothing warned; the entry was dead code that reported success.
-
-**Enumerated** — and a correction worth recording. A first pass used a regex
-scanner over the spec sources and reported "274 windows scanned, 2 dead". That
-number was **wrong**: a regex over source text is not an enumeration, because it
-only sees the entries it happens to match. Running the check against the real
-parsed `featuresMatrix` objects at collection time found **7 dead windows across
-3 specs**:
-
-| Spec | Window | What it hid |
-|---|---|---|
-| `tgtt-shadow-magic-sorcerer` | `2..2` (Sorcery Points) | the `longRestRestores` probe on the pool |
-| `tgtt-shadow-magic-sorcerer` | `6..10` (Hound of Ill Omen) | the **entire `classSummon` probe** — AC 14, HP 37, bite/piercing, plus the `scaling.tempHpPerLevel` descriptor reads (this is how CS-BUG-089 was found) |
-| `tgtt-arcane-archer-fighter-hochling` | `13..16` (Indomitable) | the 2-use tier of the pool |
-| `tgtt-talent-chronopath` | `7..10` ×2 (Psionic Exertion) | `psionicExertionsKnown: 2` |
-| `tgtt-talent-chronopath` | `12..16` (Psychic Boost) | `psychicBoostUses: 2` |
-| `tgtt-talent-chronopath` | `13..16` (5th-order powers) | `maxPowerOrder: 5`, `manifestationDie: 1d8` |
-
-The Hound's L17 window (`17..∞`) *did* run, so the feature was not wholly
-unasserted — but the summon's stat block never was.
-
-**Fix** — and note this is *not* the first fix attempted. The first version
-threw at collection time demanding the author widen the window. That was wrong
-twice over:
-
-1. It aborts Playwright's **entire** collection (`Total: 0 tests in 0 files`), so
-   one bad spec bricks the suite for everybody in a parallel batch.
-2. More importantly, widening is usually **impossible**. Every one of the five
-   newly-found windows is an *intermediate progression tier* — Indomitable is 1
-   use at 9-12, **2 at 13-16**, 3 at 17+. Widening `13..16` to touch a checkpoint
-   makes the asserted value factually wrong at that checkpoint. The guard was
-   demanding a false assertion.
-
-The shipped fix instead **adds the stops the spec needs**.
-`_matrixCheckpointsFor()` returns the base `MATRIX_CHECKPOINTS` plus a rescue
-stop for every otherwise-unreachable window, chosen greedily so overlapping
-tiers share one stop (`12..16` and `13..16` both resolve to a single stop at 13).
-The runners already level up through every level one at a time — a checkpoint
-only decides where to pause and assert — so a rescue stop is cheap, and specs
-with no dead windows get the identical five stops as before.
-
-A rescue stop asserts **only the entries it exists for**
-(`rescueEntriesByLevel`). Re-running the full matrix there is pure waste, and
-measurably not free: a late full pass costs about as much as the L11 one.
-
-Only structurally impossible windows (`untilLevel < level`, or a window outside
-1-20) still throw, since no stop can rescue those.
-
-The two shadow-magic windows were also widened by hand (to `3..4` and `6..16`),
-which is correct there because the asserted values genuinely do not change
-across the widened range.
-
-**Verified**: the four Chronopath entries and the Arcane Archer entry now
-execute for the first time. Chronopath's matrix passes (4.6 m). Arcane Archer
-reaches and passes its L13 rescue stop, then times out at L17 — **which it also
-does on an unmodified base checkout** (A/B verified at `f551d9a2`), so that
-spec's timeout is a pre-existing problem with its size, not a consequence of
-this change.
-
----
-
-## CS-BUG-088 — `LevelUpPage`'s named-subclass-choice modal selector matches nothing
-
-**Status**: OPEN (recorded, deliberately not fixed).
-
-**Affected**: `test/e2e/pages/LevelUpPage.ts:897` and `:902`;
-`test/e2e/pages/BuilderWizardPage.ts:337` and `:341`.
-
-**Symptom**: latent. The helpers locate `.ui-modal__inner`, but 5etools modals
-carry the class **`ve-ui-modal__inner`** (`js/utils-ui.js:573` — the `ve-`
-prefix is part of the token, so a bare `.ui-modal__inner` matches **zero**
-elements).
-
-**Why it has not failed**: `selectNamedSubclassChoice` (`:900`) races the dead
-modal locator against `.charsheet__levelup-named-subclass-choice`, and Level-Up
-renders its choice **inline**, so the working half always wins. The
-`expectNamedSubclassChoiceModalVisible` helper (`:896`) has no such fallback and
-is the genuinely dead one.
-
-**How it was found**: the Builder *does* use the modal branch, so the new
-`BuilderWizardPage.answerSubclassChoiceModal()` written for Lunar Sorcery hung on
-an open "Lunar Embodiment" modal until the selector was corrected to
-`.ve-ui-modal__inner` (`BuilderWizardPage.ts:419`).
-
-**Not fixed here** deliberately: correcting `:337`/`:341`/`:897`/`:902` changes
-shared page objects that `divine-soul-affinity.spec.ts` and every subclass-choice
-spec depend on, and the blast radius does not belong in a subclass change. Two
-related off-by-one traps found alongside, both fixed only in the new helper: the
-choice `<select>`'s **index 0 is the disabled "Select…" placeholder** (use
-index 1), and the confirm button must be matched `/^OK$/i` rather than by
-substring.
-
----
-
-## CS-BUG-089 — a companion whose attack is declared structurally has no rollable attack at all
-
-**Status**: RESOLVED (Lunar Sorcery session; the victim is Shadow Magic).
-
-**Affected**: `js/charactersheet/charactersheet.js:4851` (companion card attack
-buttons) and `:5794` (`_rollCompanionAttack`); `js/charactersheet/charactersheet-state.js`
-`addCompanion()`. Live victim: **Hound of Ill Omen** (Shadow Magic Sorcerer 6).
-
-**Symptom**: a summoned Hound of Ill Omen rendered **zero attack buttons** and had
-nothing to roll, despite carrying a fully specified bite
-(`attackBonus: 5`, `damage: "2d6+3"`, `damageType: "piercing"`, plus the DC 13
-Strength prone rider).
-
-**Root cause** — two companion attack vocabularies, only one of which is read:
-
-| shape | example | who reads it |
-|---|---|---|
-| prose | `{name: "Bite", entries: ["{@atk mw} {@hit 5} … {@h}{@damage 2d6+3} piercing damage."]}` | the card (filters `companion.actions` for `{@atk`) **and** `_rollCompanionAttack()` (parses `{@hit}` / `{@damage}` / `{@dc}` out of `actions` entries) |
-| structured | `{name: "Bite", attackBonus: 5, damage: "2d6+3", damageType: "piercing", range, description}` | see below — nothing that renders or rolls it |
-
-`addCompanion()` stored `attacks` verbatim. Enumerating every reader
-(`git grep -n "\.attacks" -- js/charactersheet/`, discarding `_data.attacks`,
-`attacksPerAction` and `attacksAgainst`) gives exactly **four** sites that touch
-`companion.attacks`, and none of them makes a structured attack rollable:
-
-1. `charactersheet-playmode.js:2835` and 2. `:4020` — `const actions = comp.actions || comp.attacks || [];`.
-   This fallback is **unreachable for anything built by `addCompanion()`**, which
-   has always written `actions: companionData.actions || []` — and `[]` is
-   truthy, so the left operand always wins. Even if it did fire, both sites
-   render only `action.name` and `action.entries`; a structured attack has no
-   `entries`, so it would surface as a bare name with no numbers. Play Mode has
-   no companion attack roll button either way.
-3. `charactersheet-state.js:53746` (`_recalculateScaledCompanion`) — writes both
-   arrays, but **only when `scaling.attackName` is set**. The Hound's scaling
-   descriptor carries only `className` / `tempHpPerLevel`.
-4. `charactersheet-state.js:54044` — annotates `attack.damageBonus` for created
-   undead. A write, not a render.
-
-So the honest form of the claim is not "nothing reads it" but "no path that
-renders an attack button or rolls an attack reads it, and the one prose fallback
-that exists is dead for `addCompanion()` output."
-
-**Fix**: `static CharacterSheetState._withStructuredAttackActions(actions, attacks)`,
-applied once at `addCompanion()` entry, translates each unrepresented structured
-attack into the prose shape. Existing prose actions win on name collision, and an
-attack that already carries `entries` is left alone — so bestiary-derived
-companions are untouched.
-
-**How it was found**: only because CS-BUG-087's collection-time guard made the
-`classSummon` probe in `tgtt-shadow-magic-sorcerer.spec.ts` **reachable for the
-first time** — its window was `6..10`, which contains none of the matrix
-checkpoints `[3, 5, 11, 17, 20]`.
-
-**Parallel harness gap fixed alongside**: the `classSummon` flattener in
-`test/e2e/utils/comprehensiveBuildHelpers.ts` joined `a.damage` / `a.desc` /
-`a.entries` but **never `a.damageType`**, so `damageContains` could not match a
-damage type on any structured attack — the harness would have mis-reported the
-product bug as a probe failure even once reachable.
-
-**Regression pins**: `test/jest/charactersheet/CharacterSheetShadowMagicSorcerer.test.js`.
-Falsified in place (signature kept): dropping the `{@damage}` wrapper and the type
-from the synthesised entry → **1 red**, a real assertion failure
-(`Expected pattern: /\{@damage 2d6\+3\}/`). Independently, disabling the
-name-collision guard → **1 red** on the "does not clobber" pin. A whole-function
-no-op reds only the first pin, which is correct: the second pin asserts
-precedence, a property a no-op preserves.
-
----
-
-## CS-BUG-090 — the E2E export round-trip test was under-budgeted for its own wizard run
-
-**Status**: RESOLVED.
-
-**Affected**: `test/e2e/utils/characterSpecFactory.ts` — the
-`L1 export round-trip preserves identity` test generated for **every**
-`describeCharacter` spec.
-
-**Symptom**: `Test timeout of 60000ms exceeded` while still inside
-`createCharacterViaWizard` — surfacing either as
-`locator.click: waiting for locator('#charsheet-builder-next')` or as
-`page.waitForTimeout`. Both read like a hung UI and neither is one.
-
-**Root cause**: the round-trip test does the same full builder-wizard run as the
-`L1 build` test, which explicitly budgets `test.setTimeout(120_000)`. The
-round-trip test set no timeout at all and inherited the 60 s global default from
-`playwright.config.ts`. It passed only on presets whose wizard happens to finish
-inside 60 s.
-
-**How it was found**: the Lunar Sorcery preset answers a subclass-choice modal
-at L1, which pushes creation past the limit. Measured after the fix: **51.6 s** —
-i.e. the test was passing with under 9 s of headroom on every other spec too, so
-this was latent flake across the whole suite, not a Lunar-specific problem.
-
-**Fix**: `test.setTimeout(120_000)` on the round-trip test, matching the L1 build
-test it mirrors. Raising a timeout cannot make a passing spec fail, so the blast
-radius is one-directional.
 
 ---
 
@@ -2565,6 +2634,212 @@ survives `getResources()`).
 
 ---
 
+## CS-BUG-075 — a subclass spell grant with a `{choose}` block was silently dropped
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: Arcana Domain's Arcane Initiate grants "two cantrips of your
+choice from the wizard spell list". No pick-list ever appeared — in the
+Builder, in Level-Up, or in Quick Build — and no cantrip was added. The
+feature rendered as prose and did nothing.
+
+**Root cause**: `getSubclassAlwaysPreparedSpells()` walks a subclass's
+`additionalSpells` block and resolves every entry through
+`_parseSpellReference()`. That helper handles a **string** (`"detect magic"`,
+`"magic missile|phb"`) and returns `null` for anything else. A choose block is
+an **object** — `{choose: "level=0|class=Wizard", count: 2}` — so it fell out
+of the walk entirely. There is no other reader of `additionalSpells`, so **no
+subclass in the whole product could offer a player-chosen spell**; the shape
+had simply never been implemented.
+
+**Fix**: a parallel, choose-shaped walker rather than a per-subclass
+special-case. New `getSubclassSpellChoiceSlots()` walks the same
+`additionalSpells` structure, keeps only `{choose}` entries whose level gate
+the character has met, and expands each `count` into that many stable slots
+keyed by `_spellChoiceSlotKey()` (class / subclass / category / level /
+index). `_ensureSubclassSpellChoices()` reconciles those slots against
+`_data.fulfilledSpellChoiceSlots` and mints a pending choice for each unfilled
+one; `getPendingSpellChoices()` and `hasPendingSpellChoices()` call it first,
+so all three creation flows — which already call
+`processPendingSpellChoices()` — surface the picker with no flow-specific
+work. `fulfillSpellChoice()` records the slot so a choice is never re-offered,
+and honours `alwaysPrepared` so a granted spell does not eat the prepared
+limit.
+
+This lights up Arcane Mastery (four picks: one each of 6th/7th/8th/9th level)
+by the same mechanism, and every other `{choose}` grant in the data.
+
+**Regression pins**: `CharacterSheetArcanaCleric.test.js` §Arcane Initiate's
+two wizard cantrips and §Arcane Mastery is a four-part pick-list; the
+`stateCall getSubclassSpellChoiceSlots` / `getPendingSpellChoices` and
+`cantripCount` probes in `tgtt-arcana-cleric.spec.ts`.
+
+---
+
+## CS-BUG-076 — `potentSpellcastingBonus` was computed by ten subclasses and read by nothing
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: Potent Spellcasting (Arcana / Knowledge / Life… Cleric, and
+Druid's Potent Spellcasting) claims to add the Wisdom modifier to cantrip
+damage. Rolling a cantrip produced the base dice only.
+
+**Root cause**: `getFeatureCalculations()` sets `potentSpellcastingBonus` in
+roughly ten subclass branches, but a repo-wide search found **no consumer** —
+the number existed purely to be displayed.
+
+**Fix**: generic, not per-subclass. New
+`state.getCantripDamageBonus(spell)` returns `{bonus, sources}` and is scoped
+by a new `calculations.potentSpellcastingClass` (set alongside the bonus in
+the Cleric and Druid branches) via a new `spellCountsForClass(spell,
+className)` helper — so a Cleric/Wizard multiclass does not add Wisdom to
+their *wizard* cantrips. `charactersheet-spells.js` `_rollCantripDamage()`
+adds `bonus` and labels it in the breakdown; `charactersheet-features.js`
+shows a "Cantrip Damage +N" stat badge.
+
+Arcane Initiate's wizard cantrips *count as cleric cantrips*, so they receive
+the bonus — asserted explicitly.
+
+**Deliberately out of scope**: the weapon-channel cantrips (Booming Blade,
+Green-Flame Blade) do not route through `_rollCantripDamage`, so they do not
+pick the bonus up. RAW this is contested; it is noted rather than silently
+implemented either way.
+
+**Regression pins**: `CharacterSheetArcanaCleric.test.js` §Potent Spellcasting
+(including negative controls for level, non-cantrips and other-class
+cantrips); the `stateCall getCantripDamageBonus` probes in
+`tgtt-arcana-cleric.spec.ts`.
+
+---
+
+## CS-BUG-077 — `showFilteredSpellPicker` resolved before the modal closed, so batched picks collapsed
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: Arcane Initiate grants **two** wizard cantrips. Only one ever
+landed. `processPendingSpellChoices()` marked both slots fulfilled, so the
+second was never re-offered.
+
+**Root cause**: `showFilteredSpellPicker` is `async` but returned as soon as
+`CharacterSheetModal.pGetShow` had rendered — not when the user had picked.
+`processPendingSpellChoices()` awaits it in a `for … of` loop, so every picker
+in the batch opened at once, each holding the `knownSpellIds` snapshot taken
+before *any* pick. Two picks of the same top-of-list cantrip then collapsed to
+one via `addSpell`'s dedupe.
+
+**Fix**: `showFilteredSpellPicker` now returns a promise that settles on modal
+close (`cbClose`), so the loop is genuinely sequential and each picker sees the
+spells chosen before it.
+
+**Regression pin**: the `cantripCount` probe in `tgtt-arcana-cleric.spec.ts`
+(the two Arcane Initiate picks are the only guaranteed cantrips on that build,
+so a collapse fails the matrix).
+
+---
+
+## CS-BUG-078 — the 2014 Cleric's Channel Divinity pool was 2 uses at level 2
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: a 2nd-level 2014 Cleric had **two** Channel Divinity uses on the
+sheet instead of one, all the way to level 5.
+
+**Root cause**: the pool is minted by `addFeature`'s grant-time prose parser,
+and the 2014 Cleric's level-2 feature text advertises its future tiers in the
+same paragraph — "Beginning at 6th level, you can use your Channel Divinity
+**twice** between rests". The parser read that "twice".
+`_ensureChannelDivinityUses` (the CS-BUG-033 reconciler) only ever **raised**
+the max, so the over-count was permanent. The CS-BUG-033 suite even encoded
+the one-way behaviour as intended ("never lowers a pool that is already larger
+than the progression").
+
+**Fix**: `_getChannelDivinityUsesForClass` is authoritative in **both**
+directions. `resourceStale` / `featureStale` compare with `!==` rather than
+`<`, and `feature.uses.current` is clamped to the new max. Multiclass stays
+safe because `desiredMax` is the largest contribution across every class.
+The superseded CS-BUG-033 case has been rewritten in place.
+
+**Regression pins**:
+`CharacterSheetChannelDivinityScaling.test.js` §lowers a pool that the prose
+parser over-counted; `CharacterSheetArcanaCleric.test.js` §Cleric Channel
+Divinity pool is capped and scales 1 → 2 → 3; the tiered `Channel Divinity`
+resource rows in `tgtt-arcana-cleric.spec.ts`.
+
+---
+
+## CS-BUG-079 — 2014 Cleric domain Channel Divinity options were unclassified and unlimited
+
+**Status**: FIXED (Arcana Domain Cleric batch)
+
+**Symptom**: "Channel Divinity: Arcane Abjuration" surfaced with no
+`interactionMode`, was not linked to the Channel Divinity pool, and could be
+used an unbounded number of times. Its Wisdom save never rolled.
+
+**Root cause** (measured, and *not* what it first looked like). There are
+**two** independent causes producing the same symptom:
+
+1. **The tag is dropped on the way to the sheet.** `class-cleric.json`'s L2
+   SCAG entry for Arcane Abjuration *does* carry
+   `consumes: {name: "Channel Divinity"}` — but the exported live character
+   showed `consumes: None`. `CharacterSheetClassUtils` builds subclass features
+   at **five** sites, and only the `refSubclassFeature` expansion copied
+   `consumes` / `uses`; the other four whitelist a fixed key set and silently
+   dropped them. Paladin oaths reach the sheet through the ref-expansion path,
+   which is why Crown's Champion Challenge / Turn the Tide *did* arrive tagged
+   and this looked like a data difference between the two classes.
+2. **Many options genuinely ship untagged.** 18 of the 40
+   `Channel Divinity*` entries in `class-cleric.json` carry no `consumes` at
+   all — including Tempest's Destructive Wrath, which is precisely why it
+   needed a hard-coded `FEATURE_CLASSIFICATION_OVERRIDES` entry. That is
+   per-subclass special-casing of exactly the kind this codebase avoids.
+
+**Fix**, in two generic parts.
+
+*(1) Propagate the tag.* The four subclass-feature construction sites in
+`charactersheet-class-utils.js` now spread `consumes` through, matching the
+ref-expansion site. This is the true root-cause fix and reaches **113**
+`subclassFeature` entries across six pools — Channel Divinity (54), Sorcery
+Point (16), Psionic Energy Die (15), Ki (14), Focus Point (9) and Wild Shape
+(5) — every one of which previously failed to link when collected through one
+of those four paths. `uses` is deliberately **not** propagated: it would mint a
+new resource pool for features that merely document a count.
+
+*(2) Classify the naming convention* as the safety net for the 18 options that
+carry no tag in the data at all. Every Channel Divinity option
+in every source is named `Channel Divinity: <Option>`, so
+`detectActivatableFeature` now routes any feature matching
+`/^channel\s+divinity\s*:/i` through `_buildAbilityActivationInfo` with
+`resourceName: "Channel Divinity"`. Placed **after** the `consumes` branch and
+the classification-override block, so Paladin oaths and Destructive Wrath keep
+their existing paths unchanged. Options carrying their **own** use pool (TCE's
+"Channel Divinity: Harness Divine Power", PB/long rest) are excluded so the
+more specific pool keeps owning the row.
+
+Because the option now classifies as an `"ability"`, it inherits the CS-BUG-053
+fix and its save DC resolves from the character through `getFeatureSaveDc()`.
+
+**Regression pins**: `CharacterSheetArcanaCleric.test.js` §Arcane Abjuration is
+a usable Channel Divinity option (including the `consumes`-tagged and
+own-pool negative controls); the `combatAction` + `resource` probes in
+`tgtt-arcana-cleric.spec.ts`.
+
+Part (1) needs a pin of its **own**: because part (2) independently classifies
+the feature, every other probe on the row stays green with the tag still
+missing — reverting the four spreads left the whole matrix green. The dedicated
+pin is the `stateCall` probe on the L2 Arcane Abjuration row asserting
+`getFeature("Channel Divinity: Arcane Abjuration").consumes.name ===
+"Channel Divinity"`. Falsified: with the four spreads reverted it fails with
+`consumes.name=null` and is the *only* failure in the matrix; restored, green.
+
+**Blast-radius validation for part (1)**, one spec per affected pool:
+`tgtt-tempest-cleric` + `tgtt-crown-paladin` (Channel Divinity),
+`tgtt-sea-druid` (Wild Shape), `tgtt-mercy-monk-changeling` (Ki),
+`tgtt-child-of-sun-sorcerer-hochling` (Sorcery Point) — all green.
+**Not covered**: Focus Point (2024 Monk) and Psionic Energy Die (Psi Warrior)
+have no spec in this suite; they are propagated on the same code path but
+unverified end-to-end.
+
+---
 ## CS-BUG-081 — the sheet's Damage button bypassed `takeDamage()` entirely
 
 **Status**: Fixed.
@@ -2666,10 +2941,43 @@ number they could not reconcile.
 **Fix**: `getSorceryPointsMaxForClass()` returns `level + 1` for TGTT and
 `level >= 2 ? level : 0` for PHB/XPHB, and every surface now reads it.
 
-**Follow-up available**: the CS-BUG-018 skips in the two neighbouring Sorcerer
-specs are now liftable with `level + 1` values. Left in place here so the
-blast radius of this change stays inside one subclass; whoever picks up
-Lunar / Spellfire / Wicked Witch / Shadow Sorcery should take it.
+**Follow-up available — but only for HALF the skips. Read this before lifting
+anything.** Each of the two neighbouring Sorcerer specs carries **9** skipped
+rows, and they split into two groups that must be treated differently:
+
+| Rows | Kind | Liftable? |
+|---|---|---|
+| 6 per spec | `kind: "resource"`, `name: "Sorcery Points"` | **Yes** — set `resourceMax` to `level + 1` **and** add `untilLevel` to every tier (the matrix re-evaluates each earlier row at checkpoints `[3,5,11,17,20]`, and this pool grows every level) |
+| 3 per spec | `kind: "pickToggleable"` on the `/metamagic/i` rows | **No — structurally unsatisfiable. Do not unskip.** |
+
+The `pickToggleable` rows match on `/…spell.*active/i`, i.e. the **activatable**
+surface — but metamagic is deliberately excluded from it at three sites in
+`js/charactersheet/charactersheet-combat.js` (`:5806`, `:5827` — *"Skip metamagic
+features (managed via metamagic dashboard)"* — and `:6048`). Metamagic is a
+**cast-time** mechanic resolved through `getCastableActiveMetamagics()`, because
+its cost depends on the individual cast's slot level (`"level"` / `"halfLevel"`)
+and its legality on the individual spell. Lifting those six yields six
+guaranteed false reds sitting immediately beside the Sorcery Points rows, where
+they read as a regression in *this* fix.
+
+Assert metamagic with `stateCall` instead — see
+`tgtt-shadow-magic-sorcerer.spec.ts`:
+
+```ts
+{kind: "stateCall", method: "getKnownMetamagicKeys", path: "length", exact: 2},
+{kind: "stateCall", method: "getMetamagicCost", args: ["twinned", 3], exact: 3},
+```
+
+Name-matching probes are unsafe for a second, independent reason: on a
+**spawned** build the Features surface lists metamagic options the character has
+*not* picked, so a `/quickened spell.*active/i` probe can pass on a character
+that does not know it. (Measured: a **wizard-built** character does *not* leak —
+forcing `pickedCount: 20` returned `got 2`. The two builders differ whenever a
+level carries a choice.) `stateCall` is immune to both problems.
+
+Left in place here so the blast radius of this change stays inside one subclass;
+whoever picks up Lunar / Spellfire / Wicked Witch / Shadow Sorcery should take
+the six resource rows and leave the three metamagic rows alone.
 
 **Regression pins**: `CharacterSheetShadowMagicSorcerer.test.js` §"base-class
 Sorcery Points machinery" asserts both ladders explicitly.
@@ -2870,6 +3178,10 @@ entries when the description is rendered HTML". Verified in-browser via
 `[]` to `["Feather Fall", "Jump"]`, and to all three with the at-will upgrade
 at 15.
 
+**Falsified**: restoring the literal prior `feature.description` expression
+turns **1 test red** on the full `charactersheet/` suite. Measured twice —
+once by the implementing session, once independently at merge time.
+
 ---
 
 ## CS-BUG-067 — feature-wide "cast each once per long rest" clauses were out of the parser's context window, upgrading limited grants to permanent ones
@@ -2909,3 +3221,749 @@ cannot bind to the word "cast" in a different sentence.
 `CharacterSheetMeteorKnight.test.js` — asserts `uses: {current: 1, max: 1}`
 and `recharge: "long"` on the level-3 grants, and that the level-15 at-will
 upgrade *clears* both.
+
+**Falsified**: restoring the original local-context-only expressions
+
+```js
+const isOnce = /once|one time/i.test(context) && /rest|dawn|day/i.test(context);
+const recharge = /short rest/i.test(context) ? "short" : (/long rest|dawn|day/i.test(context) ? "long" : null);
+```
+
+turns **5 tests red** on the full `charactersheet/` suite. Measured
+independently at merge time and again by the implementing session; both runs
+agree on 5. Keep `_parseFeatureWideCastingLimit()` defined when running this
+control — deleting it as well produces a `ReferenceError` and an inflated red
+count that proves nothing.
+
+---
+
+## CS-BUG-090 — a species trait whose NAME collides with a combat method was reclassified as one
+
+**Status**: RESOLVED.
+
+**Affected**: any character whose species grants a trait sharing a name with a
+TGTT combat method. Enumerated against the shipped data: **Centaur** (GGR,
+MPMM, and the TGTT `_copy` of them) → **`Charge`**, and **Kender** (DSotDQ) →
+**`Taunt`**. The collision surface is the 321-name `combatMethod` catalogue, so
+any future homebrew species trait with a generic combat name joins it.
+
+**Symptom** — the racial trait was stored as a combat method. Measured on a
+wizard-built Centaur Hunter Ranger 3, `getCombatMethods()` returned **4** where
+the class table grants **3**:
+
+```json
+{"name": "Charge", "_entityType": "combatMethod", "tradition": "Rapid Current",
+ "degree": 1, "staminaCost": 1, "featureType": "Species"}
+```
+
+`featureType: "Species"` — its true origin — sits alongside combat-method
+markers it should never have. User-visible consequences: the racial trait
+appears in the Combat Methods UI grouped under a tradition the character never
+took, it acquires a **1-point stamina cost**, and the character appears to know
+one more method than the class table allows — which also lets a genuinely lost
+pick hide behind it.
+
+**Root cause** — `_repairCombatMethodMarkers()`
+(`js/charactersheet/charactersheet-state.js`) matched the catalogue on
+**name + source alone**:
+
+```js
+const entity = this._combatMethodCatalog.find(m =>
+    m?._entityType === "combatMethod"
+    && (m.name || "").toLowerCase() === name
+    && (m.source || "").toLowerCase() === source);
+```
+
+Its only guard was `hasTypePrefix(f, ["BT", "AS"])` — Battle Tactics and Arcane
+Shots. Nothing excluded a species / background / feat trait. A TGTT-sourced
+species matches on source too, so the racial `Charge` matched the TGTT method
+`Charge` exactly and was stamped.
+
+Note this is a *repair* pass whose whole job is to re-hydrate methods that lost
+their markers (CS-BUG report #14, "Doubleshot does nothing"), so it deliberately
+trusts name+source. The defect is that "lost its markers" and "never was one"
+are indistinguishable under that predicate.
+
+**Fix** — skip features tagged as belonging to another entity kind, unless they
+carry a real CTM marker; and undo exactly the fields the pass writes, so it is
+its own inverse and repairs saves already mis-stamped:
+
+```js
+const FOREIGN_ORIGIN_TYPES = /^(species|race|subrace|lineage|background|feat)$/i;
+…
+if (isForeignOrigin(f) && !hasTypePrefix(f, ["CTM:"])) {
+    if (f._entityType === "combatMethod") delete f._entityType;
+    delete f.tradition; delete f.degree; delete f.staminaCost;
+    continue;
+}
+```
+
+The CTM escape hatch keeps the guard from being over-broad: a homebrew species
+that legitimately grants a real combat method still repairs.
+
+**Why the suite missed it** — Combat Methods had **no assertion anywhere in the
+E2E suite**. `TGTT_COMBAT_METHODS_BY_TRADITION` existed as a fully-populated
+constant with zero consumers, and the two specs that mention the feature both
+asserted only that the parent `Combat Methods` row exists, under the comment
+*"Pick-kind would require enumerating all options; treat as passive listing."*
+
+**Discovered by** the new `buildCombatMethodChecks()` helper, while validating
+its own falsification — the count assertion failed at L3 reporting
+`getCombatMethods().length=4, expected 3`.
+
+⚠️ **Do not assert combat methods with `kind: "pick"` over
+`TGTT_COMBAT_METHODS_BY_TRADITION`.** That was the helper's first design and it
+is unsound: the union of 321 generic name patterns matches features that are not
+combat methods, so `matchCount` is inflated by a race/class-dependent amount.
+The very first run scored 4 matches against 3 real methods — for the same
+`Charge` collision, but through the *harness*, and it would still have been
+wrong after this product fix. Use `stateCall` on `getCombatMethods()`, which
+filters structurally via `CharacterSheetClassUtils.isCombatMethod()`.
+
+### Regression pins
+
+`CharacterSheetCombatMethodRepair.test.js` — describe block
+*"CS-BUG-090 — species traits that share a name with a combat method"*.
+**Falsified: 2 of 5 go red on revert**, both on assertions
+(`Received: "combatMethod"`), not TypeErrors. The other three are deliberate
+no-regression controls — a premise guard that the collision exists at all, plus
+the two over-broadness controls (a genuine same-named method still repairs; a
+species trait carrying CTM markers survives) — which must stay green either way.
+
+E2E: `tgtt-hunter-zodiac-centaur.spec.ts` fails at L3 without the fix and passes
+with it, so the new helper pins this end-to-end as well.
+## CS-BUG-091 — a subclass-granted combat method absorbed the next class-table increment
+
+**Status:** Fixed.
+**Affects:** 27 TGTT subclasses across 4 classes — Fighter 11 (Eldritch Knight
+grants **two**), Monk 14, Paladin 1 (Oathbreaker), Rogue 1 (Swashbuckler).
+Barbarian and Ranger grant none, which is exactly why this hid for so long.
+
+### Symptom
+
+Every one of those subclasses says, in prose, *"you learn one additional method
+from this tradition."* The character received it — and then never received the
+**next** method the class table owed them, and stayed one short for the rest of
+their career. On a wizard-built Astral Self Monk, measured:
+
+| Monk level | Class table | Expected (table + grant) | Actual |
+|---|---|---|---|
+| 3 | 2 | 3 | 3 ✅ |
+| 4 | 3 | 4 | 3 ❌ |
+| 5 | 3 | 4 | 3 ❌ |
+
+The L3 value being *correct* is what made this so quiet: the grant visibly
+arrived, so the feature looked implemented. The loss only shows up one level
+later, as a pick that is never offered.
+
+### Root cause
+
+`optionalfeatureProgression` for `CTM:*` stores a **cumulative total**, not a
+per-level delta. `CharacterSheetClassUtils.getOptionalFeatureGains()` computed:
+
+```js
+newOptionsCount = countAtNew - existingOfType;
+```
+
+`existingOfType` counts every CTM feature on the character — including the
+subclass-granted one. So at Monk 4 the table wanted 3 total, the character
+already held 3 (2 class picks + 1 grant), and the difference was 0. The grant
+had silently spent the class's next increment.
+
+The grant itself is added by a separate path
+(`charactersheet-levelup.js` ~:525, via `getSubclassBonusMethodCount()`), which
+fires once at the subclass-selection level. QuickBuild was **already correct** —
+it adds the bonus into `gain.totalNeeded` (`charactersheet-quickbuild.js`
+~:2456, ~:2492), so its arithmetic nets out. The Builder → Level-Up path was the
+odd one out.
+
+### Fix
+
+In `getOptionalFeatureGains()`, discount subclass-granted bonus methods from the
+"already known" count, **scoped to `CTM:*` only** — no other progression type
+(invocations, maneuvers, arcane shots, metamagic) has an additive-grant concept,
+so the blast radius is exactly TGTT combat methods.
+
+The discount is the *excess over the class table's total at the **current**
+level*, capped at the subclass allowance:
+
+```js
+alreadyGrantedBonus = Math.min(bonusAllowance, Math.max(0, existingOfType - countAtCurrent));
+```
+
+⚠️ **Why the inference rather than a flat `- bonusAllowance`:** at the
+subclass-selection level the grant has not been taken yet, so the excess is
+still 0 and the class path correctly contributes nothing — leaving the
+level-up module's own bonus augmentation to supply that single pick. A flat
+subtraction would make both paths offer it and hand the player **two** methods
+at the grant level. The clamp also keeps a hand-edited import carrying surplus
+methods from having the surplus read as grants.
+
+`totalCount` is reported as `countAtNew + alreadyGrantedBonus` so the picker
+header satisfies `currentCount + newCount === totalCount` instead of claiming a
+total lower than the character's own holding.
+
+### Regression pins
+
+`CharacterSheetCombatMethodBudget.test.js` — 8 tests.
+**Falsified: 4 of 8 go red on revert, all on assertions, zero TypeErrors.**
+The revert breaks the logic in place with the signature intact (sets the
+discount to 0), rather than deleting anything. Three of the four originally
+failed as `TypeError: Cannot read properties of undefined`; the tests were
+hardened with an explicit `expect(gain).toBeDefined()` so the failure is an
+assertion, per the rule that a red `TypeError` is not a falsification.
+
+The 4 that stay green are deliberate controls: the no-double-count guard at the
+grant level, the over-discount clamp, the subclass-driven control (no
+bonus-granting subclass → old arithmetic), and a non-CTM progression control.
+
+E2E: `tgtt-astral-self-monk-changeling.spec.ts` fails at L5 without the fix
+(`getCombatMethods().length=3, expected 4`) and passes L1→20 with it.
+
+### How it was found
+
+Not by interpreting a failure — by **validating a harness helper on a second
+class**. `buildCombatMethodChecks` had been built and verified on Ranger only,
+and Ranger is one of the two TGTT classes with no subclass grants. Wiring it
+into a Monk spec produced a red that turned out to be two independent defects
+stacked: a harness gap (the helper ignored subclass grants) *and* this product
+bug underneath it. Validating on N=1 class would have shipped both.
+
+---
+
+## CS-BUG-088 — Indomitable Might rendered but did nothing, and was modelled on the wrong rule
+
+**Status:** Fixed
+**Severity:** Medium (a capstone-tier class feature with zero mechanical effect)
+**Area:** `charactersheet-state.js` (FeatureEffectRegistry, `aggregateModifiers`), `charactersheet.js` (roll handlers)
+
+### Symptom
+
+Indomitable Might (Barbarian 18) appeared on the Features tab and did **nothing**.
+Measured live on `barbarian/chained fury/18/minotaur` before the fix:
+
+```
+namedModifiers -> {name: "Indomitable Might", type: "ability:str:minimum", value: "strScore"}
+aggregateModifiers("ability:str:minimum") -> bonus 0, sources []
+aggregateModifiers("check:str")           -> bonus 0, minimum null
+getAdvantageState("check:str")            -> no minimum, sources []
+_data.rollFloors                          -> {}   (empty)
+```
+
+The modifier was created and then read by **no one**. This is precisely the
+"description-only rendering" the subclass batch's acceptance bar forbids.
+
+### Root cause — two independent defects
+
+**1. No consumer.** It was registered as
+`{type: "modifier", modType: "ability:str:minimum", value: "strScore"}`.
+`ability:str:minimum` had exactly one emitter and zero readers suite-wide, so
+the value never reached a roll.
+
+**2. The modType encoded the wrong rule — the more important defect.**
+RAW is a floor on the **total of a check**, not on the **ability score**:
+
+> PHB: "if your total for a Strength check is less than your Strength score, you can use that score in place of the total."
+> XPHB: "…for a Strength check **or Strength saving throw**…"
+
+So simply adding a handler for `ability:str:minimum` would have produced a
+*correct-looking number enforcing the wrong rule* — a Strength score reading 20
+when RAW never modifies the score. The model had to change, not just the wiring.
+
+Three floors now coexist and must not be conflated:
+
+| Concept | Floors | Example |
+|---|---|---|
+| `skillMinimum` → `aggregate.minimum` | the **d20 die** | Reliable Talent |
+| `checkTotalFloor` → `aggregate.totalMinimum` | the **final total** | Indomitable Might |
+| ability-score bonuses | the **score** | what the old modType wrongly implied |
+
+### Fix
+
+- Registry: `{type: "checkTotalFloor", ability: "str", floorFrom: "abilityScore", savesInEditions: ["XPHB"], __editionAware: true}`.
+  Only the *rule* is stored, never a number — the floor is read live from
+  `getAbilityScore()` so it tracks ASIs, Primal Champion and Wild Shape. (Baking
+  the value at grant time is the CS-BUG-038 failure mode.)
+- `aggregateModifiers` emits `result.totalMinimum` on `check:<abl>` / `save:<abl>`.
+  **A Strength skill check already aggregates `check:str`** (`checkType` in
+  `_rollSkillCheck`), so Athletics is covered by the same rule with no second
+  entry — and a skill whose ability has been swapped away from STR correctly
+  stops matching.
+- New shared helper `_applyTotalFloor(total, floor)` applied in all three roll
+  handlers *after* every modifier and buff die, because RAW floors the total.
+- Edition divergence resolved from the **feature's own `source`**, threaded in
+  opt-in via `__editionAware`. Every other registry effect is passed through
+  byte-identically, so this cannot change behaviour for anything that does not
+  ask for it. (The alternative — making the class-feature lookup source-aware
+  like the feat lookup — was rejected: all 23 source-keyed registrations are
+  feats/race traits, so it would have changed a shared path for one feature.)
+
+RAW says "you **can** use that score", but the floor can only ever raise a total,
+never lower it, so it is auto-applied and disclosed in the result note rather
+than prompted — matching the existing die-floor and ability-swap conventions.
+
+### Verification
+
+End-to-end with a stubbed natural 1 on `barbarian/chained fury/20/minotaur`
+(STR 24) — displayed totals:
+
+```
+Strength Check   8 -> 24   "Total raised to 24 (was 8)"
+Athletics Check 20 -> 24   "Total raised to 24 (was 20)"   (skill path)
+Strength Save   14 -> 24   "Total raised to 24 (was 14)"   (XPHB only)
+Dexterity Check  3         untouched
+L17 control                nothing floored anywhere
+```
+
+The floor reads 20 at level 18 and 24 at level 20 — it tracks Primal Champion
+live rather than baking the grant-time score.
+
+### Regression pins — `test/jest/charactersheet/CharacterSheetIndomitableMight.test.js` (9)
+
+Staged falsification (a single full revert would have flattered the set):
+
+| Reverted | Red | Notes |
+|---|---|---|
+| aggregate emission only | **4** | all assertions, zero TypeErrors |
+| edition tagging only | **1** | exactly the XPHB-saves pin |
+| registry to pre-fix state | **5** | the true shipped-bug red count |
+
+The 4 pins that survive every revert are **negative controls** (no leak to other
+abilities, no feature ⇒ no floor, die-floor untouched, score/mod unchanged).
+They assert *absence*, so by construction they cannot go red on a revert; they
+guard against over-application, which is the opposite failure.
+
+### How it was found
+
+Assigned as "add an `ability:<abl>:minimum` handler". Probing the modifier live
+before writing any code showed it was inert *and* that the target was wrong, so
+the handler would have been the wrong fix. Measuring the value rather than
+interpreting the ticket is what changed the outcome.
+
+---
+
+## Phase 17 — predetermined-outcome probe sweep (E2E harness, not a product bug)
+
+Not a CS-BUG: no product defect is described here. It is recorded in this
+file because it governs how much any *other* entry in this file can be
+trusted.
+
+A **predetermined-outcome probe** is an assertion whose result is fixed by
+the harness's own shape rather than by product behaviour. It has two
+halves, and both had shipped:
+
+- **Cannot FAIL** — inert level windows, no-op page-object helpers,
+  probes aimed at a surface the feature is deliberately excluded from.
+- **Cannot PASS** — a `pickedCount: N` against a pool of fewer than N
+  options; a `damageContains` against a field the reader never collects.
+
+The property is checkable **statically, before running anything**, which
+is the whole point: you cannot find these by running the suite.
+
+### Why an inert row is worse than a skipped one
+
+`scripts/auditE2eCoverage.mjs` flags rows whose `[level, untilLevel]`
+window contains none of the matrix checkpoints `[3, 5, 11, 17, 20]`. Such
+a row never executes — and unlike `skip: true` it leaves **no marker**, so
+it is invisible to both `grep` and human review, and it presents as a
+green spec.
+
+The damage is larger than a missing number. **The row's `name:` existence
+check dies along with its `effects:`**, so an inert row means the feature
+has no verification of any kind at any level. That is a silent hole
+straight through this batch's acceptance bar — *every ability a subclass
+provides must be offered, shown, and implemented*. Measured: three
+permanent Rogue subclass features (Tantalizing Shivers, Fluid Step,
+Slippery Mind) were wholly unverified this way, in a spec reporting green.
+
+Generally: **a skipped or inert assertion is a frozen claim about a moving
+target, and the freeze is invisible because the test stays green.** Live
+assertions are re-validated continuously; these are not. The discipline is
+therefore needed most exactly where nothing forces it.
+
+### Repair rule for an inert row
+
+Decide against the **product source**, never against the spec — the spec
+is the artefact under suspicion, so it cannot be its own oracle.
+
+- **Value unobservable** (the step holds only *between* checkpoints, e.g.
+  Rogue Sneak Attack 4d6 on L7-8) → **delete**. Widening the window to
+  reach a checkpoint changes the correct value, so there is nothing to
+  repair. Confirm first that every observable step is asserted elsewhere.
+- **Value permanent, window merely wrong** (e.g. `manifestationDie` is
+  `level >= 13 ? "1d8"`) → **widen, or drop `untilLevel` entirely**. Note
+  `findInertRows` skips open-ended rows, since those always reach the last
+  checkpoint.
+
+### A dead probe can hide a broken probe
+
+Un-deadening Shadow Magic's Hound of Ill Omen — whose entire structural
+block (cost, range, AC, HP, bite, summon/dismiss, scaling descriptor) had
+never run — immediately produced:
+
+```
+classSummon(summonHoundOfIllOmen) damage "2d6+3" missing "piercing"
+```
+
+Not a product bug: the companion sets `damageType: "piercing"` correctly.
+The `classSummon` reader in `comprehensiveBuildHelpers.ts` collected only
+`[damage, desc, entries]`, so `damageContains` could never match a
+companion carrying its type structurally rather than inline — and the
+field is `description`, not `desc`. A *cannot-PASS* defect living in the
+**shared harness**, latent for every future author. It was reachable only
+through the inert-window fix.
+
+**Status: swept.** Inert level windows and unreachable pick thresholds are
+both at **zero** suite-wide. Run `node scripts/auditE2eCoverage.mjs` after
+any `featuresMatrix` edit; `--strict` exits non-zero.
+
+What remains is a third, softer sibling that **no static check catches**: a
+probe that *passes for a different reason than its comment claims*. Known
+instance: `tgtt-arcana-cleric.spec.ts` uses `spellMatchMode: "any"`, which
+does not relax the name match but **deletes** it — in `"any"` mode
+`e.spell` is never read and only `getKnownSpellsByLevel()[level].length >= 1`
+is checked. Those four probes correctly pass `spell: ""` and so are honest,
+but a `{spell: "Bane", spellMatchMode: "any"}` would be a probe that cannot
+fail. Never reach for `"any"` to soften a flaky name check.
+
+**Correction: that third sibling IS statically checkable, and so was a
+fourth.** Calling it "soft" was wrong. `spellMatchMode: "any"` with a
+non-empty `spell:` is a mechanical rule, and it is now detector 3 in
+`scripts/auditE2eCoverage.mjs`.
+
+Detector 4 came out of the Time Domain Cleric rewrite and is the sharpest
+of the family so far, because it is **latent rather than live**.
+`assertFeaturesMatrix` resolves a `kind: "resource"` row's pool with
+`fc.resourceName ?? (fc.name instanceof RegExp ? fc.name.source : fc.name)`,
+and `CharacterSheetPage.getResource()` filters with Playwright's
+`hasText: <string>` — a **literal, case-insensitive substring** match. So a
+RegExp `name` reaches the lookup as its raw `.source`: `/^channel divinity$/i`
+searches for a resource literally named `"^channel divinity$"`. Nothing
+rendered contains regex metacharacters, so the lookup always misses and the
+row throws `resource not found on sheet`.
+
+Six such rows exist suite-wide (`tgtt-bastion-paladin-bugbear.spec.ts:112`,
+`tgtt-horror-warlock-theocracian.spec.ts:53,60,61,62`,
+`tgtt-surrealism-bard-yuanti.spec.ts:34`) and **all six sit under a
+`skip: true` citing an unrelated product bug** (CS-BUG-017 / CS-BUG-013).
+That is what makes them dangerous. They cost nothing today; they detonate
+the moment someone lifts the skip — which is exactly what this batch has
+been doing — and then present as *"the product bug I just un-skipped is
+still broken."* The next author debugs the product instead of the harness.
+`tgtt-surrealism-bard-yuanti.spec.ts` even carries a correct,
+string-named sibling three lines below the broken one.
+
+Fix shape: **add `resourceName: "<exact name>"`; never widen the regex.**
+The regex is the right FEATURE matcher (`/^channel divinity$/i` correctly
+excludes "Channel Divinity: Temporal Manipulation"); only the pool lookup
+needs its own exact key.
+
+Falsified against a real reproduction, per the standing rule that a guard
+which has never seen its own defect proves nothing: reintroducing the shape
+into the rewritten Time Domain spec — the version that had *measurably*
+thrown `resource not found on sheet` — made the detector fire on all three
+rows and label them `(LIVE)`, distinct from the six `(latent)`. Restoring
+`resourceName` silenced it.
+
+The generalisation, now with four instances behind it: **a skipped
+assertion is not inert, it is armed.** It freezes not only its own claim
+about the product but any latent defect in the probe itself, and both stay
+invisible because the suite is green.
+
+A fifth instance of the same family was fixed in the shared harness at the
+same time. `featureCalculationDerivedFrom` resolves `abilityMod`,
+`spellSaveDc` and `spellAttackBonus` through ability-keyed state getters;
+omitting `ability` passed `undefined` through, those getters answer `0` for
+an unknown ability, and the probe silently became "expected 0" — it could
+never pass for the right reason. It now throws on the authoring mistake
+instead. (Zero live instances; found by making the error myself.)
+---
+
+## CS-BUG-092 — prose that buffs a TARGET was parsed as a buff on the character
+
+**Status:** Fixed.
+**Affects:** every feature whose prose grants a condition-gated save advantage to
+somebody other than the character. The live victim is Granny's Gifts (Wicked
+Witch Sorcerer, *Arcadia* 8 → `TGTT-AR`); the same shape occurs in 5 other places
+in the shipped corpus (see the enumeration below).
+
+### Symptom
+
+`FeatureModifierParser` turns *"advantage on saving throws against being
+charmed"* into an opt-in conditional modifier on the character. The pattern is
+**subject-blind**, so Granny's Gifts —
+
+> …whenever you finish a long rest, you can choose yourself or one creature you
+> can see within 30 feet of you. **The target has advantage on saving throws
+> against being charmed or frightened**…
+
+— registered a permanent charm/fright advantage on the *witch*, regardless of
+whom she actually warded. Measured on `character-sheet-wip` at `911b98ba`, via
+`aggregateModifiers("save:wis").conditionalsAvailable`:
+
+| Ward state | Offered to the witch | Correct |
+|---|---|---|
+| warded nobody | `["against being charmed", "against being frightened"]` | `[]` |
+| warded an **ally** | `["against being charmed", "against being frightened"]` | `[]` |
+| warded **herself** | `["against being charmed", "against being frightened", "against being charmed", "against being frightened"]` | one row each |
+
+So the ward's only cost — giving the benefit away — was silently refunded, and a
+self-ward produced **duplicate** rows in the per-roll conditional picker (once
+from `setGrannysWardTarget()`'s real named modifier, once from the prose).
+
+### Root cause
+
+`conditionGatedSaveRe` matches the phrase, not the sentence's subject. The
+codebase already had one subject-blindness patch on this very regex — the
+`(?<!dis)` lookbehind, which stops *"creatures have **dis**advantage on saving
+throws against being frightened by you"* parsing as a self-buff — but nothing
+covered a third-party **beneficiary**.
+
+### Fix
+
+A generic guard, `FeatureModifierParser.isThirdPartySaveSubject(plainText,
+matchIndex)`, consulted by the condition-gated loop. It bounds the clause at the
+previous `.`/`;`/`:`, strips the `you` mentions that qualify *which* creature is
+picked rather than naming a beneficiary (`you can see`, `you choose`, `within 30
+feet of you`, `of you`…), and suppresses the match only when what remains is a
+third-party subject immediately followed by `has`/`have`.
+
+Deliberately conservative in both directions: any surviving `you`/`your` in the
+clause disables the guard, and the subject must be the *immediate* subject of the
+matched clause, so *"You have advantage … In addition, the target has advantage
+…"* keeps the first and drops the second.
+
+### Blast radius — enumerated, not assumed
+
+Run over every `.json` under `data/` and `homebrew/` with `@tags` stripped:
+**256** condition-gated matches, of which the guard suppresses exactly **6** —
+and all 6 are genuinely third-party:
+
+- `bestiary-mpmm.json`, `bestiary-mtf.json`, `trapshazards.json` — the same wild
+  magic table row, *"**The target** grows another head, causing **it** to have
+  advantage…"*
+- `book-ai.json` ×2 — *"**The creature** has…"* / *"**This creature** has…"*
+- `spells-phb.json` — *"For the duration, **the target** has advantage on saving
+  throws against being poisoned"* (a spell's target)
+
+Zero self-buffs suppressed. Re-derive with the script shape in this entry rather
+than citing the count — the corpus grows.
+
+### Regression pin
+
+`test/jest/charactersheet/CharacterSheetThirdPartySaveProse.test.js` — 20 tests.
+Falsified three ways, each break keeping the signature intact:
+
+| Break | Reds | Sample |
+|---|---|---|
+| `isThirdPartySaveSubject` → always `false` | 10 | `Expected length: 0 / Received array: ["against being charmed", "against being frightened"]` |
+| qualifier-stripping `replace`s neutered | 2 | `Expected: true / Received: false` |
+| subject regex → `return true` | 3 | `Expected: false / Received: true` |
+
+The third break originally produced **zero** reds: every negative control
+short-circuited on the `you` test, so nothing exercised the subject regex on its
+own. Three controls with neither a `you` nor a third-party subject
+(*"Dwarves have advantage…"*, *"Elves have advantage…"*, *"the wearer gains…"*)
+were added to close that hole.
+
+---
+
+## CS-BUG-093 — eleven feature calculations are WRITE-ONLY, and asserting them is not evidence of implementation
+
+**Status:** Open (finding; no product fix attempted here)
+
+Found while raising `tgtt-time-domain-cleric` (24% → 61%) and
+`tgtt-daemonologist-wizard-dwarf` (32% → 70%). Both rewrites replaced prose
+gap comments with `featureCalculation` probes — and then the probes were
+audited against the standing rule that a **correct calculation nothing reads
+is the most common defect shape in this codebase**. Eleven of the keys have
+exactly one reference in `js/`: their own assignment.
+
+```
+$ for k in <key>; do echo "$k -> $(grep -rn "$k" js/ --include=*.js | wc -l)"; done
+```
+
+**Wizard** (`charactersheet-state.js`)
+`spellbookSpellsKnown` :23306 · `hasRitualAdept` :23317 ·
+`hasSpellMastery` :23337 · `hasSignatureSpells` :23342
+
+**Cleric / Time Domain** (`charactersheet-state.js`)
+`hasChronologicalInterference` + `chronologicalInterferenceUses` :21682-83 ·
+`hasTemporalManipulation` + `temporalManipulationDc` :21691-92 ·
+`hasEyesOfFuturePast` + `eyesOfFuturePastUses` :21696-97 ·
+`hasTemporalMastery` :21708
+
+Controls that prove the detection is not merely counting rare names:
+`potentSpellcastingBonus` 15 refs, `hasPotentSpellcasting` 12,
+`channelDivinityUses` 4, `arcaneRecoverySlotLevels` 2
+(`charactersheet-rest.js:193`), `rightOnTimeBonus` 3.
+
+### The important distinction — write-only ≠ inert
+
+These are **not** all "renders but does nothing". Chronological Interference
+and Eyes of the Future Past **do** surface as working pools with correct
+maxima (measured: 2/3/4/6/6 and `max(1, wisMod)`), because the generic
+feature-uses parser reads the homebrew entry, never the calc key. So for
+those the calc key is **redundant dead data** beside a working feature.
+
+For the four Wizard keys no such alternative surface was found; Spell
+Mastery ("cast 1st/2nd level at will"), Signature Spells and Ritual Adept
+have no pool and no observed consumer. Those are the candidates for
+genuinely-displayed-but-unimplemented, and they are the ones worth a product
+decision.
+
+### Why this matters beyond tidiness
+
+The batch bar is *offered, shown, **and** mechanically implemented*. A
+`featureCalculation` probe that passes against a write-only key satisfies
+none of the third clause — it proves the calculation RAN, not that anything
+depends on it. It is the calc-only anti-pattern arriving in the very sweep
+that exists to remove predetermined-outcome probes, which is exactly why the
+rule is "pin the READING, never `getFeatureCalculations()`" — and why a
+`stateCall` is not a reading either, only one more accessor.
+
+The two rewritten specs are annotated so a green run cannot be misread as
+proof of implementation. Where a real reading exists it is pinned instead:
+Channel Divinity / Chronological Interference use `kind: "resource"` (which
+reads the rendered sheet), Eyes of the Future Past uses
+`featureUsesEqualAbilityMod`, Unearthly Countenance uses `toggleGrantsSpeed`
+(`getSpeed`) — the grant that was itself dead until CS-BUG-085.
+
+**Detection is mechanical and worth automating:** any `calculations.<key> =`
+whose key appears exactly once across `js/` is write-only by construction.
+
+### Follow-up — the blanker is now pinned, not trusted
+
+`scripts/auditE2eCoverage.mjs` self-checks its own comment blanker. Every
+detector in that script reads `blankComments(src)`, so a desynchronised
+blanker corrupts all of them simultaneously — and in the direction that is
+hardest to notice: comment prose **leaks into the code view and manufactures
+false positives**, rather than losing real code.
+
+The blanker had already shipped two bugs (it did not recognise regex
+literals, so an apostrophe in `/gambler's folly/i` opened a phantom string
+that swallowed the remainder of the file's comments). Both ran clean before
+and after the fix; only a deliberately planted instance separated them.
+
+Invariant: after blanking, no `//` may survive outside a string literal.
+Measured both directions rather than assumed —
+
+| blanker | leaks |
+|---|---|
+| shipped | **0** across all 54 specs |
+| regex branch disabled | **274** across 14 specs |
+
+`--strict` now exits 1 on any leak.
+
+Two negative results worth not re-deriving:
+
+- Quoted `//` is legitimate and is excluded. `spawn.spec.ts` writes
+  `"rogue//1/halfling"` for an empty subclass slot; the naive form of this
+  invariant has three standing false positives for that reason.
+- **The first invariant I wrote could never fire.** It asserted that real
+  `kind:` tokens survive blanking — but a phantom string makes the scanner
+  *skip* text rather than blank it, so the failure direction is leakage, not
+  loss. It ran green against a deliberately broken blanker. Recorded so
+  nobody rebuilds the version that cannot fail.
+
+The blast radius of the original bug is **13 specs** measured behaviourally
+(fixed and broken blankers disagree), not the 7 found by pattern-matching
+apostrophes-in-regexes nor the 17 matched by a looser grep — that looser
+pattern also matches `//` comment openings, which are not instances.
+
+## CS-BUG-095 — a "restore" cost in prose was parsed as an activation cost, permanently disabling the toggle
+
+**Status:** Fixed.
+**Affects:** Crown of Spellfire (Spellfire Sorcery 18, *Forgotten Realms:
+Heroes of the Feywild* → `FRHoF`; `classSource: "XPHB"`). No other feature in
+the shipped corpus pairs a numeric Sorcery-Point *restore* cost with a toggle
+that rides another feature's uses, so this victim is currently unique — but the
+mis-parse is generic and any similarly-worded feature would inherit it.
+
+### Symptom
+
+Crown of Spellfire is a **free** "alter your Innate Sorcery" toggle: activating
+it costs nothing (it rides an existing Innate Sorcery use). Its prose only
+mentions Sorcery Points to describe *restoring* a spent use —
+
+> …you can spend 5 Sorcery Points (no action required) to restore one use of
+> Innate Sorcery…
+
+The generic `detectActivatableFeature` read *"spend 5 Sorcery Points"* as the
+**activation** cost, and the `.includes("sorcery")` resource matcher bound it to
+the 2-use **Innate Sorcery** pool. The Activate button is disabled whenever its
+linked resource is short (`charactersheet.js`, the `2 < 5` guard), so the Crown
+row rendered **permanently disabled** — `isVisible() === true` but never
+actionable. The E2E toggle `.click()` timed out on a visible-but-dead control,
+which reads exactly like a flaky UI wait rather than a mis-parse.
+
+### Fix
+
+An explicit early return in `detectActivatableFeature`
+(`charactersheet-state.js`), placed just after the psionic check and mirroring
+the existing bespoke returns, that yields a clean **zero-cost** `crownOfSpellfire`
+toggle. It is name-guarded to `"crown of spellfire"` on a Spellfire/`FRHoF`
+character, so no other feature can reach it. With `resourceCost: 0` and no linked
+resource, the Activate button is enabled and the toggle behaves as designed
+(60-ft Fly + hover, Spell Avoidance, once-per-turn Burning Life Force).
+
+### Why the regression test pins the READING, not the calculation
+
+The Jest test asserts two surfaces: the `detectActivatableFeature` accessor
+(`resourceCost === 0`) and the **render-consumed** row
+(`getActivatableFeatures()` → `resource == null`, the exact field
+`charactersheet.js` reads to decide whether to disable the button).
+
+**⚠️ This entry originally claimed the row was the load-bearing assertion and
+dismissed the accessor as "one more indirection a broken parse could still
+satisfy". When measured, the reverse was true — and the row assertion was
+inert.** Neutralising the guard turned the **accessor** assertion red; Jest
+stops at the first failure, so the row assertion never executed. Commenting out
+the four accessor assertions and re-running with the break still applied gave
+**`27 passed`**: the row was `{"resource": null}` with *and* without the fix.
+
+The cause was the fixture, not the product. `SPELLFIRE_FEATURES` described Crown
+as *"…gaining Flight, Spell Avoidance, and Burning Life Force"* and **omitted
+"spend 5 Sorcery Points" entirely**, so the mis-parse this bug is about could
+not occur there: with no numeric cost in the prose the parser bound no resource,
+and the row looked correct even when broken.
+
+**Fixed.** The fixture now carries the restore sentence verbatim, so the test
+exercises the actual mis-parse. Re-measured: with the guard broken and the
+accessor assertions neutered, the row assertion **does** fail
+(`Expected: true, Received: false`). Both surfaces now discriminate, and the
+claim above is true rather than aspirational.
+
+> Take care adding prose to this fixture: an earlier attempt used *"Once per
+> Long Rest you can spend 5 Sorcery Points…"*, and the `Once per Long Rest`
+> clause independently created a 1/long-rest uses pool named "Crown of
+> Spellfire". That failed the row assertion **with the fix in place** — a
+> fixture artefact that looks exactly like a product regression.
+
+**The strongest pin for this bug remains the E2E probe**: the `featuresMatrix`
+L18 entry in `tgtt-spellfire-sorcerer.spec.ts` carries `kind: "toggle"`, which
+clicks the real rendered Activate button against real brew data. That is the
+probe whose timeout found the bug.
+
+**Lesson, stated correctly:** *"pin the reading, never the calc"* (CS-BUG-093) is
+a sound default, but **it does not self-verify**. A render-consumed assertion is
+exactly as inert as a calculation probe when the fixture cannot reach the
+failure mode. Being the surface the renderer reads does not make an assertion
+sensitive — only a targeted falsification shows that, and it must confirm *which*
+assertion went red.
+
+### Falsification
+
+Neutralising the early-return's guard condition (so the bespoke branch never
+fires and the generic mis-parse returns) turned the regression **red: 1 failure,
+`Expected 0, Received undefined`** — a genuine wrong-value catch, not a
+`TypeError`/`ReferenceError`. Restored, it is green. The eight Spellfire methods
+carry their own seven in-place chokepoint falsifications (signatures kept:
+3/2/1/1/1/1/1 red).
+
+**But note which assertion went red.** That single failure is the accessor line,
+and it masks the inert row assertion behind it (see above). "A revert makes it
+red" is necessary, not sufficient: when a test has assertions ahead of the one
+you are relying on, the first failure hides whether the later one can fire at
+all. Neutralise the earlier assertions and re-run before claiming a surface is
+pinned.

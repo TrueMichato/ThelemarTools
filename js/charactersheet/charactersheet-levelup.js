@@ -587,9 +587,9 @@ class CharacterSheetLevelUp {
 				accordions.subclass.setComplete(true, subclass.shortName || subclass.name);
 
 				// Prompt for any subclass whose data defines a persisted named branch.
-				if (CharacterSheetClassUtils.hasSubclassChoicePrompt(subclass) && !CharacterSheetClassUtils.normalizeSubclassChoice(selectedSubclassChoice)) {
-					const choiceOptions = CharacterSheetClassUtils.getSubclassChoiceOptions(subclass);
-					const prompt = CharacterSheetClassUtils.getSubclassChoicePrompt(subclass);
+				if (CharacterSheetClassUtils.hasNamedSubclassChoice(subclass) && !CharacterSheetClassUtils.normalizeSubclassChoice(selectedSubclassChoice)) {
+					const choiceOptions = CharacterSheetClassUtils.getNamedSubclassChoiceOptions(subclass);
+					const prompt = CharacterSheetClassUtils.getNamedSubclassChoicePrompt(subclass);
 					if (choiceOptions.length) {
 						subclassContent.querySelector(".charsheet__levelup-named-subclass-choice")?.remove();
 						const selChoice = e_({tag: "select", clazz: "form-control input-sm"});
@@ -1223,9 +1223,9 @@ class CharacterSheetLevelUp {
 			}
 
 			const choiceSubclass = selectedSubclass || fullClassSubclassData;
-			if (CharacterSheetClassUtils.hasSubclassChoicePrompt(choiceSubclass) && !CharacterSheetClassUtils.normalizeSubclassChoice(selectedSubclassChoice)) {
-				const choiceOptions = CharacterSheetClassUtils.getSubclassChoiceOptions(choiceSubclass);
-				const prompt = CharacterSheetClassUtils.getSubclassChoicePrompt(choiceSubclass);
+			if (CharacterSheetClassUtils.hasNamedSubclassChoice(choiceSubclass) && !CharacterSheetClassUtils.normalizeSubclassChoice(selectedSubclassChoice)) {
+				const choiceOptions = CharacterSheetClassUtils.getNamedSubclassChoiceOptions(choiceSubclass);
+				const prompt = CharacterSheetClassUtils.getNamedSubclassChoicePrompt(choiceSubclass);
 				if (!choiceOptions.length) {
 					JqueryUtil.doToast({type: "warning", content: "This subclass is missing its choice options."});
 					return;
@@ -4471,7 +4471,7 @@ class CharacterSheetLevelUp {
 					targetClass.spellcastingAbility = selectedSubclass.spellcastingAbility;
 				}
 			}
-			if (selectedSubclassChoice || CharacterSheetClassUtils.hasSubclassChoicePrompt(targetClass.subclass)) {
+			if (selectedSubclassChoice || CharacterSheetClassUtils.hasNamedSubclassChoice(targetClass.subclass)) {
 				targetClass.subclassChoice = CharacterSheetClassUtils.normalizeSubclassChoice(selectedSubclassChoice);
 			}
 		}

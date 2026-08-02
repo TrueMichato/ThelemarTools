@@ -164,56 +164,6 @@ Two ways a swap is created, both flowing through `_processFeatureModifiers` → 
 ### FeatureEffectRegistry
 Maps feature names to effect objects. When a feature is added to the character (during build/levelup), the registry is consulted to auto-apply effects like resistances, proficiencies, and senses.
 
-### FEATURE_SPELL_GRANTS — spell lists the parser cannot see
-
-`SpellGrantParser.getFeatureSpellText()` walks only a node's `entries` and
-`items`; it never descends into a `type: "table"` node's `rows`. A subclass that
-publishes its spells as a **table** — the 5etools house style for multi-column
-progressions — therefore grants nothing, and its shipped `additionalSpells`
-block is frequently a *partial* transcription of that table (Lunar Sorcery ships
-one of three columns; ten of fifteen spells were missing).
-
-Rather than teach the parser to read tables — which would over-grant for the many
-CHOOSE-ONE tables (Circle of the Land's terrains, Warlock expanded lists) —
-declare the grant explicitly in `static CharacterSheetState.FEATURE_SPELL_GRANTS`:
-
-```js
-"Sorcerer|Lunar": [
-    {name: "Sacred Flame", source: "PHB", cantrip: true, grantedBy: "Moon Fire"},
-    {name: "Shield", source: "PHB", minLevel: 1, grantedBy: "Lunar Embodiment"},
-    // …
-]
-```
-
-Key is `"<Class name>|<subclass shortName or name>"`; `minLevel` is the **class**
-level the grant unlocks at (default 1). `getFeatureGrantedSpells(cls)` is static
-and pure, so it is safe to call from the always-prepared pipeline without
-re-entering `getFeatureCalculations()`. Entries are applied **first** in
-`getSubclassAlwaysPreparedSpells()` and then flow through the ordinary pipeline
-— enrichment, cantrip routing, dedupe against `additionalSpells`, and
-`sourceFeature` attribution — exactly like a shipped block. Prefer it over
-touching `data/class/`, which is upstream-synced.
-
-**Known-limit accounting** is via `alwaysPrepared` + `sourceFeature`, which is
-what `charactersheet-levelup.js`'s spell-swap filter and
-`charactersheet-class-utils.js`'s granted-cantrip filter actually read. There is
-no `doesNotCountAgainstKnown` field anywhere in `js/` — do not invent one.
-Granted **cantrips** deliberately omit `alwaysPrepared` (a cantrip is always
-castable); `sourceFeature` / `sourceClass` are the readable flags there.
-
-### Subclass choices: prompt vs. spell-block gating
-
-Two separate predicates in `charactersheet-class-utils.js`, deliberately split:
-
-- `hasNamedSubclassChoice` / `getNamedSubclassChoiceBlock` — **gating**: only the
-  chosen `additionalSpells` block is granted (Divine Soul's affinity).
-- `hasSubclassChoicePrompt` / `getSubclassChoiceOptions` / `getSubclassChoicePrompt`
-  — **prompting**: the Builder, Level-Up and Quick Build wizards all refuse to
-  advance until the choice is answered, and `setSubclass()` preserves the answer.
-
-A subclass that needs an up-front choice but must keep its **whole** spell list
-(Lunar Sorcery: RAW you learn every column) implements only the prompt trio.
-
 ### Deferred damage maximization and damage-triggered effects
 
 Features which modify a future damage roll use `armDamageMaximization()` rather than spending

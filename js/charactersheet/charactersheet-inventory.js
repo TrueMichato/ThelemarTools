@@ -1162,7 +1162,7 @@ class CharacterSheetInventory {
 					${item.value ? `<div><strong>Value:</strong> ${this._formatValue(item.value)}</div>` : ""}
 					${item.weight ? `<div><strong>Weight:</strong> ${item.weight} lb.</div>` : ""}
 					${item.ac ? `<div><strong>AC:</strong> ${item.ac}${item.dexterityMax ? ` (max Dex ${item.dexterityMax > 0 ? `+${item.dexterityMax}` : item.dexterityMax})` : ""}</div>` : ""}
-					${item.dmg1 ? `<div><strong>Damage:</strong> ${this._state.getWeaponDamageDie(item)}${item.dmg2 ? ` (${item.dmg1} 1H / ${item.dmg2} 2H)` : ""} ${item.dmgType ? Parser.dmgTypeToFull(item.dmgType) : ""}</div>` : ""}
+					${item.dmg1 ? `<div><strong>Damage:</strong> ${this._state.getWeaponDamageDie(item)}${this._renderVersatileBreakdown(item)} ${item.dmgType ? Parser.dmgTypeToFull(item.dmgType) : ""}</div>` : ""}
 					${item.property?.length ? `<div><strong>Properties:</strong> ${item.property.map(p => this._formatProperty(p)).join(", ")}</div>` : ""}
 				</div>
 				${item.entries?.length ? `
@@ -4729,7 +4729,10 @@ class CharacterSheetInventory {
 		// Weapon stats
 		if (item.weapon) {
 			const damageDie = this._state.getWeaponDamageDie(item);
-			const versatileBreakdown = item.dmg2 ? ` <span class="ve-muted">(${item.dmg1} 1H / ${item.dmg2} 2H)</span>` : "";
+			// Effective profile so a feature-granted versatile property (Steel Hawk's
+			// Nimble Lancer) shows its 1H/2H breakdown here too.
+			const dmgProfile = this._state.getEffectiveWeaponDamageProfile?.(item) || {dmg1: item.dmg1, dmg2: item.dmg2};
+			const versatileBreakdown = dmgProfile.dmg2 ? ` <span class="ve-muted">(${dmgProfile.dmg1} 1H / ${dmgProfile.dmg2} 2H)</span>` : "";
 			html += `<p><strong>Damage:</strong> ${damageDie}${versatileBreakdown} ${item.dmgType ? Parser.dmgTypeToFull(item.dmgType) : ""}</p>`;
 			if (item.property?.length) {
 				html += `<p><strong>Properties:</strong> ${item.property.map(p => this._formatProperty(p)).join(", ")}</p>`;
@@ -6109,6 +6112,19 @@ class CharacterSheetInventory {
 				</div>
 			</div>
 		`});
+	}
+
+	/**
+	 * The " (1d8 1H / 1d12 2H)" suffix for a versatile weapon, resolved from the
+	 * character's EFFECTIVE profile so feature-granted versatility (Steel Hawk's
+	 * Nimble Lancer) is shown alongside printed versatility.
+	 * @param {object} item
+	 * @returns {string}
+	 */
+	_renderVersatileBreakdown (item) {
+		const profile = this._state.getEffectiveWeaponDamageProfile?.(item) || {dmg1: item?.dmg1, dmg2: item?.dmg2};
+		if (!profile.dmg2) return "";
+		return ` (${profile.dmg1} 1H / ${profile.dmg2} 2H)`;
 	}
 
 	/**

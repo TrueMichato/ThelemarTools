@@ -625,19 +625,26 @@ class SpellGrantParser {
 			const context = contextBefore + contextAfter;
 
 			const isAtWill = /at will|at-will|without expending/i.test(context);
+			// "…but only as a ritual" (Steel Hawk's Bird Caller, Ritual Caster-shaped
+			// grants). A ritual-only grant has no per-rest budget — the limiter is the
+			// 10-minute casting time — so it is at-will in the resource sense. Without
+			// this it fell through to `uses: undefined`, which the innate-spell renderer
+			// labels with a bogus "1/day" badge.
+			const isRitualOnly = /only as a ritual|as a ritual only|only if .{0,20}ritual/i.test(context);
 			const localOnce = /once|one time/i.test(context) && /rest|dawn|day/i.test(context);
 			// An at-will grant is never limited, so the feature-wide clause can only ever
 			// promote an otherwise-unlimited grant into a tracked one.
-			const isOnce = localOnce || (!isAtWill && !!featureWideRecharge);
+			const isOnce = !isRitualOnly && (localOnce || (!isAtWill && !!featureWideRecharge));
 			const localRecharge = /short rest/i.test(context) ? "short" : (/long rest|dawn|day/i.test(context) ? "long" : null);
 			const recharge = localRecharge || (isOnce ? featureWideRecharge : null);
 
 			spells.push({
 				name: (/** @type {*} */ (spellName)).toTitleCase(),
 				source,
-				innate: isAtWill || isOnce,
-				atWill: isAtWill,
-				uses: isOnce ? 1 : (isAtWill ? null : undefined),
+				innate: isAtWill || isOnce || isRitualOnly,
+				atWill: isAtWill || isRitualOnly,
+				ritualOnly: isRitualOnly,
+				uses: isOnce ? 1 : ((isAtWill || isRitualOnly) ? null : undefined),
 				recharge: recharge,
 				sourceFeature: featureName,
 				minLevel: this._parseSpellGrantMinLevel(contextBefore),
@@ -1000,6 +1007,57 @@ class FeatureModifierParser {
 		"incapacitated", "invisible", "paralyzed", "paralysed", "petrified", "poisoned",
 		"prone", "restrained", "stunned", "unconscious",
 	]);
+
+	/**
+	 * Clause subjects that are somebody OTHER than the character whose sheet this is.
+	 *
+	 * A feature that buffs a *different* creature ("whenever you finish a long rest you
+	 * can choose yourself or one creature within 30 feet … **the target has advantage on
+	 * saving throws against being charmed or frightened**") reads, to a subject-blind
+	 * regex, exactly like a self-buff. The sheet models one character, so parsing that
+	 * sentence onto the character is simply wrong: it hands out a benefit that was never
+	 * granted, and — when the feature ALSO registers the real modifier for the self-target
+	 * case — it hands it out twice.
+	 *
+	 * Anchored on a trailing `has`/`have` so it only fires on the immediate subject of the
+	 * matched clause, not on any third-party noun anywhere in the sentence.
+	 *
+	 * Sibling in spirit to the `(?<!dis)` lookbehind below: both exist because the naive
+	 * pattern cannot tell who the sentence is about.
+	 */
+	static THIRD_PARTY_SAVE_SUBJECT_RE = /\b(?:the|that|this|each|one|a|an|chosen)\s+(?:chosen\s+)?(?:target|creature|ally|companion|beast|familiar|steed|mount|summon)\b[^.;]*?\b(?:has|have)\s*$/i;
+
+	/**
+	 * True when the prose match at `matchIndex` belongs to a clause whose subject is a
+	 * third party rather than the character.
+	 *
+	 * The clause is bounded by the previous sentence/semicolon break, so a feature that
+	 * says "You have advantage … In addition, the target has advantage …" is judged one
+	 * sentence at a time. Any mention of `you`/`your` in the clause makes it a self-buff
+	 * (or an inclusive "you or an ally … has advantage") and disables the guard.
+	 *
+	 * @param {string} plainText
+	 * @param {number} matchIndex index of the matched phrase within `plainText`
+	 * @returns {boolean}
+	 */
+	static isThirdPartySaveSubject (plainText, matchIndex) {
+		if (!plainText || !(matchIndex > 0)) return false;
+		const clauseStart = Math.max(
+			plainText.lastIndexOf(".", matchIndex - 1),
+			plainText.lastIndexOf(";", matchIndex - 1),
+			plainText.lastIndexOf(":", matchIndex - 1),
+		) + 1;
+		const clause = plainText.slice(clauseStart, matchIndex).toLowerCase()
+			// Strip the "you" mentions that qualify WHICH creature is picked rather than
+			// naming a beneficiary — "one creature you can see within 30 feet of you has
+			// advantage …" buffs the creature, not you. Without this the guard is defeated
+			// by the most common targeting phrasing in the whole ruleset.
+			.replace(/\byou\s+(?:can\s+(?:see|hear)|choose|are\s+aware\s+of)\b/g, "")
+			.replace(/\b(?:with)?in\s+\d+\s*(?:-|\s)?\s*(?:feet|foot|ft\.?)\s+of\s+you\b/g, "")
+			.replace(/\b(?:of|to|near|from|beside|around)\s+you\b/g, "");
+		if (/\byou\b|\byour\b|\byourself\b/.test(clause)) return false;
+		return FeatureModifierParser.THIRD_PARTY_SAVE_SUBJECT_RE.test(clause);
+	}
 
 	/**
 	 * Parse feature/item text to extract modifiers
@@ -1596,6 +1654,9 @@ class FeatureModifierParser {
 		const conditionGatedSaveRe = /(?<!dis)advantage\s+on\s+(?:all\s+)?saving\s+throws?\s+(?:made\s+)?(?:to\s+(?:avoid|resist|end|prevent)\s+(?:being|becoming)|against\s+(?:being|becoming)|to\s+resist\s+becoming)\s+((?:[a-z]+(?:\s*,\s*|\s+or\s+|\s+and\s+))*[a-z]+)/gi;
 		const seenConditionGated = new Set();
 		for (const match of plainText.matchAll(conditionGatedSaveRe)) {
+			// "The target has advantage on saving throws against being charmed" buffs
+			// somebody else, not the character holding this sheet.
+			if (FeatureModifierParser.isThirdPartySaveSubject(plainText, match.index ?? -1)) continue;
 			const named = (match[1] || "").split(/\s*,\s*|\s+or\s+|\s+and\s+/)
 				.map(s => s.trim().toLowerCase())
 				.filter(s => FeatureModifierParser.SAVE_GATING_CONDITIONS.has(s));
@@ -2691,8 +2752,26 @@ const FeatureEffectRegistry = {
 		this.register("Feral Instinct", [
 			{type: "modifier", modType: "initiative:advantage", value: 1},
 		]);
+		// Indomitable Might (Barbarian 18). RAW PHB: "if your total for a Strength
+		// check is less than your Strength score, you can use that score in place of
+		// the total." XPHB extends this to Strength saving throws.
+		//
+		// This is a floor on the TOTAL, and it is three different things from the two
+		// floors that already exist here:
+		//   - NOT a floor on the ability SCORE (the old `ability:str:minimum` modType,
+		//     which no reader consumed, so the feature rendered but did nothing);
+		//   - NOT a floor on the d20 DIE (`skillMinimum` / Reliable Talent).
+		// See CS-BUG-088.
 		this.register("Indomitable Might", [
-			{type: "modifier", modType: "ability:str:minimum", value: "strScore"},
+			{
+				type: "checkTotalFloor",
+				ability: "str",
+				floorFrom: "abilityScore",
+				// Editions whose wording also covers saving throws. Resolved against the
+				// feature's own `source` at apply time via `__editionAware` below.
+				savesInEditions: ["XPHB"],
+				__editionAware: true,
+			},
 		]);
 
 		// ======= BARD =======
@@ -4818,6 +4897,10 @@ class CharacterSheetState {
 			// Pending spell choices (from feats/features that grant spell selection)
 			// Each choice: {id, featureName, featureId, filter, innate, uses, recharge, ability}
 			pendingSpellChoices: [],
+			// Keys of re-derivable spell-choice slots (subclass `additionalSpells`
+			// `{choose}` grants) the player has already filled, so a later read never
+			// re-offers a pick that was already made. See `_ensureSubclassSpellChoices`.
+			fulfilledSpellChoiceSlots: [],
 			// Pending feature choices parsed from prose "either A or B" grants
 			// (e.g. Arcane Archer Lore: pick a skill proficiency + a cantrip).
 			// Each choice: {id, featureName, featureId, kind: "skill"|"cantrip", options, count}
@@ -4837,6 +4920,10 @@ class CharacterSheetState {
 			chosenSubfeatures: [],
 			// TGTT passive metamagic tuning state
 			tunedMetamagics: [],
+			// Wicked Witch (Ar8 Sorcerer): the Granny's Gifts ward, the Fly, My Pretty
+			// enchanted object, and any conjured Coven Calling duplicates. Null until the
+			// origin's abilities are actually used.
+			wickedWitch: {grannysWard: null, flyingItem: null, covenDuplicates: null},
 
 			// Sheet settings/options
 			settings: {
@@ -7754,7 +7841,7 @@ class CharacterSheetState {
 		if (classEntry) {
 			const wasDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(classEntry.subclass);
 			const willBeDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(subclass);
-			const willHaveNamedChoice = CharacterSheetClassUtils.hasSubclassChoicePrompt(subclass);
+			const willHaveNamedChoice = CharacterSheetClassUtils.hasNamedSubclassChoice(subclass);
 			// Switching away from Divine Soul: remove the orphaned affinity spell
 			// (computed from the OLD subclass) before reassigning.
 			if (wasDivineSoul && !willBeDivineSoul) {
@@ -9319,6 +9406,27 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Apply immunity / resistance / vulnerability to a damage amount.
+	 *
+	 * The one place the ×0 / ÷2 / ×2 arithmetic lives, so the model's damage entry point and
+	 * any UI preview cannot disagree about the number. RAW ordering: immunity wins outright,
+	 * then resistance halves (rounding down), then vulnerability doubles.
+	 *
+	 * @param {number} damage
+	 * @param {string|null} damageType lowercase damage type
+	 * @returns {{damage: number, raw: number, applied: "immunity"|"resistance"|"vulnerability"|null}}
+	 */
+	applyDamageDefenses (damage, damageType) {
+		const raw = Math.max(0, Math.floor(Number(damage) || 0));
+		const type = damageType ? String(damageType).toLowerCase() : null;
+		if (!type) return {damage: raw, raw, applied: null};
+		if (this.hasImmunity(type)) return {damage: 0, raw, applied: "immunity"};
+		if (this.hasResistance(type)) return {damage: Math.floor(raw / 2), raw, applied: "resistance"};
+		if (this.hasVulnerability(type)) return {damage: raw * 2, raw, applied: "vulnerability"};
+		return {damage: raw, raw, applied: null};
+	}
+
+	/**
 	 * Take damage, consuming temp HP first
 	 * @param {number} damage - Amount of damage to take
 	 * @param {object} [opts]
@@ -9326,11 +9434,30 @@ class CharacterSheetState {
 	 *        any way" (Divine Allegiance, Beacon of Hope-style riders, several homebrew pacts).
 	 *        Bypasses temporary hit points AND Death Ward — both are "prevention" in RAW terms.
 	 * @param {string|null} [opts.damageType=null] Damage type, lowercase ("radiant", "fire", …).
-	 *        Consumed by {@link getZeroHpInterventions}; `null` means "not stated".
+	 *        Consumed by {@link getZeroHpInterventions} AND, since CS-BUG-100, by the
+	 *        immunity / resistance / vulnerability step below; `null` means "not stated".
 	 * @param {boolean} [opts.isCritical=false] Whether the damage came from a critical hit.
+	 * @param {boolean} [opts.skipDefenses=false] The caller has ALREADY halved/doubled/zeroed
+	 *        the amount for defenses (Play Mode's damage modal does its own arithmetic so it
+	 *        can show a preview). Prevents double-application.
 	 * @returns {boolean} True if damage was taken
 	 */
-	takeDamage (damage, {unpreventable = false, damageType = null, isCritical = false} = {}) {
+	takeDamage (damage, {unpreventable = false, damageType = null, isCritical = false, skipDefenses = false} = {}) {
+		if (damage <= 0) return false;
+
+		// CS-BUG-100: `damageType` was accepted and then used ONLY to gate zero-HP
+		// interventions — nothing halved the number. Every resistance the sheet computes
+		// (Umbral Form's "Resistance to all damage except Force and Radiant", Draconic
+		// Resilience, racial resistances, Rage) was therefore invisible to the model's own
+		// damage entry point: `getResistances()` listed them and no damage was ever reduced.
+		const defenses = !unpreventable && !skipDefenses && damageType
+			? this.applyDamageDefenses(damage, damageType)
+			: {damage, applied: null};
+		damage = defenses.damage;
+		if (damage <= 0 && defenses.applied === "immunity") {
+			this._updateBloodiedCondition();
+			return true;
+		}
 		if (damage <= 0) return false;
 
 		const startingHp = this._data.hp.current;
@@ -9402,6 +9529,15 @@ class CharacterSheetState {
 	 * - `spendOn`        `"success"` (use consumed only when it works) or `"attempt"`
 	 * - `usesMax` / `recharge` the once-per-rest budget reconciled by
 	 *                    {@link _ensureZeroHpInterventionUses}
+	 * - `displayName`    optional label when the granting feature is an umbrella whose name
+	 *                    is not the player-facing name of the benefit (Shadow Sorcery's
+	 *                    "Power of Shadow" grants "Strength of the Grave")
+	 * - `hpOnSuccess`    optional `{flat?, abilityMod?, classLevel?}` descriptor for the hit
+	 *                    point total a success leaves you on. Defaults to a flat 1 — the
+	 *                    XGE/Death Ward wording. Shadow Sorcery (RHW) instead sets you to
+	 *                    "your Charisma modifier plus your Sorcerer level", which is a
+	 *                    different NUMBER on the same pipeline; see
+	 *                    {@link _resolveZeroHpInterventionHp}.
 	 * @type {Array<object>}
 	 */
 	static ZERO_HP_INTERVENTIONS = [
@@ -9419,7 +9555,61 @@ class CharacterSheetState {
 			recharge: "long",
 			description: "Charisma save (DC 5 + the damage taken) to drop to 1 hit point instead of 0. Unavailable against radiant damage or a critical hit.",
 		},
+		{
+			// Shadow Sorcery (RHW) rewrites the SAME benefit with a different result and
+			// WITHOUT the two XGE exclusions: no radiant carve-out, no critical-hit
+			// carve-out, and a success leaves you on "your Charisma modifier plus your
+			// Sorcerer level" hit points rather than 1. Same pipeline, different data.
+			//
+			// `featureName` is the umbrella "Power of Shadow" because that is the feature the
+			// sheet actually stores — the RHW JSON nests Eyes of the Dark and Strength of the
+			// Grave as named sub-entries, and nothing in the codebase splits nested entries
+			// into separate features. The once-per-long-rest use therefore lives on Power of
+			// Shadow, which is also what `_ensureZeroHpInterventionUses` re-scales.
+			id: "strengthOfTheGraveRhw",
+			featureName: "Power of Shadow",
+			displayName: "Strength of the Grave",
+			calcFlag: "hasPowerOfShadow",
+			saveAbility: "cha",
+			dcBase: 5,
+			dcAddsDamage: true,
+			excludedDamageTypes: [],
+			excludeCritical: false,
+			spendOn: "success",
+			usesMax: 1,
+			recharge: "long",
+			hpOnSuccess: {abilityMod: "cha", classLevel: "Sorcerer"},
+			description: "Charisma save (DC 5 + the damage taken); on a success your hit points become your Charisma modifier plus your Sorcerer level instead of 0.",
+		},
 	];
+
+	/**
+	 * Hit points a successful zero-HP intervention leaves the character on.
+	 *
+	 * Declarative so the pipeline never has to know WHICH feature fired: the default is the
+	 * flat 1 of Death Ward / XGE's Strength of the Grave, and a descriptor can add an ability
+	 * modifier and/or a class level on top (Shadow Sorcery's "Charisma modifier plus your
+	 * Sorcerer level").
+	 *
+	 * Always at least 1 — a negative Charisma modifier at low level must not resolve to a
+	 * "success" that leaves you unconscious, and never above the hit point maximum.
+	 *
+	 * @param {object} def a {@link ZERO_HP_INTERVENTIONS} entry
+	 * @returns {number}
+	 * @private
+	 */
+	_resolveZeroHpInterventionHp (def) {
+		const spec = def?.hpOnSuccess;
+		if (!spec) return 1;
+		let hp = Number(spec.flat) || 0;
+		if (spec.abilityMod) hp += this.getAbilityMod(spec.abilityMod);
+		if (spec.classLevel) {
+			const cls = (this._data.classes || []).find(c => (c.name || "").toLowerCase() === String(spec.classLevel).toLowerCase());
+			hp += cls?.level || 0;
+		}
+		const maxHp = this.getMaxHp();
+		return Math.max(1, Math.min(maxHp > 0 ? maxHp : hp, Math.floor(hp)));
+	}
 
 	/**
 	 * Every zero-HP intervention this character actually has, already resolved against the
@@ -9443,14 +9633,16 @@ class CharacterSheetState {
 			const dmgType = damageType ? String(damageType).toLowerCase() : null;
 
 			let unavailableReason = null;
-			if (usesRemaining <= 0) unavailableReason = `${def.featureName} has no uses remaining (recharges on a ${def.recharge} rest).`;
-			else if (def.excludeCritical && isCritical) unavailableReason = `${def.featureName} can't be used when a critical hit reduces you to 0 hit points.`;
-			else if (dmgType && (def.excludedDamageTypes || []).includes(dmgType)) unavailableReason = `${def.featureName} can't be used against ${dmgType} damage.`;
+			const label = def.displayName || def.featureName;
+			if (usesRemaining <= 0) unavailableReason = `${label} has no uses remaining (recharges on a ${def.recharge} rest).`;
+			else if (def.excludeCritical && isCritical) unavailableReason = `${label} can't be used when a critical hit reduces you to 0 hit points.`;
+			else if (dmgType && (def.excludedDamageTypes || []).includes(dmgType)) unavailableReason = `${label} can't be used against ${dmgType} damage.`;
 
 			const dc = (def.dcBase || 0) + (def.dcAddsDamage ? Math.max(0, Math.floor(Number(damage) || 0)) : 0);
 			out.push({
 				id: def.id,
-				name: def.featureName,
+				name: def.displayName || def.featureName,
+				featureName: def.featureName,
 				description: def.description,
 				saveAbility: def.saveAbility,
 				saveModifier: def.saveAbility ? this.getSaveMod(def.saveAbility) : 0,
@@ -9459,6 +9651,7 @@ class CharacterSheetState {
 				excludedDamageTypes: [...(def.excludedDamageTypes || [])],
 				excludeCritical: !!def.excludeCritical,
 				spendOn: def.spendOn,
+				hpOnSuccess: this._resolveZeroHpInterventionHp(def),
 				usesRemaining,
 				usesMax: feature?.uses?.max ?? def.usesMax,
 				recharge: def.recharge,
@@ -9543,7 +9736,7 @@ class CharacterSheetState {
 		const success = def.saveAbility ? saveTotal >= info.dc : true;
 
 		if (success) {
-			this._data.hp.current = 1;
+			this._data.hp.current = info.hpOnSuccess;
 			this.resetDeathSaves();
 			this._data.massiveDamageDeath = false;
 			this._updateBloodiedCondition();
@@ -9556,7 +9749,8 @@ class CharacterSheetState {
 		return {
 			applied: true,
 			id: def.id,
-			name: def.featureName,
+			name: def.displayName || def.featureName,
+			featureName: def.featureName,
 			success,
 			dc: info.dc,
 			saveAbility: def.saveAbility,
@@ -9587,15 +9781,29 @@ class CharacterSheetState {
 		for (const def of CharacterSheetState.ZERO_HP_INTERVENTIONS) {
 			const feature = (this._data.features || []).find(f => f.name === def.featureName);
 			if (!feature) continue;
-			if (feature.uses?.max === def.usesMax && feature.uses?.recharge === def.recharge) continue;
+			const resource = (this._data.resources || []).find(r => r.featureId === feature.id || r.name === def.featureName);
+			const featureOk = feature.uses?.max === def.usesMax && feature.uses?.recharge === def.recharge;
+			const resourceOk = !resource || (resource.max === def.usesMax && resource.recharge === def.recharge);
+			if (featureOk && resourceOk) continue;
 			calc = calc || this.getFeatureCalculations();
 			if (!calc[def.calcFlag]) continue;
-			const spent = feature.uses ? (feature.uses.current ?? 0) < (feature.uses.max ?? 0) : false;
+			// CS-BUG-101: the FEATURE's uses were re-scaled but its mirrored RESOURCE row was
+			// not, so Shadow Sorcery's Power of Shadow rendered a "5/5" tracker (the
+			// feature-uses parser's Charisma-modifier guess) next to a feature that really
+			// has one use per Long Rest.
+			const spent = feature.uses
+				? (feature.uses.current ?? 0) < (feature.uses.max ?? 0)
+				: false;
 			feature.uses = {
 				current: spent ? 0 : def.usesMax,
 				max: def.usesMax,
 				recharge: def.recharge,
 			};
+			if (resource) {
+				resource.max = def.usesMax;
+				resource.recharge = def.recharge;
+				resource.current = feature.uses.current;
+			}
 		}
 	}
 	// #endregion
@@ -11911,7 +12119,11 @@ class CharacterSheetState {
 	hasArmorStealthDisadvantage () {
 		const armor = this._data.ac.armor;
 		if (!armor || !armor.stealth) return false;
-		if (this.getFeatureCalculations().hasUmbralWarrior) return false;
+		// Generic escape hatch: any feature that says "armor never imposes disadvantage on
+		// Stealth" sets `ignoresArmorStealthDisadvantage` (Steel Hawk's Steel Grace, …).
+		// `hasUmbralWarrior` predates the generic flag and is kept for back-compat.
+		const stealthCalcs = this.getFeatureCalculations();
+		if (stealthCalcs.hasUmbralWarrior || stealthCalcs.ignoresArmorStealthDisadvantage) return false;
 
 		// Check for Medium Armor Master (removes stealth disadvantage from medium armor)
 		if (armor.type === "medium") {
@@ -12942,7 +13154,11 @@ class CharacterSheetState {
 		const itemBonus = this._data.itemBonuses?.spellSaveDc || 0;
 		// Apply exhaustion DC penalty (Thelemar rules only)
 		const exhaustionPenalty = this._getExhaustionDcPenalty();
-		return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus - exhaustionPenalty;
+		// CS-BUG-099: `{type: "bonus", target: "spellDc"}` was a documented active-state
+		// effect target (see the custom-ability editor's target list) with NO consumer, so
+		// Innate Sorcery's "+1 to your Sorcerer spell save DC" was pure description.
+		const stateBonus = this.getBonusFromStates?.("spellDc") || 0;
+		return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus + stateBonus - exhaustionPenalty;
 	}
 
 	getSpellSaveDc () {
@@ -12980,7 +13196,8 @@ class CharacterSheetState {
 		if (classNameOrAbility && abilities.includes(classNameOrAbility.toLowerCase())) {
 			const ability = classNameOrAbility.toLowerCase();
 			const itemBonus = this._data.itemBonuses?.spellSaveDc || 0;
-			return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus;
+			const stateBonus = this.getBonusFromStates?.("spellDc") || 0;
+			return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus + stateBonus;
 		}
 
 		// If className specified, temporarily use that class's spellcasting ability
@@ -12999,7 +13216,8 @@ class CharacterSheetState {
 			const ability = spellcastingAbilities[classNameOrAbility];
 			if (ability) {
 				const itemBonus = this._data.itemBonuses?.spellSaveDc || 0;
-				return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus;
+				const stateBonus = this.getBonusFromStates?.("spellDc") || 0;
+				return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus + stateBonus;
 			}
 		}
 		return this.getSpellSaveDc();
@@ -13046,6 +13264,71 @@ class CharacterSheetState {
 		const ability = this._data.spellcasting.ability;
 		if (!ability) return null;
 		return this.getSpellAttackBonusForAbility(ability);
+	}
+
+	/**
+	 * True when `spell` counts as one of `className`'s cantrips/spells for the purposes
+	 * of a class feature that scopes itself to "any <class> cantrip".
+	 *
+	 * Attribution order: an explicit `sourceClass` on the sheet entry wins — that is how
+	 * "for you, these cantrips count as cleric cantrips" (Arcana Domain's Arcane Initiate,
+	 * Nature Domain's Acolyte of Nature, …) is represented — then the spell's own class
+	 * list, resolved through the catalog when the stored entry is a lean stub.
+	 * @param {*} spell A sheet spell entry, or null to ask about the class in general.
+	 * @param {string} [className]
+	 * @returns {boolean}
+	 */
+	spellCountsForClass (spell, className) {
+		if (!className) return false;
+		if (!spell) return true;
+
+		const target = String(className).toLowerCase();
+		if (spell.sourceClass && String(spell.sourceClass).toLowerCase() === target) return true;
+		// A spell explicitly attributed to a DIFFERENT class is not this class's.
+		if (spell.sourceClass) return false;
+
+		const full = this._resolveFullSpellData(spell) || spell;
+		try {
+			if (CharacterSheetClassUtils.spellIsForClass(full, className)) return true;
+		} catch (e) { /* catalog unavailable — fall through */ }
+
+		// Unattributed and unresolvable: attribute it to the only spellcasting class the
+		// character has, so a single-classed Cleric's cantrips still benefit.
+		const casters = (this._data.classes || []).filter(c => this.getSpellcastingAbilityForClass(c));
+		return casters.length === 1 && String(casters[0].name).toLowerCase() === target;
+	}
+
+	/**
+	 * Flat damage bonus a class feature adds to a CANTRIP's damage.
+	 *
+	 * Potent Spellcasting ("you add your Wisdom modifier to the damage you deal with any
+	 * cleric cantrip" — most Cleric domains, and the Druid's Circle of the Land /
+	 * Elemental Fury option) has always been computed into
+	 * `getFeatureCalculations().potentSpellcastingBonus`, but nothing ever READ it, so the
+	 * feature was pure decoration on every subclass that grants it (CS-BUG-076).
+	 *
+	 * Scoped to the granting class's cantrips so a Cleric/Wizard multiclass does not add
+	 * Wisdom to a wizard cantrip.
+	 * @param {*} [spell] The cantrip being rolled. Omit for the headline value.
+	 * @returns {{bonus: number, sources: Array<{name: string, value: number}>}}
+	 */
+	getCantripDamageBonus (spell = null) {
+		/** @type {{bonus: number, sources: Array<{name: string, value: number}>}} */
+		const out = {bonus: 0, sources: []};
+
+		// Level is `undefined` on stored cantrip entries (they live in their own list), so
+		// only reject an entry that positively declares a non-zero level.
+		if (spell && spell.level != null && spell.level !== 0) return out;
+
+		const calc = this.getFeatureCalculations();
+		const potent = calc.potentSpellcastingBonus;
+		if (Number.isFinite(potent) && potent > 0
+			&& this.spellCountsForClass(spell, calc.potentSpellcastingClass)) {
+			out.bonus += potent;
+			out.sources.push({name: "Potent Spellcasting", value: potent});
+		}
+
+		return out;
 	}
 
 	/**
@@ -13447,6 +13730,27 @@ class CharacterSheetState {
 	getSpellSlotsMax (level) {
 		const slot = this._data.spellcasting.spellSlots[level];
 		return slot ? slot.max : 0;
+	}
+
+	/**
+	 * The highest spell-slot level the character has any slots of (0 when none).
+	 *
+	 * Several features cap themselves at "the level of the spell slot you use" —
+	 * e.g. the Arcana Domain's Spell Breaker ends a spell of level <= the slot spent on
+	 * the healing spell — so the practical ceiling is the biggest slot on the sheet.
+	 * Pact slots count: a Warlock's pact slot is a spell slot for this purpose.
+	 * @returns {number}
+	 */
+	getHighestSpellSlotLevel () {
+		let highest = 0;
+		for (const [levelKey, slot] of Object.entries(this._data.spellcasting.spellSlots || {})) {
+			const level = parseInt(levelKey);
+			if (!Number.isFinite(level)) continue;
+			if ((slot?.max || 0) > 0 && level > highest) highest = level;
+		}
+		const pact = this._data.spellcasting.pactSlots;
+		if ((pact?.max || 0) > 0 && (pact.level || 0) > highest) highest = pact.level;
+		return highest;
 	}
 
 	getPactSlots () {
@@ -14120,93 +14424,6 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Declarative, level-gated spell grants for subclasses whose spell list lives
-	 * somewhere neither `additionalSpells` nor `SpellGrantParser` can reach.
-	 *
-	 * The parser only ever sees prose: `getFeatureSpellText()` walks `entries` and
-	 * `items` and never descends into a `type: "table"` node's `rows`. A subclass
-	 * that publishes its spells as a TABLE — the 5etools house style for
-	 * multi-column spell progressions — therefore grants nothing at all, and the
-	 * shipped `additionalSpells` block is frequently a partial transcription of
-	 * that table (Lunar Sorcery ships only the Full Moon column of three).
-	 *
-	 * Rather than teach the parser to read tables — which would over-grant for the
-	 * many CHOOSE-ONE spell tables (Circle of the Land's terrain columns, warlock
-	 * expanded lists) — this registry states the grant explicitly, and the entries
-	 * flow through the ordinary always-prepared pipeline (enrichment, cantrip
-	 * routing, dedupe, `sourceFeature` attribution) exactly like `additionalSpells`.
-	 *
-	 * Keys are `"<Class name>|<subclass shortName or name>"`. Each entry is
-	 * `{name, source?, minLevel?, cantrip?, grantedBy?}` where `minLevel` is the
-	 * CLASS level at which the grant unlocks (default 1).
-	 *
-	 * @type {Record<string, Array<{name: string, source?: string, minLevel?: number, cantrip?: boolean, grantedBy?: string}>>}
-	 */
-	static FEATURE_SPELL_GRANTS = {
-		// Lunar Sorcery (DSotDQ p34). RAW you learn EVERY spell on the Lunar Spells
-		// table — all three phase columns — and the chosen phase gates the free
-		// casts / Lunar Boons schools / Empowerment / Phenomenon instead. The
-		// shipped data encodes only the Full Moon column, so all fifteen are
-		// declared here and the partial `additionalSpells` block dedupes away.
-		"Sorcerer|Lunar": [
-			{name: "Sacred Flame", source: "PHB", cantrip: true, grantedBy: "Moon Fire"},
-			{name: "Shield", source: "PHB", minLevel: 1, grantedBy: "Lunar Embodiment"},
-			{name: "Ray of Sickness", source: "PHB", minLevel: 1, grantedBy: "Lunar Embodiment"},
-			{name: "Color Spray", source: "PHB", minLevel: 1, grantedBy: "Lunar Embodiment"},
-			{name: "Lesser Restoration", source: "PHB", minLevel: 3, grantedBy: "Lunar Embodiment"},
-			{name: "Blindness/Deafness", source: "PHB", minLevel: 3, grantedBy: "Lunar Embodiment"},
-			{name: "Alter Self", source: "PHB", minLevel: 3, grantedBy: "Lunar Embodiment"},
-			{name: "Dispel Magic", source: "PHB", minLevel: 5, grantedBy: "Lunar Embodiment"},
-			{name: "Vampiric Touch", source: "PHB", minLevel: 5, grantedBy: "Lunar Embodiment"},
-			{name: "Phantom Steed", source: "PHB", minLevel: 5, grantedBy: "Lunar Embodiment"},
-			{name: "Death Ward", source: "PHB", minLevel: 7, grantedBy: "Lunar Embodiment"},
-			{name: "Confusion", source: "PHB", minLevel: 7, grantedBy: "Lunar Embodiment"},
-			{name: "Hallucinatory Terrain", source: "PHB", minLevel: 7, grantedBy: "Lunar Embodiment"},
-			{name: "Rary's Telepathic Bond", source: "PHB", minLevel: 9, grantedBy: "Lunar Embodiment"},
-			{name: "Hold Monster", source: "PHB", minLevel: 9, grantedBy: "Lunar Embodiment"},
-			{name: "Mislead", source: "PHB", minLevel: 9, grantedBy: "Lunar Embodiment"},
-		],
-	};
-
-	/**
-	 * Resolve the declarative spell grants (see {@link FEATURE_SPELL_GRANTS}) that a
-	 * class entry has unlocked at its current level.
-	 *
-	 * Static and pure: it reads only the class entry, so it is safe to call from the
-	 * always-prepared pipeline without re-entering `getFeatureCalculations()`.
-	 *
-	 * @param {*} cls A `_data.classes[]` entry (with `subclass`).
-	 * @returns {Array<{name: string, source: string, minLevel: number, cantrip: boolean, grantedBy: string|null}>}
-	 */
-	static getFeatureGrantedSpells (cls) {
-		const subclass = cls?.subclass;
-		if (!cls?.name || !subclass) return [];
-		const level = cls.level || 0;
-		const keys = [subclass.shortName, subclass.name]
-			.filter(Boolean)
-			.map(it => `${cls.name}|${it}`);
-		const seen = new Set();
-		const out = [];
-		for (const key of keys) {
-			for (const grant of (CharacterSheetState.FEATURE_SPELL_GRANTS[key] || [])) {
-				const minLevel = grant.minLevel ?? 1;
-				if (level < minLevel) continue;
-				const id = `${grant.name}|${grant.source || Parser.SRC_PHB}`.toLowerCase();
-				if (seen.has(id)) continue;
-				seen.add(id);
-				out.push({
-					name: grant.name,
-					source: grant.source || Parser.SRC_PHB,
-					minLevel,
-					cantrip: !!grant.cantrip,
-					grantedBy: grant.grantedBy || null,
-				});
-			}
-		}
-		return out;
-	}
-
-	/**
 	 * Get the list of always-prepared spells from a subclass's additionalSpells data.
 	 * This handles domain spells (Cleric), oath spells (Paladin), circle spells (Druid),
 	 * expanded spell lists (Warlock), etc.
@@ -14220,23 +14437,9 @@ class CharacterSheetState {
 		const characterLevel = cls.level || 0;
 		const result = [];
 
-		// Declarative grants first (see FEATURE_SPELL_GRANTS): these cover spell lists
-		// the shipped data cannot express, and they are INDEPENDENT of additionalSpells
-		// — a subclass may have one, the other, or both. Any overlap dedupes downstream
-		// in `populateSubclassSpells()`.
-		for (const grant of CharacterSheetState.getFeatureGrantedSpells(cls)) {
-			const parsed = this._parseSpellReference(`${grant.name}|${grant.source}${grant.cantrip ? "#c" : ""}`);
-			if (!parsed) continue;
-			// Attribute the grant to the FEATURE that gives it rather than to a
-			// generic "<Subclass> Spells" bucket, so the sheet can tell the player
-			// which feature is responsible (Lunar Sorcery grants from two).
-			const extra = grant.grantedBy ? {sourceFeature: grant.grantedBy} : {};
-			result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls, extra));
-		}
-
 		// Check additionalSpells on the subclass object
 		const additionalSpells = subclassData.additionalSpells;
-		if (!additionalSpells?.length) return result;
+		if (!additionalSpells?.length) return [];
 
 		const isDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(subclassData);
 		const hasNamedChoice = CharacterSheetClassUtils.hasNamedSubclassChoice(subclassData);
@@ -15158,6 +15361,10 @@ class CharacterSheetState {
 			components: spell.components || "",
 			concentration: spell.concentration || false,
 			ritual: spell.ritual || false,
+			// "…but only as a ritual" — the spell can ONLY be cast with the ritual tag
+			// (10 minutes, no slot). Distinct from `ritual`, which merely says the spell
+			// HAS the ritual tag and may also be cast normally.
+			ritualOnly: spell.ritualOnly || false,
 		};
 
 		// Bug #13: preserve a per-spell chosen casting ability (e.g. a racial innate spell
@@ -15239,6 +15446,7 @@ class CharacterSheetState {
 
 	// Pending spell choice management
 	getPendingSpellChoices () {
+		this._ensureSubclassSpellChoices();
 		return [...(this._data.pendingSpellChoices || [])];
 	}
 
@@ -15246,6 +15454,12 @@ class CharacterSheetState {
 		if (!this._data.pendingSpellChoices) {
 			this._data.pendingSpellChoices = [];
 		}
+
+		// A `slotKey` identifies one re-derivable grant slot (see
+		// `_ensureSubclassSpellChoices`). Those are re-minted on every read, so they must
+		// never stack duplicates. Feat-driven choices carry no key and keep the historical
+		// push-always behaviour (a feat taken twice legitimately grants twice).
+		if (choice.slotKey && this._data.pendingSpellChoices.some(c => c.slotKey === choice.slotKey)) return;
 
 		const pendingChoice = {
 			id: CryptUtil.uid(),
@@ -15258,6 +15472,10 @@ class CharacterSheetState {
 			ability: choice.ability,
 			prepared: choice.prepared,
 			subschools: choice.subschools || [],
+			...(choice.slotKey ? {slotKey: choice.slotKey} : {}),
+			...(choice.sourceClass ? {sourceClass: choice.sourceClass} : {}),
+			...(choice.alwaysPrepared ? {alwaysPrepared: true} : {}),
+			...(choice.level != null ? {level: choice.level} : {}),
 		};
 
 		this._data.pendingSpellChoices.push(pendingChoice);
@@ -15276,7 +15494,123 @@ class CharacterSheetState {
 	}
 
 	hasPendingSpellChoices () {
+		this._ensureSubclassSpellChoices();
 		return (this._data.pendingSpellChoices?.length || 0) > 0;
+	}
+
+	/**
+	 * Stable identifier for one re-derivable spell-choice slot.
+	 * @param {*} parts
+	 * @returns {string}
+	 * @private
+	 */
+	static _spellChoiceSlotKey (parts) {
+		return ["subclassSpell", ...parts].map(p => String(p ?? "").toLowerCase()).join("|");
+	}
+
+	/**
+	 * Every `{choose: "<filter>"}` slot a class's SUBCLASS grants at its current level.
+	 *
+	 * `additionalSpells` blocks mix fixed refs (`"detect magic"`) with player CHOICES
+	 * (`{"choose": "level=0|class=Wizard", "count": 2}` — Arcana Domain's Arcane Initiate;
+	 * `{"choose": "level=6|class=Wizard"}` — its Arcane Mastery). The always-prepared
+	 * walker ({@link getSubclassAlwaysPreparedSpells}) resolves refs through
+	 * `_parseSpellReference`, which returns `null` for a choose object, so every such
+	 * choice was silently DROPPED — the player was never asked and never got the spells
+	 * (CS-BUG-075). This is the choose-shaped counterpart of that walker: same block
+	 * traversal, same level gating, same named-choice narrowing.
+	 * @returns {Array<object>} One entry per pick the player still owes or has made.
+	 */
+	getSubclassSpellChoiceSlots () {
+		const out = [];
+
+		for (const cls of (this._data.classes || [])) {
+			const subclass = cls?.subclass;
+			const blocks = subclass?.additionalSpells;
+			if (!Array.isArray(blocks) || !blocks.length) continue;
+
+			// Mirror getSubclassAlwaysPreparedSpells: a named-choice subclass (e.g. the
+			// Daemonologist's pact) only grants the block the player picked.
+			const hasNamedChoice = CharacterSheetClassUtils.hasNamedSubclassChoice(subclass);
+			const spellBlocks = hasNamedChoice
+				? [CharacterSheetClassUtils.getNamedSubclassChoiceBlock(subclass, cls.subclassChoice)].filter(Boolean)
+				: blocks;
+
+			const subclassLabel = subclass.shortName || subclass.name || "";
+			const featureName = `${subclass.name || subclassLabel} Spells`;
+
+			spellBlocks.forEach((block, blockIdx) => {
+				for (const kind of ["known", "prepared", "innate"]) {
+					const section = block?.[kind];
+					if (!section || typeof section !== "object") continue;
+
+					for (const [levelKey, levelValue] of Object.entries(section)) {
+						const reqLevel = parseInt(levelKey);
+						if (isNaN(reqLevel)) continue;
+						if (reqLevel > 0 && (cls.level || 0) < reqLevel) continue;
+
+						const refs = CharacterSheetState._flattenAdditionalSpellsLevelValue(levelValue);
+						refs.forEach((ref, refIdx) => {
+							// Only STRING filters are pickable here — the object form
+							// (`{choose: {from: [...]}}`) is a different, fixed-option shape.
+							if (!ref || typeof ref !== "object" || typeof ref.choose !== "string") return;
+							const count = Number.isInteger(ref.count) && ref.count > 0 ? ref.count : 1;
+							for (let i = 0; i < count; i++) {
+								out.push({
+									slotKey: CharacterSheetState._spellChoiceSlotKey([
+										cls.name, subclassLabel, subclass.source, blockIdx, kind, levelKey, refIdx, i,
+									]),
+									className: cls.name,
+									featureName,
+									filter: ref.choose,
+									unlockLevel: reqLevel,
+									// `prepared` blocks are the domain/oath/circle "always prepared"
+									// grant; `known`/`innate` are simply added to the list.
+									prepared: kind === "prepared",
+									alwaysPrepared: kind === "prepared",
+									innate: kind === "innate",
+									sourceClass: cls.name,
+									ability: subclass.spellcastingAbility || cls.spellcastingAbility || null,
+								});
+							}
+						});
+					}
+				}
+			});
+		}
+
+		return out;
+	}
+
+	/**
+	 * Queue any subclass spell-choice slot the player has not yet filled.
+	 *
+	 * Called from the pending-choice readers (mirroring `_ensureStudentOfWarChoices`) so
+	 * every flow that already drains the queue — Builder, LevelUp, QuickBuild and the
+	 * Features tab all call `processPendingSpellChoices()` — surfaces these picks with no
+	 * new UI. Idempotent: fulfilled slots are recorded by key, and `addPendingSpellChoice`
+	 * refuses to re-queue a key that is already pending.
+	 * @private
+	 */
+	_ensureSubclassSpellChoices () {
+		const slots = this.getSubclassSpellChoiceSlots();
+		if (!slots.length) return;
+		const fulfilled = new Set(this._data.fulfilledSpellChoiceSlots || []);
+		for (const slot of slots) {
+			if (fulfilled.has(slot.slotKey)) continue;
+			this.addPendingSpellChoice(slot);
+		}
+	}
+
+	/**
+	 * Record a re-derivable choice slot as filled so it is never re-offered.
+	 * @param {string} [slotKey]
+	 * @private
+	 */
+	_recordFulfilledSpellChoiceSlot (slotKey) {
+		if (!slotKey) return;
+		if (!Array.isArray(this._data.fulfilledSpellChoiceSlots)) this._data.fulfilledSpellChoiceSlots = [];
+		if (!this._data.fulfilledSpellChoiceSlots.includes(slotKey)) this._data.fulfilledSpellChoiceSlots.push(slotKey);
 	}
 
 	/**
@@ -15312,6 +15646,9 @@ class CharacterSheetState {
 				level: spell.level,
 				school: spell.school,
 				prepared: choice.prepared,
+				// A `prepared`-block subclass grant (domain/oath/circle spells) is ALWAYS
+				// prepared and doesn't count against the prepared limit.
+				...(choice.alwaysPrepared ? {alwaysPrepared: true} : {}),
 				ritual: spell.ritual || false,
 				concentration: spell.concentration || false,
 				// Attribute the pick to the granting feature so it is recognised as
@@ -15321,8 +15658,11 @@ class CharacterSheetState {
 				sourceFeature: choice.featureName || null,
 				sourceClass: choice.sourceClass || null,
 				spellcastingAbility: choice.ability || null,
-			});
+			}, choice.alwaysPrepared ? true : choice.prepared);
 		}
+
+		// Re-derivable slots (subclass `additionalSpells` choices) must not be re-offered.
+		this._recordFulfilledSpellChoiceSlot(choice.slotKey);
 
 		// Remove the fulfilled choice
 		this.removePendingSpellChoice(choiceId);
@@ -15335,13 +15675,28 @@ class CharacterSheetState {
 	// =========================================================================
 
 	getPendingFeatureChoices () {
-		this._ensureStudentOfWarChoices();
+		this._ensureSeededFeatureChoices();
 		return [...(this._data.pendingFeatureChoices || [])];
 	}
 
 	hasPendingFeatureChoices () {
-		this._ensureStudentOfWarChoices();
+		this._ensureSeededFeatureChoices();
 		return (this._data.pendingFeatureChoices?.length || 0) > 0;
+	}
+
+	/**
+	 * Catch-up seeding for feature choices whose prompt is NOT produced by the generic
+	 * prose parsers. Called from both pending-choice readers, so Builder, Level-Up and
+	 * Quick Build all surface these picks — including after a reload, where the
+	 * feature-add path that would normally seed them never ran.
+	 *
+	 * Every seeder must be idempotent: `addPendingFeatureChoice` dedupes by signature and
+	 * each seeder additionally short-circuits once its choice has been resolved.
+	 * @private
+	 */
+	_ensureSeededFeatureChoices () {
+		this._ensureStudentOfWarChoices();
+		this._ensureHagAncestorChoice();
 	}
 
 	_ensureStudentOfWarChoices () {
@@ -18007,13 +18362,8 @@ class CharacterSheetState {
 					// Number of rages per long rest
 					// PHB: 2/3/4/5/6/unlimited at levels 1/3/6/12/17/20
 					// XPHB: 2/3/4/5/6 at levels 1/3/6/12/17 (no unlimited at 20)
-					if (isXPHB) {
-						const ragesPerDay = level >= 17 ? 6 : level >= 12 ? 5 : level >= 6 ? 4 : level >= 3 ? 3 : 2;
-						calculations.ragesPerDay = ragesPerDay;
-					} else {
-						const ragesPerDay = level >= 20 ? Infinity : level >= 17 ? 6 : level >= 12 ? 5 : level >= 6 ? 4 : level >= 3 ? 3 : 2;
-						calculations.ragesPerDay = ragesPerDay;
-					}
+					const rageUsesMax = CharacterSheetState.getRageUsesMaxForClass(cls);
+					calculations.ragesPerDay = rageUsesMax === 999 ? Infinity : rageUsesMax;
 
 					// Brutal Critical (PHB only) - extra damage dice on critical
 					// Levels 9, 13, 17 add +1/+2/+3 dice
@@ -19423,6 +19773,82 @@ class CharacterSheetState {
 						}
 					}
 
+					// Steel Hawk (The Griffon's Saddlebag 2). Source-gated like Shadow Knight
+					// and Meteor Knight above — homebrew short names are not globally unique.
+					// Every tier is derived from `level` so level-up / respec stay correct.
+					if (CharacterSheetState.isSteelHawkSubclass(cls.subclass) && level >= 3) {
+						const strMod = this.getAbilityMod("str");
+						calculations.hasSteelHawk = true;
+
+						// --- Launch (3 / 7 / 10 / 15 / 18) ---
+						calculations.hasLaunch = true;
+						// Uses between short/long rests: 3 → 4 at 7th → 5 at 15th.
+						calculations.launchUses = level >= 15 ? 5 : level >= 7 ? 4 : 3;
+						// Combined horizontal + vertical leap distance.
+						calculations.launchDistance = level >= 7 ? 30 : 15;
+						// The momentum rider on a melee weapon attack made immediately after
+						// (or during) the leap: advantage plus a weapon-typed damage die.
+						calculations.launchBonusDamage = level >= 18 ? "1d12" : level >= 10 ? "1d10" : "1d8";
+						// "you can subtract up to 30 feet from the fall when calculating
+						// falling damage" — always available, independent of Improved Launch.
+						calculations.launchFallReduction = 30;
+						calculations.launchProvokesOpportunityAttacks = false;
+
+						// --- Nimble Lancer (3) ---
+						calculations.hasNimbleLancer = true;
+						calculations.nimbleLancerOneHandedDamage = "1d8";
+						calculations.nimbleLancerTwoHandedDamage = "1d12";
+						calculations.nimbleLancerDisengageDistance = 5;
+
+						// --- Bird Caller (3) ---
+						calculations.hasBirdCaller = true;
+						calculations.birdCallerRitualSpells = ["Animal Messenger"];
+
+						// --- Steel Grace (7) ---
+						if (level >= 7) {
+							calculations.hasSteelGrace = true;
+							// Generic flag consumed by hasArmorStealthDisadvantage().
+							calculations.ignoresArmorStealthDisadvantage = true;
+							// A Launch-fuelled Evasion: no damage on a successful Dexterity
+							// save, half on a failure. Same shape as the Rogue's Evasion, but
+							// it costs a Launch use and a reaction.
+							calculations.hasLaunchEvasion = true;
+							calculations.launchEvasionCost = 1;
+						}
+
+						// --- Eagle Eye (10) ---
+						if (level >= 10) {
+							calculations.hasEagleEye = true;
+							// The Launch attack (and only that attack) crits on 19-20.
+							calculations.launchCriticalRange = 19;
+							// Sight-based Wisdom (Perception) doubles proficiency — modelled as
+							// a player-toggled state so it reaches the displayed skill modifier
+							// AND the roll total (see `eagleEyeSight` in ACTIVE_STATE_TYPES).
+							calculations.eagleEyeSightBonus = profBonus;
+							calculations.eagleEyeGrantsPerception = true;
+							// Save DC shared by Eagle Eye's speed-to-0 rider and Improved
+							// Launch's prone rider: 8 + proficiency bonus + Strength modifier.
+							// DC contract: the exhaustion penalty is baked in exactly once, here.
+							calculations.steelHawkSaveDc = 8 + profBonus + strMod - exhaustionPenalty;
+						}
+
+						// --- Predatory Instinct (15) ---
+						if (level >= 15) {
+							calculations.hasPredatoryInstinct = true;
+							calculations.predatoryInstinctInitiativeRefill = 1;
+						}
+
+						// --- Improved Launch (18) ---
+						if (level >= 18) {
+							calculations.hasImprovedLaunch = true;
+							calculations.improvedLaunchDistance = 90;
+							calculations.improvedLaunchExhaustionCost = 1;
+							// "You can't use this feature in this way if you're suffering from
+							// two or more levels of exhaustion."
+							calculations.improvedLaunchMaxExhaustion = 1;
+						}
+					}
+
 					// Cavalier subclass
 					if (cls.subclass?.shortName === "Cavalier") {
 						// Unwavering Mark uses per long rest = STR mod (min 1)
@@ -20350,6 +20776,90 @@ class CharacterSheetState {
 								}
 								break;
 							}
+							case "Shadow Sorcery": {
+								// The 2024 rework of Shadow Magic. Deliberately a SEPARATE case rather
+								// than a fall-through: every one of its four benefits differs in value
+								// or economy from the XGE feature of the same name, and the shared
+								// `shortName: "Shadow"` above already routes ambiguously.
+								if (level >= 3) {
+									calculations.hasShadowSorcery = true;
+									calculations.hasPowerOfShadow = true;
+
+									// --- Eyes of the Dark ---
+									// Two senses from ONE feature. Both are consumed generically by
+									// `_getClassFeatureEffects()`, which emits `type: "sense"` effects so
+									// the ranges actually reach `getSenses()`.
+									calculations.hasEyesOfTheDarkRhw = true;
+									calculations.darkvision = 120;
+									calculations.darkvisionSource = "Eyes of the Dark";
+									calculations.blindsight = 10;
+									calculations.blindsightSource = "Eyes of the Dark";
+									// "If a spell you cast creates an area of Darkness, you can see
+									// normally through that spell's Darkness." Unlike XGE this is not
+									// tied to a Sorcery-Point cast — see `canSeeThroughOwnDarkness()`.
+									calculations.seeThroughOwnSpellDarkness = true;
+
+									// --- Strength of the Grave ---
+									// Same trigger as XGE, different RESULT, and without XGE's radiant
+									// and critical-hit carve-outs. Registered declaratively in
+									// `ZERO_HP_INTERVENTIONS` (id `strengthOfTheGraveRhw`) — note that
+									// `hasStrengthOfTheGrave` is deliberately NOT set, or the XGE entry
+									// would fire too and drop the character to 1 hit point.
+									calculations.strengthOfTheGraveDc = 5; // + damage taken
+									calculations.strengthOfTheGraveSaveAbility = "cha";
+									calculations.strengthOfTheGraveHp = this.getAbilityMod("cha") + level;
+								}
+								// --- Beasts of Ill Omen (level 6) ---
+								if (level >= 6) {
+									calculations.hasBeastsOfIllOmen = true;
+									calculations.beastsOfIllOmenCost = 3;
+									calculations.resourceCastSpells = [
+										...(calculations.resourceCastSpells || []),
+										{
+											spell: "Summon Beast",
+											source: "XPHB",
+											level: 2,
+											concentration: true,
+											concentrationOptional: true,
+											waivedDurationMinutes: 1,
+											castingTime: "bonus",
+											ignoresMaterialComponents: true,
+											ignoresPreparation: true,
+											replacesPrevious: true,
+											cost: 3,
+											resource: "Sorcery Points",
+											grantedBy: "Beasts of Ill Omen",
+											note: "Enemies within 5 feet of the summon have Disadvantage on saving throws against your spells.",
+											summon: {
+												baseLevel: 2,
+												creatureType: "beast",
+												forms: ["Bestial Spirit (Land)", "Bestial Spirit (Sea)", "Bestial Spirit (Sky)"],
+											},
+											riders: {enemiesNearSummonSaveDisadvantage: 5},
+										},
+									];
+								}
+								// --- Shadow Walk (level 14) --- identical to XGE.
+								if (level >= 14) {
+									calculations.hasShadowWalk = true;
+									calculations.shadowWalkRange = 120;
+									calculations.shadowWalkAction = "bonus";
+								}
+								// --- Umbral Form (level 18) ---
+								// Bound to Innate Sorcery: once per Long Rest, no activation cost, and
+								// 6 Sorcery Points RESTORES the use. `hasUmbralForm` is deliberately
+								// NOT set — that flag means the XGE 6-SP toggle.
+								if (level >= 18) {
+									calculations.hasUmbralFormRhw = true;
+									calculations.umbralFormBoundToInnateSorcery = true;
+									calculations.umbralFormUsesMax = 1;
+									calculations.umbralFormRestoreCost = 6;
+									calculations.umbralFormIncorporealDamage = "1d10";
+									calculations.umbralFormIncorporealDamageType = "force";
+									calculations.umbralFormResistanceExceptions = ["force", "radiant"];
+								}
+								break;
+							}
 							case "Storm Sorcery":
 							case "Storm": {
 								// Wind Speaker (level 1/3)
@@ -20446,70 +20956,62 @@ class CharacterSheetState {
 								}
 								break;
 							}
-							// =====================================================================
-							// Lunar Sorcery (Sorcerer Subclass, DSotDQ)
-							//
-							// The lunar PHASE is the centrepiece: it is a live, switchable
-							// state (three mutually-exclusive `ACTIVE_STATE_TYPES` entries,
-							// seeded from `subclassChoice`) and it gates four real mechanics —
-							// which 1st-level Lunar spell is free, which two schools Lunar
-							// Boons discounts, which Lunar Empowerment passive is live, and
-							// which Lunar Phenomenon the bonus action produces.
-							//
-							// It does NOT gate spell knowledge: RAW you learn every spell on
-							// the Lunar Spells table. The shipped data encodes only the Full
-							// Moon column, so all fifteen are granted declaratively via
-							// `FEATURE_SPELL_GRANTS` instead.
-							// =====================================================================
 							case "Lunar Sorcery":
 							case "Lunar": {
 								const subclassLevel = is2024 ? 3 : 1;
-								if (level < subclassLevel) break;
-
-								const phase = this.getLunarPhase();
-
-								calculations.hasLunarEmbodiment = true;
-								calculations.lunarPhase = phase?.key || null;
-								calculations.lunarPhaseName = phase?.name || null;
-								calculations.lunarPhaseOptions = Object.values(CharacterSheetState.LUNAR_PHASES)
-									.map(p => ({key: p.key, name: p.name, icon: p.icon}));
-								calculations.lunarFreeSpell = phase ? {...phase.freeSpell} : null;
-								calculations.lunarEmbodimentFreeCasts = this.getLunarFreeCasts().filter(it => it.available).length;
-								// How many rows of the Lunar Spells table have unlocked. RAW every
-								// column is learned, so this is 3 per unlocked row: 3/6/9/12/15 at
-								// class levels 1/3/5/7/9. Published because the level gate is a real
-								// mechanic and is otherwise only observable by diffing the spell list.
-								calculations.lunarSpellsKnownCount = CharacterSheetState.getFeatureGrantedSpells(cls)
-									.filter(it => it.grantedBy === "Lunar Embodiment").length;
-
-								// Moon Fire — Sacred Flame, cast against two creatures within
-								// 5 ft of each other, and it does not count against cantrips known.
-								calculations.hasMoonFire = true;
-								calculations.moonFireCantrip = "Sacred Flame";
-								calculations.moonFireTargets = 2;
-								calculations.moonFireTargetSpacingFt = 5;
-
+								// The phase is read from stored data (never from this method — it is
+								// the one being built), so every value below is safe to derive here.
+								const lunarPhase = CharacterSheetState.getLunarPhaseDefinition(this._data.lunarPhase)
+									|| CharacterSheetState.LUNAR_PHASES[0];
+								// Lunar Embodiment (level 1/3) — the recurring phase choice.
+								if (level >= subclassLevel) {
+									calculations.hasLunarEmbodiment = true;
+									calculations.lunarPhase = lunarPhase.id;
+									calculations.lunarPhaseName = lunarPhase.name;
+									calculations.lunarPhaseSchools = [...lunarPhase.schools];
+									// One free 1st-level lunar cast per long rest; Waxing and Waning
+									// widens that to one per phase at 6.
+									calculations.lunarFreeCastCount = level >= 6 ? 3 : 1;
+									calculations.lunarSpellTableRows = CharacterSheetState.LUNAR_SPELL_TABLE
+										.filter(row => level >= row.level).length;
+								}
+								// Moon Fire (level 1/3) — free `sacred flame`, splittable across two
+								// creatures within 5 feet of each other.
+								if (level >= subclassLevel) {
+									calculations.hasMoonFire = true;
+									calculations.moonFireSpell = "Sacred Flame";
+									calculations.moonFireTargetCount = 2;
+									calculations.moonFireTargetSeparation = 5;
+								}
+								// Lunar Boons (level 6) — proficiency-bonus metamagic discounts per
+								// long rest, on spells of the current phase's schools.
 								if (level >= 6) {
 									calculations.hasLunarBoons = true;
-									calculations.lunarBoonsMax = profBonus;
-									calculations.lunarBoonsSchools = phase ? [...phase.schools] : [];
-									calculations.lunarBoonsSchoolNames = phase ? [...phase.schoolNames] : [];
-									calculations.lunarBoonsDiscount = 1;
-
-									calculations.hasWaxingAndWaning = true;
-									calculations.waxingAndWaningCost = 1;
+									calculations.lunarBoonsUses = profBonus;
+									calculations.lunarBoonsReduction = 1;
 								}
-
+								// Waxing and Waning (level 6) — bonus action, 1 sorcery point.
+								if (level >= 6) {
+									calculations.hasWaxingAndWaning = true;
+									calculations.waxingAndWaningCost = CharacterSheetState.LUNAR_PHASE_CHANGE_COST;
+									calculations.waxingAndWaningAction = "bonus";
+								}
+								// Lunar Empowerment (level 14) — the phase's passive benefit.
 								if (level >= 14) {
 									calculations.hasLunarEmpowerment = true;
-									calculations.lunarEmpowermentText = phase?.empowermentText || null;
+									calculations.lunarEmpowermentSummary = lunarPhase.empowerment.summary;
+									if (lunarPhase.empowerment.resistances) calculations.lunarEmpowermentResistances = [...lunarPhase.empowerment.resistances];
+									if (lunarPhase.empowerment.brightRadius) calculations.lunarMoonlightRadius = lunarPhase.empowerment.brightRadius;
 								}
-
+								// Lunar Phenomenon (level 18) — bonus-action phase burst, once per
+								// long rest or 5 sorcery points.
 								if (level >= 18) {
 									calculations.hasLunarPhenomenon = true;
-									calculations.lunarPhenomenonSorceryPointCost = 5;
-									calculations.lunarPhenomenonSaveDc = this.getSpellSaveDC("Sorcerer");
-									calculations.lunarPhenomenonEffect = phase ? {...phase.phenomenon} : null;
+									calculations.lunarPhenomenonCost = CharacterSheetState.LUNAR_PHENOMENON_REUSE_COST;
+									calculations.lunarPhenomenonRange = lunarPhase.phenomenon.range;
+									calculations.lunarPhenomenonAction = "bonus";
+									if (lunarPhase.phenomenon.damage) calculations.lunarPhenomenonDamage = lunarPhase.phenomenon.damage;
+									if (lunarPhase.phenomenon.healing) calculations.lunarPhenomenonHealing = lunarPhase.phenomenon.healing;
 								}
 								break;
 							}
@@ -20669,6 +21171,146 @@ class CharacterSheetState {
 								}
 								break;
 							}
+							// =====================================================================
+							// Spellfire Sorcery (FRHoF Sorcerer subclass) — 2024, subclass at L3
+							// =====================================================================
+							case "Spellfire Sorcery":
+							case "Spellfire": {
+								const chaMod = this.getAbilityMod("cha");
+								// Honed Spellfire (L14) improves both Spellfire Burst options.
+								const honed = level >= 14;
+
+								// The subclass and all of its base features arrive at L3 (2024
+								// chassis). Gate so an artificially early subclass assignment
+								// (or a broken save) can't surface L3 kit at L1–L2.
+								if (level >= 3) {
+									// Spellfire Burst (L3) — once per turn, when you spend at least
+									// 1 Sorcery Point on the Magic action or a Bonus Action, you may
+									// unleash Bolstering Flames or Radiant Fire. The trigger and the
+									// once-per-turn limit are enforced by `useSpellfireBurst()`.
+									calculations.hasSpellfireBurst = true;
+									calculations.spellfireBurstUsesPerTurn = 1;
+									calculations.spellfireBurstMinSorceryPoints = 1;
+
+									// Radiant Fire (L3) — 1d4 Fire or Radiant damage within 30 ft,
+									// increasing to 1d8 with Honed Spellfire.
+									calculations.hasRadiantFire = true;
+									calculations.radiantFireDamage = honed ? "1d8" : "1d4";
+									calculations.radiantFireRange = 30;
+									calculations.radiantFireDamageTypes = ["fire", "radiant"];
+
+									// Bolstering Flames (L3) — grant Temp HP = 1d4 + CHA modifier to
+									// yourself or a creature within 30 ft. Honed Spellfire adds your
+									// Sorcerer level to the total.
+									calculations.hasBolsteringFlames = true;
+									calculations.bolsteringFlamesTempHpDie = "1d4";
+									calculations.bolsteringFlamesTempHpBonus = chaMod + (honed ? level : 0);
+									calculations.bolsteringFlamesRange = 30;
+								}
+
+								// Honed Spellfire (L14) — the scaling above already reflects it;
+								// keep an explicit flag for display/probing.
+								if (honed) calculations.hasHonedSpellfire = true;
+
+								// Absorb Spells (L6) — Counterspell is always prepared (data
+								// `additionalSpells`), and a target failing its save against your
+								// Counterspell refunds 1d4 Sorcery Points.
+								if (level >= 6) {
+									calculations.hasAbsorbSpells = true;
+									calculations.absorbSpellsSorceryPointRegain = "1d4";
+								}
+
+								// Crown of Spellfire (L18) — while your altered Innate Sorcery is
+								// active you gain a 60 ft fly speed (and can hover), Spell
+								// Avoidance, and Burning Life Force. Restoring the use costs 5
+								// Sorcery Points.
+								if (level >= 18) {
+									calculations.hasCrownOfSpellfire = true;
+									calculations.crownOfSpellfireFlySpeed = 60;
+									calculations.crownOfSpellfireRestoreCost = 5;
+									// Burning Life Force caps the expended Hit Point Dice at your
+									// CHA modifier (minimum of one).
+									calculations.crownBurningLifeForceMaxDice = Math.max(1, chaMod);
+								}
+								break;
+							}
+
+							case "Wicked Witch":
+							case "Wicked Witch Sorcerous Origin": {
+								// Wicked Witch (Arcadia 8 Sorcerer, re-parented onto the TGTT
+								// chassis by `homebrew/TravelersGuidetoThelemar.json`). On the Ar8
+								// original the origin lands at sorcerer 1; on the TGTT / XPHB
+								// chassis Sorcerous Origin is a LEVEL 3 feature, so the L1 block
+								// gates on `subclassLevel`, exactly like every other origin here.
+								const subclassLevel = is2024 ? 3 : 1;
+
+								// ── Granny's Gifts (L1) ──────────────────────────────────
+								// Half of it is the always-prepared spell ladder, which the
+								// GENERIC `additionalSpells` pipeline already grants. The other
+								// half is a real, choosable long-rest boon: you or one creature
+								// within 30 ft gains advantage on saves against being charmed or
+								// frightened. `setGrannysWardTarget()` applies it.
+								if (level >= subclassLevel) {
+									calculations.hasGrannysGifts = true;
+									calculations.grannysWardRange = 30;
+									calculations.grannysWardConditions = ["charmed", "frightened"];
+									// The replaceable-spell clause: any enchantment or illusion
+									// spell from the sorcerer, warlock or wizard list.
+									calculations.grannysGiftsSwapSchools = ["enchantment", "illusion"];
+									calculations.grannysGiftsSwapClasses = ["sorcerer", "warlock", "wizard"];
+								}
+
+								// ── Hag Ancestor (L1) ────────────────────────────────────
+								// A three-way player CHOICE whose pick drives a language, a skill
+								// proficiency and — most importantly — the "specialty" school
+								// that halves Clever Little Witch / Coven Calling costs.
+								if (level >= subclassLevel) {
+									calculations.hasHagAncestor = true;
+									calculations.hasHagInfluenceAdvantage = true;
+									const kind = this.getHagAncestorKind();
+									if (kind) {
+										const def = CharacterSheetState.HAG_ANCESTOR_KINDS[kind];
+										calculations.hagAncestorKind = kind;
+										calculations.hagAncestorSpecialty = def.specialty;
+										calculations.hagAncestorLanguage = def.language;
+										calculations.hagAncestorSkill = def.skill;
+									}
+								}
+
+								// ── Clever Little Witch (L6) ─────────────────────────────
+								// Reaction: reflect a single-target spell back at its caster for
+								// Sorcery Points equal to the spell's level — HALVED (rounded
+								// down) when the spell belongs to your ancestor's specialty.
+								if (level >= 6) {
+									calculations.hasCleverLittleWitch = true;
+									calculations.cleverLittleWitchRange = 15;
+									calculations.cleverLittleWitchAction = "reaction";
+									calculations.cleverLittleWitchMaxSpellLevel = 9;
+								}
+
+								// ── Fly, My Pretty (L14) ─────────────────────────────────
+								// Enchant one Small/Medium object on a long rest; riding it grants
+								// a 60 ft flying speed and immunity to being charmed or frightened.
+								if (level >= 14) {
+									calculations.hasFlyMyPretty = true;
+									calculations.flyMyPrettyFlySpeed = 60;
+									calculations.flyMyPrettyImmunities = ["charmed", "frightened"];
+								}
+
+								// ── Coven Calling (L18) ──────────────────────────────────
+								// Clever Little Witch may instead throw back ANY spell you saw the
+								// triggering creature cast in the last minute, and 2 Sorcery Points
+								// conjure two *mirror image*-like duplicates that can each cast a
+								// known L1–3 instantaneous spell for its level in Sorcery Points.
+								if (level >= 18) {
+									calculations.hasCovenCalling = true;
+									calculations.covenCallingRecallMinutes = 1;
+									calculations.covenDuplicateCost = 2;
+									calculations.covenDuplicateCount = 2;
+									calculations.covenDuplicateMaxSpellLevel = 3;
+								}
+								break;
+							}
 						}
 					}
 					break;
@@ -20681,8 +21323,11 @@ class CharacterSheetState {
 					calculations.hasRitualCasting = true;
 					calculations.ritualCastingMode = "prepared";
 
-					// Channel Divinity DC is spell save DC
-					calculations.channelDivinityDc = this.getSpellSaveDc();
+					// Channel Divinity DC is the cleric's spell save DC. Resolve it through
+					// the class rather than the global spellcasting ability so it is correct
+					// for a multiclass — and non-null before the sheet has committed a
+					// global spellcasting ability.
+					calculations.channelDivinityDc = this.getFeatureSaveDc({className: cls.name});
 
 					// Channel Divinity uses progression
 					// PHB/XPHB: 1 use at level 2, 2 at level 6, 3 at level 18
@@ -21157,18 +21802,36 @@ class CharacterSheetState {
 							}
 							case "arcana domain":
 							case "arcana": {
-								// Arcane Initiate (level 1): 2 wizard cantrips
+								// Arcane Initiate (level 1): Arcana proficiency + 2 wizard
+								// cantrips that count as cleric cantrips (so Potent
+								// Spellcasting applies to them). The picks themselves are
+								// surfaced from the subclass's `additionalSpells` choose
+								// block by `getSubclassSpellChoiceSlots()`.
 								calculations.hasArcaneInitiate = true;
 								calculations.bonusWizardCantrips = 2;
 
 								// Channel Divinity: Arcane Abjuration (level 2)
 								if (level >= 2) {
 									calculations.hasArcaneAbjuration = true;
+									calculations.arcaneAbjurationDc = this.getFeatureSaveDc({className: cls.name});
+									calculations.arcaneAbjurationRange = 30;
+									calculations.arcaneAbjurationDuration = 1; // minute
+									// Banishment rider (level 5+): highest CR banished.
+									if (level >= 5) {
+										calculations.arcaneAbjurationBanishCr = level >= 17 ? 4
+											: level >= 14 ? 3
+												: level >= 11 ? 2
+													: level >= 8 ? 1
+														: 0.5;
+									}
 								}
 
-								// Spell Breaker (level 6)
+								// Spell Breaker (level 6): healing with a spell of 1st level
+								// or higher also ends one spell of level <= the slot used, so
+								// the ceiling is the character's highest available slot.
 								if (level >= 6) {
 									calculations.hasSpellBreaker = true;
+									calculations.spellBreakerMaxSpellLevel = this.getHighestSpellSlotLevel();
 								}
 
 								// Potent Spellcasting (level 8)
@@ -21177,9 +21840,11 @@ class CharacterSheetState {
 									calculations.potentSpellcastingBonus = wisMod;
 								}
 
-								// Arcane Mastery (level 17)
+								// Arcane Mastery (level 17): four wizard spells, one each of
+								// 6th/7th/8th/9th, become always-prepared domain spells.
 								if (level >= 17) {
 									calculations.hasArcaneMastery = true;
+									calculations.arcaneMasterySpellLevels = [6, 7, 8, 9];
 								}
 								break;
 							}
@@ -21374,6 +22039,14 @@ class CharacterSheetState {
 								break;
 							}
 						}
+					}
+
+					// Potent Spellcasting is granted by many domains and always reads
+					// "add your Wisdom modifier to the damage you deal with any CLERIC
+					// cantrip" — record the owning class so the damage roll can scope the
+					// bonus to that class's cantrips instead of every cantrip on the sheet.
+					if (calculations.hasPotentSpellcasting && !calculations.potentSpellcastingClass) {
+						calculations.potentSpellcastingClass = cls.name;
 					}
 					break;
 				}
@@ -21954,6 +22627,11 @@ class CharacterSheetState {
 								break;
 							}
 						}
+					}
+
+					// See the Cleric case: scope Potent Spellcasting to its owning class.
+					if (calculations.hasPotentSpellcasting && !calculations.potentSpellcastingClass) {
+						calculations.potentSpellcastingClass = cls.name;
 					}
 					break;
 				}
@@ -24787,7 +25465,11 @@ class CharacterSheetState {
 				// Try to get effects from the registry by feature name
 				const registryEffects = FeatureEffectRegistry.getEffects(feature.name);
 				if (registryEffects.length > 0) {
-					effects.push(...registryEffects);
+					// Effects that opt in with `__editionAware` need the FEATURE's own source
+					// (e.g. "PHB" vs "XPHB") to resolve edition-divergent wording. Opt-in by
+					// design: every other effect is passed through byte-identically, so this
+					// cannot change behaviour for anything that does not ask for it.
+					effects.push(...registryEffects.map(e => (e.__editionAware ? {...e, featureSource: feature.source} : e)));
 					processedFeatures.add(feature.name.toLowerCase());
 				}
 
@@ -25111,6 +25793,37 @@ class CharacterSheetState {
 				value: 2,
 				maxScore: 20,
 				source: "Agile Acrobat",
+			});
+		}
+
+		// Steel Hawk (TGS2 Fighter): Eagle Eye's automatic Perception proficiency,
+		// Predatory Instinct's initiative advantage, and Bird Caller's conditional
+		// Animal Handling advantage. Advantage-carrying modifiers stay `enabled: true`
+		// even when conditional (only NUMERIC conditionals must be disabled — see
+		// CS-BUG-065); `aggregateModifiers` still routes them into `conditionalsAvailable`.
+		if (calculations.hasEagleEye && !alreadyProcessed("Eagle Eye")) {
+			effects.push({
+				type: "skillProficiency",
+				skill: "perception",
+				level: 1,
+				source: "Eagle Eye",
+			});
+		}
+		if (calculations.hasPredatoryInstinct && !alreadyProcessed("Predatory Instinct")) {
+			effects.push({
+				type: "modifier",
+				modType: "initiative:advantage",
+				value: 1,
+				source: "Predatory Instinct",
+			});
+		}
+		if (calculations.hasBirdCaller && !alreadyProcessed("Bird Caller")) {
+			effects.push({
+				type: "modifier",
+				modType: "skill:animal handling:advantage",
+				value: 1,
+				source: "Bird Caller",
+				conditional: "when interacting with a beast that has an innate flying speed",
 			});
 		}
 
@@ -25889,21 +26602,31 @@ class CharacterSheetState {
 		// SORCERER FEATURES
 		// =========================================================
 
-		// GENERIC: any class/subclass calculation that declares a flat darkvision range
-		// (`calculations.darkvision`, labelled by `calculations.darkvisionSource`) becomes a
-		// real sense. CS-BUG-082: `calculations.darkvision` had NO consumer anywhere in the
-		// codebase, so Eyes of the Dark's 120 ft was pure text — `getSenses().darkvision`
-		// stayed at whatever the species granted.
-		if (calculations.darkvision > 0) {
-			const dvSource = calculations.darkvisionSource || "Class Feature";
-			if (!alreadyProcessed(dvSource)) {
-				effects.push({
-					type: "sense",
-					sense: "darkvision",
-					range: calculations.darkvision,
-					source: dvSource,
-				});
-			}
+		// GENERIC: any class/subclass calculation that declares a flat sense range
+		// (`calculations.darkvision`, labelled by `calculations.darkvisionSource`, and the
+		// same pair for blindsight / tremorsense / truesight) becomes a real sense.
+		//
+		// CS-BUG-082: `calculations.darkvision` had NO consumer anywhere in the codebase, so
+		// Eyes of the Dark's 120 ft was pure text — `getSenses().darkvision` stayed at
+		// whatever the species granted.
+		//
+		// CS-BUG-098: the block was darkvision-only, so a feature granting TWO senses at once
+		// (Shadow Sorcery's Eyes of the Dark — "Darkvision 120 ft AND Blindsight 10 ft") could
+		// only ever land one of them; the description parser picked darkvision and blindsight
+		// was silently dropped. The `alreadyProcessed` guard is per-SOURCE and stays that way
+		// (it exists to avoid double-applying a feature the registry already handled), so the
+		// loop below deliberately checks it once per source rather than once per sense.
+		for (const senseName of ["darkvision", "blindsight", "tremorsense", "truesight"]) {
+			const range = calculations[senseName];
+			if (!(range > 0)) continue;
+			const senseSource = calculations[`${senseName}Source`] || "Class Feature";
+			if (alreadyProcessed(senseSource)) continue;
+			effects.push({
+				type: "sense",
+				sense: senseName,
+				range,
+				source: senseSource,
+			});
 		}
 
 		// Draconic Resilience: +1 HP per level, unarmored AC = 13 + DEX
@@ -25978,6 +26701,36 @@ class CharacterSheetState {
 
 		// Bright Zenith (Sun Bloodline 18): AoE blind + blindsight, 6 SP cost
 		// (Active ability, tracked as SP cost)
+
+		// Hag Ancestor (Wicked Witch 1): the ancestry pick's three passive grants —
+		// the ancestral language, a bonus skill proficiency, and advantage on Charisma
+		// checks made to influence hags. Emitted from the CALCULATIONS rather than the
+		// name-keyed registry so the grant follows the stored pick (and so re-picking on
+		// a respec re-derives cleanly) instead of being hard-wired to one option name.
+		if (calculations.hasHagAncestor && calculations.hagAncestorKind && !alreadyProcessed("Hag Ancestor")) {
+			effects.push({
+				type: "language",
+				language: calculations.hagAncestorLanguage,
+				source: "Hag Ancestor",
+			});
+			effects.push({
+				type: "skillProficiency",
+				skill: calculations.hagAncestorSkill,
+				source: "Hag Ancestor",
+			});
+		}
+
+		// Hag Ancestor also grants advantage on Charisma checks to influence hags. This
+		// is independent of the ancestry pick, so it is gated only on the feature.
+		if (calculations.hasHagInfluenceAdvantage && !alreadyProcessed("Hag Ancestor")) {
+			effects.push({
+				type: "modifier",
+				modType: "check:cha:advantage",
+				value: 1,
+				source: "Hag Ancestor",
+				conditional: "on checks made to influence a hag",
+			});
+		}
 
 		// =========================================================
 		// BARD FEATURES
@@ -26416,6 +27169,27 @@ class CharacterSheetState {
 					source: effect.source,
 				};
 				return `${effect.source}: minimum ${effect.minimum} on d20 for ${effect.skill || "proficient"} checks`;
+			}
+
+			case "checkTotalFloor": {
+				// Floor on the TOTAL of a check (Indomitable Might), as opposed to
+				// `skillMinimum` above which floors the d20 die. Only the RULE is stored
+				// here -- never the value -- because the floor is a live ability score that
+				// must follow ASIs, Primal Champion, Wild Shape and item bonuses. Baking a
+				// number at grant time is exactly the class of bug CS-BUG-038 fixed.
+				if (!this._data.rollFloors) this._data.rollFloors = {};
+				if (!this._data.rollFloors.checkTotal) this._data.rollFloors.checkTotal = {};
+				const abl = effect.ability;
+				if (!abl) return null;
+				const includeSaves = Array.isArray(effect.savesInEditions)
+					&& effect.savesInEditions.some(s => String(s).toLowerCase() === String(effect.featureSource || "").toLowerCase());
+				this._data.rollFloors.checkTotal[abl] = {
+					floorFrom: effect.floorFrom || "abilityScore",
+					includeSaves,
+					source: effect.source,
+				};
+				const ablUp = abl.toUpperCase();
+				return `${effect.source}: ${ablUp} check total treated as at least your ${ablUp} score${includeSaves ? " (checks and saves)" : ""}`;
 			}
 
 			case "skillBonus": {
@@ -27049,6 +27823,35 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * The damage profile a weapon actually has for THIS character, after feature-granted
+	 * property changes. Generic seam: a feature that grants (or rewrites) a weapon's
+	 * versatile property registers here rather than mutating the inventory item, so the
+	 * grant survives re-equipping, respec and save/load, and disappears the moment the
+	 * feature does.
+	 *
+	 * Currently the only contributor is Steel Hawk's Nimble Lancer ("Lances have the
+	 * versatile property for you while you're not mounted, dealing 1d8 … with one hand
+	 * and 1d12 … with two").
+	 *
+	 * @param {object} item An inventory item / `attack.sourceItem`.
+	 * @returns {{dmg1: string|null, dmg2: string|null}}
+	 */
+	getEffectiveWeaponDamageProfile (item) {
+		const dmg1 = item?.dmg1 || (item?.damage ? String(item.damage).split(" ")[0] : null) || null;
+		let dmg2 = item?.dmg2 || null;
+
+		// Cheap name gate FIRST — `getNimbleLancerLanceDamage` reaches
+		// `getFeatureCalculations()`, and this helper runs once per rendered weapon row.
+		const name = `${item?.name || ""}`.toLowerCase();
+		if (/\blance\b/.test(name)) {
+			const lance = this.getNimbleLancerLanceDamage(item);
+			if (lance) return {dmg1: lance.oneHanded, dmg2: lance.twoHanded};
+		}
+
+		return {dmg1, dmg2};
+	}
+
+	/**
 	 * Resolve the base damage die for a weapon from its persisted hand count.
 	 * Missing/invalid hand state preserves the legacy one-handed behavior.
 	 *
@@ -27056,12 +27859,13 @@ class CharacterSheetState {
 	 * @returns {string}
 	 */
 	getWeaponDamageDie (item) {
-		const oneHanded = item?.dmg1 || (item?.damage ? String(item.damage).split(" ")[0] : null) || "1d4";
-		if (!item?.dmg2) return oneHanded;
+		const profile = this.getEffectiveWeaponDamageProfile(item);
+		const oneHanded = profile.dmg1 || "1d4";
+		if (!profile.dmg2) return oneHanded;
 
 		const parsedHands = Math.floor(Number(item.handsUsed));
 		const handsUsed = Number.isFinite(parsedHands) && parsedHands >= 1 ? parsedHands : 1;
-		return handsUsed >= 2 ? item.dmg2 : oneHanded;
+		return handsUsed >= 2 ? profile.dmg2 : oneHanded;
 	}
 
 	/**
@@ -31934,15 +32738,35 @@ class CharacterSheetState {
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
 		this._ensureMeteorKnightResources();
-		this._ensureLunarResources();
+		this._ensureSteelHawkResources();
 		this.ensureBloodHunterResources();
 		this.ensureTalentResources();
 		this._ensureChannelDivinityUses();
 		this._ensureWildShapeUses();
 		this._ensureCreationBardUses();
 		this._ensureSorceryPoints();
+		this._ensureLunarSorceryResources();
 		this._ensureZeroHpInterventionUses();
+		this._ensureUmbralFormUses();
 		return [...this._data.resources];
+	}
+
+	/**
+	 * Rage uses granted by a Barbarian class entry. PHB uses 999 as the
+	 * player-facing unlimited sentinel; XPHB and TGTT remain capped at 6.
+	 * @param {object} cls A `_data.classes` entry.
+	 * @returns {number}
+	 */
+	static getRageUsesMaxForClass (cls) {
+		if ((cls?.name || "").toLowerCase() !== "barbarian") return 0;
+		const level = cls?.level || 0;
+		if (level <= 0) return 0;
+		if (level >= 20 && cls?.source !== "XPHB" && cls?.source !== "TGTT") return 999;
+		if (level >= 17) return 6;
+		if (level >= 12) return 5;
+		if (level >= 6) return 4;
+		if (level >= 3) return 3;
+		return 2;
 	}
 
 	/**
@@ -32114,9 +32938,13 @@ class CharacterSheetState {
 	 * directly rather than calling `getFeatureCalculations()`, which would recurse back
 	 * through `getResources()`.
 	 *
-	 * Only ever RAISES the max, and takes the largest contribution across classes. A
-	 * Cleric/Paladin multiclass shares one on-sheet pool, and lowering could clobber a
-	 * homebrew or subclass contribution that legitimately pushed the pool higher.
+	 * The class table is AUTHORITATIVE in both directions (CS-BUG-078). `addFeature`'s
+	 * prose parser reads a use count out of the whole feature description, and the 2014
+	 * Cleric's Channel Divinity text advertises its FUTURE tiers in the same paragraph
+	 * ("Beginning at 6th level, you can use your Channel Divinity twice between rests"),
+	 * so a 2nd-level cleric was minted with a two-use pool. While this method only ever
+	 * RAISED the max, that over-count was permanent. Multiclass is still safe because
+	 * `desiredMax` is the largest contribution across every class the character has.
 	 * @private
 	 */
 	_ensureChannelDivinityUses () {
@@ -32153,8 +32981,8 @@ class CharacterSheetState {
 		// feature text and reset the FEATURE back to its grant-time maximum while the
 		// resource is already correct — and rest restoration reads the feature, so
 		// returning early on the resource alone would silently restore only 2 of 3 uses.
-		const resourceStale = (resource.max ?? 0) < desiredMax;
-		const featureStale = !!feature?.uses && (feature.uses.max ?? 0) < desiredMax;
+		const resourceStale = (resource.max ?? 0) !== desiredMax;
+		const featureStale = !!feature?.uses && (feature.uses.max ?? 0) !== desiredMax;
 		if (!resourceStale && !featureStale) return;
 
 		if (resourceStale) {
@@ -32168,7 +32996,7 @@ class CharacterSheetState {
 		if (feature && !feature.uses) feature.uses = {current: desiredMax, max: desiredMax, per: "short"};
 		if (feature?.uses) {
 			feature.uses.max = desiredMax;
-			feature.uses.current = Math.max(feature.uses.current ?? 0, resource.current ?? 0);
+			feature.uses.current = Math.min(desiredMax, Math.max(feature.uses.current ?? 0, resource.current ?? 0));
 		}
 	}
 
@@ -32364,6 +33192,279 @@ class CharacterSheetState {
 	}
 	// #endregion
 
+	// =========================================================================
+	// Steel Hawk (The Griffon's Saddlebag 2)
+	// =========================================================================
+	// #region steel-hawk
+
+	/**
+	 * Identity predicate for the Steel Hawk Fighter archetype. Source-gated for the
+	 * same reason as Meteor Knight: homebrew subclass short names are not globally
+	 * unique, so every Steel Hawk code path funnels through this one check.
+	 * @param {*} subclass A `_data.classes[].subclass` entry.
+	 * @returns {boolean}
+	 */
+	static isSteelHawkSubclass (subclass) {
+		return (subclass?.shortName || subclass?.name) === "Steel Hawk"
+			&& subclass?.source === "GriffonsSaddlebag2";
+	}
+
+	/** @returns {object|null} The Fighter class entry carrying the Steel Hawk archetype. */
+	_getSteelHawkClass () {
+		return (this._data.classes || []).find(cls =>
+			(cls.name || "").toLowerCase() === "fighter"
+			&& CharacterSheetState.isSteelHawkSubclass(cls.subclass),
+		) || null;
+	}
+
+	/** @returns {boolean} True when the character is a Steel Hawk of at least level 3. */
+	hasSteelHawk () {
+		return (this._getSteelHawkClass()?.level || 0) >= 3;
+	}
+
+	/**
+	 * Reconcile the "Launch" pool (3 uses, 4 from 7th, 5 from 15th; short rest).
+	 *
+	 * Mirrors `_ensureMeteorKnightResources`: derives from the class level directly
+	 * (never `getFeatureCalculations()`, which would recurse back through
+	 * `getResources()`), and preserves the number of expended uses across a max change
+	 * so levelling up hands the player the new headroom without silently refilling.
+	 * @private
+	 */
+	_ensureSteelHawkResources () {
+		const level = this._getSteelHawkClass()?.level || 0;
+		if (level < 3) {
+			this._data.resources = (this._data.resources || []).filter(r =>
+				r.resourceType !== "steelHawkLaunch" && r.resourceType !== "steelHawkImprovedLaunch");
+			return;
+		}
+		const ensure = ({name, max, resourceType, recharge}) => {
+			let resource = this._data.resources.find(r => r.resourceType === resourceType || r.name === name);
+			if (!resource) {
+				resource = {id: CryptUtil.uid(), name, current: max, max, recharge, resourceType};
+				this._data.resources.push(resource);
+				return resource;
+			}
+			const expended = Math.max(0, (resource.max ?? max) - (resource.current ?? resource.max ?? max));
+			resource.name = name;
+			resource.max = max;
+			resource.current = Math.max(0, max - expended);
+			resource.recharge = recharge;
+			resource.resourceType = resourceType;
+			return resource;
+		};
+
+		ensure({
+			name: CharacterSheetState.STEEL_HAWK_LAUNCH_POOL_NAME,
+			max: level >= 15 ? 5 : level >= 7 ? 4 : 3,
+			resourceType: "steelHawkLaunch",
+			recharge: "short",
+		});
+
+		// Improved Launch's "push yourself beyond your normal limits" mode is its own
+		// once-per-rest budget, separate from the Launch pool it also spends.
+		if (level >= 18) {
+			ensure({
+				name: CharacterSheetState.STEEL_HAWK_IMPROVED_LAUNCH_POOL_NAME,
+				max: 1,
+				resourceType: "steelHawkImprovedLaunch",
+				recharge: "short",
+			});
+		} else {
+			this._data.resources = (this._data.resources || []).filter(r => r.resourceType !== "steelHawkImprovedLaunch");
+		}
+	}
+
+	/**
+	 * @param {string} resourceType
+	 * @returns {object|null} A copy of the live pool, or null when absent.
+	 * @private
+	 */
+	_getSteelHawkResource (resourceType) {
+		this._ensureSteelHawkResources();
+		const resource = this._data.resources.find(r => r.resourceType === resourceType);
+		return resource ? {...resource} : null;
+	}
+
+	/** @returns {object|null} A copy of the live Launch pool, or null when not a Steel Hawk. */
+	getLaunchResource () { return this._getSteelHawkResource("steelHawkLaunch"); }
+
+	/** @returns {number} Launch uses remaining before the next short rest. */
+	getLaunchUsesRemaining () { return this.getLaunchResource()?.current ?? 0; }
+
+	/** @returns {number} Maximum Launch uses between rests (3 / 4 at 7th / 5 at 15th). */
+	getLaunchUsesMax () { return this.getLaunchResource()?.max ?? 0; }
+
+	/**
+	 * Set the remaining Launch uses, clamped to [0, max]. Single write path so the
+	 * combat panel, the resource tracker and Predatory Instinct all agree.
+	 * @param {number} n
+	 * @returns {boolean} True when a Launch pool existed and was updated.
+	 */
+	setLaunchUsesRemaining (n) {
+		this._ensureSteelHawkResources();
+		const resource = this._data.resources.find(r => r.resourceType === "steelHawkLaunch");
+		if (!resource) return false;
+		resource.current = Math.max(0, Math.min(Number(n) || 0, resource.max));
+		return true;
+	}
+
+	/**
+	 * Spend one Launch use and arm the momentum rider — the `launchMomentum` active
+	 * state which grants advantage plus a weapon-typed bonus die on the next melee
+	 * weapon attack (and, from Eagle Eye, a 19-20 critical range on it).
+	 *
+	 * `improved` opts into Improved Launch's 90-foot push, which additionally spends
+	 * that feature's own once-per-rest budget and inflicts a level of exhaustion.
+	 *
+	 * @param {{improved?: boolean}} [opts]
+	 * @returns {object|null} A descriptor of the leap, or null when it can't be used.
+	 */
+	useLaunch ({improved = false} = {}) {
+		if (!this.hasSteelHawk()) return null;
+		const calcs = this.getFeatureCalculations();
+		// "You can't use this feature if your speed is 0." `getSpeed()` with no argument
+		// returns a formatted DISPLAY string ("30 ft."), so the numeric walking speed
+		// must be asked for by type.
+		if (this.getSpeed("walk") <= 0) return null;
+		const remaining = this.getLaunchUsesRemaining();
+		if (remaining <= 0) return null;
+
+		let usedImproved = false;
+		if (improved) {
+			if (!this.canUseImprovedLaunch()) return null;
+			const pool = this._data.resources.find(r => r.resourceType === "steelHawkImprovedLaunch");
+			if (pool) pool.current = Math.max(0, (pool.current || 0) - 1);
+			this.addExhaustion(calcs.improvedLaunchExhaustionCost || 1);
+			usedImproved = true;
+		}
+
+		this.setLaunchUsesRemaining(remaining - 1);
+		this.activateState("launchMomentum", {customEffects: this.getLaunchMomentumEffects()});
+
+		return {
+			distance: usedImproved ? (calcs.improvedLaunchDistance || 90) : (calcs.launchDistance || 15),
+			improved: usedImproved,
+			bonusDamage: calcs.launchBonusDamage || "1d8",
+			criticalRange: calcs.launchCriticalRange || 20,
+			fallReduction: usedImproved ? null : (calcs.launchFallReduction || 30),
+			ignoresFallDamage: usedImproved,
+			remaining: this.getLaunchUsesRemaining(),
+		};
+	}
+
+	/**
+	 * The momentum rider's effect list, resolved at activation time because both the
+	 * bonus die and the critical range scale with Fighter level.
+	 * @returns {Array<object>}
+	 */
+	getLaunchMomentumEffects () {
+		const calcs = this.getFeatureCalculations();
+		const effects = [
+			{type: "advantage", target: "attack:melee"},
+			// Damage "of the weapon's type" — left untyped so the damage roller reports
+			// it under the weapon's own type rather than inventing one.
+			{type: "extraDamage", value: calcs.launchBonusDamage || "1d8", damageType: "", meleeOnly: true},
+		];
+		if (calcs.launchCriticalRange && calcs.launchCriticalRange < 20) {
+			effects.push({type: "critRange", value: calcs.launchCriticalRange});
+		}
+		return effects;
+	}
+
+	/** @returns {boolean} True while a spent Launch is still arming the next melee attack. */
+	hasLaunchMomentum () { return this.isStateTypeActive("launchMomentum"); }
+
+	/**
+	 * Improved Launch (18) gate: needs the feature, an unspent once-per-rest use, and
+	 * fewer than two levels of exhaustion ("You can't use this feature in this way if
+	 * you're suffering from two or more levels of exhaustion").
+	 * @returns {boolean}
+	 */
+	canUseImprovedLaunch () {
+		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasImprovedLaunch) return false;
+		if (this.getExhaustion() > (calcs.improvedLaunchMaxExhaustion ?? 1)) return false;
+		const pool = this._getSteelHawkResource("steelHawkImprovedLaunch");
+		return (pool?.current || 0) > 0;
+	}
+
+	/**
+	 * Steel Grace (7): spend a Launch use as a reaction to a Dexterity saving throw for
+	 * an Evasion-shaped result — no damage on a success, half on a failure.
+	 * @param {{success: boolean, damage?: number}} params
+	 * @returns {{damage: number, spent: boolean}|null} null when unavailable.
+	 */
+	useLaunchEvasion ({success, damage = 0} = /** @type {*} */ ({})) {
+		if (!this.getFeatureCalculations().hasLaunchEvasion) return null;
+		const remaining = this.getLaunchUsesRemaining();
+		if (remaining <= 0) return null;
+		this.setLaunchUsesRemaining(remaining - 1);
+		return {damage: success ? 0 : Math.floor((Number(damage) || 0) / 2), spent: true};
+	}
+
+	/**
+	 * Predatory Instinct (15): "when you roll initiative and have no uses of Launch
+	 * remaining, you regain one". Idempotent — a call with uses left is a no-op.
+	 * @returns {number} How many uses were regained (0 or 1).
+	 */
+	restoreLaunchOnInitiative () {
+		if (!this.getFeatureCalculations().hasPredatoryInstinct) return 0;
+		if (this.getLaunchUsesRemaining() > 0) return 0;
+		const refill = this.getFeatureCalculations().predatoryInstinctInitiativeRefill || 1;
+		this.setLaunchUsesRemaining(refill);
+		return refill;
+	}
+
+	/**
+	 * Nimble Lancer (3): the versatile damage profile a lance gains for a Steel Hawk
+	 * while not mounted. Returns null for a non-Steel-Hawk or a non-lance weapon.
+	 * @param {*} attack An attack / weapon descriptor.
+	 * @returns {{oneHanded: string, twoHanded: string}|null}
+	 */
+	getNimbleLancerLanceDamage (attack) {
+		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasNimbleLancer) return null;
+		const name = `${attack?.name || attack?.sourceItem?.name || ""}`.toLowerCase();
+		if (!/\blance\b/.test(name)) return null;
+		return {
+			oneHanded: calcs.nimbleLancerOneHandedDamage || "1d8",
+			twoHanded: calcs.nimbleLancerTwoHandedDamage || "1d12",
+		};
+	}
+
+	/**
+	 * Eagle Eye (10): toggle the sight-based Wisdom (Perception) doubling. Modelled as
+	 * an active state rather than a numeric conditional modifier because
+	 * `getSkillBonusFromStates` is consumed by BOTH the displayed skill modifier and
+	 * the roll total, whereas an opted-in numeric conditional currently moves neither
+	 * (see CS-BUG-065's "genuine follow-up left open").
+	 * @param {boolean} on
+	 * @returns {boolean} True when the toggle was applied.
+	 */
+	setEagleEyeSightActive (on) {
+		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasEagleEye) return false;
+		if (!on) {
+			this.deactivateState("eagleEyeSight");
+			return true;
+		}
+		this.activateState("eagleEyeSight", {
+			// "your proficiency bonus is doubled" — worth nothing on top of existing
+			// expertise, which already doubles it.
+			customEffects: [{
+				type: "bonus",
+				target: "skill:perception",
+				value: this.getSkillProficiency("perception") >= 2 ? 0 : (calcs.eagleEyeSightBonus || 0),
+			}],
+		});
+		return true;
+	}
+
+	/** @returns {boolean} True while Eagle Eye's sight-based Perception doubling is on. */
+	isEagleEyeSightActive () { return this.isStateTypeActive("eagleEyeSight"); }
+	// #endregion
+
 	_ensureShadowKnightResources () {
 		const fighter = this._getShadowKnightClass();
 		const level = fighter?.level || 0;
@@ -32410,433 +33511,6 @@ class CharacterSheetState {
 		resource.current--;
 		return true;
 	}
-
-	// #region Lunar Sorcery (Sorcerer, DSotDQ)
-	/**
-	 * The three Lunar Embodiment phases. Everything phase-dependent in the subclass
-	 * reads this ONE table, so a phase is never re-described at a call site:
-	 *
-	 * - `freeSpell`  the 1st-level Lunar spell Lunar Embodiment lets you cast free,
-	 * - `schools`    the two schools Lunar Boons discounts,
-	 * - `empowerment` the level-14 Lunar Empowerment passive effects,
-	 * - `phenomenon` the level-18 Lunar Phenomenon bonus-action power.
-	 *
-	 * NOTE the phase does NOT gate which spells are known — RAW you learn every
-	 * spell on the Lunar Spells table (all three columns); see FEATURE_SPELL_GRANTS.
-	 * @type {Record<string, *>}
-	 */
-	static LUNAR_PHASES = {
-		"full moon": {
-			key: "full moon",
-			name: "Full Moon",
-			icon: "🌕",
-			stateId: "lunarPhaseFull",
-			freeSpell: {name: "Shield", source: "PHB"},
-			schools: ["A", "D"],
-			schoolNames: ["Abjuration", "Divination"],
-			empowerment: [],
-			empowermentText: "As a bonus action you shed bright light in a 10-foot radius and dim light for an additional 10 feet. You have advantage on Investigation and Perception checks made within that light.",
-			phenomenon: {
-				name: "Full Moon: Blinding Moonlight",
-				text: "Each creature of your choice within 30 feet must succeed on a Constitution saving throw or be Blinded until the end of your next turn. A creature that succeeds is instead healed.",
-				save: "con",
-				condition: "blinded",
-				healDice: "3d8",
-			},
-		},
-		"new moon": {
-			key: "new moon",
-			name: "New Moon",
-			icon: "🌑",
-			stateId: "lunarPhaseNew",
-			freeSpell: {name: "Ray of Sickness", source: "PHB"},
-			schools: ["E", "N"],
-			schoolNames: ["Enchantment", "Necromancy"],
-			empowerment: [
-				{type: "advantage", target: "skill:stealth"},
-				{type: "disadvantage", target: "attacksAgainst", conditional: "While you are entirely within darkness"},
-			],
-			empowermentText: "You have advantage on Stealth checks, and while you are entirely within darkness attack rolls against you have disadvantage.",
-			phenomenon: {
-				name: "New Moon: Devouring Dark",
-				text: "Each creature of your choice within 30 feet must succeed on a Dexterity saving throw or take necrotic damage and have its speed reduced to 0 until the end of your next turn. You then become Invisible until the end of your next turn.",
-				save: "dex",
-				damageDice: "3d10",
-				damageType: "necrotic",
-			},
-		},
-		"crescent moon": {
-			key: "crescent moon",
-			name: "Crescent Moon",
-			icon: "🌙",
-			stateId: "lunarPhaseCrescent",
-			freeSpell: {name: "Color Spray", source: "PHB"},
-			schools: ["I", "T"],
-			schoolNames: ["Illusion", "Transmutation"],
-			// CS-BUG-050: a resistance target MUST be namespaced `damage:<type>` —
-			// a bare damage type is silently inert.
-			empowerment: [
-				{type: "resistance", target: "damage:necrotic"},
-				{type: "resistance", target: "damage:radiant"},
-			],
-			empowermentText: "You have resistance to necrotic and radiant damage.",
-			phenomenon: {
-				name: "Crescent Moon: Moonlit Step",
-				text: "You teleport up to 60 feet to an unoccupied space you can see, bringing one willing creature within 5 feet with you. Until the end of your next turn, you and that creature have resistance to all damage.",
-				teleportFeet: 60,
-			},
-		},
-	};
-
-	/** Normalize any spelling of a phase ("Full Moon", "full", "lunarPhaseFull") to a registry key. */
-	static normalizeLunarPhaseKey (value) {
-		if (!value) return null;
-		const raw = String(typeof value === "object" ? (value.key || value.name || "") : value).trim().toLowerCase();
-		if (!raw) return null;
-		if (CharacterSheetState.LUNAR_PHASES[raw]) return raw;
-		for (const phase of Object.values(CharacterSheetState.LUNAR_PHASES)) {
-			if (phase.stateId.toLowerCase() === raw) return phase.key;
-			if (phase.name.toLowerCase() === raw) return phase.key;
-			// "full" / "new" / "crescent"
-			if (phase.key.split(" ")[0] === raw) return phase.key;
-		}
-		return null;
-	}
-
-	/** The `_data.classes[]` entry carrying the Lunar Sorcery subclass, or null. */
-	_getLunarSorceryClass () {
-		return (this._data.classes || [])
-			.find(cls => CharacterSheetClassUtils.isLunarSorcerySubclass(cls?.subclass)) || null;
-	}
-
-	/**
-	 * Ensure exactly one lunar phase state exists and is active, seeded from the
-	 * `subclassChoice` the wizards recorded.
-	 *
-	 * The persisted `subclassChoice` is only a SEED, never the source of truth: a
-	 * player who switches phase mid-adventure (Waxing and Waning) must not have that
-	 * undone by the next level-up re-reading `subclassChoice`. So this only seeds
-	 * when NO phase is currently active. It also re-derives the level-14 Lunar
-	 * Empowerment `customEffects` on every call, which is what makes the passives
-	 * appear the moment the character reaches 14th level without a re-toggle.
-	 */
-	_ensureLunarPhase () {
-		const cls = this._getLunarSorceryClass();
-		const phaseIds = Object.values(CharacterSheetState.LUNAR_PHASES).map(p => p.stateId);
-
-		if (!cls) {
-			// Subclass removed / respecced away: drop the orphaned phase states.
-			if (Array.isArray(this._data.activeStates) && this._data.activeStates.some(s => phaseIds.includes(s.stateTypeId))) {
-				this._data.activeStates = this._data.activeStates.filter(s => !phaseIds.includes(s.stateTypeId) && s.stateTypeId !== "lunarMoonlight");
-			}
-			return;
-		}
-
-		if (!Array.isArray(this._data.activeStates)) this._data.activeStates = [];
-
-		const hasEmpowerment = (cls.level || 0) >= 14;
-		let active = this._data.activeStates.find(s => phaseIds.includes(s.stateTypeId) && s.active);
-
-		if (!active) {
-			const seedKey = CharacterSheetState.normalizeLunarPhaseKey(cls.subclassChoice) || "full moon";
-			this.setLunarPhase(seedKey, {free: true});
-			active = this._data.activeStates.find(s => phaseIds.includes(s.stateTypeId) && s.active);
-		}
-
-		// Re-derive the level-gated Empowerment effects for EVERY phase state (not
-		// just the active one) — toggling an inactive phase back on only flips
-		// `active` and never re-derives.
-		for (const st of this._data.activeStates) {
-			if (!phaseIds.includes(st.stateTypeId)) continue;
-			const phase = Object.values(CharacterSheetState.LUNAR_PHASES).find(p => p.stateId === st.stateTypeId);
-			st.customEffects = hasEmpowerment ? phase.empowerment.map(e => ({...e})) : [];
-		}
-		if (!hasEmpowerment) {
-			this._data.activeStates = this._data.activeStates.filter(s => s.stateTypeId !== "lunarMoonlight");
-		}
-	}
-
-	/**
-	 * The live lunar phase.
-	 * @returns {*|null} `{key, name, icon, stateId, freeSpell, schools, schoolNames, ...}` or null.
-	 */
-	getLunarPhase () {
-		if (!this._getLunarSorceryClass()) return null;
-		this._ensureLunarPhase();
-		const active = (this._data.activeStates || [])
-			.find(s => s.active && Object.values(CharacterSheetState.LUNAR_PHASES).some(p => p.stateId === s.stateTypeId));
-		if (!active) return null;
-		const phase = Object.values(CharacterSheetState.LUNAR_PHASES).find(p => p.stateId === active.stateTypeId);
-		return phase ? {...phase} : null;
-	}
-
-	/**
-	 * Switch the lunar phase. THE single mutator.
-	 *
-	 * @param {string} phaseKey Any accepted spelling (see normalizeLunarPhaseKey).
-	 * @param {object} [opts]
-	 * @param {boolean} [opts.free] Skip the sorcery-point cost (long rest / initial seed).
-	 * @param {boolean} [opts.bonusAction] Waxing and Waning: spend 1 sorcery point.
-	 * @returns {{success: boolean, reason?: string, phase?: *, sorceryPointsSpent?: number}}
-	 */
-	setLunarPhase (phaseKey, {free = false, bonusAction = false} = {}) {
-		const cls = this._getLunarSorceryClass();
-		if (!cls) return {success: false, reason: "Not a Lunar Sorcery sorcerer"};
-		const key = CharacterSheetState.normalizeLunarPhaseKey(phaseKey);
-		if (!key) return {success: false, reason: `Unknown lunar phase "${phaseKey}"`};
-		const phase = CharacterSheetState.LUNAR_PHASES[key];
-
-		let spent = 0;
-		if (bonusAction && !free) {
-			if ((cls.level || 0) < 6) return {success: false, reason: "Waxing and Waning requires 6th level"};
-			const sp = this.getSorceryPoints();
-			if ((sp?.current || 0) < 1) return {success: false, reason: "Requires 1 sorcery point"};
-			if (!this.useSorceryPoint(1)) return {success: false, reason: "Requires 1 sorcery point"};
-			spent = 1;
-		}
-
-		// Belt-and-braces: `ACTIVE_STATE_TYPES` already declares `exclusiveWith` for all
-		// three phases, so this loop is REDUNDANT — falsification confirmed that
-		// disabling either site alone leaves the suite green, and only disabling BOTH
-		// turns it red (9 assertion failures). It is kept because the seed path runs
-		// before any UI and must be deterministic regardless of registry edits.
-		for (const other of Object.values(CharacterSheetState.LUNAR_PHASES)) {
-			if (other.stateId !== phase.stateId) this.deactivateState(other.stateId);
-		}
-		this.deactivateState("lunarMoonlight");
-		this.activateState(phase.stateId, {
-			customEffects: (cls.level || 0) >= 14 ? phase.empowerment.map(e => ({...e})) : [],
-		});
-		cls.subclassChoice = phase.name;
-		return {success: true, phase: {...phase}, sorceryPointsSpent: spent};
-	}
-
-	/**
-	 * Lunar Embodiment / Waxing and Waning free casts.
-	 *
-	 * Lunar Embodiment gives ONE free cast of the current phase's 1st-level Lunar
-	 * spell per long rest. Waxing and Waning (6th) upgrades that to one free cast
-	 * PER PHASE, so the pool is tracked per phase rather than as a single counter —
-	 * otherwise switching phase would let you re-spend the same charge.
-	 * @returns {Array<{phase: string, phaseName: string, spell: *, used: boolean, available: boolean, reason: string|null}>}
-	 */
-	getLunarFreeCasts () {
-		const cls = this._getLunarSorceryClass();
-		if (!cls) return [];
-		const level = cls.level || 0;
-		const subclassLevel = CharacterSheetState._isOneEditionSubclass(cls.subclass) ? 3 : 1;
-		if (level < subclassLevel) return [];
-
-		const perPhase = level >= 6;
-		const current = this.getLunarPhase();
-		const used = new Set(this._data.lunarEmbodiment?.usedPhases || []);
-
-		return Object.values(CharacterSheetState.LUNAR_PHASES).map(phase => {
-			const isUsed = used.has(phase.key);
-			const isCurrent = current?.key === phase.key;
-			const reason = isUsed
-				? "Already used — regained on a long rest"
-				: (!perPhase && !isCurrent)
-					? "Only your current phase's spell is free before 6th level"
-					: null;
-			return {
-				phase: phase.key,
-				phaseName: phase.name,
-				spell: {...phase.freeSpell},
-				used: isUsed,
-				available: !reason,
-				reason,
-			};
-		});
-	}
-
-	/**
-	 * Spend a Lunar Embodiment free cast.
-	 * @param {string} [phaseKey] Defaults to the current phase.
-	 * @returns {{success: boolean, reason?: string, spell?: *, phase?: string}}
-	 */
-	useLunarFreeCast (phaseKey = null) {
-		const key = CharacterSheetState.normalizeLunarPhaseKey(phaseKey) || this.getLunarPhase()?.key;
-		if (!key) return {success: false, reason: "No lunar phase active"};
-		const entry = this.getLunarFreeCasts().find(it => it.phase === key);
-		if (!entry) return {success: false, reason: "Lunar Embodiment is not available"};
-		if (!entry.available) return {success: false, reason: entry.reason};
-
-		if (!this._data.lunarEmbodiment) this._data.lunarEmbodiment = {usedPhases: []};
-		if (!Array.isArray(this._data.lunarEmbodiment.usedPhases)) this._data.lunarEmbodiment.usedPhases = [];
-		this._data.lunarEmbodiment.usedPhases.push(key);
-		return {success: true, spell: {...entry.spell}, phase: key};
-	}
-
-	_ensureLunarResources () {
-		// Reconcile the phase here too, not just from the Lunar calculation branch:
-		// `getResources()` is the one entry point that runs for EVERY character, so
-		// this is what tears the phase states down when the subclass is swapped away.
-		this._ensureLunarPhase();
-		const cls = this._getLunarSorceryClass();
-		const level = cls?.level || 0;
-		const drop = (type) => { this._data.resources = this._data.resources.filter(r => r.resourceType !== type); };
-
-		if (level < 6) drop("lunarBoons");
-		else {
-			const max = this.getProficiencyBonus();
-			let resource = this._data.resources.find(r => r.resourceType === "lunarBoons");
-			if (!resource) {
-				resource = {id: CryptUtil.uid(), name: "Lunar Boons", current: max, max, recharge: "long", resourceType: "lunarBoons"};
-				this._data.resources.push(resource);
-			} else {
-				const expended = Math.max(0, (resource.max ?? max) - (resource.current ?? resource.max ?? max));
-				resource.max = max;
-				resource.current = Math.max(0, max - expended);
-				resource.recharge = "long";
-			}
-		}
-
-		if (level < 18) drop("lunarPhenomenon");
-		else {
-			const max = Object.keys(CharacterSheetState.LUNAR_PHASES).length;
-			let resource = this._data.resources.find(r => r.resourceType === "lunarPhenomenon");
-			if (!resource) {
-				resource = {id: CryptUtil.uid(), name: "Lunar Phenomenon", current: max, max, recharge: "long", resourceType: "lunarPhenomenon"};
-				this._data.resources.push(resource);
-			} else {
-				const expended = Math.max(0, (resource.max ?? max) - (resource.current ?? resource.max ?? max));
-				resource.max = max;
-				resource.current = Math.max(0, max - expended);
-				resource.recharge = "long";
-			}
-		}
-	}
-
-	getLunarBoonsResource () {
-		this._ensureLunarResources();
-		const resource = this._data.resources.find(r => r.resourceType === "lunarBoons");
-		return resource ? {...resource} : null;
-	}
-
-	getLunarPhenomenonResource () {
-		this._ensureLunarResources();
-		const resource = this._data.resources.find(r => r.resourceType === "lunarPhenomenon");
-		return resource ? {...resource} : null;
-	}
-
-	/**
-	 * Lunar Boons: metamagic applied to a spell of one of the current phase's two
-	 * schools costs 1 sorcery point less (minimum 0), a number of times per long
-	 * rest equal to your proficiency bonus.
-	 *
-	 * Pure and side-effect free so the discount is testable independently of which
-	 * metamagic catalogue is in play — {@link getMetamagicCost} only knows
-	 * `TGTT_METAMAGIC`, a pre-existing gap this deliberately does not inherit.
-	 *
-	 * @param {number} baseCost
-	 * @param {string} school A one-letter 5etools school code, or a school name.
-	 * @returns {{cost: number, discounted: boolean, saved: number, phase: string|null, reason: string|null}}
-	 */
-	getLunarBoonsDiscountedCost (baseCost, school) {
-		const base = Number(baseCost);
-		const none = (reason) => ({cost: base, discounted: false, saved: 0, phase: null, reason});
-		if (!Number.isFinite(base)) return none("No base cost");
-
-		const cls = this._getLunarSorceryClass();
-		if (!cls || (cls.level || 0) < 6) return none(null);
-		const phase = this.getLunarPhase();
-		if (!phase) return none("No lunar phase active");
-
-		const code = CharacterSheetState._normalizeSpellSchoolCode(school);
-		if (!code || !phase.schools.includes(code)) {
-			return {...none(`Lunar Boons applies to ${phase.schoolNames.join(" and ")} spells`), phase: phase.key};
-		}
-		const resource = this.getLunarBoonsResource();
-		if (!resource || resource.current <= 0) {
-			return {...none("No Lunar Boons uses remain"), phase: phase.key};
-		}
-		if (base <= 0) return {...none(null), phase: phase.key};
-
-		return {cost: Math.max(0, base - 1), discounted: true, saved: 1, phase: phase.key, reason: null};
-	}
-
-	/** Spend one Lunar Boons use. Call this only when a discounted metamagic is actually applied. */
-	consumeLunarBoon () {
-		this._ensureLunarResources();
-		const resource = this._data.resources.find(r => r.resourceType === "lunarBoons");
-		if (!resource || resource.current <= 0) return false;
-		resource.current--;
-		return true;
-	}
-
-	/** Map a school name or code to the one-letter 5etools code. */
-	static _normalizeSpellSchoolCode (school) {
-		if (!school) return null;
-		const raw = String(school).trim();
-		if (raw.length === 1) return raw.toUpperCase();
-		const byName = {
-			abjuration: "A",
-			conjuration: "C",
-			divination: "D",
-			enchantment: "E",
-			evocation: "V",
-			illusion: "I",
-			necromancy: "N",
-			transmutation: "T",
-		};
-		return byName[raw.toLowerCase()] || null;
-	}
-
-	/**
-	 * Lunar Phenomenon (18th): once per long rest per phase, as a bonus action,
-	 * produce the current phase's effect. You may also produce it again by spending
-	 * 5 sorcery points.
-	 * @param {object} [opts]
-	 * @param {boolean} [opts.spendSorceryPoints] Force the 5-sorcery-point route.
-	 * @returns {{success: boolean, reason?: string, phenomenon?: *, saveDc?: number, sorceryPointsSpent?: number}}
-	 */
-	useLunarPhenomenon ({spendSorceryPoints = false} = {}) {
-		const cls = this._getLunarSorceryClass();
-		if (!cls) return {success: false, reason: "Not a Lunar Sorcery sorcerer"};
-		if ((cls.level || 0) < 18) return {success: false, reason: "Lunar Phenomenon requires 18th level"};
-		const phase = this.getLunarPhase();
-		if (!phase) return {success: false, reason: "No lunar phase active"};
-
-		const used = new Set(this._data.lunarPhenomenon?.usedPhases || []);
-		const freeAvailable = !used.has(phase.key);
-
-		let spent = 0;
-		if (freeAvailable && !spendSorceryPoints) {
-			this._ensureLunarResources();
-			const resource = this._data.resources.find(r => r.resourceType === "lunarPhenomenon");
-			if (resource && resource.current > 0) resource.current--;
-			if (!this._data.lunarPhenomenon) this._data.lunarPhenomenon = {usedPhases: []};
-			if (!Array.isArray(this._data.lunarPhenomenon.usedPhases)) this._data.lunarPhenomenon.usedPhases = [];
-			this._data.lunarPhenomenon.usedPhases.push(phase.key);
-		} else {
-			const sp = this.getSorceryPoints();
-			if ((sp?.current || 0) < 5) return {success: false, reason: "Requires 5 sorcery points"};
-			if (!this.useSorceryPoint(5)) return {success: false, reason: "Requires 5 sorcery points"};
-			spent = 5;
-		}
-
-		return {
-			success: true,
-			phenomenon: {...phase.phenomenon, phase: phase.key, phaseName: phase.name},
-			saveDc: this.getSpellSaveDC("Sorcerer"),
-			sorceryPointsSpent: spent,
-		};
-	}
-
-	/** Restore every Lunar Sorcery per-long-rest track. Called from {@link onLongRest}. */
-	resetLunarSorceryOnLongRest () {
-		if (!this._getLunarSorceryClass()) return;
-		this._data.lunarEmbodiment = {usedPhases: []};
-		this._data.lunarPhenomenon = {usedPhases: []};
-		this._ensureLunarResources();
-	}
-
-	/** True when the 2024 (XPHB / "one") chassis is in play, which moves subclass entry to level 3. */
-	static _isOneEditionSubclass (subclass) {
-		return subclass?.edition === "one" || subclass?.classSource === "XPHB" || subclass?.source === "XPHB";
-	}
-	// #endregion
 
 	useShadowbite ({hadAttackAdvantage = false} = {}) {
 		const calc = this.getFeatureCalculations();
@@ -36708,9 +37382,35 @@ class CharacterSheetState {
 			return types.some(ft => typeof ft === "string" && prefixes.some(p => ft.startsWith(p)));
 		};
 
+		// A species / background / feat trait can legitimately share a NAME with a
+		// combat method — Centaur's "Charge" and Kender's "Taunt" both collide with
+		// TGTT methods, and a homebrew race carrying the same source matches on
+		// name + source alone. Such a trait is not a combat method: stamping it made
+		// it surface in the Combat Methods UI under a tradition the character never
+		// took, with a stamina cost attached. Only reclassify a feature that is
+		// either already recognised as a combat method (it carries CTM markers) or
+		// is not tagged as belonging to another entity kind.
+		const FOREIGN_ORIGIN_TYPES = /^(species|race|subrace|lineage|background|feat)$/i;
+		const isForeignOrigin = (/** @type {*} */ feature) => {
+			const types = Array.isArray(feature.featureType)
+				? feature.featureType
+				: (feature.featureType ? [feature.featureType] : []);
+			return types.some(ft => typeof ft === "string" && FOREIGN_ORIGIN_TYPES.test(ft));
+		};
+
 		for (const f of this._data.features) {
 			// Never reclassify a Battle Tactic / Arcane Shot optionalfeature as a combat method.
 			if (hasTypePrefix(f, ["BT", "AS"])) continue;
+
+			if (isForeignOrigin(f) && !hasTypePrefix(f, ["CTM:"])) {
+				// Repair saves already mis-stamped by an earlier run of this pass:
+				// undo exactly the fields it writes, so the pass is its own inverse.
+				if (f._entityType === "combatMethod") delete f._entityType;
+				delete f.tradition;
+				delete f.degree;
+				delete f.staminaCost;
+				continue;
+			}
 
 			const name = (f.name || "").toLowerCase();
 			const source = (f.source || "").toLowerCase();
@@ -37705,6 +38405,7 @@ class CharacterSheetState {
 						uses: spell.uses,
 						recharge: spell.recharge || "long",
 						ability: invocationAbility || spell.ability,
+						ritualOnly: spell.ritualOnly,
 					}));
 				} else {
 					this.addInnateSpell({
@@ -37716,6 +38417,8 @@ class CharacterSheetState {
 						recharge: spell.recharge || "long",
 						sourceFeature: feature.name,
 						spellcastingAbility: invocationAbility || spell.ability,
+						ritualOnly: spell.ritualOnly,
+						ritual: spell.ritualOnly || undefined,
 					});
 				}
 			} else if (spell.level === 0) {
@@ -45168,7 +45871,8 @@ class CharacterSheetState {
 			disadvantage: false,
 			removeAdvantage: false,
 			removeDisadvantage: false,
-			minimum: null, // Minimum roll result (Reliable Talent)
+			minimum: null, // Minimum d20 ROLL result (Reliable Talent)
+			totalMinimum: null, // Minimum final TOTAL (Indomitable Might) -- distinct from `minimum`
 			maximum: null, // Maximum roll result
 			setValue: null, // Override with set value
 			multiplier: 1, // Result multiplier
@@ -45316,6 +46020,32 @@ class CharacterSheetState {
 			}
 		}
 
+		// Apply TOTAL floors (e.g. Indomitable Might: "if your total for a Strength check
+		// is less than your Strength score, you can use that score in place of the total").
+		// Emitted on `check:<abl>` / `save:<abl>`, which is the chokepoint all three roll
+		// handlers already aggregate -- a Strength SKILL check aggregates `check:str` too
+		// (charactersheet.js `checkType`), so Athletics is covered without a second rule,
+		// and a skill whose ability has been swapped away from STR correctly stops matching.
+		if (this._data.rollFloors?.checkTotal) {
+			const parts = type.split(":");
+			const category = parts[0];
+			const specific = parts[1];
+			if ((category === "check" || category === "save") && specific) {
+				const floor = this._data.rollFloors.checkTotal[specific];
+				// 2014 wording covers checks only; 2024 adds saving throws.
+				if (floor && (category === "check" || floor.includeSaves)) {
+					// Read LIVE so the floor tracks ASIs / Primal Champion / Wild Shape.
+					const floorVal = floor.floorFrom === "abilityScore" ? this.getAbilityScore(specific) : null;
+					if (Number.isFinite(floorVal)) {
+						result.totalMinimum = result.totalMinimum == null ? floorVal : Math.max(result.totalMinimum, floorVal);
+						if (floor.source && !result.sources.includes(floor.source)) {
+							result.sources.push(floor.source);
+						}
+					}
+				}
+			}
+		}
+
 		// Apply roll floors granted by active states (e.g. the Cat Zodiac Form:
 		// "treat a d20 of 7 or lower as 8" on Perception/Stealth/Acrobatics).
 		// Sourcing these from active-state effects means they auto-clear when the
@@ -45428,7 +46158,16 @@ class CharacterSheetState {
 			const builtInEffects = stateType?.effects || [];
 			// Also check custom effects on the state instance
 			const customEffects = state.customEffects || [];
-			const allEffects = [...builtInEffects, ...customEffects];
+			// …and the supplemental effects a state derives at runtime. These are the
+			// effects a state cannot declare statically because they depend on class
+			// level or a runtime flag (Juggernaut rage immunities, Wrath of the Sea,
+			// the Lunar Sorcery phases). `getActiveStateEffects()` — the canonical
+			// collector — has always included them; this loop hand-rolls its own
+			// collection and silently dropped them, so an advantage granted through
+			// the supplemental hook reached `getResistances()` but never
+			// `getAdvantageState()`.
+			const supplementalEffects = this._getSupplementalActiveStateEffects(state.stateTypeId, state) || [];
+			const allEffects = [...builtInEffects, ...customEffects, ...supplementalEffects];
 			if (allEffects.length === 0) return;
 
 			const stateName = state.name || stateType?.name || state.stateTypeId;
@@ -45503,6 +46242,15 @@ class CharacterSheetState {
 		if (targetParts[0] === "check" && typeParts[0] === "skill") {
 			const skillAbility = this.getSkillAbility(typeParts[1]);
 			return targetParts[1] === "all" || targetParts[1] === skillAbility;
+		}
+
+		// Hierarchical attack targets, matching `hasAdvantageFromStates` (the path the
+		// actual attack roll takes). A less specific effect target ("attack:melee")
+		// applies to a more specific query ("attack:melee:str") and vice versa. Without
+		// this the two advantage aggregators disagreed: a state granting advantage on
+		// melee attacks moved the roll but reported `advantage: false` here.
+		if (targetParts[0] === "attack" && typeParts[0] === "attack") {
+			if (type.startsWith(`${effectTarget}:`) || effectTarget.startsWith(`${type}:`)) return true;
 		}
 
 		// "all" matches
@@ -46364,60 +47112,22 @@ class CharacterSheetState {
 			detectPatterns: ["^unearthly countenance$"],
 			activationAction: "bonus",
 		},
-		lunarPhaseFull: {
-			id: "lunarPhaseFull",
-			name: "Full Moon",
-			icon: "🌕",
-			description: "Lunar Embodiment: Full Moon. Free cast of Shield; Lunar Boons discounts Abjuration and Divination; at 14th level you shed 10 ft bright / 10 ft dim light and have advantage on Investigation and Perception within it.",
-			effects: [],
-			duration: "Until you change phase or finish a long rest",
-			endConditions: ["You change lunar phase"],
-			detectPatterns: ["^full moon$"],
-			activationAction: "free",
-			exclusiveWith: ["lunarPhaseNew", "lunarPhaseCrescent"],
-			preferCuratedEffects: true,
-		},
-		lunarPhaseNew: {
-			id: "lunarPhaseNew",
-			name: "New Moon",
-			icon: "🌑",
-			description: "Lunar Embodiment: New Moon. Free cast of Ray of Sickness; Lunar Boons discounts Enchantment and Necromancy; at 14th level you have advantage on Stealth, and attacks against you have disadvantage while you are entirely within darkness.",
-			effects: [],
-			duration: "Until you change phase or finish a long rest",
-			endConditions: ["You change lunar phase"],
-			detectPatterns: ["^new moon$"],
-			activationAction: "free",
-			exclusiveWith: ["lunarPhaseFull", "lunarPhaseCrescent"],
-			preferCuratedEffects: true,
-		},
-		lunarPhaseCrescent: {
-			id: "lunarPhaseCrescent",
-			name: "Crescent Moon",
-			icon: "🌙",
-			description: "Lunar Embodiment: Crescent Moon. Free cast of Color Spray; Lunar Boons discounts Illusion and Transmutation; at 14th level you have resistance to necrotic and radiant damage.",
-			effects: [],
-			duration: "Until you change phase or finish a long rest",
-			endConditions: ["You change lunar phase"],
-			detectPatterns: ["^crescent moon$"],
-			activationAction: "free",
-			exclusiveWith: ["lunarPhaseFull", "lunarPhaseNew"],
-			preferCuratedEffects: true,
-		},
-		lunarMoonlight: {
-			id: "lunarMoonlight",
-			name: "Lunar Moonlight",
-			icon: "💡",
-			description: "Full Moon empowerment: you shed bright light in a 10-foot radius and dim light for an additional 10 feet, and have advantage on Investigation and Perception checks made within that light.",
+		flyMyPretty: {
+			id: "flyMyPretty",
+			name: "Fly, My Pretty",
+			icon: "🧹",
+			description: "Riding your enchanted object: 60-foot flying speed (hover); you can't be charmed or frightened.",
 			effects: [
-				{type: "advantage", target: "skill:investigation", conditional: "For checks made within your moonlight"},
-				{type: "advantage", target: "skill:perception", conditional: "For checks made within your moonlight"},
+				{type: "bonus", target: "speed:fly", value: 60},
+				{type: "conditionImmunity", target: "charmed"},
+				{type: "conditionImmunity", target: "frightened"},
 			],
-			duration: "Until you dismiss it or change phase",
-			endConditions: ["You change lunar phase", "Dismissed"],
-			detectPatterns: ["^lunar moonlight$"],
+			duration: "While riding the enchanted object",
+			endConditions: ["You dismount", "The command word is spoken again", "You enchant a different object"],
+			// No resource: the enchantment is the long-rest cost, and mounting is free
+			// thereafter. Speaking the command word is an action or a bonus action.
+			detectPatterns: ["^fly, my pretty$"],
 			activationAction: "bonus",
-			requiresStates: ["lunarPhaseFull"],
-			preferCuratedEffects: true,
 		},
 		resoluteStance: {
 			id: "resoluteStance",
@@ -46758,6 +47468,129 @@ class CharacterSheetState {
 			resourceName: "Sorcery Points",
 			resourceCost: 6,
 		},
+		innateSorcery: {
+			id: "innateSorcery",
+			name: "Innate Sorcery",
+			icon: "✨",
+			description: "Your Sorcerer spell save DC increases by 1 and you have Advantage on the attack rolls of Sorcerer spells you cast.",
+			// Curated: the prose parser turns "the spell save DC of your Sorcerer spells
+			// increases by 1" into nothing usable, and the advantage clause is scoped to
+			// spell attacks specifically (not all attacks).
+			preferCuratedEffects: true,
+			effects: [
+				{type: "bonus", target: "spellDc", value: 1},
+				{type: "advantage", target: "attack:spell"},
+			],
+			duration: "1 minute",
+			endConditions: ["Duration expires", "You end it (no action)"],
+			activationAction: "bonus",
+			resourceName: "Innate Sorcery",
+			resourceCost: 1,
+		},
+		umbralFormRhw: {
+			id: "umbralFormRhw",
+			// Name-detection would send RHW's "Umbral Form" to the XGE `umbralForm` state
+			// above, which is a 6-Sorcery-Point, 1-minute, self-activated toggle. The RHW
+			// capstone has a completely different economy (see `activateUmbralForm`), so it
+			// is reached only through the name+source override in `detectActivatableFeature`.
+			noNameDetect: true,
+			name: "Umbral Form",
+			icon: "🌑",
+			description: "While Innate Sorcery is active you are a shadowy form: Resistance to all damage except Force and Radiant, and you can move through creatures and objects as Difficult Terrain (taking 1d10 Force damage if you end your turn inside one).",
+			// CS-BUG-050: curated, explicitly `damage:`-namespaced resistances. Identical set
+			// to the XGE form — both exclude Force AND Radiant.
+			preferCuratedEffects: true,
+			effects: [
+				{type: "resistance", target: "damage:acid"},
+				{type: "resistance", target: "damage:bludgeoning"},
+				{type: "resistance", target: "damage:cold"},
+				{type: "resistance", target: "damage:fire"},
+				{type: "resistance", target: "damage:lightning"},
+				{type: "resistance", target: "damage:necrotic"},
+				{type: "resistance", target: "damage:piercing"},
+				{type: "resistance", target: "damage:poison"},
+				{type: "resistance", target: "damage:psychic"},
+				{type: "resistance", target: "damage:slashing"},
+				{type: "resistance", target: "damage:thunder"},
+				{type: "info", label: "Incorporeal Movement: move through creatures and objects as Difficult Terrain; 1d10 Force damage if you end your turn inside one."},
+			],
+			requiresStates: ["innateSorcery"],
+			duration: "While Innate Sorcery is active",
+			endConditions: ["Innate Sorcery ends", "You end it (no action)"],
+			activationAction: "free",
+		},
+		crownOfSpellfire: {
+			id: "crownOfSpellfire",
+			name: "Crown of Spellfire",
+			icon: "👑",
+			description: "Your altered Innate Sorcery crowns you in spellfire: you gain a 60-foot Fly Speed and can hover, you have Spell Avoidance (no damage on a successful save against a save-for-half effect, half on a failure), and once per turn when you take damage you can use Burning Life Force to expend Hit Point Dice and reduce it.",
+			// CS-BUG-050: use a curated, explicit flySpeed effect. Prose-parsing
+			// "you gain a Fly Speed of 60 feet" is unreliable, so pin the value.
+			preferCuratedEffects: true,
+			effects: [
+				{type: "flySpeed", value: 60},
+			],
+			duration: "1 minute",
+			endConditions: ["Innate Sorcery ends", "Duration expires", "You are incapacitated", "You die"],
+			activationAction: "bonus",
+			// The base use rides on Innate Sorcery; restoring a spent use costs 5 SP
+			// (handled by restoreCrownOfSpellfire), so activation itself is free.
+			resourceCost: 0,
+		},
+		/*
+		 * Lunar Sorcery (DSotDQ Sorcerer) — the three Lunar Embodiment phases.
+		 *
+		 * These are NOT ordinary player-flipped toggles. Exactly one is active at all
+		 * times while the subclass is online, and the single writer is
+		 * `setLunarPhase()`; the Combat-tab Lunar Sorcery panel owns the UI (the
+		 * metamagic-dashboard precedent). `noNameDetect` therefore matters twice over:
+		 * without it the "Lunar Embodiment" feature would be name-detected into a
+		 * generic activatable row that flips the state behind the phase API's back
+		 * (CS-BUG-083).
+		 *
+		 * `effects: []` is deliberate. Everything a phase grants is LEVEL-GATED behind
+		 * Lunar Empowerment (14), and two of the three grants are further gated on a
+		 * runtime flag (moonlight shed / standing in darkness), so the live list is
+		 * produced by `_getSupplementalActiveStateEffects` instead — which reads stored
+		 * class data only and never `getFeatureCalculations()`, keeping it out of the
+		 * `getSpeed → getActiveStateEffects → getFeatureCalculations → getSpeed` cycle.
+		 */
+		lunarPhaseFull: {
+			id: "lunarPhaseFull",
+			noNameDetect: true,
+			name: "Full Moon",
+			icon: "🌕",
+			description: "Your Lunar Embodiment manifests as the Full Moon: abjuration and divination spells are attuned to your Lunar Boons. At 14th level you can shed moonlight, granting advantage on Investigation and Perception checks inside it.",
+			effects: [],
+			duration: "Until you change phase",
+			endConditions: ["You change your Lunar Embodiment phase"],
+			activationAction: "free",
+			exclusiveWith: ["lunarPhaseNew", "lunarPhaseCrescent"],
+		},
+		lunarPhaseNew: {
+			id: "lunarPhaseNew",
+			noNameDetect: true,
+			name: "New Moon",
+			icon: "🌑",
+			description: "Your Lunar Embodiment manifests as the New Moon: enchantment and necromancy spells are attuned to your Lunar Boons. At 14th level you have advantage on Stealth checks, and attack rolls have disadvantage against you while you are entirely in darkness.",
+			effects: [],
+			duration: "Until you change phase",
+			endConditions: ["You change your Lunar Embodiment phase"],
+			activationAction: "free",
+			exclusiveWith: ["lunarPhaseFull", "lunarPhaseCrescent"],
+		},
+		lunarPhaseCrescent: {
+			id: "lunarPhaseCrescent",
+			noNameDetect: true,
+			name: "Crescent Moon",
+			icon: "🌒",
+			description: "Your Lunar Embodiment manifests as the Crescent Moon: illusion and transmutation spells are attuned to your Lunar Boons. At 14th level you have resistance to necrotic and radiant damage.",
+			effects: [],
+			duration: "Until you change phase",
+			endConditions: ["You change your Lunar Embodiment phase"],
+			activationAction: "free",
+			exclusiveWith: ["lunarPhaseFull", "lunarPhaseNew"],
+		},
 		astralArms: {
 			id: "astralArms",
 			name: "Arms of the Astral Self",
@@ -46972,6 +47805,40 @@ class CharacterSheetState {
 			requiresClass: "rogue",
 			requiresClassLevel: 3,
 			consumeOnAttack: true, // Deactivate advantage after next attack roll (speed stays 0)
+		},
+		// ===== STEEL HAWK (The Griffon's Saddlebag 2) =====
+		launchMomentum: {
+			id: "launchMomentum",
+			name: "Launch Momentum",
+			icon: "🦅",
+			description: "You are mid-leap: your next melee weapon attack has advantage and deals an extra weapon-typed die (and, from Eagle Eye, crits on 19-20).",
+			// Placeholder defaults. `useLaunch()` always activates the state with
+			// `customEffects` from `getLaunchMomentumEffects()`, because both the die and
+			// the critical range scale with Fighter level.
+			effects: [
+				{type: "advantage", target: "attack:melee"},
+				{type: "extraDamage", value: "1d8", damageType: "", meleeOnly: true},
+			],
+			duration: "Until your next melee weapon attack",
+			endConditions: ["Make an attack"],
+			activationAction: "bonus",
+			consumeOnAttack: true,
+			// "Launch Momentum" is a synthetic label with no matching feature name; the
+			// real feature is called Launch, which is far too generic a word to name-match.
+			noNameDetect: true,
+		},
+		eagleEyeSight: {
+			id: "eagleEyeSight",
+			name: "Eagle Eye (Sight)",
+			icon: "👁️‍🗨️",
+			description: "Your proficiency bonus is doubled for Wisdom (Perception) checks that rely on sight.",
+			// Replaced at activation time by `setEagleEyeSightActive()` with the live
+			// proficiency bonus.
+			effects: [{type: "bonus", target: "skill:perception", value: 0}],
+			duration: "While the check relies on sight",
+			endConditions: ["The check does not rely on sight"],
+			activationAction: "free",
+			noNameDetect: true,
 		},
 		// ===== RACE TRAIT ACTIVATABLE STATES =====
 		shellDefense: {
@@ -48097,6 +48964,24 @@ class CharacterSheetState {
 		"channel divinity: destructive wrath": "ability",
 		"blood maledict": "passive",
 
+		// === Wicked Witch (Ar8 Sorcerer, TGTT chassis) ===
+		// Granny's Gifts is half an always-prepared spell ladder (generic) and half a
+		// long-rest ward you point at yourself or an ally — a click, not a toggle. Its
+		// Use button is wired by name in charactersheet.js (_pUseGrannysGifts).
+		"granny's gifts": "ability",
+		// Hag Ancestor is a one-time ancestry pick whose grants are all passive; without
+		// this its "you have advantage on Charisma checks…" phrasing reads as a toggle.
+		"hag ancestor": "passive",
+		// A reaction that spends a variable number of Sorcery Points computed from the
+		// reflected spell's level and school — routed as an "ability" so it gets a Use
+		// button that can prompt for both (_pUseCleverLittleWitch).
+		"clever little witch": "ability",
+		// Two separate activations (recall-cast and 2-SP duplicates) behind one button.
+		"coven calling": "ability",
+		// "Fly, My Pretty" IS a genuine toggle (the flyMyPretty active state), but the
+		// enchantment step has to happen first, so the Use button opens that flow.
+		"fly, my pretty": "ability",
+
 		// === Reactions wrongly detected as activatable toggle states ===
 		"deflect attacks": "reaction",
 		"deflect missiles": "reaction",
@@ -48366,6 +49251,28 @@ class CharacterSheetState {
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 		const psionic = this._detectPsionicActivation(feature, rawText, text);
 		if (psionic) return psionic;
+		// (CS-BUG-095) Crown of Spellfire (Spellfire 18) — a free "alter Innate Sorcery"
+		// toggle, NOT a resource spender. Its prose mentions "spend 5 Sorcery Points"
+		// (the *restore* cost, handled by restoreCrownOfSpellfire()). Left to the generic
+		// parser, that "5 Sorcery Points" becomes an activation cost AND the `.includes("sorcery")`
+		// resource matcher grabs the "Innate Sorcery" use pool (2 uses) instead of Sorcery Points,
+		// so the Activate button renders permanently DISABLED (2 < 5). Return an explicit
+		// zero-cost toggle bound to the crownOfSpellfire state so the button is actionable.
+		if (name === "crown of spellfire"
+			&& (feature.subclassShortName === "Spellfire" || (feature.source || feature.subclassSource) === "FRHoF")) {
+			return {
+				stateTypeId: "crownOfSpellfire",
+				stateType: this.ACTIVE_STATE_TYPES.crownOfSpellfire,
+				matchedBy: "spellfire",
+				activationAction: "bonus",
+				interactionMode: "toggle",
+				isToggle: true,
+				duration: this.ACTIVE_STATE_TYPES.crownOfSpellfire.duration,
+				endConditions: this.ACTIVE_STATE_TYPES.crownOfSpellfire.endConditions,
+				effects: this.ACTIVE_STATE_TYPES.crownOfSpellfire.effects,
+				resourceCost: 0,
+			};
+		}
 		const isDaemonologistFeature = (feature.source || feature.subclassSource) === "GrimHollowPG24"
 			&& (feature.subclassShortName || feature.subclassName || "Daemonologist").toLowerCase() === "daemonologist";
 		if (isDaemonologistFeature && name === "borrowed tongues and hides") {
@@ -48682,6 +49589,27 @@ class CharacterSheetState {
 			}
 		}
 
+		// ===== CHANNEL DIVINITY OPTIONS (CS-BUG-079) =====
+		// Every subclass Channel Divinity option in every source follows the
+		// "Channel Divinity: <Option>" naming convention. PALADIN oaths are additionally
+		// tagged in the class data with `consumes: {name: "Channel Divinity"}` and so are
+		// handled by the branch above, but the 2014 CLERIC domains carry NO such tag — so
+		// options like "Channel Divinity: Arcane Abjuration" fell through to generic
+		// pattern detection, came back with no `interactionMode`, never linked to the
+		// shared pool, and could therefore be used an unlimited number of times. Only
+		// per-domain entries hard-coded into `FEATURE_CLASSIFICATION_OVERRIDES` (Tempest's
+		// Destructive Wrath) escaped it; classify the whole convention instead.
+		//
+		// Options carrying their OWN use pool (TCE's "Channel Divinity: Harness Divine
+		// Power" is PB/long rest on top of the Channel Divinity it spends) are left alone
+		// so the more specific pool keeps owning the row.
+		if (!(feature.uses?.max > 0) && /^channel\s+divinity\s*:/i.test(feature.name || "")) {
+			return this._buildAbilityActivationInfo(feature, rawText, text, {
+				resourceName: "Channel Divinity",
+				resourceCost: 1,
+			});
+		}
+
 		// ===== RACE-MANIFESTATION CHILD ABILITIES (R20 #5/#6, S2 contract) =====
 		// Synthesized "Divine Manifestation" child options (tagged `_raceManifestation`)
 		// that present an action / track a use pool are clickable + hoverable abilities,
@@ -48844,6 +49772,31 @@ class CharacterSheetState {
 		}
 
 		// ===== CHECK AGAINST KNOWN STATE TYPES =====
+		// Same feature NAME, different subclass. Shadow Magic (XGE) and Shadow Sorcery (RHW)
+		// both name their level-18 capstone "Umbral Form", but the economies are unrelated:
+		// XGE spends 6 Sorcery Points to enter for a minute, RHW rides Innate Sorcery once
+		// per Long Rest and spends 6 Sorcery Points to RESTORE the use. Name matching alone
+		// silently gives an RHW sorcerer the XGE behaviour, so disambiguate on the feature's
+		// own source before the generic loop below can claim it.
+		const stateBySourceOverrides = {
+			"umbral form": {rhw: "umbralFormRhw"},
+		};
+		const sourceOverride = stateBySourceOverrides[name]?.[String(feature.source || "").toLowerCase()];
+		if (sourceOverride && this.ACTIVE_STATE_TYPES[sourceOverride]) {
+			const stateType = this.ACTIVE_STATE_TYPES[sourceOverride];
+			return {
+				stateTypeId: sourceOverride,
+				stateType,
+				matchedBy: "nameAndSource",
+				activationAction: stateType.activationAction,
+				effects: stateType.effects,
+				duration: stateType.duration,
+				endConditions: stateType.endConditions,
+				requiresStates: stateType.requiresStates,
+				isToggle: true,
+			};
+		}
+
 		for (const [stateTypeId, stateType] of Object.entries(this.ACTIVE_STATE_TYPES)) {
 			// Skip generic types that shouldn't match by name
 			if (stateType.isGeneric && !stateType.detectPatterns?.length) continue;
@@ -50223,6 +51176,31 @@ class CharacterSheetState {
 				.replace(/data-vet-source="[^"]*"/i, `data-vet-source="${newSrc}"`)
 				.replace(/data-vet-hash="[^"]*"/i, `data-vet-hash="${newHash}"`);
 		});
+	}
+
+	/**
+	 * The active-state prerequisites this feature would need, that are NOT currently met.
+	 *
+	 * `getActivatableFeatures()` deliberately HIDES a feature whose `requiresStates` gate
+	 * is unmet, so the Overview toggle row disappears until the prerequisite is running.
+	 * That is correct for the toggle list, but it also drops the feature out of the
+	 * "classified activatable ability" branch of the Features tab's Use button, where the
+	 * fallback is a bare use decrement (CS-BUG-103). Callers use this to tell "this feature
+	 * has no activation behaviour" apart from "this feature is gated right now".
+	 *
+	 * @param {*} feature
+	 * @returns {string[]} display names of the missing prerequisite states (empty when the
+	 *   feature is not a gated activatable, or its gate is already satisfied)
+	 */
+	getUnmetStateRequirementsForFeature (feature) {
+		if (!feature) return [];
+		const activationInfo = CharacterSheetState.detectActivatableFeature(feature);
+		const stateType = activationInfo?.stateType || CharacterSheetState.ACTIVE_STATE_TYPES[activationInfo?.stateTypeId];
+		const required = stateType?.requiresStates;
+		if (!required?.length) return [];
+		return required
+			.filter(requiredId => !this.isStateTypeActive(requiredId))
+			.map(requiredId => CharacterSheetState.ACTIVE_STATE_TYPES[requiredId]?.name || requiredId);
 	}
 
 	/**
@@ -51658,6 +52636,7 @@ class CharacterSheetState {
 
 	_getSupplementalActiveStateEffects (stateTypeId, state = null) {
 		if (stateTypeId === "wrathOfTheSea") return this._getWrathOfTheSeaStateEffects(state);
+		if (CharacterSheetState.LUNAR_PHASE_STATE_IDS.includes(stateTypeId)) return this._getLunarPhaseStateEffects(stateTypeId);
 		if (stateTypeId !== "rage") return [];
 		const cls = this._data.classes.find(it => {
 			return it.name === "Barbarian" && this._isJuggernautSubclass(it.subclass);
@@ -51681,6 +52660,75 @@ class CharacterSheetState {
 		const name = (subclass?.name || subclass?.shortName || "").toLowerCase();
 		if (name !== "path of the juggernaut" && name !== "juggernaut") return false;
 		return ["TalDoreiCampaignSettingReborn", "TGTT-2014"].includes(subclass?.source);
+	}
+
+	/**
+	 * Resolve the sorcerer class entry carrying the Lunar Sorcery subclass, if any.
+	 *
+	 * Reads stored class data ONLY — never `getFeatureCalculations()` — because this
+	 * runs inside `getActiveStateEffects()`, which the speed pipeline calls. Going
+	 * through the calculations would close the
+	 * `getSpeed → getActiveStateEffects → getFeatureCalculations → getSpeed` cycle
+	 * guarded by CharacterSheetSpeedCalcRecursion.test.js. Same doctrine as
+	 * {@link _getCircleOfTheSeaClass}.
+	 *
+	 * Source-safe: `Lunar` is a plausible short name, so the subclass source must be
+	 * DSotDQ (or a TGTT re-export of it) before we hand a character moon magic.
+	 * @returns {object|null}
+	 */
+	_getLunarSorceryClass () {
+		return this._data.classes.find(cls => {
+			if ((cls.name || "").toLowerCase() !== "sorcerer") return false;
+			const sub = `${cls.subclass?.shortName || cls.subclass?.name || ""}`.toLowerCase();
+			if (sub !== "lunar" && sub !== "lunar sorcery") return false;
+			const src = `${cls.subclass?.source || ""}`.toUpperCase();
+			return !src || src === "DSOTDQ" || src.startsWith("TGTT");
+		}) || null;
+	}
+
+	/**
+	 * Live effects for the three `lunarPhase*` active states (Lunar Empowerment, 14).
+	 *
+	 * Below sorcerer 14 a phase is pure bookkeeping — it steers Lunar Boons and the free
+	 * lunar spell cast, but grants no passive. From 14 each phase adds its own benefit,
+	 * and two of the three are additionally gated on a runtime flag the player controls
+	 * from the Lunar Sorcery panel:
+	 *  - **Full Moon** — the Investigation / Perception advantage applies only "while
+	 *    within the bright light you shed", so it needs the moonlight to actually be lit.
+	 *  - **New Moon** — the Stealth advantage is unconditional, but the
+	 *    attacks-have-disadvantage-against-you clause needs you "entirely in darkness".
+	 *  - **Crescent Moon** — flat necrotic / radiant resistance, no gate.
+	 *
+	 * CS-BUG-050: resistances are emitted `damage:`-namespaced. A bare damage type is
+	 * accepted by the collector but the namespaced spelling is the canonical one.
+	 * @param {string} stateTypeId
+	 * @returns {Array<object>}
+	 * @private
+	 */
+	_getLunarPhaseStateEffects (stateTypeId) {
+		const cls = this._getLunarSorceryClass();
+		if (!cls || (cls.level || 0) < 14) return [];
+		switch (stateTypeId) {
+			case "lunarPhaseFull": {
+				if (!this._data.lunarMoonlight) return [];
+				return [
+					{type: "advantage", target: "skill:investigation", source: "Lunar Empowerment (Full Moon)"},
+					{type: "advantage", target: "skill:perception", source: "Lunar Empowerment (Full Moon)"},
+				];
+			}
+			case "lunarPhaseNew": {
+				const effects = [{type: "advantage", target: "skill:stealth", source: "Lunar Empowerment (New Moon)"}];
+				if (this._data.lunarInDarkness) effects.push({type: "disadvantage", target: "attacksAgainst", source: "Lunar Empowerment (New Moon)"});
+				return effects;
+			}
+			case "lunarPhaseCrescent": {
+				return [
+					{type: "resistance", target: "damage:necrotic", source: "Lunar Empowerment (Crescent Moon)"},
+					{type: "resistance", target: "damage:radiant", source: "Lunar Empowerment (Crescent Moon)"},
+				];
+			}
+			default: return [];
+		}
 	}
 
 	/**
@@ -52073,7 +53121,17 @@ class CharacterSheetState {
 
 	/**
 	 * Get bonus to a specific skill from active states
-	 * Handles hierarchical targets like "check:str:athletics" or "check:str"
+	 * Handles hierarchical targets like "check:str:athletics" or "check:str", plus the
+	 * ability-agnostic `skill:<key>` / `skill:all` vocabulary.
+	 *
+	 * Two target vocabularies reach this method and BOTH must be honoured (CS-BUG-086):
+	 *   - `check:<ability>[:<skill>]` — the hierarchical ability-check family.
+	 *   - `skill:<key>` / `skill:all` — the ability-agnostic family emitted by the buff
+	 *     registry (e.g. Pass Without Trace's +10 Stealth), by the custom-ability effect
+	 *     builder, and by `summarizeEffects`. Matching only the `check:` family silently
+	 *     dropped every one of these bonuses from both the displayed modifier and the roll.
+	 * `skill:` targets deliberately ignore `ability`, so they keep working when a feature
+	 * has swapped the skill's governing ability.
 	 * @param {string} skill - The skill key (e.g., "athletics")
 	 * @param {string} ability - The ability associated with the skill (e.g., "str")
 	 * @returns {number} The total bonus from active states
@@ -52081,6 +53139,7 @@ class CharacterSheetState {
 	getSkillBonusFromStates (skill, ability) {
 		const effects = this.getActiveStateEffects();
 		let bonus = 0;
+		const normalizedSkill = String(skill || "").toLowerCase().trim();
 
 		// Skip combatStance effects — the stance-specific system (_getStanceSkillBonus) is authoritative
 		effects.filter(e => e.type === "bonus" && e.stateTypeId !== "combatStance").forEach(e => {
@@ -52090,8 +53149,12 @@ class CharacterSheetState {
 			const abilityTarget = `check:${ability}`;
 			// Check for generic check match: "check" applies to all ability checks
 			const genericTarget = "check";
+			// Ability-agnostic vocabulary: "skill:stealth" / "skill:all"
+			const normalizedEffectTarget = String(e.target || "").toLowerCase().trim();
+			const isSkillTarget = normalizedSkill
+				&& (normalizedEffectTarget === `skill:${normalizedSkill}` || normalizedEffectTarget === "skill:all");
 
-			if (e.target === exactTarget || e.target === abilityTarget || e.target === genericTarget) {
+			if (isSkillTarget || e.target === exactTarget || e.target === abilityTarget || e.target === genericTarget) {
 				if (e.useProficiency) {
 					bonus += this.getProficiencyBonus();
 				} else {
@@ -52259,6 +53322,9 @@ class CharacterSheetState {
 				source: e.stateName || "state effect",
 				weaponId: e.weaponId || null,
 				isCrimsonRite: !!e.isCrimsonRite,
+				// Scoping flags — consumed by the damage roller so a rider that reads
+				// "on a melee weapon attack" can't leak onto ranged attacks or spells.
+				meleeOnly: !!e.meleeOnly,
 			}));
 	}
 
@@ -52914,6 +53980,12 @@ class CharacterSheetState {
 	/** Player-facing label of the Meteor Knight satellite pool (single source of truth). */
 	static METEOR_KNIGHT_SATELLITE_POOL_NAME = "Satellites";
 
+	/** Player-facing label of the Steel Hawk Launch pool (single source of truth). */
+	static STEEL_HAWK_LAUNCH_POOL_NAME = "Launch";
+
+	/** Player-facing label of the Steel Hawk Improved Launch (push) pool. */
+	static STEEL_HAWK_IMPROVED_LAUNCH_POOL_NAME = "Improved Launch";
+
 	// =========================================================================
 	// COMPANION TYPES — Categorizes companions by origin mechanic
 	// =========================================================================
@@ -53048,59 +54120,6 @@ class CharacterSheetState {
 	 * @param {string} [companionData.groupId] - ID to link related conjured creatures
 	 * @returns {string} The new companion's ID
 	 */
-	/**
-	 * Normalise structured companion attacks into the prose `actions` shape.
-	 *
-	 * Companion attacks arrive in two vocabularies. Bestiary-derived companions carry
-	 * 5etools prose (`{name, entries: ["{@atk mw} {@hit 5} to hit …"]}`), and that is
-	 * the ONLY shape the sheet renders a roll button for and the only one
-	 * `_rollCompanionAttack()` can parse. Curated class summons are far easier to author
-	 * in the structured shape (`{name, attackBonus, damage, damageType, range}`), which
-	 * `addCompanion()` stored verbatim in `attacks` — where no rendering or rolling path
-	 * reads it. (Play Mode has a `comp.actions || comp.attacks` fallback at
-	 * `charactersheet-playmode.js:2835`/`:4020`, but `addCompanion()` always writes an
-	 * array to `actions` and `[]` is truthy, so it never fires — and it renders only
-	 * `name`/`entries` anyway, neither of which a structured attack has.)
-	 *
-	 * The result was a summon with a fully specified attack and **no way to roll it**:
-	 * the Hound of Ill Omen (Shadow Magic 6) had `attackBonus: 5`, `damage: "2d6+3"`,
-	 * `damageType: "piercing"` and rendered zero attack buttons.
-	 *
-	 * Rather than teach the renderer and the roller a second vocabulary, translate once
-	 * at the point of entry. Existing prose actions win: an attack whose name already
-	 * matches an action, or which already carries `entries`, is left alone.
-	 *
-	 * @param {Array} [actions] the companion's declared prose actions.
-	 * @param {Array} [attacks] the companion's declared structured attacks.
-	 * @returns {Array} `actions` plus one synthesised entry per unrepresented attack.
-	 * @private
-	 */
-	static _withStructuredAttackActions (actions, attacks) {
-		const out = [...(actions || [])];
-		if (!Array.isArray(attacks) || !attacks.length) return out;
-
-		const seen = new Set(out.map(a => String(a?.name || "").toLowerCase()));
-		for (const atk of attacks) {
-			const name = atk?.name;
-			if (!name || atk.entries) continue;
-			if (seen.has(String(name).toLowerCase())) continue;
-			if (atk.attackBonus == null && !atk.damage) continue;
-
-			const parts = [];
-			parts.push(`{@atk ${atk.attackType || "mw"}}`);
-			if (atk.attackBonus != null) parts.push(`{@hit ${atk.attackBonus}} to hit,`);
-			parts.push(`reach ${atk.range || "5 ft."}, one target.`);
-			if (atk.damage) {
-				parts.push(`{@h}{@damage ${atk.damage}}${atk.damageType ? ` ${atk.damageType}` : ""} damage.`);
-			}
-			if (atk.description) parts.push(atk.description);
-
-			out.push({name, entries: [parts.join(" ")]});
-			seen.add(String(name).toLowerCase());
-		}
-		return out;
-	}
-
 	addCompanion (companionData) {
 		if (!this._data.companions) this._data.companions = [];
 
@@ -53153,8 +54172,8 @@ class CharacterSheetState {
 			languages: companionData.languages || [],
 
 			// Stat block entries
-			actions: CharacterSheetState._withStructuredAttackActions(companionData.actions, companionData.attacks),
 			traits: companionData.traits || [],
+			actions: companionData.actions || [],
 			reactions: companionData.reactions || [],
 			bonusActions: companionData.bonusActions || [],
 
@@ -54545,11 +55564,6 @@ class CharacterSheetState {
 		// Recover all resources
 		this.recoverResources("long");
 		this.recoverResources("dawn");
-		// Lunar Sorcery per-phase tracks are not plain resources (they are keyed by
-		// phase so switching phase cannot re-spend the same charge), so restore them
-		// explicitly. The phase itself is re-chosen after a long rest — that is a
-		// player decision, so it is offered by the UI rather than forced here.
-		this.resetLunarSorceryOnLongRest();
 
 		// Recover Mystic Arcanum (Warlock)
 		this.resetMysticArcanum();
@@ -54591,8 +55605,30 @@ class CharacterSheetState {
 		// (proficiency-bonus hours for items, 1 hour for a Dancing Item).
 		this._clearCreationBardConstructs();
 
+		// Lunar Sorcery: free lunar casts return, the shed moonlight goes out, and the
+		// phase becomes re-choosable for free.
+		this._onLongRestLunarSorcery();
+
 		// Clear all temporary attacks (from variant components, etc.)
 		this.clearTemporaryAttacks();
+
+		// Wicked Witch: Granny's Gifts is re-chosen on every long rest, and Coven
+		// Calling's duplicates plus the Fly, My Pretty ride do not survive a rest.
+		this._resetWickedWitchOnLongRest();
+	}
+
+	/**
+	 * Long-rest bookkeeping for the Wicked Witch origin. The ward is deliberately
+	 * CLEARED rather than silently renewed: RAW makes it a fresh choice each rest
+	 * ("when you finish a long rest, choose…"), so leaving it in place would hand the
+	 * player a boon they never picked. `setGrannysWardTarget()` re-arms it.
+	 * @private
+	 */
+	_resetWickedWitchOnLongRest () {
+		if (!this._data.wickedWitch) return;
+		this.clearGrannysWard();
+		this.dismissCovenDuplicates();
+		if (this.isStateActive?.("flyMyPretty")) this.deactivateState("flyMyPretty");
 	}
 
 	/**
@@ -54899,6 +55935,17 @@ class CharacterSheetState {
 	 * concentration, note, riders}]` and this method resolves each descriptor against the live
 	 * resource pool. No per-subclass branch here or in the UI.
 	 *
+	 * Optional descriptor fields, all added for Shadow Sorcery (RHW)'s Beasts of Ill Omen:
+	 * - `castingTime`          `"bonus"` / `"action"` — surfaced so the UI can label it.
+	 * - `concentrationOptional` the caster MAY waive concentration; see
+	 *                          {@link castSpellWithResource}'s `waiveConcentration`.
+	 * - `waivedDurationMinutes` the duration the spell falls back to when concentration is
+	 *                          waived (RHW: 1 minute).
+	 * - `ignoresMaterialComponents` / `ignoresPreparation` flavour flags for the cast dialog.
+	 * - `replacesPrevious`     recasting ends the earlier casting (RHW says so explicitly).
+	 * - `summon`               a {@link getSummonSpiritStats} descriptor; casting creates the
+	 *                          companion, ending the spell dismisses it.
+	 *
 	 * @returns {Array<object>} `[{spell, source, level, cost, resourceName, resourceCurrent,
 	 *   available, grantedBy, note, concentration, riders, active}]`
 	 */
@@ -54921,6 +55968,13 @@ class CharacterSheetState {
 				grantedBy: def.grantedBy || null,
 				note: def.note || null,
 				concentration: !!def.concentration,
+				concentrationOptional: !!def.concentrationOptional,
+				waivedDurationMinutes: def.waivedDurationMinutes ?? null,
+				castingTime: def.castingTime || "action",
+				ignoresMaterialComponents: !!def.ignoresMaterialComponents,
+				ignoresPreparation: !!def.ignoresPreparation,
+				replacesPrevious: !!def.replacesPrevious,
+				summon: def.summon ? {...def.summon} : null,
 				riders: {...(def.riders || {})},
 				active: active.some(a => a.spell?.toLowerCase() === String(def.spell).toLowerCase()),
 			};
@@ -54933,10 +55987,15 @@ class CharacterSheetState {
 	 * (e.g. "you can see through your own darkness") stay observable until it ends.
 	 *
 	 * @param {string} spellName
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.waiveConcentration=false] cast WITHOUT concentration, when the
+	 *   descriptor allows it (Beasts of Ill Omen). The duration falls back to
+	 *   `waivedDurationMinutes` and the casting still replaces any earlier one.
+	 * @param {string} [opts.summonForm] which form of a `summon` descriptor to create.
 	 * @returns {object|null} the resolved descriptor with `spent`/`resourceRemaining`, or null
 	 *   when the spell isn't offered or the resource is short.
 	 */
-	castSpellWithResource (spellName) {
+	castSpellWithResource (spellName, {waiveConcentration = false, summonForm = null} = {}) {
 		const key = String(spellName || "").toLowerCase();
 		const info = this.getResourceCastableSpells().find(s => s.spell.toLowerCase() === key);
 		if (!info || !info.available) return null;
@@ -54945,18 +56004,103 @@ class CharacterSheetState {
 		if (!resource || resource.current < info.cost) return null;
 		this.setResourceCurrent(resource.id, resource.current - info.cost);
 
+		// A waiver only takes effect when the descriptor offers one; asking to waive
+		// concentration on a spell that does not allow it must NOT silently succeed.
+		const waived = waiveConcentration && info.concentrationOptional;
+		const concentrating = info.concentration && !waived;
+
+		// "If you cast it again, the previous casting ends" — dismiss the earlier summon
+		// before the new record replaces it, or the companion would be orphaned.
+		const previous = (this._data.activeResourceCastSpells || []).find(a => a.spell?.toLowerCase() === key);
+		if (previous?.companionId) this.removeCompanion?.(previous.companionId);
+
 		this._data.activeResourceCastSpells = (this._data.activeResourceCastSpells || [])
 			.filter(a => a.spell?.toLowerCase() !== key);
-		this._data.activeResourceCastSpells.push({
+		const record = {
 			spell: info.spell,
 			source: info.source,
 			grantedBy: info.grantedBy,
+			concentration: concentrating,
+			durationMinutes: waived ? info.waivedDurationMinutes : null,
 			riders: {...info.riders},
+		};
+
+		let companion = null;
+		if (info.summon) {
+			companion = this._createResourceCastSummon(info, summonForm, concentrating);
+			if (companion) record.companionId = companion.id;
+		}
+
+		this._data.activeResourceCastSpells.push(record);
+
+		if (concentrating) this.setConcentration({name: info.spell, level: info.level || 0, source: info.grantedBy || "Resource cast"});
+
+		return {
+			...info,
+			spent: info.cost,
+			resourceRemaining: this.getResources().find(r => r.name === info.resourceName)?.current ?? 0,
+			active: true,
+			concentrationWaived: waived,
+			concentration: concentrating,
+			durationMinutes: record.durationMinutes,
+			companion,
+		};
+	}
+
+	/**
+	 * Statistics of a "summon" spell's spirit, as a pure function of the effective spell
+	 * level and the caster.
+	 *
+	 * Extracted from the spell-summon picker so a RESOURCE cast of the same spell (Beasts of
+	 * Ill Omen casts *Summon Beast* for Sorcery Points, with no slot at all) produces an
+	 * identical creature — the numbers cannot drift between the two entry points because
+	 * there is only one of them.
+	 *
+	 * @param {object} opts
+	 * @param {number} opts.spellLevel effective spell level the summon was cast at
+	 * @param {number} [opts.baseLevel=2] the spell's own minimum level
+	 * @returns {{hp: number, ac: number, attackBonus: number, damage: string}}
+	 */
+	getSummonSpiritStats ({spellLevel, baseLevel = 2} = {}) {
+		const lvl = Math.max(baseLevel, Math.floor(Number(spellLevel) || baseLevel));
+		const spellMod = this.getAbilityMod(this._data.spellcasting?.ability || "int");
+		return {
+			hp: 30 + 10 * (lvl - baseLevel),
+			ac: 11 + lvl,
+			attackBonus: this.getProficiencyBonus() + spellMod,
+			damage: `1d8 + ${3 + lvl}`,
+			spellLevel: lvl,
+		};
+	}
+
+	/** @private */
+	_createResourceCastSummon (info, summonForm, concentrating) {
+		const spec = info.summon;
+		const baseLevel = spec.baseLevel ?? 2;
+		const stats = this.getSummonSpiritStats({spellLevel: info.level ?? baseLevel, baseLevel});
+		const form = summonForm || (spec.forms || [])[0] || info.spell;
+		const pb = this.getProficiencyBonus();
+		const id = this.addCompanion({
+			name: form,
+			type: CharacterSheetState.COMPANION_TYPES.SUMMON,
+			origin: info.spell,
+			creatureType: spec.creatureType || "beast",
+			size: "M",
+			ac: stats.ac,
+			hp: {max: stats.hp, current: stats.hp},
+			speed: spec.speed ? {...spec.speed} : {walk: 30},
+			abilities: {str: 14, dex: 14, con: 14, int: 14, wis: 14, cha: 14},
+			senses: ["darkvision 60 ft."],
+			passive: 10 + pb,
+			actions: [
+				{name: "Multiattack", entries: [`The spirit makes a number of attacks equal to half this spell's level (rounded down).`]},
+				{name: "Attack", entries: [`Melee/Ranged Attack: +${stats.attackBonus} to hit, reach 5 ft. or range 60 ft. Hit: ${stats.damage} damage of a type matching the spirit.`]},
+			],
+			profBonus: pb,
+			source: info.grantedBy || info.spell,
+			concentrationLinked: concentrating,
 		});
-
-		if (info.concentration) this.setConcentration({name: info.spell, level: info.level || 0, source: info.grantedBy || "Resource cast"});
-
-		return {...info, spent: info.cost, resourceRemaining: this.getResources().find(r => r.name === info.resourceName)?.current ?? 0, active: true};
+		return (this._data.companions || []).find(c => c.id === id) || null;
 	}
 
 	/** Currently-running resource-cast spells (see {@link castSpellWithResource}). */
@@ -54971,10 +56115,12 @@ class CharacterSheetState {
 	 */
 	endResourceCastSpell (spellName) {
 		const key = String(spellName || "").toLowerCase();
-		const before = (this._data.activeResourceCastSpells || []).length;
-		this._data.activeResourceCastSpells = (this._data.activeResourceCastSpells || [])
-			.filter(a => a.spell?.toLowerCase() !== key);
+		const list = this._data.activeResourceCastSpells || [];
+		const record = list.find(a => a.spell?.toLowerCase() === key);
+		const before = list.length;
+		this._data.activeResourceCastSpells = list.filter(a => a.spell?.toLowerCase() !== key);
 		const ended = this._data.activeResourceCastSpells.length !== before;
+		if (ended && record?.companionId) this.removeCompanion?.(record.companionId);
 		if (ended && this.getConcentration()?.spellName?.toLowerCase() === key) this.breakConcentration?.();
 		return ended;
 	}
@@ -54982,11 +56128,30 @@ class CharacterSheetState {
 	/**
 	 * Eyes of the Dark: true while a *darkness* you cast with Sorcery Points is running, which
 	 * is the only case in which you can see through it.
+	 *
+	 * Shadow Sorcery (RHW) states the same benefit MORE broadly — "if a spell you cast creates
+	 * an area of Darkness, you can see normally through that spell's Darkness" — so it is not
+	 * tied to a resource cast at all. When `calculations.seeThroughOwnSpellDarkness` is set,
+	 * concentrating on any darkness-creating spell you cast is enough.
 	 * @returns {boolean}
 	 */
 	canSeeThroughOwnDarkness () {
-		return (this._data.activeResourceCastSpells || []).some(a => a.riders?.seeThroughOwnDarkness);
+		if ((this._data.activeResourceCastSpells || []).some(a => a.riders?.seeThroughOwnDarkness)) return true;
+		if (!this.getFeatureCalculations().seeThroughOwnSpellDarkness) return false;
+		const conc = this.getConcentration?.();
+		const name = (conc?.spellName || conc?.name || "").toLowerCase();
+		if (!name) return false;
+		return CharacterSheetState.DARKNESS_CREATING_SPELLS.some(s => name.includes(s));
 	}
+
+	/**
+	 * Spells whose area is literally Darkness, for "you can see through Darkness YOU created".
+	 * Deliberately a short curated list rather than a text search: the sheet has no structured
+	 * "creates darkness" flag on spell data, and a substring search for "darkness" would match
+	 * *Eyes of the Dark* style feature text and every spell that merely mentions it.
+	 * @type {Array<string>}
+	 */
+	static DARKNESS_CREATING_SPELLS = ["darkness", "hunger of hadar", "evard's black tentacles"];
 	// #endregion
 
 	// #region Shadow Magic (XGE Sorcerer)
@@ -55100,6 +56265,1277 @@ class CharacterSheetState {
 		const dist = distance == null ? range : Math.floor(Number(distance) || 0);
 		if (dist > range) return {ok: false, error: `Shadow Walk can teleport you up to ${range} feet.`, range};
 		return {ok: true, distance: dist, range, action: calc.shadowWalkAction || "bonus"};
+	}
+	// #endregion
+
+	// #region Shadow Sorcery (RHW Sorcerer)
+	/**
+	 * Umbral Form (Shadow Sorcery 18) — the RHW rework, whose economy is unrelated to the
+	 * XGE feature of the same name.
+	 *
+	 * RAW: "When you use your Innate Sorcery feature, you can also adopt an Umbral Form …
+	 * Once you use this feature, you can't do so again until you finish a Long Rest unless
+	 * you spend 6 Sorcery Points to restore your use of it." So:
+	 * - Innate Sorcery must ALREADY be active (the state carries `requiresStates`).
+	 * - Entering costs NO Sorcery Points — it costs the once-per-Long-Rest use.
+	 * - 6 Sorcery Points buys the USE back, not the transformation.
+	 *
+	 * @returns {{has: boolean, active: boolean, usesRemaining: number, usesMax: number,
+	 *   innateSorceryActive: boolean, canActivate: boolean, blockedReason: string|null,
+	 *   restoreCost: number, canRestore: boolean, sorceryPoints: number}}
+	 */
+	getUmbralFormStatus () {
+		const calc = this.getFeatureCalculations();
+		const has = !!calc.hasUmbralFormRhw;
+		const usesMax = calc.umbralFormUsesMax ?? 1;
+		const restoreCost = calc.umbralFormRestoreCost ?? 6;
+		const feature = (this._data.features || []).find(f => f.name === "Umbral Form");
+		const usesRemaining = has ? (feature?.uses?.current ?? usesMax) : 0;
+		const innateSorceryActive = this.isStateTypeActive("innateSorcery");
+		const active = this.isStateTypeActive("umbralFormRhw");
+		const sp = this._getSpResource()?.current ?? 0;
+
+		let blockedReason = null;
+		if (!has) blockedReason = "You don't have Umbral Form.";
+		else if (active) blockedReason = "Umbral Form is already active.";
+		else if (!innateSorceryActive) blockedReason = "Umbral Form is adopted when you use Innate Sorcery — activate Innate Sorcery first.";
+		else if (usesRemaining <= 0) blockedReason = `No uses remaining — spend ${restoreCost} Sorcery Points to restore it, or finish a Long Rest.`;
+
+		return {
+			has,
+			active,
+			usesRemaining,
+			usesMax,
+			innateSorceryActive,
+			canActivate: !blockedReason,
+			blockedReason,
+			restoreCost,
+			canRestore: has && usesRemaining < usesMax && sp >= restoreCost,
+			sorceryPoints: sp,
+		};
+	}
+
+	/**
+	 * Adopt the Umbral Form. Spends the once-per-Long-Rest use (NOT Sorcery Points) and
+	 * activates the `umbralFormRhw` state, which grants the resistances for real.
+	 * @returns {{ok: boolean, error?: string, usesRemaining?: number, state?: object}}
+	 */
+	activateUmbralForm () {
+		const status = this.getUmbralFormStatus();
+		if (!status.canActivate) return {ok: false, error: status.blockedReason};
+
+		const feature = (this._data.features || []).find(f => f.name === "Umbral Form");
+		if (feature?.uses) {
+			feature.uses.current = Math.max(0, (feature.uses.current ?? status.usesMax) - 1);
+			const resource = (this._data.resources || []).find(r => r.featureId === feature.id || r.name === "Umbral Form");
+			if (resource) resource.current = feature.uses.current;
+		}
+
+		const state = this.activateState("umbralFormRhw", {source: "Umbral Form"});
+		if (!state) {
+			// Restore the use — the state refused (e.g. Innate Sorcery lapsed between the
+			// status check and here), so nothing should have been spent.
+			if (feature?.uses) feature.uses.current = Math.min(feature.uses.max ?? status.usesMax, (feature.uses.current ?? 0) + 1);
+			return {ok: false, error: "Umbral Form could not be activated."};
+		}
+		return {ok: true, usesRemaining: this.getUmbralFormStatus().usesRemaining, state};
+	}
+
+	/** End the Umbral Form (no action, per RAW). @returns {boolean} */
+	endUmbralForm () {
+		if (!this.isStateTypeActive("umbralFormRhw")) return false;
+		this.deactivateState("umbralFormRhw");
+		return true;
+	}
+
+	/**
+	 * "unless you spend 6 Sorcery Points to restore your use of it" — buy the use back.
+	 * @returns {{ok: boolean, error?: string, spent?: number, usesRemaining?: number, sorceryPointsRemaining?: number}}
+	 */
+	restoreUmbralFormUse () {
+		const status = this.getUmbralFormStatus();
+		if (!status.has) return {ok: false, error: "You don't have Umbral Form."};
+		if (status.usesRemaining >= status.usesMax) return {ok: false, error: "Umbral Form's use is already available."};
+		const res = this._getSpResource();
+		if (!res || res.current < status.restoreCost) return {ok: false, error: `You need ${status.restoreCost} Sorcery Points to restore Umbral Form.`};
+
+		this.setResourceCurrent(res.id, res.current - status.restoreCost);
+		const feature = (this._data.features || []).find(f => f.name === "Umbral Form");
+		if (feature?.uses) {
+			feature.uses.current = Math.min(feature.uses.max ?? status.usesMax, (feature.uses.current ?? 0) + 1);
+			const resource = (this._data.resources || []).find(r => r.featureId === feature.id || r.name === "Umbral Form");
+			if (resource) resource.current = feature.uses.current;
+		}
+		return {
+			ok: true,
+			spent: status.restoreCost,
+			usesRemaining: this.getUmbralFormStatus().usesRemaining,
+			sorceryPointsRemaining: this._getSpResource()?.current ?? 0,
+		};
+	}
+
+	/**
+	 * Give the RHW Umbral Form its once-per-Long-Rest budget on its own feature, so it
+	 * renders as a use badge and a Long Rest restores it through the ordinary feature-uses
+	 * path. Mirrors {@link _ensureZeroHpInterventionUses}.
+	 * @private
+	 */
+	_ensureUmbralFormUses () {
+		const feature = (this._data.features || []).find(f => f.name === "Umbral Form");
+		if (!feature) return;
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasUmbralFormRhw) return;
+		const usesMax = calc.umbralFormUsesMax ?? 1;
+		const resource = (this._data.resources || []).find(r => r.featureId === feature.id || r.name === "Umbral Form");
+		const featureOk = feature.uses?.max === usesMax && feature.uses?.recharge === "long";
+		const resourceOk = !resource || (resource.max === usesMax && resource.recharge === "long");
+		if (featureOk && resourceOk) return;
+		const spent = feature.uses ? (feature.uses.current ?? 0) < (feature.uses.max ?? 0) : false;
+		feature.uses = {current: spent ? 0 : usesMax, max: usesMax, recharge: "long"};
+		if (resource) {
+			resource.max = usesMax;
+			resource.recharge = "long";
+			resource.current = feature.uses.current;
+		}
+	}
+
+	/**
+	 * Beasts of Ill Omen (Shadow Sorcery 6): "you can expend 3 Sorcery Points to cast Summon
+	 * Beast as a Bonus Action, without expending a spell slot, without having the spell
+	 * prepared, and without Material components".
+	 *
+	 * Routed entirely through the generic {@link castSpellWithResource} pipeline, whose
+	 * descriptor lives in `calculations.resourceCastSpells`; this method exists only to give
+	 * the UI (and tests) a named, intention-revealing entry point and to normalize the
+	 * concentration choice.
+	 *
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.waiveConcentration=false] cast it WITHOUT Concentration; the
+	 *   duration becomes 1 minute and recasting ends the earlier one.
+	 * @param {string} [opts.form] which Bestial Spirit to summon.
+	 * @returns {object|null} the cast descriptor, or null when unavailable.
+	 */
+	castBeastsOfIllOmen ({waiveConcentration = false, form = null} = {}) {
+		if (!this.getFeatureCalculations().hasBeastsOfIllOmen) return null;
+		return this.castSpellWithResource("Summon Beast", {waiveConcentration, summonForm: form});
+	}
+
+	// #endregion
+
+	// #region Spellfire Sorcery (FRHoF Sorcerer)
+	/**
+	 * Bolstering Flames (Spellfire 3). Grant Temporary Hit Points equal to
+	 * `1d4 + your Charisma modifier` (plus your Sorcerer level once Honed
+	 * Spellfire is online) to yourself or a creature within 30 ft.
+	 *
+	 * When the target is yourself this performs the REAL mutation — it calls
+	 * {@link setTempHp}, so the granted Temp HP show up on the sheet and obey the
+	 * "higher value wins, no stacking" rule. When the target is an ally the roll
+	 * is still returned so the DM can apply it, but your own Temp HP are left
+	 * untouched.
+	 *
+	 * @param {object} [opts]
+	 * @param {"self"|"ally"} [opts.target="self"]
+	 * @param {number|null} [opts.roll=null] explicit d4 result (for deterministic use/tests).
+	 * @returns {{ok: boolean, error?: string, tempHp?: number, applied?: boolean, target?: string, range?: number}}
+	 */
+	useBolsteringFlames ({target = "self", roll = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasBolsteringFlames) return {ok: false, error: "You don't have Bolstering Flames."};
+
+		const die = roll == null ? this._rollDiceExpression(calc.bolsteringFlamesTempHpDie || "1d4") : Math.floor(Number(roll) || 0);
+		const bonus = calc.bolsteringFlamesTempHpBonus ?? this.getAbilityMod("cha");
+		const tempHp = Math.max(1, die + bonus);
+		const range = calc.bolsteringFlamesRange ?? 30;
+
+		if (target === "self") {
+			this.setTempHp(tempHp);
+			return {ok: true, tempHp, applied: true, target, range};
+		}
+		return {ok: true, tempHp, applied: false, target: "ally", range};
+	}
+
+	/**
+	 * Radiant Fire (Spellfire 3). One creature within 30 ft takes `1d4` Fire OR
+	 * Radiant damage (your choice), increasing to `1d8` with Honed Spellfire.
+	 *
+	 * There is no self-effect to mutate, so this method publishes the live
+	 * damage die, the chosen damage type and the range, and rolls the total —
+	 * the returned `total` is the value a DM applies. The damage TYPE is a
+	 * per-use choice, never a persisted build decision.
+	 *
+	 * @param {object} [opts]
+	 * @param {"fire"|"radiant"} [opts.damageType="fire"]
+	 * @param {number|null} [opts.roll=null] explicit die result (for deterministic use/tests).
+	 * @returns {{ok: boolean, error?: string, total?: number, damage?: string, damageType?: string, range?: number}}
+	 */
+	useRadiantFire ({damageType = "fire", roll = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasRadiantFire) return {ok: false, error: "You don't have Radiant Fire."};
+
+		const allowed = calc.radiantFireDamageTypes || ["fire", "radiant"];
+		const chosen = allowed.includes(damageType) ? damageType : allowed[0];
+		const expr = calc.radiantFireDamage || "1d4";
+		const total = roll == null ? this._rollDiceExpression(expr) : Math.floor(Number(roll) || 0);
+		return {ok: true, total, damage: expr, damageType: chosen, range: calc.radiantFireRange ?? 30};
+	}
+
+	/**
+	 * Spellfire Burst (Spellfire 3). Once per turn, when you spend at least one
+	 * Sorcery Point to take the Magic action or a Bonus Action, you may unleash
+	 * Bolstering Flames OR Radiant Fire.
+	 *
+	 * This method OWNS the two gates the prose describes:
+	 *   1. the once-per-turn limit — tracked on `_data.spellfireBurstUsedThisTurn`
+	 *      and cleared by {@link resetSpellfireBurstTurn};
+	 *   2. the "spent at least one Sorcery Point this action" trigger.
+	 * On success it dispatches to {@link useBolsteringFlames} / {@link useRadiantFire}
+	 * and marks the turn used, so a second call in the same turn is refused.
+	 *
+	 * @param {object} opts
+	 * @param {"bolstering"|"radiant"} opts.effect which effect to unleash.
+	 * @param {boolean} [opts.spentSorceryPoint=true] whether the triggering action spent ≥1 SP.
+	 * @param {object} [opts.effectOpts={}] forwarded to the chosen effect method.
+	 * @returns {{ok: boolean, error?: string, effect?: string, result?: object}}
+	 */
+	useSpellfireBurst ({effect, spentSorceryPoint = true, effectOpts = {}} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasSpellfireBurst) return {ok: false, error: "You don't have Spellfire Burst."};
+		if (!spentSorceryPoint) {
+			return {ok: false, error: "Spellfire Burst triggers only when you spend at least one Sorcery Point on the Magic action or a Bonus Action."};
+		}
+		if (this._data.spellfireBurstUsedThisTurn) {
+			return {ok: false, error: "You've already used Spellfire Burst this turn."};
+		}
+
+		let result;
+		if (effect === "bolstering") result = this.useBolsteringFlames(effectOpts);
+		else if (effect === "radiant") result = this.useRadiantFire(effectOpts);
+		else return {ok: false, error: "Choose Bolstering Flames (\"bolstering\") or Radiant Fire (\"radiant\")."};
+
+		if (!result.ok) return result;
+		this._data.spellfireBurstUsedThisTurn = true;
+		return {ok: true, effect, result};
+	}
+
+	/** Clear the once-per-turn Spellfire Burst lock (call at the start of your turn). */
+	resetSpellfireBurstTurn () {
+		this._data.spellfireBurstUsedThisTurn = false;
+	}
+
+	/**
+	 * Absorb Spells (Spellfire 6). Counterspell is always prepared (via the
+	 * subclass `additionalSpells`); when a target FAILS its save against your
+	 * Counterspell you regain `1d4` Sorcery Points.
+	 *
+	 * This performs the REAL mutation — it raises your current Sorcery Points
+	 * (clamped to your maximum) via {@link setSorceryPoints}, so the pool on the
+	 * sheet actually refills.
+	 *
+	 * @param {object} [opts]
+	 * @param {number|null} [opts.roll=null] explicit d4 result (for deterministic use/tests).
+	 * @returns {{ok: boolean, error?: string, regained?: number, sorceryPoints?: object}}
+	 */
+	regainSorceryPointsFromAbsorbSpells ({roll = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasAbsorbSpells) return {ok: false, error: "You don't have Absorb Spells."};
+
+		const rolled = roll == null ? this._rollDiceExpression(calc.absorbSpellsSorceryPointRegain || "1d4") : Math.floor(Number(roll) || 0);
+		const sp = this.getSorceryPoints();
+		const before = sp.current;
+		const next = Math.min(sp.max, before + Math.max(0, rolled));
+		this.setSorceryPoints({current: next, max: sp.max});
+		return {ok: true, regained: next - before, sorceryPoints: this.getSorceryPoints()};
+	}
+
+	/**
+	 * Crown of Spellfire (Spellfire 18) — restore the altered Innate Sorcery use
+	 * by spending 5 Sorcery Points. This performs the REAL spend via
+	 * {@link useSorceryPoint} and (re)activates the {@link crownOfSpellfire}
+	 * active state so the 60 ft fly speed lands on {@link getSpeed}.
+	 *
+	 * @returns {{ok: boolean, error?: string, cost?: number, sorceryPointsRemaining?: number, stateId?: string}}
+	 */
+	restoreCrownOfSpellfire () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCrownOfSpellfire) return {ok: false, error: "You don't have Crown of Spellfire."};
+
+		const cost = calc.crownOfSpellfireRestoreCost ?? 5;
+		const sp = this.getSorceryPoints();
+		if (sp.current < cost) return {ok: false, error: `Restoring Crown of Spellfire costs ${cost} Sorcery Points (you have ${sp.current}).`};
+		if (!this.useSorceryPoint(cost)) return {ok: false, error: "Could not spend Sorcery Points."};
+
+		let stateId = null;
+		if (!this.isStateTypeActive("crownOfSpellfire")) stateId = this.activateState("crownOfSpellfire");
+		else stateId = (this.getActiveStates().find(s => s.stateTypeId === "crownOfSpellfire") || {}).id || null;
+
+		return {ok: true, cost, sorceryPointsRemaining: this.getSorceryPoints().current, stateId};
+	}
+
+	/**
+	 * Burning Life Force (part of Crown of Spellfire, L18). Once per turn when
+	 * you take damage while your altered Innate Sorcery is active, you may
+	 * expend up to your Charisma modifier (minimum one) in Hit Point Dice and
+	 * reduce the damage by the total rolled.
+	 *
+	 * This performs the REAL mutation — it decrements the Hit Point Dice pools
+	 * via {@link adjustHitDieCurrent} (expending, NOT healing), so the dice
+	 * actually leave your pool. Only usable while the crown state is active.
+	 *
+	 * @param {object} [opts]
+	 * @param {number} [opts.diceToSpend] how many Hit Point Dice to expend (clamped to the cap and to what you have).
+	 * @param {number|null} [opts.roll=null] explicit total for the expended dice (deterministic use/tests).
+	 * @param {number} [opts.incomingDamage] damage being taken (the reduction is clamped to it).
+	 * @returns {{ok: boolean, error?: string, diceSpent?: number, reduction?: number, hitDiceRemaining?: object}}
+	 */
+	useBurningLifeForce ({diceToSpend = null, roll = null, incomingDamage = null} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCrownOfSpellfire) return {ok: false, error: "You don't have Crown of Spellfire."};
+		if (!this.isStateTypeActive("crownOfSpellfire")) {
+			return {ok: false, error: "Burning Life Force works only while your altered Innate Sorcery (Crown of Spellfire) is active."};
+		}
+
+		const cap = calc.crownBurningLifeForceMaxDice ?? Math.max(1, this.getAbilityMod("cha"));
+		let want = diceToSpend == null ? cap : Math.floor(Number(diceToSpend) || 0);
+		want = Math.max(0, Math.min(cap, want));
+		if (want <= 0) return {ok: false, error: "You must expend at least one Hit Point Die."};
+
+		// Expend the largest-faced spendable dice first — real mutation, no heal.
+		let spent = 0;
+		let rolledTotal = 0;
+		for (let i = 0; i < want; i++) {
+			const dieType = this.getLargestSpendableHitDieType();
+			if (!dieType) break;
+			this.adjustHitDieCurrent(dieType, -1);
+			spent++;
+			if (roll == null) rolledTotal += this._rollDiceExpression(`1${dieType}`);
+		}
+		if (spent === 0) return {ok: false, error: "You have no Hit Point Dice to expend."};
+
+		let reduction = roll == null ? rolledTotal : Math.floor(Number(roll) || 0);
+		if (incomingDamage != null) reduction = Math.min(reduction, Math.max(0, Math.floor(Number(incomingDamage) || 0)));
+		return {ok: true, diceSpent: spent, reduction, hitDiceRemaining: this.getHitDiceByType()};
+	}
+
+	/**
+	 * Spell Avoidance (part of Crown of Spellfire, L18). While your altered
+	 * Innate Sorcery is active, when you're subjected to an effect that lets you
+	 * make a saving throw to take only half damage, you instead take NO damage on
+	 * a success and only half on a failure.
+	 *
+	 * Returns the damage you actually take. Only rewrites the outcome while the
+	 * crown state is active; otherwise it applies the normal save-for-half rule.
+	 *
+	 * @param {object} opts
+	 * @param {boolean} opts.saveSuccess whether you succeeded on the saving throw.
+	 * @param {number} opts.damage the full damage of the effect.
+	 * @returns {{ok: boolean, error?: string, damageTaken?: number, avoided?: boolean, active?: boolean}}
+	 */
+	resolveSpellAvoidance ({saveSuccess = false, damage = 0} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCrownOfSpellfire) return {ok: false, error: "You don't have Crown of Spellfire."};
+
+		const full = Math.max(0, Math.floor(Number(damage) || 0));
+		const active = this.isStateTypeActive("crownOfSpellfire");
+		if (!active) {
+			// Normal save-for-half.
+			return {ok: true, active: false, avoided: false, damageTaken: saveSuccess ? Math.floor(full / 2) : full};
+		}
+		if (saveSuccess) return {ok: true, active: true, avoided: true, damageTaken: 0};
+		return {ok: true, active: true, avoided: false, damageTaken: Math.floor(full / 2)};
+	}
+	// #endregion
+
+	// #region Wicked Witch (Arcadia 8 Sorcerer)
+
+	/**
+	 * The three hag ancestries offered by Hag Ancestor (Wicked Witch 1), keyed by the
+	 * value stored on the character. Everything the subclass derives from the pick —
+	 * the halved-cost "specialty" school, the bonus language and the bonus skill —
+	 * lives here so the picker, the calculations and the cost maths can never drift.
+	 *
+	 * @type {Record<string, {name: string, specialty: string, language: string, skill: string, skillLabel: string}>}
+	 */
+	static HAG_ANCESTOR_KINDS = {
+		Green: {name: "Green", specialty: "illusion", language: "Sylvan", skill: "deception", skillLabel: "Deception"},
+		Night: {name: "Night", specialty: "enchantment", language: "Abyssal", skill: "insight", skillLabel: "Insight"},
+		Sea: {name: "Sea", specialty: "transmutation", language: "Primordial (Aquan)", skill: "intimidation", skillLabel: "Intimidation"},
+	};
+
+	/** Parent-feature name under which the ancestry pick is recorded. */
+	static HAG_ANCESTOR_PARENT = "Hag Ancestor";
+
+	/** Feature-option name for a given ancestry kind, e.g. `"Green Hag Ancestor"`. */
+	static getHagAncestorOptionName (kind) { return `${kind} Hag Ancestor`; }
+
+	/**
+	 * The three ancestry options as pending-choice option records. Kept as a builder
+	 * (not a frozen constant) so each option carries its own prose — the Features tab
+	 * renders it, and the pick is stored through the ordinary `chosenSubfeatures`
+	 * pipeline like every other structured sub-feature choice.
+	 * @returns {Array<{name: string, source: string, entries: string[]}>}
+	 */
+	static getHagAncestorOptions () {
+		return Object.values(CharacterSheetState.HAG_ANCESTOR_KINDS).map(def => ({
+			name: CharacterSheetState.getHagAncestorOptionName(def.name),
+			source: "Ar8",
+			description: `Magic specialty: ${def.specialty.toTitleCase()} · Language: ${def.language} · Skill: ${def.skillLabel}`,
+			entries: [
+				`Your ancestor was a ${def.name.toLowerCase()} hag. Your magic specialty is ${def.specialty}, `
+				+ `you can speak, read, and write ${def.language}, and you gain proficiency in the ${def.skillLabel} skill.`,
+			],
+		}));
+	}
+
+	/**
+	 * The chosen hag ancestry (`"Green"` / `"Night"` / `"Sea"`), or null.
+	 *
+	 * Read from the durable `chosenSubfeatures` record first, falling back to a present
+	 * feature — Builder / Quick Build add the sub-feature without always leaving a
+	 * pending-choice record behind, exactly as {@link getChosenBlessedStrikesOption} has
+	 * to cope with.
+	 * @returns {?string}
+	 */
+	getHagAncestorKind () {
+		const match = (name) => {
+			const m = /^(green|night|sea)\b/i.exec(String(name || "").trim());
+			if (!m) return null;
+			return m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
+		};
+		const rec = (this._data.chosenSubfeatures || []).find(r =>
+			String(r.parent || "").toLowerCase() === CharacterSheetState.HAG_ANCESTOR_PARENT.toLowerCase());
+		if (rec) {
+			const kind = match(rec.name);
+			if (kind) return kind;
+		}
+		const feat = (this._data.features || []).find(f =>
+			String(f.parentFeature || "").toLowerCase() === CharacterSheetState.HAG_ANCESTOR_PARENT.toLowerCase()
+			&& match(f.name));
+		return feat ? match(feat.name) : null;
+	}
+
+	/**
+	 * The school of magic that halves Clever Little Witch / Coven Calling costs, or null
+	 * when no ancestry has been chosen yet.
+	 * @returns {?string}
+	 */
+	getHagAncestorSpecialtySchool () {
+		const kind = this.getHagAncestorKind();
+		return kind ? CharacterSheetState.HAG_ANCESTOR_KINDS[kind].specialty : null;
+	}
+
+	/**
+	 * Seed the Hag Ancestor ancestry pick, if the feature is present and no ancestry has
+	 * been chosen yet. Idempotent (the pending queue dedupes by signature), so it is safe
+	 * to call from the feature-add path AND from the pending-choice drain that Builder,
+	 * Level-Up and Quick Build all read — which is what makes the choice surface in all
+	 * three wizards without three copies of this code.
+	 * @returns {boolean} true if a new choice was queued.
+	 * @private
+	 */
+	_ensureHagAncestorChoice () {
+		const feature = (this._data.features || []).find(f =>
+			String(f.name || "").toLowerCase() === CharacterSheetState.HAG_ANCESTOR_PARENT.toLowerCase());
+		if (!feature) return false;
+		if (this.getHagAncestorKind()) return false;
+		return this.addPendingFeatureChoice({
+			featureName: feature.name,
+			featureId: feature.id || feature.name,
+			featureSource: feature.source,
+			featureClass: feature.className,
+			featureClassSource: feature.classSource,
+			level: feature.level,
+			kind: "subfeature",
+			options: CharacterSheetState.getHagAncestorOptions(),
+			count: 1,
+		});
+	}
+
+	// ── Granny's Gifts: the long-rest ward ──────────────────────────────────────
+
+	/** Stable display name of the named modifiers the ward installs. */
+	static GRANNYS_WARD_MODIFIER_NAME = "Granny's Gifts (Ancestral Ward)";
+
+	/**
+	 * Granny's Gifts (Wicked Witch 1), second half: "When you finish a long rest, choose
+	 * yourself or a creature within 30 feet of you that you can see. The target has
+	 * advantage on saving throws against being charmed or frightened until the end of
+	 * your next long rest or until you die."
+	 *
+	 * The ward is a genuine mechanical grant when you keep it for yourself — two
+	 * conditional `save:advantage:*` named modifiers, which flow through the same
+	 * per-roll opt-in path as every other sub-typed conditional. Pointing it at an ally
+	 * records the recipient without touching your own saves, which is the only honest
+	 * model: the sheet tracks one character.
+	 *
+	 * @param {string} [target="self"] `"self"` or an ally's name.
+	 * @param {object} [opts]
+	 * @param {number} [opts.distance=0] how far away the ally is, in feet. The 30 ft
+	 *        clause is a real limit, so a target beyond `grannysWardRange` is refused.
+	 * @returns {{ok: boolean, error?: string, target?: string, isSelf?: boolean, conditions?: string[], range?: number}}
+	 */
+	setGrannysWardTarget (target = "self", {distance = 0} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasGrannysGifts) return {ok: false, error: "You don't have Granny's Gifts."};
+		const name = String(target || "").trim() || "self";
+		const isSelf = name.toLowerCase() === "self" || name.toLowerCase() === "yourself";
+
+		const range = calc.grannysWardRange ?? 30;
+		const dist = isSelf ? 0 : Math.max(0, Math.floor(Number(distance) || 0));
+		if (dist > range) {
+			return {ok: false, error: `Granny's Gifts only reaches a creature within ${range} feet.`, range};
+		}
+
+		this.clearGrannysWard();
+
+		const conditions = calc.grannysWardConditions || ["charmed", "frightened"];
+		if (isSelf) {
+			conditions.forEach(condition => {
+				this.addNamedModifier({
+					name: CharacterSheetState.GRANNYS_WARD_MODIFIER_NAME,
+					type: `save:advantage:${condition}`,
+					value: 1,
+					sourceType: "classFeature",
+					note: `Granny's Gifts — advantage on saves against being ${condition}`,
+					duration: "Until the end of your next long rest",
+				});
+			});
+		}
+
+		if (!this._data.wickedWitch) this._data.wickedWitch = {};
+		this._data.wickedWitch.grannysWard = {
+			target: isSelf ? "self" : name,
+			isSelf,
+			conditions: [...conditions],
+			range,
+			distance: dist,
+		};
+		return {ok: true, target: isSelf ? "self" : name, isSelf, conditions: [...conditions], range};
+	}
+
+	/** The active Granny's Gifts ward, or null. */
+	getGrannysWard () {
+		return this._data.wickedWitch?.grannysWard || null;
+	}
+
+	/** Remove the ward and any modifiers it installed. Idempotent. */
+	clearGrannysWard () {
+		(this._data.namedModifiers || [])
+			.filter(m => m.name === CharacterSheetState.GRANNYS_WARD_MODIFIER_NAME)
+			.map(m => m.id)
+			.forEach(id => this.removeNamedModifier(id));
+		if (this._data.wickedWitch) this._data.wickedWitch.grannysWard = null;
+		return true;
+	}
+
+	// ── Clever Little Witch / Coven Calling ─────────────────────────────────────
+
+	/**
+	 * Sorcery-Point cost to throw a spell back with Clever Little Witch (Wicked Witch 6).
+	 *
+	 * RAW: "spend a number of sorcery points equal to the spell's level … and if it is
+	 * from your ancestor's specialty school, it costs half the number of sorcery points
+	 * (rounded down)." The halving is the whole reason the ancestry pick has to be a real
+	 * stored choice rather than flavour, and the floor means a 1st-level specialty spell
+	 * is free.
+	 *
+	 * @param {number} spellLevel 1–9.
+	 * @param {?string} [school] school name or 5etools single-letter code.
+	 * @returns {?number} cost in Sorcery Points, or null for an invalid level.
+	 */
+	getCleverLittleWitchCost (spellLevel, school = null) {
+		const lvl = Math.floor(Number(spellLevel));
+		if (!Number.isFinite(lvl) || lvl < 1 || lvl > 9) return null;
+		return this.isHagSpecialtySchool(school) ? Math.floor(lvl / 2) : lvl;
+	}
+
+	/**
+	 * True when `school` is the school your hag ancestor specialises in. Accepts the
+	 * 5etools single-letter school codes (`"I"`, `"E"`, `"T"`) as well as full names,
+	 * because spell records on the sheet carry the letter form.
+	 * @param {?string} school
+	 * @returns {boolean}
+	 */
+	isHagSpecialtySchool (school) {
+		const specialty = this.getHagAncestorSpecialtySchool();
+		if (!specialty || !school) return false;
+		const SCHOOL_BY_CODE = {a: "abjuration", c: "conjuration", d: "divination", e: "enchantment", v: "evocation", i: "illusion", n: "necromancy", t: "transmutation"};
+		const raw = String(school).trim().toLowerCase();
+		const normalized = raw.length === 1 ? (SCHOOL_BY_CODE[raw] || raw) : raw;
+		return normalized === specialty;
+	}
+
+	/**
+	 * Clever Little Witch (Wicked Witch 6). Spends the computed Sorcery Points and reports
+	 * the DC / attack bonus the reflected spell uses (yours, not the original caster's).
+	 *
+	 * From level 18 (Coven Calling) the same reaction may instead throw back any spell you
+	 * saw the triggering creature cast in the last minute — pass `{recalled: true}`, which
+	 * is refused until Coven Calling is online.
+	 *
+	 * @param {object} opts
+	 * @param {number} opts.spellLevel level of the spell being reflected (1–9).
+	 * @param {?string} [opts.school] the spell's school, for the specialty discount.
+	 * @param {boolean} [opts.recalled=false] Coven Calling's "any spell you saw it cast".
+	 * @param {number} [opts.distance=0] distance in feet to the ally targeted by the spell.
+	 * @returns {{ok: boolean, error?: string, cost?: number, discounted?: boolean, spellSaveDc?: number, spellAttackBonus?: number, sorceryPointsRemaining?: number}}
+	 */
+	useCleverLittleWitch ({spellLevel, school = null, recalled = false, distance = 0} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCleverLittleWitch) return {ok: false, error: "You don't have Clever Little Witch."};
+		if (recalled && !calc.hasCovenCalling) {
+			return {ok: false, error: "Throwing back a spell you merely saw cast requires Coven Calling (18th level)."};
+		}
+		const range = calc.cleverLittleWitchRange ?? 15;
+		const dist = Math.max(0, Math.floor(Number(distance) || 0));
+		if (dist > range) return {ok: false, error: `Clever Little Witch only protects you and allies within ${range} feet.`, range};
+
+		const cost = this.getCleverLittleWitchCost(spellLevel, school);
+		if (cost == null) return {ok: false, error: "Clever Little Witch only works on spells of 1st level or higher."};
+
+		const sp = this.getSorceryPoints();
+		if (sp.current < cost) return {ok: false, error: `That costs ${cost} Sorcery Points (you have ${sp.current}).`, cost};
+		// A halved 1st-level specialty spell costs 0 — nothing to spend, but still a use.
+		if (cost > 0 && !this.useSorceryPoint(cost)) return {ok: false, error: "Could not spend Sorcery Points."};
+
+		return {
+			ok: true,
+			cost,
+			discounted: this.isHagSpecialtySchool(school),
+			recalled: !!recalled,
+			spellSaveDc: this.getSpellSaveDc(),
+			spellAttackBonus: this.getSpellAttackBonus(),
+			sorceryPointsRemaining: this.getSorceryPoints().current,
+		};
+	}
+
+	/**
+	 * Coven Calling (Wicked Witch 18), second half. Two hag-like duplicates appear in your
+	 * space for 2 Sorcery Points; each may take one action to cast a spell you know of
+	 * 1st–3rd level with an instantaneous duration, for its level in Sorcery Points.
+	 *
+	 * Tracked as a first-class resource rather than prose because both halves cost the
+	 * real Sorcery Point pool and both are exhaustible.
+	 *
+	 * @returns {{ok: boolean, error?: string, count?: number, sorceryPointsRemaining?: number}}
+	 */
+	conjureCovenDuplicates () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasCovenCalling) return {ok: false, error: "You don't have Coven Calling."};
+		const cost = calc.covenDuplicateCost ?? 2;
+		const sp = this.getSorceryPoints();
+		if (sp.current < cost) return {ok: false, error: `Coven Calling costs ${cost} Sorcery Points (you have ${sp.current}).`};
+		if (!this.useSorceryPoint(cost)) return {ok: false, error: "Could not spend Sorcery Points."};
+
+		const count = calc.covenDuplicateCount ?? 2;
+		if (!this._data.wickedWitch) this._data.wickedWitch = {};
+		this._data.wickedWitch.covenDuplicates = {
+			count,
+			remaining: count,
+			maxSpellLevel: calc.covenDuplicateMaxSpellLevel ?? 3,
+		};
+		return {ok: true, count, sorceryPointsRemaining: this.getSorceryPoints().current};
+	}
+
+	/** The active Coven Calling duplicates, or null. */
+	getCovenDuplicates () {
+		return this._data.wickedWitch?.covenDuplicates || null;
+	}
+
+	/**
+	 * Spend one duplicate's action to cast a known instantaneous spell of 1st–3rd level,
+	 * paying its level in Sorcery Points.
+	 * @param {number} spellLevel 1–3.
+	 * @returns {{ok: boolean, error?: string, cost?: number, duplicatesRemaining?: number, sorceryPointsRemaining?: number}}
+	 */
+	castCovenDuplicateSpell (spellLevel) {
+		const dupes = this.getCovenDuplicates();
+		if (!dupes || dupes.remaining <= 0) return {ok: false, error: "You have no Coven Calling duplicates left to act."};
+		const lvl = Math.floor(Number(spellLevel));
+		if (!Number.isFinite(lvl) || lvl < 1 || lvl > (dupes.maxSpellLevel ?? 3)) {
+			return {ok: false, error: `A duplicate can only cast a spell of 1st to ${dupes.maxSpellLevel ?? 3}rd level.`};
+		}
+		const sp = this.getSorceryPoints();
+		if (sp.current < lvl) return {ok: false, error: `That costs ${lvl} Sorcery Points (you have ${sp.current}).`, cost: lvl};
+		if (!this.useSorceryPoint(lvl)) return {ok: false, error: "Could not spend Sorcery Points."};
+
+		dupes.remaining -= 1;
+		return {ok: true, cost: lvl, duplicatesRemaining: dupes.remaining, sorceryPointsRemaining: this.getSorceryPoints().current};
+	}
+
+	/** Dismiss the Coven Calling duplicates. */
+	dismissCovenDuplicates () {
+		if (!this._data.wickedWitch?.covenDuplicates) return false;
+		this._data.wickedWitch.covenDuplicates = null;
+		return true;
+	}
+
+	// ── Fly, My Pretty ─────────────────────────────────────────────────────────
+
+	/**
+	 * Fly, My Pretty (Wicked Witch 14). Enchant one Small or Medium object on a long rest.
+	 * Enchanting a new one un-enchants the previous, per RAW, so this replaces rather than
+	 * stacks — and dismounts you if you were riding the old one.
+	 *
+	 * @param {object} [opts]
+	 * @param {string} [opts.item="Broom"] the object enchanted.
+	 * @param {string} [opts.commandWord="Fly"] the word that starts/stops the hover.
+	 * @returns {{ok: boolean, error?: string, item?: string, commandWord?: string, flySpeed?: number, replaced?: ?string}}
+	 */
+	enchantFlyingItem ({item = "Broom", commandWord = "Fly"} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasFlyMyPretty) return {ok: false, error: "You don't have Fly, My Pretty."};
+		const previous = this.getFlyingItem();
+		if (previous && this.isStateActive?.("flyMyPretty")) this.deactivateState("flyMyPretty");
+		if (!this._data.wickedWitch) this._data.wickedWitch = {};
+		this._data.wickedWitch.flyingItem = {
+			item: String(item || "Broom").trim() || "Broom",
+			commandWord: String(commandWord || "Fly").trim() || "Fly",
+			flySpeed: calc.flyMyPrettyFlySpeed ?? 60,
+		};
+		return {
+			ok: true,
+			...this._data.wickedWitch.flyingItem,
+			replaced: previous ? previous.item : null,
+		};
+	}
+
+	/** The currently enchanted flying object, or null. */
+	getFlyingItem () {
+		return this._data.wickedWitch?.flyingItem || null;
+	}
+
+	/** Un-enchant the flying object (and stop riding it). */
+	clearFlyingItem () {
+		if (!this._data.wickedWitch?.flyingItem) return false;
+		if (this.isStateActive?.("flyMyPretty")) this.deactivateState("flyMyPretty");
+		this._data.wickedWitch.flyingItem = null;
+		return true;
+	}
+	// #endregion
+
+	// #region Lunar Sorcery (DSotDQ Sorcerer)
+
+	/** Active-state ids for the three Lunar Embodiment phases, in table order. */
+	static LUNAR_PHASE_STATE_IDS = ["lunarPhaseFull", "lunarPhaseNew", "lunarPhaseCrescent"];
+
+	/**
+	 * The three Lunar Embodiment phases, fully declarative.
+	 *
+	 * Everything the subclass keys off a phase lives here: the schools Lunar Boons
+	 * discounts, the 1st-level lunar spell you can cast free, the Lunar Empowerment
+	 * benefit, and the Lunar Phenomenon burst. Nothing downstream branches on a phase
+	 * id — it looks the phase up and reads the field it needs.
+	 *
+	 * `schools` are 5etools school codes (A abjuration, D divination, E enchantment,
+	 * N necromancy, I illusion, T transmutation) so they can be compared against a
+	 * spell object's `school` without a lookup table.
+	 */
+	static LUNAR_PHASES = [
+		{
+			id: "full",
+			name: "Full Moon",
+			icon: "🌕",
+			stateTypeId: "lunarPhaseFull",
+			schools: ["A", "D"],
+			schoolNames: ["abjuration", "divination"],
+			freeCastSpell: {name: "Shield", source: "PHB", level: 1},
+			empowerment: {
+				summary: "Bonus action: shed bright light in a 10-foot radius (dim light 10 feet beyond), or douse it. You and creatures of your choice have advantage on Intelligence (Investigation) and Wisdom (Perception) checks inside the bright light.",
+				brightRadius: 10,
+				dimRadius: 20,
+				requiresMoonlight: true,
+			},
+			phenomenon: {
+				summary: "Each creature of your choice within 30 feet must succeed on a Constitution save or be blinded until the end of its next turn. One creature of your choice in the area regains 3d8 hit points.",
+				range: 30,
+				saveAbility: "con",
+				condition: "blinded",
+				healing: "3d8",
+			},
+		},
+		{
+			id: "new",
+			name: "New Moon",
+			icon: "🌑",
+			stateTypeId: "lunarPhaseNew",
+			schools: ["E", "N"],
+			schoolNames: ["enchantment", "necromancy"],
+			freeCastSpell: {name: "Ray of Sickness", source: "PHB", level: 1},
+			empowerment: {
+				summary: "You have advantage on Dexterity (Stealth) checks. While you are entirely in darkness, attack rolls have disadvantage against you.",
+				requiresDarkness: true,
+			},
+			phenomenon: {
+				summary: "Each creature of your choice within 30 feet must succeed on a Dexterity save or take 3d10 necrotic damage and have its speed reduced to 0 until the end of its next turn. You become invisible until the end of your next turn, or until you attack or cast a spell.",
+				range: 30,
+				saveAbility: "dex",
+				damage: "3d10",
+				damageType: "necrotic",
+				condition: "invisible",
+			},
+		},
+		{
+			id: "crescent",
+			name: "Crescent Moon",
+			icon: "🌒",
+			stateTypeId: "lunarPhaseCrescent",
+			schools: ["I", "T"],
+			schoolNames: ["illusion", "transmutation"],
+			freeCastSpell: {name: "Color Spray", source: "PHB", level: 1},
+			empowerment: {
+				summary: "You have resistance to necrotic and radiant damage.",
+				resistances: ["necrotic", "radiant"],
+			},
+			phenomenon: {
+				summary: "Teleport to an unoccupied space you can see within 60 feet, optionally bringing one willing creature within 5 feet of you. You and that creature gain resistance to all damage until the start of your next turn.",
+				range: 60,
+				teleport: 60,
+				allyRange: 5,
+			},
+		},
+	];
+
+	/** The Lunar Spells table (DSotDQ p. 34), keyed by the sorcerer level that grants the row. */
+	static LUNAR_SPELL_TABLE = [
+		{level: 1, full: "Shield", new: "Ray of Sickness", crescent: "Color Spray"},
+		{level: 3, full: "Lesser Restoration", new: "Blindness/Deafness", crescent: "Alter Self"},
+		{level: 5, full: "Dispel Magic", new: "Vampiric Touch", crescent: "Phantom Steed"},
+		{level: 7, full: "Death Ward", new: "Confusion", crescent: "Hallucinatory Terrain"},
+		{level: 9, full: "Rary's Telepathic Bond", new: "Hold Monster", crescent: "Mislead"},
+	];
+
+	/** Sorcery Point cost of a Waxing and Waning phase change (bonus action, sorcerer 6). */
+	static LUNAR_PHASE_CHANGE_COST = 1;
+	/** Sorcery Point cost of re-using Lunar Phenomenon before a long rest (sorcerer 18). */
+	static LUNAR_PHENOMENON_REUSE_COST = 5;
+
+	/** @returns {object|null} The phase descriptor with the given id. */
+	static getLunarPhaseDefinition (phaseId) {
+		const key = `${phaseId || ""}`.toLowerCase();
+		return CharacterSheetState.LUNAR_PHASES.find(p => p.id === key || p.name.toLowerCase() === key) || null;
+	}
+
+	/**
+	 * Sorcerer level of the Lunar Sorcery class entry, or 0 when the character is not a
+	 * Lunar sorcerer.
+	 * @returns {number}
+	 */
+	getLunarSorceryLevel () {
+		return this._getLunarSorceryClass()?.level || 0;
+	}
+
+	/**
+	 * The class level at which the subclass itself comes online: 1 on the PHB-2014
+	 * chassis, 3 on the XPHB-2024 one (which is where the subclass feature is pinned in
+	 * `data/class/class-sorcerer.json`).
+	 * @returns {number}
+	 */
+	getLunarSubclassLevel () {
+		const cls = this._getLunarSorceryClass();
+		if (!cls) return 0;
+		return (cls.source === "XPHB" || cls.subclass?.classSource === "XPHB") ? 3 : 1;
+	}
+
+	/** @returns {boolean} True once Lunar Embodiment is actually online. */
+	hasLunarSorcery () {
+		const level = this.getLunarSorceryLevel();
+		return level > 0 && level >= this.getLunarSubclassLevel();
+	}
+
+	/**
+	 * Current Lunar Embodiment phase id, defaulting to Full Moon (the first column of
+	 * the Lunar Spells table) so a freshly built sorcerer is never phase-less.
+	 * @returns {string|null} `"full" | "new" | "crescent"`, or null without the subclass.
+	 */
+	getLunarPhase () {
+		if (!this.hasLunarSorcery()) return null;
+		const stored = CharacterSheetState.getLunarPhaseDefinition(this._data.lunarPhase);
+		return stored ? stored.id : "full";
+	}
+
+	/**
+	 * Full descriptor for the current (or a named) phase, with the runtime flags folded
+	 * in so a caller never has to reach into `_data`.
+	 * @param {string} [phaseId] defaults to the current phase.
+	 * @returns {object|null}
+	 */
+	getLunarPhaseInfo (phaseId = null) {
+		const id = phaseId || this.getLunarPhase();
+		const def = CharacterSheetState.getLunarPhaseDefinition(id);
+		if (!def) return null;
+		const level = this.getLunarSorceryLevel();
+		return {
+			...def,
+			isCurrent: def.id === this.getLunarPhase(),
+			empowermentActive: level >= 14,
+			phenomenonActive: level >= 18,
+			moonlightShed: !!this._data.lunarMoonlight,
+			inDarkness: !!this._data.lunarInDarkness,
+		};
+	}
+
+	/** @returns {Array<object>} All three phases, each as {@link getLunarPhaseInfo} shape. */
+	getLunarPhases () {
+		if (!this.hasLunarSorcery()) return [];
+		return CharacterSheetState.LUNAR_PHASES.map(p => this.getLunarPhaseInfo(p.id));
+	}
+
+	/**
+	 * Set the Lunar Embodiment phase. THE single writer of `_data.lunarPhase`.
+	 *
+	 * Syncing the three `lunarPhase*` active states is what makes the phase mechanically
+	 * real: Lunar Empowerment's resistances and advantage reach `getResistances()` /
+	 * `getAdvantageState()` through the ordinary active-state pipeline rather than a
+	 * bespoke branch in either getter.
+	 *
+	 * @param {string} phaseId `"full" | "new" | "crescent"` (phase names also accepted).
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.spendSorceryPoint=false] charge the Waxing and Waning cost.
+	 * @returns {{ok: boolean, error?: string, phase?: string, previousPhase?: string|null, spent?: number}}
+	 */
+	setLunarPhase (phaseId, {spendSorceryPoint = false} = {}) {
+		if (!this.hasLunarSorcery()) return {ok: false, error: "You don't have Lunar Embodiment."};
+		const def = CharacterSheetState.getLunarPhaseDefinition(phaseId);
+		if (!def) return {ok: false, error: `Unknown lunar phase "${phaseId}".`};
+
+		const previousPhase = this.getLunarPhase();
+		let spent = 0;
+		if (spendSorceryPoint && def.id !== previousPhase) {
+			const cost = CharacterSheetState.LUNAR_PHASE_CHANGE_COST;
+			if (!this.useSorceryPoint(cost)) return {ok: false, error: `Waxing and Waning costs ${cost} sorcery point.`, previousPhase};
+			spent = cost;
+		}
+
+		this._data.lunarPhase = def.id;
+		// The moonlight you shed is a Full Moon benefit; leaving the phase douses it.
+		if (def.id !== "full") this._data.lunarMoonlight = false;
+		this._syncLunarPhaseStates();
+		return {ok: true, phase: def.id, previousPhase, spent};
+	}
+
+	/**
+	 * Waxing and Waning (Lunar Sorcery 6): a bonus action and 1 sorcery point to change
+	 * phase. Refused below sorcerer 6 — before then the phase is only chosen on a long
+	 * rest, and that gate IS the feature.
+	 * @param {string} phaseId
+	 * @returns {{ok: boolean, error?: string, phase?: string, previousPhase?: string|null, spent?: number, action?: string}}
+	 */
+	changeLunarPhase (phaseId) {
+		if (this.getLunarSorceryLevel() < 6) return {ok: false, error: "Waxing and Waning is a 6th-level Lunar Sorcery feature."};
+		const def = CharacterSheetState.getLunarPhaseDefinition(phaseId);
+		if (def && def.id === this.getLunarPhase()) return {ok: false, error: "You are already in that phase."};
+		const res = this.setLunarPhase(phaseId, {spendSorceryPoint: true});
+		return res.ok ? {...res, action: "bonus"} : res;
+	}
+
+	/**
+	 * Choose the phase that manifests through your magic after a long rest. Free, per
+	 * Lunar Embodiment ("Whenever you finish a long rest, you can choose…").
+	 * @param {string} phaseId
+	 */
+	chooseLunarPhaseOnRest (phaseId) {
+		return this.setLunarPhase(phaseId, {spendSorceryPoint: false});
+	}
+
+	/**
+	 * Reconcile the three phase active-states with `_data.lunarPhase`.
+	 * Idempotent, and a no-op for a character without the subclass.
+	 * @private
+	 */
+	_syncLunarPhaseStates () {
+		const phase = this.getLunarPhase();
+		for (const stateTypeId of CharacterSheetState.LUNAR_PHASE_STATE_IDS) {
+			const def = CharacterSheetState.LUNAR_PHASES.find(p => p.stateTypeId === stateTypeId);
+			if (phase && def?.id === phase) this.activateState(stateTypeId);
+			else this.deactivateState(stateTypeId);
+		}
+	}
+
+	/**
+	 * Full Moon's Lunar Empowerment light (bonus action to shed or douse). Toggling it
+	 * is what gates the Investigation / Perception advantage, so this is a real switch
+	 * and not a note.
+	 * @param {boolean} [on] omit to toggle.
+	 * @returns {{ok: boolean, error?: string, shed?: boolean, brightRadius?: number, dimRadius?: number, action?: string}}
+	 */
+	toggleLunarMoonlight (on = null) {
+		if (this.getLunarSorceryLevel() < 14) return {ok: false, error: "Lunar Empowerment is a 14th-level Lunar Sorcery feature."};
+		if (this.getLunarPhase() !== "full") return {ok: false, error: "Shedding moonlight is a Full Moon benefit."};
+		const next = on == null ? !this._data.lunarMoonlight : !!on;
+		this._data.lunarMoonlight = next;
+		const empowerment = CharacterSheetState.getLunarPhaseDefinition("full").empowerment;
+		return {ok: true, shed: next, brightRadius: empowerment.brightRadius, dimRadius: empowerment.dimRadius, action: "bonus"};
+	}
+
+	/** @returns {boolean} Whether Full Moon's Lunar Empowerment light is currently lit. */
+	isLunarMoonlightShed () { return !!this._data.lunarMoonlight; }
+
+	/**
+	 * New Moon's Lunar Empowerment gate — "while you are entirely in darkness". The
+	 * sheet has no lighting model, so the player asserts it and the disadvantage
+	 * against attacks toward them follows mechanically.
+	 * @param {boolean} [on] omit to toggle.
+	 */
+	setLunarInDarkness (on = null) {
+		const next = on == null ? !this._data.lunarInDarkness : !!on;
+		this._data.lunarInDarkness = next;
+		return next;
+	}
+
+	/** @returns {boolean} */
+	isLunarInDarkness () { return !!this._data.lunarInDarkness; }
+
+	/**
+	 * The Lunar Spells table rows the character has actually unlocked.
+	 * @returns {Array<{level: number, full: string, new: string, crescent: string}>}
+	 */
+	getLunarSpellTable () {
+		const level = this.getLunarSorceryLevel();
+		if (!this.hasLunarSorcery()) return [];
+		return CharacterSheetState.LUNAR_SPELL_TABLE.filter(row => level >= row.level);
+	}
+
+	/**
+	 * Every lunar spell of one phase the character has unlocked, in table order.
+	 * @param {string} [phaseId] defaults to the current phase.
+	 * @returns {string[]}
+	 */
+	getLunarSpellsForPhase (phaseId = null) {
+		const def = CharacterSheetState.getLunarPhaseDefinition(phaseId || this.getLunarPhase());
+		if (!def) return [];
+		return this.getLunarSpellTable().map(row => row[def.id]);
+	}
+
+	/**
+	 * The free 1st-level lunar casts currently on offer.
+	 *
+	 * Lunar Embodiment (1) grants ONE — the 1st-level spell of your current phase, once
+	 * per long rest. Waxing and Waning (6) widens that to one per phase, each once per
+	 * long rest, but still only castable "provided your current phase is the same as the
+	 * lunar phase spell". So the number of ROWS grows at 6 while the phase gate stays.
+	 *
+	 * @returns {Array<{phase: string, phaseName: string, spell: string, source: string,
+	 *   level: number, used: boolean, available: boolean, reason: string|null}>}
+	 */
+	getLunarFreeCastOptions () {
+		if (!this.hasLunarSorcery()) return [];
+		const level = this.getLunarSorceryLevel();
+		const currentPhase = this.getLunarPhase();
+		const used = this._data.lunarFreeCastsUsed || [];
+		const phases = level >= 6
+			? CharacterSheetState.LUNAR_PHASES
+			: CharacterSheetState.LUNAR_PHASES.filter(p => p.id === currentPhase);
+
+		return phases.map(p => {
+			const isUsed = used.includes(p.id);
+			const isCurrent = p.id === currentPhase;
+			let reason = null;
+			if (isUsed) reason = "Already cast — recovers on a long rest.";
+			else if (!isCurrent) reason = `Requires the ${p.name} phase.`;
+			return {
+				phase: p.id,
+				phaseName: p.name,
+				spell: p.freeCastSpell.name,
+				source: p.freeCastSpell.source,
+				level: p.freeCastSpell.level,
+				used: isUsed,
+				available: !isUsed && isCurrent,
+				reason,
+			};
+		});
+	}
+
+	/**
+	 * Cast a lunar phase spell without expending a spell slot.
+	 * @param {string} spellName the 1st-level lunar spell, or the phase id/name.
+	 * @returns {{ok: boolean, error?: string, spell?: string, phase?: string, slotSpent?: boolean}}
+	 */
+	castLunarFreeSpell (spellName) {
+		const key = `${spellName || ""}`.trim().toLowerCase();
+		const options = this.getLunarFreeCastOptions();
+		if (!options.length) return {ok: false, error: "You don't have Lunar Embodiment."};
+		const match = options.find(o => o.spell.toLowerCase() === key)
+			|| options.find(o => o.phase === key || o.phaseName.toLowerCase() === key);
+		if (!match) return {ok: false, error: `"${spellName}" is not a lunar phase spell you can cast for free.`};
+		if (!match.available) return {ok: false, error: match.reason || "Not available.", spell: match.spell, phase: match.phase};
+
+		this._data.lunarFreeCastsUsed = [...(this._data.lunarFreeCastsUsed || []), match.phase];
+		return {ok: true, spell: match.spell, phase: match.phase, slotSpent: false};
+	}
+
+	/**
+	 * Lunar Boons (6): the schools of magic your current phase discounts.
+	 * @returns {{schools: string[], schoolNames: string[]}}
+	 */
+	getLunarBoonSchools () {
+		const def = CharacterSheetState.getLunarPhaseDefinition(this.getLunarPhase());
+		if (!def || this.getLunarSorceryLevel() < 6) return {schools: [], schoolNames: []};
+		return {schools: [...def.schools], schoolNames: [...def.schoolNames]};
+	}
+
+	/** @returns {{current: number, max: number}} Lunar Boons uses (proficiency bonus per long rest). */
+	getLunarBoonUses () {
+		const res = (this.getResources() || []).find(r => r.name === CharacterSheetState.LUNAR_BOONS_RESOURCE);
+		return {current: res?.current ?? 0, max: res?.max ?? 0};
+	}
+
+	/**
+	 * Whether Lunar Boons would shave a sorcery point off a metamagic applied to a spell
+	 * of the given school, and why not when it wouldn't.
+	 *
+	 * @param {string} school a 5etools school code ("A"), or a school name ("abjuration").
+	 * @returns {{applies: boolean, reduction: number, school: string|null, usesRemaining: number, reason: string|null}}
+	 */
+	getLunarBoonDiscount (school) {
+		const usesRemaining = this.getLunarBoonUses().current;
+		const out = {applies: false, reduction: 0, school: null, usesRemaining, reason: null};
+		if (this.getLunarSorceryLevel() < 6) return {...out, reason: "Lunar Boons is a 6th-level Lunar Sorcery feature."};
+
+		const raw = `${school || ""}`.trim();
+		if (!raw) return {...out, reason: "No spell school."};
+		const code = raw.length === 1 ? raw.toUpperCase() : null;
+		const name = raw.toLowerCase();
+		const {schools, schoolNames} = this.getLunarBoonSchools();
+		const matches = (code && schools.includes(code)) || schoolNames.includes(name);
+		if (!matches) {
+			const phase = CharacterSheetState.getLunarPhaseDefinition(this.getLunarPhase());
+			return {...out, school: code || name, reason: `${phase?.name || "Your phase"} discounts ${schoolNames.join(" and ")} spells.`};
+		}
+		if (usesRemaining <= 0) return {...out, school: code || name, reason: "No Lunar Boons uses left — they return on a long rest."};
+		return {applies: true, reduction: 1, school: code || name, usesRemaining, reason: null};
+	}
+
+	/**
+	 * Spend one Lunar Boons use. Called by the cast path once the discounted cost has
+	 * actually been paid, so a discount that is only *displayed* never burns a use.
+	 * @param {string} school
+	 * @returns {boolean} whether a use was consumed.
+	 */
+	consumeLunarBoon (school) {
+		if (!this.getLunarBoonDiscount(school).applies) return false;
+		const res = (this.getResources() || []).find(r => r.name === CharacterSheetState.LUNAR_BOONS_RESOURCE);
+		if (!res || res.current <= 0) return false;
+		res.current -= 1;
+		return true;
+	}
+
+	/**
+	 * Lunar Phenomenon (18): the burst tied to your current phase, plus whether you can
+	 * pay for it right now.
+	 * @returns {object|null} null below sorcerer 18.
+	 */
+	getLunarPhenomenon () {
+		if (this.getLunarSorceryLevel() < 18) return null;
+		const def = CharacterSheetState.getLunarPhaseDefinition(this.getLunarPhase());
+		if (!def) return null;
+		const res = (this.getResources() || []).find(r => r.name === CharacterSheetState.LUNAR_PHENOMENON_RESOURCE);
+		const usesRemaining = res?.current ?? 0;
+		const reuseCost = CharacterSheetState.LUNAR_PHENOMENON_REUSE_COST;
+		const sp = this.getSorceryPoints().current;
+		return {
+			phase: def.id,
+			phaseName: def.name,
+			icon: def.icon,
+			...def.phenomenon,
+			saveDc: def.phenomenon.saveAbility ? this.getSpellSaveDc() : null,
+			action: "bonus",
+			usesRemaining,
+			usesMax: res?.max ?? 0,
+			reuseCost,
+			canUseFree: usesRemaining > 0,
+			canUseForPoints: sp >= reuseCost,
+			available: usesRemaining > 0 || sp >= reuseCost,
+		};
+	}
+
+	/**
+	 * Use Lunar Phenomenon. Spends the free long-rest use first, falling back to 5
+	 * sorcery points ("unless you spend 5 sorcery points to use it again").
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.forcePoints=false] spend points even with a free use left.
+	 * @returns {{ok: boolean, error?: string, phase?: string, spentSorceryPoints?: number,
+	 *   usedFreeUse?: boolean, saveDc?: number|null, action?: string}}
+	 */
+	useLunarPhenomenon ({forcePoints = false} = {}) {
+		const info = this.getLunarPhenomenon();
+		if (!info) return {ok: false, error: "Lunar Phenomenon is an 18th-level Lunar Sorcery feature."};
+
+		if (info.canUseFree && !forcePoints) {
+			const res = (this.getResources() || []).find(r => r.name === CharacterSheetState.LUNAR_PHENOMENON_RESOURCE);
+			if (!res || res.current <= 0) return {ok: false, error: "No Lunar Phenomenon use left."};
+			res.current -= 1;
+			return {ok: true, phase: info.phase, spentSorceryPoints: 0, usedFreeUse: true, saveDc: info.saveDc, action: "bonus"};
+		}
+
+		const cost = CharacterSheetState.LUNAR_PHENOMENON_REUSE_COST;
+		if (!this.useSorceryPoint(cost)) return {ok: false, error: `Re-using Lunar Phenomenon costs ${cost} sorcery points.`};
+		return {ok: true, phase: info.phase, spentSorceryPoints: cost, usedFreeUse: false, saveDc: info.saveDc, action: "bonus"};
+	}
+
+	/**
+	 * Moon Fire (1): *sacred flame* for free, and it may be split across two creatures
+	 * within 5 feet of each other.
+	 * @returns {{spell: string, source: string, maxTargets: number, targetSeparation: number}|null}
+	 */
+	getMoonFireInfo () {
+		if (!this.hasLunarSorcery()) return null;
+		return {spell: "Sacred Flame", source: "PHB", maxTargets: 2, targetSeparation: 5};
+	}
+
+	/** Player-facing name of the Lunar Boons pool. */
+	static LUNAR_BOONS_RESOURCE = "Lunar Boons";
+	/** Player-facing name of the Lunar Phenomenon pool. */
+	static LUNAR_PHENOMENON_RESOURCE = "Lunar Phenomenon";
+
+	/**
+	 * Create / re-scale the two Lunar Sorcery pools, and make sure the character always
+	 * has a phase. Mirrors {@link _ensureWildShapeUses}: derive from the stored class
+	 * level directly, never from `getFeatureCalculations()` (which calls
+	 * `getResources()`), and only ever RAISE a max so a homebrew or item contribution is
+	 * never clobbered.
+	 * @private
+	 */
+	_ensureLunarSorceryResources () {
+		const cls = this._getLunarSorceryClass();
+		if (!cls) return;
+		const level = cls.level || 0;
+		if (level < this.getLunarSubclassLevel()) return;
+
+		if (!CharacterSheetState.getLunarPhaseDefinition(this._data.lunarPhase)) this._data.lunarPhase = "full";
+
+		const wanted = [];
+		// Lunar Boons: "a number of times equal to your proficiency bonus".
+		if (level >= 6) wanted.push({name: CharacterSheetState.LUNAR_BOONS_RESOURCE, max: this.getProficiencyBonus()});
+		// Lunar Phenomenon: one free use per long rest, then 5 sorcery points a pop.
+		if (level >= 18) wanted.push({name: CharacterSheetState.LUNAR_PHENOMENON_RESOURCE, max: 1});
+
+		this._data.resources = this._data.resources || [];
+		for (const {name, max} of wanted) {
+			if (max <= 0) continue;
+			const existing = this._data.resources.find(r => r.name === name);
+			if (!existing) {
+				this._data.resources.push({id: CryptUtil.uid(), name, current: max, max, recharge: "long"});
+				continue;
+			}
+			if ((existing.max ?? 0) >= max) continue;
+			const wasFull = (existing.current ?? 0) >= (existing.max ?? 0);
+			existing.max = max;
+			existing.current = wasFull ? max : Math.min(existing.current ?? 0, max);
+		}
+	}
+
+	/**
+	 * Long-rest housekeeping for Lunar Sorcery: the free lunar casts return, the
+	 * moonlight goes out, and the phase becomes re-choosable for free.
+	 * The two resource pools ride the ordinary `recharge: "long"` path.
+	 * @private
+	 */
+	_onLongRestLunarSorcery () {
+		if (!this._getLunarSorceryClass()) return;
+		this._data.lunarFreeCastsUsed = [];
+		this._data.lunarMoonlight = false;
+		this._syncLunarPhaseStates();
 	}
 	// #endregion
 
@@ -55475,24 +57911,18 @@ class CharacterSheetState {
 	 * @param {number} spellLevel - Effective spell level for the cast
 	 * @returns {number|null} Sorcery point cost, or null if invalid
 	 */
-	getMetamagicCost (key, spellLevel = 0, {school = null} = {}) {
+	getMetamagicCost (key, spellLevel = 0) {
 		const meta = CharacterSheetState.TGTT_METAMAGIC[key];
 		if (!meta) return null;
 
 		const effectiveLevel = Math.max(1, spellLevel || 0);
-		const base = typeof meta.cost === "number"
-			? meta.cost
-			: meta.cost === "level"
-				? effectiveLevel
-				: meta.cost === "halfLevel"
-					? Math.max(1, Math.ceil(effectiveLevel / 2))
-					: null;
-		if (base == null) return null;
+		if (typeof meta.cost === "number") return meta.cost;
 
-		// Lunar Boons (Lunar Sorcery, 6th) shaves 1 sorcery point off metamagic
-		// applied to a spell of the current phase's two schools. Callers that know
-		// the spell pass its school; everyone else gets the undiscounted cost.
-		return school ? this.getLunarBoonsDiscountedCost(base, school).cost : base;
+		switch (meta.cost) {
+			case "level": return effectiveLevel;
+			case "halfLevel": return Math.max(1, Math.ceil(effectiveLevel / 2));
+			default: return null;
+		}
 	}
 
 	/**
@@ -55506,12 +57936,18 @@ class CharacterSheetState {
 	getCastableActiveMetamagics ({spell = null, spellData = null, slotLevel = null} = {}) {
 		const currentSp = this.getSorceryPoints().current;
 		const effectiveLevel = slotLevel ?? (/** @type {*} */ (spell))?.level ?? 0;
+		// Lunar Boons (Lunar Sorcery 6): −1 sorcery point when the spell's school matches
+		// the current Lunar Embodiment phase. Resolved HERE rather than in
+		// `getMetamagicCost` because the school only exists on the spell being cast, and
+		// because a discount that is merely displayed must not burn a use — the cast path
+		// calls `consumeLunarBoon()` once the reduced cost is actually paid.
+		const spellSchool = (/** @type {*} */ (spellData))?.school ?? (/** @type {*} */ (spell))?.school ?? null;
+		const lunarBoon = spellSchool ? this.getLunarBoonDiscount(spellSchool) : null;
+		const lunarReduction = lunarBoon?.applies ? lunarBoon.reduction : 0;
 
 		return this.getKnownActiveMetamagics().map(meta => {
-			const school = (/** @type {*} */ (spellData))?.school || null;
 			const baseCost = this.getMetamagicCost(meta.key, effectiveLevel);
-			const boon = baseCost == null ? null : this.getLunarBoonsDiscountedCost(baseCost, school);
-			const cost = boon?.discounted ? boon.cost : baseCost;
+			const cost = baseCost == null ? null : Math.max(0, baseCost - lunarReduction);
 			const availability = this._getActiveMetamagicAvailability(meta.key, /** @type {*} */ ({spell, spellData, slotLevel: effectiveLevel}));
 			const isAffordable = cost != null && currentSp >= cost;
 			const unavailableReason = availability.unavailableReason
@@ -55521,7 +57957,8 @@ class CharacterSheetState {
 				...meta,
 				cost,
 				baseCost,
-				lunarBoonApplied: !!boon?.discounted,
+				lunarBoonApplied: lunarReduction > 0 && cost !== baseCost,
+				lunarBoonSchool: lunarReduction > 0 ? lunarBoon.school : null,
 				isAvailable: availability.isAvailable && isAffordable,
 				unavailableReason,
 			};

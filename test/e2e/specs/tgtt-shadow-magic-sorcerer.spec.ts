@@ -104,10 +104,12 @@ describeCharacter({
 		// The pool grows at EVERY level, so one row per matrix checkpoint
 		// with `untilLevel` — an earlier row must never be re-evaluated
 		// against a later, larger pool.
-		// NOTE: the MEGA/matrix runners only stop at levels [3, 5, 11, 17, 20]
-		// (`characterSpecFactory.ts` MATRIX_CHECKPOINTS), so a `2..2` window would
-		// never be evaluated. The long-rest probe therefore rides on the first
-		// window that IS reachable.
+		//
+		// The ladder starts at L3, not L2: an L2-2 window contains no
+		// checkpoint ([3, 5, 11, 17, 20]), so the tier-1 row never ran —
+		// and it was the only one carrying the long-rest restore probe,
+		// which therefore never ran either. Restore now lives on the
+		// first tier that actually executes.
 		{
 			level: 3,
 			untilLevel: 4,
@@ -123,10 +125,52 @@ describeCharacter({
 		{level: 20, name: "Sorcery Points", kind: "resource", resourceMax: 20},
 		// Metamagic: 2 options at L3, +1 at L10, +1 at L17. The picker is a real
 		// choice the Level-Up wizard must surface, so each tier asserts the
-		// cumulative pick count against the PHB option list.
-		{level: 3, untilLevel: 9, name: /metamagic/i, kind: "pick", pickedCount: 2, pickedFrom: METAMAGIC_POOL},
-		{level: 10, untilLevel: 16, name: /metamagic/i, kind: "pick", pickedCount: 3, pickedFrom: METAMAGIC_POOL},
-		{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4, pickedFrom: METAMAGIC_POOL},
+		// cumulative pick count against the option list.
+		//
+		// ⚠️ A NAME probe alone is not enough here, and this is a trap worth
+		// inheriting. The Features surface can list metamagic options the
+		// character has NOT picked, so a row matching a metamagic by name can
+		// pass on a character that does not know it. These `pick` rows are kept
+		// because "every CHOICE must be surfaced" is a real requirement — but
+		// each tier is BACKED by a `getKnownMetamagicKeys()` count read straight
+		// off the character, which only counts stored picks and is immune to
+		// whatever the Features tab chooses to render.
+		{level: 3, untilLevel: 9, name: /metamagic/i, kind: "pick", pickedCount: 2, pickedFrom: METAMAGIC_POOL,
+			effects: [
+				{kind: "stateCall", method: "getKnownMetamagicKeys", path: "length", exact: 2},
+				{kind: "stateCall", method: "getKnownActiveMetamagics", path: "length", min: 1},
+				// Cost table, read through the production accessor. Three shapes:
+				// a flat cost, a `"level"` cost and a `"halfLevel"` cost — the two
+				// computed branches are the ones a toggle-shaped model would have
+				// gotten wrong, which is precisely why metamagic is resolved at
+				// CAST time and not as a standing toggle.
+				{kind: "stateCall", method: "getMetamagicCost", args: ["aimed", 3], exact: 2},
+				{kind: "stateCall", method: "getMetamagicCost", args: ["twinned", 3], exact: 3},
+				{kind: "stateCall", method: "getMetamagicCost", args: ["vampiric", 3], exact: 2},
+				// …and the character's OWN castable list agrees on the cost.
+				{kind: "stateCall", method: "getCastableActiveMetamagics", args: [{slotLevel: 3}], contains: "\"cost\":"},
+			]},
+		// THE MECHANICAL EFFECT of metamagic: spending a metamagic's cost moves the
+		// real Sorcery Point pool by exactly that cost. `useSorceryPoint()` is the
+		// same method the cast path calls (charactersheet-spells.js:2180 / :2240 /
+		// :2354) once `_resolveMetamagicChoice` has picked an option, so this is the
+		// production spend, not a stand-in. Scoped to L3 ONLY (`untilLevel: 3`)
+		// because the exact before/after numbers are only knowable when the pool is
+		// exactly 3 — at later checkpoints it is larger.
+		{level: 3, untilLevel: 3, name: /font of magic/i, kind: "passive",
+			effects: [
+				{kind: "stateCall", method: "onLongRest", ignoreResult: true},
+				{kind: "stateCall", method: "getSorceryPoints", path: "current", exact: 3},
+				// 2 = Aimed Spell's cost, as reported by getMetamagicCost above.
+				{kind: "stateCall", method: "useSorceryPoint", args: [2], exact: true},
+				{kind: "stateCall", method: "getSorceryPoints", path: "current", exact: 1},
+				{kind: "stateCall", method: "onLongRest", ignoreResult: true},
+				{kind: "stateCall", method: "getSorceryPoints", path: "current", exact: 3},
+			]},
+		{level: 10, untilLevel: 16, name: /metamagic/i, kind: "pick", pickedCount: 3, pickedFrom: METAMAGIC_POOL,
+			effects: [{kind: "stateCall", method: "getKnownMetamagicKeys", path: "length", exact: 3}]},
+		{level: 17, name: /metamagic/i, kind: "pick", pickedCount: 4, pickedFrom: METAMAGIC_POOL,
+			effects: [{kind: "stateCall", method: "getKnownMetamagicKeys", path: "length", exact: 4}]},
 		{level: 20, name: /sorcerous restoration/i, kind: "passive"},
 
 		// ══ Eyes of the Dark (L1) ════════════════════════════════════════
@@ -238,8 +282,12 @@ describeCharacter({
 		// ══ Hound of Ill Omen (L6) ═══════════════════════════════════════
 		// A real CLASS_SUMMON companion built from the dire wolf, re-typed to
 		// Medium monstrosity, costing 3 Sorcery Points.
-		// Widened from `6..10`, which contained no matrix checkpoint and so ran
-		// NEVER — the whole `classSummon` probe below was silently dead.
+		//
+		// Window runs to L16 so it reaches the L11 checkpoint. At L6-10 it
+		// reached none of [3, 5, 11, 17, 20], so this entire structural
+		// block — cost, range, AC, HP, the bite attack, the summon/dismiss
+		// round trip and the scaling descriptor — never executed. The L17
+		// row below re-checks only the level-scaled temp HP.
 		{
 			level: 6,
 			untilLevel: 16,

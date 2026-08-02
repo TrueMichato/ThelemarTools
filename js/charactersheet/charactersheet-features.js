@@ -832,6 +832,21 @@ class CharacterSheetFeatures {
 			return;
 		}
 
+		// (CS-BUG-103) A feature whose active state is GATED by an unmet `requiresStates`
+		// prerequisite is hidden from `getActivatableFeatures()` — correctly, since its
+		// toggle row must not appear — which drops it out of the branch above and into the
+		// bare use decrement below. Clicking Use on Umbral Form before Innate Sorcery is
+		// running silently burned the once-per-Long-Rest use and activated nothing. Explain
+		// the gate instead; the use is untouched.
+		const unmetStateRequirements = this._state.getUnmetStateRequirementsForFeature?.(feature) || [];
+		if (unmetStateRequirements.length) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: `${feature.name} requires ${unmetStateRequirements.join(" and ")} to be active.`,
+			});
+			return;
+		}
+
 		// Plain uses-tracking features (not classified abilities): decrement the use count.
 		if (!feature.uses) return;
 		if (feature.uses.current > 0) {
@@ -1482,6 +1497,16 @@ class CharacterSheetFeatures {
 				label: "Channel Divinity DC",
 				value: calculations.channelDivinityDc,
 				title: "8 + Proficiency + Wisdom or Charisma modifier",
+			});
+		}
+
+		// Potent Spellcasting (most Cleric domains, Druid Circle of the Land / Elemental
+		// Fury): a flat modifier added to every cantrip of the granting class.
+		if (calculations.potentSpellcastingBonus > 0) {
+			stats.push({
+				label: "Cantrip Damage",
+				value: `+${calculations.potentSpellcastingBonus}`,
+				title: `Potent Spellcasting — added to the damage of every ${calculations.potentSpellcastingClass || "class"} cantrip`,
 			});
 		}
 

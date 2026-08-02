@@ -190,28 +190,6 @@ const MEGA_TIMEOUT_MS = Math.max(
 	360_000,
 	Number(process.env.PW_TIMEOUT_MS ?? 0) * 3,
 ); // Scale with the supported per-test override on contended shared machines.
-
-/**
- * Budget for a MEGA run that had to add rescue checkpoints (see
- * `_matrixCheckpointsFor`).  `MEGA_TIMEOUT_MS` is calibrated for the five base
- * stops; a rescue stop adds a level-up segment and a long rest even though its
- * matrix pass is deliberately narrow, so the budget grows with it rather than
- * letting the spec die with a bare `Test timeout` / `Target page has been
- * closed` — which reads exactly like a product bug and is not one.
- *
- * The margin is deliberately generous: a timeout that is never hit costs
- * nothing, and the failure mode it prevents costs a full 6-minute re-run to
- * diagnose.
- *
- * NB this does **not** rescue a spec that is already over budget at five
- * stops. `tgtt-arcane-archer-fighter-hochling.spec.ts` times out at L17 on an
- * unmodified base checkout too (A/B verified); that is a pre-existing problem
- * with that spec's size, not something a checkpoint change caused.
- */
-function _megaTimeoutFor (checkpoints: number[]): number {
-	const extra = Math.max(0, checkpoints.length - MATRIX_CHECKPOINTS.length);
-	return Math.round(MEGA_TIMEOUT_MS * (1 + 0.3 * extra));
-}
 const MIDTIER_TIMEOUT_MS = 180_000;
 // L5 loadout walks 4 level-ups + creation + loadout + toggle probe.
 // Empirically that needs ~6-9 minutes per spec on the slower characters
@@ -220,102 +198,8 @@ const MIDTIER_TIMEOUT_MS = 180_000;
 // down further is a separate optimisation effort.
 const L7_TIMEOUT_MS = 600_000;
 
-/**
- * The levels at which the MEGA / matrix runners stop and evaluate
- * `featuresMatrix`.  A matrix entry is only ever checked at one of these,
- * so an entry whose `[level, untilLevel]` window contains none of them is
- * dead code that reports success while asserting nothing.
- */
-const MATRIX_CHECKPOINTS = [3, 5, 11, 17, 20];
-
-/**
- * Resolve the checkpoint set a given spec's matrix should be evaluated at.
- *
- * The base checkpoints are a compromise: five stops that between them catch
- * most progressions cheaply.  But real classes have intermediate tiers that
- * fall entirely between two stops — Fighter's Indomitable is 1 use at 9-12,
- * **2 at 13-16**, 3 at 17+; the Talent's Psychic Boost is 1 / **2** / 3 on the
- * same shape.  An entry written for such a tier has a window like `13..16`
- * that contains no checkpoint, so it is **never evaluated and reports
- * success** — a silent gap that looks like coverage in review.
- *
- * Widening those windows is not a fix: the asserted value is wrong at the
- * neighbouring checkpoints by construction (that is *why* the tier exists).
- * So instead of rejecting the spec, add the stops it needs.  The runners
- * already level up through every level one at a time — a checkpoint only
- * decides where to pause and assert — so a rescue stop costs one long rest
- * and one matrix pass, and specs with no dead windows are unaffected.
- *
- * Stops are chosen greedily by the widest coverage so overlapping tiers share
- * one stop (`12..16` and `13..16` both resolve to a single stop at 13).
- *
- * A rescue stop asserts **only the entries it exists for**, returned in
- * `rescueEntriesByLevel`.  Re-running the whole matrix there would be pure
- * waste — every other entry is already covered by a base checkpoint — and it
- * is not cheap: a late full pass costs about as much as the L11 one, which is
- * enough to blow the MEGA timeout on a Fighter.
- *
- * Windows that are structurally impossible (`untilLevel` below `level`, or a
- * window entirely outside 1-20) still throw: no stop can rescue those, and
- * they are always author typos.
- *
- * Found by auditing every `featuresMatrix` in `test/e2e/specs/`: seven dead
- * windows across three specs, one of which hid an entire `classSummon` probe
- * (see CS-BUG-089).
- */
-function _matrixCheckpointsFor (
-	displayName: string,
-	featuresMatrix?: FeatureCheck[],
-): {checkpoints: number[]; rescueEntriesByLevel: Map<number, FeatureCheck[]>} {
-	const none = new Map<number, FeatureCheck[]>();
-	if (!featuresMatrix?.length) return {checkpoints: MATRIX_CHECKPOINTS, rescueEntriesByLevel: none};
-
-	const windows = featuresMatrix.map((entry, idx) => ({
-		idx,
-		entry,
-		lo: entry.level ?? 1,
-		hi: entry.untilLevel ?? 20,
-		name: String(entry.name),
-	}));
-
-	const impossible = windows.filter(w => w.lo > w.hi || w.lo > 20 || w.hi < 1);
-	if (impossible.length) {
-		throw new Error(
-			`${displayName}: ${impossible.length} featuresMatrix entr${impossible.length === 1 ? "y has an" : "ies have"} impossible level window.\n`
-			+ `${impossible.map(w => `  [${w.idx}] ${w.name} — window ${w.lo}..${w.hi}`).join("\n")}\n`
-			+ `A window must satisfy 1 <= level <= untilLevel <= 20.`,
-		);
-	}
-
-	const unreachable = windows.filter(w => !MATRIX_CHECKPOINTS.some(cp => cp >= w.lo && cp <= w.hi));
-	if (!unreachable.length) return {checkpoints: MATRIX_CHECKPOINTS, rescueEntriesByLevel: none};
-
-	let uncovered = unreachable;
-	const rescueEntriesByLevel = new Map<number, FeatureCheck[]>();
-	while (uncovered.length) {
-		// `lo` is always inside its own window, so the candidate set is never empty.
-		const candidates = [...new Set(uncovered.map(w => w.lo))];
-		let best = candidates[0];
-		let bestCount = -1;
-		for (const cand of candidates) {
-			const count = uncovered.filter(w => cand >= w.lo && cand <= w.hi).length;
-			if (count > bestCount) {
-				bestCount = count;
-				best = cand;
-			}
-		}
-		const covered = uncovered.filter(w => best >= w.lo && best <= w.hi);
-		rescueEntriesByLevel.set(best, covered.map(w => w.entry));
-		uncovered = uncovered.filter(w => !covered.includes(w));
-	}
-
-	const checkpoints = [...new Set([...MATRIX_CHECKPOINTS, ...rescueEntriesByLevel.keys()])].sort((a, b) => a - b);
-	return {checkpoints, rescueEntriesByLevel};
-}
-
 export function describeCharacter (spec: CharacterSpec): void {
 	const {preset, displayName, milestones = {}, midTierLoadout, signatureToggle, signatureToggleSkip, skipMega, skipL7, skipL3, skipL5, featuresMatrix} = spec;
-	const {checkpoints: matrixCheckpoints, rescueEntriesByLevel} = _matrixCheckpointsFor(displayName, featuresMatrix);
 	const subclassOpts = preset.subclassName
 		? {subclassName: preset.subclassName, subclassSource: preset.subclassSource, namedSubclassChoice: preset.namedSubclassChoice, preferredFeatProgressionPattern: preset.preferredFeatProgressionPattern}
 		: preset.preferredFeatProgressionPattern
@@ -476,10 +360,10 @@ export function describeCharacter (spec: CharacterSpec): void {
 		// ── L1→20 mega progression ─────────────────────────────────────
 		const mega = skipMega || !process.env.RUN_MEGA ? test.skip : test;
 		mega(`MEGA L1→20 with milestone asserts`, async ({page}) => {
-			test.setTimeout(_megaTimeoutFor(matrixCheckpoints));
+			test.setTimeout(MEGA_TIMEOUT_MS);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
 
-			const checkpoints = matrixCheckpoints;
+			const checkpoints = [3, 5, 11, 17, 20];
 			let cursor = 1;
 			for (const cp of checkpoints) {
 				if (cp <= cursor) continue;
@@ -490,7 +374,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 				if (m) await assertMilestone(charSheet, m);
 				if (featuresMatrix?.length) {
 					await charSheet.triggerLongRest();
-					await assertFeaturesMatrix(charSheet, rescueEntriesByLevel.get(cp) ?? featuresMatrix, cp);
+					await assertFeaturesMatrix(charSheet, featuresMatrix, cp);
 				}
 			}
 		});
@@ -504,9 +388,9 @@ export function describeCharacter (spec: CharacterSpec): void {
 		if (featuresMatrix?.length) {
 			const matrixGated = process.env.RUN_MATRIX ? test : test.skip;
 			matrixGated(`MEGA Features matrix L1→20`, async ({page}) => {
-				test.setTimeout(_megaTimeoutFor(matrixCheckpoints));
+				test.setTimeout(MEGA_TIMEOUT_MS);
 				const {charSheet} = await createCharacterViaWizard(page, preset);
-				const checkpoints = matrixCheckpoints;
+				const checkpoints = [3, 5, 11, 17, 20];
 				let cursor = 1;
 				for (const cp of checkpoints) {
 					if (cp <= cursor) continue;
@@ -514,7 +398,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 					cursor = cp;
 					await charSheet.expectLevel(cp);
 					await charSheet.triggerLongRest();
-					await assertFeaturesMatrix(charSheet, rescueEntriesByLevel.get(cp) ?? featuresMatrix, cp);
+					await assertFeaturesMatrix(charSheet, featuresMatrix, cp);
 				}
 			});
 		}
@@ -717,11 +601,10 @@ export function describeCharacter (spec: CharacterSpec): void {
 
 		// ── Persistence smoke (export → re-import via state) ───────────
 		test(`L1 export round-trip preserves identity`, async ({page}) => {
-			// Same wizard creation as the L1 build test, which budgets 120s — this
-			// one inherited the 60s global default and so was under-budgeted for
-			// the work it actually does. It passed only on presets whose wizard is
-			// fast; any preset with an extra step (e.g. a subclass-choice modal at
-			// L1) blew the limit inside `createCharacterViaWizard`.
+			// Same full wizard walk as the L1 smoke above, so it needs the same
+			// budget. On the default 60s it sat exactly on the edge — Shadow Magic
+			// passed at 1.0m while Lunar Sorcery timed out at `fillDetails`, which
+			// reads as a product failure and is not one.
 			test.setTimeout(120_000);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
 			const exported = await page.evaluate(() => {

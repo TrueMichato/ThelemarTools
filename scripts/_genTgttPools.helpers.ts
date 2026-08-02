@@ -198,6 +198,131 @@ export function buildPactBoonChecks (
 	);
 }
 
+/**
+ * TGTT Combat Methods — the pick-list shared by Barbarian / Fighter / Monk /
+ * Paladin / Ranger / Rogue.
+ *
+ * This helper is shaped differently from every other `build*Checks` above, for
+ * two measured reasons.
+ *
+ * **1. WHICH methods a character holds is not deterministic.** Tradition access
+ * is a build-time choice, so two characters of the same class, subclass and
+ * level routinely hold disjoint method sets — spawning the same build
+ * repeatedly yields a different tradition mix each time. Anchoring on specific
+ * method names would be flaky. What IS deterministic is HOW MANY they hold:
+ * the class table's "Methods Known" column, plus any outright grants.
+ *
+ * **2. `kind: "pick"` over `TGTT_COMBAT_METHODS_BY_TRADITION` is UNSOUND, and
+ * this was measured, not assumed.** That constant unions to 321 name patterns,
+ * many of them generic single words, and they collide with features that are
+ * not combat methods at all. A wizard-built Centaur Ranger 3 scored 4 matches
+ * against a true count of 3: the extra was `Charge`, a *Centaur racial trait*
+ * sharing a name with a combat method. A collision count varies by race and
+ * class, so such an assertion is neither tight nor stable — it can be satisfied
+ * by features that are not combat methods.
+ *
+ * So the count is asserted through the product's own structural API instead.
+ * `getCombatMethods()` filters `_data.features` with
+ * `CharacterSheetClassUtils.isCombatMethod()`, which is immune to name
+ * collisions, and `stateCall` compares it with `exact` rather than a lower
+ * bound — so this catches a LOST pick and a SPURIOUS extra alike.
+ *
+ * ⚠️ `exact` is NOT monotone-safe. The features matrix re-evaluates every
+ * earlier entry at each later checkpoint, so a fixed exact count would fail by
+ * construction as the pool grows. Each tier therefore carries `untilLevel`,
+ * closing at the level below the next milestone.
+ *
+ * Auto-granted methods (Ranger's Primal Focus Upgrade at L6 is the only one in
+ * the dataset today) are counted into the expected total AND asserted by name
+ * — via `contains` on the same structural API, so a same-named racial cannot
+ * satisfy them. Counting them is what stops a lost pick hiding behind a grant.
+ *
+ * 🔴 **PASS `subclassName` OR THE COUNT WILL BE TOO LOW.** 27 subclasses grant
+ * an extra method outright — "you learn one additional method from this
+ * tradition" — across Fighter (11), Monk (14), Paladin (Oathbreaker) and Rogue
+ * (Swashbuckler); Eldritch Knight grants TWO. These carry no method name, so
+ * they can only feed the count. A TGTT Monk 3 picks 2 from the class table and
+ * is granted 1 by its subclass, for a true total of 3 — measured, after an
+ * Astral Self run failed with `length=3, expected 2`. Omitting the grant
+ * under-counts by exactly the grant, which is indistinguishable from a lost
+ * pick, so this is a false red rather than a missed one. Barbarian and Ranger
+ * have NO subclass grants, which is why a Ranger-only validation missed this.
+ *
+ * 🔴 **ONLY VALID ON A `classSource: "TGTT"` PRESET.** Combat Methods are a
+ * TGTT class feature; a PHB / XPHB build of the same class has none, and this
+ * helper would then assert a whole ladder against a constant zero. Not every
+ * spec for an eligible class qualifies — e.g. `PRESET_FULL_METEOR_KNIGHT_FIGHTER`
+ * and `PRESET_FULL_SHADOW_KNIGHT_FIGHTER` are both `classSource: "PHB"`, so the
+ * Fighter ladder must NOT be spread into those specs even though Fighter is an
+ * eligible class. Check the preset's `classSource` before adding a spread.
+ *
+ * @param className   Class whose "Methods Known" ladder to assert.
+ * @param opts.subclassName   Subclass short name, e.g. "Astral Self". Required
+ *                         whenever the subclass appears in
+ *                         `TGTT_COMBAT_METHOD_SUBCLASS_GRANTS`.
+ * @param opts.maxClassLevel  Highest level actually reached IN THIS CLASS.
+ *                         Required for multiclass legs: a Ranger 6 / Druid 14
+ *                         never gains Ranger 7+, so emitting the full ladder
+ *                         would assert Ranger-13 counts at character level 13.
+ * @param opts.levelMap    class-level \u2192 character-level, for multiclass specs.
+ */
+export function buildCombatMethodChecks (
+	className: string,
+	opts?: {subclassName?: string; maxClassLevel?: number; levelMap?: Record<number, number>},
+): FeatureCheck[] {
+	const ladder = TGTT_COMBAT_METHODS_KNOWN[className];
+	if (!ladder?.length) return [];
+
+	const cap = opts?.maxClassLevel ?? ladder.length;
+	const grants = (TGTT_COMBAT_METHOD_AUTO_GRANTS[className] ?? []).filter(g => g.level <= cap);
+	const subGrants = (opts?.subclassName
+		? TGTT_COMBAT_METHOD_SUBCLASS_GRANTS[className]?.[opts.subclassName] ?? []
+		: []).filter(g => g.level <= cap);
+	const grantedBy = (level: number): number => grants
+		.filter(g => g.level <= level)
+		.reduce((n, g) => n + g.names.length, 0)
+		+ subGrants
+			.filter(g => g.level <= level)
+			.reduce((n, g) => n + g.count, 0);
+
+	// One milestone per level where the total actually moves.
+	const milestones: {level: number; total: number}[] = [];
+	let prevTotal = 0;
+	ladder.forEach((picked, idx) => {
+		const level = idx + 1;
+		if (level > cap) return;
+		const total = picked + grantedBy(level);
+		if (total <= prevTotal) return;
+		prevTotal = total;
+		milestones.push({level, total});
+	});
+
+	const checks: FeatureCheck[] = milestones.map((m, idx) => {
+		const next = milestones[idx + 1];
+		return {
+			level: applyLevelMap(m.level, opts?.levelMap),
+			// `untilLevel` is mandatory here — see the `exact` note above.
+			...(next ? {untilLevel: applyLevelMap(next.level - 1, opts?.levelMap)} : {}),
+			name: /combat methods/i,
+			kind: "passive" as const,
+			effects: [{kind: "stateCall" as const, method: "getCombatMethods", path: "length", exact: m.total}],
+		};
+	});
+
+	// Outright grants are deterministic, so assert them by name — through the
+	// same structural API, so a same-named racial trait cannot satisfy them.
+	for (const g of grants) {
+		checks.push({
+			level: applyLevelMap(g.level, opts?.levelMap),
+			name: /combat methods/i,
+			kind: "passive" as const,
+			effects: g.names.map(name => ({kind: "stateCall" as const, method: "getCombatMethods", contains: name})),
+		});
+	}
+
+	return checks.sort((a, b) => a.level - b.level);
+}
+
 /** Dreamwalker subclass calls/customs and studies/specials. */
 export function buildDreamwalkerChecks (
 	customsProgression: Array<{level: number; cum: number}> = [{level: 3, cum: 1}, {level: 10, cum: 2}],

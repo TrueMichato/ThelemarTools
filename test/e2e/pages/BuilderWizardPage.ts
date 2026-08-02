@@ -372,13 +372,8 @@ export class BuilderWizardPage {
 	 * @param subclassName Exact rendered subclass name.
 	 * @param subclassSource Optional JSON source key; disambiguates same-named
 	 *   subclasses by the rendered abbreviation next to the label.
-	 * @param subclassChoice Optional up-front subclass choice (Divine Soul's affinity,
-	 *   Lunar Sorcery's starting lunar phase, …). Checking the radio fires
-	 *   `hasSubclassChoicePrompt` in `_renderClassSubclassSelection`, which opens a
-	 *   blocking `pGetUserEnum` modal; leaving it unanswered wedges the whole wizard,
-	 *   AND the Class step's Next button refuses to advance without it.
 	 */
-	async selectLevel1Subclass (subclassName: string, subclassSource?: string, subclassChoice?: string): Promise<void> {
+	async selectLevel1Subclass (subclassName: string, subclassSource?: string): Promise<void> {
 		const list = this.page.locator(".charsheet__builder-subclass-list");
 		await list.waitFor({state: "visible", timeout: 10000});
 		let option = list.locator(".charsheet__builder-subclass-option")
@@ -400,32 +395,6 @@ export class BuilderWizardPage {
 		// The change handler resolves the full subclass, may open a named-choice modal,
 		// and re-renders the class preview. Give it room before the next picker runs.
 		await this.page.waitForTimeout(400);
-		await this.answerSubclassChoiceModal(subclassChoice);
-	}
-
-	/**
-	 * Answer the Builder's up-front subclass-choice modal if one is open.
-	 * No-op when the subclass has no such choice, so it is always safe to call.
-	 * @param choiceName Option label to select. When omitted the first option is taken.
-	 */
-	async answerSubclassChoiceModal (choiceName?: string): Promise<void> {
-		// NOTE the selector: `InputUiUtil._pGetShowModal` builds the window with
-		// `clazz: "ve-ui-modal__inner …"` (js/utils-ui.js:573) — the `ve-` prefix is
-		// part of the class token, so a bare `.ui-modal__inner` matches NOTHING.
-		// `LevelUpPage.expectNamedSubclassChoiceModalVisible` uses the unprefixed
-		// spelling and only passes because the Level-Up flow renders its choice
-		// INLINE (`.charsheet__levelup-named-subclass-choice`) and never reaches the
-		// modal branch. The Builder has no inline path, so it must be correct here.
-		const modal = this.page.locator(".ve-ui-modal__inner").last();
-		if (!await modal.count()) return;
-		if (!await modal.isVisible().catch(() => false)) return;
-		const select = modal.locator("select").first();
-		if (!await select.count()) return;
-		if (choiceName) await select.selectOption({label: choiceName});
-		else await select.selectOption({index: 1});
-		await modal.getByRole("button", {name: /^OK$/i}).click();
-		await modal.waitFor({state: "hidden", timeout: 10000});
-		await this.page.waitForTimeout(200);
 	}
 
 	/**
@@ -1043,7 +1012,7 @@ export class BuilderWizardPage {
 	}
 
 	/**
-	 * Assign standard array ability scores using a sensible default distribution
+	 * Assign standard array ability scores using a sensible default distribution.
 	 * Standard array: 15, 14, 13, 12, 10, 8
 	 * Default assigns: STR=15, DEX=14, CON=13, INT=12, WIS=10, CHA=8
 	 *
@@ -1231,6 +1200,48 @@ export class BuilderWizardPage {
 		await this.btnNext.click();
 		// Wait for the character sheet to load
 		await this.page.waitForTimeout(500);
+		// `_finishCharacterCore` drains the pending spell/feature choice queues BEFORE
+		// it saves, so an unresolved picker strands the whole creation.
+		await this.resolvePostFinishChoices();
+	}
+
+	/**
+	 * Resolve any choice modal the Builder raises AFTER Finish is clicked.
+	 *
+	 * `_finishCharacterCore` drains both pending-choice queues
+	 * (`processPendingSpellChoices` then `processPendingFeatureChoices`) and only THEN
+	 * calls `saveCharacter()`. Any subclass that grants a player-chosen spell — an
+	 * `additionalSpells` `{choose}` block such as the Arcana Domain's two wizard cantrips,
+	 * or a seeded Moon-Bard-style bonus cantrip — therefore blocks creation on a modal
+	 * that nothing in the harness was clicking, and `createCharacterViaWizard`'s wait for
+	 * `_currentCharacterId` times out.
+	 *
+	 * Mirrors `LevelUpPage.resolvePendingFeatureChoices`: same DOM contract, same
+	 * top-most-first ordering (picks can chain, and a chained modal stacks above its
+	 * parent), and the same preference for a CONCRETE option over "Decide later" so
+	 * downstream effect probes have something to assert against. A no-op when no modal
+	 * is open, so it is safe on every existing build.
+	 * @returns the number of prompts resolved.
+	 */
+	async resolvePostFinishChoices (maxPrompts = 12): Promise<number> {
+		let resolved = 0;
+		for (let i = 0; i < maxPrompts; i++) {
+			const clicked = await this.page.evaluate(() => {
+				const prompts = Array.from(document.querySelectorAll<HTMLElement>(".charsheet__feature-choice, .spell-choice-list"));
+				const wrp = prompts[prompts.length - 1];
+				if (!wrp) return false;
+				const btn = wrp.querySelector<HTMLButtonElement>(".charsheet__feature-choice-opt")
+					|| wrp.querySelector<HTMLButtonElement>(".spell-choice-select")
+					|| wrp.querySelector<HTMLButtonElement>('[data-act="defer"]');
+				if (!btn) return false;
+				btn.click();
+				return true;
+			}).catch(() => false);
+			if (!clicked) break;
+			resolved++;
+			await this.page.waitForTimeout(250);
+		}
+		return resolved;
 	}
 
 	/**

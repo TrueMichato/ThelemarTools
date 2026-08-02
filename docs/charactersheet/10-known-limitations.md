@@ -434,6 +434,22 @@ See [Combat System → Conditional Modifier Picker](./06-combat-system.md#condit
 
 See [Components Reference → Favorites System](./03-components-reference.md#favorites-system).
 
+### No Ally-Targeting Machinery Anywhere on the Sheet
+
+The character sheet models exactly one creature. There is no ally roster, no
+targeting API, and no way to push a modifier onto another player's sheet. Features
+that let you buff *another creature* therefore land in one of two buckets:
+
+- **Self-target** — real modifiers registered on this sheet.
+- **Ally-target** — a *displayed designation* plus its lifecycle (who was chosen,
+  when it expires), with no numeric effect anywhere.
+
+Granny's Gifts (Wicked Witch Sorcerer) is the worked example: warding yourself
+registers real gated `save:advantage:charmed|frightened` conditionals, while
+warding an ally records the name and clears on the next long rest — and
+deliberately grants the witch nothing. Prose describing the ally case must not be
+parsed onto the character; see CS-BUG-092 and the third-party subject guard.
+
 ---
 
 *Previous: [Testing Strategy](./09-testing-strategy.md) | Next: [Future Roadmap](./11-future-roadmap.md)*

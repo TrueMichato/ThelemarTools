@@ -330,7 +330,76 @@ Increase Gravity is encoded as *conditional* modifiers rather than flat ones —
 advantage on `check:advantage:forcedmovement` / `save:advantage:forcedmovement`
 plus `skill:athletics +INT` gated on "when you shove a creature" — so the
 bonuses are offered per roll instead of leaking onto unrelated Athletics
-checks.
+checks. Note the pre-existing generic gap recorded under CS-BUG-065: opting a
+*numeric* conditional in does not currently move a skill or save roll total,
+because `_rollSkillCheck` / `_rollSavingThrow` never consume
+`aggregated.bonus`. The advantage half works; the +INT is offered and
+displayed but not yet summed by those two handlers.
+
+**Steel Hawk** (`GriffonsSaddlebag2`)
+
+Source-gated on `CharacterSheetState.isSteelHawkSubclass()`. Like Meteor Knight
+it carries **no player choices** — every feature is a fixed grant, so Builder /
+Level-Up / Quick Build have nothing extra to surface beyond the subclass pick.
+
+```javascript
+hasSteelHawk: true,                                 // Level 3+
+hasLaunch: true,                                    // Level 3+
+launchUses: 3 | 4 | 5,                              // L3 / L7 / L15, short-or-long rest
+launchDistance: 15 | 30,                            // L3 / L7 (combined H+V leap)
+launchBonusDamage: "1d8" | "1d10" | "1d12",         // L3 / L10 / L18
+launchFallReduction: 30,                            // display-only (no fall-damage system)
+launchProvokesOpportunityAttacks: false,
+hasNimbleLancer: true,                              // Level 3+
+nimbleLancerOneHandedDamage: "1d8",
+nimbleLancerTwoHandedDamage: "1d12",
+nimbleLancerDisengageDistance: 5,
+hasBirdCaller: true,                                // Level 3+
+birdCallerRitualSpells: ["Animal Messenger"],
+hasSteelGrace: true,                                // Level 7+
+ignoresArmorStealthDisadvantage: true,              // GENERIC flag, see below
+hasLaunchEvasion: true,
+launchEvasionCost: 1,
+hasEagleEye: true,                                  // Level 10+
+launchCriticalRange: 19,                            // only while momentum is armed
+eagleEyeSightBonus: profBonus,
+eagleEyeGrantsPerception: true,
+steelHawkSaveDc: 8 + profBonus + STR - exhaustionPenalty,
+hasPredatoryInstinct: true,                         // Level 15+
+predatoryInstinctInitiativeRefill: 1,
+hasImprovedLaunch: true,                            // Level 18+
+improvedLaunchDistance: 90,
+improvedLaunchExhaustionCost: 1,
+improvedLaunchMaxExhaustion: 1,                     // blocked at 2+ exhaustion
+```
+
+Launch is a **short-or-long-rest pool** (`resourceType: "steelHawkLaunch"`,
+name `"Launch"`) spent by `useLaunch()`, which arms the `launchMomentum` active
+state. That state carries the whole rider — `{type: "advantage", target:
+"attack:melee"}`, a `meleeOnly` `extraDamage` die of the tier size, and (from
+level 10) `{type: "critRange", value: 19}` — and is `consumeOnAttack`, so the
+next melee attack eats it. Improved Launch adds a second, separate
+once-per-rest pool (`steelHawkImprovedLaunch`, name `"Improved Launch"`) that
+exists only from level 18 and additionally charges a level of exhaustion.
+
+Three of Steel Hawk's flags are deliberately **generic**, not bespoke:
+
+- `ignoresArmorStealthDisadvantage` is consumed by
+  `hasArmorStealthDisadvantage()` alongside the older `hasUmbralWarrior`, so any
+  future "armor never imposes Stealth disadvantage" feature can reuse it.
+- Nimble Lancer's synthesised versatile lance profile is resolved by the new
+  generic `getEffectiveWeaponDamageProfile(item)`, which every damage read-site
+  (damage roll, hands-used toggle, inventory detail) now goes through — so a
+  feature-granted weapon property is no longer a display-only string.
+- Bird Caller's *animal messenger* uses generic **ritual-only** innate-spell
+  support (`ritualOnly` on the parsed grant, persisted through
+  `addInnateSpell`), which replaces the bogus `1/day` the parser previously
+  invented for any "you can cast X as a ritual" grant.
+
+Eagle Eye's doubled proficiency on sight-based Perception is a player-toggled
+active state (`eagleEyeSight`) rather than a passive bonus, because the doubling
+applies only to *sight-based* checks. It is correctly worth **zero** on top of
+existing Perception expertise, which already doubles the bonus.
 
 ### Rogue
 
@@ -503,6 +572,50 @@ registered no modifier, and Exalted Champion's resistances were inert. See
 CS-BUG-050 through CS-BUG-054 in `known-bugs.md` — each was a generic defect on
 a shared path, not a Crown-specific gap. Adding a `has*` flag is the *first*
 step of supporting a feature, never the last.
+
+### Cleric — Arcana Domain (SCAG, 2014)
+
+```javascript
+// Arcana Domain (SCAG)
+hasArcaneInitiate: true,          // L1
+bonusWizardCantrips: 2,           // L1 — a real pick-list, see below
+hasArcaneAbjuration: true,        // L2
+arcaneAbjurationDc: 8 + profBonus + WIS,   // via getFeatureSaveDc()
+arcaneAbjurationRange: 30,
+arcaneAbjurationDuration: 1,      // minutes
+arcaneAbjurationBanishCr: 0.5 | 1 | 2 | 3 | 4,   // L5 / L8 / L11 / L14 / L17
+hasSpellBreaker: true,            // L6
+spellBreakerMaxSpellLevel: <highest spell slot level the character HAS>,
+hasPotentSpellcasting: true,      // L8
+potentSpellcastingBonus: WIS,
+potentSpellcastingClass: "Cleric",
+hasArcaneMastery: true,           // L17
+arcaneMasterySpellLevels: [6, 7, 8, 9],
+```
+
+**Arcana is the worked example for player-CHOSEN grants.** Arcane Initiate
+("two cantrips of your choice from the wizard spell list") and Arcane Mastery
+("choose four spells… one 6th, one 7th, one 8th, one 9th") are the first
+subclass grants in the product that require the *player* to pick. They are
+implemented generically, from the data:
+
+- `getSubclassSpellChoiceSlots()` walks the subclass's `additionalSpells`
+  block for `{choose: "level=0|class=Wizard", count: 2}` entries — the shape
+  that `_parseSpellReference()` silently dropped (CS-BUG-075) — and expands
+  each into stable, level-gated slots.
+- `_ensureSubclassSpellChoices()` reconciles those slots against
+  `_data.fulfilledSpellChoiceSlots` and mints pending choices, so the Builder,
+  Level-Up and Quick Build all surface the picker with no flow-specific code:
+  they already call `processPendingSpellChoices()`.
+- Arcane Mastery's picks are marked `alwaysPrepared`, so they behave as domain
+  spells rather than eating the prepared limit.
+
+**Potent Spellcasting is the worked example for "a calculation is not a
+mechanic".** `potentSpellcastingBonus` had been computed by ~10 subclass
+branches and read by nothing (CS-BUG-076). The consumer is generic:
+`state.getCantripDamageBonus(spell)` scoped by `potentSpellcastingClass`, wired
+into `_rollCantripDamage()` and shown as a "Cantrip Damage" stat badge. Arcane
+Initiate's wizard cantrips *count as cleric cantrips*, so they receive it.
 
 ### Wizard
 
@@ -856,6 +969,14 @@ An at-will re-grant of an already-granted spell **upgrades** it —
 `_mergeSpellMetadata()` sets `atWill` and drops `uses`/`recharge` — which is how
 Reduce Gravity's level-15 tier works.
 
+All three behaviours are pinned in `CharacterSheetMeteorKnight.test.js` and each
+pin has been **measured** against a faithful negative control on the full
+`charactersheet/` suite (13,100 tests): reverting (1) turns 1 test red,
+reverting (2) — by making `_parseSpellGrantMinLevel()` return `null`
+unconditionally, which restores pre-feature semantics without deleting a symbol
+— turns 5 red, and reverting (3) to the original local-context-only
+`isOnce`/`recharge` expressions turns 5 red.
+
 ---
 
 ## Usage in UI Components
@@ -994,6 +1115,32 @@ The sub-type slot accepts conditions (`frightened`, `poisoned`, …), damage typ
 ### Normalization
 
 `getModifiersForType()` synthesizes a `conditional` text field on registry sub-typed entries when queried via the base type (e.g. `save:dex`), so both encodings appear identically to the aggregator. The picker dedupes on `_buildConditionalModId(mod)` = `${baseType}|${name||note||""}|${conditional}`.
+
+### Whose sentence is it? — the third-party subject guard
+
+Encoding 1 is produced by a regex over prose, and a regex has no idea who the
+sentence is about. Two guards exist because of that, and any new prose pattern in
+this area needs to think about both:
+
+- `(?<!dis)` on `conditionGatedSaveRe` — stops *"creatures have **dis**advantage
+  on saving throws against being frightened by you"* (an enemy debuff) parsing as
+  a self-buff.
+- `FeatureModifierParser.isThirdPartySaveSubject(plainText, matchIndex)` — stops
+  *"**the target** has advantage on saving throws against being charmed"* (a buff
+  you hand to somebody else) parsing as a self-buff. See CS-BUG-092.
+
+The guard bounds the clause at the previous `.`/`;`/`:`, strips the `you`
+mentions that qualify *which* creature is picked rather than naming a beneficiary
+(`you can see`, `you choose`, `within 30 feet of you`, `of you`), and fires only
+when what remains is a third-party subject directly followed by `has`/`have`. Any
+surviving `you`/`your` disables it, so *"You or an ally within 30 feet of you has
+advantage…"* is still parsed onto the character.
+
+Sheet-wide consequence worth internalising: **the sheet models one character.**
+There is no ally roster and no way to push a modifier onto another creature, so a
+feature that buffs a target is, on this sheet, a displayed designation plus a
+lifecycle — never a number. Parsing it as a self-buff is not a harmless
+approximation; it hands the player a benefit they gave away.
 
 ### Static helpers
 
@@ -1198,3 +1345,393 @@ A dire wolf re-typed to size M / monstrosity, registered through
 The temp HP is *additional* to the dire wolf's own 37 HP, which is why it uses
 the new `tempHpPerLevel` key rather than `hpPerLevel`. No bespoke recalculation
 path — `recalculateCompanion()` re-derives it on every level-up.
+
+---
+
+## Shadow Sorcery (Sorcerer, RHW)
+
+The **2024 rework** of Shadow Magic, published under its own
+`case "Shadow Sorcery":` in the Sorcerer switch. It sits on the **XPHB**
+chassis (Innate Sorcery at 1, Font of Magic + Metamagic at 2, subclass at 3,
+Sorcery Points = level).
+
+> ⚠️ **`shortName` collision.** `"Shadow"` is the `shortName` of *three*
+> sorcerer subclasses — `Shadow Magic|XGE` (once per `classSource`) and
+> `Shadow Sorcery|RHW`. The calc switch is `switch (cls.subclass?.name)`, so
+> `case "Shadow"` routes to the XGE block; anything resolving by `shortName`
+> (including the E2E spawner shorthand `sorcerer/shadow/N/race`) is ambiguous
+> and must not be used. Address this subclass by **name + source**.
+>
+> Re-derive the collision set rather than trusting this note:
+> ```
+> python3 -c "import json;d=json.load(open('data/class/class-sorcerer.json'));[print(repr(s['name']),s['source'],repr(s.get('shortName')),s.get('classSource')) for s in d['subclass'] if 'shadow' in s['name'].lower()]"
+> ```
+
+```javascript
+// L3 — Power of Shadow → Eyes of the Dark
+hasPowerOfShadow: true,
+darkvision: 120,
+darkvisionSource: "Eyes of the Dark",
+blindsight: 10,                        // ← CS-BUG-098: the grant loop was darkvision-only
+blindsightSource: "Eyes of the Dark",
+seeThroughOwnSpellDarkness: true,      // Darkness created by a spell YOU cast
+
+// L3 — Power of Shadow → Strength of the Grave
+// (no dedicated calc flags; the intervention registry reads `hasPowerOfShadow`)
+
+// L6 — Beasts of Ill Omen
+hasBeastsOfIllOmen: true,
+beastsOfIllOmenCost: 3,
+resourceCastSpells: [{spell: "Summon Beast", resource: "Sorcery Points", cost: 3, …}],
+
+// L14 — Shadow Walk  (identical to XGE; RAW is unchanged)
+hasShadowWalk: true, shadowWalkRange: 120, shadowWalkAction: "bonus",
+
+// L18 — Umbral Form
+hasUmbralFormRhw: true,
+umbralFormRestoreCost: 6,              // RESTORES the use; does not pay for it
+umbralFormIncorporealDamage: "1d10",
+umbralFormIncorporealDamageType: "force",
+```
+
+### Five substantive divergences from Shadow Magic (XGE)
+
+The danger with this subclass is implementing XGE behaviour under an RHW name.
+Every row below is a place where reusing the XGE code is *wrong*:
+
+| Feature | XGE | RHW |
+|---|---|---|
+| Strength of the Grave | restores **1** HP; radiant and criticals excluded | restores **CHA mod + Sorcerer level**; **no** exclusions |
+| Eyes of the Dark | darkvision 120; casts *Darkness* for SP | darkvision 120 **+ blindsight 10**; **no** SP-cast Darkness |
+| Ill Omen (L6) | *Hound* — a scaled `CLASS_SUMMON` companion | *Beasts* — a **3-SP free cast of Summon Beast**, optional concentration |
+| Umbral Form (L18) | 6 SP to **enter**, 1 minute | bound to **Innate Sorcery**, 1/long rest, 6 SP **restores** the use |
+| Chassis | PHB 2014 (subclass at L1) | XPHB (subclass at L3, Innate Sorcery at L1) |
+
+Everything else — the zero-HP intervention pipeline, the resource-cast
+pipeline, the sense-grant bridge, the active-state form — is **reused**, not
+reimplemented.
+
+### `hpOnSuccess` — the zero-HP registry became parametric
+
+`ZERO_HP_INTERVENTIONS` entries previously left you on a hardcoded 1 HP.
+`hpOnSuccess` now accepts either a flat number or a descriptor:
+
+```javascript
+strengthOfTheGraveRhw: {
+    featureName: "Power of Shadow",       // the STORED feature (see below)
+    displayName: "Strength of the Grave", // what the prompt calls it
+    calcFlag: "hasPowerOfShadow",
+    saveAbility: "cha",
+    dcBase: 5,
+    dcAddsDamage: true,
+    // NO excludedDamageTypes and NO excludedOnCritical — unlike XGE
+    hpOnSuccess: {abilityMod: "cha", classLevel: "Sorcerer"},
+    spendUseOn: "success",
+    recharge: "long",
+},
+```
+
+`_resolveZeroHpInterventionHp()` resolves the descriptor, defaults to a flat 1
+and clamps into `[1, maxHp]`.
+
+> **The stored feature is `Power of Shadow`, not `Strength of the Grave`.**
+> Eyes of the Dark and Strength of the Grave are *nested named entries* inside
+> one JSON feature; nothing in the codebase splits nested entries into separate
+> features. The same is true of Incorporeal Movement / Shadow Resilience inside
+> Umbral Form. `displayName` exists so the prompt can still say the right thing.
+
+### Beasts of Ill Omen — a resource-cast with a player CHOICE
+
+Not a companion descriptor. The descriptor published by the calc block adds
+four keys the pipeline now understands:
+
+```javascript
+{
+    spell: "Summon Beast", resource: "Sorcery Points", cost: 3,
+    castingTime: "bonus",
+    concentrationOptional: true,      // ← the player CHOICE
+    waivedDurationMinutes: 1,         // duration if the waiver is taken
+    ignoresMaterialComponents: true,
+    ignoresPreparation: true,
+    replacesPrevious: true,           // recasting ends the earlier summon
+    summon: {forms: [...], baseLevel: 2},
+}
+```
+
+`castSpellWithResource(name, {waiveConcentration, summonForm})` honours the
+waiver **only when the descriptor offers it**, dismisses any previous summon,
+and creates a real companion via `_createResourceCastSummon()`.
+`charactersheet.js` `_pCastSpellWithResource()` asks both questions at cast
+time, so the concentration choice is surfaced rather than assumed.
+`getSummonSpiritStats({spellLevel, baseLevel})` is the extracted stat
+arithmetic, shared with the Spells tab's own summon picker.
+
+### Umbral Form — bound to Innate Sorcery
+
+`ACTIVE_STATE_TYPES.umbralFormRhw` carries `requiresStates: ["innateSorcery"]`,
+so `activateState()` refuses while Innate Sorcery is off and
+`deactivateState("innateSorcery")` **cascades** it off. It costs no resource:
+`activateUmbralForm()` spends one of its own 1/long-rest uses, and
+`restoreUmbralFormUse()` spends 6 Sorcery Points to buy a use back.
+
+Shadow Resilience is the same 11 curated `{target: "damage:<type>"}` effects
+XGE uses — RAW excludes **both** Force and Radiant in both editions.
+
+> `Umbral Form` is a name shared with Shadow Magic, so `detectActivatableFeature()`
+> disambiguates it by **source** through a `stateBySourceOverrides` table
+> consulted before the generic name-matching loop (`matchedBy: "nameAndSource"`).
+> The RHW state also sets `noNameDetect: true`.
+
+### Innate Sorcery (XPHB base feature)
+
+Implemented here because the subclass depends on it.
+`ACTIVE_STATE_TYPES.innateSorcery` publishes
+`[{bonus spellDc 1}, {advantage attack:spell}]`. The `spellDc` target was an
+advertised effect target with **no reader** before CS-BUG-099; see also
+CS-BUG-102, which was the same value failing to reach the Spells tab's own
+per-class card.
+## Wicked Witch (Sorcerer, Arcadia 8 → TGTT)
+
+Published under `case "Wicked Witch": case "Wicked Witch Sorcerous Origin":`.
+
+The subclass reaches the sheet through a `_copy` in
+`homebrew/TravelersGuidetoThelemar.json` that re-parents
+`Wicked Witch Sorcerous Origin|Ar8` — authored for `classSource: "PHB"` — onto
+`classSource: "TGTT"`. Two chassis consequences drive everything below:
+
+* The origin is a **level 3** feature on TGTT/XPHB, so the two "L1" Ar8 features
+  gate on `subclassLevel = is2024 ? 3 : 1` like every other origin here. The
+  L6 / L14 / L18 features keep their literal Ar8 levels, which is also the level
+  at which `CharacterSheetClassUtils` adds them.
+* Sorcery Points are **`level + 1` from L1** on this chassis
+  (`getSorceryPointsMaxForClass()`), not `level` from L2.
+
+```javascript
+// L3 (subclassLevel) — Granny's Gifts
+hasGrannysGifts: true,
+grannysWardRange: 30,
+grannysWardConditions: ["charmed", "frightened"],
+grannysGiftsSwapSchools: ["enchantment", "illusion"],
+grannysGiftsSwapClasses: ["sorcerer", "warlock", "wizard"],
+
+// L3 (subclassLevel) — Hag Ancestor
+hasHagAncestor: true,
+hasHagInfluenceAdvantage: true,
+hagAncestorKind: "Green" | "Night" | "Sea",   // only once the pick is made
+hagAncestorSpecialty: "illusion" | "enchantment" | "transmutation",
+hagAncestorLanguage: "Sylvan" | "Abyssal" | "Primordial (Aquan)",
+hagAncestorSkill: "deception" | "insight" | "intimidation",
+
+// L6 — Clever Little Witch
+hasCleverLittleWitch: true,
+cleverLittleWitchRange: 15,
+cleverLittleWitchAction: "reaction",
+cleverLittleWitchMaxSpellLevel: 9,
+
+// L14 — Fly, My Pretty
+hasFlyMyPretty: true,
+flyMyPrettyFlySpeed: 60,
+flyMyPrettyImmunities: ["charmed", "frightened"],
+
+// L18 — Coven Calling
+hasCovenCalling: true,
+covenCallingRecallMinutes: 1,
+covenDuplicateCost: 2,
+covenDuplicateCount: 2,
+covenDuplicateMaxSpellLevel: 3,
+```
+
+### Hag Ancestor — one pick, four mechanics
+
+`HAG_ANCESTOR_KINDS` maps each hag to a specialty school, a language and a skill.
+`_ensureHagAncestorChoice()` seeds a `kind: "subfeature"` pending choice from
+`_ensureSeededFeatureChoices()`, which both `getPendingFeatureChoices()` and
+`hasPendingFeatureChoices()` call — so the pick reaches the Builder, Level-Up,
+Quick Build, Respec and the Features tab through the one existing drain.
+
+The pick then drives, via `_getClassFeatureEffects()`:
+
+| Grant | Effect emitted |
+|---|---|
+| Language | `{type: "language", language}` |
+| Skill proficiency | `{type: "skillProficiency", skill}` |
+| Specialty school | read by `isHagSpecialtySchool()` / `getCleverLittleWitchCost()` |
+| Influence advantage | `{type: "modifier", modType: "check:cha:advantage", conditional: "on checks made to influence a hag"}` |
+
+The CHA-check advantage is **conditional**, so it is offered to the per-roll
+opt-in picker and never leaks into a plain Charisma check.
+
+> **Timing fix (generic).** Effects are applied *before* the pending-choice
+> queue drains (`addClass()` → `applyClassFeatureEffects()` →
+> `processPendingFeatureChoices()`), so a parent feature whose effects are gated
+> on a sub-feature pick used to land a whole level late. `charactersheet.js`
+> `processPendingFeatureChoices()` now re-runs `applyClassFeatureEffects()` when
+> it resolved anything. This benefits every structured choice, not just this one.
+
+### Granny's Gifts — a real, precisely-typed ward
+
+`setGrannysWardTarget(target, {distance})` installs two named modifiers typed
+`save:advantage:charmed` / `save:advantage:frightened` when the ward is kept for
+yourself, and records the recipient without touching your saves when it goes to
+an ally. Distance is checked against `grannysWardRange`, so the 30 ft clause is
+mechanical rather than prose. `onLongRest()` clears it, because RAW re-chooses
+the target every rest.
+
+The precise typing matters: the generic `FeatureModifierParser` reads the same
+prose as a blanket `save:all` conditional. That parsed pair remains available in
+the opt-in picker (text-parsed conditionals are deliberately not dropped —
+CS-BUG-053), but only the explicit ward *applies* advantage, and only to charm
+and fear saves.
+
+### Clever Little Witch — the specialty discount is the mechanic
+
+`getCleverLittleWitchCost(spellLevel, school)` returns the spell's level in
+Sorcery Points, **halved and floored** when the school matches
+`hagAncestorSpecialty` — so a 5th-level illusion costs 2 to a Green hag's
+descendant where a 5th-level evocation costs 5, and a 1st-level specialty spell
+is free. Both the full school name and the 5etools single-letter code (`"I"`)
+are accepted, because spell records carry the letter form.
+
+`useCleverLittleWitch({spellLevel, school, recalled, distance})` spends through
+`useSorceryPoint()` — the same method the production cast path calls — and
+reports the DC and attack bonus the reflected spell uses (yours, not the
+original caster's). `recalled: true` is Coven Calling's "any spell you saw it
+cast in the last minute" mode and is refused before level 18.
+
+### Fly, My Pretty — an active state, not a passive grant
+
+`enchantFlyingItem({item, commandWord})` records one enchanted object; enchanting
+a new one un-enchants (and dismounts) the old, per RAW. Riding it is the
+`flyMyPretty` entry in `ACTIVE_STATE_TYPES`:
+
+```javascript
+effects: [
+    {type: "bonus", target: "speed:fly", value: 60},
+    {type: "conditionImmunity", target: "charmed"},
+    {type: "conditionImmunity", target: "frightened"},
+]
+```
+
+so `getSpeed("fly")` goes 0 → 60 → 0 and `getConditionImmunities()` gains and
+loses both conditions around the toggle.
+
+### Coven Calling — two duplicates, both spending real points
+
+`conjureCovenDuplicates()` spends `covenDuplicateCost` and stores
+`{count, remaining, maxSpellLevel}`. `castCovenDuplicateSpell(level)` spends one
+duplicate's action and the spell's level in Sorcery Points, refusing anything
+outside 1st–3rd. `dismissCovenDuplicates()` and `onLongRest()` clear them.
+
+All four abilities are registered in `FEATURE_CLASSIFICATION_OVERRIDES`
+(`"granny's gifts"`, `"clever little witch"`, `"fly, my pretty"`,
+`"coven calling"` as `"ability"`, `"hag ancestor"` as `"passive"`) so they
+surface with a Use affordance and Hag Ancestor correctly does not.
+---
+
+## Lunar Sorcery (Sorcerer, DSotDQ)
+
+Published under `case "Lunar Sorcery": case "Lunar":`. The subclass exists for
+both the 2014 (`PHB`) and 2024 (`XPHB`) Sorcerer chassis; the gate is
+`is2024 ? 3 : 1`, so on the 2014 chassis every lunar feature is a plain
+sorcerer-level gate from level 1.
+
+The subclass is built around a **recurring player choice** — the lunar phase.
+It is not a note on the Features tab: the phase is stored state, it is switched
+from a dedicated Combat-tab panel, and four separate engine paths read it.
+
+```javascript
+// L1 — Lunar Sorcery / Lunar Embodiment
+hasLunarSorcery: true,
+hasLunarEmbodiment: true,
+lunarPhase: "full" | "new" | "crescent",      // ← the live choice
+lunarPhaseName: "Full Moon",
+lunarPhaseSchools: ["Abjuration", "Divination"],
+lunarSpellTableRows: 5,                        // rows unlocked at this level
+lunarFreeCastCount: 1,                         // 3 from L6 (one per phase)
+
+// L1 — Moon Fire
+hasMoonFire: true,
+moonFireSpell: "Sacred Flame",
+moonFireTargetCount: 2,
+moonFireTargetSeparation: 5,
+
+// L6 — Lunar Boons
+hasLunarBoons: true,
+lunarBoonsUses: <proficiency bonus>,
+lunarBoonsReduction: 1,                        // sorcery points off a metamagic
+
+// L6 — Waxing and Waning
+hasWaxingAndWaning: true,
+waxingAndWaningCost: 1,
+waxingAndWaningAction: "bonus",
+
+// L14 — Lunar Empowerment
+hasLunarEmpowerment: true,
+lunarEmpowermentSummary: "…",                  // phase-dependent
+lunarEmpowermentResistances: ["necrotic", "radiant"],   // Crescent only
+lunarMoonlightRadius: 10,
+
+// L18 — Lunar Phenomenon
+hasLunarPhenomenon: true,
+lunarPhenomenonCost: 5,                        // SP cost for a re-use
+lunarPhenomenonRange: 30,
+lunarPhenomenonAction: "bonus",
+lunarPhenomenonDamage: "3d10",                 // phase-dependent
+lunarPhenomenonHealing: "3d8",                 // Full Moon only
+```
+
+### The phase is stored state, not a calculation
+
+`_data.lunarPhase` is the single source of truth and `setLunarPhase()` is its
+only writer. Everything else is derived:
+
+| Reader | What the phase changes |
+|---|---|
+| `getLunarSpellsForPhase()` / `getLunarFreeCastOptions()` | which of the 15 table spells the free 1/long-rest cast may pick |
+| `getCastableActiveMetamagics()` | Lunar Boons knocks 1 SP off a metamagic applied to a spell of the phase's two schools |
+| `getResistances()` / `getAdvantageState()` | Lunar Empowerment's L14 passives |
+| `getLunarPhenomenon()` | which burst L18 produces, its save ability, damage and healing |
+
+`LUNAR_PHASES` is a declarative descriptor table (schools, empowerment,
+phenomenon, spell column) — adding or re-tuning a phase touches data, not
+branches.
+
+### L14 passives ride the active-state engine
+
+Three `ACTIVE_STATE_TYPES` entries (`lunarPhaseFull`, `lunarPhaseNew`,
+`lunarPhaseCrescent`) mirror the stored phase; `setLunarPhase()` keeps exactly
+one of them active. Their `effects` arrays are **empty** — the real effects are
+produced at read time by `_getSupplementalActiveStateEffects()` →
+`_getLunarPhaseStateEffects()`, which returns `[]` below sorcerer 14 and
+otherwise emits:
+
+- **Full Moon** — advantage on Investigation and Perception, but only while the
+  bonus-action moonlight is actually shed (`_data.lunarMoonlight`).
+- **New Moon** — advantage on Stealth always; attacks against you have
+  disadvantage while `_data.lunarInDarkness`.
+- **Crescent Moon** — `damage:necrotic` and `damage:radiant` resistance.
+
+Two conventions matter here. Resistance targets are `damage:<type>`-namespaced
+(CS-BUG-050), and all three states carry `noNameDetect: true` so the generic
+activatable surface cannot hijack them (CS-BUG-083) — the dedicated Combat-tab
+panel owns the UI, the same way the Metamagic Dashboard does.
+
+`_getLunarPhaseStateEffects()` reads stored class data only. It must never call
+`getFeatureCalculations()`, which would recurse — the same rule
+`_getCircleOfTheSeaClass()` follows.
+
+> **Generic fix shipped with this subclass.** `getAdvantageState()` hand-rolled
+> its own active-state effect collection from `stateType.effects` plus
+> `state.customEffects` and never consulted `_getSupplementalActiveStateEffects()`.
+> Any advantage produced by the supplemental hook reached `getResistances()` but
+> was invisible to `getAdvantageState()`. It now folds the supplemental effects
+> in, which fixes the hook for every subclass that uses it, not just this one.
+
+### Lunar Boons is spent on the real cast path
+
+`getCastableActiveMetamagics()` resolves the discount and returns `baseCost`,
+`lunarBoonApplied` and `lunarBoonSchool` alongside the usual `cost`.
+`charactersheet-spells.js` routes all three former
+`useSorceryPoint(metamagic.cost)` call sites through a single
+`_spendMetamagicCost()` helper, so a boon use is burned **only** when the
+discounted cost is actually paid — never on a preview, never twice.

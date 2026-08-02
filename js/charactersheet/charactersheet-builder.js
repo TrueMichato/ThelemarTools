@@ -477,9 +477,9 @@ class CharacterSheetBuilder {
 						return false;
 					}
 				}
-				if (CharacterSheetClassUtils.hasSubclassChoicePrompt(this._selectedSubclass)
+				if (CharacterSheetClassUtils.hasNamedSubclassChoice(this._selectedSubclass)
 					&& !CharacterSheetClassUtils.normalizeSubclassChoice(this._divineSoulAffinity)) {
-					const prompt = CharacterSheetClassUtils.getSubclassChoicePrompt(this._selectedSubclass);
+					const prompt = CharacterSheetClassUtils.getNamedSubclassChoicePrompt(this._selectedSubclass);
 					JqueryUtil.doToast({type: "warning", content: `Please complete your ${prompt?.title || "subclass choice"}.`});
 					return false;
 				}
@@ -674,7 +674,7 @@ class CharacterSheetBuilder {
 							shortName: this._selectedSubclass.shortName,
 							source: this._selectedSubclass.source,
 						};
-						if (CharacterSheetClassUtils.hasSubclassChoicePrompt(this._selectedSubclass) && this._divineSoulAffinity) {
+						if (CharacterSheetClassUtils.hasNamedSubclassChoice(this._selectedSubclass) && this._divineSoulAffinity) {
 							level1History.choices.subclassChoice = CharacterSheetClassUtils.normalizeSubclassChoice(this._divineSoulAffinity);
 						}
 					}
@@ -4830,9 +4830,9 @@ class CharacterSheetBuilder {
 				const resolved = CharacterSheetClassUtils.resolveFullSubclass(sc, cls) || sc;
 				this._selectedSubclass = resolved;
 
-				if (CharacterSheetClassUtils.hasSubclassChoicePrompt(resolved)) {
-					const affinityOptions = CharacterSheetClassUtils.getSubclassChoiceOptions(resolved);
-					const prompt = CharacterSheetClassUtils.getSubclassChoicePrompt(resolved);
+				if (CharacterSheetClassUtils.hasNamedSubclassChoice(resolved)) {
+					const affinityOptions = CharacterSheetClassUtils.getNamedSubclassChoiceOptions(resolved);
+					const prompt = CharacterSheetClassUtils.getNamedSubclassChoicePrompt(resolved);
 					if (affinityOptions.length && InputUiUtil?.pGetUserEnum) {
 						const affinityChoice = await InputUiUtil.pGetUserEnum({
 							title: prompt?.title || "Subclass Choice",

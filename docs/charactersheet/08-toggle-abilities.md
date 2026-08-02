@@ -96,34 +96,6 @@ Ki/Focus point or Arms plus Visage for two. Visage and Body expose resolved
 `trigger` controls for speech modes and Deflect Energy; the trigger resolver
 applies ranges, ability modifiers, and action-economy costs before rendering.
 
-### Lunar Sorcery phase states
-
-Lunar Sorcery (DSotDQ) models the moon phase as **three mutually-exclusive
-states** — `lunarPhaseFull`, `lunarPhaseNew`, `lunarPhaseCrescent` — plus one
-sub-toggle, `lunarMoonlight`. Exactly one phase is active at all times.
-
-- The phase is **seeded, not owned, by `subclassChoice`**. `_ensureLunarPhase()`
-  activates the persisted choice when no phase state is live, so pre-existing
-  saves migrate for free and a mid-adventure switch is never undone by a later
-  level-up re-reading the wizard answer.
-- **Do not toggle these rows directly.** `setLunarPhase(key, opts)` is the single
-  mutator: it charges the Waxing and Waning sorcery point (L6+, unless
-  `{free: true}`), re-attaches the level-14 Lunar Empowerment `customEffects` for
-  the incoming phase, and refuses an unknown key. Clicking the raw activatable
-  row bypasses all three.
-- Mutual exclusivity is enforced **twice** — imperatively in `setLunarPhase()`
-  and declaratively via `exclusiveWith` in `ACTIVE_STATE_TYPES`. Both are
-  deliberate: the declarative arm covers activations that arrive through the
-  generic state engine, the imperative arm covers the seed path. Breaking either
-  one alone leaves the regression suite green.
-- Empowerment effects are attached **at activation time**, not baked into the
-  registry, so they are level-gated to 14+: Full Moon → the `lunarMoonlight`
-  bonus-action sub-toggle (10 ft bright / 10 ft dim light, advantage on
-  Investigation and Perception inside it); New Moon → advantage on Stealth plus a
-  conditional disadvantage on attacks against you; Crescent Moon → resistance to
-  `damage:necrotic` and `damage:radiant` (namespaced — see CS-BUG-050; a bare
-  damage type is silently inert).
-
 ---
 
 ## Effect Types
@@ -155,6 +127,26 @@ sub-toggle, `lunarMoonlight`. Exactly one phase is active at all times.
 {type: "speedReductionImmunity"}
 {type: "forcedMovementImmunity", target: "ground"}
 ```
+
+> **`damage:<type>` is the house convention, but since CS-BUG-050 it is no
+> longer a *correctness* requirement.** Older guidance says a bare damage type
+> (`target: "fire"`) is "silently inert". That is **stale** — it describes
+> pre-CS-BUG-050 behaviour. `_damageTypeFromEffectTarget()`
+> (`charactersheet-state.js:41064`) now normalises **both** shapes: it strips a
+> `damage:` prefix when present, and otherwise falls back to
+> `DAMAGE_TYPES.has(clean)`. Its sibling's doc-comment says so explicitly —
+> *"de-duplicated and normalised across both target shapes"*.
+>
+> Measured: rewriting Umbral Form's `target: "damage:cold"` to a bare
+> `"cold"` left `getResistances()` **unchanged** (still 11 entries, still
+> containing `cold`); *deleting* the entry outright is what turns the
+> behavioural test red.
+>
+> Practical consequence for anyone writing an active state: **keep using the
+> prefix** for consistency and greppability, but do not expect a behavioural
+> test to catch a missing one. If you want the convention enforced, assert the
+> shape directly, e.g.
+> `expect(info.effects.every(e => e.target.startsWith("damage:"))).toBe(true)`.
 
 ### Special Effects
 
@@ -426,6 +418,130 @@ Knight's activatable state of the same name. Add `noNameDetect: true` to any
 state whose name is generic enough to appear in unrelated content; such states
 are then reachable only through an explicit `activateState(key)` call or a
 `FEATURE_CLASSIFICATION_OVERRIDES` entry.
+
+#### Umbral Form (Shadow **Sorcery** Sorcerer, RHW, L18)
+
+The 2024 rework shares its *name* with the XGE state above but almost none of
+its mechanics, which is why it needs a second state and a source-aware way to
+reach it.
+
+```javascript
+umbralFormRhw: {
+    noNameDetect: true,               // the name is taken; see below
+    preferCuratedEffects: true,
+    effects: [
+        // The same 11 curated `damage:<type>` resistances as `umbralForm` —
+        // RAW excludes BOTH force and radiant in both editions.
+        …,
+        {type: "info", text: "Incorporeal Movement: … 1d10 Force damage …"},
+    ],
+    requiresStates: ["innateSorcery"], // ← the binding
+    duration: "While Innate Sorcery is active",
+    activationAction: "free",
+    // NO resourceName / resourceCost: entering is FREE and costs one of the
+    // feature's own 1/long-rest uses. 6 Sorcery Points RESTORE a use instead.
+}
+```
+
+**Two mechanisms worth reusing.**
+
+`requiresStates` makes the binding bidirectional for free: `activateState()`
+returns `null` while Innate Sorcery is inactive, and `deactivateState(id)`
+already cascades off every state whose `requiresStates` names it — so ending
+Innate Sorcery ends Umbral Form and takes the 11 resistances with it, with no
+bespoke teardown code.
+
+**Disambiguating a name collision by SOURCE.** `noNameDetect: true` was not
+enough here: `Umbral Form|RHW` needs to reach *a* state, just not the XGE one.
+`detectActivatableFeature()` therefore consults a `stateBySourceOverrides` table
+**before** the generic name-matching loop:
+
+```javascript
+const stateBySourceOverrides = {"umbral form": {rhw: "umbralFormRhw"}};
+```
+
+A hit returns `matchedBy: "nameAndSource"`. Prefer this over inventing a
+distinct state name when the product name genuinely is shared — the player sees
+"Umbral Form" on both sheets and the feature list should say so.
+
+#### Innate Sorcery (Sorcerer, XPHB, L1)
+
+```javascript
+innateSorcery: {
+    preferCuratedEffects: true,
+    effects: [
+        {type: "bonus", target: "spellDc", value: 1},
+        {type: "advantage", target: "attack:spell"},
+    ],
+    duration: "1 minute",
+    activationAction: "bonus",
+    resourceName: "Innate Sorcery",
+    resourceCost: 1,
+}
+```
+
+A base-class feature, implemented alongside Shadow Sorcery because Umbral Form
+hangs off it. `spellDc` was an **advertised effect target with no reader**
+(CS-BUG-099), and the Spells tab's own per-class card then hand-rolled the DC
+and ignored it a second time (CS-BUG-102) — so a `{type: "bonus", target:
+"spellDc"}` effect is now worth checking end-to-end when you add one.
+#### Launch Momentum (Steel Hawk Fighter, `GriffonsSaddlebag2`)
+
+```javascript
+launchMomentum: {
+    name: "Launch Momentum",
+    icon: "🦅",
+    activationAction: "bonus",
+    // Armed by useLaunch(); eaten by the next melee attack.
+    consumeOnAttack: true,
+    // "Launch" is a generic English word — never name-detect it.
+    noNameDetect: true,
+}
+```
+
+The effects are supplied per-activation by `getLaunchMomentumEffects()` rather
+than being fixed on the state type, because all three riders are level-scaled:
+
+```javascript
+[
+    {type: "advantage", target: "attack:melee"},
+    // "of the weapon's type" — left untyped so the roller reports it under the
+    // weapon's own damage type instead of inventing one.
+    {type: "extraDamage", value: "1d8"|"1d10"|"1d12", damageType: "", meleeOnly: true},
+    {type: "critRange", value: 19},   // Eagle Eye, level 10+ only
+]
+```
+
+Two conventions worth copying:
+
+**`meleeOnly` is honoured by the damage roller.** `getExtraDamageFromStates()`
+propagates the flag and `_rollDamage` filters on it, so a rider that reads "on a
+melee weapon attack" cannot leak onto a ranged attack or a spell.
+
+**`target: "attack:melee"` matches a `"attack:melee:str"` query.** Both
+advantage aggregators — `hasAdvantageFromStates()` (the roll path) and
+`_effectMatchesType()` (the badge path, via `getAdvantageState()`) — honour the
+hierarchical attack prefix. They did not agree before CS-BUG-087.
+
+#### Eagle Eye Sight (Steel Hawk Fighter, `GriffonsSaddlebag2`)
+
+```javascript
+eagleEyeSight: {
+    name: "Eagle Eye Sight",
+    icon: "👁️‍🗨️",
+    activationAction: "free",
+    noNameDetect: true,
+}
+```
+
+A player-driven toggle rather than a passive bonus, because the doubled
+proficiency applies only to **sight-based** Wisdom (Perception) checks and the
+sheet cannot know which checks those are. `setEagleEyeSightActive(true)` supplies
+`customEffects: [{type: "bonus", target: "skill:perception", value: …}]`, where
+the value is **0** when Perception is already expertise — doubling an
+already-doubled bonus is worth nothing. Note this state is why CS-BUG-086 was
+found: `skill:<name>` bonus targets were being discarded outright by
+`getSkillBonusFromStates()`.
 
 ### Combat Stances (TGTT/Homebrew)
 

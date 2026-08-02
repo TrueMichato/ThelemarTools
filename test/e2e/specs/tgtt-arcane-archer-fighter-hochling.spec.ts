@@ -179,16 +179,12 @@ const ARCANE_ARCHER_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollSkillCheck", skill: "athletics"},
 		],
 	},
-	{
-		level: 13,
-		untilLevel: 16,
-		name: /indomitable/i,
-		kind: "resource",
-		resourceMax: 2,
-		effects: [
-			{kind: "longRestRestores", resource: "Indomitable"},
-		],
-	},
+	// No L13-16 row. The matrix samples [3, 5, 11, 17, 20], so a row whose
+	// window is L13-16 never executes — `resourceMax: 2` was compared
+	// against nothing. It cannot be widened either: 2 uses hold only on
+	// L13-16, so reaching a checkpoint changes the correct value. The two
+	// observable steps (1 at L11, 3 at L17/L20) are both asserted, and
+	// each carries its own longRestRestores probe.
 	{
 		level: 17,
 		name: /indomitable/i,

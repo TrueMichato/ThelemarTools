@@ -2105,27 +2105,6 @@ class CharacterSheetClassUtils {
 			&& subclass.source === "GrimHollowPG24";
 	}
 
-	static isLunarSorcerySubclass (/** @type {*} */ subclass) {
-		if (!subclass?.name && !subclass?.shortName) return false;
-		return [subclass.name, subclass.shortName]
-			.filter(Boolean)
-			.some((/** @type {*} */ name) => ["lunar", "lunar sorcery"].includes(String(name).toLowerCase()));
-	}
-
-	/**
-	 * The three Lunar Embodiment phases (DSotDQ p34), in book order.
-	 *
-	 * The phase is a *runtime* state — re-chosen on every long rest and switchable
-	 * as a bonus action from 6th level — but it still needs an initial pick at the
-	 * moment the subclass is taken, which is what the wizards surface.
-	 * @type {Array<{key: string, name: string}>}
-	 */
-	static LUNAR_PHASE_OPTIONS = [
-		{key: "full moon", name: "Full Moon"},
-		{key: "new moon", name: "New Moon"},
-		{key: "crescent moon", name: "Crescent Moon"},
-	];
-
 	/**
 	 * Canonical "spells known" casters. In both 2014 and 2024 these classes use a fixed
 	 * personal spell list (swap one on level-up), unlike prepared casters who re-prepare
@@ -2254,50 +2233,6 @@ class CharacterSheetClassUtils {
 			};
 		}
 		return null;
-	}
-
-	// ==========================================================================
-	// Subclass choice PROMPT vs subclass choice SPELL-BLOCK GATING
-	//
-	// `hasNamedSubclassChoice()` above answers a NARROW question: "does this
-	// subclass's `additionalSpells` split into named blocks of which exactly ONE
-	// is granted?" Divine Soul and the Daemonologist do; that predicate therefore
-	// gates spell-block selection (`getSubclassAlwaysPreparedSpells`,
-	// `subclassAdditionalSpellsIncludeSpell`, `_reconcileSubclassChoiceSpellGrants`).
-	//
-	// The wizards were using the same predicate for a DIFFERENT question: "does
-	// this subclass need an up-front pick before the character is playable?" Those
-	// two coincided until Lunar Sorcery, which needs the pick (its Lunar Embodiment
-	// phase) but grants EVERY spell on its table regardless of the pick. Conflating
-	// them would have silently dropped ten of its fifteen spells.
-	//
-	// The trio below answers the wizard question only. Builder, Level-Up and Quick
-	// Build all consume it, so a new subclass needing an up-front pick gets all
-	// three surfaces for free by extending these three methods.
-	// ==========================================================================
-
-	/** True when Builder / Level-Up / Quick Build must collect a pick for this subclass. */
-	static hasSubclassChoicePrompt (/** @type {*} */ subclass) {
-		return this.hasNamedSubclassChoice(subclass) || this.isLunarSorcerySubclass(subclass);
-	}
-
-	/** The `{key, name}` options for the wizard pick. */
-	static getSubclassChoiceOptions (/** @type {*} */ subclass) {
-		if (this.isLunarSorcerySubclass(subclass)) {
-			return CharacterSheetClassUtils.LUNAR_PHASE_OPTIONS.map(it => ({...it}));
-		}
-		return this.getNamedSubclassChoiceOptions(subclass);
-	}
-
-	/** The `{title, description}` copy for the wizard pick. */
-	static getSubclassChoicePrompt (/** @type {*} */ subclass) {
-		if (this.isLunarSorcerySubclass(subclass)) {
-			return {
-				title: "Lunar Embodiment",
-				description: "Choose the lunar phase your magic manifests. You re-choose it after every long rest, and from 6th level Waxing and Waning lets you switch as a bonus action for 1 sorcery point.",
-			};
-		}
-		return this.getNamedSubclassChoicePrompt(subclass);
 	}
 
 	static getOptionalFeaturePrerequisiteClassAliases (/** @type {*} */ subclass, /** @type {*} */ featureTypes) {
@@ -3429,6 +3364,13 @@ class CharacterSheetClassUtils {
 									level: feature.level,
 									entries: feature.entries,
 									isSubclassFeature: true,
+									// (CS-BUG-079) Preserve the activation marker. Only the
+									// refSubclassFeature expansion below used to copy it, so a
+									// subclass option collected through THIS path lost its
+									// `consumes` tag and could not be linked to its shared pool.
+									// `uses` is deliberately NOT propagated here: it would mint a
+									// new resource pool for features that merely document a count.
+									...(feature.consumes ? {consumes: feature.consumes} : {}),
 								});
 							}
 						} else if (typeof feature === "string") {
@@ -3462,6 +3404,13 @@ class CharacterSheetClassUtils {
 									level: featureLevel,
 									entries: fullFeature?.entries,
 									isSubclassFeature: true,
+									// (CS-BUG-079) Preserve the activation marker. Only the
+									// refSubclassFeature expansion below used to copy it, so a
+									// subclass option collected through THIS path lost its
+									// `consumes` tag and could not be linked to its shared pool.
+									// `uses` is deliberately NOT propagated here: it would mint a
+									// new resource pool for features that merely document a count.
+									...(fullFeature?.consumes ? {consumes: fullFeature.consumes} : {}),
 								});
 							}
 						}
@@ -3497,6 +3446,13 @@ class CharacterSheetClassUtils {
 							level: featureLevel,
 							entries: fullFeature?.entries,
 							isSubclassFeature: true,
+							// (CS-BUG-079) Preserve the activation marker. Only the
+							// refSubclassFeature expansion below used to copy it, so a
+							// subclass option collected through THIS path lost its
+							// `consumes` tag and could not be linked to its shared pool.
+							// `uses` is deliberately NOT propagated here: it would mint a
+							// new resource pool for features that merely document a count.
+							...(fullFeature?.consumes ? {consumes: fullFeature.consumes} : {}),
 						});
 					}
 				}
@@ -3526,6 +3482,13 @@ class CharacterSheetClassUtils {
 					level: feature.level,
 					entries: feature.entries,
 					isSubclassFeature: true,
+					// (CS-BUG-079) Preserve the activation marker. Only the
+					// refSubclassFeature expansion below used to copy it, so a
+					// subclass option collected through THIS path lost its
+					// `consumes` tag and could not be linked to its shared pool.
+					// `uses` is deliberately NOT propagated here: it would mint a
+					// new resource pool for features that merely document a count.
+					...(feature.consumes ? {consumes: feature.consumes} : {}),
 				});
 			});
 		}
@@ -5166,7 +5129,7 @@ class CharacterSheetClassUtils {
 	 * @param {string} [opts.recharge="long"]
 	 * @returns {*} Innate spell state object
 	 */
-	static buildInnateSpellStateObject (/** @type {*} */ spell, {sourceFeature, atWill = false, uses, recharge = "long", ability = null}) {
+	static buildInnateSpellStateObject (/** @type {*} */ spell, {sourceFeature, atWill = false, uses, recharge = "long", ability = null, ritualOnly = false}) {
 		return {
 			name: spell.name,
 			source: spell.source,
@@ -5183,6 +5146,9 @@ class CharacterSheetClassUtils {
 			duration: CharacterSheetClassUtils.getSpellDuration(spell),
 			concentration: CharacterSheetClassUtils.spellIsConcentration(spell),
 			ritual: CharacterSheetClassUtils.spellIsRitual(spell),
+			// A grant that reads "but only as a ritual" — the caster can never spend a
+			// slot on it. Kept separate from `ritual` (which is just the spell's tag).
+			ritualOnly,
 			subschools: spell.subschools || [],
 		};
 	}
@@ -5768,7 +5734,13 @@ class CharacterSheetClassUtils {
 	static updateClassResources (/** @type {*} */ state, /** @type {*} */ classEntry, /** @type {*} */ newLevel, /** @type {*} */ classData) {
 		const resourceDefs = {
 			"Barbarian": [
-				{name: "Rage", maxByLevel: [2, 2, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 999], recharge: "long"},
+				{name: "Rage",
+					maxByLevel: (/** @type {*} */ lvl) => CharacterSheetState.getRageUsesMaxForClass({
+						name: "Barbarian",
+						source: classEntry.source || classData.source,
+						level: lvl,
+					}),
+					recharge: "long"},
 			],
 			"Monk": [
 				{name: "__MONK_RESOURCE__", maxByLevel: (/** @type {*} */ lvl) => lvl >= 2 ? lvl : 0, recharge: "short"},
@@ -7159,8 +7131,11 @@ class CharacterSheetClassUtils {
 	 * is merged only when its featureType set does NOT intersect any class-level
 	 * progression featureType — this prevents miscounting shared types (e.g. Champion's
 	 * subclass "FS:F" vs the Fighter class "FS:F", where a shared global count would
-	 * cancel the gain). CTM:* (TGTT combat methods) are skipped here; they are augmented
-	 * separately by the bonus-method path.
+	 * cancel the gain). A subclass CTM:* progression is skipped here (the level-up
+	 * bonus-method path owns that grant), but the CLASS-level CTM:* progression is
+	 * still processed — with subclass-granted bonus methods discounted from the
+	 * "already known" count so they don't absorb a class-table increment
+	 * (CS-BUG-091).
 	 *
 	 * @param {object} classData - The class data object
 	 * @param {number} currentLevel - Previous class level
@@ -7210,13 +7185,38 @@ class CharacterSheetClassUtils {
 				matchesFeatureType(f.optionalFeatureTypes),
 			).length;
 
-			const newOptionsCount = countAtNew - existingOfType;
+			// CS-BUG-091: a subclass-GRANTED combat method is ADDITIVE to the class
+			// table, not a draw against it. 27 TGTT subclasses say "you learn one
+			// additional method from this tradition" (Eldritch Knight says two).
+			// Because `optionalfeatureProgression` stores a CUMULATIVE total, letting a
+			// granted method sit in `existingOfType` silently absorbs the class table's
+			// NEXT increment, so the character is permanently one method short from the
+			// level after the grant onward. Discount only the bonuses ALREADY on the
+			// character — inferred as the excess over the class table's total at the
+			// CURRENT level, capped at the subclass allowance — so this composes with,
+			// rather than double-counting, the level-up path's own bonus augmentation at
+			// the subclass-selection level (where the excess is still 0).
+			// Scoped to CTM:* deliberately: every other progression type (invocations,
+			// maneuvers, arcane shots, metamagic) has no additive-grant concept.
+			let effectiveExisting = existingOfType;
+			let alreadyGrantedBonus = 0;
+			if (featureTypes.some((/** @type {*} */ ft) => ft.startsWith?.("CTM:"))) {
+				const bonusAllowance = CharacterSheetClassUtils.getSubclassBonusMethodCount(subclassData, classData?.source);
+				if (bonusAllowance > 0) {
+					alreadyGrantedBonus = Math.min(bonusAllowance, Math.max(0, existingOfType - countAtCurrent));
+					effectiveExisting = existingOfType - alreadyGrantedBonus;
+				}
+			}
+
+			const newOptionsCount = countAtNew - effectiveExisting;
 			if (/** @type {*} */ newOptionsCount > 0) {
 				gains.push({
 					featureTypes,
 					name,
 					currentCount: existingOfType,
-					totalCount: countAtNew,
+					// Keep the headline total consistent with what the character will
+					// actually know: currentCount + newCount === totalCount.
+					totalCount: countAtNew + alreadyGrantedBonus,
 					newCount: newOptionsCount,
 					replacementCount: featureTypes.includes("MV:B") && countAtNew > countAtCurrent && existingOfType > 0 ? 1 : 0,
 					required: optFeatProg.required || false,

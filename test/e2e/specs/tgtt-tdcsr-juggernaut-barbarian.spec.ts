@@ -45,17 +45,36 @@ describeCharacter({
 		{level: 5, name: /extra attack/i, kind: "passive", effects: [{kind: "featureCalculation", property: "extraAttackCount", exact: 2}]},
 		{level: 5, name: /fast movement/i, kind: "passive", effects: [{kind: "speed", type: "walk", min: 40}]},
 		{level: 7, name: /feral instinct/i, kind: "passive", effects: [{kind: "rollInitiative"}]},
-		{level: 9, name: /brutal strike/i, kind: "passive", effects: [{kind: "featureCalculation", property: "brutalStrikeDamage", exact: "1d10"}]},
+		// `brutalStrikeDamage` GROWS to 2d10 at level 17, so the L9 row needs a bound or it
+		// fails itself at the L17 checkpoint. Tiered rather than loosened to a range, so
+		// both values stay exactly asserted.
+		{level: 9, untilLevel: 16, name: /brutal strike/i, kind: "passive", effects: [{kind: "featureCalculation", property: "brutalStrikeDamage", exact: "1d10"}]},
+		{level: 17, name: /brutal strike/i, kind: "passive", effects: [{kind: "featureCalculation", property: "brutalStrikeDamage", exact: "2d10"}]},
 		{level: 11, name: /relentless rage/i, kind: "passive", effects: [{kind: "featureCalculation", property: "relentlessRageBaseDc", exact: 10}]},
 		{level: 15, name: /persistent rage/i, kind: "passive", effects: [{kind: "featureCalculation", property: "hasPersistentRage", exact: true}]},
 		{level: 18, name: /indomitable might/i, kind: "passive", effects: [{kind: "featureCalculation", property: "hasIndomitableMight", exact: true}]},
 		{level: 20, name: /primal champion/i, kind: "passive", effects: [{kind: "featureCalculation", property: "hasPrimalChampion", exact: true}]},
 		{
 			level: 3,
+			// `thunderousBlowsDistance` GROWS to 10 at level 10 (Hurricane Strike, see the
+			// L10 entry below). The matrix re-evaluates every still-active earlier row at
+			// each later checkpoint, so an unbounded `exact: 5` here fails itself at L11.
+			untilLevel: 9,
 			name: /thunderous blows/i,
 			kind: "passive",
 			effects: [
 				{kind: "featureCalculation", property: "thunderousBlowsDistance", exact: 5},
+				{kind: "featureCalculation", property: "juggernautSaveDc", min: 12},
+			],
+		},
+		{
+			// Same feature past the Hurricane Strike bump — keeps the save DC asserted at
+			// every checkpoint rather than only up to L9.
+			level: 10,
+			name: /thunderous blows/i,
+			kind: "passive",
+			effects: [
+				{kind: "featureCalculation", property: "thunderousBlowsDistance", exact: 10},
 				{kind: "featureCalculation", property: "juggernautSaveDc", min: 12},
 			],
 		},

@@ -70,6 +70,18 @@ const METEOR_KNIGHT_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [{kind: "stateCall", method: "getSatellitesMax", exact: 4}],
 	},
 	{
+		// PB 5 (levels 13-16). Not exercised by the current checkpoint list
+		// [3, 5, 11, 17, 20], but kept so the tier ladder is complete and stays
+		// correct if the checkpoints ever change.
+		level: 13,
+		untilLevel: 16,
+		name: /satellite mastery/i,
+		kind: "resource",
+		resourceName: "Satellites",
+		resourceMax: 5,
+		effects: [{kind: "stateCall", method: "getSatellitesMax", exact: 5}],
+	},
+	{
 		level: 17,
 		name: /satellite mastery/i,
 		kind: "resource",
@@ -187,7 +199,8 @@ const METEOR_KNIGHT_FEATURES_MATRIX: FeatureCheck[] = [
 		level: 9,
 		name: /indomitable/i,
 		kind: "resource",
-		resourceMax: [1, 3],
+		// 1 use at 9, 2 at 13, 3 at 17.
+		resourceMax: [1, 2, 3],
 		restoreOn: "long",
 		effects: [{kind: "longRestRestores", resource: "Indomitable"}],
 	},

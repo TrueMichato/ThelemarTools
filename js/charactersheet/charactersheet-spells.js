@@ -98,6 +98,26 @@ class CharacterSheetSpells {
 		if (typeof this._page._renderOverviewMetamagic === "function") this._page._renderOverviewMetamagic();
 		this._renderMetamagic();
 		if (this._page._combat) this._page._combat.renderCombatMetamagic();
+		if (this._page._combat?.renderCombatLunar) this._page._combat.renderCombatLunar();
+	}
+
+	/**
+	 * Pay for an active metamagic: spend its (already Lunar-Boons-discounted) sorcery
+	 * point cost, then burn the Lunar Boons use that produced the discount.
+	 *
+	 * The order matters. `getCastableActiveMetamagics()` reports the REDUCED cost so the
+	 * player sees the real price, but a discount that is only displayed must never
+	 * consume a use — so the boon is consumed here, after the points have actually been
+	 * paid, and only when the reduction really changed the cost.
+	 *
+	 * @param {object|null} metamagic entry from `getCastableActiveMetamagics()`.
+	 * @returns {boolean} false when the character cannot afford it (caller aborts).
+	 */
+	_spendMetamagicCost (metamagic) {
+		if (!metamagic) return true;
+		if (!this._state.useSorceryPoint(metamagic.cost)) return false;
+		if (metamagic.lunarBoonApplied) this._state.consumeLunarBoon(metamagic.lunarBoonSchool);
+		return true;
 	}
 
 	_renderMetamagic () {
@@ -2177,14 +2197,11 @@ class CharacterSheetSpells {
 				}
 			}
 
-			if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
+			if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
 				JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 				return;
 			}
-			if (activeMetamagicChoice?.metamagic) {
-				this._consumeLunarBoonIfApplied(activeMetamagicChoice.metamagic);
-				this._refreshSorceryPointUI();
-			}
+			if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 			if (variantComponentChoice?.variantComponent) {
 				for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
@@ -2240,14 +2257,11 @@ class CharacterSheetSpells {
 				const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: spell.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 				if (activeMetamagicChoice?.cancelled) return;
 				if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
-				if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
+				if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
 					JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 					return;
 				}
-				if (activeMetamagicChoice?.metamagic) {
-					this._consumeLunarBoonIfApplied(activeMetamagicChoice.metamagic);
-					this._refreshSorceryPointUI();
-				}
+				if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 				// Variant spell component selection (ritual)
 				const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
@@ -2357,14 +2371,11 @@ class CharacterSheetSpells {
 		const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: selectedSlot.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 		if (activeMetamagicChoice?.cancelled) return;
 		if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
-		if (activeMetamagicChoice?.metamagic && !this._state.useSorceryPoint(activeMetamagicChoice.metamagic.cost)) {
+		if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
 			JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 			return;
 		}
-		if (activeMetamagicChoice?.metamagic) {
-			this._consumeLunarBoonIfApplied(activeMetamagicChoice.metamagic);
-			this._refreshSorceryPointUI();
-		}
+		if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 		// Variant spell component selection
 		const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
@@ -2989,16 +3000,6 @@ class CharacterSheetSpells {
 	 * never under-charges. Otherwise falls back to the interactive picker (or none).
 	 * @returns {Promise<{cancelled: boolean, metamagic: (object|null)}>}
 	 */
-	/**
-	 * Lunar Boons (Lunar Sorcery, 6th) already shaved a sorcery point off the cost that
-	 * was just paid — spend the use that paid for it. Called at every site that pays a
-	 * metamagic cost, so the pool can never drift from the discount actually granted.
-	 * @param {*} metamagic The resolved metamagic (from `getCastableActiveMetamagics`).
-	 */
-	_consumeLunarBoonIfApplied (metamagic) {
-		if (metamagic?.lunarBoonApplied) this._state.consumeLunarBoon?.();
-	}
-
 	async _resolveMetamagicChoice ({spell, spellData, slotLevel, isExplicit = false, shouldPrompt = true, decision = null}) {
 		if (decision && Object.prototype.hasOwnProperty.call(decision, "metamagic")) {
 			if (!decision.metamagic) return {cancelled: false, metamagic: null};
@@ -3088,16 +3089,15 @@ class CharacterSheetSpells {
 		const metamagics = this._state.getCastableActiveMetamagics?.({spell, spellData, slotLevel: isCantrip ? 0 : spell.level}) || [];
 		const availableMm = metamagics.filter(m => m.isAvailable);
 		for (const meta of availableMm) {
-			const boonNote = meta.lunarBoonApplied ? ` · 🌙 Lunar Boons (was ${meta.baseCost} SP)` : "";
 			items.push({
 				label: `🌀 ${meta.name}`,
-				sublabel: `${meta.cost} SP${boonNote}`,
+				sublabel: `${meta.cost} SP`,
 				onSelect: () => this._castSpell(spellId, {decision: {...baseDecision, metamagic: {key: meta.key, name: meta.name, cost: meta.cost}}}),
 			});
 			if (isFeywildShardAttuned) {
 				items.push({
 					label: `🌀 ${meta.name} + ✨ Feywild Shard`,
-					sublabel: `${meta.cost} SP${boonNote} · discharge shard (Wild Magic Surge)`,
+					sublabel: `${meta.cost} SP · discharge shard (Wild Magic Surge)`,
 					onSelect: () => this._castSpell(spellId, {decision: {...baseDecision, metamagic: {key: meta.key, name: meta.name, cost: meta.cost}, feywildShard: true}}),
 				});
 			}
@@ -3266,7 +3266,7 @@ class CharacterSheetSpells {
 				html: `
 					<span class="charsheet__mm-picker-option-head split-v-center">
 						<span class="charsheet__mm-picker-reference-name bold">${this._getMetamagicHoverLink(meta)}</span>
-						<span class="charsheet__mm-picker-reference-cost ml-2">${meta.cost} SP${meta.lunarBoonApplied ? ` <span class="ve-muted">🌙 was ${meta.baseCost}</span>` : ""}</span>
+						<span class="charsheet__mm-picker-reference-cost ml-2">${meta.cost} SP</span>
 					</span>
 					${meta.description ? `<span class="charsheet__mm-picker-reference-desc ve-muted ve-small ve-block">${meta.description}</span>` : ""}
 				`,
@@ -4507,7 +4507,6 @@ class CharacterSheetSpells {
 	async _pShowSummonPicker (spell, summonInfo, castLevel = null) {
 		const slotLevel = Number(castLevel) || spell.level || 2; // Minimum level for summon spells
 		const pb = this._state.getProficiencyBonus?.() || 2;
-		const spellMod = this._state.getAbilityMod?.(this._state.getSpellcastingAbility?.() || "int") || 0;
 
 		// Choose form
 		const chosenForm = await InputUiUtil.pGetUserEnum({
@@ -4518,11 +4517,10 @@ class CharacterSheetSpells {
 		});
 		if (!chosenForm) return;
 
-		// Base stats scale with spell level
-		const hp = 30 + (10 * (slotLevel - 2)); // Scales by 10 HP per level above 2nd
-		const ac = 11 + slotLevel;
-		const attackBonus = pb + spellMod;
-		const damage = `1d8 + ${3 + slotLevel}`;
+		// Base stats scale with spell level. Single source of truth so a RESOURCE cast of the
+		// same spell (e.g. Shadow Sorcery's Beasts of Ill Omen casting Summon Beast for
+		// Sorcery Points) cannot produce a differently-statted spirit.
+		const {hp, ac, attackBonus, damage} = this._state.getSummonSpiritStats({spellLevel: slotLevel});
 
 		// Dismiss any existing concentration-linked companions
 		const existingSummons = this._state.getActiveCompanions?.()?.filter(c => c.concentrationLinked) || [];
@@ -5911,6 +5909,23 @@ class CharacterSheetSpells {
 		return damageTypes[0] || "damage";
 	}
 
+	/**
+	 * Flat feature damage bonus for a CANTRIP (Potent Spellcasting & friends).
+	 *
+	 * Merges the catalog record (for its class list) with the sheet entry (for its
+	 * `sourceClass` attribution — how "these count as cleric cantrips" is represented)
+	 * so the state can scope the bonus to the granting class.
+	 * @param {*} spell Sheet spell entry, may be null.
+	 * @param {*} spellData Catalog spell record.
+	 * @returns {{bonus: number, sources: Array<{name: string, value: number}>}}
+	 */
+	_getCantripDamageBonus (spell, spellData) {
+		const level = spellData?.level ?? spell?.level;
+		if (level !== 0) return {bonus: 0, sources: []};
+		const entry = {...(spellData || {}), ...(spell || {}), level: 0};
+		return this._state.getCantripDamageBonus?.(entry) || {bonus: 0, sources: []};
+	}
+
 	_rollSpellDamage (spellData, slotLevel, baseLevel, appliedMetamagic = null, spell = null) {
 		// Weapon-channel cantrips (Booming/Green-Flame Blade) cast on their own roll ONLY
 		// the secondary/movement damage; the on-hit damage rides the weapon attack instead.
@@ -5919,7 +5934,7 @@ class CharacterSheetSpells {
 
 		// Check for cantrip scaling
 		if (spellData.scalingLevelDice) {
-			return this._rollCantripDamage(spellData, appliedMetamagic);
+			return this._rollCantripDamage(spellData, appliedMetamagic, spell);
 		}
 
 		// Look for damage dice in spell entries
@@ -5969,8 +5984,10 @@ class CharacterSheetSpells {
 			});
 			if (isDestructiveWrath) this._state.consumePendingDamageMaximization?.(damageType);
 			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
-			const total = detail.total + spellDamageBonus;
-			const bonusStr = spellDamageBonus ? ` + ${spellDamageBonus} item` : "";
+			const featureBonus = this._getCantripDamageBonus(spell, spellData);
+			const total = detail.total + spellDamageBonus + featureBonus.bonus;
+			const bonusStr = (spellDamageBonus ? ` + ${spellDamageBonus} item` : "")
+				+ featureBonus.sources.map(s => ` + ${s.value} ${s.name}`).join("");
 			const maximizedLabel = (isOvercharged || isDestructiveWrath) ? " maximized" : "";
 			const diceLabel = projectile ? `${projectile.count}× ${baseDice}` : baseDice;
 			const triggeredEffects = this._state.getTriggeredDamageEffects?.(damageType) || [];
@@ -5996,7 +6013,7 @@ class CharacterSheetSpells {
 	/**
 	 * @returns {*}
 	 */
-	_rollCantripDamage (spellData, appliedMetamagic = null) {
+	_rollCantripDamage (spellData, appliedMetamagic = null, spell = null) {
 		const characterLevel = this._state.getTotalLevel();
 		const scaling = Array.isArray(spellData.scalingLevelDice)
 			? spellData.scalingLevelDice[0]
@@ -6021,8 +6038,10 @@ class CharacterSheetSpells {
 			const detail = this._rollDamageDiceDetailed(dice, {maximize: isOvercharged || isDestructiveWrath});
 			if (isDestructiveWrath) this._state.consumePendingDamageMaximization?.(damageType);
 			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
-			const total = detail.total + spellDamageBonus;
-			const bonusStr = spellDamageBonus ? ` + ${spellDamageBonus} item` : "";
+			const featureBonus = this._getCantripDamageBonus(spell, spellData);
+			const total = detail.total + spellDamageBonus + featureBonus.bonus;
+			const bonusStr = (spellDamageBonus ? ` + ${spellDamageBonus} item` : "")
+				+ featureBonus.sources.map(s => ` + ${s.value} ${s.name}`).join("");
 			const maximizedLabel = (isOvercharged || isDestructiveWrath) ? " maximized" : "";
 			const triggeredEffects = this._state.getTriggeredDamageEffects?.(damageType) || [];
 			const push = triggeredEffects.find(it => it.type === "forcedMovement");
@@ -7319,7 +7338,11 @@ class CharacterSheetSpells {
 
 		// Build usage info
 		let usageInfo;
-		if (spell.atWill) {
+		if (spell.ritualOnly) {
+			// "…but only as a ritual": no per-rest budget, but also not freely castable —
+			// labelling it "At Will" (or, worse, the "1/day" fallback) misstates the rule.
+			usageInfo = "<span class=\"badge badge-info\" title=\"Can only be cast as a ritual (10 minutes, no spell slot)\">Ritual Only</span>";
+		} else if (spell.atWill) {
 			usageInfo = "<span class=\"badge badge-success\">At Will</span>";
 		} else if (spell.uses) {
 			// Build pips: filled = available, empty (used class) = spent
@@ -7788,9 +7811,22 @@ class CharacterSheetSpells {
 		const customSpellDc = this._state._data?.customModifiers?.spellDc || 0;
 
 		// Phase-1 doctrine: exhaustion is roll-only, not applied to display.
+		//
+		// CS-BUG-102: this card hand-rolled `8 + mod + prof` and so was the ONLY spell
+		// save DC on the sheet that ignored active-state buffs. The Combat tab reads
+		// `getSpellcastingClassBreakdown()[].saveDc`, which routes through
+		// `getSpellSaveDcForAbility()` and DOES include them, so a character under
+		// Innate Sorcery (or any `{type: "bonus", target: "spellDc"}` custom ability)
+		// saw two different DCs on two tabs — and the Spells tab, the one a player
+		// actually casts from, showed the lower one.
+		//
+		// Deliberately NOT done for the attack bonus: `_rollSpellsTabAttack` already
+		// adds `getBonusFromStates("attack:spell")` on top of the displayed value, so
+		// folding it in here would double-count it on every roll.
+		const stateDcBonus = this._state.getBonusFromStates?.("spellDc") || 0;
 		const canonicalAttack = mod + prof;
 		const effectiveAttack = canonicalAttack + spellAttackBonus + customSpellAttack;
-		const canonicalDc = 8 + mod + prof;
+		const canonicalDc = 8 + mod + prof + stateDcBonus;
 		const effectiveDc = canonicalDc + spellDcBonus + customSpellDc;
 
 		const idAttr = (base) => isPrimary ? ` id="charsheet-spell-${base}"` : "";
@@ -7821,7 +7857,7 @@ class CharacterSheetSpells {
 		if (card.isRolledPrepared) {
 			// Gambler: DC/attack are rolled per cast (dice instead of a static mod).
 			const dice = calcs.gamblerModifierDice || card.preparedDice || "1d4";
-			const dcStatic = spellDcBonus + customSpellDc;
+			const dcStatic = spellDcBonus + customSpellDc + stateDcBonus;
 			const dcBonusStr = dcStatic > 0 ? ` + ${dcStatic}` : (dcStatic < 0 ? ` - ${Math.abs(dcStatic)}` : "");
 			dcEl.textContent = `${8 + prof} + ${dice}${dcBonusStr}`;
 			const atkStatic = spellAttackBonus + customSpellAttack;
@@ -8122,8 +8158,19 @@ class CharacterSheetSpells {
 
 	/**
 	 * Show a spell picker modal filtered for a specific choice (e.g., from Fey Touched feat)
+	 *
+	 * Resolves when the modal CLOSES, not when it opens (CS-BUG-077). A grant that offers
+	 * several picks from one list — the Arcana Domain's Arcane Initiate is two wizard
+	 * cantrips — is drained by a sequential `for … await` loop in
+	 * `processPendingSpellChoices()`. While this returned early, every picker in that loop
+	 * opened at once and each snapshotted `knownSpellIds` BEFORE any pick was made, so the
+	 * same spell was still offered as selectable in the second modal. Picking it twice
+	 * silently collapsed to a single spell (`addSpell` de-dupes) while both choice slots
+	 * were recorded as fulfilled — the player lost a cantrip with no feedback.
+	 *
 	 * @param {object} choice - The pending spell choice object from state
 	 * @param {function} onSelect - Callback when spell is selected
+	 * @returns {Promise<void>} Resolves once the picker has closed.
 	 */
 	async showFilteredSpellPicker (choice, onSelect) {
 		const criteria = this._parseSpellFilter(choice.filter);
@@ -8145,10 +8192,14 @@ class CharacterSheetSpells {
 			...this._state.getInnateSpells().map(s => `${s.name}|${s.source}`),
 		];
 
+		let resolveClosed;
+		const pClosed = new Promise(resolve => { resolveClosed = resolve; });
+
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Choose Spell: ${choice.featureName}`,
 			isMinHeight0: true,
 			zIndex: 10002, // Above QuickBuild/LevelUp modals
+			cbClose: () => resolveClosed(),
 		});
 
 		// Description
@@ -8222,6 +8273,8 @@ class CharacterSheetSpells {
 		{ const _cl = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
 			<button class="ve-btn ve-btn-default">Cancel</button>
 		</div>`; modalInner.append(_cl); _cl.querySelector("button").addEventListener("click", () => doClose(false)); }
+
+		return pClosed;
 	}
 
 	/**
