@@ -3870,3 +3870,59 @@ The blast radius of the original bug is **13 specs** measured behaviourally
 (fixed and broken blankers disagree), not the 7 found by pattern-matching
 apostrophes-in-regexes nor the 17 matched by a looser grep — that looser
 pattern also matches `//` comment openings, which are not instances.
+
+## CS-BUG-095 — a "restore" cost in prose was parsed as an activation cost, permanently disabling the toggle
+
+**Status:** Fixed.
+**Affects:** Crown of Spellfire (Spellfire Sorcery 18, *Forgotten Realms:
+Heroes of the Feywild* → `FRHoF`; `classSource: "XPHB"`). No other feature in
+the shipped corpus pairs a numeric Sorcery-Point *restore* cost with a toggle
+that rides another feature's uses, so this victim is currently unique — but the
+mis-parse is generic and any similarly-worded feature would inherit it.
+
+### Symptom
+
+Crown of Spellfire is a **free** "alter your Innate Sorcery" toggle: activating
+it costs nothing (it rides an existing Innate Sorcery use). Its prose only
+mentions Sorcery Points to describe *restoring* a spent use —
+
+> …you can spend 5 Sorcery Points (no action required) to restore one use of
+> Innate Sorcery…
+
+The generic `detectActivatableFeature` read *"spend 5 Sorcery Points"* as the
+**activation** cost, and the `.includes("sorcery")` resource matcher bound it to
+the 2-use **Innate Sorcery** pool. The Activate button is disabled whenever its
+linked resource is short (`charactersheet.js`, the `2 < 5` guard), so the Crown
+row rendered **permanently disabled** — `isVisible() === true` but never
+actionable. The E2E toggle `.click()` timed out on a visible-but-dead control,
+which reads exactly like a flaky UI wait rather than a mis-parse.
+
+### Fix
+
+An explicit early return in `detectActivatableFeature`
+(`charactersheet-state.js`), placed just after the psionic check and mirroring
+the existing bespoke returns, that yields a clean **zero-cost** `crownOfSpellfire`
+toggle. It is name-guarded to `"crown of spellfire"` on a Spellfire/`FRHoF`
+character, so no other feature can reach it. With `resourceCost: 0` and no linked
+resource, the Activate button is enabled and the toggle behaves as designed
+(60-ft Fly + hover, Spell Avoidance, once-per-turn Burning Life Force).
+
+### Why the regression test pins the READING, not the calculation
+
+The test asserts the **render-consumed** surface — `getActivatableFeatures()`
+returns the Crown row with `resource == null` — because that is the exact field
+`charactersheet.js` reads to decide whether to disable the button. A
+`getFeatureCalculations()` probe, or even a `stateCall` accessor, would be one
+more indirection that a broken parse could still satisfy; only the row the
+renderer actually consumes proves the button is live. (This is the same
+"pin the reading, never the calc" lesson as CS-BUG-093, applied to a toggle's
+enabled/disabled surface rather than a numeric bonus.)
+
+### Falsification
+
+Neutralising the early-return's guard condition (so the bespoke branch never
+fires and the generic mis-parse returns) turned the regression **red: 1 failure,
+`Expected 0, Received undefined`** — a genuine wrong-value catch, not a
+`TypeError`/`ReferenceError`. Restored, it is green. The eight Spellfire methods
+carry their own seven in-place chokepoint falsifications (signatures kept:
+3/2/1/1/1/1/1 red).

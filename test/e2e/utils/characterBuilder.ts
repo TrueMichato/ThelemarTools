@@ -932,6 +932,40 @@ export const PRESET_FULL_SHADOW_SORCERY_RHW_SORCERER: CharacterPreset = {
 };
 
 /**
+ * Spellfire Sorcery Sorcerer (FRHoF subclass on the XPHB / 2024 Sorcerer chassis).
+ *
+ * Unlike Shadow Magic (a 2014 PHB origin online from L1), Spellfire is a 2024 subclass and
+ * is therefore selected at LEVEL 3 — the factory handles the L3 subclass arrival exactly as
+ * it does for the XPHB Light Cleric and Sea Druid.
+ *
+ * `classSource: "PHB'24"` selects the XPHB Sorcerer; `subclassSource: "FRHoF"` selects the
+ * Spellfire Sorcery subclass (its `classSource` is XPHB). `optFeatCount: 1` accounts for the
+ * 2024 Background's Origin Feat. Dwarf/Acolyte for the same reason as the other 2024 presets:
+ * the 2024 Human's mandatory extra Origin-Feat pick stalls the Species step.
+ *
+ * CS-BUG-056: `abilityPriority` pins CHA first (else the standard array lands the Sorcerer on
+ * CHA 8, making every save DC, the Bolstering Flames Temp HP total and Burning Life Force cap
+ * unrepresentative). DEX/CON stay at 14/13 so HP, AC and initiative are untouched.
+ */
+export const PRESET_FULL_SPELLFIRE_SORCERER: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	className: "Sorcerer",
+	classSource: "PHB'24",
+	prioritySources: ["XPHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Ember Weavefire",
+	skillCount: 2,
+	optFeatCount: 1,
+	subclassName: "Spellfire Sorcery",
+	subclassSource: "FRHoF",
+	abilityPriority: ["cha", "con", "dex", "wis", "int", "str"],
+	signatureSpells: ["Fire Bolt", "Shield"],
+};
+
+/**
  * Wicked Witch Sorcerer (Arcadia 8 subclass re-parented onto the TGTT Sorcerer chassis).
  *
  * The subclass reaches the sheet as a `_copy` in `homebrew/TravelersGuidetoThelemar.json`
@@ -1030,6 +1064,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_ARCANA_CLERIC,
 	PRESET_FULL_SHADOW_MAGIC_SORCERER,
 	PRESET_FULL_SHADOW_SORCERY_RHW_SORCERER,
+	PRESET_FULL_SPELLFIRE_SORCERER,
 	PRESET_FULL_WICKED_WITCH_SORCERER,
 	PRESET_FULL_LUNAR_SORCERY_SORCERER,
 ];
