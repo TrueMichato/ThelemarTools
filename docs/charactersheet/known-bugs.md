@@ -3855,10 +3855,24 @@ classSummon(summonHoundOfIllOmen) damage "2d6+3" missing "piercing"
 Not a product bug: the companion sets `damageType: "piercing"` correctly.
 The `classSummon` reader in `comprehensiveBuildHelpers.ts` collected only
 `[damage, desc, entries]`, so `damageContains` could never match a
-companion carrying its type structurally rather than inline — and the
-field is `description`, not `desc`. A *cannot-PASS* defect living in the
-**shared harness**, latent for every future author. It was reachable only
-through the inert-window fix.
+companion carrying its type structurally rather than inline. A
+*cannot-PASS* defect living in the **shared harness**, latent for every
+future author. It was reachable only through the inert-window fix.
+
+> **⚠️ The fix adds `damageType` ONLY. Do not "complete" it by adding
+> `description`.** An earlier phrasing here — *"the field is `description`,
+> not `desc`"* — read as though `description` were the intended replacement.
+> It is not, and adding it reintroduces the defect class this fix removes:
+> `description` is **prose** fed to a `contains` matcher, so
+> `damageContains: "fire"` would be satisfied by a description reading *"the
+> target catches fire"* — a probe passing for the wrong reason. The exclusion
+> is a judgement, not an oversight, and is argued in the comment above
+> `comprehensiveBuildHelpers.ts`'s `const flat = …`.
+>
+> `desc` is retained but **dead**: `grep -cE '\bdesc:' js/charactersheet/charactersheet-state.js`
+> → **0**, versus **254** for `description:`. It is harmless only for that
+> reason; if a future companion shape starts populating `desc` with prose it
+> becomes the same hazard and should be dropped too.
 
 **Status: swept.** Inert level windows and unreachable pick thresholds are
 both at **zero** suite-wide. Run `node scripts/auditE2eCoverage.mjs` after
@@ -4362,9 +4376,12 @@ the wrong assertion stayed green — i.e. the data was bent to fit the assertion
 
 ## CS-BUG-104 — a *resolved* `Blessed Strikes` choice still materialises both options, so `_data.chosenSubfeatures` and `_data.features` disagree — and a TGTT domain turns that into a visible duplicate
 
-**Status:** **Fixed** — the materialisation site now defers to the parser's
-verdict instead of re-deriving one from the entry shape. Pinned in both
-directions by `test/jest/charactersheet/CharacterSheetSubfeatureChoiceMaterialisation.test.js`.
+**Status:** **Fixed for newly-derived characters; NOT retroactive.** The
+materialisation site now defers to the parser's verdict instead of re-deriving
+one from the entry shape. Pinned in both directions by
+`test/jest/charactersheet/CharacterSheetSubfeatureChoiceMaterialisation.test.js`.
+**A character saved before `8839135c` keeps the duplicate rows forever** —
+`loadFromJson` never re-derives features from class data. See **CS-BUG-110**.
 
 > **The parser was never the defect.** `FeatureChoiceParser.extractChoices()`
 > returned `{count: 1, options: [Divine Strike, Potent Spellcasting]}` for
@@ -4881,10 +4898,94 @@ for the bug itself. Falsifying it required the second break above.
 
 **Status:** Open. Partially addressed — `913600e4` widened the offending
 windows that existed at the time and added `scripts/auditE2eCoverage.mjs`. The
-underlying hole is still open, and **13 rows are inert** — measured at `fae134bb`, re-measured at `380389fb`, unchanged (count corrected from 12; see Root cause 1).
+underlying hole is still open, and **16 rows are inert** — count corrected twice (12 -> 13 -> 16); see Root cause 1 and Root cause 4.
 
 **Affects:** `test/e2e/utils/characterSpecFactory.ts` (the MEGA and matrix
 loops) and `scripts/auditE2eCoverage.mjs` (the detector).
+
+### The one-command falsification — no instrumentation needed
+
+`node scripts/auditE2eCoverage.mjs` prints **coverage percentages above 100%
+next to a ✓ FULL badge**. At `c1d8df7c`: **11 of 42 rows exceed 100%**, topping
+out at **168%** (`tgtt-trickster-rogue-goblin`). A coverage figure over 100% is
+arithmetically impossible, so the metric is unsound on its face — before any
+question of *which* rows it can see. This was on screen in every run of the
+script; the inert-row enumeration below required a collection-time probe to
+obtain the weaker result.
+
+> **Do not quote 174% / "14 of 42".** Those figures are real but were measured
+> at `406e3e96`, a pre-sweep tree, and do not reproduce at trunk — for the
+> reason immediately below. Re-derive before citing; this section's own numbers
+> will drift the same way.
+
+### 🔴 Sharper: the score counts a SKIPPED assertion as coverage, so lifting a skip makes coverage go DOWN
+
+`scripts/auditE2eCoverage.mjs:728`
+
+```js
+const effective = effectsCount + helperCount + skipReasonCount + siblingCovered - inertWithProbes;
+```
+
+`skipReasonCount` counts `skipReason: "…"` annotations — prose attached to an
+assertion that **does not run**. The comment eight lines above it argues, at
+length and correctly, that `reasonCount` must *not* be added because *"an
+explanatory comment records that a gap is KNOWN; it does not make the feature
+verified … a row whose only accounting is prose must keep counting against the
+spec."* The next statement adds the strictly weaker signal: prose on a row that
+is not merely unexplained but **disabled**. The function contradicts its own
+stated principle in adjacent lines.
+
+Consequence, measured across the CS-BUG-016 skip-lifting sweep (`406e3e96` →
+`c1d8df7c`), which is unambiguously an *increase* in verification:
+
+| spec | skips lifted | reported coverage |
+|---|---|---|
+| `tgtt-child-of-sun-sorcerer-hochling` | 19 → 6 (**13**) | 174% → **105%** |
+| `tgtt-lust-cleric-lexalian` | 26 → 8 (**18**) | 131% → **62%** (FULL → LOW) |
+| `tgtt-bladesinger-wizard-tabaxi` | 14 → 10 | 154% → **123%** |
+
+Both lift counts match the per-spec CS-BUG-016 skip inventory exactly (13 and
+18), which is what identifies the mechanism rather than merely correlating with
+it. **The metric moves in the wrong direction when coverage genuinely
+improves**, and it moved one spec from ✓ FULL to ⚠ LOW *as a result of being
+better tested*. That is worse than the >100% artefact: an impossible percentage
+announces itself, whereas a plausible percentage that ranks improvement as
+regression will be believed and acted on.
+
+Minimum repair is deleting `skipReasonCount` from the sum — **but that is
+measured to be insufficient.** Removing it takes the >100% rows from **11 to
+3**, not to 0:
+
+```
+tgtt-meteor-knight-fighter.spec.ts        13 entries  15 effects  0 helpers  →  115%  ✓ FULL
+tgtt-steel-hawk-fighter.spec.ts           13 entries  15 effects  0 helpers  →  115%  ✓ FULL
+tgtt-tdcsr-juggernaut-barbarian.spec.ts   21 entries  20 effects  2 helpers  →  124%  ✓ FULL
+```
+
+On the first two, `effectsCount` **alone exceeds `entryCount`** with every
+other term at zero. So the two "honest" terms are not commensurable either:
+`entryCount` counts `{level: N,` literals (`:683`) while `effectsCount` counts
+`effects:` blocks (`:687-688`), and a row may carry more than one. The
+numerator and denominator count different things throughout, which is why a
+ratio between them is not a coverage figure at all. **Deleting one term makes
+the artefact rarer without making the metric sound.**
+
+### The printed table cannot reproduce its own percentage
+
+Two of the four numerator terms are invisible in the output:
+
+- the printed **`skip`** column is `skipCount` = `/\bskip:\s*true\b/` (`:698-699`),
+  but the term added to `effective` is `skipReasonCount` = `/\bskipReason:\s*"/`
+  (`:700-701`). They diverge routinely — bladesinger **10 vs 7**, child-of-sun
+  **6 vs 3**, champion **2 vs 0**, arcana-cleric **1 vs 0**.
+- `siblingCovered` (`:719`) is added to the score and **printed nowhere**.
+
+A reader checking the arithmetic from the table gets a different number and
+concludes they have misread the columns. Worth recording that an earlier
+attempt to confirm the mechanism this way *appeared* to succeed by coincidence
+— child-of-sun's printed `skip` of 6 happens to equal `skipReasonCount` 3 plus
+`siblingCovered` 3, so `12 + 2 + 6 = 20` gave the right total for the wrong
+reason. Verify terms against the source, never against this table.
 
 ### Symptom
 
@@ -4916,7 +5017,8 @@ DEAD_WINDOW Meteor Knight Fighter Aarakocra:: L13..16 :: /satellite mastery/i (r
 ```
 
 Meanwhile `node scripts/auditE2eCoverage.mjs` prints an **empty `inert` column
-for all three specs**, and badges two of them as fully covered:
+for all three specs**, and badges two of them as fully covered (measured at
+`fae134bb`; see the drift note above):
 
 ```
 tgtt-hunter-zodiac-centaur.spec.ts    52 entries … inert (blank)  102%  ✓ FULL
@@ -4924,17 +5026,59 @@ tgtt-meteor-knight-fighter.spec.ts    13 entries … inert (blank)  115%  ✓ FU
 tgtt-astral-self-monk-changeling.ts   24 entries … inert (blank)   58%  ⚠ LOW
 ```
 
+> At `c1d8df7c` these read **85% OK / 115% ✓ FULL / 58% ⚠ LOW** — hunter-zodiac
+> dropped out of FULL only because the skip-lifting sweep removed skips it was
+> being credited for. The **`inert` column is still blank on all three, and on
+> all 18 specs**, which is the invariant part of this symptom; the percentages
+> are not.
+
 A spec scoring **✓ FULL at 102%** while carrying six never-executed rows is
 worse than no detector, because the badge actively discourages a second look.
 
 ### Root cause — two independent ones
 
-**1. `findInertRows()` scans spec source text, but 12 of the 13 rows do not
+**1. `findInertRows()` scans spec source text, but 14 of the 16 rows do not
 exist in spec source.** They are emitted at runtime by `buildCombatMethodChecks`
 (`test/e2e/utils/tgttFeaturePools.ts:1420`/`:1431`). A lexical scan of
 `test/e2e/specs/*.ts` is structurally incapable of seeing a row a helper
 returns. This is the same class of error already recorded in CS-BUG-087's notes:
 **a regex scan over source is not an enumeration.**
+
+**4. The detector's model is wrong, not just its reach — it holds ONE global
+checkpoint list, and multiclass specs do not use it.** `characterSpecFactory.ts:907`
+
+```js
+await assertFeaturesMatrix(charSheet, featuresMatrix, leg.toTotalLevel);
+```
+
+The multiclass path evaluates the matrix **once per leg, at that leg's total
+level**. For `tgtt-hunter-zodiac-centaur` the legs are `toTotalLevel: 6` (`:458`)
+and `20` (`:460`) — **two stops, not five**. So the *same file* feeds two call
+sites that need two different checkpoint sets, and `grep -c 'toTotalLevel'
+scripts/auditE2eCoverage.mjs` returns **0**: the tool has no concept of legs at
+all.
+
+Causes 1-3 are about what the detector can *see*. This one is about the model
+being wrong, so **a perfect `findInertRows()` still gets this file wrong.** The
+worked example is `tgtt-hunter-zodiac-centaur.spec.ts:328` — hand-written,
+lexically plain, no comment between brace and key, so every proposed scanner
+repair marks it live:
+
+```js
+{ level: 8, untilLevel: 11, name: /wild shape/i, kind: "resource", resourceMax: [2, 2], restoreOn: "short" }
+```
+
+`6 < 8` and `20 > 11`, so no leg lands inside the window.
+
+> ⚠️ **One correction to how this row is usually described.** It is *not* a
+> silent kill. The comment at `:323-327` states the inertness outright — *"the
+> multiclass matrix is evaluated once PER LEG … so the level-8 tier is inert
+> here and the `shortRestRestores` probe is relocated onto the level-12 tier
+> rather than dropped."* The author knew and compensated; what is lost is the
+> row's `resourceMax: [2,2]`, not the restore probe. That makes it a **perfect**
+> demonstration of root cause 4 — the detector calls live a row whose own
+> adjacent comment says it is dead — and a **poor** example of an author being
+> misled.
 
 > **Count corrected 12 → 13 (2026-08-02, still reproducing at `380389fb`).**
 > Both earlier figures were derived by reading, and both missed the same row: the
@@ -4954,13 +5098,24 @@ returns. This is the same class of error already recorded in CS-BUG-087's notes:
 >     if (!CP.some(c => c >= r.level && c <= (r.untilLevel ?? 20))) console.log(r.level, r.untilLevel);
 > ```
 >
-> | call site | rows | inert |
-> |---|---|---|
-> | `buildCombatMethodChecks("Monk", {subclassName: "Astral Self"})` | 10 | **5** — L2..2, L6..7, L8..9, L13..14, L15..16 |
-> | `buildCombatMethodChecks("Ranger", {subclassName: "Hunter"})` | 12 | **6** — L2..2, L6..6, L7..8, L9..10, L13..14, L15..16 |
-> | `…{maxClassLevel: 6}` (`:271`, the missed one) | 5 | **1** — L2..2 |
-> | Meteor Knight `L13..16` (hand-written, self-documented) | — | 1 |
-> | | | **13** |
+> | call site | checkpoint set | rows | inert |
+> |---|---|---|---|
+> | `buildCombatMethodChecks("Monk", {subclassName: "Astral Self"})` | `[3,5,11,17,20]` | 10 | **5** — L2..2, L6..7, L8..9, L13..14, L15..16 |
+> | `buildCombatMethodChecks("Ranger", {subclassName: "Hunter"})` (`:45`) | `[3,5,11,17,20]` | 12 | **6** — L2..2, L6..6, L7..8, L9..10, L13..14, L15..16 |
+> | `…{maxClassLevel: 6}` (`:271`, the missed one) | **`{6,20}`** | 5 | **3** — L2..2, L3..4, L5..5 |
+> | Wild Shape `L8..11` (`:328`, hand-written) | **`{6,20}`** | — | **1** |
+> | Meteor Knight `L13..16` (hand-written, self-documented) | `[3,5,11,17,20]` | — | 1 |
+> | | | | **16** |
+>
+> **Count corrected again, 13 → 16.** The `13` figure applied
+> `[3,5,11,17,20]` to every call site. That set is a property of the
+> **consuming spec**, not a constant — see root cause 4. The two `{6,20}` rows
+> above are what the wrong parameter hid, and the second of them is
+> hand-written. Negative controls, since they are the useful half:
+> `tgtt-hexblade-divine-soul-tortle` (legs `{2,20}`) is **clean** — its helpers
+> return no windowed rows — and the single-class loops apply no level-cap
+> filter, so no spec loses checkpoints to its own max level. The multiclass
+> defect is confined to one file.
 >
 > The gate is `comprehensiveBuildHelpers.ts:2311`
 > (`if (fc.untilLevel != null && currentLevel > fc.untilLevel) continue;`), so an
@@ -5252,6 +5407,19 @@ being wrong. Both are avoided in the landed fix, but the plan as worded does not
 say so, and the literal reading of it produces both. Recorded here because the
 next person to touch this line will read the sentence, not the diff.
 
+> **The review caused the fix's shape — it did not merely agree with it.**
+> Measured, because the opposite was asserted once and was wrong:
+> `git log -S'abilityModOverride'` puts its first appearance in `f86af94e` at
+> **18:47**, and `git show 3c529e2e:…charactersheet-state.js | grep -c
+> abilityModOverride` returns **0** — that being the tree the reviewer measured
+> at 18:04. Their citation of the old `8 + prof + getAbilityMod(ability)` form
+> was live code, not a stale line number, and `f86af94e`'s own message encodes
+> their objection ("*which is why it cannot use the no-argument accessor*").
+> **"Your citation is stale" is the reflexive diagnosis in a fast-moving trunk,
+> and applied wrongly it erases the cause of the fix** and tells the reader no
+> action was needed. Two commands settle it: `git log -S <symbol>` for when the
+> change landed, `git show <their-sha>:<file>` for what they actually saw.
+
 **Trap 1 — exhaustion subtracted twice.** `exhaustionDcPenalty` exists on *both*
 sides. `getSpellSaveDcForAbility` already subtracts it
 (`charactersheet-state.js:13172` / `:13180`), and the cast site still reads it
@@ -5286,3 +5454,108 @@ The `PREMISE` row (exhaustion actually moves the canonical DC under Thelemar
 rules) stays green by design: it reads the accessor, not the cast output, so it
 proves the fixture reaches the penalty at all rather than comparing an unchanged
 number to itself.
+
+---
+
+## CS-BUG-110 — CS-BUG-104's fix is prospective, so a character saved before it keeps the duplicate choose-one rows forever
+
+**Status:** Open. Display-only. Measured end-to-end by the `plan-cs-bug-018-skips`
+session; the *proposed* repair in that report is recorded below **and corrected**,
+because it does not fix either measured case.
+
+**Reproduction (a full round trip, not an inference).** On the fixed tree:
+
+```
+1. revert the CS-BUG-104 delegation
+2. spawn cleric/life domain/7, export toJson()   -> Blessed Strikes children = 2
+3. restore the fix
+4. load that JSON on the FIXED tree              -> still 2: ["Divine Strike","Potent Spellcasting"]
+```
+
+**Root cause.** `_migrateFeatures()` (`charactersheet-state.js:6546`) is a
+`.map()` over the stored `_data.features` array:
+
+```js
+this._data.features = this._data.features.map(f => { … });
+```
+
+A `map` can transform a row and can never remove one, and nothing else in
+`loadFromJson` re-derives features from class data. So CS-BUG-104 corrected the
+**derivation** while leaving the **stored result** untouched. Any Cleric 7+
+saved before `8839135c` still renders three rows at L7, and a TGTT Time Domain
+Cleric 8 still shows Potent Spellcasting twice.
+
+### ⚠️ The obvious repair does not work — do not ship it
+
+The originating report proposed *"a one-line dedup in `_migrateFeatures` keyed
+on `(name, parentFeature, level)`"*. That key is inert on both measured cases,
+by the report's own output:
+
+| case | rows | why the key keeps both |
+|---|---|---|
+| `cleric/life domain/7` | `["Divine Strike", "Potent Spellcasting"]` | **different names** — these are two *options* of one choice, not two copies of one row |
+| `cleric/time domain/8` | Potent Spellcasting ×2 | same name, but **levels 7 and 8** — `level` is in the key |
+
+The stored defect is an **over-grant of a choose-one group**, not a duplicated
+row, so no identity-based dedup can see it. A correct repair has to re-derive
+the group and keep the chosen option — and that is harder than it looks, because
+branch (b) of the choice seeder (`charactersheet-class-utils.js`, the
+`appliedFeatures.forEach(_recordChosenSubfeature)` path) records a chosen
+subfeature for **every materialised row**. A pre-fix save therefore has *both*
+options recorded as chosen, so `chosenSubfeatures` cannot arbitrate. (Same
+circularity already noted in CS-BUG-104's evidence section.)
+
+**Severity is display-only and unchanged from CS-BUG-104's own finding:** the L7
+rows assign no calc keys, and `blessedStrikesDamage: "1d8"` comes from the
+surviving row either way. Filed rather than fixed because a wrong one-liner here
+would look like a fix, pass a dedup-shaped test, and change nothing.
+
+### It does not self-heal on level-up — measured through the real wizard
+
+The open question above was whether a subsequent level-up would re-derive the
+row set and silently repair a pre-`8839135c` save. **It does not.** Measured by
+the originating session through `levelUpTo` (a real wizard run, not a state
+poke):
+
+```
+after load     {"blessedStrikes":["Divine Strike","Potent Spellcasting"], "lvl":7}
+after LEVEL-UP {"blessedStrikes":["Divine Strike","Potent Spellcasting"], "lvl":8}
+```
+
+So the duplicate is **permanent for the life of the save**, through any number
+of level-ups.
+
+Two mechanisms, both verified here rather than taken from the report — the
+second is more specific than the report states:
+
+1. **`addFeature` cannot see it.** `charactersheet-state.js:36414` dedups on
+   `(name, source, className, level)` and the very first line of the predicate
+   is `if (f.name !== feature.name) return false;`. The two stored rows are
+   *different names*, so the dedup declines on its first comparison.
+2. **There IS an earlier-level backfill, but it is gated off for a loaded
+   save.** `charactersheet-levelup.js:4440-4450` loops
+   `for (let earlierLevel = 1; earlierLevel < newLevel; …)` and recomputes
+   `getLevelFeatures` for every earlier level — but only inside
+   `if (!alreadyHadSubclass)` (`:4439`), which exists so the backfill fires
+   exactly once, at subclass acquisition. A Cleric 7 loaded from JSON already
+   has a subclass, so it never runs. **And it could not help if it did:** the
+   body is `newFeatures.push(...earlierSubclassFeatures)` — it can only add
+   rows, never remove one. Firing it would produce a *third* row, not heal the
+   pair.
+
+> **Probe hygiene, from the same investigation.** The first attempt at this
+> measurement called `st.addClassLevel?.("Cleric")` and reported "features len
+> delta 0". `grep -rn 'addClassLevel' js/charactersheet/` returns **nothing** —
+> the optional chain silently no-op'd, and the probe would have reported the
+> right conclusion on the strength of a call that never executed. Generalised
+> rule: **`?.` on the object under test converts "this API does not exist" — the
+> single most interesting possible result — into a silent pass, and must not
+> appear in a probe.**
+
+### Also recorded: a benign state-shape change from the CS-BUG-104 fix
+
+Cunning Strike's `chosenSubfeatures` went **3 → 0** (branch (b) no longer runs,
+since narrowing means no group is produced). `_data.features` rows are
+unaffected, and display and mechanics read those, so this is believed benign —
+recorded because it will show up in save diffs and should not surprise the next
+reader.
