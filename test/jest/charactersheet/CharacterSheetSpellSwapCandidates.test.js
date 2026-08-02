@@ -15,6 +15,9 @@
  * of spell (player-chosen, feature-granted, orphan) are asserted separately so a
  * fix that over-corrects — admitting subclass grants into the swap list — is just
  * as red as the original under-correction.
+ *
+ * They do NOT pin the call site. See the note on `swapCandidates` below, and
+ * `CharacterSheetSpellSwapRender.test.js` for the wiring.
  */
 
 import "../../../js/parser.js";
@@ -26,9 +29,18 @@ const CharacterSheetState = globalThis.CharacterSheetState;
 const ClassUtils = globalThis.CharacterSheetClassUtils;
 
 /**
- * The production predicate itself — `charactersheet-levelup.js`
- * `_renderSpellSwapSection` filters its candidate list with exactly this call, so
- * breaking `isSwappableKnownSpell` turns these tests red.
+ * Applies the production predicate to a state's known-spell list.
+ *
+ * SCOPE — read before adding a test here. This helper calls
+ * `isSwappableKnownSpell` directly; it does NOT drive
+ * `_renderSpellSwapSection`, which is what actually filters the UI's candidate
+ * list. So these tests pin the PREDICATE and are blind to the WIRING: reverting
+ * the level-up call site to the original `!s.sourceFeature` — i.e. reintroducing
+ * CS-BUG-108 in full — leaves every test in this file green (measured: 19/19).
+ *
+ * The wiring is pinned separately by `CharacterSheetSpellSwapRender.test.js`,
+ * which drives the real render method and reads what it wrote. A change to the
+ * call site needs a test there, not here.
  */
 function swapCandidates (state) {
 	return (state.getSpellsKnown?.() || [])
