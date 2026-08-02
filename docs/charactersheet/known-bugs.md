@@ -5828,11 +5828,25 @@ because it does not fix either measured case.
 **Reproduction (a full round trip, not an inference).** On the fixed tree:
 
 ```
-1. revert the CS-BUG-104 delegation
+1. materialise the TRUE pre-fix tree — `git checkout c188b94b^ -- \
+     js/charactersheet/charactersheet-class-utils.js \
+     js/charactersheet/charactersheet-state.js`
 2. spawn cleric/life domain/7, export toJson()   -> Blessed Strikes children = 2
 3. restore the fix
 4. load that JSON on the FIXED tree              -> still 2: ["Divine Strike","Potent Spellcasting"]
 ```
+
+> **⚠️ Method note on step 1.** An earlier draft of this reproduction said
+> *"revert the CS-BUG-104 delegation"*. CS-BUG-104's fix is **two coupled edits**
+> — `getChoiceOptionNames()` in `charactersheet-class-utils.js` **and** the
+> `continue` at the materialisation call site — so reverting one of them yields a
+> **hybrid tree matching no commit that has ever existed**. The conclusion here is
+> unaffected (materialisation is 2 rows on either tree), but the *recording* count
+> differs between them, so anyone extending this repro from the old wording gets a
+> different answer than the entry implies. That exact hybrid is what produced the
+> since-corrected `recording: correct` row in CS-BUG-104. Use `c188b94b^`, and
+> confirm with `grep -c 'choiceOptionNames' js/charactersheet/charactersheet-class-utils.js`
+> → **0** on the pre-fix tree.
 
 **Root cause.** `_migrateFeatures()` (`charactersheet-state.js:6546`) is a
 `.map()` over the stored `_data.features` array:
@@ -5900,10 +5914,37 @@ second is more specific than the report states:
    `getLevelFeatures` for every earlier level — but only inside
    `if (!alreadyHadSubclass)` (`:4439`), which exists so the backfill fires
    exactly once, at subclass acquisition. A Cleric 7 loaded from JSON already
-   has a subclass, so it never runs. **And it could not help if it did:** the
-   body is `newFeatures.push(...earlierSubclassFeatures)` — it can only add
-   rows, never remove one. Firing it would produce a *third* row, not heal the
-   pair.
+   has a subclass, so it never runs. **And it is doubly incapable if it does
+   run** — two independent reasons, and the *earlier* one is the one a reader
+   trips over:
+   - **(a) It never sees these rows.** The line above the push is
+     `const earlierSubclassFeatures = earlierFeatures.filter(f => f.isSubclassFeature);`
+     (`charactersheet-levelup.js:4448`; the same filter guards the second
+     backfill site at `charactersheet-quickbuild.js:4795`). Blessed Strikes is a
+     **`classFeature`**, and the `extracted.push({…})` block that stamps
+     `parentFeature` (`charactersheet-class-utils.js:3401-3410`) sets no
+     `isSubclassFeature` key at all. The five `isSubclassFeature: true` sites
+     (`:3435`, `:3475`, `:3517`, `:3553`, `:3621`) are all on the *subclass*
+     path. Measured through the pin's own `materialise()` helper, so no browser
+     was involved:
+
+     ```
+     Rogue XPHB 5, parent "Cunning Strike"  -> 3 rows, all isSubclassFeature=undefined
+       Poison (Cost: 1d6) / Trip (Cost: 1d6) / Withdraw (Cost: 1d6)
+     Monk  XPHB 2, parent "Monk's Focus"    -> 3 rows, all isSubclassFeature=undefined
+       Flurry of Blows / Patient Defense / Step of the Wind
+     ```
+   - **(b) Even if it saw them, the body is
+     `newFeatures.push(...earlierSubclassFeatures)`** — it can only add rows,
+     never remove one. Firing it would produce a *third* row, not heal the pair.
+
+   **Why (a) is worth stating and not a footnote.** (b) alone invites the repair
+   *"make the backfill replace instead of push"*. That repair would still do
+   nothing, because the filter excludes these rows before the push is reached.
+   Recording only (b) forecloses one wrong one-liner (the `addFeature` dedup) and
+   leaves a second one open. Correction contributed by the
+   `plan-cs-bug-018-skips` session; the "it can only add" half was mine and was
+   accurate but not the operative gate.
 
 > **Probe hygiene, from the same investigation.** The first attempt at this
 > measurement called `st.addClassLevel?.("Cleric")` and reported "features len
