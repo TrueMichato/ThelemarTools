@@ -54120,6 +54120,61 @@ class CharacterSheetState {
 	 * @param {string} [companionData.groupId] - ID to link related conjured creatures
 	 * @returns {string} The new companion's ID
 	 */
+	/**
+	 * Normalise structured companion attacks into the prose `actions` shape.
+	 *
+	 * Companion attacks arrive in two vocabularies. Bestiary-derived companions carry
+	 * 5etools prose (`{name, entries: ["{@atk mw} {@hit 5} to hit …"]}`), and that is the
+	 * only shape the sheet renders a roll button for and the only one
+	 * `_rollCompanionAttack()` can parse. Curated class summons are far easier to author
+	 * in the structured shape (`{name, attackBonus, damage, damageType, range}`), which
+	 * `addCompanion()` stored verbatim in `attacks` — where no button-rendering or rolling
+	 * path reads it.
+	 *
+	 * Enumerated readers of `companion.attacks` at the time of writing: only
+	 * `charactersheet-playmode.js:2835`/`:4013` (`comp.actions || comp.attacks`) and the
+	 * scaling rewrite at `_recalculateScaledCompanion()`. The Play Mode fallback never
+	 * fires — `addCompanion()` always writes an array to `actions` and `[]` is truthy —
+	 * and it renders only `name`/`entries` anyway, neither of which a structured attack
+	 * has. The scaling rewrite only fires for a `scaling.attackName`, which curated
+	 * fixed-statblock summons do not declare.
+	 *
+	 * Net effect (CS-BUG-089): a summon with a fully specified attack and no way to roll
+	 * it — the Hound of Ill Omen (Shadow Magic 6) had `attackBonus: 5`, `damage: "2d6+3"`,
+	 * `damageType: "piercing"` and rendered zero attack buttons.
+	 *
+	 * Rather than teach the renderer and the roller a second vocabulary, translate once at
+	 * the point of entry. Authored prose wins: an attack whose name already matches an
+	 * action, or which already carries `entries`, is left alone.
+	 *
+	 * @param {Array} [actions] the companion's declared prose actions.
+	 * @param {Array} [attacks] the companion's declared structured attacks.
+	 * @returns {Array} `actions` plus one synthesised entry per unrepresented attack.
+	 * @private
+	 */
+	static _withStructuredAttackActions (actions, attacks) {
+		const out = [...(actions || [])];
+		if (!Array.isArray(attacks) || !attacks.length) return out;
+
+		const seen = new Set(out.map(a => String(a?.name || "").toLowerCase()));
+		for (const atk of attacks) {
+			const name = atk?.name;
+			if (!name || atk.entries) continue;
+			if (seen.has(String(name).toLowerCase())) continue;
+			if (atk.attackBonus == null && !atk.damage) continue;
+
+			const parts = [`{@atk ${atk.attackType || "mw"}}`];
+			if (atk.attackBonus != null) parts.push(`{@hit ${atk.attackBonus}} to hit,`);
+			parts.push(`reach ${atk.range || "5 ft."}, one target.`);
+			if (atk.damage) parts.push(`{@h}{@damage ${atk.damage}}${atk.damageType ? ` ${atk.damageType}` : ""} damage.`);
+			if (atk.description) parts.push(atk.description);
+
+			out.push({name, entries: [parts.join(" ")]});
+			seen.add(String(name).toLowerCase());
+		}
+		return out;
+	}
+
 	addCompanion (companionData) {
 		if (!this._data.companions) this._data.companions = [];
 
@@ -54173,7 +54228,7 @@ class CharacterSheetState {
 
 			// Stat block entries
 			traits: companionData.traits || [],
-			actions: companionData.actions || [],
+			actions: CharacterSheetState._withStructuredAttackActions(companionData.actions, companionData.attacks),
 			reactions: companionData.reactions || [],
 			bonusActions: companionData.bonusActions || [],
 

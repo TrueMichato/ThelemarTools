@@ -3967,3 +3967,93 @@ red" is necessary, not sufficient: when a test has assertions ahead of the one
 you are relying on, the first failure hides whether the later one can fire at
 all. Neutralise the earlier assertions and re-run before claiming a surface is
 pinned.
+
+---
+
+## CS-BUG-089 — a companion whose attack is declared structurally has no rollable attack at all
+
+**Status:** Fixed.
+**Affects:** every `CLASS_SUMMON` companion authored in the structured attack
+vocabulary. The reproducible victim in the shipped corpus is the **Hound of Ill
+Omen** (Shadow Magic Sorcerer 6). Any future curated summon written the same way
+inherits it, which is why the fix is at the point of entry rather than in the
+Hound.
+
+### Symptom
+
+Summon the Hound at level 6. It arrives with a fully specified Bite — `+5` to
+hit, `2d6+3` piercing, plus a DC 13 Strength save or prone — and the companion
+card renders **zero attack buttons**. There is nothing to click and nothing to
+roll. The damage is visible nowhere on the sheet.
+
+### Root cause — two vocabularies, one reader
+
+Companion attacks arrive in two shapes:
+
+| shape | example | who reads it |
+|---|---|---|
+| prose (bestiary) | `{name: "Bite", entries: ["{@atk mw} {@hit 5} to hit… {@damage 2d6+3}"]}` | everything |
+| structured (curated) | `{name: "Bite", attackBonus: 5, damage: "2d6+3", damageType: "piercing"}` | **nothing that renders or rolls** |
+
+`addCompanion()` stored the structured form verbatim as `companion.attacks` and
+initialised `actions: companionData.actions || []`. Every surface that produces
+a button or a roll reads `companion.actions` and parses 5etools prose out of
+`entries`:
+
+- `charactersheet.js:4853` — attack-button filter, `/\{@atk/` over `actions[].entries`
+- `charactersheet.js:5705` — the same filter, second render path
+- `charactersheet.js:5797` — `_rollCompanionAttack()`, `{@hit N}` / `{@damage X}` over `entries`
+- `charactersheet.js:5963` — companion attack list
+
+So a structured attack landed in a field no rendering or rolling path consults.
+
+**Enumerated, not assumed.** `git grep -n "\.attacks" -- js/charactersheet/`
+returns exactly two other readers of `companion.attacks`, and neither rescues
+this:
+
+1. `charactersheet-playmode.js:2835` / `:4013` do `comp.actions || comp.attacks || []`.
+   That fallback **never fires** — `addCompanion()` always writes an array to
+   `actions` and `[]` is truthy — and it renders only `name`/`entries` anyway,
+   neither of which a structured attack has.
+2. `_recalculateScaledCompanion()` rewrites both lists, but only when the
+   companion declares `scaling.attackName`. The Hound's descriptor is
+   `{className: "Sorcerer", tempHpPerLevel: 0.5}` — no `attackName` — so it is
+   never reached.
+
+This corrects an earlier and weaker-sounding but false claim that "nothing reads
+`companion.attacks`". Two things do; neither renders a button or rolls dice.
+
+### Fix
+
+`static CharacterSheetState._withStructuredAttackActions(actions, attacks)`,
+applied once at `addCompanion()`. It synthesises a prose action per structured
+attack that is not already represented, emitting exactly the tokens the four
+consumers parse (`{@atk}`, `{@hit N}`, `{@h}{@damage X} <type> damage.`) and
+appending any `description` so riders such as the prone save survive.
+
+Authored prose wins: an attack whose name already matches an action, or which
+already carries `entries`, is left untouched. `companion.attacks` is preserved
+unchanged, so the translation is purely additive and nothing that reads the
+structured form is disturbed.
+
+### Regression pins
+
+`test/jest/charactersheet/CharacterSheetShadowMagicSorcerer.test.js` — both
+assert the tokens the real consumers parse, applying the render predicate from
+`charactersheet.js:4853` verbatim rather than a paraphrase.
+
+Falsified by breaking the logic **in place**, signature kept — never by deleting
+the method, which would only prove the test touches new code:
+
+| break | red | failure |
+|---|---|---|
+| the fix absent entirely (pre-fix baseline) | 1 | `Expected length: 1 / Received length: 0` — zero attack buttons |
+| `seen.has(...)` collision guard removed | 1 | `Expected length: 1 / Received length: 2` — duplicate `Bite` row |
+| `{@damage …}` wrapper dropped from the emitted entry | 1 | damage list `Expected - 3 / Received + 1` |
+
+All three are real **assertion** failures, not `TypeError`.
+
+Honest note on pin 2: it is **green pre-fix**, because it asserts *precedence*
+and the total absence of translation satisfies that trivially. It is a guard
+against the fix over-reaching, not against the original bug — pin 1 is the pin
+for the bug itself. Falsifying it required the second break above.
