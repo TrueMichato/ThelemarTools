@@ -3886,8 +3886,8 @@ Crown of Spellfire is a **free** "alter your Innate Sorcery" toggle: activating
 it costs nothing (it rides an existing Innate Sorcery use). Its prose only
 mentions Sorcery Points to describe *restoring* a spent use —
 
-> …you can spend 5 Sorcery Points (no action required) to restore one use of
-> Innate Sorcery…
+> …you can't use it again until you finish a Long Rest unless you spend 5
+> Sorcery Points (no action required) to restore your use of it…
 
 The generic `detectActivatableFeature` read *"spend 5 Sorcery Points"* as the
 **activation** cost, and the `.includes("sorcery")` resource matcher bound it to
@@ -3907,63 +3907,50 @@ character, so no other feature can reach it. With `resourceCost: 0` and no linke
 resource, the Activate button is enabled and the toggle behaves as designed
 (60-ft Fly + hover, Spell Avoidance, once-per-turn Burning Life Force).
 
-### Why the regression test pins the READING, not the calculation
+### Why the regression pins the READING — and what "the reading" actually is
 
-The Jest test asserts two surfaces: the `detectActivatableFeature` accessor
-(`resourceCost === 0`) and the **render-consumed** row
-(`getActivatableFeatures()` → `resource == null`, the exact field
-`charactersheet.js` reads to decide whether to disable the button).
+The load-bearing, render-consumed surface is **which resource
+`getActivatableFeatures()` binds to the Crown row**, because that is the field
+`charactersheet.js` charges the Activate button against:
 
-**⚠️ This entry originally claimed the row was the load-bearing assertion and
-dismissed the accessor as "one more indirection a broken parse could still
-satisfy". When measured, the reverse was true — and the row assertion was
-inert.** Neutralising the guard turned the **accessor** assertion red; Jest
-stops at the first failure, so the row assertion never executed. Commenting out
-the four accessor assertions and re-running with the break still applied gave
-**`27 passed`**: the row was `{"resource": null}` with *and* without the fix.
+- **broken** → the row binds the shared **Sorcery-Point / Innate-Sorcery spend
+  pool** (`matchedBy: "name"`, `sorceryPointCost: 5`; in the field, a 2-use
+  Innate Sorcery pool → the `2 < 5` disable);
+- **fixed** → the row binds *at most* Crown's **own 1/Long-Rest use pool**
+  (`"Crown of Spellfire"`, `current 1 ≥ cost 1`), so the button stays live.
 
-The cause was the fixture, not the product. `SPELLFIRE_FEATURES` described Crown
-as *"…gaining Flight, Spell Avoidance, and Burning Life Force"* and **omitted
-"spend 5 Sorcery Points" entirely**, so the mis-parse this bug is about could
-not occur there: with no numeric cost in the prose the parser bound no resource,
-and the row looked correct even when broken.
+**Correction (measured after review).** An earlier draft of this test asserted
+`crownRow.resource == null`, and an earlier draft of the fixture *paraphrased
+away* the "spend 5 Sorcery Points" clause. Both were wrong, and they masked each
+other: with the trigger prose removed the mis-parse had nothing to bite, so the
+row was `null` in **both** worlds and the assertion never discriminated (green
+under a neutralised guard). Two facts only surfaced once the fixture carried the
+**verbatim** published prose:
 
-**Fixed.** The fixture now carries the restore sentence verbatim, so the test
-exercises the actual mis-parse. Re-measured: with the guard broken and the
-accessor assertions neutered, the row assertion **does** fail
-(`Expected: true, Received: false`). Both surfaces now discriminate, and the
-claim above is true rather than aspirational.
+1. The real prose legitimately mints a `feature.uses` **1/Long-Rest** pool, so
+   the *correct* fixed row carries a resource — it is **not** `null`. `resource
+   == null` was therefore never the right assertion.
+2. The discriminator is the **name** of the bound pool, not its presence. The
+   regression now asserts `resource.name` is **not** Sorcery-flavoured (and, if
+   present, is Crown's own pool), and asserts it **first**, so a leading accessor
+   failure can never mask it (the lesson from this review round: *"a revert makes
+   it red" is necessary but not sufficient — which assertion went red matters*).
 
-> Take care adding prose to this fixture: an earlier attempt used *"Once per
-> Long Rest you can spend 5 Sorcery Points…"*, and the `Once per Long Rest`
-> clause independently created a 1/long-rest uses pool named "Crown of
-> Spellfire". That failed the row assertion **with the fix in place** — a
-> fixture artefact that looks exactly like a product regression.
-
-**The strongest pin for this bug remains the E2E probe**: the `featuresMatrix`
-L18 entry in `tgtt-spellfire-sorcerer.spec.ts` carries `kind: "toggle"`, which
-clicks the real rendered Activate button against real brew data. That is the
-probe whose timeout found the bug.
-
-**Lesson, stated correctly:** *"pin the reading, never the calc"* (CS-BUG-093) is
-a sound default, but **it does not self-verify**. A render-consumed assertion is
-exactly as inert as a calculation probe when the fixture cannot reach the
-failure mode. Being the surface the renderer reads does not make an assertion
-sensitive — only a targeted falsification shows that, and it must confirm *which*
-assertion went red.
+The `getFeatureCalculations()` / `stateCall` accessors below the row assertion
+are corroboration only. And the **field pin** — the probe that found the bug in
+the first place and cannot be fooled by a fixture — is the E2E `featuresMatrix`
+L18 row (`kind: "toggle"`), which `.click()`s the **real rendered** Activate
+button against the **real brew prose**; it passes 8/8.
 
 ### Falsification
 
-Neutralising the early-return's guard condition (so the bespoke branch never
-fires and the generic mis-parse returns) turned the regression **red: 1 failure,
-`Expected 0, Received undefined`** — a genuine wrong-value catch, not a
-`TypeError`/`ReferenceError`. Restored, it is green. The eight Spellfire methods
-carry their own seven in-place chokepoint falsifications (signatures kept:
-3/2/1/1/1/1/1 red).
-
-**But note which assertion went red.** That single failure is the accessor line,
-and it masks the inert row assertion behind it (see above). "A revert makes it
-red" is necessary, not sufficient: when a test has assertions ahead of the one
-you are relying on, the first failure hides whether the later one can fire at
-all. Neutralise the earlier assertions and re-run before claiming a surface is
-pinned.
+Neutralising the early-return's guard condition **in place** (`if (false &&
+name === …`, signature kept, generic mis-parse restored) turned the regression
+**red: 1 failure**, and the first assertion to fail is the render-consumed
+row-binding one — `test/…/CharacterSheetSpellfireSorcerer.test.js:276`,
+`expect(/sorcer/i.test(boundName)).toBe(false)` → **`Expected false, Received
+true`** (the broken row binds `"Sorcery Points"`). A genuine wrong-value catch on
+the reading the renderer consumes, not a `TypeError`/`ReferenceError`, and not an
+accessor. Restored, it is green (27/27). The eight Spellfire methods carry their
+own seven in-place chokepoint falsifications (signatures kept: 3/2/1/1/1/1/1
+red).

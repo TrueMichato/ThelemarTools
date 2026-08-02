@@ -23,7 +23,10 @@ const SPELLFIRE_FEATURES = [
 	{level: 3, name: "Bolstering Flames", description: "You or one creature you can see within 30 feet of yourself gains Temporary Hit Points equal to 1d4 plus your Charisma modifier."},
 	{level: 6, name: "Absorb Spells", description: "You always have Counterspell prepared. Whenever a target fails the saving throw against a Counterspell you cast, you regain 1d4 Sorcery Points."},
 	{level: 14, name: "Honed Spellfire", description: "Your Spellfire Burst improves. You add your Sorcerer level to the Temporary Hit Points, and Radiant Fire deals 1d8 damage."},
-	{level: 18, name: "Crown of Spellfire", description: "When you use Innate Sorcery, you can alter it and infuse yourself with the essence of spellfire, gaining Flight, Spell Avoidance, and Burning Life Force. While the crown persists, you can spend 5 Sorcery Points (no action required) to restore one use of Innate Sorcery."},
+	// Full published prose ON PURPOSE: the "spend 5 Sorcery Points ... to restore" clause is the
+	// exact text the generic parser mis-reads as an activation cost (CS-BUG-095). Paraphrasing it
+	// away makes the regression below inert — the mis-parse has nothing to bite on. See line ~254.
+	{level: 18, name: "Crown of Spellfire", description: "When you use Innate Sorcery, you can alter it and infuse yourself with the essence of spellfire, gaining Flight, Spell Avoidance, and Burning Life Force while this use of Innate Sorcery is active. Once you use this feature to alter Innate Sorcery, you can't use it again until you finish a Long Rest unless you spend 5 Sorcery Points (no action required) to restore your use of it."},
 ];
 
 /**
@@ -251,29 +254,40 @@ describe("Crown of Spellfire — active state, fly speed, restore cost", () => {
 		expect(state.getSorceryPoints().current).toBe(4); // unspent
 	});
 
-	// CS-BUG-095 regression. Crown's prose says "spend 5 Sorcery Points" (the RESTORE
-	// cost). The generic parser turned that into an *activation* cost and, via the
-	// `.includes("sorcery")` resource matcher, bound it to the 2-use "Innate Sorcery"
-	// pool — so the rendered Activate button was permanently disabled (2 < 5) and could
-	// never be clicked. The reading the render consumes is getActivatableFeatures(): the
-	// Crown row must carry NO linked resource (charactersheet.js keeps the button enabled
-	// only when `!resource`) and a zero activation cost.
-	it("surfaces Crown as a clickable zero-cost toggle, not a 5-SP Innate Sorcery spender", () => {
+	// CS-BUG-095 regression. Crown's published prose (see the fixture at line ~29, kept
+	// verbatim ON PURPOSE) says "spend 5 Sorcery Points ... to restore your use of it" — a
+	// RESTORE cost, handled by restoreCrownOfSpellfire(). The generic parser instead read it
+	// as an *activation* cost, so getActivatableFeatures() bound the Crown row to the shared
+	// Sorcery-Point / Innate-Sorcery spend pool at cost 5 (matchedBy "name", sorceryPointCost
+	// 5). The load-bearing, render-consumed reading is THEREFORE which resource the row binds:
+	// broken → "Sorcery Points" (the spend pool the Activate button charges against, disabled
+	// when a 2-use Innate Sorcery pool is present at 2 < 5); fixed → at most Crown's OWN
+	// 1/Long-Rest use pool ("Crown of Spellfire"). This assertion is asserted FIRST so it is
+	// never masked by a leading accessor failure. The accessor checks below corroborate but
+	// are not the pin — a broken parse changes both, so the row-binding is the discriminator.
+	it("binds Crown's row to its own use pool, never the shared Sorcery-Point spend pool", () => {
 		const state = makeSpellfireSorcerer(18);
-		const crownFeature = state._data.features.find(f => f.name === "Crown of Spellfire");
-		expect(crownFeature).toBeTruthy();
 
+		// --- render-consumed reading (the pin) ---
+		const crownRow = state.getActivatableFeatures().find(a => a.stateTypeId === "crownOfSpellfire");
+		expect(crownRow).toBeTruthy();
+		const boundName = crownRow.resource ? crownRow.resource.name : null;
+		// Must NOT be the Sorcery-Point / Innate-Sorcery spend pool the restore cost mis-bound.
+		expect(/sorcer/i.test(boundName || "")).toBe(false);
+		// A bound resource is allowed, but only Crown's own 1/Long-Rest use pool.
+		expect(boundName == null || /crown of spellfire/i.test(boundName)).toBe(true);
+		// And it must be affordable, so the rendered Activate button stays actionable.
+		const cost = crownRow.resource ? (crownRow.resource.cost || 1) : 0;
+		expect(crownRow.resource == null || crownRow.resource.current >= cost).toBe(true);
+
+		// --- accessor corroboration (not the pin) ---
+		const crownFeature = state._data.features.find(f => f.name === "Crown of Spellfire");
 		const info = CharacterSheetState.detectActivatableFeature(crownFeature);
 		expect(info.stateTypeId).toBe("crownOfSpellfire");
 		expect(info.isToggle).toBe(true);
 		expect(info.resourceCost).toBe(0);
 		// The restore cost must NOT leak in as an activation resource cost.
 		expect(info.sorceryPointCost == null).toBe(true);
-
-		const crownRow = state.getActivatableFeatures().find(a => a.stateTypeId === "crownOfSpellfire");
-		expect(crownRow).toBeTruthy();
-		// `resource: null` is exactly what keeps the Activate button enabled at render time.
-		expect(crownRow.resource == null).toBe(true);
 	});
 });
 
