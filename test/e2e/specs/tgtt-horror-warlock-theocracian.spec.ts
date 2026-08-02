@@ -36,43 +36,46 @@ describeCharacter({
 		featAbility: {skip: true},
 	},
 	milestones: {
-		1:  {totalLevel: 1,  expectToggles: [/horror|hex|eldritch|pact|terror/i]},
-		3:  {totalLevel: 3,  expectToggles: [/pact of|invocation|horror|hex|terror/i]}, // CS-BUG-013: drop pactSlots assertion
-		5:  {totalLevel: 5},  // CS-BUG-013
-		11: {totalLevel: 11}, // CS-BUG-013
-		17: {totalLevel: 17}, // CS-BUG-013
-		20: {totalLevel: 20}, // CS-BUG-013
+		// CS-BUG-013 is marked **Stale (Wave 1 triage — closing)** and the
+		// export artifact confirms it: a freshly-built L1 Horror Warlock
+		// carries `spellcasting.pactSlots = {current:1, max:1, level:1}`.
+		// Pact magic IS wired — it is simply modelled as spell slots, not
+		// as a resource-tracker pool. The `pactSlots` milestone assertions
+		// dropped below were therefore frozen behind a reason that no
+		// longer stands; restored here against the real reading surface.
+		// Floors only (the helper asserts >=), per PHB pact progression.
+		1:  {totalLevel: 1,  expectToggles: [/horror|hex|eldritch|pact|terror/i], pactSlots: {level: 1, max: 1}},
+		3:  {totalLevel: 3,  expectToggles: [/pact of|invocation|horror|hex|terror/i], pactSlots: {level: 2, max: 2}},
+		5:  {totalLevel: 5,  pactSlots: {level: 3, max: 2}},
+		11: {totalLevel: 11, pactSlots: {level: 5, max: 3}},
+		17: {totalLevel: 17, pactSlots: {level: 5, max: 4}},
+		20: {totalLevel: 20, pactSlots: {level: 5, max: 4}},
 	},
 	featuresMatrix: [
 		// ── Class features ────────────────────────────────────────
-		// Pact Magic slots — entirely blocked by CS-BUG-013.
-		// Effects below are documented but skipped: anything that
-		// reads from the pact-slot pipeline (spellbook entries fed
-		// by signatureSpells, slot-pool restoration) can't be probed
-		// while CS-BUG-013 stands.
-		{level: 1,  name: /pact magic|pact slots/i, kind: "resource", skip: true, skipReason: "CS-BUG-013",
-			effects: [
-				{kind: "spellInList", spell: "Eldritch Blast", skip: true, skipReason: "CS-BUG-013"},
-				{kind: "spellInList", spell: "Hex",            skip: true, skipReason: "CS-BUG-013"},
-				{kind: "shortRestRestores", resource: "Pact Magic", skip: true, skipReason: "CS-BUG-013"},
-			],
-		},
-		{level: 2,  name: /pact magic|pact slots/i, kind: "resource", skip: true, skipReason: "CS-BUG-013"},
-		{level: 11, name: /pact magic|pact slots/i, kind: "resource", skip: true, skipReason: "CS-BUG-013"},
-		{level: 17, name: /pact magic|pact slots/i, kind: "resource", skip: true, skipReason: "CS-BUG-013"},
+		// RETIRED: four `kind: "resource"` rows (L1/L2/L11/L17) that looked
+		// for a resource-tracker pool named "Pact Magic". Measured on a real
+		// run, the pools on this sheet at L1/L2 are
+		// [Magical Cunning, Devastating Strike] — there is no Pact Magic
+		// pool and there never was one, because pact slots are modelled as
+		// spell slots (`spellcasting.pactSlots`), not as a resource pool.
+		// So these rows could never pass regardless of CS-BUG-013, in the
+		// same way the mercy-monk spec asserted a Debilitation-only feature.
+		// Their real claim now lives in `milestones[*].pactSlots` above,
+		// which probes the surface the product actually exposes. The
+		// spell-list / save / cantrip probes they carried are preserved by
+		// the live `kind: "passive"` twin immediately below.
 
 		// Spellbook-side probes for Pact Magic. Added as a separate
-		// non-skipped passive entry so the cantrip/spell-list checks
-		// still run even though the slot resource itself is gated by
-		// CS-BUG-013. The actual spellInList probes for Eldritch
-		// Blast / Hex remain skipped here too, because spell
-		// registration may also be impacted while pact slots aren't
-		// wired (see CS-BUG-013).
+		// non-skipped passive entry. The Eldritch Blast / Hex probes
+		// were skipped on the theory that spell registration might be
+		// impacted while pact slots weren't wired; the export shows
+		// pactSlots is populated, so that theory is retired too.
 		{level: 1, name: /pact magic|pact slots/i, kind: "passive",
 			effects: [
 				{kind: "cantripCount", min: 2},
-				{kind: "spellInList", spell: "Eldritch Blast", skip: true, skipReason: "CS-BUG-013"},
-				{kind: "spellInList", spell: "Hex",            skip: true, skipReason: "CS-BUG-013"},
+				{kind: "spellInList", spell: "Eldritch Blast"},
+				{kind: "spellInList", spell: "Hex"},
 				// Saves a warlock is proficient in: WIS, CHA.
 				{kind: "rollSavingThrow", ability: "wis"},
 				{kind: "rollSavingThrow", ability: "cha"},

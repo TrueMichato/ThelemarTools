@@ -2370,9 +2370,34 @@ export async function assertFeaturesMatrix (
 				}
 
 				case "resource": {
-					const nameStr = fc.resourceName ?? (fc.name instanceof RegExp ? fc.name.source : fc.name);
+					// A RegExp `name` used to be flattened with `.source` and
+					// handed to a literal substring matcher, so a row written
+					// as `/pact magic|pact slots/i` searched for the string
+					// "pact magic|pact slots" and could NEVER match a pool
+					// called "Pact Magic". That is a probe that cannot fail
+					// for the right reason — the same shape as the CS-BUG-016
+					// spell-picker defects this sweep exists to remove.
+					//
+					// Resolve the pattern against the pool names actually on
+					// the sheet instead. This honours the row exactly as
+					// authored — it does NOT widen the pattern, which would
+					// trade an assertion that never passes for one that
+					// passes for the wrong reason.
+					let nameStr: string;
+					if (fc.resourceName) nameStr = fc.resourceName;
+					else if (!(fc.name instanceof RegExp)) nameStr = fc.name;
+					else {
+						const pools = await charSheet.getResourceNames();
+						const hits = [...new Set(pools.filter(p => (fc.name as RegExp).test(p)))];
+						if (hits.length === 1) nameStr = hits[0];
+						else if (hits.length > 1) {
+							throw new Error(`resource pattern ${fc.name} is ambiguous — matched ${hits.length} distinctly-named pools: ${hits.join(", ")}. Pin it with resourceName: "<exact name>".`);
+						} else {
+							throw new Error(`resource pattern ${fc.name} matched none of the ${pools.length} pools on the sheet: [${pools.join(", ")}]`);
+						}
+					}
 					const r = await charSheet.getResource(nameStr).catch(() => ({current: -1, max: -1}));
-					if (r.max < 0) throw new Error(`resource not found on sheet`);
+					if (r.max < 0) throw new Error(`resource "${nameStr}" not found on sheet; pools present: [${(await charSheet.getResourceNames()).join(", ")}]`);
 					if (fc.resourceMax != null) {
 						if (Array.isArray(fc.resourceMax)) {
 							const [lo, hi] = fc.resourceMax;
@@ -2388,20 +2413,33 @@ export async function assertFeaturesMatrix (
 						const before = r.current;
 						if (before <= 0) break; // can't probe an empty pool
 						await charSheet.useResourceByName(nameStr, 1).catch(() => null);
-						const afterSpend = await charSheet.getResource(nameStr).catch(() => r);
+						// NOTE: the three reads below previously fell back to a
+						// STALE earlier reading on error (`.catch(() => r)` /
+						// `.catch(() => afterSpend)`). Substituting a stale
+						// value fabricates a verdict from data that was never
+						// read — in the `afterSpend` case it silently skipped
+						// the whole restore probe. Fail loudly instead.
+						const afterSpend = await charSheet.getResource(nameStr)
+							.catch(e => { throw new Error(`could not re-read resource "${nameStr}" after spending 1: ${e}`); });
 						if (afterSpend.current >= before) {
-							// resource could not be spent — skip the restore probe quietly
+							// Resource could not be spent, so restoration is not
+							// observable. KNOWN SOFT SPOT: this quietly passes.
+							// Left as-is deliberately — turning it into a throw
+							// changes behaviour for every `restoreOn` row in the
+							// suite and is out of scope for this sweep. Reported.
 							break;
 						}
 						// short rest — via the page object; `_state.shortRest` does not exist
 						await charSheet.triggerShortRest();
-						const afterShort = await charSheet.getResource(nameStr).catch(() => afterSpend);
+						const afterShort = await charSheet.getResource(nameStr)
+							.catch(e => { throw new Error(`could not re-read resource "${nameStr}" after short rest: ${e}`); });
 						const shortRestored = afterShort.current >= before;
 						// long rest
 						let longRestored = shortRestored;
 						if (!shortRestored && (fc.restoreOn === "long" || fc.restoreOn === "either")) {
 							await charSheet.triggerLongRest();
-							const afterLong = await charSheet.getResource(nameStr).catch(() => afterShort);
+							const afterLong = await charSheet.getResource(nameStr)
+								.catch(e => { throw new Error(`could not re-read resource "${nameStr}" after long rest: ${e}`); });
 							longRestored = afterLong.current >= before;
 						}
 						if (fc.restoreOn === "short" && !shortRestored) throw new Error(`expected short-rest restore; got ${afterShort.current}/${afterShort.max}`);
