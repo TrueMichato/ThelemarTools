@@ -4881,8 +4881,8 @@ false reds.
 
 ## CS-BUG-109 — the spell **cast output** still hand-rolls its own save DC, so item, custom and active-state DC bonuses vanish at the moment you cast
 
-**Status:** Open — measured, not fixed. Player-visible, and broader than the
-two DC bugs already fixed.
+**Status:** **Fixed** — routed through the shared chokepoint and pinned on the
+printed reading. Player-visible, and broader than the two DC bugs already fixed.
 
 **Relationship to CS-BUG-099 / CS-BUG-102.** Those fixed two of *three* sites.
 099 fixed the state API (`charactersheet-state.js:13160 / :13199 / :13219`,
@@ -4942,3 +4942,53 @@ hand and stayed green with the production fix neutralised (0 of 13,276 red) —
 the "correct calculation that nothing reads" shape. `CharacterSheetSpellsTabDc.test.js`
 shows the working pattern: stub the DOM **before** a dynamic `import()`, because
 `charactersheet-spells.js:11` destructures `e_`/`ee` at module load.
+
+### Fix as landed
+
+`_handleSpellEffects()` no longer builds a save DC. It calls
+`getSpellSaveDcForAbility(castingAbility, …)` — the same accessor the state API
+and the Spells-tab card use — and then applies only the variant-component
+modifier on top. The `castingAbility` derivation that already existed inside the
+non-Gambler branch was hoisted so both branches can name it.
+
+**Why the accessor needed a parameter.** Gambler spellcasting rolls a die *in
+place of* the ability modifier, so the cast site genuinely cannot call the
+no-argument accessor. Rather than let that justify a rival formula,
+`getSpellSaveDcForAbility(ability, {abilityModOverride})` now substitutes **the
+ability modifier alone**; proficiency, custom, item, active-state and exhaustion
+terms are untouched. Before this fix a Gambler cast dropped those bonuses too.
+
+**The breakdown string is derived by subtraction**, not re-summed:
+
+```js
+const dcOtherBonuses = saveDC - (8 + spellcastingMod + profBonus - exhaustionDcPenalty);
+```
+
+so a term added to the chokepoint in future appears in the printed derivation
+without this call site being taught about it. Re-listing the bonuses by hand
+here would have been the same fourth formula in display clothing.
+
+### Falsification
+
+Pin: `test/jest/charactersheet/CharacterSheetCastSaveDc.test.js` (8 tests). It
+drives the real `_handleSpellEffects()` and reads back the two surfaces the
+player sees — the `Save DC: <strong>N</strong>` in the cast toast and the
+`Spell Save DC:` roll-history entry. It never recomputes the formula.
+
+Both new code paths were broken in place, signatures intact, with the red count
+predicted before it was measured:
+
+| break | predicted | measured |
+|---|---|---|
+| `saveDC` back to `8 + spellcastingMod + profBonus - exhaustionDcPenalty` | 4 red | **4 red** — `Expected: 18 / Received: 15`, the reported case verbatim |
+| `abilityModOverride` ignored (`const abilityMod = this.getAbilityMod(ability)`) | 1 red | **1 red** — `Expected: 12 / Received: 15` |
+
+No `TypeError`/`ReferenceError` in either; every red is a wrong-value assertion.
+
+Two rows stay green under the first break **by design** and are labelled as
+controls: the `PREMISE` row (proves the save-DC branch is reached at all, so the
+other assertions are not comparing `null` to `null`) and the no-bonus baseline
+(correct in both directions — it is the case the old formula got right). The
+second break leaves the Gambler bonus-stacking row green because that row
+measures a *delta*, which the override does not change; the row it does move is
+the one that pins the substitution itself.

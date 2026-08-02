@@ -13146,9 +13146,13 @@ class CharacterSheetState {
 	 * The no-arg getSpellSaveDc() delegates here with the global ability so
 	 * existing callers and tests see identical values.
 	 * @param {string} ability - Ability abbreviation (e.g. "wis")
+	 * @param {{abilityModOverride?: number}} [opts] - `abilityModOverride` replaces the
+	 *        ability modifier only (Gambler spellcasting rolls a die in its place); every
+	 *        other term — proficiency, custom, item, active-state, exhaustion — still
+	 *        applies. Callers must never rebuild this sum themselves (CS-BUG-109).
 	 * @returns {number|null}
 	 */
-	getSpellSaveDcForAbility (ability) {
+	getSpellSaveDcForAbility (ability, opts) {
 		if (!ability) return null;
 		// Add item bonuses (spell save DC bonus from magic items)
 		const itemBonus = this._data.itemBonuses?.spellSaveDc || 0;
@@ -13158,7 +13162,10 @@ class CharacterSheetState {
 		// effect target (see the custom-ability editor's target list) with NO consumer, so
 		// Innate Sorcery's "+1 to your Sorcerer spell save DC" was pure description.
 		const stateBonus = this.getBonusFromStates?.("spellDc") || 0;
-		return 8 + this.getProficiencyBonus() + this.getAbilityMod(ability) + (this._data.customModifiers.spellDc || 0) + itemBonus + stateBonus - exhaustionPenalty;
+		const abilityMod = Number.isFinite(opts?.abilityModOverride)
+			? /** @type {number} */ (opts.abilityModOverride)
+			: this.getAbilityMod(ability);
+		return 8 + this.getProficiencyBonus() + abilityMod + (this._data.customModifiers.spellDc || 0) + itemBonus + stateBonus - exhaustionPenalty;
 	}
 
 	getSpellSaveDc () {

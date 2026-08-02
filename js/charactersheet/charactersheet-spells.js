@@ -3855,15 +3855,15 @@ class CharacterSheetSpells {
 			const isGamblerCast = isGamblerSpell && calcs?.hasGamblerSpellcasting;
 			let spellcastingMod;
 			let gamblerModRoll = null;
+			// Route to the casting class's ability for this specific spell.
+			const castingAbility = this._state.getSpellcastingAbilityForSpell?.(spell)
+				|| this._state.getSpellcastingAbility()
+				|| "int";
 			if (isGamblerCast && calcs.gamblerModifierDice) {
 				const rollTotal = Renderer.dice.parseRandomise2(calcs.gamblerModifierDice);
 				gamblerModRoll = {total: rollTotal, dice: calcs.gamblerModifierDice};
 				spellcastingMod = rollTotal;
 			} else {
-				// Route to the casting class's ability for this specific spell.
-				const castingAbility = this._state.getSpellcastingAbilityForSpell?.(spell)
-					|| this._state.getSpellcastingAbility()
-					|| "int";
 				spellcastingMod = this._state.getAbilityMod(castingAbility);
 			}
 
@@ -3903,7 +3903,19 @@ class CharacterSheetSpells {
 
 			// Check for save DC
 			if (spellData.savingThrow) {
-				let saveDC = 8 + spellcastingMod + profBonus - exhaustionDcPenalty;
+				// CS-BUG-109: this hand-rolled `8 + mod + prof - exhaustion`, silently dropping
+				// customModifiers.spellDc, itemBonuses.spellSaveDc and getBonusFromStates("spellDc").
+				// The Spells-tab card printed 18 while pressing Cast on that same card printed 15.
+				// Route through the one shared chokepoint rather than maintaining a rival formula;
+				// the Gambler die substitutes for the ability modifier only.
+				let saveDC = this._state.getSpellSaveDcForAbility(
+					castingAbility,
+					gamblerModRoll ? {abilityModOverride: spellcastingMod} : undefined,
+				);
+				// Residual of everything the chokepoint adds beyond the three terms named in the
+				// breakdown. Derived by subtraction so a bonus added there shows up here without
+				// this call site being taught about it.
+				const dcOtherBonuses = saveDC - (8 + spellcastingMod + profBonus - exhaustionDcPenalty);
 
 				// Apply variant component save DC modifier
 				const vcSaveDcMod = normalizedCastMeta.variantComponent?.effects?.find(e => e.type === "saveDcMod");
@@ -3922,7 +3934,7 @@ class CharacterSheetSpells {
 				const gamblerDcNote = gamblerModRoll ? ` <span class="ve-muted">(🎲 ${gamblerModRoll.dice}: ${gamblerModRoll.total})</span>` : "";
 				const vcDcNote = vcDcModVal ? ` <span class="text-info">(🧪 ${vcDcModVal > 0 ? "+" : ""}${vcDcModVal} DC)</span>` : "";
 				attackInfo += `<br>Save DC: <strong>${saveDC}</strong> (${spellData.savingThrow.join("/")} save${saveNote})${gamblerDcNote}${vcDcNote}`;
-				_rollMeta.dc = {total: saveDC, breakdown: `8 + ${spellcastingMod} + ${profBonus}${exhaustionDcPenalty ? ` - ${exhaustionDcPenalty}` : ""}${vcDcModVal ? ` + ${vcDcModVal} (component)` : ""} (${spellData.savingThrow.join("/")})`};
+				_rollMeta.dc = {total: saveDC, breakdown: `8 + ${spellcastingMod} + ${profBonus}${exhaustionDcPenalty ? ` - ${exhaustionDcPenalty}` : ""}${dcOtherBonuses ? ` ${dcOtherBonuses > 0 ? "+" : "-"} ${Math.abs(dcOtherBonuses)} (bonuses)` : ""}${vcDcModVal ? ` + ${vcDcModVal} (component)` : ""} (${spellData.savingThrow.join("/")})`};
 			}
 
 			// Parse spell effects to determine what the spell does
