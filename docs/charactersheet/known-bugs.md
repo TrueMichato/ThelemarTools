@@ -3605,6 +3605,52 @@ reads the rendered sheet), Eyes of the Future Past uses
 **Detection is mechanical and worth automating:** any `calculations.<key> =`
 whose key appears exactly once across `js/` is write-only by construction.
 
+### Follow-up — traced to the wiring, and the count is TWELVE
+
+The four Wizard keys were traced rather than left as "candidates". The
+result splits them, and corrects two plausible-sounding wiring targets that
+would send an implementer to the wrong surface.
+
+**`hasRitualAdept` — NOT a gap.** Ritual Adept is implemented, via
+`ritualCastingMode = "spellbook"` (`charactersheet-state.js:23368`, 5 refs),
+set on the line immediately above the `hasRitualAdept` comment. The calc key
+is the redundant twin, exactly as with the Time Domain pools.
+
+**`hasSignatureSpells` — a genuine missing wire, and the target exists.**
+`getNoSlotCastResourcesForSpell()` (`:34407`) is a generic, data-driven
+no-slot cast path already wired into the cast menu
+(`charactersheet-spells.js:2322` → `castOptions`). Signature Spells fits its
+descriptor shape exactly: named spells, limited charges, long-rest recharge.
+
+**`hasSpellMastery` — a gap, and `noSlotCasts` CANNOT express it as written.**
+The descriptor requires a backing resource with charges — `getResource(...)`
+then `if ((resource.current || 0) <= 0) continue`. Spell Mastery is
+*unlimited*, so it has no resource to gate on. It needs an unlimited sentinel
+or a separate branch; it is not a drop-in.
+
+**`spell.atWill` is the WRONG target for either.** It is tempting — there is
+a working "At Will" badge and a suppressed cast button — but that code lives
+in `_renderInnateSpellItem` (`charactersheet-spells.js:7347`, `:7374`,
+`:7424`), i.e. the INNATE spell list. Spell Mastery and Signature Spells act
+on *prepared spellbook* spells. Routing them through `atWill` would surface
+duplicates in the innate section while the prepared copy still spends a slot.
+
+**`spellbookSpellsKnown`** — no enforcement and no display found; the cap is
+advisory only.
+
+**Twelfth key, found while checking the above:** `lunarFreeCastCount`
+(`:20763`) also has exactly 1 ref. And it is another write-only-but-working
+case — Lunar free-casting runs through an entirely separate path
+(`getLunarFreeCastOptions()` `:56387`, `_data.lunarFreeCastsUsed`, and the
+`charsheet__lunar-cast` button in `charactersheet-combat.js:5263`). So it
+must NOT be cited as machinery to wire Signature Spells into; it is a
+symptom, not a half-built feature.
+
+**Player-facing consequence:** a level-18 wizard casting a 1st-level spell
+still spends a slot, and a level-20 wizard has no free Signature Spell cast.
+That is a base-Wizard rules violation, not a subclass edge case, so it
+affects every wizard build in the suite.
+
 ### Follow-up — the blanker is now pinned, not trusted
 
 `scripts/auditE2eCoverage.mjs` self-checks its own comment blanker. Every

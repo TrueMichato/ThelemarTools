@@ -100,12 +100,17 @@ const DAEMONOLOGIST_FEATURES: FeatureCheck[] = [
 	{level: 16, name: /ability score improvement/i, kind: "passive"},
 	{level: 19, name: /ability score improvement|epic boon/i, kind: "passive"},
 	// CS-BUG-093: `hasSpellMastery` and `hasSignatureSpells` are WRITE-ONLY
-	// (one ref each in js/ — their own assignment) and no alternative reading
-	// surface was found: neither has a pool, and "cast 1st/2nd level at will"
-	// / "two 3rd-level always prepared" have no observed consumer. These two
-	// assertions therefore prove the calc RAN, not that the ability does
-	// anything. Do not read a green run here as implementation. By contrast
-	// `hasMemorizeSpell` (3 refs) is genuinely consumed.
+	// (one ref each in js/ — their own assignment) and neither ability is
+	// implemented: a L18 wizard still spends a slot on a 1st-level spell.
+	// These two assertions therefore prove the calc RAN, not that the ability
+	// does anything. Do NOT read a green run here as implementation.
+	//   Signature Spells has a ready wiring target — `noSlotCasts` /
+	//   `getNoSlotCastResourcesForSpell` (state :34407), already in the cast
+	//   menu — but Spell Mastery does not: that descriptor gates on a resource
+	//   with charges and Spell Mastery is unlimited. `spell.atWill` is NOT the
+	//   target for either; it renders in `_renderInnateSpellItem`, the innate
+	//   list, and these act on prepared spellbook spells.
+	// By contrast `hasMemorizeSpell` (3 refs) is genuinely consumed.
 	// Memorize Spell, Spell Mastery and Signature Spells are choice-driven
 	// spellbook operations, so their PICKS aren't deterministic — but each
 	// grant sets a real calculation flag, so presence is now verified
