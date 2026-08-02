@@ -786,7 +786,7 @@ export class CharacterSheetPage {
 
 	/** List the resource names rendered on the sheet. */
 	async getResourceNames (): Promise<string[]> {
-		const els = this.page.locator(".charsheet__resource-row .charsheet__resource-name, .charsheet__resource-tracker .charsheet__resource-name");
+		const els = this.page.locator(".charsheet__resource-row .charsheet__resource-name, .charsheet__resource-tracker .charsheet__resource-name, .charsheet__combat-resource-name");
 		const count = await els.count();
 		const out: string[] = [];
 		for (let i = 0; i < count; i++) {
