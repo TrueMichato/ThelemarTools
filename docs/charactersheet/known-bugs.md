@@ -5335,6 +5335,19 @@ being wrong. Both are avoided in the landed fix, but the plan as worded does not
 say so, and the literal reading of it produces both. Recorded here because the
 next person to touch this line will read the sentence, not the diff.
 
+> **The review caused the fix's shape — it did not merely agree with it.**
+> Measured, because the opposite was asserted once and was wrong:
+> `git log -S'abilityModOverride'` puts its first appearance in `f86af94e` at
+> **18:47**, and `git show 3c529e2e:…charactersheet-state.js | grep -c
+> abilityModOverride` returns **0** — that being the tree the reviewer measured
+> at 18:04. Their citation of the old `8 + prof + getAbilityMod(ability)` form
+> was live code, not a stale line number, and `f86af94e`'s own message encodes
+> their objection ("*which is why it cannot use the no-argument accessor*").
+> **"Your citation is stale" is the reflexive diagnosis in a fast-moving trunk,
+> and applied wrongly it erases the cause of the fix** and tells the reader no
+> action was needed. Two commands settle it: `git log -S <symbol>` for when the
+> change landed, `git show <their-sha>:<file>` for what they actually saw.
+
 **Trap 1 — exhaustion subtracted twice.** `exhaustionDcPenalty` exists on *both*
 sides. `getSpellSaveDcForAbility` already subtracts it
 (`charactersheet-state.js:13172` / `:13180`), and the cast site still reads it
