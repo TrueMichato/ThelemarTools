@@ -5147,11 +5147,22 @@ is withdrawn. *(Invariant supplied by the `lunar-sorcery-sorcerer` session; the
 The real cause **on those two** is **root cause 5** below — `:683`'s comment
 blinding, the same defect as `:188` on the opposite side of the ratio.
 
-| spec | badge | `entryCount` | real rows | blinded | `eff` | `help` | `skipReason` | true coverage |
-|---|---|---|---|---|---|---|---|---|
-| `tgtt-meteor-knight-fighter` | 115% | 13 | 15 | 2 | 15 | 0 | 0 | **100%** |
-| `tgtt-steel-hawk-fighter` | 115% | 13 | 15 | 2 | 15 | 0 | 0 | **100%** |
-| `tgtt-tdcsr-juggernaut-barbarian` | 124% | 21 | 22 | 1 | 20 | 2 | **4** | **118%** |
+| spec | badge | `entryCount` | real rows | blinded | `eff` | `help` | `skipReason` | `eff`/real | score/real |
+|---|---|---|---|---|---|---|---|---|---|
+| `tgtt-meteor-knight-fighter` | 115% | 13 | 15 | 2 | 15 | 0 | 0 | **100%** | **100%** |
+| `tgtt-steel-hawk-fighter` | 115% | 13 | 15 | 2 | 15 | 0 | 0 | **100%** | **100%** |
+| `tgtt-tdcsr-juggernaut-barbarian` | 124% | 21 | 22 | 1 | 20 | 2 | **4** | **91%** | **118%** |
+
+> **Read the last two columns as two different questions.** `eff`/real is *"what
+> fraction of real rows carry a hand-written `effects:` block"*; score/real is
+> *"what the metric would print if only the denominator were repaired"*. They
+> **coincide on meteor and steel-hawk only because `help` and `skipReason` are
+> both 0 there** — which is the tell that those two are a different mechanism
+> from juggernaut. An earlier revision published a single "true coverage" column
+> that silently switched between the two quantities across rows, and elsewhere in
+> this entry the same spec has been given three separate unmeasured figures
+> (124 / 95 / 91). *(Column split prompted by the `lunar-sorcery-sorcerer`
+> session, which flagged the conflation.)*
 
 ##### 🔴 Correction (2026-08-03) — juggernaut is the OTHER mechanism
 
