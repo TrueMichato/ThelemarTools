@@ -1,5 +1,5 @@
 /**
- * CS-BUG-087 — subclass-granted combat methods must not absorb the class table.
+ * CS-BUG-091 — subclass-granted combat methods must not absorb the class table.
  *
  * 27 TGTT subclasses grant an extra combat method outright ("you learn one
  * additional method from this tradition"; Eldritch Knight grants two). The class
@@ -56,7 +56,7 @@ const FIGHTER_CLASS_DATA = {
 const ASTRAL_SELF = {name: "Astral Self", shortName: "Astral Self", source: "TGTT"};
 const ELDRITCH_KNIGHT = {name: "Eldritch Knight", shortName: "Eldritch Knight", source: "TGTT"};
 
-describe("CS-BUG-087 — subclass-granted combat methods are additive", () => {
+describe("CS-BUG-091 — subclass-granted combat methods are additive", () => {
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});

@@ -22,6 +22,22 @@
 //      grep for, and without this check they would still count towards
 //      `effects` — laundering dead probes as coverage. Cannot FAIL.
 //
+//      Do not "simplify" this check away. The row's `name:` existence
+//      check dies along with its `effects:`, so an inert row means the
+//      feature has NO verification of ANY kind at ANY level — not merely
+//      a missing numeric assertion. That is a silent hole straight
+//      through this batch's acceptance bar (every ability a subclass
+//      provides must be offered, shown, AND implemented), and it presents
+//      as a green spec. Measured: three permanent Rogue subclass features
+//      in tgtt-belly-dancer-rogue-jaknian were wholly unverified this way.
+//
+//      The general property: a skipped or inert assertion is a FROZEN
+//      CLAIM ABOUT A MOVING TARGET, and the freeze is invisible precisely
+//      because the test stays green. Live assertions get re-validated
+//      continuously; these do not. So they cannot be found by running the
+//      suite — only by asking the harness about its own shape, statically,
+//      which is what this script exists to do.
+//
 //   2. UNREACHABLE PICK THRESHOLDS — a `pickedCount: N` asserted against
 //      a pool holding fewer than N options, either written literally in a
 //      spec or derived by a `build*Checks` helper from a levels table.

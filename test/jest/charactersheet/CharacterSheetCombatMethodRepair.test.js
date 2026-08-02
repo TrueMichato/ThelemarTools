@@ -200,7 +200,7 @@ describe("Combat-method marker repair (repro: D_kaios Petri, Fighter 9 TGTT Arca
 });
 
 /**
- * CS-BUG-086 — a species trait whose NAME collides with a combat method was being
+ * CS-BUG-090 — a species trait whose NAME collides with a combat method was being
  * reclassified as one.
  *
  * `_repairCombatMethodMarkers()` matched the catalog on name + source alone, guarding
@@ -214,7 +214,7 @@ describe("Combat-method marker repair (repro: D_kaios Petri, Fighter 9 TGTT Arca
  * `tradition: "Rapid Current"` and `staminaCost: 1` while still tagged
  * `featureType: "Species"`.
  */
-describe("CS-BUG-086 — species traits that share a name with a combat method", () => {
+describe("CS-BUG-090 — species traits that share a name with a combat method", () => {
 	const CENTAUR_CHARGE = {name: "Charge", source: "TGTT", featureType: "Species", description: "If you move 30 feet straight toward a target…"};
 	const COLLIDING_CATALOG = [
 		{name: "Charge", source: "TGTT", tradition: "Rapid Current", degree: 1, staminaCost: 1, _entityType: "combatMethod", optionalFeatureTypes: ["CTM:1"], entries: ["Bonus Action (1 Stamina Point)."]},

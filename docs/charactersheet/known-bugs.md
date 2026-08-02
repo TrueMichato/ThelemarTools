@@ -2987,7 +2987,7 @@ count that proves nothing.
 
 ---
 
-## CS-BUG-086 — a species trait whose NAME collides with a combat method was reclassified as one
+## CS-BUG-090 — a species trait whose NAME collides with a combat method was reclassified as one
 
 **Status**: RESOLVED.
 
@@ -3073,7 +3073,7 @@ filters structurally via `CharacterSheetClassUtils.isCombatMethod()`.
 ### Regression pins
 
 `CharacterSheetCombatMethodRepair.test.js` — describe block
-*"CS-BUG-086 — species traits that share a name with a combat method"*.
+*"CS-BUG-090 — species traits that share a name with a combat method"*.
 **Falsified: 2 of 5 go red on revert**, both on assertions
 (`Received: "combatMethod"`), not TypeErrors. The other three are deliberate
 no-regression controls — a premise guard that the collision exists at all, plus
@@ -3082,7 +3082,7 @@ species trait carrying CTM markers survives) — which must stay green either wa
 
 E2E: `tgtt-hunter-zodiac-centaur.spec.ts` fails at L3 without the fix and passes
 with it, so the new helper pins this end-to-end as well.
-## CS-BUG-087 — a subclass-granted combat method absorbed the next class-table increment
+## CS-BUG-091 — a subclass-granted combat method absorbed the next class-table increment
 
 **Status:** Fixed.
 **Affects:** 27 TGTT subclasses across 4 classes — Fighter 11 (Eldritch Knight
@@ -3289,3 +3289,89 @@ Assigned as "add an `ability:<abl>:minimum` handler". Probing the modifier live
 before writing any code showed it was inert *and* that the target was wrong, so
 the handler would have been the wrong fix. Measuring the value rather than
 interpreting the ticket is what changed the outcome.
+
+---
+
+## Phase 17 — predetermined-outcome probe sweep (E2E harness, not a product bug)
+
+Not a CS-BUG: no product defect is described here. It is recorded in this
+file because it governs how much any *other* entry in this file can be
+trusted.
+
+A **predetermined-outcome probe** is an assertion whose result is fixed by
+the harness's own shape rather than by product behaviour. It has two
+halves, and both had shipped:
+
+- **Cannot FAIL** — inert level windows, no-op page-object helpers,
+  probes aimed at a surface the feature is deliberately excluded from.
+- **Cannot PASS** — a `pickedCount: N` against a pool of fewer than N
+  options; a `damageContains` against a field the reader never collects.
+
+The property is checkable **statically, before running anything**, which
+is the whole point: you cannot find these by running the suite.
+
+### Why an inert row is worse than a skipped one
+
+`scripts/auditE2eCoverage.mjs` flags rows whose `[level, untilLevel]`
+window contains none of the matrix checkpoints `[3, 5, 11, 17, 20]`. Such
+a row never executes — and unlike `skip: true` it leaves **no marker**, so
+it is invisible to both `grep` and human review, and it presents as a
+green spec.
+
+The damage is larger than a missing number. **The row's `name:` existence
+check dies along with its `effects:`**, so an inert row means the feature
+has no verification of any kind at any level. That is a silent hole
+straight through this batch's acceptance bar — *every ability a subclass
+provides must be offered, shown, and implemented*. Measured: three
+permanent Rogue subclass features (Tantalizing Shivers, Fluid Step,
+Slippery Mind) were wholly unverified this way, in a spec reporting green.
+
+Generally: **a skipped or inert assertion is a frozen claim about a moving
+target, and the freeze is invisible because the test stays green.** Live
+assertions are re-validated continuously; these are not. The discipline is
+therefore needed most exactly where nothing forces it.
+
+### Repair rule for an inert row
+
+Decide against the **product source**, never against the spec — the spec
+is the artefact under suspicion, so it cannot be its own oracle.
+
+- **Value unobservable** (the step holds only *between* checkpoints, e.g.
+  Rogue Sneak Attack 4d6 on L7-8) → **delete**. Widening the window to
+  reach a checkpoint changes the correct value, so there is nothing to
+  repair. Confirm first that every observable step is asserted elsewhere.
+- **Value permanent, window merely wrong** (e.g. `manifestationDie` is
+  `level >= 13 ? "1d8"`) → **widen, or drop `untilLevel` entirely**. Note
+  `findInertRows` skips open-ended rows, since those always reach the last
+  checkpoint.
+
+### A dead probe can hide a broken probe
+
+Un-deadening Shadow Magic's Hound of Ill Omen — whose entire structural
+block (cost, range, AC, HP, bite, summon/dismiss, scaling descriptor) had
+never run — immediately produced:
+
+```
+classSummon(summonHoundOfIllOmen) damage "2d6+3" missing "piercing"
+```
+
+Not a product bug: the companion sets `damageType: "piercing"` correctly.
+The `classSummon` reader in `comprehensiveBuildHelpers.ts` collected only
+`[damage, desc, entries]`, so `damageContains` could never match a
+companion carrying its type structurally rather than inline — and the
+field is `description`, not `desc`. A *cannot-PASS* defect living in the
+**shared harness**, latent for every future author. It was reachable only
+through the inert-window fix.
+
+**Status: swept.** Inert level windows and unreachable pick thresholds are
+both at **zero** suite-wide. Run `node scripts/auditE2eCoverage.mjs` after
+any `featuresMatrix` edit; `--strict` exits non-zero.
+
+What remains is a third, softer sibling that **no static check catches**: a
+probe that *passes for a different reason than its comment claims*. Known
+instance: `tgtt-arcana-cleric.spec.ts` uses `spellMatchMode: "any"`, which
+does not relax the name match but **deletes** it — in `"any"` mode
+`e.spell` is never read and only `getKnownSpellsByLevel()[level].length >= 1`
+is checked. Those four probes correctly pass `spell: ""` and so are honest,
+but a `{spell: "Bane", spellMatchMode: "any"}` would be a probe that cannot
+fail. Never reach for `"any"` to soften a flaky name check.

@@ -7135,7 +7135,7 @@ class CharacterSheetClassUtils {
 	 * bonus-method path owns that grant), but the CLASS-level CTM:* progression is
 	 * still processed — with subclass-granted bonus methods discounted from the
 	 * "already known" count so they don't absorb a class-table increment
-	 * (CS-BUG-087).
+	 * (CS-BUG-091).
 	 *
 	 * @param {object} classData - The class data object
 	 * @param {number} currentLevel - Previous class level
@@ -7185,7 +7185,7 @@ class CharacterSheetClassUtils {
 				matchesFeatureType(f.optionalFeatureTypes),
 			).length;
 
-			// CS-BUG-087: a subclass-GRANTED combat method is ADDITIVE to the class
+			// CS-BUG-091: a subclass-GRANTED combat method is ADDITIVE to the class
 			// table, not a draw against it. 27 TGTT subclasses say "you learn one
 			// additional method from this tradition" (Eldritch Knight says two).
 			// Because `optionalfeatureProgression` stores a CUMULATIVE total, letting a
