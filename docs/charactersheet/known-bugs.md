@@ -4415,7 +4415,7 @@ the wrong assertion stayed green — i.e. the data was bent to fit the assertion
 
 ---
 
-## CS-BUG-104 — a *resolved* `Blessed Strikes` choice still materialises both options, so `_data.chosenSubfeatures` and `_data.features` disagree — and a TGTT domain turns that into a visible duplicate
+## CS-BUG-104 — a *resolved* `Blessed Strikes` choice still materialises both options, contradicting the parser's own `count: 1` — and a TGTT domain turns that into a visible duplicate
 
 **Status:** **Fixed for newly-derived characters; NOT retroactive.** The
 materialisation site now defers to the parser's verdict instead of re-deriving
@@ -4434,13 +4434,14 @@ one from the entry shape. Pinned in both directions by
 **Root cause (measured at three stages; this entry's cause was relocated twice
 before reaching this one, and amended once after — see Provenance).**
 `Blessed Strikes` (Cleric XPHB L7) is a choose-one
-feature. The choice is extracted correctly and recorded correctly, and is then
-materialised incorrectly. Measured on `cleric/life domain/7`:
+feature. The choice is extracted correctly, then materialised incorrectly — and
+the pick record silently inherits that error rather than contradicting it (see
+the 2026-08-02 correction below). Measured on `cleric/life domain/7`:
 
 | stage | reading | verdict |
 |---|---|---|
 | extraction | `FeatureChoiceParser.extractChoices()` → `count: 1`, 2 options | **correct** |
-| pick record | `_data.chosenSubfeatures` → `Blessed Strikes → Divine Strike` (one) | **correct** |
+| pick record | `_data.chosenSubfeatures` → **both** options recorded | **WRONG** (see correction) |
 | materialisation | `_data.features` → **both** options, each `parentFeature: "Blessed Strikes"` | **WRONG** |
 
 ```
@@ -4454,9 +4455,65 @@ _data.features on cleric/life domain/7:
 _data.chosenSubfeatures: [… {parent: "Blessed Strikes", name: "Divine Strike"} …]
 ```
 
-**The bug is self-evidencing**: one state object holds both the correct record
-(one pick) and the incorrect materialisation (two rows). No comparison against
-the rules is needed to see the inconsistency.
+##### 🔴 Correction (2026-08-02) — the `pick record` row above was wrong, and so was the paragraph under it
+
+The row originally read:
+
+> | pick record | `_data.chosenSubfeatures` → `Blessed Strikes → Divine Strike` (one) | **correct** |
+
+and was followed by:
+
+> **The bug is self-evidencing**: one state object holds both the correct record
+> (one pick) and the incorrect materialisation (two rows). No comparison against
+> the rules is needed to see the inconsistency.
+
+Both are **refuted by measurement on the true pre-fix tree**. `c188b94b`'s fix is
+two coupled edits, so "pre-fix" must be materialised as the actual parent commit —
+reverting one edit yields a hybrid tree matching no commit that has ever existed:
+
+```
+git rev-parse c188b94b^                              -> f86af94e
+git checkout f86af94e -- js/charactersheet/charactersheet-class-utils.js \
+                         js/charactersheet/charactersheet-state.js
+grep -c 'choiceOptionNames' js/charactersheet/charactersheet-class-utils.js   -> 0   (fix absent)
+```
+
+On that tree, on the very build this entry names, `_data.chosenSubfeatures` holds
+**two** entries, not one:
+
+```
+cleric/life domain/7   (spawner)
+  option rows        : ["Divine Strike@L7", "Potent Spellcasting@L7"]
+  chosenSubfeatures  : ["Blessed Strikes@L7->Divine Strike",
+                        "Blessed Strikes@L7->Potent Spellcasting"]
+```
+
+The same reading was obtained independently on a **wizard**-built Cleric 7. So this
+is not spawner-vs-wizard path dependence — the row is wrong on both paths, including
+its own cited one.
+
+**How the error survived: the ellipsis.** The dump above is elided on both sides —
+`[… {parent: "Blessed Strikes", name: "Divine Strike"} …]` — and the second entry was
+inside one of those ellipses. The table row is an *interpretation* of an elided dump,
+and the dump as printed is equally compatible with the correct reading. A quoted
+excerpt that elides the part which would refute it reads exactly like a quoted excerpt
+that does not.
+
+**The consequence is the load-bearing half.** Recording inherits from materialisation:
+`seedSubclassFeatureChoices` branch (b) records a chosen subfeature for *every*
+materialised row. So the pre-fix state is **2 rows vs 2 records — internally
+consistent**. The "self-evidencing" claim is therefore backwards: the state object
+contains no inconsistency to notice, and the only thing that identifies two as wrong
+is the parser's own `count: 1` (equivalently, the rules text). The bug is
+**exactly not** self-evidencing, which is why it shipped.
+
+**The entry's conclusion is unaffected.** Extraction is still exonerated,
+materialisation is still the sole defect, and the fix in `c188b94b` is still correct
+and correctly targeted — this corrects the evidence for it, not the verdict. It is
+the third piece of evidence in this entry not to survive scrutiny (after the circular
+Cunning Strike counts and the malformed open question), while the conclusion has
+survived all three. Found by the `plan-cs-bug-018-skips` session, which retracted its
+own supporting measurement to get here.
 
 The duplicate you actually notice comes later — a TGTT domain grants its own
 same-named feature at L8, so the name now appears twice on the Features tab.
@@ -4626,13 +4683,25 @@ of the following" describes an at-use menu, not a level-up pick.
 >
 > | | (a) already-resolved guard `:3159` | (b) records from `_data.features` | counts |
 > |---|---|---|---|
-> | Blessed Strikes | **fires** — a real level-up choice exists | never reached | 1 rec / 2 mat → **genuine disagreement** |
+> | Blessed Strikes | ~~**fires** — a real level-up choice exists~~ | ~~never reached~~ | ~~1 rec / 2 mat → **genuine disagreement**~~ |
 > | Cunning Strike | doesn't fire — no level-up choice | **fires**, records all 3 | 3 / 3 → **manufactured agreement** |
 >
-> So the Blessed Strikes finding is *strengthened*: its record is independent and
-> still disagrees. Only the Cunning Strike corroboration dies. **The sound basis
+> ~~So the Blessed Strikes finding is *strengthened*: its record is independent and
+> still disagrees. Only the Cunning Strike corroboration dies.~~ **The sound basis
 > for "Cunning Strike is correct" is the rules text alone** — which is
 > independently true, so the conclusion stands; the evidence for it does not.
+>
+> 🔴 **The Blessed Strikes row of this table is itself refuted (2026-08-02).**
+> Measured on the true pre-fix tree (`f86af94e`), on both the spawner and wizard
+> paths, `_data.chosenSubfeatures` holds **two** entries for Blessed Strikes. Guard
+> (a) therefore does **not** fire on the seeding pass — nothing is recorded yet at
+> that point — so branch (b) runs and records one per materialised row, exactly as
+> it does for Cunning Strike. The counts are **2 rec / 2 mat → manufactured
+> agreement**, the same cell as the row below it, and Blessed Strikes' record is
+> *not* independent. The retraction this table was written to perform was correct
+> and did not go far enough: it removed the corroborating member and left the
+> remaining member's numbers un-remeasured. See the correction under the evidence
+> block at the top of this entry.
 >
 > This also kills a fix shape that looks obvious: *"filter the extracted rows
 > against `chosenSubfeatures`"* is circular by the above, and separately dead
@@ -4741,9 +4810,13 @@ reviewer fed the real data entry to `FeatureChoiceParser.extractChoices()` and
 got `count: 1` with two options — the extractor is **correct**, and had been
 since `9a03a9f8` (2026-07-03), a month before the report. My evidence had
 always come from `getFeatures()` / `_data.features`, a different surface from
-the one my sentence named. Probing the stage in between settled it:
-`_data.chosenSubfeatures` records exactly one pick, so recording is correct
-too, and the defect is strictly at materialisation.
+the one my sentence named. Probing the stage in between settled it: the defect is
+strictly at materialisation.
+(⚠️ This paragraph originally continued *"`_data.chosenSubfeatures` records exactly
+one pick, so recording is correct too"*. That clause is **refuted** — pre-fix it
+records **two**, because branch (b) records one per materialised row. The
+conclusion it was supporting — defect strictly at materialisation — is unchanged.
+See the 2026-08-02 correction at the top of this entry.)
 
 3. **Confirming the premise of a mechanism is not confirming the mechanism.**
    The data shape I cited was real and was verified; the behaviour I inferred
@@ -4836,6 +4909,52 @@ The pinned surfaces are deliberately the **read** ones — what the sheet grants
 (`seedSubclassFeatureChoices` → `addPendingFeatureChoice`) — not
 `extractChoices()` alone, which was correct before the fix and would therefore
 have pinned nothing.
+
+#### Complement added 2026-08-02 — the "fixed by granting nothing" hole
+
+The row `a Cleric 7 is granted NEITHER Blessed Strikes option` asserts
+`not.toContain("Divine Strike")` on the **unresolved** state. That is the correct
+pre-choice assertion, but it is one-sided: it would stay green if the bug were
+"fixed" by making `fulfillFeatureChoice` grant nothing at all. Flagged by the
+`plan-cs-bug-018-skips` session.
+
+Closed by `resolving the choice grants EXACTLY the picked option and not the
+other`, which drives the real resolution path — `seedSubclassFeatureChoices` →
+`getPendingFeatureChoices()` → `fulfillFeatureChoice(id, "Divine Strike")` — and
+asserts the picked option is present, the rejected one absent, and the pending
+queue drained. Two PREMISE guards (a choice exists; `count === 1`) keep it from
+degrading into a vacuous pass if seeding ever stops producing the choice.
+
+**Falsified**, break in place with the signature intact
+(`_fulfillSubfeatureChoice` → `if (false) this.addFeature(built);`):
+
+```
+✕ resolving the choice grants EXACTLY the picked option and not the other
+  Expected value: "Divine Strike"   Received array: ["Blessed Strikes"]
+✓ a Cleric 7 is granted NEITHER Blessed Strikes option        <- stayed GREEN
+Tests: 1 failed, 6 passed
+```
+
+The green row is the point: it demonstrates the hole rather than arguing it.
+
+⚠️ **This suite must `import "./setup.js"` before the product imports.**
+`jest.config.json` declares no global `setupFiles`, and `addPendingFeatureChoice`
+calls `CryptUtil.uid()` — omitting it yields `ReferenceError: CryptUtil is not
+defined` from inside the seeder, which reads like a product fault.
+
+#### Spawner and wizard diverge here — do not derive an expectation from a spawned build
+
+Measured post-fix on Cleric 7, the level that carries the choice:
+
+| path | `pendingChoices` | option rows |
+|---|---|---|
+| spawner | **0** — auto-resolves | `["Divine Strike"]` |
+| wizard | **1** — queues for the player | `[]` |
+
+Both are correct. A probe that reads option rows off a spawned build will report
+the choice as already made. The player-facing consumer that drains the queue is
+`charactersheet.js:13056 processPendingFeatureChoices()`, which drives one modal
+per pending choice at Builder-finalize, LevelUp and QuickBuild.
 
 ### Existing saves — no migration
 
@@ -5000,8 +5119,15 @@ measured to be insufficient.** Removing it takes the >100% rows from **11 to
 ```
 tgtt-meteor-knight-fighter.spec.ts        13 entries  15 effects  0 helpers  →  115%  ✓ FULL
 tgtt-steel-hawk-fighter.spec.ts           13 entries  15 effects  0 helpers  →  115%  ✓ FULL
-tgtt-tdcsr-juggernaut-barbarian.spec.ts   21 entries  20 effects  2 helpers  →  124%  ✓ FULL
+tgtt-tdcsr-juggernaut-barbarian.spec.ts   21 entries  20 effects  2 helpers  →  105%  ✓ FULL
 ```
+
+> **Correction (2026-08-03).** An earlier revision printed juggernaut's row as
+> **124%**, which is its *unpatched* badge. With `skipReasonCount` removed and
+> juggernaut's `skipReason = 4`, it must print `(20 + 2) / 21 = 105%`. Meteor
+> and steel-hawk are unaffected by the patch because their `skipReason` is **0**
+> — which is itself the tell that they are a different mechanism. The headline
+> "11 → 3" is unchanged. *(Caught by the `lunar-sorcery-sorcerer` session.)*
 
 On the first two, `effectsCount` **alone exceeds `entryCount`** with every
 other term at zero — and that is not a units mismatch, it is a **proof of
@@ -5018,16 +5144,63 @@ terms were incommensurable; that clause was false, and the argument built on it
 is withdrawn. *(Invariant supplied by the `lunar-sorcery-sorcerer` session; the
 919-row sweep is the check on it.)*
 
-The real cause is **root cause 5** below — `:683`'s comment blinding, the same
-defect as `:188` on the opposite side of the ratio. True coverage:
+The real cause **on those two** is **root cause 5** below — `:683`'s comment
+blinding, the same defect as `:188` on the opposite side of the ratio.
 
-| spec | `entryCount` | real rows | blinded | effects | true coverage |
-|---|---|---|---|---|---|
-| `tgtt-meteor-knight-fighter` | 13 | 15 | 2 | 15 | **100%** |
-| `tgtt-steel-hawk-fighter` | 13 | 15 | 2 | 15 | **100%** |
-| `tgtt-tdcsr-juggernaut-barbarian` | 21 | 22 | 1 | 20 | **91%** |
+| spec | badge | `entryCount` | real rows | blinded | `eff` | `help` | `skipReason` | `eff`/real | score/real |
+|---|---|---|---|---|---|---|---|---|---|
+| `tgtt-meteor-knight-fighter` | 115% | 13 | 15 | 2 | 15 | 0 | 0 | **100%** | **100%** |
+| `tgtt-steel-hawk-fighter` | 115% | 13 | 15 | 2 | 15 | 0 | 0 | **100%** | **100%** |
+| `tgtt-tdcsr-juggernaut-barbarian` | 124% | 21 | 22 | 1 | 20 | 2 | **4** | **91%** | **118%** |
 
-All three are ≤ 100% once the denominator is correct.
+> **Read the last two columns as two different questions.** `eff`/real is *"what
+> fraction of real rows carry a hand-written `effects:` block"*; score/real is
+> *"what the metric would print if only the denominator were repaired"*. They
+> **coincide on meteor and steel-hawk only because `help` and `skipReason` are
+> both 0 there** — which is the tell that those two are a different mechanism
+> from juggernaut. An earlier revision published a single "true coverage" column
+> that silently switched between the two quantities across rows, and elsewhere in
+> this entry the same spec has been given three separate unmeasured figures
+> (124 / 95 / 91). *(Column split prompted by the `lunar-sorcery-sorcerer`
+> session, which flagged the conflation.)*
+
+##### 🔴 Correction (2026-08-03) — juggernaut is the OTHER mechanism
+
+An earlier revision of this section listed all three as denominator undercounts
+and gave juggernaut a true coverage of **91%**. Both are wrong, and the error is
+the one this entry retracts elsewhere: **the terms were inferred from the
+percentage rather than measured.** `124% × 21 ≈ 26` admits more than one
+assignment, and the one chosen (`sibling = 4, skipReason = 0`) is the exact
+inverse of the truth. Measured by instrumenting a copy of the script *inside
+`scripts/`* so `ROOT` resolves, then deleting the copy:
+
+```
+TERMS tgtt-meteor-knight-fighter.spec.ts        eff=15 help=0 skipReason=0 sibling=0 inertWP=0 entry=13
+TERMS tgtt-steel-hawk-fighter.spec.ts           eff=15 help=0 skipReason=0 sibling=0 inertWP=0 entry=13
+TERMS tgtt-tdcsr-juggernaut-barbarian.spec.ts   eff=20 help=2 skipReason=4 sibling=0 inertWP=0 entry=21
+```
+
+Juggernaut has `eff = 20 ≤ entry = 21`, so **it never triggers the invariant
+above** — it is not, and never was, evidence for it. Its badge is root cause 4
+(`skipReasonCount`), and it stays impossible even against a correct denominator:
+`(20 + 2 + 4) / 22 = 118%`.
+
+**Each fix is load-bearing for a different spec, which is the argument for doing
+both:**
+
+| | numerator fix alone | denominator fix alone | both |
+|---|---|---|---|
+| meteor / steel (`skipReason = 0`) | no change, 115% | **100%** | 100% |
+| juggernaut (`blinded = 1`) | 105% | 118% | **100%** |
+
+*(Measurement and reconciliation supplied by the `lunar-sorcery-sorcerer`
+session; the 43-spec sweep and the term dump above are the check on them.)*
+
+**The invariant itself survives, swept rather than asserted.** Across all 43
+specs, exactly **two** have `effectsCount > entryCount` — meteor-knight and
+steel-hawk — and on both, `eff ≤ real rows`, so denominator undercount fully
+explains them. The invariant is sound; it is simply rarer than first implied, and
+it is **not** the mechanism behind most of the badges.
 
 **The conclusion survives its own retracted premise: deleting one term makes the
 artefact rarer without making the metric sound.** It is true for a different
@@ -5271,8 +5444,16 @@ Measured — the two 115% specs reproduce exactly, from source:
 ```
 tgtt-meteor-knight-fighter   entryCount=13  real rows=15  blinded=2  effects=15  ->  115%
 tgtt-steel-hawk-fighter      entryCount=13  real rows=15  blinded=2  effects=15  ->  115%
-tgtt-tdcsr-juggernaut-barbarian  entryCount=21  real=22  blinded=1  effects=20  ->   95%
 ```
+
+> **Correction (2026-08-03).** This block previously carried a third line,
+> `tgtt-tdcsr-juggernaut-barbarian … -> 95%`, listing it as a cause-5 spec.
+> It is not one: its measured terms are `eff=20 help=2 skipReason=4`, so
+> `eff ≤ entry` and its 124% badge is **cause 4**, not cause 5. The `95%` was
+> `20/21` — a hand-computed effects-over-entries ratio that is neither the badge
+> nor the true coverage. Juggernaut *is* blinded by one row (`21 → 22`), so
+> cause 5 touches it; that blinding is simply not what produced its badge. Full
+> reconciliation in the "juggernaut is the OTHER mechanism" block above.
 
 Both specs have 15 rows and 15 `effects:` blocks. **Coverage is genuinely 100%;
 the entire overshoot is the denominator losing 2 rows.** The four lost rows, and
@@ -5709,11 +5890,25 @@ because it does not fix either measured case.
 **Reproduction (a full round trip, not an inference).** On the fixed tree:
 
 ```
-1. revert the CS-BUG-104 delegation
+1. materialise the TRUE pre-fix tree — `git checkout c188b94b^ -- \
+     js/charactersheet/charactersheet-class-utils.js \
+     js/charactersheet/charactersheet-state.js`
 2. spawn cleric/life domain/7, export toJson()   -> Blessed Strikes children = 2
 3. restore the fix
 4. load that JSON on the FIXED tree              -> still 2: ["Divine Strike","Potent Spellcasting"]
 ```
+
+> **⚠️ Method note on step 1.** An earlier draft of this reproduction said
+> *"revert the CS-BUG-104 delegation"*. CS-BUG-104's fix is **two coupled edits**
+> — `getChoiceOptionNames()` in `charactersheet-class-utils.js` **and** the
+> `continue` at the materialisation call site — so reverting one of them yields a
+> **hybrid tree matching no commit that has ever existed**. The conclusion here is
+> unaffected (materialisation is 2 rows on either tree), but the *recording* count
+> differs between them, so anyone extending this repro from the old wording gets a
+> different answer than the entry implies. That exact hybrid is what produced the
+> since-corrected `recording: correct` row in CS-BUG-104. Use `c188b94b^`, and
+> confirm with `grep -c 'choiceOptionNames' js/charactersheet/charactersheet-class-utils.js`
+> → **0** on the pre-fix tree.
 
 **Root cause.** `_migrateFeatures()` (`charactersheet-state.js:6546`) is a
 `.map()` over the stored `_data.features` array:
@@ -5781,10 +5976,37 @@ second is more specific than the report states:
    `getLevelFeatures` for every earlier level — but only inside
    `if (!alreadyHadSubclass)` (`:4439`), which exists so the backfill fires
    exactly once, at subclass acquisition. A Cleric 7 loaded from JSON already
-   has a subclass, so it never runs. **And it could not help if it did:** the
-   body is `newFeatures.push(...earlierSubclassFeatures)` — it can only add
-   rows, never remove one. Firing it would produce a *third* row, not heal the
-   pair.
+   has a subclass, so it never runs. **And it is doubly incapable if it does
+   run** — two independent reasons, and the *earlier* one is the one a reader
+   trips over:
+   - **(a) It never sees these rows.** The line above the push is
+     `const earlierSubclassFeatures = earlierFeatures.filter(f => f.isSubclassFeature);`
+     (`charactersheet-levelup.js:4448`; the same filter guards the second
+     backfill site at `charactersheet-quickbuild.js:4795`). Blessed Strikes is a
+     **`classFeature`**, and the `extracted.push({…})` block that stamps
+     `parentFeature` (`charactersheet-class-utils.js:3401-3410`) sets no
+     `isSubclassFeature` key at all. The five `isSubclassFeature: true` sites
+     (`:3435`, `:3475`, `:3517`, `:3553`, `:3621`) are all on the *subclass*
+     path. Measured through the pin's own `materialise()` helper, so no browser
+     was involved:
+
+     ```
+     Rogue XPHB 5, parent "Cunning Strike"  -> 3 rows, all isSubclassFeature=undefined
+       Poison (Cost: 1d6) / Trip (Cost: 1d6) / Withdraw (Cost: 1d6)
+     Monk  XPHB 2, parent "Monk's Focus"    -> 3 rows, all isSubclassFeature=undefined
+       Flurry of Blows / Patient Defense / Step of the Wind
+     ```
+   - **(b) Even if it saw them, the body is
+     `newFeatures.push(...earlierSubclassFeatures)`** — it can only add rows,
+     never remove one. Firing it would produce a *third* row, not heal the pair.
+
+   **Why (a) is worth stating and not a footnote.** (b) alone invites the repair
+   *"make the backfill replace instead of push"*. That repair would still do
+   nothing, because the filter excludes these rows before the push is reached.
+   Recording only (b) forecloses one wrong one-liner (the `addFeature` dedup) and
+   leaves a second one open. Correction contributed by the
+   `plan-cs-bug-018-skips` session; the "it can only add" half was mine and was
+   accurate but not the operative gate.
 
 > **Probe hygiene, from the same investigation.** The first attempt at this
 > measurement called `st.addClassLevel?.("Cleric")` and reported "features len
