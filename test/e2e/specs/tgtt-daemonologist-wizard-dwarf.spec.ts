@@ -17,12 +17,47 @@ const DAEMONOLOGIST_FEATURES: FeatureCheck[] = [
 		{kind: "rollSavingThrow", ability: "int"},
 		{kind: "rollSavingThrow", ability: "wis"},
 	]},
-	// Ritual Adept changes which spellbook spells can be ritual-cast; the factory has no ritual-cast probe.
-	{level: 1, name: /ritual adept/i, kind: "passive"},
-	// Arcane Recovery's variable slot-level chooser is covered by Wizard suites; no deterministic matrix delta.
-	{level: 1, name: /arcane recovery/i, kind: "passive"},
-	// Scholar's expertise target is auto-picked and therefore not deterministic.
-	{level: 2, name: /scholar/i, kind: "passive"},
+	// Ritual Adept lets a Wizard ritual-cast straight from the spellbook without
+	// preparing. The factory has no ritual-cast probe, but the mode itself is a
+	// real mechanical value and distinguishes Wizard ("spellbook") from the
+	// "prepared" / "known" casters — so it is asserted rather than deferred.
+	{level: 1, name: /ritual adept/i, kind: "passive", effects: [
+		{kind: "featureCalculation", property: "hasRitualCasting", exact: true},
+		{kind: "featureCalculation", property: "ritualCastingMode", exact: "spellbook"},
+		{kind: "featureCalculation", property: "hasRitualAdept", exact: true},
+	]},
+	// Arcane Recovery's slot-level CHOOSER is non-deterministic, but its budget
+	// is not: `ceil(level / 2)`. Likewise the spellbook grows `6 + (level-1)*2`.
+	// Both are level-driven ladders, so they need one exact tier per checkpoint
+	// with `untilLevel` — the matrix re-evaluates every earlier row at each
+	// later checkpoint, so a single fixed value fails by construction.
+	// Windows are chosen to contain exactly one of [3, 5, 11, 17, 20].
+	{level: 1, untilLevel: 4, name: /arcane recovery/i, kind: "passive", effects: [
+		{kind: "featureCalculation", property: "hasArcaneRecovery", exact: true},
+		{kind: "featureCalculation", property: "arcaneRecoverySlotLevels", exact: 2},
+		{kind: "featureCalculation", property: "spellbookSpellsKnown", exact: 10},
+	]},
+	{level: 5, untilLevel: 10, name: /arcane recovery/i, kind: "passive", effects: [
+		{kind: "featureCalculation", property: "arcaneRecoverySlotLevels", exact: 3},
+		{kind: "featureCalculation", property: "spellbookSpellsKnown", exact: 14},
+	]},
+	{level: 11, untilLevel: 16, name: /arcane recovery/i, kind: "passive", effects: [
+		{kind: "featureCalculation", property: "arcaneRecoverySlotLevels", exact: 6},
+		{kind: "featureCalculation", property: "spellbookSpellsKnown", exact: 26},
+	]},
+	{level: 17, untilLevel: 19, name: /arcane recovery/i, kind: "passive", effects: [
+		{kind: "featureCalculation", property: "arcaneRecoverySlotLevels", exact: 9},
+		{kind: "featureCalculation", property: "spellbookSpellsKnown", exact: 38},
+	]},
+	{level: 20, name: /arcane recovery/i, kind: "passive", effects: [
+		{kind: "featureCalculation", property: "arcaneRecoverySlotLevels", exact: 10},
+		{kind: "featureCalculation", property: "spellbookSpellsKnown", exact: 44},
+	]},
+	// Scholar's expertise TARGET is auto-picked and not deterministic, but the
+	// grant itself and the menu it must be drawn from are.
+	{level: 2, name: /scholar/i, kind: "passive", effects: [
+		{kind: "featureCalculation", property: "hasScholar", exact: true},
+	]},
 	{level: 3, name: /fair and foul/i, kind: "passive", effects: [
 		// Deliberately NOT `spellMatchMode: "any"`: that mode drops the name
 		// assertion entirely and only counts spells at `level`, so it would
@@ -45,16 +80,32 @@ const DAEMONOLOGIST_FEATURES: FeatureCheck[] = [
 		{level: 6, cum: 2},
 		{level: 14, cum: 3},
 	]),
-	// ASIs have no deterministic target in the auto-filled level-up flow.
+	// ASIs are a genuine coverage gap, not a deferred one. The auto-filled
+	// level-up picks its own targets, so no specific score is deterministic,
+	// and there is no ASI-specific calculation to read.
+	// Do NOT "fix" this with a global probe such as `hasPendingFeatureChoices()`:
+	// that is process-wide state, so it would pass or fail for reasons this row
+	// does not own — a probe that passes for a different reason than it appears
+	// to, which is the exact shape this suite has been removing. An honest gap
+	// is worth more than a probe that cannot fail for the right reason.
 	{level: 4, name: /ability score improvement/i, kind: "passive"},
 	{level: 8, name: /ability score improvement/i, kind: "passive"},
 	{level: 12, name: /ability score improvement/i, kind: "passive"},
 	{level: 16, name: /ability score improvement/i, kind: "passive"},
 	{level: 19, name: /ability score improvement|epic boon/i, kind: "passive"},
-	// Memorize Spell, Spell Mastery, and Signature Spells are choice-driven spellbook operations.
-	{level: 5, name: /memorize spell/i, kind: "passive"},
-	{level: 18, name: /spell mastery/i, kind: "passive"},
-	{level: 20, name: /signature spells/i, kind: "passive"},
+	// Memorize Spell, Spell Mastery and Signature Spells are choice-driven
+	// spellbook operations, so their PICKS aren't deterministic — but each
+	// grant sets a real calculation flag, so presence is now verified
+	// mechanically rather than by feature name alone.
+	{level: 5, name: /memorize spell/i, kind: "passive", effects: [
+		{kind: "featureCalculation", property: "hasMemorizeSpell", exact: true},
+	]},
+	{level: 18, name: /spell mastery/i, kind: "passive", effects: [
+		{kind: "featureCalculation", property: "hasSpellMastery", exact: true},
+	]},
+	{level: 20, name: /signature spells/i, kind: "passive", effects: [
+		{kind: "featureCalculation", property: "hasSignatureSpells", exact: true},
+	]},
 ];
 
 describeCharacter({
