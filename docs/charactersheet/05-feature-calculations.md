@@ -1116,6 +1116,32 @@ The sub-type slot accepts conditions (`frightened`, `poisoned`, …), damage typ
 
 `getModifiersForType()` synthesizes a `conditional` text field on registry sub-typed entries when queried via the base type (e.g. `save:dex`), so both encodings appear identically to the aggregator. The picker dedupes on `_buildConditionalModId(mod)` = `${baseType}|${name||note||""}|${conditional}`.
 
+### Whose sentence is it? — the third-party subject guard
+
+Encoding 1 is produced by a regex over prose, and a regex has no idea who the
+sentence is about. Two guards exist because of that, and any new prose pattern in
+this area needs to think about both:
+
+- `(?<!dis)` on `conditionGatedSaveRe` — stops *"creatures have **dis**advantage
+  on saving throws against being frightened by you"* (an enemy debuff) parsing as
+  a self-buff.
+- `FeatureModifierParser.isThirdPartySaveSubject(plainText, matchIndex)` — stops
+  *"**the target** has advantage on saving throws against being charmed"* (a buff
+  you hand to somebody else) parsing as a self-buff. See CS-BUG-092.
+
+The guard bounds the clause at the previous `.`/`;`/`:`, strips the `you`
+mentions that qualify *which* creature is picked rather than naming a beneficiary
+(`you can see`, `you choose`, `within 30 feet of you`, `of you`), and fires only
+when what remains is a third-party subject directly followed by `has`/`have`. Any
+surviving `you`/`your` disables it, so *"You or an ally within 30 feet of you has
+advantage…"* is still parsed onto the character.
+
+Sheet-wide consequence worth internalising: **the sheet models one character.**
+There is no ally roster and no way to push a modifier onto another creature, so a
+feature that buffs a target is, on this sheet, a displayed designation plus a
+lifecycle — never a number. Parsing it as a self-buff is not a harmless
+approximation; it hands the player a benefit they gave away.
+
 ### Static helpers
 
 | Helper | Purpose |
