@@ -5559,3 +5559,64 @@ since narrowing means no group is produced). `_data.features` rows are
 unaffected, and display and mechanics read those, so this is believed benign —
 recorded because it will show up in save diffs and should not surprise the next
 reader.
+
+## CS-BUG-111 — the rest-restore probes have a silent-pass branch; measured reachable, exercised 24×, fired 0×
+
+**Status:** Open, latent. **Do not "fix" this without re-running the measurement
+below** — the branch is currently inert, and converting it to a throw changes
+behaviour for every `restoreOn` / `*RestRestores` row in the suite (59 + 113
+occurrences) in exchange for nothing presently observable.
+
+Flagged by the `cs-bug-016-spell-autofill-sweep` session and explicitly handed
+off unfixed. Measured here before recording, because "reported not fixed" with
+no measurement invites a harmful repair.
+
+**The shape.** Two sites spend one charge, then bail silently if the spend
+appears not to have happened:
+
+```
+comprehensiveBuildHelpers.ts:1563   if (afterSpend.current >= before.current) return;   // soft skip
+comprehensiveBuildHelpers.ts:2424   if (afterSpend.current >= before)        { break; } // soft skip
+```
+
+A bare `return`/`break` — nothing logged, nothing counted. If the spend is a
+no-op the entire rest-restoration assertion is skipped and the test passes. The
+correct shape already exists **nineteen lines below the first site**:
+`:1582` is `if (!await charSheet.spendFeatureUse(e.feature)) throw …`.
+
+### Measurement — a positive control, not an absence of failures
+
+Instrumented both branches to throw, ran four resource-dense specs: **0 throws,
+24 passed / 8 skipped — byte-identical to the un-instrumented run.**
+
+That result was *ambiguous and nearly recorded as a clean negative.* Re-ran with
+a log line at branch entry instead of a throw: **zero `REACHED` lines.** The
+lines had never executed. These rows live in `FeatureCheck` matrices evaluated
+by `assertFeaturesMatrix`, which is gated at `characterSpecFactory.ts:389`
+behind `RUN_MATRIX` — one of the tests that had been *skipped*. The instrument
+had been aimed at a path the run could not reach.
+
+With the gate on (`RUN_MATRIX=1`, `tgtt-battle-master-fighter`):
+
+```
+REACHED-1563 Second Wind     2->1, 3->2, 4->3, 5->4   fires=false   (7×)
+REACHED-1563 Action Surge    1->0                     fires=false   (3×)
+REACHED-1563 Superiority Dice 4->3                    fires=false   (2×)
+REACHED-2424  … identical distribution                fires=false  (12×)
+                                                       7 passed (11.2m)
+```
+
+**Reachable, exercised 24 times, fired 0 times** — every spend decremented. So
+the soft spot is a real latent hazard and is masking nothing measured today.
+
+> **The methodological point is the more valuable half.** The first run's
+> "0 throws / 24 passed" looked exactly like a clean negative and was in fact a
+> non-execution. An instrument that never runs reports the same thing as an
+> instrument that runs and finds nothing. **A falsification instrument needs a
+> positive control proving it executed** — same family as `?.` on the object
+> under test (CS-BUG-110), `--strict` exit codes, and `getFeatures()` under
+> Jest, and the reason a "soft skip" must log rather than return bare.
+
+**If this is ever repaired**, the repair is to *log and count* the soft skip so
+it is visible in the run, not to throw — and the fix must be re-measured with
+`RUN_MATRIX=1`, since without it the affected lines do not execute at all.
