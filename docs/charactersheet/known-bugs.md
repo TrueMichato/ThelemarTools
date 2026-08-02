@@ -2093,6 +2093,266 @@ climb speed of **0** even with two fly-granting states active.
 
 ---
 
+## CS-BUG-086 — a subclass whose spell list lives in a TABLE was granted nothing, and the shipped `additionalSpells` transcribed only one column
+
+**Status**: RESOLVED (Lunar Sorcery Sorcerer implementation).
+
+**Affected**: Lunar Sorcery Sorcerer (DSotDQ), all levels. Generically, any
+subclass whose spell progression is published as a `type: "table"` entry.
+
+**Symptom**: a Lunar Sorcery Sorcerer knew **5 of the 15** Lunar Spells. Ten
+spells — the entire New Moon and Crescent Moon columns — were never granted at
+any level.
+
+**Root cause — two independent halves.**
+
+1. `SpellGrantParser.getFeatureSpellText()` (`charactersheet-state.js` ~:581)
+   walks only `node.entries` and `node.items`. It never descends into a
+   `type: "table"` node's `rows`, so a table-published spell list is invisible to
+   the prose grant path. This is the 5etools house style for multi-column
+   progressions, so the blind spot is structural, not incidental.
+2. The shipped `data/class/class-sorcerer.json:1940-1971` compensates with a
+   *single* `additionalSpells` block named `"Full Moon"` — one of the table's
+   three columns. RAW ("You learn additional spells … as shown on the Lunar
+   Spells table") **every** column is learned; the phase gates other things.
+
+**Fix**: new declarative `static CharacterSheetState.FEATURE_SPELL_GRANTS`
+registry keyed `"<Class>|<subclass shortName or name>"`, resolved by the static,
+pure `getFeatureGrantedSpells(cls)` and applied **first** in
+`getSubclassAlwaysPreparedSpells()`. Grants then flow through the ordinary
+always-prepared pipeline (enrichment, cantrip routing, dedupe against the partial
+`additionalSpells`, `sourceFeature` attribution). `data/class/` is deliberately
+**not** modified — it is upstream-synced and only version-bump commits have ever
+touched it.
+
+**Why the parser was not taught to read tables**: it would over-grant for the
+many CHOOSE-ONE spell tables (Circle of the Land's terrain columns, Warlock
+expanded lists), turning a missing-spells bug into a wrong-spells bug across
+shipped content.
+
+**Correction to a claim made while fixing this**: the descriptor was first
+designed with a `doesNotCountAgainstKnown` flag. `git grep` over `js/` returns
+**zero** occurrences of that identifier — it does not exist. The convention
+actually *read* is `alwaysPrepared` + `sourceFeature`
+(`charactersheet-levelup.js` filters `s.level > 0 && !s.alwaysPrepared &&
+!s.sourceFeature`; `charactersheet-class-utils.js` filters granted cantrips by
+`sourceFeature`). Granted **cantrips** deliberately omit `alwaysPrepared`, so
+`sourceFeature`/`sourceClass` are the only readable flags there. Inventing the
+new field would have been exactly the dead-`hasXxx` anti-pattern this suite
+exists to kill.
+
+**Regression pin — falsified**: `CharacterSheetLunarSorcery.test.js`. Breaking
+`getFeatureGrantedSpells()` in place (keeping the signature) turns the grant
+tests red with real assertion failures, not `TypeError`.
+
+---
+
+## CS-BUG-087 — `featuresMatrix` entries whose level window contained no checkpoint were silently never evaluated
+
+**Status**: RESOLVED (rescue checkpoints added; seven dead windows across three specs now execute).
+
+**Affected**: every E2E spec using `featuresMatrix`.
+
+**Symptom**: none — that is the bug. The suite stayed green while the entry
+asserted nothing, and the entry looked like coverage in review.
+
+**Root cause**: the MEGA and matrix runners in `characterSpecFactory.ts` only
+stop and evaluate at levels **[3, 5, 11, 17, 20]**. An entry declared
+`{level: 6, untilLevel: 10, …}` contains none of those, so
+`assertFeaturesMatrix` was never called with a `currentLevel` inside its window.
+Nothing warned; the entry was dead code that reported success.
+
+**Enumerated** — and a correction worth recording. A first pass used a regex
+scanner over the spec sources and reported "274 windows scanned, 2 dead". That
+number was **wrong**: a regex over source text is not an enumeration, because it
+only sees the entries it happens to match. Running the check against the real
+parsed `featuresMatrix` objects at collection time found **7 dead windows across
+3 specs**:
+
+| Spec | Window | What it hid |
+|---|---|---|
+| `tgtt-shadow-magic-sorcerer` | `2..2` (Sorcery Points) | the `longRestRestores` probe on the pool |
+| `tgtt-shadow-magic-sorcerer` | `6..10` (Hound of Ill Omen) | the **entire `classSummon` probe** — AC 14, HP 37, bite/piercing, plus the `scaling.tempHpPerLevel` descriptor reads (this is how CS-BUG-089 was found) |
+| `tgtt-arcane-archer-fighter-hochling` | `13..16` (Indomitable) | the 2-use tier of the pool |
+| `tgtt-talent-chronopath` | `7..10` ×2 (Psionic Exertion) | `psionicExertionsKnown: 2` |
+| `tgtt-talent-chronopath` | `12..16` (Psychic Boost) | `psychicBoostUses: 2` |
+| `tgtt-talent-chronopath` | `13..16` (5th-order powers) | `maxPowerOrder: 5`, `manifestationDie: 1d8` |
+
+The Hound's L17 window (`17..∞`) *did* run, so the feature was not wholly
+unasserted — but the summon's stat block never was.
+
+**Fix** — and note this is *not* the first fix attempted. The first version
+threw at collection time demanding the author widen the window. That was wrong
+twice over:
+
+1. It aborts Playwright's **entire** collection (`Total: 0 tests in 0 files`), so
+   one bad spec bricks the suite for everybody in a parallel batch.
+2. More importantly, widening is usually **impossible**. Every one of the five
+   newly-found windows is an *intermediate progression tier* — Indomitable is 1
+   use at 9-12, **2 at 13-16**, 3 at 17+. Widening `13..16` to touch a checkpoint
+   makes the asserted value factually wrong at that checkpoint. The guard was
+   demanding a false assertion.
+
+The shipped fix instead **adds the stops the spec needs**.
+`_matrixCheckpointsFor()` returns the base `MATRIX_CHECKPOINTS` plus a rescue
+stop for every otherwise-unreachable window, chosen greedily so overlapping
+tiers share one stop (`12..16` and `13..16` both resolve to a single stop at 13).
+The runners already level up through every level one at a time — a checkpoint
+only decides where to pause and assert — so a rescue stop is cheap, and specs
+with no dead windows get the identical five stops as before.
+
+A rescue stop asserts **only the entries it exists for**
+(`rescueEntriesByLevel`). Re-running the full matrix there is pure waste, and
+measurably not free: a late full pass costs about as much as the L11 one.
+
+Only structurally impossible windows (`untilLevel < level`, or a window outside
+1-20) still throw, since no stop can rescue those.
+
+The two shadow-magic windows were also widened by hand (to `3..4` and `6..16`),
+which is correct there because the asserted values genuinely do not change
+across the widened range.
+
+**Verified**: the four Chronopath entries and the Arcane Archer entry now
+execute for the first time. Chronopath's matrix passes (4.6 m). Arcane Archer
+reaches and passes its L13 rescue stop, then times out at L17 — **which it also
+does on an unmodified base checkout** (A/B verified at `f551d9a2`), so that
+spec's timeout is a pre-existing problem with its size, not a consequence of
+this change.
+
+---
+
+## CS-BUG-088 — `LevelUpPage`'s named-subclass-choice modal selector matches nothing
+
+**Status**: OPEN (recorded, deliberately not fixed).
+
+**Affected**: `test/e2e/pages/LevelUpPage.ts:897` and `:902`;
+`test/e2e/pages/BuilderWizardPage.ts:337` and `:341`.
+
+**Symptom**: latent. The helpers locate `.ui-modal__inner`, but 5etools modals
+carry the class **`ve-ui-modal__inner`** (`js/utils-ui.js:573` — the `ve-`
+prefix is part of the token, so a bare `.ui-modal__inner` matches **zero**
+elements).
+
+**Why it has not failed**: `selectNamedSubclassChoice` (`:900`) races the dead
+modal locator against `.charsheet__levelup-named-subclass-choice`, and Level-Up
+renders its choice **inline**, so the working half always wins. The
+`expectNamedSubclassChoiceModalVisible` helper (`:896`) has no such fallback and
+is the genuinely dead one.
+
+**How it was found**: the Builder *does* use the modal branch, so the new
+`BuilderWizardPage.answerSubclassChoiceModal()` written for Lunar Sorcery hung on
+an open "Lunar Embodiment" modal until the selector was corrected to
+`.ve-ui-modal__inner` (`BuilderWizardPage.ts:419`).
+
+**Not fixed here** deliberately: correcting `:337`/`:341`/`:897`/`:902` changes
+shared page objects that `divine-soul-affinity.spec.ts` and every subclass-choice
+spec depend on, and the blast radius does not belong in a subclass change. Two
+related off-by-one traps found alongside, both fixed only in the new helper: the
+choice `<select>`'s **index 0 is the disabled "Select…" placeholder** (use
+index 1), and the confirm button must be matched `/^OK$/i` rather than by
+substring.
+
+---
+
+## CS-BUG-089 — a companion whose attack is declared structurally has no rollable attack at all
+
+**Status**: RESOLVED (Lunar Sorcery session; the victim is Shadow Magic).
+
+**Affected**: `js/charactersheet/charactersheet.js:4851` (companion card attack
+buttons) and `:5794` (`_rollCompanionAttack`); `js/charactersheet/charactersheet-state.js`
+`addCompanion()`. Live victim: **Hound of Ill Omen** (Shadow Magic Sorcerer 6).
+
+**Symptom**: a summoned Hound of Ill Omen rendered **zero attack buttons** and had
+nothing to roll, despite carrying a fully specified bite
+(`attackBonus: 5`, `damage: "2d6+3"`, `damageType: "piercing"`, plus the DC 13
+Strength prone rider).
+
+**Root cause** — two companion attack vocabularies, only one of which is read:
+
+| shape | example | who reads it |
+|---|---|---|
+| prose | `{name: "Bite", entries: ["{@atk mw} {@hit 5} … {@h}{@damage 2d6+3} piercing damage."]}` | the card (filters `companion.actions` for `{@atk`) **and** `_rollCompanionAttack()` (parses `{@hit}` / `{@damage}` / `{@dc}` out of `actions` entries) |
+| structured | `{name: "Bite", attackBonus: 5, damage: "2d6+3", damageType: "piercing", range, description}` | see below — nothing that renders or rolls it |
+
+`addCompanion()` stored `attacks` verbatim. Enumerating every reader
+(`git grep -n "\.attacks" -- js/charactersheet/`, discarding `_data.attacks`,
+`attacksPerAction` and `attacksAgainst`) gives exactly **four** sites that touch
+`companion.attacks`, and none of them makes a structured attack rollable:
+
+1. `charactersheet-playmode.js:2835` and 2. `:4020` — `const actions = comp.actions || comp.attacks || [];`.
+   This fallback is **unreachable for anything built by `addCompanion()`**, which
+   has always written `actions: companionData.actions || []` — and `[]` is
+   truthy, so the left operand always wins. Even if it did fire, both sites
+   render only `action.name` and `action.entries`; a structured attack has no
+   `entries`, so it would surface as a bare name with no numbers. Play Mode has
+   no companion attack roll button either way.
+3. `charactersheet-state.js:53746` (`_recalculateScaledCompanion`) — writes both
+   arrays, but **only when `scaling.attackName` is set**. The Hound's scaling
+   descriptor carries only `className` / `tempHpPerLevel`.
+4. `charactersheet-state.js:54044` — annotates `attack.damageBonus` for created
+   undead. A write, not a render.
+
+So the honest form of the claim is not "nothing reads it" but "no path that
+renders an attack button or rolls an attack reads it, and the one prose fallback
+that exists is dead for `addCompanion()` output."
+
+**Fix**: `static CharacterSheetState._withStructuredAttackActions(actions, attacks)`,
+applied once at `addCompanion()` entry, translates each unrepresented structured
+attack into the prose shape. Existing prose actions win on name collision, and an
+attack that already carries `entries` is left alone — so bestiary-derived
+companions are untouched.
+
+**How it was found**: only because CS-BUG-087's collection-time guard made the
+`classSummon` probe in `tgtt-shadow-magic-sorcerer.spec.ts` **reachable for the
+first time** — its window was `6..10`, which contains none of the matrix
+checkpoints `[3, 5, 11, 17, 20]`.
+
+**Parallel harness gap fixed alongside**: the `classSummon` flattener in
+`test/e2e/utils/comprehensiveBuildHelpers.ts` joined `a.damage` / `a.desc` /
+`a.entries` but **never `a.damageType`**, so `damageContains` could not match a
+damage type on any structured attack — the harness would have mis-reported the
+product bug as a probe failure even once reachable.
+
+**Regression pins**: `test/jest/charactersheet/CharacterSheetShadowMagicSorcerer.test.js`.
+Falsified in place (signature kept): dropping the `{@damage}` wrapper and the type
+from the synthesised entry → **1 red**, a real assertion failure
+(`Expected pattern: /\{@damage 2d6\+3\}/`). Independently, disabling the
+name-collision guard → **1 red** on the "does not clobber" pin. A whole-function
+no-op reds only the first pin, which is correct: the second pin asserts
+precedence, a property a no-op preserves.
+
+---
+
+## CS-BUG-090 — the E2E export round-trip test was under-budgeted for its own wizard run
+
+**Status**: RESOLVED.
+
+**Affected**: `test/e2e/utils/characterSpecFactory.ts` — the
+`L1 export round-trip preserves identity` test generated for **every**
+`describeCharacter` spec.
+
+**Symptom**: `Test timeout of 60000ms exceeded` while still inside
+`createCharacterViaWizard` — surfacing either as
+`locator.click: waiting for locator('#charsheet-builder-next')` or as
+`page.waitForTimeout`. Both read like a hung UI and neither is one.
+
+**Root cause**: the round-trip test does the same full builder-wizard run as the
+`L1 build` test, which explicitly budgets `test.setTimeout(120_000)`. The
+round-trip test set no timeout at all and inherited the 60 s global default from
+`playwright.config.ts`. It passed only on presets whose wizard happens to finish
+inside 60 s.
+
+**How it was found**: the Lunar Sorcery preset answers a subclass-choice modal
+at L1, which pushes creation past the limit. Measured after the fix: **51.6 s** —
+i.e. the test was passing with under 9 s of headroom on every other spec too, so
+this was latent flake across the whole suite, not a Lunar-specific problem.
+
+**Fix**: `test.setTimeout(120_000)` on the round-trip test, matching the L1 build
+test it mirrors. Raising a timeout cannot make a passing spec fail, so the blast
+radius is one-directional.
+
+---
+
 ## CS-BUG-060 — Circle of the Sea's Wrath of the Sea was description-only, and Stormborn collided with the Tempest Cleric
 
 **Status**: RESOLVED (Circle of the Sea Druid implementation).

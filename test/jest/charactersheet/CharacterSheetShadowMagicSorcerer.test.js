@@ -343,6 +343,40 @@ describe("Shadow Magic Sorcerer — Hound of Ill Omen (level 6)", () => {
 		expect(hound.attacks[0]).toMatchObject({name: "Bite", attackBonus: 5, damage: "2d6+3", damageType: "piercing"});
 	});
 
+	// CS-BUG-089. The bite was stored ONLY in the structured `attacks` array, and both
+	// the companion card's attack buttons and `_rollCompanionAttack()` read exclusively
+	// from the prose `actions` array — so a summoned hound had no rollable attack at all.
+	// `addCompanion()` now translates structured attacks into the prose shape on entry.
+	it("exposes the bite as a rollable prose action, not just structured data", () => {
+		const state = makeShadowSorcerer(6);
+		state.summonHoundOfIllOmen();
+		const hound = state.getHoundOfIllOmen();
+
+		const bite = (hound.actions || []).find(a => a.name === "Bite");
+		expect(bite).toBeDefined();
+		const entry = bite.entries.find(e => typeof e === "string");
+		// The card only renders a button for actions matching `{@atk`, and the roller
+		// parses the bonus out of `{@hit N}` and the dice out of `{@damage …}`.
+		expect(entry).toMatch(/\{@atk /);
+		expect(entry).toMatch(/\{@hit 5\}/);
+		expect(entry).toMatch(/\{@damage 2d6\+3\}/);
+		expect(entry).toMatch(/piercing damage/);
+		// The prone rider survives the translation.
+		expect(entry).toMatch(/Strength saving throw/);
+	});
+
+	it("does not clobber a companion that already declares prose actions", () => {
+		const state = makeShadowSorcerer(6);
+		const id = state.addCompanion({
+			name: "Prose Beast",
+			actions: [{name: "Bite", entries: ["{@atk mw} {@hit 9} to hit. {@h}{@damage 1d4} slashing damage."]}],
+			attacks: [{name: "Bite", attackBonus: 5, damage: "2d6+3", damageType: "piercing"}],
+		});
+		const comp = state.getCompanion(id);
+		expect(comp.actions.filter(a => a.name === "Bite")).toHaveLength(1);
+		expect(comp.actions[0].entries[0]).toMatch(/\{@hit 9\}/);
+	});
+
 	it("appears with temporary hit points equal to HALF the sorcerer level, declaratively", () => {
 		const l6 = makeShadowSorcerer(6);
 		l6.summonHoundOfIllOmen();

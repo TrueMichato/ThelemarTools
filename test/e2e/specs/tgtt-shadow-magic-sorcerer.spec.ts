@@ -104,16 +104,19 @@ describeCharacter({
 		// The pool grows at EVERY level, so one row per matrix checkpoint
 		// with `untilLevel` — an earlier row must never be re-evaluated
 		// against a later, larger pool.
+		// NOTE: the MEGA/matrix runners only stop at levels [3, 5, 11, 17, 20]
+		// (`characterSpecFactory.ts` MATRIX_CHECKPOINTS), so a `2..2` window would
+		// never be evaluated. The long-rest probe therefore rides on the first
+		// window that IS reachable.
 		{
-			level: 2,
-			untilLevel: 2,
+			level: 3,
+			untilLevel: 4,
 			name: "Sorcery Points",
 			kind: "resource",
-			resourceMax: 2,
+			resourceMax: 3,
 			restoreOn: "long",
 			effects: [{kind: "longRestRestores", resource: "Sorcery Points"}],
 		},
-		{level: 3, untilLevel: 4, name: "Sorcery Points", kind: "resource", resourceMax: 3},
 		{level: 5, untilLevel: 10, name: "Sorcery Points", kind: "resource", resourceMax: 5},
 		{level: 11, untilLevel: 16, name: "Sorcery Points", kind: "resource", resourceMax: 11},
 		{level: 17, untilLevel: 19, name: "Sorcery Points", kind: "resource", resourceMax: 17},
@@ -235,9 +238,11 @@ describeCharacter({
 		// ══ Hound of Ill Omen (L6) ═══════════════════════════════════════
 		// A real CLASS_SUMMON companion built from the dire wolf, re-typed to
 		// Medium monstrosity, costing 3 Sorcery Points.
+		// Widened from `6..10`, which contained no matrix checkpoint and so ran
+		// NEVER — the whole `classSummon` probe below was silently dead.
 		{
 			level: 6,
-			untilLevel: 10,
+			untilLevel: 16,
 			name: /hound of ill omen/i,
 			kind: "passive",
 			effects: [

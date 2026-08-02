@@ -372,8 +372,13 @@ export class BuilderWizardPage {
 	 * @param subclassName Exact rendered subclass name.
 	 * @param subclassSource Optional JSON source key; disambiguates same-named
 	 *   subclasses by the rendered abbreviation next to the label.
+	 * @param subclassChoice Optional up-front subclass choice (Divine Soul's affinity,
+	 *   Lunar Sorcery's starting lunar phase, …). Checking the radio fires
+	 *   `hasSubclassChoicePrompt` in `_renderClassSubclassSelection`, which opens a
+	 *   blocking `pGetUserEnum` modal; leaving it unanswered wedges the whole wizard,
+	 *   AND the Class step's Next button refuses to advance without it.
 	 */
-	async selectLevel1Subclass (subclassName: string, subclassSource?: string): Promise<void> {
+	async selectLevel1Subclass (subclassName: string, subclassSource?: string, subclassChoice?: string): Promise<void> {
 		const list = this.page.locator(".charsheet__builder-subclass-list");
 		await list.waitFor({state: "visible", timeout: 10000});
 		let option = list.locator(".charsheet__builder-subclass-option")
@@ -395,6 +400,32 @@ export class BuilderWizardPage {
 		// The change handler resolves the full subclass, may open a named-choice modal,
 		// and re-renders the class preview. Give it room before the next picker runs.
 		await this.page.waitForTimeout(400);
+		await this.answerSubclassChoiceModal(subclassChoice);
+	}
+
+	/**
+	 * Answer the Builder's up-front subclass-choice modal if one is open.
+	 * No-op when the subclass has no such choice, so it is always safe to call.
+	 * @param choiceName Option label to select. When omitted the first option is taken.
+	 */
+	async answerSubclassChoiceModal (choiceName?: string): Promise<void> {
+		// NOTE the selector: `InputUiUtil._pGetShowModal` builds the window with
+		// `clazz: "ve-ui-modal__inner …"` (js/utils-ui.js:573) — the `ve-` prefix is
+		// part of the class token, so a bare `.ui-modal__inner` matches NOTHING.
+		// `LevelUpPage.expectNamedSubclassChoiceModalVisible` uses the unprefixed
+		// spelling and only passes because the Level-Up flow renders its choice
+		// INLINE (`.charsheet__levelup-named-subclass-choice`) and never reaches the
+		// modal branch. The Builder has no inline path, so it must be correct here.
+		const modal = this.page.locator(".ve-ui-modal__inner").last();
+		if (!await modal.count()) return;
+		if (!await modal.isVisible().catch(() => false)) return;
+		const select = modal.locator("select").first();
+		if (!await select.count()) return;
+		if (choiceName) await select.selectOption({label: choiceName});
+		else await select.selectOption({index: 1});
+		await modal.getByRole("button", {name: /^OK$/i}).click();
+		await modal.waitFor({state: "hidden", timeout: 10000});
+		await this.page.waitForTimeout(200);
 	}
 
 	/**

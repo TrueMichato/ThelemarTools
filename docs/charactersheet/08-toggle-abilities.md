@@ -96,6 +96,34 @@ Ki/Focus point or Arms plus Visage for two. Visage and Body expose resolved
 `trigger` controls for speech modes and Deflect Energy; the trigger resolver
 applies ranges, ability modifiers, and action-economy costs before rendering.
 
+### Lunar Sorcery phase states
+
+Lunar Sorcery (DSotDQ) models the moon phase as **three mutually-exclusive
+states** — `lunarPhaseFull`, `lunarPhaseNew`, `lunarPhaseCrescent` — plus one
+sub-toggle, `lunarMoonlight`. Exactly one phase is active at all times.
+
+- The phase is **seeded, not owned, by `subclassChoice`**. `_ensureLunarPhase()`
+  activates the persisted choice when no phase state is live, so pre-existing
+  saves migrate for free and a mid-adventure switch is never undone by a later
+  level-up re-reading the wizard answer.
+- **Do not toggle these rows directly.** `setLunarPhase(key, opts)` is the single
+  mutator: it charges the Waxing and Waning sorcery point (L6+, unless
+  `{free: true}`), re-attaches the level-14 Lunar Empowerment `customEffects` for
+  the incoming phase, and refuses an unknown key. Clicking the raw activatable
+  row bypasses all three.
+- Mutual exclusivity is enforced **twice** — imperatively in `setLunarPhase()`
+  and declaratively via `exclusiveWith` in `ACTIVE_STATE_TYPES`. Both are
+  deliberate: the declarative arm covers activations that arrive through the
+  generic state engine, the imperative arm covers the seed path. Breaking either
+  one alone leaves the regression suite green.
+- Empowerment effects are attached **at activation time**, not baked into the
+  registry, so they are level-gated to 14+: Full Moon → the `lunarMoonlight`
+  bonus-action sub-toggle (10 ft bright / 10 ft dim light, advantage on
+  Investigation and Perception inside it); New Moon → advantage on Stealth plus a
+  conditional disadvantage on attacks against you; Crescent Moon → resistance to
+  `damage:necrotic` and `damage:radiant` (namespaced — see CS-BUG-050; a bare
+  damage type is silently inert).
+
 ---
 
 ## Effect Types

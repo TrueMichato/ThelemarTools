@@ -1124,7 +1124,12 @@ async function _runPassiveOrRollEffect (
 				const comp = (st.getCompanions?.() || []).find((c: any) => re.test(c?.name || ""));
 				if (!comp) return {err: `no companion matching ${cfg.namePattern}; seen=[${(st.getCompanions?.() || []).map((c: any) => c.name).join(", ")}]`};
 				const atks = [...(comp.attacks || []), ...(comp.actions || [])];
-				const flat = (a: any) => [a?.damage, a?.desc, ...(Array.isArray(a?.entries) ? a.entries : [a?.entries])].filter(Boolean).join(" ");
+				// Companion attacks come in two shapes: 5etools prose (`entries`, where
+				// the damage type is inside the sentence) and the structured form
+				// (`damage` + a SEPARATE `damageType` field). Omitting `damageType` here
+				// made `damageContains` unable to match a type on any structured attack —
+				// which is how the Hound of Ill Omen's "piercing" probe read "2d6+3".
+				const flat = (a: any) => [a?.damage, a?.damageType, a?.desc, a?.description, ...(Array.isArray(a?.entries) ? a.entries : [a?.entries])].filter(Boolean).join(" ");
 				const out = {
 					err: null as string | null,
 					hp: comp.hp?.max ?? comp.maxHp ?? null,

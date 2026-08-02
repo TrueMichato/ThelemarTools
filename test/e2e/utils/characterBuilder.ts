@@ -847,6 +847,40 @@ export const PRESET_FULL_SHADOW_MAGIC_SORCERER: CharacterPreset = {
 	signatureSpells: ["Fire Bolt", "Shield"],
 };
 
+/**
+ * Lunar Sorcery Sorcerer (DSotDQ subclass on the PHB-2014 Sorcerer chassis).
+ *
+ * Dwarf deliberately: the subclass's most falsifiable probe is Lunar Empowerment's
+ * Crescent Moon resistance to NECROTIC and RADIANT, plus New Moon's advantage on
+ * Stealth. A Dwarf brings poison resistance and nothing else, so both probes measure a
+ * real delta rather than a species freebie. (The 2024 Human's mandatory Origin Feat
+ * pick stalls the Species step, so it is not an option here anyway.)
+ *
+ * `namedSubclassChoice` is the STARTING lunar phase. PHB-2014 Sorcerer picks its
+ * Sorcerous Origin at level 1, so this is answered in the Builder's Class step — the
+ * first preset to exercise that path (see `BuilderWizardPage.selectLevel1Subclass`).
+ */
+export const PRESET_FULL_LUNAR_SORCERY_SORCERER: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB",
+	className: "Sorcerer",
+	classSource: "PHB",
+	prioritySources: ["PHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB",
+	name: "Selene Moonwake",
+	skillCount: 2,
+	subclassName: "Lunar Sorcery",
+	subclassSource: "DSotDQ",
+	namedSubclassChoice: {title: "Lunar Embodiment", name: "Full Moon"},
+	// CS-BUG-056: without this the standard array is assigned STR-first and the Sorcerer
+	// lands on CHA 8, which would make every spell save DC — including Lunar Phenomenon's
+	// — unrepresentative.
+	abilityPriority: ["cha", "con", "dex", "wis", "int", "str"],
+	signatureSpells: ["Fire Bolt", "Magic Missile"],
+};
+
 /** Convenience array of all comprehensive presets — handy for parameterised smoke tests. */
 export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_MERCY_MONK_CHANGELING,
@@ -872,6 +906,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_HORROR_THEOCRACIAN,
 	PRESET_FULL_CREATION_BARD_CHANGELING,
 	PRESET_FULL_SHADOW_MAGIC_SORCERER,
+	PRESET_FULL_LUNAR_SORCERY_SORCERER,
 ];
 
 /**
@@ -947,7 +982,11 @@ export async function createCharacterViaWizard (
 	// skill / optional-feature pickers, because selecting it can add its own sub-pickers.
 	// No-op for every class that gains its subclass later.
 	if (preset.subclassName && await builder.hasLevel1SubclassSelection()) {
-		await builder.selectLevel1Subclass(preset.subclassName, preset.subclassSource);
+		await builder.selectLevel1Subclass(
+			preset.subclassName,
+			preset.subclassSource,
+			preset.namedSubclassChoice?.name,
+		);
 	}
 	if (preset.skillCount) {
 		await builder.selectFirstAvailableSkills(preset.skillCount);

@@ -20475,6 +20475,12 @@ class CharacterSheetState {
 									.map(p => ({key: p.key, name: p.name, icon: p.icon}));
 								calculations.lunarFreeSpell = phase ? {...phase.freeSpell} : null;
 								calculations.lunarEmbodimentFreeCasts = this.getLunarFreeCasts().filter(it => it.available).length;
+								// How many rows of the Lunar Spells table have unlocked. RAW every
+								// column is learned, so this is 3 per unlocked row: 3/6/9/12/15 at
+								// class levels 1/3/5/7/9. Published because the level gate is a real
+								// mechanic and is otherwise only observable by diffing the spell list.
+								calculations.lunarSpellsKnownCount = CharacterSheetState.getFeatureGrantedSpells(cls)
+									.filter(it => it.grantedBy === "Lunar Embodiment").length;
 
 								// Moon Fire — Sacred Flame, cast against two creatures within
 								// 5 ft of each other, and it does not count against cantrips known.
@@ -32589,8 +32595,11 @@ class CharacterSheetState {
 			spent = 1;
 		}
 
-		// Mutual exclusivity is declared on the state definitions too, but activate
-		// explicitly here so the seed path (which runs before any UI) is deterministic.
+		// Belt-and-braces: `ACTIVE_STATE_TYPES` already declares `exclusiveWith` for all
+		// three phases, so this loop is REDUNDANT — falsification confirmed that
+		// disabling either site alone leaves the suite green, and only disabling BOTH
+		// turns it red (9 assertion failures). It is kept because the seed path runs
+		// before any UI and must be deterministic regardless of registry edits.
 		for (const other of Object.values(CharacterSheetState.LUNAR_PHASES)) {
 			if (other.stateId !== phase.stateId) this.deactivateState(other.stateId);
 		}
@@ -53039,6 +53048,59 @@ class CharacterSheetState {
 	 * @param {string} [companionData.groupId] - ID to link related conjured creatures
 	 * @returns {string} The new companion's ID
 	 */
+	/**
+	 * Normalise structured companion attacks into the prose `actions` shape.
+	 *
+	 * Companion attacks arrive in two vocabularies. Bestiary-derived companions carry
+	 * 5etools prose (`{name, entries: ["{@atk mw} {@hit 5} to hit …"]}`), and that is
+	 * the ONLY shape the sheet renders a roll button for and the only one
+	 * `_rollCompanionAttack()` can parse. Curated class summons are far easier to author
+	 * in the structured shape (`{name, attackBonus, damage, damageType, range}`), which
+	 * `addCompanion()` stored verbatim in `attacks` — where no rendering or rolling path
+	 * reads it. (Play Mode has a `comp.actions || comp.attacks` fallback at
+	 * `charactersheet-playmode.js:2835`/`:4020`, but `addCompanion()` always writes an
+	 * array to `actions` and `[]` is truthy, so it never fires — and it renders only
+	 * `name`/`entries` anyway, neither of which a structured attack has.)
+	 *
+	 * The result was a summon with a fully specified attack and **no way to roll it**:
+	 * the Hound of Ill Omen (Shadow Magic 6) had `attackBonus: 5`, `damage: "2d6+3"`,
+	 * `damageType: "piercing"` and rendered zero attack buttons.
+	 *
+	 * Rather than teach the renderer and the roller a second vocabulary, translate once
+	 * at the point of entry. Existing prose actions win: an attack whose name already
+	 * matches an action, or which already carries `entries`, is left alone.
+	 *
+	 * @param {Array} [actions] the companion's declared prose actions.
+	 * @param {Array} [attacks] the companion's declared structured attacks.
+	 * @returns {Array} `actions` plus one synthesised entry per unrepresented attack.
+	 * @private
+	 */
+	static _withStructuredAttackActions (actions, attacks) {
+		const out = [...(actions || [])];
+		if (!Array.isArray(attacks) || !attacks.length) return out;
+
+		const seen = new Set(out.map(a => String(a?.name || "").toLowerCase()));
+		for (const atk of attacks) {
+			const name = atk?.name;
+			if (!name || atk.entries) continue;
+			if (seen.has(String(name).toLowerCase())) continue;
+			if (atk.attackBonus == null && !atk.damage) continue;
+
+			const parts = [];
+			parts.push(`{@atk ${atk.attackType || "mw"}}`);
+			if (atk.attackBonus != null) parts.push(`{@hit ${atk.attackBonus}} to hit,`);
+			parts.push(`reach ${atk.range || "5 ft."}, one target.`);
+			if (atk.damage) {
+				parts.push(`{@h}{@damage ${atk.damage}}${atk.damageType ? ` ${atk.damageType}` : ""} damage.`);
+			}
+			if (atk.description) parts.push(atk.description);
+
+			out.push({name, entries: [parts.join(" ")]});
+			seen.add(String(name).toLowerCase());
+		}
+		return out;
+	}
+
 	addCompanion (companionData) {
 		if (!this._data.companions) this._data.companions = [];
 
@@ -53091,8 +53153,8 @@ class CharacterSheetState {
 			languages: companionData.languages || [],
 
 			// Stat block entries
+			actions: CharacterSheetState._withStructuredAttackActions(companionData.actions, companionData.attacks),
 			traits: companionData.traits || [],
-			actions: companionData.actions || [],
 			reactions: companionData.reactions || [],
 			bonusActions: companionData.bonusActions || [],
 

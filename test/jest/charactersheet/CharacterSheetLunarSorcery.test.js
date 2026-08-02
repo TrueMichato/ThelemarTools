@@ -737,6 +737,17 @@ describe("calculations surface", () => {
 		expect(at(18).hasLunarPhenomenon).toBe(true);
 	});
 
+	it("publishes the Lunar Spells row count, three per unlocked row", () => {
+		const at = (level) => makeLunarSorcerer(level).getFeatureCalculations().lunarSpellsKnownCount;
+		expect(at(1)).toBe(3);
+		expect(at(2)).toBe(3);
+		expect(at(3)).toBe(6);
+		expect(at(5)).toBe(9);
+		expect(at(7)).toBe(12);
+		expect(at(9)).toBe(15);
+		expect(at(20)).toBe(15);
+	});
+
 	it("every flag is backed by a real number or object the UI can render", () => {
 		const calc = makeLunarSorcerer(20, {phase: "New Moon"}).getFeatureCalculations();
 		expect(calc.lunarPhaseName).toBe("New Moon");
