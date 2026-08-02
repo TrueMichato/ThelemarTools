@@ -4939,7 +4939,7 @@ for the bug itself. Falsifying it required the second break above.
 
 **Status:** Open. Partially addressed — `913600e4` widened the offending
 windows that existed at the time and added `scripts/auditE2eCoverage.mjs`. The
-underlying hole is still open, and **16 rows are inert** — count corrected twice (12 -> 13 -> 16); see Root cause 1 and Root cause 4.
+underlying hole is still open, and **16 rows are inert** — count corrected twice (12 -> 13 -> 16); see Root cause 1 and Root cause 4. SEVEN root causes are now recorded.
 
 **Affects:** `test/e2e/utils/characterSpecFactory.ts` (the MEGA and matrix
 loops) and `scripts/auditE2eCoverage.mjs` (the detector).
@@ -5004,12 +5004,37 @@ tgtt-tdcsr-juggernaut-barbarian.spec.ts   21 entries  20 effects  2 helpers  →
 ```
 
 On the first two, `effectsCount` **alone exceeds `entryCount`** with every
-other term at zero. So the two "honest" terms are not commensurable either:
-`entryCount` counts `{level: N,` literals (`:683`) while `effectsCount` counts
-`effects:` blocks (`:687-688`), and a row may carry more than one. The
-numerator and denominator count different things throughout, which is why a
-ratio between them is not a coverage figure at all. **Deleting one term makes
-the artefact rarer without making the metric sound.**
+other term at zero — and that is not a units mismatch, it is a **proof of
+denominator undercount**. An `effects:` block belongs to exactly one row, so
+`effectsCount ≤ (true row count)` holds unconditionally. Therefore:
+
+> **Any spec where `effectsCount > entryCount` is, by construction, a
+> denominator undercount. No other explanation is available.**
+
+Confirmed empirically as well as structurally — **919 rows scanned across all 43
+specs, zero carrying more than one `effects:` block.** An earlier revision of
+this entry asserted "a row may carry more than one" and used it to argue the two
+terms were incommensurable; that clause was false, and the argument built on it
+is withdrawn. *(Invariant supplied by the `lunar-sorcery-sorcerer` session; the
+919-row sweep is the check on it.)*
+
+The real cause is **root cause 5** below — `:683`'s comment blinding, the same
+defect as `:188` on the opposite side of the ratio. True coverage:
+
+| spec | `entryCount` | real rows | blinded | effects | true coverage |
+|---|---|---|---|---|---|
+| `tgtt-meteor-knight-fighter` | 13 | 15 | 2 | 15 | **100%** |
+| `tgtt-steel-hawk-fighter` | 13 | 15 | 2 | 15 | **100%** |
+| `tgtt-tdcsr-juggernaut-barbarian` | 21 | 22 | 1 | 20 | **91%** |
+
+All three are ≤ 100% once the denominator is correct.
+
+**The conclusion survives its own retracted premise: deleting one term makes the
+artefact rarer without making the metric sound.** It is true for a different
+reason than first recorded — the units mismatch is real and fatal for
+`helperCount` (root cause 6), but it is not what produced these three badges.
+The printed table contains its own disproof, and the two columns that expose it
+are already side by side.
 
 ### The printed table cannot reproduce its own percentage
 
@@ -5076,7 +5101,7 @@ tgtt-astral-self-monk-changeling.ts   24 entries … inert (blank)   58%  ⚠ LO
 A spec scoring **✓ FULL at 102%** while carrying six never-executed rows is
 worse than no detector, because the badge actively discourages a second look.
 
-### Root cause — two independent ones
+### Root cause — seven, not two
 
 **1. `findInertRows()` scans spec source text, but 14 of the 16 rows do not
 exist in spec source.** They are emitted at runtime by `buildCombatMethodChecks`
@@ -5084,6 +5109,44 @@ exist in spec source.** They are emitted at runtime by `buildCombatMethodChecks`
 `test/e2e/specs/*.ts` is structurally incapable of seeing a row a helper
 returns. This is the same class of error already recorded in CS-BUG-087's notes:
 **a regex scan over source is not an enumeration.**
+
+> **Measured, and it is worse than "14 of the 16": `findInertRows()` finds
+> ZERO rows on ALL 43 specs.** Instrumented the audit in-tree to print its own
+> intermediate, then restored it byte-identical:
+>
+> ```
+> node scripts/auditE2eCoverage.mjs   (43 specs)
+> 43 × inertRows=0 withProbes=0
+> ```
+>
+> It misses even the two rows that *are* in spec source, for two different
+> reasons — one per detection cause:
+> - **Meteor Knight `L13..16`** — the object literal is `{`, then a two-line
+>   comment, then `level: 13` (`tgtt-meteor-knight-fighter.spec.ts:73-77`). The
+>   pattern is `/\{\s*level:\s*(\d+)/`, which allows only whitespace between the
+>   brace and the key. Comment ⇒ no match. (Cause 2.)
+> - **Wild Shape `L8..11`** (`tgtt-hunter-zodiac-centaur.spec.ts:328`) — matches
+>   the pattern fine, then survives `CHECKPOINTS.some(c => c >= lo && c <= hi)`
+>   because the global list contains **11**. Against the row's real legs
+>   `{6,20}` nothing lands. (Cause 4.)
+>
+> **Consequence — the formula's own guard against this defect has never fired.**
+> `:712-713` build `inertWithProbes` from the blind scanner and `:728` subtracts
+> it:
+>
+> ```js
+> const inertRows = findInertRows(src);
+> const inertWithProbes = inertRows.filter(r => r.hasProbes).length;
+> …
+> const effective = … + siblingCovered - inertWithProbes;   // always - 0
+> ```
+>
+> So the expression contains an explicit correction term intended to stop inert
+> rows being laundered into the score, wired to the one input structurally
+> incapable of finding them. It has evaluated to `0` for every spec, every run.
+> This is a sharper indictment than the >100% artefact, and it lives in the same
+> line. Credit to the `lunar-sorcery-sorcerer` session for the structural
+> argument; the "exactly 0 on 43 of 43" figure is the measurement of it.
 
 **4. The detector's model is wrong, not just its reach — it holds ONE global
 checkpoint list, and multiclass specs do not use it.** `characterSpecFactory.ts:907`
@@ -5120,6 +5183,27 @@ repair marks it live:
 > demonstration of root cause 4 — the detector calls live a row whose own
 > adjacent comment says it is dead — and a **poor** example of an author being
 > misled.
+
+> **Consequence for the bug's character (2026-08-03).** With that correction, all
+> 16 rows fall into exactly two buckets: **14 invisible-by-construction**
+> (helper-emitted, so absent from spec source entirely) and **2 knowingly
+> documented** (Meteor Knight `L13..16` and this one, each with an adjacent
+> comment naming its own inertness). **There is not one case of an author being
+> misled.**
+>
+> That is a sharper indictment than "the detector missed 16 rows", because it
+> removes the consolation reading. The tool exists to tell an author that a row
+> they believe is live is dead. On this evidence it has never had that job to do:
+> where an author was capable of noticing, they noticed and wrote it down; where
+> they were not, the tool cannot see it either. **Its value proposition is
+> unrealised in both directions simultaneously** — which is also why no amount of
+> lexical repair reaches the 14, and why the 2 it could theoretically catch are
+> precisely the ones that need catching least.
+>
+> *(Framing supplied by the `lunar-sorcery-sorcerer` session, after retracting the
+> "silently killed" reading above. The relocation is verified complete: `:341-345`
+> carries `restoreOn: "short"` and `effects: [{kind: "shortRestRestores", resource:
+> "Wild Shape"}]` on the level-12 tier.)*
 
 > **Count corrected 12 → 13 (2026-08-02, still reproducing at `380389fb`).**
 > Both earlier figures were derived by reading, and both missed the same row: the
@@ -5174,6 +5258,124 @@ repair marks it live:
 they know is inert — the Meteor Knight L13..16 row carries *"Not exercised by
 the current checkpoint list [3, 5, 11, 17, 20], but kept so the tier ladder is
 complete"* and is therefore invisible to the detector that exists to find it.
+
+**5. The SAME blinding also afflicts the denominator — and it is what produces
+every surviving >100% row.** `:683` counts entries with
+`/\{\s*level:\s*\d+\s*,/g`: whitespace only between the brace and the key, the
+identical shape as cause 2, on the opposite side of the fraction. Cause 2 hides
+inert rows *from the detector*; cause 5 hides documented rows *from the
+denominator*.
+
+Measured — the two 115% specs reproduce exactly, from source:
+
+```
+tgtt-meteor-knight-fighter   entryCount=13  real rows=15  blinded=2  effects=15  ->  115%
+tgtt-steel-hawk-fighter      entryCount=13  real rows=15  blinded=2  effects=15  ->  115%
+tgtt-tdcsr-juggernaut-barbarian  entryCount=21  real=22  blinded=1  effects=20  ->   95%
+```
+
+Both specs have 15 rows and 15 `effects:` blocks. **Coverage is genuinely 100%;
+the entire overshoot is the denominator losing 2 rows.** The four lost rows, and
+what precedes each:
+
+```
+meteor-knight :76   level: 13   <- "// PB 5 (levels 13-16). Not exercised by the current checkpoint list…"
+meteor-knight :140  level: 10   <- "// The middle damage tier: 1d6 from 10 until Satellite Barrage bumps it…"
+steel-hawk    :61   level: 3    <- "// Damage tier 1: 1d8 from 3 until Eagle Eye bumps it at 10."
+steel-hawk    :205  level: 10   <- "// Damage tier 2 plus the widened crit range, both released at 10…"
+```
+
+All four are among the **best-documented rows in their files**. The metric
+penalises exactly the rows an author took most care over.
+
+> **The script diagnosed this itself and fixed a different instance of it.**
+> `:676-682`, verbatim, six lines above the offending regex: *"The stricter
+> anchor missed 102 entries across 27 of 39 specs, all of them tiered rows, so
+> **the denominator shrank exactly where a spec was best written and every
+> coverage figure came out overstated.**"* The author hit the failure mode via
+> the `name:` anchor, repaired that instance, wrote down the general rule — and
+> left a second instance of the same rule live in the next line. That is the
+> **third** self-indicting comment in this file, after `:178-185` (laundering)
+> and `:721-727` (prose is not verification). *Found by the
+> `lunar-sorcery-sorcerer` session; the 115% reproduction is the measurement of
+> it.*
+
+**6. `helperCount` counts distinct helper *functions*, not rows — and omits the
+one helper that matters most.** `:705` is `new Set(helperUsage).size` over a
+fixed alternation of 16 names, so three calls to `buildWeaponMasteryChecks`
+contribute **1**. Worse:
+
+```
+grep -c 'buildCombatMethodChecks' scripts/auditE2eCoverage.mjs   ->  0
+grep -rn 'buildCombatMethodChecks' test/e2e/specs/*.ts | wc -l   ->  6   (across 2 specs)
+```
+
+**The helper that emits 14 of the 16 inert rows is not in the alternation at
+all**, so it contributes **0** to the numerator — not 1. Those rows are
+mis-counted on *both* sides of the fraction: invisible to `entryCount` because
+they are not literals, and invisible to `helperCount` because the function is
+unlisted.
+
+**Consequence for any repair.** Dropping `skipReasonCount` takes 11 rows over
+100% down to 3; anchoring the entry regex past comments takes those 3 to 0. The
+two together remove every impossible figure — **and the metric is still
+unsound**, because causes 1, 4 and 6 are untouched and the tell is now gone. A
+partial repair here is worse than none: it buys silence, not correctness.
+
+**7. On a PARTIAL tree it warns, silently substitutes the wrong model, and
+prints an authoritative table anyway.** The script resolves `ROOT` from its own
+file location, so cross-tree measurement (`git archive … | tar -x -C /tmp/…` —
+the standard workflow for reproducing another session's numbers) easily produces
+a tree with `test/e2e/specs/` present and `test/e2e/utils/characterSpecFactory.ts`
+absent. Measured, three configurations:
+
+| tree | behaviour |
+|---|---|
+| full repo | correct |
+| script alone, outside the repo | warns, then **crashes** (`ENOENT … scandir '/private/tmp/test/e2e/specs'`) |
+| **specs present, `characterSpecFactory.ts` absent** | **warns twice, prints the full table, prints a verdict — "13 spec(s) below threshold"** |
+
+```
+[audit] WARNING: could not read the checkpoint list … Falling back to [3, 5, 11, 17, 20].
+[audit]          Coverage below may be WRONG.
+  …full table, every row badged…
+  13 spec(s) below threshold.
+```
+
+The crash case is safe — loud, and it stops. The middle case is the dangerous
+one, and note **what** it falls back to: the hardcoded `[3, 5, 11, 17, 20]`,
+i.e. exactly the constant root cause 4 establishes is the wrong model for
+multiclass specs. A partial materialisation therefore substitutes a known-wrong
+checkpoint list and reports a verdict on it. Same family as a `✓ FULL` badge
+over 168% — every failure mode of this tool is *legible but non-blocking*.
+
+> **Corollary for reviewers, learned the expensive way this batch.** Running a
+> fetched copy of this script against your own working tree produces a **hybrid
+> corresponding to no tree that has ever existed** — trunk's instrument over
+> stale specs. The `shadow-sorcery-rhw` session got `14 rows / max 174%` that way
+> and was one message from filing it as a falsification of the true `11 / 168`.
+> To reproduce another session's tooling measurement, materialise their **whole**
+> tree, and read the warning line before the table.
+
+### The strongest evidence for the inversion is a natural experiment, not the synthetic one
+
+The `- skipReasonCount` deletion (11 rows → 3) is a *synthetic* demonstration:
+the instrument was edited to produce it. A cleaner one arrived by accident. The
+hybrid tree above differs from trunk largely by **merged skip-lifting work**, so
+the same unmodified script over the same rows shows coverage *falling* as skips
+are genuinely fixed:
+
+| spec | stale tree | trunk | skips |
+|---|---|---|---|
+| `tgtt-lust-cleric-lexalian` | **131% ✓ FULL** | **62% ⚠ LOW** | 26 → 8 |
+| `tgtt-child-of-sun-sorcerer-hochling` | 174% | 105% | 19 → 6 |
+| `tgtt-hunter-zodiac-centaur` | 102% | 85% | 32 → 23 |
+| `tgtt-surrealism-bard-yuanti` | 110% | 90% | 16 → 12 |
+
+Lust-cleric is demoted **FULL → LOW by a 69-point fall caused entirely by fixing
+18 real skips.** Nobody touched the instrument; the drop was produced by merged
+work, in the direction that punishes it. That is stronger than the deletion
+experiment precisely because it cannot be attributed to the edit.
 
 ### Why widening the window is the wrong fix
 
@@ -5600,3 +5802,64 @@ since narrowing means no group is produced). `_data.features` rows are
 unaffected, and display and mechanics read those, so this is believed benign —
 recorded because it will show up in save diffs and should not surprise the next
 reader.
+
+## CS-BUG-111 — the rest-restore probes have a silent-pass branch; measured reachable, exercised 24×, fired 0×
+
+**Status:** Open, latent. **Do not "fix" this without re-running the measurement
+below** — the branch is currently inert, and converting it to a throw changes
+behaviour for every `restoreOn` / `*RestRestores` row in the suite (59 + 113
+occurrences) in exchange for nothing presently observable.
+
+Flagged by the `cs-bug-016-spell-autofill-sweep` session and explicitly handed
+off unfixed. Measured here before recording, because "reported not fixed" with
+no measurement invites a harmful repair.
+
+**The shape.** Two sites spend one charge, then bail silently if the spend
+appears not to have happened:
+
+```
+comprehensiveBuildHelpers.ts:1563   if (afterSpend.current >= before.current) return;   // soft skip
+comprehensiveBuildHelpers.ts:2424   if (afterSpend.current >= before)        { break; } // soft skip
+```
+
+A bare `return`/`break` — nothing logged, nothing counted. If the spend is a
+no-op the entire rest-restoration assertion is skipped and the test passes. The
+correct shape already exists **nineteen lines below the first site**:
+`:1582` is `if (!await charSheet.spendFeatureUse(e.feature)) throw …`.
+
+### Measurement — a positive control, not an absence of failures
+
+Instrumented both branches to throw, ran four resource-dense specs: **0 throws,
+24 passed / 8 skipped — byte-identical to the un-instrumented run.**
+
+That result was *ambiguous and nearly recorded as a clean negative.* Re-ran with
+a log line at branch entry instead of a throw: **zero `REACHED` lines.** The
+lines had never executed. These rows live in `FeatureCheck` matrices evaluated
+by `assertFeaturesMatrix`, which is gated at `characterSpecFactory.ts:389`
+behind `RUN_MATRIX` — one of the tests that had been *skipped*. The instrument
+had been aimed at a path the run could not reach.
+
+With the gate on (`RUN_MATRIX=1`, `tgtt-battle-master-fighter`):
+
+```
+REACHED-1563 Second Wind     2->1, 3->2, 4->3, 5->4   fires=false   (7×)
+REACHED-1563 Action Surge    1->0                     fires=false   (3×)
+REACHED-1563 Superiority Dice 4->3                    fires=false   (2×)
+REACHED-2424  … identical distribution                fires=false  (12×)
+                                                       7 passed (11.2m)
+```
+
+**Reachable, exercised 24 times, fired 0 times** — every spend decremented. So
+the soft spot is a real latent hazard and is masking nothing measured today.
+
+> **The methodological point is the more valuable half.** The first run's
+> "0 throws / 24 passed" looked exactly like a clean negative and was in fact a
+> non-execution. An instrument that never runs reports the same thing as an
+> instrument that runs and finds nothing. **A falsification instrument needs a
+> positive control proving it executed** — same family as `?.` on the object
+> under test (CS-BUG-110), `--strict` exit codes, and `getFeatures()` under
+> Jest, and the reason a "soft skip" must log rather than return bare.
+
+**If this is ever repaired**, the repair is to *log and count* the soft skip so
+it is visible in the run, not to throw — and the fix must be re-measured with
+`RUN_MATRIX=1`, since without it the affected lines do not execute at all.
