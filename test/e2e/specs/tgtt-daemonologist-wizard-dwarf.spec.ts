@@ -18,12 +18,37 @@ const DAEMONOLOGIST_FEATURES: FeatureCheck[] = [
 		{kind: "rollSavingThrow", ability: "wis"},
 	]},
 	// Ritual Adept lets a Wizard ritual-cast straight from the spellbook without
-	// preparing. The factory has no ritual-cast probe, but the mode itself is a
-	// real mechanical value and distinguishes Wizard ("spellbook") from the
-	// "prepared" / "known" casters — so it is asserted rather than deferred.
-	// CS-BUG-093: `hasRitualAdept` is WRITE-ONLY (one ref in js/ — its own
-	// assignment), so that clause proves the calc ran, not that anything
-	// depends on it. `ritualCastingMode` (5 refs) is the load-bearing one.
+	// preparing. ALL THREE keys below are WRITE-ONLY as far as the UI is
+	// concerned (CS-BUG-093), so this row proves the calcs ran and nothing more:
+	//   hasRitualCasting   6 refs = 5 writes + 1 read (state.js:15074)
+	//   ritualCastingMode  5 refs = 5 writes, 0 reads
+	//   hasRitualAdept     1 ref  = 1 write,  0 reads
+	// The single `hasRitualCasting` read is itself unreachable from the UI: it
+	// sits inside `getAvailableRitualSpells` (state.js:15072), which has zero
+	// callers in js/ — only Jest tests.
+	//
+	// An earlier version of this comment called `ritualCastingMode` "the
+	// load-bearing one (5 refs)". That was wrong, and wrong in the exact way the
+	// CS-BUG-093 detector exists to catch: all 5 refs are `calculations.x = …`
+	// ASSIGNMENTS. A reference count is not a read count.
+	//
+	// The real reader is `canCastAsRitual` (state.js:15033), which has 4 UI
+	// callers in charactersheet-spells.js (:2226, :2512, :3115, :7619) and
+	// implements the whole prepared-vs-spellbook distinction itself.
+	//
+	// NOT repinned to `getAvailableRitualSpells()` — besides having no UI
+	// caller, its count is CHOICE-DEPENDENT, so no fixed assertion survives the
+	// matrix re-evaluating this row at every later checkpoint. Measured on
+	// spawned builds: wizard L1 → 1 ritual (Find Familiar), same build at L3 → 0.
+	// A `min: 1` here would go red at the level-3 checkpoint. Pinning this needs
+	// a spec that fixes a known ritual in the spellbook first, then asserts
+	// `canCastAsRitual` on it while UNPREPARED — that is the behaviour Ritual
+	// Adept actually changes. Deferred rather than guessed.
+	{level: 1, name: /ritual adept/i, kind: "passive", effects: [
+		{kind: "featureCalculation", property: "hasRitualCasting", exact: true},
+		{kind: "featureCalculation", property: "ritualCastingMode", exact: "spellbook"},
+		{kind: "featureCalculation", property: "hasRitualAdept", exact: true},
+	]},
 	{level: 1, name: /ritual adept/i, kind: "passive", effects: [
 		{kind: "featureCalculation", property: "hasRitualCasting", exact: true},
 		{kind: "featureCalculation", property: "ritualCastingMode", exact: "spellbook"},
