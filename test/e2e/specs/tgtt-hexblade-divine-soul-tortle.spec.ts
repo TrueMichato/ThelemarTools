@@ -198,13 +198,13 @@ const HEX_DIVINE_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 	// kind with `none` to validate button presence + activation only.
 	// No togglePlusSpeed probe — the sheet's snapshot only captures
 	// walk speed and Wings grants a fly speed instead.
-	// PRODUCT GAP — CS-BUG-104. Otherworldly Wings is "use a bonus action
+	// PRODUCT GAP — CS-BUG-106. Otherworldly Wings is "use a bonus action
 	// to manifest ... you have a flying speed of 30 feet ... dismiss them
 	// as a bonus action" (Divine Soul 14, XGE) — textbook activatable — but
 	// the sheet renders it with no toggle button at all. Other fly-speed
 	// grants ARE curated active states, so this one is simply missing.
 	// Asserted as `passive` so its PRESENCE stays pinned; flip back to
-	// `toggle` when CS-BUG-104 is fixed.
+	// `toggle` when CS-BUG-106 is fixed.
 	{level: 16, name: /otherworldly wings/i, kind: "passive"},
 	// L20 = Sorc 18: Unearthly Recovery (passive — once per long rest
 	// regain HP at half). State doesn't expose an "Unearthly Recovery

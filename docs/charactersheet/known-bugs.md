@@ -171,9 +171,17 @@ Two authoring rules came out of it, both preset-safety issues:
 
 ## Open
 
-### CS-BUG-104 — Otherworldly Wings renders with no toggle, so its fly speed can never be turned on
+### CS-BUG-106 — Otherworldly Wings renders with no toggle, so its fly speed can never be turned on
 
 **Status**: Open (not fixed here — found during the CS-BUG-016 sweep).
+
+**Note on the id**: filed as CS-BUG-104 and renumbered to 106 on merge. The
+reserved block 103–107 was handed to this session, but 103 and 104 had already
+been claimed on `character-sheet-wip` by two other sessions (the Features-tab
+"Use" bug and the `Blessed Strikes` materialisation bug). Numbers are allocated
+out-of-band, so a reservation is a claim, not a lock — check
+`grep -oE '^#+ CS-BUG-[0-9]+' docs/charactersheet/known-bugs.md` against the
+**merged** base before writing an id into a spec.
 
 **Surfaced by**: `test/e2e/specs/tgtt-hexblade-divine-soul-tortle.spec.ts`,
 matrix row `{level: 16, name: /otherworldly wings/i, kind: "toggle"}`, which
@@ -211,10 +219,13 @@ fly-speed states. Then flip the spec row back from `kind: "passive"` to
 
 ---
 
-### CS-BUG-103 — Class-level always-prepared spells never reach a character built in the wizard
+### CS-BUG-105 — Class-level always-prepared spells never reach a character built in the wizard
 
 **Status**: Open. Product bug, **not fixed here** — surfaced by a harness
 sweep (CS-BUG-016) and filed rather than patched.
+
+**Note on the id**: filed as CS-BUG-103 and renumbered to 105 on merge — 103
+was already claimed on `character-sheet-wip`. See the note under CS-BUG-106.
 
 **Symptom**: A character created through the builder wizard never receives
 the always-prepared spells declared on the base CLASS object's

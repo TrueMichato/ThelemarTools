@@ -100,7 +100,7 @@ describeCharacter({
 		// mechanic isn't surfaced as a discrete resource pool.
 		//
 		// Un-skipped from CS-BUG-016 (the spell-picker driver could not
-		// pick anything), then RE-skipped under CS-BUG-103, which is the
+		// pick anything), then RE-skipped under CS-BUG-105, which is the
 		// real blocker: the base CLASS object's `additionalSpells` grant
 		// (`prepared {"2": ["divine smite|xphb"]}`) never reaches a
 		// character built in the wizard, because `setClassCatalog()` is
@@ -112,7 +112,7 @@ describeCharacter({
 			name: /paladin'?s? smite|divine smite/i,
 			kind: "passive",
 			effects: [
-				{kind: "spellInList", spell: "Divine Smite", skip: true, skipReason: "CS-BUG-103"},
+				{kind: "spellInList", spell: "Divine Smite", skip: true, skipReason: "CS-BUG-105"},
 			],
 		},
 		// ── L3: Channel Divinity + Oath of Bastion ──────────────────────
