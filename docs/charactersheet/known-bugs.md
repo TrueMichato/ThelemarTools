@@ -5096,3 +5096,46 @@ other assertions are not comparing `null` to `null`) and the no-bonus baseline
 second break leaves the Gambler bonus-stacking row green because that row
 measures a *delta*, which the override does not change; the row it does move is
 the one that pins the substitution itself.
+
+### The two traps in the obvious repair
+
+A reviewing session, reading only the *plan* ("route `:3906` through the shared
+chokepoint"), independently derived two ways that instruction ships green while
+being wrong. Both are avoided in the landed fix, but the plan as worded does not
+say so, and the literal reading of it produces both. Recorded here because the
+next person to touch this line will read the sentence, not the diff.
+
+**Trap 1 — exhaustion subtracted twice.** `exhaustionDcPenalty` exists on *both*
+sides. `getSpellSaveDcForAbility` already subtracts it
+(`charactersheet-state.js:13172` / `:13180`), and the cast site still reads it
+locally. A route-through that keeps the local term *in the value* penalises an
+exhausted caster twice. Only a **Thelemar-rules** exhausted caster can reach it,
+so it fails no other configuration. The landed fix keeps the local variable for
+the *breakdown string only* and derives the residual by subtraction
+(`dcOtherBonuses`), so the value passes through the chokepoint exactly once.
+
+**Trap 2 — Gambler spellcasting flattened.** `charactersheet-spells.js:3861`
+assigns `spellcastingMod = rollTotal` — a fresh die rolled per cast. A bare
+`getSpellSaveDcForAbility(ability)` call uses `getAbilityMod(ability)` and would
+replace the rolled modifier with a static one. That is not a rounding error; it
+deletes the feature's whole mechanic on the only path that implements it. This
+is why `opts.abilityModOverride` exists, and why it overrides **the ability mod
+alone** rather than the DC.
+
+Amended plan wording, for anyone re-deriving this: *add the shared **bonus**
+terms at the cast site by routing the value through the chokepoint, passing the
+rolled modifier in as an override, and leave the local exhaustion variable to the
+breakdown string.*
+
+Trap 1 was correct in the landed code but **unpinned** — the pin had a Gambler
+block and no exhaustion case. Three rows added, and the trap broken in place to
+prove they bite:
+
+| break | predicted | measured |
+|---|---|---|
+| `getSpellSaveDcForAbility(...) - exhaustionDcPenalty` at the cast site | 2 red | **2 red** — `Expected: 12 / Received: 9` and `Expected: 16 / Received: 14` |
+
+The `PREMISE` row (exhaustion actually moves the canonical DC under Thelemar
+rules) stays green by design: it reads the accessor, not the cast output, so it
+proves the fixture reaches the penalty at all rather than comparing an unchanged
+number to itself.
