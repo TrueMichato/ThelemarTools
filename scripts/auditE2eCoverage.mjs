@@ -123,18 +123,44 @@ function warn (...args) { console.warn(...args); }
  * The MEGA matrix only evaluates the features matrix at a fixed set of
  * levels. Read them out of the factory rather than hard-coding, so this
  * audit cannot silently drift if the checkpoint list changes.
+ *
+ * Every fallback path here is LOUD. The regex only matches a literal digit
+ * array, so any refactor that makes the list a variable, a constant import
+ * or a computed expression stops matching — and a silent fallback would then
+ * audit against a stale list while reporting success, which is precisely the
+ * drift this function exists to prevent. The factory also declares the list
+ * more than once; if the copies ever disagree, taking the first match would
+ * audit against an arbitrary one, so that is reported too.
  */
 function readCheckpoints () {
 	const FALLBACK = [3, 5, 11, 17, 20];
-	try {
-		const src = fs.readFileSync(FACTORY_PATH, "utf8");
-		const m = src.match(/const\s+checkpoints\s*=\s*\[([\d,\s]+)\]/);
-		if (!m) return FALLBACK;
-		const parsed = m[1].split(",").map(s => Number(s.trim())).filter(Number.isFinite);
-		return parsed.length ? parsed : FALLBACK;
-	} catch {
+	const bail = (why) => {
+		warn(`[audit] WARNING: could not read the checkpoint list from ${path.relative(ROOT, FACTORY_PATH)} — ${why}.`);
+		warn(`[audit]          Falling back to [${FALLBACK.join(", ")}]. Coverage below may be WRONG.`);
+		if (STRICT) {
+			warn("[audit]          --strict is set; treating an unreadable checkpoint list as a failure.");
+			process.exitCode = 1;
+		}
 		return FALLBACK;
+	};
+
+	let src;
+	try {
+		src = fs.readFileSync(FACTORY_PATH, "utf8");
+	} catch (e) {
+		return bail(`unreadable (${e.message})`);
 	}
+
+	const found = [...src.matchAll(/const\s+checkpoints\s*=\s*\[([\d,\s]+)\]/g)]
+		.map(m => m[1].split(",").map(s => Number(s.trim())).filter(Number.isFinite))
+		.filter(nums => nums.length);
+
+	if (!found.length) return bail("no `const checkpoints = [<digits>]` declaration matched");
+
+	const distinct = [...new Set(found.map(nums => nums.join(",")))];
+	if (distinct.length > 1) return bail(`the factory declares disagreeing checkpoint lists (${distinct.map(d => `[${d}]`).join(" vs ")})`);
+
+	return found[0];
 }
 
 const CHECKPOINTS = readCheckpoints();

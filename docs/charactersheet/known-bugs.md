@@ -464,7 +464,35 @@ finding in CS-BUG-092: **a break that yields no reds usually means the tests sto
 short of the logic, not that the logic is dead.**
 
 **Pinned by**: `test/jest/charactersheet/CharacterSheetSpellSwapCandidates.test.js`
-(19 tests).
+(19 tests) — the **predicate**; and
+`test/jest/charactersheet/CharacterSheetSpellSwapRender.test.js` (3 tests) —
+the **call site**.
+
+**Why two pins.** The candidates file re-derives the filter locally
+(`spells.filter(s => ClassUtils.isSwappableKnownSpell(s))`) and asserts its
+coupling to `_renderSpellSwapSection` only in a comment. Measured: restoring the
+original `!s.sourceFeature` **at the call site** — i.e. reintroducing this exact
+bug — leaves all **19 green**, because the predicate it tests is still correct.
+The render pin drives the production method and reads what it wrote, so the same
+break fails **2 of 3** with the user-visible string:
+
+```
+Expected substring: not "No swappable spells known."
+Received string:        "<p class=\"ve-muted ve-small\">No swappable spells known.</p>"
+```
+
+Breaking the predicate instead also reds it (2 of 3), so the two pins overlap on
+the helper and only the render pin covers the wiring. Same shape as CS-BUG-102,
+where the state API was fixed and the renderer kept its own copy: **a helper
+extracted to fix a call-site bug leaves the call site itself unpinned unless
+something drives it.**
+
+**Note on E2E**: no Playwright spec exercises the swap accordion — a grep for
+`charsheet__levelup-spell-swap` / `charsheet__spell-swap-btn` across
+`test/e2e/**` returns nothing. That absence is why a dead core allowance
+survived: the feature renders its own empty state, so there is no error, no log
+and nothing red. The render pin above is a Jest-level substitute, not a
+replacement for a real level-up UI probe.
 
 ### CS-BUG-103 — Features-tab "Use" silently burned a limited use for any state-gated feature
 
@@ -4283,6 +4311,28 @@ accessor. Restored, it is green (27/27). The eight Spellfire methods carry their
 own seven in-place chokepoint falsifications (signatures kept: 3/2/1/1/1/1/1
 red).
 
+### Correction to the record: commit `f03737f7`'s message is wrong
+
+An earlier attempt at this fix (`f03737f7`, superseded by `fae134bb`) changed the
+fixture only — **1 line, 0 assertions** — and kept `resource == null`. Its commit
+message reports that a fixture carrying the published *"until you finish a Long
+Rest"* clause **"independently created a 1/long-rest uses pool and failed the row
+assertion with the fix in place — a fixture artefact that mimics a product
+regression."**
+
+**That characterisation is backwards, and the message is in pushed history where
+`git log -- <this file>` will surface it as guidance.** The 1/Long-Rest pool is
+not an artefact: it is what the real published prose legitimately mints, and the
+failure it produced was the *correct* signal that `resource == null` was the
+wrong expectation. The response was to delete the true clause from the fixture so
+the wrong assertion stayed green — i.e. the data was bent to fit the assertion.
+
+> Generalised: when repairing a fixture makes an assertion go red, the first
+> hypothesis must be **"the assertion was always wrong"**, not "the fixture is
+> lying". A fixture that props up a wrong expectation *survives* fixture repair
+> by presenting the repair as a regression, which is strictly more dangerous than
+> one that merely keeps a pin inert.
+
 ---
 
 ## CS-BUG-104 — a *resolved* `Blessed Strikes` choice still materialises both options, so `_data.chosenSubfeatures` and `_data.features` disagree — and a TGTT domain turns that into a visible duplicate
@@ -4853,3 +4903,119 @@ The editable sources are `scripts/_genTgttPools.helpers.ts` (`buildCatalogChecks
 (`ZODIAC_FORM_EFFECTS`). Regenerate with `node scripts/genTgttPools.mjs` and
 confirm the diff is otherwise empty — a stale pool is itself a known source of
 false reds.
+
+---
+
+## CS-BUG-109 — the spell **cast output** still hand-rolls its own save DC, so item, custom and active-state DC bonuses vanish at the moment you cast
+
+**Status:** **Fixed** — routed through the shared chokepoint and pinned on the
+printed reading. Player-visible, and broader than the two DC bugs already fixed.
+
+**Relationship to CS-BUG-099 / CS-BUG-102.** Those fixed two of *three* sites.
+099 fixed the state API (`charactersheet-state.js:13160 / :13199 / :13219`,
+each now adding `getBonusFromStates?.("spellDc")`). 102 fixed the Spells-tab
+card (`_buildSpellClassCard()`, `charactersheet-spells.js:7826 / :7829`).
+CS-BUG-102's own entry says the fix covered *"the tab a player actually casts
+from"* — but the **cast output itself** is a third, separate computation that
+neither fix reached.
+
+**Root cause.** `charactersheet-spells.js:3906`, inside the cast flow:
+
+```js
+let saveDC = 8 + spellcastingMod + profBonus - exhaustionDcPenalty;
+```
+
+with (`:3847`, `:3856`) `profBonus = this._state.getProficiencyBonus()` and
+`spellcastingMod = this._state.getAbilityMod(castingAbility)` — both raw. Only
+the variant-component modifier is added afterwards (`:3911`). It never consults
+`customModifiers.spellDc`, `itemBonuses.spellSaveDc`, or
+`getBonusFromStates("spellDc")`.
+
+The value is then printed to the player and recorded for the roll log:
+
+```js
+attackInfo += `<br>Save DC: <strong>${saveDC}</strong> …`;   // :3922
+_rollMeta.dc = {total: saveDC, breakdown: `8 + ${spellcastingMod} + ${profBonus}…`};  // :3925
+```
+
+**Measured**, Sorcerer 5, CHA 18, `customModifiers.spellDc = 2`,
+`itemBonuses.spellSaveDc = 1`, **no active state at all**:
+
+| reading | value |
+|---|---|
+| `getSpellSaveDC("cha")` (state API, post-099) | **18** |
+| Spells-tab card (post-102) | **18** |
+| cast output / roll log (`:3906`) | **15** |
+
+A 3-point disagreement from item + custom bonuses alone; an active-state buff
+widens it further. So the card says 18, and clicking **Cast** on that same card
+prints "Save DC: **15**" — the number the table actually plays with.
+
+**Why this is wider than 102.** 102 was surfaced by an active-state toggle, so
+its framing is buff-centric. This site drops **item** bonuses too, which means
+plain published magic items are affected with no homebrew involved — Rod of the
+Pact Keeper, Robe of the Archmagi, and anything else writing
+`itemBonuses.spellSaveDc`.
+
+**Suggested fix.** Do not add three more terms at `:3906` — that would be a
+*fourth* hand-rolled formula. Route it through the same state chokepoint the
+other two now use (`getSpellSaveDcForAbility()` / `getSpellSaveDC()`), then add
+the variant-component modifier on top, and update the `_rollMeta.dc.breakdown`
+string so the printed derivation matches the printed total.
+
+**Note for whoever fixes it:** pin the **printed / roll-log reading**, not the
+formula. The first CS-BUG-102 pin asserted `8 + mod + prof + stateBonus` by
+hand and stayed green with the production fix neutralised (0 of 13,276 red) —
+the "correct calculation that nothing reads" shape. `CharacterSheetSpellsTabDc.test.js`
+shows the working pattern: stub the DOM **before** a dynamic `import()`, because
+`charactersheet-spells.js:11` destructures `e_`/`ee` at module load.
+
+### Fix as landed
+
+`_handleSpellEffects()` no longer builds a save DC. It calls
+`getSpellSaveDcForAbility(castingAbility, …)` — the same accessor the state API
+and the Spells-tab card use — and then applies only the variant-component
+modifier on top. The `castingAbility` derivation that already existed inside the
+non-Gambler branch was hoisted so both branches can name it.
+
+**Why the accessor needed a parameter.** Gambler spellcasting rolls a die *in
+place of* the ability modifier, so the cast site genuinely cannot call the
+no-argument accessor. Rather than let that justify a rival formula,
+`getSpellSaveDcForAbility(ability, {abilityModOverride})` now substitutes **the
+ability modifier alone**; proficiency, custom, item, active-state and exhaustion
+terms are untouched. Before this fix a Gambler cast dropped those bonuses too.
+
+**The breakdown string is derived by subtraction**, not re-summed:
+
+```js
+const dcOtherBonuses = saveDC - (8 + spellcastingMod + profBonus - exhaustionDcPenalty);
+```
+
+so a term added to the chokepoint in future appears in the printed derivation
+without this call site being taught about it. Re-listing the bonuses by hand
+here would have been the same fourth formula in display clothing.
+
+### Falsification
+
+Pin: `test/jest/charactersheet/CharacterSheetCastSaveDc.test.js` (8 tests). It
+drives the real `_handleSpellEffects()` and reads back the two surfaces the
+player sees — the `Save DC: <strong>N</strong>` in the cast toast and the
+`Spell Save DC:` roll-history entry. It never recomputes the formula.
+
+Both new code paths were broken in place, signatures intact, with the red count
+predicted before it was measured:
+
+| break | predicted | measured |
+|---|---|---|
+| `saveDC` back to `8 + spellcastingMod + profBonus - exhaustionDcPenalty` | 4 red | **4 red** — `Expected: 18 / Received: 15`, the reported case verbatim |
+| `abilityModOverride` ignored (`const abilityMod = this.getAbilityMod(ability)`) | 1 red | **1 red** — `Expected: 12 / Received: 15` |
+
+No `TypeError`/`ReferenceError` in either; every red is a wrong-value assertion.
+
+Two rows stay green under the first break **by design** and are labelled as
+controls: the `PREMISE` row (proves the save-DC branch is reached at all, so the
+other assertions are not comparing `null` to `null`) and the no-bonus baseline
+(correct in both directions — it is the case the old formula got right). The
+second break leaves the Gambler bonus-stacking row green because that row
+measures a *delta*, which the override does not change; the row it does move is
+the one that pins the substitution itself.
