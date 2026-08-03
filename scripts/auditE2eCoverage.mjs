@@ -71,22 +71,36 @@
 //      briefly thought to be undetectable-by-machine. It is not: the
 //      pairing is a purely static fact about the probe literal.
 //
-//   4. UNMATCHABLE RESOURCE NAMES — a `kind: "resource"` row whose `name`
-//      is a RegExp containing metacharacters, with no `resourceName`
-//      override. The matrix resolves the pool with `fc.name.source`, and
-//      `getResource()` filters on Playwright's `hasText: <string>` — a
-//      LITERAL substring match. So `/^channel divinity$/i` looks for a
-//      resource called "^channel divinity$" and always misses. Cannot PASS.
+//   4. UNMATCHABLE RESOURCE NAMES — ⚠️ THIS DETECTOR HAS INVERTED. Read the
+//      full block above `findUnmatchableResourceRows` (~:527) before acting
+//      on anything it reports.
 //
-//      This one is mostly LATENT, which is what makes it the sharpest of
-//      the family: all six instances found suite-wide sit under a
-//      `skip: true` citing an UNRELATED product bug. They cost nothing
-//      today and detonate the moment someone lifts that skip — then
-//      present as "the product bug I just un-skipped is still broken",
-//      sending the next author to debug the product instead of the
-//      harness. So: a skipped assertion is not inert, it is ARMED. It
-//      freezes its own claim about the product AND any latent defect in
-//      the probe itself, and both stay invisible because the suite is green.
+//      ORIGINAL rationale, true only until `b018a512`: a `kind: "resource"`
+//      row whose `name` is a RegExp containing metacharacters, with no
+//      `resourceName` override, was flattened to `fc.name.source` and fed to
+//      `getResource()`, which filters on Playwright's `hasText: <string>` — a
+//      LITERAL substring match. So `/^channel divinity$/i` looked for a
+//      resource called "^channel divinity$" and could never pass.
+//
+//      `b018a512` removed that flattening. The resolver now TESTS the RegExp
+//      against live pool names and throws only on 0 matches or genuine
+//      ambiguity, so an anchored pattern resolves correctly today and needs
+//      NO pin. The detector now defends the old regime: the first author to
+//      write a correct, unpinned `/^channel divinity$/i` gets flagged and
+//      sent to add a pin the resolver does not want.
+//
+//      It is also the ONLY one of the eight known audit defects that can
+//      produce a FALSE POSITIVE — the other seven all fail silent. That
+//      makes it simultaneously the most likely to be acted on and the least
+//      likely to be true, which is why it carries a warning rather than a
+//      row count. Its current zero is an artefact: every fatal-metacharacter
+//      row was pre-emptively pinned under the removed regime, which is
+//      exactly the condition the loop skips.
+//
+//      (The "a skipped assertion is not inert, it is ARMED" generalisation
+//      formerly stated here is retained at `docs/charactersheet/known-bugs.md`
+//      ~:3971. It is true and independent, but it was attached to a LATENCY
+//      claim about this detector that measurement has since refuted.)
 //
 //      Fix by adding `resourceName: "<exact name>"`. Never widen the
 //      regex — it is the correct FEATURE matcher (`/^channel divinity$/i`
