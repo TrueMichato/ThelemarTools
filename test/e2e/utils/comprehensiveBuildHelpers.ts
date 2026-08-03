@@ -2390,9 +2390,36 @@ export async function assertFeaturesMatrix (
 					// `kind: "passive"` row.
 					//
 					// This note deliberately does NOT make `name` load-bearing
-					// here: ~14 pinned rows have never had their `name`
-					// evaluated, so enforcing it is a broad unmeasured change,
-					// not a comment-sized one.
+					// here. But the "broad unmeasured change" that phrase
+					// implied is now MEASURED — censused 2026-08-03 over
+					// `test/e2e/specs/*.ts`, predicate "a row of
+					// `kind: "resource"` carrying BOTH `name` and
+					// `resourceName`", i.e. exactly the rows whose `name` this
+					// branch ignores:
+					//
+					//   13 rows / 6 distinct names
+					//     /satellite mastery/i    x5  meteor-knight
+					//     /^launch$/i             x4  steel-hawk
+					//     /improved launch/i      x1  steel-hawk
+					//     "Bardic Inspiration"    x1  surrealism-bard
+					//     /^psychic boost$/i      x1  talent-chronopath (fixed)
+					//     /^channel divinity$/i   x1  time-domain-cleric
+					//
+					// All six name a feature that really exists — Satellite
+					// Mastery (`charactersheet-state.js:19760`), Improved
+					// Launch (`charactersheet-combat.js:11321`), Launch
+					// (`charactersheet-state.js:54023`), Psychic Boost
+					// (`:34038-34041`), and the two SRD ones. The ONLY false
+					// name in the population was the parenthetical-count shape
+					// corrected above, and no other row carries that shape.
+					//
+					// ⚠️ Read the bound precisely: "names a real feature in the
+					// product" is NOT "would pass if `name` were enforced here".
+					// Enforcement would require the name to be in `allFeatures`
+					// AT THAT CHECKPOINT, which is unmeasured and is a per-leg
+					// question. The census bounds the blast radius to 13 rows
+					// and rules out a second impossible name; it does not
+					// license flipping the switch.
 					//
 					// A RegExp `name` used to be flattened with `.source` and
 					// handed to a literal substring matcher, so a row written
