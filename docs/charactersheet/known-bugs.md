@@ -6371,3 +6371,44 @@ this bug — it silently was not for any prefix collision.
 > rendering must be dropped or reworded. The prose is the durable artefact; a
 > comment recording a shipped bug as intended behaviour outlives the pin that
 > motivated it.
+
+> **The pins and comments were removed** in the same tree as this note; all three
+> specs re-verified individually with `RUN_MATRIX=1` → 7 passed / 1 skipped each.
+
+### What the fix uncovered: `resourceMax: [1, 2, 3]` (harness, fixed)
+
+Worth recording because it explains why these specs were **green before** the
+duplicate was found, and it is the same defect class as the bug itself.
+
+`tgtt-meteor-knight-fighter.spec.ts` carried
+`{level: 9, name: /indomitable/i, kind: "resource", resourceMax: [1, 2, 3]}`
+with the comment "1 use at 9, 2 at 13, 3 at 17". But `resourceMax` is
+`number | [number, number]` — an inclusive **range**, not a per-level ladder.
+The resolver destructures `const [lo, hi] = fc.resourceMax`, so the `3` was
+**silently discarded** and the row asserted the range `[1,2]`. Playwright
+transpiles specs without typechecking, so the tuple type never caught it.
+
+It never fired because CS-BUG-112 threw first: the `/indomitable/i` ambiguity
+detonated at the L11 checkpoint, and `assertFeaturesMatrix` throws on the first
+failing checkpoint, so **L17 and L20 never executed**. Fixing the product let
+the matrix reach L17, where the real `max=3` failed the phantom range `[1,2]`.
+A bug masking a bug, with the outer one making the inner one unreachable.
+
+Two repairs, both in the same tree:
+
+1. The row is now an explicit ladder using `untilLevel` (the mechanism that
+   field's own doc-comment prescribes for exactly this case). The matrix
+   checkpoint set is `[3, 5, 11, 17, 20]`, so the L13–16 rung executes at no
+   checkpoint today; it is stated anyway, with a comment saying so, rather than
+   omitted or quietly folded into a looser range.
+2. `assertFeaturesMatrix` now **throws** when an array `resourceMax` does not
+   have exactly 2 elements, naming the pool and pointing at `untilLevel`. The
+   positive control is retrospective but real: the branch is proven reachable
+   with a 3-element array by the very failure this fixes, whose message
+   (`outside expected range [1,2]`) could only have been produced by
+   `[lo, hi]`-destructuring a 3-element array.
+
+A sweep of every `resourceMax:` array literal in `test/e2e/specs/` found this
+was the **only** malformed one; the two sibling Fighter specs use the correct
+but looser `resourceMax: [1, 3]`, which is left alone — it is not wrong, merely
+weaker, and narrowing it was not measured here.

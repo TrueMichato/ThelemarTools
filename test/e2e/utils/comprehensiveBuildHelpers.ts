@@ -2419,6 +2419,17 @@ export async function assertFeaturesMatrix (
 					if (r.max < 0) throw new Error(`resource "${nameStr}" not found on sheet; pools present: [${(await charSheet.getResourceNames()).join(", ")}]`);
 					if (fc.resourceMax != null) {
 						if (Array.isArray(fc.resourceMax)) {
+							// `resourceMax` is `[lo, hi]` — an inclusive RANGE, not a
+							// per-level ladder. Destructuring silently discards any
+							// third element, so `[1, 2, 3]` (written meaning "1 at L9,
+							// 2 at L13, 3 at L17") reads as the range [1,2] and rejects
+							// the correct L17 value. Playwright transpiles without
+							// typechecking, so the `[number, number]` tuple type does
+							// not catch it — this must be a runtime error. Use
+							// `untilLevel` to express a ladder.
+							if (fc.resourceMax.length !== 2) {
+								throw new Error(`resourceMax for "${nameStr}" has ${fc.resourceMax.length} elements; it is an inclusive [lo, hi] RANGE and must have exactly 2. For a per-level ladder, write one entry per tier with \`untilLevel\`.`);
+							}
 							const [lo, hi] = fc.resourceMax;
 							if (r.max < lo || r.max > hi) {
 								throw new Error(`resource max=${r.max} outside expected range [${lo},${hi}]`);

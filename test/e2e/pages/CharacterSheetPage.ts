@@ -468,11 +468,12 @@ export class CharacterSheetPage {
 	 * Choose which of several `hasText`-matched rows to read.
 	 *
 	 * Every resource surface filters with a SUBSTRING `hasText`, so a
-	 * requested name that is a PREFIX of another pool's name matches both:
-	 * "Indomitable" also selects "Indomitable (two uses)" (see CS-BUG-112).
-	 * `.first()` then resolves by DOM order — a coin flip that reports
-	 * success either way, and the reason `resourceName: "<exact name>"` is
-	 * not actually a pin against a prefix collision.
+	 * requested name that is a PREFIX of another pool's name matches both.
+	 * That is a property of the readers, not of any particular data: when
+	 * CS-BUG-112 was live, "Indomitable" also selected "Indomitable (two
+	 * uses)". `.first()` then resolves by DOM order — a coin flip that
+	 * reports success either way, and the reason `resourceName: "<exact
+	 * name>"` is not actually a pin against a prefix collision.
 	 *
 	 * Prefer the candidate whose NAME NODE equals the request exactly; fall
 	 * back to index 0 when none does. Strictly narrowing: wherever one row
@@ -480,10 +481,10 @@ export class CharacterSheetPage {
 	 * unchanged.
 	 *
 	 * ⚠️ NO LIVE INSTANCE. The collision that motivated this (CS-BUG-112) is
-	 * fixed product-side, and the only remaining `(N uses)` family member,
-	 * `Action Surge (two uses)`, mints no pool of its own. So this guard has
-	 * never been observed firing, and a guard never observed firing is
-	 * indistinguishable from one that cannot fire — do NOT cite it as
+	 * fixed product-side in `0caa440d`, and the only other `(N uses)` family
+	 * member, `Action Surge (two uses)`, was measured rendering once. So this
+	 * guard has never been observed firing, and a guard never observed firing
+	 * is indistinguishable from one that cannot fire — do NOT cite it as
 	 * load-bearing. It is kept because the substring-`hasText` + `.first()`
 	 * shape regenerates the hazard for any future prefix collision, silently
 	 * and with a passing test. If you need it to be trustworthy, plant a
