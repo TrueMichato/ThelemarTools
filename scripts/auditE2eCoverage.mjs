@@ -527,22 +527,45 @@ function findVacuousSpellMatches (rawSrc) {
 /**
  * Detector 4 — resource rows whose pool lookup can never match.
  *
- * `assertFeaturesMatrix` resolves a `kind: "resource"` row's pool with
- * `fc.resourceName ?? (fc.name instanceof RegExp ? fc.name.source : fc.name)`,
- * and `CharacterSheetPage.getResource()` filters with Playwright's
- * `hasText: <string>` — a LITERAL, case-insensitive substring match. So a
- * RegExp `name` is handed to the lookup as its raw `.source`: `/^channel
- * divinity$/i` searches for a resource literally called "^channel divinity$".
- * No rendered resource contains regex metacharacters, so the lookup always
- * misses and line 2342 throws `resource not found on sheet`.
+ * ⚠️ THE MECHANISM THIS WAS BUILT FOR NO LONGER EXISTS. Do not repair a row
+ * from this detector without reading this block first.
  *
- * This is the cannot-PASS half of the predetermined-outcome property, and it
- * is mostly LATENT: every instance found so far sits under a `skip: true`
- * citing an unrelated product bug. It detonates when someone lifts that skip
- * — and then presents as "the product bug I just un-skipped is still broken",
- * sending the next author to debug the product instead of the harness.
- * The fix is never to widen the regex: add `resourceName: "<exact name>"`,
- * which keeps the regex as the FEATURE matcher and gives the pool its own key.
+ * ORIGINAL rationale (true until `b018a512`): `assertFeaturesMatrix` flattened
+ * a `kind: "resource"` row's pool name with
+ * `fc.resourceName ?? (fc.name instanceof RegExp ? fc.name.source : fc.name)`,
+ * and `getResource()` filters with Playwright's `hasText: <string>` — a
+ * LITERAL substring match. So `/^channel divinity$/i` searched for a resource
+ * literally called "^channel divinity$", always missed, and threw
+ * `resource not found on sheet`. The prescribed fix was to pin the pool with
+ * `resourceName: "<exact name>"`.
+ *
+ * WHAT CHANGED: `b018a512` removed the `.source` flattening. The resolver now
+ * TESTS the RegExp against the live pool names from `getResourceNames()`,
+ * groups the hits by a decoration-stripped key, and throws on 0 matches or on
+ * genuine ambiguity (>1 distinct pool) — see `comprehensiveBuildHelpers.ts`
+ * ~:2386-2417. An anchored or alternating pattern therefore resolves correctly
+ * today and needs NO pin.
+ *
+ * WHY IT STILL REPORTS ZERO, AND WHY THAT IS MISLEADING. Measured at
+ * `ea964480` using this file's own extractor: **0 rows flagged**, and **10**
+ * `kind: "resource"` rows carry FATAL metacharacters — `/^channel divinity$/`,
+ * `/^launch$/`, `/^bardic inspiration/`, `/psychic boost \(three uses\)/` —
+ * every one of them already pinned with `resourceName`, which is exactly the
+ * condition the loop below skips. So the zero is NOT evidence that nothing is
+ * wrong; it is an artefact of the entire population having been pre-emptively
+ * pinned under a regime that has since been removed.
+ *
+ * THE DETECTOR HAS THEREFORE INVERTED. The first author to write a correct,
+ * unpinned `/^channel divinity$/i` will be flagged as "can never match" and
+ * sent to add a pin that the resolver does not need. It now defends the old
+ * workaround rather than catching a defect.
+ *
+ * WHAT THIS CORRECTION DELIBERATELY DOES NOT DO: it does not retire, re-scope
+ * or change the behaviour of this detector, and it does not remove the 10
+ * now-unnecessary pins. Both are part of the pending audit redesign, which is
+ * awaiting a decision; doing either here would be an unmeasured change landed
+ * at batch close. This block only stops the stale rationale from prescribing a
+ * wrong repair in the meantime.
  */
 function findUnmatchableResourceNames (rawSrc) {
 	const src = blankComments(rawSrc);
