@@ -5878,13 +5878,30 @@ class CharacterSheetState {
 	 * first and skips the synthetic one by name), so e.g. Indomitable surfaces 2 uses at
 	 * L9 instead of the correct 1. Single source of truth for the name set, consumed by
 	 * the load migration AND the addFeature creation guard.
+	 *
+	 * (CS-BUG-112) The name is CANONICALISED before matching, because the classic-PHB
+	 * Fighter models each use-count upgrade as a SEPARATE feature carrying an `(N uses)`
+	 * suffix — `Indomitable (two uses)` at L13 and `Indomitable (three uses)` at L17
+	 * (`data/class/class-fighter.json`). Those are riders on an already-owned base pool,
+	 * exactly like the `<X> Improvement` shape handled by
+	 * {@link isRedundantImprovementFeature}, so they must resolve to the same canonical
+	 * pool. The XPHB Fighter instead repeats the plain name at 9/13/17, which is why only
+	 * classic-PHB chassis builds were affected.
+	 * @param {string} name
+	 * @returns {string|null} the canonical synthetic pool name, or null if not one.
+	 */
+	static canonicalSyntheticTrackedResourceName (name) {
+		if (typeof name !== "string") return null;
+		const n = name.trim().toLowerCase().replace(/\s*\(\s*[a-z0-9]+\s+uses?\s*\)$/, "").trim();
+		return n === "second wind" || n === "arcane shot" || n === "indomitable" ? n : null;
+	}
+
+	/**
 	 * @param {string} name
 	 * @returns {boolean}
 	 */
 	static isSyntheticTrackedResourceFeature (name) {
-		if (typeof name !== "string") return false;
-		const n = name.trim().toLowerCase();
-		return n === "second wind" || n === "arcane shot" || n === "indomitable";
+		return CharacterSheetState.canonicalSyntheticTrackedResourceName(name) != null;
 	}
 
 	/**
@@ -5958,8 +5975,10 @@ class CharacterSheetState {
 		// (b) Remove duplicate generic resource rows owned by the synthetic system.
 		if (this._data.resources?.length) {
 			this._data.resources = this._data.resources.filter(r => {
-				if (!CharacterSheetState.isSyntheticTrackedResourceFeature(r.name)) return true;
-				const n = (r.name || "").trim().toLowerCase();
+				// (CS-BUG-112) Canonicalise so the classic-PHB `(N uses)` upgrade rows
+				// ("Indomitable (two uses)") resolve onto the base pool they duplicate.
+				const n = CharacterSheetState.canonicalSyntheticTrackedResourceName(r.name);
+				if (!n) return true;
 				// Only remove when the synthetic pool actually owns this name for this
 				// character; otherwise leave the row so nothing is silently untracked. The
 				// generic row is a stale DUPLICATE of the owning feature, so feature presence
@@ -5981,8 +6000,9 @@ class CharacterSheetState {
 		if (this._data.features?.length) {
 			for (const f of this._data.features) {
 				if (!f?.uses) continue;
-				const n = (f.name || "").trim().toLowerCase();
-				if (!CharacterSheetState.isSyntheticTrackedResourceFeature(n)) continue;
+				// (CS-BUG-112) Canonicalise — see (b).
+				const n = CharacterSheetState.canonicalSyntheticTrackedResourceName(f.name);
+				if (!n) continue;
 				if (n === "second wind") continue; // synthetic pool reads feature.uses — never strip
 				const ownedByPool = (n === "indomitable" && (this.hasIndomitable?.() || this.hasFeature?.("Indomitable")))
 					|| (n === "arcane shot" && (this.hasArcaneShot?.() || this.hasFeature?.("Arcane Shot")));
