@@ -207,6 +207,63 @@ placed on an ally rather than on the druid.
 
 ## Supported Toggle Abilities
 
+> ⚠️ **This section documents 27 of the 70 states in `ACTIVE_STATE_TYPES`.**
+> The other 43 are **implemented and working** — they are merely undocumented
+> here. Do not read a state's absence from this section as "unsupported"; check
+> `CharacterSheetState.ACTIVE_STATE_TYPES` first, which is the only authority.
+>
+> This gap is machine-checked. `CharacterSheetToggleDocCoverage.test.js`
+> enumerates the **runtime** object and asserts the undocumented set is exactly
+> the list below, so a newly-added state cannot silently join it and a state
+> that gets documented cannot silently linger. If that test fails, do not edit
+> the list to make it pass without reading which direction it moved.
+>
+> <!-- TOGGLE_DOC_GAP:START — generated set; see CharacterSheetToggleDocCoverage.test.js -->
+> `unearthlyCountenance` (Unearthly Countenance) ·
+> `flyMyPretty` (Fly, My Pretty) ·
+> `crimsonRite` (Crimson Rite) ·
+> `shadowKnightDimLight` (Umbral Warrior: Dim Light/Darkness) ·
+> `improvedShadowcastingAttack` (Improved Shadowcasting Attack) ·
+> `shadowSneak` (Shadow Sneak) ·
+> `defensiveStance` (Defensive Stance) ·
+> `dodge` (Dodging) ·
+> `prone` (Prone) ·
+> `wardingFlare` (Warding Flare) ·
+> `coronaOfLight` (Corona of Light) ·
+> `sacredWeapon` (Sacred Weapon) ·
+> `smiteOfProtection` (Smite of Protection) ·
+> `holyNimbus` (Holy Nimbus) ·
+> `crownOfSpellfire` (Crown of Spellfire) ·
+> `lunarPhaseFull` (Full Moon) ·
+> `lunarPhaseNew` (New Moon) ·
+> `lunarPhaseCrescent` (Crescent Moon) ·
+> `dancing` (Dancing) ·
+> `combatStance` (Combat Stance) ·
+> `zodiacForm` (Zodiac Form) ·
+> `wrathOfTheSea` (Wrath of the Sea) ·
+> `stepOfTheWind` (Step of the Wind) ·
+> `steadyAim` (Steady Aim) ·
+> `shellDefense` (Shell Defense) ·
+> `fighterStance` (Combat Stance) ·
+> `adamantineBull` (Adamantine Bull) ·
+> `steelSerpent` (Steel Serpent) ·
+> `weightlessMithral` (Weightless Mithral) ·
+> `preciseStrike` (Precise Strike) ·
+> `rhythmicStep` (Rhythmic Step) ·
+> `craneParry` (Crane Parry) ·
+> `jestersAct` (Jester's Act) ·
+> `pantomime` (Pantomime) ·
+> `tumbler` (Tumbler) ·
+> `tricksterTrick` (Trickster's Trick) ·
+> `metamagic` (Metamagic) ·
+> `wardingSpell` (Warding Spell) ·
+> `infernalMajesty` (Infernal Majesty) ·
+> `hellishFrenzy` (Hellish Frenzy) ·
+> `shadowShroud` (Shadow Shroud) ·
+> `veilOfLies` (Veil of Lies) ·
+> `hellsight` (Hellsight)
+> <!-- TOGGLE_DOC_GAP:END -->
+
 ### Core D&D Abilities
 
 #### Rage (Barbarian)
