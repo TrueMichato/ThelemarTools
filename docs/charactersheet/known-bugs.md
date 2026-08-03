@@ -6008,6 +6008,60 @@ second is more specific than the report states:
    `plan-cs-bug-018-skips` session; the "it can only add" half was mine and was
    accurate but not the operative gate.
 
+   > ⚠️ **Correction — (a) does NOT generalise, and it is (b) that carries the
+   > claim.** The text above, and a follow-up asserting the backfill sites were
+   > "exactly TWO — the complete set", were both enumerated by *variable name*
+   > (`grep 'earlierSubclassFeatures\|earlierLevel'`). The semantic anchor is
+   > `getLevelFeatures(` inside a `for lvl` loop — the only way to obtain an
+   > earlier level's features. That returns **four** paths, not two:
+   >
+   > | path | selects on `isSubclassFeature`? | writes |
+   > |---|---|---|
+   > | `charactersheet-levelup.js:4440-4449` | yes (`:4448`) | `push` |
+   > | `charactersheet-quickbuild.js:4793-4796` | yes (`:4795`) | `concat` |
+   > | `charactersheet-respec.js:2747-2755` | yes — predicate `matchesNew` (`:2741`) | `addFeature` |
+   > | `charactersheet-class-utils.js:5479-5535` `reconcileClassFeatures` | **no — unfiltered** | `addFeature` + `backfillFeatureContentFromCanonical` |
+   >
+   > The third was invisible to a name-based grep because its loop variable is
+   > `lvl` and its filter is a named predicate. The fourth is the one that
+   > matters: `reconcileClassFeatures` passes **unfiltered** `levelFeatures`
+   > into `dedupAndBuildFeatures` → `state.addFeature`, so it **does** see
+   > `classFeature` rows. Gate (a) closes **three of four**; it does not close
+   > the class.
+   >
+   > And the path it fails to close is the one that actually executes in this
+   > bug's own scenario. The entry dismisses the level-up backfill because a
+   > Cleric 7 *loaded from JSON* already has a subclass — but
+   > `reconcileClassFeatures` has four callers in `charactersheet.js`
+   > (`:1525`, `:1846`, `:1869`, `:2797`) and runs on exactly that load. So the
+   > analysis above dismissed the recompute paths on grounds that do not apply
+   > to the only one that runs.
+   >
+   > **The conclusion survives, on (b) alone.** No path can remove a row:
+   > three add, and `reconcileClassFeatures` adds or patches `entries` in place.
+   > The four `removeFeature` sites are each scoped away from a class-feature
+   > row — `respec.js:2668-2691` gates on `isSubclassFeature`/`subclassSource`,
+   > `class-utils.js:6175` on `featureType === "Species"|"Subrace"`,
+   > `class-utils.js:6501` on `f._raceManifestation`, and
+   > `levelup.js:4609` on `opt._replaces`.
+   >
+   > This **inverts the framing above**. (b) was recorded as the weaker,
+   > invitation-shaped half; it is in fact the only universal one. (a) is the
+   > locally-reached reason at two sites and is false as a claim about the class.
+   >
+   > **What this correction deliberately does NOT do.** It does not claim the
+   > row *should* be removed by a recompute path, and it is not a licence to add
+   > removal to `reconcileClassFeatures` — that function is add-or-patch by
+   > design and giving it teeth would let a transient data-load failure delete
+   > real features. The fix for CS-BUG-110 remains at the grant site.
+   >
+   > Method note, since it is the point: the "exactly two" claim was an *upgrade*
+   > made because this batch holds set-claims to enumeration — and the upgrade is
+   > what made it falsifiable. An enumeration assembled to support a conclusion
+   > already reached stops at sufficiency, and a partial enumeration reads
+   > exactly like a complete one. Enumerate by the semantic anchor, never by
+   > identifier name.
+
 > **Probe hygiene, from the same investigation.** The first attempt at this
 > measurement called `st.addClassLevel?.("Cleric")` and reported "features len
 > delta 0". `grep -rn 'addClassLevel' js/charactersheet/` returns **nothing** —
