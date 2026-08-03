@@ -199,6 +199,13 @@ const METEOR_KNIGHT_FEATURES_MATRIX: FeatureCheck[] = [
 		level: 9,
 		name: /indomitable/i,
 		kind: "resource",
+		// Defensive pin, NOT load-bearing. It names the authoritative pool
+		// explicitly; it does not describe how the sheet renders. Once
+		// CS-BUG-112 (classic-Fighter Indomitable emitting a second, stale
+		// "Indomitable (two uses)" pool) is fixed, the pattern resolves to a
+		// single pool and this line is redundant — check known-bugs.md for
+		// status rather than inferring it from this comment.
+		resourceName: "Indomitable",
 		// 1 use at 9, 2 at 13, 3 at 17.
 		resourceMax: [1, 2, 3],
 		restoreOn: "long",

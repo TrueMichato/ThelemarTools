@@ -434,10 +434,10 @@ export class CharacterSheetPage {
 			return m ? parseInt(m[0], 10) : 0;
 		};
 
-		const container = this.page
+		const rows = this.page
 			.locator(".charsheet__resource-row, .charsheet__resource-tracker, [data-testid='resource-tracker']")
-			.filter({hasText: resourceName})
-			.first();
+			.filter({hasText: resourceName});
+		const container = rows.nth(await this._pickResourceIndex(rows, ".charsheet__resource-name", resourceName));
 		// Hard 2s presence check — missing resources must NOT hang the
 		// test budget on retried `.inputValue()` waits.
 		const present = await container.waitFor({state: "attached", timeout: 2000}).then(() => true).catch(() => false);
@@ -456,6 +456,51 @@ export class CharacterSheetPage {
 	}
 
 	/**
+	 * Decoration-stripped pool-name key. Takes the FIRST line (combat-panel
+	 * titles wrap the whole card) and drops emoji/punctuation, so
+	 * "💗Second Wind" and "Second Wind" compare equal.
+	 */
+	private static _poolKey (s: string | null | undefined): string {
+		return String(s ?? "").split("\n")[0].replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
+	}
+
+	/**
+	 * Choose which of several `hasText`-matched rows to read.
+	 *
+	 * Every resource surface filters with a SUBSTRING `hasText`, so a
+	 * requested name that is a PREFIX of another pool's name matches both:
+	 * "Indomitable" also selects "Indomitable (two uses)" (see CS-BUG-112).
+	 * `.first()` then resolves by DOM order — a coin flip that reports
+	 * success either way, and the reason `resourceName: "<exact name>"` is
+	 * not actually a pin against a prefix collision.
+	 *
+	 * Prefer the candidate whose NAME NODE equals the request exactly; fall
+	 * back to index 0 when none does. Strictly narrowing: wherever one row
+	 * matches — which is everywhere, see below — the selected row is
+	 * unchanged.
+	 *
+	 * ⚠️ NO LIVE INSTANCE. The collision that motivated this (CS-BUG-112) is
+	 * fixed product-side, and the only remaining `(N uses)` family member,
+	 * `Action Surge (two uses)`, mints no pool of its own. So this guard has
+	 * never been observed firing, and a guard never observed firing is
+	 * indistinguishable from one that cannot fire — do NOT cite it as
+	 * load-bearing. It is kept because the substring-`hasText` + `.first()`
+	 * shape regenerates the hazard for any future prefix collision, silently
+	 * and with a passing test. If you need it to be trustworthy, plant a
+	 * two-row positive control first.
+	 */
+	private async _pickResourceIndex (rows: Locator, nameSel: string, resourceName: string): Promise<number> {
+		const n = await rows.count().catch(() => 0);
+		if (n <= 1) return 0;
+		const want = CharacterSheetPage._poolKey(resourceName);
+		for (let i = 0; i < n; i++) {
+			const t = await rows.nth(i).locator(nameSel).first().textContent({timeout: 500}).catch(() => null);
+			if (CharacterSheetPage._poolKey(t) === want) return i;
+		}
+		return 0;
+	}
+
+	/**
 	 * Fallback for {@link getResource}: probe the two Combat-tab pool surfaces.
 	 * Returns `{current: -1, max: -1}` when the pool is genuinely absent.
 	 */
@@ -470,10 +515,10 @@ export class CharacterSheetPage {
 		// pip titles would otherwise let an unrelated item match by substring.
 		// That caption is also the authoritative current/max, so read it directly
 		// instead of counting pips.
-		const synthetic = this.page
+		const syntheticRows = this.page
 			.locator(".charsheet__combat-resource-item")
-			.filter({has: this.page.locator(".charsheet__combat-resource-name", {hasText: resourceName})})
-			.first();
+			.filter({has: this.page.locator(".charsheet__combat-resource-name", {hasText: resourceName})});
+		const synthetic = syntheticRows.nth(await this._pickResourceIndex(syntheticRows, ".charsheet__combat-resource-name", resourceName));
 		if (await synthetic.waitFor({state: "attached", timeout: 2000}).then(() => true).catch(() => false)) {
 			const text = await synthetic.locator(".ve-small.ve-muted").first().textContent({timeout: 2000}).catch(() => null);
 			const m = text?.match(/(-?\d+)\s*\/\s*(-?\d+)/);
@@ -482,10 +527,10 @@ export class CharacterSheetPage {
 
 		// (3) Class combat-panel feature carrying a `csCombatPoolCaption` pool
 		// (Action Surge). Not covered by (2) — it is not a synthetic resource.
-		const feature = this.page
+		const featureRows = this.page
 			.locator(".cs-combat-feature")
-			.filter({hasText: resourceName})
-			.first();
+			.filter({hasText: resourceName});
+		const feature = featureRows.nth(await this._pickResourceIndex(featureRows, ".cs-combat-feature__title", resourceName));
 		if (await feature.waitFor({state: "attached", timeout: 2000}).then(() => true).catch(() => false)) {
 			const pool = feature.locator(".cs-combat-pool").first();
 			if (await pool.count().catch(() => 0) > 0) {
@@ -803,6 +848,27 @@ export class CharacterSheetPage {
 	 *      `:has(.cs-combat-pool)` to mirror the getter, which only returns a
 	 *      value for features that actually have one. Unscoped, this class
 	 *      also matches action-modal headings like "Effects on Use".
+	 *
+	 * ⚠️ MEASURED GAP: surface 3 currently contributes NOTHING. Two template
+	 * shapes emit `.cs-combat-feature__title`, and they differ in whether the
+	 * name follows the opening tag on the same line:
+	 *
+	 *   combat.js:9470  `<div …__title>\n\t\t${icon}<span>Cunning Strike</span>`
+	 *   combat.js:10953 `<div …__title>\n\t\t${icon}<span …>Wild Shape</span>`
+	 *
+	 * Both start with a newline, so the first-line trim below yields `""` and
+	 * the entry is dropped by the non-empty filter. (A third shape does put
+	 * the name first, which is why the trim exists at all — without it that
+	 * one returns the whole card, caption and all.)
+	 *
+	 * Left as-is deliberately. Taking the first NON-EMPTY line instead would
+	 * restore true parity with {@link getResource}, but it adds names to the
+	 * set the `kind: "resource"` resolver judges for ambiguity, and that is an
+	 * unmeasured widening. The gap is currently harmless: the one live pool
+	 * reachable through surface 3, Wild Shape, is also reachable through
+	 * surfaces 1/2 — `tgtt-hunter-zodiac-centaur.spec.ts:169-170` carries two
+	 * `/wild shape/i` resource rows and passes. Fix it behind a broad run, not
+	 * at the end of one.
 	 *
 	 * Combat-tab nodes stay attached while other tabs are shown, so this
 	 * deliberately does NOT switch tabs — enumeration must be side-effect free.
