@@ -850,26 +850,47 @@ export class CharacterSheetPage {
 	 *      value for features that actually have one. Unscoped, this class
 	 *      also matches action-modal headings like "Effects on Use".
 	 *
-	 * ⚠️ MEASURED GAP: surface 3 currently contributes NOTHING. Two template
-	 * shapes emit `.cs-combat-feature__title`, and they differ in whether the
-	 * name follows the opening tag on the same line:
+	 * ⚠️ MEASURED GAP: surface 3 currently contributes NOTHING, and the reason
+	 * is broader than a two-template coincidence. All 13 emitters of
+	 * `.cs-combat-feature__title` in `charactersheet-combat.js` were checked:
 	 *
-	 *   combat.js:9470  `<div …__title>\n\t\t${icon}<span>Cunning Strike</span>`
-	 *   combat.js:10953 `<div …__title>\n\t\t${icon}<span …>Wild Shape</span>`
+	 *   12 of 13 open with the tag alone on its line, so `textContent` begins
+	 *   with a newline — e.g. `:9471` `<div …__title>\n\t\t${icon}<span>Cunning
+	 *   Strike</span>` and `:10953` the same shape for Wild Shape. The
+	 *   first-line trim below therefore yields `""` and the non-empty filter
+	 *   drops them.
 	 *
-	 * Both start with a newline, so the first-line trim below yields `""` and
-	 * the entry is dropped by the non-empty filter. (A third shape does put
-	 * the name first, which is why the trim exists at all — without it that
-	 * one returns the whole card, caption and all.)
+	 *   The 1 remaining emitter, `:8119` `>Effects on Use</div>`, is the only
+	 *   one that puts text on the opening line — and it is an action-modal
+	 *   heading carrying no `.cs-combat-pool`, so the `:has()` scope above
+	 *   already excludes it.
 	 *
-	 * Left as-is deliberately. Taking the first NON-EMPTY line instead would
-	 * restore true parity with {@link getResource}, but it adds names to the
-	 * set the `kind: "resource"` resolver judges for ambiguity, and that is an
-	 * unmeasured widening. The gap is currently harmless: the one live pool
-	 * reachable through surface 3, Wild Shape, is also reachable through
-	 * surfaces 1/2 — `tgtt-hunter-zodiac-centaur.spec.ts:169-170` carries two
-	 * `/wild shape/i` resource rows and passes. Fix it behind a broad run, not
-	 * at the end of one.
+	 * So NO scoped node survives the trim, by construction rather than by
+	 * accident.
+	 *
+	 * Note on the trim itself: it is a strict no-op for surfaces 1/2 — all 10
+	 * `charsheet__resource-name` / `charsheet__combat-resource-name` emitters
+	 * interpolate the name inline (`>${resource.name}<`), so their content is
+	 * single-line. Its only effect anywhere is the destructive one above. An
+	 * earlier revision of this comment justified it by "a third shape puts the
+	 * name first, which is why the trim exists" — that shape is `:8119`, which
+	 * the scope excludes, so the justification was false. Corrected rather than
+	 * deleted, because a comment asserting a live reason for dead machinery is
+	 * the artefact that outlives the machinery.
+	 *
+	 * Left as-is deliberately. Taking the first NON-EMPTY line would restore
+	 * parity with {@link getResource}, and — measured, not assumed — it would
+	 * yield a CLEAN name: in every scoped shape the name sits alone on its own
+	 * line with decoration (`__meta` pills, badges, toggle buttons) on the
+	 * lines below, so `:9471` would give "Cunning Strike", not "Cunning Strike
+	 * Save DC 15". The reason to defer is therefore NOT a risk of pulling in
+	 * decoration; it is that adding names enlarges the set the
+	 * `kind: "resource"` resolver judges for ambiguity, which is an unmeasured
+	 * widening. The gap is currently harmless: the one live pool reachable
+	 * through surface 3, Wild Shape, is also reachable through surfaces 1/2 —
+	 * `tgtt-hunter-zodiac-centaur.spec.ts:169-170` carries two `/wild shape/i`
+	 * resource rows and passes. Fix it behind a broad run, not at the end of
+	 * one.
 	 *
 	 * Combat-tab nodes stay attached while other tabs are shown, so this
 	 * deliberately does NOT switch tabs — enumeration must be side-effect free.
