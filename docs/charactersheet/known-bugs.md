@@ -6637,3 +6637,143 @@ A sweep of every `resourceMax:` array literal in `test/e2e/specs/` found this
 was the **only** malformed one; the two sibling Fighter specs use the correct
 but looser `resourceMax: [1, 3]`, which is left alone — it is not wrong, merely
 weaker, and narrowing it was not measured here.
+
+---
+
+## CS-BUG-113 — "All Class Features" omits every Optional Feature (12.6% of real feature rows), and the Overview summary card drops them into a write-only bucket
+
+**Status: Open** (product). Player-visible. Not fixed — filed only.
+
+Two read gates in `js/charactersheet/charactersheet-features.js` accept a
+narrower set of `featureType` values than the writers produce. The rows are
+still listed on the **Features tab**, so nothing is lost outright; they are
+missing from the **Overview summary card** and from the **"All Class
+Features"** modal. The symptom, stated plainly: *"All Class Features" is not
+all class features.*
+
+### The contradiction — same file, 150 lines apart
+
+```js
+// :915-916  _renderClassFeatures — the Features tab: INCLUDE
+// Optional Features (invocations, metamagic, etc.) are displayed with class features
+if (f.featureType === "Optional Feature") return true;
+
+// :764      _pShowMoreFeaturesModal — "All Class Features": EXCLUDE
+features = allFeatures.filter(f => f.featureType === "Class");
+```
+
+The file already states the intended behaviour and then contradicts it. This
+is what makes it a defect rather than a design choice — and the **sibling
+Species branch ORs three spellings in both places**, so the pattern for
+handling vocabulary variants is already established next door:
+
+```js
+:767   f.featureType === "Species" || f.featureType === "Subrace" || f.featureType === "Race"
+:1336  [...byType.Species, ...byType.Subrace]
+:764   f.featureType === "Class"          // ORs nothing
+```
+
+### Gate 2 — a write-only bucket
+
+```js
+:1303  const byType = {Class: [], Species: [], Subrace: [], Background: [], Other: []};
+:1312  const type = f.featureType || "Other";
+:1316  byType.Other.push(f);
+```
+
+`git grep -n 'byType.Other'` returns **exactly one occurrence in the file** —
+that push. Reads are `byType.Class` (:1323/:1326/:1330/:1339),
+`Species`+`Subrace` (:1336) and `Background` (:1349/:1352). `byType.Other` is
+written and never read, so any `featureType` outside the four named buckets
+disappears from `#charsheet-features-summary` (`charactersheet.html:993`).
+
+### Measured, against real exports
+
+290 characters / **6,663 feature rows** in
+`test-results/exports-for-validation/`, produced by actual Builder / LevelUp /
+QuickBuild E2E runs:
+
+```
+featureType         rows    share
+Class               3847    57.7%
+Species             1754    26.3%
+Optional Feature     839    12.6%    <- dropped by both gates
+Background           164     2.5%
+<absent>              59     0.9%    <- dropped by both gates
+Subclass               0     0.0%
+                    ----
+dropped by BOTH      898    13.5%
+```
+
+Worst-affected exported builds, by dropped rows in a single character:
+
+```
+battle-master-fighter-aarakocra      32
+chronopath-talent-human              31
+arcane-archer-fighter-hochling       29
+hunter-ranger-centaur                16
+chained-fury-barbarian-minotaur      11
+tdcsr-juggernaut-barbarian           11
+```
+
+The dropped names are precisely the picks that define those subclasses —
+`Knockdown Assault`, `Leading Throw`, `Warning Strike` (Battle Master
+maneuvers); `Aimed Spell`, `Bestowed Spell`, `Bouncing Spell` (Metamagic);
+`Covering Fire`, `Doubleshot` (Arcane Shots); `Archery` (Fighting Style);
+`Armor of Shadows` (Invocation); `Wary Stance`, `Farshot Stance`.
+
+### Severity bounds — stated honestly
+
+- **Features tab: unaffected.** `_renderClassFeatures` (:912-938) is
+  deliberately lenient and returns true at `:916` (Optional Feature),
+  `:918` (`f.className`) and `:922` (numeric `level`).
+- **Overview summary card: bounded.** It is additionally gated by
+  `isImportantFeature` (:1300) and `slice(0, 5)`, so not every dropped row
+  would have rendered anyway. The *"+N more class features"* count at :1331
+  is nevertheless understated, because it is `byType.Class.length - 5`.
+- **Modal: unconditional.** `:758` reads `allFeatures` with **no** importance
+  filter, so the exclusion there is total.
+
+### The latent sibling — `featureType: "Subclass"`
+
+The same two gates also drop `featureType: "Subclass"`, which has **three
+writers and zero readers**:
+
+```
+charactersheet-respec.js:2768    featureType: "Subclass"                                  (literal)
+charactersheet-state.js:15944    featureType: opt.subclassShortName ? "Subclass" : "Class"
+charactersheet-state.js:16121    featureType: option.subclassShortName ? "Subclass" : "Class"
+```
+
+`git grep 'featureType === "Subclass"'` → **0**. `addFeature`
+(`charactersheet-state.js:36434`) contains no `featureType` reference, so it
+does not normalise.
+
+**This half is latent, not active** — 0 of 6,663 rows across all 290 exports.
+The two ternaries never produced `"Subclass"` in any real build. Only
+`respec:2768` can fire unconditionally, and the respec subclass-swap flow
+(`respec.js:2632-2637` confirm modal → `:2642 _applySubclassChange`) is not
+covered by the export corpus, so no export can confirm or deny it. Whether a
+real swap yields rows that reach `:764` is **inferred from the write-site
+literal, not observed.**
+
+### Suggested fix
+
+1. `:764` — OR in the other vocabularies, mirroring the Species branch:
+   `f.featureType === "Class" || f.featureType === "Optional Feature" || f.featureType === "Subclass"`.
+2. `:1303`/`:1312` — add `"Optional Feature"` and `"Subclass"` buckets, fold
+   them into `Class`, or render `byType.Other` under an "Other" heading.
+   Leaving `byType.Other` write-only is the trap that will re-swallow the next
+   new `featureType` value silently.
+3. Regression pin: assert that a Battle Master's maneuvers appear in
+   "All Class Features". Verify the pin by reverting the fix and watching it
+   go red — a green-on-revert pin proves nothing.
+
+### Credit
+
+Reachability of the `"Subclass"` half was established by the
+`truemichato-plan-cs-bug-018-skips` session, which traced
+`respec:2768 → addFeature → :764`. The `Optional Feature` half, the
+write-only `byType.Other` bucket, and the export-corpus measurement that
+showed the `"Subclass"` half is latent while the `Optional Feature` half is
+active were added while verifying that report.
