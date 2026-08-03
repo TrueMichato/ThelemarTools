@@ -203,14 +203,20 @@ class _BrewDocHead {
 	 *   to IndexedDB, both of which read accessors, and so materialise the checksum exactly when it is needed.
 	 */
 	static _defineChecksumLazy (tgt, fnGet) {
+		let val;
+		let isCached = false;
+		// A single memoising thunk, shared with any object derived from this one via `toObject`, so that the
+		//   checksum is computed at most once regardless of which copy is first to be observed
+		const fnGetCached = () => {
+			if (!isCached) { val = fnGet(); isCached = true; }
+			return val;
+		};
+
+		Object.defineProperty(tgt, "_fnGetChecksum", {value: fnGetCached, enumerable: false, configurable: true, writable: true});
 		Object.defineProperty(tgt, "checksum", {
 			enumerable: true,
 			configurable: true,
-			get () {
-				const val = fnGet();
-				Object.defineProperty(this, "checksum", {value: val, enumerable: true, configurable: true, writable: true});
-				return val;
-			},
+			get: fnGetCached,
 			set (val) {
 				Object.defineProperty(this, "checksum", {value: val, enumerable: true, configurable: true, writable: true});
 			},
@@ -221,17 +227,23 @@ class _BrewDocHead {
 	static _getChecksum (json) { return CryptUtil.md5(JSON.stringify(json)); }
 
 	toObject () {
-		// Note the explicit construction (rather than a spread): key order is preserved, and the checksum is
-		//   materialised deliberately, as the result is intended for persistence.
-		return {
+		// Note the explicit construction (rather than a spread, which would read -- and therefore compute -- the
+		//   checksum): the properties are assigned in constructor order, so that the key order of stored documents
+		//   is unchanged, and the checksum is propagated as a lazy accessor rather than being materialised.
+		const out = {
 			docIdLocal: this.docIdLocal,
 			timeAdded: this.timeAdded,
-			checksum: this.checksum,
-			url: this.url,
-			filename: this.filename,
-			isLocal: this.isLocal,
-			isEditable: this.isEditable,
 		};
+
+		if (this._fnGetChecksum) this.constructor._defineChecksumLazy(out, this._fnGetChecksum);
+		else out.checksum = this.checksum;
+
+		out.url = this.url;
+		out.filename = this.filename;
+		out.isLocal = this.isLocal;
+		out.isEditable = this.isEditable;
+
+		return out;
 	}
 
 	static fromValues (
