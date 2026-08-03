@@ -6784,41 +6784,105 @@ Totem Spirit -> "Bear"
   :918  f.className fallback        -> Bear PRESENT      (Features tab)
 ```
 
-**Why the export corpus reported 0.** The 290 exports contain 16 Barbarians
-and 7 Hunters, but not one Totem Warrior, and the Hunter builds reached their
-picks by a writer that leaves `featureType` unset — hence 57 subclass rows in
-the `<absent>` bucket and 0 in `Subclass`. The zero measures **the test
-corpus, not the product.**
+**Why the export corpus reported 0 — a *third* writer.** The 290 exports
+contain 16 Barbarians and 7 Hunters, but not one Totem Warrior. The Hunter
+rows are in the `<absent>` bucket, and **all 57 of them carry
+`isSubclassFeature: true`** alongside `subclassShortName` and `className` —
+the signature of `CharacterSheetClassUtils.getLevelFeatures`
+(`charactersheet-class-utils.js:3296`), whose subclass pushes at `:3435`,
+`:3475`, `:3517`, `:3553` and `:3621` emit exactly that shape and which
+**contains no `featureType` assignment anywhere in its 340-line body.**
 
-**Bound, stated honestly.** One of the three writers (`state:15944`) is now
-observed, not inferred. `state:16121` and `respec:2768` are still inferred from
-their write sites. The Totem Spirit trace drives the real resolver and the real
-fulfil method but seeds the pending choice directly rather than clicking through
-the Builder, so "a player doing this in the browser gets the same row" is one
-step short of observed.
+That is decisive for the fix: the `<absent>` rows and the `"Subclass"` rows
+are two writers with one symptom. **Repairing the three `"Subclass"` writers
+repairs 0 of the 57.** Only a read-side repair covers both.
+
+### The vocabulary is wider than either gate
+
+Every `featureType:` string literal assigned anywhere in `js/charactersheet/`:
+
+```
+19  "Class"          3  "Species"       1  "Subclass"     1  "Feat"
+16  "Optional Feature"  2  "Background"    1  "Race"
+```
+
+plus three non-literal sources:
+
+```
+state:15936 / :16113   opt.subclassShortName ? "Subclass" : "Class"
+state:43864            featureTypeLabel — DM-granted data features;
+                       defaults to "Feature", else any string on the payload
+class-utils:3296       getLevelFeatures — sets NO featureType at all
+```
+
+`buildFeatureStateObject` has **30 call sites across 6 files**, and
+`getLevelFeatures` reaches `addFeature` without going through it at all.
+
+Against that, the read side:
+
+```
+:764   accepts exactly ONE value      "Class"
+:1303  byType has FIVE keys           Class · Species · Subrace · Background · Other
+```
+
+Two things fall out. `byType` carries a **`Subrace` bucket that no writer
+fills** — there is no `featureType: "Subrace"` literal in the codebase — while
+lacking buckets for five values writers *do* produce (`Optional Feature`,
+`Subclass`, `Race`, `Feat`, `Feature`). And the asymmetry with the Species
+branch is now quantified rather than asserted: **`:766` accepts three spellings
+for a value set of three; `:764` accepts one spelling for a value set of six.**
+
+`"Feature"` behaves exactly like `"Subclass"` — dropped by `:764`, folded into
+`byType.Other`, and surviving on the Features tab only because
+`state:43869` defaults `level` to `1` and `:922` accepts any numeric level. It
+does not appear in the export corpus because the corpus exercises no DM grants;
+by the lesson below, that is a statement about the corpus.
+
+**Bound, stated honestly — and it narrowed.** `state:15944` is observed under
+Jest. But Hunter's options *do* carry `subclassShortName` (11 of the 53), so a
+Builder pick routed through `_fulfillSubfeatureChoice` would have stamped
+`"Subclass"` — and the corpus Hunter rows are absent instead. So the live
+wizard path for those picks is **not** `state:15944`, and its *browser*
+reachability is **less** supported by the corpus, not more. `state:16121` and
+`respec:2768` remain inferred from their write sites.
 
 ### Suggested fix
 
-1. `:764` — OR in the other vocabularies, mirroring the Species branch:
-   `f.featureType === "Class" || f.featureType === "Optional Feature" || f.featureType === "Subclass"`.
-2. `:1303`/`:1312` — add `"Optional Feature"` and `"Subclass"` buckets, fold
-   them into `Class`, or render `byType.Other` under an "Other" heading.
-   Leaving `byType.Other` write-only is the trap that will re-swallow the next
-   new `featureType` value silently.
-3. Regression pin: assert that a Battle Master's maneuvers appear in
-   "All Class Features". Verify the pin by reverting the fix and watching it
-   go red — a green-on-revert pin proves nothing.
+The read side is the only place that covers every writer.
+
+1. `:764` — OR in the other vocabularies, mirroring the Species branch, or
+   invert to an exclusion list (`Species`/`Subrace`/`Race`/`Background`), which
+   does not need updating each time a writer invents a value.
+2. `:1303`/`:1312` — the `Other` bucket must either be rendered or removed.
+   Leaving it write-only is what swallowed five of the six vocabulary values
+   silently, and it will swallow the sixth. Note `Subrace` is a bucket with no
+   writer, so the list is already out of sync in both directions.
+3. Consider normalising in `addFeature` (`charactersheet-state.js:36434`),
+   which today does not touch `featureType`: a row carrying
+   `isSubclassFeature: true` or `className` and no `featureType` could be
+   stamped once, at the single point every writer passes through.
+4. Regression pin: assert that a Battle Master's maneuvers **and** a Hunter's
+   `Colossus Slayer` appear in "All Class Features" — one per writer class.
+   Verify the pin by reverting the fix and watching it go red; a
+   green-on-revert pin proves nothing.
 
 ### Credit
 
 Reachability of the `"Subclass"` half was established by the
-`truemichato-plan-cs-bug-018-skips` session, which first traced
-`respec:2768 → addFeature → :764` and then measured the 53/214 census and drove
-`Totem Spirit → Bear` end to end. The `Optional Feature` half, the write-only
-`byType.Other` bucket, the export-corpus measurement, and the reconciliation
-showing that 57 of the 59 `<absent>` rows are subclass rows by another writer
-were added while verifying that report.
+`truemichato-plan-cs-bug-018-skips` session, which measured the 53/214 census,
+drove `Totem Spirit → Bear` end to end, and then identified `getLevelFeatures`
+as the third writer behind the 57 `<absent>` rows — the finding that makes a
+read-side repair the only sufficient one. The `Optional Feature` half, the
+write-only `byType.Other` bucket, the export-corpus measurement, and the
+vocabulary census (30 supplier call sites; `Subrace` bucket with no writer;
+`featureTypeLabel` defaulting to `"Feature"`) were added while verifying that
+report.
 
-An earlier revision of this entry called the `"Subclass"` half **latent** on
-the strength of `Subclass = 0 of 6,663`. That was wrong: the zero measured a
-gap in the export corpus, not a property of the product.
+Two earlier revisions of this entry were wrong and are worth recording, because
+both errors have the same shape. The first called the `"Subclass"` half
+**latent** on the strength of `Subclass = 0 of 6,663` — a gap in the export
+corpus, not a property of the product. The second attributed the 57 `<absent>`
+rows to the same writers as the `"Subclass"` rows; they are a different writer
+entirely, and a fix aimed at the `"Subclass"` sites would have repaired none of
+them. **A frequency table cannot tell you which code path filled a bucket**, and
+neither error was visible in the counts.
