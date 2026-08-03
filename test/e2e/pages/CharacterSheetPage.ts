@@ -883,14 +883,46 @@ export class CharacterSheetPage {
 	 * yield a CLEAN name: in every scoped shape the name sits alone on its own
 	 * line with decoration (`__meta` pills, badges, toggle buttons) on the
 	 * lines below, so `:9471` would give "Cunning Strike", not "Cunning Strike
-	 * Save DC 15". The reason to defer is therefore NOT a risk of pulling in
-	 * decoration; it is that adding names enlarges the set the
-	 * `kind: "resource"` resolver judges for ambiguity, which is an unmeasured
-	 * widening. The gap is currently harmless: the one live pool reachable
-	 * through surface 3, Wild Shape, is also reachable through surfaces 1/2 —
-	 * `tgtt-hunter-zodiac-centaur.spec.ts:169-170` carries two `/wild shape/i`
-	 * resource rows and passes. Fix it behind a broad run, not at the end of
-	 * one.
+	 * Save DC 15".
+	 *
+	 * ⚠️ A PREVIOUS REVISION OF THIS BLOCK CALLED WILD SHAPE "the one live pool
+	 * reachable through surface 3". That was wrong, and wrong in the direction
+	 * that understates the gap. Enumerated: `.cs-combat-feature__title` has 13
+	 * emitters in `charactersheet-combat.js`, and SIX of them carry a
+	 * `csCombatPoolCaption` inside the title — `:10953` Wild Shape, `:11164`
+	 * Second Wind, `:11194` Action Surge, `:11217` Shadow Knight, `:11262`
+	 * Meteor Knight, `:11297` Steel Hawk. All six are scoped in by
+	 * `:has(.cs-combat-pool)` and all six are then discarded by the first-line
+	 * trim above, because each opens with the icon tag alone on its own line.
+	 *
+	 * The reason to defer is NOT a risk of pulling in decoration, and it is
+	 * not merely that widening the enumeration enlarges the set the
+	 * `kind: "resource"` resolver judges for ambiguity. It is that the obvious
+	 * fix — take the first NON-EMPTY line — would add exactly those six names
+	 * and NO USEFUL ONE among them:
+	 *
+	 *  - Wild Shape, Second Wind and Action Surge are already enumerated via
+	 *    surfaces 1/2 (they own real resource twins;
+	 *    `tgtt-hunter-zodiac-centaur.spec.ts:169-170` carries two
+	 *    `/wild shape/i` rows and passes), so they are duplicates.
+	 *  - The other three are SUBCLASS CARD TITLES, not pool names. The card
+	 *    titled "Steel Hawk" owns the pool spec rows call `Launch`; "Meteor
+	 *    Knight" owns `Satellites`; "Shadow Knight" owns `Shadowcasting`. So
+	 *    widening would enumerate three names no spec asks for while STILL
+	 *    not enumerating the three pool names those cards actually hold.
+	 *
+	 * Net new resolvable pool names: zero. Anyone reaching for the first
+	 * non-empty-line fix to make an unpinned `/^launch$/i` resolve should know
+	 * it does not, and that `Launch` already resolves through surfaces 1/2 —
+	 * measured by running `tgtt-steel-hawk-fighter` with its four
+	 * `resourceName: "Launch"` pins REMOVED: 7 passed / 1 skipped, identical
+	 * to the pinned baseline.
+	 *
+	 * This correction deliberately does NOT change any code: the trim stays
+	 * (it is a strict no-op on surfaces 1/2, whose ten emitters all
+	 * interpolate the name inline), surface 3 stays in {@link getResource}
+	 * where it IS load-bearing, and the enumeration stays narrow. Only the
+	 * stated reason changes, from an unmeasured one to a measured one.
 	 *
 	 * Combat-tab nodes stay attached while other tabs are shown, so this
 	 * deliberately does NOT switch tabs — enumeration must be side-effect free.
