@@ -5060,6 +5060,55 @@ for the bug itself. Falsifying it required the second break above.
 windows that existed at the time and added `scripts/auditE2eCoverage.mjs`. The
 underlying hole is still open, and **16 rows are inert** — count corrected twice (12 -> 13 -> 16); see Root cause 1 and Root cause 4. **EIGHT root causes are now recorded**, and the count is stated here only because it is enumerable: causes **1, 2, 4, 5, 6, 7** are numbered in "Root cause — seven, not two" below; cause **3** carries its own `###` heading above that section (it was described but never numbered — see the enumeration correction there); and cause **8** is the *inversion* of detector 4, documented in `scripts/auditE2eCoverage.mjs:541-583` and referenced at the "mirror of the widening hazard" note below. Two of the eight — 2 and 5 — share a single repair, and that repair is **necessary but not sufficient** for the >100% artefact (see the magnitude correction under cause 5).
 
+### 🔴 Provenance correction — the enumeration fix landed under a mis-cited subject
+
+`833fe91a` is the commit that renumbered the root-cause list and corrected
+cause 5's magnitude in **this** entry. Its subject line reads *"docs: fix the
+**CS-BUG-016** root-cause enumeration…"*. That id is wrong:
+
+```
+git log -1 --format=%s 833fe91a
+  -> docs: fix the CS-BUG-016 root-cause enumeration and correct cause 5's magnitude
+git show 833fe91a -- docs/charactersheet/known-bugs.md | grep -cE '^[+-].*CS-BUG-016'
+  -> 0
+```
+
+All five of its hunks land between this entry's heading and the next
+`## CS-BUG-` heading. The commit never touched CS-BUG-016.
+
+The damage is the **discovery path**, not the content: `git log
+--grep=CS-BUG-069` misses the commit that edited CS-BUG-069, and
+`git log --grep=CS-BUG-016` returns a commit that never touched it. The commit
+is pushed, so its message is not rewritten (standing rule: never rewrite
+history; add a follow-up). This note is the follow-up — it puts the id in the
+entry so the grep path resolves.
+
+**Found by the `lunar-sorcery-sorcerer` session.** Their conclusion is correct;
+their *evidence* is not sufficient on its own, and the difference matters if
+anyone repeats the check. Three predicates were tried against every batch-era
+commit touching this file:
+
+| predicate | flagged | verdict |
+|---|---|---|
+| subject cites `CS-BUG-N` **and** `git show <c> \| grep -cE '^[+-].*CS-BUG-N'` = 0 | **36** | useless — prose added *inside* a section need not repeat the section's id |
+| enclosing `## CS-BUG-` heading of each hunk in the **parent** blob | **35** | useless in the other direction — a commit that *files* a new entry appends at EOF, so its parent-side heading is always the previous entry |
+| enclosing `## CS-BUG-` heading of each **added line** in the **child** blob | **12** | usable; 11 are benign |
+
+Of the 12: six are renumber commits, whose subjects legitimately name the *old*
+id (`233324d5`, `b42e7d8e`, `83f786f8`, `7d2a435e`, `c755a62f`, `2df50300`);
+four are merges, whose default `git show` diff is empty (`7d8b77fd`,
+`b5430bb5`, `7517ad9f`, `661708b5`); and `fcc291d4`'s subject says it filed
+CS-BUG-030 when `4641f850` had already done so — an over-claim about *which
+commit filed it*, not a wrong id. **`833fe91a` is the only genuine instance in
+the batch.**
+
+> An id in a commit subject is the one field in a report with **no internal
+> cross-check**. Every other claim carries line numbers or quotes a reader can
+> falsify in place. Same family as the `c3f77ab6` phantom SHA. Corollary for
+> anyone auditing this class: a token grep and a parent-side heading lookup
+> both *look* measured and both flag ~35 innocent commits — state the predicate
+> before quoting a count.
+
 **Affects:** `test/e2e/utils/characterSpecFactory.ts` (the MEGA and matrix
 loops) and `scripts/auditE2eCoverage.mjs` (the detector).
 
