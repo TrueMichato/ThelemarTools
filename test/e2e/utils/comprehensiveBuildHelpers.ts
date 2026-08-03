@@ -2370,6 +2370,30 @@ export async function assertFeaturesMatrix (
 				}
 
 				case "resource": {
+					// ⚠️ `name` IS NOT AN EXISTENCE ASSERTION ON THIS BRANCH.
+					// The `re` compiled at the top of the loop is consulted only
+					// by `passive`, `pick` and `toggle`; nothing here checks the
+					// named feature against `allFeatures`. `name` has exactly
+					// two jobs on a resource row: it builds the human-readable
+					// `label`, and — ONLY when `resourceName` is absent — it is
+					// the pattern resolved against real pool names below.
+					//
+					// So adding `resourceName` silently converts `name` from
+					// load-bearing to fully inert. That is how
+					// `tgtt-talent-chronopath.spec.ts` came to carry
+					// `/psychic boost \(three uses\)/i` — a feature named
+					// nowhere in `js/`, `data/` or `homebrew/` — green for the
+					// whole batch. Corrected there, but the shape regenerates
+					// on the next pin, and a reader will keep assuming a row
+					// reading `{name: /x/, kind: "resource"}` asserts that `x`
+					// exists. If you want that guarantee, write a separate
+					// `kind: "passive"` row.
+					//
+					// This note deliberately does NOT make `name` load-bearing
+					// here: ~14 pinned rows have never had their `name`
+					// evaluated, so enforcing it is a broad unmeasured change,
+					// not a comment-sized one.
+					//
 					// A RegExp `name` used to be flattened with `.source` and
 					// handed to a literal substring matcher, so a row written
 					// as `/pact magic|pact slots/i` searched for the string

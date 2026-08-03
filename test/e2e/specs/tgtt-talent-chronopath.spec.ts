@@ -253,7 +253,14 @@ const TALENT_FEATURES: FeatureCheck[] = [
 	},
 	{
 		level: 17,
-		name: /psychic boost \(three uses\)/i,
+		// Was `/psychic boost \(three uses\)/i`, which named a feature that
+		// exists NOWHERE — `charactersheet-state.js:34038,34041,34113` names
+		// both the pool and the feature exactly "Psychic Boost". It never went
+		// red because `name` is INERT on a `resourceName`-pinned resource row
+		// (see the note on `case "resource"` in comprehensiveBuildHelpers.ts):
+		// the compiled regex is used only by passive/pick/toggle. The tier is
+		// still asserted — by `resourceMax: 3` and the effect probe below.
+		name: /^psychic boost$/i,
 		kind: "resource",
 		resourceName: "Psychic Boost",
 		resourceMax: 3,
