@@ -14561,6 +14561,11 @@ class CharacterSheetPage {
 
 		// Preferred path: real 3D physics dice, landing on our exact values.
 		try {
+			// The bundle is fetched on demand (it is not on the page's critical
+			//   path); await it so the first roll still gets 3D dice rather than
+			//   silently degrading to the legacy animation.
+			if (typeof Dice3d?.pLoadLibrary === "function") await Dice3d.pLoadLibrary();
+
 			const dice3d = this._getDice3d();
 			if (dice3d && cleanGroups.every(g => dice3d.canRender(g.sides))) {
 				await dice3d.pRollMany({groups: cleanGroups, theme, appearance});
@@ -19053,6 +19058,14 @@ window.addEventListener("load", async () => {
 		(/** @type {*} */ (globalThis)).csSpawn = (/** @type {*} */ spec, /** @type {*} */ opts) => charSheet.spawn(spec, opts);
 
 		window.dispatchEvent(new Event("toolsLoaded"));
+
+		// Warm the 3D dice bundle once the page is idle. It is no longer a
+		//   blocking `<script>` (it is ~550 KB of three.js + physics that a
+		//   freshly-loaded sheet never needs), and `pAnimateDiceSpec` awaits it
+		//   anyway — this just means the first roll rarely has to wait for it.
+		const warmDice3d = () => { void (/** @type {*} */ (globalThis)).CharacterSheetDice3d?.pLoadLibrary?.(); };
+		if (typeof requestIdleCallback === "function") requestIdleCallback(warmDice3d, {timeout: 5000});
+		else setTimeout(warmDice3d, 2000);
 	} catch (e) {
 		// eslint-disable-next-line no-console
 		console.error("Failed to initialize character sheet:", e);

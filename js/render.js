@@ -2632,6 +2632,11 @@ Renderer.get = () => {
  *   but a property injector *is* valid inside a tag.
  */
 Renderer.applyProperties = function (entry, object) {
+	// Fast path: `splitByTags` only ever splits on `{@` / `{=`, and any segment
+	//   which starts with neither is copied to the output verbatim. A string
+	//   containing no `{` at all therefore always round-trips unchanged.
+	if (typeof entry === "string" && entry.indexOf("{") === -1) return entry;
+
 	const propSplit = Renderer.splitByTags(entry);
 	const len = propSplit.length;
 
@@ -2708,7 +2713,9 @@ Renderer.applyAllProperties = function (entries, object = null) {
 		},
 		string: (str) => Renderer.applyProperties(str, object || lastObj),
 	};
-	return MiscUtil.getWalker().walk(entries, handlers);
+	// The walker holds no per-walk state, so one shared instance serves every
+	//   call. `handlers` must stay per-call: it closes over `lastObj`/`object`.
+	return (Renderer.applyAllProperties._WALKER ||= MiscUtil.getWalker()).walk(entries, handlers);
 };
 
 Renderer.attackTagToFull = function (tagStr, {isRoll = false} = {}) {
@@ -13024,15 +13031,9 @@ Renderer.item = class {
 
 		specificVariant._category = "Specific Variant";
 		specificVariant.baseItem = DataUtil.proxy.getUid("item", baseItem);
-		Object.entries(inherits)
-			// Always apply "remove"s first
-			// This allows for e.g.
-			//   - base item: "Very Rare Reagent"
-			//   - variant: "Poisonous Reagent"
-			//     `{"nameRemove": "Reagent", "nameSuffix": "Poisonous Reagent"}`
-			//   -> `"Very Rare Poisonous Reagent"`
-			.sort(([kA], [kB]) => kB.includes("Remove") - kA.includes("Remove"))
-			.forEach(([inheritedProperty, val]) => {
+		Renderer.item._createSpecificVariants_getInheritsKeys(inherits)
+			.forEach((inheritedProperty) => {
+				const val = inherits[inheritedProperty];
 				switch (inheritedProperty) {
 					case "namePrefix": specificVariant.name = `${val}${specificVariant.name}`; break;
 					case "nameSuffix": specificVariant.name = `${specificVariant.name}${val}`; break;
@@ -13134,6 +13135,30 @@ Renderer.item = class {
 		return specificVariant;
 	}
 
+	static _CACHE_INHERITS_KEYS = new WeakMap();
+
+	/**
+	 * The applicable `inherits` keys, in application order: "remove"s always run
+	 * first. This allows for e.g.
+	 *   - base item: "Very Rare Reagent"
+	 *   - variant: "Poisonous Reagent"
+	 *     `{"nameRemove": "Reagent", "nameSuffix": "Poisonous Reagent"}`
+	 *   -> `"Very Rare Poisonous Reagent"`
+	 *
+	 * A generic variant's `inherits` is shared across every base item it matches,
+	 * so the (stable) sorted key order is computed once per `inherits` object
+	 * rather than once per generated specific variant.
+	 */
+	static _createSpecificVariants_getInheritsKeys (inherits) {
+		const cached = Renderer.item._CACHE_INHERITS_KEYS.get(inherits);
+		if (cached) return cached;
+
+		const keys = Object.keys(inherits)
+			.sort((kA, kB) => kB.includes("Remove") - kA.includes("Remove"));
+		Renderer.item._CACHE_INHERITS_KEYS.set(inherits, keys);
+		return keys;
+	}
+
 	static _createSpecificVariants_evaluateExpression (baseItem, specificVariant, inherits, inheritedProperty) {
 		return inherits[inheritedProperty].replace(/\[\[([^\]]+)]]/g, (...m) => {
 			const propPath = m[1].split(".");
@@ -13151,6 +13176,14 @@ Renderer.item = class {
 		"immune",
 	];
 	static _createSpecificVariants_mergeVulnerableResistImmune ({specificVariant, inherits}) {
+		// Fast path: with none of the three props present on either side there is
+		//   nothing to merge, and the `delete`s the slow path would perform are
+		//   all no-ops on absent keys.
+		if (
+			!("vulnerable" in specificVariant) && !("resist" in specificVariant) && !("immune" in specificVariant)
+			&& !("vulnerable" in inherits) && !("resist" in inherits) && !("immune" in inherits)
+		) return;
+
 		const fromBase = {};
 		Renderer.item._PROPS_VULN_RES_IMMUNE
 			.filter(prop => specificVariant[prop])

@@ -2674,20 +2674,30 @@ globalThis.MiscUtil = class {
 	};
 
 	static _WalkerSync = class extends this._WalkerBase {
+		// Note: these two run once per visited node per walk, so the single-handler
+		//   case (overwhelmingly the common one) deliberately avoids wrapping the
+		//   handler in a throwaway array and allocating an iteration closure.
 		_applyHandlers ({handlers, obj, lastKey, stack}) {
-			handlers = handlers instanceof Array ? handlers : [handlers];
-			const didBreak = handlers.some(h => {
-				const out = h(obj, lastKey, stack);
-				if (this._isBreakOnReturn && out) return true;
+			if (typeof handlers === "function") {
+				const out = handlers(obj, lastKey, stack);
+				if (this._isBreakOnReturn && out) return VeCt.SYM_WALKER_BREAK;
+				return this._isNoModification ? obj : out;
+			}
+
+			const arr = handlers instanceof Array ? handlers : [handlers];
+			for (let i = 0, len = arr.length; i < len; ++i) {
+				const out = arr[i](obj, lastKey, stack);
+				if (this._isBreakOnReturn && out) return VeCt.SYM_WALKER_BREAK;
 				if (!this._isNoModification) obj = out;
-			});
-			if (didBreak) return VeCt.SYM_WALKER_BREAK;
+			}
 			return obj;
 		}
 
 		_runHandlers ({handlers, obj, lastKey, stack}) {
-			handlers = handlers instanceof Array ? handlers : [handlers];
-			handlers.forEach(h => h(obj, lastKey, stack));
+			if (typeof handlers === "function") { handlers(obj, lastKey, stack); return; }
+
+			const arr = handlers instanceof Array ? handlers : [handlers];
+			for (let i = 0, len = arr.length; i < len; ++i) arr[i](obj, lastKey, stack);
 		}
 
 		_doObjectRecurse (obj, primitiveHandlers, stack) {
