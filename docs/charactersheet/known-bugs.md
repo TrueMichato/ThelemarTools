@@ -6090,8 +6090,12 @@ it is visible in the run, not to throw — and the fix must be re-measured with
 
 ## CS-BUG-112 — classic-Fighter Indomitable renders a second, stale pool named "Indomitable (two uses)"; the suppression guard is an exact-name match against a three-name family
 
-**Status:** Open, product bug. Player-visible. Harness pinned around it; **do not
-"fix" the harness pin instead of the product.**
+**Status: Fixed** (product). See **Fix as landed** below. The original
+**Suggested fix** section is retained *as a historical pre-fix plan* and is
+marked where it was wrong — do not follow it as an instruction.
+
+Player-visible while open. Harness was pinned around it; **the harness pin was
+never the fix.**
 
 Found by the `kind: "resource"` ambiguity throw introduced in the CS-BUG-016
 sweep, on its first broad run — three Fighter specs (`meteor-knight`,
@@ -6175,6 +6179,10 @@ success.
 
 ### Suggested fix — and what NOT to do
 
+> ⚠️ **HISTORICAL — this section is the pre-fix plan.** It was substantially
+> correct and the landed fix follows it, with two departures recorded inline
+> below. Read **Fix as landed** for what the code actually does.
+
 ⚠️ **Do not simply add the two literal names.** `Indomitable (two uses)` and
 `(three uses)` are the whole family *today*; the shape recurs wherever 5etools
 data disambiguates a repeated feature with a parenthetical. Strip the
@@ -6190,11 +6198,32 @@ through the predicate **and** both arms, or the row passes the first gate and is
 caught by the second. Measured population of the whole `(N uses)` family, via
 `grep -rhoE '"name": "[^"]*\([a-z0-9]+ uses?\)"' data/ homebrew/`, is exactly
 three — `Indomitable (two uses)`, `Indomitable (three uses)`,
-`Action Surge (two uses)` — all in `data/class/class-fighter.json`. Note
-`Action Surge (two uses)` canonicalises to `action surge`, which IS in the
-tracked set, so any fix must keep the deliberate
-`expect(isSyntheticTrackedResourceFeature("Action Surge")).toBe(false)` pin at
-`CharacterSheetStalePassiveDataMigration.test.js:219` green.
+`Action Surge (two uses)` — all in `data/class/class-fighter.json`.
+
+> 🔴 **CORRECTION (measured at the landed fix).** The next clause of this
+> paragraph originally read:
+>
+> > ~~"Note `Action Surge (two uses)` canonicalises to `action surge`, which IS in
+> > the tracked set, so any fix must keep the deliberate … pin green."~~
+>
+> **False, and self-contradictory** — it asserts `action surge` is a member while
+> simultaneously citing the pin that asserts it is not. The tracked set is
+> exactly `{second wind, arcane shot, indomitable}`; `action surge` is **not** a
+> member, which is what the pin at
+> `CharacterSheetStalePassiveDataMigration.test.js:219` has always encoded.
+> Measured on the landed fix:
+> `canonicalSyntheticTrackedResourceName("Action Surge (two uses)")` → `null`,
+> `isSyntheticTrackedResourceFeature("Action Surge (two uses)")` → `false`.
+> So the third member of the `(N uses)` family is untouched by the fix and the
+> pin holds trivially — there is **no hazard here to guard against**. Kept rather
+> than deleted because the clause reads as a live constraint on any future
+> widening, and would send the next reader looking for a collision that cannot
+> occur.
+
+The pin at
+`CharacterSheetStalePassiveDataMigration.test.js:219` must stay green regardless;
+it is the blast-radius control, and test #5 of the new block is its runtime
+counterpart.
 
 Arms (b) and (c) run on **load only**. The export that exposed this came from a
 level-up, so the fresh-level-up path is guarded solely by the two creation
@@ -6203,6 +6232,112 @@ just a loaded save.
 
 Any fix must be verified against a **classic** Fighter at L17 — an XPHB Fighter
 cannot reproduce it.
+
+### Fix as landed
+
+Three edits to `js/charactersheet/charactersheet-state.js`. The exact-match
+predicate became a **canonicalising pair**, and both arms of
+`_migrateStalePassiveData` now read through it instead of re-deriving the name:
+
+```js
+static canonicalSyntheticTrackedResourceName (name) {
+    if (typeof name !== "string") return null;
+    const n = name.trim().toLowerCase().replace(/\s*\(\s*[a-z0-9]+\s+uses?\s*\)$/, "").trim();
+    return n === "second wind" || n === "arcane shot" || n === "indomitable" ? n : null;
+}
+
+static isSyntheticTrackedResourceFeature (name) {
+    return CharacterSheetState.canonicalSyntheticTrackedResourceName(name) != null;
+}
+```
+
+**Departure from the plan above:** the suffix pattern is
+`\(\s*[a-z0-9]+\s+uses?\s*\)$`, **not** the suggested `\(.*\)$`. Stripping *any*
+trailing parenthetical is wider than the demonstrated population and would
+silently collapse unrelated disambiguators onto a tracked name — a name-matcher
+resolving to more than intended, which is the mirror of the bug being fixed.
+Narrow now; widen when a second shape is measured.
+
+Arms (b) `:5980` and (c) `:6004` each replaced a two-step
+`if (!isSyntheticTrackedResourceFeature(...)) return true; const n = <local exact
+re-derivation>` with a single canonicalising read. This is the coupling the plan
+warned about, and it is real — see the falsification below.
+
+#### The creation path was ALSO affected — the entry's open question, answered
+
+The section above notes arms (b)/(c) are load-only and asks for a freshly-levelled
+classic Fighter to be verified. Done, and it **did** reproduce. Building
+`Fighter|PHB|17` through `addClass` + `addFeature` on the pre-fix tree:
+
+```
+GEN ["Action Surge 1/1", "Indomitable (two uses) 2/2"]     <- stale duplicate
+SYN ["Second Wind 1/1", "Action Surge 2/2", "Indomitable 3/3"]
+```
+
+and on the fixed tree `GEN ["Action Surge 1/1"]`, synthetic unchanged. Both the
+creation guards (`_remintFeatureUsesFromText` ~`:36261`, the second guard in
+`addFeature` ~`:36503`) and the load arms are repaired; neither file needed an
+edit beyond the predicate, because both creation guards already consume it.
+
+> 🔴 **The verbatim `entries` text is load-bearing, and this nearly went
+> unrecorded.** The *first* creation probe used a **paraphrased** feature
+> description and produced byte-identical output with and without the fix. That
+> was one command away from being written up as "the creation guards are not
+> involved". The paraphrase never reached the uses parser, so `uses` was `null`
+> on every `(N uses)` row and there was nothing to duplicate. Only the real text
+> from `data/class/class-fighter.json` reproduces. Test #1 of the new block is
+> the PREMISE guard pinning exactly this (`uses.max === 2` on the fixture), and
+> the block's header comment says so — the same positive-control discipline as
+> CS-BUG-111.
+
+#### Falsification — each half broken separately, counts predicted first
+
+The two edits are **coupled**, so a single full revert would flatter them. Broken
+independently, in place, signatures intact (restore via `cp` from a `/tmp` copy,
+never `git stash` — sibling worktrees share one stash stack):
+
+| break | predicted | measured | which tests |
+|---|---|---|---|
+| narrow the canonicaliser back to exact match (`:5895`) | **4 red** | **4 red** | 2 (canonicaliser), 3 (creation), 6, 7 (load) |
+| revert arms (b)/(c) to local exact re-derivation, canonicaliser intact | **2 red** | **2 red** | 6, 7 — the LOAD pair only |
+| **E2E / field layer** — same `:5895` narrowing, run against `tgtt-shadow-knight-fighter` with `RUN_MATRIX=1` | **1 failed / 6 passed / 1 skipped** | **1 failed / 6 passed / 1 skipped** (6.2m) | `MEGA Features matrix L1→20` |
+
+No `TypeError`/`ReferenceError` in any of the three; every red is a genuine value
+assertion. The second break is the one that matters for the *product* fix: it
+demonstrates the arms pin a property the predicate does not, so neither edit is
+redundant. Tests 3/4/5 staying green under it is the localisation result —
+creation is repaired by the predicate alone.
+
+The third row is the field pin, and it is the one that proves the bug was
+player-visible rather than merely state-visible. With the fix in place the spec
+is **7 passed / 1 skipped**; with `:5895` narrowed it fails at the **L17**
+checkpoint (the first checkpoint at or after L13, where the classic PHB Fighter
+gains `Indomitable (two uses)`) with:
+
+```
+featuresMatrix at L17 (1 failures):
+  - L9 /indomitable/i (resource): resource pattern /indomitable/i is ambiguous —
+    matched 2 distinct pools: Indomitable (two uses), Indomitable.
+    Pin it with resourceName:
+```
+
+That message is the shipped defect stated by the harness: the sheet really did
+render two separate `Indomitable` trackers to the player, and the E2E resolver's
+ambiguity throw is what surfaces it. Note the row is anchored at `level: 9` but
+fails at 17 — the matrix re-evaluates every earlier row at each later checkpoint,
+so the level in the message is the row's anchor, not where the defect appears.
+
+Reproduce with:
+
+```
+PW_PORT=8147 PW_WORKERS=1 PW_TIMEOUT_MS=360000 RUN_MATRIX=1 \
+  npx playwright test test/e2e/specs/tgtt-shadow-knight-fighter.spec.ts
+```
+
+⚠️ Run this spec **alone** and verify the server's cwd
+(`lsof -a -p $(lsof -tiTCP:8147 -sTCP:LISTEN) -d cwd`) — `reuseExistingServer`
+will attach to any listener on the port, including one rooted in a sibling
+worktree serving different source.
 
 ### Harness state
 
@@ -6219,3 +6354,20 @@ DOM order. `getResource` now prefers the candidate whose name node matches the
 request exactly (`_pickResourceIndex`), falling back to the first when none
 does. That makes `resourceName: "<exact name>"` an actual pin, which — until
 this bug — it silently was not for any prefix collision.
+
+> **Post-fix status of the harness half.** The product fix removes the duplicate
+> row, so the `resourceName: "Indomitable"` pins in the three Fighter specs are
+> now **redundant** and the ambiguity throw keeps those rows honest on its own.
+> They are harmless to leave and harmless to remove.
+>
+> `_pickResourceIndex` is a different matter and should be **kept**: the prefix
+> hazard it closes is general (a substring `hasText` plus `.first()` resolves by
+> DOM order whenever one pool name is a prefix of another), and it is now a guard
+> with **zero live instances** — which is exactly the state in which a guard is
+> most likely to be deleted as dead code and most expensive to rediscover.
+> Recorded here so the next reader has the reason rather than the absence.
+>
+> ⚠️ Any *comment* in those specs describing two Indomitable rows as the expected
+> rendering must be dropped or reworded. The prose is the durable artefact; a
+> comment recording a shipped bug as intended behaviour outlives the pin that
+> motivated it.
