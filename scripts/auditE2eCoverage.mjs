@@ -574,12 +574,25 @@ function findVacuousSpellMatches (rawSrc) {
  * sent to add a pin that the resolver does not need. It now defends the old
  * workaround rather than catching a defect.
  *
+ * HOW MANY OF THE 10 PINS ARE ACTUALLY UNNECESSARY: 4 are MEASURED so, 6 are
+ * NOT. The four `/^launch$/` rows in `tgtt-steel-hawk-fighter.spec.ts` were
+ * un-pinned and the spec re-run at `ea964480` (`RUN_MATRIX=1`): 7 passed / 1
+ * skipped, byte-identical to its pinned baseline, while this detector went from
+ * 0 flagged to 4 — i.e. it flagged four rows the resolver handles correctly,
+ * which is the inversion above executing. The other 6 pins span three further
+ * patterns (`/^channel divinity$/`, `/^bardic inspiration/`,
+ * `/psychic boost \(three uses\)/`) and have NOT been run unpinned. Do not
+ * generalise the steel-hawk result to them: an anchored pattern matches only an
+ * exactly-equal pool name, so a pool that renders solely in a decorated form
+ * would return 0 matches and throw (decorated names are emitted — see
+ * `charactersheet-spells.js` ~:6978).
+ *
  * WHAT THIS CORRECTION DELIBERATELY DOES NOT DO: it does not retire, re-scope
- * or change the behaviour of this detector, and it does not remove the 10
- * now-unnecessary pins. Both are part of the pending audit redesign, which is
- * awaiting a decision; doing either here would be an unmeasured change landed
- * at batch close. This block only stops the stale rationale from prescribing a
- * wrong repair in the meantime.
+ * or change the behaviour of this detector, and it does not remove ANY of the
+ * 10 pins — not even the 4 measured unnecessary. Both are part of the pending
+ * audit redesign, which is awaiting a decision; doing either here would be an
+ * unmeasured change landed at batch close. This block only stops the stale
+ * rationale from prescribing a wrong repair in the meantime.
  */
 function findUnmatchableResourceNames (rawSrc) {
 	const src = blankComments(rawSrc);
