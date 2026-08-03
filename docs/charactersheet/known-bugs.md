@@ -6640,7 +6640,7 @@ weaker, and narrowing it was not measured here.
 
 ---
 
-## CS-BUG-113 — "All Class Features" omits every Optional Feature (12.6% of real feature rows), and the Overview summary card drops them into a write-only bucket
+## CS-BUG-113 — "All Class Features" omits every Optional Feature and every subclass-feature row (13.5% of real feature rows), and the Overview summary card drops them into a write-only bucket
 
 **Status: Open** (product). Player-visible. Not fixed — filed only.
 
@@ -6700,10 +6700,19 @@ Species             1754    26.3%
 Optional Feature     839    12.6%    <- dropped by both gates
 Background           164     2.5%
 <absent>              59     0.9%    <- dropped by both gates
-Subclass               0     0.0%
+Subclass               0     0.0%    <- corpus gap, NOT a product property
                     ----
 dropped by BOTH      898    13.5%
 ```
+
+**Read the last two rows together.** `57` of the `59` absent-`featureType`
+rows carry **both `subclassShortName` and `className`** — `Colossus Slayer`,
+`Giant Killer`, `Horde Breaker`, `Arcane Initiate`, `Lunar Embodiment`,
+`Moon Fire`, `Eyes of the Dark`, `Strength of the Grave`. They are subclass
+feature rows that simply never had `featureType` set. So the subclass half of
+this defect is **already live in the corpus at 57 rows**; it is wearing
+`undefined` rather than `"Subclass"`, and `:1312`'s `f.featureType || "Other"`
+sends both spellings to the same write-only bucket.
 
 Worst-affected exported builds, by dropped rows in a single character:
 
@@ -6734,7 +6743,7 @@ maneuvers); `Aimed Spell`, `Bestowed Spell`, `Bouncing Spell` (Metamagic);
 - **Modal: unconditional.** `:758` reads `allFeatures` with **no** importance
   filter, so the exclusion there is total.
 
-### The latent sibling — `featureType: "Subclass"`
+### The sibling — `featureType: "Subclass"` — reachable on core PHB content
 
 The same two gates also drop `featureType: "Subclass"`, which has **three
 writers and zero readers**:
@@ -6749,13 +6758,44 @@ charactersheet-state.js:16121    featureType: option.subclassShortName ? "Subcla
 (`charactersheet-state.js:36434`) contains no `featureType` reference, so it
 does not normalise.
 
-**This half is latent, not active** — 0 of 6,663 rows across all 290 exports.
-The two ternaries never produced `"Subclass"` in any real build. Only
-`respec:2768` can fire unconditionally, and the respec subclass-swap flow
-(`respec.js:2632-2637` confirm modal → `:2642 _applySubclassChange`) is not
-covered by the export corpus, so no export can confirm or deny it. Whether a
-real swap yields rows that reach `:764` is **inferred from the write-site
-literal, not observed.**
+**This is not an exotic path.** Census of `FeatureChoiceParser.extractChoices`
+over all of `data/class/` — 37 choice groups, 214 options, of which **53 carry
+`subclassShortName`** and therefore take the ternary's `"Subclass"` branch:
+
+```
+15  barbarian / Totem Warrior      5  fighter / Psi Warrior      2  monk / Drunken Master
+11  ranger    / Hunter             4  rogue   / Soulknife        2  monk / Kensei
+ 9  barbarian / Storm Herald       3  bard    / Swords           2  warlock / Genie
+```
+
+Nine subclasses across seven classes, all core PHB/XGE/TCE — no homebrew, no
+respec, no confirmation modal.
+
+Driven end to end through `state:15944` (Jest, four positive controls: the
+feature exists in `data/class/class-barbarian.json`; `getStructuredFeatureChoices`
+returns a group whose options carry `subclassShortName`; the choice queues; and
+`fulfillFeatureChoice` returns **`true`** before any output is read):
+
+```
+Totem Spirit -> "Bear"
+  stored row        {name: "Bear", featureType: "Subclass", className: "Barbarian"}
+  :764  featureType === "Class"     -> Bear ABSENT       (modal)
+  :1312 byType                      -> Other: ["Bear"]   (write-only bucket)
+  :918  f.className fallback        -> Bear PRESENT      (Features tab)
+```
+
+**Why the export corpus reported 0.** The 290 exports contain 16 Barbarians
+and 7 Hunters, but not one Totem Warrior, and the Hunter builds reached their
+picks by a writer that leaves `featureType` unset — hence 57 subclass rows in
+the `<absent>` bucket and 0 in `Subclass`. The zero measures **the test
+corpus, not the product.**
+
+**Bound, stated honestly.** One of the three writers (`state:15944`) is now
+observed, not inferred. `state:16121` and `respec:2768` are still inferred from
+their write sites. The Totem Spirit trace drives the real resolver and the real
+fulfil method but seeds the pending choice directly rather than clicking through
+the Builder, so "a player doing this in the browser gets the same row" is one
+step short of observed.
 
 ### Suggested fix
 
@@ -6772,8 +6812,13 @@ literal, not observed.**
 ### Credit
 
 Reachability of the `"Subclass"` half was established by the
-`truemichato-plan-cs-bug-018-skips` session, which traced
-`respec:2768 → addFeature → :764`. The `Optional Feature` half, the
-write-only `byType.Other` bucket, and the export-corpus measurement that
-showed the `"Subclass"` half is latent while the `Optional Feature` half is
-active were added while verifying that report.
+`truemichato-plan-cs-bug-018-skips` session, which first traced
+`respec:2768 → addFeature → :764` and then measured the 53/214 census and drove
+`Totem Spirit → Bear` end to end. The `Optional Feature` half, the write-only
+`byType.Other` bucket, the export-corpus measurement, and the reconciliation
+showing that 57 of the 59 `<absent>` rows are subclass rows by another writer
+were added while verifying that report.
+
+An earlier revision of this entry called the `"Subclass"` half **latent** on
+the strength of `Subclass = 0 of 6,663`. That was wrong: the zero measured a
+gap in the export corpus, not a property of the product.
