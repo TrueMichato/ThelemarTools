@@ -6015,6 +6015,12 @@ after LEVEL-UP {"blessedStrikes":["Divine Strike","Potent Spellcasting"], "lvl":
 So the duplicate is **permanent for the life of the save**, through any number
 of level-ups.
 
+> **Qualified below.** "Permanent" is exact as a claim about *level-up and load*
+> — the scope this section measures — and **false as a claim about the state
+> API**: `removeChosenSubfeature(parent, {})` removes the whole group, and only
+> its caller is hardcoded. See *"🔴 Correction to 'permanent'"* near the end of
+> this entry before triaging on this sentence.
+
 Two mechanisms, both verified here rather than taken from the report — the
 second is more specific than the report states:
 
@@ -6122,6 +6128,70 @@ second is more specific than the report states:
 > rule: **`?.` on the object under test converts "this API does not exist" — the
 > single most interesting possible result — into a silent pass, and must not
 > appear in a probe.**
+
+### 🔴 Correction to "permanent": a removal path exists, and only its CALLER is hardcoded
+
+Raised by session `21cb84b8` and **measured here before recording**. The
+"permanent for the life of the save" framing above is true of the *shipped UI*
+and **false of the state API**.
+
+`charactersheet-state.js:16148 removeChosenSubfeature(parent, scope = {})`
+treats every `scope` field as optional (`parentSource == null || eq(…)`, and so
+on for all six), so an empty scope reduces the filter to `eq(r.parent, parent)`
+— it matches the whole group rather than one member. That is exactly the shape
+this bug needs, because it sidesteps the circularity recorded above: it does not
+have to arbitrate *which* of the two records is right, it removes both.
+
+Measured on a reconstructed pre-fix state (two `parentFeature: "Blessed
+Strikes"` rows in `_data.features`, two matching records in
+`_data.chosenSubfeatures`, exactly as CS-BUG-104's corrected `recording` row
+established):
+
+```
+before  rows=["Divine Strike","Potent Spellcasting"]  recs=["Divine Strike","Potent Spellcasting"]
+removeChosenSubfeature("Blessed Strikes", {})
+after   rows=[]  recs=[]  removed=2
+```
+
+Both feature rows and both durable records are gone, and `removeFeature`
+(`:16161`) carries its usual teardown — granted proficiencies, resources,
+auto-added attacks — so this is not a hand-edit of two arrays.
+
+**The blocker is reachability, not semantics.** `grep -rn
+'removeChosenSubfeature' js/` returns exactly three hits: the definition
+(`:16148`), an internal self-call from `changeChosenSubfeature` (`:16178`), and
+**one** product caller —
+
+```
+charactersheet.js:6858   this._state.removeChosenSubfeature?.("Principles of Devotion", {})
+```
+
+a `<select>` in the Principles of Devotion manager, hardcoded to one literal
+string. So *"no mechanism exists"* and *"the mechanism exists and one caller is
+hardcoded"* invite very different triage, and this entry previously read as the
+first.
+
+**What this correction deliberately does NOT do.**
+
+- It does **not** claim the bug is repaired. Only the *removal* half is
+  measured. Whether the post-fix pending-choice machinery then re-offers the
+  pick cleanly is **UNMEASURED** — plausible (nothing is left for the
+  already-resolved guard to trip on) but not established, and it is the half a
+  reader would actually be relying on.
+- It does **not** propose generalising the caller. Which choices are re-openable
+  mid-game is a design decision, not a defect: Principles of Devotion is
+  deliberately swappable, and most level-up picks deliberately are not.
+- It does **not** retract the "⚠️ The obvious repair does not work" section
+  above. A `(name, parentFeature, level)` dedup remains inert for the reasons
+  given; this path works because it is a *group* removal keyed on the parent,
+  which is a different operation.
+
+**Method note, and it is the reason this was found at all.** The four
+`removeFeature` sites enumerated above were enumerated *from within the
+recompute paths* — the correct scope for the (b) argument and the wrong scope
+for the severity question. `:16148` is in no recompute path; it is a user
+action. Censusing by **mutation shape** (`_data.features =` / `splice` /
+`removeFeature`) rather than by call-graph proximity is what surfaced it.
 
 ### Also recorded: a benign state-shape change from the CS-BUG-104 fix
 
