@@ -5058,7 +5058,7 @@ for the bug itself. Falsifying it required the second break above.
 
 **Status:** Open. Partially addressed — `913600e4` widened the offending
 windows that existed at the time and added `scripts/auditE2eCoverage.mjs`. The
-underlying hole is still open, and **16 rows are inert** — count corrected twice (12 -> 13 -> 16); see Root cause 1 and Root cause 4. SEVEN root causes are now recorded.
+underlying hole is still open, and **16 rows are inert** — count corrected twice (12 -> 13 -> 16); see Root cause 1 and Root cause 4. **EIGHT root causes are now recorded**, and the count is stated here only because it is enumerable: causes **1, 2, 4, 5, 6, 7** are numbered in "Root cause — seven, not two" below; cause **3** carries its own `###` heading above that section (it was described but never numbered — see the enumeration correction there); and cause **8** is the *inversion* of detector 4, documented in `scripts/auditE2eCoverage.mjs:541-583` and referenced at the "mirror of the widening hazard" note below. Two of the eight — 2 and 5 — share a single repair, and that repair is **necessary but not sufficient** for the >100% artefact (see the magnitude correction under cause 5).
 
 **Affects:** `test/e2e/utils/characterSpecFactory.ts` (the MEGA and matrix
 loops) and `scripts/auditE2eCoverage.mjs` (the detector).
@@ -5209,7 +5209,7 @@ reason than first recorded — the units mismatch is real and fatal for
 The printed table contains its own disproof, and the two columns that expose it
 are already side by side.
 
-### The printed table cannot reproduce its own percentage
+### Root cause 3 — the printed table cannot reproduce its own percentage
 
 Two of the four numerator terms are invisible in the output:
 
@@ -5275,6 +5275,26 @@ A spec scoring **✓ FULL at 102%** while carrying six never-executed rows is
 worse than no detector, because the badge actively discourages a second look.
 
 ### Root cause — seven, not two
+
+> **Enumeration correction (2026-08-03).** This list numbers **1, 4, 2, 5, 6, 7**
+> — six items — while the prose above claimed seven. **There was no item 3.**
+> Its content was written, but as its own `###` heading 65 lines earlier rather
+> than as a list entry, so a reader counting got 6, the prose said 7, and the
+> highest label was 7: three different answers, resolvable only by noticing an
+> unnumbered section further up. That section is now titled **Root cause 3 —
+> the printed table cannot reproduce its own percentage**; the out-of-order
+> sequence is left alone because it is honest about the order the causes were
+> found in. An **eighth** cause — the *inversion* of detector 4 — is recorded
+> in `scripts/auditE2eCoverage.mjs:541-583` rather than here, so this section's
+> heading remains "seven" while the Status line above says eight. *Found by the
+> `lunar-sorcery-sorcerer` session, by counting.*
+>
+> This is the entry's own subject matter one level out: **a count asserted in
+> prose beside an enumeration that does not produce it.** Same shape as the
+> `124% × 21 ≈ 26` arithmetic it documents — plausible number, terms never
+> listed, discrepancy invisible unless you enumerate. The general form is
+> recorded because it recurs: *a total stated next to a list is not verified by
+> the list being present.*
 
 **1. `findInertRows()` scans spec source text, but 14 of the 16 rows do not
 exist in spec source.** They are emitted at runtime by `buildCombatMethodChecks`
@@ -5432,8 +5452,8 @@ they know is inert — the Meteor Knight L13..16 row carries *"Not exercised by
 the current checkpoint list [3, 5, 11, 17, 20], but kept so the tier ladder is
 complete"* and is therefore invisible to the detector that exists to find it.
 
-**5. The SAME blinding also afflicts the denominator — and it is what produces
-every surviving >100% row.** `:683` counts entries with
+**5. The SAME blinding also afflicts the denominator — and it is one of two
+terms that produce the surviving >100% rows.** `:683` counts entries with
 `/\{\s*level:\s*\d+\s*,/g`: whitespace only between the brace and the key, the
 identical shape as cause 2, on the opposite side of the fraction. Cause 2 hides
 inert rows *from the detector*; cause 5 hides documented rows *from the
@@ -5468,6 +5488,38 @@ steel-hawk    :205  level: 10   <- "// Damage tier 2 plus the widened crit range
 
 All four are among the **best-documented rows in their files**. The metric
 penalises exactly the rows an author took most care over.
+
+> **Magnitude correction (2026-08-03) — this cause is 20% of the >100%
+> artefact, not 100%, and NEITHER repair is sufficient alone.** The headline
+> above previously read *"it is what produces every surviving >100% row"*. That
+> was asserted from the two 115% reproductions, never measured against the
+> whole population. Measured at `19ac0f33`, three single-factor arms plus the
+> pair:
+>
+> | arm | rows >100% | max |
+> |---|---|---|
+> | trunk baseline | **10** | **168%** |
+> | comment-tolerant regex ONLY (this cause) | 8 | **168%** |
+> | drop `skipReasonCount` ONLY | **3** | **115%** |
+> | both | **0** | — |
+>
+> So this cause accounts for 2 of 10, and **the 168% maximum is completely
+> untouched by repairing it**. But the obvious headline fix is no better:
+> dropping `skipReasonCount` alone removes 7, not 8, and leaves the artefact
+> live at 115%. Since 7 + 2 = 9 while the pair clears all 10, the two interact
+> — **both repairs are necessary and neither is sufficient.**
+>
+> This matters in the direction that costs most. Either single edit visibly
+> *does* something — badges drop, impossible rows vanish, the max falls 168% →
+> 115% — so it will very reasonably be taken as having cured the impossibility.
+> **A partial repair that visibly works is harder to detect than one that does
+> nothing, because it buys evidence of correctness rather than silence.** There
+> is no single-edit escape from this defect; anyone scheduling the redesign
+> should plan for both terms or expect to ship impossible rows that look fixed.
+>
+> *Reported by the `shadow-sorcery-rhw` session (which measured the 20% and the
+> untouched 168%); the `skipReasonCount`-alone arm, which breaks the other half
+> of the conclusion, was the arm neither session had run.*
 
 > **The script diagnosed this itself and fixed a different instance of it.**
 > `:676-682`, verbatim, six lines above the offending regex: *"The stricter
