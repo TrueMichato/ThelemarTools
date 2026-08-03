@@ -2397,13 +2397,14 @@ export async function assertFeaturesMatrix (
 					// `resourceName`", i.e. exactly the rows whose `name` this
 					// branch ignores:
 					//
-					//   13 rows / 6 distinct names
+					//   16 rows / 6 specs / 6 distinct patterns
 					//     /satellite mastery/i    x5  meteor-knight
+					//     /^channel divinity$/i   x4  time-domain-cleric x3,
+					//                                 bastion-paladin x1
 					//     /^launch$/i             x4  steel-hawk
 					//     /improved launch/i      x1  steel-hawk
-					//     "Bardic Inspiration"    x1  surrealism-bard
+					//     /^bardic inspiration/i  x1  surrealism-bard
 					//     /^psychic boost$/i      x1  talent-chronopath (fixed)
-					//     /^channel divinity$/i   x1  time-domain-cleric
 					//
 					// All six name a feature that really exists — Satellite
 					// Mastery (`charactersheet-state.js:19760`), Improved
@@ -2413,13 +2414,56 @@ export async function assertFeaturesMatrix (
 					// name in the population was the parenthetical-count shape
 					// corrected above, and no other row carries that shape.
 					//
+					// ⚠️ CORRECTION (2026-08-03). An earlier revision of this
+					// block recorded "13 rows / 6 distinct names" and is wrong
+					// three ways, one of which mattered:
+					//   1. `/^channel divinity$/i` was counted x1. It is x4 —
+					//      three rows in time-domain-cleric plus one in
+					//      bastion-paladin, a spec the census omitted entirely
+					//      (hence "6 specs", not the 5 implied).
+					//   2. The bard entry was written as the STRING
+					//      `"Bardic Inspiration"`. The row actually carries the
+					//      regex `/^bardic inspiration/i`. Recording a pattern
+					//      in the shape of a literal is what hid (3) for a day:
+					//      a literal cannot over-match; the regex can.
+					//   3. Therefore 13 -> 16.
+					//
+					// 🔴 6 of the 16 are AMBIGUOUS, not merely unverified —
+					// their pattern matches MORE THAN ONE real feature name:
+					//     /satellite mastery/i    x5  also matches
+					//                                 "Improved Satellite Mastery"
+					//     /^bardic inspiration/i  x1  also matches the four
+					//                                 data/ names "Bardic
+					//                                 Inspiration (d8)/(d10)/
+					//                                 (d12)/(3/Day)" — 5 total
+					// So enforcing `name` here would convert those 6 rows from
+					// inert to AMBIGUOUS, not from inert to verified. That
+					// makes the non-change below a correctness guard, not a
+					// deferred chore about scale.
+					//
+					// Nothing is live today: meteor-knight's two load-bearing
+					// rows (`:125`, `:142`) correctly use the specific
+					// `/improved satellite mastery/i`. The exposure is latent.
+					// The bard row is `level: 1` with no `untilLevel`, so it
+					// re-runs at every checkpoint, and every checkpoint after
+					// the first has the colliding die-tier names present.
+					//
+					// Note which of these is safe and why: `/^channel
+					// divinity$/i` sits in a corpus of ~40 `Channel Divinity: X`
+					// names and is safe PURELY because of the trailing `$`.
+					// `/^bardic inspiration/i` is the same construction one
+					// character short and collides five ways. Both spellings
+					// read as correct in review.
+					//
 					// ⚠️ Read the bound precisely: "names a real feature in the
 					// product" is NOT "would pass if `name` were enforced here".
 					// Enforcement would require the name to be in `allFeatures`
 					// AT THAT CHECKPOINT, which is unmeasured and is a per-leg
-					// question. The census bounds the blast radius to 13 rows
+					// question. The census bounds the blast radius to 16 rows
 					// and rules out a second impossible name; it does not
-					// license flipping the switch.
+					// license flipping the switch — and per the ambiguity note
+					// above, flipping it would make 6 of those 16 resolve to
+					// whichever colliding name the matcher reached first.
 					//
 					// A RegExp `name` used to be flattened with `.source` and
 					// handed to a literal substring matcher, so a row written
