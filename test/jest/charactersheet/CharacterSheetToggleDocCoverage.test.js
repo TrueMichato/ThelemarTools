@@ -15,10 +15,39 @@
  *
  * Two things make this honest rather than decorative:
  *
- *   1. It reads the RUNTIME object, not a regex over source. An earlier
- *      brace-walking estimate of the same set returned 41 rather than 43,
- *      because substring matching over-matched the generic words `dodge` and
- *      `prone`. The object is the only authority.
+ *   1. It reads the RUNTIME object, not a regex over source. The object is the
+ *      only authority for WHICH KEYS EXIST.
+ *
+ *      CORRECTION (2026-08-03, found by the `lunar-sorcery-sorcerer` session):
+ *      an earlier note here said a prior estimate returned 41 rather than 43
+ *      "because substring matching over-matched the generic words `dodge` and
+ *      `prone`". The keys were right; the mechanism was not. The cause is
+ *      CASE-FOLDING, not substring width. Measured against the doc as it stood
+ *      at `f0bc5ab8`, before the gap block existed:
+ *
+ *        plain substring, exact case   -> 43 missing
+ *        plain substring, case-folded  -> 41 missing   flip: [dodge, prone]
+ *        THIS predicate, exact case    -> 43 missing
+ *        THIS predicate, with `i`      -> 41 missing   flip: [dodge, prone]
+ *        controls: doc has `Dodge` x1, `Prone` x2, and ZERO lowercase
+ *                  `dodge`/`prone`; `doc.includes("rage")` -> true
+ *
+ *      Two consequences the old wording hid. First, the `\b` anchoring below is
+ *      IRRELEVANT to this distinction — exact-case substring and the anchored
+ *      regex both give 43, so anchoring is not what protects the count. What
+ *      protects it is the DELIBERATE ABSENCE OF THE `i` FLAG: the prose says
+ *      `Dodge` the action and `Prone` the condition, capitalised, and only
+ *      case-folding collapses those onto the state keys. Second, the old
+ *      wording named a failure that `\b` appears to fix, which invites the one
+ *      edit that reintroduces it — a later reader hitting a case mismatch on
+ *      some other key adds `i` and silently restores the 41.
+ *
+ *      That edit is survivable, and only because the assertion is bidirectional
+ *      rather than a bare count. Verified by making it: adding `i` to the
+ *      predicate below turns this file RED with
+ *      `staleDeclarations: ["dodge", "prone"]` (2 of 3 tests fail). The guard
+ *      catches the regression its own former comment would have invited —
+ *      which is the property to preserve if this predicate is ever rewritten.
  *
  *   2. It STRIPS the gap block before deciding what counts as documented.
  *      Without that, listing the 43 keys in the doc makes all 43 match, the
