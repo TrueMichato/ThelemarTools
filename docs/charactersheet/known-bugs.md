@@ -6085,3 +6085,137 @@ the soft spot is a real latent hazard and is masking nothing measured today.
 **If this is ever repaired**, the repair is to *log and count* the soft skip so
 it is visible in the run, not to throw — and the fix must be re-measured with
 `RUN_MATRIX=1`, since without it the affected lines do not execute at all.
+
+---
+
+## CS-BUG-112 — classic-Fighter Indomitable renders a second, stale pool named "Indomitable (two uses)"; the suppression guard is an exact-name match against a three-name family
+
+**Status:** Open, product bug. Player-visible. Harness pinned around it; **do not
+"fix" the harness pin instead of the product.**
+
+Found by the `kind: "resource"` ambiguity throw introduced in the CS-BUG-016
+sweep, on its first broad run — three Fighter specs (`meteor-knight`,
+`shadow-knight`, `steel-hawk`) failed identically at the L17 checkpoint:
+
+```
+L9 /indomitable/i (resource): resource pattern /indomitable/i is ambiguous —
+matched 2 distinct pools: Indomitable (two uses), Indomitable.
+```
+
+### The product state, from a real export
+
+`test-results/exports-for-validation/meteor-knight-fighter-aarakocra/…` at
+Fighter **17**:
+
+```jsonc
+"resources": [ …,
+  {"name": "Indomitable (two uses)", "current": 2, "max": 2, "recharge": "long"} ],
+"features": [
+  {"name": "Indomitable",             "uses": {"current": 2, "max": 2}},
+  {"name": "Indomitable (two uses)",  "uses": {"current": 2, "max": 2}},
+  {"name": "Indomitable (three uses)"}                      // no uses at all
+],
+"indomitable": {"used": 0}                                  // authoritative pool
+```
+
+So a level-17 Fighter shows the Indomitable counter **more than once**, and the
+duplicate reads **2 uses** when the character has **3**. The L17 upgrade never
+reaches the duplicate, because `Indomitable (three uses)` carries no pool.
+
+Independently confirmed on the **rendered** surface (not just in state) by
+feeding a failing leg's export back through `loadFromJson` and re-rendering a
+`Fighter|PHB|17`:
+
+```
+.charsheet__combat-resource-name ->
+  ['Action Surge', 'Shadowcasting', 'Indomitable (two uses)',   <- spurious 2/2
+   'Shadow Sneak', 'Second Wind', 'Indomitable']                <- correct 3/3
+```
+
+Two Indomitable trackers on screen. This is an acceptance-bar violation on the
+classic-PHB Fighter chassis, not a probe artefact.
+
+### Root cause — exact-match name gating against a family
+
+`charactersheet-state.js:5884`:
+
+```js
+static isSyntheticTrackedResourceFeature (name) {
+    const n = name.trim().toLowerCase();
+    return n === "second wind" || n === "arcane shot" || n === "indomitable";
+}
+```
+
+Every Indomitable guard in the codebase routes through that predicate or an
+identical `n === "indomitable"` test:
+
+| site | guard | effect when it misses |
+|---|---|---|
+| `charactersheet-state.js:5971` | `_migrateStalePassiveData` (b) | duplicate generic resource row survives |
+| `charactersheet-state.js:5987` | `_migrateStalePassiveData` (c) | baked `feature.uses` survives |
+| `charactersheet-combat.js:6696` | `_createCombatActionElement` | per-feature counter is rendered next to the synthetic pool |
+
+But the **classic** Fighter names the family three different things
+(`data/class/class-fighter.json:160,167,175`):
+
+```
+"Indomitable|Fighter||9"
+"Indomitable (two uses)|Fighter||13"
+"Indomitable (three uses)|Fighter||17"
+```
+
+So the two suffixed members escape all three guards. The **2024** Fighter
+(`:443,451,460`) reuses the single name `Indomitable` at 9/13/17 — which is
+exactly why `tgtt-champion-fighter-xphb` passes while the classic-chassis specs
+fail. That correspondence is the confirmation, not a coincidence.
+
+This is the batch's dominant defect class once more: a matcher that resolves to
+nothing for part of its intended set, with everything downstream reporting
+success.
+
+### Suggested fix — and what NOT to do
+
+⚠️ **Do not simply add the two literal names.** `Indomitable (two uses)` and
+`(three uses)` are the whole family *today*; the shape recurs wherever 5etools
+data disambiguates a repeated feature with a parenthetical. Strip the
+parenthetical qualifier before comparing, e.g. match on
+`n.replace(/\s*\(.*\)\s*$/, "")`, so the predicate covers the family rather than
+an enumeration of its current members.
+
+⚠️ **Widening the predicate alone is NOT sufficient.** Arms (b) and (c) of
+`_migrateStalePassiveData` each re-derive the name locally and test
+`n === "indomitable"` directly (`:5971`, `:5987`) rather than going through
+`isSyntheticTrackedResourceFeature`. A canonicalising helper must be threaded
+through the predicate **and** both arms, or the row passes the first gate and is
+caught by the second. Measured population of the whole `(N uses)` family, via
+`grep -rhoE '"name": "[^"]*\([a-z0-9]+ uses?\)"' data/ homebrew/`, is exactly
+three — `Indomitable (two uses)`, `Indomitable (three uses)`,
+`Action Surge (two uses)` — all in `data/class/class-fighter.json`. Note
+`Action Surge (two uses)` canonicalises to `action surge`, which IS in the
+tracked set, so any fix must keep the deliberate
+`expect(isSyntheticTrackedResourceFeature("Action Surge")).toBe(false)` pin at
+`CharacterSheetStalePassiveDataMigration.test.js:219` green.
+
+Arms (b) and (c) run on **load only**. The export that exposed this came from a
+level-up, so the fresh-level-up path is guarded solely by the two creation
+guards plus the render gate — verify a freshly-levelled classic Fighter, not
+just a loaded save.
+
+Any fix must be verified against a **classic** Fighter at L17 — an XPHB Fighter
+cannot reproduce it.
+
+### Harness state
+
+Not worked around silently. The three affected rows carry an explicit
+`resourceName: "Indomitable"` pin citing this entry, so they assert the
+authoritative synthetic pool rather than whichever row the DOM happened to
+render first. Remove the pins once the product is fixed; the ambiguity throw
+will then keep them honest on its own.
+
+Note that `resourceName` alone was **not** sufficient: every resource surface in
+`CharacterSheetPage` filters with a substring `hasText`, and `"Indomitable"` is a
+*prefix* of `"Indomitable (two uses)"`, so both matched and `.first()` decided by
+DOM order. `getResource` now prefers the candidate whose name node matches the
+request exactly (`_pickResourceIndex`), falling back to the first when none
+does. That makes `resourceName: "<exact name>"` an actual pin, which — until
+this bug — it silently was not for any prefix collision.
