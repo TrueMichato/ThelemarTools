@@ -7073,18 +7073,56 @@ aborts everything after it:
 
 The modal stays open, no toast appears, nothing is persisted, and the only
 evidence is an unhandled rejection in the console. The feature is inert rather
-than corrupting — which is the one piece of good news here.
+than corrupting — but see the warning below: **the inertness is load-bearing.**
+The throw at `:2446` is the only thing standing between the user and silent
+data loss, so a partial fix is strictly worse than no fix.
 
 Everything downstream of `:2446` is therefore also dead code today, including
 the ability-score application at `:2464-2480`, the history update at `:2483`
 (`updateLevelChoice`) and the HP recalculation at `:2491`.
+
+### ⚠️ Do not fix limb 1 alone — the one-word repair causes data loss
+
+The two limbs are **stacked and independently sufficient**, not sequential. Limb
+2 is broken for a reason that has nothing to do with `_character`, so repairing
+only the property name removes the old feat and still never adds the new one.
+
+Measured by driving the real `getFeatures()` body (extracted verbatim from the
+committed source) with the `_applyFeatChange` statements copied as-is, starting
+from a single feat row `["Alert"]` and swapping it for `Lucky`:
+
+```
+A  today, as committed        throws TypeError   rows ["Alert"]   old feat KEPT
+B  `_character` -> `_data`,
+   limb 2 untouched           no throw           rows []          BOTH LOST
+```
+
+So the observable effect of the obvious one-word repair is that the user's feat
+silently disappears and nothing replaces it. **Fix both limbs in the same change
+or neither.**
+
+The underlying reason limb 2 cannot be fixed by accident:
+
+```
+getFeatures() === _data.features        ->  false   (new array)
+getFeatures()[0] === _data.features[0]  ->  false   (new objects)
+```
+
+`getFeatures()` is a **read-only projection** — it re-wraps every row via
+`.map(f => ({...f, id: f.id || CryptUtil.uid()}))`. Neither the array nor any
+element is live, so mutating its result is unobservable. Of its 49 call sites in
+`js/`, exactly one mutates the returned array: `charactersheet-respec.js:2461`.
+Both of this function's defects are therefore unique in the tree — `_character`
+appears at `:2446` and nowhere else, and `:2461` is the only `getFeatures()`
+mutation — which is why neither is caught by any pattern used elsewhere.
 
 ### Latent second-order defects, visible once limb 1 is repaired
 
 These do **not** manifest today because control never reaches them. Anyone
 fixing `:2446` must handle them in the same change or they become live:
 
-1. **The new feat is still never added** — limb 2 above.
+1. **The new feat is still never added** — limb 2 above. This is the one that
+   turns the repair into data loss; see the warning above.
 2. **The old feat's effects are never reverted.** The code says so itself at
    `:2448-2449`: *"Remove old feat bonuses (simplified — full implementation
    would need to track all feat effects)"*. The ability increase applied by the
