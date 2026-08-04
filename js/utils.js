@@ -1381,10 +1381,14 @@ class ElementUtil {
 
 		if (children) for (let i = 0, len = children.length; i < len; ++i) if (children[i] != null) ele.append(children[i]);
 
-		// Element extension methods live on `Node.prototype` (see `ElementUtil._installExtensions`), so nothing needs
-		//   to be bound here. `e_` is, however, occasionally called on non-`Node` targets (e.g. `window`), which are
-		//   handled by binding the extensions directly.
+		// Bind the element extension methods as own properties. These were previously installed once on
+		//   `Node.prototype`, which avoided ~55 `bind` calls per element, but mutating a built-in prototype used by
+		//   every DOM node and every library on the page is too large a blast radius for the gain.
+		// The extensions live on `Node.prototype` (see `ElementUtil._installExtensions`), so a `Node` needs nothing
+		//   bound to it. `e_` is, however, also called on non-`Node` targets (e.g. `window`), and any name that
+		//   could not be installed is still handled per-element -- normally none.
 		if (typeof Node === "undefined" || !(ele instanceof Node)) ElementUtil._mutBindExtensions(ele);
+		else if (ElementUtil._EXTENSION_ENTRIES_UNINSTALLED.length) ElementUtil._mutBindExtensions(ele, ElementUtil._EXTENSION_ENTRIES_UNINSTALLED);
 
 		return ele;
 	}
@@ -2018,24 +2022,50 @@ class ElementUtil {
 	};
 
 	/**
-	 * Install the extension methods on a prototype, once, rather than binding ~55 methods as own properties on
-	 *   every element created. The latter allocates millions of closures when rendering a large list, and was one
-	 *   of the largest single costs of loading the entry-heavy list pages.
+	 * Bind the extension methods to a target as own properties, as `e_`/`ee` have always done.
 	 *
-	 * These are defined as non-enumerable (previously they were enumerable own properties), so they are hidden
-	 *   from `Object.keys`/`JSON.stringify`/spread. They remain writable and configurable, so both assignment and
-	 *   own-property shadowing (e.g. `<form>` named properties) continue to take precedence, as before.
+	 * The entry list is hoisted, as this runs for every element created; `Object.entries` would otherwise allocate a
+	 *   fresh array of ~55 pairs per element.
 	 */
-	static _installExtensions (proto) {
-		for (const [name, fn] of Object.entries(ElementUtil._EXTENSIONS)) {
-			Object.defineProperty(proto, name, {value: fn, writable: true, configurable: true, enumerable: false});
+	static _EXTENSION_ENTRIES = Object.entries(ElementUtil._EXTENSIONS);
+
+	/**
+	 * Entries which could not be installed on `Node.prototype`, and so are still handled per-element.
+	 *
+	 * Empty in every browser this has been checked against (53/53 install). It exists so that a future native DOM
+	 *   API, or another library, taking one of these names does not have its implementation overwritten. In that
+	 *   case the pre-existing implementation wins and ours is not installed -- which is exactly what the original
+	 *   per-element `ele[name] ||= ...` binding did, since it resolved `ele[name]` through the prototype chain.
+	 */
+	static _EXTENSION_ENTRIES_UNINSTALLED = ElementUtil._EXTENSION_ENTRIES;
+
+	static _mutBindExtensions (ele, entries = ElementUtil._EXTENSION_ENTRIES) {
+		for (let i = 0; i < entries.length; ++i) {
+			const [name, fn] = entries[i];
+			ele[name] ||= fn.bind(ele);
 		}
 	}
 
-	static _mutBindExtensions (ele) {
-		for (const [name, fn] of Object.entries(ElementUtil._EXTENSIONS)) {
-			ele[name] ||= fn.bind(ele);
+	/**
+	 * Install the extension methods on a prototype, once, rather than binding ~55 methods as own properties on
+	 *   every element created. The latter allocates millions of closures when rendering an entry-heavy list, and
+	 *   was one of the largest single costs of loading those pages.
+	 *
+	 * Installed non-enumerable (the per-element properties were enumerable), so they stay hidden from
+	 *   `Object.keys`/`JSON.stringify`/spread, and writable/configurable, so assignment and own-property
+	 *   shadowing (e.g. `<form>` named properties) still take precedence, exactly as before.
+	 *
+	 * Runs at script-evaluation time, before any element exists, so no inline cache has yet been formed against
+	 *   the unmodified prototype. Names already present anywhere on the prototype chain are never overwritten.
+	 */
+	static _installExtensions (proto) {
+		const uninstalled = [];
+		for (const entry of ElementUtil._EXTENSION_ENTRIES) {
+			const [name, fn] = entry;
+			if (name in proto) { uninstalled.push(entry); continue; }
+			Object.defineProperty(proto, name, {value: fn, writable: true, configurable: true, enumerable: false});
 		}
+		ElementUtil._EXTENSION_ENTRIES_UNINSTALLED = uninstalled;
 	}
 	// endregion
 }

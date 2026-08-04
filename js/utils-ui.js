@@ -1949,8 +1949,9 @@ class SearchUiUtil {
 
 		// Every document is indexed twice: once into `ALL`, once into its own category. Only `ALL` is
 		//   needed to render the search UI -- a category index is read solely when the user narrows the
-		//   category dropdown -- so the per-category indexes are built on first read instead of up-front,
-		//   then warmed in the background. See `initIndexForFullCat`/`_scheduleCategoryWarm`.
+		//   category dropdown -- so the per-category indexes are built on first read instead of up-front.
+		//   They are deliberately *not* warmed in the background: scheduling work against the idle budget
+		//   competes with the UI the user is trying to use. See `initIndexForFullCat`.
 		const pendingByCat = new Map();
 		const builtByCat = new Map();
 
@@ -2023,8 +2024,6 @@ class SearchUiUtil {
 		await pAddPrereleaseBrewIndex({brewUtil: PrereleaseUtil});
 		await pAddPrereleaseBrewIndex({brewUtil: BrewUtil2});
 
-		SearchUiUtil._scheduleCategoryWarm(availContent, [...pendingByCat.keys()]);
-
 		return availContent;
 	}
 
@@ -2036,29 +2035,6 @@ class SearchUiUtil {
 		});
 		SearchUtil.removeStemmer(index);
 		return index;
-	}
-
-	/**
-	 * Materialise the lazily-defined per-category indexes once the page is idle, so that the first
-	 *   category-filtered search doesn't pay the whole build cost in one go. Purely an optimisation --
-	 *   reading a category before its turn simply builds it there and then.
-	 */
-	static _scheduleCategoryWarm (availContent, cats) {
-		if (!cats.length) return;
-
-		let ix = 0;
-		const step = () => {
-			if (ix >= cats.length) return;
-			// Reading the property is what builds the index
-			// eslint-disable-next-line no-unused-expressions
-			availContent[cats[ix++]];
-			schedule();
-		};
-		const schedule = () => {
-			if (typeof requestIdleCallback === "function") requestIdleCallback(step, {timeout: 5000});
-			else setTimeout(step, 0);
-		};
-		schedule();
 	}
 }
 SearchUiUtil.NO_HOVER_CATEGORIES = new Set([
