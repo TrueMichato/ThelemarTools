@@ -7108,13 +7108,50 @@ getFeatures() === _data.features        ->  false   (new array)
 getFeatures()[0] === _data.features[0]  ->  false   (new objects)
 ```
 
-`getFeatures()` is a **read-only projection** — it re-wraps every row via
-`.map(f => ({...f, id: f.id || CryptUtil.uid()}))`. Neither the array nor any
-element is live, so mutating its result is unobservable. Of its 49 call sites in
-`js/`, exactly one mutates the returned array: `charactersheet-respec.js:2461`.
-Both of this function's defects are therefore unique in the tree — `_character`
-appears at `:2446` and nowhere else, and `:2461` is the only `getFeatures()`
-mutation — which is why neither is caught by any pattern used elsewhere.
+`getFeatures()` re-wraps every row via `.map(f => ({...f, id: f.id ||
+CryptUtil.uid()}))`, so the array and every row are fresh and **top-level**
+writes to them are discarded. That is what defeats limb 2: `features.push(...)`
+and `row.someProp = x` are both unobservable.
+
+#### ⚠️ It is NOT a read-only projection — do not "harden" it
+
+`{...f}` is a **shallow** copy, so nested objects are shared by reference.
+Driven against the real extracted body:
+
+```
+row === _data.features[0]            ->  false
+row.uses === _data.features[0].uses  ->  TRUE     <-- ALIASED
+row.name = "Renamed"   ->  live.name          unchanged  (discarded)
+row.uses.current = 99  ->  live.uses.current  99         (PERSISTED)
+```
+
+So the rule is **top-level writes vanish, nested writes persist** — which is
+more dangerous than read-only, because a nested write looks inert and isn't.
+
+There is a live, load-bearing nested write. `charactersheet-combat.js:6933`
+(`feature.uses.current--`, inside `_useCombatAction`) mutates a projection row
+obtained from `renderCombatActions:5937`, and reaches live state *only* through
+this aliasing. Nine lines later `:6942` (`features[idx].uses = feature.uses`) is
+a top-level write onto a second projection and is dead — `features` is bound at
+`:6939` and read afterwards only at `:6940` and `:6944`.
+
+Deep-copying or freezing `getFeatures()` would therefore break feature-use
+tracking for any row lacking a persisted `id`: `:6945`'s `setFeatureUses(fid, …)`
+is guarded on `fid`, and for an id-less row `|| CryptUtil.uid()` mints a *fresh
+random id on every call* (measured: two calls return different ids), so the
+lookup misses and the call no-ops. Note `setFeatureUses` (`:38677`) also owns the
+mirrored-resource sync, which the alias does not do — so such rows already get a
+*partial* update today, and closing the alias would make it a total one. Whether
+id-less rows exist in the product is **unmeasured**: `addFeature:36484` always
+assigns an id, and 0 of 1,127 feature rows across 31 E2E export files lack one,
+so it would take a legacy save restored verbatim by `loadFromJson`.
+
+Under the narrower predicate *"mutates the returned array"*, exactly one call
+site qualifies: `charactersheet-respec.js:2461`. `getFeatures()` has 48 call
+sites in `js/` plus its declaration at `charactersheet-state.js:35976`. Both of
+`_applyFeatChange`'s defects are unique in the tree — `_character` appears at
+`:2446` and nowhere else — which is why neither is caught by any pattern used
+elsewhere.
 
 ### Latent second-order defects, visible once limb 1 is repaired
 
