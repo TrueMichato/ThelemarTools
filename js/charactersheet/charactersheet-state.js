@@ -29441,8 +29441,9 @@ class CharacterSheetState {
 		const item = this._data.inventory.find(i => i.id === itemId);
 		if (!item) return false;
 
-		// Check if already at max attunement
-		if (this.getAttunedCount() >= this.getMaxAttunement()) {
+		// Check if already at max attunement — items whose own rules exempt them from the
+		// slot limit bypass this entirely (see `isAttunementExempt`).
+		if (!this.isAttunementExempt(item.item || item) && this.getAttunedCount() >= this.getMaxAttunement()) {
 			return false;
 		}
 
@@ -30985,8 +30986,58 @@ class CharacterSheetState {
 		return !!item?.item?.maxSpellLevels;
 	}
 
+	/**
+	 * Matches an item's own declaration that its attunement is free of the normal slot
+	 * limit. The `(?:attunement|bond)` anchor is load-bearing: it requires the noun naming
+	 * *this* item's attunement to be the subject, so "Attuning to an installed component
+	 * doesn't count against…" (Orrery of the Wanderer) is correctly NOT matched.
+	 */
+	static _RE_ATTUNEMENT_EXEMPT = /\b(?:attunement|bond)\b[^.]{0,160}?\b(?:doesn't|does not|don't|do not)\s+count\s+against\s+the\s+(?:total\s+)?number\s+of\s+(?:magic\s+)?items/i;
+
+	/**
+	 * Some magic items declare, in their own rules text, that attuning to them does not
+	 * consume one of the character's attunement slots — the Ioun bond of the Moorchlyne
+	 * Ioun Stones is the archetype ("An Ioun bond is a special form of attunement and
+	 * doesn't count against the number of magic items to which a creature can normally
+	 * be attuned"). Without this, such items are capped at the normal 3-6 slots and every
+	 * item aggregator (which gates on `requiresAttunement && attuned`) silently drops them.
+	 *
+	 * The check is deliberately narrow. It requires the *noun* naming this item's own
+	 * attunement ("attunement" / "bond") to be the thing that doesn't count. That excludes
+	 * wording such as Orrery of the Wanderer's "Attuning to an installed component doesn't
+	 * count against…", where the exemption belongs to a separate sub-item and the parent
+	 * item still occupies a slot.
+	 * @param {object} itemData - The raw item data (the `.item` payload of an inventory row)
+	 * @returns {boolean} True if attuning to this item should not consume a slot
+	 */
+	isAttunementExempt (itemData) {
+		if (!itemData) return false;
+		const cached = itemData.__attunementExempt;
+		if (cached != null) return cached;
+
+		const text = CharacterSheetState._getItemTextForAttunementExemption(itemData);
+		const isExempt = !!text && CharacterSheetState._RE_ATTUNEMENT_EXEMPT.test(text);
+		try { Object.defineProperty(itemData, "__attunementExempt", {value: isExempt, enumerable: false, configurable: true}); } catch (ignored) { /* frozen item data */ }
+		return isExempt;
+	}
+
+	static _getItemTextForAttunementExemption (itemData) {
+		const out = [];
+		const walk = (node, depth) => {
+			if (depth > 10 || node == null) return;
+			if (typeof node === "string") { out.push(node); return; }
+			if (Array.isArray(node)) { node.forEach(it => walk(it, depth + 1)); return; }
+			if (typeof node !== "object") return;
+			walk(node.entries, depth + 1);
+			walk(node.entry, depth + 1);
+			walk(node.items, depth + 1);
+		};
+		walk(itemData.entries, 0);
+		return out.join(" ");
+	}
+
 	getAttunedCount () {
-		return this._data.inventory.filter(i => i.attuned).length;
+		return this._data.inventory.filter(i => i.attuned && !this.isAttunementExempt(i.item || i)).length;
 	}
 
 	/**

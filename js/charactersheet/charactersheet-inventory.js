@@ -3721,16 +3721,19 @@ class CharacterSheetInventory {
 
 		// If trying to attune (not un-attune), check requirements
 		if (!item.attuned) {
-			// Check attunement limit (base 3, can be higher for Artificers)
-			const currentAttuned = this._state.getAttunedCount();
-			const maxAttuned = this._state.getMaxAttunement();
-			if (currentAttuned >= maxAttuned) {
-				JqueryUtil.doToast({type: "warning", content: `Cannot attune to more than ${maxAttuned} items!`});
-				return;
+			const itemData = item.item || item;
+			// Check attunement limit (base 3, can be higher for Artificers). Items whose own
+			// rules exempt them from the limit (e.g. an Ioun bond) bypass this check.
+			if (!this._state.isAttunementExempt(itemData)) {
+				const currentAttuned = this._state.getAttunedCount();
+				const maxAttuned = this._state.getMaxAttunement();
+				if (currentAttuned >= maxAttuned) {
+					JqueryUtil.doToast({type: "warning", content: `Cannot attune to more than ${maxAttuned} items!`});
+					return;
+				}
 			}
 
 			// Check attunement requirements (class, race, spellcasting, etc.)
-			const itemData = item.item || item;
 			const {canAttune, reasons} = this._state.meetsAttunementRequirements(itemData);
 			if (!canAttune && reasons.length > 0) {
 				JqueryUtil.doToast({
@@ -6413,8 +6416,10 @@ class CharacterSheetInventory {
 
 		const items = this._state.getItems();
 		const attunedItems = items.filter(i => i.attuned);
-		const currentAttuned = attunedItems.length;
+		const currentAttuned = this._state.getAttunedCount();
+		const exemptCount = attunedItems.length - currentAttuned;
 		const maxAttuned = this._state.getMaxAttunement();
+		const exemptSuffix = exemptCount > 0 ? ` <span class="ve-muted" title="Attunements that the item's own rules exempt from the normal limit (e.g. an Ioun bond)">+${exemptCount} slot-free</span>` : "";
 
 		if (!attunedItems.length) {
 			container.append(e_({outer: `<div class="ve-muted ve-text-center py-2">No attuned items (${currentAttuned}/${maxAttuned})</div>`}));
@@ -6422,7 +6427,7 @@ class CharacterSheetInventory {
 		}
 
 		// Show attunement count header
-		container.append(e_({outer: `<div class="ve-small ve-muted mb-1">Attunement Slots: ${currentAttuned}/${maxAttuned}</div>`}));
+		container.append(e_({outer: `<div class="ve-small ve-muted mb-1">Attunement Slots: ${currentAttuned}/${maxAttuned}${exemptSuffix}</div>`}));
 
 		attunedItems.forEach(item => {
 			const itemEl = this._renderEquipmentSummaryRow(item, "attuned");
