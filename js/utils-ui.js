@@ -1942,50 +1942,25 @@ class SearchUiUtil {
 
 		const fromDeepIndex = (d) => d.d; // flag for "deep indexed" content that refers to the same item
 
-		availContent.ALL = SearchUiUtil._getNewContentIndex();
+		availContent.ALL = elasticlunr(function () {
+			this.addField("n");
+			this.addField("s");
+			this.setRef("id");
+		});
+		SearchUtil.removeStemmer(availContent.ALL);
 
 		// Add main site index
 		let ixMax = 0;
 
-		// Every document is indexed twice: once into `ALL`, once into its own category. Only `ALL` is
-		//   needed to render the search UI -- a category index is read solely when the user narrows the
-		//   category dropdown -- so the per-category indexes are built on first read instead of up-front,
-		//   then warmed in the background. See `initIndexForFullCat`/`_scheduleCategoryWarm`.
-		const pendingByCat = new Map();
-		const builtByCat = new Map();
-
-		const getOrBuildCat = (cf) => {
-			const existing = builtByCat.get(cf);
-			if (existing) return existing;
-
-			const index = SearchUiUtil._getNewContentIndex();
-			builtByCat.set(cf, index);
-
-			const pending = pendingByCat.get(cf);
-			if (pending) {
-				for (let i = 0; i < pending.length; ++i) index.addDoc(pending[i]);
-				pendingByCat.delete(cf);
-			}
-			return index;
-		};
-
 		const initIndexForFullCat = (doc) => {
-			const cf = doc.cf;
-			if (Object.prototype.hasOwnProperty.call(availContent, cf)) return;
-			Object.defineProperty(availContent, cf, {
-				enumerable: true,
-				configurable: true,
-				get: () => getOrBuildCat(cf),
-				set: (val) => { pendingByCat.delete(cf); builtByCat.set(cf, val); },
-			});
-		};
-
-		const addDocToFullCat = (d) => {
-			const built = builtByCat.get(d.cf);
-			if (built) return built.addDoc(d);
-			const pending = pendingByCat.get(d.cf);
-			if (pending) pending.push(d);
-			else pendingByCat.set(d.cf, [d]);
+			if (!availContent[doc.cf]) {
+				availContent[doc.cf] = elasticlunr(function () {
+					this.addField("n");
+					this.addField("s");
+					this.setRef("id");
+				});
+				SearchUtil.removeStemmer(availContent[doc.cf]);
+			}
 		};
 
 		const handleDataItem = (d, isAlternate) => {
@@ -1998,7 +1973,7 @@ class SearchUiUtil {
 			if (isAlternate) d.cf = `alt_${d.cf}`;
 			initIndexForFullCat(d);
 			if (!isAlternate) availContent.ALL.addDoc(d);
-			addDocToFullCat(d);
+			availContent[d.cf].addDoc(d);
 			ixMax = Math.max(ixMax, d.id);
 		};
 
@@ -2015,7 +1990,7 @@ class SearchUiUtil {
 				d.cf = d.c === Parser.CAT_ID_CREATURE ? "Creature" : Parser.pageCategoryToFull(d.c);
 				initIndexForFullCat(d);
 				availContent.ALL.addDoc(d);
-				addDocToFullCat(d);
+				availContent[d.cf].addDoc(d);
 				ixMax = Math.max(ixMax, d.id);
 			});
 		};
@@ -2023,42 +1998,7 @@ class SearchUiUtil {
 		await pAddPrereleaseBrewIndex({brewUtil: PrereleaseUtil});
 		await pAddPrereleaseBrewIndex({brewUtil: BrewUtil2});
 
-		SearchUiUtil._scheduleCategoryWarm(availContent, [...pendingByCat.keys()]);
-
 		return availContent;
-	}
-
-	static _getNewContentIndex () {
-		const index = elasticlunr(function () {
-			this.addField("n");
-			this.addField("s");
-			this.setRef("id");
-		});
-		SearchUtil.removeStemmer(index);
-		return index;
-	}
-
-	/**
-	 * Materialise the lazily-defined per-category indexes once the page is idle, so that the first
-	 *   category-filtered search doesn't pay the whole build cost in one go. Purely an optimisation --
-	 *   reading a category before its turn simply builds it there and then.
-	 */
-	static _scheduleCategoryWarm (availContent, cats) {
-		if (!cats.length) return;
-
-		let ix = 0;
-		const step = () => {
-			if (ix >= cats.length) return;
-			// Reading the property is what builds the index
-			// eslint-disable-next-line no-unused-expressions
-			availContent[cats[ix++]];
-			schedule();
-		};
-		const schedule = () => {
-			if (typeof requestIdleCallback === "function") requestIdleCallback(step, {timeout: 5000});
-			else setTimeout(step, 0);
-		};
-		schedule();
 	}
 }
 SearchUiUtil.NO_HOVER_CATEGORIES = new Set([
@@ -2241,10 +2181,7 @@ class SearchWidget {
 	static pDoGlobalInit () {
 		if (!SearchWidget.P_LOADING_CONTENT) {
 			SearchWidget.P_LOADING_CONTENT = (async () => {
-				const indices = await SearchUiUtil.pGetContentIndices({additionalIndices: ["item"], alternateIndices: ["spell"]});
-				// Copy descriptors rather than values: the per-category indexes are lazy accessors, and
-				//   `Object.assign` would read -- i.e. build -- every one of them.
-				Object.defineProperties(SearchWidget.CONTENT_INDICES, Object.getOwnPropertyDescriptors(indices));
+				Object.assign(SearchWidget.CONTENT_INDICES, await SearchUiUtil.pGetContentIndices({additionalIndices: ["item"], alternateIndices: ["spell"]}));
 			})();
 		}
 		return SearchWidget.P_LOADING_CONTENT;
