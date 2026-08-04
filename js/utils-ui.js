@@ -1942,25 +1942,51 @@ class SearchUiUtil {
 
 		const fromDeepIndex = (d) => d.d; // flag for "deep indexed" content that refers to the same item
 
-		availContent.ALL = elasticlunr(function () {
-			this.addField("n");
-			this.addField("s");
-			this.setRef("id");
-		});
-		SearchUtil.removeStemmer(availContent.ALL);
+		availContent.ALL = SearchUiUtil._getNewContentIndex();
 
 		// Add main site index
 		let ixMax = 0;
 
-		const initIndexForFullCat = (doc) => {
-			if (!availContent[doc.cf]) {
-				availContent[doc.cf] = elasticlunr(function () {
-					this.addField("n");
-					this.addField("s");
-					this.setRef("id");
-				});
-				SearchUtil.removeStemmer(availContent[doc.cf]);
+		// Every document is indexed twice: once into `ALL`, once into its own category. Only `ALL` is
+		//   needed to render the search UI -- a category index is read solely when the user narrows the
+		//   category dropdown -- so the per-category indexes are built on first read instead of up-front.
+		//   They are deliberately *not* warmed in the background: scheduling work against the idle budget
+		//   competes with the UI the user is trying to use. See `initIndexForFullCat`.
+		const pendingByCat = new Map();
+		const builtByCat = new Map();
+
+		const getOrBuildCat = (cf) => {
+			const existing = builtByCat.get(cf);
+			if (existing) return existing;
+
+			const index = SearchUiUtil._getNewContentIndex();
+			builtByCat.set(cf, index);
+
+			const pending = pendingByCat.get(cf);
+			if (pending) {
+				for (let i = 0; i < pending.length; ++i) index.addDoc(pending[i]);
+				pendingByCat.delete(cf);
 			}
+			return index;
+		};
+
+		const initIndexForFullCat = (doc) => {
+			const cf = doc.cf;
+			if (Object.prototype.hasOwnProperty.call(availContent, cf)) return;
+			Object.defineProperty(availContent, cf, {
+				enumerable: true,
+				configurable: true,
+				get: () => getOrBuildCat(cf),
+				set: (val) => { pendingByCat.delete(cf); builtByCat.set(cf, val); },
+			});
+		};
+
+		const addDocToFullCat = (d) => {
+			const built = builtByCat.get(d.cf);
+			if (built) return built.addDoc(d);
+			const pending = pendingByCat.get(d.cf);
+			if (pending) pending.push(d);
+			else pendingByCat.set(d.cf, [d]);
 		};
 
 		const handleDataItem = (d, isAlternate) => {
@@ -1973,7 +1999,7 @@ class SearchUiUtil {
 			if (isAlternate) d.cf = `alt_${d.cf}`;
 			initIndexForFullCat(d);
 			if (!isAlternate) availContent.ALL.addDoc(d);
-			availContent[d.cf].addDoc(d);
+			addDocToFullCat(d);
 			ixMax = Math.max(ixMax, d.id);
 		};
 
@@ -1990,7 +2016,7 @@ class SearchUiUtil {
 				d.cf = d.c === Parser.CAT_ID_CREATURE ? "Creature" : Parser.pageCategoryToFull(d.c);
 				initIndexForFullCat(d);
 				availContent.ALL.addDoc(d);
-				availContent[d.cf].addDoc(d);
+				addDocToFullCat(d);
 				ixMax = Math.max(ixMax, d.id);
 			});
 		};
@@ -1999,6 +2025,16 @@ class SearchUiUtil {
 		await pAddPrereleaseBrewIndex({brewUtil: BrewUtil2});
 
 		return availContent;
+	}
+
+	static _getNewContentIndex () {
+		const index = elasticlunr(function () {
+			this.addField("n");
+			this.addField("s");
+			this.setRef("id");
+		});
+		SearchUtil.removeStemmer(index);
+		return index;
 	}
 }
 SearchUiUtil.NO_HOVER_CATEGORIES = new Set([
@@ -2181,7 +2217,10 @@ class SearchWidget {
 	static pDoGlobalInit () {
 		if (!SearchWidget.P_LOADING_CONTENT) {
 			SearchWidget.P_LOADING_CONTENT = (async () => {
-				Object.assign(SearchWidget.CONTENT_INDICES, await SearchUiUtil.pGetContentIndices({additionalIndices: ["item"], alternateIndices: ["spell"]}));
+				const indices = await SearchUiUtil.pGetContentIndices({additionalIndices: ["item"], alternateIndices: ["spell"]});
+				// Copy descriptors rather than values: the per-category indexes are lazy accessors, and
+				//   `Object.assign` would read -- i.e. build -- every one of them.
+				Object.defineProperties(SearchWidget.CONTENT_INDICES, Object.getOwnPropertyDescriptors(indices));
 			})();
 		}
 		return SearchWidget.P_LOADING_CONTENT;
