@@ -240,18 +240,13 @@ export class BrewUtil2Base {
 	}
 
 	async _pGetBrewProcessed_ ({lockToken}) {
-		const brews = [
+		const cpyBrews = MiscUtil.copyFast([
 			...await this.pGetBrew({lockToken}),
 			...this._brewsTemp,
-		];
-		if (!brews.length) return this._cache_brewsProc = {};
+		]);
+		if (!cpyBrews.length) return this._cache_brewsProc = {};
 
-		await this._pGetBrewProcessed_pDoBlocklistExtension({brews});
-
-		// Copy only the bodies: these are mutated below (diagnostics, migrations, merging), whereas the heads are
-		//   not, and deep-copying them would both be wasted work and force the (expensive, lazily-computed)
-		//   document checksums.
-		const cpyBrews = brews.map(({head, body}) => ({head, body: MiscUtil.copyFast(body)}));
+		await this._pGetBrewProcessed_pDoBlocklistExtension({cpyBrews});
 
 		// Add per-file diagnostics
 		cpyBrews.forEach(({head, body}) => this._pGetBrewProcessed_mutDiagnostics({head, body}));
@@ -266,8 +261,8 @@ export class BrewUtil2Base {
 	}
 
 	/** Homebrew files can contain embedded blocklists. */
-	async _pGetBrewProcessed_pDoBlocklistExtension ({brews}) {
-		for (const {body} of brews) {
+	async _pGetBrewProcessed_pDoBlocklistExtension ({cpyBrews}) {
+		for (const {body} of cpyBrews) {
 			if (!body?.blocklist?.length || !(body.blocklist instanceof Array)) continue;
 			await ExcludeUtil.pExtendList(body.blocklist);
 		}
@@ -286,8 +281,7 @@ export class BrewUtil2Base {
 	}
 
 	_pGetBrewProcessed_getMergedOutput ({cpyBrews}) {
-		// The bodies are already private copies (see `_pGetBrewProcessed_`), so skip the merge's own defensive copy
-		return BrewDoc.mergeObjects({isCopy: false}, ...cpyBrews.map(({body}) => body));
+		return BrewDoc.mergeObjects(undefined, ...cpyBrews.map(({body}) => body));
 	}
 
 	/**

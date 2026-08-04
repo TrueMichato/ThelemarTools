@@ -12939,41 +12939,25 @@ Renderer.item = class {
 		return Renderer.item._createSpecificVariants_isRequiresExcludesMatch(baseItem, genericVariant.excludes, "some");
 	}
 
-	/**
-	 * Note the hand-rolled `every`/`some`: this runs once per (base item x generic variant) pair, i.e. hundreds of
-	 *   thousands of times per load of the items page, so the intermediate `Object.entries` arrays are worth avoiding.
-	 */
 	static _createSpecificVariants_isRequiresExcludesMatch (candidate, requirements, method) {
 		if (candidate == null || requirements == null) return false;
 
-		const isEvery = method === "every";
+		return Object.entries(requirements)[method](([reqKey, reqVal]) => {
+			if (reqVal instanceof Array) {
+				return candidate[reqKey] instanceof Array
+					? candidate[reqKey].some(it => reqVal.includes(it))
+					: reqVal.includes(candidate[reqKey]);
+			}
 
-		for (const reqKey in requirements) {
-			const isMatch = Renderer.item._createSpecificVariants_isRequiresExcludesMatch_isMatch({candidate, reqKey, reqVal: requirements[reqKey], method});
-			if (isEvery) { if (!isMatch) return false; } else if (isMatch) return true;
-		}
+			// Recurse for e.g. `"customProperties": { ... }`
+			if (reqVal != null && typeof reqVal === "object") {
+				return Renderer.item._createSpecificVariants_isRequiresExcludesMatch(candidate[reqKey], reqVal, method);
+			}
 
-		// Matches `[].every(...) === true` / `[].some(...) === false`
-		return isEvery;
-	}
-
-	static _createSpecificVariants_isRequiresExcludesMatch_isMatch ({candidate, reqKey, reqVal, method}) {
-		const candidateVal = candidate[reqKey];
-
-		if (reqVal instanceof Array) {
-			return candidateVal instanceof Array
-				? candidateVal.some(it => reqVal.includes(it))
-				: reqVal.includes(candidateVal);
-		}
-
-		// Recurse for e.g. `"customProperties": { ... }`
-		if (reqVal != null && typeof reqVal === "object") {
-			return Renderer.item._createSpecificVariants_isRequiresExcludesMatch(candidateVal, reqVal, method);
-		}
-
-		return candidateVal instanceof Array
-			? candidateVal.some(it => reqVal === it)
-			: reqVal === candidateVal;
+			return candidate[reqKey] instanceof Array
+				? candidate[reqKey].some(it => reqVal === it)
+				: reqVal === candidate[reqKey];
+		});
 	}
 
 	/**
@@ -13208,9 +13192,7 @@ Renderer.item = class {
 	}
 
 	static _enhanceItems (allItems) {
-		// Resolve the style hint once, rather than once per item
-		const styleHint = VetoolsConfig.get("styleSwitcher", "style");
-		allItems.forEach((item) => Renderer.item.enhanceItem(item, {styleHint}));
+		allItems.forEach((item) => Renderer.item.enhanceItem(item));
 		return allItems;
 	}
 
@@ -13315,11 +13297,10 @@ Renderer.item = class {
 		if (itemTypeAbv === Parser.ITM_TYP_ABV__GENERIC_VARIANT) item._category = "Generic Variant";
 		if (item._category == null) item._category = "Other";
 		if (item.entries == null) item.entries = [];
-		const entType = item.type ? Renderer.item.getType(item.type) : null;
-		if (entType?.entries || entType?.entriesTemplate) {
+		if (item.type && (Renderer.item.getType(item.type)?.entries || Renderer.item.getType(item.type)?.entriesTemplate)) {
 			Renderer.item._initFullEntries(item);
 
-			const propertyEntries = Renderer.item._enhanceItem_getItemPropertyTypeEntries({item, ent: entType});
+			const propertyEntries = Renderer.item._enhanceItem_getItemPropertyTypeEntries({item, ent: Renderer.item.getType(item.type)});
 			propertyEntries.forEach(e => item._fullEntries.push({type: "wrapper", wrapped: e, data: {[VeCt.ENTDATA_ITEM_MERGED_ENTRY_TAG]: "type"}}));
 		}
 		if (item.property) {
