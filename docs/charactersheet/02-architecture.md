@@ -306,7 +306,7 @@ toJson(), loadFromJson()
 **Responsibilities**:
 - JSON export
 - JSON import
-- Print/PDF generation
+- Print/PDF generation via `CharacterSheetPdf` (print-optimized HTML → browser Save as PDF)
 
 ### CharacterSheetLayout (`charactersheet-layout.js`)
 

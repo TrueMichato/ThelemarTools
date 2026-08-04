@@ -68,7 +68,11 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   Convert character to 5etools monster statblock JSON.
 │
 ├── CharacterSheetExport (charactersheet-export.js, ~320 lines)
-│   JSON import/export, print/PDF, delegates to NpcExporter.
+│   JSON import/export, print/PDF entry points, delegates to NpcExporter.
+│
+├── CharacterSheetPdf (charactersheet-pdf.js)
+│   Print-optimized self-contained HTML (browser Save as PDF). Notes,
+│   appearance/portrait, resources, custom abilities, TGTT, companions.
 │
 ├── CharacterSheetRespec (charactersheet-respec.js, ~600 lines)
 │   Level history timeline display. Edit functionality planned.

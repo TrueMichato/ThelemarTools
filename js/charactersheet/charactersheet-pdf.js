@@ -70,6 +70,7 @@ class CharacterSheetPdf {
 			`</div>`,
 			`<div class="pdf-col pdf-col--right">`,
 			this._renderCombatStats(),
+			this._renderResources(),
 			this._renderAttacks(),
 			`</div>`,
 			`</div>`, // close pdf-page--stats
@@ -77,7 +78,7 @@ class CharacterSheetPdf {
 			this._renderPageOneFooter(),
 		];
 
-		// ---- Page 2+: Features (compact), Spellcasting, Inventory, TGTT ----
+		// ---- Page 2+: Features (compact), Spellcasting, Inventory, Character, TGTT ----
 		const featuresHtml = this._renderFeatures();
 		if (featuresHtml) sections.push(`<div class="pdf-page-break"></div>`, featuresHtml);
 
@@ -86,6 +87,12 @@ class CharacterSheetPdf {
 
 		const inventoryHtml = this._renderInventory();
 		if (inventoryHtml) sections.push(inventoryHtml);
+
+		const customAbilitiesHtml = this._renderCustomAbilities();
+		if (customAbilitiesHtml) sections.push(customAbilitiesHtml);
+
+		const characterHtml = this._renderCharacterBackground();
+		if (characterHtml) sections.push(`<div class="pdf-page-break"></div>`, characterHtml);
 
 		const tgttHtml = this._renderTgttSections();
 		if (tgttHtml) sections.push(tgttHtml);
@@ -197,7 +204,10 @@ class CharacterSheetPdf {
 		const hp = this._state.getHp();
 		const initiative = this._state.getInitiative();
 		const hitDice = this._state.getHitDice();
-		const hitDiceStr = hitDice.map(hd => `${hd.current}/${hd.max}${hd.type}`).join(", ");
+		const hitDiceStr = hitDice.map(hd => {
+			const label = hd.className && hd.className !== "Unknown" ? ` ${hd.className}` : "";
+			return `${hd.current}/${hd.max}${hd.type}${label}`;
+		}).join(", ");
 
 		// Speed — build from individual types
 		const speedParts = [];
@@ -529,6 +539,53 @@ class CharacterSheetPdf {
 
 	// endregion
 
+	// region Class Resources
+
+	/**
+	 * Shared class resource pools (Ki, Rage, Sorcery Points, etc.).
+	 * Skips stamina when the TGTT combat section will show it.
+	 */
+	_renderResources () {
+		const resources = this._state.getResources?.() || [];
+		const hasTgttStamina = (this._state.getCombatTraditionEntries?.() || []).length > 0
+			&& (this._state.getStaminaMax?.() || 0) > 0;
+
+		const rows = [];
+		for (const res of resources) {
+			if (!res || !(res.max > 0)) continue;
+			const id = String(res.id || res.name || "").toLowerCase();
+			if (hasTgttStamina && (id === "stamina" || /stamina/i.test(res.name || ""))) continue;
+
+			const name = this._esc(res.name || "Resource");
+			const current = res.current ?? res.max;
+			const max = res.max;
+			const recharge = res.recharge === "short" || res.recharge === "short rest"
+				? "SR"
+				: res.recharge === "long" || res.recharge === "long rest"
+					? "LR"
+					: res.recharge
+						? this._esc(String(res.recharge))
+						: "";
+			const pips = max <= 12
+				? this._renderPips(current, max)
+				: `<span class="pdf-resource__count">${current}/${max}</span>`;
+			rows.push(`<div class="pdf-resource-row">
+				<span class="pdf-resource__name">${name}</span>
+				${recharge ? `<span class="pdf-resource__recharge">${recharge}</span>` : ""}
+				<span class="pdf-resource__pips">${pips}</span>
+			</div>`);
+		}
+
+		if (!rows.length) return "";
+
+		return `<div class="pdf-section pdf-section--resources">
+			<h3 class="pdf-section__title">Resources</h3>
+			${rows.join("\n")}
+		</div>`;
+	}
+
+	// endregion
+
 	// region Attacks
 
 	_renderAttacks () {
@@ -554,8 +611,9 @@ class CharacterSheetPdf {
 				const gems = atk._sourceItem.socketedGemstones || [];
 				for (const gem of gems) {
 					const summary = CharacterSheetUpgrades.getGemstoneSummary(gem);
-					if (summary) bits.push(`${this._esc(gem.name)}: ${this._esc(summary)}`);
+					if (summary) bits.push(`${gem.name}: ${summary}`);
 				}
+				// Escape once at render time (bits are plain text)
 				if (bits.length) upgradeNote = `<div class="pdf-atk__upgrade-note">${bits.map(b => this._esc(b)).join(" · ")}</div>`;
 			}
 
@@ -675,7 +733,8 @@ class CharacterSheetPdf {
 
 	/**
 	 * Detect action economy type from feature description.
-	 * Mirrors charactersheet-combat.js _getFeatureActionType().
+	 * Kept in sync with charactersheet-combat.js _getFeatureActionType() —
+	 * shared extraction deferred until combat exports a pure helper.
 	 */
 	_getActionType (feature) {
 		const nameLower = (feature?.name || "").toLowerCase();
@@ -912,19 +971,24 @@ class CharacterSheetPdf {
 			</div>`);
 		}
 
-		// Cantrips
-		if (cantrips.length) {
-			parts.push(this._renderSpellList("Cantrips", cantrips));
+		// Cantrips — include any level-0 entries that landed in spellsKnown
+		const cantripList = [...cantrips];
+		const leveledSpells = [];
+		for (const sp of spells) {
+			if ((sp.level || 0) === 0) cantripList.push(sp);
+			else leveledSpells.push(sp);
+		}
+		if (cantripList.length) {
+			parts.push(this._renderSpellList("Cantrips", cantripList));
 		}
 
 		// Spells by level
 		const spellsByLevel = {};
-		for (const sp of spells) {
-			const lvl = sp.level || 0;
+		for (const sp of leveledSpells) {
+			const lvl = sp.level || 1;
 			(spellsByLevel[lvl] = spellsByLevel[lvl] || []).push(sp);
 		}
 		for (const [lvl, sps] of Object.entries(spellsByLevel).sort(([a], [b]) => Number(a) - Number(b))) {
-			if (Number(lvl) === 0) continue; // Skip cantrips already rendered
 			parts.push(this._renderSpellList(`${this._ordinal(Number(lvl))} Level`, sps));
 		}
 
@@ -949,8 +1013,12 @@ class CharacterSheetPdf {
 			const ritual = sp.ritual ? " (R)" : "";
 			const prepared = sp.prepared === false ? `<span class="pdf-spell__unprepared">\u2717</span>` : "";
 			const rowCls = sp.prepared === false ? ` class="pdf-spell-row--unprepared"` : "";
+			const summary = this._getSpellSummary(sp);
+			const summaryHtml = summary
+				? `<div class="pdf-spell__summary">${summary}</div>`
+				: "";
 			return `<tr${rowCls}>
-				<td class="pdf-spell__name">${name}${concentration}${ritual} ${prepared}</td>
+				<td class="pdf-spell__name">${name}${concentration}${ritual} ${prepared}${summaryHtml}</td>
 				<td class="pdf-spell__time">${time}</td>
 				<td class="pdf-spell__range">${range}</td>
 				<td class="pdf-spell__duration">${duration}</td>
@@ -964,6 +1032,29 @@ class CharacterSheetPdf {
 				<tbody>${rows}</tbody>
 			</table>
 		</div>`;
+	}
+
+	/**
+	 * One-line spell summary for the print list (avoids full spell text bloat).
+	 */
+	_getSpellSummary (sp) {
+		if (!sp) return "";
+		let raw = sp.description || "";
+		if (!raw && Array.isArray(sp.entries)) {
+			raw = sp.entries
+				.map(e => {
+					if (typeof e === "string") return e;
+					if (e && typeof e === "object" && typeof e.entries === "string") return e.entries;
+					if (e && typeof e === "object" && Array.isArray(e.entries)) {
+						return e.entries.filter(x => typeof x === "string").join(" ");
+					}
+					return "";
+				})
+				.filter(Boolean)
+				.join(" ");
+		}
+		if (!raw) return "";
+		return this._getFirstSentence(this._cleanDescription(raw));
 	}
 
 	// endregion
@@ -1039,6 +1130,133 @@ class CharacterSheetPdf {
 
 	// endregion
 
+	// region Custom Abilities
+
+	_renderCustomAbilities () {
+		const abilities = this._state.getCustomAbilities?.() || [];
+		if (!abilities.length) return "";
+
+		const rows = abilities.map(ca => {
+			const name = this._esc(ca.name || "Custom Ability");
+			const uses = ca.uses?.max
+				? ` (${ca.uses.current ?? ca.uses.max}/${ca.uses.max}${ca.uses.recharge ? ` \u2022 ${this._esc(ca.uses.recharge)}` : ""})`
+				: "";
+			const activation = ca.activationAction && ca.activationAction !== "free"
+				? `<span class="pdf-custom__activation">${this._esc(ca.activationAction)}</span>`
+				: ca.mode === "toggle"
+					? `<span class="pdf-custom__activation">toggle</span>`
+					: "";
+			const descRaw = ca.description || "";
+			const summary = descRaw ? this._getFirstSentence(this._cleanDescription(descRaw)) : "";
+			const summaryHtml = summary ? `<div class="pdf-custom__summary">${summary}</div>` : "";
+			return `<div class="pdf-custom-ability">
+				<div class="pdf-custom__header">
+					<span class="pdf-custom__name">${name}${uses}</span>
+					${activation}
+				</div>
+				${summaryHtml}
+			</div>`;
+		}).join("\n");
+
+		return `<div class="pdf-section pdf-section--custom">
+			<h3 class="pdf-section__title">Custom Abilities</h3>
+			${rows}
+		</div>`;
+	}
+
+	// endregion
+
+	// region Character Background & Appearance
+
+	_renderCharacterBackground () {
+		const notesHtml = this._renderBackgroundNotes();
+		const appearanceHtml = this._renderAppearance();
+		if (!notesHtml && !appearanceHtml) return "";
+
+		return `<div class="pdf-section pdf-section--character">
+			<h3 class="pdf-section__title">Character</h3>
+			${appearanceHtml}
+			${notesHtml}
+		</div>`;
+	}
+
+	_renderBackgroundNotes () {
+		const fields = [
+			{key: "personality", altKeys: ["personalityTraits"], label: "Personality Traits"},
+			{key: "ideals", label: "Ideals"},
+			{key: "bonds", label: "Bonds"},
+			{key: "flaws", label: "Flaws"},
+			{key: "backstory", label: "Backstory", wide: true},
+			{key: "notes", label: "Notes", wide: true},
+		];
+
+		const cards = [];
+		for (const field of fields) {
+			const value = this._getNoteField(field.key, field.altKeys);
+			if (!value) continue;
+			const body = this._esc(value).replace(/\n/g, "<br>");
+			cards.push(`<div class="pdf-note-card${field.wide ? " pdf-note-card--wide" : ""}">
+				<div class="pdf-note-card__label">${field.label}</div>
+				<div class="pdf-note-card__body">${body}</div>
+			</div>`);
+		}
+
+		if (!cards.length) return "";
+
+		return `<div class="pdf-notes-grid">${cards.join("\n")}</div>`;
+	}
+
+	_getNoteField (key, altKeys = []) {
+		const primary = this._state.getNote?.(key);
+		if (primary) return String(primary).trim();
+		const raw = this._state.toJSON?.()?.notes || this._state.toJson?.()?.notes || {};
+		if (raw[key]) return String(raw[key]).trim();
+		for (const alt of altKeys) {
+			if (raw[alt]) return String(raw[alt]).trim();
+		}
+		return "";
+	}
+
+	_renderAppearance () {
+		const fields = [
+			{key: "age", label: "Age"},
+			{key: "height", label: "Height"},
+			{key: "weight", label: "Weight"},
+			{key: "eyes", label: "Eyes"},
+			{key: "skin", label: "Skin"},
+			{key: "hair", label: "Hair"},
+		];
+
+		const parts = [];
+		for (const f of fields) {
+			const val = this._state.getAppearance?.(f.key);
+			if (val) parts.push(`<span class="pdf-appearance__item"><strong>${f.label}</strong> ${this._esc(val)}</span>`);
+		}
+
+		const portraitUrl = this._state.getAppearance?.("portraitUrl") || "";
+		const safePortrait = this._isSafePortraitUrl(portraitUrl) ? portraitUrl : "";
+		const portraitHtml = safePortrait
+			? `<div class="pdf-portrait-wrap"><img class="pdf-portrait" src="${this._esc(safePortrait)}" alt="Character portrait"></div>`
+			: "";
+
+		if (!parts.length && !portraitHtml) return "";
+
+		return `<div class="pdf-appearance">
+			${portraitHtml}
+			<div class="pdf-appearance__fields">${parts.join(" \u00B7 ")}</div>
+		</div>`;
+	}
+
+	_isSafePortraitUrl (url) {
+		if (!url || typeof url !== "string") return false;
+		const trimmed = url.trim();
+		if (trimmed.startsWith("data:image/")) return true;
+		if (/^https?:\/\//i.test(trimmed)) return true;
+		return false;
+	}
+
+	// endregion
+
 	// region TGTT Sections
 
 	_renderTgttSections () {
@@ -1083,11 +1301,28 @@ class CharacterSheetPdf {
 			? `<div class="pdf-tgtt-methods"><h4 class="pdf-subsection__title" style="color:#1a3c5e">Methods</h4>${methods.map(f => this._renderSingleFeature(f)).join("\n")}</div>`
 			: "";
 
+		// Active combat-method effects (ongoing stance/weapon riders)
+		const activeEffects = this._state.getActiveCombatMethodEffects?.()
+			|| this._state.toJSON?.()?.activeCombatMethodEffects
+			|| this._state.toJson?.()?.activeCombatMethodEffects
+			|| [];
+		const effectsHtml = activeEffects.length
+			? `<div class="pdf-tgtt-effects"><h4 class="pdf-subsection__title" style="color:#1a3c5e">Active Effects</h4>${
+				activeEffects.map(eff => {
+					const name = this._esc(eff.name || "Effect");
+					const weapon = eff.weaponName ? ` <span class="pdf-tgtt-effect__weapon">(${this._esc(eff.weaponName)})</span>` : "";
+					const desc = eff.description ? ` — ${this._esc(eff.description)}` : "";
+					return `<div class="pdf-tgtt-effect">${name}${weapon}${desc}</div>`;
+				}).join("\n")
+			}</div>`
+			: "";
+
 		return `<div class="pdf-section pdf-section--tgtt">
 			<h3 class="pdf-section__title pdf-section__title--tgtt">Combat Traditions</h3>
 			<div class="pdf-traditions">${tradRows}</div>
 			${staminaPips}
 			${stanceRow}
+			${effectsHtml}
 			${methodsHtml}
 		</div>`;
 	}
@@ -1161,9 +1396,10 @@ class CharacterSheetPdf {
 			if (speeds.burrow) speedParts.push(`burrow ${speeds.burrow} ft.`);
 			const speedStr = speedParts.join(", ") || "30 ft.";
 
-			// Traits/Actions
-			const traits = (comp.traits || []).map(t => `<div class="pdf-comp__trait"><strong>${this._esc(t.name || "")}</strong> ${this._esc(t.description || t.entries?.join(" ") || "")}</div>`).join("");
-			const actions = (comp.actions || []).map(a => `<div class="pdf-comp__trait"><strong>${this._esc(a.name || "")}</strong> ${this._esc(a.description || a.entries?.join(" ") || "")}</div>`).join("");
+			// Traits/Actions — entries may be strings or nested objects
+			const traitText = (entry) => this._esc(entry.description || this._flattenEntries(entry.entries) || "");
+			const traits = (comp.traits || []).map(t => `<div class="pdf-comp__trait"><strong>${this._esc(t.name || "")}</strong> ${traitText(t)}</div>`).join("");
+			const actions = (comp.actions || []).map(a => `<div class="pdf-comp__trait"><strong>${this._esc(a.name || "")}</strong> ${traitText(a)}</div>`).join("");
 
 			return `<div class="pdf-companion">
 				<div class="pdf-companion__header">
@@ -1193,23 +1429,58 @@ class CharacterSheetPdf {
 	// region Document Wrapper
 
 	_wrapDocument (body) {
+		const charName = this._esc(this._state.getName() || "Character");
+		const hasPortrait = this._isSafePortraitUrl(this._state.getAppearance?.("portraitUrl") || "");
 		return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${this._esc(this._state.getName() || "Character")} — Character Sheet</title>
+<title>${charName} — Character Sheet</title>
 <style>
 ${CharacterSheetPdf._CSS}
 </style>
 </head>
 <body>
+<div class="pdf-toolbar" role="banner">
+	<div class="pdf-toolbar__title">${charName} — Print Preview</div>
+	<div class="pdf-toolbar__actions">
+		<button type="button" class="pdf-toolbar__btn pdf-toolbar__btn--primary" onclick="window.print()">Print / Save as PDF</button>
+		<button type="button" class="pdf-toolbar__btn" onclick="window.close()">Close</button>
+	</div>
+</div>
 <div class="pdf-sheet">
 ${body}
 </div>
+<div class="pdf-sheet-end">End of character sheet — ${charName}</div>
 <script>
-// Auto-print after a brief render delay
-setTimeout(() => window.print(), 400);
+(function () {
+	function doPrint () { try { window.print(); } catch (e) { /* ignore */ } }
+	function whenReady (cb) {
+		const imgs = Array.from(document.images || []);
+		if (!imgs.length) { cb(); return; }
+		let settled = false;
+		const finish = () => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			cb();
+		};
+		const timer = setTimeout(finish, 500);
+		let pending = imgs.length;
+		const done = () => { pending -= 1; if (pending <= 0) finish(); };
+		imgs.forEach(img => {
+			if (img.complete) done();
+			else {
+				img.addEventListener("load", done, {once: true});
+				img.addEventListener("error", done, {once: true});
+			}
+		});
+	}
+	// Auto-print after render; toolbar remains if the user cancels the dialog.
+	const delay = ${hasPortrait ? 100 : 400};
+	setTimeout(function () { whenReady(doPrint); }, delay);
+})();
 </script>
 </body>
 </html>`;
@@ -1392,6 +1663,25 @@ setTimeout(() => window.print(), 400);
 		return `Long Jump ${longJump} ft. \u00B7 High Jump ${highJump} ft.`;
 	}
 
+	/**
+	 * Flatten 5etools-style entries arrays into plain text for PDF.
+	 */
+	_flattenEntries (entries) {
+		if (!entries) return "";
+		if (typeof entries === "string") return entries;
+		if (!Array.isArray(entries)) return "";
+		const parts = [];
+		for (const e of entries) {
+			if (typeof e === "string") parts.push(e);
+			else if (e && typeof e === "object") {
+				if (typeof e.entries === "string") parts.push(e.entries);
+				else if (Array.isArray(e.entries)) parts.push(this._flattenEntries(e.entries));
+				else if (typeof e.name === "string" && typeof e.entry === "string") parts.push(`${e.name}: ${e.entry}`);
+			}
+		}
+		return parts.filter(Boolean).join(" ");
+	}
+
 	// endregion
 }
 
@@ -1507,9 +1797,9 @@ body {
 .pdf-header__field-value {
 	font-size: 8.5pt;
 	font-weight: 600;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+white-space: normal;
+overflow-wrap: anywhere;
+word-break: break-word;
 }
 
 .pdf-header__field-label {
@@ -2436,6 +2726,178 @@ body {
 	margin-bottom: 6px;
 }
 
+/* ======== RESOURCES ======== */
+.pdf-section--resources {
+	margin-top: 4px;
+}
+
+.pdf-resource-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 7.5pt;
+	line-height: 1.5;
+	margin-bottom: 1px;
+}
+
+.pdf-resource__name {
+	font-weight: 600;
+	color: #333;
+	min-width: 0;
+	flex: 1;
+}
+
+.pdf-resource__recharge {
+	font-size: 6.5pt;
+	color: #777;
+	text-transform: uppercase;
+}
+
+.pdf-resource__pips,
+.pdf-resource__count {
+	font-variant-numeric: tabular-nums;
+	color: #58180d;
+	font-weight: 600;
+}
+
+/* ======== CUSTOM ABILITIES ======== */
+.pdf-custom-ability {
+	margin-bottom: 4px;
+	padding-bottom: 3px;
+	border-bottom: 0.5px solid #e8dcc0;
+}
+
+.pdf-custom__header {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 8px;
+}
+
+.pdf-custom__name {
+	font-weight: 700;
+	color: #58180d;
+	font-size: 8.5pt;
+}
+
+.pdf-custom__activation {
+	font-size: 6.5pt;
+	text-transform: uppercase;
+	letter-spacing: 0.3px;
+	color: #777;
+	white-space: nowrap;
+}
+
+.pdf-custom__summary {
+	font-size: 7.5pt;
+	color: #333;
+	margin-top: 1px;
+}
+
+/* ======== CHARACTER / NOTES / APPEARANCE ======== */
+.pdf-appearance {
+	display: flex;
+	gap: 12px;
+	align-items: flex-start;
+	margin-bottom: 8px;
+}
+
+.pdf-portrait-wrap {
+	flex: 0 0 auto;
+}
+
+.pdf-portrait {
+	width: 88px;
+	height: 110px;
+	object-fit: cover;
+	border: 1.5px solid #58180d;
+	border-radius: 3px;
+	background: #fff;
+	-webkit-print-color-adjust: exact;
+	print-color-adjust: exact;
+}
+
+.pdf-appearance__fields {
+	flex: 1;
+	font-size: 8pt;
+	line-height: 1.55;
+}
+
+.pdf-appearance__item strong {
+	color: #58180d;
+}
+
+.pdf-notes-grid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 6px;
+}
+
+.pdf-note-card {
+	border: 1px solid #c9ad6a;
+	border-radius: 4px;
+	padding: 5px 7px;
+	background: rgba(255,255,255,0.35);
+	page-break-inside: avoid;
+	break-inside: avoid;
+}
+
+.pdf-note-card--wide {
+	grid-column: 1 / -1;
+}
+
+.pdf-note-card__label {
+	font-size: 6.5pt;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+	color: #58180d;
+	margin-bottom: 2px;
+}
+
+.pdf-note-card__body {
+	font-size: 8pt;
+	line-height: 1.4;
+	white-space: pre-wrap;
+}
+
+.pdf-spell__summary {
+	font-size: 6.5pt;
+	font-weight: 400;
+	color: #555;
+	margin-top: 1px;
+	line-height: 1.3;
+}
+
+.pdf-tgtt-effects {
+	margin-top: 4px;
+}
+
+.pdf-tgtt-effect {
+	font-size: 7.5pt;
+	margin-bottom: 2px;
+}
+
+.pdf-tgtt-effect__weapon {
+	color: #555;
+	font-style: italic;
+}
+
+/* ======== TOOLBAR (screen only) ======== */
+.pdf-toolbar {
+	display: none;
+}
+
+.pdf-sheet-end {
+	display: none;
+	text-align: center;
+	font-size: 7pt;
+	color: #888;
+	margin-top: 12px;
+	padding-top: 6px;
+	border-top: 1px solid #e0d5b7;
+}
+
 /* ======== PRINT ======== */
 @media print {
 	body {
@@ -2445,13 +2907,77 @@ body {
 	.pdf-sheet {
 		max-width: none;
 	}
+
+	.pdf-toolbar {
+		display: none !important;
+	}
+
+	.pdf-sheet-end {
+		display: block;
+	}
 }
 
 /* ======== SCREEN PREVIEW ======== */
 @media screen {
 	body {
-		padding: 24px;
+		padding: 56px 24px 24px;
 		background: #555;
+	}
+
+	.pdf-toolbar {
+		display: flex;
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		z-index: 1000;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 8px 16px;
+		background: #2b2b2b;
+		color: #f5f5f5;
+		box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+		font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+	}
+
+	.pdf-toolbar__title {
+		font-size: 13px;
+		font-weight: 600;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.pdf-toolbar__actions {
+		display: flex;
+		gap: 8px;
+		flex-shrink: 0;
+	}
+
+	.pdf-toolbar__btn {
+		appearance: none;
+		border: 1px solid #777;
+		background: #444;
+		color: #f5f5f5;
+		border-radius: 4px;
+		padding: 6px 12px;
+		font-size: 12px;
+		cursor: pointer;
+	}
+
+	.pdf-toolbar__btn:hover {
+		background: #555;
+	}
+
+	.pdf-toolbar__btn--primary {
+		background: #58180d;
+		border-color: #7a2a1a;
+		color: #fff;
+	}
+
+	.pdf-toolbar__btn--primary:hover {
+		background: #6e2114;
 	}
 
 	.pdf-sheet {
@@ -2459,6 +2985,14 @@ body {
 		padding: 0.5in 0.55in;
 		box-shadow: 0 6px 30px rgba(0,0,0,0.4);
 		border-radius: 2px;
+	}
+
+	.pdf-sheet-end {
+		display: block;
+		max-width: 7.5in;
+		margin: 12px auto 0;
+		color: #ccc;
+		border-top-color: #777;
 	}
 
 	.pdf-page-break {

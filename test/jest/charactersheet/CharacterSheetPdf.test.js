@@ -1152,4 +1152,195 @@ describe("CharacterSheetPdf", () => {
 			expect(html).toContain("\u2020"); // † dagger suffix for spells
 		});
 	});
+
+	// ===================================================================
+	// Character notes, appearance, resources, custom abilities
+	// ===================================================================
+	describe("Character Background & Appearance", () => {
+		test("should not render character section when notes and appearance empty", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			const body = html.split("<body>")[1] || html;
+			expect(body).not.toContain(">Character<");
+			expect(body).not.toContain("pdf-note-card");
+			expect(body).not.toContain("pdf-portrait");
+		});
+
+		test("should render personality ideals bonds flaws backstory and notes", () => {
+			state._data.notes = {
+				personality: "Curious explorer",
+				ideals: "Knowledge above all",
+				bonds: "My mentor",
+				flaws: "Too trusting",
+				backstory: "Grew up in a library.",
+				notes: "Session note: met the duke.",
+			};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("Personality Traits");
+			expect(html).toContain("Curious explorer");
+			expect(html).toContain("Ideals");
+			expect(html).toContain("Knowledge above all");
+			expect(html).toContain("Bonds");
+			expect(html).toContain("My mentor");
+			expect(html).toContain("Flaws");
+			expect(html).toContain("Too trusting");
+			expect(html).toContain("Backstory");
+			expect(html).toContain("Grew up in a library.");
+			expect(html).toContain("Session note: met the duke.");
+		});
+
+		test("should accept legacy personalityTraits note key", () => {
+			state._data.notes = {personalityTraits: "Legacy trait text"};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("Legacy trait text");
+		});
+
+		test("should render appearance fields and safe portrait", () => {
+			state._data.appearance = {
+				age: "120",
+				height: "5'6\"",
+				weight: "130 lb",
+				eyes: "green",
+				skin: "fair",
+				hair: "silver",
+				portraitUrl: "data:image/png;base64,abc123",
+			};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-appearance");
+			expect(html).toContain("Age");
+			expect(html).toContain("120");
+			expect(html).toContain("green");
+			expect(html).toContain("pdf-portrait");
+			expect(html).toContain("data:image/png;base64,abc123");
+		});
+
+		test("should reject unsafe portrait URLs", () => {
+			state._data.appearance = {
+				age: "30",
+				portraitUrl: "javascript:alert(1)",
+			};
+			const html = new CharacterSheetPdf(state).generate();
+			const body = html.split("<body>")[1] || html;
+			expect(html).toContain("30");
+			expect(html).not.toContain("javascript:alert");
+			// CSS may mention .pdf-portrait; body must not render an <img>
+			expect(body).not.toContain("<img");
+			expect(body).not.toContain("pdf-portrait-wrap");
+		});
+	});
+
+	describe("Class Resources", () => {
+		test("should not render resources section when empty", () => {
+			state._data.resources = [];
+			const html = new CharacterSheetPdf(state).generate();
+			const body = html.split("<body>")[1] || html;
+			expect(body).not.toContain(">Resources<");
+		});
+
+		test("should render class resource pools with pips", () => {
+			state._data.resources = [
+				{id: "r1", name: "Ki Points", current: 3, max: 5, recharge: "short"},
+				{id: "r2", name: "Rage", current: 2, max: 3, recharge: "long"},
+			];
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("Resources");
+			expect(html).toContain("Ki Points");
+			expect(html).toContain("Rage");
+			expect(html).toContain("SR");
+			expect(html).toContain("LR");
+			expect(html).toContain("●●●○○");
+		});
+	});
+
+	describe("Custom Abilities", () => {
+		test("should not render custom abilities section when empty", () => {
+			state._data.customAbilities = [];
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).not.toContain("Custom Abilities");
+		});
+
+		test("should render passive custom abilities", () => {
+			state._data.customAbilities = [
+				{id: "c1", name: "House Rule Boon", description: "Always gain +1 to initiative checks.", activationAction: "free"},
+			];
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("Custom Abilities");
+			expect(html).toContain("House Rule Boon");
+			expect(html).toContain("+1 to initiative");
+		});
+	});
+
+	describe("Spell Summaries", () => {
+		test("should render one-line spell summary when description present", () => {
+			state._data.spellcasting = {
+				ability: "int",
+				spellSlots: {1: {current: 2, max: 2}},
+				cantripsKnown: [],
+				spellsKnown: [
+					{name: "Magic Missile", level: 1, time: "1 action", range: "120 ft.", duration: "Instantaneous", description: "You create three glowing darts of magical force. Each dart hits a creature of your choice."},
+				],
+				innateSpells: [],
+			};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-spell__summary");
+			expect(html).toContain("three glowing darts");
+		});
+	});
+
+	describe("Active Combat Method Effects", () => {
+		test("should render active combat method effects under TGTT", () => {
+			state._data.combatTraditions = [{code: "AM", name: "Adamant Mountain"}];
+			state._data.activeCombatMethodEffects = [
+				{name: "Farshot Stance", weaponName: "Longbow", description: "+10 ft range"},
+			];
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("Active Effects");
+			expect(html).toContain("Farshot Stance");
+			expect(html).toContain("Longbow");
+			expect(html).toContain("+10 ft range");
+		});
+	});
+
+	describe("Print Toolbar", () => {
+		test("should include screen-only print toolbar markup", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-toolbar");
+			expect(html).toContain("Print / Save as PDF");
+			expect(html).toContain("window.close()");
+		});
+
+		test("should hide toolbar in print media CSS", () => {
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("@media print");
+			expect(html).toContain(".pdf-toolbar");
+			expect(html).toContain("display: none !important");
+		});
+
+		test("should include end-of-sheet marker", () => {
+			state._data.name = "Aragorn";
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("pdf-sheet-end");
+			expect(html).toContain("End of character sheet — Aragorn");
+		});
+	});
+
+	describe("Companion entries hardening", () => {
+		test("should flatten object entries without [object Object]", () => {
+			state._data.companions = [{
+				id: "c1",
+				name: "Buddy",
+				creatureType: "beast",
+				size: "S",
+				ac: 12,
+				hp: {max: 5, current: 5},
+				speed: {walk: 30},
+				abilities: {str: 10, dex: 14, con: 10, int: 3, wis: 12, cha: 6},
+				traits: [{name: "Keen Smell", entries: [{type: "entries", entries: ["Advantage on smell-based Perception."]}]}],
+				actions: [],
+			}];
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("Buddy");
+			expect(html).toContain("Advantage on smell-based Perception.");
+			expect(html).not.toContain("[object Object]");
+		});
+	});
 });
