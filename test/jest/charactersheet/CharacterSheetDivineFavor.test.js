@@ -6,7 +6,7 @@
  * (innate spells, named modifiers, customModifiers ability channels).
  *
  * Covered here:
- *   - Pan loads from the homebrew and the catalog is set on state;
+ *   - Pan and Zeus load from the homebrew and the catalog is set on state;
  *   - favour-tier and malice-tier computation;
  *   - Devotee (favour 3): Animal Friendship as a limited-cast innate spell with
  *     uses = max(1, WIS mod) per long rest, WIS spellcasting ability, and a
@@ -36,10 +36,12 @@ const __dirnameLocal = path.dirname(fileURLToPath(import.meta.url));
 const BREW_PATH = path.join(__dirnameLocal, "..", "..", "..", "homebrew", "TravelersGuidetoThelemar.json");
 
 let PAN;
+let ZEUS;
 
 beforeAll(() => {
 	const brew = JSON.parse(fs.readFileSync(BREW_PATH, "utf8"));
 	PAN = (brew.divineFavor || []).find(g => g.name === "Pan" && g.source === "TGTT");
+	ZEUS = (brew.divineFavor || []).find(g => g.name === "Zeus" && g.source === "TGTT");
 });
 
 function makeState (catalog = [PAN]) {
@@ -59,15 +61,93 @@ describe("Divine Favor — data + catalog", () => {
 		expect(PAN.tiers.map(t => t.favor)).toEqual([3, 10, 25, 50]);
 	});
 
+	test("Zeus is present in the homebrew divineFavor array", () => {
+		expect(ZEUS).toBeDefined();
+		expect(Array.isArray(ZEUS.tiers)).toBe(true);
+		expect(ZEUS.tiers.map(t => t.favor)).toEqual([3, 10, 25, 50]);
+		expect(ZEUS.alignment).toBe("Lawful Neutral");
+		expect(ZEUS.domains).toEqual(expect.arrayContaining(["Tempest", "Sky", "Kingship", "Hospitality"]));
+		expect(ZEUS.expectedActs.length).toBeGreaterThan(0);
+		expect(ZEUS.malicedActs.length).toBeGreaterThan(0);
+	});
+
 	test("catalog resolves the selected god by name|source UID", () => {
 		const s = makeState();
 		s.setDivineFavorGod("Pan|TGTT");
 		expect(s.getDivineFavorGodData()?.name).toBe("Pan");
 	});
 
+	test("catalog resolves Zeus by name|source UID", () => {
+		const s = makeState([ZEUS]);
+		s.setDivineFavorGod("Zeus|TGTT");
+		expect(s.getDivineFavorGodData()?.name).toBe("Zeus");
+	});
+
 	test("expected/maliced acts are carried through as display data", () => {
 		expect(PAN.expectedActs.length).toBeGreaterThan(0);
 		expect(PAN.malicedActs.length).toBeGreaterThan(0);
+	});
+});
+
+describe("Divine Favor — Zeus boon application", () => {
+	test("Devotee (3): Command limited-cast + Insight advantage when judging oaths", () => {
+		const s = makeState([ZEUS]);
+		s.setAbilityBase("cha", 16); // +3
+		s.setDivineFavorGod("Zeus|TGTT");
+		s.setDivineFavorLevel(3);
+
+		const cmd = innate(s, "Command");
+		expect(cmd).toBeDefined();
+		expect(cmd.source).toBe("PHB");
+		expect(cmd.spellcastingAbility).toBe("cha");
+		expect(cmd.uses).toEqual({current: 3, max: 3});
+		expect(cmd.recharge).toBe("long");
+
+		const gated = s.aggregateModifiers("skill:insight");
+		expect(gated.advantage).toBe(false);
+		const avail = gated.conditionalsAvailable.find(c => /oath|vow|testimony/i.test(c.conditional || ""));
+		expect(avail).toBeDefined();
+		expect(avail.advantage).toBe(true);
+	});
+
+	test("Votary (10): Call Lightning 1/long rest", () => {
+		const s = makeState([ZEUS]);
+		s.setDivineFavorGod("Zeus|TGTT");
+		s.setDivineFavorLevel(10);
+
+		const bolt = innate(s, "Call Lightning");
+		expect(bolt).toBeDefined();
+		expect(bolt.spellcastingAbility).toBe("cha");
+		expect(bolt.uses).toEqual({current: 1, max: 1});
+		expect(bolt.recharge).toBe("long");
+		// Devotee boon still present
+		expect(innate(s, "Command")).toBeDefined();
+	});
+
+	test("Disciple (25): Aegis of Olympus narrative feature", () => {
+		const s = makeState([ZEUS]);
+		s.setDivineFavorGod("Zeus|TGTT");
+		s.setDivineFavorLevel(25);
+
+		const feat = (s._data.features || []).find(f => f._divineFavor && f.name === "Aegis of Olympus");
+		expect(feat).toBeDefined();
+		expect(feat._dfNarrativeBoon).toBe(true);
+		const boonRes = (s._data.resources || []).filter(r => r.name === "Aegis of Olympus");
+		expect(boonRes).toHaveLength(1);
+		expect(boonRes[0].max).toBe(1);
+		expect(boonRes[0].recharge).toBe("long");
+	});
+
+	test("Apostle (50): +2 STR or CHA and +2 max via chooser key", () => {
+		const s = makeState([ZEUS]);
+		s.setAbilityBase("str", 15);
+		s.setDivineFavorGod("Zeus|TGTT");
+		s.setDivineFavorLevel(50);
+		s.setDivineFavorBoonChoice("zeus-apostle-asi", "str");
+
+		expect(s.getAbilityScore("str")).toBe(17);
+		expect(s.getAbilityScoreMax("str")).toBe(22);
+		expect(s.getAbilityScoreMax("cha")).toBe(20);
 	});
 });
 

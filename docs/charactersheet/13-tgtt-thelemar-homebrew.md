@@ -17,7 +17,7 @@ This document catalogs all Thelemar homebrew content implemented in the characte
 | **Combat Methods** | 17/17 traditions | 0 | ✅ |
 | **Battle Tactics** | 13/13 | 0 | ✅ |
 | **Dreamwalker Abilities** | 11/11 | 0 | ✅ |
-| **Divine Favor** | 1 god (Pan) seeded | Extensible — more gods are data-only | ✅ |
+| **Divine Favor** | 2 gods (Pan, Zeus) seeded | Extensible — more gods are data-only | ✅ |
 
 **Total TGTT Tests**: 737 passing
 
@@ -476,6 +476,10 @@ every affected tab immediately.
 - **Pan** — full seed: Devotee (Animal Friendship limited-cast + Persuasion-vs-animals
   advantage), Votary (Conjure Animals 1/long-rest), Disciple (nature-sense
   narrative), Apostle (+2 WIS/CHA & +2 to its max).
+- **Zeus** — full seed: Devotee (Command limited-cast + Insight-vs-oaths
+  advantage), Votary (Call Lightning 1/long-rest), Disciple (Aegis of Olympus
+  narrative), Apostle (+2 STR/CHA & +2 to its max). Domains: Tempest, Sky,
+  Order, Kingship, Hospitality.
 
 Additional gods can be added purely as data (no code changes).
 
