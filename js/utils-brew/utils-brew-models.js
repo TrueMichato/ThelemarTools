@@ -19,7 +19,12 @@ export class BrewDoc {
 		this.body = opts.body;
 	}
 
-	toObject () { return MiscUtil.copyFast({...this}); }
+	toObject () {
+		return {
+			head: this.head instanceof _BrewDocHead ? this.head.toObject() : MiscUtil.copyFast(this.head),
+			body: MiscUtil.copyFast(this.body),
+		};
+	}
 
 	static fromValues ({head, body}) {
 		return new this({
@@ -185,7 +190,49 @@ class _BrewDocHead {
 		this.isEditable = opts.isEditable;
 	}
 
-	toObject () { return MiscUtil.copyFast({...this}); }
+	/**
+	 * Install `checksum` as a self-replacing lazy accessor.
+	 *
+	 * Checksumming is `md5(JSON.stringify(...))` over the entire document body. For a user with a large local
+	 *   homebrew collection this is multiple seconds of work on every page load, yet the checksum is only ever
+	 *   read when de-duplicating user-added brew. Computing it on first read instead makes it free for the (much
+	 *   more common) case where the document is merely loaded and rendered.
+	 *
+	 * The property is left enumerable and configurable, so that it behaves as an ordinary data property to
+	 *   everything which observes it -- including object spread and the structured-clone used to persist documents
+	 *   to IndexedDB, both of which read accessors, and so materialise the checksum exactly when it is needed.
+	 */
+	static _defineChecksumLazy (tgt, fnGet) {
+		Object.defineProperty(tgt, "checksum", {
+			enumerable: true,
+			configurable: true,
+			get () {
+				const val = fnGet();
+				Object.defineProperty(this, "checksum", {value: val, enumerable: true, configurable: true, writable: true});
+				return val;
+			},
+			set (val) {
+				Object.defineProperty(this, "checksum", {value: val, enumerable: true, configurable: true, writable: true});
+			},
+		});
+		return tgt;
+	}
+
+	static _getChecksum (json) { return CryptUtil.md5(JSON.stringify(json)); }
+
+	toObject () {
+		// Note the explicit construction (rather than a spread): key order is preserved, and the checksum is
+		//   materialised deliberately, as the result is intended for persistence.
+		return {
+			docIdLocal: this.docIdLocal,
+			timeAdded: this.timeAdded,
+			checksum: this.checksum,
+			url: this.url,
+			filename: this.filename,
+			isLocal: this.isLocal,
+			isEditable: this.isEditable,
+		};
+	}
 
 	static fromValues (
 		{
@@ -196,15 +243,15 @@ class _BrewDocHead {
 			isEditable = false,
 		},
 	) {
-		return new this({
+		const out = new this({
 			docIdLocal: CryptUtil.uid(),
 			timeAdded: Date.now(),
-			checksum: CryptUtil.md5(JSON.stringify(json)),
 			url: url,
 			filename: filename,
 			isLocal: isLocal,
 			isEditable: isEditable,
 		});
+		return this._defineChecksumLazy(out, () => this._getChecksum(json));
 	}
 
 	static fromObject (obj, {isCopy = false} = {}) {
@@ -212,12 +259,11 @@ class _BrewDocHead {
 	}
 
 	mutUpdate ({json}) {
-		this.checksum = CryptUtil.md5(JSON.stringify(json));
-		return this;
+		return this.constructor._defineChecksumLazy(this, () => this.constructor._getChecksum(json));
 	}
 
 	mutMerge ({json, body, isLazy}) {
-		if (!isLazy) this.checksum = CryptUtil.md5(JSON.stringify(body ?? json));
+		if (!isLazy) return this.constructor._defineChecksumLazy(this, () => this.constructor._getChecksum(body ?? json));
 		return this;
 	}
 }
