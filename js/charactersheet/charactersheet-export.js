@@ -44,6 +44,7 @@ class CharacterSheetExport {
 		});
 
 		let isPdfFormat = false;
+		let syncFooterForFormat = () => {};
 
 		const btnJson = e_({tag: "button",
 			clazz: "ve-btn ve-btn-default ve-active",
@@ -54,6 +55,7 @@ class CharacterSheetExport {
 				btnPdf.classList.remove("ve-active");
 				jsonSection.style.display = "";
 				pdfSection.style.display = "none";
+				syncFooterForFormat();
 			}});
 
 		const btnPdf = e_({tag: "button",
@@ -65,6 +67,7 @@ class CharacterSheetExport {
 				btnJson.classList.remove("ve-active");
 				pdfSection.style.display = "";
 				jsonSection.style.display = "none";
+				syncFooterForFormat();
 			}});
 
 		const jsonSection = ee`<div>
@@ -94,7 +97,7 @@ class CharacterSheetExport {
 			click: () => {
 				this._printCharacter();
 			}});
-		btnQuickPrint.innerHTML = `🖨️ Quick Print (Current View)`;
+		btnQuickPrint.innerHTML = `🖨️ Quick Print (Live UI)`;
 
 		const pdfSection = ee`<div style="display: none;">
 			<div class="charsheet__export-info">
@@ -102,10 +105,11 @@ class CharacterSheetExport {
 				<p class="ve-muted" style="font-size: 0.85rem;">Opens a clean, print-optimized character sheet in a new window. Use your browser's print dialog to save as PDF or print a physical copy.</p>
 				<ul class="ve-muted" style="margin: 0.5rem 0 0; padding-left: 1.5rem; font-size: 0.85rem;">
 					<li>Classic D&amp;D-inspired parchment layout</li>
-					<li>All stats, features, spells, and equipment</li>
+					<li>Stats, features, spells, equipment, notes, and resources</li>
 					<li>Thelemar homebrew sections (if applicable)</li>
 					<li>Companion statblocks on a dedicated page</li>
 				</ul>
+				<p class="ve-muted mt-2" style="font-size: 0.8rem;"><strong>Quick Print</strong> uses the live sheet layout (tabs/chrome stripped) and is not the parchment print view.</p>
 			</div>
 			<div>
 				${btnOpenPrintView}
@@ -125,38 +129,44 @@ class CharacterSheetExport {
 			${pdfSection}
 		</div>`.appendTo(modalInner);
 
-		// Footer buttons
+		// Footer buttons — labels/visibility track the selected export format.
 		const btnClose = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Close", click: () => doClose(false)});
 		const btnCopy = e_({tag: "button",
 			clazz: "ve-btn ve-btn-default",
 			click: async () => {
-				if (isPdfFormat) {
-					this._openPdfPrintView();
-				} else {
-					await MiscUtil.pCopyTextToClipboard(jsonStr);
-					JqueryUtil.doToast({type: "success", content: "Character data copied to clipboard!"});
-				}
+				await MiscUtil.pCopyTextToClipboard(jsonStr);
+				JqueryUtil.doToast({type: "success", content: "Character data copied to clipboard!"});
 			}});
 		btnCopy.innerHTML = `<span class="glyphicon glyphicon-copy"></span> Copy to Clipboard`;
 
 		const btnDownload = e_({tag: "button",
 			clazz: "ve-btn ve-btn-primary",
 			click: () => {
-				if (isPdfFormat) {
-					this._openPdfPrintView();
-				} else {
-					// Note: DataUtil.userDownload appends ".json" itself — pass bare basename.
-					const basename = characterName.replace(/[^a-zA-Z0-9]/g, "_");
-					DataUtil.userDownload(basename, characterData, {fileType: "character"});
-					JqueryUtil.doToast({type: "success", content: `Downloaded ${basename}.json`});
-				}
+				// Note: DataUtil.userDownload appends ".json" itself — pass bare basename.
+				const basename = characterName.replace(/[^a-zA-Z0-9]/g, "_");
+				DataUtil.userDownload(basename, characterData, {fileType: "character"});
+				JqueryUtil.doToast({type: "success", content: `Downloaded ${basename}.json`});
 			}});
 		btnDownload.innerHTML = `<span class="glyphicon glyphicon-download"></span> Download`;
+
+		const btnFooterPrint = e_({tag: "button",
+			clazz: "ve-btn ve-btn-primary",
+			style: "display: none;",
+			click: () => this._openPdfPrintView()});
+		btnFooterPrint.innerHTML = `📄 Open Print View`;
+
+		syncFooterForFormat = () => {
+			btnCopy.style.display = isPdfFormat ? "none" : "";
+			btnDownload.style.display = isPdfFormat ? "none" : "";
+			btnFooterPrint.style.display = isPdfFormat ? "" : "none";
+		};
+		syncFooterForFormat();
 
 		ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
 			${btnClose}
 			${btnCopy}
 			${btnDownload}
+			${btnFooterPrint}
 		</div>`.appendTo(modalInner);
 	}
 
@@ -281,10 +291,7 @@ class CharacterSheetExport {
 		try {
 			let sourceConfig = await this._pGetNpcExportSourceConfig();
 			let exportOptions = await this._pGetNpcExportOptions();
-			let monster = CharacterSheetNpcExporter.convertStateToMonster(this._state, {
-				sourceJson: sourceConfig.sourceJson,
-				defenseMode: exportOptions.defenseMode,
-			});
+			let monster = null;
 			let sourceMeta = CharacterSheetNpcExporter.getDefaultSourceMeta(sourceConfig);
 
 			const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
@@ -315,8 +322,151 @@ class CharacterSheetExport {
 			</select>`});
 			selDefenseMode.value = exportOptions.defenseMode;
 
+			const selUnarmed = e_({outer: `<select class="ve-form-control ve-input-sm">
+				<option value="auto">Unarmed: Auto</option>
+				<option value="always">Unarmed: Always</option>
+				<option value="never">Unarmed: Never</option>
+			</select>`});
+			selUnarmed.value = exportOptions.includeUnarmed;
+
+			const selFeatures = e_({outer: `<select class="ve-form-control ve-input-sm">
+				<option value="auto">Features: Auto (important)</option>
+				<option value="allImportant">Features: All important</option>
+				<option value="manual">Features: Manual pick</option>
+			</select>`});
+			selFeatures.value = exportOptions.includeFeatures;
+
+			const selCrMode = e_({outer: `<select class="ve-form-control ve-input-sm">
+				<option value="auto">CR: Auto estimate</option>
+				<option value="manual">CR: Manual</option>
+			</select>`});
+			selCrMode.value = exportOptions.crMode;
+
+			const iptCrManual = e_({tag: "input", clazz: "ve-form-control ve-input-sm"});
+			iptCrManual.placeholder = "5";
+			iptCrManual.value = exportOptions.crManual || "1";
+			iptCrManual.style.maxWidth = "80px";
+
+			const cbCustomMods = e_({tag: "input", type: "checkbox"});
+			cbCustomMods.checked = exportOptions.includeCustomModifiers !== false;
+			const cbCustomAbs = e_({tag: "input", type: "checkbox"});
+			cbCustomAbs.checked = exportOptions.includeCustomAbilities !== false;
+			const cbMethods = e_({tag: "input", type: "checkbox"});
+			cbMethods.checked = exportOptions.includeCombatMethods !== false;
+			const cbCrBreakdown = e_({tag: "input", type: "checkbox"});
+			cbCrBreakdown.checked = !!exportOptions.includeCrBreakdown;
+			const cbLegendary = e_({tag: "input", type: "checkbox"});
+			cbLegendary.checked = !!exportOptions.legendaryEnabled;
+
+			const iptLegendaryActions = e_({tag: "input", clazz: "ve-form-control ve-input-sm", type: "number"});
+			iptLegendaryActions.min = "0";
+			iptLegendaryActions.max = "5";
+			iptLegendaryActions.value = String(exportOptions.legendaryActions ?? 3);
+			iptLegendaryActions.style.maxWidth = "70px";
+
+			const iptLegendaryRes = e_({tag: "input", clazz: "ve-form-control ve-input-sm", type: "number"});
+			iptLegendaryRes.min = "0";
+			iptLegendaryRes.max = "5";
+			iptLegendaryRes.value = String(exportOptions.legendaryResistances ?? 0);
+			iptLegendaryRes.style.maxWidth = "70px";
+
+			const wrpFeaturePicker = e_({tag: "div", clazz: "mb-2"});
 			const wrpPreviewMeta = e_({tag: "p", clazz: "ve-muted mb-0"});
-			const wrpPreviewStatblock = e_({tag: "div", clazz: "ve-overflow-x-auto", style: "max-height: 60vh; overflow-y: auto;"});
+			const wrpValidation = e_({tag: "div", clazz: "mb-2"});
+			const wrpPreviewStatblock = e_({tag: "div", clazz: "ve-overflow-x-auto", style: "max-height: 50vh; overflow-y: auto;"});
+
+			const featureChecks = new Map();
+			const exportableFeatures = CharacterSheetNpcExporter.listExportableFeatures(this._state);
+			const recommendedIds = new Set(
+				exportableFeatures
+					.filter(f => f.classification === "important")
+					.map(f => f.id),
+			);
+			const initialSelected = new Set(
+				(exportOptions.selectedFeatureIds || []).length
+					? exportOptions.selectedFeatureIds
+					: [...recommendedIds],
+			);
+
+			const renderFeaturePicker = () => {
+				wrpFeaturePicker.innerHTML = "";
+				featureChecks.clear();
+				if (selFeatures.value !== "manual") {
+					wrpFeaturePicker.style.display = "none";
+					return;
+				}
+				wrpFeaturePicker.style.display = "";
+				const list = e_({tag: "div", clazz: "ve-flex-col", style: "max-height: 160px; overflow-y: auto; gap: 4px;"});
+				exportableFeatures.forEach(f => {
+					const cb = e_({tag: "input", type: "checkbox"});
+					cb.checked = initialSelected.has(f.id) || initialSelected.has(f.name);
+					featureChecks.set(f.id, cb);
+					const badge = f.classification === "important" ? "important" : f.classification;
+					ee`<label class="ve-flex-v-center" style="gap: 6px; font-size: 0.85rem;">
+						${cb}
+						<span>${f.name}</span>
+						<span class="ve-muted">(${f.section} · ${badge})</span>
+					</label>`.appendTo(list);
+				});
+				const btnRec = e_({tag: "button",
+					clazz: "ve-btn ve-btn-default ve-btn-xs",
+					txt: "Select recommended",
+					click: () => {
+						featureChecks.forEach((cb, id) => { cb.checked = recommendedIds.has(id); });
+					}});
+				const btnNone = e_({tag: "button",
+					clazz: "ve-btn ve-btn-default ve-btn-xs",
+					txt: "Select none",
+					click: () => {
+						featureChecks.forEach(cb => { cb.checked = false; });
+					}});
+				ee`<div>
+					<div class="ve-flex-v-center mb-1" style="gap: 6px;">
+						<strong style="font-size: 0.9rem;">Feature picks</strong>
+						${btnRec}
+						${btnNone}
+					</div>
+					${list}
+				</div>`.appendTo(wrpFeaturePicker);
+			};
+
+			const readOptionsFromForm = () => {
+				const selectedFeatureIds = [];
+				featureChecks.forEach((cb, id) => {
+					if (cb.checked) selectedFeatureIds.push(id);
+				});
+				return this._getSanitizedNpcExportOptions({
+					defenseMode: String(selDefenseMode.value || "persistent"),
+					includeUnarmed: String(selUnarmed.value || "auto"),
+					includeFeatures: String(selFeatures.value || "auto"),
+					selectedFeatureIds,
+					includeCustomModifiers: !!cbCustomMods.checked,
+					includeCustomAbilities: !!cbCustomAbs.checked,
+					includeCombatMethods: !!cbMethods.checked,
+					crMode: String(selCrMode.value || "auto"),
+					crManual: String(iptCrManual.value || "1"),
+					legendaryEnabled: !!cbLegendary.checked,
+					legendaryActions: Number(iptLegendaryActions.value) || 0,
+					legendaryResistances: Number(iptLegendaryRes.value) || 0,
+					includeCrBreakdown: !!cbCrBreakdown.checked,
+				});
+			};
+
+			const renderValidation = (validation) => {
+				if (!validation.errors.length && !validation.warnings.length) {
+					wrpValidation.innerHTML = `<div class="ve-muted" style="font-size: 0.85rem;">Validation: no issues.</div>`;
+					return;
+				}
+				const errHtml = validation.errors.slice(0, 4).map(e => `<div class="text-danger">• ${this._escapeHtml(e)}</div>`).join("");
+				const warnHtml = validation.warnings.slice(0, 4).map(w => `<div class="text-warning">• ${this._escapeHtml(w)}</div>`).join("");
+				const extraE = Math.max(0, validation.errors.length - 4);
+				const extraW = Math.max(0, validation.warnings.length - 4);
+				wrpValidation.innerHTML = `
+					<div style="font-size: 0.85rem;">
+						${errHtml}${extraE ? `<div class="text-danger">(+${extraE} more errors)</div>` : ""}
+						${warnHtml}${extraW ? `<div class="text-warning">(+${extraW} more warnings)</div>` : ""}
+					</div>`;
+			};
 
 			const pApplySourceConfig = async () => {
 				const inputConfig = {
@@ -325,9 +475,7 @@ class CharacterSheetExport {
 					full: String(iptSourceFull.value || ""),
 					version: String(iptSourceVersion.value || ""),
 				};
-				const nextOptions = this._getSanitizedNpcExportOptions({
-					defenseMode: String(selDefenseMode.value || "persistent"),
-				});
+				const nextOptions = readOptionsFromForm();
 
 				sourceConfig = CharacterSheetNpcExporter.getSanitizedSourceConfig(inputConfig);
 				exportOptions = nextOptions;
@@ -336,13 +484,27 @@ class CharacterSheetExport {
 				iptSourceFull.value = sourceConfig.full;
 				iptSourceVersion.value = sourceConfig.version;
 				selDefenseMode.value = exportOptions.defenseMode;
+				selUnarmed.value = exportOptions.includeUnarmed;
+				selFeatures.value = exportOptions.includeFeatures;
+				selCrMode.value = exportOptions.crMode;
+				iptCrManual.value = exportOptions.crManual;
+				cbCustomMods.checked = exportOptions.includeCustomModifiers;
+				cbCustomAbs.checked = exportOptions.includeCustomAbilities;
+				cbMethods.checked = exportOptions.includeCombatMethods;
+				cbCrBreakdown.checked = exportOptions.includeCrBreakdown;
+				cbLegendary.checked = exportOptions.legendaryEnabled;
+				iptLegendaryActions.value = String(exportOptions.legendaryActions);
+				iptLegendaryRes.value = String(exportOptions.legendaryResistances);
+				iptCrManual.disabled = exportOptions.crMode !== "manual";
+				iptLegendaryActions.disabled = !exportOptions.legendaryEnabled;
+				iptLegendaryRes.disabled = !exportOptions.legendaryEnabled;
 
 				await this._pSetNpcExportSourceConfig(sourceConfig);
 				await this._pSetNpcExportOptions(exportOptions);
 
 				monster = CharacterSheetNpcExporter.convertStateToMonster(this._state, {
 					sourceJson: sourceConfig.sourceJson,
-					defenseMode: exportOptions.defenseMode,
+					...exportOptions,
 				});
 				sourceMeta = CharacterSheetNpcExporter.getDefaultSourceMeta(sourceConfig);
 
@@ -350,16 +512,24 @@ class CharacterSheetExport {
 				const safeName = this._escapeHtml(monster.name);
 				const safeSource = this._escapeHtml(monster.source);
 				const safeCr = this._escapeHtml(monster.cr);
+				const actionCount = (monster.action || []).length;
+				const spellBlocks = (monster.spellcasting || []).length;
 
-				wrpPreviewMeta.innerHTML = `CR: <strong>${safeCr}</strong> • Source: <strong>${safeSource}</strong> • Name: <strong>${safeName}</strong>`;
+				wrpPreviewMeta.innerHTML = `CR: <strong>${safeCr}</strong> • Source: <strong>${safeSource}</strong> • Name: <strong>${safeName}</strong> • Actions: ${actionCount} • Spellcasting blocks: ${spellBlocks}`;
 				wrpPreviewStatblock.innerHTML = `<table class="ve-w-100 ve-stats"><tbody>${rendered}</tbody></table>`;
 				Renderer.statblockCollapse.apply(wrpPreviewStatblock);
+				renderValidation(CharacterSheetNpcExporter.getValidationIssues(monster));
 			};
+
+			selFeatures.addEventListener("change", () => {
+				renderFeaturePicker();
+			});
 
 			ee`<div>
 				<div class="charsheet__export-info mb-3">
 					<p class="ve-muted mb-1"><strong>Statblock Preview</strong> — Uses the standard bestiary compact format.</p>
 					${wrpPreviewMeta}
+					${wrpValidation}
 				</div>
 				<div class="mb-3 p-2" style="border: 1px solid var(--bs-border-color); border-radius: 4px;">
 					<div class="mb-2"><strong>Source Metadata</strong></div>
@@ -379,17 +549,48 @@ class CharacterSheetExport {
 						<label class="ve-muted no-shrink" style="min-width: 110px;">Version</label>
 						${iptSourceVersion}
 					</div>
-					<div class="ve-flex-v-center mt-2" style="gap: 8px;">
+				</div>
+				<div class="mb-3 p-2" style="border: 1px solid var(--bs-border-color); border-radius: 4px;">
+					<div class="mb-2"><strong>Export Options</strong></div>
+					<div class="ve-flex-v-center mb-2" style="gap: 8px;">
 						<label class="ve-muted no-shrink" style="min-width: 110px;">Defenses</label>
 						${selDefenseMode}
 					</div>
-					<p class="ve-muted mb-0 mt-1" style="margin-left: 118px;">
-						Persistent = stable baseline; Active-State = include currently toggled effects.
+					<div class="ve-flex-v-center mb-2" style="gap: 8px;">
+						<label class="ve-muted no-shrink" style="min-width: 110px;">Unarmed</label>
+						${selUnarmed}
+					</div>
+					<div class="ve-flex-v-center mb-2" style="gap: 8px;">
+						<label class="ve-muted no-shrink" style="min-width: 110px;">Features</label>
+						${selFeatures}
+					</div>
+					${wrpFeaturePicker}
+					<div class="ve-flex-v-center mb-2" style="gap: 8px; flex-wrap: wrap;">
+						<label class="ve-muted no-shrink" style="min-width: 110px;">CR</label>
+						${selCrMode}
+						${iptCrManual}
+						<label class="ve-flex-v-center ve-muted" style="gap: 4px; font-size: 0.85rem;">${cbCrBreakdown} Show CR breakdown</label>
+					</div>
+					<div class="ve-flex-v-center mb-2" style="gap: 12px; flex-wrap: wrap; font-size: 0.85rem;">
+						<label class="ve-flex-v-center" style="gap: 4px;">${cbCustomMods} Custom modifiers</label>
+						<label class="ve-flex-v-center" style="gap: 4px;">${cbCustomAbs} Custom abilities</label>
+						<label class="ve-flex-v-center" style="gap: 4px;">${cbMethods} Combat methods</label>
+					</div>
+					<div class="ve-flex-v-center" style="gap: 8px; flex-wrap: wrap;">
+						<label class="ve-flex-v-center" style="gap: 4px; font-size: 0.85rem;">${cbLegendary} Legendary framing</label>
+						<label class="ve-muted" style="font-size: 0.85rem;">Actions</label>
+						${iptLegendaryActions}
+						<label class="ve-muted" style="font-size: 0.85rem;">Resistances/day</label>
+						${iptLegendaryRes}
+					</div>
+					<p class="ve-muted mb-0 mt-2" style="font-size: 0.8rem;">
+						Persistent defenses = stable baseline. Active-State includes currently toggled effects. Legendary options are off by default.
 					</p>
 				</div>
 				${wrpPreviewStatblock}
 			</div>`.appendTo(modalInner);
 
+			renderFeaturePicker();
 			await pApplySourceConfig();
 
 			const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Close", click: () => doClose(false)});
@@ -401,6 +602,18 @@ class CharacterSheetExport {
 				}});
 			btnRefresh.innerHTML = `<span class="glyphicon glyphicon-refresh"></span> Refresh Preview`;
 
+			const getBrewPayload = () => ({_meta: {sources: [sourceMeta]}, monster: [monster]});
+
+			const btnCopy = e_({tag: "button",
+				clazz: "ve-btn ve-btn-default",
+				click: async () => {
+					await pApplySourceConfig();
+					const payload = getBrewPayload();
+					await MiscUtil.pCopyTextToClipboard(JSON.stringify(payload, null, 2));
+					JqueryUtil.doToast({type: "success", content: "NPC homebrew JSON copied to clipboard!"});
+				}});
+			btnCopy.innerHTML = `<span class="glyphicon glyphicon-copy"></span> Copy JSON`;
+
 			const btnDownload = e_({tag: "button",
 				clazz: "ve-btn ve-btn-default",
 				click: async () => {
@@ -411,7 +624,7 @@ class CharacterSheetExport {
 						const details = this._getValidationIssueSummary(validation, {maxErrors: 2, maxWarnings: 2});
 						JqueryUtil.doToast({
 							type: "warning",
-							content: `Downloaded with validation warnings (${validation.errors.length} error(s), ${validation.warnings.length} warning(s)). ${details}`.trim(),
+							content: `Downloaded with validation issues (${validation.errors.length} error(s), ${validation.warnings.length} warning(s)). ${details}`.trim(),
 						});
 					}
 
@@ -419,7 +632,7 @@ class CharacterSheetExport {
 					const basename = (monster.name || "npc").replace(/[^a-zA-Z0-9]/g, "_");
 					DataUtil.userDownload(
 						basename,
-						{_meta: {sources: [sourceMeta]}, monster: [monster]},
+						getBrewPayload(),
 						{fileType: "homebrew"},
 					);
 					JqueryUtil.doToast({type: "success", content: `Downloaded ${basename}.json`});
@@ -434,9 +647,10 @@ class CharacterSheetExport {
 				}});
 			btnSave.innerHTML = `<span class="glyphicon glyphicon-floppy-disk"></span> Save to Homebrew`;
 
-			ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
+			ee`<div class="ve-flex-v-center ve-flex-h-right mt-3" style="gap: 6px; flex-wrap: wrap;">
 				${btnCancel}
 				${btnRefresh}
+				${btnCopy}
 				${btnDownload}
 				${btnSave}
 			</div>`.appendTo(modalInner);
@@ -466,10 +680,7 @@ class CharacterSheetExport {
 	}
 
 	_getSanitizedNpcExportOptions (opts = {}) {
-		const mode = String(opts.defenseMode || "persistent").toLowerCase();
-		return {
-			defenseMode: mode === "active" ? "active" : "persistent",
-		};
+		return CharacterSheetNpcExporter.getSanitizedExportOptions(opts);
 	}
 
 	async _pGetNpcExportOptions () {
@@ -598,8 +809,14 @@ class CharacterSheetExport {
 			JqueryUtil.doToast({type: "warning", content: "Pop-up blocked! Please allow pop-ups for this site to open the print view."});
 			return;
 		}
+		printWindow.document.open();
 		printWindow.document.write(html);
 		printWindow.document.close();
+		try {
+			printWindow.document.title = `${this._state.getName() || "Character"} — Character Sheet`;
+		} catch (e) {
+			// Cross-origin or closed window — ignore
+		}
 	}
 
 	_printCharacter () {

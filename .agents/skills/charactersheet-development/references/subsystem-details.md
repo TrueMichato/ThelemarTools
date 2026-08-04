@@ -368,23 +368,56 @@ Magic weapon bonuses are THREE separate fields on the item:
 
 ## NPC Exporter
 
+**Files**: `charactersheet-npc-exporter.js` (pure converter), `charactersheet-export.js` (dialog).  
+**Docs**: `docs/charactersheet/18-npc-export.md`  
+**Tests**: `CharacterSheetNpcExporter.test.js`
+
 ### Key Method: `convertStateToMonster(state, options)`
 
 **Output format**: 5etools homebrew monster JSON. Key structural requirements:
-- **AC**: `[{ac: 15, from: ["natural armor"]}]` — array of objects, NOT flat number
-- **HP**: `{average: 52, formula: "8d8 + 16"}` — both fields required
+- **AC**: `[{ac: 15, from: ["Chain Mail" | "Unarmored Defense (Monk)" | "natural armor", ...]}]` — from `getAcBreakdown` / equipped armor, not hard-coded `"armor"`
+- **HP**: `{average: maxHp, formula}` — average is max HP; formula uses primary class hit die + CON
 - **Size**: `["M"]` — array
+- **Spellcasting**: class slots and/or pact magic + separate innate block (`will` / `daily`)
+- **Multiattack**: synthesized when Extra Attack / attack count ≥ 2; Extra Attack trait suppressed
+- **pbNote**: character proficiency (CR is advisory only)
+
+Sanitize options with `getSanitizedExportOptions` (defense mode, unarmed policy, feature mode/picker, CR mode, legendary, name suffix, CR breakdown). List picker rows via `listExportableFeatures(state)`.
 
 ### CR Estimation Algorithm
-```
-baseline = totalLevel <= 1 ? 0.5 : max(1, level - 1)
-defensiveAdjust = floor((hp - 40)/45 + (ac - 13)/2)
-offensiveAdjust = floor((avgAttackBonus - 5)/2 + (maxDamageScore - 10)/8 + (hasSpells ? 1 : 0))
-finalCR = max(0.125, baseline + (defensiveAdjust + offensiveAdjust) / 3)
-```
+Staged DMG-style tables (`_CR_HP_THRESHOLDS`, `_CR_DPR_THRESHOLDS`):
+1. **Defensive CR** from HP + AC adjustment
+2. **Offensive CR** from expected DPR (best attack × multiattack + light spell heuristic) and attack bonus / save DC
+3. Blend with mild level anchor → nearest CR string (`0` … `30`, fractions included)
+4. Manual override: `crMode: "manual"` + `crManual`
+5. Optional `includeCrBreakdown` appends note under Level Signal
 
-### Custom Source Metadata
-Users can configure custom source with `charsheet-npc-export-source-config` storage key.
+### Spellcasting fidelity
+- Header uses NPC reference name (not `"The NPC"`)
+- DC / attack from `getSpellSaveDc` / `getSpellAttackBonus` (and ability-specific variants)
+- Innate from `getInnateSpells()` → second block
+- Warlock: `getPactSlots()` → Pact Magic block when normal slots empty
+
+### Legendary (optional, off by default)
+`legendaryEnabled` → `legendaryActions` count + derived actions (weapon / move / signature) and optional `Legendary Resistance (N/Day)`.
+
+### Special systems coverage
+- **Class resources**: `getGenericPoolResources` + `getSyntheticCombatResources` + stamina → `Class Resources` trait
+- **Combat methods (TGTT)**: `getCombatMethods()` → `Combat Methods` trait by stamina cost
+- **Divine Favor**: innate spells via normal innate path; narrative boons as features; named mods as Custom Modifiers
+- **Ioun stones**: active (orbiting) stones under Special Equipment with `orbiting` note; stowed omitted
+- **Specialties**: important/activatable export; pure passive often collapses into named modifiers
+- **Gemstones / armor upgrades**: state getters only (no Upgrades module load required)
+
+### Storage
+- `charsheet-npc-export-source-config` — source meta
+- `charsheet-npc-export-options` — export options (sanitized on read/write)
+
+### Dialog actions
+Close | Refresh | **Copy JSON** | Download JSON | Save to Homebrew. In-dialog validation panel; Save blocked on hard errors.
+
+### Tests
+`CharacterSheetNpcExporter.test.js` + `CharacterSheetNpcExporter.matrix.test.js` (class × special-system matrix).
 
 ## Rest Mechanics
 

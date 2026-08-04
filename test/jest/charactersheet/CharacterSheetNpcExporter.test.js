@@ -484,4 +484,226 @@ describe("CharacterSheetNpcExporter", () => {
 		expect(out.spellcasting[0].will).toBeDefined();
 		expect(out.spellcasting[0].spells).toBeUndefined();
 	});
+
+	it("should avoid double periods in attack ranges and strip +0 damage", () => {
+		const warrior = new CharacterSheetState();
+		warrior.setName("Archer");
+		warrior.addClass({name: "Fighter", source: "PHB", level: 5});
+		warrior.setAbilityBase("dex", 10);
+		warrior.setMaxHp(40);
+		warrior.addItem({
+			name: "Longbow",
+			source: "PHB",
+			dmg1: "1d8",
+			dmgType: "piercing",
+			range: "150/600 ft.",
+			type: "R",
+			weaponCategory: "martial",
+			equipped: true,
+		});
+
+		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior);
+		const bow = out.action.find(a => a.name === "Longbow");
+		expect(bow).toBeDefined();
+		expect(bow.entries[0]).not.toMatch(/ft\.\./);
+		expect(bow.entries[0]).toContain("range 150/600 ft.");
+		expect(bow.entries[0]).toContain("{@damage 1d8}");
+		expect(bow.entries[0]).not.toContain("1d8+0");
+	});
+
+	it("should tag thrown melee weapons as mw,rw", () => {
+		const warrior = new CharacterSheetState();
+		warrior.setName("Thrower");
+		warrior.addClass({name: "Fighter", source: "PHB", level: 3});
+		warrior.setAbilityBase("str", 14);
+		warrior.setMaxHp(28);
+		warrior.addItem({
+			name: "Dagger",
+			source: "PHB",
+			dmg1: "1d4",
+			dmgType: "piercing",
+			range: "20/60 ft.",
+			type: "M",
+			weaponCategory: "simple",
+			property: ["F", "T"],
+			equipped: true,
+		});
+
+		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior);
+		const dagger = out.action.find(a => a.name === "Dagger");
+		expect(dagger).toBeDefined();
+		expect(dagger.entries[0]).toContain("{@atk mw,rw}");
+		expect(dagger.entries[0]).toContain("reach 5 ft. or range 20/60 ft.");
+	});
+
+	it("should omit default unarmed strike when armed (auto mode) and keep it for monks", () => {
+		const fighter = new CharacterSheetState();
+		fighter.setName("Armed");
+		fighter.addClass({name: "Fighter", source: "PHB", level: 5});
+		fighter.setAbilityBase("str", 16);
+		fighter.setMaxHp(44);
+		fighter.addAttack({
+			name: "Longsword",
+			isMelee: true,
+			attackBonus: 6,
+			damage: "1d8+3",
+			damageType: "slashing",
+			range: "reach 5 ft., one target",
+		});
+
+		const fighterOut = CharacterSheetNpcExporter.convertStateToMonster(fighter);
+		expect(fighterOut.action.some(a => a.name === "Longsword")).toBe(true);
+		expect(fighterOut.action.some(a => a.name === "Unarmed Strike")).toBe(false);
+
+		const monk = new CharacterSheetState();
+		monk.setName("Zu");
+		monk.addClass({name: "Monk", source: "XPHB", level: 5});
+		monk.setAbilityBase("dex", 16);
+		monk.setAbilityBase("wis", 14);
+		monk.setMaxHp(38);
+
+		const monkOut = CharacterSheetNpcExporter.convertStateToMonster(monk);
+		expect(monkOut.action.some(a => a.name === "Unarmed Strike")).toBe(true);
+		expect(monkOut.ac[0].from.join(" ")).toMatch(/Unarmored Defense/i);
+	});
+
+	it("should synthesize Multiattack and suppress Extra Attack trait text", () => {
+		state.addFeature({
+			name: "Extra Attack",
+			source: "PHB",
+			description: "You can attack twice whenever you take the Attack action on your turn.",
+			important: true,
+		});
+
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		expect(out.action.some(a => a.name === "Multiattack")).toBe(true);
+		expect(out.action.find(a => a.name === "Multiattack").entries[0]).toMatch(/two/i);
+		expect((out.trait || []).some(t => t.name === "Extra Attack")).toBe(false);
+	});
+
+	it("should use state spell save DC and character name in spellcasting header", () => {
+		const wiz = new CharacterSheetState();
+		wiz.setName("Mira");
+		wiz.addClass({name: "Wizard", source: "XPHB", level: 5});
+		wiz.setAbilityBase("int", 18);
+		wiz.setMaxHp(30);
+		wiz.setSpellcastingAbility("int");
+		wiz.addCantrip({name: "fire bolt", source: "XPHB", level: 0});
+		wiz.addNamedModifier({name: "DC bump", type: "spellDc", value: 2, enabled: true});
+		wiz._recalculateCustomModifiers?.();
+
+		const expectedDc = wiz.getSpellSaveDc();
+		const out = CharacterSheetNpcExporter.convertStateToMonster(wiz);
+		const header = out.spellcasting[0].headerEntries[0];
+		expect(header).toContain("Mira is a spellcaster");
+		expect(header).toContain(`{@dc ${expectedDc}}`);
+		expect(header).not.toContain("The NPC is a spellcaster");
+	});
+
+	it("should export innate spells as a separate spellcasting block", () => {
+		const wiz = new CharacterSheetState();
+		wiz.setName("Innate Mage");
+		wiz.addClass({name: "Wizard", source: "XPHB", level: 3});
+		wiz.setSpellcastingAbility("int");
+		wiz.setMaxHp(20);
+		wiz.addCantrip({name: "light", source: "XPHB", level: 0});
+		wiz.addInnateSpell({name: "detect magic", source: "XPHB", level: 1, atWill: true});
+		wiz.addInnateSpell({name: "misty step", source: "XPHB", level: 2, uses: {current: 1, max: 1}, recharge: "long"});
+
+		const out = CharacterSheetNpcExporter.convertStateToMonster(wiz);
+		expect(out.spellcasting.length).toBeGreaterThanOrEqual(2);
+		const innate = out.spellcasting.find(b => b.name === "Innate Spellcasting");
+		expect(innate).toBeDefined();
+		expect(innate.will.some(s => s.includes("detect magic"))).toBe(true);
+		expect(innate.daily).toBeDefined();
+		const dailyVals = Object.values(innate.daily).flat().join(" ");
+		expect(dailyVals).toContain("misty step");
+	});
+
+	it("should export warlock pact magic slots", () => {
+		const warlock = new CharacterSheetState();
+		warlock.setName("Hexer");
+		warlock.addClass({name: "Warlock", source: "PHB", level: 5});
+		warlock.setAbilityBase("cha", 16);
+		warlock.setMaxHp(38);
+		warlock.setSpellcastingAbility("cha");
+		warlock.calculateSpellSlots?.();
+		warlock.addCantrip({name: "eldritch blast", source: "PHB", level: 0});
+		warlock.addSpell({name: "hex", source: "PHB", level: 1}, true);
+		warlock.addSpell({name: "misty step", source: "PHB", level: 2}, true);
+
+		const pact = warlock.getPactSlots();
+		expect(pact.max).toBeGreaterThan(0);
+
+		const out = CharacterSheetNpcExporter.convertStateToMonster(warlock);
+		expect(out.spellcasting).toBeDefined();
+		const block = out.spellcasting[0];
+		expect(block.name).toMatch(/Pact Magic/i);
+		expect(block.headerEntries[0]).toMatch(/short or long rest/i);
+		expect(block.will.some(s => s.includes("eldritch blast"))).toBe(true);
+		const slotLevel = String(pact.level || 3);
+		expect(block.spells[slotLevel]).toBeDefined();
+		expect(block.spells[slotLevel].slots).toBe(pact.max);
+		expect(block.spells[slotLevel].lower).toBe(1);
+	});
+
+	it("should use primary class hit die in HP formula", () => {
+		const barb = new CharacterSheetState();
+		barb.setName("Tank");
+		barb.addClass({name: "Barbarian", source: "PHB", level: 10});
+		barb.setAbilityBase("con", 20);
+		barb.setMaxHp(125);
+		barb.setCurrentHp(125);
+
+		const out = CharacterSheetNpcExporter.convertStateToMonster(barb);
+		expect(out.hp.average).toBe(125);
+		expect(out.hp.formula).toMatch(/d12/);
+		expect(out.hp.formula).not.toMatch(/d8/);
+	});
+
+	it("should support legendary framing options", () => {
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {
+			legendaryEnabled: true,
+			legendaryActions: 3,
+			legendaryResistances: 2,
+		});
+
+		expect((out.trait || []).some(t => /Legendary Resistance \(2\/Day\)/.test(t.name))).toBe(true);
+		expect(out.legendaryActions).toBe(3);
+		expect(Array.isArray(out.legendary)).toBe(true);
+		expect(out.legendary.length).toBeGreaterThanOrEqual(2);
+
+		const validation = CharacterSheetNpcExporter.getValidationIssues(out);
+		expect(validation.errors).toEqual([]);
+	});
+
+	it("should honor manual CR override and sanitize export options", () => {
+		const opts = CharacterSheetNpcExporter.getSanitizedExportOptions({
+			defenseMode: "ACTIVE",
+			includeUnarmed: "never",
+			includeFeatures: "manual",
+			crMode: "manual",
+			crManual: "12",
+			legendaryEnabled: 1,
+			legendaryActions: 99,
+		});
+		expect(opts.defenseMode).toBe("active");
+		expect(opts.includeUnarmed).toBe("never");
+		expect(opts.includeFeatures).toBe("manual");
+		expect(opts.crMode).toBe("manual");
+		expect(opts.crManual).toBe("12");
+		expect(opts.legendaryActions).toBe(5);
+
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, opts);
+		expect(out.cr).toBe("12");
+	});
+
+	it("should label AC from equipped armor name", () => {
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		expect(out.ac[0].from.join(" ")).toMatch(/Chain Mail|armor|natural/i);
+		// Prefer real armor name when breakdown available
+		state.setArmor({name: "Chain Mail", ac: 16, type: "heavy"});
+		const out2 = CharacterSheetNpcExporter.convertStateToMonster(state);
+		expect(out2.ac[0].from.some(f => /chain mail/i.test(f) || f === "natural armor" || /armor/i.test(f))).toBe(true);
+	});
 });

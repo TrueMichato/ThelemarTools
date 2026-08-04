@@ -112,11 +112,13 @@ When modifying these, run the full test suite to catch regressions.
 
 ### Working with the NPC exporter
 
-1. `CharacterSheetNpcExporter.convertStateToMonster(state, options)` converts character to 5etools monster JSON
-2. **AC must be array of objects**: `[{ac: 15, from: ["armor"]}]`, not a flat number
-3. Attack translation merges weapon magic bonuses: `bonusWeapon + bonusWeaponAttack` (to-hit), `bonusWeapon + bonusWeaponDamage` (damage)
-4. CR estimation: baseline from level, ±adjustments from HP/AC defensively and attack bonus/damage offensively
-5. Output must match 5etools homebrew schema format
+1. `CharacterSheetNpcExporter.convertStateToMonster(state, options)` is pure — no DOM. Dialog lives in `CharacterSheetExport._showNpcExportDialog`.
+2. Sanitize options with `getSanitizedExportOptions` (unarmed policy, feature picker, CR mode, legendary, defense mode).
+3. **AC must be array of objects**: `[{ac: 15, from: ["Chain Mail"|"Unarmored Defense"|"natural armor", ...]}]` via `getAcBreakdown` — never a flat number.
+4. Prefer state getters for spell DC/attack, innate (`getInnateSpells`), pact (`getPactSlots`), Multiattack from Extra Attack / attack count.
+5. CR is staged defensive/offensive tables + mild level anchor; `pbNote` stays character PB. Manual CR override supported.
+6. Legendary framing is opt-in (`legendaryEnabled`). No auto lair actions.
+7. Full reference: `docs/charactersheet/18-npc-export.md` and subsystem-details § NPC Exporter.
 
 ### Working with the LevelUp/QuickBuild refactor
 

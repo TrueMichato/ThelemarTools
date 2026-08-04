@@ -245,8 +245,11 @@ Step 6: Details
 
 ### Print/Export Improvements
 
-- **PDF export**: Native PDF generation
+- **Print/PDF content + UX** ✅ — notes/appearance/portrait, class resources, custom abilities, spell one-liners, print toolbar, clearer export dialog (print-HTML path)
+- **NPC export upgrade** ✅ — attack polish, spell DC/innate/pact, Multiattack, AC labels, hit-die HP, staged CR, optional legendary, feature picker, Copy JSON (see [18-npc-export.md](./18-npc-export.md))
+- **PDF export**: Native binary PDF generation (still future; current path is browser print-to-PDF)
 - **Form-fillable PDF**: Editable exports
+- **NPC schema validation in-browser**: Optional full monster schema check on Save (still hand validator only)
 - **VTT export**: Roll20, Foundry formats
 - **D&D Beyond export**: One-way sync
 

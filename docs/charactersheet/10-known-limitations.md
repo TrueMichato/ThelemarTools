@@ -305,6 +305,23 @@ The 2024 revision introduced significant changes. Current coverage:
 
 ---
 
+## NPC Export
+
+Full upgrade pass landed (attack polish, spell DC/innate/pact, Multiattack, AC `from`, hit-die HP, staged CR, optional legendary, dialog options/feature picker/Copy JSON). See [18-npc-export.md](./18-npc-export.md).
+
+### Remaining limitations
+
+| Item | Notes |
+|------|-------|
+| CR is advisory | DMG-inspired tables + level anchor; not a full monster redesign |
+| No lair / regional / mythic auto-gen | Legendary actions optional; lair out of scope |
+| Structural validation only | No full browser-side `monster.json` schema run |
+| Feature text truncation | Long features shortened; picker warns |
+| Multiclass spell presentation | Pact-preferring when no normal slots; mixed casters may need manual cleanup |
+| VTT-native formats | 5etools homebrew monster JSON only (no Foundry/Roll20 packagers) |
+
+---
+
 ## Technical Debt
 
 ### Code Organization

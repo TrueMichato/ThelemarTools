@@ -605,23 +605,59 @@ _applyASI(choices)
 ## CharacterSheetExport
 
 **File**: `js/charactersheet/charactersheet-export.js`  
-**Lines**: ~322  
-**Role**: Import/Export
+**Role**: Import/Export + print entry points + NPC export dialog
 
 ### Export Formats
 
-1. **JSON**: Full character data for backup/transfer
-2. **Print/PDF**: Browser print dialog
+1. **JSON**: Full character data for backup/transfer (download / clipboard)
+2. **Print/PDF**: Opens a self-contained print-optimized HTML document via `CharacterSheetPdf` (browser “Save as PDF”). Not a binary PDF file generator.
+3. **NPC / bestiary**: Converts the live sheet to a 5etools homebrew monster via `CharacterSheetNpcExporter` (preview, Copy JSON, Download, Save to Homebrew).
+
+### Print/PDF pipeline
+
+```
+Print button / Export dialog "Print / PDF"
+  → CharacterSheetExport._openPdfPrintView()
+    → new CharacterSheetPdf(state, {skillsList})
+    → generate() self-contained HTML + CSS
+    → window.open + document.write
+    → screen toolbar (Print / Close) + auto window.print()
+```
+
+### NPC export pipeline
+
+```
+Toolbar / Play mode "NPC Export"
+  → CharacterSheetExport._showNpcExportDialog()
+    → options + source meta (StorageUtil)
+    → CharacterSheetNpcExporter.convertStateToMonster(state, options)
+    → Renderer.monster compact preview + validation panel
+    → Copy JSON | Download | Save to Homebrew
+```
+
+See [18-npc-export.md](./18-npc-export.md).
+
+### Print document sections
+
+Page 1: header, abilities, saves, skills, combat, **resources**, attacks, actions, footer (defenses/senses/profs/conditions/carry)  
+Later pages: features (compact), spellcasting, equipment, **custom abilities**, **character notes/appearance/portrait**, TGTT, companions, feature details appendix
 
 ### Key Methods
 
 ```javascript
 _showExportDialog()
-_exportJson()
 _showImportDialog()
+_showNpcExportDialog()
 _importJson(jsonStr)
-_printCharacter()
+_openPdfPrintView()
+_printCharacter() // live UI quick print (not parchment layout)
 ```
+
+### Related modules
+
+- `js/charactersheet/charactersheet-npc-exporter.js` — pure `CharacterSheetNpcExporter`
+- `js/charactersheet/charactersheet-pdf.js` — `CharacterSheetPdf` HTML/CSS generator
+- Tests: `CharacterSheetNpcExporter.test.js`, `CharacterSheetPdf.test.js`
 
 ---
 

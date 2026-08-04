@@ -22,6 +22,7 @@ Welcome to the 5etools Character Sheet system documentation. This comprehensive 
 | [Design System Overhaul](./14-design-system-overhaul.md) | Visual/UX redesign: token layer, the two surfaces, Combat Section Shell, governing rules |
 | [Spawning Test Characters](./15-spawn-test-characters.md) | One-line character creation for manual testing and bug repros: spec DSL, seeds, the four surfaces |
 | [Talent & Psionics](./17-talent-psionics.md) | MCDM Talent base class: psionic strain, manifestation tests, generic power/exertion pickers, Chronopath |
+| [NPC Export](./18-npc-export.md) | Character → bestiary monster conversion, export options, CR, legendary framing, brew save |
 
 ## System at a Glance
 
