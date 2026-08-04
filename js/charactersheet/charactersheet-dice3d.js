@@ -26,7 +26,6 @@
  */
 class CharacterSheetDice3d {
 	static ASSET_PATH = "lib/dice-box-threejs-assets/";
-	static SCRIPT_PATH = "lib/dice-box-threejs.umd.js";
 	static GLOBAL_KEY = "dice-box-threejs";
 	static SUPPORTED_DICE = new Set([4, 6, 8, 10, 12, 20]);
 
@@ -109,46 +108,6 @@ class CharacterSheetDice3d {
 		const g = (typeof globalThis !== "undefined") ? globalThis : (typeof window !== "undefined" ? window : {});
 		const fromGlobal = g[CharacterSheetDice3d.GLOBAL_KEY];
 		return (typeof fromGlobal === "function") ? fromGlobal : null;
-	}
-
-	/** Memoised in-flight/settled result of {@link pLoadLibrary}. */
-	static _pLibrary = null;
-
-	/**
-	 * Fetch the vendored `dice-box-threejs` bundle on demand.
-	 *
-	 * The bundle is ~550 KB of three.js + physics — a sixth of the sheet's total
-	 * script payload — and is needed only once a die is actually rolled. Loading
-	 * it here instead of from a blocking `<script>` keeps it off the critical
-	 * path without changing what a roll does: every animated-roll path awaits
-	 * this before its `canRender` precheck, so the 3D roller is still chosen
-	 * whenever it would previously have been.
-	 *
-	 * Resolves `true` once the factory is on `globalThis`, `false` if it could
-	 * not be loaded (callers then fall back to the legacy CSS animation, exactly
-	 * as they already do when the library is missing). Never rejects.
-	 *
-	 * @returns {Promise<boolean>}
-	 */
-	static pLoadLibrary () {
-		if (CharacterSheetDice3d._getFactory(null)) return Promise.resolve(true);
-		if (CharacterSheetDice3d._pLibrary) return CharacterSheetDice3d._pLibrary;
-		if (typeof document === "undefined") return Promise.resolve(false);
-
-		CharacterSheetDice3d._pLibrary = new Promise(resolve => {
-			try {
-				const script = document.createElement("script");
-				script.src = CharacterSheetDice3d.SCRIPT_PATH;
-				script.async = true;
-				script.addEventListener("load", () => resolve(!!CharacterSheetDice3d._getFactory(null)), {once: true});
-				script.addEventListener("error", () => resolve(false), {once: true});
-				document.head.appendChild(script);
-			} catch (e) {
-				resolve(false);
-			}
-		});
-
-		return CharacterSheetDice3d._pLibrary;
 	}
 
 	static isReducedMotion () {
