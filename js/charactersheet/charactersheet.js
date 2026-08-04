@@ -21,6 +21,7 @@ import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
 import {CharacterSheetPlayMode} from "./charactersheet-playmode.js";
 import * as CharacterSheetBuffPickerHelpers from "./charactersheet-buffpicker-helpers.js";
 import {CharacterSheetDruidResources} from "./charactersheet-druid-resources.js";
+import {CharacterSheetIoun} from "./charactersheet-ioun.js";
 import {CharacterSheetSpawnSpec, CharacterSheetSpawnRng} from "./charactersheet-spawn.js";
 import {CharacterSheetSpawner} from "./charactersheet-spawn-drivers.js";
 
@@ -63,6 +64,8 @@ class CharacterSheetPage {
 		this._playMode = null;
 		this._druidResources = null;
 		this._druidResourcesEnabled = false;
+		this._ioun = null;
+		this._iounEnabled = false;
 		// Forward-compat module slots (referenced by other modules; assigned externally if wired)
 		/** @type {*} */
 		this._spellsModule = null;
@@ -192,6 +195,11 @@ class CharacterSheetPage {
 			this._druidResources = new CharacterSheetDruidResources(this);
 			this._druidResourcesEnabled = true;
 		} catch (e) { console.error("Failed to init druidResources:", e); this._druidResourcesEnabled = false; }
+
+		try {
+			this._ioun = new CharacterSheetIoun(this);
+			this._iounEnabled = true;
+		} catch (e) { console.error("Failed to init ioun:", e); this._iounEnabled = false; }
 		/* eslint-enable no-console */
 
 		// Pass loaded data to modules

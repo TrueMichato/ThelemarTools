@@ -6421,6 +6421,18 @@ class CharacterSheetInventory {
 		const maxAttuned = this._state.getMaxAttunement();
 		const exemptSuffix = exemptCount > 0 ? ` <span class="ve-muted" title="Attunements that the item's own rules exempt from the normal limit (e.g. an Ioun bond)">+${exemptCount} slot-free</span>` : "";
 
+		// Ioun Stones get their own manager: orbit state (not attunement) is what decides
+		// whether a stone confers anything, and a collection is far too many rows to govern
+		// from this list. Rendered BEFORE the empty return, because a character can have stones
+		// part-way through a bond while nothing is attuned yet.
+		const ioun = this._page?._ioun;
+		if (this._page?._iounEnabled && ioun?.isApplicable?.()) {
+			const iounSummary = ioun.getCombatSummary();
+			const btnRow = e_({outer: `<div class="mb-2"><button type="button" class="charsheet__add-btn charsheet__ioun-open" title="Manage which Ioun Stones are in orbit">\u25C7 Ioun Stones <span class="ve-muted">(${iounSummary.orbitingCount} in orbit)</span></button></div>`});
+			btnRow.querySelector(".charsheet__ioun-open").addEventListener("click", () => ioun.openModal());
+			container.append(btnRow);
+		}
+
 		if (!attunedItems.length) {
 			container.append(e_({outer: `<div class="ve-muted ve-text-center py-2">No attuned items (${currentAttuned}/${maxAttuned})</div>`}));
 			return;

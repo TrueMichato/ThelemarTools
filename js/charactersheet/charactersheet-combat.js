@@ -5884,6 +5884,7 @@ class CharacterSheetCombat {
 			() => this.renderCombatMethods(),
 			() => this.renderCombatRanger(),
 			() => this.renderCombatDruidResources(),
+			() => this.renderCombatIoun(),
 			() => this.renderCombatFighter(),
 			() => this.renderCombatVitality(),
 			() => this.renderCombatDefenses(),
@@ -10922,6 +10923,67 @@ class CharacterSheetCombat {
 	 * if the module failed to load, the panel hides and the generic Active-States list
 	 * still surfaces the rows (no stranding).
 	 */
+	/**
+	 * Ioun Stones — the fast in-play route.
+	 *
+	 * Deliberately NOT a copy of the modal. In combat the only questions are "how many stones
+	 * am I actually getting benefit from" and "can I take them down in one action", so the
+	 * panel answers those two and defers everything else to the manager. Reads
+	 * `page._ioun.getCombatSummary()` — the same single source of truth the modal uses — and
+	 * delegates every action to that module, so the two can never disagree.
+	 *
+	 * The section carries `.cs-adaptive-panel`, so its narrow layout is driven by its container
+	 * width rather than by which tab rendered it.
+	 */
+	renderCombatIoun () {
+		const section = document.getElementById("charsheet-combat-ioun-section");
+		const container = document.getElementById("charsheet-combat-ioun");
+		if (!section || !container) return;
+
+		const ioun = this._page?._ioun;
+		const summary = (this._page?._iounEnabled && ioun?.getCombatSummary)
+			? ioun.getCombatSummary()
+			: null;
+
+		if (!summary || !summary.applicable) {
+			section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		section.style.display = "";
+
+		const stripHtml = csCombatStatusStrip([
+			{label: "In orbit", value: summary.orbitingCount},
+			{label: "Bonded", value: summary.bondedCount},
+			{label: "Can act", value: summary.actionableCount},
+		], {ariaLabel: "Ioun Stones"});
+
+		// Only the batch action is offered here. Tossing a stone up is a Magic action PER
+		// stone, so it belongs in the manager where the player can see what they are paying.
+		const stowHtml = summary.orbitingCount
+			? `<button type="button" class="cs-combat-btn charsheet__ioun-stow-all" title="Seize and stow every orbiting stone — one Utilize action, any number of stones">${csCombatIcon("reset")}<span>Stow all</span></button>`
+			: "";
+
+		const warnHtml = summary.orbitingCount === 0
+			? `<div class="cs-ioun-notice cs-ioun-notice--warn">${csCombatIcon("warning")}<span>Nothing in orbit — your bonded stones confer nothing.</span></div>`
+			: (summary.isConspicuous
+				? `<div class="cs-ioun-notice cs-ioun-notice--warn">${csCombatIcon("warning")}<span>Large collection: you normally can't hide in darkness.</span></div>`
+				: "");
+
+		container.innerHTML = `
+			<div class="cs-ioun-combat">
+				${stripHtml}
+				${warnHtml}
+				<div class="cs-ioun-combat__actions cs-combat-feature__options">
+					${stowHtml}
+					<button type="button" class="cs-combat-btn cs-combat-btn--primary charsheet__ioun-manage" title="Open the Ioun Stone manager">Manage…</button>
+				</div>
+			</div>`;
+
+		container.querySelector(".charsheet__ioun-stow-all")?.addEventListener("click", () => ioun.stowAll());
+		container.querySelector(".charsheet__ioun-manage")?.addEventListener("click", () => ioun.openModal());
+	}
+
 	renderCombatDruidResources () {
 		const section = document.getElementById("charsheet-combat-druid-section");
 		const container = document.getElementById("charsheet-combat-druid");
@@ -13298,4 +13360,15 @@ class CharacterSheetCombat {
 
 globalThis.CharacterSheetCombat = CharacterSheetCombat;
 
-export {CharacterSheetCombat};
+// The shell primitives are exported so surfaces that live OUTSIDE this file (the Ioun Stone
+// manager is the first) compose the same a11y-bearing markup instead of re-authoring it. Per
+// the Phase-B note above, hand-rolling these contracts per surface is the single riskiest
+// duplication in the sheet — one missing `aria-pressed` and a whole surface goes silent.
+export {
+	CharacterSheetCombat,
+	csCombatIcon,
+	csCombatSection,
+	csCombatStateToggle,
+	csCombatStatusStrip,
+	csCombatPoolCaption,
+};

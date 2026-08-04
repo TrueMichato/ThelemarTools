@@ -4685,6 +4685,12 @@ class CharacterSheetState {
 			inventory: [], // [{item, quantity, equipped, attuned}]
 			currency: {cp: 0, sp: 0, ep: 0, gp: 0, pp: 0},
 
+			// Ioun Stone bonds in progress — {itemId: daysElapsed}. An Ioun bond takes 7
+			// consecutive days (shortened 1 day per orbiting stone, min 3), so it can't ride the
+			// rest flow. Absent from older saves; `loadFromJson` spreads the defaults first, so
+			// this defaults to {} with no migration step.
+			iounBonds: {},
+
 			// Features and traits
 			features: [], // [{name, source, description, uses: {current, max, recharge}}]
 			feats: [], // [{name, source}]
@@ -29468,6 +29474,42 @@ class CharacterSheetState {
 	}
 
 	// ==========================================
+	// Ioun bonds in progress
+	// ==========================================
+	// An Ioun bond forms over 7 CONSECUTIVE DAYS (shortened 1 day per orbiting stone, to a
+	// minimum of 3), so it deliberately does not ride the rest flow — a long rest is 8 hours.
+	// Progress is held here, keyed by inventory item id, rather than on the item wrapper:
+	// `getItems()` does not surface extra wrapper fields, and `replaceItem` rebuilds
+	// `wrapper.item` wholesale, so a field stored on either would be invisible or lost.
+	// Orphans (bonding stone sold or dropped) are pruned on read.
+
+	/** @returns {Record<string, number>} `{itemId: daysElapsed}` for live inventory items only. */
+	getIounBonds () {
+		const bonds = this._data.iounBonds || (this._data.iounBonds = {});
+		const liveIds = new Set(this._data.inventory.map(i => i.id));
+		for (const id of Object.keys(bonds)) {
+			if (!liveIds.has(id)) delete bonds[id];
+		}
+		return bonds;
+	}
+
+	/** Record elapsed days toward a bond. Clamped at 0; never records for a missing item. */
+	setIounBondDays (itemId, days) {
+		if (!this._data.inventory.some(i => i.id === itemId)) return false;
+		if (!this._data.iounBonds) this._data.iounBonds = {};
+		this._data.iounBonds[itemId] = Math.max(0, Math.floor(Number(days) || 0));
+		return true;
+	}
+
+	/** Forget a bond in progress (completed, cancelled, or the stone left the inventory). */
+	clearIounBond (itemId) {
+		if (!this._data.iounBonds) return false;
+		if (this._data.iounBonds[itemId] == null) return false;
+		delete this._data.iounBonds[itemId];
+		return true;
+	}
+
+	// ==========================================
 	// Item Recharge (canonical operation)
 	// ==========================================
 	// A single source of truth for restoring charges on a charged item. Both the
@@ -31017,23 +31059,72 @@ class CharacterSheetState {
 
 		const text = CharacterSheetState._getItemTextForAttunementExemption(itemData);
 		const isExempt = !!text && CharacterSheetState._RE_ATTUNEMENT_EXEMPT.test(text);
-		try { Object.defineProperty(itemData, "__attunementExempt", {value: isExempt, enumerable: false, configurable: true}); } catch (ignored) { /* frozen item data */ }
+
+		// Never memoise a negative that an unresolved reference could be responsible for.
+		// `Renderer.item.entryMap` is populated asynchronously, so an early call would
+		// otherwise pin `false` for the rest of the session — the exact silent failure the
+		// reference-resolving walk above exists to prevent.
+		const isRefPending = !isExempt && text.includes("{#itemEntry") && !globalThis.Renderer?.item?.entryMap;
+		if (!isRefPending) {
+			try { Object.defineProperty(itemData, "__attunementExempt", {value: isExempt, enumerable: false, configurable: true}); } catch (ignored) { /* frozen item data */ }
+		}
 		return isExempt;
 	}
 
+	/**
+	 * Every text fragment an item carries, with `{#itemEntry Name|Source}` references resolved.
+	 *
+	 * Resolution is load-bearing, not a nicety. Item entries are dereferenced at RENDER time,
+	 * so an item held in the inventory still carries the raw `{#itemEntry …}` string. The
+	 * Moorchlyne stones keep their shared rules — including the sentence this exemption looks
+	 * for — behind exactly such a reference, so a walk that only sees literal strings finds no
+	 * bond text, silently returns `false` for all 682 stones, and re-imposes the very slot cap
+	 * this method exists to lift. The failure is invisible: nothing errors, the stones simply
+	 * stop working past the third.
+	 *
+	 * `Renderer.item.entryMap` is the same lookup the renderer itself dereferences against, so
+	 * this cannot drift from what the player reads on the item page.
+	 */
 	static _getItemTextForAttunementExemption (itemData) {
 		const out = [];
+		const seenRefs = new Set();
 		const walk = (node, depth) => {
 			if (depth > 10 || node == null) return;
-			if (typeof node === "string") { out.push(node); return; }
+			if (typeof node === "string") {
+				out.push(node);
+				CharacterSheetState._walkItemEntryRefs(node, seenRefs, ref => walk(ref, depth + 1));
+				return;
+			}
 			if (Array.isArray(node)) { node.forEach(it => walk(it, depth + 1)); return; }
 			if (typeof node !== "object") return;
+			// An unresolved reference may also survive as its parsed object form.
+			if (node.type === "refItemEntry" && node.itemEntry) {
+				CharacterSheetState._walkItemEntryRefs(`{#itemEntry ${node.itemEntry}}`, seenRefs, ref => walk(ref, depth + 1));
+			}
 			walk(node.entries, depth + 1);
 			walk(node.entry, depth + 1);
 			walk(node.items, depth + 1);
 		};
 		walk(itemData.entries, 0);
 		return out.join(" ");
+	}
+
+	/**
+	 * Resolve any `{#itemEntry Name|Source}` references in `str`, handing each referenced
+	 * entry's body to `cbWalk`. `seenRefs` guards against a reference cycle in the data.
+	 */
+	static _walkItemEntryRefs (str, seenRefs, cbWalk) {
+		if (!str.includes("{#itemEntry")) return;
+		const re = /\{#itemEntry ([^}]+)}/g;
+		let m;
+		while ((m = re.exec(str)) !== null) {
+			const uid = m[1];
+			if (seenRefs.has(uid)) continue;
+			seenRefs.add(uid);
+			const [name, source] = uid.split("|").map(it => it.trim());
+			const ent = globalThis.Renderer?.item?.entryMap?.[source]?.[name];
+			if (ent) cbWalk(ent.entriesTemplate || ent.entries);
+		}
 	}
 
 	getAttunedCount () {

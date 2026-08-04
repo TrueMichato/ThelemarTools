@@ -23509,3 +23509,338 @@ color: var(--cs-text-primary, #f1f5f9);
 	border-radius: var(--cs-radius-sm, 6px);
 	background: rgba(99, 102, 241, 0.08);
 }
+
+/* ========================================================================
+   Ioun Stones — collection manager (modal) + Combat-tab summary
+   ------------------------------------------------------------------------
+   The book's fiction is the design brief: gems that orbit your head, glowing.
+   The swatch is therefore the primary identifier — a player who owns 15 stones
+   reads them by colour long before they read the number — and orbit state is
+   carried by the swatch's halo as well as by the toggle's icon + text, so the
+   distinction never rests on colour alone.
+
+   Per the Recessed-Inset Rule the zones are insets on the BASE tone sitting on
+   the modal's surface, not nested cards; there are no coloured edge stripes.
+   Layout responds to `cs-panel` (the container named by `.cs-adaptive-panel`)
+   because the same row markup renders in a ~510px Combat panel and a full-width
+   modal.
+   ======================================================================== */
+
+.cs-ioun-modal {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-sm, 0.5rem);
+	padding: var(--cs-space-sm, 0.5rem);
+}
+
+.cs-ioun {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+/* --- Notices ---------------------------------------------------------- */
+/* Every notice is a mechanical consequence the player would otherwise be
+   blindsided by (nothing orbiting, a duplicate conferring nothing). Tinted,
+   not striped, and always icon + text. */
+.cs-ioun-notice {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--cs-space-xs, 0.25rem);
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	font-size: var(--cs-text-sm, 0.8125rem);
+	line-height: var(--cs-leading-snug, 1.35);
+	color: var(--cs-text-secondary, #cbd5e1);
+	border: 1px solid transparent;
+	border-radius: var(--cs-radius-sm, 6px);
+}
+
+/* A notice is either a hazard or an unlocked ability, and the two must not look alike —
+   otherwise a collection milestone reads as something going wrong. */
+.cs-ioun-notice--warn {
+	background: var(--cs-warning-light, rgba(245, 158, 11, 0.14));
+	border-color: var(--cs-warning, rgba(245, 158, 11, 0.5));
+}
+
+.cs-ioun-zone__hint {
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.cs-ioun-notice--good {
+	background: var(--cs-success-light, rgba(16, 185, 129, 0.12));
+	border-color: var(--cs-success, rgba(16, 185, 129, 0.5));
+}
+
+.cs-ioun-notice > span { min-width: 0; }
+
+/* --- Filter controls -------------------------------------------------- */
+.cs-ioun-controls {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+}
+
+.cs-ioun-search {
+	flex: 1 1 12rem;
+	min-width: 0;
+	height: auto;
+	padding: 0.25rem 0.5rem;
+	font-size: var(--cs-text-sm, 0.8125rem);
+}
+
+.cs-ioun-type {
+	flex: 0 1 9rem;
+	height: auto;
+	padding: 0.25rem 0.5rem;
+	font-size: var(--cs-text-sm, 0.8125rem);
+}
+
+.cs-ioun-control-label {
+	margin: 0;
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-muted, #94a3b8);
+}
+
+.cs-ioun-control-check {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	margin: 0;
+	font-size: var(--cs-text-sm, 0.8125rem);
+	font-weight: 400;
+	color: var(--cs-text-secondary, #cbd5e1);
+	cursor: pointer;
+}
+
+.cs-ioun-control-check input { margin: 0; }
+
+/* --- Zones ------------------------------------------------------------ */
+.cs-ioun-zone {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-xs, 0.25rem);
+	padding: var(--cs-space-sm, 0.5rem);
+	background: var(--cs-bg-base, rgba(0, 0, 0, 0.15));
+	border: 1px solid var(--cs-border, rgba(148, 163, 184, 0.35));
+	border-radius: var(--cs-radius-md, 10px);
+}
+
+.cs-ioun-zone__header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+}
+
+.cs-ioun-zone__title {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin: 0;
+	font-size: var(--cs-text-sm, 0.8125rem);
+	font-weight: var(--cs-weight-semibold, 600);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--cs-text-muted, #94a3b8);
+}
+
+.cs-ioun-zone__count {
+	padding: 0 0.4rem;
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-variant-numeric: tabular-nums;
+	color: var(--cs-text-secondary, #cbd5e1);
+	background: var(--cs-bg-surface, rgba(148, 163, 184, 0.16));
+	border-radius: var(--cs-radius-full, 999px);
+}
+
+.cs-ioun-zone__actions { margin-left: auto; }
+
+.cs-ioun-empty {
+	padding: var(--cs-space-sm, 0.5rem) 0;
+	text-align: center;
+}
+
+.cs-ioun-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+/* --- Stone row -------------------------------------------------------- */
+.cs-ioun-row {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto auto;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	padding: 0.3rem var(--cs-space-xs, 0.25rem);
+	border-radius: var(--cs-radius-sm, 6px);
+	transition: background var(--cs-transition-fast, 150ms) ease-out;
+}
+
+.cs-ioun-row:hover { background: var(--cs-bg-hover, rgba(148, 163, 184, 0.1)); }
+
+.cs-ioun-row + .cs-ioun-row { border-top: 1px solid var(--cs-border, rgba(148, 163, 184, 0.22)); }
+
+.cs-ioun-row--spent { opacity: 0.55; }
+
+/* The gem. A soft inner highlight reads as a polished stone rather than a flat
+   swatch; the halo (not a hue change) is what marks "in orbit", so the cue
+   survives both themes and colour-blindness. Static — a pulse here would be
+   entertainment, not information. */
+.cs-ioun-swatch {
+	width: 0.85rem;
+	height: 0.85rem;
+	border-radius: var(--cs-radius-full, 999px);
+	border: 1px solid rgba(0, 0, 0, 0.45);
+	box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.55);
+	background-image: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.6), transparent 55%);
+}
+
+.cs-ioun-swatch--unknown {
+	background: repeating-linear-gradient(45deg, rgba(148, 163, 184, 0.55) 0 2px, transparent 2px 4px);
+}
+
+.cs-ioun-zone .cs-ioun-row:not(.cs-ioun-row--bonding) .cs-ioun-swatch { filter: saturate(0.55) brightness(0.8); }
+
+.cs-ioun-row:has(.cs-combat-toggle[aria-pressed="true"]) .cs-ioun-swatch {
+	filter: none;
+	box-shadow:
+		inset 0 1px 1px rgba(255, 255, 255, 0.55),
+		0 0 0 2px var(--cs-bg-base, rgba(0, 0, 0, 0.15)),
+		0 0 6px 2px currentColor;
+}
+
+.cs-ioun-row__identity {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 0.3rem;
+	min-width: 0;
+}
+
+.cs-ioun-row__num {
+	font-family: var(--cs-font-mono, ui-monospace, monospace);
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-muted, #94a3b8);
+}
+
+.cs-ioun-row__name {
+	font-size: var(--cs-text-sm, 0.8125rem);
+	color: var(--cs-text, #e2e8f0);
+	overflow-wrap: anywhere;
+}
+
+.cs-ioun-row__charges,
+.cs-ioun-row__cost { white-space: nowrap; }
+
+/* --- Badges ----------------------------------------------------------- */
+.cs-ioun-badge {
+	padding: 0 0.35rem;
+	font-size: var(--cs-text-xs, 0.75rem);
+	line-height: 1.5;
+	color: var(--cs-text-secondary, #cbd5e1);
+	background: var(--cs-bg-surface, rgba(148, 163, 184, 0.16));
+	border: 1px solid var(--cs-border, rgba(148, 163, 184, 0.3));
+	border-radius: var(--cs-radius-sm, 6px);
+	white-space: nowrap;
+}
+
+.cs-ioun-badge--super {
+	color: var(--cs-accent-gold, #f59e0b);
+	border-color: var(--cs-accent-gold, #f59e0b);
+	background: transparent;
+}
+
+/* --- Bonding ---------------------------------------------------------- */
+.cs-ioun-row--bonding { grid-template-columns: auto minmax(0, 1fr) minmax(3rem, 8rem) auto auto; }
+
+.cs-ioun-bond-progress {
+	display: block;
+	height: 0.4rem;
+	overflow: hidden;
+	background: var(--cs-bg-surface, rgba(148, 163, 184, 0.16));
+	border-radius: var(--cs-radius-full, 999px);
+}
+
+.cs-ioun-bond-progress__bar {
+	display: block;
+	width: 100%;
+	height: 100%;
+	background: var(--cs-primary, #6366f1);
+	transform: scaleX(var(--cs-ioun-bond-pct, 0));
+	transform-origin: left center;
+	transition: transform var(--cs-transition-normal, 220ms) ease-out;
+}
+
+.cs-ioun-bondable {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--cs-space-xs, 0.25rem);
+	padding-top: var(--cs-space-xs, 0.25rem);
+}
+
+/* --- Combat-tab summary ----------------------------------------------- */
+.cs-ioun-combat {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.cs-ioun-combat__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+/* --- Narrow container -------------------------------------------------- */
+/* Below ~480px the toggle earns its own line rather than squeezing the name to
+   a few characters; `overflow-wrap` above means names wrap instead of being
+   ellipsised away. */
+@container cs-panel (max-width: 480px) {
+	.cs-ioun-row,
+	.cs-ioun-row--bonding {
+		grid-template-columns: auto minmax(0, 1fr);
+	}
+
+	.cs-ioun-row__charges,
+	.cs-ioun-row__cost,
+	.cs-ioun-bond-progress,
+	.cs-ioun-row .cs-combat-toggle,
+	.cs-ioun-row [data-ioun-cancel-bond] {
+		grid-column: 2;
+		justify-self: start;
+	}
+
+	.cs-ioun-zone__actions {
+		margin-left: 0;
+		width: 100%;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.cs-ioun-row,
+	.cs-ioun-bond-progress__bar { transition: none; }
+}
+
+/* --- Light theme ------------------------------------------------------ */
+/* Light is the DEFAULT here (`:root:not(.ve-night-mode)`), not an override. The
+   dark-mode swatch highlight and the near-black gem outline both invert badly on
+   a light ground, and the halo needs a light backdrop ring to stay visible. */
+:root:not(.ve-night-mode) .cs-ioun-swatch {
+	border-color: rgba(0, 0, 0, 0.25);
+	box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.75);
+}
+
+:root:not(.ve-night-mode) .cs-ioun-row:has(.cs-combat-toggle[aria-pressed="true"]) .cs-ioun-swatch {
+	box-shadow:
+		inset 0 1px 1px rgba(255, 255, 255, 0.75),
+		0 0 0 2px var(--cs-bg-base, #f1f5f9),
+		0 0 5px 1px currentColor;
+}
+
+:root:not(.ve-night-mode) .cs-ioun-swatch--unknown {
+	background: repeating-linear-gradient(45deg, rgba(71, 85, 105, 0.45) 0 2px, transparent 2px 4px);
+}
