@@ -6810,8 +6810,9 @@ plus three non-literal sources:
 
 ```
 state:15936 / :16113   opt.subclassShortName ? "Subclass" : "Class"
-state:43864            featureTypeLabel — DM-granted data features;
-                       defaults to "Feature", else any string on the payload
+state:43864            featureTypeLabel — DM-granted data features; takes the
+                       PICKER'S UI LABEL first (see next section), then any
+                       string on the payload, then "Feature"
 class-utils:3296       getLevelFeatures — sets NO featureType at all
 ```
 
@@ -6827,16 +6828,16 @@ Against that, the read side:
 
 Two things fall out. `byType` carries a **`Subrace` bucket that no writer
 fills** — there is no `featureType: "Subrace"` literal in the codebase — while
-lacking buckets for five values writers *do* produce (`Optional Feature`,
-`Subclass`, `Race`, `Feat`, `Feature`). And the asymmetry with the Species
-branch is now quantified rather than asserted: **`:766` accepts three spellings
-for a value set of three; `:764` accepts one spelling for a value set of six.**
+lacking buckets for seven values writers *do* produce (`Optional Feature`,
+`Subclass`, `Race`, `Feat`, and the three label values in the next section).
+And the asymmetry with the Species branch is now quantified rather than
+asserted: **`:766` accepts three spellings for a value set of three; `:764`
+accepts one spelling for a value set of eight.**
 
-`"Feature"` behaves exactly like `"Subclass"` — dropped by `:764`, folded into
-`byType.Other`, and surviving on the Features tab only because
-`state:43869` defaults `level` to `1` and `:922` accepts any numeric level. It
-does not appear in the export corpus because the corpus exercises no DM grants;
-by the lesson below, that is a statement about the corpus.
+The `"Feature"` fallback named above is in fact **unreachable** — see the next
+section, which measures what `state:43864` really produces. None of it appears
+in the export corpus because the corpus exercises no DM grants; by the lesson
+below, that is a statement about the corpus.
 
 **Bound, stated honestly — and it narrowed.** `state:15944` is observed under
 Jest. But Hunter's options *do* carry `subclassShortName` (11 of the 53), so a
@@ -6845,6 +6846,76 @@ Builder pick routed through `_fulfillSubfeatureChoice` would have stamped
 wizard path for those picks is **not** `state:15944`, and its *browser*
 reachability is **less** supported by the corpus, not more. `state:16121` and
 `respec:2768` remain inferred from their write sites.
+
+### A third `featureType` vocabulary — UI labels, written by a live path
+
+`featureType` carries **three** vocabularies, not two, and only two of them are
+quarantined.
+
+1. **Authored code arrays** — an optionalfeature payload's own
+   `featureType: ["EI"]`. *Correctly handled.* `state:43884-43885` hardcodes
+   `featureType: "Optional Feature"` and diverts the array into
+   `optionalFeatureTypes`, and `class-utils:5276` does the same for the
+   `buildFeatureStateObject` route. The convention is stated in-code at `state:43861-43863`. **Do not
+   widen the read gates to accept arrays** — nothing stores one.
+2. **Sheet display buckets** — `Class`, `Species`, `Subclass`, … the values
+   censused above.
+3. **DM-grant UI labels** — the `<option>` text of a `<select>`, written
+   straight into the discriminator. Not quarantined anywhere.
+
+The third vocabulary is defined at `charactersheet-customabilities.js:3489`
+and stamped onto the grant row at `:3525`:
+
+```js
+:3489  const sourceTypeLabels = {
+           classFeature: "Class Feature",  subclassFeature: "Subclass Feature",
+           optionalfeature: "Optional Feature",  feat: "Feat",  json: "Pasted",
+       };
+:3520  grants.features.push({grantKind: "dataFeature", …,
+:3525      featureType: sourceTypeLabels[sourceType] || "Feature",
+```
+
+`state:43864` then hands that label to the builder, where `class-utils:5289`
+(`explicitFeatureType || featureType`) lets it through unmapped:
+
+```js
+state:43864   const featureTypeLabel = feature.featureType || …  || "Feature";
+state:43868   buildFeatureStateObject(payload, {featureType: featureTypeLabel, …})
+state:43871   this.addFeature({...built, dmGranted: true, …})
+```
+
+Measured — all five labels driven through the real `buildFeatureStateObject`:
+
+```
+sourceType        stored featureType    :764   bucket   className   isSubclassFeature
+classFeature      "Class Feature"       ✗      Other    "Fighter"   null      <- NEW
+subclassFeature   "Subclass Feature"    ✗      Other    "Fighter"   null      <- NEW
+json              "Pasted"              ✗      Other    null        null      <- NEW
+optionalfeature   "Optional Feature"    ✗      Other    null        null
+feat              "Feat"                ✗      Other    null        null
+```
+
+Three of the five are genuinely outside the sheet's vocabulary. The other two
+coincide with values the sheet already writes, so they fail on the pre-existing
+defect rather than on this one. The `|| "Feature"` fallback at `:3525` is
+**dead**: `sourceType` can only be one of the four `<option>` values at
+`:1858-1861` or the literal `"json"` at `:3626`, and `sourceTypeLabels` covers
+all five. Likewise `state:43865`'s payload-string limb is redundant — the same
+payload string wins again at `class-utils:5289` regardless.
+
+**Reachability — a click, not a cascade.** `:3565` calls `addDataFeature` from
+a plain `click` handler on a search result; `:3626` from the *Add from JSON*
+button. No confirmation modal and no data dependency. Honest bound: the panel
+sits behind a collapsed `<details>` labelled *Advanced Feature Grant (DM)* with
+a permission warning (`:1850-1854`), and this was driven through the state API
+with the picker's exact literal row shape (read verbatim from `:3520`), not
+through the DOM click itself.
+
+**This narrows the read-side repair.** A gate that ORs on
+`isSubclassFeature`/`className` does *not* cover this writer class:
+`isSubclassFeature` is `null` even on subclass grants, and `"Pasted"` / `"Feat"`
+rows carry no `className` at all. Those need either a `dmGranted` limb on the
+read side or a mapping at the write site.
 
 ### Suggested fix
 
@@ -6860,23 +6931,29 @@ The read side is the only place that covers every writer.
 3. Consider normalising in `addFeature` (`charactersheet-state.js:36434`),
    which today does not touch `featureType`: a row carrying
    `isSubclassFeature: true` or `className` and no `featureType` could be
-   stamped once, at the single point every writer passes through.
-4. Regression pin: assert that a Battle Master's maneuvers **and** a Hunter's
-   `Colossus Slayer` appear in "All Class Features" — one per writer class.
-   Verify the pin by reverting the fix and watching it go red; a
-   green-on-revert pin proves nothing.
+   stamped once, at the single point every writer passes through. Note this
+   covers `getLevelFeatures` and the `"Subclass"` writers but **not** the
+   DM-grant labels — `"Pasted"` and `"Feat"` rows carry neither limb, so they
+   need either a `dmGranted` limb here or a label→vocabulary map at
+   `state:43864`. This is the argument for the exclusion-list form of fix 1,
+   which covers all four writer classes without enumerating any of them.
+4. Regression pin: assert that a Battle Master's maneuvers, a Hunter's
+   `Colossus Slayer`, **and** a DM-granted class feature appear in "All Class
+   Features" — one per writer class. Verify the pin by reverting the fix and
+   watching it go red; a green-on-revert pin proves nothing.
 
 ### Credit
 
 Reachability of the `"Subclass"` half was established by the
 `truemichato-plan-cs-bug-018-skips` session, which measured the 53/214 census,
-drove `Totem Spirit → Bear` end to end, and then identified `getLevelFeatures`
-as the third writer behind the 57 `<absent>` rows — the finding that makes a
-read-side repair the only sufficient one. The `Optional Feature` half, the
-write-only `byType.Other` bucket, the export-corpus measurement, and the
-vocabulary census (30 supplier call sites; `Subrace` bucket with no writer;
-`featureTypeLabel` defaulting to `"Feature"`) were added while verifying that
-report.
+drove `Totem Spirit → Bear` end to end, then identified `getLevelFeatures` as
+the third writer behind the 57 `<absent>` rows — the finding that makes a
+read-side repair the only sufficient one — and finally found the DM-grant label
+vocabulary at `customabilities:3489`, the fourth writer class. The
+`Optional Feature` half, the write-only `byType.Other` bucket, the
+export-corpus measurement, and the vocabulary census were added while verifying
+those reports; the per-label measurement, the dead `|| "Feature"` fallback, and
+the limits of a `className`-based read repair likewise.
 
 Two earlier revisions of this entry were wrong and are worth recording, because
 both errors have the same shape. The first called the `"Subclass"` half
