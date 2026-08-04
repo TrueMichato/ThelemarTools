@@ -6637,3 +6637,567 @@ A sweep of every `resourceMax:` array literal in `test/e2e/specs/` found this
 was the **only** malformed one; the two sibling Fighter specs use the correct
 but looser `resourceMax: [1, 3]`, which is left alone — it is not wrong, merely
 weaker, and narrowing it was not measured here.
+
+---
+
+## CS-BUG-113 — "All Class Features" omits every Optional Feature and every subclass-feature row (13.5% of real feature rows), and the Overview summary card drops them into a write-only bucket
+
+**Status: Open** (product). Player-visible. Not fixed — filed only.
+
+Two read gates in `js/charactersheet/charactersheet-features.js` accept a
+narrower set of `featureType` values than the writers produce. The rows are
+still listed on the **Features tab**, so nothing is lost outright; they are
+missing from the **Overview summary card** and from the **"All Class
+Features"** modal. The symptom, stated plainly: *"All Class Features" is not
+all class features.*
+
+### The contradiction — same file, 150 lines apart
+
+```js
+// :915-916  _renderClassFeatures — the Features tab: INCLUDE
+// Optional Features (invocations, metamagic, etc.) are displayed with class features
+if (f.featureType === "Optional Feature") return true;
+
+// :764      _pShowMoreFeaturesModal — "All Class Features": EXCLUDE
+features = allFeatures.filter(f => f.featureType === "Class");
+```
+
+The file already states the intended behaviour and then contradicts it. This
+is what makes it a defect rather than a design choice — and the **sibling
+Species branch ORs three spellings in both places**, so the pattern for
+handling vocabulary variants is already established next door:
+
+```js
+:767   f.featureType === "Species" || f.featureType === "Subrace" || f.featureType === "Race"
+:1336  [...byType.Species, ...byType.Subrace]
+:764   f.featureType === "Class"          // ORs nothing
+```
+
+### Gate 2 — a write-only bucket
+
+```js
+:1303  const byType = {Class: [], Species: [], Subrace: [], Background: [], Other: []};
+:1312  const type = f.featureType || "Other";
+:1316  byType.Other.push(f);
+```
+
+`git grep -n 'byType.Other'` returns **exactly one occurrence in the file** —
+that push. Reads are `byType.Class` (:1323/:1326/:1330/:1339),
+`Species`+`Subrace` (:1336) and `Background` (:1349/:1352). `byType.Other` is
+written and never read, so any `featureType` outside the four named buckets
+disappears from `#charsheet-features-summary` (`charactersheet.html:993`).
+
+### Measured, against real exports
+
+290 characters / **6,663 feature rows** in
+`test-results/exports-for-validation/`, produced by actual Builder / LevelUp /
+QuickBuild E2E runs:
+
+```
+featureType         rows    share
+Class               3847    57.7%
+Species             1754    26.3%
+Optional Feature     839    12.6%    <- dropped by both gates
+Background           164     2.5%
+<absent>              59     0.9%    <- dropped by both gates
+Subclass               0     0.0%    <- corpus gap, NOT a product property
+                    ----
+dropped by BOTH      898    13.5%
+```
+
+**Read the last two rows together.** `57` of the `59` absent-`featureType`
+rows carry **both `subclassShortName` and `className`** — `Colossus Slayer`,
+`Giant Killer`, `Horde Breaker`, `Arcane Initiate`, `Lunar Embodiment`,
+`Moon Fire`, `Eyes of the Dark`, `Strength of the Grave`. They are subclass
+feature rows that simply never had `featureType` set. So the subclass half of
+this defect is **already live in the corpus at 57 rows**; it is wearing
+`undefined` rather than `"Subclass"`, and `:1312`'s `f.featureType || "Other"`
+sends both spellings to the same write-only bucket.
+
+Worst-affected exported builds, by dropped rows in a single character:
+
+```
+battle-master-fighter-aarakocra      32
+chronopath-talent-human              31
+arcane-archer-fighter-hochling       29
+hunter-ranger-centaur                16
+chained-fury-barbarian-minotaur      11
+tdcsr-juggernaut-barbarian           11
+```
+
+The dropped names are precisely the picks that define those subclasses —
+`Knockdown Assault`, `Leading Throw`, `Warning Strike` (Battle Master
+maneuvers); `Aimed Spell`, `Bestowed Spell`, `Bouncing Spell` (Metamagic);
+`Covering Fire`, `Doubleshot` (Arcane Shots); `Archery` (Fighting Style);
+`Armor of Shadows` (Invocation); `Wary Stance`, `Farshot Stance`.
+
+### Severity bounds — stated honestly
+
+- **Features tab: unaffected.** `_renderClassFeatures` (:912-938) is
+  deliberately lenient and returns true at `:916` (Optional Feature),
+  `:918` (`f.className`) and `:922` (numeric `level`).
+- **Overview summary card: bounded.** It is additionally gated by
+  `isImportantFeature` (:1300) and `slice(0, 5)`, so not every dropped row
+  would have rendered anyway. The *"+N more class features"* count at :1331
+  is nevertheless understated, because it is `byType.Class.length - 5`.
+- **Modal: unconditional.** `:758` reads `allFeatures` with **no** importance
+  filter, so the exclusion there is total.
+
+### The sibling — `featureType: "Subclass"` — reachable on core PHB content
+
+The same two gates also drop `featureType: "Subclass"`, which has **three
+writers and zero readers**:
+
+```
+charactersheet-respec.js:2768    featureType: "Subclass"                                  (literal)
+charactersheet-state.js:15944    featureType: opt.subclassShortName ? "Subclass" : "Class"
+charactersheet-state.js:16121    featureType: option.subclassShortName ? "Subclass" : "Class"
+```
+
+`git grep 'featureType === "Subclass"'` → **0**. `addFeature`
+(`charactersheet-state.js:36434`) contains no `featureType` reference, so it
+does not normalise.
+
+**This is not an exotic path.** Census of `FeatureChoiceParser.extractChoices`
+over all of `data/class/` — 37 choice groups, 214 options, of which **53 carry
+`subclassShortName`** and therefore take the ternary's `"Subclass"` branch:
+
+```
+15  barbarian / Totem Warrior      5  fighter / Psi Warrior      2  monk / Drunken Master
+11  ranger    / Hunter             4  rogue   / Soulknife        2  monk / Kensei
+ 9  barbarian / Storm Herald       3  bard    / Swords           2  warlock / Genie
+```
+
+Nine subclasses across seven classes, all core PHB/XGE/TCE — no homebrew, no
+respec, no confirmation modal.
+
+Driven end to end through `state:15944` (Jest, four positive controls: the
+feature exists in `data/class/class-barbarian.json`; `getStructuredFeatureChoices`
+returns a group whose options carry `subclassShortName`; the choice queues; and
+`fulfillFeatureChoice` returns **`true`** before any output is read):
+
+```
+Totem Spirit -> "Bear"
+  stored row        {name: "Bear", featureType: "Subclass", className: "Barbarian"}
+  :764  featureType === "Class"     -> Bear ABSENT       (modal)
+  :1312 byType                      -> Other: ["Bear"]   (write-only bucket)
+  :918  f.className fallback        -> Bear PRESENT      (Features tab)
+```
+
+**Why the export corpus reported 0 — a *third* writer.** The 290 exports
+contain 16 Barbarians and 7 Hunters, but not one Totem Warrior. The Hunter
+rows are in the `<absent>` bucket, and **all 57 of them carry
+`isSubclassFeature: true`** alongside `subclassShortName` and `className` —
+the signature of `CharacterSheetClassUtils.getLevelFeatures`
+(`charactersheet-class-utils.js:3296`), whose subclass pushes at `:3435`,
+`:3475`, `:3517`, `:3553` and `:3621` emit exactly that shape and which
+**contains no `featureType` assignment anywhere in its 340-line body.**
+
+That is decisive for the fix: the `<absent>` rows and the `"Subclass"` rows
+are two writers with one symptom. **Repairing the three `"Subclass"` writers
+repairs 0 of the 57.** Only a read-side repair covers both.
+
+### The vocabulary is wider than either gate
+
+Every `featureType:` string literal assigned anywhere in `js/charactersheet/`:
+
+```
+19  "Class"          3  "Species"       1  "Subclass"     1  "Feat"
+16  "Optional Feature"  2  "Background"    1  "Race"
+```
+
+plus three non-literal sources:
+
+```
+state:15936 / :16113   opt.subclassShortName ? "Subclass" : "Class"
+state:43864            featureTypeLabel — DM-granted data features; takes the
+                       PICKER'S UI LABEL first (see next section), then any
+                       string on the payload, then "Feature"
+class-utils:3296       getLevelFeatures — sets NO featureType at all
+```
+
+`buildFeatureStateObject` has **30 call sites across 6 files**, and
+`getLevelFeatures` reaches `addFeature` without going through it at all.
+
+Against that, the read side:
+
+```
+:764   accepts exactly ONE value      "Class"
+:1303  byType has FIVE keys           Class · Species · Subrace · Background · Other
+```
+
+Two things fall out. `byType` carries a **`Subrace` bucket that no writer
+fills** — there is no `featureType: "Subrace"` literal in the codebase — while
+lacking buckets for seven values writers *do* produce (`Optional Feature`,
+`Subclass`, `Race`, `Feat`, and the three label values in the next section).
+And the asymmetry with the Species branch is now quantified rather than
+asserted: **`:766` accepts three spellings for a value set of three; `:764`
+accepts one spelling for a value set of eight.**
+
+The `"Feature"` fallback named above is in fact **unreachable** — see the next
+section, which measures what `state:43864` really produces. None of it appears
+in the export corpus because the corpus exercises no DM grants; by the lesson
+below, that is a statement about the corpus.
+
+**Bound, stated honestly — and it narrowed.** `state:15944` is observed under
+Jest. But Hunter's options *do* carry `subclassShortName` (11 of the 53), so a
+Builder pick routed through `_fulfillSubfeatureChoice` would have stamped
+`"Subclass"` — and the corpus Hunter rows are absent instead. So the live
+wizard path for those picks is **not** `state:15944`, and its *browser*
+reachability is **less** supported by the corpus, not more. `state:16121` and
+`respec:2768` remain inferred from their write sites.
+
+### A third `featureType` vocabulary — UI labels, written by a live path
+
+`featureType` carries **three** vocabularies, not two, and only two of them are
+quarantined.
+
+1. **Authored code arrays** — an optionalfeature payload's own
+   `featureType: ["EI"]`. *Correctly handled.* `state:43884-43885` hardcodes
+   `featureType: "Optional Feature"` and diverts the array into
+   `optionalFeatureTypes`, and `class-utils:5276` does the same for the
+   `buildFeatureStateObject` route. The convention is stated in-code at `state:43861-43863`. **Do not
+   widen the read gates to accept arrays** — nothing stores one.
+2. **Sheet display buckets** — `Class`, `Species`, `Subclass`, … the values
+   censused above.
+3. **DM-grant UI labels** — the `<option>` text of a `<select>`, written
+   straight into the discriminator. Not quarantined anywhere.
+
+The third vocabulary is defined at `charactersheet-customabilities.js:3489`
+and stamped onto the grant row at `:3525`:
+
+```js
+:3489  const sourceTypeLabels = {
+           classFeature: "Class Feature",  subclassFeature: "Subclass Feature",
+           optionalfeature: "Optional Feature",  feat: "Feat",  json: "Pasted",
+       };
+:3520  grants.features.push({grantKind: "dataFeature", …,
+:3525      featureType: sourceTypeLabels[sourceType] || "Feature",
+```
+
+`state:43864` then hands that label to the builder, where `class-utils:5289`
+(`explicitFeatureType || featureType`) lets it through unmapped:
+
+```js
+state:43864   const featureTypeLabel = feature.featureType || …  || "Feature";
+state:43868   buildFeatureStateObject(payload, {featureType: featureTypeLabel, …})
+state:43871   this.addFeature({...built, dmGranted: true, …})
+```
+
+Measured — all five labels driven through the real `buildFeatureStateObject`:
+
+```
+sourceType        stored featureType    :764   bucket   className   isSubclassFeature
+classFeature      "Class Feature"       ✗      Other    "Fighter"   null      <- NEW
+subclassFeature   "Subclass Feature"    ✗      Other    "Fighter"   null      <- NEW
+json              "Pasted"              ✗      Other    null        null      <- NEW
+optionalfeature   "Optional Feature"    ✗      Other    null        null
+feat              "Feat"                ✗      Other    null        null
+```
+
+Three of the five are genuinely outside the sheet's vocabulary. The other two
+coincide with values the sheet already writes, so they fail on the pre-existing
+defect rather than on this one. The `|| "Feature"` fallback at `:3525` is
+**dead**: `sourceType` can only be one of the four `<option>` values at
+`:1858-1861` or the literal `"json"` at `:3626`, and `sourceTypeLabels` covers
+all five. Likewise `state:43865`'s payload-string limb is redundant — the same
+payload string wins again at `class-utils:5289` regardless.
+
+**Reachability — a click, not a cascade.** `:3565` calls `addDataFeature` from
+a plain `click` handler on a search result; `:3626` from the *Add from JSON*
+button. No confirmation modal and no data dependency. Honest bound: the panel
+sits behind a collapsed `<details>` labelled *Advanced Feature Grant (DM)* with
+a permission warning (`:1850-1854`), and this was driven through the state API
+with the picker's exact literal row shape (read verbatim from `:3520`), not
+through the DOM click itself.
+
+**This narrows the read-side repair.** A gate that ORs on
+`isSubclassFeature`/`className` does *not* cover this writer class:
+`isSubclassFeature` is `null` even on subclass grants, and `"Pasted"` / `"Feat"`
+rows carry no `className` at all. Those need either a `dmGranted` limb on the
+read side or a mapping at the write site.
+
+### Suggested fix
+
+The read side is the only place that covers every writer.
+
+1. `:764` — OR in the other vocabularies, mirroring the Species branch, or
+   invert to an **exclusion list**, which does not need updating each time a
+   writer invents a value. Take the membership from the **written** set, not
+   the compared set: `Species`, `Subrace`, `Race`, `Background`, **`Feat`**.
+
+   The product already has this list — `charactersheet-features.js:924` — and
+   it is the precedent for both the right membership and the wrong placement:
+
+   ```js
+   :914-922  if (f.featureType === "Class") return true;          // acceptors
+             if (f.featureType === "Optional Feature") return true;
+             if (f.className) return true;
+             if (f.classSource) return true;
+             if (f.level && typeof f.level === "number") return true;
+   :924      if (f.featureType === "Race" || … === "Background" || … === "Feat") return false;
+   ```
+
+   `:924` never fires for a feat, because `respec.js:2457` writes a numeric
+   `level` and `:922` accepts on numeric level two lines earlier. **An
+   exclusion list placed after the acceptors is decorative** — it must go
+   first. Note also that `Subrace` and `Racial` are compared but never
+   written, while `Subclass` is written but never compared, which is where
+   `byType`'s unfilled `Subrace` bucket came from.
+2. `:1303`/`:1312` — the `Other` bucket must either be rendered or removed.
+   Leaving it write-only is what swallowed five of the six vocabulary values
+   silently, and it will swallow the sixth. Note `Subrace` is a bucket with no
+   writer, so the list is already out of sync in both directions.
+3. Consider normalising in `addFeature` (`charactersheet-state.js:36434`),
+   which today does not touch `featureType`: a row carrying
+   `isSubclassFeature: true` or `className` and no `featureType` could be
+   stamped once, at the single point every writer passes through. Note this
+   covers `getLevelFeatures` and the `"Subclass"` writers but **not** the
+   DM-grant labels — `"Pasted"` and `"Feat"` rows carry neither limb, so they
+   need either a `dmGranted` limb here or a label→vocabulary map at
+   `state:43864`. This is the argument for the exclusion-list form of fix 1,
+   which covers all four writer classes without enumerating any of them.
+4. Regression pin: assert that a Battle Master's maneuvers, a Hunter's
+   `Colossus Slayer`, **and** a DM-granted class feature appear in "All Class
+   Features" — one per writer class. Verify the pin by reverting the fix and
+   watching it go red; a green-on-revert pin proves nothing.
+
+### Credit
+
+Reachability of the `"Subclass"` half was established by the
+`truemichato-plan-cs-bug-018-skips` session, which measured the 53/214 census,
+drove `Totem Spirit → Bear` end to end, then identified `getLevelFeatures` as
+the third writer behind the 57 `<absent>` rows — the finding that makes a
+read-side repair the only sufficient one — and finally found the DM-grant label
+vocabulary at `customabilities:3489`, the fourth writer class. The
+`Optional Feature` half, the write-only `byType.Other` bucket, the
+export-corpus measurement, and the vocabulary census were added while verifying
+those reports; the per-label measurement, the dead `|| "Feature"` fallback, and
+the limits of a `className`-based read repair likewise.
+
+Two earlier revisions of this entry were wrong and are worth recording, because
+both errors have the same shape. The first called the `"Subclass"` half
+**latent** on the strength of `Subclass = 0 of 6,663` — a gap in the export
+corpus, not a property of the product. The second attributed the 57 `<absent>`
+rows to the same writers as the `"Subclass"` rows; they are a different writer
+entirely, and a fix aimed at the `"Subclass"` sites would have repaired none of
+them. **A frequency table cannot tell you which code path filled a bucket**, and
+neither error was visible in the counts.
+
+---
+
+## CS-BUG-114 — Respec "Change Feat" is completely non-functional: it throws on every invocation, the modal never closes, and nothing is saved
+
+**Status: Open** (product). Player-visible. Not fixed — filed only.
+
+`CharacterSheetRespec._applyFeatChange` (`js/charactersheet/charactersheet-respec.js:2439`)
+has two limbs for moving a feat. **Both are broken, and the one that always
+runs throws.**
+
+### Limb 1 — assigns to a property that does not exist
+
+```js
+:2443  if (oldFeat) {
+:2444      let features = this._state.getFeatures();
+:2445      features = features.filter(f => !(f.name === oldFeat.name && …));
+:2446      this._state._character.features = features;      // <- _character is undefined
+```
+
+`git grep -nE '_character[^a-zA-Z]' -- js/charactersheet/` returns **exactly one
+line in the entire tree** — `respec.js:2446` itself. Nothing declares,
+initialises or otherwise references `_character`. The state object stores
+features on `this._data.features`.
+
+Driven against a real `CharacterSheetState` instance:
+
+```
+typeof state._character            ->  undefined
+state._character.features = []     ->  TypeError: Cannot set properties of
+                                       undefined (setting 'features')
+```
+
+### Limb 2 — pushes into a detached copy
+
+```js
+:2460  const features = this._state.getFeatures();
+:2461  features.push(feature);                              // <- mutates a throwaway
+```
+
+`getFeatures()` (`charactersheet-state.js:35976`) is
+
+```js
+return this._data.features.map(f => ({...f, id: f.id || CryptUtil.uid()}));
+```
+
+— a fresh array of freshly-spread objects. Pushing to it cannot reach state.
+Measured:
+
+```
+getFeatures().push(newFeat)  ->  _data.features 1 -> 1;  new feat present: FALSE
+```
+
+So even if limb 1 were removed, the new feat would still never be added.
+
+### The throwing branch is the only reachable one
+
+The guard at `:2443` is `if (oldFeat)`, where `oldFeat = history.choices?.feat`
+(`:2440`). The *same expression* gates whether the "Feat" row is offered for
+editing at all:
+
+```js
+:921   if (history.choices?.feat) {
+:922       editable.push({type: "feat", label: "Feat", current: history.choices.feat});
+```
+
+`_editChoice:1074` dispatches `case "feat"` to `_editFeat` (`:1922`), whose
+Apply button calls `_applyFeatChange` (`:2003`). A user can therefore only reach
+`_applyFeatChange` through a row that exists *because* `history.choices.feat` is
+truthy — so `oldFeat` is always truthy, and `:2446` always throws.
+
+There is **no branch in which the feat swap silently half-succeeds**; the
+no-`oldFeat` path is unreachable from the UI.
+
+### What the user sees
+
+The click handler at `:1997` has **no `try`/`catch`**, so the throw at `:2446`
+aborts everything after it:
+
+```js
+:2003  await this._applyFeatChange(level, history, selectedFeat);   // throws here
+:2005  doClose();                    // never runs
+:2006  closeParentModal();           // never runs
+:2007  this.render();                // never runs
+:2009  await this._page.saveCharacter();   // never runs
+:2010  JqueryUtil.doToast({type: "success", content: `Changed feat to …`});  // never runs
+```
+
+The modal stays open, no toast appears, nothing is persisted, and the only
+evidence is an unhandled rejection in the console. The feature is inert rather
+than corrupting — but see the warning below: **the inertness is load-bearing.**
+The throw at `:2446` is the only thing standing between the user and silent
+data loss, so a partial fix is strictly worse than no fix.
+
+Everything downstream of `:2446` is therefore also dead code today, including
+the ability-score application at `:2464-2480`, the history update at `:2483`
+(`updateLevelChoice`) and the HP recalculation at `:2491`.
+
+### ⚠️ Do not fix limb 1 alone — the one-word repair causes data loss
+
+The two limbs are **stacked and independently sufficient**, not sequential. Limb
+2 is broken for a reason that has nothing to do with `_character`, so repairing
+only the property name removes the old feat and still never adds the new one.
+
+Measured by driving the real `getFeatures()` body (extracted verbatim from the
+committed source) with the `_applyFeatChange` statements copied as-is, starting
+from a single feat row `["Alert"]` and swapping it for `Lucky`:
+
+```
+A  today, as committed        throws TypeError   rows ["Alert"]   old feat KEPT
+B  `_character` -> `_data`,
+   limb 2 untouched           no throw           rows []          BOTH LOST
+```
+
+So the observable effect of the obvious one-word repair is that the user's feat
+silently disappears and nothing replaces it. **Fix both limbs in the same change
+or neither.**
+
+The underlying reason limb 2 cannot be fixed by accident:
+
+```
+getFeatures() === _data.features        ->  false   (new array)
+getFeatures()[0] === _data.features[0]  ->  false   (new objects)
+```
+
+`getFeatures()` re-wraps every row via `.map(f => ({...f, id: f.id ||
+CryptUtil.uid()}))`, so the array and every row are fresh and **top-level**
+writes to them are discarded. That is what defeats limb 2: `features.push(...)`
+and `row.someProp = x` are both unobservable.
+
+#### ⚠️ It is NOT a read-only projection — do not "harden" it
+
+`{...f}` is a **shallow** copy, so nested objects are shared by reference.
+Driven against the real extracted body:
+
+```
+row === _data.features[0]            ->  false
+row.uses === _data.features[0].uses  ->  TRUE     <-- ALIASED
+row.name = "Renamed"   ->  live.name          unchanged  (discarded)
+row.uses.current = 99  ->  live.uses.current  99         (PERSISTED)
+```
+
+So the rule is **top-level writes vanish, nested writes persist** — which is
+more dangerous than read-only, because a nested write looks inert and isn't.
+
+There is a live, load-bearing nested write. `charactersheet-combat.js:6933`
+(`feature.uses.current--`, inside `_useCombatAction`) mutates a projection row
+obtained from `renderCombatActions:5937`, and reaches live state *only* through
+this aliasing. Nine lines later `:6942` (`features[idx].uses = feature.uses`) is
+a top-level write onto a second projection and is dead — `features` is bound at
+`:6939` and read afterwards only at `:6940` and `:6944`.
+
+Deep-copying or freezing `getFeatures()` would therefore break feature-use
+tracking for any row lacking a persisted `id`: `:6945`'s `setFeatureUses(fid, …)`
+is guarded on `fid`, and for an id-less row `|| CryptUtil.uid()` mints a *fresh
+random id on every call* (measured: two calls return different ids), so the
+lookup misses and the call no-ops. Note `setFeatureUses` (`:38677`) also owns the
+mirrored-resource sync, which the alias does not do — so such rows already get a
+*partial* update today, and closing the alias would make it a total one. Whether
+id-less rows exist in the product is **unmeasured**: `addFeature:36484` always
+assigns an id, and 0 of 1,127 feature rows across 31 E2E export files lack one,
+so it would take a legacy save restored verbatim by `loadFromJson`.
+
+Under the narrower predicate *"mutates the returned array"*, exactly one call
+site qualifies: `charactersheet-respec.js:2461`. `getFeatures()` has 48 call
+sites in `js/` plus its declaration at `charactersheet-state.js:35976`. Both of
+`_applyFeatChange`'s defects are unique in the tree — `_character` appears at
+`:2446` and nowhere else — which is why neither is caught by any pattern used
+elsewhere.
+
+### Latent second-order defects, visible once limb 1 is repaired
+
+These do **not** manifest today because control never reaches them. Anyone
+fixing `:2446` must handle them in the same change or they become live:
+
+1. **The new feat is still never added** — limb 2 above. This is the one that
+   turns the repair into data loss; see the warning above.
+2. **The old feat's effects are never reverted.** The code says so itself at
+   `:2448-2449`: *"Remove old feat bonuses (simplified — full implementation
+   would need to track all feat effects)"*. The ability increase applied by the
+   outgoing feat at `:2473-2474` (`setAbilityBase`) has no inverse.
+3. **`updateLevelChoice` at `:2483` would then diverge from `_data.features`** —
+   history would name the new feat while the features list still held the old
+   one.
+
+### Suggested fix
+
+1. `:2446` — replace with the real accessor. There is no public setter for the
+   whole array; `removeFeature(id)` (`charactersheet-state.js`) is the canonical
+   single-feature teardown and is what `removeFeaturesBySourceAbility:44508`
+   deliberately delegates to, *"so any side effects the feature created via
+   `addFeature` … are also cleaned up. A plain array filter would orphan them."*
+   That comment is an argument against the filter-and-reassign approach at
+   `:2444-2446` even if `_character` had existed.
+2. `:2460-2461` — use `addFeature(...)` rather than pushing to `getFeatures()`.
+3. Wrap `:2003` in `try`/`catch` so a future throw surfaces as a toast instead
+   of a silently stuck modal.
+4. Regression pin: respec a level's feat and assert the old feat row is gone,
+   the new one is present, and `history.choices.feat` matches. Verify the pin by
+   reverting the fix and watching it go red.
+
+### How this was found, and the near-miss
+
+Surfaced by the `truemichato-plan-cs-bug-018-skips` session while checking an
+exclusion-list claim in CS-BUG-113 — unrelated to `featureType`, reached only
+because that check sent them to `charactersheet-features.js:924`.
+
+Their report characterised the failure as *"with a prior feat the handler throws
+before the add; without one it no-ops silently … the user is told it worked
+either way."* The second half describes an **unreachable** branch: `:921` and
+`:2443` test the same expression, so the success toast at `:2010` cannot fire on
+this path at all. The bug is simpler and more severe than reported — a total,
+deterministic failure rather than a silent corruption — which is the better
+outcome for users and the worse one for anyone who assumed the feature worked.
+
+**Bound:** driven through the state API with the two statements copied verbatim
+from `:2446` and `:2460-2461`, plus a static trace of the dispatch chain
+`:921 → :1074 → :1922 → :2003 → :2439`. The DOM click itself was not performed.
