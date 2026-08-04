@@ -29,17 +29,6 @@ class CharacterSheetDice3d {
 	static GLOBAL_KEY = "dice-box-threejs";
 	static SUPPORTED_DICE = new Set([4, 6, 8, 10, 12, 20]);
 
-	/**
-	 * How long to stop attempting 3D after an initialisation failure or WebGL context loss, and how many such
-	 *   failures to tolerate before giving up for the rest of the session.
-	 *
-	 * The cooldown is what stops a broken environment from thrashing re-initialisation on every roll; the bound
-	 *   is what stops it retrying forever. Together they let a transient failure heal while preserving the
-	 *   original behaviour for an environment that genuinely cannot render.
-	 */
-	static _FAILURE_COOLDOWN_MS = 10000;
-	static _MAX_FAILURES = 3;
-
 	static _ROLL_TIMEOUT_MS = 4500;
 	static _SETTLE_MS = 600;
 	static _CRIT_SETTLE_MS = 1000;
@@ -97,17 +86,9 @@ class CharacterSheetDice3d {
 		this._overlay = null;
 		this._badge = null;
 		this._initPromise = null;
-		// "Give up on 3D" state. Set on init failure or WebGL context loss.
-		//
-		// This used to be a permanent, session-scoped flag, which meant a single transient failure -- a GPU reset,
-		//   a context loss while the tab was backgrounded, a driver hiccup -- silently downgraded every subsequent
-		//   roll to the legacy CSS animation until the page was reloaded, with nothing to tell the user why.
-		//
-		// It is now a short cooldown plus a bounded failure count: a transient failure recovers on a later roll,
-		//   while a genuinely broken environment still stops re-initialising after `_MAX_FAILURES` attempts, so
-		//   the original "avoid re-init thrash" intent is preserved.
-		this._failCount = 0;
-		this._unavailableUntil = 0;
+		// Hard, session-scoped "give up on 3D" flag. Set on init failure or
+		// WebGL context loss; never auto-cleared (avoids re-init thrash).
+		this._unavailable = false;
 		this._lastThemeKey = null;
 		// Signature of the currently-applied appearance (theme + overrides) so we
 		// only call updateConfig when the look actually changes.
@@ -151,18 +132,6 @@ class CharacterSheetDice3d {
 
 	isSupportedDie (diceType) {
 		return CharacterSheetDice3d.SUPPORTED_DICE.has(Number(diceType));
-	}
-
-	/**
-	 * Whether 3D is currently given up on.
-	 *
-	 * True while a failure cooldown is in effect, and permanently once `_MAX_FAILURES` initialisations have
-	 *   failed. Reading it is what allows a transient failure to heal: once the cooldown lapses, the next roll
-	 *   attempts initialisation again.
-	 */
-	get _unavailable () {
-		if (this._failCount >= CharacterSheetDice3d._MAX_FAILURES) return true;
-		return Date.now() < this._unavailableUntil;
 	}
 
 	/** Fast precheck: can we even attempt a 3D render for this die right now? */
@@ -314,8 +283,7 @@ class CharacterSheetDice3d {
 	}
 
 	_teardownToUnavailable () {
-		this._failCount += 1;
-		this._unavailableUntil = Date.now() + CharacterSheetDice3d._FAILURE_COOLDOWN_MS;
+		this._unavailable = true;
 		this._initPromise = null;
 		try {
 			if (this._box && typeof this._box.clearDice === "function") this._box.clearDice();

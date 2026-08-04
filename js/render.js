@@ -2632,11 +2632,6 @@ Renderer.get = () => {
  *   but a property injector *is* valid inside a tag.
  */
 Renderer.applyProperties = function (entry, object) {
-	// Fast path: `splitByTags` only ever splits on `{@` / `{=`, and any segment
-	//   which starts with neither is copied to the output verbatim. A string
-	//   containing no `{` at all therefore always round-trips unchanged.
-	if (typeof entry === "string" && entry.indexOf("{") === -1) return entry;
-
 	const propSplit = Renderer.splitByTags(entry);
 	const len = propSplit.length;
 
@@ -2713,9 +2708,7 @@ Renderer.applyAllProperties = function (entries, object = null) {
 		},
 		string: (str) => Renderer.applyProperties(str, object || lastObj),
 	};
-	// The walker holds no per-walk state, so one shared instance serves every
-	//   call. `handlers` must stay per-call: it closes over `lastObj`/`object`.
-	return (Renderer.applyAllProperties._WALKER ||= MiscUtil.getWalker()).walk(entries, handlers);
+	return MiscUtil.getWalker().walk(entries, handlers);
 };
 
 Renderer.attackTagToFull = function (tagStr, {isRoll = false} = {}) {
@@ -12946,41 +12939,25 @@ Renderer.item = class {
 		return Renderer.item._createSpecificVariants_isRequiresExcludesMatch(baseItem, genericVariant.excludes, "some");
 	}
 
-	/**
-	 * Note the hand-rolled `every`/`some`: this runs once per (base item x generic variant) pair, i.e. hundreds of
-	 *   thousands of times per load of the items page, so the intermediate `Object.entries` arrays are worth avoiding.
-	 */
 	static _createSpecificVariants_isRequiresExcludesMatch (candidate, requirements, method) {
 		if (candidate == null || requirements == null) return false;
 
-		const isEvery = method === "every";
+		return Object.entries(requirements)[method](([reqKey, reqVal]) => {
+			if (reqVal instanceof Array) {
+				return candidate[reqKey] instanceof Array
+					? candidate[reqKey].some(it => reqVal.includes(it))
+					: reqVal.includes(candidate[reqKey]);
+			}
 
-		for (const reqKey in requirements) {
-			const isMatch = Renderer.item._createSpecificVariants_isRequiresExcludesMatch_isMatch({candidate, reqKey, reqVal: requirements[reqKey], method});
-			if (isEvery) { if (!isMatch) return false; } else if (isMatch) return true;
-		}
+			// Recurse for e.g. `"customProperties": { ... }`
+			if (reqVal != null && typeof reqVal === "object") {
+				return Renderer.item._createSpecificVariants_isRequiresExcludesMatch(candidate[reqKey], reqVal, method);
+			}
 
-		// Matches `[].every(...) === true` / `[].some(...) === false`
-		return isEvery;
-	}
-
-	static _createSpecificVariants_isRequiresExcludesMatch_isMatch ({candidate, reqKey, reqVal, method}) {
-		const candidateVal = candidate[reqKey];
-
-		if (reqVal instanceof Array) {
-			return candidateVal instanceof Array
-				? candidateVal.some(it => reqVal.includes(it))
-				: reqVal.includes(candidateVal);
-		}
-
-		// Recurse for e.g. `"customProperties": { ... }`
-		if (reqVal != null && typeof reqVal === "object") {
-			return Renderer.item._createSpecificVariants_isRequiresExcludesMatch(candidateVal, reqVal, method);
-		}
-
-		return candidateVal instanceof Array
-			? candidateVal.some(it => reqVal === it)
-			: reqVal === candidateVal;
+			return candidate[reqKey] instanceof Array
+				? candidate[reqKey].some(it => reqVal === it)
+				: reqVal === candidate[reqKey];
+		});
 	}
 
 	/**
@@ -13031,9 +13008,15 @@ Renderer.item = class {
 
 		specificVariant._category = "Specific Variant";
 		specificVariant.baseItem = DataUtil.proxy.getUid("item", baseItem);
-		Renderer.item._createSpecificVariants_getInheritsKeys(inherits)
-			.forEach((inheritedProperty) => {
-				const val = inherits[inheritedProperty];
+		Object.entries(inherits)
+			// Always apply "remove"s first
+			// This allows for e.g.
+			//   - base item: "Very Rare Reagent"
+			//   - variant: "Poisonous Reagent"
+			//     `{"nameRemove": "Reagent", "nameSuffix": "Poisonous Reagent"}`
+			//   -> `"Very Rare Poisonous Reagent"`
+			.sort(([kA], [kB]) => kB.includes("Remove") - kA.includes("Remove"))
+			.forEach(([inheritedProperty, val]) => {
 				switch (inheritedProperty) {
 					case "namePrefix": specificVariant.name = `${val}${specificVariant.name}`; break;
 					case "nameSuffix": specificVariant.name = `${specificVariant.name}${val}`; break;
@@ -13135,30 +13118,6 @@ Renderer.item = class {
 		return specificVariant;
 	}
 
-	static _CACHE_INHERITS_KEYS = new WeakMap();
-
-	/**
-	 * The applicable `inherits` keys, in application order: "remove"s always run
-	 * first. This allows for e.g.
-	 *   - base item: "Very Rare Reagent"
-	 *   - variant: "Poisonous Reagent"
-	 *     `{"nameRemove": "Reagent", "nameSuffix": "Poisonous Reagent"}`
-	 *   -> `"Very Rare Poisonous Reagent"`
-	 *
-	 * A generic variant's `inherits` is shared across every base item it matches,
-	 * so the (stable) sorted key order is computed once per `inherits` object
-	 * rather than once per generated specific variant.
-	 */
-	static _createSpecificVariants_getInheritsKeys (inherits) {
-		const cached = Renderer.item._CACHE_INHERITS_KEYS.get(inherits);
-		if (cached) return cached;
-
-		const keys = Object.keys(inherits)
-			.sort((kA, kB) => kB.includes("Remove") - kA.includes("Remove"));
-		Renderer.item._CACHE_INHERITS_KEYS.set(inherits, keys);
-		return keys;
-	}
-
 	static _createSpecificVariants_evaluateExpression (baseItem, specificVariant, inherits, inheritedProperty) {
 		return inherits[inheritedProperty].replace(/\[\[([^\]]+)]]/g, (...m) => {
 			const propPath = m[1].split(".");
@@ -13176,14 +13135,6 @@ Renderer.item = class {
 		"immune",
 	];
 	static _createSpecificVariants_mergeVulnerableResistImmune ({specificVariant, inherits}) {
-		// Fast path: with none of the three props present on either side there is
-		//   nothing to merge, and the `delete`s the slow path would perform are
-		//   all no-ops on absent keys.
-		if (
-			!("vulnerable" in specificVariant) && !("resist" in specificVariant) && !("immune" in specificVariant)
-			&& !("vulnerable" in inherits) && !("resist" in inherits) && !("immune" in inherits)
-		) return;
-
 		const fromBase = {};
 		Renderer.item._PROPS_VULN_RES_IMMUNE
 			.filter(prop => specificVariant[prop])
@@ -13241,9 +13192,7 @@ Renderer.item = class {
 	}
 
 	static _enhanceItems (allItems) {
-		// Resolve the style hint once, rather than once per item
-		const styleHint = VetoolsConfig.get("styleSwitcher", "style");
-		allItems.forEach((item) => Renderer.item.enhanceItem(item, {styleHint}));
+		allItems.forEach((item) => Renderer.item.enhanceItem(item));
 		return allItems;
 	}
 
@@ -13348,11 +13297,10 @@ Renderer.item = class {
 		if (itemTypeAbv === Parser.ITM_TYP_ABV__GENERIC_VARIANT) item._category = "Generic Variant";
 		if (item._category == null) item._category = "Other";
 		if (item.entries == null) item.entries = [];
-		const entType = item.type ? Renderer.item.getType(item.type) : null;
-		if (entType?.entries || entType?.entriesTemplate) {
+		if (item.type && (Renderer.item.getType(item.type)?.entries || Renderer.item.getType(item.type)?.entriesTemplate)) {
 			Renderer.item._initFullEntries(item);
 
-			const propertyEntries = Renderer.item._enhanceItem_getItemPropertyTypeEntries({item, ent: entType});
+			const propertyEntries = Renderer.item._enhanceItem_getItemPropertyTypeEntries({item, ent: Renderer.item.getType(item.type)});
 			propertyEntries.forEach(e => item._fullEntries.push({type: "wrapper", wrapped: e, data: {[VeCt.ENTDATA_ITEM_MERGED_ENTRY_TAG]: "type"}}));
 		}
 		if (item.property) {

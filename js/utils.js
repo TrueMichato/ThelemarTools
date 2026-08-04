@@ -1381,14 +1381,59 @@ class ElementUtil {
 
 		if (children) for (let i = 0, len = children.length; i < len; ++i) if (children[i] != null) ele.append(children[i]);
 
-		// Bind the element extension methods as own properties. These were previously installed once on
-		//   `Node.prototype`, which avoided ~55 `bind` calls per element, but mutating a built-in prototype used by
-		//   every DOM node and every library on the page is too large a blast radius for the gain.
-		// The extensions live on `Node.prototype` (see `ElementUtil._installExtensions`), so a `Node` needs nothing
-		//   bound to it. `e_` is, however, also called on non-`Node` targets (e.g. `window`), and any name that
-		//   could not be installed is still handled per-element -- normally none.
-		if (typeof Node === "undefined" || !(ele instanceof Node)) ElementUtil._mutBindExtensions(ele);
-		else if (ElementUtil._EXTENSION_ENTRIES_UNINSTALLED.length) ElementUtil._mutBindExtensions(ele, ElementUtil._EXTENSION_ENTRIES_UNINSTALLED);
+		ele.find = ele.find || ElementUtil._find.bind(ele);
+		ele.findAll = ele.findAll || ElementUtil._findAll.bind(ele);
+		ele.prev = ele.prev || ElementUtil._prev.bind(ele);
+		ele.prevAll = ele.prevAll || ElementUtil._prevAll.bind(ele);
+		ele.next = ele.next || ElementUtil._next.bind(ele);
+		ele.nextAll = ele.nextAll || ElementUtil._nextAll.bind(ele);
+		ele.appends = ele.appends || ElementUtil._appends.bind(ele);
+		ele.prepends = ele.prepends || ElementUtil._prepends.bind(ele);
+		ele.appendTo = ele.appendTo || ElementUtil._appendTo.bind(ele);
+		ele.prependTo = ele.prependTo || ElementUtil._prependTo.bind(ele);
+		ele.aftere = ele.aftere || ElementUtil._aftere.bind(ele);
+		ele.insertAfter = ele.insertAfter || ElementUtil._insertAfter.bind(ele);
+		ele.beforee = ele.beforee || ElementUtil._beforee.bind(ele);
+		ele.insertBeforee = ele.insertBeforee || ElementUtil._insertBeforee.bind(ele);
+		ele.addClass = ele.addClass || ElementUtil._addClass.bind(ele);
+		ele.removeClass = ele.removeClass || ElementUtil._removeClass.bind(ele);
+		ele.toggleClass = ele.toggleClass || ElementUtil._toggleClass.bind(ele);
+		ele.hasClass = ele.hasClass || ElementUtil._hasClass.bind(ele);
+		ele.showVe = ele.showVe || ElementUtil._showVe.bind(ele);
+		ele.hideVe = ele.hideVe || ElementUtil._hideVe.bind(ele);
+		ele.toggleVe = ele.toggleVe || ElementUtil._toggleVe.bind(ele);
+		ele.empty = ele.empty || ElementUtil._empty.bind(ele);
+		ele.detach = ele.detach || ElementUtil._detach.bind(ele);
+		ele.attr = ele.attr || ElementUtil._attr.bind(ele);
+		ele.prop = ele.prop || ElementUtil._prop.bind(ele);
+		ele.val = ele.val || ElementUtil._val.bind(ele);
+		ele.html = ele.html || ElementUtil._html.bind(ele);
+		ele.txt = ele.txt || ElementUtil._txt.bind(ele);
+		ele.tooltip = ele.tooltip || ElementUtil._tooltip.bind(ele);
+		ele.placeholdere = ele.placeholdere || ElementUtil._placeholdere.bind(ele);
+		ele.disableSpellcheck = ele.disableSpellcheck || ElementUtil._disableSpellcheck.bind(ele);
+		ele.typeahead = ele.typeahead || ElementUtil._typeahead.bind(ele);
+		ele.css = ele.css || ElementUtil._css.bind(ele);
+		ele.onn = ele.onn || ElementUtil._onX.bind(ele);
+		ele.off = ele.off || ElementUtil._offX.bind(ele);
+		ele.onClick = ele.onClick || ElementUtil._onX.bind(ele, "click");
+		ele.onContextmenu = ele.onContextmenu || ElementUtil._onX.bind(ele, "contextmenu");
+		ele.onChange = ele.onChange || ElementUtil._onX.bind(ele, "change");
+		ele.onKeydown = ele.onKeydown || ElementUtil._onX.bind(ele, "keydown");
+		ele.onKeyup = ele.onKeyup || ElementUtil._onX.bind(ele, "keyup");
+		ele.trigger = ele.trigger || ElementUtil._trigger.bind(ele);
+		ele.first = ele.first || ElementUtil._first.bind(ele);
+		ele.closeste = ele.closeste || ElementUtil._closeste.bind(ele);
+		ele.childrene = ele.childrene || ElementUtil._childrene.bind(ele);
+		ele.siblings = ele.siblings || ElementUtil._siblings.bind(ele);
+		ele.parente = ele.parente || ElementUtil._parente.bind(ele);
+		ele.outerWidthe = ele.outerWidthe || ElementUtil._outerWidthe.bind(ele);
+		ele.outerHeighte = ele.outerHeighte || ElementUtil._outerHeighte.bind(ele);
+		ele.focuse = ele.focuse || ElementUtil._focuse.bind(ele);
+		ele.selecte = ele.selecte || ElementUtil._selecte.bind(ele);
+		ele.blure = ele.blure || ElementUtil._blure.bind(ele);
+		ele.scrollTope = ele.scrollTope || ElementUtil._scrollTope.bind(ele);
+		ele.is = ele.is || ElementUtil._is.bind(ele);
 
 		return ele;
 	}
@@ -1956,123 +2001,9 @@ class ElementUtil {
 		return `sandbox="${this._IFRAME_SANDBOX_ATTRIBUTES.join(" ")}"`;
 	}
 	// endregion
-
-	/* -------------------------------------------- */
-
-	// region Element extensions
-	/**
-	 * The set of extension methods added to elements by `e_`/`ee`.
-	 *
-	 * Every `ElementUtil._xxx` implementation is `this`-based, so these work unbound, as ordinary methods.
-	 */
-	static _EXTENSIONS = {
-		find: ElementUtil._find,
-		findAll: ElementUtil._findAll,
-		prev: ElementUtil._prev,
-		prevAll: ElementUtil._prevAll,
-		next: ElementUtil._next,
-		nextAll: ElementUtil._nextAll,
-		appends: ElementUtil._appends,
-		prepends: ElementUtil._prepends,
-		appendTo: ElementUtil._appendTo,
-		prependTo: ElementUtil._prependTo,
-		aftere: ElementUtil._aftere,
-		insertAfter: ElementUtil._insertAfter,
-		beforee: ElementUtil._beforee,
-		insertBeforee: ElementUtil._insertBeforee,
-		addClass: ElementUtil._addClass,
-		removeClass: ElementUtil._removeClass,
-		toggleClass: ElementUtil._toggleClass,
-		hasClass: ElementUtil._hasClass,
-		showVe: ElementUtil._showVe,
-		hideVe: ElementUtil._hideVe,
-		toggleVe: ElementUtil._toggleVe,
-		empty: ElementUtil._empty,
-		detach: ElementUtil._detach,
-		attr: ElementUtil._attr,
-		prop: ElementUtil._prop,
-		val: ElementUtil._val,
-		html: ElementUtil._html,
-		txt: ElementUtil._txt,
-		tooltip: ElementUtil._tooltip,
-		placeholdere: ElementUtil._placeholdere,
-		disableSpellcheck: ElementUtil._disableSpellcheck,
-		typeahead: ElementUtil._typeahead,
-		css: ElementUtil._css,
-		onn: ElementUtil._onX,
-		off: ElementUtil._offX,
-		trigger: ElementUtil._trigger,
-		first: ElementUtil._first,
-		closeste: ElementUtil._closeste,
-		childrene: ElementUtil._childrene,
-		siblings: ElementUtil._siblings,
-		parente: ElementUtil._parente,
-		outerWidthe: ElementUtil._outerWidthe,
-		outerHeighte: ElementUtil._outerHeighte,
-		focuse: ElementUtil._focuse,
-		selecte: ElementUtil._selecte,
-		blure: ElementUtil._blure,
-		scrollTope: ElementUtil._scrollTope,
-		is: ElementUtil._is,
-		onClick: function (fn, opts) { return ElementUtil._onX.call(this, "click", fn, opts); },
-		onContextmenu: function (fn, opts) { return ElementUtil._onX.call(this, "contextmenu", fn, opts); },
-		onChange: function (fn, opts) { return ElementUtil._onX.call(this, "change", fn, opts); },
-		onKeydown: function (fn, opts) { return ElementUtil._onX.call(this, "keydown", fn, opts); },
-		onKeyup: function (fn, opts) { return ElementUtil._onX.call(this, "keyup", fn, opts); },
-	};
-
-	/**
-	 * Bind the extension methods to a target as own properties, as `e_`/`ee` have always done.
-	 *
-	 * The entry list is hoisted, as this runs for every element created; `Object.entries` would otherwise allocate a
-	 *   fresh array of ~55 pairs per element.
-	 */
-	static _EXTENSION_ENTRIES = Object.entries(ElementUtil._EXTENSIONS);
-
-	/**
-	 * Entries which could not be installed on `Node.prototype`, and so are still handled per-element.
-	 *
-	 * Empty in every browser this has been checked against (53/53 install). It exists so that a future native DOM
-	 *   API, or another library, taking one of these names does not have its implementation overwritten. In that
-	 *   case the pre-existing implementation wins and ours is not installed -- which is exactly what the original
-	 *   per-element `ele[name] ||= ...` binding did, since it resolved `ele[name]` through the prototype chain.
-	 */
-	static _EXTENSION_ENTRIES_UNINSTALLED = ElementUtil._EXTENSION_ENTRIES;
-
-	static _mutBindExtensions (ele, entries = ElementUtil._EXTENSION_ENTRIES) {
-		for (let i = 0; i < entries.length; ++i) {
-			const [name, fn] = entries[i];
-			ele[name] ||= fn.bind(ele);
-		}
-	}
-
-	/**
-	 * Install the extension methods on a prototype, once, rather than binding ~55 methods as own properties on
-	 *   every element created. The latter allocates millions of closures when rendering an entry-heavy list, and
-	 *   was one of the largest single costs of loading those pages.
-	 *
-	 * Installed non-enumerable (the per-element properties were enumerable), so they stay hidden from
-	 *   `Object.keys`/`JSON.stringify`/spread, and writable/configurable, so assignment and own-property
-	 *   shadowing (e.g. `<form>` named properties) still take precedence, exactly as before.
-	 *
-	 * Runs at script-evaluation time, before any element exists, so no inline cache has yet been formed against
-	 *   the unmodified prototype. Names already present anywhere on the prototype chain are never overwritten.
-	 */
-	static _installExtensions (proto) {
-		const uninstalled = [];
-		for (const entry of ElementUtil._EXTENSION_ENTRIES) {
-			const [name, fn] = entry;
-			if (name in proto) { uninstalled.push(entry); continue; }
-			Object.defineProperty(proto, name, {value: fn, writable: true, configurable: true, enumerable: false});
-		}
-		ElementUtil._EXTENSION_ENTRIES_UNINSTALLED = uninstalled;
-	}
-	// endregion
 }
 
 globalThis.ElementUtil = ElementUtil;
-
-if (typeof Node !== "undefined") ElementUtil._installExtensions(Node.prototype);
 
 if (typeof window !== "undefined") {
 	/**
@@ -2129,31 +2060,13 @@ globalThis.MiscUtil = class {
 		return JSON.parse(JSON.stringify(obj));
 	}
 
-	/**
-	 * Note that the primitive check is inlined at each recursion site, and the loops are index-based: this is one of
-	 *   the hottest functions on the site (large data sets are deep-copied wholesale), and the overwhelming majority
-	 *   of the values encountered are primitives, for which the function call is pure overhead.
-	 */
 	static copyFast (obj) {
-		if (obj == null || typeof obj !== "object") return obj;
+		if ((typeof obj !== "object") || obj == null) return obj;
 
-		if (obj instanceof Array) {
-			const len = obj.length;
-			const cpy = new Array(len);
-			for (let i = 0; i < len; ++i) {
-				const val = obj[i];
-				cpy[i] = (val == null || typeof val !== "object") ? val : MiscUtil.copyFast(val);
-			}
-			return cpy;
-		}
+		if (obj instanceof Array) return obj.map(MiscUtil.copyFast);
 
 		const cpy = {};
-		const keys = Object.keys(obj);
-		for (let i = 0, len = keys.length; i < len; ++i) {
-			const k = keys[i];
-			const val = obj[k];
-			cpy[k] = (val == null || typeof val !== "object") ? val : MiscUtil.copyFast(val);
-		}
+		for (const k of Object.keys(obj)) cpy[k] = MiscUtil.copyFast(obj[k]);
 		return cpy;
 	}
 
@@ -2704,30 +2617,20 @@ globalThis.MiscUtil = class {
 	};
 
 	static _WalkerSync = class extends this._WalkerBase {
-		// Note: these two run once per visited node per walk, so the single-handler
-		//   case (overwhelmingly the common one) deliberately avoids wrapping the
-		//   handler in a throwaway array and allocating an iteration closure.
 		_applyHandlers ({handlers, obj, lastKey, stack}) {
-			if (typeof handlers === "function") {
-				const out = handlers(obj, lastKey, stack);
-				if (this._isBreakOnReturn && out) return VeCt.SYM_WALKER_BREAK;
-				return this._isNoModification ? obj : out;
-			}
-
-			const arr = handlers instanceof Array ? handlers : [handlers];
-			for (let i = 0, len = arr.length; i < len; ++i) {
-				const out = arr[i](obj, lastKey, stack);
-				if (this._isBreakOnReturn && out) return VeCt.SYM_WALKER_BREAK;
+			handlers = handlers instanceof Array ? handlers : [handlers];
+			const didBreak = handlers.some(h => {
+				const out = h(obj, lastKey, stack);
+				if (this._isBreakOnReturn && out) return true;
 				if (!this._isNoModification) obj = out;
-			}
+			});
+			if (didBreak) return VeCt.SYM_WALKER_BREAK;
 			return obj;
 		}
 
 		_runHandlers ({handlers, obj, lastKey, stack}) {
-			if (typeof handlers === "function") { handlers(obj, lastKey, stack); return; }
-
-			const arr = handlers instanceof Array ? handlers : [handlers];
-			for (let i = 0, len = arr.length; i < len; ++i) arr[i](obj, lastKey, stack);
+			handlers = handlers instanceof Array ? handlers : [handlers];
+			handlers.forEach(h => h(obj, lastKey, stack));
 		}
 
 		_doObjectRecurse (obj, primitiveHandlers, stack) {
@@ -3756,43 +3659,13 @@ globalThis.UrlUtil = class {
 
 	static URL_TO_HASH_GENERIC = (it) => UrlUtil.encodeArrayForHash(it.name, it.source);
 
-	static _CACHE_ENCODE_FOR_HASH = new Map();
-	static _CACHE_ENCODE_FOR_HASH_MAX = 100_000;
-
-	/**
-	 * Hash-building is extremely hot during data load (every entity is hashed, repeatedly), and the set of distinct
-	 *   inputs (names/sources) is small relative to the number of calls, so the encoded form is memoised.
-	 */
-	static _encodeStrForHash (str) {
-		const cached = UrlUtil._CACHE_ENCODE_FOR_HASH.get(str);
-		if (cached !== undefined) return cached;
-
-		const out = str.toUrlified();
-		if (UrlUtil._CACHE_ENCODE_FOR_HASH.size >= UrlUtil._CACHE_ENCODE_FOR_HASH_MAX) UrlUtil._CACHE_ENCODE_FOR_HASH.clear();
-		UrlUtil._CACHE_ENCODE_FOR_HASH.set(str, out);
-		return out;
-	}
-
 	static encodeForHash (toEncode) {
-		if (toEncode instanceof Array) {
-			let out = "";
-			for (let i = 0; i < toEncode.length; ++i) {
-				if (i) out += HASH_LIST_SEP;
-				out += UrlUtil._encodeStrForHash(`${toEncode[i]}`);
-			}
-			return out;
-		}
-
-		return UrlUtil._encodeStrForHash(`${toEncode}`);
+		if (toEncode instanceof Array) return toEncode.map(it => `${it}`.toUrlified()).join(HASH_LIST_SEP);
+		else return `${toEncode}`.toUrlified();
 	}
 
 	static encodeArrayForHash (...toEncodes) {
-		let out = "";
-		for (let i = 0; i < toEncodes.length; ++i) {
-			if (i) out += HASH_LIST_SEP;
-			out += UrlUtil.encodeForHash(toEncodes[i]);
-		}
-		return out;
+		return toEncodes.map(UrlUtil.encodeForHash).join(HASH_LIST_SEP);
 	}
 
 	static autoEncodeHash (obj) {
@@ -5691,51 +5564,17 @@ globalThis.DataUtil = class {
 			const templates = await this._pMergeCopy_pGetTemplates(entry);
 			if (!entry._copy) return; // Another merge may have completed for this entry, if multiple entries use it as a parent
 
-			const out = DataUtil.generic.copyApplier.getCopy(impl, MiscUtil.copyFast(entParent), entry, templates, options);
-
-			// Merging can complete an entity's identity (e.g. by supplying a `className` which was previously only
-			//   available on the parent), changing its hash. Re-cache under the post-merge hash, so that subsequent
-			//   copiers targeting the completed form still find it without a full re-scan. `getCopy` mutating
-			//   `entry` is the only point at which an entity's hash can change (the parent is deep-copied, so is
-			//   left untouched), so this captures every such change, in constant time.
-			DataUtil.generic._pMergeCopy_mutRecache({impl, page, entry});
-
-			return out;
+			return DataUtil.generic.copyApplier.getCopy(impl, MiscUtil.copyFast(entParent), entry, templates, options);
 		}
 
-		static _pMergeCopy_mutRecache ({impl, page, entry}) {
-			const hash = UrlUtil.URL_TO_HASH_BUILDER[page](entry);
-			// Avoid clobbering existing caches, as we assume "earlier = better"
-			impl._mergeCache[hash] ||= entry;
-		}
-
-		/**
-		 * This is only reached on a cache miss, and every entity visited by a previous search has had its hash
-		 *   cached -- both here, and (for entities whose hash changed as a result of being merged) by
-		 *   `_pMergeCopy_mutRecache`. Resuming the scan from where the previous one stopped therefore hashes each
-		 *   entity at most once overall, rather than re-walking the head of the list for every `_copy` (which is
-		 *   quadratic, and dominates load time for `_copy`-heavy data such as the bestiary).
-		 */
 		static _pMergeCopy_search (impl, page, entryList, entry, options) {
 			const entryHash = UrlUtil.URL_TO_HASH_BUILDER[page](entry._copy);
-			const fnGetHash = UrlUtil.URL_TO_HASH_BUILDER[page];
-
-			const scanIxs = (impl._mergeCacheScanIxs ||= new WeakMap());
-			const ixStart = Math.min(scanIxs.get(entryList) ?? 0, entryList.length);
-
-			for (let ix = ixStart, len = entryList.length; ix < len; ++ix) {
-				const ent = entryList[ix];
-				const hash = fnGetHash(ent);
+			return entryList.find(ent => {
+				const hash = UrlUtil.URL_TO_HASH_BUILDER[page](ent);
 				// Avoid clobbering existing caches, as we assume "earlier = better"
 				impl._mergeCache[hash] ||= ent;
-				if (hash === entryHash) {
-					scanIxs.set(entryList, Math.max(scanIxs.get(entryList) ?? 0, ix + 1));
-					return ent;
-				}
-			}
-
-			scanIxs.set(entryList, entryList.length);
-			return undefined;
+				return hash === entryHash;
+			});
 		}
 
 		static async _pMergeCopy_pGetTemplates (entry) {
