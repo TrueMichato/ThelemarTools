@@ -6922,8 +6922,28 @@ read side or a mapping at the write site.
 The read side is the only place that covers every writer.
 
 1. `:764` — OR in the other vocabularies, mirroring the Species branch, or
-   invert to an exclusion list (`Species`/`Subrace`/`Race`/`Background`), which
-   does not need updating each time a writer invents a value.
+   invert to an **exclusion list**, which does not need updating each time a
+   writer invents a value. Take the membership from the **written** set, not
+   the compared set: `Species`, `Subrace`, `Race`, `Background`, **`Feat`**.
+
+   The product already has this list — `charactersheet-features.js:924` — and
+   it is the precedent for both the right membership and the wrong placement:
+
+   ```js
+   :914-922  if (f.featureType === "Class") return true;          // acceptors
+             if (f.featureType === "Optional Feature") return true;
+             if (f.className) return true;
+             if (f.classSource) return true;
+             if (f.level && typeof f.level === "number") return true;
+   :924      if (f.featureType === "Race" || … === "Background" || … === "Feat") return false;
+   ```
+
+   `:924` never fires for a feat, because `respec.js:2457` writes a numeric
+   `level` and `:922` accepts on numeric level two lines earlier. **An
+   exclusion list placed after the acceptors is decorative** — it must go
+   first. Note also that `Subrace` and `Racial` are compared but never
+   written, while `Subclass` is written but never compared, which is where
+   `byType`'s unfilled `Subrace` bucket came from.
 2. `:1303`/`:1312` — the `Other` bucket must either be rendered or removed.
    Leaving it write-only is what swallowed five of the six vocabulary values
    silently, and it will swallow the sixth. Note `Subrace` is a bucket with no
@@ -6963,3 +6983,146 @@ rows to the same writers as the `"Subclass"` rows; they are a different writer
 entirely, and a fix aimed at the `"Subclass"` sites would have repaired none of
 them. **A frequency table cannot tell you which code path filled a bucket**, and
 neither error was visible in the counts.
+
+---
+
+## CS-BUG-114 — Respec "Change Feat" is completely non-functional: it throws on every invocation, the modal never closes, and nothing is saved
+
+**Status: Open** (product). Player-visible. Not fixed — filed only.
+
+`CharacterSheetRespec._applyFeatChange` (`js/charactersheet/charactersheet-respec.js:2439`)
+has two limbs for moving a feat. **Both are broken, and the one that always
+runs throws.**
+
+### Limb 1 — assigns to a property that does not exist
+
+```js
+:2443  if (oldFeat) {
+:2444      let features = this._state.getFeatures();
+:2445      features = features.filter(f => !(f.name === oldFeat.name && …));
+:2446      this._state._character.features = features;      // <- _character is undefined
+```
+
+`git grep -nE '_character[^a-zA-Z]' -- js/charactersheet/` returns **exactly one
+line in the entire tree** — `respec.js:2446` itself. Nothing declares,
+initialises or otherwise references `_character`. The state object stores
+features on `this._data.features`.
+
+Driven against a real `CharacterSheetState` instance:
+
+```
+typeof state._character            ->  undefined
+state._character.features = []     ->  TypeError: Cannot set properties of
+                                       undefined (setting 'features')
+```
+
+### Limb 2 — pushes into a detached copy
+
+```js
+:2460  const features = this._state.getFeatures();
+:2461  features.push(feature);                              // <- mutates a throwaway
+```
+
+`getFeatures()` (`charactersheet-state.js:35976`) is
+
+```js
+return this._data.features.map(f => ({...f, id: f.id || CryptUtil.uid()}));
+```
+
+— a fresh array of freshly-spread objects. Pushing to it cannot reach state.
+Measured:
+
+```
+getFeatures().push(newFeat)  ->  _data.features 1 -> 1;  new feat present: FALSE
+```
+
+So even if limb 1 were removed, the new feat would still never be added.
+
+### The throwing branch is the only reachable one
+
+The guard at `:2443` is `if (oldFeat)`, where `oldFeat = history.choices?.feat`
+(`:2440`). The *same expression* gates whether the "Feat" row is offered for
+editing at all:
+
+```js
+:921   if (history.choices?.feat) {
+:922       editable.push({type: "feat", label: "Feat", current: history.choices.feat});
+```
+
+`_editChoice:1074` dispatches `case "feat"` to `_editFeat` (`:1922`), whose
+Apply button calls `_applyFeatChange` (`:2003`). A user can therefore only reach
+`_applyFeatChange` through a row that exists *because* `history.choices.feat` is
+truthy — so `oldFeat` is always truthy, and `:2446` always throws.
+
+There is **no branch in which the feat swap silently half-succeeds**; the
+no-`oldFeat` path is unreachable from the UI.
+
+### What the user sees
+
+The click handler at `:1997` has **no `try`/`catch`**, so the throw at `:2446`
+aborts everything after it:
+
+```js
+:2003  await this._applyFeatChange(level, history, selectedFeat);   // throws here
+:2005  doClose();                    // never runs
+:2006  closeParentModal();           // never runs
+:2007  this.render();                // never runs
+:2009  await this._page.saveCharacter();   // never runs
+:2010  JqueryUtil.doToast({type: "success", content: `Changed feat to …`});  // never runs
+```
+
+The modal stays open, no toast appears, nothing is persisted, and the only
+evidence is an unhandled rejection in the console. The feature is inert rather
+than corrupting — which is the one piece of good news here.
+
+Everything downstream of `:2446` is therefore also dead code today, including
+the ability-score application at `:2464-2480`, the history update at `:2483`
+(`updateLevelChoice`) and the HP recalculation at `:2491`.
+
+### Latent second-order defects, visible once limb 1 is repaired
+
+These do **not** manifest today because control never reaches them. Anyone
+fixing `:2446` must handle them in the same change or they become live:
+
+1. **The new feat is still never added** — limb 2 above.
+2. **The old feat's effects are never reverted.** The code says so itself at
+   `:2448-2449`: *"Remove old feat bonuses (simplified — full implementation
+   would need to track all feat effects)"*. The ability increase applied by the
+   outgoing feat at `:2473-2474` (`setAbilityBase`) has no inverse.
+3. **`updateLevelChoice` at `:2483` would then diverge from `_data.features`** —
+   history would name the new feat while the features list still held the old
+   one.
+
+### Suggested fix
+
+1. `:2446` — replace with the real accessor. There is no public setter for the
+   whole array; `removeFeature(id)` (`charactersheet-state.js`) is the canonical
+   single-feature teardown and is what `removeFeaturesBySourceAbility:44508`
+   deliberately delegates to, *"so any side effects the feature created via
+   `addFeature` … are also cleaned up. A plain array filter would orphan them."*
+   That comment is an argument against the filter-and-reassign approach at
+   `:2444-2446` even if `_character` had existed.
+2. `:2460-2461` — use `addFeature(...)` rather than pushing to `getFeatures()`.
+3. Wrap `:2003` in `try`/`catch` so a future throw surfaces as a toast instead
+   of a silently stuck modal.
+4. Regression pin: respec a level's feat and assert the old feat row is gone,
+   the new one is present, and `history.choices.feat` matches. Verify the pin by
+   reverting the fix and watching it go red.
+
+### How this was found, and the near-miss
+
+Surfaced by the `truemichato-plan-cs-bug-018-skips` session while checking an
+exclusion-list claim in CS-BUG-113 — unrelated to `featureType`, reached only
+because that check sent them to `charactersheet-features.js:924`.
+
+Their report characterised the failure as *"with a prior feat the handler throws
+before the add; without one it no-ops silently … the user is told it worked
+either way."* The second half describes an **unreachable** branch: `:921` and
+`:2443` test the same expression, so the success toast at `:2010` cannot fire on
+this path at all. The bug is simpler and more severe than reported — a total,
+deterministic failure rather than a silent corruption — which is the better
+outcome for users and the worse one for anyone who assumed the feature worked.
+
+**Bound:** driven through the state API with the two statements copied verbatim
+from `:2446` and `:2460-2461`, plus a static trace of the dispatch chain
+`:921 → :1074 → :1922 → :2003 → :2439`. The DOM click itself was not performed.
