@@ -438,6 +438,55 @@ describe("CharacterSheetDice3d", () => {
 			expect(d._unavailable).toBe(true);
 		});
 
+		test("a transient init failure recovers once the cooldown lapses", async () => {
+			const opts = {failInit: true};
+			const factory = makeFakeFactory(opts);
+			const d = new CharacterSheetDice3d({diceBoxFactory: factory});
+			const realNow = Date.now;
+			let now = realNow.call(Date);
+			Date.now = () => now;
+
+			try {
+				await expect(d.pRoll({diceType: 20, finalValue: 4, theme: "standard"}))
+					.rejects.toBeTruthy();
+				// Cooling down: the caller falls back rather than thrashing re-init.
+				expect(d.canRender(20)).toBe(false);
+
+				// The environment recovers (e.g. the WebGL context comes back).
+				opts.failInit = false;
+				now += CharacterSheetDice3d._FAILURE_COOLDOWN_MS + 1;
+
+				expect(d.canRender(20)).toBe(true);
+				await expect(d.pRoll({diceType: 20, finalValue: 4, theme: "standard"}))
+					.resolves.toBeUndefined();
+			} finally {
+				Date.now = realNow;
+			}
+		});
+
+		test("repeated init failures give up on 3D for the rest of the session", async () => {
+			const factory = makeFakeFactory({failInit: true});
+			const d = new CharacterSheetDice3d({diceBoxFactory: factory});
+			const realNow = Date.now;
+			let now = realNow.call(Date);
+			Date.now = () => now;
+
+			try {
+				for (let i = 0; i < CharacterSheetDice3d._MAX_FAILURES; ++i) {
+					await expect(d.pRoll({diceType: 20, finalValue: 4, theme: "standard"}))
+						.rejects.toBeTruthy();
+					now += CharacterSheetDice3d._FAILURE_COOLDOWN_MS + 1;
+				}
+
+				// Bound reached: no amount of waiting re-enables 3D.
+				now += CharacterSheetDice3d._FAILURE_COOLDOWN_MS * 1000;
+				expect(d.canRender(20)).toBe(false);
+				expect(d._unavailable).toBe(true);
+			} finally {
+				Date.now = realNow;
+			}
+		});
+
 		test("pRoll rejects for an unsupported die so caller can fall back", async () => {
 			const factory = makeFakeFactory();
 			const d = new CharacterSheetDice3d({diceBoxFactory: factory});
