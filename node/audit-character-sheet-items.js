@@ -57,9 +57,11 @@ function classifyItem (item) {
 	const hasDerivedWeaponRider = DERIVED_WEAPON_RIDER_RE.test(text);
 	if (hasDerivedWeaponRider) fields.push("derivedWeaponRider");
 	const hasPowerData = !!item.attachedSpells || namedActive || hasDerivedWeaponRider;
+	const hasCooldownLimitedSpeed = !!item.modifySpeed && /\b(?:can be used|use this property)\s+once every\b/i.test(text);
 	if (unsupportedSpellKeys.length) {
 		return {status: "unsupported", fields, reasons: unsupportedSpellKeys.map(key => `attachedSpells.${key}`)};
 	}
+	if (hasCooldownLimitedSpeed) return {status: "surfacedOnly", fields, reasons: ["cooldown-limited structured speed"]};
 	if (fields.length || hasPowerData) {
 		return {
 			status: hasActiveProse && !hasPowerData ? "surfacedOnly" : "fullyFunctional",
@@ -67,7 +69,7 @@ function classifyItem (item) {
 			reasons: hasActiveProse && !hasPowerData ? ["unstructured active prose"] : [],
 		};
 	}
-	if (text) return {status: "surfacedOnly", fields, reasons: ["rules text only"]};
+	if (text || item._isExpandedVariant || item._isItemGroup) return {status: "surfacedOnly", fields, reasons: ["rules text only"]};
 	return {status: "unsupported", fields, reasons: ["no structured mechanics or rules text"]};
 }
 
@@ -82,20 +84,117 @@ function isMagicItem (item) {
 		|| !!(item.wondrous || item.staff || item.wand || item.rod || item.ring || item.tattoo);
 }
 
-function loadCorpus (attachmentPath = null) {
-	const items = readJson("data/items.json").item.filter(isMagicItem).map(item => ({...item, _corpus: "site"}));
-	const variants = readJson("data/magicvariants.json").magicvariant
-		.map(item => ({...item, ...(item.inherits || {}), _corpus: "magicvariants"}));
-	const tgtt = readJson("homebrew/TravelersGuidetoThelemar.json").item.filter(isMagicItem)
-		.map(item => ({...item, _corpus: "TGTT"}));
-	const out = [...items, ...variants, ...tgtt];
-	if (!attachmentPath) return out;
-	const exported = readJson(attachmentPath);
-	for (const document of exported.async?.HOMEBREW_2_STORAGE || []) {
-		const label = document.head?.filename || document.body?._meta?.sources?.[0]?.full || "attached homebrew";
-		for (const item of (document.body?.item || []).filter(isMagicItem)) out.push({...item, _corpus: `attachment: ${label}`});
+function isRequirementMatch (candidate, requirement, method) {
+	if (candidate == null || requirement == null) return false;
+	return Object.entries(requirement)[method](([key, expected]) => {
+		const actual = candidate[key];
+		if (Array.isArray(expected)) return Array.isArray(actual) ? actual.some(it => expected.includes(it)) : expected.includes(actual);
+		if (expected && typeof expected === "object") return isRequirementMatch(actual, expected, method);
+		return Array.isArray(actual) ? actual.includes(expected) : actual === expected;
+	});
+}
+
+function isEditionMatch (baseItem, variant) {
+	if (baseItem.edition === variant.edition) return true;
+	if (baseItem.edition === "classic") return false;
+	if (baseItem.edition == null) return true;
+	if (baseItem.edition === "one") return variant.edition !== "classic";
+	return false;
+}
+
+function applyProperties (value, props) {
+	if (typeof value === "string") {
+		return value.replace(/\{=([^}]+)}/g, (full, key) => props[key] == null ? full : String(props[key]));
+	}
+	if (Array.isArray(value)) return value.map(it => applyProperties(it, props));
+	if (!value || typeof value !== "object") return value;
+	return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, applyProperties(child, props)]));
+}
+
+function createSpecificVariant (baseItem, variant, corpus) {
+	const inherits = variant.inherits || {};
+	const out = structuredClone(baseItem);
+	const props = {...baseItem, ...inherits};
+	for (const [key, rawValue] of Object.entries(inherits).sort(([a], [b]) => Number(b.includes("Remove")) - Number(a.includes("Remove")))) {
+		const value = applyProperties(rawValue, props);
+		switch (key) {
+			case "namePrefix": out.name = `${value}${out.name}`; break;
+			case "nameSuffix": out.name = `${out.name}${value}`; break;
+			case "nameRemove": out.name = out.name.replace(new RegExp(value, "g"), ""); break;
+			case "entries": out.entries = [...value, ...(out.entries || [])]; break;
+			case "conditionImmune":
+			case "resist":
+			case "immune":
+			case "vulnerable": out[key] = [...new Set([...(out[key] || []), ...value])]; break;
+			case "propertyAdd": out.property = [...new Set([...(out.property || []), ...value])]; break;
+			case "propertyRemove": out.property = (out.property || []).filter(it => !value.includes(it?.uid || it)); break;
+			case "weightExpression":
+			case "valueExpression":
+			case "barding": break;
+			default: out[key] = value;
+		}
+	}
+	out.source = inherits.source || variant.source || out.source;
+	out.baseItem = `${baseItem.name}|${baseItem.source}`;
+	out._variantName = variant.name;
+	out._isExpandedVariant = true;
+	out._corpus = corpus;
+	return out;
+}
+
+function expandVariants (baseItems, variants, corpusForVariant) {
+	const out = [];
+	for (const variant of variants) {
+		if (!Array.isArray(variant.requires) || !variant.requires.length) continue;
+		for (const baseItem of baseItems) {
+			if (baseItem.packContents) continue;
+			if (!isEditionMatch(baseItem, variant)) continue;
+			if (!variant.requires.some(requirement => isRequirementMatch(baseItem, requirement, "every"))) continue;
+			if (variant.excludes && isRequirementMatch(baseItem, variant.excludes, "some")) continue;
+			out.push(createSpecificVariant(baseItem, variant, corpusForVariant(variant)));
+		}
 	}
 	return out;
+}
+
+function dedupeItems (items) {
+	const byUid = new Map();
+	for (const item of items) {
+		const uid = `${item.name || ""}|${item.source || ""}`.toLowerCase();
+		if (!byUid.has(uid)) byUid.set(uid, item);
+	}
+	return [...byUid.values()];
+}
+
+function loadCorpus (attachmentPath = null) {
+	const siteItems = readJson("data/items.json").item;
+	const siteBaseItems = readJson("data/items-base.json").baseitem;
+	const siteVariants = readJson("data/magicvariants.json").magicvariant;
+	const direct = siteItems.filter(isMagicItem).map(item => ({...item, _corpus: "site items"}));
+	const baseItems = [...siteBaseItems];
+	const variants = [...siteVariants.map(item => ({...item, _auditCorpus: "site variants"}))];
+
+	if (attachmentPath) {
+		const exported = readJson(attachmentPath);
+		for (const document of exported.async?.HOMEBREW_2_STORAGE || []) {
+			const label = document.head?.filename || document.body?._meta?.sources?.[0]?.full || "attached homebrew";
+			const corpus = `backup: ${label}`;
+			for (const item of document.body?.item || []) {
+				if (isMagicItem(item)) direct.push({...item, _corpus: corpus});
+			}
+			for (const group of document.body?.itemGroup || []) direct.push({...group, _isItemGroup: true, _corpus: `${corpus} (groups)`});
+			baseItems.push(...(document.body?.baseitem || []));
+			variants.push(...(document.body?.magicvariant || []).map(item => ({...item, _auditCorpus: `${corpus} variants`})));
+		}
+	} else {
+		const tgtt = readJson("homebrew/TravelersGuidetoThelemar.json");
+		direct.push(...(tgtt.item || []).filter(isMagicItem).map(item => ({...item, _corpus: "TGTT"})));
+		baseItems.push(...(tgtt.baseitem || []));
+		variants.push(...(tgtt.magicvariant || []).map(item => ({...item, _auditCorpus: "TGTT variants"})));
+	}
+
+	const expanded = expandVariants(baseItems, variants, variant => variant._auditCorpus || "site variants");
+	return dedupeItems([...direct, ...expanded]);
 }
 
 function summarize (items) {
@@ -120,7 +219,7 @@ function toMarkdown (summary, attachmentPath) {
 	const lines = [
 		"# Character Sheet Magic-Item Coverage Audit",
 		"",
-		`Generated from the in-repo site catalog, magic-variant templates, TGTT homebrew${attachmentPath ? ", and the supplied 5etools export" : ""}.`,
+		`Generated from the in-repo site catalog and concrete magic-variant expansions${attachmentPath ? ", plus all item content in the supplied 5etools site backup" : ", plus TGTT homebrew"}.`,
 		"",
 		"| Status | Items | Share |",
 		"| --- | ---: | ---: |",
@@ -153,7 +252,7 @@ function toMarkdown (summary, attachmentPath) {
 		"- **Surfaced only:** rules text remains visible, but no safe structured operation can be inferred.",
 		"- **Unsupported:** the entity has an unknown attached-spell shape or neither mechanics nor rules text.",
 		"",
-		"Run `node node/audit-character-sheet-items.js [5etools-export.json]` to refresh this report.",
+		"Run `node node/audit-character-sheet-items.js [5etools-site-backup.json]` to refresh this report.",
 	);
 	return `${lines.join("\n")}\n`;
 }

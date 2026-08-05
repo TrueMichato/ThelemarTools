@@ -28233,6 +28233,7 @@ class CharacterSheetState {
 			};
 		};
 		const itemText = CharacterSheetState._getItemEntryText(item.entries);
+		const itemEntryJson = JSON.stringify(item.entries || []);
 		const addSpell = (raw, usageType, {chargesCost = 0, usesMax = null, isEach = false, usesKey = null} = {}) => {
 			const spell = parseSpellUid(raw);
 			if (!spell.name) return;
@@ -28241,11 +28242,18 @@ class CharacterSheetState {
 				&& /\bexpend\s+1\s+or\s+more\s+(?:of (?:its|the) )?charges?\b/i.test(itemText)
 				&& /\bincrease the spell slot level by one for each additional charge\b/i.test(itemText);
 			const baseLevelMatch = itemText.match(/\bfor\s+1\s+charge,\s+you\s+cast\s+the\s+(\d+)(?:st|nd|rd|th)-level version\b/i);
+			const actionType = Array.isArray(item.attachedSpells) && item.attachedSpells.length === 1
+				? /\breaction\b[^.]*\bcast\b/i.test(itemText)
+					? "reaction"
+					: /\bbonus action\b[^.]*\bcast\b/i.test(itemText)
+						? "bonus"
+						: "action"
+				: "action";
 			addPower({
 				id: CharacterSheetState._getItemPowerId(["spell", spell.name, spell.source, chargesCost || usageType]),
 				name: spell.name,
 				kind: "spell",
-				actionType: "action",
+				actionType,
 				usageType,
 				chargesCost,
 				chargesCostMax: isVariableChargeCast ? item.charges || chargesCost : chargesCost,
@@ -28276,7 +28284,21 @@ class CharacterSheetState {
 				isReferenceOnly: false,
 			});
 		} else if (Array.isArray(attached)) {
-			for (const raw of attached) addSpell(raw, "other");
+			const chargeCosts = new Map(
+				[...itemEntryJson.matchAll(/\{@spell\s+([^}|]+)(?:\|[^}]*)?}\s*\((\d+)\s+charges?\)/gi)]
+					.map(match => [match[1].trim().toLowerCase(), parseInt(match[2], 10)]),
+			);
+			const resetsEachAtDawn = /\bonce you use\b[^.]*\byou can't cast that spell again\b[^.]*\bnext dawn\b/i.test(itemText);
+			const resetsOnRest = /\byou can't use this property again until you finish\b[^.]*\bshort rest\b[^.]*\blong rest\b/i.test(itemText);
+			for (const raw of attached) {
+				const spell = parseSpellUid(raw);
+				const chargesCost = chargeCosts.get(spell.name.toLowerCase()) || 0;
+				addSpell(raw, resetsEachAtDawn ? "daily" : resetsOnRest ? "rest" : chargesCost ? "charges" : "other", {
+					chargesCost,
+					usesMax: resetsEachAtDawn || resetsOnRest ? 1 : null,
+					isEach: true,
+				});
+			}
 		} else if (attached && typeof attached === "object") {
 			for (const raw of attached.will || []) addSpell(raw, "will");
 			for (const raw of attached.ritual || []) addSpell(raw, "ritual");
@@ -28361,12 +28383,23 @@ class CharacterSheetState {
 			const recurring = getRecurringUsage(text);
 			const isReversible = /\b(?:again|a second time)[^.]*(?:end|ends)\s+the effect\b/i.test(text)
 				|| /\b(?:lasts?|remains?)\s+until\s+[^.]*\bagain\b/i.test(text);
+			const isLimitedSpeedReference = item.modifySpeed && /\b(?:can be used|use this property)\s+once every\b/i.test(text);
 			const toggleEffectType = item.modifySpeed && isReversible
 				? "modifySpeed"
 				: item.damageRiders?.some(rider => rider.requiresToggle) && isReversible
 					? "damageRiders"
 					: null;
-			if (actionType && toggleEffectType) {
+			if (isLimitedSpeedReference) {
+				addPower({
+					id: CharacterSheetState._getItemPowerId(["reference", item.name, "modify-speed"]),
+					name: `${item.name} Speed`,
+					kind: "ability",
+					actionType: explicitActionType || "other",
+					effectType: "modifySpeed",
+					description: text,
+					isReferenceOnly: true,
+				});
+			} else if (actionType && toggleEffectType) {
 				addPower({
 					id: CharacterSheetState._getItemPowerId(["toggle", item.name, toggleEffectType]),
 					name: `${item.name} ${toggleEffectType === "modifySpeed" ? "Speed" : "Damage"}`,
@@ -29267,6 +29300,13 @@ class CharacterSheetState {
 			// Item activation requirements detection (action economy costs)
 			if (itemProps.activation === undefined) {
 				itemProps.activation = this._detectItemActivation(itemProps);
+			}
+			if (itemProps.charges == null) {
+				const chargesMatch = CharacterSheetState._getItemEntryText(itemProps.entries).match(/\bhas\s+(\d+)\s+charges\b/i);
+				if (chargesMatch) {
+					itemProps.charges = parseInt(chargesMatch[1], 10);
+					itemProps.chargesCurrent = itemProps.charges;
+				}
 			}
 			itemProps.effects = this._normalizeItemEffects(itemProps);
 			itemProps.damageRiders = this._normalizeItemDamageRiders(itemProps);

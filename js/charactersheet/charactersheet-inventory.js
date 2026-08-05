@@ -5689,8 +5689,8 @@ class CharacterSheetInventory {
 			if (item.requiresAttunement && !item.attuned) continue;
 
 			if (item.modifySpeed) {
-				const speedToggle = item.itemPowers?.find(power => power.isToggle && power.effectType === "modifySpeed");
-				if (speedToggle && !item.itemPowerStates?.[speedToggle.id]?.active) continue;
+				const speedPower = item.itemPowers?.find(power => power.effectType === "modifySpeed");
+				if (speedPower && (speedPower.isReferenceOnly || !item.itemPowerStates?.[speedPower.id]?.active)) continue;
 				hasAny = true;
 
 				// Process bonus speeds (additive)

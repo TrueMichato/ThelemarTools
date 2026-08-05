@@ -25,6 +25,40 @@ const CharacterSheetSpells = globalThis.CharacterSheetSpells;
 const items = JSON.parse(readFileSync(resolve(REPO_ROOT, "data/items.json"), "utf8")).item;
 const magicVariants = JSON.parse(readFileSync(resolve(REPO_ROOT, "data/magicvariants.json"), "utf8")).magicvariant;
 const brewItems = JSON.parse(readFileSync(resolve(REPO_ROOT, "homebrew/TravelersGuidetoThelemar.json"), "utf8")).item;
+const backupFixtures = {
+	gutterang: {
+		name: "Gutterang",
+		source: "EdE",
+		type: "RG|DMG",
+		rarity: "artifact",
+		reqAttune: true,
+		attachedSpells: ["death ward", "far step", "fly", "mass cure wounds"],
+		entries: [{
+			type: "entries",
+			name: "Spells",
+			entries: ["Gutterang has 7 charges. You can expend charges to cast {@spell death ward} (2 charges), {@spell fly} (3 charges), {@spell mass cure wounds} (5 charges), or {@spell far step|XGE} (2 charges). Once you use the ring to cast a spell, you can't cast that spell again from it until the next dawn."],
+		}],
+	},
+	batWings: {
+		name: "Bat Wings of Flying",
+		source: "GrimHollowMG24",
+		rarity: "rare",
+		reqAttune: true,
+		wondrous: true,
+		modifySpeed: {static: {fly: 40}},
+		entries: ["These wings give you a fly speed of 40 feet, but they can be used once every {@dice 1d8} hours."],
+	},
+	arcaneMirror: {
+		name: "Arcane Mirror",
+		source: "24GriffonsSaddlebag1",
+		type: "S|XPHB",
+		rarity: "very rare",
+		reqAttune: true,
+		charges: 10,
+		attachedSpells: ["shield|xphb"],
+		entries: ["You can take a reaction when you're hit by an attack to cast {@spell Shield|XPHB} from it. You can't use this property again until you finish a short rest or long rest."],
+	},
+};
 
 function addActiveCatalogItem (state, item) {
 	state.addItem({
@@ -421,5 +455,30 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		expect(state.getItemPowers().find(it => it.itemId === rod.id)).toEqual(
 			expect.objectContaining({usageType: "daily", usesMax: 1}),
 		);
+	});
+
+	it("normalizes attached-spell resource prose from multiple backup homebrew documents", () => {
+		const state = new CharacterSheetState();
+		const gutterang = addActiveCatalogItem(state, backupFixtures.gutterang);
+		const mirror = addActiveCatalogItem(state, backupFixtures.arcaneMirror);
+		const deathWard = state.getItemPowers().find(it => it.itemId === gutterang.id && it.name === "Death Ward");
+		const fly = state.getItemPowers().find(it => it.itemId === gutterang.id && it.name === "Fly");
+		const shield = state.getItemPowers().find(it => it.itemId === mirror.id && it.name === "Shield");
+
+		expect(deathWard).toEqual(expect.objectContaining({chargesCost: 2, usageType: "daily", usesMax: 1}));
+		expect(fly).toEqual(expect.objectContaining({chargesCost: 3, usageType: "daily", usesMax: 1}));
+		expect(deathWard.usesKey).not.toBe(fly.usesKey);
+		expect(shield).toEqual(expect.objectContaining({actionType: "reaction", usageType: "rest", usesMax: 1}));
+	});
+
+	it("keeps cooldown-limited structured speed from becoming an always-on homebrew bonus", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const wings = addCatalogItemViaInventory(state, inventory, backupFixtures.batWings);
+		inventory._updateItemBonuses(state.getItems());
+		const power = state.getItemPowers().find(it => it.itemId === wings.id);
+
+		expect(state.getSpeed("fly")).toBe(0);
+		expect(power).toEqual(expect.objectContaining({effectType: "modifySpeed", isReferenceOnly: true}));
 	});
 });
