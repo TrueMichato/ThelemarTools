@@ -998,11 +998,13 @@ describe("Item-power hover previews", () => {
 	const originalHover = globalThis.Renderer.hover;
 	const originalEncodeForHash = globalThis.UrlUtil.encodeForHash;
 	const originalSpellsPage = globalThis.UrlUtil.PG_SPELLS;
+	const originalItemsPage = globalThis.UrlUtil.PG_ITEMS;
 
 	afterEach(() => {
 		globalThis.Renderer.hover = originalHover;
 		globalThis.UrlUtil.encodeForHash = originalEncodeForHash;
 		globalThis.UrlUtil.PG_SPELLS = originalSpellsPage;
+		globalThis.UrlUtil.PG_ITEMS = originalItemsPage;
 	});
 
 	it("wires spell rows to the canonical spell hover with cast-level context", () => {
@@ -1035,7 +1037,53 @@ describe("Item-power hover previews", () => {
 		expect(onMouseOver).toHaveBeenCalledWith(expect.any(Object), element);
 	});
 
-	it("exposes the full ability/reference description without fake spell hover data", () => {
+	it("wires non-spell ability rows on a catalog item to the same item statblock hover the Inventory uses", () => {
+		const onMouseOver = jest.fn();
+		globalThis.UrlUtil.PG_ITEMS = "items.html";
+		globalThis.UrlUtil.encodeForHash = jest.fn(value => String(value).toLowerCase().replace(/\s+/g, "-"));
+		globalThis.Renderer.hover = {
+			pHandleLinkMouseOver: onMouseOver,
+			handleInlineMouseOver: jest.fn(),
+			handleLinkMouseMove: jest.fn(),
+			handleLinkMouseLeave: jest.fn(),
+		};
+		const element = makePreviewElement("button");
+		const description = "Expend a charge to release a burst of thunderous force.";
+		const preview = CharacterSheetClassUtils.applyItemPowerPreview(element, {
+			kind: "ability",
+			name: "Thunder Burst",
+			itemName: "Horn of Blasting",
+			itemSource: "DMG",
+			description,
+			chargesCost: 1,
+			isReferenceOnly: true,
+		});
+
+		// A non-spell power on a catalog item hovers the parent item's statblock —
+		// identical to the Inventory item name — not a bespoke inline card.
+		expect(preview).toMatchObject({isSpell: false, page: "items.html", source: "DMG"});
+		expect(preview.isInlineHover).toBeUndefined();
+		expect(element.getAttribute("data-vet-page")).toBe("items.html");
+		expect(element.getAttribute("data-vet-source")).toBe("DMG");
+		expect(element.getAttribute("data-vet-hash")).toContain("horn-of-blasting");
+		// No bespoke inline entry when we have a real catalog item.
+		expect(element.getAttribute("data-vet-entry")).toBeUndefined();
+		// Native title/ARIA stay as an accessible fallback.
+		expect(element.title).toContain(description);
+		expect(element.getAttribute("aria-label")).toContain(description);
+		// Hovering dispatches the canonical item hover, not the inline hover.
+		element.listeners.get("mouseover")({type: "mouseover"});
+		expect(onMouseOver).toHaveBeenCalledWith(expect.any(Object), element);
+		expect(globalThis.Renderer.hover.handleInlineMouseOver).not.toHaveBeenCalled();
+	});
+
+	it("wires non-spell ability rows on source-less items to a rich inline-entries hover", () => {
+		const onInlineMouseOver = jest.fn();
+		globalThis.Renderer.hover = {
+			handleInlineMouseOver: onInlineMouseOver,
+			handleLinkMouseMove: jest.fn(),
+			handleLinkMouseLeave: jest.fn(),
+		};
 		const element = makePreviewElement("button");
 		const description = "Choose a creature you can see; it must succeed on a DC 17 save or be blinded until the next dawn.";
 		const preview = CharacterSheetClassUtils.applyItemPowerPreview(element, {
@@ -1043,13 +1091,46 @@ describe("Item-power hover previews", () => {
 			name: "Blinding Radiance",
 			itemName: "Gae Bolg",
 			description,
+			chargesCost: 2,
+			isReferenceOnly: true,
+		});
+
+		expect(preview).toMatchObject({isSpell: false, isInlineHover: true});
+		// No fake spell-hover data on a non-spell power.
+		expect(element.getAttribute("data-vet-page")).toBeUndefined();
+		// The rich inline hover carries the ability's own description + resource meta.
+		const entry = JSON.parse(element.getAttribute("data-vet-entry"));
+		expect(entry).toMatchObject({type: "entries", name: "Blinding Radiance"});
+		expect(entry.entries[0]).toBe(description);
+		expect(entry.entries.join(" ")).toContain("2 charges");
+		expect(entry.entries.join(" ")).toContain("Rules reference");
+		// Native title/ARIA stay as an accessible fallback.
+		expect(element.title).toContain(description);
+		expect(element.getAttribute("aria-label")).toContain(description);
+		expect(element.classList.contains("charsheet__item-power--has-preview")).toBe(true);
+		// Hovering dispatches the inline hover with the built entry.
+		element.listeners.get("mouseover")({type: "mouseover"});
+		expect(onInlineMouseOver).toHaveBeenCalledWith(expect.any(Object), element, entry);
+	});
+
+	it("falls back to native title when no inline hover handler is available", () => {
+		globalThis.Renderer.hover = {handleLinkMouseMove: jest.fn(), handleLinkMouseLeave: jest.fn()};
+		const element = makePreviewElement("button");
+		const description = "Expend a charge to release a burst of thunderous force.";
+		const preview = CharacterSheetClassUtils.applyItemPowerPreview(element, {
+			kind: "ability",
+			name: "Thunder Burst",
+			itemName: "Horn of Blasting",
+			description,
 			isReferenceOnly: true,
 		});
 
 		expect(preview).toMatchObject({isSpell: false});
+		expect(preview.isInlineHover).toBeUndefined();
+		expect(element.getAttribute("data-vet-entry")).toBeUndefined();
+		expect(element.getAttribute("data-vet-page")).toBeUndefined();
 		expect(element.title).toContain(description);
 		expect(element.getAttribute("aria-label")).toContain(description);
-		expect(element.getAttribute("data-vet-page")).toBeUndefined();
 		expect(element.classList.contains("charsheet__item-power--has-preview")).toBe(true);
 	});
 

@@ -920,11 +920,17 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
-	 * Add an accessible preview to an item-power row. Spell powers use the canonical
-	 * 5etools spell hover; prose powers expose their full description via title/ARIA.
+	 * Add an accessible preview to an item-power row so its hover matches what the
+	 * Inventory shows. Spell powers use the canonical 5etools spell statblock hover.
+	 * Non-spell powers (abilities, toggles, on-hit riders, reference-only rows) have
+	 * no catalog page of their own, so — exactly like the Inventory item name — they
+	 * hover the parent item's statblock (via its name + source). Custom / source-less
+	 * items have no catalog entry, so they fall back to a rich inline-entries hover
+	 * built from the power's own description + resource metadata. Native `title`/ARIA
+	 * stay as the final fallback.
 	 * @param {HTMLElement} element
 	 * @param {*} power
-	 * @returns {{isSpell: boolean, title: string, page?: string, source?: string, hash?: string}|null}
+	 * @returns {{isSpell: boolean, title: string, page?: string, source?: string, hash?: string, isInlineHover?: boolean}|null}
 	 */
 	static applyItemPowerPreview (/** @type {*} */ element, /** @type {*} */ power) {
 		if (!element || !power) return null;
@@ -939,26 +945,85 @@ class CharacterSheetClassUtils {
 		const tagName = String(element.tagName || "").toLowerCase();
 		if (!["a", "button", "input", "select", "textarea"].includes(tagName)) element.tabIndex = 0;
 
-		if (!isSpell || typeof Renderer === "undefined" || !Renderer.hover) return {isSpell, title};
-		try {
-			const source = power.spellSource || Parser.SRC_XPHB;
-			const page = UrlUtil.PG_SPELLS || "spells.html";
-			const separator = typeof HASH_LIST_SEP !== "undefined" ? HASH_LIST_SEP : "_";
-			const hash = UrlUtil.encodeForHash([power.spellName, source].join(separator));
-			element.setAttribute("data-vet-page", page);
-			element.setAttribute("data-vet-source", source);
-			element.setAttribute("data-vet-hash", hash);
-			if (power.castLevel) element.setAttribute("data-cast-level", String(power.castLevel));
-			if (typeof Renderer.hover.pHandleLinkMouseOver === "function") {
-				element.addEventListener?.("mouseover", event => Renderer.hover.pHandleLinkMouseOver(event, element));
+		if (typeof Renderer === "undefined" || !Renderer.hover) return {isSpell, title};
+
+		// Spell powers reuse the canonical 5etools spell statblock hover.
+		if (isSpell) {
+			try {
+				const source = power.spellSource || Parser.SRC_XPHB;
+				const page = UrlUtil.PG_SPELLS || "spells.html";
+				const separator = typeof HASH_LIST_SEP !== "undefined" ? HASH_LIST_SEP : "_";
+				const hash = UrlUtil.encodeForHash([power.spellName, source].join(separator));
+				element.setAttribute("data-vet-page", page);
+				element.setAttribute("data-vet-source", source);
+				element.setAttribute("data-vet-hash", hash);
+				if (power.castLevel) element.setAttribute("data-cast-level", String(power.castLevel));
+				if (typeof Renderer.hover.pHandleLinkMouseOver === "function") {
+					element.addEventListener?.("mouseover", event => Renderer.hover.pHandleLinkMouseOver(event, element));
+				}
+				if (typeof Renderer.hover.handleLinkMouseMove === "function") {
+					element.addEventListener?.("mousemove", event => Renderer.hover.handleLinkMouseMove(event, element));
+				}
+				if (typeof Renderer.hover.handleLinkMouseLeave === "function") {
+					element.addEventListener?.("mouseleave", event => Renderer.hover.handleLinkMouseLeave(event, element));
+				}
+				return {isSpell, title, page, source, hash};
+			} catch (e) {
+				return {isSpell, title};
 			}
+		}
+
+		// Non-spell powers have no catalog page of their own, so — exactly like the
+		// Inventory item name — hover the parent item's statblock. This keeps the
+		// invoke modal's hover identical to the Inventory instead of a bespoke card.
+		const itemSource = power.itemSource;
+		if (power.itemName && itemSource && itemSource !== "Custom"
+			&& typeof Renderer.hover.pHandleLinkMouseOver === "function") {
+			try {
+				const page = UrlUtil.PG_ITEMS || "items.html";
+				const separator = typeof HASH_LIST_SEP !== "undefined" ? HASH_LIST_SEP : "_";
+				const hash = UrlUtil.encodeForHash([power.itemName, itemSource].join(separator));
+				element.setAttribute("data-vet-page", page);
+				element.setAttribute("data-vet-source", itemSource);
+				element.setAttribute("data-vet-hash", hash);
+				element.addEventListener?.("mouseover", event => Renderer.hover.pHandleLinkMouseOver(event, element));
+				if (typeof Renderer.hover.handleLinkMouseMove === "function") {
+					element.addEventListener?.("mousemove", event => Renderer.hover.handleLinkMouseMove(event, element));
+				}
+				if (typeof Renderer.hover.handleLinkMouseLeave === "function") {
+					element.addEventListener?.("mouseleave", event => Renderer.hover.handleLinkMouseLeave(event, element));
+				}
+				return {isSpell, title, page, source: itemSource, hash};
+			} catch (e) {
+				// Fall through to the inline-entries card below.
+			}
+		}
+
+		// Custom / source-less items have no catalog entry (the Inventory shows a
+		// plain name there too); build a rich inline-entries hover from the power's
+		// own description so the ability still previews what it does.
+		if (typeof Renderer.hover.handleInlineMouseOver !== "function") return {isSpell, title};
+		try {
+			const metaLines = [];
+			if (power.chargesCost) metaLines.push(`{@b Cost:} ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}`);
+			if (power.usesMax) metaLines.push(`{@b Uses:} ${power.usesCurrent ?? power.usesMax}/${power.usesMax}`);
+			if (castLevel) metaLines.push(`{@b ${castLevel}.}`);
+			if (power.isDestructive) metaLines.push(`{@b Destroys ${power.itemName || "the item"} when used.}`);
+			if (power.isReferenceOnly) metaLines.push(`{@i Rules reference — apply this effect manually.}`);
+			const entry = {
+				type: "entries",
+				name: power.name || power.itemName || "Item Power",
+				entries: [description, ...metaLines],
+			};
+			element.setAttribute("data-vet-entry", JSON.stringify(entry));
+			element.addEventListener?.("mouseover", event => Renderer.hover.handleInlineMouseOver(event, element, entry));
 			if (typeof Renderer.hover.handleLinkMouseMove === "function") {
 				element.addEventListener?.("mousemove", event => Renderer.hover.handleLinkMouseMove(event, element));
 			}
 			if (typeof Renderer.hover.handleLinkMouseLeave === "function") {
 				element.addEventListener?.("mouseleave", event => Renderer.hover.handleLinkMouseLeave(event, element));
 			}
-			return {isSpell, title, page, source, hash};
+			return {isSpell, title, isInlineHover: true};
 		} catch (e) {
 			return {isSpell, title};
 		}
