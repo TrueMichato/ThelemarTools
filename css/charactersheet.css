@@ -7576,6 +7576,68 @@ body[data-font="readable"] {
 	text-shadow: 0 0 6px rgba(139, 92, 246, 0.5);
 }
 
+/* --- Ioun bond -----------------------------------------------------------
+   An Ioun bond is a different mechanic wearing, until now, identical clothes:
+   it takes days of consecutive orbit rather than a short rest, it never costs
+   an attunement slot, and it is governed in the Ioun Stone manager. Attunement
+   already owns violet (the badge) and amber (the button), so the bond speaks
+   cyan — the one accent neither of its neighbours uses.
+
+   Hue is never the only cue. The button also swaps its glyph (◇ unbonded, ◈
+   bonded) and its label ("Bond"/"Bonded" against "Attune"/"Attuned"), so the
+   distinction survives greyscale and colour-blindness. */
+.charsheet__item-attuned-badge--bond {
+	color: var(--cs-info, #06b6d4);
+	text-shadow: 0 0 6px rgba(6, 182, 212, 0.5);
+}
+
+.charsheet__item-attune--bond {
+	color: var(--cs-info, #06b6d4);
+	background: transparent;
+	border-color: var(--cs-info, #06b6d4);
+}
+
+.charsheet__item-attune--bond:hover,
+.charsheet__item-attune--bond:focus-visible {
+	color: var(--cs-info, #06b6d4);
+	background: var(--cs-info-light, rgba(6, 182, 212, 0.12));
+	border-color: var(--cs-info, #06b6d4);
+}
+
+/* Established bonds read as a filled state without a solid fill: bright cyan
+   cannot carry white label text at AA, and the manager this control belongs to
+   is built on tinted insets rather than solid chips. */
+.charsheet__item-attune--bond.is-bonded {
+	color: var(--cs-info-text, var(--cs-info, #06b6d4));
+	background: var(--cs-info-light, rgba(6, 182, 212, 0.16));
+	border-color: var(--cs-info, #06b6d4);
+	font-weight: 600;
+}
+
+/* The doorway into the manager, standing in the attunement list where the stones
+   themselves no longer appear. It carries the bond hue rather than the generic
+   "add" indigo so the reader connects it to the cyan controls on the item rows —
+   and so it is legible as a *different* thing from the slots listed beneath it. */
+.charsheet__add-btn.charsheet__ioun-open {
+	background: var(--cs-info-light, rgba(6, 182, 212, 0.16));
+	color: var(--cs-info-text, var(--cs-info, #06b6d4));
+	border: 1px solid var(--cs-info, #06b6d4);
+	box-shadow: none;
+}
+
+.charsheet__add-btn.charsheet__ioun-open:hover {
+	background: color-mix(in srgb, var(--cs-info, #06b6d4) 26%, transparent);
+	color: var(--cs-info-text, var(--cs-info, #06b6d4));
+}
+
+/* The orbit count is the point of the button, not an aside — the default muted
+   grey all but vanishes against the tint. */
+.charsheet__add-btn.charsheet__ioun-open .ve-muted {
+	color: inherit;
+	opacity: 0.75;
+	font-weight: 500;
+}
+
 /* Empty inventory state */
 .charsheet__inventory-empty {
 	display: flex;

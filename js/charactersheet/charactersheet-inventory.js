@@ -4174,7 +4174,7 @@ class CharacterSheetInventory {
 		this._page.saveCharacter();
 	}
 
-	_toggleAttuned (itemId) {
+	async _toggleAttuned (itemId) {
 		const items = this._state.getItems();
 		const item = items.find(i => i.id === itemId);
 		if (!item || !item.requiresAttunement) return;
@@ -4207,6 +4207,19 @@ class CharacterSheetInventory {
 				});
 				return;
 			}
+		}
+
+		// Breaking a bond is not the mirror image of un-attuning. Un-attuning costs a short
+		// rest to undo; a broken bond costs days of consecutive orbit to reform, so it must
+		// never be one unguarded click on a button the reader may have aimed at "Equip".
+		if (item.attuned && this._state.getIounBondPolicy?.(item.item || item)?.usesBond) {
+			const isConfirmed = await InputUiUtil.pGetUserBoolean({
+				title: "End Ioun bond?",
+				htmlDescription: `Ending your bond with <b>${(item.name || "this stone").qq()}</b> stops it conferring anything, and reforming the bond takes days of consecutive orbit.`,
+				textYes: "End bond",
+				textNo: "Keep bond",
+			});
+			if (!isConfirmed) return;
 		}
 
 		this._state.setItemAttuned(itemId, !item.attuned);
@@ -6698,6 +6711,25 @@ class CharacterSheetInventory {
 		const typeTag = this._getItemTypeTagFromStoredType(item.type);
 		const canEquip = CharacterSheetInventory.canEquipItem(item);
 		const canAttune = item.requiresAttunement;
+		// An Ioun bond is not attunement. It takes days of consecutive orbit rather than a
+		// short rest, it is slot-free, and it is governed entirely by the Ioun Stone manager.
+		// Dressing it as the amber attunement control beside it invited exactly the confusion
+		// this flag exists to remove, so a bond gets its own label, glyph and hue.
+		const usesBond = !!canAttune && !!this._state.getIounBondPolicy?.(item.item || item)?.usesBond;
+		const attuneBtnClass = usesBond
+			? `charsheet__item-attune--bond${item.attuned ? " is-bonded" : ""}`
+			: (item.attuned ? "ve-btn-warning" : "ve-btn-default");
+		const attuneBtnGlyph = usesBond
+			? `<span aria-hidden="true">${item.attuned ? "◈" : "◇"}</span>`
+			: `<span class="glyphicon glyphicon-star-empty"></span>`;
+		const attuneBtnLabel = usesBond
+			? (item.attuned ? "Bonded" : "Bond")
+			: (item.attuned ? "Attuned" : "Attune");
+		const attuneBtnTitle = usesBond
+			? (item.attuned
+				? "End this Ioun bond — reforming it costs days of consecutive orbit"
+				: "Form an Ioun bond in the Ioun Stone manager — bonding takes days, and never costs an attunement slot")
+			: (item.attuned ? "End attunement" : "Attune");
 		const hasCharges = item.charges && item.charges > 0;
 		const hasPowers = Array.isArray(item.itemPowers) && item.itemPowers.length > 0;
 		const canRecharge = hasCharges && !!item.recharge;
@@ -6779,7 +6811,7 @@ class CharacterSheetInventory {
 				<div class="charsheet__item-content">
 					<div class="charsheet__item-main">
 						<span class="charsheet__item-name">
-							${item.attuned ? "<span class=\"charsheet__item-attuned-badge\" title=\"Attuned\">◈</span>" : ""}
+							${item.attuned ? `<span class="charsheet__item-attuned-badge${usesBond ? " charsheet__item-attuned-badge--bond" : ""}" title="${usesBond ? "Ioun bond — a slot-free form of attunement" : "Attuned"}">◈</span>` : ""}
 							${itemNameHtml}
 							${item.quantity > 1 ? `<span class="ve-muted">(×${item.quantity})</span>` : ""}
 						</span>
@@ -6880,8 +6912,8 @@ class CharacterSheetInventory {
 							</button>
 						` : ""}
 						${canAttune ? `
-							<button type="button" class="ve-btn ve-btn-xs ${item.attuned ? "ve-btn-warning" : "ve-btn-default"} charsheet__item-attune" title="${item.attuned ? "End attunement" : "Attune"}">
-								<span class="glyphicon glyphicon-star-empty"></span> ${item.attuned ? "Attuned" : "Attune"}
+							<button type="button" class="ve-btn ve-btn-xs ${attuneBtnClass} charsheet__item-attune" title="${attuneBtnTitle}">
+								${attuneBtnGlyph} ${attuneBtnLabel}
 							</button>
 						` : ""}
 						${isConsumable ? `
@@ -7226,9 +7258,15 @@ class CharacterSheetInventory {
 		container.innerHTML = "";
 
 		const items = this._state.getItems();
-		const attunedItems = items.filter(i => i.attuned);
+		// Bonded Ioun Stones are deliberately absent. A bond is slot-free and a collection
+		// routinely runs to dozens of stones, so listing them here would bury the 3-6 real
+		// attunements this panel exists to track. The manager button above is their doorway.
+		const attunedItems = items.filter(i => i.attuned && !this._state.getIounBondPolicy?.(i.item || i)?.usesBond);
 		const currentAttuned = this._state.getAttunedCount();
-		const exemptCount = attunedItems.length - currentAttuned;
+		// Counted from what is actually shown, not from the whole inventory: with stones
+		// filtered out, an inventory-wide difference would advertise slot-free attunements
+		// the reader cannot see in this list.
+		const exemptCount = attunedItems.filter(i => this._state.isAttunementExempt(i.item || i)).length;
 		const maxAttuned = this._state.getMaxAttunement();
 		const exemptSuffix = exemptCount > 0 ? ` <span class="ve-muted" title="Attunements that the item's own rules exempt from the normal limit (e.g. an Ioun bond)">+${exemptCount} slot-free</span>` : "";
 
@@ -7239,7 +7277,12 @@ class CharacterSheetInventory {
 		const ioun = this._page?._ioun;
 		if (this._page?._iounEnabled && ioun?.isApplicable?.()) {
 			const iounSummary = ioun.getCombatSummary();
-			const btnRow = e_({outer: `<div class="mb-2"><button type="button" class="charsheet__add-btn charsheet__ioun-open" title="Manage which Ioun Stones are in orbit">\u25C7 Ioun Stones <span class="ve-muted">(${iounSummary.orbitingCount} in orbit)</span></button></div>`});
+			// Now that bonded stones are no longer listed below, this button is their only
+			// representation here — so it carries the whole collection, not just the orbit count.
+			const iounCaption = iounSummary.bondedCount
+				? `${iounSummary.orbitingCount} of ${iounSummary.bondedCount} in orbit`
+				: `${iounSummary.orbitingCount} in orbit`;
+			const btnRow = e_({outer: `<div class="mb-2"><button type="button" class="charsheet__add-btn charsheet__ioun-open" title="Manage Ioun bonds and which stones are in orbit. An Ioun bond is slot-free, so stones are tracked here rather than against your attunement slots.">\u25C7 Ioun Stones <span class="ve-muted">(${iounCaption})</span></button></div>`});
 			btnRow.querySelector(".charsheet__ioun-open").addEventListener("click", () => ioun.openModal());
 			container.append(btnRow);
 		}

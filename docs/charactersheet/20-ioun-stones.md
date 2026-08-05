@@ -43,6 +43,38 @@ The sheet stored the book's two-stage state before it named it:
 `_calculateItemBonuses` already gated on both, so the manager adds no mechanics — it is a
 control surface and a vocabulary over correct existing state.
 
+## Separating bonds from attunement
+
+Naming the state was not enough: a bond and an attunement still *looked* identical, and the
+sheet counted them in the same list. Four changes separate them, all keyed on the existing
+`getIounBondPolicy(item).usesBond` predicate — nothing is hard-coded to this source.
+
+| Surface | Ordinary attunement | Ioun bond |
+|---|---|---|
+| Item-row control | amber `☆ Attune` / `☆ Attuned` | cyan `◇ Bond` / `◈ Bonded` |
+| Name badge | violet `◈` | cyan `◈`, titled "Ioun bond — a slot-free form of attunement" |
+| Attuned-items panel | listed, counts against `n/max` | **not listed**; reached through the `◇ Ioun Stones (n of m in orbit)` button |
+| Undoing it | one click | confirmation dialog (see below) |
+
+**Why cyan.** Attunement already owns two accents — amber on the button, violet on the
+badge — and the manager's bond-progress bar owns indigo. Cyan (`--cs-info`) was the only
+free accent, and it echoes the source book's teal. Hue is never the sole cue: the glyph
+(`◇`/`◈`) and the label (`Bond`/`Bonded`) carry the distinction in greyscale.
+`.is-bonded` is a *tint* rather than a solid fill because white text on `#06b6d4` is
+roughly 2.5:1, far below AA, and the manager it belongs to is built on tinted insets.
+
+**Why the confirmation.** Breaking a bond is not the mirror of un-attuning. An attunement
+costs a short rest to restore; a bond costs days of consecutive orbit. The row control is
+the only place a bond can be severed — the manager can start, cancel and complete a bond
+but deliberately has no break action — so that one click is guarded by `pGetUserBoolean`.
+
+**Why the slot counter changed.** `exemptCount` used to be the remainder
+`attunedItems.length - currentAttuned`. With bonded stones no longer in `attunedItems`
+that remainder is always zero, so it is now computed directly from the displayed rows via
+`isAttunementExempt`. The visible effect is that a character carrying only stones reads
+`Attunement Slots: 0/3` with no phantom "+1 slot-free" — the stones are accounted for
+behind the Ioun Stones button instead.
+
 ## Effect-implementation audit
 
 Every one of the 685 items was classified by its `Stone Effect` prose and cross-referenced
@@ -156,3 +188,10 @@ were each verified to genuinely fail when the corresponding fix is reverted.
 
 `test/jest/charactersheet/CharacterSheetAttunementExemption.test.js` (13 tests) covers the
 attunement exemption; `CharacterSheetIoun.test.js` (35 tests) covers the manager.
+
+`test/jest/charactersheet/CharacterSheetIounBondUi.test.js` (12 tests) covers the
+bond/attunement separation: the row control's three states, the exclusion of bonded stones
+from the attuned list, the slot-free counter, and the break-bond confirmation. Four of the
+twelve are regression pins on *ordinary* attunement, so a future change that collapses the
+two vocabularies again fails loudly. Reverting the two `usesBond` gates turns the other
+seven red on behavioural assertions.
