@@ -518,9 +518,11 @@ automate uses standard item fields plus the shared catalog `effects[]` pipeline
 
 **Catalog plumbing:** adding an item from the picker copies `effects[]`, charges,
 `spellImmunitySlots`, `bonusDamageDice`/`damageRiders`, `regeneration`, and
-`conditionImmune`; loading the item index rehydrates missing structured fields onto
-existing inventory rows so older saves pick up Gae Bolg initiative / Necklace defenses /
-Spear of Lugh riders without re-adding the item.
+`conditionImmune`. Missing or partial catalog fields are rehydrated onto inventory
+rows on every character render (`syncItemDerivedState` → `_rehydrateInventoryItemEffects`),
+not only at catalog init — so older saves pick up Gae Bolg initiative (+ PB) / Necklace
+defenses / Spear of Lugh riders without re-adding the item. Rehydration also merges
+missing effect types/flags into a partial `effects[]` list.
 
 **Generic item combat / heal plumbing:**
 - `combat:disadvantage:*Against` / `combat:advantage:*` → Combat → Effects (and Magic Item Defenses)

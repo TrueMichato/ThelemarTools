@@ -89,13 +89,47 @@ class CharacterSheetInventory {
 			if (!match) continue;
 
 			let rowChanged = false;
-			if (!(Array.isArray(item.effects) && item.effects.length)
-				&& typeof this._state._normalizeItemEffects === "function") {
-				const effects = this._state._normalizeItemEffects(match);
-				if (effects.length) {
-					item.effects = JSON.parse(JSON.stringify(effects));
-					rowChanged = true;
-					effectsChanged = true;
+			if (typeof this._state._normalizeItemEffects === "function") {
+				const catEffects = this._state._normalizeItemEffects(match);
+				if (!(Array.isArray(item.effects) && item.effects.length)) {
+					if (catEffects.length) {
+						item.effects = JSON.parse(JSON.stringify(catEffects));
+						rowChanged = true;
+						effectsChanged = true;
+					}
+				} else {
+					const have = new Set(item.effects.map(e => `${e?.type || ""}|${e?.name || ""}`));
+					let merged = false;
+					for (const effect of catEffects) {
+						const key = `${effect?.type || ""}|${effect?.name || ""}`;
+						if (have.has(key)) continue;
+						item.effects.push(JSON.parse(JSON.stringify(effect)));
+						have.add(key);
+						merged = true;
+					}
+					for (const invEffect of item.effects) {
+						const catEffect = catEffects.find(effect =>
+							(effect?.type || "") === (invEffect?.type || "")
+							&& (effect?.name || "") === (invEffect?.name || ""));
+						if (!catEffect) continue;
+						if (catEffect.proficiencyBonus && !invEffect.proficiencyBonus) {
+							invEffect.proficiencyBonus = true;
+							merged = true;
+						}
+						if (catEffect.setValue && !invEffect.setValue) {
+							invEffect.setValue = catEffect.setValue;
+							if (catEffect.value != null && (invEffect.value == null || invEffect.value === 0)) invEffect.value = catEffect.value;
+							merged = true;
+						}
+						if (catEffect.mode && !invEffect.mode) {
+							invEffect.mode = catEffect.mode;
+							merged = true;
+						}
+					}
+					if (merged) {
+						rowChanged = true;
+						effectsChanged = true;
+					}
 				}
 			}
 			if (!(Array.isArray(item.itemPowers) && item.itemPowers.length)
@@ -1368,20 +1402,25 @@ class CharacterSheetInventory {
 	}
 
 	_getItemType (item) {
+		// Real item type codes carry a source suffix (e.g. "RG|DMG", "WD|XDMG", "M|XPHB"), so
+		// every comparison must use `typeBase`, NOT an exact `item.type === "RG"` match — the
+		// exact form silently dropped rings/wands/rods/staves/potions into "gear". Boolean flags
+		// (e.g. a DMG Staff of Power carries `staff:true` and NO type) are handled alongside.
 		const typeBase = item.type?.split("|")[0];
 		if (this._isVariantComponent(item)) return "component";
 		if (this._isWeapon(item)) return "weapon";
 		// Check both armor flag and armor type codes
 		if (item.armor || ["LA", "MA", "HA"].includes(typeBase)) return "armor";
 		if (typeBase === "S") return "armor"; // Shield
-		if (item.type === "P") return "potion";
-		if (item.type === "SC") return "scroll";
-		if (item.type === "WD") return "wand";
-		if (item.type === "ST") return "staff";
-		if (item.type === "RG") return "ring";
+		if (typeBase === "P") return "potion";
+		if (typeBase === "SC") return "scroll";
+		if (typeBase === "WD") return "wand";
+		if (typeBase === "ST" || item.staff) return "staff";
+		if (typeBase === "RD") return "rod";
+		if (typeBase === "RG") return "ring";
 		if (item.wondrous) return "wondrous";
-		if (item.type === "AT" || item.type === "T") return "tool";
-		if (item.type === "G" || item.type === "SCF") return "gear";
+		if (typeBase === "AT" || typeBase === "T") return "tool";
+		if (typeBase === "G" || typeBase === "SCF") return "gear";
 		if (typeBase === "$G") return "gemstone";
 		if (item._isEmpoweredGemstone) return "gemstone";
 		return "gear";
@@ -1393,13 +1432,14 @@ class CharacterSheetInventory {
 		if (this._isWeapon(item)) return "Weapon";
 		if (item.armor || ["LA", "MA", "HA"].includes(typeBase)) return "Armor";
 		if (typeBase === "S") return "Shield";
-		if (item.type === "P") return "Potion";
-		if (item.type === "SC") return "Scroll";
-		if (item.type === "WD") return "Wand";
-		if (item.type === "ST") return "Staff";
-		if (item.type === "RG") return "Ring";
+		if (typeBase === "P") return "Potion";
+		if (typeBase === "SC") return "Scroll";
+		if (typeBase === "WD") return "Wand";
+		if (typeBase === "ST" || item.staff) return "Staff";
+		if (typeBase === "RD") return "Rod";
+		if (typeBase === "RG") return "Ring";
 		if (item.wondrous) return "Wondrous";
-		if (item.type === "AT" || item.type === "T") return "Tool";
+		if (typeBase === "AT" || typeBase === "T") return "Tool";
 		if (typeBase === "$G") return "Gemstone";
 		if (item._isEmpoweredGemstone) return "Empowered Gem";
 		if (this._isCraftingMaterial(item)) return "Material";
@@ -1497,8 +1537,12 @@ class CharacterSheetInventory {
 			value: item.value || 0,
 			type: this._getItemType(item),
 			requiresAttunement: item.reqAttune || false,
-			// Weapon properties
-			weapon: item.weapon || false,
+			// Weapon properties. `weapon` is the boolean both the inventory categorizer
+			// (_getItemCategory) and Combat attack-detection (filter(i => i.weapon)) key off,
+			// so derive it from `_isWeapon()` — a `type:"M"`/`type:"R"` artifact (e.g. Gae Bolg)
+			// carries NO `weapon:true` flag, and `item.weapon || false` would drop it into
+			// "Other" AND deny it an attack.
+			weapon: this._isWeapon(item),
 			weaponCategory: item.weaponCategory,
 			// Base-item reference (e.g. "shortbow|phb") for magic weapons derived from a base
 			// weapon. Drives base-item detection for effects scoped to a weapon TYPE (e.g.
@@ -6113,21 +6157,28 @@ class CharacterSheetInventory {
 		// Eye both enhances legend lore and crafts a Lens of Forgotten History), and the castable
 		// role is the rarer, more consequential one. Casting itself never reads this — it resolves
 		// purely from `item.variantComponent` — so this is display grouping only.
+		//
+		// Stored inventory items carry a COARSE `type` produced by `_getItemType()` (e.g.
+		// "weapon","staff","wand","ring","potion","wondrous","gear"), NOT the raw 5etools code.
+		// Each branch therefore accepts BOTH the coarse stored type AND the raw code, so a stored
+		// magic staff/wand/ring/wondrous item no longer collapses into "Other".
 		if (this._isVariantComponent(item)) return "Spell Components";
-		if (item.weapon) return "Weapons";
+		if (item.weapon || item.type === "weapon") return "Weapons";
 		const typeBase = item.type?.split("|")[0];
-		if (item.armor || ["LA", "MA", "HA"].includes(typeBase)) return "Armor";
+		if (item.armor || item.type === "armor" || ["LA", "MA", "HA"].includes(typeBase)) return "Armor";
 		if (typeBase === "S" || item.shield) return "Armor";
-		if (item.type === "P") return "Consumables";
-		if (item.type === "SC") return "Consumables";
-		if (item.type === "WD") return "Wondrous Items";
-		if (item.type === "ST") return "Wondrous Items";
-		if (item.type === "RG") return "Wondrous Items";
-		if (item.wondrous) return "Wondrous Items";
-		if (item.type === "AT" || item.type === "T") return "Tools";
+		if (item.type === "potion" || typeBase === "P") return "Consumables";
+		if (item.type === "scroll" || typeBase === "SC") return "Consumables";
+		if (
+			["wand", "staff", "rod", "ring", "wondrous"].includes(item.type)
+			|| ["WD", "ST", "RD", "RG"].includes(typeBase)
+			|| item.wondrous || item.staff || item.wand || item.rod
+		) return "Wondrous Items";
+		if (item.type === "tool" || typeBase === "AT" || typeBase === "T") return "Tools";
 		if (this._isCraftingMaterial(item)) return "Crafting Materials";
-		if (item.type === "G" || item.type === "SCF") return "Adventuring Gear";
-		if (typeBase === "$G" || item._isEmpoweredGemstone) return "Gemstones";
+		if (item.type === "gear" || typeBase === "G" || typeBase === "SCF") return "Adventuring Gear";
+		if (item.type === "gemstone" || typeBase === "$G" || item._isEmpoweredGemstone) return "Gemstones";
+		if (item.type === "component") return "Spell Components";
 		return "Other";
 	}
 
@@ -6742,9 +6793,15 @@ class CharacterSheetInventory {
 			weapon: "Weapon",
 			armor: "Armor",
 			potion: "Potion",
+			scroll: "Scroll",
+			wand: "Wand",
+			staff: "Staff",
+			rod: "Rod",
+			ring: "Ring",
 			wondrous: "Wondrous",
 			tool: "Tool",
 			gear: "Gear",
+			gemstone: "Gemstone",
 			component: "Component",
 		};
 		return tags[type] || "";
@@ -7093,6 +7150,10 @@ class CharacterSheetInventory {
 	 */
 	syncItemDerivedState () {
 		if (!this._state) return;
+		// Rehydrate catalog effects/bonuses onto inventory AFTER character load.
+		// setItems() alone is not enough: it runs at init while inventory is still empty,
+		// so brew mechanics like Gae Bolg's initiative + PB never reached older saves.
+		this._rehydrateInventoryItemEffects();
 		this._syncArmorState();
 	}
 
