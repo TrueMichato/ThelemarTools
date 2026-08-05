@@ -2114,6 +2114,43 @@ class CharacterSheetSpells {
 		return `${dur.duration?.amount || ""} ${dur.duration?.type || ""}`.trim();
 	}
 
+	async pCastItemSpell (power) {
+		const spellData = this._allSpells.find(spell =>
+			spell.name?.toLowerCase() === power?.spellName?.toLowerCase()
+			&& spell.source?.toLowerCase() === power?.spellSource?.toLowerCase());
+		if (!spellData) {
+			JqueryUtil.doToast({type: "warning", content: `Spell data for ${power?.spellName || "that item power"} is unavailable.`});
+			return false;
+		}
+		const slotLevel = power.castLevel || spellData.level || 0;
+		const spell = {
+			...spellData,
+			id: `item:${power.itemId}:${power.id}`,
+			level: slotLevel,
+			sourceItem: power.itemName,
+		};
+		const requiresConcentration = spellData.duration?.some?.(duration => duration.concentration);
+		if (requiresConcentration && this._state.isConcentrating?.()) {
+			const current = this._state.getConcentration?.();
+			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+				title: "Break Concentration?",
+				htmlDescription: `You are currently concentrating on <strong>${current?.spellName || "a spell"}</strong>. Casting <strong>${spell.name}</strong> from ${power.itemName} will break that concentration.`,
+				textYes: "Cast and break concentration",
+				textNo: "Cancel",
+			}));
+			if (!confirmed) return false;
+			this._state.breakConcentration?.();
+		}
+		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: false})) return false;
+		await this._showCastResult(spell, slotLevel, false, false, {sourceItem: power.itemName});
+		if (requiresConcentration) {
+			this._state.setConcentration?.(spell.name, slotLevel);
+			this._updateConcentrationUI();
+		}
+		this._state.consumeStatesEndingOnSpellCast?.();
+		return true;
+	}
+
 	async _castSpell (spellId, {withMetamagic, decision = null} = {}) {
 		// Metamagic prompt runs unless the caller explicitly opts out (withMetamagic === false).
 		// Default (undefined) preserves legacy behaviour for callers that pass only a spellId

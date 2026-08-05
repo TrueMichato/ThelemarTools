@@ -1211,10 +1211,48 @@ export class CharacterSheetPlayMode {
 		this._renderActiveStates();
 		this._renderCombatMethods();
 		this._renderAttacks();
+		this._renderItemPowers();
 		this._renderSpellsQuick();
 		this._renderFeaturesQuick();
 		this._renderCrafting();
 		this._renderResources();
+	}
+
+	_renderItemPowers () {
+		const powers = this._state.getItemPowers?.({activeOnly: true}) || [];
+		if (!powers.length) return;
+		const card = this._makeCard(this._elActionsHub, "feature", "Item Powers");
+		const groups = [
+			{key: "action", label: "Action"},
+			{key: "bonus", label: "Bonus Action"},
+			{key: "reaction", label: "Reaction"},
+			{key: "onHit", label: "On Hit"},
+			{key: "other", label: "Other"},
+		];
+		for (const group of groups) {
+			const groupPowers = powers.filter(power => power.actionType === group.key);
+			if (!groupPowers.length) continue;
+			const heading = this._ce("div", "pm-item-powers__heading", card);
+			heading.textContent = group.label;
+			for (const power of groupPowers) {
+				const row = this._ce("button", "pm-item-power", card);
+				row.type = "button";
+				row.disabled = !power.isAvailable || (["action", "bonus", "reaction"].includes(group.key) && !this._actionEconomy[group.key]);
+				const name = this._ce("span", "pm-item-power__name", row);
+				name.textContent = power.name;
+				const meta = this._ce("span", "pm-item-power__meta", row);
+				meta.textContent = power.chargesCost
+					? `${power.itemName} · ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"} · ${power.chargesCurrent}/${power.chargesMax}`
+					: power.itemName;
+				this._makeClickable(row, power.unavailableReason || `${power.kind === "spell" ? "Cast" : "Invoke"} ${power.name}`, async () => {
+					const used = await this._page._inventory?._pInvokeItemPower?.(power.itemId, power.id);
+					if (!used) return;
+					if (["action", "bonus", "reaction"].includes(group.key)) this._actionEconomy[group.key] = false;
+					this._logActivity("feature", `${power.kind === "spell" ? "Cast" : "Invoked"} ${power.name} from ${power.itemName}`);
+					this._renderActionsHub();
+				});
+			}
+		}
 	}
 
 	/**

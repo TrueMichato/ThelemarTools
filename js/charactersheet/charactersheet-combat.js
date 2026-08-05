@@ -5910,6 +5910,7 @@ class CharacterSheetCombat {
 			() => this.renderCombatResources(),
 			() => this.renderCombatActions(),
 			() => this.renderCombatActionEconomy(),
+			() => this.renderCombatItemPowers(),
 			() => this.renderCombatMetamagic(),
 			() => this.renderCombatStates(),
 		]);
@@ -6402,6 +6403,23 @@ class CharacterSheetCombat {
 			});
 		}
 
+		// (5) Magic-item powers — normalized by state from attached spells and named powers.
+		for (const power of this._state.getItemPowers?.({activeOnly: true}) || []) {
+			const type = this._normalizeActionType(power.actionType);
+			if (type !== "action" && type !== "bonus" && type !== "reaction") continue;
+			const cost = power.chargesCost
+				? `${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"} · ${power.chargesCurrent}/${power.chargesMax}`
+				: power.itemName;
+			push(type, {
+				kind: "item",
+				id: `${power.itemId}:${power.id}`,
+				name: power.name,
+				source: power.itemName,
+				subtitle: cost,
+				actionType: type,
+			});
+		}
+
 		return buckets;
 	}
 
@@ -6430,6 +6448,7 @@ class CharacterSheetCombat {
 			spell: {label: "Spell", glyph: "✦"},
 			feature: {label: "Feature", glyph: "★"},
 			custom: {label: "Custom", glyph: "✨"},
+			item: {label: "Item", glyph: "◆"},
 		};
 	}
 
@@ -6454,6 +6473,7 @@ class CharacterSheetCombat {
 			container.innerHTML = "";
 			return;
 		}
+
 		if (section) section.style.display = "";
 		container.innerHTML = "";
 
@@ -6505,6 +6525,51 @@ class CharacterSheetCombat {
 
 			group.appendChild(list);
 			container.appendChild(group);
+		}
+	}
+
+	renderCombatItemPowers () {
+		const section = document.getElementById("charsheet-combat-item-powers-section");
+		const container = document.getElementById("charsheet-combat-item-powers");
+		if (!container) return;
+		const powers = this._state.getItemPowers?.({activeOnly: true}) || [];
+		if (!powers.length) {
+			if (section) section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+		if (section) section.style.display = "";
+		container.innerHTML = "";
+		const order = ["action", "bonus", "reaction", "onHit", "other"];
+		const labels = {action: "Action", bonus: "Bonus Action", reaction: "Reaction", onHit: "On Hit", other: "Other"};
+		for (const type of order) {
+			const groupPowers = powers.filter(power => power.actionType === type);
+			if (!groupPowers.length) continue;
+			const group = e_({tag: "div", clazz: "cs-combat-item-powers__group"});
+			group.append(e_({tag: "div", clazz: "cs-combat-item-powers__title", text: labels[type]}));
+			for (const power of groupPowers) {
+				const row = e_({tag: "div", clazz: "cs-combat-item-power"});
+				const body = e_({tag: "div", clazz: "cs-combat-item-power__body"});
+				body.append(e_({tag: "div", clazz: "cs-combat-item-power__name", text: power.name}));
+				const meta = power.chargesCost
+					? `${power.itemName} · ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"} · ${power.chargesCurrent}/${power.chargesMax}`
+					: power.itemName;
+				body.append(e_({tag: "div", clazz: "cs-combat-item-power__meta", text: meta}));
+				const actionAvailable = ["action", "bonus", "reaction"].includes(type) ? this._isActionTypeAvailable(type) : true;
+				const use = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-primary", text: power.kind === "spell" ? "Cast" : "Invoke"});
+				use.disabled = !power.isAvailable || !actionAvailable;
+				use.title = power.unavailableReason || (!actionAvailable ? `${labels[type]} already used this turn.` : `${use.textContent} ${power.name}`);
+				use.addEventListener("click", async () => {
+					const used = await this._page?._inventory?._pInvokeItemPower?.(power.itemId, power.id);
+					if (!used) return;
+					if (["action", "bonus", "reaction"].includes(type)) this._consumeActionType(type);
+					this.renderCombatItemPowers();
+					this.renderCombatActionEconomy();
+				});
+				row.append(body, use);
+				group.append(row);
+			}
+			container.append(group);
 		}
 	}
 

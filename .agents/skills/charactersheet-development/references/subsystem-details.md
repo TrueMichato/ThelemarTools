@@ -366,6 +366,31 @@ Magic weapon bonuses are THREE separate fields on the item:
 - `bonusWeaponAttack`: attack-only bonus
 - `bonusWeaponDamage`: damage-only bonus
 
+### Magic-item effects and powers
+
+Catalog items use the existing `effects[]` lifecycle for passive mechanics. `addItem()` normalizes high-confidence prose-only passives into the same schema; item-owned alternative AC formulas use `{type: "acFormula", value, addDex, requireUnarmored}` and are registered/removed with `sourceFeatureId: "item:<inventoryId>"`.
+
+Active mechanics are normalized into `itemPowers[]`:
+
+```javascript
+{
+	id: "spell:fireball:phb:5",
+	name: "Fireball",
+	kind: "spell", // "spell" | "ability"
+	actionType: "action", // "action" | "bonus" | "reaction" | "onHit" | "other"
+	chargesCost: 5,
+	spellName: "Fireball",
+	spellSource: "PHB",
+	castLevel: 5,
+	description: "Cast Fireball at level 5 from Staff of Power.",
+	isDestructive: false,
+}
+```
+
+`getItemPowers({activeOnly})` is the shared read API for Inventory, Combat, and Play Mode. It adds current charge balance and explicit unavailable reasons for unequipped, unattuned, or undercharged items. `invokeItemPower(itemId, powerId, {confirmed})` is the sole charge transaction; destructive powers require confirmation before mutation. `attachedSpells` and named entry blocks with unambiguous activation prose are derived automatically. Ambiguous bespoke prose remains reference-only rather than receiving a misleading control.
+
+Current generic coverage includes attached spells with charge costs, action/bonus/reaction/on-hit named powers, shared item charge pools/recharge display, alternative unarmored AC, and conditional save advantage. Staff of Power, Gae Bolg, and Robe of the Archmagi are the regression fixtures in `CharacterSheetItemPowers.test.js`.
+
 ## NPC Exporter
 
 **Files**: `charactersheet-npc-exporter.js` (pure converter), `charactersheet-export.js` (dialog).  

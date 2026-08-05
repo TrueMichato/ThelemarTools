@@ -322,6 +322,7 @@ describe("TGTT artifact item effects (Gae Bolg / Necklace / Ring of Human Influe
 			],
 			senses: {truesight: 60},
 		});
+
 		// DEX +2 + PB +3
 		expect(state.getInitiative()).toBe(before + state.getProficiencyBonus());
 		expect(state.getSenses().truesight).toBeGreaterThanOrEqual(60);

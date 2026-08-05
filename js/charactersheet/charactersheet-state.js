@@ -11103,6 +11103,7 @@ class CharacterSheetState {
 		formulas.forEach(formula => {
 			// Skip conditional formulas that aren't active
 			if (formula.conditional) return; // For now, skip conditional AC formulas
+			if (formula.requireUnarmored && this._data.ac.armor) return;
 
 			let ac = formula.base || 10;
 
@@ -28144,6 +28145,238 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Convert an item entry tree to readable plain text without depending on Renderer.
+	 * @param {*} entry
+	 * @returns {string}
+	 */
+	static _getItemEntryText (entry) {
+		if (entry == null) return "";
+		if (typeof entry === "string") {
+			return entry
+				.replace(/<[^>]*>/g, " ")
+				.replace(/\{@\w+\s+([^}|]+)(?:\|[^}]*)?\}/g, "$1")
+				.replace(/\s+/g, " ")
+				.trim();
+		}
+		if (Array.isArray(entry)) return entry.map(it => CharacterSheetState._getItemEntryText(it)).filter(Boolean).join(" ");
+		if (typeof entry !== "object") return String(entry);
+		return [
+			entry.name,
+			CharacterSheetState._getItemEntryText(entry.entries),
+			CharacterSheetState._getItemEntryText(entry.items),
+			CharacterSheetState._getItemEntryText(entry.rows),
+		].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+	}
+
+	static _getItemPowerId (parts) {
+		return parts
+			.filter(Boolean)
+			.join(":")
+			.toLowerCase()
+			.replace(/[^a-z0-9:]+/g, "-")
+			.replace(/^-+|-+$/g, "");
+	}
+
+	/**
+	 * Normalize attached spells and named active entry blocks into one item-power model.
+	 * Explicit `itemPowers[]` entries win over derived entries with the same id.
+	 * @param {object} item
+	 * @returns {Array<object>}
+	 */
+	_normalizeItemPowers (item) {
+		if (!item) return [];
+		const powers = [];
+		const addPower = power => {
+			if (!power?.name) return;
+			const normalized = {
+				kind: "ability",
+				actionType: "other",
+				chargesCost: 0,
+				...power,
+			};
+			normalized.id = normalized.id || CharacterSheetState._getItemPowerId([
+				normalized.kind,
+				normalized.name,
+				normalized.spellSource,
+				normalized.chargesCost,
+			]);
+			const ix = powers.findIndex(it => it.id === normalized.id);
+			if (~ix) powers[ix] = normalized;
+			else powers.push(normalized);
+		};
+		const parseSpellUid = raw => {
+			const [nameSource, levelRaw] = String(raw || "").split("#");
+			const [name, source] = nameSource.split("|");
+			return {
+				name: String(name || "").trim().toTitleCase(),
+				source: String(source || Parser.SRC_PHB || "PHB").trim().toUpperCase(),
+				castLevel: levelRaw ? parseInt(levelRaw, 10) || null : null,
+			};
+		};
+		const addSpell = (raw, usageType, {chargesCost = 0, usesMax = null, isEach = false} = {}) => {
+			const spell = parseSpellUid(raw);
+			if (!spell.name) return;
+			addPower({
+				id: CharacterSheetState._getItemPowerId(["spell", spell.name, spell.source, chargesCost || usageType]),
+				name: spell.name,
+				kind: "spell",
+				actionType: "action",
+				usageType,
+				chargesCost,
+				usesMax,
+				isEach,
+				spellName: spell.name,
+				spellSource: spell.source,
+				castLevel: spell.castLevel,
+				description: `Cast ${spell.name}${spell.castLevel ? ` at level ${spell.castLevel}` : ""} from ${item.name || "this item"}.`,
+			});
+		};
+
+		const attached = item.attachedSpells;
+		if (Array.isArray(attached)) {
+			for (const raw of attached) addSpell(raw, "other");
+		} else if (attached && typeof attached === "object") {
+			for (const raw of attached.will || []) addSpell(raw, "will");
+			for (const raw of attached.ritual || []) addSpell(raw, "ritual");
+			for (const [cost, list] of Object.entries(attached.charges || {})) {
+				for (const raw of list || []) addSpell(raw, "charges", {chargesCost: Math.max(1, parseInt(cost, 10) || 1)});
+			}
+			for (const usageType of ["daily", "rest"]) {
+				for (const [usesRaw, list] of Object.entries(attached[usageType] || {})) {
+					const isEach = usesRaw.endsWith("e");
+					const usesMax = Math.max(1, parseInt(isEach ? usesRaw.slice(0, -1) : usesRaw, 10) || 1);
+					for (const raw of list || []) addSpell(raw, usageType, {usesMax, isEach});
+				}
+			}
+			for (const raw of attached.other || []) addSpell(raw, "other");
+		}
+
+		const namedEntries = (item.entries || []).filter(entry => entry && typeof entry === "object" && entry.name);
+		for (const entry of namedEntries) {
+			if (attached && /^spells?$/i.test(entry.name)) continue;
+			const text = CharacterSheetState._getItemEntryText(entry.entries);
+			if (!text) continue;
+			const detected = this._detectItemActivation({entries: [text]});
+			let actionType = detected.find(it => ["action", "bonus", "reaction"].includes(it.type))?.type || null;
+			if (!actionType && /\bas (?:a|an) bonus action\b/i.test(text)) actionType = "bonus";
+			if (!actionType && /\bas (?:a|an) reaction\b/i.test(text)) actionType = "reaction";
+			if (!actionType && /\b(?:use|take) (?:a|an|your) action\b/i.test(text)) actionType = "action";
+			if (!actionType && /\b(?:when|after)\s+you\s+(?:hit|make an attack)\b/i.test(text)) actionType = "onHit";
+			if (!actionType) continue;
+			const chargeMatch = text.match(/\bexpend\s+(one|\d+)\s+(?:of (?:its|the) )?charges?\b/i);
+			const chargesCost = chargeMatch ? (chargeMatch[1].toLowerCase() === "one" ? 1 : parseInt(chargeMatch[1], 10) || 1) : 0;
+			addPower({
+				id: CharacterSheetState._getItemPowerId(["ability", entry.name]),
+				name: entry.name,
+				kind: "ability",
+				actionType,
+				chargesCost,
+				description: text,
+				isDestructive: /\b(?:staff|item|weapon|armor)\s+is destroyed\b/i.test(text),
+			});
+		}
+
+		const explicit = Array.isArray(item.itemPowers) ? item.itemPowers : [];
+		for (const power of explicit) addPower(power);
+
+		const nonSpell = powers.filter(it => it.kind !== "spell");
+		if (item.charges === 1 && nonSpell.length === 1 && !nonSpell[0].chargesCost) nonSpell[0].chargesCost = 1;
+		return powers;
+	}
+
+	/**
+	 * Derive high-confidence passive catalog effects which are absent from native item fields.
+	 * @param {object} item
+	 * @returns {Array<object>}
+	 */
+	_normalizeItemEffects (item) {
+		const effects = Array.isArray(item?.effects) ? MiscUtil.copyFast(item.effects) : [];
+		const hasType = type => effects.some(effect => effect?.type === type);
+		const text = CharacterSheetState._getItemEntryText(item?.entries);
+		const acMatch = text.match(/base\s+(?:armor class|ac)\s+is\s+(\d+)\s*(?:\+|plus)\s+(?:your\s+)?dexterity modifier/i);
+		if (acMatch && !hasType("acFormula")) {
+			effects.push({
+				type: "acFormula",
+				value: parseInt(acMatch[1], 10),
+				addDex: true,
+				requireUnarmored: true,
+				name: "Alternative Armor Class",
+			});
+		}
+		if (/advantage on saving throws against spells? and (?:other )?magical effects/i.test(text)
+			&& !hasType("save:advantage:magic")) {
+			effects.push({type: "save:advantage:magic", value: 1, name: "Magic Resistance"});
+		}
+		return effects;
+	}
+
+	/**
+	 * Return normalized active-item powers with current availability.
+	 * @param {{activeOnly?: boolean}} options
+	 * @returns {Array<object>}
+	 */
+	getItemPowers ({activeOnly = false} = {}) {
+		const out = [];
+		for (const item of this.getItems()) {
+			const isActive = !!item.equipped && (!item.requiresAttunement || !!item.attuned);
+			if (activeOnly && !isActive) continue;
+			for (const power of item.itemPowers || []) {
+				const chargesCurrent = item.chargesCurrent ?? item.charges ?? 0;
+				const unavailableReason = !item.equipped
+					? "Equip this item to use its powers."
+					: item.requiresAttunement && !item.attuned
+						? "Attune to this item to use its powers."
+						: power.chargesCost > chargesCurrent
+							? `Requires ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}; ${chargesCurrent} remaining.`
+							: null;
+				out.push({
+					...power,
+					itemId: item.id,
+					itemName: item.name,
+					itemSource: item.source,
+					chargesCurrent,
+					chargesMax: item.charges || 0,
+					recharge: item.recharge || null,
+					isAvailable: !unavailableReason,
+					unavailableReason,
+				});
+			}
+		}
+		return out;
+	}
+
+	getItemPower (itemId, powerId) {
+		return this.getItemPowers().find(power => power.itemId === itemId && power.id === powerId) || null;
+	}
+
+	/**
+	 * Atomically validate and consume an item power's resource.
+	 * Spell/result resolution remains with the calling UI, but charge mutation has one owner.
+	 */
+	invokeItemPower (itemId, powerId, {confirmed = false} = {}) {
+		const power = this.getItemPower(itemId, powerId);
+		if (!power) return {ok: false, reason: "Item power not found."};
+		if (!power.isAvailable) return {ok: false, reason: power.unavailableReason};
+		if (power.isDestructive && !confirmed) return {ok: false, needsConfirmation: true, power};
+		const entry = this._data.inventory.find(it => it.id === itemId);
+		if (!entry?.item) return {ok: false, reason: "Item not found."};
+		if (power.chargesCost) {
+			const current = entry.item.chargesCurrent ?? entry.item.charges ?? 0;
+			if (current < power.chargesCost) return {ok: false, reason: `Not enough charges for ${power.name}.`};
+			entry.item.chargesCurrent = current - power.chargesCost;
+		}
+		const result = {
+			ok: true,
+			power,
+			chargesCurrent: entry.item.chargesCurrent ?? entry.item.charges ?? 0,
+			chargesMax: entry.item.charges || 0,
+			destroyed: !!power.isDestructive,
+		};
+		if (power.isDestructive) this.removeItem(itemId);
+		return result;
+	}
+
+	/**
 	 * Get activation requirements for a specific item
 	 * @param {string} itemId - The item ID
 	 * @returns {Array<object>} Array of activation abilities or empty array
@@ -28797,6 +29030,8 @@ class CharacterSheetState {
 			if (itemProps.activation === undefined) {
 				itemProps.activation = this._detectItemActivation(itemProps);
 			}
+			itemProps.effects = this._normalizeItemEffects(itemProps);
+			itemProps.itemPowers = this._normalizeItemPowers(itemProps);
 
 			// Conditional damage bonuses detection (vs creature types)
 			if (itemProps.conditionalBonuses === undefined) {
@@ -43887,6 +44122,20 @@ class CharacterSheetState {
 			});
 			return true;
 		}
+		if (effectType === "acFormula") {
+			if (!Array.isArray(this._data.acFormulas)) this._data.acFormulas = [];
+			this._data.acFormulas.push({
+				base: Number(effect.value ?? effect.base) || 10,
+				addDex: effect.addDex !== false,
+				secondAbility: effect.secondAbility || null,
+				formulaType: effect.formulaType || "item",
+				requireUnarmored: !!effect.requireUnarmored,
+				name: effect.name || ctx.name,
+				sourceFeatureId: ctx.sourceFeatureId,
+				sourceType: ctx.sourceType,
+			});
+			return true;
+		}
 
 		// Standard numeric modifier (full passthrough of the shared effect schema)
 		this.addNamedModifier({
@@ -44520,6 +44769,9 @@ class CharacterSheetState {
 	_unregisterItemEffects (itemId) {
 		const sourceId = `item:${itemId}`;
 		this.removeModifiersByFeature(sourceId);
+		if (Array.isArray(this._data.acFormulas)) {
+			this._data.acFormulas = this._data.acFormulas.filter(formula => formula.sourceFeatureId !== sourceId);
+		}
 		const invItem = this._data.inventory.find(i => i.id === itemId);
 		const effects = invItem?.item?.effects;
 		if (Array.isArray(effects)) {

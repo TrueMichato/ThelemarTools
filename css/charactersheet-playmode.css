@@ -1338,6 +1338,45 @@
 	color: var(--cs-text-primary, #f1f5f9);
 }
 
+.pm-item-powers__heading {
+	margin-top: var(--cs-space-xs, 4px);
+	color: var(--cs-text-secondary, #94a3b8);
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.pm-item-power {
+	width: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--cs-space-sm, 8px);
+	padding: var(--cs-space-sm, 8px);
+	border: 1px solid var(--cs-border, rgba(148, 163, 184, 0.25));
+	border-radius: var(--cs-radius-sm, 6px);
+	background: var(--cs-bg-elevated, rgba(255, 255, 255, 0.04));
+	color: var(--cs-text-primary, #f1f5f9);
+	text-align: left;
+}
+
+.pm-item-power:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.pm-item-power__name {
+	font-weight: 600;
+}
+
+.pm-item-power__meta {
+	color: var(--cs-text-secondary, #94a3b8);
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-variant-numeric: tabular-nums;
+	text-align: right;
+}
+
 /* ========================================================================
    Drawer System
    ======================================================================== */

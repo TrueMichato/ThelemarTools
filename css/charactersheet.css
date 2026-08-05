@@ -6224,6 +6224,10 @@ body[data-font="readable"] {
 	color: var(--cs-success, #10b981);
 }
 
+.cs-combat-action-economy__item--item .cs-combat-action-economy__kind {
+	color: var(--cs-primary, #6366f1);
+}
+
 .cs-combat-action-economy__name {
 	flex: 1 1 auto;
 	min-width: 0;
@@ -6251,6 +6255,75 @@ body[data-font="readable"] {
 	margin: 0.15rem 0 0.4rem;
 	font-style: italic;
 	line-height: 1.25;
+}
+
+.charsheet__item-powers-modal,
+.cs-combat-item-powers {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__item-powers-status {
+	padding: var(--cs-space-sm, 0.5rem);
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 6px);
+	color: var(--cs-text-muted, var(--rgb-muted));
+	font-size: var(--cs-text-sm, 0.85rem);
+	font-variant-numeric: tabular-nums;
+}
+
+.charsheet__item-power-group,
+.cs-combat-item-powers__group {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__item-power-group-title,
+.cs-combat-item-powers__title {
+	margin: 0;
+	padding-bottom: var(--cs-space-2xs, 0.15rem);
+	border-bottom: 1px solid var(--cs-border, var(--rgb-border-grey));
+	color: var(--cs-text-secondary, var(--rgb-font));
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: var(--cs-weight-semibold, 600);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.charsheet__item-power,
+.cs-combat-item-power {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-sm, 0.5rem);
+	padding: var(--cs-space-sm, 0.5rem);
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 6px);
+	background: var(--cs-bg-elevated, rgba(255, 255, 255, 0.03));
+}
+
+.charsheet__item-power-body,
+.cs-combat-item-power__body {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.charsheet__item-power-name,
+.cs-combat-item-power__name {
+	font-weight: var(--cs-weight-semibold, 600);
+}
+
+.charsheet__item-power-meta,
+.cs-combat-item-power__meta,
+.charsheet__item-power-description {
+	color: var(--cs-text-muted, var(--rgb-muted));
+	font-size: var(--cs-text-xs, 0.75rem);
+}
+
+.charsheet__item-power-description {
+	margin-top: var(--cs-space-2xs, 0.15rem);
+	line-height: 1.35;
 }
 
 .charsheet__ability-name {

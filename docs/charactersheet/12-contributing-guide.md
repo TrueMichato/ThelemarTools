@@ -45,6 +45,12 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest test/jest/charactersheet/ --no
 └── charactersheet.html          # Entry point
 ```
 
+### Extending magic items
+
+Do not add a second magic-item effect or resource system. Passive mechanics belong in catalog `effects[]` and flow through `_applyCatalogEffect`; active mechanics belong in normalized `itemPowers[]` and consume resources through `invokeItemPower()`. Inventory, Combat, and Play Mode all read `getItemPowers()` so availability and charge balances remain consistent.
+
+Prefer structured catalog data and safe native-field derivation. Only derive prose when the action timing and resource cost are unambiguous. Unsupported bespoke powers should remain visible as rules text instead of exposing an Invoke button that cannot resolve their mechanics. Add catalog-backed regression tests to `CharacterSheetItemPowers.test.js`.
+
 ---
 
 ## Development Workflow

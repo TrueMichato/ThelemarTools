@@ -90,10 +90,21 @@ class CharacterSheetInventory {
 
 			let rowChanged = false;
 			if (!(Array.isArray(item.effects) && item.effects.length)
-				&& Array.isArray(match.effects) && match.effects.length) {
-				item.effects = JSON.parse(JSON.stringify(match.effects));
-				rowChanged = true;
-				effectsChanged = true;
+				&& typeof this._state._normalizeItemEffects === "function") {
+				const effects = this._state._normalizeItemEffects(match);
+				if (effects.length) {
+					item.effects = JSON.parse(JSON.stringify(effects));
+					rowChanged = true;
+					effectsChanged = true;
+				}
+			}
+			if (!(Array.isArray(item.itemPowers) && item.itemPowers.length)
+				&& typeof this._state._normalizeItemPowers === "function") {
+				const powers = this._state._normalizeItemPowers(match);
+				if (powers.length) {
+					item.itemPowers = JSON.parse(JSON.stringify(powers));
+					rowChanged = true;
+				}
 			}
 			if (!item.ability && match.ability) {
 				item.ability = JSON.parse(JSON.stringify(match.ability));
@@ -268,6 +279,11 @@ class CharacterSheetInventory {
 			if (e.target.closest(".charsheet__item-use-charge")) {
 				const itemId = _getItemId(e.target);
 				if (itemId) this._useCharge(itemId);
+				return;
+			}
+			if (e.target.closest(".charsheet__item-powers")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this._showItemPowersModal(itemId);
 				return;
 			}
 			if (e.target.closest(".charsheet__item-restore-charge")) {
@@ -4949,6 +4965,119 @@ class CharacterSheetInventory {
 		});
 	}
 
+	async _pConfirmDestructiveItemPower (power) {
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: `Destroy ${power.itemName}?`,
+			isMinHeight0: true,
+		});
+		let confirmed = false;
+		const warning = e_({tag: "p", clazz: "mb-3"});
+		warning.textContent = `${power.name} permanently destroys ${power.itemName}. This cannot be undone.`;
+		const buttons = e_({tag: "div", clazz: "ve-flex-v-center ve-flex-h-right"});
+		const cancel = e_({tag: "button", clazz: "ve-btn ve-btn-default mr-2", text: "Cancel"});
+		const confirm = e_({tag: "button", clazz: "ve-btn ve-btn-danger", text: `Destroy and use ${power.name}`});
+		cancel.addEventListener("click", () => doClose(false));
+		confirm.addEventListener("click", () => {
+			confirmed = true;
+			doClose(true);
+		});
+		buttons.append(cancel, confirm);
+		modalInner.append(warning, buttons);
+		confirm.focus();
+		await pGetResolved();
+		return confirmed;
+	}
+
+	async _pInvokeItemPower (itemId, powerId, {closeModal = null} = {}) {
+		const power = this._state.getItemPower?.(itemId, powerId);
+		if (power?.kind === "spell" && power.isAvailable) {
+			const cast = await this._page?._spells?.pCastItemSpell?.(power);
+			if (!cast) return false;
+		}
+		let result = this._state.invokeItemPower?.(itemId, powerId);
+		if (result?.needsConfirmation) {
+			const confirmed = await this._pConfirmDestructiveItemPower(result.power);
+			if (!confirmed) return false;
+			result = this._state.invokeItemPower(itemId, powerId, {confirmed: true});
+		}
+		if (!result?.ok) {
+			JqueryUtil.doToast({type: "warning", content: result?.reason || "That item power cannot be used."});
+			return false;
+		}
+		const chargeText = result.chargesMax
+			? ` (${result.chargesCurrent}/${result.chargesMax} charges remaining)`
+			: "";
+		JqueryUtil.doToast({
+			type: "success",
+			content: `${result.power.kind === "spell" ? "Cast" : "Invoked"} ${result.power.name} from ${result.power.itemName}${chargeText}.`,
+		});
+		closeModal?.();
+		this._renderItemList();
+		this._page?._combat?.renderCombatItemPowers?.();
+		this._page?._combat?.renderCombatActionEconomy?.();
+		this._page?._playMode?._renderActionsHub?.();
+		this._page?._saveCurrentCharacter?.();
+		return true;
+	}
+
+	async _showItemPowersModal (itemId) {
+		const item = this._state.getItems().find(it => it.id === itemId);
+		const powers = this._state.getItemPowers?.().filter(power => power.itemId === itemId) || [];
+		if (!item || !powers.length) return;
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: `${item.name} — Powers`,
+			isMinHeight0: true,
+			isWidth100: true,
+		});
+		const root = e_({tag: "div", clazz: "charsheet__item-powers-modal cs-adaptive-panel"});
+		const status = e_({tag: "div", clazz: "charsheet__item-powers-status"});
+		const stateLabel = !item.equipped
+			? "Unequipped"
+			: item.requiresAttunement && !item.attuned
+				? "Not attuned"
+				: "Ready";
+		status.textContent = item.charges
+			? `${stateLabel} · ${item.chargesCurrent ?? item.charges}/${item.charges} charges${item.recharge ? ` · recharges ${item.recharge}` : ""}`
+			: stateLabel;
+		root.append(status);
+		const groups = [
+			{key: "action", label: "Action"},
+			{key: "bonus", label: "Bonus Action"},
+			{key: "reaction", label: "Reaction"},
+			{key: "onHit", label: "On Hit"},
+			{key: "other", label: "Other"},
+		];
+		for (const group of groups) {
+			const entries = powers.filter(power => power.actionType === group.key);
+			if (!entries.length) continue;
+			const section = e_({tag: "section", clazz: "charsheet__item-power-group"});
+			section.append(e_({tag: "h5", clazz: "charsheet__item-power-group-title", text: group.label}));
+			for (const power of entries) {
+				const row = e_({tag: "div", clazz: "charsheet__item-power"});
+				const body = e_({tag: "div", clazz: "charsheet__item-power-body"});
+				body.append(e_({tag: "div", clazz: "charsheet__item-power-name", text: power.name}));
+				const metaParts = [];
+				if (power.chargesCost) metaParts.push(`${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}`);
+				if (power.castLevel) metaParts.push(`level ${power.castLevel}`);
+				if (power.isDestructive) metaParts.push("destroys item");
+				if (metaParts.length) body.append(e_({tag: "div", clazz: "charsheet__item-power-meta", text: metaParts.join(" · ")}));
+				if (power.description) body.append(e_({tag: "div", clazz: "charsheet__item-power-description", text: power.description}));
+				const use = e_({
+					tag: "button",
+					clazz: `ve-btn ve-btn-sm ${power.isDestructive ? "ve-btn-danger" : "ve-btn-primary"}`,
+					text: power.kind === "spell" ? "Cast" : "Invoke",
+				});
+				use.disabled = !power.isAvailable;
+				use.title = power.unavailableReason || `${power.kind === "spell" ? "Cast" : "Invoke"} ${power.name}`;
+				use.addEventListener("click", () => this._pInvokeItemPower(itemId, power.id, {closeModal: () => doClose(true)}));
+				row.append(body, use);
+				section.append(row);
+			}
+			root.append(section);
+		}
+		modalInner.append(root);
+	}
+
 	_renderItemDetails (item) {
 		let html = "";
 
@@ -6216,6 +6345,7 @@ class CharacterSheetInventory {
 		const canEquip = CharacterSheetInventory.canEquipItem(item);
 		const canAttune = item.requiresAttunement;
 		const hasCharges = item.charges && item.charges > 0;
+		const hasPowers = Array.isArray(item.itemPowers) && item.itemPowers.length > 0;
 		const canRecharge = hasCharges && !!item.recharge;
 		const rechargeFormula = canRecharge ? CharacterSheetState.getItemRechargeFormula(item) : "";
 		// Staff of Healing (and similar charged healing staves): a "Cast" affordance lets the
@@ -6355,6 +6485,11 @@ class CharacterSheetInventory {
 							</button>
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-restore-charge" title="Restore 1 charge" ${(item.chargesCurrent ?? item.charges) >= item.charges ? "disabled" : ""}>
 								<span class="glyphicon glyphicon-plus"></span>
+							</button>
+						` : ""}
+						${hasPowers ? `
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__item-powers" title="View and invoke ${item.itemPowers.length} item power${item.itemPowers.length === 1 ? "" : "s"}">
+								<span class="glyphicon glyphicon-flash"></span> Powers (${item.itemPowers.length})
 							</button>
 						` : ""}
 						${canRecharge ? `
