@@ -5,6 +5,7 @@
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import {CharacterSheetPlayMode} from "../../../js/charactersheet/charactersheet-playmode.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 
@@ -13,6 +14,50 @@ describe("CharacterSheetPlayMode", () => {
 
 	beforeEach(() => {
 		state = new CharacterSheetState();
+	});
+
+	describe("Item attunement", () => {
+		const addItem = (item) => {
+			state.addItem(item);
+			return state.getItems().at(-1);
+		};
+
+		const makePlayMode = (onOpenIoun = () => {}) => new CharacterSheetPlayMode({
+			getState: () => state,
+			_ioun: {openModal: onOpenIoun},
+		});
+
+		it("redirects effective Ioun bonds to the manager", () => {
+			let opens = 0;
+			const pm = makePlayMode(() => { opens++; });
+			const official = addItem({
+				name: "Ioun Stone, Protection",
+				source: "DMG",
+				requiresAttunement: true,
+				entries: ["This stone orbits your head."],
+			});
+
+			expect(pm._toggleItemAttunement(official)).toBe(false);
+			expect(state.getItems().at(-1).attuned).toBe(false);
+			expect(opens).toBe(1);
+		});
+
+		it("enforces the RAW attunement cap for official stones while TGTT is disabled", () => {
+			state.setSetting("enableTgtt", false);
+			for (let i = 0; i < 3; ++i) {
+				const ring = addItem({name: `Ring ${i}`, source: "DMG", requiresAttunement: true});
+				state.setItemAttuned(ring.id, true);
+			}
+			const official = addItem({
+				name: "Ioun Stone, Protection",
+				source: "DMG",
+				requiresAttunement: true,
+				entries: ["This stone orbits your head."],
+			});
+
+			expect(makePlayMode()._toggleItemAttunement(official)).toBe(false);
+			expect(state.getItems().at(-1).attuned).toBe(false);
+		});
 	});
 
 	// ==========================================================================

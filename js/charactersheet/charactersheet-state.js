@@ -30445,7 +30445,7 @@ class CharacterSheetState {
 			return false;
 		}
 
-		item.attuned = true;
+		this.setItemAttuned(itemId, true);
 		return true;
 	}
 
@@ -30455,7 +30455,7 @@ class CharacterSheetState {
 	 */
 	unattune (itemId) {
 		const item = this._data.inventory.find(i => i.id === itemId);
-		if (item) item.attuned = false;
+		if (item) this.setItemAttuned(itemId, false);
 	}
 
 	setItemCharges (itemId, charges) {
@@ -32053,6 +32053,41 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Return the effective Ioun bond policy for an item.
+	 *
+	 * Intrinsic item text always wins. The TGTT master flag is purely additive: while enabled,
+	 * every recognized Ioun Stone adopts the same bond and slot-free rules; while disabled,
+	 * official stones remain RAW and text-defined Moorchlyne bonds continue unchanged.
+	 *
+	 * @param {object} itemData
+	 * @returns {{usesBond: boolean, isAttunementExempt: boolean, isIntrinsicBond: boolean, isTgttExtension: boolean, text: string}}
+	 */
+	getIounBondPolicy (itemData) {
+		const text = CharacterSheetState._getItemTextForAttunementExemption(itemData);
+		const isIntrinsicBond = /\bioun bond\b/i.test(text);
+		const isTgttExtension = this.getSettings()?.enableTgtt === true
+			&& CharacterSheetState.isIounStone(itemData);
+		return {
+			usesBond: isIntrinsicBond || isTgttExtension,
+			isAttunementExempt: CharacterSheetState._RE_ATTUNEMENT_EXEMPT.test(text) || isTgttExtension,
+			isIntrinsicBond,
+			isTgttExtension,
+			text,
+		};
+	}
+
+	/**
+	 * Source-agnostic Ioun Stone detection shared by attunement policy and the manager.
+	 * Name matching intentionally excludes Ioun Geode/Sand; intrinsic bond text remains the
+	 * fallback for differently named stones.
+	 */
+	static isIounStone (itemData) {
+		if (!itemData) return false;
+		if (/\bioun stone\b/i.test(itemData.name || "")) return true;
+		return /\bioun bond\b/i.test(CharacterSheetState._getItemTextForAttunementExemption(itemData));
+	}
+
+	/**
 	 * Matches an item's own declaration that its attunement is free of the normal slot
 	 * limit. The `(?:attunement|bond)` anchor is load-bearing: it requires the noun naming
 	 * *this* item's attunement to be the subject, so "Attuning to an installed component
@@ -32065,8 +32100,9 @@ class CharacterSheetState {
 	 * consume one of the character's attunement slots — the Ioun bond of the Moorchlyne
 	 * Ioun Stones is the archetype ("An Ioun bond is a special form of attunement and
 	 * doesn't count against the number of magic items to which a creature can normally
-	 * be attuned"). Without this, such items are capped at the normal 3-6 slots and every
-	 * item aggregator (which gates on `requiresAttunement && attuned`) silently drops them.
+	 * be attuned"). TGTT additionally extends that rule to every recognized Ioun Stone.
+	 * Without this, such items are capped at the normal 3-6 slots and every item aggregator
+	 * (which gates on `requiresAttunement && attuned`) silently drops them.
 	 *
 	 * The check is deliberately narrow. It requires the *noun* naming this item's own
 	 * attunement ("attunement" / "bond") to be the thing that doesn't count. That excludes
@@ -32078,19 +32114,21 @@ class CharacterSheetState {
 	 */
 	isAttunementExempt (itemData) {
 		if (!itemData) return false;
-		const cached = itemData.__attunementExempt;
-		if (cached != null) return cached;
+		const cacheKey = this.getSettings()?.enableTgtt === true ? "tgtt" : "raw";
+		const cached = itemData.__attunementExemptByRuleset;
+		if (cached && Object.prototype.hasOwnProperty.call(cached, cacheKey)) return cached[cacheKey];
 
-		const text = CharacterSheetState._getItemTextForAttunementExemption(itemData);
-		const isExempt = !!text && CharacterSheetState._RE_ATTUNEMENT_EXEMPT.test(text);
+		const policy = this.getIounBondPolicy(itemData);
+		const isExempt = policy.isAttunementExempt;
 
 		// Never memoise a negative that an unresolved reference could be responsible for.
 		// `Renderer.item.entryMap` is populated asynchronously, so an early call would
 		// otherwise pin `false` for the rest of the session — the exact silent failure the
 		// reference-resolving walk above exists to prevent.
-		const isRefPending = !isExempt && text.includes("{#itemEntry") && !globalThis.Renderer?.item?.entryMap;
+		const isRefPending = !isExempt && policy.text.includes("{#itemEntry") && !globalThis.Renderer?.item?.entryMap;
 		if (!isRefPending) {
-			try { Object.defineProperty(itemData, "__attunementExempt", {value: isExempt, enumerable: false, configurable: true}); } catch (ignored) { /* frozen item data */ }
+			const cache = {...(cached || {}), [cacheKey]: isExempt};
+			try { Object.defineProperty(itemData, "__attunementExemptByRuleset", {value: cache, enumerable: false, configurable: true}); } catch (ignored) { /* frozen item data */ }
 		}
 		return isExempt;
 	}

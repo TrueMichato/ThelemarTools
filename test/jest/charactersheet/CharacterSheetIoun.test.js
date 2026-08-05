@@ -9,8 +9,8 @@
  *
  * These tests pin the parts a future contributor could plausibly "tidy up" into being
  * wrong — the deliberately narrow definition of "spent", the bond-time floor, the
- * exclusion of Ioun Geode/Sand, and the fact that official (non-homebrew) stones get
- * orbit management but must NOT be dragged into the 7-day bonding pipeline.
+ * exclusion of Ioun Geode/Sand, and the additive TGTT boundary which extends the bond
+ * rules to official stones without disabling intrinsic item-text bonds in RAW mode.
  */
 
 import "./setup.js";
@@ -131,9 +131,19 @@ describe("CharacterSheetIoun — detection", () => {
 		expect(CharacterSheetIoun.isIounStone({name: "Ring of Protection", entries: ["+1 AC."]})).toBe(false);
 	});
 
-	it("keeps the bonding pipeline homebrew-only: official stones use ordinary attunement", () => {
+	it("detects intrinsic bond text without applying character settings", () => {
 		expect(CharacterSheetIoun.usesIounBond(makeStone("Ioun Stone #002, Dusty Rose Prism"))).toBe(true);
 		expect(CharacterSheetIoun.usesIounBond(makeOfficialStone("Ioun Stone of Protection"))).toBe(false);
+	});
+
+	it("extends the effective bond policy to official stones only while TGTT is enabled", () => {
+		const state = new CharacterSheetState();
+		const official = makeOfficialStone("Ioun Stone of Protection");
+		expect(CharacterSheetIoun.usesIounBond(official, {state})).toBe(true);
+
+		state.setSetting("enableTgtt", false);
+		expect(CharacterSheetIoun.usesIounBond(official, {state})).toBe(false);
+		expect(CharacterSheetIoun.usesIounBond(makeStone("Ioun Stone #002, Dusty Rose Prism"), {state})).toBe(true);
 	});
 
 	it("resolves the {#itemEntry} reference the real brew hides its bond text behind", () => {
@@ -274,10 +284,10 @@ describe("CharacterSheetIoun — collection maths", () => {
 });
 
 describe("CharacterSheetIoun — reading the character", () => {
-	it("stays hidden until there is something to manage", () => {
+	it("becomes applicable for the first bondable stone", () => {
 		const {ioun} = makeSheet([{item: makeStone("Ioun Stone #011, Grey Sphere")}]);
-		// Held but not bonded: nothing to govern yet.
-		expect(ioun.isApplicable()).toBe(false);
+		expect(ioun.isApplicable()).toBe(true);
+		expect(ioun.getBondableStones()).toHaveLength(1);
 	});
 
 	it("becomes applicable once a stone is bonded", () => {
@@ -292,14 +302,46 @@ describe("CharacterSheetIoun — reading the character", () => {
 		expect(ioun.getBondedStones()).toHaveLength(0);
 	});
 
-	it("offers a bond only for homebrew stones, and never for one already bonding", () => {
+	it("offers official and intrinsic-text stones while TGTT is enabled, and never re-offers one already bonding", () => {
 		const {state, ioun} = makeSheet([
 			{item: makeStone("Ioun Stone #014, Grey Sphere")},
 			{item: makeOfficialStone("Ioun Stone of Awareness")},
 		]);
-		expect(ioun.getBondableStones().map(s => s.name)).toEqual(["Ioun Stone #014, Grey Sphere"]);
+		expect(ioun.getBondableStones().map(s => s.name)).toEqual([
+			"Ioun Stone #014, Grey Sphere",
+			"Ioun Stone of Awareness",
+		]);
 		state.setIounBondDays(ioun.getBondableStones()[0].id, 1);
-		expect(ioun.getBondableStones()).toHaveLength(0);
+		expect(ioun.getBondableStones().map(s => s.name)).toEqual(["Ioun Stone of Awareness"]);
+		expect(ioun.getBondingStones()).toHaveLength(1);
+	});
+
+	it("keeps intrinsic bonds but withholds the official-stone extension while TGTT is disabled", () => {
+		const {state, ioun} = makeSheet([
+			{item: makeStone("Ioun Stone #014, Grey Sphere")},
+			{item: makeOfficialStone("Ioun Stone of Awareness")},
+		]);
+		state.setSetting("enableTgtt", false);
+		expect(ioun.getBondableStones().map(s => s.name)).toEqual(["Ioun Stone #014, Grey Sphere"]);
+		const intrinsicId = ioun.getAllStones().find(s => s.name === "Ioun Stone #014, Grey Sphere").id;
+		expect(ioun.startBond(intrinsicId)).toBe(true);
+		expect(ioun.getBondingStones().map(s => s.id)).toEqual([intrinsicId]);
+		expect(ioun.startBond(ioun.getAllStones().find(s => s.name === "Ioun Stone of Awareness").id)).toBe(false);
+	});
+
+	it("pauses an official bond while TGTT is disabled and resumes it when re-enabled", () => {
+		const {state, ioun} = makeSheet([{item: makeOfficialStone("Ioun Stone of Awareness")}]);
+		const id = ioun.getAllStones()[0].id;
+		expect(ioun.startBond(id)).toBe(true);
+		ioun.advanceBondDay();
+		expect(state.getIounBonds()[id]).toBe(1);
+
+		state.setSetting("enableTgtt", false);
+		expect(ioun.getBondingStones()).toHaveLength(0);
+		expect(ioun.advanceBondDay()).toEqual({advanced: 0, completed: []});
+		expect(state.getIounBonds()[id]).toBe(1);
+
+		state.setSetting("enableTgtt", true);
 		expect(ioun.getBondingStones()).toHaveLength(1);
 	});
 
@@ -349,6 +391,31 @@ describe("CharacterSheetIoun — actions", () => {
 		expect(completed).toHaveLength(1);
 		expect(ioun.getBondedStones()).toHaveLength(1);
 		// The bond record is cleared once it has been converted into attunement.
+		expect(state.getIounBonds()[id]).toBeUndefined();
+	});
+
+	it("completes an official-stone bond while every ordinary attunement slot is full", () => {
+		const {state, ioun} = makeSheet([{item: makeOfficialStone("Ioun Stone of Protection")}]);
+		for (let i = 0; i < 3; ++i) {
+			state.addItem({
+				name: `Ring ${i}`,
+				source: "DMG",
+				type: "wondrous",
+				requiresAttunement: true,
+				entries: ["A plain magic ring."],
+			});
+			expect(state.attune(state.getItems().at(-1).id)).toBe(true);
+		}
+
+		const id = ioun.getAllStones()[0].id;
+		expect(state.getAttunedCount()).toBe(3);
+		expect(state.canAttune()).toBe(false);
+		expect(ioun.startBond(id)).toBe(true);
+		for (let i = 0; i < 6; ++i) expect(ioun.advanceBondDay().completed).toHaveLength(0);
+
+		expect(ioun.advanceBondDay().completed.map(it => it.id)).toEqual([id]);
+		expect(state.getItems().find(it => it.id === id).attuned).toBe(true);
+		expect(state.getAttunedCount()).toBe(3);
 		expect(state.getIounBonds()[id]).toBeUndefined();
 	});
 
