@@ -1040,6 +1040,21 @@ class FeatureModifierParser {
 	static THIRD_PARTY_SAVE_SUBJECT_RE = /\b(?:the|that|this|each|one|a|an|chosen)\s+(?:chosen\s+)?(?:target|creature|ally|companion|beast|familiar|steed|mount|summon)\b[^.;]*?\b(?:has|have)\s*$/i;
 
 	/**
+	 * Third-party subjects introduced by a POSSESSIVE ("each of your other orbiting Ioun
+	 * Stones has … a +2 bonus to saving throws").
+	 *
+	 * These are invisible to {@link THIRD_PARTY_SAVE_SUBJECT_RE} twice over: the beneficiary
+	 * noun is arbitrary (an item, not a creature from the fixed roster), and — fatally — the
+	 * possessive `your` trips the `you|your` bail-out in {@link isThirdPartySaveSubject},
+	 * which disables the guard entirely. That bail-out is right for a self-buff, but here
+	 * `your` modifies the *beneficiary*, not the character, so it means the opposite.
+	 *
+	 * Anchored on `each of your <noun> has/have`, which grammatically always names something
+	 * other than the character, so a genuine self-buff cannot match.
+	 */
+	static THIRD_PARTY_POSSESSIVE_SUBJECT_RE = /\beach\s+of\s+your\s+(?:other\s+)?[a-z'’\- ]{2,40}?\s+(?:has|have)\b/i;
+
+	/**
 	 * True when the prose match at `matchIndex` belongs to a clause whose subject is a
 	 * third party rather than the character.
 	 *
@@ -1067,6 +1082,10 @@ class FeatureModifierParser {
 			.replace(/\byou\s+(?:can\s+(?:see|hear)|choose|are\s+aware\s+of)\b/g, "")
 			.replace(/\b(?:with)?in\s+\d+\s*(?:-|\s)?\s*(?:feet|foot|ft\.?)\s+of\s+you\b/g, "")
 			.replace(/\b(?:of|to|near|from|beside|around)\s+you\b/g, "");
+		// Checked BEFORE the you/your bail-out: in "each of your other orbiting Ioun Stones
+		// has …" the possessive names the beneficiary, so the bail-out would invert the
+		// verdict and wave a third-party buff through as a self-buff.
+		if (FeatureModifierParser.THIRD_PARTY_POSSESSIVE_SUBJECT_RE.test(clause)) return true;
 		if (/\byou\b|\byour\b|\byourself\b/.test(clause)) return false;
 		return FeatureModifierParser.THIRD_PARTY_SAVE_SUBJECT_RE.test(clause);
 	}
@@ -1119,12 +1138,14 @@ class FeatureModifierParser {
 		// SAVING THROWS
 		// ===================
 		// All saving throws
+		// `thirdPartyGuard` — these patterns match "a +2 bonus to saving throws" wherever it
+		// appears, including in a clause whose subject is somebody (or something) else.
 		const saveAllPatterns = [
-			{pattern: /([+\-−])(\d+)\s*(?:bonus\s*)?to\s*(?:all\s*)?saving\s*throws/gi, signed: true},
-			{pattern: /saving\s*throws?\s*(?:increase|bonus)\s*(?:by|of)\s*([+\-−])?(\d+)/gi, signed: true, defaultPositive: true},
-			{pattern: /saving\s*throws?\s*(?:decrease|penalty|are\s*reduced)\s*by\s*(\d+)/gi, negative: true},
-			{pattern: /(?:bonus|penalty)\s*of\s*([+\-−])?(\d+)\s*to\s*(?:all\s*)?saving\s*throws/gi, signed: true, defaultPositive: true},
-			{pattern: /gain(?:s)?\s*(?:a\s*)?([+\-−])?(\d+)\s*(?:bonus\s*)?to\s*(?:all\s*)?saving\s*throws/gi, signed: true, defaultPositive: true},
+			{pattern: /([+\-−])(\d+)\s*(?:bonus\s*)?to\s*(?:all\s*)?saving\s*throws/gi, signed: true, thirdPartyGuard: true},
+			{pattern: /saving\s*throws?\s*(?:increase|bonus)\s*(?:by|of)\s*([+\-−])?(\d+)/gi, signed: true, defaultPositive: true, thirdPartyGuard: true},
+			{pattern: /saving\s*throws?\s*(?:decrease|penalty|are\s*reduced)\s*by\s*(\d+)/gi, negative: true, thirdPartyGuard: true},
+			{pattern: /(?:bonus|penalty)\s*of\s*([+\-−])?(\d+)\s*to\s*(?:all\s*)?saving\s*throws/gi, signed: true, defaultPositive: true, thirdPartyGuard: true},
+			{pattern: /gain(?:s)?\s*(?:a\s*)?([+\-−])?(\d+)\s*(?:bonus\s*)?to\s*(?:all\s*)?saving\s*throws/gi, signed: true, defaultPositive: true, thirdPartyGuard: true},
 		];
 		this._applyPatterns(plainText, saveAllPatterns, "save:all", sourceName, modifiers, parseSignedValue);
 
@@ -2368,10 +2389,16 @@ class FeatureModifierParser {
 	 * Helper to apply multiple patterns and extract modifiers
 	 */
 	static _applyPatterns (text, patterns, type, sourceName, modifiers, parseSignedValue) {
-		patterns.forEach(({pattern, signed, positive, negative, defaultPositive, setValue, perLevel, sizeIncrease, maybeDouble, maybeHalve, abilityMod, equalToWalk, proficiencyBonus, spellSlot, spellSlotCount}) => {
+		patterns.forEach(({pattern, signed, positive, negative, defaultPositive, setValue, perLevel, sizeIncrease, maybeDouble, maybeHalve, abilityMod, equalToWalk, proficiencyBonus, spellSlot, spellSlotCount, thirdPartyGuard}) => {
 			let match;
 			while ((match = pattern.exec(text)) !== null) {
 				let value;
+
+				// "Each of your other orbiting Ioun Stones has … a +2 bonus to saving throws"
+				// buffs the stones, not the character. Opt-in per pattern because the guard
+				// reads the clause SUBJECT, which is only meaningful for grants that can
+				// coherently be aimed at somebody else.
+				if (thirdPartyGuard && FeatureModifierParser.isThirdPartySaveSubject(text, match.index ?? -1)) continue;
 
 				if (proficiencyBonus) {
 					// "bonus equal to your proficiency bonus" - mark for special handling.
@@ -2574,6 +2601,24 @@ class FeatureModifierParser {
 			/when\s+(?:you\s+are\s+)?(wearing|wielding|in\s+(?:dim\s+light|darkness)|hit\s+by)/i,
 			/if\s+you\s+(are|have|wear|wield|aren't|don't)/i,
 			/against\s+(aberrations|beasts|celestials|constructs|dragons|elementals|fey|fiends|giants|monstrosities|oozes|plants|undead|(?:creatures?\s+)?(?:that\s+)?(?:can't\s+see\s+you|you\s+can\s+see))/i,
+			// Bonuses scoped by an "against …" qualifier that names an EFFECT rather than a
+			// creature type: "+1 to saving throws against poison", "against spells",
+			// "against disease and lycanthropy", "+2 against the Frightened condition".
+			//
+			// The creature-type pattern above matches who you are rolling against; these match
+			// what you are rolling against, and the two are deliberately kept separate.
+			//
+			// Without these the qualifier was silently dropped and `parseModifiers` returned
+			// `conditional: null`, making a narrowly-scoped bonus indistinguishable from an
+			// unconditional one — so "+1 to saving throws against poison" was applied to EVERY
+			// saving throw. This affects official content, not just homebrew.
+			//
+			// Condition names are matched before the bare-noun list so "against the Frightened
+			// condition" is recognised as a condition gate; note that "poisoned" (the condition)
+			// and "poison" (the damage type / effect) are both reachable, via different branches.
+			/against\s+(?:being\s+|becoming\s+)?(?:the\s+)?(?:charmed|frightened|poisoned|paralyzed|petrified|blinded|deafened|stunned|prone|restrained|grappled|incapacitated|unconscious|exhaustion)\b(?:\s+condition)?/i,
+			/against\s+(?:acid|cold|fire|force|lightning|necrotic|poison|psychic|radiant|thunder|bludgeoning|piercing|slashing)\s+damage\b/i,
+			/against\s+(?:poison|disease|lycanthropy|spells?|magic|curses?|illusions?|fear|petrification|paralysis|polymorph)\b/i,
 			/within\s+\d+\s*(?:feet|ft\.?)\s*of/i,
 			/in\s+(?:bright\s+light|dim\s+light|darkness)/i,
 			// "while not wearing armor" or "while you are not wearing armor"
@@ -46043,6 +46088,157 @@ class CharacterSheetState {
 		return contributions;
 	}
 
+	/**
+	 * Conditional modifiers contributed by currently-active items.
+	 *
+	 * Items already deliver their UNCONDITIONAL bonuses through `bonusSavingThrow` and
+	 * `_getItemProseSaveBonus`, both of which carry "structured wins" guards. This method
+	 * deliberately returns **only** modifiers that carry a `conditional`, which makes
+	 * double-counting impossible by construction: the two paths are disjoint by definition.
+	 *
+	 * Results are computed rather than written into `_data.namedModifiers`, because that
+	 * array is persisted and restored verbatim by `loadFromJson` — storing item-derived
+	 * entries there would strand them in saves after the item was dropped and would need a
+	 * migration for every future change (see the several `_migrate*` passes above that exist
+	 * for exactly that reason). Computing keeps the modifiers exactly as live as the equip
+	 * and attune state that justifies them.
+	 *
+	 * Only PASSIVE clauses qualify. Without that gate an activated item ("Once per day, you
+	 * can … gain a +2 bonus to saving throws against fire") would grant its bonus at rest,
+	 * which for the Moorchlyne Ioun Stone brew alone would leak from 485 activated stones.
+	 *
+	 * @returns {Array<object>} Modifier objects shaped like `namedModifiers` entries.
+	 * @private
+	 */
+	_getItemConditionalModifiers () {
+		const inventory = this._data?.inventory;
+		if (!Array.isArray(inventory) || !inventory.length) return [];
+
+		// `getModifiersForType` runs on every roll and every render, so the prose parse is
+		// memoised against the only state that can change its result.
+		const signature = inventory
+			.map(row => `${row?.id || ""}:${row?.equipped ? 1 : 0}:${row?.attuned ? 1 : 0}`)
+			.join("|");
+		if (this._itemConditionalModifierCache?.signature === signature) {
+			return this._itemConditionalModifierCache.modifiers;
+		}
+
+		const modifiers = [];
+		for (const row of inventory) {
+			if (!row?.equipped) continue;
+			const itemData = row.item || row;
+			const requiresAttunement = row.requiresAttunement || itemData?.requiresAttunement;
+			if (requiresAttunement && !row.attuned) continue;
+
+			const text = this._getItemEntriesText(itemData);
+			if (!text) continue;
+
+			const passiveText = CharacterSheetState._getPassiveClauses(text);
+			if (!passiveText) continue;
+
+			const itemName = itemData?.name || row?.name || "Item";
+			for (const mod of FeatureModifierParser.parseModifiers(passiveText, itemName, {isItem: true})) {
+				if (!mod?.conditional) continue;
+				// "while wearing" / "while attuned" / "while it orbits your head" is an item's
+				// BASELINE state, not a condition on top of it — equipping and attuning are
+				// already prerequisites checked above. Treating these as conditionals would
+				// demote every ordinary magic item (Bracers of Archery, dragon scale mail,
+				// Wraps of Unarmed Power …) into a per-roll opt-in prompt, and opting in would
+				// double-count against the structured `bonusAc`/`bonusWeaponDamage` path that
+				// already applies them. Only a qualifier that narrows WHEN the bonus applies
+				// (against poison, against the Frightened condition) is a real conditional.
+				if (CharacterSheetState._RE_ITEM_BASELINE_CONDITION.test(mod.conditional)) continue;
+				// "Structured wins", matching the six equivalent guards in
+				// charactersheet-inventory.js. Pariah's Shield carries BOTH `bonusAc: "+1"`
+				// and prose the parser reads as `ac +1 [within 5 feet of]`; without this the
+				// structured bonus would apply always AND the prose one would be offered as an
+				// opt-in that stacks a second +1 on top of it.
+				if (CharacterSheetState._hasStructuredEquivalent(itemData, mod.type)) continue;
+				modifiers.push({...mod, name: itemName, enabled: false, _fromItem: true});
+			}
+		}
+
+		this._itemConditionalModifierCache = {signature, modifiers};
+		return modifiers;
+	}
+
+	/**
+	 * Reduce item text to the clauses that apply passively, so an activated ability's
+	 * numbers are never read as an always-on bonus.
+	 *
+	 * Split per sentence — an item routinely carries a passive clause and an activated one
+	 * in the same block, and judging the whole text at once would either lose the passive
+	 * effect or admit the activated one.
+	 *
+	 * @param {string} text
+	 * @returns {string} The passive sentences, joined; empty when none qualify.
+	 * @private
+	 */
+	static _getPassiveClauses (text) {
+		if (!text) return "";
+		return text
+			.split(/(?<=[.;])\s+/)
+			.filter(sentence => CharacterSheetState._RE_PASSIVE_CLAUSE.test(sentence)
+				&& !CharacterSheetState._RE_ACTIVATED_CLAUSE.test(sentence))
+			.join(" ");
+	}
+
+	/**
+	 * Phrasings that mark a clause as continuously active while the item is worn/held.
+	 * "orbits" covers Ioun Stones, whose entire vocabulary ("while this pale blue rhomboid
+	 * orbits your head") matches none of the wear/wield/carry verbs the older
+	 * `_parseItemEffectProse` gate recognises.
+	 */
+	static _RE_PASSIVE_CLAUSE = /\bwhile\s+[^.;]{0,80}?\b(?:orbit|orbits|orbiting|wear|wearing|wield|wielding|hold|holding|carry|carrying|attuned|equipped)\b|\bas\s+long\s+as\s+you\s+(?:wear|hold|wield|carry|remain)\b/i;
+
+	/** Phrasings that mark a clause as an activated ability rather than a passive property. */
+	static _RE_ACTIVATED_CLAUSE = /\bonce\s+(?:per|every|a\s+day)\b|\bas\s+a\s+(?:magic|bonus)\s+action\b|\bas\s+an\s+action\b|\byou\s+can\s+(?:use|expend|spend|activate|speak|command)\b|\bexpend(?:ing)?\s+\d*\s*charges?\b|\bcommand\s+word\b/i;
+
+	/**
+	 * Conditions that merely restate an item's baseline "you are using it" state and so must
+	 * NOT gate the bonus behind a per-roll opt-in. See the call site in
+	 * {@link _getItemConditionalModifiers} for why this distinction matters.
+	 */
+	static _RE_ITEM_BASELINE_CONDITION = /^(?:while|when|as\s+long\s+as)\s+(?:you\s+(?:are\s+|,\s*)?)?(?:it\s+)?(?:this\s+)?(?:wear|wearing|wield|wielding|hold|holding|carry|carrying|attuned|equipped|orbit|orbits|orbiting)\b/i;
+
+	/**
+	 * Does `itemData` already carry a structured prop covering `modType`?
+	 *
+	 * The structured props are applied unconditionally by `_updateItemBonuses`, so a
+	 * prose-derived modifier of the same type is a duplicate of something already counted.
+	 *
+	 * @param {object} itemData
+	 * @param {string} modType e.g. "ac", "save:all", "ability:str"
+	 * @returns {boolean}
+	 */
+	static _hasStructuredEquivalent (itemData, modType) {
+		if (!itemData || !modType) return false;
+		// NOT a null check: `charactersheet-inventory.js:_addItem` normalises every
+		// `bonus*` prop onto the row, materialising the absent ones as literal 0. A
+		// `!= null` test therefore reports "structured" for EVERY item and suppresses
+		// every prose conditional. Only a non-zero value means the structured path is
+		// actually contributing something this would duplicate.
+		const has = val => {
+			if (val == null) return false;
+			const num = typeof val === "number" ? val : Number.parseFloat(String(val).replace(/^\+/, ""));
+			return Number.isFinite(num) ? num !== 0 : !!String(val).trim();
+		};
+		const base = String(modType).split(":")[0];
+		switch (base) {
+			case "ac": return has(itemData.bonusAc);
+			case "save": return has(itemData.bonusSavingThrow);
+			case "attack": return has(itemData.bonusWeaponAttack) || has(itemData.bonusWeapon) || has(itemData.bonusSpellAttack);
+			case "damage": return has(itemData.bonusWeaponDamage) || has(itemData.bonusWeapon) || has(itemData.bonusSpellDamage);
+			case "check": return has(itemData.bonusAbilityCheck);
+			case "spellDc": return has(itemData.bonusSpellSaveDc);
+			case "ability": {
+				const abv = String(modType).split(":")[1];
+				return !!(abv && itemData.ability && has(itemData.ability[abv]));
+			}
+			default: return false;
+		}
+	}
+
 	getModifiersForType (type) {
 		if (!type) return [];
 		const parts = type.split(":");
@@ -46051,7 +46247,7 @@ class CharacterSheetState {
 
 		const matchingMods = [];
 
-		this._data.namedModifiers.forEach(mod => {
+		[...this._data.namedModifiers, ...this._getItemConditionalModifiers()].forEach(mod => {
 			// (CS-BUG-053) A text-parsed CONDITIONAL modifier is registered with
 			// `enabled: false` by `_processFeatureModifiers` ("conditional modifiers start
 			// disabled"), which predates the roll-time opt-in gating in `aggregateModifiers`.

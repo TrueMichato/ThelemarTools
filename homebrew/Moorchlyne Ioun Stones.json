@@ -11,7 +11,7 @@
 				"convertedBy": [
 					"Michato"
 				],
-				"version": "1.3.0",
+				"version": "1.4.0",
 				"dateReleased": "2026-08-01",
 				"color": "2f7180",
 				"colorNight": "67b8c7"
@@ -23,7 +23,7 @@
 			]
 		},
 		"dateAdded": 1785542400,
-		"dateLastModified": 1785742291,
+		"dateLastModified": 1785918540,
 		"edition": "one"
 	},
 	"itemEntry": [
@@ -344,8 +344,8 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Your Strength increases by 2, to a maximum of 22, while this pale blue rhomboid orbits your head.",
-						"A super-charged pale blue rhomboid contains multicolored sparks. Your Strength instead increases by 4, to a maximum of 24, while it orbits your head."
+						"Your Strength increases by 4, to a maximum of 24, while this pale blue rhomboid orbits your head.",
+						"A super-charged pale blue rhomboid contains multicolored sparks."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #001, Pale Blue Rhomboid|MECIounStones}.",
@@ -419,8 +419,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Your Intelligence increases by 2, to a maximum of 22, while this scarlet and blue sphere orbits your head.",
-						"Your Intelligence instead increases by 4, to a maximum of 24."
+						"Your Intelligence increases by 4, to a maximum of 24, while this scarlet and blue sphere orbits your head."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #002, Scarlet and Blue Sphere|MECIounStones}.",
@@ -494,8 +493,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Your Wisdom increases by 2, to a maximum of 22, while this incandescent blue sphere orbits your head.",
-						"Your Wisdom instead increases by 4, to a maximum of 24."
+						"Your Wisdom increases by 4, to a maximum of 24, while this incandescent blue sphere orbits your head."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #003, Incandescent Blue Sphere|MECIounStones}.",
@@ -569,8 +567,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Your Dexterity increases by 2, to a maximum of 22, while this deep red sphere orbits your head.",
-						"Your Dexterity instead increases by 4, to a maximum of 24."
+						"Your Dexterity increases by 4, to a maximum of 24, while this deep red sphere orbits your head."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #004, Deep Red Sphere|MECIounStones}.",
@@ -644,8 +641,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Your Constitution increases by 2, to a maximum of 22, while this pink rhomboid orbits your head. Your Hit Point maximum changes normally when your Constitution modifier changes.",
-						"Your Constitution instead increases by 4, to a maximum of 24."
+						"Your Constitution increases by 4, to a maximum of 24, while this pink rhomboid orbits your head. Your Hit Point maximum changes normally when your Constitution modifier changes."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #005, Pink Rhomboid|MECIounStones}.",
@@ -719,8 +715,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Your Charisma increases by 2, to a maximum of 22, while this pink and green sphere orbits your head.",
-						"Your Charisma instead increases by 4, to a maximum of 24."
+						"Your Charisma increases by 4, to a maximum of 24, while this pink and green sphere orbits your head."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #006, Pink and Green Sphere|MECIounStones}.",
@@ -788,8 +783,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"While this pale green prism orbits your head, you gain one level in one of your classes, including its Hit Die, Hit Point increase, class features, Spell Slots, and other benefits. You must meet the normal multiclass prerequisites if you gain the level in a new class. The DM decides how any choice normally made when gaining that level is resolved when the stone first bonds to you. You lose all benefits of the granted level while the stone isn't orbiting, and you can't use another pale green prism at the same time. The stone can raise your total level above 20.",
-						"A super-charged prism grants two levels instead of one. If you have more than one class, the DM can instead have it grant one level in each class."
+						"While this pale green prism orbits your head, you gain two levels in one of your classes, including their Hit Dice, Hit Point increases, class features, Spell Slots, and other benefits. If you have more than one class, the DM can instead have it grant one level in each class. You must meet the normal multiclass prerequisites if you gain a level in a new class. The DM decides how any choice normally made when gaining those levels is resolved when the stone first bonds to you. You lose all benefits of the granted levels while the stone isn't orbiting, and you can't use another pale green prism at the same time. The stone can raise your total level above 20."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #007, Pale Green Prism|MECIounStones}.",
@@ -1132,8 +1126,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"You gain a +1 bonus to AC and saving throws while this dusty rose prism orbits your head. The saving throw bonus doesn't apply to unattended objects or other magic items in your possession.",
-						"The bonuses to AC and saving throws are +2 instead."
+						"You gain a +2 bonus to AC and saving throws while this dusty rose prism orbits your head. The saving throw bonus doesn't apply to unattended objects or other magic items in your possession."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #014, Dusty Rose Prism|MECIounStones}.",
@@ -1321,8 +1314,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"When you finish a Long Rest while this brass lozenge is orbiting, you gain {@dice 2d4 + 2} Temporary Hit Points. They last until the start of your next Long Rest or until the stone ceases to orbit you.",
-						"You instead gain {@dice 4d4 + 4} Temporary Hit Points."
+						"When you finish a Long Rest while this brass lozenge is orbiting, you gain {@dice 4d4 + 4} Temporary Hit Points. They last until the start of your next Long Rest or until the stone ceases to orbit you."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #019, Brass Lozenge|MECIounStones}.",
@@ -2401,8 +2393,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"You gain a +1 bonus to saving throws against poison and the {@condition Poisoned|XPHB} condition while this green star orbits your head.",
-						"The bonus is +2 instead."
+						"You gain a +2 bonus to saving throws against poison and the {@condition Poisoned|XPHB} condition while this green star orbits your head."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #046, Green Star|MECIounStones}.",
@@ -3068,8 +3059,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"The stone has 2 charges and regains all expended charges daily at dawn. When you make a Strength check to bend, break, lift, or force an object, you can expend 1 charge to add 2 to the roll after rolling the d20 but before the outcome is determined.",
-						"The bonus is +4 instead."
+						"The stone has 2 charges and regains all expended charges daily at dawn. When you make a Strength check to bend, break, lift, or force an object, you can expend 1 charge to add 4 to the roll after rolling the d20 but before the outcome is determined."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #061, Pearl Brown Rhomboid|MECIounStones}.",
@@ -3809,8 +3799,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Once per day, you can take a {@variantrule Reaction|XPHB} to stop time for a moment. You immediately take one special turn during which you can move and take the Dash, Disengage, Dodge, or Hide action. You can affect only yourself and objects you are wearing or carrying. During this movement, you can cross liquids and other surfaces that couldn't normally bear your weight without falling or sinking.",
-						"You take two special turns instead of one."
+						"Once per day, you can take a {@variantrule Reaction|XPHB} to stop time for a moment. You immediately take two special turns during which you can move and take the Dash, Disengage, Dodge, or Hide action. You can affect only yourself and objects you are wearing or carrying. During this movement, you can cross liquids and other surfaces that couldn't normally bear your weight without falling or sinking."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #079, Black Twisted Hexagonal Rod|MECIounStones}.",
@@ -3980,8 +3969,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Once per day, you can take a {@variantrule Bonus Action|XPHB} to empower the stone for 1 minute. When you cast a spell during this time, increase its duration by 50 percent, rounding up to the next round or minute as appropriate. A spell cast on you by another creature during this time gains the same increase.",
-						"Affected spell durations are doubled instead."
+						"Once per day, you can take a {@variantrule Bonus Action|XPHB} to empower the stone for 1 minute. When you cast a spell during this time, its duration is doubled. A spell cast on you by another creature during this time gains the same increase."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #082, Blue and Green Cube|MECIounStones}.",
@@ -4537,8 +4525,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"A creature within 60 feet of you that has Magic Resistance or a similar trait takes a -2 penalty to saving throws against spells you cast while this red twisted hexagonal rod orbits your head. This penalty applies after any Advantage granted by that trait.",
-						"The penalty is -4 instead."
+						"A creature within 60 feet of you that has Magic Resistance or a similar trait takes a -4 penalty to saving throws against spells you cast while this red twisted hexagonal rod orbits your head. This penalty applies after any Advantage granted by that trait."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #092, Red Twisted Hexagonal Rod|MECIounStones}.",
@@ -4901,8 +4888,8 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"This pearl sphere has 2 charges. Once every 24 hours, you can expend 1 charge to duplicate any spell of level 6 or lower. You don't need to meet the spell's requirements or provide components, and the spell takes effect as part of the action used to activate the stone. Alternatively, the DM can allow another effect of comparable power. At 0 charges, the stone burns out and crumbles into dust. No effect, including {@item Ioun Stone #277, Lavender and Green Faceted Egg|MECIounStones} or {@spell Wish|XPHB}, can restore its charges.",
-						"Five percent of pearl spheres contain multicolored sparks. Its charges each cast {@spell Wish|XPHB} instead."
+						"This pearl sphere has 2 charges. Once every 24 hours, you can expend 1 charge to cast {@spell Wish|XPHB}. You don't need to meet the spell's requirements or provide components, and the spell takes effect as part of the action used to activate the stone. At 0 charges, the stone burns out and crumbles into dust. No effect, including {@item Ioun Stone #277, Lavender and Green Faceted Egg|MECIounStones} or {@spell Wish|XPHB}, can restore its charges.",
+						"A super-charged pearl sphere contains multicolored sparks."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #100, Pearl Sphere|MECIounStones}.",
@@ -5032,8 +5019,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"You gain a +1 bonus to ranged attack and damage rolls with weapons while this cobalt blue lozenge orbits your head. This bonus doesn't make nonmagical ammunition or weapons magical.",
-						"The bonus is +2 instead."
+						"You gain a +2 bonus to ranged attack and damage rolls with weapons while this cobalt blue lozenge orbits your head. This bonus doesn't make nonmagical ammunition or weapons magical."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #103, Cobalt Blue Lozenge|MECIounStones}.",
@@ -7828,8 +7814,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Once per day, when you cast a prepared spell of level 1-3, you can instead cast another spell of the same or lower level from your class's spell list. You expend the original spell's Spell Slot and must provide the replacement spell's components.",
-						"You can transpose a prepared spell of level 1-5."
+						"Once per day, when you cast a prepared spell of level 1-5, you can instead cast another spell of the same or lower level from your class's spell list. You expend the original spell's Spell Slot and must provide the replacement spell's components."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #181, Black Rod|MECIounStones}.",
@@ -8293,8 +8278,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Your Hit Point maximum increases by 2 for each of your levels while this dazzling white spindle orbits your head. Your current Hit Points increase or decrease by the same amount when the stone begins or ceases to orbit.",
-						"Your Hit Point maximum instead increases by 3 for each level."
+						"Your Hit Point maximum increases by 3 for each of your levels while this dazzling white spindle orbits your head. Your current Hit Points increase or decrease by the same amount when the stone begins or ceases to orbit."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #192, Dazzling White Spindle|MECIounStones}.",
@@ -8437,8 +8421,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Once per day, when you cast a spell of level 3 or lower, choose one augmentation: add 2 to each damage or healing die rolled by the spell, or increase one of the spell's areas and its duration by 25 percent. Afterward, roll {@dice 1d100}. The stone crumbles on a roll of 50 or lower; increase this chance by 10 for each previous use.",
-						"The stone can augment a spell of level 4-7 instead of level 1-3."
+						"Once per day, when you cast a spell of level 7 or lower, choose one augmentation: add 2 to each damage or healing die rolled by the spell, or increase one of the spell's areas and its duration by 25 percent. Afterward, roll {@dice 1d100}. The stone crumbles on a roll of 50 or lower; increase this chance by 10 for each previous use."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #194, Pale Lavender Prism|MECIounStones}.",
@@ -8763,6 +8746,9 @@
 						"{#itemEntry Moorchlyne Ioun Stone|MECIounStones}"
 					]
 				}
+			],
+			"immune": [
+				"acid"
 			]
 		},
 		{
@@ -9293,8 +9279,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Once per day, you can take a {@action Magic|XPHB} action and touch an injured creature. Roll {@dice 3d4 + 3}; you lose that many Hit Points, to a minimum of 10 Hit Points, and the target regains the same number. This loss can't be reduced or redirected.",
-						"Roll {@dice 6d4 + 6} instead."
+						"Once per day, you can take a {@action Magic|XPHB} action and touch an injured creature. Roll {@dice 6d4 + 6}; you lose that many Hit Points, to a minimum of 10 Hit Points, and the target regains the same number. This loss can't be reduced or redirected."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #220, Lavender Smooth Egg|MECIounStones}.",
@@ -11584,8 +11569,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"You gain a +1 bonus to saving throws against an Undead creature's touch-range attacks and abilities, including effects that impose Paralysis, disease, or reduction of Hit Point maximum.",
-						"The bonus is +2 instead."
+						"You gain a +2 bonus to saving throws against an Undead creature's touch-range attacks and abilities, including effects that impose Paralysis, disease, or reduction of Hit Point maximum."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #278, Pearl White Smooth Torus|MECIounStones}.",
@@ -11748,8 +11732,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"You gain a +1 bonus to attack rolls with every weapon and unarmed strike and a +1 bonus to damage rolls with melee weapons and unarmed strikes. The damage bonus doesn't apply to ranged attacks.",
-						"The bonuses are +2 instead."
+						"You gain a +2 bonus to attack rolls with every weapon and unarmed strike and a +2 bonus to damage rolls with melee weapons and unarmed strikes. The damage bonus doesn't apply to ranged attacks."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #282, Pale Aquamarine Lozenge|MECIounStones}.",
@@ -16393,8 +16376,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Once per day, you can take a {@variantrule Bonus Action|XPHB} to create a fumble field for 1 minute. When a creature misses you with a weapon attack after rolling a natural 1 or 2, it must succeed on a DC 18 Dexterity saving throw or drop one held item of your choice.",
-						"The property triggers on a natural 1-4. A creature using a natural weapon instead has the {@condition Prone|XPHB} condition on a failed save."
+						"Once per day, you can take a {@variantrule Bonus Action|XPHB} to create a fumble field for 1 minute. When a creature misses you with a weapon attack after rolling a natural 1-4, it must succeed on a DC 18 Dexterity saving throw or drop one held item of your choice. A creature using a natural weapon instead has the {@condition Prone|XPHB} condition on a failed save."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #402, Bright Rose Faceted Helix|MECIounStones}.",
@@ -18527,8 +18509,7 @@
 					"type": "entries",
 					"name": "Stone Effect",
 					"entries": [
-						"Once per day, you can take a {@variantrule Bonus Action|XPHB} to empower your unarmed strikes for 1 minute. You gain a +2 bonus to their attack rolls, and each hit deals {@damage 1d8 + 4} Bludgeoning damage instead of its normal damage.",
-						"Each hit deals {@damage 1d12 + 6} Bludgeoning damage."
+						"Once per day, you can take a {@variantrule Bonus Action|XPHB} to empower your unarmed strikes for 1 minute. You gain a +2 bonus to their attack rolls, and each hit deals {@damage 1d12 + 6} Bludgeoning damage instead of its normal damage."
 					]
 				},
 				"{@b Base Stone:} {@item Ioun Stone #456, Lavender Faceted Cone|MECIounStones}.",
