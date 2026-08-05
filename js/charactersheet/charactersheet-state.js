@@ -9204,9 +9204,18 @@ class CharacterSheetState {
 
 	getMaxHp () {
 		const base = this._data.hp.max > 0 ? this._data.hp.max : this._calculateMaxHp();
+		let itemBonus = 0;
+		for (const item of this.getItems()) {
+			if (!this._isItemEffectsActive(item)) continue;
+			for (const effect of item.effects || []) {
+				if (effect?.type === "maxHpBonus") itemBonus += Number(effect.value) || 0;
+				if (effect?.type === "maxHpPerLevel") itemBonus += (Number(effect.value) || 0) * (this.getTotalLevel() || 1);
+			}
+		}
+		const total = Math.max(1, base + itemBonus);
 		// Psionic body strain (Talent, 7+ body strain) halves the hit point maximum.
-		if (this._isStrainHalvingMaxHp()) return Math.max(1, Math.floor(base / 2));
-		return base;
+		if (this._isStrainHalvingMaxHp()) return Math.max(1, Math.floor(total / 2));
+		return total;
 	}
 
 	_calculateMaxHp () {
@@ -9476,8 +9485,9 @@ class CharacterSheetState {
 		// Always update max HP when recalculated (level up, class added/removed, etc.)
 		this._data.hp.max = calculated;
 		// If current HP exceeds max, cap it
-		if (this._data.hp.current > this._data.hp.max) {
-			this._data.hp.current = this._data.hp.max;
+		const effectiveMax = this.getMaxHp();
+		if (this._data.hp.current > effectiveMax) {
+			this._data.hp.current = effectiveMax;
 		}
 	}
 
@@ -9490,7 +9500,7 @@ class CharacterSheetState {
 	recalculateHp ({syncCurrent = false} = {}) {
 		this._recalculateMaxHp();
 		if (syncCurrent) {
-			this._data.hp.current = this._data.hp.max;
+			this._data.hp.current = this.getMaxHp();
 			this._updateBloodiedCondition();
 		}
 	}
@@ -28213,7 +28223,7 @@ class CharacterSheetState {
 	 * @param {*} entry
 	 * @returns {string}
 	 */
-	static _getItemEntryText (entry) {
+	static _getItemEntryText (entry, {skipTables = false} = {}) {
 		if (entry == null) return "";
 		if (typeof entry === "string") {
 			return entry
@@ -28222,13 +28232,14 @@ class CharacterSheetState {
 				.replace(/\s+/g, " ")
 				.trim();
 		}
-		if (Array.isArray(entry)) return entry.map(it => CharacterSheetState._getItemEntryText(it)).filter(Boolean).join(" ");
+		if (Array.isArray(entry)) return entry.map(it => CharacterSheetState._getItemEntryText(it, {skipTables})).filter(Boolean).join(" ");
 		if (typeof entry !== "object") return String(entry);
+		if (skipTables && entry.type === "table") return "";
 		return [
 			entry.name,
-			CharacterSheetState._getItemEntryText(entry.entries),
-			CharacterSheetState._getItemEntryText(entry.items),
-			CharacterSheetState._getItemEntryText(entry.rows),
+			CharacterSheetState._getItemEntryText(entry.entries, {skipTables}),
+			CharacterSheetState._getItemEntryText(entry.items, {skipTables}),
+			CharacterSheetState._getItemEntryText(entry.rows, {skipTables}),
 		].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 	}
 
@@ -28653,6 +28664,42 @@ class CharacterSheetState {
 		if (/advantage on saving throws against spells?(?: and (?:other )?magical effects)?/i.test(text)
 			&& !hasType("save:advantage:magic")) {
 			effects.push({type: "save:advantage:magic", value: 1, name: "Magic Resistance"});
+		}
+		const isWeapon = item?.weapon || ["M", "R"].includes(item?.type?.split("|")[0]);
+		if (isWeapon && item.critThreshold == null && !hasType("weaponCritThreshold")) {
+			const narrativeText = CharacterSheetState._getItemEntryText(item?.entries, {skipTables: true});
+			const critSentence = narrativeText.split(/(?<=[.!?])\s+/)
+				.find(sentence => /\b(?:18|19)\s+or\s+20\b/.test(sentence) && /\bcritical hit\b/i.test(sentence));
+			const isTargetFacing = /\battack rolls?\s+against\b|\bagainst\s+(?:it|the|that|a|an)\b/i.test(critSentence || "");
+			const critMatch = !isTargetFacing && critSentence
+				? critSentence.match(/\b(?:scores?|can score|are considered)\s+(?:a\s+)?critical hit\s+(?:on\s+)?(?:a\s+)?(?:d20\s+)?roll(?:s)?\s+of\s+(18|19)\s+or\s+20\b/i)
+					|| critSentence.match(/\battack rolls?\s+of\s+(18|19)\s+or\s+20\s+made with this weapon\s+are considered\s+(?:a\s+)?critical hit\b/i)
+				: null;
+			if (critMatch) {
+				effects.push({
+					type: "weaponCritThreshold",
+					value: parseInt(critMatch[1], 10),
+					name: "Improved Critical",
+				});
+			}
+		}
+		if (!hasType("maxHpPerLevel")) {
+			const hpPerLevelMatch = text.match(/\byour hit point maximum increases by\s+(\d+)\s+for each level you have attained\b/i);
+			if (hpPerLevelMatch) {
+				effects.push({
+					type: "maxHpPerLevel",
+					value: parseInt(hpPerLevelMatch[1], 10),
+					name: "Hit Point Maximum",
+				});
+			}
+		}
+		if (!hasType("carryCapacityMultiplier")
+			&& /\byour carrying capacity\s+(?:is\s+)?doubled\b/i.test(text)) {
+			effects.push({type: "carryCapacityMultiplier", value: 2, name: "Carrying Capacity"});
+		}
+		if (!hasType("jumpMultiplier")
+			&& /\byour (?:long and high )?jump distance\s+(?:is\s+)?doubled\b/i.test(text)) {
+			effects.push({type: "jumpMultiplier", value: 2, name: "Jump Distance"});
 		}
 		return effects;
 	}
@@ -29523,6 +29570,10 @@ class CharacterSheetState {
 			}
 			itemProps.grantedLanguages = CharacterSheetState.getItemGrantedLanguages(itemProps);
 			itemProps.effects = this._normalizeItemEffects(itemProps);
+			if (itemProps.critThreshold == null) {
+				const critThresholdEffect = itemProps.effects.find(effect => effect?.type === "weaponCritThreshold");
+				if (critThresholdEffect) itemProps.critThreshold = Number(critThresholdEffect.value) || null;
+			}
 			itemProps.damageRiders = this._normalizeItemDamageRiders(itemProps);
 			itemProps.critRiders = this._normalizeItemCritRiders(itemProps);
 
@@ -30201,6 +30252,7 @@ class CharacterSheetState {
 			}
 			// Refresh derived armor/shield-upgrade conditional modifiers (equip state changed).
 			this._recalculateItemUpgradeModifiers();
+			this._data.hp.current = Math.min(this._data.hp.current, this.getMaxHp());
 		}
 	}
 
@@ -30269,6 +30321,7 @@ class CharacterSheetState {
 				this._removeItemProficiencies(itemId);
 				this._unregisterItemEffects(itemId);
 			}
+			this._data.hp.current = Math.min(this._data.hp.current, this.getMaxHp());
 		}
 	}
 
@@ -32519,7 +32572,13 @@ class CharacterSheetState {
 		const sizeMultiplier = this.getSizeCarryMultiplier();
 
 		const flatBonus = this._data.customModifiers.carryCapacity || 0;
-		const carryMultiplier = this._data.customModifiers.carryCapacityMultiplier || 1;
+		let carryMultiplier = this._data.customModifiers.carryCapacityMultiplier || 1;
+		for (const item of this.getItems()) {
+			if (!this._isItemEffectsActive(item)) continue;
+			for (const effect of item.effects || []) {
+				if (effect?.type === "carryCapacityMultiplier") carryMultiplier *= Number(effect.value) || 1;
+			}
+		}
 		// External capacity (Bag of Holding etc.) is extradimensional storage. It is
 		// added to the COMBINED carrying-capacity total for display, but it is NOT
 		// scaled by carryMultiplier / sizeMultiplier (a magic container holds a fixed
@@ -33347,6 +33406,12 @@ class CharacterSheetState {
 		effects.filter(e => e.type === "jumpMultiplier").forEach(e => {
 			multiplier *= e.value;
 		});
+		for (const item of this.getItems()) {
+			if (!this._isItemEffectsActive(item)) continue;
+			for (const effect of item.effects || []) {
+				if (effect?.type === "jumpMultiplier") multiplier *= Number(effect.value) || 1;
+			}
+		}
 		return multiplier;
 	}
 
@@ -44690,6 +44755,8 @@ class CharacterSheetState {
 		}
 		// Conditional AC bonuses are evaluated live in getAc(), where armor/shield state is known.
 		if (effectType === "acBonusConditional") return true;
+		// These item-scoped effects are evaluated live by their downstream consumers.
+		if (["weaponCritThreshold", "carryCapacityMultiplier", "jumpMultiplier", "maxHpBonus", "maxHpPerLevel"].includes(effectType)) return true;
 
 		// Standard numeric modifier (full passthrough of the shared effect schema)
 		this.addNamedModifier({
@@ -53535,7 +53602,7 @@ class CharacterSheetState {
 			return;
 		}
 		this._recalculateMaxHp();
-		const newMax = this._data.hp.max || 0;
+		const newMax = this.getMaxHp();
 		const delta = newMax - oldMax;
 		if (delta > 0) {
 			this._data.hp.current = Math.min(this._data.hp.current + delta, newMax);

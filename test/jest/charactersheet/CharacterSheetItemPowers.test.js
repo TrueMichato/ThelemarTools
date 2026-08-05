@@ -814,6 +814,125 @@ describe("Catalog magic-item powers and passive normalization", () => {
 	});
 });
 
+describe("Safe item-prose effects", () => {
+	it("compiles a passive weapon critical threshold into the attack consumer", () => {
+		const state = new CharacterSheetState();
+		const item = addActiveCatalogItem(state, {
+			name: "Champion's Longsword",
+			source: "HB",
+			type: "M",
+			dmg1: "1d8",
+			dmgType: "S",
+			entries: ["Attack rolls made using this magic weapon can score a critical hit on a roll of 19 or 20 on the d20."],
+		});
+
+		expect(item.critThreshold).toBe(19);
+		expect(item.effects).toContainEqual(expect.objectContaining({type: "weaponCritThreshold", value: 19}));
+	});
+
+	it("prefers a structured critical threshold over prose", () => {
+		const state = new CharacterSheetState();
+		const item = addActiveCatalogItem(state, {
+			name: "Exacting Blade",
+			source: "HB",
+			type: "M",
+			weapon: true,
+			critThreshold: 18,
+			entries: ["This weapon scores a critical hit on a roll of 19 or 20."],
+		});
+
+		expect(item.critThreshold).toBe(18);
+		expect(item.effects.some(effect => effect.type === "weaponCritThreshold")).toBe(false);
+	});
+
+	it("applies attunement-gated maximum-HP bonuses per character level", () => {
+		const state = new CharacterSheetState();
+		const baselineHp = state.getMaxHp();
+		const item = addActiveCatalogItem(state, {
+			name: "Berserker Axe",
+			source: "HB",
+			reqAttune: true,
+			entries: ["While you are attuned to this weapon, your hit point maximum increases by 1 for each level you have attained."],
+		});
+
+		expect(state.getMaxHp()).toBe(baselineHp + 1);
+		state.setItemAttuned(item.id, false);
+		expect(state.getMaxHp()).toBe(baselineHp);
+	});
+
+	it("consumes explicit flat maximum-HP item effects and caps current HP on removal", () => {
+		const state = new CharacterSheetState();
+		const baselineHp = state.getMaxHp();
+		const item = addActiveCatalogItem(state, {
+			name: "Healthy Charm",
+			source: "HB",
+			effects: [{type: "maxHpBonus", value: 10, name: "Health"}],
+		});
+		state.setCurrentHp(baselineHp + 10);
+
+		expect(state.getMaxHp()).toBe(baselineHp + 10);
+		state.setItemEquipped(item.id, false);
+		expect(state.getMaxHp()).toBe(baselineHp);
+		expect(state.getCurrentHp()).toBe(baselineHp);
+	});
+
+	it("applies only passive self-scoped carrying and jump multipliers", () => {
+		const state = new CharacterSheetState();
+		const baselineCarry = state.getCarryingCapacityBreakdown().total;
+		const carryItem = addActiveCatalogItem(state, {
+			name: "Minotaur Ring",
+			source: "HB",
+			entries: ["While wearing this ring, your carrying capacity is doubled."],
+		});
+		const jumpItem = addActiveCatalogItem(state, {
+			name: "Leaping Boots",
+			source: "HB",
+			entries: ["While wearing these boots, your jump distance is doubled."],
+		});
+
+		expect(state.getCarryingCapacityBreakdown().total).toBe(baselineCarry * 2);
+		expect(state.getJumpMultiplierFromStates()).toBe(2);
+		state.setItemEquipped(carryItem.id, false);
+		state.setItemEquipped(jumpItem.id, false);
+		expect(state.getCarryingCapacityBreakdown().total).toBe(baselineCarry);
+		expect(state.getJumpMultiplierFromStates()).toBe(1);
+	});
+
+	it("refuses target-facing and activated clauses", () => {
+		const state = new CharacterSheetState();
+		const item = addActiveCatalogItem(state, {
+			name: "Ambiguous Charm",
+			source: "HB",
+			type: "M",
+			weapon: true,
+			entries: [
+				"Attack rolls against the marked target score a critical hit on a roll of 19 or 20.",
+				"As an action, double another creature's carrying capacity and jump distance.",
+			],
+		});
+
+		expect(item.critThreshold).toBeUndefined();
+		expect(item.effects.filter(effect => ["weaponCritThreshold", "carryCapacityMultiplier", "jumpMultiplier"].includes(effect.type))).toEqual([]);
+	});
+
+	it("does not treat a random table outcome as an always-on critical threshold", () => {
+		const state = new CharacterSheetState();
+		const item = addActiveCatalogItem(state, {
+			name: "Runed Blade",
+			source: "HB",
+			type: "M",
+			entries: [{
+				type: "table",
+				caption: "Random Properties",
+				colLabels: ["d6", "Property"],
+				rows: [["1", "This weapon scores a critical hit on a roll of 19 or 20."]],
+			}],
+		});
+
+		expect(item.critThreshold).toBeUndefined();
+	});
+});
+
 describe("Item-power hover previews", () => {
 	const originalHover = globalThis.Renderer.hover;
 	const originalEncodeForHash = globalThis.UrlUtil.encodeForHash;

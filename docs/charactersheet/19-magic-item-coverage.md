@@ -8,8 +8,8 @@ The full snapshot includes repository items, base items, concrete magic-variant 
 
 | Legacy headline | Concrete entities | Share |
 | --- | ---: | ---: |
-| Fully functional | 5,423 | 45.3% |
-| Surfaced only | 6,536 | 54.7% |
+| Fully functional | 5,535 | 46.3% |
+| Surfaced only | 6,424 | 53.7% |
 | Unsupported | 0 | 0.0% |
 | **Total** | **11,959** | **100%** |
 
@@ -18,12 +18,12 @@ The stricter operational audit remains below the previous optimistic 6,100-item 
 | Operational status | Items | Share |
 | --- | ---: | ---: |
 | `structuredOperational` | 4,932 | 41.2% |
-| `proseOperational` | 491 | 4.1% |
-| `partiallyOperational` | 1,815 | 15.2% |
+| `proseOperational` | 603 | 5.0% |
+| `partiallyOperational` | 1,824 | 15.3% |
 | `choiceRequired` | 1,218 | 10.2% |
-| `resourceOnly` | 226 | 1.9% |
-| `referenceOnly` | 779 | 6.5% |
-| `bespoke` | 2,498 | 20.9% |
+| `resourceOnly` | 225 | 1.9% |
+| `referenceOnly` | 771 | 6.4% |
+| `bespoke` | 2,386 | 20.0% |
 | `invalidShape` | 0 | 0.0% |
 
 ## Classification contract
@@ -44,6 +44,8 @@ The legacy headline remains for historical comparison. Only `structuredOperation
 Structured item resources now use one runtime contract. Numeric maxima remain fixed, dice maxima such as `{@dice 1d8 + 1}` are rolled once when an item instance is created and persisted, and proficiency-bonus maxima resize with the character without refilling spent charges. Invalid formulas remain explicitly unavailable instead of being truncated by `parseInt`. `attachedSpells.resource` spends its named character resource atomically, while a missing `resourceName` is surfaced as unresolved. `recharge: "special"` remains manual and is never restored by a rest.
 
 The remaining structured adapters add 255 fully functional entities (+2.1 percentage points). Structured `light` becomes a persisted on/off item power feeding the sheet's emitted-light display; `focus` participates in material-component validation for the listed classes; fixed language grants are derived only from wearer-directed rules text, while ambiguous grants require a persisted language choice; `ability.choose` uses persisted per-item selections; and numeric weapon `reach` feeds attack range. Choice-configured copies remain distinct inventory stacks.
+
+The first conservative prose families add another 112 fully functional entities (+0.9 percentage points). Passive weapon critical thresholds, per-level maximum-HP bonuses, doubled carrying capacity, and doubled jump distance compile into typed effects consumed by combat, HP, encumbrance, and movement calculations. Structured fields take precedence, random-table outcomes are excluded, and target-facing or activated wording remains reference-only.
 
 ## Corpus methodology
 
