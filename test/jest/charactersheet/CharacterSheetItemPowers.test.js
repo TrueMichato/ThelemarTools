@@ -388,4 +388,38 @@ describe("Catalog magic-item powers and passive normalization", () => {
 			expect.objectContaining({trigger: "nat20", damageAmount: 7, damageType: "slashing"}),
 		]);
 	});
+
+	it("keeps random-table and command items honest while tracking resolvable resources", () => {
+		const state = new CharacterSheetState();
+		const wonder = addActiveCatalogItem(state, items.find(it => it.name === "Wand of Wonder" && it.source === "DMG"));
+		const horn = addActiveCatalogItem(state, items.find(it => it.name === "Horn of Blasting" && it.source === "DMG"));
+		const broom = addActiveCatalogItem(state, items.find(it => it.name === "Broom of Flying" && it.source === "DMG"));
+		const wonderPowers = state.getItemPowers().filter(it => it.itemId === wonder.id);
+		const hornPower = state.getItemPowers().find(it => it.itemId === horn.id);
+		const broomPower = state.getItemPowers().find(it => it.itemId === broom.id);
+
+		expect(wonderPowers).toEqual([
+			expect.objectContaining({name: "Wand of Wonder Random Effect", chargesCost: 1, isReferenceOnly: false}),
+		]);
+		expect(state.invokeItemPower(wonder.id, wonderPowers[0].id)).toEqual(expect.objectContaining({ok: true, chargesCurrent: 6}));
+		expect(hornPower).toEqual(expect.objectContaining({actionType: "action", isReferenceOnly: true}));
+		expect(broomPower).toEqual(expect.objectContaining({isReferenceOnly: true}));
+	});
+
+	it("normalizes major charged and stored-use catalog families", () => {
+		const state = new CharacterSheetState();
+		const staff = addActiveCatalogItem(state, items.find(it => it.name === "Staff of the Magi" && it.source === "DMG"));
+		const necklace = addActiveCatalogItem(state, items.find(it => it.name === "Necklace of Fireballs" && it.source === "DMG"));
+		const rod = addActiveCatalogItem(state, items.find(it => it.name === "+1 Rod of the Pact Keeper" && it.source === "DMG"));
+
+		const staffPowers = state.getItemPowers().filter(it => it.itemId === staff.id);
+		expect(staffPowers.some(it => it.kind === "spell" && it.chargesCost === 7)).toBe(true);
+		expect(staffPowers.some(it => it.usageType === "will")).toBe(true);
+		expect(state.getItemPowers().find(it => it.itemId === necklace.id && it.name === "Fireball")).toEqual(
+			expect.objectContaining({usageType: "limited", usesMax: 9}),
+		);
+		expect(state.getItemPowers().find(it => it.itemId === rod.id)).toEqual(
+			expect.objectContaining({usageType: "daily", usesMax: 1}),
+		);
+	});
 });

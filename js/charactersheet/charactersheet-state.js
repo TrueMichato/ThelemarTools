@@ -28261,7 +28261,21 @@ class CharacterSheetState {
 		};
 
 		const attached = item.attachedSpells;
-		if (Array.isArray(attached)) {
+		const isRandomTablePower = !!attached
+			&& /\broll\s+(?:a\s+)?(?:\{@dice\s+)?d100\b/i.test(itemText)
+			&& /\bconsult\s+(?:the\s+)?(?:following\s+)?table\b/i.test(itemText);
+		if (isRandomTablePower) {
+			const chargeCosts = Object.keys(attached.charges || {}).map(Number).filter(Number.isFinite);
+			addPower({
+				id: CharacterSheetState._getItemPowerId(["random", item.name]),
+				name: `${item.name} Random Effect`,
+				kind: "ability",
+				actionType: "action",
+				chargesCost: Math.min(...chargeCosts, 1),
+				description: itemText,
+				isReferenceOnly: false,
+			});
+		} else if (Array.isArray(attached)) {
 			for (const raw of attached) addSpell(raw, "other");
 		} else if (attached && typeof attached === "object") {
 			for (const raw of attached.will || []) addSpell(raw, "will");
@@ -28337,6 +28351,13 @@ class CharacterSheetState {
 			const text = CharacterSheetState._getItemEntryText(item.entries);
 			const detected = this._detectItemActivation({entries: [text]});
 			const actionType = detected.find(it => ["action", "bonus", "reaction"].includes(it.type))?.type || null;
+			const explicitActionType = /\bbonus action\b/i.test(text)
+				? "bonus"
+				: /\breaction\b/i.test(text)
+					? "reaction"
+					: /\buse (?:a|an|your) action\b/i.test(text)
+						? "action"
+						: null;
 			const recurring = getRecurringUsage(text);
 			const isReversible = /\b(?:again|a second time)[^.]*(?:end|ends)\s+the effect\b/i.test(text)
 				|| /\b(?:lasts?|remains?)\s+until\s+[^.]*\bagain\b/i.test(text);
@@ -28367,6 +28388,15 @@ class CharacterSheetState {
 					usesKey: `${recurring.usageType}:derived:${CharacterSheetState._getItemPowerId([item.name, item.source])}`,
 					description: text,
 					isReferenceOnly: false,
+				});
+			} else if (actionType || explicitActionType) {
+				addPower({
+					id: CharacterSheetState._getItemPowerId(["reference", item.name, explicitActionType || "other"]),
+					name: `${item.name} Power`,
+					kind: "ability",
+					actionType: explicitActionType || "other",
+					description: text,
+					isReferenceOnly: true,
 				});
 			}
 		}
