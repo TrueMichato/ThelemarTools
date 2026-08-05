@@ -41,6 +41,8 @@ The legacy headline remains for historical comparison. Only `structuredOperation
 
 `spellScrollLevel` items now have a deterministic configuration path: adding one from the inventory catalog requires selecting an exact-level spell, persists that selection on the item, and normalizes it into a charged Enspelled power or a finite scroll power. Unconfigured corpus templates remain `choiceRequired`, so this capability does not inflate the headline before a concrete spell is selected.
 
+Structured item resources now use one runtime contract. Numeric maxima remain fixed, dice maxima such as `{@dice 1d8 + 1}` are rolled once when an item instance is created and persisted, and proficiency-bonus maxima resize with the character without refilling spent charges. Invalid formulas remain explicitly unavailable instead of being truncated by `parseInt`. `attachedSpells.resource` spends its named character resource atomically, while a missing `resourceName` is surfaced as unresolved. `recharge: "special"` remains manual and is never restored by a rest.
+
 ## Corpus methodology
 
 Repository input is `data/items.json`, `data/items-base.json`, and `data/magicvariants.json`. With a backup argument, the audit also reads every document in `async.HOMEBREW_2_STORAGE`, including `item`, `baseitem`, `magicvariant`, and `itemGroup`.

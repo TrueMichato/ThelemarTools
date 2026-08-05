@@ -237,6 +237,137 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		expect(state.getItemPower(added.id, levitate.id)).toEqual(expect.objectContaining({isAvailable: false, usesCurrent: 0}));
 	});
 
+	it("rolls schema-valid formula charge maxima once and persists the numeric result", () => {
+		const randomise = jest.fn().mockReturnValue(5);
+		globalThis.RollerUtil.randomise = randomise;
+		const state = new CharacterSheetState();
+		const added = addActiveCatalogItem(state, {
+			name: "Formula-Charged Weapon",
+			source: "TST",
+			charges: "{@dice 1d8 + 1}",
+			recharge: "dawn",
+			attachedSpells: {charges: {"1": ["magic missile"]}},
+		});
+
+		expect(added).toEqual(expect.objectContaining({
+			charges: 6,
+			chargesCurrent: 6,
+			chargesFormula: "{@dice 1d8 + 1}",
+			chargesMaxMode: "rolledFormula",
+		}));
+		expect(randomise).toHaveBeenCalledTimes(1);
+
+		const restoredState = new CharacterSheetState();
+		restoredState.loadFromJson(state.toJson());
+		const restored = restoredState.getItems().find(it => it.id === added.id);
+		expect(restored).toEqual(expect.objectContaining({charges: 6, chargesCurrent: 6}));
+		expect(randomise).toHaveBeenCalledTimes(1);
+		delete globalThis.RollerUtil.randomise;
+	});
+
+	it("uses the same formula-charge resolver for inventory catalog additions", () => {
+		const randomise = jest.fn().mockReturnValue(3);
+		globalThis.RollerUtil.randomise = randomise;
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const added = addCatalogItemViaInventory(state, inventory, {
+			name: "Catalog Formula Wand",
+			source: "TST",
+			charges: "{@dice 1d4 - 1}",
+			attachedSpells: {charges: {"1": ["magic missile"]}},
+		});
+
+		expect(added).toEqual(expect.objectContaining({
+			charges: 2,
+			chargesCurrent: 2,
+			chargesFormula: "{@dice 1d4 - 1}",
+			chargesMaxMode: "rolledFormula",
+		}));
+		expect(randomise).toHaveBeenCalledTimes(1);
+		delete globalThis.RollerUtil.randomise;
+	});
+
+	it("derives proficiency-based charge maxima and resizes them safely", () => {
+		const state = new CharacterSheetState();
+		const added = addActiveCatalogItem(state, {
+			name: "Proficiency-Charged Focus",
+			source: "TST",
+			charges: "equal to your proficiency bonus",
+			attachedSpells: {charges: {"1": ["magic missile"]}},
+		});
+
+		expect(added).toEqual(expect.objectContaining({
+			charges: 2,
+			chargesCurrent: 2,
+			chargesMaxMode: "proficiencyBonus",
+		}));
+
+		state._data.classes = [{name: "Wizard", level: 9}];
+		state.syncDerivedResourceMaxes();
+		expect(state.getItems().find(it => it.id === added.id)).toEqual(expect.objectContaining({charges: 4, chargesCurrent: 2}));
+	});
+
+	it("rejects invalid charge formulas instead of creating a truncated counter", () => {
+		const state = new CharacterSheetState();
+		const added = addActiveCatalogItem(state, {
+			name: "Invalid-Charge Item",
+			source: "TST",
+			charges: "when the moon is full",
+			attachedSpells: {charges: {"1": ["magic missile"]}},
+		});
+
+		expect(added).toEqual(expect.objectContaining({
+			charges: null,
+			chargesCurrent: null,
+			chargesMaxMode: "invalid",
+			chargesInvalidFormula: "when the moon is full",
+		}));
+		const power = state.getItemPowers().find(it => it.itemId === added.id);
+		expect(power).toEqual(expect.objectContaining({isAvailable: false}));
+	});
+
+	it("binds resource-cast attached spells to a named resource atomically", () => {
+		const state = new CharacterSheetState();
+		state.addResource({name: "Arcane Battery", max: 3, current: 3, recharge: "long"});
+		const added = addActiveCatalogItem(state, {
+			name: "Battery Wand",
+			source: "TST",
+			attachedSpells: {
+				resourceName: "Arcane Battery",
+				resource: {"2": ["magic missile"]},
+			},
+		});
+		const power = state.getItemPowers({activeOnly: true}).find(it => it.itemId === added.id);
+
+		expect(power).toEqual(expect.objectContaining({
+			usageType: "resource",
+			resourceName: "Arcane Battery",
+			resourceCost: 2,
+			resourceCurrent: 3,
+			isAvailable: true,
+		}));
+		expect(state.invokeItemPower(added.id, power.id)).toEqual(expect.objectContaining({ok: true, resourceCurrent: 1}));
+		expect(state.getItemPower(added.id, power.id)).toEqual(expect.objectContaining({isAvailable: false, resourceCurrent: 1}));
+		expect(state.invokeItemPower(added.id, power.id)).toEqual(expect.objectContaining({ok: false}));
+		expect(state.getResource("Arcane Battery").current).toBe(1);
+	});
+
+	it("surfaces resource-cast spells as unavailable when resourceName is absent", () => {
+		const state = new CharacterSheetState();
+		const added = addActiveCatalogItem(state, {
+			name: "Unbound Wand",
+			source: "TST",
+			attachedSpells: {resource: {"1": ["magic missile"]}},
+		});
+		const power = state.getItemPowers({activeOnly: true}).find(it => it.itemId === added.id);
+
+		expect(power).toEqual(expect.objectContaining({
+			usageType: "resource",
+			isAvailable: false,
+			unavailableReason: "This power has no resource name configured.",
+		}));
+	});
+
 	it("normalizes a persisted spell-level item choice into a charged spell power", () => {
 		const state = new CharacterSheetState();
 		const added = addActiveCatalogItem(state, {

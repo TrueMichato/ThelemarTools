@@ -1,4 +1,5 @@
 import "./setup.js";
+import {jest} from "@jest/globals";
 
 import {classifyItem, summarize} from "../../../node/audit-character-sheet-items.js";
 
@@ -46,6 +47,49 @@ describe("Character sheet magic-item operational coverage audit", () => {
 		})).toEqual(expect.objectContaining({
 			status: "surfacedOnly",
 			operationalStatus: "resourceOnly",
+		}));
+	});
+
+	it("recognizes schema-valid formula maxima without rolling during audit", () => {
+		const randomise = jest.fn();
+		globalThis.RollerUtil.randomise = randomise;
+		expect(classifyItem({
+			name: "Formula Battery",
+			source: "TST",
+			charges: "{@dice 1d8 + 1}",
+			entries: ["This item has a variable number of charges."],
+		})).toEqual(expect.objectContaining({
+			status: "surfacedOnly",
+			operationalStatus: "resourceOnly",
+			reasons: ["charges have no operational power"],
+		}));
+		expect(randomise).not.toHaveBeenCalled();
+		delete globalThis.RollerUtil.randomise;
+	});
+
+	it("requires a name before treating attached-spell resources as operational", () => {
+		expect(classifyItem({
+			name: "Unbound Focus",
+			source: "TST",
+			attachedSpells: {resource: {"1": ["magic missile"]}},
+		})).toEqual(expect.objectContaining({
+			status: "surfacedOnly",
+			operationalStatus: "choiceRequired",
+			reasons: ["choice required: attachedSpells.resourceName"],
+		}));
+	});
+
+	it("accepts named attached-spell resources as a supported schema shape", () => {
+		expect(classifyItem({
+			name: "Bound Focus",
+			source: "TST",
+			attachedSpells: {
+				resourceName: "Arcane Battery",
+				resource: {"1": ["magic missile"]},
+			},
+		})).toEqual(expect.objectContaining({
+			status: "fullyFunctional",
+			operationalStatus: "structuredOperational",
 		}));
 	});
 

@@ -28322,7 +28322,7 @@ class CharacterSheetState {
 		};
 		const itemText = CharacterSheetState._getItemEntryText(item.entries);
 		const itemEntryJson = JSON.stringify(item.entries || []);
-		const addSpell = (raw, usageType, {chargesCost = 0, usesMax = null, isEach = false, usesKey = null, requiresEquipped = true} = {}) => {
+		const addSpell = (raw, usageType, {chargesCost = 0, resourceCost = 0, usesMax = null, isEach = false, usesKey = null, requiresEquipped = true, resourceName = null} = {}) => {
 			const spell = parseSpellUid(raw);
 			if (!spell.name) return;
 			const isVariableChargeCast = usageType === "charges"
@@ -28338,7 +28338,7 @@ class CharacterSheetState {
 						: "action"
 				: "action";
 			addPower({
-				id: CharacterSheetState._getItemPowerId(["spell", spell.name, spell.source, chargesCost || usageType]),
+				id: CharacterSheetState._getItemPowerId(["spell", spell.name, spell.source, chargesCost || resourceCost || usageType]),
 				name: spell.name,
 				kind: "spell",
 				actionType,
@@ -28348,6 +28348,8 @@ class CharacterSheetState {
 				usesMax,
 				isEach,
 				usesKey: usesMax ? (usesKey || `${usageType}:${usesMax}:${spell.name.toLowerCase()}|${spell.source.toLowerCase()}`) : null,
+				resourceName,
+				resourceCost,
 				requiresEquipped,
 				spellName: spell.name,
 				spellSource: spell.source,
@@ -28403,6 +28405,14 @@ class CharacterSheetState {
 			for (const raw of attached.ritual || []) addSpell(raw, "ritual");
 			for (const [cost, list] of Object.entries(attached.charges || {})) {
 				for (const raw of list || []) addSpell(raw, "charges", {chargesCost: Math.max(1, parseInt(cost, 10) || 1)});
+			}
+			for (const [cost, list] of Object.entries(attached.resource || {})) {
+				for (const raw of list || []) {
+					addSpell(raw, "resource", {
+						resourceName: attached.resourceName || null,
+						resourceCost: Math.max(1, parseInt(cost, 10) || 1),
+					});
+				}
 			}
 			for (const usageType of ["daily", "rest"]) {
 				for (const [usesRaw, list] of Object.entries(attached[usageType] || {})) {
@@ -28650,6 +28660,7 @@ class CharacterSheetState {
 				const usesCurrent = power.usesMax
 					? item.itemPowerUses?.[power.usesKey] ?? power.usesMax
 					: null;
+				const resource = power.resourceName ? this.getResource(power.resourceName) : null;
 				const unavailableReason = power.isReferenceOnly
 					? "Rules reference only; resolve this effect manually."
 					: requiresEquipped && !item.equipped
@@ -28660,7 +28671,13 @@ class CharacterSheetState {
 								? `Requires ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}; ${chargesCurrent} remaining.`
 								: power.usesMax && usesCurrent <= 0
 									? `${power.name} has no uses remaining.`
-									: null;
+									: power.usageType === "resource" && !power.resourceName
+										? "This power has no resource name configured."
+										: power.resourceName && !resource
+											? `Resource "${power.resourceName}" is unavailable.`
+											: resource && resource.current < power.resourceCost
+												? `Requires ${power.resourceCost} ${power.resourceName}; ${resource.current} remaining.`
+												: null;
 				out.push({
 					...power,
 					itemId: item.id,
@@ -28669,6 +28686,8 @@ class CharacterSheetState {
 					chargesCurrent,
 					chargesMax: item.charges || 0,
 					usesCurrent,
+					resourceCurrent: resource?.current ?? null,
+					resourceMax: resource?.max ?? null,
 					isActive: !!item.itemPowerStates?.[power.id]?.active,
 					recharge: item.recharge || null,
 					isAvailable: !unavailableReason,
@@ -28709,6 +28728,9 @@ class CharacterSheetState {
 			if (current < selectedChargesCost) return {ok: false, reason: `Not enough charges for ${power.name}.`};
 			entry.item.chargesCurrent = current - selectedChargesCost;
 		}
+		if (power.resourceName && !this.useResourceCharge(power.resourceName, power.resourceCost)) {
+			return {ok: false, reason: `Not enough ${power.resourceName} for ${power.name}.`};
+		}
 		if (power.usesMax) {
 			if (!entry.item.itemPowerUses) entry.item.itemPowerUses = {};
 			const current = entry.item.itemPowerUses[power.usesKey] ?? power.usesMax;
@@ -28721,6 +28743,7 @@ class CharacterSheetState {
 			chargesCurrent: entry.item.chargesCurrent ?? entry.item.charges ?? 0,
 			chargesMax: entry.item.charges || 0,
 			usesCurrent: power.usesMax ? entry.item.itemPowerUses?.[power.usesKey] ?? power.usesMax : null,
+			resourceCurrent: power.resourceName ? this.getResource(power.resourceName)?.current ?? null : null,
 			chargesCost: selectedChargesCost,
 			isActive,
 			destroyed: !!power.isDestructive,
@@ -29417,6 +29440,19 @@ class CharacterSheetState {
 				if (chargesMatch) {
 					itemProps.charges = parseInt(chargesMatch[1], 10);
 					itemProps.chargesCurrent = itemProps.charges;
+				}
+			}
+			if (itemProps.charges != null && typeof itemProps.charges !== "number") {
+				const chargeMaximum = this.resolveItemChargeMaximum(itemProps.charges);
+				itemProps.chargesFormula = chargeMaximum.formula;
+				itemProps.chargesMaxMode = chargeMaximum.mode;
+				if (chargeMaximum.parsed) {
+					itemProps.charges = chargeMaximum.max;
+					itemProps.chargesCurrent = chargeMaximum.max;
+				} else {
+					itemProps.charges = null;
+					itemProps.chargesCurrent = null;
+					itemProps.chargesInvalidFormula = chargeMaximum.formula;
 				}
 			}
 			itemProps.effects = this._normalizeItemEffects(itemProps);
@@ -30338,10 +30374,16 @@ class CharacterSheetState {
 			if (!Number.isNaN(n)) return {amount: Math.max(0, n), isDice: false, formula, rolls: [], parsed: true};
 			return {amount: 0, isDice: false, formula, rolls: [], parsed: false};
 		}
-		// Dice string → strip {@dice} wrapper, parse NdX(+/-M), roll ONCE.
-		const diceStr = trimmed.replace(/\{@dice\s*([^}]+)\}/i, "$1").trim();
-		const match = diceStr.match(/(\d*)d(\d+)\s*(?:([+-])\s*(\d+))?/i);
-		if (!match) return {amount: 0, isDice: false, formula, rolls: [], parsed: false};
+		const rolled = CharacterSheetState._rollItemDiceFormula(trimmed);
+		if (!rolled.parsed) return {amount: 0, isDice: false, formula, rolls: [], parsed: false};
+		return {amount: rolled.total, isDice: true, formula, rolls: rolled.rolls, parsed: true};
+	}
+
+	static _rollItemDiceFormula (raw, {roll = true} = {}) {
+		const formula = String(raw || "").trim();
+		const diceStr = formula.replace(/\{@dice\s*([^}]+)\}/i, "$1").trim();
+		const match = diceStr.match(/^(\d*)d(\d+)\s*(?:([+-])\s*(\d+))?$/i);
+		if (!match) return {total: 0, rolls: [], parsed: false};
 		const numDice = parseInt(match[1] || "1", 10);
 		const dieSize = parseInt(match[2], 10);
 		const sign = match[3] === "-" ? -1 : 1;
@@ -30349,13 +30391,35 @@ class CharacterSheetState {
 		const rolls = [];
 		let total = modifier;
 		for (let i = 0; i < numDice; i++) {
+			if (!roll) continue;
 			const r = (typeof RollerUtil !== "undefined" && RollerUtil.randomise)
 				? RollerUtil.randomise(dieSize)
 				: Math.floor(Math.random() * dieSize) + 1;
 			rolls.push(r);
 			total += r;
 		}
-		return {amount: Math.max(0, total), isDice: true, formula, rolls, parsed: true};
+		return {total: roll ? Math.max(0, total) : null, rolls, parsed: true};
+	}
+
+	resolveItemChargeMaximum (raw, {roll = true} = {}) {
+		const formula = String(raw ?? "").trim();
+		if (typeof raw === "number" && Number.isFinite(raw)) {
+			return {max: Math.max(0, raw), formula: String(raw), mode: "fixed", rolls: [], parsed: true};
+		}
+		if (/^\d+$/.test(formula)) {
+			return {max: parseInt(formula, 10), formula, mode: "fixed", rolls: [], parsed: true};
+		}
+		if (/^(?:equal to )?your proficiency bonus$/i.test(formula)) {
+			return {max: this.getProficiencyBonus(), formula, mode: "proficiencyBonus", rolls: [], parsed: true};
+		}
+		const rolled = CharacterSheetState._rollItemDiceFormula(formula, {roll});
+		return {
+			max: rolled.total,
+			formula,
+			mode: rolled.parsed ? "rolledFormula" : "invalid",
+			rolls: rolled.rolls,
+			parsed: rolled.parsed,
+		};
 	}
 
 	/**
@@ -44428,8 +44492,13 @@ class CharacterSheetState {
 		if (Array.isArray(this._data.inventory)) {
 			for (const invItem of this._data.inventory) {
 				const item = invItem?.item;
-				if (!item || item.chargesMaxMode !== "abilityMod" || !item.chargesMaxAbility) continue;
-				const newMax = this._computeAbilityModResourceMax(item.chargesMaxAbility);
+				if (!item) continue;
+				const newMax = item.chargesMaxMode === "abilityMod" && item.chargesMaxAbility
+					? this._computeAbilityModResourceMax(item.chargesMaxAbility)
+					: item.chargesMaxMode === "proficiencyBonus"
+						? this.getProficiencyBonus()
+						: null;
+				if (newMax == null) continue;
 				item.charges = newMax;
 				if (typeof item.chargesCurrent !== "number") item.chargesCurrent = newMax;
 				else item.chargesCurrent = Math.min(item.chargesCurrent, newMax);

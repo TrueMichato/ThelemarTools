@@ -157,10 +157,18 @@ class CharacterSheetInventory {
 				rowChanged = true;
 			}
 			if ((item.charges == null || item.charges === 0) && match.charges != null) {
-				const maxCharges = typeof match.charges === "string" ? parseInt(match.charges, 10) : match.charges;
-				if (maxCharges) {
-					item.charges = maxCharges;
-					if (item.chargesCurrent == null) item.chargesCurrent = maxCharges;
+				const chargeMaximum = this._state.resolveItemChargeMaximum(match.charges);
+				if (chargeMaximum.parsed) {
+					item.charges = chargeMaximum.max;
+					item.chargesFormula = chargeMaximum.formula;
+					item.chargesMaxMode = chargeMaximum.mode;
+					delete item.chargesInvalidFormula;
+					if (item.chargesCurrent == null) item.chargesCurrent = chargeMaximum.max;
+					rowChanged = true;
+				} else if (item.chargesInvalidFormula !== chargeMaximum.formula) {
+					item.chargesFormula = chargeMaximum.formula;
+					item.chargesMaxMode = chargeMaximum.mode;
+					item.chargesInvalidFormula = chargeMaximum.formula;
 					rowChanged = true;
 				}
 			}
@@ -1524,9 +1532,6 @@ class CharacterSheetInventory {
 		// Check if item is a shield (type "S" or "S|source")
 		const isShield = itemTypeBase === "S";
 
-		// Parse charges - can be string or integer
-		const maxCharges = item.charges ? (typeof item.charges === "string" ? parseInt(item.charges) : item.charges) : null;
-
 		const newItem = {
 			name: item.name,
 			source: item.source,
@@ -1606,8 +1611,8 @@ class CharacterSheetInventory {
 			// Spellcasting focus for classes
 			focus: item.focus || null,
 			// Charges
-			charges: maxCharges,
-			chargesCurrent: maxCharges, // Start fully charged
+			charges: item.charges ?? null,
+			chargesCurrent: typeof item.charges === "number" ? item.charges : null,
 			recharge: item.recharge || null, // "dawn", "restShort", "restLong", etc.
 			rechargeAmount: item.rechargeAmount || null, // e.g., "{@dice 1d6 + 1}" or a number
 			chargeName: item.chargeName || null, // e.g. "Stone-Caught Magic"

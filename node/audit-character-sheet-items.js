@@ -40,7 +40,7 @@ const STRUCTURED_FIELDS = new Set([
 	"spellImmunitySlots",
 	"vulnerable",
 ]);
-const ATTACHED_SPELL_KEYS = new Set(["ability", "charges", "daily", "limited", "other", "rest", "ritual", "will"]);
+const ATTACHED_SPELL_KEYS = new Set(["ability", "charges", "daily", "limited", "other", "resource", "resourceName", "rest", "ritual", "will"]);
 const ACTIVATION_RE = /\b(?:as (?:a|an) (?:bonus )?action|as (?:a|an) reaction|use (?:a|an|your) action|when you hit|expend \d+ charges?|once (?:this property is )?used|until (?:the )?next dawn|short or long rest)\b/i;
 
 function getEntryText (entry) {
@@ -66,7 +66,8 @@ export function classifyItem (item) {
 	const damageRiders = ITEM_NORMALIZER._normalizeItemDamageRiders(item);
 	const criticalRiders = ITEM_NORMALIZER._normalizeItemCritRiders(item);
 	const conditionalBonuses = ITEM_NORMALIZER._detectConditionalBonuses(item);
-	const actionablePowers = powers.filter(power => power.kind === "spell" || !power.isReferenceOnly);
+	const actionablePowers = powers.filter(power => (power.kind === "spell" || !power.isReferenceOnly)
+		&& !(power.usageType === "resource" && !power.resourceName));
 	const referencePowers = powers.filter(power => power.isReferenceOnly);
 	const explicitEffects = Array.isArray(item.effects) && item.effects.length;
 	const schemaProfile = globalThis.CharacterSheetState.getItemSchemaEffectProfile(item);
@@ -79,6 +80,7 @@ export function classifyItem (item) {
 	];
 	const choices = [
 		...(item.spellScrollLevel != null && !item.attachedSpells && !item.selectedSpell ? ["spellScrollLevel"] : []),
+		...(item.attachedSpells?.resource && !item.attachedSpells.resourceName ? ["attachedSpells.resourceName"] : []),
 		...schemaProfile.choiceRequired
 			.map(adapter => adapter.field)
 			.filter(field => field !== "spellScrollLevel"),
@@ -128,11 +130,12 @@ export function classifyItem (item) {
 	}
 
 	if (item.charges != null) {
+		const chargeMaximum = ITEM_NORMALIZER.resolveItemChargeMaximum(item.charges, {roll: false});
 		return {
 			status: "surfacedOnly",
 			operationalStatus: "resourceOnly",
 			fields,
-			reasons: [typeof item.charges === "number" ? "charges have no operational power" : "charge maximum requires resolution"],
+			reasons: [chargeMaximum.parsed ? "charges have no operational power" : "unsupported charge maximum"],
 		};
 	}
 

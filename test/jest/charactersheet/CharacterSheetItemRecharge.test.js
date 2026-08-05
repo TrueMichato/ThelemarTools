@@ -219,6 +219,8 @@ describe("Item Charge Recharge — static helpers", () => {
 		}
 		expect(CharacterSheetState.itemRechargesOnRest(mk("restShort"), "short")).toBe(true);
 		expect(CharacterSheetState.itemRechargesOnRest(mk("restShort"), "long")).toBe(false);
+		expect(CharacterSheetState.itemRechargesOnRest(mk("special"), "short")).toBe(false);
+		expect(CharacterSheetState.itemRechargesOnRest(mk("special"), "long")).toBe(false);
 		expect(CharacterSheetState.itemRechargesOnRest({recharge: "dawn"}, "long")).toBe(false); // no charges
 		expect(CharacterSheetState.itemRechargesOnRest(mk("dawn"), "elsewhere")).toBe(false); // unknown restType
 	});
