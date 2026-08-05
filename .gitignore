@@ -41,3 +41,6 @@ test-results/
 .cache/
 # Impeccable design skill — transient per-session detector cache (not an artifact)
 .impeccable/hook.cache.json
+
+# Generated NPC character-sheet exports (spawn-npcs runner scratch)
+npc-exports/
