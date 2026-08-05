@@ -5458,6 +5458,12 @@ class CharacterSheetState {
 		// pipeline processed these fields — the grants were silently dropped.
 		// Idempotent via _trackGrantedProficiency; never downgrades existing levels.
 		this._migrateSubclassFeatureProficiencyGrants();
+
+		// (Magic items) Repair the persisted `weapon` boolean on stored inventory items so
+		// pre-fix saves of `type:"M"`/`type:"R"` artifacts (e.g. Gae Bolg, encoded WITHOUT an
+		// explicit `weapon:true` flag) both categorise as weapons and generate an attack.
+		// Idempotent; only ever sets a missing/false flag to true.
+		this._migrateInventoryItemWeaponFlag();
 	}
 
 	/**
@@ -5525,6 +5531,34 @@ class CharacterSheetState {
 				&& !feature.savingThrowProficiencies
 			) continue;
 			this._processFeatureProficiencyGrants(feature, feature.id);
+		}
+	}
+
+	/**
+	 * (Magic items) Load-time repair of the persisted `weapon` boolean on stored inventory items.
+	 *
+	 * Both the inventory categoriser (`_getItemCategory`) and Combat's equipped-weapon attack
+	 * generator (`items.filter(i => i.weapon && i.equipped)`) key off `item.weapon`. Catalog
+	 * magic weapons encoded as `type:"M"`/`type:"R"` WITHOUT an explicit `weapon:true` flag
+	 * (e.g. the artifact Gae Bolg) were stored `weapon:false` by the pre-fix add path, so they
+	 * collapsed into the "Other" inventory group AND never produced an attack. The add path now
+	 * derives the flag from `_isWeapon()`; this sweep repairs saves created before that fix.
+	 *
+	 * Idempotent and non-destructive: it only ever promotes a missing/false flag to `true`, never
+	 * clears it, and only for items the surviving weapon signals (coarse stored `type:"weapon"`,
+	 * raw `M`/`R` code, or `weaponCategory`) identify as weapons — so ammunition and gear that
+	 * merely carry a damage die are left untouched.
+	 */
+	_migrateInventoryItemWeaponFlag () {
+		if (!Array.isArray(this._data.inventory)) return;
+		for (const invItem of this._data.inventory) {
+			const item = invItem?.item;
+			if (!item || item.weapon === true) continue;
+			const typeBase = typeof item.type === "string" ? item.type.split("|")[0] : null;
+			const isWeapon = item.type === "weapon"
+				|| typeBase === "M" || typeBase === "R"
+				|| !!item.weaponCategory;
+			if (isWeapon) item.weapon = true;
 		}
 	}
 
@@ -28824,6 +28858,15 @@ class CharacterSheetState {
 				else if (_typeBase === "MA") itemProps.armorType = "medium";
 				else if (_typeBase === "LA") itemProps.armorType = "light";
 				else itemProps.armorType = null;
+			}
+			// Derive the `weapon` flag from raw weapon type codes for the same reason: a builder-
+			// added `type:"M"`/`type:"R"` weapon (or a `type:"M"` artifact like Gae Bolg) carries no
+			// `weapon:true` flag, yet both the inventory categoriser (_getItemCategory) and Combat's
+			// equipped-weapon attack generator key off `item.weapon`. Without this it lands in
+			// "Other" AND never produces an attack. The inventory module sets `weapon` explicitly
+			// (true or false), so this only fills the gap for the raw-data-file add path.
+			if (itemProps.weapon === undefined) {
+				itemProps.weapon = _typeBase === "M" || _typeBase === "R" || !!itemProps.weaponCategory;
 			}
 
 			// Initialize arrays for complex item features
