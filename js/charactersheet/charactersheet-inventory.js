@@ -5355,6 +5355,8 @@ class CharacterSheetInventory {
 				if (!item.equipped) return false;
 				// If item requires attunement, it must be attuned
 				if (item.requiresAttunement && !item.attuned) return false;
+				// Conditional AC bonuses are evaluated by state.getAc() against live armor/shield state.
+				if (bonusType === "bonusAc" && item.effects?.some(effect => effect?.type === "acBonusConditional")) return false;
 				return item[bonusType];
 			})
 			.reduce((sum, item) => sum + (item[bonusType] || 0), 0);

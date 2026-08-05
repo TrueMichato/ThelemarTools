@@ -5,6 +5,7 @@ import {fileURLToPath} from "url";
 import {jest} from "@jest/globals";
 
 import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-inventory.js";
 import "../../../js/charactersheet/charactersheet-spells.js";
 
 if (typeof globalThis.document === "undefined") {
@@ -19,6 +20,7 @@ if (typeof globalThis.document === "undefined") {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 const CharacterSheetState = globalThis.CharacterSheetState;
+const CharacterSheetInventory = globalThis.CharacterSheetInventory;
 const CharacterSheetSpells = globalThis.CharacterSheetSpells;
 const items = JSON.parse(readFileSync(resolve(REPO_ROOT, "data/items.json"), "utf8")).item;
 const brewItems = JSON.parse(readFileSync(resolve(REPO_ROOT, "homebrew/TravelersGuidetoThelemar.json"), "utf8")).item;
@@ -33,6 +35,25 @@ function addActiveCatalogItem (state, item) {
 		quantity: 1,
 	});
 	return state.getItems().find(it => it.name === item.name && it.source === item.source);
+}
+
+function makeInventory (state) {
+	const inventory = new CharacterSheetInventory({
+		getState: () => state,
+		renderCharacter: () => {},
+		saveCharacter: () => {},
+	});
+	inventory._renderItemList = () => {};
+	inventory._updateEncumbrance = () => {};
+	return inventory;
+}
+
+function addCatalogItemViaInventory (state, inventory, item) {
+	inventory._addItem(item);
+	const added = state.getItems().find(it => it.name === item.name && it.source === item.source);
+	state.setItemEquipped(added.id, true);
+	if (added.requiresAttunement) state.setItemAttuned(added.id, true);
+	return added;
 }
 
 describe("Catalog magic-item powers and passive normalization", () => {
@@ -151,5 +172,96 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		expect(state.invokeItemPower(added.id, levitate.id)).toEqual(expect.objectContaining({ok: true, usesCurrent: 0}));
 		state.restoreItemPowerUses("long");
 		expect(state.getItemPower(added.id, levitate.id)).toEqual(expect.objectContaining({isAvailable: false, usesCurrent: 0}));
+	});
+
+	it("applies Bracers of Defense only while unarmored and without a shield", () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("dex", 14);
+		const inventory = makeInventory(state);
+		const bracers = items.find(it => it.name === "Bracers of Defense" && it.source === "DMG");
+		addActiveCatalogItem(state, bracers);
+		inventory._updateArmorClass();
+
+		expect(state.getAc()).toBe(14);
+
+		state.setArmor({ac: 12, type: "light", name: "Leather Armor"});
+		expect(state.getAc()).toBe(14);
+
+		state.setArmor(null);
+		state.setShield({equipped: true, ac: 2, bonus: 0, name: "Shield"});
+		expect(state.getAc()).toBe(14);
+	});
+
+	it.each([
+		["Amulet of Health", "con", 19],
+		["Headband of Intellect", "int", 19],
+		["Gauntlets of Ogre Power", "str", 19],
+	])("applies the catalog ability setter from %s", (name, ability, expected) => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const item = items.find(it => it.name === name && it.source === "DMG");
+		addCatalogItemViaInventory(state, inventory, item);
+		inventory._updateItemBonuses(state.getItems());
+
+		expect(state.getAbilityScore(ability)).toBe(expected);
+	});
+
+	it("applies every DMG Belt of Giant Strength tier", () => {
+		const belts = items.filter(it => it.source === "DMG" && /^Belt of .* Giant Strength$/.test(it.name));
+		expect(belts).toHaveLength(6);
+
+		for (const belt of belts) {
+			const state = new CharacterSheetState();
+			const inventory = makeInventory(state);
+			addCatalogItemViaInventory(state, inventory, belt);
+			inventory._updateItemBonuses(state.getItems());
+			expect(state.getAbilityScore("str")).toBe(belt.ability.static.str);
+		}
+	});
+
+	it("applies protection, luck, poison-proof, and magic-resistance families", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		for (const name of [
+			"Ring of Protection",
+			"Stone of Good Luck",
+			"Periapt of Proof against Poison",
+			"Mantle of Spell Resistance",
+		]) {
+			const item = items.find(it => it.name === name && it.source === "DMG");
+			addCatalogItemViaInventory(state, inventory, item);
+		}
+		inventory._updateArmorClass();
+
+		expect(state.getAc()).toBe(11);
+		expect(state.getItemBonuses()).toEqual(expect.objectContaining({savingThrow: 2, abilityCheck: 1}));
+		expect(state.getImmunities()).toContain("poison");
+		expect(state.getConditionImmunities()).toContain("poisoned");
+		expect(state.getNamedModifiers().filter(mod => mod.type === "save:advantage:magic")).toHaveLength(1);
+	});
+
+	it("applies every DMG Ring of Resistance damage type", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const rings = items.filter(it => it.source === "DMG" && /^Ring of .* Resistance$/.test(it.name));
+		expect(rings.length).toBeGreaterThanOrEqual(10);
+		for (const ring of rings) addCatalogItemViaInventory(state, inventory, ring);
+		inventory._updateItemBonuses(state.getItems());
+
+		const expected = new Set(rings.flatMap(ring => ring.resist || []));
+		expect(new Set(state.getResistances())).toEqual(expected);
+	});
+
+	it("applies structured speed and spell-focus bonus families", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		for (const name of ["Winged Boots", "+3 Wand of the War Mage", "+3 Rod of the Pact Keeper"]) {
+			const item = items.find(it => it.name === name && it.source === "DMG");
+			addCatalogItemViaInventory(state, inventory, item);
+		}
+		inventory._updateItemBonuses(state.getItems());
+
+		expect(state.getSpeed("fly")).toBe(state.getSpeed("walk"));
+		expect(state.getItemBonuses()).toEqual(expect.objectContaining({spellAttack: 6, spellSaveDc: 3}));
 	});
 });

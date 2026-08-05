@@ -51,6 +51,8 @@ The supplied export contains 21 homebrew documents with 780 magic items after ex
 
 The audit is deliberately conservative. "Surfaced only" means the player can read the complete item rules, but the sheet does not claim to resolve bespoke prose. Limited, daily, rest-based, at-will, ritual, charge-based, and other attached-spell forms are supported. Daily groups share uses unless the data uses the `e` suffix ("each"), rest groups refresh on either rest, and finite `limited` groups never refresh automatically.
 
+Catalog-backed regressions cover the high-frequency enhancement, ability-setter, protection/luck, resistance/immunity, speed, senses, spell-focus, and charged-spell families. Conditional AC bonuses such as Bracers of Defense are evaluated against live armor and shield state instead of being treated as unconditional `bonusAc`.
+
 Run the in-repo catalog audit:
 
 ```bash

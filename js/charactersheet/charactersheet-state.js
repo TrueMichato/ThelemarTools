@@ -11059,6 +11059,7 @@ class CharacterSheetState {
 		// Bonuses from other equipped magic items (e.g., Cloak of Protection, Ring of Protection)
 		// Note: Armor and shield bonuses are already included above, this is for OTHER items only
 		ac += this._data.ac.itemBonus || 0;
+		ac += this._getItemConditionalAcBonus();
 
 		// Custom bonuses
 		ac += this._data.customModifiers.ac || 0;
@@ -11086,6 +11087,20 @@ class CharacterSheetState {
 		ac -= this._getStrainAcPenalty();
 
 		return ac;
+	}
+
+	_getItemConditionalAcBonus () {
+		let total = 0;
+		for (const item of this.getItems()) {
+			if (!this._isItemEffectsActive(item)) continue;
+			for (const effect of item.effects || []) {
+				if (effect?.type !== "acBonusConditional") continue;
+				if (effect.requireUnarmored && this._data.ac.armor) continue;
+				if (effect.requireNoShield && this._data.ac.shield) continue;
+				total += Number(effect.value) || 0;
+			}
+		}
+		return total;
 	}
 
 	/**
@@ -28304,6 +28319,16 @@ class CharacterSheetState {
 		const effects = Array.isArray(item?.effects) ? MiscUtil.copyFast(item.effects) : [];
 		const hasType = type => effects.some(effect => effect?.type === type);
 		const text = CharacterSheetState._getItemEntryText(item?.entries);
+		const conditionalAcMatch = text.match(/gain\s+a\s+\+(\d+)\s+bonus\s+to\s+(?:armor class|ac)\s+if\s+you\s+are\s+wearing\s+no\s+armor\s+and\s+using\s+no\s+[^.]*shield/i);
+		if (conditionalAcMatch && !hasType("acBonusConditional")) {
+			effects.push({
+				type: "acBonusConditional",
+				value: parseInt(conditionalAcMatch[1], 10),
+				requireUnarmored: true,
+				requireNoShield: true,
+				name: "Unarmored Defense Bonus",
+			});
+		}
 		const acMatch = text.match(/base\s+(?:armor class|ac)\s+is\s+(\d+)\s*(?:\+|plus)\s+(?:your\s+)?dexterity modifier/i);
 		if (acMatch && !hasType("acFormula")) {
 			effects.push({
@@ -28314,7 +28339,7 @@ class CharacterSheetState {
 				name: "Alternative Armor Class",
 			});
 		}
-		if (/advantage on saving throws against spells? and (?:other )?magical effects/i.test(text)
+		if (/advantage on saving throws against spells?(?: and (?:other )?magical effects)?/i.test(text)
 			&& !hasType("save:advantage:magic")) {
 			effects.push({type: "save:advantage:magic", value: 1, name: "Magic Resistance"});
 		}
@@ -44178,6 +44203,8 @@ class CharacterSheetState {
 			});
 			return true;
 		}
+		// Conditional AC bonuses are evaluated live in getAc(), where armor/shield state is known.
+		if (effectType === "acBonusConditional") return true;
 
 		// Standard numeric modifier (full passthrough of the shared effect schema)
 		this.addNamedModifier({
