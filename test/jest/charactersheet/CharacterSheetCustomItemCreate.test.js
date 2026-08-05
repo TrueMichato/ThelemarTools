@@ -265,3 +265,55 @@ describe("save/load round-trip preserves the new flags", () => {
 		expect(armor.armorType).toBe("heavy");
 	});
 });
+
+describe("custom item powers", () => {
+	test("builds, normalizes, invokes, and round-trips an authored charged power", () => {
+		const state = newState();
+		const inv = makeInventory(state);
+		const built = inv._buildCustomItem("Storm Battery", 1, 1, {
+			type: "wondrous",
+			charges: 3,
+			itemPowers: [{
+				name: "Thunder Burst",
+				kind: "ability",
+				actionType: "action",
+				description: "Release a burst of thunder.",
+				chargesCost: 1,
+				isReferenceOnly: false,
+			}],
+		});
+		expect(built.itemPowers).toHaveLength(1);
+
+		state.addItem({...built, equipped: true});
+		const item = state.getItems().find(it => it.name === "Storm Battery");
+		const power = state.getItemPowers().find(it => it.itemId === item.id && it.name === "Thunder Burst");
+		expect(power).toEqual(expect.objectContaining({chargesCost: 1, unavailableReason: null}));
+		expect(state.invokeItemPower(item.id, power.id)).toEqual(expect.objectContaining({ok: true}));
+		expect(state.getItems().find(it => it.id === item.id).chargesCurrent).toBe(2);
+
+		const seed = inv._seedOptionsFromItem(item);
+		expect(seed.options.itemPowers).toContainEqual(expect.objectContaining({name: "Thunder Burst", chargesCost: 1}));
+		const state2 = new CharacterSheetState();
+		state2.loadFromJson(state.toJson());
+		expect(state2.getItems().find(it => it.name === "Storm Battery").itemPowers).toContainEqual(
+			expect.objectContaining({name: "Thunder Burst", chargesCost: 1}),
+		);
+	});
+
+	test("keeps an untracked authored power reference-only", () => {
+		const state = newState();
+		const inv = makeInventory(state);
+		const built = inv._buildCustomItem("Story Key", 1, 0, {
+			itemPowers: [{
+				name: "Open the Story Door",
+				description: "The GM determines which door opens.",
+				isReferenceOnly: true,
+			}],
+		});
+		state.addItem({...built, equipped: true});
+
+		expect(state.getItemPowers().find(it => it.name === "Open the Story Door")).toEqual(
+			expect.objectContaining({isReferenceOnly: true, unavailableReason: "Rules reference only; resolve this effect manually."}),
+		);
+	});
+});

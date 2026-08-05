@@ -151,6 +151,17 @@ describe("Character sheet magic-item operational coverage audit", () => {
 		}));
 	});
 
+	it("distinguishes curated typed mechanics from prose inference", () => {
+		expect(classifyItem({
+			name: "Goggles of Night",
+			source: "DMG",
+			entries: ["The prose can be rewritten without changing the exact registered mechanic."],
+		})).toEqual(expect.objectContaining({
+			status: "fullyFunctional",
+			operationalStatus: "curatedOperational",
+		}));
+	});
+
 	it("keeps a structured passive with an unresolved active clause partial", () => {
 		expect(classifyItem({
 			name: "Partly Automated Ring",

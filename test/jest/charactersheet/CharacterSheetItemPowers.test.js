@@ -933,6 +933,67 @@ describe("Safe item-prose effects", () => {
 	});
 });
 
+describe("Curated item-mechanic registry", () => {
+	it("applies reusable typed templates for exact item identities", () => {
+		const state = new CharacterSheetState();
+		const goggles = addActiveCatalogItem(state, {
+			name: "Goggles of Night",
+			source: "DMG",
+			entries: ["Narrative wording can change without changing the registered mechanic."],
+		});
+		const gloves = addActiveCatalogItem(state, {
+			name: "Gloves of Thievery",
+			source: "XDMG",
+			entries: [],
+		});
+		const boots = addActiveCatalogItem(state, {
+			name: "Boots of Elvenkind",
+			source: "XDMG",
+			entries: [],
+		});
+
+		expect(goggles.effects).toContainEqual(expect.objectContaining({type: "senseBonus:darkvision", value: 60}));
+		expect(gloves.effects).toContainEqual(expect.objectContaining({type: "skill:sleightofhand", value: 5}));
+		expect(boots.effects).toContainEqual(expect.objectContaining({type: "skill:stealth", advantage: true}));
+		expect(state.getSenses().darkvision).toBe(60);
+		expect(state.aggregateModifiers("skill:sleightofhand").bonus).toBe(5);
+		expect(state.aggregateModifiers("skill:stealth").advantage).toBe(true);
+	});
+
+	it("lets explicit structured effects override the curated family default", () => {
+		const state = new CharacterSheetState();
+		const goggles = addActiveCatalogItem(state, {
+			name: "Goggles of Night",
+			source: "DMG",
+			effects: [{type: "senseBonus:darkvision", value: 90, name: "Explicit Darkvision"}],
+		});
+
+		expect(goggles.effects.filter(effect => effect.type === "senseBonus:darkvision")).toEqual([
+			expect.objectContaining({value: 90, name: "Explicit Darkvision"}),
+		]);
+		expect(state.getSenses().darkvision).toBe(90);
+	});
+
+	it("keeps source-specific conditional mechanics opt-in", () => {
+		const state = new CharacterSheetState();
+		addActiveCatalogItem(state, {
+			name: "Boots of Elvenkind",
+			source: "DMG",
+			entries: [],
+		});
+		const aggregate = state.aggregateModifiers("skill:stealth");
+
+		expect(aggregate.advantage).toBe(false);
+		expect(aggregate.conditionalsAvailable).toContainEqual(
+			expect.objectContaining({conditional: "while moving silently", advantage: true}),
+		);
+	});
+
+	it("does not match an item with the same name from an unregistered source", () => {
+		expect(CharacterSheetState.getItemCuratedMechanics({name: "Goggles of Night", source: "HB"})).toEqual({effects: [], powers: []});
+	});
+});
+
 describe("Item-power hover previews", () => {
 	const originalHover = globalThis.Renderer.hover;
 	const originalEncodeForHash = globalThis.UrlUtil.encodeForHash;

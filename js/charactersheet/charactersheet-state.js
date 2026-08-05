@@ -8644,28 +8644,28 @@ class CharacterSheetState {
 		const baseSenses = /** @type {*} */ (this._data.senses || {});
 		const itemSenses = /** @type {*} */ (this._data.itemSenses || {});
 		const itemSenseBonuses = /** @type {*} */ (this._data.itemSenseBonuses || {});
-
-		// Also check named modifiers for sense bonuses
-		const getNamedModifierBonus = (senseType) => {
-			return this._data.namedModifiers
-				?.filter(m => m.enabled && m.type === `sense:${senseType}`)
-				?.reduce((total, m) => {
-					// Symbolic values ("proficiency", "conModx2", …) must be resolved to a
-					// number before arithmetic, or `+` concatenates (CS-BUG-038).
-					const v = this._resolveSymbolicModifierValue(m.value) ?? 0;
-					// If setValue is true, take the max value; otherwise add
-					if (m.setValue) {
-						return Math.max(total, v);
-					}
-					return total + v;
-				}, 0) || 0;
+		const getTypedItemBonus = sense => {
+			let total = 0;
+			for (const item of this.getItems()) {
+				if (!this._isItemEffectsActive(item)) continue;
+				for (const effect of item.effects || []) {
+					if (effect?.type === `senseBonus:${sense}`) total += Number(effect.value) || 0;
+				}
+			}
+			return total;
 		};
+		const getNamedModifierBonus = sense => this._data.namedModifiers
+			?.filter(modifier => modifier.enabled && modifier.type === `sense:${sense}`)
+			?.reduce((total, modifier) => {
+				const value = this._resolveSymbolicModifierValue(modifier.value) ?? 0;
+				return modifier.setValue ? Math.max(total, value) : total + value;
+			}, 0) || 0;
 
 		return {
-			darkvision: Math.max(baseSenses.darkvision || 0, senseMods.darkvision || 0, itemSenses.darkvision || 0, this.getSenseBonusFromStates("darkvision")) + getNamedModifierBonus("darkvision") + (itemSenseBonuses.darkvision || 0),
-			blindsight: Math.max(baseSenses.blindsight || 0, senseMods.blindsight || 0, itemSenses.blindsight || 0, this.getSenseBonusFromStates("blindsight")) + getNamedModifierBonus("blindsight") + (itemSenseBonuses.blindsight || 0),
-			tremorsense: Math.max(baseSenses.tremorsense || 0, senseMods.tremorsense || 0, itemSenses.tremorsense || 0, this.getSenseBonusFromStates("tremorsense")) + getNamedModifierBonus("tremorsense") + (itemSenseBonuses.tremorsense || 0),
-			truesight: Math.max(baseSenses.truesight || 0, senseMods.truesight || 0, itemSenses.truesight || 0, this.getSenseBonusFromStates("truesight")) + getNamedModifierBonus("truesight") + (itemSenseBonuses.truesight || 0),
+			darkvision: Math.max(baseSenses.darkvision || 0, senseMods.darkvision || 0, itemSenses.darkvision || 0, this.getSenseBonusFromStates("darkvision")) + getNamedModifierBonus("darkvision") + getTypedItemBonus("darkvision") + (itemSenseBonuses.darkvision || 0),
+			blindsight: Math.max(baseSenses.blindsight || 0, senseMods.blindsight || 0, itemSenses.blindsight || 0, this.getSenseBonusFromStates("blindsight")) + getNamedModifierBonus("blindsight") + getTypedItemBonus("blindsight") + (itemSenseBonuses.blindsight || 0),
+			tremorsense: Math.max(baseSenses.tremorsense || 0, senseMods.tremorsense || 0, itemSenses.tremorsense || 0, this.getSenseBonusFromStates("tremorsense")) + getNamedModifierBonus("tremorsense") + getTypedItemBonus("tremorsense") + (itemSenseBonuses.tremorsense || 0),
+			truesight: Math.max(baseSenses.truesight || 0, senseMods.truesight || 0, itemSenses.truesight || 0, this.getSenseBonusFromStates("truesight")) + getNamedModifierBonus("truesight") + getTypedItemBonus("truesight") + (itemSenseBonuses.truesight || 0),
 		};
 	}
 
@@ -8679,22 +8679,22 @@ class CharacterSheetState {
 		const baseSenses = /** @type {*} */ (this._data.senses || {});
 		const itemSenses = /** @type {*} */ (this._data.itemSenses || {});
 		const itemSenseBonuses = /** @type {*} */ (this._data.itemSenseBonuses || {});
-
-		// Get bonus from named modifiers
+		let typedItemBonus = 0;
+		for (const item of this.getItems()) {
+			if (!this._isItemEffectsActive(item)) continue;
+			for (const effect of item.effects || []) {
+				if (effect?.type === `senseBonus:${sense}`) typedItemBonus += Number(effect.value) || 0;
+			}
+		}
 		const namedBonus = this._data.namedModifiers
-			?.filter(m => m.enabled && m.type === `sense:${sense}`)
-			?.reduce((total, m) => {
-				// See getSenses(): resolve symbolic values before arithmetic (CS-BUG-038).
-				const v = this._resolveSymbolicModifierValue(m.value) ?? 0;
-				if (m.setValue) {
-					return Math.max(total, v);
-				}
-				return total + v;
+			?.filter(modifier => modifier.enabled && modifier.type === `sense:${sense}`)
+			?.reduce((total, modifier) => {
+				const value = this._resolveSymbolicModifierValue(modifier.value) ?? 0;
+				return modifier.setValue ? Math.max(total, value) : total + value;
 			}, 0) || 0;
 
-		// Mirror getSenses(): floor across base/custom/item/state, plus additive named + item bonuses
 		return Math.max(baseSenses[sense] || 0, senseMods[sense] || 0, itemSenses[sense] || 0, this.getSenseBonusFromStates(sense))
-			+ namedBonus + (itemSenseBonuses[sense] || 0);
+			+ namedBonus + typedItemBonus + (itemSenseBonuses[sense] || 0);
 	}
 
 	/**
@@ -28283,6 +28283,73 @@ class CharacterSheetState {
 		vulnerable: {family: "damageVulnerability", consumer: "inventory"},
 	});
 
+	static ITEM_MECHANIC_TEMPLATES = Object.freeze({
+		senseBonus: ({sense, value, name}) => ({
+			type: `senseBonus:${sense}`,
+			value,
+			name,
+		}),
+		skillAdvantage: ({skill, name, conditional = null}) => ({
+			type: `skill:${skill}`,
+			value: 0,
+			advantage: true,
+			name,
+			...(conditional ? {conditional} : {}),
+		}),
+		skillBonus: ({skill, value, name}) => ({
+			type: `skill:${skill}`,
+			value,
+			name,
+		}),
+	});
+
+	static ITEM_MECHANIC_REGISTRY = Object.freeze([
+		{
+			names: ["Goggles of Night"],
+			sources: ["DMG", "XDMG"],
+			effects: [{template: "senseBonus", sense: "darkvision", value: 60, name: "Goggles of Night"}],
+		},
+		{
+			names: ["Boots of Elvenkind"],
+			sources: ["DMG"],
+			effects: [{template: "skillAdvantage", skill: "stealth", name: "Silent Steps", conditional: "while moving silently"}],
+		},
+		{
+			names: ["Boots of Elvenkind"],
+			sources: ["XDMG"],
+			effects: [{template: "skillAdvantage", skill: "stealth", name: "Silent Steps"}],
+		},
+		{
+			names: ["Gloves of Thievery"],
+			sources: ["XDMG"],
+			effects: [{template: "skillBonus", skill: "sleightofhand", value: 5, name: "Thievery"}],
+		},
+	]);
+
+	/**
+	 * Resolve curated item/family definitions into the same typed contracts used by schema and prose adapters.
+	 * @param {object} item
+	 * @returns {{effects: Array<object>, powers: Array<object>}}
+	 */
+	static getItemCuratedMechanics (item) {
+		const out = {effects: [], powers: []};
+		if (!item?.name || !item?.source) return out;
+		const name = String(item.name).toLowerCase();
+		const source = String(item.source).toLowerCase();
+		for (const definition of CharacterSheetState.ITEM_MECHANIC_REGISTRY) {
+			if (!definition.names.some(it => it.toLowerCase() === name)) continue;
+			if (definition.sources?.length && !definition.sources.some(it => it.toLowerCase() === source)) continue;
+			for (const effect of definition.effects || []) {
+				const factory = CharacterSheetState.ITEM_MECHANIC_TEMPLATES[effect.template];
+				if (!factory) continue;
+				out.effects.push(factory(effect));
+			}
+			out.powers.push(...(definition.powers || []).map(power => MiscUtil.copyFast(power)));
+			break;
+		}
+		return out;
+	}
+
 	/**
 	 * Return the canonical structured-field contract used by runtime consumers and coverage tooling.
 	 * Choice-dependent sub-shapes override their otherwise operational parent field.
@@ -28604,7 +28671,10 @@ class CharacterSheetState {
 			});
 		}
 
-		const explicit = Array.isArray(item.itemPowers) ? item.itemPowers : [];
+		const explicit = [
+			...(Array.isArray(item.itemPowers) ? item.itemPowers : []),
+			...CharacterSheetState.getItemCuratedMechanics(item).powers,
+		];
 		for (const [ix, light] of (item.light || []).entries()) {
 			addPower({
 				id: CharacterSheetState._getItemPowerId(["light", item.name, ix]),
@@ -28640,6 +28710,9 @@ class CharacterSheetState {
 	_normalizeItemEffects (item) {
 		const effects = Array.isArray(item?.effects) ? MiscUtil.copyFast(item.effects) : [];
 		const hasType = type => effects.some(effect => effect?.type === type);
+		for (const effect of CharacterSheetState.getItemCuratedMechanics(item).effects) {
+			if (!hasType(effect.type)) effects.push(effect);
+		}
 		const text = CharacterSheetState._getItemEntryText(item?.entries);
 		const conditionalAcMatch = text.match(/gain\s+a\s+\+(\d+)\s+bonus\s+to\s+(?:armor class|ac)\s+if\s+you\s+are\s+wearing\s+no\s+armor\s+and\s+using\s+no\s+[^.]*shield/i);
 		if (conditionalAcMatch && !hasType("acBonusConditional")) {
@@ -44756,7 +44829,8 @@ class CharacterSheetState {
 		// Conditional AC bonuses are evaluated live in getAc(), where armor/shield state is known.
 		if (effectType === "acBonusConditional") return true;
 		// These item-scoped effects are evaluated live by their downstream consumers.
-		if (["weaponCritThreshold", "carryCapacityMultiplier", "jumpMultiplier", "maxHpBonus", "maxHpPerLevel"].includes(effectType)) return true;
+		if (["weaponCritThreshold", "carryCapacityMultiplier", "jumpMultiplier", "maxHpBonus", "maxHpPerLevel"].includes(effectType)
+			|| effectType.startsWith("senseBonus:")) return true;
 
 		// Standard numeric modifier (full passthrough of the shared effect schema)
 		this.addNamedModifier({

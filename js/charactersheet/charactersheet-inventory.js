@@ -1805,6 +1805,8 @@ class CharacterSheetInventory {
 			senses: options.senses || null,
 			// Structured modifiers & effects (Bug #8) — applied while equipped via _registerItemEffects
 			effects: Array.isArray(options.effects) && options.effects.length ? options.effects : undefined,
+			// Explicit active/reference powers authored by homebrew users.
+			itemPowers: Array.isArray(options.itemPowers) && options.itemPowers.length ? options.itemPowers : undefined,
 			// Attached spells. Bare so editing a non-spell-section item preserves item-granted spells.
 			attachedSpells: options.attachedSpells,
 			// Misc
@@ -2091,6 +2093,9 @@ class CharacterSheetInventory {
 		// Structured modifiers & effects (Bug #8) — round-trip the effects[] catalog.
 		if (Array.isArray(item.effects) && item.effects.length) {
 			options.effects = JSON.parse(JSON.stringify(item.effects));
+		}
+		if (Array.isArray(item.itemPowers) && item.itemPowers.length) {
+			options.itemPowers = JSON.parse(JSON.stringify(item.itemPowers));
 		}
 
 		return {
@@ -3007,6 +3012,80 @@ class CharacterSheetInventory {
 			renderItemEffects();
 		});
 
+		// Explicit powers use the same runtime item-power contract as catalog and curated definitions.
+		const itemPowers = Array.isArray(prefillItem?.itemPowers) ? JSON.parse(JSON.stringify(prefillItem.itemPowers)) : [];
+		const powersSection = e_({outer: `
+			<div class="charsheet__custom-item-section charsheet__custom-item-section--powers">
+				<div class="charsheet__custom-item-section-title">⚡ Powers (Optional)</div>
+				<div class="charsheet__custom-item-fields">
+					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
+						<div class="ve-muted ve-small mb-2">Add activated or rules-reference powers. Tracked charges and uses are spent atomically by the item-power controls.</div>
+						<div id="custom-item-powers-list"></div>
+						<button type="button" id="custom-item-add-power" class="ve-btn ve-btn-default ve-btn-xs mt-2">+ Add Power</button>
+					</div>
+				</div>
+			</div>
+		`});
+		form.append(powersSection);
+		const powersListEl = powersSection.querySelector("#custom-item-powers-list");
+		const renderItemPowers = () => {
+			if (!powersListEl) return;
+			powersListEl.innerHTML = itemPowers.length
+				? itemPowers.map((power, ix) => `
+					<div class="ve-flex-col mb-2 p-2 ve-border" data-power-index="${ix}">
+						<div class="ve-flex-v-center mb-1">
+							<input class="ve-form-control mr-2" data-power-field="name" value="${(power.name || "").qq()}" placeholder="Power name">
+							<select class="ve-form-control mr-2" data-power-field="actionType">
+								${["action", "bonus", "reaction", "onHit", "other"].map(type => `<option value="${type}"${power.actionType === type ? " selected" : ""}>${type}</option>`).join("")}
+							</select>
+							<button type="button" class="ve-btn ve-btn-danger ve-btn-xs" data-power-remove title="Remove power">×</button>
+						</div>
+						<textarea class="ve-form-control mb-1" data-power-field="description" rows="2" placeholder="Rules text">${(power.description || "").qq()}</textarea>
+						<div class="ve-flex-v-center">
+							<label class="mr-2">Charge cost <input type="number" class="ve-form-control input-xs" data-power-field="chargesCost" min="0" value="${Number(power.chargesCost) || 0}"></label>
+							<label class="mr-2">Uses <input type="number" class="ve-form-control input-xs" data-power-field="usesMax" min="0" value="${Number(power.usesMax) || 0}"></label>
+							<label class="mr-2">Reset
+								<select class="ve-form-control input-xs" data-power-field="usageType">
+									${["other", "daily", "rest", "limited"].map(type => `<option value="${type}"${power.usageType === type ? " selected" : ""}>${type}</option>`).join("")}
+								</select>
+							</label>
+							<label class="ve-flex-v-center"><input type="checkbox" data-power-field="isReferenceOnly"${power.isReferenceOnly ? " checked" : ""}> <span class="ml-1">Reference only</span></label>
+						</div>
+					</div>
+				`).join("")
+				: `<div class="ve-muted ve-small">No powers added.</div>`;
+			for (const row of powersListEl.querySelectorAll("[data-power-index]")) {
+				const ix = Number(row.dataset.powerIndex);
+				for (const input of row.querySelectorAll("[data-power-field]")) {
+					input.addEventListener("change", () => {
+						const field = input.dataset.powerField;
+						if (field === "chargesCost" || field === "usesMax") itemPowers[ix][field] = Math.max(0, parseInt(input.value, 10) || 0);
+						else if (field === "isReferenceOnly") itemPowers[ix][field] = !!input.checked;
+						else itemPowers[ix][field] = input.value;
+					});
+				}
+				row.querySelector("[data-power-remove]")?.addEventListener("click", () => {
+					itemPowers.splice(ix, 1);
+					renderItemPowers();
+				});
+			}
+		};
+		renderItemPowers();
+		powersSection.querySelector("#custom-item-add-power")?.addEventListener("click", () => {
+			itemPowers.push({
+				name: "New Power",
+				kind: "ability",
+				actionType: "action",
+				description: "",
+				chargesCost: 0,
+				usesMax: 0,
+				usageType: "other",
+				isReferenceOnly: true,
+				usesKey: `custom:${CryptUtil.uid()}`,
+			});
+			renderItemPowers();
+		});
+
 		// Attached Spells Section
 		const allSpells = this._page.getSpells?.() || [];
 		const selectedSpells = [];
@@ -3679,6 +3758,26 @@ class CharacterSheetInventory {
 				.filter(eff => eff && eff.type && hasBehavior(eff))
 				.map(eff => JSON.parse(JSON.stringify(eff)));
 			if (cleanedEffects.length) options.effects = cleanedEffects;
+			const cleanedPowers = itemPowers
+				.filter(power => power?.name?.trim())
+				.map((power, ix) => {
+					const chargesCost = Math.max(0, Number(power.chargesCost) || 0);
+					const usesMax = Math.max(0, Number(power.usesMax) || 0);
+					return {
+						name: power.name.trim(),
+						kind: power.kind || "ability",
+						actionType: power.actionType || "other",
+						description: power.description || "",
+						chargesCost,
+						...(usesMax ? {
+							usesMax,
+							usageType: power.usageType || "limited",
+							usesKey: power.usesKey || `custom:${ix}:${power.name.trim().toLowerCase().replace(/\W+/g, "-")}`,
+						} : {}),
+						isReferenceOnly: !!power.isReferenceOnly || (!chargesCost && !usesMax),
+					};
+				});
+			if (cleanedPowers.length) options.itemPowers = cleanedPowers;
 
 			// Creation-time upgrades & empowerment (#15) — applied AFTER the item is created,
 			// bypassing cost/prerequisites. Only populated when the upgrades section was shown.
@@ -5837,7 +5936,7 @@ class CharacterSheetInventory {
 			// Prose "set/grant" senses fill gaps where no structured value exists for that type
 			const prose = this._parseItemEffectProse(item);
 			for (const [type, value] of Object.entries(prose.senses.set)) {
-				if (item.senses?.[type]) continue; // structured wins
+				if (item.senses?.[type] || item.effects?.some(effect => [`sense:${type}`, `senseBonus:${type}`].includes(effect?.type))) continue; // typed data wins
 				senses[type] = Math.max(senses[type] || 0, value);
 			}
 		}
@@ -5861,7 +5960,7 @@ class CharacterSheetInventory {
 
 			const prose = this._parseItemEffectProse(item);
 			for (const [type, value] of Object.entries(prose.senses.increase)) {
-				if (item.senses?.[type]) continue; // structured wins
+				if (item.senses?.[type] || item.effects?.some(effect => [`sense:${type}`, `senseBonus:${type}`].includes(effect?.type))) continue; // typed data wins
 				bonuses[type] = (bonuses[type] || 0) + value;
 			}
 		}

@@ -70,6 +70,8 @@ export function classifyItem (item) {
 		&& !(power.usageType === "resource" && !power.resourceName));
 	const referencePowers = powers.filter(power => power.isReferenceOnly);
 	const explicitEffects = Array.isArray(item.effects) && item.effects.length;
+	const curatedMechanics = globalThis.CharacterSheetState.getItemCuratedMechanics(item);
+	const hasCuratedMechanics = curatedMechanics.effects.length || curatedMechanics.powers.length;
 	const schemaProfile = globalThis.CharacterSheetState.getItemSchemaEffectProfile(item);
 	const operationalStructured = schemaProfile.operational.filter(adapter => adapter.countsAsMagicEffect !== false);
 	const operationalDerived = [
@@ -114,7 +116,7 @@ export function classifyItem (item) {
 		const isStructured = operationalStructured.length || actionablePowers.some(power => power.kind === "spell") || explicitEffects;
 		return {
 			status: "fullyFunctional",
-			operationalStatus: isStructured ? "structuredOperational" : "proseOperational",
+			operationalStatus: isStructured ? "structuredOperational" : hasCuratedMechanics ? "curatedOperational" : "proseOperational",
 			fields,
 			reasons,
 		};
@@ -397,7 +399,7 @@ function toMarkdown (summary, attachmentPath) {
 		"- **Fully functional:** production normalization or a downstream structured consumer provides operational mechanics, with no unresolved choice, active clause, or reference-only power detected.",
 		"- **Surfaced only:** includes partial automation, unresolved choices, bare resources, reference-only powers, and bespoke rules text.",
 		"- **Unsupported:** the entity has an invalid attached-spell shape or neither mechanics nor rules text.",
-		"- Operational sub-statuses distinguish `structuredOperational`, `proseOperational`, `partiallyOperational`, `choiceRequired`, `resourceOnly`, `referenceOnly`, `bespoke`, and `invalidShape`.",
+		"- Operational sub-statuses distinguish `structuredOperational`, `curatedOperational`, `proseOperational`, `partiallyOperational`, `choiceRequired`, `resourceOnly`, `referenceOnly`, `bespoke`, and `invalidShape`.",
 		"",
 		"Run `node node/audit-character-sheet-items.js [5etools-site-backup.json]` to refresh this report.",
 	);

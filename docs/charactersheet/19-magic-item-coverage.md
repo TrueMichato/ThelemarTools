@@ -8,8 +8,8 @@ The full snapshot includes repository items, base items, concrete magic-variant 
 
 | Legacy headline | Concrete entities | Share |
 | --- | ---: | ---: |
-| Fully functional | 5,535 | 46.3% |
-| Surfaced only | 6,424 | 53.7% |
+| Fully functional | 5,540 | 46.3% |
+| Surfaced only | 6,419 | 53.7% |
 | Unsupported | 0 | 0.0% |
 | **Total** | **11,959** | **100%** |
 
@@ -18,17 +18,19 @@ The stricter operational audit remains below the previous optimistic 6,100-item 
 | Operational status | Items | Share |
 | --- | ---: | ---: |
 | `structuredOperational` | 4,932 | 41.2% |
+| `curatedOperational` | 5 | 0.0% |
 | `proseOperational` | 603 | 5.0% |
 | `partiallyOperational` | 1,824 | 15.3% |
 | `choiceRequired` | 1,218 | 10.2% |
 | `resourceOnly` | 225 | 1.9% |
 | `referenceOnly` | 771 | 6.4% |
-| `bespoke` | 2,386 | 20.0% |
+| `bespoke` | 2,381 | 19.9% |
 | `invalidShape` | 0 | 0.0% |
 
 ## Classification contract
 
 - **`structuredOperational`:** a supported structured field reaches a known sheet consumer, or a structured attached spell becomes an operational item power.
+- **`curatedOperational`:** an exact item/source registry entry expands reusable typed templates into the same effect/power contracts.
 - **`proseOperational`:** production normalization derives an operational effect, rider, or power from a supported prose family.
 - **`partiallyOperational`:** at least one mechanic works, but an unresolved choice, active clause, or reference-only power remains.
 - **`choiceRequired`:** structured metadata is insufficient until the player selects its concrete meaning, such as the spell bound by `spellScrollLevel`.
@@ -37,7 +39,7 @@ The stricter operational audit remains below the previous optimistic 6,100-item 
 - **`bespoke`:** rules text is visible but no safe operational mechanic is available.
 - **`invalidShape`:** an unknown attached-spell shape or an entity with neither mechanics nor rules text.
 
-The legacy headline remains for historical comparison. Only `structuredOperational` and `proseOperational` count as fully functional. Partial, choice, resource, reference, and bespoke outcomes count as surfaced.
+The legacy headline remains for historical comparison. `structuredOperational`, `curatedOperational`, and `proseOperational` count as fully functional. Partial, choice, resource, reference, and bespoke outcomes count as surfaced.
 
 `spellScrollLevel` items now have a deterministic configuration path: adding one from the inventory catalog requires selecting an exact-level spell, persists that selection on the item, and normalizes it into a charged Enspelled power or a finite scroll power. Unconfigured corpus templates remain `choiceRequired`, so this capability does not inflate the headline before a concrete spell is selected.
 
@@ -46,6 +48,8 @@ Structured item resources now use one runtime contract. Numeric maxima remain fi
 The remaining structured adapters add 255 fully functional entities (+2.1 percentage points). Structured `light` becomes a persisted on/off item power feeding the sheet's emitted-light display; `focus` participates in material-component validation for the listed classes; fixed language grants are derived only from wearer-directed rules text, while ambiguous grants require a persisted language choice; `ability.choose` uses persisted per-item selections; and numeric weapon `reach` feeds attack range. Choice-configured copies remain distinct inventory stacks.
 
 The first conservative prose families add another 112 fully functional entities (+0.9 percentage points). Passive weapon critical thresholds, per-level maximum-HP bonuses, doubled carrying capacity, and doubled jump distance compile into typed effects consumed by combat, HP, encumbrance, and movement calculations. Structured fields take precedence, random-table outcomes are excluded, and target-facing or activated wording remains reference-only.
+
+The curated registry adds five exact item/source definitions without item-name branches in downstream consumers. Registry entries reuse typed sense and skill templates, and explicit structured effects override a registry default. Homebrew authors can use the custom-item editor for both passive effects and active/reference powers; charged and limited powers share the runtime's atomic resource tracking, while untracked powers remain explicitly reference-only.
 
 ## Corpus methodology
 
