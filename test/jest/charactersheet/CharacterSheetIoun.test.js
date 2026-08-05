@@ -323,6 +323,9 @@ describe("CharacterSheetIoun — reading the character", () => {
 		]);
 		state.setSetting("enableTgtt", false);
 		expect(ioun.getBondableStones().map(s => s.name)).toEqual(["Ioun Stone #014, Grey Sphere"]);
+		const intrinsicId = ioun.getAllStones().find(s => s.name === "Ioun Stone #014, Grey Sphere").id;
+		expect(ioun.startBond(intrinsicId)).toBe(true);
+		expect(ioun.getBondingStones().map(s => s.id)).toEqual([intrinsicId]);
 		expect(ioun.startBond(ioun.getAllStones().find(s => s.name === "Ioun Stone of Awareness").id)).toBe(false);
 	});
 
