@@ -89,11 +89,51 @@ class CharacterSheetInventory {
 			if (!match) continue;
 
 			let rowChanged = false;
-			if (!(Array.isArray(item.effects) && item.effects.length)
-				&& Array.isArray(match.effects) && match.effects.length) {
-				item.effects = JSON.parse(JSON.stringify(match.effects));
-				rowChanged = true;
-				effectsChanged = true;
+			// Merge catalog effects onto inventory rows. Older saves often lack effects[]
+			// entirely; some rows have a partial list. Always pull missing types/flags from
+			// the catalog so brew updates (e.g. Gae Bolg initiative + PB) apply without
+			// requiring the player to remove/re-add the item.
+			if (Array.isArray(match.effects) && match.effects.length) {
+				if (!(Array.isArray(item.effects) && item.effects.length)) {
+					item.effects = JSON.parse(JSON.stringify(match.effects));
+					rowChanged = true;
+					effectsChanged = true;
+				} else {
+					const have = new Set(item.effects.map(e => `${e?.type || ""}|${e?.name || ""}`));
+					let merged = false;
+					for (const eff of match.effects) {
+						const key = `${eff?.type || ""}|${eff?.name || ""}`;
+						if (!have.has(key)) {
+							item.effects.push(JSON.parse(JSON.stringify(eff)));
+							have.add(key);
+							merged = true;
+						}
+					}
+					// Upgrade in-place flags (e.g. proficiencyBonus) when catalog is richer
+					for (const invEff of item.effects) {
+						const cat = match.effects.find(e =>
+							(e?.type || "") === (invEff?.type || "")
+							&& (e?.name || "") === (invEff?.name || ""));
+						if (!cat) continue;
+						if (cat.proficiencyBonus && !invEff.proficiencyBonus) {
+							invEff.proficiencyBonus = true;
+							merged = true;
+						}
+						if (cat.setValue && !invEff.setValue) {
+							invEff.setValue = cat.setValue;
+							if (cat.value != null && (invEff.value == null || invEff.value === 0)) invEff.value = cat.value;
+							merged = true;
+						}
+						if (cat.mode && !invEff.mode) {
+							invEff.mode = cat.mode;
+							merged = true;
+						}
+					}
+					if (merged) {
+						rowChanged = true;
+						effectsChanged = true;
+					}
+				}
 			}
 			if (!item.ability && match.ability) {
 				item.ability = JSON.parse(JSON.stringify(match.ability));
@@ -6941,6 +6981,10 @@ class CharacterSheetInventory {
 	 */
 	syncItemDerivedState () {
 		if (!this._state) return;
+		// Rehydrate catalog effects/bonuses onto inventory AFTER character load.
+		// setItems() alone is not enough: it runs at init while inventory is still empty,
+		// so brew mechanics like Gae Bolg's initiative + PB never reached older saves.
+		this._rehydrateInventoryItemEffects();
 		this._syncArmorState();
 	}
 

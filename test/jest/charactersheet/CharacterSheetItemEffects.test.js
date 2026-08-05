@@ -565,6 +565,76 @@ describe("TGTT artifact item effects (Gae Bolg / Necklace / Ring of Human Influe
 		expect(state.getInitiative()).toBe(before + state.getProficiencyBonus());
 	});
 
+	it("syncItemDerivedState rehydrates Gae Bolg initiative after character load (catalog already set)", () => {
+		// Real load order: setItems(catalog) runs at init with EMPTY inventory, then
+		// loadFromJson restores a bare Gae Bolg. Rehydration must run again on render.
+		const state = mkArtifactState({level: 5});
+		const before = state.getInitiative();
+		const inv = new CharacterSheetInventory({getState: () => state});
+		inv._page = {getState: () => state, renderCharacter: () => {}, saveCharacter: () => {}};
+		inv.setItems([{
+			name: "Gae Bolg",
+			source: "TGTT",
+			reqAttune: true,
+			effects: [
+				{type: "initiative", value: 0, proficiencyBonus: true, name: "Never Unready"},
+				{type: "sense:truesight", value: 60, setValue: true, name: "Never Unready"},
+			],
+			senses: {truesight: 60},
+		}]);
+		// Inventory still empty at catalog set time — no-op rehydrate.
+		expect(state.getItems()).toHaveLength(0);
+
+		// Character load restores bare weapon (no effects).
+		state.addItem({
+			name: "Gae Bolg",
+			source: "TGTT",
+			equipped: true,
+			attuned: true,
+			requiresAttunement: true,
+			quantity: 1,
+		});
+		expect(state.getInitiative()).toBe(before);
+
+		// _renderCharacter → syncItemDerivedState must rehydrate + re-register.
+		inv.syncItemDerivedState();
+		expect(state.getItems()[0].effects?.some(e => e.type === "initiative" && e.proficiencyBonus)).toBe(true);
+		expect(state.getInitiative()).toBe(before + state.getProficiencyBonus());
+		expect(state.getNamedModifiers().some(m =>
+			m.type === "initiative" && m.proficiencyBonus && m.sourceType === "item",
+		)).toBe(true);
+	});
+
+	it("rehydration merges missing catalog effects onto partial inventory effects[]", () => {
+		const state = mkArtifactState({level: 5});
+		const before = state.getInitiative();
+		// Save has truesight effect but is missing initiative (partial brew snapshot).
+		state.addItem({
+			name: "Gae Bolg",
+			source: "TGTT",
+			equipped: true,
+			attuned: true,
+			requiresAttunement: true,
+			quantity: 1,
+			effects: [
+				{type: "sense:truesight", value: 60, setValue: true, name: "Never Unready"},
+			],
+		});
+		const inv = new CharacterSheetInventory({getState: () => state});
+		inv._page = {getState: () => state, renderCharacter: () => {}, saveCharacter: () => {}};
+		inv.setItems([{
+			name: "Gae Bolg",
+			source: "TGTT",
+			reqAttune: true,
+			effects: [
+				{type: "initiative", value: 0, proficiencyBonus: true, name: "Never Unready"},
+				{type: "sense:truesight", value: 60, setValue: true, name: "Never Unready"},
+			],
+		}]);
+		expect(state.getItems()[0].effects.some(e => e.type === "initiative")).toBe(true);
+		expect(state.getInitiative()).toBe(before + state.getProficiencyBonus());
+	});
+
 	it("Gae Bolg conditionImmune surprised surfaces in defenses and condition immunities", () => {
 		const state = mkArtifactState();
 		addAttuned(state, {
