@@ -264,4 +264,26 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		expect(state.getSpeed("fly")).toBe(state.getSpeed("walk"));
 		expect(state.getItemBonuses()).toEqual(expect.objectContaining({spellAttack: 6, spellSaveDc: 3}));
 	});
+
+	it("surfaces unresolved active prose as reference-only instead of a dead invoke control", () => {
+		const state = new CharacterSheetState();
+		const added = addActiveCatalogItem(state, {
+			name: "Many-Choice Relic",
+			source: "HB",
+			entries: [{
+				type: "entries",
+				name: "Choose a Wonder",
+				entries: ["As an action, choose one of the relic's wonders and resolve its rules."],
+			}],
+		});
+		const power = state.getItemPowers().find(it => it.itemId === added.id);
+
+		expect(power).toEqual(expect.objectContaining({
+			name: "Choose a Wonder",
+			isReferenceOnly: true,
+			isAvailable: false,
+			unavailableReason: "Rules reference only; resolve this effect manually.",
+		}));
+		expect(state.invokeItemPower(added.id, power.id)).toEqual(expect.objectContaining({ok: false}));
+	});
 });

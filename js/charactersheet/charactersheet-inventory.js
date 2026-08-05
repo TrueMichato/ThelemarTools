@@ -5061,8 +5061,14 @@ class CharacterSheetInventory {
 				if (power.usesMax) metaParts.push(`${power.usesCurrent}/${power.usesMax} uses`);
 				if (power.castLevel) metaParts.push(`level ${power.castLevel}`);
 				if (power.isDestructive) metaParts.push("destroys item");
+				if (power.isReferenceOnly) metaParts.push("rules reference");
 				if (metaParts.length) body.append(e_({tag: "div", clazz: "charsheet__item-power-meta", text: metaParts.join(" · ")}));
 				if (power.description) body.append(e_({tag: "div", clazz: "charsheet__item-power-description", text: power.description}));
+				if (power.isReferenceOnly) {
+					row.append(body);
+					section.append(row);
+					continue;
+				}
 				const use = e_({
 					tag: "button",
 					clazz: `ve-btn ve-btn-sm ${power.isDestructive ? "ve-btn-danger" : "ve-btn-primary"}`,

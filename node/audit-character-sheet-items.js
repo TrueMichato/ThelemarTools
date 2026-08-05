@@ -28,6 +28,7 @@ const STRUCTURED_FIELDS = new Set([
 ]);
 const ATTACHED_SPELL_KEYS = new Set(["ability", "charges", "daily", "limited", "other", "rest", "ritual", "will"]);
 const ACTIVATION_RE = /\b(?:as (?:a|an) (?:bonus )?action|as (?:a|an) reaction|use (?:a|an|your) action|when you hit|expend \d+ charges?|once (?:this property is )?used|until (?:the )?next dawn|short or long rest)\b/i;
+const ACTIONABLE_ACTIVE_RE = /\b(?:expend (?:one|\d+) charges?|(?:staff|item|weapon|armor) is destroyed)\b/i;
 
 function getEntryText (entry) {
 	if (entry == null) return "";
@@ -46,8 +47,11 @@ function classifyItem (item) {
 	const fields = [...STRUCTURED_FIELDS].filter(field => item[field] != null);
 	const unsupportedSpellKeys = getAttachedSpellKeys(item).filter(key => !ATTACHED_SPELL_KEYS.has(key));
 	const text = getEntryText(item.entries);
-	const namedActive = (item.entries || []).some(entry =>
-		entry && typeof entry === "object" && entry.name && ACTIVATION_RE.test(getEntryText(entry.entries)));
+	const namedActive = (item.entries || []).some(entry => {
+		if (!entry || typeof entry !== "object" || !entry.name) return false;
+		const entryText = getEntryText(entry.entries);
+		return ACTIVATION_RE.test(entryText) && ACTIONABLE_ACTIVE_RE.test(entryText);
+	});
 	const hasActiveProse = ACTIVATION_RE.test(text);
 	const hasPowerData = !!item.attachedSpells || namedActive;
 	if (unsupportedSpellKeys.length) {

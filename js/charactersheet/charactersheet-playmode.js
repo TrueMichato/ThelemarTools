@@ -1235,9 +1235,11 @@ export class CharacterSheetPlayMode {
 			const heading = this._ce("div", "pm-item-powers__heading", card);
 			heading.textContent = group.label;
 			for (const power of groupPowers) {
-				const row = this._ce("button", "pm-item-power", card);
-				row.type = "button";
-				row.disabled = !power.isAvailable || (["action", "bonus", "reaction"].includes(group.key) && !this._actionEconomy[group.key]);
+				const row = this._ce(power.isReferenceOnly ? "div" : "button", "pm-item-power", card);
+				if (!power.isReferenceOnly) {
+					row.type = "button";
+					row.disabled = !power.isAvailable || (["action", "bonus", "reaction"].includes(group.key) && !this._actionEconomy[group.key]);
+				}
 				const name = this._ce("span", "pm-item-power__name", row);
 				name.textContent = power.name;
 				const meta = this._ce("span", "pm-item-power__meta", row);
@@ -1245,7 +1247,8 @@ export class CharacterSheetPlayMode {
 					? `${power.itemName} · ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"} · ${power.chargesCurrent}/${power.chargesMax}`
 					: power.usesMax
 						? `${power.itemName} · ${power.usesCurrent}/${power.usesMax} uses`
-						: power.itemName;
+						: `${power.itemName}${power.isReferenceOnly ? " · rules reference" : ""}`;
+				if (power.isReferenceOnly) continue;
 				this._makeClickable(row, power.unavailableReason || `${power.kind === "spell" ? "Cast" : "Invoke"} ${power.name}`, async () => {
 					const used = await this._page._inventory?._pInvokeItemPower?.(power.itemId, power.id);
 					if (!used) return;

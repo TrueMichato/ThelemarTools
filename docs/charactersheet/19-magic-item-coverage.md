@@ -4,8 +4,8 @@ Snapshot generated from the in-repo site catalog, magic-variant templates, TGTT 
 
 | Status | Items | Share |
 | --- | ---: | ---: |
-| Fully functional | 1241 | 46.7% |
-| Surfaced only | 1418 | 53.3% |
+| Fully functional | 1087 | 40.9% |
+| Surfaced only | 1572 | 59.1% |
 | Unsupported | 0 | 0.0% |
 | **Total** | **2659** | **100%** |
 
@@ -13,10 +13,10 @@ Snapshot generated from the in-repo site catalog, magic-variant templates, TGTT 
 
 | Corpus | Full | Surfaced | Total |
 | --- | ---: | ---: | ---: |
-| Site catalog | 794 | 849 | 1643 |
-| Magic-variant templates | 110 | 104 | 214 |
-| TGTT | 21 | 1 | 22 |
-| Supplied homebrew export | 316 | 464 | 780 |
+| Site catalog | 715 | 928 | 1643 |
+| Magic-variant templates | 105 | 109 | 214 |
+| TGTT | 14 | 8 | 22 |
+| Supplied homebrew export | 253 | 527 | 780 |
 
 The supplied export contains 21 homebrew documents with 780 magic items after excluding mundane entities. The largest sets are *The Griffon's Saddlebag, Book 1* (359), *Heliana's Guide to Monster Hunting* (91), the two *Grim Hollow Monster Grimoire* documents (74 each), and *Monsters of Drakkenheim* (43).
 
@@ -45,11 +45,11 @@ The supplied export contains 21 homebrew documents with 780 magic items after ex
 
 ## Classification contract
 
-- **Fully functional:** mechanics use a supported structured field, attached-spell shape, or named active-power block.
+- **Fully functional:** mechanics use a supported structured field, attached-spell shape, or resource-backed/destructive active-power block.
 - **Surfaced only:** rules text remains visible, but no safe structured operation can be inferred.
 - **Unsupported:** the entity has an unknown attached-spell shape or neither mechanics nor rules text.
 
-The audit is deliberately conservative. "Surfaced only" means the player can read the complete item rules, but the sheet does not claim to resolve bespoke prose. Limited, daily, rest-based, at-will, ritual, charge-based, and other attached-spell forms are supported. Daily groups share uses unless the data uses the `e` suffix ("each"), rest groups refresh on either rest, and finite `limited` groups never refresh automatically.
+The audit is deliberately conservative. "Surfaced only" means the player can read the complete item rules, but the sheet does not claim to resolve bespoke prose. Prose-derived powers without a charge/use transaction or destructive consequence render as non-interactive rules references. Limited, daily, rest-based, at-will, ritual, charge-based, and other attached-spell forms are supported. Daily groups share uses unless the data uses the `e` suffix ("each"), rest groups refresh on either rest, and finite `limited` groups never refresh automatically.
 
 Catalog-backed regressions cover the high-frequency enhancement, ability-setter, protection/luck, resistance/immunity, speed, senses, spell-focus, and charged-spell families. Conditional AC bonuses such as Bracers of Defense are evaluated against live armor and shield state instead of being treated as unconditional `bonusAc`.
 

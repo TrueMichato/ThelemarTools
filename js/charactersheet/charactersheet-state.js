@@ -28299,6 +28299,7 @@ class CharacterSheetState {
 				chargesCost,
 				description: text,
 				isDestructive: /\b(?:staff|item|weapon|armor)\s+is destroyed\b/i.test(text),
+				isReferenceOnly: !chargesCost,
 			});
 		}
 
@@ -28307,6 +28308,9 @@ class CharacterSheetState {
 
 		const nonSpell = powers.filter(it => it.kind !== "spell");
 		if (item.charges === 1 && nonSpell.length === 1 && !nonSpell[0].chargesCost) nonSpell[0].chargesCost = 1;
+		for (const power of nonSpell) {
+			if (power.chargesCost || power.usesMax || power.isDestructive) power.isReferenceOnly = false;
+		}
 		return powers;
 	}
 
@@ -28361,15 +28365,17 @@ class CharacterSheetState {
 				const usesCurrent = power.usesMax
 					? item.itemPowerUses?.[power.usesKey] ?? power.usesMax
 					: null;
-				const unavailableReason = !item.equipped
-					? "Equip this item to use its powers."
-					: item.requiresAttunement && !item.attuned
-						? "Attune to this item to use its powers."
-						: power.chargesCost > chargesCurrent
-							? `Requires ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}; ${chargesCurrent} remaining.`
-							: power.usesMax && usesCurrent <= 0
-								? `${power.name} has no uses remaining.`
-								: null;
+				const unavailableReason = power.isReferenceOnly
+					? "Rules reference only; resolve this effect manually."
+					: !item.equipped
+						? "Equip this item to use its powers."
+						: item.requiresAttunement && !item.attuned
+							? "Attune to this item to use its powers."
+							: power.chargesCost > chargesCurrent
+								? `Requires ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}; ${chargesCurrent} remaining.`
+								: power.usesMax && usesCurrent <= 0
+									? `${power.name} has no uses remaining.`
+									: null;
 				out.push({
 					...power,
 					itemId: item.id,
