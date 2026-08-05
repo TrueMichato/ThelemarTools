@@ -2,7 +2,29 @@ import "./setup.js";
 
 import {classifyItem, summarize} from "../../../node/audit-character-sheet-items.js";
 
+const CharacterSheetState = globalThis.CharacterSheetState;
+
 describe("Character sheet magic-item operational coverage audit", () => {
+	it("exposes the canonical schema adapter profile from production state", () => {
+		const profile = CharacterSheetState.getItemSchemaEffectProfile({
+			bonusAc: "+2",
+			ability: {choose: [{from: ["str", "dex"], amount: 2}]},
+			light: [{bright: 20, dim: 20}],
+			containerCapacity: {weight: [500], weightless: true},
+		});
+
+		expect(profile.operational).toEqual(expect.arrayContaining([
+			expect.objectContaining({field: "bonusAc", family: "ac", consumer: "inventory"}),
+			expect.objectContaining({field: "containerCapacity", countsAsMagicEffect: false}),
+		]));
+		expect(profile.choiceRequired).toEqual([
+			expect.objectContaining({field: "ability.choose", family: "ability"}),
+		]);
+		expect(profile.storedOnly).toEqual([
+			expect.objectContaining({field: "light", family: "light"}),
+		]);
+	});
+
 	it("counts a consumed structured passive as operational", () => {
 		expect(classifyItem({
 			name: "Protective Charm",

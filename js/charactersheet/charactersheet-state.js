@@ -28230,6 +28230,60 @@ class CharacterSheetState {
 			.replace(/^-+|-+$/g, "");
 	}
 
+	static ITEM_SCHEMA_EFFECT_ADAPTERS = Object.freeze({
+		ability: {family: "ability", consumer: "inventory"},
+		bonusAbilityCheck: {family: "check", consumer: "rolls"},
+		bonusAc: {family: "ac", consumer: "inventory"},
+		bonusProficiencyBonus: {family: "proficiency", consumer: "state"},
+		bonusSavingThrow: {family: "save", consumer: "rolls"},
+		bonusSavingThrowConcentration: {family: "concentration", consumer: "combat"},
+		bonusSpellAttack: {family: "spellAttack", consumer: "spells"},
+		bonusSpellDamage: {family: "spellDamage", consumer: "spells"},
+		bonusSpellSaveDc: {family: "spellSaveDc", consumer: "spells"},
+		bonusWeapon: {family: "weapon", consumer: "combat"},
+		bonusWeaponAttack: {family: "weaponAttack", consumer: "combat"},
+		bonusWeaponCritDamage: {family: "weaponCritDamage", consumer: "combat"},
+		bonusWeaponDamage: {family: "weaponDamage", consumer: "combat"},
+		conditionImmune: {family: "conditionImmunity", consumer: "inventory"},
+		containerCapacity: {family: "container", consumer: "inventory", countsAsMagicEffect: false},
+		critThreshold: {family: "weaponCritThreshold", consumer: "combat"},
+		focus: {family: "spellcastingFocus", status: "storedOnly"},
+		grantsLanguage: {family: "language", status: "choiceRequired"},
+		grantsProficiency: {family: "itemProficiency", consumer: "state", countsAsMagicEffect: false},
+		immune: {family: "damageImmunity", consumer: "inventory"},
+		light: {family: "light", status: "storedOnly"},
+		modifySpeed: {family: "speed", consumer: "state"},
+		resist: {family: "damageResistance", consumer: "inventory"},
+		senses: {family: "senses", consumer: "inventory"},
+		spellImmunitySlots: {family: "spellImmunity", consumer: "inventory"},
+		spellScrollLevel: {family: "attachedSpellChoice", status: "choiceRequired"},
+		vulnerable: {family: "damageVulnerability", consumer: "inventory"},
+	});
+
+	/**
+	 * Return the canonical structured-field contract used by runtime consumers and coverage tooling.
+	 * Choice-dependent sub-shapes override their otherwise operational parent field.
+	 * @param {object} item
+	 * @returns {{operational: Array<object>, choiceRequired: Array<object>, storedOnly: Array<object>}}
+	 */
+	static getItemSchemaEffectProfile (item) {
+		const out = {operational: [], choiceRequired: [], storedOnly: []};
+		if (!item) return out;
+
+		for (const [field, adapter] of Object.entries(CharacterSheetState.ITEM_SCHEMA_EFFECT_ADAPTERS)) {
+			if (item[field] == null || item[field] === false) continue;
+			if (field === "ability" && item.ability?.choose?.length) {
+				out.choiceRequired.push({...adapter, field: "ability.choose", value: item.ability.choose});
+			}
+
+			const status = adapter.status || "operational";
+			if (field === "ability" && !item.ability?.static && !["str", "dex", "con", "int", "wis", "cha"].some(ab => item.ability?.[ab] != null)) continue;
+			out[status].push({...adapter, field, value: item[field]});
+		}
+
+		return out;
+	}
+
 	/**
 	 * Normalize attached spells and named active entry blocks into one item-power model.
 	 * Explicit `itemPowers[]` entries win over derived entries with the same id.

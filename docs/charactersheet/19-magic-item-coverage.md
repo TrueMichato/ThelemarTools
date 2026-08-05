@@ -19,8 +19,8 @@ The stricter operational audit reduces the previous 6,100-item functional count 
 | --- | ---: | ---: |
 | `structuredOperational` | 4,655 | 38.9% |
 | `proseOperational` | 513 | 4.3% |
-| `partiallyOperational` | 1,838 | 15.4% |
-| `choiceRequired` | 1,218 | 10.2% |
+| `partiallyOperational` | 1,837 | 15.4% |
+| `choiceRequired` | 1,219 | 10.2% |
 | `resourceOnly` | 238 | 2.0% |
 | `referenceOnly` | 819 | 6.8% |
 | `bespoke` | 2,678 | 22.4% |

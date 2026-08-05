@@ -40,29 +40,6 @@ const STRUCTURED_FIELDS = new Set([
 	"spellImmunitySlots",
 	"vulnerable",
 ]);
-const OPERATIONAL_STRUCTURED_FIELDS = new Set([
-	"ability",
-	"bonusAbilityCheck",
-	"bonusAc",
-	"bonusProficiencyBonus",
-	"bonusSavingThrow",
-	"bonusSavingThrowConcentration",
-	"bonusSpellAttack",
-	"bonusSpellDamage",
-	"bonusSpellSaveDc",
-	"bonusWeapon",
-	"bonusWeaponAttack",
-	"bonusWeaponDamage",
-	"bonusWeaponCritDamage",
-	"conditionImmune",
-	"critThreshold",
-	"immune",
-	"modifySpeed",
-	"resist",
-	"senses",
-	"spellImmunitySlots",
-	"vulnerable",
-]);
 const ATTACHED_SPELL_KEYS = new Set(["ability", "charges", "daily", "limited", "other", "rest", "ritual", "will"]);
 const ACTIVATION_RE = /\b(?:as (?:a|an) (?:bonus )?action|as (?:a|an) reaction|use (?:a|an|your) action|when you hit|expend \d+ charges?|once (?:this property is )?used|until (?:the )?next dawn|short or long rest)\b/i;
 
@@ -92,7 +69,8 @@ export function classifyItem (item) {
 	const actionablePowers = powers.filter(power => power.kind === "spell" || !power.isReferenceOnly);
 	const referencePowers = powers.filter(power => power.isReferenceOnly);
 	const explicitEffects = Array.isArray(item.effects) && item.effects.length;
-	const operationalStructured = [...OPERATIONAL_STRUCTURED_FIELDS].filter(field => item[field] != null);
+	const schemaProfile = globalThis.CharacterSheetState.getItemSchemaEffectProfile(item);
+	const operationalStructured = schemaProfile.operational.filter(adapter => adapter.countsAsMagicEffect !== false);
 	const operationalDerived = [
 		...effects,
 		...damageRiders,
@@ -101,8 +79,9 @@ export function classifyItem (item) {
 	];
 	const choices = [
 		...(item.spellScrollLevel != null && !item.attachedSpells ? ["spellScrollLevel"] : []),
-		...(item.ability?.choose?.length ? ["ability.choose"] : []),
-		...(item.grantsLanguage ? ["grantsLanguage"] : []),
+		...schemaProfile.choiceRequired
+			.map(adapter => adapter.field)
+			.filter(field => field !== "spellScrollLevel"),
 	];
 	const hasOperational = operationalStructured.length || actionablePowers.length || operationalDerived.length;
 	const hasUnresolvedActive = hasActiveProse && !actionablePowers.length;
