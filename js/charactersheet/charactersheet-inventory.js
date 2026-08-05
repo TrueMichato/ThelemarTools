@@ -5058,6 +5058,7 @@ class CharacterSheetInventory {
 				body.append(e_({tag: "div", clazz: "charsheet__item-power-name", text: power.name}));
 				const metaParts = [];
 				if (power.chargesCost) metaParts.push(`${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}`);
+				if (power.usesMax) metaParts.push(`${power.usesCurrent}/${power.usesMax} uses`);
 				if (power.castLevel) metaParts.push(`level ${power.castLevel}`);
 				if (power.isDestructive) metaParts.push("destroys item");
 				if (metaParts.length) body.append(e_({tag: "div", clazz: "charsheet__item-power-meta", text: metaParts.join(" · ")}));

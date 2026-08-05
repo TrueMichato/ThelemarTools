@@ -1312,6 +1312,7 @@ class CharacterSheetRest {
 				console.warn(`[CharSheet Rest] Failed to recharge item "${item.name}":`, e);
 			}
 		});
+		this._state.restoreItemPowerUses?.(restType);
 
 		// Show toast for restored item charges
 		if (restoredItems.length > 0) {

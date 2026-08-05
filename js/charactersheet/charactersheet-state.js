@@ -28213,7 +28213,7 @@ class CharacterSheetState {
 				castLevel: levelRaw ? parseInt(levelRaw, 10) || null : null,
 			};
 		};
-		const addSpell = (raw, usageType, {chargesCost = 0, usesMax = null, isEach = false} = {}) => {
+		const addSpell = (raw, usageType, {chargesCost = 0, usesMax = null, isEach = false, usesKey = null} = {}) => {
 			const spell = parseSpellUid(raw);
 			if (!spell.name) return;
 			addPower({
@@ -28225,6 +28225,7 @@ class CharacterSheetState {
 				chargesCost,
 				usesMax,
 				isEach,
+				usesKey: usesMax ? (usesKey || `${usageType}:${usesMax}:${spell.name.toLowerCase()}|${spell.source.toLowerCase()}`) : null,
 				spellName: spell.name,
 				spellSource: spell.source,
 				castLevel: spell.castLevel,
@@ -28245,8 +28246,18 @@ class CharacterSheetState {
 				for (const [usesRaw, list] of Object.entries(attached[usageType] || {})) {
 					const isEach = usesRaw.endsWith("e");
 					const usesMax = Math.max(1, parseInt(isEach ? usesRaw.slice(0, -1) : usesRaw, 10) || 1);
-					for (const raw of list || []) addSpell(raw, usageType, {usesMax, isEach});
+					for (const raw of list || []) {
+						addSpell(raw, usageType, {
+							usesMax,
+							isEach,
+							usesKey: isEach ? null : `${usageType}:${usesRaw}`,
+						});
+					}
 				}
+			}
+			for (const [usesRaw, list] of Object.entries(attached.limited || {})) {
+				const usesMax = Math.max(1, parseInt(usesRaw, 10) || 1);
+				for (const raw of list || []) addSpell(raw, "limited", {usesMax, usesKey: `limited:${usesRaw}`});
 			}
 			for (const raw of attached.other || []) addSpell(raw, "other");
 		}
@@ -28322,13 +28333,18 @@ class CharacterSheetState {
 			if (activeOnly && !isActive) continue;
 			for (const power of item.itemPowers || []) {
 				const chargesCurrent = item.chargesCurrent ?? item.charges ?? 0;
+				const usesCurrent = power.usesMax
+					? item.itemPowerUses?.[power.usesKey] ?? power.usesMax
+					: null;
 				const unavailableReason = !item.equipped
 					? "Equip this item to use its powers."
 					: item.requiresAttunement && !item.attuned
 						? "Attune to this item to use its powers."
 						: power.chargesCost > chargesCurrent
 							? `Requires ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}; ${chargesCurrent} remaining.`
-							: null;
+							: power.usesMax && usesCurrent <= 0
+								? `${power.name} has no uses remaining.`
+								: null;
 				out.push({
 					...power,
 					itemId: item.id,
@@ -28336,6 +28352,7 @@ class CharacterSheetState {
 					itemSource: item.source,
 					chargesCurrent,
 					chargesMax: item.charges || 0,
+					usesCurrent,
 					recharge: item.recharge || null,
 					isAvailable: !unavailableReason,
 					unavailableReason,
@@ -28365,15 +28382,40 @@ class CharacterSheetState {
 			if (current < power.chargesCost) return {ok: false, reason: `Not enough charges for ${power.name}.`};
 			entry.item.chargesCurrent = current - power.chargesCost;
 		}
+		if (power.usesMax) {
+			if (!entry.item.itemPowerUses) entry.item.itemPowerUses = {};
+			const current = entry.item.itemPowerUses[power.usesKey] ?? power.usesMax;
+			if (current <= 0) return {ok: false, reason: `No uses remaining for ${power.name}.`};
+			entry.item.itemPowerUses[power.usesKey] = current - 1;
+		}
 		const result = {
 			ok: true,
 			power,
 			chargesCurrent: entry.item.chargesCurrent ?? entry.item.charges ?? 0,
 			chargesMax: entry.item.charges || 0,
+			usesCurrent: power.usesMax ? entry.item.itemPowerUses?.[power.usesKey] ?? power.usesMax : null,
 			destroyed: !!power.isDestructive,
 		};
 		if (power.isDestructive) this.removeItem(itemId);
 		return result;
+	}
+
+	restoreItemPowerUses (restType) {
+		let restored = 0;
+		for (const entry of this._data.inventory || []) {
+			const item = entry.item;
+			if (!item?.itemPowers?.length) continue;
+			for (const power of item.itemPowers) {
+				if (!power.usesMax || !power.usesKey) continue;
+				const shouldRestore = power.usageType === "rest"
+					|| (power.usageType === "daily" && restType === "long");
+				if (!shouldRestore) continue;
+				if (!item.itemPowerUses) item.itemPowerUses = {};
+				if ((item.itemPowerUses[power.usesKey] ?? power.usesMax) < power.usesMax) restored++;
+				item.itemPowerUses[power.usesKey] = power.usesMax;
+			}
+		}
+		return restored;
 	}
 
 	/**

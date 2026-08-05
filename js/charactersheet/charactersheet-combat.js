@@ -6553,7 +6553,9 @@ class CharacterSheetCombat {
 				body.append(e_({tag: "div", clazz: "cs-combat-item-power__name", text: power.name}));
 				const meta = power.chargesCost
 					? `${power.itemName} · ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"} · ${power.chargesCurrent}/${power.chargesMax}`
-					: power.itemName;
+					: power.usesMax
+						? `${power.itemName} · ${power.usesCurrent}/${power.usesMax} uses`
+						: power.itemName;
 				body.append(e_({tag: "div", clazz: "cs-combat-item-power__meta", text: meta}));
 				const actionAvailable = ["action", "bonus", "reaction"].includes(type) ? this._isActionTypeAvailable(type) : true;
 				const use = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-primary", text: power.kind === "spell" ? "Cast" : "Invoke"});

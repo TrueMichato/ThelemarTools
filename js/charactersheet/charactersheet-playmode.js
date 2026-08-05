@@ -1243,7 +1243,9 @@ export class CharacterSheetPlayMode {
 				const meta = this._ce("span", "pm-item-power__meta", row);
 				meta.textContent = power.chargesCost
 					? `${power.itemName} · ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"} · ${power.chargesCurrent}/${power.chargesMax}`
-					: power.itemName;
+					: power.usesMax
+						? `${power.itemName} · ${power.usesCurrent}/${power.usesMax} uses`
+						: power.itemName;
 				this._makeClickable(row, power.unavailableReason || `${power.kind === "spell" ? "Cast" : "Invoke"} ${power.name}`, async () => {
 					const used = await this._page._inventory?._pInvokeItemPower?.(power.itemId, power.id);
 					if (!used) return;

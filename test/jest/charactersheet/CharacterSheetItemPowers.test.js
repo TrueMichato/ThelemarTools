@@ -122,4 +122,34 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		);
 		expect(JSON.stringify(state.getSpellSlots())).toBe(slotsBefore);
 	});
+
+	it("tracks shared daily attached-spell uses and restores them on a long rest", () => {
+		const state = new CharacterSheetState();
+		const adze = items.find(it => it.name === "Adze of Annam");
+		const added = addActiveCatalogItem(state, adze);
+		const fabricate = state.getItemPowers({activeOnly: true}).find(power => power.itemId === added.id && power.name === "Fabricate");
+		const moveEarth = state.getItemPowers({activeOnly: true}).find(power => power.itemId === added.id && power.name === "Move Earth");
+
+		expect(fabricate).toEqual(expect.objectContaining({usesCurrent: 1, usesMax: 1, usageType: "daily"}));
+		expect(fabricate.usesKey).toBe(moveEarth.usesKey);
+		expect(state.invokeItemPower(added.id, fabricate.id)).toEqual(expect.objectContaining({ok: true, usesCurrent: 0}));
+		expect(state.getItemPower(added.id, moveEarth.id)).toEqual(expect.objectContaining({isAvailable: false, usesCurrent: 0}));
+
+		expect(state.restoreItemPowerUses("short")).toBe(0);
+		expect(state.getItemPower(added.id, fabricate.id).isAvailable).toBe(false);
+		expect(state.restoreItemPowerUses("long")).toBe(1);
+		expect(state.getItemPower(added.id, moveEarth.id)).toEqual(expect.objectContaining({isAvailable: true, usesCurrent: 1}));
+	});
+
+	it("surfaces limited attached spells without incorrectly restoring them on a rest", () => {
+		const state = new CharacterSheetState();
+		const balloon = items.find(it => it.name === "Balloon Pack");
+		const added = addActiveCatalogItem(state, balloon);
+		const levitate = state.getItemPowers({activeOnly: true}).find(power => power.itemId === added.id && power.name === "Levitate");
+
+		expect(levitate).toEqual(expect.objectContaining({usageType: "limited", usesCurrent: 1, usesMax: 1}));
+		expect(state.invokeItemPower(added.id, levitate.id)).toEqual(expect.objectContaining({ok: true, usesCurrent: 0}));
+		state.restoreItemPowerUses("long");
+		expect(state.getItemPower(added.id, levitate.id)).toEqual(expect.objectContaining({isAvailable: false, usesCurrent: 0}));
+	});
 });
