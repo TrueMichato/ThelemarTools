@@ -2362,6 +2362,30 @@ export class CharacterSheetPlayMode {
 		}
 	}
 
+	_toggleItemAttunement (item) {
+		if (!item.attuned && this._state.getIounBondPolicy?.(item.item || item)?.usesBond) {
+			JqueryUtil?.doToast?.({type: "info", content: `${item.name} must form an Ioun bond before it becomes attuned.`});
+			this._page?._ioun?.openModal?.();
+			return false;
+		}
+
+		if (item.attuned) {
+			this._state.unattune?.(item.id);
+			return true;
+		}
+
+		const {canAttune, reasons} = this._state.meetsAttunementRequirements?.(item.item || item) || {canAttune: true, reasons: []};
+		if (!canAttune) {
+			JqueryUtil?.doToast?.({type: "warning", content: `Cannot attune to ${item.name}: ${reasons.join(", ")}`});
+			return false;
+		}
+		if (!this._state.attune?.(item.id)) {
+			JqueryUtil?.doToast?.({type: "warning", content: `Cannot attune to more than ${this._state.getMaxAttunement?.() || 3} items!`});
+			return false;
+		}
+		return true;
+	}
+
 	_renderItemRow (parent, item) {
 		const row = this._ce("div", "pm-item", parent);
 
@@ -2389,8 +2413,7 @@ export class CharacterSheetPlayMode {
 			attuneBtn.title = item.attuned ? "Unattune" : "Attune";
 			this._makeClickable(attuneBtn, `${item.attuned ? "Unattune" : "Attune"} ${item.name}`, (e) => {
 				e.stopPropagation();
-				this._state.setItemAttuned?.(item.id, !item.attuned);
-				this._openDrawerByType("gear");
+				if (this._toggleItemAttunement(item)) this._openDrawerByType("gear");
 			});
 		}
 
@@ -2522,7 +2545,7 @@ export class CharacterSheetPlayMode {
 				{label: item.name, icon: "inventory", disabled: true},
 				{separator: true},
 				{label: item.equipped ? "Unequip" : "Equip", icon: "shield", onClick: () => { this._state.setItemEquipped?.(item.id, !item.equipped); this._openDrawerByType("gear"); }},
-				...(item.reqAttune || item.attuned ? [{label: item.attuned ? "Unattune" : "Attune", icon: "cantrip", onClick: () => { this._state.setItemAttuned?.(item.id, !item.attuned); this._openDrawerByType("gear"); }}] : []),
+				...(item.reqAttune || item.attuned ? [{label: item.attuned ? "Unattune" : "Attune", icon: "cantrip", onClick: () => { if (this._toggleItemAttunement(item)) this._openDrawerByType("gear"); }}] : []),
 				...(item.consumable || item.type === "P" || item.type === "SC" ? [{label: "Use Item", icon: "potion", onClick: () => { this._state.consumeItem?.(item.id); this._logActivity("potion", `Used ${item.name}`); this._openDrawerByType("gear"); }}] : []),
 				{label: "Item Details", icon: "info", onClick: () => this._showItemInfoModal(item)},
 				{label: "Add Note", icon: "edit", onClick: () => this._showEntityNoteModal("item", item.id, item.name, () => this._openDrawerByType("gear"))},
@@ -3794,9 +3817,9 @@ export class CharacterSheetPlayMode {
 			const attuneToggle = this._ce("button", `pm-modal__btn ${item.attuned ? "pm-modal__btn--confirm" : "pm-modal__btn--cancel"}`, toggleRow);
 			this._setIconLabel(attuneToggle, "cantrip", item.attuned ? " Attuned" : " Unattuned");
 			attuneToggle.addEventListener("click", () => {
-				this._state.setItemAttuned?.(item.id, !item.attuned);
+				const didToggle = this._toggleItemAttunement(item);
 				overlay.remove();
-				this._openDrawerByType("gear");
+				if (didToggle) this._openDrawerByType("gear");
 			});
 		}
 
@@ -4996,8 +5019,8 @@ export class CharacterSheetPlayMode {
 					cb.type = "checkbox";
 					cb.checked = !!value;
 					cb.addEventListener("change", () => {
-						onChange?.(cb.checked);
 						this._state.setSetting(key, cb.checked);
+						onChange?.(cb.checked);
 					});
 				} else if (type === "select") {
 					const sel = this._ce("select", "pm-settings__select", row);
@@ -5039,7 +5062,11 @@ export class CharacterSheetPlayMode {
 				label: "Enable Thelemar Homebrew",
 				type: "toggle",
 				value: settings.enableTgtt,
-				onChange: (v) => { this._renderSettingsDrawer(container); },
+				onChange: () => {
+					container.innerHTML = "";
+					this._renderSettingsDrawer(container);
+					this._page._renderCharacter?.();
+				},
 			},
 			...(settings.enableTgtt ? [
 				{key: "thelemar_carryWeight", label: "TGTT Carry Capacity", type: "toggle", value: settings.thelemar_carryWeight},

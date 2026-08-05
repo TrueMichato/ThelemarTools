@@ -34,9 +34,9 @@
  * ## Detection is rules-text driven, not source-locked
  *
  * Keyed on the item's own text, so the ~35 official Ioun Stones (DMG/XDMG/IMR/LLK) are managed
- * too. The 7-day bond pipeline and slot-free treatment are keyed separately, on the text that
- * actually grants them, so official stones correctly get orbit management without the homebrew
- * bond rules.
+ * too. Intrinsic Ioun Bond text always grants the homebrew bond rules. The TGTT master flag
+ * additively extends those same rules to official stones; disabling it restores RAW official
+ * attunement without removing text-defined bonds.
  */
 
 import {CharacterSheetModal} from "./charactersheet-modal.js";
@@ -256,6 +256,8 @@ class CharacterSheetIoun {
 	 * and neither orbits.
 	 */
 	static isIounStone (item) {
+		const State = globalThis.CharacterSheetState;
+		if (State?.isIounStone) return State.isIounStone(item);
 		if (!item) return false;
 		if (/\bioun stone\b/i.test(item.name || "")) return true;
 		return /\bioun bond\b/i.test(CharacterSheetIoun._getItemText(item));
@@ -263,11 +265,12 @@ class CharacterSheetIoun {
 
 	/**
 	 * Does this stone use the homebrew bond ruleset (7 consecutive days, slot-free, accelerated
-	 * by orbiting stones)? Official stones use ordinary attunement and must NOT be dragged into
-	 * the bonding pipeline.
+	 * by orbiting stones)? With state, this delegates to the centralized effective policy.
+	 * Without state, it reports only the item's intrinsic text rule for pure detection callers.
 	 */
-	static usesIounBond (item) {
+	static usesIounBond (item, {state = null} = {}) {
 		if (!item) return false;
+		if (state?.getIounBondPolicy) return state.getIounBondPolicy(item).usesBond;
 		return /\bioun bond\b/i.test(CharacterSheetIoun._getItemText(item));
 	}
 
@@ -425,19 +428,19 @@ class CharacterSheetIoun {
 		return this.getBondedStones().filter(i => CharacterSheetIoun.getStoneState(i) === "orbiting");
 	}
 
-	/** Stones part-way through a 7-day bond. Only ever homebrew stones. */
+	/** Stones part-way through a 7-day bond. */
 	getBondingStones () {
 		const bonds = this._state.getIounBonds?.() || {};
 		return this.getAllStones()
-			.filter(i => !i.attuned && bonds[i.id] != null)
+			.filter(i => !i.attuned && bonds[i.id] != null && CharacterSheetIoun.usesIounBond(i, {state: this._state}))
 			.map(i => ({...i, bondDaysElapsed: bonds[i.id]}));
 	}
 
-	/** Stones eligible to START a bond: held, unbonded, homebrew ruleset, not already bonding. */
+	/** Stones eligible to START a bond: held, unbonded, effective bond ruleset, not already bonding. */
 	getBondableStones () {
 		const bonds = this._state.getIounBonds?.() || {};
 		return this.getAllStones()
-			.filter(i => !i.attuned && bonds[i.id] == null && CharacterSheetIoun.usesIounBond(i));
+			.filter(i => !i.attuned && bonds[i.id] == null && CharacterSheetIoun.usesIounBond(i, {state: this._state}));
 	}
 
 	/**
@@ -456,7 +459,9 @@ class CharacterSheetIoun {
 
 	/** The module shows itself only once there is something to manage. */
 	isApplicable () {
-		return this.getBondedStones().length > 0 || this.getBondingStones().length > 0;
+		return this.getBondedStones().length > 0
+			|| this.getBondingStones().length > 0
+			|| this.getBondableStones().length > 0;
 	}
 
 	// #endregion
@@ -489,6 +494,8 @@ class CharacterSheetIoun {
 	startBond (itemId) {
 		this._refreshState();
 		if (!this._state.setIounBondDays) return false;
+		const stone = this.getAllStones().find(i => i.id === itemId);
+		if (!stone || stone.attuned || !CharacterSheetIoun.usesIounBond(stone, {state: this._state})) return false;
 		this._state.setIounBondDays(itemId, 0);
 		this._afterChange();
 		return true;

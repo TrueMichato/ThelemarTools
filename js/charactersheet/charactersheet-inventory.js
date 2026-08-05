@@ -3869,6 +3869,11 @@ class CharacterSheetInventory {
 		// If trying to attune (not un-attune), check requirements
 		if (!item.attuned) {
 			const itemData = item.item || item;
+			if (this._state.getIounBondPolicy?.(itemData)?.usesBond) {
+				JqueryUtil.doToast({type: "info", content: `${item.name} must form an Ioun bond before it becomes attuned.`});
+				this._page?._ioun?.openModal?.();
+				return;
+			}
 			// Check attunement limit (base 3, can be higher for Artificers). Items whose own
 			// rules exempt them from the limit (e.g. an Ioun bond) bypass this check.
 			if (!this._state.isAttunementExempt(itemData)) {

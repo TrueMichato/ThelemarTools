@@ -6,13 +6,32 @@ Super-Charged variants and 3 loose items — **685 items** in
 `homebrew/Moorchlyne Ioun Stones.json`.
 
 Three sheet features exist because of this source, and all three are **generic** — they
-key on rules text, not on the source abbreviation:
+use item rules/detection and character settings rather than source-specific allowlists:
 
 | Feature | Where | What it does |
 |---|---|---|
 | Attunement exemption | `charactersheet-state.js` `isAttunementExempt()` | Ioun bonds don't consume one of the 3 attunement slots |
 | Ioun Stone manager | `charactersheet-ioun.js` | Orbit/stow control surface over `equipped` + `attuned` |
 | Item conditional modifiers | `charactersheet-state.js` `_getItemConditionalModifiers()` | Narrowly-scoped item bonuses reach the per-roll opt-in picker |
+
+## Official/core parity
+
+The official Ioun Stones are item records in the DMG (2014) and XDMG (2024), not the
+PHB/XPHB: 14 records in each edition, plus 7 adventure-source stones. All are recognized
+source-agnostically by `CharacterSheetIoun.isIounStone()`.
+
+The effective bond policy is additive:
+
+- With `settings.enableTgtt` enabled, every recognized Ioun Stone uses the Moorchlyne
+  7-day bond, collection acceleration, and slot-free attunement rules.
+- With `settings.enableTgtt` disabled, official/no-bond-text stones use RAW ordinary
+  attunement.
+- Intrinsic Ioun Bond text always remains active, so disabling TGTT never removes the
+  bond flow or slot exemption from a Moorchlyne stone whose own rules grant them.
+
+`CharacterSheetState.getIounBondPolicy()` is the single policy source for both manager
+eligibility and attunement-slot accounting. Keeping those consumers together prevents a
+stone from entering the bond flow but failing to complete at the normal attunement cap.
 
 ## Vocabulary
 

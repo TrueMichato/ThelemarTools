@@ -15947,9 +15947,10 @@ class CharacterSheetPage {
 		const currentThelemar_asiFeat = (/** @type {*} */ (this._state.getSettings()))?.thelemar_asiFeat || false;
 		const currentThelemar_itemUtilization = (/** @type {*} */ (this._state.getSettings()))?.thelemar_itemUtilization || false;
 		const currentThelemar_spellRarityCheck = (/** @type {*} */ (this._state.getSettings()))?.thelemar_spellRarity !== false;
+		const currentEnableTgtt = (/** @type {*} */ (this._state.getSettings()))?.enableTgtt !== false;
 
 		// Master toggle for all Thelemar rules (uses currentExhaustionRules from above)
-		const allThelemar = currentThelemar_carryWeight && currentThelemar_jumping && currentThelemar_linguisticsBonus && currentThelemar_criticalRolls && currentThelemar_asiFeat && currentThelemar_itemUtilization && currentThelemar_spellRarityCheck && currentExhaustionRules === "thelemar";
+		const allThelemar = currentEnableTgtt && currentThelemar_carryWeight && currentThelemar_jumping && currentThelemar_linguisticsBonus && currentThelemar_criticalRolls && currentThelemar_asiFeat && currentThelemar_itemUtilization && currentThelemar_spellRarityCheck && currentExhaustionRules === "thelemar";
 		const thelemar_masterToggle = ee`<div class="charsheet__settings-option charsheet__settings-option--checkbox charsheet__settings-option--master">
 			<label class="charsheet__settings-checkbox-label">
 				<input type="checkbox" id="settings-thelemar-all" ${allThelemar ? "checked" : ""}>
@@ -16322,7 +16323,8 @@ class CharacterSheetPage {
 			const spellRarityChecked = modalInner.querySelector("#settings-thelemar-spell-rarity").checked;
 			const exhaustionRules = modalInner.querySelector("#settings-exhaustion-rules").value;
 			const exhaustionIsThelemar = exhaustionRules === "thelemar";
-			modalInner.querySelector("#settings-thelemar-all").checked = carryChecked && jumpingChecked && lingChecked && critsChecked && asiFeatChecked && itemUtilChecked && spellRarityChecked && exhaustionIsThelemar;
+			const tgttEnabled = (/** @type {*} */ (this._state.getSettings()))?.enableTgtt !== false;
+			modalInner.querySelector("#settings-thelemar-all").checked = tgttEnabled && carryChecked && jumpingChecked && lingChecked && critsChecked && asiFeatChecked && itemUtilChecked && spellRarityChecked && exhaustionIsThelemar;
 		};
 
 		// Exhaustion rules handler
@@ -16338,6 +16340,7 @@ class CharacterSheetPage {
 		// Thelemar master toggle handler
 		modalInner.querySelector("#settings-thelemar-all").addEventListener("change", (e) => {
 			const isChecked = (/** @type {*} */ (e.target)).checked;
+			this._state.setSetting("enableTgtt", isChecked);
 			// Set all sub-toggles, then fire change events so per-setting handlers run
 			const subToggleIds = [
 				"#settings-thelemar-carry",
@@ -16360,6 +16363,8 @@ class CharacterSheetPage {
 				exhaustionSel.value = isChecked ? "thelemar" : "2024";
 				exhaustionSel.dispatchEvent(new Event("change"));
 			}
+			// The master flag changes official Ioun bond eligibility and slot accounting.
+			this._renderCharacter();
 		});
 
 		// Thelemar carry weight handler

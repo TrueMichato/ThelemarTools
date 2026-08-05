@@ -23,7 +23,7 @@ Welcome to the 5etools Character Sheet system documentation. This comprehensive 
 | [Spawning Test Characters](./15-spawn-test-characters.md) | One-line character creation for manual testing and bug repros: spec DSL, seeds, the four surfaces |
 | [Talent & Psionics](./17-talent-psionics.md) | MCDM Talent base class: psionic strain, manifestation tests, generic power/exertion pickers, Chronopath |
 | [NPC Export](./18-npc-export.md) | Character → bestiary monster conversion, export options, CR, legendary framing, brew save |
-| [Ioun Stones](./19-ioun-stones.md) | MECIounStones support: attunement exemption, orbit/bond manager, item conditional modifiers, effect-implementation audit |
+| [Ioun Stones](./20-ioun-stones.md) | MECIounStones and official-stone parity: attunement exemption, orbit/bond manager, item conditional modifiers, effect-implementation audit |
 
 ## System at a Glance
 

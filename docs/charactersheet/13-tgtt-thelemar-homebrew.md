@@ -39,6 +39,7 @@ All Thelemar variant rules are implemented as toggleable settings:
 | **ASI + Feat** | `thelemar_asiFeat` | At **character level 4** (not class level 4), the level-up grants BOTH an ASI and a feat. Fires exactly once per character, on the level-up that brings the total character level to 4 — regardless of which class is being leveled. |
 | **Item Utilization** | `thelemar_itemUtilization` | CON-based limits on consumable items |
 | **Spell Rarity/Legality** | `thelemar_spellRarity` | Applies Thelemar spell rarity tags and legality rules |
+| **Official Ioun Bond Parity** | `enableTgtt` | Additively extends the Moorchlyne 7-day, accelerated, slot-free bond rules to all recognized official Ioun Stones. Disabling TGTT restores RAW official attunement but never removes intrinsic bond rules from Moorchlyne stones. |
 
 ### Settings Location
 
@@ -47,6 +48,7 @@ All Thelemar variant rules are implemented as toggleable settings:
 settings: {
     exhaustionRules: "thelemar",
     prioritySources: ["TGTT"],
+    enableTgtt: true,
     thelemar_carryWeight: true,
     thelemar_jumping: true,
     thelemar_linguisticsBonus: true,
@@ -693,4 +695,3 @@ _data.loreSkills = [
 Rendered by `_renderLoreSkillsSection()` in `charactersheet.js` (~L2849), positioned beneath the main Skills table. Each row exposes −/+ buttons (bonus increment) and an × delete handle. Skills with `isLoreSkill: true` are filtered out of the main table by the standard renderer (charactersheet.js L2754–2755).
 
 Non-TGTT characters never see the section — it's gated by the standard TGTT settings flag.
-

@@ -14,8 +14,10 @@
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-inventory.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const CharacterSheetInventory = globalThis.CharacterSheetInventory;
 
 const IOUN_BOND_TEXT = "An Ioun bond is a special form of attunement and doesn't count against the number of magic items to which a creature can normally be attuned.";
 const ORRERY_TEXT = "You must attune to the orrery and all the components installed in it. Attuning to an installed component doesn't count against the number of magic items you can normally attune to.";
@@ -31,6 +33,12 @@ function makeStone (name, {entries, requiresAttunement = true} = {}) {
 		requiresAttunement,
 		entries: entries || ["A stone that orbits your head."],
 	};
+}
+
+function makeOfficialStone (name = "Ioun Stone, Protection") {
+	return makeStone(name, {
+		entries: ["This stone orbits your head at a distance of 1d3 feet."],
+	});
 }
 
 function addEquipAttune (state, item) {
@@ -60,6 +68,20 @@ describe("Attunement slot exemption", () => {
 
 		it("does not exempt an ordinary magic item", () => {
 			expect(state.isAttunementExempt({entries: ["While wearing this ring, you gain a +1 bonus to AC."]})).toBe(false);
+		});
+
+		it("extends slot-free attunement to official Ioun Stones while TGTT is enabled", () => {
+			expect(state.isAttunementExempt(makeOfficialStone())).toBe(true);
+		});
+
+		it("restores RAW official attunement when TGTT is disabled without disabling intrinsic bonds", () => {
+			const official = makeOfficialStone();
+			const intrinsic = makeStone("Ioun Stone #001", {entries: [IOUN_BOND_TEXT]});
+
+			expect(state.isAttunementExempt(official)).toBe(true);
+			state.setSetting("enableTgtt", false);
+			expect(state.isAttunementExempt(official)).toBe(false);
+			expect(state.isAttunementExempt(intrinsic)).toBe(true);
 		});
 
 		it("does not exempt an item that says its attunement DOES count", () => {
@@ -137,6 +159,20 @@ describe("Attunement slot exemption", () => {
 			expect(state.getItems().find(i => i.id === stoneId).attuned).toBe(true);
 		});
 
+		it("lets an official Ioun Stone complete attunement beyond the cap only with TGTT enabled", () => {
+			for (let i = 0; i < 3; i++) addEquipAttune(state, makeStone(`Ring ${i}`, {entries: ["A plain magic ring."]}));
+			state.addItem(makeOfficialStone());
+			const officialId = state.getItems().at(-1).id;
+
+			expect(state.attune(officialId)).toBe(true);
+			expect(state.getAttunedCount()).toBe(3);
+
+			state.unattune(officialId);
+			state.setSetting("enableTgtt", false);
+			expect(state.attune(officialId)).toBe(false);
+			expect(state.getAttunedCount()).toBe(3);
+		});
+
 		it("keeps exempt attunements visible to getAttunedItems (Soul of Artifice counts them RAW)", () => {
 			addEquipAttune(state, makeStone("Ring of Protection", {entries: ["A plain magic ring."]}));
 			for (let i = 0; i < 4; i++) addEquipAttune(state, makeStone(`Ioun Stone #${i}`, {entries: [IOUN_BOND_TEXT]}));
@@ -157,6 +193,27 @@ describe("Attunement slot exemption", () => {
 			const row = state.getItems().find(i => i.id === id);
 			expect(row.attuned).toBe(true);
 			expect(row.bonusAc).toBe(1);
+		});
+	});
+
+	describe("inventory bond entry point", () => {
+		it("opens the Ioun manager instead of instantly attuning a bond-policy stone", () => {
+			let managerOpens = 0;
+			const page = {
+				getState: () => state,
+				saveCharacter: () => {},
+				_ioun: {openModal: () => { managerOpens++; }},
+			};
+			const inventory = Object.create(CharacterSheetInventory.prototype);
+			inventory._page = page;
+			inventory._state = state;
+			state.addItem(makeOfficialStone());
+			const stone = state.getItems().at(-1);
+
+			inventory._toggleAttuned(stone.id);
+
+			expect(state.getItems().find(i => i.id === stone.id).attuned).toBe(false);
+			expect(managerOpens).toBe(1);
 		});
 	});
 });
