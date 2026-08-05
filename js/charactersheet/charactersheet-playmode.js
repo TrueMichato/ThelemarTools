@@ -1241,7 +1241,7 @@ export class CharacterSheetPlayMode {
 					row.disabled = !power.isAvailable || (["action", "bonus", "reaction"].includes(group.key) && !this._actionEconomy[group.key]);
 				}
 				const name = this._ce("span", "pm-item-power__name", row);
-				name.textContent = power.name;
+				name.textContent = power.isToggle ? `${power.isActive ? "Deactivate" : "Activate"} ${power.name}` : power.name;
 				const meta = this._ce("span", "pm-item-power__meta", row);
 				meta.textContent = power.chargesCost
 					? `${power.itemName} · ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"} · ${power.chargesCurrent}/${power.chargesMax}`

@@ -28326,7 +28326,19 @@ class CharacterSheetState {
 			const detected = this._detectItemActivation({entries: [text]});
 			const actionType = detected.find(it => ["action", "bonus", "reaction"].includes(it.type))?.type || null;
 			const recurring = getRecurringUsage(text);
-			if (actionType && recurring) {
+			const isSpeedToggle = item.modifySpeed && /\b(?:again|a second time)[^.]*(?:end|ends)\s+the effect\b/i.test(text);
+			if (actionType && isSpeedToggle) {
+				addPower({
+					id: CharacterSheetState._getItemPowerId(["toggle", item.name, "modify-speed"]),
+					name: `${item.name} Speed`,
+					kind: "toggle",
+					actionType,
+					isToggle: true,
+					effectType: "modifySpeed",
+					description: text,
+					isReferenceOnly: false,
+				});
+			} else if (actionType && recurring) {
 				addPower({
 					id: CharacterSheetState._getItemPowerId(["ability", item.name, recurring.usageType]),
 					name: `${item.name} Power`,
@@ -28422,6 +28434,7 @@ class CharacterSheetState {
 					chargesCurrent,
 					chargesMax: item.charges || 0,
 					usesCurrent,
+					isActive: !!item.itemPowerStates?.[power.id]?.active,
 					recharge: item.recharge || null,
 					isAvailable: !unavailableReason,
 					unavailableReason,
@@ -28446,6 +28459,12 @@ class CharacterSheetState {
 		if (power.isDestructive && !confirmed) return {ok: false, needsConfirmation: true, power};
 		const entry = this._data.inventory.find(it => it.id === itemId);
 		if (!entry?.item) return {ok: false, reason: "Item not found."};
+		let isActive = power.isActive;
+		if (power.isToggle) {
+			if (!entry.item.itemPowerStates) entry.item.itemPowerStates = {};
+			isActive = !entry.item.itemPowerStates[power.id]?.active;
+			entry.item.itemPowerStates[power.id] = {active: isActive};
+		}
 		if (power.chargesCost) {
 			const current = entry.item.chargesCurrent ?? entry.item.charges ?? 0;
 			if (current < power.chargesCost) return {ok: false, reason: `Not enough charges for ${power.name}.`};
@@ -28463,6 +28482,7 @@ class CharacterSheetState {
 			chargesCurrent: entry.item.chargesCurrent ?? entry.item.charges ?? 0,
 			chargesMax: entry.item.charges || 0,
 			usesCurrent: power.usesMax ? entry.item.itemPowerUses?.[power.usesKey] ?? power.usesMax : null,
+			isActive,
 			destroyed: !!power.isDestructive,
 		};
 		if (power.isDestructive) this.removeItem(itemId);

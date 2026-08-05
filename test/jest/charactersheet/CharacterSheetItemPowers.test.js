@@ -304,4 +304,24 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		expect(state.getItemPower(addedDagger.id, daggerPower.id).usesCurrent).toBe(1);
 		expect(state.getItemPower(addedBag.id, bagPower.id).usesCurrent).toBe(3);
 	});
+
+	it("activates and deactivates toggleable speed items instead of applying them passively", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const boots = items.find(it => it.name === "Boots of Speed" && it.source === "DMG");
+		const added = addCatalogItemViaInventory(state, inventory, boots);
+		inventory._updateItemBonuses(state.getItems());
+		const power = state.getItemPowers().find(it => it.itemId === added.id);
+
+		expect(power).toEqual(expect.objectContaining({kind: "toggle", actionType: "bonus", isActive: false}));
+		expect(state.getSpeed("walk")).toBe(30);
+
+		expect(state.invokeItemPower(added.id, power.id)).toEqual(expect.objectContaining({ok: true, isActive: true}));
+		inventory._updateItemBonuses(state.getItems());
+		expect(state.getSpeed("walk")).toBe(60);
+
+		expect(state.invokeItemPower(added.id, power.id)).toEqual(expect.objectContaining({ok: true, isActive: false}));
+		inventory._updateItemBonuses(state.getItems());
+		expect(state.getSpeed("walk")).toBe(30);
+	});
 });

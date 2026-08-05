@@ -6563,7 +6563,11 @@ class CharacterSheetCombat {
 					continue;
 				}
 				const actionAvailable = ["action", "bonus", "reaction"].includes(type) ? this._isActionTypeAvailable(type) : true;
-				const use = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-primary", text: power.kind === "spell" ? "Cast" : "Invoke"});
+				const use = e_({
+					tag: "button",
+					clazz: "ve-btn ve-btn-xs ve-btn-primary",
+					text: power.isToggle ? (power.isActive ? "Deactivate" : "Activate") : power.kind === "spell" ? "Cast" : "Invoke",
+				});
 				use.disabled = !power.isAvailable || !actionAvailable;
 				use.title = power.unavailableReason || (!actionAvailable ? `${labels[type]} already used this turn.` : `${use.textContent} ${power.name}`);
 				use.addEventListener("click", async () => {

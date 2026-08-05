@@ -5007,11 +5007,15 @@ class CharacterSheetInventory {
 		const chargeText = result.chargesMax
 			? ` (${result.chargesCurrent}/${result.chargesMax} charges remaining)`
 			: "";
+		const verb = result.power.isToggle
+			? result.isActive ? "Activated" : "Deactivated"
+			: result.power.kind === "spell" ? "Cast" : "Invoked";
 		JqueryUtil.doToast({
 			type: "success",
-			content: `${result.power.kind === "spell" ? "Cast" : "Invoked"} ${result.power.name} from ${result.power.itemName}${chargeText}.`,
+			content: `${verb} ${result.power.name} from ${result.power.itemName}${chargeText}.`,
 		});
 		closeModal?.();
+		this._updateItemBonuses(this._state.getItems());
 		this._renderItemList();
 		this._page?._combat?.renderCombatItemPowers?.();
 		this._page?._combat?.renderCombatActionEconomy?.();
@@ -5072,7 +5076,7 @@ class CharacterSheetInventory {
 				const use = e_({
 					tag: "button",
 					clazz: `ve-btn ve-btn-sm ${power.isDestructive ? "ve-btn-danger" : "ve-btn-primary"}`,
-					text: power.kind === "spell" ? "Cast" : "Invoke",
+					text: power.isToggle ? (power.isActive ? "Deactivate" : "Activate") : power.kind === "spell" ? "Cast" : "Invoke",
 				});
 				use.disabled = !power.isAvailable;
 				use.title = power.unavailableReason || `${power.kind === "spell" ? "Cast" : "Invoke"} ${power.name}`;
@@ -5660,6 +5664,8 @@ class CharacterSheetInventory {
 			if (item.requiresAttunement && !item.attuned) continue;
 
 			if (item.modifySpeed) {
+				const speedToggle = item.itemPowers?.find(power => power.isToggle && power.effectType === "modifySpeed");
+				if (speedToggle && !item.itemPowerStates?.[speedToggle.id]?.active) continue;
 				hasAny = true;
 
 				// Process bonus speeds (additive)
