@@ -28277,6 +28277,20 @@ class CharacterSheetState {
 			for (const raw of attached.other || []) addSpell(raw, "other");
 		}
 
+		const getRecurringUsage = text => {
+			const resetsAtDawn = /\b(?:until|at)\s+(?:the\s+)?next dawn\b/i.test(text);
+			const resetsOnLongRest = /\buntil\s+you\s+finish\s+a\s+long rest\b/i.test(text);
+			const resetsOnRest = /\buntil\s+you\s+finish\s+a\s+short or long rest\b/i.test(text);
+			if (!resetsAtDawn && !resetsOnLongRest && !resetsOnRest) return null;
+			const countMatch = text.match(/\bonce\s+(one|two|three|four|\d+)\s+[^.]*?(?:have|has)\s+been\b/i);
+			const countWords = {one: 1, two: 2, three: 3, four: 4};
+			return {
+				usageType: resetsOnRest ? "rest" : "daily",
+				usesMax: countMatch
+					? countWords[countMatch[1].toLowerCase()] || parseInt(countMatch[1], 10) || 1
+					: 1,
+			};
+		};
 		const namedEntries = (item.entries || []).filter(entry => entry && typeof entry === "object" && entry.name);
 		for (const entry of namedEntries) {
 			if (attached && /^spells?$/i.test(entry.name)) continue;
@@ -28291,16 +28305,40 @@ class CharacterSheetState {
 			if (!actionType) continue;
 			const chargeMatch = text.match(/\bexpend\s+(one|\d+)\s+(?:of (?:its|the) )?charges?\b/i);
 			const chargesCost = chargeMatch ? (chargeMatch[1].toLowerCase() === "one" ? 1 : parseInt(chargeMatch[1], 10) || 1) : 0;
+			const recurring = chargesCost ? null : getRecurringUsage(text);
 			addPower({
 				id: CharacterSheetState._getItemPowerId(["ability", entry.name]),
 				name: entry.name,
 				kind: "ability",
 				actionType,
 				chargesCost,
+				usageType: recurring?.usageType,
+				usesMax: recurring?.usesMax,
+				usesKey: recurring ? `${recurring.usageType}:derived:${CharacterSheetState._getItemPowerId([item.name, entry.name])}` : null,
 				description: text,
 				isDestructive: /\b(?:staff|item|weapon|armor)\s+is destroyed\b/i.test(text),
-				isReferenceOnly: !chargesCost,
+				isReferenceOnly: !chargesCost && !recurring,
 			});
+		}
+
+		if (!attached && !powers.length) {
+			const text = CharacterSheetState._getItemEntryText(item.entries);
+			const detected = this._detectItemActivation({entries: [text]});
+			const actionType = detected.find(it => ["action", "bonus", "reaction"].includes(it.type))?.type || null;
+			const recurring = getRecurringUsage(text);
+			if (actionType && recurring) {
+				addPower({
+					id: CharacterSheetState._getItemPowerId(["ability", item.name, recurring.usageType]),
+					name: `${item.name} Power`,
+					kind: "ability",
+					actionType,
+					usageType: recurring.usageType,
+					usesMax: recurring.usesMax,
+					usesKey: `${recurring.usageType}:derived:${CharacterSheetState._getItemPowerId([item.name, item.source])}`,
+					description: text,
+					isReferenceOnly: false,
+				});
+			}
 		}
 
 		const explicit = Array.isArray(item.itemPowers) ? item.itemPowers : [];

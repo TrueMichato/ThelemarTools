@@ -28,7 +28,7 @@ const STRUCTURED_FIELDS = new Set([
 ]);
 const ATTACHED_SPELL_KEYS = new Set(["ability", "charges", "daily", "limited", "other", "rest", "ritual", "will"]);
 const ACTIVATION_RE = /\b(?:as (?:a|an) (?:bonus )?action|as (?:a|an) reaction|use (?:a|an|your) action|when you hit|expend \d+ charges?|once (?:this property is )?used|until (?:the )?next dawn|short or long rest)\b/i;
-const ACTIONABLE_ACTIVE_RE = /\b(?:expend (?:one|\d+) charges?|(?:staff|item|weapon|armor) is destroyed)\b/i;
+const ACTIONABLE_ACTIVE_RE = /\b(?:expend (?:one|\d+) charges?|(?:staff|item|weapon|armor) is destroyed|until (?:the )?next dawn|until you finish a (?:short or )?long rest)\b/i;
 
 function getEntryText (entry) {
 	if (entry == null) return "";

@@ -286,4 +286,22 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		}));
 		expect(state.invokeItemPower(added.id, power.id)).toEqual(expect.objectContaining({ok: false}));
 	});
+
+	it("normalizes prose-only daily item powers without item-name adapters", () => {
+		const state = new CharacterSheetState();
+		const dagger = items.find(it => it.name === "Dagger of Venom" && it.source === "DMG");
+		const bag = items.find(it => it.name === "Bag of Tricks, Gray" && it.source === "DMG");
+		const addedDagger = addActiveCatalogItem(state, dagger);
+		const addedBag = addActiveCatalogItem(state, bag);
+		const daggerPower = state.getItemPowers().find(it => it.itemId === addedDagger.id);
+		const bagPower = state.getItemPowers().find(it => it.itemId === addedBag.id);
+
+		expect(daggerPower).toEqual(expect.objectContaining({actionType: "action", usageType: "daily", usesMax: 1}));
+		expect(bagPower).toEqual(expect.objectContaining({actionType: "action", usageType: "daily", usesMax: 3}));
+		expect(state.invokeItemPower(addedDagger.id, daggerPower.id)).toEqual(expect.objectContaining({ok: true, usesCurrent: 0}));
+		expect(state.invokeItemPower(addedBag.id, bagPower.id)).toEqual(expect.objectContaining({ok: true, usesCurrent: 2}));
+		expect(state.restoreItemPowerUses("long")).toBe(2);
+		expect(state.getItemPower(addedDagger.id, daggerPower.id).usesCurrent).toBe(1);
+		expect(state.getItemPower(addedBag.id, bagPower.id).usesCurrent).toBe(3);
+	});
 });
