@@ -5114,6 +5114,7 @@ class CharacterSheetInventory {
 			section.append(e_({tag: "h5", clazz: "charsheet__item-power-group-title", text: group.label}));
 			for (const power of entries) {
 				const row = e_({tag: "div", clazz: "charsheet__item-power"});
+				CharacterSheetClassUtils.applyItemPowerPreview?.(row, power);
 				const body = e_({tag: "div", clazz: "charsheet__item-power-body"});
 				body.append(e_({tag: "div", clazz: "charsheet__item-power-name", text: power.name}));
 				const metaParts = [];

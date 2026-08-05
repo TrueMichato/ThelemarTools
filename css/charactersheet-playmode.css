@@ -1370,6 +1370,11 @@
 	font-weight: 600;
 }
 
+.charsheet__item-power--has-preview .pm-item-power__name {
+	text-decoration: underline dotted;
+	text-underline-offset: 2px;
+}
+
 .pm-item-power__meta {
 	color: var(--cs-text-secondary, #94a3b8);
 	font-size: var(--cs-text-xs, 0.75rem);

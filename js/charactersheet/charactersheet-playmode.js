@@ -1248,7 +1248,10 @@ export class CharacterSheetPlayMode {
 					: power.usesMax
 						? `${power.itemName} · ${power.usesCurrent}/${power.usesMax} uses`
 						: `${power.itemName}${power.isReferenceOnly ? " · rules reference" : ""}`;
-				if (power.isReferenceOnly) continue;
+				if (power.isReferenceOnly) {
+					CharacterSheetClassUtils.applyItemPowerPreview?.(row, power);
+					continue;
+				}
 				this._makeClickable(row, power.unavailableReason || `${power.kind === "spell" ? "Cast" : "Invoke"} ${power.name}`, async () => {
 					if (power.chargesCostMax > power.chargesCost) {
 						await this._page._inventory?._showItemPowersModal?.(power.itemId);
@@ -1260,6 +1263,7 @@ export class CharacterSheetPlayMode {
 					this._logActivity("feature", `${power.kind === "spell" ? "Cast" : "Invoked"} ${power.name} from ${power.itemName}`);
 					this._renderActionsHub();
 				});
+				CharacterSheetClassUtils.applyItemPowerPreview?.(row, power);
 			}
 		}
 	}

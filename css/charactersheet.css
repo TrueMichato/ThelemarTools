@@ -6314,6 +6314,13 @@ body[data-font="readable"] {
 	font-weight: var(--cs-weight-semibold, 600);
 }
 
+.charsheet__item-power--has-preview .charsheet__item-power-name,
+.charsheet__item-power--has-preview .cs-combat-item-power__name {
+	text-decoration: underline dotted;
+	text-underline-offset: 2px;
+	cursor: help;
+}
+
 .charsheet__item-power-meta,
 .cs-combat-item-power__meta,
 .charsheet__item-power-description {

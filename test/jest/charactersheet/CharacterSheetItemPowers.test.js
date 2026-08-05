@@ -4,6 +4,7 @@ import {resolve, dirname} from "path";
 import {fileURLToPath} from "url";
 import {jest} from "@jest/globals";
 
+import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-inventory.js";
 import "../../../js/charactersheet/charactersheet-spells.js";
@@ -22,6 +23,7 @@ const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetInventory = globalThis.CharacterSheetInventory;
 const CharacterSheetSpells = globalThis.CharacterSheetSpells;
+const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
 const items = JSON.parse(readFileSync(resolve(REPO_ROOT, "data/items.json"), "utf8")).item;
 const magicVariants = JSON.parse(readFileSync(resolve(REPO_ROOT, "data/magicvariants.json"), "utf8")).magicvariant;
 const brewItems = JSON.parse(readFileSync(resolve(REPO_ROOT, "homebrew/TravelersGuidetoThelemar.json"), "utf8")).item;
@@ -89,6 +91,21 @@ function addCatalogItemViaInventory (state, inventory, item) {
 	state.setItemEquipped(added.id, true);
 	if (added.requiresAttunement) state.setItemAttuned(added.id, true);
 	return added;
+}
+
+function makePreviewElement (tagName = "div") {
+	const attributes = new Map();
+	const listeners = new Map();
+	const classes = new Set();
+	return {
+		tagName: tagName.toUpperCase(),
+		attributes,
+		listeners,
+		classList: {add: className => classes.add(className), contains: className => classes.has(className)},
+		setAttribute: (name, value) => attributes.set(name, String(value)),
+		getAttribute: name => attributes.get(name),
+		addEventListener: (name, handler) => listeners.set(name, handler),
+	};
 }
 
 function getMagicVariant (name) {
@@ -480,5 +497,76 @@ describe("Catalog magic-item powers and passive normalization", () => {
 
 		expect(state.getSpeed("fly")).toBe(0);
 		expect(power).toEqual(expect.objectContaining({effectType: "modifySpeed", isReferenceOnly: true}));
+	});
+});
+
+describe("Item-power hover previews", () => {
+	const originalHover = globalThis.Renderer.hover;
+	const originalEncodeForHash = globalThis.UrlUtil.encodeForHash;
+	const originalSpellsPage = globalThis.UrlUtil.PG_SPELLS;
+
+	afterEach(() => {
+		globalThis.Renderer.hover = originalHover;
+		globalThis.UrlUtil.encodeForHash = originalEncodeForHash;
+		globalThis.UrlUtil.PG_SPELLS = originalSpellsPage;
+	});
+
+	it("wires spell rows to the canonical spell hover with cast-level context", () => {
+		const onMouseOver = jest.fn();
+		globalThis.UrlUtil.PG_SPELLS = "spells.html";
+		globalThis.UrlUtil.encodeForHash = jest.fn(value => String(value).toLowerCase().replace(/\s+/g, "-"));
+		globalThis.Renderer.hover = {
+			pHandleLinkMouseOver: onMouseOver,
+			handleLinkMouseMove: jest.fn(),
+			handleLinkMouseLeave: jest.fn(),
+		};
+		const element = makePreviewElement();
+		const preview = CharacterSheetClassUtils.applyItemPowerPreview(element, {
+			kind: "spell",
+			name: "Fireball",
+			spellName: "Fireball",
+			spellSource: "PHB",
+			castLevel: 5,
+			description: "Cast Fireball from the staff.",
+		});
+
+		expect(preview).toMatchObject({isSpell: true, page: "spells.html", source: "PHB"});
+		expect(element.getAttribute("data-vet-page")).toBe("spells.html");
+		expect(element.getAttribute("data-vet-source")).toBe("PHB");
+		expect(element.getAttribute("data-vet-hash")).toContain("fireball");
+		expect(element.getAttribute("data-cast-level")).toBe("5");
+		expect(element.getAttribute("aria-label")).toContain("Cast at level 5");
+		expect(element.title).toContain("Cast Fireball from the staff.");
+		element.listeners.get("mouseover")({type: "mouseover"});
+		expect(onMouseOver).toHaveBeenCalledWith(expect.any(Object), element);
+	});
+
+	it("exposes the full ability/reference description without fake spell hover data", () => {
+		const element = makePreviewElement("button");
+		const description = "Choose a creature you can see; it must succeed on a DC 17 save or be blinded until the next dawn.";
+		const preview = CharacterSheetClassUtils.applyItemPowerPreview(element, {
+			kind: "ability",
+			name: "Blinding Radiance",
+			itemName: "Gae Bolg",
+			description,
+			isReferenceOnly: true,
+		});
+
+		expect(preview).toMatchObject({isSpell: false});
+		expect(element.title).toContain(description);
+		expect(element.getAttribute("aria-label")).toContain(description);
+		expect(element.getAttribute("data-vet-page")).toBeUndefined();
+		expect(element.classList.contains("charsheet__item-power--has-preview")).toBe(true);
+	});
+
+	it("applies the shared preview helper in Inventory, Combat, and Play Mode", () => {
+		for (const file of [
+			"js/charactersheet/charactersheet-inventory.js",
+			"js/charactersheet/charactersheet-combat.js",
+			"js/charactersheet/charactersheet-playmode.js",
+		]) {
+			const source = readFileSync(resolve(REPO_ROOT, file), "utf8");
+			expect(source).toMatch(/CharacterSheetClassUtils\.applyItemPowerPreview\?\.\(row, power\)/);
+		}
 	});
 });

@@ -920,6 +920,51 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Add an accessible preview to an item-power row. Spell powers use the canonical
+	 * 5etools spell hover; prose powers expose their full description via title/ARIA.
+	 * @param {HTMLElement} element
+	 * @param {*} power
+	 * @returns {{isSpell: boolean, title: string, page?: string, source?: string, hash?: string}|null}
+	 */
+	static applyItemPowerPreview (/** @type {*} */ element, /** @type {*} */ power) {
+		if (!element || !power) return null;
+		const isSpell = power.kind === "spell" && !!power.spellName;
+		const castLevel = power.castLevel ? `Cast at level ${power.castLevel}` : "";
+		const description = String(power.description || "").trim()
+			|| (isSpell ? `Preview ${power.spellName}` : `${power.itemName || "Item"} power`);
+		const title = [power.name, castLevel, description].filter(Boolean).join(". ");
+		element.title = title;
+		element.setAttribute?.("aria-label", title);
+		element.classList?.add("charsheet__item-power--has-preview");
+		const tagName = String(element.tagName || "").toLowerCase();
+		if (!["a", "button", "input", "select", "textarea"].includes(tagName)) element.tabIndex = 0;
+
+		if (!isSpell || typeof Renderer === "undefined" || !Renderer.hover) return {isSpell, title};
+		try {
+			const source = power.spellSource || Parser.SRC_XPHB;
+			const page = UrlUtil.PG_SPELLS || "spells.html";
+			const separator = typeof HASH_LIST_SEP !== "undefined" ? HASH_LIST_SEP : "_";
+			const hash = UrlUtil.encodeForHash([power.spellName, source].join(separator));
+			element.setAttribute("data-vet-page", page);
+			element.setAttribute("data-vet-source", source);
+			element.setAttribute("data-vet-hash", hash);
+			if (power.castLevel) element.setAttribute("data-cast-level", String(power.castLevel));
+			if (typeof Renderer.hover.pHandleLinkMouseOver === "function") {
+				element.addEventListener?.("mouseover", event => Renderer.hover.pHandleLinkMouseOver(event, element));
+			}
+			if (typeof Renderer.hover.handleLinkMouseMove === "function") {
+				element.addEventListener?.("mousemove", event => Renderer.hover.handleLinkMouseMove(event, element));
+			}
+			if (typeof Renderer.hover.handleLinkMouseLeave === "function") {
+				element.addEventListener?.("mouseleave", event => Renderer.hover.handleLinkMouseLeave(event, element));
+			}
+			return {isSpell, title, page, source, hash};
+		} catch (e) {
+			return {isSpell, title};
+		}
+	}
+
+	/**
 	 * HTML-escape an arbitrary string for safe interpolation into innerHTML.
 	 * @param {*} str
 	 * @returns {string}

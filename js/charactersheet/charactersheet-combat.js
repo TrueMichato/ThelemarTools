@@ -6549,6 +6549,7 @@ class CharacterSheetCombat {
 			group.append(e_({tag: "div", clazz: "cs-combat-item-powers__title", text: labels[type]}));
 			for (const power of groupPowers) {
 				const row = e_({tag: "div", clazz: "cs-combat-item-power"});
+				CharacterSheetClassUtils.applyItemPowerPreview?.(row, power);
 				const body = e_({tag: "div", clazz: "cs-combat-item-power__body"});
 				body.append(e_({tag: "div", clazz: "cs-combat-item-power__name", text: power.name}));
 				const meta = power.chargesCost
