@@ -17,13 +17,12 @@ describe("Character sheet magic-item operational coverage audit", () => {
 		expect(profile.operational).toEqual(expect.arrayContaining([
 			expect.objectContaining({field: "bonusAc", family: "ac", consumer: "inventory"}),
 			expect.objectContaining({field: "containerCapacity", countsAsMagicEffect: false}),
+			expect.objectContaining({field: "light", family: "light", consumer: "overview"}),
 		]));
 		expect(profile.choiceRequired).toEqual([
 			expect.objectContaining({field: "ability.choose", family: "ability"}),
 		]);
-		expect(profile.storedOnly).toEqual([
-			expect.objectContaining({field: "light", family: "light"}),
-		]);
+		expect(profile.storedOnly).toEqual([]);
 	});
 
 	it("counts a consumed structured passive as operational", () => {
@@ -103,6 +102,27 @@ describe("Character sheet magic-item operational coverage audit", () => {
 			status: "surfacedOnly",
 			operationalStatus: "choiceRequired",
 			reasons: ["choice required: spellScrollLevel"],
+		}));
+	});
+
+	it("counts resolved language metadata while leaving ambiguous grants choice-required", () => {
+		expect(classifyItem({
+			name: "Draconic Mask",
+			source: "TST",
+			grantsLanguage: true,
+			entries: ["You can speak and understand Draconic."],
+		})).toEqual(expect.objectContaining({
+			status: "fullyFunctional",
+			operationalStatus: "structuredOperational",
+		}));
+		expect(classifyItem({
+			name: "Polyglot Stone",
+			source: "TST",
+			grantsLanguage: true,
+			entries: ["You learn one language of your choice."],
+		})).toEqual(expect.objectContaining({
+			status: "surfacedOnly",
+			operationalStatus: "choiceRequired",
 		}));
 	});
 

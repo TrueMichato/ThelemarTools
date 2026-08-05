@@ -7246,12 +7246,16 @@ class CharacterSheetState {
 			|| (attack.isMelee == null && !!rangeStr && !isThrown);
 		if (!isMelee) return null;
 
-		const base = meleeReach != null ? meleeReach : this.getMeleeReach();
+		const characterReach = meleeReach != null ? meleeReach : this.getMeleeReach();
+		const structuredReach = Number(attack.reach) || 0;
+		const base = structuredReach
+			? structuredReach + (characterReach - CharacterSheetState.BASE_MELEE_REACH)
+			: characterReach;
 		const hasReachProp = (attack.properties || []).some(p => String(p).split("|")[0].toUpperCase() === "R");
 		const attackReachBonus = attack.reachCondition === "onYourTurn" && !isOwnTurn
 			? 0
 			: Number(attack.reachBonus) || 0;
-		return base + (hasReachProp ? CharacterSheetState.REACH_PROPERTY_BONUS : 0) + attackReachBonus;
+		return base + (!structuredReach && hasReachProp ? CharacterSheetState.REACH_PROPERTY_BONUS : 0) + attackReachBonus;
 	}
 
 	getRaceName () {
@@ -12928,7 +12932,14 @@ class CharacterSheetState {
 	getArmorProficiencies () { return [...this._data.armorProficiencies]; }
 	getWeaponProficiencies () { return [...this._data.weaponProficiencies]; }
 	getToolProficiencies () { return [...this._data.toolProficiencies]; }
-	getLanguages () { return [...this._data.languages]; }
+	getLanguages () {
+		const out = new Set(this._data.languages || []);
+		for (const item of this.getItems()) {
+			if (!item.equipped || (item.requiresAttunement && !item.attuned)) continue;
+			for (const language of item.grantedLanguages || []) out.add(language);
+		}
+		return [...out];
+	}
 	getSaveProficiencies () { return [...this._data.saveProficiencies]; }
 
 	/**
@@ -28247,16 +28258,17 @@ class CharacterSheetState {
 		conditionImmune: {family: "conditionImmunity", consumer: "inventory"},
 		containerCapacity: {family: "container", consumer: "inventory", countsAsMagicEffect: false},
 		critThreshold: {family: "weaponCritThreshold", consumer: "combat"},
-		focus: {family: "spellcastingFocus", status: "storedOnly"},
+		focus: {family: "spellcastingFocus", consumer: "spells"},
 		grantsLanguage: {family: "language", status: "choiceRequired"},
 		grantsProficiency: {family: "itemProficiency", consumer: "state", countsAsMagicEffect: false},
 		immune: {family: "damageImmunity", consumer: "inventory"},
-		light: {family: "light", status: "storedOnly"},
+		light: {family: "light", consumer: "overview"},
 		modifySpeed: {family: "speed", consumer: "state"},
 		resist: {family: "damageResistance", consumer: "inventory"},
 		senses: {family: "senses", consumer: "inventory"},
 		spellImmunitySlots: {family: "spellImmunity", consumer: "inventory"},
 		spellScrollLevel: {family: "attachedSpellChoice", status: "choiceRequired"},
+		reach: {family: "weaponReach", consumer: "combat"},
 		vulnerable: {family: "damageVulnerability", consumer: "inventory"},
 	});
 
@@ -28272,16 +28284,43 @@ class CharacterSheetState {
 
 		for (const [field, adapter] of Object.entries(CharacterSheetState.ITEM_SCHEMA_EFFECT_ADAPTERS)) {
 			if (item[field] == null || item[field] === false) continue;
-			if (field === "ability" && item.ability?.choose?.length) {
+			if (field === "ability" && item.ability?.choose?.length && !CharacterSheetState._hasResolvedItemAbilityChoices(item)) {
 				out.choiceRequired.push({...adapter, field: "ability.choose", value: item.ability.choose});
+			}
+			if (field === "grantsLanguage") {
+				const languages = CharacterSheetState.getItemGrantedLanguages(item);
+				if (languages.length) out.operational.push({...adapter, status: undefined, consumer: "state", field, value: languages});
+				else out.choiceRequired.push({...adapter, field, value: item[field]});
+				continue;
 			}
 
 			const status = adapter.status || "operational";
-			if (field === "ability" && !item.ability?.static && !["str", "dex", "con", "int", "wis", "cha"].some(ab => item.ability?.[ab] != null)) continue;
+			if (field === "ability" && !item.ability?.static && !["str", "dex", "con", "int", "wis", "cha"].some(ab => item.ability?.[ab] != null) && !CharacterSheetState._hasResolvedItemAbilityChoices(item)) continue;
 			out[status].push({...adapter, field, value: item[field]});
 		}
 
 		return out;
+	}
+
+	static _hasResolvedItemAbilityChoices (item) {
+		const expected = (item?.ability?.choose || []).reduce((total, choice) => total + Math.max(1, Number(choice.count) || 1), 0);
+		return expected > 0 && (item.selectedAbilityChoices || []).length === expected;
+	}
+
+	static getItemGrantedLanguages (item) {
+		if (!item?.grantsLanguage) return [];
+		if (item.selectedLanguage) return [item.selectedLanguage];
+		if (Array.isArray(item.grantedLanguages) && item.grantedLanguages.length) return [...item.grantedLanguages];
+		const text = CharacterSheetState._getItemEntryText(item.entries);
+		const languageNames = [
+			"Abyssal", "Aquan", "Auran", "Celestial", "Common", "Deep Speech", "Draconic",
+			"Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Ignan",
+			"Infernal", "Orc", "Primordial", "Sylvan", "Terran", "Undercommon",
+		];
+		const selfSentences = text.split(/(?<=[.!?])\s+/).filter(sentence =>
+			/\byou (?:can )?(?:speak|read|write|understand|know|learn)\b/i.test(sentence));
+		return languageNames.filter(language =>
+			selfSentences.some(sentence => new RegExp(`\\b${language.replace(/\s+/g, "\\s+")}\\b`, "i").test(sentence)));
 	}
 
 	/**
@@ -28555,6 +28594,23 @@ class CharacterSheetState {
 		}
 
 		const explicit = Array.isArray(item.itemPowers) ? item.itemPowers : [];
+		for (const [ix, light] of (item.light || []).entries()) {
+			addPower({
+				id: CharacterSheetState._getItemPowerId(["light", item.name, ix]),
+				name: `${item.name} Light`,
+				kind: "toggle",
+				actionType: "other",
+				isToggle: true,
+				effectType: "light",
+				light: {
+					brightRange: Number(light.bright) || 0,
+					dimRange: Number(light.dim) || Number(light.bright) || 0,
+					shape: light.shape || "radius",
+				},
+				description: `Shed ${Number(light.bright) || 0} feet of bright light and ${Number(light.dim) || Number(light.bright) || 0} feet of dim light.`,
+				isReferenceOnly: false,
+			});
+		}
 		for (const power of explicit) addPower(power);
 
 		const nonSpell = powers.filter(it => it.kind !== "spell");
@@ -29378,14 +29434,24 @@ class CharacterSheetState {
 		const selectedSpellUid = item.selectedSpell
 			? `${item.selectedSpell.name || ""}|${item.selectedSpell.source || ""}`.toLowerCase()
 			: "";
+		const selectedChoiceUid = JSON.stringify({
+			spell: selectedSpellUid,
+			abilities: [...(item.selectedAbilityChoices || [])].sort((a, b) => String(a.ability).localeCompare(String(b.ability))),
+			language: item.selectedLanguage || "",
+		});
 		const existing = isIncomingCustom ? null : this._data.inventory.find(
 			i => {
 				const existingSpellUid = i.item.selectedSpell
 					? `${i.item.selectedSpell.name || ""}|${i.item.selectedSpell.source || ""}`.toLowerCase()
 					: "";
+				const existingChoiceUid = JSON.stringify({
+					spell: existingSpellUid,
+					abilities: [...(i.item.selectedAbilityChoices || [])].sort((a, b) => String(a.ability).localeCompare(String(b.ability))),
+					language: i.item.selectedLanguage || "",
+				});
 				return i.item.name === item.name
 					&& i.item.source === item.source
-					&& existingSpellUid === selectedSpellUid
+					&& existingChoiceUid === selectedChoiceUid
 					&& !i.item._isCustom;
 			},
 		);
@@ -29455,6 +29521,7 @@ class CharacterSheetState {
 					itemProps.chargesInvalidFormula = chargeMaximum.formula;
 				}
 			}
+			itemProps.grantedLanguages = CharacterSheetState.getItemGrantedLanguages(itemProps);
 			itemProps.effects = this._normalizeItemEffects(itemProps);
 			itemProps.damageRiders = this._normalizeItemDamageRiders(itemProps);
 			itemProps.critRiders = this._normalizeItemCritRiders(itemProps);
@@ -30868,6 +30935,10 @@ class CharacterSheetState {
 		if (has((i, it) => baseType(it) === "SCF" || !!it.scfType)) {
 			const source = ({arcane: "arcane focus", druid: "druidic focus", holy: "holy symbol"})[matched.it.scfType] || "spellcasting focus";
 			return {ok: true, source, itemName: matched.name};
+		}
+		const classNames = new Set((this._data.classes || []).map(cls => String(cls.name || "").toLowerCase()));
+		if (has((i, it) => it.focus === true || (Array.isArray(it.focus) && it.focus.some(cls => classNames.has(String(cls).toLowerCase()))))) {
+			return {ok: true, source: "spellcasting focus", itemName: matched.name};
 		}
 
 		// 2. A component pouch (matched by name — it is plain adventuring gear).
@@ -32758,7 +32829,8 @@ class CharacterSheetState {
 			attackBonus,
 			damage,
 			damageType: dmgTypeFull || item.damageType || "bludgeoning",
-			range: item.range || (isRanged ? "80/320 ft." : "5 ft."),
+			range: item.range || (!isRanged && item.reach ? `${item.reach} ft.` : isRanged ? "80/320 ft." : "5 ft."),
+			reach: Number(item.reach) || null,
 			properties: props,
 			isMonkWeapon: !!isMonkWeapon,
 		};
@@ -33216,12 +33288,12 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Aggregate the light the character currently SHEDS from active states.
+	 * Aggregate the light the character currently sheds from active states and item powers.
 	 *
 	 * Generic over any active-state effect of the form
 	 * `{type: "light", brightRange, dimRange}`, so any future feature, spell
-	 * effect or item that emits light surfaces automatically by declaring that
-	 * effect — no per-feature rendering code.
+	 * effect surfaces automatically by declaring that effect. Structured item
+	 * light uses the same output after its item-power toggle is activated.
 	 *
 	 * Ranges are TOTAL radii, matching how the source books phrase it and how
 	 * the existing `*BrightLightRange` / `*DimLightRange` calculations are
@@ -33250,6 +33322,17 @@ class CharacterSheetState {
 			dimRange = Math.max(dimRange, dim);
 			const name = e.stateName || CharacterSheetState.ACTIVE_STATE_TYPES[e.stateTypeId]?.name;
 			if (name && !sources.includes(name)) sources.push(name);
+		}
+		for (const item of this.getItems()) {
+			if (!item.equipped || (item.requiresAttunement && !item.attuned)) continue;
+			for (const power of item.itemPowers || []) {
+				if (power.effectType !== "light" || !item.itemPowerStates?.[power.id]?.active) continue;
+				const bright = Number(power.light?.brightRange) || 0;
+				const dim = Number(power.light?.dimRange) || bright;
+				brightRange = Math.max(brightRange, bright);
+				dimRange = Math.max(dimRange, dim);
+				if (!sources.includes(item.name)) sources.push(item.name);
+			}
 		}
 		return {brightRange, dimRange: Math.max(brightRange, dimRange), sources};
 	}

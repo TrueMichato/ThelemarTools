@@ -1561,6 +1561,7 @@ class CharacterSheetInventory {
 			properties: item.property || [],
 			mastery: item.mastery || [],
 			range: item.range ? `${item.range}` : null,
+			reach: item.reach ?? null,
 			bonusWeapon: this._parseBonus(item.bonusWeapon),
 			bonusWeaponAttack: this._parseBonus(item.bonusWeaponAttack),
 			bonusWeaponDamage: this._parseBonus(item.bonusWeaponDamage),
@@ -1604,12 +1605,16 @@ class CharacterSheetInventory {
 			senses: item.senses || null,
 			// Ability score modifications from items (e.g., Gauntlets of Ogre Power, Belt of Giant Strength)
 			ability: item.ability || null,
+			selectedAbilityChoices: item.selectedAbilityChoices ? MiscUtil.copyFast(item.selectedAbilityChoices) : null,
 			// Item-granted spells (e.g., Staff of the Magi, Wand of Fireballs)
 			attachedSpells: item.attachedSpells || null,
 			spellScrollLevel: item.spellScrollLevel ?? null,
 			selectedSpell: item.selectedSpell ? MiscUtil.copyFast(item.selectedSpell) : null,
 			// Spellcasting focus for classes
 			focus: item.focus || null,
+			light: item.light ? MiscUtil.copyFast(item.light) : null,
+			grantsLanguage: !!item.grantsLanguage,
+			selectedLanguage: item.selectedLanguage || null,
 			// Charges
 			charges: item.charges ?? null,
 			chargesCurrent: typeof item.charges === "number" ? item.charges : null,
@@ -3919,15 +3924,65 @@ class CharacterSheetInventory {
 	}
 
 	async _pAddItemWithChoices (item) {
-		if (item?.spellScrollLevel == null || item.attachedSpells || item.selectedSpell) {
-			this._addItem(item);
-			return true;
+		let configured = item;
+		if (configured?.spellScrollLevel != null && !configured.attachedSpells && !configured.selectedSpell) {
+			const selectedSpell = await this._pChooseSpellForItem(configured);
+			if (!selectedSpell) return false;
+			configured = CharacterSheetInventory.getItemWithSelectedSpell(configured, selectedSpell);
 		}
 
-		const selectedSpell = await this._pChooseSpellForItem(item);
-		if (!selectedSpell) return false;
-		this._addItem(CharacterSheetInventory.getItemWithSelectedSpell(item, selectedSpell));
+		if (configured?.ability?.choose?.length && !CharacterSheetState._hasResolvedItemAbilityChoices(configured)) {
+			const selectedAbilityChoices = await this._pChooseAbilitiesForItem(configured);
+			if (!selectedAbilityChoices) return false;
+			configured = {...configured, selectedAbilityChoices};
+		}
+
+		if (configured?.grantsLanguage && !CharacterSheetState.getItemGrantedLanguages(configured).length) {
+			const selectedLanguage = await this._pChooseLanguageForItem(configured);
+			if (!selectedLanguage) return false;
+			configured = {...configured, selectedLanguage};
+		}
+
+		this._addItem(configured);
 		return true;
+	}
+
+	async _pChooseAbilitiesForItem (item) {
+		const selected = [];
+		for (const choice of item.ability?.choose || []) {
+			const count = Math.max(1, Number(choice.count) || 1);
+			const amount = Number(choice.amount) || 1;
+			for (let i = 0; i < count; i++) {
+				const available = (choice.from || []).filter(ability => !selected.some(it => it.ability === ability));
+				if (!available.length) return null;
+				const ability = await InputUiUtil.pGetUserEnum({
+					title: `Choose an Ability for ${item.name}`,
+					htmlDescription: `Choose ${count > 1 ? `${i + 1} of ${count}: ` : ""}an ability to increase by ${amount}.`,
+					values: available,
+					fnDisplay: value => Parser.attAbvToFull(value),
+					isResolveItem: true,
+				});
+				if (!ability) return null;
+				selected.push({ability, amount});
+			}
+		}
+		return selected;
+	}
+
+	async _pChooseLanguageForItem (item) {
+		const languages = this._page.getLanguagesList?.() || [];
+		const values = languages.map(language => language.name).filter(Boolean);
+		if (!values.length) {
+			JqueryUtil.doToast({type: "danger", content: `No languages are available for ${item.name}.`});
+			return null;
+		}
+		return InputUiUtil.pGetUserEnum({
+			title: `Choose a Language for ${item.name}`,
+			htmlDescription: "Choose the language granted while this item is equipped and active.",
+			values,
+			fnDisplay: value => value,
+			isResolveItem: true,
+		});
 	}
 
 	async _pChooseSpellForItem (item) {
@@ -6138,6 +6193,10 @@ class CharacterSheetInventory {
 					if (item.ability[ab] && typeof item.ability[ab] === "number") {
 						bonuses[ab] = (bonuses[ab] || 0) + item.ability[ab];
 					}
+				}
+				for (const choice of item.selectedAbilityChoices || []) {
+					if (!abilityKeys.includes(choice.ability) || !Number.isFinite(Number(choice.amount))) continue;
+					bonuses[choice.ability] = (bonuses[choice.ability] || 0) + Number(choice.amount);
 				}
 			}
 

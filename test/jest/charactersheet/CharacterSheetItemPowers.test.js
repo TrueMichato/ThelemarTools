@@ -436,6 +436,121 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		expect(state.getItems().map(item => item.selectedSpell.name)).toEqual(["Fireball", "Fly"]);
 	});
 
+	it("turns structured item light into a persisted player-controlled light source", () => {
+		const state = new CharacterSheetState();
+		const added = addActiveCatalogItem(state, {
+			name: "Test Lantern",
+			source: "TST",
+			light: [{bright: 20, dim: 40, shape: "cone"}],
+		});
+		const power = state.getItemPowers({activeOnly: true}).find(it => it.itemId === added.id && it.effectType === "light");
+
+		expect(power).toEqual(expect.objectContaining({
+			kind: "toggle",
+			isToggle: true,
+			light: {brightRange: 20, dimRange: 40, shape: "cone"},
+		}));
+		expect(state.getEmittedLight()).toEqual({brightRange: 0, dimRange: 0, sources: []});
+		expect(state.invokeItemPower(added.id, power.id)).toEqual(expect.objectContaining({ok: true, isActive: true}));
+		expect(state.getEmittedLight()).toEqual({brightRange: 20, dimRange: 40, sources: ["Test Lantern"]});
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(state.toJson());
+		expect(restored.getEmittedLight()).toEqual({brightRange: 20, dimRange: 40, sources: ["Test Lantern"]});
+	});
+
+	it("uses structured focus class lists in material-component validation", () => {
+		const state = new CharacterSheetState();
+		state._data.classes = [{name: "Wizard", level: 1}];
+		addActiveCatalogItem(state, {
+			name: "Wizard Orb",
+			source: "TST",
+			type: "OTH",
+			focus: ["Wizard"],
+		});
+
+		expect(state.getSpellcastingFocusStatus()).toEqual(expect.objectContaining({
+			ok: true,
+			itemName: "Wizard Orb",
+		}));
+
+		const universalState = new CharacterSheetState();
+		addActiveCatalogItem(universalState, {name: "Universal Focus", source: "TST", type: "OTH", focus: true});
+		expect(universalState.getSpellcastingFocusStatus()).toEqual(expect.objectContaining({
+			ok: true,
+			itemName: "Universal Focus",
+		}));
+	});
+
+	it("applies persisted structured ability choices and keeps different choices separate", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const base = {
+			name: "Mutable Tome",
+			source: "TST",
+			ability: {choose: [{from: ["str", "wis"], count: 1, amount: 2}]},
+		};
+		addActiveCatalogItem(state, {...base, selectedAbilityChoices: [{ability: "wis", amount: 2}]});
+		addActiveCatalogItem(state, {...base, selectedAbilityChoices: [{ability: "str", amount: 2}]});
+		inventory._updateArmorClass();
+
+		expect(state.getItems()).toHaveLength(2);
+		expect(state.getAbilityScore("wis")).toBe(12);
+		expect(state.getAbilityScore("str")).toBe(12);
+	});
+
+	it("derives fixed structured language grants and removes them when unequipped", () => {
+		const state = new CharacterSheetState();
+		const added = addActiveCatalogItem(state, {
+			name: "Draconic Mask",
+			source: "TST",
+			grantsLanguage: true,
+			entries: ["While wearing this mask, you can speak and understand Draconic."],
+		});
+
+		expect(state.getLanguages()).toContain("Draconic");
+		state.setItemEquipped(added.id, false);
+		expect(state.getLanguages()).not.toContain("Draconic");
+	});
+
+	it("uses structured weapon reach as the attack range", () => {
+		const state = new CharacterSheetState();
+		const attack = state.updateAttackFromWeapon({
+			name: "Long Pike",
+			source: "TST",
+			type: "M",
+			weaponCategory: "martial",
+			dmg1: "1d10",
+			dmgType: "P",
+			reach: 15,
+		});
+
+		expect(attack.range).toBe("15 ft.");
+		expect(state.getAttackReach(attack)).toBe(15);
+	});
+
+	it("persists catalog ability and language choices before adding an item", async () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		inventory._pChooseAbilitiesForItem = jest.fn().mockResolvedValue([{ability: "cha", amount: 2}]);
+		inventory._pChooseLanguageForItem = jest.fn().mockResolvedValue("Celestial");
+
+		await expect(inventory._pAddItemWithChoices({
+			name: "Choice Relic",
+			source: "TST",
+			ability: {choose: [{from: ["int", "wis", "cha"], count: 1, amount: 2}]},
+			grantsLanguage: true,
+		})).resolves.toBe(true);
+
+		expect(state.getItems()).toEqual([
+			expect.objectContaining({
+				selectedAbilityChoices: [{ability: "cha", amount: 2}],
+				selectedLanguage: "Celestial",
+				grantedLanguages: ["Celestial"],
+			}),
+		]);
+	});
+
 	it("applies Bracers of Defense only while unarmored and without a shield", () => {
 		const state = new CharacterSheetState();
 		state.setAbilityBase("dex", 14);

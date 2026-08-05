@@ -8,22 +8,22 @@ The full snapshot includes repository items, base items, concrete magic-variant 
 
 | Legacy headline | Concrete entities | Share |
 | --- | ---: | ---: |
-| Fully functional | 5,168 | 43.2% |
-| Surfaced only | 6,791 | 56.8% |
+| Fully functional | 5,423 | 45.3% |
+| Surfaced only | 6,536 | 54.7% |
 | Unsupported | 0 | 0.0% |
 | **Total** | **11,959** | **100%** |
 
-The stricter operational audit reduces the previous 6,100-item functional count by 932. This is an intentional correction, not a product regression: field presence no longer proves functionality. Items with bare charges, unresolved choices, reference-only powers, or a working passive plus an unresolved active clause remain surfaced.
+The stricter operational audit remains below the previous optimistic 6,100-item count. This is intentional: field presence no longer proves functionality. Items with bare charges, unresolved choices, reference-only powers, or a working passive plus an unresolved active clause remain surfaced.
 
 | Operational status | Items | Share |
 | --- | ---: | ---: |
-| `structuredOperational` | 4,655 | 38.9% |
-| `proseOperational` | 513 | 4.3% |
-| `partiallyOperational` | 1,837 | 15.4% |
-| `choiceRequired` | 1,219 | 10.2% |
-| `resourceOnly` | 238 | 2.0% |
-| `referenceOnly` | 819 | 6.8% |
-| `bespoke` | 2,678 | 22.4% |
+| `structuredOperational` | 4,932 | 41.2% |
+| `proseOperational` | 491 | 4.1% |
+| `partiallyOperational` | 1,815 | 15.2% |
+| `choiceRequired` | 1,218 | 10.2% |
+| `resourceOnly` | 226 | 1.9% |
+| `referenceOnly` | 779 | 6.5% |
+| `bespoke` | 2,498 | 20.9% |
 | `invalidShape` | 0 | 0.0% |
 
 ## Classification contract
@@ -42,6 +42,8 @@ The legacy headline remains for historical comparison. Only `structuredOperation
 `spellScrollLevel` items now have a deterministic configuration path: adding one from the inventory catalog requires selecting an exact-level spell, persists that selection on the item, and normalizes it into a charged Enspelled power or a finite scroll power. Unconfigured corpus templates remain `choiceRequired`, so this capability does not inflate the headline before a concrete spell is selected.
 
 Structured item resources now use one runtime contract. Numeric maxima remain fixed, dice maxima such as `{@dice 1d8 + 1}` are rolled once when an item instance is created and persisted, and proficiency-bonus maxima resize with the character without refilling spent charges. Invalid formulas remain explicitly unavailable instead of being truncated by `parseInt`. `attachedSpells.resource` spends its named character resource atomically, while a missing `resourceName` is surfaced as unresolved. `recharge: "special"` remains manual and is never restored by a rest.
+
+The remaining structured adapters add 255 fully functional entities (+2.1 percentage points). Structured `light` becomes a persisted on/off item power feeding the sheet's emitted-light display; `focus` participates in material-component validation for the listed classes; fixed language grants are derived only from wearer-directed rules text, while ambiguous grants require a persisted language choice; `ability.choose` uses persisted per-item selections; and numeric weapon `reach` feeds attack range. Choice-configured copies remain distinct inventory stacks.
 
 ## Corpus methodology
 
