@@ -1,5 +1,19 @@
 import fs from "fs";
 import path from "path";
+import {pathToFileURL} from "url";
+
+if (!String.prototype.toTitleCase) {
+	String.prototype.toTitleCase = function () {
+		return this.replace(/\w\S*/g, txt => `${txt.charAt(0).toUpperCase()}${txt.slice(1).toLowerCase()}`);
+	};
+}
+globalThis.Parser ||= {SRC_PHB: "PHB"};
+globalThis.MiscUtil ||= {copyFast: value => structuredClone(value)};
+
+await import("../js/charactersheet/charactersheet-class-utils.js");
+await import("../js/charactersheet/charactersheet-state.js");
+
+const ITEM_NORMALIZER = new globalThis.CharacterSheetState();
 
 const STRUCTURED_FIELDS = new Set([
 	"ability",
@@ -26,10 +40,31 @@ const STRUCTURED_FIELDS = new Set([
 	"spellImmunitySlots",
 	"vulnerable",
 ]);
+const OPERATIONAL_STRUCTURED_FIELDS = new Set([
+	"ability",
+	"bonusAbilityCheck",
+	"bonusAc",
+	"bonusProficiencyBonus",
+	"bonusSavingThrow",
+	"bonusSavingThrowConcentration",
+	"bonusSpellAttack",
+	"bonusSpellDamage",
+	"bonusSpellSaveDc",
+	"bonusWeapon",
+	"bonusWeaponAttack",
+	"bonusWeaponDamage",
+	"bonusWeaponCritDamage",
+	"conditionImmune",
+	"critThreshold",
+	"immune",
+	"modifySpeed",
+	"resist",
+	"senses",
+	"spellImmunitySlots",
+	"vulnerable",
+]);
 const ATTACHED_SPELL_KEYS = new Set(["ability", "charges", "daily", "limited", "other", "rest", "ritual", "will"]);
 const ACTIVATION_RE = /\b(?:as (?:a|an) (?:bonus )?action|as (?:a|an) reaction|use (?:a|an|your) action|when you hit|expend \d+ charges?|once (?:this property is )?used|until (?:the )?next dawn|short or long rest)\b/i;
-const ACTIONABLE_ACTIVE_RE = /\b(?:expend (?:one|\d+) charges?|(?:staff|item|weapon|armor) is destroyed|until (?:the )?next dawn|until you finish a (?:short or )?long rest)\b/i;
-const DERIVED_WEAPON_RIDER_RE = /\b(?:when you hit|it deals|target takes|roll a 20)[^.]*\bextra\s+(?:\{@damage\s+)?(?:\d+d\d+|\d+)\b/i;
 
 function getEntryText (entry) {
 	if (entry == null) return "";
@@ -44,33 +79,103 @@ function getAttachedSpellKeys (item) {
 	return Object.keys(item.attachedSpells);
 }
 
-function classifyItem (item) {
+export function classifyItem (item) {
 	const fields = [...STRUCTURED_FIELDS].filter(field => item[field] != null);
 	const unsupportedSpellKeys = getAttachedSpellKeys(item).filter(key => !ATTACHED_SPELL_KEYS.has(key));
 	const text = getEntryText(item.entries);
-	const namedActive = (item.entries || []).some(entry => {
-		if (!entry || typeof entry !== "object" || !entry.name) return false;
-		const entryText = getEntryText(entry.entries);
-		return ACTIVATION_RE.test(entryText) && ACTIONABLE_ACTIVE_RE.test(entryText);
-	});
 	const hasActiveProse = ACTIVATION_RE.test(text);
-	const hasDerivedWeaponRider = DERIVED_WEAPON_RIDER_RE.test(text);
-	if (hasDerivedWeaponRider) fields.push("derivedWeaponRider");
-	const hasPowerData = !!item.attachedSpells || namedActive || hasDerivedWeaponRider;
-	const hasCooldownLimitedSpeed = !!item.modifySpeed && /\b(?:can be used|use this property)\s+once every\b/i.test(text);
+	const powers = ITEM_NORMALIZER._normalizeItemPowers(item);
+	const effects = ITEM_NORMALIZER._normalizeItemEffects(item);
+	const damageRiders = ITEM_NORMALIZER._normalizeItemDamageRiders(item);
+	const criticalRiders = ITEM_NORMALIZER._normalizeItemCritRiders(item);
+	const conditionalBonuses = ITEM_NORMALIZER._detectConditionalBonuses(item);
+	const actionablePowers = powers.filter(power => power.kind === "spell" || !power.isReferenceOnly);
+	const referencePowers = powers.filter(power => power.isReferenceOnly);
+	const explicitEffects = Array.isArray(item.effects) && item.effects.length;
+	const operationalStructured = [...OPERATIONAL_STRUCTURED_FIELDS].filter(field => item[field] != null);
+	const operationalDerived = [
+		...effects,
+		...damageRiders,
+		...criticalRiders,
+		...conditionalBonuses,
+	];
+	const choices = [
+		...(item.spellScrollLevel != null && !item.attachedSpells ? ["spellScrollLevel"] : []),
+		...(item.ability?.choose?.length ? ["ability.choose"] : []),
+		...(item.grantsLanguage ? ["grantsLanguage"] : []),
+	];
+	const hasOperational = operationalStructured.length || actionablePowers.length || operationalDerived.length;
+	const hasUnresolvedActive = hasActiveProse && !actionablePowers.length;
+	const reasons = [];
+
 	if (unsupportedSpellKeys.length) {
-		return {status: "unsupported", fields, reasons: unsupportedSpellKeys.map(key => `attachedSpells.${key}`)};
-	}
-	if (hasCooldownLimitedSpeed) return {status: "surfacedOnly", fields, reasons: ["cooldown-limited structured speed"]};
-	if (fields.length || hasPowerData) {
 		return {
-			status: hasActiveProse && !hasPowerData ? "surfacedOnly" : "fullyFunctional",
+			status: "unsupported",
+			operationalStatus: "invalidShape",
 			fields,
-			reasons: hasActiveProse && !hasPowerData ? ["unstructured active prose"] : [],
+			reasons: unsupportedSpellKeys.map(key => `attachedSpells.${key}`),
 		};
 	}
-	if (text || item._isExpandedVariant || item._isItemGroup) return {status: "surfacedOnly", fields, reasons: ["rules text only"]};
-	return {status: "unsupported", fields, reasons: ["no structured mechanics or rules text"]};
+
+	if (hasOperational && (hasUnresolvedActive || choices.length || referencePowers.length)) {
+		if (hasUnresolvedActive) reasons.push("unresolved active prose");
+		if (choices.length) reasons.push(...choices.map(choice => `choice required: ${choice}`));
+		if (referencePowers.length) reasons.push("reference-only power");
+		return {
+			status: "surfacedOnly",
+			operationalStatus: "partiallyOperational",
+			fields,
+			reasons,
+		};
+	}
+
+	if (hasOperational) {
+		const isStructured = operationalStructured.length || actionablePowers.some(power => power.kind === "spell") || explicitEffects;
+		return {
+			status: "fullyFunctional",
+			operationalStatus: isStructured ? "structuredOperational" : "proseOperational",
+			fields,
+			reasons,
+		};
+	}
+
+	if (choices.length) {
+		return {
+			status: "surfacedOnly",
+			operationalStatus: "choiceRequired",
+			fields,
+			reasons: choices.map(choice => `choice required: ${choice}`),
+		};
+	}
+
+	if (item.charges != null) {
+		return {
+			status: "surfacedOnly",
+			operationalStatus: "resourceOnly",
+			fields,
+			reasons: [typeof item.charges === "number" ? "charges have no operational power" : "charge maximum requires resolution"],
+		};
+	}
+
+	if (referencePowers.length) {
+		return {
+			status: "surfacedOnly",
+			operationalStatus: "referenceOnly",
+			fields,
+			reasons: ["reference-only power"],
+		};
+	}
+
+	if (text || item._isExpandedVariant || item._isItemGroup) {
+		return {status: "surfacedOnly", operationalStatus: "bespoke", fields, reasons: ["rules text only"]};
+	}
+
+	return {
+		status: "unsupported",
+		operationalStatus: "invalidShape",
+		fields,
+		reasons: ["no structured mechanics or rules text"],
+	};
 }
 
 function readJson (file) {
@@ -167,7 +272,7 @@ function dedupeItems (items) {
 	return [...byUid.values()];
 }
 
-function loadCorpus (attachmentPath = null) {
+export function loadCorpus (attachmentPath = null) {
 	const siteItems = readJson("data/items.json").item;
 	const siteBaseItems = readJson("data/items-base.json").baseitem;
 	const siteVariants = readJson("data/magicvariants.json").magicvariant;
@@ -220,9 +325,10 @@ function loadCorpus (attachmentPath = null) {
 	return {items: dedupeItems([...direct, ...expanded]), documents};
 }
 
-function summarize ({items, documents}) {
+export function summarize ({items, documents}) {
 	const rows = items.map(item => ({item, result: classifyItem(item)}));
 	const status = {fullyFunctional: 0, surfacedOnly: 0, unsupported: 0};
+	const operationalStatus = {};
 	const byCorpus = {};
 	const byDocument = documents.map(document => ({
 		...document,
@@ -235,6 +341,7 @@ function summarize ({items, documents}) {
 	const reasons = {};
 	for (const {item, result} of rows) {
 		status[result.status]++;
+		operationalStatus[result.operationalStatus] = (operationalStatus[result.operationalStatus] || 0) + 1;
 		const corpus = byCorpus[item._corpus] ||= {fullyFunctional: 0, surfacedOnly: 0, unsupported: 0, total: 0};
 		corpus[result.status]++;
 		corpus.total++;
@@ -246,7 +353,7 @@ function summarize ({items, documents}) {
 		for (const field of result.fields) fields[field] = (fields[field] || 0) + 1;
 		for (const reason of result.reasons) reasons[reason] = (reasons[reason] || 0) + 1;
 	}
-	return {total: rows.length, status, byCorpus, byDocument, fields, reasons};
+	return {total: rows.length, status, operationalStatus, byCorpus, byDocument, fields, reasons};
 }
 
 function toMarkdown (summary, attachmentPath) {
@@ -262,6 +369,14 @@ function toMarkdown (summary, attachmentPath) {
 		`| Surfaced only | ${summary.status.surfacedOnly} | ${pct(summary.status.surfacedOnly)} |`,
 		`| Unsupported | ${summary.status.unsupported} | ${pct(summary.status.unsupported)} |`,
 		`| **Total** | **${summary.total}** | **100%** |`,
+		"",
+		"## Operational status",
+		"",
+		"| Status | Items | Share |",
+		"| --- | ---: | ---: |",
+		...Object.entries(summary.operationalStatus)
+			.sort((a, b) => b[1] - a[1])
+			.map(([status, count]) => `| ${status} | ${count} | ${pct(count)} |`),
 		"",
 		"## Corpus breakdown",
 		"",
@@ -297,9 +412,10 @@ function toMarkdown (summary, attachmentPath) {
 		"",
 		"## Classification contract",
 		"",
-		"- **Fully functional:** mechanics use a supported structured field, attached-spell shape, or named active-power block.",
-		"- **Surfaced only:** rules text remains visible, but no safe structured operation can be inferred.",
-		"- **Unsupported:** the entity has an unknown attached-spell shape or neither mechanics nor rules text.",
+		"- **Fully functional:** production normalization or a downstream structured consumer provides operational mechanics, with no unresolved choice, active clause, or reference-only power detected.",
+		"- **Surfaced only:** includes partial automation, unresolved choices, bare resources, reference-only powers, and bespoke rules text.",
+		"- **Unsupported:** the entity has an invalid attached-spell shape or neither mechanics nor rules text.",
+		"- Operational sub-statuses distinguish `structuredOperational`, `proseOperational`, `partiallyOperational`, `choiceRequired`, `resourceOnly`, `referenceOnly`, `bespoke`, and `invalidShape`.",
 		"",
 		"Run `node node/audit-character-sheet-items.js [5etools-site-backup.json]` to refresh this report.",
 	);
@@ -307,5 +423,7 @@ function toMarkdown (summary, attachmentPath) {
 }
 
 const attachmentPath = process.argv[2] ? path.resolve(process.argv[2]) : null;
-const summary = summarize(loadCorpus(attachmentPath));
-process.stdout.write(toMarkdown(summary, attachmentPath));
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+	const summary = summarize(loadCorpus(attachmentPath));
+	process.stdout.write(toMarkdown(summary, attachmentPath));
+}
