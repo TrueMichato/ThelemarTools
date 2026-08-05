@@ -391,6 +391,31 @@ describe("CharacterSheetIoun — actions", () => {
 		expect(state.getIounBonds()[id]).toBeUndefined();
 	});
 
+	it("completes an official-stone bond while every ordinary attunement slot is full", () => {
+		const {state, ioun} = makeSheet([{item: makeOfficialStone("Ioun Stone of Protection")}]);
+		for (let i = 0; i < 3; ++i) {
+			state.addItem({
+				name: `Ring ${i}`,
+				source: "DMG",
+				type: "wondrous",
+				requiresAttunement: true,
+				entries: ["A plain magic ring."],
+			});
+			expect(state.attune(state.getItems().at(-1).id)).toBe(true);
+		}
+
+		const id = ioun.getAllStones()[0].id;
+		expect(state.getAttunedCount()).toBe(3);
+		expect(state.canAttune()).toBe(false);
+		expect(ioun.startBond(id)).toBe(true);
+		for (let i = 0; i < 6; ++i) expect(ioun.advanceBondDay().completed).toHaveLength(0);
+
+		expect(ioun.advanceBondDay().completed.map(it => it.id)).toEqual([id]);
+		expect(state.getItems().find(it => it.id === id).attuned).toBe(true);
+		expect(state.getAttunedCount()).toBe(3);
+		expect(state.getIounBonds()[id]).toBeUndefined();
+	});
+
 	it("recomputes the requirement live, so orbiting stones shorten a bond already underway", () => {
 		const {ioun} = makeSheet([
 			{item: makeStone("Ioun Stone #021, Grey Sphere"), attuned: true, equipped: true},
