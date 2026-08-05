@@ -4988,13 +4988,25 @@ class CharacterSheetInventory {
 		return confirmed;
 	}
 
-	async _pInvokeItemPower (itemId, powerId, {closeModal = null} = {}) {
+	async _pInvokeItemPower (itemId, powerId, {closeModal = null, chargesCost = null} = {}) {
 		const power = this._state.getItemPower?.(itemId, powerId);
+		const selectedChargesCost = chargesCost == null ? power?.chargesCost : Number(chargesCost);
+		if (power?.chargesCostMax && (
+			selectedChargesCost < power.chargesCost
+			|| selectedChargesCost > power.chargesCostMax
+			|| selectedChargesCost > power.chargesCurrent
+		)) {
+			JqueryUtil.doToast({type: "warning", content: `Choose an available charge cost for ${power.name}.`});
+			return false;
+		}
 		if (power?.kind === "spell" && power.isAvailable) {
-			const cast = await this._page?._spells?.pCastItemSpell?.(power);
+			const castLevel = power.isVariableChargeCast && power.castLevel
+				? power.castLevel + selectedChargesCost - power.chargesCost
+				: power.castLevel;
+			const cast = await this._page?._spells?.pCastItemSpell?.({...power, castLevel});
 			if (!cast) return false;
 		}
-		let result = this._state.invokeItemPower?.(itemId, powerId);
+		let result = this._state.invokeItemPower?.(itemId, powerId, {chargesCost});
 		if (result?.needsConfirmation) {
 			const confirmed = await this._pConfirmDestructiveItemPower(result.power);
 			if (!confirmed) return false;
@@ -5073,6 +5085,16 @@ class CharacterSheetInventory {
 					section.append(row);
 					continue;
 				}
+				let chargeChoice = null;
+				if (power.chargesCostMax > power.chargesCost) {
+					chargeChoice = e_({tag: "select", clazz: "form-control input-xs", title: `Charges to spend on ${power.name}`});
+					const maxSpend = Math.min(power.chargesCostMax, power.chargesCurrent);
+					for (let cost = power.chargesCost; cost <= maxSpend; cost++) {
+						const castLevel = power.castLevel ? power.castLevel + cost - power.chargesCost : null;
+						chargeChoice.append(e_({tag: "option", value: String(cost), text: `${cost} charge${cost === 1 ? "" : "s"}${castLevel ? ` · level ${castLevel}` : ""}`}));
+					}
+					body.append(chargeChoice);
+				}
 				const use = e_({
 					tag: "button",
 					clazz: `ve-btn ve-btn-sm ${power.isDestructive ? "ve-btn-danger" : "ve-btn-primary"}`,
@@ -5080,7 +5102,10 @@ class CharacterSheetInventory {
 				});
 				use.disabled = !power.isAvailable;
 				use.title = power.unavailableReason || `${power.kind === "spell" ? "Cast" : "Invoke"} ${power.name}`;
-				use.addEventListener("click", () => this._pInvokeItemPower(itemId, power.id, {closeModal: () => doClose(true)}));
+				use.addEventListener("click", () => this._pInvokeItemPower(itemId, power.id, {
+					closeModal: () => doClose(true),
+					chargesCost: chargeChoice ? parseInt(chargeChoice.value, 10) : null,
+				}));
 				row.append(body, use);
 				section.append(row);
 			}

@@ -6571,6 +6571,10 @@ class CharacterSheetCombat {
 				use.disabled = !power.isAvailable || !actionAvailable;
 				use.title = power.unavailableReason || (!actionAvailable ? `${labels[type]} already used this turn.` : `${use.textContent} ${power.name}`);
 				use.addEventListener("click", async () => {
+					if (power.chargesCostMax > power.chargesCost) {
+						await this._page?._inventory?._showItemPowersModal?.(power.itemId);
+						return;
+					}
 					const used = await this._page?._inventory?._pInvokeItemPower?.(power.itemId, power.id);
 					if (!used) return;
 					if (["action", "bonus", "reaction"].includes(type)) this._consumeActionType(type);

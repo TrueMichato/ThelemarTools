@@ -1250,6 +1250,10 @@ export class CharacterSheetPlayMode {
 						: `${power.itemName}${power.isReferenceOnly ? " · rules reference" : ""}`;
 				if (power.isReferenceOnly) continue;
 				this._makeClickable(row, power.unavailableReason || `${power.kind === "spell" ? "Cast" : "Invoke"} ${power.name}`, async () => {
+					if (power.chargesCostMax > power.chargesCost) {
+						await this._page._inventory?._showItemPowersModal?.(power.itemId);
+						return;
+					}
 					const used = await this._page._inventory?._pInvokeItemPower?.(power.itemId, power.id);
 					if (!used) return;
 					if (["action", "bonus", "reaction"].includes(group.key)) this._actionEconomy[group.key] = false;

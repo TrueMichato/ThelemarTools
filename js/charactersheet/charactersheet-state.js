@@ -28228,9 +28228,15 @@ class CharacterSheetState {
 				castLevel: levelRaw ? parseInt(levelRaw, 10) || null : null,
 			};
 		};
+		const itemText = CharacterSheetState._getItemEntryText(item.entries);
 		const addSpell = (raw, usageType, {chargesCost = 0, usesMax = null, isEach = false, usesKey = null} = {}) => {
 			const spell = parseSpellUid(raw);
 			if (!spell.name) return;
+			const isVariableChargeCast = usageType === "charges"
+				&& chargesCost === 1
+				&& /\bexpend\s+1\s+or\s+more\s+(?:of (?:its|the) )?charges?\b/i.test(itemText)
+				&& /\bincrease the spell slot level by one for each additional charge\b/i.test(itemText);
+			const baseLevelMatch = itemText.match(/\bfor\s+1\s+charge,\s+you\s+cast\s+the\s+(\d+)(?:st|nd|rd|th)-level version\b/i);
 			addPower({
 				id: CharacterSheetState._getItemPowerId(["spell", spell.name, spell.source, chargesCost || usageType]),
 				name: spell.name,
@@ -28238,12 +28244,14 @@ class CharacterSheetState {
 				actionType: "action",
 				usageType,
 				chargesCost,
+				chargesCostMax: isVariableChargeCast ? item.charges || chargesCost : chargesCost,
 				usesMax,
 				isEach,
 				usesKey: usesMax ? (usesKey || `${usageType}:${usesMax}:${spell.name.toLowerCase()}|${spell.source.toLowerCase()}`) : null,
 				spellName: spell.name,
 				spellSource: spell.source,
-				castLevel: spell.castLevel,
+				castLevel: spell.castLevel || (baseLevelMatch ? parseInt(baseLevelMatch[1], 10) : null),
+				isVariableChargeCast,
 				description: `Cast ${spell.name}${spell.castLevel ? ` at level ${spell.castLevel}` : ""} from ${item.name || "this item"}.`,
 			});
 		};
@@ -28452,7 +28460,7 @@ class CharacterSheetState {
 	 * Atomically validate and consume an item power's resource.
 	 * Spell/result resolution remains with the calling UI, but charge mutation has one owner.
 	 */
-	invokeItemPower (itemId, powerId, {confirmed = false} = {}) {
+	invokeItemPower (itemId, powerId, {confirmed = false, chargesCost = null} = {}) {
 		const power = this.getItemPower(itemId, powerId);
 		if (!power) return {ok: false, reason: "Item power not found."};
 		if (!power.isAvailable) return {ok: false, reason: power.unavailableReason};
@@ -28465,10 +28473,14 @@ class CharacterSheetState {
 			isActive = !entry.item.itemPowerStates[power.id]?.active;
 			entry.item.itemPowerStates[power.id] = {active: isActive};
 		}
-		if (power.chargesCost) {
+		const selectedChargesCost = chargesCost == null ? power.chargesCost : Number(chargesCost);
+		if (power.chargesCostMax && (selectedChargesCost < power.chargesCost || selectedChargesCost > power.chargesCostMax)) {
+			return {ok: false, reason: `Choose between ${power.chargesCost} and ${power.chargesCostMax} charges.`};
+		}
+		if (selectedChargesCost) {
 			const current = entry.item.chargesCurrent ?? entry.item.charges ?? 0;
-			if (current < power.chargesCost) return {ok: false, reason: `Not enough charges for ${power.name}.`};
-			entry.item.chargesCurrent = current - power.chargesCost;
+			if (current < selectedChargesCost) return {ok: false, reason: `Not enough charges for ${power.name}.`};
+			entry.item.chargesCurrent = current - selectedChargesCost;
 		}
 		if (power.usesMax) {
 			if (!entry.item.itemPowerUses) entry.item.itemPowerUses = {};
@@ -28482,6 +28494,7 @@ class CharacterSheetState {
 			chargesCurrent: entry.item.chargesCurrent ?? entry.item.charges ?? 0,
 			chargesMax: entry.item.charges || 0,
 			usesCurrent: power.usesMax ? entry.item.itemPowerUses?.[power.usesKey] ?? power.usesMax : null,
+			chargesCost: selectedChargesCost,
 			isActive,
 			destroyed: !!power.isDestructive,
 		};

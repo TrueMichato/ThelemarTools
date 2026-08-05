@@ -324,4 +324,27 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		inventory._updateItemBonuses(state.getItems());
 		expect(state.getSpeed("walk")).toBe(30);
 	});
+
+	it.each([
+		["Wand of Magic Missiles", "Magic Missile", 1],
+		["Wand of Fireballs", "Fireball", 3],
+		["Wand of Lightning Bolts", "Lightning Bolt", 3],
+	])("supports variable-charge upcasting for %s", (itemName, spellName, baseLevel) => {
+		const state = new CharacterSheetState();
+		const wand = items.find(it => it.name === itemName && it.source === "DMG");
+		const added = addActiveCatalogItem(state, wand);
+		const power = state.getItemPowers().find(it => it.itemId === added.id && it.name === spellName);
+
+		expect(power).toEqual(expect.objectContaining({
+			chargesCost: 1,
+			chargesCostMax: 7,
+			castLevel: baseLevel,
+			isVariableChargeCast: true,
+		}));
+		expect(state.invokeItemPower(added.id, power.id, {chargesCost: 4})).toEqual(expect.objectContaining({
+			ok: true,
+			chargesCost: 4,
+			chargesCurrent: 3,
+		}));
+	});
 });
