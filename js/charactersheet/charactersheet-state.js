@@ -12022,11 +12022,66 @@ class CharacterSheetState {
 
 	// Defensive properties from equipped/attuned magic items
 	setItemDefenses (defenses) {
-		this._data.itemDefenses = defenses || {resist: [], immune: [], vulnerable: [], conditionImmune: []};
+		this._data.itemDefenses = defenses || {
+			resist: [],
+			immune: [],
+			vulnerable: [],
+			conditionImmune: [],
+			combatEffects: [],
+			spellImmunities: [],
+			regeneration: [],
+		};
 	}
 
 	getItemDefenses () {
-		return this._data.itemDefenses || {resist: [], immune: [], vulnerable: [], conditionImmune: []};
+		return this._data.itemDefenses || {
+			resist: [],
+			immune: [],
+			vulnerable: [],
+			conditionImmune: [],
+			combatEffects: [],
+			spellImmunities: [],
+			regeneration: [],
+		};
+	}
+
+	/**
+	 * Persist player-chosen spell immunities on an inventory item (e.g. Necklace of Goibhnie
+	 * Threefold Spellward). Values are `{name, source?}[]`, clamped to the item's slot count.
+	 * @param {string} itemId
+	 * @param {Array<{name: string, source?: string}|string>} spells
+	 * @returns {boolean}
+	 */
+	setItemChosenSpellImmunities (itemId, spells) {
+		const entry = this._data.inventory?.find(i => i.id === itemId);
+		if (!entry?.item) return false;
+		const slots = entry.item.spellImmunitySlots;
+		const max = Math.max(0, Number(slots?.count) || 0);
+		if (!max) return false;
+		const cleaned = [];
+		const seen = new Set();
+		for (const raw of (Array.isArray(spells) ? spells : [])) {
+			const name = typeof raw === "string" ? raw.trim() : String(raw?.name || "").trim();
+			if (!name) continue;
+			const source = typeof raw === "object" && raw?.source ? String(raw.source) : "";
+			const key = `${name.toLowerCase()}|${source.toLowerCase()}`;
+			if (seen.has(key)) continue;
+			seen.add(key);
+			cleaned.push(source ? {name, source} : {name});
+			if (cleaned.length >= max) break;
+		}
+		entry.item.chosenSpellImmunities = cleaned;
+		return true;
+	}
+
+	/**
+	 * @param {string} itemId
+	 * @returns {Array<{name: string, source?: string}>}
+	 */
+	getItemChosenSpellImmunities (itemId) {
+		const entry = this._data.inventory?.find(i => i.id === itemId);
+		const list = entry?.item?.chosenSpellImmunities;
+		return Array.isArray(list) ? list.map(s => ({...s})) : [];
 	}
 
 	// Ability score overrides from equipped/attuned magic items
@@ -12057,6 +12112,27 @@ class CharacterSheetState {
 		if (!invItem) return {};
 
 		const item = invItem.item || invItem;
+		const damageRiders = [];
+		// Catalog / brew weapons may declare standing extra damage dice (e.g. Spear of Lugh
+		// +4d12 radiant). Prefer an explicit damageRiders[] list; fall back to the single
+		// bonusDamageDice/bonusDamageType pair used by upgrades.
+		if (Array.isArray(item.damageRiders)) {
+			for (const r of item.damageRiders) {
+				if (!r?.dice) continue;
+				damageRiders.push({
+					dice: String(r.dice),
+					damageType: r.damageType || r.type || null,
+					name: r.name || item.name || "Weapon",
+				});
+			}
+		} else if (item.bonusDamageDice) {
+			damageRiders.push({
+				dice: String(item.bonusDamageDice),
+				damageType: item.bonusDamageType || null,
+				name: item.name || "Weapon",
+			});
+		}
+
 		const base = {
 			bonusWeaponAttack: item.bonusWeaponAttack || 0,
 			bonusWeaponDamage: item.bonusWeaponDamage || 0,
@@ -12065,11 +12141,10 @@ class CharacterSheetState {
 			bonusSpellSaveDc: item.bonusSpellSaveDc || 0,
 			critThreshold: item.critThreshold || 20,
 			damageDieIncrease: 0,
-			// Non-flat upgrade riders (e.g. Saw-toothed +1d4 slashing). Surfaced here so combat /
-			// roll consumers (S5) can apply them; previously computed by getUpgradeEffects but
-			// silently dropped at this boundary.
-			bonusDamageDice: null,
-			bonusDamageType: null,
+			// Non-flat dice riders (item catalog + upgrades). Combat auto-applies these on hit.
+			bonusDamageDice: damageRiders[0]?.dice || null,
+			bonusDamageType: damageRiders[0]?.damageType || null,
+			damageRiders,
 			// Weapon-property tags granted by upgrades (e.g. Silvered, Magical, Runic).
 			tags: [],
 		};
@@ -12086,8 +12161,16 @@ class CharacterSheetState {
 				base.critThreshold = (base.critThreshold || 20) - effects.critThresholdReduction;
 			}
 			if (effects.bonusDamageDice) {
-				base.bonusDamageDice = effects.bonusDamageDice;
-				base.bonusDamageType = effects.bonusDamageType;
+				base.damageRiders.push({
+					dice: String(effects.bonusDamageDice),
+					damageType: effects.bonusDamageType || null,
+					name: "Weapon Upgrade",
+				});
+				// Keep legacy single-field view pointing at the first rider for older readers.
+				if (!base.bonusDamageDice) {
+					base.bonusDamageDice = effects.bonusDamageDice;
+					base.bonusDamageType = effects.bonusDamageType;
+				}
 			}
 			if (Array.isArray(effects.tags) && effects.tags.length) {
 				base.tags = [...effects.tags];
@@ -34530,6 +34613,39 @@ class CharacterSheetState {
 			effects.push({type: "heal", amount: calc.championSurvivorHealing, source: "Heroic Rally"});
 		}
 
+		// Equipped/attuned item regeneration (Ring of Greater Regeneration, Plate of
+		// Silvanus Rooted Renewal, etc.). Generic: driven by item.regeneration.
+		if (this.getCurrentHp() >= 1) {
+			for (const item of this.getItems()) {
+				if (!item.equipped) continue;
+				if (item.requiresAttunement && !item.attuned) continue;
+				const regen = item.regeneration;
+				if (!regen) continue;
+				const source = regen.name || item.name || "Item Regeneration";
+				const raw = regen.value ?? regen.amount ?? regen.hp;
+				if (raw == null || raw === "") continue;
+				const asNum = Number(raw);
+				if (Number.isFinite(asNum) && asNum > 0) {
+					effects.push({
+						type: "heal",
+						amount: asNum,
+						source,
+						note: regen.condition || regen.note || null,
+					});
+				} else {
+					const dice = String(raw).trim();
+					if (/^\d+d\d+/i.test(dice) || /^\d+d\d+\s*[+-]\s*\d+/i.test(dice)) {
+						effects.push({
+							type: "heal",
+							dice,
+							source,
+							note: regen.condition || regen.note || null,
+						});
+					}
+				}
+			}
+		}
+
 		return effects;
 	}
 
@@ -34543,19 +34659,30 @@ class CharacterSheetState {
 	 */
 	applyTurnStartEffects () {
 		const effects = this.getTurnStartEffects();
+		const applied = [];
 		for (const effect of effects) {
 			if (effect.type === "grantInspiration") {
 				if (!this.hasInspiration()) this.setInspiration(true);
-			} else if (effect.type === "heal" && effect.amount) {
-				this.heal(effect.amount);
+				applied.push(effect);
+			} else if (effect.type === "heal") {
+				let amount = effect.amount;
+				if ((amount == null || amount === 0) && effect.dice) {
+					// Roll NdX[+/-M] for item regeneration (e.g. 1d6).
+					amount = this._rollDiceExpression(String(effect.dice));
+				}
+				amount = Number(amount) || 0;
+				if (amount > 0) {
+					this.heal(amount);
+					applied.push({...effect, amount});
+				}
 			}
 		}
 		// Non-persisted side channel so combat/play-mode UI can build a toast
 		// message describing what just fired, without changing the pre-existing
 		// return shapes of `startCombat()` (void) / `advanceRound()` (expired states
 		// array) that other call sites already depend on.
-		this._lastTurnStartEffects = effects;
-		return effects;
+		this._lastTurnStartEffects = applied;
+		return applied;
 	}
 
 	/**
@@ -42450,15 +42577,19 @@ class CharacterSheetState {
 
 	/**
 	 * Get the complete effective defenses summary combining all sources.
-	 * @returns {{resistances: string[], conditionalResistances: Array<{type:string, conditional:string}>, immunities: string[], vulnerabilities: string[], conditionImmunities: string[]}}
+	 * @returns {{resistances: string[], conditionalResistances: Array<{type:string, conditional:string}>, immunities: string[], vulnerabilities: string[], conditionImmunities: string[], spellImmunities: Array<{name:string, source?:string, itemSource?:string}>, combatEffects: Array<object>}}
 	 */
 	getEffectiveDefenses () {
+		const itemDef = this.getItemDefenses();
 		return {
 			resistances: this.getResistances(),
 			conditionalResistances: this._getConditionalResistancesFromStates(),
 			immunities: this.getImmunities(),
 			vulnerabilities: this.getVulnerabilities(),
 			conditionImmunities: this.getConditionImmunities(),
+			spellImmunities: Array.isArray(itemDef.spellImmunities) ? itemDef.spellImmunities : [],
+			combatEffects: Array.isArray(itemDef.combatEffects) ? itemDef.combatEffects : [],
+			regeneration: Array.isArray(itemDef.regeneration) ? itemDef.regeneration : [],
 		};
 	}
 
@@ -43692,6 +43823,10 @@ class CharacterSheetState {
 			return true;
 		}
 
+		// Passive combat display effects (e.g. combat:disadvantage:spellAttacksAgainst) are
+		// aggregated by inventory defenses, not as numeric named-modifiers.
+		if (effectType.startsWith("combat:")) return true;
+
 		// Active-state effect types are NOT handled by the shared applier.
 		if (this._isActiveStateEffectType(effectType)) return false;
 
@@ -43722,6 +43857,7 @@ class CharacterSheetState {
 			// Pass through any special flags
 			advantage: effect.advantage,
 			disadvantage: effect.disadvantage,
+			setValue: effect.setValue,
 			setMinimum: effect.setMinimum,
 			setMaximum: effect.setMaximum,
 			conditional: effect.conditional, // Conditional trigger (e.g., "against:undead", "in:darkness")

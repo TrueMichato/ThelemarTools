@@ -485,6 +485,59 @@ Additional gods can be added purely as data (no code changes).
 
 ---
 
+## Celtic / Demon Door Artifacts
+
+Artifact and legendary items from the Celtic/Demon Door set live in
+`homebrew/TravelersGuidetoThelemar.json` (`source: TGTT`). Passive that the sheet can
+automate uses standard item fields plus the shared catalog `effects[]` pipeline
+(same as custom items):
+
+| Item | Structured automation on the sheet |
+|------|-------------------------------------|
+| **Gae Bolg** | `+4` weapon; truesight 60; initiative + PB; `conditionImmune: surprised`; charges 1/dawn **Enemy-Blinding Radiance**; combat notes for blaze |
+| **Spear of Lugh** | `+4` weapon; `bonusDamageDice` **4d12 radiant** auto on hit; ally attack/save advantage combat effect; battle-cannot-be-lost notes |
+| **Sword of Nauda** | `+4` weapon; **3d10 radiant** on hit; Flawless Guard / mark notes |
+| **Spears of Morrigan** | `+3` weapon pair; inevitable-hit / head rider notes |
+| **Trident of Mac Lir** | `+3` weapon; Drink-the-Sea max-HP drain note |
+| **Retaliator, Sword of Mac Lir** | `+3` weapon; Final Retaliation / Answer the Blow notes |
+| **Wooden Mallet of Silvanus** | `+3` weapon; charges 1/dawn **Worldroot Blow**; structure damage notes |
+| **Staff of Brigit** | fire-ignition combat notes |
+| **Staff of Dagda** | charges + recharge dice; Circle of Death / Raise Dead; fate-end notes |
+| **Rod of Math** | charges + Control Water will; Dissolve into Water note |
+| **Necklace of Goibhnie** | +3 AC, +2 all saves, +3 spell attack/DC; save adv vs magic; `resistance:spell`; enemy spell-attack disadv; `spellImmunitySlots` (5, swap 1 on SR); charges 1/dawn **Stone-Caught Magic** |
+| **Ring of Human Influence** | CHA set 22 (+ max); conditional CHA adv vs humanoids; charges 1/dawn **Command Allegiance** |
+| **Ring of Greater Regeneration** | `regeneration: 1` HP/turn (turn-start heal); body-part/death notes |
+| **Silver Hand of Nauda** | STR set 30 (+ max); `+4` force fist; charges 1/dawn **Dancing Hand** |
+| **Lia Fail** | CHA set 30 (+ max); charges 3/dawn **Royal Command** |
+| **Torc of the Gods** | Polymorph / Shapechange at will; form-retention notes |
+| **Cauldron of Dagda** | Endless Provision / Heroes' Feast notes |
+| **Armor of Brigit** | AC/resists; Furnace aura + Melt the Unworthy notes |
+| **Plate of Silvanus** | AC/resists; `regeneration: 20` while on natural ground (turn-start + combat badge); Wild Reclaims note |
+| **Fetters of Oghma** | bind true-name / anti-teleport notes |
+| **Rite of the Wild Hunt** | charge **Name the Quarry** (special/full moon); hunt notes |
+
+**Catalog plumbing:** adding an item from the picker copies `effects[]`, charges,
+`spellImmunitySlots`, `bonusDamageDice`/`damageRiders`, `regeneration`, and
+`conditionImmune`; loading the item index rehydrates missing structured fields onto
+existing inventory rows so older saves pick up Gae Bolg initiative / Necklace defenses /
+Spear of Lugh riders without re-adding the item.
+
+**Generic item combat / heal plumbing:**
+- `combat:disadvantage:*Against` / `combat:advantage:*` → Combat → Effects (and Magic Item Defenses)
+- `combat:note` → short-named badges with full text in the tooltip
+- `resistance:spell` → **Spell damage** resistance
+- `bonusDamageDice` (+ type) or `damageRiders[]` → automatic extra damage on weapon hits (crit-doubled)
+- `regeneration` → combat badge + `getTurnStartEffects` / `applyTurnStartEffects` heal while HP ≥ 1
+- `spellImmunitySlots` + picker; short/long rest toasts for swap/rechoose
+- Inventory rows show extra damage, regen, charges, and spellward counts
+
+Still mostly prose/manual (complex actives beyond charges + notes): Fetters prison
+bookkeeping, full Wild Hunt resolution, Sword Flawless Guard miss-counter, Trident % max
+HP necrotic math, auto-crit death riders, vampiric ring mode toggle, shapechange form
+selection UI.
+
+---
+
 ## Deferred / Not Yet Implemented
 
 
@@ -518,6 +571,7 @@ These would require broader system changes:
 - `CharacterSheetCombatMethodsSurvey.test.js` — 81 tests (Phase D: tradition parsing, stance integration, subclass tradition grants, edge cases, degree progression, DC calculation, stamina pool)
 - `CharacterSheetRumorSpell.test.js` — Rumor spell (level/school/components/duration, class availability, `rarity:rare`/`legality:illegal-II` tags, higher-level durations)
 - `CharacterSheetDivineFavor.test.js` — Divine Favor subsystem (Pan load, favour/malice tier computation, boon grants at favour 3/10/25/50, limited/granted casts, conditional advantage, Apostle +2 score & +2 max, save/load round-trip, apply/clear idempotency, and Bug 4: limited/granted casts minting tracked resources cross-linked to their innate spell — spend/restore sync across Spells/Resources/Combat, resource idempotency, and a real-character (Lorian, Pan favour 100) load check)
+- `CharacterSheetItemEffects.test.js` — TGTT Celtic artifact coverage (Gae Bolg init/truesight/surprised, Necklace spellward/resist/combat disadv, Spear/Sword damage riders, regen turn-start, combat notes, Ring CHA 22, Silver Hand STR 30, catalog field copy + rehydration)
 
 ### Test Categories
 

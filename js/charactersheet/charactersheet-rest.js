@@ -1322,6 +1322,35 @@ class CharacterSheetRest {
 			});
 		}
 
+		// Remind players about choose-N spell immunities (Threefold Spellward, etc.)
+		const spellwardItems = items.filter(it => {
+			if (!it.spellImmunitySlots?.count) return false;
+			if (!it.equipped) return false;
+			if (it.requiresAttunement && !it.attuned) return false;
+			return true;
+		});
+		if (spellwardItems.length) {
+			if (restType === "long") {
+				const labels = spellwardItems.map(it => it.spellImmunitySlots.label || it.name).join(", ");
+				JqueryUtil.doToast({
+					type: "info",
+					content: `Re-choose spell immunities if desired (${labels}) — use the inventory 🛡 button.`,
+				});
+			} else if (restType === "short") {
+				const swappable = spellwardItems.filter(it => Number(it.spellImmunitySlots.replaceOnShortRest) > 0);
+				if (swappable.length) {
+					const labels = swappable.map(it => {
+						const n = Number(it.spellImmunitySlots.replaceOnShortRest) || 1;
+						return `${it.name} (replace ${n})`;
+					}).join(", ");
+					JqueryUtil.doToast({
+						type: "info",
+						content: `You may replace a spell immunity: ${labels}.`,
+					});
+				}
+			}
+		}
+
 		// Recharge socketed gemstones on long rest (dawn recharge)
 		if (restType === "long") {
 			this._state.rechargeAllGemstones();

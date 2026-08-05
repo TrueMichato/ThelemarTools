@@ -2592,13 +2592,30 @@ class CharacterSheetCombat {
 	_getWeaponUpgradeDamageRiders (attack) {
 		const itemId = attack?.sourceItem?.id;
 		if (!itemId) return [];
-		const eff = this._state.getEffectiveItemBonuses?.(itemId);
-		if (!eff?.bonusDamageDice) return [];
-		return [{
-			source: "Weapon Upgrade",
-			dice: eff.bonusDamageDice,
-			damageType: eff.bonusDamageType || attack.damageType,
-		}];
+		const eff = this._state.getEffectiveItemBonuses?.(itemId) || {};
+		const riders = [];
+		// Prefer the full damageRiders list (catalog weapons may have multiple; upgrades append).
+		// Default label stays "Weapon Upgrade" for the legacy single-field upgrade path
+		// and for tests that mock only bonusDamageDice; named catalog riders override.
+		if (Array.isArray(eff.damageRiders) && eff.damageRiders.length) {
+			for (const r of eff.damageRiders) {
+				if (!r?.dice) continue;
+				riders.push({
+					source: r.name || r.source || "Weapon Upgrade",
+					dice: r.dice,
+					damageType: r.damageType || attack.damageType,
+				});
+			}
+			return riders;
+		}
+		if (eff.bonusDamageDice) {
+			riders.push({
+				source: "Weapon Upgrade",
+				dice: eff.bonusDamageDice,
+				damageType: eff.bonusDamageType || attack.damageType,
+			});
+		}
+		return riders;
 	}
 
 	async _rollDamage (attackId, isCrit = false) {
@@ -8607,6 +8624,7 @@ class CharacterSheetCombat {
 		const immunities = effectiveDefenses.immunities || this._state.getImmunities?.() || [];
 		const vulnerabilities = effectiveDefenses.vulnerabilities || this._state.getVulnerabilities?.() || [];
 		const conditionImmunities = effectiveDefenses.conditionImmunities || this._state.getConditionImmunities?.() || [];
+		const spellImmunities = effectiveDefenses.spellImmunities || this._state.getItemDefenses?.()?.spellImmunities || [];
 
 		// Also get defenses from active states (like Rage giving resistance to B/P/S)
 		// Strip "damage:" prefix to match base resistance format
@@ -8724,11 +8742,38 @@ class CharacterSheetCombat {
 			}
 		}
 
+		// Spell-by-name immunities (item choices like Threefold Spellward)
+		let spellImmunitiesEl = document.getElementById("charsheet-spell-immunities");
+		if (!spellImmunitiesEl && spellImmunities.length) {
+			const defenses = document.getElementById("charsheet-combat-defenses");
+			if (defenses) {
+				defenses.insertAdjacentHTML("beforeend", `
+					<div class="charsheet__defense-row">
+						<span class="charsheet__defense-label">Spell Immunities:</span>
+						<span class="charsheet__defense-value" id="charsheet-spell-immunities">—</span>
+					</div>
+				`);
+				spellImmunitiesEl = document.getElementById("charsheet-spell-immunities");
+			}
+		}
+		if (spellImmunitiesEl) {
+			if (spellImmunities.length) {
+				spellImmunitiesEl.innerHTML = spellImmunities.map(s => {
+					const name = s.name || "Spell";
+					const src = s.itemSource ? ` (${s.itemSource})` : "";
+					return `<span class="badge badge-primary mr-1" title="Immune to this spell${src}">${name}</span>`;
+				}).join("");
+			} else {
+				spellImmunitiesEl.innerHTML = `<span class="ve-muted">—</span>`;
+			}
+		}
+
 		// Collapse the whole Defenses card to a thin affordance when the
 		// character has no resistances/immunities/vulnerabilities at all.
 		const defensesBody = document.getElementById("charsheet-combat-defenses");
 		const hasAnyDefenses = allResistances.length || allImmunities.length
-			|| allVulnerabilities.length || allConditionImmunities.length;
+			|| allVulnerabilities.length || allConditionImmunities.length
+			|| spellImmunities.length;
 		this._setCombatSectionEmpty(defensesBody, !hasAnyDefenses);
 	}
 
@@ -8739,8 +8784,29 @@ class CharacterSheetCombat {
 		if (!type) return "Unknown";
 		// Strip "damage:" prefix if present, then capitalize first letter
 		const clean = type.replace(/^damage:/i, "").trim();
+		if (/^spell$/i.test(clean)) return "Spell damage";
 		// Handle compound types like "bludgeoning, piercing, and slashing"
 		return clean.split(/,\s*/).map(t => t.trim().charAt(0).toUpperCase() + t.trim().slice(1)).join(", ");
+	}
+
+	/**
+	 * Human label for combat-effect targets (including item-granted passive defenses).
+	 * @param {string} target
+	 * @returns {string}
+	 */
+	_formatCombatEffectTarget (target) {
+		if (!target) return "Unknown";
+		const map = {
+			"attacksAgainst": "Attacks Against You",
+			"spellAttacksAgainst": "Spell Attacks Against You",
+			"rangedAttacksAgainst": "Ranged Attacks Against You",
+			"meleeAttacksAgainst": "Melee Attacks Against You",
+			"allyAttacksAndSaves": "Allies' Attacks & Saves (aura)",
+			"allyAttacks": "Allies' Attacks (aura)",
+			"allySaves": "Allies' Saves (aura)",
+		};
+		if (map[target]) return map[target];
+		return this._formatEffectTarget?.(target) || String(target).replace(/([A-Z])/g, " $1").replace(/^./, s => s.toUpperCase());
 	}
 
 	/**
@@ -8768,6 +8834,37 @@ class CharacterSheetCombat {
 		// Regular advantage/disadvantage applies to YOUR rolls
 		const enemyAdvantageAgainst = new Map(); // Enemies have advantage attacking you
 		const enemyDisadvantageAgainst = new Map(); // Enemies have disadvantage attacking you
+
+		// Item-granted passive combat effects (e.g. combat:disadvantage:spellAttacksAgainst)
+		const itemCombatEffects = this._state.getItemDefenses?.()?.combatEffects || [];
+		for (const d of itemCombatEffects) {
+			const source = d.source || d.name || "Item";
+			const target = d.target;
+			if (!target) continue;
+			if (d.type === "note") {
+				otherEffects.push({
+					icon: "📝",
+					text: d.name || target,
+					source,
+					type: "itemNote",
+					detail: target,
+				});
+				continue;
+			}
+			if (d.type === "disadvantage" && String(target).includes("Against")) {
+				if (!enemyDisadvantageAgainst.has(target)) enemyDisadvantageAgainst.set(target, []);
+				enemyDisadvantageAgainst.get(target).push(source);
+			} else if (d.type === "advantage" && String(target).includes("Against")) {
+				if (!enemyAdvantageAgainst.has(target)) enemyAdvantageAgainst.set(target, []);
+				enemyAdvantageAgainst.get(target).push(source);
+			} else if (d.type === "disadvantage") {
+				if (!disadvantageTypes.has(target)) disadvantageTypes.set(target, []);
+				disadvantageTypes.get(target).push(source);
+			} else if (d.type === "advantage") {
+				if (!advantageTypes.has(target)) advantageTypes.set(target, []);
+				advantageTypes.get(target).push(source);
+			}
+		}
 
 		for (const effect of stateEffects) {
 			const source = effect.stateName || "Active State";
@@ -8917,10 +9014,13 @@ class CharacterSheetCombat {
 			const otherSection = e_({outer: `<div class="charsheet__effect-group mb-2"></div>`});
 			otherSection.insertAdjacentHTML("beforeend", `<div class="ve-small ve-bold text-warning mb-1">⚠️ Other Effects:</div>`);
 			for (const effect of otherEffects) {
-				const badgeClass = effect.type === "negative" ? "badge-danger" : (effect.type === "speed" ? "badge-info" : "badge-secondary");
+				const badgeClass = effect.type === "negative"
+					? "badge-danger"
+					: (effect.type === "speed" ? "badge-info" : (effect.type === "itemNote" ? "badge-success" : "badge-secondary"));
+				const title = (effect.detail || `From: ${effect.source || ""}`).replace(/"/g, "&quot;");
 				otherSection.insertAdjacentHTML("beforeend", `
-					<div class="charsheet__effect-item badge ${badgeClass} mr-1 mb-1" title="From: ${effect.source}">
-						${effect.icon} ${effect.text}
+					<div class="charsheet__effect-item badge ${badgeClass} mr-1 mb-1" title="${title}">
+						${effect.icon} ${effect.text}${effect.source && effect.type === "itemNote" ? ` (${effect.source})` : ""}
 					</div>
 				`);
 			}
@@ -8934,7 +9034,7 @@ class CharacterSheetCombat {
 			for (const [target, sources] of enemyAdvantageAgainst) {
 				enemyAdvSection.insertAdjacentHTML("beforeend", `
 					<div class="charsheet__effect-item badge badge-danger mr-1 mb-1" title="From: ${sources.join(", ")}">
-						${this._formatEffectTarget(target)}
+						${this._formatCombatEffectTarget(target)}
 					</div>
 				`);
 			}
@@ -8948,7 +9048,7 @@ class CharacterSheetCombat {
 			for (const [target, sources] of enemyDisadvantageAgainst) {
 				enemyDisadvSection.insertAdjacentHTML("beforeend", `
 					<div class="charsheet__effect-item badge badge-success mr-1 mb-1" title="From: ${sources.join(", ")}">
-						${this._formatEffectTarget(target)}
+						${this._formatCombatEffectTarget(target)}
 					</div>
 				`);
 			}
@@ -9004,7 +9104,7 @@ class CharacterSheetCombat {
 
 		// Item-granted defenses display (resistances, immunities, etc. from magic items)
 		const itemDefenses = this._state.getItemDefenses?.() || {};
-		const hasItemDefenses = (itemDefenses.resist?.length > 0) || (itemDefenses.immune?.length > 0) || (itemDefenses.vulnerable?.length > 0) || (itemDefenses.conditionImmune?.length > 0);
+		const hasItemDefenses = (itemDefenses.resist?.length > 0) || (itemDefenses.immune?.length > 0) || (itemDefenses.vulnerable?.length > 0) || (itemDefenses.conditionImmune?.length > 0) || (itemDefenses.spellImmunities?.length > 0) || (itemDefenses.combatEffects?.length > 0) || (itemDefenses.regeneration?.length > 0);
 		if (hasItemDefenses) {
 			const defSection = e_({outer: `<div class="charsheet__effect-group mb-2"></div>`});
 			defSection.insertAdjacentHTML("beforeend", `<div class="ve-small ve-bold text-info mb-1">🛡️ Magic Item Defenses:</div>`);
@@ -9013,7 +9113,7 @@ class CharacterSheetCombat {
 				for (const d of itemDefenses.resist) {
 					defSection.insertAdjacentHTML("beforeend", `
 						<div class="charsheet__effect-item badge badge-info mr-1 mb-1" title="From: ${d.source}">
-							Resist ${d.type.toTitleCase()} (${d.source})
+							Resist ${this._formatDamageType(d.type)} (${d.source})
 						</div>
 					`);
 				}
@@ -9022,7 +9122,7 @@ class CharacterSheetCombat {
 				for (const d of itemDefenses.immune) {
 					defSection.insertAdjacentHTML("beforeend", `
 						<div class="charsheet__effect-item badge badge-success mr-1 mb-1" title="From: ${d.source}">
-							Immune ${d.type.toTitleCase()} (${d.source})
+							Immune ${this._formatDamageType(d.type)} (${d.source})
 						</div>
 					`);
 				}
@@ -9031,7 +9131,7 @@ class CharacterSheetCombat {
 				for (const d of itemDefenses.vulnerable) {
 					defSection.insertAdjacentHTML("beforeend", `
 						<div class="charsheet__effect-item badge badge-danger mr-1 mb-1" title="From: ${d.source}">
-							Vulnerable ${d.type.toTitleCase()} (${d.source})
+							Vulnerable ${this._formatDamageType(d.type)} (${d.source})
 						</div>
 					`);
 				}
@@ -9041,6 +9141,46 @@ class CharacterSheetCombat {
 					defSection.insertAdjacentHTML("beforeend", `
 						<div class="charsheet__effect-item badge badge-warning mr-1 mb-1" title="From: ${d.source}">
 							Immune to ${d.type.toTitleCase()} (${d.source})
+						</div>
+					`);
+				}
+			}
+			if (itemDefenses.spellImmunities?.length) {
+				for (const d of itemDefenses.spellImmunities) {
+					defSection.insertAdjacentHTML("beforeend", `
+						<div class="charsheet__effect-item badge badge-primary mr-1 mb-1" title="From: ${d.itemSource || "item"}">
+							Immune to ${d.name}${d.itemSource ? ` (${d.itemSource})` : ""}
+						</div>
+					`);
+				}
+			}
+			if (itemDefenses.combatEffects?.length) {
+				for (const d of itemDefenses.combatEffects) {
+					if (d.type === "note") {
+						const title = (d.name || d.source || "Item").replace(/"/g, "&quot;");
+						const body = (d.target || d.name || "").replace(/"/g, "&quot;");
+						defSection.insertAdjacentHTML("beforeend", `
+							<div class="charsheet__effect-item badge badge-success mr-1 mb-1" title="${body}">
+								📝 ${title}${d.source && d.name !== d.source ? ` (${d.source})` : ""}
+							</div>
+						`);
+						continue;
+					}
+					const verb = d.type === "disadvantage" ? "Disadv." : (d.type === "advantage" ? "Adv." : d.type);
+					const targetLabel = this._formatCombatEffectTarget(d.target);
+					defSection.insertAdjacentHTML("beforeend", `
+						<div class="charsheet__effect-item badge badge-success mr-1 mb-1" title="From: ${d.source}">
+							${verb} ${targetLabel}${d.source ? ` (${d.source})` : ""}
+						</div>
+					`);
+				}
+			}
+			if (itemDefenses.regeneration?.length) {
+				for (const d of itemDefenses.regeneration) {
+					const cond = d.condition ? ` — ${d.condition}` : "";
+					defSection.insertAdjacentHTML("beforeend", `
+						<div class="charsheet__effect-item badge badge-success mr-1 mb-1" title="Start of turn${cond}">
+							Regen ${d.value} HP/turn (${d.name || d.source})
 						</div>
 					`);
 				}
@@ -10553,7 +10693,8 @@ class CharacterSheetCombat {
 			if (effect.type === "grantInspiration") {
 				JqueryUtil.doToast({type: "success", content: `${effect.source}: gained Heroic Inspiration!`});
 			} else if (effect.type === "heal" && effect.amount) {
-				JqueryUtil.doToast({type: "success", content: `${effect.source}: healed ${effect.amount} HP.`});
+				const note = effect.note ? ` (${effect.note})` : "";
+				JqueryUtil.doToast({type: "success", content: `${effect.source}: healed ${effect.amount} HP.${note}`});
 			}
 		}
 	}

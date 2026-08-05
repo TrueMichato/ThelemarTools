@@ -740,6 +740,7 @@ class CharacterSheetCustomAbilities {
 					{value: "resistance:bludgeoning", label: "Bludgeoning Resistance"},
 					{value: "resistance:piercing", label: "Piercing Resistance"},
 					{value: "resistance:slashing", label: "Slashing Resistance"},
+					{value: "resistance:spell", label: "Spell Damage Resistance"},
 				],
 			},
 			{

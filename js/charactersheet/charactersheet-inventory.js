@@ -58,6 +58,124 @@ class CharacterSheetInventory {
 
 	setItems (items) {
 		this._allItems = items;
+		// Older saves / pre-effects inventory rows may lack catalog `effects[]`. Rehydrate
+		// from the loaded item index (by name|source) so equip/attune registration can apply
+		// brew mechanics like Gae Bolg's proficiency-to-initiative without requiring re-add.
+		this._rehydrateInventoryItemEffects();
+	}
+
+	/**
+	 * Copy structured catalog fields onto inventory rows that are missing them (effects,
+	 * ability/senses, spell attachments, numeric bonuses). Does not overwrite custom items
+	 * or values the player already has. Used so brew buffs (e.g. Necklace of Goibhnie AC/saves)
+	 * reach older saves without re-adding the item.
+	 * @private
+	 */
+	_rehydrateInventoryItemEffects () {
+		if (!this._allItems?.length || !this._state?.getItems) return;
+		const raw = this._state._data?.inventory;
+		if (!Array.isArray(raw) || !raw.length) return;
+
+		let changed = false;
+		let effectsChanged = false;
+		for (const inv of raw) {
+			const item = inv?.item;
+			if (!item?.name || item._isCustom || item.source === "Custom") continue;
+			const nameLower = item.name.toLowerCase();
+			const sourceLower = (item.source || "").toLowerCase();
+			const match = this._allItems.find(i =>
+				i.name?.toLowerCase() === nameLower
+				&& (!sourceLower || (i.source || "").toLowerCase() === sourceLower));
+			if (!match) continue;
+
+			let rowChanged = false;
+			if (!(Array.isArray(item.effects) && item.effects.length)
+				&& Array.isArray(match.effects) && match.effects.length) {
+				item.effects = JSON.parse(JSON.stringify(match.effects));
+				rowChanged = true;
+				effectsChanged = true;
+			}
+			if (!item.ability && match.ability) {
+				item.ability = JSON.parse(JSON.stringify(match.ability));
+				rowChanged = true;
+			}
+			if (!item.senses && match.senses) {
+				item.senses = JSON.parse(JSON.stringify(match.senses));
+				rowChanged = true;
+			}
+			if (item.attachedSpells == null && match.attachedSpells != null) {
+				item.attachedSpells = JSON.parse(JSON.stringify(match.attachedSpells));
+				rowChanged = true;
+			}
+			if (!item.spellImmunitySlots && match.spellImmunitySlots) {
+				item.spellImmunitySlots = JSON.parse(JSON.stringify(match.spellImmunitySlots));
+				rowChanged = true;
+			}
+			if ((item.charges == null || item.charges === 0) && match.charges != null) {
+				const maxCharges = typeof match.charges === "string" ? parseInt(match.charges, 10) : match.charges;
+				if (maxCharges) {
+					item.charges = maxCharges;
+					if (item.chargesCurrent == null) item.chargesCurrent = maxCharges;
+					rowChanged = true;
+				}
+			}
+			if (!item.recharge && match.recharge) {
+				item.recharge = match.recharge;
+				rowChanged = true;
+			}
+			if (item.rechargeAmount == null && match.rechargeAmount != null) {
+				item.rechargeAmount = match.rechargeAmount;
+				rowChanged = true;
+			}
+			if (!item.chargeName && match.chargeName) {
+				item.chargeName = match.chargeName;
+				rowChanged = true;
+			}
+			if (!item.bonusDamageDice && match.bonusDamageDice) {
+				item.bonusDamageDice = match.bonusDamageDice;
+				if (match.bonusDamageType) item.bonusDamageType = match.bonusDamageType;
+				rowChanged = true;
+			}
+			if (!(Array.isArray(item.damageRiders) && item.damageRiders.length)
+				&& Array.isArray(match.damageRiders) && match.damageRiders.length) {
+				item.damageRiders = JSON.parse(JSON.stringify(match.damageRiders));
+				rowChanged = true;
+			}
+			if (!item.regeneration && match.regeneration) {
+				item.regeneration = JSON.parse(JSON.stringify(match.regeneration));
+				rowChanged = true;
+			}
+			if (!(Array.isArray(item.conditionImmune) && item.conditionImmune.length)
+				&& Array.isArray(match.conditionImmune) && match.conditionImmune.length) {
+				item.conditionImmune = JSON.parse(JSON.stringify(match.conditionImmune));
+				rowChanged = true;
+			}
+			if (!(Array.isArray(item.resist) && item.resist.length)
+				&& Array.isArray(match.resist) && match.resist.length) {
+				item.resist = JSON.parse(JSON.stringify(match.resist));
+				rowChanged = true;
+			}
+			if (!(Array.isArray(item.immune) && item.immune.length)
+				&& Array.isArray(match.immune) && match.immune.length) {
+				item.immune = JSON.parse(JSON.stringify(match.immune));
+				rowChanged = true;
+			}
+			for (const k of [
+				"bonusAc", "bonusSavingThrow", "bonusSpellAttack", "bonusSpellSaveDc",
+				"bonusSpellDamage", "bonusWeapon", "bonusWeaponAttack", "bonusWeaponDamage",
+				"bonusAbilityCheck", "bonusProficiencyBonus", "bonusSavingThrowConcentration",
+			]) {
+				if ((item[k] == null || item[k] === 0) && match[k] != null) {
+					item[k] = typeof match[k] === "string" ? this._parseBonus(match[k]) : match[k];
+					rowChanged = true;
+				}
+			}
+			if (rowChanged) changed = true;
+		}
+		if (effectsChanged && typeof this._state._reapplyItemEffects === "function") {
+			this._state._reapplyItemEffects();
+		}
+		if (changed) this._updateItemBonuses(this._state.getItems());
 	}
 
 	_initEventListeners () {
@@ -202,6 +320,11 @@ class CharacterSheetInventory {
 			if (e.target.closest(".charsheet__item-artifact-config")) {
 				const itemId = _getItemId(e.target);
 				if (itemId) this._showArtifactPropertiesModal(itemId);
+				return;
+			}
+			if (e.target.closest(".charsheet__item-spellward")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this._showSpellImmunityPicker(itemId);
 				return;
 			}
 			if (e.target.closest(".charsheet__item-upgrade-config")) {
@@ -1425,6 +1548,24 @@ class CharacterSheetInventory {
 			chargesCurrent: maxCharges, // Start fully charged
 			recharge: item.recharge || null, // "dawn", "restShort", "restLong", etc.
 			rechargeAmount: item.rechargeAmount || null, // e.g., "{@dice 1d6 + 1}" or a number
+			chargeName: item.chargeName || null, // e.g. "Stone-Caught Magic"
+			// Standing extra weapon damage (Spear of Lugh +4d12 radiant, etc.)
+			bonusDamageDice: item.bonusDamageDice || null,
+			bonusDamageType: item.bonusDamageType || null,
+			damageRiders: Array.isArray(item.damageRiders) && item.damageRiders.length
+				? JSON.parse(JSON.stringify(item.damageRiders))
+				: undefined,
+			// Start-of-turn regeneration (Ring of Greater Regeneration, etc.)
+			regeneration: item.regeneration
+				? JSON.parse(JSON.stringify(item.regeneration))
+				: null,
+			// Choose-N spell immunities (Necklace of Goibhnie Threefold Spellward, etc.)
+			spellImmunitySlots: item.spellImmunitySlots
+				? JSON.parse(JSON.stringify(item.spellImmunitySlots))
+				: null,
+			chosenSpellImmunities: Array.isArray(item.chosenSpellImmunities)
+				? JSON.parse(JSON.stringify(item.chosenSpellImmunities))
+				: [],
 			// Magic item properties
 			rarity: item.rarity,
 			// Special item flags
@@ -1445,6 +1586,12 @@ class CharacterSheetInventory {
 			socketedGemstones: [], // [{name, source, gemName, rarity, upgradeType, entries, charges, chargesCurrent, chargesMax, recharge, socketedAt}]
 			// Variant spell component data (Arcadia 8)
 			variantComponent: item.variantComponent || null,
+			// Structured catalog effects (same schema as custom items/abilities). Required so
+			// homebrew/site items that ship `effects[]` (e.g. Gae Bolg initiative PB) register
+			// through `_registerItemEffects` when equipped/attuned.
+			effects: Array.isArray(item.effects) && item.effects.length
+				? JSON.parse(JSON.stringify(item.effects))
+				: undefined,
 			// Prose description — needed so prose-expressed effects (senses, defenses, speed,
 			// ability, save bonuses) can be parsed and applied. Without this, prose-only items
 			// (e.g. Goggles of Night) would lose all of their mechanical text once in inventory.
@@ -3766,7 +3913,9 @@ class CharacterSheetInventory {
 		this._renderItemList();
 		this._page.saveCharacter();
 
-		JqueryUtil.doToast({type: "info", content: `Used 1 charge from ${item.name}. ${item.chargesCurrent - 1}/${item.charges} remaining.`});
+		const remaining = item.chargesCurrent - 1;
+		const ability = item.chargeName ? `${item.chargeName} on ${item.name}` : item.name;
+		JqueryUtil.doToast({type: "info", content: `Used ${ability}. ${remaining}/${item.charges} remaining.`});
 	}
 
 	_restoreCharge (itemId) {
@@ -4537,6 +4686,87 @@ class CharacterSheetInventory {
 	}
 
 	/**
+	 * Configure choose-N spell immunities on an item (e.g. Necklace of Goibhnie
+	 * Threefold Spellward). Generic: driven by `item.spellImmunitySlots`.
+	 * @param {string} itemId
+	 */
+	async _showSpellImmunityPicker (itemId) {
+		const items = this._state.getItems();
+		const item = items.find(i => i.id === itemId);
+		const slots = item?.spellImmunitySlots;
+		const max = Math.max(0, Number(slots?.count) || 0);
+		if (!item || !max) return;
+
+		const label = slots.label || "Spell Immunities";
+		const replaceOnSr = Number(slots.replaceOnShortRest) || 0;
+		const current = Array.isArray(item.chosenSpellImmunities)
+			? item.chosenSpellImmunities.map(s => (typeof s === "string" ? s : s?.name) || "").filter(Boolean)
+			: [];
+		while (current.length < max) current.push("");
+
+		const allSpells = this._page?.getSpells?.() || this._page?._spellsData || [];
+		const spellNames = [...new Set(allSpells.map(s => s.name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+		const datalistId = `spellward-dl-${itemId}`;
+
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: `${item.name} — ${label}`,
+			isMinHeight0: true,
+		});
+
+		const hintParts = [
+			`Choose up to <b>${max}</b> spell${max === 1 ? "" : "s"} by name. While attuned and wearing this item, you are immune to those spells.`,
+		];
+		if (replaceOnSr > 0) {
+			hintParts.push(`After a short rest you may replace ${replaceOnSr === 1 ? "one" : replaceOnSr} chosen spell${replaceOnSr === 1 ? "" : "s"}.`);
+		}
+		if (slots.resetHint === "longRest") {
+			hintParts.push("Re-select after each long rest (or keep the current list).");
+		}
+
+		modalInner.append(e_({outer: `
+			<div class="ve-flex-col w-100">
+				<p class="ve-small ve-muted mb-2">${hintParts.join(" ")}</p>
+				<datalist id="${datalistId}">${spellNames.slice(0, 800).map(n => `<option value="${n.replace(/"/g, "&quot;")}"></option>`).join("")}</datalist>
+				<div class="ve-flex-col w-100 mb-2" id="spellward-slots"></div>
+				<div class="ve-flex ve-flex-h-right ve-flex-wrap" style="gap: 6px;">
+					<button type="button" class="ve-btn ve-btn-default" id="spellward-cancel">Cancel</button>
+					<button type="button" class="ve-btn ve-btn-primary" id="spellward-save">Save</button>
+				</div>
+			</div>
+		`}));
+
+		const slotsEl = modalInner.querySelector("#spellward-slots");
+		for (let i = 0; i < max; i++) {
+			slotsEl.append(e_({outer: `
+				<div class="ve-flex ve-flex-v-center mb-1" style="gap: 8px;">
+					<label class="ve-small ve-muted" style="min-width: 4.5rem;">Spell ${i + 1}</label>
+					<input type="text" class="ve-form-control spellward-input" list="${datalistId}" value="${(current[i] || "").replace(/"/g, "&quot;")}" placeholder="e.g. Fireball" autocomplete="off">
+				</div>
+			`}));
+		}
+
+		modalInner.querySelector("#spellward-cancel")?.addEventListener("click", () => doClose(false));
+		modalInner.querySelector("#spellward-save")?.addEventListener("click", () => {
+			const values = [...modalInner.querySelectorAll(".spellward-input")]
+				.map(inp => {
+					const name = String(inp.value || "").trim();
+					if (!name) return null;
+					const match = allSpells.find(s => s.name?.toLowerCase() === name.toLowerCase());
+					return match ? {name: match.name, source: match.source} : {name};
+				})
+				.filter(Boolean);
+			this._state.setItemChosenSpellImmunities(itemId, values);
+			this._updateItemBonuses(this._state.getItems());
+			this._renderItemList();
+			this._page?.renderCharacter?.();
+			this._page?._saveCurrentCharacter?.();
+			const names = values.map(v => v.name).join(", ") || "none";
+			JqueryUtil.doToast({type: "success", content: `${label}: ${names}`});
+			doClose(true);
+		});
+	}
+
+	/**
 	 * Show artifact properties configuration modal
 	 * @param {string} itemId - The item ID
 	 */
@@ -5096,12 +5326,21 @@ class CharacterSheetInventory {
 	}
 
 	/**
-	 * Collect defensive properties (resist, immune, vulnerable, conditionImmune) from equipped/attuned items
+	 * Collect defensive properties (resist, immune, vulnerable, conditionImmune) from equipped/attuned items,
+	 * plus passive combat display effects and chosen spell-by-name immunities.
 	 * @param {Array} items - All inventory items
-	 * @returns {object} { resist: [{type, source}], immune: [{type, source}], vulnerable: [{type, source}], conditionImmune: [{type, source}] }
+	 * @returns {object}
 	 */
 	_getItemDefenses (items) {
-		const defenses = {resist: [], immune: [], vulnerable: [], conditionImmune: []};
+		const defenses = {
+			resist: [],
+			immune: [],
+			vulnerable: [],
+			conditionImmune: [],
+			combatEffects: [],
+			spellImmunities: [],
+			regeneration: [],
+		};
 
 		for (const item of items) {
 			if (!item.equipped) continue;
@@ -5147,6 +5386,63 @@ class CharacterSheetInventory {
 			addProse("immune", item.immune?.length);
 			addProse("vulnerable", item.vulnerable?.length);
 			addProse("conditionImmune", item.conditionImmune?.length);
+
+			// Catalog effects that surface as combat display notes (not numeric modifiers)
+			if (Array.isArray(item.effects)) {
+				for (const eff of item.effects) {
+					const t = String(eff?.type || "");
+					if (!t.startsWith("combat:")) continue;
+					const parts = t.split(":"); // combat | advantage|disadvantage|note | target...
+					const kind = parts[1];
+					if (!kind) continue;
+					if (kind === "note") {
+						const noteText = eff.note || eff.name || parts.slice(2).join(":") || source;
+						defenses.combatEffects.push({
+							type: "note",
+							target: noteText,
+							source,
+							name: eff.name || source,
+						});
+						continue;
+					}
+					if (parts.length < 3) continue;
+					const target = parts.slice(2).join(":");
+					if (!target) continue;
+					defenses.combatEffects.push({
+						type: kind,
+						target,
+						source,
+						name: eff.name || source,
+					});
+				}
+			}
+
+			// Player-chosen spell-by-name immunities (Threefold Spellward, etc.)
+			if (item.spellImmunitySlots?.count && Array.isArray(item.chosenSpellImmunities)) {
+				for (const sp of item.chosenSpellImmunities) {
+					const name = typeof sp === "string" ? sp : sp?.name;
+					if (!name) continue;
+					defenses.spellImmunities.push({
+						name,
+						source: typeof sp === "object" ? sp.source : undefined,
+						itemSource: source,
+					});
+				}
+			}
+
+			// Start-of-turn regeneration (applied via getTurnStartEffects)
+			if (item.regeneration) {
+				const r = item.regeneration;
+				const value = r.value ?? r.amount ?? r.hp;
+				if (value != null && value !== "") {
+					defenses.regeneration.push({
+						value,
+						name: r.name || source,
+						source,
+						condition: r.condition || r.note || null,
+					});
+				}
+			}
 		}
 
 		return defenses;
@@ -5936,6 +6232,14 @@ class CharacterSheetInventory {
 		const isConsumable = this._isConsumable(item);
 		const isArtifact = item.rarity === "artifact";
 		const artifactNeedsConfig = isArtifact && item.artifactProperties?.hasRequirements && !this._state.isArtifactFullyConfigured(item.id);
+		const hasSpellward = !!(item.spellImmunitySlots?.count);
+		const spellwardCount = hasSpellward ? (item.chosenSpellImmunities?.length || 0) : 0;
+		const spellwardMax = hasSpellward ? Number(item.spellImmunitySlots.count) || 0 : 0;
+		const spellwardLabel = item.spellImmunitySlots?.label || "Spell Immunities";
+		const chargeUseLabel = item.chargeName || "Use";
+		const chargeUseTitle = item.chargeName
+			? `Use ${item.chargeName} (${item.chargesCurrent ?? item.charges}/${item.charges})`
+			: "Use 1 charge";
 		const canUpgrade = CharacterSheetUpgrades.isWeapon(item) || CharacterSheetUpgrades.isArmor(item) || CharacterSheetUpgrades.isShield(item);
 		const isBaseGemstone = (item.type === "$G" || item.type === "gemstone") && !item._isEmpoweredGemstone;
 		const hasUpgrades = !!(item.appliedUpgrades?.length || item.socketedGemstones?.length);
@@ -6005,10 +6309,17 @@ class CharacterSheetInventory {
 					<div class="charsheet__item-details">
 						${item.damage ? `<span class="ve-small">Dmg: ${item.damage}</span>` : ""}
 						${item.ac ? `<span class="ve-small">AC: ${item.ac}</span>` : ""}
+						${(item.bonusDamageDice || (item.damageRiders?.length)) ? `<span class="ve-small text-warning" title="Extra damage on hit">${
+		item.damageRiders?.length
+			? item.damageRiders.map(r => `+${r.dice}${r.damageType ? ` ${r.damageType}` : ""}`).join(", ")
+			: `+${item.bonusDamageDice}${item.bonusDamageType ? ` ${item.bonusDamageType}` : ""}`
+	}</span>` : ""}
+						${item.regeneration ? `<span class="ve-small text-success" title="${(item.regeneration.condition || item.regeneration.note || "Start of turn").replace(/"/g, "&quot;")}">♥ Regen ${item.regeneration.value ?? item.regeneration.amount ?? item.regeneration.hp}/turn</span>` : ""}
 						${propertiesStr ? `<span class="ve-small ve-muted" title="Properties">${propertiesStr}</span>` : ""}
 						${masteryStr ? `<span class="ve-small text-info" title="Mastery">⚔ ${masteryStr}</span>` : ""}
 						${vcSpellLabels.length ? `<span class="ve-small" style="color: #8b5cf6; font-style: italic;" title="Enhances these spells when used as a variant component">🧫 ${vcSpellLabels.join(", ")}</span>` : ""}
-						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}">Charges: <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
+						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}${item.chargeName ? ` — ${item.chargeName}` : ""}">${item.chargeName ? `${item.chargeName}:` : "Charges:"} <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
+						${hasSpellward ? `<span class="ve-small" title="${spellwardLabel}">🛡 ${spellwardLabel}: <strong>${spellwardCount}</strong>/${spellwardMax}${spellwardCount ? ` (${(item.chosenSpellImmunities || []).map(s => typeof s === "string" ? s : s.name).filter(Boolean).join(", ")})` : ""}</span>` : ""}
 						${item.appliedUpgrades?.length ? `<span class="ve-small charsheet__item-upgrade-badges">${item.appliedUpgrades.map(u => {
 		const tooltip = typeof CharacterSheetUpgrades !== "undefined" ? (() => {
 			const eff = CharacterSheetUpgrades.getUpgradeEffects({appliedUpgrades: [u]});
@@ -6039,8 +6350,8 @@ class CharacterSheetInventory {
 						<span class="charsheet__item-qty">${item.quantity}</span>
 						<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-qty-increase" title="Increase quantity">+</button>
 						${hasCharges ? `
-							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-use-charge" title="Use 1 charge" ${(item.chargesCurrent ?? item.charges) <= 0 ? "disabled" : ""}>
-								<span class="glyphicon glyphicon-flash"></span> Use
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-use-charge" title="${chargeUseTitle.replace(/"/g, "&quot;")}" ${(item.chargesCurrent ?? item.charges) <= 0 ? "disabled" : ""}>
+								<span class="glyphicon glyphicon-flash"></span> ${chargeUseLabel}
 							</button>
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-restore-charge" title="Restore 1 charge" ${(item.chargesCurrent ?? item.charges) >= item.charges ? "disabled" : ""}>
 								<span class="glyphicon glyphicon-plus"></span>
@@ -6049,6 +6360,11 @@ class CharacterSheetInventory {
 						${canRecharge ? `
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-recharge" title="Recharge (${rechargeFormula.replace(/"/g, "&quot;")})" ${(item.chargesCurrent ?? item.charges) >= item.charges ? "disabled" : ""}>
 								<span class="glyphicon glyphicon-refresh"></span> ${rechargeFormula}
+							</button>
+						` : ""}
+						${hasSpellward ? `
+							<button type="button" class="ve-btn ve-btn-xs ${spellwardCount >= spellwardMax ? "ve-btn-success" : "ve-btn-info"} charsheet__item-spellward" title="Configure ${spellwardLabel.replace(/"/g, "&quot;")} (${spellwardCount}/${spellwardMax})">
+								🛡 ${spellwardLabel}${spellwardCount ? ` (${spellwardCount})` : ""}
 							</button>
 						` : ""}
 						${healingStaffActive ? `

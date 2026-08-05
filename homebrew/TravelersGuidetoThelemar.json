@@ -3284,9 +3284,27 @@
 			"property": [
 				"V"
 			],
-			"attachedSpells": [
-				"circle of death|xphb",
-				"raise dead|xphb"
+			"attachedSpells": {
+				"charges": {
+					"5": [
+						"raise dead|xphb"
+					],
+					"6": [
+						"circle of death|xphb"
+					]
+				}
+			},
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "World-Shaking Staff",
+					"note": "Double damage to objects and structures."
+				},
+				{
+					"type": "combat:note",
+					"name": "Two Ends of Fate",
+					"note": "When you reduce a creature to 0 HP with the staff, choose: kill instantly, or leave stable and free of poisons/diseases/curses."
+				}
 			]
 		},
 		{
@@ -3332,7 +3350,40 @@
 						"As a {@action Bonus Action|XPHB}, you can cause the spear to blaze for 1 minute. Creatures you regard as allies are unaffected by this light. Each other creature that starts its turn within 60 feet of you must succeed on a {@dc 22} Constitution saving throw or have the {@condition Blinded|XPHB} condition until the start of its next turn. Once used, this property can't be used again until the next dawn."
 					]
 				}
-			]
+			],
+			"senses": {
+				"truesight": 60
+			},
+			"effects": [
+				{
+					"type": "initiative",
+					"value": 0,
+					"proficiencyBonus": true,
+					"name": "Never Unready"
+				},
+				{
+					"type": "sense:truesight",
+					"value": 60,
+					"setValue": true,
+					"name": "Never Unready"
+				},
+				{
+					"type": "conditionImmunity:surprised",
+					"value": 0,
+					"name": "Never Unready"
+				},
+				{
+					"type": "combat:note",
+					"name": "Enemy-Blinding Radiance",
+					"note": "Bonus action: blaze 1 min; foes starting turn within 60 ft CON DC 22 or Blinded until their next turn (1/dawn)."
+				}
+			],
+			"conditionImmune": [
+				"surprised"
+			],
+			"charges": 1,
+			"recharge": "dawn",
+			"chargeName": "Enemy-Blinding Radiance"
 		},
 		{
 			"name": "Armor of Brigit",
@@ -3370,6 +3421,18 @@
 						"When a non-artifact weapon with a bonus to attack and damage rolls of +2 or lower hits you, the attack deals its damage and the weapon then melts or burns to ash. A nonmagical weapon that touches the armor without being wielded is destroyed immediately. Natural weapons and artifacts are unaffected."
 					]
 				}
+			],
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "Furnace of the Goddess",
+					"note": "Enemy entering/starting turn within 30 ft takes 30 fire damage (ignores Resistance; Immunity treated as Resistance)."
+				},
+				{
+					"type": "combat:note",
+					"name": "Melt the Unworthy",
+					"note": "Non-artifact weapon ≤+2 that hits you deals damage then melts/burns to ash. Nonmagical weapons destroyed on touch. Natural weapons/artifacts unaffected."
+				}
 			]
 		},
 		{
@@ -3399,6 +3462,13 @@
 			"staff": true,
 			"property": [
 				"V"
+			],
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "Brigit's Flame",
+					"note": "While ignited: your fire damage ignores Resistance and treats Immunity as Resistance; treat 1s on fire damage dice as max. Bright light 60 / dim +60."
+				}
 			]
 		},
 		{
@@ -3409,22 +3479,76 @@
 			"reqAttune": true,
 			"wondrous": true,
 			"entries": [
-				"This heavy golden collar is set with three flawless stones that change color each morning.",
+				"This heavy golden collar is set with three flawless stones that change color each morning. Goibhnie forged it so that no craft of magic could unmake a wearer he had armored.",
+				{
+					"type": "entries",
+					"name": "Forged Carapace",
+					"entries": [
+						"While wearing the necklace, you gain a +3 bonus to AC and a +2 bonus to all saving throws."
+					]
+				},
 				{
 					"type": "entries",
 					"name": "Threefold Spellward",
 					"entries": [
-						"Whenever you finish a Long Rest, choose three spells by name. Until you finish your next Long Rest, you are immune to those spells. You are unaffected by each chosen spell, spell attacks made against only you with it automatically miss, and you automatically succeed on saving throws against it. A chosen spell can still affect other creatures and objects normally."
+						"Whenever you finish a {@variantrule Long Rest|XPHB}, choose five spells by name. Until you finish your next Long Rest, you are immune to those spells. You are unaffected by each chosen spell, spell attacks made against only you with it automatically miss, and you automatically succeed on saving throws against it. A chosen spell can still affect other creatures and objects normally.",
+						"When you finish a {@variantrule Short Rest|XPHB}, you can replace one of the chosen spells with a different spell."
 					]
 				},
 				{
 					"type": "entries",
 					"name": "Master Smith's Aegis",
 					"entries": [
-						"You have Advantage on saving throws against all other spells and magical effects."
+						"You have {@variantrule Advantage|XPHB} on saving throws against spells and other magical effects. Spell attack rolls against you have {@variantrule Disadvantage|XPHB}.",
+						"You have Resistance to damage from spells."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Anvil of the Magi",
+					"entries": [
+						"Your spell attack rolls and spell save DC each increase by 3."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Stone-Caught Magic",
+					"entries": [
+						"When you succeed on a saving throw against a spell that targets only you (not an area), you can take a {@action Reaction|XPHB} to catch the magic in one of the necklace's stones. The spell has no effect on you, and if the spell is 8th level or lower you can immediately cast it once (using the original caster's level, spell save DC, and spell attack bonus, but requiring no components) before the end of your next turn, after which the trapped magic fades. Once you catch a spell this way, you can't do so again until the next dawn."
 					]
 				}
-			]
+			],
+			"effects": [
+				{
+					"type": "save:advantage:magic",
+					"value": 1,
+					"name": "Master Smith's Aegis"
+				},
+				{
+					"type": "resistance:spell",
+					"value": 0,
+					"name": "Master Smith's Aegis"
+				},
+				{
+					"type": "combat:disadvantage:spellAttacksAgainst",
+					"value": 1,
+					"name": "Master Smith's Aegis"
+				}
+			],
+			"bonusAc": "+3",
+			"bonusSavingThrow": "+2",
+			"bonusSpellAttack": "+3",
+			"bonusSpellSaveDc": "+3",
+			"charges": 1,
+			"recharge": "dawn",
+			"rechargeAmount": "all",
+			"chargeName": "Stone-Caught Magic",
+			"spellImmunitySlots": {
+				"count": 5,
+				"replaceOnShortRest": 1,
+				"label": "Threefold Spellward",
+				"resetHint": "longRest"
+			}
 		},
 		{
 			"name": "Trident of Mac Lir",
@@ -3454,6 +3578,13 @@
 					"entries": [
 						"A creature reduced to 0 Hit Points by the trident is drained of all moisture and crumbles into salt and dust. A creature killed in this way can be returned to life only by {@spell True Resurrection|XPHB} or {@spell Wish|XPHB}. Constructs and creatures without bodily fluids take the trident's normal damage but are unaffected by its other properties."
 					]
+				}
+			],
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "Drink the Sea Within",
+					"note": "On hit: target takes necrotic = 1/4 its HP max and HP max reduced by same (until Greater Restoration/Wish). Constructs/fluidless creatures immune to this rider."
 				}
 			]
 		},
@@ -3487,6 +3618,18 @@
 						"When a creature within your reach damages you, you can take a Reaction to make one attack with the sword against that creature."
 					]
 				}
+			],
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "Final Retaliation",
+					"note": "When you hit a creature that damaged you since end of your last turn: Con DC 22 or die. Success: immune until start of your next turn."
+				},
+				{
+					"type": "combat:note",
+					"name": "Answer the Blow",
+					"note": "Reaction: when a creature within reach damages you, make one sword attack against it."
+				}
 			]
 		},
 		{
@@ -3517,8 +3660,18 @@
 				}
 			],
 			"type": "RD|DMG",
-			"attachedSpells": [
-				"control water|xphb"
+			"attachedSpells": {
+				"will": [
+					"control water|xphb"
+				]
+			},
+			"chargeName": "Rod of Math",
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "Dissolve into Water",
+					"note": "Magic action, 3 charges: one creature you see within 60 ft Con DC 23 or permanently becomes water (Incapacitated); success takes 8d10 cold."
+				}
 			]
 		},
 		{
@@ -3548,7 +3701,34 @@
 						"As a {@action Bonus Action|XPHB}, you can detach the hand and toss it into an unoccupied space within 30 feet, where it hovers for 1 minute. When you release it and as a Bonus Action on each of your later turns, you can move it up to 60 feet and make one Silver Fist attack through it against a target within 5 feet of it. The hand can manipulate objects, take Reactions you could take with it attached, and remains within 120 feet of you. It reattaches instantly when the effect ends."
 					]
 				}
-			]
+			],
+			"ability": {
+				"static": {
+					"str": 30
+				}
+			},
+			"effects": [
+				{
+					"type": "ability:str",
+					"value": 30,
+					"mode": "set",
+					"name": "Silver Hand"
+				},
+				{
+					"type": "abilityMax:str",
+					"value": 30,
+					"mode": "set",
+					"name": "Silver Hand"
+				},
+				{
+					"type": "combat:note",
+					"name": "Dancing Hand",
+					"note": "Bonus action: detach hand 1 min; move 60 ft and attack as BA each turn; reattaches when effect ends."
+				}
+			],
+			"charges": 1,
+			"recharge": "dawn",
+			"chargeName": "Dancing Hand"
 		},
 		{
 			"name": "Sword of Nauda",
@@ -3583,6 +3763,20 @@
 					"entries": [
 						"When you draw the sword, choose one creature you can see. Until you sheathe the sword, choose another creature, or the target dies, you always know the target's direction and distance while it is on the same plane. The target can't teleport, travel to another plane, or become invisible, and its Speed is halved while it moves away from you. These effects allow no saving throw."
 					]
+				}
+			],
+			"bonusDamageDice": "3d10",
+			"bonusDamageType": "radiant",
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "Flawless Guard",
+					"note": "First 3 weapon attacks that would hit you each round miss instead (drawn sword in hand, not Incapacitated)."
+				},
+				{
+					"type": "combat:note",
+					"name": "None Escape the Drawn Sword",
+					"note": "On draw, mark a creature: know direction/distance; can't teleport/plane shift/go invisible; Speed halved while moving away."
 				}
 			]
 		},
@@ -3619,6 +3813,18 @@
 						"A creature hit by the red-headed spear can't regain Hit Points until the start of your next turn. A creature hit by the yellow-headed spear must succeed on a {@dc 22} Wisdom saving throw or have the {@condition Frightened|XPHB} condition for 1 minute. The frightened creature repeats the save at the end of each of its turns, ending the condition on itself on a success."
 					]
 				}
+			],
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "Inevitable Spears",
+					"note": "May forgo the attack roll to hit automatically. Thrown spears return to your free hand."
+				},
+				{
+					"type": "combat:note",
+					"name": "Heads of War and Doom",
+					"note": "Red head: hit creature can't regain HP until start of your next turn. Yellow head: Wis DC 22 or Frightened 1 min (repeat save EoT)."
+				}
 			]
 		},
 		{
@@ -3650,6 +3856,18 @@
 					"entries": [
 						"Fiends within 60 feet of you can't teleport or travel to another plane unless you allow it."
 					]
+				}
+			],
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "Bind the True Name",
+					"note": "Magic action: speak true name of a Fiend you see within 120 ft; Cha DC 23 or imprisoned in empty link (devils disadv.; can't use Legendary Resistance). Success: 10d10 psychic."
+				},
+				{
+					"type": "combat:note",
+					"name": "Word Against Fiends",
+					"note": "Fiends within 60 ft can't teleport or plane travel unless you allow it."
 				}
 			]
 		},
@@ -3688,6 +3906,19 @@
 						"Ground in a 30-foot Emanation originating from you is Difficult Terrain for your enemies. When an enemy enters the Emanation for the first time on a turn or starts its turn there, roots and vines force it to succeed on a {@dc 22} Strength saving throw or have the {@condition Restrained|XPHB} condition until the start of its next turn."
 					]
 				}
+			],
+			"regeneration": {
+				"value": 20,
+				"requireHp": true,
+				"name": "Rooted Renewal",
+				"condition": "touching natural earth, stone, or living vegetation"
+			},
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "The Wild Reclaims",
+					"note": "30-ft emanation: difficult terrain for enemies; enemy entering/starting turn there Str DC 22 or Restrained until start of its next turn."
+				}
 			]
 		},
 		{
@@ -3717,6 +3948,21 @@
 						"While standing on the ground, you can take a {@action Magic|XPHB} action to strike it. Each enemy and each structure of your choice touching the ground in a 120-foot Emanation originating from you must make a {@dc 23} Strength saving throw, taking {@damage 20d10} bludgeoning damage and falling {@condition Prone|XPHB} on a failed save, or taking half as much damage only on a successful one. The ground in the area becomes Difficult Terrain until cleared. Once used, this property can't be used again until the next dawn."
 					]
 				}
+			],
+			"charges": 1,
+			"recharge": "dawn",
+			"chargeName": "Worldroot Blow",
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "Worldroot Blow",
+					"note": "Magic action while on ground (1/dawn): enemies/structures on ground in 120-ft emanation Str DC 23, 20d10 bludgeoning and Prone on fail (half on success). Area becomes difficult terrain."
+				},
+				{
+					"type": "combat:note",
+					"name": "Heartwood",
+					"note": "Triple damage to Constructs, objects, and structures."
+				}
 			]
 		},
 		{
@@ -3743,9 +3989,23 @@
 					]
 				}
 			],
-			"attachedSpells": [
-				"polymorph|xphb",
-				"shapechange|xphb"
+			"attachedSpells": {
+				"will": [
+					"polymorph|xphb",
+					"shapechange|xphb"
+				]
+			},
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "A Thousand Perfect Forms",
+					"note": "Polymorph/Shapechange at will from torc: no concentration; lasts until dismissed/recast/remove torc. Shapechange up to CR 30."
+				},
+				{
+					"type": "combat:note",
+					"name": "Unstolen Self",
+					"note": "Retain Int/Wis/Cha, HP, HD, class features, and torc properties in every form. Only Wish can change your form against your will."
+				}
 			]
 		},
 		{
@@ -3778,6 +4038,26 @@
 						"On Initiative count 20 (losing ties), spectral hounds and riders strike each quarry that is outdoors and within 1 mile of a rider. A quarry must make a {@dc 22} Dexterity saving throw, taking {@damage 6d10} force damage and gaining the {@condition Frightened|XPHB} condition until Initiative count 20 of the next round on a failed save, or taking half as much damage only on a successful one. Once the rite is completed, it can't be performed again until the next full moon."
 					]
 				}
+			],
+			"charges": 1,
+			"recharge": "special",
+			"chargeName": "Name the Quarry",
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "Name the Quarry",
+					"note": "1-hour rite under open sky (1/full moon): Hunt pursues named quarry until next dawn; knows direction/distance; quarry can't hide/invis/teleport/leave plane from Hunt."
+				},
+				{
+					"type": "combat:note",
+					"name": "Ride with the Hunt",
+					"note": "Up to 100 willing creatures: fly 120 ft, truesight 1 mile, immune charmed/frightened/exhaustion for Hunt duration."
+				},
+				{
+					"type": "combat:note",
+					"name": "The Hunt Descends",
+					"note": "Init 20: each outdoor quarry within 1 mile of a rider Dex DC 22, 6d10 force and Frightened until next init 20 (half damage only on success)."
+				}
 			]
 		},
 		{
@@ -3804,8 +4084,24 @@
 					]
 				}
 			],
-			"attachedSpells": [
-				"heroes' feast|xphb"
+			"attachedSpells": {
+				"daily": {
+					"1": [
+						"heroes' feast|xphb"
+					]
+				}
+			},
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "Endless Provision",
+					"note": "Magic action while touching: name any nonmagical food/drink; cauldron fills (up to 500 lb food or 100 gal drink)."
+				},
+				{
+					"type": "combat:note",
+					"name": "Feast Without End",
+					"note": "10-minute ceremony: Heroes' Feast (no materials); any number within 30 ft. Benefit once per dawn per creature."
+				}
 			]
 		},
 		{
@@ -3844,6 +4140,25 @@
 						"Allies of your choice within 60 feet of you have Advantage on attack rolls and saving throws. When such an ally would be reduced to 0 Hit Points, it is reduced to 1 Hit Point instead. Once an ally benefits from this final property, it can't do so again until the next dawn."
 					]
 				}
+			],
+			"bonusDamageDice": "4d12",
+			"bonusDamageType": "radiant",
+			"effects": [
+				{
+					"type": "combat:advantage:allyAttacksAndSaves",
+					"value": 1,
+					"name": "Victory for the Host"
+				},
+				{
+					"type": "combat:note",
+					"name": "Battle Cannot Be Lost",
+					"note": "While holding spear and you can see a hostile creature: can't drop below 1 HP, can't be Incapacitated, can't be unwillingly moved/teleported/banished; may choose to succeed on a failed save. Ends if you retreat/surrender."
+				},
+				{
+					"type": "combat:note",
+					"name": "Victory for the Host",
+					"note": "Allies within 60 ft: advantage on attacks and saves; first time reduced to 0 HP becomes 1 HP (once per ally per dawn)."
+				}
 			]
 		},
 		{
@@ -3879,7 +4194,35 @@
 						"Three times per dawn, the sovereign can speak a one-sentence command to any number of creatures of its choice that can hear it within 1 mile. Each target must succeed on a {@dc 23} Wisdom saving throw or have the {@condition Charmed|XPHB} condition for 24 hours. While charmed in this way, a target must obey the command unless doing so would certainly cause its death."
 					]
 				}
-			]
+			],
+			"reqAttune": true,
+			"ability": {
+				"static": {
+					"cha": 30
+				}
+			},
+			"effects": [
+				{
+					"type": "ability:cha",
+					"value": 30,
+					"mode": "set",
+					"name": "Sovereign of the Land"
+				},
+				{
+					"type": "abilityMax:cha",
+					"value": 30,
+					"mode": "set",
+					"name": "Sovereign of the Land"
+				},
+				{
+					"type": "combat:note",
+					"name": "Royal Command",
+					"note": "3/dawn: one-sentence command to any number of creatures that can hear you within 1 mile; Wis DC 23 or Charmed 24h and must obey (not suicidal)."
+				}
+			],
+			"charges": 3,
+			"recharge": "dawn",
+			"chargeName": "Royal Command"
 		},
 		{
 			"name": "Ring of Human Influence",
@@ -3905,9 +4248,46 @@
 					]
 				}
 			],
-			"attachedSpells": [
-				"suggestion|xphb"
-			]
+			"attachedSpells": {
+				"daily": {
+					"1": [
+						"suggestion|xphb"
+					]
+				}
+			},
+			"ability": {
+				"static": {
+					"cha": 22
+				}
+			},
+			"effects": [
+				{
+					"type": "ability:cha",
+					"value": 22,
+					"mode": "set",
+					"name": "Human Influence"
+				},
+				{
+					"type": "abilityMax:cha",
+					"value": 22,
+					"mode": "set",
+					"name": "Human Influence"
+				},
+				{
+					"type": "check:cha:advantage",
+					"value": 1,
+					"conditional": "to influence Humanoids",
+					"name": "Human Influence"
+				},
+				{
+					"type": "combat:note",
+					"name": "Command Allegiance",
+					"note": "Magic action 1/dawn: any number of Humanoids you see within 60 ft (combined CR ≤ 21); Wis DC 20 or Charmed 24h as trusted leader (ends if you/allies damage)."
+				}
+			],
+			"charges": 1,
+			"recharge": "dawn",
+			"chargeName": "Command Allegiance"
 		},
 		{
 			"name": "Ring of Greater Regeneration",
@@ -3935,6 +4315,19 @@
 					"entries": [
 						"While wearing the vampiric ring, whenever you deal damage to a creature with a melee attack that isn't a spell attack, you regain Hit Points equal to half the damage dealt (round down). This property can't raise your Hit Points above your Hit Point maximum and doesn't regrow body parts or return you to life."
 					]
+				}
+			],
+			"regeneration": {
+				"value": 1,
+				"requireHp": true,
+				"name": "Greater Regeneration",
+				"note": "If you lose a body part, it regrows after 10 minutes. If you die wearing the ring, return to life after 1 hour with full HP (ring on remains; some living tissue; not if destroyed by fire/acid/disintegration)."
+			},
+			"effects": [
+				{
+					"type": "combat:note",
+					"name": "Vampiric Variant (10%)",
+					"note": "Alternate form: no passive regen; on melee weapon hit (not spell attack), regain HP equal to half the damage dealt."
 				}
 			]
 		},
