@@ -12177,9 +12177,13 @@ class CharacterSheetState {
 		// Catalog / brew weapons may declare standing extra damage dice (e.g. Spear of Lugh
 		// +4d12 radiant). Prefer an explicit damageRiders[] list; fall back to the single
 		// bonusDamageDice/bonusDamageType pair used by upgrades.
-		if (Array.isArray(item.damageRiders)) {
+		if (Array.isArray(item.damageRiders) && item.damageRiders.length) {
 			for (const r of item.damageRiders) {
 				if (!r?.dice) continue;
+				if (r.requiresToggle) {
+					const toggle = item.itemPowers?.find(power => power.isToggle && power.effectType === "damageRiders");
+					if (!toggle || !item.itemPowerStates?.[toggle.id]?.active) continue;
+				}
 				damageRiders.push({
 					dice: String(r.dice),
 					damageType: r.damageType || r.type || null,
@@ -28334,15 +28338,21 @@ class CharacterSheetState {
 			const detected = this._detectItemActivation({entries: [text]});
 			const actionType = detected.find(it => ["action", "bonus", "reaction"].includes(it.type))?.type || null;
 			const recurring = getRecurringUsage(text);
-			const isSpeedToggle = item.modifySpeed && /\b(?:again|a second time)[^.]*(?:end|ends)\s+the effect\b/i.test(text);
-			if (actionType && isSpeedToggle) {
+			const isReversible = /\b(?:again|a second time)[^.]*(?:end|ends)\s+the effect\b/i.test(text)
+				|| /\b(?:lasts?|remains?)\s+until\s+[^.]*\bagain\b/i.test(text);
+			const toggleEffectType = item.modifySpeed && isReversible
+				? "modifySpeed"
+				: item.damageRiders?.some(rider => rider.requiresToggle) && isReversible
+					? "damageRiders"
+					: null;
+			if (actionType && toggleEffectType) {
 				addPower({
-					id: CharacterSheetState._getItemPowerId(["toggle", item.name, "modify-speed"]),
-					name: `${item.name} Speed`,
+					id: CharacterSheetState._getItemPowerId(["toggle", item.name, toggleEffectType]),
+					name: `${item.name} ${toggleEffectType === "modifySpeed" ? "Speed" : "Damage"}`,
 					kind: "toggle",
 					actionType,
 					isToggle: true,
-					effectType: "modifySpeed",
+					effectType: toggleEffectType,
 					description: text,
 					isReferenceOnly: false,
 				});
@@ -28359,6 +28369,17 @@ class CharacterSheetState {
 					isReferenceOnly: false,
 				});
 			}
+		}
+
+		for (const bonus of item.conditionalBonuses || []) {
+			addPower({
+				id: CharacterSheetState._getItemPowerId(["on-hit", item.name, bonus.id]),
+				name: bonus.label || `${item.name} On-Hit Rider`,
+				kind: "ability",
+				actionType: "onHit",
+				description: `${bonus.damage} ${bonus.damageType || "weapon"} damage against ${(bonus.creatureTypes || []).join(" or ")}.`,
+				isReferenceOnly: true,
+			});
 		}
 
 		const explicit = Array.isArray(item.itemPowers) ? item.itemPowers : [];
@@ -28406,6 +28427,49 @@ class CharacterSheetState {
 			effects.push({type: "save:advantage:magic", value: 1, name: "Magic Resistance"});
 		}
 		return effects;
+	}
+
+	_normalizeItemDamageRiders (item) {
+		const riders = Array.isArray(item?.damageRiders) ? MiscUtil.copyFast(item.damageRiders) : [];
+		if (riders.length || !item?.weapon) return riders;
+		const text = CharacterSheetState._getItemEntryText(item.entries);
+		const sentences = text.split(/(?<=[.!?])\s+/);
+		for (const sentence of sentences) {
+			if (/\b(?:dragon|giant|fiend|undead|construct|roll a 20|critical hit)\b/i.test(sentence)) continue;
+			const match = sentence.match(/\b(?:target takes|it deals)\s+(?:an\s+)?extra\s+(\d+d\d+)\s+(\w+)\s+damage\b/i);
+			if (!match) continue;
+			const requiresToggle = /^\s*while\b/i.test(sentence)
+				&& (
+					/\b(?:again|a second time)[^.]*(?:end|ends|puts? out)\b/i.test(text)
+					|| /\b(?:lasts?|remains?)\s+until\s+[^.]*\bagain\b/i.test(text)
+				);
+			riders.push({
+				dice: match[1],
+				damageType: match[2].toLowerCase(),
+				name: item.name || "Weapon",
+				requiresToggle,
+			});
+		}
+		return riders;
+	}
+
+	_normalizeItemCritRiders (item) {
+		const riders = Array.isArray(item?.critRiders) ? MiscUtil.copyFast(item.critRiders) : [];
+		if (riders.length || !item?.weapon) return riders;
+		const text = CharacterSheetState._getItemEntryText(item.entries);
+		const sentence = text.split(/(?<=[.!?])\s+/).find(it => /\b(?:roll|rolled)\s+a\s+20\b/i.test(it) && /\bextra\b/i.test(it));
+		if (!sentence) return riders;
+		const diceMatch = sentence.match(/\bextra\s+(\d+d\d+)\s+(\w+)\s+damage\b/i);
+		const amountMatch = sentence.match(/\bextra\s+(\d+)(?:\s+(\w+)|\s+\{=[^}]+\})?\s+damage\b/i);
+		if (!diceMatch && !amountMatch) return riders;
+		riders.push({
+			trigger: "nat20",
+			name: item.name || "Weapon",
+			damageDice: diceMatch?.[1] || null,
+			damageAmount: amountMatch ? parseInt(amountMatch[1], 10) : null,
+			damageType: (diceMatch?.[2] || amountMatch?.[2] || "").toLowerCase() || null,
+		});
+		return riders;
 	}
 
 	/**
@@ -29175,12 +29239,14 @@ class CharacterSheetState {
 				itemProps.activation = this._detectItemActivation(itemProps);
 			}
 			itemProps.effects = this._normalizeItemEffects(itemProps);
-			itemProps.itemPowers = this._normalizeItemPowers(itemProps);
+			itemProps.damageRiders = this._normalizeItemDamageRiders(itemProps);
+			itemProps.critRiders = this._normalizeItemCritRiders(itemProps);
 
 			// Conditional damage bonuses detection (vs creature types)
 			if (itemProps.conditionalBonuses === undefined) {
 				itemProps.conditionalBonuses = this._detectConditionalBonuses(itemProps);
 			}
+			itemProps.itemPowers = this._normalizeItemPowers(itemProps);
 
 			// Artifact property requirements detection
 			if (itemProps.artifactProperties === undefined && itemProps.rarity === "artifact") {
@@ -40963,7 +41029,7 @@ class CharacterSheetState {
 					damageDice: r.damageDice || r.dice || null,
 					damageAmount: typeof r.damageAmount === "number" ? r.damageAmount
 						: (typeof r.amount === "number" ? r.amount : null),
-					damageType: r.damageType || "necrotic",
+					damageType: r.damageType || attack.damageType || null,
 					excludesTypes: r.excludesTypes || null,
 					tempHp: r.tempHp != null ? r.tempHp : null,
 					note: r.note || null,

@@ -23,6 +23,7 @@ const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetInventory = globalThis.CharacterSheetInventory;
 const CharacterSheetSpells = globalThis.CharacterSheetSpells;
 const items = JSON.parse(readFileSync(resolve(REPO_ROOT, "data/items.json"), "utf8")).item;
+const magicVariants = JSON.parse(readFileSync(resolve(REPO_ROOT, "data/magicvariants.json"), "utf8")).magicvariant;
 const brewItems = JSON.parse(readFileSync(resolve(REPO_ROOT, "homebrew/TravelersGuidetoThelemar.json"), "utf8")).item;
 
 function addActiveCatalogItem (state, item) {
@@ -54,6 +55,17 @@ function addCatalogItemViaInventory (state, inventory, item) {
 	state.setItemEquipped(added.id, true);
 	if (added.requiresAttunement) state.setItemAttuned(added.id, true);
 	return added;
+}
+
+function getMagicVariant (name) {
+	const variant = magicVariants.find(it => it.name === name && it.inherits?.source === "DMG");
+	return {
+		...variant.inherits,
+		name,
+		source: variant.inherits.source,
+		type: "M",
+		weapon: true,
+	};
 }
 
 describe("Catalog magic-item powers and passive normalization", () => {
@@ -346,5 +358,34 @@ describe("Catalog magic-item powers and passive normalization", () => {
 			chargesCost: 4,
 			chargesCurrent: 3,
 		}));
+	});
+
+	it("derives standing, toggleable, conditional, and critical weapon riders from catalog data", () => {
+		const state = new CharacterSheetState();
+		const frostBrand = addActiveCatalogItem(state, getMagicVariant("Frost Brand"));
+		const flameTongue = addActiveCatalogItem(state, getMagicVariant("Flame Tongue"));
+		const dragonSlayer = addActiveCatalogItem(state, getMagicVariant("Dragon Slayer"));
+		const vicious = addActiveCatalogItem(state, getMagicVariant("Vicious Weapon"));
+
+		expect(state.getEffectiveItemBonuses(frostBrand.id).damageRiders).toEqual([
+			expect.objectContaining({dice: "1d6", damageType: "cold"}),
+		]);
+
+		const flamePower = state.getItemPowers().find(it => it.itemId === flameTongue.id && it.kind === "toggle");
+		expect(state.getEffectiveItemBonuses(flameTongue.id).damageRiders).toHaveLength(0);
+		expect(state.invokeItemPower(flameTongue.id, flamePower.id)).toEqual(expect.objectContaining({ok: true, isActive: true}));
+		expect(state.getEffectiveItemBonuses(flameTongue.id).damageRiders).toEqual([
+			expect.objectContaining({dice: "2d6", damageType: "fire"}),
+		]);
+
+		const dragonPower = state.getItemPowers().find(it => it.itemId === dragonSlayer.id && it.actionType === "onHit");
+		expect(dragonSlayer.conditionalBonuses).toEqual([
+			expect.objectContaining({damage: "3d6", creatureTypes: ["dragon"]}),
+		]);
+		expect(dragonPower).toEqual(expect.objectContaining({isReferenceOnly: true, isAvailable: false}));
+
+		expect(state.getCritWeaponRiders({name: vicious.name, damageType: "slashing", sourceItem: vicious})).toEqual([
+			expect.objectContaining({trigger: "nat20", damageAmount: 7, damageType: "slashing"}),
+		]);
 	});
 });

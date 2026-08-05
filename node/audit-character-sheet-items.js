@@ -29,6 +29,7 @@ const STRUCTURED_FIELDS = new Set([
 const ATTACHED_SPELL_KEYS = new Set(["ability", "charges", "daily", "limited", "other", "rest", "ritual", "will"]);
 const ACTIVATION_RE = /\b(?:as (?:a|an) (?:bonus )?action|as (?:a|an) reaction|use (?:a|an|your) action|when you hit|expend \d+ charges?|once (?:this property is )?used|until (?:the )?next dawn|short or long rest)\b/i;
 const ACTIONABLE_ACTIVE_RE = /\b(?:expend (?:one|\d+) charges?|(?:staff|item|weapon|armor) is destroyed|until (?:the )?next dawn|until you finish a (?:short or )?long rest)\b/i;
+const DERIVED_WEAPON_RIDER_RE = /\b(?:when you hit|it deals|target takes|roll a 20)[^.]*\bextra\s+(?:\{@damage\s+)?(?:\d+d\d+|\d+)\b/i;
 
 function getEntryText (entry) {
 	if (entry == null) return "";
@@ -53,7 +54,9 @@ function classifyItem (item) {
 		return ACTIVATION_RE.test(entryText) && ACTIONABLE_ACTIVE_RE.test(entryText);
 	});
 	const hasActiveProse = ACTIVATION_RE.test(text);
-	const hasPowerData = !!item.attachedSpells || namedActive;
+	const hasDerivedWeaponRider = DERIVED_WEAPON_RIDER_RE.test(text);
+	if (hasDerivedWeaponRider) fields.push("derivedWeaponRider");
+	const hasPowerData = !!item.attachedSpells || namedActive || hasDerivedWeaponRider;
 	if (unsupportedSpellKeys.length) {
 		return {status: "unsupported", fields, reasons: unsupportedSpellKeys.map(key => `attachedSpells.${key}`)};
 	}

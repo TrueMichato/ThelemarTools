@@ -4,8 +4,8 @@ Snapshot generated from the in-repo site catalog, magic-variant templates, TGTT 
 
 | Status | Items | Share |
 | --- | ---: | ---: |
-| Fully functional | 1166 | 43.9% |
-| Surfaced only | 1493 | 56.1% |
+| Fully functional | 1242 | 46.7% |
+| Surfaced only | 1417 | 53.3% |
 | Unsupported | 0 | 0.0% |
 | **Total** | **2659** | **100%** |
 
@@ -13,10 +13,10 @@ Snapshot generated from the in-repo site catalog, magic-variant templates, TGTT 
 
 | Corpus | Full | Surfaced | Total |
 | --- | ---: | ---: | ---: |
-| Site catalog | 758 | 885 | 1643 |
-| Magic-variant templates | 106 | 108 | 214 |
+| Site catalog | 795 | 848 | 1643 |
+| Magic-variant templates | 128 | 86 | 214 |
 | TGTT | 19 | 3 | 22 |
-| Supplied homebrew export | 283 | 497 | 780 |
+| Supplied homebrew export | 300 | 480 | 780 |
 
 The supplied export contains 21 homebrew documents with 780 magic items after excluding mundane entities. The largest sets are *The Griffon's Saddlebag, Book 1* (359), *Heliana's Guide to Monster Hunting* (91), the two *Grim Hollow Monster Grimoire* documents (74 each), and *Monsters of Drakkenheim* (43).
 
@@ -29,6 +29,7 @@ The supplied export contains 21 homebrew documents with 780 magic items after ex
 | `bonusWeapon` | 363 |
 | `resist` | 202 |
 | `bonusAc` | 151 |
+| Derived weapon rider | 122 |
 | `ability` | 83 |
 | `bonusSpellAttack` | 60 |
 | `modifySpeed` | 60 |
@@ -51,7 +52,7 @@ The supplied export contains 21 homebrew documents with 780 magic items after ex
 
 The audit is deliberately conservative. "Surfaced only" means the player can read the complete item rules, but the sheet does not claim to resolve bespoke prose. Prose-derived powers without a charge/use transaction or destructive consequence render as non-interactive rules references. Repeating action powers with a clear dawn/long-rest reset normalize into shared use tracking (for example, Dagger of Venom and all Bag of Tricks variants). Limited, daily, rest-based, at-will, ritual, charge-based, and other attached-spell forms are supported. Daily groups share uses unless the data uses the `e` suffix ("each"), rest groups refresh on either rest, and finite `limited` groups never refresh automatically.
 
-Catalog-backed regressions cover the high-frequency enhancement, ability-setter, protection/luck, resistance/immunity, speed, senses, spell-focus, and charged-spell families. Conditional AC bonuses such as Bracers of Defense are evaluated against live armor and shield state instead of being treated as unconditional `bonusAc`. Toggleable structured speed properties such as Boots of Speed apply only while their item power is active. Variable-charge spell wands expose a charge/slot-level choice and spend the selected amount atomically.
+Catalog-backed regressions cover the high-frequency enhancement, ability-setter, protection/luck, resistance/immunity, speed, senses, spell-focus, charged-spell, and weapon-rider families. Conditional AC bonuses such as Bracers of Defense are evaluated against live armor and shield state instead of being treated as unconditional `bonusAc`. Toggleable structured speed properties such as Boots of Speed apply only while their item power is active. Variable-charge spell wands expose a charge/slot-level choice and spend the selected amount atomically. Weapon prose normalizes standing riders (Frost Brand), toggleable riders (Flame Tongue), target-conditional riders (Dragon/Giant Slayer), and natural-20 riders (Vicious/Sword of Sharpness).
 
 Run the in-repo catalog audit:
 
