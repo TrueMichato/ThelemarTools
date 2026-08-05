@@ -27,6 +27,65 @@ Each repository or backup variant is applied to every compatible repository or b
 | Griffon's Saddlebag variant expansions | 332 | 100 | 432 |
 | Griffon's Saddlebag items | 154 | 205 | 359 |
 
+## Backup document proof
+
+All 52 backup documents are read, including documents with no item content. Raw totals are 881 items, 101 base items, 116 variant templates, and 58 item groups. Backup variants generate 2637 concrete candidates before global deduplication; 3457 globally deduplicated entities are credited to backup documents.
+
+| # | Document | Item | Base | Variant | Group | Expanded | Full | Surfaced | Unsupported |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | Book of Hordes | 12 | 0 | 0 | 1 | 0 | 0 | 13 | 0 |
+| 2 | Major NPCs | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 3 | Abyssal Horrors | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 4 | Ankheg Catalogue | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 5 | Badooga's Exploration Guidelines | 5 | 0 | 0 | 0 | 0 | 0 | 5 | 0 |
+| 6 | Badooga's Monster Guidelines | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 7 | Better Greatwyrms | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 8 | Elder Evils | 7 | 0 | 0 | 0 | 0 | 2 | 5 | 0 |
+| 9 | Libris Mortis | 56 | 0 | 10 | 0 | 483 | 252 | 271 | 0 |
+| 10 | Monsters of the Apocalypse | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 11 | Conflux Creatures | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 12 | Conflux's Zombies | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 13 | 35 Versatile NPCs | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 14 | Monsters of the Infinite Planes | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 15 | NPC Collection Blog | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 16 | Expanded Racial Feats | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 17 | Dragonix's Deadly Denizens 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 18 | Monster Manual Expanded (v1) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 19 | Monster Manual Expanded - 2024 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 20 | Monster Manual Expanded II (v2) | 0 | 0 | 1 | 0 | 5 | 5 | 0 | 0 |
+| 21 | Monster Manual Expanded III | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 22 | Dungeon Dad Statblocks | 2 | 0 | 0 | 0 | 0 | 2 | 0 | 0 |
+| 23 | Monsters and Myths | 15 | 0 | 0 | 0 | 0 | 3 | 12 | 0 |
+| 24 | Eighteen Sons of the Lightning Lord | 58 | 32 | 1 | 0 | 114 | 1 | 120 | 0 |
+| 25 | Honourable Heroes | 8 | 41 | 0 | 0 | 0 | 1 | 0 | 0 |
+| 26 | Fifth Edition Foes | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 27 | Grim Hollow - Monster Grimoire - 2024 | 80 | 1 | 6 | 1 | 158 | 152 | 81 | 0 |
+| 28 | Grim Hollow - The Monster Grimoire | 80 | 1 | 6 | 1 | 180 | 149 | 106 | 0 |
+| 29 | Monsters of Drakkenheim | 49 | 0 | 15 | 1 | 591 | 441 | 194 | 0 |
+| 30 | Monsters of the Guild | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 31 | The Griffon's Saddlebag, Book 1 - 2024 | 359 | 0 | 29 | 4 | 450 | 486 | 309 | 0 |
+| 32 | Melvin's Minute Monsterium: Swamps & Sewers | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 33 | Creature Codex | 2 | 0 | 0 | 0 | 0 | 0 | 2 | 0 |
+| 34 | Tome of Beasts 2 Lairs | 2 | 0 | 0 | 0 | 0 | 2 | 0 | 0 |
+| 35 | Tome of Beasts 3 Lairs | 9 | 1 | 0 | 0 | 0 | 1 | 3 | 0 |
+| 36 | Tome of Beasts 3 | 6 | 0 | 1 | 0 | 17 | 17 | 3 | 0 |
+| 37 | 5 High Level Villains | 3 | 0 | 0 | 0 | 0 | 3 | 0 | 0 |
+| 38 | 5 Low Level Villains | 3 | 0 | 0 | 0 | 0 | 2 | 1 | 0 |
+| 39 | Heliana's Guide to Monster Hunting | 92 | 25 | 47 | 50 | 639 | 311 | 469 | 0 |
+| 40 | Lovecraftian Monsters | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 41 | Essential NPCs | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 42 | The Seven Dragon Overlords | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 43 | Ultimate NPCs Skulduggery | 30 | 0 | 0 | 0 | 0 | 3 | 27 | 0 |
+| 44 | The Dreaded Accursed | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 45 | Pathfinder - Kingmaker Bestiary (5e) | 3 | 0 | 0 | 0 | 0 | 2 | 1 | 0 |
+| 46 | Monster a Day Compendium | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 47 | Travelers Guide to Thelemar Monsters | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 48 | Outclassed - The NPC Statblock Compendium | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 49 | Errata Spellcasters | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 50 | Sword Coast Legends NPCs | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 51 | Wizards copy | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 52 | Catastrophic Dragons | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
 ## Structured mechanics covered
 
 The largest mechanically recognized families in the expanded corpus are:
