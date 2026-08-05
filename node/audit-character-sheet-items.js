@@ -78,7 +78,7 @@ export function classifyItem (item) {
 		...conditionalBonuses,
 	];
 	const choices = [
-		...(item.spellScrollLevel != null && !item.attachedSpells ? ["spellScrollLevel"] : []),
+		...(item.spellScrollLevel != null && !item.attachedSpells && !item.selectedSpell ? ["spellScrollLevel"] : []),
 		...schemaProfile.choiceRequired
 			.map(adapter => adapter.field)
 			.filter(field => field !== "spellScrollLevel"),

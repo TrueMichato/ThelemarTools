@@ -62,6 +62,20 @@ describe("Character sheet magic-item operational coverage audit", () => {
 		}));
 	});
 
+	it("counts a resolved spell-level choice as operational", () => {
+		expect(classifyItem({
+			name: "Enspelled Test Weapon",
+			source: "TST",
+			charges: 6,
+			spellScrollLevel: 3,
+			selectedSpell: {name: "Fireball", source: "PHB", level: 3},
+			entries: ["The item has 6 charges. You can expend 1 charge to cast its spell."],
+		})).toEqual(expect.objectContaining({
+			status: "fullyFunctional",
+			operationalStatus: "structuredOperational",
+		}));
+	});
+
 	it("distinguishes prose-derived operational effects", () => {
 		expect(classifyItem({
 			name: "Unarmored Ward",

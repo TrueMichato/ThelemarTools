@@ -39,6 +39,8 @@ The stricter operational audit reduces the previous 6,100-item functional count 
 
 The legacy headline remains for historical comparison. Only `structuredOperational` and `proseOperational` count as fully functional. Partial, choice, resource, reference, and bespoke outcomes count as surfaced.
 
+`spellScrollLevel` items now have a deterministic configuration path: adding one from the inventory catalog requires selecting an exact-level spell, persists that selection on the item, and normalizes it into a charged Enspelled power or a finite scroll power. Unconfigured corpus templates remain `choiceRequired`, so this capability does not inflate the headline before a concrete spell is selected.
+
 ## Corpus methodology
 
 Repository input is `data/items.json`, `data/items-base.json`, and `data/magicvariants.json`. With a backup argument, the audit also reads every document in `async.HOMEBREW_2_STORAGE`, including `item`, `baseitem`, `magicvariant`, and `itemGroup`.

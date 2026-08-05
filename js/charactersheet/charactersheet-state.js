@@ -28322,7 +28322,7 @@ class CharacterSheetState {
 		};
 		const itemText = CharacterSheetState._getItemEntryText(item.entries);
 		const itemEntryJson = JSON.stringify(item.entries || []);
-		const addSpell = (raw, usageType, {chargesCost = 0, usesMax = null, isEach = false, usesKey = null} = {}) => {
+		const addSpell = (raw, usageType, {chargesCost = 0, usesMax = null, isEach = false, usesKey = null, requiresEquipped = true} = {}) => {
 			const spell = parseSpellUid(raw);
 			if (!spell.name) return;
 			const isVariableChargeCast = usageType === "charges"
@@ -28348,6 +28348,7 @@ class CharacterSheetState {
 				usesMax,
 				isEach,
 				usesKey: usesMax ? (usesKey || `${usageType}:${usesMax}:${spell.name.toLowerCase()}|${spell.source.toLowerCase()}`) : null,
+				requiresEquipped,
 				spellName: spell.name,
 				spellSource: spell.source,
 				castLevel: spell.castLevel || (baseLevelMatch ? parseInt(baseLevelMatch[1], 10) : null),
@@ -28357,10 +28358,20 @@ class CharacterSheetState {
 		};
 
 		const attached = item.attachedSpells;
+		const selectedSpell = item.selectedSpell;
 		const isRandomTablePower = !!attached
 			&& /\broll\s+(?:a\s+)?(?:\{@dice\s+)?d100\b/i.test(itemText)
 			&& /\bconsult\s+(?:the\s+)?(?:following\s+)?table\b/i.test(itemText);
-		if (isRandomTablePower) {
+		if (!attached && selectedSpell?.name) {
+			const isConsumableScroll = item.type?.split("|")[0] === "SC" || /^spell scroll\b/i.test(item.name || "");
+			const chargesCost = Number.isFinite(Number(item.charges)) && Number(item.charges) > 0 ? 1 : 0;
+			addSpell(`${selectedSpell.name}|${selectedSpell.source || "PHB"}#${item.spellScrollLevel ?? selectedSpell.level ?? ""}`, chargesCost ? "charges" : isConsumableScroll ? "limited" : "other", {
+				chargesCost,
+				usesMax: isConsumableScroll ? 1 : null,
+				usesKey: isConsumableScroll ? `limited:selected-spell:${item.spellScrollLevel ?? selectedSpell.level ?? 0}` : null,
+				requiresEquipped: !isConsumableScroll,
+			});
+		} else if (isRandomTablePower) {
 			const chargeCosts = Object.keys(attached.charges || {}).map(Number).filter(Number.isFinite);
 			addPower({
 				id: CharacterSheetState._getItemPowerId(["random", item.name]),
@@ -28631,16 +28642,17 @@ class CharacterSheetState {
 	getItemPowers ({activeOnly = false} = {}) {
 		const out = [];
 		for (const item of this.getItems()) {
-			const isActive = !!item.equipped && (!item.requiresAttunement || !!item.attuned);
-			if (activeOnly && !isActive) continue;
 			for (const power of item.itemPowers || []) {
+				const requiresEquipped = power.requiresEquipped !== false;
+				const isActive = (!requiresEquipped || !!item.equipped) && (!item.requiresAttunement || !!item.attuned);
+				if (activeOnly && !isActive) continue;
 				const chargesCurrent = item.chargesCurrent ?? item.charges ?? 0;
 				const usesCurrent = power.usesMax
 					? item.itemPowerUses?.[power.usesKey] ?? power.usesMax
 					: null;
 				const unavailableReason = power.isReferenceOnly
 					? "Rules reference only; resolve this effect manually."
-					: !item.equipped
+					: requiresEquipped && !item.equipped
 						? "Equip this item to use its powers."
 						: item.requiresAttunement && !item.attuned
 							? "Attune to this item to use its powers."
@@ -29340,8 +29352,19 @@ class CharacterSheetState {
 
 		// Don't merge if incoming item is marked as custom
 		const isIncomingCustom = item._isCustom;
+		const selectedSpellUid = item.selectedSpell
+			? `${item.selectedSpell.name || ""}|${item.selectedSpell.source || ""}`.toLowerCase()
+			: "";
 		const existing = isIncomingCustom ? null : this._data.inventory.find(
-			i => i.item.name === item.name && i.item.source === item.source && !i.item._isCustom,
+			i => {
+				const existingSpellUid = i.item.selectedSpell
+					? `${i.item.selectedSpell.name || ""}|${i.item.selectedSpell.source || ""}`.toLowerCase()
+					: "";
+				return i.item.name === item.name
+					&& i.item.source === item.source
+					&& existingSpellUid === selectedSpellUid
+					&& !i.item._isCustom;
+			},
 		);
 		if (existing) {
 			existing.quantity += quantity;

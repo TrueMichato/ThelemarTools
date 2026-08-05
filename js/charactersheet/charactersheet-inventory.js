@@ -1183,14 +1183,14 @@ class CharacterSheetInventory {
 						</div>
 					`});
 
-					itemEl.querySelector(".item-picker-add").addEventListener("click", (/** @type {*} */ e) => {
+					itemEl.querySelector(".item-picker-add").addEventListener("click", async (/** @type {*} */ e) => {
 						e.stopPropagation();
 						if (isSelectMode) {
 							onSelect(item);
 							doClose(true);
 							return;
 						}
-						this._addItem(item);
+						if (!await this._pAddItemWithChoices(item)) return;
 						JqueryUtil.doToast({type: "success", content: `Added ${item.name} to your inventory!`});
 					});
 
@@ -1601,6 +1601,8 @@ class CharacterSheetInventory {
 			ability: item.ability || null,
 			// Item-granted spells (e.g., Staff of the Magi, Wand of Fireballs)
 			attachedSpells: item.attachedSpells || null,
+			spellScrollLevel: item.spellScrollLevel ?? null,
+			selectedSpell: item.selectedSpell ? MiscUtil.copyFast(item.selectedSpell) : null,
 			// Spellcasting focus for classes
 			focus: item.focus || null,
 			// Charges
@@ -3888,6 +3890,98 @@ class CharacterSheetInventory {
 			this._updateEncumbrance();
 			this._page.saveCharacter();
 		}
+	}
+
+	static getItemWithSelectedSpell (item, spell) {
+		if (!item || !spell?.name) return item;
+		return {
+			...item,
+			selectedSpell: {
+				name: spell.name,
+				source: spell.source || "PHB",
+				level: Number(spell.level ?? item.spellScrollLevel ?? 0),
+			},
+		};
+	}
+
+	_getItemSpellCandidates (item) {
+		const targetLevel = Number(item?.spellScrollLevel);
+		if (!Number.isInteger(targetLevel) || targetLevel < 0) return [];
+		const spells = this._page.getSpells?.() || this._page?._spellsData || [];
+		return spells
+			.filter(spell => Number(spell.level) === targetLevel)
+			.sort((a, b) => a.name.localeCompare(b.name) || String(a.source || "").localeCompare(String(b.source || "")));
+	}
+
+	async _pAddItemWithChoices (item) {
+		if (item?.spellScrollLevel == null || item.attachedSpells || item.selectedSpell) {
+			this._addItem(item);
+			return true;
+		}
+
+		const selectedSpell = await this._pChooseSpellForItem(item);
+		if (!selectedSpell) return false;
+		this._addItem(CharacterSheetInventory.getItemWithSelectedSpell(item, selectedSpell));
+		return true;
+	}
+
+	async _pChooseSpellForItem (item) {
+		const candidates = this._getItemSpellCandidates(item);
+		if (!candidates.length) {
+			JqueryUtil.doToast({
+				type: "danger",
+				content: `No level ${item.spellScrollLevel} spells are available for ${item.name}.`,
+			});
+			return null;
+		}
+
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: `Choose the Spell for ${item.name}`,
+			isMinHeight0: true,
+		});
+		let selected = null;
+		const search = e_({
+			tag: "input",
+			clazz: "ve-form-control mb-2",
+			attrs: {type: "search", placeholder: `Search level ${item.spellScrollLevel} spells...`},
+		});
+		const list = e_({tag: "div", clazz: "charsheet__modal-list"});
+		const footer = e_({tag: "div", clazz: "ve-flex-v-center ve-flex-h-right mt-3"});
+		const cancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", text: "Cancel"});
+		cancel.addEventListener("click", () => doClose(false));
+		footer.append(cancel);
+
+		const render = () => {
+			const term = search.value.trim().toLowerCase();
+			list.innerHTML = "";
+			for (const spell of candidates.filter(candidate =>
+				!term
+				|| candidate.name.toLowerCase().includes(term)
+				|| String(candidate.source || "").toLowerCase().includes(term))) {
+				const row = e_({tag: "button", clazz: "charsheet__modal-list-item ve-btn ve-btn-default w-100"});
+				const name = e_({tag: "span", clazz: "bold", text: spell.name});
+				const source = e_({tag: "span", clazz: "ve-muted ve-small", text: Parser.sourceJsonToAbv(spell.source)});
+				row.append(name, source);
+				row.addEventListener("click", () => {
+					selected = spell;
+					doClose(true);
+				});
+				list.append(row);
+			}
+			if (!list.childElementCount) list.append(e_({tag: "div", clazz: "ve-muted p-2", text: "No matching spells."}));
+		};
+
+		search.addEventListener("input", render);
+		render();
+		modalInner.append(
+			e_({tag: "p", clazz: "ve-small mb-2", text: `Select the level ${item.spellScrollLevel} spell bound to this item. This choice is saved with the inventory item.`}),
+			search,
+			list,
+			footer,
+		);
+		search.focus();
+		await pGetResolved();
+		return selected;
 	}
 
 	_toggleEquipped (itemId) {

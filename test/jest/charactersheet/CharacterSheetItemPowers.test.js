@@ -237,6 +237,74 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		expect(state.getItemPower(added.id, levitate.id)).toEqual(expect.objectContaining({isAvailable: false, usesCurrent: 0}));
 	});
 
+	it("normalizes a persisted spell-level item choice into a charged spell power", () => {
+		const state = new CharacterSheetState();
+		const added = addActiveCatalogItem(state, {
+			name: "Enspelled Test Staff",
+			source: "TST",
+			type: "ST",
+			rarity: "rare",
+			charges: 6,
+			spellScrollLevel: 3,
+			selectedSpell: {name: "Fireball", source: "PHB", level: 3},
+			entries: ["The staff has 6 charges. While holding it, you can expend 1 charge to cast its spell."],
+		});
+		const power = state.getItemPowers({activeOnly: true}).find(it => it.itemId === added.id);
+
+		expect(power).toEqual(expect.objectContaining({
+			kind: "spell",
+			spellName: "Fireball",
+			spellSource: "PHB",
+			castLevel: 3,
+			chargesCost: 1,
+			usageType: "charges",
+		}));
+		expect(state.invokeItemPower(added.id, power.id)).toEqual(expect.objectContaining({ok: true, chargesCurrent: 5}));
+	});
+
+	it("keeps a selected spell-scroll choice finite and persists its identity", () => {
+		const state = new CharacterSheetState();
+		const selected = CharacterSheetInventory.getItemWithSelectedSpell({
+			name: "Spell Scroll (Level 2)",
+			source: "DMG",
+			type: "SC",
+			rarity: "uncommon",
+			spellScrollLevel: 2,
+		}, {name: "Misty Step", source: "PHB", level: 2});
+		const added = addActiveCatalogItem(state, selected);
+		state.setItemEquipped(added.id, false);
+		const power = state.getItemPowers({activeOnly: true}).find(it => it.itemId === added.id);
+
+		expect(added.selectedSpell).toEqual({name: "Misty Step", source: "PHB", level: 2});
+		expect(power).toEqual(expect.objectContaining({
+			spellName: "Misty Step",
+			castLevel: 2,
+			usageType: "limited",
+			usesCurrent: 1,
+			usesMax: 1,
+		}));
+		expect(state.invokeItemPower(added.id, power.id)).toEqual(expect.objectContaining({ok: true, usesCurrent: 0}));
+		expect(state.getItemPower(added.id, power.id).isAvailable).toBe(false);
+	});
+
+	it("does not merge different selected spells on otherwise identical items", () => {
+		const state = new CharacterSheetState();
+		const base = {
+			name: "Enspelled Test Staff",
+			source: "TST",
+			type: "ST",
+			rarity: "rare",
+			charges: 6,
+			spellScrollLevel: 3,
+		};
+
+		state.addItem({...base, id: "fire", selectedSpell: {name: "Fireball", source: "PHB", level: 3}});
+		state.addItem({...base, id: "fly", selectedSpell: {name: "Fly", source: "PHB", level: 3}});
+
+		expect(state.getItems()).toHaveLength(2);
+		expect(state.getItems().map(item => item.selectedSpell.name)).toEqual(["Fireball", "Fly"]);
+	});
+
 	it("applies Bracers of Defense only while unarmored and without a shield", () => {
 		const state = new CharacterSheetState();
 		state.setAbilityBase("dex", 14);
