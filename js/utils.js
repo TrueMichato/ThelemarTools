@@ -8723,6 +8723,36 @@ globalThis.CryptUtil = class {
 	};
 
 	/**
+	 * A fast, non-cryptographic content fingerprint (cyrb53), ~9x faster than `md5` on large inputs.
+	 *
+	 * Use this wherever a hash is only required to answer "is this the same content?" in-memory, and is
+	 * never persisted-and-compared across versions, exposed to users, or relied upon for security.
+	 * Prefer `md5` if a stable, portable digest is required.
+	 *
+	 * The string length is included in the output, so a collision requires both an identical length and
+	 * an identical 53-bit hash.
+	 *
+	 * @param str String to fingerprint.
+	 * @param seed Optional seed.
+	 * @return {string} An opaque fingerprint.
+	 */
+	static hashFast (str, seed = 0) {
+		let h1 = 0xDEADBEEF ^ seed;
+		let h2 = 0x41C6CE57 ^ seed;
+
+		for (let i = 0; i < str.length; ++i) {
+			const ch = str.charCodeAt(i);
+			h1 = Math.imul(h1 ^ ch, 2654435761);
+			h2 = Math.imul(h2 ^ ch, 1597334677);
+		}
+
+		h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+		h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+
+		return `${str.length.toString(36)}-${(4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36)}`;
+	}
+
+	/**
 	 * Based on Java's implementation.
 	 * @param obj An object to hash.
 	 * @return {*} An integer hashcode for the object.

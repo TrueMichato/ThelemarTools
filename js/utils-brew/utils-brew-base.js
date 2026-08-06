@@ -846,6 +846,8 @@ export class BrewUtil2Base {
 	}
 
 	async _pAddBrewsLazyFinalize_ ({lockToken}) {
+		// Note: `head.checksum` is an in-memory content fingerprint (`CryptUtil.hashFast`), used only to
+		// drop byte-identical duplicates from this batch. It is never compared across sessions.
 		const brewsTempDeduped = this._addLazy_brewsTemp
 			.reduce(
 				(accum, brew) => {
