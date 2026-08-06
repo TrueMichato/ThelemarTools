@@ -8,9 +8,14 @@
  * `chronal%20shift_wizard_tgtt_chronurgy_egw_2_egw`.
  */
 import "./setup.js";
+import {readFileSync} from "fs";
+import {resolve, dirname} from "path";
+import {fileURLToPath} from "url";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 
 describe("resolveSubclassHoverSources (Bug 12)", () => {
 	test("prefers explicit classSource on the subclass entry", () => {
@@ -82,5 +87,25 @@ describe("resolveFeatureHoverSources for subclass features (Bug 12)", () => {
 		const out = CharacterSheetClassUtils.resolveFeatureHoverSources(feature, storedClass);
 		expect(out.classSource).toBe("PHB");
 		expect(out.featureSource).toBe("EGW");
+	});
+});
+
+describe("item hover routing", () => {
+	test("Overview auto-attacks retain the source item and use the shared item hover", () => {
+		const source = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+		expect(source).toMatch(/sourceItem:\s*weapon/);
+		expect(source).toMatch(/buildItemHoverNameHtml\(attack\.sourceItem \|\| attack\)/);
+		expect(source).not.toMatch(/getHoverElementAttributes\(\{page:\s*UrlUtil\.PG_ITEMS/);
+	});
+
+	test("all inventory and combat item-name surfaces use the shared item helper", () => {
+		for (const file of [
+			"js/charactersheet/charactersheet-inventory.js",
+			"js/charactersheet/charactersheet-combat.js",
+		]) {
+			const source = readFileSync(resolve(REPO_ROOT, file), "utf8");
+			expect(source).toContain("CharacterSheetClassUtils.buildItemHoverNameHtml");
+			expect(source).not.toMatch(/getHoverLink\(UrlUtil\.PG_ITEMS/);
+		}
 	});
 });

@@ -920,6 +920,256 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * A user-authored item has no DataLoader identity even when an imported save
+	 * carries a non-Custom source label. Only real catalog entries may use the
+	 * standard item hover.
+	 * @param {*} item
+	 * @returns {boolean}
+	 */
+	static isCatalogItemHoverTarget (/** @type {*} */ item) {
+		const source = String(item?.source || "").trim();
+		const isDerived = item?._isCraftingMaterial
+			|| item?._isCraftedItem
+			|| item?._isEmpoweredGemstone
+			|| item?.cookedTier != null;
+		return !!item?.name
+			&& !!source
+			&& source.toLowerCase() !== "custom"
+			&& !item?._isCustom
+			&& !isDerived;
+	}
+
+	/**
+	 * Build a self-contained inline-hover entry from an inventory item's own data.
+	 * This is intentionally independent of the item catalog so custom and imported
+	 * source-less items always have a useful preview.
+	 * @param {*} item
+	 * @returns {{type: string, name: string, entries: Array}|null}
+	 */
+	static buildItemInlineHoverEntry (/** @type {*} */ item) {
+		if (!item?.name) return null;
+
+		const entries = [];
+		const summary = [];
+		const toLabel = (value) => {
+			if (value == null || value === "") return "";
+			if (typeof value === "object") return value.name || value.full || value.type || value.property || "";
+			return String(value);
+		};
+		const list = (values) => (Array.isArray(values) ? values : values != null ? [values] : [])
+			.map(toLabel)
+			.filter(Boolean)
+			.join(", ");
+		const addLine = (label, value) => {
+			if (value == null || value === "") return;
+			entries.push(`{@b ${label}:} ${value}`);
+		};
+		const formatBonus = (value) => {
+			if (value == null || value === "" || Number(value) === 0) return "";
+			const num = Number(value);
+			return Number.isFinite(num) && num > 0 ? `+${num}` : String(value);
+		};
+
+		if (item.type) summary.push(toLabel(item.type));
+		if (item.rarity && !["none", "unknown"].includes(String(item.rarity).toLowerCase())) summary.push(String(item.rarity));
+		if (item.requiresAttunement || item.reqAttune) summary.push("requires attunement");
+		if (summary.length) entries.push(`{@i ${summary.join(", ")}}`);
+
+		let valueText = item.value != null ? `${item.value} cp` : "";
+		let weightText = item.weight != null ? `${item.weight} lb.` : "";
+		try {
+			valueText = Parser.itemValueToFullMultiCurrency?.(item) || valueText;
+			weightText = Parser.itemWeightToFull?.(item) || weightText;
+		} catch (e) { /* use the raw-value fallback */ }
+		addLine("Value", valueText);
+		addLine("Weight", weightText);
+
+		const damage = item.damage || item.dmg1;
+		const damageType = toLabel(item.dmgType);
+		addLine("Damage", damage ? `${damage}${damageType ? ` ${damageType}` : ""}` : "");
+		addLine("Properties", list(item.properties || item.property));
+		addLine("Mastery", list(item.mastery));
+
+		const armorParts = [];
+		if (item.armorType) armorParts.push(toLabel(item.armorType));
+		if (item.ac != null) armorParts.push(`AC ${item.ac}`);
+		if (item.dexterityMax != null) armorParts.push(`Dexterity maximum ${item.dexterityMax}`);
+		if (item.strength != null) armorParts.push(`Strength ${item.strength}`);
+		if (item.stealth) armorParts.push("Stealth disadvantage");
+		addLine("Armor", armorParts.join(", "));
+
+		if (item.charges != null) {
+			const current = item.chargesCurrent ?? item.charges;
+			addLine("Charges", `${current}/${item.charges}${item.recharge ? `; recharges ${item.recharge}` : ""}`);
+		}
+
+		const bonuses = [
+			["AC", item.bonusAc],
+			["weapon", item.bonusWeapon],
+			["weapon attacks", item.bonusWeaponAttack],
+			["weapon damage", item.bonusWeaponDamage],
+			["spell attacks", item.bonusSpellAttack],
+			["spell save DC", item.bonusSpellSaveDc],
+			["saving throws", item.bonusSavingThrow],
+			["ability checks", item.bonusAbilityCheck],
+		]
+			.map(([label, value]) => {
+				const bonus = formatBonus(value);
+				return bonus ? `${bonus} ${label}` : "";
+			})
+			.filter(Boolean);
+		addLine("Bonuses", bonuses.join(", "));
+
+		addLine("Resistance", list(item.resist));
+		addLine("Immunity", list(item.immune));
+		addLine("Vulnerability", list(item.vulnerable));
+		addLine("Condition Immunity", list(item.conditionImmune));
+
+		const senses = Object.entries(item.senses || {})
+			.filter(([, value]) => value != null && value !== "" && Number(value) !== 0)
+			.map(([sense, value]) => `${sense} ${value} ft.`);
+		addLine("Senses", senses.join(", "));
+
+		if (Array.isArray(item.entries)) entries.push(...item.entries);
+		else if (item.entries) entries.push(String(item.entries));
+
+		for (const power of item.itemPowers || []) {
+			const powerEntries = [];
+			if (power.description) powerEntries.push(power.description);
+			if (power.chargesCost) powerEntries.push(`{@b Cost:} ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}`);
+			if (power.usesMax) powerEntries.push(`{@b Uses:} ${power.usesMax}`);
+			if (powerEntries.length) entries.push({type: "entries", name: power.name || "Item Power", entries: powerEntries});
+		}
+
+		if (!entries.length) entries.push(item._isCustom || String(item.source || "").toLowerCase() === "custom" ? "Custom item." : "Item details are stored on this character.");
+
+		// Inline entry strings are rendered as HTML. Custom/imported item data is
+		// save-file input, so escape raw markup recursively while leaving 5etools
+		// `{@tag ...}` syntax intact for the Renderer.
+		const isSafeExternalUrl = (url) => {
+			const clean = String(url || "").trim();
+			const normalized = [...clean]
+				.filter(char => {
+					const code = char.charCodeAt(0);
+					return code > 0x20 && code !== 0x7f;
+				})
+				.join("");
+			if (!normalized) return false;
+			if (!/^[a-zA-Z]+:/.test(normalized)) return true;
+			try {
+				return ["http:", "https:", "mailto:"].includes(new URL(normalized).protocol.toLowerCase());
+			} catch (e) {
+				return false;
+			}
+		};
+		const isSafeInternalPath = (path) => {
+			const clean = String(path || "").trim();
+			return !!clean
+				&& !/^[a-zA-Z]+:/.test(clean)
+				&& !clean.startsWith("//")
+				&& !clean.includes("\\")
+				&& /^[a-zA-Z0-9][a-zA-Z0-9/_-]*\.html$/i.test(clean);
+		};
+		const sanitizeLinkTags = (str) => String(str)
+			.replace(
+				/\{@link\s+([^|}]+)(?:\|([^}]+))?\}/gi,
+				(match, displayText, url) => isSafeExternalUrl(url ?? displayText) ? match : displayText,
+			)
+			.replace(
+				/\{@(?:5etools|5etoolsImg)\s+([^|}]+)\|([^|}]+)(?:\|[^}]*)?\}/gi,
+				(match, displayText, path) => isSafeInternalPath(path) ? match : displayText,
+			);
+		const escapeEntry = (value) => {
+			if (typeof value === "string") return CharacterSheetClassUtils.escapeHtml(sanitizeLinkTags(value));
+			if (Array.isArray(value)) return value.map(escapeEntry);
+			if (value && typeof value === "object") {
+				if (value.type === "link" && value.href?.type === "external" && !isSafeExternalUrl(value.href.url)) {
+					return escapeEntry(value.text || value.href.url || "");
+				}
+				if (value.type === "link" && value.href?.type === "internal" && !isSafeInternalPath(value.href.path)) {
+					return escapeEntry(value.text || value.href.path || "");
+				}
+				if (["image", "gallery"].includes(value.type)) return escapeEntry(value.title || value.altText || "");
+				return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, escapeEntry(child)]));
+			}
+			return value;
+		};
+		return {
+			type: "entries",
+			name: CharacterSheetClassUtils.escapeHtml(item.name),
+			entries: entries.map(escapeEntry),
+		};
+	}
+
+	/**
+	 * Build safe item-name HTML. Catalog items use the normal statblock hover;
+	 * custom/source-less items use their own inline data.
+	 * @param {*} item
+	 * @param {*} [opts]
+	 * @returns {string}
+	 */
+	static buildItemHoverNameHtml (/** @type {*} */ item, {displayLabel = null} = {}) {
+		const label = displayLabel ?? item?.name ?? "Item";
+		const safeLabel = CharacterSheetClassUtils.escapeHtml(label);
+		if (!item?.name) return safeLabel;
+
+		if (CharacterSheetClassUtils.isCatalogItemHoverTarget(item)
+			&& typeof Renderer !== "undefined"
+			&& Renderer.hover?.getHoverElementAttributes
+			&& typeof UrlUtil !== "undefined") {
+			try {
+				const separator = typeof HASH_LIST_SEP !== "undefined" ? HASH_LIST_SEP : "_";
+				const hash = UrlUtil.encodeForHash([item.name, item.source].join(separator));
+				const page = UrlUtil.PG_ITEMS || "items.html";
+				const hoverAttrs = Renderer.hover.getHoverElementAttributes({page, source: item.source, hash});
+				return `<a href="${page}#${hash}" ${hoverAttrs} target="_blank" rel="noopener noreferrer">${safeLabel}</a>`;
+			} catch (e) { /* fall through to inline/plain */ }
+		}
+
+		const entry = CharacterSheetClassUtils.buildItemInlineHoverEntry(item);
+		const inline = entry
+			? CharacterSheetClassUtils.buildInlineEntriesHoverLink(label, entry.name, entry.entries)
+			: null;
+		return inline || safeLabel;
+	}
+
+	/**
+	 * Wire an existing element to the same item hover used by item-name HTML.
+	 * @param {HTMLElement} element
+	 * @param {*} item
+	 * @returns {{isInlineHover?: boolean, page?: string, source?: string, hash?: string, entry?: object}|null}
+	 */
+	static applyItemHoverPreview (/** @type {*} */ element, /** @type {*} */ item) {
+		if (!element || !item?.name || typeof Renderer === "undefined" || !Renderer.hover) return null;
+		element.classList?.add("charsheet__item-power--has-preview");
+
+		if (CharacterSheetClassUtils.isCatalogItemHoverTarget(item)
+			&& typeof Renderer.hover.pHandleLinkMouseOver === "function") {
+			try {
+				const page = UrlUtil.PG_ITEMS || "items.html";
+				const separator = typeof HASH_LIST_SEP !== "undefined" ? HASH_LIST_SEP : "_";
+				const hash = UrlUtil.encodeForHash([item.name, item.source].join(separator));
+				element.setAttribute("data-vet-page", page);
+				element.setAttribute("data-vet-source", item.source);
+				element.setAttribute("data-vet-hash", hash);
+				element.addEventListener?.("mouseover", event => Renderer.hover.pHandleLinkMouseOver(event, element));
+				if (typeof Renderer.hover.handleLinkMouseMove === "function") element.addEventListener?.("mousemove", event => Renderer.hover.handleLinkMouseMove(event, element));
+				if (typeof Renderer.hover.handleLinkMouseLeave === "function") element.addEventListener?.("mouseleave", event => Renderer.hover.handleLinkMouseLeave(event, element));
+				return {page, source: item.source, hash};
+			} catch (e) { /* fall through to inline */ }
+		}
+
+		if (typeof Renderer.hover.handleInlineMouseOver !== "function") return null;
+		const entry = CharacterSheetClassUtils.buildItemInlineHoverEntry(item);
+		if (!entry) return null;
+		element.setAttribute("data-vet-entry", JSON.stringify(entry));
+		element.addEventListener?.("mouseover", event => Renderer.hover.handleInlineMouseOver(event, element, entry));
+		if (typeof Renderer.hover.handleLinkMouseMove === "function") element.addEventListener?.("mousemove", event => Renderer.hover.handleLinkMouseMove(event, element));
+		if (typeof Renderer.hover.handleLinkMouseLeave === "function") element.addEventListener?.("mouseleave", event => Renderer.hover.handleLinkMouseLeave(event, element));
+		return {isInlineHover: true, entry};
+	}
+
+	/**
 	 * Add an accessible preview to an item-power row so its hover matches what the
 	 * Inventory shows. Spell powers use the canonical 5etools spell statblock hover.
 	 * Non-spell powers (abilities, toggles, on-hit riders, reference-only rows) have
@@ -973,60 +1223,20 @@ class CharacterSheetClassUtils {
 			}
 		}
 
-		// Non-spell powers have no catalog page of their own, so — exactly like the
-		// Inventory item name — hover the parent item's statblock. This keeps the
-		// invoke modal's hover identical to the Inventory instead of a bespoke card.
-		const itemSource = power.itemSource;
-		if (power.itemName && itemSource && itemSource !== "Custom"
-			&& typeof Renderer.hover.pHandleLinkMouseOver === "function") {
-			try {
-				const page = UrlUtil.PG_ITEMS || "items.html";
-				const separator = typeof HASH_LIST_SEP !== "undefined" ? HASH_LIST_SEP : "_";
-				const hash = UrlUtil.encodeForHash([power.itemName, itemSource].join(separator));
-				element.setAttribute("data-vet-page", page);
-				element.setAttribute("data-vet-source", itemSource);
-				element.setAttribute("data-vet-hash", hash);
-				element.addEventListener?.("mouseover", event => Renderer.hover.pHandleLinkMouseOver(event, element));
-				if (typeof Renderer.hover.handleLinkMouseMove === "function") {
-					element.addEventListener?.("mousemove", event => Renderer.hover.handleLinkMouseMove(event, element));
-				}
-				if (typeof Renderer.hover.handleLinkMouseLeave === "function") {
-					element.addEventListener?.("mouseleave", event => Renderer.hover.handleLinkMouseLeave(event, element));
-				}
-				return {isSpell, title, page, source: itemSource, hash};
-			} catch (e) {
-				// Fall through to the inline-entries card below.
-			}
-		}
-
-		// Custom / source-less items have no catalog entry (the Inventory shows a
-		// plain name there too); build a rich inline-entries hover from the power's
-		// own description so the ability still previews what it does.
-		if (typeof Renderer.hover.handleInlineMouseOver !== "function") return {isSpell, title};
-		try {
-			const metaLines = [];
-			if (power.chargesCost) metaLines.push(`{@b Cost:} ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}`);
-			if (power.usesMax) metaLines.push(`{@b Uses:} ${power.usesCurrent ?? power.usesMax}/${power.usesMax}`);
-			if (castLevel) metaLines.push(`{@b ${castLevel}.}`);
-			if (power.isDestructive) metaLines.push(`{@b Destroys ${power.itemName || "the item"} when used.}`);
-			if (power.isReferenceOnly) metaLines.push(`{@i Rules reference — apply this effect manually.}`);
-			const entry = {
-				type: "entries",
-				name: power.name || power.itemName || "Item Power",
-				entries: [description, ...metaLines],
-			};
-			element.setAttribute("data-vet-entry", JSON.stringify(entry));
-			element.addEventListener?.("mouseover", event => Renderer.hover.handleInlineMouseOver(event, element, entry));
-			if (typeof Renderer.hover.handleLinkMouseMove === "function") {
-				element.addEventListener?.("mousemove", event => Renderer.hover.handleLinkMouseMove(event, element));
-			}
-			if (typeof Renderer.hover.handleLinkMouseLeave === "function") {
-				element.addEventListener?.("mouseleave", event => Renderer.hover.handleLinkMouseLeave(event, element));
-			}
-			return {isSpell, title, isInlineHover: true};
-		} catch (e) {
-			return {isSpell, title};
-		}
+		const fallbackEntries = [description];
+		if (power.chargesCost) fallbackEntries.push(`{@b Cost:} ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}`);
+		if (power.usesMax) fallbackEntries.push(`{@b Uses:} ${power.usesCurrent ?? power.usesMax}/${power.usesMax}`);
+		if (castLevel) fallbackEntries.push(`{@b ${castLevel}.}`);
+		if (power.isDestructive) fallbackEntries.push(`{@b Destroys ${power.itemName || "the item"} when used.}`);
+		if (power.isReferenceOnly) fallbackEntries.push(`{@i Rules reference — apply this effect manually.}`);
+		const item = power.itemHoverData || {
+			name: power.itemName || power.name || "Item Power",
+			source: power.itemSource,
+			_isCustom: power.itemSource === "Custom" || !power.itemSource,
+			entries: fallbackEntries,
+		};
+		const preview = CharacterSheetClassUtils.applyItemHoverPreview(element, item);
+		return preview ? {isSpell, title, ...preview} : {isSpell, title};
 	}
 
 	/**

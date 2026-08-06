@@ -7539,10 +7539,7 @@ class CharacterSheetPage {
 				case "item": {
 					// Inventory entries wrap the underlying item under `entity.item`.
 					const itm = entity?.item || entity;
-					const itemName = itm?.name || entity?.name || name;
-					const itemSource = itm?.source || entity?.source;
-					if (!itemSource) return escaped;
-					return this.getHoverLink(UrlUtil.PG_ITEMS, itemName, itemSource, null, escaped);
+					return CharacterSheetClassUtils.buildItemHoverNameHtml(itm, {displayLabel: name});
 				}
 				case "feat": {
 					if (!entity?.source) return escaped;
@@ -10918,6 +10915,7 @@ class CharacterSheetPage {
 					properties: props,
 					mastery: weapon.mastery || [],
 					isMonkWeapon: !!isMonkWeapon,
+					sourceItem: weapon,
 				};
 				attacks.push(autoAttack);
 			}
@@ -10972,17 +10970,7 @@ class CharacterSheetPage {
 			}
 			const propsStr = propAbbrs.length ? `[${propAbbrs.join(", ")}]` : "";
 
-			// Create hoverable weapon name
-			let attackNameHtml = attack.name;
-			if (attack.source) {
-				try {
-					const hash = UrlUtil.encodeForHash([attack.name, attack.source].join(HASH_LIST_SEP));
-					const hoverAttrs = Renderer.hover.getHoverElementAttributes({page: UrlUtil.PG_ITEMS, source: attack.source, hash: hash});
-					attackNameHtml = `<a href="${UrlUtil.PG_ITEMS}#${hash}" ${hoverAttrs}>${attack.name}</a>`;
-				} catch (e) {
-					// Fall back to plain name
-				}
-			}
+			const attackNameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(attack.sourceItem || attack);
 
 			const monkBadge = attack.isMonkWeapon ? ` <span class="badge badge-warning" title="Monk Weapon">Monk</span>` : "";
 
@@ -15710,7 +15698,9 @@ class CharacterSheetPage {
 			// plain (non-hover) name instead. Items are the only custom-source
 			// entities the sheet emits links for; scope the guard to PG_ITEMS so
 			// other entity hovers are untouched.
-			if (source === "Custom" && page === UrlUtil.PG_ITEMS) return displayName || name;
+			if (page === UrlUtil.PG_ITEMS && (!source || String(source).toLowerCase() === "custom")) {
+				return displayName || CharacterSheetClassUtils.escapeHtml(name);
+			}
 
 			const finalHash = hash || UrlUtil.encodeForHash([name, source].join(HASH_LIST_SEP));
 			const hoverAttrs = Renderer.hover.getHoverElementAttributes({page, source, hash: finalHash});

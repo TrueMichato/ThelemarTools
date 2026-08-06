@@ -1077,6 +1077,93 @@ describe("Item-power hover previews", () => {
 		expect(globalThis.Renderer.hover.handleInlineMouseOver).not.toHaveBeenCalled();
 	});
 
+	it.each([
+		[{name: "Custom Blade", source: "Custom", _isCustom: true, damage: "1d8 slashing", entries: ["A bespoke weapon."]}, "Custom"],
+		[{name: "Source-less Blade", source: "", damage: "1d6 force"}, "empty"],
+		[{name: "Imported Blade", damage: "1d4 radiant"}, "undefined"],
+		[{name: "Brew-labelled Custom Blade", source: "MYBREW", _isCustom: true, bonusWeapon: 1}, "homebrew custom"],
+	])("wires a %s item to inline data without a catalog mouseover", (item) => {
+		const onCatalogMouseOver = jest.fn();
+		const onInlineMouseOver = jest.fn();
+		globalThis.Renderer.hover = {
+			pHandleLinkMouseOver: onCatalogMouseOver,
+			handleInlineMouseOver: onInlineMouseOver,
+			handleLinkMouseMove: jest.fn(),
+			handleLinkMouseLeave: jest.fn(),
+		};
+		const element = makePreviewElement("span");
+
+		const preview = CharacterSheetClassUtils.applyItemHoverPreview(element, item);
+
+		expect(preview).toMatchObject({isInlineHover: true});
+		expect(element.getAttribute("data-vet-entry")).toBeDefined();
+		expect(element.getAttribute("data-vet-page")).toBeUndefined();
+		expect(element.getAttribute("data-vet-source")).toBeUndefined();
+		element.listeners.get("mouseover")({type: "mouseover"});
+		expect(onInlineMouseOver).toHaveBeenCalledWith(expect.any(Object), element, preview.entry);
+		expect(onCatalogMouseOver).not.toHaveBeenCalled();
+	});
+
+	it("wires a real catalog item to the item statblock hover", () => {
+		const onCatalogMouseOver = jest.fn();
+		globalThis.UrlUtil.PG_ITEMS = "items.html";
+		globalThis.UrlUtil.encodeForHash = jest.fn(value => String(value).toLowerCase().replace(/\s+/g, "-"));
+		globalThis.Renderer.hover = {
+			pHandleLinkMouseOver: onCatalogMouseOver,
+			handleInlineMouseOver: jest.fn(),
+			handleLinkMouseMove: jest.fn(),
+			handleLinkMouseLeave: jest.fn(),
+		};
+		const element = makePreviewElement("span");
+
+		const preview = CharacterSheetClassUtils.applyItemHoverPreview(element, {name: "Longsword", source: "PHB"});
+
+		expect(preview).toMatchObject({page: "items.html", source: "PHB"});
+		expect(element.getAttribute("data-vet-page")).toBe("items.html");
+		expect(element.getAttribute("data-vet-entry")).toBeUndefined();
+		element.listeners.get("mouseover")({type: "mouseover"});
+		expect(onCatalogMouseOver).toHaveBeenCalledWith(expect.any(Object), element);
+		expect(globalThis.Renderer.hover.handleInlineMouseOver).not.toHaveBeenCalled();
+	});
+
+	it("uses the parent custom item's full data for invoke-row hovers", () => {
+		const state = new CharacterSheetState();
+		state.addItem({
+			name: "Stormglass Blade",
+			source: "Custom",
+			_isCustom: true,
+			damage: "1d8 lightning",
+			resist: ["lightning"],
+			entries: ["The blade hums before a storm."],
+			itemPowers: [{
+				id: "storm-burst",
+				name: "Storm Burst",
+				kind: "ability",
+				description: "Release the stored storm.",
+				isReferenceOnly: true,
+			}],
+		});
+		const power = state.getItemPowers()[0];
+		const onCatalogMouseOver = jest.fn();
+		globalThis.Renderer.hover = {
+			pHandleLinkMouseOver: onCatalogMouseOver,
+			handleInlineMouseOver: jest.fn(),
+			handleLinkMouseMove: jest.fn(),
+			handleLinkMouseLeave: jest.fn(),
+		};
+		const element = makePreviewElement("button");
+
+		const preview = CharacterSheetClassUtils.applyItemPowerPreview(element, power);
+
+		expect(power.itemHoverData).toMatchObject({name: "Stormglass Blade", _isCustom: true});
+		expect(preview).toMatchObject({isInlineHover: true});
+		const entry = JSON.parse(element.getAttribute("data-vet-entry"));
+		expect(entry.name).toBe("Stormglass Blade");
+		expect(JSON.stringify(entry.entries)).toContain("1d8 lightning");
+		expect(JSON.stringify(entry.entries)).toContain("The blade hums before a storm.");
+		expect(onCatalogMouseOver).not.toHaveBeenCalled();
+	});
+
 	it("wires non-spell ability rows on source-less items to a rich inline-entries hover", () => {
 		const onInlineMouseOver = jest.fn();
 		globalThis.Renderer.hover = {
@@ -1100,7 +1187,7 @@ describe("Item-power hover previews", () => {
 		expect(element.getAttribute("data-vet-page")).toBeUndefined();
 		// The rich inline hover carries the ability's own description + resource meta.
 		const entry = JSON.parse(element.getAttribute("data-vet-entry"));
-		expect(entry).toMatchObject({type: "entries", name: "Blinding Radiance"});
+		expect(entry).toMatchObject({type: "entries", name: "Gae Bolg"});
 		expect(entry.entries[0]).toBe(description);
 		expect(entry.entries.join(" ")).toContain("2 charges");
 		expect(entry.entries.join(" ")).toContain("Rules reference");

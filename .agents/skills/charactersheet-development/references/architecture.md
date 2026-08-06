@@ -301,6 +301,20 @@ the `cbClose` composition.
 | NpcExporter | State | Read-only conversion to monster format |
 | Features | State | getFeatureCalculations(), resource tracking |
 
+### Item Hover Routing
+
+All character-sheet item names route through `CharacterSheetClassUtils.buildItemHoverNameHtml`.
+Real catalog items (including catalog-backed homebrew items) use the standard `items.html`
+statblock hover. Items marked `_isCustom`, items with source `Custom`, and source-less imported
+items instead use a self-contained inline `entries` hover built by
+`buildItemInlineHoverEntry`; they must never receive `data-vet-page="items.html"` or dispatch
+`Renderer.hover.pHandleLinkMouseOver`, because no matching DataLoader entity exists.
+Generated crafting materials, crafted stubs, cooked dishes, and empowered gemstones follow the
+same inline route even when they retain a book source. Inline save-data entries are HTML-escaped,
+and external/internal renderer links are protocol/path allowlisted before rendering.
+`applyItemHoverPreview` provides the equivalent DOM wiring for item-power rows and other
+already-created elements.
+
 ## Parsers (in charactersheet-state.js)
 
 Four parser classes extract mechanical data from feature description text:

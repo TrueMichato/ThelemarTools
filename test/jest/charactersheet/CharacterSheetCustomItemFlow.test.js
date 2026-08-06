@@ -34,9 +34,11 @@ if (typeof globalThis.CharacterSheetUpgrades === "undefined") {
 	};
 }
 
+import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-inventory.js";
 
+const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetInventory = globalThis.CharacterSheetInventory;
 
@@ -97,6 +99,87 @@ describe("Custom-item builder + aggregation (Bug #2 ↔ #1)", () => {
 
 		const built3 = inv._buildCustomItem("Empty", 1, 0, {type: "gear"});
 		expect(built3.entries).toBeUndefined();
+	});
+});
+
+describe("Custom-item inline hover data", () => {
+	test("builds a rich entry from the custom item's own structured fields", () => {
+		const item = {
+			name: "Stormglass Blade",
+			source: "Custom",
+			_isCustom: true,
+			type: "weapon",
+			rarity: "rare",
+			weight: 3,
+			value: 2500,
+			damage: "1d8 lightning",
+			property: ["Finesse"],
+			mastery: ["Vex"],
+			charges: 4,
+			chargesCurrent: 2,
+			recharge: "dawn",
+			bonusWeapon: 1,
+			resist: ["lightning"],
+			senses: {darkvision: 60},
+			entries: ["The blade hums before a storm."],
+		};
+
+		expect(CharacterSheetClassUtils.isCatalogItemHoverTarget(item)).toBe(false);
+		const entry = CharacterSheetClassUtils.buildItemInlineHoverEntry(item);
+		expect(entry).toMatchObject({type: "entries", name: "Stormglass Blade"});
+		const text = JSON.stringify(entry.entries);
+		expect(text).toContain("1d8 lightning");
+		expect(text).toContain("2/4");
+		expect(text).toContain("lightning");
+		expect(text).toContain("darkvision 60 ft.");
+		expect(text).toContain("The blade hums before a storm.");
+	});
+
+	test.each([
+		[{name: "Source-less Relic", source: ""}, "empty source"],
+		[{name: "Imported Relic"}, "undefined source"],
+		[{name: "Edited Brew Relic", source: "MYBREW", _isCustom: true}, "homebrew-labelled custom item"],
+	])("treats %s as non-catalog (%s)", (item) => {
+		expect(CharacterSheetClassUtils.isCatalogItemHoverTarget(item)).toBe(false);
+		expect(CharacterSheetClassUtils.buildItemInlineHoverEntry(item)).toMatchObject({name: item.name});
+	});
+
+	test("keeps a real catalog item on the catalog route", () => {
+		expect(CharacterSheetClassUtils.isCatalogItemHoverTarget({name: "Longsword", source: "PHB"})).toBe(true);
+	});
+
+	test.each([
+		{name: "Dragon Stew (Critical Success)", source: "AR11", cookedTier: "criticalSuccess"},
+		{name: "Empowered Ruby", source: "TGTT", _isEmpoweredGemstone: true},
+		{name: "Aboleth Eye", source: "HHH", _isCraftingMaterial: true},
+		{name: "Basilisk Salve", source: "HHH", _isCraftedItem: true},
+	])("keeps generated non-catalog items on the inline route", (item) => {
+		expect(CharacterSheetClassUtils.isCatalogItemHoverTarget(item)).toBe(false);
+	});
+
+	test("escapes raw custom HTML and unsafe links while preserving safe 5etools tags", () => {
+		const entry = CharacterSheetClassUtils.buildItemInlineHoverEntry({
+			name: "<img src=x onerror=alert(1)>",
+			source: "Custom",
+			_isCustom: true,
+			entries: [
+				"<img src=x onerror=alert(1)> {@b Safe tag} {@link Docs|https://example.com} {@link Bad|javascript:alert(1)} {@5etools Items|items.html} {@5etools Bad internal|javascript:alert(3)}",
+				{type: "link", href: {type: "external", url: "javascript:alert(2)"}, text: "Bad object link"},
+				{type: "link", href: {type: "external", url: "java\nscript:alert(5)"}, text: "Obfuscated bad link"},
+				{type: "link", href: {type: "internal", path: "javascript:alert(4)"}, text: "Bad internal object link"},
+			],
+		});
+
+		expect(entry.name).toBe("&lt;img src=x onerror=alert(1)&gt;");
+		expect(entry.entries.join(" ")).not.toContain("<img");
+		expect(entry.entries.join(" ")).toContain("&lt;img");
+		expect(entry.entries.join(" ")).toContain("{@b Safe tag}");
+		expect(entry.entries.join(" ")).toContain("{@link Docs|https://example.com}");
+		expect(entry.entries.join(" ")).toContain("{@5etools Items|items.html}");
+		expect(entry.entries.join(" ")).not.toContain("javascript:");
+		expect(entry.entries.join(" ")).not.toContain("java\nscript:");
+		expect(entry.entries.join(" ")).toContain("Bad object link");
+		expect(entry.entries.join(" ")).toContain("Bad internal object link");
 	});
 });
 

@@ -1494,13 +1494,7 @@ class CharacterSheetRespec {
 
 				// Add hover link for the weapon name
 				const weaponNameEl = label.querySelector(".respec-weapon-name");
-				try {
-					const weaponLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEMS, weapon.name, weapon.source);
-					if (typeof weaponLink === "string") weaponNameEl.innerHTML = weaponLink;
-					else weaponNameEl.append(weaponLink);
-				} catch (e) {
-					weaponNameEl.textContent = weapon.name;
-				}
+				weaponNameEl.innerHTML = CharacterSheetClassUtils.buildItemHoverNameHtml(weapon);
 
 				label.querySelector("input").addEventListener("change", (evt) => {
 					if (evt.target.checked) {
@@ -1761,6 +1755,10 @@ class CharacterSheetRespec {
 	static _setHoverLink (el, page, name, source, hash = null, displayName = null) {
 		if (!name) { el.textContent = "Unknown"; return; }
 		try {
+			if (page === UrlUtil.PG_ITEMS) {
+				el.innerHTML = CharacterSheetClassUtils.buildItemHoverNameHtml({name, source}, {displayLabel: displayName || name});
+				return;
+			}
 			const link = CharacterSheetPage.getHoverLink(page, name, source, hash, displayName);
 			if (typeof link === "string") el.innerHTML = link;
 			else el.append(link);

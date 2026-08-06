@@ -1413,6 +1413,7 @@ class CharacterSheetCrafting {
 		this._state.addItem(real ? {...real} : {
 			name: recipe.name,
 			source: recipe.source,
+			_isCraftedItem: true,
 			type: "G",
 			rarity: recipe.rarity || "unknown",
 			entries: recipe.entries || [],
