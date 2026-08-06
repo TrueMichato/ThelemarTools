@@ -40,6 +40,8 @@
 		"test:e2e:ui": "npx playwright test --ui",
 		"test:e2e:debug": "npx playwright test --debug",
 		"test:e2e:report": "npx playwright show-report",
+		"perf": "node scripts/perf/measure.mjs",
+		"perf:local": "node scripts/perf/measure.mjs --serve",
 		"test:tgtt-party": "node --localstorage-file test/localstorage.tmp --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern='CharacterSheetTGTT(Bladesinger|MercyMonk|DivineSoul|Hexblade|HunterRanger|ArcaneArcher|ZodiacDruid|Multiclass)' --no-coverage",
 		"test:tgtt-party:e2e": "npx playwright test --grep 'TGTT'",
 		"test": "npm run test:js && npm run test:unit && npm run test:css && npm run test:data",
