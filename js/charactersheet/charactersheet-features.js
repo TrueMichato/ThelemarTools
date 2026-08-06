@@ -2448,15 +2448,7 @@ class CharacterSheetFeatures {
 			}
 		}
 
-		const effectiveAbility = CharacterSheetClassUtils.getEffectiveFeatAbility(feat);
-		if (effectiveAbility) {
-			for (const ab of effectiveAbility) {
-				if (ab.choose) {
-					choices.ability = {count: ab.choose.count || 1, amount: ab.choose.amount || 1, from: ab.choose.from || Parser.ABIL_ABVS};
-					break;
-				}
-			}
-		}
+		choices.ability = CharacterSheetClassUtils.buildFeatChoicesSpec(feat).ability;
 
 		const featOptSpecs = CharacterSheetClassUtils.getFeatOptionalFeatureChoiceSpec(feat);
 		if (featOptSpecs?.length) {

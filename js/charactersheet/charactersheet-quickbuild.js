@@ -1788,19 +1788,7 @@ class CharacterSheetQuickBuild {
 
 			// Check ability choices (effective array also covers uncategorized
 			// feats that default to General → +1 ASI of the player's choice)
-			const effectiveAbility = CharacterSheetClassUtils.getEffectiveFeatAbility(feat);
-			if (effectiveAbility) {
-				for (const ab of effectiveAbility) {
-					if (ab.choose) {
-						choices.ability = {
-							count: ab.choose.count || 1,
-							amount: ab.choose.amount || 1,
-							from: ab.choose.from || Parser.ABIL_ABVS,
-						};
-						break;
-					}
-				}
-			}
+			choices.ability = CharacterSheetClassUtils.buildFeatChoicesSpec(feat).ability;
 
 			const featOptSpecs = CharacterSheetClassUtils.getFeatOptionalFeatureChoiceSpec(feat);
 			if (featOptSpecs?.length) {
@@ -2403,6 +2391,13 @@ class CharacterSheetQuickBuild {
 			} else if (sel.mode === "feat") {
 				if (!sel.feat) {
 					JqueryUtil.doToast({type: "warning", content: `Please select a feat for ${analysis.className} level ${analysis.classLevel}.`});
+					return false;
+				}
+			}
+			if (sel.feat) {
+				const selectedFeat = {...sel.feat, _featChoices: sel.featChoices};
+				if (!CharacterSheetClassUtils.isFeatChoiceSpecComplete(selectedFeat, null, {state: this._state, page: this._page})) {
+					JqueryUtil.doToast({type: "warning", content: `Please complete all choices for ${sel.feat.name}.`});
 					return false;
 				}
 			}

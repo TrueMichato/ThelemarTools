@@ -97,6 +97,21 @@ describe("Epic Boons — Ability Score Max Override", () => {
 			expect(mockBoon.ability[0].choose.from).toContain("str");
 		});
 
+		it("propagates max 30 into the shared picker choice spec", () => {
+			const boon = {
+				name: "Boon of Combat Prowess",
+				source: "XPHB",
+				category: "EB",
+				ability: [{choose: {from: ["str", "dex", "con", "int", "wis", "cha"]}, max: 30}],
+			};
+			expect(globalThis.CharacterSheetClassUtils.buildFeatChoicesSpec(boon).ability).toEqual({
+				count: 1,
+				amount: 1,
+				from: ["str", "dex", "con", "int", "wis", "cha"],
+				max: 30,
+			});
+		});
+
 		it("should handle fixed ability bonuses with max 30", () => {
 			// Some boons have fixed ability bonuses like {str: 1, max: 30}
 			const mockBoon = {
@@ -116,17 +131,12 @@ describe("Epic Boons — Ability Score Max Override", () => {
 		});
 
 		it("should handle choose-based ability bonuses with max 30", () => {
-			// Most boons have {choose: {from: [...]}, max: 30}
 			const mockBoon = {
 				ability: [{choose: {from: ["str", "dex", "con", "int", "wis", "cha"]}, max: 30}],
-				_epicBoonAbilityChoice: {ability: "cha", amount: 1, max: 30},
 			};
 
-			// Simulate applying the choice
 			state.setAbilityBase("cha", 20);
-			const {ability, amount, max} = mockBoon._epicBoonAbilityChoice;
-			const current = state.getAbilityBase(ability);
-			state.setAbilityBase(ability, Math.min(max, current + amount));
+			globalThis.CharacterSheetClassUtils.applyFeatBonuses(state, mockBoon, {ability: "cha"});
 			expect(state.getAbilityBase("cha")).toBe(21);
 		});
 	});
@@ -264,15 +274,14 @@ describe("Boon of Skill — Skill Proficiencies and Expertise", () => {
 		it("should allow ability score to exceed 20 with Boon of Skill", () => {
 			state.setAbilityBase("dex", 20);
 
-			// Simulate applying +1 with max 30
-			globalThis.CharacterSheetClassUtils.applyFeatBonuses(state, {
-				...BOON_OF_SKILL_DATA,
-				_epicBoonAbilityChoice: {ability: "dex", amount: 1, max: 30},
-			}, {});
-
-			// Note: The ability bonus is applied through the ability array processing
-			// with _epicBoonAbilityChoice for chosen abilities
+			globalThis.CharacterSheetClassUtils.applyFeatBonuses(state, BOON_OF_SKILL_DATA, {ability: "dex"});
 			expect(state.getAbilityBase("dex")).toBe(21);
+		});
+
+		it("should cap a chosen Epic Boon ability at 30", () => {
+			state.setAbilityBase("dex", 30);
+			globalThis.CharacterSheetClassUtils.applyFeatBonuses(state, BOON_OF_SKILL_DATA, {ability: "dex"});
+			expect(state.getAbilityBase("dex")).toBe(30);
 		});
 	});
 });
@@ -353,11 +362,10 @@ describe("Epic Boon — Immunity Application via applyFeatBonuses", () => {
 			category: "EB",
 			immune: ["radiant"],
 			ability: [{choose: {from: ["str", "dex", "con", "int", "wis", "cha"]}, max: 30}],
-			_epicBoonAbilityChoice: {ability: "cha", amount: 1, max: 30},
 		};
 
 		state.setAbilityBase("cha", 20);
-		ClassUtils.applyFeatBonuses(state, boon, {});
+		ClassUtils.applyFeatBonuses(state, boon, {ability: "cha"});
 
 		// Check immunity applied
 		const immunities = state.getImmunities?.() || state._data?.immunities || [];

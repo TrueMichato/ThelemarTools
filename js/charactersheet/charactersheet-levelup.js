@@ -1259,6 +1259,13 @@ class CharacterSheetLevelUp {
 					return;
 				}
 			}
+			if (selectedFeat && !CharacterSheetClassUtils.isFeatChoiceSpecComplete(selectedFeat, null, {state: this._state, page: this._page})) {
+				JqueryUtil.doToast({type: "warning", content: `Please complete all choices for ${selectedFeat.name}.`});
+				const el = accordions.asi.el;
+				el.classList.add("expanded");
+				el.scrollIntoView({behavior: "smooth"});
+				return;
+			}
 
 			for (const gain of optionalFeatureGains) {
 				const featureKey = gain.featureTypes.join("_");
@@ -2126,10 +2133,8 @@ class CharacterSheetLevelUp {
 
 						onFeatSelect(boon);
 
-						// Show ability choice UI if boon has choose
-						this._renderEpicBoonAbilityChoice(boon, epicSection);
-
-						// Show additional choices UI if boon has skill/spell/tool choices
+						// Show all boon sub-choices, including its ability increase, through
+						// the canonical feat-choice UI so the selected ability is applied.
 						if (hasChoices) {
 							if (!boon._featChoices) {
 								boon._featChoices = {skills: [], languages: [], ability: null, tools: [], expertise: [], spellList: null, cantrips: [], spells: [], optionalFeatures: []};
@@ -2215,42 +2220,6 @@ class CharacterSheetLevelUp {
 		featsContainer.append(featSearch, featList, featChoicesContainer);
 
 		return section;
-	}
-
-	/**
-	 * Render ability score choice UI for Epic Boons with { choose: { from: [...] } }
-	 */
-	_renderEpicBoonAbilityChoice (/** @type {*} */ boon, /** @type {*} */ parentSection) {
-		// Remove any existing ability choice UI
-		parentSection.querySelector(".charsheet__epic-boon-ability-choice")?.remove();
-
-		if (!boon.ability?.length) return;
-
-		const ablEntry = boon.ability[0];
-		if (!ablEntry.choose) return;
-
-		const options = ablEntry.choose.from || Parser.ABIL_ABVS;
-		const amount = ablEntry.choose.amount || 1;
-		const max = ablEntry.max || 20;
-
-		const choiceContainer = e_({outer: `<div class="charsheet__epic-boon-ability-choice mt-2 p-2 rounded" style="background: var(--cs-bg-surface, var(--rgb-bg-alt, #1e293b));">
-			<span class="ve-small ve-bold">Choose ability to increase by +${amount} (max ${max}):</span>
-		</div>`});
-
-		const select = e_({outer: `<select class="ve-form-control ve-input-sm mt-1" style="max-width: 200px;"></select>`});
-		options.forEach((/** @type {*} */ abl) => {
-			const currentScore = this._state.getAbilityScore(abl);
-			select.insertAdjacentHTML("beforeend", `<option value="${abl}">${Parser.attAbvToFull(abl)} (currently ${currentScore})</option>`);
-		});
-
-		// Store the choice on the boon object so _applyFeatBonuses can use it
-		boon._epicBoonAbilityChoice = {ability: options[0], amount, max};
-		select.addEventListener("change", (/** @type {*} */ e) => {
-			boon._epicBoonAbilityChoice = {ability: e.target.value, amount, max};
-		});
-
-		choiceContainer.append(select);
-		parentSection.append(choiceContainer);
 	}
 
 	/**
