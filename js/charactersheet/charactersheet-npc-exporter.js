@@ -8441,12 +8441,17 @@ class CharacterSheetNpcExporter {
 	}
 
 	static _restoreTags (text, tagStore = [], prefix = null) {
-		if (prefix) {
-			const re = new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\d+)§§`, "g");
-			return String(text || "").replace(re, (_, n) => tagStore[Number(n)] || "");
-		}
-		// Fallback: restore any stash marker shape
-		return String(text || "").replace(/§§T\d+G(\d+)§§/g, (_, n) => tagStore[Number(n)] || "");
+		const restored = prefix
+			? String(text || "").replace(new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\d+)§§`, "g"), (_, n) => tagStore[Number(n)] || "")
+			// Fallback: restore any stash marker shape
+			: String(text || "").replace(/§§T\d+G(\d+)§§/g, (_, n) => tagStore[Number(n)] || "");
+		// A cut that lands inside a marker leaves halves no restore rule can match, and
+		// they read as line noise in the statblock. Drop any remnant rather than print it.
+		// Strip only an *orphan* half-marker — one with no closing delimiter, which a cut
+		// through the middle of a marker leaves behind. A complete marker belonging to an
+		// outer, still-stashed pass must survive untouched, and the subject placeholders
+		// (`§§SUBJ§§`) share the delimiter and are live at some call sites.
+		return restored.replace(/§§T\d+G\d*(?!\d*§§)/g, "");
 	}
 
 	static _normalizeAbilityTextForNpc (text, {npcName = "The NPC", maxLen = 420} = {}) {
@@ -8593,7 +8598,21 @@ class CharacterSheetNpcExporter {
 		if (s.length > maxLen) {
 			const slice = s.slice(0, maxLen);
 			const lastStop = Math.max(slice.lastIndexOf(". "), slice.lastIndexOf("! "), slice.lastIndexOf("? "));
-			s = (lastStop >= Math.floor(maxLen * 0.45) ? slice.slice(0, lastStop + 1) : `${slice.trim()}…`).trim();
+			if (lastStop >= Math.floor(maxLen * 0.45)) {
+				s = slice.slice(0, lastStop + 1).trim();
+			} else {
+				// No sentence ends in range — a colon-introduced list is the usual cause.
+				// Cutting at the character limit splits whatever sits there, including a
+				// stash marker, whose halves then survive `_restoreTags` as visible noise.
+				// Fall back to the last complete list item or word and close the sentence:
+				// a statblock line that trails off in an ellipsis cannot be read aloud.
+				let cut = slice.replace(/§§T\d+G\d*$/, "").replace(/§+$/, "");
+				// Back up to the last word boundary only — losing more than the word the
+				// cut landed in changes what downstream passes see.
+				const boundary = cut.lastIndexOf(" ");
+				if (boundary > Math.floor(maxLen * 0.5)) cut = cut.slice(0, boundary);
+				s = `${cut.trim().replace(/[,;:\s]+$/, "")}.`;
+			}
 			// Cutting mid-parenthetical leaves the rest of the entry inside a paren that
 			// never closes, which reads as a broken statblock.
 			const unclosed = (s.match(/\(/g) || []).length - (s.match(/\)/g) || []).length;
