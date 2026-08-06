@@ -1,0 +1,23 @@
+[
+  {"query": "can you whip me up a level 15 drow archfey warlock to use as a recurring villain in my Thelemar game — give her strong spell picks and some nasty level-appropriate magic items, and I want to import her into the character sheet", "should_trigger": true},
+  {"query": "I need four bandit lieutenants statted as actual level 8 fighter/rogues with real feats and gear, not just monster blocks. make them genuinely tough to fight", "should_trigger": true},
+  {"query": "build me Onger — a Goliath Barbarian Juggernaut, L17, tank and DPS, wielding the Gae Bolg, and throw in a couple of level-appropriate ioun stones", "should_trigger": true},
+  {"query": "make a TGTT Way of the Sun Soul monk NPC at 13th level and export the json so I can load it into charactersheet.html", "should_trigger": true},
+  {"query": "spawn a party of three L12 heroes for me: a tempest cleric, a battlemaster fighter, and a moon druid, all optimized with good items", "should_trigger": true},
+  {"query": "I want a homebrew Daemonologist wizard character built out with Contingency, Teleport and a couple of rare homebrew spells, plus the Necklace of Goibhnie — controller/support role", "should_trigger": true},
+  {"query": "give me a strong dex-based dual-wielding fighter around level 13 with cool swords, built so I can drop him in as an enemy the party fights", "should_trigger": true},
+  {"query": "could you generate an importable character json for a Minotaur World Tree Barbarian 6 / Moon Bard 7 who worships Pan with 25 favor?", "should_trigger": true},
+  {"query": "stat out a Devotion Paladin, level 13, one of the Children (Lexalian) — make all the class and subclass choices strong and hand him some varied magic items", "should_trigger": true},
+  {"query": "put together a blinded noble Battlemaster fighter who fights through a telepathically-linked raven companion — L13, dex build, needs cool twin blades and to be importable into the sheet", "should_trigger": true},
+
+  {"query": "the character sheet's AC calculation is wrong for Bracers of Defense — can you fix the bug in charactersheet-state.js so the unarmored formula picks them up?", "should_trigger": false},
+  {"query": "add a new homebrew spell called Fearheart's Grasp of Death to the TGTT spells data file and make sure it validates against the schema", "should_trigger": false},
+  {"query": "write a monster stat block for a CR 12 abyssal warlord for my bestiary json", "should_trigger": false},
+  {"query": "help me level up MY character — I'm a level 7 tempest cleric and just hit 8, what feat or ASI should I take?", "should_trigger": false},
+  {"query": "the spawn engine keeps throwing 'Spec override never matched an available option' warnings — can you open charactersheet-spawn.js and explain what reportUnusedOverrides is doing?", "should_trigger": false},
+  {"query": "can you add a Journey Tracker panel feature to the DM screen that tracks NPC morale across travel days?", "should_trigger": false},
+  {"query": "I need a magic item designed — a homebrew +2 war pick with a fey teleport rider — and write the item JSON for it", "should_trigger": false},
+  {"query": "explain how additionalSpells works for races in the 5etools schema, with an example", "should_trigger": false},
+  {"query": "regenerate crafting.json by running the crafting generator, some Hamund's materials look stale", "should_trigger": false},
+  {"query": "write a Playwright e2e test that builds a moon druid and checks the level-up flow in the character builder", "should_trigger": false}
+]
