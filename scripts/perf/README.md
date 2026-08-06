@@ -1,9 +1,13 @@
 # Page-load performance harness
 
-`scripts/perf/measure.mjs` measures how long content pages take to become usable, and writes the
-result to JSON so two runs can be diffed. It exists so that performance work can be judged on
-numbers rather than intuition — a previous optimisation attempt on this codebase made load times
-*worse*, and there was no way to tell until users noticed.
+Two complementary tools:
+
+- **`measure.mjs`** — tells you *whether* a change helped, and proves it broke nothing.
+- **`profile.mjs`** — tells you *where to look next*.
+
+They exist so that performance work can be judged on numbers rather than intuition — a previous
+optimisation attempt on this codebase made load times *worse*, and there was no way to tell until
+users noticed.
 
 ## Quick start
 
@@ -20,6 +24,38 @@ node scripts/perf/measure.mjs --serve \
 
 `--serve` starts a throwaway `http-server` on port 5099 against this checkout, with
 `max-age=600` to match what GitHub Pages sends. It shuts the server down when the run finishes.
+
+## Finding the next thing to fix
+
+`measure.mjs` will tell you a page is slow, but not why. `profile.mjs` CPU-profiles a real page
+load and ranks functions by **self time**:
+
+```bash
+node scripts/perf/profile.mjs --serve --page items
+node scripts/perf/profile.mjs --url https://truemichato.github.io/ThelemarTools/bestiary.html
+```
+
+```
+  self%      self   function
+  -----   -------   --------
+   15.7%    1243ms   (program)  @ :0
+    8.0%     633ms   (idle)  @ :0
+    7.0%     557ms   _add32  @ js/utils.js:8705      <- MD5 internals
+    6.0%     471ms   getOrModify  @ js/utils.js:1295
+    4.5%     355ms   String.toUrlified  @ js/utils.js:206
+```
+
+Reading it:
+
+- High **self** time = the function is doing the work itself, and is a candidate.
+- `(program)` is native work — JSON parsing, script compilation, GC. Not directly actionable.
+- `(idle)` is waiting on the network. Not main-thread work.
+- Watch for *families* of related frames. The MD5 internals above (`_add32`, `_cmn`, `_ff`, `_gg`,
+  `_hh`, `_ii`, `_md5blk`, `_md5cycle`) each looked small, but summed to ~1.57 s — 20% of the page
+  load. Ranking by individual self time alone would have buried it.
+
+This is how the two largest wins so far were found: a full-payload MD5 run on every page load, and
+a quadratic `_copy` parent search.
 
 ## What it measures
 
