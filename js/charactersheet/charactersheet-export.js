@@ -287,10 +287,28 @@ class CharacterSheetExport {
 		</div>`.appendTo(modalInner);
 	}
 
+	/**
+	 * Slot level alone cannot separate a blaster from a diplomat, so the CR estimate needs
+	 * to know what each spell actually does. Loading happens here, once, because the
+	 * converter itself is deliberately pure and synchronous.
+	 */
+	async _pGetNpcExportSpellIndex () {
+		if (this._npcExportSpellIndex !== undefined) return this._npcExportSpellIndex;
+		try {
+			const data = await DataUtil.spell.pLoadAll();
+			this._npcExportSpellIndex = CharacterSheetNpcExporter.buildSpellThreatIndex(data?.spell || []);
+		} catch (e) {
+			// A missing index only costs precision — the school-weighted fallback still runs.
+			this._npcExportSpellIndex = null;
+		}
+		return this._npcExportSpellIndex;
+	}
+
 	async _showNpcExportDialog () {
 		try {
 			let sourceConfig = await this._pGetNpcExportSourceConfig();
 			let exportOptions = await this._pGetNpcExportOptions();
+			const spellIndex = await this._pGetNpcExportSpellIndex();
 			let monster = null;
 			let sourceMeta = CharacterSheetNpcExporter.getDefaultSourceMeta(sourceConfig);
 
@@ -348,13 +366,15 @@ class CharacterSheetExport {
 			iptCrManual.style.maxWidth = "80px";
 
 			const cbCustomMods = e_({tag: "input", type: "checkbox"});
-			cbCustomMods.checked = exportOptions.includeCustomModifiers !== false;
+			cbCustomMods.checked = !!exportOptions.includeCustomModifiers;
 			const cbCustomAbs = e_({tag: "input", type: "checkbox"});
 			cbCustomAbs.checked = exportOptions.includeCustomAbilities !== false;
 			const cbMethods = e_({tag: "input", type: "checkbox"});
 			cbMethods.checked = exportOptions.includeCombatMethods !== false;
 			const cbCrBreakdown = e_({tag: "input", type: "checkbox"});
 			cbCrBreakdown.checked = !!exportOptions.includeCrBreakdown;
+			const cbLevelSignal = e_({tag: "input", type: "checkbox"});
+			cbLevelSignal.checked = !!exportOptions.includeLevelSignal;
 			const cbLegendary = e_({tag: "input", type: "checkbox"});
 			cbLegendary.checked = !!exportOptions.legendaryEnabled;
 
@@ -449,6 +469,7 @@ class CharacterSheetExport {
 					legendaryActions: Number(iptLegendaryActions.value) || 0,
 					legendaryResistances: Number(iptLegendaryRes.value) || 0,
 					includeCrBreakdown: !!cbCrBreakdown.checked,
+					includeLevelSignal: !!cbLevelSignal.checked,
 				});
 			};
 
@@ -492,6 +513,7 @@ class CharacterSheetExport {
 				cbCustomAbs.checked = exportOptions.includeCustomAbilities;
 				cbMethods.checked = exportOptions.includeCombatMethods;
 				cbCrBreakdown.checked = exportOptions.includeCrBreakdown;
+				cbLevelSignal.checked = exportOptions.includeLevelSignal;
 				cbLegendary.checked = exportOptions.legendaryEnabled;
 				iptLegendaryActions.value = String(exportOptions.legendaryActions);
 				iptLegendaryRes.value = String(exportOptions.legendaryResistances);
@@ -505,6 +527,7 @@ class CharacterSheetExport {
 				monster = CharacterSheetNpcExporter.convertStateToMonster(this._state, {
 					sourceJson: sourceConfig.sourceJson,
 					...exportOptions,
+					spellIndex,
 				});
 				sourceMeta = CharacterSheetNpcExporter.getDefaultSourceMeta(sourceConfig);
 
@@ -570,9 +593,10 @@ class CharacterSheetExport {
 						${selCrMode}
 						${iptCrManual}
 						<label class="ve-flex-v-center ve-muted" style="gap: 4px; font-size: 0.85rem;">${cbCrBreakdown} Show CR breakdown</label>
+						<label class="ve-flex-v-center ve-muted" style="gap: 4px; font-size: 0.85rem;" title="Adds an out-of-fiction &quot;Level Signal&quot; trait naming the source character's level and classes">${cbLevelSignal} Level signal</label>
 					</div>
 					<div class="ve-flex-v-center mb-2" style="gap: 12px; flex-wrap: wrap; font-size: 0.85rem;">
-						<label class="ve-flex-v-center" style="gap: 4px;">${cbCustomMods} Custom modifiers</label>
+						<label class="ve-flex-v-center" style="gap: 4px;" title="Leftover effects not already promoted to abilities, defenses, or skills (smart filter)">${cbCustomMods} Leftover modifiers</label>
 						<label class="ve-flex-v-center" style="gap: 4px;">${cbCustomAbs} Custom abilities</label>
 						<label class="ve-flex-v-center" style="gap: 4px;">${cbMethods} Combat methods</label>
 					</div>

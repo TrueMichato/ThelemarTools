@@ -5278,6 +5278,14 @@ class CharacterSheetState {
 		// Migrate modifiers: re-process modifiers that may be missing special flags
 		this._migrateModifiers();
 
+		// Drop duplicate feature-sourced named modifiers. `addFeat` runs both the
+		// data-declared and the registry pipelines, and until the guard was hoisted
+		// into `addNamedModifier` a feat described in both (Alert, War Caster) was
+		// registered twice — doubling its bonus. Saves written before that fix still
+		// carry the duplicate, so it has to be cleaned on load. Runs before every
+		// other modifier migration so those see a deduped list.
+		this._migrateDuplicateNamedModifiers();
+
 		// Migrate conditional speed modifiers: re-gate transformation-conditional
 		// speed grants (e.g. Aasimar Heavenly Wings, "until the transformation
 		// ends") that predate the conditional-gating fix and were saved enabled at
@@ -6136,6 +6144,39 @@ class CharacterSheetState {
 	 * Migrate old modifier data to include special flags
 	 * This re-parses feature descriptions to extract proficiencyBonus, abilityMod, etc.
 	 */
+	/**
+	 * Remove duplicate feature-sourced named modifiers left behind by older saves.
+	 *
+	 * `addFeat` dispatches to both `_processFeatureModifiers` (data-declared
+	 * `modifiers`) and `_processFeatRegistryEffects` (FeatureEffectRegistry). Feats
+	 * described in both — Alert, War Caster — therefore produced two identical
+	 * entries, and `_recalculateCustomModifiers` summed both (Alert yielded
+	 * initiative +10 for a +5 feat). `addNamedModifier` now rejects the second
+	 * registration, but characters saved before that still hold the duplicate.
+	 *
+	 * Only modifiers that share a `sourceFeatureId` AND are structurally identical
+	 * (see `_isSameNamedModifier`) collapse; hand-authored custom modifiers carry no
+	 * source feature and are never touched. Idempotent.
+	 */
+	_migrateDuplicateNamedModifiers () {
+		const mods = this._data.namedModifiers;
+		if (!mods?.length) return;
+
+		const kept = [];
+		let removed = 0;
+		for (const mod of mods) {
+			if (mod.sourceFeatureId && kept.some(prev => this._isSameNamedModifier(prev, mod))) {
+				removed++;
+				continue;
+			}
+			kept.push(mod);
+		}
+		if (!removed) return;
+
+		this._data.namedModifiers = kept;
+		this._recalculateCustomModifiers();
+	}
+
 	_migrateModifiers () {
 		if (!this._data.namedModifiers?.length) return;
 		if (!this._data.features?.length) return;
@@ -46283,9 +46324,48 @@ class CharacterSheetState {
 		if (modifier.newAbility) newModifier.newAbility = modifier.newAbility;
 		if (modifier.oldAbility) newModifier.oldAbility = modifier.oldAbility;
 
+		// A single feature can reach this method down more than one pipeline —
+		// `addFeat` runs BOTH `_processFeatureModifiers` (data-declared `modifiers`)
+		// and `_processFeatRegistryEffects` (FeatureEffectRegistry), and a feat such
+		// as Alert or War Caster is described in both. Only the former carried a
+		// duplicate guard, so the registry copy landed unchecked and the bonus was
+		// counted twice (Alert produced initiative +10 for a +5 feat). The guard
+		// belongs here so every registration path — present and future — is covered.
+		// Scoped to feature-sourced modifiers: hand-authored custom modifiers carry no
+		// `sourceFeatureId` and a user may legitimately add the same one twice.
+		const existingDuplicate = newModifier.sourceFeatureId
+			? this._data.namedModifiers.find(existing => this._isSameNamedModifier(existing, newModifier))
+			: null;
+		if (existingDuplicate) return existingDuplicate.id;
+
 		this._data.namedModifiers.push(newModifier);
 		this._recalculateCustomModifiers();
 		return id;
+	}
+
+	/**
+	 * Structural identity test for two named modifiers sharing a source feature.
+	 * Deliberately compares the fields that make a modifier mechanically distinct —
+	 * a feature may register several entries of the same type that differ only by
+	 * `conditional` (Unyielding Spirit grants two separate `save:all` advantages),
+	 * so those must NOT collapse into one.
+	 * @param {Object} a
+	 * @param {Object} b
+	 * @returns {boolean}
+	 */
+	_isSameNamedModifier (a, b) {
+		if (!a || !b) return false;
+		if (a.sourceFeatureId !== b.sourceFeatureId) return false;
+		const FIELDS = ["type", "name", "value", "conditional", "abilityMod", "newAbility", "oldAbility", "setValue", "equalTo"];
+		for (const field of FIELDS) {
+			if ((a[field] ?? null) !== (b[field] ?? null)) return false;
+		}
+		const FLAGS = ["advantage", "disadvantage", "removeAdvantage", "removeDisadvantage", "proficiencyBonus", "halfProficiency", "perLevel", "equalToWalk"];
+		for (const flag of FLAGS) {
+			if (!!a[flag] !== !!b[flag]) return false;
+		}
+		if (JSON.stringify(a.derivedSkill ?? null) !== JSON.stringify(b.derivedSkill ?? null)) return false;
+		return true;
 	}
 
 	/**

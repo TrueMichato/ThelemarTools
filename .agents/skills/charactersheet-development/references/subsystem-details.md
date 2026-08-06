@@ -395,7 +395,7 @@ Current generic coverage includes attached spells with charge costs, action/bonu
 
 **Files**: `charactersheet-npc-exporter.js` (pure converter), `charactersheet-export.js` (dialog).  
 **Docs**: `docs/charactersheet/18-npc-export.md`  
-**Tests**: `CharacterSheetNpcExporter.test.js`
+**Tests**: `CharacterSheetNpcExporter.test.js` + `.matrix.test.js` + `.realsaves.test.js` (contract tests against a corpus of 21 full saves in `npc-exports/`; auto-skips when those untracked fixtures are absent)
 
 ### Key Method: `convertStateToMonster(state, options)`
 
@@ -406,13 +406,346 @@ Current generic coverage includes attached spells with charge costs, action/bonu
 - **Spellcasting**: class slots and/or pact magic + separate innate block (`will` / `daily`)
 - **Multiattack**: synthesized when Extra Attack / attack count ≥ 2; Extra Attack trait suppressed
 - **pbNote**: character proficiency (CR is advisory only)
+- **save / skill / initiative**: always **effective** values (`getSaveBreakdown().total`,
+  `getSkillMod`, `getInitiativeBreakdown().total`), never canonical. A save prints when
+  proficient **or** when it differs from the plain ability modifier; a skill prints when
+  proficient **or** bonused. Homebrew skills are keyed `"endurance|TGTT"` (hoverable via
+  `Renderer.monster.getSkillsString`, knowingly outside the bestiary schema). `initiative`
+  appears only when it beats the bare DEX modifier.
 
-Sanitize options with `getSanitizedExportOptions` (defense mode, unarmed policy, feature mode/picker, CR mode, legendary, name suffix, CR breakdown). List picker rows via `listExportableFeatures(state)`.
+Sanitize options with `getSanitizedExportOptions` (defense mode, unarmed policy, feature mode/picker, CR mode, legendary, name suffix, CR breakdown, **level signal**). `includeLevelSignal` defaults **false** — the out-of-fiction "Level Signal" trait is opt-in (forced on by `includeCrBreakdown`, which has nowhere else to put its note). **`includeCustomModifiers` defaults true** (smart leftover **Additional Effects**; bookkeeping filtered). List picker rows via `listExportableFeatures(state)` (features **and** feats).
+
+### Runnability (v10)
+The block is written to be *run*, not read: numbers instead of formulas, hovers wherever
+a term exists, prose only where it adds something.
+- `_resolveAbilityFormulas` annotates ability modifiers, proficiency bonus and their
+  compounds with the resolved value. Compounds are stashed behind a `\uE000` placeholder
+  before the bare rules run so an operand is never annotated twice. Never use a control
+  character (`\u0001`) for a stash — ESLint's `no-control-regex` rejects it.
+- `_enrichHoverTags` / `_tagCapabilityTerms` tag XPHB actions, `Opportunity Attack`,
+  `Unarmed Strike`, `Difficult Terrain` (case-free, sentence casing kept as display
+  text), `{@feat}` on feat trait names and `{@optfeature}` on maneuvers. **Must stay last
+  in the chain** — any pass matching entries by plain-text name breaks once names are
+  tagged. Each written tag is masked immediately or a shorter vocabulary entry nests
+  inside it (`{@action {@action Opportunity Attack|XPHB}|XPHB|…}`).
+- `_dropSupersededQuantityClaims` keeps the improved value when a base rule and a
+  subclass rule state the same quantity; runs **after** `_consolidateShapeshiftEntries`.
+- `_collapseParallelOptionLists` detects a menu by shape (3+ `{@b Label.}` blocks with a
+  shared opening/ending and one short varying middle) and folds it into one sentence.
+- `_condenseRosterClause` caps a hoverable roster clause at two sentences plus any
+  sentence carrying a save, DC, condition or damage.
+- `_resolveConditionalFeatureReferences` answers "If it has its X feature…" against
+  `state.getFeatures()` instead of leaving the DM to check.
+- `_dropFlavourLeadSentences` drops a lead only if it has no number, no tag, no
+  mechanical or duration vocabulary, **and** nothing after it reuses a noun it
+  introduced, **and** the remainder does not open with "To do so". That dependency test
+  is the whole safety margin — without it the pass eats real mechanics.
+- `_orderTraitsForReading` sorts traits into standing passives → resource pools →
+  triggered → rosters, stably.
+- A new generic resolver can silently shadow an older specialised one guarded by
+  `(?!\s*\()`. After adding one, re-check the specialised rules it may have pre-empted.
+
+### Resolved numbers and one home per feature (v11)
+- **The "already annotated" guard must match the annotation shape, not "any paren".**
+  `(?!\s*\()` rejected `its Charisma modifier (minimum of one)`, leaving ten real
+  formulas unresolved across the corpus. A trailing minimum is now merged into one
+  parenthetical (`its Charisma modifier (+5, min. 1)`), never stacked.
+- **A tag is only written when it can hover.** A homebrew tag always carries a source or
+  stays plain text; a sourceless `@spell` is allowed because 5etools resolves it by name.
+  Spell tagging requires membership in a real spell list — matching on Title Case alone
+  minted `{@spell Attack Or}` out of a mangled sentence.
+- **Cross-entry passes run after the merges that create their inputs.** Order in the
+  chain: `_mergeSameNameEntriesAcrossSections` → `_foldImprovedEntriesIntoBase` →
+  `_dropUnownedOptionClauses` → `_applyCrossEntryQuantityUpgrades` →
+  `_trimNonMechanicalSentences` → `_dropSupersededProcedures` → `_refileByStatedEconomy`
+  → `_dropInertItemEntries` → `_dropDuplicateItemSpellStubs` → `_tidyEntryNames` →
+  `_fixImperativeVoice`.
+- **Option menus and base/upgrade pairs split across separate `entries` elements.** A
+  per-line pass never sees both halves; gather across the whole entry, then rebuild.
+- **Trim by identifying description, not by looking for mechanics.** "It always knows the
+  direction to the branded creature" has no number, no tag and no modal, and is a rule.
+  `_isPureFlavourSentence` cuts appearance, DM narration and "Describe…" only, and never a
+  sentence carrying a number, a tag, or duration/permission/obligation language. Roster
+  lines (`{@optfeature`, `{@combatmethod`, ≥2 semicolons) are skipped — splitting a
+  semicolon-delimited list into sentences silently truncates its tail.
+- **A shared resource pool is not evidence of a specific feature.** Every Sorcerer has
+  Sorcery Points; only a level-18 Shadow Sorcerer has Umbral Form. Toggle-derived defenses
+  require the *named feature*, not a matching `resourceName`.
+- **Metamagic tuning comes from `tunedMetamagics`.** Active vs Passive vs currently-tuned
+  is state, not inference. Costs come from the option's own `Cost:` line, and the affected
+  spells are a canonical category label — truncating the condition produced "a spell that
+  deals a type of damage from the".
+- **Lift resolved numbers out of parentheses before stripping nested asides**, or the
+  number is destroyed with the aside.
+- **`_conjugateThirdPerson` must not re-inflect.** `[aeiou]s$` exists for "gas" → "gases";
+  without a `[^aeiou]es$` guard it turned "perceives" into "perceiveses". Adverbs belong
+  in `_SUBJECT_ADVERBS` (so the verb after them is found), not in the keep-set.
+- **A default Unarmed Strike is filler; a monk's is not.** `_getMultiattackAction` picks
+  the best weapon attack unless an unarmed strike out-damages all of them.
+
+### Level 20, psionics and item banks (v12)
+- **`modes[]` is where a psionic power's mechanics live.** A `feature._entityType ===
+  "psionicPower"` carries only headers (Manifestation Time / Range / Duration) at the top
+  level; without reading `modes[]` seven abilities export with zero mechanics. The
+  class-rules feature's `description` is a 28KB HTML blob and must never be printed.
+- **`calc.sneakAttack` is an object** — `{dice: "10d6", avgDamage: 35}`, keyed
+  `sneakAttack`, *not* `sneakAttackDamage`. Other real rider keys: `smiteBaseDamage`,
+  `smiteMaxDamage`, `radiantStrikesDamage`, `brutalStrikeDamage`, `rageDamage`,
+  `envenomDamage`, `decayDamagePerStrain`, `timePocketDamage`.
+- **A word-level guard must run on tag-reduced text.** `_isStatOnlyItemSnippet` tested
+  raw text, so `{@action Magic|XPHB} action` never matched `magic action` and a real
+  magic-action item was judged "stat only". Reduce `{@tag Display|SRC}` → `Display`
+  first.
+- **`_isRestatedSentence` returns false for any `while|when|unless`.** For *item* entries
+  the "while wearing it" gate is inherent — strip it before the test, or the item's
+  restatement of a resistance already on the block never drops.
+- **`_getItemUseSnippet` truncates.** A rule keyed on a phrase late in the item text
+  silently never fires; key on early phrases.
+- **The sheet does not store Signature Spells, Spell Mastery or Resilient's ability.**
+  `feats[].choices.ability` is `null` and there is no signature/at-will marker;
+  `chosenSubfeatures` holds only Specialties. Drop the scaffolding, never invent a pick.
+- **A regex backreference cannot match across case.** `/\b([A-Z][a-z]{2,})\s+(\1)\b/`
+  never matched `May may` — use two groups and compare lowercased.
+- **CR probes must hook the real call.** Reconstructing `_estimateCr`'s arguments by hand
+  reports nonsense DPR; monkey-patch `_estimateCr` and let `convertStateToMonster` supply
+  them.
+- **A corpus diff is the safety net for any "clever" drop rule.** Both bad drop rules in
+  v12 passed lint and passed a spot check on the character they targeted, and were only
+  caught by diffing all 21 exports.
+
+### Ability prose (compact + hoverable)
+- Preserve `{@tags}` through strip/normalize; enrich `{@condition}` / `{@skill}`.
+- `_sanitizeInboundTags` strips homebrew sources from **core** condition tags
+  (`{@condition prone|TGTT}` breaks the hover) and collapses `{@quickref …|display}`.
+- Some features store `description` as a **JSON string**; it is parsed and flattened
+  before cleanup so raw JSON never reaches the block.
+- **Third-person voice is token-based, not string substitution.** 2nd person maps to
+  `§§SUBJ§§` / `§§POSS§§` / `§§REFL§§`; `_conjugateAfterSubject` (skips object position
+  and `-ly` adverb runs) and `_conjugateImpliedSubjects` (guarded by modal, infinitive,
+  plural-cue and `_hasBareAntecedentVerb` checks) fix agreement once; then the **name is
+  emitted on first mention and `it`/`its` thereafter**, `itself` for reflexives.
+  *Do not go back to name-everywhere substitution — agreement and pronoun choice become
+  undecidable.*
+- **Conjugation is vocabulary AND structure, deliberately.** A purely structural rewrite
+  (governor test, no verb list) over-conjugated badly — "Strength**s** saving throws",
+  "Long**s** Rest", "Radiant**s** damage" — because rules text is dense with verb/noun
+  homographs. `_IMPLIED_SUBJECT_VERBS` bounds *what* may change; `_getClauseGovernor` +
+  `_NOUN_HOMOGRAPHS` remove the false positives. Preferred failure mode: leave an unlisted
+  verb in second person rather than corrupt a noun phrase.
+- **`\b` does not work next to `§`.** The placeholders are non-word characters, so a
+  `\b` after `§§POSS§§` never matches. Use `(?:\s|$)`. This has caused the same class of
+  silent no-op guard bug more than once.
+- **Global-regex lead capture is not the sentence start.** With `/g`, a `([^.!?;]*?)` lead
+  group begins at `lastIndex`, so an earlier non-matching candidate can hide the clause
+  governor. Compute the clause from `(offset, whole)` — that is what `_getLeadClause` is for.
+- **Names match by token subset, never substring** (`_featureKeyMatches`). `"rage"` ⊂
+  `"aura of courage"` under `includes`, which is how a Paladin got barbarian resistance.
+- **Clause splitting is paren- and brace-aware** (`_splitIntoClauses`): `(attuned; orbiting)`
+  and `{@dice …}` are single units. Splitting inside them strands unbalanced delimiters.
+- **Level-progression tables arrive as rendered HTML** in `feature.description` and are
+  collapsed in `_stripHtmlTags` (`_collapseLevelTables`) — list columns accumulate every
+  row ≤ level, scalar columns take the latest row.
+- **Tag enrichment must be a single alternation pass.** Iterating replacements over a
+  sorted name list lets a short name match inside a tag emitted by a longer one
+  (`{@spell Mass {@spell Cure Wounds|XPHB}|XPHB}`); one combined `replace` cannot rescan
+  its own output.
+- Strip level preambles in **both** ordinal (`at 5th level`) and cardinal (`at level 17`)
+  form, sentence-initial and trailing; also `Rules Tip: … p166`, `Prerequisite:` (which may
+  be its own **unterminated** paragraph), and use-count scaling sentences.
+- **Never truncate a long feature.** `_splitFeatureDescriptionSections` splits on the
+  renderer's `data-roll-name-ancestor` markers (stripping the repeated `<h3>` heading, or
+  you get `{@b Switch Sides.} Switch Sides. …`), then on `<p>` boundaries; each section
+  becomes its own `entries` string prefixed `{@b Label.}`. The ~900-char budget only trims
+  *within* a section. The old flat 420-char cap silently ate whole sub-sections.
+- `_getPlainMatchText` flattens `{@tag …}` to display text **before** classification —
+  Retributive Strike's `{@action Magic|XPHB}` never matched a `\bmagic action\b` test that
+  only stripped HTML.
+- Permanent named-mod immunities/resists fold onto the block; **toggle** defenses (Rage,
+  ACTIVE_STATE_TYPES, stances) use bestiary `{…, note, cond:true}` — on `resist`,
+  `immune`, `vulnerable` **and** `conditionImmune`.
+- **Stances are first-class active effects.** The stored `stanceEffects` payload is empty
+  in practice, so `_parseStanceDefenseText` lifts resistances / immunities / condition
+  immunities / save advantages out of the description prose and feeds them through the
+  same annotation path as Rage. Keep it name-agnostic — no stance is named in code.
+- `_ensureToggleAbilityIntegrity` runs after dedupe: every `while <Toggle>` annotation must
+  have a defining ability, else one is synthesised from the active-state or stance
+  description. A stance with parseable persistent effects is defined even when unreferenced.
+- **Conditional damage riders** (`_getConditionalDamageRiders`) append Rage / Demolishing
+  Might / Brutal Strike / stand-alone conditional damage to the attack lines that can gain
+  them. A conditional modifier whose feature also registered an **unconditional** twin is
+  skipped — that bonus is already inside the damage number (Dueling).
+- **Feature-conjured weapons** (`_getFeatureWeaponActions`) become real attacks; die,
+  two-handed die, damage type and finesse are parsed from prose, and the weapon's name is
+  taken from the most-repeated non-generic adjective in the *whole* feature corpus (the
+  granting feature says only "melee weapon"; siblings say "shadow weapon").
+- **Spell provenance**: `{@spell Mage Hand|PHB} (Telekinetic)`; generic class routes
+  (`Wizard Spellbook`, `Cantrips Known`, …) are not annotated. Emitted via the scoped
+  static `_spellProvenanceTags`, rebuilt at the top of every `convertStateToMonster` —
+  threading it through ~10 `_formatSpellTag` call sites would bury them, and conversion is
+  synchronous. `_getSpellProvenanceLabel` must keep returning **plain text**, because
+  `_dropRedundantSpellGrantEntries` and `_stripBlockRestatedSentences` key on it.
+  `_dropRedundantSpellGrantEntries` removes a feature whose entire content was that grant —
+  either because provenance names it, or because every `{@spell}` it mentions is already on
+  the block (Fey Touched grants Misty Step into a wizard's spellbook, so no provenance trail
+  exists) — but keeps features with real mechanics (Telekinetic's shove survives).
+
+### v6 — attribution, compaction, spell-aware CR
+- **Defence attribution**: a folded resist/immunity prints its granting feature —
+  `{resist: ["poison"], note: "({@feat Poison Resilience|TGTT})"}`. `note` renders through
+  `Renderer.get().render()` and **does not need `cond`** to display (`js/parser.js`,
+  `_getFullImmRes_getRenderedObject`). `_getFeatureHoverTag` only tags **feats**; class /
+  subclass / species features are keyed by tuples the exporter cannot rebuild, so they
+  degrade to a bare name rather than a dead link. Feats reach it via
+  `getFeats().map(f => ({...f, featureType: f?.featureType || "Feat"}))`.
+  `_stripBlockRestatedSentences` then removes the duplicated sentence from the prose.
+  *Do not extend this to spell-grant sentences* — removing "It learns the Mage Hand
+  cantrip" leaves the next sentence's "it" dangling; compaction handles those instead.
+- **Mode-gated defences** (`_getGatedDefenseGrants`): `While <cond>, … Resistance to <type>`
+  is read from **any** feature body, emitting one conditional entry per mode so a
+  shapeshifter shows both. A flat hand-entered resistance matching a gated grant is
+  *converted*, not duplicated. Uses `_getPlainMatchTextCased` — the lower-casing
+  `_getPlainMatchText` destroyed proper nouns in gate phrases.
+- **One activation classifier.** `_classifyTextActivationSection` is gone; everything routes
+  through `_getActivationSectionFromText`. The split is why "it can take a Reaction" filed
+  as a trait. Do not reintroduce a second classifier.
+- **Nothing is suppressed for lacking a structural home.** `advantage`/`disadvantage` are
+  not in `statDerivedEffectTypes`, and a feature with labelled sub-sections is never folded
+  away. Features named by a damage rider are passed as `protectedFeatureNames` and are
+  **cap-exempt**, like pool owners — anything referenced elsewhere must be defined.
+- **Compaction** (`_compactStatblockProse`): the prose pipeline emits **one sentence per
+  entries element**, so a sentence-level rule that iterates elements silently no-ops. Flatten
+  across the entry → mark dead → regroup. Kills recharge restatements, leading flavour,
+  `For example…`, verbatim repeats, and build-time spellcasting bookkeeping ("…is the
+  ability increased by this feat"). Also: `Rules Tip:` sub-sections dropped,
+  `_stripLeadingLabelEcho` kills "{@b Forceful Blow.} Forceful Blow.",
+  `_boldInlineOptionLabel` promotes `Shadowbite: …` to `{@b Shadowbite.} …`, and
+  `_demoteOrphanedRider` moves a dangling shared rider below the options it qualifies.
+- **Spell-aware CR**: optional `spellIndex` export option, built by the dialog from
+  `DataUtil.spell.pLoadAll()` via `buildSpellThreatIndex` (converter stays pure/sync).
+  Damage is gated on `damageInflict` being non-empty (else *Wish*'s incidental `1d10` reads
+  as artillery); control scores off `conditionInflict`; `areaTags` weights it — every tag
+  except `ST` and `MT` is a real area. Scored over the DMG's three rounds spending real
+  slots. Offline, a school-weighted heuristic stands in.
+- **Swappable subclass spell lists**: two or more `subSubclassSpells` tables produce a
+  dedicated block marking the active mode and the long-rest switch; those spells are
+  excluded from the general list.
+- Feats from `getFeats()` export as real BA/reaction/trait lines; `bonusAction` named-mod stubs promoted when no feat covered them. A promoted feat attack inherits the **source weapon's** to-hit/damage bonus so the block can't contradict itself.
+- Uses on ability **names** as `(6/LR)` / `(2/SR)`; Class Resources is orphan-pool only, and
+  `_classifyFeatureForStatblock` takes the `resourceIndex` so a pooled ability is never
+  filtered out as unimportant (that bug silently dropped Indomitable).
+- Magic item named `entries` children → traits/actions (Gae Bolg style); item-granted
+  spells group into one entry with proper `{@spell Name|SRC}` links; stance methods expand riders.
+- Dedupe same-name level upgrades; light templates for Rage / Stone’s Endurance / Reckless
+  (authored in 2nd person and pushed through the same pipeline); auto feature cap 16.
+- Residual **Additional Effects** bullets are dropped when their content-word fingerprint
+  is ≥80% covered by an ability already on the block (`_isEffectAlreadyDescribed`).
+- Attack magic qualifier reads “The attack is magical.”
+
+### v8 — inference, consolidation, item fidelity
+- **Special Equipment is inventory-wide, not equipment-wide.** The old `item.equipped`
+  gate silently dropped a Driftglobe, Pearl of Power, Javelin of Lightning and Bag of
+  Holding from every export. Carried items are marked `carried`; consumables collapse to
+  one `{@b Consumables:}` line. `_getMagicItemUseBlocks` **keeps** the equipped gate — a
+  stowed item is worth listing but grants no ability.
+- **An item trait must be its benefit, never its item-class lore.** An Ioun Stone's
+  `entries` are four paragraphs of shared Ioun lore plus one benefit line; taking the
+  first 240 chars printed pure flavour. `_isGenericItemClassPreamble` filters preamble (a
+  paragraph that *grants* something is never preamble) and `_isStatOnlyItemSnippet`
+  suppresses the trait entirely when the only benefit is an ability increase already
+  folded in. This path is **browser-only** — `item.activation` is populated from live item
+  data, not from the saved copy, so the Node corpus looks clean.
+- **Verify before suppressing.** `_stripRestatedNumericSentences` drops "+5 bonus to
+  initiative" only when a matching **enabled** `initiative` modifier exists, and an item's
+  AC/save restatement only when the item is credited in `ac[].from`. Talna's Necklace
+  bonus is not in the modifier registry at all — `ac[].from` was the only usable signal.
+- **The character's own feature text outranks derived calculations.**
+  `calculations.divineStrikeType` reports `thunder` for a 2024 Blessed Strikes cleric
+  whose feature says "Necrotic or Radiant". `_getFeatureStatedDamageType` reads the text
+  first. Fixing the state is out of scope.
+- **Rider facts must be derived inside `_getConditionalDamageRiders`.** Attack actions are
+  built ~line 236, feature blocks ~line 258; mutating a rider after the feature-block step
+  is too late to reach the attack line.
+- **`_mergeResilienceTraits`** folds single-clause standing defences into one attributed
+  `Resilience` trait. Prefix-subsumption dedupe is required — "advantage on saves against
+  spells" and "…and other magical effects" are the same benefit twice.
+- **`{@b Label.}` sits mid-sentence**, not at the start ("…gains the following options:
+  {@b Cloak of Shadow.} …"). `_groupSentencesIntoBenefitUnits` therefore tests *contains a
+  label*, never `^`. Anchoring at `^` is a silent no-op that severs a body from its label.
+- **`_dropDuplicatedStanceBodies` must run LAST** in the post-processing chain, because
+  `_ensureToggleAbilityIntegrity` is what *creates* the standalone stance entry it dedupes
+  against. Placed earlier it is a no-op.
+- **`_getDivineFavorBlock`** renders `divineFavor[].tiers[].boons[]` (each boon carries a
+  ready-to-use second-person `desc`) for tiers at or below the character's favor, labelled
+  once per tier; `abilityScoreBoost` boons are skipped as already folded into the scores.
+  Requires `state.setDivineFavorCatalog()`; degrades to no trait when absent. The block is
+  fed into `_collectDescribedEffectTexts` so the garbled residual modifiers it replaces
+  are suppressed.
+- **`_consolidateShapeshiftEntries`** folds `Circle Forms` / `Improved Circle Forms` /
+  `Elemental Wild Shape` into the Wild Shape ability and resolves formulas to numbers.
+  `_isDecapitatedClause` drops verb-less splitter debris but **exempts labelled clauses** —
+  `{@b Beast Shapes.} Known Forms 8, Max CR 1` is a deliberate stat line, not debris.
+  `Wild Resurgence`, `Wild Companion` and `Primal Strike` stay separate (independently
+  usable; Primal Strike also applies to weapon attacks).
+- **Ambiguous skill names need a check context.** `Nature`, `Insight`, `Perception`,
+  `Performance`, `Medicine`, `History`, `Survival` are common nouns; blind tagging produced
+  "a {@skill Nature} spirit". Tag unambiguous skills **first**, then ambiguous ones only
+  next to a check/proficiency cue, a paren, or an adjacent skill tag — that ordering is
+  what lets "chosen from Insight, Persuasion, or Religion" tag all three.
+- **Do not delete `out.trait` when it empties** — several base tests call
+  `out.trait.some(...)` unconditionally. Only non-`trait` sections may be deleted.
+
+### v9 — new-class coverage, resolved numbers, statblock discipline
+Driven by four further saves (Dzeiy blood hunter, Reggu monk, Vern battle master, Wisp
+champion), taking the real-save corpus from 7 to 11.
+
+- **A defence scan must check whose clause it is.** `immune to the <X> condition` inside
+  "the creature is immune to this curse if…" is about the *target*. Reject a match whose
+  clause is introduced by a foreign subject or sits inside an `if`, or every
+  "the target is immune to X" phrasing becomes a self-immunity.
+- **Active-state name matching is one-directional.** Every token of the *state's* name must
+  appear in the *feature's* name, never the reverse — bidirectional subset matching let a
+  feature literally named `Champion` unlock the level-18 `exaltedChampion` state on a
+  level-13 character. Bidirectionality stays where it belongs (resource ↔ feature).
+- **`getAttacks()` rows store the bare die.** The sheet adds the ability modifier at roll
+  time (`charactersheet-combat.js` renders `damage + abilityMod + damageBonus`), so a
+  feature attack must be tagged `_damageIncludesAbilityMod` at *collection* time and the
+  formatter must honour the flag. Sniffing the formula shape is what dropped the modifier.
+- **A save-detection regex needs an explicit third-party subject.** A bare `makes?`
+  alternative matches "allows it to make a Dexterity saving throw" (a save the NPC *makes*)
+  as readily as "the target must make a saving throw" (one it *forces*), and stamps the
+  NPC's own DC on its Evasion.
+- **Item text distinguishes bearer benefits from object rules by person.** Official item
+  entries address the bearer as "you"; rules about the object itself ("General Ioun Stone
+  Rules", "Orbiting the Stone") are written about "a creature" in the abstract. That is far
+  more robust than a heading vocabulary needing extension per item.
+- **A die-annotation lookahead must match a die-value paren.** `(?!\s*\()` treats "one
+  Superiority Die (no action required)" as already annotated; use `(?!\s*\(\d*d\d)`.
+- **A plural word that is also a verb is disambiguated by clause position.** "The spell
+  attacks Onger" takes the subject as an object; "attacks Onger makes" is a reduced
+  relative whose verb needs conjugating. Treat `attacks`/`hits`/`targets`/`moves`/`saves`/
+  `checks`/`rolls` as nouns when they open a clause.
+- **Compaction welds bulleted lists into one string**, so any per-bullet pass must split on
+  `/\s*(?=•)/` first, and bullet bodies are bare noun phrases that need normalizing to
+  `It gains <clause>` before a `<subject> has/gains` detector will accept them.
+- **A subsumption filter that shrinks a list can trip a `length < 2` early return** — the
+  guard must distinguish "only one to begin with" from "one left after folding".
+- **A home-less resource pool is named after itself** (`Focus Points (13/Short Rest)`), not
+  dumped into a generic `Class Resources` row.
+- **Spell tags are title-cased after the outer restore.** Running the normalizer before
+  `_restoreTags` sees only `§§` placeholders.
 
 ### CR Estimation Algorithm
 Staged DMG-style tables (`_CR_HP_THRESHOLDS`, `_CR_DPR_THRESHOLDS`):
-1. **Defensive CR** from HP + AC adjustment
-2. **Offensive CR** from expected DPR (best attack × multiattack + light spell heuristic) and attack bonus / save DC
+1. **Defensive CR** from **effective** HP (`_getEffectiveHpForCr` counts conditional
+   Rage/stance resistances, reading the already-annotated `defenses` object) + AC adjustment
+2. **Offensive CR** from expected DPR — `(best attack + per-hit riders) × (multiattack +
+   Bonus Action attack routine)` + **slot-scaled** caster damage via
+   `_getHighestSpellSlotLevel` — and attack bonus / **spell attack bonus** / save DC.
+   `_estimatePerHitRiderDamage` credits Rage, Divine Strike, a Crimson Rite, Sneak Attack
+   and friends once each (conservative, never per swing);
+   `_getBonusActionAttackCount` reads Flurry of Blows / two-weapon fighting / Polearm
+   Master out of feature prose in either word order. Omitting both rated a level-13 monk
+   at CR 6.
 3. Blend with mild level anchor → nearest CR string (`0` … `30`, fractions included)
 4. Manual override: `crMode: "manual"` + `crManual`
 5. Optional `includeCrBreakdown` appends note under Level Signal
@@ -427,12 +760,14 @@ Staged DMG-style tables (`_CR_HP_THRESHOLDS`, `_CR_DPR_THRESHOLDS`):
 `legendaryEnabled` → `legendaryActions` count + derived actions (weapon / move / signature) and optional `Legendary Resistance (N/Day)`.
 
 ### Special systems coverage
-- **Class resources**: `getGenericPoolResources` + `getSyntheticCombatResources` + stamina → `Class Resources` trait
-- **Combat methods (TGTT)**: `getCombatMethods()` → `Combat Methods` trait by stamina cost
-- **Divine Favor**: innate spells via normal innate path; narrative boons as features; named mods as Custom Modifiers
-- **Ioun stones**: active (orbiting) stones under Special Equipment with `orbiting` note; stowed omitted
-- **Specialties**: important/activatable export; pure passive often collapses into named modifiers
+- **Class resources**: orphan pools only (covered ability names / stamina-with-methods suppressed)
+- **Combat methods (TGTT)**: `getCombatMethods()` → cost groups + stance rider prose (`{@combatmethod}`)
+- **Divine Favor**: a structured `Divine Favor (God)` trait built from the unlocked homebrew tiers (`_getDivineFavorBlock`); needs `setDivineFavorCatalog()`
+- **Ioun stones**: every stone under Special Equipment (stowed ones marked); a stone whose only benefit is an ability increase emits no trait
+- **Specialties**: important/activatable export; pure passive often omitted when already on block
 - **Gemstones / armor upgrades**: state getters only (no Upgrades module load required)
+- **Feats / items**: feats as action economy; item named entries + per-spell item grants
+- **Residual modifiers**: smart leftover Additional Effects (default on); never dump baked-in speed/HP/skill/immunity bookkeeping
 
 ### Storage
 - `charsheet-npc-export-source-config` — source meta
