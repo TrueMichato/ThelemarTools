@@ -44,3 +44,6 @@ test-results/
 
 # Generated NPC character-sheet exports (spawn-npcs runner scratch)
 npc-exports/
+
+# Page-load performance harness results (scripts/perf/measure.mjs --out)
+perf-*.json
