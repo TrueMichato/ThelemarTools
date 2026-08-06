@@ -106,6 +106,7 @@ describe("Bug #4 — the initiative ROLL HANDLER consumes the mode", () => {
 	// the synchronous combat one as the representative.)
 	function runHandler ({advantage, disadvantage}) {
 		let received = null;
+		let shown = null;
 		const prevDoc = globalThis.document;
 		globalThis.document = {getElementById: () => ({})};
 		try {
@@ -114,12 +115,13 @@ describe("Bug #4 — the initiative ROLL HANDLER consumes the mode", () => {
 					getInitiative: () => 2,
 					getInitiativeRollMode: () => ({advantage, disadvantage}),
 					getRollBonusDiceFromStates: () => [],
+					_getExhaustionD20Penalty: () => 0,
 				},
 				_page: {
 					rollD20: (opts) => { received = opts; return {roll: 13, mode: "normal"}; },
 					getModeLabel: () => "",
 					pAnimateD20: () => {},
-					showDiceResult: () => {},
+					showDiceResult: (result) => { shown = result; },
 					formatD20Breakdown: () => "",
 				},
 				_triggerInitiativeRecovery: () => {},
@@ -132,25 +134,57 @@ describe("Bug #4 — the initiative ROLL HANDLER consumes the mode", () => {
 		} finally {
 			globalThis.document = prevDoc;
 		}
-		return received;
+		return {received, shown};
 	}
 
 	it("forwards advantage from the roll mode into rollD20", () => {
-		const opts = runHandler({advantage: true, disadvantage: false});
+		const {received: opts} = runHandler({advantage: true, disadvantage: false});
 		expect(opts).not.toBeNull();
 		expect(opts.stateAdvantage).toBe(true);
 		expect(opts.stateDisadvantage).toBe(false);
 	});
 
 	it("forwards disadvantage from the roll mode into rollD20", () => {
-		const opts = runHandler({advantage: false, disadvantage: true});
+		const {received: opts} = runHandler({advantage: false, disadvantage: true});
 		expect(opts.stateAdvantage).toBe(false);
 		expect(opts.stateDisadvantage).toBe(true);
 	});
 
 	it("forwards a plain normal roll when the mode is empty", () => {
-		const opts = runHandler({advantage: false, disadvantage: false});
+		const {received: opts} = runHandler({advantage: false, disadvantage: false});
 		expect(opts.stateAdvantage).toBe(false);
 		expect(opts.stateDisadvantage).toBe(false);
+	});
+
+	it("subtracts exhaustion once from the Combat-tab initiative total", () => {
+		let shown = null;
+		const prevDoc = globalThis.document;
+		globalThis.document = {getElementById: () => ({})};
+		try {
+			const fakeThis = {
+				_state: {
+					getInitiative: () => 2,
+					getInitiativeRollMode: () => ({advantage: false, disadvantage: false}),
+					getRollBonusDiceFromStates: () => [],
+					_getExhaustionD20Penalty: () => 4,
+				},
+				_page: {
+					rollD20: () => ({roll: 13, mode: "normal", thelemar_critBonus: 5}),
+					getModeLabel: () => "",
+					pAnimateD20: () => {},
+					showDiceResult: (result) => { shown = result; },
+					formatD20Breakdown: (roll, modifier, extra = "") => `1d20 (${roll.roll}) + ${modifier}${extra}`,
+				},
+				_triggerInitiativeRecovery: () => {},
+				consumeBattleMasterCheckBonus: CharacterSheetCombat.prototype.consumeBattleMasterCheckBonus,
+			};
+			CharacterSheetCombat.prototype._rollInitiative.call(fakeThis);
+		} finally {
+			globalThis.document = prevDoc;
+		}
+
+		expect(shown.modifier).toBe(-2);
+		expect(shown.total).toBe(16);
+		expect(shown.subtitle).toContain("- 4 (exhaustion)");
 	});
 });

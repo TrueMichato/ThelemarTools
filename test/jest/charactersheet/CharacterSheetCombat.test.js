@@ -10,8 +10,10 @@
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-combat.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const CharacterSheetCombat = globalThis.CharacterSheetCombat;
 
 describe("Combat Calculations", () => {
 	let state;
@@ -462,5 +464,64 @@ describe("Multiclass Combat", () => {
 		const summary = state.getClassSummary();
 		expect(summary).toContain("Fighter");
 		expect(summary).toContain("Rogue");
+	});
+});
+
+describe("Combat-tab attack exhaustion", () => {
+	function makeCombat ({rules, exhaustion}) {
+		const state = new CharacterSheetState();
+		state.addClass({name: "Fighter", source: "PHB", level: 5});
+		state.setAbilityBase("str", 16);
+		state.setExhaustionRules(rules);
+		state.setExhaustion(exhaustion);
+		state.addAttack({id: "sword", name: "Longsword", isMelee: true, type: "melee", abilityMod: "str", range: "melee", damage: "1d8"});
+
+		const captured = [];
+		const rollD20Calls = [];
+		const combat = Object.create(CharacterSheetCombat.prototype);
+		combat._battleTacticToggles = {};
+		combat._flankingEnabled = false;
+		combat._state = state;
+		combat._page = {
+			rollD20: (opts) => {
+				rollD20Calls.push(opts);
+				return {roll: 10, roll1: 10, roll2: 10, mode: "normal"};
+			},
+			getModeLabel: () => "",
+			formatD20Breakdown: (roll, modifier, extra = "") => `1d20 (${roll.roll}) + ${modifier}${extra}`,
+			pAnimateD20: () => {},
+			showDiceResult: (result) => { captured.push(result); return null; },
+			_offerGuidedStrikePostAttack: () => {},
+		};
+		combat._renderSneakAttackToggle = () => {};
+		combat._isSneakAttackAvailableThisTurn = () => false;
+		combat._runPostAttackHooks = async () => {};
+		combat._consumeOnAttackStates = () => {};
+		combat._clearPendingSpellRider = () => {};
+
+		return {combat, captured, rollD20Calls};
+	}
+
+	test.each([
+		["2024", 1, 2],
+		["2024", 2, 4],
+		["2024", 3, 6],
+		["thelemar", 1, 1],
+		["thelemar", 2, 2],
+		["thelemar", 3, 3],
+		["2014", 1, 0],
+		["2014", 2, 0],
+		["2014", 3, 0],
+	])("%s exhaustion %i reduces the live attack by %i", (rules, exhaustion, penalty) => {
+		const {combat, captured, rollD20Calls} = makeCombat({rules, exhaustion});
+
+		combat._rollAttack("sword");
+
+		expect(captured).toHaveLength(1);
+		expect(rollD20Calls[0].isAttack).toBe(true);
+		expect(captured[0].modifier).toBe(6 - penalty);
+		expect(captured[0].total).toBe(16 - penalty);
+		if (penalty) expect(captured[0].subtitle).toContain(`- ${penalty} (exhaustion)`);
+		else expect(captured[0].subtitle).not.toContain("exhaustion");
 	});
 });

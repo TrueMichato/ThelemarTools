@@ -485,7 +485,7 @@ describe("Forest Sage — old-save repair migration (B2)", () => {
 describe("Lore skill display reflects exhaustion (B5)", () => {
 	test("getSkillBreakdown(lore).total drops with exhaustion while getSkillMod stays intrinsic", () => {
 		const state = new CharacterSheetState();
-		state.setExhaustionRules("2024"); // flat -N per level d20 penalty
+		state.setExhaustionRules("2024"); // flat -2 per level d20 penalty
 		state.addLoreSkill("Herbalism Lore", 2);
 		const loreKey = "herbalismlore";
 
@@ -496,10 +496,10 @@ describe("Lore skill display reflects exhaustion (B5)", () => {
 		state.setExhaustion(2);
 		// Intrinsic display (and passive) is unchanged — exhaustion is a d20 roll penalty.
 		expect(state.getSkillMod(loreKey)).toBe(intrinsic);
-		// The effective total shown on the row now reflects the -2 penalty.
+		// The effective total shown on the row reflects the 2024 -2/level penalty.
 		const breakdown = state.getSkillBreakdown(loreKey);
-		expect(breakdown.total).toBe(intrinsic - 2);
-		expect(breakdown.components.some(c => c.type === "penalty" && c.value === -2)).toBe(true);
+		expect(breakdown.total).toBe(intrinsic - 4);
+		expect(breakdown.components.some(c => c.type === "penalty" && c.value === -4)).toBe(true);
 	});
 
 	test("no exhaustion → lore total equals intrinsic mod (regression guard)", () => {

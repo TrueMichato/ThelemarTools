@@ -978,6 +978,7 @@ describe("Phase C: Death Save with Proficiency Bonus (C9)", () => {
 				disciplinedSurvivorRerollCost: 1,
 			}),
 			getProficiencyBonus: () => profBonus,
+			_getExhaustionD20Penalty: () => 0,
 		};
 
 		combat = Object.create(CharacterSheetCombat.prototype);
@@ -986,6 +987,7 @@ describe("Phase C: Death Save with Proficiency Bonus (C9)", () => {
 			rollDice: () => rollResult,
 			rollD20: () => ({roll: rollResult, roll1: rollResult, roll2: rollResult, mode: "normal"}),
 			showDiceResult: (result) => toasts.push({_diceResult: true, ...result}),
+			formatD20Breakdown: (roll, modifier, extra = "") => `1d20 (${roll.roll}) + ${modifier}${extra}`,
 			renderCharacter: () => {},
 			saveCharacter: () => {},
 		};
@@ -1056,6 +1058,20 @@ describe("Phase C: Death Save with Proficiency Bonus (C9)", () => {
 
 		expect(deathSaves.failures).toBe(1);
 		expect(deathSaves.successes).toBe(0);
+	});
+
+	it("subtracts exhaustion from the death-save total and shows the penalty", () => {
+		rollResult = 8;
+		profBonus = 5;
+		combat._state._getExhaustionD20Penalty = () => 4;
+
+		combat._rollDeathSave();
+
+		expect(deathSaves.failures).toBe(1);
+		const diceResult = toasts.find(t => t._diceResult);
+		expect(diceResult.modifier).toBe(1);
+		expect(diceResult.total).toBe(9);
+		expect(diceResult.subtitle).toContain("- 4 (exhaustion)");
 	});
 });
 
