@@ -46,9 +46,11 @@ exists for that theme — if everything you found is `DMG`/`XDMG`, widen the sea
 | Field | Notes |
 |---|---|
 | `candidates` | Ordered list of `{name, source}`. The **first** one that resolves in the catalog wins — list the preferred printing first, cheaper fallbacks after. |
+| `custom` | A hand-authored raw item object used verbatim (fused/bespoke items); replaces `candidates`. |
 | `equip` | `true` to equip/wear/wield it. |
 | `attune` | `true` to attune (counts against the 3-attunement budget — except Ioun stones, see below). |
 | `qty` | Stack size for consumables (default 1). |
+| `storedSpells` | For a `Ring of Spell Storing` (or any spell-storing item): an array of `{spell, level, saveDc, attackBonus, ability, casterName}` written into the item's structured reserve so the sheet can cast them. Keep summed `level`s ≤ capacity (5 for the ring). See the Ring of Spell Storing note below. |
 
 Why `candidates` is a list: the same item is often printed in several books with
 different source codes. Listing fallbacks means the entry still resolves if the
@@ -122,11 +124,23 @@ spawn's printed `abil:` line, **not** by eyeballing the loadout.
 
 Vary the booster *type* across a party rather than stacking Ioun stones on everyone:
 a numbered MEC stone here, the classic named `Ioun Stone, Leadership` there, a
-`Tome of Clear Thought` (INT +2, no attune) for a scholar, a `Manual of Quickness of
-Action` (DEX +2) for a duelist, a `Belt of Fire Giant Strength` (sets STR 25) for a
-front-liner. For **epic** NPCs, layer two boosters (e.g. a +2 stone *and* a +4
-super-tier stone, or a +2 stone *and* a matching tome) to push a signature stat to
-24–26, and remember an epic boon can add a further +1.
+`Manual of Quickness of Action` (DEX +2) for a duelist, a `Belt of Fire Giant
+Strength` (sets STR 25) for a front-liner. For **epic** NPCs, layer two boosters
+(e.g. a +2 stone *and* a +4 super-tier stone) to push a signature stat to 24–26, and
+remember an epic boon can add a further +1 (it lands in `directAbilityBonuses` in the
+export, which you must include when hand-checking a total).
+
+> **Pitfall — the one-use stat "tomes"/"manuals" are consumables, not gear.**
+> `Tome of Clear Thought` / `Tome of Understanding` / `Tome of Leadership and
+> Influence` and the `Manual of …` books are read once over several days, grant their
+> +2 permanently, then are **destroyed**. Parking one in an NPC's attuned loadout as a
+> persistent booster reads as a mistake. If a player wants that +2 "just baked in,"
+> use `graft: {abilityScores: {int: 2}}` — it writes a permanent flat bonus into
+> `customModifiers.abilityScores` (summed by `getAbilityScore`), survives export/import,
+> and, unlike bumping the spec's base score, is **not** overridden by the builder's
+> auto-ASI allocation. Then spend the freed slot on an *interesting persistent* item
+> (e.g. for a dark wizard, the `Libram of Souls and Flesh` — a Rare necromantic wizard
+> spellbook — instead of the consumable tome).
 
 ## Custom / fused items — `custom:` on a loadout entry
 
@@ -159,12 +173,29 @@ identically. Confirm in the export that the item is present with a numeric
   to `{dex: 4}` (or higher), and inject it via `custom:`. A custom item's `ability`
   block is read on import exactly like a real item's, so the larger increase lands
   (verify `itemAbilityOverrides.bonus` in the export).
-- **A pre-loaded `Ring of Spell Storing`.** The sheet has no structured "stored
-  spells" slot — a real ring imports empty. To give an NPC a ring loaded with
-  specific spells, inject a `custom:` copy whose `entries` name exactly what it holds
-  (e.g. "currently holding {@spell vampiric touch} (3rd) and {@spell blindness/
-  deafness} (2nd)"), keeping the total within the ring's 5-level capacity. It's
-  self-documenting on the sheet even though the casting itself stays DM-tracked.
+- **A pre-loaded `Ring of Spell Storing`.** The sheet *does* have a structured
+  stored-spell slot, so use a **real** catalogue `Ring of Spell Storing` (the
+  inventory add path auto-detects the name and sets `maxSpellLevels: 5`) and populate
+  it via a `storedSpells` array on the loadout entry — **not** a `custom:` prose copy.
+  A prose "currently holding …" description does nothing: the sheet's stored-spell UI
+  (`getStoredSpells`/`castStoredSpell`) reads only the structured array, so a prose-only
+  ring imports with an empty reserve and "does nothing." Each entry is
+  `{spell, level, saveDc, attackBonus, ability, casterName}`; keep the summed `level`s
+  within the ring's 5-level capacity, and set `saveDc`/`attackBonus` to the storing
+  caster's own effective numbers (include a `Robe of the Archmagi`'s +2 if worn):
+
+  ```js
+  {
+    candidates: [P("Ring of Spell Storing", "DMG"), P("Ring of Spell Storing", "XDMG")],
+    equip: true, attune: true,
+    storedSpells: [
+      {spell: "Vampiric Touch", level: 3, saveDc: 23, attackBonus: 15, ability: "int", casterName: "Octavius Katro"},
+      {spell: "Blindness/Deafness", level: 2, saveDc: 23, attackBonus: 15, ability: "int", casterName: "Octavius Katro"},
+    ],
+  }
+  ```
+
+  Verify in the export that `inventory[].item.storedSpells` is populated (not `[]`).
 
 ## AC-affecting items work automatically
 

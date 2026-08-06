@@ -190,6 +190,21 @@ Descriptions accept `@tag` syntax.
   graft: {profBonus: 1},   // the Ioun Stone, Mastery's +1 PB
   ```
 
+- **`graft.abilityScores: {int: 2, …}`** — a flat, permanent ability-score bump
+  written into `customModifiers.abilityScores`, which `getAbilityScore()` sums as a
+  "featureBonus". Use it to bake in a stat gain that has **no persistent item** to
+  carry it — most often to replace a nonsensical one-use consumable "tome"/"manual"
+  (a `Tome of Clear Thought` sitting in an attuned loadout; see magic-items.md). Unlike
+  raising the spec's base `abilities.int`, this is **not** overridden by the builder's
+  auto-ASI allocation, and it survives export/import. Verify
+  `customModifiers.abilityScores` in the export and re-check the total on the spawn's
+  `abil:` line (remember an epic boon's +1 shows up separately in
+  `directAbilityBonuses`):
+
+  ```js
+  graft: {abilityScores: {int: 2}, boons: [/* … */]},   // bakes in a removed tome's +2 INT
+  ```
+
 ## Self-contained helper
 
 The batch is imported as a module, so define the loadout helper inside it:
