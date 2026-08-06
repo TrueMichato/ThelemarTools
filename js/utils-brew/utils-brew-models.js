@@ -199,7 +199,7 @@ class _BrewDocHead {
 		return new this({
 			docIdLocal: CryptUtil.uid(),
 			timeAdded: Date.now(),
-			checksum: CryptUtil.md5(JSON.stringify(json)),
+			checksum: CryptUtil.hashFast(JSON.stringify(json)),
 			url: url,
 			filename: filename,
 			isLocal: isLocal,
@@ -212,12 +212,12 @@ class _BrewDocHead {
 	}
 
 	mutUpdate ({json}) {
-		this.checksum = CryptUtil.md5(JSON.stringify(json));
+		this.checksum = CryptUtil.hashFast(JSON.stringify(json));
 		return this;
 	}
 
 	mutMerge ({json, body, isLazy}) {
-		if (!isLazy) this.checksum = CryptUtil.md5(JSON.stringify(body ?? json));
+		if (!isLazy) this.checksum = CryptUtil.hashFast(JSON.stringify(body ?? json));
 		return this;
 	}
 }
