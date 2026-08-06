@@ -240,6 +240,7 @@ export class BrewUtil2Base {
 	}
 
 	async _pGetBrewProcessed_ ({lockToken}) {
+		// Deep copy up-front so everything downstream is free to mutate in place.
 		const cpyBrews = MiscUtil.copyFast([
 			...await this.pGetBrew({lockToken}),
 			...this._brewsTemp,
@@ -281,7 +282,10 @@ export class BrewUtil2Base {
 	}
 
 	_pGetBrewProcessed_getMergedOutput ({cpyBrews}) {
-		return BrewDoc.mergeObjects(undefined, ...cpyBrews.map(({body}) => body));
+		// `cpyBrews` is already a private deep copy (see `_pGetBrewProcessed_`), and is discarded
+		// once merged, so allow `mergeObjects` to consume it directly. Letting it copy again would
+		// deep-copy the entire homebrew payload a second time.
+		return BrewDoc.mergeObjects({isCopy: false}, ...cpyBrews.map(({body}) => body));
 	}
 
 	/**
