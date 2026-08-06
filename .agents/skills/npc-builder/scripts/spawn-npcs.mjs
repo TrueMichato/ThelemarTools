@@ -318,6 +318,27 @@ async function main () {
 								w.equipped = !!entry.equip;
 								w.attuned = !!entry.attune;
 								w.quantity = entry.qty || 1;
+								// Pre-load a spell-storing item (e.g. Ring of Spell Storing) with a
+								// reserve of *castable* spells. `_addItem` hardcodes `storedSpells: []`
+								// and derives `maxSpellLevels` from the item name, so a real "Ring of
+								// Spell Storing" already reports a 5-level capacity on this wrapper —
+								// we only need to populate the reserve so the sheet's stored-spell UI
+								// (state.getStoredSpells/castStoredSpell) can list and cast them. A
+								// prose-only "currently holds …" description does nothing here; the
+								// structured array is the single source of truth. Entry shape:
+								// {spell, level, saveDc, attackBonus, ability, casterName}.
+								if (Array.isArray(entry.storedSpells) && entry.storedSpells.length) {
+									if (!w.item.maxSpellLevels) w.item.maxSpellLevels = entry.maxSpellLevels || 5;
+									w.item.storedSpells = entry.storedSpells.map(s => ({
+										spell: s.spell,
+										level: s.level ?? 1,
+										saveDc: s.saveDc ?? 13,
+										attackBonus: s.attackBonus ?? 5,
+										ability: s.ability || "int",
+										casterName: s.casterName || "",
+									}));
+									log.push(`stored spells → ${it.name}: ${entry.storedSpells.map(s => `${s.spell} (L${s.level})`).join(", ")}`);
+								}
 							}
 						} else {
 							state.addItem(it, entry.qty || 1, !!entry.equip, !!entry.attune);
@@ -524,6 +545,23 @@ async function main () {
 							if (typeof graft.profBonus === "number" && state.setCustomModifier) {
 								state.setCustomModifier("proficiencyBonus", graft.profBonus);
 								log.push(`graft profBonus: +${graft.profBonus}`);
+							}
+							// Flat, deterministic ability-score bumps written straight to
+							// customModifiers.abilityScores, which getAbilityScore() sums as a
+							// "featureBonus". Use this to bake in a permanent stat gain that has
+							// no structured item to carry it — e.g. an ability increase a player
+							// wants baked into the character rather than tracked as a nonsensical
+							// one-use consumable (a Tome of Clear Thought/Understanding sitting in
+							// the pack). It survives export/import because customModifiers is
+							// serialized, and unlike bumping the spec's base score it does NOT get
+							// overridden by the builder's auto-ASI allocation. Shape: {int: 2, …}.
+							if (graft.abilityScores && state._data?.customModifiers) {
+								const tgt = state._data.customModifiers.abilityScores
+									|| (state._data.customModifiers.abilityScores = {});
+								for (const [abl, amt] of Object.entries(graft.abilityScores)) {
+									tgt[abl] = (tgt[abl] || 0) + amt;
+								}
+								log.push(`graft abilityScores: ${Object.entries(graft.abilityScores).map(([a, v]) => `${a}+${v}`).join(", ")}`);
 							}
 							// Grant epic boons directly. Some classes (e.g. Talent) have no
 							// epic-boon selection slot, so the normal chooser can never reach
