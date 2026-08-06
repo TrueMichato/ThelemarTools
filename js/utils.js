@@ -5569,12 +5569,26 @@ globalThis.DataUtil = class {
 
 		static _pMergeCopy_search (impl, page, entryList, entry, options) {
 			const entryHash = UrlUtil.URL_TO_HASH_BUILDER[page](entry._copy);
-			return entryList.find(ent => {
+
+			// Index the entire list, rather than stopping at the first match.
+			//
+			// `_pMergeCopy` only calls this on a cache miss, so stopping early leaves the cache
+			// partially built, and the next miss re-walks the list from the start -- rebuilding hashes
+			// for entries it has already seen. Over a homebrew-inflated entry list that makes `_copy`
+			// resolution quadratic in hash-building.
+			//
+			// Walking to the end means the first miss populates the cache for every entry, so every
+			// subsequent lookup is served by the `impl._mergeCache` hit in `_pMergeCopy`.
+			//
+			// `||=` preserves the existing "earlier = better" precedence, so the entry returned for
+			// `entryHash` is still the first one in `entryList` which matches it.
+			impl._mergeCache ||= {};
+			for (const ent of entryList) {
 				const hash = UrlUtil.URL_TO_HASH_BUILDER[page](ent);
-				// Avoid clobbering existing caches, as we assume "earlier = better"
 				impl._mergeCache[hash] ||= ent;
-				return hash === entryHash;
-			});
+			}
+
+			return impl._mergeCache[entryHash];
 		}
 
 		static async _pMergeCopy_pGetTemplates (entry) {
