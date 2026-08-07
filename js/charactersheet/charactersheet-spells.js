@@ -379,6 +379,12 @@ class CharacterSheetSpells {
 		document.addEventListener("click", (/** @type {*} */ e) => {
 			if (e.target.closest(".btn-open-gambling-table")) this._openGamblingTableModal();
 		});
+
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const btn = e.target.closest(".charsheet__wizard-capstone-configure");
+			if (!btn || btn.disabled) return;
+			this.pConfigureWizardCapstone(btn.dataset.feature);
+		});
 	}
 
 	_toggleSlot (level, pip) {
@@ -2365,8 +2371,27 @@ class CharacterSheetSpells {
 			label: `${r.name} — cast at level ${r.castLevel}, no slot (${r.current}/${r.max})`,
 		}));
 
-		// Unified cast options: no-slot resources first, then pact/leveled slots.
-		const castOptions = [...noSlotOptions, ...availableSlotLevels];
+		const masteryInfo = this._state.getSpellMasteryCastInfo?.(spell);
+		const signatureInfo = this._state.getSignatureSpellCastInfo?.(spell);
+		const wizardCapstoneOptions = [
+			...(masteryInfo ? [{
+				isWizardCapstone: true,
+				capstoneType: "mastery",
+				level: masteryInfo.castLevel,
+				isPact: false,
+				label: `Free (Spell Mastery) — cast at level ${masteryInfo.castLevel}`,
+			}] : []),
+			...(signatureInfo?.available ? [{
+				isWizardCapstone: true,
+				capstoneType: "signature",
+				level: 3,
+				isPact: false,
+				label: `Signature (${signatureInfo.usesCurrent}/${signatureInfo.usesMax}) — cast at level 3, no slot`,
+			}] : []),
+		];
+
+		// Unified cast options: class-feature casts, other no-slot resources, then slots.
+		const castOptions = [...wizardCapstoneOptions, ...noSlotOptions, ...availableSlotLevels];
 
 		if (castOptions.length === 0) {
 			JqueryUtil.doToast({type: "warning", content: "No spell slots available!"});
@@ -2377,8 +2402,7 @@ class CharacterSheetSpells {
 		// upcast choice from the cast-options context menu — revalidated against current slots).
 		let selectedSlot;
 		if (decision && decision.slotLevel != null) {
-			selectedSlot = castOptions.find(s => !s.isNoSlotResource && !s.isPact && s.level === decision.slotLevel)
-				|| castOptions.find(s => s.level === decision.slotLevel);
+			selectedSlot = castOptions.find(s => !s.isWizardCapstone && !s.isNoSlotResource && !s.isPact && s.level === decision.slotLevel);
 			if (!selectedSlot) {
 				JqueryUtil.doToast({type: "warning", content: `No level ${decision.slotLevel} slot available.`});
 				return;
@@ -2426,6 +2450,7 @@ class CharacterSheetSpells {
 				...(activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : {}),
 				...(variantComponentChoice?.variantComponent ? {variantComponent: variantComponentChoice.variantComponent} : {}),
 				...(activeMetamagicChoice?.feywildShard ? {feywildShard: true} : {}),
+				...(selectedSlot.isWizardCapstone ? {freeCastSource: selectedSlot.capstoneType === "mastery" ? "Spell Mastery" : "Signature Spells"} : {}),
 			},
 		});
 
@@ -2454,7 +2479,12 @@ class CharacterSheetSpells {
 		// A no-slot resource (e.g. Star Map) is the player's chosen cast vehicle,
 		// so it is always spent — a variant component's "noSlot" effect waives
 		// spell *slots*, not feature resources.
-		if (selectedSlot.isNoSlotResource) {
+		if (selectedSlot.isWizardCapstone) {
+			if (selectedSlot.capstoneType === "signature" && !this._state.useSignatureSpell?.(spell)) {
+				JqueryUtil.doToast({type: "warning", content: `${spell.name}'s Signature Spell cast has already been used. Cast it with a spell slot instead.`});
+				return;
+			}
+		} else if (selectedSlot.isNoSlotResource) {
 			const res = this._state.getResources().find(r => r.id === selectedSlot.resourceId);
 			if (!res || (res.current || 0) <= 0) {
 				JqueryUtil.doToast({type: "warning", content: `No ${selectedSlot.resourceName || "resource"} charges remaining.`});
@@ -2494,7 +2524,9 @@ class CharacterSheetSpells {
 				this._state.setSorceryPoints({current: Math.min(sp.max, sp.current + activeMetamagicChoice.metamagic.cost), max: sp.max});
 				this._refreshSorceryPointUI();
 			}
-			if (selectedSlot.isNoSlotResource) {
+			if (selectedSlot.isWizardCapstone) {
+				if (selectedSlot.capstoneType === "signature") this._state.restoreSignatureSpellUse?.(spell);
+			} else if (selectedSlot.isNoSlotResource) {
 				const res = this._state.getResources().find(r => r.id === selectedSlot.resourceId);
 				if (res) this._state.setResourceCurrent(selectedSlot.resourceId, (res.current || 0) + 1);
 			} else if (!skipSlotConsumption) {
@@ -6849,6 +6881,7 @@ class CharacterSheetSpells {
 		container.innerHTML = "";
 
 		// Render innate spells first (from features/feats)
+		this._renderWizardCapstonePanel(container);
 		this._renderInnateSpells(container);
 
 		// Render scribing spellbook section (Spell Scribing Adept)
@@ -6868,6 +6901,7 @@ class CharacterSheetSpells {
 		if (this._spellFilter) {
 			filtered = filtered.filter(s => s.name.toLowerCase().includes(this._spellFilter));
 		}
+
 		if (this._spellLevelFilter !== "all") {
 			filtered = filtered.filter(s => s.level === parseInt(this._spellLevelFilter));
 		}
@@ -6904,6 +6938,94 @@ class CharacterSheetSpells {
 		// full reload). _renderSpellTrackingUI does not call back into this
 		// method, so there's no recursion.
 		this._renderSpellTrackingUI();
+	}
+
+	_renderWizardCapstonePanel (container) {
+		const calc = this._state.getFeatureCalculations?.() || {};
+		if (!calc.hasSpellMastery && !calc.hasSignatureSpells) return;
+		const mastery = this._state.getSpellMasterySpells?.() || [];
+		const signatures = this._state.getSignatureSpells?.() || [];
+		const isXphb = this._state.isXphbWizard?.();
+		const masteryRows = mastery.length
+			? mastery.map(spell => `<span class="badge badge-success mr-1">${spell.name} (L${spell.level})</span>`).join("")
+			: `<span class="ve-muted">Not selected</span>`;
+		const signatureRows = signatures.length
+			? signatures.map(spell => `<span class="badge badge-info mr-1">${spell.name} (${spell.usesCurrent}/${spell.usesMax})</span>`).join("")
+			: `<span class="ve-muted">Not selected</span>`;
+		const panel = e_({outer: `
+			<div class="charsheet__spell-section charsheet__wizard-capstones mb-3">
+				<h4 class="charsheet__spell-section-header"><span class="charsheet__spell-section-icon">✨</span> Wizard Mastery</h4>
+				${calc.hasSpellMastery ? `<div class="ve-flex-v-center ve-flex-wrap gap-2 mb-2">
+					<strong>Spell Mastery:</strong> ${masteryRows}
+					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__wizard-capstone-configure" data-feature="mastery" ${isXphb && mastery.length === 2 ? "disabled" : ""} title="${isXphb && mastery.length === 2 ? "Replace a mastered spell when you finish a Long Rest" : "Choose mastered spells"}">${mastery.length === 2 ? "Change" : "Choose"}</button>
+					${isXphb ? `<span class="ve-muted ve-small">Changes on a Long Rest</span>` : `<span class="ve-muted ve-small">Changes after 8 hours of study</span>`}
+				</div>` : ""}
+				${calc.hasSignatureSpells ? `<div class="ve-flex-v-center ve-flex-wrap gap-2">
+					<strong>Signature Spells:</strong> ${signatureRows}
+					${signatures.length !== 2 ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__wizard-capstone-configure" data-feature="signature">Choose</button>` : ""}
+				</div>` : ""}
+			</div>
+		`});
+		container.append(panel);
+	}
+
+	async pConfigureWizardCapstone (feature) {
+		const isMastery = feature === "mastery";
+		const current = isMastery ? this._state.getSpellMasterySpells() : this._state.getSignatureSpells();
+		if (isMastery && this._state.isXphbWizard?.() && current.length === 2) {
+			JqueryUtil.doToast({type: "info", content: "XPHB Spell Mastery can be changed when you finish a Long Rest."});
+			return false;
+		}
+		if (!isMastery && current.length === 2) return false;
+		const {eleModalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: isMastery ? "✨ Spell Mastery" : "🌟 Signature Spells",
+			isMinHeight0: true,
+			isWidth100: true,
+		});
+		let selected = [...current];
+		const candidates = isMastery
+			? [...this._state.getSpellMasteryCandidates(1), ...this._state.getSpellMasteryCandidates(2)]
+			: this._state.getSignatureSpellCandidates();
+		eleModalInner.append(CharacterSheetSpellPicker.renderFixedSpellPicker({
+			title: isMastery ? "Mastered Spells" : "Signature Spells",
+			description: isMastery
+				? "Choose one level 1 and one level 2 Wizard spell from your spellbook."
+				: "Choose two different level 3 Wizard spells from your spellbook.",
+			slots: isMastery
+				? [{level: 1, label: "Level 1 Mastery"}, {level: 2, label: "Level 2 Mastery"}]
+				: [{level: 3, label: "First Signature Spell"}, {level: 3, label: "Second Signature Spell"}],
+			spells: candidates,
+			preSelectedSpells: current,
+			onSelect: spells => { selected = spells; },
+		}));
+		const footer = e_({outer: `<div class="charsheet__modal-footer"></div>`});
+		const cancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel", click: () => doClose(false)});
+		const save = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Save Choices"});
+		save.addEventListener("click", () => {
+			const ok = isMastery
+				? (current.length === 2
+					? selected.every(spell => {
+						const previous = current.find(it => it.level === spell.level);
+						return previous && (this._spellIdentity(previous) === this._spellIdentity(spell)
+							|| this._state.replaceSpellMasterySpell(spell.level, spell, {trigger: "study"}));
+					})
+					: this._state.setSpellMasterySpells(selected))
+				: this._state.setSignatureSpells(selected);
+			if (!ok) {
+				JqueryUtil.doToast({type: "warning", content: "Complete all eligible spell choices before saving."});
+				return;
+			}
+			this._page.saveCharacter();
+			this._renderSpellList();
+			doClose(true);
+		});
+		footer.append(cancel, save);
+		eleModalInner.append(footer);
+		return true;
+	}
+
+	_spellIdentity (spell) {
+		return `${spell?.name || ""}|${spell?.source || ""}`.toLowerCase();
 	}
 
 	/**
@@ -7118,8 +7240,8 @@ class CharacterSheetSpells {
 		const unpreparedSpells = leveledSpells.filter(s => !s.prepared && !s.alwaysPrepared);
 
 		// Calculate prepared limits
-		const currentPrepared = preparedSpells.length;
 		const maxPrepared = spellcastingInfo?.preparedMax || spellcastingInfo?.max || 0;
+		const currentPrepared = CharacterSheetClassUtils.countPreparedSpells(leveledSpells, {max: maxPrepared}).current;
 		const preparedColorClass = currentPrepared > maxPrepared ? "text-danger" : (currentPrepared === maxPrepared ? "text-success" : "");
 
 		// Render cantrips first (always "prepared"); split attributed vs orphan so the
@@ -7551,6 +7673,8 @@ class CharacterSheetSpells {
 		const isCantrip = spell.level === 0;
 		const isAlwaysPrepared = spell.alwaysPrepared;
 		const sourceFeature = spell.sourceFeature;
+		const masteryInfo = this._state.getSpellMasteryCastInfo?.(spell);
+		const signatureInfo = this._state.getSignatureSpellCastInfo?.(spell);
 		// Ensure spell has a valid ID
 		const spellId = spell.id || `${spell.name}|${spell.source}`;
 
@@ -7650,6 +7774,11 @@ class CharacterSheetSpells {
 		const sourceBadge = sourceLabel
 			? `<span class="badge badge-warning charsheet__spell-source-badge" title="Source: ${sourceLabel}">${this._truncateFeatureName(sourceLabel)}</span>`
 			: "";
+		const capstoneBadge = masteryInfo
+			? `<span class="badge badge-success" title="Cast at level ${masteryInfo.castLevel} without a spell slot">Free (Spell Mastery)</span>`
+			: (signatureInfo
+				? `<span class="badge ${signatureInfo.available ? "badge-info" : "badge-secondary"}" title="Free level 3 cast; recharges on a Short or Long Rest">Signature (${signatureInfo.usesCurrent}/${signatureInfo.usesMax})</span>`
+				: "");
 
 		// Bug #13: surface a spell's own save DC / attack bonus when it carries an explicit
 		// per-spell casting ability (e.g. the Hochling Divine Spark racial cantrip cast with
@@ -7678,9 +7807,12 @@ class CharacterSheetSpells {
 		// sorcery points change); per-spell applicability/affordability is surfaced in the
 		// picker itself.
 		const hasActiveMetamagic = (this._state.getCastableActiveMetamagics?.({spell, spellData, slotLevel: spell.level}) || []).length > 0;
+		const castLabel = masteryInfo
+			? "Cast Free"
+			: (signatureInfo?.available ? `Cast Signature (${signatureInfo.usesCurrent}/${signatureInfo.usesMax})` : "Cast");
 		let castButtonsHtml = `
-			<button class="ve-btn ve-btn-xs ve-btn-success charsheet__spell-cast" title="Cast Spell">
-				<span class="glyphicon glyphicon-flash mr-1"></span>Cast
+			<button class="ve-btn ve-btn-xs ve-btn-success charsheet__spell-cast" title="${masteryInfo ? "Cast free with Spell Mastery" : (signatureInfo?.available ? "Use the free Signature Spell cast" : "Cast Spell")}">
+				<span class="glyphicon glyphicon-flash mr-1"></span>${castLabel}
 			</button>
 		`;
 		if (hasActiveMetamagic) {
@@ -7716,6 +7848,7 @@ class CharacterSheetSpells {
 							${spell.concentration ? `<span class="badge badge-info" title="Concentration">C</span>` : ""}
 							${spell.ritual ? `<span class="badge badge-success" title="Ritual">R</span>` : ""}
 							${sourceBadge}
+							${capstoneBadge}
 						</span>
 					</div>
 					${fullDetailsLine ? `<div class="charsheet__spell-item-details ve-muted ve-small">${fullDetailsLine}</div>` : ""}
