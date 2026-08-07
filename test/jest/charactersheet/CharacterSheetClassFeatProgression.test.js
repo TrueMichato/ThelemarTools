@@ -92,6 +92,16 @@ describe("CharacterSheetClassUtils.getClassFeatProgressionGains", () => {
 			{progressionName: "Fighting Style", category: ["FS:R"], count: 1},
 		]);
 	});
+
+	it("accepts a selected ability for a class-granted feat choice", () => {
+		const resilient = {
+			name: "Resilient",
+			source: "XPHB",
+			ability: [{choose: {from: Parser.ABIL_ABVS, amount: 1}}],
+			_featChoices: {ability: "wis"},
+		};
+		expect(ClassUtils.isFeatChoiceSpecComplete(resilient)).toBe(true);
+	});
 });
 
 // ===========================================================================

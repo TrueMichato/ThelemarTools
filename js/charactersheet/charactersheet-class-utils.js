@@ -5732,13 +5732,7 @@ class CharacterSheetClassUtils {
 				const max = ablChoice.max || 20;
 
 				if (/** @type {*} */ ablChoice.choose) {
-					// Check for epic boon choice first, then feat choice
-					if (/** @type {*} */ feat._epicBoonAbilityChoice) {
-						const {ability, amount} = feat._epicBoonAbilityChoice;
-						const current = state.getAbilityBase(ability);
-						state.setAbilityBase(ability, CharacterSheetClassUtils.capAbilityIncrease(current, amount, max));
-					} else if (choices.ability) {
-						// Apply chosen ability from feat choices
+					if (choices.ability) {
 						const amount = ablChoice.choose.amount || 1;
 						const current = state.getAbilityBase(choices.ability);
 						state.setAbilityBase(choices.ability, CharacterSheetClassUtils.capAbilityIncrease(current, amount, max));
@@ -7021,7 +7015,12 @@ class CharacterSheetClassUtils {
 		if (Array.isArray(effectiveAbility)) {
 			for (const ab of effectiveAbility) {
 				if (ab?.choose) {
-					choices.ability = {count: ab.choose.count || 1, amount: ab.choose.amount || 1, from: ab.choose.from || Parser.ABIL_ABVS};
+					choices.ability = {
+						count: ab.choose.count || 1,
+						amount: ab.choose.amount || 1,
+						from: ab.choose.from || Parser.ABIL_ABVS,
+						max: ab.max || 20,
+					};
 					break;
 				}
 			}
@@ -7124,18 +7123,25 @@ class CharacterSheetClassUtils {
 		if (sp.tools && (!Array.isArray(fc.tools) || fc.tools.length < sp.tools.count)) return false;
 		if (sp.expertise && (!Array.isArray(fc.expertise) || fc.expertise.length < sp.expertise.count)) return false;
 		if (sp.ability) {
-			const picked = fc.ability && typeof fc.ability === "object" ? Object.keys(fc.ability).length : 0;
+			const picked = typeof fc.ability === "string"
+				? 1
+				: Array.isArray(fc.ability)
+					? fc.ability.length
+					: fc.ability && typeof fc.ability === "object"
+						? Object.keys(fc.ability).length
+						: 0;
 			if (picked < sp.ability.count) return false;
 		}
 		if (Array.isArray(sp.optionalFeatures) && sp.optionalFeatures.length) {
 			const picks = Array.isArray(fc.optionalFeatures) ? fc.optionalFeatures : [];
 			for (const optSpec of sp.optionalFeatures) {
-				const match = picks.find((/** @type {*} */ p) => p?.featureName === optSpec.name) || picks.find((/** @type {*} */ p) => p?.specIndex === sp.optionalFeatures.indexOf(optSpec));
+				const match = picks.find((/** @type {*} */ p) => p?.name === optSpec.name || p?.featureName === optSpec.name)
+					|| picks.find((/** @type {*} */ p) => p?.specIndex === sp.optionalFeatures.indexOf(optSpec));
 				if (!match || !Array.isArray(match.picks) || match.picks.length < (optSpec.count || 1)) return false;
 			}
 		}
 		if (sp.spells) {
-			if (sp.spells.list && !fc.scribingClass) return false;
+			if (sp.spells.list && !fc.spellList && !fc.scribingClass) return false;
 			if (sp.spells.cantrips && (!Array.isArray(fc.cantrips) || fc.cantrips.length < sp.spells.cantrips.count)) return false;
 			if (sp.spells.spells && (!Array.isArray(fc.spells) || fc.spells.length < sp.spells.spells.count)) return false;
 		}

@@ -70,6 +70,29 @@ describe("resolveFeatSaveProficiencies", () => {
 	});
 });
 
+describe("Resilient ability choice spec", () => {
+	test.each([
+		["PHB", RESILIENT_PHB],
+		["XPHB", RESILIENT_XPHB],
+	])("%s exposes one choice from all six abilities", (_source, feat) => {
+		const spec = ClassUtils.buildFeatChoicesSpec(feat);
+		expect(spec.ability).toEqual({
+			count: 1,
+			amount: 1,
+			from: ["str", "dex", "con", "int", "wis", "cha"],
+			max: 20,
+		});
+	});
+
+	it("treats the renderer's string ability selection as a completed choice", () => {
+		const feat = {
+			...RESILIENT_XPHB,
+			_featChoices: {ability: "con"},
+		};
+		expect(ClassUtils.isFeatChoiceSpecComplete(feat)).toBe(true);
+	});
+});
+
 describe("applyFeatBonuses grants the Resilient save proficiency", () => {
 	let state;
 	beforeEach(() => { state = new CharacterSheetState(); });

@@ -270,6 +270,33 @@ describe("CharacterSheetClassUtils.buildFeatChoicesSpec & isFeatChoiceSpecComple
 		feat._featChoices.skills = ["Athletics", "Acrobatics"];
 		expect(ClassUtils.isFeatChoiceSpecComplete(feat, null, {state: new globalThis.CharacterSheetState(), page: {getOptionalFeatures: () => []}})).toBe(true);
 	});
+
+	it("accepts the spellList field written by Magic Initiate pickers", () => {
+		const feat = {
+			name: "Magic Initiate",
+			category: "O",
+			additionalSpells: [{name: "Wizard", ability: "int"}],
+			_featChoices: {spellList: "Wizard"},
+		};
+		expect(ClassUtils.isFeatChoiceSpecComplete(feat)).toBe(true);
+	});
+
+	it("accepts optional-feature groups stored under their spec name", () => {
+		const feat = {
+			name: "Eldritch Adept",
+			category: "G",
+			optionalfeatureProgression: [{name: "Eldritch Invocation", featureType: ["EI"], progression: {"1": 1}}],
+			_featChoices: {
+				optionalFeatures: [{name: "Eldritch Invocation", featureTypes: ["EI"], picks: [{name: "Agonizing Blast", source: "XPHB"}]}],
+			},
+		};
+		const state = new globalThis.CharacterSheetState();
+		const page = {
+			filterByAllowedSources: it => it,
+			getOptionalFeatures: () => [{name: "Agonizing Blast", source: "XPHB", featureType: ["EI"]}],
+		};
+		expect(ClassUtils.isFeatChoiceSpecComplete(feat, null, {state, page})).toBe(true);
+	});
 });
 
 describe("CharacterSheetState linkedToOptFeature cascade (Bug 8)", () => {

@@ -147,6 +147,17 @@ describe("R21 #10 — isEpicBoonLevel is source-aware and shared", () => {
 		expect(QUICKBUILD_SRC).not.toMatch(/isEpicBoon = classLevel === 19;/);
 		expect(LEVELUP_SRC).not.toMatch(/newLevel === 19 && \(classEntry\.source === "XPHB"/);
 	});
+
+	test("both choice UIs consume the propagated ability max", () => {
+		expect(LEVELUP_SRC).toMatch(/const\s+cap\s*=\s*abilityChoiceSpec\.max\s*\|\|\s*20/);
+		expect(QUICKBUILD_SRC).toMatch(/const\s+cap\s*=\s*choices\.ability\.max\s*\|\|\s*20/);
+		expect(QUICKBUILD_SRC).toMatch(/CharacterSheetClassUtils\.buildFeatChoicesSpec\(feat/);
+	});
+
+	test("both progression flows require the selected boon's ability choice", () => {
+		expect(LEVELUP_SRC).toMatch(/selectedFeat\s*&&\s*!CharacterSheetClassUtils\.isFeatChoiceSpecComplete\(selectedFeat/);
+		expect(QUICKBUILD_SRC).toMatch(/CharacterSheetClassUtils\.isFeatChoiceSpecComplete\(selectedFeat,/);
+	});
 });
 
 // ==========================================================================

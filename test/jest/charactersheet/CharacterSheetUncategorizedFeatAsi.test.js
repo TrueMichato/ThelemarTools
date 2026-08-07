@@ -98,7 +98,7 @@ describe("getEffectiveFeatAbility", () => {
 describe("buildFeatChoicesSpec surfaces the synthesized ASI picker", () => {
 	it("sets choices.ability for Plantmender", () => {
 		const spec = ClassUtils.buildFeatChoicesSpec(PLANTMENDER);
-		expect(spec.ability).toEqual({count: 1, amount: 1, from: Parser.ABIL_ABVS});
+		expect(spec.ability).toEqual({count: 1, amount: 1, from: Parser.ABIL_ABVS, max: 20});
 	});
 
 	it("leaves choices.ability null for an Origin feat with no ASI", () => {
