@@ -171,6 +171,7 @@ if (spell.name === "Blade Ward" && spell.source === "XPHB") {
 - **Effective** = canonical ± situational mods (exhaustion penalty, custom mods, active states, concentration buffs). Computed on demand by the breakdown methods (`getSaveBreakdown`, `getSkillBreakdown`, `getInitiativeBreakdown`, `getAbilityCheckBreakdown`, spell DC/attack).
 - Roll handlers apply situational mods **once** at roll time, never pre-baked into stored fields.
 - Surface both via `_formatModWithEffective(canonical, effective)` (see B8). The exhaustion subtraction must live inside the breakdown methods that compute `effective`, **never** in the field that produces `canonical`.
+- Use `CharacterSheetState._getExhaustionD20Penalty()` as the single rules source for both breakdowns and roll handlers: 2024 is `2 × exhaustion`, Thelemar is `1 × exhaustion`, and 2014 has no flat penalty. Page/module helpers must delegate to it rather than duplicating ruleset logic.
 
 Regression smell: if `spellAttackBonus`/`spellSaveDc` calc fields contain an exhaustion delta, the display and the roll will fight each other.
 

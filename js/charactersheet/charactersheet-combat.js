@@ -1406,11 +1406,12 @@ class CharacterSheetCombat {
 		const extraBonusValue = extraBonus ? extraBonus.value : 0;
 
 		const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + stateAttackBonus + localAttackBonus + extraBonusValue + ammoAttackBonus;
+		const exhaustionPenalty = this._state._getExhaustionD20Penalty?.() || 0;
 
 		// Roll d20 with advantage/disadvantage support (state mode can be overridden by shift/ctrl keys)
-		const rollResult = this._page.rollD20({event, mode: stateMode});
+		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
 		this._pendingBattleMasterAttackAdvantage = false;
-		const total = rollResult.roll + totalBonus;
+		const total = rollResult.roll + totalBonus - exhaustionPenalty;
 
 		// Check for crit/fumble
 		const critRange = this._state.getCriticalRange?.() || 20;
@@ -1447,6 +1448,7 @@ class CharacterSheetCombat {
 		const ammoLabel = (selectedAmmo && ammoAttackBonus)
 			? ` <span class="ve-muted">(${selectedAmmo.name} ${ammoAttackBonus >= 0 ? "+" : ""}${ammoAttackBonus})</span>`
 			: "";
+		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 
 		// Show result
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
@@ -1454,11 +1456,11 @@ class CharacterSheetCombat {
 		const resultEl = this._page.showDiceResult({
 			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}${extraBonusLabel}${featureModLabel}${ammoLabel}`,
 			roll: rollResult.roll,
-			modifier: totalBonus,
+			modifier: totalBonus - exhaustionPenalty,
 			total,
 			resultClass,
 			resultNote: resultNote,
-			subtitle: this._page.formatD20Breakdown(rollResult, totalBonus),
+			subtitle: this._page.formatD20Breakdown(rollResult, totalBonus, exhaustionStr),
 		});
 
 		// (R26 #8) Non-blocking post-roll Guided Strike offer. FLAG (overlap #9 roll
@@ -1633,11 +1635,12 @@ class CharacterSheetCombat {
 		const stateAttackBonus = (this._state.getBonusFromStates?.("attack") || 0)
 			+ (this._state.getBonusFromStates?.("attack:spell") || 0);
 		const totalBonus = info.bonus + stateAttackBonus;
+		const exhaustionPenalty = this._state._getExhaustionD20Penalty?.() || 0;
 
 		// Spell attacks ARE attacks: pass isAttack so the Thelemar Nat1/Nat20 ±5
 		// check/save rule does not leak into the breakdown.
 		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
-		const total = rollResult.roll + totalBonus;
+		const total = rollResult.roll + totalBonus - exhaustionPenalty;
 
 		// "spell" kind: Champion Improved/Superior Critical never expands the crit
 		// range for spell attacks (RAW text is weapon/Unarmed Strike only) — see
@@ -1655,15 +1658,16 @@ class CharacterSheetCombat {
 
 		const stateEffectLabel = this._getStateEffectLabel(hasAdvantage, hasDisadvantage);
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
+		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		void this._page.pAnimateD20?.(rollResult);
 		this._page.showDiceResult({
 			title: `Spell Attack${modeLabel}${stateEffectLabel}`,
 			roll: rollResult.roll,
-			modifier: totalBonus,
+			modifier: totalBonus - exhaustionPenalty,
 			total,
 			resultClass,
 			resultNote,
-			subtitle: this._page.formatD20Breakdown(rollResult, totalBonus),
+			subtitle: this._page.formatD20Breakdown(rollResult, totalBonus, exhaustionStr),
 		});
 	}
 
@@ -3567,6 +3571,7 @@ class CharacterSheetCombat {
 
 	_rollInitiative (event) {
 		const mod = this._state.getInitiative();
+		const exhaustionPenalty = this._state._getExhaustionD20Penalty?.() || 0;
 		// Consume initiative advantage/disadvantage from the modifier pipeline (Bug #4) — mirrors
 		// the primary handler in charactersheet.js. rollD20 combines this with event keys.
 		const initMode = this._state.getInitiativeRollMode?.() || {advantage: false, disadvantage: false};
@@ -3583,16 +3588,17 @@ class CharacterSheetCombat {
 		}
 
 		const maneuverBonus = this.consumeBattleMasterCheckBonus("initiative");
-		const total = rollResult.roll + mod + diceTotal + (maneuverBonus?.roll || 0);
+		const total = rollResult.roll + mod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0) + diceTotal + (maneuverBonus?.roll || 0);
 
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
+		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		void this._page.pAnimateD20?.(rollResult);
 		this._page.showDiceResult({
 			title: `Initiative${modeLabel}`,
 			roll: rollResult.roll,
-			modifier: mod,
+			modifier: mod - exhaustionPenalty,
 			total,
-			subtitle: this._page.formatD20Breakdown(rollResult, mod)
+			subtitle: this._page.formatD20Breakdown(rollResult, mod, exhaustionStr)
 				+ diceStr
 				+ (maneuverBonus ? ` + ${maneuverBonus.roll} [${maneuverBonus.name}]` : ""),
 		});
@@ -3751,8 +3757,11 @@ class CharacterSheetCombat {
 			// C9: Disciplined Survivor adds proficiency bonus to death saves
 			const calc = this._state.getFeatureCalculations?.() || {};
 			const profBonus = calc.hasDeathSaveProficiency ? (this._state.getProficiencyBonus?.() || 0) : 0;
-			const total = roll + profBonus;
+			const exhaustionPenalty = this._state._getExhaustionD20Penalty?.() || 0;
+			const total = roll + profBonus - exhaustionPenalty;
 			const profNote = profBonus > 0 ? ` (+${profBonus} prof)` : "";
+			const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
+			const subtitle = this._page.formatD20Breakdown?.(rollResult, profBonus, exhaustionStr);
 
 			// Champion Survivor's Defy Death (XPHB L18): a roll of 18-20 counts as a
 			// natural 20 (regain 1 HP, stabilize). PHB/pre-18 characters keep the strict
@@ -3773,27 +3782,33 @@ class CharacterSheetCombat {
 				this._page.showDiceResult({
 					title: `Death Save${modeLabel}`,
 					roll,
+					modifier: profBonus - exhaustionPenalty,
 					total,
 					resultClass: "text-danger",
 					resultNote: ` (2 Failures!)${profNote}`,
+					subtitle,
 				});
 			} else if (total >= 10) {
 				deathSaves.successes = Math.min(3, deathSaves.successes + 1);
 				this._page.showDiceResult({
 					title: `Death Save${modeLabel}`,
 					roll,
+					modifier: profBonus - exhaustionPenalty,
 					total,
 					resultClass: "text-success",
 					resultNote: ` (Success)${profNote}`,
+					subtitle,
 				});
 			} else {
 				deathSaves.failures = Math.min(3, deathSaves.failures + 1);
 				this._page.showDiceResult({
 					title: `Death Save${modeLabel}`,
 					roll,
+					modifier: profBonus - exhaustionPenalty,
 					total,
 					resultClass: "text-danger",
 					resultNote: ` (Failure)${profNote}`,
+					subtitle,
 				});
 			}
 		}

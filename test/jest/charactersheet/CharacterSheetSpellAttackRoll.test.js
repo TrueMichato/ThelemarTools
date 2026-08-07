@@ -34,7 +34,7 @@ function makePage (forcedRoll) {
 			return {roll: forcedRoll, roll1: forcedRoll, roll2: forcedRoll, mode: m, thelemar_critBonus: 0};
 		},
 		getModeLabel: (mode) => mode === "advantage" ? " (Advantage)" : mode === "disadvantage" ? " (Disadvantage)" : "",
-		formatD20Breakdown: (rollResult, modifier) => `1d20 (${rollResult.roll}) + ${modifier}`,
+		formatD20Breakdown: (rollResult, modifier, extra = "") => `1d20 (${rollResult.roll}) + ${modifier}${extra}`,
 		showDiceResult: (opts) => { diceResults.push(opts); },
 	};
 }
@@ -48,6 +48,7 @@ function makeState (overrides = {}) {
 		hasDisadvantageFromStates: () => false,
 		getBonusFromStates: () => 0,
 		getCriticalRange: () => 20,
+		_getExhaustionD20Penalty: () => 0,
 		...overrides,
 	};
 }
@@ -108,6 +109,20 @@ describe("Spell-attack quick roll (#3b)", () => {
 			const combat = makeCombat(makeState({getSpellAttackBonus: () => 4}), page);
 			combat._rollSpellAttack({});
 			expect(page.diceResults[0].modifier).toBe(4);
+		});
+
+		it("subtracts exhaustion once and itemizes it in the breakdown", () => {
+			const page = makePage(12);
+			const combat = makeCombat(makeState({
+				getSpellAttackBonus: () => 7,
+				_getExhaustionD20Penalty: () => 4,
+			}), page);
+
+			combat._rollSpellAttack({});
+
+			expect(page.diceResults[0].modifier).toBe(3);
+			expect(page.diceResults[0].total).toBe(15);
+			expect(page.diceResults[0].subtitle).toContain("- 4 (exhaustion)");
 		});
 	});
 

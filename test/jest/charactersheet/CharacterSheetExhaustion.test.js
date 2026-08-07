@@ -169,21 +169,21 @@ describe("Exhaustion Mechanics", () => {
 			const baseSave = state.getSaveMod("wis");
 			state.setExhaustion(2);
 			expect(state.getSaveMod("wis")).toBe(baseSave);
-			expect(state._getExhaustionD20Penalty()).toBe(2);
+			expect(state._getExhaustionD20Penalty()).toBe(4);
 		});
 
 		test("should NOT bake d20 penalty into displayed skill mod", () => {
 			const baseSkill = state.getSkillMod("athletics");
 			state.setExhaustion(3);
 			expect(state.getSkillMod("athletics")).toBe(baseSkill);
-			expect(state._getExhaustionD20Penalty()).toBe(3);
+			expect(state._getExhaustionD20Penalty()).toBe(6);
 		});
 
 		test("should NOT bake d20 penalty into displayed initiative", () => {
 			const baseInit = state.getInitiative();
 			state.setExhaustion(2);
 			expect(state.getInitiative()).toBe(baseInit);
-			expect(state._getExhaustionD20Penalty()).toBe(2);
+			expect(state._getExhaustionD20Penalty()).toBe(4);
 		});
 
 		test("should NOT bake d20 penalty into displayed spell attack bonus", () => {
@@ -191,7 +191,7 @@ describe("Exhaustion Mechanics", () => {
 			const baseAttack = state.getSpellAttackBonus();
 			state.setExhaustion(1);
 			expect(state.getSpellAttackBonus()).toBe(baseAttack);
-			expect(state._getExhaustionD20Penalty()).toBe(1);
+			expect(state._getExhaustionD20Penalty()).toBe(2);
 		});
 
 		// --- Speed penalty ---
@@ -276,19 +276,27 @@ describe("Exhaustion Mechanics", () => {
 			expect(state._getExhaustionD20Penalty()).toBe(0);
 		});
 
-		test("_getExhaustionD20Penalty should scale with level (2024)", () => {
+		test("_getExhaustionD20Penalty should apply -2 per level (2024)", () => {
 			state.setExhaustionRules("2024");
-			for (let i = 1; i <= 5; i++) {
+			for (let i = 1; i <= 3; i++) {
+				state.setExhaustion(i);
+				expect(state._getExhaustionD20Penalty()).toBe(i * 2);
+			}
+		});
+
+		test("_getExhaustionD20Penalty should apply -1 per level (thelemar)", () => {
+			state.setExhaustionRules("thelemar");
+			for (let i = 1; i <= 3; i++) {
 				state.setExhaustion(i);
 				expect(state._getExhaustionD20Penalty()).toBe(i);
 			}
 		});
 
-		test("_getExhaustionD20Penalty should scale with level (thelemar)", () => {
-			state.setExhaustionRules("thelemar");
-			for (let i = 1; i <= 10; i++) {
+		test("_getExhaustionD20Penalty should apply no flat penalty (2014)", () => {
+			state.setExhaustionRules("2014");
+			for (let i = 1; i <= 3; i++) {
 				state.setExhaustion(i);
-				expect(state._getExhaustionD20Penalty()).toBe(i);
+				expect(state._getExhaustionD20Penalty()).toBe(0);
 			}
 		});
 
@@ -383,7 +391,7 @@ describe("Exhaustion Mechanics", () => {
 		test("penalty type should change when rules change", () => {
 			state.setExhaustion(3);
 			state.setExhaustionRules("2024");
-			expect(state._getExhaustionD20Penalty()).toBe(3);
+			expect(state._getExhaustionD20Penalty()).toBe(6);
 			expect(state._getExhaustionSpeedPenalty()).toBe(15);
 			expect(state._getExhaustionDcPenalty()).toBe(0);
 
@@ -456,7 +464,7 @@ describe("Exhaustion Mechanics", () => {
 			expect(state.getInitiative()).toBe(baseInit);
 			expect(state.getSpellAttackBonus()).toBe(baseSpellAtk);
 			// Penalty is still available for the roll handlers to subtract at roll time
-			expect(state._getExhaustionD20Penalty()).toBe(3);
+			expect(state._getExhaustionD20Penalty()).toBe(6);
 		});
 	});
 });

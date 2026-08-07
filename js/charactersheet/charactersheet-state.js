@@ -11554,10 +11554,9 @@ class CharacterSheetState {
 		const stanceBonus = this._getStanceSaveBonus(ability);
 		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️", isCanonical: false});
 
-		// Exhaustion: subtract from the EFFECTIVE total only. Save rolls subtract
-		// `_getExhaustionD20Penalty` at roll time (via _getExhaustionPenalty in
-		// charactersheet.js), so showing it in the effective breakdown matches
-		// what the player will actually roll. Canonical stays pure ability+prof.
+		// Exhaustion: subtract from the EFFECTIVE total only. Roll handlers consume
+		// this same state-owned value, so the breakdown matches the applied penalty.
+		// Canonical stays pure ability+prof.
 		const exhaustionPenalty = this._getExhaustionD20Penalty();
 		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫", isCanonical: false});
 
@@ -11955,9 +11954,8 @@ class CharacterSheetState {
 			components.push({type: "feature", name: bonus.name, value: bonus.value, icon: "⚡", isCanonical: true});
 		}
 
-		// Exhaustion: subtract from EFFECTIVE only. Initiative is a d20 roll and
-		// _rollInitiative subtracts _getExhaustionPenalty at roll time, so the
-		// effective breakdown should reflect that. Canonical stays pure.
+		// Exhaustion: subtract from EFFECTIVE only. Initiative roll handlers consume
+		// this same state-owned value. Canonical stays pure.
 		const exhaustionPenalty = this._getExhaustionD20Penalty();
 		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫", isCanonical: false});
 
@@ -33719,8 +33717,8 @@ class CharacterSheetState {
 
 	/**
 	 * Get exhaustion penalty for d20 rolls (ability checks, attack rolls, saving throws).
-	 * 2024 XPHB: -N per level (where N = exhaustion level)
-	 * Thelemar: -N per level (same mechanic as 2024, but up to 10 levels)
+	 * 2024 XPHB: -2 per exhaustion level
+	 * Thelemar: -1 per exhaustion level
 	 * 2014: No flat d20 penalty (uses tiered disadvantage instead — not modeled as flat penalty)
 	 * @returns {number} Penalty to subtract from d20 rolls (always >= 0)
 	 */
@@ -33728,7 +33726,8 @@ class CharacterSheetState {
 		const exhaustion = this.getExhaustion();
 		if (exhaustion <= 0) return 0;
 		const rules = this.getExhaustionRules();
-		if (rules === "2024" || rules === "thelemar") return exhaustion;
+		if (rules === "2024") return exhaustion * 2;
+		if (rules === "thelemar") return exhaustion;
 		return 0; // 2014 uses tiered disadvantage, not flat penalty
 	}
 

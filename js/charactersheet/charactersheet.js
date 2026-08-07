@@ -12774,23 +12774,12 @@ class CharacterSheetPage {
 
 	// #region Dice Rolling
 	/**
-	 * Get exhaustion penalty for d20 rolls
-	 * 2024 rules: -2 per exhaustion level to d20 Tests (ability checks, attack rolls, saving throws)
-	 * Thelemar rules: -1 per exhaustion level to all rolls and DCs
-	 * 2014 rules: Handled separately (disadvantage, etc.)
+	 * Compatibility wrapper for page-owned roll handlers.
+	 * Exhaustion rules live in CharacterSheetState so roll totals and breakdowns cannot drift.
 	 * @returns {number} Penalty to subtract from d20 tests
 	 */
 	_getExhaustionPenalty () {
-		const exhaustion = this._state.getExhaustion();
-		const rules = (/** @type {*} */ (this._state.getSettings())).exhaustionRules || "2024";
-		if (rules === "2024") {
-			return exhaustion * 2; // -2 per level in 2024 rules
-		}
-		if (rules === "thelemar") {
-			return exhaustion; // -1 per level in Thelemar rules
-		}
-		// 2014 rules don't have a flat penalty to rolls
-		return 0;
+		return this._state._getExhaustionD20Penalty();
 	}
 
 	/**

@@ -13,11 +13,10 @@
  *   - Adding exhaustion to spell DC (would mis-display the target
  *     number that other creatures roll against).
  *
- * Roll-handler double-subtraction guard: the roll handlers in
- * charactersheet.js call `_getExhaustionPenalty()` themselves and
- * subtract once at roll time. They do NOT consume `breakdown.total`.
- * So adding the penalty to `breakdown.total` only affects DISPLAY and
- * cannot cause a double-subtraction at roll time.
+ * Roll-handler double-subtraction guard: roll handlers subtract the
+ * state-owned `_getExhaustionD20Penalty()` once at roll time. They do
+ * NOT consume `breakdown.total`, so adding the same penalty to the
+ * effective breakdown only affects DISPLAY.
  */
 
 import "./setup.js";
@@ -35,6 +34,46 @@ const findExhaustion = (breakdown) => breakdown.components.find(c => c.name === 
 describe("CharacterSheetExhaustionBreakdown — Phase 6.5", () => {
 	beforeEach(() => {
 		state = new CharacterSheetState();
+	});
+
+	describe("ruleset magnitude stays identical across breakdowns", () => {
+		test.each([
+			["2024", 1, 2],
+			["2024", 2, 4],
+			["2024", 3, 6],
+			["thelemar", 1, 1],
+			["thelemar", 2, 2],
+			["thelemar", 3, 3],
+			["2014", 1, 0],
+			["2014", 2, 0],
+			["2014", 3, 0],
+		])("%s exhaustion %i displays the applied -%i penalty", (rules, level, expectedPenalty) => {
+			state.setExhaustionRules(rules);
+			state.setExhaustion(level);
+			state._data.spellcasting.ability = "int";
+			state._data.customSkills.push({name: "Sailing", isLoreSkill: true, bonus: 3});
+
+			const breakdowns = [
+				state.getSaveBreakdown("dex"),
+				state.getSkillBreakdown("stealth"),
+				state.getSkillBreakdown("sailing"),
+				state.getAbilityCheckBreakdown("cha"),
+				state.getInitiativeBreakdown(),
+				state.getSpellAttackBreakdown(),
+			];
+
+			expect(state._getExhaustionD20Penalty()).toBe(expectedPenalty);
+			for (const breakdown of breakdowns) {
+				const exhaustion = findExhaustion(breakdown);
+				if (expectedPenalty === 0) {
+					expect(exhaustion).toBeUndefined();
+					expect(breakdown.total).toBe(breakdown.components.reduce((sum, component) => sum + component.value, 0));
+				} else {
+					expect(exhaustion?.value).toBe(-expectedPenalty);
+					expect(breakdown.total).toBe(breakdown.canonical - expectedPenalty);
+				}
+			}
+		});
 	});
 
 	// ─── getSaveBreakdown ─────────────────────────────────────
