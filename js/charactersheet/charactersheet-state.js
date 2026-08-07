@@ -28898,6 +28898,7 @@ class CharacterSheetState {
 					itemId: item.id,
 					itemName: item.name,
 					itemSource: item.source,
+					itemHoverData: item,
 					chargesCurrent,
 					chargesMax: item.charges || 0,
 					usesCurrent,
@@ -29616,6 +29617,7 @@ class CharacterSheetState {
 		);
 		if (existing) {
 			existing.quantity += quantity;
+			if (item._isCraftedItem) existing.item._isCraftedItem = true;
 		} else {
 			// Extract item properties, excluding wrapper properties
 			const {quantity: _q, equipped: _e, attuned: _a, ...itemProps} = item;

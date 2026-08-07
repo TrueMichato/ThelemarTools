@@ -1170,7 +1170,7 @@ class CharacterSheetInventory {
 					const rarityColors = {"common": "#9ca3af", "uncommon": "#22c55e", "rare": "#3b82f6", "very rare": "#a855f7", "legendary": "#f97316", "artifact": "#ef4444"};
 					const rarityColor = rarityColors[(item.rarity || "").toLowerCase()] || "";
 
-					const itemHoverLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEMS, item.name, item.source);
+					const itemHoverLink = CharacterSheetClassUtils.buildItemHoverNameHtml(item);
 
 					const vcSpellLabels = this._getVariantComponentSpellLabels(item);
 					const vcSpellLine = vcSpellLabels.length
@@ -6765,20 +6765,7 @@ class CharacterSheetInventory {
 		const isVariantComponent = !!(item.variantComponent?.spellEffects?.length);
 		const vcSpellLabels = isVariantComponent ? this._getVariantComponentSpellLabels(item) : [];
 
-		// Render item name with a 5etools hover link if it has a source
-		let itemNameHtml = item.name;
-		if (item.source && item.source !== "Custom" && this._page?.getHoverLink) {
-			try {
-				itemNameHtml = this._page.getHoverLink(
-					UrlUtil.PG_ITEMS,
-					item.name,
-					item.source,
-				);
-			} catch (e) {
-				// Fall back to plain name if rendering fails
-				itemNameHtml = item.name;
-			}
-		}
+		const itemNameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(item);
 
 		// Get recharge description for tooltip
 		const rechargeDescriptions = {
@@ -7194,17 +7181,11 @@ class CharacterSheetInventory {
 		const ammo = this._state.getQuiverAmmunition?.(quiver.id) || [];
 		const total = ammo.reduce((sum, a) => sum + (this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0)), 0);
 
-		let nameHtml = quiver.name;
-		if (this._page?.getHoverLink && quiver.source) {
-			try { nameHtml = this._page.getHoverLink(UrlUtil.PG_ITEMS, quiver.name, quiver.source); } catch (e) { nameHtml = quiver.name; }
-		}
+		const nameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(quiver);
 
 		const rowsHtml = ammo.length
 			? ammo.map(a => {
-				let aName = a.name;
-				if (this._page?.getHoverLink && a.source) {
-					try { aName = this._page.getHoverLink(UrlUtil.PG_ITEMS, a.name, a.source); } catch (e) { aName = a.name; }
-				}
+				const aName = CharacterSheetClassUtils.buildItemHoverNameHtml(a);
 				const count = this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0);
 				return `
 					<div class="charsheet__quiver-row ve-flex ve-flex-v-center ve-flex-wrap gap-1">
@@ -7305,19 +7286,7 @@ class CharacterSheetInventory {
 	 * Render a compact summary row for equipped/attuned item display
 	 */
 	_renderEquipmentSummaryRow (item, type) {
-		// Get item name with hover link if available
-		let itemNameHtml = item.name;
-		if (item.source && item.source !== "Custom" && this._page?.getHoverLink) {
-			try {
-				itemNameHtml = this._page.getHoverLink(
-					UrlUtil.PG_ITEMS,
-					item.name,
-					item.source,
-				);
-			} catch (e) {
-				// Fall back to plain text
-			}
-		}
+		const itemNameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(item);
 
 		// Build bonus info
 		const bonusParts = [];

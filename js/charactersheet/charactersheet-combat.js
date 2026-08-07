@@ -2304,17 +2304,11 @@ class CharacterSheetCombat {
 		const ammo = this._state.getQuiverAmmunition?.(quiver.id) || [];
 		const total = ammo.reduce((sum, a) => sum + (this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0)), 0);
 
-		let nameHtml = quiver.name;
-		if (this._page?.getHoverLink && quiver.source) {
-			try { nameHtml = this._page.getHoverLink(UrlUtil.PG_ITEMS, quiver.name, quiver.source); } catch (e) { nameHtml = quiver.name; }
-		}
+		const nameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(quiver);
 
 		const rowsHtml = ammo.length
 			? ammo.map(a => {
-				let aName = a.name;
-				if (this._page?.getHoverLink && a.source) {
-					try { aName = this._page.getHoverLink(UrlUtil.PG_ITEMS, a.name, a.source); } catch (e) { aName = a.name; }
-				}
+				const aName = CharacterSheetClassUtils.buildItemHoverNameHtml(a);
 				const count = this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0);
 
 				// Full per-arrow info (Bug #2): effective count, +X attack/damage
@@ -2403,15 +2397,13 @@ class CharacterSheetCombat {
 		const ammo = this._state.getQuiverAmmunition?.(quiver.id) || [];
 		const total = ammo.reduce((sum, a) => sum + (this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0)), 0);
 
-		let nameHtml = quiver.name;
-		if (this._page?.getHoverLink && quiver.source) {
-			try { nameHtml = this._page.getHoverLink(UrlUtil.PG_ITEMS, quiver.name, quiver.source); } catch (e) { nameHtml = quiver.name; }
-		}
+		const nameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(quiver);
 
 		const pillsHtml = ammo.length
 			? ammo.map(a => {
 				const count = this._state.getEffectiveAmmoCount?.(a) ?? (a.quantity || 0);
-				return `<span class="charsheet__quiver-summary-pill" title="${a.name}: ${count} remaining">${a.name} <span class="badge badge-default">×${count}</span></span>`;
+				const safeName = CharacterSheetClassUtils.escapeHtml(a.name);
+				return `<span class="charsheet__quiver-summary-pill" title="${safeName}: ${count} remaining">${safeName} <span class="badge badge-default">×${count}</span></span>`;
 			}).join("")
 			: `<span class="ve-muted ve-small">empty</span>`;
 
@@ -2468,22 +2460,21 @@ class CharacterSheetCombat {
 		items.forEach((item) => {
 			const qty = item.quantity || 1;
 			const emoji = inv?._getItemTypeEmoji?.(item) || "🧪";
-			let nameHtml = item.name;
-			if (this._page?.getHoverLink && item.source) {
-				try { nameHtml = this._page.getHoverLink(UrlUtil.PG_ITEMS, item.name, item.source); } catch (e) { nameHtml = item.name; }
-			}
+			const nameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(item);
+			const safeName = CharacterSheetClassUtils.escapeHtml(item.name);
+			const safeId = CharacterSheetClassUtils.escapeHtml(item.id);
 			// (Bug 2) Offer the "Use (Action)" MAX button only when the TGTT item-utilization
 			// house rule is on AND the item actually rolls a heal on use — that's the only case
 			// where taking the maximum (action) differs from a normal (bonus-action) roll.
 			const canMaximize = !!settings.thelemar_itemUtilization && !!this._state.getItemHealingEffect?.(item.id);
 			const btnsHtml = canMaximize
 				? `<span class="ve-flex ve-flex-wrap gap-1 ml-auto">
-						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__combat-consumable-use" data-maximize="0" title="Use ${item.name} as a bonus action (roll normally)">Use (Bonus Action)</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-consumable-use" data-maximize="1" title="Use ${item.name} as an action — no roll, take the maximum (TGTT item utilization)">Use (Action)</button>
+						<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__combat-consumable-use" data-maximize="0" title="Use ${safeName} as a bonus action (roll normally)">Use (Bonus Action)</button>
+						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__combat-consumable-use" data-maximize="1" title="Use ${safeName} as an action — no roll, take the maximum (TGTT item utilization)">Use (Action)</button>
 					</span>`
-				: `<button class="ve-btn ve-btn-xs ve-btn-primary ml-auto charsheet__combat-consumable-use" data-maximize="0" title="Use ${item.name}">Use</button>`;
+				: `<button class="ve-btn ve-btn-xs ve-btn-primary ml-auto charsheet__combat-consumable-use" data-maximize="0" title="Use ${safeName}">Use</button>`;
 			const row = e_({outer: `
-				<div class="charsheet__combat-consumable ve-flex ve-flex-v-center ve-flex-wrap gap-1" data-item-id="${item.id}">
+				<div class="charsheet__combat-consumable ve-flex ve-flex-v-center ve-flex-wrap gap-1" data-item-id="${safeId}">
 					<span class="charsheet__combat-consumable-icon" title="Consumable">${emoji}</span>
 					<span class="bold charsheet__combat-consumable-name">${nameHtml}</span>
 					<span class="ve-muted ve-small charsheet__combat-consumable-qty">×${qty}</span>
