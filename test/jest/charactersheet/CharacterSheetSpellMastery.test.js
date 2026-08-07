@@ -138,14 +138,25 @@ describe("Wizard Spell Mastery", () => {
 		);
 	});
 
-	test("always-prepared Mastery grants do not consume the prepared count", () => {
-		const state = makeState({source: "XPHB"});
+	test("capstone overlays are excluded while subclass always-prepared spells still count", () => {
+		const state = makeState({source: "XPHB", level: 20});
 		const shield = addWizardSpell(state, rawSpell({name: "Shield", level: 1}));
 		const blur = addWizardSpell(state, rawSpell({name: "Blur", level: 2}));
-		const fireball = addWizardSpell(state, rawSpell({name: "Fireball", level: 3}), {prepared: true});
+		const fireball = addWizardSpell(state, rawSpell({name: "Fireball", level: 3}));
+		const counterspell = addWizardSpell(state, rawSpell({name: "Counterspell", level: 3}));
+		state.addSpell({
+			...rawSpell({name: "Slow", level: 3}),
+			sourceClass: "Wizard",
+			sourceFeature: "Chronurgy Magic Spells",
+			alwaysPrepared: true,
+		});
 		state.setSpellMasterySpells([shield, blur]);
+		state.setSignatureSpells([fireball, counterspell]);
 
-		expect(CharacterSheetClassUtils.countPreparedSpells(state.getSpells()).current).toBe(1);
-		expect(state.getPreparedSpells().map(it => it.name)).toEqual(expect.arrayContaining(["Shield", "Blur", "Fireball"]));
+		const spells = state.getSpells();
+		expect(spells.find(it => it.name === "Shield")).toEqual(expect.objectContaining({isSpellMastery: true, alwaysPrepared: true}));
+		expect(spells.find(it => it.name === "Fireball")).toEqual(expect.objectContaining({isSignatureSpell: true, alwaysPrepared: true}));
+		expect(CharacterSheetClassUtils.countPreparedSpells(spells).current).toBe(1);
+		expect(state.getPreparedSpells().map(it => it.name)).toEqual(expect.arrayContaining(["Shield", "Blur", "Fireball", "Counterspell", "Slow"]));
 	});
 });

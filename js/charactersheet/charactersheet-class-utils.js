@@ -1508,11 +1508,11 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
-	 * Canonical prepared-spells count. Counts leveled spells (level > 0) that
-	 * the player prepared against their class limit. Always-prepared feature
-	 * grants are available but explicitly do not consume that limit. Cantrips are excluded
-	 * (they have their own counter). Spellbook spells with `prepared:false`
-	 * are NOT counted — only the ones the player has marked prepared today.
+	 * Canonical prepared-spells count. Counts leveled spells (level > 0) that are
+	 * prepared or always prepared. Signature Spells and XPHB Spell Mastery are
+	 * always-prepared overlays which do not inflate this display count. PHB Spell
+	 * Mastery remains a normal prepared spell and therefore counts. Cantrips are
+	 * excluded (they have their own counter).
 	 * @param {Array<*>} spells
 	 * @param {object} [opts]
 	 * @param {number} [opts.max] - If supplied, returned `isOver`/`isAt` flags are populated.
@@ -1520,7 +1520,11 @@ class CharacterSheetClassUtils {
 	 */
 	static countPreparedSpells (spells, {max = null} = {}) {
 		const leveled = (spells || []).filter(s => s && s.level > 0);
-		const current = leveled.filter(s => s.prepared && !s.alwaysPrepared).length;
+		const current = leveled.filter(s =>
+			(s.prepared || s.alwaysPrepared)
+			&& !s.isSignatureSpell
+			&& !(s.isSpellMastery && s.alwaysPrepared),
+		).length;
 		const numericMax = typeof max === "number" ? max : null;
 		return {
 			current,
