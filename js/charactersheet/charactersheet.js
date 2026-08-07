@@ -1012,7 +1012,7 @@ class CharacterSheetPage {
 			} catch (e) {
 				// Hook is best-effort — never block the underlying hover call.
 			}
-			return orig(evt, ele, opts);
+			return CharacterSheetClassUtils.pCallHoverHandlerSafely(orig, evt, ele, opts);
 		};
 	}
 

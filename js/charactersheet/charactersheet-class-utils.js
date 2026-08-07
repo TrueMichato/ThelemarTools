@@ -932,11 +932,31 @@ class CharacterSheetClassUtils {
 			|| item?._isCraftedItem
 			|| item?._isEmpoweredGemstone
 			|| item?.cookedTier != null;
+		const isSourceLoaded = !!source && !!(
+			globalThis.SourceUtil?.isSiteSource?.(source)
+			|| globalThis.BrewUtil2?.hasSourceJson?.(source)
+			|| globalThis.PrereleaseUtil?.hasSourceJson?.(source)
+		);
 		return !!item?.name
-			&& !!source
+			&& isSourceLoaded
 			&& source.toLowerCase() !== "custom"
 			&& !item?._isCustom
 			&& !isDerived;
+	}
+
+	/**
+	 * Execute an async renderer hover without allowing a failed/stale lookup to
+	 * escape as an unhandled promise rejection.
+	 * @param {Function} handler
+	 * @param  {...any} args
+	 * @returns {Promise<any|undefined>}
+	 */
+	static async pCallHoverHandlerSafely (handler, ...args) {
+		try {
+			return await handler(...args);
+		} catch (e) {
+			return undefined;
+		}
 	}
 
 	/**

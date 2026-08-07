@@ -999,12 +999,24 @@ describe("Item-power hover previews", () => {
 	const originalEncodeForHash = globalThis.UrlUtil.encodeForHash;
 	const originalSpellsPage = globalThis.UrlUtil.PG_SPELLS;
 	const originalItemsPage = globalThis.UrlUtil.PG_ITEMS;
+	const originalSourceUtil = globalThis.SourceUtil;
+	const originalBrewUtil2 = globalThis.BrewUtil2;
+	const originalPrereleaseUtil = globalThis.PrereleaseUtil;
+
+	beforeEach(() => {
+		globalThis.SourceUtil = {isSiteSource: source => ["PHB", "DMG", "XPHB"].includes(source)};
+		globalThis.BrewUtil2 = {hasSourceJson: () => false};
+		globalThis.PrereleaseUtil = {hasSourceJson: () => false};
+	});
 
 	afterEach(() => {
 		globalThis.Renderer.hover = originalHover;
 		globalThis.UrlUtil.encodeForHash = originalEncodeForHash;
 		globalThis.UrlUtil.PG_SPELLS = originalSpellsPage;
 		globalThis.UrlUtil.PG_ITEMS = originalItemsPage;
+		globalThis.SourceUtil = originalSourceUtil;
+		globalThis.BrewUtil2 = originalBrewUtil2;
+		globalThis.PrereleaseUtil = originalPrereleaseUtil;
 	});
 
 	it("wires spell rows to the canonical spell hover with cast-level context", () => {
@@ -1124,6 +1136,34 @@ describe("Item-power hover previews", () => {
 		element.listeners.get("mouseover")({type: "mouseover"});
 		expect(onCatalogMouseOver).toHaveBeenCalledWith(expect.any(Object), element);
 		expect(globalThis.Renderer.hover.handleInlineMouseOver).not.toHaveBeenCalled();
+	});
+
+	it("uses inline stored data for an unloaded homebrew source", () => {
+		const onCatalogMouseOver = jest.fn();
+		const onInlineMouseOver = jest.fn();
+		globalThis.Renderer.hover = {
+			pHandleLinkMouseOver: onCatalogMouseOver,
+			handleInlineMouseOver: onInlineMouseOver,
+			handleLinkMouseMove: jest.fn(),
+			handleLinkMouseLeave: jest.fn(),
+		};
+		const element = makePreviewElement("span");
+		const item = {
+			name: "Cataclysm",
+			source: "Raza",
+			damage: "2d6 force",
+			entries: ["Stored on Arthur Chase, but the Raza brew is not loaded."],
+		};
+
+		const preview = CharacterSheetClassUtils.applyItemHoverPreview(element, item);
+
+		expect(preview).toMatchObject({isInlineHover: true});
+		expect(element.getAttribute("data-vet-entry")).toBeDefined();
+		expect(element.getAttribute("data-vet-page")).toBeUndefined();
+		expect(element.getAttribute("data-vet-hash")).toBeUndefined();
+		element.listeners.get("mouseover")({type: "mouseover"});
+		expect(onInlineMouseOver).toHaveBeenCalled();
+		expect(onCatalogMouseOver).not.toHaveBeenCalled();
 	});
 
 	it("uses the parent custom item's full data for invoke-row hovers", () => {

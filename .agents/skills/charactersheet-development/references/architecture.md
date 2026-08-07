@@ -304,8 +304,8 @@ the `cbClose` composition.
 ### Item Hover Routing
 
 All character-sheet item names route through `CharacterSheetClassUtils.buildItemHoverNameHtml`.
-Real catalog items (including catalog-backed homebrew items) use the standard `items.html`
-statblock hover. Items marked `_isCustom`, items with source `Custom`, and source-less imported
+Items use the standard `items.html` statblock hover only when their source is currently loaded
+as a site, homebrew, or prerelease source. Custom, source-less, generated, and unavailable-source
 items instead use a self-contained inline `entries` hover built by
 `buildItemInlineHoverEntry`; they must never receive `data-vet-page="items.html"` or dispatch
 `Renderer.hover.pHandleLinkMouseOver`, because no matching DataLoader entity exists.

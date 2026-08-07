@@ -145,7 +145,14 @@ describe("Custom-item inline hover data", () => {
 	});
 
 	test("keeps a real catalog item on the catalog route", () => {
-		expect(CharacterSheetClassUtils.isCatalogItemHoverTarget({name: "Longsword", source: "PHB"})).toBe(true);
+		const prevSourceUtil = globalThis.SourceUtil;
+		globalThis.SourceUtil = {isSiteSource: source => source === "PHB"};
+		try {
+			expect(CharacterSheetClassUtils.isCatalogItemHoverTarget({name: "Longsword", source: "PHB"})).toBe(true);
+			expect(CharacterSheetClassUtils.isCatalogItemHoverTarget({name: "Cataclysm", source: "Raza"})).toBe(false);
+		} finally {
+			globalThis.SourceUtil = prevSourceUtil;
+		}
 	});
 
 	test.each([
