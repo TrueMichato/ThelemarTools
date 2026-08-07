@@ -1509,7 +1509,8 @@ class CharacterSheetClassUtils {
 
 	/**
 	 * Canonical prepared-spells count. Counts leveled spells (level > 0) that
-	 * are currently `prepared` or `alwaysPrepared`. Cantrips are excluded
+	 * the player prepared against their class limit. Always-prepared feature
+	 * grants are available but explicitly do not consume that limit. Cantrips are excluded
 	 * (they have their own counter). Spellbook spells with `prepared:false`
 	 * are NOT counted — only the ones the player has marked prepared today.
 	 * @param {Array<*>} spells
@@ -1519,7 +1520,7 @@ class CharacterSheetClassUtils {
 	 */
 	static countPreparedSpells (spells, {max = null} = {}) {
 		const leveled = (spells || []).filter(s => s && s.level > 0);
-		const current = leveled.filter(s => s.prepared || s.alwaysPrepared).length;
+		const current = leveled.filter(s => s.prepared && !s.alwaysPrepared).length;
 		const numericMax = typeof max === "number" ? max : null;
 		return {
 			current,
@@ -2491,6 +2492,20 @@ class CharacterSheetClassUtils {
 		if (!spell.time?.length) return "";
 		const time = spell.time[0];
 		return `${time.number} ${time.unit}`;
+	}
+
+	/**
+	 * Return true when a raw or stored spell's primary casting time is one action.
+	 * XPHB Spell Mastery uses this exact eligibility gate.
+	 * @param {*} spell
+	 * @returns {boolean}
+	 */
+	static spellHasActionCastingTime (/** @type {*} */ spell) {
+		if (spell?.time?.length) {
+			const time = spell.time[0];
+			return Number(time?.number) === 1 && String(time?.unit || "").toLowerCase() === "action";
+		}
+		return /^1\s+action$/i.test(String(spell?.castingTime || "").trim());
 	}
 
 	/**

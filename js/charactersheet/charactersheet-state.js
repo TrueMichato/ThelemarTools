@@ -4710,6 +4710,8 @@ class CharacterSheetState {
 				spellsKnown: [], // [{name, source, prepared: bool}]
 				cantripsKnown: [],
 				innateSpells: [], // [{name, source, uses: {current, max}, atWill: bool, sourceFeature}]
+				spellMasterySpells: [], // [{name, source, level}] — one level 1 and one level 2 Wizard spell
+				signatureSpells: [], // [{name, source, level: 3, usesCurrent, usesMax: 1, recharge: "short"}]
 				// Gambler (TGTT) unique spellcasting - rolled prepared count
 				gamblerPreparedRolled: null, // Current day's prepared spell count (null = needs roll)
 				gamblerPreparedRollDetails: null, // {dice: "2d4", rolls: [3, 2], total: 5}
@@ -5358,6 +5360,7 @@ class CharacterSheetState {
 
 		// Migrate spells: ensure concentration/ritual flags are set correctly
 		this._migrateSpells();
+		this._migrateWizardCapstoneSpells();
 
 		// Reconcile legacy inventory `starred` flags into the centralised
 		// favourites system, so older saves where items were starred (before
@@ -5742,6 +5745,7 @@ class CharacterSheetState {
 					spell.concentration = true;
 					migratedCount++;
 				}
+
 				if (!spell.ritual && knownRitualSpells.has(spellNameLower)) {
 					spell.ritual = true;
 					migratedCount++;
@@ -5846,6 +5850,36 @@ class CharacterSheetState {
 		// editions by one subclass collapses to the edition matching that subclass. Runs LAST
 		// so it sees the fully-enriched, relocated arrays. Idempotent.
 		this._sweepDedupStoredSpells();
+	}
+
+	/**
+	 * Normalize Wizard capstone selections from saved characters and discard
+	 * references which no longer point at eligible Wizard spellbook entries.
+	 */
+	_migrateWizardCapstoneSpells () {
+		const sc = this._data.spellcasting;
+		sc.spellMasterySpells = Array.isArray(sc.spellMasterySpells) ? sc.spellMasterySpells : [];
+		sc.signatureSpells = Array.isArray(sc.signatureSpells) ? sc.signatureSpells : [];
+
+		const mastery = [];
+		for (const raw of sc.spellMasterySpells) {
+			const spell = this._getWizardSpellbookSpell(raw);
+			if (!spell || ![1, 2].includes(spell.level) || mastery.some(it => it.level === spell.level)) continue;
+			if (this.isXphbWizard() && !CharacterSheetClassUtils.spellHasActionCastingTime(spell)) continue;
+			mastery.push(this._toWizardCapstoneSpellRef(spell));
+		}
+		sc.spellMasterySpells = mastery;
+
+		const signatures = [];
+		for (const raw of sc.signatureSpells) {
+			const spell = this._getWizardSpellbookSpell(raw);
+			if (!spell || spell.level !== 3 || signatures.some(it => this._spellIdentityKey(it) === this._spellIdentityKey(spell))) continue;
+			const usesMax = 1;
+			const usesCurrent = Math.max(0, Math.min(usesMax, Number(raw.usesCurrent ?? raw.uses?.current ?? usesMax) || 0));
+			signatures.push({...this._toWizardCapstoneSpellRef(spell), usesCurrent, usesMax, recharge: "short"});
+			if (signatures.length === 2) break;
+		}
+		sc.signatureSpells = signatures;
 	}
 
 	/**
@@ -14358,11 +14392,157 @@ class CharacterSheetState {
 		}
 	}
 
+	_getWizardClassEntry () {
+		return (this._data.classes || []).find(cls => cls?.name?.toLowerCase() === "wizard") || null;
+	}
+
+	isXphbWizard () {
+		return this._getWizardClassEntry()?.source === Parser.SRC_XPHB;
+	}
+
+	_getWizardSpellbookSpell (ref) {
+		if (!ref?.name) return null;
+		return (this._data.spellcasting.spellsKnown || []).find(spell =>
+			this._spellIdentityKey(spell) === this._spellIdentityKey(ref)
+			&& spell.level > 0
+			&& spell.sourceClass?.toLowerCase() === "wizard"
+			&& (spell.inSpellbook || spell.sourceFeature === "Wizard Spellbook"),
+		) || null;
+	}
+
+	_toWizardCapstoneSpellRef (spell) {
+		return {name: spell.name, source: spell.source, level: spell.level};
+	}
+
+	getSpellMasteryCandidates (level) {
+		if (![1, 2].includes(level)) return [];
+		const isXphb = this.isXphbWizard();
+		return (this._data.spellcasting.spellsKnown || []).filter(spell =>
+			spell.level === level
+			&& spell.sourceClass?.toLowerCase() === "wizard"
+			&& (spell.inSpellbook || spell.sourceFeature === "Wizard Spellbook")
+			&& (!isXphb || CharacterSheetClassUtils.spellHasActionCastingTime(spell)),
+		);
+	}
+
+	getSignatureSpellCandidates () {
+		return (this._data.spellcasting.spellsKnown || []).filter(spell =>
+			spell.level === 3
+			&& spell.sourceClass?.toLowerCase() === "wizard"
+			&& (spell.inSpellbook || spell.sourceFeature === "Wizard Spellbook"),
+		);
+	}
+
+	getSpellMasterySpells () {
+		return (this._data.spellcasting.spellMasterySpells || []).map(ref => {
+			const spell = this._getWizardSpellbookSpell(ref);
+			return spell ? {...spell, ...ref} : {...ref};
+		});
+	}
+
+	setSpellMasterySpells (spells) {
+		if (!Array.isArray(spells) || spells.length !== 2) return false;
+		const byLevel = new Map();
+		for (const ref of spells) {
+			const spell = this._getWizardSpellbookSpell(ref);
+			if (!spell || ![1, 2].includes(spell.level)) return false;
+			if (this.isXphbWizard() && !CharacterSheetClassUtils.spellHasActionCastingTime(spell)) return false;
+			if (byLevel.has(spell.level)) return false;
+			byLevel.set(spell.level, this._toWizardCapstoneSpellRef(spell));
+		}
+		if (!byLevel.has(1) || !byLevel.has(2)) return false;
+		this._data.spellcasting.spellMasterySpells = [byLevel.get(1), byLevel.get(2)];
+		return true;
+	}
+
+	replaceSpellMasterySpell (level, replacement, {trigger = "study"} = {}) {
+		if (![1, 2].includes(level)) return false;
+		if (this.isXphbWizard() ? trigger !== "longRest" : trigger !== "study") return false;
+		const spell = this._getWizardSpellbookSpell(replacement);
+		if (!spell || spell.level !== level) return false;
+		if (this.isXphbWizard() && !CharacterSheetClassUtils.spellHasActionCastingTime(spell)) return false;
+		const current = this.getSpellMasterySpells();
+		const next = current.filter(it => it.level !== level);
+		next.push(spell);
+		return this.setSpellMasterySpells(next);
+	}
+
+	getSignatureSpells () {
+		return (this._data.spellcasting.signatureSpells || []).map(ref => {
+			const spell = this._getWizardSpellbookSpell(ref);
+			return spell ? {...spell, ...ref} : {...ref};
+		});
+	}
+
+	setSignatureSpells (spells) {
+		if (!Array.isArray(spells) || spells.length !== 2) return false;
+		const refs = [];
+		for (const raw of spells) {
+			const spell = this._getWizardSpellbookSpell(raw);
+			if (!spell || spell.level !== 3) return false;
+			if (refs.some(it => this._spellIdentityKey(it) === this._spellIdentityKey(spell))) return false;
+			refs.push({...this._toWizardCapstoneSpellRef(spell), usesCurrent: 1, usesMax: 1, recharge: "short"});
+		}
+		this._data.spellcasting.signatureSpells = refs;
+		return true;
+	}
+
+	getSpellMasteryCastInfo (spell) {
+		if ((this._getWizardClassEntry()?.level || 0) < 18) return null;
+		const selected = (this._data.spellcasting.spellMasterySpells || []).find(ref =>
+			this._spellIdentityKey(ref) === this._spellIdentityKey(spell));
+		if (!selected || spell.level !== selected.level) return null;
+		if (!this.isXphbWizard() && !spell.prepared) return null;
+		return {feature: "Spell Mastery", castLevel: selected.level, atWill: true};
+	}
+
+	getSignatureSpellCastInfo (spell) {
+		if ((this._getWizardClassEntry()?.level || 0) < 20) return null;
+		const selected = (this._data.spellcasting.signatureSpells || []).find(ref =>
+			this._spellIdentityKey(ref) === this._spellIdentityKey(spell));
+		if (!selected || spell.level !== 3) return null;
+		return {
+			feature: "Signature Spells",
+			castLevel: 3,
+			usesCurrent: selected.usesCurrent,
+			usesMax: selected.usesMax,
+			available: selected.usesCurrent > 0,
+		};
+	}
+
+	useSignatureSpell (spell) {
+		if (!this.getSignatureSpellCastInfo(spell)?.available) return false;
+		const selected = (this._data.spellcasting.signatureSpells || []).find(ref =>
+			this._spellIdentityKey(ref) === this._spellIdentityKey(spell));
+		if (!selected || selected.usesCurrent <= 0) return false;
+		selected.usesCurrent--;
+		return true;
+	}
+
+	restoreSignatureSpellUse (spell) {
+		const selected = (this._data.spellcasting.signatureSpells || []).find(ref =>
+			this._spellIdentityKey(ref) === this._spellIdentityKey(spell));
+		if (!selected) return false;
+		selected.usesCurrent = Math.min(selected.usesMax, selected.usesCurrent + 1);
+		return true;
+	}
+
+	restoreSignatureSpells () {
+		for (const spell of (this._data.spellcasting.signatureSpells || [])) {
+			spell.usesCurrent = spell.usesMax;
+		}
+	}
+
 	getSpells () {
 		// Return spells with IDs for easier manipulation
 		const spells = this._data.spellcasting.spellsKnown.map(s => ({
 			...s,
 			id: s.id || `${s.name}|${s.source}`,
+			...(this.getSpellMasteryCastInfo(s) ? {
+				isSpellMastery: true,
+				...(this.isXphbWizard() ? {alwaysPrepared: true} : {}),
+			} : {}),
+			...(this.getSignatureSpellCastInfo(s) ? {isSignatureSpell: true, alwaysPrepared: true} : {}),
 		}));
 		const cantrips = this._data.spellcasting.cantripsKnown.map(c => {
 			// Ensure cantrips always have a valid ID
@@ -14386,7 +14566,7 @@ class CharacterSheetState {
 	 * @returns {Array} Array of prepared spell objects
 	 */
 	getPreparedSpells () {
-		return this._data.spellcasting.spellsKnown.filter(s => s.prepared || s.alwaysPrepared);
+		return this.getSpells().filter(s => s.level > 0 && (s.prepared || s.alwaysPrepared));
 	}
 
 	// --- Multiclass Spell Isolation ---
@@ -57157,6 +57337,7 @@ class CharacterSheetState {
 
 		// Recover short rest innate spells
 		this.restoreInnateSpells("short");
+		this.restoreSignatureSpells();
 
 		// Recover stamina (Thelemar: recovers on short rest)
 		this.restoreStamina();
@@ -57203,6 +57384,7 @@ class CharacterSheetState {
 
 		// Recover all innate spells
 		this.restoreInnateSpells("long");
+		this.restoreSignatureSpells();
 
 		// Reduce exhaustion by 1 level (if any) - applies to both 2014 and 2024 rules
 		if (this._data.exhaustion > 0) {
