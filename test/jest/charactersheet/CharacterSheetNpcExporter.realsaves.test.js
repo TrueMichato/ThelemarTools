@@ -963,7 +963,8 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 		it("keeps subject-verb agreement after the pronoun rewrite", () => {
 			available.forEach(n => {
 				const text = allEntryText(loadMonster(n));
-				const bad = /\bit (?:make|take|gain|deal|have|do|use|die|fall|drop)\b(?!\s+\w+\s+(?:action|damage))|\bits character\b/.exec(text);
+				// "attack rolls against it have advantage" is a plural subject, correctly conjugated.
+				const bad = /(?<!against )\bit (?:make|take|gain|deal|have|do|use|die|fall|drop)\b(?!\s+\w+\s+(?:action|damage))|\bits character\b/.exec(text);
 				expect(bad ? `${n}: ${bad[0]}` : null).toBeNull();
 			});
 		});
@@ -982,7 +983,8 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 		it("prints resolved numbers, never bare ability or proficiency formulas (W1)", () => {
 			available.forEach(n => {
 				const text = allEntryText(loadMonster(n));
-				const bad = /\bits (?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) modifier(?! [+a-z])(?!\s*\()|\bits proficiency bonus(?! [+a-z])(?!\s*[(\u00d7])/.exec(text);
+				// "18 (13 plus its Wisdom modifier)" already led with the resolved value.
+				const bad = /(?<!\(\d{1,3} plus )(?<!\(\d{1,3} \+ )\bits (?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) modifier(?! [+a-z])(?!\s*\()|\bits proficiency bonus(?! [+a-z])(?!\s*[(\u00d7])/.exec(text);
 				expect(bad ? `${n}: ${text.slice(Math.max(0, bad.index - 40), bad.index + 60)}` : null).toBeNull();
 			});
 		});
@@ -1316,6 +1318,124 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 				expect(`${power}: ${entry ? "found" : "missing"}`).toBe(`${power}: found`);
 				const body = (entry.entries || []).filter(it => typeof it === "string").join(" ");
 				expect(`${power}: ${body}`).toMatch(/\{@|\d/);
+			});
+		});
+	});
+	describe("v13 — rollable dice, resolved formulas and honest filing", () => {
+		it("tags every bare die so it rolls from the statblock (B1)", () => {
+			available.forEach(n => {
+				const mon = loadMonster(n);
+				["trait", "action", "bonus", "reaction"].forEach(section => {
+					(mon[section] || []).forEach(entry => {
+						(entry.entries || []).forEach(line => {
+							if (typeof line !== "string") return;
+							// Blank out every tagged span; whatever dice remain are inert prose.
+							const bare = line.replace(/\{@\w+[^{}]*\}/g, " ");
+							const hit = /(?<![\w@])\d*d(?:4|6|8|10|12|100)\b/.exec(bare);
+							expect(`${n}/${entry.name}: ${hit ? hit[0] : "clean"}`).toBe(`${n}/${entry.name}: clean`);
+						});
+					});
+				});
+			});
+		});
+
+		it("never leaves a class-level formula unresolved (C1)", () => {
+			available.forEach(n => {
+				const text = allEntryText(loadMonster(n));
+				expect(`${n}: ${text}`).not.toMatch(/\b(?:half )?its \w+ level \((?:round (?:up|down))\)/i);
+				expect(`${n}: ${text}`).not.toMatch(/\bequal to its level\b/i);
+			});
+		});
+
+		it("attaches a resolved value to the noun it measures (C2)", () => {
+			available.forEach(n => {
+				// "its Wisdom modifier (18)" states a false fact when 18 is the sum.
+				const text = allEntryText(loadMonster(n));
+				expect(`${n}: ${text}`).not.toMatch(/\d+ plus its \w+ modifier \(\d/i);
+			});
+		});
+
+		it("files a purely passive feat as a trait, not a reaction (D1)", () => {
+			available.forEach(n => {
+				const mon = loadMonster(n);
+				const misfiled = ["bonus", "reaction"]
+					.flatMap(section => (mon[section] || []).map(e => ({section, e})))
+					.filter(({e}) => /\{@feat /.test(String(e.name || "")))
+					.filter(({e}) => {
+						const body = (e.entries || []).filter(it => typeof it === "string").join(" ");
+						return !/\b(?:bonus action|reaction|as an action|magic action|no action required|opportunity attack)\b/i.test(body)
+							&& !/(?:^|[.;]\s*|,\s*)(?:when|whenever|in response to|immediately after)\b/i.test(body);
+					})
+					.map(({section, e}) => `${section}/${e.name}`);
+				expect(`${n}: ${misfiled.join(", ")}`).toBe(`${n}: `);
+			});
+		});
+
+		it("does not open an item entry by naming itself (D2)", () => {
+			available.forEach(n => {
+				const mon = loadMonster(n);
+				["trait", "action", "bonus", "reaction"].forEach(section => {
+					(mon[section] || []).forEach(entry => {
+						const first = (entry.entries || []).find(it => typeof it === "string") || "";
+						const echo = /^\{@item ([^|}]+)[^}]*\}\s*[:\u2014-]/.exec(first);
+						const plainName = String(entry.name || "").replace(/\{@\w+\s+([^|}]+)[^}]*\}/g, "$1").trim();
+						expect(`${n}/${entry.name}: ${echo && echo[1].toLowerCase() === plainName.toLowerCase() ? "echo" : "clean"}`)
+							.toBe(`${n}/${entry.name}: clean`);
+					});
+				});
+			});
+		});
+
+		it("never opens a standalone entry on a dangling connective (D6)", () => {
+			available.forEach(n => {
+				const mon = loadMonster(n);
+				["trait", "action", "bonus", "reaction"].forEach(section => {
+					(mon[section] || []).forEach(entry => {
+						const first = (entry.entries || []).find(it => typeof it === "string") || "";
+						expect(`${n}/${entry.name}: ${first.slice(0, 24)}`)
+							.not.toMatch(/: (?:In addition|Additionally|Furthermore|Moreover),/);
+					});
+				});
+			});
+		});
+
+		it("keeps the subject and its coordinated verb in agreement (A1/A2)", () => {
+			available.forEach(n => {
+				const text = allEntryText(loadMonster(n));
+				expect(`${n}: ${text}`).not.toMatch(/\bit (?:either )?\w+s\b[^.;]{0,60} and miss,/);
+				expect(`${n}: ${text}`).not.toMatch(/\b(?:rolls?|attacks?|strikes?)\}? against it has\b/i);
+				expect(`${n}: ${text}`).not.toMatch(/\bit can use it to \w/);
+			});
+		});
+
+		it("keeps a surname that collides with a modal (A4)", () => {
+			if (!available.includes("Juen")) return;
+			const text = allEntryText(loadMonster("Juen"));
+			expect(text).not.toMatch(/\bJuen may\b/);
+			if (/Juen May/.test(text)) expect(text).toMatch(/\bJuen May\b/);
+		});
+
+		it("states the stance duration once and drops flavour-only stances (F1/F3/F4)", () => {
+			available.forEach(n => {
+				const mon = loadMonster(n);
+				const block = (mon.trait || []).find(t => t.name === "Combat Methods");
+				if (!block) return;
+				const expansions = block.entries.filter(e => /\(Stance\)\.\}/.test(e));
+				expansions.forEach(entry => {
+					// The economy lead and the shared duration trailer are stated by the block.
+					expect(`${n}: ${entry}`).not.toMatch(/\(Stance\)\.\}\s*(?:\{@b\s*)?(?:Bonus Action|Action|Reaction)\s*\(\d+ Stamina/);
+					expect(`${n}: ${entry}`).not.toMatch(/This stance lasts until/);
+					// Nothing mechanical means nothing printed.
+					const body = entry.replace(/^.*?\(Stance\)\.\}\s*/, "");
+					expect(`${n}: ${body}`).toMatch(/\{@|\d/);
+				});
+				if (expansions.length) expect(block.entries.join(" ")).toMatch(/\{@b Stances\.\} A stance costs/);
+			});
+		});
+
+		it("carries no trace of the maneuver-rename typo (F5)", () => {
+			available.forEach(n => {
+				expect(`${n}: ${allEntryText(loadMonster(n))}`).not.toMatch(/methoding/i);
 			});
 		});
 	});

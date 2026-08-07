@@ -620,6 +620,73 @@ nothing else about it appears.
     and a doubled-word collapse catches the `Juen May may cast` shape that substitution
     creates. Padded thousands separators (`2, 000 pounds`) are repaired.
 
+### Rollable numbers and honest filing (v13)
+
+74. **Every die in the prose rolls** (`_tagBareDice`). A die written as plain text renders
+    as inert prose; `{@damage}` / `{@dice}` render as click-to-roll links. Damage and
+    healing dice take `{@damage}`, everything else `{@dice}`. Tagged regions are masked
+    first, and a *die-cost* label (Cunning Strike's `(1d6)`, where the die is spent rather
+    than rolled) is exempt. This was the single largest "easier to run" gap left: 42
+    entries across 18 of 21 corpus characters.
+
+75. **A class-level formula resolves to the level the exporter already knows.**
+    `half its Wizard level (round up)` → `half its Wizard level (10)`;
+    `equal to its level + its Charisma modifier` → `equal to 15`. A trailing
+    `(maximum Nth level)` cap that the resolved value already clears is dropped — a
+    statblock is a snapshot of one level, not a progression table.
+
+76. **A resolved value is attached to the noun it measures.** `compound(…, {restate})`
+    leads with the answer instead of appending it to the last operand:
+    `its AC equals 18 (13 plus its Wisdom modifier)`, not
+    `13 plus its Wisdom modifier (18)` — which stated, falsely, that the Wisdom modifier
+    was +18. **Before adding a numeric pass, read the existing `compound(…)` rules**: an
+    earlier attempt at this added a second summing pass and double-counted to AC 31.
+
+77. **Filing follows the stated economy, everywhere in the body**
+    (`_refileByStatedEconomy`, `_demoteEconomylessEntries`). The action branch excludes
+    "take a **Bonus** Action" explicitly — without that guard, six item entries migrated
+    from Bonus Actions into Actions. A feat- or item-derived entry that states no economy
+    and carries no trigger is demoted to a trait. The pass is **gated** to `{@feat …}`
+    names and `{@item …}`-opening bodies: class features and psionic disciplines carry
+    authoritative economy in their metadata even when their prose never says so, and an
+    ungated version wrongly demoted real psionic bonus actions.
+
+78. **An item entry never opens by naming itself** (`_stripItemSelfEcho`). A leading
+    `{@item Moonlit Aegis|…}: This magic shield glows softly under moonlight` loses both
+    the echo and the appearance-only lead — and the tag is **promoted to the entry
+    heading**, so the hover survives the trim.
+
+79. **A stance body prints its mechanics or nothing** (`_condenseStanceBody`). The generic
+    roster condenser kept the *first* sentences, which in stance prose is always flavour,
+    so 6 of 13 corpus stances said nothing mechanical ("heightens its senses."). Sentence
+    selection is now by mechanical content — a tag, a save, advantage/disadvantage, a
+    resistance, a bonus, a distance or an extra die. The economy lead (stated three times
+    over: cost group, roster suffix, body opener) and the universal duration trailer are
+    stripped, the duration rule is stated **once** in a `{@b Stances.}` block header, and
+    a body with nothing mechanical left emits no line at all — the roster already names
+    the stance and the name is hoverable.
+
+80. **Residual grammar is repaired after substitution, not before**
+    (`_fixResidualGrammar`, run both inside `_tidyStatblockText` and as the late
+    `_applyResidualGrammar` pass). Subject substitution runs after the early prose
+    compaction, so the residue it creates needs a second look:
+    - a coordinated verb after a finite `it <verb>s` is conjugated ("and **miss**" →
+      "and **misses**"), refusing to fire when a modal or infinitive governs the span or
+      when the coordinator sits inside an unclosed parenthetical — otherwise every
+      "or **take** damage" infinitive is corrupted;
+    - `rolls/attacks against it **has**` → `have` (matched through a closing `}`, since the
+      plural noun is often the display text of an `{@action}` tag);
+    - `it can use it to X` → `it can X` — the second `it` was the feature, not the NPC;
+    - the doubled-word collapse is **name-aware**: `Juen May may cast` becomes
+      `Juen May can cast`, not `Juen may cast`, which deleted the surname and turned the
+      sentence into a modal;
+    - capitalisation after `e.g.`; symmetric em-dash spacing.
+
+81. **A duplicated defence clause and a dangling opener are dropped**
+    (`_dropRestatedSleepImmunity`, `_dropDanglingConnectives`). Fey Ancestry stated its
+    sleep immunity twice in one sentence; three entries opened on `In addition,` referring
+    to nothing, having been split from the sentence they extended.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). Hard errors block Save to Homebrew; warnings allow Download / Copy. Full browser-side monster schema validation is still out of scope (graceful hand validator only).
 
@@ -734,6 +801,14 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
 20. Ioun stone bank → one grouped Special Equipment heading; stat-only stones produce no
     trait; no entry restates a resistance already on the block
 21. No single entry paragraph runs past ~620 characters unless it is a roster
+22. No bare die anywhere in the prose — every `NdX` is `{@dice}` or `{@damage}` and rolls
+    from the rendered block
+23. No unresolved `half its <class> level (round up)` / `equal to its level`; a resolved
+    sum leads its phrase rather than trailing the last operand
+24. Combat Methods states the stance duration once in a `{@b Stances.}` header; every
+    stance expansion carries mechanics or is absent entirely
+25. A purely passive feat sits under traits, never under Reactions; an item entry does not
+    open by naming itself
 
 ## Known limitations (post-upgrade)
 
@@ -754,6 +829,15 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
 - No Foundry/Roll20-native formats — 5etools homebrew monster JSON only.
 - Temporary combat buffs only appear when `defenseMode: "active"` (or as already-applied sheet state).
 - Feature prose is best-effort cleaned (not full NLG); rare features may still need manual picker edits.
+- **`Additional Effects` can restate a bonus already folded into the numbers.** Suppressing
+  a leftover bullet requires *proving* the bonus is inside the derived AC / attack /
+  damage, and only a minority of cases are provable from the state the exporter has.
+  Printing a bonus twice is a readability cost; removing a live one is a correctness cost,
+  so the pass stays conservative.
+- **An item-granted spell stated only in the item's prose never reaches a spellcasting
+  block.** Wisp's Moonlit Aegis grants *Moonbeam* in free text with no structural record
+  on the sheet, so extraction would be a guess. The grant is left where it is written,
+  where it is at least hoverable.
 - **Compression is bounded by safety, not by a target length.** Every trim rule must
   prove the text it removes is redundant; where it cannot, the text stays. Some entries
   are therefore still long (Dzeiy's `Hybrid Transformation`), and a second mention of a

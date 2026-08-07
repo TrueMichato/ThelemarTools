@@ -486,6 +486,8 @@ class CharacterSheetNpcExporter {
 		this._splitOverlongParagraphs(out);
 		this._dropSupersededProcedures(out);
 		this._refileByStatedEconomy(out);
+		this._demoteEconomylessEntries(out);
+		this._stripItemSelfEcho(out);
 		this._dropInertItemEntries(out);
 		this._dropDuplicateItemSpellStubs(out);
 		this._dropItemSpellEntriesCoveredByRoster(out);
@@ -506,6 +508,15 @@ class CharacterSheetNpcExporter {
 		this._consolidateCostedOptionMenus(out);
 		this._annotateResourceCostsOnNames(out);
 		this._orderTraitsForReading(out);
+		// After every prose pass: tagging turns words into tags, and a pass that matches
+		// on plain text would stop seeing what it needs to.
+		// Late: the subject substitution that produces "(e.g. Its rapier)" and
+		// "Juen May may cast" runs after the early prose compaction, so its residue is
+		// only visible now.
+		this._dropDanglingConnectives(out);
+		this._dropRestatedSleepImmunity(out);
+		this._applyResidualGrammar(out);
+		this._tagBareDice(out);
 		// Absolutely last: every pass above matches entries by their plain-text name, and
 		// this one rewrites names into hover tags.
 		this._enrichHoverTags(out, state);
@@ -565,22 +576,8 @@ class CharacterSheetNpcExporter {
 		if (!str) return str;
 
 		// Mask existing tags, brace-depth aware so nested tags survive intact.
-		const masked = [];
-		let plain = "";
-		for (let i = 0; i < str.length; ++i) {
-			if (str[i] !== "{" || str[i + 1] !== "@") {
-				plain += str[i];
-				continue;
-			}
-			let depth = 0;
-			let j = i;
-			for (; j < str.length; ++j) {
-				if (str[j] === "{") depth++;
-				else if (str[j] === "}" && --depth === 0) break;
-			}
-			plain += `\uE001${masked.push(str.slice(i, j + 1)) - 1}\uE001`;
-			i = j;
-		}
+		const {plain: initial, masked} = this._maskTaggedSpans(str);
+		let plain = initial;
 
 		const once = (pattern, build) => {
 			plain = plain.replace(pattern, (m, ...rest) => {
@@ -607,7 +604,136 @@ class CharacterSheetNpcExporter {
 		glossary(/\bunarmed strike\b/gi, "Unarmed Strike", "variantrule");
 		glossary(/\bdifficult terrain\b/gi, "Difficult Terrain", "variantrule");
 
+		return this._unmaskTaggedSpans(plain, masked);
+	}
+
+	/**
+	 * Hides every `{@tag …}` span behind a placeholder so a text pass can match on prose
+	 * without ever matching inside a tag. Brace-depth aware, so a nested tag (an
+	 * `{@action}` inside an `{@item}` display string) is masked as one unit rather than
+	 * being cut in half.
+	 *
+	 * The returned `masked` array is live: a caller may push a freshly-built tag onto it
+	 * and emit the matching placeholder to protect that tag from its own later passes.
+	 *
+	 * @param {string} str text to mask
+	 * @returns {{plain: string, masked: string[]}} placeholder text and the spans it hides
+	 */
+	static _maskTaggedSpans (str) {
+		const masked = [];
+		let plain = "";
+		for (let i = 0; i < str.length; ++i) {
+			if (str[i] !== "{" || str[i + 1] !== "@") {
+				plain += str[i];
+				continue;
+			}
+			let depth = 0;
+			let j = i;
+			for (; j < str.length; ++j) {
+				if (str[j] === "{") depth++;
+				else if (str[j] === "}" && --depth === 0) break;
+			}
+			plain += `\uE001${masked.push(str.slice(i, j + 1)) - 1}\uE001`;
+			i = j;
+		}
+		return {plain, masked};
+	}
+
+	/**
+	 * Puts back every span `_maskTaggedSpans` hid.
+	 *
+	 * @param {string} plain placeholder text
+	 * @param {string[]} masked spans to restore
+	 * @returns {string} text with tags restored
+	 */
+	static _unmaskTaggedSpans (plain, masked) {
 		return plain.replace(/\uE001(\d+)\uE001/g, (_m, idx) => masked[Number(idx)]);
+	}
+
+	/**
+	 * Dice written as plain prose are inert: `deal an extra 10d6 damage` is something the
+	 * DM has to go and roll by hand, while `{@damage 10d6}` is one click. The corpus
+	 * carried 57 untagged dice across 18 of 21 characters, which made this the single
+	 * biggest "easier to run at the table" gap left in the export.
+	 *
+	 * Two dice are deliberately left alone:
+	 *
+	 * - `d20` never means "roll this for an effect" — it names the D20 Test itself
+	 *   ("rolls a 20 on the d20", "reroll the d20"), so a roll link there is noise.
+	 * - a die-size change ("the d6 becomes a d8") describes scaling. Hovering both sides
+	 *   asks the DM which one to roll when the sentence has already told them.
+	 *
+	 * `{@damage}` vs `{@dice}` follows the bestiary's own convention: damage rolls are
+	 * `{@damage}`, everything else — healing, temp HP, resource regain, reductions,
+	 * durations — is `{@dice}`.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _tagBareDice (out) {
+		["trait", "action", "bonus", "reaction", "legendary"].forEach(section => {
+			(out[section] || []).forEach(entry => {
+				if (!Array.isArray(entry?.entries)) return;
+				entry.entries = entry.entries.map(it => (typeof it === "string" ? this._tagBareDiceInText(it) : it));
+			});
+		});
+	}
+
+	/**
+	 * @param {string} text entry text
+	 * @returns {string} text with bare dice wrapped in `{@damage}` / `{@dice}`
+	 */
+	static _tagBareDiceInText (text) {
+		const str = String(text || "");
+		if (!/\d*d\d/.test(str)) return str;
+
+		const {plain, masked} = this._maskTaggedSpans(str);
+
+		// `+ 1` is part of the roll, but `+ 1d6` starts a second die that must stay out of
+		// this one's tag.
+		const DIE = /\b(\d*)d(\d+)\b(\s*[+-]\s*\d+(?!\s*d\d))?/g;
+
+		const tagged = plain.replace(DIE, (m, count, faces, mod, offset, whole) => {
+			if (faces === "20") return m;
+
+			const before = whole.slice(Math.max(0, offset - 70), offset);
+			// Wide enough to reach a trailing "reducing the damage by the total" — the
+			// checks that read this window are each bounded on their own.
+			const after = whole.slice(offset + m.length, offset + m.length + 90);
+
+			const body = `${count}d${faces}${mod ? mod.replace(/\s*([+-])\s*/, " $1 ") : ""}`;
+			return `\uE001${masked.push(`{@${this._getBareDiceTagName(before, after)} ${body}}`) - 1}\uE001`;
+		});
+
+		return this._unmaskTaggedSpans(tagged, masked);
+	}
+
+	/**
+	 * Decides whether a die rolls damage or something else.
+	 *
+	 * What follows the die is the strongest signal — a unit noun ("rounds", "Hit Points")
+	 * settles it outright, and a nearby "damage" makes it a damage roll. Only when the
+	 * trailing text says nothing does the preceding clause get a vote, and even then a
+	 * reduction ("roll a d12 … reducing the damage") names damage while rolling something
+	 * that is emphatically not damage, so those verbs veto it.
+	 *
+	 * @param {string} before up to 70 characters preceding the die
+	 * @param {string} after up to 45 characters following the die
+	 * @returns {string} `"damage"` or `"dice"`
+	 */
+	static _getBareDiceTagName (before, after) {
+		if (/^\s*(?:\+\s*\d+\s*)?(?:rounds?|minutes?|hours?|days?|feet|foot|ft\.)\b/i.test(after)) return "dice";
+		if (/^\s*(?:\+\s*\d+\s*)?(?:[Hh]it\s+[Pp]oints|[A-Z][a-z]+\s+Points)\b/.test(after)) return "dice";
+		// "an extra 1d8 Cold, Fire, Lightning, or Thunder damage" puts a long type list
+		// between the die and the word that classifies it.
+		if (/^\s*(?:[^.;]{0,40}?\b)?damage\b/i.test(after)) return "damage";
+		// A reduction names damage while rolling something that is emphatically not damage
+		// ("roll a d12 … reducing the damage by the total"), so it vetoes the vote below.
+		// Only this sentence counts: "…hemocraft die (1d8). This damage can't be reduced"
+		// is a damage die whose *next* sentence happens to say "reduced".
+		const clause = before + String(after).split(/[.;]/)[0];
+		if (/\breduc(?:e|es|ed|tion|ing)\b|\bsubtracts?\b|\bregains?\b|\btemporary hit points\b/i.test(clause)) return "dice";
+		if (/\bdamage\b/i.test(before)) return "damage";
+		return "dice";
 	}
 
 	/**
@@ -1176,9 +1302,9 @@ class CharacterSheetNpcExporter {
 				const lead = sentence.replace(/^\s*(?:when|whenever|if|after|while|once)\b[^,]{0,120},\s*/i, "");
 				const kinds = new Set();
 				if (/\(no action required\)/i.test(lead)) kinds.add("trait");
-				if (/\bas a bonus action\b|\bas part of the bonus action\b|\buse[sd]? a bonus action\b/i.test(lead)) kinds.add("bonus");
+				if (/\bas a bonus action\b|\bas part of the bonus action\b|\b(?:use[sd]?|takes?) a bonus action\b/i.test(lead)) kinds.add("bonus");
 				if (/\bas a reaction\b|\buse[sd]? its reaction\b/i.test(lead)) kinds.add("reaction");
-				if (/\bas an? (?!bonus\b)[a-z]* ?action\b|\buse[sd]? (?:its|an) action\b/i.test(lead)) kinds.add("action");
+				if (/\bas an? (?!bonus\b)[a-z]* ?action\b|\buse[sd]? (?:its|an) action\b|\btakes? an? (?!bonus\b)(?:[a-z]+ )?action\b/i.test(lead)) kinds.add("action");
 				// Two economies in one lead is an ambiguity, not a correction.
 				if (kinds.size !== 1) return;
 				const [stated] = [...kinds];
@@ -1194,6 +1320,71 @@ class CharacterSheetNpcExporter {
 		});
 		sections.forEach(section => {
 			if (out[section] && !out[section].length && section !== "trait") delete out[section];
+		});
+	}
+
+	/**
+	 * An item entry titled "Moonlit Aegis" that opens "{@item Moonlit Aegis|…}: This
+	 * magic shield glows softly under moonlight." spends its first line saying its own
+	 * name and then describing how it looks. The name is already the entry heading and
+	 * the appearance is not a rule; the DM wants the sentence after that.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _stripItemSelfEcho (out) {
+		// Appearance-only openers. Kept deliberately narrow: a sentence that also states
+		// a condition ("While attuned…") is doing work and stays.
+		const APPEARANCE = /^This (?:magic |magical )?[a-z ]{2,30} (?:glows|shimmers|gleams|is carved|appears|looks|feels)\b[^.]*\.\s*/i;
+		["trait", "action", "bonus", "reaction"].forEach(section => {
+			(out[section] || []).forEach(entry => {
+				if (!Array.isArray(entry?.entries)) return;
+				const name = String(entry.name || "").replace(/\{@\w+\s+([^|}]+)[^}]*\}/g, "$1").trim();
+				entry.entries = entry.entries.map((line, ix) => {
+					if (ix || typeof line !== "string") return line;
+					const echo = line.match(/^\{@item ([^|}]+)[^}]*\}\s*[:\u2014-]\s*/);
+					if (!echo || echo[1].trim().toLowerCase() !== name.toLowerCase()) return line;
+					// The tag is the only hover the item has, so it is promoted to the heading
+					// rather than deleted along with the echo.
+					if (!/\{@item /.test(String(entry.name || ""))) entry.name = echo[0].replace(/\s*[:\u2014-]\s*$/, "");
+					return line.slice(echo[0].length).replace(APPEARANCE, "").trim();
+				});
+			});
+		});
+	}
+
+	/**
+	 * The lead-sentence test above only corrects an entry that names a *different*
+	 * economy. It cannot see an entry that names none at all — War Caster sat under
+	 * Reactions on seven characters while its whole body ("has advantage on
+	 * Constitution saves…, can cast with its hands full…") is passive. A DM scanning
+	 * Reactions for something to spend a reaction on finds a trait.
+	 *
+	 * An entry earns its place in Bonus Actions or Reactions by naming the economy or
+	 * by naming a trigger somewhere in its body. One that does neither is a trait.
+	 *
+	 * Scoped to feat-derived entries and to item prose that opens by naming itself. A
+	 * class feature or psionic discipline carries an authoritative economy in its own
+	 * data, so its body is free to omit it — Phirse's Minor Acceleration is a real
+	 * bonus action whose prose never says so.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _demoteEconomylessEntries (out) {
+		const ECONOMY = /\b(?:bonus action|reaction|as an action|magic action|no action required)\b/i;
+		const TRIGGER = /(?:^|[.;]\s*|,\s*)(?:when|whenever|in response to|immediately after)\b/i;
+		["bonus", "reaction"].forEach(section => {
+			if (!out[section]) return;
+			const keep = [];
+			out[section].forEach(entry => {
+				const isInferred = /\{@feat /.test(String(entry?.name || ""))
+					|| /^\{@item /.test(String((entry.entries || []).find(it => typeof it === "string") || ""));
+				if (!isInferred) { keep.push(entry); return; }
+				const body = this._getPlainMatchTextCased((entry.entries || []).filter(it => typeof it === "string").join(" "));
+				if (!body || ECONOMY.test(body) || TRIGGER.test(body)) { keep.push(entry); return; }
+				(out.trait = out.trait || []).push(entry);
+			});
+			out[section] = keep;
+			if (!out[section].length) delete out[section];
 		});
 	}
 
@@ -1856,6 +2047,50 @@ class CharacterSheetNpcExporter {
 			if (idx < maxSentences || MECHANICAL.test(sentence)) kept.push(sentence);
 		});
 		return (kept.length ? kept : sentences.slice(0, maxSentences)).join(" ");
+	}
+
+	/**
+	 * A stance body in the source is three parts: the action economy, a sentence of
+	 * flavour, and (sometimes) the rule. The roster line directly above already carries
+	 * the economy and the cost, and the duration is stated once for the whole subsystem,
+	 * so the only part worth reprinting is the rule.
+	 *
+	 * `_condenseRosterClause` keeps the *first* sentences, which for stance prose is
+	 * exactly the wrong half — six of thirteen corpus stances reduced to a line of
+	 * flavour. This keeps the mechanical sentences instead, and returns empty when there
+	 * are none.
+	 *
+	 * @param {string} text prepared stance description
+	 * @return {string} mechanical body, or "" when the prose says nothing mechanical
+	 */
+	static _condenseStanceBody (text) {
+		let str = String(text || "").trim();
+		if (!str) return "";
+
+		// "{@b Bonus Action (1 Stamina Point)}." or the same unbolded — both forms reach
+		// here because the source prose bolds it inconsistently.
+		str = str
+			.replace(/^\{@b\s*([^}]*?)\}\s*\.?\s*/i, (m, inner) => (/\b(?:action|stamina)\b/i.test(inner) ? "" : m))
+			.replace(/^(?:Bonus Action|Action|Reaction|No Action Required)\b[^.]{0,40}\.\s*/i, "")
+			.trim();
+
+		const MECHANICAL = /\{@(?:dc|damage|dice|condition|skill|status|variantrule|spell|action)\b|saving throw|\bAdvantage\b|\bDisadvantage\b|\bresistan|\bimmun|\bbonus (?:to|equal to|of)\b|\b\d+ (?:feet|foot)\b|\bextra \d/;
+		// A sentence that only says when the stance stops is worthless without the one
+		// that says what it does, and the shared duration rule is already in the header.
+		const DURATION = /^This stance (?:lasts|ends)\b/i;
+
+		const kept = this._splitIntoClauses(str)
+			.filter(sentence => MECHANICAL.test(sentence) || DURATION.test(sentence.trim()));
+		if (!kept.some(sentence => !DURATION.test(sentence.trim()))) return "";
+
+		return kept
+			.filter(sentence => !/^This stance lasts\b/i.test(sentence.trim()))
+			.join(" ")
+			// The roster line above already states the economy for every method.
+			.replace(/^As a bonus action,\s*/i, "")
+			.replace(/^As part of this stance,\s*/i, "")
+			.replace(/\s+/g, " ")
+			.trim();
 	}
 
 	/**
@@ -2814,7 +3049,9 @@ class CharacterSheetNpcExporter {
 			rules.push([new RegExp(`\\b(${phrase}),\\s+an?\\s+d\\d+`, "g"), (_m, p) => `${p} (${shown})`]);
 			// The lookahead must match a *die value* paren, not any paren — "one
 			// Superiority Die (no action required)" otherwise reads as already annotated.
-			rules.push([new RegExp(`\\b${phrase}\\b(?!\\s*\\(\\d*d\\d)`, "g"), m => `${m} (${shown})`]);
+			// A tag counts as already-annotated too: the psionics block writes
+			// "Manifestation die {@dice 1d8}", and appending to that reads as two dice.
+			rules.push([new RegExp(`\\b${phrase}\\b(?!\\s*(?:\\(\\d*d\\d|\\{@(?:dice|damage)\\s+\\d*d\\d))`, "g"), m => `${m} (${shown})`]);
 		};
 
 		addDie("[Hh]emocraft [Dd]i(?:e|ce)", calculations.hemocraftDie);
@@ -2867,12 +3104,51 @@ class CharacterSheetNpcExporter {
 			const level = Number(state.getClassLevel?.(name)) || Number(cls?.level) || 0;
 			if (!level) return;
 			const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+			// The guard has to be a *numeric* paren. "half its Wizard level (round up)" and
+			// "half its blood hunter level (maximum 9th level)" both carry a parenthetical
+			// that is part of the rule, not an annotation this pass already added, and a
+			// blanket `\(` lookahead left those two phrases unresolved forever.
+			const NOT_RESOLVED = String.raw`(?!\s*\(\d)`;
+			// A stated rounding direction is the book telling the reader how to finish the
+			// division. Once the number is printed, the instruction has nothing left to do.
+			const ROUNDING = String.raw`(\s*\(round(?:ed)?\s+(up|down)\))?`;
 			// Multiplier forms first; the bare form's lookahead then skips what they wrote.
 			MULTIPLIERS.forEach(([word, fn]) => {
-				rules.push([new RegExp(`\\b${word}\\s+its\\s+${esc}\\s+level\\b(?!\\s*\\()`, "gi"), m => `${m} (${fn(level)})`]);
+				rules.push([
+					new RegExp(`\\b${word}\\s+its\\s+${esc}\\s+level\\b${ROUNDING}${NOT_RESOLVED}`, "gi"),
+					(m, roundParen, direction) => {
+						const base = fn(level);
+						const roundsUp = /^up$/i.test(direction || "") && base * 2 !== level;
+						return `${roundParen ? m.slice(0, -roundParen.length) : m} (${base + (roundsUp ? 1 : 0)})`;
+					},
+				]);
 			});
-			rules.push([new RegExp(`\\bits\\s+${esc}\\s+level\\b(?!\\s*\\()`, "gi"), m => `${m} (${level})`]);
+			rules.push([new RegExp(`\\bits\\s+${esc}\\s+level\\b${NOT_RESOLVED}`, "gi"), m => `${m} (${level})`]);
 		});
+
+		// Feat text says "its level" with no class, because a feat does not belong to one.
+		// Inspiring Leader printed "equal to its level + its Charisma modifier (1)", where
+		// the only number shown is the modifier — so the line looked like it stated the
+		// answer while being off by the whole character level. State the total instead.
+		const totalLevel = Number(state.getTotalLevel?.()) || 0;
+		if (totalLevel) {
+			rules.push([
+				/\bits level\s*\+\s*its\s+(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)\s+modifier(?:\s*\([+-]?\d+\))?/gi,
+				(m, ability) => {
+					const mod = Number(state.getAbilityMod?.(ability.slice(0, 3).toLowerCase()));
+					return Number.isFinite(mod) ? `${totalLevel + mod}` : m;
+				},
+			]);
+			rules.push([/\bits level\b(?!\s*\(\d)/g, m => `${m} (${totalLevel})`]);
+		}
+
+		// "half its blood hunter level (6) (maximum 9th level)" states a ceiling this
+		// character is nowhere near. A statblock is a snapshot of one level, so a cap the
+		// resolved value already clears is guidance for a different character.
+		rules.push([
+			/\((\d+)\)\s*\(maximum (\d+)(?:st|nd|rd|th) level\)/g,
+			(m, value, cap) => (Number(value) <= Number(cap) ? `(${value})` : m),
+		]);
 
 		// No early return on an empty `rules` — the DC passes below stand on their own.
 
@@ -2972,7 +3248,7 @@ class CharacterSheetNpcExporter {
 		const stash = [];
 		const keep = resolved => `\uE000${stash.push(resolved) - 1}\uE000`;
 
-		const compound = (pattern, valueOf, {unsigned = false} = {}) => {
+		const compound = (pattern, valueOf, {unsigned = false, restate = false} = {}) => {
 			str = str.replace(new RegExp(`${pattern}${MIN}(?!\\s*\\()`, "gi"), (m, ...rest) => {
 				const offset = rest[rest.length - 2];
 				const whole = rest[rest.length - 1];
@@ -2983,7 +3259,12 @@ class CharacterSheetNpcExporter {
 				const floor = minimumOf(m);
 				const resolved = floor != null && value < floor ? floor : value;
 				const phrase = m.replace(new RegExp(String.raw`\s*${MIN_BODY}`, "i"), "");
-				return keep(`${phrase} (${unsigned ? resolved : format(whole, offset, resolved)})`);
+				const shown = unsigned ? resolved : format(whole, offset, resolved);
+				// Appending the value works while the phrase ends on the noun the value
+				// measures. It does not for "13 plus its Wisdom modifier", where the trailing
+				// noun is an operand — "its Wisdom modifier (18)" states a false fact about a
+				// character whose Wisdom modifier is +5. Those phrases lead with the answer.
+				return keep(restate ? `${shown} (${phrase})` : `${phrase} (${shown})`);
 			});
 		};
 
@@ -3018,10 +3299,10 @@ class CharacterSheetNpcExporter {
 		// "its AC equals 13 plus its Wisdom modifier" — the DM needs the total, not the
 		// two operands. The lookbehind keeps dice expressions out ("1d10 plus its
 		// Dexterity modifier" must annotate the modifier, not sum 10 into it).
-		compound(String.raw`(?<![\dd])(\d{1,2}) plus (?:its )?(${ABL}) modifier\b`, ([base, abl]) => {
+		compound(String.raw`(?<![\dd])(\d{1,2}) (?:plus|\+) (?:its )?(${ABL}) modifier\b`, ([base, abl]) => {
 			const mod = modOf(abl);
 			return mod == null ? null : Number(base) + mod;
-		}, {unsigned: true});
+		}, {restate: true, unsigned: true});
 		compound(String.raw`\b(?:its )?[Pp]roficiency [Bb]onus\s*(?:×|x|\*)\s*(\d+)\b`, ([mult]) => (pb ? pb * Number(mult) : null));
 
 		compound(String.raw`\b(?:its )?(${ABL}) modifier\b`, ([abl]) => modOf(abl));
@@ -3306,7 +3587,10 @@ class CharacterSheetNpcExporter {
 	 * "(passive; active)" state that means nothing to a DM reading a statblock.
 	 */
 	static _tidyStatblockText (text) {
-		return String(text || "")
+		// "Juen May may cast" is a surname colliding with a modal, not a duplicated word.
+		// Collapsing it deletes the surname and leaves a sentence that reads as a modal.
+		const MODAL_ALT = {may: "can", might: "could", will: "shall", can: "is able to"};
+		return this._fixResidualGrammar(String(text || ""))
 			.replace(/\((?:\s*(?:passive|active|inactive)\s*[;,]?)+\)/gi, "")
 			.replace(/…\s*\./g, "…")
 			.replace(/\(\s+/g, "(")
@@ -3316,10 +3600,100 @@ class CharacterSheetNpcExporter {
 			// Some upstream pass pads punctuation and turns "2,000 pounds" into "2, 000".
 			.replace(/(\d),\s+(\d{3})\b/g, "$1,$2")
 			// Substituting the subject into "You may cast…" leaves "Juen May may cast".
-			// The lower-cased survivor is the real word; the capital is the leftover.
-			.replace(/\b([A-Z][a-z]{2,})\s+([a-z]{3,})\b/g, (m, first, second) => (first.toLowerCase() === second ? second : m))
+			// The lower-cased survivor is the real word; the capital is the leftover —
+			// unless a capitalised word precedes it, in which case the pair is a full name.
+			.replace(/(\b[A-Z][a-z]{1,20} )?\b([A-Z][a-z]{2,})\s+([a-z]{3,})\b/g, (m, lead, first, second) => {
+				if (first.toLowerCase() !== second) return m;
+				if (lead && MODAL_ALT[second]) return `${lead}${first} ${MODAL_ALT[second]}`;
+				return `${lead || ""}${second}`;
+			})
+			// An em-dash the source spaced on one side only ("Darkness —such as").
+			.replace(/\s+—(?=\S)/g, "—")
 			.replace(/\s{2,}/g, " ")
 			.trim();
+	}
+
+	/**
+	 * Residue from the second-person rewrite that the agreement passes cannot reach,
+	 * because it sits across a coordinator rather than next to the subject.
+	 *
+	 * Every rule here is anchored on a *finite* verb ("it makes … and miss") and refuses
+	 * to fire when a modal or an infinitive governs the span, because "must succeed on a
+	 * saving throw or take damage" is already correct and conjugating it would be wrong.
+	 *
+	 * @param {string} text entry text
+	 * @returns {string} text with coordinated and collided forms repaired
+	 */
+	/**
+	 * "In addition," as the first words of a standalone entry points at a sentence the
+	 * trimming passes already removed, so the reader is told this adds to something that
+	 * is not there. The connective goes; the rule it introduces stays.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _dropDanglingConnectives (out) {
+		["trait", "action", "bonus", "reaction", "legendary"].forEach(section => {
+			(out[section] || []).forEach(entry => {
+				if (!Array.isArray(entry?.entries)) return;
+				const first = entry.entries[0];
+				if (typeof first !== "string") return;
+				entry.entries[0] = first
+					.replace(/^\s*(?:In addition|Additionally|Furthermore|Moreover|Also)\s*,\s*([A-Za-z{])/, (m, ch) => ch.toUpperCase())
+					.trim();
+			});
+		});
+	}
+
+	/**
+	 * The 2014 and 2024 printings of Fey Ancestry say the same thing in different words,
+	 * and a character carrying both lands them side by side: "magic can't put it to sleep
+	 * (Fey Ancestry); immunity to being magically asleep".
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _dropRestatedSleepImmunity (out) {
+		["trait", "action", "bonus", "reaction"].forEach(section => {
+			(out[section] || []).forEach(entry => {
+				if (!Array.isArray(entry?.entries)) return;
+				entry.entries = entry.entries.map(line => {
+					if (typeof line !== "string" || !/magic can't put it to sleep/i.test(line)) return line;
+					return line
+						.replace(/;\s*immunity to being magically asleep\b/i, "")
+						.replace(/\bimmunity to being magically asleep\s*;\s*/i, "");
+				});
+			});
+		});
+	}
+
+	static _applyResidualGrammar (out) {
+		["trait", "action", "bonus", "reaction", "legendary"].forEach(section => {
+			(out[section] || []).forEach(entry => {
+				if (!Array.isArray(entry?.entries)) return;
+				entry.entries = entry.entries.map(it => (typeof it === "string" ? this._fixResidualGrammar(it) : it));
+			});
+		});
+	}
+
+	static _fixResidualGrammar (text) {
+		const CONJUGATE = /^(?:miss|push|hit|deal|take|gain|make|move|roll|force|knock|reduce|add)$/;
+		const GOVERNED = /\b(?:can|could|must|may|might|shall|should|will|would)\b|\bto (?:make|hit|deal|take|move|push|gain|use|roll|force|cast|attack|do|choose|spend)\b/i;
+		return String(text || "")
+			.replace(/\b([Ii]t (?:either |also |then )?[a-z]+s\b)([^.;]{0,90}?)(\s(?:and|or)\s)([a-z]+)\b/g, (m, subj, span, coord, verb) => {
+				if (!CONJUGATE.test(verb)) return m;
+				// The coordinated verb is inside a parenthetical whose own clause governs it.
+				if ((span.match(/\(/g) || []).length > (span.match(/\)/g) || []).length) return m;
+				// A closed parenthetical carries its own clause, so its verbs say nothing
+				// about the one being coordinated here.
+				if (GOVERNED.test(span.replace(/\([^)]*\)/g, " "))) return m;
+				return `${subj}${span}${coord}${verb === "miss" ? "misses" : `${verb}s`}`;
+			})
+			// "attack rolls against it has advantage" — plural subject, singular verb.
+			.replace(/\b((?:rolls?|attacks?|strikes?)\}? against (?:it|[A-Z][\w' ]{1,24})) has\b/gi, "$1 have")
+			// "As a Bonus Action, it can use it to regain Hit Points" — the second "it" is
+			// the feature, and the reader has to work that out mid-sentence.
+			.replace(/\bit can use it to ([a-z]+)/g, "it can $1")
+			// "(e.g. Its rapier)" — a parenthetical example is not a sentence.
+			.replace(/(\be\.g\.\s+)(Its|It|The|A|An)\b/g, (m, lead, word) => `${lead}${word.toLowerCase()}`);
 	}
 
 	/**
@@ -5503,14 +5877,12 @@ class CharacterSheetNpcExporter {
 		});
 
 		const druidLevel = Number(state.getClassLevel?.("Druid")) || 0;
-		const wisMod = Number(state.getAbilityMod?.("wis")) || 0;
 
 		const resolve = txt => {
 			let s = String(txt || "");
 			// `_resolveDerivedNumbers` already annotated the common "<multiplier> its X
 			// level" shapes; only the Wild Shape-specific divisor is left here.
 			if (druidLevel) s = s.replace(/Druid level divided by 3 \(round down\)/gi, `Druid level divided by 3 (${Math.floor(druidLevel / 3)})`);
-			s = s.replace(/13 plus its Wisdom modifier(?!\s*\()/gi, `13 plus its Wisdom modifier (${13 + wisMod})`);
 			return s;
 		};
 
@@ -7124,13 +7496,23 @@ class CharacterSheetNpcExporter {
 
 		entries.unshift(`${npcName} uses combat methods fueled by stamina (pool ${staminaMax}; method degree access ${degreeAccess}; save {@dc ${methodDc}}).`);
 
+		const stances = methods.filter(m => m?.isStance);
+		if (stances.length) {
+			// Every stance body repeated the same duration sentence. It is a rule of the
+			// subsystem, not of any one stance, so the subsystem states it once.
+			entries.push(`{@b Stances.} A stance costs the stamina listed above and lasts until ${npcName} is {@condition incapacitated} or ends it (Bonus Action).`);
+		}
+
 		// Expand stance riders so effects aren't name-only. The name is hoverable here
 		// exactly as it is in the cost roster above, so the body only has to say what the
 		// stance *does* — the full rule is one hover away.
-		methods.filter(m => m?.isStance).forEach(m => {
+		stances.forEach(m => {
 			const safeName = this._getSafeInlineText(m.name, {maxLen: 80}) || "Stance";
 			const safeSource = this._getSafeSourceJson(m.source || Parser.SRC_TGTT || Parser.SRC_XPHB);
-			const body = this._condenseRosterClause(this._prepareFeatureTextForNpc(m.description || "", {npcName}));
+			const body = this._condenseStanceBody(this._prepareFeatureTextForNpc(m.description || "", {npcName}));
+			// A stance whose prose is entirely flavour ("Vern Hollow heightens its senses")
+			// tells the DM strictly less than the hoverable name three lines above. Say
+			// nothing rather than spend a line saying nothing.
 			if (!body) return;
 			entries.push(`{@b {@combatmethod ${safeName}|${safeSource}} (Stance).} ${body}`);
 		});
@@ -9055,7 +9437,7 @@ class CharacterSheetNpcExporter {
 		{
 			const tailStash = this._stashTags(s);
 			s = tailStash.stashed;
-			const NOT_A_SPELL = /^(?:same|following|chosen|higher[- ]level|lower[- ]level|other|another|first|second|third|next|new|selected|appropriate|corresponding|original|resulting|entire|whole|only|single)$/i;
+			const NOT_A_SPELL = /^(?:same|following|chosen|higher[- ]level|lower[- ]level|other|another|first|second|third|next|new|selected|appropriate|corresponding|original|resulting|entire|whole|only|single|artificer|barbarian|bard|cleric|druid|fighter|monk|paladin|ranger|rogue|sorcerer|warlock|wizard)$/i;
 			// A spell name is a noun phrase. When conversion mangles a sentence the
 			// pattern can span a clause boundary and mint a spell out of grammar —
 			// "{@spell Attack Or}", "{@spell Metamagic Affects Any}". Any conjunction,
@@ -9066,14 +9448,18 @@ class CharacterSheetNpcExporter {
 				"deals", "deal", "takes", "take", "makes", "make", "gains", "gain", "uses",
 				"has", "have", "can", "must", "is", "are", "was", "were", "be", "been",
 			]);
-			s = s.replace(/\bthe ([a-z][a-z'’]*(?: [a-z][a-z'’]*){0,2}) spell\b/g, (m, name) => {
-				const words = name.split(" ");
+			// The name may be written either way: item prose says "the darkness spell",
+			// class prose says "cast the Find Familiar spell". Match both and normalise
+			// case below, but never let "the Wizard spell slots" mint a spell — a
+			// following bookkeeping noun means the word before it was a qualifier.
+			s = s.replace(/\bthe ([a-zA-Z][a-zA-Z'’]*(?: [a-zA-Z][a-zA-Z'’]*){0,2}) spell\b(?!\s+(?:slots?|save|attack|list|level|scroll))/g, (m, name) => {
+				const words = name.split(" ").map(w => w.toLowerCase());
 				if (NOT_A_SPELL.test(words[0])) return m;
 				if (words.some(w => NOT_IN_A_NAME.has(w))) return m;
-				const titled = name.replace(/\b[a-z]/g, c => c.toUpperCase())
+				const titled = name.toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase())
 					.replace(/\b(Of|The|And|From|In|On|To)\b/g, w => w.toLowerCase());
 				// Prefer the source the character's own list already proves.
-				const known = spellVocabulary?.get(name.replace(/\s+/g, " "));
+				const known = spellVocabulary?.get(name.toLowerCase().replace(/\s+/g, " "));
 				return `the {@spell ${titled}${known?.source ? `|${known.source}` : ""}} spell`;
 			});
 			s = this._restoreTags(s, tailStash.tagStore, tailStash.prefix);

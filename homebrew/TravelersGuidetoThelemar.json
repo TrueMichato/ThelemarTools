@@ -36925,7 +36925,7 @@
 			"staminaCost": 1,
 			"actionType": "action",
 			"entries": [
-				"{@b Action (1 Stamina Point)}. Your unpredictable methoding puts your opponent off-balance—when you connect with your weapon they stumble and fall. When you activate this method, you take the Attack action and make a melee weapon attack, as well as any additional attacks granted by Extra Attack. Until the start of your next turn, when you hit with a melee weapon attack against a creature and deal 8 or more damage it makes a Dexterity saving throw or is knocked {@condition prone}."
+				"{@b Action (1 Stamina Point)}. Your unpredictable maneuvering puts your opponent off-balance—when you connect with your weapon they stumble and fall. When you activate this method, you take the Attack action and make a melee weapon attack, as well as any additional attacks granted by Extra Attack. Until the start of your next turn, when you hit with a melee weapon attack against a creature and deal 8 or more damage it makes a Dexterity saving throw or is knocked {@condition prone}."
 			]
 		},
 		{
@@ -37235,7 +37235,7 @@
 			"staminaCost": 2,
 			"actionType": "bonus action",
 			"entries": [
-				"{@b Bonus Action (2 Stamina Points)}. You pace your attacks in a disruptive flow that makes it easy to follow a strike with methoding that temporarily blinds your foes. After you hit a creature with a melee weapon attack, you can spend 1 stamina to make a Sleight of Hand check, blinding it if the result is higher than its AC. At the beginning of each of its turns, the {@condition blinded} creature can make a Wisdom saving throw to recover from its blindness.",
+				"{@b Bonus Action (2 Stamina Points)}. You pace your attacks in a disruptive flow that makes it easy to follow a strike with maneuvering that temporarily blinds your foes. After you hit a creature with a melee weapon attack, you can spend 1 stamina to make a Sleight of Hand check, blinding it if the result is higher than its AC. At the beginning of each of its turns, the {@condition blinded} creature can make a Wisdom saving throw to recover from its blindness.",
 				"This stance lasts until you are {@condition incapacitated|tgtt} or use a bonus action to end it."
 			],
 			"isStance": true

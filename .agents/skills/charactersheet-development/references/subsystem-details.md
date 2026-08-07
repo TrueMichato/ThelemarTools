@@ -515,6 +515,50 @@ a term exists, prose only where it adds something.
   v12 passed lint and passed a spot check on the character they targeted, and were only
   caught by diffing all 21 exports.
 
+### Rollable numbers, grammar and honest filing (v13)
+- **A bare die is inert prose.** `_tagBareDice` runs immediately before `_enrichHoverTags`
+  and wraps every `NdX` (never `d20`) in `{@damage}` or `{@dice}`. Classification reads
+  what *follows* first — a unit noun (`rounds`, `Hit Points`) settles it, then a nearby
+  `damage`; only then does the preceding clause vote, and a reduction verb (`reducing the
+  damage`) vetoes that vote, because "roll a d12 … reducing the damage" rolls something
+  that is emphatically not damage.
+- **Before adding a numeric-resolution pass, read the existing `compound(…)` rules.**
+  Several formula shapes are *already* summed; they were just formatted badly. A second
+  summing pass for `N plus its X modifier` double-counted Tignor's Wild Shape AC to 31.
+  The fix was `compound(…, {restate: true})`, which emits `18 (13 plus its Wisdom
+  modifier)` instead of appending the total to the last operand — the old form asserted a
+  Wisdom modifier of +18.
+- **`_refileByStatedEconomy`'s action branch must exclude "take a Bonus Action".** Adding
+  `takes? an? … action` without `(?!bonus\b)` moved six item entries out of Bonus Actions.
+  The bonus branch needs its own `takes? a bonus action` alternative.
+- **`_demoteEconomylessEntries` is gated to `{@feat …}` names and `{@item …}` bodies.**
+  Class features and psionic disciplines carry authoritative economy in their metadata even
+  when the prose never states it; an ungated version demoted real psionic bonus actions to
+  traits. A body naming an Opportunity Attack (Sentinel) is a genuine reaction.
+- **A stance body needs mechanical-sentence selection, not `_condenseRosterClause`.** The
+  generic condenser keeps the *first* sentences, and stance prose always opens on flavour —
+  six of thirteen corpus stances printed nothing but "heightens its senses."
+  `_condenseStanceBody` strips the economy lead (bolded or plain), keeps only sentences
+  carrying a tag, save, advantage, resistance, bonus, distance or extra die, drops the
+  universal duration trailer, and **returns empty when nothing mechanical survives** — the
+  roster above already names the stance and the name is hoverable. The duration rule is
+  stated once in a `{@b Stances.}` block header.
+- **Grammar repair must run late.** Subject substitution happens *after* the early prose
+  compaction, so `_fixResidualGrammar` is wired both into `_tidyStatblockText` and as a
+  standalone `_applyResidualGrammar` pass near the end of the chain.
+  - Conjugating a coordinated verb after a finite `it <verb>s` requires refusing to fire
+    when a modal or infinitive governs the span, or when the coordinator sits inside an
+    **unclosed** parenthetical — otherwise every "or **take** damage" infinitive is
+    corrupted.
+  - The plural-subject rule (`attacks against it has` → `have`) must match through a
+    closing `}`: the plural noun is often the display text of an `{@action …}` tag.
+  - The doubled-word collapse must be **name-aware**. `Juen May may cast` collapsed to
+    `Juen may cast`, deleting the surname and turning the sentence into a modal; the fix
+    keeps the name and swaps the modal (`may` → `can`).
+- **Fix a typo in this repo's own homebrew at the source.** TGTT's `methoding` was a
+  botched `maneuver` → `method` rename in `homebrew/TravelersGuidetoThelemar.json`, not an
+  exporter defect.
+
 ### Ability prose (compact + hoverable)
 - Preserve `{@tags}` through strip/normalize; enrich `{@condition}` / `{@skill}`.
 - `_sanitizeInboundTags` strips homebrew sources from **core** condition tags
