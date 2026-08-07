@@ -4652,6 +4652,13 @@ class CharacterSheetState {
 				savingThrowInt: 0,
 				savingThrowWis: 0,
 				savingThrowCha: 0,
+				// Per-ability ability-check bonuses
+				abilityCheckStr: 0,
+				abilityCheckDex: 0,
+				abilityCheckCon: 0,
+				abilityCheckInt: 0,
+				abilityCheckWis: 0,
+				abilityCheckCha: 0,
 				// Additional bonus types
 				proficiencyBonus: 0,
 				savingThrowConcentration: 0,
@@ -10691,6 +10698,28 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * The item-granted ability-check bonus that applies to a check of `ability`.
+	 *
+	 * Mirrors the per-ability saving-throw resolution in `getSavingThrow`: a blanket
+	 * `bonusAbilityCheck` applies to every check, and a per-ability
+	 * `bonusAbilityCheck_<abl>` stacks on top of it for the named ability only. Items that
+	 * scope their bonus to some abilities but not all (the Ioun Blade's "+1 to Intelligence,
+	 * Wisdom, and Charisma checks") are otherwise inexpressible — the blanket prop would
+	 * silently over-grant on the other three.
+	 *
+	 * @param {string|null} [ability] - "str"|"dex"|"con"|"int"|"wis"|"cha", or null/undefined
+	 *        for a check with no governing ability (lore skills), which gets the blanket
+	 *        bonus only.
+	 * @returns {number}
+	 */
+	getItemAbilityCheckBonus (ability) {
+		const generic = this._data.itemBonuses?.abilityCheck || 0;
+		if (!ability) return generic;
+		const key = `abilityCheck${ability.charAt(0).toUpperCase()}${ability.slice(1)}`;
+		return generic + (this._data.itemBonuses?.[key] || 0);
+	}
+
+	/**
 	 * Get the total skill bonus (alias for getSkillMod)
 	 * @param {string} skill - The skill name
 	 * @returns {number} The skill bonus
@@ -10768,7 +10797,7 @@ class CharacterSheetState {
 		if (loreSkill) {
 			const pb = this.getProficiencyBonus();
 			const custom = this.getSkillCustomMod(normalizedSkill);
-			const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
+			const itemBonus = this.getItemAbilityCheckBonus(null);
 			const stateBonus = this.getSkillBonusFromStates(normalizedSkill, null);
 			const stanceBonus = this._getStanceSkillBonus(normalizedSkill);
 			return pb + (loreSkill.bonus || 0) + custom + itemBonus + stateBonus + stanceBonus;
@@ -10793,7 +10822,7 @@ class CharacterSheetState {
 		const custom = this.getSkillCustomMod(normalizedSkill);
 
 		// Add item bonuses (ability check bonus from magic items)
-		const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
+		const itemBonus = this.getItemAbilityCheckBonus(resolvedAbility);
 
 		// Get feature modifiers that need dynamic calculation (abilityMod-based effects)
 		// Note: Basic value modifiers are already in custom via _recalculateCustomModifiers
@@ -11712,7 +11741,7 @@ class CharacterSheetState {
 				const residual = custom - itemized;
 				if (residual !== 0) loreComponents.push({type: "custom", name: "Custom Modifier", value: residual, icon: "⚙️", isCanonical: false});
 			}
-			const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
+			const itemBonus = this.getItemAbilityCheckBonus(null);
 			if (itemBonus !== 0) loreComponents.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 			const stateBonus = this.getSkillBonusFromStates(normalizedSkill, null);
 			if (stateBonus !== 0) loreComponents.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮", isCanonical: false});
@@ -11772,7 +11801,7 @@ class CharacterSheetState {
 			if (residual !== 0) components.push({type: "custom", name: "Custom Modifier", value: residual, icon: "⚙️", isCanonical: false});
 		}
 
-		const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
+		const itemBonus = this.getItemAbilityCheckBonus(ability);
 		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 
 		const dynamicFeatureBonus = this._getDynamicSkillFeatureBonus(normalizedSkill);
@@ -11947,7 +11976,7 @@ class CharacterSheetState {
 		const customCheck = this.getAbilityCheckCustomMod(ability);
 		if (customCheck !== 0) components.push({type: "custom", name: `${ability.toUpperCase()} Check Modifier`, value: customCheck, icon: "⚙️", isCanonical: false});
 
-		const itemBonus = this._data.itemBonuses?.abilityCheck || 0;
+		const itemBonus = this.getItemAbilityCheckBonus(ability);
 		if (itemBonus !== 0) components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎", isCanonical: false});
 
 		// Exhaustion: subtract from EFFECTIVE only. Raw ability checks are d20
@@ -29926,6 +29955,10 @@ class CharacterSheetState {
 			// Update aggregated item bonuses
 			this._recalculateItemBonuses();
 
+			// A new host must pick up its registry corrections and any already-active bond
+			// waiver immediately; a new stone can start a waiver for a host already held.
+			this.reconcileIounHosts();
+
 			// Register any custom-item effects (Bug #8) if the item is active on add
 			const _addedWrapper = this._data.inventory[this._data.inventory.length - 1];
 			if (this._isItemEffectsActive(_addedWrapper)) {
@@ -30449,6 +30482,11 @@ class CharacterSheetState {
 		}
 
 		this._data.inventory = this._data.inventory.filter(i => i.id !== itemId);
+
+		// A stone (or a host) leaving the inventory must not leave a dangling seat behind,
+		// and losing your last bond must revoke any bond-borne attunement waiver.
+		this.reconcileIounHosts();
+
 		const sacredWeaponState = this._data.activeStates?.find(state =>
 			state.active
 			&& state.stateTypeId === "sacredWeapon"
@@ -30546,6 +30584,11 @@ class CharacterSheetState {
 			}
 			// Refresh derived armor/shield-upgrade conditional modifiers (equip state changed).
 			this._recalculateItemUpgradeModifiers();
+			// A set stone is by definition functioning, so stowing it must vacate its setting.
+			if (!equipped) {
+				const host = this.getIounHostOfStone(itemId);
+				if (host) this.unsetIounStone(host.id, itemId);
+			}
 			this._data.hp.current = Math.min(this._data.hp.current, this.getMaxHp());
 		}
 	}
@@ -30592,6 +30635,10 @@ class CharacterSheetState {
 		const item = this._data.inventory.find(i => i.id === itemId);
 		if (item) {
 			item.equipped = false;
+			// A set stone is by definition functioning, so taking it out of use must also take
+			// it out of its setting — otherwise the host keeps its +1 for a dormant stone.
+			const host = this.getIounHostOfStone(itemId);
+			if (host) this.unsetIounStone(host.id, itemId);
 			// Remove any effects the item was contributing while equipped
 			this._unregisterItemEffects(itemId);
 			// Refresh derived armor/shield-upgrade conditional modifiers (now unequipped).
@@ -30616,6 +30663,15 @@ class CharacterSheetState {
 				this._unregisterItemEffects(itemId);
 			}
 			this._data.hp.current = Math.min(this._data.hp.current, this.getMaxHp());
+			// Bonding or unbonding a stone can start or end a host's attunement waiver, and an
+			// unbonded stone can no longer occupy a setting.
+			if (CharacterSheetState.isIounStone(item.item || item)) {
+				if (!attuned) {
+					const host = this.getIounHostOfStone(itemId);
+					if (host) this.unsetIounStone(host.id, itemId);
+				}
+				this.reconcileIounHosts();
+			}
 		}
 	}
 
@@ -32408,6 +32464,412 @@ class CharacterSheetState {
 			const ent = globalThis.Renderer?.item?.entryMap?.[source]?.[name];
 			if (ent) cbWalk(ent.entriesTemplate || ent.entries);
 		}
+	}
+
+	// ==========================================
+	// Ioun host items — items that hold stones in settings (Ioun Blade, and any item a
+	// player or DM declares a host). See docs/charactersheet/20-ioun-stones.md.
+	// ==========================================
+
+	/**
+	 * Built-in host descriptors, keyed by the lower-cased identity of an item that cannot
+	 * carry its own sheet data.
+	 *
+	 * This layer exists for exactly one reason: books fetched from GitHub (The Griffon's
+	 * Saddlebag, etc.) are not editable locally, so an `iounHost` prop can never be added to
+	 * them. Editable homebrew should declare `iounHost` on the item instead of being listed
+	 * here.
+	 *
+	 * The Ioun Blade is a `magicvariant`, so it never appears under that name — it generates
+	 * "Ioun Longsword", "Ioun Greatsword", etc. across the 11 swords its `requires` matches.
+	 * `_variantName` (set by `Renderer.item._createSpecificVariants_createSpecificVariant`)
+	 * is therefore the only stable identity, and is preserved onto the inventory row for
+	 * exactly this lookup.
+	 */
+	static IOUN_HOST_REGISTRY = {
+		// Keyed by bare variant name as well as `name|source`; see `_getIounHostRegistryEntry`.
+		"ioun blade": {
+			settings: 2,
+			settingLabel: "gemstone setting",
+			// "For each replaced stone, the sword's bonuses increase by 1." `bonusWeapon` is
+			// +X to both attack and damage; the three save/check pairs are the abilities the
+			// item's own text names.
+			grants: [
+				"bonusWeapon",
+				"bonusSavingThrowInt", "bonusSavingThrowWis", "bonusSavingThrowCha",
+				"bonusAbilityCheckInt", "bonusAbilityCheckWis", "bonusAbilityCheckCha",
+			],
+			waivesAttunement: true,
+			// TGS3 encodes "+1 to Intelligence, Wisdom, and Charisma checks and saving
+			// throws" as a blanket `bonusSavingThrow: "+1"`, which over-grants to STR/DEX/CON
+			// saves and drops the ability-check half entirely. Correct it to what the item
+			// actually says. Applied once, when the item enters inventory.
+			dataCorrections: {
+				bonusSavingThrow: 0,
+				bonusSavingThrowInt: 1,
+				bonusSavingThrowWis: 1,
+				bonusSavingThrowCha: 1,
+				bonusAbilityCheckInt: 1,
+				bonusAbilityCheckWis: 1,
+				bonusAbilityCheckCha: 1,
+			},
+		},
+	};
+
+	/** Matches an item declaring that a bonded Ioun Stone stands in for attuning to it. */
+	static _RE_IOUN_ATTUNEMENT_WAIVER = /\battuned\s+to\s+an?\s+ioun\s+stone\b[^.]{0,120}?\b(?:don't|do not|doesn't|does not)\s+need\s+to\s+attune\b/i;
+
+	/**
+	 * Resolve how (and whether) an item can hold Ioun Stones in settings.
+	 *
+	 * Four layers, first match wins, so a player's own declaration always beats detection:
+	 *
+	 *  1. `iounSettings` — a plain number the player set from the item editor.
+	 *  2. `iounHost` — a data prop on editable homebrew.
+	 *  3. The built-in registry, for books that cannot be edited locally.
+	 *  4. Prose, which can recognise the attunement waiver but never a setting *count* —
+	 *     so it never claims one.
+	 *
+	 * @param {object} itemData - the `.item` payload of an inventory row, or raw item data
+	 * @returns {{isHost: boolean, settings: number, grants: string[], perStone: number,
+	 *           waivesAttunement: boolean, settingLabel: string, origin: string}}
+	 */
+	getIounHostPolicy (itemData) {
+		const none = {isHost: false, settings: 0, grants: [], perStone: 1, waivesAttunement: false, settingLabel: "setting", origin: "none"};
+		if (!itemData) return none;
+
+		const build = (desc, origin) => {
+			const settings = Math.max(0, Math.floor(Number(desc.settings) || 0));
+			const grants = Array.isArray(desc.grants) && desc.grants.length ? [...desc.grants] : ["bonusWeapon"];
+			return {
+				isHost: settings > 0,
+				settings,
+				grants,
+				perStone: Number(desc.perStone) > 0 ? Number(desc.perStone) : 1,
+				waivesAttunement: !!desc.waivesAttunement,
+				settingLabel: desc.settingLabel || "setting",
+				origin,
+			};
+		};
+
+		// 1. Player declaration. An explicit 0 is a real answer — "this item is NOT a host" —
+		// and must be able to override an inherited count, so only `null`/`undefined` falls
+		// through to the layers below.
+		if (itemData.iounSettings != null && Number.isFinite(Number(itemData.iounSettings))) {
+			return build({
+				settings: itemData.iounSettings,
+				grants: itemData.iounHost?.grants,
+				perStone: itemData.iounHost?.perStone,
+				// A player-declared host keeps any waiver the item genuinely has, but
+				// declaring settings never invents one.
+				waivesAttunement: itemData.iounHost?.waivesAttunement ??
+					CharacterSheetState._hasIounAttunementWaiverText(itemData),
+				settingLabel: itemData.iounHost?.settingLabel,
+			}, "user");
+		}
+
+		// 2. Homebrew data prop.
+		if (itemData.iounHost && Number(itemData.iounHost.settings) > 0) return build(itemData.iounHost, "data");
+
+		// 3. Built-in registry.
+		const desc = CharacterSheetState._getIounHostRegistryEntry(itemData);
+		if (desc) return build(desc, "registry");
+
+		// 4. Prose. Recognises the waiver only — a settings count is not inferable from text.
+		if (CharacterSheetState._hasIounAttunementWaiverText(itemData)) {
+			return {...none, waivesAttunement: true, origin: "prose"};
+		}
+
+		return none;
+	}
+
+	/**
+	 * The registry descriptor for an item, matched on variant identity then plain identity.
+	 *
+	 * `_baseSource` is consulted alongside `source` because the ⚙ item editor rewrites an
+	 * edited row's source to the "Custom" sentinel. Editing an Ioun Blade's weight must not
+	 * quietly stop it being an Ioun Blade, so provenance is matched as well as current source.
+	 */
+	static _getIounHostRegistryEntry (itemData) {
+		const sources = [itemData.source, itemData._variantSource, itemData._baseSource].filter(Boolean);
+		const names = [itemData._variantName, itemData.name].filter(Boolean);
+		for (const n of names) {
+			for (const src of sources) {
+				const entry = CharacterSheetState.IOUN_HOST_REGISTRY[`${n}|${src}`.toLowerCase()];
+				if (entry) return entry;
+			}
+		}
+		// Source-agnostic fallback on the VARIANT name only. A generic variant's name is its
+		// own identity ("Ioun Blade" is never a base item's name), while `source` on a generated
+		// variant is the BASE item's source and the ⚙ editor overwrites it with "Custom" — so a
+		// source-qualified key alone is not durable enough to survive an ordinary edit.
+		if (itemData._variantName) {
+			const bare = CharacterSheetState.IOUN_HOST_REGISTRY[itemData._variantName.toLowerCase()];
+			if (bare) return bare;
+		}
+		return null;
+	}
+
+	static _hasIounAttunementWaiverText (itemData) {
+		return CharacterSheetState._RE_IOUN_ATTUNEMENT_WAIVER
+			.test(CharacterSheetState._getItemTextForAttunementExemption(itemData));
+	}
+
+	/**
+	 * The one-off data corrections a registry entry declares for an item whose source book
+	 * cannot be edited. Returns `null` when there is nothing to correct.
+	 */
+	static getIounHostDataCorrections (itemData) {
+		if (!itemData) return null;
+		const desc = CharacterSheetState._getIounHostRegistryEntry(itemData);
+		return desc?.dataCorrections ? {...desc.dataCorrections} : null;
+	}
+
+	/** Every inventory row that can hold Ioun Stones, with its resolved policy. */
+	getIounHosts () {
+		return this._data.inventory
+			.map(row => ({row, policy: this.getIounHostPolicy(row.item || row)}))
+			.filter(it => it.policy.isHost);
+	}
+
+	/** The inventory ids of the stones currently set into `hostItemId`. */
+	getIounSetStoneIds (hostItemId) {
+		const row = this._data.inventory.find(i => i.id === hostItemId);
+		const ids = row?.item?.iounSet;
+		return Array.isArray(ids) ? [...ids] : [];
+	}
+
+	/** The host row holding `stoneItemId`, or `null` when the stone is not set. */
+	getIounHostOfStone (stoneItemId) {
+		if (!stoneItemId) return null;
+		return this._data.inventory.find(i => Array.isArray(i.item?.iounSet) && i.item.iounSet.includes(stoneItemId)) || null;
+	}
+
+	/** Whether `stoneItemId` is currently set into some host item. */
+	isIounStoneSet (stoneItemId) {
+		return !!this.getIounHostOfStone(stoneItemId);
+	}
+
+	/**
+	 * Seat a bonded stone into one of a host item's settings.
+	 *
+	 * A set stone stays *functioning*: it keeps `equipped === true`, so it goes on conferring
+	 * its own effect, goes on counting toward the collection's bond-time discount, and goes
+	 * on tripping the duplicate-descriptor rule. Setting a stone is a change of *place*, not
+	 * a trade — which is what the Ioun Blade's "instead of having it orbit your head" means.
+	 *
+	 * Seats hold the stone's inventory **id**, not a copy of its data (unlike
+	 * `socketedGemstones`, which absorbs its gem). A stone must remain a first-class row
+	 * because it is bonded, tracks its own charges, and can be pried back out.
+	 *
+	 * @param {string} hostItemId
+	 * @param {string} stoneItemId
+	 * @returns {{success: boolean, error?: string}}
+	 */
+	setIounStone (hostItemId, stoneItemId) {
+		const host = this._data.inventory.find(i => i.id === hostItemId);
+		if (!host) return {success: false, error: "Host item not found"};
+		const stone = this._data.inventory.find(i => i.id === stoneItemId);
+		if (!stone) return {success: false, error: "Stone not found"};
+
+		const policy = this.getIounHostPolicy(host.item || host);
+		if (!policy.isHost) return {success: false, error: "That item has no Ioun settings"};
+		if (!stone.attuned) return {success: false, error: "Only a bonded stone can be set"};
+
+		const existingHost = this.getIounHostOfStone(stoneItemId);
+		if (existingHost?.id === hostItemId) return {success: false, error: "That stone is already set in this item"};
+		if (existingHost) this.unsetIounStone(existingHost.id, stoneItemId, {isKeepFunctioning: true});
+
+		if (!Array.isArray(host.item.iounSet)) host.item.iounSet = [];
+		if (host.item.iounSet.length >= policy.settings) {
+			return {success: false, error: `All ${policy.settings} ${policy.settingLabel}s are full`};
+		}
+
+		host.item.iounSet.push(stoneItemId);
+		stone.equipped = true;
+		this._recomputeIounHostBonuses(host);
+		this._recalculateItemBonuses();
+		return {success: true};
+	}
+
+	/**
+	 * Pry a stone out of a host item. The stone returns to your possession **stowed** — it is
+	 * in your hand, not back in orbit — unless the caller is moving it straight to another
+	 * host.
+	 *
+	 * @param {string} hostItemId
+	 * @param {string} stoneItemId
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.isKeepFunctioning] Leave `equipped` alone (used when re-seating).
+	 * @returns {{success: boolean, error?: string}}
+	 */
+	unsetIounStone (hostItemId, stoneItemId, {isKeepFunctioning = false} = {}) {
+		const host = this._data.inventory.find(i => i.id === hostItemId);
+		if (!Array.isArray(host?.item?.iounSet)) return {success: false, error: "Host item not found"};
+
+		const idx = host.item.iounSet.indexOf(stoneItemId);
+		if (idx === -1) return {success: false, error: "That stone is not set in this item"};
+
+		host.item.iounSet.splice(idx, 1);
+		if (!isKeepFunctioning) {
+			const stone = this._data.inventory.find(i => i.id === stoneItemId);
+			if (stone) stone.equipped = false;
+		}
+		this._recomputeIounHostBonuses(host);
+		this._recalculateItemBonuses();
+		return {success: true};
+	}
+
+	/**
+	 * Fold the set-stone count into the host's own bonus props.
+	 *
+	 * The +1-per-stone is **materialised onto the row** rather than layered at read time.
+	 * `bonusWeapon` alone is read raw in a dozen places across combat, ammunition, NPC export
+	 * and the inventory aggregator, and only some of them consult `getEffectiveItemBonuses`;
+	 * writing the effective value means every one of them is correct with no call-site
+	 * changes. The pristine values are preserved once in `iounBaseBonuses` and every
+	 * recomputation reads *from* that, so the operation is idempotent and never compounds.
+	 *
+	 * @param {object} hostRow - an inventory wrapper
+	 */
+	_recomputeIounHostBonuses (hostRow) {
+		const data = hostRow?.item || hostRow;
+		if (!data) return;
+		const policy = this.getIounHostPolicy(data);
+
+		// An item can STOP being a host — the user clears the setting count in the ⚙ editor, or a
+		// registry entry is withdrawn. Restoring the pristine base here (rather than only on the
+		// happy path) is what keeps the materialisation reversible; leaving it out would strand an
+		// inflated bonus on the row with nothing left to explain it.
+		if (!policy.isHost) {
+			if (data.iounBaseBonuses) {
+				for (const [key, base] of Object.entries(data.iounBaseBonuses)) data[key] = base;
+				data.iounBaseBonuses = null;
+			}
+			if (Array.isArray(data.iounSet) && data.iounSet.length) data.iounSet = [];
+			return;
+		}
+
+		// Shrinking the setting count evicts from the END, so the stones a player seated first
+		// keep their places.
+		if (Array.isArray(data.iounSet) && data.iounSet.length > policy.settings) {
+			data.iounSet = data.iounSet.slice(0, policy.settings);
+		}
+
+		const delta = (Array.isArray(data.iounSet) ? data.iounSet.length : 0) * policy.perStone;
+		if (!data.iounBaseBonuses) data.iounBaseBonuses = {};
+		for (const key of policy.grants) {
+			// Capture per key, not per object: a grant added by a later registry revision must
+			// still record ITS pristine base rather than inherit a zero from an older capture.
+			if (data.iounBaseBonuses[key] == null) data.iounBaseBonuses[key] = Number(data[key]) || 0;
+			data[key] = (Number(data.iounBaseBonuses[key]) || 0) + delta;
+		}
+	}
+
+	/**
+	 * Restore a host item's pristine bonuses and forget the capture.
+	 *
+	 * Used by the item editor, which must present and receive BASE values — otherwise a player
+	 * who opens the ⚙ editor on a sword with two stones in it would see the inflated number and,
+	 * by simply pressing Save, bake the stones' contribution into the sword permanently.
+	 *
+	 * @param {string} itemId - Inventory row id
+	 * @returns {boolean} Whether anything was restored
+	 */
+	dematerialiseIounHostBonuses (itemId) {
+		const row = this._data.inventory.find(i => i.id === itemId);
+		const data = row?.item;
+		if (!data?.iounBaseBonuses) return false;
+		for (const [key, base] of Object.entries(data.iounBaseBonuses)) data[key] = base;
+		data.iounBaseBonuses = null;
+		return true;
+	}
+
+	/**
+	 * Drop seats pointing at stones that are no longer in the inventory, re-materialise every
+	 * host's bonuses, and refresh every host's attunement waiver. Cheap and idempotent; safe to
+	 * call after any inventory or attunement mutation.
+	 * @returns {boolean} Whether any seat was dropped
+	 */
+	reconcileIounHosts () {
+		if (this._isReconcilingIounHosts) return false;
+		this._isReconcilingIounHosts = true;
+		try {
+			const liveIds = new Set(this._data.inventory.map(i => i.id));
+			const hasBond = this.hasIounBond();
+			let changed = false;
+			for (const row of this._data.inventory) {
+				const data = row.item;
+				if (!data) continue;
+				// Corrections must land BEFORE the base capture below, or a wrong shipped value
+				// would be preserved as this item's pristine base forever.
+				if (!data._iounDataCorrected) {
+					const corrections = CharacterSheetState.getIounHostDataCorrections(data);
+					if (corrections) {
+						for (const [key, value] of Object.entries(corrections)) data[key] = value;
+						data._iounDataCorrected = true;
+					}
+				}
+				const seats = data.iounSet;
+				if (Array.isArray(seats)) {
+					const kept = seats.filter(id => liveIds.has(id));
+					if (kept.length !== seats.length) {
+						data.iounSet = kept;
+						changed = true;
+					}
+				}
+				this._recomputeIounHostBonuses(row);
+				this._recomputeIounHostAttunement(row, hasBond);
+			}
+			return changed;
+		} finally {
+			this._isReconcilingIounHosts = false;
+		}
+	}
+
+	/** Whether the character is bonded to at least one Ioun Stone. */
+	hasIounBond () {
+		return this._data.inventory.some(i => i.attuned && CharacterSheetState.isIounStone(i.item || i));
+	}
+
+	/**
+	 * Apply the Ioun Blade's conditional attunement waiver — "if you're also attuned to an
+	 * Ioun stone, you don't need to attune to this weapon to use its properties".
+	 *
+	 * Like the bonus materialisation above, the waiver is **written onto the row** rather than
+	 * consulted at read time: `requiresAttunement && !attuned` is the gate at two dozen call
+	 * sites across combat, rests, NPC export and every item aggregator, and threading a
+	 * waiver argument through all of them would be a standing invitation to miss one. Flipping
+	 * the flag makes every existing gate correct by construction. The pristine value lives in
+	 * `iounBaseRequiresAttunement`, so the waiver is fully reversible when the last bond ends.
+	 *
+	 * A waived item is also released from attunement: it no longer needs the slot, so holding
+	 * one would be a silent tax.
+	 *
+	 * @param {object} hostRow - an inventory wrapper
+	 * @param {boolean} hasBond - whether the character is bonded to any Ioun Stone
+	 */
+	_recomputeIounHostAttunement (hostRow, hasBond) {
+		const data = hostRow?.item;
+		if (!data) return;
+		const policy = this.getIounHostPolicy(data);
+		if (!policy.waivesAttunement) return;
+
+		if (data.iounBaseRequiresAttunement == null) data.iounBaseRequiresAttunement = !!data.requiresAttunement;
+		if (!data.iounBaseRequiresAttunement) return;
+
+		const isWaived = !!hasBond;
+		data.requiresAttunement = !isWaived;
+		if (isWaived && hostRow.attuned) this.setItemAttuned(hostRow.id, false);
+	}
+
+	/** Whether this item's attunement is currently waived by an active Ioun bond. */
+	isIounAttunementWaived (itemData) {
+		if (!itemData) return false;
+		const policy = this.getIounHostPolicy(itemData);
+		if (!policy.waivesAttunement) return false;
+		const base = itemData.iounBaseRequiresAttunement ?? itemData.requiresAttunement;
+		return !!base && this.hasIounBond();
 	}
 
 	getAttunedCount () {

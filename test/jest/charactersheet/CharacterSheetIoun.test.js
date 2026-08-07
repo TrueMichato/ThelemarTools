@@ -570,3 +570,89 @@ describe("CharacterSheetIoun — sheet write-back", () => {
 		expect(() => ioun._page._renderCharacter).not.toThrow();
 	});
 });
+
+describe("CharacterSheetIoun — the 'Set in items' zone", () => {
+	/**
+	 * The zone's whole thesis is that a setting is a fourth PLACE, not a third state. These
+	 * tests pin the consequences of that: a set stone is absent from the zone it *used* to be
+	 * in, its state word is `"set"` rather than `"orbiting"`, and the zone itself does not
+	 * exist for a character who owns no host item.
+	 */
+	function makeBlade () {
+		return {
+			name: "Ioun Longsword",
+			_variantName: "Ioun Blade",
+			source: "GriffonsSaddlebag3",
+			type: "M",
+			weapon: true,
+			weight: 3,
+			requiresAttunement: true,
+			bonusWeapon: 1,
+			entries: ["This sword has a gemstone set into its blade and another into its crossguard."],
+		};
+	}
+
+	function setup () {
+		const sheet = makeSheet([
+			{item: makeBlade(), equipped: true},
+			{item: makeStone("Ioun Stone #001, Pale Blue Rhomboid"), equipped: true, attuned: true},
+			{item: makeStone("Ioun Stone #002, Scarlet Sphere"), equipped: true, attuned: true},
+		]);
+		const blade = sheet.state.getItems().find(i => i.name === "Ioun Longsword");
+		return {...sheet, blade};
+	}
+
+	it("is absent, not empty, for a character with no host item", () => {
+		const {ioun} = makeSheet([{item: makeStone("Ioun Stone #001, Pale Blue Rhomboid"), equipped: true, attuned: true}]);
+		expect(ioun.getHostItems()).toEqual([]);
+	});
+
+	it("reports the host's superseded bonus so the readout has something to say", () => {
+		const {ioun, blade, state} = setup();
+		const stone = state.getItems().find(i => i.name.includes("#001"));
+
+		let host = ioun.getHostItems().find(h => h.id === blade.id);
+		expect(host.bonusBase).toBe(1);
+		expect(host.bonusNow).toBe(1);
+		expect(host.seated).toEqual([]);
+
+		ioun.setStone(blade.id, stone.id);
+		host = ioun.getHostItems().find(h => h.id === blade.id);
+		expect(host.bonusBase).toBe(1);
+		expect(host.bonusNow).toBe(2);
+		expect(host.seated.map(s => s.id)).toEqual([stone.id]);
+	});
+
+	it("moves a stone OUT of 'In orbit' when it is set — one place at a time", () => {
+		const {ioun, blade, state} = setup();
+		const stone = state.getItems().find(i => i.name.includes("#001"));
+		expect(ioun.getOrbitingStones().map(s => s.id)).toContain(stone.id);
+
+		ioun.setStone(blade.id, stone.id);
+		expect(ioun.getOrbitingStones().map(s => s.id)).not.toContain(stone.id);
+		expect(ioun.getSetStoneIds().has(stone.id)).toBe(true);
+		expect(CharacterSheetIoun.getStoneState(stone, {isSet: true})).toBe("set");
+	});
+
+	it("offers only bonded, unseated stones as candidates", () => {
+		const {ioun, blade, state} = setup();
+		const stone = state.getItems().find(i => i.name.includes("#001"));
+		expect(ioun.getSeatableStones()).toHaveLength(2);
+
+		ioun.setStone(blade.id, stone.id);
+		const seatable = ioun.getSeatableStones();
+		expect(seatable).toHaveLength(1);
+		expect(seatable[0].name).toContain("#002");
+	});
+
+	it("returns a pried stone to Stowed, not to orbit — the player must toss it up again", () => {
+		const {ioun, blade, state} = setup();
+		const stone = state.getItems().find(i => i.name.includes("#001"));
+		ioun.setStone(blade.id, stone.id);
+		ioun.unsetStone(blade.id, stone.id);
+
+		expect(ioun.getSetStoneIds().has(stone.id)).toBe(false);
+		expect(ioun.getOrbitingStones().map(s => s.id)).not.toContain(stone.id);
+		expect(state.getItems().find(i => i.id === stone.id).equipped).toBe(false);
+	});
+});

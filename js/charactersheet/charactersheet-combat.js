@@ -11181,8 +11181,11 @@ class CharacterSheetCombat {
 		}
 		section.style.display = "";
 
+		// "Set" appears only when the character actually has a host item, so the 99% who do not
+		// never see a permanent zero for a mechanic they cannot use.
 		const stripHtml = csCombatStatusStrip([
 			{label: "In orbit", value: summary.orbitingCount},
+			...(summary.setCount ? [{label: "Set", value: summary.setCount}] : []),
 			{label: "Bonded", value: summary.bondedCount},
 			{label: "Can act", value: summary.actionableCount},
 		], {ariaLabel: "Ioun Stones"});
@@ -11193,8 +11196,8 @@ class CharacterSheetCombat {
 			? `<button type="button" class="cs-combat-btn charsheet__ioun-stow-all" title="Seize and stow every orbiting stone — one Utilize action, any number of stones">${csCombatIcon("reset")}<span>Stow all</span></button>`
 			: "";
 
-		const warnHtml = summary.orbitingCount === 0
-			? `<div class="cs-ioun-notice cs-ioun-notice--warn">${csCombatIcon("warning")}<span>Nothing in orbit — your bonded stones confer nothing.</span></div>`
+		const warnHtml = !summary.functioningCount
+			? `<div class="cs-ioun-notice cs-ioun-notice--warn">${csCombatIcon("warning")}<span>Nothing in orbit or set — your bonded stones confer nothing.</span></div>`
 			: (summary.isConspicuous
 				? `<div class="cs-ioun-notice cs-ioun-notice--warn">${csCombatIcon("warning")}<span>Large collection: you normally can't hide in darkness.</span></div>`
 				: "");

@@ -361,15 +361,27 @@ class CharacterSheetIoun {
 	}
 
 	/**
-	 * `"orbiting"` | `"stowed"` | `"spent"`.
+	 * `"orbiting"` | `"set"` | `"stowed"` | `"spent"`.
+	 *
+	 * These are four PLACES a stone can be, not four modes it can run in. `set` means it is
+	 * mounted in a host item's setting (an Ioun Blade's blade or crossguard) — which is still
+	 * functioning, exactly like orbiting, just somewhere else. That is why `set` is grouped
+	 * with `orbiting` and not with `stowed`.
 	 *
 	 * Spent is only reachable for the Source Types whose charges never come back (Single-Use,
 	 * Charge-Holding, Temporary) — an ordinary stone at 0 charges is merely empty until dawn,
-	 * and calling that "spent" would be a lie the player acts on.
+	 * and calling that "spent" would be a lie the player acts on. A spent stone that is
+	 * physically sitting in a setting reports `spent`, because that is what the player needs
+	 * to know; it keeps its seat (and the host keeps its bonus) until it is pried out.
+	 *
+	 * @param item
+	 * @param [opts]
+	 * @param [opts.isSet] Whether this stone currently occupies a host item's setting.
 	 */
-	static getStoneState (item) {
+	static getStoneState (item, {isSet = false} = {}) {
 		const max = Number(item?.charges) || 0;
 		if (max > 0 && CharacterSheetIoun.getChargesRemaining(item) <= 0 && CharacterSheetIoun.isTerminalType(item)) return "spent";
+		if (isSet) return "set";
 		return item?.equipped ? "orbiting" : "stowed";
 	}
 
@@ -425,7 +437,53 @@ class CharacterSheetIoun {
 	getBondedStones () { return this.getAllStones().filter(i => i.attuned); }
 
 	getOrbitingStones () {
-		return this.getBondedStones().filter(i => CharacterSheetIoun.getStoneState(i) === "orbiting");
+		const setIds = this.getSetStoneIds();
+		return this.getBondedStones()
+			.filter(i => !setIds.has(i.id) && CharacterSheetIoun.getStoneState(i) === "orbiting");
+	}
+
+	/** The ids of every stone currently occupying a host item's setting. */
+	getSetStoneIds () {
+		const out = new Set();
+		for (const {row} of this._state.getIounHosts?.() || []) {
+			for (const id of row.item?.iounSet || []) out.add(id);
+		}
+		return out;
+	}
+
+	/**
+	 * Every host item the character owns, with its policy and its seated stones resolved.
+	 *
+	 * A seat that points at a stone which is no longer a stone (or no longer held) is dropped
+	 * here rather than rendered as a hole — `reconcileIounHosts` normally prevents that, but
+	 * the UI must not depend on a repair pass having already run.
+	 */
+	getHostItems () {
+		this._refreshState();
+		const stonesById = new Map(this.getAllStones().map(s => [s.id, s]));
+		return (this._state.getIounHosts?.() || []).map(({row, policy}) => {
+			const seated = (row.item?.iounSet || []).map(id => stonesById.get(id)).filter(Boolean);
+			return {
+				id: row.id,
+				name: row.item?.name || "Item",
+				equipped: !!row.equipped,
+				policy,
+				seated,
+				isAttunementWaived: !!this._state.isIounAttunementWaived?.(row.item),
+				// The bonus the readout announces. `bonusWeapon` is the Ioun Blade's headline
+				// number; a DM-declared host falls back to whatever its policy grants first.
+				bonusKey: policy.grants[0],
+				bonusBase: Number(row.item?.iounBaseBonuses?.[policy.grants[0]] ?? row.item?.[policy.grants[0]]) || 0,
+				bonusNow: Number(row.item?.[policy.grants[0]]) || 0,
+			};
+		});
+	}
+
+	/** Stones that could be seated right now: bonded, not spent, not already in a setting. */
+	getSeatableStones () {
+		const setIds = this.getSetStoneIds();
+		return this.getBondedStones()
+			.filter(s => !setIds.has(s.id) && CharacterSheetIoun.getStoneState(s) !== "spent");
 	}
 
 	/** Stones part-way through a 7-day bond. */
@@ -450,7 +508,12 @@ class CharacterSheetIoun {
 	 */
 	getDuplicateDescriptors () {
 		const seen = new Map();
-		for (const stone of this.getOrbitingStones()) {
+		const setIds = this.getSetStoneIds();
+		const functioning = [
+			...this.getOrbitingStones(),
+			...this.getBondedStones().filter(s => setIds.has(s.id)),
+		];
+		for (const stone of functioning) {
 			const key = CharacterSheetIoun.getStoneDescriptor(stone).toLowerCase();
 			seen.set(key, (seen.get(key) || 0) + 1);
 		}
@@ -479,6 +542,27 @@ class CharacterSheetIoun {
 		this._state.setItemEquipped(itemId, !stone.equipped);
 		this._afterChange();
 		return true;
+	}
+
+	/**
+	 * Seat a bonded stone in a host item's setting.
+	 *
+	 * Deliberately NO batch equivalent: seating is per-stone and per-setting, so a "Set all"
+	 * would misrepresent it exactly as an "Orbit all" would misrepresent tossing.
+	 */
+	setStone (hostId, stoneId) {
+		this._refreshState();
+		const res = this._state.setIounStone?.(hostId, stoneId) || {success: false};
+		if (res.success) this._afterChange();
+		return res;
+	}
+
+	/** Pry a stone back out. It returns to your hand — stowed, not orbiting. */
+	unsetStone (hostId, stoneId) {
+		this._refreshState();
+		const res = this._state.unsetIounStone?.(hostId, stoneId) || {success: false};
+		if (res.success) this._afterChange();
+		return res;
 	}
 
 	/** One Utilize action, any number of stones — the book's own batch. */
@@ -576,12 +660,20 @@ class CharacterSheetIoun {
 		const bonded = this.getBondedStones();
 		const orbiting = this.getOrbitingStones();
 		const bonding = this.getBondingStones();
+		// A SET stone is functioning too, so "nothing is working" has to count both places or
+		// the sheet would warn a player about a problem they do not have.
+		const setCount = this.getSetStoneIds().size;
 		return {
 			applicable: true,
 			bondedCount: bonded.length,
 			orbitingCount: orbiting.length,
+			setCount,
+			functioningCount: orbiting.length + setCount,
 			bondingCount: bonding.length,
-			nextBondDays: CharacterSheetIoun.getBondDaysRequired(orbiting.length),
+			// Set stones count for the collection rules — they are still yours and still working.
+			// Conspicuousness deliberately does NOT count them: a gem in a sword hilt is not a
+			// stone circling your head.
+			nextBondDays: CharacterSheetIoun.getBondDaysRequired(orbiting.length + setCount),
 			canGift: bonded.length >= CharacterSheetIoun.GIFTING_THRESHOLD,
 			isConspicuous: orbiting.length >= CharacterSheetIoun.CONSPICUOUS_THRESHOLD,
 			duplicates: this.getDuplicateDescriptors(),
@@ -626,9 +718,73 @@ class CharacterSheetIoun {
 		}).join("");
 	}
 
+	/**
+	 * A set stone's toggle. `SET` is an ON state — the stone is functioning, just gripped in
+	 * metal rather than free-floating — so it wears the ON skin, and pressing it pries the
+	 * stone out exactly as pressing `ORBITING` seizes and stows one.
+	 */
+	static _SET_TOGGLE_VOCAB = {
+		on: {label: "SET", icon: "bolt"},
+		used: {label: "SPENT", icon: "none"},
+	};
+
+	/** How a host's headline bonus is spoken, so "+2" is never a naked number. */
+	static _GRANT_LABELS = {
+		bonusWeapon: "attack & damage",
+		bonusWeaponAttack: "attack",
+		bonusWeaponDamage: "damage",
+		bonusAc: "AC",
+		bonusSavingThrow: "saving throws",
+		bonusSpellAttack: "spell attack",
+		bonusSpellSaveDc: "spell save DC",
+	};
+
+	static _fmtBonus (n) { return `${n >= 0 ? "+" : ""}${n}`; }
+
+	/**
+	 * One host item: identity, the superseded-value readout, and a tray of its EMPTY settings.
+	 *
+	 * Filled settings are not repeated as bezels — the stones themselves are rendered as rows
+	 * beneath, in the same grammar they use in every other zone, so a set stone keeps its
+	 * badges and its charge caption instead of shrinking to an anonymous dot. The tray is
+	 * therefore purely the "there is room here" affordance.
+	 */
+	_getHostRowHtml (host) {
+		const filled = host.seated.length;
+		const total = host.policy.settings;
+		const label = CharacterSheetIoun._GRANT_LABELS[host.bonusKey] || "bonus";
+		const isRaised = host.bonusNow !== host.bonusBase;
+
+		const metaBits = [];
+		metaBits.push(host.equipped ? "equipped" : "not equipped — its bonus is dormant");
+		if (host.isAttunementWaived) metaBits.push("bond-borne — no attunement needed");
+
+		const bezels = [];
+		for (let i = filled; i < total; ++i) {
+			bezels.push(`<button type="button" class="cs-ioun-bezel cs-ioun-bezel--empty" data-ioun-seat="${CharacterSheetIoun._escapeAttr(host.id)}" title="Set one of your bonded stones into this ${CharacterSheetIoun._escapeAttr(host.policy.settingLabel)}" aria-label="Empty ${CharacterSheetIoun._escapeAttr(host.policy.settingLabel)} on ${CharacterSheetIoun._escapeAttr(host.name)} — set a stone">◇</button>`);
+		}
+
+		return `
+			<div class="cs-ioun-host${host.equipped ? "" : " cs-ioun-host--dormant"}">
+				<span class="cs-ioun-host__glyph" aria-hidden="true">◈</span>
+				<span class="cs-ioun-row__identity">
+					<span class="cs-ioun-row__name">${CharacterSheetIoun._escapeAttr(host.name)}</span>
+					<span class="cs-ioun-host__meta ve-muted ve-small">${metaBits.join(" · ")}</span>
+				</span>
+				<span class="cs-ioun-host__readout" role="img" aria-label="${label} bonus ${isRaised ? `raised from ${CharacterSheetIoun._fmtBonus(host.bonusBase)} to ` : "is "}${CharacterSheetIoun._fmtBonus(host.bonusNow)}">
+					${isRaised ? `<span class="cs-combat-strip__value-was">${CharacterSheetIoun._fmtBonus(host.bonusBase)}</span>` : ""}<span class="cs-combat-strip__value">${CharacterSheetIoun._fmtBonus(host.bonusNow)}</span>
+					<span class="cs-ioun-host__readout-label ve-muted ve-small">${label}</span>
+				</span>
+				<span class="cs-ioun-host__tray">
+					<span class="cs-ioun-host__count ve-muted ve-small">${filled} / ${total} set</span>
+					${bezels.join("")}
+				</span>
+			</div>`;
+	}
+
 	/** One stone row: swatch, identity, type badges, charges, state toggle. */
-	_getStoneRowHtml (stone) {
-		const state = CharacterSheetIoun.getStoneState(stone);
+	_getStoneRowHtml (stone, {isSet = false, hostId = null} = {}) {
+		const state = CharacterSheetIoun.getStoneState(stone, {isSet});
 		const swatch = CharacterSheetIoun.getSwatchColor(stone);
 		const num = CharacterSheetIoun.getStoneNumber(stone);
 		const desc = CharacterSheetIoun.getStoneDescriptor(stone);
@@ -637,28 +793,46 @@ class CharacterSheetIoun {
 		// `color` is set alongside `background` so the CSS halo can use `currentColor`
 		// and glow in the stone's own hue; without it every halo would be text-coloured.
 		const swatchStyle = swatch ? ` style="background:${CharacterSheetIoun._escapeAttr(swatch)};color:${CharacterSheetIoun._escapeAttr(swatch)}"` : "";
-		const swatchHtml = `<span class="cs-ioun-swatch${swatch ? "" : " cs-ioun-swatch--unknown"}"${swatchStyle} aria-hidden="true"></span>`;
+		// A set stone keeps its halo — it is still working — but gains a hard collar where an
+		// orbiting stone has only soft light: gripped in metal, not free-floating.
+		const swatchHtml = `<span class="cs-ioun-swatch${swatch ? "" : " cs-ioun-swatch--unknown"}${isSet ? " cs-ioun-swatch--set" : ""}"${swatchStyle} aria-hidden="true"></span>`;
 
 		const max = Number(stone.charges) || 0;
 		const chargesHtml = max > 0
 			? csCombatPoolCaption(CharacterSheetIoun.getChargesRemaining(stone), max, {recharge: stone.recharge || ""})
 			: "";
 
-		const toggleHtml = csCombatStateToggle({
-			state: isSpent ? "used" : (state === "orbiting" ? "on" : "off"),
-			labelPrefix: desc,
-			ariaState: isSpent ? "spent — bond ended" : (state === "orbiting" ? "in orbit, conferring its benefit" : "stowed, conferring nothing"),
-			title: isSpent
-				? "This stone is spent; its bond has ended"
-				: (state === "orbiting" ? "Seize and stow (Utilize action)" : "Toss into orbit (Magic action)"),
-			disabled: isSpent,
-			vocab: CharacterSheetIoun._TOGGLE_VOCAB,
-			domClass: "cs-ioun-row__toggle",
-			attrs: {"data-ioun-toggle": stone.id},
-		});
+		// A set stone's control PRIES IT OUT; an orbiting/stowed stone's control moves it
+		// between orbit and the pack. Same affordance, different verb, so the seat is
+		// reversible from exactly where the player is already looking.
+		const toggleHtml = isSet
+			? csCombatStateToggle({
+				state: isSpent ? "used" : "on",
+				labelPrefix: desc,
+				ariaState: isSpent
+					? "spent, but still filling a setting"
+					: "set in an item, conferring its benefit and raising the item's bonus",
+				// The book states no action for replacing a gemstone, so none is claimed here.
+				title: "Pry this stone out — it returns to your pack, stowed",
+				vocab: CharacterSheetIoun._SET_TOGGLE_VOCAB,
+				domClass: "cs-ioun-row__toggle cs-ioun-row__toggle--set",
+				attrs: {"data-ioun-unset": stone.id, "data-ioun-host": hostId || ""},
+			})
+			: csCombatStateToggle({
+				state: isSpent ? "used" : (state === "orbiting" ? "on" : "off"),
+				labelPrefix: desc,
+				ariaState: isSpent ? "spent — bond ended" : (state === "orbiting" ? "in orbit, conferring its benefit" : "stowed, conferring nothing"),
+				title: isSpent
+					? "This stone is spent; its bond has ended"
+					: (state === "orbiting" ? "Seize and stow (Utilize action)" : "Toss into orbit (Magic action)"),
+				disabled: isSpent,
+				vocab: CharacterSheetIoun._TOGGLE_VOCAB,
+				domClass: "cs-ioun-row__toggle",
+				attrs: {"data-ioun-toggle": stone.id},
+			});
 
 		return `
-			<div class="cs-ioun-row${isSpent ? " cs-ioun-row--spent" : ""}">
+			<div class="cs-ioun-row${isSpent ? " cs-ioun-row--spent" : ""}${isSet ? " cs-ioun-row--set" : ""}">
 				${swatchHtml}
 				<span class="cs-ioun-row__identity">
 					${num ? `<span class="cs-ioun-row__num">${num}</span>` : ""}
@@ -711,7 +885,9 @@ class CharacterSheetIoun {
 		}
 
 		const orbiting = this._applyFilters(this.getOrbitingStones());
-		const stowed = this._applyFilters(this.getBondedStones().filter(s => CharacterSheetIoun.getStoneState(s) !== "orbiting"));
+		const setIds = this.getSetStoneIds();
+		const stowed = this._applyFilters(this.getBondedStones()
+			.filter(s => !setIds.has(s.id) && CharacterSheetIoun.getStoneState(s) !== "orbiting"));
 		// The filter bar sits above every zone, so it must govern every zone. Exempting the
 		// pipeline would make the control silently lie about one third of the dialog.
 		const bonding = this._applyFilters(this.getBondingStones(), {isApplyActionable: false});
@@ -719,6 +895,7 @@ class CharacterSheetIoun {
 
 		const stripHtml = csCombatStatusStrip([
 			{label: "In orbit", value: summary.orbitingCount},
+			...(summary.setCount ? [{label: "Set", value: summary.setCount}] : []),
 			{label: "Bonded", value: summary.bondedCount},
 			{label: "Next bond", value: `${summary.nextBondDays} ${summary.nextBondDays === 1 ? "day" : "days"}`},
 		], {ariaLabel: "Ioun Stone collection"});
@@ -726,8 +903,8 @@ class CharacterSheetIoun {
 		// Every notice below is a real mechanical consequence a player would otherwise be
 		// blindsided by, not decoration.
 		const notices = [];
-		if (summary.orbitingCount === 0 && summary.bondedCount > 0) {
-			notices.push({icon: "warning", text: `Nothing is in orbit, so none of your ${summary.bondedCount} bonded stones ${summary.bondedCount === 1 ? "is" : "are"} conferring anything.`});
+		if (!summary.functioningCount && summary.bondedCount > 0) {
+			notices.push({icon: "warning", text: `Nothing is in orbit or set, so none of your ${summary.bondedCount} bonded stones ${summary.bondedCount === 1 ? "is" : "are"} conferring anything.`});
 		}
 		if (summary.canGift) {
 			// An UNLOCKED ability, not a hazard — it must not wear the warning skin the two
@@ -771,6 +948,32 @@ class CharacterSheetIoun {
 		const orbitBodyHtml = orbiting.length
 			? `<div class="cs-ioun-list">${orbiting.map(s => this._getStoneRowHtml(s)).join("")}</div>`
 			: null;
+
+		// "Set in items" sits immediately beneath "In orbit": both zones hold FUNCTIONING
+		// stones, so they belong adjacent, with the two not-functioning zones below them.
+		//
+		// The zone is ABSENT, not empty, for the overwhelming majority of characters who own
+		// no host item — a dialog must not teach a mechanic to someone who cannot use it.
+		const hosts = this.getHostItems();
+		const settingHtml = hosts.length
+			? CharacterSheetIoun._getZoneHtml({
+				title: "Set in items",
+				count: hosts.reduce((n, h) => n + h.seated.length, 0),
+				// Prompt to bond only when there is genuinely nothing to seat. With every bonded
+				// stone already seated the settings are simply full, which the per-host
+				// "n / m set" count already says — a second, contradictory line would not.
+				actionsHtml: (this.getSeatableStones().length || this.getBondedStones().length)
+					? ""
+					: `<span class="cs-ioun-zone__hint ve-muted ve-small">Bond a stone before you can set one</span>`,
+				bodyHtml: `<div class="cs-ioun-list cs-ioun-list--hosts">${hosts.map(h => {
+					const seated = this._applyFilters(h.seated, {isApplyActionable: false});
+					return `<div class="cs-ioun-hostgroup" data-ioun-hostgroup="${CharacterSheetIoun._escapeAttr(h.id)}">
+								${this._getHostRowHtml(h)}
+								${seated.map(st => this._getStoneRowHtml(st, {isSet: true, hostId: h.id})).join("")}
+							</div>`;
+				}).join("")}</div>`,
+			})
+			: "";
 		const stowedBodyHtml = stowed.length
 			? `<div class="cs-ioun-list">${stowed.map(s => this._getStoneRowHtml(s)).join("")}</div>`
 			: null;
@@ -816,6 +1019,7 @@ class CharacterSheetIoun {
 		bodyHtml: orbitBodyHtml,
 		emptyText: this._filterText || this._filterType || this._filterActionable ? "No orbiting stones match the filter." : "No stones in orbit — toss one up to gain its benefit.",
 	})}
+				${settingHtml}
 				${CharacterSheetIoun._getZoneHtml({
 		title: "Stowed",
 		count: stowed.length,
@@ -823,7 +1027,9 @@ class CharacterSheetIoun {
 		// repeated verbatim beside each stone.
 		actionsHtml: stowed.length ? `<span class="cs-ioun-zone__hint ve-muted ve-small">Orbit one: 1 Magic action</span>` : "",
 		bodyHtml: stowedBodyHtml,
-		emptyText: this._filterText || this._filterType || this._filterActionable ? "No stowed stones match the filter." : "Every bonded stone is in orbit.",
+		emptyText: this._filterText || this._filterType || this._filterActionable
+			? "No stowed stones match the filter."
+			: (setIds.size ? "Every bonded stone is in orbit or set into an item." : "Every bonded stone is in orbit."),
 	})}
 				${bondingHtml}
 			</div>`;
@@ -857,6 +1063,16 @@ class CharacterSheetIoun {
 			});
 		});
 
+		body.querySelectorAll("[data-ioun-seat]").forEach(btn => {
+			btn.addEventListener("click", () => this._pSeatStone(btn.getAttribute("data-ioun-seat")));
+		});
+		body.querySelectorAll("[data-ioun-unset]").forEach(btn => {
+			btn.addEventListener("click", () => this._pPryStone(
+				btn.getAttribute("data-ioun-host"),
+				btn.getAttribute("data-ioun-unset"),
+			));
+		});
+
 		body.querySelectorAll("[data-ioun-start-bond]").forEach(btn => {
 			btn.addEventListener("click", () => this.startBond(btn.getAttribute("data-ioun-start-bond")));
 		});
@@ -885,6 +1101,101 @@ class CharacterSheetIoun {
 	}
 
 	/**
+	 * Choose a stone to seat in `hostId`.
+	 *
+	 * The picker reuses the manager's own stone-row markup rather than a bare `<select>`, so
+	 * the list a player chooses from looks exactly like the list they were just reading —
+	 * same swatch, same number, same Source Type badges.
+	 */
+	async _pSeatStone (hostId) {
+		this._refreshState();
+		const host = this.getHostItems().find(h => h.id === hostId);
+		if (!host) return;
+
+		const candidates = this.getSeatableStones();
+		if (!candidates.length) {
+			this._announce("You have no bonded stone free to set.");
+			JqueryUtil.doToast({type: "warning", content: "No bonded stone is free to set. Bond one first, or pry one out of another item."});
+			return;
+		}
+
+		// The title stays short so it can never collide with the close button on a narrow
+		// screen; the host is named far more usefully by its own row, reproduced below.
+		const {eleModalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: "Set a stone",
+			isWidth100: true,
+			isMinHeight0: true,
+		});
+
+		const listHtml = candidates.map(st => {
+			const swatch = CharacterSheetIoun.getSwatchColor(st);
+			const num = CharacterSheetIoun.getStoneNumber(st);
+			const style = swatch ? ` style="background:${CharacterSheetIoun._escapeAttr(swatch)};color:${CharacterSheetIoun._escapeAttr(swatch)}"` : "";
+			return `
+				<button type="button" class="cs-ioun-row cs-ioun-pick" data-ioun-pick="${CharacterSheetIoun._escapeAttr(st.id)}">
+					<span class="cs-ioun-swatch${swatch ? "" : " cs-ioun-swatch--unknown"}"${style} aria-hidden="true"></span>
+					<span class="cs-ioun-row__identity">
+						${num ? `<span class="cs-ioun-row__num">${num}</span>` : ""}
+						<span class="cs-ioun-row__name">${CharacterSheetIoun._escapeAttr(CharacterSheetIoun.getStoneDescriptor(st))}</span>
+						${CharacterSheetIoun._getTypeBadgesHtml(st)}
+					</span>
+					<span class="cs-ioun-pick__where ve-muted ve-small">${st.equipped ? "in orbit" : "stowed"}</span>
+				</button>`;
+		}).join("");
+
+		// Reproducing the host's own row is the honest way to answer "what am I upgrading?" —
+		// it carries the same superseded readout the player was just looking at.
+		eleModalInner.append(e_({
+			outer: `
+				<div class="cs-ioun cs-adaptive-panel ve-flex-col w-100">
+					<div class="cs-ioun-hostgroup mb-2">${this._getHostRowHtml(host)}</div>
+					<p class="ve-small ve-muted mb-2">The stone keeps conferring its own effect — setting it only changes where it sits. Each stone set raises this item's ${CharacterSheetIoun._GRANT_LABELS[host.bonusKey] || "bonus"} by ${host.policy.perStone}.</p>
+					<div class="cs-ioun-list">${listHtml}</div>
+				</div>`,
+		}));
+
+		eleModalInner.querySelectorAll("[data-ioun-pick]").forEach(btn => {
+			btn.addEventListener("click", () => {
+				const stone = candidates.find(c => c.id === btn.getAttribute("data-ioun-pick"));
+				if (!stone) return;
+				doClose(true);
+				const res = this.setStone(hostId, stone.id);
+				if (!res.success) {
+					JqueryUtil.doToast({type: "danger", content: res.error || "Could not set that stone."});
+					return;
+				}
+				const after = this.getHostItems().find(h => h.id === hostId);
+				this._announce(`${CharacterSheetIoun.getStoneDescriptor(stone)} set into ${host.name}; ${CharacterSheetIoun._GRANT_LABELS[host.bonusKey] || "bonus"} now ${CharacterSheetIoun._fmtBonus(after?.bonusNow ?? host.bonusNow)}. The stone keeps conferring its own effect.`);
+			});
+		});
+	}
+
+	/** Pry a stone out, with a confirm — the stone comes back STOWED, not into orbit. */
+	async _pPryStone (hostId, stoneId) {
+		this._refreshState();
+		const host = this.getHostItems().find(h => h.id === hostId);
+		const stone = this.getAllStones().find(s => s.id === stoneId);
+		if (!host || !stone) return;
+
+		const desc = CharacterSheetIoun.getStoneDescriptor(stone);
+		const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+			title: `Pry ${desc} out?`,
+			htmlDescription: `<p>${desc} returns to your pack <b>stowed</b> — it will not fly back into orbit on its own.</p><p class="ve-muted ve-small">${host.name}'s ${CharacterSheetIoun._GRANT_LABELS[host.bonusKey] || "bonus"} drops to ${CharacterSheetIoun._fmtBonus(host.bonusNow - host.policy.perStone)}. Your bond is unaffected.</p>`,
+			textYes: "Pry out",
+			textNo: "Cancel",
+		}));
+		if (!confirmed) return;
+
+		const res = this.unsetStone(hostId, stoneId);
+		if (!res.success) {
+			JqueryUtil.doToast({type: "danger", content: res.error || "Could not pry that stone out."});
+			return;
+		}
+		const after = this.getHostItems().find(h => h.id === hostId);
+		this._announce(`${desc} pried out of ${host.name} and stowed; ${CharacterSheetIoun._GRANT_LABELS[host.bonusKey] || "bonus"} now ${CharacterSheetIoun._fmtBonus(after?.bonusNow ?? host.bonusNow)}.`);
+	}
+
+	/**
 	 * Polite live-region announcement.
 	 *
 	 * The region is created once in {@link openModal} as a SIBLING of the body, never inside
@@ -897,13 +1208,14 @@ class CharacterSheetIoun {
 		if (this._liveRegion) this._liveRegion.textContent = msg;
 	}
 
-	async openModal () {
+	async openModal ({focusHostId = null} = {}) {
 		// Re-entrancy guard. `pGetShow` happily stacks a second dialog, so a double-click on
 		// "Manage…" (or a second entry point firing while one is open) would leave a stale,
 		// unbound copy sitting on top of the live one. Refresh and focus the existing modal
 		// instead of opening a rival.
 		if (this._modalBody?.isConnected) {
 			this._renderModalBody();
+			if (focusHostId) { this._focusHost(focusHostId); return; }
 			/** @type {HTMLElement} */ (this._modalBody.querySelector("#cs-ioun-search"))?.focus();
 			return;
 		}
@@ -926,6 +1238,19 @@ class CharacterSheetIoun {
 		this._modalBody = e_({tag: "div", clazz: "cs-ioun-modal cs-adaptive-panel"});
 		eleModalInner.appendChild(this._modalBody);
 		this._renderModalBody();
+		if (focusHostId) this._focusHost(focusHostId);
+	}
+
+	/**
+	 * Arriving from an item row, the player already knows which item they meant. Land them on
+	 * it — scrolled into view and marked — rather than at the top of a list they must re-scan.
+	 */
+	_focusHost (hostId) {
+		const group = /** @type {HTMLElement} */ (this._modalBody?.querySelector(`[data-ioun-hostgroup="${CSS.escape(String(hostId))}"]`));
+		if (!group) return;
+		group.scrollIntoView({block: "nearest", behavior: "smooth"});
+		group.classList.add("cs-ioun-hostgroup--focused");
+		/** @type {HTMLElement} */ (group.querySelector("[data-ioun-seat], [data-ioun-unset]"))?.focus();
 	}
 
 	// #endregion

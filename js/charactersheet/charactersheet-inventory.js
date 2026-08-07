@@ -24,6 +24,19 @@ class CharacterSheetInventory {
 	}
 
 	/**
+	 * `[inventoryRowKey, catalogKey]` for every per-ability bonus family. The two spellings
+	 * differ (`bonusSavingThrowInt` on a row vs `bonusSavingThrow_int` in item data), so any
+	 * code bridging the two needs this map rather than a shared-name loop.
+	 */
+	static _PER_ABILITY_BONUS_KEYS = ["Str", "Dex", "Con", "Int", "Wis", "Cha"].flatMap(abl => {
+		const lower = abl.toLowerCase();
+		return [
+			[`bonusSavingThrow${abl}`, `bonusSavingThrow_${lower}`],
+			[`bonusAbilityCheck${abl}`, `bonusAbilityCheck_${lower}`],
+		];
+	});
+
+	/**
 	 * Whether an item can show an equip control. Pure (item-only) so the equip affordance can be
 	 * unit-tested without DOM. Equippable: weapons, armor, shields, gear, wondrous items, rings,
 	 * wands/rods/staves, anything requiring attunement, and anything carrying a bonus — either a
@@ -223,8 +236,31 @@ class CharacterSheetInventory {
 					rowChanged = true;
 				}
 			}
+			// Per-ability bonuses are spelled differently in the catalog (`bonusSavingThrow_int`)
+			// than on an inventory row (`bonusSavingThrowInt`), so they need an explicit map
+			// rather than the shared-name loop above.
+			for (const [rowKey, catalogKey] of CharacterSheetInventory._PER_ABILITY_BONUS_KEYS) {
+				if ((item[rowKey] == null || item[rowKey] === 0) && match[catalogKey] != null) {
+					item[rowKey] = this._parseBonus(match[catalogKey]);
+					rowChanged = true;
+				}
+			}
+			// `_variantName` is the stable identity of a generic-variant item ("Ioun Blade"),
+			// which its generated name ("Ioun Longsword") never carries. The Ioun host registry
+			// is keyed on it, so a save written before it was whitelisted needs it restored or
+			// the item silently stops being a host.
+			if (item._variantName == null && match._variantName != null) {
+				item._variantName = match._variantName;
+				rowChanged = true;
+			}
+			if (item.iounHost == null && match.iounHost != null) {
+				item.iounHost = JSON.parse(JSON.stringify(match.iounHost));
+				rowChanged = true;
+			}
 			if (rowChanged) changed = true;
 		}
+		// `reconcileIounHosts` also applies the registry's data corrections.
+		this._state.reconcileIounHosts();
 		if (effectsChanged && typeof this._state._reapplyItemEffects === "function") {
 			this._state._reapplyItemEffects();
 		}
@@ -383,6 +419,11 @@ class CharacterSheetInventory {
 			if (e.target.closest(".charsheet__item-spellward")) {
 				const itemId = _getItemId(e.target);
 				if (itemId) this._showSpellImmunityPicker(itemId);
+				return;
+			}
+			if (e.target.closest(".charsheet__item-ioun-settings")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this._page?._ioun?.openModal?.({focusHostId: itemId});
 				return;
 			}
 			if (e.target.closest(".charsheet__item-upgrade-config")) {
@@ -1587,6 +1628,16 @@ class CharacterSheetInventory {
 			bonusSavingThrowCha: this._parseBonus(item.bonusSavingThrow_cha),
 			// Ability bonuses
 			bonusAbilityCheck: this._parseBonus(item.bonusAbilityCheck),
+			// Per-ability ability-check bonuses, mirroring the per-ability saving-throw family
+			// above. Needed by any item that scopes its bonus to named abilities rather than
+			// all six (e.g. the Ioun Blade's "+1 to Intelligence, Wisdom, and Charisma checks
+			// and saving throws"); without these, only the saves half is expressible.
+			bonusAbilityCheckStr: this._parseBonus(item.bonusAbilityCheck_str),
+			bonusAbilityCheckDex: this._parseBonus(item.bonusAbilityCheck_dex),
+			bonusAbilityCheckCon: this._parseBonus(item.bonusAbilityCheck_con),
+			bonusAbilityCheckInt: this._parseBonus(item.bonusAbilityCheck_int),
+			bonusAbilityCheckWis: this._parseBonus(item.bonusAbilityCheck_wis),
+			bonusAbilityCheckCha: this._parseBonus(item.bonusAbilityCheck_cha),
 			// Additional bonus types
 			bonusProficiencyBonus: this._parseBonus(item.bonusProficiencyBonus),
 			bonusSavingThrowConcentration: this._parseBonus(item.bonusSavingThrowConcentration),
@@ -1656,6 +1707,16 @@ class CharacterSheetInventory {
 			appliedUpgrades: [], // [{name, source, upgradeType, costPaid, appliedAt}]
 			// Socketed Gemstones (TGTT empowered gemstones)
 			socketedGemstones: [], // [{name, source, gemName, rarity, upgradeType, entries, charges, chargesCurrent, chargesMax, recharge, socketedAt}]
+			// Ioun Stone settings (Ioun Blade and any item declared a host). `_variantName` is
+			// the stable identity of a generic variant — "Ioun Longsword" never says "Ioun
+			// Blade" — and the host registry is keyed on it, so it must survive the copy.
+			_variantName: item._variantName || null,
+			// Provenance, so registry lookups survive the ⚙ editor stamping the row "Custom".
+			_baseSource: item._baseSource || null,
+			iounHost: item.iounHost ? JSON.parse(JSON.stringify(item.iounHost)) : null,
+			iounSettings: item.iounSettings ?? null,
+			iounSet: [], // inventory ids of the stones seated in this item's settings
+			iounBaseBonuses: null, // pristine bonus values, so materialisation never compounds
 			// Variant spell component data (Arcadia 8)
 			variantComponent: item.variantComponent || null,
 			// Structured catalog effects (same schema as custom items/abilities). Required so
@@ -1769,9 +1830,18 @@ class CharacterSheetInventory {
 			bonusSavingThrowWis: this._parseBonus(options.bonusSavingThrowWis),
 			bonusSavingThrowCha: this._parseBonus(options.bonusSavingThrowCha),
 			bonusAbilityCheck: this._parseBonus(options.bonusAbilityCheck),
+			bonusAbilityCheckStr: this._parseBonus(options.bonusAbilityCheckStr),
+			bonusAbilityCheckDex: this._parseBonus(options.bonusAbilityCheckDex),
+			bonusAbilityCheckCon: this._parseBonus(options.bonusAbilityCheckCon),
+			bonusAbilityCheckInt: this._parseBonus(options.bonusAbilityCheckInt),
+			bonusAbilityCheckWis: this._parseBonus(options.bonusAbilityCheckWis),
+			bonusAbilityCheckCha: this._parseBonus(options.bonusAbilityCheckCha),
 			bonusProficiencyBonus: this._parseBonus(options.bonusProficiencyBonus),
 			bonusSavingThrowConcentration: this._parseBonus(options.bonusSavingThrowConcentration),
 			critThreshold: options.critThreshold || null,
+			// Ioun host declaration — the user layer of `getIounHostPolicy`, so it wins over
+			// both the brew prop and the built-in registry.
+			iounSettings: options.iounSettings == null ? null : (Number(options.iounSettings) || 0),
 			// Defenses
 			resist: options.resist || null,
 			immune: options.immune || null,
@@ -1854,7 +1924,20 @@ class CharacterSheetInventory {
 			// would drop or clear all of those. _mergeEditedItem keeps the original value for any
 			// field the form did not supply (undefined), while letting explicit clears (null / false
 			// / 0 / []) through. See bug #2 (+ #8 continuation).
-			const merged = this._mergeEditedItem(oldItem, newItem);
+			// De-materialise BEFORE merging. The editor shows an Ioun host's *base* bonuses, so the
+			// values coming back are bases too; but the old payload still carries the inflated
+			// values for any grant the form does not model. Restoring the pristine bases first
+			// makes both halves of the merge speak the same units, and dropping the capture lets
+			// `reconcileIounHosts` re-derive it from the freshly-agreed base.
+			this._state.dematerialiseIounHostBonuses?.(editItemId);
+			const mergeBase = this._state.getItems().find(i => i.id === editItemId) || oldItem;
+			const merged = this._mergeEditedItem(mergeBase, newItem);
+			merged.iounBaseBonuses = null;
+			// The editor stamps every edited row as "Custom", which erases where the item came
+			// from. Record the original source once so provenance-keyed lookups (the Ioun host
+			// registry, and anything added later) still resolve after an edit.
+			merged._baseSource = mergeBase?._baseSource
+				|| (mergeBase?.source && mergeBase.source !== merged.source ? mergeBase.source : undefined);
 
 			// Preserve the original quantity unless the form explicitly changed it
 			this._state.replaceItem(editItemId, merged);
@@ -1868,6 +1951,9 @@ class CharacterSheetInventory {
 			// already preserved the item's existing appliedUpgrades/socketedGemstones, so this only
 			// adds newly-checked entries and removes un-checked ones — idempotently.
 			this._applyEditUpgrades(editItemId, options);
+			// An edit can declare or withdraw Ioun settings, so the host layer has to re-settle
+			// before anything reads the item's bonuses again.
+			this._state.reconcileIounHosts?.();
 			this._syncArmorState();
 			this._page.renderCharacter?.();
 			this._page.saveCharacter?.();
@@ -2064,6 +2150,8 @@ class CharacterSheetInventory {
 			"bonusAc", "bonusSpellAttack", "bonusSpellSaveDc", "bonusSpellDamage",
 			"bonusSavingThrow", "bonusSavingThrowStr", "bonusSavingThrowDex", "bonusSavingThrowCon",
 			"bonusSavingThrowInt", "bonusSavingThrowWis", "bonusSavingThrowCha", "bonusAbilityCheck",
+			"bonusAbilityCheckStr", "bonusAbilityCheckDex", "bonusAbilityCheckCon",
+			"bonusAbilityCheckInt", "bonusAbilityCheckWis", "bonusAbilityCheckCha",
 			"bonusProficiencyBonus", "bonusSavingThrowConcentration",
 		]) {
 			if (item[k] != null) {
@@ -2072,6 +2160,8 @@ class CharacterSheetInventory {
 			}
 		}
 		if (item.critThreshold) options.critThreshold = item.critThreshold;
+		if (item.iounSettings != null) options.iounSettings = item.iounSettings;
+		if (item.iounBaseBonuses) options.iounBaseBonuses = item.iounBaseBonuses;
 
 		// Defenses, speed, ability, senses, spells, charges
 		if (item.resist) options.resist = item.resist;
@@ -2104,6 +2194,10 @@ class CharacterSheetInventory {
 			weight: item.weight || 0,
 			type,
 			options,
+			// The source item itself, so prefill can ask the Ioun resolver questions that only
+			// the whole item can answer (registry keys live on `_variantName`/`name`/`source`,
+			// none of which survive the flattening into `options`).
+			item,
 		};
 	}
 
@@ -2738,6 +2832,48 @@ class CharacterSheetInventory {
 						<div class="charsheet__custom-item-field" style="width: 80px;">
 							<label>CHA</label>
 							<input type="number" id="custom-item-bonus-save-cha" class="ve-form-control charsheet__signed-input" value="0">
+						</div>
+					</div>
+				</div>
+				<div class="charsheet__custom-item-subsection mt-2">
+					<div class="ve-small ve-muted mb-1">Individual Ability Check Bonuses:</div>
+					<div class="charsheet__custom-item-fields">
+						<div class="charsheet__custom-item-field" style="width: 80px;">
+							<label>STR</label>
+							<input type="number" id="custom-item-bonus-check-str" class="ve-form-control charsheet__signed-input" value="0">
+						</div>
+						<div class="charsheet__custom-item-field" style="width: 80px;">
+							<label>DEX</label>
+							<input type="number" id="custom-item-bonus-check-dex" class="ve-form-control charsheet__signed-input" value="0">
+						</div>
+						<div class="charsheet__custom-item-field" style="width: 80px;">
+							<label>CON</label>
+							<input type="number" id="custom-item-bonus-check-con" class="ve-form-control charsheet__signed-input" value="0">
+						</div>
+						<div class="charsheet__custom-item-field" style="width: 80px;">
+							<label>INT</label>
+							<input type="number" id="custom-item-bonus-check-int" class="ve-form-control charsheet__signed-input" value="0">
+						</div>
+						<div class="charsheet__custom-item-field" style="width: 80px;">
+							<label>WIS</label>
+							<input type="number" id="custom-item-bonus-check-wis" class="ve-form-control charsheet__signed-input" value="0">
+						</div>
+						<div class="charsheet__custom-item-field" style="width: 80px;">
+							<label>CHA</label>
+							<input type="number" id="custom-item-bonus-check-cha" class="ve-form-control charsheet__signed-input" value="0">
+						</div>
+					</div>
+				</div>
+				<div class="charsheet__custom-item-subsection mt-2">
+					<div class="ve-small ve-muted mb-1">Ioun Stone Settings:</div>
+					<div class="charsheet__custom-item-fields">
+						<div class="charsheet__custom-item-field" style="width: 110px;">
+							<label>Settings</label>
+							<input type="number" id="custom-item-ioun-settings" class="ve-form-control" placeholder="0" min="0" max="10">
+						</div>
+						<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
+							<span class="ve-muted ve-small">How many bonded Ioun Stones this item can hold in place of its own gems. Most items: 0. Each stone set raises every bonus above by 1, and keeps conferring its own effect.</span>
+							<span class="ve-muted ve-small" id="custom-item-ioun-settings-origin"></span>
 						</div>
 					</div>
 				</div>
@@ -3605,6 +3741,20 @@ class CharacterSheetInventory {
 			if (saveWis) options.bonusSavingThrowWis = saveWis;
 			if (saveCha) options.bonusSavingThrowCha = saveCha;
 
+			// Individual ability-check bonuses (the sibling family of the saves above)
+			["Str", "Dex", "Con", "Int", "Wis", "Cha"].forEach(abl => {
+				const v = parseInt(form.querySelector(`#custom-item-bonus-check-${abl.toLowerCase()}`)?.value) || 0;
+				if (v) options[`bonusAbilityCheck${abl}`] = v;
+			});
+
+			// A declared setting count is the highest-priority layer of the host resolver, so a
+			// DM can make ANY item hold stones without the book shipping data for it.
+			// Blank means "no override" — distinct from an explicit 0, which suppresses an
+			// inherited setting count on purpose.
+			const rawIounSettings = (form.querySelector("#custom-item-ioun-settings")?.value ?? "").trim();
+			const iounSettings = rawIounSettings === "" ? null : (parseInt(rawIounSettings) || 0);
+			if (iounSettings != null) options.iounSettings = iounSettings;
+
 			// Defenses
 			const resist = [];
 			form.querySelectorAll(".resist-check:checked").forEach(cb => { resist.push(cb.value); });
@@ -3840,7 +3990,13 @@ class CharacterSheetInventory {
 	 */
 	_prefillCustomItemForm (form, seed) {
 		if (!form || !seed) return;
-		const o = seed.options || {};
+		// A host's granted bonuses are MATERIALISED on the row (base + one per set stone), so the
+		// raw value is not the number the item actually has — it is the number it has *right now*,
+		// with stones in it. Prefilling the editor with that inflated value would invite the player
+		// to "correct" it and permanently bake a stone's contribution into the base. Show the base.
+		const o = seed.options?.iounBaseBonuses
+			? {...seed.options, ...seed.options.iounBaseBonuses}
+			: (seed.options || {});
 		const numOf = (v) => {
 			if (v == null) return "";
 			const n = parseInt(String(v).replace("+", ""));
@@ -3914,6 +4070,24 @@ class CharacterSheetInventory {
 		setVal("#custom-item-bonus-save-int", numOf(o.bonusSavingThrowInt));
 		setVal("#custom-item-bonus-save-wis", numOf(o.bonusSavingThrowWis));
 		setVal("#custom-item-bonus-save-cha", numOf(o.bonusSavingThrowCha));
+		["Str", "Dex", "Con", "Int", "Wis", "Cha"].forEach(abl => setVal(`#custom-item-bonus-check-${abl.toLowerCase()}`, numOf(o[`bonusAbilityCheck${abl}`])));
+		// The field is an OVERRIDE, not a mirror. An item whose settings come from the built-in
+		// registry or from brew data must show that count — but as a placeholder, so saving
+		// without touching the field leaves the inherited value inherited rather than freezing
+		// today's number into the row.
+		const eleIounSettings = /** @type {HTMLInputElement} */ (form.querySelector("#custom-item-ioun-settings"));
+		if (eleIounSettings) {
+			eleIounSettings.value = o.iounSettings == null ? "" : String(numOf(o.iounSettings));
+			const policy = this._state?.getIounHostPolicy?.(seed?.item || o) || null;
+			const inherited = (policy && policy.origin !== "user") ? policy.settings : 0;
+			eleIounSettings.placeholder = String(inherited || 0);
+			const eleOrigin = form.querySelector("#custom-item-ioun-settings-origin");
+			if (eleOrigin) {
+				eleOrigin.textContent = inherited
+					? `This item already provides ${inherited} setting${inherited === 1 ? "" : "s"} from ${policy.origin === "registry" ? "its own rules" : "its item data"}. Leave blank to keep that; enter a number to override it.`
+					: "";
+			}
+		}
 
 		// Charges
 		if (o.charges || o.chargesMaxMode === "abilityMod") {
@@ -5732,6 +5906,13 @@ class CharacterSheetInventory {
 			savingThrowInt: this._calculateItemBonuses("bonusSavingThrowInt", items, []),
 			savingThrowWis: this._calculateItemBonuses("bonusSavingThrowWis", items, []),
 			savingThrowCha: this._calculateItemBonuses("bonusSavingThrowCha", items, []),
+			// Per-ability ability-check bonuses (mirrors the saves above)
+			abilityCheckStr: this._calculateItemBonuses("bonusAbilityCheckStr", items, []),
+			abilityCheckDex: this._calculateItemBonuses("bonusAbilityCheckDex", items, []),
+			abilityCheckCon: this._calculateItemBonuses("bonusAbilityCheckCon", items, []),
+			abilityCheckInt: this._calculateItemBonuses("bonusAbilityCheckInt", items, []),
+			abilityCheckWis: this._calculateItemBonuses("bonusAbilityCheckWis", items, []),
+			abilityCheckCha: this._calculateItemBonuses("bonusAbilityCheckCha", items, []),
 			// Additional bonus types
 			proficiencyBonus: this._calculateItemBonuses("bonusProficiencyBonus", items, []),
 			savingThrowConcentration: this._calculateItemBonuses("bonusSavingThrowConcentration", items, []),
@@ -6752,6 +6933,11 @@ class CharacterSheetInventory {
 		const spellwardCount = hasSpellward ? (item.chosenSpellImmunities?.length || 0) : 0;
 		const spellwardMax = hasSpellward ? Number(item.spellImmunitySlots.count) || 0 : 0;
 		const spellwardLabel = item.spellImmunitySlots?.label || "Spell Immunities";
+		// An Ioun host advertises its settings from the row itself, so a player who is looking
+		// at the sword does not have to know the stone manager exists to discover it holds stones.
+		const iounHostPolicy = this._state.getIounHostPolicy?.(item);
+		const iounSettings = iounHostPolicy?.isHost ? iounHostPolicy.settings : 0;
+		const iounSetCount = iounSettings ? (this._state.getIounSetStoneIds?.(item.id)?.length || 0) : 0;
 		const chargeUseLabel = item.chargeName || "Use";
 		const chargeUseTitle = item.chargeName
 			? `Use ${item.chargeName} (${item.chargesCurrent ?? item.charges}/${item.charges})`
@@ -6873,6 +7059,11 @@ class CharacterSheetInventory {
 						${hasSpellward ? `
 							<button type="button" class="ve-btn ve-btn-xs ${spellwardCount >= spellwardMax ? "ve-btn-success" : "ve-btn-info"} charsheet__item-spellward" title="Configure ${spellwardLabel.replace(/"/g, "&quot;")} (${spellwardCount}/${spellwardMax})">
 								🛡 ${spellwardLabel}${spellwardCount ? ` (${spellwardCount})` : ""}
+							</button>
+						` : ""}
+						${iounSettings ? `
+							<button type="button" class="ve-btn ve-btn-xs ${iounSetCount ? "ve-btn-info" : "ve-btn-default"} charsheet__item-ioun-settings" title="${iounSetCount} of ${iounSettings} Ioun ${iounSettings === 1 ? "setting" : "settings"} filled — set or pry out stones">
+								${iounSetCount ? "◈" : "◇"} Settings (${iounSetCount}/${iounSettings})
 							</button>
 						` : ""}
 						${healingStaffActive ? `
@@ -7260,9 +7451,14 @@ class CharacterSheetInventory {
 			const iounSummary = ioun.getCombatSummary();
 			// Now that bonded stones are no longer listed below, this button is their only
 			// representation here — so it carries the whole collection, not just the orbit count.
-			const iounCaption = iounSummary.bondedCount
-				? `${iounSummary.orbitingCount} of ${iounSummary.bondedCount} in orbit`
-				: `${iounSummary.orbitingCount} in orbit`;
+			// A stone set into an item is working just as hard as one in orbit, so the caption
+			// counts both — saying "0 of 1 in orbit" beside a stone that is actively raising a
+			// sword's bonus would be a lie.
+			const iounCaption = iounSummary.setCount
+				? `${iounSummary.functioningCount} of ${iounSummary.bondedCount} working`
+				: (iounSummary.bondedCount
+					? `${iounSummary.orbitingCount} of ${iounSummary.bondedCount} in orbit`
+					: `${iounSummary.orbitingCount} in orbit`);
 			const btnRow = e_({outer: `<div class="mb-2"><button type="button" class="charsheet__add-btn charsheet__ioun-open" title="Manage Ioun bonds and which stones are in orbit. An Ioun bond is slot-free, so stones are tracked here rather than against your attunement slots.">\u25C7 Ioun Stones <span class="ve-muted">(${iounCaption})</span></button></div>`});
 			btnRow.querySelector(".charsheet__ioun-open").addEventListener("click", () => ioun.openModal());
 			container.append(btnRow);

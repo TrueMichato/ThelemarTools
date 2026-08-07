@@ -75,6 +75,144 @@ that remainder is always zero, so it is now computed directly from the displayed
 `Attunement Slots: 0/3` with no phantom "+1 slot-free" — the stones are accounted for
 behind the Ioun Stones button instead.
 
+## Setting stones into items
+
+Some items hold Ioun Stones in place of their own gems. The Griffon's Saddlebag's
+**Ioun Blade** is the seed case: *"you can choose to have that stone magically replace one
+of the gemstones in the sword, instead of having it orbit your head. For each replaced
+stone, the sword's bonuses increase by 1."*
+
+### A setting is a fourth *place*, not a third *state*
+
+The manager's zones already encode location, and the row toggle is a binary that cannot
+take a third value without breaking the ON/OFF/USED contract every other control in the
+sheet obeys. So the vocabulary extends by a place, not by a state:
+
+| Word | Means | Where it lives |
+|---|---|---|
+| **ORBITING** | circling your head, conferring its benefit | *In orbit* |
+| **SET** | seated in an item's setting, conferring its benefit **and** raising the item's bonus | *Set in items* |
+| **STOWED** | in your pack, conferring nothing | *Stowed* |
+| **SPENT** | consumed; its bond has ended | any zone, dimmed |
+
+*Set in items* sits **directly beneath** *In orbit* — the two zones that hold **functioning**
+stones belong together, with the two that do not below them. The zone is **absent, not
+empty**, for the overwhelming majority of characters who own no host item.
+
+Setting a stone is **pure gain**: it keeps conferring its own effect, keeps its charges, keeps
+counting for the bond-time discount and the duplicate-descriptor warning. Only its *place*
+changes. This is stated at the moment of the decision (in the picker) rather than in a help
+page, because it is the single most misread thing about the mechanic.
+
+The book names no action for replacing a gemstone, so **the control claims none**. There is
+no "Set all", for the same reason there is no "Orbit all": seating is per-stone and
+per-setting.
+
+### The layered host resolver
+
+`CharacterSheetState.getIounHostPolicy(itemData)` returns
+`{isHost, settings, grants, perStone, waivesAttunement, settingLabel, origin}`, first match wins:
+
+| Layer | Source | Why it exists |
+|---|---|---|
+| 1. `user` | `item.iounSettings` (number), set in the ⚙ item editor | A DM can make **any** item hold stones |
+| | *`null`/blank* = not declared, falls through · *`0`* = an explicit "**not** a host", overriding the layers below | |
+| 2. `brew` | `item.iounHost: {settings, grants, waivesAttunement}` | Editable homebrew declares it in data |
+| 3. `registry` | `IOUN_HOST_REGISTRY`, keyed `_variantName\|source`, then `name\|source`, then bare `_variantName` | The **only** way to support a book that cannot be edited locally |
+| 4. `prose` | the attunement-waiver wording alone | Prose cannot yield a settings *count*, so it never claims one |
+
+The Ioun Blade is a **generic variant**, so it never appears under that name — `requires:
+[{sword: true}]` generates *Ioun Longsword*, *Ioun Greatsword*, and nine more. Its stable
+identity is therefore `_variantName|source`, which is why `_variantName` is now carried on
+inventory rows.
+
+**Why the lookup also falls back to a bare `_variantName`.** A source-qualified key alone is
+not durable, for two measured reasons:
+
+- A *generated* variant inherits the **base item's** source. The catalog's *Ioun Longsword*
+  reports `source: "XPHB"` — the longsword's book — not `GriffonsSaddlebag3`.
+- The ⚙ item editor stamps every edited row `source: "Custom"`.
+
+Either one silently severs a `name|source` key. That was not theoretical: opening the editor
+on a stone-bearing Ioun Longsword and pressing **Save Changes** — changing nothing — used to
+drop the item's host status, evict the seated stone, and revert its bonus from +2 to +1. The
+row was also given a `_baseSource` provenance field, but that records the *base item's*
+source too, so it does not help here and the bare-name fallback is what actually holds.
+
+Matching a bare `_variantName` is safe because a generic variant's name is its own identity:
+"Ioun Blade" is never a base item's name, so the key cannot collide with an ordinary sword.
+Plain `name` is **never** matched source-agnostically, since names like "Longsword" are not
+distinctive. `CharacterSheetIounHost.test.js` pins all three cases, including the negative
+("does not make every sword a host").
+
+The registry entry also ships `dataCorrections`, because TGS3's data both over-grants and
+under-grants relative to its own text: it applies `bonusSavingThrow: "+1"` to all six saves,
+and omits the ability-check half entirely. The correction zeroes the blanket bonus and
+writes the six values the text names (Int/Wis/Cha checks **and** saves). Corrections are
+applied **before** the base capture, or a wrong shipped value would be pinned as the
+pristine base forever.
+
+### Why the bonus is materialised, not derived
+
+`bonusWeapon` is read raw at about a dozen combat call sites, and `requiresAttunement &&
+!attuned` is a gate at roughly two dozen more. Threading a host-aware accessor through all
+of them would be a standing invitation to miss one. So both the +1-per-stone **and** the
+attunement waiver are **written onto the row**, with the pristine values preserved in
+`item.iounBaseBonuses` / `item.iounBaseRequiresAttunement`. Every existing consumer —
+combat, the inventory aggregator, NPC export — is correct with zero call-site changes. This
+is the same shape as the existing `vestigeTier` materialisation.
+
+Three invariants keep that safe:
+
+- **Per-key lazy capture.** A grant added by a later registry revision records *its own*
+  pristine base rather than inheriting a zero from an older capture.
+- **Always recompute from the base**, never from the current value, so five set/unset cycles
+  land exactly where one did.
+- **Reversible.** Withdrawing host status (clearing the ⚙ field, or a registry entry going
+  away) restores the base and drops the seats; shrinking the setting count evicts from the
+  **end**, so stones seated first keep their places.
+
+The ⚙ editor is the sharp edge here: it shows and receives **base** values, and
+`dematerialiseIounHostBonuses()` runs before the merge so both halves speak the same units.
+Without that, a player who simply opened the editor on a two-stone sword and pressed Save
+would bake the stones' contribution into the sword permanently.
+
+### Seats are references, not copies
+
+`item.iounSet` holds inventory **ids**. This is deliberately unlike `socketedGemstones`,
+which absorbs the gem and destroys it as an independent row. A stone must stay a first-class
+inventory row because it is bonded, charge-tracking and reversible. Set stones keep
+`equipped === true`, so `_calculateItemBonuses`, `getBondDaysRequired` and
+`getDuplicateDescriptors` all keep working unchanged.
+
+A seat is vacated automatically when the stone is removed, stowed, or un-bonded.
+`reconcileIounHosts()` is re-entrancy-guarded, idempotent and cheap; it runs after every
+inventory or attunement mutation.
+
+### The bond-borne attunement waiver
+
+*"If you're also attuned to an Ioun stone, you don't need to attune to this weapon to use
+its properties."* A host whose policy waives attunement, on a character with at least one
+bonded stone, has `requiresAttunement` flipped to `false` and is released from attunement —
+holding the slot would be a silent tax. The flag returns to `true` when the last bond ends.
+
+### Per-ability check bonuses
+
+Per-ability *saves* already existed end-to-end; per-ability *checks* did not — only a blanket
+`itemBonuses.abilityCheck`. Phase 6 adds the missing sibling family
+(`bonusAbilityCheck_<abl>` in data → `bonusAbilityCheck<Abl>` on a row →
+`itemBonuses.abilityCheck<Abl>`), read through the new
+`getItemAbilityCheckBonus(ability)`. This is **not** Ioun-specific: any item worded
+"+N to Strength checks" is now expressible, and the ⚙ editor exposes all six.
+
+### Entry points
+
+| Surface | What it does |
+|---|---|
+| Manager zone *Set in items* | owns assignment: host rows, empty-bezel tray, pry-out |
+| Item row `◇ / ◈ Settings (n/m)` | a doorway — opens the manager scrolled to and focused on that host |
+| ⚙ item editor → *Ioun Stone Settings* | declares any item a host |
+
 ## Effect-implementation audit
 
 Every one of the 685 items was classified by its `Stone Effect` prose and cross-referenced
@@ -195,3 +333,9 @@ from the attuned list, the slot-free counter, and the break-bond confirmation. F
 twelve are regression pins on *ordinary* attunement, so a future change that collapses the
 two vocabularies again fails loudly. Reverting the two `usesBond` gates turns the other
 seven red on behavioural assertions.
+
+`test/jest/charactersheet/CharacterSheetIounHost.test.js` covers the host layer: the
+four-layer resolver, seating as a change of place rather than a trade, the materialisation
+invariants (no compounding across repeated set/unset cycles, reconcile idempotent, pristine
+base preserved, host status reversible, seat vacated on remove/stow/unbond), and the
+bond-borne attunement waiver.
