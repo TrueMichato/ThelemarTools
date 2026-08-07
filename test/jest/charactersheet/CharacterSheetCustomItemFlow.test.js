@@ -135,6 +135,28 @@ describe("Custom-item inline hover data", () => {
 		expect(text).toContain("The blade hums before a storm.");
 	});
 
+	test("resolves property and mastery UIDs to their full display names", () => {
+		const entry = CharacterSheetClassUtils.buildItemInlineHoverEntry({
+			name: "Runic Greataxe",
+			source: "Custom",
+			_isCustom: true,
+			type: "weapon",
+			damage: "1d12 slashing",
+			property: [{uid: "H|XPHB"}, "F", "2H|XPHB"],
+			mastery: [{uid: "Cleave|XPHB"}, "Vex|XPHB"],
+		});
+		const text = JSON.stringify(entry.entries);
+		// Full display names, never the raw UID/abbreviation
+		expect(text).toContain("Heavy");
+		expect(text).toContain("Finesse");
+		expect(text).toContain("Two-Handed");
+		expect(text).toContain("Cleave");
+		expect(text).toContain("Vex");
+		expect(text).not.toContain("H|XPHB");
+		expect(text).not.toContain("2H|XPHB");
+		expect(text).not.toContain("Cleave|XPHB");
+	});
+
 	test.each([
 		[{name: "Source-less Relic", source: ""}, "empty source"],
 		[{name: "Imported Relic"}, "undefined source"],

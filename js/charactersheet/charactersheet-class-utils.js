@@ -989,6 +989,58 @@ class CharacterSheetClassUtils {
 			const num = Number(value);
 			return Number.isFinite(num) && num > 0 ? `+${num}` : String(value);
 		};
+		// Item properties are stored as UIDs (e.g. "H|XPHB" or {uid:"H|XPHB"}); resolve them to
+		// their full display name. Prefer the loaded item-property reference, then a static
+		// fallback so we never surface a raw abbreviation/source even before catalog data loads.
+		const PROPERTY_ABV_TO_FULL = {
+			"2h": "Two-Handed",
+			"a": "Ammunition",
+			"af": "Ammunition",
+			"bf": "Burst Fire",
+			"f": "Finesse",
+			"h": "Heavy",
+			"l": "Light",
+			"ld": "Loading",
+			"r": "Reach",
+			"rld": "Reload",
+			"s": "Special",
+			"t": "Thrown",
+			"v": "Versatile",
+			"vst": "Vestige of Divergence",
+		};
+		const uidOf = (value) => {
+			if (value == null || value === "") return "";
+			if (typeof value === "object") return value.uid || value.property || value.name || "";
+			return String(value);
+		};
+		const resolveProperty = (value) => {
+			const uid = uidOf(value);
+			if (!uid) return "";
+			try {
+				const resolved = typeof Renderer !== "undefined" && Renderer.item?.getProperty?.(uid, {isIgnoreMissing: true})?.name;
+				if (resolved) return resolved;
+			} catch (e) { /* fall through to static resolution */ }
+			let abbreviation = String(uid).split("|")[0];
+			try {
+				abbreviation = DataUtil.itemProperty.unpackUid(uid, {isLower: true}).abbreviation || abbreviation;
+			} catch (e) { /* keep the split-based abbreviation */ }
+			return PROPERTY_ABV_TO_FULL[String(abbreviation).toLowerCase()]
+				|| (typeof value === "object" && value.name ? value.name : abbreviation);
+		};
+		const resolveMastery = (value) => {
+			const uid = uidOf(value);
+			if (!uid) return "";
+			// A mastery UID's name segment is already the display name (e.g. "Vex|XPHB" -> "Vex").
+			try {
+				const {name} = DataUtil.proxy.unpackUid("itemMastery", uid, "itemMastery");
+				if (name) return name;
+			} catch (e) { /* fall through */ }
+			return String(uid).split("|")[0];
+		};
+		const listResolved = (values, resolver) => (Array.isArray(values) ? values : values != null ? [values] : [])
+			.map(resolver)
+			.filter(Boolean)
+			.join(", ");
 
 		if (item.type) summary.push(toLabel(item.type));
 		if (item.rarity && !["none", "unknown"].includes(String(item.rarity).toLowerCase())) summary.push(String(item.rarity));
@@ -1007,8 +1059,8 @@ class CharacterSheetClassUtils {
 		const damage = item.damage || item.dmg1;
 		const damageType = toLabel(item.dmgType);
 		addLine("Damage", damage ? `${damage}${damageType ? ` ${damageType}` : ""}` : "");
-		addLine("Properties", list(item.properties || item.property));
-		addLine("Mastery", list(item.mastery));
+		addLine("Properties", listResolved(item.properties || item.property, resolveProperty));
+		addLine("Mastery", listResolved(item.mastery, resolveMastery));
 
 		const armorParts = [];
 		if (item.armorType) armorParts.push(toLabel(item.armorType));
