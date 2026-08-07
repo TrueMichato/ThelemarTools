@@ -149,17 +149,33 @@ class CharacterSheetSpawnAutoFill {
 	// ═══════════════════════════════════════════════════════════════════════
 
 	static _RE_CHOOSE = /choose\s+(\d+)\s+/i;
+	// A feat's fixed ability bump renders as "Choose ability to increase by 1:" — a
+	// `Choose …` label with NO leading count, so `_RE_CHOOSE` (which demands
+	// `choose <digits>`) misses it entirely. That left the ability button unclicked
+	// and stalled the ASI step on every 2024 origin/half-feat (Crusher, Slasher,
+	// Poisoner, Observant, …), which each grant a mandatory +1. This is scoped tightly
+	// to *ability* grids: skill/tool/language sub-choices have their own dedicated
+	// picker buckets and must NOT be intercepted here, or their overrides get
+	// autofilled out from under them. Such a control is always a single pick; the
+	// ability-priority ordering inside `pickMany` then lands the +1 on the most useful
+	// score for the class rather than whichever button happens to be first.
+	static _RE_CHOOSE_ABILITY = /choose\s+(?:an?\s+)?abilit(?:y|ies)\b/i;
 
 	/**
-	 * Feat sub-choices (tools, skills, languages) render as a grid of toggle
-	 * buttons — selected ones carry `ve-btn-primary` — under a `Choose N …:` label.
-	 * There is no checkbox and no `Selected: n/max` counter to key off, so the
-	 * label supplies the count.
+	 * Feat sub-choices (tools, skills, languages, a fixed ability bump) render as a
+	 * grid of toggle buttons — selected ones carry `ve-btn-primary` — under a
+	 * `Choose N …:` label. There is no checkbox and no `Selected: n/max` counter to
+	 * key off, so the label supplies the count (ability-bump labels omit it and are
+	 * always a single pick).
 	 */
 	_fillButtonGrids () {
 		for (const label of this._root.querySelectorAll("label")) {
-			const m = CharacterSheetSpawnAutoFill._RE_CHOOSE.exec(label.textContent || "");
-			if (!m || this._isHidden(label)) continue;
+			const labelTxt = label.textContent || "";
+			const m = CharacterSheetSpawnAutoFill._RE_CHOOSE.exec(labelTxt);
+			const wantCount = m
+				? Number(m[1])
+				: (CharacterSheetSpawnAutoFill._RE_CHOOSE_ABILITY.test(labelTxt) ? 1 : null);
+			if (wantCount == null || this._isHidden(label)) continue;
 
 			const section = label.parentElement;
 			if (!section) continue;
@@ -169,7 +185,7 @@ class CharacterSheetSpawnAutoFill {
 			if (!buttons.length) continue;
 
 			const selected = buttons.filter(b => b.classList.contains("ve-btn-primary"));
-			const need = Number(m[1]) - selected.length;
+			const need = wantCount - selected.length;
 			if (need <= 0) continue;
 
 			const available = buttons.filter(b => !b.classList.contains("ve-btn-primary"));

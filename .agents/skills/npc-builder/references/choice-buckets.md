@@ -152,3 +152,62 @@ To choose reliably:
 Never pad the list with extra "backup" names hoping one lands — every name beyond a
 match that doesn't resolve is its own warning. Pick from the core and list exactly
 `count`.
+
+## Feats: list exactly as many as the build has ASI/feat levels
+
+The picklog logs a `Feat Selection` control **every time the autofill re-encounters
+it** across its multi-pass sweep, so a single feat slot routinely shows up two or
+three times. Counting `Feat Selection` entries in the picklog therefore *overstates*
+how many feats you can actually place. The real capacity is the number of
+**ASI/feat levels** in the build (each class's ASI levels — Fighter 4/6/8/12/14/16,
+Rogue 4/8/10/12, most classes 4/8/12/16/19 — plus any origin-feat the race grants).
+
+The spawner's feat priming reveals one selector per ASI level it can flip to "feat"
+mode; once those run out it stops, and every name past that point warns
+(`"…" (options.Feat Selection) never matched`). Ordering is preserved, so the
+**trailing** names in your list are the ones that fall off.
+
+*Fix:* count the build's ASI/feat levels and list exactly that many feats, best
+ones first. If you're unsure of the count, spawn once with your full wishlist and
+see how many place `from: "spec"` — the count that lands **is** the capacity; trim
+the list to it. (Example from a Fighter 6 / Wizard 3 / Warlock 4: 3 ASI levels →
+exactly 3 curated feats; a 2014 Variant Human here grants no extra origin feat.)
+
+## Source-suffixed option pools need the *exact* candidate string
+
+`namesMatch` (see `charactersheet-spawn.js`) compares by exact / punctuation-stripped
+/ article-stripped equality — it has **no substring or startsWith fallback**. So a
+bare name will **not** match a candidate that carries a trailing source tag. The
+canonical trap is Fighting Style, whose candidates render as
+`Two-Weapon Fighting (PHB'24)`, `Archery (PHB'24)`, `Great Weapon Fighting (PHB'24)`,
+etc. Overriding with `"Two-Weapon Fighting"` warns; you must write
+`"Two-Weapon Fighting (PHB'24)"` verbatim. When a picklog `candidates` entry has a
+`(...)` suffix, copy the whole thing.
+
+## Grant off-list proficiencies with a graft, not a phantom featureChoice
+
+If a skill/tool you want isn't offered by any of the build's real pickers, grant it
+with `graft: {skills: {prof: [...], expertise: [...]}}` — a direct post-build state
+edit. Do **not** key a `skills:` override to a *specialty* the character didn't pick:
+options like the Rogue's `Extra Skill Training` only expose a skill sub-picker **after
+you select that specialty**, so keying `skills: {"Extra Skill Training": [...]}`
+without choosing it never matches. Expertise on a skill requires proficiency first —
+if you graft `expertise: ["perception"]`, graft `prof: ["perception"]` too (or the
+proficiency must come from a class/race list), or the expertise is invalid.
+
+## Migrating an existing sheet (e.g. a PDF) into a TGTT NPC
+
+When the source is a finished lower-level character rather than a blank concept:
+
+1. **Transcribe, then re-map to TGTT.** Read off race, classes, subclass, ability
+   array, and signature items. Swap each subclass to its TGTT equivalent where one
+   exists (e.g. a generic Sea-themed druid → `Circle of the Sea`), and honor TGTT's
+   structural rules — e.g. TGTT gates Bladesinging behind Wizard 3, so a level-8
+   bladesinger becomes a multiclass, not a straight wizard.
+2. **Level to the target** by extending `classes[].level`; let the spawner walk every
+   intervening choice. Keep the original ability array as the base — TGTT ASIs/feats
+   layer on top.
+3. **Re-gear to the cohort's power band.** Preserve the character's iconic items
+   (create them as `custom` items if they don't exist), then top up to the same
+   legendary/very-rare/rare budget as the other NPCs at that level, favoring homebrew.
+4. Drive to 0 warnings with the picklog loop exactly as for a from-scratch build.
