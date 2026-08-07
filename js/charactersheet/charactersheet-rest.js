@@ -333,6 +333,7 @@ class CharacterSheetRest {
 				this._state.heal(totalHealing);
 			}
 			this._restoreResources("short");
+			this._state.restoreSignatureSpells?.();
 
 			// Restore Warlock pact slots on short rest
 			const pactSlots = this._state.getPactSlots();
@@ -684,6 +685,9 @@ class CharacterSheetRest {
 			else modalInner.append(terrorizingForceChoice.section);
 		}
 
+		const spellMasterySwap = this._buildSpellMasteryLongRestSection();
+		if (spellMasterySwap) modalInner.append(spellMasterySwap.section);
+
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
 		btnConfirm.onClick(() => {
 			// Snapshot the full pre-rest state so this rest can be undone (BUG 8).
@@ -716,6 +720,7 @@ class CharacterSheetRest {
 
 			// Restore long-rest and short-rest resources
 			this._restoreResources("long");
+			this._state.restoreSignatureSpells?.();
 
 			// Clear one level of exhaustion using the dedicated exhaustion tracker
 			if (cbClearExhaustion.checked) {
@@ -772,6 +777,7 @@ class CharacterSheetRest {
 
 			// Apply Terrorizing Force damage-type re-choice (free on a long rest)
 			const terrorizingForceChanged = terrorizingForceChoice?.apply() || false;
+			const spellMasteryChanged = spellMasterySwap?.apply() || false;
 
 			// Save changes
 			this._page.saveCharacter();
@@ -784,6 +790,7 @@ class CharacterSheetRest {
 			if (daemonologistSideChanged) message += ` Fair and Foul set to ${daemonologistSideChanged}.`;
 			if (forkedTongueChanged) message += ` Forked Tongue: swapped ${forkedTongueChanged}.`;
 			if (terrorizingForceChanged) message += ` Terrorizing Force damage set to ${terrorizingForceChanged}.`;
+			if (spellMasteryChanged) message += ` Spell Mastery changed to ${spellMasteryChanged}.`;
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
 			if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
 			if (removedCompanions > 0) message += ` Wild Shape form/companion dismissed.`;
@@ -811,6 +818,50 @@ class CharacterSheetRest {
 			${btnCancel}
 			${btnConfirm}
 		</div>`.appendTo(modalInner);
+	}
+
+	_buildSpellMasteryLongRestSection () {
+		if (!this._state.isXphbWizard?.()) return null;
+		const selected = this._state.getSpellMasterySpells?.() || [];
+		if (selected.length !== 2) return null;
+		const section = e_({outer: `
+			<div class="charsheet__rest-section">
+				<div class="charsheet__rest-section-title">✨ Spell Mastery</div>
+				<p class="ve-muted ve-small mb-2">You may replace one mastered spell with an eligible spell of the same level.</p>
+			</div>
+		`});
+		const levelSelect = e_({tag: "select", clazz: "ve-form-control mb-2"});
+		levelSelect.append(e_({tag: "option", val: "", txt: "Keep current mastered spells"}));
+		selected.forEach(spell => levelSelect.append(e_({tag: "option", val: `${spell.level}`, txt: `Replace ${spell.name} (level ${spell.level})` })));
+		const replacementSelect = e_({tag: "select", clazz: "ve-form-control"});
+		replacementSelect.disabled = true;
+		replacementSelect.append(e_({tag: "option", val: "", txt: "Choose a mastered spell first"}));
+		levelSelect.addEventListener("change", () => {
+			replacementSelect.innerHTML = "";
+			const level = Number(levelSelect.value);
+			if (!level) {
+				replacementSelect.disabled = true;
+				replacementSelect.append(e_({tag: "option", val: "", txt: "Choose a mastered spell first"}));
+				return;
+			}
+			replacementSelect.disabled = false;
+			replacementSelect.append(e_({tag: "option", val: "", txt: "Choose a replacement"}));
+			for (const spell of this._state.getSpellMasteryCandidates(level)) {
+				replacementSelect.append(e_({tag: "option", val: `${spell.name}|${spell.source}`, txt: `${spell.name} — ${spell.castingTime || "1 action"}`}));
+			}
+		});
+		section.append(levelSelect, replacementSelect);
+		return {
+			section,
+			apply: () => {
+				const level = Number(levelSelect.value);
+				if (!level || !replacementSelect.value) return false;
+				const replacement = this._state.getSpellMasteryCandidates(level)
+					.find(spell => `${spell.name}|${spell.source}` === replacementSelect.value);
+				if (!replacement || !this._state.replaceSpellMasterySpell(level, replacement, {trigger: "longRest"})) return false;
+				return replacement.name;
+			},
+		};
 	}
 
 	/**

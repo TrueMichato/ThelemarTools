@@ -212,6 +212,13 @@ class CharacterSheetFeatures {
 				return;
 			}
 
+			const wizardCapstone = e.target.closest(".charsheet__feature-wizard-capstone");
+			if (wizardCapstone) {
+				e.stopPropagation();
+				this._page._spells?.pConfigureWizardCapstone?.(wizardCapstone.dataset.feature);
+				return;
+			}
+
 			// Also toggle on header click, but not if clicking a link
 			const featureHeader = e.target.closest(".charsheet__feature-header");
 			if (featureHeader) {
@@ -1952,6 +1959,28 @@ class CharacterSheetFeatures {
 			intransigentBadge = `<span class="badge ${badgeClass}" title="${badgeTitle.replace(/"/g, "&quot;")}">${badgeText}</span>`;
 		}
 
+		let wizardCapstoneHtml = "";
+		const normalizedFeatureName = (feature.name || "").toLowerCase();
+		if (normalizedFeatureName === "spell mastery") {
+			const spells = this._state.getSpellMasterySpells?.() || [];
+			const isXphb = this._state.isXphbWizard?.();
+			wizardCapstoneHtml = `
+				<div class="ve-flex-v-center ve-flex-wrap gap-2 mb-2">
+					<strong>Mastered:</strong>
+					${spells.length ? spells.map(spell => `<span class="badge badge-success">${spell.name} (L${spell.level})</span>`).join(" ") : `<span class="ve-muted">Not selected</span>`}
+					<button class="ve-btn ve-btn-xs ve-btn-default charsheet__feature-wizard-capstone" data-feature="mastery" ${isXphb && spells.length === 2 ? "disabled" : ""}>${spells.length === 2 ? "Change" : "Choose"}</button>
+					<span class="ve-muted ve-small">${isXphb ? "Changes when you finish a Long Rest." : "Changes after 8 hours of study."}</span>
+				</div>`;
+		} else if (normalizedFeatureName === "signature spells") {
+			const spells = this._state.getSignatureSpells?.() || [];
+			wizardCapstoneHtml = `
+				<div class="ve-flex-v-center ve-flex-wrap gap-2 mb-2">
+					<strong>Signature:</strong>
+					${spells.length ? spells.map(spell => `<span class="badge badge-info">${spell.name} (${spell.usesCurrent}/${spell.usesMax})</span>`).join(" ") : `<span class="ve-muted">Not selected</span>`}
+					${spells.length !== 2 ? `<button class="ve-btn ve-btn-xs ve-btn-default charsheet__feature-wizard-capstone" data-feature="signature">Choose</button>` : ""}
+				</div>`;
+		}
+
 		const featureEl = e_({outer: `
 			<div class="charsheet__feature" data-feature-id="${feature.id}">
 				<div class="charsheet__feature-header">
@@ -1977,6 +2006,7 @@ class CharacterSheetFeatures {
 					</div>
 				</div>
 				<div class="charsheet__feature-body" style="display: ${isExpanded ? "block" : "none"};">
+					${wizardCapstoneHtml}
 					${primalFocusHtml}
 					${huntersPreyHtml}
 					${intransigentHtml}
