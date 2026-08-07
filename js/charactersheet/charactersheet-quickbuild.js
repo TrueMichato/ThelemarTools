@@ -44,6 +44,8 @@ class CharacterSheetQuickBuild {
 			languages: {}, // {levelKey: {featureName: [language, ...]}}
 			scholarSkill: null,
 			spellbookSpells: [], // [{name, source, level, ...}]
+			spellMasterySpells: [],
+			signatureSpells: [],
 			spells: [], // batch spell selections
 			hpMethod: "average", // "average" or "roll"
 			hpRolls: {}, // {levelKey: rollResult}
@@ -162,6 +164,8 @@ class CharacterSheetQuickBuild {
 			languages: {},
 			scholarSkill: null,
 			spellbookSpells: [],
+			spellMasterySpells: [],
+			signatureSpells: [],
 			knownSpells: [], // Known-caster spells (Sorcerer, Bard, etc.)
 			knownCantrips: [], // Known-caster cantrips
 			preparedSpells: [], // Prepared-caster spells (XPHB Warlock, etc.)
@@ -3938,6 +3942,40 @@ class CharacterSheetQuickBuild {
 			</div>
 		`}));
 
+		const crossesSpellMastery = this._levelAnalysis.some(a => a.className === "Wizard" && a.classLevel === 18);
+		const crossesSignatureSpells = this._levelAnalysis.some(a => a.className === "Wizard" && a.classLevel === 20);
+		const capstoneHost = e_({tag: "div", clazz: "charsheet__wizard-capstone-pickers"});
+		const renderCapstonePickers = () => {
+			capstoneHost.innerHTML = "";
+			const wizardAlloc = this._classAllocations.find(a => a.className === "Wizard");
+			const isXphb = wizardAlloc?.classSource === "XPHB";
+			const spellbook = [
+				...(this._state.getWizardSpellbook?.() || []),
+				...(this._selections.spellbookSpells || []),
+			].filter((spell, ix, arr) => arr.findIndex(it => `${it.name}|${it.source}` === `${spell.name}|${spell.source}`) === ix);
+			if (crossesSpellMastery) {
+				const eligible = spellbook.filter(spell => [1, 2].includes(spell.level) && (!isXphb || CharacterSheetClassUtils.spellHasActionCastingTime(spell)));
+				capstoneHost.append(CharacterSheetSpellPicker.renderFixedSpellPicker({
+					title: "Spell Mastery",
+					description: `${isXphb ? "Choose action-casting-time" : "Choose"} level 1 and level 2 spells from the selected Wizard spellbook.`,
+					slots: [{level: 1, label: "Level 1 Mastery"}, {level: 2, label: "Level 2 Mastery"}],
+					spells: eligible,
+					preSelectedSpells: this._selections.spellMasterySpells,
+					onSelect: spells => { this._selections.spellMasterySpells = spells; },
+				}));
+			}
+			if (crossesSignatureSpells) {
+				capstoneHost.append(CharacterSheetSpellPicker.renderFixedSpellPicker({
+					title: "Signature Spells",
+					description: "Choose two different level 3 spells from the selected Wizard spellbook.",
+					slots: [{level: 3, label: "First Signature Spell"}, {level: 3, label: "Second Signature Spell"}],
+					spells: spellbook.filter(spell => spell.level === 3),
+					preSelectedSpells: this._selections.signatureSpells,
+					onSelect: spells => { this._selections.signatureSpells = spells; },
+				}));
+			}
+		};
+
 		if (spellbookLevels.length > 0) {
 			const totalSpellbookSpells = spellbookLevels.length * 2;
 			const maxSpellLevel = CharacterSheetClassUtils.getMaxSpellLevelForClass("Wizard", this._targetLevel);
@@ -3972,6 +4010,7 @@ class CharacterSheetQuickBuild {
 				}),
 				onSelect: (spells) => {
 					this._selections.spellbookSpells = spells;
+					renderCapstonePickers();
 				},
 				getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
 				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
@@ -3979,6 +4018,10 @@ class CharacterSheetQuickBuild {
 			});
 
 			step.append(section);
+		}
+		if (crossesSpellMastery || crossesSignatureSpells) {
+			renderCapstonePickers();
+			step.append(capstoneHost);
 		}
 
 		if (knownCasterInfo) {
@@ -4182,6 +4225,16 @@ class CharacterSheetQuickBuild {
 		// player picked is applied, and any remaining unspent spell/cantrip slots
 		// can be filled later from the Spells tab. We do not gate or warn on
 		// under-filled spell pools — the section already shows accurate counts.
+		const crossesSpellMastery = this._levelAnalysis.some(a => a.className === "Wizard" && a.classLevel === 18);
+		if (crossesSpellMastery && (this._selections.spellMasterySpells.length !== 2 || new Set(this._selections.spellMasterySpells.map(s => s.level)).size !== 2)) {
+			JqueryUtil.doToast({type: "warning", content: "Choose one level 1 and one level 2 spell for Spell Mastery."});
+			return false;
+		}
+		const crossesSignatureSpells = this._levelAnalysis.some(a => a.className === "Wizard" && a.classLevel === 20);
+		if (crossesSignatureSpells && (this._selections.signatureSpells.length !== 2 || new Set(this._selections.signatureSpells.map(s => `${s.name}|${s.source}`)).size !== 2)) {
+			JqueryUtil.doToast({type: "warning", content: "Choose two different level 3 Signature Spells."});
+			return false;
+		}
 		return true;
 	}
 
@@ -5019,6 +5072,8 @@ class CharacterSheetQuickBuild {
 				}));
 			});
 		}
+		if (this._selections.spellMasterySpells.length) this._state.setSpellMasterySpells(this._selections.spellMasterySpells);
+		if (this._selections.signatureSpells.length) this._state.setSignatureSpells(this._selections.signatureSpells);
 
 		// Apply known spells (Sorcerer, Bard, Ranger, Warlock, etc.)
 		if (this._selections.knownSpells.length > 0) {
@@ -5350,6 +5405,12 @@ class CharacterSheetQuickBuild {
 			&& analysis.characterLevel > 1
 			&& typeof this._selections.hpRolls[levelKey] === "number") {
 			entry.choices.hpRoll = this._selections.hpRolls[levelKey];
+		}
+		if (analysis.className === "Wizard" && analysis.classLevel === 18 && this._selections.spellMasterySpells.length) {
+			entry.choices.spellMasterySpells = this._selections.spellMasterySpells.map(spell => ({name: spell.name, source: spell.source, level: spell.level}));
+		}
+		if (analysis.className === "Wizard" && analysis.classLevel === 20 && this._selections.signatureSpells.length) {
+			entry.choices.signatureSpells = this._selections.signatureSpells.map(spell => ({name: spell.name, source: spell.source, level: spell.level}));
 		}
 
 		// ASI / Feat

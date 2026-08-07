@@ -10,6 +10,52 @@ import {CharacterSheetModal} from "./charactersheet-modal.js";
 const {e_, ee} = /** @type {*} */ (globalThis);
 
 class CharacterSheetSpellPicker {
+	/**
+	 * Render a compact fixed-slot picker for feature choices drawn from an
+	 * existing spellbook. Each slot declares its required spell level.
+	 * @param {*} opts
+	 * @returns {HTMLElement}
+	 */
+	static renderFixedSpellPicker ({title, description, slots, spells, preSelectedSpells = [], onSelect}) {
+		const section = e_({outer: `
+			<div class="charsheet__levelup-section charsheet__spell-picker-container">
+				<h5 class="charsheet__levelup-section-title"><span class="glyphicon glyphicon-star"></span> ${title}</h5>
+				<p class="ve-small">${description}</p>
+				<div class="charsheet__fixed-spell-picker"></div>
+			</div>
+		`});
+		const host = section.querySelector(".charsheet__fixed-spell-picker");
+		const selected = slots.map((slot, ix) => {
+			const seeded = preSelectedSpells[ix];
+			return seeded && seeded.level === slot.level ? seeded : null;
+		});
+		const emit = () => onSelect(selected.filter(Boolean));
+
+		slots.forEach((slot, ix) => {
+			const candidates = (spells || [])
+				.filter(spell => spell.level === slot.level)
+				.sort((a, b) => a.name.localeCompare(b.name));
+			const select = e_({tag: "select", clazz: "ve-form-control"});
+			select.append(e_({tag: "option", val: "", txt: `Choose a level ${slot.level} spell...`}));
+			for (const spell of candidates) {
+				select.append(e_({
+					tag: "option",
+					val: `${spell.name}|${spell.source}`,
+					txt: `${spell.name} (${spell.source})${spell.castingTime ? ` — ${spell.castingTime}` : ""}`,
+				}));
+			}
+			if (selected[ix]) select.value = `${selected[ix].name}|${selected[ix].source}`;
+			select.addEventListener("change", () => {
+				selected[ix] = candidates.find(spell => `${spell.name}|${spell.source}` === select.value) || null;
+				emit();
+			});
+			const row = e_({outer: `<label class="ve-flex-col mb-2"><strong>${slot.label || `Level ${slot.level}`}</strong></label>`});
+			row.append(select);
+			host.append(row);
+		});
+		return section;
+	}
+
 	// ==========================================
 	// Progress Header & Summary Panel Helpers
 	// ==========================================

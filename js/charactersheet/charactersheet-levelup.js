@@ -164,6 +164,9 @@ class CharacterSheetLevelUp {
 		// feat-progression picker UI + apply/cascade machinery can be reused verbatim.
 		/** @type {*[]} */ let selectedClassFeatProgression = [];
 		/** @type {*} */ let selectedSpellbookSpells = [];
+		/** @type {*} */ let selectedSpellMasterySpells = [];
+		/** @type {*} */ let selectedSignatureSpells = [];
+		let rerenderWizardCapstones = null;
 		// Subclass-granted combat traditions (pre-seeded during subclass selection)
 		let subclassGrantedTraditionCodes = /** @type {*[]} */ ([]);
 
@@ -1020,6 +1023,7 @@ class CharacterSheetLevelUp {
 				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 				onSelect: (/** @type {*} */ spells) => {
 					selectedSpellbookSpells = spells;
+					rerenderWizardCapstones?.();
 					// Spellbook picks are optional at level-up — always report complete
 					// so the accordion + summary stop flagging partial selections as red.
 					const summary = spells.length > 0 ? spells.map((/** @type {*} */ s) => s.name).join(", ") : "None — pick later on the Spells tab";
@@ -1033,6 +1037,74 @@ class CharacterSheetLevelUp {
 			summaryItemEls.spellbook.setStatus(true, "None — pick later on the Spells tab");
 			accordions.spellbook.setComplete(true, `0/${wizardSpellCount} spells`);
 		}
+
+		const wizardCapstoneHost = e_({tag: "div"});
+		rerenderWizardCapstones = () => {
+			wizardCapstoneHost.innerHTML = "";
+			const stagedSpellbook = [
+				...this._state.getSpells(),
+				...selectedSpellbookSpells.map(spell => CharacterSheetClassUtils.buildSpellStateObject(spell, {
+					sourceFeature: "Wizard Spellbook",
+					sourceClass: "Wizard",
+					inSpellbook: true,
+				})),
+			];
+			const uniqueSpellbook = stagedSpellbook.filter((spell, ix, arr) => arr.findIndex(it => `${it.name}|${it.source}` === `${spell.name}|${spell.source}`) === ix);
+			if (isWizard && newLevel === 18) {
+				const candidates = uniqueSpellbook.filter(spell =>
+					[1, 2].includes(spell.level)
+					&& spell.sourceClass?.toLowerCase() === "wizard"
+					&& (spell.inSpellbook || spell.sourceFeature === "Wizard Spellbook")
+					&& (!isWizard2024 || CharacterSheetClassUtils.spellHasActionCastingTime(spell)),
+				);
+				wizardCapstoneHost.append(CharacterSheetSpellPicker.renderFixedSpellPicker({
+					title: "Spell Mastery",
+					description: `${isWizard2024 ? "Choose action-casting-time" : "Choose"} level 1 and level 2 Wizard spells from your spellbook.`,
+					slots: [{level: 1, label: "Level 1 Mastery"}, {level: 2, label: "Level 2 Mastery"}],
+					spells: candidates,
+					preSelectedSpells: selectedSpellMasterySpells,
+					onSelect: spells => {
+						selectedSpellMasterySpells = spells;
+						const complete = spells.length === 2 && new Set(spells.map(s => s.level)).size === 2;
+						const label = spells.map(s => s.name).join(", ") || "Select two spells";
+						summaryItemEls.spellmastery.setStatus(complete, label);
+						accordions.spellmastery.setComplete(complete, label);
+					},
+				}));
+			}
+			if (isWizard && newLevel === 20) {
+				const candidates = uniqueSpellbook.filter(spell =>
+					spell.level === 3
+					&& spell.sourceClass?.toLowerCase() === "wizard"
+					&& (spell.inSpellbook || spell.sourceFeature === "Wizard Spellbook"),
+				);
+				wizardCapstoneHost.append(CharacterSheetSpellPicker.renderFixedSpellPicker({
+					title: "Signature Spells",
+					description: "Choose two different level 3 Wizard spells from your spellbook.",
+					slots: [{level: 3, label: "First Signature Spell"}, {level: 3, label: "Second Signature Spell"}],
+					spells: candidates,
+					preSelectedSpells: selectedSignatureSpells,
+					onSelect: spells => {
+						selectedSignatureSpells = spells;
+						const complete = spells.length === 2 && new Set(spells.map(s => `${s.name}|${s.source}`)).size === 2;
+						const label = spells.map(s => s.name).join(", ") || "Select two spells";
+						summaryItemEls.signaturespells.setStatus(complete, label);
+						accordions.signaturespells.setComplete(complete, label);
+					},
+				}));
+			}
+		};
+
+		if (isWizard && newLevel === 18) {
+			summaryItems.append(createSummaryItem("spellmastery", "✨", "Spell Mastery", {required: true}));
+			main.append(createAccordion("spellmastery", "✨", "Spell Mastery", wizardCapstoneHost, {required: true}));
+		}
+
+		if (isWizard && newLevel === 20) {
+			summaryItems.append(createSummaryItem("signaturespells", "🌟", "Signature Spells", {required: true}));
+			main.append(createAccordion("signaturespells", "🌟", "Signature Spells", wizardCapstoneHost, {required: true}));
+		}
+		rerenderWizardCapstones();
 
 		// ========== 8b. KNOWN SPELLS (Sorcerer, Bard, Ranger, Warlock, etc.) ==========
 		if (isKnownCaster && (knownSpellsGain > 0 || knownCantripsGain > 0)) {
@@ -1381,6 +1453,16 @@ class CharacterSheetLevelUp {
 					return;
 				}
 			}
+			if (isWizard && newLevel === 18 && (selectedSpellMasterySpells.length !== 2 || new Set(selectedSpellMasterySpells.map(s => s.level)).size !== 2)) {
+				JqueryUtil.doToast({type: "warning", content: "Choose one level 1 and one level 2 spell for Spell Mastery."});
+				accordions.spellmastery?.el.classList.add("expanded");
+				return;
+			}
+			if (isWizard && newLevel === 20 && (selectedSignatureSpells.length !== 2 || new Set(selectedSignatureSpells.map(s => `${s.name}|${s.source}`)).size !== 2)) {
+				JqueryUtil.doToast({type: "warning", content: "Choose two different level 3 Signature Spells."});
+				accordions.signaturespells?.el.classList.add("expanded");
+				return;
+			}
 
 			// ========== APPLY LEVEL UP ==========
 			await this._applyLevelUp({
@@ -1401,6 +1483,8 @@ class CharacterSheetLevelUp {
 				forkedTongueLevelUpPick,
 				selectedScholarSkill,
 				selectedSpellbookSpells,
+				selectedSpellMasterySpells,
+				selectedSignatureSpells,
 				selectedKnownSpells,
 				selectedKnownCantrips,
 				selectedPreparedSpells,
@@ -4408,7 +4492,7 @@ class CharacterSheetLevelUp {
 
 	/** @param {*} arg */
 
-	async _applyLevelUp ({classEntry, newLevel, asiChoices, selectedFeat, selectedSubclass, selectedSubclassChoice, selectedOptionalFeatures, selectedCombatTraditions, selectedWeaponMasteries, selectedFeatureOptions, selectedClassFeatProgression, selectedExpertise, selectedLanguages, languageGrants, forkedTongueLevelUpPick, selectedScholarSkill, selectedSpellbookSpells, selectedKnownSpells, selectedKnownCantrips, selectedPreparedSpells, selectedPreparedCantrips, stagedSpellSwap, newFeatures, hpMethod, classData}) {
+	async _applyLevelUp ({classEntry, newLevel, asiChoices, selectedFeat, selectedSubclass, selectedSubclassChoice, selectedOptionalFeatures, selectedCombatTraditions, selectedWeaponMasteries, selectedFeatureOptions, selectedClassFeatProgression, selectedExpertise, selectedLanguages, languageGrants, forkedTongueLevelUpPick, selectedScholarSkill, selectedSpellbookSpells, selectedSpellMasterySpells, selectedSignatureSpells, selectedKnownSpells, selectedKnownCantrips, selectedPreparedSpells, selectedPreparedCantrips, stagedSpellSwap, newFeatures, hpMethod, classData}) {
 		const prevCombatTraditions = this._state.getCombatTraditions?.() || [];
 		const prevWeaponMasteries = this._state.getWeaponMasteries?.() || [];
 
@@ -4853,6 +4937,8 @@ class CharacterSheetLevelUp {
 				}));
 			});
 		}
+		if (selectedSpellMasterySpells?.length) this._state.setSpellMasterySpells(selectedSpellMasterySpells);
+		if (selectedSignatureSpells?.length) this._state.setSignatureSpells(selectedSignatureSpells);
 
 		// Apply known-spell caster spell selections (Sorcerer, Bard, Ranger, Warlock, etc.)
 		if (selectedKnownSpells && selectedKnownSpells.length > 0) {
@@ -5184,6 +5270,12 @@ class CharacterSheetLevelUp {
 		// (L1 always uses max hit die per RAW; _calculateMaxHp ignores hpRoll at the first level).
 		if (hpRollDie != null && totalLevel > 1) {
 			historyEntry.choices.hpRoll = hpRollDie;
+		}
+		if (selectedSpellMasterySpells?.length) {
+			historyEntry.choices.spellMasterySpells = selectedSpellMasterySpells.map(spell => ({name: spell.name, source: spell.source, level: spell.level}));
+		}
+		if (selectedSignatureSpells?.length) {
+			historyEntry.choices.signatureSpells = selectedSignatureSpells.map(spell => ({name: spell.name, source: spell.source, level: spell.level}));
 		}
 
 		// Record the history entry
