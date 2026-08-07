@@ -375,6 +375,28 @@ _getMaxPreparedSpells() {
 }
 ```
 
+### Wizard Capstone Spells
+
+Wizard Spell Mastery and Signature Spells use canonical references to spells already
+in `spellcasting.spellsKnown`; they do not create duplicate innate-spell rows.
+
+- `spellMasterySpells` stores one level 1 and one level 2 Wizard spellbook spell.
+  PHB free casting requires the normal `prepared` flag and replacement is an
+  explicit 8-hour-study action. XPHB accepts only spells with a casting time of
+  one action, treats both picks as always prepared, and offers replacement only
+  in the Long Rest dialog.
+- `signatureSpells` stores two distinct level 3 Wizard spellbook spells. Both are
+  always prepared without counting against the prepared limit. Each has one free
+  level-3 cast and restores that use on either a Short or Long Rest.
+- `_castSpell` adds these as no-slot cast options before ordinary slots. Spell
+  Mastery is unlimited at the spell's base level. A Signature cast spends only
+  its own use; ordinary slot casting and higher-level casting remain available.
+  A cancelled cast refunds the Signature use.
+
+Level Up and Quick Build require these choices when Wizard level crosses 18 or
+20. The Spells and Features tabs show the selected spells and remaining
+Signature uses.
+
 ---
 
 ## Per-Class Spell Tracking (Multiclass)

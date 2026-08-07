@@ -501,9 +501,11 @@ a term exists, prose only where it adds something.
   restatement of a resistance already on the block never drops.
 - **`_getItemUseSnippet` truncates.** A rule keyed on a phrase late in the item text
   silently never fires; key on early phrases.
-- **The sheet does not store Signature Spells, Spell Mastery or Resilient's ability.**
-  `feats[].choices.ability` is `null` and there is no signature/at-will marker;
-  `chosenSubfeatures` holds only Specialties. Drop the scaffolding, never invent a pick.
+- **Wizard capstone spell picks are state-backed.** Spell Mastery is stored in
+  `spellcasting.spellMasterySpells` and Signature Spells in
+  `spellcasting.signatureSpells`; both reference canonical Wizard spellbook rows.
+  NPC export may use these picks when present, but must not invent them for older
+  saves. Resilient's ability can still be absent and must not be inferred.
 - **A regex backreference cannot match across case.** `/\b([A-Z][a-z]{2,})\s+(\1)\b/`
   never matched `May may` — use two groups and compare lowercased.
 - **CR probes must hook the real call.** Reconstructing `_estimateCr`'s arguments by hand

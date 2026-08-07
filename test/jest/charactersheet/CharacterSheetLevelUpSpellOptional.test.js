@@ -78,6 +78,16 @@ describe("Level-up — spell selection is optional", () => {
 			expect(source).toMatch(re);
 		}
 	});
+
+	test("required Wizard capstones are validated outside optional class feat progression", () => {
+		const masteryGate = source.indexOf("if (isWizard && newLevel === 18 &&");
+		const signatureGate = source.indexOf("if (isWizard && newLevel === 20 &&");
+		const apply = source.indexOf("// ========== APPLY LEVEL UP ==========");
+		expect(masteryGate).toBeGreaterThan(0);
+		expect(signatureGate).toBeGreaterThan(masteryGate);
+		expect(apply).toBeGreaterThan(signatureGate);
+		expect(source.slice(masteryGate, apply)).not.toMatch(/selectedClassFeatProgression\.length/);
+	});
 });
 
 describe("Builder & QuickBuild — spell selection is optional", () => {
@@ -92,15 +102,16 @@ describe("Builder & QuickBuild — spell selection is optional", () => {
 		expect(quickbuildSource).not.toMatch(/Spell selection incomplete/);
 	});
 
-	test("QuickBuild _validateSpellsStep returns true unconditionally", () => {
-		// The function body should now be effectively `return true;` — no early
-		// returns based on selection counts.
+	test("QuickBuild gates only required Wizard capstone choices", () => {
+		// Ordinary known/prepared/spellbook picks remain optional. The only
+		// allowed validation failures are the level-18/20 Wizard feature choices.
 		const m = quickbuildSource.match(/_validateSpellsStep\s*\([^)]*\)\s*\{([\s\S]*?)\n\t\}/);
 		expect(m).not.toBeNull();
 		const body = m[1];
-		// No JqueryUtil.doToast or pGetUserBoolean inside.
-		expect(body).not.toMatch(/JqueryUtil\.doToast/);
 		expect(body).not.toMatch(/pGetUserBoolean/);
+		expect(body).toMatch(/crossesSpellMastery/);
+		expect(body).toMatch(/crossesSignatureSpells/);
+		expect(body).not.toMatch(/knownSpells|preparedSpells|spellbookSpells/);
 		// Must end in `return true;`.
 		expect(body).toMatch(/return true;\s*$/);
 	});
