@@ -22,6 +22,8 @@ describe("CharacterSheetQuickBuild _applyQuickBuild", () => {
 			updateLevelChoice: jest.fn(() => true),
 			addSpell: jest.fn(),
 			addCantrip: jest.fn(),
+			setSpellMasterySpells: jest.fn(),
+			setSignatureSpells: jest.fn(),
 			ensureXpMatchesLevel: jest.fn(),
 			applyClassFeatureEffects: jest.fn(),
 			calculateSpellSlots: jest.fn(),
@@ -51,6 +53,8 @@ describe("CharacterSheetQuickBuild _applyQuickBuild", () => {
 			languages: {},
 			scholarSkill: null,
 			spellbookSpells: [],
+			spellMasterySpells: [{name: "Shield", source: "PHB", level: 1}, {name: "Misty Step", source: "PHB", level: 2}],
+			signatureSpells: [{name: "Fireball", source: "PHB", level: 3}, {name: "Counterspell", source: "PHB", level: 3}],
 			knownSpells: [],
 			knownCantrips: [],
 			hpMethod: "average",
@@ -65,6 +69,8 @@ describe("CharacterSheetQuickBuild _applyQuickBuild", () => {
 
 		await expect(qb._applyQuickBuild()).resolves.toBeUndefined();
 		expect(state.recordLevelChoice).not.toHaveBeenCalled();
+		expect(state.setSpellMasterySpells).toHaveBeenCalledWith(qb._selections.spellMasterySpells);
+		expect(state.setSignatureSpells).toHaveBeenCalledWith(qb._selections.signatureSpells);
 		expect(page.saveCharacter).toHaveBeenCalled();
 
 		CharacterSheetClassUtils.updateRacialSpells = originalUpdateRacialSpells;
