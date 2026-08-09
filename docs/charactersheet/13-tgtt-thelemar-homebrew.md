@@ -199,7 +199,7 @@ hook as a confirm-then-pick prompt.
 | College | Status | Key Features |
 |---------|--------|--------------|
 | **Conduction** | ✅ Complete | `batteryDice`, `amplifiedEffectBonus`, `conductorAuraRange` |
-| **Jesters** | ✅ Complete | `jestersActUses`, `jestersGrin` bonuses |
+| **Jesters** | ✅ Complete | 13 Jester's Acts (3/4/5 known at L3/L6/L14), act DC, `getJesterAct()` — see [College of Jesters](#college-of-jesters) |
 | **Surrealism** | ✅ Complete | `surrealistInspirationDie`, `dreamLogicUses` |
 
 ### ✅ Cleric Domains
