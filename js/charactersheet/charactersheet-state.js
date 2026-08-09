@@ -54227,6 +54227,11 @@ class CharacterSheetState {
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
+			// Re-apply self-imposed conditions. Deactivating the state released
+			// them (and emptied `_managedConditions`), so without this the SECOND
+			// and every later activation of a state silently carries no condition
+			// even though `addsConditions` is still declared on it.
+			this._applyStateAddedConditions(existing, stateType);
 			return existing.id;
 		}
 

@@ -105,6 +105,37 @@ for temporary condition, speed-reduction, and forced-movement immunities.
 Condition-derived states are filtered by active `conditionImmunity` effects,
 but remain persisted so their mechanics resume after the immunity ends.
 
+### Self-Imposed Conditions on Custom Toggles (`addsConditions`)
+
+A state can carry `addsConditions: [...]`, applied on activation and released
+when the state ends (tracked per-state in `_managedConditions`, so ending a
+state never strips a condition the character already had independently).
+
+Two sources, resolved in this order by `_applyStateAddedConditions` /
+`_removeStateAddedConditions`:
+
+1. `ACTIVE_STATE_TYPES[stateTypeId].addsConditions` — hand-authored state types.
+2. **Fallback:** `stateInstance.addsConditions` — for `stateTypeId: "custom"`,
+   which is what every *generically detected* homebrew toggle produces. Custom
+   states have no `ACTIVE_STATE_TYPES` entry, so without this fallback they
+   could never impose a condition.
+
+For custom states the array is derived from the feature text by
+`CharacterSheetState.parseSelfImposedConditions(text)`: it normalizes
+`{@condition X|…}` tags, matches only *self-directed* phrasings against a known
+condition list, and rejects negated / immunity clauses ("you are immune to
+being blinded", "you can't be blinded"). The toggle detector emits it as
+`addsConditions` on the activation info, and `charactersheet.js` forwards it
+into `addActiveState`.
+
+**Prefer this over authoring a bespoke `ACTIVE_STATE_TYPES` entry** when a
+homebrew feature's only extra mechanic is a condition it imposes on its owner
+(e.g. Time Domain's Eyes of the Future Past → Blinded).
+
+`_applyStateAddedConditions` is idempotent, and `addActiveState` calls it on
+**both** the create path and the reactivation path — the reactivation call was
+missing until CS-BUG-116, which made every activation after the first inert.
+
 ### Steady Aim Two-Phase Pattern
 
 Steady Aim has TWO effects: `advantage` on next attack + `speedZero` (speed = 0).

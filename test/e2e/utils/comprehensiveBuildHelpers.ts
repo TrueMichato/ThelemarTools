@@ -2677,6 +2677,16 @@ export async function assertFeaturesMatrix (
 					if (!matched) {
 						errors.push(`${label} toggle-effects skipped: no matching feature on sheet`);
 					} else {
+						// A limited-use TOGGLE that was already spent at an earlier
+						// checkpoint has a disabled Activate button ("Not enough … remaining"),
+						// which would report as an infra failure rather than a real defect.
+						// The matrix re-evaluates every earlier row at each later checkpoint,
+						// so any toggle whose pool is small (e.g. `max(1, wisMod)` on a build
+						// that leaves the ability at 10) is guaranteed to hit this. Refresh
+						// uses BEFORE the baseline snapshot — the pool sizing itself is
+						// asserted separately by `featureUsesEqualAbilityMod` /
+						// `kind: "resource"`, so restoring here costs no coverage.
+						await charSheet.triggerLongRest().catch(() => { /* best-effort */ });
 						const before = await charSheet.snapshotEffectiveStats();
 						const beforeRes = await charSheet.getResistances();
 						const beforeImm = await charSheet.getImmunities();

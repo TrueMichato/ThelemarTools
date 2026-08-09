@@ -591,14 +591,18 @@ export class LevelUpPage {
 			// Epic Boon" (L19 in 2024 rules), etc. We always prefer the
 			// "Increase Ability Scores" path because +2 to a stat is
 			// unconditionally legal at every ASI node.
-			const allRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']"));
-			const modeAsi = allRadios.find(r => {
+			// Mode radios are the ONLY radios in the `asi-type` group. Scope to it
+			// explicitly: the loose label regex below also matches the XPHB feat
+			// literally named "Ability Score Improvement", and under the Thelemar
+			// L4 rule (ASI *and* feat) there are no mode radios at all — so an
+			// unscoped `find` clicked that feat as though it were a mode toggle,
+			// selecting a feat whose own ability sub-choices then went unfilled and
+			// wedging the wizard on "Please complete all choices for Ability Score
+			// Improvement."
+			const modeRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[name='asi-type']"));
+			const modeAsi = modeRadios.find(r => {
 				const wrap = r.closest("label") || r.parentElement;
-				return !!wrap && /Increase Ability Scores|Ability Score Improvement/i.test(wrap.textContent || "");
-			});
-			const modeFeatOrBoon = allRadios.find(r => {
-				const wrap = r.closest("label") || r.parentElement;
-				return !!wrap && /Take a (Feat|Epic Boon)|Take an Epic Boon|Epic Boon/i.test(wrap.textContent || "");
+				return r.value === "asi" || (!!wrap && /Increase Ability Scores/i.test(wrap.textContent || ""));
 			});
 
 			// Switch to ASI mode whenever it's available and not already
@@ -653,11 +657,11 @@ export class LevelUpPage {
 			// If steppers exist but Points remaining > 0, the user is in
 			// ASI mode and we already failed to drive them — try feat.
 			// Find the Feat-mode radio and switch to it, then pick a feat.
-			const allRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']"));
-			const modeFeatOrBoon = allRadios.find(r => {
-				const wrap = r.closest("label") || r.parentElement;
-				return !!wrap && /Take a (Feat|Epic Boon)|Take an Epic Boon|Epic Boon/i.test(wrap.textContent || "");
-			});
+			const modeFeatOrBoon = Array.from(asi.querySelectorAll<HTMLInputElement>("input[name='asi-type']"))
+				.find(r => {
+					const wrap = r.closest("label") || r.parentElement;
+					return r.value === "feat" || (!!wrap && /Take a (Feat|Epic Boon)|Take an Epic Boon|Epic Boon/i.test(wrap.textContent || ""));
+				});
 			const robustClick = (el: HTMLElement) => {
 				try { el.click(); } catch (_) { /* noop */ }
 				try {
@@ -675,11 +679,18 @@ export class LevelUpPage {
 			// Refresh radio list — feat/boon radios appear after switching mode.
 			const featRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']:not(:checked):not(:disabled)"))
 				.filter(r => {
+					// Never treat a mode toggle as a feat.
+					if (r.name === "asi-type") return false;
 					const wrap = r.closest("label") || r.parentElement;
 					if (!wrap) return false;
 					const txt = wrap.textContent || "";
 					// Exclude the mode-toggle radios themselves.
 					if (/Increase Ability Scores|Take a (Feat|Epic Boon)|Take an Epic Boon/i.test(txt)) return false;
+					// The XPHB feat literally named "Ability Score Improvement" always
+					// carries unfilled ability sub-choices, so auto-picking it wedges the
+					// wizard on "Please complete all choices for …". Other feats with
+					// choices get filled by the next counter pass; this one is a trap.
+					if (/^\s*Ability Score Improvement\b/i.test(txt.trim())) return false;
 					return true;
 				});
 			const noChoice = featRadios.filter(r => {

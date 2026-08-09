@@ -5903,6 +5903,39 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						.not.toContain("blinded");
 				});
 
+				it("re-activating a self-imposed-condition state re-applies the condition (CS-BUG-116)", () => {
+					// Regression pin. `addActiveState` reuses the existing state object on a
+					// second activation and used to `return` before re-applying conditions, so
+					// the FIRST activation blinded the character and every later one silently
+					// did nothing — the state showed `addsConditions: ["blinded"]` while the
+					// character had no condition at all. Generic: affects every state type
+					// that declares conditions, not just this feature.
+					makeTimeCleric(6);
+					const feature = state.getFeatures().find(f => f.name === "Eyes of the Future Past");
+					const info = CharacterSheetState.detectActivatableFeature(feature);
+					const opts = {name: feature.name, sourceFeatureId: feature.id, addsConditions: info.addsConditions};
+
+					const readBlinded = () => (state.getConditions() || [])
+						.map(c => (c.name || c).toLowerCase()).includes("blinded");
+
+					const first = state.addActiveState("custom", opts);
+					expect(readBlinded()).toBe(true);
+					state.removeActiveState(first);
+					expect(readBlinded()).toBe(false);
+
+					// Second cycle — the one that used to be inert.
+					const second = state.addActiveState("custom", opts);
+					expect(readBlinded()).toBe(true);
+					state.removeActiveState(second);
+					expect(readBlinded()).toBe(false);
+
+					// Third cycle, to prove it is not an odd/even artifact.
+					const third = state.addActiveState("custom", opts);
+					expect(readBlinded()).toBe(true);
+					state.removeActiveState(third);
+					expect(readBlinded()).toBe(false);
+				});
+
 				it("Potent Spellcasting adds WIS to cleric cantrip damage (pins the reader)", () => {
 					makeTimeCleric(8, {wis: 18}); // +4
 					const bonus = state.getCantripDamageBonus({name: "Sacred Flame", level: 0, className: "Cleric"});

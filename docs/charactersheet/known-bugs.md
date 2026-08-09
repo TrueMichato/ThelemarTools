@@ -7321,3 +7321,104 @@ agree changes the value of *every* named modifier carrying `abilityMod`
 (skill bonuses, temp HP, …) that currently contributes 0 to the cached totals —
 a repo-wide behavioural change that needs its own measurement pass, not a
 drive-by in a subclass task.
+
+---
+
+## CS-BUG-116 — Re-activating a state never re-applied its self-imposed conditions — FIXED
+
+**Status:** Fixed (`charactersheet-state.js`, `addActiveState`).
+**Severity:** Medium. **Scope:** generic — every active state that declares
+`addsConditions`, not one feature.
+
+### Symptom
+
+The first activation of a state applied its condition. Every subsequent
+activation of the *same* state applied nothing, while still reporting
+`addsConditions` on the state object. The character looked like it had the
+drawback and did not.
+
+### Measurement
+
+Cleric 6 / Time Domain, Eyes of the Future Past (declares Blinded), driven
+through the real browser UI (Playwright, activate → deactivate → long rest →
+activate):
+
+| Cycle | `state.addsConditions` | `state._managedConditions` | `hasCondition("blinded")` |
+|---|---|---|---|
+| 1st activate | `["blinded"]` | `[{name: "blinded", source: "XPHB"}]` | `true` |
+| after deactivate | `["blinded"]` | `[]` | `false` |
+| **2nd activate** | `["blinded"]` | **`[]`** | **`false`** ← bug |
+| 2nd activate (fixed) | `["blinded"]` | `[{name: "blinded", source: "XPHB"}]` | `true` |
+
+### Root cause
+
+`addActiveState` has a reactivation branch: when a state with the same
+`sourceFeatureId` (custom) or `stateTypeId` already exists, it refreshes the
+existing object's fields and `return`s its id. That early `return` sits
+*before* the `_applyStateAddedConditions` call at the end of the function, so
+only the create path ever applied conditions.
+
+Deactivating correctly releases the conditions and empties
+`_managedConditions`, so the second activation started from a clean slate and
+then did nothing — the two halves were individually correct and only wrong in
+sequence, which is why unit tests that exercised a single activate/deactivate
+cycle passed.
+
+### Fix
+
+Call `this._applyStateAddedConditions(existing, stateType)` immediately before
+the reactivation branch returns. `_applyStateAddedConditions` is idempotent
+(it skips anything already in `_managedConditions`), so this is safe on paths
+where `activateState` also reaches it.
+
+### Regression pin
+
+`test/jest/charactersheet/CharacterSheetTGTT.test.js` —
+"re-activating a self-imposed-condition state re-applies the condition
+(CS-BUG-116)" runs three full activate/deactivate cycles, so an odd/even
+artifact cannot pass it.
+
+---
+
+## CS-BUG-117 — Level-up ASI step wedged on any class granting BOTH an ASI and a feat — FIXED (test infra)
+
+**Status:** Fixed (`test/e2e/pages/LevelUpPage.ts`). Product code unaffected.
+**Severity:** High for the E2E suite — blocked **every** TGTT spec at L4+.
+
+### Symptom
+
+Every TGTT E2E spec that levelled past 3 failed with the wizard stuck open and
+the toast "Please complete all choices for Ability Score Improvement".
+
+### Measurement
+
+`tgtt-time-domain-cleric.spec.ts`: 3 failed / 3 passed / 2 skipped before the
+fix; 6 passed / 2 skipped after. Reproduced on a clean checkout of
+`character-sheet-wip` with all product changes reverted, confirming it was
+pre-existing and unrelated to the Time Domain work.
+
+### Root cause
+
+TGTT's L4 rule grants an ASI **and** a feat (`isBothAsiAndFeat`,
+`charactersheet-levelup.js:1311`). In that branch the product deliberately
+renders **no** `asi-type` mode radios (`:1984-1993`) — there is no mode to
+choose. The page object looked up its mode radio with an unscoped
+`input[type='radio']` plus the loose label regex
+`/Increase Ability Scores|Ability Score Improvement/i`, which then matched the
+**XPHB feat literally named "Ability Score Improvement"** and clicked it as if
+it were a mode toggle. That feat carries `ability` sub-choices, which were
+never filled, so `isFeatChoiceSpecComplete` (`:1334`) failed and the wizard
+refused to close.
+
+### Fix
+
+Scope mode-radio lookups to `input[name='asi-type']` and match on
+`r.value === "asi" / "feat"` first, falling back to label text. Exclude
+`asi-type` radios and any radio whose label starts with "Ability Score
+Improvement" from the `featRadios` pool.
+
+### Note
+
+This was a *test-infra* defect, not a product defect — the sheet renders the
+combined ASI+feat step correctly. It is recorded here because it silently
+suppressed L4+ coverage for the whole TGTT suite.
