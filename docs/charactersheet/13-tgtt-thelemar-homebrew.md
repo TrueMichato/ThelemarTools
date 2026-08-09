@@ -161,7 +161,38 @@ Generic `_subclassGrantedTraditions` pattern feeds into `combatTradition` effect
 
 | Subclass | Status | Key Features |
 |----------|--------|--------------|
-| **Chained Fury** | ✅ Complete | `chainWorthyDamageBonus`, `chainWrapDice`, `breakingTheChainsHp`, `explosiveEntranceRange` |
+| **Path of the Chained Fury** | ✅ Complete | `chainDamageDie`, `chainRange`, `chainCount`, `chainRestrainDc`, `chainRestrainDamage`, `chainGrappleSizeBonus`, `grappleSizeUnlimited`, `grantedAttacks`, `attackOnHitOptions`, `attackActionAllowances` |
+
+#### Path of the Chained Fury — mechanical surface
+
+The chains are a **rage-gated sub-state**, not an always-on grant. `manifestChains`
+(`ACTIVE_STATE_TYPES`) declares `requiresStates: ["rage"]`, so it cannot be
+activated outside Rage, and `deactivateState("rage")` cascades it off — which is
+exactly the RAW "they vanish when your rage ends". It inherits Rage's
+`breaksConcentration` and `exclusiveWith` without restating either.
+
+| Level | Feature | Implementation |
+|---|---|---|
+| 3 | Manifest Chains | `manifestChains` toggle; a `grantedAttacks` descriptor (`Spectral Chains`, finesse, force, `reachBonus`, `requiresState: "manifestChains"`) that appears in the Combat attack list with a `✨ Feature` badge; `attackOnHitOptions` `chains-grapple` / `chains-shove`; grapple size +1 |
+| 6 | Chain Imprisonment | `countsAsMagical` on the chains (renders a `✧ Magical` badge); `chains-restrain` on-hit rider with a STR save at `8 + PB + STR` and recurring damage |
+| 10 | Chain Control | grapple size bonus → +2; `chains-control-shove` on-hit rider |
+| 14 | Unchained Fury | `chainCount` 2 → 4; `attackActionAllowances` entry (3 attacks with the chains per Attack action); `grappleSizeUnlimited` (no size cap) |
+
+Damage die and range are read from the subclass's **`subclassTableGroups`** via
+`CharacterSheetClassUtils.getSubclassTableDice` / `getSubclassTableNumber`, never
+hardcoded — 1d8/1d10/1d12/2d6 and 15/20/25/30 ft. A hardcoded fallback exists only
+because `addClass` stores lean `{name, source}` subclass refs, so the table is
+often absent at calculation time.
+
+**Reach:** the chains contribute a per-attack `reachBonus`, *not* a global reach
+effect — a global one would wrongly extend the character's greataxe too. See
+`getReachContributions()` / `getAttackReach()`.
+
+**On-hit riders are never auto-applied.** Whether the attack hit, and whether the
+player wants to spend the rider, are facts the sheet cannot know (there is no
+target model). They surface through the generic `featureOnHitOptions` post-attack
+hook as a confirm-then-pick prompt.
+
 
 ### ✅ Bard Colleges
 

@@ -695,6 +695,76 @@ export class LevelUpPage {
 		await this.page.waitForTimeout(300);
 
 		// ──────────────────────────────────────────────────────────────
+		// Feat sub-choices ("Additional Choices for <Feat>"). The generic
+		// radio pass below deliberately skips the ASI accordion (it must
+		// never re-roll the feat/mode radios), so nothing else fills the
+		// sub-picker a chosen feat renders. Without this, Finish rejects
+		// with "Please complete all choices for <Feat>." and the level-up
+		// silently stalls — which is exactly what a Thelemar L4
+		// "ASI + Feat" node did after the autopicker landed on the XPHB
+		// feat literally named "Ability Score Improvement" (its +2 is a
+		// `choose` block, so it renders an ability grid of BUTTONS, which
+		// no radio/checkbox pass can satisfy).
+		//
+		// The picker is heterogeneous — ability/skill/tool/language
+		// choices render as `.ve-btn` grids, others as radios, checkboxes
+		// or selects. Drive all of them, re-querying after every click
+		// because each selection re-renders the container.
+		// ──────────────────────────────────────────────────────────────
+		for (let pass = 0; pass < 10; pass++) {
+			const didPick = await this.page.evaluate(() => {
+				const box = document.querySelector<HTMLElement>(".charsheet__levelup-feat-choices");
+				if (!box) return false;
+
+				// A grid button is "selected" once the widget flips it to
+				// a non-default variant (btn-primary / active / aria-pressed).
+				const isPicked = (b: HTMLButtonElement) =>
+					b.classList.contains("active")
+					|| b.getAttribute("aria-pressed") === "true"
+					|| /ve-btn-(primary|success|info)/.test(b.className);
+
+				for (const grid of Array.from(box.querySelectorAll<HTMLElement>("[class*='-grid'], .ve-flex-wrap"))) {
+					const btns = Array.from(grid.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+					if (!btns.length) continue;
+					if (btns.some(isPicked)) continue; // group already satisfied
+					btns[0].click();
+					return true;
+				}
+
+				const sel = Array.from(box.querySelectorAll<HTMLSelectElement>("select"))
+					.find(s => !s.value || s.selectedIndex <= 0);
+				if (sel) {
+					const opt = Array.from(sel.options).find((o, i) => i > 0 && !o.disabled);
+					if (opt) {
+						sel.value = opt.value;
+						sel.dispatchEvent(new Event("change", {bubbles: true}));
+						return true;
+					}
+				}
+
+				const radios = Array.from(box.querySelectorAll<HTMLInputElement>("input[type='radio']:not(:disabled)"));
+				const byName = new Map<string, HTMLInputElement[]>();
+				for (const r of radios) {
+					const n = r.name || "_anon";
+					if (!byName.has(n)) byName.set(n, []);
+					byName.get(n)!.push(r);
+				}
+				for (const group of byName.values()) {
+					if (group.some(r => r.checked)) continue;
+					group[0].click();
+					return true;
+				}
+
+				const box2 = box.querySelector<HTMLInputElement>("input[type='checkbox']:not(:disabled):not(:checked)");
+				if (box2) { box2.click(); return true; }
+
+				return false;
+			});
+			if (!didPick) break;
+			await this.page.waitForTimeout(150);
+		}
+
+		// ──────────────────────────────────────────────────────────────
 		// Scholar Expertise / other single-pick radio sections — for any
 		// accordion still flagged ⚠️ Required that contains an unchecked
 		// radio group but no "Selected: N/M" counter, pick the first

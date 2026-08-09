@@ -691,6 +691,19 @@ export interface FeatureCheck {
 	 * handler so a feature that's not even present fails fast.
 	 */
 	effects?: EffectCheck[];
+	/**
+	 * Active-state ids that must be ON before this entry's TOGGLE effects can
+	 * be probed, for toggles declaring `requiresStates` in `ACTIVE_STATE_TYPES`
+	 * (Chained Fury's `manifestChains` needs `rage`; Awakened Astral Self needs
+	 * `astralBody`). Such a toggle refuses to activate while its prerequisite is
+	 * off — `activateState` returns null and `getActivatableFeatures()` omits the
+	 * row entirely — so without this the probe reports a false "could not
+	 * activate".
+	 *
+	 * Turned on BEFORE the before-snapshot so the diff isolates THIS toggle's
+	 * contribution rather than the prerequisite's, and turned off afterwards.
+	 */
+	requiresStates?: string[];
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -2283,6 +2296,36 @@ const _describeName = (n: string | RegExp): string =>
 	n instanceof RegExp ? n.toString() : `"${n}"`;
 
 /**
+ * Turn on `stateIds` that aren't already running and re-render the sheet.
+ *
+ * `getToggleableFeatureNames()` / `activateFeature()` read the RENDERED
+ * `.charsheet__activatable-row` list, so a programmatic `activateState()` is
+ * invisible to them until `_renderCharacter()` runs. Returns only the ids this
+ * call actually turned on, so the caller can unwind exactly what it changed.
+ */
+async function _activateStatesAndRerender (charSheet: CharacterSheetPage, stateIds: string[]): Promise<string[]> {
+	if (!stateIds?.length) return [];
+	const activated = await charSheet.page.evaluate((ids: string[]) => {
+		const st: any = (globalThis as any).charSheet?._state;
+		const done = ids.filter(id => (st?.isStateTypeActive?.(id) ? false : st?.activateState?.(id) != null));
+		if (done.length) (globalThis as any).charSheet?._renderCharacter?.();
+		return done;
+	}, stateIds);
+	if (activated.length) await charSheet.page.waitForTimeout(250);
+	return activated;
+}
+
+async function _deactivateStatesAndRerender (charSheet: CharacterSheetPage, stateIds: string[]): Promise<void> {
+	if (!stateIds?.length) return;
+	await charSheet.page.evaluate((ids: string[]) => {
+		const st: any = (globalThis as any).charSheet?._state;
+		[...ids].reverse().forEach(id => st?.deactivateState?.(id));
+		(globalThis as any).charSheet?._renderCharacter?.();
+	}, stateIds);
+	await charSheet.page.waitForTimeout(250);
+}
+
+/**
  * Assert every `FeatureCheck` whose `level <= currentLevel` is wired
  * correctly on the sheet. Collects per-entry errors and surfaces a
  * single grouped failure so tests don't bail on the first miss.
@@ -2306,6 +2349,26 @@ export async function assertFeaturesMatrix (
 
 	const errors: string[] = [];
 
+	// A toggle declaring `requiresStates` is deliberately HIDDEN by
+	// `getActivatableFeatures()` until its prerequisite is running (see
+	// CS-BUG-103 — the row must not appear, or clicking Use silently burns a
+	// use and activates nothing). So the plain `toggleable` list above cannot
+	// see it. Take a second reading with every declared prerequisite active,
+	// and use that one for the entries which declare it.
+	const gatedPrereqs = [...new Set(
+		matrix
+			.filter(fc => !fc.skip && fc.level <= currentLevel && (fc.untilLevel == null || currentLevel <= fc.untilLevel))
+			.flatMap(fc => fc.requiresStates ?? []),
+	)];
+	let gatedToggleable: string[] = toggleable;
+	let gatedFeatures: string[] = allFeatures;
+	if (gatedPrereqs.length) {
+		const activated = await _activateStatesAndRerender(charSheet, gatedPrereqs);
+		gatedToggleable = await charSheet.getToggleableFeatureNames().catch(() => toggleable);
+		gatedFeatures = await charSheet.getActivatableFeatureNames().catch(() => allFeatures);
+		await _deactivateStatesAndRerender(charSheet, activated);
+	}
+
 	for (const fc of matrix) {
 		if (fc.level > currentLevel) continue;
 		if (fc.untilLevel != null && currentLevel > fc.untilLevel) continue;
@@ -2313,12 +2376,14 @@ export async function assertFeaturesMatrix (
 
 		const re = fc.name instanceof RegExp ? fc.name : new RegExp(fc.name, "i");
 		const label = `L${fc.level} ${_describeName(fc.name)} (${fc.kind})`;
+		const visibleFeatures = fc.requiresStates?.length ? gatedFeatures : allFeatures;
+		const visibleToggleable = fc.requiresStates?.length ? gatedToggleable : toggleable;
 
 		try {
 			switch (fc.kind) {
 				case "passive": {
-					if (!allFeatures.some(f => re.test(f))) {
-						throw new Error(`feature not present in feature list. seen=${allFeatures.slice(0, 25).join(", ")}…`);
+					if (!visibleFeatures.some(f => re.test(f))) {
+						throw new Error(`feature not present in feature list. seen=${visibleFeatures.slice(0, 25).join(", ")}…`);
 					}
 					break;
 				}
@@ -2339,13 +2404,21 @@ export async function assertFeaturesMatrix (
 				}
 
 				case "toggle": {
-					if (!allFeatures.some(f => re.test(f))) {
-						throw new Error(`feature not present in feature list. seen=${allFeatures.slice(0, 25).join(", ")}…`);
+					if (!visibleFeatures.some(f => re.test(f))) {
+						throw new Error(`feature not present in feature list. seen=${visibleFeatures.slice(0, 25).join(", ")}…`);
 					}
-					if (!toggleable.some(f => re.test(f))) {
-						throw new Error(`feature has no toggle button (expected toggleable). toggleable=${toggleable.slice(0, 15).join(", ")}…`);
+					if (!visibleToggleable.some(f => re.test(f))) {
+						throw new Error(`feature has no toggle button (expected toggleable)${fc.requiresStates?.length ? ` even with prerequisite state(s) ${fc.requiresStates.join(", ")} active` : ""}. toggleable=${visibleToggleable.slice(0, 15).join(", ")}…`);
 					}
 					const want = fc.toggleDelta ?? "any";
+					// Same gate as the visibility check above: the toggle cannot be
+					// driven at all while its prerequisite state is off.
+					const togglePrereqs = fc.requiresStates ?? [];
+					const activatedForToggle = togglePrereqs.length
+						? await _activateStatesAndRerender(charSheet, togglePrereqs)
+						: [];
+					const unwindTogglePrereqs = () => _deactivateStatesAndRerender(charSheet, activatedForToggle);
+					try {
 					if (want !== "none") {
 						const delta = await probeToggleDelta(charSheet, re);
 						if (!delta) throw new Error(`probeToggleDelta returned null (toggle vanished)`);
@@ -2363,9 +2436,10 @@ export async function assertFeaturesMatrix (
 						}
 					} else {
 						// just confirm it activates without error
-						await charSheet.activateFeature(allFeatures.find(f => re.test(f))!);
-						await charSheet.deactivateFeature(allFeatures.find(f => re.test(f))!);
+						await charSheet.activateFeature(visibleFeatures.find(f => re.test(f))!);
+						await charSheet.deactivateFeature(visibleFeatures.find(f => re.test(f))!);
 					}
+					} finally { await unwindTogglePrereqs(); }
 					break;
 				}
 
@@ -2620,10 +2694,34 @@ export async function assertFeaturesMatrix (
 				}
 
 				if (toggleEffects.length) {
-					const matched = allFeatures.find(f => re.test(f));
+					const matched = visibleFeatures.find(f => re.test(f));
 					if (!matched) {
 						errors.push(`${label} toggle-effects skipped: no matching feature on sheet`);
 					} else {
+						// Prerequisite active states (see FeatureCheck.requiresStates).
+						// Applied before the before-snapshot so the measured delta belongs
+						// to THIS toggle, not to its prerequisite.
+						const prereqs = fc.requiresStates ?? [];
+						let prereqsOk = true;
+						for (const stateId of prereqs) {
+							const ok = await charSheet.page.evaluate((id) => {
+								const st: any = (globalThis as any).charSheet?._state;
+								if (st?.isStateTypeActive?.(id)) return true;
+								const res = st?.activateState?.(id) != null;
+								// The toggle rows are DOM-rendered; a programmatic
+								// activation is invisible until the sheet re-renders.
+								if (res) (globalThis as any).charSheet?._renderCharacter?.();
+								return res;
+							}, stateId);
+							if (!ok) {
+								errors.push(`${label} toggle-effects skipped: prerequisite state "${stateId}" could not be activated`);
+								prereqsOk = false;
+								break;
+							}
+						}
+						if (!prereqsOk) {
+							// fall through to the shared cleanup below
+						} else {
 						const before = await charSheet.snapshotEffectiveStats();
 						const beforeRes = await charSheet.getResistances();
 						const beforeImm = await charSheet.getImmunities();
@@ -2682,6 +2780,14 @@ export async function assertFeaturesMatrix (
 								}
 							}
 							try { await charSheet.deactivateFeature(matched); } catch (_) { /* swallow */ }
+						}
+						}
+						// Always unwind prerequisites, in reverse, so a later matrix entry
+						// isn't measured against a lingering Rage.
+						for (const stateId of [...prereqs].reverse()) {
+							await charSheet.page.evaluate((id) => {
+								(globalThis as any).charSheet?._state?.deactivateState?.(id);
+							}, stateId).catch(() => { /* swallow */ });
 						}
 					}
 				}
