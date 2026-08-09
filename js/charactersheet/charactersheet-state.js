@@ -22512,9 +22512,15 @@ class CharacterSheetState {
 								calculations.rightOnTimeBonus = wisMod;
 
 								// Channel Divinity: Temporal Manipulation (level 3)
-								// DC = 8 + proficiency bonus + WIS modifier, uses = Channel Divinity uses
+								// A REACTION that grants advantage or imposes disadvantage on
+								// another creature's d20 roll within 60 ft, spending one use of
+								// Channel Divinity. It forces NO saving throw, so it has no DC —
+								// an earlier `temporalManipulationDc` (8 + PB + WIS) was invented
+								// data that nothing read. The mechanical implementation is the
+								// generic "Channel Divinity: <Option>" convention in
+								// detectActivatableFeature, which surfaces it as a reaction
+								// ability bound to the shared Channel Divinity pool.
 								calculations.hasTemporalManipulation = true;
-								calculations.temporalManipulationDc = 8 + profBonus + wisMod - exhaustionPenalty;
 
 								// Eyes of the Future Past (level 6): WIS mod uses
 								if (level >= 6) {
@@ -52254,6 +52260,10 @@ class CharacterSheetState {
 					activationAction: activationAction || toggleAnalysis.activationAction || "bonus",
 					matchedBy: "analysis",
 					effects: parsedEffects,
+					// Self-imposed drawbacks ("While using this ability, you are under the
+					// blinded condition") are part of the toggle's mechanics, not flavour —
+					// carry them so activation applies (and deactivation clears) them.
+					addsConditions: CharacterSheetState.parseSelfImposedConditions(rawText),
 					duration: toggleAnalysis.duration,
 					endConditions: toggleAnalysis.endConditions,
 					confidence: toggleAnalysis.confidence,
@@ -54208,6 +54218,7 @@ class CharacterSheetState {
 			if (options.sourceFeatureId) existing.sourceFeatureId = options.sourceFeatureId;
 			if (options.icon) existing.icon = options.icon;
 			if (options.customEffects) existing.customEffects = options.customEffects;
+			if (options.addsConditions?.length) existing.addsConditions = options.addsConditions;
 			if (options.beastData !== undefined) existing.beastData = options.beastData;
 			if (options.zodiacForm !== undefined) existing.zodiacForm = options.zodiacForm;
 			if (options.placement !== undefined) existing.placement = options.placement;
@@ -54253,9 +54264,18 @@ class CharacterSheetState {
 			placement: options.placement || null,
 			weaponId: options.weaponId || null,
 			weaponName: options.weaponName || null,
+			// Self-imposed drawback conditions this state applies while active. Curated
+			// states declare them on their ACTIVE_STATE_TYPES entry; CUSTOM (generically
+			// detected) toggles carry them here instead, parsed from the feature text.
+			addsConditions: options.addsConditions?.length ? options.addsConditions : null,
 		};
 
 		this._data.activeStates.push(state);
+		// Apply any self-imposed drawback conditions the state declares. `activateState`
+		// does this for curated types; the CUSTOM path reaches the sheet through
+		// addActiveState alone, so without this a generically-detected toggle's drawback
+		// (e.g. Eyes of the Future Past → Blinded) would never be applied.
+		this._applyStateAddedConditions(state, stateType);
 		return state.id;
 	}
 
@@ -54446,6 +54466,60 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Parse conditions a feature imposes on ITS OWN USER for as long as it is active.
+	 *
+	 * Sustained toggles frequently carry a drawback ("While using this ability, you are
+	 * under the {@condition blinded} condition …" — Time Domain's Eyes of the Future Past;
+	 * "you are {@condition restrained} while …"). Those drawbacks were previously invisible
+	 * to the sheet: `addsConditions` only existed on curated ACTIVE_STATE_TYPES entries, so
+	 * every generically-detected (custom) toggle silently dropped them.
+	 *
+	 * Deliberately conservative — it only matches text that says the condition applies to
+	 * YOU (`you are` / `you have` / `you become` / `you suffer`), never to a target
+	 * ("the target is blinded"), and only inside a duration clause, so an instantaneous
+	 * effect on someone else is never mistaken for a self-imposed drawback.
+	 * @param {string} text - The feature's description text (may contain `{@condition …}` tags).
+	 * @returns {string[]} Lower-case condition names, de-duplicated (empty when none).
+	 */
+	static parseSelfImposedConditions (text) {
+		if (!text || typeof text !== "string") return [];
+		// Normalize `{@condition blinded|XPHB|blinded}` → `blinded` so one pattern set
+		// covers tagged and untagged prose alike.
+		const plain = text
+			.replace(/\{@condition\s+([^}|]+)(?:\|[^}]*)?\}/gi, "$1")
+			.replace(/<[^>]*>/g, " ")
+			.replace(/\s+/g, " ");
+
+		const known = [
+			"blinded", "charmed", "deafened", "frightened", "grappled", "incapacitated",
+			"invisible", "paralyzed", "petrified", "poisoned", "prone", "restrained",
+			"stunned", "unconscious", "exhaustion",
+		];
+		const alternation = known.join("|");
+
+		// "you are/have/become/suffer [from] the <cond> condition" and the bare
+		// "you are <cond>" form. `(?:under|subjected to)` covers the common
+		// "you are under the blinded condition" phrasing.
+		const patterns = [
+			new RegExp(`\\byou\\s+(?:are|become|have|suffer(?:\\s+from)?|count\\s+as)\\s+(?:being\\s+)?(?:under|subjected\\s+to)?\\s*(?:the\\s+)?(${alternation})\\b`, "gi"),
+			new RegExp(`\\byou\\s+(?:gain|take)\\s+(?:a\\s+|one\\s+)?level\\s+of\\s+(exhaustion)\\b`, "gi"),
+		];
+
+		/** @type {Set<string>} */
+		const out = new Set();
+		for (const re of patterns) {
+			let m;
+			while ((m = re.exec(plain)) !== null) {
+				// Reject a negated clause ("you are no longer blinded", "you aren't blinded").
+				const before = plain.slice(Math.max(0, m.index - 24), m.index + m[0].length);
+				if (/\b(?:no longer|not|aren'?t|isn'?t|never|immune to|cannot be|can'?t be)\b/i.test(before)) continue;
+				out.add(m[1].toLowerCase());
+			}
+		}
+		return [...out];
+	}
+
+	/**
 	 * Apply any conditions an active state grants on activation (e.g. Shell
 	 * Defense → Prone). Only conditions this activation ACTUALLY added (i.e.
 	 * `addCondition` returned true — the condition wasn't already present) are
@@ -54458,9 +54532,21 @@ class CharacterSheetState {
 	 * @private
 	 */
 	_applyStateAddedConditions (stateInstance, stateType) {
-		if (!stateInstance || !Array.isArray(stateType?.addsConditions) || !stateType.addsConditions.length) return;
+		if (!stateInstance) return;
+		// GENERIC (self-imposed drawbacks): a CUSTOM state — one detected by the generic
+		// toggle analysis rather than curated in ACTIVE_STATE_TYPES — has no stateType and
+		// therefore could never carry `addsConditions`. Homebrew toggles routinely impose a
+		// condition on their OWN user for the duration ("While using this ability, you are
+		// under the blinded condition" — Time Domain's Eyes of the Future Past). Let the
+		// state instance carry its own `addsConditions` (parsed from the feature text by
+		// `parseSelfImposedConditions`) so every such toggle applies — and, via
+		// `_managedConditions`, cleanly removes — its drawback with no per-feature wiring.
+		const declared = (Array.isArray(stateType?.addsConditions) && stateType.addsConditions.length)
+			? stateType.addsConditions
+			: stateInstance.addsConditions;
+		if (!Array.isArray(declared) || !declared.length) return;
 		if (!Array.isArray(stateInstance._managedConditions)) stateInstance._managedConditions = [];
-		for (const cond of stateType.addsConditions) {
+		for (const cond of declared) {
 			const condObj = this._normalizeCondition(cond);
 			// Don't double-track a condition this state already owns (re-activation).
 			const alreadyManaged = stateInstance._managedConditions.some(c =>
@@ -54499,8 +54585,11 @@ class CharacterSheetState {
 		// the state TYPE declares it adds (resolved to their active variant by
 		// removeCondition's normalization, so "Invisible" → the TGTT variant when present).
 		const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[stateInstance.stateTypeId];
-		if (!Array.isArray(stateType?.addsConditions) || !stateType.addsConditions.length) return;
-		for (const cond of stateType.addsConditions) {
+		const declared = (Array.isArray(stateType?.addsConditions) && stateType.addsConditions.length)
+			? stateType.addsConditions
+			: stateInstance.addsConditions;
+		if (!Array.isArray(declared) || !declared.length) return;
+		for (const cond of declared) {
 			this.removeCondition(cond);
 		}
 	}

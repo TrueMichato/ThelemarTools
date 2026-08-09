@@ -1006,6 +1006,23 @@ clean under `RUN_MATRIX=1`:
    guessed spells with the actual TGTT subclass spell list per
    spec.
 
+   > **STALE as of the Time Domain audit — this item is now WRONG in
+   > both directions.** Re-measured directly against
+   > `homebrew/TravelersGuidetoThelemar.json`: Time Domain's
+   > `additionalSpells.prepared` is keyed `3/5/7/9` and contains
+   > `gift of alacrity|egw`, `feather fall`, `fortune's favor|egw`,
+   > `immovable object|egw` / `slow`, `haste` / `death ward`,
+   > `freedom of movement` / `temporal shunt|egw`, `hold monster`.
+   > `getSubclassAlwaysPreparedSpells` returns exactly that list, tier
+   > for tier — so `Feather Fall` was RIGHT, and the sheet does **not**
+   > grant `Accelerate/Decelerate` or `Animate Claw` as domain spells.
+   > The spec is now pinned to the literal book list
+   > (`test/e2e/specs/tgtt-time-domain-cleric.spec.ts`), and the "we
+   > can't assert specific names here" comments that this note had
+   > propagated into that spec have been removed. The underlying
+   > lesson still stands — just verify against the book JSON rather
+   > than against this paragraph.
+
 3. **Real product bugs** — any `kind: "toggle"` entry that fails
    `toggleDelta: "ac"` / `"any"` after the regex matches a real
    feature is a real bug; file CS-BUG-014+ following the Phase 5
@@ -4091,9 +4108,21 @@ $ for k in <key>; do echo "$k -> $(grep -rn "$k" js/ --include=*.js | wc -l)"; d
 
 **Cleric / Time Domain** (`charactersheet-state.js`)
 `hasChronologicalInterference` + `chronologicalInterferenceUses` :21682-83 ·
-`hasTemporalManipulation` + `temporalManipulationDc` :21691-92 ·
+`hasTemporalManipulation` + ~~`temporalManipulationDc`~~ :21691-92 ·
 `hasEyesOfFuturePast` + `eyesOfFuturePastUses` :21696-97 ·
 `hasTemporalMastery` :21708
+
+> **Update — `temporalManipulationDc` is REMOVED (Time Domain audit).**
+> It was worse than write-only: it was *invented data*. Channel Divinity:
+> Temporal Manipulation imposes **no saving throw** — it grants advantage or
+> imposes disadvantage on another creature's d20 as a reaction — so a DC for
+> it never had a referent. It has been deleted rather than wired up, and the
+> two E2E/Jest probes that asserted
+> `temporalManipulationDc === spellSaveDc` have been replaced with probes on
+> the feature's real contract (reaction; draws 1 use from the shared Channel
+> Divinity pool). Removing a key is the correct fix when the key describes a
+> mechanic that does not exist; wiring it would have shipped a number that
+> renders convincingly and means nothing.
 
 Controls that prove the detection is not merely counting rare names:
 `potentSpellcastingBonus` 15 refs, `hasPotentSpellcasting` 12,
@@ -4107,6 +4136,20 @@ and Eyes of the Future Past **do** surface as working pools with correct
 maxima (measured: 2/3/4/6/6 and `max(1, wisMod)`), because the generic
 feature-uses parser reads the homebrew entry, never the calc key. So for
 those the calc key is **redundant dead data** beside a working feature.
+
+> **Re-measured and CONFIRMED (Time Domain audit).** Driving a real
+> `CharacterSheetState` at L3/5/8/17 with the actual homebrew features
+> attached reproduces the pools exactly: Chronological Interference
+> 2/3/3/6 tracking proficiency bonus, Eyes of the Future Past
+> `max(1, wisMod)`. Both bind to their pool through the
+> `getActivatableFeatures()` fallback
+> (`resources.find(r => r.featureId === feature.id || r.name === feature.name)`)
+> rather than through a `resourceName` on the detection result — which is
+> why they work despite the detector emitting none. Beware the measurement
+> trap that briefly made this look false: `uses` is **not** present on the
+> object returned by `CharacterSheetClassUtils.buildFeatureStateObject` — it
+> is minted later by `_remintFeatureUsesFromText`, so reading `uses` before
+> `addFeature()` reports `undefined` and looks like an inert pool.
 
 For the four Wizard keys no such alternative surface was found; Spell
 Mastery ("cast 1st/2nd level at will"), Signature Spells and Ritual Adept
@@ -7201,3 +7244,80 @@ outcome for users and the worse one for anyone who assumed the feature worked.
 **Bound:** driven through the state API with the two statements copied verbatim
 from `:2446` and `:2460-2461`, plus a static trace of the dispatch chain
 `:921 → :1074 → :1922 → :2003 → :2439`. The DOM click itself was not performed.
+
+---
+
+## CS-BUG-115 — a feature caught by BOTH the initiative text-parse and a curated calc effect mints two modifier rows; the totals only stay correct because the two numeric chokepoints disagree
+
+**Severity:** low today, latent-high. **Status:** open, measured, pinned by a test.
+
+Right on Time (Cleric / Time Domain, TGTT) — "you add your Wisdom modifier to
+your initiative" — is captured twice:
+
+1. the **generic text-parse** at `charactersheet-state.js:1230`
+   (`/add\s*(?:your\s*)?(\w+)\s*modifier\s*to\s*(?:your\s*)?initiative/gi`,
+   `abilityMod: true`), which mints a row carrying `abilityMod: "wisdom"` and
+   `value: 0`; and
+2. the **curated calc effect** at `:26807`, which mints a second row carrying a
+   resolved numeric `value`.
+
+The `alreadyProcessed("Right on Time")` guard at `:26807` does not suppress the
+second row, because the text-parsed one is added through a different path.
+
+### Measurement
+
+Cleric 3 / Time Domain / WIS 16 / DEX 10, features attached from the real
+homebrew, `applyClassFeatureEffects()` run:
+
+```
+getNamedModifiers().filter(type === "initiative"):
+  {name: "Right on Time", value: 0, abilityMod: "wisdom",  note: "From Right on Time"}
+  {name: "Right on Time", value: 3, sourceType: "classFeature", note: "From Right on Time"}
+
+getInitiative()                      -> 3   (correct)
+aggregateModifiers("initiative").bonus -> 3   (correct)
+```
+
+So **no arithmetic is wrong today**. The user-visible defect is cosmetic: two
+identically-named rows in the modifiers list, one of which renders `+0`.
+
+### Why it is latent-high rather than cosmetic
+
+The total is correct only by accident of an inconsistency between the two
+numeric chokepoints:
+
+| helper | feeds | reads `abilityMod`? |
+|---|---|---|
+| `_getNamedModifierEffectiveValue` (`:47112`) | cached `customModifiers` totals → `getInitiative()` | **no** |
+| `_resolveNamedModifierNumericValue` (`:47730`) | `aggregateModifiers`, itemizers | **yes** (`:47756`) |
+
+The text-parsed row resolves to 0 through the first helper, which is the one
+that feeds the initiative total. Teach `_getNamedModifierEffectiveValue` to read
+`abilityMod` — an obvious-looking consistency fix — and initiative silently
+becomes **+6**. Anyone making the two helpers agree must delete one of these
+rows in the same change.
+
+### Blast radius
+
+Not Time-Domain-specific. Any feature whose text matches that pattern *and* has
+a curated initiative effect is exposed. `_getFeatureInitiativeBonuses` (`:12988`)
+covers Temporal Awareness (Chronurgy), Dread Ambusher (Gloom Stalker) and
+Rakish Audacity (Swashbuckler) through a different route; their prose should be
+checked against the `:1230` pattern before that route is unified.
+
+### Pin
+
+`test/jest/charactersheet/CharacterSheetTGTT.test.js` →
+*"does not double-count initiative despite the duplicate modifier row
+(CS-BUG-115)"* asserts both rows exist, exactly one is `0`, and
+`getInitiative()` is 3 and not 6. It fails loudly if a future fix doubles the
+value instead of removing the duplicate.
+
+### Not fixed here because
+
+The cheap fixes are both wrong. Suppressing the curated row breaks initiative
+outright (the surviving row contributes 0 to the total). Making the helpers
+agree changes the value of *every* named modifier carrying `abilityMod`
+(skill bonuses, temp HP, …) that currently contributes 0 to the cached totals —
+a repo-wide behavioural change that needs its own measurement pass, not a
+drive-by in a subclass task.

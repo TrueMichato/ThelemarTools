@@ -10818,6 +10818,7 @@ class CharacterSheetPage {
 				sourceFeatureId: feature.id,
 				description: feature.description,
 				customEffects: parsedEffects?.length > 0 ? parsedEffects : null,
+				addsConditions: activationInfo?.addsConditions || null,
 			});
 		} else {
 			// For known state types, pass feature info but only use parsed effects for generic types
