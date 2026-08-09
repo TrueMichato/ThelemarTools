@@ -9630,6 +9630,37 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					expect(state.getJesterAct("Ridiculous Ruse")).toBeNull();
 				});
 
+				it("should derive Jester's Privilege's rolled save DC from its own prose", () => {
+					// "Wisdom saving throw (DC equal to your Performance check result)" —
+					// the DC is a CHECK RESULT, not the static 8 + prof + mod the sheet
+					// computes everywhere else, so it can only resolve at activation time.
+					// Derived generically from prose, so any feature phrased this way
+					// inherits the behaviour without a name switch.
+					const text = "when you use your bardic inspiration, you can make a performance check. "
+						+ "creatures within 60 feet of you that can hear you must make a wisdom saving throw "
+						+ "(dc equal to your performance check result).";
+					const spec = CharacterSheetState._buildRolledSaveDcInfo(text);
+
+					expect(spec).not.toBeNull();
+					expect(spec.skill).toBe("performance");
+					expect(spec.ability).toBe("cha"); // Performance is a Charisma skill
+					expect(spec.saveAbility).toBe("wis");
+					expect(spec.range).toBe(60);
+				});
+
+				it("should NOT invent a rolled save DC for a static-DC feature", () => {
+					// Negative control: an ordinary "DC 8 + your proficiency bonus" feature
+					// must not acquire the descriptor, or every save would prompt for a roll.
+					expect(CharacterSheetState._buildRolledSaveDcInfo(
+						"each creature must make a dexterity saving throw against your spell save dc.",
+					)).toBeNull();
+					// A check-result DC with no saving throw named is also not actionable.
+					expect(CharacterSheetState._buildRolledSaveDcInfo(
+						"the target is fooled until it makes a dc equal to your performance check.",
+					)).toBeNull();
+					expect(CharacterSheetState._buildRolledSaveDcInfo("")).toBeNull();
+				});
+
 				it("should track spells granted by acts", () => {
 					state.addClass({
 						name: "Bard",

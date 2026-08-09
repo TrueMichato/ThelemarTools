@@ -43065,6 +43065,17 @@ class CharacterSheetState {
 	 */
 	getJesterActsKnown () {
 		const bardLevel = this.getClassLevel("Bard");
+		if (!bardLevel) return 0;
+		// Prefer the subclass's own "Jester's Acts Known" table column so
+		// rebalancing the homebrew moves the sheet with it. `addClass`
+		// stores lean {name, source} refs, so the ladder below stays as
+		// the fallback and MUST keep matching the shipped table
+		// (0,0,3,3,3,4,4,4,4,4,4,4,4,5,5,5,5,5,5,5).
+		const bard = (this.getClasses() || []).find(c => (c?.name || "").toLowerCase() === "bard");
+		const fromTable = CharacterSheetClassUtils.getSubclassTableNumber(
+			bard?.subclass, bardLevel, /jester'?s? acts? known/i, null,
+		);
+		if (fromTable != null) return fromTable;
 		if (bardLevel >= 14) return 5;
 		if (bardLevel >= 6) return 4;
 		return 3;
@@ -51775,6 +51786,41 @@ class CharacterSheetState {
 	 * @param {string} text lower-cased, tag-stripped prose
 	 * @returns {object|null}
 	 */
+	/**
+	 * (Generic) Build a `rolledSaveDc` descriptor from prose of the shape
+	 * "…must make a <Ability> saving throw (DC equal to your <Skill> check result)".
+	 *
+	 * Such a feature's DC is NOT the static 8 + proficiency + modifier the sheet
+	 * computes everywhere else — it is whatever the actor rolls at the moment of
+	 * use, so it can only be resolved at activation time. Returning a descriptor
+	 * (rather than a number) keeps that fact explicit instead of silently
+	 * substituting a static DC the feature never had.
+	 *
+	 * @param {string} text - Lower-cased, tag-stripped feature text.
+	 * @returns {object|null}
+	 */
+	static _buildRolledSaveDcInfo (text) {
+		if (!text) return null;
+		const dcMatch = text.match(/dc equal to (?:your|the) ([a-z' ]+?) check/i);
+		if (!dcMatch) return null;
+		const skill = dcMatch[1].trim().toLowerCase();
+		const skillAbility = (typeof Parser !== "undefined" && Parser.SKILL_TO_ATB_ABV)
+			? Parser.SKILL_TO_ATB_ABV[skill]
+			: null;
+		if (!skillAbility) return null;
+		const saveMatch = text.match(/\b(strength|dexterity|constitution|intelligence|wisdom|charisma)\s+saving throw/i);
+		if (!saveMatch) return null;
+		const saveAbility = saveMatch[1].slice(0, 3).toLowerCase();
+		const rangeMatch = text.match(/within (\d+)\s*(?:feet|ft)/i);
+		return {
+			skill,
+			skillLabel: skill.replace(/\b\w/g, c => c.toUpperCase()),
+			ability: skillAbility,
+			saveAbility,
+			range: rangeMatch ? Number(rangeMatch[1]) : null,
+		};
+	}
+
 	static _buildJesterActActivationInfo (feature, rawText, text) {
 		if (!text) return null;
 
@@ -51901,7 +51947,6 @@ class CharacterSheetState {
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 		const psionic = this._detectPsionicActivation(feature, rawText, text);
 		if (psionic) return psionic;
-
 		// ===== JESTER'S ACTS (TGTT Bard — College of Jesters, optional feature type "JA") =====
 		// Every act is a discrete, in-play thing the player DOES, so each one gets its own
 		// row + Use button in the generic "Available to Activate" list. Detection is driven
@@ -54052,6 +54097,18 @@ class CharacterSheetState {
 			// compute it, so fill it in here, where we have the character.
 			if (activationInfo.isJesterAct && activationInfo.saveAbility) {
 				activationInfo.actDc = this.getJesterActDc(feature.name);
+			}
+
+			// (Generic) A feature whose save DC is a check RESULT ("DC equal to your
+			// Performance check result") can only resolve its DC at activation time.
+			// `detectActivatableFeature` has many return points, so attach the
+			// descriptor at this single post-processing seam instead of threading it
+			// through all of them. Consumed by `_pResolveRolledSaveDc`.
+			if (!activationInfo.rolledSaveDc) {
+				const rawText = feature.description || CharacterSheetState._featureTextFromEntries(feature) || "";
+				const flat = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
+				const rolled = CharacterSheetState._buildRolledSaveDcInfo(flat);
+				if (rolled) activationInfo.rolledSaveDc = rolled;
 			}
 
 			activatables.push({

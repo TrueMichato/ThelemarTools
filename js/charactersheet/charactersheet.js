@@ -10635,6 +10635,28 @@ class CharacterSheetPage {
 		return true;
 	}
 
+	/**
+	 * (Generic) Resolve an `activationInfo.rolledSaveDc` descriptor: roll the
+	 * check whose RESULT becomes the save DC for this feature, and report it.
+	 * Returns `true` when the caller should proceed with activation, `false`
+	 * when the player cancelled the roll (so nothing is spent).
+	 * @param {object} feature
+	 * @param {{skill:string, skillLabel:string, ability:string, saveAbility:string, range?:number}} spec
+	 * @returns {Promise<boolean>}
+	 * @private
+	 */
+	async _pResolveRolledSaveDc (feature, spec) {
+		const result = await this._rollSkillCheck(spec.skill, spec.skillLabel, null, spec.ability);
+		if (!result) return false;
+		const saveFull = typeof Parser !== "undefined" ? Parser.attAbvToFull(spec.saveAbility) : String(spec.saveAbility).toUpperCase();
+		const rangeTxt = spec.range ? ` within ${spec.range} ft.` : "";
+		JqueryUtil.doToast({
+			type: "info",
+			content: `${feature?.name || "Ability"}: creatures${rangeTxt} must make a DC ${result.total} ${saveFull} saving throw (your ${spec.skillLabel} check result).`,
+		});
+		return true;
+	}
+
 	async _activateFeatureState (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
 		let variableSpend = null;
 		if (stateType?.variablePointSpend) {
@@ -10834,6 +10856,18 @@ class CharacterSheetPage {
 		if (activationInfo?.contestedCheck) {
 			const won = await this._pResolveContestedCheck(feature, activationInfo.contestedCheck);
 			if (!won) return;
+		}
+
+		// ===== (Generic) Activation-time ROLLED SAVE DC =====
+		// A few abilities set their save DC from a check the actor rolls at the
+		// moment of use rather than the static 8 + prof + mod (e.g. the Jester's
+		// Privilege: "Wisdom saving throw, DC equal to your Performance check
+		// result"). Rolled BEFORE any resource is deducted, so cancelling the
+		// roll costs nothing. The sheet reports the resulting DC rather than
+		// silently applying a static one that the feature never had.
+		if (activationInfo?.rolledSaveDc) {
+			const proceed = await this._pResolveRolledSaveDc(feature, activationInfo.rolledSaveDc);
+			if (!proceed) return;
 		}
 
 		// Deduct resource cost if applicable
