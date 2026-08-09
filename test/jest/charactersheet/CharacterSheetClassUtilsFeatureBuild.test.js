@@ -141,8 +141,13 @@ describe("CharacterSheetClassUtils optional feature parsing", () => {
 });
 
 describe("getFeatureOptionsForLevel deduplication", () => {
-	test("should return pure-optionalfeature groups from raw output", () => {
-		// Simulate a "Metamagic Options" class feature with refOptionalfeature entries
+	test("should SUPPRESS pure-optionalfeature groups at source", () => {
+		// A "… Options" feature whose options are all refOptionalfeature documents a shared
+		// pool; the paired `optionalfeatureProgression` is what grants the picks and knows
+		// the per-level count. Consumers used to strip these groups individually (see the
+		// two tests below), but not all of them did — the Builder and Level-Up paths still
+		// raised a second prompt, over-granting one extra pick (a level-3 TGTT Jester Bard
+		// learned 4 acts instead of 3). The suppression now lives in the single producer.
 		const features = [{
 			name: "Metamagic Options",
 			source: "XPHB",
@@ -161,8 +166,7 @@ describe("getFeatureOptionsForLevel deduplication", () => {
 		}];
 
 		const raw = CharacterSheetClassUtils.getFeatureOptionsForLevel(features, 2, []);
-		expect(raw.length).toBe(1);
-		expect(raw[0].options.every(o => o.type === "optionalfeature")).toBe(true);
+		expect(raw).toEqual([]);
 	});
 
 	test("quickbuild-style filter removes pure-optionalfeature groups", () => {

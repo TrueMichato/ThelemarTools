@@ -1,7 +1,7 @@
 /**
  * TGTT Feature Pools — Auto-generated. Do not edit by hand.
  *
- * Source:        homebrew/TravelersGuidetoThelemar.json (sha256:0d24f1e1636c)
+ * Source:        homebrew/TravelersGuidetoThelemar.json (sha256:5a43f3c74571)
  * Generator:     scripts/genTgttPools.mjs
  * Regenerate:    node scripts/genTgttPools.mjs
  *
@@ -1186,13 +1186,20 @@ export function buildSpecialtyChecks (className: string, levelMap?: Record<numbe
  * `/^Name$/i` literals, so we strip the anchors and case flag.
  */
 function readableFirstPick (pool: RegExp[]): string | undefined {
+	return poolNames(pool)[0];
+}
+
+/**
+ * Recover every readable option name from a regex pool, sorted the same
+ * way the auto-picker orders them (lexicographic).
+ */
+function poolNames (pool: RegExp[]): string[] {
 	const names: string[] = [];
 	for (const r of pool) {
 		const m = /^\/\^(.+?)\$\/i?$/.exec(r.toString());
 		if (m) names.push(m[1].replace(/\\(.)/g, "$1"));
 	}
-	if (!names.length) return undefined;
-	return names.sort((a, b) => a.localeCompare(b))[0];
+	return names.sort((a, b) => a.localeCompare(b));
 }
 
 function buildOptionalFeatureChecks (
@@ -1201,10 +1208,24 @@ function buildOptionalFeatureChecks (
 	effectMap: Record<string, EffectCheck[] | undefined> | undefined,
 	progression: Array<{level: number; cum: number}>,
 	levelMap?: Record<number, number>,
+	/**
+	 * Attach `pickedFeatureGrants` for EVERY pool entry that has effects,
+	 * not just the auto-picker's deterministic first choice.
+	 *
+	 * `pickedFeatureGrants` is conditional at runtime — it expands only
+	 * when that pick actually surfaced on the sheet — so this is safe
+	 * regardless of which options the wizard chose, and it is the only
+	 * way to honour the standard's "every pick gets an EffectCheck" rule
+	 * for pools whose picks aren't fully deterministic. Opt-in so pools
+	 * whose effect maps are still existence-only don't start asserting
+	 * mechanics they haven't been audited for.
+	 */
+	attachAllPickGrants = false,
 ): FeatureCheck[] {
 	const firstPickName = readableFirstPick(pool);
-	const subEffects = firstPickName ? effectMap?.[firstPickName] : undefined;
-	const grants = firstPickName ? pickedGrants(firstPickName, subEffects) : [];
+	const grants: EffectCheck[] = attachAllPickGrants
+		? poolNames(pool).flatMap(n => pickedGrants(n, effectMap?.[n]))
+		: (firstPickName ? pickedGrants(firstPickName, effectMap?.[firstPickName]) : []);
 	return progression.map(({level, cum}, idx) => ({
 		level: applyLevelMap(level, levelMap),
 		name: featureName,
@@ -1264,15 +1285,22 @@ export function buildInvocationChecks (
 	);
 }
 
-/** Jester Bard Acts — picks at L3 (subclass arrival) and grow on level-up. */
+/** Jester Bard Acts — picks at L3 (subclass arrival) and grow on level-up.
+ *  Cumulative counts come from the `subclassTableGroups` "Jester's Acts
+ *  Known" column in homebrew/TravelersGuidetoThelemar.json: 3 from L3,
+ *  4 from L6, 5 from L14. */
 export function buildJesterActChecks (
 	progression: Array<{level: number; cum: number}> = [
-		{level: 3, cum: 2}, {level: 6, cum: 3}, {level: 14, cum: 4},
+		{level: 3, cum: 3}, {level: 6, cum: 4}, {level: 14, cum: 5},
 	],
 	levelMap?: Record<number, number>,
 ): FeatureCheck[] {
 	return buildOptionalFeatureChecks(
 		/Jester Acts|Acts/i, TGTT_JESTER_ACTS, TGTT_JESTER_ACT_EFFECTS, progression, levelMap,
+		// Every act carries a real mechanical probe, so grant-check ALL of
+		// them — whichever three the wizard picked get asserted, the rest
+		// no-op. This is what makes the pool free of existence-only rows.
+		true,
 	);
 }
 

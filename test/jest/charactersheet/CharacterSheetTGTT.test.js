@@ -9516,6 +9516,120 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					expect(tumbler.bardicInspirationCost).toBe(0);
 				});
 
+				it("should charge a Bardic Inspiration use for every prose phrasing that spends one", () => {
+					state.addClass({
+						name: "Bard",
+						source: "TGTT",
+						level: 5,
+						subclass: {name: "College of Jesters", shortName: "Jesters", source: "TGTT"},
+					});
+
+					// Both of these say "This act requires the expenditure of one use of
+					// Bardic Inspiration" — a phrasing the cost parser used to miss, leaving
+					// the acts free to use.
+					addJesterAct(state, "Laughing Lunge");
+					addJesterAct(state, "Jester's Agility");
+
+					expect(state.getJesterAct("Laughing Lunge").bardicInspirationCost).toBe(1);
+					expect(state.getJesterAct("Jester's Agility").bardicInspirationCost).toBe(1);
+				});
+
+				it("should NOT charge a second Bardic Inspiration use for acts that ride on one", () => {
+					state.addClass({
+						name: "Bard",
+						source: "TGTT",
+						level: 5,
+						subclass: {name: "College of Jesters", shortName: "Jesters", source: "TGTT"},
+					});
+
+					// "When you use your Bardic Inspiration, you can use this act…" —
+					// Witty Wordplay piggybacks on an inspiration use the bard is already
+					// spending and declares no `consumes`, so it is gated on inspiration
+					// but costs nothing extra.
+					addJesterAct(state, "Witty Wordplay");
+
+					const act = state.getJesterAct("Witty Wordplay");
+					expect(act.usesBardicInspiration).toBe(true);
+					expect(act.bardicInspirationCost).toBe(0);
+				});
+
+				it("should let a structured consumes block override the prose reading", () => {
+					state.addClass({
+						name: "Bard",
+						source: "TGTT",
+						level: 5,
+						subclass: {name: "College of Jesters", shortName: "Jesters", source: "TGTT"},
+					});
+
+					// Fool's Folly reads as a rider ("When you use your Bardic
+					// Inspiration…") but the homebrew declares
+					// `consumes: {name: "Bardic Inspiration"}` with no amount. The
+					// structured field wins, and a missing amount means one use.
+					addJesterAct(state, "Fool's Folly");
+
+					const act = state.getJesterAct("Fool's Folly");
+					expect(act.usesBardicInspiration).toBe(true);
+					expect(act.bardicInspirationCost).toBe(1);
+				});
+
+				it("should derive condition and granted spell from an already-RENDERED description", () => {
+					// The sheet stores a rendered description for features loaded through
+					// the normal path, in which {@condition …} / {@spell …} have become
+					// links. Reading tags alone silently lost every act's condition.
+					state.addClass({
+						name: "Bard",
+						source: "TGTT",
+						level: 5,
+						subclass: {name: "College of Jesters", shortName: "Jesters", source: "TGTT"},
+					});
+
+					const rendered = [
+						["Pantomime", "As an action you mock a creature within 30 feet. It must make a Wisdom saving throw, becoming charmed until the end of its next turn on a failed save."],
+						["Prankster", "As an action you pull a prank on a creature within 30 feet. It must make a Wisdom saving throw, becoming dazed until the end of its next turn on a failed save."],
+						["Jester's Jaunt", "You can use this act to cast the spell mirror image without expending a spell slot. This act requires the expenditure of one use of Bardic Inspiration."],
+					];
+					for (const [name, description] of rendered) {
+						// No `entries` at all — exactly what the rendered path produces.
+						state.addFeature({
+							name,
+							source: "TGTT",
+							featureType: "Optional Feature",
+							optionalFeatureTypes: ["JA"],
+							description,
+						});
+					}
+
+					expect(state.getJesterAct("Pantomime").condition).toBe("charmed");
+					expect(state.getJesterAct("Prankster").condition).toBe("dazed");
+					expect(state.getJesterAct("Jester's Jaunt").grantsSpell).toBe("mirror image");
+				});
+
+				it("should expose one act's mechanics via getJesterAct", () => {
+					state.addClass({
+						name: "Bard",
+						source: "TGTT",
+						level: 5,
+						subclass: {name: "College of Jesters", shortName: "Jesters", source: "TGTT"},
+					});
+					state.setAbilityBase("cha", 16); // +3; base DC = 8 + 3 + 3 = 14
+
+					addJesterAct(state, "Pantomime");
+
+					const act = state.getJesterAct("Pantomime");
+					expect(act.name).toBe("Pantomime");
+					expect(act.timing).toBe("action");
+					expect(act.saveType).toBe("wis");
+					expect(act.dc).toBe(14);
+					expect(act.range).toBe(30);
+					expect(act.condition).toBe("charmed");
+
+					// Same shape as the matching entry of getJesterActs().
+					expect(act).toEqual(state.getJesterActs().find(a => a.name === "Pantomime"));
+
+					// An act the character has not learned is not described at all.
+					expect(state.getJesterAct("Ridiculous Ruse")).toBeNull();
+				});
+
 				it("should track spells granted by acts", () => {
 					state.addClass({
 						name: "Bard",

@@ -43009,28 +43009,45 @@ class CharacterSheetState {
 		const acts = (this._data.features || []).filter(f =>
 			f?.featureType === "Optional Feature" && f?.optionalFeatureTypes?.includes("JA"));
 
-		const baseDc = this.getJesterActBaseDc();
+		return acts.map(raw => this._describeJesterAct(raw));
+	}
 
-		return acts.map(raw => {
-			const a = this._hydrateJesterActProse(raw);
-			const info = CharacterSheetState.detectActivatableFeature(a) || {};
-			return {
-				name: a.name,
-				source: a.source,
-				description: a.description,
-				timing: info.activationAction || null,
-				saveType: info.saveAbility || null,
-				dc: info.saveAbility ? baseDc : null,
-				range: info.range ?? null,
-				duration: info.duration || null,
-				bardicInspirationCost: info.bardicInspirationCost || 0,
-				usesBardicInspiration: !!info.usesBardicInspiration,
-				isToggle: !!info.isToggle,
-				condition: info.condition || null,
-				grantsSpell: info.grantsSpell || null,
-				acBonus: info.acBonusScale === "proficiency" ? this.getProficiencyBonus() : null,
-			};
-		});
+	/**
+	 * The derived mechanics of a SINGLE known act. Same shape as one entry of
+	 * `getJesterActs()`, so the act-detail UI and anything probing one act by name share
+	 * one description of its mechanics.
+	 * @param {string} actName
+	 * @returns {object|null} null when the character does not know that act
+	 */
+	getJesterAct (actName) {
+		const act = this._findJesterAct(actName);
+		return act ? this._describeJesterAct(act) : null;
+	}
+
+	/**
+	 * Derive one act's mechanics from its own rules text.
+	 * @param {object} raw - the act feature as stored on the character
+	 * @returns {object}
+	 */
+	_describeJesterAct (raw) {
+		const a = this._hydrateJesterActProse(raw);
+		const info = CharacterSheetState.detectActivatableFeature(a) || {};
+		return {
+			name: a.name,
+			source: a.source,
+			description: a.description,
+			timing: info.activationAction || null,
+			saveType: info.saveAbility || null,
+			dc: info.saveAbility ? this.getJesterActBaseDc() : null,
+			range: info.range ?? null,
+			duration: info.duration || null,
+			bardicInspirationCost: info.bardicInspirationCost || 0,
+			usesBardicInspiration: !!info.usesBardicInspiration,
+			isToggle: !!info.isToggle,
+			condition: info.condition || null,
+			grantsSpell: info.grantsSpell || null,
+			acBonus: info.acBonusScale === "proficiency" ? this.getProficiencyBonus() : null,
+		};
 	}
 
 	/**
@@ -43039,10 +43056,7 @@ class CharacterSheetState {
 	 * @returns {number|null} The save DC, or null if the act calls for no saving throw
 	 */
 	getJesterActDc (actName) {
-		const act = this._findJesterAct(actName);
-		if (!act) return null;
-		const info = CharacterSheetState.detectActivatableFeature(act);
-		return info?.saveAbility ? this.getJesterActBaseDc() : null;
+		return this.getJesterAct(actName)?.dc ?? null;
 	}
 
 	/**
@@ -51768,9 +51782,18 @@ class CharacterSheetState {
 		const consumesInspiration = /bardic inspiration/i.test(feature?.consumes?.name || "");
 		// `amount` is optional in the data (Fool's Folly omits it); one use is the pool-wide
 		// convention and matches the prose of every act that spends inspiration.
+		//
+		// The prose spends a use in several shapes — "you expend one use of your Bardic
+		// Inspiration", "this act requires the expenditure of one use of Bardic
+		// Inspiration", "it costs a use of Bardic Inspiration" — so match the verb stem and
+		// tolerate the connective words between it and "one use". Note this deliberately
+		// does NOT fire for the rider phrasing "WHEN you use your Bardic Inspiration…"
+		// (Fool's Folly, Witty Wordplay), which piggybacks on an inspiration use the
+		// character was already spending rather than charging a second one.
+		const spendsInspirationProse = /(?:expend\w*|spend\w*|cost\w*|use)\b[^.]{0,24}?\b(?:one|a|1)\s+use\b[^.]{0,40}?bardic inspiration/i.test(text);
 		const bardicInspirationCost = consumesInspiration
 			? (feature.consumes.amount || 1)
-			: (/expend\w*\s+(?:one\s+use|a\s+use)[^.]*bardic inspiration/i.test(text) ? 1 : 0);
+			: (spendsInspirationProse ? 1 : 0);
 
 		let activationAction = "special";
 		if (/as a bonus action|use this act as a bonus action/i.test(text)) activationAction = "bonus";
@@ -51785,14 +51808,26 @@ class CharacterSheetState {
 
 		const rangeMatch = /within (\d+) feet/i.exec(text);
 
-		// Condition imposed on a failed save, read from the {@condition} tag rather than a
-		// per-act table, so retagging the homebrew updates the sheet automatically.
+		// Condition imposed on a failed save. Prefer the `{@condition}` tag, but the
+		// character sheet often stores an already-RENDERED description in which the tag
+		// has become a link — so fall back to reading the condition word out of the
+		// rendered prose. Without the fallback, every act loaded through the normal
+		// (rendered) path silently loses its condition.
 		const condMatch = /\{@condition\s+([^}|]+)/i.exec(rawText || "");
-		const condition = condMatch ? condMatch[1].trim().toLowerCase() : null;
+		let condition = condMatch ? condMatch[1].trim().toLowerCase() : null;
+		if (!condition) {
+			// TGTT adds its own conditions on top of the core list; "dazed" is the one
+			// the acts use.
+			const vocabulary = [...FeatureModifierParser.SAVE_GATING_CONDITIONS, "dazed"];
+			const found = vocabulary.find(c => new RegExp(`\\b(?:become|becoming|becomes|is|are)\\s+(?:\\w+\\s+){0,2}?${c}\\b`, "i").test(text));
+			condition = found || null;
+		}
 
 		// Acts that hand the character a spell for free ({@spell mirror image} / {@spell
-		// silent image}) — surfaced so the spell can be granted rather than just described.
-		const spellMatch = /cast the spell \{@spell\s+([^}|]+)/i.exec(rawText || "");
+		// silent image}). Same rendered-text fallback as the condition above — the tag is
+		// gone once the description has been rendered, but the spell name survives.
+		const spellMatch = /cast the spell \{@spell\s+([^}|]+)/i.exec(rawText || "")
+			|| /cast the spell ([a-z][a-z' ]*?)(?=\s*(?:without|,|\.|$))/i.exec(text);
 		const grantsSpell = spellMatch ? spellMatch[1].trim().toLowerCase() : null;
 
 		// "a bonus to AC equal to your proficiency bonus" — the magnitude is per-character,
