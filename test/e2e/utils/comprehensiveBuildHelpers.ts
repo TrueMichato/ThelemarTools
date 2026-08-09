@@ -908,6 +908,17 @@ export type EffectCheck = _EffectCommon & (
 	// activate it via `activateFeature` and verify it doesn't
 	// throw. After verifying, deactivate. Defaults `min: 1`.
 	| {kind: "pickActivatable"; matchAny: (string | RegExp)[]; min?: number}
+	// Assert that a feature is SURFACED as an activation row on the
+	// Features tab, without clicking Activate.
+	//
+	// Use this instead of `pickActivatable` when the ability costs a
+	// limited resource: `pickActivatable` spends one use per probe, so a
+	// pool of resource-costing picks (e.g. the Bardic-Inspiration-priced
+	// Jester's Acts) drains its own pool and then fails on the sheet's
+	// entirely correct "not enough <resource> remaining" gating. This
+	// check asserts the surfacing half; the mechanical half belongs on a
+	// `stateCall` probe of the derived numbers.
+	| {kind: "activatableListed"; matchAny: (string | RegExp)[]; min?: number}
 	// Verify an attack row matching the pattern exists on the
 	// Combat tab. Used for Pact of the Blade summoned weapons,
 	// Mercy Monk unarmed strike, and other "feature creates an
@@ -1988,6 +1999,18 @@ async function _runPassiveOrRollEffect (
 				}
 			}
 			throw new Error(`pickActivatable: only ${hits} of expected ≥${need} matched picks could be activated. errors=[${errs.join(" | ")}]`);
+		}
+		case "activatableListed": {
+			const allFeatures = await charSheet.getActivatableFeatureNames().catch(() => [] as string[]);
+			const need = e.min ?? 1;
+			const hits = e.matchAny.filter(pat => {
+				const re = pat instanceof RegExp ? pat : new RegExp(pat, "i");
+				return allFeatures.some(f => re.test(f));
+			}).length;
+			if (hits < need) {
+				throw new Error(`activatableListed: only ${hits} of expected ≥${need} patterns are surfaced as activation rows. patterns=[${e.matchAny.join(", ")}]`);
+			}
+			return;
 		}
 		case "weaponScopedState": {
 			await charSheet.page.evaluate(() => {

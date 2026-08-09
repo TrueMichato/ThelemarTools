@@ -25,15 +25,26 @@ Specs touched (all still report **✓ FULL** coverage after the edit):
 - `tgtt-belly-dancer-rogue-jaknian.spec.ts` (`buildSpecialtyChecks` → CS-BUG-017)
 - `tgtt-gambler-rogue-clairnian.spec.ts` (`buildSpecialtyChecks` → CS-BUG-017)
 - `tgtt-horror-warlock-theocracian.spec.ts` (`buildAnyInvocationChecks` → CS-BUG-017)
-- `tgtt-jester-bard-dendulra.spec.ts` (`buildJesterActChecks` → CS-BUG-017)
+- `tgtt-jester-bard-dendulra.spec.ts` (~~`buildJesterActChecks` → CS-BUG-017~~ — **skip lifted**, see the CS-BUG-017b note below)
 - `tgtt-trickster-rogue-goblin.spec.ts` (`buildSpecialtyChecks`, `buildTricksterTrickChecks` → CS-BUG-017)
 
 Open bugs re-affirmed by the sweep (no new CS-BUGs filed; all
 failures encountered during validation matched existing entries):
 - **CS-BUG-017** still blocks pick-rendering for Specialties past L11,
-  Battle Tactics past L3, Trickster Tricks, Jester Acts, Eldritch
-  Invocations, Arcane Shot, Pact Boons (now visible via `skipReason`
-  on every helper-emitted row).
+  Battle Tactics past L3, Trickster Tricks, ~~Jester Acts~~,
+  Eldritch Invocations, Arcane Shot, Pact Boons (now visible via
+  `skipReason` on every helper-emitted row).
+  **Jester Acts are no longer blocked** — the College of Jesters
+  full-support pass found the root cause (three duplicate
+  options-group scanners each re-emitting the `refOptionalfeature`
+  pool as a grant, inflating the pick count and shadowing the real
+  picker) and fixed it at all three sites. Measured act counts are
+  now exactly 3 / 4 / 5 / 5 at L3 / L6 / L14 / L20, matching the
+  `subclassTableGroups` "Jester's Acts Known" column, and
+  `buildJesterActChecks()` runs unwrapped. The other pools listed
+  here were **not** re-verified against that fix and may share the
+  same cause — worth re-measuring before assuming they are still
+  broken.
 - **CS-BUG-013** still blocks Horror Warlock pact-magic slots.
 - ~~**CS-BUG-018** still blocks several class resource maxes.~~
   **Superseded** — CS-BUG-018 itself is Fixed, and the resource-max
@@ -7567,3 +7578,79 @@ Improvement" from the `featRadios` pool.
 This was a *test-infra* defect, not a product defect — the sheet renders the
 combined ASI+feat step correctly. It is recorded here because it silently
 suppressed L4+ coverage for the whole TGTT suite.
+## CS-BUG-119 — "action-economy" feature grants are computed into write-only `calculations` keys with zero product consumers
+
+**Status**: Open (documented, not fixed — no generic surface exists yet)
+**Surfaced**: College of Jesters (TGTT) full-support audit, Gifted Acrobat (L6).
+**Component**: Character Sheet · `charactersheet-state.js` · `getFeatureCalculations()`.
+
+### Symptom
+
+A class/subclass feature that changes **action economy or movement cost**
+— rather than a number the sheet already tracks — is parsed, computed and
+then dropped on the floor. Gifted Acrobat (Bard / College of Jesters, L6)
+grants three things:
+
+| Grant | Surface | Effective? |
+|---|---|---|
+| Climbing speed equal to walking speed | `speed:climb` `equalToWalk` modifier | **Yes** |
+| Escaping a grapple costs a bonus action | `calculations.escapeGrappleBonusAction` | **No** |
+| Standing from prone costs 10 ft | `calculations.standFromProneCost` | **No** |
+
+### Measurement
+
+Both keys are produced in exactly one place and consumed in exactly one
+place — and the only consumer is a unit test asserting the producer:
+
+```
+$ grep -rn "escapeGrappleBonusAction\|standFromProneCost" js/ test/
+js/charactersheet/charactersheet-state.js:23532:  calculations.escapeGrappleBonusAction = true;
+js/charactersheet/charactersheet-state.js:23533:  calculations.standFromProneCost = 10;
+test/jest/charactersheet/CharacterSheetTGTT.test.js:9303:  expect(calcs.escapeGrappleBonusAction).toBe(true);
+test/jest/charactersheet/CharacterSheetTGTT.test.js:9304:  expect(calcs.standFromProneCost).toBe(10);
+```
+
+**2 product references, 0 product consumers.** Nothing renders them,
+nothing rolls with them, nothing gates on them. The test passes and the
+feature is inert — the exact failure mode the "a test can pass while the
+feature is inert" rule exists to catch.
+
+The absence is structural, not a Jester oversight. There is no
+movement-cost or action-economy vocabulary in the sheet at all:
+
+```
+$ grep -rn "movementCost\|proneCost\|standFromProne\|grappleEscape" js/charactersheet/ | wc -l
+0   # (the two lines above are the only near-matches, and they are the producer)
+```
+
+`getSpeedBreakdown()` and the 15 `get*Speed*` accessors all model speed as
+a **distance per type**; none model the *cost* of an action, and there is
+no `getMovementCostOverrides()` / `getBonusActionGrants()` equivalent.
+
+### Why it is not fixed here
+
+Fixing it properly means adding a new generic surface (a movement-cost /
+action-economy override registry, plus somewhere on Overview or Combat to
+render it) that every class with the same shape would feed — Rogue's
+Cunning Action, Monk's Step of the Wind, Barbarian's Fast Movement riders,
+Tabaxi's Feline Agility. Special-casing Gifted Acrobat into a bespoke
+renderer would violate the generic-architecture rule in
+`.github/instructions/charactersheet.instructions.md` and leave the same
+hole for every other feature of this shape.
+
+### Scope
+
+Not Jester-specific. Any feature whose entire effect is "X costs a bonus
+action instead of an action" or "Y costs N ft instead of half your speed"
+currently has nowhere to land. Grep `calculations\.` in the class-feature
+block for other write-only keys before designing the fix.
+
+### Suggested fix
+
+1. Add `state.getActionEconomyOverrides()` returning
+   `[{what, from, to, source}]`, fed by the same feature-parse path.
+2. Render them as a short list on the Combat tab (next to Actions) and in
+   the Overview feature summary.
+3. Add an `actionEconomy` EffectCheck kind to
+   `test/e2e/utils/comprehensiveBuildHelpers.ts` so E2E can assert them,
+   and re-point the Gifted Acrobat row at it.

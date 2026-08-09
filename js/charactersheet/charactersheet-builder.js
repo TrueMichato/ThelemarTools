@@ -183,6 +183,14 @@ class CharacterSheetBuilder {
 				}
 
 				if (typeof entry === "object" && entry.type === "options") {
+					// An options group made entirely of `refOptionalfeature` children is pool
+					// DOCUMENTATION, not a choice — the paired `optionalfeatureProgression` is
+					// what grants the picks. Prompting here as well asked for the same pick
+					// twice and over-granted (a level-3 Jester learned 4 acts instead of 3).
+					// Mirrors the guard in CharacterSheetClassUtils.findFeatureOptions.
+					if (Array.isArray(entry.entries) && entry.entries.length
+						&& entry.entries.every(o => o?.type === "refOptionalfeature")) continue;
+
 					// Found an options entry
 					/** @type {*[]} */ const options = [];
 					const count = entry.count || 1;

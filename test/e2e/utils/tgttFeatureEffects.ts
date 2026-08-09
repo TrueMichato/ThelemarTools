@@ -173,17 +173,118 @@ export const TGTT_ELDRITCH_INVOCATION_EFFECTS: Record<string, EffectCheck[]> = {
 };
 
 // ── Jester Acts (Bard) ───────────────────────────────────────────────
+//
+// Every act carries a REAL mechanical probe, not an existence assertion.
+// `getJesterAct(name)` derives each act's action economy, save ability +
+// DC, range, imposed condition, granted spell, AC bonus and Bardic
+// Inspiration price from the act's own rules text, so asserting a path
+// into it proves the sheet actually understood the act — a prose-only
+// "the text renders" implementation fails these.
+//
+// Expected values below are measured against
+// homebrew/TravelersGuidetoThelemar.json; DCs use `min: 8` because the
+// act DC is 8 + the character's Performance bonus, which varies with the
+// build's CHA / proficiency / Unparalleled Skill expertise.
 
-const _jesterActivatable = (name: string): EffectCheck[] => [
-	{kind: "pickActivatable", matchAny: [new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")], min: 1},
+const _jesterAct = (name: string, mechanics: EffectCheck[]): EffectCheck[] => [
+	// Surfacing is asserted WITHOUT clicking Activate: several acts cost a
+	// Bardic Inspiration use, and a click-through probe on all thirteen
+	// would drain the pool and then fail on the sheet's correct
+	// "not enough Bardic Inspiration remaining" gating.
+	{kind: "activatableListed", matchAny: [new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")], min: 1},
+	...mechanics,
 ];
 
+/** Assert one derived property of a single act. */
+const _actProp = (name: string, path: string, expect: {exact?: number | string | boolean | null; min?: number}): EffectCheck =>
+	({kind: "stateCall", method: "getJesterAct", args: [name], path, ...expect});
+
 export const TGTT_JESTER_ACT_EFFECTS: Record<string, EffectCheck[]> = {
-	"Pantomime": _jesterActivatable("Pantomime"),
-	"Prankster": _jesterActivatable("Prankster"),
-	"Trickster's Disengagement": _jesterActivatable("Trickster's Disengagement"),
-	"Tumbler": _jesterActivatable("Tumbler"),
-	"Dazzling Disguise": _jesterActivatable("Dazzling Disguise"),
+	// Action, 30 ft, Wis save or charmed.
+	"Pantomime": _jesterAct("Pantomime", [
+		_actProp("Pantomime", "timing", {exact: "action"}),
+		_actProp("Pantomime", "saveType", {exact: "wis"}),
+		_actProp("Pantomime", "dc", {min: 8}),
+		_actProp("Pantomime", "range", {exact: 30}),
+		_actProp("Pantomime", "condition", {exact: "charmed"}),
+	]),
+	// Action, 30 ft, Wis save or dazed (TGTT condition).
+	"Prankster": _jesterAct("Prankster", [
+		_actProp("Prankster", "timing", {exact: "action"}),
+		_actProp("Prankster", "saveType", {exact: "wis"}),
+		_actProp("Prankster", "dc", {min: 8}),
+		_actProp("Prankster", "condition", {exact: "dazed"}),
+	]),
+	// Bonus action, no save, no resource.
+	"Trickster's Disengagement": _jesterAct("Trickster's Disengagement", [
+		_actProp("Trickster's Disengagement", "timing", {exact: "bonus"}),
+		_actProp("Trickster's Disengagement", "saveType", {exact: null}),
+		_actProp("Trickster's Disengagement", "bardicInspirationCost", {exact: 0}),
+	]),
+	// Bonus action toggle lasting the rest of the turn.
+	"Tumbler": _jesterAct("Tumbler", [
+		_actProp("Tumbler", "timing", {exact: "bonus"}),
+		_actProp("Tumbler", "isToggle", {exact: true}),
+		_actProp("Tumbler", "duration", {exact: "rest of the turn"}),
+	]),
+	// 1-hour disguise toggle; also registers conditional Deception advantage.
+	"Dazzling Disguise": _jesterAct("Dazzling Disguise", [
+		_actProp("Dazzling Disguise", "isToggle", {exact: true}),
+		_actProp("Dazzling Disguise", "duration", {exact: "1 hour"}),
+	]),
+	// Bonus action, 30 ft, Wis save.
+	"Jester's Juggle": _jesterAct("Jester's Juggle", [
+		_actProp("Jester's Juggle", "timing", {exact: "bonus"}),
+		_actProp("Jester's Juggle", "saveType", {exact: "wis"}),
+		_actProp("Jester's Juggle", "dc", {min: 8}),
+		_actProp("Jester's Juggle", "range", {exact: 30}),
+	]),
+	// Rider phrasing ("when you use your Bardic Inspiration") but the homebrew
+	// declares a `consumes` block, which wins: 60 ft, Int save or incapacitated,
+	// one Bardic Inspiration.
+	"Fool's Folly": _jesterAct("Fool's Folly", [
+		_actProp("Fool's Folly", "saveType", {exact: "int"}),
+		_actProp("Fool's Folly", "dc", {min: 8}),
+		_actProp("Fool's Folly", "range", {exact: 60}),
+		_actProp("Fool's Folly", "condition", {exact: "incapacitated"}),
+		_actProp("Fool's Folly", "usesBardicInspiration", {exact: true}),
+		_actProp("Fool's Folly", "bardicInspirationCost", {exact: 1}),
+	]),
+	// Rider on the Attack action; explicitly spends one Bardic Inspiration.
+	"Laughing Lunge": _jesterAct("Laughing Lunge", [
+		_actProp("Laughing Lunge", "timing", {exact: "attack"}),
+		_actProp("Laughing Lunge", "bardicInspirationCost", {exact: 1}),
+	]),
+	// Spends one Bardic Inspiration to cast mirror image.
+	"Jester's Jaunt": _jesterAct("Jester's Jaunt", [
+		_actProp("Jester's Jaunt", "grantsSpell", {exact: "mirror image"}),
+		_actProp("Jester's Jaunt", "bardicInspirationCost", {exact: 1}),
+	]),
+	// Spends one Bardic Inspiration to cast silent image.
+	"Ridiculous Ruse": _jesterAct("Ridiculous Ruse", [
+		_actProp("Ridiculous Ruse", "grantsSpell", {exact: "silent image"}),
+		_actProp("Ridiculous Ruse", "bardicInspirationCost", {exact: 1}),
+	]),
+	// Reaction toggle: +PB AC until the start of your next turn, for one
+	// Bardic Inspiration. `acBonus` resolves the proficiency scale per build.
+	"Jester's Agility": _jesterAct("Jester's Agility", [
+		_actProp("Jester's Agility", "timing", {exact: "reaction"}),
+		_actProp("Jester's Agility", "isToggle", {exact: true}),
+		_actProp("Jester's Agility", "acBonus", {min: 2}),
+		_actProp("Jester's Agility", "bardicInspirationCost", {exact: 1}),
+	]),
+	// Rider on a Bardic Inspiration use: disadvantage on one attack within 60 ft.
+	"Witty Wordplay": _jesterAct("Witty Wordplay", [
+		_actProp("Witty Wordplay", "range", {exact: 60}),
+		_actProp("Witty Wordplay", "usesBardicInspiration", {exact: true}),
+		_actProp("Witty Wordplay", "bardicInspirationCost", {exact: 0}),
+	]),
+	// Bonus action, Wis save.
+	"Jester's Jest": _jesterAct("Jester's Jest", [
+		_actProp("Jester's Jest", "timing", {exact: "bonus"}),
+		_actProp("Jester's Jest", "saveType", {exact: "wis"}),
+		_actProp("Jester's Jest", "dc", {min: 8}),
+	]),
 };
 
 // ── Trickster Tricks (Rogue) ─────────────────────────────────────────

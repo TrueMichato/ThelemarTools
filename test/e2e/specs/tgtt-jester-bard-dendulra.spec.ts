@@ -1,6 +1,6 @@
 import {describeCharacter} from "../utils/characterSpecFactory";
 import {PRESET_FULL_JESTER_DENDULRA} from "../utils/characterBuilder";
-import {buildSpecialtyChecks, buildJesterActChecks, withSkipReason} from "../utils/tgttFeaturePools";
+import {buildSpecialtyChecks, buildJesterActChecks} from "../utils/tgttFeaturePools";
 
 /**
  * #13 — College of Jesters Bard Dendulra (TGTT) — L1→20.
@@ -158,149 +158,49 @@ describeCharacter({
 		{level: 20, name: /superior inspiration/i, kind: "passive"},
 
 		// ── College of Jesters subclass ──────────────────────────────
-		// Jester's Acts (JA optional features) — 3 picked at L3, +1 at
-		// L6, +1 at L14. Candidate names sourced from
-		// `featureType: ["JA"]` in homebrew/TravelersGuidetoThelemar.json.
-		//
-		// No Phase-7 effect probes attached: a `pick` FeatureCheck
-		// validates the pick happened and references resolve, but
-		// each individual Jester's Act has its own toggle / save-DC /
-		// movement effect that depends on which acts the preset
-		// actually picked. Those per-act effects belong on dedicated
-		// rows once the picks are stable, not on the parent pick.
-		{
-			level: 3,
-			name: /jester's acts?|acts/i,
-			kind: "pick",
-			pickedCount: 3,
-			skip: true,
-			skipReason: "CS-BUG-017",
-			pickedFrom: [
-				/pantomime/i,
-				/prankster/i,
-				/trickster's disengagement|disengagement/i,
-				/tumbler/i,
-				/dazzling disguise/i,
-				/jester's juggle|juggle/i,
-				/fool's folly|folly/i,
-				/laughing lunge/i,
-				/jester's jaunt|jaunt/i,
-				/ridiculous ruse|ruse/i,
-				/jester's agility|agility/i,
-				/witty wordplay|wordplay/i,
-				/jester's jest|jest/i,
-			],
-			effects: [
-				// At least one of the active Jester's Acts (pantomime,
-				// disengagement, tumbler, disguise, juggle, folly, lunge,
-				// jaunt, ruse, agility, wordplay, jest) should surface as
-				// activatable on the sheet. Wizard auto-picks vary, so
-				// list every active act and require ≥1 hit.
-				{
-					kind: "pickActivatable",
-					min: 1,
-					matchAny: [
-						/pantomime/i,
-						/trickster's disengagement|disengagement/i,
-						/tumbler/i,
-						/dazzling disguise/i,
-						/jester's juggle|juggle/i,
-						/fool's folly|folly/i,
-						/laughing lunge/i,
-						/jester's jaunt|jaunt/i,
-						/ridiculous ruse|ruse/i,
-						/jester's agility|agility/i,
-						/witty wordplay|wordplay/i,
-						/jester's jest|jest/i,
-					],
-				},
-			],
-		},
-		{
-			level: 6,
-			name: /jester's acts?|acts/i,
-			kind: "pick",
-			pickedCount: 4,
-			skip: true, skipReason: "CS-BUG-017",
-			pickedFrom: [
-				/pantomime/i, /prankster/i, /disengagement/i, /tumbler/i,
-				/dazzling disguise/i, /juggle/i, /folly/i, /laughing lunge/i,
-				/jaunt/i, /ruse/i, /agility/i, /wordplay/i, /jest/i,
-			],
-			effects: [
-				// Same lenient ≥1-active-act assertion as L3.
-				{
-					kind: "pickActivatable",
-					min: 1,
-					matchAny: [
-						/pantomime/i,
-						/trickster's disengagement|disengagement/i,
-						/tumbler/i,
-						/dazzling disguise/i,
-						/jester's juggle|juggle/i,
-						/fool's folly|folly/i,
-						/laughing lunge/i,
-						/jester's jaunt|jaunt/i,
-						/ridiculous ruse|ruse/i,
-						/jester's agility|agility/i,
-						/witty wordplay|wordplay/i,
-						/jester's jest|jest/i,
-					],
-				},
-			],
-		},
-		{
-			level: 14,
-			name: /jester's acts?|acts/i,
-			kind: "pick",
-			pickedCount: 5,
-			skip: true, skipReason: "CS-BUG-017",
-			pickedFrom: [
-				/pantomime/i, /prankster/i, /disengagement/i, /tumbler/i,
-				/dazzling disguise/i, /juggle/i, /folly/i, /laughing lunge/i,
-				/jaunt/i, /ruse/i, /agility/i, /wordplay/i, /jest/i,
-			],
-			effects: [
-				// By L14 the bard has 5 acts picked — still only require
-				// ≥1 to be activatable to stay tolerant of pick variance.
-				{
-					kind: "pickActivatable",
-					min: 1,
-					matchAny: [
-						/pantomime/i,
-						/trickster's disengagement|disengagement/i,
-						/tumbler/i,
-						/dazzling disguise/i,
-						/jester's juggle|juggle/i,
-						/fool's folly|folly/i,
-						/laughing lunge/i,
-						/jester's jaunt|jaunt/i,
-						/ridiculous ruse|ruse/i,
-						/jester's agility|agility/i,
-						/witty wordplay|wordplay/i,
-						/jester's jest|jest/i,
-					],
-				},
-			],
-		},
+		// Jester's Acts (JA optional features) — 3 known from L3, 4 from
+		// L6, 5 from L14 (the subclass's "Jester's Acts Known" table
+		// column). The pool, the cumulative counts and the per-act
+		// mechanical probes all come from `buildJesterActChecks()` at the
+		// bottom of this matrix, which is generated from
+		// homebrew/TravelersGuidetoThelemar.json — open-coding them here
+		// would let the two drift.
 
 		// Other Jesters subclass features.
-		// Gifted Acrobat — climb speed = walk, bonus-action grapple
-		// escape, stand from prone for 10 ft. None of these are
-		// probeable through the current passive/toggle/roll APIs
-		// (state.getSpeed("climb") isn't reliably populated for
-		// subclass-granted modes), so no effect probes.
-		{level: 6, name: /gifted acrobat/i, kind: "passive"},
-		// Unparalleled Skill — doubles prof on one chosen skill. The
-		// chosen skill is build-specific; without coupling to the
-		// preset we can't assert a specific skillBonus floor.
-		{level: 6, name: /unparalleled skill/i, kind: "passive"},
-		// Jester's Privilege — once-per-long-rest charm-on-BI ability.
-		// No persistent passive state to probe (it's an action, not a
-		// modifier or active state), and the resource pool isn't
-		// surfaced as a named "Jester's Privilege" resource on the
-		// sheet, so no effect probes.
-		{level: 14, name: /jester's privilege|privilege/i, kind: "passive"},
+		// Gifted Acrobat — climbing speed equal to walking speed, plus a
+		// bonus-action grapple escape and a 10-ft cost to stand from
+		// prone. Only the climb speed has a generic surface on the sheet
+		// (movement-cost overrides have no state representation at all —
+		// see CS-BUG-119), so that is what is asserted here.
+		{
+			level: 6,
+			name: /gifted acrobat/i,
+			kind: "passive",
+			effects: [
+				{kind: "speedEquals", left: "climb", right: "walk"},
+			],
+		},
+		// Unparalleled Skill — expertise (doubled proficiency) in one
+		// chosen skill. The chosen skill is build-specific, so assert the
+		// generic consequence: the character has at least one expertise
+		// skill by L6.
+		{
+			level: 6,
+			name: /unparalleled skill/i,
+			kind: "passive",
+			effects: [
+				{kind: "stateCall", method: "getExpertise", min: 1, path: "length"},
+			],
+		},
+		// Jester's Privilege — once-per-long-rest charm rider on Bardic
+		// Inspiration. Surfaces as a named 1/long-rest resource.
+		{
+			level: 14,
+			name: /jester's privilege|privilege/i,
+			kind: "resource",
+			resourceMax: 1,
+			restoreOn: "long",
+		},
 
 		// ── Dendulra racial features (TGTT) ───────────────────────────
 		// All meaningful Dendulra effects fall outside the
@@ -321,9 +221,13 @@ describeCharacter({
 		// Documented here intentionally; no effects: arrays added.
 		...buildSpecialtyChecks("Bard"),
 		// Jester Acts (JA optional features) — Bard subclass picks.
-		// CS-BUG-017: Jester Acts picks register as 0/1 instead of 3/4/5.
-		// Keep the helper in the matrix (no-blind-spots doctrine) with
-		// every emitted row marked skip+skipReason via withSkipReason.
-		...withSkipReason(buildJesterActChecks(), "CS-BUG-017"),
+		// Cumulative 3 / 4 / 5 at L3 / L6 / L14, from the subclass's
+		// "Jester's Acts Known" table column. Every act in the pool
+		// carries a real per-act mechanical probe (action economy, save
+		// ability + DC, range, imposed condition, granted spell, AC
+		// bonus, Bardic Inspiration cost) via TGTT_JESTER_ACT_EFFECTS,
+		// so whichever acts the wizard picks get asserted for real
+		// behaviour rather than mere existence.
+		...buildJesterActChecks(),
 	],
 });

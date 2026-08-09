@@ -271,6 +271,42 @@ sheet, so the sheet rolls honestly and asks for the outcome rather than
 inventing one.
 
 
+### Activation-time rolled save DCs (`activationInfo.rolledSaveDc`)
+
+A few abilities set their save DC from a check the actor rolls **at the moment
+of use**, rather than the static `8 + proficiency + modifier` the sheet computes
+everywhere else. The Jester's Privilege (TGTT Bard / College of Jesters, L14) is
+the canonical case: *"Creatures within 60 feet … must make a Wisdom saving throw
+(DC equal to your Performance check result)."*
+
+The descriptor is derived from the feature's own prose by
+`CharacterSheetState._buildRolledSaveDcInfo(text)`, so **any** feature phrased
+this way inherits the behaviour with no name switch:
+
+```javascript
+rolledSaveDc: {
+    skill: "performance",
+    skillLabel: "Performance",
+    ability: "cha",        // Performance is a Charisma skill
+    saveAbility: "wis",    // what the targets roll
+    range: 60,             // optional, from "within N feet"
+}
+```
+
+`_pResolveRolledSaveDc` rolls the check **before** any resource is deducted
+(so cancelling costs nothing) and reports the resulting DC. Returning a
+descriptor rather than a number keeps the variable DC explicit instead of
+silently substituting a static DC the feature never had.
+
+Both halves of the derivation are required: prose that names a check-result DC
+but no saving throw, or a saving throw against an ordinary static DC, yields
+`null`. Without that guard every static-DC feature on the sheet would start
+prompting for a roll.
+
+The descriptor is attached in `getActivatableFeatures()` rather than inside
+`detectActivatableFeature`, which has many return points.
+
+
 ### Speeds that track the walking speed
 
 An active state can grant a speed that is *equal to* the character's walking
