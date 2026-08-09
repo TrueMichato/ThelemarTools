@@ -289,3 +289,47 @@ their conditions on a *second* activation). The repeat is the valuable part.
 succeeds but the effect reads wrong on the second cycle, it is a product bug.
 If the button is *disabled* with a "not enough remaining" title, it is pool
 exhaustion.
+
+---
+
+## A batch-level flake exists in the 5-spec serial run — confirm before chasing
+
+**Observed:** running the five TGTT batch-3 specs together
+(`tgtt-belly-dancer-rogue-jaknian`, `tgtt-chained-fury-barbarian-minotaur`,
+`tgtt-gambler-rogue-clairnian`, `tgtt-jester-bard-dendulra`,
+`tgtt-time-domain-cleric`) with `--workers=1`, one run in three reported
+
+```
+2 failed
+  Chained Fury Barbarian Minotaur › L5: extra attack / 3rd-level slots / prof +3
+  Chained Fury Barbarian Minotaur › L5 loadout: installs gear + signature toggle …
+```
+
+**Measurement, so the next person does not re-derive it:**
+
+| Invocation | Result |
+|---|---|
+| 5 specs, `--workers=1` (run 1) | 30 passed, 0 failed |
+| 5 specs, `--workers=1` (run 2) | 28 passed, **2 failed** |
+| 5 specs, `--workers=1` (run 3) | 30 passed, 0 failed |
+| `-g "L5"` alone | 3 passed |
+| Full Chained Fury spec alone | 6 passed, 2 skipped, 0 failed |
+| 5 specs, `--workers=2` | 1 failed — a *different* test (Gambler L5), also non-reproducing |
+
+**The cause is not established.** The failing run's artifacts were overwritten
+by the reruns, so there is no error text behind this entry — only the
+reproduction statistics above. Do not cite a mechanism for it that has not been
+measured.
+
+**What this means in practice.** A single red run of these specs is not
+evidence of a regression. Before investigating, re-run the failing test in
+isolation and re-run the full serial suite. Only treat it as real if it
+reproduces. Conversely, do not use this entry to wave away a *consistent*
+failure — the distinguishing property here is that it never reproduced under
+any narrower invocation.
+
+**Worth noting:** three separate sessions independently hit Playwright races in
+this area, all of the form "the Active-States panel re-renders and detaches the
+button mid-click" (fixed for both `activateFeature` and `deactivateFeature` by
+click-then-verify via `isFeatureActive()`). This flake may be another member of
+that family, but that is a hypothesis, not a finding.
