@@ -52106,60 +52106,69 @@ class CharacterSheetState {
 			};
 		}
 
-		for (const [stateTypeId, stateType] of Object.entries(this.ACTIVE_STATE_TYPES)) {
-			// Skip generic types that shouldn't match by name
-			if (stateType.isGeneric && !stateType.detectPatterns?.length) continue;
-			// CS-BUG-083: states that are ONLY ever applied programmatically (the Shadow
-			// Knight's shadowcasting options) must never be name-matched — their names
-			// ("Eyes of the Dark", "Darkness") collide with real features from other
-			// classes, hijacking them into the wrong state with the wrong effects.
-			if (stateType.noNameDetect) continue;
+		// TWO PASSES, DELIBERATELY.
+		//
+		// An EXACT NAME MATCH is a far stronger signal than some OTHER state's prose
+		// pattern, so every state gets its name checked before any state gets its
+		// patterns checked. A single interleaved pass resolved by object insertion
+		// order instead, which silently hijacked features:
+		//
+		//   Chained Fury's "Manifest Chains" reads "When you rage, you can choose to
+		//   manifest a pair of spectral chains ... they vanish when your rage ends."
+		//   `rage` is declared first in ACTIVE_STATE_TYPES and its
+		//   `you can\b.*\brage\b` pattern matched that text, so the feature resolved
+		//   to `rage` — wrong id, wrong effects, wrong resource cost (1 rage use for
+		//   a free action), and the real `manifestChains` toggle never appeared.
+		//
+		// This is the same failure family as CS-BUG-083 (`noNameDetect`) approached
+		// from the other side: there a name collision hijacked a feature, here a
+		// pattern collision did. Ordering the passes fixes the whole class, because
+		// any state whose own name matches exactly is unambiguously the right answer.
+		const detectCandidates = Object.entries(this.ACTIVE_STATE_TYPES)
+			.filter(([, stateType]) => {
+				// Skip generic types that shouldn't match by name
+				if (stateType.isGeneric && !stateType.detectPatterns?.length) return false;
+				// CS-BUG-083: states that are ONLY ever applied programmatically (the Shadow
+				// Knight's shadowcasting options) must never be name-matched — their names
+				// ("Eyes of the Dark", "Darkness") collide with real features from other
+				// classes, hijacking them into the wrong state with the wrong effects.
+				if (stateType.noNameDetect) return false;
+				return true;
+			});
 
-			// Check name match
-			if (name === stateType.name.toLowerCase()) {
-				const parsedEffects = this.parseEffectsFromDescription(rawText);
-				return {
-					stateTypeId,
-					stateType,
-					matchedBy: "name",
-					activationAction: activationAction || stateType.activationAction,
-					effects: (stateType.preferCuratedEffects && stateType.effects?.length) || parsedEffects.length === 0 ? stateType.effects : parsedEffects,
-					duration: toggleAnalysis.duration || stateType.duration,
-					endConditions: toggleAnalysis.endConditions.length > 0 ? toggleAnalysis.endConditions : stateType.endConditions,
-					staminaCost,
-					kiCost,
-					focusPointCost,
-					sorceryPointCost,
-					bardicInspirationCost,
-					channelDivinityCost,
-					superiorityDiceCost,
-					isToggle: true,
-				};
-			}
+		const buildDetection = (stateTypeId, stateType, matchedBy) => {
+			const parsedEffects = this.parseEffectsFromDescription(rawText);
+			return {
+				stateTypeId,
+				stateType,
+				matchedBy,
+				activationAction: activationAction || stateType.activationAction,
+				effects: (stateType.preferCuratedEffects && stateType.effects?.length) || parsedEffects.length === 0 ? stateType.effects : parsedEffects,
+				duration: toggleAnalysis.duration || stateType.duration,
+				endConditions: toggleAnalysis.endConditions.length > 0 ? toggleAnalysis.endConditions : stateType.endConditions,
+				requiresStates: stateType.requiresStates,
+				staminaCost,
+				kiCost,
+				focusPointCost,
+				sorceryPointCost,
+				bardicInspirationCost,
+				channelDivinityCost,
+				superiorityDiceCost,
+				isToggle: true,
+			};
+		};
 
-			// Check detect patterns
-			if (stateType.detectPatterns) {
-				for (const pattern of stateType.detectPatterns) {
-					if (new RegExp(pattern, "i").test(name) || new RegExp(pattern, "i").test(text)) {
-						const parsedEffects = this.parseEffectsFromDescription(rawText);
-						return {
-							stateTypeId,
-							stateType,
-							matchedBy: "pattern",
-							activationAction: activationAction || stateType.activationAction,
-							effects: (stateType.preferCuratedEffects && stateType.effects?.length) || parsedEffects.length === 0 ? stateType.effects : parsedEffects,
-							duration: toggleAnalysis.duration || stateType.duration,
-							endConditions: toggleAnalysis.endConditions.length > 0 ? toggleAnalysis.endConditions : stateType.endConditions,
-							staminaCost,
-							kiCost,
-							focusPointCost,
-							sorceryPointCost,
-							bardicInspirationCost,
-							channelDivinityCost,
-							superiorityDiceCost,
-							isToggle: true,
-						};
-					}
+		// Pass 1 — exact name.
+		for (const [stateTypeId, stateType] of detectCandidates) {
+			if (name === stateType.name.toLowerCase()) return buildDetection(stateTypeId, stateType, "name");
+		}
+
+		// Pass 2 — prose patterns.
+		for (const [stateTypeId, stateType] of detectCandidates) {
+			if (!stateType.detectPatterns) continue;
+			for (const pattern of stateType.detectPatterns) {
+				if (new RegExp(pattern, "i").test(name) || new RegExp(pattern, "i").test(text)) {
+					return buildDetection(stateTypeId, stateType, "pattern");
 				}
 			}
 		}
