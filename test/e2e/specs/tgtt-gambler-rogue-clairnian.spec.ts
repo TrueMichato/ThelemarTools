@@ -24,7 +24,7 @@ import {buildSpecialtyChecks, buildWeaponMasteryChecks, withSkipReason} from "..
 describeCharacter({
 	preset: PRESET_FULL_GAMBLER_CLAIRNIAN,
 	displayName: "Gambler Rogue Clairnian",
-	// (CS-BUG-119) This previously matched "Gambler's Folly" — but Folly is an
+	// (CS-BUG-121) This previously matched "Gambler's Folly" — but Folly is an
 	// always-on passive with no on/off state in its source text, and the toggle
 	// row only existed because the generic classifier scraped the embedded d100
 	// Gambling Table. With that phantom fixed, the subclass's real toggle is the

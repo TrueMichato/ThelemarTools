@@ -51384,7 +51384,7 @@ class CharacterSheetState {
 	 * Remove embedded tables from a rendered feature description before any
 	 * prose-level parsing.
 	 *
-	 * (CS-BUG-119) A `<table>` inside a feature description is always a
+	 * (CS-BUG-121) A `<table>` inside a feature description is always a
 	 * random-outcome or lookup table — Wild Magic Surge, the TGTT Gambler's
 	 * Gambling Table, trinket/carousing tables. Its rows describe things that
 	 * MIGHT happen on a particular roll; they are never the feature's own
@@ -51412,7 +51412,7 @@ class CharacterSheetState {
 
 		const effects = [];
 		// Strip HTML tags and normalize whitespace for better pattern matching.
-		// (CS-BUG-119) Embedded outcome tables are removed FIRST so their rows
+		// (CS-BUG-121) Embedded outcome tables are removed FIRST so their rows
 		// are never mistaken for the feature's own effects.
 		const text = CharacterSheetState.stripEmbeddedOutcomeTables(description).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 
@@ -52473,7 +52473,7 @@ class CharacterSheetState {
 		if (!feature?.description && !feature?.activatable && !hasMarkers && !hasClassificationOverride) return null;
 
 		const rawText = feature.description || CharacterSheetState._featureTextFromEntries(feature) || "";
-		// (CS-BUG-119) Embedded outcome tables (Wild Magic Surge, the TGTT
+		// (CS-BUG-121) Embedded outcome tables (Wild Magic Surge, the TGTT
 		// Gambling Table, …) are removed before classification: incidental
 		// "you gain …" phrasing in a table ROW must not promote an always-on
 		// passive into a bogus activatable toggle.

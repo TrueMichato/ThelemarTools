@@ -588,7 +588,7 @@ describe("Versatile Gambler (L13)", () => {
 });
 
 /**
- * (CS-BUG-119) A `<table>` embedded in a feature description is a random-outcome
+ * (CS-BUG-121) A `<table>` embedded in a feature description is a random-outcome
  * or lookup table (Wild Magic Surge, the Gambling Table, trinket tables). Its
  * rows describe what MIGHT happen on a roll — never the feature's own
  * persistent effects. Before the fix, the naive tag-strip flattened the whole
@@ -596,7 +596,7 @@ describe("Versatile Gambler (L13)", () => {
  * always-on effect AND incidental "you gain …" phrasing inside a row promoted
  * an always-on passive into a phantom activatable toggle.
  */
-describe("Embedded outcome tables are not scraped as feature effects (CS-BUG-119)", () => {
+describe("Embedded outcome tables are not scraped as feature effects (CS-BUG-121)", () => {
 	const GAMBLING_TABLE_DESC = `<p>When you cast a spell using a tool described in your Gambler's Tools feature, you are also treating the casting as a bet.</p>`
 		+ `<table><caption>Gambling Table</caption><tbody>`
 		+ `<tr><td>1</td><td>You gain a +2 bonus to initiative until the end of the encounter</td></tr>`

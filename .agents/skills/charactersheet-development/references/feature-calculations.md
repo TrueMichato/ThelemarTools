@@ -359,7 +359,7 @@ array but publishes its ladder as a "Cantrips Known" column in
 `CharacterSheetClassUtils.getSubclassTableNumber(subclass, level, /cantrips?\s+known/i, 0)`
 reader. Prefer that reader over hardcoding any subclass scaling.
 
-## Embedded Outcome Tables Are Not Feature Effects (CS-BUG-119)
+## Embedded Outcome Tables Are Not Feature Effects (CS-BUG-121)
 
 `CharacterSheetState.stripEmbeddedOutcomeTables(html)` removes
 `<table>…</table>` blocks from a rendered feature description, and is applied

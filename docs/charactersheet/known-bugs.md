@@ -1068,7 +1068,14 @@ restrictions" surface is ever built, this is its first customer.
 
 ---
 
-### CS-BUG-119 — an embedded outcome table is scraped as the feature's own effects, minting a phantom toggle (TGTT Gambler's Folly)
+### CS-BUG-121 — an embedded outcome table is scraped as the feature's own effects, minting a phantom toggle (TGTT Gambler's Folly)
+
+**Renumbered from CS-BUG-119**, which the College of Jesters session had already
+taken for the action-economy write-only-calculations entry. Three separate id
+collisions occurred across this batch of parallel sessions (115, 116, 119),
+each because `known-bugs.md` entries at different heading levels in different
+sections merge cleanly without ever raising a conflict. Claim the next id by
+grepping `^#\+ CS-BUG-` across the whole file, not by reading one section.
 
 **Status**: **FIXED** — generic fix in
 `CharacterSheetState.stripEmbeddedOutcomeTables()`, applied in both
