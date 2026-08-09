@@ -15,6 +15,37 @@
  */
 
 import "./setup.js";
+import {readFileSync} from "fs";
+import {join, dirname} from "path";
+import {fileURLToPath} from "url";
+
+// The Jester's Act tests below drive the REAL rules text out of the homebrew source.
+// The sheet derives every act's action cost, save ability, DC, Bardic Inspiration price
+// and rider from that prose, so feeding synthetic name-only stubs would assert nothing
+// about the parser — and would silently keep passing if the homebrew text changed.
+const TGTT_ACTS = (() => {
+	const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+	const brew = JSON.parse(readFileSync(join(repoRoot, "homebrew/TravelersGuidetoThelemar.json"), "utf8"));
+	const out = new Map();
+	for (const of_ of brew.optionalfeature || []) {
+		if ((of_.featureType || []).includes("JA")) out.set(of_.name, of_);
+	}
+	return out;
+})();
+
+/** Add a Jester's Act to `st` using its verbatim homebrew entries. */
+function addJesterAct (st, name) {
+	const act = TGTT_ACTS.get(name);
+	if (!act) throw new Error(`Unknown Jester's Act fixture: ${name}`);
+	st.addFeature({
+		name: act.name,
+		source: act.source || "TGTT",
+		entries: act.entries,
+		consumes: act.consumes,
+		featureType: "Optional Feature",
+		optionalFeatureTypes: ["JA"],
+	});
+}
 
 let CharacterSheetState;
 let state;
@@ -9376,12 +9407,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					state.setAbilityBase("cha", 16); // +3
 
 					// Add Pantomime act (WIS save)
-					state.addFeature({
-						name: "Pantomime",
-						source: "TGTT",
-						featureType: "Optional Feature",
-						optionalFeatureTypes: ["JA"],
-					});
+					addJesterAct(state, "Pantomime");
 
 					const acts = state.getJesterActs();
 					expect(acts.length).toBe(1);
@@ -9402,7 +9428,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					state.setAbilityBase("cha", 16); // +3
 					state.setSkillExpertise("performance", true);
 
-					state.addFeature({name: "Prankster", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]});
+					addJesterAct(state, "Prankster");
 
 					const acts = state.getJesterActs();
 					const prankster = acts.find(a => a.name === "Prankster");
@@ -9419,8 +9445,8 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					});
 
 					// Add acts with different save types
-					state.addFeature({name: "Pantomime", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]}); // WIS
-					state.addFeature({name: "Fool's Folly", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]}); // INT
+					addJesterAct(state, "Pantomime"); // WIS
+					addJesterAct(state, "Fool's Folly"); // INT
 
 					const acts = state.getJesterActs();
 					expect(acts.find(a => a.name === "Pantomime").saveType).toBe("wis");
@@ -9435,9 +9461,9 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						subclass: {name: "College of Jesters", shortName: "Jesters", source: "TGTT"},
 					});
 
-					state.addFeature({name: "Tumbler", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]});
-					state.addFeature({name: "Dazzling Disguise", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]});
-					state.addFeature({name: "Laughing Lunge", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]});
+					addJesterAct(state, "Tumbler");
+					addJesterAct(state, "Dazzling Disguise");
+					addJesterAct(state, "Laughing Lunge");
 
 					const acts = state.getJesterActs();
 					expect(acts.find(a => a.name === "Tumbler").dc).toBeNull();
@@ -9453,14 +9479,14 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						subclass: {name: "College of Jesters", shortName: "Jesters", source: "TGTT"},
 					});
 
-					state.addFeature({name: "Pantomime", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]}); // action
-					state.addFeature({name: "Tumbler", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]}); // bonus action
-					state.addFeature({name: "Jester's Agility", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]}); // reaction
-					state.addFeature({name: "Laughing Lunge", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]}); // attack
+					addJesterAct(state, "Pantomime"); // action
+					addJesterAct(state, "Tumbler"); // bonus action
+					addJesterAct(state, "Jester's Agility"); // reaction
+					addJesterAct(state, "Laughing Lunge"); // attack
 
 					const acts = state.getJesterActs();
 					expect(acts.find(a => a.name === "Pantomime").timing).toBe("action");
-					expect(acts.find(a => a.name === "Tumbler").timing).toBe("bonus action");
+					expect(acts.find(a => a.name === "Tumbler").timing).toBe("bonus");
 					expect(acts.find(a => a.name === "Jester's Agility").timing).toBe("reaction");
 					expect(acts.find(a => a.name === "Laughing Lunge").timing).toBe("attack");
 				});
@@ -9473,9 +9499,9 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						subclass: {name: "College of Jesters", shortName: "Jesters", source: "TGTT"},
 					});
 
-					state.addFeature({name: "Laughing Lunge", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]}); // costs 1 BI
-					state.addFeature({name: "Jester's Jaunt", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]}); // costs 1 BI
-					state.addFeature({name: "Tumbler", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]}); // no cost
+					addJesterAct(state, "Laughing Lunge"); // costs 1 BI
+					addJesterAct(state, "Jester's Jaunt"); // costs 1 BI
+					addJesterAct(state, "Tumbler"); // no cost
 
 					const acts = state.getJesterActs();
 					const laughingLunge = acts.find(a => a.name === "Laughing Lunge");
@@ -9498,8 +9524,8 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						subclass: {name: "College of Jesters", shortName: "Jesters", source: "TGTT"},
 					});
 
-					state.addFeature({name: "Jester's Jaunt", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]});
-					state.addFeature({name: "Ridiculous Ruse", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]});
+					addJesterAct(state, "Jester's Jaunt");
+					addJesterAct(state, "Ridiculous Ruse");
 
 					const acts = state.getJesterActs();
 					expect(acts.find(a => a.name === "Jester's Jaunt").grantsSpell).toBe("mirror image");
@@ -9515,10 +9541,14 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					});
 					state.setAbilityBase("cha", 16); // +3; base DC = 8 + 3 + 3 = 14
 
+					["Pantomime", "Prankster", "Tumbler", "Laughing Lunge"].forEach(n => addJesterAct(state, n));
+
 					expect(state.getJesterActDc("Pantomime")).toBe(14);
 					expect(state.getJesterActDc("Prankster")).toBe(14);
 					expect(state.getJesterActDc("Tumbler")).toBeNull(); // No save
 					expect(state.getJesterActDc("Laughing Lunge")).toBeNull(); // No save
+					// An act the character has not learned has no DC at all.
+					expect(state.getJesterActDc("Ridiculous Ruse")).toBeNull();
 				});
 
 				it("should calculate acts known via getJesterActsKnown", () => {
@@ -9540,12 +9570,15 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						subclass: {name: "College of Jesters", shortName: "Jesters", source: "TGTT"},
 					});
 
-					state.addFeature({name: "Jester's Agility", source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]});
+					addJesterAct(state, "Jester's Agility");
 
 					const acts = state.getJesterActs();
 					const jestersAgility = acts.find(a => a.name === "Jester's Agility");
 					expect(jestersAgility.acBonus).toBe(3); // proficiency bonus
-					expect(jestersAgility.effect).toBe("+3 to AC until start of next turn");
+					expect(jestersAgility.timing).toBe("reaction");
+					expect(jestersAgility.duration).toBe("until the start of your next turn");
+					expect(jestersAgility.isToggle).toBe(true);
+					expect(jestersAgility.bardicInspirationCost).toBe(1);
 				});
 
 				it("should calculate all 13 Jester's Acts correctly", () => {
@@ -9563,19 +9596,31 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						"Dazzling Disguise", "Jester's Juggle", "Jester's Jest", "Witty Wordplay",
 						"Fool's Folly", "Laughing Lunge", "Jester's Jaunt", "Ridiculous Ruse", "Jester's Agility",
 					];
-					actNames.forEach(name => {
-						state.addFeature({name, source: "TGTT", featureType: "Optional Feature", optionalFeatureTypes: ["JA"]});
-					});
+					actNames.forEach(name => addJesterAct(state, name));
 
 					const acts = state.getJesterActs();
 					expect(acts.length).toBe(13);
 
-					// Verify each act has basic properties
+					// Every act must resolve to real, usable mechanics — not just render text.
 					acts.forEach(act => {
-						expect(act.name).toBeDefined();
-						expect(act.timing).toBeDefined();
-						expect(act.effect).toBeDefined();
+						expect(act.name).toBeTruthy();
+						// Action economy is always known (action / bonus / reaction / attack / special)
+						expect(["action", "bonus", "reaction", "attack", "special"]).toContain(act.timing);
+						// An act that calls for a saving throw must expose BOTH the ability and a DC.
+						if (act.saveType) expect(act.dc).toBe(state.getJesterActBaseDc());
+						else expect(act.dc).toBeNull();
 					});
+
+					// The acts that spend Bardic Inspiration must say so, and cost exactly one die.
+					["Laughing Lunge", "Fool's Folly", "Jester's Jaunt", "Ridiculous Ruse", "Jester's Agility"].forEach(n => {
+						const act = acts.find(a => a.name === n);
+						expect(act.usesBardicInspiration).toBe(true);
+						expect(act.bardicInspirationCost).toBe(1);
+					});
+
+					// Acts that hand over a free spell must name it.
+					expect(acts.find(a => a.name === "Jester's Jaunt").grantsSpell).toBe("mirror image");
+					expect(acts.find(a => a.name === "Ridiculous Ruse").grantsSpell).toBe("silent image");
 
 					// Verify conditions for save-based acts
 					expect(acts.find(a => a.name === "Pantomime").condition).toBe("charmed");

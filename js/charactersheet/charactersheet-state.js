@@ -806,7 +806,23 @@ class FeatureChoiceParser {
 			const t = String(node.type || "").toLowerCase();
 			if (t === "options") {
 				const options = this._collectRefOptions(node.entries);
-				if (options.length >= 2) groups.push({count: node.count || 1, options});
+				if (options.length >= 2) {
+					// A group made entirely of `refOptionalfeature` entries is a POOL
+					// DEFINITION, not a grant: every such block in the data (Fighting
+					// Style, Maneuvers, Metamagic, Eldritch Invocations, Pact Boon,
+					// Arcane Shot, Elemental Disciplines, Rune Carver, Battle Tactics,
+					// Trickster's Tricks, Precise Strike Methods, Dreamwalker Abilities,
+					// Jester's Acts …) is paired with an `optionalfeatureProgression`
+					// that is the authoritative "how many do you know at level N"
+					// counter. Its `count` is merely the first level's total.
+					//
+					// Seeding it as a sub-feature choice therefore DOUBLE-PROMPTS: the
+					// player picks N acts from the progression picker and then a further
+					// `count` from a second, unrelated prompt. Flag it so the seeder can
+					// leave these pools to the progression path that owns them.
+					const isOptionalFeaturePool = options.every(o => o.refType === "optionalfeature");
+					groups.push({count: node.count || 1, options, optionalFeaturePool: isOptionalFeaturePool});
+				}
 				return; // an options node's children are the choices — do not descend further
 			}
 			if (Array.isArray(node.entries)) {
@@ -927,6 +943,13 @@ class FeatureChoiceParser {
 		// form above; requires the leading "the" + a trailing "skill" to stay tightly
 		// scoped to an explicit single-pick A-or-B choice.
 		if (!m) m = /proficien(?:cy|t)\s+(?:in|with)\s+the\s+([^.]*?\bor\b[^.]*?)\s+skills?\b/i.exec(text);
+
+		// "choose an additional skill to be proficient in between {@skill A} and {@skill B}"
+		// (College of Jesters — Bonus Proficiencies). "between X and Y" is a two-option
+		// single pick spelled with "and" rather than "or", so none of the clauses above
+		// match it. Anchored on `proficien… in between` so ordinary prose that merely
+		// contains "between" cannot trigger it.
+		if (!m) m = /proficien(?:cy|t)\s+(?:in|with)\s+between\s+([^.]*)/i.exec(text);
 
 		if (!m) return null;
 
@@ -2745,6 +2768,7 @@ const FeatureEffectRegistry = {
 		this._registerInterdictBoonEffects();
 		this._registerIllriggerSpecialtyEffects();
 		this._registerClericFeatureEffects();
+		this._registerJesterActEffects();
 	},
 
 	/**
@@ -3826,6 +3850,31 @@ const FeatureEffectRegistry = {
 		// Blessed Strikes options + Tempest's Divine Strike are handled as
 		// weaponDamageRiders in _applyClericDomainCalculations (they need
 		// die-scaling by level + de-dup across sources), not as static effects.
+	},
+
+	/**
+	 * TGTT Bard — College of Jesters: the standing, non-action-economy riders that a
+	 * Jester's Act contributes once known.
+	 *
+	 * The ACTIVE half of each act (its action cost, save DC, Bardic Inspiration price,
+	 * duration) is derived from the act's own prose by
+	 * `CharacterSheetState._buildJesterActActivationInfo` and surfaced as a Use/toggle
+	 * row. Registered here are only the effects that the rest of the sheet has to read
+	 * even when nothing is toggled on — i.e. skill riders, whose "is it on right now?"
+	 * question is answered by the conditional prompt rather than a state.
+	 *
+	 * Acts whose entire effect lands on ANOTHER creature (Pantomime, Prankster,
+	 * Jester's Juggle, Jester's Jest, Fool's Folly, Witty Wordplay) intentionally have
+	 * no entry: the sheet tracks the character, not their victims, so those acts are
+	 * fully expressed by their DC + save ability on the activation row.
+	 */
+	_registerJesterActEffects () {
+		// === DAZZLING DISGUISE — advantage on Deception for an hour after a 1-minute setup.
+		// Conditional (not a flat always-on advantage) because the disguise has to have
+		// been put on; the conditional-modifier prompt surfaces it per roll.
+		this.register("Dazzling Disguise", [
+			{type: "skillAdvantage", skill: "deception", conditional: "while your Dazzling Disguise is worn (1 hour)"},
+		]);
 	},
 
 	/**
@@ -16815,7 +16864,7 @@ class CharacterSheetState {
 			}
 			if (!Array.isArray(options) || options.length < 2) continue;
 			const enriched = options.map(o => ({...o, description: this._describeFeatureRef(o)}));
-			out.push({count: g.count || 1, options: enriched, unique});
+			out.push({count: g.count || 1, options: enriched, unique, optionalFeaturePool: !!g.optionalFeaturePool});
 		}
 		return out;
 	}
@@ -27838,7 +27887,13 @@ class CharacterSheetState {
 				// Derived "equal to walking speed" grant: store as a live equalToWalk modifier
 				// (value 0) so getSpeed()/getSpeedByType() compute max(base, walk) dynamically and
 				// teardown is clean. Distinct from the legacy value:"walk" numeric-freeze path below.
-				if (effect.equalToWalk) {
+				//
+				// `value: "walking"` is the literal `parseEffectsFromDescription()` emits for
+				// "a <type> speed equal to your walking speed"; it is the same grant spelled a
+				// different way. Normalising it here (rather than letting it fall through to the
+				// numeric branch) stops `addNamedModifier` storing an unresolvable string value
+				// and warning "has an unresolvable value 'walking'; treating as 0".
+				if (effect.equalToWalk || effect.value === "walking") {
 					this._addClassFeatureModifier({
 						name: effect.source,
 						type: `speed:${effect.speedType}`,
@@ -28360,6 +28415,20 @@ class CharacterSheetState {
 	}
 
 	_addClassFeatureModifier (modData) {
+		// `equalToWalk` speed grants are idempotent by definition — the resolved speed is
+		// `max(base, walkSpeed)`, so a second identical grant contributes nothing but a
+		// duplicate row in the Modifiers UI and a duplicate line in the speed breakdown.
+		// A feature can legitimately reach here twice (once via the generic feature-text
+		// effect parser, once via a hardcoded `calculations.*` effect); collapse those.
+		if (modData?.equalToWalk && String(modData.type || "").startsWith("speed:")) {
+			const dupe = (this._data.namedModifiers || []).find(m =>
+				m.equalToWalk
+				&& m.type === modData.type
+				&& (m.name || "").toLowerCase() === String(modData.name || "").toLowerCase(),
+			);
+			if (dupe) return dupe.id;
+		}
+
 		const id = this.addNamedModifier({
 			...modData,
 			sourceType: "classFeature",
@@ -42861,6 +42930,12 @@ class CharacterSheetState {
 
 	// =========================================================================
 	// Jester's Acts (TGTT Bard - College of Jesters)
+	//
+	// Acts are optional features tagged `featureType: ["JA"]`. Everything the
+	// sheet needs about an act is derived from the act's OWN prose by the shared
+	// static detector `CharacterSheetState._buildJesterActActivationInfo`, so the
+	// pool stays open to homebrew and there is exactly ONE description of each
+	// act's mechanics rather than a hand-maintained parallel switch.
 	// =========================================================================
 
 	/**
@@ -42873,45 +42948,101 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Get list of Jester's Acts the character knows
-	 * Acts are Optional Features with type "JA"
-	 * @returns {Array<object>} Array of act objects with name, effects, and DC
+	 * The character's Performance skill bonus — the basis of every act save DC.
+	 * @returns {number}
 	 */
-	getJesterActs () {
-		const acts = this._data.features?.filter(f => {
-			if (f.featureType !== "Optional Feature") return false;
-			return f.optionalFeatureTypes?.some(ft => ft === "JA");
-		}) ?? [];
-
-		const bardLevel = this.getClassLevel("Bard");
-		// Act DC = 8 + Performance skill bonus (unique formula)
+	getJesterPerformanceBonus () {
 		const chaMod = this.getAbilityMod("cha");
 		const profBonus = this.getProficiencyBonus();
-		const hasPerformanceExpertise = this.getSkillProficiency("performance") === 2;
-		const performanceSkillBonus = chaMod + profBonus + (hasPerformanceExpertise ? profBonus : 0);
-		const actDc = 8 + performanceSkillBonus;
-
-		return acts.map(a => ({
-			name: a.name,
-			source: a.source,
-			description: a.description,
-			...this._getJesterActEffects(a.name, bardLevel, actDc, profBonus),
-		}));
+		const profLevel = this.getSkillProficiency("performance") || 0;
+		return chaMod + (profLevel >= 1 ? profBonus : 0) + (profLevel === 2 ? profBonus : 0);
 	}
 
 	/**
-	 * Get the DC for a specific Jester's Act
+	 * The shared Jester's Act save DC: 8 + Performance skill bonus.
+	 * NOTE this is deliberately NOT the usual 8 + PB + CHA spell-save formula — the
+	 * subclass keys off the Performance SKILL, so Expertise in Performance (which
+	 * Unparalleled Skill can grant) raises every act DC.
+	 * @returns {number}
+	 */
+	getJesterActBaseDc () {
+		return 8 + this.getJesterPerformanceBonus();
+	}
+
+	/**
+	 * Find a known act by name (case-insensitive).
+	 * @param {string} actName
+	 * @returns {object|null}
+	 */
+	_findJesterAct (actName) {
+		const wanted = String(actName || "").toLowerCase();
+		const found = (this._data.features || []).find(f =>
+			String(f?.name || "").toLowerCase() === wanted
+			&& f?.optionalFeatureTypes?.includes("JA")) || null;
+		return found ? this._hydrateJesterActProse(found) : null;
+	}
+
+	/**
+	 * Every act's mechanics are read out of its own rules text, so an act that reached
+	 * `_data.features` without prose (an older save file, a partially-resolved ref) would
+	 * silently lose its DC, action cost and Bardic Inspiration price. Re-attach the text
+	 * from the loaded optional-feature catalog when it is missing.
+	 * @param {object} feature
+	 * @returns {object} the feature, with `entries`/`description` filled in when possible
+	 */
+	_hydrateJesterActProse (feature) {
+		if (!feature) return feature;
+		if (feature.description || feature.entries?.length) return feature;
+		const wanted = String(feature.name || "").toLowerCase();
+		const cat = (this._optionalFeatureCatalog || []).find(c => String(c?.name || "").toLowerCase() === wanted);
+		if (!cat?.entries?.length) return feature;
+		return {...feature, entries: cat.entries};
+	}
+
+	/**
+	 * Get list of Jester's Acts the character knows, each enriched with its derived
+	 * mechanics (action economy, save ability + DC, range, Bardic Inspiration cost,
+	 * duration).
+	 * @returns {Array<object>}
+	 */
+	getJesterActs () {
+		const acts = (this._data.features || []).filter(f =>
+			f?.featureType === "Optional Feature" && f?.optionalFeatureTypes?.includes("JA"));
+
+		const baseDc = this.getJesterActBaseDc();
+
+		return acts.map(raw => {
+			const a = this._hydrateJesterActProse(raw);
+			const info = CharacterSheetState.detectActivatableFeature(a) || {};
+			return {
+				name: a.name,
+				source: a.source,
+				description: a.description,
+				timing: info.activationAction || null,
+				saveType: info.saveAbility || null,
+				dc: info.saveAbility ? baseDc : null,
+				range: info.range ?? null,
+				duration: info.duration || null,
+				bardicInspirationCost: info.bardicInspirationCost || 0,
+				usesBardicInspiration: !!info.usesBardicInspiration,
+				isToggle: !!info.isToggle,
+				condition: info.condition || null,
+				grantsSpell: info.grantsSpell || null,
+				acBonus: info.acBonusScale === "proficiency" ? this.getProficiencyBonus() : null,
+			};
+		});
+	}
+
+	/**
+	 * Get the DC for a specific Jester's Act.
 	 * @param {string} actName - Name of the act
-	 * @returns {number|null} The save DC, or null if act has no save
+	 * @returns {number|null} The save DC, or null if the act calls for no saving throw
 	 */
 	getJesterActDc (actName) {
-		const chaMod = this.getAbilityMod("cha");
-		const profBonus = this.getProficiencyBonus();
-		const hasPerformanceExpertise = this.getSkillProficiency("performance") === 2;
-		const performanceSkillBonus = chaMod + profBonus + (hasPerformanceExpertise ? profBonus : 0);
-		const actDc = 8 + performanceSkillBonus;
-		const effects = this._getJesterActEffects(actName, 0, actDc, profBonus);
-		return effects.dc;
+		const act = this._findJesterAct(actName);
+		if (!act) return null;
+		const info = CharacterSheetState.detectActivatableFeature(act);
+		return info?.saveAbility ? this.getJesterActBaseDc() : null;
 	}
 
 	/**
@@ -42923,144 +43054,6 @@ class CharacterSheetState {
 		if (bardLevel >= 14) return 5;
 		if (bardLevel >= 6) return 4;
 		return 3;
-	}
-
-	/**
-	 * Get mechanical effects for a specific Jester's Act
-	 * @param {string} actName - Name of the act
-	 * @param {number} bardLevel - Current bard level
-	 * @param {number} actDc - Base act save DC (8 + Performance skill)
-	 * @param {number} profBonus - Proficiency bonus
-	 * @returns {object} Effects including DC, save type, timing, conditions, costs
-	 */
-	_getJesterActEffects (actName, bardLevel, actDc, profBonus) {
-		const effects = {
-			dc: null,
-			saveType: null,
-			timing: null,
-			usesBardicInspiration: false,
-			bardicInspirationCost: 0,
-			effect: null,
-			condition: null,
-			duration: null,
-			range: null,
-			grantsSpell: null,
-		};
-
-		switch (actName) {
-			case "Pantomime":
-				effects.dc = actDc;
-				effects.saveType = "wis";
-				effects.timing = "action";
-				effects.effect = "target charmed, speed 0, disadvantage on attacks";
-				effects.condition = "charmed";
-				effects.duration = "until end of next turn";
-				effects.range = 30;
-				break;
-
-			case "Prankster":
-				effects.dc = actDc;
-				effects.saveType = "wis";
-				effects.timing = "action";
-				effects.effect = "target dazed until end of next turn";
-				effects.condition = "dazed";
-				effects.duration = "until end of next turn";
-				effects.range = 30;
-				break;
-
-			case "Trickster's Disengagement":
-				effects.dc = null;
-				effects.timing = "bonus action";
-				effects.effect = "disengage from up to 5 creatures";
-				break;
-
-			case "Tumbler":
-				effects.dc = null;
-				effects.timing = "bonus action";
-				effects.effect = "can move through hostile creature spaces this turn";
-				effects.duration = "this turn";
-				break;
-
-			case "Dazzling Disguise":
-				effects.dc = null;
-				effects.timing = "1 minute";
-				effects.effect = "advantage on Deception checks for 1 hour";
-				effects.duration = "1 hour";
-				break;
-
-			case "Jester's Juggle":
-				effects.dc = actDc;
-				effects.saveType = "wis";
-				effects.timing = "bonus action";
-				effects.effect = "enamored targets grant advantage on attacks against them";
-				effects.range = 30;
-				break;
-
-			case "Jester's Jest":
-				effects.dc = actDc;
-				effects.saveType = "wis";
-				effects.timing = "bonus action";
-				effects.effect = "target can't take reactions until end of next turn";
-				effects.duration = "until end of next turn";
-				effects.range = 30;
-				break;
-
-			case "Witty Wordplay":
-				effects.dc = null;
-				effects.timing = "with Bardic Inspiration";
-				effects.effect = "target has disadvantage on next attack against you or ally";
-				effects.range = 60;
-				break;
-
-			case "Fool's Folly":
-				effects.dc = actDc;
-				effects.saveType = "int";
-				effects.timing = "with Bardic Inspiration";
-				effects.usesBardicInspiration = true;
-				effects.effect = "target incapacitated until end of next turn on failed save";
-				effects.condition = "incapacitated";
-				effects.duration = "until end of next turn";
-				effects.range = 60;
-				break;
-
-			case "Laughing Lunge":
-				effects.dc = null;
-				effects.timing = "attack";
-				effects.usesBardicInspiration = true;
-				effects.bardicInspirationCost = 1;
-				effects.effect = "attack with advantage, +1d6 psychic damage";
-				break;
-
-			case "Jester's Jaunt":
-				effects.dc = null;
-				effects.timing = "action";
-				effects.usesBardicInspiration = true;
-				effects.bardicInspirationCost = 1;
-				effects.effect = "cast mirror image without spell slot or components";
-				effects.grantsSpell = "mirror image";
-				break;
-
-			case "Ridiculous Ruse":
-				effects.dc = null;
-				effects.timing = "action";
-				effects.usesBardicInspiration = true;
-				effects.bardicInspirationCost = 1;
-				effects.effect = "cast silent image without spell slot or components";
-				effects.grantsSpell = "silent image";
-				break;
-
-			case "Jester's Agility":
-				effects.dc = null;
-				effects.timing = "reaction";
-				effects.usesBardicInspiration = true;
-				effects.bardicInspirationCost = 1;
-				effects.effect = `+${profBonus} to AC until start of next turn`;
-				effects.acBonus = profBonus;
-				effects.duration = "until start of next turn";
-				break;
-		}
-
-		return effects;
 	}
 
 	/**
@@ -50704,7 +50697,22 @@ class CharacterSheetState {
 	 * @returns {object} Analysis result with isToggle, duration, endConditions, confidence
 	 */
 	static analyzeToggleability (text) {
-		if (!text) return {isToggle: false, confidence: 0};
+		// NOTE: callers dereference `.endConditions.length` and `.duration` directly, so
+		// the empty-text early return must still hand back the FULL result shape. Returning
+		// a partial `{isToggle, confidence}` here used to throw a TypeError for any feature
+		// that carried no description but whose name matched an ACTIVE_STATE_TYPES entry.
+		if (!text) {
+			return {
+				isToggle: false,
+				isInstant: false,
+				duration: null,
+				endConditions: [],
+				confidence: 0,
+				activationAction: null,
+				resourceType: null,
+				resourceCost: null,
+			};
+		}
 
 		const result = {
 			isToggle: false,
@@ -51395,6 +51403,12 @@ class CharacterSheetState {
 		"water walk": "passive",
 		"focus speech": "passive",
 		"uncanny metabolism": "passive",
+		// TGTT Bard (College of Jesters). "Jester's Acts" is the umbrella feature that
+		// explains the pool and states the act save DC; the acts themselves are separate
+		// optional features with their own rows. Its prose ("perform specific tricks
+		// during your performance") otherwise reads as an activatable ability, minting a
+		// phantom, resource-less toggle alongside the real acts.
+		"jester's acts": "passive",
 
 		// === Combat actions wrongly detected as activatable toggle states ===
 		"hand of healing": "combat",
@@ -51708,9 +51722,115 @@ class CharacterSheetState {
 		for (const entry of entries) {
 			if (typeof entry === "string") continue;
 			if (typeof entry?.type === "string" && /^ref[A-Z]/.test(entry.type)) { ++nRefs; continue; }
+			// An `{type:"options"}` group whose children are ALL feature refs is the very
+			// same "here are the options you gained" shape, merely wrapped in an options
+			// node — e.g. "Jester's Acts Options", "Battle Tactics Options", "Metamagic
+			// Options", "Eldritch Invocation Options", "Arcane Shot Options", "Trickster's
+			// Tricks Options", "Precise Strike Methods", "Dreamwalker Abilities". The
+			// referenced options are loaded as features in their own right and carry the
+			// mechanics, so the wrapper must not mint a second, resource-less ability row.
+			if (String(entry?.type || "").toLowerCase() === "options"
+				&& Array.isArray(entry.entries) && entry.entries.length
+				&& entry.entries.every(c => typeof c?.type === "string" && /^ref[A-Z]/.test(c.type))) {
+				nRefs += entry.entries.length;
+				continue;
+			}
 			return false; // structured content of its own ⇒ not a pure wrapper
 		}
 		return nRefs > 0;
+	}
+
+	/**
+	 * Build activation info for a single Jester's Act (TGTT Bard, optional feature type "JA").
+	 *
+	 * Everything is read out of the act's own prose so the pool stays open to homebrew:
+	 *   • action economy — "as an action" / "as a bonus action" / "as a reaction"; acts
+	 *     triggered by spending Bardic Inspiration, and Dazzling Disguise's 1-minute ritual,
+	 *     are "special" (no standard action cost of their own);
+	 *   • Bardic Inspiration cost — from the `consumes` tag, or from prose that says the act
+	 *     is used WITH / by expending an inspiration die. A `consumes` entry with no `amount`
+	 *     (Fool's Folly) means one use, matching every other act in the pool;
+	 *   • saving throw — ability + "act DC", which is 8 + the character's Performance skill
+	 *     bonus. That is a subclass-specific formula, so the numeric DC is filled in by
+	 *     {@link getActivatableFeatures} (this method is static and has no character);
+	 *   • duration — acts that persist get `interactionMode: "toggle"` so the player can see
+	 *     and clear them; one-shots are `"limited"` Use buttons.
+	 *
+	 * @param {object} feature
+	 * @param {string} rawText
+	 * @param {string} text lower-cased, tag-stripped prose
+	 * @returns {object|null}
+	 */
+	static _buildJesterActActivationInfo (feature, rawText, text) {
+		if (!text) return null;
+
+		const usesInspirationProse = /bardic inspiration/i.test(text);
+		const consumesInspiration = /bardic inspiration/i.test(feature?.consumes?.name || "");
+		// `amount` is optional in the data (Fool's Folly omits it); one use is the pool-wide
+		// convention and matches the prose of every act that spends inspiration.
+		const bardicInspirationCost = consumesInspiration
+			? (feature.consumes.amount || 1)
+			: (/expend\w*\s+(?:one\s+use|a\s+use)[^.]*bardic inspiration/i.test(text) ? 1 : 0);
+
+		let activationAction = "special";
+		if (/as a bonus action|use this act as a bonus action/i.test(text)) activationAction = "bonus";
+		else if (/as a reaction|use this act as a reaction/i.test(text)) activationAction = "reaction";
+		else if (/as an action/i.test(text)) activationAction = "action";
+		// Riders on the Attack action (Laughing Lunge) cost no action of their own — they
+		// modify an attack the character was already making.
+		else if (/make (?:your|an|the) attack action/i.test(text)) activationAction = "attack";
+
+		const saveMatch = /\b(strength|dexterity|constitution|intelligence|wisdom|charisma)\s+saving throw/i.exec(text);
+		const saveAbility = saveMatch ? saveMatch[1].slice(0, 3).toLowerCase() : null;
+
+		const rangeMatch = /within (\d+) feet/i.exec(text);
+
+		// Condition imposed on a failed save, read from the {@condition} tag rather than a
+		// per-act table, so retagging the homebrew updates the sheet automatically.
+		const condMatch = /\{@condition\s+([^}|]+)/i.exec(rawText || "");
+		const condition = condMatch ? condMatch[1].trim().toLowerCase() : null;
+
+		// Acts that hand the character a spell for free ({@spell mirror image} / {@spell
+		// silent image}) — surfaced so the spell can be granted rather than just described.
+		const spellMatch = /cast the spell \{@spell\s+([^}|]+)/i.exec(rawText || "");
+		const grantsSpell = spellMatch ? spellMatch[1].trim().toLowerCase() : null;
+
+		// "a bonus to AC equal to your proficiency bonus" — the magnitude is per-character,
+		// so record the SCALE here and let the instance method resolve the number.
+		const acBonusScale = /bonus to (?:your )?ac equal to your proficiency bonus/i.test(text)
+			? "proficiency"
+			: null;
+
+		// Acts whose benefit persists past the instant of use are toggles, so the sheet can
+		// show "this is currently running" and apply the state's effects while it is.
+		let duration = null;
+		if (/for the next hour|for 1 hour/i.test(text)) duration = "1 hour";
+		else if (/until the start of your next turn/i.test(text)) duration = "until the start of your next turn";
+		else if (/for the rest of the turn/i.test(text)) duration = "rest of the turn";
+		const isToggle = duration != null;
+
+		return {
+			stateTypeId: "custom",
+			isCustom: true,
+			isDataDriven: true,
+			matchedBy: "jestersAct",
+			isJesterAct: true,
+			interactionMode: isToggle ? "toggle" : "limited",
+			isToggle,
+			isInstant: !isToggle,
+			activationAction,
+			duration,
+			saveAbility,
+			// Filled in per-character by getActivatableFeatures() — 8 + Performance bonus.
+			actDc: null,
+			range: rangeMatch ? Number(rangeMatch[1]) : null,
+			condition,
+			grantsSpell,
+			acBonusScale,
+			bardicInspirationCost: bardicInspirationCost || null,
+			usesBardicInspiration: !!bardicInspirationCost || usesInspirationProse,
+			effects: this.parseEffectsFromDescription(rawText) || [],
+		};
 	}
 
 	/**
@@ -51726,11 +51846,15 @@ class CharacterSheetState {
 		const name = feature?.name?.toLowerCase() || "";
 		const isCrimsonRite = feature?.optionalFeatureTypes?.includes("CR");
 		const isBloodCurse = feature?.optionalFeatureTypes?.includes("BC");
+		// A Jester's Act (TGTT Bard) always carries its mechanics in `entries`; like
+		// Crimson Rites and Blood Curses above, the type tag alone is enough to keep it
+		// out of the "no description ⇒ not activatable" early return below.
+		const isJesterAct = feature?.optionalFeatureTypes?.includes("JA");
 		const isHybridTransformation = name === "hybrid transformation";
 		// (R20) Allow features that carry classification-relevant markers to be processed
 		// even when they only have `entries` (no rendered `description`) — e.g. Invoke Hell
 		// options expanded from refSubclassFeature, or synthesized manifestation children.
-		const hasMarkers = !!(feature?.consumes || feature?._raceManifestation || isCrimsonRite || isBloodCurse || isHybridTransformation);
+		const hasMarkers = !!(feature?.consumes || feature?._raceManifestation || isCrimsonRite || isBloodCurse || isHybridTransformation || isJesterAct);
 		// (R40) A feature named in FEATURE_CLASSIFICATION_OVERRIDES must be processed even when
 		// it arrives entries-only (no rendered `description`), so its override is honoured
 		// rather than dropped by this early return. The override branch below builds its own
@@ -51742,6 +51866,20 @@ class CharacterSheetState {
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 		const psionic = this._detectPsionicActivation(feature, rawText, text);
 		if (psionic) return psionic;
+
+		// ===== JESTER'S ACTS (TGTT Bard — College of Jesters, optional feature type "JA") =====
+		// Every act is a discrete, in-play thing the player DOES, so each one gets its own
+		// row + Use button in the generic "Available to Activate" list. Detection is driven
+		// off the act's own prose rather than a name switch, so a homebrewer adding a 14th
+		// act inherits the behaviour for free.
+		//
+		// Left to the generic pipeline, 6 of the 13 acts were classified as NOT activatable
+		// at all (no "as an action" opener, or their trigger is "when you use your Bardic
+		// Inspiration"), so they existed only as Features-tab prose.
+		if (isJesterAct) {
+			const act = this._buildJesterActActivationInfo(feature, rawText, text);
+			if (act) return act;
+		}
 		// (CS-BUG-095) Crown of Spellfire (Spellfire 18) — a free "alter Innate Sorcery"
 		// toggle, NOT a resource spender. Its prose mentions "spend 5 Sorcery Points"
 		// (the *restore* cost, handled by restoreCrownOfSpellfire()). Left to the generic
@@ -53873,6 +54011,13 @@ class CharacterSheetState {
 			const isActive = activationInfo.stateTypeId !== "custom"
 				? this.isStateTypeActive(activationInfo.stateTypeId)
 				: this._data.activeStates.some(s => s.sourceFeatureId === feature.id && s.active);
+
+			// Jester's Acts share ONE save DC — 8 + the character's Performance skill bonus
+			// (not the usual 8 + PB + CHA). `detectActivatableFeature` is static and cannot
+			// compute it, so fill it in here, where we have the character.
+			if (activationInfo.isJesterAct && activationInfo.saveAbility) {
+				activationInfo.actDc = this.getJesterActDc(feature.name);
+			}
 
 			activatables.push({
 				feature,

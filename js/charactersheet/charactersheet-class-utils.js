@@ -3566,6 +3566,17 @@ class CharacterSheetClassUtils {
 					// permitted because opt-in Principles cannot be achieved without it.
 					if (String(feature.name || "").trim().toLowerCase() === "principles of devotion") continue;
 
+					// Optional-feature POOLS (Jester's Acts Options, Battle Tactics Options,
+					// Metamagic Options, Eldritch Invocation Options, Trickster's Tricks
+					// Options, Precise Strike Methods, Arcane Shot Options, …) are owned by
+					// the `optionalfeatureProgression` picker, which already knows how many
+					// picks the character has at this level and handles swaps on level-up.
+					// Seeding them here as well produced a SECOND, extra prompt on top of
+					// the correct one (measured: a L14 Jester Bard was asked for 5 acts via
+					// the progression and then a 6th via this path). See
+					// `_extractStructuredChoices` for why the flag is set.
+					if (group.optionalFeaturePool) continue;
+
 					// (a) Already resolved for THIS parent-instance (class + level-scoped)?
 					if (typeof state.hasChosenSubfeatureForParent === "function"
 						&& state.hasChosenSubfeatureForParent(feature.name, feature.source, feature.level, feature.className, feature.classSource)) continue;
@@ -4203,7 +4214,41 @@ class CharacterSheetClassUtils {
 			return CharacterSheetClassUtils.parseExpertiseEntries(feature.entries);
 		}
 
-		return CharacterSheetClassUtils.findExpertiseInEntries(feature.entries);
+		const nested = CharacterSheetClassUtils.findExpertiseInEntries(feature.entries);
+		if (nested) return nested;
+
+		// Some features spell an Expertise grant out in their OWN top-level prose rather
+		// than in a nested `{type:"entries", name:"Expertise"}` block — e.g. College of
+		// Jesters' Unparalleled Skill: "choose one of your skill proficiencies. Your
+		// proficiency bonus is doubled for any ability check you make that uses the
+		// chosen proficiency."
+		//
+		// The gate is deliberately narrow: an expertise phrase ALONE is far too common
+		// (Dragon Ancestor, Natural Explorer, Royal Envoy, Blessings of Knowledge,
+		// Survivalist, Glorious Purpose … all double a proficiency bonus in a fixed,
+		// non-choosable way and must NOT be turned into a skill-picker prompt). So we
+		// additionally require an explicit "choose/select/pick <N> … skill proficiency"
+		// clause, which is what distinguishes a player-facing pick from a passive grant.
+		if (CharacterSheetClassUtils._featureTextOffersExpertiseChoice(feature.entries)) {
+			return CharacterSheetClassUtils.parseExpertiseEntries(feature.entries);
+		}
+
+		return null;
+	}
+
+	/**
+	 * True when a feature's own prose both (a) invites the player to choose from among
+	 * their existing skill proficiencies and (b) states that the proficiency bonus is
+	 * doubled / expertise is gained. Both halves are required — see the caller.
+	 * @param {Array<*>} entries
+	 * @returns {boolean}
+	 */
+	static _featureTextOffersExpertiseChoice (/** @type {*} */ entries) {
+		if (!Array.isArray(entries)) return false;
+		const text = entries.filter((/** @type {*} */ e) => typeof e === "string").join(" ");
+		if (!text) return false;
+		if (!CharacterSheetClassUtils.entryGrantsExpertise([text])) return false;
+		return /\b(?:choose|select|pick)\s+(?:one|two|three|four|1|2|3|4|another)\b[^.]{0,40}?\bskill\s+proficienc(?:y|ies)/i.test(text);
 	}
 
 	/**
