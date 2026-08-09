@@ -394,8 +394,35 @@ the Mountain (Prone and involuntary ground-movement immunity) and Unstoppable
 reductions). Existing conditions remain stored but their active-state effects
 are suppressed while the immunity applies, then resume when Rage ends.
 
-#### Resolute Stance (Juggernaut Barbarian)
+#### Manifest Chains (Path of the Chained Fury Barbarian, TGTT)
 
+`manifestChains` is a **rage-gated sub-state** — the reference example of
+`requiresStates` on a homebrew subclass. The RAW is "when you enter your rage,
+you can choose to manifest spectral chains", so manifesting is a *choice made
+within* rage rather than a second resource:
+
+```javascript
+manifestChains: {
+    requiresStates: ["rage"],   // cannot activate until raging; cascades off with rage
+    activationAction: "free",
+    resourceCost: 0,
+    preferCuratedEffects: true,
+    duration: "While raging",
+}
+```
+
+Three consequences fall out of `requiresStates` for free (see `astralBody`):
+`activateState("manifestChains")` returns `null` while not raging,
+`getActivatableFeatures()` omits the row entirely so the toggle is not even
+offered, and `deactivateState("rage")` cascades the chains off.
+
+The state gates the granted **Spectral Chains** attack (`requiresState:
+"manifestChains"` on the `grantedAttacks` descriptor), so the weapon appears in
+the Combat tab only while the chains are actually manifested. Because the state
+is nested inside Rage, the chains inherit Rage's `breaksConcentration` and its
+`exclusiveWith: ["bladesong"]` without restating either.
+
+#### Resolute Stance (Juggernaut Barbarian)
 `resoluteStance` is a free, start-of-turn state which expires at the start of
 the next turn. It grants Grappled immunity, imposes disadvantage on the
 Juggernaut's weapon attacks, and exposes disadvantage on attacks against the

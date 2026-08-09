@@ -4103,6 +4103,8 @@ class CharacterSheetState {
 	static BASE_MELEE_REACH = 5;
 	/** Extra reach granted by a weapon's "Reach" property, in feet. */
 	static REACH_PROPERTY_BONUS = 5;
+	/** Ascending size categories, used by {@link getGrappleSizeCategory}. */
+	static GRAPPLE_SIZE_ORDER = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
 
 	/**
 	 * Monotonic counter backing {@link _nextActiveStateId}. Active-state ids used
@@ -19187,58 +19189,116 @@ class CharacterSheetState {
 							case "path of the chained fury": {
 								const conMod = this.getAbilityMod("con");
 
-								// Manifest Chains (level 3)
-								// Spectral chains: martial, finesse, light, force damage
-								// Can grapple or shove on hit, count as 1 size larger
+								// ---- Manifest Chains (level 3) ----------------------------
+								// Scaling comes from the subclass's own `subclassTableGroups`
+								// ("Chains Damage" / "Chains Range") whenever the full subclass
+								// entity is available, so rebalancing the homebrew table moves
+								// the sheet with it. `addClass` stores lean {name, source} refs,
+								// so the hardcoded ladder below stays as the fallback and MUST
+								// keep matching the shipped table.
+								const scData = cls.subclass;
+								const tableDamage = CharacterSheetClassUtils.getSubclassTableDice(scData, level, /chains? damage/i);
+								const tableRange = CharacterSheetClassUtils.getSubclassTableNumber(scData, level, /chains? range/i);
+
 								calculations.hasManifestChains = true;
 								calculations.chainProperties = ["finesse", "light"];
 								calculations.chainDamageType = "force";
+								calculations.chainDamageDie = tableDamage
+									|| (level >= 14 ? "2d6" : level >= 10 ? "1d12" : level >= 6 ? "1d10" : "1d8");
+								calculations.chainRange = tableRange
+									?? (level >= 14 ? 30 : level >= 10 ? 25 : level >= 6 ? 20 : 15);
+								calculations.chainCount = level >= 14 ? 4 : 2;
+								// "You count as 1 size category larger" (2 at L10) when grappling
+								// or moving a grappled creature. Fed to getGrappleSizeCategory().
+								calculations.chainGrappleSizeBonus = level >= 10 ? 2 : 1;
+								calculations.grappleSizeCategoryBonus = Math.max(
+									calculations.grappleSizeCategoryBonus || 0,
+									calculations.chainGrappleSizeBonus,
+								);
 
-								// Damage and range scale with level
-								if (level >= 14) {
-									calculations.chainDamageDie = "2d6";
-									calculations.chainRange = 30;
-									calculations.chainGrappleSizeBonus = Infinity; // Any size
-									calculations.chainCount = 4;
-									calculations.chainExtraAttack = true; // 3 attacks if all chains
-								} else if (level >= 10) {
-									calculations.chainDamageDie = "1d12";
-									calculations.chainRange = 25;
-									calculations.chainGrappleSizeBonus = 2;
-									calculations.chainCount = 2;
-								} else if (level >= 6) {
-									calculations.chainDamageDie = "1d10";
-									calculations.chainRange = 20;
-									calculations.chainGrappleSizeBonus = 1;
-									calculations.chainCount = 2;
-								} else {
-									calculations.chainDamageDie = "1d8";
-									calculations.chainRange = 15;
-									calculations.chainGrappleSizeBonus = 1;
-									calculations.chainCount = 2;
-								}
+								// The chains are a REACH weapon, not a ranged one: they grapple and
+								// shove on a hit (both reach mechanics), are finesse/light, and must
+								// receive Rage damage. Declared melee with a per-attack `reachBonus`
+								// so the extended reach never leaks onto the barbarian's other
+								// weapons (getMeleeReach stays untouched).
+								(calculations.grantedAttacks ||= []).push({
+									id: "feature_manifest-chains",
+									name: "Spectral Chains",
+									sourceFeature: "Manifest Chains",
+									isMelee: true,
+									abilityMod: "finesse",
+									damage: calculations.chainDamageDie,
+									damageType: calculations.chainDamageType,
+									attackBonus: 0,
+									damageBonus: 0,
+									reachBonus: Math.max(0, calculations.chainRange - CharacterSheetState.BASE_MELEE_REACH),
+									range: `${calculations.chainRange} ft.`,
+									properties: ["F", "L"],
+									countsAsMagical: level >= 6,
+									actionType: "action",
+									requiresState: "manifestChains",
+								});
 
-								// Chain Imprisonment (level 6)
-								// Chains magical, can restrain on grapple, damage per turn
+								// On-hit riders. Never auto-applied — each is a player choice
+								// resolved after the attack lands, via the generic post-attack
+								// `featureOnHitOptions` hook.
+								const onHit = (calculations.attackOnHitOptions ||= []);
+								onHit.push({
+									id: "chains-grapple",
+									name: "Grapple with the chains",
+									attackSourceFeature: "Manifest Chains",
+									description: `Grapple the target in addition to dealing damage. You count as ${calculations.chainGrappleSizeBonus} size ${calculations.chainGrappleSizeBonus === 1 ? "category" : "categories"} larger for the grapple.`,
+								});
+								onHit.push({
+									id: "chains-shove",
+									name: "Shove with the chains",
+									attackSourceFeature: "Manifest Chains",
+									description: "Shove the target in addition to dealing damage.",
+								});
+
+								// ---- Chain Imprisonment (level 6) ------------------------
 								if (level >= 6) {
 									calculations.hasChainImprisonment = true;
 									calculations.chainsAreMagical = true;
 									calculations.chainRestrainDc = 8 + profBonus + conMod;
-									calculations.chainRestrainDamage = level; // Per turn
+									calculations.chainRestrainDamage = level; // force damage per turn
+									onHit.push({
+										id: "chains-restrain",
+										name: "Chain Imprisonment (restrain)",
+										attackSourceFeature: "Manifest Chains",
+										description: `On a successful grapple, the target must succeed on a Strength saving throw or be restrained until the grapple ends, taking ${level} force damage at the start of each of its turns.`,
+										save: {ability: "str", dc: calculations.chainRestrainDc},
+										recurringDamage: {amount: level, type: "force", when: "start of each of its turns"},
+									});
 								}
 
-								// Chain Control (level 10)
-								// Immediate 10ft shove on grapple
+								// ---- Chain Control (level 10) ---------------------------
 								if (level >= 10) {
 									calculations.hasChainControl = true;
 									calculations.chainShoveDistance = 10;
+									onHit.push({
+										id: "chains-control-shove",
+										name: "Chain Control (10 ft. reposition)",
+										attackSourceFeature: "Manifest Chains",
+										description: "On a successful grapple, immediately shove the target 10 feet in any direction, provided it ends within the chains' reach.",
+									});
 								}
 
-								// Unchained Fury (level 14)
-								// No movement cost to move grappled creatures
+								// ---- Unchained Fury (level 14) --------------------------
 								if (level >= 14) {
 									calculations.hasUnchainedFury = true;
 									calculations.chainFreeMovement = true;
+									calculations.chainExtraAttack = true;
+									calculations.grappleSizeUnlimited = true;
+									// "…you can instead attack three times if ALL the attacks are
+									// made with your chains." Data-driven allowance consumed by the
+									// combat tab's attack-action budget.
+									(calculations.attackActionAllowances ||= []).push({
+										sourceFeature: "Manifest Chains",
+										count: 3,
+										requiresState: "manifestChains",
+										label: "Unchained Fury",
+									});
 								}
 								break;
 							}
@@ -49458,6 +49518,34 @@ class CharacterSheetState {
 			exclusiveWith: ["bladesong"], // Cannot rage and bladesong simultaneously
 			breaksConcentration: true, // Rage prevents maintaining concentration
 		},
+		/**
+		 * Manifest Chains (Barbarian: Path of the Chained Fury, TGTT L3).
+		 *
+		 * "When you rage, you can CHOOSE to manifest a pair of spectral chains… they
+		 * vanish when your rage ends." Modelled as a free, resource-less sub-state
+		 * gated on `rage`: it only becomes offerable once raging (getActivatableFeatures
+		 * hides features whose `requiresStates` gate is unmet) and cascades off
+		 * automatically when Rage is deactivated (deactivateState's dependent sweep).
+		 *
+		 * The chains' ATTACK is not declared here — it is a `grantedAttacks` descriptor
+		 * carrying `requiresState: "manifestChains"`, so its damage/reach scale off the
+		 * subclass progression table rather than a frozen effect literal.
+		 */
+		manifestChains: {
+			id: "manifestChains",
+			name: "Manifest Chains",
+			icon: "⛓️",
+			description: "Spectral chains extend from your arms: a martial finesse/light weapon with extended reach that can grapple or shove on a hit.",
+			effects: [
+				{type: "info", label: "The chains act as an elongated appendage for object interaction and ability checks that don't need fine motor skills."},
+			],
+			preferCuratedEffects: true,
+			duration: "While raging",
+			endConditions: ["Your rage ends", "Knocked unconscious"],
+			requiresStates: ["rage"],
+			activationAction: "free",
+			resourceCost: 0,
+		},
 		unearthlyCountenance: {
 			id: "unearthlyCountenance",
 			name: "Unearthly Countenance",
@@ -52244,60 +52332,69 @@ class CharacterSheetState {
 			};
 		}
 
-		for (const [stateTypeId, stateType] of Object.entries(this.ACTIVE_STATE_TYPES)) {
-			// Skip generic types that shouldn't match by name
-			if (stateType.isGeneric && !stateType.detectPatterns?.length) continue;
-			// CS-BUG-083: states that are ONLY ever applied programmatically (the Shadow
-			// Knight's shadowcasting options) must never be name-matched — their names
-			// ("Eyes of the Dark", "Darkness") collide with real features from other
-			// classes, hijacking them into the wrong state with the wrong effects.
-			if (stateType.noNameDetect) continue;
+		// TWO PASSES, DELIBERATELY.
+		//
+		// An EXACT NAME MATCH is a far stronger signal than some OTHER state's prose
+		// pattern, so every state gets its name checked before any state gets its
+		// patterns checked. A single interleaved pass resolved by object insertion
+		// order instead, which silently hijacked features:
+		//
+		//   Chained Fury's "Manifest Chains" reads "When you rage, you can choose to
+		//   manifest a pair of spectral chains ... they vanish when your rage ends."
+		//   `rage` is declared first in ACTIVE_STATE_TYPES and its
+		//   `you can\b.*\brage\b` pattern matched that text, so the feature resolved
+		//   to `rage` — wrong id, wrong effects, wrong resource cost (1 rage use for
+		//   a free action), and the real `manifestChains` toggle never appeared.
+		//
+		// This is the same failure family as CS-BUG-083 (`noNameDetect`) approached
+		// from the other side: there a name collision hijacked a feature, here a
+		// pattern collision did. Ordering the passes fixes the whole class, because
+		// any state whose own name matches exactly is unambiguously the right answer.
+		const detectCandidates = Object.entries(this.ACTIVE_STATE_TYPES)
+			.filter(([, stateType]) => {
+				// Skip generic types that shouldn't match by name
+				if (stateType.isGeneric && !stateType.detectPatterns?.length) return false;
+				// CS-BUG-083: states that are ONLY ever applied programmatically (the Shadow
+				// Knight's shadowcasting options) must never be name-matched — their names
+				// ("Eyes of the Dark", "Darkness") collide with real features from other
+				// classes, hijacking them into the wrong state with the wrong effects.
+				if (stateType.noNameDetect) return false;
+				return true;
+			});
 
-			// Check name match
-			if (name === stateType.name.toLowerCase()) {
-				const parsedEffects = this.parseEffectsFromDescription(rawText);
-				return {
-					stateTypeId,
-					stateType,
-					matchedBy: "name",
-					activationAction: activationAction || stateType.activationAction,
-					effects: (stateType.preferCuratedEffects && stateType.effects?.length) || parsedEffects.length === 0 ? stateType.effects : parsedEffects,
-					duration: toggleAnalysis.duration || stateType.duration,
-					endConditions: toggleAnalysis.endConditions.length > 0 ? toggleAnalysis.endConditions : stateType.endConditions,
-					staminaCost,
-					kiCost,
-					focusPointCost,
-					sorceryPointCost,
-					bardicInspirationCost,
-					channelDivinityCost,
-					superiorityDiceCost,
-					isToggle: true,
-				};
-			}
+		const buildDetection = (stateTypeId, stateType, matchedBy) => {
+			const parsedEffects = this.parseEffectsFromDescription(rawText);
+			return {
+				stateTypeId,
+				stateType,
+				matchedBy,
+				activationAction: activationAction || stateType.activationAction,
+				effects: (stateType.preferCuratedEffects && stateType.effects?.length) || parsedEffects.length === 0 ? stateType.effects : parsedEffects,
+				duration: toggleAnalysis.duration || stateType.duration,
+				endConditions: toggleAnalysis.endConditions.length > 0 ? toggleAnalysis.endConditions : stateType.endConditions,
+				requiresStates: stateType.requiresStates,
+				staminaCost,
+				kiCost,
+				focusPointCost,
+				sorceryPointCost,
+				bardicInspirationCost,
+				channelDivinityCost,
+				superiorityDiceCost,
+				isToggle: true,
+			};
+		};
 
-			// Check detect patterns
-			if (stateType.detectPatterns) {
-				for (const pattern of stateType.detectPatterns) {
-					if (new RegExp(pattern, "i").test(name) || new RegExp(pattern, "i").test(text)) {
-						const parsedEffects = this.parseEffectsFromDescription(rawText);
-						return {
-							stateTypeId,
-							stateType,
-							matchedBy: "pattern",
-							activationAction: activationAction || stateType.activationAction,
-							effects: (stateType.preferCuratedEffects && stateType.effects?.length) || parsedEffects.length === 0 ? stateType.effects : parsedEffects,
-							duration: toggleAnalysis.duration || stateType.duration,
-							endConditions: toggleAnalysis.endConditions.length > 0 ? toggleAnalysis.endConditions : stateType.endConditions,
-							staminaCost,
-							kiCost,
-							focusPointCost,
-							sorceryPointCost,
-							bardicInspirationCost,
-							channelDivinityCost,
-							superiorityDiceCost,
-							isToggle: true,
-						};
-					}
+		// Pass 1 — exact name.
+		for (const [stateTypeId, stateType] of detectCandidates) {
+			if (name === stateType.name.toLowerCase()) return buildDetection(stateTypeId, stateType, "name");
+		}
+
+		// Pass 2 — prose patterns.
+		for (const [stateTypeId, stateType] of detectCandidates) {
+			if (!stateType.detectPatterns) continue;
+			for (const pattern of stateType.detectPatterns) {
+				if (new RegExp(pattern, "i").test(name) || new RegExp(pattern, "i").test(text)) {
+					return buildDetection(stateTypeId, stateType, "pattern");
 				}
 			}
 		}
@@ -55861,8 +55958,16 @@ class CharacterSheetState {
 
 	/**
 	 * Check if Rage damage bonus applies to this attack
+	 *
+	 * RAW: Rage damage applies to a melee weapon attack "using Strength". A FINESSE
+	 * weapon wielded by a Strength-primary barbarian does use Strength, so the
+	 * symbolic ability keys the attack pipeline uses ("finesse", "finesseWis") are
+	 * resolved to the concrete ability actually rolled before the STR test. Without
+	 * this, every finesse melee attack (rapier, scimitar, the Chained Fury chains, …)
+	 * silently lost its Rage damage.
+	 *
 	 * @param {boolean} isMelee - Whether this is a melee attack
-	 * @param {string} abilityUsed - The ability used for the attack
+	 * @param {string} abilityUsed - The ability used for the attack ("str", "dex", "finesse", …)
 	 * @returns {number} The rage damage bonus if applicable, 0 otherwise
 	 */
 	getRageDamageBonus (isMelee, abilityUsed) {
@@ -55871,7 +55976,7 @@ class CharacterSheetState {
 			return 0;
 		}
 		// Rage damage applies to melee attacks using Strength
-		if (isMelee && abilityUsed === "str") {
+		if (isMelee && this.resolveAttackAbilityKey(abilityUsed) === "str") {
 			// Use getFeatureCalculation to get the properly computed rage damage
 			const rageDmg = this.getFeatureCalculation("rageDamage");
 			if (rageDmg == null) return 2; // Default rage damage if not calculated
@@ -55881,6 +55986,56 @@ class CharacterSheetState {
 			return rageDmg || 2;
 		}
 		return 0;
+	}
+
+	/**
+	 * Resolve a symbolic attack ability key to the concrete ability that will actually
+	 * be rolled. Mirrors the combat module's resolution so state-side rules (Rage
+	 * damage, …) agree with the number on the attack row.
+	 *
+	 * "finesse"     → better of STR/DEX
+	 * "finesseWis"  → best of STR/DEX/WIS (Astral Arms)
+	 * anything else → returned unchanged (defaults to "str" when blank)
+	 *
+	 * @param {string} [abilityKey]
+	 * @returns {string}
+	 */
+	resolveAttackAbilityKey (abilityKey) {
+		if (!abilityKey) return "str";
+		if (abilityKey === "finesse") return this.getAbilityMod("str") >= this.getAbilityMod("dex") ? "str" : "dex";
+		if (abilityKey === "finesseWis") {
+			return ["str", "dex", "wis"].reduce((best, a) => (this.getAbilityMod(a) > this.getAbilityMod(best) ? a : best), "str");
+		}
+		return abilityKey;
+	}
+
+	/**
+	 * Effective size category used when grappling or shoving, and when moving a
+	 * creature you have grappled.
+	 *
+	 * Generic resolver over the calculation contract:
+	 *  - `grappleSizeCategoryBonus` (number) — "counts as N size categories larger"
+	 *    (Chained Fury's Manifest Chains / Chain Control, Enlarge, …)
+	 *  - `grappleSizeUnlimited` (bool) — "you can grapple a creature of any size"
+	 *    (Chained Fury's Unchained Fury)
+	 *
+	 * Builds on `getSize()`, so active-state size changes (Enlarge/Reduce, wildshape)
+	 * feed in automatically.
+	 *
+	 * @returns {{base: string, effective: string, bonus: number, unlimited: boolean, maxTargetSize: string}}
+	 */
+	getGrappleSizeCategory () {
+		const order = CharacterSheetState.GRAPPLE_SIZE_ORDER;
+		const base = (this.getSize?.() || "medium").toLowerCase();
+		const calcs = this.getFeatureCalculations();
+		const bonus = Math.max(0, Number(calcs.grappleSizeCategoryBonus) || 0);
+		const unlimited = !!calcs.grappleSizeUnlimited;
+		const baseIx = Math.max(0, order.indexOf(base));
+		const effIx = Math.min(order.length - 1, baseIx + bonus);
+		const cap = (/** @type {string} */ s) => s.charAt(0).toUpperCase() + s.slice(1);
+		// RAW: you can grapple a creature at most one size larger than you.
+		const maxTargetSize = unlimited ? "Any" : cap(order[Math.min(order.length - 1, effIx + 1)]);
+		return {base: cap(base), effective: cap(order[effIx]), bonus, unlimited, maxTargetSize};
 	}
 
 	// --- Wild Shape System ---

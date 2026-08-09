@@ -9,7 +9,10 @@ import {buildSpecialtyChecks, buildWeaponMasteryChecks} from "../utils/tgttFeatu
  *   - Rage uses scale per Barbarian table (2/3/4/5/6)
  *   - Rage damage bonus scales (+2/+3/+4) and applies on the toggle
  *   - Reckless Attack at L2, Extra Attack at L5
- *   - Path of the Chained Fury subclass features at L3, L6, L10, L14
+ *   - Path of the Chained Fury subclass features at L3, L6, L10, L14 — each with
+ *     real effect probes: the rage-gated Spectral Chains weapon appearing on the
+ *     Combat tab, table-driven damage/reach scaling, the derived restrain DC, the
+ *     grapple size category, and the L14 three-attack allowance
  *   - Primal Champion at L20 boosts STR/CON beyond 20
  */
 describeCharacter({
@@ -172,13 +175,117 @@ describeCharacter({
 		},
 
 		// ── Subclass: Path of the Chained Fury (TGTT) ────────────
-		// Subclass features grant flavor mechanics (manifested chain weapons, prone/restrained
-		// effects on hit) that aren't surfaced as state-probeable fields. Existence is verified
-		// by the parent FeatureCheck; no additional effect probes available.
-		{level: 3,  name: /manifest chains/i, kind: "passive"},
-		{level: 6,  name: /chain imprisonment/i, kind: "passive"},
-		{level: 10, name: /chain control/i, kind: "passive"},
-		{level: 14, name: /unchained fury/i, kind: "passive"},
+		// Every one of these was previously a bare existence check carrying the
+		// comment "aren't surfaced as state-probeable fields". They are now, and the
+		// features are no longer inert, so each level gets real effect probes.
+		//
+		// Manifest Chains is a RAGE-GATED toggle (`requiresStates: ["rage"]`), so the
+		// toggle probes declare `requiresStates` — without it the harness cannot even
+		// activate the row, because a non-raging barbarian is correctly not offered it.
+		// NOTE ON BANDING: `assertFeaturesMatrix` re-runs every row whose
+		// `level <= currentLevel`, so a row pinning an exact scaled value is
+		// re-checked at L11 and L20 too. Anything read from
+		// `subclassTableGroups` (damage die, range) or that steps at a later
+		// tier (chain count, grapple ceiling) therefore carries `untilLevel`
+		// to bound its band; the invariants that hold at every level stay
+		// unbounded so they keep being asserted all the way to 20.
+		{
+			level: 3,
+			name: /manifest chains/i,
+			kind: "toggle",
+			toggleDelta: "none",
+			requiresStates: ["rage"],
+			effects: [
+				// The chains are a real weapon on the Combat tab, and ONLY while manifested.
+				{kind: "toggleAddsAttack", namePattern: /spectral chains/i},
+				// Grapple + shove riders are offered at every level from 3 up.
+				{kind: "stateCall", method: "getFeatureCalculations", path: "attackOnHitOptions", contains: "chains-grapple"},
+				{kind: "stateCall", method: "getFeatureCalculations", path: "attackOnHitOptions", contains: "chains-shove"},
+			],
+		},
+		{
+			// L3–5 band: base die/range off the subclass table, one size category
+			// of grapple bonus, two chains.
+			level: 3,
+			untilLevel: 5,
+			name: /manifest chains/i,
+			kind: "toggle",
+			toggleDelta: "none",
+			requiresStates: ["rage"],
+			effects: [
+				// Scaling comes from the subclass table, not a hardcoded ladder.
+				{kind: "featureCalculation", property: "chainDamageDie", exact: "1d8"},
+				{kind: "featureCalculation", property: "chainRange", exact: 15},
+				{kind: "featureCalculation", property: "chainCount", exact: 2},
+				// Grapple size category is a real derived bundle, not just prose.
+				{kind: "stateCall", method: "getGrappleSizeCategory", path: "effective", exact: "Large"},
+				{kind: "stateCall", method: "getGrappleSizeCategory", path: "maxTargetSize", exact: "Huge"},
+			],
+		},
+		{
+			level: 6,
+			name: /chain imprisonment/i,
+			kind: "passive",
+			effects: [
+				{kind: "featureCalculation", property: "chainsAreMagical", exact: true},
+				// Restrain DC is derived (8 + prof + STR), not a constant.
+				{kind: "featureCalculation", property: "chainRestrainDc", min: 12},
+				// Recurring force damage equals barbarian level.
+				{kind: "featureCalculation", property: "chainRestrainDamage", min: 6},
+				{kind: "stateCall", method: "getFeatureCalculations", path: "attackOnHitOptions", contains: "chains-restrain"},
+			],
+		},
+		{
+			level: 6,
+			untilLevel: 9,
+			name: /chain imprisonment/i,
+			kind: "passive",
+			effects: [
+				{kind: "featureCalculation", property: "chainDamageDie", exact: "1d10"},
+				{kind: "featureCalculation", property: "chainRange", exact: 20},
+			],
+		},
+		{
+			level: 10,
+			name: /chain control/i,
+			kind: "passive",
+			effects: [
+				{kind: "featureCalculation", property: "chainGrappleSizeBonus", exact: 2},
+				{kind: "featureCalculation", property: "chainShoveDistance", exact: 10},
+				{kind: "stateCall", method: "getGrappleSizeCategory", path: "effective", exact: "Huge"},
+				{kind: "stateCall", method: "getFeatureCalculations", path: "attackOnHitOptions", contains: "chains-control-shove"},
+			],
+		},
+		{
+			level: 10,
+			untilLevel: 13,
+			name: /chain control/i,
+			kind: "passive",
+			effects: [
+				{kind: "featureCalculation", property: "chainDamageDie", exact: "1d12"},
+				{kind: "featureCalculation", property: "chainRange", exact: 25},
+				// Ceiling is one step above "Huge" until Unchained Fury removes it.
+				{kind: "stateCall", method: "getGrappleSizeCategory", path: "maxTargetSize", exact: "Gargantuan"},
+			],
+		},
+		{
+			level: 14,
+			name: /unchained fury/i,
+			kind: "passive",
+			effects: [
+				{kind: "featureCalculation", property: "chainCount", exact: 4},
+				// Top band of the subclass table — holds to L20, so unbounded.
+				{kind: "featureCalculation", property: "chainDamageDie", exact: "2d6"},
+				{kind: "featureCalculation", property: "chainRange", exact: 30},
+				{kind: "featureCalculation", property: "chainFreeMovement", exact: true},
+				// Three attacks per Attack action, gated on the chains being out.
+				{kind: "stateCall", method: "getFeatureCalculations", path: "attackActionAllowances", contains: "\"count\":3"},
+				{kind: "stateCall", method: "getFeatureCalculations", path: "attackActionAllowances", contains: "\"requiresState\":\"manifestChains\""},
+				// No grapple size ceiling at all.
+				{kind: "stateCall", method: "getGrappleSizeCategory", path: "unlimited", exact: true},
+				{kind: "stateCall", method: "getGrappleSizeCategory", path: "maxTargetSize", exact: "Any"},
+			],
+		},
 		...buildSpecialtyChecks("Barbarian"),
 	],
 });
