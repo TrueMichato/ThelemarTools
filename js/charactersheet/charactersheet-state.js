@@ -19572,8 +19572,8 @@ class CharacterSheetState {
 								calculations.chainDamageType = "force";
 								calculations.chainDamageDie = tableDamage
 									|| (level >= 14 ? "2d6" : level >= 10 ? "1d12" : level >= 6 ? "1d10" : "1d8");
-								calculations.chainRange = tableRange
-									?? (level >= 14 ? 30 : level >= 10 ? 25 : level >= 6 ? 20 : 15);
+								calculations.chainRange = tableRange ??
+									(level >= 14 ? 30 : level >= 10 ? 25 : level >= 6 ? 20 : 15);
 								calculations.chainCount = level >= 14 ? 4 : 2;
 								// "You count as 1 size category larger" (2 at L10) when grappling
 								// or moving a grappled creature. Fed to getGrappleSizeCategory().
@@ -35796,7 +35796,8 @@ class CharacterSheetState {
 	 * @returns {object|null} A copy of the live pool, or null when absent.
 	 * @private
 	 */
-	_getSteelHawkResource (resourceType) {		this._ensureSteelHawkResources();
+	_getSteelHawkResource (resourceType) {
+		this._ensureSteelHawkResources();
 		const resource = this._data.resources.find(r => r.resourceType === resourceType);
 		return resource ? {...resource} : null;
 	}

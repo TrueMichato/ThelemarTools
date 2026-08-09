@@ -4403,7 +4403,8 @@ class CharacterSheetCombat {
 			badgeHtml = ` <span class="badge badge-warning" title="Granted by ${label}${actionLabel} — ends when the form does">${attack.sourceStateIcon || "🌟"} ${label}${actionLabel}</span>`;
 		} else if (attack.isFeatureAttack) {
 			badgeHtml = ` <span class="badge badge-info" title="Granted by ${attack.sourceFeature || attack.name}">✨ Feature</span>`;
-		} else if (attack.isTemporary) {			const srcParts = [attack.sourceComponent, attack.sourceSpell, attack.sourceDuration].filter(Boolean);
+		} else if (attack.isTemporary) {
+			const srcParts = [attack.sourceComponent, attack.sourceSpell, attack.sourceDuration].filter(Boolean);
 			const srcTitle = srcParts.length ? srcParts.join(" — ") : "Temporary Attack";
 			badgeHtml = ` <span class="badge badge-info" title="${srcTitle}">🧪 Temp</span>`;
 		} else if (attack.isMonkWeapon) {

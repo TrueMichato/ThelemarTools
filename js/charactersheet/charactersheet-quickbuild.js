@@ -4897,10 +4897,10 @@ class CharacterSheetQuickBuild {
 							subSubclassSpells: selectedSubclass.subSubclassSpells,
 							optionalfeatureProgression: selectedSubclass.optionalfeatureProgression,
 							subclassTableGroups: selectedSubclass.subclassTableGroups,
-						// Subclass-derived casters (Eldritch Knight, Arcane Trickster, TGTT
-						// Gambler) declare their cantrip table on the SUBCLASS. Persisted so
-						// `getSubclassCantripChoiceSlots` can prompt for those picks.
-						cantripProgression: selectedSubclass.cantripProgression,
+							// Subclass-derived casters (Eldritch Knight, Arcane Trickster, TGTT
+							// Gambler) declare their cantrip table on the SUBCLASS. Persisted so
+							// `getSubclassCantripChoiceSlots` can prompt for those picks.
+							cantripProgression: selectedSubclass.cantripProgression,
 						}
 						: null,
 					subclassChoice: this._selections.subclassChoices[`${className}_${classSource}`] || null,
