@@ -15,7 +15,7 @@
  */
 
 import "./setup.js";
-import {readFileSync} from "fs";
+import fs from "fs";
 import {join, dirname} from "path";
 import {fileURLToPath} from "url";
 
@@ -25,7 +25,7 @@ import {fileURLToPath} from "url";
 // about the parser — and would silently keep passing if the homebrew text changed.
 const TGTT_ACTS = (() => {
 	const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
-	const brew = JSON.parse(readFileSync(join(repoRoot, "homebrew/TravelersGuidetoThelemar.json"), "utf8"));
+	const brew = JSON.parse(fs.readFileSync(join(repoRoot, "homebrew/TravelersGuidetoThelemar.json"), "utf8"));
 	const out = new Map();
 	for (const of_ of brew.optionalfeature || []) {
 		if ((of_.featureType || []).includes("JA")) out.set(of_.name, of_);
@@ -48,10 +48,19 @@ function addJesterAct (st, name) {
 }
 
 let CharacterSheetState;
+let CharacterSheetClassUtils;
 let state;
+
+/**
+ * The REAL homebrew source. Tests that assert on a subclass's granted spells or
+ * feature text must read this rather than re-declaring a hand-written stub — a stub
+ * can drift from the book and let a test pass while the sheet grants the wrong thing.
+ */
+const TGTT_BREW = JSON.parse(fs.readFileSync("homebrew/TravelersGuidetoThelemar.json", "utf8"));
 
 beforeAll(async () => {
 	CharacterSheetState = (await import("../../../js/charactersheet/charactersheet-state.js")).CharacterSheetState;
+	CharacterSheetClassUtils = (await import("../../../js/charactersheet/charactersheet-class-utils.js")).CharacterSheetClassUtils;
 });
 
 describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
@@ -5822,88 +5831,184 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 			});
 
 			describe("Time Domain", () => {
-				it("should grant Right on Time (+WIS to initiative) at level 3", () => {
+				// NOTE ON TEST SHAPE: `getFeatureCalculations()` keys are NOT evidence of
+				// support — a key can be written and never read (the standing "correct
+				// calculation nothing reads" defect). Every test below pins a READING:
+				// the initiative modifier, the always-prepared spell list, the activatable
+				// feature + its bound resource pool, the cantrip damage bonus, or the
+				// condition the toggle actually applies.
+
+				/** Build a Time Domain cleric carrying the REAL homebrew subclass + feature data. */
+				function makeTimeCleric (level, {wis = 18} = {}) {
+					const sub = TGTT_BREW.subclass.find(s => s.name === "Time Domain" && s.className === "Cleric");
 					state.addClass({
 						name: "Cleric",
 						source: "TGTT",
-						level: 3,
-						subclass: {name: "Time Domain", shortName: "Time", source: "TGTT"},
+						level,
+						hitDice: "d8",
+						subclass: JSON.parse(JSON.stringify(sub)),
 					});
-					state.setAbilityBase("wis", 18); // +4
-
-					const calcs = state.getFeatureCalculations();
-					expect(calcs.hasRightOnTime).toBe(true);
-					expect(calcs.rightOnTimeBonus).toBe(4);
-				});
-
-				it("should apply initiative bonus via effects pipeline", () => {
-					state.addClass({
-						name: "Cleric",
-						source: "TGTT",
-						level: 3,
-						subclass: {name: "Time Domain", shortName: "Time", source: "TGTT"},
-					});
-					state.setAbilityBase("wis", 16); // +3
+					state.setAbilityBase("wis", wis);
+					TGTT_BREW.subclassFeature
+						.filter(f => f.className === "Cleric" && f.subclassShortName === "Time" && f.level <= level)
+						.forEach(f => state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(f, {featureType: "Subclass"})));
 					state.applyClassFeatureEffects();
+					return state;
+				}
 
-					// Initiative should include the WIS modifier bonus
-					const modifiers = state.getNamedModifiers();
-					const initMod = modifiers.find(m => m.type === "initiative" && m.note?.includes("Right on Time"));
-					expect(initMod).toBeDefined();
-					expect(initMod.value).toBe(3);
+				it("Right on Time adds WIS to the rolled initiative (pins the reading, not a calc key)", () => {
+					// DEX 10 (+0) so the whole initiative total is attributable to the feature.
+					makeTimeCleric(3, {wis: 16}); // WIS +3
+					expect(state.getAbilityMod("dex")).toBe(0);
+					expect(state.getInitiative()).toBe(3);
+					expect(state.aggregateModifiers("initiative").bonus).toBe(3);
 				});
 
-				it("should calculate Chronological Interference uses from proficiency bonus", () => {
-					state.addClass({
-						name: "Cleric",
-						source: "TGTT",
-						level: 5,
-						subclass: {name: "Time Domain", shortName: "Time", source: "TGTT"},
-					});
-
-					const calcs = state.getFeatureCalculations();
-					expect(calcs.hasChronologicalInterference).toBe(true);
-					// Level 5 = +3 proficiency bonus
-					expect(calcs.chronologicalInterferenceUses).toBe(3);
+				it("Right on Time tracks Wisdom rather than snapshotting it", () => {
+					makeTimeCleric(3, {wis: 16});
+					expect(state.getInitiative()).toBe(3);
+					state.setAbilityBase("wis", 20); // +5
+					state.applyClassFeatureEffects();
+					expect(state.getInitiative()).toBe(5);
 				});
 
-				it("should calculate Eyes of the Future Past uses from WIS at level 6", () => {
-					state.addClass({
-						name: "Cleric",
-						source: "TGTT",
-						level: 6,
-						subclass: {name: "Time Domain", shortName: "Time", source: "TGTT"},
-					});
-					state.setAbilityBase("wis", 14); // +2
-
-					const calcs = state.getFeatureCalculations();
-					expect(calcs.hasEyesOfFuturePast).toBe(true);
-					expect(calcs.eyesOfFuturePastUses).toBe(2);
+				// CS-BUG-118: the feature is captured BOTH by the generic
+				// "add your <ability> modifier to initiative" text-parse (which mints an
+				// inert `abilityMod` row) and by the curated calc effect (which mints the
+				// live +WIS row), so two same-named rows appear in the modifiers list.
+				// Every total is currently correct because the two numeric chokepoints
+				// disagree about `abilityMod` and the text-parsed row resolves to 0 —
+				// this test pins that the TOTAL stays right, and documents the duplicate
+				// so a future fix to `_getNamedModifierEffectiveValue` cannot silently
+				// double it to +6.
+				it("does not double-count initiative despite the duplicate modifier row (CS-BUG-118)", () => {
+					makeTimeCleric(3, {wis: 16});
+					const rows = state.getNamedModifiers()
+						.filter(m => m.type === "initiative" && m.note?.includes("Right on Time"));
+					expect(rows.length).toBe(2);
+					expect(rows.filter(r => r.value === 0).length).toBe(1);
+					expect(state.getInitiative()).toBe(3); // NOT 6
 				});
 
-				it("should grant Temporal Mastery at level 17", () => {
-					state.addClass({
-						name: "Cleric",
-						source: "TGTT",
-						level: 17,
-						subclass: {name: "Time Domain", shortName: "Time", source: "TGTT"},
-					});
-
-					const calcs = state.getFeatureCalculations();
-					expect(calcs.hasTemporalMastery).toBe(true);
+				it("Chronological Interference is a bonus action bound to its own PB pool", () => {
+					makeTimeCleric(5);
+					const entry = state.getActivatableFeatures()
+						.find(a => a.feature.name === "Chronological Interference");
+					expect(entry).toBeDefined();
+					expect(entry.activationInfo.activationAction).toBe("bonus");
+					// L5 → proficiency bonus 3
+					expect(entry.resource).toMatchObject({name: "Chronological Interference", max: 3});
 				});
 
-				it("should scale Chronological Interference uses with level", () => {
-					// Level 1-4: prof +2, level 5-8: +3, level 9-12: +4, level 13-16: +5, level 17-20: +6
-					state.addClass({
-						name: "Cleric",
-						source: "TGTT",
-						level: 17,
-						subclass: {name: "Time Domain", shortName: "Time", source: "TGTT"},
-					});
+				it("Chronological Interference pool scales with proficiency bonus", () => {
+					makeTimeCleric(17);
+					const res = state.getResources().find(r => r.name === "Chronological Interference");
+					expect(res?.max).toBe(6); // L17 → PB +6
+				});
 
-					const calcs = state.getFeatureCalculations();
-					expect(calcs.chronologicalInterferenceUses).toBe(6);
+				it("Eyes of the Future Past is a toggle bound to a WIS-mod pool", () => {
+					makeTimeCleric(6, {wis: 18}); // +4
+					const entry = state.getActivatableFeatures()
+						.find(a => a.feature.name === "Eyes of the Future Past");
+					expect(entry).toBeDefined();
+					expect(entry.activationInfo.isToggle).toBe(true);
+					expect(entry.activationInfo.activationAction).toBe("bonus");
+					expect(entry.resource).toMatchObject({name: "Eyes of the Future Past", max: 4});
+				});
+
+				it("Eyes of the Future Past applies Blinded while active and clears it on end", () => {
+					makeTimeCleric(6);
+					const feature = state.getFeatures().find(f => f.name === "Eyes of the Future Past");
+					const info = CharacterSheetState.detectActivatableFeature(feature);
+					// The drawback is parsed from the feature text, not hard-coded per feature.
+					expect(info.addsConditions).toEqual(["blinded"]);
+
+					const stateId = state.addActiveState("custom", {
+						name: feature.name,
+						sourceFeatureId: feature.id,
+						addsConditions: info.addsConditions,
+					});
+					expect((state.getConditions() || []).map(c => (c.name || c).toLowerCase()))
+						.toContain("blinded");
+
+					state.removeActiveState(stateId);
+					expect((state.getConditions() || []).map(c => (c.name || c).toLowerCase()))
+						.not.toContain("blinded");
+				});
+
+				it("re-activating a self-imposed-condition state re-applies the condition (CS-BUG-116)", () => {
+					// Regression pin. `addActiveState` reuses the existing state object on a
+					// second activation and used to `return` before re-applying conditions, so
+					// the FIRST activation blinded the character and every later one silently
+					// did nothing — the state showed `addsConditions: ["blinded"]` while the
+					// character had no condition at all. Generic: affects every state type
+					// that declares conditions, not just this feature.
+					makeTimeCleric(6);
+					const feature = state.getFeatures().find(f => f.name === "Eyes of the Future Past");
+					const info = CharacterSheetState.detectActivatableFeature(feature);
+					const opts = {name: feature.name, sourceFeatureId: feature.id, addsConditions: info.addsConditions};
+
+					const readBlinded = () => (state.getConditions() || [])
+						.map(c => (c.name || c).toLowerCase()).includes("blinded");
+
+					const first = state.addActiveState("custom", opts);
+					expect(readBlinded()).toBe(true);
+					state.removeActiveState(first);
+					expect(readBlinded()).toBe(false);
+
+					// Second cycle — the one that used to be inert.
+					const second = state.addActiveState("custom", opts);
+					expect(readBlinded()).toBe(true);
+					state.removeActiveState(second);
+					expect(readBlinded()).toBe(false);
+
+					// Third cycle, to prove it is not an odd/even artifact.
+					const third = state.addActiveState("custom", opts);
+					expect(readBlinded()).toBe(true);
+					state.removeActiveState(third);
+					expect(readBlinded()).toBe(false);
+				});
+
+				it("Potent Spellcasting adds WIS to cleric cantrip damage (pins the reader)", () => {
+					makeTimeCleric(8, {wis: 18}); // +4
+					const bonus = state.getCantripDamageBonus({name: "Sacred Flame", level: 0, className: "Cleric"});
+					expect(bonus.bonus).toBe(4);
+					expect(bonus.sources.map(s => s.name)).toContain("Potent Spellcasting");
+				});
+
+				it("grants exactly the homebrew domain spells at each gated level", () => {
+					const expected = {
+						3: ["gift of alacrity", "feather fall", "fortune's favor", "immovable object"],
+						5: ["slow", "haste"],
+						7: ["death ward", "freedom of movement"],
+						9: ["temporal shunt", "hold monster"],
+					};
+					for (const level of [3, 5, 7, 9]) {
+						const s = new CharacterSheetState();
+						const sub = TGTT_BREW.subclass.find(x => x.name === "Time Domain" && x.className === "Cleric");
+						s.addClass({name: "Cleric", source: "TGTT", level, hitDice: "d8", subclass: JSON.parse(JSON.stringify(sub))});
+						const got = s.getSubclassAlwaysPreparedSpells(s.getClasses()[0]).map(p => p.name.toLowerCase());
+						// Everything gated at or below this level is present…
+						for (const [gate, spells] of Object.entries(expected)) {
+							if (+gate <= level) spells.forEach(sp => expect(got).toContain(sp));
+							else spells.forEach(sp => expect(got).not.toContain(sp));
+						}
+					}
+				});
+
+				it("Temporal Mastery adds Time Stop and Time Ravage as always-prepared domain spells at 17", () => {
+					const sub = TGTT_BREW.subclass.find(x => x.name === "Time Domain" && x.className === "Cleric");
+					const at = (level) => {
+						const s = new CharacterSheetState();
+						s.addClass({name: "Cleric", source: "TGTT", level, hitDice: "d8", subclass: JSON.parse(JSON.stringify(sub))});
+						return s.getSubclassAlwaysPreparedSpells(s.getClasses()[0]).map(p => p.name.toLowerCase());
+					};
+					// Not before 17 …
+					expect(at(16)).not.toContain("time stop");
+					expect(at(16)).not.toContain("time ravage");
+					// … and both from 17.
+					expect(at(17)).toContain("time stop");
+					expect(at(17)).toContain("time ravage");
 				});
 			});
 
@@ -9659,6 +9764,77 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						"the target is fooled until it makes a dc equal to your performance check.",
 					)).toBeNull();
 					expect(CharacterSheetState._buildRolledSaveDcInfo("")).toBeNull();
+				});
+
+				it("rolls the DC BEFORE the resource is deducted, so cancelling costs nothing", () => {
+					// Load-bearing ORDERING invariant, shared with `contestedCheck` and the
+					// mirror-image `endSave`. It is invisible to a behavioural test: moving
+					// the spend above the roll leaves every other assertion green while
+					// silently charging players for activations they cancelled.
+					// `_pResolveRolledSaveDc` returns false on cancel, and the caller must
+					// `return` at that point — which is only correct if nothing was spent yet.
+					const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+					const src = fs.readFileSync(join(repoRoot, "js/charactersheet/charactersheet.js"), "utf8");
+					const body = src.slice(src.indexOf("async _activateFeatureState ("));
+
+					const idxRoll = body.indexOf("_pResolveRolledSaveDc(");
+					const idxContest = body.indexOf("_pResolveContestedCheck(");
+					const idxSpend = body.indexOf("setResourceCurrent(resource.id, resource.current - cost)");
+
+					expect(idxRoll).toBeGreaterThan(-1);
+					expect(idxSpend).toBeGreaterThan(-1);
+					expect(idxRoll).toBeLessThan(idxSpend);
+					// Same guarantee for the sibling descriptor.
+					expect(idxContest).toBeGreaterThan(-1);
+					expect(idxContest).toBeLessThan(idxSpend);
+				});
+
+				it("surfaces Jester's Privilege as a long-rest activatable carrying its rolled DC", () => {
+					// End-to-end for the whole L14 path, in the shape the BROWSER produces.
+					//
+					// `detectActivatableFeature` early-returns on a feature with no rendered
+					// `description` unless it carries a marker (`consumes`, the "JA" type, a
+					// classification override...). Jester's Acts carry the "JA" marker so they
+					// survive entries-only; a plain subclass feature like Jester's Privilege
+					// does NOT. The sheet's own attach path always populates `description`, so
+					// this is only ever a hazard for hand-built fixtures — which is exactly why
+					// this test builds the feature the way the product does, verbatim from the
+					// homebrew. A fixture without `description` silently measures nothing here.
+					const priv = TGTT_BREW.subclassFeature.find(f => f.subclassShortName === "Jesters" && f.name === "Jester's Privilege");
+					expect(priv).toBeTruthy();
+
+					state.addClass({
+						name: "Bard",
+						source: "TGTT",
+						level: 14,
+						subclass: {name: "College of Jesters", shortName: "Jesters", source: "TGTT"},
+					});
+					state.addFeature({
+						name: priv.name,
+						source: "TGTT",
+						entries: priv.entries,
+						description: priv.entries.join(" "),
+						level: priv.level,
+						className: "Bard",
+						subclassShortName: "Jesters",
+					});
+
+					const row = state.getActivatableFeatures().find(r => r.feature?.name === "Jester's Privilege");
+					expect(row).toBeTruthy();
+					// Not a persistent toggle — a one-shot use.
+					expect(row.activationInfo.isToggle).toBe(false);
+					expect(row.activationInfo.interactionMode).toBe("limited");
+					// "Once you use this ability, you cannot use it again until you finish a
+					// long rest" ⇒ it costs a use of its own pool.
+					expect(row.activationInfo.resourceCost).toBe(1);
+					// …and the DC descriptor rode along, so the roll actually happens on Use.
+					expect(row.activationInfo.rolledSaveDc).toEqual({
+						skill: "performance",
+						skillLabel: "Performance",
+						ability: "cha",
+						saveAbility: "wis",
+						range: 60,
+					});
 				});
 
 				it("should track spells granted by acts", () => {

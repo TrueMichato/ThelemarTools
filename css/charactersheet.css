@@ -24142,3 +24142,91 @@ color: var(--cs-text-primary, #f1f5f9);
 	background: color-mix(in srgb, var(--cs-info, #0891b2) 12%, #fff);
 }
 
+
+/* ==========================================================================
+   "Press Your Luck" fortune-intervention modal (generic post-roll d20
+   intervention offers; currently TGTT Gambler Extra Luck / Master of Fortune).
+   Mirrors the Red Cant modal's dark, high-contrast decision language: state the
+   die you rolled, then one tappable card per intervention showing its name,
+   remaining uses, and exactly what it does to the roll.
+   ========================================================================== */
+.charsheet__fortune {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	padding: 4px 2px;
+}
+
+.charsheet__fortune__lede {
+	margin: 0;
+	line-height: 1.45;
+	color: var(--cs-text-primary, #e2e8f0);
+}
+
+.charsheet__fortune__offers {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.charsheet__fortune__offer {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 4px;
+	width: 100%;
+	padding: 10px 14px;
+	text-align: left;
+	white-space: normal;
+	border-radius: 10px;
+	border: 1px solid rgba(245, 158, 11, 0.45);
+	background: rgba(245, 158, 11, 0.12);
+	color: var(--cs-text-primary, #f1f5f9);
+}
+
+.charsheet__fortune__offer:hover,
+.charsheet__fortune__offer:focus-visible {
+	border-color: #f59e0b;
+	background: rgba(245, 158, 11, 0.22);
+	color: var(--cs-text-primary, #f1f5f9);
+}
+
+.charsheet__fortune__offer-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.charsheet__fortune__offer-name {
+	font-weight: 700;
+	font-size: 1rem;
+	line-height: 1.2;
+}
+
+.charsheet__fortune__offer-uses {
+	flex-shrink: 0;
+	font-size: 0.72rem;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__fortune__offer-desc {
+	font-size: 0.85rem;
+	line-height: 1.4;
+	color: var(--cs-text-secondary, #cbd5e1);
+}
+
+.charsheet__fortune__actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+/* Always-on prose riders on an attack row (e.g. Gambler's Coins ricochet). */
+.charsheet__attack-rider-note {
+	margin-top: 2px;
+	font-style: italic;
+	cursor: help;
+}

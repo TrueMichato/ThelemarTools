@@ -14246,6 +14246,47 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * GENERIC subclass-declared spell-slot table reader.
+	 *
+	 * 5etools subclass data may ship an explicit slot progression through
+	 * `subclassTableGroups[].rowsSpellProgression` — a 20-row array whose Nth row is the
+	 * slots-per-spell-level for CLASS level N. When present this is authoritative for a
+	 * single-class caster whose spellcasting comes only from that subclass, because the
+	 * generic caster-level table is merely an approximation of the published one.
+	 *
+	 * Used by `calculateSpellSlots`. Returns null when the subclass declares no table,
+	 * in which case the caller falls back to the standard progression.
+	 *
+	 * @param {*} cls A class entry from `_data.classes` (needs `.level` and `.subclass`).
+	 * @returns {number[]|null} 9-element slots-per-level array, or null.
+	 */
+	static getSubclassSpellSlotRow (cls) {
+		const level = Math.max(1, Math.min(20, cls?.level || 1));
+		const groups = cls?.subclass?.subclassTableGroups;
+		let rows = null;
+		if (Array.isArray(groups) && groups.length) {
+			const group = groups.find(g => Array.isArray(g?.rowsSpellProgression) && g.rowsSpellProgression.length);
+			if (group) rows = group.rowsSpellProgression;
+		}
+		if (!rows) {
+			// Fallback for characters saved before `subclassTableGroups` was persisted onto
+			// the class entry (and for programmatic `addClass` callers such as unit tests).
+			// Mirrors the published table in the homebrew source; keep in sync if it changes.
+			const key = `${cls?.subclass?.shortName || cls?.subclass?.name || ""}|${cls?.subclass?.source || ""}`.toLowerCase();
+			rows = CharacterSheetState.SUBCLASS_SPELL_SLOT_TABLES[key] || null;
+		}
+		if (!rows) return null;
+		const row = rows[level - 1];
+		if (!Array.isArray(row)) return null;
+		const out = [];
+		for (let i = 0; i < 9; i++) {
+			const n = row[i];
+			out.push(Number.isFinite(n) ? n : 0);
+		}
+		return out;
+	}
+
+	/**
 	 * Calculate spell slots based on class(es) and level using standard 5e spell slot progression
 	 * Handles full casters, half casters, third casters, and multiclassing
 	 * Uses casterProgression property from class/subclass data for accurate multiclass calculation
@@ -14359,6 +14400,21 @@ class CharacterSheetState {
 		if (casterLevel > 0) {
 			const slots = slotTable[Math.min(casterLevel, 20)] || [0, 0, 0, 0, 0, 0, 0, 0, 0];
 			for (let level = 1; level <= 9; level++) baseSlots[level] = slots[level - 1] || 0;
+		}
+
+		// --- Subclass-declared slot table override (single-class casters only) ---------------
+		// GENERIC: a subclass may ship its own spell-slot progression via
+		// `subclassTableGroups[].rowsSpellProgression` (5etools data convention). When a
+		// single-class character's ONLY caster progression comes from such a subclass, the
+		// declared table is authoritative — the generic caster-level table is only an
+		// approximation of it. This makes any homebrew third/half caster subclass exact
+		// without per-subclass code (TGTT Gambler's L10-12 row is 4/2, not the generic 4/3).
+		// Multiclass casters keep the PHB shared-slot table (RAW).
+		if (!isMulticlassCaster && casterClasses.length === 1) {
+			const subclassRow = CharacterSheetState.getSubclassSpellSlotRow(casterClasses[0]);
+			if (subclassRow) {
+				for (let level = 1; level <= 9; level++) baseSlots[level] = subclassRow[level - 1] || 0;
+			}
 		}
 
 		// --- Bonus slots from every non-pact source ----------------------------------------
@@ -14803,15 +14859,29 @@ class CharacterSheetState {
 
 			const mechanic = isSpellbook ? "spellbook" : (info.isRolledPrepared ? "rolled" : info.type);
 
+			// A `rolled` caster (TGTT Gambler) has NO spellcasting ability by design —
+			// its DC and attack bonus are `8 + PB + XdY` / `PB + XdY`, re-rolled per cast.
+			// Reporting an ability modifier here would be a lie the whole sheet then
+			// repeats (card header, Combat badges, Overview rows, exports), so the
+			// ability-derived fields are nulled and replaced with the live formulas.
+			const isRolledCaster = !!info.isRolledPrepared;
+			const rolledDice = isRolledCaster
+				? ((cls.level >= 13 ? "2d4" : "1d6"))
+				: null;
+			const rolledProf = this.getProficiencyBonus();
+
 			cards.push({
 				className: cls.name,
 				classSource: cls.source || null,
 				subclassName: cls.subclass?.name || null,
 				displayName: CharacterSheetState._getCasterDisplayName(cls),
-				ability,
-				abilityLabel: CharacterSheetState._abilityLabel(ability),
-				saveDc: this.getSpellSaveDcForAbility(ability),
-				attackBonus: this.getSpellAttackBonusForAbility(ability),
+				ability: isRolledCaster ? null : ability,
+				abilityLabel: isRolledCaster ? "Rolled" : CharacterSheetState._abilityLabel(ability),
+				saveDc: isRolledCaster ? null : this.getSpellSaveDcForAbility(ability),
+				attackBonus: isRolledCaster ? null : this.getSpellAttackBonusForAbility(ability),
+				saveDcFormula: isRolledCaster ? `8 + ${rolledProf} + ${rolledDice}` : null,
+				attackBonusFormula: isRolledCaster ? `${rolledProf} + ${rolledDice}` : null,
+				modifierDice: rolledDice,
 				mechanic,
 				is2024: !!info.is2024,
 				isRolledPrepared: !!info.isRolledPrepared,
@@ -16141,12 +16211,128 @@ class CharacterSheetState {
 	 */
 	_ensureSubclassSpellChoices () {
 		const slots = this.getSubclassSpellChoiceSlots();
-		if (!slots.length) return;
+		const cantripSlots = this.getSubclassCantripChoiceSlots();
+		const all = [...slots, ...cantripSlots];
+		if (!all.length) return;
 		const fulfilled = new Set(this._data.fulfilledSpellChoiceSlots || []);
-		for (const slot of slots) {
+		for (const slot of all) {
 			if (fulfilled.has(slot.slotKey)) continue;
 			this.addPendingSpellChoice(slot);
 		}
+	}
+
+	/**
+	 * Resolve which class's spell list a SUBCLASS-derived caster draws from.
+	 *
+	 * Subclass casters rarely use their parent class's list: an Arcane Trickster and
+	 * an Eldritch Knight cast from the Wizard list, and the TGTT Gambler casts from
+	 * the Warlock list. 5etools encodes that in the subclass's `additionalSpells`
+	 * "expanded" filters (`"level=0|class=Warlock"`), so read it from there rather
+	 * than maintaining a name lookup. Falls back to an explicit
+	 * `spellcastingSpellList`, then to the parent class name.
+	 * @param {object} subclass - Stored or full subclass object
+	 * @param {object} cls - The owning class entry
+	 * @returns {string} A class name usable in a `class=` spell filter
+	 */
+	static getSubclassSpellListClass (subclass, cls) {
+		if (subclass?.spellcastingSpellList) return subclass.spellcastingSpellList;
+		const blocks = Array.isArray(subclass?.additionalSpells) ? subclass.additionalSpells : [];
+		let fallback = null;
+		for (const block of blocks) {
+			for (const kind of ["expanded", "known", "prepared", "innate"]) {
+				const section = block?.[kind];
+				if (!section || typeof section !== "object") continue;
+				for (const levelValue of Object.values(section)) {
+					const refs = CharacterSheetState._flattenAdditionalSpellsLevelValue(levelValue);
+					for (const ref of refs) {
+						const filter = typeof ref === "string"
+							? null
+							: (typeof ref?.all === "string" ? ref.all : (typeof ref?.choose === "string" ? ref.choose : null));
+						if (!filter) continue;
+						const m = /class=([^|]+)/i.exec(filter);
+						if (!m) continue;
+						// A `level=0` filter is the definitive cantrip list; anything else
+						// is only a fallback (a subclass may expand higher levels only).
+						if (/level=0(\||$)/i.test(filter)) return m[1];
+						if (!fallback) fallback = m[1];
+					}
+				}
+			}
+		}
+		return fallback || cls?.name || "";
+	}
+
+	/**
+	 * Every cantrip pick owed by a SUBCLASS-derived caster.
+	 *
+	 * The Builder / Level-Up / Quick Build spell steps read cantrip gains from the
+	 * CLASS's `cantripProgression`. Subclass casters (Eldritch Knight, Arcane
+	 * Trickster, TGTT Gambler, Architect of Ruin) declare that table on the SUBCLASS
+	 * instead, so those flows never prompted for their cantrips at all — the player
+	 * had to discover the Spells tab picker unaided.
+	 *
+	 * Rather than teaching three wizards about subclass casters, this mints ordinary
+	 * pending spell choices, which every one of those flows already drains via
+	 * `processPendingSpellChoices()`. Idempotent: slots the player has already
+	 * covered (by any route) are never queued, and filled slots are recorded by key.
+	 * @returns {Array<object>} One entry per cantrip the player still owes.
+	 */
+	getSubclassCantripChoiceSlots () {
+		const out = [];
+		const allCantrips = this._data.spellcasting?.cantripsKnown || [];
+
+		for (const cls of (this._data.classes || [])) {
+			const subclass = cls?.subclass;
+			if (!subclass) continue;
+			const prog = subclass.cantripProgression;
+			const hasProg = Array.isArray(prog) && prog.length;
+			// A subclass may publish its cantrip ladder EITHER as a
+			// `cantripProgression` array or only as a "Cantrips Known" column in
+			// `subclassTableGroups`. Read the array first (cheap, exact) and fall
+			// back to the shared table reader so a table-only subclass is still
+			// prompted rather than silently skipped.
+			if (!hasProg && !subclass.subclassTableGroups?.length) continue;
+			// Only fill the gap the class-level flows leave: a class that declares its
+			// own cantrip table is already handled by the Builder/LevelUp spell steps.
+			if (Array.isArray(cls.cantripProgression) && cls.cantripProgression.length) continue;
+
+			const level = Math.max(0, Math.min(20, cls.level || 0));
+			if (!level) continue;
+			const want = hasProg
+				? (prog[level - 1] || 0)
+				: (CharacterSheetClassUtils.getSubclassTableNumber?.(subclass, level, /cantrips?\s+known/i, 0) || 0);
+			if (!want) continue;
+
+			const subclassLabel = subclass.shortName || subclass.name || "";
+			const matchKeys = [cls.name, subclass.name, subclassLabel]
+				.filter(Boolean).map(s => String(s).toLowerCase());
+			const have = allCantrips.filter(c => {
+				const keys = [c?.sourceClass, c?.sourceSubclass].filter(Boolean).map(s => String(s).toLowerCase());
+				return keys.some(k => matchKeys.includes(k));
+			}).length;
+			if (have >= want) continue;
+
+			const listClass = CharacterSheetState.getSubclassSpellListClass(subclass, cls);
+			for (let i = have; i < want; i++) {
+				out.push({
+					slotKey: CharacterSheetState._spellChoiceSlotKey([
+						"cantrip", cls.name, subclassLabel, subclass.source, i,
+					]),
+					className: cls.name,
+					// "Cantrips Known" is the canonical player-chosen attribution, so the
+					// pick counts toward the card's `N/M cantrips` chip rather than being
+					// filed as a feature grant.
+					featureName: "Cantrips Known",
+					filter: `level=0|class=${listClass}`,
+					level: 0,
+					prepared: false,
+					sourceClass: subclassLabel || cls.name,
+					ability: subclass.spellcastingAbility || cls.spellcastingAbility || null,
+				});
+			}
+		}
+
+		return out;
 	}
 
 	/**
@@ -17207,10 +17393,30 @@ class CharacterSheetState {
 			roll,
 			effect,
 			...(secondRoll && {secondRoll, secondEffect}),
+			// Master of Fortune rolls twice and CHOOSES; until the player picks, the first
+			// roll stands so every consumer has a concrete effect to display.
+			chosenRoll: roll,
+			chosenEffect: effect,
+			needsChoice: !!secondRoll,
 			timestamp: Date.now(),
 		};
 		this._data.spellcasting.gamblerLastTableRoll = result;
 		return result;
+	}
+
+	/**
+	 * Record which of a Master of Fortune double Gambling Table roll the player kept.
+	 * @param {1|2} which 1 = the first roll, 2 = the second.
+	 * @returns {{roll: number, effect: string}|null} The chosen result, or null.
+	 */
+	chooseGamblingTableResult (which) {
+		const last = this._data.spellcasting.gamblerLastTableRoll;
+		if (!last) return null;
+		const useSecond = which === 2 && last.secondRoll != null;
+		last.chosenRoll = useSecond ? last.secondRoll : last.roll;
+		last.chosenEffect = useSecond ? last.secondEffect : last.effect;
+		last.needsChoice = false;
+		return {roll: last.chosenRoll, effect: last.chosenEffect};
 	}
 
 	/**
@@ -17239,24 +17445,134 @@ class CharacterSheetState {
 		this._data.spellcasting.gamblerAutoRollTable = !!value;
 	}
 
+	// =========================================================================
+	// Generic post-roll d20 "fortune intervention" API
+	// =========================================================================
+	//
+	// A fortune intervention is a feature that lets the player CHANGE an already-rolled
+	// d20 by spending a limited resource ("Lucky", "Portent", TGTT Gambler's Extra Luck
+	// and Master of Fortune, …). Every such feature has the same shape, so the sheet
+	// models them uniformly:
+	//
+	//   getD20InterventionOffers(ctx)   → what could be spent on THIS die (pure)
+	//   applyD20Intervention(id, ctx)   → spend it, return the new die + side effects
+	//
+	// The page layer (`_pMaybeApplyFortuneIntervention`) renders one prompt for whatever
+	// the state offers, so adding a new feature of this kind is a state-only change.
+	//
+	// Offer kinds:
+	//   "advantage"      — roll a second d20 and keep the higher (post-hoc advantage)
+	//   "natOneToTwenty" — treat a natural 1 as a natural 20
+
+	/**
+	 * Which d20 interventions are available for a die that has just been rolled.
+	 *
+	 * @param {object} ctx
+	 * @param {number} ctx.naturalRoll The natural d20 the player rolled.
+	 * @param {number} [ctx.effectiveRoll] The die after minimums/floors (defaults to naturalRoll).
+	 * @param {boolean} [ctx.isAdvantage] True when the roll already had advantage.
+	 * @param {string} [ctx.rollType] "check" | "save" | "attack" (informational).
+	 * @returns {Array<{id: string, name: string, kind: string, remaining: number, max: number, description: string}>}
+	 */
+	getD20InterventionOffers ({naturalRoll, effectiveRoll, isAdvantage = false, rollType = "check"} = {}) {
+		const natural = Number.isFinite(naturalRoll) ? naturalRoll : null;
+		if (natural == null) return [];
+		const effective = Number.isFinite(effectiveRoll) ? effectiveRoll : natural;
+		const settings = this.getSettings?.() || {};
+		const offers = [];
+
+		// TGTT Gambler — Extra Luck (L9). Bonus action: gain advantage on an attack roll,
+		// ability check or saving throw; usable after the die is rolled but before results
+		// are determined. Prompting on EVERY die would be spam, so it is only offered on a
+		// die that is plausibly worth rescuing (configurable) and never on an existing
+		// advantage roll (which it could not improve).
+		const extraLuck = this.getExtraLuckUses();
+		if (extraLuck && extraLuck.remaining > 0 && !isAdvantage) {
+			const threshold = Number.isFinite(settings.gamblerLuckPromptThreshold)
+				? settings.gamblerLuckPromptThreshold
+				: CharacterSheetState.GAMBLER_LUCK_PROMPT_THRESHOLD;
+			if (effective <= threshold) {
+				offers.push({
+					id: "gamblerExtraLuck",
+					name: "Extra Luck",
+					kind: "advantage",
+					remaining: extraLuck.remaining,
+					max: extraLuck.max,
+					description: "Bonus action: gain advantage on this roll (roll a second d20 and keep the higher). Rolls once on the Gambling Table.",
+				});
+			}
+		}
+
+		// TGTT Gambler — Master of Fortune (L17). PB/long rest: treat a natural 1 on an
+		// attack roll, ability check or saving throw as a natural 20.
+		const masterOfFortune = this.getMasterOfFortuneUses();
+		if (masterOfFortune && masterOfFortune.remaining > 0 && natural === 1) {
+			offers.push({
+				id: "gamblerMasterOfFortune",
+				name: "Master of Fortune",
+				kind: "natOneToTwenty",
+				remaining: masterOfFortune.remaining,
+				max: masterOfFortune.max,
+				description: "Treat this natural 1 as a natural 20. Rolls twice on the Gambling Table \u2014 you choose which result applies.",
+			});
+		}
+
+		return offers;
+	}
+
+	/**
+	 * Spend a d20 intervention offered by {@link getD20InterventionOffers}.
+	 *
+	 * @param {string} id The offer id.
+	 * @param {object} ctx
+	 * @param {number} ctx.naturalRoll
+	 * @param {number} [ctx.effectiveRoll]
+	 * @returns {{applied: boolean, effectiveRoll: number, naturalRoll: number, secondDie?: number, tableRoll?: object, remaining?: number, name?: string}}
+	 */
+	applyD20Intervention (id, {naturalRoll, effectiveRoll} = {}) {
+		const natural = Number.isFinite(naturalRoll) ? naturalRoll : 0;
+		const effective = Number.isFinite(effectiveRoll) ? effectiveRoll : natural;
+		const fail = {applied: false, effectiveRoll: effective, naturalRoll: natural};
+
+		switch (id) {
+			case "gamblerExtraLuck": {
+				if (!this.useExtraLuck()) return fail;
+				const secondDie = Math.floor(Math.random() * 20) + 1;
+				return {
+					applied: true,
+					name: "Extra Luck",
+					naturalRoll: Math.max(natural, secondDie),
+					effectiveRoll: Math.max(effective, secondDie),
+					secondDie,
+					tableRoll: this.getGamblerLastTableRoll(),
+					remaining: this.getExtraLuckUses()?.remaining ?? 0,
+				};
+			}
+			case "gamblerMasterOfFortune": {
+				if (natural !== 1) return fail;
+				if (!this.useMasterOfFortune()) return fail;
+				return {
+					applied: true,
+					name: "Master of Fortune",
+					naturalRoll: 20,
+					effectiveRoll: 20,
+					tableRoll: this.getGamblerLastTableRoll(),
+					remaining: this.getMasterOfFortuneUses()?.remaining ?? 0,
+				};
+			}
+			default: return fail;
+		}
+	}
+
 	/**
 	 * Use Extra Luck (L9 feature) - grants advantage, triggers d100 roll.
 	 * @returns {boolean} True if successful, false if no uses remaining
 	 */
 	useExtraLuck () {
-		const calcs = this.getFeatureCalculations();
-		if (!calcs.hasExtraLuck) return false;
-
-		const maxUses = calcs.extraLuckUses || this.getProficiencyBonus();
-		const used = this._data.spellcasting.gamblerExtraLuckUsed || 0;
-
-		if (used >= maxUses) return false;
-
-		this._data.spellcasting.gamblerExtraLuckUsed = used + 1;
-
+		const resource = this._spendGamblerResource("gamblerExtraLuck");
+		if (!resource) return false;
 		// Trigger d100 roll on the Gambling Table
 		this.rollGamblingTable();
-
 		return true;
 	}
 
@@ -17265,12 +17581,7 @@ class CharacterSheetState {
 	 * @returns {{remaining: number, max: number}|null}
 	 */
 	getExtraLuckUses () {
-		const calcs = this.getFeatureCalculations();
-		if (!calcs.hasExtraLuck) return null;
-
-		const max = calcs.extraLuckUses || this.getProficiencyBonus();
-		const used = this._data.spellcasting.gamblerExtraLuckUsed || 0;
-		return {remaining: max - used, max};
+		return this._getGamblerResourceUses("gamblerExtraLuck");
 	}
 
 	/**
@@ -17278,19 +17589,10 @@ class CharacterSheetState {
 	 * @returns {boolean} True if successful, false if no uses remaining
 	 */
 	useMasterOfFortune () {
-		const calcs = this.getFeatureCalculations();
-		if (!calcs.hasMasterOfFortune) return false;
-
-		const maxUses = calcs.masterOfFortuneUses || this.getProficiencyBonus();
-		const used = this._data.spellcasting.gamblerMasterFortuneUsed || 0;
-
-		if (used >= maxUses) return false;
-
-		this._data.spellcasting.gamblerMasterFortuneUsed = used + 1;
-
+		const resource = this._spendGamblerResource("gamblerMasterOfFortune");
+		if (!resource) return false;
 		// Trigger d100 roll on the Gambling Table
 		this.rollGamblingTable();
-
 		return true;
 	}
 
@@ -17299,12 +17601,7 @@ class CharacterSheetState {
 	 * @returns {{remaining: number, max: number}|null}
 	 */
 	getMasterOfFortuneUses () {
-		const calcs = this.getFeatureCalculations();
-		if (!calcs.hasMasterOfFortune) return null;
-
-		const max = calcs.masterOfFortuneUses || this.getProficiencyBonus();
-		const used = this._data.spellcasting.gamblerMasterFortuneUsed || 0;
-		return {remaining: max - used, max};
+		return this._getGamblerResourceUses("gamblerMasterOfFortune");
 	}
 
 	/**
@@ -17315,6 +17612,11 @@ class CharacterSheetState {
 		this._data.spellcasting.gamblerMasterFortuneUsed = 0;
 		this._data.spellcasting.gamblerLastBet = null;
 		this._data.spellcasting.gamblerLastTableRoll = null;
+		this._ensureGamblerResources();
+		for (const resourceType of ["gamblerExtraLuck", "gamblerMasterOfFortune"]) {
+			const resource = (this._data.resources || []).find(r => r.resourceType === resourceType);
+			if (resource) resource.current = resource.max;
+		}
 	}
 
 	// ==========================================
@@ -18045,13 +18347,15 @@ class CharacterSheetState {
 									calculations.gamblerSpellDcFormula = `8 + ${profBonus} + ${calculations.gamblerModifierDice}`;
 									calculations.gamblerSpellAttackFormula = `${profBonus} + ${calculations.gamblerModifierDice}`;
 
-									// 1/3 caster spell slots
-									const thirdCasterLevel = Math.floor(level / 3);
+									// Spell slots, straight from the subclass's published table (via
+									// the same generic reader `calculateSpellSlots` uses) so this
+									// display value can never drift from the real slot grid.
+									const gamblerSlotRow = CharacterSheetState.getSubclassSpellSlotRow(cls) || [0, 0, 0, 0];
 									calculations.gamblerSpellSlots = {
-										level1: thirdCasterLevel >= 1 ? (thirdCasterLevel >= 2 ? (thirdCasterLevel >= 3 ? 4 : 3) : 2) : 0,
-										level2: thirdCasterLevel >= 4 ? (thirdCasterLevel >= 7 ? 3 : 2) : 0,
-										level3: thirdCasterLevel >= 7 ? (thirdCasterLevel >= 10 ? 3 : 2) : 0,
-										level4: thirdCasterLevel >= 10 ? 1 : 0,
+										level1: gamblerSlotRow[0] || 0,
+										level2: gamblerSlotRow[1] || 0,
+										level3: gamblerSlotRow[2] || 0,
+										level4: gamblerSlotRow[3] || 0,
 									};
 								}
 
@@ -22629,9 +22933,15 @@ class CharacterSheetState {
 								calculations.rightOnTimeBonus = wisMod;
 
 								// Channel Divinity: Temporal Manipulation (level 3)
-								// DC = 8 + proficiency bonus + WIS modifier, uses = Channel Divinity uses
+								// A REACTION that grants advantage or imposes disadvantage on
+								// another creature's d20 roll within 60 ft, spending one use of
+								// Channel Divinity. It forces NO saving throw, so it has no DC —
+								// an earlier `temporalManipulationDc` (8 + PB + WIS) was invented
+								// data that nothing read. The mechanical implementation is the
+								// generic "Channel Divinity: <Option>" convention in
+								// detectActivatableFeature, which surfaces it as a reaction
+								// ability bound to the shared Channel Divinity pool.
 								calculations.hasTemporalManipulation = true;
-								calculations.temporalManipulationDc = 8 + profBonus + wisMod - exhaustionPenalty;
 
 								// Eyes of the Future Past (level 6): WIS mod uses
 								if (level >= 6) {
@@ -30153,9 +30463,13 @@ class CharacterSheetState {
 		);
 		if (hasGamblerWeapons) return; // Already injected
 
-		// Inject all Gambler weapons
+		// Inject all Gambler weapons, EQUIPPED. Gambler's Tools is the subclass's weapon
+		// suite — the cards/dice/coins are the gambler's arms and their spellcasting focus,
+		// so they must reach the Attacks panel immediately rather than sitting inert in the
+		// inventory. They are weightless trinkets (0.01-0.1 lb) with no AC or attunement
+		// impact, and the guard above means a player who unequips them is never overridden.
 		for (const weaponTemplate of CharacterSheetState.GAMBLER_WEAPONS) {
-			this.addItem({...weaponTemplate}, 1, false, false);
+			this.addItem({...weaponTemplate}, 1, true, false);
 		}
 	}
 
@@ -34834,6 +35148,7 @@ class CharacterSheetState {
 		this._ensureShadowKnightResources();
 		this._ensureMeteorKnightResources();
 		this._ensureSteelHawkResources();
+		this._ensureGamblerResources();
 		this.ensureBloodHunterResources();
 		this.ensureTalentResources();
 		this._ensureChannelDivinityUses();
@@ -35370,13 +35685,104 @@ class CharacterSheetState {
 		}
 	}
 
+	// =========================================================================
+	// TGTT Rogue — Gambler daily fortune pools
+	// =========================================================================
+
+	/** @returns {object|null} The Rogue class entry whose subclass is the TGTT Gambler. */
+	_getGamblerClass () {
+		return (this._data.classes || []).find(cls => {
+			const sub = cls?.subclass;
+			if (!sub) return false;
+			const name = (sub.shortName || sub.name || "").toLowerCase();
+			return name === "gambler";
+		}) || null;
+	}
+
+	/**
+	 * Reconcile the Gambler's two daily fortune pools (Extra Luck L9, Master of
+	 * Fortune L17). Both are "proficiency bonus per long rest".
+	 *
+	 * Mirrors `_ensureSteelHawkResources`: derives max from the class level + PB
+	 * directly (never `getFeatureCalculations()`, which would recurse back through
+	 * `getResources()`), preserves expended uses across a max change, and removes the
+	 * rows when the level requirement lapses (respec / level drain).
+	 *
+	 * Migration: pre-resource saves tracked spend in the legacy
+	 * `spellcasting.gamblerExtraLuckUsed` / `gamblerMasterFortuneUsed` counters. Those
+	 * are consumed once, when the pool is first materialised, so an in-flight adventuring
+	 * day survives the upgrade.
+	 * @private
+	 */
+	_ensureGamblerResources () {
+		const level = this._getGamblerClass()?.level || 0;
+		const max = this.getProficiencyBonus();
+		this._data.resources = this._data.resources || [];
+
+		const ensure = ({name, resourceType, minLevel, legacyUsedKey}) => {
+			if (level < minLevel) {
+				this._data.resources = this._data.resources.filter(r => r.resourceType !== resourceType);
+				return;
+			}
+			let resource = this._data.resources.find(r => r.resourceType === resourceType);
+			if (!resource) {
+				const legacyUsed = Math.max(0, Math.min(max, this._data.spellcasting?.[legacyUsedKey] || 0));
+				resource = {
+					id: CryptUtil.uid(),
+					name,
+					current: Math.max(0, max - legacyUsed),
+					max,
+					recharge: "long",
+					resourceType,
+				};
+				this._data.resources.push(resource);
+				return;
+			}
+			const expended = Math.max(0, (resource.max ?? max) - (resource.current ?? resource.max ?? max));
+			resource.name = name;
+			resource.max = max;
+			resource.current = Math.max(0, max - expended);
+			resource.recharge = "long";
+		};
+
+		ensure({name: "Extra Luck", resourceType: "gamblerExtraLuck", minLevel: 9, legacyUsedKey: "gamblerExtraLuckUsed"});
+		ensure({name: "Master of Fortune", resourceType: "gamblerMasterOfFortune", minLevel: 17, legacyUsedKey: "gamblerMasterFortuneUsed"});
+	}
+
+	/**
+	 * @param {string} resourceType
+	 * @returns {{remaining: number, max: number}|null} null when the feature is absent.
+	 * @private
+	 */
+	_getGamblerResourceUses (resourceType) {
+		this._ensureGamblerResources();
+		const resource = (this._data.resources || []).find(r => r.resourceType === resourceType);
+		if (!resource) return null;
+		return {remaining: Math.max(0, resource.current || 0), max: resource.max || 0};
+	}
+
+	/**
+	 * Spend one use from a Gambler fortune pool, keeping the legacy counter in sync.
+	 * @param {string} resourceType
+	 * @returns {object|null} The live resource when a use was spent, else null.
+	 * @private
+	 */
+	_spendGamblerResource (resourceType) {
+		this._ensureGamblerResources();
+		const resource = (this._data.resources || []).find(r => r.resourceType === resourceType);
+		if (!resource || (resource.current || 0) <= 0) return null;
+		resource.current -= 1;
+		const legacyKey = resourceType === "gamblerExtraLuck" ? "gamblerExtraLuckUsed" : "gamblerMasterFortuneUsed";
+		this._data.spellcasting[legacyKey] = Math.max(0, (resource.max || 0) - resource.current);
+		return resource;
+	}
+
 	/**
 	 * @param {string} resourceType
 	 * @returns {object|null} A copy of the live pool, or null when absent.
 	 * @private
 	 */
-	_getSteelHawkResource (resourceType) {
-		this._ensureSteelHawkResources();
+	_getSteelHawkResource (resourceType) {		this._ensureSteelHawkResources();
 		const resource = this._data.resources.find(r => r.resourceType === resourceType);
 		return resource ? {...resource} : null;
 	}
@@ -42465,6 +42871,55 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * GENERIC always-on attack riders: prose effects that change how an attack RESOLVES
+	 * but are not a numeric attack/damage bonus (ignoring cover, auto-crit conditions,
+	 * forced saves on hit, …). The sheet cannot simulate battlefield geometry, so these
+	 * are surfaced as first-class badges on the attack row and in the roll title, the
+	 * same "reminder" convention used for Remarkable Athlete's movement.
+	 *
+	 * Two sources, unioned:
+	 *  1. Structured `attackRiders` declared on the weapon's `sourceItem` — the
+	 *     data-driven path any homebrew item or feature-granted weapon can use.
+	 *  2. Feature-derived riders (TGTT Gambler's Coins ricochet).
+	 *
+	 * Each rider: `{id, icon, label, description}`.
+	 * @param {*} attack
+	 * @returns {Array<{id: string, icon: string, label: string, description: string}>}
+	 */
+	getAttackRiderNotes (attack) {
+		if (!attack || attack.isSpell) return [];
+		const item = attack.sourceItem;
+		const riders = [];
+
+		if (Array.isArray(item?.attackRiders)) {
+			for (const r of item.attackRiders) {
+				if (!r?.label) continue;
+				riders.push({
+					id: r.id || `item:${r.label}`,
+					icon: r.icon || "\u2726",
+					label: r.label,
+					description: r.description || r.label,
+				});
+			}
+		}
+
+		// TGTT Gambler's Tools — the coins ricochet off surfaces, so a ranged attack made
+		// with them treats a target behind half cover as having no cover (i.e. the target
+		// loses its +2 AC / +2 DEX-save bonus from half cover).
+		if (item?._isGamblerWeapon && /coins/i.test(item.name || "")
+			&& !riders.some(r => r.id === "gamblerCoinRicochet")) {
+			riders.push({
+				id: "gamblerCoinRicochet",
+				icon: "\u{1FA99}",
+				label: "Ricochet: ignores half cover",
+				description: "Gambler's Tools: the coins ricochet off nearby surfaces \u2014 a ranged attack with them treats a target behind half cover as having no cover (the target loses the +2 AC and +2 Dexterity saving-throw bonus half cover would grant).",
+			});
+		}
+
+		return riders;
+	}
+
+	/**
 	 * Crit / nat-20 weapon riders for an attack: bonus damage and/or temp-HP
 	 * effects that fire when the attack roll is a natural 20 (or, for
 	 * `trigger:"crit"` riders, any critical hit including an expanded crit range).
@@ -49065,6 +49520,37 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Fallback subclass-declared spell-slot tables, keyed `shortname|source` (lowercase).
+	 *
+	 * The authoritative copy of each table lives in the subclass's own
+	 * `subclassTableGroups[].rowsSpellProgression` and is persisted onto the class entry
+	 * by the Builder / Quick Build / Level-Up subclass writers. This registry only covers
+	 * saves written before that persistence existed, and programmatic `addClass` callers
+	 * (unit tests) that never went through a picker.
+	 *
+	 * Row N (0-indexed N-1) = slots per spell level at CLASS level N.
+	 *
+	 * @see CharacterSheetState.getSubclassSpellSlotRow
+	 */
+	static SUBCLASS_SPELL_SLOT_TABLES = {		// TGTT Rogue — Gambler ("Spell Slots per Spell Level" table). Deliberately NOT the
+		// generic third-caster progression: levels 10-12 grant 4/2, where the generic table
+		// would give 4/3.
+		"gambler|tgtt": [
+			[0, 0, 0, 0], [0, 0, 0, 0], [2, 0, 0, 0], [3, 0, 0, 0], [3, 0, 0, 0],
+			[3, 0, 0, 0], [4, 2, 0, 0], [4, 2, 0, 0], [4, 2, 0, 0], [4, 2, 0, 0],
+			[4, 2, 0, 0], [4, 2, 0, 0], [4, 3, 2, 0], [4, 3, 2, 0], [4, 3, 2, 0],
+			[4, 3, 3, 0], [4, 3, 3, 0], [4, 3, 3, 0], [4, 3, 3, 1], [4, 3, 3, 1],
+		],
+	};
+
+	/**
+	 * Default ceiling for offering TGTT Gambler's Extra Luck on a rolled d20. A die at or
+	 * below this value is "worth rescuing"; anything higher would be prompt spam.
+	 * Overridable per character via `settings.gamblerLuckPromptThreshold`.
+	 */
+	static GAMBLER_LUCK_PROMPT_THRESHOLD = 10;
+
+	/**
 	 * Gambler class unique weapons - injected when Gambler reaches level 3
 	 * These are custom weapons with special properties from TGTT
 	 */
@@ -52795,6 +53281,10 @@ class CharacterSheetState {
 					activationAction: activationAction || toggleAnalysis.activationAction || "bonus",
 					matchedBy: "analysis",
 					effects: parsedEffects,
+					// Self-imposed drawbacks ("While using this ability, you are under the
+					// blinded condition") are part of the toggle's mechanics, not flavour —
+					// carry them so activation applies (and deactivation clears) them.
+					addsConditions: CharacterSheetState.parseSelfImposedConditions(rawText),
 					duration: toggleAnalysis.duration,
 					endConditions: toggleAnalysis.endConditions,
 					confidence: toggleAnalysis.confidence,
@@ -54768,6 +55258,7 @@ class CharacterSheetState {
 			if (options.sourceFeatureId) existing.sourceFeatureId = options.sourceFeatureId;
 			if (options.icon) existing.icon = options.icon;
 			if (options.customEffects) existing.customEffects = options.customEffects;
+			if (options.addsConditions?.length) existing.addsConditions = options.addsConditions;
 			if (options.beastData !== undefined) existing.beastData = options.beastData;
 			if (options.zodiacForm !== undefined) existing.zodiacForm = options.zodiacForm;
 			if (options.placement !== undefined) existing.placement = options.placement;
@@ -54776,6 +55267,11 @@ class CharacterSheetState {
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
+			// Re-apply self-imposed conditions. Deactivating the state released
+			// them (and emptied `_managedConditions`), so without this the SECOND
+			// and every later activation of a state silently carries no condition
+			// even though `addsConditions` is still declared on it.
+			this._applyStateAddedConditions(existing, stateType);
 			return existing.id;
 		}
 
@@ -54813,9 +55309,18 @@ class CharacterSheetState {
 			placement: options.placement || null,
 			weaponId: options.weaponId || null,
 			weaponName: options.weaponName || null,
+			// Self-imposed drawback conditions this state applies while active. Curated
+			// states declare them on their ACTIVE_STATE_TYPES entry; CUSTOM (generically
+			// detected) toggles carry them here instead, parsed from the feature text.
+			addsConditions: options.addsConditions?.length ? options.addsConditions : null,
 		};
 
 		this._data.activeStates.push(state);
+		// Apply any self-imposed drawback conditions the state declares. `activateState`
+		// does this for curated types; the CUSTOM path reaches the sheet through
+		// addActiveState alone, so without this a generically-detected toggle's drawback
+		// (e.g. Eyes of the Future Past → Blinded) would never be applied.
+		this._applyStateAddedConditions(state, stateType);
 		return state.id;
 	}
 
@@ -55018,6 +55523,60 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Parse conditions a feature imposes on ITS OWN USER for as long as it is active.
+	 *
+	 * Sustained toggles frequently carry a drawback ("While using this ability, you are
+	 * under the {@condition blinded} condition …" — Time Domain's Eyes of the Future Past;
+	 * "you are {@condition restrained} while …"). Those drawbacks were previously invisible
+	 * to the sheet: `addsConditions` only existed on curated ACTIVE_STATE_TYPES entries, so
+	 * every generically-detected (custom) toggle silently dropped them.
+	 *
+	 * Deliberately conservative — it only matches text that says the condition applies to
+	 * YOU (`you are` / `you have` / `you become` / `you suffer`), never to a target
+	 * ("the target is blinded"), and only inside a duration clause, so an instantaneous
+	 * effect on someone else is never mistaken for a self-imposed drawback.
+	 * @param {string} text - The feature's description text (may contain `{@condition …}` tags).
+	 * @returns {string[]} Lower-case condition names, de-duplicated (empty when none).
+	 */
+	static parseSelfImposedConditions (text) {
+		if (!text || typeof text !== "string") return [];
+		// Normalize `{@condition blinded|XPHB|blinded}` → `blinded` so one pattern set
+		// covers tagged and untagged prose alike.
+		const plain = text
+			.replace(/\{@condition\s+([^}|]+)(?:\|[^}]*)?\}/gi, "$1")
+			.replace(/<[^>]*>/g, " ")
+			.replace(/\s+/g, " ");
+
+		const known = [
+			"blinded", "charmed", "deafened", "frightened", "grappled", "incapacitated",
+			"invisible", "paralyzed", "petrified", "poisoned", "prone", "restrained",
+			"stunned", "unconscious", "exhaustion",
+		];
+		const alternation = known.join("|");
+
+		// "you are/have/become/suffer [from] the <cond> condition" and the bare
+		// "you are <cond>" form. `(?:under|subjected to)` covers the common
+		// "you are under the blinded condition" phrasing.
+		const patterns = [
+			new RegExp(`\\byou\\s+(?:are|become|have|suffer(?:\\s+from)?|count\\s+as)\\s+(?:being\\s+)?(?:under|subjected\\s+to)?\\s*(?:the\\s+)?(${alternation})\\b`, "gi"),
+			new RegExp(`\\byou\\s+(?:gain|take)\\s+(?:a\\s+|one\\s+)?level\\s+of\\s+(exhaustion)\\b`, "gi"),
+		];
+
+		/** @type {Set<string>} */
+		const out = new Set();
+		for (const re of patterns) {
+			let m;
+			while ((m = re.exec(plain)) !== null) {
+				// Reject a negated clause ("you are no longer blinded", "you aren't blinded").
+				const before = plain.slice(Math.max(0, m.index - 24), m.index + m[0].length);
+				if (/\b(?:no longer|not|aren'?t|isn'?t|never|immune to|cannot be|can'?t be)\b/i.test(before)) continue;
+				out.add(m[1].toLowerCase());
+			}
+		}
+		return [...out];
+	}
+
+	/**
 	 * Apply any conditions an active state grants on activation (e.g. Shell
 	 * Defense → Prone). Only conditions this activation ACTUALLY added (i.e.
 	 * `addCondition` returned true — the condition wasn't already present) are
@@ -55030,9 +55589,21 @@ class CharacterSheetState {
 	 * @private
 	 */
 	_applyStateAddedConditions (stateInstance, stateType) {
-		if (!stateInstance || !Array.isArray(stateType?.addsConditions) || !stateType.addsConditions.length) return;
+		if (!stateInstance) return;
+		// GENERIC (self-imposed drawbacks): a CUSTOM state — one detected by the generic
+		// toggle analysis rather than curated in ACTIVE_STATE_TYPES — has no stateType and
+		// therefore could never carry `addsConditions`. Homebrew toggles routinely impose a
+		// condition on their OWN user for the duration ("While using this ability, you are
+		// under the blinded condition" — Time Domain's Eyes of the Future Past). Let the
+		// state instance carry its own `addsConditions` (parsed from the feature text by
+		// `parseSelfImposedConditions`) so every such toggle applies — and, via
+		// `_managedConditions`, cleanly removes — its drawback with no per-feature wiring.
+		const declared = (Array.isArray(stateType?.addsConditions) && stateType.addsConditions.length)
+			? stateType.addsConditions
+			: stateInstance.addsConditions;
+		if (!Array.isArray(declared) || !declared.length) return;
 		if (!Array.isArray(stateInstance._managedConditions)) stateInstance._managedConditions = [];
-		for (const cond of stateType.addsConditions) {
+		for (const cond of declared) {
 			const condObj = this._normalizeCondition(cond);
 			// Don't double-track a condition this state already owns (re-activation).
 			const alreadyManaged = stateInstance._managedConditions.some(c =>
@@ -55071,8 +55642,11 @@ class CharacterSheetState {
 		// the state TYPE declares it adds (resolved to their active variant by
 		// removeCondition's normalization, so "Invisible" → the TGTT variant when present).
 		const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[stateInstance.stateTypeId];
-		if (!Array.isArray(stateType?.addsConditions) || !stateType.addsConditions.length) return;
-		for (const cond of stateType.addsConditions) {
+		const declared = (Array.isArray(stateType?.addsConditions) && stateType.addsConditions.length)
+			? stateType.addsConditions
+			: stateInstance.addsConditions;
+		if (!Array.isArray(declared) || !declared.length) return;
+		for (const cond of declared) {
 			this.removeCondition(cond);
 		}
 	}

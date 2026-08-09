@@ -93,15 +93,21 @@ describeCharacter({
 		},
 		{level: 2, name: /turn undead/i, kind: "passive"},
 		// ── L3: Time Domain subclass features + 1st domain spell tier ───
-		// Domain spells are "always prepared" but the TGTT Time Domain
-		// preset uses TGTT-flavor spells, not first-party Feather Fall.
-		// Phase 6 declared Feather Fall here; Phase 7 smoke confirmed
-		// the build prepares TGTT-flavor spells instead, so we no
-		// longer assert any specific domain spell name.
+		// The domain spells ARE first-party / EGW spells and they ARE granted
+		// always-prepared at the right tiers — verified literally against
+		// `additionalSpells.prepared` in homebrew/TravelersGuidetoThelemar.json.
+		// (An earlier note in known-bugs.md claimed the sheet listed
+		// "plausible but wrong" TGTT-flavor spells here; that is stale.)
 		{
 			level: 3,
 			name: /time domain spells/i,
 			kind: "passive",
+			effects: <EffectCheck[]>[
+				{kind: "spellInList", spell: "Gift of Alacrity"},
+				{kind: "spellInList", spell: "Feather Fall"},
+				{kind: "spellInList", spell: "Fortune's Favor"},
+				{kind: "spellInList", spell: "Immovable Object"},
+			],
 		},
 		// CS-BUG-093: the `has*` / `*Uses` / `*Dc` calc keys for Chronological
 		// Interference, Temporal Manipulation, Eyes of the Future Past and
@@ -153,45 +159,61 @@ describeCharacter({
 			],
 		},
 		// CD: Temporal Manipulation is a reaction (advantage/disadvantage on
-		// another creature's d20), so there is no self-targeted roll-mod to
-		// read. Its SAVE DC is a real mechanical effect and is asserted
-		// against the spell save DC it is derived from.
+		// another creature's d20). It imposes NO saving throw, so there is no
+		// DC to read — the product used to publish a `temporalManipulationDc`
+		// calc key, which was invented data nothing rendered; it has been
+		// removed. Its real mechanical footprint is that it is a REACTION
+		// bound to the shared Channel Divinity pool, which is what is asserted.
 		{
 			level: 3,
 			name: /channel divinity: temporal manipulation/i,
-			kind: "passive",
+			kind: "resource",
+			resourceName: "Channel Divinity",
 			effects: [
 				{kind: "featureCalculation", property: "hasTemporalManipulation", exact: true},
-				{kind: "featureCalculationDerivedFrom", property: "temporalManipulationDc", equals: "spellSaveDc", ability: "wis"},
+				{
+					kind: "featureActivation",
+					feature: "Channel Divinity: Temporal Manipulation",
+					activationAction: "reaction",
+					resourceName: "Channel Divinity",
+					resourceCost: 1,
+				},
 			],
 		},
 		// ── L5: Destroy/Sear Undead + 2nd domain spell tier ─────────────
 		// Destroy/Sear Undead is a passive Turn Undead upgrade — no clean
 		// state probe per Phase-7 hint #4.
 		{level: 5, name: /sear undead|destroy undead/i, kind: "passive"},
-		// L5 domain spell tier — TGTT Time Domain prepares TGTT-flavor
-		// spells (Accelerate/Decelerate, Animate Claw…) rather than
-		// first-party Haste/Slow, so we no longer assert specific names
-		// (CS-BUG-015). rollAttack probe was also removed — the TGTT
-		// cleric build doesn't auto-equip a weapon, so the attack row
-		// regex never matches; loadout-driven specs cover that case
-		// elsewhere.
+		// L5 domain spell tier — Haste / Slow, granted always-prepared.
+		// rollAttack probe was removed — the TGTT cleric build doesn't
+		// auto-equip a weapon, so the attack row regex never matches;
+		// the midTierLoadout Mace covers that case in the USE probes.
 		{
 			level: 5,
 			name: /time domain spells/i,
 			kind: "passive",
+			effects: <EffectCheck[]>[
+				{kind: "spellInList", spell: "Haste"},
+				{kind: "spellInList", spell: "Slow"},
+			],
 		},
 		// ── L6: Eyes of the Future Past + CD pool grows ─────────────────
-		// Bonus-action toggle in the rules but the parent FeatureCheck is
-		// "passive" — no toggle button to drive. The uses pool is real
-		// though: product computes `Math.max(1, wisMod)`, which
-		// `featureUsesEqualAbilityMod` matches exactly (minimum included),
-		// and is preset-independent unlike a literal count.
+		// A genuine bonus-action TOGGLE ("stays active until you dismiss it,
+		// up to 1 minute") whose COST is a self-imposed condition: "While
+		// using this ability, you are under the blinded condition with respect
+		// to everything happening in the present around you." That cost is now
+		// mechanically applied through the generic `addsConditions` channel on
+		// active states, and released when the toggle ends — both halves are
+		// probed here, because a self-imposed condition that leaks is worse
+		// than one that never applies.
+		// The uses pool is real: product computes `Math.max(1, wisMod)`, which
+		// `featureUsesEqualAbilityMod` matches exactly (minimum included), and
+		// is preset-independent unlike a literal count.
 		{
 			level: 6,
 			name: /eyes of the future past/i,
-			kind: "passive",
-			effects: [
+			kind: "toggle",
+			effects: <EffectCheck[]>[
 				{kind: "featureCalculation", property: "hasEyesOfFuturePast", exact: true},
 				{
 					kind: "featureUsesEqualAbilityMod",
@@ -200,6 +222,7 @@ describeCharacter({
 					minimum: 1,
 					recharge: "long",
 				},
+				{kind: "toggleAddsCondition", condition: "blinded"},
 			],
 		},
 		// CD pool grows to 2 at L6 and holds through L17 (checkpoints 11, 17).
@@ -217,6 +240,10 @@ describeCharacter({
 			level: 7,
 			name: /time domain spells/i,
 			kind: "passive",
+			effects: <EffectCheck[]>[
+				{kind: "spellInList", spell: "Death Ward"},
+				{kind: "spellInList", spell: "Freedom of Movement"},
+			],
 		},
 		// ── L8: Potent Spellcasting ─────────────────────────────────────
 		// Adds Wis to cleric cantrip damage. There is no cantrip-damage
@@ -245,20 +272,30 @@ describeCharacter({
 			level: 9,
 			name: /time domain spells/i,
 			kind: "passive",
+			effects: <EffectCheck[]>[
+				{kind: "spellInList", spell: "Temporal Shunt"},
+				{kind: "spellInList", spell: "Hold Monster"},
+			],
 		},
 		// ── L10: Divine Intervention ────────────────────────────────────
 		// Once-per-long-rest cinematic feature — no easy probe per hint #5.
 		{level: 10, name: /divine intervention/i, kind: "passive"},
 		// ── L17: Temporal Mastery capstone subclass feature ─────────────
-		// TGTT Time Domain spell list at L17 is TGTT-flavored, so we still
-		// don't assert specific spell names — but the capstone itself sets
-		// a real calculation flag, so its presence is now verified
-		// mechanically rather than by name alone.
+		// The capstone's prose says it adds Time Stop and Time Ravage to the
+		// domain spell list, always prepared. Those two spells were MISSING
+		// from `additionalSpells.prepared` in the homebrew, so the grant was
+		// inert; a `"17"` tier was added to the book data (no JS special-case
+		// — it reuses the same level-gated channel as every other tier).
+		// These two probes are what keep that fix honest.
 		{
 			level: 17,
 			name: /temporal mastery/i,
 			kind: "passive",
-			effects: [{kind: "featureCalculation", property: "hasTemporalMastery", exact: true}],
+			effects: <EffectCheck[]>[
+				{kind: "featureCalculation", property: "hasTemporalMastery", exact: true},
+				{kind: "spellInList", spell: "Time Stop"},
+				{kind: "spellInList", spell: "Time Ravage"},
+			],
 		},
 		// ── L18: Channel Divinity reaches its final pool of 3 ───────────
 		{

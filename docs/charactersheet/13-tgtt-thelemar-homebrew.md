@@ -209,7 +209,7 @@ hook as a confirm-then-pick prompt.
 | 3 | **Bonus Proficiencies** | Performance auto-granted; one further skill prompted at creation / Quick Build / level-up (the "proficiency in between …" phrasing needed a new `FeatureChoiceParser` pattern) |
 | 3 | **Jester's Acts** | The wrapper. Classified `passive` via `FEATURE_CLASSIFICATION_OVERRIDES`; the acts themselves carry the mechanics. Act save DC = `8 + your Performance skill bonus` (**not** the usual 8 + PB + CHA) via `getJesterActDc()` |
 | 3 | **Jester's Acts Options** | The pick pool (13 acts, `featureType: "JA"`). Count comes from the subclass's own **"Jester's Acts Known"** table column via `getSubclassTableNumber` — 3 at L3, 4 at L6, 5 at L14 |
-| 6 | **Gifted Acrobat** | Climbing speed equal to walking speed (`speed:climb` `equalToWalk`). The bonus-action grapple escape and 10-ft stand-from-prone have **no** generic surface — see **CS-BUG-116** |
+| 6 | **Gifted Acrobat** | Climbing speed equal to walking speed (`speed:climb` `equalToWalk`). The bonus-action grapple escape and 10-ft stand-from-prone have **no** generic surface — see **CS-BUG-119** |
 | 6 | **Unparalleled Skill** | Expertise (doubled proficiency) in one chosen skill; the choice is prompted and applied |
 | 14 | **Jester's Privilege** | 1 use / **long** rest. DC is a **rolled** value — `activationInfo.rolledSaveDc` rolls Performance at activation and reports "DC = result" rather than substituting a static DC |
 
@@ -265,7 +265,39 @@ adding a 14th act inherits the behaviour for free.
 | **Darkness** | ✅ Complete | `darknessChannelRange`, `umbralStrikeDamage` |
 | **Lust** | ✅ Complete | `charmingPresenceDc`, `seductiveAuraRange` |
 | **Madness** | ✅ Complete | `maddingTouchDamage`, `contagiousMadnessRange` |
-| **Time** | ✅ Complete | `temporalShiftUses`, `rewindActionUses`, `hasteSelfDuration` |
+| **Time** | ✅ Complete | See [Time Domain](#time-domain-full-surface) below — implemented as real mechanics (domain spells, initiative modifier, resource pools, cantrip damage, self-imposed condition), not calc keys |
+
+#### Time Domain — full surface
+
+Audited feature-by-feature against `homebrew/TravelersGuidetoThelemar.json`.
+Note the domain-spell tiers are keyed **3 / 5 / 7 / 9** (TGTT clerics get their
+domain at L3, not L1) plus a **17** tier added for Temporal Mastery.
+
+| Level | Feature | Mechanical implementation |
+|---|---|---|
+| 3 | Time Domain | Wrapper; pulls in the three L3 features via `refSubclassFeature` |
+| 3 | Chronological Interference | Bonus-action limited-use ability on a PB-scaled pool (2/3/3/6 at L3/5/8/17). The initiative *swap* itself is DM-side — the sheet spends the use |
+| 3 | Right on Time | `+WIS` initiative modifier, read by `getInitiative()` |
+| 3 | Time Domain Spells | `additionalSpells.prepared` → always-prepared, via the generic subclass path |
+| 3 | CD: Temporal Manipulation | Reaction; surfaced by the generic `"Channel Divinity: <Option>"` handler and bound to the shared Channel Divinity pool |
+| 6 | Eyes of the Future Past | Bonus-action toggle on a `max(1, wisMod)` pool that applies **Blinded** to its own owner while active and releases it on end (see `addsConditions` below) |
+| 8 | Potent Spellcasting | `+WIS` to cleric cantrip damage, read by `getCantripDamageBonus` |
+| 17 | Temporal Mastery | Adds *time stop* and *time ravage* to the always-prepared domain list (data-driven, the `"17"` tier) |
+
+Deliberately **not** modelled: Chronological Interference's swap of two
+creatures' initiative order, because the sheet does not track other creatures'
+initiative. Only the use-spend is implemented.
+
+##### Convention: `addsConditions` on generically-detected toggles
+
+A homebrew feature whose text imposes a condition **on its own owner**
+("you are blinded until…") does not need a hand-written entry in
+`ACTIVE_STATE_TYPES`. `CharacterSheetState.parseSelfImposedConditions(text)`
+extracts the condition from the feature text, the toggle detector attaches it
+to the activation info as `addsConditions`, and `addActiveState` applies and
+releases it. Only self-directed phrasings match; negations and immunity
+clauses ("you are immune to being blinded", "you can't be blinded") are
+rejected. Prefer this over adding a bespoke state type.
 
 ### ✅ Ranger Conclaves
 
@@ -316,6 +348,86 @@ adding a 14th act inherits the behaviour for free.
 | Patron | Status | Key Features |
 |--------|--------|--------------|
 | **The Horror** | ✅ Complete | `devastatingStrikeDamage` (scales by level), `devastatingStrikeAc` (temporary AC during strike), L6: `fearsomePresenceDc`, `feedOnFearHealing` |
+
+### ✅ Rogue Archetypes
+
+| Archetype | Status | Key Features |
+|-----------|--------|--------------|
+| **Gambler** | ✅ Complete | Published slot table, injected implement weapons, rolled spellcasting, `extraLuckUses`, `masterOfFortuneUses`, d20 fortune interventions |
+
+#### Gambler — feature-by-feature contract
+
+| Level | Feature | Surfaced where | Mechanical effect |
+|-------|---------|----------------|-------------------|
+| 3 | **Gambler's Tools** | Features tab; Inventory (3 equipped weapons); Combat → Attacks | Grants playing-card + dice-set tool proficiency. Injects **Gambler's Coins** (1d4 piercing, finesse/thrown 60/100), **Gambler's Dice** (1d6 bludgeoning, finesse/thrown 60/200) and **Gambler's Cards** (1d8 slashing, finesse/light/thrown 30/60) as *equipped* inventory so `renderAttacks` auto-generates rollable rows. The coins carry an attack rider — *"Ricochet: ignores half cover"* — rendered as a badge on the attack row and appended to the roll toast. |
+| 3 | **Gambler's Folly** | Features tab; toast + Gambling Table modal on every implement cast | Casting through an implement is a bet. Odds scale with the slot: 1st/2nd → 3-in-4 (d4, lose on 4), 3rd → 2-in-3 (d6, lose on 5-6), 4th → 1-in-2 (coin flip). A loss rolls d100 on the 100-row Gambling Table. |
+| 3 | **Gambler's Spellcasting** | Features tab; Spells tab (class card + slot rows); cantrip picker in Builder / Level-Up / Quick Build / Features | Cantrips are chosen from the **warlock** list (3, rising to 4 at L10) via ordinary pending spell choices. Slots come from the subclass's *published* table, not generic third-caster math. The Gambler has **no spellcasting ability**: each cast rolls a **Gambling Modifier** (1d6, 2d4 from L13); DC = `8 + PB + Gambling`, attack = `PB + Gambling`. The class card reports `ability: null` / `abilityLabel: "Rolled"` and exposes `saveDcFormula` / `attackBonusFormula` rather than inventing a static number. Prepared spells are re-rolled (2d4, 3d6 from L13) each long rest. |
+| 9 | **Extra Luck** | Features tab; **Resources** (PB uses, long rest); post-roll fortune prompt | A real spendable resource. Offered by `getD20InterventionOffers()` after a low d20 on an attack, ability check, skill check or saving throw; applying it re-rolls the die, keeps the better result and rolls on the Gambling Table. |
+| 13 | **Versatile Gambler** | Features tab; Spells tab dice display | `gamblerSpellsPreparedDice` → `3d6`, `gamblerModifierDice` → `2d4`. Both feed the live DC / attack formulas. |
+| 17 | **Master of Fortune** | Features tab; **Resources** (PB uses, long rest); Gambling Table modal; post-roll fortune prompt | Every Gambling Table roll produces **two** results with a real "choose" UI in the modal. Separately, PB times per day a natural 1 on an attack, check or save can be treated as a natural 20 via the fortune-intervention prompt. |
+
+---
+
+## Generic mechanisms introduced for the Gambler
+
+These were added as *general* sheet capabilities, not Gambler special cases —
+other subclasses (including first-party ones) already benefit.
+
+### Data-driven subclass spell-slot tables
+
+`CharacterSheetState.getSubclassSpellSlotRow(cls)` reads
+`cls.subclass.subclassTableGroups[].rowsSpellProgression[classLevel - 1]` and,
+for a single-class caster, `calculateSpellSlots()` uses that row verbatim
+instead of the generic caster math. Any homebrew subclass that publishes its
+own progression now gets an exact slot grid for free.
+
+This matters because the Gambler's published grid is **not** `ceil(level/3)`:
+at L10-12 the book gives 4 first-level + **2** second-level slots where the
+generic formula gives 4/3.
+
+A hard-coded fallback lives in `CharacterSheetState.SUBCLASS_SPELL_SLOT_TABLES`
+(keyed `"gambler|tgtt"`) for saves whose stored subclass predates
+`subclassTableGroups` persistence.
+
+### Post-roll d20 "fortune intervention" API
+
+```js
+state.getD20InterventionOffers({naturalRoll, effectiveRoll, isAdvantage, rollType})
+// → [{id, name, kind, description, remaining}]
+state.applyD20Intervention(id, {naturalRoll, effectiveRoll})
+// → {applied, naturalRoll, effectiveRoll, secondDie?, tableRoll?, remaining}
+```
+
+Offer `kind` is `"advantage"` (re-roll, keep the better die) or
+`"natOneToTwenty"` (a natural 1 becomes a natural 20). The page layer
+(`_pPromptFortuneIntervention`) is wired into `_rollAbilityCheck`,
+`_rollSkillCheck`, `_rollSavingThrow` and the combat `_rollAttack` post-hooks,
+so any future "you may improve a roll after seeing it" feature only needs to
+register an offer.
+
+Prompt spam is bounded: an advantage-style offer is only surfaced when the die
+came up at or below `CharacterSheetState.GAMBLER_LUCK_PROMPT_THRESHOLD` (10),
+overridable per character with `settings.gamblerLuckPromptThreshold`. The whole
+prompt can be disabled with `settings.skipFortuneInterventionPrompt`.
+
+### Attack rider notes
+
+`state.getAttackRiderNotes(attack)` returns
+`[{id, icon, label, description}]` for an attack, unioning structured
+`sourceItem.attackRiders[]` with feature-derived riders. Rendered as a badge in
+`_renderAttackItem` and appended to the dice-toast title in `_rollAttack`. Use
+this for any "attacks with this weapon also …" clause that isn't damage.
+
+### Subclass-derived cantrip choices
+
+`getSubclassCantripChoiceSlots()` mints ordinary pending spell choices
+(`featureName: "Cantrips Known"`) from a subclass's `cantripProgression`, and
+`getSubclassSpellListClass()` resolves which class list they are drawn from via
+the subclass's `additionalSpells` (`class=Warlock` for the Gambler). Because
+`_ensureSubclassSpellChoices()` is drained by Builder, Level-Up, Quick Build
+**and** the Features tab, this surfaces the picker in all four flows with no new
+UI. Eldritch Knight and Arcane Trickster had the same gap and are fixed by the
+same change.
 
 ---
 

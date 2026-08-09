@@ -306,6 +306,26 @@ prompting for a roll.
 The descriptor is attached in `getActivatableFeatures()` rather than inside
 `detectActivatableFeature`, which has many return points.
 
+#### The shared "roll before you pay" invariant
+
+`contestedCheck`, `rolledSaveDc` and `endSave` are three descriptors of one
+family, and they share a property that is **load-bearing and easy to break
+silently**:
+
+> The activation roll happens **before any resource is deducted**, so losing the
+> contest — or dismissing the prompt — costs the player nothing.
+
+`endSave` is the mirror image of the same principle: its save is rolled *after*
+deactivation, so the state's own bonuses cannot inflate the roll that ends it.
+
+Both orderings are invisible to a passing test. A refactor that moves the
+resource spend above the roll, or the `endSave` roll above the teardown, leaves
+every existing assertion green while quietly charging players for cancelled
+activations or letting a state help its own escape. If you touch
+`_pResolveContestedCheck`, `_pResolveRolledSaveDc`, `_pResolveStateEndSave` or
+the ordering in `_activateFeatureState`, re-check this explicitly — the
+Jester's Privilege tests pin the cancel-costs-nothing half.
+
 
 ### Speeds that track the walking speed
 

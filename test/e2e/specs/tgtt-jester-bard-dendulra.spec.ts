@@ -171,7 +171,7 @@ describeCharacter({
 		// bonus-action grapple escape and a 10-ft cost to stand from
 		// prone. Only the climb speed has a generic surface on the sheet
 		// (movement-cost overrides have no state representation at all —
-		// see CS-BUG-116), so that is what is asserted here.
+		// see CS-BUG-119), so that is what is asserted here.
 		{
 			level: 6,
 			name: /gifted acrobat/i,

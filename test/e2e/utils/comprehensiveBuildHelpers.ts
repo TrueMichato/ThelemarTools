@@ -823,7 +823,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "cantripCount"; min: number}
 
 	// === Toggle: snapshot before, activate, snapshot diff, deactivate ===
-	| {kind: "togglePlusAc"; whenActive: number | "abilityMod"; ability?: AblKey}
+	| {kind: "togglePlusAc"; whenActive: number | "abilityMod"; ability?: AblKey; floor?: number}
 	| {kind: "togglePlusSpeed"; type?: SpeedType; delta: number}
 	// Verify a toggle GRANTS a movement type the character doesn't otherwise
 	// have (fly/swim/climb/burrow). `togglePlusSpeed` only asserts for walk,
@@ -837,7 +837,27 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "toggleGrantsAdvantage"; rollType: string}
 	| {kind: "toggleGrantsImmunity"; damageType: string}
 	| {kind: "toggleGrantsConditionImmunity"; condition: string}
+	// A toggle whose cost is a SELF-IMPOSED condition ("you are blinded until the
+	// effect ends"). Distinct from `toggleGrantsConditionImmunity`: this asserts the
+	// condition is actually applied to the character while the state is active, and
+	// — unless `expectClearedOnDeactivate` is false — that ending the state removes
+	// it again. Backed by the generic `addsConditions` channel on active states, so
+	// it works for curated ACTIVE_STATE_TYPES entries and text-parsed homebrew
+	// toggles alike.
+	| {kind: "toggleAddsCondition"; condition: string; expectClearedOnDeactivate?: boolean}
 	| {kind: "toggleAddsAttack"; namePattern: string | RegExp}
+	// Read the ACTIVATION CONTRACT the sheet derived for a feature:
+	// which action it costs, which resource pool it draws from, and how much.
+	// This is what proves a "Channel Divinity: X" / "N uses" feature is really
+	// wired to a pool and really spends from it, rather than merely rendering
+	// its text. Generic — any activatable feature can be pinned this way.
+	| {
+		kind: "featureActivation";
+		feature: string;
+		activationAction?: string;
+		resourceName?: string;
+		resourceCost?: number;
+	}
 
 	// === Roll: clicking the button doesn't throw ===
 	| {kind: "rollAbilityCheck"; ability: AblKey}
@@ -1054,6 +1074,7 @@ const _TOGGLE_EFFECT_KINDS = new Set([
 	"toggleGrantsAdvantage",
 	"toggleGrantsImmunity",
 	"toggleGrantsConditionImmunity",
+	"toggleAddsCondition",
 	"toggleAddsAttack",
 ]);
 
@@ -1377,6 +1398,26 @@ async function _runPassiveOrRollEffect (
 			const expected = Math.max(e.minimum ?? 0, ability.mod);
 			if (uses.max !== expected) throw new Error(`${e.feature} uses=${uses.max}, expected max(${e.minimum ?? 0}, ${e.ability} mod ${ability.mod})=${expected}`);
 			if (uses.recharge !== e.recharge) throw new Error(`${e.feature} recharge=${uses.recharge}, expected ${e.recharge}`);
+			return;
+		}
+		case "featureActivation": {
+			const info = await charSheet.page.evaluate((featureName) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const feature = state?.getFeature?.(featureName);
+				if (!feature) return null;
+				const d = state?.constructor?.detectActivatableFeature?.(feature);
+				return d ? {activationAction: d.activationAction ?? null, resourceName: d.resourceName ?? null, resourceCost: d.resourceCost ?? null} : null;
+			}, e.feature);
+			if (!info) throw new Error(`featureActivation: "${e.feature}" is not on the sheet, or the sheet derived no activation contract for it`);
+			if (e.activationAction != null && info.activationAction !== e.activationAction) {
+				throw new Error(`${e.feature} activationAction=${info.activationAction}, expected ${e.activationAction}`);
+			}
+			if (e.resourceName != null && info.resourceName !== e.resourceName) {
+				throw new Error(`${e.feature} resourceName=${info.resourceName}, expected ${e.resourceName}`);
+			}
+			if (e.resourceCost != null && info.resourceCost !== e.resourceCost) {
+				throw new Error(`${e.feature} resourceCost=${info.resourceCost}, expected ${e.resourceCost}`);
+			}
 			return;
 		}
 		case "combatAction": {
@@ -2248,6 +2289,7 @@ async function _runToggleEffect (
 	beforeAttackNames: string[],
 	afterAttackNames: string[],
 	speedProbes: Map<string, {before: number; after: number; walkAfter: number}>,
+	conditionProbes?: Map<string, {before: boolean; after: boolean; afterDeactivate: boolean | null}>,
 ): Promise<void> {
 	switch (e.kind) {
 		case "togglePlusAc": {
@@ -2259,6 +2301,12 @@ async function _runToggleEffect (
 			} else {
 				want = e.whenActive;
 			}
+			// Many "+<ability> to AC" features carry a floor ("a bonus equal to
+			// your Charisma modifier, minimum of +1"). Without `floor` the probe
+			// asserts the RAW modifier, so it fails on exactly the builds the
+			// floor exists for — a dump-stat character with a negative mod — and
+			// reads as a product bug when the sheet is the thing that is correct.
+			if (e.floor != null) want = Math.max(want, e.floor);
 			if (delta !== want) throw new Error(`AC delta on toggle = ${delta}, expected ${want}`);
 			return;
 		}
@@ -2313,6 +2361,17 @@ async function _runToggleEffect (
 			if (!probe) throw new Error(`internal: no condition-immunity probe captured for "${e.condition}"`);
 			if (probe.before) throw new Error(`already had condition immunity "${e.condition}" before toggle — can't probe`);
 			if (!probe.after) throw new Error(`expected condition immunity "${e.condition}" after toggle`);
+			return;
+		}
+		case "toggleAddsCondition": {
+			const probe = conditionProbes?.get(e.condition);
+			if (!probe) throw new Error(`internal: no condition probe captured for "${e.condition}"`);
+			if (probe.before) throw new Error(`already had condition "${e.condition}" before toggle — can't probe`);
+			if (!probe.after) throw new Error(`expected condition "${e.condition}" to be applied by the toggle, but the character has no such condition`);
+			if (e.expectClearedOnDeactivate !== false) {
+				if (probe.afterDeactivate == null) throw new Error(`internal: deactivate reading missing for condition "${e.condition}"`);
+				if (probe.afterDeactivate) throw new Error(`condition "${e.condition}" LEAKED — still present after the toggle was switched off`);
+			}
 			return;
 		}
 		case "toggleAddsAttack": {
@@ -2383,6 +2442,36 @@ export async function assertFeaturesMatrix (
 
 	const errors: string[] = [];
 
+	// A probe must OBSERVE the character, not change it — and deactivating a
+	// state can mutate it rather than just clear a flag. A state type with an
+	// `endSave` rolls that save on deactivation and applies its failure
+	// consequence (the Belly Dancer's Dance is a DC 10 CON save or a level of
+	// exhaustion). Every branch below that cycles a state pays that tax: the
+	// toggle branch, the `stateCall` effects on `passive` rows, and the gated
+	// second reading further down. Across a MEGA L1→20 walk those failures
+	// accumulate, and under Thelemar rules each level is -1 to every feature DC
+	// and every d20 — so by L17 the build under test is a different character
+	// than the one the later assertions describe, and the probe's own residue
+	// reads as a product bug. It cost two wrong diagnoses (a "PB not applied"
+	// bug and an "off-by-one DC") before the cause was the harness.
+	//
+	// Restored in three places, deliberately: per entry (so one row cannot tax
+	// the next at the same level), after the gated block (which runs BEFORE the
+	// loop, so an end-of-function restore would close the door after it), and
+	// once at the end as the backstop.
+	const exhaustionAtEntry = await charSheet.page.evaluate(() => {
+		return (globalThis as any).charSheet?._state?.getExhaustion?.() ?? 0;
+	}).catch(() => 0);
+	const restoreExhaustion = async () => {
+		await charSheet.page.evaluate((lvl) => {
+			const st: any = (globalThis as any).charSheet?._state;
+			if (st?.getExhaustion?.() !== lvl) {
+				st?.setExhaustion?.(lvl);
+				(globalThis as any).charSheet?._renderCharacter?.();
+			}
+		}, exhaustionAtEntry).catch(() => { /* swallow */ });
+	};
+
 	// A toggle declaring `requiresStates` is deliberately HIDDEN by
 	// `getActivatableFeatures()` until its prerequisite is running (see
 	// CS-BUG-103 — the row must not appear, or clicking Use silently burns a
@@ -2401,6 +2490,13 @@ export async function assertFeaturesMatrix (
 		gatedToggleable = await charSheet.getToggleableFeatureNames().catch(() => toggleable);
 		gatedFeatures = await charSheet.getActivatableFeatureNames().catch(() => allFeatures);
 		await _deactivateStatesAndRerender(charSheet, activated);
+		// This block cycles every gated prerequisite once, BEFORE the entry loop
+		// runs. If one of them declares an `endSave` (the Belly Dancer's Dance
+		// does), a failed save here taxes the character for the whole rest of the
+		// level — every subsequent probe then measures an exhausted build, which
+		// under Thelemar rules is -1 to every feature DC. Restore before the loop
+		// rather than only at the end, or the backstop closes the door after it.
+		await restoreExhaustion();
 	}
 
 	for (const fc of matrix) {
@@ -2451,6 +2547,10 @@ export async function assertFeaturesMatrix (
 					const activatedForToggle = togglePrereqs.length
 						? await _activateStatesAndRerender(charSheet, togglePrereqs)
 						: [];
+					// See the matching note on the toggle-EFFECTS branch below:
+					// deactivating an `endSave` state charges the character a
+					// saving throw, and its failures accumulate across a MEGA
+					// walk. Restore whatever we were charged for measuring.
 					const unwindTogglePrereqs = () => _deactivateStatesAndRerender(charSheet, activatedForToggle);
 					try {
 					if (want !== "none") {
@@ -2732,6 +2832,21 @@ export async function assertFeaturesMatrix (
 					if (!matched) {
 						errors.push(`${label} toggle-effects skipped: no matching feature on sheet`);
 					} else {
+						// A limited-use TOGGLE that was already spent at an earlier
+						// checkpoint has a disabled Activate button ("Not enough … remaining"),
+						// which would report as an infra failure rather than a real defect.
+						// The matrix re-evaluates every earlier row at each later checkpoint,
+						// so any toggle whose pool is small (e.g. `max(1, wisMod)` on a build
+						// that leaves the ability at 10) is guaranteed to hit this. Refresh
+						// uses BEFORE the baseline snapshot — the pool sizing itself is
+						// asserted separately by `featureUsesEqualAbilityMod` /
+						// `kind: "resource"`, so restoring here costs no coverage.
+						//
+						// This MUST precede the prerequisite-state activation below: a long
+						// rest clears active states, so resting after activating a
+						// prerequisite would silently undo it.
+						await charSheet.triggerLongRest().catch(() => { /* best-effort */ });
+
 						// Prerequisite active states (see FeatureCheck.requiresStates).
 						// Applied before the before-snapshot so the measured delta belongs
 						// to THIS toggle, not to its prerequisite.
@@ -2763,6 +2878,14 @@ export async function assertFeaturesMatrix (
 						const advProbes = new Map<string, {advBefore: boolean; advAfter: boolean}>();
 						const conditionImmunityProbes = new Map<string, {before: boolean; after: boolean}>();
 						const speedProbes = new Map<string, {before: number; after: number; walkAfter: number}>();
+						const conditionProbes = new Map<string, {before: boolean; after: boolean; afterDeactivate: boolean | null}>();
+						// Reads the character's OWN condition list (not condition
+						// immunities) — the observable end of the generic
+						// `addsConditions` channel on active states.
+						const readCondition = (condition: string) => charSheet.page.evaluate((cond) => {
+							const cs: any = (globalThis as any).charSheet;
+							return !!cs?._state?.hasCondition?.(cond);
+						}, condition);
 						for (const eff of toggleEffects) {
 							if (eff.kind === "toggleGrantsAdvantage") {
 								const s = await charSheet.getAdvantageState(eff.rollType);
@@ -2777,6 +2900,9 @@ export async function assertFeaturesMatrix (
 							}
 							if (eff.kind === "toggleGrantsSpeed") {
 								speedProbes.set(eff.type, {before: await charSheet.getSpeed(eff.type), after: 0, walkAfter: 0});
+							}
+							if (eff.kind === "toggleAddsCondition") {
+								conditionProbes.set(eff.condition, {before: await readCondition(eff.condition), after: false, afterDeactivate: null});
 							}
 						}
 						let activated = false;
@@ -2805,19 +2931,40 @@ export async function assertFeaturesMatrix (
 									probe.after = await charSheet.getSpeed(eff.type);
 									probe.walkAfter = await charSheet.getSpeed("walk");
 								}
+								if (eff.kind === "toggleAddsCondition") {
+									conditionProbes.get(eff.condition)!.after = await readCondition(eff.condition);
+								}
+							}
+							// A `toggleAddsCondition` probe must also prove the condition is
+							// RELEASED when the state ends — a leak is the classic failure of
+							// self-imposed-cost features. Every other post-activation reading is
+							// already snapshotted into locals above, so switching the toggle off
+							// here (rather than after the assertion loop) is safe, and the shared
+							// `deactivated` flag keeps it from being toggled twice.
+							let deactivated = false;
+							if (conditionProbes.size) {
+								try {
+									await charSheet.deactivateFeature(matched);
+									deactivated = true;
+									for (const [cond, probe] of conditionProbes) probe.afterDeactivate = await readCondition(cond);
+								} catch (_) { /* leave afterDeactivate null → probe reports the gap */ }
 							}
 							for (const eff of toggleEffects) {
 								try {
-									await _runToggleEffect(eff, before, after, beforeRes, afterRes, beforeImm, afterImm, advProbes, conditionImmunityProbes, before.abilityMods, beforeAttackNames, afterAttackNames, speedProbes);
+									await _runToggleEffect(eff, before, after, beforeRes, afterRes, beforeImm, afterImm, advProbes, conditionImmunityProbes, before.abilityMods, beforeAttackNames, afterAttackNames, speedProbes, conditionProbes);
 								} catch (eErr: any) {
 									errors.push(`${label} effect ${eff.kind}: ${eErr.message}`);
 								}
 							}
-							try { await charSheet.deactivateFeature(matched); } catch (_) { /* swallow */ }
+							if (!deactivated) {
+								try { await charSheet.deactivateFeature(matched); } catch (_) { /* swallow */ }
+							}
 						}
 						}
 						// Always unwind prerequisites, in reverse, so a later matrix entry
-						// isn't measured against a lingering Rage.
+						// isn't measured against a lingering Rage. Exhaustion incurred by
+						// an `endSave` on the way out is unwound by the per-entry
+						// `finally` below, which covers every branch rather than this one.
 						for (const stateId of [...prereqs].reverse()) {
 							await charSheet.page.evaluate((id) => {
 								(globalThis as any).charSheet?._state?.deactivateState?.(id);
@@ -2828,8 +2975,20 @@ export async function assertFeaturesMatrix (
 			}
 		} catch (e: any) {
 			errors.push(`${label}: ${e.message}`);
+		} finally {
+			// EVERY entry, not just toggles. A `passive` row's `stateCall`
+			// effects drive `activateState`/`deactivateState` directly (Fluid
+			// Step's row does exactly that), and deactivating a state with an
+			// `endSave` rolls that save and applies its failure consequence.
+			// Restoring only on the toggle branch left that path leaking a
+			// level of exhaustion into every later row at the same level —
+			// which, under Thelemar rules, is -1 to every feature DC and made
+			// a correct Percussive Strike DC of 13 read as 12.
+			await restoreExhaustion();
 		}
 	}
+
+	await restoreExhaustion();
 
 	if (errors.length) {
 		throw new Error(`featuresMatrix at L${currentLevel} (${errors.length} failures):\n  - ${errors.join("\n  - ")}`);

@@ -20,15 +20,24 @@ When a test goes red:
    - Specific assertion (`expect(slots.current).toBe(...)`) on a
      concrete game stat → likely a product bug. Triage before assuming
      infra.
+   - A derived number wrong by a *small, level-dependent* amount, only
+     in MEGA → suspect probe residue, not the sheet. See "Probe
+     residue" below. Two consecutive misdiagnoses came from this shape.
 
-2. **Re-run the single failing test in isolation.**
+2. **Ask what the probe did before it measured.**
+   Does the feature under test, or an earlier row at the same level,
+   cycle a state? Does that state declare `endSave`? A probe that
+   changes the character invalidates every later assertion at that
+   level and above.
+
+3. **Re-run the single failing test in isolation.**
    ```bash
    npx playwright test test/e2e/specs/tgtt-X.spec.ts --reporter=list -g "L5 loadout"
    ```
    If it passes alone, the suite has parallelism contention (Bucket A
    pattern). If it fails alone, it's deterministic — easier to triage.
 
-3. **Stash all `e2e/` changes and reproduce on the previous baseline.**
+4. **Stash all `e2e/` changes and reproduce on the previous baseline.**
    If it still reproduces, it's a product regression (or pre-existing).
 
 ## Catalogued infra patterns
@@ -107,6 +116,82 @@ When a test goes red:
   or mark `test.serial` for the heaviest sibling specs (Bard,
   Sorcerer, Wizard L5-loadout).
 
+### Probe residue (the probe changed the character it measures)
+
+- **Symptom**: a derived number is *slightly* wrong, only at high
+  levels, only in MEGA, and the same probe passes at L1/L3/L5. The
+  amount it's wrong by grows with level. Classic false readings:
+  "proficiency bonus isn't applied to this DC" and "the DC is off by
+  one".
+- **Root cause**: a probe activated and deactivated a state, and the
+  deactivation *mutated the character* rather than clearing a flag. Any
+  state type declaring `endSave` rolls a saving throw on the way out and
+  applies its failure consequence — the Belly Dancer's Dance of the
+  Country is a DC 10 CON save or a level of exhaustion. `assertFeatures-
+  Matrix` cycles states in three places (the toggle branch, `stateCall`
+  effects on `passive` rows, and the gated second reading), so across a
+  20-rung walk the failures accumulate. Under Thelemar exhaustion rules
+  each level is **-1 to every feature DC and every d20**, so by L17 the
+  later assertions describe a character that no longer exists.
+- **Fix**: already handled — `assertFeaturesMatrix` snapshots exhaustion
+  on entry and restores it per entry, after the gated block, and at the
+  end. If you add a probe path that cycles states **outside** that
+  function, restore there too.
+- **Tell it apart from a real bug**: read the number's *delta*, not the
+  number. A missing PB is a constant offset at a given level; probe
+  residue grows monotonically with how many rungs the walk has taken.
+  Check `getExhaustion()` in a diagnostic dump before filing anything.
+- **The wider rule**: a probe must OBSERVE the character, not change it.
+  Before concluding "the sheet computed this wrong", ask what the probe
+  itself did to the sheet on the way to the measurement.
+
+### An assertion floor that presumes a good stat
+
+- **Symptom**: a `min`/`exact` effect check fails on a build that dumps
+  the relevant ability, and the "expected" value is one no such build
+  could reach.
+- **Root cause**: the floor was written against an idealised build. Two
+  live examples, both on the Belly Dancer, whose Jaknian dumps Charisma:
+  `togglePlusAc` asserted the raw CHA mod (-1) for a feature that grants
+  "+CHA to AC, **minimum +1**"; and the Percussive Strike DC carried
+  `min: 15` when 8 + PB + CHA is 13 for that character.
+- **Fix**: use `togglePlusAc`'s `floor` for min-capped bonuses, and set
+  numeric floors from the build's own statistics. Prefer a
+  `featureCalculationDerivedFrom` check — it pins the *derivation*, which
+  is what rules out a hardcoded constant, and doesn't rot when a build's
+  ability array changes.
+- **This is spec-side, not a product bug.** The failure mode is nasty
+  precisely because a probe fails on exactly the build whose floor
+  behaviour it was meant to cover.
+
+### Toggle re-render mid-click
+
+- **Symptom**: `activateFeature` times out with
+  `locator.click: Timeout 5000ms exceeded` and a call log that reaches
+  `performing click action` and stops — while the failure snapshot shows
+  the feature is **already in "Currently Active"**.
+- **Root cause**: flipping a toggle re-renders the whole Active States
+  panel, so the Activate button detaches mid-click. Playwright treats
+  that as an unconfirmed click, retries, and waits forever for a
+  `.charsheet__activate-btn` that legitimately no longer exists.
+- **Fix**: already handled — `CharacterSheetPage.activateFeature`
+  catches the click error and swallows it when `isFeatureActive()` is
+  true. If you add a new toggle path, use the same click-then-verify
+  pattern rather than a bare `click()`.
+
+### Feat sub-choices block the level-up wizard
+
+- **Symptom**: `expectModalClosed` fails at TGTT L4+; Finish refuses to
+  close the wizard.
+- **Root cause**: at TGTT L4 the auto-picked "Ability Score Improvement"
+  *feat* renders its own `Additional Choices for …: Choose ability to
+  increase by 2:` button grid, which nothing used to drain.
+- **Fix**: already handled — `LevelUpPage.autoFillRequiredChoices` has a
+  generic feat-sub-choice drainer that scans
+  `.charsheet__levelup-feat-choices, .charsheet__opt-feat-progression-choices`,
+  reads the want-count from the `Choose N …` prompt, and clicks one
+  unselected option per pass (the grid re-renders on every toggle).
+
 ## Real product bug indicators
 
 Trust an assertion that:
@@ -172,3 +257,35 @@ Stop and report when:
 - A "product bug" is too easy to fix and you suspect it's actually
   infra (often the case for first-time spec authors).
 - The known-bugs.md entry would be a fundamental redesign of the sheet.
+
+## "Not enough <Feature> remaining" — disabled Activate button in the features matrix
+
+**Symptom.** A `featuresMatrix` row with toggle effects fails at a *later*
+checkpoint than the one it was declared for:
+
+```
+featuresMatrix at L11 (1 failures):
+  - L6 /eyes of the future past/i (toggle) could not activate to probe toggle
+    effects: locator.click: Timeout 5000ms exceeded
+    locator resolved to <button disabled title="Not enough … remaining" …>
+```
+
+**Cause — infra, not product.** `assertFeaturesMatrix` re-evaluates *every*
+earlier row at each later checkpoint. A toggle sitting on a small pool
+(e.g. `max(1, wisMod)` on a preset that leaves the ability at 10) is drained by
+the probe's own earlier activation, so the Activate button is legitimately
+disabled by the time the row runs again.
+
+**Fix (already in `comprehensiveBuildHelpers.ts`).** The toggle branch calls
+`charSheet.triggerLongRest()` before taking the `before` snapshot. This costs
+no coverage: pool sizing is asserted separately by `featureUsesEqualAbilityMod`
+and `kind: "resource"`.
+
+**Do not** "fix" this by narrowing the row to a single level — that hides the
+re-evaluation, which is exactly what caught CS-BUG-116 (states never re-applied
+their conditions on a *second* activation). The repeat is the valuable part.
+
+**Tell it apart from a real bug:** if the button is *enabled* and activation
+succeeds but the effect reads wrong on the second cycle, it is a product bug.
+If the button is *disabled* with a "not enough remaining" title, it is pool
+exhaustion.

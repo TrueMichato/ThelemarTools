@@ -377,7 +377,7 @@ class CharacterSheetSpells {
 
 		// Open Gambling Table modal (can be triggered from features panel, spell UI, or toast button)
 		document.addEventListener("click", (/** @type {*} */ e) => {
-			if (e.target.closest(".btn-open-gambling-table")) this._openGamblingTableModal();
+			if (e.target.closest(".btn-open-gambling-table")) void this._pOpenGamblingTableModal();
 		});
 
 		document.addEventListener("click", (/** @type {*} */ e) => {
@@ -4202,7 +4202,7 @@ class CharacterSheetSpells {
 		if (gamblerBtn) {
 			gamblerBtn.addEventListener("click", (evt) => {
 				evt.stopPropagation();
-				this._openGamblingTableModal();
+				void this._pOpenGamblingTableModal();
 			});
 		}
 
@@ -4285,8 +4285,16 @@ class CharacterSheetSpells {
 			if (autoRoll) {
 				const tableResult = this._state.rollGamblingTable();
 				if (tableResult) {
-					html += `<br><span class="text-info">\u{1F3B0} <b>d100:</b> ${tableResult.roll}</span>`;
-					html += `<br>${tableResult.effect}`;
+					if (tableResult.secondRoll) {
+						// Master of Fortune rolled twice — the player must CHOOSE, so the
+						// toast cannot resolve it. Show both and open the picker.
+						html += `<br><span class="text-info">\u{1F3B0} <b>d100:</b> ${tableResult.roll} / ${tableResult.secondRoll}</span>`;
+						html += `<br><span class="ve-small">\u{1F3B2} Master of Fortune \u2014 choose which result applies:</span>`;
+						html += `<br><button class="btn btn-xs btn-outline-info mt-1 btn-open-gambling-table" style="font-weight: 600;">\u{1F3B0} Choose Result</button>`;
+					} else {
+						html += `<br><span class="text-info">\u{1F3B0} <b>d100:</b> ${tableResult.roll}</span>`;
+						html += `<br>${tableResult.effect}`;
+					}
 				}
 			} else {
 				// Button opens gambling table modal — handler attached after element creation (not inline)
@@ -4300,8 +4308,13 @@ class CharacterSheetSpells {
 	/**
 	 * Open the Gambling Table modal for manual d100 rolls or reference
 	 * Used by Gambler's Folly, Extra Luck, Master of Fortune (TGTT)
+	 *
+	 * @param {object} [prerolled] A result already produced by `rollGamblingTable()`
+	 *        (e.g. by spending Extra Luck / Master of Fortune). When supplied the modal
+	 *        opens showing that result instead of waiting for a fresh click, so the
+	 *        Master of Fortune "roll twice and CHOOSE" step is actually offered.
 	 */
-	async _openGamblingTableModal () {
+	async _pOpenGamblingTableModal (prerolled = null) {
 		const table = CharacterSheetState.GAMBLER_GAMBLING_TABLE;
 		if (!table || !table.length) return;
 
@@ -4313,46 +4326,81 @@ class CharacterSheetSpells {
 
 		// Roll button and result display
 		const rollSection = e_({outer: `
-			<div class="ve-flex-v-center mb-3 p-2" style="gap: 12px; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px;">
-				<button class="btn btn-sm btn-warning btn-gambler-modal-roll" style="font-weight: 600; min-width: 120px;">\u{1F3B2} Roll d100</button>
-				<div class="gambler-roll-result" style="font-size: 1.05em; line-height: 1.4;"></div>
+			<div class="mb-3 p-2" style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px;">
+				<div class="ve-flex-v-center" style="gap: 12px;">
+					<button class="btn btn-sm btn-warning btn-gambler-modal-roll" style="font-weight: 600; min-width: 120px;">\u{1F3B2} Roll d100</button>
+					<div class="gambler-roll-result" style="font-size: 1.05em; line-height: 1.4;"></div>
+				</div>
+				<div class="gambler-roll-choice mt-2" style="display: none;"></div>
 			</div>
 		`});
 		modalInner.append(rollSection);
 
 		const resultDisplay = rollSection.querySelector(".gambler-roll-result");
+		const choiceDisplay = rollSection.querySelector(".gambler-roll-choice");
 
-		// Check for Master of Fortune (roll twice, choose result)
-		const calcs = this._state.getFeatureCalculations?.();
-		const hasMasterOfFortune = calcs?.hasMasterOfFortune;
+		const highlightRow = (/** @type {number} */ roll) => {
+			tableBody.querySelectorAll("tr.table-warning").forEach(el => { el.classList.remove("table-warning"); el.style.removeProperty("background"); });
+			const matchRow = tableBody.querySelector(`tr[data-roll="${roll}"]`);
+			if (matchRow) {
+				matchRow.classList.add("table-warning");
+				matchRow.style.background = "rgba(245, 158, 11, 0.2)";
+				matchRow.scrollIntoView({behavior: "smooth", block: "center"});
+			}
+		};
+
+		/**
+		 * Paint a rolled result, including the Master of Fortune "choose which applies"
+		 * affordance. The choice is RECORDED in state (chosenRoll/chosenEffect), not just
+		 * displayed — a double roll is inert until the player picks one.
+		 */
+		const showResult = (/** @type {*} */ result) => {
+			if (!result) return;
+			const chosenRoll = result.chosenRoll ?? result.roll;
+			const chosenEffect = result.chosenEffect ?? result.effect;
+			let resultHtml = `<span style="font-size: 1.3em; font-weight: 700; color: var(--rgb-name--accent);">d100: ${chosenRoll}</span>`;
+			resultHtml += `<br><span class="text-warning" style="font-style: italic;">${chosenEffect}</span>`;
+			resultDisplay.innerHTML = resultHtml;
+			highlightRow(chosenRoll);
+
+			if (!result.secondRoll) {
+				choiceDisplay.style.display = "none";
+				choiceDisplay.innerHTML = "";
+				return;
+			}
+
+			const options = [
+				{which: 1, roll: result.roll, effect: result.effect},
+				{which: 2, roll: result.secondRoll, effect: result.secondEffect},
+			];
+			choiceDisplay.style.display = "";
+			choiceDisplay.innerHTML = `
+				<div class="ve-small mb-1"><span class="text-info">\u{1F3B2} <b>Master of Fortune</b> \u2014 you rolled twice. Choose which result applies:</span></div>
+				<div class="ve-flex" style="gap: 8px; flex-wrap: wrap;">
+					${options.map(o => `
+						<button class="btn btn-xs ${chosenRoll === o.roll && !result.needsChoice ? "btn-primary" : "btn-default"} btn-gambler-choose" data-which="${o.which}" style="text-align: left; max-width: 100%; white-space: normal;">
+							<b>${o.roll}</b> \u2014 ${o.effect}
+						</button>
+					`).join("")}
+				</div>
+			`;
+			choiceDisplay.querySelectorAll(".btn-gambler-choose").forEach(btn => {
+				btn.addEventListener("click", () => {
+					this._state.chooseGamblingTableResult?.(parseInt(btn.getAttribute("data-which"), 10));
+					showResult(this._state.getGamblerLastTableRoll?.());
+					void this._page?._saveCurrentCharacter?.();
+				});
+			});
+		};
 
 		rollSection.querySelector(".btn-gambler-modal-roll").addEventListener("click", () => {
-			const result = this._state.rollGamblingTable();
-			if (result) {
-				let resultHtml = `<span style="font-size: 1.3em; font-weight: 700; color: var(--rgb-name--accent);">d100: ${result.roll}</span>`;
-				if (hasMasterOfFortune && result.secondRoll) {
-					resultHtml += ` <span style="font-size: 1.1em;">/ ${result.secondRoll}</span>`;
-					resultHtml += `<br><span class="text-info ve-small">\u{1F3B2} Master of Fortune: Choose which result to use</span>`;
-				}
-				resultHtml += `<br><span class="text-warning" style="font-style: italic;">${result.effect}</span>`;
-				resultDisplay.innerHTML = resultHtml;
-
-				// Highlight the result row in the table and scroll to it
-				tableBody.querySelectorAll("tr.table-warning").forEach(el => { el.classList.remove("table-warning"); el.style.removeProperty("background"); });
-				const matchRow = tableBody.querySelector(`tr[data-roll="${result.roll}"]`);
-				if (matchRow) {
-					matchRow.classList.add("table-warning");
-					matchRow.style.background = "rgba(245, 158, 11, 0.2)";
-					matchRow.scrollIntoView({behavior: "smooth", block: "center"});
-				}
-			}
+			showResult(this._state.rollGamblingTable());
+			void this._page?._saveCurrentCharacter?.();
 		});
 
-		// Last roll display
-		const lastRoll = this._state.getGamblerLastTableRoll?.();
-		if (lastRoll) {
-			resultDisplay.innerHTML = `<span class="text-muted">Last roll: ${lastRoll.roll} \u2014 ${lastRoll.effect}</span>`;
-		}
+		// Last roll display — or the freshly-rolled result the caller handed us.
+		const lastRoll = prerolled || this._state.getGamblerLastTableRoll?.();
+		if (lastRoll) showResult(lastRoll);
 
 		// Search filter
 		const searchRow = e_({outer: `
@@ -8017,7 +8065,7 @@ class CharacterSheetSpells {
 			<div class="charsheet__spell-class-card" data-class-name="${(card.className || "").escapeQuotes()}" data-class-source="${(card.classSource || "").escapeQuotes()}">
 				<div class="charsheet__spell-class-card-header">
 					<span class="charsheet__spell-class-card-title">${(card.displayName || card.className || "").qq()}</span>
-					<span class="charsheet__spell-ability charsheet__spell-class-card-ability"${idAttr("ability")} title="Spellcasting ability">${card.abilityLabel || ""}</span>
+					<span class="charsheet__spell-ability charsheet__spell-class-card-ability"${idAttr("ability")} title="${card.mechanic === "rolled" ? `No spellcasting ability \u2014 roll ${(card.modifierDice || "1d6").qq()} per cast as the Gambling Modifier` : "Spellcasting ability"}">${card.abilityLabel || ""}</span>
 				</div>
 				<div class="charsheet__spell-class-card-stats">
 					<div class="charsheet__spell-stat">
@@ -8038,7 +8086,7 @@ class CharacterSheetSpells {
 
 		if (card.isRolledPrepared) {
 			// Gambler: DC/attack are rolled per cast (dice instead of a static mod).
-			const dice = calcs.gamblerModifierDice || card.preparedDice || "1d4";
+			const dice = card.modifierDice || calcs.gamblerModifierDice || "1d6";
 			const dcStatic = spellDcBonus + customSpellDc + stateDcBonus;
 			const dcBonusStr = dcStatic > 0 ? ` + ${dcStatic}` : (dcStatic < 0 ? ` - ${Math.abs(dcStatic)}` : "");
 			dcEl.textContent = `${8 + prof} + ${dice}${dcBonusStr}`;

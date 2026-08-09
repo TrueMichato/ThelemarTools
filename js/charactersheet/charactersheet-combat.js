@@ -1431,6 +1431,12 @@ class CharacterSheetCombat {
 
 		// Build state effect label for display
 		const stateEffectLabel = this._getStateEffectLabel(hasAdvantage, hasDisadvantage);
+		// Always-on prose riders ride the roll title so the player is reminded at the
+		// moment the roll resolves (e.g. "ignores half cover" on a ranged coin attack).
+		const riderNotes = this._state.getAttackRiderNotes?.(attack) || [];
+		const riderLabel = riderNotes.length
+			? ` <span class="ve-muted">(${riderNotes.map(r => `${r.icon} ${r.label}`).join(", ")})</span>`
+			: "";
 		const localLabel = localContribution.parts?.length
 			? ` <span class="ve-muted">(${localContribution.parts.map(p => `${p.label} ${p.value >= 0 ? "+" : ""}${p.value}`).join(", ")})</span>`
 			: "";
@@ -1454,7 +1460,7 @@ class CharacterSheetCombat {
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
 		void this._page.pAnimateD20?.(rollResult);
 		const resultEl = this._page.showDiceResult({
-			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}${extraBonusLabel}${featureModLabel}${ammoLabel}`,
+			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}${extraBonusLabel}${featureModLabel}${ammoLabel}${riderLabel}`,
 			roll: rollResult.roll,
 			modifier: totalBonus - exhaustionPenalty,
 			total,
@@ -1776,6 +1782,25 @@ class CharacterSheetCombat {
 				handler: (ctx) => this._pOfferFeatureOnHitOptions(ctx),
 			},
 			{
+				// GENERIC post-roll fortune interventions (TGTT Gambler's Extra Luck /
+				// Master of Fortune, and any future Lucky-style feature). The offer set
+				// comes from `CharacterSheetState#getD20InterventionOffers`, so this hook
+				// never needs to change when a new such feature is added.
+				//
+				// `_rollAttack` is synchronous and its result is already displayed by the
+				// time hooks run, so an accepted intervention re-displays a corrected
+				// result toast (the Blood Price / Guided Strike convention) rather than
+				// mutating the original roll in place.
+				id: "fortuneIntervention",
+				predicate: (ctx) => (this._state.getD20InterventionOffers?.({
+					naturalRoll: ctx.rollResult?.roll,
+					effectiveRoll: ctx.rollResult?.roll,
+					isAdvantage: ctx.hasAdvantage && !ctx.hasDisadvantage,
+					rollType: "attack",
+				}) || []).length > 0,
+				handler: (ctx) => this._pOfferFortuneIntervention(ctx),
+			},
+			{
 				id: "shadowKnightTriggers",
 				predicate: (ctx) => (!!ctx.attack?.isShadowWeapon || !!ctx.attack?.countsAsShadowWeapon)
 					&& !!this._state.getFeatureCalculations?.().hasShadowKnight,
@@ -1848,6 +1873,58 @@ class CharacterSheetCombat {
 			parts.push(`Recurring: ${opt.recurringDamage.amount} ${opt.recurringDamage.type || ""} damage at the ${opt.recurringDamage.when || "start of each of its turns"}.`);
 		}
 		JqueryUtil.doToast({type: "success", content: `${opt.name}: ${parts.join(" ")}`});
+	}
+
+	/**
+	 * Post-attack fortune intervention (see the `fortuneIntervention` hook).
+	 *
+	 * Delegates the offer + prompt + spend to the page's generic
+	 * `_pMaybeApplyFortuneIntervention`, then re-displays the attack result with the new
+	 * die. Crit / fumble classification is recomputed from the changed natural roll so a
+	 * Master of Fortune 1 → 20 actually reads (and crits) as a natural 20.
+	 * @param {*} ctx Post-attack context from `_rollAttack`.
+	 */
+	async _pOfferFortuneIntervention (ctx) {
+		const result = await this._page._pMaybeApplyFortuneIntervention?.({
+			rollResult: ctx.rollResult,
+			effectiveRoll: ctx.rollResult.roll,
+			rollLabel: `${ctx.attack?.name || "Attack"} Attack`,
+			rollType: "attack",
+			totalMod: ctx.totalBonus,
+			exhaustionPenalty: 0,
+		});
+		if (!result?.applied) return;
+
+		const critRange = this._state.getCriticalRange?.() || 20;
+		const newTotal = result.effectiveRoll + ctx.totalBonus;
+		let resultClass = "";
+		let resultNote = "";
+		if (ctx.rollResult.roll >= critRange) {
+			resultClass = "charsheet__dice-result-total--crit";
+			resultNote = "Critical Hit!";
+		} else if (ctx.rollResult.roll === 1) {
+			resultClass = "charsheet__dice-result-total--fumble";
+			resultNote = "Critical Miss!";
+		}
+		resultNote = resultNote ? `${resultNote}\n${result.note}` : result.note;
+
+		this._page.showDiceResult({
+			title: `${ctx.attack?.name || "Attack"} Attack (revised)`,
+			roll: result.effectiveRoll,
+			modifier: ctx.totalBonus,
+			total: newTotal,
+			resultClass,
+			resultNote,
+			subtitle: `d20 (${result.effectiveRoll}) ${ctx.totalBonus >= 0 ? "+" : "-"} ${Math.abs(ctx.totalBonus)}`,
+		});
+
+		// Keep the recorded attack context in step so Sneak Attack / damage riders that
+		// read `_lastAttackContext` see the revised total.
+		if (this._lastAttackContext?.attackId === ctx.attackId) {
+			this._lastAttackContext.total = newTotal;
+			this._lastAttackContext.mode = ctx.rollResult.mode || this._lastAttackContext.mode;
+		}
+		this.renderAttacks?.();
 	}
 
 	async _pHandleShadowKnightHit (ctx) {
@@ -4398,6 +4475,14 @@ class CharacterSheetCombat {
 					</button>`
 			: "";
 		const handsUsedHtml = this._renderHandsUsedToggle(attack);
+		// Always-on prose riders (e.g. Gambler's Coins ricochet ignoring half cover).
+		// Generic + data-driven via `getAttackRiderNotes`; surfaced as badges so the
+		// player can see, at a glance, how this weapon resolves differently.
+		const attackRiders = this._state.getAttackRiderNotes?.(attack) || [];
+		const escRider = (str) => String(str == null ? "" : str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+		const riderHtml = attackRiders.length
+			? `<div class="ve-small ve-muted charsheet__attack-rider-note">${attackRiders.map(r => `<span title="${escRider(r.description)}">${r.icon} ${escRider(r.label)}</span>`).join(" \u00b7 ")}</div>`
+			: "";
 		// Attack-action budget badge. Generic: any feature attack that unlocks a larger
 		// Attack-action allowance (Astral Barrage, Unchained Fury's three chain swings)
 		// advertises it on its own row so the player can see the bigger budget exists.
@@ -4418,6 +4503,7 @@ class CharacterSheetCombat {
 						${masteryHtml}
 					</span>
 					${upgradeNotesHtml}
+					${riderHtml}
 				</div>
 				<div class="charsheet__attack-actions">
 					<button class="ve-btn ve-btn-sm ve-btn-primary charsheet__attack-roll" title="Roll Attack">

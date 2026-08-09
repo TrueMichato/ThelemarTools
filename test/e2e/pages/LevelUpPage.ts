@@ -591,14 +591,18 @@ export class LevelUpPage {
 			// Epic Boon" (L19 in 2024 rules), etc. We always prefer the
 			// "Increase Ability Scores" path because +2 to a stat is
 			// unconditionally legal at every ASI node.
-			const allRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']"));
-			const modeAsi = allRadios.find(r => {
+			// Mode radios are the ONLY radios in the `asi-type` group. Scope to it
+			// explicitly: the loose label regex below also matches the XPHB feat
+			// literally named "Ability Score Improvement", and under the Thelemar
+			// L4 rule (ASI *and* feat) there are no mode radios at all — so an
+			// unscoped `find` clicked that feat as though it were a mode toggle,
+			// selecting a feat whose own ability sub-choices then went unfilled and
+			// wedging the wizard on "Please complete all choices for Ability Score
+			// Improvement."
+			const modeRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[name='asi-type']"));
+			const modeAsi = modeRadios.find(r => {
 				const wrap = r.closest("label") || r.parentElement;
-				return !!wrap && /Increase Ability Scores|Ability Score Improvement/i.test(wrap.textContent || "");
-			});
-			const modeFeatOrBoon = allRadios.find(r => {
-				const wrap = r.closest("label") || r.parentElement;
-				return !!wrap && /Take a (Feat|Epic Boon)|Take an Epic Boon|Epic Boon/i.test(wrap.textContent || "");
+				return r.value === "asi" || (!!wrap && /Increase Ability Scores/i.test(wrap.textContent || ""));
 			});
 
 			// Switch to ASI mode whenever it's available and not already
@@ -653,11 +657,11 @@ export class LevelUpPage {
 			// If steppers exist but Points remaining > 0, the user is in
 			// ASI mode and we already failed to drive them — try feat.
 			// Find the Feat-mode radio and switch to it, then pick a feat.
-			const allRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']"));
-			const modeFeatOrBoon = allRadios.find(r => {
-				const wrap = r.closest("label") || r.parentElement;
-				return !!wrap && /Take a (Feat|Epic Boon)|Take an Epic Boon|Epic Boon/i.test(wrap.textContent || "");
-			});
+			const modeFeatOrBoon = Array.from(asi.querySelectorAll<HTMLInputElement>("input[name='asi-type']"))
+				.find(r => {
+					const wrap = r.closest("label") || r.parentElement;
+					return r.value === "feat" || (!!wrap && /Take a (Feat|Epic Boon)|Take an Epic Boon|Epic Boon/i.test(wrap.textContent || ""));
+				});
 			const robustClick = (el: HTMLElement) => {
 				try { el.click(); } catch (_) { /* noop */ }
 				try {
@@ -675,11 +679,18 @@ export class LevelUpPage {
 			// Refresh radio list — feat/boon radios appear after switching mode.
 			const featRadios = Array.from(asi.querySelectorAll<HTMLInputElement>("input[type='radio']:not(:checked):not(:disabled)"))
 				.filter(r => {
+					// Never treat a mode toggle as a feat.
+					if (r.name === "asi-type") return false;
 					const wrap = r.closest("label") || r.parentElement;
 					if (!wrap) return false;
 					const txt = wrap.textContent || "";
 					// Exclude the mode-toggle radios themselves.
 					if (/Increase Ability Scores|Take a (Feat|Epic Boon)|Take an Epic Boon/i.test(txt)) return false;
+					// The XPHB feat literally named "Ability Score Improvement" always
+					// carries unfilled ability sub-choices, so auto-picking it wedges the
+					// wizard on "Please complete all choices for …". Other feats with
+					// choices get filled by the next counter pass; this one is a trap.
+					if (/^\s*Ability Score Improvement\b/i.test(txt.trim())) return false;
 					return true;
 				});
 			const noChoice = featRadios.filter(r => {
@@ -710,11 +721,21 @@ export class LevelUpPage {
 		// choices render as `.ve-btn` grids, others as radios, checkboxes
 		// or selects. Drive all of them, re-querying after every click
 		// because each selection re-renders the container.
+		//
+		// Grid groups are count-aware: a `Choose N …:` label means the
+		// group is not satisfied until N buttons are selected, so a
+		// "pick 2 skills" feat is not left half-filled. Groups whose
+		// label omits a count (ability bumps) want exactly one.
 		// ──────────────────────────────────────────────────────────────
-		for (let pass = 0; pass < 10; pass++) {
+		for (let pass = 0; pass < 12; pass++) {
 			const didPick = await this.page.evaluate(() => {
-				const box = document.querySelector<HTMLElement>(".charsheet__levelup-feat-choices");
-				if (!box) return false;
+				const RE_COUNT = /choose\s+(?:a\s+)?(\d+)\s+/i;
+				// Optional-feature progressions (invocation/maneuver feat
+				// grants) render the same widget in their own container.
+				const boxes = Array.from(document.querySelectorAll<HTMLElement>(
+					".charsheet__levelup-feat-choices, .charsheet__opt-feat-progression-choices",
+				)).filter(b => b.offsetParent !== null || b.offsetHeight > 0);
+				if (!boxes.length) return false;
 
 				// A grid button is "selected" once the widget flips it to
 				// a non-default variant (btn-primary / active / aria-pressed).
@@ -723,40 +744,52 @@ export class LevelUpPage {
 					|| b.getAttribute("aria-pressed") === "true"
 					|| /ve-btn-(primary|success|info)/.test(b.className);
 
-				for (const grid of Array.from(box.querySelectorAll<HTMLElement>("[class*='-grid'], .ve-flex-wrap"))) {
-					const btns = Array.from(grid.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
-					if (!btns.length) continue;
-					if (btns.some(isPicked)) continue; // group already satisfied
-					btns[0].click();
-					return true;
-				}
-
-				const sel = Array.from(box.querySelectorAll<HTMLSelectElement>("select"))
-					.find(s => !s.value || s.selectedIndex <= 0);
-				if (sel) {
-					const opt = Array.from(sel.options).find((o, i) => i > 0 && !o.disabled);
-					if (opt) {
-						sel.value = opt.value;
-						sel.dispatchEvent(new Event("change", {bubbles: true}));
+				for (const box of boxes) {
+					for (const grid of Array.from(box.querySelectorAll<HTMLElement>("[class*='-grid'], .ve-flex-wrap"))) {
+						const btns = Array.from(grid.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"))
+							.filter(b => (b.textContent || "").trim() !== "+");
+						if (!btns.length) continue;
+						// How many picks does this group want? Read it off the
+						// nearest "Choose N …:" label; default to 1.
+						const labelTxt = (grid.previousElementSibling?.textContent
+							|| grid.parentElement?.querySelector("label")?.textContent
+							|| "");
+						const m = RE_COUNT.exec(labelTxt);
+						const want = m ? Number(m[1]) : 1;
+						if (btns.filter(isPicked).length >= want) continue; // group satisfied
+						const next = btns.find(b => !isPicked(b));
+						if (!next) continue;
+						next.click();
 						return true;
 					}
-				}
 
-				const radios = Array.from(box.querySelectorAll<HTMLInputElement>("input[type='radio']:not(:disabled)"));
-				const byName = new Map<string, HTMLInputElement[]>();
-				for (const r of radios) {
-					const n = r.name || "_anon";
-					if (!byName.has(n)) byName.set(n, []);
-					byName.get(n)!.push(r);
-				}
-				for (const group of byName.values()) {
-					if (group.some(r => r.checked)) continue;
-					group[0].click();
-					return true;
-				}
+					const sel = Array.from(box.querySelectorAll<HTMLSelectElement>("select"))
+						.find(s => !s.value || s.selectedIndex <= 0);
+					if (sel) {
+						const opt = Array.from(sel.options).find((o, i) => i > 0 && !o.disabled);
+						if (opt) {
+							sel.value = opt.value;
+							sel.dispatchEvent(new Event("change", {bubbles: true}));
+							return true;
+						}
+					}
 
-				const box2 = box.querySelector<HTMLInputElement>("input[type='checkbox']:not(:disabled):not(:checked)");
-				if (box2) { box2.click(); return true; }
+					const radios = Array.from(box.querySelectorAll<HTMLInputElement>("input[type='radio']:not(:disabled)"));
+					const byName = new Map<string, HTMLInputElement[]>();
+					for (const r of radios) {
+						const n = r.name || "_anon";
+						if (!byName.has(n)) byName.set(n, []);
+						byName.get(n)!.push(r);
+					}
+					for (const group of byName.values()) {
+						if (group.some(r => r.checked)) continue;
+						group[0].click();
+						return true;
+					}
+
+					const cb = box.querySelector<HTMLInputElement>("input[type='checkbox']:not(:disabled):not(:checked)");
+					if (cb) { cb.click(); return true; }
+				}
 
 				return false;
 			});
