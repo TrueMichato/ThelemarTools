@@ -66,6 +66,18 @@ export interface SpellPickerReport {
 	/** Number of still-addable (`+`) options, split by section kind. */
 	availableCantrips: number;
 	availableSpells: number;
+	/**
+	 * Fixed-slot pickers (`CharacterSheetSpellPicker.renderFixedSpellPicker`)
+	 * are a SECOND, structurally different picker shape that also lives in a
+	 * `.charsheet__spell-picker-container`: Wizard "Spell Mastery" (L18) and
+	 * "Signature Spells" (L20) render one `<select>` per fixed slot instead of
+	 * a `<current>/<max>` counter over `+` buttons. They are complete when
+	 * every `<select>` has a non-empty value, so the counter contract simply
+	 * does not apply to them — treating their absent counter as a harness
+	 * error made every Wizard build red at L18.
+	 */
+	fixedSlots: number;
+	fixedSlotsFilled: number;
 }
 
 export interface FillSpellPickersResult {
@@ -128,14 +140,65 @@ export async function readSpellPickers (page: Page, rootSelector: string): Promi
 				else availableSpells += addable;
 			}
 
+			const fixedSelects = Array.from(container.querySelectorAll<HTMLSelectElement>(".charsheet__fixed-spell-picker select"));
+
 			return {
 				title: (container.querySelector(".charsheet__levelup-section-title")?.textContent || "").trim(),
 				counters,
 				availableCantrips,
 				availableSpells,
+				fixedSlots: fixedSelects.length,
+				fixedSlotsFilled: fixedSelects.filter(s => !!s.value).length,
 			};
 		});
 	}, rootSelector);
+}
+
+/**
+ * Fill every fixed-slot spell picker (`.charsheet__fixed-spell-picker`)
+ * under `rootSelector`.
+ *
+ * Each slot is a `<select>` whose first `<option>` is the empty
+ * "Choose a level N spell..." placeholder, so the first non-empty option
+ * is the first real candidate. `preferredNames` wins when one of the
+ * spec's signature spells is on offer, matching the behaviour of the
+ * counter-based pass.
+ *
+ * Selections are made one at a time and re-queried between writes: the
+ * widget's `onSelect` re-renders the summary/accordion, and a batched
+ * write against a captured NodeList would silently no-op the same way
+ * the `+` buttons did (see the invariant note above).
+ */
+async function fillFixedSlotPickers (
+	page: Page,
+	rootSelector: string,
+	preferredNames?: string[],
+): Promise<void> {
+	for (let guard = 0; guard < 12; ++guard) {
+		const changed = await page.evaluate(({sel, preferred}) => {
+			const root = document.querySelector(sel);
+			if (!root) return false;
+			const selects = Array.from(root.querySelectorAll<HTMLSelectElement>(".charsheet__fixed-spell-picker select"));
+			const target = selects.find(s => !s.value);
+			if (!target) return false;
+			// Signature Spells renders TWO slots of the SAME level, and the
+			// wizard rejects Finish with "Choose two different level 3
+			// Signature Spells" if both hold the same pick. So exclude values
+			// already taken by sibling slots rather than always taking
+			// `options[0]`.
+			const taken = new Set(selects.filter(s => s !== target && s.value).map(s => s.value));
+			const options = Array.from(target.options).filter(o => !!o.value && !taken.has(o.value));
+			if (!options.length) return false;
+			const wanted = (preferred || [])
+				.map(name => options.find(o => o.textContent?.toLowerCase().startsWith(`${name.toLowerCase()} (`)))
+				.find(Boolean);
+			target.value = (wanted || options[0]).value;
+			target.dispatchEvent(new Event("change", {bubbles: true}));
+			return true;
+		}, {sel: rootSelector, preferred: preferredNames ?? []});
+		if (!changed) return;
+		await page.waitForTimeout(120);
+	}
 }
 
 /**
@@ -161,8 +224,9 @@ async function clickOneSpell (
 	containerIdx: number,
 	kind: "cantrip" | "spell",
 	avoidNames: Set<string> = new Set(),
+	rotate: number = 0,
 ): Promise<string | null> {
-	return page.evaluate(({sel, idx, wantCantrip, avoid}) => {
+	return page.evaluate(({sel, idx, wantCantrip, avoid, rot}) => {
 		const root = document.querySelector(sel);
 		if (!root) return null;
 		const container = root.querySelectorAll<HTMLElement>(".charsheet__spell-picker-container")[idx];
@@ -171,10 +235,28 @@ async function clickOneSpell (
 		const nameOf = (btn: HTMLButtonElement) => (btn.closest(".charsheet__spell-picker-item")
 			?.querySelector(".charsheet__spell-picker-item-name")?.textContent || "?").trim();
 
+		// Sections are one per spell level, in ascending DOM order. Taking the
+		// first addable `+` therefore ALWAYS lands in the level-1 section,
+		// which never runs out (the catalogue has hundreds of level-1 spells).
+		// A wizard walked to L17 that way ends up with a spellbook of
+		// {L0:3, L1:38} and not a single level-2 spell — measured, not
+		// assumed — which then makes L18 Spell Mastery unfillable because its
+		// "Level 2 Mastery" slot has no candidate. Rotating the starting
+		// section per pick spreads the picks across levels, which is both what
+		// a real spellbook looks like and what downstream level-gated features
+		// need. The count guarantee is untouched: we still fall through every
+		// section before giving up.
+		const sections = Array.from(container.querySelectorAll(".charsheet__spell-picker-section"))
+			.filter(section => {
+				const title = section.querySelector(".charsheet__spell-picker-section-title")?.textContent || "";
+				return /Cantrips/i.test(title) === wantCantrip;
+			});
+		if (!sections.length) return null;
+		const start = sections.length ? (rot % sections.length) : 0;
+		const ordered = [...sections.slice(start), ...sections.slice(0, start)];
+
 		let fallback: HTMLButtonElement | null = null;
-		for (const section of Array.from(container.querySelectorAll(".charsheet__spell-picker-section"))) {
-			const title = section.querySelector(".charsheet__spell-picker-section-title")?.textContent || "";
-			if (/Cantrips/i.test(title) !== wantCantrip) continue;
+		for (const section of ordered) {
 			for (const btn of Array.from(section.querySelectorAll<HTMLButtonElement>("button.spell-toggle"))) {
 				if ((btn.textContent || "").trim() !== "+") continue;
 				if (!fallback) fallback = btn;
@@ -188,13 +270,14 @@ async function clickOneSpell (
 		const name = nameOf(fallback);
 		fallback.click();
 		return name;
-	}, {sel: rootSelector, idx: containerIdx, wantCantrip: kind === "cantrip", avoid: [...avoidNames]});
+	}, {sel: rootSelector, idx: containerIdx, wantCantrip: kind === "cantrip", avoid: [...avoidNames], rot: rotate});
 }
 
 function describeReports (reports: SpellPickerReport[]): string {
 	if (!reports.length) return "(no spell-picker containers found)";
 	return reports
 		.map((r, i) => `  [${i}] "${r.title}" ${r.counters.map(c => `${c.kind}=${c.current}/${c.max}`).join(" ")} `
+			+ (r.fixedSlots ? `fixed-slots=${r.fixedSlotsFilled}/${r.fixedSlots} ` : "")
 			+ `(addable: ${r.availableCantrips} cantrips, ${r.availableSpells} spells)`)
 		.join("\n");
 }
@@ -308,7 +391,12 @@ export async function fillSpellPickers (
 		return {reports: [], picked: 0, insufficient: [], pickedPreferred: [], missedPreferred: opts.preferredNames ?? []};
 	}
 
+	// Fixed-slot pickers are satisfied by CHOOSING a value per `<select>`,
+	// not by clicking `+` until a counter fills. They are filled at the END of
+	// this function (see the note there on why order matters); here we only
+	// need to exempt them from the counter contract.
 	for (const [i, report] of initial.entries()) {
+		if (report.fixedSlots > 0) continue;
 		if (!report.counters.length) {
 			throw new Error(
 				`fillSpellPickers(${opts.context}): picker [${i}] ("${report.title}") rendered no `
@@ -325,6 +413,16 @@ export async function fillSpellPickers (
 			}
 		}
 	}
+
+	// Rotation base for the level-section spread (see `clickOneSpell`). Derived
+	// from how many spells the character ALREADY knows so the offset advances
+	// across successive level-ups instead of resetting to 0 each time — that
+	// reset is why an earlier attempt produced a spellbook of only level-1 and
+	// level-2 spells, which then blocked L20 Signature Spells (two level-3
+	// picks) the same way it had blocked L18 Spell Mastery.
+	const rotBase = await page.evaluate(() => {
+		return ((globalThis as any).charSheet?._state?.getSpells?.() ?? []).length;
+	}).catch(() => 0);
 
 	// Signature picks go FIRST, so they win the limited slots before the
 	// generic pass fills the remainder alphabetically.
@@ -362,7 +460,11 @@ export async function fillSpellPickers (
 			// `need` clicks should suffice; the small slack absorbs a
 			// click that lands on an option the widget rejects.
 			for (let attempt = 0; attempt < need + 5 && need > 0; attempt++) {
-				const name = await clickOneSpell(page, rootSelector, idx, kind, takenNames);
+				// Rotate the starting level-section per pick (see clickOneSpell).
+				// With the usual "2 new spells per wizard level" this alternates
+				// level 1 / level 2, which is what L18 Spell Mastery requires and
+				// is strictly closer to a real spellbook than 38 level-1 spells.
+				const name = await clickOneSpell(page, rootSelector, idx, kind, takenNames, rotBase + attempt);
 				if (name == null) break;
 				chosen.push(name);
 				takenNames.add(name.toLowerCase());
@@ -393,7 +495,25 @@ export async function fillSpellPickers (
 		}
 	}
 
+	// Fixed-slot pickers go LAST, deliberately. Wizard Spell Mastery's
+	// candidate list is derived from the spellbook INCLUDING the spells staged
+	// in this same wizard step (`rerenderWizardCapstones` recomputes it from
+	// `getSpells() + selectedSpellbookSpells`), so filling the fixed slots
+	// before the counter pass reads a spellbook that is 2 spells short and can
+	// leave a level-2 slot with no eligible option.
+	await fillFixedSlotPickers(page, rootSelector, opts.preferredNames);
+
 	const finalReports = await readSpellPickers(page, rootSelector);
+	const unmetFixed = finalReports
+		.filter(r => r.fixedSlots > 0 && r.fixedSlotsFilled < r.fixedSlots)
+		.map((r, i) => `[${i}] "${r.title}" ${r.fixedSlotsFilled}/${r.fixedSlots} slots`);
+	if (unmetFixed.length) {
+		throw new Error(
+			`fillSpellPickers(${opts.context}): fixed-slot picker(s) left unset: ${unmetFixed.join("; ")}. `
+			+ `The <select> offered no eligible spell, which blocks a player too.\n`
+			+ describeReports(finalReports),
+		);
+	}
 	const unmet = finalReports
 		.flatMap((r, i) => r.counters.filter(c => c.current < c.max).map(c => `[${i}] "${r.title}" ${c.kind} ${c.current}/${c.max}`));
 	if (unmet.length && !opts.allowInsufficientOptions) {

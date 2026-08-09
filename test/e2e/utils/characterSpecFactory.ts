@@ -187,7 +187,15 @@ export interface CharacterSpec {
 }
 
 const MEGA_TIMEOUT_MS = Math.max(
-	360_000,
+	// 360s was too tight once the features matrix (RUN_MATRIX) joined the MEGA
+	// walk. Measured on this suite: Chained Fury Barbarian completes the matrix
+	// in 4.5 min and The Horror Warlock in 3.8 min when run ALONE, but both
+	// blew the 6-minute budget when run as part of a multi-spec batch — under
+	// contention a single level-up step stretches from ~4s to ~9s, which is
+	// enough to double the walk. Those were false reds: the identical test
+	// passes standalone. 540s keeps ~2x headroom over the slowest measured
+	// standalone run without letting a genuinely hung test sit for long.
+	540_000,
 	Number(process.env.PW_TIMEOUT_MS ?? 0) * 3,
 ); // Scale with the supported per-test override on contended shared machines.
 const MIDTIER_TIMEOUT_MS = 180_000;
@@ -383,10 +391,19 @@ export function describeCharacter (spec: CharacterSpec): void {
 		// Same wizard navigation cost as MEGA, but ONLY runs the
 		// declarative per-feature checks. Useful for triaging matrix
 		// regressions in isolation from milestone failures.
-		// Gated behind RUN_MATRIX so it doesn't double the suite cost
-		// when contributors only want milestone coverage.
+		//
+		// Gated behind RUN_MATRIX so it doesn't double the suite cost when
+		// contributors only want milestone coverage — but RUN_MEGA IMPLIES
+		// RUN_MATRIX. Before that implication existed, `RUN_MEGA=1` silently
+		// skipped every matrix test, so a full-looking "N passed, 0 failed"
+		// MEGA run had executed `assertFeaturesMatrix` exactly zero times.
+		// That is the most expensive kind of green: it reports coverage it
+		// never had. Opt out of the matrix explicitly with RUN_MATRIX=0.
 		if (featuresMatrix?.length) {
-			const matrixGated = process.env.RUN_MATRIX ? test : test.skip;
+			const wantMatrix = process.env.RUN_MATRIX
+				? process.env.RUN_MATRIX !== "0"
+				: !!process.env.RUN_MEGA;
+			const matrixGated = wantMatrix ? test : test.skip;
 			matrixGated(`MEGA Features matrix L1→20`, async ({page}) => {
 				test.setTimeout(MEGA_TIMEOUT_MS);
 				const {charSheet} = await createCharacterViaWizard(page, preset);

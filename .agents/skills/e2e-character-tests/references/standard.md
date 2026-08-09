@@ -74,7 +74,27 @@ pickers](#helpers-for-class-option-pickers) for the full inventory.
 | 21 | **Class-option pickers + per-pick effect** *(new, Fighter / Sorcerer / Warlock / Bard / Rogue)* | per-spec `featuresMatrix` `pick` with `pickActivatable` + `pickedFeatureGrants` | Fighter Battle Tactics (2 at L3, +1 at L7/10/15), Sorcerer Metamagic, Warlock Invocations, Jester Acts, Trickster Tricks, Precise Strikes, Pact Boons, Dreamwalker calls / studies — each must register the picked option as a feature on the sheet AND attach `pickedFeatureGrants` so the auto-picked option's documented effect (damage rider, attack bonus, resource cost, toggle) is verified. |
 | 22 | **Per-feature effect coverage** *(new, applies to every entry)* | every `featuresMatrix` row | Every non-cinematic feature, ability, feat, spell, attack, or item in the matrix MUST attach at least one `EffectCheck` (or carry a `// no measurable derived effect: <reason>` comment). Existence-only assertions are insufficient — see [Effect verification](#effect-verification-every-feature-should-do-something) below. |
 
-## Helpers for class-option pickers
+## Which env flags actually run the matrix
+
+`RUN_MEGA=1` **now implies the features matrix**. It did not always, and the
+gap was expensive: the matrix test was gated on `RUN_MATRIX` alone, so a
+`RUN_MEGA=1` run reported a clean "N passed, 0 failed" having executed
+`assertFeaturesMatrix` **zero times** — every matrix test sat in the skip
+count, which reads as ordinary skipping. A sweep of six state-heavy specs
+validated nothing and looked entirely green doing it.
+
+| Invocation | MEGA L1→20 | Features matrix |
+|---|---|---|
+| *(no flags)* | skipped | skipped |
+| `RUN_MATRIX=1` | skipped | **runs** |
+| `RUN_MEGA=1` | **runs** | **runs** (implied) |
+| `RUN_MEGA=1 RUN_MATRIX=0` | **runs** | skipped (explicit opt-out) |
+
+**Read the skip count, not just the pass count.** A green run whose skips you
+haven't accounted for is not evidence. If you are validating a fix to feature
+behaviour across levels, confirm the matrix rows actually executed — checks
+19–22 above live entirely in `featuresMatrix` and are invisible without it.
+
 
 For TGTT classes, use the shared pools in
 [`test/e2e/utils/tgttFeaturePools.ts`](../../../../test/e2e/utils/tgttFeaturePools.ts).
