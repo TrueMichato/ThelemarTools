@@ -710,11 +710,21 @@ export class LevelUpPage {
 		// choices render as `.ve-btn` grids, others as radios, checkboxes
 		// or selects. Drive all of them, re-querying after every click
 		// because each selection re-renders the container.
+		//
+		// Grid groups are count-aware: a `Choose N …:` label means the
+		// group is not satisfied until N buttons are selected, so a
+		// "pick 2 skills" feat is not left half-filled. Groups whose
+		// label omits a count (ability bumps) want exactly one.
 		// ──────────────────────────────────────────────────────────────
-		for (let pass = 0; pass < 10; pass++) {
+		for (let pass = 0; pass < 12; pass++) {
 			const didPick = await this.page.evaluate(() => {
-				const box = document.querySelector<HTMLElement>(".charsheet__levelup-feat-choices");
-				if (!box) return false;
+				const RE_COUNT = /choose\s+(?:a\s+)?(\d+)\s+/i;
+				// Optional-feature progressions (invocation/maneuver feat
+				// grants) render the same widget in their own container.
+				const boxes = Array.from(document.querySelectorAll<HTMLElement>(
+					".charsheet__levelup-feat-choices, .charsheet__opt-feat-progression-choices",
+				)).filter(b => b.offsetParent !== null || b.offsetHeight > 0);
+				if (!boxes.length) return false;
 
 				// A grid button is "selected" once the widget flips it to
 				// a non-default variant (btn-primary / active / aria-pressed).
@@ -723,40 +733,52 @@ export class LevelUpPage {
 					|| b.getAttribute("aria-pressed") === "true"
 					|| /ve-btn-(primary|success|info)/.test(b.className);
 
-				for (const grid of Array.from(box.querySelectorAll<HTMLElement>("[class*='-grid'], .ve-flex-wrap"))) {
-					const btns = Array.from(grid.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
-					if (!btns.length) continue;
-					if (btns.some(isPicked)) continue; // group already satisfied
-					btns[0].click();
-					return true;
-				}
-
-				const sel = Array.from(box.querySelectorAll<HTMLSelectElement>("select"))
-					.find(s => !s.value || s.selectedIndex <= 0);
-				if (sel) {
-					const opt = Array.from(sel.options).find((o, i) => i > 0 && !o.disabled);
-					if (opt) {
-						sel.value = opt.value;
-						sel.dispatchEvent(new Event("change", {bubbles: true}));
+				for (const box of boxes) {
+					for (const grid of Array.from(box.querySelectorAll<HTMLElement>("[class*='-grid'], .ve-flex-wrap"))) {
+						const btns = Array.from(grid.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"))
+							.filter(b => (b.textContent || "").trim() !== "+");
+						if (!btns.length) continue;
+						// How many picks does this group want? Read it off the
+						// nearest "Choose N …:" label; default to 1.
+						const labelTxt = (grid.previousElementSibling?.textContent
+							|| grid.parentElement?.querySelector("label")?.textContent
+							|| "");
+						const m = RE_COUNT.exec(labelTxt);
+						const want = m ? Number(m[1]) : 1;
+						if (btns.filter(isPicked).length >= want) continue; // group satisfied
+						const next = btns.find(b => !isPicked(b));
+						if (!next) continue;
+						next.click();
 						return true;
 					}
-				}
 
-				const radios = Array.from(box.querySelectorAll<HTMLInputElement>("input[type='radio']:not(:disabled)"));
-				const byName = new Map<string, HTMLInputElement[]>();
-				for (const r of radios) {
-					const n = r.name || "_anon";
-					if (!byName.has(n)) byName.set(n, []);
-					byName.get(n)!.push(r);
-				}
-				for (const group of byName.values()) {
-					if (group.some(r => r.checked)) continue;
-					group[0].click();
-					return true;
-				}
+					const sel = Array.from(box.querySelectorAll<HTMLSelectElement>("select"))
+						.find(s => !s.value || s.selectedIndex <= 0);
+					if (sel) {
+						const opt = Array.from(sel.options).find((o, i) => i > 0 && !o.disabled);
+						if (opt) {
+							sel.value = opt.value;
+							sel.dispatchEvent(new Event("change", {bubbles: true}));
+							return true;
+						}
+					}
 
-				const box2 = box.querySelector<HTMLInputElement>("input[type='checkbox']:not(:disabled):not(:checked)");
-				if (box2) { box2.click(); return true; }
+					const radios = Array.from(box.querySelectorAll<HTMLInputElement>("input[type='radio']:not(:disabled)"));
+					const byName = new Map<string, HTMLInputElement[]>();
+					for (const r of radios) {
+						const n = r.name || "_anon";
+						if (!byName.has(n)) byName.set(n, []);
+						byName.get(n)!.push(r);
+					}
+					for (const group of byName.values()) {
+						if (group.some(r => r.checked)) continue;
+						group[0].click();
+						return true;
+					}
+
+					const cb = box.querySelector<HTMLInputElement>("input[type='checkbox']:not(:disabled):not(:checked)");
+					if (cb) { cb.click(); return true; }
+				}
 
 				return false;
 			});

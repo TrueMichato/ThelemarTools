@@ -8,6 +8,11 @@
 - Interaction with Other Systems (Active States, Conditions, FeatureEffectRegistry, Items)
 - Implemented Classes
 - Performance Note
+- Subclass-Published Spell Slot Tables
+- Rolled Casters (no spellcasting ability)
+- Post-Roll d20 Intervention API
+- Attack Rider Notes
+- Subclass Cantrip Choice Slots
 
 ## Overview
 
@@ -311,3 +316,39 @@ A few class-utils helpers gate which options are visible in the optional-feature
 ## Hover Routing Discipline
 
 The `_getFeatureHoverLink` and `getSubclassHoverLink` helpers (`charactersheet.js`) both route through `CharacterSheetClassUtils.resolveSubclassHoverSources(feature)`. This helper exists because TGTT-style `_copy` subclasses can leave `feature.classSource` pointing at the homebrew copy (`TGTT-2014`) when the canonical entry lives in PHB / EGW / etc. Always use the helper instead of reading `feature.classSource` raw — otherwise hovers produce broken hashes and the link silently 404s.
+
+## Subclass-Published Spell Slot Tables
+
+Some subclasses publish an explicit slot grid in `subclassTableGroups[].rowsSpellProgression` that intentionally deviates from generic caster math (the TGTT Rogue/Gambler's L10-12 row is 4/2 where third-caster math would give 4/3). `CharacterSheetState.getSubclassSpellSlotRow(cls)` reads that row (padding to 9 levels) and `calculateSpellSlots` overrides `baseSlots` wholesale for a **single-class, non-multiclass** caster whose subclass declares one. A static `SUBCLASS_SPELL_SLOT_TABLES` map provides a fallback keyed `"<shortName>|<source>"` in lowercase for saves whose persisted subclass lost its table group.
+
+Consequence for the four persistence sites (builder / level-up / quick build ×2): a subclass snapshot must persist **both** `subclassTableGroups` and `cantripProgression`, or reloading the character silently reverts it to generic math.
+
+## Rolled Casters (no spellcasting ability)
+
+A caster whose DC/attack come from a die roll rather than an ability modifier sets `isRolledPrepared` on its `getSpellcastingClassBreakdown()` card. That card then reports:
+
+- `ability: null`, `abilityLabel: "Rolled"`
+- `saveDc: null`, `attackBonus: null` (a number here would be a lie)
+- `saveDcFormula` / `attackBonusFormula` / `modifierDice` carrying the honest expression (e.g. `"8 + 4 + 1d6"`)
+
+Every consumer branches on `isRolledPrepared` **before** reading `saveDc`/`attackBonus`, so nulls are safe. Note `getSpellcastingAbilityForClass` still returns a non-null ability for such classes — callers that need an ability for unrelated bookkeeping depend on it; the card layer is where the truth is told.
+
+## Post-Roll d20 Intervention API
+
+Generic hook for features that alter a d20 result *after* it is rolled (Gambler's Extra Luck, Master of Fortune):
+
+- `getD20InterventionOffers({naturalRoll, effectiveRoll, isAdvantage, rollType})` → array of `{id, name, kind, remaining, …}`; `kind` is `"advantage"` (re-roll and take the better) or `"natOneToTwenty"`.
+- `applyD20Intervention(id, ctx)` → `{applied, name, naturalRoll, effectiveRoll, secondDie, tableRoll, remaining}`. Note the field is **`secondDie`**, not `secondRoll`.
+
+The page layer (`charactersheet.js` `_pMaybeApplyFortuneIntervention` / `_pPromptFortuneIntervention`) is wired into `_rollAbilityCheck`, `_rollSkillCheck`, `_rollSavingThrow` and, via a post-attack hook, `charactersheet-combat.js` `_rollAttack`. Escape hatch: `settings.skipFortuneInterventionPrompt`.
+
+## Attack Rider Notes
+
+`getAttackRiderNotes(attack)` returns generic per-attack rider strings, unioning `attack.sourceItem.attackRiders[]` with feature-derived riders. Riders surface as a badge in `_renderAttackItem` and are appended to the dice-toast title in `_rollAttack`, so a rider is never flavour text only.
+
+## Subclass Cantrip Choice Slots
+
+`getSubclassCantripChoiceSlots()` + the static `getSubclassSpellListClass(subclass, cls)` mint pending cantrip choices from a subclass's own `cantripProgression`, unioned in by `_ensureSubclassSpellChoices()`. Because that hook is drained by Builder, Level-Up, Quick Build and Features alike, minting there surfaces the pick in **all four flows with no new UI**. The pending choice must use `featureName: "Cantrips Known"` (a member of `PLAYER_CHOSEN_SPELL_FEATURES`), or the result is filed as feature-granted and re-prompts forever.
+
+This closed the same gap for Eldritch Knight and Arcane Trickster: the level-up wizard's caster detection reads the **class's** `cantripProgression`, and Rogue/Fighter declare none.
+
