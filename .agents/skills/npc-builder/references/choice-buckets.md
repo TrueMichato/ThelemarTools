@@ -211,3 +211,29 @@ When the source is a finished lower-level character rather than a blank concept:
    (create them as `custom` items if they don't exist), then top up to the same
    legendary/very-rare/rare budget as the other NPCs at that level, favoring homebrew.
 4. Drive to 0 warnings with the picklog loop exactly as for a from-scratch build.
+
+## Choosing between level splits — decide empirically, not from memory
+
+When a multiclass NPC's final level(s) could go to any of several classes and the
+"best" choice depends on the concept (e.g. "which 13th level makes this gish the best
+bag-of-tricks?"), do NOT reason it out from remembered class tables — TGTT reworks
+class progressions, so memory is unreliable. Spawn the alternatives and diff their
+*computed* capabilities:
+
+1. Copy the finished spec into a throwaway `_variants.mjs` with `export const SPECS`
+   (the loader requires that name), one entry per candidate split. Give every variant
+   the FULL known-good choice set — stripped/empty choices stall the build at level 1
+   because autofill can't clear early required gates (Fighting Style, Weapon Mastery,
+   Combat Methods). Tail mismatches autofill harmlessly.
+2. Spawn to a temp dir, then diff the exports on the reservoirs that matter: feats
+   (a level that grants no ASI silently costs a feat), spell slots per level
+   (`spellcasting.spellSlots[N].max`), `spellcasting.pactSlots`, superiority dice +
+   maneuvers known (`resources[]`), invocations, spellbook size.
+3. Watch for "trap" levels that look like progress but add nothing structural. The
+   classic: **Warlock pact slots do not upgrade every level** — Warlock 3→4 keeps
+   `pactSlots` at 2×L2 (the jump to L3 pact slots is at Warlock 5), so a 4th warlock
+   level only buys a cantrip + the ASI. A full-caster level (e.g. Wizard 3→4) instead
+   adds a slot at the character's top spell tier AND keeps the feat — usually the
+   stronger pick for a spell-slinger. Let the diff, not intuition, make the call.
+4. Delete the `_variants.mjs` and temp dir once the winner is chosen and folded back
+   into the deliverable spec.

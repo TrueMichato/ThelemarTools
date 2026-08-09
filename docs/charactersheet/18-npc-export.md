@@ -687,6 +687,92 @@ nothing else about it appears.
     sleep immunity twice in one sentence; three entries opened on `In addition,` referring
     to nothing, having been split from the sentence they extended.
 
+### v14 — one printing per spell, honest tags and a readable voice
+
+82. **A spell is deduped by name within its level, not by `name|source`**
+    (`_dedupeSpellsByName`). The same spell reaches the block by two routes — the class
+    list and a subclass or feat grant — carrying two different printings, so
+    `Fog Cloud|PHB` and `Fog Cloud|XPHB` both survived and the block printed the spell
+    twice on one line. **8 of 24 corpus characters** were affected. The surviving printing
+    is chosen by: matching the character's edition first, then carrying a grant
+    annotation, then first-seen.
+
+83. **A tag whose kind contradicts its referent is remapped or stripped**
+    (`_sanitizeTagKinds`, inside `_enrichHoverTags`). `{@condition Dash}`,
+    `{@condition hidden|XPHB}`, `{@action Bonus Action|XPHB}` and `{@action Reaction|XPHB}`
+    all rendered as failed lookups. Actions mis-filed as conditions are remapped;
+    everything else is demoted to plain text. **This must run inside `_enrichHoverTags`** —
+    an earlier version ran mid-pipeline and deleted a whole trait.
+
+84. **`{@spell}` is emitted only on an exact catalogue match**. A capitalisation heuristic
+    invented `{@spell Magic of the}` and `{@spell Absorbed}` out of the Staff of Power's
+    prose — two hovers to spells that do not exist.
+
+85. **A scaling ladder collapses to the row that applies** (`_collapseScalingLadders`).
+    The resolver used to substitute the character's value into the ladder's *condition*,
+    producing "deal `1d6` … the damage increases to `2d6` when its proficiency bonus
+    **(+5) is +3**" for a character whose actual damage is `4d6`. Progression text is
+    player-facing; a statblock states the current row. Runs **after** `_tagBareDice` and
+    **entry-wide**, not per line.
+
+86. **Every defence from one conditional feature carries the gate**
+    (`_propagateConditionalDefenceNotes`). Annotating only the first read as though the
+    rest were unconditional: Nagara's Stormborn gated `cold` but not `lightning`, and
+    dropped `thunder` entirely.
+
+87. **A table stays a table** (`_preserveEntryTables`). Font of Magic was stringified down
+    to its bare header row — the sorcery-point costs were simply **gone**, making the
+    feature unusable — and Spellsword Technique lost its row boundaries
+    ("Abjuration - Force damage Conjuration or Transmutation - a normal type").
+
+88. **A stated die count becomes a roll** (`_resolveStatedDiceAndSpeeds`). "roll a number
+    of **d8s** equal to its Wisdom modifier (5)" states the number but still makes the DM
+    assemble the roll and offers no click-to-roll link → `{@damage 5d8}`. Derived speeds
+    resolve the same way: "a Fly Speed equal to its Speed" → `fly 30 ft.`. Takes
+    `calculations` so feature-derived counts (Rage Damage) resolve too.
+
+89. **Coordination is conjugated across a list of any length**
+    (`_conjugateCoordinatedListItems`, `_getClauseGovernor`, `_getAdverbAlternation`).
+    Four independent causes, each of which alone defeated the pass:
+    - `_getClauseGovernor` read a clause-final **adverb** as the governing verb;
+    - `it does so` was classified as a **modal**, when it is a pro-verb standing in for a
+      finite clause;
+    - imperative subjects were supplied **last**, so once the final list item inflected,
+      the coordination lookahead matched the earlier item and inflected it in place —
+      permanently destroying the chance to supply "it";
+    - the `-ly` adverb guard swallowed **`apply`**, in both `_conjugateThirdPerson` and the
+      shared adverb-run regex; fixing either alone changed nothing.
+
+90. **A subordinate clause supplies the subject its main clause dropped**
+    (`_supplySubordinateClauseSubject`). Player-facing rules address the reader, so
+    "If it hits, **add** the Superiority Die" becomes an order to the DM. Scanned comma by
+    comma rather than by one regex — the first comma is often internal to the subordinate
+    clause ("When it manifests this power, and as its action…, choose…"), and a single
+    match consumes the sentence before reaching the real boundary. Three guards:
+    - a **modal in the governing prefix** means the bare form is already correct
+      ("it can expend a die, roll it, and regain…"); a modal further along the sentence
+      governs a different clause and is ignored;
+    - the sentence must refer to the NPC, or the clause must name it;
+    - a **comma-separated noun list** looks identical to a bare imperative from the left —
+      "acid, cold, fire, **force**, lightning" became "it forces" until the pass learned
+      that a list item is followed by another separator, a verb by its object.
+
+91. **Bare DCs and coordinated action lists are tagged** (`_tagCapabilityTerms`). Every
+    `DC N` becomes `{@dc N}`. Two or more action names in a coordinated run are tagged
+    even with no "action" noun present, which is how Cunning Action is written ("take a
+    Bonus Action to Dash, Disengage, or Hide"); **a lone `Hide` or `Attack` is left alone**
+    — in prose it is too often the ordinary English word. `surprised` is deliberately
+    **not** tagged: it is neither a condition nor a variant rule in the data, so all nine
+    corpus occurrences would have become broken hovers.
+
+92. **The body uses the short name; the title carries the full one**
+    (`_getNpcReferenceName`). Subject substitution repeated the surname up to 49 times in
+    one block — ~2,500 characters corpus-wide, and unlike any published statblock.
+    Honorifics are kept ("Sir Arthur Chase" → "Sir Arthur"). One knock-on: the longer name
+    had been pushing an item-flavour sentence past the truncation limit, leaving a trailing
+    `:` that a suppression rule caught — **an entry disappearing is not proof it was
+    correctly suppressed**, and that entry now needs its own rule.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). Hard errors block Save to Homebrew; warnings allow Download / Copy. Full browser-side monster schema validation is still out of scope (graceful hand validator only).
 
