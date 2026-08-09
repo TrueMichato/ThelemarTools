@@ -297,13 +297,28 @@ describe("Gambler's Spellcasting - rolled mechanic + cantrip picks", () => {
 		expect(state.getPendingSpellChoices().filter(c => c.level === 0)).toHaveLength(2);
 	});
 
-	it("offers nothing before L3 and nothing when the cantrip table was never persisted", () => {
+	it("offers nothing before L3, and nothing when NO cantrip table survived persistence", () => {
 		buildGambler(2);
 		expect(state.getPendingSpellChoices().filter(c => c.level === 0)).toHaveLength(0);
 
+		// Neither the array nor the published table round-tripped: there is no
+		// ladder to read, so the sheet must not invent picks.
 		state = new CharacterSheetState();
-		buildGambler(5, {omitCantripProgression: true});
+		buildGambler(5, {omitCantripProgression: true, omitTables: true});
 		expect(state.getPendingSpellChoices().filter(c => c.level === 0)).toHaveLength(0);
+	});
+
+	it("falls back to the published 'Cantrips Known' table column when the array is absent", () => {
+		// A subclass may publish its cantrip ladder ONLY as a table column. The
+		// shared `getSubclassTableNumber` reader covers that case so a table-only
+		// subclass is still prompted instead of silently skipped.
+		buildGambler(5, {omitCantripProgression: true});
+		expect(state.getPendingSpellChoices().filter(c => c.level === 0)).toHaveLength(3);
+
+		// And it tracks the table's own L10 bump, exactly like the array path.
+		state = new CharacterSheetState();
+		buildGambler(10, {omitCantripProgression: true});
+		expect(state.getPendingSpellChoices().filter(c => c.level === 0)).toHaveLength(4);
 	});
 
 	it("resolves the spell list from the subclass's own expansion filters (generic)", () => {

@@ -396,10 +396,20 @@ export class CharacterSheetPage {
 		const activeRow = this.page.locator(".charsheet__state-row.charsheet__state--active").filter({hasText: this._getFeatureActivationPattern(featureName)}).first();
 		const endBtn = activeRow.locator(".charsheet__end-state-btn");
 		if (await endBtn.count()) {
-			await endBtn.click({timeout: 5000});
+			try {
+				await endBtn.click({timeout: 5000});
+			} catch (e) {
+				// Mirror of the race handled in activateFeature(): ending a state
+				// re-renders the whole Active States panel, so the End button is
+				// detached/moved mid-click and Playwright reports it as unstable.
+				// If the feature is no longer active the click landed, so swallow.
+				if (await this.isFeatureActive(featureName)) throw e;
+			}
 			await this.page.waitForTimeout(200);
 			return;
 		}
+		// Already inactive (e.g. the state auto-ended) — nothing to do.
+		if (!await this.isFeatureActive(featureName)) return;
 		throw new Error(`deactivateFeature(${featureName}): no active state row with an End control.`);
 	}
 

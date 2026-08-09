@@ -16234,15 +16234,24 @@ class CharacterSheetState {
 
 		for (const cls of (this._data.classes || [])) {
 			const subclass = cls?.subclass;
-			const prog = subclass?.cantripProgression;
-			if (!Array.isArray(prog) || !prog.length) continue;
+			if (!subclass) continue;
+			const prog = subclass.cantripProgression;
+			const hasProg = Array.isArray(prog) && prog.length;
+			// A subclass may publish its cantrip ladder EITHER as a
+			// `cantripProgression` array or only as a "Cantrips Known" column in
+			// `subclassTableGroups`. Read the array first (cheap, exact) and fall
+			// back to the shared table reader so a table-only subclass is still
+			// prompted rather than silently skipped.
+			if (!hasProg && !subclass.subclassTableGroups?.length) continue;
 			// Only fill the gap the class-level flows leave: a class that declares its
 			// own cantrip table is already handled by the Builder/LevelUp spell steps.
 			if (Array.isArray(cls.cantripProgression) && cls.cantripProgression.length) continue;
 
 			const level = Math.max(0, Math.min(20, cls.level || 0));
 			if (!level) continue;
-			const want = prog[level - 1] || 0;
+			const want = hasProg
+				? (prog[level - 1] || 0)
+				: (CharacterSheetClassUtils.getSubclassTableNumber?.(subclass, level, /cantrips?\s+known/i, 0) || 0);
 			if (!want) continue;
 
 			const subclassLabel = subclass.shortName || subclass.name || "";
