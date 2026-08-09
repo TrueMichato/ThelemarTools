@@ -489,6 +489,19 @@ warding an ally records the name and clears on the next long rest — and
 deliberately grants the witch nothing. Prose describing the ally case must not be
 parsed onto the character; see CS-BUG-092 and the third-party subject guard.
 
+### No Enemy Action Economy Either
+
+The same one-creature limit cuts the other way: a feature that *constrains an
+opponent's options* has nothing on the sheet to change. There is no enemy turn,
+no enemy action selection, and no opportunity-attack tracker, so a clause like
+Fluid Step's "other creatures can't gain the benefit of Disengaging from you
+while you are Dancing" (Belly Dancer Rogue 13, TGTT) can only be **surfaced as a
+rules note** — as an active-state note and a Combat-tab feature line. Its
+self-facing half ("you gain the benefit of Disengage while Dancing") *is* a real
+mechanic, via the generic `grantsActionBenefit` state effect. See CS-BUG-115.
+
+Encounter-side rules of this shape belong on the DM Screen, not the sheet.
+
 ---
 
 *Previous: [Testing Strategy](./09-testing-strategy.md) | Next: [Future Roadmap](./11-future-roadmap.md)*

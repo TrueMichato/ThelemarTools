@@ -1500,7 +1500,12 @@ class CharacterSheetCombat {
 		// Auto-enable SA when conditions are met after attack
 		const sneakAttackInfo = this._state.getFeatureCalculations?.()?.sneakAttack;
 		if (sneakAttackInfo && !this._sneakAttackEnabled && this._isSneakAttackAvailableThisTurn()) {
-			const triggerMet = (hasAdvantage && !hasDisadvantage) || this._sneakAttackHasAdjacentAlly;
+			// A state may licence Sneak Attack without the usual trigger (e.g. the
+			// Belly Dancer's Dance of the Country, in melee) — see
+			// `canSneakAttackWithoutAdvantage`.
+			const stateLicence = !hasDisadvantage
+				&& this._state.canSneakAttackWithoutAdvantage?.({isMelee: attack?.isMelee !== false && !attack?.isRanged});
+			const triggerMet = (hasAdvantage && !hasDisadvantage) || this._sneakAttackHasAdjacentAlly || stateLicence;
 			if (triggerMet && this._isSneakAttackWeaponEligible(attack)) {
 				this._sneakAttackEnabled = true;
 				this._renderSneakAttackToggle?.();
@@ -3217,7 +3222,7 @@ class CharacterSheetCombat {
 		return this._lastAttackContext.mode === "advantage" || this._lastAttackContext.hasAdvantage;
 	}
 
-	_isSneakAttackTriggerSatisfied (attackId, {showWarnings = true} = {}) {
+	_isSneakAttackTriggerSatisfied (attackId, {showWarnings = true, isMelee = true} = {}) {
 		const hasAdvantage = this._isSneakAttackContextAdvantaged(attackId);
 		const hasDisadvantage = this._isSneakAttackContextDisadvantaged(attackId);
 
@@ -3232,6 +3237,12 @@ class CharacterSheetCombat {
 		}
 
 		if (hasAdvantage || this._sneakAttackHasAdjacentAlly) return true;
+
+		// An active state may licence Sneak Attack without the usual trigger — the
+		// Belly Dancer's Dance of the Country lets you Sneak Attack creatures within
+		// melee range without needing advantage. Generic via the
+		// `sneakAttackWithoutAdvantage` state effect.
+		if (this._state.canSneakAttackWithoutAdvantage?.({isMelee})) return true;
 
 		if (showWarnings) {
 			JqueryUtil.doToast({
@@ -3452,7 +3463,7 @@ class CharacterSheetCombat {
 			return false;
 		}
 
-		if (!this._isSneakAttackTriggerSatisfied(attack.id, {showWarnings})) return false;
+		if (!this._isSneakAttackTriggerSatisfied(attack.id, {showWarnings, isMelee: attack?.isMelee !== false && !attack?.isRanged})) return false;
 
 		return true;
 	}
@@ -8393,6 +8404,40 @@ class CharacterSheetCombat {
 			}
 		}
 
+		// --- TGTT Belly Dancer (Rogue) ---
+		const isDancing = !!this._state.isDancing?.();
+		if (nameLower === "dance of the country") {
+			lines.push(`<span class="mr-1">🛡️</span> <strong>+${calc.danceAcBonus ?? 1} AC</strong> while Dancing (CHA mod, minimum +1)`);
+			lines.push(`<span class="mr-1">🤸</span> <strong>Advantage</strong> on Dexterity (Acrobatics) while Dancing`);
+			lines.push(`<span class="mr-1">🗡️</span> <strong>Sneak Attack</strong> in melee range <strong>without needing advantage</strong> while Dancing`);
+			lines.push(`<span class="mr-1">😮‍💨</span> When the Dance ends: <strong>DC ${calc.danceEndSaveDc ?? 10} CON save</strong> or gain 1 level of exhaustion`);
+			if (!isDancing) lines.push(`<span class="mr-1">💃</span> <span class="ve-muted">Not currently Dancing — activate it to apply these benefits.</span>`);
+		}
+
+		if (nameLower === "fluid step") {
+			lines.push(`<span class="mr-1">💨</span> While Dancing you have the <strong>Disengage</strong> benefit`);
+			lines.push(`<span class="mr-1">🚫</span> Other creatures <strong>can't gain the Disengage benefit</strong> from you while you Dance`);
+			if (!isDancing) lines.push(`<span class="mr-1">💃</span> <span class="ve-muted">Requires an active Dance of the Country.</span>`);
+		}
+
+		if (nameLower === "tantalizing shivers") {
+			const perfMod = this._state.getSkillModifier?.("performance") ?? 0;
+			lines.push(`<span class="mr-1">💫</span> <strong>Bonus action while Dancing</strong>: Charisma (Performance) <strong>${perfMod >= 0 ? "+" : ""}${perfMod}</strong> contested by the target's Wisdom (Insight)`);
+			lines.push(`<span class="mr-1">😵</span> On a win the creature is <strong>charmed &amp; incapacitated with speed 0</strong> for 1 round, and you have <strong>advantage</strong> on attacks against it`);
+			if (!isDancing) lines.push(`<span class="mr-1">💃</span> <span class="ve-muted">Requires an active Dance of the Country.</span>`);
+		}
+
+		if (nameLower === "percussive strike") {
+			lines.push(`<span class="mr-1">🥁</span> When your Dance begins, hostile creatures that can see you make a <strong>DC ${calc.percussiveStrikeDc ?? "—"} Wisdom save</strong>`);
+			lines.push(`<span class="mr-1">🎯</span> On a failure you have <strong>advantage</strong> on attack rolls against it while the Dance lasts`);
+			if (!isDancing) lines.push(`<span class="mr-1">💃</span> <span class="ve-muted">Requires an active Dance of the Country.</span>`);
+		}
+
+		if (nameLower === "bonus proficiency" && calc.hasConcealedWeapons) {
+			lines.push(`<span class="mr-1">🎭</span> <strong>Expertise</strong> in Performance`);
+			lines.push(`<span class="mr-1">🗡️</span> Weapons you hold count as <strong>Concealed</strong>: advantage on Dexterity (Sleight of Hand) checks to keep them hidden`);
+		}
+
 		// --- C7: Instant Step ---
 		if (nameLower === "instant step") {
 			const range = calc.instantStepRange || 60;
@@ -9654,12 +9699,29 @@ class CharacterSheetCombat {
 
 		const conditions = e_({outer: `<div class="cs-combat-conditions"></div>`});
 
+		// A state may licence Sneak Attack without the usual trigger (e.g. the Belly
+		// Dancer's Dance of the Country, in melee). Surface it as a met condition so
+		// the player can see WHY Sneak Attack is live without advantage.
+		const stateLicence = !!this._state.canSneakAttackWithoutAdvantage?.({isMelee: true});
+		const stateLicenceSource = stateLicence
+			? (this._state.getActiveStateEffects?.() || []).find(e => e?.type === "sneakAttackWithoutAdvantage")?.stateName || "Active state"
+			: null;
+
 		if (hasAdv) {
 			conditions.insertAdjacentHTML("beforeend", csCombatConditionPill({variant: "met", icon: "check", label: "Advantage", title: "Last attack had advantage"}));
 		} else if (hasDisadv) {
 			conditions.insertAdjacentHTML("beforeend", csCombatConditionPill({variant: "blocked", icon: "ban", label: "Disadvantage", title: "Last attack had disadvantage — Sneak Attack blocked"}));
 		} else {
 			conditions.insertAdjacentHTML("beforeend", csCombatConditionPill({variant: "none", icon: "none", label: "No advantage", title: "No advantage from the last attack"}));
+		}
+
+		if (stateLicence) {
+			conditions.insertAdjacentHTML("beforeend", csCombatConditionPill({
+				variant: "met",
+				icon: "check",
+				label: `${stateLicenceSource}: no advantage needed`,
+				title: `${stateLicenceSource} lets you Sneak Attack a creature in melee range without advantage`,
+			}));
 		}
 
 		// Ally-adjacent state toggle (clickable condition pill)
@@ -9682,7 +9744,7 @@ class CharacterSheetCombat {
 
 		// ===== Notice: armed but trigger not met =====
 		if (this._sneakAttackEnabled && !isSpentThisRound) {
-			const triggerMet = hasAdv || allyAdj;
+			const triggerMet = hasAdv || allyAdj || stateLicence;
 			if (!triggerMet && !hasDisadv) {
 				section.insertAdjacentHTML("beforeend", `<div class="cs-combat-notice cs-combat-notice--warning">${csCombatIcon("warning")}<span>No advantage and no adjacent ally — Sneak Attack won't apply.</span></div>`);
 			} else if (hasDisadv) {

@@ -969,13 +969,78 @@ description ("advantage on Dexterity (Acrobatics) rolls") the target
 should be `skill:acrobatics`.
 
 **Fix**: One-line change in `ACTIVE_STATE_TYPES.dancing` — target
-flipped from `skill:athletics` to `skill:acrobatics`. The Snake
-Charmer AC bonus path at L17582 reads `isStateActive("dancing")` only
-(not the skill target) so no other call sites needed updating.
+flipped from `skill:athletics` to `skill:acrobatics`.
+
+**Re-verified** (Belly Dancer full-support pass): the fix landed and is
+correct. Measured live — with the Dance active,
+`getSkillAdvantageState("acrobatics").advantage === true` and
+`getSkillAdvantageState("athletics").advantage === false`. Regression
+guards now exist in both
+`test/jest/charactersheet/CharacterSheetBellyDancer.test.js` ("grants
+advantage on Dexterity (ACROBATICS) — not Athletics") and the E2E spec.
+
+The same pass also **deleted** the "Snake Charmer AC bonus path"
+referenced in the original note: `hasSnakeCharmer` and its `acBonus`
+effect named a feature that does not exist anywhere in
+`homebrew/TravelersGuidetoThelemar.json`, and it gated on
+`isStateActive("dancing")` — which matches a state *instance* id and is
+therefore permanently false. It emitted a disabled conditional AC
+modifier duplicating the `dancing` state's own +CHA AC, i.e. a
+double-count trap for any user who enabled it by hand. The AC bonus now
+lives solely on the `dancing` state.
 
 **Spec update**: `toggleGrantsAdvantage skill:acrobatics` probe in
-`tgtt-belly-dancer-rogue-jaknian.spec.ts` is no longer skipped for
-014 (still skipped under the outer 017 toggle-registration umbrella).
+`tgtt-belly-dancer-rogue-jaknian.spec.ts` is no longer skipped —
+the CS-BUG-017 umbrella skip on that row was removed in the Belly
+Dancer full-support pass, and an explicit Athletics-must-be-false
+counter-assertion was added alongside it.
+
+---
+
+### CS-BUG-115 — "Other creatures cannot gain the benefit of Disengaging from you" (Fluid Step) has no mechanical effect
+
+**Status**: Open — **won't fix at the sheet level** (documented
+limitation, not a defect in the implementation).
+
+**Surfaced by**: Belly Dancer full-support pass, auditing Fluid Step
+(Rogue / The Belly Dancer, TGTT, L13).
+
+**Symptom**: Fluid Step has two clauses. The first — "You gain the
+benefit of the Disengage action while Dancing" — is fully implemented
+(`hasActionBenefitFromStates("disengage")` returns `true` while the
+`dancing` state is active, driven by the generic `grantsActionBenefit`
+state effect). The second — "other creatures cannot gain the benefit of
+Disengaging from you while you are Dancing" — is **not** implemented as
+a mechanic.
+
+**Measurement**: With a L13 Belly Dancer Dancing,
+`getActiveStateEffects()` contains
+`{type: "grantsActionBenefit", action: "disengage", source: "Fluid Step"}`
+and a `{type: "note", …}` carrying the enemy clause as prose. There is no
+queryable API that a caller could consult to learn that an enemy's
+Disengage is suppressed, because there is nothing to consult it *for*.
+
+**Root cause / why it is not fixable in scope**: The clause modifies the
+action economy of *other creatures*. The character sheet models exactly
+one creature and has no concept of an enemy's turn, an enemy's action
+choice, or opportunity attacks the character would be entitled to. There
+is no state on the sheet that this rule could change. Implementing it
+would require a combat-tracker abstraction that does not exist (and
+belongs on the DM Screen, not the sheet).
+
+**Mitigation shipped**: the clause is surfaced as an explicit rules note
+in two places, so the player is never unaware of it —
+(a) an active-state note while Dancing, and
+(b) a Combat-tab feature line under Fluid Step
+    ("🚫 Other creatures can't gain the Disengage benefit from you while
+    you Dance").
+
+**Severity**: Low — informational only; no calculation on the sheet is
+wrong as a result.
+
+**Related**: the same reasoning applies to any homebrew clause that
+constrains an opponent's options. If a general "enemy action
+restrictions" surface is ever built, this is its first customer.
 
 ---
 
@@ -1122,16 +1187,14 @@ sheet doesn't expose the toggle / resource UI for them.
 | Mercy Monk | 3 | Hand of Harm | toggle button absent |
 | Mercy Monk | 3 | Channel Divinity (parent class resource via Mercy plumbing) | resource not surfaced |
 | Surrealism Bard | 3 | Warped Reality | toggle button absent |
-| Belly Dancer Rogue | 3 | Dance of the Country | toggle button absent |
+| Belly Dancer Rogue | 3 | Dance of the Country | ✅ **Closed** (Belly Dancer full-support pass). The toggle DOES render — measured live at `charactersheet.html` on a L3 Belly Dancer: `getActivatableFeatures()` returns `{feature: "Dance of the Country", interactionMode: "toggle", stateTypeId: "dancing"}` and the Overview "Available to Activate" section shows `💃 Dance of the Country · 🎯 Bonus · 2/2 · [Activate]`. Clicking it takes AC 14 → 17 and the resource 2/2 → 1/2. The original report was a spec-side selector miss, not a product defect. |
 | Horror Warlock | 3 | Pact Boon pick | pick row not surfacing on sheet |
 | Mercy Monk | 3 | Implements of Mercy → Medicine proficiency | `skill:medicine=0`. ⚠️ The "no Medicine roll button" half of this row was a **harness** defect (skill rows are click-to-roll, no button exists) — see **CS-BUG-027(c)**. Only `skill:medicine=0` remains open. |
 
 Notes for the eventual fix:
-- `Dance of the Country` is already registered as a `dancing` state
-  type with `detectPatterns: ["dance of the country"]` at
-  `charactersheet-state.js:29481+`. The detection appears wired —
-  this needs a live UI walkthrough to determine why the toggle button
-  isn't rendering even though `detectActivatableFeature` should match.
+- ~~`Dance of the Country` is already registered as a `dancing` state
+  type…~~ **Resolved** — see the closed row above. The toggle renders
+  correctly; verified live in the browser at L3/L9/L13/L17.
 - `Warped Reality` has no `activatable` metadata in
   `homebrew/TravelersGuidetoThelemar.json` — it relies on the
   text-detection path. May benefit from explicit `activatable` data
@@ -1170,7 +1233,7 @@ entry in Wave 1 triage. They remain documented here for history:
 |---|---|---|
 | Chained Fury Rage L1=3 | L1 export: `Rage: 2/2` | Stale — fixed |
 | Bastion Lay on Hands L1=15 | L1 export: `Lay on Hands: 5/5` | Stale — fixed |
-| Belly Dancer / Gambler / Trickster Sneak Attack dice = 0 | SA isn't tracked via the resources array; it's a static class config (`sneakAttackDice = ceil(rogueLevel/2)`) | Spec-side — the `getResource("Sneak Attack")` probe is checking the wrong field. Move to E2E spec triage. |
+| Belly Dancer / Gambler / Trickster Sneak Attack dice = 0 | SA isn't tracked via the resources array; it's a static class config (`sneakAttackDice = ceil(rogueLevel/2)`) | ✅ Spec-side, **resolved for Belly Dancer** — the spec now asserts `{kind: "sneakAttackDice", exact: N}` at each checkpoint instead of probing `getResource("Sneak Attack")`. Gambler / Trickster still to migrate. |
 
 ---
 
