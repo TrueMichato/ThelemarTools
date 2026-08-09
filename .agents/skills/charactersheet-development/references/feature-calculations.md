@@ -352,3 +352,39 @@ The page layer (`charactersheet.js` `_pMaybeApplyFortuneIntervention` / `_pPromp
 
 This closed the same gap for Eldritch Knight and Arcane Trickster: the level-up wizard's caster detection reads the **class's** `cantripProgression`, and Rogue/Fighter declare none.
 
+
+Post-rebase addendum: when a subclass declares **no** `cantripProgression`
+array but publishes its ladder as a "Cantrips Known" column in
+`subclassTableGroups`, the slot count falls back to the shared
+`CharacterSheetClassUtils.getSubclassTableNumber(subclass, level, /cantrips?\s+known/i, 0)`
+reader. Prefer that reader over hardcoding any subclass scaling.
+
+## Embedded Outcome Tables Are Not Feature Effects (CS-BUG-119)
+
+`CharacterSheetState.stripEmbeddedOutcomeTables(html)` removes
+`<table>…</table>` blocks from a rendered feature description, and is applied
+by **both** `parseEffectsFromDescription()` and `detectActivatableFeature()`
+before any prose-level matching.
+
+A `<table>` inside a feature description is always a random-outcome or lookup
+table — Wild Magic Surge, the TGTT Gambling Table, trinket/carousing tables.
+Its rows describe what *might* happen on a particular roll; they are never the
+feature's own persistent effects. The naive `replace(/<[^>]*>/g, " ")` these two
+functions previously used flattened the table into the feature's prose, which
+caused two distinct failures:
+
+1. **Bogus effects.** An outcome row reading "gain a +2 bonus to initiative"
+   was scraped into `{type: "bonus", target: "initiative", value: 2}` and
+   stored on the active-state instance as a `customEffects` entry.
+2. **Phantom toggles.** The generic `matchedBy: "analysis"` branch is guarded
+   by "only consider it activatable if it actually provides some effects"
+   (`parsedEffects.length > 0 || /you gain|grants? you|you (?:have|get)/`).
+   Incidental "you gain …" phrasing inside a table ROW satisfied that guard, so
+   an **always-on passive** (the TGTT Gambler's Folly) was promoted into an
+   activatable toggle with a live Activate button — a write-only bucket that
+   activated and changed nothing.
+
+**Rule of thumb when adding a new prose parser:** normalise through
+`stripEmbeddedOutcomeTables()` first. If you genuinely need the table (e.g. to
+roll on it), read it from the feature's structured `entries`, not from the
+flattened description text.

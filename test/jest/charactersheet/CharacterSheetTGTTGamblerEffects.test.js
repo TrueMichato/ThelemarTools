@@ -586,3 +586,69 @@ describe("Versatile Gambler (L13)", () => {
 		}
 	});
 });
+
+/**
+ * (CS-BUG-119) A `<table>` embedded in a feature description is a random-outcome
+ * or lookup table (Wild Magic Surge, the Gambling Table, trinket tables). Its
+ * rows describe what MIGHT happen on a roll — never the feature's own
+ * persistent effects. Before the fix, the naive tag-strip flattened the whole
+ * table into the feature's prose, so an outcome row was scraped as a real
+ * always-on effect AND incidental "you gain …" phrasing inside a row promoted
+ * an always-on passive into a phantom activatable toggle.
+ */
+describe("Embedded outcome tables are not scraped as feature effects (CS-BUG-119)", () => {
+	const GAMBLING_TABLE_DESC = `<p>When you cast a spell using a tool described in your Gambler's Tools feature, you are also treating the casting as a bet.</p>`
+		+ `<table><caption>Gambling Table</caption><tbody>`
+		+ `<tr><td>1</td><td>You gain a +2 bonus to initiative until the end of the encounter</td></tr>`
+		+ `<tr><td>2</td><td>Target becomes charmed</td></tr>`
+		+ `<tr><td>3</td><td>Your speed increases by 20 feet for 1 minute</td></tr>`
+		+ `<tr><td>4</td><td>You gain a 3 bonus to your AC while you remain concentrating</td></tr>`
+		+ `</tbody></table>`;
+
+	it("strips table blocks but leaves ordinary prose untouched", () => {
+		const stripped = CharacterSheetState.stripEmbeddedOutcomeTables(GAMBLING_TABLE_DESC);
+		expect(stripped).toContain("treating the casting as a bet");
+		expect(stripped).not.toContain("Gambling Table");
+		expect(stripped).not.toContain("Target becomes charmed");
+		// A description with no table is returned unchanged.
+		const plain = "<p>You gain a +2 bonus to initiative.</p>";
+		expect(CharacterSheetState.stripEmbeddedOutcomeTables(plain)).toBe(plain);
+	});
+
+	it("does not scrape effects out of outcome-table rows", () => {
+		const effects = CharacterSheetState.parseEffectsFromDescription(GAMBLING_TABLE_DESC);
+		// The table rows carry speed/AC phrasing the parser WOULD otherwise match.
+		expect(effects.some(e => e.target === "speed")).toBe(false);
+		expect(effects.some(e => e.target === "ac")).toBe(false);
+		expect(effects.some(e => e.target === "initiative")).toBe(false);
+	});
+
+	it("still parses effects that live in the feature's own prose", () => {
+		const effects = CharacterSheetState.parseEffectsFromDescription(
+			`<p>While active, your speed increases by 10 feet.</p><table><tbody><tr><td>1</td><td>Your speed increases by 40 feet</td></tr></tbody></table>`,
+		);
+		const speed = effects.filter(e => e.target === "speed");
+		expect(speed).toHaveLength(1);
+		expect(speed[0].value).toBe(10);
+	});
+
+	it("does not promote an always-on passive with an outcome table into a toggle", () => {
+		const detected = CharacterSheetState.detectActivatableFeature({
+			name: "Gambler's Folly",
+			description: GAMBLING_TABLE_DESC,
+		});
+		expect(detected).toBeNull();
+	});
+
+	it("leaves the real Gambler features non-activatable at every milestone", () => {
+		[3, 9, 13, 17].forEach(level => {
+			state = new CharacterSheetState();
+			buildGambler(level);
+			const gamblerFeatures = state.getFeatures().filter(f => /gambl|fortune|luck/i.test(f.name || ""));
+			expect(gamblerFeatures.length).toBeGreaterThan(0);
+			gamblerFeatures.forEach(f => {
+				expect(CharacterSheetState.detectActivatableFeature(f)).toBeNull();
+			});
+		});
+	});
+});
