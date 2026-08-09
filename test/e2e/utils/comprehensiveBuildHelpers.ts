@@ -588,6 +588,24 @@ export async function probeToggleDelta (
 
 	const before = await snapshot();
 
+	// Deactivating a state is not a pure "clear the flag" operation: a state
+	// type declaring `endSave` ROLLS that save on deactivation and applies the
+	// failure consequence (the Belly Dancer's Dance of the Country is a DC 10
+	// CON save or a level of exhaustion). So the "toggle off" below can leave
+	// the character permanently worse than this probe found it, and under
+	// Thelemar rules each exhaustion level is -1 to every feature DC and every
+	// d20 — i.e. the probe taxes the very character it is measuring.
+	//
+	// `assertFeaturesMatrix` already snapshots/restores around its own
+	// branches, but `probeToggleDelta` is called from OUTSIDE that function
+	// too (the L5-loadout `signatureToggle` probe and the USE-test
+	// `featAbility` probe in `characterSpecFactory`). Restoring here — at the
+	// primitive that actually does the cycling — is what makes the guarantee
+	// hold for every caller, including ones added later.
+	const exhaustionBefore = await charSheet.page.evaluate(() => {
+		return (globalThis as any).charSheet?._state?.getExhaustion?.() ?? 0;
+	}).catch(() => 0);
+
 	await charSheet.activateFeature(match);
 	await charSheet.page.waitForTimeout(250);
 
@@ -596,6 +614,15 @@ export async function probeToggleDelta (
 	// toggle off so subsequent assertions see the resting baseline
 	await charSheet.deactivateFeature(match);
 	await charSheet.page.waitForTimeout(150);
+
+	// …and make "resting baseline" true rather than merely intended.
+	await charSheet.page.evaluate((lvl) => {
+		const st: any = (globalThis as any).charSheet?._state;
+		if (st?.getExhaustion?.() !== lvl) {
+			st?.setExhaustion?.(lvl);
+			(globalThis as any).charSheet?._renderCharacter?.();
+		}
+	}, exhaustionBefore).catch(() => { /* swallow — probe must not fail on cleanup */ });
 
 	const acDelta = after.ac - before.ac;
 	const dcDelta = after.dc - before.dc;
