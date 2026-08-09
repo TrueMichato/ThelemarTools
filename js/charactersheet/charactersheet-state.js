@@ -13687,7 +13687,10 @@ class CharacterSheetState {
 	 * Resolve the spellcasting ability abbreviation for a class entry (or class
 	 * name). Subclass-derived casters override the base class ability.
 	 * @param {object|string} clsOrName - Class entry ({name, source, subclass, spellcastingAbility}) or class name
-	 * @returns {string|null} Ability abbreviation, or null if the class is a non-caster
+	 * @returns {string|null} Ability abbreviation, or null if the class is a non-caster.
+	 *   CAUTION: for rolled-casting subclasses (the TGTT Gambler) the returned
+	 *   ability is bookkeeping-only and is NOT the source of the DC or attack
+	 *   bonus — see the inline warning below.
 	 */
 	getSpellcastingAbilityForClass (clsOrName) {
 		if (!clsOrName) return null;
@@ -13703,6 +13706,17 @@ class CharacterSheetState {
 		switch (subclassName) {
 			case "Eldritch Knight":
 			case "Arcane Trickster": return "int";
+			// WARNING — the Gambler (TGTT) has NO spellcasting ability. Its save DC
+			// and attack bonus are ROLLED (a Gambling Modifier die), not derived
+			// from an ability modifier. "cha" here is BOOKKEEPING ONLY: several
+			// generic paths (caster detection, spell attribution, multiclass slot
+			// math) require a non-null ability to treat the class as a caster at
+			// all. It MUST NOT be used to compute a DC, an attack bonus, or a
+			// displayed ability. The spellcasting breakdown card suppresses it
+			// (see getSpellcastingClassBreakdown -> isRolledPrepared, which emits
+			// ability: null / abilityLabel: "Rolled" plus saveDcFormula and
+			// attackBonusFormula). Any NEW consumer of this function must handle
+			// the rolled case explicitly rather than trusting this return value.
 			case "Gambler":
 			case "Architect of Ruin": return "cha";
 		}
@@ -51327,12 +51341,41 @@ class CharacterSheetState {
 		return result;
 	}
 
+	/**
+	 * Remove embedded tables from a rendered feature description before any
+	 * prose-level parsing.
+	 *
+	 * (CS-BUG-119) A `<table>` inside a feature description is always a
+	 * random-outcome or lookup table — Wild Magic Surge, the TGTT Gambler's
+	 * Gambling Table, trinket/carousing tables. Its rows describe things that
+	 * MIGHT happen on a particular roll; they are never the feature's own
+	 * persistent effects. The naive `replace(/<[^>]*>/g, " ")` used by the
+	 * effect parser and by `detectActivatableFeature` flattens those rows into
+	 * the feature's prose, so an outcome row such as "gain a +2 bonus to
+	 * initiative" is scraped as a real, always-on effect of the feature, and
+	 * incidental "you gain …" phrasing inside the table can promote an
+	 * always-on passive into a bogus activatable toggle.
+	 *
+	 * Stripping the table wholesale is the correct generic rule: any feature
+	 * that embeds an outcome table wants its effects parsed from its own prose
+	 * only.
+	 * @param {string} html - Rendered description HTML (or plain text)
+	 * @returns {string} The same text with any `<table>…</table>` blocks removed
+	 */
+	static stripEmbeddedOutcomeTables (html) {
+		if (!html || typeof html !== "string") return html || "";
+		if (!/<table/i.test(html)) return html;
+		return html.replace(/<table[\s\S]*?<\/table>/gi, " ");
+	}
+
 	static parseEffectsFromDescription (description) {
 		if (!description) return [];
 
 		const effects = [];
-		// Strip HTML tags and normalize whitespace for better pattern matching
-		const text = description.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
+		// Strip HTML tags and normalize whitespace for better pattern matching.
+		// (CS-BUG-119) Embedded outcome tables are removed FIRST so their rows
+		// are never mistaken for the feature's own effects.
+		const text = CharacterSheetState.stripEmbeddedOutcomeTables(description).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 
 		// Speed increases
 		const speedMatch = text.match(/(?:your )?speed increases? by (\d+) feet/i);
@@ -52219,7 +52262,11 @@ class CharacterSheetState {
 		if (!feature?.description && !feature?.activatable && !hasMarkers && !hasClassificationOverride) return null;
 
 		const rawText = feature.description || CharacterSheetState._featureTextFromEntries(feature) || "";
-		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
+		// (CS-BUG-119) Embedded outcome tables (Wild Magic Surge, the TGTT
+		// Gambling Table, …) are removed before classification: incidental
+		// "you gain …" phrasing in a table ROW must not promote an always-on
+		// passive into a bogus activatable toggle.
+		const text = CharacterSheetState.stripEmbeddedOutcomeTables(rawText).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
 		const psionic = this._detectPsionicActivation(feature, rawText, text);
 		if (psionic) return psionic;
 		// (CS-BUG-095) Crown of Spellfire (Spellfire 18) — a free "alter Innate Sorcery"

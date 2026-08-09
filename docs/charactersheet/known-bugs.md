@@ -1057,6 +1057,90 @@ restrictions" surface is ever built, this is its first customer.
 
 ---
 
+### CS-BUG-119 — an embedded outcome table is scraped as the feature's own effects, minting a phantom toggle (TGTT Gambler's Folly)
+
+**Status**: **FIXED** — generic fix in
+`CharacterSheetState.stripEmbeddedOutcomeTables()`, applied in both
+`parseEffectsFromDescription()` and `detectActivatableFeature()`.
+
+**Surfaced by**: Gambler full-support pass, chasing an unidentified path
+that minted a "Currently Active" row for Gambler's Folly (Rogue /
+Gambler, TGTT, L3).
+
+**Symptom**: Gambler's Folly is an **always-on passive** — "When you cast
+a spell using a tool described in your Gambler's Tools feature, you are
+also treating the casting as a bet". It has no on/off state in its source
+text. The sheet nevertheless offered it as an activatable **toggle**,
+with an Activate button in both the Overview "Available to Activate"
+list and the Combat tab, and moved it to "● Currently Active" when
+clicked.
+
+**Root cause**: Gambler's Folly embeds the d100 **Gambling Table** in its
+description. Both `parseEffectsFromDescription()` and
+`detectActivatableFeature()` normalised text with a naive
+`replace(/<[^>]*>/g, " ")`, which flattens the whole `<table>` into the
+feature's prose. Two independent failures followed:
+
+1. `detectActivatableFeature()` fell through to its generic
+   `matchedBy: "analysis"` branch. That branch is guarded by "only
+   consider it activatable if it actually provides some effects" —
+   `parsedEffects.length > 0 || /you gain|grants? you|you (?:have|get)/`.
+   `parsedEffects` was non-empty *only* because of failure 2, and the
+   regex matched incidental phrasing inside **table rows**. The guard was
+   satisfied entirely by outcome-table content.
+2. `parseEffectsFromDescription()` scraped four bogus effects out of
+   table rows, including a **`{type: "bonus", target: "initiative",
+   value: 2}`** lifted from a d100 outcome.
+
+**Measurement** (L5 Gambler, real exported character loaded into the live
+sheet, `activeStates` cleared first):
+
+```
+detectActivatableFeature("Gambler's Folly")
+  → {stateTypeId: "custom", isToggle: true, matchedBy: "analysis"}
+  effects = [ {type:"bonus", target:"initiative", value:2},
+              {type:"note", value:"Target becomes charmed"},
+              {type:"note", value:"Target becomes blinded"},
+              {type:"note", value:"Can knock target prone"} ]
+
+getActivatableFeatures() → ["Steady Aim", "Gambler's Folly"]
+
+addActiveState("custom", {…, customEffects: <the four above>})
+  → instance.active = true, instance.customEffects = <all four stored>
+
+before/after diff over {initiative, ac, speed, skills(3), saves,
+attacks, aggregateModifiers("all")}  →  []   (initiative 2 → 2)
+```
+
+So the phantom `+2 initiative` **is stored on the active-state instance**
+and reaches the state row's tooltip (`charactersheet.js:8563`), but is
+**not consumed** by `getInitiative()`. Impact as shipped was therefore a
+*write-only bucket* — a toggle that appears activatable, activates, and
+changes nothing — plus garbage in the tooltip. It was one consumer away
+from becoming a real phantom bonus.
+
+**Fix**: a `<table>` inside a feature description is always a
+random-outcome or lookup table (Wild Magic Surge, the Gambling Table,
+trinket/carousing tables). Its rows describe what *might* happen on a
+particular roll; they are never the feature's own persistent effects.
+`stripEmbeddedOutcomeTables()` removes `<table>…</table>` blocks before
+any prose-level parsing, in both the effect parser and the activatable
+classifier. This is deliberately generic — every feature that embeds an
+outcome table benefits.
+
+**Post-fix measurement**: `detectActivatableFeature` returns `null` for
+all three L3 Gambler features; `getActivatableFeatures()` returns
+`["Steady Aim"]` (the genuine Rogue toggle is unaffected). Full
+`CharacterSheet` Jest suite re-run to confirm no other feature depended
+on table text for detection.
+
+**Note on the E2E signature-toggle probe**: the Gambler spec's toggle
+probe previously matched Gambler's Folly, i.e. it was asserting the
+phantom. It now targets Steady Aim, the subclass's real Rogue-side
+toggle.
+
+---
+
 ## E2E Phase 6 — featuresMatrix triage notes
 
 The Phase 6 `featuresMatrix` infra (see

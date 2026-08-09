@@ -24,12 +24,16 @@ import {buildSpecialtyChecks, buildWeaponMasteryChecks, withSkipReason} from "..
 describeCharacter({
 	preset: PRESET_FULL_GAMBLER_CLAIRNIAN,
 	displayName: "Gambler Rogue Clairnian",
-	signatureToggle: /gambler|folly|fortune|luck/i,
-	// TGTT Gambler's signature abilities alter dice OUTCOMES (roll twice on the
-	// Gambler's Table, treat a natural 1 as a natural 20, cast-as-a-bet d100)
-	// rather than any derived stat, so probeToggleDelta has nothing to observe.
+	// (CS-BUG-119) This previously matched "Gambler's Folly" — but Folly is an
+	// always-on passive with no on/off state in its source text, and the toggle
+	// row only existed because the generic classifier scraped the embedded d100
+	// Gambling Table. With that phantom fixed, the subclass's real toggle is the
+	// Rogue-side Steady Aim (L3), which the Gambler keeps.
+	signatureToggle: /steady aim/i,
+	// Steady Aim's benefit is advantage on the next attack this turn (plus speed
+	// 0), which probeToggleDelta cannot observe as a derived-stat delta.
 	// The toggle is still required to surface and activate.
-	signatureToggleNoDerivedEffect: "Gambler abilities modify dice outcomes, not AC/DC/speed/attacks/damage",
+	signatureToggleNoDerivedEffect: "Steady Aim grants advantage on the next attack, not a derived AC/DC/speed/attack/damage value",
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [
