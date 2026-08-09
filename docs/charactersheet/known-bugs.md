@@ -7654,3 +7654,60 @@ block for other write-only keys before designing the fix.
 3. Add an `actionEconomy` EffectCheck kind to
    `test/e2e/utils/comprehensiveBuildHelpers.ts` so E2E can assert them,
    and re-point the Gifted Acrobat row at it.
+
+---
+
+## CS-BUG-120 — `endSave` and `effectsBuilder` are readable only from the state *type* registry, so a prose-detected state can never carry them
+
+**Status**: Open (documented seam, not fixed — nothing needs it today).
+**Surfaced**: batch-3 integration review, after CS-BUG-116 fixed the same
+asymmetry for a sibling property.
+**Component**: Character Sheet · `charactersheet-state.js`.
+
+### Symptom
+
+Three sibling activation properties describe what a running state does.
+Only one of them can be carried by a state *instance*:
+
+| Property | Type registry | Instance fallback |
+|---|---|---|
+| `addsConditions` | yes | **yes** (added by CS-BUG-116's fix) |
+| `endSave` | yes | **no** |
+| `effectsBuilder` | yes | **no** |
+
+`getStateEndSave()` is `ACTIVE_STATE_TYPES[stateTypeId]?.endSave || null`, and
+the `effectsBuilder` resolution in `activateState()` reads
+`stateType?.effectsBuilder` — neither consults the state instance.
+
+A state produced by prose detection rather than a hand-authored registry entry
+resolves to `stateTypeId: "custom"`. `ACTIVE_STATE_TYPES.custom` declares
+neither property, so such a state silently cannot have an end-of-state saving
+throw or level-scaled effects, no matter what its feature text says.
+
+### Why it matters
+
+This is the exact shape of CS-BUG-116, which was a real defect: `addsConditions`
+was type-only, so homebrew toggles that impose a condition on their owner were
+inert. That was fixed by adding an instance fallback. The two neighbouring
+properties were left type-only, so the same class of defect is still reachable —
+it simply has no caller yet.
+
+The trigger is a homebrew toggle whose prose declares an end-of-state save
+(the Dance of the Country's "DC 10 Constitution save or gain a level of
+exhaustion" shape) *without* a curated `ACTIVE_STATE_TYPES` entry. Today every
+such state happens to be curated, which is why nothing is broken.
+
+### Suggested fix
+
+Mirror the CS-BUG-116 resolution: have `getStateEndSave()` and the
+`effectsBuilder` lookup prefer the type declaration and fall back to the
+instance, and give `parseSelfImposedConditions`'s sibling parsers somewhere to
+write an instance-level `endSave`. Do all three together — the lesson of
+CS-BUG-116 is that fixing one member of a sibling set leaves the others as
+quiet traps.
+
+### Bound
+
+Verified by reading both call sites; no behavioural repro exists because no
+uncurated state currently declares either property. Filed to stop a third
+session rediscovering the asymmetry from scratch.
