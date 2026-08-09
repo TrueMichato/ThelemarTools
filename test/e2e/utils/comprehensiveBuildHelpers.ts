@@ -823,7 +823,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "cantripCount"; min: number}
 
 	// === Toggle: snapshot before, activate, snapshot diff, deactivate ===
-	| {kind: "togglePlusAc"; whenActive: number | "abilityMod"; ability?: AblKey}
+	| {kind: "togglePlusAc"; whenActive: number | "abilityMod"; ability?: AblKey; floor?: number}
 	| {kind: "togglePlusSpeed"; type?: SpeedType; delta: number}
 	// Verify a toggle GRANTS a movement type the character doesn't otherwise
 	// have (fly/swim/climb/burrow). `togglePlusSpeed` only asserts for walk,
@@ -2236,6 +2236,12 @@ async function _runToggleEffect (
 			} else {
 				want = e.whenActive;
 			}
+			// Many "+<ability> to AC" features carry a floor ("a bonus equal to
+			// your Charisma modifier, minimum of +1"). Without `floor` the probe
+			// asserts the RAW modifier, so it fails on exactly the builds the
+			// floor exists for — a dump-stat character with a negative mod — and
+			// reads as a product bug when the sheet is the thing that is correct.
+			if (e.floor != null) want = Math.max(want, e.floor);
 			if (delta !== want) throw new Error(`AC delta on toggle = ${delta}, expected ${want}`);
 			return;
 		}
@@ -2360,6 +2366,36 @@ export async function assertFeaturesMatrix (
 
 	const errors: string[] = [];
 
+	// A probe must OBSERVE the character, not change it — and deactivating a
+	// state can mutate it rather than just clear a flag. A state type with an
+	// `endSave` rolls that save on deactivation and applies its failure
+	// consequence (the Belly Dancer's Dance is a DC 10 CON save or a level of
+	// exhaustion). Every branch below that cycles a state pays that tax: the
+	// toggle branch, the `stateCall` effects on `passive` rows, and the gated
+	// second reading further down. Across a MEGA L1→20 walk those failures
+	// accumulate, and under Thelemar rules each level is -1 to every feature DC
+	// and every d20 — so by L17 the build under test is a different character
+	// than the one the later assertions describe, and the probe's own residue
+	// reads as a product bug. It cost two wrong diagnoses (a "PB not applied"
+	// bug and an "off-by-one DC") before the cause was the harness.
+	//
+	// Restored in three places, deliberately: per entry (so one row cannot tax
+	// the next at the same level), after the gated block (which runs BEFORE the
+	// loop, so an end-of-function restore would close the door after it), and
+	// once at the end as the backstop.
+	const exhaustionAtEntry = await charSheet.page.evaluate(() => {
+		return (globalThis as any).charSheet?._state?.getExhaustion?.() ?? 0;
+	}).catch(() => 0);
+	const restoreExhaustion = async () => {
+		await charSheet.page.evaluate((lvl) => {
+			const st: any = (globalThis as any).charSheet?._state;
+			if (st?.getExhaustion?.() !== lvl) {
+				st?.setExhaustion?.(lvl);
+				(globalThis as any).charSheet?._renderCharacter?.();
+			}
+		}, exhaustionAtEntry).catch(() => { /* swallow */ });
+	};
+
 	// A toggle declaring `requiresStates` is deliberately HIDDEN by
 	// `getActivatableFeatures()` until its prerequisite is running (see
 	// CS-BUG-103 — the row must not appear, or clicking Use silently burns a
@@ -2378,6 +2414,13 @@ export async function assertFeaturesMatrix (
 		gatedToggleable = await charSheet.getToggleableFeatureNames().catch(() => toggleable);
 		gatedFeatures = await charSheet.getActivatableFeatureNames().catch(() => allFeatures);
 		await _deactivateStatesAndRerender(charSheet, activated);
+		// This block cycles every gated prerequisite once, BEFORE the entry loop
+		// runs. If one of them declares an `endSave` (the Belly Dancer's Dance
+		// does), a failed save here taxes the character for the whole rest of the
+		// level — every subsequent probe then measures an exhausted build, which
+		// under Thelemar rules is -1 to every feature DC. Restore before the loop
+		// rather than only at the end, or the backstop closes the door after it.
+		await restoreExhaustion();
 	}
 
 	for (const fc of matrix) {
@@ -2428,6 +2471,10 @@ export async function assertFeaturesMatrix (
 					const activatedForToggle = togglePrereqs.length
 						? await _activateStatesAndRerender(charSheet, togglePrereqs)
 						: [];
+					// See the matching note on the toggle-EFFECTS branch below:
+					// deactivating an `endSave` state charges the character a
+					// saving throw, and its failures accumulate across a MEGA
+					// walk. Restore whatever we were charged for measuring.
 					const unwindTogglePrereqs = () => _deactivateStatesAndRerender(charSheet, activatedForToggle);
 					try {
 					if (want !== "none") {
@@ -2794,7 +2841,9 @@ export async function assertFeaturesMatrix (
 						}
 						}
 						// Always unwind prerequisites, in reverse, so a later matrix entry
-						// isn't measured against a lingering Rage.
+						// isn't measured against a lingering Rage. Exhaustion incurred by
+						// an `endSave` on the way out is unwound by the per-entry
+						// `finally` below, which covers every branch rather than this one.
 						for (const stateId of [...prereqs].reverse()) {
 							await charSheet.page.evaluate((id) => {
 								(globalThis as any).charSheet?._state?.deactivateState?.(id);
@@ -2805,8 +2854,20 @@ export async function assertFeaturesMatrix (
 			}
 		} catch (e: any) {
 			errors.push(`${label}: ${e.message}`);
+		} finally {
+			// EVERY entry, not just toggles. A `passive` row's `stateCall`
+			// effects drive `activateState`/`deactivateState` directly (Fluid
+			// Step's row does exactly that), and deactivating a state with an
+			// `endSave` rolls that save and applies its failure consequence.
+			// Restoring only on the toggle branch left that path leaking a
+			// level of exhaustion into every later row at the same level —
+			// which, under Thelemar rules, is -1 to every feature DC and made
+			// a correct Percussive Strike DC of 13 read as 12.
+			await restoreExhaustion();
 		}
 	}
+
+	await restoreExhaustion();
 
 	if (errors.length) {
 		throw new Error(`featuresMatrix at L${currentLevel} (${errors.length} failures):\n  - ${errors.join("\n  - ")}`);

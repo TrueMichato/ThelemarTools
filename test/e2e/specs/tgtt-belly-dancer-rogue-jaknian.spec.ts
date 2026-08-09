@@ -170,7 +170,11 @@ describeCharacter({
 			kind: "toggle",
 			toggleDelta: "ac",
 			effects: [
-				{kind: "togglePlusAc", whenActive: "abilityMod", ability: "cha"},
+				// "a bonus to AC equal to your Charisma modifier (minimum of
+				// +1)". Jaknian's CHA mod is negative at L3, so the floor is
+				// exactly what this build exercises — without it the probe
+				// expects -1 and the correct +1 reads as a product bug.
+				{kind: "togglePlusAc", whenActive: "abilityMod", ability: "cha", floor: 1},
 				{
 					kind: "toggleGrantsAdvantage",
 					rollType: "skill:acrobatics",
@@ -319,7 +323,13 @@ describeCharacter({
 				// 14 + CHA mod — derived from a live statistic, floored
 				// well above any constant a stub could return.
 				{kind: "featureCalculationDerivedFrom", property: "percussiveStrikeDc", equals: "abilityMod", ability: "cha", offset: 14},
-				{kind: "stateCall", method: "getPercussiveStrikeDc", min: 15},
+				// Jaknian dumps Charisma (mod -1 at 17), so the DC here is
+				// 14 - 1 = 13. The previous `min: 15` silently presumed a
+				// positive CHA and failed on the correct value — the
+				// derivation check above is what actually rules out a
+				// constant; this one only proves the METHOD returns the same
+				// live number as the calculation key.
+				{kind: "stateCall", method: "getPercussiveStrikeDc", min: 13},
 				// Gated behind the Dance, and grants attack advantage.
 				{kind: "stateCall", method: "activateState", args: ["dancing"], ignoreResult: true},
 				{kind: "stateCall", method: "hasAdvantageFromStates", args: ["attack"], exact: false},
