@@ -187,7 +187,15 @@ export interface CharacterSpec {
 }
 
 const MEGA_TIMEOUT_MS = Math.max(
-	360_000,
+	// 360s was too tight once the features matrix (RUN_MATRIX) joined the MEGA
+	// walk. Measured on this suite: Chained Fury Barbarian completes the matrix
+	// in 4.5 min and The Horror Warlock in 3.8 min when run ALONE, but both
+	// blew the 6-minute budget when run as part of a multi-spec batch — under
+	// contention a single level-up step stretches from ~4s to ~9s, which is
+	// enough to double the walk. Those were false reds: the identical test
+	// passes standalone. 540s keeps ~2x headroom over the slowest measured
+	// standalone run without letting a genuinely hung test sit for long.
+	540_000,
 	Number(process.env.PW_TIMEOUT_MS ?? 0) * 3,
 ); // Scale with the supported per-test override on contended shared machines.
 const MIDTIER_TIMEOUT_MS = 180_000;
