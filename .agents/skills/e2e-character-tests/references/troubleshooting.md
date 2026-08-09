@@ -164,6 +164,41 @@ When a test goes red:
   precisely because a probe fails on exactly the build whose floor
   behaviour it was meant to cover.
 
+### A batch-only timeout that passes standalone
+
+- **Symptom**: a MEGA/matrix test dies with a bare `Test timeout of
+  Nms exceeded`, followed by a cascade of `Target page, context or
+  browser has been closed` errors attributed to individual matrix rows.
+  The row list looks like a dozen simultaneous feature regressions.
+- **Root cause**: the walk simply ran out of clock. Under batch
+  contention a single level-up step stretches from ~4s to ~9s, which is
+  enough to double a 20-rung walk.
+- **Tell it apart from a real bug**: re-run the ONE spec alone. Measured
+  examples: the Chained Fury matrix takes 4.5 min alone and The Horror
+  Warlock 3.8 min, and both blew a 6-minute budget inside a multi-spec
+  batch while passing unchanged on their own. A genuine failure names a
+  mechanic and reproduces standalone; this one evaporates.
+- **Never triage the cascade rows.** Everything after "page closed" is
+  noise from the teardown, not evidence. Read the FIRST error only.
+
+### The auto-filler's own picking bias
+
+- **Symptom**: a level-gated choice cannot be completed — e.g. Wizard
+  Spell Mastery (L18) or Signature Spells (L20) reporting a slot with no
+  eligible spell.
+- **Root cause**: spell-picker sections are one per spell level in
+  ascending DOM order, so "click the first addable `+`" always lands in
+  the level-1 section, which never exhausts. Measured: a Bladesinger
+  walked to L17 that way had a spellbook of `{L0:3, L1:38}` — not one
+  level-2 spell — so the level-2 mastery slot genuinely had no candidate.
+- **Tell it apart from a real bug**: dump the character's spells grouped
+  by level. If the distribution is degenerate (everything at one level),
+  the harness built an impossible character and the product is correctly
+  refusing it. A player picking normally would never hit this.
+- **The wider rule**: when a late-game feature has no valid input, check
+  what the harness fed the build on the way up before blaming the
+  feature.
+
 ## Real product bug indicators
 
 Trust an assertion that:
