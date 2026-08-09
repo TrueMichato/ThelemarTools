@@ -107,6 +107,34 @@ When a test goes red:
   or mark `test.serial` for the heaviest sibling specs (Bard,
   Sorcerer, Wizard L5-loadout).
 
+### Toggle re-render mid-click
+
+- **Symptom**: `activateFeature` times out with
+  `locator.click: Timeout 5000ms exceeded` and a call log that reaches
+  `performing click action` and stops — while the failure snapshot shows
+  the feature is **already in "Currently Active"**.
+- **Root cause**: flipping a toggle re-renders the whole Active States
+  panel, so the Activate button detaches mid-click. Playwright treats
+  that as an unconfirmed click, retries, and waits forever for a
+  `.charsheet__activate-btn` that legitimately no longer exists.
+- **Fix**: already handled — `CharacterSheetPage.activateFeature`
+  catches the click error and swallows it when `isFeatureActive()` is
+  true. If you add a new toggle path, use the same click-then-verify
+  pattern rather than a bare `click()`.
+
+### Feat sub-choices block the level-up wizard
+
+- **Symptom**: `expectModalClosed` fails at TGTT L4+; Finish refuses to
+  close the wizard.
+- **Root cause**: at TGTT L4 the auto-picked "Ability Score Improvement"
+  *feat* renders its own `Additional Choices for …: Choose ability to
+  increase by 2:` button grid, which nothing used to drain.
+- **Fix**: already handled — `LevelUpPage.autoFillRequiredChoices` has a
+  generic feat-sub-choice drainer that scans
+  `.charsheet__levelup-feat-choices, .charsheet__opt-feat-progression-choices`,
+  reads the want-count from the `Choose N …` prompt, and clicks one
+  unselected option per pass (the grid re-renders on every toggle).
+
 ## Real product bug indicators
 
 Trust an assertion that:

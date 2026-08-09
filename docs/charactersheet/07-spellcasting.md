@@ -72,6 +72,23 @@ const FULL_CASTER_SLOTS = {
 // Use level / 3, rounded up
 ```
 
+### Subclass-published slot tables
+
+A subclass may publish its **own** slot grid instead of relying on the generic
+caster math above. `CharacterSheetState.getSubclassSpellSlotRow(cls)` reads
+`cls.subclass.subclassTableGroups[].rowsSpellProgression[classLevel - 1]`
+(the same array shape 5etools uses to render a subclass table) and, for a
+**single-class** caster, `calculateSpellSlots()` uses that row verbatim.
+
+Use this whenever a homebrew subclass's published table deviates from the
+formula — the TGTT Gambler's does, at L10-12 (4 first-level + **2**
+second-level slots, where `ceil(level/3)` gives 4/3). Multiclass casters still
+go through the shared PHB multiclass table, as the rules require.
+
+`CharacterSheetState.SUBCLASS_SPELL_SLOT_TABLES` holds hard-coded fallbacks
+(keyed `"<subclassShortName>|<source>"` lowercased) for saves whose stored
+subclass predates `subclassTableGroups` persistence.
+
 ### Multiclass Slot Calculation
 
 ```javascript
@@ -423,6 +440,15 @@ Knight, Arcane Trickster, Gambler, Architect of Ruin):
   matchKeys,          // lowercased class/subclass keys (incl. "gambler") for attribution
 }
 ```
+
+**Rolled casters** (`mechanic === "rolled"` / `isRolledPrepared`, i.e. the TGTT
+Gambler) have **no** spellcasting ability, so the card reports `ability: null`,
+`abilityLabel: "Rolled"`, `saveDc: null` and `attackBonus: null` rather than
+inventing a Charisma-derived number. It instead carries
+`saveDcFormula` (`"8 + PB + <dice>"`), `attackBonusFormula` (`"PB + <dice>"`)
+and `modifierDice` (`"1d6"`, `"2d4"` from L13). Every consumer already branched
+on `isRolledPrepared` before reading `saveDc`/`attackBonus`, so the nulls are
+safe; renderers fall back to `abilityLabel` for the ability chip.
 
 Attribution: a spell/cantrip belongs to a card when its `sourceClass` **or**
 `sourceSubclass` is in that card's `matchKeys`. Player-chosen vs feature-granted

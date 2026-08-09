@@ -342,7 +342,15 @@ export class CharacterSheetPage {
 		const activatableRow = this.page.locator(".charsheet__activatable-row").filter({hasText: this._getFeatureActivationPattern(featureName)}).first();
 		const btn = activatableRow.locator(".charsheet__activate-btn");
 		if (await btn.isVisible().catch(() => false)) {
-			await btn.click({timeout: 5000});
+			try {
+				await btn.click({timeout: 5000});
+			} catch (e) {
+				// Flipping a toggle re-renders the whole Active States panel, which can
+				// detach the Activate button mid-click; Playwright then retries and waits
+				// forever for a control that has legitimately moved to "Currently Active".
+				// If the feature ended up active the click landed, so swallow the error.
+				if (!await this.isFeatureActive(featureName)) throw e;
+			}
 		} else {
 			await this.switchToTab(this.tabFeatures);
 			const exactName = new RegExp(`^\\s*${featureName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i");

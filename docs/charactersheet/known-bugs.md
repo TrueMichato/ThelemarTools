@@ -886,8 +886,21 @@ still rounds down as PHB requires.
 → 3 L1 slots) and "CS-BUG-010: multiclass third-caster still uses
 floor(level/3)" (Wizard 1 + EK 5 → 3 L1 slots).
 
-**Test follow-up**: drop the relaxed L3/L5 Gambler milestones in
-`tgtt-gambler-rogue-clairnian.spec.ts`; assert the full progression.
+**Test follow-up**: **Done.** `tgtt-gambler-rogue-clairnian.spec.ts`
+now pins the Gambler's published slot grid at L3 `{1: 2}`, L5
+`{1: 3}`, L11 `{1: 4, 2: 2}`, L17 `{1: 4, 2: 3, 3: 3}` and L20
+`{1: 4, 2: 3, 3: 3, 4: 1}`, and every `skipReason: "CS-BUG-010"`
+entry has been removed from the matrix.
+
+**Follow-on fix**: `ceil(classLevel / 3)` is the *generic* third-caster
+table, but the TGTT Gambler publishes its own grid in
+`subclassTableGroups[].rowsSpellProgression`, and that grid deviates at
+L10-12 (4 first-level + **2** second-level slots, where the generic
+math gives 4/3). `CharacterSheetState.getSubclassSpellSlotRow()` now
+reads a subclass's published progression and overrides the generic
+result for single-class casters, so the sheet matches the book exactly
+at every level. Any homebrew subclass that publishes a
+`rowsSpellProgression` gets the same treatment for free.
 
 ---
 
