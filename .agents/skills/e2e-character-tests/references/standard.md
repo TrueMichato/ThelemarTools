@@ -174,7 +174,7 @@ stay clean). Use this decision tree:
 | "You have disadvantage on X" | flag | `disadvantage` |
 | Damage resistance / immunity / vulnerability | flag | `resistance`, `immunity`, `vulnerability` |
 | Adds a spell to a list / known | spell | `spellInList` (searches known spells **and** cantrips, so subclass-granted cantrips count), `cantripCount` |
-| Toggle that adds/removes AC while active | toggle delta | `togglePlusAc` |
+| Toggle that adds/removes AC while active | toggle delta | `togglePlusAc` (use `floor` when the feature caps the bonus low: "+CHA to AC, minimum +1") |
 | Toggle that adds/removes speed while active | toggle delta | `togglePlusSpeed` (walking speed only), `toggleGrantsSpeed` (any speed type; `equalsWalk` for "equal to your Speed" grants) |
 | Toggle that grants resistance / advantage / immunity | toggle flag | `toggleGrantsResistance`, `toggleGrantsAdvantage`, `toggleGrantsImmunity` |
 | Toggle whose activation fires a save-for-damage / reaction burst | toggle trigger | `activeStateTrigger` (`label`, `actionType`, `damageType`, `damageMin`, `damageFormula`, `dcMin`) |
@@ -200,6 +200,14 @@ stay clean). Use this decision tree:
 // Toggle delta — Bladesong (XPHB Wizard)
 {level: 3, name: /Bladesong/i, kind: "toggle", effects: [
     {kind: "togglePlusAc", expectedDelta: "+intMod"},
+]}
+
+// Toggle delta with a floor — Dance of the Country (Belly Dancer Rogue)
+// "+CHA to AC, minimum +1". Without `floor` this probe asserts the raw
+// modifier, so it fails on a dump-CHA build — exactly the build the
+// minimum exists for — and the correct +1 reads as a product bug.
+{level: 3, name: /Dance of the Country/i, kind: "toggle", effects: [
+    {kind: "togglePlusAc", whenActive: "abilityMod", ability: "cha", floor: 1},
 ]}
 
 // Passive flag — Fast Movement (Barbarian)

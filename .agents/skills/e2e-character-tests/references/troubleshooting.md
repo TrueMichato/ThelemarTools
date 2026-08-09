@@ -20,15 +20,24 @@ When a test goes red:
    - Specific assertion (`expect(slots.current).toBe(...)`) on a
      concrete game stat → likely a product bug. Triage before assuming
      infra.
+   - A derived number wrong by a *small, level-dependent* amount, only
+     in MEGA → suspect probe residue, not the sheet. See "Probe
+     residue" below. Two consecutive misdiagnoses came from this shape.
 
-2. **Re-run the single failing test in isolation.**
+2. **Ask what the probe did before it measured.**
+   Does the feature under test, or an earlier row at the same level,
+   cycle a state? Does that state declare `endSave`? A probe that
+   changes the character invalidates every later assertion at that
+   level and above.
+
+3. **Re-run the single failing test in isolation.**
    ```bash
    npx playwright test test/e2e/specs/tgtt-X.spec.ts --reporter=list -g "L5 loadout"
    ```
    If it passes alone, the suite has parallelism contention (Bucket A
    pattern). If it fails alone, it's deterministic — easier to triage.
 
-3. **Stash all `e2e/` changes and reproduce on the previous baseline.**
+4. **Stash all `e2e/` changes and reproduce on the previous baseline.**
    If it still reproduces, it's a product regression (or pre-existing).
 
 ## Catalogued infra patterns
@@ -106,6 +115,54 @@ When a test goes red:
 - **Fix**: drop the slow test's `test.timeout` to fail-fast (240s),
   or mark `test.serial` for the heaviest sibling specs (Bard,
   Sorcerer, Wizard L5-loadout).
+
+### Probe residue (the probe changed the character it measures)
+
+- **Symptom**: a derived number is *slightly* wrong, only at high
+  levels, only in MEGA, and the same probe passes at L1/L3/L5. The
+  amount it's wrong by grows with level. Classic false readings:
+  "proficiency bonus isn't applied to this DC" and "the DC is off by
+  one".
+- **Root cause**: a probe activated and deactivated a state, and the
+  deactivation *mutated the character* rather than clearing a flag. Any
+  state type declaring `endSave` rolls a saving throw on the way out and
+  applies its failure consequence — the Belly Dancer's Dance of the
+  Country is a DC 10 CON save or a level of exhaustion. `assertFeatures-
+  Matrix` cycles states in three places (the toggle branch, `stateCall`
+  effects on `passive` rows, and the gated second reading), so across a
+  20-rung walk the failures accumulate. Under Thelemar exhaustion rules
+  each level is **-1 to every feature DC and every d20**, so by L17 the
+  later assertions describe a character that no longer exists.
+- **Fix**: already handled — `assertFeaturesMatrix` snapshots exhaustion
+  on entry and restores it per entry, after the gated block, and at the
+  end. If you add a probe path that cycles states **outside** that
+  function, restore there too.
+- **Tell it apart from a real bug**: read the number's *delta*, not the
+  number. A missing PB is a constant offset at a given level; probe
+  residue grows monotonically with how many rungs the walk has taken.
+  Check `getExhaustion()` in a diagnostic dump before filing anything.
+- **The wider rule**: a probe must OBSERVE the character, not change it.
+  Before concluding "the sheet computed this wrong", ask what the probe
+  itself did to the sheet on the way to the measurement.
+
+### An assertion floor that presumes a good stat
+
+- **Symptom**: a `min`/`exact` effect check fails on a build that dumps
+  the relevant ability, and the "expected" value is one no such build
+  could reach.
+- **Root cause**: the floor was written against an idealised build. Two
+  live examples, both on the Belly Dancer, whose Jaknian dumps Charisma:
+  `togglePlusAc` asserted the raw CHA mod (-1) for a feature that grants
+  "+CHA to AC, **minimum +1**"; and the Percussive Strike DC carried
+  `min: 15` when 8 + PB + CHA is 13 for that character.
+- **Fix**: use `togglePlusAc`'s `floor` for min-capped bonuses, and set
+  numeric floors from the build's own statistics. Prefer a
+  `featureCalculationDerivedFrom` check — it pins the *derivation*, which
+  is what rules out a hardcoded constant, and doesn't rot when a build's
+  ability array changes.
+- **This is spec-side, not a product bug.** The failure mode is nasty
+  precisely because a probe fails on exactly the build whose floor
+  behaviour it was meant to cover.
 
 ## Real product bug indicators
 
