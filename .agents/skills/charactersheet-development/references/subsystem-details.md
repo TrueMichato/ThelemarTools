@@ -162,6 +162,19 @@ cancelling costs nothing. The sheet does not model the opponent, so it rolls
 honestly and asks rather than inventing the enemy's result. First customer:
 Tantalizing Shivers (CHA (Performance) vs WIS (Insight)).
 
+### Rolled Save DCs (`activationInfo.rolledSaveDc`)
+
+`{skill, skillLabel, ability, saveAbility, range}` — for features whose save DC
+is a **check result** rather than `8 + prof + mod` (*"a Wisdom saving throw, DC
+equal to your Performance check result"*). Derived from prose by
+`CharacterSheetState._buildRolledSaveDcInfo(text)` (no name switch) and attached
+in `getActivatableFeatures()`, not `detectActivatableFeature` (many return
+points). `_pResolveRolledSaveDc` rolls **before** any resource deduction, so
+cancelling costs nothing, then reports the DC. Requires BOTH a check-result DC
+and a named saving throw, or it returns `null` — otherwise every static-DC
+feature would prompt for a roll. First customer: Jester's Privilege (TGTT Bard /
+College of Jesters, L14).
+
 ### `grantsActionBenefit`
 
 `{type: "grantsActionBenefit", action: "disengage", source}` on an active state

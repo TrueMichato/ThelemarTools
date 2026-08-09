@@ -199,8 +199,62 @@ hook as a confirm-then-pick prompt.
 | College | Status | Key Features |
 |---------|--------|--------------|
 | **Conduction** | ✅ Complete | `batteryDice`, `amplifiedEffectBonus`, `conductorAuraRange` |
-| **Jesters** | ✅ Complete | 13 Jester's Acts (3/4/5 known at L3/L6/L14), act DC, `getJesterAct()` — see [College of Jesters](#college-of-jesters) |
+| **Jesters** | ✅ Complete | 13 Jester's Acts (3/4/5 known at L3/L6/L14), act DC, `getJesterAct()` — see below |
 | **Surrealism** | ✅ Complete | `surrealistInspirationDie`, `dreamLogicUses` |
+
+#### College of Jesters — feature-by-feature
+
+| Lvl | Feature | Mechanical effect on the sheet |
+|---|---|---|
+| 3 | **Bonus Proficiencies** | Performance auto-granted; one further skill prompted at creation / Quick Build / level-up (the "proficiency in between …" phrasing needed a new `FeatureChoiceParser` pattern) |
+| 3 | **Jester's Acts** | The wrapper. Classified `passive` via `FEATURE_CLASSIFICATION_OVERRIDES`; the acts themselves carry the mechanics. Act save DC = `8 + your Performance skill bonus` (**not** the usual 8 + PB + CHA) via `getJesterActDc()` |
+| 3 | **Jester's Acts Options** | The pick pool (13 acts, `featureType: "JA"`). Count comes from the subclass's own **"Jester's Acts Known"** table column via `getSubclassTableNumber` — 3 at L3, 4 at L6, 5 at L14 |
+| 6 | **Gifted Acrobat** | Climbing speed equal to walking speed (`speed:climb` `equalToWalk`). The bonus-action grapple escape and 10-ft stand-from-prone have **no** generic surface — see **CS-BUG-116** |
+| 6 | **Unparalleled Skill** | Expertise (doubled proficiency) in one chosen skill; the choice is prompted and applied |
+| 14 | **Jester's Privilege** | 1 use / **long** rest. DC is a **rolled** value — `activationInfo.rolledSaveDc` rolls Performance at activation and reports "DC = result" rather than substituting a static DC |
+
+**The 13 Jester's Acts.** Each is a discrete row with its own Use button in the
+generic "Available to Activate" list. Detection is **data-driven**
+(`_buildJesterActActivationInfo` reads each act's own prose), so a homebrewer
+adding a 14th act inherits the behaviour for free.
+
+| Act | Action | BI cost | Mechanics |
+|---|---|---|---|
+| Jester's Pantomime | action | 0 | WIS save, 30 ft, **charmed** |
+| Jester's Prankster | action | 0 | WIS save, 30 ft, **dazed** |
+| Trickster's Disengagement | bonus | 0 | Disengage |
+| Jester's Tumbler | bonus | 0 | toggle, "rest of the turn" |
+| Dazzling Disguise | special | 0 | toggle 1 hour + conditional Deception advantage |
+| Jester's Juggle | bonus | 0 | WIS save, 30 ft |
+| Fool's Folly | special | **1** | INT save, 60 ft, incapacitated |
+| Laughing Lunge | attack | **1** | attack-timing rider |
+| Jester's Jaunt | special | **1** | grants *mirror image* |
+| Ridiculous Ruse | special | **1** | grants *silent image* |
+| Jester's Agility | reaction | **1** | toggle, AC bonus = proficiency bonus |
+| Witty Wordplay | special | 0 | 60 ft |
+| Jester's Jest | bonus | 0 | WIS save |
+
+> **`consumes` beats prose for the Bardic Inspiration cost.** Five acts declare
+> `consumes` in the homebrew and that is authoritative. The prose fallback must
+> also match *"requires the expenditure of one use of Bardic Inspiration"* — an
+> earlier regex missed that phrasing and left **Laughing Lunge** and **Jester's
+> Agility** free to use.
+
+> **An options group whose children are all `refOptionalfeature` is pool
+> DOCUMENTATION, not a grant.** Three independent scanners
+> (`FeatureChoiceParser._extractStructuredChoices`,
+> `CharacterSheetClassUtils.findFeatureOptions`,
+> `CharacterSheetBuilder._findFeatureOptions`) each re-emitted the pool as a
+> grant, inflating the Jester's Acts count to 4/4/6/6 and shadowing the real
+> picker. All 22 such groups in the repo pair with an
+> `optionalfeatureProgression` or a `subclassTableGroups` column that owns the
+> count. Fixing one scanner is not enough.
+
+> **The browser stores a RENDERED description.** `feature.description` has
+> already had `{@condition …}` / `{@spell …}` expanded into links, so tag-only
+> regexes silently return `null` in production while passing in Jest (where
+> features are built from `entries`). Act condition/spell derivation carries
+> prose fallbacks for exactly this reason.
 
 ### ✅ Cleric Domains
 
