@@ -266,27 +266,32 @@ describe("TGTT Incomplete Feature Fixes", () => {
 	});
 
 	// --- Time Domain Temporal Manipulation ---
-	it("Time Domain Cleric L3 should have temporalManipulationDc", () => {
+	// The feature is a REACTION that grants advantage / imposes disadvantage on another
+	// creature's d20 roll and spends one use of Channel Divinity. It forces NO saving
+	// throw, so there is no DC to compute. A previous `temporalManipulationDc`
+	// (8 + PB + WIS) was invented data that nothing in `js/` ever read — the classic
+	// "correct calculation nothing reads" defect. These tests pin the REAL mechanics
+	// (the reaction + the Channel Divinity cost) instead of the phantom DC.
+	it("Time Domain Cleric L3 does NOT invent a Temporal Manipulation DC", () => {
 		makeTGTTCleric(3, "Time Domain");
 		const calcs = state.getFeatureCalculations();
 		expect(calcs.hasTemporalManipulation).toBe(true);
-		expect(calcs.temporalManipulationDc).toBeDefined();
+		expect(calcs.temporalManipulationDc).toBeUndefined();
 	});
 
-	it("Time Domain Temporal Manipulation DC should equal 8 + prof + WIS", () => {
-		makeTGTTCleric(3, "Time Domain");
-		state.setAbilityBase("wis", 16); // +3
-		const calcs = state.getFeatureCalculations();
-		// L3: prof = 2, WIS mod = 3 → DC = 8 + 2 + 3 = 13
-		expect(calcs.temporalManipulationDc).toBe(13);
-	});
-
-	it("Time Domain DC should scale with proficiency", () => {
-		makeTGTTCleric(9, "Time Domain");
-		state.setAbilityBase("wis", 16); // +3
-		const calcs = state.getFeatureCalculations();
-		// L9: prof = 4, WIS mod = 3 → DC = 8 + 4 + 3 = 15
-		expect(calcs.temporalManipulationDc).toBe(15);
+	it("Temporal Manipulation surfaces as a reaction that spends Channel Divinity", () => {
+		const feature = {
+			name: "Channel Divinity: Temporal Manipulation",
+			source: "TGTT",
+			featureType: "Subclass",
+			level: 3,
+			description: "Starting at 3rd level, you can use your Channel Divinity to manipulate the flow of time to aid or hamper others in combat. When a creature you can see within 60 feet uses their action in a way that requires them to roll a d20, you can use your reaction to grant them advantage (by speeding up time around them), or disadvantage (by slowing it) on their action. This reaction requires a use of your Channel Divinity.",
+		};
+		const info = CharacterSheetState.detectActivatableFeature(feature);
+		expect(info).not.toBeNull();
+		expect(info.activationAction).toBe("reaction");
+		expect(info.resourceName).toBe("Channel Divinity");
+		expect(info.resourceCost).toBe(1);
 	});
 });
 

@@ -177,6 +177,8 @@ stay clean). Use this decision tree:
 | Toggle that adds/removes AC while active | toggle delta | `togglePlusAc` (use `floor` when the feature caps the bonus low: "+CHA to AC, minimum +1") |
 | Toggle that adds/removes speed while active | toggle delta | `togglePlusSpeed` (walking speed only), `toggleGrantsSpeed` (any speed type; `equalsWalk` for "equal to your Speed" grants) |
 | Toggle that grants resistance / advantage / immunity | toggle flag | `toggleGrantsResistance`, `toggleGrantsAdvantage`, `toggleGrantsImmunity` |
+| Toggle that imposes a condition on **its own owner** (a self-imposed drawback) | toggle condition | `toggleAddsCondition` (`condition`, `expectClearedOnDeactivate`) — asserts the condition is applied on activation **and released** when the state ends; a leak is the classic failure mode here |
+| Feature's activation contract (action cost, which pool it spends, how much) | activation | `featureActivation` (`feature`, `activationAction`, `resourceName`, `resourceCost`) — reads what the sheet actually derived, so "the button exists" is never enough |
 | Toggle whose activation fires a save-for-damage / reaction burst | toggle trigger | `activeStateTrigger` (`label`, `actionType`, `damageType`, `damageMin`, `damageFormula`, `dcMin`) |
 | Adds a roll button (Bardic Inspiration, Channel Divinity option, …) | roll | `rollAbilityCheck`, `rollSavingThrow`, `rollSkillCheck`, `rollAttack`, `rollInitiative` |
 | Restores a resource or feature-owned use pool on long / short rest | resource | `longRestRestores`, `shortRestRestores`, `longRestRestoresFeatureUses`, `shortRestRestoresFeatureUses` |

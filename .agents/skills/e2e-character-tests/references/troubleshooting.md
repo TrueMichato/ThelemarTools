@@ -257,3 +257,35 @@ Stop and report when:
 - A "product bug" is too easy to fix and you suspect it's actually
   infra (often the case for first-time spec authors).
 - The known-bugs.md entry would be a fundamental redesign of the sheet.
+
+## "Not enough <Feature> remaining" — disabled Activate button in the features matrix
+
+**Symptom.** A `featuresMatrix` row with toggle effects fails at a *later*
+checkpoint than the one it was declared for:
+
+```
+featuresMatrix at L11 (1 failures):
+  - L6 /eyes of the future past/i (toggle) could not activate to probe toggle
+    effects: locator.click: Timeout 5000ms exceeded
+    locator resolved to <button disabled title="Not enough … remaining" …>
+```
+
+**Cause — infra, not product.** `assertFeaturesMatrix` re-evaluates *every*
+earlier row at each later checkpoint. A toggle sitting on a small pool
+(e.g. `max(1, wisMod)` on a preset that leaves the ability at 10) is drained by
+the probe's own earlier activation, so the Activate button is legitimately
+disabled by the time the row runs again.
+
+**Fix (already in `comprehensiveBuildHelpers.ts`).** The toggle branch calls
+`charSheet.triggerLongRest()` before taking the `before` snapshot. This costs
+no coverage: pool sizing is asserted separately by `featureUsesEqualAbilityMod`
+and `kind: "resource"`.
+
+**Do not** "fix" this by narrowing the row to a single level — that hides the
+re-evaluation, which is exactly what caught CS-BUG-116 (states never re-applied
+their conditions on a *second* activation). The repeat is the valuable part.
+
+**Tell it apart from a real bug:** if the button is *enabled* and activation
+succeeds but the effect reads wrong on the second cycle, it is a product bug.
+If the button is *disabled* with a "not enough remaining" title, it is pool
+exhaustion.

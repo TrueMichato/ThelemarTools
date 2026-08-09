@@ -211,7 +211,39 @@ hook as a confirm-then-pick prompt.
 | **Darkness** | ✅ Complete | `darknessChannelRange`, `umbralStrikeDamage` |
 | **Lust** | ✅ Complete | `charmingPresenceDc`, `seductiveAuraRange` |
 | **Madness** | ✅ Complete | `maddingTouchDamage`, `contagiousMadnessRange` |
-| **Time** | ✅ Complete | `temporalShiftUses`, `rewindActionUses`, `hasteSelfDuration` |
+| **Time** | ✅ Complete | See [Time Domain](#time-domain-full-surface) below — implemented as real mechanics (domain spells, initiative modifier, resource pools, cantrip damage, self-imposed condition), not calc keys |
+
+#### Time Domain — full surface
+
+Audited feature-by-feature against `homebrew/TravelersGuidetoThelemar.json`.
+Note the domain-spell tiers are keyed **3 / 5 / 7 / 9** (TGTT clerics get their
+domain at L3, not L1) plus a **17** tier added for Temporal Mastery.
+
+| Level | Feature | Mechanical implementation |
+|---|---|---|
+| 3 | Time Domain | Wrapper; pulls in the three L3 features via `refSubclassFeature` |
+| 3 | Chronological Interference | Bonus-action limited-use ability on a PB-scaled pool (2/3/3/6 at L3/5/8/17). The initiative *swap* itself is DM-side — the sheet spends the use |
+| 3 | Right on Time | `+WIS` initiative modifier, read by `getInitiative()` |
+| 3 | Time Domain Spells | `additionalSpells.prepared` → always-prepared, via the generic subclass path |
+| 3 | CD: Temporal Manipulation | Reaction; surfaced by the generic `"Channel Divinity: <Option>"` handler and bound to the shared Channel Divinity pool |
+| 6 | Eyes of the Future Past | Bonus-action toggle on a `max(1, wisMod)` pool that applies **Blinded** to its own owner while active and releases it on end (see `addsConditions` below) |
+| 8 | Potent Spellcasting | `+WIS` to cleric cantrip damage, read by `getCantripDamageBonus` |
+| 17 | Temporal Mastery | Adds *time stop* and *time ravage* to the always-prepared domain list (data-driven, the `"17"` tier) |
+
+Deliberately **not** modelled: Chronological Interference's swap of two
+creatures' initiative order, because the sheet does not track other creatures'
+initiative. Only the use-spend is implemented.
+
+##### Convention: `addsConditions` on generically-detected toggles
+
+A homebrew feature whose text imposes a condition **on its own owner**
+("you are blinded until…") does not need a hand-written entry in
+`ACTIVE_STATE_TYPES`. `CharacterSheetState.parseSelfImposedConditions(text)`
+extracts the condition from the feature text, the toggle detector attaches it
+to the activation info as `addsConditions`, and `addActiveState` applies and
+releases it. Only self-directed phrasings match; negations and immunity
+clauses ("you are immune to being blinded", "you can't be blinded") are
+rejected. Prefer this over adding a bespoke state type.
 
 ### ✅ Ranger Conclaves
 
