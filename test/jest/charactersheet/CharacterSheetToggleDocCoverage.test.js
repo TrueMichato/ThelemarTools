@@ -1,13 +1,16 @@
 /**
  * Drift guard for `docs/charactersheet/08-toggle-abilities.md`.
  *
- * The doc's "Supported Toggle Abilities" section covers 27 of the 70 entries in
+ * The doc's "Supported Toggle Abilities" section covers 32 of the 73 entries in
  * `ACTIVE_STATE_TYPES`. That is a documentation gap, not a capability gap — every
- * one of the 43 is implemented — but a section titled "Supported …" that lists
- * 39% of what exists actively misleads: a reader concludes an implemented state
+ * one of the 41 is implemented — but a section titled "Supported …" that lists
+ * 44% of what exists actively misleads: a reader concludes an implemented state
  * is unsupported and reimplements it.
+
+ * The counts above are prose and WILL rot; the assertions below read the runtime
+ * object and the doc, so they stay correct regardless.
  *
- * Rather than freeze a hand-copied list that rots at state 71, this asserts the
+ * Rather than freeze a hand-copied list that rots at state 74, this asserts the
  * undocumented set is EXACTLY the set declared in the doc's TOGGLE_DOC_GAP block.
  * Both directions fail loudly:
  *   - add a state without documenting it   -> it is undocumented but undeclared

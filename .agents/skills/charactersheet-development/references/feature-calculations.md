@@ -177,6 +177,104 @@ one effect description.
 ### Items
 Magic items can provide bonuses that stack with or override feature calculations. Item bonuses are tracked separately in state and aggregated during AC/save/skill computation.
 
+### Reading a subclass's progression table (do NOT hardcode)
+
+Many subclasses carry a `subclassTableGroups` block (the per-level table rendered
+on the class page). Read it instead of transcribing the numbers into a `switch`:
+
+```js
+const die   = CharacterSheetClassUtils.getSubclassTableDice(subclass, level, /damage/i, "1d8");
+const range = CharacterSheetClassUtils.getSubclassTableNumber(subclass, level, /range/i, 15);
+const raw   = CharacterSheetClassUtils.getSubclassTableCell(subclass, level, "Chains Damage");
+```
+
+Rows are indexed by **character level** (row 0 = level 1). Column labels match by
+case-insensitive substring or `RegExp`. `{@dice}` / `{@damage}` wrappers are
+normalised away, and em-dash / en-dash / hyphen-only cells count as absent.
+
+**Always pass a fallback.** `addClass` stores subclasses as lean `{name, source}`
+refs, so `subclassTableGroups` is frequently unavailable at calculation time and
+every reader returns `null`.
+
+### Granting an attack from a feature (`grantedAttacks`)
+
+Push a descriptor onto `calculations.grantedAttacks`; `getFeatureGrantedAttacks()`
+filters it by `requiresState` and Combat merges it into the canonical
+roll/damage path. Never build a parallel attack list.
+
+```js
+calculations.grantedAttacks.push({
+    id: "feature_manifest-chains",   // stable — Combat de-dupes on id
+    name: "Spectral Chains",
+    isMelee: true,
+    abilityMod: "finesse",           // resolved by resolveAttackAbilityKey()
+    reachBonus: range - 5,           // NOT a range string, NOT a global reach effect
+    damageType: "force",
+    properties: ["F", "L"],
+    countsAsMagical: level >= 6,     // renders a `✧ Magical` badge
+    requiresState: "manifestChains", // hidden unless the state is active
+});
+```
+
+`abilityMod: "finesse"` (or `"finesseWis"`) is resolved through
+`resolveAttackAbilityKey()`, which picks the better of STR/DEX (or STR/DEX/WIS).
+This matters for riders keyed on the *resolved* ability: Rage damage applies only
+when finesse resolves to **str**, which is RAW-correct.
+
+**Reach belongs on the attack, not on the character.** Contribute `reachBonus` per
+attack; a global reach effect would extend every melee weapon the character holds.
+
+### On-hit riders (`attackOnHitOptions`)
+
+Riders that depend on the attack *landing* cannot be auto-applied — the sheet has
+no target model and does not know whether the roll hit. Declare them and let the
+generic `featureOnHitOptions` post-attack hook offer them:
+
+```js
+calculations.attackOnHitOptions.push({
+    id: "chains-restrain",
+    attackId: "feature_manifest-chains",
+    label: "Restrain the target",
+    save: {ability: "str", dc},
+    recurringDamage: level,
+});
+```
+
+The hook asks "did it hit?" then presents an enum picker of the eligible options.
+
+### Extra attacks with a specific weapon (`attackActionAllowances`)
+
+```js
+calculations.attackActionAllowances.push({
+    sourceFeature: "Manifest Chains",
+    count: 3,
+    requiresState: "manifestChains",
+    label: "Unchained Fury",
+});
+```
+
+`_getAttackActionAllowance()` is data-driven from this list (base is
+`max(2, attackCount)`); the display-side `_getFeatureAttackActionAllowance()`
+only reports an allowance that *exceeds* the base.
+
+### Grapple size categories (`getGrappleSizeCategory()`)
+
+`calculations.grappleSizeCategoryBonus` / `grappleSizeUnlimited` feed
+`getGrappleSizeCategory()`, which returns
+`{base, effective, bonus, unlimited, maxTargetSize}` and surfaces in the Overview
+size-chip tooltip. Use it instead of re-deriving size math.
+
+### State detection: an exact name beats another state's prose pattern
+
+`detectActivatableFeature` runs **two passes** — every state's `name` is tested
+against the feature before *any* state's `detectPatterns`. This is load-bearing.
+Rage's pattern `you can\b.*\brage\b` is loose enough to swallow any feature whose
+text merely mentions raging (e.g. "When you rage, you can choose to manifest…"),
+which silently mis-resolved such features to `stateTypeId: "rage"` — wrong id,
+wrong effects, wrong action type, and a spurious rage-use cost. If you add a
+`detectPatterns` entry, keep it as tight as you can regardless.
+
+
 ## Implemented Classes (All Official + TGTT)
 
 Every official PHB/XPHB class has full subclass calculations. All TGTT homebrew classes/subclasses have calculations. See `docs/charactersheet/10-known-limitations.md` for the full matrix.

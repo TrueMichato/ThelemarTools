@@ -32,6 +32,8 @@ const SAVE_NAMES = [
 	"Aldor", "Boti", "Fili", "Nessa", "Tikal",
 	// v12 — the first level-20 builds, the first psionic class and the first Ioun bank.
 	"Arthur", "Juen", "Mikase", "Octavius", "Phirse",
+	// v14 — the edition-split casters, the shapechanger and the second rogue.
+	"Elizabeth", "Missy", "Nagara",
 ];
 
 const available = SAVE_NAMES.filter(n => fs.existsSync(path.join(SAVE_DIR, `${n}.json`)));
@@ -49,11 +51,20 @@ const DIVINE_FAVOR_CATALOG = (() => {
 	}
 })();
 
+// Conversion is the expensive part (a full state load plus an ~80-pass pipeline), and the
+// corpus-wide contracts each want every character. Memoized on name + options: the
+// exporter is pure with respect to the save, so one conversion serves every assertion.
+const MONSTER_CACHE = new Map();
+
 const loadMonster = (name, opts = {}) => {
-	const state = new CharacterSheetState();
-	state.loadFromJson(JSON.parse(fs.readFileSync(path.join(SAVE_DIR, `${name}.json`), "utf8")));
-	state.setDivineFavorCatalog?.(DIVINE_FAVOR_CATALOG);
-	return CharacterSheetNpcExporter.convertStateToMonster(state, opts);
+	const key = `${name}|${JSON.stringify(opts)}`;
+	if (!MONSTER_CACHE.has(key)) {
+		const state = new CharacterSheetState();
+		state.loadFromJson(JSON.parse(fs.readFileSync(path.join(SAVE_DIR, `${name}.json`), "utf8")));
+		state.setDivineFavorCatalog?.(DIVINE_FAVOR_CATALOG);
+		MONSTER_CACHE.set(key, CharacterSheetNpcExporter.convertStateToMonster(state, opts));
+	}
+	return MONSTER_CACHE.get(key);
 };
 
 const allEntryText = mon => {
@@ -70,6 +81,16 @@ const allEntryText = mon => {
 
 const allAbilityNames = mon => ["trait", "action", "bonus", "reaction"]
 	.flatMap(section => (mon[section] || []).map(e => String(e?.name || "")));
+
+/** A spell is the same spell whatever printing it came from, so compare on name alone. */
+const expectNoDuplicateSpells = (label, list) => {
+	const names = list
+		.map(x => /\{@spell ([^}|]+)/.exec(String(x))?.[1])
+		.filter(Boolean)
+		.map(x => x.trim().toLowerCase());
+	const dupes = [...new Set(names.filter((x, i) => names.indexOf(x) !== i))];
+	expect(`${label}: ${dupes.join(", ")}`).toBe(`${label}: `);
+};
 
 describeReal("CharacterSheetNpcExporter — real saves", () => {
 	describe.each(available)("%s", name => {
@@ -153,7 +174,9 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 		});
 
 		it("prints limited uses on the ability itself", () => {
-			const limited = allAbilityNames(mon).filter(n => /\(\d+\/(?:LR|SR|Day)\)/i.test(n));
+			// `Dawn` is a real recharge period on items (Poison Absorbing Tattoo), and is
+			// the only limited-use pool some builds have.
+			const limited = allAbilityNames(mon).filter(n => /\(\d+\/(?:LR|SR|Day|Dawn|Dusk|Turn|Rest)\)/i.test(n));
 			expect(limited.length).toBeGreaterThan(0);
 		});
 
@@ -1408,11 +1431,15 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			});
 		});
 
+		// The v13 defect was the *doubled-word* collapse deleting Juen's surname and
+		// leaving a modal behind. v14 uses the given name in the body, so "Juen may cast"
+		// is now the correct rendering — what must never reappear is the truncated
+		// "Juen may" that came from swallowing "May".
 		it("keeps a surname that collides with a modal (A4)", () => {
 			if (!available.includes("Juen")) return;
 			const text = allEntryText(loadMonster("Juen"));
-			expect(text).not.toMatch(/\bJuen may\b/);
-			if (/Juen May/.test(text)) expect(text).toMatch(/\bJuen May\b/);
+			expect(text).not.toMatch(/\bJuen may may\b/);
+			expect(text).not.toMatch(/\bMay may\b/);
 		});
 
 		it("states the stance duration once and drops flavour-only stances (F1/F3/F4)", () => {
@@ -1436,6 +1463,145 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 		it("carries no trace of the maneuver-rename typo (F5)", () => {
 			available.forEach(n => {
 				expect(`${n}: ${allEntryText(loadMonster(n))}`).not.toMatch(/methoding/i);
+			});
+		});
+	});
+
+	describe("v14 — one printing per spell, honest tags and a readable voice", () => {
+		// A spell reaches the block by two routes (class list and subclass grant) carrying
+		// two different printings, so `Fog Cloud|PHB` and `Fog Cloud|XPHB` both survived a
+		// `name|source` dedupe and the block printed the same spell twice on one line.
+		it("prints each spell once per level regardless of edition (1.1)", () => {
+			available.forEach(n => {
+				(loadMonster(n).spellcasting || []).forEach(sc => {
+					["will", "ritual"].forEach(key => {
+						if (!Array.isArray(sc[key])) return;
+						expectNoDuplicateSpells(`${n}/${sc.name}/${key}`, sc[key]);
+					});
+					["spells", "daily", "weekly"].forEach(bucket => {
+						Object.entries(sc[bucket] || {}).forEach(([lvl, val]) => {
+							const list = Array.isArray(val) ? val : val?.spells;
+							if (Array.isArray(list)) expectNoDuplicateSpells(`${n}/${sc.name}/${bucket}/${lvl}`, list);
+						});
+					});
+				});
+			});
+		});
+
+		// A tag whose kind does not match its referent renders as a failed lookup:
+		// `{@condition Dash}` and `{@action Bonus Action}` both shipped.
+		it("emits no tag whose kind contradicts its referent (1.5)", () => {
+			const NOT_CONDITIONS = /^(?:dash|disengage|dodge|hide|help|ready|search|study|influence|utilize|attack|hidden|surprised)$/i;
+			const NOT_ACTIONS = /^(?:bonus action|reaction|action|free action|movement)$/i;
+			available.forEach(n => {
+				const text = allEntryText(loadMonster(n));
+				for (const [, kind, arg] of text.matchAll(/\{@(condition|action) ([^}|]+)/g)) {
+					const bad = kind === "condition" ? NOT_CONDITIONS.test(arg.trim()) : NOT_ACTIONS.test(arg.trim());
+					if (bad) throw new Error(`${n} emits {@${kind} ${arg.trim()}}, which is not a ${kind}`);
+				}
+			});
+		});
+
+		// A capitalisation heuristic invented `{@spell Magic of the}` and `{@spell Absorbed}`
+		// out of ordinary prose, producing hovers to spells that do not exist.
+		it("never invents a spell name out of prose (1.6)", () => {
+			available.forEach(n => {
+				const text = allEntryText(loadMonster(n));
+				for (const [, arg] of text.matchAll(/\{@spell ([^}|]+)/g)) {
+					expect(`${n}: ${arg}`).not.toMatch(/\b(?:of|the|a|an|to|with|its|absorbed)\s*$/i);
+				}
+			});
+		});
+
+		// Progression ladders are player-facing. An NPC block states the row that applies;
+		// the resolver used to substitute the character's value into the *condition*,
+		// producing "when its proficiency bonus (+5) is +3".
+		it("collapses scaling ladders instead of contradicting itself (1.2)", () => {
+			available.forEach(n => {
+				const text = allEntryText(loadMonster(n));
+				expect(`${n}: ${text}`).not.toMatch(/\(\+\d+\) is \+\d+/);
+				expect(`${n}: ${text}`).not.toMatch(/\(\d+\) is (?:level )?\d+/);
+			});
+		});
+
+		// Where one feature grants several defences, annotating only the first reads as if
+		// the rest were unconditional.
+		// Where one feature grants several defences, annotating only the first reads as if
+		// the rest were unconditional. Nagara's Stormborn is the corpus case: it grants
+		// three resistances, and only cold used to carry the gate.
+		(available.includes("Nagara") ? it : it.skip)("gates every defence from a conditional feature, not just the first (1.3, 1.4)", () => {
+			const resist = loadMonster("Nagara").resist || [];
+			// A feature that grants several defences at once is emitted as one grouped
+			// entry, so flatten before looking for the gate.
+			const gated = new Map();
+			resist.forEach(x => {
+				if (typeof x === "string") return gated.set(x, null);
+				[].concat(x.resist || []).forEach(type => gated.set(typeof type === "string" ? type : type?.resist, x.note || null));
+			});
+			["cold", "lightning", "thunder"].forEach(type => {
+				expect(`${type}: ${gated.has(type) ? gated.get(type) || "ungated" : "missing"}`)
+					.toMatch(new RegExp(`^${type}: .*Stormborn`));
+			});
+		});
+
+		// "roll a number of d6s equal to its Wisdom modifier (6)" states the number but
+		// still makes the DM assemble the roll, and gives no click-to-roll link.
+		it("writes a roll, not an instruction to build one (2.2)", () => {
+			available.forEach(n => {
+				expect(`${n}: ${allEntryText(loadMonster(n))}`).not.toMatch(/a number of d(?:4|6|8|10|12)s equal to/i);
+			});
+		});
+
+		it("resolves derived speeds to a distance (2.3)", () => {
+			available.forEach(n => {
+				expect(`${n}: ${allEntryText(loadMonster(n))}`)
+					.not.toMatch(/[Ss]peed equal to (?:its|the creature's) (?:walking |flying |swimming )?[Ss]peed/);
+			});
+		});
+
+		// A bare imperative in a statblock is an order to the DM. Asserted on the exact
+		// shapes the corpus produced rather than on a general verb heuristic: "rolls
+		// against it have Disadvantage" is a plural subject and correct as written.
+		it("conjugates every verb in a coordinated list (3.1)", () => {
+			const LEAKS = [
+				/\bit again, or have\b/,
+				/,\s*(?:manifest|revert|recover) it\b/,
+				/\b[A-Z][a-z]+ apply\b/,
+				/\bIf it hits, add\b/,
+				/\bfinishes a[^.]{0,40}, choose\b/,
+				/\bturns?, (?:take|deal|roll|choose|add|gain)\b/,
+			];
+			available.forEach(n => {
+				const text = allEntryText(loadMonster(n));
+				LEAKS.forEach(re => expect(`${n}: ${text.match(re)?.[0] || "clean"}`).toBe(`${n}: clean`));
+			});
+		});
+
+		it("tags every DC so it reads as a check, not a number (3.2)", () => {
+			available.forEach(n => {
+				const text = allEntryText(loadMonster(n)).replace(/\{@\w+[^{}]*\}/g, " ");
+				expect(`${n}: ${text}`).not.toMatch(/\bDC \d+/);
+			});
+		});
+
+		it("tags coordinated action lists (3.2)", () => {
+			available.forEach(n => {
+				const text = allEntryText(loadMonster(n)).replace(/\{@\w+[^{}]*\}/g, " ");
+				expect(`${n}: ${text}`).not.toMatch(/\b(?:Dash|Disengage|Dodge)\b[^.]{0,20}\b(?:Dash|Disengage|Dodge)\b/);
+			});
+		});
+
+		// The block title carries the full name; repeating a surname 40-odd times in the
+		// body reads unlike any published statblock.
+		it("uses the short name after the block title (3.3)", () => {
+			available.forEach(n => {
+				const mon = loadMonster(n);
+				const parts = String(mon.name).replace(/\s*\(NPC\)\s*$/, "").split(/\s+/);
+				if (parts.length < 2) return;
+				const surname = parts[parts.length - 1];
+				if (surname.length < 4) return;
+				const hits = (allEntryText(mon).match(new RegExp(`\\b${surname}\\b`, "g")) || []).length;
+				expect(`${n}: surname ×${hits}`).toBe(`${n}: surname ×0`);
 			});
 		});
 	});

@@ -1500,7 +1500,12 @@ class CharacterSheetCombat {
 		// Auto-enable SA when conditions are met after attack
 		const sneakAttackInfo = this._state.getFeatureCalculations?.()?.sneakAttack;
 		if (sneakAttackInfo && !this._sneakAttackEnabled && this._isSneakAttackAvailableThisTurn()) {
-			const triggerMet = (hasAdvantage && !hasDisadvantage) || this._sneakAttackHasAdjacentAlly;
+			// A state may licence Sneak Attack without the usual trigger (e.g. the
+			// Belly Dancer's Dance of the Country, in melee) — see
+			// `canSneakAttackWithoutAdvantage`.
+			const stateLicence = !hasDisadvantage
+				&& this._state.canSneakAttackWithoutAdvantage?.({isMelee: attack?.isMelee !== false && !attack?.isRanged});
+			const triggerMet = (hasAdvantage && !hasDisadvantage) || this._sneakAttackHasAdjacentAlly || stateLicence;
 			if (triggerMet && this._isSneakAttackWeaponEligible(attack)) {
 				this._sneakAttackEnabled = true;
 				this._renderSneakAttackToggle?.();
@@ -1757,12 +1762,92 @@ class CharacterSheetCombat {
 				handler: (ctx) => this._pShowRemarkableAthleteMoveReminder(ctx),
 			},
 			{
+				// Generic, data-driven on-hit rider options. Any class/subclass can declare
+				// `getFeatureCalculations().attackOnHitOptions` entries scoped to an attack's
+				// `sourceFeature` (or unscoped for every weapon attack); each surfaces as an
+				// opt-in offer after the attack lands. Nothing is auto-applied: whether the
+				// attack actually hit, and whether the player WANTS the rider, are facts the
+				// sheet cannot know. Powers Chained Fury's grapple / shove / restrain /
+				// reposition riders.
+				id: "featureOnHitOptions",
+				predicate: (ctx) => !ctx.attack?.isSpell
+					&& !ctx.isFumble
+					&& this._getEligibleOnHitOptions(ctx.attack).length > 0,
+				handler: (ctx) => this._pOfferFeatureOnHitOptions(ctx),
+			},
+			{
 				id: "shadowKnightTriggers",
 				predicate: (ctx) => (!!ctx.attack?.isShadowWeapon || !!ctx.attack?.countsAsShadowWeapon)
 					&& !!this._state.getFeatureCalculations?.().hasShadowKnight,
 				handler: (ctx) => this._pHandleShadowKnightHit(ctx),
 			},
 		];
+	}
+
+	/**
+	 * On-hit rider options eligible for this attack.
+	 *
+	 * An option is eligible when its `attackSourceFeature` matches the attack's
+	 * `sourceFeature` (or it declares none, meaning "any weapon attack") AND its
+	 * optional `requiresState` gate is satisfied.
+	 *
+	 * @param {*} attack
+	 * @returns {Array<*>}
+	 */
+	_getEligibleOnHitOptions (attack) {
+		if (!attack || attack.isSpell) return [];
+		const options = this._state.getFeatureCalculations?.()?.attackOnHitOptions || [];
+		const sourceFeature = (attack.sourceFeature || "").trim().toLowerCase();
+		return options.filter(opt => {
+			if (opt?.attackSourceFeature && opt.attackSourceFeature.toLowerCase() !== sourceFeature) return false;
+			if (opt?.requiresState && !this._state.isStateTypeActive?.(opt.requiresState)) return false;
+			return true;
+		});
+	}
+
+	/**
+	 * Offer this attack's on-hit rider options after the roll resolves. Purely
+	 * additive: the player confirms the attack hit, picks one option (or skips), and
+	 * the resolved wording — save DC, recurring damage, distances — is surfaced as a
+	 * toast. Nothing here mutates the attack or damage math, because these riders are
+	 * resolved against a target the sheet does not model.
+	 *
+	 * @param {*} ctx - Post-attack context from `_rollAttack`.
+	 */
+	async _pOfferFeatureOnHitOptions (ctx) {
+		const options = this._getEligibleOnHitOptions(ctx.attack);
+		if (!options.length) return;
+
+		const labels = options.map(opt => {
+			const bits = [opt.name];
+			if (opt.save?.dc) bits.push(`DC ${opt.save.dc} ${Parser.attAbvToFull(opt.save.ability).slice(0, 3).toUpperCase()}`);
+			return bits.join(" — ");
+		});
+
+		const didHit = await InputUiUtil.pGetUserBoolean({
+			title: `${ctx.attack?.name || "Attack"} — On Hit`,
+			htmlDescription: `Did this attack hit? On a hit you may use one of: ${labels.join("; ")}.`,
+			textYes: "Hit",
+			textNo: "Miss",
+		});
+		if (!didHit) return;
+
+		const picked = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
+			title: `${ctx.attack?.name || "Attack"} — Choose an On-Hit Effect`,
+			values: [...labels, "Skip"],
+			isResolveItem: false,
+		}));
+		if (picked == null || picked >= options.length) return;
+
+		const opt = options[picked];
+		const parts = [opt.description || opt.name];
+		if (opt.save?.dc) {
+			parts.push(`Save: DC ${opt.save.dc} ${Parser.attAbvToFull(opt.save.ability)}.`);
+		}
+		if (opt.recurringDamage?.amount) {
+			parts.push(`Recurring: ${opt.recurringDamage.amount} ${opt.recurringDamage.type || ""} damage at the ${opt.recurringDamage.when || "start of each of its turns"}.`);
+		}
+		JqueryUtil.doToast({type: "success", content: `${opt.name}: ${parts.join(" ")}`});
 	}
 
 	async _pHandleShadowKnightHit (ctx) {
@@ -3217,7 +3302,7 @@ class CharacterSheetCombat {
 		return this._lastAttackContext.mode === "advantage" || this._lastAttackContext.hasAdvantage;
 	}
 
-	_isSneakAttackTriggerSatisfied (attackId, {showWarnings = true} = {}) {
+	_isSneakAttackTriggerSatisfied (attackId, {showWarnings = true, isMelee = true} = {}) {
 		const hasAdvantage = this._isSneakAttackContextAdvantaged(attackId);
 		const hasDisadvantage = this._isSneakAttackContextDisadvantaged(attackId);
 
@@ -3232,6 +3317,12 @@ class CharacterSheetCombat {
 		}
 
 		if (hasAdvantage || this._sneakAttackHasAdjacentAlly) return true;
+
+		// An active state may licence Sneak Attack without the usual trigger — the
+		// Belly Dancer's Dance of the Country lets you Sneak Attack creatures within
+		// melee range without needing advantage. Generic via the
+		// `sneakAttackWithoutAdvantage` state effect.
+		if (this._state.canSneakAttackWithoutAdvantage?.({isMelee})) return true;
 
 		if (showWarnings) {
 			JqueryUtil.doToast({
@@ -3389,17 +3480,84 @@ class CharacterSheetCombat {
 		return this._turnAttackUsage.attackActionFeatureIds.has(sourceFeature.trim().toLowerCase());
 	}
 
+	/**
+	 * How many attacks the Attack action may buy THIS turn, given what has already
+	 * been swung with.
+	 *
+	 * Data-driven from `getFeatureCalculations().attackActionAllowances`: each entry
+	 * is `{sourceFeature, count, requiresState?}` and means "if EVERY attack-action
+	 * attack this turn came from `sourceFeature`, the budget is `count` instead of the
+	 * default". Covers the Astral Self's Astral Barrage (3 arm attacks) and the
+	 * Chained Fury's Unchained Fury (3 chain attacks) identically.
+	 *
+	 * @param {*} attack
+	 * @returns {number}
+	 */
 	_getAttackActionAllowance (attack) {
 		const calculations = this._state.getFeatureCalculations?.() || {};
+		const base = Math.max(2, Number(calculations.attackCount) || 2);
 		const sourceFeature = (attack?.sourceFeature || "").trim().toLowerCase();
-		if (!calculations.hasAwakenedAstralSelf || !this._state.isStateTypeActive?.("awakenedAstralSelf") || sourceFeature !== "astral arms") return 2;
+		if (!sourceFeature) return base;
+
+		const allowances = [...(calculations.attackActionAllowances || [])];
+		// Legacy: Astral Barrage predates the declarative contract.
+		if (calculations.hasAwakenedAstralSelf) {
+			allowances.push({
+				sourceFeature: "Astral Arms",
+				count: calculations.astralBarrageAttackCount || 3,
+				requiresState: "awakenedAstralSelf",
+			});
+		}
+
 		const used = this._turnAttackUsage?.attackActionFeatureIds || new Set();
-		return [...used].every(id => id === "astral arms") ? calculations.astralBarrageAttackCount || 3 : 2;
+		let best = base;
+		for (const allowance of allowances) {
+			if ((allowance.sourceFeature || "").toLowerCase() !== sourceFeature) continue;
+			if (allowance.requiresState && !this._state.isStateTypeActive?.(allowance.requiresState)) continue;
+			// The bigger budget is conditional on EVERY attack-action attack this turn
+			// coming from the same feature ("…if all the attacks are made with your chains").
+			if (![...used].every(id => id === sourceFeature)) continue;
+			best = Math.max(best, Number(allowance.count) || base);
+		}
+		return best;
 	}
 
 	_isWeaponDamageRiderEligible (rider, attack) {
 		return !rider?.attackSourceFeature
 			|| (attack?.sourceFeature || "").toLowerCase() === rider.attackSourceFeature.toLowerCase();
+	}
+
+	/**
+	 * The Attack-action allowance this feature attack advertises, or null when it
+	 * grants nothing above the character's normal attack count. Unlike
+	 * {@link _getAttackActionAllowance} this ignores what has already been swung
+	 * this turn — it answers "what does this attack unlock", for display.
+	 * @param {*} attack
+	 * @returns {number|null}
+	 */
+	_getFeatureAttackActionAllowance (attack) {
+		const calculations = this._state.getFeatureCalculations?.() || {};
+		const sourceFeature = (attack?.sourceFeature || "").trim().toLowerCase();
+		if (!sourceFeature) return null;
+		const base = Math.max(1, Number(calculations.attackCount) || 1);
+
+		const allowances = [...(calculations.attackActionAllowances || [])];
+		if (calculations.hasAwakenedAstralSelf) {
+			allowances.push({
+				sourceFeature: "Astral Arms",
+				count: calculations.astralBarrageAttackCount || 3,
+				requiresState: "awakenedAstralSelf",
+			});
+		}
+
+		let best = null;
+		for (const allowance of allowances) {
+			if ((allowance.sourceFeature || "").toLowerCase() !== sourceFeature) continue;
+			if (allowance.requiresState && !this._state.isStateTypeActive?.(allowance.requiresState)) continue;
+			const count = Number(allowance.count) || 0;
+			if (count > base) best = Math.max(best || 0, count);
+		}
+		return best;
 	}
 
 	_canRollAttackActionAttack (attack) {
@@ -3452,7 +3610,7 @@ class CharacterSheetCombat {
 			return false;
 		}
 
-		if (!this._isSneakAttackTriggerSatisfied(attack.id, {showWarnings})) return false;
+		if (!this._isSneakAttackTriggerSatisfied(attack.id, {showWarnings, isMelee: attack?.isMelee !== false && !attack?.isRanged})) return false;
 
 		return true;
 	}
@@ -4168,8 +4326,7 @@ class CharacterSheetCombat {
 			badgeHtml = ` <span class="badge badge-warning" title="Granted by ${label}${actionLabel} — ends when the form does">${attack.sourceStateIcon || "🌟"} ${label}${actionLabel}</span>`;
 		} else if (attack.isFeatureAttack) {
 			badgeHtml = ` <span class="badge badge-info" title="Granted by ${attack.sourceFeature || attack.name}">✨ Feature</span>`;
-		} else if (attack.isTemporary) {
-			const srcParts = [attack.sourceComponent, attack.sourceSpell, attack.sourceDuration].filter(Boolean);
+		} else if (attack.isTemporary) {			const srcParts = [attack.sourceComponent, attack.sourceSpell, attack.sourceDuration].filter(Boolean);
 			const srcTitle = srcParts.length ? srcParts.join(" — ") : "Temporary Attack";
 			badgeHtml = ` <span class="badge badge-info" title="${srcTitle}">🧪 Temp</span>`;
 		} else if (attack.isMonkWeapon) {
@@ -4179,6 +4336,13 @@ class CharacterSheetCombat {
 			badgeHtml = " <span class=\"badge badge-info\" title=\"Natural Weapon from feature\">Natural</span>";
 		} else if (isAutoGenerated) {
 			badgeHtml = " <span class=\"badge badge-secondary\">Auto</span>";
+		}
+
+		// Generic "counts as magical" badge — any attack descriptor (feature-granted or
+		// otherwise) that sets `countsAsMagical` advertises that it overcomes resistance
+		// and immunity to nonmagical attacks and damage.
+		if (attack.countsAsMagical) {
+			badgeHtml += " <span class=\"badge badge-success\" title=\"Counts as magical for overcoming resistance and immunity to nonmagical attacks and damage\">✧ Magical</span>";
 		}
 
 		// Show active combat method effect badge
@@ -4234,9 +4398,11 @@ class CharacterSheetCombat {
 					</button>`
 			: "";
 		const handsUsedHtml = this._renderHandsUsedToggle(attack);
-		const astralBarrageCount = (attack.sourceFeature || "").toLowerCase() === "astral arms"
-			&& this._state.isStateTypeActive?.("awakenedAstralSelf")
-			? this._getAttackActionAllowance(attack)
+		// Attack-action budget badge. Generic: any feature attack that unlocks a larger
+		// Attack-action allowance (Astral Barrage, Unchained Fury's three chain swings)
+		// advertises it on its own row so the player can see the bigger budget exists.
+		const attackActionAllowance = attack.isFeatureAttack
+			? this._getFeatureAttackActionAllowance(attack)
 			: null;
 
 		return e_({outer: `
@@ -4255,7 +4421,7 @@ class CharacterSheetCombat {
 				</div>
 				<div class="charsheet__attack-actions">
 					<button class="ve-btn ve-btn-sm ve-btn-primary charsheet__attack-roll" title="Roll Attack">
-						<span class="glyphicon glyphicon-screenshot"></span> Attack${astralBarrageCount ? ` (${astralBarrageCount}/action)` : ""}
+						<span class="glyphicon glyphicon-screenshot"></span> Attack${attackActionAllowance ? ` (${attackActionAllowance}/action)` : ""}
 					</button>
 					${recklessBtnHtml}
 					<button class="ve-btn ve-btn-sm ve-btn-danger charsheet__attack-damage" title="Roll Damage">
@@ -8393,6 +8559,40 @@ class CharacterSheetCombat {
 			}
 		}
 
+		// --- TGTT Belly Dancer (Rogue) ---
+		const isDancing = !!this._state.isDancing?.();
+		if (nameLower === "dance of the country") {
+			lines.push(`<span class="mr-1">🛡️</span> <strong>+${calc.danceAcBonus ?? 1} AC</strong> while Dancing (CHA mod, minimum +1)`);
+			lines.push(`<span class="mr-1">🤸</span> <strong>Advantage</strong> on Dexterity (Acrobatics) while Dancing`);
+			lines.push(`<span class="mr-1">🗡️</span> <strong>Sneak Attack</strong> in melee range <strong>without needing advantage</strong> while Dancing`);
+			lines.push(`<span class="mr-1">😮‍💨</span> When the Dance ends: <strong>DC ${calc.danceEndSaveDc ?? 10} CON save</strong> or gain 1 level of exhaustion`);
+			if (!isDancing) lines.push(`<span class="mr-1">💃</span> <span class="ve-muted">Not currently Dancing — activate it to apply these benefits.</span>`);
+		}
+
+		if (nameLower === "fluid step") {
+			lines.push(`<span class="mr-1">💨</span> While Dancing you have the <strong>Disengage</strong> benefit`);
+			lines.push(`<span class="mr-1">🚫</span> Other creatures <strong>can't gain the Disengage benefit</strong> from you while you Dance`);
+			if (!isDancing) lines.push(`<span class="mr-1">💃</span> <span class="ve-muted">Requires an active Dance of the Country.</span>`);
+		}
+
+		if (nameLower === "tantalizing shivers") {
+			const perfMod = this._state.getSkillModifier?.("performance") ?? 0;
+			lines.push(`<span class="mr-1">💫</span> <strong>Bonus action while Dancing</strong>: Charisma (Performance) <strong>${perfMod >= 0 ? "+" : ""}${perfMod}</strong> contested by the target's Wisdom (Insight)`);
+			lines.push(`<span class="mr-1">😵</span> On a win the creature is <strong>charmed &amp; incapacitated with speed 0</strong> for 1 round, and you have <strong>advantage</strong> on attacks against it`);
+			if (!isDancing) lines.push(`<span class="mr-1">💃</span> <span class="ve-muted">Requires an active Dance of the Country.</span>`);
+		}
+
+		if (nameLower === "percussive strike") {
+			lines.push(`<span class="mr-1">🥁</span> When your Dance begins, hostile creatures that can see you make a <strong>DC ${calc.percussiveStrikeDc ?? "—"} Wisdom save</strong>`);
+			lines.push(`<span class="mr-1">🎯</span> On a failure you have <strong>advantage</strong> on attack rolls against it while the Dance lasts`);
+			if (!isDancing) lines.push(`<span class="mr-1">💃</span> <span class="ve-muted">Requires an active Dance of the Country.</span>`);
+		}
+
+		if (nameLower === "bonus proficiency" && calc.hasConcealedWeapons) {
+			lines.push(`<span class="mr-1">🎭</span> <strong>Expertise</strong> in Performance`);
+			lines.push(`<span class="mr-1">🗡️</span> Weapons you hold count as <strong>Concealed</strong>: advantage on Dexterity (Sleight of Hand) checks to keep them hidden`);
+		}
+
 		// --- C7: Instant Step ---
 		if (nameLower === "instant step") {
 			const range = calc.instantStepRange || 60;
@@ -9654,12 +9854,29 @@ class CharacterSheetCombat {
 
 		const conditions = e_({outer: `<div class="cs-combat-conditions"></div>`});
 
+		// A state may licence Sneak Attack without the usual trigger (e.g. the Belly
+		// Dancer's Dance of the Country, in melee). Surface it as a met condition so
+		// the player can see WHY Sneak Attack is live without advantage.
+		const stateLicence = !!this._state.canSneakAttackWithoutAdvantage?.({isMelee: true});
+		const stateLicenceSource = stateLicence
+			? (this._state.getActiveStateEffects?.() || []).find(e => e?.type === "sneakAttackWithoutAdvantage")?.stateName || "Active state"
+			: null;
+
 		if (hasAdv) {
 			conditions.insertAdjacentHTML("beforeend", csCombatConditionPill({variant: "met", icon: "check", label: "Advantage", title: "Last attack had advantage"}));
 		} else if (hasDisadv) {
 			conditions.insertAdjacentHTML("beforeend", csCombatConditionPill({variant: "blocked", icon: "ban", label: "Disadvantage", title: "Last attack had disadvantage — Sneak Attack blocked"}));
 		} else {
 			conditions.insertAdjacentHTML("beforeend", csCombatConditionPill({variant: "none", icon: "none", label: "No advantage", title: "No advantage from the last attack"}));
+		}
+
+		if (stateLicence) {
+			conditions.insertAdjacentHTML("beforeend", csCombatConditionPill({
+				variant: "met",
+				icon: "check",
+				label: `${stateLicenceSource}: no advantage needed`,
+				title: `${stateLicenceSource} lets you Sneak Attack a creature in melee range without advantage`,
+			}));
 		}
 
 		// Ally-adjacent state toggle (clickable condition pill)
@@ -9682,7 +9899,7 @@ class CharacterSheetCombat {
 
 		// ===== Notice: armed but trigger not met =====
 		if (this._sneakAttackEnabled && !isSpentThisRound) {
-			const triggerMet = hasAdv || allyAdj;
+			const triggerMet = hasAdv || allyAdj || stateLicence;
 			if (!triggerMet && !hasDisadv) {
 				section.insertAdjacentHTML("beforeend", `<div class="cs-combat-notice cs-combat-notice--warning">${csCombatIcon("warning")}<span>No advantage and no adjacent ally — Sneak Attack won't apply.</span></div>`);
 			} else if (hasDisadv) {

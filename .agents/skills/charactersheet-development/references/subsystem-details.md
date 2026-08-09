@@ -161,6 +161,44 @@ mastery.
 chosen weapon. Both activations use dedicated controller paths because they
 also pay resources or HP before the state is created.
 
+### Level-Dependent Effects (`effectsBuilder`)
+
+A state type may declare `effectsBuilder: "<methodName>"`. `activateState()`
+calls `this[methodName]()` whenever the caller passed no explicit
+`options.customEffects`, so every activation path gets level-correct effects
+without a bespoke `activateState(id, {customEffects: …})` call site. This
+generalises the older `getLaunchMomentumEffects()` pattern; new features should
+prefer it. Keep the literal `effects` array as a sane fallback. First customer:
+`dancing` (Belly Dancer) → `getDancingEffects()`.
+
+### Prerequisite States (`requiresStates`) and End Saves (`endSave`)
+
+`requiresStates: ["dancing"]` hides a toggle from `getActivatableFeatures()`
+until the prerequisite runs, and `deactivateState` drops dependents when it
+ends — no bespoke "while Dancing" visibility logic.
+
+`endSave: {ability, dc, onFailure: {exhaustion: 1}, label}` declares a save made
+when the state ends. `getStateEndSave(id)` reads it,
+`resolveStateEndSave(id, {total})` applies consequences, and
+`charactersheet.js` `_pResolveStateEndSave` rolls it from the "End" button —
+*after* deactivation, so the state's own bonuses don't inflate the roll.
+
+### Contested Activation (`activationInfo.contestedCheck`)
+
+A detected activatable feature may carry
+`{skill, skillLabel, ability, opposedBy}`. `_activateFeatureState` rolls the
+character's side via `_rollSkillCheck(skill, label, null, ability)` **before**
+any resource deduction, then asks whether it beat the opposed roll. Losing or
+cancelling costs nothing. The sheet does not model the opponent, so it rolls
+honestly and asks rather than inventing the enemy's result. First customer:
+Tantalizing Shivers (CHA (Performance) vs WIS (Insight)).
+
+### `grantsActionBenefit`
+
+`{type: "grantsActionBenefit", action: "disengage", source}` on an active state
+grants a named action's benefit for free; read via
+`hasActionBenefitFromStates(action)`. First customer: Fluid Step.
+
 ## Combat System
 
 ### Attack Bonus Calculation
@@ -178,6 +216,7 @@ total = abilityMod + profBonus + weaponBonus + featureAttackBonus + stateAttackB
 - **Cunning Strikes**: Subtract dice BEFORE rolling (e.g., 5d6 SA - 2d6 CS cost = 3d6 damage)
 - **Auto-enable**: After eligible attack when conditions met (advantage or ally adjacent), SA auto-activates
 - **Advantage detection**: Checks BOTH `rollD20` mode AND `hasAdvantage`/`hasDisadvantage` flags from active states
+- **State licence**: an active state carrying `{type: "sneakAttackWithoutAdvantage", meleeOnly?}` waives the trigger entirely. Read via `canSneakAttackWithoutAdvantage({isMelee})`; consumed by the auto-enable path, `_isSneakAttackTriggerSatisfied` and the toggle's condition pills. First customer: Belly Dancer's Dance of the Country (melee only)
 
 ### Action Economy Tracking
 
@@ -426,7 +465,7 @@ Current generic coverage includes attached spells with charge costs, action/bonu
 
 **Files**: `charactersheet-npc-exporter.js` (pure converter), `charactersheet-export.js` (dialog).  
 **Docs**: `docs/charactersheet/18-npc-export.md`  
-**Tests**: `CharacterSheetNpcExporter.test.js` + `.matrix.test.js` + `.realsaves.test.js` (contract tests against a corpus of 21 full saves in `npc-exports/`; auto-skips when those untracked fixtures are absent)
+**Tests**: `CharacterSheetNpcExporter.test.js` + `.matrix.test.js` + `.realsaves.test.js` (contract tests against a corpus of 24 full saves in `npc-exports/`; auto-skips when those untracked fixtures are absent)
 
 ### Key Method: `convertStateToMonster(state, options)`
 
@@ -589,6 +628,60 @@ a term exists, prose only where it adds something.
 - **Fix a typo in this repo's own homebrew at the source.** TGTT's `methoding` was a
   botched `maneuver` → `method` rename in `homebrew/TravelersGuidetoThelemar.json`, not an
   exporter defect.
+
+### One printing per spell, honest tags and a readable voice (v14)
+- **Dedupe spells by name within a level, not by `name|source`.** The same spell arrives by
+  two routes (class list, subclass/feat grant) carrying two printings, so `Fog Cloud|PHB`
+  and `Fog Cloud|XPHB` both survived — 8 of 24 corpus characters printed a spell twice on
+  one line. Prefer the character's edition, then the printing carrying a grant annotation.
+- **`surprised` and `concentration` are `{@status}`, not `{@condition}`.** Official data
+  has 260 `{@status surprised}` uses and zero condition entries for it. `_sanitizeTagKinds`
+  remaps them; `_HOVERABLE_CONDITIONS` must not list them. Verify a term's *kind* in
+  `data/conditionsdiseases.json` / `data/variantrules.json` before tagging it — the first
+  attempt at this shipped 9 broken hovers.
+- **A tag of the wrong kind must be corrected inside `_enrichHoverTags`.** Demoting one
+  mid-pipeline hides the entry from passes that match on tags — an earlier version deleted
+  a whole trait that way.
+- **A scaling ladder is player-facing progression.** `_collapseScalingLadders` keeps the row
+  that applies; the numeric resolver had been substituting the character's value into the
+  ladder's own *condition* ("when its proficiency bonus **(+5) is +3**"). Runs after
+  `_tagBareDice` and **entry-wide**, never per line.
+- **A conditional feature gates every defence it grants.** Grouped emission
+  (`{resist: [cold, lightning, thunder], note: "(Stormborn)"}`) is the correct shape; a
+  test that reads `x.resist[0]` will report a false failure.
+- **`_flattenOptionTables` exists because not every table is a progression.** A cost table
+  (Font of Magic) or a lookup (Spellsword Technique) has every row live at once, so the
+  row-selecting collapse declines it and generic tag-stripping used to destroy it — the
+  sorcery-point costs were simply gone.
+- **A stated die count is not a roll.** `_resolveStatedDiceAndSpeeds` turns "a number of d8s
+  equal to its Wisdom modifier (5)" into `{@damage 5d8}` and "a Fly Speed equal to its
+  Speed" into a distance. It takes `calculations`, so feature-derived counts (Rage Damage)
+  resolve too, and it runs **before** the dice rules.
+- **`_supplySubordinateClauseSubject` scans comma by comma, not by one regex.** The first
+  comma is often internal to the subordinate clause, and a single match consumes the
+  sentence before reaching the real boundary. Three guards, each earned from a real
+  regression: a modal in the *governing prefix* (not the whole sentence) means the bare
+  form is already correct; the sentence must refer to the NPC or the clause must name it;
+  and a comma-separated **noun list** looks identical to a bare imperative from the left —
+  "acid, cold, fire, **force**, lightning" became "it forces".
+- **Four independent causes defeated coordinated-list conjugation**, each of which alone
+  made the fix look inert: a clause-final adverb read as the governing verb; `it does so`
+  classified as a modal when it is a pro-verb for a finite clause; imperative subjects
+  supplied *last*, so the coordination lookahead inflected the earlier item in place and
+  destroyed the chance to supply "it"; and the `-ly` guard swallowing `apply` in **both**
+  `_conjugateThirdPerson` and the shared adverb-run regex.
+- **Tag a lone action name only when a coordinated run confirms it.** Two or more action
+  names in a run is the signal ("take a Bonus Action to Dash, Disengage, or Hide"); a lone
+  `Hide` or `Attack` in prose is too often the ordinary English word.
+- **The body uses the short name; the title carries the full one.** `_getNpcReferenceName`
+  returns the given name (honorifics kept). One knock-on: the longer name had been pushing
+  an item-flavour sentence past truncation, leaving a trailing `:` that a suppression rule
+  caught — **an entry disappearing is not proof it was correctly suppressed.**
+- **`_ensureTerminalPunctuation` runs after every trim, split and substitution.** Any of
+  them can leave a line without its full stop, which reads as a truncation; it also
+  collapses the `30 ft..` a resolved distance leaves at a sentence end.
+- **Memoize `loadMonster` in the realsaves suite.** Corpus-wide contracts each want all 24
+  characters; without a cache the suite went from ~190 s to over 15 minutes.
 
 ### Ability prose (compact + hoverable)
 - Preserve `{@tags}` through strip/normalize; enrich `{@condition}` / `{@skill}`.

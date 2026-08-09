@@ -6379,31 +6379,30 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					expect(features.some(f => f.name === "Percussive Strike")).toBe(true);
 				});
 
-				it("should calculate Snake Charmer AC bonus from CHA mod", () => {
+				it("should calculate the Dance of the Country AC bonus from CHA mod", () => {
 					state.setAbilityBase("cha", 16); // +3 CHA mod
 
 					const calcs = state.getFeatureCalculations();
-					expect(calcs.hasSnakeCharmer).toBe(true);
 					expect(calcs.danceAcBonus).toBe(3);
 				});
 
-				it("should enforce minimum of 1 for Snake Charmer AC bonus", () => {
+				it("should enforce minimum of 1 for the Dance of the Country AC bonus", () => {
 					state.setAbilityBase("cha", 8); // -1 CHA mod
 
 					const calcs = state.getFeatureCalculations();
 					expect(calcs.danceAcBonus).toBe(1); // minimum 1
 				});
 
-				it("should include Snake Charmer AC bonus in getBonuses() effects", () => {
+				it("should NOT emit a standalone AC-bonus effect (the AC rides on the dancing state)", () => {
 					state.setAbilityBase("cha", 16);
 
 					const calcs = state.getFeatureCalculations();
-					const acEffect = calcs._effects.find(e => e.source === "Snake Charmer");
-
-					expect(acEffect).toBeDefined();
-					expect(acEffect.type).toBe("acBonus");
-					expect(acEffect.value).toBe(3);
-					expect(acEffect.enabled).toBe(false); // Conditional - must be toggled
+					// Historically a phantom "Snake Charmer" acBonus effect was emitted here,
+					// duplicating the `dancing` state's own +CHA AC bonus. There is no such
+					// feature in the TGTT data and enabling it by hand double-counted the AC.
+					expect(calcs.hasSnakeCharmer).toBeUndefined();
+					const acEffect = (calcs._effects || []).find(e => e.type === "acBonus" && /snake charmer|dance of the country/i.test(e.source || ""));
+					expect(acEffect).toBeUndefined();
 				});
 
 				it("should grant Tantalizing Shivers at level 9", () => {
@@ -9904,7 +9903,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					expect(calcs.danceOfTheCountryUses).toBe(6); // Level 17 = prof +6
 				});
 
-				it("should calculate Snake Charmer AC bonus based on CHA modifier", () => {
+				it("should calculate the Dance of the Country AC bonus based on CHA modifier", () => {
 					state.addClass({
 						name: "Rogue",
 						source: "TGTT",
@@ -9914,7 +9913,6 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					state.setAbilityBase("cha", 16); // +3 mod
 
 					let calcs = state.getFeatureCalculations();
-					expect(calcs.hasSnakeCharmer).toBe(true);
 					expect(calcs.danceAcBonus).toBe(3);
 
 					// With CHA 8 (-1), minimum should be 1

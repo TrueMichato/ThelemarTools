@@ -161,7 +161,38 @@ Generic `_subclassGrantedTraditions` pattern feeds into `combatTradition` effect
 
 | Subclass | Status | Key Features |
 |----------|--------|--------------|
-| **Chained Fury** | ✅ Complete | `chainWorthyDamageBonus`, `chainWrapDice`, `breakingTheChainsHp`, `explosiveEntranceRange` |
+| **Path of the Chained Fury** | ✅ Complete | `chainDamageDie`, `chainRange`, `chainCount`, `chainRestrainDc`, `chainRestrainDamage`, `chainGrappleSizeBonus`, `grappleSizeUnlimited`, `grantedAttacks`, `attackOnHitOptions`, `attackActionAllowances` |
+
+#### Path of the Chained Fury — mechanical surface
+
+The chains are a **rage-gated sub-state**, not an always-on grant. `manifestChains`
+(`ACTIVE_STATE_TYPES`) declares `requiresStates: ["rage"]`, so it cannot be
+activated outside Rage, and `deactivateState("rage")` cascades it off — which is
+exactly the RAW "they vanish when your rage ends". It inherits Rage's
+`breaksConcentration` and `exclusiveWith` without restating either.
+
+| Level | Feature | Implementation |
+|---|---|---|
+| 3 | Manifest Chains | `manifestChains` toggle; a `grantedAttacks` descriptor (`Spectral Chains`, finesse, force, `reachBonus`, `requiresState: "manifestChains"`) that appears in the Combat attack list with a `✨ Feature` badge; `attackOnHitOptions` `chains-grapple` / `chains-shove`; grapple size +1 |
+| 6 | Chain Imprisonment | `countsAsMagical` on the chains (renders a `✧ Magical` badge); `chains-restrain` on-hit rider with a STR save at `8 + PB + STR` and recurring damage |
+| 10 | Chain Control | grapple size bonus → +2; `chains-control-shove` on-hit rider |
+| 14 | Unchained Fury | `chainCount` 2 → 4; `attackActionAllowances` entry (3 attacks with the chains per Attack action); `grappleSizeUnlimited` (no size cap) |
+
+Damage die and range are read from the subclass's **`subclassTableGroups`** via
+`CharacterSheetClassUtils.getSubclassTableDice` / `getSubclassTableNumber`, never
+hardcoded — 1d8/1d10/1d12/2d6 and 15/20/25/30 ft. A hardcoded fallback exists only
+because `addClass` stores lean `{name, source}` subclass refs, so the table is
+often absent at calculation time.
+
+**Reach:** the chains contribute a per-attack `reachBonus`, *not* a global reach
+effect — a global one would wrongly extend the character's greataxe too. See
+`getReachContributions()` / `getAttackReach()`.
+
+**On-hit riders are never auto-applied.** Whether the attack hit, and whether the
+player wants to spend the rider, are facts the sheet cannot know (there is no
+target model). They surface through the generic `featureOnHitOptions` post-attack
+hook as a confirm-then-pick prompt.
+
 
 ### ✅ Bard Colleges
 
@@ -219,6 +250,36 @@ rejected. Prefer this over adding a bespoke state type.
 | Conclave | Status | Key Features |
 |----------|--------|--------------|
 | **Primal Focus** | ✅ Complete | `predatorMode` / `preyMode` toggle, mode-specific bonuses |
+
+### ✅ Rogue Archetypes
+
+| Archetype | Status | Key Features |
+|-----------|--------|--------------|
+| **The Belly Dancer** | ✅ Complete | `dancing` toggle state (+CHA AC, min +1; Acrobatics advantage; melee Sneak Attack without advantage; DC 10 CON save on end or gain 1 exhaustion); `hasConcealedWeapons`, `danceEndSaveDc`; gated `tantalizingShivers` + `percussiveStrike` states; Fluid Step Disengage benefit |
+
+#### The Belly Dancer — feature-by-feature
+
+| Lvl | Feature | Mechanical effect on the sheet |
+|---|---|---|
+| 3 | **Bonus Proficiency** | Performance Expertise (`getSkillProficiency("performance") === 2`); `hasConcealedWeapons` plus a **conditional** Sleight of Hand advantage ("to keep a weapon you are holding hidden"), opt-in per roll like every other conditional modifier |
+| 3 | **Dance of the Country** | Bonus-action `dancing` toggle costing 1 of PB/short rest. While active: AC + CHA mod (**minimum +1**), advantage on Dex (Acrobatics), and `sneakAttackWithoutAdvantage` for **melee** attacks. Ends on Incapacitated / Paralyzed / Restrained / donning heavy armor / 1 minute; ending triggers a **DC 10 Constitution** save, failure = 1 exhaustion |
+| 9 | **Tantalizing Shivers** | Separate toggle, `requiresStates: ["dancing"]`. Activation rolls a **Charisma (Performance)** contest vs the target's Wisdom (Insight) *before* spending anything; winning grants advantage on attacks for 1 round |
+| 13 | **Fluid Step** | `grantsActionBenefit: "disengage"` while Dancing → `hasActionBenefitFromStates("disengage")`. The reciprocal clause (enemies can't Disengage from you) is a rules note only — see **CS-BUG-115** |
+| 17 | **Percussive Strike** | Free-action toggle, `requiresStates: ["dancing"]`, DC = `8 + PB + CHA` via `getPercussiveStrikeDc()`, surfaced in the Combat tab; grants advantage on attacks and lasts as long as the Dance |
+
+> **Dance of the Country is a toggle, not a choice.** The homebrew text reads
+> "you can start Dancing, and can stop doing so at will" — there is no list of
+> dances to pick from. A regression test in
+> `test/jest/charactersheet/CharacterSheetBellyDancer.test.js` asserts this
+> against the live homebrew JSON so a future "dance selector" is not built on a
+> misreading.
+
+> **There is no "Snake Charmer" feature.** An earlier implementation carried a
+> `hasSnakeCharmer` calculation and an `acBonus` effect under that name; no such
+> feature exists in `homebrew/TravelersGuidetoThelemar.json`. It gated on
+> `isStateActive("dancing")` (an *instance*-id lookup, permanently false) and
+> duplicated the Dance's own AC bonus. Both are removed and guarded by a
+> regression test.
 
 ### ✅ Sorcerer Origins
 
