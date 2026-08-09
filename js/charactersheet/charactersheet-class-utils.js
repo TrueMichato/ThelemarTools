@@ -2972,6 +2972,18 @@ class CharacterSheetClassUtils {
 				}
 
 				if (/** @type {*} */ typeof entry === "object" && entry.type === "options") {
+					// An options group whose children are ALL `refOptionalfeature` documents a
+					// shared pool (Fighting Style, Maneuvers, Metamagic, Eldritch Invocations,
+					// Arcane Shots, Battle Tactics, Jester's Acts, Trickster's Tricks,
+					// Dreamwalker Abilities, Pact Boon, Precise Strike Methods …). Every one of
+					// the 22 such groups in the repo is paired with an `optionalfeatureProgression`,
+					// which is what actually decides how many picks the character gets and at
+					// which levels. Prompting from the wrapper too asked for the pick a SECOND
+					// time and handed out an extra option (a level-3 Jester ended up knowing 4
+					// acts instead of 3).
+					if (Array.isArray(entry.entries) && entry.entries.length
+						&& entry.entries.every(o => o?.type === "refOptionalfeature")) continue;
+
 					const count = entry.count || 1;
 					const options = [];
 
