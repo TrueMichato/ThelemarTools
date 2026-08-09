@@ -7387,9 +7387,14 @@ reachability result is a static enumeration at `8e967c3e`; the DOM click remains
 unperformed.
 ---
 
-## CS-BUG-115 — a feature caught by BOTH the initiative text-parse and a curated calc effect mints two modifier rows; the totals only stay correct because the two numeric chokepoints disagree
+## CS-BUG-118 — a feature caught by BOTH the initiative text-parse and a curated calc effect mints two modifier rows; the totals only stay correct because the two numeric chokepoints disagree
 
 **Severity:** low today, latent-high. **Status:** open, measured, pinned by a test.
+
+**Renumbered from CS-BUG-115.** Two sessions independently claimed 115 while
+working in parallel branches; the entries merged cleanly because they sit at
+different heading levels in different sections, so neither side saw a conflict.
+115 stays with the Fluid Step entry (Belly Dancer), which landed on trunk first.
 
 Right on Time (Cleric / Time Domain, TGTT) — "you add your Wisdom modifier to
 your initiative" — is captured twice:
@@ -7449,7 +7454,7 @@ checked against the `:1230` pattern before that route is unified.
 
 `test/jest/charactersheet/CharacterSheetTGTT.test.js` →
 *"does not double-count initiative despite the duplicate modifier row
-(CS-BUG-115)"* asserts both rows exist, exactly one is `0`, and
+(CS-BUG-118)"* asserts both rows exist, exactly one is `0`, and
 `getInitiative()` is 3 and not 6. It fails loudly if a future fix doubles the
 value instead of removing the duplicate.
 

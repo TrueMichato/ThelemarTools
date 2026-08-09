@@ -5812,7 +5812,10 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				function makeTimeCleric (level, {wis = 18} = {}) {
 					const sub = TGTT_BREW.subclass.find(s => s.name === "Time Domain" && s.className === "Cleric");
 					state.addClass({
-						name: "Cleric", source: "TGTT", level, hitDice: "d8",
+						name: "Cleric",
+						source: "TGTT",
+						level,
+						hitDice: "d8",
 						subclass: JSON.parse(JSON.stringify(sub)),
 					});
 					state.setAbilityBase("wis", wis);
@@ -5839,7 +5842,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					expect(state.getInitiative()).toBe(5);
 				});
 
-				// CS-BUG-115: the feature is captured BOTH by the generic
+				// CS-BUG-118: the feature is captured BOTH by the generic
 				// "add your <ability> modifier to initiative" text-parse (which mints an
 				// inert `abilityMod` row) and by the curated calc effect (which mints the
 				// live +WIS row), so two same-named rows appear in the modifiers list.
@@ -5848,7 +5851,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				// this test pins that the TOTAL stays right, and documents the duplicate
 				// so a future fix to `_getNamedModifierEffectiveValue` cannot silently
 				// double it to +6.
-				it("does not double-count initiative despite the duplicate modifier row (CS-BUG-115)", () => {
+				it("does not double-count initiative despite the duplicate modifier row (CS-BUG-118)", () => {
 					makeTimeCleric(3, {wis: 16});
 					const rows = state.getNamedModifiers()
 						.filter(m => m.type === "initiative" && m.note?.includes("Right on Time"));
