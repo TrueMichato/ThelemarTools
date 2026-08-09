@@ -7578,6 +7578,9 @@ Improvement" from the `featRadios` pool.
 This was a *test-infra* defect, not a product defect — the sheet renders the
 combined ASI+feat step correctly. It is recorded here because it silently
 suppressed L4+ coverage for the whole TGTT suite.
+
+---
+
 ## CS-BUG-119 — "action-economy" feature grants are computed into write-only `calculations` keys with zero product consumers
 
 **Status**: Open (documented, not fixed — no generic surface exists yet)

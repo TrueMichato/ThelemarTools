@@ -16,7 +16,6 @@
 
 import "./setup.js";
 import fs from "fs";
-import {readFileSync} from "fs";
 import {join, dirname} from "path";
 import {fileURLToPath} from "url";
 
@@ -26,7 +25,7 @@ import {fileURLToPath} from "url";
 // about the parser — and would silently keep passing if the homebrew text changed.
 const TGTT_ACTS = (() => {
 	const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
-	const brew = JSON.parse(readFileSync(join(repoRoot, "homebrew/TravelersGuidetoThelemar.json"), "utf8"));
+	const brew = JSON.parse(fs.readFileSync(join(repoRoot, "homebrew/TravelersGuidetoThelemar.json"), "utf8"));
 	const out = new Map();
 	for (const of_ of brew.optionalfeature || []) {
 		if ((of_.featureType || []).includes("JA")) out.set(of_.name, of_);
@@ -9765,6 +9764,77 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						"the target is fooled until it makes a dc equal to your performance check.",
 					)).toBeNull();
 					expect(CharacterSheetState._buildRolledSaveDcInfo("")).toBeNull();
+				});
+
+				it("rolls the DC BEFORE the resource is deducted, so cancelling costs nothing", () => {
+					// Load-bearing ORDERING invariant, shared with `contestedCheck` and the
+					// mirror-image `endSave`. It is invisible to a behavioural test: moving
+					// the spend above the roll leaves every other assertion green while
+					// silently charging players for activations they cancelled.
+					// `_pResolveRolledSaveDc` returns false on cancel, and the caller must
+					// `return` at that point — which is only correct if nothing was spent yet.
+					const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+					const src = fs.readFileSync(join(repoRoot, "js/charactersheet/charactersheet.js"), "utf8");
+					const body = src.slice(src.indexOf("async _activateFeatureState ("));
+
+					const idxRoll = body.indexOf("_pResolveRolledSaveDc(");
+					const idxContest = body.indexOf("_pResolveContestedCheck(");
+					const idxSpend = body.indexOf("setResourceCurrent(resource.id, resource.current - cost)");
+
+					expect(idxRoll).toBeGreaterThan(-1);
+					expect(idxSpend).toBeGreaterThan(-1);
+					expect(idxRoll).toBeLessThan(idxSpend);
+					// Same guarantee for the sibling descriptor.
+					expect(idxContest).toBeGreaterThan(-1);
+					expect(idxContest).toBeLessThan(idxSpend);
+				});
+
+				it("surfaces Jester's Privilege as a long-rest activatable carrying its rolled DC", () => {
+					// End-to-end for the whole L14 path, in the shape the BROWSER produces.
+					//
+					// `detectActivatableFeature` early-returns on a feature with no rendered
+					// `description` unless it carries a marker (`consumes`, the "JA" type, a
+					// classification override...). Jester's Acts carry the "JA" marker so they
+					// survive entries-only; a plain subclass feature like Jester's Privilege
+					// does NOT. The sheet's own attach path always populates `description`, so
+					// this is only ever a hazard for hand-built fixtures — which is exactly why
+					// this test builds the feature the way the product does, verbatim from the
+					// homebrew. A fixture without `description` silently measures nothing here.
+					const priv = TGTT_BREW.subclassFeature.find(f => f.subclassShortName === "Jesters" && f.name === "Jester's Privilege");
+					expect(priv).toBeTruthy();
+
+					state.addClass({
+						name: "Bard",
+						source: "TGTT",
+						level: 14,
+						subclass: {name: "College of Jesters", shortName: "Jesters", source: "TGTT"},
+					});
+					state.addFeature({
+						name: priv.name,
+						source: "TGTT",
+						entries: priv.entries,
+						description: priv.entries.join(" "),
+						level: priv.level,
+						className: "Bard",
+						subclassShortName: "Jesters",
+					});
+
+					const row = state.getActivatableFeatures().find(r => r.feature?.name === "Jester's Privilege");
+					expect(row).toBeTruthy();
+					// Not a persistent toggle — a one-shot use.
+					expect(row.activationInfo.isToggle).toBe(false);
+					expect(row.activationInfo.interactionMode).toBe("limited");
+					// "Once you use this ability, you cannot use it again until you finish a
+					// long rest" ⇒ it costs a use of its own pool.
+					expect(row.activationInfo.resourceCost).toBe(1);
+					// …and the DC descriptor rode along, so the roll actually happens on Use.
+					expect(row.activationInfo.rolledSaveDc).toEqual({
+						skill: "performance",
+						skillLabel: "Performance",
+						ability: "cha",
+						saveAbility: "wis",
+						range: 60,
+					});
 				});
 
 				it("should track spells granted by acts", () => {

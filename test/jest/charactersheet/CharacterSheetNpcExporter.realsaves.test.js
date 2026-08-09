@@ -37,7 +37,12 @@ const SAVE_NAMES = [
 ];
 
 const available = SAVE_NAMES.filter(n => fs.existsSync(path.join(SAVE_DIR, `${n}.json`)));
+// `npc-exports/` is an untracked local corpus, so it is absent from every worktree and
+// every fresh clone. `describe.skip.each([])` still THROWS ("called with an empty Array
+// of table data"), so the skip guard alone is not enough — the table has to be non-empty
+// for `.each` to be legal at all. Feed it a placeholder that is only ever skipped.
 const describeReal = available.length ? describe : describe.skip;
+const availableTable = available.length ? available : ["(no npc-exports/ corpus present)"];
 
 // The app seeds this from loaded homebrew; without it `getDivineFavorGodData()` returns
 // null and the exporter can never resolve a god's tiers.
@@ -93,7 +98,7 @@ const expectNoDuplicateSpells = (label, list) => {
 };
 
 describeReal("CharacterSheetNpcExporter — real saves", () => {
-	describe.each(available)("%s", name => {
+	describe.each(availableTable)("%s", name => {
 		let mon;
 		let text;
 		beforeAll(() => {
@@ -535,7 +540,7 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 });
 
 describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
-	describe.each(available)("%s", name => {
+	describe.each(availableTable)("%s", name => {
 		let mon;
 		let text;
 		beforeAll(() => {
