@@ -7201,3 +7201,68 @@ outcome for users and the worse one for anyone who assumed the feature worked.
 **Bound:** driven through the state API with the two statements copied verbatim
 from `:2446` and `:2460-2461`, plus a static trace of the dispatch chain
 `:921 → :1074 → :1922 → :2003 → :2439`. The DOM click itself was not performed.
+
+### Amendment 3 — the one-word repair is a *three-way* divergence, not "both feats lost"; and the reported ASI path is unreachable
+
+Two claims arrived from `truemichato-wicked-witch-sorcerer` after amendment 2.
+One is refuted, one is accepted and strengthens the entry. Both were re-derived
+here rather than taken on report.
+
+> **Line-number note.** Everything above this amendment was measured at
+> `208a85eb`; this amendment is measured at `8e967c3e`, where
+> `charactersheet-respec.js` has shifted by two lines. The same statements are
+> `:2446 → :2444`, `:2443 → :2441`, `:2460-2461 → :2458-2459`. Nothing about the
+> defect changed — only the offsets.
+
+**Refuted — there is no non-throwing branch.** The report proposed that
+respeccing a level that took an *ASI* rather than a feat reaches
+`_applyFeatChange` with a falsy `oldFeat`, skips the throwing block, and diverges
+silently. It does not: ASI and feat are separate editable rows with separate
+handlers. Enumerated at `8e967c3e`:
+
+```
+type: "feat" producers in charactersheet-respec.js   ->  1   (:923, gated :921 on history.choices?.feat)
+_editFeat call sites                                 ->  1   (:1075, case "feat")
+_applyFeatChange call sites                          ->  1   (:2001, inside _editFeat)
+_editFeat / _applyFeatChange outside respec.js       ->  0   (tree-wide)
+_getEditableChoices / _showEditModal call sites      ->  1 each (:659 / :667, same `history` object)
+```
+
+`case "asi"` routes to `_editAsi` (`:1071`), which never reaches
+`_applyFeatChange`. So `oldFeat` is truthy on every invocation and `:2444` throws
+on every invocation — the original finding stands unmodified. This is the *same*
+enumeration that refuted the *original* report's "no-ops silently" branch; the
+falsy-`oldFeat` branch has now been claimed twice, by two sessions, and is
+unreachable both times.
+
+**Accepted, and worse than amendment 2 said.** Amendment 2 measured the one-word
+repair (`_character` → `_data`) as losing both feats. That understates it: the
+statements *below* the discarded `push` write to **real** state, so the repaired
+function leaves three subsystems disagreeing. Driven with the verbatim bodies of
+`getFeatures` (`charactersheet-state.js:37932`) and `updateLevelChoice`
+(`:8564`), swapping Alert → Resilient at level 4:
+
+```
+                     BEFORE            AFTER (one-word repair applied)
+_data.features       ["Alert"]         []            <- old destroyed, new never added
+_data.abilities.dex  14                15            <- Resilient's +1 APPLIED (real write, :2472)
+levelHistory.choices Alert             Resilient     <- real write (:2481)
+```
+
+*(positive control: `dex` 14 → 15 proves the sequence executed rather than
+short-circuiting.)*
+
+All three of `_data.features`, `_data.abilities` and `_data.levelHistory`
+serialize, so this **survives save/load**. The result is a character whose level
+history claims a feat it does not have, carrying that feat's ability increase,
+with an empty features list — and no error, because nothing throws any more.
+
+This sharpens fix step 2 from "should" to "must, in the same change": repairing
+`:2444` without simultaneously replacing `:2458-2459` with `addFeature(...)`
+converts a visible total failure into an invisible partial one. The two limbs are
+not merely stacked; the second limb's *neighbours* are live, which is why a
+partial repair produces divergence rather than a no-op.
+
+**Bound:** state API driven with the source statements copied verbatim; the
+reachability result is a static enumeration at `8e967c3e`; the DOM click remains
+unperformed.
