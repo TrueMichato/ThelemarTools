@@ -768,6 +768,13 @@ export type EffectCheck = _EffectCommon & (
 		 * mechanical-effect probe is built (`setCurrentHp` → `takeDamage` → `getCurrentHp`).
 		 */
 		ignoreResult?: boolean;
+		/**
+		 * Assert the call returns `null`/`undefined`. Distinct from `ignoreResult`,
+		 * which asserts nothing: a feature being deliberately UNAVAILABLE in a given
+		 * state (e.g. a "while Dancing" ability queried outside the Dance) is a real,
+		 * assertable mechanic, and without this the absent case is unexpressible.
+		 */
+		isNull?: boolean;
 	}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
@@ -1304,6 +1311,10 @@ async function _runPassiveOrRollEffect (
 			if ((value as any).__missing) throw new Error(`${label}: state method is missing`);
 			if ((value as any).__threw) throw new Error(`${label} threw: ${(value as any).__threw}`);
 			const actual = (value as any).value;
+			if (e.isNull) {
+				if (actual != null) throw new Error(`${label}=${JSON.stringify(actual)}, expected null`);
+				return;
+			}
 			if (e.exact !== undefined && actual !== e.exact) throw new Error(`${label}=${JSON.stringify(actual)}, expected ${JSON.stringify(e.exact)}`);
 			if (e.min !== undefined && (typeof actual !== "number" || actual < e.min)) throw new Error(`${label}=${JSON.stringify(actual)}, expected >= ${e.min}`);
 			if (e.contains !== undefined) {

@@ -188,6 +188,36 @@ Generic `_subclassGrantedTraditions` pattern feeds into `combatTradition` effect
 |----------|--------|--------------|
 | **Primal Focus** | ✅ Complete | `predatorMode` / `preyMode` toggle, mode-specific bonuses |
 
+### ✅ Rogue Archetypes
+
+| Archetype | Status | Key Features |
+|-----------|--------|--------------|
+| **The Belly Dancer** | ✅ Complete | `dancing` toggle state (+CHA AC, min +1; Acrobatics advantage; melee Sneak Attack without advantage; DC 10 CON save on end or gain 1 exhaustion); `hasConcealedWeapons`, `danceEndSaveDc`; gated `tantalizingShivers` + `percussiveStrike` states; Fluid Step Disengage benefit |
+
+#### The Belly Dancer — feature-by-feature
+
+| Lvl | Feature | Mechanical effect on the sheet |
+|---|---|---|
+| 3 | **Bonus Proficiency** | Performance Expertise (`getSkillProficiency("performance") === 2`); `hasConcealedWeapons` plus a **conditional** Sleight of Hand advantage ("to keep a weapon you are holding hidden"), opt-in per roll like every other conditional modifier |
+| 3 | **Dance of the Country** | Bonus-action `dancing` toggle costing 1 of PB/short rest. While active: AC + CHA mod (**minimum +1**), advantage on Dex (Acrobatics), and `sneakAttackWithoutAdvantage` for **melee** attacks. Ends on Incapacitated / Paralyzed / Restrained / donning heavy armor / 1 minute; ending triggers a **DC 10 Constitution** save, failure = 1 exhaustion |
+| 9 | **Tantalizing Shivers** | Separate toggle, `requiresStates: ["dancing"]`. Activation rolls a **Charisma (Performance)** contest vs the target's Wisdom (Insight) *before* spending anything; winning grants advantage on attacks for 1 round |
+| 13 | **Fluid Step** | `grantsActionBenefit: "disengage"` while Dancing → `hasActionBenefitFromStates("disengage")`. The reciprocal clause (enemies can't Disengage from you) is a rules note only — see **CS-BUG-115** |
+| 17 | **Percussive Strike** | Free-action toggle, `requiresStates: ["dancing"]`, DC = `8 + PB + CHA` via `getPercussiveStrikeDc()`, surfaced in the Combat tab; grants advantage on attacks and lasts as long as the Dance |
+
+> **Dance of the Country is a toggle, not a choice.** The homebrew text reads
+> "you can start Dancing, and can stop doing so at will" — there is no list of
+> dances to pick from. A regression test in
+> `test/jest/charactersheet/CharacterSheetBellyDancer.test.js` asserts this
+> against the live homebrew JSON so a future "dance selector" is not built on a
+> misreading.
+
+> **There is no "Snake Charmer" feature.** An earlier implementation carried a
+> `hasSnakeCharmer` calculation and an `acBonus` effect under that name; no such
+> feature exists in `homebrew/TravelersGuidetoThelemar.json`. It gated on
+> `isStateActive("dancing")` (an *instance*-id lookup, permanently false) and
+> duplicated the Dance's own AC bonus. Both are removed and guarded by a
+> regression test.
+
 ### ✅ Sorcerer Origins
 
 | Origin | Status | Key Features |

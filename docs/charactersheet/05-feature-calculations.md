@@ -433,6 +433,24 @@ hasDeviousStrikes: true,          // Level 14+
 
 #### Rogue Subclasses
 
+**The Belly Dancer** (TGTT homebrew)
+```javascript
+hasBonusProficiency: true,        // Level 3 — Performance Expertise
+hasConcealedWeapons: true,        // Level 3 — conditional Sleight of Hand adv
+hasDanceOfTheCountry: true,       // Level 3 — the `dancing` toggle state
+danceEndSaveDc: 10,               // CON save when the Dance ends
+hasTantalizingShivers: true,      // Level 9+
+hasFluidStep: true,               // Level 13+
+hasPercussiveStrike: true,        // Level 17+
+percussiveStrikeDc: 8 + profBonus + CHA,
+```
+The AC bonus, Acrobatics advantage and melee Sneak-Attack licence are **not**
+calculations — they are effects on the `dancing` active state, so they exist
+only while the Dance is running. Read them via `getBonusFromStates("ac")`,
+`getSkillAdvantageState("acrobatics")` and
+`canSneakAttackWithoutAdvantage({isMelee})`. There is deliberately no
+`hasSnakeCharmer` — no such feature exists in the TGTT data.
+
 **Assassin**
 ```javascript
 hasAssassinate: true,

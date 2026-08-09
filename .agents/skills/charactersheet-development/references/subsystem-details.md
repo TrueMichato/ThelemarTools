@@ -130,6 +130,44 @@ mastery.
 chosen weapon. Both activations use dedicated controller paths because they
 also pay resources or HP before the state is created.
 
+### Level-Dependent Effects (`effectsBuilder`)
+
+A state type may declare `effectsBuilder: "<methodName>"`. `activateState()`
+calls `this[methodName]()` whenever the caller passed no explicit
+`options.customEffects`, so every activation path gets level-correct effects
+without a bespoke `activateState(id, {customEffects: …})` call site. This
+generalises the older `getLaunchMomentumEffects()` pattern; new features should
+prefer it. Keep the literal `effects` array as a sane fallback. First customer:
+`dancing` (Belly Dancer) → `getDancingEffects()`.
+
+### Prerequisite States (`requiresStates`) and End Saves (`endSave`)
+
+`requiresStates: ["dancing"]` hides a toggle from `getActivatableFeatures()`
+until the prerequisite runs, and `deactivateState` drops dependents when it
+ends — no bespoke "while Dancing" visibility logic.
+
+`endSave: {ability, dc, onFailure: {exhaustion: 1}, label}` declares a save made
+when the state ends. `getStateEndSave(id)` reads it,
+`resolveStateEndSave(id, {total})` applies consequences, and
+`charactersheet.js` `_pResolveStateEndSave` rolls it from the "End" button —
+*after* deactivation, so the state's own bonuses don't inflate the roll.
+
+### Contested Activation (`activationInfo.contestedCheck`)
+
+A detected activatable feature may carry
+`{skill, skillLabel, ability, opposedBy}`. `_activateFeatureState` rolls the
+character's side via `_rollSkillCheck(skill, label, null, ability)` **before**
+any resource deduction, then asks whether it beat the opposed roll. Losing or
+cancelling costs nothing. The sheet does not model the opponent, so it rolls
+honestly and asks rather than inventing the enemy's result. First customer:
+Tantalizing Shivers (CHA (Performance) vs WIS (Insight)).
+
+### `grantsActionBenefit`
+
+`{type: "grantsActionBenefit", action: "disengage", source}` on an active state
+grants a named action's benefit for free; read via
+`hasActionBenefitFromStates(action)`. First customer: Fluid Step.
+
 ## Combat System
 
 ### Attack Bonus Calculation
@@ -147,6 +185,7 @@ total = abilityMod + profBonus + weaponBonus + featureAttackBonus + stateAttackB
 - **Cunning Strikes**: Subtract dice BEFORE rolling (e.g., 5d6 SA - 2d6 CS cost = 3d6 damage)
 - **Auto-enable**: After eligible attack when conditions met (advantage or ally adjacent), SA auto-activates
 - **Advantage detection**: Checks BOTH `rollD20` mode AND `hasAdvantage`/`hasDisadvantage` flags from active states
+- **State licence**: an active state carrying `{type: "sneakAttackWithoutAdvantage", meleeOnly?}` waives the trigger entirely. Read via `canSneakAttackWithoutAdvantage({isMelee})`; consumed by the auto-enable path, `_isSneakAttackTriggerSatisfied` and the toggle's condition pills. First customer: Belly Dancer's Dance of the Country (melee only)
 
 ### Action Economy Tracking
 

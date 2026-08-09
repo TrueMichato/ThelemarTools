@@ -69,6 +69,9 @@ static ACTIVE_STATE_TYPES = {
 | `requiresClassLevel` | number | Minimum level (optional) |
 | `isGeneric` | boolean | If true, effects parsed from feature |
 | `useFeatureDescription` | boolean | Show feature description instead of generic |
+| `effectsBuilder` | string | Name of a `CharacterSheetState` method returning level-correct effects; overrides `effects` on activation |
+| `requiresStates` | array | State type ids that must be active for this toggle to be offered; dropped automatically when a prerequisite ends |
+| `endSave` | object | `{ability, dc, onFailure, label}` — a save rolled when the state ends |
 
 ### Astral Self state lifecycle
 
@@ -155,7 +158,108 @@ applies ranges, ability modifiers, and action-economy costs before rendering.
 {type: "sizeIncrease", value: 1}              // Count as one size larger
 {type: "replaceStats", targets: ["str", "dex"]} // Wild Shape stat replacement
 {type: "note", value: "Description text"}     // Informational note
+{type: "sneakAttackWithoutAdvantage", meleeOnly: true} // Waives the SA trigger
+{type: "grantsActionBenefit", action: "disengage", source: "Fluid Step"}
 ```
+
+#### `sneakAttackWithoutAdvantage`
+
+Waives the usual Sneak Attack trigger (advantage, or an ally within 5 ft.)
+for as long as the state is active. Read via
+`canSneakAttackWithoutAdvantage({isMelee})`; `meleeOnly: true` restricts the
+licence to melee attacks. The combat panel consumes it in three places —
+the post-attack auto-enable, `_isSneakAttackTriggerSatisfied` (so the "no
+advantage and no adjacent ally" warning stops lying), and the Sneak Attack
+toggle's condition pills, which gain a `<StateName>: no advantage needed`
+row.
+
+First customer: the Belly Dancer's Dance of the Country ("you can make a
+Sneak Attack against creatures within your melee range without the need for
+advantage").
+
+#### `grantsActionBenefit`
+
+Grants the benefit of a named action (`"disengage"`, `"dodge"`, `"dash"`, …)
+without spending the action. Read via `hasActionBenefitFromStates(action)`.
+First customer: Fluid Step (Belly Dancer 13).
+
+### Level-dependent effects (`effectsBuilder`)
+
+A state type's literal `effects` array is static, but many features change
+what the state *does* as the character levels (the Belly Dancer's Dance
+gains a Disengage benefit at 13 and a Percussive Strike rider at 17).
+Rather than special-casing each one at the call site, a state type may
+declare an `effectsBuilder` — the name of a `CharacterSheetState` method
+that returns the effect list:
+
+```javascript
+dancing: {
+    // …
+    effects: [ /* safe static fallback */ ],
+    effectsBuilder: "getDancingEffects",
+}
+```
+
+`activateState()` calls it automatically whenever the caller did not pass an
+explicit `options.customEffects`, so every activation path — the Overview
+toggle, a direct `activateState()`, a save/load restore — gets the same
+level-correct effects. This generalises the older bespoke
+`activateState(id, {customEffects: this.getLaunchMomentumEffects()})`
+pattern; new features should prefer `effectsBuilder`.
+
+The literal `effects` array should remain a sane fallback for any caller
+that reads `ACTIVE_STATE_TYPES[x].effects` without an activation.
+
+### States that require another state (`requiresStates`)
+
+`requiresStates: ["dancing"]` makes a toggle **invisible** in
+`getActivatableFeatures()` until its prerequisite state is running, and
+`deactivateState` drops dependents automatically when the prerequisite ends.
+This is how "while Dancing" abilities (Tantalizing Shivers, Percussive
+Strike) are gated — no bespoke visibility logic required.
+
+### End-of-state saving throws (`endSave`)
+
+A state type may declare a saving throw made **when the state ends**, with
+declared consequences on a failure:
+
+```javascript
+endSave: {
+    ability: "con",
+    dc: 10,
+    onFailure: {exhaustion: 1},
+    label: "Dance of the Country",
+}
+```
+
+`getStateEndSave(stateTypeId)` returns the descriptor;
+`resolveStateEndSave(stateTypeId, {total})` applies the consequences and
+returns `{success, dc, ability, exhaustionGained}`. The UI wiring lives in
+`charactersheet.js` `_pResolveStateEndSave`, called from the "End" button on
+an active state — the roll is made *after* deactivation so the state's own
+bonuses don't inflate it.
+
+### Activation-time contested checks (`activationInfo.contestedCheck`)
+
+Some abilities only take effect if you win a contest. A detected activatable
+feature may carry:
+
+```javascript
+contestedCheck: {
+    skill: "performance",
+    skillLabel: "Performance",
+    ability: "cha",           // override ability — CHA (Performance)
+    opposedBy: "Wisdom (Insight)",
+}
+```
+
+`_activateFeatureState` rolls the character's side through
+`_rollSkillCheck(skill, label, null, ability)` **before** deducting any
+resource, then asks whether it beat the opposed roll. Losing the contest —
+or cancelling — costs nothing. The opposing creature is not modelled by the
+sheet, so the sheet rolls honestly and asks for the outcome rather than
+inventing one.
+
 
 ### Speeds that track the walking speed
 

@@ -18034,24 +18034,32 @@ class CharacterSheetState {
 							case "The Belly Dancer": {
 								const chaMod = this.getAbilityMod("cha");
 
-								// Dance of the Country (level 3) - perform a traditional dance
-								// Uses = proficiency bonus, regained on short or long rest
+								// Bonus Proficiency (level 3) — Expertise in Performance (the
+								// generic text parser grants that from the feature prose) plus
+								// the ability to treat held weapons as having the Concealed
+								// (TGTT) trait: advantage on Dexterity (Sleight of Hand) checks
+								// made to keep the weapon hidden.
+								if (level >= 3) {
+									calculations.hasConcealedWeapons = true;
+								}
+
+								// Dance of the Country (level 3) — a bonus-action toggle
+								// (the `dancing` active state). Uses = proficiency bonus,
+								// regained on a short rest. While Dancing: +CHA to AC
+								// (minimum +1), advantage on Dexterity (Acrobatics), and
+								// Sneak Attack in melee without needing advantage.
 								if (level >= 3) {
 									calculations.hasDanceOfTheCountry = true;
 									calculations.danceOfTheCountryUses = profBonus;
-								}
-
-								// Snake Charmer (level 3) - bonus AC when dancing
-								// AC bonus = CHA modifier (minimum 1)
-								if (level >= 3) {
-									calculations.hasSnakeCharmer = true;
 									calculations.danceAcBonus = Math.max(1, chaMod);
+									calculations.danceEndSaveDc = 10;
 								}
 
 								// Tantalizing Shivers (level 9) - charm with dance
-								// Bonus action: Performance vs Insight contest
-								// On success: target charmed + incapacitated, speed 0
-								// Advantage on attacks vs charmed target
+								// Bonus action while Dancing: Charisma (Performance) contested
+								// by the target's Wisdom (Insight). On success the creature is
+								// charmed + incapacitated with speed 0 for one round, and you
+								// have advantage on attack rolls against it.
 								if (level >= 9) {
 									calculations.hasTantalizingShivers = true;
 								}
@@ -26874,15 +26882,22 @@ class CharacterSheetState {
 
 		// ===== TGTT ROGUE SUBCLASSES =====
 
-		// Belly Dancer - Snake Charmer: AC bonus = CHA mod (while dancing/unarmored)
-		if (calculations.hasSnakeCharmer && calculations.danceAcBonus && !alreadyProcessed("Snake Charmer")) {
-			const isDancing = this.isStateActive("dancing");
+		// Belly Dancer — Bonus Proficiency: held weapons gain the Concealed (TGTT)
+		// trait, i.e. advantage on Dexterity (Sleight of Hand) checks made to keep
+		// a weapon hidden. Declared as a CONDITIONAL skill advantage so it surfaces
+		// in the per-roll conditional picker rather than silently applying to every
+		// Sleight of Hand check.
+		//
+		// NOTE: the Dance of the Country AC bonus is deliberately NOT emitted here.
+		// It rides entirely on the `dancing` active state (see `getDancingEffects`),
+		// so there is exactly one source of truth and no risk of the conditional
+		// modifier being enabled by hand on top of the state bonus.
+		if (calculations.hasConcealedWeapons && !alreadyProcessed("Bonus Proficiency")) {
 			effects.push({
-				type: "acBonus",
-				value: calculations.danceAcBonus,
-				source: "Snake Charmer",
-				conditional: "while dancing, not wearing armor",
-				enabled: isDancing,
+				type: "skillAdvantage",
+				skill: "sleightofhand",
+				source: "Bonus Proficiency (Concealed)",
+				conditional: "to keep a weapon you are holding hidden",
 			});
 		}
 
@@ -35325,6 +35340,132 @@ class CharacterSheetState {
 
 	/** @returns {boolean} True while a spent Launch is still arming the next melee attack. */
 	hasLaunchMomentum () { return this.isStateTypeActive("launchMomentum"); }
+
+	// #region Belly Dancer (TGTT Rogue) — Dance of the Country
+
+	/**
+	 * The `dancing` state's effect list, resolved at activation time because it
+	 * scales with the Belly Dancer's level (Fluid Step at 13, Percussive Strike at
+	 * 17) and with the character's Charisma. Wired through the generic
+	 * `ACTIVE_STATE_TYPES.dancing.effectsBuilder` hook, so the plain
+	 * `activateState("dancing")` call site needs no Belly-Dancer-specific code.
+	 * @returns {Array<object>}
+	 */
+	getDancingEffects () {
+		const calcs = this.getFeatureCalculations();
+		const effects = [
+			// "a bonus to your AC equal to your Charisma modifier (minimum of +1)"
+			{type: "bonus", target: "ac", abilityMod: "cha", minimum: 1},
+			// "advantage on Dexterity (Acrobatics) rolls" (CS-BUG-014: Acrobatics, not Athletics)
+			{type: "advantage", target: "skill:acrobatics"},
+			// "You can make a Sneak Attack against creatures within your melee range
+			// without the need for advantage." All other Sneak Attack rules still apply.
+			{type: "sneakAttackWithoutAdvantage", meleeOnly: true},
+		];
+		if (calcs.hasFluidStep) {
+			effects.push({type: "grantsActionBenefit", action: "disengage", source: "Fluid Step"});
+			effects.push({type: "note", value: "Fluid Step: you have the Disengage benefit, and other creatures can't gain the Disengage benefit from you."});
+		}
+		if (calcs.hasPercussiveStrike) {
+			effects.push({
+				type: "note",
+				value: `Percussive Strike: hostile creatures that could see you when the Dance began must make a DC ${calcs.percussiveStrikeDc} Wisdom save or you have advantage on attack rolls against them for the Dance's duration.`,
+			});
+		}
+		return effects;
+	}
+
+	/** @returns {boolean} True while the Dance of the Country is active. */
+	isDancing () { return this.isStateTypeActive("dancing"); }
+
+	/**
+	 * True when an active state currently lets this character land a Sneak Attack
+	 * without satisfying the usual advantage / adjacent-ally trigger. Generic:
+	 * driven by the `sneakAttackWithoutAdvantage` state effect, so any feature that
+	 * grants the same licence (Dance of the Country today) only needs to emit the
+	 * effect.
+	 * @param {{isMelee?: boolean}} [opts] - `isMelee` gates `meleeOnly` effects.
+	 * @returns {boolean}
+	 */
+	canSneakAttackWithoutAdvantage ({isMelee = true} = {}) {
+		return this.getActiveStateEffects()
+			.some(e => e?.type === "sneakAttackWithoutAdvantage" && (!e.meleeOnly || isMelee));
+	}
+
+	/**
+	 * True when an active state grants the benefit of the named action (e.g. the
+	 * Disengage benefit Fluid Step grants while Dancing). Generic over the
+	 * `grantsActionBenefit` state effect.
+	 * @param {string} action - e.g. "disengage", "dodge", "dash".
+	 * @returns {boolean}
+	 */
+	hasActionBenefitFromStates (action) {
+		const wanted = (action || "").toLowerCase();
+		return this.getActiveStateEffects()
+			.some(e => e?.type === "grantsActionBenefit" && (e.action || "").toLowerCase() === wanted);
+	}
+
+	/**
+	 * Percussive Strike (Belly Dancer 17): the save DC hostile creatures roll
+	 * against when the Dance begins.
+	 * @returns {number|null}
+	 */
+	getPercussiveStrikeDc () {
+		const calcs = this.getFeatureCalculations();
+		return calcs.hasPercussiveStrike ? (calcs.percussiveStrikeDc ?? null) : null;
+	}
+
+	/**
+	 * Tantalizing Shivers (Belly Dancer 9): the character's side of the contested
+	 * check — a Charisma (Performance) check. Returns the total modifier plus the
+	 * descriptor the UI needs to run the contest; `null` when the feature isn't
+	 * available or the Dance isn't running (it is "a bonus action while Dancing").
+	 * @returns {{skill:string, skillLabel:string, ability:string, modifier:number, opposedBy:string}|null}
+	 */
+	getTantalizingShiversContest () {
+		const calcs = this.getFeatureCalculations();
+		if (!calcs.hasTantalizingShivers || !this.isDancing()) return null;
+		return {
+			skill: "performance",
+			skillLabel: "Performance",
+			ability: "cha",
+			modifier: this.getSkillModifier("performance"),
+			opposedBy: "Wisdom (Insight)",
+		};
+	}
+
+	// #endregion
+
+	/**
+	 * The end-of-state saving throw a state type declares (e.g. the Dance of the
+	 * Country's DC 10 Constitution save against a level of exhaustion). Generic:
+	 * any state type may declare `endSave`.
+	 * @param {string} stateTypeId
+	 * @returns {{ability:string, dc:number, onFailure:object, label:string}|null}
+	 */
+	getStateEndSave (stateTypeId) {
+		return CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId]?.endSave || null;
+	}
+
+	/**
+	 * Apply the consequences of a state's end-of-state saving throw. Called with the
+	 * player's rolled total; on a failure the declared `onFailure` consequences are
+	 * applied (currently exhaustion levels).
+	 * @param {string} stateTypeId
+	 * @param {{total:number}} opts
+	 * @returns {{success:boolean, dc:number, ability:string, exhaustionGained:number}|null}
+	 */
+	resolveStateEndSave (stateTypeId, {total} = {}) {
+		const endSave = this.getStateEndSave(stateTypeId);
+		if (!endSave) return null;
+		const success = Number(total) >= endSave.dc;
+		let exhaustionGained = 0;
+		if (!success && endSave.onFailure?.exhaustion) {
+			exhaustionGained = endSave.onFailure.exhaustion;
+			this.addExhaustion(exhaustionGained);
+		}
+		return {success, dc: endSave.dc, ability: endSave.ability, exhaustionGained};
+	}
 
 	/**
 	 * Improved Launch (18) gate: needs the feature, an unspent once-per-rest use, and
@@ -49893,16 +50034,53 @@ class CharacterSheetState {
 			id: "dancing",
 			name: "Dancing",
 			icon: "💃",
-			description: "Performing a traditional dance that grants combat benefits",
+			description: "Performing the Dance of the Country: +CHA to AC, advantage on Acrobatics, and Sneak Attack in melee without needing advantage",
+			// Baseline effects only. The FULL effect list (AC minimum, the melee
+			// Sneak Attack enablement, and the Fluid Step / Percussive Strike riders
+			// that only exist at Belly Dancer 13 / 17) is level-dependent, so it is
+			// resolved at activation time by the generic `effectsBuilder` hook below.
+			// These literals remain as a safe fallback for any caller that reads
+			// `ACTIVE_STATE_TYPES.dancing.effects` without an activation.
 			effects: [
-				{type: "bonus", target: "ac", abilityMod: "cha"}, // +CHA to AC (Snake Charmer)
+				{type: "bonus", target: "ac", abilityMod: "cha", minimum: 1},
 				{type: "advantage", target: "skill:acrobatics"}, // CS-BUG-014: Dance of the Country grants Acrobatics, not Athletics
+				{type: "sneakAttackWithoutAdvantage", meleeOnly: true},
 			],
+			effectsBuilder: "getDancingEffects",
 			duration: "1 minute",
-			endConditions: ["Incapacitated", "Wearing armor"],
+			endConditions: ["Incapacitated", "Paralyzed", "Restrained", "Donning heavy armor", "1 minute elapses"],
+			// Per the homebrew: when the Dance ends you must make a DC 10 Constitution
+			// save or gain a level of exhaustion.
+			endSave: {ability: "con", dc: 10, onFailure: {exhaustion: 1}, label: "Dance of the Country"},
 			resourceName: "Dance of the Country",
 			detectPatterns: ["dance of the country", "traditional dance"],
 			activationAction: "bonus",
+			requiresSubclass: "The Belly Dancer",
+		},
+		tantalizingShivers: {
+			id: "tantalizingShivers",
+			name: "Tantalizing Shivers",
+			icon: "💫",
+			description: "A creature is charmed by your Dance — it is incapacitated with speed 0, and you have advantage on attack rolls against it.",
+			effects: [{type: "advantage", target: "attack"}],
+			duration: "1 round",
+			endConditions: ["The creature takes damage", "Someone shakes it out of its fascination", "Your Dance ends"],
+			// "As a bonus action WHILE DANCING" — hidden from the activate list until
+			// the Dance is running, and auto-dropped when the Dance ends.
+			requiresStates: ["dancing"],
+			activationAction: "bonus",
+			requiresSubclass: "The Belly Dancer",
+		},
+		percussiveStrike: {
+			id: "percussiveStrike",
+			name: "Percussive Strike",
+			icon: "🥁",
+			description: "A hostile creature failed its Wisdom save when your Dance began — you have advantage on attack rolls against it for as long as the Dance lasts.",
+			effects: [{type: "advantage", target: "attack"}],
+			duration: "While the Dance is active",
+			endConditions: ["Your Dance ends"],
+			requiresStates: ["dancing"],
+			activationAction: "free",
 			requiresSubclass: "The Belly Dancer",
 		},
 		combatStance: {
@@ -51095,6 +51273,10 @@ class CharacterSheetState {
 
 	static FEATURE_CLASSIFICATION_OVERRIDES = {
 		// === Passive features wrongly detected as activatable states ===
+		// TGTT Belly Dancer: both of these are riders on the Dance of the Country
+		// (whose mechanics live on the `dancing` state), never independently
+		// activatable. Bonus Proficiency is a flat Expertise + Concealed grant.
+		"fluid step": "passive",
 		"monk's focus": "passive",
 		"heightened focus": "passive",
 		"unhindered flurry": "passive",
@@ -51533,6 +51715,50 @@ class CharacterSheetState {
 				resourceCost: 1,
 			};
 		}
+		// ===== TGTT Belly Dancer (Rogue) =====
+		// Both of these are gated behind an ACTIVE Dance of the Country (their state
+		// types carry `requiresStates: ["dancing"]`, which getActivatableFeatures()
+		// honours), so they only appear once the Dance is running and are dropped
+		// automatically when it ends.
+		const isBellyDancerFeature = (feature.subclassShortName || "").toLowerCase() === "belly dancer"
+			|| (feature.subclassName || "").toLowerCase() === "the belly dancer";
+		if (isBellyDancerFeature && name === "tantalizing shivers") {
+			return {
+				stateTypeId: "tantalizingShivers",
+				stateType: this.ACTIVE_STATE_TYPES.tantalizingShivers,
+				matchedBy: "bellyDancer",
+				activationAction: "bonus",
+				interactionMode: "toggle",
+				isToggle: true,
+				duration: this.ACTIVE_STATE_TYPES.tantalizingShivers.duration,
+				endConditions: this.ACTIVE_STATE_TYPES.tantalizingShivers.endConditions,
+				effects: this.ACTIVE_STATE_TYPES.tantalizingShivers.effects,
+				resourceCost: 0,
+				// Generic contested-check descriptor — the activation path rolls the
+				// actor's side and asks whether it beat the target's opposed check.
+				contestedCheck: {
+					skill: "performance",
+					skillLabel: "Performance",
+					ability: "cha",
+					opposedBy: "Wisdom (Insight)",
+				},
+			};
+		}
+		if (isBellyDancerFeature && name === "percussive strike") {
+			return {
+				stateTypeId: "percussiveStrike",
+				stateType: this.ACTIVE_STATE_TYPES.percussiveStrike,
+				matchedBy: "bellyDancer",
+				activationAction: "free",
+				interactionMode: "toggle",
+				isToggle: true,
+				duration: this.ACTIVE_STATE_TYPES.percussiveStrike.duration,
+				endConditions: this.ACTIVE_STATE_TYPES.percussiveStrike.endConditions,
+				effects: this.ACTIVE_STATE_TYPES.percussiveStrike.effects,
+				resourceCost: 0,
+			};
+		}
+
 		const isXphbLight = (feature.classSource || feature.source) === "XPHB"
 			&& (feature.subclassShortName || "").toLowerCase() === "light";
 		const isXphbDevotion = (feature.classSource || feature.source) === "XPHB"
@@ -54320,6 +54546,18 @@ class CharacterSheetState {
 		// Look up state type definition for side-effect handling
 		const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId];
 		if (stateType?.requiresStates?.some(requiredId => !this.isStateTypeActive(requiredId))) return null;
+
+		// (Generic) A state type may declare an `effectsBuilder` — the name of an
+		// instance method that resolves its effect list against the CURRENT build
+		// (level, ability scores, later subclass features). This is the same idea as
+		// the bespoke `getLaunchMomentumEffects()` call site, generalised so any
+		// state whose effects scale with the character can opt in without a bespoke
+		// activation path. An explicit `customEffects` always wins.
+		if (!options.customEffects && stateType?.effectsBuilder && typeof this[stateType.effectsBuilder] === "function") {
+			const built = this[stateType.effectsBuilder]();
+			if (Array.isArray(built) && built.length) options = {...options, customEffects: built};
+		}
+
 		for (const activatedStateId of stateType?.activatesStates || []) {
 			this.activateState(activatedStateId);
 		}

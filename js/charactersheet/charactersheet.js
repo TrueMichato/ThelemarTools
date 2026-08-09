@@ -8632,7 +8632,7 @@ class CharacterSheetPage {
 		`});
 
 		if (isEndable) {
-			row.querySelector(".charsheet__end-state-btn").addEventListener("click", () => {
+			row.querySelector(".charsheet__end-state-btn").addEventListener("click", async () => {
 				if (state.stateTypeId === "sunShield" && !this._tryConsumeActiveStateToggleAction(state.stateTypeId, stateType)) return;
 				if (isSpellEffect) {
 					// For spell effects that grant conditions, also remove those conditions
@@ -8657,6 +8657,12 @@ class CharacterSheetPage {
 						if (state.stateTypeId === "combatStance") {
 							this._state.deactivateStance();
 						}
+						// (Generic) A state type may declare an `endSave` — a saving throw
+						// made when the state ends, with declared consequences on a failure
+						// (e.g. the Belly Dancer's Dance of the Country: DC 10 CON or a
+						// level of exhaustion). Prompted AFTER deactivation so the roll is
+						// made without the state's own bonuses still applied.
+						await this._pResolveStateEndSave(state.stateTypeId);
 					}
 				}
 				this._saveCurrentCharacter();
@@ -10539,6 +10545,82 @@ class CharacterSheetPage {
 	/**
 	 * Activate a feature's state, deducting resource cost if applicable
 	 */
+	/**
+	 * (Generic) Resolve a state type's declared `endSave` — a saving throw made when
+	 * the state ends, with declared consequences on a failure. Rolls the save, shows
+	 * the result, and applies the consequences through
+	 * {@link CharacterSheetState#resolveStateEndSave}. No-op for state types that
+	 * declare no `endSave`.
+	 *
+	 * Currently used by the Belly Dancer's Dance of the Country ("when it ends, you
+	 * must attempt a DC 10 Constitution Saving Throw, or suffer one level of
+	 * exhaustion"), but nothing here is Belly-Dancer-specific.
+	 * @param {string} stateTypeId
+	 * @private
+	 */
+	async _pResolveStateEndSave (stateTypeId) {
+		const endSave = this._state.getStateEndSave?.(stateTypeId);
+		if (!endSave) return;
+
+		const ability = endSave.ability;
+		const mod = this._state.getSaveMod(ability);
+		const exhaustionPenalty = this._getExhaustionPenalty?.() || 0;
+		const roll = typeof RollerUtil !== "undefined" ? RollerUtil.randomise(20) : Math.ceil(Math.random() * 20);
+		const total = roll + mod - exhaustionPenalty;
+
+		const outcome = this._state.resolveStateEndSave(stateTypeId, {total});
+		if (!outcome) return;
+
+		const abilityFull = typeof Parser !== "undefined" ? Parser.attAbvToFull(ability) : ability.toUpperCase();
+		const breakdown = `d20 (${roll}) ${mod >= 0 ? "+" : "−"} ${Math.abs(mod)}${exhaustionPenalty ? ` − ${exhaustionPenalty} (exhaustion)` : ""} vs DC ${outcome.dc}`;
+		const note = outcome.success
+			? `${endSave.label || "State"} ended — save succeeded.`
+			: `${endSave.label || "State"} ended — save FAILED${outcome.exhaustionGained ? `; gained ${outcome.exhaustionGained} level${outcome.exhaustionGained === 1 ? "" : "s"} of exhaustion (now ${this._state.getExhaustion()}).` : "."}`;
+
+		this._showDiceResult(
+			`${abilityFull} Save — ${endSave.label || "End of state"}`,
+			total,
+			breakdown,
+			outcome.success ? "" : "charsheet__dice-result-total--fumble",
+			note,
+			{duration: 8000},
+		);
+		if (!outcome.success && outcome.exhaustionGained) {
+			JqueryUtil.doToast({type: "warning", content: note});
+		}
+	}
+
+	/**
+	 * (Generic) Run an activation-time contested check declared on an
+	 * `activationInfo.contestedCheck` descriptor: roll the character's side of the
+	 * contest and ask whether it beat the opposed roll. Returns `true` when the
+	 * contest was won (so the caller should proceed with activation), `false` when
+	 * it was lost or the player cancelled.
+	 *
+	 * The opposing roll belongs to a creature the sheet doesn't model, so the sheet
+	 * rolls OUR side honestly and asks for the outcome rather than inventing one.
+	 * @param {object} feature
+	 * @param {{skill:string, skillLabel:string, ability:string, opposedBy:string}} contest
+	 * @returns {Promise<boolean>}
+	 * @private
+	 */
+	async _pResolveContestedCheck (feature, contest) {
+		const result = await this._rollSkillCheck(contest.skill, contest.skillLabel, null, contest.ability);
+		if (!result) return false;
+		const abilityFull = typeof Parser !== "undefined" ? Parser.attAbvToFull(contest.ability) : contest.ability.toUpperCase();
+		const won = await InputUiUtil.pGetUserBoolean({
+			title: feature?.name || "Contested Check",
+			htmlDescription: `Your ${abilityFull} (${contest.skillLabel}) check totalled <strong>${result.total}</strong>.<br>Did it beat the target's ${contest.opposedBy} check?`,
+			textYes: "Yes — contest won",
+			textNo: "No",
+		});
+		if (!won) {
+			JqueryUtil.doToast({type: "info", content: `${feature?.name || "Contested check"}: the contest was lost — no effect.`});
+			return false;
+		}
+		return true;
+	}
+
 	async _activateFeatureState (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
 		let variableSpend = null;
 		if (stateType?.variablePointSpend) {
@@ -10728,6 +10810,16 @@ class CharacterSheetPage {
 				return;
 			}
 			if (liveResource) resource = liveResource;
+		}
+
+		// ===== (Generic) Activation-time CONTESTED CHECK =====
+		// Some abilities only take effect if you win a contest (e.g. the Belly
+		// Dancer's Tantalizing Shivers: Charisma (Performance) vs the target's
+		// Wisdom (Insight)). Rolled BEFORE any resource is deducted, so losing the
+		// contest — or cancelling — costs nothing.
+		if (activationInfo?.contestedCheck) {
+			const won = await this._pResolveContestedCheck(feature, activationInfo.contestedCheck);
+			if (!won) return;
 		}
 
 		// Deduct resource cost if applicable
