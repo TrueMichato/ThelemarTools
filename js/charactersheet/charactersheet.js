@@ -3040,6 +3040,14 @@ class CharacterSheetPage {
 		}
 		tooltipParts.push(`Carry Capacity: ×${this._state.getSizeCarryMultiplier()}`);
 
+		// Grappling size category — generic surface for any feature that lets you count
+		// as larger when grappling (Chained Fury's chains, Enlarge, Powerful Build, ...).
+		const grapple = this._state.getGrappleSizeCategory?.();
+		if (grapple && (grapple.bonus > 0 || grapple.unlimited)) {
+			tooltipParts.push(`Grappling: counts as ${grapple.effective}${grapple.bonus ? ` (+${grapple.bonus} size ${grapple.bonus === 1 ? "category" : "categories"})` : ""}`);
+			tooltipParts.push(`Max grapple target: ${grapple.maxTargetSize}`);
+		}
+
 		chip.setAttribute("title", tooltipParts.join("\n"));
 
 		// Add visual indicator if size is modified
@@ -3049,6 +3057,12 @@ class CharacterSheetPage {
 			chip.classList.remove(direction === "increased" ? "charsheet__info-chip--size-decreased" : "charsheet__info-chip--size-increased");
 		} else {
 			chip.classList.remove("charsheet__info-chip--size-increased", "charsheet__info-chip--size-decreased");
+		}
+
+		// Grappling-size features get the same "larger" affordance even when the
+		// character's actual size is unchanged, so the tooltip is discoverable.
+		if (!sizeChanged && grapple && (grapple.bonus > 0 || grapple.unlimited)) {
+			chip.classList.add("charsheet__info-chip--size-increased");
 		}
 	}
 

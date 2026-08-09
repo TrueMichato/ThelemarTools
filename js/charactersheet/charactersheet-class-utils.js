@@ -5317,6 +5317,83 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Read one cell of a subclass's `subclassTableGroups` progression table.
+	 *
+	 * Many subclasses (Chained Fury's chain damage/range, Battle Master superiority
+	 * dice, …) publish a per-level progression as a table group on the SUBCLASS
+	 * entity rather than as prose. This is the generic reader for that table so
+	 * calculations can be driven by the data instead of a hardcoded ladder that
+	 * silently diverges when the homebrew is rebalanced.
+	 *
+	 * `subclassTableGroups[].rows` is indexed by CHARACTER level (row 0 = level 1),
+	 * matching `classTableGroups`. Cells may carry `{@dice ...}` / `{@damage ...}`
+	 * tags and em-dashes for "nothing yet"; both are normalised away.
+	 *
+	 * NOTE: `state.addClass` stores subclasses as lean `{name, source}` refs, so this
+	 * returns null for a stored ref. Callers MUST keep a working fallback — see
+	 * `getSubclassTableDice` / `getSubclassTableNumber`.
+	 *
+	 * @param {*} subclass - A full subclass entity (with `subclassTableGroups`).
+	 * @param {number} level - Class level (1-based).
+	 * @param {RegExp|string} colMatcher - Column label to match (case-insensitive substring, or regex).
+	 * @returns {string|null} The raw cell text, or null when unavailable/blank.
+	 */
+	static getSubclassTableCell (/** @type {*} */ subclass, /** @type {*} */ level, /** @type {*} */ colMatcher) {
+		if (!subclass?.subclassTableGroups?.length || !level || level < 1) return null;
+		const matches = (/** @type {*} */ label) => {
+			if (typeof label !== "string") return false;
+			return colMatcher instanceof RegExp
+				? colMatcher.test(label)
+				: label.toLowerCase().includes(String(colMatcher).toLowerCase());
+		};
+		for (/** @type {*} */ const group of subclass.subclassTableGroups) {
+			const colIx = group.colLabels?.findIndex(matches);
+			if (colIx == null || colIx === -1) continue;
+			const row = group.rows?.[level - 1];
+			if (!row) continue;
+			const raw = row[colIx];
+			if (raw == null) continue;
+			const cell = String(typeof raw === "object" ? (raw.value ?? raw.entry ?? "") : raw).trim();
+			// Em-dash / en-dash / hyphen alone means "no value at this level".
+			if (!cell || /^[—–-]+$/.test(cell)) continue;
+			return cell;
+		}
+		return null;
+	}
+
+	/**
+	 * Read a dice expression (e.g. "1d8", "2d6") from a subclass progression table.
+	 * Strips `{@dice ...}` / `{@damage ...}` tags.
+	 * @param {*} subclass
+	 * @param {number} level
+	 * @param {RegExp|string} colMatcher
+	 * @param {string|null} [fallback=null]
+	 * @returns {string|null}
+	 */
+	static getSubclassTableDice (/** @type {*} */ subclass, /** @type {*} */ level, /** @type {*} */ colMatcher, /** @type {*} */ fallback = null) {
+		const cell = this.getSubclassTableCell(subclass, level, colMatcher);
+		if (cell == null) return fallback;
+		const stripped = cell.replace(/\{@(?:dice|damage|scaledice|scaledamage)\s+([^}|]+)(?:\|[^}]*)?\}/gi, "$1").trim();
+		const m = stripped.match(/\d+d\d+(?:\s*[+-]\s*\d+)?/i);
+		return m ? m[0].replace(/\s+/g, "") : (stripped || fallback);
+	}
+
+	/**
+	 * Read the leading integer from a subclass progression table cell (e.g. "15 ft." → 15).
+	 * @param {*} subclass
+	 * @param {number} level
+	 * @param {RegExp|string} colMatcher
+	 * @param {number|null} [fallback=null]
+	 * @returns {number|null}
+	 */
+	static getSubclassTableNumber (/** @type {*} */ subclass, /** @type {*} */ level, /** @type {*} */ colMatcher, /** @type {*} */ fallback = null) {
+		const cell = this.getSubclassTableCell(subclass, level, colMatcher);
+		if (cell == null) return fallback;
+		const m = String(cell).replace(/\{@[^}\s]+\s+([^}|]+)(?:\|[^}]*)?\}/g, "$1").match(/-?\d+/);
+		return m ? parseInt(m[0], 10) : fallback;
+	}
+
+	/**
 	 * Get the maximum method degree available at a given level from the class table.
 	 * @param {*} cls - Class data
 	 * @param {number} level - Class level
