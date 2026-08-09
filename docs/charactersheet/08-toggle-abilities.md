@@ -215,8 +215,18 @@ that reads `ACTIVE_STATE_TYPES[x].effects` without an activation.
 `requiresStates: ["dancing"]` makes a toggle **invisible** in
 `getActivatableFeatures()` until its prerequisite state is running, and
 `deactivateState` drops dependents automatically when the prerequisite ends.
-This is how "while Dancing" abilities (Tantalizing Shivers, Percussive
-Strike) are gated — no bespoke visibility logic required.
+This is how "while Dancing" abilities are gated — no bespoke visibility
+logic required. Both Belly Dancer dependents use it:
+
+- `tantalizingShivers` (Tantalizing Shivers, 9) — a bonus action that first
+  resolves a contested check (see `contestedCheck` below), then grants
+  attack advantage for 1 round.
+- `percussiveStrike` (Percussive Strike, 17) — a free action granting attack
+  advantage for as long as the Dance lasts; its save DC is
+  `getPercussiveStrikeDc()` = 8 + PB + CHA.
+
+Neither appears in `getActivatableFeatures()` until `dancing` is running,
+and both are dropped when it ends.
 
 ### End-of-state saving throws (`endSave`)
 
@@ -311,8 +321,8 @@ placed on an ally rather than on the druid.
 
 ## Supported Toggle Abilities
 
-> ⚠️ **This section documents 27 of the 70 states in `ACTIVE_STATE_TYPES`.**
-> The other 43 are **implemented and working** — they are merely undocumented
+> ⚠️ **This section documents 32 of the 73 states in `ACTIVE_STATE_TYPES`.**
+> The other 41 are **implemented and working** — they are merely undocumented
 > here. Do not read a state's absence from this section as "unsupported"; check
 > `CharacterSheetState.ACTIVE_STATE_TYPES` first, which is the only authority.
 >
@@ -330,7 +340,6 @@ placed on an ally rather than on the druid.
 > `improvedShadowcastingAttack` (Improved Shadowcasting Attack) ·
 > `shadowSneak` (Shadow Sneak) ·
 > `defensiveStance` (Defensive Stance) ·
-> `dodge` (Dodging) ·
 > `prone` (Prone) ·
 > `wardingFlare` (Warding Flare) ·
 > `coronaOfLight` (Corona of Light) ·
@@ -341,7 +350,6 @@ placed on an ally rather than on the druid.
 > `lunarPhaseFull` (Full Moon) ·
 > `lunarPhaseNew` (New Moon) ·
 > `lunarPhaseCrescent` (Crescent Moon) ·
-> `dancing` (Dancing) ·
 > `combatStance` (Combat Stance) ·
 > `zodiacForm` (Zodiac Form) ·
 > `wrathOfTheSea` (Wrath of the Sea) ·
@@ -504,6 +512,23 @@ patientDefense: {
     activationAction: "bonus",
 }
 ```
+
+#### Dodge (universal action)
+```javascript
+dodge: {
+    name: "Dodging",
+    effects: [
+        {type: "disadvantage", target: "attacksAgainst"},
+        {type: "advantage", target: "save:dex"},
+    ],
+    duration: "Until start of next turn",
+}
+```
+The plain Dodge action, available to every character. Mechanically identical
+to Patient Defense but with no resource cost and no bonus-action activation.
+Note the distinction from the `grantsActionBenefit: "dodge"` *effect*
+described above: that effect grants Dodge's benefit **without** taking the
+action, whereas this state models actually having taken it.
 
 #### Sun Shield (Sun Soul Monk)
 ```javascript
