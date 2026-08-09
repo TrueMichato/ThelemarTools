@@ -11234,7 +11234,7 @@ class CharacterSheetPage {
 			if (breakdown.length < 2) return "";
 			const card = this._state.getSpellcastingCardForSpell?.(spell);
 			if (!card) return "";
-			const abilShort = (card.ability || "").toUpperCase();
+			const abilShort = card.ability ? card.ability.toUpperCase() : (card.abilityLabel || "");
 			const className = card.displayName || card.className || "";
 			const dcText = `${fmtDc(card)}`;
 			const atkText = `${fmtAttack(card)}`;
@@ -13483,6 +13483,190 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * GENERIC post-roll "fortune intervention" offer.
+	 *
+	 * A fortune intervention lets the player CHANGE an already-rolled d20 by spending a
+	 * limited resource. The state layer owns which features qualify and what each one
+	 * does ({@link CharacterSheetState#getD20InterventionOffers} /
+	 * {@link CharacterSheetState#applyD20Intervention}); this method owns the prompt and
+	 * the result-note wording, so adding a new feature of this kind is a state-only
+	 * change.
+	 *
+	 * Follows the same contract as {@link _pMaybeApplyRedCant}: called BEFORE the total is
+	 * computed, returns `{effectiveRoll, applied, note}`, and no-ops silently (returning
+	 * the die unchanged) whenever nothing is on offer or the player declines.
+	 *
+	 * Escape hatch: `settings.skipFortuneInterventionPrompt`.
+	 *
+	 * @param {object} opts
+	 * @param {{roll: number, mode?: string}} opts.rollResult
+	 * @param {number} opts.effectiveRoll The die after minimums/floors.
+	 * @param {string} [opts.rollLabel]
+	 * @param {string} [opts.rollType] "check" | "save" | "attack"
+	 * @param {number} [opts.totalMod]
+	 * @param {number} [opts.exhaustionPenalty]
+	 * @returns {Promise<{effectiveRoll: number, applied: boolean, note: string, naturalRoll?: number}>}
+	 */
+	async _pMaybeApplyFortuneIntervention ({rollResult, effectiveRoll, rollLabel = "roll", rollType = "check", totalMod = 0, exhaustionPenalty = 0}) {
+		const noChange = {effectiveRoll, applied: false, note: ""};
+		if (!rollResult || !Number.isFinite(rollResult.roll)) return noChange;
+		if ((/** @type {*} */ (this._state.getSettings?.() || {})).skipFortuneInterventionPrompt) return noChange;
+
+		const offers = this._state.getD20InterventionOffers?.({
+			naturalRoll: rollResult.roll,
+			effectiveRoll,
+			isAdvantage: rollResult.mode === "advantage",
+			rollType,
+		}) || [];
+		if (!offers.length) return noChange;
+
+		const picked = await this._pPromptFortuneIntervention({offers, rollResult, effectiveRoll, rollLabel, totalMod, exhaustionPenalty});
+		if (!picked) return noChange;
+
+		const result = this._state.applyD20Intervention?.(picked.id, {naturalRoll: rollResult.roll, effectiveRoll});
+		if (!result?.applied) return noChange;
+
+		// The die genuinely changed, so downstream crit/fumble handling must see the new
+		// natural value (a Master of Fortune 1→20 is a natural 20 for crit purposes, and
+		// no longer a Thelemar critical fumble).
+		const previousNatural = rollResult.roll;
+		const hadThelemarCrits = rollResult.thelemar_critBonus != null;
+		rollResult.roll = result.naturalRoll;
+		if (hadThelemarCrits && previousNatural !== result.naturalRoll) {
+			// Recompute the Thelemar critical bonus for the NEW natural die rather than
+			// merely clearing it, so a 1 → 20 conversion earns the +5 it is now entitled to.
+			rollResult.thelemar_critBonus = result.naturalRoll === 20 ? 5 : result.naturalRoll === 1 ? -5 : 0;
+		}
+		if (picked.kind === "advantage") rollResult.mode = "advantage";
+
+		const noteParts = [];
+		if (picked.kind === "advantage") {
+			noteParts.push(`\uD83C\uDFB2 ${result.name}: rolled a second d20 (${result.secondDie}) \u2014 keeping ${result.effectiveRoll} (uses left: ${result.remaining})`);
+		} else {
+			noteParts.push(`\uD83C\uDFB2 ${result.name}: natural 1 treated as a natural 20 (uses left: ${result.remaining})`);
+		}
+		if (result.tableRoll) {
+			noteParts.push(this._formatGamblingTableNote(result.tableRoll));
+		}
+
+		// The Gambling Table roll may need a choice (Master of Fortune rolls twice), and
+		// the spend has to be persisted + repainted like any other resource expenditure.
+		if (result.tableRoll) void this._pResolveGamblingTableRoll(result.tableRoll);
+		this._renderResources?.();
+		void this._saveCurrentCharacter?.();
+
+		return {
+			effectiveRoll: result.effectiveRoll,
+			naturalRoll: result.naturalRoll,
+			applied: true,
+			note: noteParts.filter(Boolean).join("\n"),
+		};
+	}
+
+	/**
+	 * One-line summary of a Gambling Table roll for a dice-result note.
+	 * @param {{roll: number, effect: string, secondRoll?: number, secondEffect?: string, chosenRoll?: number}} tableRoll
+	 * @returns {string}
+	 */
+	_formatGamblingTableNote (tableRoll) {
+		if (!tableRoll) return "";
+		if (tableRoll.secondRoll) {
+			return `\uD83C\uDCCF Gambling Table: ${tableRoll.roll} \u2014 ${tableRoll.effect} | ${tableRoll.secondRoll} \u2014 ${tableRoll.secondEffect} (choose one)`;
+		}
+		return `\uD83C\uDCCF Gambling Table ${tableRoll.roll}: ${tableRoll.effect}`;
+	}
+
+	/**
+	 * Hand a fresh Gambling Table roll to the Gambler UI so a Master of Fortune double
+	 * roll gets its "choose one" modal. Safe no-op when the spells module is absent.
+	 * @param {object} tableRoll
+	 */
+	async _pResolveGamblingTableRoll (tableRoll) {
+		try {
+			await this._spells?._pOpenGamblingTableModal?.(tableRoll);
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.error("[CharSheet] Gambling Table modal error", e);
+		}
+	}
+
+	/**
+	 * Prompt for a post-roll fortune intervention. One row per offer; dismissing the
+	 * modal (backdrop / X / "Keep the roll") declines.
+	 * @param {object} opts
+	 * @param {Array<{id: string, name: string, kind: string, remaining: number, max: number, description: string}>} opts.offers
+	 * @param {{roll: number}} opts.rollResult
+	 * @param {number} opts.effectiveRoll
+	 * @param {string} opts.rollLabel
+	 * @param {number} opts.totalMod
+	 * @param {number} opts.exhaustionPenalty
+	 * @returns {Promise<{id: string, kind: string}|null>}
+	 */
+	async _pPromptFortuneIntervention ({offers, rollResult, effectiveRoll, rollLabel, totalMod = 0, exhaustionPenalty = 0}) {
+		const safeLabel = (rollLabel || "roll").replace(/[<>]/g, "");
+		const currentTotal = effectiveRoll + totalMod - exhaustionPenalty;
+
+		let resolveOuter = null;
+		let isResolved = false;
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: "Press Your Luck",
+			isMinHeight0: true,
+			cbClose: () => {
+				if (resolveOuter && !isResolved) {
+					isResolved = true;
+					resolveOuter(null);
+				}
+			},
+		});
+
+		return new Promise((resolve) => {
+			resolveOuter = resolve;
+			const finalize = (val) => {
+				if (isResolved) return;
+				isResolved = true;
+				resolve(val);
+			};
+
+			const escape = (/** @type {string} */ s) => String(s || "").replace(/[<>]/g, "");
+			const rows = offers.map((o, i) => `
+				<button class="ve-btn ve-btn-primary charsheet__fortune__offer" data-act="pick" data-idx="${i}">
+					<span class="charsheet__fortune__offer-head">
+						<span class="charsheet__fortune__offer-name">${escape(o.name)}</span>
+						<span class="charsheet__fortune__offer-uses">${o.remaining}/${o.max} left</span>
+					</span>
+					<span class="charsheet__fortune__offer-desc">${escape(o.description)}</span>
+				</button>
+			`).join("");
+
+			modalInner.innerHTML = `
+				<div class="charsheet__fortune">
+					<p class="charsheet__fortune__lede">
+						Your <strong>${safeLabel}</strong> came up
+						<strong>${rollResult.roll}</strong>${effectiveRoll !== rollResult.roll ? ` (treated as ${effectiveRoll})` : ""}
+						\u2014 total <strong>${currentTotal}</strong>. Spend a use to change it?
+					</p>
+					<div class="charsheet__fortune__offers">${rows}</div>
+					<div class="charsheet__fortune__actions">
+						<button class="ve-btn ve-btn-default" data-act="decline">Keep the roll</button>
+					</div>
+				</div>
+			`;
+
+			modalInner.querySelector(`[data-act="decline"]`)?.addEventListener("click", () => {
+				finalize(null);
+				doClose();
+			});
+			modalInner.querySelectorAll(`[data-act="pick"]`).forEach((btn) => {
+				btn.addEventListener("click", () => {
+					const offer = offers[parseInt(btn.getAttribute("data-idx"), 10)];
+					finalize(offer ? {id: offer.id, kind: offer.kind} : null);
+					doClose();
+				});
+			});
+		});
+	}
+
+	/**
 	 * Apply a TOTAL floor to a finished d20 roll (Indomitable Might).
 	 *
 	 * Distinct from `aggregated.minimum`, which floors the d20 DIE (Reliable Talent):
@@ -13577,6 +13761,18 @@ class CharacterSheetPage {
 		// the -5 still hits the total and the result wrongly reads as a fumble.
 		if (redCant.applied) rollResult.thelemar_critBonus = 0;
 
+		// Generic post-roll fortune interventions (TGTT Gambler's Extra Luck / Master of
+		// Fortune, and any future Lucky-style feature). See _pMaybeApplyFortuneIntervention.
+		const fortune = await this._pMaybeApplyFortuneIntervention({
+			rollResult,
+			effectiveRoll,
+			rollLabel: `${Parser.attAbvToFull(ability)} Check`,
+			rollType: "check",
+			totalMod,
+			exhaustionPenalty,
+		});
+		effectiveRoll = fortune.effectiveRoll;
+
 		let total = effectiveRoll + totalMod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
 		// Buff dice (e.g. Guidance's 1d4) rolled into the total.
@@ -13606,6 +13802,9 @@ class CharacterSheetPage {
 		}
 		if (redCant.note) {
 			resultNote = resultNote ? `${resultNote}\n${redCant.note}` : redCant.note;
+		}
+		if (fortune.note) {
+			resultNote = resultNote ? `${resultNote}\n${fortune.note}` : fortune.note;
 		}
 
 		const appliedCondsStr = this._formatAppliedConditionalsNote(appliedConditionals);
@@ -13741,6 +13940,17 @@ class CharacterSheetPage {
 			minimumApplied = true;
 		}
 
+		// Generic post-roll fortune interventions (see _pMaybeApplyFortuneIntervention).
+		const fortune = await this._pMaybeApplyFortuneIntervention({
+			rollResult,
+			effectiveRoll,
+			rollLabel: `${Parser.attAbvToFull(ability)} Save`,
+			rollType: "save",
+			totalMod: mod,
+			exhaustionPenalty,
+		});
+		effectiveRoll = fortune.effectiveRoll;
+
 		const total = effectiveRoll + mod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
 		// Buff dice (e.g. Bless's 1d4) rolled into the total.
@@ -13763,6 +13973,9 @@ class CharacterSheetPage {
 		}
 		if (totalFloor.note) {
 			resultNote = resultNote ? `${resultNote}\n${totalFloor.note}` : totalFloor.note;
+		}
+		if (fortune.note) {
+			resultNote = resultNote ? `${resultNote}\n${fortune.note}` : fortune.note;
 		}
 
 		// Passive defensive reminders (Evasion, Last Ditch Evasion, etc.).
@@ -14133,6 +14346,17 @@ class CharacterSheetPage {
 		// the -5 still hits the total and the result wrongly reads as a fumble.
 		if (redCant.applied) rollResult.thelemar_critBonus = 0;
 
+		// Generic post-roll fortune interventions (see _pMaybeApplyFortuneIntervention).
+		const fortune = await this._pMaybeApplyFortuneIntervention({
+			rollResult,
+			effectiveRoll,
+			rollLabel: `${skillName} Check`,
+			rollType: "check",
+			totalMod: mod,
+			exhaustionPenalty,
+		});
+		effectiveRoll = fortune.effectiveRoll;
+
 		const total = effectiveRoll + mod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
 		// Buff dice (e.g. Guidance's 1d4) rolled into the total. Match against the
@@ -14165,6 +14389,9 @@ class CharacterSheetPage {
 		}
 		if (redCant.note) {
 			resultNote = resultNote ? `${resultNote}\n${redCant.note}` : redCant.note;
+		}
+		if (fortune.note) {
+			resultNote = resultNote ? `${resultNote}\n${fortune.note}` : fortune.note;
 		}
 		if (maneuverBonus) {
 			resultNote = resultNote

@@ -319,7 +319,13 @@ describe("getSpellcastingCardForSpell — per-class favourite resolution (Bug #1
 
 		const gamblerCard = state.getSpellcastingCardForSpell({name: "Hex", level: 1, sourceClass: "Gambler", sourceSubclass: "Gambler"});
 		expect(gamblerCard.displayName).toBe("Gambler");
-		expect(gamblerCard.ability).toBe("cha");
+		// The Gambler has no spellcasting ability - it rolls a Gambling Modifier
+		// per cast - so the card must report that rather than inventing a stat.
+		expect(gamblerCard.ability).toBeNull();
+		expect(gamblerCard.abilityLabel).toBe("Rolled");
+		expect(gamblerCard.saveDc).toBeNull();
+		expect(gamblerCard.attackBonus).toBeNull();
+		expect(gamblerCard.saveDcFormula).toBe("8 + 4 + 1d6");
 
 		const ekCard = state.getSpellcastingCardForSpell({name: "Shield", level: 1, sourceClass: "Fighter", sourceSubclass: "Eldritch Knight"});
 		expect(ekCard.displayName).toBe("Eldritch Knight");

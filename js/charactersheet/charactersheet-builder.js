@@ -603,6 +603,14 @@ class CharacterSheetBuilder {
 						additionalSpells: this._selectedSubclass.additionalSpells,
 						subSubclassSpells: this._selectedSubclass.subSubclassSpells,
 						optionalfeatureProgression: this._selectedSubclass.optionalfeatureProgression,
+						// Subclass-declared spell-slot / cantrip progression tables. Persisted so
+						// `calculateSpellSlots` can honour a homebrew subclass's exact published
+						// slot table (see CharacterSheetState.getSubclassSpellSlotRow) after reload.
+						subclassTableGroups: this._selectedSubclass.subclassTableGroups,
+						// Subclass-derived casters (Eldritch Knight, Arcane Trickster, TGTT
+						// Gambler) declare their cantrip table on the SUBCLASS. Persisted so
+						// `getSubclassCantripChoiceSlots` can prompt for those picks.
+						cantripProgression: this._selectedSubclass.cantripProgression,
 					} : null,
 					subclassChoice: this._divineSoulAffinity,
 					casterProgression: casterProgressionBuilder,
