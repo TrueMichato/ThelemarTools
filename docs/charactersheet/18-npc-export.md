@@ -893,6 +893,32 @@ governs the whole group.
     make this attack twice as a Bonus Action.` The rewrite only fires when both the cost and
     the repeat count parse out of the sentence — a half-parsed cost is worse than a long one.
 
+106. **A replacement attack becomes a real attack entry** (`_promoteReplacementAttacks`).
+    Mikase's Starlight Arc was 754 characters of trait describing *an attack* — a cone, a
+    shared attack roll, an extra die — while the to-hit and base damage it uses sat in a
+    different entry. It is now `Starlight Arc (Replaces One Attack)` carrying the parent
+    weapon's own line with the target clause swapped for the area and the power's die
+    appended, plus the two facts a line cannot hold (one roll for every target; illusions
+    end). 754 → ~300 characters. Fires only when the parent attack, the area **and** the
+    extra damage all parse: a synthesised attack line that guesses any of the three is worse
+    than the paragraph it replaces.
+
+107. **A toggle that changes an attack is written on that attack**
+    (`_annotateToggledAttackRiders`). Reggu's Eldritch Maul gave every melee attack 15-foot
+    reach and 1d6 force for a minute, and said so only inside a Bonus Action — nobody reading
+    `Talons` would consult it. Each melee line now ends `While Eldritch Maul is active, reach
+    15 ft. and plus {@damage 1d6} force damage.`, the ranged line is untouched, and the
+    source shrinks to its activation. Requires the extra damage to parse; a reach change
+    alone stays in prose, because reach without a number is not something a line can state.
+
+108. **A count upgrade is applied at the anchor** (`_foldCountUpgradesIntoBase`). This is
+    A0.3 in its simplest form. `_foldImprovedEntriesIntoBase` refuses `Improved Cunning
+    Strike` because it is not an *addition* to the base feature but an *edit* to the base
+    feature's own count, so the block said "add one of the following" and contradicted itself
+    an entry later. The count is now applied where it is stated (`add up to two of the
+    following`) and the dependent, which had nothing else to say, is dropped. Only fires when
+    the improvement's whole body is the count claim.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). Hard errors block Save to Homebrew; warnings allow Download / Copy. Full browser-side monster schema validation is still out of scope (graceful hand validator only).
 

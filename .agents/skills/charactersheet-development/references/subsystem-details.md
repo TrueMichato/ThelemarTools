@@ -1006,12 +1006,24 @@ Staged DMG-style tables (`_CR_HP_THRESHOLDS`, `_CR_DPR_THRESHOLDS`):
   class's spellcasting, and an innate list is a different feature with a different ability.
 - **`_foldAttackActionTrailers` merges into the previous line when the trailer owns its own
   entry**, and only fires when both cost and repeat count parse out.
+- **A replacement attack is synthesised from its parent's line, not from prose.**
+  `_promoteReplacementAttacks` finds the parent attack via the entry name (`Starfire
+  Katana — Starlight Arc`), swaps the target clause for the stated area and appends the
+  power's own die. It needs all three — parent, area, damage — or it does nothing.
+- **`_annotateToggledAttackRiders` matches `{@atk mw|ms}` only.** Reggu's Radiant Sun Bolt
+  is `rs` and must not gain a melee-only rider. The pass also needs a parsed damage die,
+  because reach-only has no number for the line to carry.
+- **`_foldCountUpgradesIntoBase` is A0.3 in miniature.** `_foldImprovedEntriesIntoBase`
+  requires a body opening on "In addition/Also/The", so it refuses `Improved Cunning
+  Strike`, which is an *edit* to the base's count rather than an addition to it. The count
+  pass rewrites `add one of the following` → `add up to two of the following` at the anchor
+  and drops the dependent. Only fires when the improvement's whole body is the count claim.
 
 ### Dialog actions
 Close | Refresh | **Copy JSON** | Download JSON | Save to Homebrew. In-dialog validation panel; Save blocked on hard errors.
 
 ### Tests
-`CharacterSheetNpcExporter.test.js` + `CharacterSheetNpcExporter.matrix.test.js` (class × special-system matrix) + `.realsaves.test.js` (976 contract tests against the 24-save corpus; auto-skips when absent).
+`CharacterSheetNpcExporter.test.js` + `CharacterSheetNpcExporter.matrix.test.js` (class × special-system matrix) + `.realsaves.test.js` (981 contract tests against the 24-save corpus; auto-skips when absent).
 
 ## Rest Mechanics
 

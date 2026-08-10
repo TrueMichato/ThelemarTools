@@ -1744,5 +1744,46 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			expect(bolt.entries[0]).toMatch(/\{@damage 1d10\+5\} radiant damage\. As part of the \{@action Attack[^}]*\} action, 1 Focus Point: make this attack twice as a Bonus Action\./);
 			expect(bolt.entries[0]).not.toMatch(/ {2}/);
 		});
+
+		it("promotes a replacement attack to a real attack entry (A4)", () => {
+			const mikase = loadMonster("Mikase");
+			// The paragraph that described an attack is gone from the traits.
+			expect((mikase.trait || []).map(it => it.name).join("|")).not.toMatch(/Starlight Arc/i);
+			const arc = (mikase.action || []).find(it => /^Starlight Arc/.test(it.name));
+			expect(arc.name).toMatch(/\(Replaces One Attack\)$/);
+			// It carries the parent weapon's own line, retargeted, with its own die appended.
+			expect(arc.entries[0]).toMatch(/\{@atk mw\} \{@hit \+13\} to hit, 30-foot cone, each nearest creature in it\./);
+			expect(arc.entries[0]).toMatch(/\{@damage 1d8\+7\} slashing damage/);
+			// …and states only what the line cannot carry.
+			expect(arc.entries.join(" ").length).toBeLessThan(400);
+			expect(arc.entries.join(" ")).not.toMatch(/dissipates|equidistant|forgo/i);
+		});
+
+		it("annotates every attack a toggle modifies, and shrinks the toggle (A3)", () => {
+			const reggu = loadMonster("Reggu");
+			const melee = (reggu.action || []).filter(it => (it.entries || []).some(l => typeof l === "string" && /\{@atk mw\}/.test(l)));
+			expect(melee.length).toBeGreaterThanOrEqual(3);
+			melee.forEach(attack => {
+				expect(`${attack.name}: ${attack.entries.join(" ")}`).toMatch(/While Eldritch Maul is active, reach 15 ft\. and plus \{@damage 1d6\} force damage\./);
+			});
+			// The ranged line must not claim a melee-only rider.
+			const bolt = (reggu.action || []).find(it => /Radiant Sun Bolt/i.test(it.name));
+			expect(bolt.entries.join(" ")).not.toMatch(/Eldritch Maul/);
+			// The source keeps only its activation.
+			const toggle = (reggu.bonus || []).find(it => /Eldritch Maul/.test(it.name));
+			expect(toggle.entries.join(" ").length).toBeLessThan(220);
+			expect(toggle.entries.join(" ")).not.toMatch(/inky tendrils|until the next dawn/i);
+		});
+
+		it("applies a count upgrade at the anchor and drops the dependent (A0.3)", () => {
+			const juen = loadMonster("Juen");
+			const names = allAbilityNames(juen).join("|");
+			expect(names).not.toMatch(/Improved Cunning Strike/);
+			const base = (juen.trait || []).find(it => it.name === "Cunning Strike");
+			expect(base.entries[0]).toMatch(/it can add up to two of the following Cunning Strike effects/);
+			// Missy has Cunning Strike without the upgrade and must still read "one".
+			const missy = (loadMonster("Missy").trait || []).find(it => it.name === "Cunning Strike");
+			if (missy) expect(missy.entries[0]).not.toMatch(/up to two of the following/);
+		});
 	});
 });

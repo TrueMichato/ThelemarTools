@@ -500,6 +500,9 @@ class CharacterSheetNpcExporter {
 		// After the paragraph split: a form block's sub-features are only separable once each
 		// labelled benefit is its own line.
 		this._splitFormBlocksIntoAlternateForm(out);
+		this._promoteReplacementAttacks(out);
+		this._annotateToggledAttackRiders(out);
+		this._foldCountUpgradesIntoBase(out);
 		// After the roster passes have settled the trait's final name.
 		this._linkSpellModifiersFromSpellcasting(out);
 		this._foldAttackActionTrailers(out);
@@ -2490,6 +2493,159 @@ class CharacterSheetNpcExporter {
 	 *
 	 * @param {Object} out monster object being assembled (mutated)
 	 */
+	/**
+	 * Mikase's Starlight Arc was 754 characters of trait describing *an attack* — a cone, a
+	 * shared attack roll and an extra damage die — with the to-hit and base damage it uses
+	 * sitting in a different entry entirely. Running it meant reading a paragraph and then
+	 * cross-referencing the weapon.
+	 *
+	 * Promotes such a power to a real action entry carrying the parent weapon's own line,
+	 * with the target clause replaced by the area the power states and the power's extra
+	 * damage appended. Deliberately narrow: fires only when the parent attack, the area and
+	 * the extra damage are all recovered, because a synthesised attack line that guesses any
+	 * of the three is worse than the paragraph it replaces.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _promoteReplacementAttacks (out) {
+		const attacks = (out.action || []).filter(it => (it.entries || []).some(line => typeof line === "string" && /\{@atk /.test(line)));
+		if (!attacks.length) return;
+
+		["trait", "action"].forEach(section => {
+			(out[section] || []).forEach(entry => {
+				const name = String(entry?.name || "");
+				const body = (entry.entries || []).filter(it => typeof it === "string").join(" ");
+				if (!body || !/\bforgo (?:the first attack|one of)|\breplace one of (?:its|your) attacks\b/i.test(body)) return;
+				if (/\{@atk /.test(body)) return;
+
+				const parent = attacks.find(it => name.startsWith(`${it.name} `) || body.includes(it.name));
+				if (!parent) return;
+				const parentLine = parent.entries.find(line => typeof line === "string" && /\{@atk /.test(line));
+
+				const area = /(\d+)-foot (cone|line|radius|sphere)/i.exec(body);
+				const extra = /takes? an extra (\{@damage [^}]+\}) (\w+) damage/i.exec(body);
+				if (!area || !extra) return;
+
+				const shortName = name.includes("—") ? name.split("—").pop().trim() : name;
+				const targets = `${area[1]}-foot ${area[2].toLowerCase()}, each nearest creature in it`;
+				const line = parentLine
+					.replace(/reach [^,]+, one target\.|range [^,]+, one target\.|, one target\./i, `${targets}.`)
+					.replace(/(\{@h\}[\s\S]*?)(?=$)/, `$1, plus ${extra[1]} ${extra[2].toLowerCase()} damage`)
+					.replace(/damage\., plus/g, "damage, plus")
+					.replace(/\s{2,}/g, " ");
+				// Only what the line cannot carry. Every other sentence in the source either
+				// restates the roll, the damage, or the fact that an area ends after it fires.
+				const residue = [
+					/using that attack roll against each/i.test(body) ? "One attack roll applies to every target." : "",
+					/illusion/i.test(body) ? "Any illusions on a target it hits end." : "",
+				].filter(Boolean).join(" ");
+
+				out.action = out.action || [];
+				out.action.push({name: `${shortName} (Replaces One Attack)`, entries: [`${line}.`.replace(/\.\.$/, "."), residue].filter(Boolean)});
+				entry._npcRemove = true;
+			});
+			if (out[section]) out[section] = out[section].filter(it => !it._npcRemove);
+		});
+	}
+
+	/**
+	 * Reggu's Eldritch Maul gives every melee attack 15-foot reach and an extra 1d6 force
+	 * damage for a minute — and said so only inside a Bonus Action nobody reading `Talons`
+	 * would think to consult. A toggle that changes an attack belongs on that attack.
+	 *
+	 * Annotates every melee attack line with the gated effect and reduces the source to its
+	 * activation. Requires the extra damage to parse; a reach change alone is left in prose,
+	 * because reach without a number is not something an attack line can state.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _annotateToggledAttackRiders (out) {
+		const melee = (out.action || []).filter(it => (it.entries || []).some(line => typeof line === "string" && /\{@atk (?:mw|ms)\b/.test(line)));
+		if (!melee.length) return;
+
+		["bonus", "action"].forEach(section => {
+			(out[section] || []).forEach(entry => {
+				const body = (entry.entries || []).filter(it => typeof it === "string").join(" ");
+				if (!body || /\{@atk /.test(body)) return;
+				if (!/\bfor (?:the duration|1 minute|\d+ minutes?)\b/i.test(body)) return;
+
+				const dmg = /(?:its|your) melee attacks? (?:deal|deals) an extra (\{@damage [^}]+\}) (\w+) damage/i.exec(body);
+				if (!dmg) return;
+				const reach = /reach a target up to (\d+) feet away/i.exec(body);
+
+				const rawName = String(entry.name || "");
+				const toggle = (rawName.includes("—") ? rawName.split("—").pop() : rawName).replace(/\s*\([^)]*\)\s*$/, "").trim();
+				if (!toggle) return;
+
+				const rider = [reach ? `reach ${reach[1]} ft.` : "", `plus ${dmg[1]} ${dmg[2].toLowerCase()} damage`]
+					.filter(Boolean).join(" and ");
+				melee.forEach(attack => {
+					attack.entries = attack.entries.map(line => {
+						if (typeof line !== "string" || !/\{@atk /.test(line)) return line;
+						if (line.includes(toggle)) return line;
+						return `${line.replace(/\s+$/, "")} While ${toggle} is active, ${rider}.`;
+					});
+				});
+
+				// The activation is all the source still has to say; the numbers now ride the
+				// lines they modify, and the daily limit is already on the entry name.
+				const activation = body.split(/(?<=\.)\s+/)[0];
+				if (activation) entry.entries = [`${activation} Its melee attacks gain ${rider} for the duration.`];
+			});
+		});
+	}
+
+	/**
+	 * `Improved Cunning Strike` says one thing — you may now use two effects instead of one —
+	 * and `_foldImprovedEntriesIntoBase` will not take it, because it is not an addition to
+	 * the base feature but an *edit* to the base feature's own count. Filed separately, the
+	 * statblock states "add one of the following" and then contradicts itself an entry later.
+	 *
+	 * Applies the edit where the count is stated and drops the improvement, which is A0.3:
+	 * a modifier on an anchor belongs at the anchor, and the dependent then has nothing left
+	 * to say. Only fires when the improvement's whole body is the count claim.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _foldCountUpgradesIntoBase (out) {
+		const sections = ["trait", "action", "bonus", "reaction"];
+		const WORDS = {one: "one", two: "two", three: "three", four: "four"};
+		const dropped = new Set();
+
+		sections.forEach(section => {
+			(out[section] || []).forEach(entry => {
+				const body = (entry.entries || []).filter(it => typeof it === "string");
+				if (body.length !== 1) return;
+				const claim = /^[^.]*?\bcan use up to (one|two|three|four|\d+) (.+?) effects\b[^.]*\.$/i.exec(body[0].trim());
+				if (!claim) return;
+				const count = WORDS[claim[1].toLowerCase()] || claim[1];
+				const baseKey = this._normalizeFeatureKey(claim[2]);
+
+				const base = sections
+					.flatMap(sec => out[sec] || [])
+					.find(it => it !== entry && this._normalizeFeatureKey(String(it?.name || "").replace(/\s*\([^)]*\)\s*$/, "")) === baseKey);
+				if (!base?.entries?.length) return;
+
+				let applied = false;
+				base.entries = base.entries.map(line => {
+					if (applied || typeof line !== "string") return line;
+					const next = line.replace(/\b(add|use) one of the following\b/i, (_, verb) => `${verb} up to ${count} of the following`);
+					if (next === line) return line;
+					applied = true;
+					return next;
+				});
+				if (applied) dropped.add(entry);
+			});
+		});
+		if (!dropped.size) return;
+
+		sections.forEach(section => {
+			if (!out[section]) return;
+			out[section] = out[section].filter(entry => !dropped.has(entry));
+			if (!out[section].length && section !== "trait") delete out[section];
+		});
+	}
+
 	static _splitFormBlocksIntoAlternateForm (out) {
 		const CONNECTOR = /^(?:while (?:it is |you are )?(?:transformed|in this form)|in this form)[^.:]{0,60}[:.]?$/i;
 		["bonus", "action", "trait"].forEach(section => {
