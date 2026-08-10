@@ -989,12 +989,29 @@ Staged DMG-style tables (`_CR_HP_THRESHOLDS`, `_CR_DPR_THRESHOLDS`):
 - **Lowercasing a label breaks `_boldInlineOptionLabel`** (`(?=[A-Z"“{])` lookahead).
   `_formatProgressionCell` skips list columns and `_collapseLevelTables` emits the caption
   already bolded.
+- **Lore suppression must be a ratio, not an absolute.** `_dropMechaniclessLoreEntries`
+  needs ≥ 250 chars, ≤ 2 mechanical sentences **and** ratio < 0.25. A "contains no
+  mechanical sentence" test flagged 16 legitimate corpus entries, and the very entry it was
+  built for (`Bladesinger Styles`) contains two false-positive mechanical sentences — a
+  `{@skill Stealth}` hover and a modal buried in flavour.
+- **A form block is split, not trimmed.** `_splitFormBlocksIntoAlternateForm` needs ≥ 4
+  string lines, a `while transformed`/`in this form` connector that is neither first nor
+  last, and ≥ 2 `{@b Label.}` paragraphs after it. Dzeiy matches; Angelic Avatar does not.
+- **A restated rule is deleted only where it is a whole sentence.** In the maneuver roster
+  Riposte's closing sentence goes, but Trip Attack carries the same rule *mid*-sentence
+  with the on-hit trigger the next clause needs, so it is joined (`…, if the target is
+  Large or smaller`) instead of cut. The strip runs while bodies are still imperative, so
+  match both `add` and `it adds`.
+- **`_linkSpellModifiersFromSpellcasting` skips innate blocks** — Metamagic applies to the
+  class's spellcasting, and an innate list is a different feature with a different ability.
+- **`_foldAttackActionTrailers` merges into the previous line when the trailer owns its own
+  entry**, and only fires when both cost and repeat count parse out.
 
 ### Dialog actions
 Close | Refresh | **Copy JSON** | Download JSON | Save to Homebrew. In-dialog validation panel; Save blocked on hard errors.
 
 ### Tests
-`CharacterSheetNpcExporter.test.js` + `CharacterSheetNpcExporter.matrix.test.js` (class × special-system matrix) + `.realsaves.test.js` (971 contract tests against the 24-save corpus; auto-skips when absent).
+`CharacterSheetNpcExporter.test.js` + `CharacterSheetNpcExporter.matrix.test.js` (class × special-system matrix) + `.realsaves.test.js` (976 contract tests against the 24-save corpus; auto-skips when absent).
 
 ## Rest Mechanics
 

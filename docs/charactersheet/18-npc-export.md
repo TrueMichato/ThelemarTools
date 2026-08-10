@@ -852,6 +852,47 @@ governs the whole group.
     silently unbolded Tignor's `Circle of the Moon Spells` heading, so `_collapseLevelTables`
     now emits the caption already bolded and list columns skip the rewrite.
 
+101. **Subclass lore that states no mechanic is dropped** (`_dropMechaniclessLoreEntries`).
+    Elizabeth carried `Bladesinger Styles` (2,375 chars) and `Bladesinging` (478) — elven
+    school history and the largest block on her sheet. The predicate is deliberately a
+    **ratio**, not an absolute: body ≥ 250 chars **and** ≤ 2 mechanical sentences **and**
+    mechanical ratio < 0.25. An all-or-nothing "contains no mechanical sentence" test was
+    tried first and flagged 16 corpus entries — Multiattack rows, `Resilience`, `Cold
+    Empowerment`, `Demolishing Might` — all legitimate. `Bladesinger Styles` itself contains
+    two false-positive "mechanical" sentences (a `{@skill Stealth}` hover and "which can keep
+    many foes at bay", a modal buried in flavour), which is precisely why an absolute test
+    cannot work. The ratio form matches those two entries corpus-wide and nothing else.
+
+102. **A form block splits into an activation and an alternate-form trait**
+    (`_splitFormBlocksIntoAlternateForm`). Dzeiy's `Hybrid Transformation` was a 2,531-char
+    bonus action describing a different creature — AC, resistances, an attack, regeneration
+    and a save — which is unusable mid-combat. It is now a 284-char activation plus a
+    `Hybrid Form` trait (2,188) holding the deltas. The pass requires ≥ 4 string-only lines,
+    a connector line matching `^(?:while (?:it is |you are )?(?:transformed|in this form)|in
+    this form)…[:.]?$` that is neither first nor last, and ≥ 2 `{@b Label.}` paragraphs after
+    it. Dzeiy is the only corpus match; Mikase's Angelic Avatar deliberately does not qualify.
+
+103. **A maneuver states only what distinguishes it** (`_consolidateManeuverEntries`). The
+    roster lead already says *"a maneuver that hits adds the die to that attack's damage
+    roll"*, then Riposte closed with the same sentence and Trip Attack carried it
+    mid-sentence. Riposte's is deleted; Trip Attack's is joined to the trigger the following
+    clause depends on (`…using a weapon or an Unarmed Strike, if the target is Large or
+    smaller, …`) rather than cut, because cutting it would orphan the save. Note the strip
+    runs while bodies are still imperative (`add`, not `it adds`), so both forms are matched.
+
+104. **The spell block names the trait that alters spells**
+    (`_linkSpellModifiersFromSpellcasting`). Nessa's Metamagic roster sat among the traits
+    with nothing connecting it to the spells it modifies. The class block's header now ends
+    with a pointer; the **innate** block is excluded, because Metamagic applies to class
+    spellcasting and an innate list is a different feature with a different ability.
+
+105. **An Attack-action rider is folded onto its own attack line**
+    (`_foldAttackActionTrailers`). Reggu's Radiant Sun Bolt spent 150 characters restating the
+    Attack action to say one thing, and did it in a paragraph *beneath* the line. It now ends
+    the line itself: `… 1d10+5 radiant damage. As part of the Attack action, 1 Focus Point:
+    make this attack twice as a Bonus Action.` The rewrite only fires when both the cost and
+    the repeat count parse out of the sentence — a half-parsed cost is worse than a long one.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). Hard errors block Save to Homebrew; warnings allow Download / Copy. Full browser-side monster schema validation is still out of scope (graceful hand validator only).
 

@@ -1675,6 +1675,31 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			});
 		});
 
+		it("splits a form block into activation and an alternate-form trait (A7)", () => {
+			const mon = loadMonster("Dzeiy");
+			const activation = (mon.bonus || []).find(e => /Hybrid Transformation/i.test(e.name));
+			const form = (mon.trait || []).find(e => /^Hybrid Form$/i.test(e.name));
+			expect(`activation ${activation ? "present" : "missing"}`).toBe("activation present");
+			expect(`form ${form ? "present" : "missing"}`).toBe("form present");
+			// The Bonus Action explains how to transform, and nothing else.
+			const actText = activation.entries.join(" ");
+			expect(actText.length).toBeLessThan(600);
+			expect(actText).toMatch(/transforms into/i);
+			expect(actText).not.toMatch(/Feral Might|Resilient Hide|Bloodlust/i);
+			// The deltas live where every other standing modifier lives.
+			expect(form.entries.join(" ")).toMatch(/Feral Might[\s\S]*Resilient Hide/i);
+		});
+
+		it("drops long subclass lore that states no mechanic (A8)", () => {
+			const names = allAbilityNames(loadMonster("Elizabeth")).join("|");
+			expect(names).not.toMatch(/Bladesinger Styles|^Bladesinging$/im);
+			// …but a terse mechanical line the token vocabulary misses must survive.
+			expect(allAbilityNames(loadMonster("Nagara")).join("|")).toMatch(/Cold Empowerment/i);
+			available.forEach(n => {
+				expect(`${n}: ${(loadMonster(n).action || []).length > 0}`).toBe(`${n}: true`);
+			});
+		});
+
 		it("annotates a number whose only source is a conditional modifier (1b)", () => {
 			[["Elizabeth", 15, 14], ["Mikase", 20, 19], ["Vern", 18, 17]].forEach(([n, base, gated]) => {
 				const ac = loadMonster(n).ac;
@@ -1683,6 +1708,41 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 				expect(`${n}: ${alt ? alt.ac : "none"}`).toBe(`${n}: ${gated}`);
 				expect(alt.condition).toMatch(/Dual Wielder/i);
 			});
+		});
+
+		it("states the shared maneuver damage rule once, in the roster lead (C1)", () => {
+			["Vern", "Elizabeth"].forEach(n => {
+				const roster = (loadMonster(n).trait || []).find(it => it.name === "Maneuvers");
+				expect(`${n}: ${!!roster}`).toBe(`${n}: true`);
+				const [lead, ...bodies] = roster.entries;
+				expect(lead).toMatch(/a maneuver that hits adds the die to that attack's damage roll/i);
+				// Riposte and Trip Attack each restated it; neither may now.
+				bodies.forEach(body => expect(`${n}: ${body}`).not.toMatch(/adds? the (?:Superiority )?[Dd]ie to the attack's damage/i));
+				// Trip Attack's on-hit trigger is load-bearing for the clause that follows.
+				const trip = bodies.find(it => /Trip Attack/.test(it));
+				expect(trip).toMatch(/When \w+ hits a creature[\s\S]*if the target is Large or smaller/i);
+			});
+		});
+
+		it("points from the spell block at the trait that alters spells (C3)", () => {
+			const nessa = loadMonster("Nessa");
+			const block = nessa.spellcasting.find(it => !/innate/i.test(it.name));
+			expect(block.headerEntries.join(" ")).toMatch(/alter these spells with Metamagic/i);
+			// The innate list is a different feature and must not claim the same pointer.
+			const innate = nessa.spellcasting.find(it => /innate/i.test(it.name));
+			expect(innate.headerEntries.join(" ")).not.toMatch(/Metamagic/i);
+			// Nobody without the trait gains the sentence.
+			available.filter(n => n !== "Nessa").forEach(n => {
+				const text = (loadMonster(n).spellcasting || []).flatMap(it => it.headerEntries || []).join(" ");
+				expect(`${n}: ${/alter these spells with Metamagic/i.test(text)}`).toBe(`${n}: false`);
+			});
+		});
+
+		it("folds an Attack-action rider onto its own attack line (C4)", () => {
+			const bolt = (loadMonster("Reggu").action || []).find(it => /Radiant Sun Bolt/i.test(it.name));
+			expect(bolt.entries).toHaveLength(1);
+			expect(bolt.entries[0]).toMatch(/\{@damage 1d10\+5\} radiant damage\. As part of the \{@action Attack[^}]*\} action, 1 Focus Point: make this attack twice as a Bonus Action\./);
+			expect(bolt.entries[0]).not.toMatch(/ {2}/);
 		});
 	});
 });

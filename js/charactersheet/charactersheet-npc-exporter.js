@@ -497,6 +497,12 @@ class CharacterSheetNpcExporter {
 		this._trimNonMechanicalSentences(out);
 		this._boldInlineSubHeadings(out);
 		this._splitOverlongParagraphs(out);
+		// After the paragraph split: a form block's sub-features are only separable once each
+		// labelled benefit is its own line.
+		this._splitFormBlocksIntoAlternateForm(out);
+		// After the roster passes have settled the trait's final name.
+		this._linkSpellModifiersFromSpellcasting(out);
+		this._foldAttackActionTrailers(out);
 		this._dropSupersededProcedures(out);
 		this._refileByStatedEconomy(out);
 		this._demoteEconomylessEntries(out);
@@ -509,6 +515,9 @@ class CharacterSheetNpcExporter {
 		this._fixImperativeVoice(out);
 		this._collapseParallelOptionLists(out);
 		this._dropFlavourLeadSentences(out);
+		// After the trims above: an entry only reveals its true mechanical density once the
+		// scaffolding and boilerplate sentences have gone.
+		this._dropMechaniclessLoreEntries(out);
 		this._resolveConditionalFeatureReferences(out, state);
 		this._ensureToggleAbilityIntegrity(out, state, {npcName});
 		// Runs last: toggle integrity can promote a stance to its own ability, which is
@@ -2428,6 +2437,153 @@ class CharacterSheetNpcExporter {
 	 *
 	 * @param {Object} out monster object being assembled (mutated)
 	 */
+	/**
+	 * Elizabeth carried 2,853 characters of elven school history — *"Most schools of
+	 * Bladesinging are in Evermeet or Evereska"* — because it is subclass text and subclass
+	 * text is normally rules. A DM running her needs none of it.
+	 *
+	 * The test is a *ratio*, not the absence of mechanics: `Bladesinger Styles` contains two
+	 * sentences the token vocabulary reads as mechanical (a `{@skill}` hover, and "which can
+	 * keep many foes at bay" — a modal inside flavour), so an all-or-nothing test misses it.
+	 * A long entry that is 90% description is description.
+	 *
+	 * Deliberately conservative on both axes: short entries are exempt, because a terse
+	 * mechanical line the vocabulary happens to miss ("Nagara's elemental empowerment is to
+	 * cold damage") must survive; and an entry with three or more mechanical sentences is
+	 * exempt however long it is. Across the corpus this matches exactly the two lore traits
+	 * and nothing else.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _dropMechaniclessLoreEntries (out) {
+		["trait", "action", "bonus", "reaction"].forEach(section => {
+			if (!out[section]?.length) return;
+			out[section] = out[section].filter(entry => {
+				const lines = (entry?.entries || []).filter(it => typeof it === "string");
+				if (lines.length !== (entry?.entries || []).length) return true;
+				const body = lines.join(" ");
+				if (body.length < 250) return true;
+				const sentences = lines
+					.flatMap(line => this._splitIntoClauses(line))
+					.filter(it => typeof it === "string" && it.trim().length > 15);
+				if (!sentences.length) return true;
+				const mechanical = sentences.filter(it => this._hasMechanicalToken(it)).length;
+				return mechanical > 2 || (mechanical / sentences.length) >= 0.25;
+			});
+		});
+	}
+
+	/**
+	 * Dzeiy's Hybrid Transformation was 2,531 characters inside a single Bonus Action: the
+	 * activation, and then seven standing features the form confers. A DM reading Bonus
+	 * Actions wants to know how to transform; a DM reading a transformed Dzeiy wants the
+	 * deltas — and those are two different moments.
+	 *
+	 * Split on the connector the source itself supplies ("While it is transformed, it gains
+	 * the following features:"). The activation stays where the economy put it; the deltas
+	 * become a companion trait, which is where every other standing modifier on the block
+	 * already lives. Generalises to any form feature written this way (Mikase's Angelic
+	 * Avatar, Wild Shape's rules-while-shifted).
+	 *
+	 * Requires the connector *and* at least two labelled sub-features: a form entry with one
+	 * benefit is not a block, and splitting it would only add a heading.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _splitFormBlocksIntoAlternateForm (out) {
+		const CONNECTOR = /^(?:while (?:it is |you are )?(?:transformed|in this form)|in this form)[^.:]{0,60}[:.]?$/i;
+		["bonus", "action", "trait"].forEach(section => {
+			const entries = out[section];
+			if (!entries?.length) return;
+			const added = [];
+
+			entries.forEach(entry => {
+				const lines = entry?.entries;
+				if (!Array.isArray(lines) || lines.length < 4) return;
+				if (!lines.every(it => typeof it === "string")) return;
+				const at = lines.findIndex(line => CONNECTOR.test(line.replace(/\s+/g, " ").trim()));
+				if (at < 1 || at === lines.length - 1) return;
+				const rest = lines.slice(at + 1);
+				if (rest.filter(line => /^\{@b [^}]+\.\}/.test(line.trim())).length < 2) return;
+
+				const formName = this._getFormTraitName(entry.name);
+				if (!formName) return;
+				entry.entries = lines.slice(0, at);
+				added.push({name: formName, entries: rest});
+			});
+
+			if (added.length) (out.trait = out.trait || []).push(...added);
+		});
+	}
+
+	/** "Hybrid Transformation (2/SR)" → "Hybrid Form"; "Angelic Avatar (1/LR)" → "Angelic Avatar Form". */
+	static _getFormTraitName (rawName) {
+		const bare = this._getAnchorBareName(rawName).trim();
+		if (!bare) return "";
+		const stem = bare.replace(/\s*\b(?:transformation|form)\b\s*$/i, "").trim();
+		return stem ? `${stem} Form` : "";
+	}
+
+	/**
+	 * Nessa's Metamagic roster sat among the traits with nothing connecting it to the spells
+	 * it modifies, so casting a spell meant remembering that a trait five entries away might
+	 * change it. State the connection where the spells are.
+	 *
+	 * Innate blocks are excluded: Metamagic applies to the class's spellcasting, and an
+	 * innate list is a different feature with a different ability.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _linkSpellModifiersFromSpellcasting (out) {
+		if (!out.spellcasting?.length) return;
+		const roster = ["trait", "action", "bonus", "reaction"]
+			.flatMap(section => out[section] || [])
+			.find(entry => /^metamagic$/i.test(String(entry?.name || "").trim()));
+		if (!roster) return;
+
+		const block = out.spellcasting.find(sc => !/innate/i.test(String(sc?.name || "")));
+		if (!block?.headerEntries?.length) return;
+		const last = block.headerEntries.length - 1;
+		if (typeof block.headerEntries[last] !== "string") return;
+		if (/metamagic/i.test(block.headerEntries.join(" "))) return;
+		block.headerEntries[last] += " It can alter these spells with Metamagic (see its Metamagic trait for the options and their costs).";
+	}
+
+	/**
+	 * Reggu's Radiant Sun Bolt line ended with 150 characters restating the Attack action in
+	 * order to say one thing: it costs a Focus Point to make the attack twice as a Bonus
+	 * Action. At the table that is a cost and a count, not a paragraph.
+	 *
+	 * Only rewrites when both the cost and the repeat count are recoverable from the
+	 * sentence; anything else keeps its prose, because a half-parsed cost is worse than a
+	 * long one.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _foldAttackActionTrailers (out) {
+		const TRAILER = /\s*When (?:it|[A-Z][\w'’-]*) takes the \{@action Attack[^}]*\} action[^.]*?, (?:it|[A-Z][\w'’-]*) can spend (\d+) ([A-Za-z ]+?) to (?:make|use) (?:the|this) (?:special )?attack (twice|two times) as a (?:bonus action|\{@variantrule Bonus Action[^}]*\})\.\s*/i;
+		(out.action || []).forEach(entry => {
+			const lines = entry.entries || [];
+			const next = [];
+			lines.forEach(line => {
+				if (typeof line !== "string") return void next.push(line);
+				const match = TRAILER.exec(line);
+				if (!match) return void next.push(line);
+				const [, cost, resource] = match;
+				const unit = this._getSafeInlineText(resource.trim(), {maxLen: 30});
+				if (!unit) return void next.push(line);
+				const stripped = `${line.slice(0, match.index)}${line.slice(match.index + match[0].length)}`.replace(/\s{2,}/g, " ").trim();
+				const folded = `As part of the Attack action, ${cost} ${unit}: make this attack twice as a Bonus Action.`;
+				// The clause belongs on the attack line, not in a paragraph beneath it — even
+				// when the sheet filed it as its own entry.
+				const prev = next.length ? next[next.length - 1] : null;
+				if (!stripped && typeof prev === "string") next[next.length - 1] = `${prev} ${folded}`.replace(/\s{2,}/g, " ");
+				else next.push(`${stripped ? `${stripped} ` : ""}${folded}`.replace(/\s{2,}/g, " "));
+			});
+			entry.entries = next;
+		});
+	}
+
 	static _dropFlavourLeadSentences (out) {
 		const MECHANICAL = /\b(?:advantage|disadvantage|saving throw|save|damage|hit points?|action|reaction|resistan|immun|condition|DC|proficiency|attack|speed|spell|feet|foot|rest|round|turn|AC|Armor Class|temporary|minutes?|hours?|days?|weeks?|months?|years?|miles?|yards?)\b/i;
 
@@ -2692,7 +2848,14 @@ class CharacterSheetNpcExporter {
 				// Only when the rider is a whole sentence — in Feinting Attack it is the tail
 				// of "If that attack hits, add the Superiority Die…", and cutting it there
 				// leaves a dangling conditional.
-				const withoutRider = compact.replace(/(^|\.\s+)Add the Superiority Die(?: roll)? to the attack'?s damage roll\.\s*/g, "$1");
+				let withoutRider = compact.replace(/(^|\.\s+)Add the Superiority Die(?: roll)? to the attack['’]?s damage roll\.\s*/g, "$1");
+				// Riposte states the same rule again as its own closing sentence. The body has
+				// been rewritten to third person by now but not yet de-imperativised, so both
+				// "add" and "it adds" have to be accepted.
+				withoutRider = withoutRider.replace(/(^|\.\s+)If (?:it hits|you hit), (?:it adds |add )the Superiority Die to the attack['’]?s damage(?: roll)?\.\s*/gi, "$1");
+				// Trip Attack states it mid-sentence, carrying the on-hit trigger the clause
+				// that follows depends on — so the rider goes and the trigger is joined to it.
+				withoutRider = withoutRider.replace(/,? (?:it can |you can )?add the die to the attack['’]?s damage roll\.\s+If /gi, ", if ");
 				if (withoutRider !== compact) {
 					damageRiderCount++;
 					compact = withoutRider;
