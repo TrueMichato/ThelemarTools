@@ -956,11 +956,45 @@ Staged DMG-style tables (`_CR_HP_THRESHOLDS`, `_CR_DPR_THRESHOLDS`):
 - `charsheet-npc-export-source-config` — source meta
 - `charsheet-npc-export-options` — export options (sanitized on read/write)
 
+### Information placement: a rider rides its attack (v15)
+- **Build the reference graph before removing anything.** `_buildFeatureReferenceGraph`
+  finds features that *other* entries name — present in 14 of 24 corpus characters. Sneak
+  Attack is a spendable currency (Cunning Strike buys effects with its dice, Assassinate
+  crits with it), so printing `plus 10d6` and retiring the trait both lies and orphans
+  three dependents. **Removal is available only to leaves** (`_isReferencedAnchor`).
+- **Two traps the graph taught.** `Special Equipment` and `Multiattack` name every item by
+  construction, so without `_STRUCTURAL_REFERRERS` every magic item became unremovable;
+  and "Rage" matches inside "cou*rage*", so only multi-word names or three whitelisted
+  resource words may anchor, matched with `\b…\b`, never `includes()`.
+- **`calculations.sneakAttack.dice` is the rider source**; push it `named` but **not**
+  `wholeFeature`, and scope it `appliesTo: "finesseOrRanged"` — Missy's Claws must not
+  gain it. Item `properties` arrive as codes, sometimes suffixed (`["F|XPHB","L|XPHB"]`).
+- **Item damage was never exported at all.** `item.damageRiders[]` and
+  `item.conditionalBonuses[]` had no consumer; a third channel lifts on-hit damage that
+  exists only in `item.itemPowers[].description` prose, guarded so an *optional* or
+  daily-limited rider (Lorian's staff Lightning) and a replacement attack phrased "When
+  you take the Attack action…" (Mikase's Starlight Arc) are both excluded.
+- **A gate naming a different action disqualifies a rider.** Charger's `damage:charge`
+  was printing `plus 5 damage after Dash + bonus action attack` on the base weapon line.
+- **Residue runs before whole-feature retirement, and a surviving residue cancels it —
+  but only if it still reads as a rule.** `_stripEmittedDamageClause` is clause-scoped, so
+  Onger keeps "double damage to objects and structures". Divine Strike's whole sentence
+  *is* the rider, leaving "…it can cause the target to."; `_isUsableRiderResidue` rejects
+  that fragment so the entry is retired instead. **This is the pass that most easily
+  regresses** — it reintroduced three decapitated traits on the first corpus run.
+- **A fighting style is registered twice** — unconditionally (what the printed number sums)
+  and again as a gated twin. `_getBakedInModifierKeys` proves the bonus is already inside
+  the number. Where there is *no* unconditional twin (Dual Wielder), the gate is real and
+  rides the number: `_getAcEntries` emits a second `acItem` with a `condition`.
+- **Lowercasing a label breaks `_boldInlineOptionLabel`** (`(?=[A-Z"“{])` lookahead).
+  `_formatProgressionCell` skips list columns and `_collapseLevelTables` emits the caption
+  already bolded.
+
 ### Dialog actions
 Close | Refresh | **Copy JSON** | Download JSON | Save to Homebrew. In-dialog validation panel; Save blocked on hard errors.
 
 ### Tests
-`CharacterSheetNpcExporter.test.js` + `CharacterSheetNpcExporter.matrix.test.js` (class × special-system matrix).
+`CharacterSheetNpcExporter.test.js` + `CharacterSheetNpcExporter.matrix.test.js` (class × special-system matrix) + `.realsaves.test.js` (971 contract tests against the 24-save corpus; auto-skips when absent).
 
 ## Rest Mechanics
 

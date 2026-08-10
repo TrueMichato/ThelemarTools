@@ -1070,8 +1070,10 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			const joined = (wild.entries || []).filter(it => typeof it === "string").join(" ");
 			const tempHp = joined.match(/Temporary Hit Points equal to [^.]{0,80}?\((\d+)\)/g) || [];
 			expect(tempHp.length).toBeLessThanOrEqual(1);
-			expect(joined).toMatch(/Max CR 3\b/);
-			expect(joined).not.toMatch(/Max CR 1\b/);
+			expect(joined).toMatch(/max CR 3\b/i);
+			expect(joined).not.toMatch(/max CR 1\b/i);
+			// v15: the boolean config column is prose, not a form-field label.
+			expect(joined).not.toMatch(/Fly Speed Yes/i);
 		});
 
 		it("collapses a menu of parallel options into one line (W5)", () => {
@@ -1607,6 +1609,79 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 				if (surname.length < 4) return;
 				const hits = (allEntryText(mon).match(new RegExp(`\\b${surname}\\b`, "g")) || []).length;
 				expect(`${n}: surname ×${hits}`).toBe(`${n}: surname ×0`);
+			});
+		});
+	});
+	describe("v15 — information placement: riders ride their attack", () => {
+		it("prints Sneak Attack on the finesse/ranged line but keeps the anchor trait (A0/A1)", () => {
+			[["Juen", "Hecate's Dagger", "10d6"], ["Missy", "Ninjato", "7d6"]].forEach(([who, weapon, dice]) => {
+				const mon = loadMonster(who);
+				const line = (mon.action || []).find(e => e.name === weapon);
+				expect(`${who}: ${weapon}`).toBe(`${who}: ${line ? weapon : "missing"}`);
+				expect(line.entries.join(" ")).toMatch(new RegExp(`\\{@damage ${dice}\\}[^.]*Sneak Attack`, "i"));
+				// A0.1: three other entries key off Sneak Attack, so the anchor survives.
+				expect(allAbilityNames(mon).join("|")).toMatch(/Sneak Attack/i);
+			});
+		});
+
+		it("does not attach Sneak Attack to a non-finesse, non-ranged attack (A1)", () => {
+			const claws = (loadMonster("Missy").action || []).find(e => /^claws$/i.test(e.name));
+			if (claws) expect(claws.entries.join(" ")).not.toMatch(/Sneak Attack/i);
+		});
+
+		it("carries a weapon's own damage rider on that weapon's line (A2)", () => {
+			const fang = (loadMonster("Elizabeth").action || []).find(e => /Fang of the Whale Eater/i.test(e.name));
+			expect(fang.entries.join(" ")).toMatch(/\{@damage 2d6\} cold damage \(Leviathan's Bite/i);
+			const sunStaff = (loadMonster("Reggu").action || []).find(e => /Sun Staff/i.test(e.name));
+			expect(sunStaff.entries.join(" ")).toMatch(/\{@damage 1d8\} fire damage/i);
+			const sunBlade = (loadMonster("Dranan").action || []).find(e => /^Sun Blade$/i.test(e.name));
+			expect(sunBlade.entries.join(" ")).toMatch(/\{@damage 1d8\} radiant damage against Undead/i);
+		});
+
+		it("never advertises a bonus-action-only rider on the Attack action line (A5)", () => {
+			["Aldor", "Arthur"].forEach(n => {
+				const mon = loadMonster(n);
+				const joined = (mon.action || []).map(e => (e.entries || []).join(" ")).join(" ");
+				expect(`${n}: ${joined}`).not.toMatch(/after Dash \+ bonus action attack/i);
+			});
+		});
+
+		it("reduces a rider's source to its residue rather than repeating the line (A6)", () => {
+			const dm = (loadMonster("Onger").trait || []).find(e => /Demolishing Might/i.test(e.name));
+			expect(dm.entries.join(" ")).toMatch(/double damage to objects and structures/i);
+			expect(dm.entries.join(" ")).not.toMatch(/extra \{?@?damage ?1d8/i);
+		});
+
+		it("retires a rider source whose residue would be a fragment (A6 guard)", () => {
+			// The whole sentence *is* the rider, so stripping it leaves "…it can cause the
+			// target to." — the entry must be retired, not kept as a decapitated clause.
+			[["Lorian", /Divine Strike/i], ["Dranan", /Radiant Strikes/i], ["Mikase", /Radiant Strikes/i]].forEach(([n, re]) => {
+				const mon = loadMonster(n);
+				const stray = ["trait", "action", "bonus", "reaction"]
+					.flatMap(section => mon[section] || [])
+					.filter(e => re.test(e.name || ""))
+					.map(e => (e.entries || []).join(" "));
+				stray.forEach(text => expect(`${n}: ${text}`).not.toMatch(/\b(?:to|the|target|creature)\s*\.\s*$/i));
+				// …and the mechanic still reaches the block, on the attack line.
+				expect((mon.action || []).map(e => (e.entries || []).join(" ")).join(" ")).toMatch(re);
+			});
+		});
+
+		it("suppresses an Additional Effects bullet already inside a printed number (1a)", () => {
+			["Wisp", "Duralin"].forEach(n => {
+				const extra = (loadMonster(n).trait || []).find(e => /^Additional Effects$/i.test(e.name));
+				const joined = extra ? extra.entries.join(" ") : "";
+				expect(`${n}: ${joined}`).not.toMatch(/\{@b (?:Dueling|Defense)\.\}/i);
+			});
+		});
+
+		it("annotates a number whose only source is a conditional modifier (1b)", () => {
+			[["Elizabeth", 15, 14], ["Mikase", 20, 19], ["Vern", 18, 17]].forEach(([n, base, gated]) => {
+				const ac = loadMonster(n).ac;
+				expect(`${n}: ${ac[0].ac}`).toBe(`${n}: ${base}`);
+				const alt = ac.find(it => it.condition);
+				expect(`${n}: ${alt ? alt.ac : "none"}`).toBe(`${n}: ${gated}`);
+				expect(alt.condition).toMatch(/Dual Wielder/i);
 			});
 		});
 	});

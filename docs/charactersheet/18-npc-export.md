@@ -773,6 +773,85 @@ nothing else about it appears.
     `:` that a suppression rule caught — **an entry disappearing is not proof it was
     correctly suppressed**, and that entry now needs its own rule.
 
+### v15 — information placement: a rider rides its attack
+
+The block was accurate and compact by v14; what remained was that information sat in the
+wrong place. Running one attack meant cross-referencing two or three traits. v15 routes a
+rider onto the line it modifies — but a rider is not always a leaf, and that constraint
+governs the whole group.
+
+93. **A referenced feature keeps its antecedent** (`_buildFeatureReferenceGraph`,
+    `_isReferencedAnchor`). Sneak Attack's 10d6 is a *currency*: `Cunning Strike` spends
+    dice for effects, `Improved Cunning Strike` spends two, and `Assassinate` turns a
+    round-1 Sneak Attack hit into a critical. Printing `plus 10d6` and retiring the trait
+    would present a spendable pool as fixed damage *and* orphan three dependents. Features
+    named by two or more *other* entries occur in **14 of 24 corpus characters** (Rage,
+    Focus Points, Sorcery Points, Wild Shape, Crimson Rite, Superiority Dice, Bardic
+    Inspiration, Channel Divinity, Psionics). The graph is built before any reduction runs,
+    and **removal is available only to leaves**.
+
+    Two traps the corpus taught: `Special Equipment` and `Multiattack` name every item by
+    construction, so without `_STRUCTURAL_REFERRERS` every magic item became an
+    unremovable anchor; and single-word anchors match inside other words ("Rage" inside
+    "cou*rage*"), so only multi-word names or three whitelisted resource words may anchor,
+    matched with `\b…\b` rather than `includes()`.
+
+94. **A dice-valued rider reaches the attack line** (`_getConditionalDamageRiders`). The
+    rider machine accepted only *numbers*, so every dice-valued rider missed it. Sneak
+    Attack is now pushed from `calculations.sneakAttack.dice` as `named` but **not**
+    `wholeFeature` — named on the line, retained as an anchor. It is scoped by
+    `appliesTo: "finesseOrRanged"`, so Missy's Ninjato carries it and her Claws do not.
+
+95. **A weapon's own rider lands on that weapon** (`_getItemDamageRiders`,
+    `_getItemProseDamageRiders`). Item `damageRiders` and `conditionalBonuses` were never
+    exported at all — Reggu's Sun Staff lost 1d8 fire, Mikase's Silver Dragon Katana lost
+    1d4 cold, Dranan's Sun Blade lost its 1d8 against Undead. A second channel lifts on-hit
+    damage that exists only in item prose (Elizabeth's Fang lost 1d6 cold entirely), gated
+    hard: an *optional* or daily-limited rider is excluded (Lorian's staff Lightning would
+    otherwise advertise free damage), and so is a replacement attack phrased as
+    "When you take the Attack action…" (Mikase's Starlight Arc).
+
+96. **A bonus-action-only rider never appears on the Attack action line.** Charger's
+    `damage:charge` modifier was rendered as `plus {@damage 5} damage after Dash + bonus
+    action attack` on Aldor's and Arthur's base weapon — a mangled fragment advertising a
+    bonus the attack can never receive. A conditional damage modifier whose gate names a
+    *different* action is now excluded; the feature states the bonus where it happens.
+
+97. **A rider must shrink its source to the residue** (`_reduceRiderSourcesToResidue`,
+    `_stripEmittedDamageClause`). Onger read `plus 1d8 against Constructs` on the line and
+    then the whole sentence again three entries later. The strip is deliberately
+    clause-scoped, never sentence-scoped: the sentence usually carries a second mechanic
+    the line does not (here, double damage to objects), and that residue must survive.
+
+    Residue runs **before** whole-feature retirement, and a surviving residue cancels it —
+    but only if it still reads as a rule (`_isUsableRiderResidue`). Divine Strike is the
+    counter-example: its whole sentence *is* the rider, so stripping it leaves
+    *"…it can cause the target to."* A decapitated clause is discarded and the entry
+    retired, which is how Lorian, Dranan and Mikase keep working.
+
+98. **An `Additional Effects` bullet already inside a printed number is suppressed**
+    (`_getBakedInModifierKeys`, `_PRINTED_NUMBER_FAMILIES`). The sheet registers a fighting
+    style **twice** — unconditionally (which is what the printed number sums) and again as
+    a gated twin. Wisp's War Pick printed `1d8+12` and then a bullet reading *"Dueling. +2
+    to damage rolls…"*, inviting the DM to add it a second time. `_getConditionalDamageRiders`
+    already applied this test; `_getNamedModifierTrait` never learned it. The same guard
+    now drops any unconditional numeric bonus to a number the block already prints.
+
+99. **A number whose only source is a conditional modifier is annotated, not silently
+    inflated** (`_getAcEntries`, `_negateGateCondition`). Elizabeth, Mikase and Vern have
+    *no* unconditional Dual Wielder twin: the +1 **is** in the printed AC, so AC 15 is true
+    only while she is dual-wielding. The gate was load-bearing and lived in a bullet the DM
+    could not connect to the AC. It now rides the number itself —
+    `ac: [{15, from:["unarmored"]}, {14, condition:"when not dual wielding two melee weapons (Dual Wielder)"}]`.
+
+100. **A boolean config column is rendered as prose** (`_formatProgressionCell`). Wild Shape
+    ended `{@b Beast Shapes.} Known Forms 8, Max CR 3, Fly Speed Yes.` — the sheet's
+    internal form-field labels printed verbatim, and `Fly Speed Yes` duplicated the sentence
+    directly above it. Now `8 known forms, max CR 3.` One knock-on found by the corpus diff:
+    lowercasing a label broke `_boldInlineOptionLabel`'s `(?=[A-Z"“{])` lookahead and
+    silently unbolded Tignor's `Circle of the Moon Spells` heading, so `_collapseLevelTables`
+    now emits the caption already bolded and list columns skip the rewrite.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). Hard errors block Save to Homebrew; warnings allow Download / Copy. Full browser-side monster schema validation is still out of scope (graceful hand validator only).
 
@@ -980,6 +1059,15 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
 - **`_refileByStatedEconomy` reads the lead sentence only.** A rider deep inside an entry
   that mentions a reaction does not move the entry; an entry whose *opening* names an
   economy does.
+- **The residue strip matches the exact damage the line emitted, nothing looser.** Onger's
+  `Brutal Strike` states its die as `1d10` (the per-die value) while the line carries the
+  full `2d10`, so the clause is left intact rather than stripped by a fuzzy match. Widening
+  the match to any `NdX` would break sentences whose subject sits before the clause,
+  leaving *"the target it can cause…"*.
+- **Retirement is unavailable to an anchor, however completely the line restates it.** Rage's
+  damage is on Onger's attack line, but four entries key off "while raging", so the Rage
+  entry stays. Compressing an anchor can make that entry *longer* while the block gets
+  shorter — measure the character total, not the entry.
 
 ## Key files
 

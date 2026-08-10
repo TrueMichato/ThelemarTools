@@ -231,7 +231,13 @@ class CharacterSheetNpcExporter {
 			state,
 			{includeUnarmed: exportOpts.includeUnarmed},
 		);
-		const damageRiders = this._getConditionalDamageRiders(state, calculations);
+		const damageRiders = (() => {
+			const base = [
+				...this._getConditionalDamageRiders(state, calculations),
+				...this._getItemDamageRiders(attacks),
+			];
+			return [...base, ...this._getItemProseDamageRiders(attacks, base)];
+		})();
 		// The sheet stores a whole-feature rider (Radiant Strikes, Divine Strike) as its own
 		// attack row, so the block printed a phantom weapon whose damage is really an extra
 		// die on every other attack. The rider now rides those attacks; the row is a ghost.
@@ -277,10 +283,17 @@ class CharacterSheetNpcExporter {
 			protectedFeatureNames: damageRiders.map(rider => rider.sourceName).filter(Boolean),
 		});
 		// A rider that reproduces its feature in full makes the feature's own trait pure
-		// duplication of the attack line it now sits on.
+		// duplication of the attack line it now sits on. Deletion is available only to
+		// leaves: a feature another entry names (see `_buildFeatureReferenceGraph`) keeps
+		// its antecedent no matter how completely the line restates it.
+		const referenceGraph = this._buildFeatureReferenceGraph(featureBlocks);
+		// Residue first: an entry that still says something the line does not carry has
+		// earned its place, even when the rider claimed the whole feature.
+		const reducedNames = this._reduceRiderSourcesToResidue(featureBlocks, damageRiders, referenceGraph);
 		const riderReplacedNames = new Set(damageRiders
-			.filter(rider => rider.wholeFeature && rider.sourceName)
-			.map(rider => this._normalizeFeatureKey(rider.sourceName)));
+			.filter(rider => rider.wholeFeature && rider.sourceName && !this._isReferencedAnchor(rider.sourceName, referenceGraph))
+			.map(rider => this._normalizeFeatureKey(rider.sourceName))
+			.filter(key => !reducedNames.has(key)));
 		if (riderReplacedNames.size) {
 			["trait", "action", "bonus", "reaction"].forEach(section => {
 				if (!featureBlocks[section]?.length) return;
@@ -380,7 +393,7 @@ class CharacterSheetNpcExporter {
 			size,
 			type: monsterType,
 			alignment,
-			ac: [{ac, from: acFrom}],
+			ac: this._getAcEntries(state, ac, acFrom),
 			hp: {
 				average: maxHp,
 				formula: this._getHpFormula(maxHp, state),
@@ -1913,6 +1926,214 @@ class CharacterSheetNpcExporter {
 			return !restated;
 		});
 		if (survivors.length !== traits.length) out.trait = survivors;
+	}
+
+	/**
+	 * Some features are **anchors**: other entries on the block key off them by name.
+	 * Sneak Attack is the sharpest case — `Cunning Strike` spends dice out of it,
+	 * `Improved Cunning Strike` spends two, and `Assassinate` turns a round-1 Sneak Attack
+	 * hit into a critical. Rage, Wild Shape, Crimson Rite, Superiority Dice, Bardic
+	 * Inspiration, Channel Divinity and every point pool behave the same way; the pattern
+	 * covers 14 of the 24 corpus characters.
+	 *
+	 * That matters because a rider printed onto an attack line normally retires its source
+	 * entry. Retiring an *anchor* would present a spendable pool as fixed damage and orphan
+	 * every dependent whose trigger clause no longer has an antecedent. So: deletion is
+	 * available only to leaves. An anchor may be compressed, never removed.
+	 *
+	 * @param {Object} out monster object being assembled
+	 * @returns {Map<string, Array<string>>} anchor key → names of the entries referencing it
+	 */
+	static _buildFeatureReferenceGraph (out) {
+		const SECTIONS = ["trait", "action", "bonus", "reaction"];
+		const entries = [];
+		SECTIONS.forEach(section => (out?.[section] || []).forEach(entry => {
+			if (entry) entries.push(entry);
+		}));
+		if (entries.length < 2) return new Map();
+
+		const rows = entries.map(entry => ({
+			entry,
+			name: this._getAnchorBareName(entry?.name),
+			body: this._getAnchorSearchText(entry),
+		}));
+
+		const graph = new Map();
+		rows.forEach(target => {
+			const aliases = this._getAnchorAliases(target.name);
+			if (!aliases.length) return;
+			const referrers = rows
+				.filter(other => other.entry !== target.entry
+					&& !this._STRUCTURAL_REFERRERS.has(other.name)
+					// A sibling entry sharing the bare name ("Sun Blade" / "Sun Blade —
+					// Blade of Radiance") is the same feature, not a dependent of it.
+					&& other.name !== target.name
+					&& aliases.some(alias => this._mentionsAnchor(other.body, alias)))
+				.map(other => other.name)
+				.filter(Boolean);
+			if (!referrers.length) return;
+			const key = this._normalizeFeatureKey(target.name);
+			if (!key) return;
+			const existing = graph.get(key) || [];
+			graph.set(key, [...new Set([...existing, ...referrers])]);
+		});
+		return graph;
+	}
+
+	// These entries name every item or weapon on the block by construction, so a mention
+	// inside them is a listing, not a dependency. Without this every magic item became an
+	// anchor and nothing could ever be retired.
+	static _STRUCTURAL_REFERRERS = new Set(["Special Equipment", "Multiattack", "Additional Effects"]);
+
+	/** True when another entry on the block names this feature, so it cannot be removed. */
+	static _isReferencedAnchor (name, graph) {
+		if (!graph?.size) return false;
+		const key = this._normalizeFeatureKey(this._getAnchorBareName(name));
+		if (!key) return false;
+		if (graph.has(key)) return true;
+		// "Focus Points (12/SR)" is referenced as "1 Focus Point"; the singular and the
+		// pool label are the same anchor.
+		return [...graph.keys()].some(anchorKey => this._featureKeyMatches(anchorKey, key));
+	}
+
+	/**
+	 * Once a rider is printed on the attack line, the clause its source feature devotes to
+	 * that same damage is pure duplication — Onger read *"plus 1d8 against Constructs"* on
+	 * the line and then *"Onger's melee weapon attacks deal an extra 1d8 damage to
+	 * constructs, and deal double damage to objects and structures"* three entries later.
+	 *
+	 * Strip exactly the clause the line now carries and nothing else. What remains is the
+	 * residue — here, the double damage to objects, which the line does not carry and must
+	 * not lose. An entry reduced to nothing is dropped, but only if it is a leaf: an anchor
+	 * keeps its name and body so its dependents still have an antecedent.
+	 *
+	 * @param {Object} featureBlocks sections of assembled feature entries (mutated)
+	 * @param {Array<Object>} riders emitted rider records
+	 * @param {Map} referenceGraph anchor → referring entries
+	 * @returns {Set<string>} normalized names whose body was actually reduced
+	 */
+	static _reduceRiderSourcesToResidue (featureBlocks, riders, referenceGraph) {
+		const reduced = new Set();
+		const bySource = new Map();
+		(riders || []).forEach(rider => {
+			if (!rider?.sourceName || !rider?.damage) return;
+			const key = this._normalizeFeatureKey(rider.sourceName);
+			if (!key) return;
+			if (!bySource.has(key)) bySource.set(key, []);
+			bySource.get(key).push(rider);
+		});
+		if (!bySource.size) return reduced;
+
+		["trait", "action", "bonus", "reaction"].forEach(section => {
+			const entries = featureBlocks?.[section];
+			if (!entries?.length) return;
+			featureBlocks[section] = entries.filter(entry => {
+				const key = this._normalizeFeatureKey(this._getAnchorBareName(entry?.name));
+				const matching = bySource.get(key);
+				if (!matching?.length) return true;
+				const isAnchor = this._isReferencedAnchor(entry?.name, referenceGraph);
+				let changed = false;
+
+				const rewritten = (entry.entries || []).map(line => {
+					if (typeof line !== "string") return line;
+					let out = line;
+					matching.forEach(rider => { out = this._stripEmittedDamageClause(out, rider.damage); });
+					if (out === line) return line;
+					changed = true;
+					const tidy = out.replace(/\s{2,}/g, " ").trim();
+					return /[.!?]$/.test(tidy) ? tidy : `${tidy}.`;
+				});
+				if (!changed) return true;
+				const kept = rewritten.filter(line => typeof line !== "string" || this._isUsableRiderResidue(line));
+				// Never leave a rider's source empty-bodied; and never delete an anchor.
+				if (!kept.length) return isAnchor;
+				entry.entries = kept;
+				reduced.add(key);
+				return true;
+			});
+		});
+		return reduced;
+	}
+
+	/**
+	 * A residue is only worth keeping if it still reads as a rule on its own. Divine Strike
+	 * is the counter-example: its whole sentence is the rider, so stripping the rider leaves
+	 * *"…when it hits a creature with an attack roll using a weapon, it can cause the target
+	 * to."* — a decapitated clause that must be discarded, letting the entry be retired.
+	 *
+	 * @param {string} text candidate residue line
+	 * @returns {boolean} true when the line stands as a rule by itself
+	 */
+	static _isUsableRiderResidue (text) {
+		const line = String(text || "").trim();
+		if (line.replace(/[^A-Za-z0-9]/g, "").length < 12) return false;
+		// The strip consumed the sentence's object or its main verb's complement.
+		if (/\b(?:to|the|a|an|of|with|and|or|from|by|into|target|creature|it|its)\s*[.]$/i.test(line)) return false;
+		return true;
+	}
+
+	/**
+	 * Remove one "deals an extra <dice> damage …" clause, taking its coordinator with it so
+	 * the sentence still reads. Deliberately clause-scoped rather than sentence-scoped: a
+	 * sentence usually carries a second mechanic the attack line does not.
+	 *
+	 * @param {string} text feature body line
+	 * @param {string} damage rider damage, tagged or bare ("1d8", "5")
+	 * @returns {string} the line with that clause removed
+	 */
+	static _stripEmittedDamageClause (text, damage) {
+		const value = String(damage || "").trim();
+		if (!value) return text;
+		const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const die = `(?:\\{@damage\\s+${escaped}\\}|\\{@dice\\s+${escaped}\\}|${escaped})`;
+		const clause = new RegExp(`(?:,\\s*and\\s+|\\s+and\\s+|,\\s*)?\\b(?:deals?|takes?|inflicts?)\\s+an\\s+extra\\s+${die}[^,.;]*(?:,\\s*and\\s+)?`, "i");
+		const match = clause.exec(text);
+		if (!match) return text;
+		const out = `${text.slice(0, match.index)}${text.slice(match.index + match[0].length)}`;
+		return out.replace(/\s+([,.;])/g, "$1").replace(/\s{2,}/g, " ").trim();
+	}
+
+	/** Entry name without its use-count suffix, tag markup or provenance parenthetical. */
+	static _getAnchorBareName (name) {
+		return String(name || "")
+			.replace(/\{@\w+\s+([^|}]+)[^}]*\}/g, "$1")
+			.replace(/\s*\([^)]*\)\s*$/, "")
+			.replace(/\s*—.*$/, "")
+			.replace(/\s+/g, " ")
+			.trim();
+	}
+
+	/** Flattened, tag-stripped body of an entry, for anchor-mention detection. */
+	static _getAnchorSearchText (entry) {
+		return (entry?.entries || [])
+			.map(line => (typeof line === "string" ? line : JSON.stringify(line)))
+			.join(" ")
+			.replace(/\{@\w+\s+([^|}]+)[^}]*\}/g, "$1");
+	}
+
+	// A one-word anchor is a trap: "Rage" is inside "courage" and "forager", and a bare
+	// "Iron" or "Kindling" is ordinary English. Only multi-word names, or the handful of
+	// single words that are unambiguous class resources, may anchor.
+	static _SINGLE_WORD_ANCHORS = new Set(["rage", "ki", "psionics"]);
+
+	/** Name variants an entry may be referenced by ("Focus Points" → "focus point"). */
+	static _getAnchorAliases (name) {
+		const bare = String(name || "").trim();
+		if (!bare) return [];
+		const words = bare.split(/\s+/);
+		if (words.length === 1 && !this._SINGLE_WORD_ANCHORS.has(bare.toLowerCase())) return [];
+		const out = new Set([bare]);
+		// Pools are named in the plural and spent in the singular.
+		if (/s$/i.test(bare)) out.add(bare.replace(/s$/i, ""));
+		else out.add(`${bare}s`);
+		return [...out].filter(alias => alias.length >= 3);
+	}
+
+	/** Whole-word, case-insensitive mention test — never a substring match. */
+	static _mentionsAnchor (haystack, alias) {
+		if (!haystack || !alias) return false;
+		const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		return new RegExp(`\\b${escaped}\\b`, "i").test(haystack);
 	}
 
 	/**
@@ -6843,14 +7064,14 @@ class CharacterSheetNpcExporter {
 
 	static _getConditionalDamageRiders (state, calculations = {}) {
 		const riders = [];
-		const push = (damage, condition, {meleeOnly = true, sourceName = "", damageType = "", wholeFeature = false} = {}) => {
+		const push = (damage, condition, {meleeOnly = true, sourceName = "", damageType = "", wholeFeature = false, named = false, appliesTo = "", onlyWeapon = ""} = {}) => {
 			const value = String(damage ?? "").trim();
 			if (!value || value === "0") return;
-			if (riders.some(r => r.condition === condition)) return;
+			if (riders.some(r => r.condition === condition && r.onlyWeapon === onlyWeapon)) return;
 			// One feature can register the same bonus twice under differently-worded
 			// conditionals (Dueling does), which reads as two separate riders on the line.
 			if (sourceName && riders.some(r => r.sourceName === sourceName && r.damage === value)) return;
-			riders.push({damage: value, condition, meleeOnly, sourceName, damageType, wholeFeature});
+			riders.push({damage: value, condition, meleeOnly, sourceName, damageType, wholeFeature, named: named || wholeFeature, appliesTo, onlyWeapon});
 		};
 
 		const rage = Number(calculations.rageDamage);
@@ -6887,6 +7108,21 @@ class CharacterSheetNpcExporter {
 			sourceName: "Crimson Rite",
 		});
 
+		// Sneak Attack is an **anchor**, not a leaf (see `_buildFeatureReferenceGraph`):
+		// Cunning Strike spends dice out of it and Assassinate turns a round-1 hit into a
+		// critical. So it is `named` — the line attributes it — but never `wholeFeature`,
+		// because retiring the trait would present a spendable pool as fixed damage and
+		// orphan its dependents. It only rides Finesse or Ranged attacks, so Missy's Claws
+		// must not pick it up.
+		if (calculations.sneakAttack?.dice) {
+			push(String(calculations.sneakAttack.dice), "1/turn", {
+				meleeOnly: false,
+				sourceName: "Sneak Attack",
+				named: true,
+				appliesTo: "finesseOrRanged",
+			});
+		}
+
 		// A conditional damage modifier whose feature ALSO registered an
 		// unconditional entry is the gated twin of a bonus already baked into the
 		// attack line, so only genuinely stand-alone conditionals become riders.
@@ -6903,6 +7139,10 @@ class CharacterSheetNpcExporter {
 			if (!/^damage(?:$|:)/.test(String(mod.type || ""))) return;
 			if (/reroll/i.test(String(mod.type || ""))) return;
 			if (mod.sourceFeatureId && bakedInSources.has(mod.sourceFeatureId)) return;
+			// A bonus that only lands on a *different* attack — Charger's +5 applies to the
+			// bonus-action attack it grants, not to the Attack action — must not advertise
+			// itself on every printed line. The feature states it where it happens.
+			if (/bonus action/i.test(String(mod.conditional || ""))) return;
 			const value = Number(mod.value);
 			if (!Number.isFinite(value) || value === 0) return;
 			const condition = this._normalizeRiderCondition(mod.conditional);
@@ -6913,6 +7153,141 @@ class CharacterSheetNpcExporter {
 			});
 		});
 
+		return riders;
+	}
+
+	/**
+	 * A magic weapon's own extra damage is scoped to *that weapon*, so it belongs on that
+	 * weapon's attack line and nowhere else. The sheet stores it on the item as
+	 * `damageRiders` (a flat extra die) and `conditionalBonuses` (a die against a creature
+	 * type), and the exporter read neither — Reggu's Sun Staff lost its 1d8 fire, Mikase's
+	 * Silver Dragon Katana lost its 1d4 cold, and Dranan's Sun Blade lost its 1d8 vs undead.
+	 *
+	 * @param {Array<Object>} attacks export attack records
+	 * @returns {Array<Object>} weapon-scoped rider records
+	 */
+	static _getItemDamageRiders (attacks) {
+		const riders = [];
+		(attacks || []).forEach(attack => {
+			const item = attack?._sourceItem;
+			const weapon = String(attack?.name || "").trim();
+			if (!item || !weapon) return;
+
+			(item.damageRiders || []).forEach(rider => {
+				const dice = String(rider?.dice || "").trim();
+				if (!dice) return;
+				const label = this._getSafeInlineText(rider?.name || "", {maxLen: 60});
+				// A rider named after its own weapon adds nothing the line doesn't say.
+				const sourceName = label && this._normalizeFeatureKey(label) !== this._normalizeFeatureKey(weapon) ? label : "";
+				riders.push({
+					damage: dice,
+					damageType: String(rider?.damageType || "").trim(),
+					condition: rider?.requiresToggle ? "while active" : "",
+					meleeOnly: false,
+					onlyWeapon: weapon,
+					sourceName,
+					named: !!sourceName,
+					wholeFeature: false,
+					appliesTo: "",
+				});
+			});
+
+			(item.conditionalBonuses || []).forEach(bonus => {
+				const dice = String(bonus?.damage || "").trim();
+				if (!dice) return;
+				riders.push({
+					damage: dice,
+					damageType: String(bonus?.damageType || "").trim(),
+					condition: this._formatItemBonusCondition(bonus),
+					meleeOnly: false,
+					onlyWeapon: weapon,
+					sourceName: "",
+					named: false,
+					wholeFeature: false,
+					appliesTo: "",
+				});
+			});
+		});
+		return riders;
+	}
+
+	/** "vs Undead" / creatureTypes ["undead"] → "against Undead". */
+	static _formatItemBonusCondition (bonus) {
+		const types = (bonus?.creatureTypes || []).map(it => String(it).trim()).filter(Boolean);
+		if (types.length) return `against ${types.map(it => it.replace(/^./, c => c.toUpperCase())).join(" and ")}`;
+		const label = String(bonus?.label || "").trim().replace(/^vs\.?\s+/i, "");
+		return label ? `against ${label}` : "";
+	}
+
+	// Only an *automatic* on-hit rider may be lifted from prose. "you can cause the target
+	// to take" is an optional, usually limited-use power (Lorian's staff) whose cost the
+	// line cannot carry, and lifting it would advertise free damage.
+	static _ITEM_HIT_TRIGGER = /\b(?:on a hit|when(?:ever)? (?:you|it) hits?|the first time each turn (?:you|it) hits?)\b/i;
+	static _ITEM_OPTIONAL_RIDER = /\b(?:you can|it can|can cause|at your option|no action required)\b/i;
+	static _ITEM_EXTRA_DAMAGE = /\b(?:deals?|takes?)\s+an?\s+extra\s+\{@damage\s+(\d+d\d+)\}\s*(\w+)?\s*damage/i;
+	static _ITEM_FIRST_TIME = /\bthe first time each turn (?:you|it) hits?\s+(?:a creature that is\s+)?([^,;.]{3,40}?)\s*,/i;
+
+	/**
+	 * A magic weapon's flat on-hit damage often lives only in its prose, never reaching the
+	 * structured `damageRiders` field — Elizabeth's Fang of the Whale Eater lost its 1d6
+	 * cold entirely, and Arthur's Cataclysm its 1d4. Mine it, but narrowly: the sentence
+	 * must state an on-hit trigger, must not be optional, and must lose to any structured
+	 * rider already carrying the same dice.
+	 *
+	 * @param {Array<Object>} attacks export attack records
+	 * @param {Array<Object>} existing riders already emitted, to dedupe against
+	 * @returns {Array<Object>} weapon-scoped rider records
+	 */
+	static _getItemProseDamageRiders (attacks, existing = []) {
+		const riders = [];
+		const seen = new Set(existing
+			.filter(it => it.onlyWeapon)
+			.map(it => `${this._normalizeFeatureKey(it.onlyWeapon)}|${it.damage}|${String(it.damageType || "").toLowerCase()}`));
+
+		(attacks || []).forEach(attack => {
+			const item = attack?._sourceItem;
+			const weapon = String(attack?.name || "").trim();
+			if (!item || !weapon) return;
+			const weaponKey = this._normalizeFeatureKey(weapon);
+
+			const candidates = [];
+			(item.entries || []).forEach(entry => {
+				if (typeof entry === "string") candidates.push({label: "", text: entry});
+				else (entry?.entries || []).forEach(line => typeof line === "string" && candidates.push({label: entry.name || "", text: line}));
+			});
+			(item.itemPowers || []).forEach(power => power?.description && candidates.push({label: power.name || "", text: power.description}));
+
+			candidates.forEach(({label, text}) => {
+				if (!this._ITEM_HIT_TRIGGER.test(text)) return;
+				if (this._ITEM_OPTIONAL_RIDER.test(text)) return;
+				const match = this._ITEM_EXTRA_DAMAGE.exec(text);
+				if (!match) return;
+				const damage = match[1];
+				const damageType = String(match[2] || "").toLowerCase();
+				const key = `${weaponKey}|${damage}|${damageType}`;
+				if (seen.has(key)) return;
+				seen.add(key);
+
+				const firstTime = this._ITEM_FIRST_TIME.exec(text);
+				const target = firstTime ? this._getSafeInlineText(firstTime[1], {maxLen: 40}) : "";
+				const condition = firstTime
+					? `${target ? `against ${target} creatures, ` : ""}1/turn`
+					: "";
+				const name = this._getSafeInlineText(label, {maxLen: 60});
+				const sourceName = name && this._normalizeFeatureKey(name) !== weaponKey ? name : "";
+				riders.push({
+					damage,
+					damageType,
+					condition,
+					meleeOnly: false,
+					onlyWeapon: weapon,
+					sourceName,
+					named: !!sourceName,
+					wholeFeature: false,
+					appliesTo: "",
+				});
+			});
+		});
 		return riders;
 	}
 
@@ -6948,23 +7323,47 @@ class CharacterSheetNpcExporter {
 	 */
 	static _formatDamageRidersForAttack (riders, attack) {
 		if (!riders?.length) return "";
-		const isMelee = this._isMeleeAttack(attack);
-		const applicable = riders.filter(rider => !rider.meleeOnly || isMelee);
+		const applicable = riders.filter(rider => this._riderAppliesToAttack(rider, attack));
 		if (!applicable.length) return "";
 		return applicable
 			.map(rider => {
 				const type = rider.damageType ? ` ${rider.damageType}` : "";
-				// A whole-feature rider replaces its trait, so it must name the feature it
+				const condition = String(rider.condition || "").trim();
+				// A named rider replaces or anchors a trait, so it must name the feature it
 				// came from or the DM loses the attribution entirely.
-				if (rider.wholeFeature && rider.sourceName) {
+				if (rider.named && rider.sourceName) {
 					// A condition that is true of every attack the rider is printed on adds
 					// nothing but length — the attack line itself is the condition.
-					const isUniversal = /^on (every|each|all) /i.test(String(rider.condition || ""));
-					return `, plus {@damage ${rider.damage}}${type} damage (${rider.sourceName}${isUniversal ? "" : `, ${rider.condition}`})`;
+					const isUniversal = !condition || /^on (every|each|all) /i.test(condition);
+					return `, plus {@damage ${rider.damage}}${type} damage (${rider.sourceName}${isUniversal ? "" : `, ${condition}`})`;
 				}
-				return `, plus {@damage ${rider.damage}}${type} damage ${rider.condition}`;
+				return `, plus {@damage ${rider.damage}}${type} damage${condition ? ` ${condition}` : ""}`;
 			})
 			.join("");
+	}
+
+	/**
+	 * A rider is not universal. Sneak Attack rides only Finesse or Ranged weapons, so
+	 * Missy's Claws must not pick it up; an item power rides only its own weapon.
+	 *
+	 * @param {Object} rider rider record from `_getConditionalDamageRiders`
+	 * @param {Object} attack export attack record
+	 * @returns {boolean}
+	 */
+	static _riderAppliesToAttack (rider, attack) {
+		if (rider.meleeOnly && !this._isMeleeAttack(attack)) return false;
+		if (rider.onlyWeapon && this._normalizeFeatureKey(attack?.name) !== this._normalizeFeatureKey(rider.onlyWeapon)) return false;
+		if (rider.appliesTo === "finesseOrRanged" && !this._isFinesseOrRangedAttack(attack)) return false;
+		return true;
+	}
+
+	/** Weapon properties reach the exporter as codes ("F|XPHB") and as words ("Finesse"). */
+	static _isFinesseOrRangedAttack (attack) {
+		const props = [...(attack?.properties || []), ...(attack?._sourceItem?.properties || [])]
+			.map(it => String(it).split("|")[0].trim().toUpperCase());
+		if (props.some(it => it === "F" || it === "FINESSE")) return true;
+		if (props.some(it => it === "A" || it === "AMMUNITION" || it === "T" || it === "THROWN")) return true;
+		return this._isRangedOnlyAttack(attack);
 	}
 
 	static _getActionEntriesFromAttacks (attacks, state, {damageRiders = []} = {}) {
@@ -8721,6 +9120,7 @@ class CharacterSheetNpcExporter {
 			speed,
 			skills,
 			representedAbilityNames,
+			bakedInKeys: this._getBakedInModifierKeys(modifiers),
 		}));
 		// bonusAction types are promoted to real bonus entries separately
 		const leftover = residual.filter(mod => !/bonusAction|bonus action/i.test(String(mod.type || "")));
@@ -8990,7 +9390,93 @@ class CharacterSheetNpcExporter {
 			.trim();
 	}
 
-	static _isResidualNamedModifier (mod, {defenses = null, speed = null, skills = null, representedAbilityNames = new Set()} = {}) {
+	/**
+	 * The sheet registers a fighting style **twice**: once unconditionally — which is what
+	 * gets summed into the printed AC or damage — and once as a gated twin carrying the
+	 * prose condition. Wisp's Dueling is `damage +2` *and* `damage:melee:oneHanded +2`;
+	 * Defense is `ac +1` *and* `ac +1 while wearing armor`.
+	 *
+	 * The conditional twin is therefore already inside the printed number. Restating it as
+	 * an `Additional Effects` bullet invites the DM to add it a second time.
+	 * `_getConditionalDamageRiders` has always applied this test to keep the +2 off the
+	 * attack line; this is the same test, shared, so the bullet list learns it too.
+	 *
+	 * @param {Array<Object>} modifiers named modifiers from the sheet
+	 * @returns {Set<string>} `sourceFeatureId|typeFamily|value` keys already folded into a number
+	 */
+	static _getBakedInModifierKeys (modifiers) {
+		return new Set((modifiers || [])
+			.filter(mod => mod?.enabled !== false && !mod?.conditional && mod?.sourceFeatureId)
+			.map(mod => this._getBakedInModifierKey(mod))
+			.filter(Boolean));
+	}
+
+	static _getBakedInModifierKey (mod) {
+		const family = String(mod?.type || "").split(":")[0];
+		const value = Number(mod?.value);
+		if (!family || !Number.isFinite(value) || !mod?.sourceFeatureId) return "";
+		return `${mod.sourceFeatureId}|${family}|${value}`;
+	}
+
+	/**
+	 * A conditional AC modifier with **no** unconditional twin is a gate the sheet silently
+	 * folded into the printed number. Elizabeth's AC 15 contains Dual Wielder's +1, so 15 is
+	 * only true while she has two weapons out — drop one and it is 14. That gate is
+	 * load-bearing and belongs on the number, exactly as rage resistances are annotated,
+	 * rather than in a bullet the DM cannot connect to the AC.
+	 *
+	 * @param {Object} state character state
+	 * @param {number} ac printed armour class
+	 * @param {Array<string>} acFrom source labels for the printed AC
+	 * @returns {Array<Object>} the `ac` array for the statblock
+	 */
+	static _getAcEntries (state, ac, acFrom) {
+		const base = [{ac, from: acFrom}];
+		const modifiers = state.getNamedModifiers?.() || [];
+		if (!modifiers.length) return base;
+
+		const bakedInKeys = this._getBakedInModifierKeys(modifiers);
+		const featuresById = new Map((state._data?.features || []).map(f => [String(f?.id || ""), f]));
+
+		const gates = modifiers.filter(mod => mod?.enabled !== false
+			&& mod?.conditional
+			&& /^ac(?:$|:)/.test(String(mod.type || ""))
+			&& Number.isFinite(Number(mod.value))
+			&& Number(mod.value) > 0
+			&& !bakedInKeys.has(this._getBakedInModifierKey(mod)));
+		if (!gates.length) return base;
+
+		const total = gates.reduce((acc, mod) => acc + Number(mod.value), 0);
+		const ungated = ac - total;
+		if (!(ungated > 0) || ungated >= ac) return base;
+
+		const conditions = [...new Set(gates.map(mod => {
+			const clause = this._negateGateCondition(mod.conditional);
+			const feature = featuresById.get(String(mod.sourceFeatureId || ""));
+			const label = this._getFeatureHoverTag(feature) || this._getSafeInlineText(mod.name || "", {maxLen: 60});
+			return label ? `${clause} (${label})` : clause;
+		}).filter(Boolean))];
+		if (!conditions.length) return base;
+
+		return [...base, {ac: ungated, condition: conditions.join(" or ")}];
+	}
+
+	/** "while dual wielding two melee weapons" → "when not dual wielding two melee weapons". */
+	static _negateGateCondition (raw) {
+		const text = String(raw || "").trim()
+			.replace(/^(?:when|while|if)\s+/i, "")
+			.replace(/\byou are\b/gi, "it is")
+			.replace(/\byour\b/gi, "its")
+			.replace(/\byou\b/gi, "it")
+			.replace(/\s+/g, " ")
+			.replace(/[.,;]+$/, "");
+		if (!text) return "otherwise";
+		return `when not ${text}`;
+	}
+
+	static _PRINTED_NUMBER_FAMILIES = new Set(["ac", "attack", "damage", "spellDc", "spellAttack"]);
+
+	static _isResidualNamedModifier (mod, {defenses = null, speed = null, skills = null, representedAbilityNames = new Set(), bakedInKeys = null} = {}) {
 		if (!mod || mod.enabled === false) return false;
 		const type = String(mod.type || "");
 		const nameKey = this._normalizeFeatureKey(mod.name);
@@ -9026,7 +9512,22 @@ class CharacterSheetNpcExporter {
 		if (type === "initiative" && (mod.advantage || mod.disadvantage) && !mod.conditional) return false;
 
 		// Keep conditional combat riders and true custom AC/attack/damage notes
-		if (mod.conditional) return true;
+		if (mod.conditional) {
+			// …unless an unconditional sibling from the same feature already put this exact
+			// bonus inside the printed number (see _getBakedInModifierKeys).
+			if (bakedInKeys?.has(this._getBakedInModifierKey(mod))) return false;
+			return true;
+		}
+
+		// A flat, ungated bonus to a number the block already prints — AC, attack, damage,
+		// spell save DC, spell attack — is *inside* that number by construction. Wisp's
+		// Defense +1 is part of AC 22; printing it again invites the DM to add it twice.
+		// Only a note carrying its own gate survives, because that gate is not in the number.
+		const family = type.split(":")[0];
+		if (this._PRINTED_NUMBER_FAMILIES.has(family) && Number.isFinite(Number(mod.value))) {
+			return !!(mod.note && /while|when|if |until /i.test(mod.note));
+		}
+
 		if (["ac", "attack", "damage", "spellDc", "spellAttack", "d20"].includes(type)) return true;
 		if (type.startsWith("save:")) return true;
 		if (mod.note && /while|when|if |until /i.test(mod.note)) return true;
@@ -10075,16 +10576,44 @@ class CharacterSheetNpcExporter {
 					// progressions ("Max CR", "Known Forms") are replaced by the latest row.
 					const isList = values.some(v => v.includes(",") || v.split(/\s+/).length > 2);
 					const value = isList ? [...new Set(values)].join(", ") : values[values.length - 1];
-					return `${h} ${value}`;
+					// A list column ("Prepared Spells") is content; only scalar config
+					// columns are form-field chrome needing a rewrite.
+					return isList ? `${h} ${value}` : this._formatProgressionCell(h, value);
 				})
 				.filter(Boolean);
 			if (!cells.length) return " ";
-			return ` ${caption ? `${caption}: ` : ""}${cells.join(", ")}. `;
+			// The caption is known to be a caption here, so bold it directly rather than
+			// leaving `_boldInlineOptionLabel` to infer it from a `Label: ` shape the
+			// rewritten cells no longer have.
+			return ` ${caption ? `{@b ${caption}.} ` : ""}${cells.join(", ")}. `;
 		});
 	}
 
 	/**
-	 * Not every table is a progression. A cost table ("Creating Spell Slots") or a
+	 * A progression cell is a form-field label paired with a raw value, and pasting the two
+	 * together gives sheet chrome rather than English: Wild Shape collapsed to
+	 * `Known Forms 8, Max CR 3, Fly Speed Yes`. `Fly Speed Yes` is a boolean config field
+	 * printed verbatim, and it duplicated the sentence directly above it.
+	 *
+	 * Boolean columns are dropped — whatever they gate is always stated in the feature's
+	 * prose — and a count reads as a count.
+	 *
+	 * @param {string} header column header
+	 * @param {string} value selected row value
+	 * @returns {string|null} readable clause, or null to omit the column
+	 */
+	static _formatProgressionCell (header, value) {
+		const h = String(header || "").trim();
+		const v = String(value || "").trim();
+		if (!h || !v) return null;
+		if (/^(?:yes|no|true|false|—|-|n\/a)$/i.test(v)) return null;
+		// Acronyms ("CR", "DC", "HP") are meaningful only in caps; ordinary words are not.
+		const lower = h.split(/\s+/).map(w => (/^[A-Z0-9]{2,}$/.test(w) ? w : w.toLowerCase())).join(" ");
+		if (/s$/i.test(h) && /^[\d/]+$/.test(v)) return `${v} ${lower}`;
+		return `${lower} ${v}`;
+	}
+
+	/**
 	 * lookup ("Spellsword Technique") has every row live at once, so the row-selecting
 	 * collapse above declines it — and generic tag-stripping then destroyed it, leaving
 	 * Nessa's Font of Magic as the bare header row with the data gone. A DM could not
