@@ -52,14 +52,12 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "rollAbilityCheck", ability: "cha"},
 			{kind: "rollSkillCheck", proficientSkills: true, skip: true, skipReason: "P5 follow-up: proficientSkills DOM lookup needs CharacterSheetPage hardening — state-side proficient ≠ rendered button"},
 			{kind: "rollInitiative"},
-			// Spell save DC at L5 with CHA ≥ 16 = 8 + prof(3) + CHA(≥3) = 14.
-			// Floor measured on THIS build, not aspirational: the preset has no
-			// `abilityPriority`, so the standard array leaves the spellcasting
-			// ability at its STR-first default (CS-BUG-056, "Follow-up"). DC is
-			// 8 + prof + mod with that dump-stat mod. Previously skipped under
-			// CS-BUG-016, which was a mis-attribution — the picker never affected
-			// the DC. Raise this when the preset gains `abilityPriority`.
-			{kind: "spellSaveDc", min: 11},
+			// Spell save DC at L5 = 8 + prof(3) + CHA mod. The preset now pins
+			// CHA first via `abilityPriority` (CS-BUG-056), so the standard
+			// array's 15 + the Hochling's bonus lands the modifier at +3 or
+			// better: 8 + 3 + 3 = 14. Floor kept one below to absorb species
+			// ASI variation without going back to measuring a dump stat.
+			{kind: "spellSaveDc", min: 13},
 			// Signature attack — preset grants Fire Bolt cantrip and the
 			// Sorcerer starting kit gives a dagger / light crossbow.
 			{kind: "rollAttack", attackName: /dagger|crossbow|fire bolt|quarterstaff/i, skip: true, skipReason: "TGTT preset deliberately ships unarmed; see Phase 15 P4 for pre-equip plan"},
@@ -117,16 +115,52 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 	// ── Child of the Sun Bloodline subclass ──────────────────────
 	// Subclass features all key off L3 in this build (TGTT copies the
 	// Ar2 bloodline whose first feature lands at sorcerer level 3).
-	// Glimpse of the Sun grants the {@spell light} cantrip free; the
-	// SP-fueled flare reaction has no clean state probe.
+	// Glimpse of the Sun grants the {@spell light} cantrip free AND
+	// unlocks the sorcery-point flare, which is fully state-probeable:
+	// `useGlimpseOfTheSunFlare()` performs the real spend and returns
+	// the DC / range / target-count contract.
 	{level: 3, name: /glimpse of the sun/i, kind: "passive",
 		effects: [
 			{kind: "spellInList", spell: "Light"},
+			// The flare is an ACTION costing 1 Sorcery Point…
+			{kind: "stateCall", method: "useGlimpseOfTheSunFlare", args: [{targets: ["Goblin"]}], path: "ok", exact: true},
+			// …and its save is DEX against the sheet's own spell save DC,
+			// which was `null` before this subclass was implemented.
+			{kind: "stateCall", method: "useGlimpseOfTheSunFlare", args: [{targets: ["Goblin"]}], path: "saveAbility", exact: "dex"},
+			{kind: "stateCall", method: "useGlimpseOfTheSunFlare", args: [{targets: ["Goblin"]}], path: "range", exact: 20},
+			{kind: "stateCall", method: "useGlimpseOfTheSunFlare", args: [{targets: ["Goblin"]}], path: "condition", exact: "blinded"},
+			// Without Bright Zenith the flare refuses a second target.
+			{kind: "stateCall", method: "useGlimpseOfTheSunFlare", args: [{targets: ["Goblin", "Orc"]}], path: "ok", exact: false},
 		]},
-	// Summer's Defiant Blood — passive damage rider that adds CHA mod
-	// to the next spell after being targeted. No state-observable
-	// probe (no AC/DC/resource delta), so listed without effects.
-	{level: 3, name: /summer'?s defiant blood/i, kind: "passive"},
+	// The flare's SPEND accounting is level-coupled (the Sorcery Point pool is
+	// sorcerer level + 1 under TGTT's Font of Magic), so it is asserted on a
+	// row pinned to a single level rather than on the unbounded row above,
+	// which re-runs at every checkpoint.
+	{level: 3, untilLevel: 3, name: /glimpse of the sun/i, kind: "passive",
+		effects: [
+			{kind: "stateCall", method: "onLongRest", ignoreResult: true},
+			{kind: "stateCall", method: "getSorceryPoints", path: "current", exact: 4},
+			{kind: "stateCall", method: "useGlimpseOfTheSunFlare", args: [{targets: ["Goblin"]}], path: "cost", exact: 1},
+			{kind: "stateCall", method: "getSorceryPoints", path: "current", exact: 3},
+			{kind: "stateCall", method: "onLongRest", ignoreResult: true},
+		]},
+	// Summer's Defiant Blood — arms a +CHA rider on the next spell's
+	// damage roll, once per round. The old comment here claimed there
+	// was "no state-observable probe"; there now is one — the arm/consume
+	// pair is the generic `pendingSpellDamageBonus` family.
+	{level: 3, name: /summer'?s defiant blood/i, kind: "passive",
+		effects: [
+			{kind: "stateCall", method: "resetPendingSpellDamageBonusCooldowns", ignoreResult: true},
+			{kind: "stateCall", method: "armSummersDefiantBlood", path: "ok", exact: true},
+			{kind: "stateCall", method: "isSummersDefiantBloodArmed", exact: true},
+			// Once per round: a second arm in the same round is refused.
+			{kind: "stateCall", method: "armSummersDefiantBlood", path: "ok", exact: false},
+			// The round reset releases the lock again.
+			{kind: "stateCall", method: "clearPendingSpellDamageBonus", ignoreResult: true},
+			{kind: "stateCall", method: "resetPendingSpellDamageBonusCooldowns", ignoreResult: true},
+			{kind: "stateCall", method: "armSummersDefiantBlood", path: "ok", exact: true},
+			{kind: "stateCall", method: "clearPendingSpellDamageBonus", ignoreResult: true},
+		]},
 
 	// Sun Spells — always-prepared bloodline spells. The `kind:
 	// "spells"` check verifies the spells appear via `grantsSpells`.
@@ -155,13 +189,82 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 		]},
 
 	// Higher-tier subclass features inherited from the Ar2 base
-	// bloodline (Sunlit Path, Grasping the Sun, Bright Zenith).
-	// Probed as passive listings only — Ar2 is not in-tree, so the
-	// detailed mechanics aren't authoritative; rely on the parent
-	// passive presence check rather than inventing effect probes.
-	{level: 6,  name: /sunlit path/i,    kind: "passive"},
-	{level: 14, name: /grasping the sun/i, kind: "passive"},
-	{level: 18, name: /bright zenith/i,  kind: "passive"},
+	// bloodline. Ar2 is not vendored in-tree, but the CODE PATH is
+	// shared with TGTT, so these are effect-verified like any other
+	// feature rather than left as bare presence listings.
+	//
+	// Sunlit Path: +15 ft walking speed, radiant resistance, and the
+	// overland-travel clause that used to be computed and rendered
+	// nowhere.
+	{level: 6, name: /sunlit path/i, kind: "passive",
+		effects: [
+			// Hochling base 30 ft + Sunlit Path 15 ft. Asserted as a FLOOR:
+			// by the first checkpoint at which this row runs (11 — the MEGA
+			// checkpoints are 3/5/11/17/20) the build has also taken a TGTT
+			// specialty that moves the speed further. The Sunlit-Path-specific
+			// half of the effect is pinned by the travel-pace probes below,
+			// which no other feature contributes to.
+			{kind: "speed", min: 45},
+			{kind: "resistance", damageType: "radiant"},
+			{kind: "stateCall", method: "getTravelPaceBonus", path: "feetPerMinute", exact: 100},
+			{kind: "stateCall", method: "getTravelPaceBonus", path: "milesPerHour", exact: 1},
+			{kind: "stateCall", method: "getTravelPaceBonus", path: "milesPerDay", exact: 6},
+			{kind: "stateCall", method: "getTravelPaceBonus", path: "allyRange", exact: 30},
+		]},
+	// Grasping the Sun: reaction, reduce damage by sorcerer level, and
+	// deal that much radiant back on a melee attack only. The reduction
+	// IS the sorcerer level, so this row (which re-runs at every
+	// checkpoint from 14 up) asserts the invariants rather than a
+	// level-specific number.
+	{level: 14, name: /grasping the sun/i, kind: "passive",
+		effects: [
+			{kind: "stateCall", method: "useGraspingTheSun", args: [{damage: 30, fromMeleeAttack: true}], path: "reduction", min: 14},
+			// Retaliation equals the reduction, and only on a melee attack.
+			{kind: "stateCall", method: "useGraspingTheSun", args: [{damage: 30, fromMeleeAttack: true}], path: "radiantDamage", min: 14},
+			{kind: "stateCall", method: "useGraspingTheSun", args: [{damage: 30, fromMeleeAttack: false}], path: "radiantDamage", exact: 0},
+			// Reduction never drives the damage below zero.
+			{kind: "stateCall", method: "useGraspingTheSun", args: [{damage: 3, fromMeleeAttack: true}], path: "damageTaken", exact: 0},
+		]},
+	// The exact arithmetic is pinned at a single checkpoint, where the
+	// sorcerer level is known: 30 incoming − 17 reduction = 13 taken.
+	// (Pinned at 17 rather than 14 because the MEGA matrix's checkpoints
+	// are 3/5/11/17/20 — a 14-only row would never execute.)
+	{level: 17, untilLevel: 17, name: /grasping the sun/i, kind: "passive",
+		effects: [
+			{kind: "stateCall", method: "useGraspingTheSun", args: [{damage: 30, fromMeleeAttack: true}], path: "reduction", exact: 17},
+			{kind: "stateCall", method: "useGraspingTheSun", args: [{damage: 30, fromMeleeAttack: true}], path: "damageTaken", exact: 13},
+			{kind: "stateCall", method: "useGraspingTheSun", args: [{damage: 30, fromMeleeAttack: true}], path: "radiantDamage", exact: 17},
+		]},
+	// Bright Zenith: a real 1-minute toggle, not a one-shot spend.
+	// Grants blindsight 100 ft and widens the Glimpse flare to 40 ft
+	// and any number of targets.
+	//
+	// `useBrightZenith()` is called exactly ONCE — a second call while the
+	// state runs correctly returns `{ok: false}`, so the cost assertion
+	// rides the same activating call rather than a repeat of it.
+	{level: 18, name: /bright zenith/i, kind: "passive",
+		effects: [
+			{kind: "stateCall", method: "onLongRest", ignoreResult: true},
+			// `getSenseBonusFromStates` isolates the ACTIVE-STATE contribution,
+			// so these assertions are independent of whatever blindsight the
+			// rest of the build already carries (`getSenses()` merges the two
+			// with `Math.max`, and by L20 this build has a standing 15 ft).
+			{kind: "stateCall", method: "getSenseBonusFromStates", args: ["blindsight"], exact: 0},
+			{kind: "stateCall", method: "useBrightZenith", path: "cost", exact: 6},
+			{kind: "stateCall", method: "isStateTypeActive", args: ["brightZenith"], exact: true},
+			{kind: "stateCall", method: "getSenseBonusFromStates", args: ["blindsight"], exact: 100},
+			// …and the merged total really does reach 100 ft on the sheet.
+			{kind: "stateCall", method: "getSenses", path: "blindsight", min: 100},
+			// The state feeds back into the flare: 40 ft, multi-target.
+			{kind: "stateCall", method: "useGlimpseOfTheSunFlare", args: [{targets: ["Goblin", "Orc"]}], path: "ok", exact: true},
+			{kind: "stateCall", method: "useGlimpseOfTheSunFlare", args: [{targets: ["Goblin", "Orc"]}], path: "range", exact: 40},
+			{kind: "stateCall", method: "useGlimpseOfTheSunFlare", args: [{targets: ["Goblin", "Orc"]}], path: "multiTarget", exact: true},
+			// Ending it takes the blindsight with it.
+			{kind: "stateCall", method: "endBrightZenith", ignoreResult: true},
+			{kind: "stateCall", method: "isStateTypeActive", args: ["brightZenith"], exact: false},
+			{kind: "stateCall", method: "getSenseBonusFromStates", args: ["blindsight"], exact: 0},
+			{kind: "stateCall", method: "onLongRest", ignoreResult: true},
+		]},
 	...buildSpecialtyChecks("Sorcerer"),
 ];
 

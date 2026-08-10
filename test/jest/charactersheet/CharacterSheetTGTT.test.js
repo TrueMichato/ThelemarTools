@@ -8638,6 +8638,45 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 			});
 
 			describe("Sun Bloodline", () => {
+				// The subclass ships in two flavours and BOTH must work:
+				//  · Ar2 (Arcadia Issue 2) — 2014 chassis, subclass arrives at L1
+				//  · TGTT — 2024 chassis, subclass arrives at L3, adds Sun Spells
+				// `mkSun` builds either, so no assertion can silently pass on one
+				// chassis while the other regresses.
+				const SUN_SUBCLASS_SPELLS = [{
+					innate: {"0": ["light#c"]},
+					known: {
+						"3": ["daybreak|ar1", "faerie fire", "continual flame", "flaming sphere"],
+						"5": ["daylight", "melf's minute meteors|xge"],
+						"7": ["fire shield", "sickening radiance|xge"],
+						"9": ["wall of light|xge", "dawn"],
+					},
+				}];
+
+				/**
+				 * @param {number} level sorcerer level
+				 * @param {"TGTT"|"Ar2"} flavour which printing of the subclass
+				 */
+				const mkSun = (level, flavour = "TGTT") => {
+					const classSource = flavour === "TGTT" ? "TGTT" : "PHB";
+					state.addClass({
+						name: "Sorcerer",
+						source: classSource,
+						level,
+						subclass: {
+							name: "Child of the Sun Bloodline",
+							shortName: "Sun Bloodline",
+							source: flavour,
+							// Ar2 has no Sun Spells table — only the free Light cantrip.
+							additionalSpells: flavour === "TGTT" ? SUN_SUBCLASS_SPELLS : [{innate: {"0": ["light#c"]}}],
+						},
+					});
+					state.setAbilityBase("cha", 18); // +4
+					state._data.spellcasting = {...(state._data.spellcasting || {}), ability: "cha"};
+					state.setSorceryPoints({current: 20, max: 20});
+					return state;
+				};
+
 				beforeEach(() => {
 					state.addClass({
 						name: "Sorcerer",
@@ -8647,184 +8686,370 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					});
 				});
 
-				it("should have hasGlimpseOfTheSun flag at level 1", () => {
-					const calcs = state.getFeatureCalculations();
-					expect(calcs.hasGlimpseOfTheSun).toBe(true);
-					expect(calcs.glimpseSunRange).toBe(20);
+				describe("Level gating by chassis", () => {
+					it("grants NOTHING at level 1 on the TGTT (2024) chassis — the subclass arrives at level 3", () => {
+						const calcs = state.getFeatureCalculations();
+						expect(calcs.hasGlimpseOfTheSun).toBeUndefined();
+						expect(calcs.hasSummersDefiantBlood).toBeUndefined();
+						expect(calcs.hasSunSpells).toBeUndefined();
+						expect(calcs.hasGlimpseBlind).toBeUndefined();
+					});
+
+					it("grants the first tier at level 3 on the TGTT chassis", () => {
+						mkSun(3, "TGTT");
+						const calcs = state.getFeatureCalculations();
+						expect(calcs.hasGlimpseOfTheSun).toBe(true);
+						expect(calcs.hasSummersDefiantBlood).toBe(true);
+						expect(calcs.hasSunSpells).toBe(true);
+					});
+
+					it("grants the first tier at level 1 on the Ar2 (2014) chassis", () => {
+						mkSun(1, "Ar2");
+						const calcs = state.getFeatureCalculations();
+						expect(calcs.hasGlimpseOfTheSun).toBe(true);
+						expect(calcs.hasSummersDefiantBlood).toBe(true);
+					});
+
+					it("does NOT claim Sun Spells on the Ar2 chassis — that table is TGTT-only", () => {
+						mkSun(9, "Ar2");
+						expect(state.getFeatureCalculations().hasSunSpells).toBeUndefined();
+					});
+
+					it("withholds the Ar2 blinding flare until character level 3", () => {
+						mkSun(1, "Ar2");
+						expect(state.getFeatureCalculations().hasGlimpseBlind).toBeUndefined();
+						mkSun(3, "Ar2");
+						expect(state.getFeatureCalculations().hasGlimpseBlind).toBe(true);
+					});
 				});
 
-				it("should have hasGlimpseBlind at level 1", () => {
-					const calcs = state.getFeatureCalculations();
-					expect(calcs.hasGlimpseBlind).toBe(true);
-					expect(calcs.glimpseBlindCost).toBe(1);
+				describe("Glimpse of the Sun — the blinding flare", () => {
+					it("surfaces a real DEX save DC equal to the spell save DC", () => {
+						mkSun(3, "TGTT");
+						const calcs = state.getFeatureCalculations();
+						// 8 + prof 2 + CHA 4 = 14
+						expect(calcs.glimpseBlindSaveDc).toBe(14);
+						expect(calcs.glimpseBlindSaveAbility).toBe("dex");
+						expect(calcs.glimpseBlindCondition).toBe("blinded");
+						expect(calcs.glimpseSunRange).toBe(20);
+					});
+
+					it("SPENDS a sorcery point and reports the save when used", () => {
+						mkSun(3, "TGTT");
+						const before = state.getSorceryPoints().current;
+						const res = state.useGlimpseOfTheSunFlare({targets: ["Goblin"]});
+						expect(res.ok).toBe(true);
+						expect(res.dc).toBe(14);
+						expect(res.saveAbility).toBe("dex");
+						expect(res.condition).toBe("blinded");
+						expect(res.targets).toEqual(["Goblin"]);
+						expect(state.getSorceryPoints().current).toBe(before - 1);
+					});
+
+					it("refuses — and spends NOTHING — when out of sorcery points", () => {
+						mkSun(3, "TGTT");
+						state.setSorceryPoints({current: 0, max: 20});
+						const res = state.useGlimpseOfTheSunFlare({targets: ["Goblin"]});
+						expect(res.ok).toBe(false);
+						expect(state.getSorceryPoints().current).toBe(0);
+					});
+
+					it("refuses more than one target without Bright Zenith, and spends nothing", () => {
+						mkSun(3, "TGTT");
+						const before = state.getSorceryPoints().current;
+						const res = state.useGlimpseOfTheSunFlare({targets: ["A", "B"]});
+						expect(res.ok).toBe(false);
+						expect(state.getSorceryPoints().current).toBe(before);
+					});
+
+					it("is not usable before level 3", () => {
+						mkSun(1, "Ar2");
+						expect(state.useGlimpseOfTheSunFlare({targets: ["A"]}).ok).toBe(false);
+					});
+
+					it("is detected as a 1-SP ACTION on the abilities surface", () => {
+						const info = CharacterSheetState.detectActivatableFeature({
+							name: "Glimpse of the Sun",
+							subclassShortName: "Sun Bloodline",
+							consumes: {name: "Sorcery Point"},
+							entries: ["You learn the light cantrip."],
+						});
+						expect(info).toBeTruthy();
+						expect(info.activationAction).toBe("action");
+						expect(info.sorceryPointCost).toBe(1);
+					});
 				});
 
-				it("should have hasSummersDefiantBlood at level 1", () => {
-					state.setAbilityBase("cha", 16);
-					const calcs = state.getFeatureCalculations();
-					expect(calcs.hasSummersDefiantBlood).toBe(true);
-					expect(calcs.defiantBloodBonus).toBe(3); // +3 CHA
-				});
+				describe("Summer's Defiant Blood", () => {
+					it("arms +CHA on the damage of the next spell", () => {
+						mkSun(3, "TGTT");
+						expect(state.getFeatureCalculations().defiantBloodBonus).toBe(4);
+						const res = state.armSummersDefiantBlood();
+						expect(res.ok).toBe(true);
+						expect(res.bonus).toBe(4);
+						expect(state.isSummersDefiantBloodArmed()).toBe(true);
+						expect(state.getPendingSpellDamageBonus().value).toBe(4);
+					});
 
-				it("should have hasSunSpells at level 1", () => {
-					const calcs = state.getFeatureCalculations();
-					expect(calcs.hasSunSpells).toBe(true);
+					it("costs no resource to arm", () => {
+						mkSun(3, "TGTT");
+						const before = state.getSorceryPoints().current;
+						state.armSummersDefiantBlood();
+						expect(state.getSorceryPoints().current).toBe(before);
+					});
+
+					it("is consumed by the damage roll that reads it", () => {
+						mkSun(3, "TGTT");
+						state.armSummersDefiantBlood();
+						const consumed = state.consumePendingSpellDamageBonus();
+						expect(consumed).toEqual({sourceName: "Summer's Defiant Blood", value: 4});
+						expect(state.getPendingSpellDamageBonus()).toBeNull();
+					});
+
+					it("is limited to ONCE PER ROUND, released at the start of your turn", () => {
+						mkSun(3, "TGTT");
+						expect(state.armSummersDefiantBlood().ok).toBe(true);
+						state.consumePendingSpellDamageBonus();
+						expect(state.armSummersDefiantBlood().ok).toBe(false);
+						state.applyTurnStartEffects();
+						expect(state.armSummersDefiantBlood().ok).toBe(true);
+					});
+
+					it("is detected as a free-action ability rather than being invisible", () => {
+						const info = CharacterSheetState.detectActivatableFeature({
+							name: "Summer's Defiant Blood",
+							subclassShortName: "Sun Bloodline",
+							entries: ["Whenever a creature makes an attack roll against you…"],
+						});
+						expect(info).toBeTruthy();
+						expect(info.interactionMode).toBe("limited");
+					});
 				});
 
 				// Level 6: Sunlit Path (Ar2)
 				describe("Sunlit Path (Level 6)", () => {
-					it("should have hasSunlitPath flag", () => {
-						state.addClass({
+					it("raises the walking speed by 15 ft on BOTH chassis", () => {
+						mkSun(6, "TGTT");
+						expect(state.getSpeed()).toBe("45 ft.");
+						const ar2 = new CharacterSheetState();
+						ar2.addClass({
 							name: "Sorcerer",
-							source: "TGTT",
+							source: "PHB",
 							level: 6,
-							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"},
+							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "Ar2"},
 						});
-						const calcs = state.getFeatureCalculations();
-						expect(calcs.hasSunlitPath).toBe(true);
+						expect(ar2.getSpeed()).toBe("45 ft.");
 					});
 
-					it("should grant +15 walking speed", () => {
-						state.addClass({
-							name: "Sorcerer",
-							source: "TGTT",
-							level: 6,
-							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"},
-						});
-						const calcs = state.getFeatureCalculations();
-						expect(calcs.sunlitPathSpeedBonus).toBe(15);
+					it("grants real radiant resistance", () => {
+						mkSun(6, "TGTT");
+						state.applyClassFeatureEffects();
+						expect(state.hasResistance("radiant")).toBe(true);
 					});
 
-					it("should grant radiant resistance", () => {
-						state.addClass({
-							name: "Sorcerer",
-							source: "TGTT",
-							level: 6,
-							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"},
+					it("publishes a generic travel-pace bonus the movement surface can render", () => {
+						mkSun(6, "TGTT");
+						expect(state.getTravelPaceBonus()).toEqual({
+							feetPerMinute: 100,
+							milesPerHour: 1,
+							milesPerDay: 6,
+							allyRange: 30,
+							source: "Sunlit Path",
 						});
-						const calcs = state.getFeatureCalculations();
-						expect(calcs.hasRadiantResistance).toBe(true);
 					});
 
-					it("should grant overland travel bonus", () => {
-						state.addClass({
-							name: "Sorcerer",
-							source: "TGTT",
-							level: 6,
-							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"},
-						});
-						const calcs = state.getFeatureCalculations();
-						expect(calcs.overlandTravelBonusMinute).toBe(100);
-						expect(calcs.overlandTravelBonusHour).toBe(1);
-						expect(calcs.overlandTravelBonusDay).toBe(6);
-						expect(calcs.overlandTravelAllyRange).toBe(30);
+					it("has no travel-pace bonus before level 6", () => {
+						mkSun(3, "TGTT");
+						expect(state.getTravelPaceBonus()).toBeNull();
+					});
+
+					it("is never promoted to a bogus toggle state", () => {
+						expect(CharacterSheetState.detectActivatableFeature({
+							name: "Sunlit Path",
+							subclassShortName: "Sun Bloodline",
+							entries: ["Your walking speed increases by 15 feet…"],
+						})).toBeNull();
 					});
 				});
 
 				// Level 14: Grasping the Sun (Ar2)
 				describe("Grasping the Sun (Level 14)", () => {
-					it("should have hasGraspingTheSun flag", () => {
-						state.addClass({
-							name: "Sorcerer",
-							source: "TGTT",
-							level: 14,
-							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"},
-						});
-						const calcs = state.getFeatureCalculations();
-						expect(calcs.hasGraspingTheSun).toBe(true);
+					it("reduces incoming damage by the sorcerer level", () => {
+						mkSun(14, "TGTT");
+						const res = state.useGraspingTheSun({damage: 30, fromMeleeAttack: false});
+						expect(res.ok).toBe(true);
+						expect(res.reduction).toBe(14);
+						expect(res.damageTaken).toBe(16);
+						expect(res.radiantDamage).toBe(0);
 					});
 
-					it("should reduce damage by sorcerer level", () => {
-						state.addClass({
-							name: "Sorcerer",
-							source: "TGTT",
-							level: 14,
-							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"},
-						});
-						const calcs = state.getFeatureCalculations();
-						expect(calcs.graspingDamageReduction).toBe(14);
+					it("burns a MELEE attacker for radiant damage equal to the sorcerer level", () => {
+						mkSun(14, "TGTT");
+						const res = state.useGraspingTheSun({damage: 30, fromMeleeAttack: true});
+						expect(res.radiantDamage).toBe(14);
 					});
 
-					it("should deal radiant damage equal to sorcerer level", () => {
-						state.addClass({
-							name: "Sorcerer",
-							source: "TGTT",
-							level: 14,
-							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"},
+					it("never reduces damage below zero", () => {
+						mkSun(14, "TGTT");
+						expect(state.useGraspingTheSun({damage: 3}).damageTaken).toBe(0);
+					});
+
+					it("is unavailable before level 14", () => {
+						mkSun(13, "TGTT");
+						expect(state.useGraspingTheSun({damage: 30}).ok).toBe(false);
+					});
+
+					it("is surfaced as a REACTION rather than being invisible", () => {
+						const info = CharacterSheetState.detectActivatableFeature({
+							name: "Grasping the Sun",
+							subclassShortName: "Sun Bloodline",
+							entries: ["When you take damage from a source you can see…"],
 						});
-						const calcs = state.getFeatureCalculations();
-						expect(calcs.graspingRadiantDamage).toBe(14);
+						expect(info).toBeTruthy();
+						expect(info.activationAction).toBe("reaction");
+					});
+				});
+
+				// The free `light` cantrip must never cost the player a pick.
+				//
+				// `populateSubclassSpells()` dedupes by name on apply, so a player who
+				// picks `light` themselves in the builder gets no duplicate row and no
+				// warning — the grant is simply skipped and one cantrip choice is
+				// silently eaten. The fix is generic (any level-1 subclass grant), so
+				// the assertion is on the grant-preview reader the builder now feeds
+				// into `knownSpellIds`.
+				describe("Free Light cantrip does not consume a pick", () => {
+					const buildSubclass = (src) => ({
+						name: "Child of the Sun Bloodline",
+						shortName: "Sun Bloodline",
+						source: src,
+						className: "Sorcerer",
+						classSource: src === "TGTT" ? "TGTT" : "PHB",
+						additionalSpells: [{
+							innate: {"0": ["light#c"]},
+							...(src === "TGTT" ? {known: {"3": ["faerie fire"]}} : {}),
+						}],
+					});
+
+					it.each(["Ar2", "TGTT"])("previews the granted Light cantrip at level 1 (%s)", (src) => {
+						const granted = state.getSubclassAlwaysPreparedSpells({
+							name: "Sorcerer",
+							source: src === "TGTT" ? "TGTT" : "PHB",
+							level: 1,
+							subclass: buildSubclass(src),
+						});
+						const names = granted.map(s => String(s.name).toLowerCase());
+						expect(names).toContain("light");
+					});
+
+					it("does not preview the level-gated Sun Spells before their level", () => {
+						const granted = state.getSubclassAlwaysPreparedSpells({
+							name: "Sorcerer", source: "TGTT", level: 1, subclass: buildSubclass("TGTT"),
+						});
+						expect(granted.map(s => String(s.name).toLowerCase())).not.toContain("faerie fire");
+					});
+
+					it("previews the Sun Spells once the level is reached", () => {
+						const granted = state.getSubclassAlwaysPreparedSpells({
+							name: "Sorcerer", source: "TGTT", level: 3, subclass: buildSubclass("TGTT"),
+						});
+						expect(granted.map(s => String(s.name).toLowerCase())).toContain("faerie fire");
+					});
+
+					it("grants Light exactly once even if it is already known", () => {
+						mkSun(3, "TGTT");
+						state.populateSubclassSpells();
+						state.populateSubclassSpells();
+						const lights = state.getCantrips().filter(c => String(c.name).toLowerCase() === "light");
+						expect(lights).toHaveLength(1);
 					});
 				});
 
 				// Level 18: Bright Zenith (Ar2)
 				describe("Bright Zenith (Level 18)", () => {
-					it("should have hasBrightZenith flag", () => {
-						state.addClass({
-							name: "Sorcerer",
-							source: "TGTT",
-							level: 18,
-							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"},
+					it("is a TOGGLE state, not a one-shot spend", () => {
+						const info = CharacterSheetState.detectActivatableFeature({
+							name: "Bright Zenith",
+							subclassShortName: "Sun Bloodline",
+							consumes: {name: "Sorcery Point", amount: 6},
+							entries: ["You can expend 6 sorcery points as a bonus action…"],
 						});
-						const calcs = state.getFeatureCalculations();
-						expect(calcs.hasBrightZenith).toBe(true);
+						expect(info).toBeTruthy();
+						expect(info.isToggle).toBe(true);
+						expect(info.stateTypeId).toBe("brightZenith");
+						expect(info.activationAction).toBe("bonus");
+						expect(info.resourceCost).toBe(6);
 					});
 
-					it("should cost 6 sorcery points", () => {
-						state.addClass({
-							name: "Sorcerer",
-							source: "TGTT",
-							level: 18,
-							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"},
-						});
-						const calcs = state.getFeatureCalculations();
-						expect(calcs.brightZenithCost).toBe(6);
+					it("spends 6 sorcery points and starts the state", () => {
+						mkSun(18, "TGTT");
+						const before = state.getSorceryPoints().current;
+						const res = state.useBrightZenith();
+						expect(res.ok).toBe(true);
+						expect(state.getSorceryPoints().current).toBe(before - 6);
+						expect(state.isStateTypeActive("brightZenith")).toBe(true);
 					});
 
-					it("should have 40ft blind range and 100ft blindsight", () => {
-						state.addClass({
-							name: "Sorcerer",
-							source: "TGTT",
-							level: 18,
-							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"},
-						});
-						const calcs = state.getFeatureCalculations();
-						expect(calcs.brightZenithBlindRange).toBe(40);
-						expect(calcs.brightZenithBlindsight).toBe(100);
+					it("grants REAL blindsight 100 ft while active", () => {
+						mkSun(18, "TGTT");
+						expect(state.getSenses().blindsight).toBe(0);
+						state.useBrightZenith();
+						expect(state.getSenses().blindsight).toBe(100);
+						state.endBrightZenith();
+						expect(state.getSenses().blindsight).toBe(0);
 					});
 
-					it("should last 1 minute", () => {
-						state.addClass({
-							name: "Sorcerer",
-							source: "TGTT",
-							level: 18,
-							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"},
-						});
-						const calcs = state.getFeatureCalculations();
-						expect(calcs.brightZenithDuration).toBe(1);
+					it("widens the flare to 40 ft and unlocks multiple targets while active", () => {
+						mkSun(18, "TGTT");
+						expect(state.getFeatureCalculations().glimpseSunRange).toBe(20);
+						expect(state.getFeatureCalculations().glimpseBlindMultiTarget).toBe(false);
+						state.useBrightZenith();
+						expect(state.getFeatureCalculations().glimpseSunRange).toBe(40);
+						expect(state.getFeatureCalculations().glimpseBlindMultiTarget).toBe(true);
+						const res = state.useGlimpseOfTheSunFlare({targets: ["A", "B", "C"]});
+						expect(res.ok).toBe(true);
+						expect(res.range).toBe(40);
+						expect(res.targets).toEqual(["A", "B", "C"]);
+					});
+
+					it("refuses — and spends nothing — under 6 sorcery points", () => {
+						mkSun(18, "TGTT");
+						state.setSorceryPoints({current: 5, max: 20});
+						expect(state.useBrightZenith().ok).toBe(false);
+						expect(state.getSorceryPoints().current).toBe(5);
+						expect(state.isStateTypeActive("brightZenith")).toBe(false);
+					});
+
+					it("cannot be double-activated", () => {
+						mkSun(18, "TGTT");
+						state.useBrightZenith();
+						const before = state.getSorceryPoints().current;
+						expect(state.useBrightZenith().ok).toBe(false);
+						expect(state.getSorceryPoints().current).toBe(before);
+					});
+
+					it("is unavailable before level 18", () => {
+						mkSun(17, "TGTT");
+						expect(state.useBrightZenith().ok).toBe(false);
+					});
+
+					it("declares a 1-minute duration", () => {
+						mkSun(18, "TGTT");
+						expect(state.getFeatureCalculations().brightZenithDuration).toBe(1);
+						expect(CharacterSheetState.ACTIVE_STATE_TYPES.brightZenith.duration).toBe("1 minute");
 					});
 				});
 
 				// Effect Application Tests
 				describe("Effect Application", () => {
 					it("should apply +15 walking speed effect at level 6", () => {
-						state.addClass({
-							name: "Sorcerer",
-							source: "TGTT",
-							level: 6,
-							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"},
-						});
+						mkSun(6, "TGTT");
 						const appliedEffects = state.getAppliedClassFeatureEffects();
 						expect(appliedEffects.some(e => e.includes("Sunlit Path"))).toBe(true);
 					});
 
 					it("should apply radiant resistance at level 6", () => {
-						state.addClass({
-							name: "Sorcerer",
-							source: "TGTT",
-							level: 6,
-							subclass: {name: "Child of the Sun Bloodline", shortName: "Sun Bloodline", source: "TGTT"},
-						});
+						mkSun(6, "TGTT");
 						state.applyClassFeatureEffects();
 						expect(state.hasResistance("radiant")).toBe(true);
 					});

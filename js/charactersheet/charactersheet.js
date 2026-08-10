@@ -8820,6 +8820,10 @@ class CharacterSheetPage {
 			case "clever little witch": return this._pUseCleverLittleWitch(feature);
 			case "fly, my pretty": return this._pUseFlyMyPretty(feature);
 			case "coven calling": return this._pUseCovenCalling(feature);
+			// Child of the Sun Bloodline (Ar2 Sorcerer; TGTT re-parents it)
+			case "glimpse of the sun": return this._pUseGlimpseOfTheSun(feature);
+			case "grasping the sun": return this._pUseGraspingTheSun(feature);
+			case "summer's defiant blood": return this._pUseSummersDefiantBlood(feature);
 		}
 		// GENERIC: any feature that publishes resource-castable spells
 		// (`calculations.resourceCastSpells`, e.g. Eyes of the Dark's *darkness* for 2
@@ -10526,6 +10530,173 @@ class CharacterSheetPage {
 				content: `🜛 <strong>Coven Calling</strong>: ${res.count} duplicates appear. ${res.sorceryPointsRemaining} SP remaining.`,
 			}));
 		}
+
+		await this._saveCurrentCharacter?.();
+		this._renderResources?.();
+		this._features?.render?.();
+		return true;
+	}
+
+	/**
+	 * Glimpse of the Sun (Child of the Sun Bloodline, L3). The blinding flare:
+	 * spend 1 Sorcery Point as an action to force a Dexterity save against your
+	 * spell save DC or blind a creature until the end of your next turn.
+	 *
+	 * The cost, the DC and the reach are all shown BEFORE the spend, and the
+	 * "requires an ongoing Light" clause is a reminder rather than a gate — the
+	 * sheet cannot know whether a *Light* is currently burning, so it must not
+	 * block a legal use.
+	 *
+	 * While Bright Zenith is running the flare reaches 40 ft and may name every
+	 * creature of your choice, so the single name field becomes a comma-separated
+	 * list. Same field, progressively disclosed — not a second layout.
+	 * @private
+	 */
+	async _pUseGlimpseOfTheSun (feature) {
+		const state = this._state;
+		const calc = state.getFeatureCalculations();
+		if (!calc.hasGlimpseBlind) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "☀️ <strong>Glimpse of the Sun</strong>: you can hide your <em>Light</em> from creatures you choose. The blinding flare arrives at 3rd level."}));
+			return true;
+		}
+
+		const sp = state.getSorceryPoints();
+		const cost = calc.glimpseBlindCost ?? 1;
+		const dc = calc.glimpseBlindSaveDc;
+		const range = calc.glimpseSunRange ?? 20;
+		const isZenith = !!calc.glimpseBlindMultiTarget;
+
+		if (sp.current < cost) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: `☀️ <strong>Glimpse of the Sun</strong>: the flare costs ${cost} Sorcery Point — you have ${sp.current}.`}));
+			return true;
+		}
+
+		const htmlDescription = `<div class="ve-flex-col ve-w-100">
+			<div class="ve-flex ve-flex-wrap ve-flex-v-center ve-mb-2" style="gap: 0.35em;">
+				<span class="ve-small ve-muted">⚡ Action</span>
+				<span class="ve-small ve-muted">·</span>
+				<span class="ve-small">${cost} Sorcery Point${cost === 1 ? "" : "s"}</span>
+				<span class="ve-small ve-muted">·</span>
+				<span class="ve-small"><strong>DC ${dc ?? "—"} DEX</strong></span>
+				${isZenith ? `<span class="ve-small ve-muted">·</span><span class="ve-small">☀️ Bright Zenith</span>` : ""}
+			</div>
+			<div>Your ongoing <em>Light</em> flares. ${isZenith ? "Any creatures you choose" : "A creature"} within <strong>${range} feet</strong> of the light source that can't already see it must succeed on a <strong>DC ${dc ?? "—"} Dexterity</strong> saving throw or be <strong>blinded</strong> until the end of your next turn.</div>
+			<div class="ve-small ve-muted ve-mt-1">Requires an ongoing <em>Light</em> cantrip.${isZenith ? " Separate multiple names with commas." : ""}</div>
+		</div>`;
+
+		const raw = await InputUiUtil.pGetUserString({
+			title: isZenith ? "Blinding Flare — who is caught in it?" : "Blinding Flare — who do you blind?",
+			htmlDescription,
+			default: "",
+		});
+		if (raw == null) return true;
+
+		const targets = `${raw}`.split(",").map(it => it.trim()).filter(Boolean);
+		const res = state.useGlimpseOfTheSunFlare({targets: isZenith ? targets : targets.slice(0, 1)});
+		if (!res.ok) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+			return true;
+		}
+
+		const who = res.targets.length ? res.targets.join(", ") : "your target";
+		this._rollHistory?.addRoll({
+			title: "Glimpse of the Sun — Blinding Flare",
+			total: res.dc ?? 0,
+			breakdown: `DC ${res.dc ?? "—"} DEX save or blinded (${who}) · ${res.range} ft · ${res.cost} SP`,
+		});
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `☀️ <strong>Blinding Flare</strong>: ${who} must succeed on a <strong>DC ${res.dc ?? "—"} Dexterity</strong> save or be blinded until the end of your next turn. `
+				+ `${res.sorceryPointsRemaining} SP remaining.`,
+		}));
+
+		await this._saveCurrentCharacter?.();
+		this._renderResources?.();
+		this._features?.render?.();
+		return true;
+	}
+
+	/**
+	 * Grasping the Sun (Child of the Sun Bloodline, L14). A reaction that reduces
+	 * damage from a source you can see by your sorcerer level, and burns the
+	 * attacker for the same amount of radiant damage if that damage came from
+	 * another creature's melee attack.
+	 *
+	 * One decision — melee or not — so it is a two-outcome confirm, not a form.
+	 * The incoming number is asked for only so the readout can state the damage
+	 * actually taken; entering nothing still reports the reduction.
+	 * @private
+	 */
+	async _pUseGraspingTheSun (feature) {
+		const state = this._state;
+		const calc = state.getFeatureCalculations();
+		if (!calc.hasGraspingTheSun) return false;
+
+		const reduction = calc.graspingDamageReduction ?? 0;
+		const isMelee = await InputUiUtil.pGetUserBoolean({
+			title: "Grasping the Sun",
+			htmlDescription: `<div class="ve-flex-col ve-w-100">
+				<div class="ve-flex ve-flex-wrap ve-flex-v-center ve-mb-2" style="gap: 0.35em;">
+					<span class="ve-small ve-muted">↩️ Reaction</span>
+					<span class="ve-small ve-muted">·</span>
+					<span class="ve-small">Reduce damage by <strong>${reduction}</strong></span>
+				</div>
+				<div>Did the damage come from another creature's <strong>melee attack</strong>? If so, that creature also takes <strong>${calc.graspingRadiantDamage ?? reduction} radiant damage</strong>.</div>
+			</div>`,
+			textYes: "Yes — a melee attack",
+			textNo: "No — another source",
+		});
+		if (isMelee == null) return true;
+
+		const damage = await InputUiUtil.pGetUserNumber({
+			title: "How much damage are you taking?",
+			default: reduction,
+			min: 0,
+			int: true,
+		});
+		if (damage == null) return true;
+
+		const res = state.useGraspingTheSun({damage, fromMeleeAttack: !!isMelee});
+		if (!res.ok) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: res.error}));
+			return true;
+		}
+
+		this._rollHistory?.addRoll({
+			title: "Grasping the Sun",
+			total: res.damageTaken,
+			breakdown: `${damage} − ${res.reduction} reduction${res.radiantDamage ? ` · ${res.radiantDamage} radiant back` : ""}`,
+		});
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `🌞 <strong>Grasping the Sun</strong>: damage reduced by <strong>${res.reduction}</strong> — you take <strong>${res.damageTaken}</strong>.`
+				+ `${res.radiantDamage ? ` The attacker takes <strong>${res.radiantDamage} radiant</strong>.` : ""}`,
+		}));
+
+		await this._saveCurrentCharacter?.();
+		this._features?.render?.();
+		return true;
+	}
+
+	/**
+	 * Summer's Defiant Blood (Child of the Sun Bloodline, L3). Arms your Charisma
+	 * modifier on the damage of your next spell. Costs no resource and is limited
+	 * to once per round, so it is a single click with no prompt — a dialog for a
+	 * one-bit decision would be pure friction. The armed rider is consumed by the
+	 * next spell damage roll and shown by name in that roll's breakdown.
+	 * @private
+	 */
+	async _pUseSummersDefiantBlood (feature) {
+		const res = this._state.armSummersDefiantBlood();
+		if (!res.ok) {
+			JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: `🩸 <strong>Summer's Defiant Blood</strong>: ${res.error}`}));
+			return true;
+		}
+
+		JqueryUtil.doToast(/** @type {*} */ ({
+			type: "success",
+			content: `🩸 <strong>Summer's Defiant Blood</strong> armed: <strong>+${res.bonus}</strong> to the damage roll of your next spell, cast before the end of your next turn.`,
+		}));
 
 		await this._saveCurrentCharacter?.();
 		this._renderResources?.();
@@ -15631,6 +15802,40 @@ class CharacterSheetPage {
 			`);
 			const listEl = e_({outer: `<div class="charsheet__ac-modal-breakdown"></div>`}); section.append(listEl);
 			this._renderModalBreakdownItems(listEl, breakdown, "ft.");
+		}
+
+		// Overland travel bonus — a generic descriptor (`getTravelPaceBonus`), so any
+		// feature that raises the party's marching pace surfaces here without this
+		// modal knowing which feature it was. Sunlit Path is the first such feature.
+		const travel = this._state.getTravelPaceBonus?.();
+		if (travel) {
+			const section = e_({outer: `<div class="charsheet__speed-modal-section"></div>`}); contentEl.append(section);
+			const allyNote = travel.allyRange
+				? ` — you and allies you choose within ${travel.allyRange} ft.`
+				: "";
+			section.insertAdjacentHTML("beforeend", `
+				<div class="charsheet__ac-modal-total charsheet__ac-modal-total--secondary">
+					<div class="charsheet__ac-modal-total-value">+${travel.milesPerDay} mi/day</div>
+					<div class="charsheet__ac-modal-total-label">Overland Travel${allyNote}</div>
+				</div>
+			`);
+			const travelList = e_({outer: `<div class="charsheet__ac-modal-breakdown"></div>`}); section.append(travelList);
+			[
+				{label: "Per minute", value: `+${travel.feetPerMinute} ft.`},
+				{label: "Per hour", value: `+${travel.milesPerHour} mile${travel.milesPerHour === 1 ? "" : "s"}`},
+				{label: "Per day", value: `+${travel.milesPerDay} miles`},
+			].forEach(row => {
+				travelList.insertAdjacentHTML("beforeend", `
+					<div class="charsheet__ac-modal-item">
+						<span class="charsheet__ac-modal-item-name">
+							<span class="charsheet__ac-modal-item-icon">🧭</span>
+							${row.label}
+							<span class="charsheet__ac-modal-item-subtype">${travel.source}</span>
+						</span>
+						<span class="charsheet__ac-modal-item-value charsheet__ac-modal-item-value--positive">${row.value}</span>
+					</div>
+				`);
+			});
 		}
 
 		// Close button lives in the pinned footer slot (a sibling of the scroller, outside the

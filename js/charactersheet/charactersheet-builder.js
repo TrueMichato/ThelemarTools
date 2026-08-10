@@ -9590,7 +9590,43 @@ class CharacterSheetBuilder {
 			additionalClassNames,
 			subclass: this._selectedSubclass,
 			subclassChoice: this._divineSoulAffinity,
+			subclassGrantedSpellIds: this._getSubclassGrantedSpellIdsForBuilder(),
 		};
+	}
+
+	/**
+	 * Spells the *selected subclass* will grant automatically at level 1, as
+	 * `"name|source"` ids.
+	 *
+	 * The builder's pickers used to be handed an empty `knownSpellIds` set, which is
+	 * only correct while nothing is known — and a subclass grant is known the moment
+	 * the subclass is picked, one step earlier. The consequence was silent and
+	 * generic, not Sun-Bloodline-specific: `populateSubclassSpells()` dedupes by name
+	 * on apply, so picking the granted spell yourself produced no duplicate row and no
+	 * warning — it simply ate one of your picks. Anything with a level-1 grant is
+	 * exposed: Child of the Sun Bloodline (`light`), Divine Soul, Nature Domain,
+	 * Arcane Domain.
+	 *
+	 * Reads `getSubclassAlwaysPreparedSpells()`, the same authority
+	 * `populateSubclassSpells()` uses, against a synthetic level-1 class entry —
+	 * the real one does not exist in `_data.classes` until the builder applies.
+	 * @returns {Set<string>}
+	 */
+	_getSubclassGrantedSpellIdsForBuilder () {
+		if (!this._selectedSubclass || !this._selectedClass) return new Set();
+		try {
+			const granted = this._state.getSubclassAlwaysPreparedSpells({
+				name: this._selectedClass.name,
+				source: this._selectedClass.source,
+				level: 1,
+				subclass: this._selectedSubclass,
+				subclassChoice: this._divineSoulAffinity,
+			}) || [];
+			return new Set(granted.map((/** @type {*} */ s) => `${s.name}|${s.source}`));
+		} catch (e) {
+			// Never let a spell-grant preview break the builder's spells step.
+			return new Set();
+		}
 	}
 
 	/**
@@ -9667,7 +9703,7 @@ class CharacterSheetBuilder {
 					cantripCount: updatedKnownInfo.cantripCount,
 					maxSpellLevel: 0,
 					allSpells: sourceFiltered,
-					knownSpellIds: new Set(),
+					knownSpellIds: updatedKnownInfo.subclassGrantedSpellIds || new Set(),
 					subclass: updatedKnownInfo.subclass,
 					subclassChoice: updatedKnownInfo.subclassChoice,
 					additionalClassNames: updatedKnownInfo.additionalClassNames,
@@ -9687,7 +9723,7 @@ class CharacterSheetBuilder {
 				spellCount: updatedKnownInfo.spellbookCount,
 				maxSpellLevel: updatedKnownInfo.maxSpellLevel,
 				allSpells: sourceFiltered,
-				knownSpellIds: new Set(),
+				knownSpellIds: updatedKnownInfo.subclassGrantedSpellIds || new Set(),
 				subclass: updatedKnownInfo.subclass,
 				subclassChoice: updatedKnownInfo.subclassChoice,
 				additionalClassNames: updatedKnownInfo.additionalClassNames,
@@ -9709,7 +9745,7 @@ class CharacterSheetBuilder {
 				cantripCount: updatedKnownInfo.cantripCount,
 				maxSpellLevel: updatedKnownInfo.maxSpellLevel,
 				allSpells: sourceFiltered,
-				knownSpellIds: new Set(),
+				knownSpellIds: updatedKnownInfo.subclassGrantedSpellIds || new Set(),
 				subclass: updatedKnownInfo.subclass,
 				subclassChoice: updatedKnownInfo.subclassChoice,
 				additionalClassNames: updatedKnownInfo.additionalClassNames,

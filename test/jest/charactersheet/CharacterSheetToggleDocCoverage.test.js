@@ -1,7 +1,7 @@
 /**
  * Drift guard for `docs/charactersheet/08-toggle-abilities.md`.
  *
- * The doc's "Supported Toggle Abilities" section covers 32 of the 73 entries in
+ * The doc's "Supported Toggle Abilities" section covers 33 of the 74 entries in
  * `ACTIVE_STATE_TYPES`. That is a documentation gap, not a capability gap — every
  * one of the 41 is implemented — but a section titled "Supported …" that lists
  * 44% of what exists actively misleads: a reader concludes an implemented state

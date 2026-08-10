@@ -341,7 +341,52 @@ rejected. Prefer this over adding a bespoke state type.
 |--------|--------|--------------|
 | **Heroic Soul** | ✅ Complete | `heroicMomentUses`, `inspireAllyBonus`, `legendaryResistanceUses` |
 | **Fiendish Bloodline** | ✅ Complete | `darkVisionFromFiend`, `fiendishResistance`, `demonic/devilishFormDamage` |
-| **Sun Bloodline** | ✅ Complete | L1: `glimpseOfSun`, `summersDefiantBlood`; L6: `sunlitPathRange`; L14: `graspingTheSunDamage`, `graspingTheSunRange`; L18: `brightZenithRadiusFt`, `brightZenithDamage` |
+| **Sun Bloodline** | ✅ Complete | See the feature-by-feature contract below |
+
+#### Child of the Sun Bloodline — feature-by-feature contract
+
+Two chassis, one implementation. `Ar2` (Arcadia Issue 2) is the 2014 original and
+puts the subclass at **level 1**; `TGTT` re-levels it to the 2024 layout at
+**level 3** and adds the `Sun Spells` progression. The gate is derived, not
+hard-coded per source:
+
+```javascript
+const subclassLevel = is2024 ? 3 : 1;          // is2024 === XPHB || TGTT
+const hasSunSpellsTable = cls.subclass?.source === "TGTT" || cls.source === "TGTT";
+```
+
+Ar2 is **not** vendored into `homebrew/` — support is source-driven, so a
+side-loaded Ar2 brew works on the same code path. Jest covers it with a fixture
+built from the real Ar2 text.
+
+| Level | Feature | Surfaced where | Mechanical effect |
+|---|---|---|---|
+| 1 / 3 | **Child of the Sun Bloodline** | Spells tab | `light` cantrip granted by `populateSubclassSpells()`, **outside** the counted picks. The builder's spell pickers now receive it in `knownSpellIds`, so it cannot also be picked manually and eat a choice. |
+| 1 / 3 | **Glimpse of the Sun** | Features tab → **Action**, 1 Sorcery Point | `useGlimpseOfTheSunFlare({targets})` spends the point and returns `{dc, saveAbility: "dex", range, condition: "blinded", duration, multiTarget}`. `glimpseBlindSaveDc` resolves from your spell save DC (it was `null` before). Gated at character level 3 per the prose. |
+| 1 / 3 | **Summer's Defiant Blood** | Features tab → free action | `armSummersDefiantBlood()` arms a generic `pendingSpellDamageBonus` of +CHA. The next spell damage roll consumes it **at any spell level** and names it in the breakdown. Once per round, released by `applyTurnStartEffects()`; an unspent arm lapses after your next turn. |
+| 3 (TGTT only) | **Sun Spells** | Spells tab | `additionalSpells.known` at sorcerer 3/5/7/9 lands as `alwaysPrepared: true` with `sourceFeature: "Child of the Sun Bloodline Spells"`. Removed by `removeSubclassSpells()` on respec / subclass change. |
+| 6 | **Sunlit Path** | Speed readout · Resistances · Speed breakdown modal | +15 ft walking speed and `radiant` resistance (both were already live). The overland-travel clause is now rendered too — a secondary total in the speed modal driven by the generic `getTravelPaceBonus()` descriptor. Classified `passive` via `FEATURE_CLASSIFICATION_OVERRIDES`. |
+| 14 | **Grasping the Sun** | Features tab → **Reaction** | `useGraspingTheSun({damage, fromMeleeAttack})` returns `{reduction, damageTaken, radiantDamage}`; reduction and retaliation both equal your sorcerer level, clamped at 0. Previously returned `null` from detection and was completely invisible. |
+| 18 | **Bright Zenith** | Active-states strip → **Bonus action**, 6 Sorcery Points | An `ACTIVE_STATE_TYPES` toggle lasting 1 minute. Grants blindsight 100 ft, and feeds back into `getFeatureCalculations()` so `glimpseSunRange` becomes 40 and `glimpseBlindMultiTarget` becomes `true`. See [08-toggle-abilities.md](08-toggle-abilities.md#bright-zenith-child-of-the-sun-bloodline-sorcerer-ar2--tgtt-l18). |
+
+Two things this subclass taught the shared machinery, both worth reusing:
+
+**`detectActivatableFeature()`'s early return drops entries-only features.** It
+requires a `description`, an `activatable` flag, one of a short list of markers,
+or a classification override. Sun Bloodline features carry only `entries`, so
+`Summer's Defiant Blood` and `Grasping the Sun` never reached their branches.
+Adding a marker fixes that — but it also exposes the subclass's *passive*
+features to the generic analyzer, which promoted `Sunlit Path` into a bogus
+bonus-action toggle. **A marker and a `FEATURE_CLASSIFICATION_OVERRIDES` entry
+for each passive are a pair; adding one without the other trades an invisible
+feature for a wrong one.**
+
+**`pendingDamageMaximization` generalised into `pendingSpellDamageBonus`.** Any
+"add X to the damage of your next spell" rider can now arm and consume through
+the same family (`armPendingSpellDamageBonus` / `consumePendingSpellDamageBonus`
+/ `resetPendingSpellDamageBonusCooldowns`) instead of growing a third bespoke
+flag. `_getCantripDamageBonus()` was not reusable here because it hard-returns
+for `level !== 0`.
 
 ### ✅ Warlock Patrons
 

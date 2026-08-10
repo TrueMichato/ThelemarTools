@@ -4893,6 +4893,10 @@ class CharacterSheetState {
 			// Resources (class features, racial abilities, etc.)
 			resources: [], // [{id, name, current, max, recharge: "short"|"long"|"dawn"}]
 			pendingDamageMaximization: null, // Deferred one-shot damage maximization (e.g. Destructive Wrath)
+			// Deferred one-shot flat bonus on the damage of your next spell
+			// (e.g. Summer's Defiant Blood). See `armPendingSpellDamageBonus`.
+			pendingSpellDamageBonus: null,
+			pendingSpellDamageBonusUsedKeys: [],
 
 			// Notes
 			notes: {
@@ -22046,31 +22050,72 @@ class CharacterSheetState {
 								}
 								break;
 							}
+							// =====================================================================
+							// Child of the Sun Bloodline — two flavours, one implementation.
+							//
+							//   • Ar2  (Arcadia Issue 2)  — 2014 chassis, origin at sorcerer 1.
+							//   • TGTT (Traveler's Guide to Thelemar) — a `_copy` of the Ar2
+							//     subclass re-levelled onto the 2024 chassis, origin at
+							//     sorcerer 3, and it ALSO adds a `Sun Spells` always-prepared
+							//     progression that the Ar2 original does not have.
+							//
+							// Everything below gates off `subclassLevel` so a side-loaded Ar2
+							// brew works without any Ar2-specific branch, exactly like the
+							// neighbouring origins.
+							// =====================================================================
 							case "Sun Bloodline":
 							case "Child of the Sun Bloodline": {
-								// Sun Bloodline (TGTT/Ar2 Sorcerer)
-								// L1 features from Ar2, L6/14/18 extend the subclass
 								const chaMod = this.getAbilityMod("cha");
+								const subclassLevel = is2024 ? 3 : 1;
+								// The Sun Spells table is a TGTT addition — the Ar2 original
+								// grants only the free Light cantrip.
+								const hasSunSpellsTable = cls.subclass?.source === "TGTT" || cls.source === "TGTT";
+								// Bright Zenith upgrades the blinding flare while it is running.
+								const zenithActive = this.isStateTypeActive("brightZenith");
 
-								// Level 1: Glimpse of the Sun
-								// - Free Light cantrip, choose who perceives it within 20ft
-								// - 1 SP to blind creature within 20ft who can't see source
-								calculations.hasGlimpseOfTheSun = true;
-								calculations.lightCantrip = true;
-								calculations.glimpseSunRange = 20;
-								calculations.hasGlimpseBlind = true;
-								calculations.glimpseBlindCost = 1; // Sorcery point
+								if (level >= subclassLevel) {
+									// ── Glimpse of the Sun ────────────────────────────────
+									// You learn Light (it does not count against cantrips
+									// known) and choose who within 20 ft can perceive it.
+									calculations.hasGlimpseOfTheSun = true;
+									calculations.lightCantrip = true;
+									calculations.glimpseSunRange = zenithActive ? 40 : 20;
 
-								// Level 1: Summer's Defiant Blood
-								// When attacked or forced to save: +CHA to next spell damage (1/round)
-								calculations.hasSummersDefiantBlood = true;
-								calculations.defiantBloodBonus = Math.max(0, chaMod);
+									// ── Summer's Defiant Blood ────────────────────────────
+									// When a creature attacks you or forces a save, add your
+									// CHA modifier to the damage of your next spell, before
+									// the end of your next turn. Once per round.
+									calculations.hasSummersDefiantBlood = true;
+									calculations.defiantBloodBonus = Math.max(0, chaMod);
+									calculations.defiantBloodUsesPerRound = 1;
 
-								// Sun Spells - always prepared
-								calculations.hasSunSpells = true;
+									// ── Sun Spells (TGTT only) ────────────────────────────
+									// The spells themselves are granted by the GENERIC
+									// `additionalSpells` pipeline; this is the display flag.
+									if (hasSunSpellsTable) calculations.hasSunSpells = true;
+								}
 
-								// Level 6: Sunlit Path (Ar2)
-								// Walking speed +15ft, radiant resistance, overland travel bonus
+								// The blinding flare is explicitly a 3rd-level upgrade
+								// ("When you reach 3rd level…"), which on the TGTT chassis
+								// coincides with the origin itself.
+								if (level >= Math.max(3, subclassLevel)) {
+									calculations.hasGlimpseBlind = true;
+									calculations.glimpseBlindCost = 1; // Sorcery point
+									calculations.glimpseBlindSaveAbility = "dex";
+									// The flare uses YOUR spell save DC. `calculations.spellSaveDc`
+									// is already computed by the Sorcerer case above, so this
+									// works even before `_data.spellcasting.ability` is set.
+									calculations.glimpseBlindSaveDc = calculations.spellSaveDc ?? this.getSpellSaveDc();
+									calculations.glimpseBlindCondition = "blinded";
+									calculations.glimpseBlindDuration = "end of your next turn";
+									// Bright Zenith widens the flare to every creature of your
+									// choice within 40 ft of the light source.
+									calculations.glimpseBlindMultiTarget = zenithActive;
+								}
+
+								// ── Sunlit Path (L6) ──────────────────────────────────────
+								// Walking speed +15 ft, radiant resistance, and a travel-pace
+								// bonus for you and chosen allies within 30 ft.
 								if (level >= 6) {
 									calculations.hasSunlitPath = true;
 									calculations.sunlitPathSpeedBonus = 15;
@@ -22081,24 +22126,25 @@ class CharacterSheetState {
 									calculations.overlandTravelAllyRange = 30;
 								}
 
-								// Level 14: Grasping the Sun (Ar2)
-								// Reaction: reduce damage by sorcerer level
-								// If melee attack, attacker takes radiant = sorcerer level
+								// ── Grasping the Sun (L14) ────────────────────────────────
+								// Reaction: reduce damage from a source you can see by your
+								// sorcerer level; a melee attacker takes that much radiant.
 								if (level >= 14) {
 									calculations.hasGraspingTheSun = true;
 									calculations.graspingDamageReduction = level;
 									calculations.graspingRadiantDamage = level;
 								}
 
-								// Level 18: Bright Zenith (Ar2)
-								// 6 SP bonus action: 40ft AoE blind, 100ft blindsight, extended targeting
-								// Duration: 1 minute
+								// ── Bright Zenith (L18) ───────────────────────────────────
+								// 6 SP as a bonus action for 1 minute: blindsight 100 ft and
+								// the widened flare above. Modelled as an active state.
 								if (level >= 18) {
 									calculations.hasBrightZenith = true;
 									calculations.brightZenithCost = 6; // Sorcery points
 									calculations.brightZenithBlindRange = 40;
 									calculations.brightZenithBlindsight = 100;
 									calculations.brightZenithDuration = 1; // minute
+									calculations.brightZenithActive = zenithActive;
 								}
 								break;
 							}
@@ -37038,6 +37084,17 @@ class CharacterSheetState {
 	applyTurnStartEffects () {
 		const effects = this.getTurnStartEffects();
 		const applied = [];
+		// GENERIC once-per-round riders (Summer's Defiant Blood, …) unlock at the
+		// start of your turn, and an armed-but-unspent bonus lapses once its
+		// "before the end of your next turn" window has fully elapsed. Out of
+		// combat there is no round counter to measure against, so an armed bonus
+		// simply waits for the next spell.
+		this.resetPendingSpellDamageBonusCooldowns();
+		const pendingBonus = this._data.pendingSpellDamageBonus;
+		if (pendingBonus && this._data.inCombat && pendingBonus.armedAtRound != null
+			&& (this._data.combatRound || 0) - pendingBonus.armedAtRound >= 2) {
+			this._data.pendingSpellDamageBonus = null;
+		}
 		for (const effect of effects) {
 			if (effect.type === "grantInspiration") {
 				if (!this.hasInspiration()) this.setInspiration(true);
@@ -37295,6 +37352,74 @@ class CharacterSheetState {
 
 	clearPendingDamageMaximization () {
 		this._data.pendingDamageMaximization = null;
+	}
+
+	// =====================================================================
+	// GENERIC: pending spell-damage bonus
+	//
+	// A family of features arm a one-shot rider on the NEXT spell you cast
+	// rather than modifying a stat: Summer's Defiant Blood (Child of the Sun
+	// Bloodline) adds your Charisma modifier to the damage of the next spell
+	// you cast after a creature attacks you or forces you to save.
+	//
+	// Modelled exactly like `pendingDamageMaximization` above — armed without
+	// spending anything, consumed by the spell damage roll — so any future
+	// "add N to your next spell's damage" feature reuses this rather than
+	// growing a second bespoke branch.
+	// =====================================================================
+
+	/**
+	 * Arm a one-shot bonus on the damage of the next spell cast.
+	 * @param {{sourceFeatureId?: string|null, sourceName?: string, value: number, oncePerRoundKey?: string|null}} opts
+	 * @returns {boolean} true when newly armed
+	 */
+	armPendingSpellDamageBonus ({sourceFeatureId = null, sourceName = "Spell Damage Bonus", value = 0, oncePerRoundKey = null} = /** @type {*} */ ({})) {
+		const amount = Number(value) || 0;
+		if (amount <= 0) return false;
+		// A once-per-round rider may only be armed once between turn resets.
+		if (oncePerRoundKey && this._data.pendingSpellDamageBonusUsedKeys?.includes(oncePerRoundKey)) return false;
+		this._data.pendingSpellDamageBonus = {sourceFeatureId, sourceName, value: amount, oncePerRoundKey, armedAtRound: this._data.inCombat ? (this._data.combatRound || 0) : null};
+		if (oncePerRoundKey) {
+			if (!Array.isArray(this._data.pendingSpellDamageBonusUsedKeys)) this._data.pendingSpellDamageBonusUsedKeys = [];
+			this._data.pendingSpellDamageBonusUsedKeys.push(oncePerRoundKey);
+		}
+		return true;
+	}
+
+	/** @returns {{sourceFeatureId: string|null, sourceName: string, value: number, oncePerRoundKey: string|null}|null} */
+	getPendingSpellDamageBonus () {
+		return this._data.pendingSpellDamageBonus ? {...this._data.pendingSpellDamageBonus} : null;
+	}
+
+	/**
+	 * Whether a once-per-round rider has already been armed since the last turn reset.
+	 * @param {string} oncePerRoundKey
+	 * @returns {boolean}
+	 */
+	isPendingSpellDamageBonusOnCooldown (oncePerRoundKey) {
+		return !!oncePerRoundKey && !!this._data.pendingSpellDamageBonusUsedKeys?.includes(oncePerRoundKey);
+	}
+
+	/**
+	 * Consume the armed bonus. Returns the descriptor that applied, or null.
+	 * @returns {{sourceName: string, value: number}|null}
+	 */
+	consumePendingSpellDamageBonus () {
+		const pending = this._data.pendingSpellDamageBonus;
+		if (!pending) return null;
+		this._data.pendingSpellDamageBonus = null;
+		return {sourceName: pending.sourceName, value: pending.value};
+	}
+
+	clearPendingSpellDamageBonus () {
+		this._data.pendingSpellDamageBonus = null;
+	}
+
+	/**
+	 * Release the once-per-round locks (called from the start-of-turn reset).
+	 */
+	resetPendingSpellDamageBonusCooldowns () {
+		this._data.pendingSpellDamageBonusUsedKeys = [];
 	}
 
 	/**
@@ -50437,6 +50562,30 @@ class CharacterSheetState {
 			resourceName: "Sorcery Points",
 			resourceCost: 6,
 		},
+		brightZenith: {
+			id: "brightZenith",
+			name: "Bright Zenith",
+			icon: "☀️",
+			description: "You blaze with the light of high summer. Your Glimpse of the Sun flare can blind every creature of your choice within 40 ft of the light source, you gain blindsight out to 100 ft, and any spell you cast that targets a single creature can reach a creature perceived through that blindsight as though your path to it were unobstructed.",
+			// Curated: the prose parser cannot turn "you gain blindsight out to a
+			// range of 100 feet" into a usable sense effect, and the widened flare
+			// and unobstructed-path clauses are read by
+			// `getFeatureCalculations()` / shown as notes rather than parsed.
+			preferCuratedEffects: true,
+			effects: [
+				{type: "sense", target: "blindsight", value: 100},
+				{type: "info", label: "Glimpse of the Sun blinds every creature of your choice within 40 ft of the light source."},
+				{type: "info", label: "A spell that targets one creature can reach anything you perceive with this blindsight, as though the path were unobstructed."},
+			],
+			duration: "1 minute",
+			endConditions: ["Duration expires", "You are incapacitated", "You die"],
+			// Anchored so the pattern can never match unrelated prose (CS-BUG-050
+			// class of bug — an unanchored "rage" once gave a Bard rage resistances).
+			detectPatterns: ["^bright zenith$"],
+			activationAction: "bonus",
+			resourceName: "Sorcery Points",
+			resourceCost: 6,
+		},
 		innateSorcery: {
 			id: "innateSorcery",
 			name: "Innate Sorcery",
@@ -52106,6 +52255,14 @@ class CharacterSheetState {
 		"vitality of the tree": "passive",
 		"vitality surge": "passive",
 		"life-giving force": "passive",
+
+		// === Child of the Sun Bloodline (Ar2 Sorcerer) ===
+		// Sunlit Path is purely passive (+15 ft walking speed, radiant resistance,
+		// a travel-pace bonus). Its "your pace increases" prose reads as an
+		// activatable buff to the generic analyzer, which promoted it into a bogus
+		// bonus-action toggle once entries-only Sun Bloodline features were allowed
+		// through the detection early-return.
+		"sunlit path": "passive",
 	};
 
 	/**
@@ -52465,7 +52622,13 @@ class CharacterSheetState {
 		// (R20) Allow features that carry classification-relevant markers to be processed
 		// even when they only have `entries` (no rendered `description`) — e.g. Invoke Hell
 		// options expanded from refSubclassFeature, or synthesized manifestation children.
-		const hasMarkers = !!(feature?.consumes || feature?._raceManifestation || isCrimsonRite || isBloodCurse || isHybridTransformation || isJesterAct);
+		//
+		// Child of the Sun Bloodline is in the same boat: "Summer's Defiant Blood" and
+		// "Grasping the Sun" carry no `consumes` marker and no "as an action" opener, so
+		// entries-only copies were dropped here and never reached their branches below.
+		const isSunBloodlineFeature = ["sun bloodline", "child of the sun bloodline"]
+			.includes((feature?.subclassShortName || feature?.subclassName || "").toLowerCase());
+		const hasMarkers = !!(feature?.consumes || feature?._raceManifestation || isCrimsonRite || isBloodCurse || isHybridTransformation || isJesterAct || isSunBloodlineFeature);
 		// (R40) A feature named in FEATURE_CLASSIFICATION_OVERRIDES must be processed even when
 		// it arrives entries-only (no rendered `description`), so its override is honoured
 		// rather than dropped by this early return. The override branch below builds its own
@@ -52595,6 +52758,75 @@ class CharacterSheetState {
 				duration: this.ACTIVE_STATE_TYPES.percussiveStrike.duration,
 				endConditions: this.ACTIVE_STATE_TYPES.percussiveStrike.endConditions,
 				effects: this.ACTIVE_STATE_TYPES.percussiveStrike.effects,
+				resourceCost: 0,
+			};
+		}
+
+		// ===== Child of the Sun Bloodline (Ar2 Sorcerer; TGTT re-parents it) =====
+		// Identified by the subclass rather than by source, so both the Ar2
+		// original and the TGTT `_copy` route here. Left to the generic pipeline
+		// two of these four were invisible: "Grasping the Sun" and "Summer's
+		// Defiant Blood" both returned null (no "as an action" opener, no
+		// `consumes` marker), and "Bright Zenith" was classified as an INSTANT
+		// spend by the generic `consumes` rule, so its 1-minute form never
+		// existed as a state and its blindsight never landed.
+		if (isSunBloodlineFeature && name === "bright zenith") {
+			return {
+				stateTypeId: "brightZenith",
+				stateType: this.ACTIVE_STATE_TYPES.brightZenith,
+				matchedBy: "sunBloodline",
+				activationAction: "bonus",
+				interactionMode: "toggle",
+				isToggle: true,
+				duration: this.ACTIVE_STATE_TYPES.brightZenith.duration,
+				endConditions: this.ACTIVE_STATE_TYPES.brightZenith.endConditions,
+				effects: this.ACTIVE_STATE_TYPES.brightZenith.effects,
+				resourceName: "Sorcery Points",
+				resourceCost: 6,
+				sorceryPointCost: 6,
+			};
+		}
+		if (isSunBloodlineFeature && name === "glimpse of the sun") {
+			// The blinding flare is the action: 1 Sorcery Point, one target
+			// (all chosen targets while Bright Zenith runs), DEX save vs your
+			// spell save DC. The generic builder already links the Sorcery
+			// Point pool; the DC is resolved from the character rather than
+			// left null, and the handler opens the flare prompt.
+			return {
+				...this._buildAbilityActivationInfo(feature, rawText, text, {resourceName: "Sorcery Points", resourceCost: 1}),
+				matchedBy: "sunBloodline",
+				activationAction: "action",
+				sorceryPointCost: 1,
+				dcCalculation: "spellSaveDc",
+			};
+		}
+		if (isSunBloodlineFeature && name === "grasping the sun") {
+			return {
+				stateTypeId: "custom",
+				isCustom: true,
+				isDataDriven: true,
+				matchedBy: "sunBloodline",
+				interactionMode: "limited",
+				isInstant: true,
+				isToggle: false,
+				activationAction: "reaction",
+				// Free — the reaction itself is the only cost.
+				resourceName: null,
+				resourceCost: 0,
+			};
+		}
+		if (isSunBloodlineFeature && name === "summer's defiant blood") {
+			return {
+				stateTypeId: "custom",
+				isCustom: true,
+				isDataDriven: true,
+				matchedBy: "sunBloodline",
+				interactionMode: "limited",
+				isInstant: true,
+				isToggle: false,
+				// Arming the rider is not an action — it rides the trigger.
+				activationAction: "free",
+				resourceName: null,
 				resourceCost: 0,
 			};
 		}
@@ -60174,6 +60406,172 @@ class CharacterSheetState {
 		if (saveSuccess) return {ok: true, active: true, avoided: true, damageTaken: 0};
 		return {ok: true, active: true, avoided: false, damageTaken: Math.floor(full / 2)};
 	}
+	// #endregion
+
+	// #region Child of the Sun Bloodline (Ar2 Sorcerer; TGTT re-parents it)
+
+	/**
+	 * Glimpse of the Sun — the blinding flare. Spends 1 Sorcery Point and
+	 * resolves a Dexterity save against your spell save DC; a failure blinds the
+	 * target until the end of your next turn.
+	 *
+	 * This performs the REAL spend via {@link useSorceryPoint}. The blind itself
+	 * lands on a CREATURE, and the sheet tracks only the player's own conditions,
+	 * so the outcome is returned for the caller to report rather than applied.
+	 *
+	 * While {@link brightZenith} is active the flare reaches 40 ft and may name
+	 * every creature of your choice instead of one.
+	 *
+	 * @param {object} [opts]
+	 * @param {string[]} [opts.targets] names of the creatures being blinded (display only).
+	 * @returns {{ok: boolean, error?: string, cost?: number, dc?: number|null, saveAbility?: string, range?: number, multiTarget?: boolean, targets?: string[], condition?: string, duration?: string, sorceryPointsRemaining?: number}}
+	 */
+	useGlimpseOfTheSunFlare ({targets = []} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasGlimpseBlind) return {ok: false, error: "You don't have Glimpse of the Sun's blinding flare yet."};
+
+		const cost = calc.glimpseBlindCost ?? 1;
+		const sp = this.getSorceryPoints();
+		if (sp.current < cost) return {ok: false, error: `The blinding flare costs ${cost} Sorcery Point (you have ${sp.current}).`};
+
+		const names = (targets || []).map(it => `${it}`.trim()).filter(Boolean);
+		// Only Bright Zenith lets the flare name more than one creature.
+		if (!calc.glimpseBlindMultiTarget && names.length > 1) {
+			return {ok: false, error: "The flare blinds one creature unless Bright Zenith is active."};
+		}
+		if (!this.useSorceryPoint(cost)) return {ok: false, error: "Could not spend Sorcery Points."};
+
+		return {
+			ok: true,
+			cost,
+			dc: calc.glimpseBlindSaveDc ?? null,
+			saveAbility: calc.glimpseBlindSaveAbility || "dex",
+			range: calc.glimpseSunRange ?? 20,
+			multiTarget: !!calc.glimpseBlindMultiTarget,
+			targets: names,
+			condition: calc.glimpseBlindCondition || "blinded",
+			duration: calc.glimpseBlindDuration || "end of your next turn",
+			sorceryPointsRemaining: this.getSorceryPoints().current,
+		};
+	}
+
+	/**
+	 * Summer's Defiant Blood — arm the CHA-modifier rider on the damage of your
+	 * next spell. Costs nothing and is limited to once per round; the lock is
+	 * released by {@link applyTurnStartEffects} at the start of your turn.
+	 *
+	 * @returns {{ok: boolean, error?: string, bonus?: number}}
+	 */
+	armSummersDefiantBlood () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasSummersDefiantBlood) return {ok: false, error: "You don't have Summer's Defiant Blood."};
+
+		const bonus = calc.defiantBloodBonus ?? 0;
+		if (bonus <= 0) return {ok: false, error: "Your Charisma modifier gives no bonus to add."};
+		if (this.isPendingSpellDamageBonusOnCooldown("summersDefiantBlood")) {
+			return {ok: false, error: "Summer's Defiant Blood has already been used this round."};
+		}
+
+		const armed = this.armPendingSpellDamageBonus({
+			sourceName: "Summer's Defiant Blood",
+			value: bonus,
+			oncePerRoundKey: "summersDefiantBlood",
+		});
+		if (!armed) return {ok: false, error: "Summer's Defiant Blood could not be armed." };
+		return {ok: true, bonus};
+	}
+
+	/**
+	 * Whether Summer's Defiant Blood is currently armed.
+	 * @returns {boolean}
+	 */
+	isSummersDefiantBloodArmed () {
+		return this.getPendingSpellDamageBonus()?.sourceName === "Summer's Defiant Blood";
+	}
+
+	/**
+	 * Grasping the Sun — the reaction. Reduces damage from a source you can see
+	 * by your sorcerer level; if that damage came from another creature's melee
+	 * attack, the attacker takes the same amount as radiant damage.
+	 *
+	 * Costs no resource (the reaction is the cost), so this is a pure
+	 * calculation: the caller applies the reduced damage through the normal
+	 * damage pipeline and reports the retaliation.
+	 *
+	 * @param {object} [opts]
+	 * @param {number} [opts.damage=0] the incoming damage.
+	 * @param {boolean} [opts.fromMeleeAttack=false] whether it came from another creature's melee attack.
+	 * @returns {{ok: boolean, error?: string, reduction?: number, damageTaken?: number, radiantDamage?: number}}
+	 */
+	useGraspingTheSun ({damage = 0, fromMeleeAttack = false} = {}) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasGraspingTheSun) return {ok: false, error: "You don't have Grasping the Sun."};
+
+		const incoming = Math.max(0, Math.floor(Number(damage) || 0));
+		const reduction = calc.graspingDamageReduction ?? 0;
+		return {
+			ok: true,
+			reduction,
+			damageTaken: Math.max(0, incoming - reduction),
+			radiantDamage: fromMeleeAttack ? (calc.graspingRadiantDamage ?? 0) : 0,
+		};
+	}
+
+	/**
+	 * Bright Zenith — spend 6 Sorcery Points as a bonus action to enter the
+	 * brilliant form for 1 minute. Performs the REAL spend via
+	 * {@link useSorceryPoint} and activates the {@link brightZenith} state, so
+	 * the blindsight lands on {@link getSenses} and the widened flare lands on
+	 * {@link getFeatureCalculations}.
+	 *
+	 * @returns {{ok: boolean, error?: string, cost?: number, sorceryPointsRemaining?: number, stateId?: string|null}}
+	 */
+	useBrightZenith () {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasBrightZenith) return {ok: false, error: "You don't have Bright Zenith."};
+		if (this.isStateTypeActive("brightZenith")) return {ok: false, error: "Bright Zenith is already active."};
+
+		const cost = calc.brightZenithCost ?? 6;
+		const sp = this.getSorceryPoints();
+		if (sp.current < cost) return {ok: false, error: `Bright Zenith costs ${cost} Sorcery Points (you have ${sp.current}).`};
+		if (!this.useSorceryPoint(cost)) return {ok: false, error: "Could not spend Sorcery Points."};
+
+		const stateId = this.activateState("brightZenith");
+		return {ok: true, cost, sorceryPointsRemaining: this.getSorceryPoints().current, stateId};
+	}
+
+	/**
+	 * End Bright Zenith early.
+	 * @returns {boolean} true when a running state was ended.
+	 */
+	endBrightZenith () {
+		if (!this.isStateTypeActive("brightZenith")) return false;
+		this.deactivateState("brightZenith");
+		return true;
+	}
+
+	/**
+	 * Sunlit Path's overland-travel bonus, as a generic travel-pace descriptor so
+	 * the movement surface can render it without knowing about this subclass.
+	 * Any future feature that sets the same `overlandTravelBonus*` calculations
+	 * surfaces the same way.
+	 * @returns {{feetPerMinute: number, milesPerHour: number, milesPerDay: number, allyRange: number, source: string}|null}
+	 */
+	getTravelPaceBonus () {
+		const calc = this.getFeatureCalculations();
+		const feetPerMinute = calc.overlandTravelBonusMinute || 0;
+		const milesPerHour = calc.overlandTravelBonusHour || 0;
+		const milesPerDay = calc.overlandTravelBonusDay || 0;
+		if (!feetPerMinute && !milesPerHour && !milesPerDay) return null;
+		return {
+			feetPerMinute,
+			milesPerHour,
+			milesPerDay,
+			allyRange: calc.overlandTravelAllyRange || 0,
+			source: calc.hasSunlitPath ? "Sunlit Path" : "Travel",
+		};
+	}
+
 	// #endregion
 
 	// #region Wicked Witch (Arcadia 8 Sorcerer)

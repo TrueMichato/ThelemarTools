@@ -6055,6 +6055,22 @@ class CharacterSheetSpells {
 		return this._state.getCantripDamageBonus?.(entry) || {bonus: 0, sources: []};
 	}
 
+	/**
+	 * Consume a one-shot armed spell-damage rider (Summer's Defiant Blood and any
+	 * future feature that arms `pendingSpellDamageBonus`).
+	 *
+	 * Unlike {@link _getCantripDamageBonus} this applies at EVERY spell level, and
+	 * it MUTATES — the rider is spent by the roll that reads it, so it must be
+	 * called exactly once per damage roll, at the point the total is assembled.
+	 * @returns {{bonus: number, sources: Array<{name: string, value: number}>}}
+	 */
+	_consumePendingSpellDamageBonus () {
+		const pending = this._state.getPendingSpellDamageBonus?.();
+		if (!pending?.value) return {bonus: 0, sources: []};
+		this._state.consumePendingSpellDamageBonus?.();
+		return {bonus: pending.value, sources: [{name: pending.sourceName || "feature", value: pending.value}]};
+	}
+
 	_rollSpellDamage (spellData, slotLevel, baseLevel, appliedMetamagic = null, spell = null) {
 		// Weapon-channel cantrips (Booming/Green-Flame Blade) cast on their own roll ONLY
 		// the secondary/movement damage; the on-hit damage rides the weapon attack instead.
@@ -6114,9 +6130,10 @@ class CharacterSheetSpells {
 			if (isDestructiveWrath) this._state.consumePendingDamageMaximization?.(damageType);
 			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
 			const featureBonus = this._getCantripDamageBonus(spell, spellData);
-			const total = detail.total + spellDamageBonus + featureBonus.bonus;
+			const riderBonus = this._consumePendingSpellDamageBonus();
+			const total = detail.total + spellDamageBonus + featureBonus.bonus + riderBonus.bonus;
 			const bonusStr = (spellDamageBonus ? ` + ${spellDamageBonus} item` : "")
-				+ featureBonus.sources.map(s => ` + ${s.value} ${s.name}`).join("");
+				+ [...featureBonus.sources, ...riderBonus.sources].map(s => ` + ${s.value} ${s.name}`).join("");
 			const maximizedLabel = (isOvercharged || isDestructiveWrath) ? " maximized" : "";
 			const diceLabel = projectile ? `${projectile.count}× ${baseDice}` : baseDice;
 			const triggeredEffects = this._state.getTriggeredDamageEffects?.(damageType) || [];
@@ -6168,9 +6185,10 @@ class CharacterSheetSpells {
 			if (isDestructiveWrath) this._state.consumePendingDamageMaximization?.(damageType);
 			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
 			const featureBonus = this._getCantripDamageBonus(spell, spellData);
-			const total = detail.total + spellDamageBonus + featureBonus.bonus;
+			const riderBonus = this._consumePendingSpellDamageBonus();
+			const total = detail.total + spellDamageBonus + featureBonus.bonus + riderBonus.bonus;
 			const bonusStr = (spellDamageBonus ? ` + ${spellDamageBonus} item` : "")
-				+ featureBonus.sources.map(s => ` + ${s.value} ${s.name}`).join("");
+				+ [...featureBonus.sources, ...riderBonus.sources].map(s => ` + ${s.value} ${s.name}`).join("");
 			const maximizedLabel = (isOvercharged || isDestructiveWrath) ? " maximized" : "";
 			const triggeredEffects = this._state.getTriggeredDamageEffects?.(damageType) || [];
 			const push = triggeredEffects.find(it => it.type === "forcedMovement");

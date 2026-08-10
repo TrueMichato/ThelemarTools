@@ -520,7 +520,16 @@ export const PRESET_FULL_HEX_DIVINE_TORTLE: CharacterPreset = {
 	signatureSpells: ["Hex", "Eldritch Blast"],
 };
 
-/** 6. Child of the Sun Bloodline Sorcerer Hochling (TGTT) */
+/**
+ * 6. Child of the Sun Bloodline Sorcerer Hochling (TGTT)
+ *
+ * CS-BUG-056: `abilityPriority` pins CHA first. Without it the standard array
+ * leaves the Sorcerer on CHA 8, which does not merely deflate the spell save DC
+ * — it makes Summer's Defiant Blood *unarmable*, because the feature adds your
+ * Charisma modifier and refuses a bonus of zero or less. The rider's own probe
+ * would then be measuring a dump stat rather than the feature.
+ * DEX/CON stay high so HP, AC and initiative are untouched.
+ */
 export const PRESET_FULL_CHILD_OF_SUN_HOCHLING: CharacterPreset = {
 	race: "Hochling",
 	raceSource: "TGTT",
@@ -532,6 +541,7 @@ export const PRESET_FULL_CHILD_OF_SUN_HOCHLING: CharacterPreset = {
 	skillCount: 2,
 	subclassName: "Child of the Sun Bloodline",
 	subclassSource: "TGTT",
+	abilityPriority: ["cha", "con", "dex", "wis", "int", "str"],
 	signatureSpells: ["Fire Bolt", "Burning Hands"],
 };
 

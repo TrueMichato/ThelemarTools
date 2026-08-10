@@ -377,7 +377,7 @@ placed on an ally rather than on the druid.
 
 ## Supported Toggle Abilities
 
-> ⚠️ **This section documents 32 of the 73 states in `ACTIVE_STATE_TYPES`.**
+> ⚠️ **This section documents 33 of the 74 states in `ACTIVE_STATE_TYPES`.**
 > The other 41 are **implemented and working** — they are merely undocumented
 > here. Do not read a state's absence from this section as "unsupported"; check
 > `CharacterSheetState.ACTIVE_STATE_TYPES` first, which is the only authority.
@@ -754,6 +754,50 @@ hangs off it. `spellDc` was an **advertised effect target with no reader**
 (CS-BUG-099), and the Spells tab's own per-class card then hand-rolled the DC
 and ignored it a second time (CS-BUG-102) — so a `{type: "bonus", target:
 "spellDc"}` effect is now worth checking end-to-end when you add one.
+
+#### Bright Zenith (Child of the Sun Bloodline Sorcerer, `Ar2` / `TGTT`, L18)
+
+```javascript
+brightZenith: {
+    preferCuratedEffects: true,
+    effects: [
+        {type: "sense", target: "blindsight", value: 100},
+        {type: "info", label: "Glimpse of the Sun blinds every creature of your choice within 40 ft…"},
+        {type: "info", label: "A spell that targets one creature can reach anything you perceive…"},
+    ],
+    duration: "1 minute",
+    detectPatterns: ["^bright zenith$"],
+    activationAction: "bonus",
+    resourceName: "Sorcery Points",
+    resourceCost: 6,
+}
+```
+
+Three conventions worth copying.
+
+**The sense effect shape for a state is `{target, value}`, not `{sense, range}`.**
+`getSenseBonusFromStates()` reads `e.target` / `e.value` and feeds `getSenses()`
+through `Math.max`. The *feature-effects registry* uses a different shape for the
+same idea (`{sense, range}`), and a third exists (`{senseType, value}`) — writing
+the registry's shape into an `ACTIVE_STATE_TYPES` entry produces a state that
+activates, renders, and grants nothing.
+
+**`detectPatterns` is anchored.** `"^bright zenith$"` cannot match inside
+unrelated prose; the unanchored form is how a Bard once acquired rage
+resistances.
+
+**A state beats a `consumes` marker.** Bright Zenith carries
+`consumes: {name: "Sorcery Point", amount: 6}` in the source data, which the
+generic rule classifies as an *instant* spend. The explicit Sun Bloodline branch
+in `detectActivatableFeature()` claims it first and returns the toggle, so the
+1-minute form actually exists. Any `consumes` feature that is really a duration
+toggle needs the same treatment.
+
+**The state feeds back into `getFeatureCalculations()`.** While it runs,
+`glimpseSunRange` becomes 40 and `glimpseBlindMultiTarget` becomes `true`, so the
+Blinding Flare prompt widens and accepts a list of targets without a second code
+path. `useBrightZenith()` / `endBrightZenith()` are the programmatic entry points.
+
 #### Launch Momentum (Steel Hawk Fighter, `GriffonsSaddlebag2`)
 
 ```javascript
