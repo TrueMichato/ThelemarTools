@@ -46961,6 +46961,62 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Break down the deterministic flat damage which belongs in a weapon attack's
+	 * standing damage formula. `attack.damageBonus` is authoritative for the attack's
+	 * intrinsic/custom base: generated attacks already cache their source weapon's
+	 * ordinary magic and custom bonuses there, while custom attacks store the value the
+	 * player authored. Never re-read those ordinary source-item bonuses here.
+	 *
+	 * Conditional, manual/once-per-turn, critical-only, ammunition, spell-only, and dice
+	 * riders remain roll-time concerns and are deliberately excluded.
+	 *
+	 * @param {object} attack
+	 * @returns {{base: number, feature: number, itemContributions: Array<{name: string, value: number}>, item: number, state: number, rage: number, hybrid: number, total: number}}
+	 */
+	getWeaponDisplayDamageBreakdown (attack) {
+		if (!attack) return {base: 0, feature: 0, itemContributions: [], item: 0, state: 0, rage: 0, hybrid: 0, total: 0};
+
+		const baseRaw = Number(attack.damageBonus);
+		const base = Number.isFinite(baseRaw) ? baseRaw : 0;
+		const feature = this.getNamedModifiersByType("damage", {includeConditional: false})
+			.filter(mod => !mod.manual && !mod.isManual && !mod.requiresChoice && !mod.requiresActivation && !mod.oncePerTurn && mod.perTurn !== true && !mod.critOnly && !mod.onCrit)
+			.reduce((sum, mod) => sum + (typeof mod.value === "number" && Number.isFinite(mod.value) ? mod.value : 0), 0);
+		const itemContributions = this.getItemWeaponScopedDamageContributions(attack)
+			.filter(it => typeof it.value === "number" && Number.isFinite(it.value));
+		const item = itemContributions.reduce((sum, it) => sum + it.value, 0);
+		const weaponId = attack.riteWeaponId || attack.id;
+		const stateRaw = this.getBonusFromStates("damage", {weaponId});
+		const state = typeof stateRaw === "number" && Number.isFinite(stateRaw) ? stateRaw : 0;
+		const isMeleeWeapon = !attack.isSpell
+			&& !attack.isRanged
+			&& this.getAttackReach(attack, {meleeReach: CharacterSheetState.BASE_MELEE_REACH}) != null;
+		const rage = this.getRageDamageBonus(isMeleeWeapon, attack.abilityMod || "str");
+		const hybrid = this.isStateTypeActive("hybridTransformation") && isMeleeWeapon
+			? (Number(this.getFeatureCalculation("hybridDamageBonus")) || 0)
+			: 0;
+
+		return {
+			base,
+			feature,
+			itemContributions,
+			item,
+			state,
+			rage,
+			hybrid,
+			total: base + feature + item + state + rage + hybrid,
+		};
+	}
+
+	/**
+	 * Standing non-ability flat damage for a weapon attack display.
+	 * @param {object} attack
+	 * @returns {number}
+	 */
+	getWeaponDisplayDamageBonus (attack) {
+		return this.getWeaponDisplayDamageBreakdown(attack).total;
+	}
+
+	/**
 	 * Register an equipped item's catalog effects as named modifiers / defensive traits.
 	 * Idempotent when paired with `_unregisterItemEffects` (called by `_reapplyItemEffects`).
 	 * @param {object} invItem - The inventory wrapper.
