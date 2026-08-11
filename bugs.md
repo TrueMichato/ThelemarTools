@@ -3,7 +3,14 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None currently tracked._
+### Round 49 — Oiled String prereq, weapon damage-bonus display parity, Gemstone Empowerment overhaul, openable equipment packs
+
+Four reported items (all TGTT character sheet unless noted). Decomposed into 3 parallel sessions + 1 orchestrator-direct data fix.
+
+- **B1 (orchestrator-direct) — "Oiled String" weapon upgrade wrongly melee-only.** `data/itemupgrades.json` "Wounding: Oiled String" (source TCAH) is the RANGED (oiled bowstring) variant but carries `prerequisite:[{"item":["melee weapons only"]}]`; must be `["bows and crossbows only"]`. Keen (its melee sibling) stays melee. Data-only one-liner; applied directly at integration.
+- **B2 (S1) — Weapon damage bonuses don't update the Combat/Overview/Play-Mode attack-row damage string.** `attack.damageBonus` is cached at attack-creation (item + custom only); the three display sites (`charactersheet-combat.js` `_renderAttackItem`, `charactersheet.js` `_renderAttacks`, `charactersheet-playmode.js` `_renderAttacks`) read it verbatim while `_rollDamage` recomputes all sources live (feature damage mods, item-weapon-scoped, active-states, rage, etc.). Fix: a shared standing-flat-damage calculation used by all three displays, at read-parity with the roll path's flat-bonus total, without double-counting `attack.damageBonus`.
+- **B3 (S3) — Gemstone Empowerment (TGTT) overhaul.** 39 `itemUpgrade` GS:* empowerments in `homebrew/TravelersGuidetoThelemar.json`; only Journey (+10 speed) and Volant (flight) are fully wired. The rest are cosmetic / need-resource / need-trigger / need-modal. Chalice (store up to 2 spell levels) needs a dedicated spell-storing modal (mirroring the Ring of Spell Storing state methods). Requires a gem-effect aggregation channel, per-gem behavior matrix, resources/charges, combat riders via the rider pipeline, and persistence across socket/unsocket.
+- **B4 (S2) — Openable equipment packs.** Explorer's/Burglar's/Dungeoneer's packs (`type:"G"` + `packContents[]`) should expand into their individual items via an inventory "Open pack" action, each item carrying a `_fromPack` provenance marker; opening consumes exactly one pack atomically.
 
 ## Closed Bugs
 
