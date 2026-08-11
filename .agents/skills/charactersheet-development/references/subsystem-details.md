@@ -218,9 +218,26 @@ grants a named action's benefit for free; read via
 ```
 total = abilityMod + profBonus + weaponBonus + featureAttackBonus + stateAttackBonus
 ```
+
 - `weaponBonus`: from magic item's `bonusWeapon` + `bonusWeaponAttack`
 - `featureAttackBonus`: from feature calculations
 - `stateAttackBonus`: from `getBonusFromStates("attack")`
+
+### Standing Weapon Damage Display
+
+`CharacterSheetState.getWeaponDisplayDamageBonus(attack)` is the shared source for
+the non-ability flat bonus shown in Combat, Overview, and Play Mode, and for the
+standing-flat portion of `_rollDamage`. It includes the attack's authoritative
+`damageBonus`, unconditional numeric feature modifiers, matching weapon-scoped
+item contributions, active-state damage, eligible Rage damage, and eligible
+Hybrid Transformation damage.
+
+Generated attacks already cache their source weapon's ordinary magic and custom
+flat bonuses in `attack.damageBonus`; custom attacks store the explicitly authored
+value there. Consumers must not independently add the source item's ordinary
+`bonusWeapon`/`bonusWeaponDamage`, or generated attacks will double-count it.
+Conditional, manual/once-per-turn, critical-only, ammunition, spell-only, and dice
+riders remain roll-time concerns and must not appear in the standing formula.
 
 ### Sneak Attack Mechanics
 
