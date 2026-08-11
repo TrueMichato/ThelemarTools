@@ -8,6 +8,48 @@ import {CharacterSheetModal} from "./charactersheet-modal.js";
 // Project globals — typed via globalThis cast for TypeScript checkJs
 const {e_, ee, InputUiUtil, Renderer} = /** @type {*} */ (globalThis);
 
+const GEMSTONE_EFFECT_REGISTRY = {
+	alchemist: {summary: "+2 HP when drinking a potion of healing", effects: [{type: "healingPotionBonus", value: 2}]},
+	mariner: {summary: "Host weapon ignores underwater attack disadvantage", effects: [{type: "removeDisadvantage", target: "attack", conditional: "underwater"}]},
+	thief: {summary: "1/day: Reroll a failed Dexterity check", resource: {key: "uses", name: "Thief Gemstone", max: 1, recharge: "dawn"}},
+	warrior: {summary: "Host weapon can't be disarmed while conscious", notes: ["Can't be disarmed of the host weapon while conscious."]},
+	"arrow-catcher": {summary: "Reaction: Impose disadvantage on a ranged attack (3 charges; regain 1d3 at dawn)", resource: {key: "charges", name: "Arrow-Catcher Charges", max: 3, recharge: "dawn", recovery: "1d3"}},
+	"bound armor": {summary: "Bonus action: Instantly don/doff or dismiss the host armor", powers: [{id: "bound-armor", name: "Bound Armor", actionType: "bonus", kind: "toggle"}]},
+	"bound weapon": {summary: "Bonus action: Make the host weapon disappear or appear", powers: [{id: "bound-weapon", name: "Bound Weapon", actionType: "bonus", kind: "toggle"}]},
+	cat: {summary: "1/dawn: Gain darkvision 120 ft. for 1 hour", resource: {key: "uses", name: "Cat Gemstone", max: 1, recharge: "dawn"}, effects: [{type: "sense", sense: "darkvision", value: 120, requiresRuntimeActive: true}]},
+	chaos: {summary: "Critical hits with the host weapon trigger Wild Magic", trigger: {type: "criticalHit", outcome: "wildMagicSurge"}},
+	daywalker: {summary: "Unaffected by sunlight while the hood is drawn", notes: ["Unaffected by sunlight while the host armor's hood is drawn."]},
+	"elemental shield": {summary: "Reaction: Reduce chosen elemental damage by 2×level + CON; gain 1 exhaustion", choices: {damageType: ["acid", "cold", "fire", "lightning", "thunder"]}},
+	featherfoot: {summary: "Standing jump distance equals walking speed", effects: [{type: "standingJumpEqualsWalk"}]},
+	knock: {summary: "1/dawn: Cast Knock from the host armor", resource: {key: "uses", name: "Knock Gemstone", max: 1, recharge: "dawn"}, powers: [{id: "knock", name: "Knock", actionType: "action", kind: "spell", spellName: "Knock", spellSource: "PHB"}]},
+	nondetection: {summary: "Hidden from divination magic and magical scrying", effects: [{type: "protection", protection: "divination"}]},
+	serpent: {summary: "1/dawn on hit: CON save or poisoned for 1 minute", resource: {key: "uses", name: "Serpent Gemstone", max: 1, recharge: "dawn"}, trigger: {type: "onHit", outcome: "poisoned"}},
+	bastion: {summary: "1/dawn: Bonus action creates a 10-ft force dome for 1 minute", resource: {key: "uses", name: "Bastion Gemstone", max: 1, recharge: "dawn"}, powers: [{id: "bastion", name: "Bastion Dome", actionType: "bonus", kind: "ability"}]},
+	berserker: {summary: "1/dawn on hit: Spend Hit Dice for damage and equal self-damage", resource: {key: "uses", name: "Berserker Gemstone", max: 1, recharge: "dawn"}, trigger: {type: "onHit", outcome: "berserker"}},
+	chalice: {summary: "Store and cast up to 2 spell levels", requiresAttunement: true, spellStorage: {capacity: 2}},
+	death: {summary: "Humanoids killed by the host weapon rise as 1-HP zombies for 1 minute", trigger: {type: "kill", outcome: "zombie"}},
+	hunt: {summary: "1/dawn: Mark a target, then teleport after a ranged host hit", resource: {key: "uses", name: "Hunt Gemstone", max: 1, recharge: "dawn"}},
+	journey: {summary: "+10 speed; improved travel pace and halved food/water", effects: [{type: "speedBonus", speed: "walk", value: 10}]},
+	magebane: {summary: "On hit: End spells using one of 3 charges", resource: {key: "charges", name: "Magebane Charges", max: 3, recharge: "dawn", recovery: "1d3"}, trigger: {type: "onHit", outcome: "dispel"}},
+	phoenix: {summary: "1/dawn at 0 HP: Fireball, then regain 1d6 HP next turn", resource: {key: "uses", name: "Phoenix Gemstone", max: 1, recharge: "dawn"}, trigger: {type: "zeroHp", outcome: "phoenix"}},
+	soultrap: {summary: "1/dawn after a qualifying kill: Regain a spell slot up to PB", resource: {key: "uses", name: "Soultrap Gemstone", max: 1, recharge: "dawn"}},
+	superconductor: {summary: "Store charges up to PB spell levels; spend for +1d6 force each", resource: {key: "charges", name: "Superconductor Charges", max: "proficiency", recharge: "none", resetOnRest: true}, rider: {dicePerCharge: "1d6", damageType: "force"}},
+	warmage: {summary: "Reroll failed concentration saves using one of 3 charges", resource: {key: "charges", name: "Warmage Charges", max: 3, recharge: "special"}},
+	"blood weapon": {summary: "Critical hit: Regain HP equal to damage dealt (not constructs/undead)", trigger: {type: "criticalHit", outcome: "heal"}},
+	displacement: {summary: "After weapon damage: Teleport 30 ft. once per turn", trigger: {type: "damaged", outcome: "teleport"}},
+	dragonbane: {summary: "+2d6 host-weapon damage against dragons; STR save or flight 0", rider: {dice: "2d6", targetTypes: ["dragon"], damageType: "weapon"}},
+	earthshaker: {summary: "1/dawn: Create a 1-round Earthquake effect", resource: {key: "uses", name: "Earthshaker Gemstone", max: 1, recharge: "dawn"}, powers: [{id: "earthshaker", name: "Earthshaker", actionType: "action", kind: "spell", spellName: "Earthquake", spellSource: "PHB"}]},
+	"giant slayer": {summary: "+2d6 host-weapon damage against giants (Large or larger); STR save or prone", rider: {dice: "2d6", targetTypes: ["giant"], damageType: "weapon"}},
+	"mark/recall": {summary: "1/dawn: Mark a location, then teleport there with up to five creatures", resource: {key: "uses", name: "Mark/Recall Gemstone", max: 1, recharge: "dawn"}},
+	overshield: {summary: "Gain 8 temp HP at the start of each turn", effects: [{type: "turnStartTempHp", value: 8}]},
+	retribution: {summary: "After taking damage, gain advantage on the next attack against that creature type", trigger: {type: "damaged", outcome: "retribution"}},
+	wolfsbane: {summary: "Moonlight; +2d6 radiant against shapechangers and force true form", effects: [{type: "light", bright: 15, dim: 15}], rider: {dice: "2d6", targetTypes: ["shapechanger"], damageType: "radiant"}},
+	"force of will": {summary: "Immune to enchantment magic unless you choose otherwise", effects: [{type: "protection", protection: "enchantment"}]},
+	mime: {summary: "Copy a same-type magic item's non-fixed properties during a short rest", notes: ["Copied magic item properties require DM adjudication; artifacts and fixed bonuses can't be copied."]},
+	tempest: {summary: "1/turn on hit: +1d10 lightning and arcs to up to 3 creatures", rider: {dice: "1d10", damageType: "lightning", perTurn: true, chainedTargetsMax: 3}},
+	volant: {summary: "Hover flight speed equals twice walking speed", effects: [{type: "flightSpeedMultiplier", speed: "walk", value: 2, hover: true}]},
+};
+
 class CharacterSheetUpgrades {
 	constructor (page) {
 		this._page = page;
@@ -808,15 +850,18 @@ class CharacterSheetUpgrades {
 	 * @returns {object} Gemstone data suitable for socketGemstone / _gemstoneData
 	 */
 	static buildGemstoneData (gemEntity) {
+		const descriptor = this.getGemstoneDescriptor(gemEntity);
 		return {
 			name: gemEntity.name,
 			source: gemEntity.source,
 			gemName: gemEntity.gemName,
 			rarity: gemEntity.rarity,
-			upgradeType: gemEntity.upgradeType,
+			upgradeType: Array.isArray(gemEntity.upgradeType) ? gemEntity.upgradeType[0] : gemEntity.upgradeType,
 			entries: gemEntity.entries,
-			charges: gemEntity.charges || null,
-			recharge: gemEntity.recharge || null,
+			charges: descriptor?.resource?.max ?? gemEntity.charges ?? null,
+			recharge: descriptor?.resource?.recharge ?? gemEntity.recharge ?? null,
+			gemInstanceId: gemEntity.gemInstanceId || null,
+			runtime: gemEntity.runtime ? MiscUtil.copyFast(gemEntity.runtime) : {},
 		};
 	}
 
@@ -967,7 +1012,7 @@ class CharacterSheetUpgrades {
 				const gemLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, gemData.name, gemData.source);
 
 				content.append(e_({outer: `
-					<div class="charsheet__socket-option mb-2 p-2" style="border-radius: 8px; border: 1px solid rgba(0,0,0,0.08); background: var(--rgb-bg, white);">
+					<div class="charsheet__socket-option mb-2 p-2">
 						<div class="ve-flex-v-center mb-1">
 							<div class="ve-flex-1">
 								<span class="charsheet__upgrade-name" style="font-weight: 600;">${gemLink}</span>
@@ -1016,6 +1061,110 @@ class CharacterSheetUpgrades {
 			doClose(true);
 			this._page._inventory?.render();
 		});
+	}
+
+	async showGemstoneChaliceModal (itemId, gemInstanceId) {
+		const item = this._state.getItems().find(it => it.id === itemId);
+		if (!item) return;
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: "Chalice Spell Storage",
+			isMinHeight0: true,
+			isWidth100: true,
+		});
+
+		const render = () => {
+			const storage = this._state.getGemstoneSpellStorage(gemInstanceId);
+			if (!storage) {
+				modalInner.replaceChildren(e_({outer: `<p class="text-danger">Chalice storage is unavailable.</p>`}));
+				return;
+			}
+			const slots = Array.from({length: storage.capacity}, (_, ix) => `<span class="charsheet__chalice-capacity-slot ${ix < storage.used ? "is-filled" : ""}" aria-hidden="true"></span>`).join("");
+			const rows = storage.storedSpells.length
+				? storage.storedSpells.map(spell => `
+					<div class="charsheet__chalice-spell" data-spell-id="${spell.id}">
+						<div class="ve-flex-1">
+							<strong>${spell.name}</strong>
+							<div class="ve-small ve-muted">Level ${spell.level} · ${spell.casterName || "Unknown caster"}${spell.saveDc != null ? ` · DC ${spell.saveDc}` : ""}${spell.spellAttackBonus != null ? ` · ${spell.spellAttackBonus >= 0 ? "+" : ""}${spell.spellAttackBonus} attack` : ""}</div>
+						</div>
+						<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__chalice-cast" ${storage.active ? "" : "disabled"}>Cast</button>
+						<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__chalice-remove" title="Remove stored spell">Remove</button>
+					</div>
+				`).join("")
+				: `<p class="ve-muted mb-0">No spells are stored.</p>`;
+
+			const content = e_({outer: `
+				<div class="charsheet__chalice">
+					<div class="charsheet__chalice-status">
+						<div><strong>Chalice · Alexandrite</strong><div class="ve-small ve-muted">Socketed in ${item.name}</div></div>
+						<div class="charsheet__chalice-capacity" role="img" aria-label="${storage.used} of ${storage.capacity} spell levels used">${slots}<span>${storage.used}/${storage.capacity}</span></div>
+					</div>
+					${storage.active ? "" : `<p class="ve-small text-warning">Equip and attune the host item to cast stored spells. Spells can still be stored by another caster.</p>`}
+					<div class="charsheet__chalice-layout">
+						<section aria-label="Stored spells">
+							<h5>Stored Spells</h5>
+							<div class="charsheet__chalice-spells">${rows}</div>
+						</section>
+						<section aria-label="Store a spell">
+							<h5>Store a Spell</h5>
+							<form class="charsheet__chalice-form">
+								<label>Spell name<input class="form-control input-sm" name="name" required></label>
+								<label>Spell level<select class="form-control input-sm" name="level"><option value="1">1st</option><option value="2">2nd</option></select></label>
+								<label>Caster name<input class="form-control input-sm" name="casterName" value="${this._state.getName?.() || ""}"></label>
+								<label>Save DC<input class="form-control input-sm" name="saveDc" type="number" min="1"></label>
+								<label>Spell attack<input class="form-control input-sm" name="spellAttackBonus" type="number"></label>
+								<label>Casting ability<select class="form-control input-sm" name="castingAbility"><option value="">—</option>${["int", "wis", "cha"].map(ability => `<option value="${ability}">${ability.toUpperCase()}</option>`).join("")}</select></label>
+								<p class="charsheet__chalice-error text-danger ve-small" role="alert"></p>
+								<button type="submit" class="ve-btn ve-btn-primary" ${storage.remaining <= 0 ? "disabled" : ""}>Store Spell</button>
+							</form>
+						</section>
+					</div>
+					<div class="ve-flex-v-center ve-flex-h-right mt-3"><button type="button" class="ve-btn ve-btn-default charsheet__chalice-close">Close</button></div>
+				</div>
+			`});
+			modalInner.replaceChildren(content);
+
+			content.querySelector(".charsheet__chalice-close").addEventListener("click", () => doClose(false));
+			content.querySelector(".charsheet__chalice-form").addEventListener("submit", evt => {
+				evt.preventDefault();
+				const formData = new FormData(evt.currentTarget);
+				const result = this._state.storeGemstoneSpell(gemInstanceId, {
+					name: formData.get("name"),
+					level: Number(formData.get("level")),
+					casterName: formData.get("casterName"),
+					saveDc: formData.get("saveDc") || null,
+					spellAttackBonus: formData.get("spellAttackBonus") || null,
+					castingAbility: formData.get("castingAbility") || null,
+				});
+				if (!result.success) {
+					content.querySelector(".charsheet__chalice-error").textContent = result.error;
+					return;
+				}
+				this._page.saveCharacter();
+				render();
+			});
+			content.addEventListener("click", evt => {
+				const row = evt.target.closest(".charsheet__chalice-spell");
+				if (!row) return;
+				if (evt.target.closest(".charsheet__chalice-cast")) {
+					const result = this._state.castGemstoneStoredSpell(gemInstanceId, row.dataset.spellId);
+					if (!result.success) {
+						JqueryUtil.doToast({content: result.error, type: "danger"});
+						return;
+					}
+					JqueryUtil.doToast({content: `Cast ${result.spell.name} using ${result.spell.casterName}'s stored statistics.`, type: "success"});
+					this._page.saveCharacter();
+					render();
+				}
+				if (evt.target.closest(".charsheet__chalice-remove")) {
+					if (!confirm(`Remove ${row.querySelector("strong")?.textContent || "this spell"} from the Chalice?`)) return;
+					this._state.removeGemstoneStoredSpell(gemInstanceId, row.dataset.spellId);
+					this._page.saveCharacter();
+					render();
+				}
+			});
+		};
+
+		render();
 	}
 
 	// ==========================================
@@ -1213,15 +1362,28 @@ class CharacterSheetUpgrades {
 	 */
 	static getGemstoneEffects (item) {
 		if (!item?.socketedGemstones?.length) return [];
-		return item.socketedGemstones.map(gem => ({
-			name: gem.name,
-			gemName: gem.gemName,
-			entries: gem.entries || [],
-			charges: gem.chargesMax,
-			chargesCurrent: gem.chargesCurrent,
-			recharge: gem.recharge,
-			usedToday: gem.usedToday || false,
-		}));
+		return item.socketedGemstones.map(gem => {
+			const descriptor = this.getGemstoneDescriptor(gem);
+			return {
+				...MiscUtil.copyFast(descriptor || {}),
+				name: gem.name,
+				gemName: gem.gemName,
+				source: gem.source,
+				gemInstanceId: gem.gemInstanceId,
+				entries: gem.entries || [],
+				runtime: gem.runtime || {},
+			};
+		});
+	}
+
+	static getGemstoneDescriptor (gem) {
+		const name = String(gem?.name || gem || "").trim().toLowerCase();
+		const descriptor = GEMSTONE_EFFECT_REGISTRY[name];
+		return descriptor ? MiscUtil.copyFast(descriptor) : null;
+	}
+
+	static getGemstoneRegistryNames () {
+		return Object.keys(GEMSTONE_EFFECT_REGISTRY);
 	}
 
 	/**
@@ -1231,49 +1393,8 @@ class CharacterSheetUpgrades {
 	 */
 	static getGemstoneSummary (gem) {
 		if (!gem?.name) return "";
-		const name = gem.name.toLowerCase();
-		const summaries = {
-			"alchemist": "+2 HP when drinking potion of healing",
-			"mariner": "No disadvantage on underwater weapon attacks",
-			"thief": "1/day: Reroll failed DEX check",
-			"warrior": "Can\u2019t be disarmed while conscious",
-			"arrow-catcher": "Reaction: Impose disadvantage on ranged attack (3 charges, 1d3/dawn)",
-			"bound armor": "Bonus action: Don/doff armor instantly",
-			"bound weapon": "Bonus action: Make weapon disappear/appear",
-			"cat": "1/dawn: 1 hour darkvision 120 ft.",
-			"chaos": "Critical hit triggers Wild Magic Surge",
-			"daywalker": "Unaffected by sunlight with hood drawn",
-			"elemental shield": "Reaction: Reduce chosen damage by 2\u00D7level + CON mod (1 exhaustion)",
-			"featherfoot": "Standing jump = walking speed (1 ft. per ft. cleared)",
-			"knock": "1/dawn: Cast Knock by tapping fist",
-			"nondetection": "Hidden from divination magic and scrying",
-			"serpent": "1/dawn: On hit, CON save or poisoned 1 min",
-			"bastion": "1/dawn: Bonus action 10-ft. force dome (1 min)",
-			"berserker": "1/dawn: Expend Hit Dice on hit, add to damage (take equal damage)",
-			"chalice": "Store up to 2 spell levels; cast stored spells",
-			"death": "Kill humanoid = rises as zombie (1 HP, 1 min)",
-			"hunt": "1/dawn: Mark creature \u226490 ft.; bonus action teleport \u226430 ft. on ranged hit",
-			"journey": "+10 speed; fast pace without Perception penalty; halved food/water",
-			"magebane": "On hit: end \u22643rd level spells; check for 4th+ (3 charges, 1d3/dawn)",
-			"phoenix": "1/dawn: At 0 HP, casts Fireball on you; gain 1d6 HP next turn",
-			"soultrap": "1/dawn: Kill CR \u2265 level = regain 1 spell slot (max level = PB)",
-			"superconductor": "Gains charges from targeted spells; spend for +1d6 force per charge",
-			"warmage": "Fail concentration save = reroll (3 charges; spend slot to recover)",
-			"blood weapon": "Critical hit: Regain HP = damage dealt (not vs undead/constructs)",
-			"displacement": "1/turn: Take weapon damage = teleport 30 ft.",
-			"dragonbane": "Hit dragon: +2d6 damage; STR save or flying speed 0",
-			"earthshaker": "1/dawn: Action Earthquake spell (1 round)",
-			"giant slayer": "Hit giant: +2d6 damage; STR save or prone",
-			"mark/recall": "1/dawn: Mark surface; concentrate 1 min = teleport to mark with up to 5",
-			"overshield": "Gain 8 temp HP at start of each turn",
-			"retribution": "Take damage = advantage on next attack vs that creature type",
-			"wolfsbane": "Sheds moonlight; hit shapechanger: +2d6 radiant; CON save or true form",
-			"force of will": "Can\u2019t be affected by enchantment magic unless you choose",
-			"mime": "Short rest: Copy magic item properties (no fixed bonuses)",
-			"tempest": "1/turn on hit: +1d10 lightning; arcs to 3 creatures within 30 ft.",
-			"volant": "Gain hover flight speed = 2\u00D7 walking speed",
-		};
-		return summaries[name] || (gem.entries?.length ? Renderer.stripTags(gem.entries[0]?.toString?.() || "") : "");
+		return this.getGemstoneDescriptor(gem)?.summary
+			|| (gem.entries?.length ? Renderer.stripTags(gem.entries[0]?.toString?.() || "") : "");
 	}
 
 	/**
@@ -1284,56 +1405,13 @@ class CharacterSheetUpgrades {
 	static getGemstonePassiveEffects (gem) {
 		const effects = {speedBonus: 0, flightSpeed: 0, notes: []};
 		if (!gem?.name) return effects;
-		const name = gem.name.toLowerCase();
-
-		// --- Passive / always-on effects ---
-		if (name === "journey") {
-			effects.speedBonus = 10;
-			effects.notes.push("Journey: +10 speed; fast pace without Perception penalty; halved food/water");
+		const descriptor = this.getGemstoneDescriptor(gem);
+		if (!descriptor) return effects;
+		for (const effect of descriptor.effects || []) {
+			if (effect.type === "speedBonus" && effect.speed === "walk") effects.speedBonus += Number(effect.value) || 0;
+			if (effect.type === "flightSpeedMultiplier") effects.flightSpeed = -1;
 		}
-		if (name === "overshield") effects.notes.push("Overshield: Gain 8 temp HP at start of each turn");
-		if (name === "featherfoot") effects.notes.push("Featherfoot: Standing jump distance equals walking speed");
-		if (name === "warrior") effects.notes.push("Warrior: Can\u2019t be disarmed while conscious");
-		if (name === "nondetection") effects.notes.push("Nondetection: Hidden from divination and scrying");
-		if (name === "daywalker") effects.notes.push("Daywalker: Unaffected by sunlight with hood drawn");
-		if (name === "force of will") effects.notes.push("Force of Will: Immune to enchantment magic unless you choose");
-		if (name === "volant") {
-			effects.flightSpeed = -1; // sentinel: 2x walk, resolved dynamically
-			effects.notes.push("Volant: Hover flight speed = 2\u00D7 walking speed");
-		}
-		if (name === "chaos") effects.notes.push("Chaos: Critical hits trigger Wild Magic Surge");
-		if (name === "retribution") effects.notes.push("Retribution: Advantage on next attack when damaged");
-		if (name === "alchemist") effects.notes.push("Alchemist: +2 HP when drinking healing potions");
-		if (name === "mariner") effects.notes.push("Mariner: No underwater attack disadvantage");
-		if (name === "blood weapon") effects.notes.push("Blood Weapon: Critical hit heals HP = extra crit damage (not vs undead/constructs)");
-		if (name === "wolfsbane") effects.notes.push("Wolfsbane: Sheds moonlight 5 ft.; +2d6 radiant vs shapechangers; CON save or true form");
-		if (name === "dragonbane") effects.notes.push("Dragonbane: +2d6 damage vs dragons; STR save or flying speed 0");
-		if (name === "giant slayer") effects.notes.push("Giant Slayer: +2d6 damage vs Large+ creatures; STR save or prone");
-		if (name === "superconductor") effects.notes.push("Superconductor: Gains charges from targeted spells; spend for +1d6 force per charge");
-		if (name === "tempest") effects.notes.push("Tempest: 1/turn on hit: +1d10 lightning; arcs to 3 creatures within 30 ft.");
-
-		// --- Active / charge-based abilities (note for reference) ---
-		if (name === "thief") effects.notes.push("Thief: 1/day reroll failed DEX (Stealth) check");
-		if (name === "arrow-catcher") effects.notes.push("Arrow-catcher: Reaction: impose disadvantage on ranged attack (3 charges, 1d3/dawn)");
-		if (name === "bound armor") effects.notes.push("Bound Armor: Bonus action don/doff armor instantly");
-		if (name === "bound weapon") effects.notes.push("Bound Weapon: Bonus action make weapon disappear/appear");
-		if (name === "cat") effects.notes.push("Cat: 1/dawn darkvision 120 ft. for 1 hour");
-		if (name === "elemental shield") effects.notes.push("Elemental Shield: Reaction: reduce chosen element damage by 2\u00D7level + CON mod (1 exhaustion)");
-		if (name === "knock") effects.notes.push("Knock: 1/dawn cast Knock by tapping fist on lock");
-		if (name === "serpent") effects.notes.push("Serpent: 1/dawn on hit: CON save or poisoned 1 min");
-		if (name === "bastion") effects.notes.push("Bastion: 1/dawn bonus action 10 ft. force dome (1 min)");
-		if (name === "berserker") effects.notes.push("Berserker: 1/dawn expend Hit Dice on hit, add to damage (take equal)");
-		if (name === "chalice") effects.notes.push("Chalice: Store up to 2 spell levels; cast stored spells");
-		if (name === "death") effects.notes.push("Death: Kill humanoid = rises as zombie (1 HP, 1 min)");
-		if (name === "hunt") effects.notes.push("Hunt: 1/dawn mark creature \u226490 ft.; bonus action teleport \u226430 ft. on ranged hit");
-		if (name === "magebane") effects.notes.push("Magebane: On hit: end \u22643rd level spells; check for 4th+ (3 charges, 1d3/dawn)");
-		if (name === "phoenix") effects.notes.push("Phoenix: 1/dawn at 0 HP, casts Fireball centered on you; gain 1d6 HP next turn");
-		if (name === "soultrap") effects.notes.push("Soultrap: 1/dawn kill CR \u2265 level = regain 1 spell slot (max level = PB)");
-		if (name === "warmage") effects.notes.push("Warmage: Fail concentration save = reroll (3 charges; spend slot to recover)");
-		if (name === "displacement") effects.notes.push("Displacement: 1/turn take weapon damage = teleport 30 ft.");
-		if (name === "earthshaker") effects.notes.push("Earthshaker: 1/dawn Earthquake spell (1 round, 100 ft.)");
-		if (name === "mark/recall") effects.notes.push("Mark/Recall: 1/dawn mark surface; concentrate 1 min = teleport with up to 5 creatures");
-		if (name === "mime") effects.notes.push("Mime: Short rest: copy magic item properties (no fixed bonuses)");
+		effects.notes.push(`${gem.name}: ${descriptor.summary}`);
 
 		return effects;
 	}

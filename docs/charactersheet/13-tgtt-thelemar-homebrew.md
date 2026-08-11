@@ -18,8 +18,36 @@ This document catalogs all Thelemar homebrew content implemented in the characte
 | **Battle Tactics** | 13/13 | 0 | ✅ |
 | **Dreamwalker Abilities** | 11/11 | 0 | ✅ |
 | **Divine Favor** | 2 gods (Pan, Zeus) seeded | Extensible — more gods are data-only | ✅ |
+| **Gemstone Empowerment** | 39/39 descriptors; host-scoped resources, standard passives, item powers, typed riders, Chalice storage | Narrative/world-state outcomes remain DM-adjudicated | ✅ |
 
 **Total TGTT Tests**: 737 passing
+
+---
+
+## Gemstone Empowerment
+
+All 39 gemstone powers resolve through a registry in
+`charactersheet-upgrades.js` and the state-owned `getGemstoneEffects()` channel.
+Effects only apply while their exact socketed host is equipped and, where
+required, attuned. Unsocketing removes the effect immediately but preserves the
+gem's stable identity, resource balances, persistent choices, and stored
+spells.
+
+Limited-use gemstones appear in the normal Resources tracker and as native item
+powers. Dawn, short-rest, long-rest, partial `1d3`, no-rest, and reset-to-zero
+policies are reconciled from the descriptor rather than duplicated in UI code.
+Target-type damage dice for Dragonbane, Giant Slayer, and Wolfsbane and the
+once-per-turn Tempest die use Combat's typed rider pipeline and are scoped to
+the attack's source item.
+
+Chalice has a dedicated spell-storage modal. It stores at most two combined
+spell levels, retains original caster/save DC/spell-attack metadata, and can
+cast only while its host is equipped and attuned. Its storage is independent
+of Ring of Spell Storing and host-item storage fields.
+
+Effects that require encounter-map state, enemy spell inventories, creature
+deaths, or other information the sheet does not own remain explicit
+DM-adjudicated notes/actions rather than simulated outcomes.
 
 ---
 

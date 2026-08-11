@@ -14,6 +14,7 @@ The character sheet test suite is in **good overall health**: **86 test files, 7
 6. **Infrastructure note**: `npm install` required before tests run — dependencies are not pre-installed in worktrees
 
 ### Previous Updates
+- ✅ **Gemstone Empowerment** has dedicated host-lifecycle/resource/rider/migration and Chalice storage suites.
 - ✅ **(Feb 2025)** All core class subclasses now have full mechanical calculations
 - ✅ **(Feb 2025)** TGTT (Thelemar) homebrew fully implemented (737+ tests)
 - ✅ **(Feb 2025)** Weak test patterns largely converted to use `getFeatureCalculations()`

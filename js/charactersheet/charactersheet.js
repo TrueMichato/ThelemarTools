@@ -3639,8 +3639,11 @@ class CharacterSheetPage {
 		longJumpRunning = Math.floor(longJumpRunning * jumpMultiplier);
 		highJumpRunning = Math.floor(highJumpRunning * jumpMultiplier);
 
-		const longJumpStanding = Math.floor(longJumpRunning / 2); // Standing = half of running
-		const highJumpStanding = Math.floor(Math.max(0, highJumpRunning) / 2); // Standing = half of running
+		const gemstoneStandingJump = this._state.hasGemstoneStandingJumpSpeed?.()
+			? this._state.getWalkSpeed()
+			: null;
+		const longJumpStanding = gemstoneStandingJump ?? Math.floor(longJumpRunning / 2); // Standing = half of running
+		const highJumpStanding = gemstoneStandingJump ?? Math.floor(Math.max(0, highJumpRunning) / 2); // Standing = half of running
 
 		(/** @type {*} */ (document.getElementById("charsheet-disp-jump-long-run"))).textContent = `${longJumpRunning}`;
 		(/** @type {*} */ (document.getElementById("charsheet-disp-jump-long-stand"))).textContent = `${longJumpStanding}`;

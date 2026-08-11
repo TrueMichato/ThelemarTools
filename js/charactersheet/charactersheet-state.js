@@ -5273,6 +5273,8 @@ class CharacterSheetState {
 				if (invItem.item) {
 					if (!Array.isArray(invItem.item.appliedUpgrades)) invItem.item.appliedUpgrades = [];
 					if (!Array.isArray(invItem.item.socketedGemstones)) invItem.item.socketedGemstones = [];
+					if (invItem.item._gemstoneData) invItem.item._gemstoneData = this._normalizeGemstoneData(invItem.item._gemstoneData);
+					invItem.item.socketedGemstones = invItem.item.socketedGemstones.map(gem => this._normalizeGemstoneData(gem));
 				}
 			}
 		}
@@ -8798,8 +8800,13 @@ class CharacterSheetState {
 				return modifier.setValue ? Math.max(total, value) : total + value;
 			}, 0) || 0;
 
+		const gemstoneDarkvision = this.getGemstoneEffects()
+			.filter(gem => !gem.effects?.some(effect => effect.requiresRuntimeActive) || gem.runtime.activeUntil > Date.now())
+			.flatMap(gem => gem.effects || [])
+			.filter(it => it.type === "sense" && it.sense === "darkvision")
+			.reduce((max, it) => Math.max(max, Number(it.value) || 0), 0);
 		return {
-			darkvision: Math.max(baseSenses.darkvision || 0, senseMods.darkvision || 0, itemSenses.darkvision || 0, this.getSenseBonusFromStates("darkvision")) + getNamedModifierBonus("darkvision") + getTypedItemBonus("darkvision") + (itemSenseBonuses.darkvision || 0),
+			darkvision: Math.max(baseSenses.darkvision || 0, senseMods.darkvision || 0, itemSenses.darkvision || 0, this.getSenseBonusFromStates("darkvision"), gemstoneDarkvision) + getNamedModifierBonus("darkvision") + getTypedItemBonus("darkvision") + (itemSenseBonuses.darkvision || 0),
 			blindsight: Math.max(baseSenses.blindsight || 0, senseMods.blindsight || 0, itemSenses.blindsight || 0, this.getSenseBonusFromStates("blindsight")) + getNamedModifierBonus("blindsight") + getTypedItemBonus("blindsight") + (itemSenseBonuses.blindsight || 0),
 			tremorsense: Math.max(baseSenses.tremorsense || 0, senseMods.tremorsense || 0, itemSenses.tremorsense || 0, this.getSenseBonusFromStates("tremorsense")) + getNamedModifierBonus("tremorsense") + getTypedItemBonus("tremorsense") + (itemSenseBonuses.tremorsense || 0),
 			truesight: Math.max(baseSenses.truesight || 0, senseMods.truesight || 0, itemSenses.truesight || 0, this.getSenseBonusFromStates("truesight")) + getNamedModifierBonus("truesight") + getTypedItemBonus("truesight") + (itemSenseBonuses.truesight || 0),
@@ -8830,7 +8837,12 @@ class CharacterSheetState {
 				return modifier.setValue ? Math.max(total, value) : total + value;
 			}, 0) || 0;
 
-		return Math.max(baseSenses[sense] || 0, senseMods[sense] || 0, itemSenses[sense] || 0, this.getSenseBonusFromStates(sense))
+		const gemstoneSense = this.getGemstoneEffects()
+			.filter(gem => !gem.effects?.some(effect => effect.requiresRuntimeActive) || gem.runtime.activeUntil > Date.now())
+			.flatMap(gem => gem.effects || [])
+			.filter(effect => effect.type === "sense" && effect.sense === sense)
+			.reduce((max, effect) => Math.max(max, Number(effect.value) || 0), 0);
+		return Math.max(baseSenses[sense] || 0, senseMods[sense] || 0, itemSenses[sense] || 0, this.getSenseBonusFromStates(sense), gemstoneSense)
 			+ namedBonus + typedItemBonus + (itemSenseBonuses[sense] || 0);
 	}
 
@@ -12713,15 +12725,10 @@ class CharacterSheetState {
 	 * @returns {number} Total speed bonus from gemstones
 	 */
 	getGemstoneSpeedBonus () {
-		if (typeof CharacterSheetUpgrades === "undefined") return 0;
-		let bonus = 0;
-		for (const invItem of this._data.inventory) {
-			if (!invItem.equipped) continue;
-			for (const gem of (invItem.item?.socketedGemstones || [])) {
-				if (gem.name?.toLowerCase() === "journey") bonus += 10;
-			}
-		}
-		return bonus;
+		return this.getGemstoneEffects()
+			.flatMap(it => it.effects || [])
+			.filter(it => it.type === "speedBonus" && it.speed === "walk")
+			.reduce((total, it) => total + (Number(it.value) || 0), 0);
 	}
 
 	/**
@@ -12746,14 +12753,10 @@ class CharacterSheetState {
 	 * @returns {number} Flight speed in feet, or 0 if no Volant gem equipped
 	 */
 	getGemstoneFlightSpeed () {
-		if (typeof CharacterSheetUpgrades === "undefined") return 0;
-		for (const invItem of this._data.inventory) {
-			if (!invItem.equipped) continue;
-			for (const gem of (invItem.item?.socketedGemstones || [])) {
-				if (gem.name?.toLowerCase() === "volant") return this.getWalkSpeed() * 2;
-			}
-		}
-		return 0;
+		const multiplier = this.getGemstoneEffects()
+			.flatMap(it => it.effects || [])
+			.find(it => it.type === "flightSpeedMultiplier" && it.speed === "walk");
+		return multiplier ? this.getWalkSpeed() * (Number(multiplier.value) || 0) : 0;
 	}
 
 	/**
@@ -29634,6 +29637,41 @@ class CharacterSheetState {
 				});
 			}
 		}
+		for (const effect of this.getGemstoneEffects({activeOnly: false})) {
+			if (activeOnly && !effect.active) continue;
+			const gemResource = effect.resource
+				? this.getGemstoneResources({activeOnly: false}).find(resource => resource.gemInstanceId === effect.gemInstanceId)
+				: null;
+			const powers = effect.powers?.length
+				? effect.powers
+				: effect.resource
+					? [{id: "use", name: effect.name, actionType: "special", kind: "ability"}]
+					: [];
+			for (const power of powers) {
+				const unavailableReason = !effect.active
+					? "Equip and attune the gemstone's host item to use this power."
+					: gemResource && gemResource.current <= 0
+						? `${effect.name} has no uses remaining.`
+						: null;
+				out.push({
+					...power,
+					id: `gem:${effect.gemInstanceId}:${power.id}`,
+					itemId: effect.hostItemId,
+					itemName: effect.hostItem.name,
+					itemSource: effect.hostItem.source,
+					gemstonePower: true,
+					gemInstanceId: effect.gemInstanceId,
+					gemResourceId: gemResource?.id || null,
+					resourceCurrent: gemResource?.current ?? null,
+					resourceMax: gemResource?.max ?? null,
+					isToggle: power.kind === "toggle",
+					isActive: !!effect.runtime.powerStates?.[power.id],
+					isAvailable: !unavailableReason,
+					unavailableReason,
+					description: effect.summary,
+				});
+			}
+		}
 		return out;
 	}
 
@@ -29649,6 +29687,24 @@ class CharacterSheetState {
 		const power = this.getItemPower(itemId, powerId);
 		if (!power) return {ok: false, reason: "Item power not found."};
 		if (!power.isAvailable) return {ok: false, reason: power.unavailableReason};
+		if (power.gemstonePower) {
+			const found = this._findGemstoneByInstanceId(power.gemInstanceId);
+			if (!found) return {ok: false, reason: "Gemstone not found."};
+			const localPowerId = power.id.split(":").at(-1);
+			if (power.isToggle) {
+				found.gem.runtime.powerStates ||= {};
+				found.gem.runtime.powerStates[localPowerId] = !found.gem.runtime.powerStates[localPowerId];
+			}
+			if (power.gemResourceId && !this.useResourceCharge(power.gemResourceId, 1)) {
+				return {ok: false, reason: `No uses remaining for ${power.name}.`};
+			}
+			return {
+				ok: true,
+				power,
+				resourceCurrent: power.gemResourceId ? this.getResource(power.gemResourceId)?.current ?? null : null,
+				isActive: power.isToggle ? !!found.gem.runtime.powerStates[localPowerId] : false,
+			};
+		}
 		if (power.isDestructive && !confirmed) return {ok: false, needsConfirmation: true, power};
 		const entry = this._data.inventory.find(it => it.id === itemId);
 		if (!entry?.item) return {ok: false, reason: "Item not found."};
@@ -32365,6 +32421,118 @@ class CharacterSheetState {
 	// Gemstone Socketing
 	// ==========================================
 
+	_normalizeGemstoneData (gemstone) {
+		const gem = MiscUtil.copyFast(gemstone || {});
+		const descriptor = typeof CharacterSheetUpgrades !== "undefined"
+			? CharacterSheetUpgrades.getGemstoneDescriptor(gem)
+			: null;
+		gem.gemInstanceId ||= CryptUtil.uid();
+		if (Array.isArray(gem.upgradeType)) gem.upgradeType = gem.upgradeType[0] || null;
+		if (gem.upgradeType === "G" && gem.rarity) {
+			const tierByRarity = {common: "GS:C", uncommon: "GS:UC", rare: "GS:R", "very rare": "GS:VR", legendary: "GS:L"};
+			gem.upgradeType = tierByRarity[String(gem.rarity).toLowerCase()] || gem.upgradeType;
+		}
+		gem.runtime = gem.runtime && typeof gem.runtime === "object" ? gem.runtime : {};
+		gem.runtime.resources = gem.runtime.resources && typeof gem.runtime.resources === "object"
+			? gem.runtime.resources
+			: {};
+		const resourceDefinition = descriptor?.resource || (gem.charges != null
+			? {key: "charges", name: `${gem.name || "Gemstone"} Charges`, max: Number(gem.charges) || 0, recharge: gem.recharge || "none"}
+			: null);
+		if (resourceDefinition) {
+			const resource = resourceDefinition;
+			const max = resource.max === "proficiency"
+				? this.getProficiencyBonus()
+				: Number(resource.max) || 0;
+			const legacyCurrent = gem.chargesCurrent != null
+				? Number(gem.chargesCurrent)
+				: gem.usedToday
+					? 0
+					: max;
+			const saved = gem.runtime.resources[resource.key];
+			gem.runtime.resources[resource.key] = {
+				current: Math.max(0, Math.min(Number(saved?.current ?? legacyCurrent) || 0, max)),
+				max,
+			};
+			gem.chargesMax = max;
+			gem.chargesCurrent = gem.runtime.resources[resource.key].current;
+			gem.recharge = resource.recharge;
+		}
+		if (descriptor?.spellStorage) {
+			gem.runtime.spellStorage = gem.runtime.spellStorage && typeof gem.runtime.spellStorage === "object"
+				? gem.runtime.spellStorage
+				: {};
+			gem.runtime.spellStorage.capacity = descriptor.spellStorage.capacity;
+			if (!Array.isArray(gem.runtime.spellStorage.storedSpells)) gem.runtime.spellStorage.storedSpells = [];
+		}
+		return gem;
+	}
+
+	_isGemstoneHostActive (host, descriptor) {
+		if (this._data.settings?.enableTgtt === false || !host?.equipped) return false;
+		if (host.item?.requiresAttunement && !host.attuned) return false;
+		if (descriptor?.requiresAttunement && !host.attuned) return false;
+		return true;
+	}
+
+	/**
+	 * Resolve socketed gemstone mechanics with exact host identity and lifecycle gates.
+	 * @param {{activeOnly?: boolean, hostItemId?: string}} options
+	 */
+	getGemstoneEffects ({activeOnly = true, hostItemId = null} = {}) {
+		if (typeof CharacterSheetUpgrades === "undefined") return [];
+		const out = [];
+		for (const host of this._data.inventory || []) {
+			if (hostItemId && host.id !== hostItemId) continue;
+			for (const rawGem of host.item?.socketedGemstones || []) {
+				const gem = this._normalizeGemstoneData(rawGem);
+				Object.assign(rawGem, gem);
+				const descriptor = CharacterSheetUpgrades.getGemstoneDescriptor(gem);
+				if (!descriptor) continue;
+				const active = this._isGemstoneHostActive(host, descriptor);
+				if (activeOnly && !active) continue;
+				out.push({
+					...descriptor,
+					name: gem.name,
+					gemName: gem.gemName,
+					gemInstanceId: gem.gemInstanceId,
+					runtime: gem.runtime,
+					hostItemId: host.id,
+					hostItem: host.item,
+					active,
+				});
+			}
+		}
+		return out;
+	}
+
+	getGemstoneDamageRidersForAttack (attack, {targetTypes = []} = {}) {
+		const hostItemId = attack?.sourceItem?.id || attack?.itemId || null;
+		if (!hostItemId) return [];
+		const normalizedTargetTypes = new Set((targetTypes || []).map(it => String(it).toLowerCase()));
+		return this.getGemstoneEffects({hostItemId})
+			.filter(it => it.rider)
+			.filter(it => !it.rider.targetTypes?.length || it.rider.targetTypes.some(type => normalizedTargetTypes.has(type)))
+			.map(it => ({
+				...it.rider,
+				sourceName: it.name,
+				hostItemId: it.hostItemId,
+				gemInstanceId: it.gemInstanceId,
+			}));
+	}
+
+	getGemstoneHealingPotionBonus () {
+		return this.getGemstoneEffects()
+			.flatMap(it => it.effects || [])
+			.filter(it => it.type === "healingPotionBonus")
+			.reduce((total, it) => total + (Number(it.value) || 0), 0);
+	}
+
+	hasGemstoneStandingJumpSpeed () {
+		return this.getGemstoneEffects()
+			.some(gem => gem.effects?.some(effect => effect.type === "standingJumpEqualsWalk"));
+	}
+
 	/**
 	 * Socket an empowered gemstone into an inventory item
 	 * @param {string} itemId - The target item ID
@@ -32382,19 +32550,9 @@ class CharacterSheetState {
 			return {success: false, error: "This item already has a gemstone socketed"};
 		}
 
-		item.item.socketedGemstones.push({
-			name: gemstone.name,
-			source: gemstone.source,
-			gemName: gemstone.gemName || null,
-			rarity: gemstone.rarity || null,
-			upgradeType: gemstone.upgradeType?.[0] || null,
-			entries: gemstone.entries || [],
-			charges: gemstone.charges || null,
-			chargesCurrent: gemstone.charges || null,
-			chargesMax: gemstone.charges || null,
-			recharge: gemstone.recharge || null,
-			socketedAt: Date.now(),
-		});
+		const normalizedGem = this._normalizeGemstoneData(gemstone);
+		normalizedGem.socketedAt = Date.now();
+		item.item.socketedGemstones.push(normalizedGem);
 
 		this._recalculateItemBonuses();
 
@@ -32418,7 +32576,7 @@ class CharacterSheetState {
 		wrapper.item.rarity = display.rarity || "common";
 		wrapper.item.entries = display.entries || [];
 		wrapper.item._isEmpoweredGemstone = true;
-		wrapper.item._gemstoneData = gemstoneData;
+		wrapper.item._gemstoneData = this._normalizeGemstoneData(gemstoneData);
 
 		return true;
 	}
@@ -32437,8 +32595,28 @@ class CharacterSheetState {
 		if (idx === -1) return null;
 
 		const removed = item.item.socketedGemstones.splice(idx, 1)[0];
+		const looseItemId = CryptUtil.uid();
+		this._data.inventory.push({
+			id: looseItemId,
+			item: {
+				name: `${removed.name} (${removed.gemName || "Gemstone"})`,
+				source: removed.source || "TGTT",
+				type: "$G",
+				rarity: removed.rarity || "common",
+				entries: removed.entries || [],
+				_isCustom: true,
+				_isEmpoweredGemstone: true,
+				_gemstoneData: this._normalizeGemstoneData(removed),
+				appliedUpgrades: [],
+				socketedGemstones: [],
+				storedSpells: [],
+			},
+			quantity: 1,
+			equipped: false,
+			attuned: false,
+		});
 		this._recalculateItemBonuses();
-		return removed;
+		return {...removed, looseItemId};
 	}
 
 	/**
@@ -32461,11 +32639,15 @@ class CharacterSheetState {
 		const item = this._data.inventory.find(i => i.id === itemId);
 		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
 		if (!gem) return {success: false, error: "Gemstone not found"};
-		if (gem.chargesMax === null) return {success: false, error: "This gemstone does not use charges"};
-		if (gem.chargesCurrent <= 0) return {success: false, error: "No charges remaining"};
-
-		gem.chargesCurrent--;
-		return {success: true, remaining: gem.chargesCurrent};
+		const descriptor = typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getGemstoneDescriptor(gem) : null;
+		const definition = descriptor?.resource || (gem.charges != null ? {key: "charges"} : null);
+		const resource = definition && gem.runtime?.resources?.[definition.key];
+		if (!resource) return {success: false, error: "This gemstone does not use charges"};
+		if (resource.current <= 0) return {success: false, error: "No charges remaining"};
+		resource.current--;
+		gem.chargesCurrent = resource.current;
+		gem.usedToday = resource.current <= 0;
+		return {success: true, remaining: resource.current};
 	}
 
 	/**
@@ -32477,25 +32659,19 @@ class CharacterSheetState {
 	restoreGemstoneCharges (itemId, gemstoneName, amount = 1) {
 		const item = this._data.inventory.find(i => i.id === itemId);
 		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
-		if (!gem || gem.chargesMax === null) return;
-
-		gem.chargesCurrent = Math.min(gem.chargesMax, gem.chargesCurrent + amount);
+		const descriptor = typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getGemstoneDescriptor(gem) : null;
+		const definition = descriptor?.resource || (gem?.charges != null ? {key: "charges"} : null);
+		const resource = definition && gem?.runtime?.resources?.[definition.key];
+		if (!resource) return;
+		resource.current = Math.min(resource.max, resource.current + amount);
+		gem.chargesCurrent = resource.current;
 	}
 
 	/**
 	 * Recharge all dawn-recharge gemstones (called during long rest)
 	 */
 	rechargeAllGemstones () {
-		for (const invItem of this._data.inventory) {
-			if (!invItem.item?.socketedGemstones?.length) continue;
-			for (const gem of invItem.item.socketedGemstones) {
-				if (gem.recharge === "dawn" && gem.chargesMax !== null) {
-					gem.chargesCurrent = gem.chargesMax;
-				}
-				// Reset daily use tracking on dawn/long rest
-				if (gem.usedToday) gem.usedToday = false;
-			}
-		}
+		this.recoverGemstoneResources("long");
 	}
 
 	/**
@@ -32508,9 +32684,12 @@ class CharacterSheetState {
 		const item = this._data.inventory.find(i => i.id === itemId);
 		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
 		if (!gem) return {success: false, error: "Gemstone not found"};
-		if (gem.usedToday) return {success: false, error: "Already used today"};
-		gem.usedToday = true;
-		return {success: true};
+		const descriptor = typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getGemstoneDescriptor(gem) : null;
+		const resource = descriptor?.resource && gem.runtime?.resources?.[descriptor.resource.key];
+		if (resource?.current <= 0 || gem.usedToday) return {success: false, error: "Already used today"};
+		const result = this.useGemstoneCharge(itemId, gemstoneName);
+		if (result.success && gemstoneName.toLowerCase() === "cat") gem.runtime.activeUntil = Date.now() + 60 * 60 * 1000;
+		return result;
 	}
 
 	/**
@@ -32521,7 +32700,13 @@ class CharacterSheetState {
 	resetGemstoneDaily (itemId, gemstoneName) {
 		const item = this._data.inventory.find(i => i.id === itemId);
 		const gem = item?.item?.socketedGemstones?.find(g => g.name === gemstoneName);
-		if (gem) gem.usedToday = false;
+		const descriptor = gem && typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getGemstoneDescriptor(gem) : null;
+		const resource = descriptor?.resource && gem?.runtime?.resources?.[descriptor.resource.key];
+		if (resource) {
+			resource.current = resource.max;
+			gem.chargesCurrent = resource.current;
+			gem.usedToday = false;
+		}
 	}
 
 	/**
@@ -32529,16 +32714,8 @@ class CharacterSheetState {
 	 * @returns {Array<string>} Array of passive effect note strings
 	 */
 	getGemstonePassiveNotes () {
-		if (typeof CharacterSheetUpgrades === "undefined") return [];
-		const notes = [];
-		for (const invItem of this._data.inventory) {
-			if (!invItem.equipped || !invItem.item?.socketedGemstones?.length) continue;
-			for (const gem of invItem.item.socketedGemstones) {
-				const passive = CharacterSheetUpgrades.getGemstonePassiveEffects(gem);
-				notes.push(...passive.notes);
-			}
-		}
-		return notes;
+		return this.getGemstoneEffects()
+			.flatMap(effect => [`${effect.name}: ${effect.summary}`, ...(effect.notes || []).map(note => `${effect.name}: ${note}`)]);
 	}
 
 	/**
@@ -35218,7 +35395,134 @@ class CharacterSheetState {
 		this._ensureLunarSorceryResources();
 		this._ensureZeroHpInterventionUses();
 		this._ensureUmbralFormUses();
-		return [...this._data.resources];
+		return [...this._data.resources, ...this.getGemstoneResources()];
+	}
+
+	getGemstoneResources ({activeOnly = true} = {}) {
+		return this.getGemstoneEffects({activeOnly})
+			.filter(effect => effect.resource)
+			.map(effect => {
+				const resource = effect.runtime.resources[effect.resource.key];
+				return {
+					id: `gem:${effect.gemInstanceId}:${effect.resource.key}`,
+					name: effect.resource.name,
+					current: resource.current,
+					max: resource.max,
+					recharge: effect.resource.recharge,
+					gemstoneResource: true,
+					gemInstanceId: effect.gemInstanceId,
+					gemResourceKey: effect.resource.key,
+					hostItemId: effect.hostItemId,
+				};
+			});
+	}
+
+	_findGemstoneByInstanceId (gemInstanceId) {
+		for (const wrapper of this._data.inventory || []) {
+			if (wrapper.item?._gemstoneData?.gemInstanceId === gemInstanceId) {
+				return {gem: wrapper.item._gemstoneData, wrapper, socketed: false};
+			}
+			const gem = wrapper.item?.socketedGemstones?.find(it => it.gemInstanceId === gemInstanceId);
+			if (gem) return {gem, wrapper, socketed: true};
+		}
+		return null;
+	}
+
+	recoverGemstoneResources (rechargeType) {
+		for (const wrapper of this._data.inventory || []) {
+			const gems = [
+				...(wrapper.item?.socketedGemstones || []),
+				...(wrapper.item?._gemstoneData ? [wrapper.item._gemstoneData] : []),
+			];
+			for (const gem of gems) {
+				const normalized = this._normalizeGemstoneData(gem);
+				Object.assign(gem, normalized);
+				const descriptor = typeof CharacterSheetUpgrades !== "undefined"
+					? CharacterSheetUpgrades.getGemstoneDescriptor(gem)
+					: null;
+				const definition = descriptor?.resource || (gem.charges != null
+					? {key: "charges", recharge: gem.recharge || "none"}
+					: null);
+				const resource = definition && gem.runtime.resources[definition.key];
+				if (!resource) continue;
+				if (definition.resetOnRest) resource.current = 0;
+				else if (rechargeType === "long" && definition.recharge === "dawn") {
+					if (definition.recovery === "1d3") resource.current = Math.min(resource.max, resource.current + 1 + Math.floor(Math.random() * 3));
+					else resource.current = resource.max;
+				} else if (
+					definition.recharge === rechargeType
+					|| (rechargeType === "long" && definition.recharge === "short")
+				) resource.current = resource.max;
+				gem.chargesCurrent = resource.current;
+				gem.chargesMax = resource.max;
+				gem.usedToday = resource.current <= 0;
+			}
+		}
+	}
+
+	getGemstoneSpellStorage (gemInstanceId) {
+		const found = this._findGemstoneByInstanceId(gemInstanceId);
+		if (!found) return null;
+		const normalized = this._normalizeGemstoneData(found.gem);
+		Object.assign(found.gem, normalized);
+		const descriptor = typeof CharacterSheetUpgrades !== "undefined"
+			? CharacterSheetUpgrades.getGemstoneDescriptor(found.gem)
+			: null;
+		if (!descriptor?.spellStorage) return null;
+		const storage = found.gem.runtime.spellStorage;
+		const used = storage.storedSpells.reduce((total, spell) => total + (Number(spell.level) || 0), 0);
+		return {
+			gemInstanceId,
+			capacity: storage.capacity,
+			used,
+			remaining: Math.max(0, storage.capacity - used),
+			storedSpells: MiscUtil.copyFast(storage.storedSpells),
+			active: found.socketed && this._isGemstoneHostActive(found.wrapper, descriptor),
+			hostItemId: found.socketed ? found.wrapper.id : null,
+		};
+	}
+
+	storeGemstoneSpell (gemInstanceId, spell) {
+		const storage = this.getGemstoneSpellStorage(gemInstanceId);
+		if (!storage) return {success: false, error: "Gemstone spell storage not found"};
+		const level = Math.floor(Number(spell?.level) || 0);
+		if (level < 1 || level > 2) return {success: false, error: "Chalice can only store 1st- or 2nd-level spells"};
+		if (level > storage.remaining) return {success: false, error: "Not enough remaining spell-level capacity"};
+		const found = this._findGemstoneByInstanceId(gemInstanceId);
+		const storedSpell = {
+			id: spell.id || CryptUtil.uid(),
+			name: String(spell.name || "").trim(),
+			source: spell.source || "PHB",
+			level,
+			casterName: spell.casterName || this._data.name || "Unknown caster",
+			saveDc: spell.saveDc == null ? null : Number(spell.saveDc),
+			spellAttackBonus: spell.spellAttackBonus == null ? null : Number(spell.spellAttackBonus),
+			castingAbility: spell.castingAbility || null,
+		};
+		if (!storedSpell.name) return {success: false, error: "Spell name is required"};
+		found.gem.runtime.spellStorage.storedSpells.push(storedSpell);
+		return {success: true, spell: MiscUtil.copyFast(storedSpell)};
+	}
+
+	castGemstoneStoredSpell (gemInstanceId, storedSpellId) {
+		const storage = this.getGemstoneSpellStorage(gemInstanceId);
+		if (!storage) return {success: false, error: "Gemstone spell storage not found"};
+		if (!storage.active) return {success: false, error: "Chalice must be socketed in an equipped, attuned host"};
+		const found = this._findGemstoneByInstanceId(gemInstanceId);
+		const spells = found.gem.runtime.spellStorage.storedSpells;
+		const ix = spells.findIndex(spell => spell.id === storedSpellId);
+		if (!~ix) return {success: false, error: "Stored spell not found"};
+		const [spell] = spells.splice(ix, 1);
+		return {success: true, spell: MiscUtil.copyFast(spell)};
+	}
+
+	removeGemstoneStoredSpell (gemInstanceId, storedSpellId) {
+		const found = this._findGemstoneByInstanceId(gemInstanceId);
+		if (!found?.gem?.runtime?.spellStorage?.storedSpells) return false;
+		const ix = found.gem.runtime.spellStorage.storedSpells.findIndex(spell => spell.id === storedSpellId);
+		if (!~ix) return false;
+		found.gem.runtime.spellStorage.storedSpells.splice(ix, 1);
+		return true;
 	}
 
 	/**
@@ -37069,6 +37373,9 @@ class CharacterSheetState {
 				}
 			}
 		}
+		for (const effect of this.getGemstoneEffects().flatMap(gem => gem.effects || [])) {
+			if (effect.type === "turnStartTempHp") effects.push({type: "tempHp", amount: Number(effect.value) || 0, source: "Overshield"});
+		}
 
 		return effects;
 	}
@@ -37110,6 +37417,10 @@ class CharacterSheetState {
 					this.heal(amount);
 					applied.push({...effect, amount});
 				}
+			} else if (effect.type === "tempHp") {
+				const amount = Number(effect.amount) || 0;
+				if (amount > this.getTempHp()) this.setTempHp(amount);
+				applied.push({...effect, amount});
 			}
 		}
 		// Non-persisted side channel so combat/play-mode UI can build a toast
@@ -37291,7 +37602,7 @@ class CharacterSheetState {
 	 * @returns {object|null} Resource object or null
 	 */
 	getResource (name) {
-		return this._data.resources.find(r => r.name === name) || null;
+		return this.getResources().find(r => r.name === name || r.id === name) || null;
 	}
 
 	/**
@@ -37301,9 +37612,9 @@ class CharacterSheetState {
 	 * @returns {boolean} True if successful
 	 */
 	useResourceCharge (name, amount = 1) {
-		const resource = this._data.resources.find(r => r.name === name);
+		const resource = this.getResource(name);
 		if (!resource || resource.current < amount) return false;
-		resource.current = Math.max(0, resource.current - amount);
+		this.setResourceCurrent(resource.id, resource.current - amount);
 		return true;
 	}
 
@@ -37472,6 +37783,16 @@ class CharacterSheetState {
 	}
 
 	setResourceCurrent (resourceId, current) {
+		if (String(resourceId).startsWith("gem:")) {
+			const [, gemInstanceId, resourceKey] = String(resourceId).split(":");
+			const found = this._findGemstoneByInstanceId(gemInstanceId);
+			const resource = found?.gem?.runtime?.resources?.[resourceKey];
+			if (!resource) return;
+			resource.current = Math.max(0, Math.min(Number(current) || 0, resource.max));
+			found.gem.chargesCurrent = resource.current;
+			found.gem.usedToday = resource.current <= 0;
+			return;
+		}
 		const resource = this._data.resources.find(r => r.id === resourceId);
 		if (resource) {
 			resource.current = Math.max(0, Math.min(current, resource.max));
@@ -59276,6 +59597,7 @@ class CharacterSheetState {
 
 		// Recover short rest resources (includes Ki/Focus Points)
 		this.recoverResources("short");
+		this.recoverGemstoneResources("short");
 
 		// Warlock pact slots
 		if (this._data.spellcasting.pactSlots.max > 0) {
@@ -59325,6 +59647,7 @@ class CharacterSheetState {
 		// Recover all resources
 		this.recoverResources("long");
 		this.recoverResources("dawn");
+		this.recoverGemstoneResources("long");
 
 		// Recover Mystic Arcanum (Warlock)
 		this.resetMysticArcanum();
