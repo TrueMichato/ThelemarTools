@@ -2833,6 +2833,7 @@ class CharacterSheetCombat {
 			methodEffectApplied = await this._promptUseCombatMethod(attack);
 		}
 		const juggernautTarget = await this._pChooseJuggernautTargetContext(attack);
+		const gemstoneTargetTypes = await this._pChooseGemstoneTargetContext(attack);
 
 		// Resolve auto-generated weapon damage live so a hands-used change cannot leave a
 		// stale cached die. Explicit/custom attack damage remains authoritative.
@@ -3002,6 +3003,19 @@ class CharacterSheetCombat {
 				riderDamageTotal += riderRoll.total;
 				riderParts.push({name: rider.source || "Weapon Upgrade", dice: rider.dice, total: riderRoll.total, type: rider.damageType});
 				riderRollsForAnim.push(riderRoll);
+			}
+
+			for (const rider of this._state.getGemstoneDamageRidersForAttack?.(attack, {targetTypes: gemstoneTargetTypes}) || []) {
+				if (!rider?.dice) continue;
+				const riderId = `gemstone:${rider.gemInstanceId}`;
+				if (rider.perTurn && !this._isRiderAvailableThisTurn(riderId)) continue;
+				const damageType = rider.damageType === "weapon" ? weaponDamageType : rider.damageType;
+				const riderRoll = rollTypedDamage(rider.dice, damageType);
+				riderDamageTotal += riderRoll.total;
+				riderParts.push({name: rider.sourceName, dice: rider.dice, total: riderRoll.total, type: damageType});
+				riderRollsForAnim.push(riderRoll);
+				usedRiderIds.push(riderId);
+				if (rider.perTurn) this._markRiderUsedThisTurn(riderId);
 			}
 
 			// Active ammunition damage (Bug #3): the selected quiver ammo's bonuses
@@ -3599,6 +3613,19 @@ class CharacterSheetCombat {
 	_isWeaponDamageRiderEligible (rider, attack) {
 		return !rider?.attackSourceFeature
 			|| (attack?.sourceFeature || "").toLowerCase() === rider.attackSourceFeature.toLowerCase();
+	}
+
+	async _pChooseGemstoneTargetContext (attack) {
+		const effects = this._state.getGemstoneEffects?.({hostItemId: attack?.sourceItem?.id}) || [];
+		const targetTypes = [...new Set(effects.flatMap(effect => effect.rider?.targetTypes || []))];
+		if (!targetTypes.length) return [];
+		const selected = await InputUiUtil.pGetUserEnum({
+			title: `${attack.name} — Gemstone Target`,
+			values: ["none", ...targetTypes],
+			fnDisplay: value => value === "none" ? "No qualifying type" : value.toTitleCase(),
+			isResolveItem: true,
+		});
+		return selected && selected !== "none" ? [selected] : [];
 	}
 
 	/**

@@ -411,6 +411,12 @@ class CharacterSheetInventory {
 				}
 				return;
 			}
+			if (e.target.closest(".charsheet__gem-chalice")) {
+				const itemId = _getItemId(e.target);
+				const gemInstanceId = e.target.closest(".charsheet__gem-chalice")?.dataset?.gemInstanceId;
+				if (itemId && gemInstanceId) this._page.getUpgradesModule()?.showGemstoneChaliceModal(itemId, gemInstanceId);
+				return;
+			}
 			if (e.target.closest(".charsheet__item-use")) {
 				const itemId = _getItemId(e.target);
 				if (itemId) this._useConsumable(itemId);
@@ -4356,7 +4362,8 @@ class CharacterSheetInventory {
 	async _toggleAttuned (itemId) {
 		const items = this._state.getItems();
 		const item = items.find(i => i.id === itemId);
-		if (!item || !item.requiresAttunement) return;
+		const requiresGemstoneAttunement = item?.socketedGemstones?.some(gem => CharacterSheetUpgrades?.getGemstoneDescriptor?.(gem)?.requiresAttunement);
+		if (!item || (!item.requiresAttunement && !requiresGemstoneAttunement)) return;
 
 		// If trying to attune (not un-attune), check requirements
 		if (!item.attuned) {
@@ -4921,6 +4928,7 @@ class CharacterSheetInventory {
 			}
 
 			if (healAmount > 0) {
+				healAmount += this._state.getGemstoneHealingPotionBonus?.() || 0;
 				this._state.heal(healAmount);
 				JqueryUtil.doToast({
 					type: "success",
@@ -7003,7 +7011,8 @@ class CharacterSheetInventory {
 	_renderItemRow (item) {
 		const typeTag = this._getItemTypeTagFromStoredType(item.type);
 		const canEquip = CharacterSheetInventory.canEquipItem(item);
-		const canAttune = item.requiresAttunement;
+		const hasAttunementGemstone = item.socketedGemstones?.some(gem => CharacterSheetUpgrades?.getGemstoneDescriptor?.(gem)?.requiresAttunement);
+		const canAttune = item.requiresAttunement || hasAttunementGemstone;
 		// An Ioun bond is not attunement. It takes days of consecutive orbit rather than a
 		// short rest, it is slot-free, and it is governed entirely by the Ioun Stone manager.
 		// Dressing it as the amber attunement control beside it invited exactly the confusion
@@ -7024,7 +7033,8 @@ class CharacterSheetInventory {
 				: "Form an Ioun bond in the Ioun Stone manager — bonding takes days, and never costs an attunement slot")
 			: (item.attuned ? "End attunement" : "Attune");
 		const hasCharges = item.charges && item.charges > 0;
-		const hasPowers = Array.isArray(item.itemPowers) && item.itemPowers.length > 0;
+		const itemPowers = this._state.getItemPowers?.().filter(power => power.itemId === item.id) || [];
+		const hasPowers = itemPowers.length > 0;
 		const canRecharge = hasCharges && !!item.recharge;
 		const rechargeFormula = canRecharge ? CharacterSheetState.getItemRechargeFormula(item) : "";
 		// Staff of Healing (and similar charged healing staves): a "Cast" affordance lets the
@@ -7059,7 +7069,7 @@ class CharacterSheetInventory {
 		const hasUpgrades = !!(item.appliedUpgrades?.length || item.socketedGemstones?.length);
 		const activeGem = item.socketedGemstones?.[0] || null;
 		const gemHasCharges = activeGem?.chargesMax > 0;
-		const gemIsDaily = activeGem && !gemHasCharges && !activeGem.usedToday;
+		const gemHasSpellStorage = !!activeGem && !!CharacterSheetUpgrades?.getGemstoneDescriptor?.(activeGem)?.spellStorage;
 		const isVariantComponent = !!(item.variantComponent?.spellEffects?.length);
 		const vcSpellLabels = isVariantComponent ? this._getVariantComponentSpellLabels(item) : [];
 		const canOpenPack = !!this._getEffectivePackContents(item)?.length;
@@ -7167,8 +7177,8 @@ class CharacterSheetInventory {
 							</button>
 						` : ""}
 						${hasPowers ? `
-							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__item-powers" title="View and invoke ${item.itemPowers.length} item power${item.itemPowers.length === 1 ? "" : "s"}">
-								<span class="glyphicon glyphicon-flash"></span> Powers (${item.itemPowers.length})
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__item-powers" title="View and invoke ${itemPowers.length} item power${itemPowers.length === 1 ? "" : "s"}">
+								<span class="glyphicon glyphicon-flash"></span> Powers (${itemPowers.length})
 							</button>
 						` : ""}
 						${canRecharge ? `
@@ -7202,6 +7212,11 @@ class CharacterSheetInventory {
 						${activeGem && !gemHasCharges ? `
 							<button type="button" class="ve-btn ve-btn-xs ${activeGem.usedToday ? "ve-btn-default charsheet__gem-used" : "ve-btn-success"} charsheet__gem-use-daily" data-gem-name="${activeGem.name}" title="${activeGem.usedToday ? `${activeGem.name} (used, resets at dawn)` : `Use ${activeGem.gemName || activeGem.name} ability`}" ${activeGem.usedToday ? "disabled" : ""}>
 								💎 ${activeGem.usedToday ? "Used" : "Activate"}
+							</button>
+						` : ""}
+						${gemHasSpellStorage ? `
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__gem-chalice" data-gem-instance-id="${activeGem.gemInstanceId}" title="Manage spells stored in the Chalice">
+								💎 Stored Spells
 							</button>
 						` : ""}
 						${canEquip ? `

@@ -11,6 +11,31 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Rest Mechanics (short rest, long rest, item charges)
 - Combat Action Effects Pipeline (parsing, classification, effect schema, modals, subclass grants)
 - Custom Abilities (data structure, effect routing, reapply on load)
+- Gemstone Empowerment (host-scoped effects, resources, riders, Chalice storage)
+
+## Gemstone Empowerment
+
+TGTT's 39 empowered gemstones are defined by `GEMSTONE_EFFECT_REGISTRY` in
+`charactersheet-upgrades.js`. `CharacterSheetState.getGemstoneEffects()` is the
+canonical runtime channel. It annotates each descriptor with `hostItemId`,
+`gemInstanceId`, runtime state, and the exact host item, and applies TGTT,
+equipped, and attunement gates. Consumers must query this channel rather than
+adding new gemstone-name switches.
+
+Gem-owned state lives in `_gemstoneData.runtime` while loose and in the same
+gem object while socketed. Socketing and unsocketing move the stable
+`gemInstanceId`, resources, choices, and stored spells together; host charges
+and host `storedSpells` are never used for gemstone mechanics. Synthetic
+resource IDs have the shape `gem:<gemInstanceId>:<key>` and
+`setResourceCurrent()` routes them back to the gem.
+
+Conditional damage dice use
+`getGemstoneDamageRidersForAttack(attack, targetContext)`. It requires the exact
+`attack.sourceItem.id` and feeds Combat's rider-parts pipeline, never the
+standing flat-damage line. Chalice storage uses
+`getGemstoneSpellStorage`/`storeGemstoneSpell`/`castGemstoneStoredSpell`/
+`removeGemstoneStoredSpell`; its two-level capacity is gem-scoped and persists
+across unsocket/resocket.
 
 ## Active States / Toggle Abilities
 
