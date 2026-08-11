@@ -30314,6 +30314,7 @@ class CharacterSheetState {
 
 		// Don't merge if incoming item is marked as custom
 		const isIncomingCustom = item._isCustom;
+		const incomingPackProvenance = item._fromPack || null;
 		const selectedSpellUid = item.selectedSpell
 			? `${item.selectedSpell.name || ""}|${item.selectedSpell.source || ""}`.toLowerCase()
 			: "";
@@ -30334,6 +30335,7 @@ class CharacterSheetState {
 				});
 				return i.item.name === item.name
 					&& i.item.source === item.source
+					&& (i.item._fromPack || null) === incomingPackProvenance
 					&& existingChoiceUid === selectedChoiceUid
 					&& !i.item._isCustom;
 			},
@@ -30508,6 +30510,65 @@ class CharacterSheetState {
 		const _addedAmmoItem = _addedAmmoWrapper?.item;
 		if (_addedAmmoItem && this._isAmmunitionItem(_addedAmmoItem) && this.getEquippedQuiver()) {
 			this.autoPlaceAmmunitionInQuiver();
+		}
+	}
+
+	/**
+	 * Add a fully-resolved equipment-pack batch and consume exactly one source pack.
+	 * Catalog resolution belongs to CharacterSheetInventory; this method only validates and
+	 * commits item payloads. A full character-state snapshot guarantees rollback if any item
+	 * normalization or pack consumption step throws.
+	 *
+	 * Packed catalog items merge only when their `_fromPack` markers match. They remain separate
+	 * from ordinary stacks and stacks spawned by a different pack, preserving provenance.
+	 *
+	 * @param {string} packItemId - Inventory wrapper id of the pack to consume.
+	 * @param {Array<{item: object, quantity: number}>} resolvedContents - Pre-resolved item batch.
+	 * @returns {{success: boolean, consumed: number, addedQuantity: number, error?: string}}
+	 */
+	openEquipmentPack (packItemId, resolvedContents) {
+		const pack = this._data.inventory.find(i => i.id === packItemId);
+		if (!pack?.item?.name || !pack.item.source || pack.quantity < 1) {
+			return {success: false, consumed: 0, addedQuantity: 0, error: "Pack is no longer in the inventory."};
+		}
+		if (!Array.isArray(resolvedContents) || !resolvedContents.length) {
+			return {success: false, consumed: 0, addedQuantity: 0, error: "Pack has no resolved contents."};
+		}
+		const isInvalid = resolvedContents.some(entry =>
+			!entry?.item?.name
+			|| !entry.item.source
+			|| !Number.isInteger(entry.quantity)
+			|| entry.quantity < 1,
+		);
+		if (isInvalid) {
+			return {success: false, consumed: 0, addedQuantity: 0, error: "Pack contents are invalid."};
+		}
+
+		const dataSnapshot = MiscUtil.copyFast(this._data);
+		const provenance = `${pack.item.name}|${pack.item.source}`;
+		try {
+			for (const entry of resolvedContents) {
+				this.addItem({...entry.item, _fromPack: provenance}, entry.quantity, false, false);
+			}
+
+			const currentPack = this._data.inventory.find(i => i.id === packItemId);
+			if (!currentPack || currentPack.quantity < 1) throw new Error("Pack disappeared during opening.");
+			if (currentPack.quantity > 1) this.setItemQuantity(packItemId, currentPack.quantity - 1);
+			else this.removeItem(packItemId);
+
+			return {
+				success: true,
+				consumed: 1,
+				addedQuantity: resolvedContents.reduce((total, entry) => total + entry.quantity, 0),
+			};
+		} catch (error) {
+			this._data = dataSnapshot;
+			return {
+				success: false,
+				consumed: 0,
+				addedQuantity: 0,
+				error: error?.message || "Unable to open pack.",
+			};
 		}
 	}
 
