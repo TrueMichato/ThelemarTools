@@ -12,6 +12,7 @@ import {extractVariantComponents} from "./generate-crafting-data/extract-variant
 import {extractCompleteCrafterCreatureParts, extractCompleteCrafterMaterials} from "./generate-crafting-data/extract-complete-crafter.js";
 import {extractArcadiaRecipes, extractCompleteCrafterRecipes, extractHamundRecipes} from "./generate-crafting-data/extract-recipes.js";
 import {extractCraftingRules} from "./generate-crafting-data/extract-rules.js";
+import {extractDraconicResonances, extractItemMaterials} from "./generate-crafting-data/extract-item-materials.js";
 import {buildCraftingGraph, markDuplicates} from "./generate-crafting-data/build-graph.js";
 import {getUid} from "./generate-crafting-data/crafting-utils.js";
 
@@ -68,9 +69,14 @@ class GenCrafting {
 		/* ----- Rules ----- */
 		const rules = extractCraftingRules(books);
 
+		/* ----- Item materials (Thelemar) ----- */
+		const itemMaterials = extractItemMaterials(books.thelemar, ctx);
+		const draconicResonances = extractDraconicResonances(books.thelemar);
+
 		this._dedupe(materials, "craftingMaterial");
 		this._dedupe(recipes, "craftingRecipe");
 		this._dedupe(rules, "craftingRule");
+		this._dedupe(itemMaterials, "itemMaterial");
 
 		this._applyCraftIndex(extractHamundCraftIndex(hamundBooks), recipes);
 
@@ -86,6 +92,7 @@ class GenCrafting {
 		this._sort(materials);
 		this._sort(recipes);
 		this._sort(rules);
+		this._sort(itemMaterials);
 
 		const output = {
 			_meta: {
@@ -95,12 +102,14 @@ class GenCrafting {
 			craftingMaterial: materials,
 			craftingRecipe: recipes,
 			craftingRule: rules,
+			itemMaterial: itemMaterials,
+			draconicResonance: draconicResonances,
 		};
 
 		// Written via `CleanUtil` so `npm run clean-jsons` is a no-op on this file
 		fs.writeFileSync(OUT_PATH, CleanUtil.getCleanJson(output), "utf-8");
 
-		this._printReport({materials, recipes, rules});
+		this._printReport({materials, recipes, rules, itemMaterials, draconicResonances});
 
 		return output;
 	}
@@ -155,7 +164,7 @@ class GenCrafting {
 			.filter((src, ix, arr) => arr.findIndex(it => it.json === src.json) === ix);
 	}
 
-	_printReport ({materials, recipes, rules}) {
+	_printReport ({materials, recipes, rules, itemMaterials, draconicResonances}) {
 		const report = this._report;
 		const nTagged = materials.filter(it => it.effectTags?.length).length + recipes.filter(it => it.effectTags?.length).length;
 		const nTaggable = materials.length + recipes.length;
@@ -166,6 +175,8 @@ class GenCrafting {
 		log(`  craftingMaterial  ${materials.length}`);
 		log(`  craftingRecipe    ${recipes.length}`);
 		log(`  craftingRule      ${rules.length}`);
+		log(`  itemMaterial      ${itemMaterials.length}`);
+		log(`  draconicResonance ${draconicResonances.length}`);
 		log(`\n  Effect-tag coverage  ${nTagged}/${nTaggable} (${((nTagged / nTaggable) * 100).toFixed(1)}%)`);
 		log(`  Materials linked to a craftable  ${report.graph.materialsWithRecipes}`);
 		log(`  Recipes with ingredients         ${report.graph.recipesWithIngredients}`);

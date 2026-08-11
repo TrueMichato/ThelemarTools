@@ -18,6 +18,7 @@ This document catalogs all Thelemar homebrew content implemented in the characte
 | **Battle Tactics** | 13/13 | 0 | ✅ |
 | **Dreamwalker Abilities** | 11/11 | 0 | ✅ |
 | **Divine Favor** | 2 gods (Pan, Zeus) seeded | Extensible — more gods are data-only | ✅ |
+| **Item Materials** | 72/72 entities, P1 engine | P2 Magic Capacity, P3 draconic/blood/ioun, P4 durability/degradation | ✅ |
 
 **Total TGTT Tests**: 737 passing
 
@@ -936,6 +937,7 @@ if (raceName?.toLowerCase()?.includes("newrace") ||
 - [Toggle Abilities](./08-toggle-abilities.md) - Combat stances and modes
 - [Combat System](./06-combat-system.md) - Stamina and methods
 - [Testing Strategy](./09-testing-strategy.md) - Test patterns
+- [Item Materials](./21-item-materials.md) - The 72 Thelemar `itemMaterial` entities and the read-time projection
 
 ---
 

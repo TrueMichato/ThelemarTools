@@ -400,6 +400,9 @@ class CharacterSheetRest {
 
 			// Offer a persistent undo for this rest (BUG 8).
 			this._showUndoRestAffordance("short");
+
+			this._page.getMaterialsModule?.()?.notifyOverloadedItemsOnRest("short");
+			this._page.getMaterialsModule?.()?.offerShortRestRepairs();
 		});
 
 		ee`<div class="charsheet__modal-footer">
@@ -812,6 +815,8 @@ class CharacterSheetRest {
 			if (calcs.hasSpellScribingAdept && calcs.scribingSpellbookCount > 0) {
 				this._showScribingMemorizeModal();
 			}
+
+			this._page.getMaterialsModule?.()?.notifyOverloadedItemsOnRest("long");
 		});
 
 		ee`<div class="charsheet__modal-footer">

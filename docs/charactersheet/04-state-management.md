@@ -230,6 +230,22 @@ currency: {
 },
 ```
 
+Items may additionally carry a **material reference**, which is *never* flattened into the
+item's own fields:
+
+```javascript
+{
+    name: "Longsword",
+    dmg1: "1d8",                                   // base value, never mutated
+    material: {name: "Darkmetal", source: "TGTT"},
+}
+```
+
+`getItems()` runs `projectItemMaterial()` over every item, so all downstream readers see the
+projected stats (`dmg1: "1d10"`, `penetration: 2`, …). Use `getItemRaw(id)` when you need the
+unprojected item — for example when previewing a *different* material. See
+[21-item-materials.md](./21-item-materials.md).
+
 ### Active States & Conditions
 
 ```javascript

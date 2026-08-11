@@ -35,7 +35,7 @@ describe("data/crafting.json freshness", () => {
 		if (regenerated !== committed) {
 			const committedJson = JSON.parse(committed);
 			const freshJson = JSON.parse(regenerated);
-			const counts = (json) => `craftingMaterial ${json.craftingMaterial.length}, craftingRecipe ${json.craftingRecipe.length}, craftingRule ${json.craftingRule.length}`;
+			const counts = (json) => `craftingMaterial ${json.craftingMaterial.length}, craftingRecipe ${json.craftingRecipe.length}, craftingRule ${json.craftingRule.length}, itemMaterial ${json.itemMaterial?.length ?? 0}`;
 
 			throw new Error(
 				`data/crafting.json is stale — run \`npm run gen:crafting\` and commit the result.\n`

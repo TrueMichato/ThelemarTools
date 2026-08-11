@@ -23895,6 +23895,19 @@ color: var(--cs-text-primary, #f1f5f9);
 	background: transparent;
 }
 
+/* An Ioun Sand matrix, and the stones it is (or is not) doubling. */
+.cs-ioun-badge--matrix {
+	color: var(--cs-accent-arcane, #a78bfa);
+	border-color: var(--cs-accent-arcane, #a78bfa);
+	background: transparent;
+}
+
+.cs-ioun-badge--inert {
+	color: var(--cs-text-muted, #94a3b8);
+	border-style: dashed;
+	background: transparent;
+}
+
 /* --- Bonding ---------------------------------------------------------- */
 .cs-ioun-row--bonding { grid-template-columns: auto minmax(0, 1fr) minmax(3rem, 8rem) auto auto; }
 
@@ -24229,4 +24242,140 @@ color: var(--cs-text-primary, #f1f5f9);
 	margin-top: 2px;
 	font-style: italic;
 	cursor: help;
+}
+
+/* ==========================================================================
+   Item materials
+   ========================================================================== */
+
+/*
+ * The material chip on an inventory row. Deliberately quieter than the upgrade
+ * badges beside it: what an item is *made of* is standing context, not an event.
+ */
+.charsheet__item-material-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 8px;
+	border-radius: 9999px;
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.12));
+	color: var(--cs-text-secondary, #94a3b8);
+	white-space: nowrap;
+	cursor: help;
+}
+
+/* Magic Capacity. The only one of the three states that shouts is "overloaded",
+   because it is the only one that costs the player a roll. */
+.charsheet__item-mc-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 8px;
+	border-radius: 9999px;
+	border: 1px solid transparent;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.charsheet__item-mc-badge--ok {
+	border-color: var(--cs-border, rgba(255, 255, 255, 0.12));
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+.charsheet__item-mc-badge--over {
+	border-color: var(--cs-danger, #ef4444);
+	background: rgba(239, 68, 68, 0.12);
+	color: var(--cs-danger, #ef4444);
+}
+
+.charsheet__item-mc-badge--suppress {
+	border-color: rgba(148, 163, 184, 0.4);
+	background: rgba(148, 163, 184, 0.1);
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
+/* Material degradation — a worn or shattered item. Mirrors the MC badge geometry so
+   the two read as one family of material-state chips. */
+.charsheet__item-degradation-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 8px;
+	border-radius: 9999px;
+	border: 1px solid transparent;
+	white-space: nowrap;
+}
+
+.charsheet__item-degradation-badge--worn {
+	border-color: var(--cs-warning, #f59e0b);
+	background: rgba(245, 158, 11, 0.12);
+	color: var(--cs-warning, #f59e0b);
+}
+
+.charsheet__item-degradation-badge--destroyed {
+	border-color: var(--cs-danger, #ef4444);
+	background: rgba(239, 68, 68, 0.14);
+	color: var(--cs-danger, #ef4444);
+	text-decoration: line-through;
+}
+
+.charsheet__mc-headline {
+	padding: 8px 16px;
+	border-radius: var(--cs-radius-md, 10px);
+	border-left: 4px solid var(--cs-border, rgba(255, 255, 255, 0.12));
+	background: var(--cs-bg-surface, rgba(255, 255, 255, 0.03));
+}
+
+.charsheet__mc-headline--over {
+	border-left-color: var(--cs-danger, #ef4444);
+	background: rgba(239, 68, 68, 0.08);
+}
+
+.charsheet__mc-headline-value {
+	font-size: 1.5rem;
+	font-weight: 600;
+	line-height: 1.25;
+	font-variant-numeric: tabular-nums;
+}
+
+.charsheet__mc-headline-sub {
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--cs-danger, #ef4444);
+}
+
+/* Tabular so the tally column reads as a column, not as ragged text. */
+.charsheet__mc-count {
+	min-width: 2.5rem;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+}
+
+.charsheet__mc-adjust-value {
+	display: inline-block;
+	min-width: 1.5rem;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+}
+
+.charsheet__mc-result {
+	margin-top: 8px;
+	padding: 8px 16px;
+	border-radius: var(--cs-radius-sm, 6px);
+	border-left: 4px solid transparent;
+}
+
+.charsheet__mc-result--pass {
+	border-left-color: var(--cs-success, #22c55e);
+	background: rgba(34, 197, 94, 0.08);
+}
+
+.charsheet__mc-result--fail {
+	border-left-color: var(--cs-danger, #ef4444);
+	background: rgba(239, 68, 68, 0.08);
 }

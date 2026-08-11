@@ -18,6 +18,7 @@ class PageFilterCrafting extends PageFilterBase {
 		"craftingMaterial": "MAT",
 		"craftingRecipe": "CRF",
 		"craftingRule": "RUL",
+		"itemMaterial": "MTL",
 	};
 
 	static getTypeAbbreviation (prop) {
@@ -83,7 +84,7 @@ class PageFilterCrafting extends PageFilterBase {
 
 		this._typeFilter = new Filter({
 			header: "Type",
-			items: ["craftingMaterial", "craftingRecipe", "craftingRule"],
+			items: ["craftingMaterial", "craftingRecipe", "craftingRule", "itemMaterial"],
 			displayFn: it => Parser.getPropDisplayName(it),
 			itemSortFn: null,
 		});
@@ -94,9 +95,13 @@ class PageFilterCrafting extends PageFilterBase {
 				...Parser.CRAFTING_MATERIAL_CATEGORIES,
 				...Parser.CRAFTING_RECIPE_CATEGORIES,
 				...Parser.CRAFTING_RULE_CATEGORIES,
+				...Parser.ITEM_MATERIAL_CATEGORIES,
 			])],
 			displayFn: Parser.craftingCategoryToFull,
 			groupFn: it => {
+				// Checked most-specific-first: "materials" is both a rule category and, loosely,
+				// what item materials are, so the item-material list has to win over the rule list.
+				if (Parser.ITEM_MATERIAL_CATEGORIES.includes(it)) return "Item Material";
 				if (Parser.CRAFTING_MATERIAL_CATEGORIES.includes(it)) return "Material";
 				if (Parser.CRAFTING_RECIPE_CATEGORIES.includes(it)) return "Craftable";
 				return "Rule";
@@ -154,6 +159,35 @@ class PageFilterCrafting extends PageFilterBase {
 
 		this._spellFilter = new SearchableFilter({header: "Variant Component For Spell"});
 
+		/* ----- Item materials (Thelemar) ----- */
+
+		this._materialRoleFilter = new Filter({
+			header: "Material Role",
+			items: Object.keys(Parser.ITEM_MATERIAL_ROLE_TO_FULL),
+			displayFn: Parser.itemMaterialRoleToFull,
+			itemSortFn: null,
+		});
+
+		this._materialAppliesToFilter = new Filter({
+			header: "Applies To",
+			items: Object.keys(Parser.ITEM_MATERIAL_APPLIES_TO_FULL),
+			displayFn: Parser.itemMaterialAppliesToFull,
+			itemSortFn: null,
+		});
+
+		// One range filter per axis. `isAllowNegative` matters: Damage and Critical are signed
+		// steps, and Magic Capacity reaches -\u221E (Lead), which is clamped into the range below.
+		this._axisFilters = Parser.ITEM_MATERIAL_AXES.map(axis => ({
+			key: axis.key,
+			filter: new RangeFilter({header: axis.full, min: -5, max: 25, isAllowNegative: true}),
+		}));
+
+		this._materialFilter = new MultiFilter({
+			header: "Item Materials",
+			filters: [this._materialRoleFilter, this._materialAppliesToFilter, ...this._axisFilters.map(it => it.filter)],
+			isAddDropdownToggle: true,
+		});
+
 		/* ----- Economy ----- */
 
 		this._valueFilter = new RangeFilter({
@@ -179,6 +213,8 @@ class PageFilterCrafting extends PageFilterBase {
 			items: [
 				"Has Mechanical Effect",
 				"Has Use Effect",
+				"Degrades In Use",
+				"Priceless",
 				"Requires Preparation",
 				"Craftable From",
 				"Has Ingredients",
@@ -239,6 +275,28 @@ class PageFilterCrafting extends PageFilterBase {
 		if ((ent.ingredients || []).length) ent._fMisc.push("Has Ingredients");
 		if (ent.variantComponent?.spellEffects?.length) ent._fMisc.push("Has Structured Spell Effects");
 		if ((ent.alsoIn || []).length) ent._fMisc.push("Appears In Multiple Books");
+
+		/* ----- Item materials ----- */
+		ent._fMaterialRoles = ent.__prop === "itemMaterial" ? (ent.roles || []) : [];
+		ent._fMaterialAppliesTo = ent.__prop === "itemMaterial" ? (ent.appliesTo || []) : [];
+		ent._fMaterialAxes = {};
+		if (ent.__prop === "itemMaterial") {
+			for (const axis of Parser.ITEM_MATERIAL_AXES) {
+				// "na" / "Varies" carry no position on a numeric scale, so they get no value and
+				// simply never match a positive selection. The infinities are clamped to the ends.
+				const raw = ent[axis.key];
+				if (raw === "infinity") ent._fMaterialAxes[axis.key] = 25;
+				else if (raw === "-infinity") ent._fMaterialAxes[axis.key] = -5;
+				else if (typeof raw === "number") ent._fMaterialAxes[axis.key] = raw;
+				else ent._fMaterialAxes[axis.key] = null;
+			}
+		}
+
+		if (ent.__prop === "itemMaterial") {
+			if ((ent.effects || []).length) ent._fMisc.push("Has Mechanical Effect");
+			if (ent.degradation) ent._fMisc.push("Degrades In Use");
+			if (ent.price?.isPriceless) ent._fMisc.push("Priceless");
+		}
 	}
 
 	addToFilters (ent, isExcluded) {
@@ -258,6 +316,9 @@ class PageFilterCrafting extends PageFilterBase {
 		this._craftDcFilter.addItem(ent._fCraftDc);
 		this._rarityFilter.addItem(ent._fRarity);
 		this._spellFilter.addItem(ent._fSpells);
+		this._materialRoleFilter.addItem(ent._fMaterialRoles);
+		this._materialAppliesToFilter.addItem(ent._fMaterialAppliesTo);
+		this._axisFilters.forEach(({key, filter}) => filter.addItem(ent._fMaterialAxes?.[key]));
 		this._valueFilter.addItem(ent._fValue);
 		this._weightFilter.addItem(ent._fWeight);
 		this._miscFilter.addItem(ent._fMisc);
@@ -271,6 +332,7 @@ class PageFilterCrafting extends PageFilterBase {
 			this._effectTagFilter,
 			this._harvestFilter,
 			this._craftFilter,
+			this._materialFilter,
 			this._valueFilter,
 			this._weightFilter,
 			this._miscFilter,
@@ -297,6 +359,11 @@ class PageFilterCrafting extends PageFilterBase {
 				ent._fCraftDc,
 				ent._fRarity,
 				ent._fSpells,
+			],
+			[
+				ent._fMaterialRoles,
+				ent._fMaterialAppliesTo,
+				...this._axisFilters.map(({key}) => ent._fMaterialAxes?.[key]),
 			],
 			ent._fValue,
 			ent._fWeight,

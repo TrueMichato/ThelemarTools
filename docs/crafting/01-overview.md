@@ -17,16 +17,20 @@ effect, creature, DC, biome, crafter, value, and rarity.
 
 ## Entity types
 
-The page is a standard 5etools `ListPage` spanning three props.
+The page is a standard 5etools `ListPage` spanning four props.
 
 | Prop | Abv | What it is |
 |---|---|---|
 | `craftingMaterial` | MAT | Anything you harvest, gather, mine, or buy as an input |
 | `craftingRecipe` | CRF | Anything you can make — magic items, potions, dishes, poisons |
 | `craftingRule` | RUL | The rules governing harvesting, crafting, cooking, and components |
+| `itemMaterial` | MTL | What a finished item is *made of* — the 72 Thelemar materials and their six axes. See [05-item-materials.md](05-item-materials.md) |
 
 Materials are further split by `materialCategory`: **creature part**, **herb**, **mineral**,
 **food ingredient**, **spell component**.
+
+Note the deliberate split between `craftingMaterial` and `itemMaterial`: a bar of mithril is
+an input you buy (MAT); **Mithril** is a property a finished sword has (MTL).
 
 ## Filters
 

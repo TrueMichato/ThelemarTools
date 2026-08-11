@@ -24,6 +24,36 @@
 				gap: 4px;
 			}
 
+			/* The six item-material axes, shown as a compact strip at the head of the stat block. */
+			&axes {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 4px;
+			}
+
+			&axis {
+				flex: 1 1 0;
+				min-width: 64px;
+				padding: 3px 4px;
+				border: 1px solid vars.$rgb-border-grey--trans;
+				border-radius: 3px;
+				text-align: center;
+			}
+
+			&axis-label {
+				font-size: 10px;
+				line-height: 12px;
+				text-transform: uppercase;
+				letter-spacing: 0.4px;
+				opacity: 0.7;
+			}
+
+			&axis-value {
+				font-size: 15px;
+				line-height: 19px;
+				font-weight: 600;
+			}
+
 			&tag {
 				padding: 1px 7px;
 				border: 1px solid vars.$rgb-border-grey--trans;
@@ -63,6 +93,10 @@
 	.ve-night-mode .crafting {
 		&__ {
 			&tag {
+				border-color: vars-night.$rgb-border-grey--trans-night;
+			}
+
+			&axis {
 				border-color: vars-night.$rgb-border-grey--trans-night;
 			}
 		}

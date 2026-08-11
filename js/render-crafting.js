@@ -2,10 +2,11 @@ import {SITE_STYLE__CLASSIC} from "./consts.js";
 import {RenderPageImplBase} from "./render-page-base.js";
 
 /**
- * Renderers for the three entity kinds on the Crafting & Harvesting hub.
+ * Renderers for the four entity kinds on the Crafting & Harvesting hub.
  *
- * Materials, craftables and rules share a stat-block frame but carry very different metadata, so
- * each gets its own implementation rather than one branching mega-renderer.
+ * Harvestable materials, craftables, rules and item materials share a stat-block frame but carry
+ * very different metadata, so each gets its own implementation rather than one branching
+ * mega-renderer.
  */
 
 /* -------------------------------------------- */
@@ -246,12 +247,177 @@ class _RenderCraftingRuleImpl extends RenderPageImplBase {
 }
 
 /* -------------------------------------------- */
+/* Item materials (Thelemar)                    */
+/* -------------------------------------------- */
+
+class _RenderItemMaterialImpl extends RenderPageImplBase {
+	_style = SITE_STYLE__CLASSIC;
+	_page = UrlUtil.PG_CRAFTING;
+	_dataProp = "itemMaterial";
+
+	_getRendered ({ent, renderer, opts}) {
+		const {htmlPtIsExcluded, htmlPtName, htmlPtPage} = this._getCommonHtmlParts({ent, renderer, opts});
+
+		return `
+			${Renderer.utils.getBorderTr()}
+			${htmlPtIsExcluded}
+			${htmlPtName}
+
+			${_getSubtitle([
+		Parser.craftingCategoryToFull(ent.materialCategory),
+		ent.rarity && ent.rarity !== "none" ? `${ent.rarity}`.toTitleCase() : null,
+		ent.primaryRole ? Parser.itemMaterialRoleToFull(ent.primaryRole) : null,
+	])}
+
+			${this._getAxesRow({ent})}
+
+			${_getMetaRow([
+		["Density", this._getDensityHtml(ent)],
+		["Price", ent.price?.display || null],
+		["Object AC", this._getObjectAcHtml(ent)],
+		["Roles", (ent.roles || []).map(Parser.itemMaterialRoleToFull).join(", ") || null],
+		["Applies To", (ent.appliesTo || []).map(Parser.itemMaterialAppliesToFull).join(", ") || null],
+		["Elemental Plane", ent.elementalPlane || null],
+	])}
+
+			${_getEffectTagsRow(ent)}
+
+			${ent.entries?.length ? `<tr><td colspan="6" class="ve-pt-2">${renderer.render({entries: ent.entries}, 1)}</td></tr>` : ""}
+
+			${this._getMagicCapacityRulesHtml({ent})}
+			${this._getDraconicResonanceHtml({ent})}
+			${this._getDegradationHtml({ent})}
+
+			${htmlPtPage}
+			${Renderer.utils.getBorderTr()}
+		`;
+	}
+
+	/** The six axes as a compact table — the headline of every material. */
+	_getAxesRow ({ent}) {
+		const cells = Parser.ITEM_MATERIAL_AXES
+			.map(axis => `<div class="crafting__axis">
+				<div class="crafting__axis-label">${axis.full}</div>
+				<div class="crafting__axis-value">${Parser.itemMaterialAxisToFull(ent[axis.key], {isSigned: axis.isSigned})}</div>
+			</div>`)
+			.join("");
+		return `<tr><td colspan="6" class="ve-pt-2"><div class="crafting__axes">${cells}</div></td></tr>`;
+	}
+
+	_getDensityHtml (ent) {
+		if (ent.densityVaries || ent.density == null) return "Varies";
+		const mult = ent.weightMultiplier != null
+			? ` <span class="ve-muted">(weight &times;${ent.weightMultiplier})</span>`
+			: "";
+		return `${ent.density}${mult}`;
+	}
+
+	_getObjectAcHtml (ent) {
+		if (ent.objectAc == null) return null;
+		return ent.objectAcInferred
+			? `${ent.objectAc} <span class="ve-muted">(inferred from the closest ordinary material)</span>`
+			: `${ent.objectAc}`;
+	}
+
+	_getMagicCapacityRulesHtml ({ent}) {
+		if (!ent.magicCapacityRules?.length) return "";
+		const RULE_TO_TEXT = {
+			"opposedStatesCountAsOne": "Two opposed magical states count as a single effect against this material's capacity.",
+			"makerForeknowledge": "The maker knows in advance whether adding another effect would exceed the capacity.",
+			"dcRiseThreshold": "The interference DC only begins to rise once the capacity is exceeded by more than the listed amount.",
+			"freeEffect": "The first qualifying effect does not count against the capacity.",
+		};
+		const items = ent.magicCapacityRules
+			.map(rule => {
+				// The authored note is the book's own wording and is always more precise than the
+				// generic fallback, so it wins wherever it is present.
+				const base = rule.note || RULE_TO_TEXT[rule.type] || rule.type;
+				const detail = [
+					rule.when ? `when ${rule.when}` : null,
+					rule.theme ? `${rule.theme} effects` : null,
+					rule.value != null ? `value ${rule.value}` : null,
+				].filter(Boolean).join(", ");
+				return `<li>${Renderer.stripTags(base).qq()}${detail ? ` <span class="ve-muted">(${detail.qq()})</span>` : ""}</li>`;
+			})
+			.join("");
+		return `<tr><td colspan="6" class="ve-pt-2"><b>Magic Capacity Exceptions</b><ul>${items}</ul></td></tr>`;
+	}
+
+	/**
+	 * A material made of solid dragon remains can carry one Draconic Domain Resonance. The
+	 * eighteen resonances are shared reference data rather than a browsable entity, so they
+	 * are printed inline here — a reader looking at Dragon Bone should not have to go
+	 * hunting for what a resonance actually does.
+	 */
+	_getDraconicResonanceHtml ({ent}) {
+		const slots = (ent.effects || []).find(fx => fx.type === "draconicResonanceSlot");
+		if (!slots) return "";
+		const all = (globalThis.__craftingDraconicResonances || []);
+		if (!all.length) return "";
+		const rows = ["fear", "safety"]
+			.flatMap(kind => all.filter(r => r.kind === kind))
+			.map(r => `<tr>
+				<td class="ve-text-center">${(r.kind || "").toTitleCase().qq()}</td>
+				<td>${(r.domain || "").qq()}</td>
+				<td><b>${r.name.qq()}</b> ${Renderer.stripTags(r.entries?.[0] || "").qq()}</td>
+			</tr>`)
+			.join("");
+		return `<tr><td colspan="6" class="ve-pt-2">
+			<b>Draconic Domain Resonance</b>
+			<div class="ve-muted ve-small">This material may carry ${slots.count ?? 1} resonance from its source dragon's domain.</div>
+			<table class="w-100 ve-tbl-border stripe-odd-table"><thead><tr>
+				<th class="ve-text-center">Kind</th><th>Domain</th><th>Resonance</th>
+			</tr></thead><tbody>${rows}</tbody></table>
+		</td></tr>`;
+	}
+
+	_getDegradationHtml ({ent}) {
+		const deg = ent.degradation;
+		if (!deg) return "";
+
+		const TRIGGER_TO_TEXT = {
+			"attackRoll": "on an attack roll",
+			"critReceived": "when struck by a critical hit",
+			"damaged": "when damaged",
+		};
+		const EFFECT_TO_TEXT = {
+			"damageStepDelta": (v) => `${v > 0 ? "increases" : "reduces"} its Damage by ${Math.abs(v)} step${Math.abs(v) === 1 ? "" : "s"}`,
+			"protectionDelta": (v) => `${v > 0 ? "increases" : "reduces"} its Protection by ${Math.abs(v)}`,
+			"axesToZero": () => "drops the listed axes to 0",
+		};
+		const REPAIR_TO_TEXT = {
+			"shortRest": "repaired over a Short Rest",
+			"tool": "repaired with the listed tools",
+			"none": "cannot be repaired",
+		};
+
+		const natural = deg.trigger?.natural?.length ? ` (natural ${deg.trigger.natural.join(" or ")})` : "";
+		const trigger = `${TRIGGER_TO_TEXT[deg.trigger?.on] || deg.trigger?.on || "in use"}${natural}`;
+
+		const fnEffect = EFFECT_TO_TEXT[deg.effect?.type];
+		const effect = deg.destroys
+			? "the item is destroyed"
+			: (fnEffect ? fnEffect(deg.effect.value) : `${deg.effect?.type || "degrades"}`);
+
+		const repair = deg.repair
+			? `${REPAIR_TO_TEXT[deg.repair.method] || deg.repair.method}${deg.repair.tool ? ` (${deg.repair.tool.qq()})` : ""}`
+			: null;
+
+		return `<tr><td colspan="6" class="ve-pt-2"><b>Degradation</b><ul>
+			<li>${trigger.qq()}, ${effect.qq()}${deg.stacking ? " (cumulative)" : ""}.</li>
+			${repair ? `<li>Can be ${repair.qq()}.</li>` : ""}
+		</ul></td></tr>`;
+	}
+}
+
+/* -------------------------------------------- */
 
 export class RenderCrafting {
 	static _RENDER_BY_PROP = {
 		"craftingMaterial": new _RenderCraftingMaterialImpl(),
 		"craftingRecipe": new _RenderCraftingRecipeImpl(),
 		"craftingRule": new _RenderCraftingRuleImpl(),
+		"itemMaterial": new _RenderItemMaterialImpl(),
 	};
 
 	static getRenderedCrafting (ent) {

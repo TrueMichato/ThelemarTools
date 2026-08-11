@@ -60,6 +60,8 @@ const RULE_ALLOWLIST_BY_SOURCE = {
 		"The Twelve Uses of Dragon's Blood": "components",
 		"Identifying Magic Items & Effects": "materials",
 		"Gemstone Empowerment": "crafting",
+		"Object Durability": "materials",
+		"Magical Interference": "materials",
 	},
 };
 

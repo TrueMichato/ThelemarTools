@@ -5096,6 +5096,22 @@ class CharacterSheetState {
 				// the 437 craftables that have no check, so it exists only for tables that
 				// houserule one. Default OFF.
 				craftingConsumeOnFailure: false,
+
+				// Item materials (TGTT). Master toggle sits under `enableTgtt`; older saves
+				// are backfilled by `_migrateMaterialSettings()` on load.
+				enableMaterials: true,
+				// Derive an item's weight from its material's density ratio.
+				materials_weightFromDensity: true,
+				// Recompute an item's value from `base + (weight x price/lb)`. Only per-pound
+				// trade units can be converted, so this is a no-op for vials/scales/teeth.
+				materials_recomputeValue: true,
+				// Track magical effects against a material's Magic Capacity and offer the
+				// Magical Interference roll when the item is over capacity.
+				materials_magicCapacity: true,
+				// Surface a weapon's Penetration rating and offer the post-miss prompt.
+				materials_penetration: true,
+				// Watch attack rolls for material degradation triggers (nat 1 / crits).
+				materials_degradation: true,
 			},
 
 			// Ammunition consumption tracking for current combat
@@ -5202,6 +5218,7 @@ class CharacterSheetState {
 		// enableTgtt-sensitive pipelines (metamagic filtering, etc.) see the value.
 		this._migrateEnableTgttDefault();
 		this._migrateCraftingSettingsDefaults();
+		this._migrateMaterialSettingsDefaults();
 
 		// Ensure acFormulas array exists
 		if (!Array.isArray(this._data.acFormulas)) {
@@ -5481,7 +5498,7 @@ class CharacterSheetState {
 		// Harness/Locking Joints) from the equipped inventory. Idempotent: strips any persisted
 		// `sourceType:"itemUpgrade"` modifiers restored verbatim, then rebuilds from current
 		// equip state — so old saves pick up the pipeline and no duplicates accrue.
-		this._recalculateItemUpgradeModifiers();
+		this._recalculateEquipmentModifiers();
 
 		// Reapply history-backed optional features for saves which persisted history
 		// but did not fully reconstruct runtime feature state.
@@ -6517,6 +6534,36 @@ class CharacterSheetState {
 			craftingDangerousHarvest: false,
 			craftingStrictCrafterGating: false,
 			craftingConsumeOnFailure: false,
+		};
+
+		for (const [key, value] of Object.entries(defaults)) {
+			if (s[key] === undefined || s[key] === null) s[key] = value;
+		}
+	}
+
+	/**
+	 * Backfill the item-material settings for saves that predate them.
+	 *
+	 * Same shallow-merge problem as {@link _migrateCraftingSettingsDefaults}: an older
+	 * save's `settings` object replaces the default wholesale, so a `=== false` guard
+	 * would read `undefined` as "not disabled" while an `enableMaterials` truthiness
+	 * check would read it as "not enabled". Set them explicitly.
+	 *
+	 * Idempotent — an explicit `true`/`false` is preserved.
+	 */
+	_migrateMaterialSettingsDefaults () {
+		if (!this._data.settings || typeof this._data.settings !== "object") {
+			this._data.settings = {};
+		}
+		const s = this._data.settings;
+
+		const defaults = {
+			enableMaterials: true,
+			materials_weightFromDensity: true,
+			materials_recomputeValue: true,
+			materials_magicCapacity: true,
+			materials_penetration: true,
+			materials_degradation: true,
 		};
 
 		for (const [key, value] of Object.entries(defaults)) {
@@ -12212,6 +12259,54 @@ class CharacterSheetState {
 
 	setBaseAc (ac) { this._data.ac.base = ac; }
 	setArmor (armor) { this._data.ac.armor = armor; }
+
+	/**
+	 * Build the `_data.ac.armor` snapshot for a piece of body armor.
+	 *
+	 * The snapshot is the AC pipeline's view of the worn armor, so it must be taken
+	 * from the MATERIAL-PROJECTED item — a Mithril breastplate's base AC, uncapped Dex
+	 * and absent Strength requirement all live in the projection, not the stored item.
+	 *
+	 * It also carries `strength`, `stealth` and `dexterityMax`, which
+	 * `getArmorStrengthPenalty()` and `_getMediumArmorMaxDex()` read but the older
+	 * snapshot never populated.
+	 *
+	 * @param {object} item Raw (unprojected) inventory item data.
+	 * @returns {object}
+	 */
+	_getArmorAcSlotSnapshot (item) {
+		const projected = this.projectItemMaterial(item);
+		return {
+			ac: projected.ac,
+			type: projected.armorType || item.armorType || this._inferArmorType(projected),
+			name: item.name,
+			source: item.source,
+			appliedUpgrades: item.appliedUpgrades || [],
+			...(projected.strength !== undefined ? {strength: projected.strength} : {}),
+			...(projected.stealth !== undefined ? {stealth: projected.stealth} : {}),
+			...(projected.dexterityMax !== undefined ? {dexterityMax: projected.dexterityMax} : {}),
+			...(item.material ? {material: item.material} : {}),
+		};
+	}
+
+	/**
+	 * Build the `_data.ac.shield` snapshot. Material AC bonuses (Darkmetal +1,
+	 * Adamantine +2, Dragon Scales +1) land on the projected `acBonus`.
+	 *
+	 * @param {object} item Raw (unprojected) inventory item data.
+	 * @returns {object}
+	 */
+	_getShieldAcSlotSnapshot (item) {
+		const projected = this.projectItemMaterial(item);
+		return {
+			ac: projected.ac ?? 2,
+			bonus: projected.acBonus,
+			name: item.name,
+			source: item.source,
+			appliedUpgrades: item.appliedUpgrades || [],
+			...(item.material ? {material: item.material} : {}),
+		};
+	}
 	setShield (hasShield) { this._data.ac.shield = hasShield; }
 	setItemAcBonus (bonus) { this._data.ac.itemBonus = bonus || 0; }
 	getItemAcBonus () { return this._data.ac.itemBonus || 0; }
@@ -12259,6 +12354,14 @@ class CharacterSheetState {
 			const baseSpellDc = invItem.item?.bonusSpellSaveDc || 0;
 			const baseCrit = invItem.item?.critThreshold || 20;
 
+			// Material crit contribution. Read from the projection so the clamps in
+			// `applyToItem` (never an impossible crit, never past the natural 20) apply here too.
+			let materialCritReduction = 0;
+			if (invItem.item?.material?.name) {
+				const projected = this.projectItemMaterial(invItem.item);
+				if (projected !== invItem.item) materialCritReduction = baseCrit - (projected.critThreshold || baseCrit);
+			}
+
 			// Upgrade bonuses (if CharacterSheetUpgrades module is loaded)
 			let upgradeSpellAtk = 0;
 			let upgradeSpellDc = 0;
@@ -12272,7 +12375,7 @@ class CharacterSheetState {
 
 			const totalSpellAtk = baseSpellAtk + upgradeSpellAtk;
 			const totalSpellDc = baseSpellDc + upgradeSpellDc;
-			const effectiveCrit = baseCrit - upgradeCritReduction;
+			const effectiveCrit = baseCrit - upgradeCritReduction - materialCritReduction;
 
 			if (totalSpellAtk > maxSpellAttack) maxSpellAttack = totalSpellAtk;
 			if (totalSpellDc > maxSpellSaveDc) maxSpellSaveDc = totalSpellDc;
@@ -12655,7 +12758,66 @@ class CharacterSheetState {
 	 * remove, equip/unequip, and load.
 	 * @private
 	 */
-	_recalculateItemUpgradeModifiers () {
+	/**
+	 * Bridge a material's conditional effects (advantage-style rules such as Lead's
+	 * divination resistance) into `namedModifiers`, so they surface through the same
+	 * per-roll opt-in flow as every other conditional bonus.
+	 *
+	 * Idempotent: every `sourceType: "itemMaterial"` modifier is stripped and rebuilt.
+	 */
+	_recalculateMaterialModifiers ({isDeferAggregate = false} = {}) {
+		if (!Array.isArray(this._data.namedModifiers)) this._data.namedModifiers = [];
+
+		const hadOwn = this._data.namedModifiers.some(m => m.sourceType === "itemMaterial");
+		this._data.namedModifiers = this._data.namedModifiers.filter(m => m.sourceType !== "itemMaterial");
+
+		let added = false;
+		if (typeof CharacterSheetMaterials !== "undefined" && this._data.settings?.enableMaterials !== false) {
+			for (const invItem of this._data.inventory) {
+				// Only worn/wielded gear projects its material onto the character.
+				if (!invItem.equipped || !invItem.item?.material?.name) continue;
+				const material = CharacterSheetMaterials.resolveMaterial(invItem.item, this._itemMaterialCatalog || []);
+				if (!material) continue;
+
+				const fx = CharacterSheetMaterials.getMaterialEffects(invItem.item, material);
+				for (const mod of fx.conditionalModifiers) {
+					this._data.namedModifiers.push({
+						id: CryptUtil.uid(),
+						name: `${material.name}${mod.schools?.length ? ` (${mod.schools.join(", ")})` : ""}`,
+						type: mod.kind === "save" ? "save" : "check",
+						value: 0,
+						advantage: true,
+						conditional: mod.conditional || material.name,
+						sourceType: "itemMaterial",
+						sourceLabel: invItem.item.name || "",
+						enabled: true,
+					});
+					added = true;
+				}
+			}
+		}
+
+		const isChanged = hadOwn || added;
+		if (isChanged && !isDeferAggregate) this._recalculateCustomModifiers();
+		return isChanged;
+	}
+
+	/**
+	 * Refresh every modifier derived from equipped gear — upgrades AND materials — in
+	 * one pass, so the expensive `_recalculateCustomModifiers()` aggregate runs at most
+	 * once. This is the hook every equip/unequip/add/remove path should call.
+	 *
+	 * @returns {boolean} Whether anything changed.
+	 */
+	_recalculateEquipmentModifiers () {
+		const upgradesChanged = this._recalculateItemUpgradeModifiers({isDeferAggregate: true});
+		const materialsChanged = this._recalculateMaterialModifiers({isDeferAggregate: true});
+		const isChanged = upgradesChanged || materialsChanged;
+		if (isChanged) this._recalculateCustomModifiers();
+		return isChanged;
+	}
+
+	_recalculateItemUpgradeModifiers ({isDeferAggregate = false} = {}) {
 		if (!Array.isArray(this._data.namedModifiers)) this._data.namedModifiers = [];
 
 		// Strip our own modifiers first (idempotent; also clears any persisted on load).
@@ -12705,7 +12867,9 @@ class CharacterSheetState {
 		}
 
 		// Only refresh aggregates when something actually changed.
-		if (hadOwn || added) this._recalculateCustomModifiers();
+		const isChanged = hadOwn || added;
+		if (isChanged && !isDeferAggregate) this._recalculateCustomModifiers();
+		return isChanged;
 	}
 
 	/**
@@ -28824,12 +28988,397 @@ class CharacterSheetState {
 	getItems () {
 		return this._data.inventory.map(invItem => ({
 			id: invItem.id,
-			...invItem.item,
+			...this.projectItemMaterial(invItem.item),
 			quantity: invItem.quantity,
 			equipped: invItem.equipped,
 			attuned: invItem.attuned,
 			starred: invItem.starred,
 		}));
+	}
+
+	/**
+	 * The item as STORED, without material projection, flattened like `getItems()`.
+	 *
+	 * Editing flows must seed from this rather than `getItems()`: the projection folds a
+	 * material's effects into `ac`/`dmg1`/`weight`/`value`, so re-saving a projected item
+	 * would bake those effects into the base and double-apply them on the next read.
+	 *
+	 * @param {string} itemId
+	 * @returns {object|null}
+	 */
+	getItemRaw (itemId) {
+		const invItem = this._data.inventory.find(i => i.id === itemId);
+		if (!invItem) return null;
+		return {
+			id: invItem.id,
+			...invItem.item,
+			quantity: invItem.quantity,
+			equipped: invItem.equipped,
+			attuned: invItem.attuned,
+			starred: invItem.starred,
+		};
+	}
+
+	/**
+	 * Resolve an item's material into its stats, returning a NEW object. The stored
+	 * item is never mutated, which is what lets a material be swapped or removed
+	 * without corrupting the base item.
+	 *
+	 * `getItems()` is the funnel for nearly every item read, so projecting here covers
+	 * the majority of call sites for free. Direct `invItem.item.*` readers call this
+	 * explicitly.
+	 *
+	 * @param {object} itemData Raw stored item data.
+	 * @returns {object} The projected item (or the input when there is nothing to do).
+	 */
+	projectItemMaterial (itemData) {
+		if (!itemData?.material?.name) return itemData;
+		if (typeof CharacterSheetMaterials === "undefined") return itemData;
+		if (this._data.settings?.enableMaterials === false) return itemData;
+
+		const material = CharacterSheetMaterials.resolveMaterial(itemData, this._itemMaterialCatalog || []);
+		if (!material) return itemData;
+
+		const projected = CharacterSheetMaterials.applyToItem(itemData, material, {
+			isSkipDegradation: this._data.settings?.materials_degradation === false,
+		});
+
+		// Weight/value derivation are independently toggleable; restore the stored values
+		// when their sub-toggle is off.
+		if (this._data.settings?.materials_weightFromDensity === false) projected.weight = itemData.weight;
+		if (this._data.settings?.materials_recomputeValue === false) projected.value = itemData.value;
+		if (this._data.settings?.materials_penetration === false) delete projected.penetration;
+
+		return projected;
+	}
+
+	/**
+	 * Set (or replace) the material an inventory item is made of.
+	 *
+	 * @param {string} itemId
+	 * @param {object|null} material Material entity or `{name, source}` ref; null clears.
+	 * @param {object} [choices] Per-material sub-choices (dragon type, condensate role,
+	 *        draconic domain), stored alongside the reference.
+	 * @returns {boolean} Whether anything changed.
+	 */
+	setItemMaterial (itemId, material, choices = null) {
+		const invItem = this._data.inventory.find(i => i.id === itemId);
+		if (!invItem?.item) return false;
+
+		if (!material) return this.clearItemMaterial(itemId);
+		// A reference with no name can never be resolved back to an entity, so accepting it
+		// would leave the item permanently "made of something" with nothing to project.
+		if (!material.name) return false;
+
+		invItem.item.material = {
+			name: material.name,
+			source: material.source || "TGTT",
+			...(choices && Object.keys(choices).length ? {choices} : {}),
+		};
+
+		this._onItemMaterialChanged();
+		return true;
+	}
+
+	/**
+	 * Remove an item's material, restoring its base statistics.
+	 * @param {string} itemId
+	 * @returns {boolean}
+	 */
+	clearItemMaterial (itemId) {
+		const invItem = this._data.inventory.find(i => i.id === itemId);
+		if (!invItem?.item?.material) return false;
+		delete invItem.item.material;
+		this._onItemMaterialChanged();
+		return true;
+	}
+
+	/**
+	 * The item's Magic Capacity standing, or `null` when the item has no material or
+	 * its material states no capacity.
+	 *
+	 * Counted against the RAW item, not the projection: a material's own intrinsic
+	 * properties are what it is, not enchantments placed into it, so Darkmetal's shield
+	 * bonus must not eat a slot of Darkmetal's own capacity.
+	 *
+	 * @param {string} itemId
+	 * @returns {object|null}
+	 */
+	getMagicCapacityStatus (itemId) {
+		if (typeof CharacterSheetMaterials === "undefined") return null;
+		if (this._data.settings?.enableMaterials === false) return null;
+		if (this._data.settings?.materials_magicCapacity === false) return null;
+
+		const item = this.getItemRaw(itemId);
+		if (!item?.material) return null;
+
+		const mat = this.getItemMaterialEntity(item);
+		if (!mat) return null;
+
+		return CharacterSheetMaterials.getMagicCapacityStatus(item, mat, {
+			manualAdjust: this.getMagicCapacityAdjust(itemId),
+		});
+	}
+
+	/**
+	 * Every carried item currently holding more magic than its material can take.
+	 *
+	 * The rules re-check passive effects "after each Short or Long Rest while it
+	 * remains overloaded", so the rest flow needs to know which items qualify.
+	 *
+	 * @returns {Array<{id: string, name: string, status: object}>}
+	 */
+	getOverloadedMaterialItems () {
+		if (typeof CharacterSheetMaterials === "undefined") return [];
+		if (this._data.settings?.enableMaterials === false) return [];
+		if (this._data.settings?.materials_magicCapacity === false) return [];
+
+		const out = [];
+		for (const invItem of this._data.inventory) {
+			if (!invItem.item?.material) continue;
+			const status = this.getMagicCapacityStatus(invItem.id);
+			if (status?.isOverloaded) out.push({id: invItem.id, name: invItem.item.name, status});
+		}
+		return out;
+	}
+
+	/* ------------------------------------------------------------------ *
+	 * Material degradation
+	 * ------------------------------------------------------------------ */
+
+	/** Whether degradation tracking is switched on. */
+	isMaterialDegradationEnabled () {
+		if (typeof CharacterSheetMaterials === "undefined") return false;
+		if (this._data.settings?.enableMaterials === false) return false;
+		return this._data.settings?.materials_degradation !== false;
+	}
+
+	/**
+	 * The item's degradation standing, or `null` when its material never degrades
+	 * or it is currently intact.
+	 * @param {string} itemId
+	 * @returns {object|null}
+	 */
+	getItemDegradation (itemId) {
+		if (!this.isMaterialDegradationEnabled()) return null;
+		const item = this.getItemRaw(itemId);
+		if (!item?.material) return null;
+		const mat = this.getItemMaterialEntity(item);
+		if (!mat) return null;
+		return CharacterSheetMaterials.getDegradationStatus(item, mat);
+	}
+
+	/**
+	 * Items whose material *can* degrade and which are affected by `trigger`.
+	 *
+	 * Used by the combat hook, which knows the roll but not which of the carried
+	 * items the rules care about. `opts.itemId` narrows it to the weapon actually
+	 * swung; a `damageTaken` trigger deliberately sweeps everything worn.
+	 *
+	 * @param {object} trigger `{type, natural, isCrit, damageType}`
+	 * @param {object} [opts] `{itemId}`
+	 * @returns {Array<{id: string, name: string, material: object}>}
+	 */
+	getDegradationCandidates (trigger, opts = {}) {
+		if (!this.isMaterialDegradationEnabled()) return [];
+
+		const rows = opts.itemId
+			? this._data.inventory.filter(i => i.id === opts.itemId)
+			: this._data.inventory;
+
+		const out = [];
+		for (const invItem of rows) {
+			if (!invItem.item?.material) continue;
+			if (invItem.item.material.isDestroyed) continue;
+			const mat = this.getItemMaterialEntity(invItem.item);
+			if (!mat) continue;
+			if (!CharacterSheetMaterials.isDegradationTriggered(mat, trigger)) continue;
+			out.push({id: invItem.id, name: invItem.item.name, material: mat});
+		}
+		return out;
+	}
+
+	/**
+	 * Record one degradation event against an item.
+	 *
+	 * Always an explicit call — the combat hook prompts first, because whether a
+	 * fumble actually chipped the blade is a table decision, not a certainty.
+	 *
+	 * @param {string} itemId
+	 * @returns {object|null} The new standing, or `null` if nothing applied.
+	 */
+	degradeItemMaterial (itemId) {
+		const invItem = this._data.inventory.find(i => i.id === itemId);
+		if (!invItem?.item?.material) return null;
+		const mat = this.getItemMaterialEntity(invItem.item);
+		const spec = CharacterSheetMaterials.getDegradationSpec(mat);
+		if (!spec) return null;
+
+		const prior = Number(invItem.item.material.degradationStacks) || 0;
+		// A non-stacking material still counts its events, so the log stays honest even
+		// though only the first one changes any number.
+		invItem.item.material.degradationStacks = prior + 1;
+		if (spec.destroys) invItem.item.material.isDestroyed = true;
+
+		this._onItemMaterialChanged();
+		return this.getItemDegradation(itemId);
+	}
+
+	/**
+	 * Repair an item back to intact.
+	 * @param {string} itemId
+	 * @returns {boolean} Whether anything changed.
+	 */
+	repairItemMaterial (itemId) {
+		const invItem = this._data.inventory.find(i => i.id === itemId);
+		const material = invItem?.item?.material;
+		if (!material) return false;
+		if (!material.degradationStacks && !material.isDestroyed) return false;
+
+		delete material.degradationStacks;
+		delete material.isDestroyed;
+		this._onItemMaterialChanged();
+		return true;
+	}
+
+	/**
+	 * Degraded items whose material is repaired over a Short Rest, so the rest flow
+	 * can offer them. Destroyed items are excluded — a shattered glass blade is gone.
+	 *
+	 * @returns {Array<{id: string, name: string, status: object, tool: string|null}>}
+	 */
+	getShortRestRepairableItems () {
+		if (!this.isMaterialDegradationEnabled()) return [];
+
+		const out = [];
+		for (const invItem of this._data.inventory) {
+			if (!invItem.item?.material) continue;
+			const status = this.getItemDegradation(invItem.id);
+			if (!status || status.isDestroyed) continue;
+			if (status.repair?.method !== "shortRest") continue;
+			out.push({id: invItem.id, name: invItem.item.name, status, tool: status.repair.tool || null});
+		}
+		return out;
+	}
+
+	/**
+	 * The DM/player override applied on top of the counted effects. Stored on the
+	 * material reference rather than the item, because it only means anything while
+	 * that material is fitted — swap the material and the judgement call is void.
+	 *
+	 * @param {string} itemId
+	 * @returns {number}
+	 */
+	getMagicCapacityAdjust (itemId) {
+		const invItem = this._data.inventory.find(i => i.id === itemId);
+		return Number(invItem?.item?.material?.mcAdjust) || 0;
+	}
+
+	/**
+	 * @param {string} itemId
+	 * @param {number} delta Signed adjustment; 0 removes the override entirely.
+	 * @returns {boolean} Whether anything changed.
+	 */
+	setMagicCapacityAdjust (itemId, delta) {
+		const invItem = this._data.inventory.find(i => i.id === itemId);
+		if (!invItem?.item?.material) return false;
+		const next = Number(delta) || 0;
+		if ((Number(invItem.item.material.mcAdjust) || 0) === next) return false;
+		if (!next) delete invItem.item.material.mcAdjust;
+		else invItem.item.material.mcAdjust = next;
+		return true;
+	}
+
+	/**
+	 * Which part of the item its material forms. Only meaningful for elemental condensates,
+	 * whose affinity applies in exactly one role.
+	 */
+	getMaterialRole (itemId) {
+		const item = this.getItemRaw(itemId);
+		const material = this.getItemMaterialEntity(item);
+		if (!material) return null;
+		return CharacterSheetMaterials.getActiveRole(item, material);
+	}
+
+	setMaterialRole (itemId, role) {
+		const invItem = this._data.inventory.find(i => i.id === itemId);
+		if (!invItem?.item?.material) return false;
+		const material = this.getItemMaterialEntity(invItem.item);
+		if (!material) return false;
+		if (role && !CharacterSheetMaterials.getAvailableRoles(invItem.item, material).includes(role)) return false;
+		if ((invItem.item.material.role || null) === (role || null)) return false;
+		if (!role) delete invItem.item.material.role;
+		else invItem.item.material.role = role;
+		this._onItemMaterialChanged();
+		return true;
+	}
+
+	/**
+	 * The Draconic Domain Resonance an item carries, if any. Items made of solid dragon
+	 * remains may carry exactly one, chosen from its source dragon's domain.
+	 */
+	getDraconicResonance (itemId) {
+		const item = this.getItemRaw(itemId);
+		return this.getDraconicResonanceEntity(item);
+	}
+
+	/**
+	 * @param {string} itemId
+	 * @param {?{name: string, source: string}} ref Pass a falsy value to clear the resonance.
+	 * @returns {boolean} Whether anything changed.
+	 */
+	setDraconicResonance (itemId, ref) {
+		const invItem = this._data.inventory.find(i => i.id === itemId);
+		if (!invItem?.item?.material) return false;
+		const material = this.getItemMaterialEntity(invItem.item);
+		if (!material) return false;
+		// A resonance rides the material's slot; without one there is nothing to carry it.
+		const slots = CharacterSheetMaterials.getMaterialEffects(invItem.item, material)?.draconicResonanceSlots || 0;
+		if (!slots) return false;
+		if (ref?.name && !(this._draconicResonanceCatalog || []).some(r => r.name === ref.name && r.source === ref.source)) return false;
+		const cur = invItem.item.material.resonance || null;
+		if ((cur?.name || null) === (ref?.name || null)) return false;
+		if (!ref?.name) delete invItem.item.material.resonance;
+		else invItem.item.material.resonance = {name: ref.name, source: ref.source};
+		this._onItemMaterialChanged();
+		return true;
+	}
+
+	/**
+	 * Shared post-change hook: refresh every material-derived aggregate. Callers are
+	 * responsible for re-rendering and saving, as with the other item setters.
+	 */
+	_onItemMaterialChanged () {
+		this._refreshEquippedAcSlots();
+		// Applying or removing Ioun Sand turns an item into (or out of) a matrix, which
+		// changes both its host policy and whether its seated stones are doubled.
+		this.reconcileIounHosts?.();
+		this._recalculateItemBonuses();
+		this._recalculateEquipmentModifiers();
+	}
+
+	/**
+	 * Re-stamp the `_data.ac.armor` / `_data.ac.shield` snapshots from the currently
+	 * equipped items.
+	 *
+	 * The snapshots are captured once, at `equip()` time. Anything that changes what an
+	 * equipped armour or shield *is* after the fact — currently a material change — has to
+	 * refresh them, or the character keeps wearing the pre-change armour.
+	 *
+	 * @returns {void}
+	 */
+	_refreshEquippedAcSlots () {
+		for (const invItem of this._data.inventory) {
+			if (!invItem.equipped) continue;
+			const item = invItem.item;
+			if (!item) continue;
+
+			if (item.acBonus !== undefined && this._data.ac.shield?.name === item.name) {
+				this._data.ac.shield = /** @type {*} */ (this._getShieldAcSlotSnapshot(item));
+			} else if (item.ac !== undefined && this._data.ac.armor?.name === item.name) {
+				this.setArmor(this._getArmorAcSlotSnapshot(item));
+			}
+		}
 	}
 
 	/**
@@ -30483,18 +31032,17 @@ class CharacterSheetState {
 			if (equipped && item.type === "armor") {
 				if (item.acBonus !== undefined) {
 					// Shield-type item (has bonus instead of base AC)
-					this._data.ac.shield = /** @type {*} */ ({ac: item.ac ?? 2, bonus: item.acBonus, name: item.name, source: item.source, appliedUpgrades: item.appliedUpgrades || []});
+					this._data.ac.shield = /** @type {*} */ (this._getShieldAcSlotSnapshot(item));
 				} else if (item.ac !== undefined) {
 					// Body armor
-					const armorType = item.armorType || this._inferArmorType(item);
-					this.setArmor({ac: item.ac, type: armorType, name: item.name, source: item.source, appliedUpgrades: item.appliedUpgrades || []});
+					this.setArmor(this._getArmorAcSlotSnapshot(item));
 				}
 			}
 
 			// An equipped armor/shield added with upgrades already applied must register its
 			// conditional roll modifiers immediately (covers one-shot add-equipped flows).
 			if (_addedWrapper.equipped && (_addedWrapper.item?.armor || _addedWrapper.item?.shield) && _addedWrapper.item?.appliedUpgrades?.length) {
-				this._recalculateItemUpgradeModifiers();
+				this._recalculateEquipmentModifiers();
 			}
 		}
 
@@ -31012,7 +31560,7 @@ class CharacterSheetState {
 		if (sacredWeaponState) this.deactivateState("sacredWeapon");
 
 		// An equipped upgraded armor/shield leaving inventory must drop its conditional modifiers.
-		this._recalculateItemUpgradeModifiers();
+		this._recalculateEquipmentModifiers();
 	}
 
 	/**
@@ -31071,7 +31619,7 @@ class CharacterSheetState {
 
 		this._recalculateItemBonuses();
 		// Replacing an equipped armor/shield payload may change its upgrades.
-		this._recalculateItemUpgradeModifiers();
+		this._recalculateEquipmentModifiers();
 		return true;
 	}
 
@@ -31101,7 +31649,7 @@ class CharacterSheetState {
 				this._unregisterItemEffects(itemId);
 			}
 			// Refresh derived armor/shield-upgrade conditional modifiers (equip state changed).
-			this._recalculateItemUpgradeModifiers();
+			this._recalculateEquipmentModifiers();
 			// A set stone is by definition functioning, so stowing it must vacate its setting.
 			if (!equipped) {
 				const host = this.getIounHostOfStone(itemId);
@@ -31126,18 +31674,17 @@ class CharacterSheetState {
 			if (item?.type === "armor" || item?.type === "M" || item?.type === "R" || item?.ac !== undefined || item?.acBonus !== undefined) {
 				if (item.acBonus !== undefined) {
 					// Shield
-					this._data.ac.shield = /** @type {*} */ ({ac: item.ac ?? 2, bonus: item.acBonus, name: item.name, source: item.source, appliedUpgrades: item.appliedUpgrades || []});
+					this._data.ac.shield = /** @type {*} */ (this._getShieldAcSlotSnapshot(item));
 				} else if (item.ac !== undefined) {
 					// Body armor
-					const armorType = item.armorType || this._inferArmorType(item);
-					this.setArmor({ac: item.ac, type: armorType, name: item.name, source: item.source, appliedUpgrades: item.appliedUpgrades || []});
+					this.setArmor(this._getArmorAcSlotSnapshot(item));
 				}
 			}
 
 			// Apply item effects now that it is equipped (if attunement gate also satisfied)
 			if (this._isItemEffectsActive(invItem)) this._registerItemEffects(invItem);
 			// Refresh derived armor/shield-upgrade conditional modifiers.
-			this._recalculateItemUpgradeModifiers();
+			this._recalculateEquipmentModifiers();
 
 			return true;
 		}
@@ -31160,7 +31707,7 @@ class CharacterSheetState {
 			// Remove any effects the item was contributing while equipped
 			this._unregisterItemEffects(itemId);
 			// Refresh derived armor/shield-upgrade conditional modifiers (now unequipped).
-			this._recalculateItemUpgradeModifiers();
+			this._recalculateEquipmentModifiers();
 			return true;
 		}
 		return false;
@@ -32296,7 +32843,7 @@ class CharacterSheetState {
 		});
 
 		this._recalculateItemBonuses();
-		this._recalculateItemUpgradeModifiers();
+		this._recalculateEquipmentModifiers();
 
 		return {success: true};
 	}
@@ -32319,7 +32866,7 @@ class CharacterSheetState {
 
 		item.item.appliedUpgrades.splice(idx, 1);
 		this._recalculateItemBonuses();
-		this._recalculateItemUpgradeModifiers();
+		this._recalculateEquipmentModifiers();
 		return true;
 	}
 
@@ -32883,6 +33430,50 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Whether a recognised Ioun item is a **fragment** rather than an intact stone.
+	 *
+	 * The distinction is load-bearing in exactly two places and nowhere else: an Ioun Sand
+	 * matrix doubles the properties of an intact stone but explicitly *not* "the effects of
+	 * loose Ioun fragments", and the Ioun Crystal free-effect capacity rule belongs to
+	 * fragments alone. Detection is by name, because a fragment is a fragment by what it is
+	 * called — the book gives it no separate mechanical marker.
+	 *
+	 * @param {object} itemData
+	 * @returns {boolean}
+	 */
+	static isIounFragment (itemData) {
+		return /\bioun\b[^.]{0,20}\bfragment/i.test(itemData?.name || "")
+			|| /\bfragment\b[^.]{0,20}\bioun\b/i.test(itemData?.name || "");
+	}
+
+	/**
+	 * The stone properties an Ioun Sand matrix can coherently double.
+	 *
+	 * *"Each coherent numerical property granted by that stone is doubled, including bonuses,
+	 * ranges, areas, damage, healing, capacities, and durations. The DM adjudicates properties
+	 * that cannot coherently be doubled."*
+	 *
+	 * Ranges, areas and durations live in prose and cannot be doubled by machine, so this is
+	 * the structured subset — the numeric bonus props the engine actually reads — and the UI
+	 * says as much rather than pretending the rest was handled.
+	 */
+	static IOUN_MATRIX_DOUBLED_PROPS = Object.freeze([
+		"bonusWeapon",
+		"bonusWeaponAttack",
+		"bonusWeaponDamage",
+		"bonusWeaponCritDamage",
+		"bonusAc",
+		"bonusAbilityCheck",
+		"bonusSavingThrow",
+		"bonusSavingThrowConcentration",
+		"bonusSpellAttack",
+		"bonusSpellDamage",
+		"bonusSpellSaveDc",
+		"bonusProficiencyBonus",
+		"reach",
+	]);
+
+	/**
 	 * Matches an item's own declaration that its attunement is free of the normal slot
 	 * limit. The `(?:attunement|bond)` anchor is load-bearing: it requires the noun naming
 	 * *this* item's attunement to be the subject, so "Attuning to an installed component
@@ -33055,7 +33646,13 @@ class CharacterSheetState {
 	getIounHostPolicy (itemData) {
 		const none = {isHost: false, settings: 0, grants: [], perStone: 1, waivesAttunement: false, settingLabel: "setting", origin: "none"};
 		if (!itemData) return none;
+		// The matrix overlay is applied to whichever of the four layers below answers, so it
+		// survives a player sizing the matrix from the ⚙ editor.
+		return this._applyIounMatrixOverlay(itemData, this._getIounHostPolicyBase(itemData, none));
+	}
 
+	/** The four first-match detection layers, before the Ioun Sand matrix overlay. */
+	_getIounHostPolicyBase (itemData, none) {
 		const build = (desc, origin) => {
 			const settings = Math.max(0, Math.floor(Number(desc.settings) || 0));
 			const grants = Array.isArray(desc.grants) && desc.grants.length ? [...desc.grants] : ["bonusWeapon"];
@@ -33064,6 +33661,10 @@ class CharacterSheetState {
 				settings,
 				grants,
 				perStone: Number(desc.perStone) > 0 ? Number(desc.perStone) : 1,
+				// Whether the *source* actually declared a bonus, as opposed to inheriting the
+				// `bonusWeapon +1` default. Only the Ioun Sand overlay consults this, so plain
+				// hosts keep the historic default untouched.
+				isBonusDeclared: !!(Array.isArray(desc.grants) && desc.grants.length) || Number(desc.perStone) > 0,
 				waivesAttunement: !!desc.waivesAttunement,
 				settingLabel: desc.settingLabel || "setting",
 				origin,
@@ -33099,6 +33700,52 @@ class CharacterSheetState {
 		}
 
 		return none;
+	}
+
+	/**
+	 * Fold an Ioun Sand matrix's properties onto a resolved host policy.
+	 *
+	 * The matrix has no stated setting count in the rules ("complete matrices holding several
+	 * intact stones are among the rarest magical devices in existence"), so an undeclared
+	 * matrix gets **one** seat and the ⚙ editor's `iounSettings` sizes it up.
+	 *
+	 * @param {object} itemData
+	 * @param {object} policy - the policy resolved by the four detection layers
+	 * @returns {object} the policy, with matrix properties applied when the item is one
+	 */
+	_applyIounMatrixOverlay (itemData, policy) {
+		if (!this.isIounMatrix(itemData)) return policy;
+		// A bare `iounSettings` number sizes the matrix; it does NOT turn it into an Ioun
+		// Blade. Only a host whose source actually declared a bonus keeps one.
+		const isBonusHost = policy.isHost && policy.isBonusDeclared;
+		return {
+			...policy,
+			isHost: true,
+			settings: policy.settings > 0 ? policy.settings : 1,
+			// A matrix does not grant a bonus of its own — the doubling IS its contribution —
+			// so `perStone` is zeroed rather than inheriting the Ioun Blade's +1.
+			grants: isBonusHost ? policy.grants : [],
+			perStone: isBonusHost ? policy.perStone : 0,
+			settingLabel: isBonusHost ? policy.settingLabel : "matrix seat",
+			isMatrix: true,
+			origin: isBonusHost ? policy.origin : "material",
+		};
+	}
+
+	/**
+	 * Whether an item is an Ioun Sand matrix — i.e. its material grants `doubleNumericProperties`.
+	 *
+	 * Keyed on the structured effect, never on the material's name, so a homebrew material that
+	 * declares the same effect behaves identically.
+	 *
+	 * @param {object} itemData
+	 * @returns {boolean}
+	 */
+	isIounMatrix (itemData) {
+		if (!itemData?.material?.name) return false;
+		if (!this._data?.settings?.enableMaterials) return false;
+		const material = this.getItemMaterialEntity(itemData);
+		return !!(material?.effects || []).some(fx => fx?.type === "doubleNumericProperties");
 	}
 
 	/**
@@ -33206,6 +33853,7 @@ class CharacterSheetState {
 		host.item.iounSet.push(stoneItemId);
 		stone.equipped = true;
 		this._recomputeIounHostBonuses(host);
+		this._recomputeIounMatrixDoubling(host);
 		this._recalculateItemBonuses();
 		return {success: true};
 	}
@@ -33234,6 +33882,7 @@ class CharacterSheetState {
 			if (stone) stone.equipped = false;
 		}
 		this._recomputeIounHostBonuses(host);
+		this._recomputeIounMatrixDoubling(host);
 		this._recalculateItemBonuses();
 		return {success: true};
 	}
@@ -33282,6 +33931,84 @@ class CharacterSheetState {
 			if (data.iounBaseBonuses[key] == null) data.iounBaseBonuses[key] = Number(data[key]) || 0;
 			data[key] = (Number(data.iounBaseBonuses[key]) || 0) + delta;
 		}
+	}
+
+	/**
+	 * Double (or restore) the numeric properties of every stone seated in a host item.
+	 *
+	 * Materialised onto the **stone** row for the same reason `_recomputeIounHostBonuses`
+	 * materialises onto the host: `bonusWeapon` and friends are read raw across combat, the
+	 * inventory aggregator and NPC export, and only some of those consult the effective-bonus
+	 * helper. The pristine values are captured once in `iounMatrixBaseBonuses` and every
+	 * recomputation reads *from* that capture, so the operation is idempotent and never
+	 * compounds. Clearing the capture is what makes it fully reversible.
+	 *
+	 * Fragments are excluded by rule: *"Ioun Sand does not double … the effects of loose Ioun
+	 * fragments."*
+	 *
+	 * @param {object} hostRow - an inventory wrapper
+	 */
+	_recomputeIounMatrixDoubling (hostRow) {
+		const data = hostRow?.item || hostRow;
+		if (!data) return;
+		const isMatrix = !!this.getIounHostPolicy(data).isMatrix;
+		const seated = new Set(Array.isArray(data.iounSet) ? data.iounSet : []);
+
+		for (const row of this._data.inventory) {
+			const stone = row.item;
+			if (!stone) continue;
+			const shouldDouble = isMatrix
+				&& seated.has(row.id)
+				&& !CharacterSheetState.isIounFragment(stone);
+
+			if (!shouldDouble) {
+				if (!stone.iounMatrixBaseBonuses) continue;
+				// Only unwind a capture this host is responsible for; a stone moved straight
+				// into another matrix is re-doubled by that matrix's own pass.
+				if (stone.iounMatrixBaseBonuses.__hostId !== (hostRow.id ?? data.id)) continue;
+				for (const [key, base] of Object.entries(stone.iounMatrixBaseBonuses)) {
+					if (key === "__hostId") continue;
+					stone[key] = base;
+				}
+				stone.iounMatrixBaseBonuses = null;
+				continue;
+			}
+
+			if (!stone.iounMatrixBaseBonuses) stone.iounMatrixBaseBonuses = {__hostId: hostRow.id ?? data.id};
+			for (const key of CharacterSheetState.IOUN_MATRIX_DOUBLED_PROPS) {
+				const current = Number(stone.iounMatrixBaseBonuses[key] ?? stone[key]);
+				if (!Number.isFinite(current) || current === 0) continue;
+				if (stone.iounMatrixBaseBonuses[key] == null) stone.iounMatrixBaseBonuses[key] = current;
+				stone[key] = current * 2;
+			}
+		}
+	}
+
+	/**
+	 * The stones an Ioun Sand matrix is currently doubling, and the ones it is refusing to.
+	 *
+	 * @param {string} hostItemId
+	 * @returns {{isMatrix: boolean, doubled: object[], excluded: object[], props: string[]}}
+	 */
+	getIounMatrixStatus (hostItemId) {
+		const host = this._data.inventory.find(i => i.id === hostItemId);
+		const policy = this.getIounHostPolicy(host?.item || host);
+		if (!policy.isMatrix) return {isMatrix: false, doubled: [], excluded: [], props: []};
+
+		const seated = (host.item?.iounSet || [])
+			.map(id => this._data.inventory.find(i => i.id === id))
+			.filter(Boolean);
+		const doubled = [];
+		const excluded = [];
+		const props = new Set();
+		for (const row of seated) {
+			if (CharacterSheetState.isIounFragment(row.item)) { excluded.push(row); continue; }
+			doubled.push(row);
+			for (const key of Object.keys(row.item?.iounMatrixBaseBonuses || {})) {
+				if (key !== "__hostId") props.add(key);
+			}
+		}
+		return {isMatrix: true, doubled, excluded, props: [...props]};
 	}
 
 	/**
@@ -33337,6 +34064,7 @@ class CharacterSheetState {
 					}
 				}
 				this._recomputeIounHostBonuses(row);
+				this._recomputeIounMatrixDoubling(row);
 				this._recomputeIounHostAttunement(row, hasBond);
 			}
 			return changed;
@@ -33754,7 +34482,7 @@ class CharacterSheetState {
 			// Skip items that are inside weightless containers
 			if (itemsInWeightlessContainers.has(i.id)) return sum;
 
-			const weight = i.item.weight || 0;
+			const weight = this.projectItemMaterial(i.item).weight || 0;
 			return sum + (weight * i.quantity);
 		}, 0);
 	}
@@ -39644,6 +40372,58 @@ class CharacterSheetState {
 	];
 
 	/** Homebrew-sourced catalog of gods (set by the page after brew merge). */
+	/**
+	 * Item material catalog (homebrew `itemMaterial` entities). Materials are resolved
+	 * by `{name, source}` reference at read time, so the catalog must be set before
+	 * any inventory projection runs.
+	 * @param {Array<object>} materials
+	 */
+	setItemMaterialCatalog (materials) {
+		this._itemMaterialCatalog = Array.isArray(materials) ? materials : [];
+		// `CharacterSheetMaterials`' static helpers are pure and catalog-free by design;
+		// this is the one shared handle they read when no catalog is passed explicitly.
+		globalThis.__csMaterialCatalog = this._itemMaterialCatalog;
+	}
+
+	/** @returns {Array<object>} */
+	getItemMaterialCatalog () { return [...(this._itemMaterialCatalog || [])]; }
+
+	/**
+	 * Resolve an item's `{name, source}` material reference to its full entity.
+	 * @param {object} item
+	 * @returns {object|null}
+	 */
+	getItemMaterialEntity (item) {
+		if (!item?.material?.name || typeof CharacterSheetMaterials === "undefined") return null;
+		return CharacterSheetMaterials.resolveMaterial(item, this._itemMaterialCatalog || []);
+	}
+
+	/**
+	 * Draconic domain resonance catalog (homebrew `draconicResonance` entities). Only items
+	 * whose material grants a resonance slot can carry one.
+	 * @param {Array<object>} resonances
+	 */
+	setDraconicResonanceCatalog (resonances) {
+		this._draconicResonanceCatalog = Array.isArray(resonances) ? resonances : [];
+		// Mirrors `__csMaterialCatalog`: the shared handle the pure static helpers read.
+		globalThis.__csResonanceCatalog = this._draconicResonanceCatalog;
+	}
+
+	/** @returns {Array<object>} */
+	getDraconicResonanceCatalog () { return [...(this._draconicResonanceCatalog || [])]; }
+
+	/**
+	 * Resolve an item's `{name, source}` resonance reference to its full entity.
+	 * @param {object} item
+	 * @returns {object|null}
+	 */
+	getDraconicResonanceEntity (item) {
+		const ref = item?.material?.resonance;
+		if (!ref?.name) return null;
+		return (this._draconicResonanceCatalog || []).find(r =>
+			r.name === ref.name && (!ref.source || r.source === ref.source)) || null;
+	}
+
 	setDivineFavorCatalog (gods) {
 		this._divineFavorCatalog = Array.isArray(gods) ? gods : [];
 	}

@@ -757,6 +757,84 @@ getEffectiveItemBonuses(itemId)
 
 ---
 
+## CharacterSheetMaterials
+
+**File**: `js/charactersheet/charactersheet-materials.js`
+**Lines**: ~700
+**Role**: Thelemar item materials — what an item is *made of*
+
+The fourth item-shaping axis, orthogonal to Upgrades / Crafting / Custom items. A material
+is stored as a non-destructive `{name, source}` reference on the item and resolved at
+**read time** by a projection inside `getItems()`, so the base item is never mutated.
+
+Full documentation: [21-item-materials.md](./21-item-materials.md).
+
+### Features
+
+- 72 `itemMaterial` entities from the TGTT brew, six numeric axes each (Density, Damage,
+  Protection, Critical, Penetration, Magic Capacity), all tri-state (`number` / `"na"` / `null`)
+- **Material picker modal** — categorised by `materialCategory`, eligibility-filtered by
+  `appliesTo`, with a live hover/focus before-after preview
+- 33 **structured effect types** declared as data, never hardcoded per material name
+- 11-step damage die ladder with **negative** steps (`1d4 … 3d10`)
+- Density-derived weight and price-per-pound value recomputation
+- `Pen N` on attack rows + a post-attack *Penetrating Blow* prompt
+- Entry points in the item info modal, Create/Modify Custom Item, and the Craft workbench
+
+### Key Methods
+
+```javascript
+// Modals
+showMaterialPickerModal(itemId)
+showMagicCapacityModal(itemId)
+notifyOverloadedItemsOnRest(restKind)      // "short" | "long"
+
+// Pure (static)
+static stepDamageDie(die, steps)          // "1d8", +1 -> "1d10"; supports negatives
+static isEligible(item, material)
+static getEligibleMaterials(item, materials)
+static getMaterialEffects(item, material)
+static applyToItem(item, material)        // -> projected clone
+static getEffectiveWeight(item, material)
+static getEffectiveValue(item, material)  // copper
+static getPenetration(item, material)
+static getPreviewRows(item, material)     // before/after rows for the picker
+static getMaterialNotes(item, material)   // display-ready, authored notes override
+static countMagicalEffects(item, opts)    // -> {total, breakdown}; counts the RAW item
+static getMagicCapacityStatus(item, material, opts)
+static rollMagicalInterference(dc, rollFn) // rollFn injectable for tests
+```
+
+### State Methods (on CharacterSheetState)
+
+```javascript
+setItemMaterial(itemId, material)
+clearItemMaterial(itemId)
+getItemRaw(itemId)                  // unprojected — use for previews
+setItemMaterialCatalog(materials)   // called by the loader
+getItemMaterialEntity(item)         // takes the ITEM, not the material ref
+projectItemMaterial(itemData)       // applied inside getItems()
+getMagicCapacityStatus(itemId)      // null when disabled or MC is "na"
+getMagicCapacityAdjust(itemId)
+setMagicCapacityAdjust(itemId, delta)  // persists as material.mcAdjust; 0 deletes
+getOverloadedMaterialItems()        // -> [{id, name, status}] for the rest re-check
+```
+
+> ⚠️ `_data.ac.armor` / `_data.ac.shield` are snapshots stamped at `equip()` time.
+> `_onItemMaterialChanged()` calls `_refreshEquippedAcSlots()` to re-stamp them; any future
+> feature that mutates an equipped item's derived stats must do the same.
+
+> ⚠️ Magic Capacity counts against **`getItemRaw()`**, never the projection — a material's own
+> intrinsic properties are what the item *is*, not enchantments placed into it.
+
+### Settings
+
+`enableMaterials` (master), `materials_weightFromDensity`, `materials_recomputeValue`,
+`materials_magicCapacity`, `materials_penetration`, `materials_degradation` — all default
+`true`, migrated by `_migrateMaterialSettingsDefaults()`.
+
+---
+
 ## Favorites System
 
 **Files**: state in `charactersheet-state.js` (~L22198–22365), UI in `charactersheet.js` (~L5837–6160, Actions hub).

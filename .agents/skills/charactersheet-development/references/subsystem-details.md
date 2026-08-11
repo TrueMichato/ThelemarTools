@@ -6,7 +6,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Active States / Toggle Abilities (ACTIVE_STATE_TYPES, storage, mutual exclusivity, bonus aggregation, concentration cascade, Steady Aim)
 - Combat System (attack bonus, sneak attack, action economy, weapon mastery, critical hit range scoping, turn-start effect resolver, death save roll mode)
 - Spell Data Format (known/prepared, innate, spell slots)
-- Inventory Item Format (items, item bonuses, weapon bonus fields)
+- Inventory Item Format (items, item bonuses, weapon bonus fields, item materials)
 - NPC Exporter (convertStateToMonster, CR estimation, custom source)
 - Rest Mechanics (short rest, long rest, item charges)
 - Combat Action Effects Pipeline (parsing, classification, effect schema, modals, subclass grants)
@@ -473,6 +473,102 @@ Active mechanics are normalized into `itemPowers[]`:
 `getItemPowers({activeOnly})` is the shared read API for Inventory, Combat, and Play Mode. It adds current charge balance and explicit unavailable reasons for unequipped, unattuned, or undercharged items. `invokeItemPower(itemId, powerId, {confirmed})` is the sole charge transaction; destructive powers require confirmation before mutation. `attachedSpells` and named entry blocks with unambiguous activation prose are derived automatically. Ambiguous bespoke prose remains reference-only rather than receiving a misleading control.
 
 Current generic coverage includes attached spells with charge costs, action/bonus/reaction/on-hit named powers, shared item charge pools/recharge display, alternative unarmored AC, and conditional save advantage. Staff of Power, Gae Bolg, and Robe of the Archmagi are the regression fixtures in `CharacterSheetItemPowers.test.js`.
+
+### Item materials (TGTT)
+
+An item may carry `material: {name, source}` — a **non-destructive reference** to one of the
+72 `itemMaterial` entities. The base item is never mutated; `getItems()` runs
+`projectItemMaterial()` and every downstream reader sees the projected stats.
+
+```javascript
+{
+	name: "Longsword",
+	dmg1: "1d8",                                   // base — never rewritten
+	material: {name: "Darkmetal", source: "TGTT"},
+}
+// getItems() -> {dmg1: "1d10", dmg2: "1d12", penetration: 2, weight: 5.95, property: ["V","H"]}
+```
+
+- **Use `state.getItemRaw(id)`** whenever you need the *unprojected* item. Previewing a
+  candidate material against an already-projected item is a bug (it double-applies).
+- Material effects are **structured data** (33 `type` values), never hardcoded per name.
+  Many carry an `appliesTo` gate — Darkmetal's `+1 AC` is `["shield"]` only.
+- Axes are **tri-state**: `number` / `"na"` (cannot apply) / `null` (Varies).
+  `magicCapacity` also accepts `"infinity"` / `"-infinity"`.
+- `CharacterSheetMaterials.stepDamageDie` uses an **11-step ladder** (`1d4 … 3d10`) with
+  negative steps. `CharacterSheetUpgrades.increaseDamageDie` is a *different*, narrower
+  ladder capped at `1d12` — do not merge them.
+- ⚠️ `_data.ac.armor` / `_data.ac.shield` are snapshots stamped at `equip()` time.
+  `_onItemMaterialChanged()` must call `_refreshEquippedAcSlots()` or an equipped item's
+  material change never reaches AC / Dex cap / STR penalty.
+- Gated by `settings.enableMaterials` plus five sub-toggles (`materials_weightFromDensity`,
+  `materials_recomputeValue`, `materials_magicCapacity`, `materials_penetration`,
+  `materials_degradation`).
+- **Magic Capacity** counts magical effects against the material's MC budget:
+  `countMagicalEffects` → `getMagicCapacityStatus` → `rollMagicalInterference`.
+  Counting reads **`getItemRaw()`**, never the projection — a material's intrinsic
+  properties are what the item *is*, not enchantments placed into it. Bonus families
+  (`bonusWeapon` + `bonusWeaponAttack` + `bonusWeaponDamage`) collapse to one.
+  `passed = d20 >= 15 + over`; failure rolls d8 on the interference table, and overloaded
+  items are re-checked after every short/long rest via `notifyOverloadedItemsOnRest`.
+  Of the five `magicCapacityRules`, only `freeEffect` and `dcRiseThreshold` are automated;
+  `opposedStatesCountAsOne` and `makerForeknowledge` are advisory, with the manual ±1
+  `material.mcAdjust` as the escape hatch.
+- An effect's authored `note` **replaces** the generated summary unless it carries
+  `"noteMode": "qualifier"`, in which case it is appended. `grantsAction` is exempt.
+- ⚠️ `addItem()` **stacks same-named items**, so a material applies to the whole stack.
+- **Elemental condensates** (`materialCategory: "condensate"`, 18 of them) are **role-gated**:
+  the affinity's mechanics only fire while the material occupies its own role
+  (`strikingSurface` / `protectiveLayer` / `focus`). Only weapons are ambiguous, so only
+  weapons get a role selector. The **instability is never gated**. Override via
+  `state.setMaterialRole(itemId, role)`; read the resolved one with
+  `CharacterSheetMaterials.getActiveRole(item, material)`.
+- **Draconic Domain Resonance**: the four dragon materials carry a `draconicResonanceSlot`
+  effect; the wielder picks one of **18** resonances (9 Fear + 9 Safety) via
+  `state.setDraconicResonance(itemId, {name, source})`. The choice lives at
+  `item.material.resonance`, so swapping the material voids it. Once chosen it **replaces**
+  the "May carry 1 …" note, typed `drawback` for Fear and `passive` for Safety. Resonances are
+  shared reference data, not a browsable entity — `globalThis.__csResonanceCatalog` on the
+  sheet, `globalThis.__craftingDraconicResonances` on `crafting.html`.
+- **Dragon Blood's Twelve Uses are already implemented** as variant spell components in
+  `charactersheet-spells.js` (`_pChooseComponentUses`), backed by the four
+  `Distilled Dragon's Blood` items with `usesPerCasting` 1–4. Do not rebuild them.
+- **Ioun Sand makes any item an Ioun host**, detected by the material's structured
+  `doubleNumericProperties` effect (never by name). `getIounHostPolicy` applies
+  `_applyIounMatrixOverlay` *on top of* its four detection layers, so sizing a matrix from
+  the ⚙ editor still doubles. A matrix grants no bonus of its own — `perStone` is zeroed and
+  `grants` emptied unless the base layer reported `isBonusDeclared`.
+- **The doubling is materialised onto the stone row**, mirroring `_recomputeIounHostBonuses`:
+  `_recomputeIounMatrixDoubling` captures pristine values in `stone.iounMatrixBaseBonuses`
+  (with a `__hostId` key so only the responsible host unwinds it) and always reads *from* the
+  capture, so it is idempotent. Only the 13 props in
+  `CharacterSheetState.IOUN_MATRIX_DOUBLED_PROPS` are doubled; prose ranges/areas/durations
+  are the DM's call.
+- **`CharacterSheetState.isIounFragment` is name-based and load-bearing in exactly two
+  places**: a matrix never doubles a fragment, and Ioun Crystal's `freeEffect` MC rule belongs
+  to fragments alone (enforced generally by
+  `CharacterSheetMaterials._isMcRuleFormApplicable`, which matches a rule's `appliesTo`
+  *form* against the item name). Ioun Geodes are reference prose only.
+- **Degradation is declared, never named.** Five materials carry a `degradation` block
+  (Stone and Flint / Obsidian / Duststone step Damage down, Rimeglass zeroes Protection and
+  Critical on Fire damage, Ordinary Glass is destroyed on a nat 1 *or* a crit). The three
+  `effect.type`s are `damageStepDelta`, `zeroAxes` and `destroy`.
+- ⚠️ **Degradation is summed into the material's own axes before projection**, not layered
+  after it: `applyToItem` adds `damageStepDelta` to `material.damage` and steps the die
+  ONCE, because stepping twice rounds differently through the ladder's off-ladder rungs.
+- **Nothing is auto-applied.** The `materialDegradation` post-attack hook only offers; the
+  player confirms. It is scoped to `ctx.attack.sourceItem.id` (the weapon actually swung),
+  excludes spell attacks, and skips already-destroyed items.
+  `state.degradeItemMaterial` / `repairItemMaterial` / `getShortRestRepairableItems` are the
+  state API; `offerShortRestRepairs()` is called from `charactersheet-rest.js`.
+- `materials_degradation: false` suspends the **effect** but keeps the recorded stacks, so
+  toggling it back on restores the degraded numbers exactly.
+- **Object Durability and Magical Interference are `variantrule` entries in the brew**,
+  allowlisted in `extract-rules.js`, rendered on `crafting.html` only. ⚠️ The interference
+  table is a **mirror** of `CharacterSheetMaterials.MAGICAL_INTERFERENCE_TABLE`; a drift
+  guard in `test/jest/CraftingItemMaterials.test.js` pins them together.
+
+Full documentation: `docs/charactersheet/21-item-materials.md`.
 
 ## NPC Exporter
 

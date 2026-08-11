@@ -35,6 +35,7 @@ data always matches what the running site actually imports. Downloads are cached
 | `arcadia8` | `Ar8` | remote |
 | `arcadia11` | `Arcadia11` | remote |
 | `completeCrafter` | `COMCRAF` | `homebrew/complete_crafter.json` |
+| `thelemar` | `TGTT` | `homebrew/TravelersGuidetoThelemar.json` |
 
 The generator **fails loudly** if a book cannot be fetched or if its `_meta.sources` no longer
 contains the expected source code — that is the signal that an upstream shape change needs
@@ -49,7 +50,8 @@ load books ─┬─ extract-hamund-materials     ─┐
             ├─ extract-complete-crafter      ─┘
             │
             ├─ extract-recipes               ─→ craftingRecipe
-            └─ extract-rules                 ─→ craftingRule
+            ├─ extract-rules                 ─→ craftingRule
+            └─ extract-item-materials        ─→ itemMaterial
                         │
                         ├─ dedupe by name|source
                         ├─ backfill crafter from the Hamund craft index
@@ -72,6 +74,7 @@ load books ─┬─ extract-hamund-materials     ─┐
 | `extract-complete-crafter.js` | Named materials + the "Parts by Creature" tables |
 | `extract-recipes.js` | Hamund craftables, Arcadia dishes, Complete Crafter items |
 | `extract-rules.js` | Crafting-relevant `variantrule` / `skill` / `itemProperty` entries |
+| `extract-item-materials.js` | The 72 Thelemar `itemMaterial` entities — a **pass-through**, since they are authored already-structured in the TGTT brew. See [05-item-materials.md](05-item-materials.md) |
 | `build-graph.js` | Material ↔ recipe linking and duplicate marking |
 
 ## How the tricky bits work
@@ -121,9 +124,10 @@ and `A or B or C` alternative sets.
 ## Reading the report
 
 ```
-craftingMaterial  1860
+craftingMaterial  1875
 craftingRecipe    456
-craftingRule      40
+craftingRule      46
+itemMaterial      72
 
 Effect-tag coverage  2314/2316 (99.9%)
 Materials linked to a craftable  642

@@ -431,6 +431,17 @@ class CharacterSheetInventory {
 				if (itemId) this._page.getUpgradesModule()?.showUpgradePickerModal(itemId);
 				return;
 			}
+			if (e.target.closest(".charsheet__item-mc-config")) {
+				e.stopPropagation();
+				const itemId = _getItemId(e.target);
+				if (itemId) this._page.getMaterialsModule()?.showMagicCapacityModal(itemId);
+				return;
+			}
+			if (e.target.closest(".charsheet__item-material-config")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this._page.getMaterialsModule()?.showMaterialPickerModal(itemId);
+				return;
+			}
 			if (e.target.closest(".charsheet__item-star")) {
 				e.stopPropagation();
 				const itemId = _getItemId(e.target);
@@ -1789,6 +1800,9 @@ class CharacterSheetInventory {
 			attuned: false,
 			weight,
 			value: options.value || 0,
+			// Material is a non-destructive `{name, source}` reference resolved at read time,
+			// so the numbers entered on the form stay as the item's BASE statistics.
+			...(options.material ? {material: options.material} : {}),
 			type: options.type || "gear",
 			requiresAttunement: options.requiresAttunement || false,
 			// Weapon stats. `weapon` is the boolean both the inventory categorizer
@@ -2097,6 +2111,7 @@ class CharacterSheetInventory {
 		const options = {type};
 
 		if (item.value != null) options.value = item.value;
+		if (item.material?.name) options.material = item.material;
 		if (item.rarity) options.rarity = item.rarity;
 		// Catalog items use `reqAttune`; normalized inventory items use `requiresAttunement`.
 		if (item.requiresAttunement || item.reqAttune) options.requiresAttunement = true;
@@ -2511,6 +2526,13 @@ class CharacterSheetInventory {
 						<select id="custom-item-rarity" class="ve-form-control">
 							<option value="">None</option>
 							${rarities.map(r => `<option value="${r}">${r.charAt(0).toUpperCase() + r.slice(1)}</option>`).join("")}
+						</select>
+					</div>
+					<div class="charsheet__custom-item-field">
+						<label>Material</label>
+						<select id="custom-item-material" class="ve-form-control" title="What the item is made of. Applied non-destructively — the numbers above stay as entered.">
+							<option value="">Default</option>
+							${this._getCustomItemMaterialOptions()}
 						</select>
 					</div>
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--checkbox">
@@ -3625,6 +3647,7 @@ class CharacterSheetInventory {
 				type: selectedType,
 				// Field is entered in gp; store in copper to match catalog items and _formatValue().
 				value: Math.round((parseFloat(form.querySelector("#custom-item-value")?.value) || 0) * 100),
+				material: this._parseCustomItemMaterial(form.querySelector("#custom-item-material")?.value),
 				rarity: form.querySelector("#custom-item-rarity")?.value || undefined,
 				requiresAttunement: form.querySelector("#custom-item-attunement")?.checked,
 				entries: form.querySelector("#custom-item-desc")?.value?.trim() || undefined,
@@ -4020,6 +4043,7 @@ class CharacterSheetInventory {
 		setVal("#custom-item-qty", seed.quantity || 1);
 		setVal("#custom-item-weight", seed.weight || 0);
 		setVal("#custom-item-value", o.value != null ? o.value / 100 : "");
+		setVal("#custom-item-material", o.material?.name ? `${o.material.name}|${o.material.source || "TGTT"}` : "");
 		setVal("#custom-item-rarity", o.rarity);
 		setChk("#custom-item-attunement", o.requiresAttunement);
 		setVal("#custom-item-desc", o.entries);
@@ -5073,6 +5097,24 @@ class CharacterSheetInventory {
 
 		modalInner.append(e_({outer: `<div>${itemData ? this._renderItemDetails(itemData) : this._renderBasicItemDetails(item)}</div>`}));
 
+		// Material is appended from the INVENTORY item, not the catalog entry. The catalog
+		// entry is the platonic "Longsword" and never carries a material reference, so this
+		// section has to be built from the thing the character actually owns — and it has to
+		// work for custom items too, which never appear in the catalog at all.
+		const materialHtml = this._renderItemMaterialDetails(item);
+		if (materialHtml) {
+			const materialEle = e_({outer: `<div class="charsheet__item-material-details">${materialHtml}</div>`});
+			materialEle.addEventListener("click", (evt) => {
+				const btn = evt.target.closest(".charsheet__material-repair-btn");
+				if (!btn) return;
+				if (!this._state.repairItemMaterial(btn.dataset.itemId)) return;
+				JqueryUtil.doToast({type: "success", content: `${item.name} repaired.`});
+				materialEle.innerHTML = this._renderItemMaterialDetails(this._state.getItemRaw(btn.dataset.itemId) || item);
+				this._page.renderCharacter?.();
+			});
+			modalInner.append(materialEle);
+		}
+
 		// Empowerment section for base gems in inventory (TGTT) — show available powers inline
 		const itemType = (itemData || item).type?.split("|")[0];
 		if ((itemType === "$G" || itemType === "gemstone") && !item._isEmpoweredGemstone) {
@@ -5184,8 +5226,10 @@ class CharacterSheetInventory {
 	 * @param {string} itemId - The inventory item id to modify
 	 */
 	async _modifyItemById (itemId) {
-		const items = this._state.getItems();
-		const item = items.find(i => i.id === itemId);
+		// Seed from the RAW item, not the projection — see `getItemRaw`. Editing a
+		// projected item would bake its material's effects into the base statistics.
+		const item = this._state.getItemRaw?.(itemId)
+			|| this._state.getItems().find(i => i.id === itemId);
 		if (!item) return;
 		await this._showAddCustomItem({prefillItem: item, editItemId: itemId});
 	}
@@ -5664,6 +5708,103 @@ class CharacterSheetInventory {
 		}
 
 		return html;
+	}
+
+	/**
+	 * Material section for the item details modal.
+	 * @param {object} item Projected inventory item.
+	 * @returns {string} HTML, or "" when the item has no material.
+	 */
+	_renderItemMaterialDetails (item) {
+		if (typeof CharacterSheetMaterials === "undefined") return "";
+		const material = this._state.getItemMaterialEntity?.(item);
+		if (!material) return "";
+
+		const esc = str => String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+		const notes = CharacterSheetMaterials.getMaterialNotes(item, material);
+		const summary = CharacterSheetMaterials.getSummary(material);
+
+		let html = `<p><strong>Material:</strong> ${esc(material.name)}${summary ? ` <span class="ve-muted ve-small">(${esc(summary)})</span>` : ""}</p>`;
+
+		const mc = this._state.getMagicCapacityStatus?.(item.id);
+		if (mc) {
+			const label = mc.isUnlimited
+				? `${mc.count} effects &mdash; unlimited capacity`
+				: mc.isSuppressing
+					? `${mc.count} effects &mdash; suppresses magic`
+					: `${mc.count} / ${mc.capacityDisplay}`;
+			html += `<p><strong>Magic Capacity:</strong> ${label}${mc.isOverloaded ? ` <span class="text-danger">(overloaded by ${mc.overage}, interference DC ${mc.dc})</span>` : ""}</p>`;
+		}
+
+		if (notes.length) {
+			html += `<ul class="ve-small">${notes.map(n => `<li><strong>${esc(n.label)}.</strong> ${esc(n.description)}</li>`).join("")}</ul>`;
+		}
+
+		const degradation = this._state.getItemDegradation?.(item.id);
+		if (degradation) {
+			const summaryTxt = CharacterSheetMaterials.getDegradationSummary(this._state.getItemRaw(item.id));
+			const repairTxt = degradation.isDestroyed
+				? "Destroyed — it cannot be repaired."
+				: degradation.repair?.method === "shortRest"
+					? `Repaired over a Short Rest${degradation.repair.tool ? ` with ${esc(degradation.repair.tool)}` : ""}.`
+					: "Repaired manually.";
+			html += `<p class="${degradation.isDestroyed ? "text-danger" : "text-warning"}"><strong>Degraded:</strong> ${esc(summaryTxt)}${degradation.stacks > 1 && !degradation.isDestroyed ? ` (${degradation.stacks} events)` : ""} <span class="ve-muted ve-small">${repairTxt}</span> <button type="button" class="ve-btn ve-btn-xxs ve-btn-default charsheet__material-repair-btn" data-item-id="${esc(item.id)}">Repair</button></p>`;
+		}
+		return html;
+	}
+
+	/**
+	 * `<option>` markup for the custom-item Material dropdown, grouped by category.
+	 * Values are `name|source` so a material is addressable without a second lookup.
+	 * @returns {string}
+	 */
+	_getCustomItemMaterialOptions () {
+		if (typeof CharacterSheetMaterials === "undefined") return "";
+		if (this._state.getSettings?.()?.enableMaterials === false) return "";
+		const materials = this._page.getItemMaterials?.() || [];
+		if (!materials.length) return "";
+
+		const esc = str => String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+		const byCategory = new Map();
+		for (const mat of materials) {
+			const cat = mat.materialCategory || "other";
+			if (!byCategory.has(cat)) byCategory.set(cat, []);
+			byCategory.get(cat).push(mat);
+		}
+
+		return [...byCategory.entries()].map(([cat, mats]) => {
+			const label = CharacterSheetMaterials.CATEGORY_LABELS[cat] || cat;
+			const opts = mats.map(m => `<option value="${esc(`${m.name}|${m.source}`)}">${esc(m.name)}</option>`).join("");
+			return `<optgroup label="${esc(label)}">${opts}</optgroup>`;
+		}).join("");
+	}
+
+	/**
+	 * Tooltip for the Magic Capacity badge — the tally, the state, and the DC when
+	 * the item is carrying more than the material can hold.
+	 * @param {object} material
+	 * @param {object} status From `state.getMagicCapacityStatus`.
+	 * @returns {string}
+	 */
+	_getMagicCapacityTooltip (material, status) {
+		const name = material?.name || "Material";
+		if (status.isUnlimited) return `${name} holds any number of enchantments — ${status.count} counted. Click for details.`;
+		if (status.isSuppressing) return `${name} suppresses magic rather than storing it. Click for details.`;
+		if (status.isOverloaded) return `Magic Capacity ${status.count}/${status.capacityDisplay} — overloaded by ${status.overage}. Interference DC ${status.dc}. Click to roll.`;
+		return `Magic Capacity ${status.count}/${status.capacityDisplay}. Click for details.`;
+	}
+
+	/**
+	 * Parse a `name|source` dropdown value into a stored material reference.
+	 * @param {string} value
+	 * @returns {{name: string, source: string}|undefined} undefined when no material is chosen,
+	 *          so the merge leaves an existing material untouched only when the field is absent.
+	 */
+	_parseCustomItemMaterial (value) {
+		if (!value) return undefined;
+		const [name, source] = String(value).split("|");
+		if (!name) return undefined;
+		return {name, source: source || "TGTT"};
 	}
 
 	_renderBasicItemDetails (item) {
@@ -6945,6 +7086,12 @@ class CharacterSheetInventory {
 		const canUpgrade = CharacterSheetUpgrades.isWeapon(item) || CharacterSheetUpgrades.isArmor(item) || CharacterSheetUpgrades.isShield(item);
 		const isBaseGemstone = (item.type === "$G" || item.type === "gemstone") && !item._isEmpoweredGemstone;
 		const hasUpgrades = !!(item.appliedUpgrades?.length || item.socketedGemstones?.length);
+		// Materials are a separate, orthogonal axis to upgrades — any item can be made of
+		// something, so the button is offered wherever the catalog has an eligible material.
+		const materialsEnabled = this._state.getSettings?.()?.enableMaterials !== false
+			&& !!this._page.getItemMaterials?.()?.length;
+		const materialEntity = materialsEnabled ? this._state.getItemMaterialEntity?.(item) : null;
+		const mcStatus = materialEntity ? this._state.getMagicCapacityStatus?.(item.id) : null;
 		const activeGem = item.socketedGemstones?.[0] || null;
 		const gemHasCharges = activeGem?.chargesMax > 0;
 		const gemIsDaily = activeGem && !gemHasCharges && !activeGem.usedToday;
@@ -7009,6 +7156,9 @@ class CharacterSheetInventory {
 						${vcSpellLabels.length ? `<span class="ve-small" style="color: #8b5cf6; font-style: italic;" title="Enhances these spells when used as a variant component">🧫 ${vcSpellLabels.join(", ")}</span>` : ""}
 						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}${item.chargeName ? ` — ${item.chargeName}` : ""}">${item.chargeName ? `${item.chargeName}:` : "Charges:"} <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
 						${hasSpellward ? `<span class="ve-small" title="${spellwardLabel}">🛡 ${spellwardLabel}: <strong>${spellwardCount}</strong>/${spellwardMax}${spellwardCount ? ` (${(item.chosenSpellImmunities || []).map(s => typeof s === "string" ? s : s.name).filter(Boolean).join(", ")})` : ""}</span>` : ""}
+						${materialEntity ? `<span class="ve-small charsheet__item-material-badge" title="${(`${materialEntity.name} — ${CharacterSheetMaterials.getSummary(materialEntity)}`).replace(/"/g, "&quot;")}">⚙ ${materialEntity.name}</span>` : ""}
+						${mcStatus ? `<span class="ve-small charsheet__item-mc-badge charsheet__item-mc-badge--${mcStatus.isSuppressing ? "suppress" : mcStatus.isOverloaded ? "over" : "ok"} charsheet__item-mc-config" title="${this._getMagicCapacityTooltip(materialEntity, mcStatus).replace(/"/g, "&quot;")}">✦ ${mcStatus.count}/${mcStatus.capacityDisplay}</span>` : ""}
+						${this._page.getMaterialsModule?.()?.getDegradationBadgeHtml(item.id) || ""}
 						${item.appliedUpgrades?.length ? `<span class="ve-small charsheet__item-upgrade-badges">${item.appliedUpgrades.map(u => {
 		const tooltip = typeof CharacterSheetUpgrades !== "undefined" ? (() => {
 			const eff = CharacterSheetUpgrades.getUpgradeEffects({appliedUpgrades: [u]});
@@ -7112,6 +7262,16 @@ class CharacterSheetInventory {
 						${canUpgrade ? `
 							<button type="button" class="ve-btn ve-btn-xs ${hasUpgrades ? "ve-btn-info" : "ve-btn-default"} charsheet__item-upgrade-config" title="${hasUpgrades ? "View/manage upgrades" : "Apply upgrades"}">
 								<span class="glyphicon glyphicon-wrench"></span> ${hasUpgrades ? "Upgrades" : "Upgrade"}
+							</button>
+						` : ""}
+						${materialsEnabled ? `
+							<button type="button" class="ve-btn ve-btn-xs ${materialEntity ? "ve-btn-info" : "ve-btn-default"} charsheet__item-material-config" title="${materialEntity ? `Made of ${materialEntity.name} — change or remove` : "Choose what this item is made of"}">
+								⚙ ${materialEntity ? materialEntity.name : "Material"}
+							</button>
+						` : ""}
+						${mcStatus ? `
+							<button type="button" class="ve-btn ve-btn-xs ${mcStatus.isOverloaded ? "ve-btn-danger" : "ve-btn-default"} charsheet__item-mc-config" title="${this._getMagicCapacityTooltip(materialEntity, mcStatus).replace(/"/g, "&quot;")}">
+								✦ ${mcStatus.count}/${mcStatus.capacityDisplay}
 							</button>
 						` : ""}
 						<button type="button" class="ve-btn ve-btn-xs ${hasNote ? "ve-btn-primary" : "ve-btn-default"} charsheet__item-note" title="${hasNote ? "View/Edit Note" : "Add Note"}">

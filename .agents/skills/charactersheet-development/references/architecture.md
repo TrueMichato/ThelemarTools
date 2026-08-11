@@ -64,6 +64,15 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 ├── CharacterSheetCustomAbilities (charactersheet-customabilities.js, ~800 lines)
 │   Custom homebrew abilities with icons, categories, effects.
 │
+├── CharacterSheetMaterials (charactersheet-materials.js, ~700 lines)
+│   Thelemar item materials — the fourth item-shaping axis, orthogonal to
+│   Upgrades / Crafting / Custom items. 72 `itemMaterial` entities, six
+│   tri-state axes, 33 structured effect types, an 11-step damage die
+│   ladder, density-derived weight and per-pound value. Stored as a
+│   non-destructive {name, source} ref; resolved at read time by
+│   `projectItemMaterial()` inside `getItems()`. Use `getItemRaw()` for
+│   unprojected reads. See docs/charactersheet/21-item-materials.md.
+│
 ├── CharacterSheetNpcExporter (charactersheet-npc-exporter.js, ~1,500 lines, all static)
 │   Convert character to 5etools monster statblock JSON.
 │

@@ -1481,6 +1481,11 @@ class CharacterSheetCombat {
 			isGuidedStrikeApplication: extraBonus?.label === "Guided Strike",
 		});
 
+		// Material Penetration offer. Non-blocking, and deliberately player-driven: the
+		// sheet never learns the target's AC, so only the player can say whether this
+		// missed and by how much.
+		this._offerPenetratingBlow({resultEl, attack, total});
+
 		const attackRollId = (this._attackRollSequence || 0) + 1;
 		this._attackRollSequence = attackRollId;
 		if (this._pendingBattleMasterDamage) {
@@ -1708,6 +1713,53 @@ class CharacterSheetCombat {
 		}
 	}
 
+	/**
+	 * Attach a "Penetrating Blow?" affordance to an attack's dice toast when the weapon
+	 * has a material Penetration rating.
+	 *
+	 * @param {object} opts
+	 * @param {HTMLElement|null} opts.resultEl The dice-result toast.
+	 * @param {object} opts.attack
+	 * @param {number} opts.total The attack roll total.
+	 * @returns {boolean} Whether an offer was attached.
+	 */
+	_offerPenetratingBlow ({resultEl = null, attack = null, total = 0} = {}) {
+		if (!resultEl) return false;
+		if (typeof document === "undefined" || !document.body?.contains(resultEl)) return false;
+		if (resultEl.__penetrationOffered) return false;
+		const pen = this._getAttackPenetration(attack);
+		if (!pen) return false;
+		resultEl.__penetrationOffered = true;
+
+		const offer = e_({outer: `
+			<div class="charsheet__dice-result-gs">
+				<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__penetration-btn" title="If this missed by ${pen} or less, the attack penetrates.">\uD83E\uDE93 Missed? Penetration ${pen}</button>
+			</div>
+		`});
+		const btn = offer.querySelector(".charsheet__penetration-btn");
+		btn.addEventListener("click", async () => {
+			const margin = await InputUiUtil.pGetUserNumber({
+				title: "Penetrating Blow",
+				default: 1,
+				min: 1,
+				int: true,
+			});
+			if (margin == null) return;
+			const isPenetrating = margin <= pen;
+			JqueryUtil.doToast(/** @type {*} */ ({
+				type: isPenetrating ? "success" : "info",
+				content: isPenetrating
+					? `Penetrating Blow \u2014 missed by ${margin}, within Penetration ${pen}. The attack hits (attack total ${total}).`
+					: `Missed by ${margin}, beyond Penetration ${pen}. No penetration.`,
+			}));
+			offer.remove();
+		});
+
+		resultEl.appendChild(offer);
+		this._page._scheduleDiceResultDismiss?.(resultEl, 15000);
+		return true;
+	}
+
 	// =========================================================================
 	// Generic post-attack hook pipeline (#7). Each hook is {id, predicate, handler}.
 	// `predicate(ctx)` is a cheap sync gate; `handler(ctx)` is async (may show a
@@ -1806,7 +1858,66 @@ class CharacterSheetCombat {
 					&& !!this._state.getFeatureCalculations?.().hasShadowKnight,
 				handler: (ctx) => this._pHandleShadowKnightHit(ctx),
 			},
+			{
+				// Material degradation (Stone and Flint, Obsidian, Ordinary Glass, …).
+				// Data-driven off the material's authored `degradation` block, so no
+				// material is named here. Never auto-applied: whether the fumble actually
+				// chipped the blade — and, for Ordinary Glass, whether that critical hit
+				// landed at all — is the table's call.
+				id: "materialDegradation",
+				predicate: (ctx) => !ctx.attack?.isSpell
+					&& this._getDegradationCandidates(ctx).length > 0,
+				handler: (ctx) => this._pOfferMaterialDegradation(ctx),
+			},
 		];
+	}
+
+	/**
+	 * Carried items whose material degrades on this attack roll.
+	 * @param {object} ctx Post-attack context.
+	 * @returns {Array<{id: string, name: string, material: object}>}
+	 */
+	_getDegradationCandidates (ctx) {
+		if (!this._state.getDegradationCandidates) return [];
+		const itemId = ctx.attack?.sourceItem?.id;
+		if (!itemId) return [];
+		return this._state.getDegradationCandidates(
+			{type: "attackRoll", natural: ctx.rollResult?.roll, isCrit: ctx.isCrit},
+			{itemId},
+		);
+	}
+
+	/**
+	 * Offer to record a degradation event against the weapon just swung.
+	 * @param {object} ctx Post-attack context.
+	 */
+	async _pOfferMaterialDegradation (ctx) {
+		const candidates = this._getDegradationCandidates(ctx);
+		if (!candidates.length) return;
+
+		for (const cand of candidates) {
+			const spec = CharacterSheetMaterials.getDegradationSpec(cand.material);
+			const what = spec?.destroys
+				? `<b>${cand.name}</b> (${cand.material.name}) shatters.`
+				: `<b>${cand.name}</b> (${cand.material.name}) degrades.`;
+			const isConfirm = await InputUiUtil.pGetUserBoolean({
+				title: spec?.destroys ? "Material Shatters" : "Material Degrades",
+				htmlDescription: `<div>${what}</div><div class="ve-muted ve-small mt-1">${spec?.note || ""}</div><div class="mt-2">Apply it?</div>`,
+				textYes: "Apply",
+				textNo: "Skip",
+			});
+			if (!isConfirm) continue;
+
+			const status = this._state.degradeItemMaterial(cand.id);
+			const summary = status?.isDestroyed
+				? "Destroyed"
+				: CharacterSheetMaterials.getDegradationSummary(this._state.getItemRaw(cand.id), cand.material);
+			JqueryUtil.doToast({
+				type: "warning",
+				content: `${cand.name}: ${summary}${status?.repair?.method === "shortRest" ? " — repairable on a Short Rest" : ""}`,
+			});
+			this._page.renderCharacter?.();
+		}
 	}
 
 	/**
@@ -4087,6 +4198,32 @@ class CharacterSheetCombat {
 		container.prepend(banner);
 	}
 
+	/**
+	 * Penetration badge for an attack row.
+	 * @param {object} attack
+	 * @returns {string} HTML, or "" when the weapon has no penetration.
+	 */
+	_getAttackPenetrationHtml (attack) {
+		const pen = this._getAttackPenetration(attack);
+		if (!pen) return "";
+		return `<span class="badge badge-default charsheet__attack-penetration" title="Penetration ${pen}: on a miss, if you missed by ${pen} or less, the attack may still penetrate. Ask your DM.">Pen ${pen}</span>`;
+	}
+
+	/**
+	 * @param {object} attack
+	 * @returns {number} The weapon's material Penetration rating, or 0.
+	 */
+	_getAttackPenetration (attack) {
+		if (typeof CharacterSheetMaterials === "undefined") return 0;
+		const settings = this._state.getSettings?.() || {};
+		if (settings.enableMaterials === false || settings.materials_penetration === false) return 0;
+
+		const itemId = attack?.sourceItem?.id;
+		if (!itemId) return 0;
+		const item = this._state.getItems().find(i => i.id === itemId);
+		return Number(item?.penetration) || 0;
+	}
+
 	renderAttacks () {
 		const container = document.getElementById("charsheet-attacks-list") || document.getElementById("charsheet-combat-attacks");
 		if (!container) return;
@@ -4380,6 +4517,11 @@ class CharacterSheetCombat {
 			? `<span class="ve-small text-info charsheet__attack-mastery">⚔ ${(attack.mastery || []).map(m => this._formatMasteryLink(m)).filter(Boolean).join(", ")}</span>`
 			: "";
 
+		// Material penetration. The sheet tracks no target AC, so this can only ever be a
+		// readout plus the post-miss offer wired up in `_offerPenetratingBlow` — it is never
+		// resolved automatically.
+		const penetrationHtml = this._getAttackPenetrationHtml(attack);
+
 		// Create hoverable name for auto-generated attacks
 		let nameHtml;
 		if (isAutoGenerated && attack.sourceItem) {
@@ -4500,6 +4642,7 @@ class CharacterSheetCombat {
 						<span class="badge badge-primary" title="${atkBadgeTitle}">+${totalAttackBonus}</span>
 						<span class="badge badge-danger">${attack.damage}${totalDamageBonus >= 0 ? "+" : ""}${totalDamageBonus} ${attack.damageType}</span>
 						${critRangeHtml}
+						${penetrationHtml}
 						${propertiesHtml}
 						${masteryHtml}
 					</span>

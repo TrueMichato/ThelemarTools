@@ -77,6 +77,16 @@ the `alsoIn` links the generator emits (~20 of 141 components have a twin).
 | `charactersheet-playmode.js` → `_renderCrafting` | Actions hub card |
 | `css/charactersheet.css` → `.cs-crafting__*` | Styles |
 
+### Item materials in the workbench
+
+The craft commit dialog carries a **Material** dropdown (`_getCraftMaterialPickerHtml()`),
+so a crafted item can be stamped with one of the 72 Thelemar `itemMaterial` entities at the
+moment it enters the inventory. `_addCraftedItem` writes `base.material = {name, source}`.
+
+That is a *different* concept from the `craftingMaterial` inputs this page is otherwise
+about: a bar of mithril is an **input you spend** (MAT); *Mithril* is a **property the
+finished sword has** (MTL). See [21-item-materials.md](./21-item-materials.md).
+
 ### Lazy loading
 
 `data/crafting.json` is ~2.5 MB — an order of magnitude larger than anything else the sheet loads,

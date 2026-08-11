@@ -958,20 +958,28 @@ class CharacterSheetCrafting {
 			...lastComponentWarnings.map(w => `<p class="ve-small cs-crafting__warning">\u26a0\ufe0f ${w.qq()}</p>`),
 			isCostUnknown ? `<p class="ve-small cs-crafting__warning">\u26a0\ufe0f ${Parser.sourceJsonToAbv(recipe.source)} lists no materials for this item, so the sheet has nothing to deduct \u2014 crafting it here costs you nothing. Settle the price with your DM first.</p>` : "",
 			!isCostUnknown && status.nMissing > 0 ? `<p class="ve-small ve-muted">You are missing ${status.nMissing} ingredient${status.nMissing === 1 ? "" : "s"} — crafting anyway will consume only what you hold.</p>` : "",
+			this._getCraftMaterialPickerHtml(),
 		].filter(Boolean).join("");
 
+		// Captured from the optional Material select, read at change time because the dialog
+		// resolves after its DOM is gone.
+		let materialRef = null;
 		const choice = await this._pThreeWay({
 			title: "\ud83d\udd28 Craft",
 			html: lines,
 			labelPrimary: "Craft",
 			labelSecondary: status.nMissing > 0 || blocked || isCostUnknown ? "Craft anyway" : null,
 			isPrimaryDisabled: status.nMissing > 0 || blocked || isCostUnknown,
+			onRender: (body) => {
+				const sel = body.querySelector(".cs-crafting__material-select");
+				sel?.addEventListener("change", () => { materialRef = CharacterSheetCrafting._parseMaterialValue(sel.value); });
+			},
 		});
 
 		if (choice === "cancel") return;
 
 		const ledger = this._consumeIngredients(status.ingredients);
-		this._addCraftedItem(recipe);
+		this._addCraftedItem(recipe, {material: materialRef});
 
 		this._page.saveCharacter();
 		this._page._inventory?.render?.();
@@ -1407,26 +1415,81 @@ class CharacterSheetCrafting {
 	}
 
 	/** Put the finished thing in the bag, preferring the real item entry over a stub. */
-	_addCraftedItem (recipe) {
+	/**
+	 * @param {object} recipe
+	 * @param {object} [opts]
+	 * @param {{name: string, source: string}|null} [opts.material] Material chosen at the workbench.
+	 */
+	_addCraftedItem (recipe, {material = null} = {}) {
 		const real = (this._page.getItems() || []).find(it => it.name === recipe.name && it.source === recipe.source);
 
-		this._state.addItem(real ? {...real} : {
+		const base = real ? {...real} : {
 			name: recipe.name,
 			source: recipe.source,
 			_isCraftedItem: true,
 			type: "G",
 			rarity: recipe.rarity || "unknown",
 			entries: recipe.entries || [],
-		}, 1);
+		};
+
+		// Provenance: what this item was made from, so a later material swap or a DM audit can
+		// see the workbench decision rather than inferring it.
+		base._craftedFrom = {recipe: recipe.name, source: recipe.source, ...(material ? {material} : {})};
+		if (material) base.material = material;
+
+		this._state.addItem(base, 1);
+	}
+
+	/**
+	 * Optional Material select for the craft commit dialog. Empty string when materials are
+	 * disabled or the catalog is empty, so the dialog is unchanged for a vanilla game.
+	 * @returns {string}
+	 */
+	_getCraftMaterialPickerHtml () {
+		if (typeof CharacterSheetMaterials === "undefined") return "";
+		if (this._state.getSettings?.()?.enableMaterials === false) return "";
+		const materials = this._page.getItemMaterials?.() || [];
+		if (!materials.length) return "";
+
+		const byCategory = new Map();
+		for (const mat of materials) {
+			const cat = mat.materialCategory || "other";
+			if (!byCategory.has(cat)) byCategory.set(cat, []);
+			byCategory.get(cat).push(mat);
+		}
+		const groups = [...byCategory.entries()].map(([cat, mats]) => {
+			const label = CharacterSheetMaterials.CATEGORY_LABELS[cat] || cat;
+			return `<optgroup label="${label.qq()}">${mats.map(m => `<option value="${`${m.name}|${m.source}`.qq()}">${m.name.qq()}</option>`).join("")}</optgroup>`;
+		}).join("");
+
+		return `<p class="mb-1"><strong>Material:</strong>
+			<select class="ve-form-control input-xs cs-crafting__material-select" style="display: inline-block; width: auto;">
+				<option value="">Default</option>${groups}
+			</select>
+			<span class="ve-small ve-muted d-block">What the finished item is made of. Applied non-destructively.</span></p>`;
+	}
+
+	/**
+	 * @param {string} value A `name|source` option value.
+	 * @returns {{name: string, source: string}|null}
+	 */
+	static _parseMaterialValue (value) {
+		if (!value) return null;
+		const [name, source] = String(value).split("|");
+		return name ? {name, source: source || "TGTT"} : null;
 	}
 
 	/**
 	 * Do it / do it anyway / cancel — the shape the Scribe Spell modal established, so a player
 	 * is never trapped by an advisory they disagree with.
 	 *
+	 * @param {object} opts
+	 * @param {function(HTMLElement): void} [opts.onRender] Called with the modal body after it is
+	 *        populated, so a caller can wire up extra form controls and read their values before
+	 *        the dialog resolves.
 	 * @returns {Promise<"primary"|"secondary"|"cancel">}
 	 */
-	async _pThreeWay ({title, html, labelPrimary, labelSecondary, labelCancel = "Cancel", isPrimaryDisabled = false}) {
+	async _pThreeWay ({title, html, labelPrimary, labelSecondary, labelCancel = "Cancel", isPrimaryDisabled = false, onRender = null}) {
 		let result = "cancel";
 		let resolveOuter;
 		const pResult = new Promise(resolve => { resolveOuter = resolve; });
@@ -1437,7 +1500,9 @@ class CharacterSheetCrafting {
 			cbClose: () => resolveOuter(result),
 		});
 
-		modalInner.appendChild(e_({tag: "div", html}));
+		const body = e_({tag: "div", html});
+		modalInner.appendChild(body);
+		onRender?.(body);
 
 		const btnRow = e_({tag: "div", style: "display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end;"});
 

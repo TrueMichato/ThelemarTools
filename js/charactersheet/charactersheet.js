@@ -18,6 +18,7 @@ import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 import {CharacterSheetSpellPicker} from "./charactersheet-spell-picker.js";
 import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
 import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
+import {CharacterSheetMaterials} from "./charactersheet-materials.js";
 import {CharacterSheetPlayMode} from "./charactersheet-playmode.js";
 import * as CharacterSheetBuffPickerHelpers from "./charactersheet-buffpicker-helpers.js";
 import {CharacterSheetDruidResources} from "./charactersheet-druid-resources.js";
@@ -178,6 +179,10 @@ class CharacterSheetPage {
 		} catch (e) { console.error("Failed to init upgrades:", e); }
 
 		try {
+			this._materials = new CharacterSheetMaterials(this);
+		} catch (e) { console.error("Failed to init materials:", e); }
+
+		try {
 			this._crafting = new CharacterSheetCrafting(this, this._state);
 		} catch (e) { console.error("Failed to init crafting:", e); }
 
@@ -208,6 +213,10 @@ class CharacterSheetPage {
 		if (this._features) this._features.setFeats(this._featsData);
 		if (this._spells) this._spells.setSpells(this._spellsData);
 		if (this._upgrades) this._upgrades.setUpgrades(this._itemUpgradesData);
+		if (this._materials) this._materials.setMaterials(this._itemMaterialsData);
+		if (this._materials) this._materials.setResonances(this._draconicResonancesData);
+		this._state.setItemMaterialCatalog(this._itemMaterialsData);
+		this._state.setDraconicResonanceCatalog(this._draconicResonancesData);
 
 		// Inject the full spell database into state so subclass-granted spells
 		// (domain/oath/circle/origin/patron) are enriched with their real
@@ -360,6 +369,11 @@ class CharacterSheetPage {
 		this._combatMethodsData = (combatMethods.combatMethod || []).map(m => ({...m, _entityType: "combatMethod"}));
 		this._state.setCombatMethodCatalog(this._combatMethodsData);
 		this._itemUpgradesData = (itemUpgrades.itemUpgrade || []).map(u => ({...u, _entityType: "itemUpgrade"}));
+		// Item materials are homebrew-only (no site data file); the catalog starts
+		// empty and is populated from brew in _mergeBrewData.
+		this._itemMaterialsData = [];
+		// Draconic domain resonances are likewise homebrew-only.
+		this._draconicResonancesData = [];
 		// Divine Favor gods are homebrew-only (no site data file); the catalog starts
 		// empty and is populated from brew in _mergeBrewData.
 		this._divineFavorData = [];
@@ -709,6 +723,22 @@ class CharacterSheetPage {
 		if (brewData.itemUpgrade?.length) {
 			const brewUpgrades = MiscUtil.copyFast(brewData.itemUpgrade).map(u => ({...u, _entityType: "itemUpgrade"}));
 			this._itemUpgradesData = [...this._itemUpgradesData, ...brewUpgrades];
+		}
+
+		// Item materials (TGTT — what an item is made of)
+		if (brewData.itemMaterial?.length) {
+			const brewMaterials = MiscUtil.copyFast(brewData.itemMaterial).map(m => ({...m, _entityType: "itemMaterial"}));
+			this._itemMaterialsData = [...this._itemMaterialsData, ...brewMaterials];
+			this._state.setItemMaterialCatalog(this._itemMaterialsData);
+			if (this._materials) this._materials.setMaterials(this._itemMaterialsData);
+		}
+
+		// Draconic domain resonances (TGTT — carried by items made of solid dragon remains)
+		if (brewData.draconicResonance?.length) {
+			const brewResonances = MiscUtil.copyFast(brewData.draconicResonance).map(r => ({...r, _entityType: "draconicResonance"}));
+			this._draconicResonancesData = [...this._draconicResonancesData, ...brewResonances];
+			this._state.setDraconicResonanceCatalog(this._draconicResonancesData);
+			if (this._materials) this._materials.setResonances(this._draconicResonancesData);
 		}
 
 		// Divine Favor gods (TGTT — Relationships with Deities)
@@ -17076,6 +17106,8 @@ class CharacterSheetPage {
 		this._combatMethodsData?.forEach(cm => sourceSet.add(cm.source));
 		// Add sources from item upgrades
 		this._itemUpgradesData?.forEach(iu => sourceSet.add(iu.source));
+		// Add sources from item materials
+		this._itemMaterialsData?.forEach(im => sourceSet.add(im.source));
 
 		// Also add all standard sources from Parser
 		Object.keys(Parser.SOURCE_JSON_TO_FULL).forEach(src => sourceSet.add(src));
@@ -18024,6 +18056,10 @@ class CharacterSheetPage {
 	getCombatMethodEntities () { return this._combatMethodsData; }
 	getItemUpgrades () { return this._itemUpgradesData; }
 	getUpgradesModule () { return this._upgrades; }
+	/** @returns {Array<*>} All known item materials (homebrew only). */
+	getItemMaterials () { return this._itemMaterialsData; }
+	getDraconicResonances () { return this._draconicResonancesData; }
+	getMaterialsModule () { return this._materials; }
 
 	/**
 	 * Fetch the crafting catalog (materials, craftables, rules) on first use.

@@ -24,6 +24,7 @@ Welcome to the 5etools Character Sheet system documentation. This comprehensive 
 | [Talent & Psionics](./17-talent-psionics.md) | MCDM Talent base class: psionic strain, manifestation tests, generic power/exertion pickers, Chronopath |
 | [NPC Export](./18-npc-export.md) | Character → bestiary monster conversion, export options, CR, legendary framing, brew save |
 | [Ioun Stones](./20-ioun-stones.md) | MECIounStones and official-stone parity: attunement exemption, orbit/bond manager, item conditional modifiers, effect-implementation audit |
+| [Item Materials](./21-item-materials.md) | Thelemar item materials: the 72 `itemMaterial` entities, the six axes, the read-time projection, the damage die ladder, and the picker/custom-item/craft entry points |
 
 ## System at a Glance
 

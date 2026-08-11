@@ -4,15 +4,23 @@ import {CraftingPlanner} from "./crafting/crafting-planner.js";
 
 /**
  * The Crafting & Harvesting hub — one filterable list spanning harvestable materials, craftable
- * outputs, and the crafting rules that govern them, backed by `data/crafting.json`.
+ * outputs, the crafting rules that govern them, and the item materials things are made OF,
+ * backed by `data/crafting.json`.
  */
 
 const _getDisplayCategory = (ent) => Parser.craftingCategoryToFull(ent.materialCategory || ent.recipeCategory || ent.ruleCategory);
 
-/** Harvest DC for materials, crafting DC for craftables; rules have neither. */
+/** Harvest DC for materials, crafting DC for craftables; rules and item materials have neither. */
 const _getDisplayDc = (ent) => ent.harvest?.dc ?? ent.craftDC ?? null;
 
-const _getDisplayValue = (ent) => (ent.value == null ? null : Parser.getDisplayCurrency(CurrencyUtil.doSimplifyCoins({cp: ent.value})));
+/**
+ * Item materials are priced per trade unit (per lb., per vial, per square yard, …) rather than as
+ * a finished item, so they show their authored price string instead of a coin total.
+ */
+const _getDisplayValue = (ent) => {
+	if (ent.__prop === "itemMaterial") return ent.price?.display || null;
+	return ent.value == null ? null : Parser.getDisplayCurrency(CurrencyUtil.doSimplifyCoins({cp: ent.value}));
+};
 
 class CraftingSublistManager extends SublistManager {
 	static _getRowTemplate () {
@@ -80,7 +88,7 @@ class CraftingPage extends ListPage {
 
 			listSyntax,
 
-			dataProps: ["craftingMaterial", "craftingRecipe", "craftingRule"],
+			dataProps: ["craftingMaterial", "craftingRecipe", "craftingRule", "itemMaterial"],
 
 			listOptions: {
 				sortByInitial: "name",
@@ -97,6 +105,7 @@ class CraftingPage extends ListPage {
 		this._harvestLookup = null;
 		this._planner = null;
 		this._listSyntaxCrafting = listSyntax;
+		this._seenUids = new Set();
 	}
 
 	getListItem (ent, ixEnt, isExcluded) {
@@ -144,6 +153,51 @@ class CraftingPage extends ListPage {
 		eleLi.addEventListener("contextmenu", evt => this._openContextMenu(evt, this._list, listItem));
 
 		return listItem;
+	}
+
+	/**
+	 * Drop entities this page has already loaded under the same `name|source`.
+	 *
+	 * `itemMaterial` is authored in `homebrew/TravelersGuidetoThelemar.json` and lifted into the
+	 * generated `data/crafting.json` so the reference page works without any brew installed — but
+	 * a user who ALSO has that brew installed would otherwise get every material twice, once from
+	 * each path. The generated dataset loads first and wins; a brew's own, genuinely new materials
+	 * still come through untouched.
+	 *
+	 * @param {object} data
+	 * @returns {void}
+	 */
+	_addData (data) {
+		// Draconic resonances are reference data, not a browsable entity — the material
+		// renderer prints them inline, so they are stashed on a shared handle rather than
+		// being added to the list. Both the generated dataset and a TGTT brew can supply them.
+		if (data.draconicResonance?.length) {
+			// The incoming batch can itself hold duplicates, because the generated dataset and an
+			// installed TGTT brew are merged before this point — so the seen-set has to grow as we go.
+			const existing = globalThis.__craftingDraconicResonances || [];
+			const seen = new Set(existing.map(r => `${r.name}|${r.source}`.toLowerCase()));
+			const added = [];
+			for (const res of data.draconicResonance) {
+				const uid = `${res.name}|${res.source}`.toLowerCase();
+				if (seen.has(uid)) continue;
+				seen.add(uid);
+				added.push(res);
+			}
+			globalThis.__craftingDraconicResonances = [...existing, ...added];
+		}
+
+		const deduped = {...data};
+		for (const prop of this._dataProps) {
+			if (!data[prop]?.length) continue;
+			const filtered = data[prop].filter(ent => {
+				const uid = `${ent.name}|${ent.source}`.toLowerCase();
+				if (this._seenUids.has(uid)) return false;
+				this._seenUids.add(uid);
+				return true;
+			});
+			if (filtered.length !== data[prop].length) deduped[prop] = filtered;
+		}
+		return super._addData(deduped);
 	}
 
 	_renderStats_doBuildStatsTab ({ent}) {

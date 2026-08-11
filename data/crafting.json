@@ -86027,6 +86027,62 @@
 			]
 		},
 		{
+			"name": "Magical Interference",
+			"source": "TGTT",
+			"page": 0,
+			"ruleCategory": "materials",
+			"entries": [
+				"Whenever an overloaded item's magical property is activated, or it is used to make an attack roll, saving throw, or ability check, roll a {@dice d20}. If the result is lower than 15 + the number of effects above the item's Magic Capacity, roll on the Magical Interference table.",
+				"Passive effects are checked when the item is first put on or otherwise brought into use, and again after each Short or Long Rest while it remains overloaded.",
+				{
+					"type": "table",
+					"caption": "Magical Interference",
+					"colLabels": [
+						"{@dice 1d8}",
+						"Effect"
+					],
+					"colStyles": [
+						"col-1 text-center",
+						"col-11"
+					],
+					"rows": [
+						[
+							"1",
+							"{@b Arcane Sparks.} The item sheds dim, colorful light in a 10-foot radius and hums loudly. Its user has Disadvantage on Dexterity ({@skill Stealth}) checks while it is unsheathed or worn."
+						],
+						[
+							"2",
+							"{@b Feedback Jolt.} When the user rolls a 1 on an attack roll, saving throw, or ability check involving the item, they take {@damage 1d4} force damage per magical effect on it."
+						],
+						[
+							"3",
+							"{@b Fickle Magic.} After each Short or Long Rest, determine one of the item's magical effects at random. That effect is suppressed until the next rest."
+						],
+						[
+							"4",
+							"{@b Wild Surge.} The first time the user rolls a 20 on an attack roll or ability check involving the item, they immediately roll on the Wild Magic Surge table."
+						],
+						[
+							"5",
+							"{@b Repulsion.} When the user takes more than 15 damage from one source, the item flies 10 feet away in a random direction if it can be removed or dropped."
+						],
+						[
+							"6",
+							"{@b Overheat.} Activating any of the item's magical properties deals {@damage 1d6} fire damage to the user."
+						],
+						[
+							"7",
+							"{@b Leyline Shift.} When the user scores a critical hit with the item, or a creature scores a critical hit against the user while the item is worn, the user teleports 15 feet in a random direction to the nearest unoccupied space."
+						],
+						[
+							"8",
+							"{@b Arcane Detonation.} The item's lowest-tier magical effect permanently burns out. Each creature within 10 feet must make a {@dc 15} Dexterity saving throw, taking {@damage 3d6} force damage on a failed save or half as much on a successful one."
+						]
+					]
+				}
+			]
+		},
+		{
 			"name": "Miscellaneous Harvesting",
 			"source": "HHHVIII",
 			"page": 108,
@@ -86416,6 +86472,165 @@
 						"{@class Druid|PHB|Druids} may have the option to choose between proficiency in the {@item herbalism kit|PHB} or the {@item harvesting kit|HHHVI} upon character creation (this skill is not gained in multiclassing)",
 						"The {@background Hermit|PHB} background may choose between the {@item herbalism kit|PHB} and the {@item harvesting kit|HHHVI} as its starting tool proficiency and gains the appropriate kit as part of its starting equipment.",
 						"The {@background Outlander|PHB} background may choose between a musical instrument or the {@item harvesting kit|HHHVI} as its initial tool proficiency. They may also choose between a {@item hunting trap|PHB}, and the {@item harvesting kit|HHHVI} in its initial starting equipment."
+					]
+				}
+			]
+		},
+		{
+			"name": "Object Durability",
+			"source": "TGTT",
+			"page": 0,
+			"ruleCategory": "materials",
+			"entries": [
+				"An object's material decides how hard it is to hit; its construction decides how much punishment it can take. The two are chosen separately.",
+				{
+					"type": "entries",
+					"name": "Object Armor Class",
+					"entries": [
+						"For a material not listed, use the closest ordinary analogue.",
+						{
+							"type": "table",
+							"caption": "Object Armor Class",
+							"colLabels": [
+								"AC",
+								"Material",
+								"Origin"
+							],
+							"colStyles": [
+								"col-1 text-center",
+								"col-8",
+								"col-3"
+							],
+							"rows": [
+								[
+									"11",
+									"Cloth, paper, or rope",
+									"Baseline"
+								],
+								[
+									"11",
+									"Leather or rawhide",
+									"Thelemar extension"
+								],
+								[
+									"13",
+									"Ordinary crystal, glass, or ice",
+									"Baseline"
+								],
+								[
+									"13",
+									"Obsidian",
+									"Thelemar extension"
+								],
+								[
+									"15",
+									"Wood or bone",
+									"Baseline"
+								],
+								[
+									"15",
+									"Horn, ivory, shell, or chitin",
+									"Thelemar extension"
+								],
+								[
+									"17",
+									"Stone",
+									"Baseline"
+								],
+								[
+									"17",
+									"Flint, copper, silver, gold, electrum, or lead",
+									"Thelemar extension"
+								],
+								[
+									"19",
+									"Iron or steel",
+									"Baseline"
+								],
+								[
+									"19",
+									"Platinum, bronze, brass, Deep Crystal, Zog'agi Glass, Dragonhide, Dragon Scales, Dragon Bone, or Dragon Teeth and Claws",
+									"Thelemar extension"
+								],
+								[
+									"21",
+									"Mithril",
+									"Baseline equivalent of mithral"
+								],
+								[
+									"21",
+									"Darkmetal or orichalcum",
+									"Thelemar extension"
+								],
+								[
+									"23",
+									"Adamantine",
+									"Baseline"
+								],
+								[
+									"23",
+									"Adamant",
+									"Thelemar extension"
+								],
+								[
+									"30",
+									"Heart Stone",
+									"Thelemar extension"
+								]
+							]
+						},
+						"Quicksilver has no Object AC while it is a free liquid; attack its container instead. A composite object normally uses the Object AC of the material forming the part being attacked."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Object Hit Points",
+					"entries": [
+						"Choose fragile or resilient from the finished object's construction and condition, not solely from its material. A thin pane, hollow ornament, or damaged tool is usually fragile. A weapon, shield, suit of armor, or sturdy tool intended to withstand impacts is usually resilient.",
+						{
+							"type": "table",
+							"caption": "Object Hit Points",
+							"colLabels": [
+								"Size",
+								"Fragile HP",
+								"Resilient HP"
+							],
+							"colStyles": [
+								"col-4",
+								"col-4 text-right",
+								"col-4 text-right"
+							],
+							"rows": [
+								[
+									"Tiny",
+									"2 ({@dice 1d4})",
+									"5 ({@dice 2d4})"
+								],
+								[
+									"Small",
+									"3 ({@dice 1d6})",
+									"10 ({@dice 3d6})"
+								],
+								[
+									"Medium",
+									"4 ({@dice 1d8})",
+									"18 ({@dice 4d8})"
+								],
+								[
+									"Large",
+									"5 ({@dice 1d10})",
+									"27 ({@dice 5d10})"
+								]
+							]
+						},
+						"At 0 Hit Points, an object loses its structural integrity and is broken or destroyed as appropriate. For a Huge or Gargantuan object, track Large or smaller sections separately or assign a Damage Threshold: damage from one attack or effect below the threshold is superficial and reduces no Hit Points."
+					]
+				},
+				{
+					"type": "entries",
+					"name": "Damage Types",
+					"entries": [
+						"Objects are immune to Poison and Psychic damage. The DM can also rule that a damage type or tool is ineffective or especially effective against a particular object; a sword cannot reasonably cut through a stone wall, while a pick can chip it. Entry-specific rules that chip, shatter, dissolve, repair, or otherwise alter an item affect the object itself and apply even when no one separately attacks it."
 					]
 				}
 			]
@@ -88992,6 +89207,3853 @@
 						"Six rows carrying a component name but neither a spell nor an effect (a spreadsheet fill-down), and one row duplicated verbatim."
 					]
 				}
+			]
+		}
+	],
+	"itemMaterial": [
+		{
+			"name": "Adamant",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "metal",
+			"density": 50,
+			"damage": 0,
+			"protection": 22,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 6,
+			"rarity": "legendary",
+			"price": {
+				"gp": 750,
+				"unit": "lb",
+				"display": "750 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#4682b4"
+			},
+			"objectAc": 23,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "indestructible",
+					"note": "Nearly indestructible."
+				}
+			],
+			"entries": [
+				"Adamant is extremely heavy, nearly indestructible, and strongly receptive to magic."
+			]
+		},
+		{
+			"name": "Adamantine",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": 9.33,
+			"damage": 0,
+			"protection": 21,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 5,
+			"rarity": "legendary",
+			"price": {
+				"gp": 1250,
+				"unit": "lb",
+				"display": "1,250 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#00318f"
+			},
+			"objectAc": 23,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "damageReduction",
+					"value": 3,
+					"armorType": "heavy",
+					"damageTypes": [
+						"bludgeoning",
+						"piercing",
+						"slashing"
+					]
+				},
+				{
+					"type": "damageReduction",
+					"value": 2,
+					"armorType": "medium",
+					"damageTypes": [
+						"bludgeoning",
+						"piercing",
+						"slashing"
+					]
+				},
+				{
+					"type": "bonusAc",
+					"value": 2,
+					"appliesTo": [
+						"shield"
+					]
+				},
+				{
+					"type": "indestructible",
+					"note": "Cannot be destroyed, damaged or worn down except by extraordinarily powerful magic or natural phenomena."
+				}
+			],
+			"entries": [
+				"An ultra-hard alloy of adamant, mithril, and electrum. Adamantine is deep blue with a metallic tinge that sharpens to purple-white under light from most magical sources.",
+				{
+					"type": "list",
+					"items": [
+						"Adamantine Heavy Armor reduces incoming Bludgeoning, Piercing, and Slashing damage by 3; Medium Armor reduces it by 2.",
+						"An adamantine shield grants +2 additional AC.",
+						"Adamantine equipment cannot be destroyed, damaged, or worn down except by extraordinarily powerful magic or natural phenomena."
+					]
+				}
+			]
+		},
+		{
+			"name": "Ashglass",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 0.7,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 3,
+			"elementalPlane": "Negative Fire",
+			"rarity": "very rare",
+			"price": {
+				"gp": 650,
+				"unit": "lb",
+				"display": "650 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #292929, #aaa39a, #4d4a47)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "focus",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "focus",
+					"text": "Ashglass can extinguish a nonmagical flame no larger than a 5-foot Cube by touch. When its user takes fire damage, they can take a Reaction to gain Resistance to that instance of damage; the glass then becomes inert until the next Long Rest."
+				},
+				{
+					"type": "condensateInstability",
+					"text": "Water suppresses its affinity for 1 hour."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} Ashglass can extinguish a nonmagical flame no larger than a 5-foot Cube by touch. When its user takes Fire damage, they can take a Reaction to gain Resistance to that instance of damage; the glass then becomes inert until the next Long Rest.",
+				"{@b Instability.} Water suppresses its affinity for 1 hour."
+			]
+		},
+		{
+			"name": "Bone and Horn",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "organic",
+			"density": null,
+			"densityVaries": true,
+			"damage": 0,
+			"protection": 13,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 3,
+			"rarity": "common",
+			"price": {
+				"gp": 0.1,
+				"unit": "lb",
+				"unitText": "1 lb. of workable material",
+				"display": "0.1 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #d8cfaa, #f0e8cb, #a89973)"
+			},
+			"objectAc": 15,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Bone and horn can form rigid armor plates, hafts, bows, needles, and simple weapon edges."
+			]
+		},
+		{
+			"name": "Brass",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": 8.5,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 3,
+			"rarity": "common",
+			"price": {
+				"gp": 1,
+				"unit": "lb",
+				"display": "1 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #8c6818, #e0bd56, #8c6818)"
+			},
+			"objectAc": 19,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Brass is an alloy of copper and zinc used for fittings, instruments, vessels, and mechanisms. It is too soft for durable weapon edges."
+			]
+		},
+		{
+			"name": "Bronze",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": 8.8,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 3,
+			"rarity": "common",
+			"price": {
+				"gp": 0.75,
+				"unit": "lb",
+				"display": "0.75 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #7f4f24, #cd8c45, #7f4f24)"
+			},
+			"objectAc": 19,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Bronze is an alloy of copper and tin used for weapons, armor, bells, statuary, and fittings. It is easier to cast than steel but does not keep as hard an edge."
+			]
+		},
+		{
+			"name": "Cloudpearl",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 0.7,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 5,
+			"elementalPlane": "Positive Water",
+			"rarity": "very rare",
+			"price": {
+				"gp": 700,
+				"unit": "lb",
+				"display": "700 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #d7c7bd, #fff7ef, #b8d8d8)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "focus",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "focus",
+					"text": "A creature that spends Hit Dice during a Short Rest while holding Cloudpearl regains additional Hit Points equal to its Proficiency Bonus."
+				},
+				{
+					"type": "condensateInstability",
+					"text": "Cold damage suppresses this benefit until the pearl spends 1 minute in a fire or another source of strong heat."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} A creature that spends Hit Dice during a Short Rest while holding Cloudpearl regains additional Hit Points equal to its Proficiency Bonus.",
+				"{@b Instability.} Cold damage suppresses this benefit until the pearl spends 1 minute in a fire or another source of strong heat."
+			]
+		},
+		{
+			"name": "Cold Iron",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": 7.87,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 2,
+			"rarity": "rare",
+			"price": {
+				"gp": 0.5,
+				"unit": "lb",
+				"unitText": "1 lb. of properly forged stock",
+				"display": "0.5 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#b7b7b7"
+			},
+			"objectAc": 19,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "extraDamageDiceVsType",
+					"dice": 1,
+					"creatureType": "fey",
+					"appliesTo": [
+						"weapon"
+					],
+					"note": "Deals an additional weapon damage die against fey creatures."
+				}
+			],
+			"entries": [
+				"A rare pure-formed iron, mined deep underground and forged at lower temperatures to preserve its delicate properties.",
+				{
+					"type": "list",
+					"items": [
+						"Weapons made of cold iron deal an additional weapon damage die against fey creatures"
+					]
+				}
+			]
+		},
+		{
+			"name": "Common Cloth",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "cloth",
+			"density": null,
+			"densityVaries": true,
+			"damage": "na",
+			"protection": 0,
+			"critical": "na",
+			"penetration": "na",
+			"magicCapacity": 1,
+			"rarity": "common",
+			"price": {
+				"gp": 0.1,
+				"unit": "sqYard",
+				"display": "0.1 gp per square yard",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #d8cfb5, #f0ead6, #b8aa89)"
+			},
+			"objectAc": 11,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Linen, wool, hemp, and cotton are used for clothing, padding, sails, and soft containers. Cloth cannot form a weapon's striking surface or rigid armor by itself."
+			]
+		},
+		{
+			"name": "Common Wood",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "wood",
+			"density": null,
+			"densityVaries": true,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 2,
+			"rarity": "common",
+			"price": {
+				"gp": 5,
+				"unit": "lb",
+				"unitText": "1 lb. of seasoned equipment stock",
+				"display": "5 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #7b4f2c, #b98552, #7b4f2c)"
+			},
+			"objectAc": 15,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Common woods such as ash, oak, yew, and beech are used for hafts, bows, shields, and tools. The species and seasoning affect the finished item, but common wood has no special material rules."
+			]
+		},
+		{
+			"name": "Copper",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "metal",
+			"density": 8.96,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 1,
+			"rarity": "common",
+			"price": {
+				"gp": 0.5,
+				"unit": "lb",
+				"display": "0.5 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#b87333"
+			},
+			"objectAc": 17,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Copper is soft, workable, and widely used for coins, vessels, fittings, and wiring."
+			]
+		},
+		{
+			"name": "Darkeline",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": 11.58,
+			"damage": 2,
+			"protection": 20,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 7,
+			"rarity": "legendary",
+			"price": {
+				"gp": 1500,
+				"unit": "lb",
+				"display": "1,500 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#434343"
+			},
+			"objectAc": 21,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "addProperty",
+					"properties": [
+						"H"
+					],
+					"appliesTo": [
+						"weapon"
+					]
+				},
+				{
+					"type": "removeProperty",
+					"properties": [
+						"L",
+						"F"
+					],
+					"appliesTo": [
+						"weapon"
+					]
+				},
+				{
+					"type": "saveAdvantage",
+					"appliesTo": [
+						"armor"
+					],
+					"conditional": "On checks and saving throws made to resist being moved against your will"
+				},
+				{
+					"type": "speedDelta",
+					"value": -5,
+					"appliesTo": [
+						"armor"
+					]
+				}
+			],
+			"entries": [
+				"Darkeline is starmetal-alloyed Darkmetal. It feels no heavier than steel at rest but becomes massively dense at the instant of impact. A Darkeline weapon gains Heavy and cannot have Light or Finesse. A creature wearing Darkeline armor has Advantage on checks and saving throws made to resist being moved against its will, but its Speed is reduced by 5 feet."
+			]
+		},
+		{
+			"name": "Darkmetal",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "metal",
+			"density": 15.62,
+			"damage": 1,
+			"protection": 19,
+			"critical": 0,
+			"penetration": 2,
+			"magicCapacity": 6,
+			"rarity": "very rare",
+			"price": {
+				"gp": 550,
+				"unit": "lb",
+				"display": "550 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#000000"
+			},
+			"objectAc": 21,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "armorForceHeavy"
+				},
+				{
+					"type": "armorStealthDisadvantage"
+				},
+				{
+					"type": "armorStrengthRequirementDelta",
+					"value": 2
+				},
+				{
+					"type": "armorDexCapDelta",
+					"value": -1
+				},
+				{
+					"type": "bonusAc",
+					"value": 1,
+					"appliesTo": [
+						"shield"
+					]
+				},
+				{
+					"type": "addProperty",
+					"properties": [
+						"H"
+					],
+					"appliesTo": [
+						"weapon"
+					]
+				},
+				{
+					"type": "removeProperty",
+					"properties": [
+						"L",
+						"F"
+					],
+					"appliesTo": [
+						"weapon"
+					]
+				}
+			],
+			"entries": [
+				"Darkmetal is hard and unusually heavy.",
+				{
+					"type": "list",
+					"items": [
+						"Armor made from darkmetal is Heavy Armor, imposes Disadvantage on Dexterity (Stealth) checks, and increases its Strength requirement by 2. If the armor normally adds a Dexterity modifier to AC, reduce that modifier by 1.",
+						"A darkmetal shield grants 1 more AC than an ordinary shield of its type.",
+						"A darkmetal weapon gains the Heavy property and loses the Light and Finesse properties."
+					]
+				}
+			]
+		},
+		{
+			"name": "Darkwood (Zalantar)",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "wood",
+			"density": 0.14,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 2,
+			"rarity": "uncommon",
+			"price": {
+				"gp": 25,
+				"unit": "lb",
+				"display": "25 gp per lb.",
+				"isPriceless": false
+			},
+			"objectAc": 15,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "removeProperty",
+					"properties": [
+						"H"
+					]
+				}
+			],
+			"entries": [
+				"This rare magical wood has similar properties to beech, oak and yew for bow-making while being extremely light and durable.",
+				{
+					"type": "list",
+					"items": [
+						"Items made of darkwood lose the Heavy property."
+					]
+				}
+			]
+		},
+		{
+			"name": "Deathglass",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": null,
+			"densityVaries": true,
+			"damage": 1,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 1,
+			"magicCapacity": 6,
+			"elementalPlane": "Negative Energy",
+			"rarity": "legendary",
+			"price": {
+				"gp": 3000,
+				"unit": "lb",
+				"display": "3,000 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #050505, #4b1248, #183a37)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "strikingSurface",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "strikingSurface",
+					"text": "When a living creature dies within 10 feet, Deathglass can hold one death charge for 24 hours. A weapon or focus made from it can expend that charge to deal an extra {@damage 2d6} necrotic damage to one target damaged by it."
+				},
+				{
+					"type": "condensateInstability",
+					"text": "If the charge expires, its bearer takes {@damage 2d6} necrotic damage."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} When a living creature dies within 10 feet, Deathglass can hold one death charge for 24 hours. A weapon or focus made from it can expend that charge to deal an extra 2d6 Necrotic damage to one target damaged by it.",
+				"{@b Instability.} If the charge expires, its bearer takes 2d6 Necrotic damage."
+			]
+		},
+		{
+			"name": "Deep Crystal",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "crystal",
+			"density": null,
+			"densityVaries": true,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 3,
+			"rarity": "uncommon",
+			"price": {
+				"gp": 25,
+				"unit": "lb",
+				"display": "25 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #BF40BF, #702963, #AA336A, #702963, #BF40BF)"
+			},
+			"objectAc": 19,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"magicCapacityRules": [
+				{
+					"type": "makerForeknowledge",
+					"note": "When an enchantment is first placed on deep crystal, its maker immediately knows whether another effect in the object would interfere with it, before committing the materials."
+				}
+			],
+			"effects": [
+				{
+					"type": "spellcastingFocus",
+					"appliesTo": [
+						"weapon"
+					],
+					"note": "A weapon with a deep-crystal striking surface can be used as a spellcasting focus."
+				}
+			],
+			"entries": [
+				"Deep crystal forms at the heart of large mineral veins and is renowned for its strength and magical resonance. A weapon with a deep-crystal striking surface can be used as a spellcasting focus. When an enchantment is first placed on deep crystal, its maker immediately knows whether another effect in the object would interfere with it, before committing the materials."
+			]
+		},
+		{
+			"name": "Desert Ironwood",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "wood",
+			"density": 0.175,
+			"damage": 0,
+			"protection": 0,
+			"critical": 1,
+			"penetration": 1,
+			"magicCapacity": 4,
+			"rarity": "rare",
+			"price": {
+				"gp": 150,
+				"unit": "lb",
+				"unitText": "1 lb. of workable stock",
+				"display": "150 gp per lb.",
+				"isPriceless": false
+			},
+			"objectAc": 15,
+			"objectAcInferred": true,
+			"weightMultiplier": 1.25,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "rangeMultiplier",
+					"value": 1.5,
+					"appliesTo": [
+						"weapon"
+					],
+					"note": "Increased normal range equal to half its current normal range."
+				}
+			],
+			"entries": [
+				"A tree with a thin trunk and many narrow branches, desert ironwood is both dense and strong. Because they only flower and fruit four years per decade, desert ironwood is scarce, but where one tree is found, there are others nearby. These trees, which thrive anywhere from lush oases to barren deserts, provide the ecosystem with shade and food, granting all manner of desert creatures refuge within the canopies. Because desert ironwood twists and knots as it grows, finding a tree with a suitable piece of wood is a challenge, and only advanced masterwork artisans can work with this dense, unyielding wood. Desert ironwood is dark, with reddish hues and violet striations throughout. Its density makes it durable, though quite heavy; items made of it are 25 percent heavier than their mundane counterparts.",
+				{
+					"type": "list",
+					"items": [
+						"A ranged weapon made from desert ironwood has an increased normal range equal to half of its current normal range. For instance, a shortbow made of desert iron wood has a normal range of 120 feet and a long range of 480 feet.",
+						"Weapon attacks made with a melee weapon made of desert ironwood score a critical hit on a roll of 19 or 20."
+					]
+				}
+			]
+		},
+		{
+			"name": "Dragon Bone",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "organic",
+			"density": null,
+			"densityVaries": true,
+			"damage": 1,
+			"protection": 19,
+			"critical": 0,
+			"penetration": 1,
+			"magicCapacity": 5,
+			"rarity": "very rare",
+			"price": {
+				"gp": 500,
+				"unit": "lb",
+				"unitText": "1 lb. of workable bone",
+				"display": "500 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #8b826f, #eee6d2, #8b826f)"
+			},
+			"objectAc": 19,
+			"weightMultiplier": 0.5,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "removeProperty",
+					"properties": [
+						"H"
+					],
+					"appliesTo": [
+						"weapon"
+					]
+				},
+				{
+					"type": "note",
+					"text": "Structures reinforced with dragon bone have Resistance to all damage from nonmagical impacts."
+				},
+				{
+					"type": "draconicResonanceSlot",
+					"count": 1
+				}
+			],
+			"entries": [
+				"Dragon bones are sturdy yet supple, extraordinarily light, and able to withstand tremendous force without breaking or deteriorating. Dragon-bone equipment weighs half as much as an ordinary equivalent. Weapons made from it lose the Heavy property, and structures reinforced with it have Resistance to all damage from nonmagical impacts. The bones are sought after for armor, siegecraft, and monuments intended to survive an age."
+			]
+		},
+		{
+			"name": "Dragon Heart",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "organic",
+			"density": null,
+			"densityVaries": true,
+			"damage": "na",
+			"protection": "na",
+			"critical": "na",
+			"penetration": "na",
+			"magicCapacity": 8,
+			"rarity": "legendary",
+			"price": {
+				"gp": 25000,
+				"unit": "heart",
+				"unitText": "One intact heart (or more)",
+				"display": "25,000 gp per heart",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "radial-gradient(circle, #ff8a80, #7a0c18, #1a0508)"
+			},
+			"appliesTo": [
+				"other"
+			],
+			"roles": [
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "note",
+					"text": "A properly housed dragon heart can power a magical construct indefinitely, or replace material components worth up to 10,000 gp in a resurrection spell, after which it stops."
+				}
+			],
+			"entries": [
+				"A dragon's heart often continues beating after death. Properly housed, it can power a magical construct indefinitely or replace material components worth up to 10,000 gp in a resurrection spell, after which it stops. Fear Dragon hearts beat in erratic, disturbing rhythms and can power effects based on coercion, destruction, or fear. Safety Dragon hearts maintain perfect, soothing patterns and can power wards, healing, or protective constructs. A heart is a unique organ, never a bulk commodity."
+			]
+		},
+		{
+			"name": "Dragon Scales",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "organic",
+			"density": null,
+			"densityVaries": true,
+			"damage": 1,
+			"protection": 18,
+			"critical": 0,
+			"penetration": 2,
+			"magicCapacity": 5,
+			"rarity": "very rare",
+			"price": {
+				"gp": 150,
+				"unit": "scale",
+				"unitText": "One large workable scale",
+				"display": "150 gp per scale",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(135deg, #17131f, #b9d98f, #d9bd67)"
+			},
+			"objectAc": 19,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "bonusAc",
+					"value": 1,
+					"appliesTo": [
+						"shield"
+					]
+				},
+				{
+					"type": "draconicResonanceSlot",
+					"count": 1
+				}
+			],
+			"entries": [
+				"Dragon scales are hard plates used for armor, shields, and weapon reinforcement.",
+				"{@b Equipment.} A shield reinforced primarily with Dragon Scales grants 1 additional AC. Other equipment uses the material properties above regardless of the kind of dragon from which the scales came.",
+				"{@b Domain Resonance.} A Dragon Scale item may carry one Draconic Domain Resonance from its source dragon."
+			]
+		},
+		{
+			"name": "Dragon Teeth and Claws",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "organic",
+			"density": null,
+			"densityVaries": true,
+			"damage": 1,
+			"protection": "na",
+			"critical": 1,
+			"penetration": 2,
+			"magicCapacity": 4,
+			"rarity": "very rare",
+			"price": {
+				"gp": 750,
+				"unit": "tooth",
+				"unitText": "One intact tooth or claw",
+				"display": "750 gp per tooth or claw",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #ddd2b4, #fff8e4, #8c7557)"
+			},
+			"objectAc": 19,
+			"appliesTo": [
+				"weapon",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "draconicResonanceSlot",
+					"count": 1
+				}
+			],
+			"entries": [
+				"Dragon teeth and claws retain an edge with little shaping.",
+				"{@b Equipment.} Teeth are commonly used for piercing weapons, while claws are used for slashing weapons and hooked tools. Both use the material properties above.",
+				"{@b Domain Resonance.} An item made from a Dragon Tooth or Claw may carry one Draconic Domain Resonance from its source dragon."
+			]
+		},
+		{
+			"name": "Dragonhide",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "organic",
+			"density": null,
+			"densityVaries": true,
+			"damage": 0,
+			"protection": 18,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 3,
+			"rarity": "very rare",
+			"price": {
+				"gp": 250,
+				"unit": "lb",
+				"unitText": "1 lb. of cured hide",
+				"display": "250 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #4a274f, #c8a74e, #4a274f)"
+			},
+			"objectAc": 19,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "draconicResonanceSlot",
+					"count": 1
+				}
+			],
+			"entries": [
+				"Dragonhide is cut from the supple portions beneath and between a dragon's scales.",
+				"{@b Equipment.} Properly cured Dragonhide can form Light, Medium, or Heavy Armor. It uses the material properties above regardless of the kind of dragon from which it came.",
+				"{@b Domain Resonance.} A Dragonhide item may carry one Draconic Domain Resonance from its source dragon."
+			]
+		},
+		{
+			"name": "Duststone",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 0.8,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 2,
+			"magicCapacity": 3,
+			"elementalPlane": "Negative Earth",
+			"rarity": "very rare",
+			"price": {
+				"gp": 650,
+				"unit": "lb",
+				"display": "650 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #6f6252, #c7b79d, #7e705d)"
+			},
+			"objectAc": 17,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "strikingSurface",
+			"degradation": {
+				"trigger": {
+					"on": "attackRoll",
+					"natural": [
+						1
+					]
+				},
+				"effect": {
+					"type": "damageStepDelta",
+					"value": -1
+				},
+				"stacking": true,
+				"destroys": false,
+				"repair": {
+					"method": "shortRest",
+					"tool": "mason's tools"
+				},
+				"note": "Its Damage decreases by 1 until rebuilt during a Short Rest with mason's tools."
+			},
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "strikingSurface",
+					"text": "A Duststone weapon deals double damage to nonmagical objects and structures."
+				},
+				{
+					"type": "condensateInstability",
+					"text": "On a natural 1 attack roll, its Damage decreases by 1 until rebuilt during a Short Rest with mason's tools."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} A Duststone weapon deals double damage to nonmagical objects and structures.",
+				"{@b Instability.} On a natural 1 attack roll, its Damage decreases by 1 until rebuilt during a Short Rest with mason's tools."
+			]
+		},
+		{
+			"name": "Electrum",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "metal",
+			"density": 14.73,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 2,
+			"rarity": "rare",
+			"price": {
+				"gp": 25,
+				"unit": "lb",
+				"display": "25 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#ffffc2"
+			},
+			"objectAc": 17,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"magicCapacityRules": [
+				{
+					"type": "opposedStatesCountAsOne",
+					"note": "Two opposed states of one magical property, such as revealing and concealing or heating and cooling, count as one effect when only one state can function at a time."
+				}
+			],
+			"entries": [
+				"Electrum is a naturally occurring or deliberately made alloy of gold and silver. It is valued for enchantments concerned with exchange, duality, and transformation. Two opposed states of one magical property, such as revealing and concealing or heating and cooling, count as one effect against an electrum item's Magic Capacity when only one state can function at a time."
+			]
+		},
+		{
+			"name": "Emberglass",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 2.6,
+			"damage": 1,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 4,
+			"elementalPlane": "Fire",
+			"rarity": "rare",
+			"price": {
+				"gp": 250,
+				"unit": "lb",
+				"display": "250 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #7a1600, #ff6b00, #ffd166)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "strikingSurface",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "strikingSurface",
+					"text": "Emberglass is warm even in winter and kindles dry material touched to it for a minute. A weapon made from it can deal fire damage instead of its normal type."
+				},
+				{
+					"type": "overrideDamageType",
+					"damageType": "fire",
+					"optional": true,
+					"appliesTo": [
+						"weapon"
+					]
+				},
+				{
+					"type": "condensateInstability",
+					"text": "Cold damage or immersion in water suppresses its affinity until the end of the user's next turn."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} Emberglass is warm even in winter and kindles dry material touched to it for a minute. A weapon made from it can deal Fire damage instead of its normal type.",
+				"{@b Instability.} Cold damage or immersion in water suppresses its affinity until the end of the user's next turn."
+			]
+		},
+		{
+			"name": "Gold",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "metal",
+			"density": 19.32,
+			"damage": -1,
+			"protection": 13,
+			"critical": -1,
+			"penetration": 0,
+			"magicCapacity": 3,
+			"rarity": "rare",
+			"price": {
+				"gp": 50,
+				"unit": "lb",
+				"display": "50 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to bottom, #c39738, #deb761, #c39738)"
+			},
+			"objectAc": 17,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Gold is heavy, soft, and poor at holding an edge. Gold equipment is usually ceremonial or built around a harder core, and its main value is as a conduit for enchantments."
+			]
+		},
+		{
+			"name": "Goldleaf Wood",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "wood",
+			"density": 0.87,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 2,
+			"rarity": "uncommon",
+			"price": {
+				"gp": 40,
+				"unit": "lb",
+				"display": "40 gp per lb.",
+				"isPriceless": false
+			},
+			"objectAc": 15,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "note",
+					"text": "An object convincingly made from goldleaf requires a successful {@dc 15} Intelligence ({@skill Investigation}) check to distinguish from gold by sight alone, though its weight reveals the difference immediately."
+				}
+			],
+			"entries": [
+				"Goldleaf wood resembles polished gold and is used for instruments, carving, and ceremonial fittings. An object convincingly made from Goldleaf requires a successful DC 15 Intelligence (Investigation) check to distinguish from gold by sight alone, though its weight reveals the difference immediately."
+			]
+		},
+		{
+			"name": "Gravesalt",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 2.2,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 1,
+			"magicCapacity": 3,
+			"elementalPlane": "Negative Water",
+			"rarity": "very rare",
+			"price": {
+				"gp": 600,
+				"unit": "lb",
+				"display": "600 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #c8c0b4, #ffffff, #8c8378)"
+			},
+			"objectAc": 17,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "strikingSurface",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "strikingSurface",
+					"text": "An intact Gravesalt container preserves nonliving organic material indefinitely. A creature hit by a Gravesalt weapon cannot regain Hit Points until the start of the user's next turn."
+				},
+				{
+					"type": "condensateInstability",
+					"text": "Fresh water dissolves exposed Gravesalt in 1 minute."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} An intact Gravesalt container preserves nonliving organic material indefinitely. A creature hit by a Gravesalt weapon cannot regain Hit Points until the start of the user's next turn.",
+				"{@b Instability.} Fresh water dissolves exposed Gravesalt in 1 minute."
+			]
+		},
+		{
+			"name": "Heart Stone",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": null,
+			"densityVaries": true,
+			"damage": -2,
+			"protection": 25,
+			"critical": -2,
+			"penetration": 0,
+			"magicCapacity": 12,
+			"rarity": "legendary",
+			"price": {
+				"gp": null,
+				"unit": "none",
+				"unitText": "Not normally traded",
+				"display": "Priceless (not normally traded)",
+				"isPriceless": true
+			},
+			"color": {
+				"css": "#ffffff"
+			},
+			"objectAc": 30,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "indestructible",
+					"note": "Untouched by time and the strife of the world."
+				},
+				{
+					"type": "note",
+					"text": "Heart Stone makes no noise when something strikes it. The craft of making it was lost in The Collapse; no new Heart Stone has been worked since."
+				}
+			],
+			"entries": [
+				"Heart Stone is often a white, somewhat warm to the touch material. It has a smooth texture and is of moderate weight, and makes no noise when something hits it.",
+				"One of the {@b Empire's} earliest and most defining inventions, Heart Stone is believed to have been a leading cause of its rise to dominance, and the craft of making it was {@b lost in The Collapse} - no new Heart Stone has been worked since. It is untouched by time and the strife of the world, which is why its greatest works still stand: above all the {@b Flard}, the oracle pillars, alongside other Imperial relics such as the Starlight Roads and the towering Great Statues."
+			]
+		},
+		{
+			"name": "Ioun Crystal",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "crystal",
+			"density": null,
+			"densityVaries": true,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 1,
+			"rarity": "legendary",
+			"price": {
+				"gp": 5000,
+				"unit": "stone",
+				"unitText": "One intact stone (or more)",
+				"display": "5,000 gp per stone",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #e6fff2, #9bd8ff, #fff0a8, #efb7ff)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"magicCapacityRules": [
+				{
+					"type": "freeEffect",
+					"theme": "aligned resonance",
+					"appliesTo": "fragment",
+					"note": "An Ioun fragment can serve as a spellcasting focus for one effect aligned with its resonance; that effect does not count against the fragment's Magic Capacity."
+				}
+			],
+			"entries": [
+				"Ioun Crystal is a natural conduit to the Positive Energy Plane. It forms inside geodes near the boundary of the Quasi-Elemental Plane of Mineral. Whole crystals are called {@b Ioun Stones}; broken pieces are {@b Ioun fragments}; the crystalline web around them is {@b Ioun Sand}.",
+				"{@b Ioun Fragments.} A fragment retains the resonance of the stone from which it broke but not that stone's complete property. It can serve as a spellcasting focus for one effect aligned with that resonance; the aligned effect does not count against the fragment's Magic Capacity. Unlike Jadoo, it cannot hold unrelated magic without limit.",
+				"{@b Ioun Geodes.} An intact Ioun geode is an unattractive shell about 1 foot across, though some grow much larger. It contains {@dice 3d4} Ioun Stones suspended in a crystalline web and surrounded by Ioun Sand. Breaking it releases centuries of trapped Positive Energy: each creature within 30 feet must make a {@dc 20} Constitution saving throw, taking {@damage 6d12 + 8} Radiant damage on a failed save or half as much on a successful one. Creatures native to the Mineral Plane often cultivate geodes and consider their removal theft."
+			]
+		},
+		{
+			"name": "Ioun Sand",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "crystal",
+			"density": null,
+			"densityVaries": true,
+			"damage": "na",
+			"protection": "na",
+			"critical": "na",
+			"penetration": "na",
+			"magicCapacity": "na",
+			"rarity": "legendary",
+			"price": {
+				"gp": 1000,
+				"unit": "matrix",
+				"unitText": "One small matrix bag",
+				"display": "1,000 gp per matrix bag",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #d9ffff, #ffe8a3, #f3c8ff, #ffffff)"
+			},
+			"appliesTo": [
+				"other"
+			],
+			"roles": [
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "doubleNumericProperties",
+					"note": "Each coherent numerical property granted by an intact Ioun Stone set in the matrix is doubled, including bonuses, ranges, areas, damage, healing, capacities and durations. Ioun Sand does not double ordinary enchantments, Dragon Blood uses, or the effects of loose Ioun fragments."
+				}
+			],
+			"entries": [
+				"Ioun Sand is the heavy, glittering crystalline web that surrounds stones inside an intact geode. A master jeweler and spellcaster can shape it into a matrix such as a helm, bracer, staff, halo, pendant, or torc. An actual Ioun Stone placed in the matrix remains until deliberately removed, and each coherent numerical property granted by that stone is doubled, including bonuses, ranges, areas, damage, healing, capacities, and durations. The DM adjudicates properties that cannot coherently be doubled.",
+				"Ioun Sand does not double ordinary enchantments, Dragon Blood uses, or the effects of loose Ioun fragments. Complete matrices holding several intact stones are among the rarest magical devices in existence."
+			]
+		},
+		{
+			"name": "Iron",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "metal",
+			"density": 7.87,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 3,
+			"rarity": "common",
+			"price": {
+				"gp": 0.1,
+				"unit": "lb",
+				"display": "0.1 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#b7b7b7"
+			},
+			"objectAc": 19,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Iron is a common material for tools, weapons, armor, and fittings. It rusts unless maintained or protected."
+			]
+		},
+		{
+			"name": "Ironwood",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "wood",
+			"density": 0.15,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 4,
+			"rarity": "uncommon",
+			"price": {
+				"gp": 37.5,
+				"unit": "lb",
+				"display": "37.5 gp per lb.",
+				"isPriceless": false
+			},
+			"objectAc": 15,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "note",
+					"text": "Ironwood is as strong, heavy and fire-resistant as steel, and will not burn."
+				},
+				{
+					"type": "note",
+					"text": "Spells and effects that affect metal do not affect ironwood; spells that affect wood do."
+				}
+			],
+			"entries": [
+				"Ironwood is a magical substance created from normal wood by druids, mimicking the properties of Desert Ironwood.",
+				{
+					"type": "list",
+					"items": [
+						"While remaining natural wood in almost every way, ironwood is as strong, heavy, and resistant to fire as steel.",
+						"Spells and effects that affect metal do not affect ironwood, whereas spells that affect wood do - although ironwood will not burn."
+					]
+				}
+			]
+		},
+		{
+			"name": "Ivory",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "organic",
+			"density": null,
+			"densityVaries": true,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 4,
+			"rarity": "uncommon",
+			"price": {
+				"gp": 25,
+				"unit": "lb",
+				"unitText": "1 lb. of legal, traceable material",
+				"display": "25 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #d8cda7, #fff8dc, #d8cda7)"
+			},
+			"objectAc": 15,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Ivory is dense, fine-grained, and used for carving, inlays, holy symbols, and wand components."
+			]
+		},
+		{
+			"name": "Jadoo",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "crystal",
+			"density": null,
+			"densityVaries": true,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": "infinity",
+			"rarity": "legendary",
+			"price": {
+				"gp": 1500,
+				"unit": "lb",
+				"display": "1,500 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #ef5350, #f48fb1, #7e57c2, #2196f3, #26c6da, #43a047, #eeff41, #f9a825, #ff5722)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "note",
+					"text": "A creature touching an unshielded piece of Jadoo for the first time must succeed on a {@dc 13} Constitution saving throw or be {@condition incapacitated} until the start of its next turn."
+				}
+			],
+			"entries": [
+				"A rare crystal found in the Black Desert and, unbeknownst to most scholars, within the Starlight Roads, Jadoo is coveted as a raw form of magic. It can host any number of unrelated magical effects without interference and was used in modern attempts to reproduce Maathaum and Sumaathaum. Bare contact creates a moment of sensory overload: Jadoo is described as tasting of every taste, smelling of every scent, and sounding like all melodies at once. A creature touching an unshielded piece for the first time must succeed on a DC 13 Constitution saving throw or be Incapacitated until the start of its next turn."
+			]
+		},
+		{
+			"name": "Lead",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "metal",
+			"density": 11.34,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": "-infinity",
+			"rarity": "very rare",
+			"price": {
+				"gp": 100,
+				"unit": "lb",
+				"unitText": "1 lb. of warding-grade lead",
+				"display": "100 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#434343"
+			},
+			"objectAc": 17,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "saveAdvantage",
+					"appliesTo": [
+						"armor"
+					],
+					"schools": [
+						"A",
+						"D",
+						"E",
+						"I"
+					],
+					"conditional": "Against Abjuration, Divination, Enchantment and Illusion spells"
+				},
+				{
+					"type": "note",
+					"text": "A sufficiently thick lead enclosure blocks divination magic through it."
+				},
+				{
+					"type": "note",
+					"text": "Lead cannot hold any magical effects."
+				}
+			],
+			"entries": [
+				"Lead blocks magic. Lead-coated armor grants Advantage on saving throws against Abjuration, Divination, Enchantment, and Illusion spells, while a sufficiently thick enclosure blocks divination magic through it.",
+				"Lead cannot hold any magical effects."
+			]
+		},
+		{
+			"name": "Leather and Rawhide",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "organic",
+			"density": null,
+			"densityVaries": true,
+			"damage": "na",
+			"protection": 12,
+			"critical": "na",
+			"penetration": "na",
+			"magicCapacity": 2,
+			"rarity": "common",
+			"price": {
+				"gp": 2,
+				"unit": "lb",
+				"unitText": "1 lb. of cured material",
+				"display": "2 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #70452d, #a96f45, #70452d)"
+			},
+			"objectAc": 11,
+			"appliesTo": [
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Leather and rawhide are used for flexible armor, straps, sheaths, and protective clothing. Untreated pieces are vulnerable to water, rot, and fire."
+			]
+		},
+		{
+			"name": "Lifeglass",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": null,
+			"densityVaries": true,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 7,
+			"elementalPlane": "Positive Energy",
+			"rarity": "legendary",
+			"price": {
+				"gp": 2500,
+				"unit": "lb",
+				"display": "2,500 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #ffffff, #8cff98, #fff59d)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "focus",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "focus",
+					"text": "When a spell cast through Lifeglass restores Hit Points, one healing die that rolled a 1 or 2 can be rerolled."
+				},
+				{
+					"type": "condensateInstability",
+					"text": "If the target is already at its Hit Point maximum, it instead takes radiant damage equal to the spell's level."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} When a spell cast through Lifeglass restores Hit Points, one healing die that rolled a 1 or 2 can be rerolled.",
+				"{@b Instability.} If the target is already at its Hit Point maximum, it instead takes Radiant damage equal to the spell's level."
+			]
+		},
+		{
+			"name": "Magmaheart",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 3.8,
+			"damage": 1,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 2,
+			"magicCapacity": 4,
+			"elementalPlane": "Magma",
+			"rarity": "very rare",
+			"price": {
+				"gp": 450,
+				"unit": "lb",
+				"display": "450 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #1f1713, #d83b01, #ffb000)"
+			},
+			"objectAc": 17,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "strikingSurface",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "strikingSurface",
+					"text": "After a Magmaheart weapon hits a creature wearing manufactured armor, the next attack against that creature before the start of the user's next turn gains a +1 bonus."
+				},
+				{
+					"type": "condensateInstability",
+					"text": "Cold damage makes it contract explosively, dealing {@damage 1d6} force damage to the creature carrying it."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} After a Magmaheart weapon hits a creature wearing manufactured armor, the next attack against that creature before the start of the user's next turn gains a +1 bonus.",
+				"{@b Instability.} Cold damage makes it contract explosively, dealing 1d6 Force damage to the creature carrying it."
+			]
+		},
+		{
+			"name": "Mercurial Steel",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": 8.2,
+			"damage": 1,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 1,
+			"magicCapacity": 4,
+			"rarity": "very rare",
+			"price": {
+				"gp": 250,
+				"unit": "lb",
+				"display": "250 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #59636c, #dce4e8, #59636c)"
+			},
+			"objectAc": 19,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "note",
+					"text": "When forged, choose two weapon or tool configurations that use roughly the same amount of material. As a Bonus Action, the user can shift the item between those forms."
+				},
+				{
+					"type": "note",
+					"text": "The metal closes minor dents and cracks during a Long Rest. Antimagic locks it in its current form, and a critical hit against an unattended Mercurial Steel object ruptures it, exposing nearby creatures to Quicksilver."
+				}
+			],
+			"entries": [
+				"Mercurial Steel encloses quicksilver channels within a flexible steel lattice. When forged, choose two weapon or tool configurations that use roughly the same amount of material. As a Bonus Action, its user can shift the item between those forms. The metal closes minor dents and cracks during a Long Rest. Antimagic locks it in its current form, and a critical hit against an unattended Mercurial Steel object ruptures it, exposing nearby creatures to Quicksilver."
+			]
+		},
+		{
+			"name": "Mineralite",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 3.3,
+			"damage": 0,
+			"protection": 19,
+			"critical": 0,
+			"penetration": 1,
+			"magicCapacity": 5,
+			"elementalPlane": "Positive Earth",
+			"rarity": "very rare",
+			"price": {
+				"gp": 750,
+				"unit": "lb",
+				"display": "750 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #6d4c9b, #d7b8ff, #5ca4a9)"
+			},
+			"objectAc": 17,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "focus",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "focus",
+					"text": "Once per day, touching Mineralite to a damaged nonmagical object for 1 minute repairs a break or tear no larger than 1 foot in any dimension."
+				},
+				{
+					"type": "condensateInstability",
+					"text": "Magical interference doubles the item's weight until one of its magical effects is removed."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} Once per day, touching Mineralite to a damaged nonmagical object for 1 minute repairs a break or tear no larger than 1 foot in any dimension.",
+				"{@b Instability.} Magical interference doubles the item's weight until one of its magical effects is removed."
+			]
+		},
+		{
+			"name": "Mirror Amalgam",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": null,
+			"densityVaries": true,
+			"damage": "na",
+			"protection": "na",
+			"critical": "na",
+			"penetration": "na",
+			"magicCapacity": 5,
+			"rarity": "very rare",
+			"price": {
+				"gp": 500,
+				"unit": "sqFoot",
+				"unitText": "1 square foot of coating",
+				"display": "500 gp per square foot",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #30363b, #ffffff, #8e9aa2)"
+			},
+			"appliesTo": [
+				"other"
+			],
+			"roles": [
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "spellcastingFocus",
+					"schools": [
+						"D",
+						"I"
+					],
+					"note": "Once per Long Rest when a Divination or Illusion spell is cast through it, the caster can double either the spell's range or its duration.",
+					"noteMode": "qualifier"
+				},
+				{
+					"type": "note",
+					"text": "Fire damage that reaches the coating destroys it."
+				}
+			],
+			"entries": [
+				"Mirror Amalgam is a sealed silver-and-quicksilver coating applied to glass, crystal, or polished obsidian. It can serve as a focus for Divination and Illusion spells. Once per Long Rest when such a spell is cast through it, the caster can double either the spell's range or its duration. Fire damage that reaches the coating destroys it. A mirror used repeatedly to contact spirits can also become contaminated, replaying images supplied by the spirit rather than true reflections."
+			]
+		},
+		{
+			"name": "Mithraline",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": 1.59,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 8,
+			"rarity": "legendary",
+			"price": {
+				"gp": 1200,
+				"unit": "lb",
+				"display": "1,200 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#eae0c8"
+			},
+			"objectAc": 21,
+			"objectAcInferred": true,
+			"weightMultiplier": 0.25,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "armorNoStrengthRequirement"
+				},
+				{
+					"type": "armorNoStealthDisadvantage"
+				},
+				{
+					"type": "armorWearableUnderClothing"
+				},
+				{
+					"type": "removeProperty",
+					"properties": [
+						"H",
+						"2H"
+					],
+					"appliesTo": [
+						"weapon"
+					]
+				},
+				{
+					"type": "addProperty",
+					"properties": [
+						"V",
+						"F"
+					],
+					"appliesTo": [
+						"weapon"
+					],
+					"note": "Gains Versatile if appropriate, and gains Finesse."
+				}
+			],
+			"entries": [
+				"Mithraline is a starmetal alloy that intensifies Mithril's lightness and magical flexibility. Equipment made from it weighs one quarter as much as normal. Armor has no Strength requirement, imposes no Disadvantage on Dexterity (Stealth), and can be concealed beneath clothing. Weapons lose Heavy and Two-Handed, gain Versatile if appropriate, and gain Finesse. Its pale surface bends around enchantments rather than resisting them, accounting for its exceptional Magic Capacity."
+			]
+		},
+		{
+			"name": "Mithril",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "metal",
+			"density": 0.17,
+			"damage": 0,
+			"protection": 18,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 5,
+			"rarity": "very rare",
+			"price": {
+				"gp": 700,
+				"unit": "lb",
+				"display": "700 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#ffe4e1"
+			},
+			"objectAc": 21,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "armorNoStealthDisadvantage"
+				},
+				{
+					"type": "armorNoStrengthRequirement"
+				},
+				{
+					"type": "armorWearableUnderClothing"
+				},
+				{
+					"type": "removeProperty",
+					"properties": [
+						"H"
+					],
+					"appliesTo": [
+						"weapon"
+					]
+				},
+				{
+					"type": "propertyLadder",
+					"appliesTo": [
+						"weapon"
+					],
+					"ladder": {
+						"2H": "V",
+						"_": "L",
+						"L": "F"
+					}
+				}
+			],
+			"entries": [
+				"Mithril is extraordinarily light and flexible without becoming soft.",
+				{
+					"type": "list",
+					"items": [
+						"Mithril armor imposes no Disadvantage on Dexterity (Stealth) checks, has no Strength requirement, and can be concealed beneath ordinary clothing if its shape permits.",
+						"A mithril weapon loses the Heavy property. A Two-Handed weapon becomes Versatile, a one-handed weapon without Light gains Light, and a Light weapon gains Finesse."
+					]
+				}
+			]
+		},
+		{
+			"name": "Nightsilk",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "cloth",
+			"density": null,
+			"densityVaries": true,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 3,
+			"rarity": "rare",
+			"price": {
+				"gp": 75,
+				"unit": "sqYard",
+				"display": "75 gp per square yard",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #241532, #6f3d78, #241532)"
+			},
+			"objectAc": 11,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "perceptionPenaltyToNotice",
+					"value": -2,
+					"appliesTo": [
+						"armor",
+						"other"
+					],
+					"note": "Creatures take a \u22122 penalty to Wisdom ({@skill Perception}) checks based on sight made to notice the wearer of an outer garment made primarily from Nightsilk."
+				}
+			],
+			"entries": [
+				"A type of silk produced by purple-spotted caterpillars from the Ossmark Forest of Clairnia. Its folds drift slowly even in still air, creating a blur around the wearer without hindering movement.",
+				"While wearing an outer garment made primarily from Nightsilk, creatures take a -2 penalty to Wisdom (Perception) checks based on sight made to notice the wearer."
+			]
+		},
+		{
+			"name": "Obsidian",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "stone",
+			"density": 2.4,
+			"damage": 0,
+			"protection": "na",
+			"critical": 1,
+			"penetration": 2,
+			"magicCapacity": 3,
+			"rarity": "uncommon",
+			"price": {
+				"gp": 2,
+				"unit": "lb",
+				"unitText": "1 lb. of workable stone",
+				"display": "2 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #050505, #382b40, #050505)"
+			},
+			"objectAc": 13,
+			"appliesTo": [
+				"weapon",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"focus"
+			],
+			"degradation": {
+				"trigger": {
+					"on": "attackRoll",
+					"natural": [
+						1
+					]
+				},
+				"effect": {
+					"type": "damageStepDelta",
+					"value": -2
+				},
+				"stacking": true,
+				"destroys": false,
+				"repair": {
+					"method": "shortRest",
+					"tool": "appropriate tools"
+				},
+				"note": "The edge shatters and its Damage decreases by 2 until it is re-knapped during a Short Rest with appropriate tools."
+			},
+			"entries": [
+				"Freshly knapped obsidian takes a sharp but brittle edge. When its wielder rolls a natural 1 on an attack roll, the edge shatters and its Damage decreases by 2 until it is re-knapped during a Short Rest with appropriate tools. Polished obsidian also has arcane uses."
+			]
+		},
+		{
+			"name": "Ordinary Glass",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "stone",
+			"density": 2.5,
+			"damage": -1,
+			"protection": "na",
+			"critical": 1,
+			"penetration": 1,
+			"magicCapacity": 2,
+			"rarity": "common",
+			"price": {
+				"gp": 0.5,
+				"unit": "lb",
+				"display": "0.5 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(135deg, #dff5f5, #8fc5c9, #f8ffff)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"focus"
+			],
+			"degradation": {
+				"trigger": {
+					"on": "attackRoll",
+					"natural": [
+						1
+					],
+					"alsoOnCriticalHit": true
+				},
+				"effect": {
+					"type": "destroy"
+				},
+				"stacking": false,
+				"destroys": true,
+				"repair": null,
+				"note": "A glass weapon shatters after it scores a critical hit or when its wielder rolls a natural 1 on an attack roll."
+			},
+			"entries": [
+				"Ordinary glass is used for lenses, vessels, alchemical equipment, and cutting edges. It is too brittle for protective equipment. A glass weapon shatters after it scores a critical hit or when its wielder rolls a natural 1 on an attack roll."
+			]
+		},
+		{
+			"name": "Orichalcum",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "metal",
+			"density": 4.93,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 4,
+			"magicCapacity": 0,
+			"rarity": "very rare",
+			"price": {
+				"gp": 600,
+				"unit": "lb",
+				"display": "600 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#7fff00"
+			},
+			"objectAc": 21,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "armorNoStealthDisadvantage"
+				},
+				{
+					"type": "armorNoStrengthRequirement"
+				},
+				{
+					"type": "countsAsMagical",
+					"appliesTo": [
+						"weapon"
+					]
+				},
+				{
+					"type": "note",
+					"text": "Orichalcum cannot safely store enchantments."
+				}
+			],
+			"entries": [
+				"Orichalcum is light, hard, keen, and disruptive to magic.",
+				{
+					"type": "list",
+					"items": [
+						"Orichalcum armor imposes no Disadvantage on Dexterity (Stealth) checks and has no Strength requirement.",
+						"An orichalcum weapon counts as magical for the purpose of overcoming resistance and immunity.",
+						"Orichalcum cannot safely store enchantments."
+					]
+				}
+			]
+		},
+		{
+			"name": "Orichaline",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": 3.92,
+			"damage": 0,
+			"protection": 0,
+			"critical": 1,
+			"penetration": 5,
+			"magicCapacity": 3,
+			"rarity": "legendary",
+			"price": {
+				"gp": 1400,
+				"unit": "lb",
+				"display": "1,400 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#38761d"
+			},
+			"objectAc": 21,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "countsAsMagical",
+					"appliesTo": [
+						"weapon"
+					]
+				},
+				{
+					"type": "penetrationIgnoresMagicalAc",
+					"note": "Ignores AC bonuses granted by spells or other temporary magical effects when determining whether a miss becomes a Penetrating Blow. It cannot bypass physical armor, cover, or a creature's natural defenses in this way."
+				}
+			],
+			"entries": [
+				"Orichaline is starmetal-alloyed Orichalcum, dark green and traced with bright lines around active magic. An Orichaline weapon counts as magical and ignores AC bonuses granted by spells or other temporary magical effects when determining whether a miss becomes a Penetrating Blow. It cannot bypass physical armor, cover, or a creature's natural defenses in this way."
+			]
+		},
+		{
+			"name": "Paradox Metal",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": 7.87,
+			"damage": 2,
+			"protection": 20,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 10,
+			"rarity": "legendary",
+			"price": {
+				"gp": 2000,
+				"unit": "lb",
+				"display": "2,000 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#b7b7b7"
+			},
+			"objectAc": 21,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "note",
+					"text": "Paradox Metal cannot be magically tracked, and can host souls in a unique fashion \u2014 protecting them from detection and exorcism, but also preventing them from escaping its confines."
+				}
+			],
+			"entries": [
+				"An alloy of darkmetal and mithril, rumored to only be craftable in planes where magic is highly suffused, such as the feywild. This metal can store enormous amounts of magic in it, and cannot be magically tracked. It can host souls in a very unique fashion, protecting them from detection and exorcism but also preventing them from escaping its confines."
+			]
+		},
+		{
+			"name": "Platinum",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "metal",
+			"density": 21.45,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 4,
+			"rarity": "rare",
+			"price": {
+				"gp": 500,
+				"unit": "lb",
+				"display": "500 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to bottom, #d5d7e5, #eee, #d5d7e5)"
+			},
+			"objectAc": 19,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Platinum is dense, difficult to work, and resistant to corrosion."
+			]
+		},
+		{
+			"name": "Quicksilver",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "metal",
+			"density": 13.53,
+			"damage": "na",
+			"protection": "na",
+			"critical": "na",
+			"penetration": "na",
+			"magicCapacity": 4,
+			"rarity": "uncommon",
+			"price": {
+				"gp": 50,
+				"unit": "vial",
+				"unitText": "One sealed vial",
+				"display": "50 gp per vial",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #747c84, #f2f5f7, #747c84)"
+			},
+			"appliesTo": [
+				"other"
+			],
+			"roles": [
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "note",
+					"text": "Quicksilver cannot form equipment by itself. A creature exposed to an open vial or ruptured channel must succeed on a {@dc 14} Constitution saving throw or take {@damage 2d6} poison damage and have the {@condition poisoned} condition for 1 hour."
+				}
+			],
+			"entries": [
+				"Quicksilver is a toxic liquid metal used in alchemy, sealed mechanisms, and amalgams. It cannot form equipment by itself. A creature exposed to an open vial or ruptured channel must succeed on a DC 14 Constitution saving throw or take 2d6 Poison damage and have the Poisoned condition for 1 hour."
+			]
+		},
+		{
+			"name": "Rimeglass",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 0.9,
+			"damage": 0,
+			"protection": 16,
+			"critical": 1,
+			"penetration": 0,
+			"magicCapacity": 4,
+			"elementalPlane": "Ice",
+			"rarity": "very rare",
+			"price": {
+				"gp": 400,
+				"unit": "lb",
+				"display": "400 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #bce8f1, #ffffff, #76b5c5)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "strikingSurface",
+			"degradation": {
+				"trigger": {
+					"on": "damageTaken",
+					"damageType": "fire"
+				},
+				"effect": {
+					"type": "zeroAxes",
+					"axes": [
+						"protection",
+						"critical"
+					]
+				},
+				"stacking": false,
+				"destroys": false,
+				"repair": {
+					"method": "shortRest",
+					"tool": "smith's or glassblower's tools"
+				},
+				"note": "Fire damage reduces its Protection and Critical to 0 until it is repaired during a Short Rest with smith's or glassblower's tools."
+			},
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "strikingSurface",
+					"text": "A creature critically hit by a Rimeglass weapon has its Speed reduced by 10 feet until the end of its next turn."
+				},
+				{
+					"type": "condensateInstability",
+					"text": "Fire damage reduces its Protection and Critical to 0 until it is repaired during a Short Rest with smith's or glassblower's tools."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} A creature critically hit by a Rimeglass weapon has its Speed reduced by 10 feet until the end of its next turn.",
+				"{@b Instability.} Fire damage reduces its Protection and Critical to 0 until it is repaired during a Short Rest with smith's or glassblower's tools."
+			]
+		},
+		{
+			"name": "Rootstone",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 4.5,
+			"damage": 0,
+			"protection": 18,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 4,
+			"elementalPlane": "Earth",
+			"rarity": "rare",
+			"price": {
+				"gp": 200,
+				"unit": "lb",
+				"display": "200 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #3f3528, #82735c, #355834)"
+			},
+			"objectAc": 17,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "protectiveLayer",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "protectiveLayer",
+					"text": "While its user stands on earth or stone, they have Advantage on checks and saving throws made to resist being shoved or knocked {@condition prone}."
+				},
+				{
+					"type": "saveAdvantage",
+					"conditional": "While standing on earth or stone, to resist being shoved or knocked prone"
+				},
+				{
+					"type": "condensateInstability",
+					"text": "Armor made from Rootstone reduces its wearer's Speed by 5 feet."
+				},
+				{
+					"type": "speedDelta",
+					"value": -5,
+					"appliesTo": [
+						"armor"
+					]
+				}
+			],
+			"entries": [
+				"{@b Affinity.} While its user stands on earth or stone, they have Advantage on checks and saving throws made to resist being shoved or knocked Prone.",
+				"{@b Instability.} Armor made from Rootstone reduces its wearer's Speed by 5 feet."
+			]
+		},
+		{
+			"name": "Rose Gold",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": 13.67,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 5,
+			"rarity": "rare",
+			"price": {
+				"gp": 100,
+				"unit": "lb",
+				"display": "100 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#C7B6C8"
+			},
+			"objectAc": 17,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"magicCapacityRules": [
+				{
+					"type": "freeEffect",
+					"theme": "loyalty, affection, status and public identity",
+					"note": "The first such effect placed on an item does not count against its Magic Capacity."
+				}
+			],
+			"entries": [
+				"This alloy of gold and traces of Mithril is expensive but common among high-end smiths. It counters gold's softness and makes luxury weapons and armor viable for real combat. Rose Gold readily carries magic concerned with loyalty, affection, status, and public identity; the first such effect placed on an item does not count against its Magic Capacity."
+			]
+		},
+		{
+			"name": "Shell and Chitin",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "organic",
+			"density": null,
+			"densityVaries": true,
+			"damage": 0,
+			"protection": 15,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 2,
+			"rarity": "uncommon",
+			"price": {
+				"gp": 5,
+				"unit": "lb",
+				"unitText": "1 lb. of workable plate",
+				"display": "5 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #6f6352, #bea77f, #5a4936)"
+			},
+			"objectAc": 15,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Large shells and monster chitin can be fitted into shields and Light or Medium Armor. They require a carver rather than a smith to work and repair."
+			]
+		},
+		{
+			"name": "Silk",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "cloth",
+			"density": null,
+			"densityVaries": true,
+			"damage": "na",
+			"protection": 0,
+			"critical": "na",
+			"penetration": "na",
+			"magicCapacity": 2,
+			"rarity": "uncommon",
+			"price": {
+				"gp": 10,
+				"unit": "sqYard",
+				"display": "10 gp per square yard",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #f2e8d5, #fffaf0, #dfcdb5)"
+			},
+			"objectAc": 11,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Silk is light, strong for its weight, and commonly used for fine clothing and rope."
+			]
+		},
+		{
+			"name": "Silver",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "metal",
+			"density": 10.49,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 2,
+			"rarity": "uncommon",
+			"price": {
+				"gp": 5,
+				"unit": "lb",
+				"display": "5 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to bottom, #bcc6cc, #eee, #bcc6cc)"
+			},
+			"objectAc": 17,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "countsAsSilvered",
+					"note": "Bypasses Resistance or Immunity to mundane weapons only when the creature's rules specifically say silver does so.",
+					"noteMode": "qualifier"
+				}
+			],
+			"entries": [
+				"Some creatures, including many werewolves, can be harmed normally by silvered weapons even when ordinary weapons fail. A properly silvered weapon bypasses Resistance or Immunity to mundane weapons only when the creature's rules specifically say that silver does so."
+			]
+		},
+		{
+			"name": "Skyshard",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 0.1,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 4,
+			"elementalPlane": "Air",
+			"rarity": "rare",
+			"price": {
+				"gp": 300,
+				"unit": "lb",
+				"display": "300 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #eafaff, #9bdcf4, #ffffff)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"weightMultiplier": 0.25,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "strikingSurface",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "strikingSurface",
+					"text": "Equipment made primarily from Skyshard weighs one quarter as much, and a Skyshard weapon's normal and long thrown ranges increase by 20 feet."
+				},
+				{
+					"type": "thrownRangeDelta",
+					"value": 20,
+					"appliesTo": [
+						"weapon"
+					]
+				},
+				{
+					"type": "condensateInstability",
+					"text": "When it takes thunder damage, a creature holding or wearing it must succeed on a {@dc 13} Strength saving throw or be pushed 10 feet."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} Equipment made primarily from Skyshard weighs one quarter as much, and a Skyshard weapon's normal and long thrown ranges increase by 20 feet.",
+				"{@b Instability.} When it takes Thunder damage, a creature holding or wearing it must succeed on a DC 13 Strength saving throw or be pushed 10 feet."
+			]
+		},
+		{
+			"name": "Smokestone",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 0.4,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 4,
+			"elementalPlane": "Smoke",
+			"rarity": "very rare",
+			"price": {
+				"gp": 400,
+				"unit": "lb",
+				"display": "400 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #222222, #888888, #d0d0d0)"
+			},
+			"objectAc": 17,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "focus",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "focus",
+					"text": "As a Bonus Action, its user can create a 10-foot-radius Sphere of smoke that is Heavily Obscured for 1 minute or until dispersed by a strong wind."
+				},
+				{
+					"type": "grantsAction",
+					"name": "Smokestone Cloud",
+					"actionType": "bonus",
+					"note": "Create a 10-foot-radius Sphere of heavily obscuring smoke for 1 minute."
+				},
+				{
+					"type": "condensateInstability",
+					"text": "Creatures relying on smell have Advantage on checks made to locate its carrier."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} As a Bonus Action, its user can create a 10-foot-radius Sphere of smoke that is Heavily Obscured for 1 minute or until dispersed by a strong wind.",
+				"{@b Instability.} Creatures relying on smell have Advantage on checks made to locate its carrier."
+			]
+		},
+		{
+			"name": "Starmetal",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "metal",
+			"density": 2.7,
+			"damage": 0,
+			"protection": 17,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 1,
+			"rarity": "legendary",
+			"price": {
+				"gp": 1000,
+				"unit": "lb",
+				"display": "1,000 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#848482"
+			},
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "note",
+					"text": "Starmetal has few useful properties by itself, but produces unusual effects when alloyed \u2014 see Mithraline, Orichaline, Darkeline and Steeline."
+				}
+			],
+			"entries": [
+				"Starmetal has few useful properties by itself but produces unusual effects when alloyed with other metals."
+			]
+		},
+		{
+			"name": "Steel",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": 7.85,
+			"damage": 1,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 1,
+			"magicCapacity": 3,
+			"rarity": "uncommon",
+			"price": {
+				"gp": 1,
+				"unit": "lb",
+				"display": "1 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#cccccc"
+			},
+			"objectAc": 19,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"Steel is the standard material for modern weapons and armor. It is harder and more resilient than wrought iron."
+			]
+		},
+		{
+			"name": "Steeline",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "constructed",
+			"density": 10.85,
+			"damage": 1,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 12,
+			"rarity": "legendary",
+			"price": {
+				"gp": 1800,
+				"unit": "lb",
+				"display": "1,800 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "#850101"
+			},
+			"objectAc": 19,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"magicCapacityRules": [
+				{
+					"type": "dcRiseThreshold",
+					"value": 2,
+					"note": "Two effects above its Magic Capacity are required before the interference DC increases by 1."
+				}
+			],
+			"entries": [
+				"This deep red alloy of iron and starmetal is found only where a meteor struck an iron deposit and the metals fused under impossible pressure. Modern smiths can rework it but cannot reproduce it. Steeline holds enchantments in isolated crystalline channels; if it ever becomes overloaded, two effects above its Magic Capacity are required before the interference DC increases by 1."
+			]
+		},
+		{
+			"name": "Stone and Flint",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "stone",
+			"density": null,
+			"densityVaries": true,
+			"damage": -1,
+			"protection": 0,
+			"critical": 1,
+			"penetration": 0,
+			"magicCapacity": 1,
+			"rarity": "common",
+			"price": {
+				"gp": 0.05,
+				"unit": "lb",
+				"display": "0.05 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #77736b, #b3aea3, #595750)"
+			},
+			"objectAc": 17,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"degradation": {
+				"trigger": {
+					"on": "attackRoll",
+					"natural": [
+						1
+					]
+				},
+				"effect": {
+					"type": "damageStepDelta",
+					"value": -1
+				},
+				"stacking": true,
+				"destroys": false,
+				"repair": {
+					"method": "manual",
+					"tool": null
+				},
+				"note": "Its striking edge chips and its Damage decreases by 1 additional step until repaired or replaced."
+			},
+			"entries": [
+				"Knapped flint and shaped stone can form sharp but fragile tools and weapon edges. They cannot be used for flexible weapons or working mechanisms. When the wielder rolls a natural 1 on an attack roll with a stone weapon, its striking edge chips and its Damage decreases by 1 additional step until repaired or replaced."
+			]
+		},
+		{
+			"name": "Stormprism",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 2,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 1,
+			"magicCapacity": 5,
+			"elementalPlane": "Positive Air",
+			"rarity": "very rare",
+			"price": {
+				"gp": 800,
+				"unit": "lb",
+				"display": "800 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #172a55, #58c7ff, #fff36b)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "focus",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "focus",
+					"text": "Its user gains a +1 bonus to Initiative and can take a Reaction immediately after being hit to move up to 10 feet without provoking Opportunity Attacks."
+				},
+				{
+					"type": "bonusInitiative",
+					"value": 1
+				},
+				{
+					"type": "condensateInstability",
+					"text": "On a natural 1 involving the item, its user takes {@damage 1d6} lightning damage."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} Its user gains a +1 bonus to Initiative and can take a Reaction immediately after being hit to move up to 10 feet without provoking Opportunity Attacks.",
+				"{@b Instability.} On a natural 1 involving the item, its user takes 1d6 Lightning damage."
+			]
+		},
+		{
+			"name": "Stout Blackwood",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "wood",
+			"density": 0.14,
+			"damage": 0,
+			"protection": 16,
+			"critical": 0,
+			"penetration": 1,
+			"magicCapacity": 4,
+			"rarity": "uncommon",
+			"price": {
+				"gp": 62.5,
+				"unit": "lb",
+				"display": "62.5 gp per lb.",
+				"isPriceless": false
+			},
+			"objectAc": 15,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "bonusCritDamage",
+					"dice": "1d4",
+					"damageType": "weapon",
+					"requiresProperty": "LD",
+					"appliesTo": [
+						"weapon"
+					],
+					"note": "On a critical hit with a ranged stout blackwood weapon that has the loading property.",
+					"noteMode": "qualifier"
+				},
+				{
+					"type": "grantsAction",
+					"name": "Stout Blackwood Shove",
+					"requiresProperty": "2H",
+					"appliesTo": [
+						"weapon"
+					],
+					"note": "Once per turn when you hit with a two-handed stout blackwood melee weapon, contest Strength (Athletics) against the target's Athletics or Acrobatics; on a success, knock it prone or push it 5 feet."
+				}
+			],
+			"entries": [
+				"Characterized by their ability to survive in the harshest weather, stout blackwood trees are found in remote locations throughout mountainous regions. Stout blackwoods have thinner trunks, heavily ringed with the passing of short, rough growing seasons. They tend to grow in abundance in valleys where snow and rain collect or near glacier-fed rivers. Their leaves are tiny and needle-like, staying on year-round to gather whatever bits of sunlight filter through the cloudy, snowy days. In the first weeks of warmer weather, stout blackwoods flower and fruit, attracting creatures emerging from hibernation. While the bark of stout blackwood trees is white, the wood inside is a rich black. These trees produce stiff, sturdy wood that creates extreme tension in ranged weapons; stout blackwood shortbows and longbows are hard to use, but crossbows made of it are granted heightened accuracy and impact. This wood also absorbs the force of impact, which makes it particularly useful in crafting melee weapons. Stout blackwood is a superb material for masterwork artisans ranging in skill from beginner to advanced.",
+				{
+					"type": "list",
+					"items": [
+						"When you score a critical hit using a ranged weapon made from stout blackwood that has the loading property, you deal an extra 1d4 damage of the weapon's type.",
+						"Once per turn when you hit a creature using a two-handed melee weapon made from stout blackwood, you can make a Strength (Athletics) check contested by the target's Strength (Athletics) or Dexterity (Acrobatics) check (the target chooses the ability to use). If you succeed, you either knock the target prone or push them 5 feet away from you (your choice)."
+					]
+				}
+			]
+		},
+		{
+			"name": "Sunprism",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 2.4,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 5,
+			"elementalPlane": "Positive Fire",
+			"rarity": "very rare",
+			"price": {
+				"gp": 800,
+				"unit": "lb",
+				"display": "800 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #ff7b00, #fff59d, #ffffff)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "focus",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "focus",
+					"text": "Sunprism sheds bright light in a 20-foot radius and dim light for a further 20 feet on command. As a Magic action, its user can outline {@condition invisible} creatures and objects in the bright light until the start of the user's next turn."
+				},
+				{
+					"type": "condensateInstability",
+					"text": "Magical Darkness of spell level 3 or higher suppresses it while their areas overlap."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} Sunprism sheds bright light in a 20-foot radius and dim light for a further 20 feet on command. As a Magic action, its user can outline Invisible creatures and objects in the bright light until the start of the user's next turn.",
+				"{@b Instability.} Magical Darkness of spell level 3 or higher suppresses it while their areas overlap."
+			]
+		},
+		{
+			"name": "Tideglass",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 1,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 4,
+			"elementalPlane": "Water",
+			"rarity": "rare",
+			"price": {
+				"gp": 250,
+				"unit": "lb",
+				"display": "250 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #064789, #5bc0eb, #b8f2e6)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "protectiveLayer",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "protectiveLayer",
+					"text": "When an attack hits its wearer, the wearer can take a Reaction to move 5 feet without provoking Opportunity Attacks."
+				},
+				{
+					"type": "condensateInstability",
+					"text": "Cold damage suppresses this movement until the end of the wearer's next turn."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} When an attack hits its wearer, the wearer can take a Reaction to move 5 feet without provoking Opportunity Attacks.",
+				"{@b Instability.} Cold damage suppresses this movement until the end of the wearer's next turn."
+			]
+		},
+		{
+			"name": "Vitriol Crystal",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": 1.5,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 2,
+			"magicCapacity": 4,
+			"elementalPlane": "Ooze",
+			"rarity": "very rare",
+			"price": {
+				"gp": 450,
+				"unit": "lb",
+				"display": "450 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #536b00, #b7d12a, #344500)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "strikingSurface",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "strikingSurface",
+					"text": "Vitriol Crystal repairs its own mundane damage during a Long Rest. A weapon made from it can deal acid damage instead of its normal type."
+				},
+				{
+					"type": "overrideDamageType",
+					"damageType": "acid",
+					"optional": true,
+					"appliesTo": [
+						"weapon"
+					]
+				},
+				{
+					"type": "condensateInstability",
+					"text": "On a natural 1 attack roll, its user takes {@damage 1d4} acid damage."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} Vitriol Crystal repairs its own mundane damage during a Long Rest. A weapon made from it can deal Acid damage instead of its normal type.",
+				"{@b Instability.} On a natural 1 attack roll, its user takes 1d4 Acid damage."
+			]
+		},
+		{
+			"name": "Voidglass",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "condensate",
+			"density": null,
+			"densityVaries": true,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 3,
+			"elementalPlane": "Negative Air",
+			"rarity": "very rare",
+			"price": {
+				"gp": 750,
+				"unit": "lb",
+				"display": "750 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #000000, #1b263b, #000000)"
+			},
+			"objectAc": 13,
+			"objectAcInferred": true,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"primaryRole": "focus",
+			"effects": [
+				{
+					"type": "condensateAffinity",
+					"role": "focus",
+					"text": "On command, a Voidglass item produces no sound and grants Advantage on Dexterity ({@skill Stealth}) checks that depend on moving quietly."
+				},
+				{
+					"type": "condensateInstability",
+					"text": "While this property is active, its user cannot speak or provide Verbal spell components."
+				}
+			],
+			"entries": [
+				"{@b Affinity.} On command, a Voidglass item produces no sound and grants Advantage on Dexterity (Stealth) checks that depend on moving quietly.",
+				"{@b Instability.} While this property is active, its user cannot speak or provide Verbal spell components."
+			]
+		},
+		{
+			"name": "Yellowwood",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "wood",
+			"density": 0.07,
+			"damage": 0,
+			"protection": 0,
+			"critical": 0,
+			"penetration": 0,
+			"magicCapacity": 3,
+			"rarity": "uncommon",
+			"price": {
+				"gp": 37.5,
+				"unit": "lb",
+				"display": "37.5 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(to right, #FDDA0D, #FFBF00, #FDDA0D)"
+			},
+			"objectAc": 15,
+			"objectAcInferred": true,
+			"weightMultiplier": 0.5,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"effects": [
+				{
+					"type": "noRangedDisadvantageInMelee",
+					"appliesTo": [
+						"weapon"
+					],
+					"note": "While wielding a yellowwood longbow or shortbow.",
+					"noteMode": "qualifier"
+				},
+				{
+					"type": "grantsAction",
+					"name": "Yellowwood Flurry",
+					"appliesTo": [
+						"weapon"
+					],
+					"note": "When you take the Attack action with a yellowwood melee weapon, you can use a bonus action to attack again with it. You don't add your ability modifier to that damage unless it is negative."
+				}
+			],
+			"entries": [
+				"Found in tropical environments, yellowwood trees grow on hillsides and along rivers and streams. The trees grow tall, reaching above the canopy for light. Due to year-round sun and a wet climate, there are very few rings in the trunks of yellowwood trees. The bark of these trees is dark brown and can be peeled back easily, revealing much lighter wood underneath. The wood of a yellowwood tree is flexible and lightweight. It can be challenging to work with, as it tends to overextend when shaped. Due to yellowwood's density, items made of it are 50 percent lighter than their mundane counterparts.",
+				{
+					"type": "list",
+					"items": [
+						"While you're wielding a yellowwood longbow or shortbow, being within 5 feet of a hostile creature doesn't impose disadvantage on your ranged attack rolls.",
+						"When you take the Attack action and attack with a melee weapon made of yellowwood, you can use a bonus action to make an additional attack with that weapon. You don't add your ability modifier to the damage of the bonus attack, unless that modifier is negative."
+					]
+				}
+			]
+		},
+		{
+			"name": "Zog'agi Glass",
+			"source": "TGTT",
+			"page": 0,
+			"materialCategory": "stone",
+			"density": 2.8,
+			"damage": 1,
+			"protection": 17,
+			"critical": 1,
+			"penetration": 2,
+			"magicCapacity": 4,
+			"rarity": "very rare",
+			"price": {
+				"gp": 250,
+				"unit": "lb",
+				"display": "250 gp per lb.",
+				"isPriceless": false
+			},
+			"color": {
+				"css": "linear-gradient(135deg, #ffd166, #65d6d0, #ef476f)"
+			},
+			"objectAc": 19,
+			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
+				"other"
+			],
+			"roles": [
+				"strikingSurface",
+				"protectiveLayer",
+				"focus"
+			],
+			"entries": [
+				"The ancient Zog'agi learned to turn the sands of the Glittering Desert into glass strong enough for weapons, armor, furniture, and machinery. The Zog'agi Corporation guards the process."
+			]
+		}
+	],
+	"draconicResonance": [
+		{
+			"name": "Final Echo",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "fear",
+			"domain": "End",
+			"entries": [
+				"When the item helps reduce a creature to 0 Hit Points, it can preserve one sentence formed from that creature's final thoughts for 24 hours."
+			]
+		},
+		{
+			"name": "Ruinous Release",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "fear",
+			"domain": "Cataclysm",
+			"entries": [
+				"After a critical hit with the item, or a critical hit against its wearer, creatures other than the user within 5 feet take {@damage 2d6} damage of the source dragon's associated type."
+			]
+		},
+		{
+			"name": "Waking Dread",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "fear",
+			"domain": "Nightmare",
+			"entries": [
+				"On a hit, force the target to make a {@dc 15} Wisdom saving throw. On a failure, it is {@condition Frightened} of the user and cannot take Reactions until the end of its next turn."
+			]
+		},
+		{
+			"name": "Unfixed Nature",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "fear",
+			"domain": "Chaos",
+			"entries": [
+				"Before the item deals damage, choose Acid, Cold, Fire, Lightning, Poison, or Thunder at random. Its damage becomes that type until the end of the turn."
+			]
+		},
+		{
+			"name": "Tainted Wound",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "fear",
+			"domain": "Corruption",
+			"entries": [
+				"A creature hit by the item cannot regain Hit Points until the start of the user's next turn."
+			]
+		},
+		{
+			"name": "Withering Touch",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "fear",
+			"domain": "Blight",
+			"entries": [
+				"The item deals double damage to nonmagical plants and plant objects. Once per turn, a Plant creature hit by it takes an extra {@damage 1d6} Necrotic damage."
+			]
+		},
+		{
+			"name": "Fractured Sense",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "fear",
+			"domain": "Madness",
+			"entries": [
+				"On a hit, force the target to make a {@dc 15} Intelligence saving throw. On a failure, it cannot distinguish allies from enemies when making Opportunity Attacks until the end of its next turn."
+			]
+		},
+		{
+			"name": "Hollowing",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "fear",
+			"domain": "Famine",
+			"entries": [
+				"After the item damages a creature, reduce the next healing that creature receives before the end of its next turn by {@dice 1d8}."
+			]
+		},
+		{
+			"name": "Betrayer's Opening",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "fear",
+			"domain": "Treachery",
+			"entries": [
+				"Once per turn, deal an extra {@damage 1d6} damage when the target is within 5 feet of one of its allies and no ally of the user is within 5 feet of the target."
+			]
+		},
+		{
+			"name": "Interposing Ward",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "safety",
+			"domain": "Aegis",
+			"entries": [
+				"When the user or a creature within 5 feet is hit, the user can take a Reaction to grant that creature +2 AC against the triggering attack, potentially causing it to miss."
+			]
+		},
+		{
+			"name": "First Light",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "safety",
+			"domain": "Dawn",
+			"entries": [
+				"The item sheds bright light in a 10-foot radius on command. The user can end the {@condition Frightened} condition on one creature touched by that light."
+			]
+		},
+		{
+			"name": "Sheltering Warmth",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "safety",
+			"domain": "Hearth",
+			"entries": [
+				"During a Short Rest, up to six creatures resting within 10 feet gain Temporary Hit Points equal to the user's Proficiency Bonus."
+			]
+		},
+		{
+			"name": "Accord",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "safety",
+			"domain": "Harmony",
+			"entries": [
+				"When the user successfully takes the Help action, both creatures gain {@dice 1d6} Temporary Hit Points."
+			]
+		},
+		{
+			"name": "Stand Fast",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "safety",
+			"domain": "Resolve",
+			"entries": [
+				"The user can reroll one failed Strength, Constitution, or Wisdom saving throw, and must use the new result."
+			]
+		},
+		{
+			"name": "Restorative Shelter",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "safety",
+			"domain": "Sanctuary",
+			"entries": [
+				"When the item restores Hit Points, reroll one healing die that rolled a 1 or a 2."
+			]
+		},
+		{
+			"name": "Unclouded Sight",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "safety",
+			"domain": "Clarity",
+			"entries": [
+				"The user has Advantage on checks to recognize illusions or deliberate visual disguises and can see {@condition Invisible} creatures until the end of their next turn when activated."
+			]
+		},
+		{
+			"name": "Unbound Motion",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "safety",
+			"domain": "Freedom",
+			"entries": [
+				"The user can end the {@condition Grappled} or {@condition Restrained} condition on themself as a Bonus Action."
+			]
+		},
+		{
+			"name": "Higher Reach",
+			"source": "TGTT",
+			"page": 0,
+			"kind": "safety",
+			"domain": "Aspiration",
+			"entries": [
+				"After seeing the result of an ability check but before its outcome is declared, the user can add {@dice 1d6} to the roll."
 			]
 		}
 	]

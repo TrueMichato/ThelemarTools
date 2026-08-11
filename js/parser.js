@@ -2428,6 +2428,7 @@ Parser.CRAFTING_PROP_TO_ABV = {
 	"craftingMaterial": "MAT",
 	"craftingRecipe": "CRF",
 	"craftingRule": "RUL",
+	"itemMaterial": "MTL",
 };
 
 Parser.craftingPropToAbv = function (prop) {
@@ -2440,6 +2441,65 @@ Parser.CRAFTING_MATERIAL_CATEGORIES = ["creature part", "herb", "mineral", "food
 Parser.CRAFTING_RECIPE_CATEGORIES = ["item", "potion", "scroll", "dish", "curse"];
 
 Parser.CRAFTING_RULE_CATEGORIES = ["harvesting", "crafting", "cooking", "components", "materials"];
+
+/** Ordered roughly by how the Thelemar materials chapter presents them. */
+Parser.ITEM_MATERIAL_CATEGORIES = ["metal", "wood", "stone", "crystal", "cloth", "organic", "constructed", "condensate"];
+
+/** Where on an item a material can sit — the condensates are gated by this. */
+Parser.ITEM_MATERIAL_ROLE_TO_FULL = {
+	"strikingSurface": "Striking Surface",
+	"protectiveLayer": "Protective Layer",
+	"focus": "Focus",
+};
+
+Parser.itemMaterialRoleToFull = function (role) {
+	if (!role) return "\u2014";
+	return Parser.ITEM_MATERIAL_ROLE_TO_FULL[role] ?? `${role}`.toTitleCase();
+};
+
+Parser.ITEM_MATERIAL_APPLIES_TO_FULL = {
+	"weapon": "Weapons",
+	"armor": "Armor",
+	"shield": "Shields",
+	"other": "Other Items",
+};
+
+Parser.itemMaterialAppliesToFull = function (appliesTo) {
+	if (!appliesTo) return "\u2014";
+	return Parser.ITEM_MATERIAL_APPLIES_TO_FULL[appliesTo] ?? `${appliesTo}`.toTitleCase();
+};
+
+Parser.ITEM_MATERIAL_AXES = [
+	{key: "damage", full: "Damage", isSigned: true},
+	{key: "protection", full: "Protection", isSigned: false},
+	{key: "critical", full: "Critical", isSigned: true},
+	{key: "penetration", full: "Penetration", isSigned: false},
+	{key: "magicCapacity", full: "Magic Capacity", isSigned: false},
+];
+
+/**
+ * Render one of the six material axes.
+ *
+ * The axes are tri-state — a number, `"na"` (the axis cannot apply to this material at all)
+ * or `null` (the source gives no single value) — plus the two infinities Magic Capacity uses
+ * for Jadoo and Lead.
+ *
+ * @param {number|string|null|undefined} value
+ * @param {object} [opts]
+ * @param {boolean} [opts.isSigned] Prefix non-negative numbers with "+".
+ * @returns {string}
+ */
+Parser.itemMaterialAxisToFull = function (value, {isSigned = false} = {}) {
+	if (value === "na") return "N/A";
+	if (value === "infinity") return "\u221E";
+	if (value === "-infinity") return "\u2212\u221E";
+	if (value == null) return "Varies";
+	if (typeof value !== "number") return `${value}`;
+	// U+2212 for negatives, so a "-1" step matches the "\u2212\u221E" sentinel typographically
+	if (value < 0) return `\u2212${Math.abs(value)}`;
+	// 0 means "explicitly no effect"; "+0" reads like a bonus that rounds away
+	return isSigned && value > 0 ? `+${value}` : `${value}`;
+};
 
 Parser.craftingCategoryToFull = function (category) {
 	if (!category) return "\u2014";
@@ -2609,6 +2669,7 @@ Parser.CAT_ID_MONSTER_GROUP = 59;
 Parser.CAT_ID_CRAFTING_MATERIAL = 60;
 Parser.CAT_ID_CRAFTING_RECIPE = 61;
 Parser.CAT_ID_CRAFTING_RULE = 62;
+Parser.CAT_ID_ITEM_MATERIAL = 63;
 
 Parser.CAT_ID_GROUPS = {
 	"optionalfeature": [
@@ -2698,6 +2759,7 @@ Parser.CAT_ID_TO_FULL[Parser.CAT_ID_MONSTER_GROUP] = "Monster Group";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_CRAFTING_MATERIAL] = "Crafting Material";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_CRAFTING_RECIPE] = "Craftable";
 Parser.CAT_ID_TO_FULL[Parser.CAT_ID_CRAFTING_RULE] = "Crafting Rule";
+Parser.CAT_ID_TO_FULL[Parser.CAT_ID_ITEM_MATERIAL] = "Item Material";
 
 Parser.pageCategoryToFull = function (catId) {
 	return Parser._parse_aToB(Parser.CAT_ID_TO_FULL, catId);
@@ -2767,6 +2829,7 @@ Parser.CAT_ID_TO_PROP[Parser.CAT_ID_ITEM_MASTERY] = "itemMastery";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_CRAFTING_MATERIAL] = "craftingMaterial";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_CRAFTING_RECIPE] = "craftingRecipe";
 Parser.CAT_ID_TO_PROP[Parser.CAT_ID_CRAFTING_RULE] = "craftingRule";
+Parser.CAT_ID_TO_PROP[Parser.CAT_ID_ITEM_MATERIAL] = "itemMaterial";
 
 Parser.pageCategoryToProp = function (catId) {
 	return Parser._parse_aToB(Parser.CAT_ID_TO_PROP, catId);
@@ -4601,6 +4664,7 @@ Parser.PROP_TO_DISPLAY_NAME = {
 	"craftingMaterial": "Material",
 	"craftingRecipe": "Craftable",
 	"craftingRule": "Crafting Rule",
+	"itemMaterial": "Item Material",
 
 	"bonus": "Bonus Action",
 	"legendary": "Legendary Action",

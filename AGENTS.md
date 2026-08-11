@@ -176,6 +176,7 @@ Root: `.agents/skills/charactersheet-development/references/`
 |Future roadmap and planned improvements|[docs/charactersheet/11-future-roadmap.md](docs/charactersheet/11-future-roadmap.md)|
 |Contributing guide and coding standards|[docs/charactersheet/12-contributing-guide.md](docs/charactersheet/12-contributing-guide.md)|
 |TGTT Thelemar homebrew system|[docs/charactersheet/13-tgtt-thelemar-homebrew.md](docs/charactersheet/13-tgtt-thelemar-homebrew.md)|
+|Thelemar item materials — the 72 `itemMaterial` entities, six axes, read-time projection, damage die ladder, picker/custom-item/craft entry points|[docs/charactersheet/21-item-materials.md](docs/charactersheet/21-item-materials.md)|
 
 ## DM Screen — Party Tracker & Journey Tracker
 
@@ -228,12 +229,14 @@ Root: `.agents/skills/dmscreen-development/references/`
 
 ## Crafting & Harvesting Hub
 
-`crafting.html` is a single filterable reference spanning ~1,860 harvestable materials, ~456 craftables, and 40 crafting rules drawn from six books (Hamund's Harvesting Handbook I/II/III, Hamund's Herbalism Handbook, Arcadia 8, Arcadia 11, The Complete Crafter), plus a Harvest Lookup tool (creature → every part, merged across books) and a Crafting Planner (craftables → aggregated material shopping list).
+`crafting.html` is a single filterable reference spanning ~1,875 harvestable materials, ~456 craftables, 44 crafting rules, and the 72 Thelemar item materials, drawn from seven books (Hamund's Harvesting Handbook I/II/III, Hamund's Herbalism Handbook, Arcadia 8, Arcadia 11, The Complete Crafter, Traveler's Guide to Thelemar), plus a Harvest Lookup tool (creature → every part, merged across books) and a Crafting Planner (craftables → aggregated material shopping list).
 
 ### Critical Facts
 
 - **`data/crafting.json` is GENERATED — never hand-edit it.** Regenerate with `npm run gen:crafting` (or `npm run gen`). Source books are fetched from the URLs in `homebrew/index.json` and cached in a gitignored `.cache/crafting/`.
-- Three props on one page: `craftingMaterial` (MAT), `craftingRecipe` (CRF), `craftingRule` (RUL).
+- Four props on one page: `craftingMaterial` (MAT), `craftingRecipe` (CRF), `craftingRule` (RUL), `itemMaterial` (MTL).
+- **`craftingMaterial` ≠ `itemMaterial`.** A bar of mithril is an input you spend (MAT); *Mithril* is a property a finished sword has (MTL). Item materials are authored already-structured in `homebrew/TravelersGuidetoThelemar.json` and merely lifted across; the extractor is a pass-through.
+- **`itemMaterial` arrives from two paths** — the generated `data/crafting.json` *and* an installed TGTT brew. `CraftingPage._addData()` dedupes by `name|source`; removing it makes every material appear twice.
 - **Almost all source data is prose-locked** — Hamund's materials exist only as table rows, ingredients only as free text. The generator lifts them into structured entities; that is the whole point of the page.
 - **`data/items-variant-components-ar8.json` stays the character sheet's source of truth** for Arcadia 8 spell components. The generator only ever *reads* it.
 - Effect tags are coarse and hybrid: pattern-matched from prose + Ar8's structured effects + fallbacks. Correct a mis-tag in `data/crafting-effect-overrides.json`, never in `data/crafting.json`.
@@ -248,6 +251,7 @@ Root: `.agents/skills/dmscreen-development/references/`
 |Full `craftingMaterial` / `craftingRecipe` / `craftingRule` shapes|[docs/crafting/02-data-model.md](docs/crafting/02-data-model.md)|
 |Generator pipeline, source books, name resolution, ingredient matching, reading the report|[docs/crafting/03-generator.md](docs/crafting/03-generator.md)|
 |Effect-tag taxonomy, how tags are assigned, correcting or adding a tag|[docs/crafting/04-effect-tags.md](docs/crafting/04-effect-tags.md)|
+|The `itemMaterial` (MTL) entity — registration checklist, rendering, filters, the duplicate-entity trap|[docs/crafting/05-item-materials.md](docs/crafting/05-item-materials.md)|
 |The character sheet's harvest / craft / cook flows|[docs/charactersheet/16-crafting.md](docs/charactersheet/16-crafting.md)|
 
 ## Troubleshooting — Common Errors & Fixes

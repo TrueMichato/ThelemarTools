@@ -295,6 +295,15 @@ class CharacterSheetIoun {
 	/** Is this the super-charged variant? Shares a descriptor with its base stone. */
 	static isSuperCharged (item) { return /\(super-charged\)/i.test(item?.name || ""); }
 
+	/**
+	 * A **fragment** — a broken piece that keeps its stone's resonance but not its property.
+	 * Delegates to the state's detector so the sheet has exactly one definition of the word.
+	 */
+	static isIounFragment (item) {
+		const st = /** @type {*} */ (globalThis).CharacterSheetState;
+		return !!st?.isIounFragment?.(item);
+	}
+
 	/** Blend a hex colour toward white (amount > 0) or black (amount < 0). */
 	static _shade (hex, amount) {
 		const n = parseInt(hex.slice(1), 16);
@@ -470,6 +479,10 @@ class CharacterSheetIoun {
 				policy,
 				seated,
 				isAttunementWaived: !!this._state.isIounAttunementWaived?.(row.item),
+				// An Ioun Sand matrix confers no bonus of its own — doubling IS its
+				// contribution — so the readout is suppressed rather than printed as "+0".
+				isMatrix: !!policy.isMatrix,
+				matrix: policy.isMatrix ? this._state.getIounMatrixStatus?.(row.id) : null,
 				// The bonus the readout announces. `bonusWeapon` is the Ioun Blade's headline
 				// number; a DM-declared host falls back to whatever its policy grants first.
 				bonusKey: policy.grants[0],
@@ -754,10 +767,13 @@ class CharacterSheetIoun {
 		const total = host.policy.settings;
 		const label = CharacterSheetIoun._GRANT_LABELS[host.bonusKey] || "bonus";
 		const isRaised = host.bonusNow !== host.bonusBase;
+		// A matrix that grants nothing of its own would otherwise print a meaningless "+0".
+		const isShowReadout = isRaised || host.policy.perStone > 0;
 
 		const metaBits = [];
 		metaBits.push(host.equipped ? "equipped" : "not equipped — its bonus is dormant");
 		if (host.isAttunementWaived) metaBits.push("bond-borne — no attunement needed");
+		if (host.isMatrix) metaBits.push("Ioun Sand matrix — a set stone's numeric properties are doubled");
 
 		const bezels = [];
 		for (let i = filled; i < total; ++i) {
@@ -766,15 +782,16 @@ class CharacterSheetIoun {
 
 		return `
 			<div class="cs-ioun-host${host.equipped ? "" : " cs-ioun-host--dormant"}">
-				<span class="cs-ioun-host__glyph" aria-hidden="true">◈</span>
+				<span class="cs-ioun-host__glyph" aria-hidden="true">${host.isMatrix ? "❖" : "◈"}</span>
 				<span class="cs-ioun-row__identity">
 					<span class="cs-ioun-row__name">${CharacterSheetIoun._escapeAttr(host.name)}</span>
+					${host.isMatrix ? `<span class="cs-ioun-badge cs-ioun-badge--matrix" title="Made of Ioun Sand — each coherent numerical property granted by a set intact stone is doubled. Ranges, areas and durations stated only in prose are the DM's call.">Matrix</span>` : ""}
 					<span class="cs-ioun-host__meta ve-muted ve-small">${metaBits.join(" · ")}</span>
 				</span>
-				<span class="cs-ioun-host__readout" role="img" aria-label="${label} bonus ${isRaised ? `raised from ${CharacterSheetIoun._fmtBonus(host.bonusBase)} to ` : "is "}${CharacterSheetIoun._fmtBonus(host.bonusNow)}">
+				${isShowReadout ? `<span class="cs-ioun-host__readout" role="img" aria-label="${label} bonus ${isRaised ? `raised from ${CharacterSheetIoun._fmtBonus(host.bonusBase)} to ` : "is "}${CharacterSheetIoun._fmtBonus(host.bonusNow)}">
 					${isRaised ? `<span class="cs-combat-strip__value-was">${CharacterSheetIoun._fmtBonus(host.bonusBase)}</span>` : ""}<span class="cs-combat-strip__value">${CharacterSheetIoun._fmtBonus(host.bonusNow)}</span>
 					<span class="cs-ioun-host__readout-label ve-muted ve-small">${label}</span>
-				</span>
+				</span>` : ""}
 				<span class="cs-ioun-host__tray">
 					<span class="cs-ioun-host__count ve-muted ve-small">${filled} / ${total} set</span>
 					${bezels.join("")}
@@ -783,12 +800,20 @@ class CharacterSheetIoun {
 	}
 
 	/** One stone row: swatch, identity, type badges, charges, state toggle. */
-	_getStoneRowHtml (stone, {isSet = false, hostId = null} = {}) {
+	_getStoneRowHtml (stone, {isSet = false, hostId = null, isMatrixHost = false} = {}) {
 		const state = CharacterSheetIoun.getStoneState(stone, {isSet});
 		const swatch = CharacterSheetIoun.getSwatchColor(stone);
 		const num = CharacterSheetIoun.getStoneNumber(stone);
 		const desc = CharacterSheetIoun.getStoneDescriptor(stone);
 		const isSpent = state === "spent";
+		// A fragment seated in a matrix is deliberately called out rather than left silent:
+		// *"Ioun Sand does not double … the effects of loose Ioun fragments."*
+		const isFragment = CharacterSheetIoun.isIounFragment(stone);
+		const matrixBadgeHtml = !isMatrixHost
+			? ""
+			: (isFragment
+				? `<span class="cs-ioun-badge cs-ioun-badge--inert" title="Ioun Sand does not double the effects of loose Ioun fragments.">Not doubled</span>`
+				: `<span class="cs-ioun-badge cs-ioun-badge--matrix" title="Every coherent numerical property this stone grants is doubled while it sits in the matrix. Properties stated only in prose — ranges, areas, durations — are the DM's call.">Doubled</span>`);
 
 		// `color` is set alongside `background` so the CSS halo can use `currentColor`
 		// and glow in the stone's own hue; without it every halo would be text-coloured.
@@ -838,6 +863,7 @@ class CharacterSheetIoun {
 					${num ? `<span class="cs-ioun-row__num">${num}</span>` : ""}
 					<span class="cs-ioun-row__name">${CharacterSheetIoun._escapeAttr(desc)}</span>
 					${CharacterSheetIoun.isSuperCharged(stone) ? `<span class="cs-ioun-badge cs-ioun-badge--super" title="Super-charged variant">Super-charged</span>` : ""}
+					${matrixBadgeHtml}
 					${CharacterSheetIoun._getTypeBadgesHtml(stone)}
 				</span>
 				${chargesHtml ? `<span class="cs-ioun-row__charges">${chargesHtml}</span>` : ""}
@@ -969,7 +995,7 @@ class CharacterSheetIoun {
 					const seated = this._applyFilters(h.seated, {isApplyActionable: false});
 					return `<div class="cs-ioun-hostgroup" data-ioun-hostgroup="${CharacterSheetIoun._escapeAttr(h.id)}">
 								${this._getHostRowHtml(h)}
-								${seated.map(st => this._getStoneRowHtml(st, {isSet: true, hostId: h.id})).join("")}
+								${seated.map(st => this._getStoneRowHtml(st, {isSet: true, hostId: h.id, isMatrixHost: h.isMatrix})).join("")}
 							</div>`;
 				}).join("")}</div>`,
 			})
