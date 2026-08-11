@@ -246,6 +246,23 @@ projected stats (`dmg1: "1d10"`, `penetration: 2`, …). Use `getItemRaw(id)` wh
 unprojected item — for example when previewing a *different* material. See
 [21-item-materials.md](./21-item-materials.md).
 
+#### Opening equipment packs
+
+Catalog equipment packs expose a non-empty `packContents` array. The Inventory module resolves
+every `name|source` UID against its loaded `_allItems` catalog before asking State to mutate
+anything. Plain UIDs add one item, `{item, quantity}` entries add the requested count, and
+`{special}` entries become custom inventory items because no catalog entity exists.
+
+Opening is all-or-nothing. An unresolved UID or malformed entry produces an error that names the
+unresolved content; no child item is added and no pack is consumed. After successful resolution,
+`CharacterSheetState.openEquipmentPack()` adds the complete batch and decrements or removes exactly
+one source pack under a rollback-backed transaction.
+
+Every child payload stores `_fromPack: "Pack Name|SOURCE"`. `addItem()` includes this marker in its
+stack identity: children from the same pack can merge, but they never merge into an ordinary stack
+or a stack from a different pack. Special custom entries remain separate under the existing
+`_isCustom` no-merge rule. Inventory rows surface the marker as a `From Pack Name` hint.
+
 ### Active States & Conditions
 
 ```javascript

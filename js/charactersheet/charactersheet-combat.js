@@ -2944,6 +2944,7 @@ class CharacterSheetCombat {
 			methodEffectApplied = await this._promptUseCombatMethod(attack);
 		}
 		const juggernautTarget = await this._pChooseJuggernautTargetContext(attack);
+		const gemstoneTargetTypes = await this._pChooseGemstoneTargetContext(attack);
 
 		// Resolve auto-generated weapon damage live so a hands-used change cannot leave a
 		// stale cached die. Explicit/custom attack damage remains authoritative.
@@ -3000,33 +3001,29 @@ class CharacterSheetCombat {
 			}
 		}
 
-		// Get damage modifiers from named modifiers (from features, magic items, etc.)
-		const damageModifiers = this._state.getNamedModifiersByType("damage");
-		const featureDamageBonus = damageModifiers.reduce((sum, mod) => sum + (mod.value || 0), 0);
-
-		// Weapon-type-scoped item damage bonuses (e.g. Bracers of Archery → +2 with any
-		// longbow/shortbow). These apply ONLY to matching weapons, so they can't be a flat
-		// `damage` named-modifier (which would buff every attack); resolved per-attack here.
-		const itemWeaponDamageContribs = this._state.getItemWeaponScopedDamageContributions?.(attack) || [];
-		const itemWeaponDamageBonus = itemWeaponDamageContribs.reduce((sum, c) => sum + (c.value || 0), 0);
-
-		// Get bonus from active states (activated abilities)
-		const stateDamageBonus = this._state.getBonusFromStates?.("damage", {weaponId: attack.riteWeaponId || attack.id}) || 0;
-		const bloodHunterCalc = this._state.getFeatureCalculations?.() || {};
-		const hybridDamageBonus = this._state.isStateTypeActive?.("hybridTransformation") && this._getAttackRollKind(attack).isMelee && !attack.isSpell
-			? (bloodHunterCalc.hybridDamageBonus || 0)
-			: 0;
-
-		// Check if attack uses strength and if rage is active (for rage damage)
-		let rageBonus = 0;
-		const isMeleeStrengthAttack = (attack.abilityMod === "str" || !attack.abilityMod)
-			&& !attack.isRanged && !attack.isSpell;
-		if (this._state.isStateTypeActive?.("rage")) {
-			rageBonus = this._state.getRageDamageBonus?.(
-				!attack.isRanged && !attack.isSpell, // isMelee
-				attack.abilityMod || "str",
-			) || 0;
-		}
+		const standingDamage = this._state.getWeaponDisplayDamageBreakdown?.(attack) || {
+			base: Number(attack.damageBonus) || 0,
+			feature: (this._state.getNamedModifiersByType?.("damage", {includeConditional: false}) || [])
+				.filter(mod => !mod.manual && !mod.isManual && !mod.requiresChoice && !mod.requiresActivation && !mod.oncePerTurn && mod.perTurn !== true && !mod.critOnly && !mod.onCrit)
+				.reduce((sum, mod) => sum + (typeof mod.value === "number" ? mod.value : 0), 0),
+			itemContributions: this._state.getItemWeaponScopedDamageContributions?.(attack) || [],
+			state: this._state.getBonusFromStates?.("damage", {weaponId: attack.riteWeaponId || attack.id}) || 0,
+			rage: this._state.getRageDamageBonus?.(!attack.isRanged && !attack.isSpell, attack.abilityMod || "str") || 0,
+			hybrid: 0,
+		};
+		const standingDamageTotal = standingDamage.total ?? (
+			standingDamage.base
+				+ standingDamage.feature
+				+ standingDamage.itemContributions.reduce((sum, it) => sum + (it.value || 0), 0)
+				+ standingDamage.state
+				+ standingDamage.rage
+				+ standingDamage.hybrid
+		);
+		const featureDamageBonus = standingDamage.feature;
+		const itemWeaponDamageContribs = standingDamage.itemContributions;
+		const stateDamageBonus = standingDamage.state;
+		const rageBonus = standingDamage.rage;
+		const hybridDamageBonus = standingDamage.hybrid;
 
 		// Check for Sneak Attack
 		let sneakAttackDamage = 0;
@@ -3119,6 +3116,19 @@ class CharacterSheetCombat {
 				riderRollsForAnim.push(riderRoll);
 			}
 
+			for (const rider of this._state.getGemstoneDamageRidersForAttack?.(attack, {targetTypes: gemstoneTargetTypes}) || []) {
+				if (!rider?.dice) continue;
+				const riderId = `gemstone:${rider.gemInstanceId}`;
+				if (rider.perTurn && !this._isRiderAvailableThisTurn(riderId)) continue;
+				const damageType = rider.damageType === "weapon" ? weaponDamageType : rider.damageType;
+				const riderRoll = rollTypedDamage(rider.dice, damageType);
+				riderDamageTotal += riderRoll.total;
+				riderParts.push({name: rider.sourceName, dice: rider.dice, total: riderRoll.total, type: damageType});
+				riderRollsForAnim.push(riderRoll);
+				usedRiderIds.push(riderId);
+				if (rider.perTurn) this._markRiderUsedThisTurn(riderId);
+			}
+
 			// Active ammunition damage (Bug #3): the selected quiver ammo's bonuses
 			// ride this weapon's damage. Any DICE it carries (bonusWeaponDamage dice
 			// or an "extra NdM <type> damage" phrase in its entries text) join the
@@ -3150,7 +3160,7 @@ class CharacterSheetCombat {
 			spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
 		}
 
-		const totalBonus = abilityMod + (attack.damageBonus || 0) + featureDamageBonus + itemWeaponDamageBonus + rageBonus + stateDamageBonus + hybridDamageBonus + critDamageBonus + spellDamageBonus + ammoFlatDamageBonus;
+		const totalBonus = abilityMod + standingDamageTotal + critDamageBonus + spellDamageBonus + ammoFlatDamageBonus;
 
 		// Get extra damage dice from active states (e.g., Hex, Flame Tongue)
 		const isMeleeForExtraDamage = this._getAttackRollKind(attack).isMelee && !attack.isSpell;
@@ -3225,6 +3235,7 @@ class CharacterSheetCombat {
 		for (const c of itemWeaponDamageContribs) subtitle += ` + ${c.value} (${c.name})`;
 		if (rageBonus) subtitle += ` + ${rageBonus} (rage)`;
 		if (stateDamageBonus) subtitle += ` + ${stateDamageBonus} (states)`;
+		if (hybridDamageBonus) subtitle += ` + ${hybridDamageBonus} (hybrid transformation)`;
 		if (critDamageBonus) subtitle += ` + ${critDamageBonus} (crit bonus)`;
 		if (spellDamageBonus) subtitle += ` + ${spellDamageBonus} (spell item)`;
 		if (ammoFlatDamageBonus) subtitle += ` + ${ammoFlatDamageBonus} (${ammoForDamage?.name || "ammunition"})`;
@@ -3713,6 +3724,19 @@ class CharacterSheetCombat {
 	_isWeaponDamageRiderEligible (rider, attack) {
 		return !rider?.attackSourceFeature
 			|| (attack?.sourceFeature || "").toLowerCase() === rider.attackSourceFeature.toLowerCase();
+	}
+
+	async _pChooseGemstoneTargetContext (attack) {
+		const effects = this._state.getGemstoneEffects?.({hostItemId: attack?.sourceItem?.id}) || [];
+		const targetTypes = [...new Set(effects.flatMap(effect => effect.rider?.targetTypes || []))];
+		if (!targetTypes.length) return [];
+		const selected = await InputUiUtil.pGetUserEnum({
+			title: `${attack.name} — Gemstone Target`,
+			values: ["none", ...targetTypes],
+			fnDisplay: value => value === "none" ? "No qualifying type" : value.toTitleCase(),
+			isResolveItem: true,
+		});
+		return selected && selected !== "none" ? [selected] : [];
 	}
 
 	/**
@@ -4476,7 +4500,7 @@ class CharacterSheetCombat {
 		const featureAttackBonus = attackContributions.reduce((sum, c) => sum + (c.value || 0), 0);
 		const stateAttackBonus = this._state.getBonusFromStates?.("attack", {weaponId: attack.riteWeaponId || attack.id}) || 0;
 		const totalAttackBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + stateAttackBonus;
-		const totalDamageBonus = abilityMod + (attack.damageBonus || 0);
+		const totalDamageBonus = abilityMod + (this._state.getWeaponDisplayDamageBonus?.(attack) ?? (Number(attack.damageBonus) || 0));
 		// Itemized tooltip for the to-hit badge so each contributing source is visible.
 		const atkBreakdownParts = [
 			`${abilityMod >= 0 ? "+" : ""}${abilityMod} ability`,

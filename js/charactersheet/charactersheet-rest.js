@@ -1274,6 +1274,7 @@ class CharacterSheetRest {
 		// Restore class resources
 		const resources = this._state.getResources();
 		resources.forEach(resource => {
+			if (resource.gemstoneResource) return;
 			if (restType === "long" || resource.recharge === "short") {
 				// Use state method to persist the change
 				this._state.setResourceCurrent(resource.id, resource.max);

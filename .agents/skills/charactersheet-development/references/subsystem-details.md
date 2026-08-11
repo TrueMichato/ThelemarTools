@@ -11,6 +11,31 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Rest Mechanics (short rest, long rest, item charges)
 - Combat Action Effects Pipeline (parsing, classification, effect schema, modals, subclass grants)
 - Custom Abilities (data structure, effect routing, reapply on load)
+- Gemstone Empowerment (host-scoped effects, resources, riders, Chalice storage)
+
+## Gemstone Empowerment
+
+TGTT's 39 empowered gemstones are defined by `GEMSTONE_EFFECT_REGISTRY` in
+`charactersheet-upgrades.js`. `CharacterSheetState.getGemstoneEffects()` is the
+canonical runtime channel. It annotates each descriptor with `hostItemId`,
+`gemInstanceId`, runtime state, and the exact host item, and applies TGTT,
+equipped, and attunement gates. Consumers must query this channel rather than
+adding new gemstone-name switches.
+
+Gem-owned state lives in `_gemstoneData.runtime` while loose and in the same
+gem object while socketed. Socketing and unsocketing move the stable
+`gemInstanceId`, resources, choices, and stored spells together; host charges
+and host `storedSpells` are never used for gemstone mechanics. Synthetic
+resource IDs have the shape `gem:<gemInstanceId>:<key>` and
+`setResourceCurrent()` routes them back to the gem.
+
+Conditional damage dice use
+`getGemstoneDamageRidersForAttack(attack, targetContext)`. It requires the exact
+`attack.sourceItem.id` and feeds Combat's rider-parts pipeline, never the
+standing flat-damage line. Chalice storage uses
+`getGemstoneSpellStorage`/`storeGemstoneSpell`/`castGemstoneStoredSpell`/
+`removeGemstoneStoredSpell`; its two-level capacity is gem-scoped and persists
+across unsocket/resocket.
 
 ## Active States / Toggle Abilities
 
@@ -218,9 +243,26 @@ grants a named action's benefit for free; read via
 ```
 total = abilityMod + profBonus + weaponBonus + featureAttackBonus + stateAttackBonus
 ```
+
 - `weaponBonus`: from magic item's `bonusWeapon` + `bonusWeaponAttack`
 - `featureAttackBonus`: from feature calculations
 - `stateAttackBonus`: from `getBonusFromStates("attack")`
+
+### Standing Weapon Damage Display
+
+`CharacterSheetState.getWeaponDisplayDamageBonus(attack)` is the shared source for
+the non-ability flat bonus shown in Combat, Overview, and Play Mode, and for the
+standing-flat portion of `_rollDamage`. It includes the attack's authoritative
+`damageBonus`, unconditional numeric feature modifiers, matching weapon-scoped
+item contributions, active-state damage, eligible Rage damage, and eligible
+Hybrid Transformation damage.
+
+Generated attacks already cache their source weapon's ordinary magic and custom
+flat bonuses in `attack.damageBonus`; custom attacks store the explicitly authored
+value there. Consumers must not independently add the source item's ordinary
+`bonusWeapon`/`bonusWeaponDamage`, or generated attacks will double-count it.
+Conditional, manual/once-per-turn, critical-only, ammunition, spell-only, and dice
+riders remain roll-time concerns and must not appear in the standing formula.
 
 ### Sneak Attack Mechanics
 

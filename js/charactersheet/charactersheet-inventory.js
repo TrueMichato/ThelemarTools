@@ -318,6 +318,11 @@ class CharacterSheetInventory {
 				if (itemId) this._changeQuantity(itemId, 1);
 				return;
 			}
+			if (e.target.closest(".charsheet__item-open-pack")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this._openPack(itemId);
+				return;
+			}
 			if (e.target.closest(".charsheet__item-equip")) {
 				const itemId = _getItemId(e.target);
 				if (itemId) this._toggleEquipped(itemId);
@@ -404,6 +409,12 @@ class CharacterSheetInventory {
 					this._state.useGemstoneDaily(itemId, gemName);
 					this._renderItemList();
 				}
+				return;
+			}
+			if (e.target.closest(".charsheet__gem-chalice")) {
+				const itemId = _getItemId(e.target);
+				const gemInstanceId = e.target.closest(".charsheet__gem-chalice")?.dataset?.gemInstanceId;
+				if (itemId && gemInstanceId) this._page.getUpgradesModule()?.showGemstoneChaliceModal(itemId, gemInstanceId);
 				return;
 			}
 			if (e.target.closest(".charsheet__item-use")) {
@@ -4375,7 +4386,8 @@ class CharacterSheetInventory {
 	async _toggleAttuned (itemId) {
 		const items = this._state.getItems();
 		const item = items.find(i => i.id === itemId);
-		if (!item || !item.requiresAttunement) return;
+		const requiresGemstoneAttunement = item?.socketedGemstones?.some(gem => CharacterSheetUpgrades?.getGemstoneDescriptor?.(gem)?.requiresAttunement);
+		if (!item || (!item.requiresAttunement && !requiresGemstoneAttunement)) return;
 
 		// If trying to attune (not un-attune), check requirements
 		if (!item.attuned) {
@@ -4940,6 +4952,7 @@ class CharacterSheetInventory {
 			}
 
 			if (healAmount > 0) {
+				healAmount += this._state.getGemstoneHealingPotionBonus?.() || 0;
 				this._state.heal(healAmount);
 				JqueryUtil.doToast({
 					type: "success",
@@ -5080,6 +5093,113 @@ class CharacterSheetInventory {
 		this._updateEncumbrance();
 		this._updateArmorClass();
 		this._page.saveCharacter();
+	}
+
+	/**
+	 * Get pack contents from the stored row or rehydrate them from the loaded item catalog.
+	 * @param {object} item - Flat inventory item.
+	 * @returns {Array|null}
+	 */
+	_getEffectivePackContents (item) {
+		if (item?.packContents?.length) return item.packContents;
+		if (!item?.name || item._isCustom || item.source === "Custom" || !this._allItems?.length) return null;
+		const nameLower = item.name.toLowerCase();
+		const sourceLower = (item.source || "").toLowerCase();
+		const match = this._allItems.find(catalogItem =>
+			catalogItem.name?.toLowerCase() === nameLower
+			&& (catalogItem.source || "").toLowerCase() === sourceLower);
+		return match?.packContents?.length ? match.packContents : null;
+	}
+
+	/**
+	 * Resolve every pack entry before state mutation. A single unresolved or malformed UID aborts
+	 * the whole operation; special prose entries become custom inventory items.
+	 * @param {object} pack - Flat inventory pack item.
+	 * @returns {{contents: Array<{item: object, quantity: number}>, errors: string[]}}
+	 */
+	_resolvePackContents (pack) {
+		const packContents = this._getEffectivePackContents(pack);
+		const provenance = `${pack.name}|${pack.source}`;
+		const contents = [];
+		const errors = [];
+
+		for (const entry of packContents || []) {
+			if (entry?.special && typeof entry.special === "string") {
+				contents.push({
+					item: {
+						name: entry.special,
+						source: "Custom",
+						type: "G",
+						rarity: "none",
+						_isCustom: true,
+						_fromPack: provenance,
+					},
+					quantity: 1,
+				});
+				continue;
+			}
+
+			const uid = typeof entry === "string" ? entry : entry?.item;
+			const quantity = typeof entry === "object" && entry !== null ? (entry.quantity ?? 1) : 1;
+			const [name, source, ...extraParts] = typeof uid === "string" ? uid.split("|") : [];
+			if (!name || !source || extraParts.length || !Number.isInteger(quantity) || quantity < 1) {
+				errors.push(typeof uid === "string" ? uid : JSON.stringify(entry));
+				continue;
+			}
+
+			const nameLower = name.toLowerCase();
+			const sourceLower = source.toLowerCase();
+			const catalogItem = this._allItems.find(item =>
+				item.name?.toLowerCase() === nameLower
+				&& (item.source || "").toLowerCase() === sourceLower);
+			if (!catalogItem) {
+				errors.push(uid);
+				continue;
+			}
+
+			contents.push({
+				item: {
+					...MiscUtil.copyFast(catalogItem),
+					_fromPack: provenance,
+				},
+				quantity,
+			});
+		}
+
+		return {contents: errors.length ? [] : contents, errors};
+	}
+
+	_openPack (itemId) {
+		const pack = this._state.getItems().find(item => item.id === itemId);
+		if (!pack || !this._getEffectivePackContents(pack)?.length) {
+			JqueryUtil.doToast({type: "warning", content: "This item has no pack contents to open."});
+			return false;
+		}
+
+		const resolved = this._resolvePackContents(pack);
+		if (resolved.errors.length) {
+			JqueryUtil.doToast({
+				type: "danger",
+				content: `Could not open ${pack.name}; unresolved contents: ${resolved.errors.join(", ")}. No items were changed.`,
+			});
+			return false;
+		}
+
+		const result = this._state.openEquipmentPack(itemId, resolved.contents);
+		if (!result.success) {
+			JqueryUtil.doToast({type: "danger", content: `Could not open ${pack.name}: ${result.error}`});
+			return false;
+		}
+
+		this._renderItemList();
+		this._updateEncumbrance();
+		this._updateArmorClass();
+		this._page.saveCharacter();
+		JqueryUtil.doToast({
+			type: "success",
+			content: `Opened ${pack.name}; added ${result.addedQuantity} item${result.addedQuantity === 1 ? "" : "s"}.`,
+		});
+		return true;
 	}
 
 	async _showItemInfo (itemId) {
@@ -7032,7 +7152,8 @@ class CharacterSheetInventory {
 	_renderItemRow (item) {
 		const typeTag = this._getItemTypeTagFromStoredType(item.type);
 		const canEquip = CharacterSheetInventory.canEquipItem(item);
-		const canAttune = item.requiresAttunement;
+		const hasAttunementGemstone = item.socketedGemstones?.some(gem => CharacterSheetUpgrades?.getGemstoneDescriptor?.(gem)?.requiresAttunement);
+		const canAttune = item.requiresAttunement || hasAttunementGemstone;
 		// An Ioun bond is not attunement. It takes days of consecutive orbit rather than a
 		// short rest, it is slot-free, and it is governed entirely by the Ioun Stone manager.
 		// Dressing it as the amber attunement control beside it invited exactly the confusion
@@ -7053,7 +7174,8 @@ class CharacterSheetInventory {
 				: "Form an Ioun bond in the Ioun Stone manager — bonding takes days, and never costs an attunement slot")
 			: (item.attuned ? "End attunement" : "Attune");
 		const hasCharges = item.charges && item.charges > 0;
-		const hasPowers = Array.isArray(item.itemPowers) && item.itemPowers.length > 0;
+		const itemPowers = this._state.getItemPowers?.().filter(power => power.itemId === item.id) || [];
+		const hasPowers = itemPowers.length > 0;
 		const canRecharge = hasCharges && !!item.recharge;
 		const rechargeFormula = canRecharge ? CharacterSheetState.getItemRechargeFormula(item) : "";
 		// Staff of Healing (and similar charged healing staves): a "Cast" affordance lets the
@@ -7094,9 +7216,11 @@ class CharacterSheetInventory {
 		const mcStatus = materialEntity ? this._state.getMagicCapacityStatus?.(item.id) : null;
 		const activeGem = item.socketedGemstones?.[0] || null;
 		const gemHasCharges = activeGem?.chargesMax > 0;
-		const gemIsDaily = activeGem && !gemHasCharges && !activeGem.usedToday;
+		const gemHasSpellStorage = !!activeGem && !!CharacterSheetUpgrades?.getGemstoneDescriptor?.(activeGem)?.spellStorage;
 		const isVariantComponent = !!(item.variantComponent?.spellEffects?.length);
 		const vcSpellLabels = isVariantComponent ? this._getVariantComponentSpellLabels(item) : [];
+		const canOpenPack = !!this._getEffectivePackContents(item)?.length;
+		const packProvenanceName = item._fromPack ? item._fromPack.split("|")[0] : "";
 
 		const itemNameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(item);
 
@@ -7154,6 +7278,7 @@ class CharacterSheetInventory {
 						${propertiesStr ? `<span class="ve-small ve-muted" title="Properties">${propertiesStr}</span>` : ""}
 						${masteryStr ? `<span class="ve-small text-info" title="Mastery">⚔ ${masteryStr}</span>` : ""}
 						${vcSpellLabels.length ? `<span class="ve-small" style="color: #8b5cf6; font-style: italic;" title="Enhances these spells when used as a variant component">🧫 ${vcSpellLabels.join(", ")}</span>` : ""}
+						${packProvenanceName ? `<span class="ve-small ve-muted" title="${item._fromPack.replace(/"/g, "&quot;")}">From ${packProvenanceName}</span>` : ""}
 						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}${item.chargeName ? ` — ${item.chargeName}` : ""}">${item.chargeName ? `${item.chargeName}:` : "Charges:"} <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
 						${hasSpellward ? `<span class="ve-small" title="${spellwardLabel}">🛡 ${spellwardLabel}: <strong>${spellwardCount}</strong>/${spellwardMax}${spellwardCount ? ` (${(item.chosenSpellImmunities || []).map(s => typeof s === "string" ? s : s.name).filter(Boolean).join(", ")})` : ""}</span>` : ""}
 						${materialEntity ? `<span class="ve-small charsheet__item-material-badge" title="${(`${materialEntity.name} — ${CharacterSheetMaterials.getSummary(materialEntity)}`).replace(/"/g, "&quot;")}">⚙ ${materialEntity.name}</span>` : ""}
@@ -7188,6 +7313,11 @@ class CharacterSheetInventory {
 						<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-qty-decrease" title="Decrease quantity">−</button>
 						<span class="charsheet__item-qty">${item.quantity}</span>
 						<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-qty-increase" title="Increase quantity">+</button>
+						${canOpenPack ? `
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__item-open-pack" title="Open ${item.name} and add its contents">
+								<span class="glyphicon glyphicon-folder-open"></span> Open pack
+							</button>
+						` : ""}
 						${hasCharges ? `
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-use-charge" title="${chargeUseTitle.replace(/"/g, "&quot;")}" ${(item.chargesCurrent ?? item.charges) <= 0 ? "disabled" : ""}>
 								<span class="glyphicon glyphicon-flash"></span> ${chargeUseLabel}
@@ -7197,8 +7327,8 @@ class CharacterSheetInventory {
 							</button>
 						` : ""}
 						${hasPowers ? `
-							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__item-powers" title="View and invoke ${item.itemPowers.length} item power${item.itemPowers.length === 1 ? "" : "s"}">
-								<span class="glyphicon glyphicon-flash"></span> Powers (${item.itemPowers.length})
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__item-powers" title="View and invoke ${itemPowers.length} item power${itemPowers.length === 1 ? "" : "s"}">
+								<span class="glyphicon glyphicon-flash"></span> Powers (${itemPowers.length})
 							</button>
 						` : ""}
 						${canRecharge ? `
@@ -7232,6 +7362,11 @@ class CharacterSheetInventory {
 						${activeGem && !gemHasCharges ? `
 							<button type="button" class="ve-btn ve-btn-xs ${activeGem.usedToday ? "ve-btn-default charsheet__gem-used" : "ve-btn-success"} charsheet__gem-use-daily" data-gem-name="${activeGem.name}" title="${activeGem.usedToday ? `${activeGem.name} (used, resets at dawn)` : `Use ${activeGem.gemName || activeGem.name} ability`}" ${activeGem.usedToday ? "disabled" : ""}>
 								💎 ${activeGem.usedToday ? "Used" : "Activate"}
+							</button>
+						` : ""}
+						${gemHasSpellStorage ? `
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__gem-chalice" data-gem-instance-id="${activeGem.gemInstanceId}" title="Manage spells stored in the Chalice">
+								💎 Stored Spells
 							</button>
 						` : ""}
 						${canEquip ? `
