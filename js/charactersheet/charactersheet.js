@@ -372,8 +372,9 @@ class CharacterSheetPage {
 		// Item materials are homebrew-only (no site data file); the catalog starts
 		// empty and is populated from brew in _mergeBrewData.
 		this._itemMaterialsData = [];
-		// Draconic domain resonances are likewise homebrew-only.
-		this._draconicResonancesData = [];
+		// Feature-granted companion stat blocks are homebrew-only too.
+		this._brewMonstersData = [];
+		// Draconic domain resonances are likewise homebrew-only.		this._draconicResonancesData = [];
 		// Divine Favor gods are homebrew-only (no site data file); the catalog starts
 		// empty and is populated from brew in _mergeBrewData.
 		this._divineFavorData = [];
@@ -748,6 +749,15 @@ class CharacterSheetPage {
 			this._state.setDivineFavorCatalog(this._divineFavorData);
 		}
 
+		// Monsters. Brew stat blocks are only interesting to the sheet when a class
+		// feature grants one as a companion (MCDM's Beastheart companions are the
+		// motivating case). Keeping the whole brew roster is cheap and lets the
+		// companion picker filter by the generic `tag=Companion` the books use,
+		// rather than hardcoding any one supplement's names.
+		if (brewData.monster?.length) {
+			this._brewMonstersData = [...(this._brewMonstersData || []), ...MiscUtil.copyFast(brewData.monster)];
+		}
+
 		// Skills (rare but possible)
 		if (brewData.skill?.length) {
 			this._skillsData = [...this._skillsData, ...MiscUtil.copyFast(brewData.skill)];
@@ -783,6 +793,22 @@ class CharacterSheetPage {
 				} catch (e) {
 					// eslint-disable-next-line no-console
 					console.warn(`[CharSheet] Failed to derive optional feature progression for ${cls?.name}`, e);
+				}
+			});
+		}
+
+		// Same synthesis for subclasses, whose progressions are read separately by
+		// `getOptionalFeatureGains` via `subclassData` (Beastheart's Infernal / Primordial
+		// bonds grant an exploit at 3 and another at 11 as inline refs only). Iterates
+		// `this._subclasses` rather than `cls.subclasses` because subclasses are not
+		// attached to their parent classes until after all brew merging completes.
+		if (brewData.subclass?.length) {
+			this._subclasses.forEach(sc => {
+				try {
+					CharacterSheetClassUtils.deriveSubclassOptionalFeatureProgressions(sc, this._subclassFeatures, this._optionalFeaturesData);
+				} catch (e) {
+					// eslint-disable-next-line no-console
+					console.warn(`[CharSheet] Failed to derive optional feature progression for subclass ${sc?.name}`, e);
 				}
 			});
 		}
@@ -2148,12 +2174,563 @@ class CharacterSheetPage {
 			container.append(btn);
 		}
 
+		// Beastheart (MCDM) — Companion. The class's whole identity, so its button
+		// leads and its label reflects whether a bond already exists.
+		if (calculations.hasBeastheartCompanion) {
+			const existing = this._state.getBeastheartCompanion?.();
+			const btn = e_({outer: `<button class="ve-btn ve-btn-success" style="white-space: nowrap;" title="${existing ? "Bond with a different companion" : "Choose the companion bound to you"}">
+				<span class="glyphicon glyphicon-${existing ? "refresh" : "plus"} mr-1"></span>🐾 ${existing ? "Rebond Companion" : "Choose Companion"}
+			</button>`});
+			btn.addEventListener("click", () => this._pShowBeastheartCompanionPicker());
+			container.append(btn);
+		}
+
 		// Always show "Add Custom" button
 		const customBtn = e_({outer: `<button class="ve-btn ve-btn-default" style="white-space: nowrap;" title="Add a custom companion manually">
 			<span class="glyphicon glyphicon-plus mr-1"></span>Custom
 		</button>`});
 		customBtn.addEventListener("click", () => this._onAddCustomCompanion());
 		container.append(customBtn);
+	}
+
+	/**
+	 * Beastheart (MCDM) — the ferocity strip inside a companion card.
+	 *
+	 * Returns an empty string for companions that have no ferocity track, so the strip is
+	 * genuinely opt-in and every other companion type's card is untouched.
+	 *
+	 * Deliberately NOT a progress bar: ferocity has no maximum, so a percentage fill
+	 * would have to invent one. The number is the loud element and the threshold is
+	 * stated outright, with colour rationed to the two moments that matter — at risk
+	 * (gold) and rampaging (ruby).
+	 * @private
+	 */
+	_getCompanionFerocityHtml (companion) {
+		if (companion.type !== CharacterSheetState.COMPANION_TYPES.BEASTHEART_COMPANION) return "";
+
+		const ferocity = this._state.getCompanionFerocity?.(companion.id) || 0;
+		const isRampaging = !!companion.isRampaging;
+		const isRisk = this._state.isCompanionRampageRisk?.(companion.id) || false;
+		const dc = this._state.getCompanionRampageDc?.(companion.id) || 0;
+		const threshold = CharacterSheetState.FEROCITY_RAMPAGE_THRESHOLD;
+		const isIncapacitated = this._state.isCompanionIncapacitated?.(companion.id) || false;
+
+		const modifier = isRampaging
+			? " charsheet__companion-ferocity--rampaging"
+			: isRisk ? " charsheet__companion-ferocity--risk" : "";
+
+		// The rules allow exploits on an unconscious companion but never on a rampaging
+		// one, so the disabled state and its tooltip have to distinguish the two.
+		const spendTitle = isRampaging
+			? "Ferocity can't be spent while your companion is rampaging"
+			: ferocity < 1 ? "No ferocity to spend" : "Spend ferocity on an exploit or ferocity action";
+
+		const statusHtml = isRampaging
+			? `<span class="charsheet__companion-ferocity-chip">🔥 Rampaging</span>`
+			: isRisk
+				? `<span class="charsheet__companion-ferocity-threshold">Rampage check DC <strong>${dc}</strong></span>`
+				: `<span class="charsheet__companion-ferocity-threshold">Rampage at ${threshold}</span>`;
+
+		return `
+			<div class="charsheet__companion-ferocity${modifier}" data-companion-id="${companion.id}">
+				<div class="ve-flex-col">
+					<span class="charsheet__companion-ferocity-label">Ferocity</span>
+					<span class="charsheet__companion-ferocity-value">${ferocity}</span>
+				</div>
+				${statusHtml}
+				<div class="charsheet__companion-ferocity-actions">
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-ferocity-gain" title="${isIncapacitated ? "An incapacitated companion gains no ferocity" : "Start of turn: 1d4 + hostiles within 5 feet"}"${isIncapacitated ? " disabled" : ""}>
+						＋ Ferocity
+					</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-ferocity-spend" title="${spendTitle}"${(isRampaging || ferocity < 1) ? " disabled" : ""}>
+						Spend
+					</button>
+					${isRisk ? `<button class="ve-btn ve-btn-xs ve-btn-warning btn-companion-ferocity-check" title="Wisdom (Animal Handling) DC ${dc} to prevent a rampage">Rampage Check</button>` : ""}
+					${isRampaging ? `<button class="ve-btn ve-btn-xs ve-btn-danger btn-companion-ferocity-endrampage" title="End the rampage">End Rampage</button>` : ""}
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-ferocity-endcombat" title="Ferocity drops to 0 and your companion regains hit points equal to it"${ferocity < 1 ? " disabled" : ""}>
+						End Combat
+					</button>
+				</div>
+				${this._getBeastheartBondActionsHtml(companion)}
+			</div>
+		`;
+	}
+
+	/**
+	 * The bond actions that SPEND ferocity, rendered as a second row inside the same
+	 * ferocity strip rather than as a separate panel — they share the strip's resource,
+	 * so they belong in the same shell ("one shell, many contents").
+	 *
+	 * Only actions the character has actually reached are rendered, and each is disabled
+	 * with an explanatory title when it cannot be afforded, so an unaffordable action
+	 * reads as "not yet" rather than as broken.
+	 * @private
+	 */
+	_getBeastheartBondActionsHtml (companion) {
+		const calc = this._state.getFeatureCalculations?.() || {};
+		const ferocity = this._state.getCompanionFerocity?.(companion.id) || 0;
+		const isRampaging = !!companion.isRampaging;
+
+		const rows = [];
+		const add = (cls, label, cost, isOn, extra = "") => {
+			if (!isOn) return;
+			const isBlocked = isRampaging || ferocity < cost;
+			const title = isRampaging
+				? "Ferocity actions can't be used while your companion is rampaging"
+				: ferocity < cost ? `Needs ${cost} ferocity — ${ferocity} available` : `Spend ${cost} ferocity`;
+			rows.push(`<button class="ve-btn ve-btn-xs ve-btn-default ${cls}" title="${title}"${isBlocked ? " disabled" : ""}>${label} <span class="charsheet__companion-ferocity-cost">${cost}</span>${extra}</button>`);
+		};
+
+		add("btn-beastheart-quarry", "Mark Quarry", calc.chosenQuarryFerocityCost || 4, !!calc.hasChosenQuarry);
+		add("btn-beastheart-sentinel", "Sentinel Attack", calc.sentinelCompanionFerocityCost || 2, !!calc.hasSentinelCompanion);
+
+		if (calc.hasFiendishForm) {
+			if (this._state.isInFiendishForm?.(companion.id)) {
+				rows.push(`<button class="ve-btn ve-btn-xs ve-btn-danger btn-beastheart-fiendish-end" title="End Fiendish Form">End Fiendish Form</button>`);
+			} else {
+				add("btn-beastheart-fiendish", "Fiendish Form", calc.fiendishFormFerocityCost || 6, true);
+			}
+		}
+
+		const quarry = this._state.getBeastheartQuarry?.();
+		const quarryChip = quarry
+			? `<span class="charsheet__companion-ferocity-chip" title="Extra ${quarry.damage} damage on hits against this creature">🎯 ${quarry.name} <button class="ve-btn ve-btn-xxs ve-btn-default btn-beastheart-quarry-clear" title="Clear the mark">✕</button></span>`
+			: "";
+
+		if (!rows.length && !quarryChip) return "";
+		return `<div class="charsheet__companion-ferocity-bond">${quarryChip}${rows.join("")}</div>`;
+	}
+
+	/**
+	 * Wire the ferocity strip's five actions. Each one delegates the RULE to state and
+	 * only owns the prompt and the re-render, so the rules stay testable without a DOM.
+	 * @private
+	 */
+	_bindCompanionFerocityHandlers (card, companion) {
+		const refresh = () => {
+			this._saveCurrentCharacter();
+			this._renderCompanions();
+		};
+
+		card.querySelector(".btn-companion-ferocity-gain")?.addEventListener("click", async () => {
+			const hostiles = await InputUiUtil.pGetUserNumber({
+				title: "Gain Ferocity",
+				htmlDescription: `<div>At the start of the turn your companion gains <strong>1d4</strong> ferocity, plus 1 for each hostile creature within 5 feet that they can see or hear. Creatures sharing a stat block (a swarm) count as one.</div>`,
+				min: 0,
+				int: true,
+				default: 0,
+			});
+			if (hostiles == null) return;
+
+			const res = this._state.gainCompanionFerocity(companion.id, {hostilesWithin5: hostiles});
+			refresh();
+			JqueryUtil.doToast({
+				type: res.rampageRisk ? "warning" : "info",
+				content: `Rolled ${res.roll}${hostiles ? ` +${hostiles} hostile${hostiles === 1 ? "" : "s"}` : ""}${res.bonus ? ` +${res.bonus} (Beyond Instinct)` : ""} → ${res.gained} ferocity. Now at ${res.ferocity}.${res.rampageRisk ? ` Rampage check DC ${res.rampageDc}!` : ""}`,
+			});
+		});
+
+		card.querySelector(".btn-companion-ferocity-spend")?.addEventListener("click", async () => {
+			const cost = await InputUiUtil.pGetUserNumber({
+				title: "Spend Ferocity",
+				htmlDescription: `<div>Your companion has <strong>${this._state.getCompanionFerocity(companion.id)}</strong> ferocity. Exploits print their cost in their name (e.g. "Thrash (4 Ferocity)").</div>`,
+				min: 1,
+				int: true,
+				default: 1,
+			});
+			if (cost == null) return;
+
+			const res = this._state.spendCompanionFerocity(companion.id, cost);
+			if (!res.ok) {
+				JqueryUtil.doToast({
+					type: "warning",
+					content: res.reason === "rampaging"
+						? "Ferocity actions can't be used while your companion is rampaging."
+						: `Not enough ferocity — ${res.ferocity} available, ${cost} needed.`,
+				});
+				return;
+			}
+			refresh();
+			JqueryUtil.doToast({type: "success", content: `Spent ${res.spent} ferocity. ${res.ferocity} remaining.`});
+		});
+
+		card.querySelector(".btn-companion-ferocity-check")?.addEventListener("click", async () => {
+			const dc = this._state.getCompanionRampageDc(companion.id);
+
+			// Unbreakable Friendship (20th) makes the check automatic, so don't ask.
+			if (this._state.hasAutomaticRampageSuccess?.()) {
+				this._state.resolveCompanionRampageCheck(companion.id, {});
+				refresh();
+				JqueryUtil.doToast({type: "success", content: `Unbreakable Friendship: the DC ${dc} check succeeds automatically.`});
+				return;
+			}
+
+			const isSuccess = await InputUiUtil.pGetUserBoolean({
+				title: "Prevent a Rampage",
+				htmlDescription: `<div>Make a Wisdom (Animal Handling) check against <strong>DC ${dc}</strong> (5 + ${this._state.getCompanionFerocity(companion.id)} ferocity).</div><div class="ve-muted ve-small mt-2">Choosing "Failed" also covers deliberately declining the check to let your companion rampage.</div>`,
+				textYes: "Succeeded",
+				textNo: "Failed",
+			});
+			if (isSuccess == null) return;
+
+			const res = this._state.resolveCompanionRampageCheck(companion.id, {isSuccess});
+			refresh();
+			JqueryUtil.doToast({
+				type: res.isRampaging ? "danger" : "success",
+				content: res.isRampaging
+					? `${companion.customName || companion.name} enters a rampage!`
+					: `${companion.customName || companion.name} holds steady.`,
+			});
+		});
+
+		card.querySelector(".btn-companion-ferocity-endrampage")?.addEventListener("click", () => {
+			const bonus = this._state.getBeastheartRampageBonusDamage(companion.id);
+			const remaining = this._state.endBeastheartRampage(companion.id);
+			refresh();
+			JqueryUtil.doToast({
+				type: "info",
+				content: `Rampage ended${bonus ? ` (its attacks were dealing +${bonus} damage)` : ""}. Ferocity is now ${remaining}.`,
+			});
+		});
+
+		card.querySelector(".btn-companion-ferocity-endcombat")?.addEventListener("click", () => {
+			const [res] = this._state.endCompanionCombat(companion.id);
+			refresh();
+			JqueryUtil.doToast({
+				type: "success",
+				content: res.healed
+					? `Combat over: ${companion.customName || companion.name} regains ${res.healed} HP and their ferocity drops to 0.`
+					: `Combat over: ferocity drops to 0.${res.ferocitySpent ? " A dying companion regains no hit points." : ""}`,
+			});
+		});
+
+		this._bindBeastheartBondActionHandlers(card, companion, refresh);
+	}
+
+	/**
+	 * Wire the bond actions. Same division of labour as the ferocity strip: the RULE
+	 * (what it costs, whether it can be afforded, what it changes) lives in state, so
+	 * these handlers only prompt, report and re-render.
+	 * @private
+	 */
+	_bindBeastheartBondActionHandlers (card, companion, refresh) {
+		card.querySelector(".btn-beastheart-quarry")?.addEventListener("click", async () => {
+			const name = await InputUiUtil.pGetUserString({
+				title: "Mark Your Quarry",
+				htmlDescription: `<div>Spend <strong>4 ferocity</strong> to mark a creature within 90 feet for 1 minute. You and your companion deal an extra <strong>1d6</strong> damage to it.</div>`,
+				default: "Quarry",
+			});
+			if (name == null) return;
+
+			const res = this._state.markBeastheartQuarry(name);
+			if (!res.ok) {
+				JqueryUtil.doToast({type: "warning", content: `Couldn't mark a quarry — ${res.reason === "insufficient" ? "not enough ferocity" : res.reason}.`});
+				return;
+			}
+			refresh();
+			JqueryUtil.doToast({type: "success", content: `${res.quarry.name} is your quarry: +${res.quarry.damage} damage for 1 minute.`});
+		});
+
+		card.querySelector(".btn-beastheart-quarry-clear")?.addEventListener("click", () => {
+			this._state.clearBeastheartQuarry();
+			refresh();
+		});
+
+		card.querySelector(".btn-beastheart-sentinel")?.addEventListener("click", () => {
+			const res = this._state.useSentinelCompanion();
+			if (!res.ok) {
+				JqueryUtil.doToast({type: "warning", content: `Couldn't use Sentinel Companion — ${res.reason === "insufficient" ? "not enough ferocity" : res.reason}.`});
+				return;
+			}
+			refresh();
+			JqueryUtil.doToast({type: "success", content: `${companion.customName || companion.name} makes a reaction signature attack.`});
+		});
+
+		card.querySelector(".btn-beastheart-fiendish")?.addEventListener("click", () => {
+			const res = this._state.useFiendishForm();
+			if (!res.ok) {
+				JqueryUtil.doToast({type: "warning", content: `Couldn't assume Fiendish Form — ${res.reason === "insufficient" ? "not enough ferocity" : res.reason}.`});
+				return;
+			}
+			refresh();
+			JqueryUtil.doToast({type: "success", content: `${companion.customName || companion.name} becomes a fiend for 1 minute: resistance to bludgeoning, piercing and slashing, and advantage on saves against magic.`});
+		});
+
+		card.querySelector(".btn-beastheart-fiendish-end")?.addEventListener("click", () => {
+			this._state.endFiendishForm();
+			refresh();
+		});
+	}
+
+	/**
+	 * Beastheart (MCDM) — the companion roster.
+	 *
+	 * The Companion feature points at `{@filter companion creature|bestiary|tag=Companion}`
+	 * rather than naming stat blocks, and explicitly invites companions from "other MCDM
+	 * supplements". So the roster is derived from that same tag across every loaded brew,
+	 * not from a hardcoded list — a new supplement's companions appear for free.
+	 *
+	 * @returns {object[]} Companion-tagged brew stat blocks, sorted by name.
+	 */
+	/**
+	 * Damage/condition defences for a companion card.
+	 *
+	 * `_parseBestiaryCreatureToBeastRecord` has always populated `resistances`,
+	 * `immunities` and `conditionImmunities` from the source stat block, but nothing
+	 * ever rendered them — so a companion's printed defences were invisible, and any
+	 * feature that granted one (Beastheart's Primal Bulwark and Fiendish Form, but
+	 * equally a Beast Master beast whose stat block carries a resistance) looked
+	 * unimplemented. See CS-BUG-141.
+	 *
+	 * Rows are omitted entirely when empty rather than rendering "—", so a companion
+	 * with no defences does not gain three blank lines.
+	 * @private
+	 */
+	/**
+	 * Movement summary for a companion, covering every movement type the record can
+	 * hold. The two companion renderers previously open-coded this and had drifted to
+	 * different subsets — one omitted `burrow`, the other omitted `climb` and `burrow`
+	 * — so a Bulette's burrow 30 and a Giant Spider's climb 30 were simply invisible.
+	 * One helper, one truth. See CS-BUG-141.
+	 * @private
+	 */
+	_getCompanionSpeedString (companion) {
+		const spd = companion?.speed || {};
+		const speeds = [];
+		if (spd.walk) speeds.push(`${spd.walk} ft.`);
+		["fly", "swim", "climb", "burrow"].forEach(k => {
+			if (spd[k]) speeds.push(`${k} ${spd[k]} ft.`);
+		});
+		return speeds.length ? speeds.join(", ") : "—";
+	}
+
+	_getCompanionDefencesHtml (companion) {
+		const rows = [
+			["Resistances", companion.resistances],
+			["Immunities", companion.immunities],
+			["Condition Immunities", companion.conditionImmunities],
+		]
+			.filter(([, vals]) => Array.isArray(vals) && vals.length)
+			.map(([label, vals]) => `<div class="mb-2" style="padding: 0 4px;"><strong>${label}:</strong> ${vals.map(it => `${it}`.qq()).join(", ")}</div>`);
+		return rows.join("");
+	}
+
+	_getCompanionCreatureRoster () {
+		return (this._brewMonstersData || [])
+			.filter(mon => (mon.type?.tags || []).some(tag => {
+				const str = typeof tag === "string" ? tag : tag?.tag;
+				return (str || "").toLowerCase() === "companion";
+			}))
+			.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+	}
+
+	/**
+	 * Beastheart (MCDM) — companion selection.
+	 *
+	 * This is the one bespoke modal the class earns. Every other Beastheart decision is a
+	 * label or a number and uses the sheet's existing prompt vocabulary
+	 * (`pGetUserEnum` / `pGetUserBoolean` / `pGetUserNumber`); this one is a genuine
+	 * multi-field comparison — the player is weighing fifteen stat blocks against each
+	 * other on size, speed, senses, AC, HP and signature attack, all of which have to be
+	 * on screen at once for the choice to be meaningful.
+	 *
+	 * Stats shown are the SCALED values for the character's current level, not the
+	 * printed "13 plus PB" strings, so the comparison is of real numbers.
+	 */
+	async _pShowBeastheartCompanionPicker () {
+		const roster = this._getCompanionCreatureRoster();
+		if (!roster.length) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: "No companion stat blocks are loaded. Add the Beastheart homebrew (or another MCDM supplement with Companion-tagged creatures) to choose a companion.",
+			});
+			return;
+		}
+
+		const level = this._state.getClassLevel?.("beastheart") || 1;
+		const existing = this._state.getBeastheartCompanion?.();
+		const previews = roster.map(mon => ({mon, preview: this._getCompanionPreview(mon, level)}));
+
+		let selectedName = existing?.name || null;
+
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: existing ? "Bond With a New Companion" : "Choose Your Companion",
+			isWidth100: true,
+			isHeight100: true,
+		});
+
+		const eleIntro = e_({
+			outer: `<div class="mb-3">
+				<div class="ve-muted ve-small">${existing
+		? `Bonding with a new companion means <strong>${(existing.customName || existing.name)}</strong> leaves to be on their own. Current HP, conditions and ferocity do not carry over.`
+		: `Your companion fights, explores and lives alongside you. Stats below are shown for Beastheart level ${level}.`}</div>
+			</div>`,
+		});
+
+		const eleGrid = e_({outer: `<div class="charsheet__beastheart-roster"></div>`});
+
+		const eleFooter = e_({
+			outer: `<div class="ve-flex-h-right ve-flex-v-center mt-3" style="gap: 8px;">
+				<button class="ve-btn ve-btn-default" data-role="cancel">Cancel</button>
+				<button class="ve-btn ve-btn-primary" data-role="confirm" disabled>Bond</button>
+			</div>`,
+		});
+		const btnConfirm = eleFooter.querySelector(`[data-role="confirm"]`);
+		const btnCancel = eleFooter.querySelector(`[data-role="cancel"]`);
+
+		const renderCards = () => {
+			eleGrid.innerHTML = "";
+			previews.forEach(({mon, preview}) => {
+				const isSelected = mon.name === selectedName;
+				const isCurrent = existing?.name === mon.name;
+				const card = e_({
+					outer: `<button type="button" class="charsheet__beastheart-card${isSelected ? " charsheet__beastheart-card--selected" : ""}" data-name="${mon.name.qq()}">
+						<div class="charsheet__beastheart-card-head">
+							<span class="charsheet__beastheart-card-name">${preview.shortName.qq()}</span>
+							${isCurrent ? `<span class="charsheet__beastheart-card-current">Current</span>` : ""}
+						</div>
+						<div class="charsheet__beastheart-card-sub">${preview.sizeType.qq()}</div>
+						<div class="charsheet__beastheart-card-stats">
+							<span><b>AC</b> ${preview.ac}</span>
+							<span><b>HP</b> ${preview.hp}</span>
+							<span><b>Speed</b> ${preview.speed.qq()}</span>
+						</div>
+						<div class="charsheet__beastheart-card-attack"><b>${preview.attackName.qq()}</b> ${preview.attack.qq()}</div>
+						${preview.senses ? `<div class="charsheet__beastheart-card-senses">${preview.senses.qq()}</div>` : ""}
+						${preview.traits.length ? `<div class="charsheet__beastheart-card-traits">${preview.traits.map(t => `<span>${t.qq()}</span>`).join("")}</div>` : ""}
+					</button>`,
+				});
+				card.addEventListener("click", () => {
+					selectedName = mon.name;
+					renderCards();
+					if (btnConfirm) /** @type {*} */ (btnConfirm).disabled = false;
+				});
+				eleGrid.append(card);
+			});
+		};
+		renderCards();
+		if (selectedName && btnConfirm) /** @type {*} */ (btnConfirm).disabled = false;
+
+		btnCancel?.addEventListener("click", () => doClose(false));
+		btnConfirm?.addEventListener("click", () => {
+			const chosen = roster.find(m => m.name === selectedName);
+			if (!chosen) return;
+			this._bondBeastheartCompanion(chosen);
+			doClose(true);
+		});
+
+		ee(modalInner)`${eleIntro}${eleGrid}${eleFooter}`;
+	}
+
+	/**
+	 * Guarantee a Beastheart has a bonded companion.
+	 *
+	 * The Companion feature is not optional — it is granted at 1st level and every other
+	 * moving part of the class (ferocity, exploits, all five bonds, Signature Attack)
+	 * reads the companion record. A Beastheart with no companion is therefore not a
+	 * character with a pending choice, it is a broken character with a dead control
+	 * strip. So rather than leave the sheet in that state we bond the first roster
+	 * entry as a sensible default and tell the player, once, that it is theirs to
+	 * change — the "Choose Companion" button re-opens the picker at any time and
+	 * rebonding is free.
+	 *
+	 * Runs from `_reconcileClassFeatures`, which is the sheet's existing
+	 * "make derived state match the character's classes" seam, so this fires on load,
+	 * on level-up and on class change alike. Idempotent and roster-gated: with no brew
+	 * loaded it is a no-op, exactly like every other brew-dependent reconcile.
+	 * @private
+	 */
+	_ensureBeastheartCompanionBonded () {
+		try {
+			if (!this._state.getClassLevel?.("beastheart")) return;
+			if (this._state.getBeastheartCompanion?.()) return;
+
+			const roster = this._getCompanionCreatureRoster();
+			if (!roster.length) return;
+
+			this._bondBeastheartCompanionState(roster[0]);
+			this._saveCurrentCharacter();
+			JqueryUtil.doToast({
+				type: "info",
+				content: `Bonded with a <b>${(roster[0].name || "").qq()}</b> by default — use <b>Choose Companion</b> on the companion card to bond with a different one.`,
+			});
+		} catch (e) { /* non-fatal — a companion default must never break sheet load */ }
+	}
+
+	/**
+	 * Scaled, human-readable summary of a companion stat block at a given caregiver
+	 * level — what the picker cards show. Falls back to the printed `special` strings
+	 * if the shared scaler is unavailable, so the picker degrades rather than blanks.
+	 * @private
+	 */
+	_getCompanionPreview (mon, level) {
+		const scaled = this._state.getScaledCompanionStatblock?.(mon, level) || mon;
+
+		const acEntry = scaled.ac?.[0];
+		const ac = typeof acEntry === "number" ? acEntry : (acEntry?.ac ?? acEntry?.special ?? "—");
+		const hp = scaled.hp?.average ?? scaled.hp?.special ?? "—";
+
+		const speeds = [];
+		const spd = scaled.speed || {};
+		if (spd.walk) speeds.push(`${typeof spd.walk === "object" ? spd.walk.number : spd.walk} ft.`);
+		["fly", "swim", "climb", "burrow"].forEach(k => {
+			if (spd[k]) speeds.push(`${k} ${typeof spd[k] === "object" ? spd[k].number : spd[k]} ft.`);
+		});
+
+		const signature = (scaled.action || []).find(a => /signature attack/i.test(a.name || ""))
+			|| (scaled.action || []).find(a => (a.entries || []).some(e => typeof e === "string" && /\{@atk/.test(e)));
+		const attackEntry = (signature?.entries || []).find(e => typeof e === "string") || "";
+
+		return {
+			shortName: (mon.name || "").replace(/\s+Companion$/i, ""),
+			sizeType: `${Parser.sizeAbvToFull(scaled.size?.[0] || "M")} ${scaled.type?.type || scaled.type || "beast"}`,
+			ac: `${ac}`,
+			hp: `${hp}`,
+			speed: speeds.length ? speeds.join(", ") : "—",
+			attackName: (signature?.name || "Signature Attack").replace(/\s*\(Signature Attack\)/i, ""),
+			attack: Renderer.stripTags(attackEntry).replace(/^Melee Weapon Attack:\s*/i, "").trim() || "—",
+			senses: (scaled.senses || []).join(", "),
+			traits: (scaled.trait || []).map(t => t.name).filter(Boolean),
+		};
+	}
+
+	/**
+	 * Replace the character's Beastheart companion with the chosen stat block.
+	 *
+	 * Stores the PRISTINE unscaled block on the companion's `scaling` descriptor so every
+	 * subsequent level change re-derives from the author's text rather than compounding
+	 * on already-scaled numbers. The rescale itself is the generic
+	 * `_recalculateScaledCompanion` path, not a Beastheart-specific one.
+	 * @private
+	 */
+	_bondBeastheartCompanionState (creature) {
+		const previous = this._state.getBeastheartCompanion?.();
+		if (previous) this._state.removeCompanion?.(previous.id);
+
+		this._state.addCompanionFromBestiary?.(
+			creature,
+			CharacterSheetState.COMPANION_TYPES.BEASTHEART_COMPANION,
+			"Beastheart",
+			{
+				scaling: {
+					className: "Beastheart",
+					statblockScaler: "classSummon",
+					statblock: MiscUtil.copyFast(creature),
+				},
+			},
+		);
+	}
+
+	_bondBeastheartCompanion (creature) {
+		this._bondBeastheartCompanionState(creature);
+
+		this._saveCurrentCharacter();
+		this._renderCompanions();
+		if (this._features) this._features.render();
+		JqueryUtil.doToast({
+			type: "success",
+			content: `Bonded with ${creature.name}!`,
+		});
 	}
 
 	/**
@@ -4799,6 +5376,13 @@ class CharacterSheetPage {
 	}
 
 	_renderCompanions () {
+		// Derived state must exist before it is drawn. Bonding is guaranteed here as well
+		// as in `_reconcileClassFeatures` because the builder-completion and level-up
+		// paths do not both run a full reconcile, and a Beastheart whose companion card
+		// is empty has no working ferocity track, exploits or bond features. Idempotent
+		// and roster-gated, and deliberately state-only so it does not re-enter render.
+		this._ensureBeastheartCompanionBonded();
+
 		const list = document.getElementById("charsheet-companions-list");
 		if (!list) return;
 
@@ -4836,12 +5420,7 @@ class CharacterSheetPage {
 			const hpBgColor = hpPercent > 50 ? "rgba(34, 197, 94, 0.15)" : hpPercent > 25 ? "rgba(245, 158, 11, 0.15)" : "rgba(239, 68, 68, 0.15)";
 
 			// Format speeds
-			const speeds = [];
-			if (companion.speed?.walk) speeds.push(`${companion.speed.walk} ft.`);
-			if (companion.speed?.fly) speeds.push(`fly ${companion.speed.fly} ft.`);
-			if (companion.speed?.swim) speeds.push(`swim ${companion.speed.swim} ft.`);
-			if (companion.speed?.climb) speeds.push(`climb ${companion.speed.climb} ft.`);
-			const speedStr = speeds.length > 0 ? speeds.join(", ") : "—";
+			const speedStr = this._getCompanionSpeedString(companion);
 
 			// Format senses
 			const sensesStr = companion.senses?.join(", ") || "—";
@@ -4920,6 +5499,8 @@ class CharacterSheetPage {
 				</button>`;
 			}).join("");
 
+			const ferocityHtml = this._getCompanionFerocityHtml(companion);
+
 			const card = e_({outer: `
 				<div class="charsheet__companion-card" data-companion-id="${companion.id}" style="
 					border: 2px solid ${info.color}33;
@@ -4991,6 +5572,8 @@ class CharacterSheetPage {
 							<div style="font-size: 0.9em;">👁️ ${companion.passive || "—"}</div>
 						</div>
 					</div>
+
+					${ferocityHtml}
 
 					<!-- Senses -->
 					<div class="ve-muted ve-small mb-2" style="padding: 0 4px;">
@@ -5084,6 +5667,8 @@ class CharacterSheetPage {
 					</div>
 				</div>
 			`});
+
+			this._bindCompanionFerocityHandlers(card, companion);
 
 			// Dismiss button
 			card.querySelector(".btn-companion-dismiss").addEventListener("click", async () => {
@@ -5411,6 +5996,8 @@ class CharacterSheetPage {
 					<strong>Conditions:</strong> ${conditionsHtml}
 				</div>
 
+				${this._getCompanionDefencesHtml(companion)}
+
 				<div class="mb-2" style="padding: 0 4px;">
 					<strong>Senses:</strong> ${companion.senses?.join(", ") || "—"}
 					${companion.passive ? `, passive Perception ${companion.passive}` : ""}
@@ -5483,12 +6070,7 @@ class CharacterSheetPage {
 		const livingCount = this._state.getLivingGroupedCreatureCount?.(companion.id) || 0;
 		const totalCount = companion.count || 1;
 
-		// Format speeds
-		const speeds = [];
-		if (companion.speed?.walk) speeds.push(`${companion.speed.walk} ft.`);
-		if (companion.speed?.fly) speeds.push(`fly ${companion.speed.fly} ft.`);
-		if (companion.speed?.swim) speeds.push(`swim ${companion.speed.swim} ft.`);
-		const speedStr = speeds.length > 0 ? speeds.join(", ") : "—";
+		const speedStr = this._getCompanionSpeedString(companion);
 
 		// Type info
 		const info = {label: "Conjured", icon: "✨", color: "#3b82f6"};
@@ -18156,6 +18738,10 @@ class CharacterSheetPage {
 			// Reconcile Divine Favor (TGTT) boon effects now that the god catalog is
 			// available and ability scores are settled — idempotent; safe to re-run.
 			this._state.applyDivineFavorEffects();
+			// A Beastheart without a bonded companion is a non-functional character: every
+			// ferocity control, exploit and bond feature keys off the companion record.
+			// Guarantee one exists once the brew roster is loaded. Idempotent.
+			this._ensureBeastheartCompanionBonded();
 		} catch (e) {
 			// Reconciliation is best-effort; never block render on a bad save.
 			// eslint-disable-next-line no-console

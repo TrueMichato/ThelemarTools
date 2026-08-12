@@ -7805,3 +7805,188 @@ quiet traps.
 Verified by reading both call sites; no behavioural repro exists because no
 uncurated state currently declares either property. Filed to stop a third
 session rediscovering the asymmetry from scratch.
+
+---
+
+## CS-BUG-140 — subclass optional-feature progressions were *skipped*, not summed, whenever they shared a `featureType` with the class — FIXED
+
+**Status:** fixed in this change set. Found while adding Beastheart (MCDM,
+`BST`); it was **not** a Beastheart-only defect — it silently mis-granted a
+core PHB subclass too.
+
+### Blast radius — enumerated, not estimated
+
+The changed branch fires **only** where a subclass `optionalfeatureProgression`
+`featureType` **intersects** a class-level one. Every non-intersecting
+progression takes a byte-identical path, so the affected set is exactly the set
+of intersections. Enumerated across all of `data/class/*.json` and the bundled
+`homebrew/`:
+
+| Class | Subclass | featureType | class curve | subclass curve | before | after |
+|---|---|---|---|---|---|---|
+| Fighter (PHB) | Champion (PHB) | `FS:F` | `{1: 1}` | `{10: 1}` | 1 at L10 | **2 at L10** |
+
+**That is the complete list — one official pair, no bundled-homebrew pair.**
+XPHB Fighter declares no class-level `optionalfeatureProgression`, so the 2024
+Champion cannot intersect and is unaffected.
+
+**Independently confirmed by the coordinating session: `TOTAL: 1`.**
+
+The enumeration is reproducible — run from the repo root:
+
+```js
+// node -e '...' — lists every subclass whose optionalfeatureProgression shares a
+// featureType with its parent class. Any row printed is a behaviour change.
+const fs = require("fs"), path = require("path");
+for (const f of fs.readdirSync("data/class").filter(f => f.endsWith(".json"))) {
+	const d = JSON.parse(fs.readFileSync(path.join("data/class", f), "utf8"));
+	const cls = {};
+	(d.class || []).forEach(c => (c.optionalfeatureProgression || []).forEach(p => {
+		const k = `${c.name}|${c.source}`;
+		cls[k] = (cls[k] || []).concat(p.featureType);
+	}));
+	(d.subclass || []).forEach(sc => {
+		const ctypes = (cls[`${sc.className}|${sc.classSource}`] || []).flat();
+		(sc.optionalfeatureProgression || []).forEach(p => {
+			const shared = [].concat(p.featureType).filter(t => ctypes.includes(t));
+			if (shared.length) console.log(`${sc.className}(${sc.classSource}) / ${sc.name}(${sc.source}) ft=${shared} prog=${JSON.stringify(p.progression)}`);
+		});
+	});
+}
+```
+
+Re-run it after any data update: a newly-printed row is a class whose grant
+counts changed, and each one needs the increment-vs-restatement check below.
+
+Champion's level-10 *Additional Fighting Style* is a genuine second pick, so the
+new total of 2 is correct and the old total of 1 was the bug: the pick was never
+offered at all.
+
+### Why this cannot over-grant
+
+The merge sums two **cumulative** curves against one shared "already known"
+count. It would over-grant only if a subclass curve *restated* the class total
+rather than adding to it (e.g. a subclass declaring `{10: 2}` to mean "two
+total, including the class's one"). **No such case exists in official data** —
+the single intersection above is an increment. If a future brew adopts the
+restating shape it must express it as an increment instead; there is no way to
+distinguish the two from the data alone.
+
+### The old guard's intent is still under test
+
+Removing a guard without replacing it is how the opposite bug arrives later, so
+`CharacterSheetArcaneArcherShots.test.js` pins both halves:
+
+- a subclass `CTM:*` progression is **still refused** (the level-up
+  bonus-method path owns that grant) — merging it would read 3 instead of 1;
+- a subclass declaring an unrelated `featureType` leaves the class curve
+  untouched, proving the merge is per-`featureType` and not per-subclass.
+
+### Repro (PHB, no homebrew required)
+
+1. Build a **Fighter → Champion** and take them to level 10.
+2. Champion's *Additional Fighting Style* (10th) grants a **second** Fighting
+   Style.
+3. Observe the Fighting Style picker: it still offers **one** pick, not two.
+
+### Root cause
+
+`CharacterSheetClassUtils.getOptionalFeatureGains` merged the class-level and
+subclass-level progressions with an **overlap guard**: if a subclass
+progression declared a `featureType` the class progression already used, the
+subclass progression was *skipped entirely*.
+
+The guard was presumably meant to stop a subclass that merely restates its
+parent class's progression from double-counting. But the common real case is
+the opposite — a subclass that grants *additional* picks of a type the class
+already grants. `FS:F` (Fighting Style, Fighter) is exactly that shape, so
+Champion's extra pick was dropped on the floor.
+
+Beastheart hits the same shape twice over: Infernal Exploits (L3/L11) and
+Nature Exploits (L3/L11) both grant `BST:EXP` picks on top of the class's
+Primal Exploits.
+
+### Fix
+
+Replaced the skip with an **additive merge** via a new
+`_sumCumulativeProgressions` helper. Both progressions are cumulative
+level→count maps, so the correct combination is a per-level sum, carried
+forward. A subclass that restates its parent's progression is not a real shape
+in any shipped data, and the guard was never protecting against an observed
+case.
+
+### Affected tests
+
+`CharacterSheetArcaneArcherShots.test.js` had one test asserting the *old*
+behaviour (that the subclass progression was ignored). It was rewritten as two
+behavioural tests — one asserting the summed count, one asserting the
+single-source count is unchanged.
+
+### Bound
+
+Full `test/jest/charactersheet` suite green afterwards (472 suites / 14,398
+tests), so no other class relied on the skip.
+
+---
+
+## CS-BUG-141 — companion cards silently dropped resistances, immunities, condition immunities, and two movement types — FIXED
+
+**Status:** fixed in the Beastheart change set. **Not a Beastheart bug** — it is a
+defect in the shared `_data.companions[]` render path and affects every companion
+the sheet has ever drawn.
+
+### Symptom
+
+`_parseBestiaryCreatureToBeastRecord` has always parsed `resistances`,
+`immunities` and `conditionImmunities` off the source stat block and stored them
+on the companion record. **Nothing ever rendered them.** A companion whose stat
+block granted damage resistance displayed no resistance anywhere on the sheet.
+
+Separately, the two companion renderers open-coded their own movement summary and
+had drifted to *different subsets*:
+
+| Renderer | walk | fly | swim | climb | burrow |
+|---|---|---|---|---|---|
+| companion detail card | ✅ | ✅ | ✅ | ✅ | ❌ |
+| compact companion row | ✅ | ✅ | ✅ | ❌ | ❌ |
+| picker preview (correct) | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+So a Bulette Companion's `burrow 30` and a Giant Spider Companion's `climb 30`
+were invisible on the card even though both were correctly stored.
+
+### Why it went unnoticed
+
+This is the *reader/writer divergence* silent-failure shape: the value is computed
+and stored correctly, and the only thing missing is a reader. There is no error,
+no warning, and no visual difference between "this companion has no resistances"
+and "this companion's resistances are never drawn" — so the feature that granted
+one looks unimplemented rather than unrendered.
+
+It surfaced only because Beastheart's Primordial bond (Primal Bulwark) and
+Infernal bond (Fiendish Form) both *grant* companion resistances, which made the
+missing row load-bearing rather than merely cosmetic.
+
+### Fix
+
+Two small generic helpers in `charactersheet.js`, used by every companion
+renderer:
+
+- `_getCompanionDefencesHtml(companion)` — renders Resistances / Immunities /
+  Condition Immunities, omitting each row entirely when empty so a companion with
+  no defences does not gain three blank lines.
+- `_getCompanionSpeedString(companion)` — one movement summary covering all five
+  movement types, replacing both open-coded copies.
+
+No state or parsing change: the data was already correct.
+
+### Bound
+
+Full `test/jest/charactersheet` suite green afterwards. Because both fixes are
+render-only and additive, no existing companion assertion changed.
+
+### Lesson
+
+When a granted companion effect "doesn't work", check that a **reader** exists for
+the field before concluding the grant is unimplemented. Three of the four
+silent-failure instances found across the parallel class sessions have this same
+shape, and all of them fail invisibly.

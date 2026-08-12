@@ -832,6 +832,39 @@ export const PRESET_FULL_TALENT_CHRONOPATH: CharacterPreset = {
 	],
 };
 
+/**
+ * Beastheart — Protector Bond (MCDM "Beastheart and Monstrous Companions", BST).
+ *
+ * Protector is chosen over the other four bonds because it is the most mechanically
+ * concrete: Beast Vitality moves the companion's HP by the character's level,
+ * Thickened Hide moves its AC by a fixed +2, and Undying Protector has an escalating
+ * ferocity cost — three independently observable numbers, where (say) Ferocious's
+ * rampage riders only manifest mid-rampage.
+ *
+ * WIS-first because Superior Ferocity's exploit save DC and three of the class's
+ * rest pools are all Wisdom-derived; a WIS-10 Beastheart would make several features
+ * indistinguishable from doing nothing.
+ */
+export const PRESET_FULL_BEASTHEART_PROTECTOR: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB",
+	className: "Beastheart",
+	// Matched against the abbreviation the sheet renders (`_meta.sources[0].abbreviation`).
+	classSource: "BST",
+	prioritySources: ["BST"],
+	skipConditionalPrompt: true,
+	background: "Outlander",
+	bgSource: "PHB",
+	name: "Ordrek Houndsworn",
+	skillCount: 2,
+	abilityPriority: ["wis", "con", "str", "dex", "cha", "int"],
+	subclassName: "Protector",
+	subclassSource: "BST",
+	homebrewUrls: [
+		"https://raw.githubusercontent.com/TheGiddyLimit/homebrew/refs/heads/master/class/MCDM%20Productions%3B%20Beastheart.json",
+	],
+};
+
 /** School of Necromancy Wizard (PHB subclass via TGTT-2014). */
 export const PRESET_FULL_NECROMANCER_WIZARD: CharacterPreset = {
 	race: "Human",
@@ -1072,6 +1105,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_HORROR_THEOCRACIAN,
 	PRESET_FULL_CREATION_BARD_CHANGELING,
 	PRESET_FULL_ARCANA_CLERIC,
+	PRESET_FULL_BEASTHEART_PROTECTOR,
 	PRESET_FULL_SHADOW_MAGIC_SORCERER,
 	PRESET_FULL_SHADOW_SORCERY_RHW_SORCERER,
 	PRESET_FULL_SPELLFIRE_SORCERER,
