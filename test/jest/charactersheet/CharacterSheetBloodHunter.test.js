@@ -321,3 +321,198 @@ describe("Blood Hunter (BH2022)", () => {
 		expect(state.getResource("Blood Maledict").current).toBe(3);
 	});
 });
+
+describe("Blood Hunter — conditional advantages (FeatureEffectRegistry)", () => {
+	function stateWithFeatures (level, names) {
+		const state = getBloodHunterState({level, lycan: true});
+		names.forEach(name => addResourceFeature(state, name, 1));
+		state.applyClassFeatureEffects();
+		return state;
+	}
+
+	// Each of these is a *conditional* advantage, so the architectural contract is
+	// two-part: it must be OFFERED on the right roll (and only the right roll), and
+	// opting in must actually produce advantage. Asserting only the first half
+	// would pass even if the modifier were inert.
+	it.each([
+		["Heightened Senses", "skill:perception", "relying on hearing or smell"],
+		["Hunter's Bane", "skill:survival", "to track fey, fiends, or undead"],
+		["Grim Psychometry", "skill:history", "to recall the sinister or tragic history of an object or location"],
+	])("%s offers a gated conditional on %s that grants advantage when applied", (feature, rollType, conditionalText) => {
+		const state = stateWithFeatures(20, [feature]);
+
+		const offered = state.aggregateModifiers(rollType);
+		const match = offered.conditionalsAvailable.find(c => c.name === feature);
+		expect(match).toBeDefined();
+		expect(match.conditional).toBe(conditionalText);
+
+		// Default-off: a conditional must never silently apply.
+		expect(offered.advantage).toBe(false);
+
+		// Opting in produces the real derived effect.
+		const applied = state.aggregateModifiers(rollType, {appliedConditionalIds: new Set([match.id])});
+		expect(applied.advantage).toBe(true);
+	});
+
+	it("does not leak Blood Hunter conditionals onto unrelated rolls", () => {
+		const state = stateWithFeatures(20, ["Heightened Senses", "Hunter's Bane", "Grim Psychometry"]);
+		["skill:stealth", "skill:persuasion", "skill:athletics"].forEach(rollType => {
+			expect(state.aggregateModifiers(rollType).conditionalsAvailable).toEqual([]);
+		});
+	});
+
+	it("Hardened Soul offers charmed and frightened save conditionals that grant advantage", () => {
+		const state = stateWithFeatures(20, ["Hardened Soul"]);
+		const offered = state.aggregateModifiers("save:wis");
+		const conditionals = offered.conditionalsAvailable.filter(c => c.name === "Hardened Soul");
+		expect(conditionals.map(c => c.conditional).sort())
+			.toEqual(["against being charmed", "against being frightened"]);
+		expect(offered.advantage).toBe(false);
+
+		const applied = state.aggregateModifiers("save:wis", {appliedConditionalIds: new Set([conditionals[0].id])});
+		expect(applied.advantage).toBe(true);
+	});
+
+	it("grants no conditionals before the granting levels", () => {
+		const state = getBloodHunterState({level: 20, lycan: true});
+		state.applyClassFeatureEffects();
+		["skill:perception", "skill:survival", "skill:history"].forEach(rollType => {
+			expect(state.aggregateModifiers(rollType).conditionalsAvailable).toEqual([]);
+		});
+	});
+});
+
+describe("Blood Hunter — Stalker's Prowess is permanent (CS-BUG-122)", () => {
+	function lycanAtLevel (level) {
+		const state = getBloodHunterState({level, lycan: true});
+		addResourceFeature(state, "Hybrid Transformation", 3);
+		state.applyClassFeatureEffects();
+		return state;
+	}
+
+	it("grants +10 walking speed out of hybrid form from level 7", () => {
+		expect(lycanAtLevel(6).getWalkSpeed()).toBe(30);
+		expect(lycanAtLevel(7).getWalkSpeed()).toBe(40);
+	});
+
+	it("keeps the speed identical in and out of hybrid form", () => {
+		const state = lycanAtLevel(7);
+		const untransformed = state.getWalkSpeed();
+		state.activateHybridTransformation();
+		expect(state.getWalkSpeed()).toBe(untransformed);
+	});
+
+	it("stacks with Dark Augmentation rather than shadowing it", () => {
+		// L10 = base 30 + Stalker's Prowess 10 + Dark Augmentation 5.
+		expect(lycanAtLevel(10).getWalkSpeed()).toBe(45);
+	});
+
+	it("does not grant the speed to a non-Lycan Blood Hunter", () => {
+		const state = getBloodHunterState({level: 10});
+		expect(state.getStalkersProwessSpeedBonus()).toBe(0);
+		// Dark Augmentation alone.
+		expect(state.getWalkSpeed()).toBe(35);
+	});
+});
+
+describe("Blood Hunter — hybrid AC reads the calculation key", () => {
+	it("applies hybridAcBonus rather than a hard-coded 1", () => {
+		const state = getBloodHunterState({level: 7, lycan: true});
+		addResourceFeature(state, "Hybrid Transformation", 3);
+		state.applyClassFeatureEffects();
+		const before = state.getAc();
+		state.activateHybridTransformation();
+		expect(state.getAc() - before).toBe(state.getFeatureCalculations().hybridAcBonus);
+	});
+});
+
+describe("Blood Hunter — branded target gates Brand of the Voracious", () => {
+	function voraciousState (level = 15) {
+		const state = getBloodHunterState({level, lycan: true});
+		addResourceFeature(state, "Hybrid Transformation", 3);
+		state.applyClassFeatureEffects();
+		state.activateHybridTransformation();
+		return state;
+	}
+
+	const advantageTargets = state => state.getBloodHunterHybridEffects()
+		.filter(e => e.type === "advantage")
+		.map(e => e.target);
+
+	it("does not grant attack advantage while no creature is branded", () => {
+		expect(advantageTargets(voraciousState())).not.toContain("attack:melee");
+	});
+
+	it("grants attack advantage once a creature is branded", () => {
+		const state = voraciousState();
+		state.activateState("brandedTarget");
+		expect(advantageTargets(state)).toContain("attack:melee");
+	});
+
+	it("grants nothing before level 15 even with a branded target", () => {
+		const state = voraciousState(14);
+		state.activateState("brandedTarget");
+		expect(advantageTargets(state)).not.toContain("attack:melee");
+	});
+});
+
+describe("Blood Hunter — blood curse reference table", () => {
+	it("covers all twelve curses", () => {
+		expect(Object.keys(CharacterSheetState.BLOOD_CURSES)).toHaveLength(12);
+	});
+
+	it("records the correct save ability per curse, including the curses that force none", () => {
+		// These differ per curse; the pre-table UI quoted one Hemocraft DC for all
+		// twelve, which was wrong for the majority that force no save at all.
+		expect(CharacterSheetState.getBloodCurseInfo("Blood Curse of Binding").save).toBe("str");
+		expect(CharacterSheetState.getBloodCurseInfo("Blood Curse of Corrosion").save).toBe("con");
+		expect(CharacterSheetState.getBloodCurseInfo("Blood Curse of the Howl").save).toBe("wis");
+		expect(CharacterSheetState.getBloodCurseInfo("Blood Curse of the Marked").save).toBeNull();
+	});
+
+	it("records the four reaction curses distinctly from the bonus-action ones", () => {
+		const reactions = Object.entries(CharacterSheetState.BLOOD_CURSES)
+			.filter(([, v]) => v.action === "reaction")
+			.map(([k]) => k)
+			.sort();
+		expect(reactions).toEqual([
+			"Blood Curse of Exposure",
+			"Blood Curse of the Eyeless",
+			"Blood Curse of the Fallen Puppet",
+			"Blood Curse of the Souleater",
+		]);
+		expect(CharacterSheetState.getBloodCurseInfo("Blood Curse of the Howl").action).toBe("action");
+	});
+
+	it("resolves a curse by its short name as well as its full name", () => {
+		expect(CharacterSheetState.getBloodCurseInfo("Howl"))
+			.toBe(CharacterSheetState.BLOOD_CURSES["Blood Curse of the Howl"]);
+		expect(CharacterSheetState.getBloodCurseInfo("Nonexistent Curse")).toBeNull();
+	});
+
+	it("gives every curse a distinct effect and amplified rider", () => {
+		const entries = Object.values(CharacterSheetState.BLOOD_CURSES);
+		expect(new Set(entries.map(e => e.effect)).size).toBe(entries.length);
+		expect(new Set(entries.map(e => e.amplified)).size).toBe(entries.length);
+	});
+});
+
+describe("Blood Hunter — amplifying a curse costs real hit points", () => {
+	it("reduces current HP by a hemocraft die roll", () => {
+		const state = getBloodHunterState({level: 6});
+		addResourceFeature(state, "Blood Maledict", 1);
+		state.ensureBloodHunterResources();
+		const before = state.getCurrentHp();
+		expect(state.useBloodMaledict({amplify: true, roll: 3})).toBe(true);
+		expect(state.getCurrentHp()).toBe(before - 3);
+	});
+
+	it("costs no HP when invoked without amplifying", () => {
+		const state = getBloodHunterState({level: 6});
+		addResourceFeature(state, "Blood Maledict", 1);
+		state.ensureBloodHunterResources();
+		const before = state.getCurrentHp();
+		expect(state.useBloodMaledict({amplify: false})).toBe(true);
+		expect(state.getCurrentHp()).toBe(before);
+	});
+});

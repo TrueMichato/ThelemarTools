@@ -1081,6 +1081,13 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "crimsonRiteMechanics"; hpCosts: [number, number]}
 	| {kind: "hybridTransformationMechanics"}
 
+	// Brand of the Voracious (Order of the Lycan 15): advantage on attacks against a
+	// creature branded by your Brand of Castigation, WHILE transformed. Both halves
+	// of the gate are load-bearing, so this asserts the advantage is ABSENT with no
+	// branded target and PRESENT once one is branded — a plain `hasBrandOfTheVoracious`
+	// flag check would pass even if the advantage never reached an attack roll.
+	| {kind: "brandedTargetGate"; advantageTarget: string}
+
 	// Psionic strain (MCDM Talent). Drives the three strain tracks up through their
 	// effect thresholds and asserts each debuff is REALLY applied to the derived
 	// numbers (AC, speed, hit point maximum, skill/save proficiency, disadvantage),
@@ -1833,6 +1840,33 @@ async function _runPassiveOrRollEffect (
 			for (const weaponId of ["e2e-rite-longsword", "e2e-rite-longbow"]) {
 				const rider = result.effects.find((it: any) => it.weaponId === weaponId);
 				if (!rider?.dice || !rider?.damageType) throw new Error(`typed Crimson Rite rider missing for ${weaponId}: ${JSON.stringify(result.effects)}`);
+			}
+			return;
+		}
+		case "brandedTargetGate": {
+			const result = await charSheet.page.evaluate(({advantageTarget}) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state: any = cs?._state;
+				state.ensureBloodHunterResources?.();
+				const resource = state.getResource?.("Hybrid Transformation");
+				if (resource) state.setResourceCurrent(resource.id, resource.max);
+				state.activateHybridTransformation?.();
+				const targets = () => (state.getBloodHunterHybridEffects?.() || [])
+					.filter((it: any) => it.type === "advantage")
+					.map((it: any) => it.target);
+				const withoutBrand = targets();
+				state.activateState?.("brandedTarget");
+				const withBrand = targets();
+				state.deactivateState?.("brandedTarget");
+				state.deactivateState?.("hybridTransformation");
+				if (resource) state.setResourceCurrent(resource.id, resource.max);
+				return {withoutBrand, withBrand, advantageTarget};
+			}, {advantageTarget: e.advantageTarget});
+			if (result.withoutBrand.includes(result.advantageTarget)) {
+				throw new Error(`Brand of the Voracious granted "${e.advantageTarget}" advantage with NO branded target (got ${JSON.stringify(result.withoutBrand)})`);
+			}
+			if (!result.withBrand.includes(result.advantageTarget)) {
+				throw new Error(`Brand of the Voracious did not grant "${e.advantageTarget}" advantage against a branded target (got ${JSON.stringify(result.withBrand)})`);
 			}
 			return;
 		}

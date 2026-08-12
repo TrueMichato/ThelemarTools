@@ -4235,8 +4235,9 @@ class CharacterSheetPage {
 		}
 
 		const calc = this._state.getFeatureCalculations();
-		const isHybrid = this._state.isStateTypeActive("hybridTransformation");
-		if (isHybrid && calc.hasStalkersProwess) {
+		// CS-BUG-122: Stalker's Prowess jump bonuses are permanent RAW — only the
+		// trailing Improved Predatory Strikes benefit is hybrid-form gated.
+		if (calc.hasStalkersProwess) {
 			longJumpRunning += calc.longJumpBonus || 0;
 			highJumpRunning += calc.highJumpBonus || 0;
 		}
@@ -10067,21 +10068,43 @@ class CharacterSheetPage {
 			JqueryUtil.doToast({type: "warning", content: "No Blood Maledict uses remain."});
 			return true;
 		}
+		const calc = this._state.getFeatureCalculations();
+		const curseName = feature?.name || "Blood curse";
+		const info = CharacterSheetState.getBloodCurseInfo?.(curseName);
+		const saveDc = calc.hemocraftSaveDc;
+		const actionLabel = {bonus: "Bonus action", reaction: "Reaction", action: "Action"}[info?.action] || null;
+		const saveLine = info?.save
+			? `<div class="mb-1"><b>Save:</b> DC ${saveDc} ${Parser.attAbvToFull(info.save)}</div>`
+			: (info ? `<div class="mb-1"><b>Save:</b> none</div>` : "");
+		const htmlDescription = info
+			? `<div class="mb-2">
+				${actionLabel ? `<div class="mb-1"><b>Cost:</b> ${actionLabel}</div>` : ""}
+				${saveLine}
+				<div class="mb-1"><b>Effect:</b> ${info.effect}</div>
+				<div class="mb-1"><b>Amplified:</b> ${info.amplified}</div>
+			</div>
+			<div>Amplifying costs one roll of your Hemocraft Die (${calc.hemocraftDie}) as unavoidable necrotic damage.</div>`
+			: `Amplify this curse? Amplifying costs one roll of your Hemocraft Die (${calc.hemocraftDie}) as unavoidable necrotic damage.`;
 		const amplify = await InputUiUtil.pGetUserBoolean({
-			title: "Invoke Blood Curse",
-			htmlDescription: `Amplify this curse? Amplifying costs one roll of your Hemocraft Die (${this._state.getFeatureCalculations().hemocraftDie}) as unavoidable necrotic damage.`,
+			title: `Invoke ${curseName}`,
+			htmlDescription,
 			textYes: "Amplify",
 			textNo: "Invoke Normally",
 		});
 		if (amplify == null) return true;
+		const hpBefore = this._state.getCurrentHp();
 		this._state.useBloodMaledict({amplify});
 		this._saveCurrentCharacter();
 		this._renderResources();
 		this._renderActiveStates();
 		this._renderCharacter();
-		const curseName = feature?.name || "Blood curse";
-		const saveDc = this._state.getFeatureCalculations().hemocraftSaveDc;
-		JqueryUtil.doToast({type: "success", content: `${curseName} invoked${amplify ? " and amplified" : ""}. Hemocraft save DC ${saveDc}.`});
+		// Only quote a save DC for curses that actually force a save — otherwise the
+		// number is noise the player will act on wrongly.
+		const dcPart = info
+			? (info.save ? ` Target saves: DC ${saveDc} ${Parser.attAbvToFull(info.save)}.` : "")
+			: ` Hemocraft save DC ${saveDc}.`;
+		const costPart = amplify ? ` You took ${hpBefore - this._state.getCurrentHp()} necrotic damage.` : "";
+		JqueryUtil.doToast({type: "success", content: `${curseName} invoked${amplify ? " and amplified" : ""}.${dcPart}${costPart}`});
 		return true;
 	}
 

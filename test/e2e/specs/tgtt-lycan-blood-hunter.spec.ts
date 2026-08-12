@@ -106,7 +106,15 @@ const BLOOD_HUNTER_FEATURES: FeatureCheck[] = [
 		level: 3,
 		name: /heightened senses/i,
 		kind: "passive",
-		effects: [{kind: "featureCalculation", property: "hasHeightenedSenses", exact: true}],
+		// Not `hasHeightenedSenses: true` — that flag proves only that a boolean was
+		// set. This asserts the derived effect: the conditional is offered on
+		// Perception, is default-off, and opting in actually grants advantage.
+		effects: [{
+			kind: "conditionalAdvantage",
+			rollType: "skill:perception",
+			conditionalIncludes: "hearing or smell",
+			sourceIncludes: "Heightened Senses",
+		}],
 	},
 	{
 		level: 3,
@@ -173,7 +181,12 @@ const BLOOD_HUNTER_FEATURES: FeatureCheck[] = [
 		level: 9,
 		name: /grim psychometry/i,
 		kind: "passive",
-		effects: [{kind: "featureCalculation", property: "hasGrimPsychometry", exact: true}],
+		effects: [{
+			kind: "conditionalAdvantage",
+			rollType: "skill:history",
+			conditionalIncludes: "sinister or tragic history",
+			sourceIncludes: "Grim Psychometry",
+		}],
 	},
 	{
 		level: 10,
@@ -223,7 +236,20 @@ const BLOOD_HUNTER_FEATURES: FeatureCheck[] = [
 		level: 14,
 		name: /hardened soul/i,
 		kind: "passive",
-		effects: [{kind: "featureCalculation", property: "hasHardenedSoul", exact: true}],
+		effects: [
+			{
+				kind: "conditionalAdvantage",
+				rollType: "save:wis",
+				conditionalIncludes: "charmed",
+				sourceIncludes: "Hardened Soul",
+			},
+			{
+				kind: "conditionalAdvantage",
+				rollType: "save:wis",
+				conditionalIncludes: "frightened",
+				sourceIncludes: "Hardened Soul",
+			},
+		],
 	},
 	{
 		level: 14,
@@ -252,7 +278,9 @@ const BLOOD_HUNTER_FEATURES: FeatureCheck[] = [
 		name: /brand of the voracious/i,
 		kind: "passive",
 		effects: [
-			{kind: "featureCalculation", property: "hasBrandOfTheVoracious", exact: true},
+			// The flag alone would pass even if the advantage never fired. This asserts
+			// the real gate: the advantage exists only while a target is branded.
+			{kind: "brandedTargetGate", advantageTarget: "attack:melee"},
 			{kind: "hybridTransformationMechanics"},
 		],
 	},

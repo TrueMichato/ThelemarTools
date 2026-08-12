@@ -2966,6 +2966,24 @@ const FeatureEffectRegistry = {
 			{type: "acFormula", base: 13, addDex: true, conditional: "while unarmored"},
 		]);
 
+		// ======= BLOOD HUNTER (BH2022) =======
+		// These four features are pure conditional advantage: nothing about them
+		// scales, so they belong in the registry rather than as `calculations.*`
+		// flags. The qualifier segment (the 4th `modType` part) becomes the
+		// human-readable `conditional`, which routes them through the standard
+		// opt-in picker instead of silently applying to every roll.
+		this.register("Hunter's Bane", [
+			{type: "modifier", modType: "skill:advantage:survival:tracking", value: 1, conditional: "to track fey, fiends, or undead"},
+			{type: "modifier", modType: "check:advantage:int:lore", value: 1, conditional: "to recall information about fey, fiends, or undead"},
+		]);
+		this.register("Grim Psychometry", [
+			{type: "modifier", modType: "skill:advantage:history:psychometry", value: 1, conditional: "to recall the sinister or tragic history of an object or location"},
+		]);
+		this.register("Hardened Soul", [
+			{type: "modifier", modType: "save:advantage:charmed", value: 1},
+			{type: "modifier", modType: "save:advantage:frightened", value: 1},
+		]);
+
 		// ======= WARLOCK =======
 		// (Most warlock features are invocations/patron-specific)
 
@@ -3022,6 +3040,23 @@ const FeatureEffectRegistry = {
 	 * Register subclass-specific features
 	 */
 	_registerSubclassFeatures () {
+		// ======= BLOOD HUNTER ORDERS (BH2022) =======
+		// Order of the Lycan
+		this.register("Heightened Senses", [
+			{type: "modifier", modType: "skill:advantage:perception:senses", value: 1, conditional: "relying on hearing or smell"},
+		]);
+		// Purely narrative: the order's oaths, the shame of being cured, and which
+		// beast-strain flavours the hybrid form carry no mechanics. Surfaced as
+		// `info` so the sheet states this honestly rather than dropping it.
+		this.register("The Onus of Lycanthropy", [
+			{type: "info", label: "You cannot spread your curse through blood unless you wish to. Being cured against your will is a mark of shame, undone by a renewed Taming. Your lycanthropic strain (wolf, bear, tiger, boar, rat) sets your hybrid form's appearance, not its benefits."},
+		]);
+		// Order of the Mutant
+		this.register("Strange Metabolism", [
+			{type: "immunity", damageType: "poison"},
+			{type: "conditionImmunity", condition: "poisoned"},
+		]);
+
 		// ======= ARTIFICER SUBCLASSES =======
 		this.register("Battle Ready", [
 			{type: "attackAbility", ability: "int", weaponType: "magic"},
@@ -9026,7 +9061,34 @@ class CharacterSheetState {
 			computed = Math.min(computed, this.getAbilityScoreMax(ability));
 		}
 
+		// Mutagens (Order of the Mutant) raise an ability score AND its maximum together, so
+		// their bonus is applied after the cap clamp — never limited by the normal ceiling.
+		// Read the active-state customEffects directly (not via getActiveStateEffects) because
+		// getAbilityScore is a hot path and must not recurse through the effect collector.
+		computed += this._getAbilityScoreBonusFromStatesRaw(ability);
+
 		return computed;
+	}
+
+	/**
+	 * Sum of `abilityScoreBonus` customEffects on currently-active states for one ability.
+	 *
+	 * Reads `_data.activeStates` directly rather than `getActiveStateEffects()` so it stays
+	 * cheap and recursion-free for the getAbilityScore hot path. Only Order of the Mutant's
+	 * mutagen state currently emits these.
+	 * @param {string} ability
+	 * @returns {number}
+	 * @private
+	 */
+	_getAbilityScoreBonusFromStatesRaw (ability) {
+		let bonus = 0;
+		for (const state of this._data.activeStates || []) {
+			if (!state.active) continue;
+			for (const e of state.customEffects || []) {
+				if (e.type === "abilityScoreBonus" && e.ability === ability) bonus += Number(e.value) || 0;
+			}
+		}
+		return bonus;
 	}
 
 	// Alias for compatibility
@@ -9945,6 +10007,26 @@ class CharacterSheetState {
 			hpOnSuccess: {abilityMod: "cha", classLevel: "Sorcerer"},
 			description: "Charisma save (DC 5 + the damage taken); on a success your hit points become your Charisma modifier plus your Sorcerer level instead of 0.",
 		},
+		{
+			// Ghostslayer Rite Revival (18): no save, no per-rest budget. Its only cost is
+			// that ALL your active crimson rites end. It is therefore gated on having at least
+			// one active rite (`requiresActiveCrimsonRite`), has `usesMax: null` (unlimited),
+			// and ends the rites on a successful application (`endsCrimsonRitesOnApply`).
+			id: "riteRevival",
+			featureName: "Rite Revival",
+			calcFlag: "hasRiteRevival",
+			saveAbility: null,
+			dcBase: 0,
+			dcAddsDamage: false,
+			excludedDamageTypes: [],
+			excludeCritical: false,
+			spendOn: "success",
+			usesMax: null,
+			recharge: null,
+			requiresActiveCrimsonRite: true,
+			endsCrimsonRitesOnApply: true,
+			description: "If you have one or more active crimson rites and are reduced to 0 hit points without dying outright, all your active crimson rites end and you drop to 1 hit point instead.",
+		},
 	];
 
 	/**
@@ -9993,12 +10075,18 @@ class CharacterSheetState {
 			if (!calc[def.calcFlag]) continue;
 
 			const feature = (this._data.features || []).find(f => f.name === def.featureName);
-			const usesRemaining = feature?.uses ? (feature.uses.current ?? 0) : def.usesMax;
+			// A null usesMax means the intervention has no per-rest budget (Rite Revival):
+			// treat it as unlimited so the uses check never gates it.
+			const unlimited = def.usesMax == null;
+			const usesRemaining = unlimited
+				? Infinity
+				: (feature?.uses ? (feature.uses.current ?? 0) : def.usesMax);
 			const dmgType = damageType ? String(damageType).toLowerCase() : null;
 
 			let unavailableReason = null;
 			const label = def.displayName || def.featureName;
-			if (usesRemaining <= 0) unavailableReason = `${label} has no uses remaining (recharges on a ${def.recharge} rest).`;
+			if (!unlimited && usesRemaining <= 0) unavailableReason = `${label} has no uses remaining (recharges on a ${def.recharge} rest).`;
+			else if (def.requiresActiveCrimsonRite && !this._hasActiveCrimsonRite()) unavailableReason = `${label} requires at least one active crimson rite.`;
 			else if (def.excludeCritical && isCritical) unavailableReason = `${label} can't be used when a critical hit reduces you to 0 hit points.`;
 			else if (dmgType && (def.excludedDamageTypes || []).includes(dmgType)) unavailableReason = `${label} can't be used against ${dmgType} damage.`;
 
@@ -10104,9 +10192,12 @@ class CharacterSheetState {
 			this.resetDeathSaves();
 			this._data.massiveDamageDeath = false;
 			this._updateBloodiedCondition();
+			// Rite Revival's cost: ending every active crimson rite.
+			if (def.endsCrimsonRitesOnApply) this.deactivateState("crimsonRite");
 		}
 
-		if (success || def.spendOn === "attempt") this._spendZeroHpInterventionUse(def);
+		// A null usesMax means there is no per-rest budget to spend (Rite Revival).
+		if (def.usesMax != null && (success || def.spendOn === "attempt")) this._spendZeroHpInterventionUse(def);
 
 		this.clearPendingZeroHpIntervention();
 
@@ -10143,6 +10234,8 @@ class CharacterSheetState {
 	_ensureZeroHpInterventionUses () {
 		let calc = null;
 		for (const def of CharacterSheetState.ZERO_HP_INTERVENTIONS) {
+			// Interventions with no per-rest budget (Rite Revival) have no use badge to scale.
+			if (def.usesMax == null) continue;
 			const feature = (this._data.features || []).find(f => f.name === def.featureName);
 			if (!feature) continue;
 			const resource = (this._data.resources || []).find(r => r.featureId === feature.id || r.name === def.featureName);
@@ -11434,7 +11527,9 @@ class CharacterSheetState {
 		// Active state bonuses (e.g., Defensive Stance)
 		ac += this.getBonusFromStates("ac");
 		const isHeavyArmor = this._data.ac.armor?.type === "heavy";
-		if (!isHeavyArmor && this.isStateTypeActive("hybridTransformation")) ac += 1;
+		// Read the calc key rather than hard-coding 1, so the bonus has a single
+		// source of truth and any future scaling actually reaches AC.
+		if (!isHeavyArmor && this.isStateTypeActive("hybridTransformation")) ac += this.getFeatureCalculations().hybridAcBonus || 0;
 
 		// Other bonuses
 		this._data.ac.bonuses.forEach(bonus => {
@@ -12116,6 +12211,8 @@ class CharacterSheetState {
 
 			const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus();
 			if (darkAugmentationSpeedBonus !== 0) components.push({type: "feature", name: "Dark Augmentation", value: darkAugmentationSpeedBonus, icon: "🩸"});
+			const stalkersProwessSpeedBonus = this.getStalkersProwessSpeedBonus();
+			if (stalkersProwessSpeedBonus !== 0) components.push({type: "feature", name: "Stalker's Prowess", value: stalkersProwessSpeedBonus, icon: "🐺"});
 
 			const armorPenalty = this.getArmorStrengthPenalty();
 			if (armorPenalty !== 0) components.push({type: "penalty", name: "Armor STR Penalty", value: armorPenalty, icon: "⚠️"});
@@ -13014,6 +13111,30 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Stalker's Prowess (Order of the Lycan 7): +10 walking speed.
+	 *
+	 * RAW the speed and jump bonuses are PERMANENT — the feature reads "your
+	 * speed increases by 10 feet, and you add 10 feet to your long jump distance
+	 * and 3 feet to your high jump distance. Your hybrid form ALSO gains the
+	 * following additional benefit." Only that trailing benefit (Improved
+	 * Predatory Strikes) is gated on the transformation. This previously lived
+	 * inside `getBloodHunterHybridEffects()`, which made the speed vanish out of
+	 * hybrid form (CS-BUG-122).
+	 *
+	 * Derived straight from the class + subclass rather than from
+	 * `getFeatureCalculations()`, for the same recursion reason documented on
+	 * `getDarkAugmentationSpeedBonus()` above.
+	 * @returns {number}
+	 */
+	getStalkersProwessSpeedBonus () {
+		const cls = this._getBloodHunterClass();
+		if (!cls || (cls.level || 0) < 7) return 0;
+		const subclass = this.getEffectiveSubclassForClass(cls);
+		const subclassName = subclass?.name || subclass?.shortName || "";
+		return /lycan/i.test(subclassName) ? 10 : 0;
+	}
+
+	/**
 	 * Get hover flight speed granted by Volant gemstone (2x walk speed)
 	 * @returns {number} Flight speed in feet, or 0 if no Volant gem equipped
 	 */
@@ -13126,7 +13247,7 @@ class CharacterSheetState {
 		const unarmoredBonus = this.getUnarmoredMovementBonus();
 		const adeptSpeedBonus = this.getAdeptSpeedBonus();
 		const gemstoneSpeedBonus = this.getGemstoneSpeedBonus();
-		const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus();
+		const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus() + this.getStalkersProwessSpeedBonus();
 		const rawWalk = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + darkAugmentationSpeedBonus + (itemSpeedBonus.walk || 0) + (itemSpeedBonus["*"] || 0);
 		const walkMultiplier = (itemSpeedMultiply.walk || 1) * (itemSpeedMultiply["*"] || 1);
 		const exhaustionSpeedPenalty = ignoresSpeedReductions ? 0 : this._getExhaustionSpeedPenalty();
@@ -13215,7 +13336,7 @@ class CharacterSheetState {
 		const unarmoredBonus = this.getUnarmoredMovementBonus();
 		const adeptSpeedBonus = this.getAdeptSpeedBonus();
 		const gemstoneSpeedBonus = this.getGemstoneSpeedBonus();
-		const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus();
+		const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus() + this.getStalkersProwessSpeedBonus();
 		const ignoresSpeedReductions = this.hasSpeedReductionImmunityFromStates();
 		const armorPenalty = ignoresSpeedReductions ? 0 : this.getArmorStrengthPenalty(); // -10 if STR requirement not met
 		const raw = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + darkAugmentationSpeedBonus + armorPenalty;
@@ -13252,7 +13373,7 @@ class CharacterSheetState {
 		const bonus = (speedMods[type] || 0)
 			+ this.getSpeedBonusFromStates(type)
 			+ this.getAdeptSpeedBonus()
-			+ (type === "walk" ? this.getDarkAugmentationSpeedBonus() : 0)
+			+ (type === "walk" ? this.getDarkAugmentationSpeedBonus() + this.getStalkersProwessSpeedBonus() : 0)
 			+ (itemSpeedBonus[type] || 0)
 			+ (itemSpeedBonus["*"] || 0);
 
@@ -14022,7 +14143,10 @@ class CharacterSheetState {
 			cls = clsOrName;
 		}
 
-		const subclassName = cls.subclass?.name;
+		// Use the full subclass name when a save stored only the shortName, so Blood
+		// Hunter orders ("Profane Soul" vs "Order of the Profane Soul") both resolve.
+		const subclassName = CharacterSheetState.lookupBySubclass(cls.subclass, CharacterSheetState.SUBCLASS_CANONICAL_NAME)
+			|| cls.subclass?.name;
 		// Subclass-derived casters override the base class spellcasting ability.
 		switch (subclassName) {
 			case "Eldritch Knight":
@@ -14040,6 +14164,9 @@ class CharacterSheetState {
 			// the rolled case explicitly rather than trusting this return value.
 			case "Gambler":
 			case "Architect of Ruin": return "cha";
+			// Order of the Profane Soul casts pact magic using its hemocraft ability
+			// (Intelligence or Wisdom, whichever the Blood Hunter chose at level 1).
+			case "Order of the Profane Soul": return this._getHemocraftAbility();
 		}
 
 		// Prefer the ability stored on the class data (covers 2024 + homebrew).
@@ -14600,6 +14727,9 @@ class CharacterSheetState {
 			"Arcane Trickster": "1/3",
 			"Gambler": "1/3",
 			"Architect of Ruin": "1/3",
+			// Order of the Profane Soul (Blood Hunter) casts on a reduced warlock-style pact
+			// progression; its own slot grid lives in PACT_SLOT_TABLES.profaneSoul.
+			"Order of the Profane Soul": "pact",
 		};
 
 		// Calculate total caster level
@@ -14608,12 +14738,15 @@ class CharacterSheetState {
 		let casterLevel = 0;
 		let isWarlock = false;
 		let warlockLevel = 0;
+		// Which pact-slot grid the pact caster uses. Warlock's is the default; a subclass
+		// (e.g. Order of the Profane Soul) can name its own reduced grid instead.
+		let pactTableKey = "warlock";
 
 		// Count how many non-pact caster classes contribute
 		const casterClasses = classes.filter(c => {
 			const prog = c.casterProgression
 				|| c.subclass?.casterProgression
-				|| subclassProgressionFallback[c.subclass?.name]
+				|| CharacterSheetState.lookupBySubclass(c.subclass, subclassProgressionFallback)
 				|| classProgressionFallback[c.name]
 				|| null;
 			return prog && prog !== "pact";
@@ -14627,7 +14760,7 @@ class CharacterSheetState {
 			// Get caster progression: prefer stored value, then check subclass, then fallback
 			let progression = cls.casterProgression
 				|| cls.subclass?.casterProgression
-				|| subclassProgressionFallback[cls.subclass?.name]
+				|| CharacterSheetState.lookupBySubclass(cls.subclass, subclassProgressionFallback)
 				|| classProgressionFallback[className]
 				|| null;
 
@@ -14635,6 +14768,11 @@ class CharacterSheetState {
 				// Warlock uses pact magic - doesn't contribute to multiclass caster level
 				isWarlock = true;
 				warlockLevel = level;
+				// A subclass may declare its own pact grid; otherwise it is a true Warlock.
+				pactTableKey = cls.pactProgression
+					|| cls.subclass?.pactProgression
+					|| CharacterSheetState.lookupBySubclass(cls.subclass, CharacterSheetState.PACT_TABLE_BY_SUBCLASS)
+					|| "warlock";
 			} else if (progression === "full") {
 				// Full casters: each level counts
 				casterLevel += level;
@@ -14748,30 +14886,11 @@ class CharacterSheetState {
 		// Handle Warlock pact slots separately (they use different progression)
 		// Warlock pact slots are in addition to regular spell slots for multiclass
 		if (isWarlock && warlockLevel > 0) {
-			// Pact Magic slot progression table
-			// [number of slots, slot level]
-			const pactSlotTable = {
-				1: [1, 1],
-				2: [2, 1],
-				3: [2, 2],
-				4: [2, 2],
-				5: [2, 3],
-				6: [2, 3],
-				7: [2, 4],
-				8: [2, 4],
-				9: [2, 5],
-				10: [2, 5],
-				11: [3, 5],
-				12: [3, 5],
-				13: [3, 5],
-				14: [3, 5],
-				15: [3, 5],
-				16: [3, 5],
-				17: [4, 5],
-				18: [4, 5],
-				19: [4, 5],
-				20: [4, 5],
-			};
+			// Pact Magic slot progression table — keyed by caster; the Warlock grid is the
+			// default and a subclass can select a reduced grid (e.g. Profane Soul). Each row
+			// is [number of slots, slot level].
+			const pactSlotTable = CharacterSheetState.PACT_SLOT_TABLES[pactTableKey]
+				|| CharacterSheetState.PACT_SLOT_TABLES.warlock;
 
 			const [pactSlots, pactLevel] = pactSlotTable[Math.min(warlockLevel, 20)] || [0, 0];
 			const existing = this._data.spellcasting.pactSlots;
@@ -18139,16 +18258,7 @@ class CharacterSheetState {
 					break;
 				}
 				case "Blood Hunter": {
-					const hemocraftChoice = (this._data.levelHistory || [])
-						.filter(h => h.class?.name === "Blood Hunter")
-						.flatMap(h => h.choices?.featureChoices || [])
-						.find(choice => choice.featureName === "Hunter's Bane")?.choice
-						|| this._data.features.find(f => f.parentFeature === "Hunter's Bane")?.name;
-					const hemocraftAbility = /^int/i.test(hemocraftChoice || "")
-						? "int"
-						: /^wis/i.test(hemocraftChoice || "")
-							? "wis"
-							: this.getAbilityMod("int") >= this.getAbilityMod("wis") ? "int" : "wis";
+					const hemocraftAbility = this._getHemocraftAbility();
 					const hemocraftModifier = Math.max(1, this.getAbilityMod(hemocraftAbility));
 					const hemocraftDie = level >= 17 ? "1d10" : level >= 11 ? "1d8" : level >= 5 ? "1d6" : "1d4";
 
@@ -18218,6 +18328,87 @@ class CharacterSheetState {
 							calculations.grantsBloodCurseOfTheHowl = true;
 						}
 					}
+					if (/ghostslayer/i.test(subclassName) && level >= 3) {
+						// Curse Specialist (3): +1 Blood Maledict use; curses can target bloodless creatures.
+						calculations.bloodMaledictUses = (calculations.bloodMaledictUses || 1) + 1;
+						calculations.bloodCurseTargetsBloodless = true;
+						// Rite of the Dawn (3): a radiant Crimson Rite. While active it sheds light and
+						// grants necrotic resistance (applied on the runtime rite state); against undead
+						// it adds an extra hemocraft die of rite damage.
+						calculations.hasRiteOfTheDawn = true;
+						calculations.riteOfTheDawnLightRange = 20;
+						calculations.riteOfTheDawnUndeadBonusDamage = hemocraftDie;
+						if (level >= 7) {
+							// Aether Walk (7): step into the veil for Hemocraft-mod rounds; 1/short rest, 2 at 15.
+							calculations.hasAetherWalk = true;
+							calculations.aetherWalkUses = level >= 15 ? 2 : 1;
+							calculations.aetherWalkDurationRounds = hemocraftModifier;
+						}
+						if (level >= 11) {
+							// Brand of Sundering (11): an extra hemocraft die of rite damage vs a branded creature.
+							calculations.hasBrandOfSundering = true;
+							calculations.brandOfSunderingRiteBonusDamage = hemocraftDie;
+						}
+						if (level >= 15) calculations.grantsBloodCurseOfTheExorcist = true;
+						if (level >= 18) calculations.hasRiteRevival = true;
+					}
+
+					if (/mutant/i.test(subclassName) && level >= 3) {
+						// Formulas / Mutagencraft (3): formulas known and mutagens created per rest scale
+						// on the Mutagencraft table (BH levels 3/7/11/15/18).
+						calculations.hasMutagencraft = true;
+						calculations.mutagenFormulasKnown = level >= 18 ? 8 : level >= 15 ? 7 : level >= 11 ? 6 : level >= 7 ? 5 : 4;
+						calculations.mutagensCreatedPerRest = level >= 15 ? 3 : level >= 7 ? 2 : 1;
+						if (level >= 7) {
+							// Strange Metabolism (7): poison/poisoned immunity (passive, via the registry) plus
+							// a once-per-long-rest burst that ignores one mutagen's drawback for 1 minute.
+							calculations.hasStrangeMetabolism = true;
+							calculations.strangeMetabolismUses = 1;
+						}
+						if (level >= 11) {
+							// Brand of Axiom (11): a branded shapechanger must make a Wisdom save (your Hemocraft
+							// save DC) or revert and be stunned; the DC is the on-you half we can surface.
+							calculations.hasBrandOfAxiom = true;
+							calculations.brandOfAxiomDc = calculations.hemocraftSaveDc;
+						}
+						if (level >= 15) calculations.grantsBloodCurseOfCorrosion = true;
+						if (level >= 18) {
+							// Exalted Mutation (18): swap an active mutagen for another; uses = Hemocraft modifier.
+							calculations.hasExaltedMutation = true;
+							calculations.exaltedMutationUses = hemocraftModifier;
+						}
+					}
+
+					if (/profane/i.test(subclassName) && level >= 3) {
+						// Pact Magic (3): a reduced warlock-style progression cast with the Hemocraft ability.
+						// Slot counts/levels come from the generalised pact-slot table in calculateSpellSlots
+						// (subclassProgressionFallback → "pact"); here we own the known-option counts.
+						calculations.hasPactMagic = true;
+						calculations.profaneSoulSpellcastingAbility = hemocraftAbility;
+						// Cantrips/Spells Known by Blood Hunter level (index = level - 1), from the BH2022 table.
+						const psCantrips = [0, 0, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3];
+						const psSpells = [0, 0, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 11];
+						calculations.profaneSoulCantripsKnown = psCantrips[Math.min(level, 20) - 1] || 0;
+						calculations.profaneSoulSpellsKnown = psSpells[Math.min(level, 20) - 1] || 0;
+						// Rite Focus (3): weapon becomes a spellcasting focus while a rite is active; the specific
+						// benefit is patron-dependent (resolved from the persisted patron choice when present).
+						calculations.hasRiteFocus = true;
+						calculations.profaneSoulPatron = this._getProfaneSoulPatron();
+						if (level >= 7) {
+							// Mystic Frenzy (7): casting a cantrip with your action grants one bonus-action weapon attack.
+							calculations.hasMysticFrenzy = true;
+							calculations.mysticFrenzyBonusAttack = true;
+							calculations.hasRevealedArcana = true;
+						}
+						if (level >= 11) {
+							// Brand of the Sapping Scar (11): a branded creature has disadvantage on saves vs your
+							// warlock spells. Resolved on the target; surfaced as a flag for the sheet.
+							calculations.hasBrandOfTheSappingScar = true;
+						}
+						if (level >= 15) calculations.hasUnsealedArcana = true;
+						if (level >= 18) calculations.grantsBloodCurseOfTheSouleater = true;
+					}
+
 					break;
 				}
 				case "Rogue": {
@@ -38531,6 +38722,42 @@ class CharacterSheetState {
 		return (this._data.classes || []).find(cls => cls.name === "Blood Hunter" && (!cls.source || cls.source === "BH2022")) || null;
 	}
 
+	/**
+	 * Resolve the chosen Hemocraft ability (Intelligence or Wisdom) for a Blood Hunter.
+	 *
+	 * The choice is persisted in level-history `featureChoices` (Hunter's Bane) or on a
+	 * stored sub-feature; absent an explicit choice we fall back to the higher of the two
+	 * modifiers. Extracted so both `getFeatureCalculations()` (Hemocraft die / DC) and the
+	 * Profane Soul spellcasting-ability lookup read one source of truth.
+	 * @returns {"int"|"wis"}
+	 */
+	_getHemocraftAbility () {
+		const hemocraftChoice = (this._data.levelHistory || [])
+			.filter(h => h.class?.name === "Blood Hunter")
+			.flatMap(h => h.choices?.featureChoices || [])
+			.find(choice => choice.featureName === "Hunter's Bane")?.choice
+			|| this._data.features.find(f => f.parentFeature === "Hunter's Bane")?.name;
+		if (/^int/i.test(hemocraftChoice || "")) return "int";
+		if (/^wis/i.test(hemocraftChoice || "")) return "wis";
+		return this.getAbilityMod("int") >= this.getAbilityMod("wis") ? "int" : "wis";
+	}
+
+	/**
+	 * The Order of the Profane Soul patron a Blood Hunter chose, if any.
+	 *
+	 * Read from the persisted "Otherworldly Patron" feature choice (level history) so the
+	 * patron-dependent Rite Focus / Revealed Arcana / Unsealed Arcana surfaces can name it.
+	 * Returns `null` when unchosen — the caller must not assume a patron.
+	 * @returns {string|null}
+	 */
+	_getProfaneSoulPatron () {
+		const choice = (this._data.levelHistory || [])
+			.filter(h => h.class?.name === "Blood Hunter")
+			.flatMap(h => h.choices?.featureChoices || [])
+			.find(c => /otherworldly patron/i.test(c.featureName || ""))?.choice;
+		return choice || null;
+	}
+
 	_resizeFeatureBackedResource (name, max, recharge, featureName = name) {
 		const feature = this._data.features.find(f => f.name === featureName);
 		let resource = this._data.resources.find(r => r.name === name);
@@ -38560,7 +38787,8 @@ class CharacterSheetState {
 		if (level >= 6) this._resizeFeatureBackedResource("Brand of Castigation", 1, "short");
 
 		const effectiveSubclass = this.getEffectiveSubclassForClass(cls);
-		const isLycan = /lycan/i.test(effectiveSubclass?.name || effectiveSubclass?.shortName || "");
+		const subclassName = effectiveSubclass?.name || effectiveSubclass?.shortName || "";
+		const isLycan = /lycan/i.test(subclassName);
 		if (isLycan && level >= 3) {
 			// Mastery makes transformation free; retain a finite legacy pool so saves and
 			// generic resource renderers never have to serialize/render Infinity.
@@ -38578,6 +38806,65 @@ class CharacterSheetState {
 					description: "As an action, creatures of your choice within 30 feet that can hear you make a Wisdom save against your Hemocraft save DC. On a failure they are frightened until the end of your next turn; a failure by 5 or more also stuns them. Amplify: the range becomes 60 feet.",
 				});
 			}
+		}
+
+		// Ghostslayer: Curse Specialist raises the Blood Maledict pool by 1, and Aether Walk is
+		// a per-short-rest pool (twice from 15th). The auto-granted Exorcist curse is pushed as a
+		// feature so it appears alongside chosen curses without counting against curses-known.
+		if (/ghostslayer/i.test(subclassName) && level >= 3) {
+			this._resizeFeatureBackedResource("Blood Maledict", maledictMax + 1, "short", "Curse Specialist");
+			if (level >= 7) this._resizeFeatureBackedResource("Aether Walk", level >= 15 ? 2 : 1, "short");
+			if (level >= 15 && !this._data.features.some(f => f.name === "Blood Curse of the Exorcist")) {
+				this._data.features.push({
+					id: "bh2022-blood-curse-of-the-exorcist",
+					name: "Blood Curse of the Exorcist",
+					source: "BH2022",
+					level: 15,
+					className: "Blood Hunter",
+					featureType: "Optional Feature",
+					optionalFeatureTypes: ["BC"],
+					description: "You gain the Blood Curse of the Exorcist for your Blood Maledict feature. This doesn't count against your number of blood curses known.",
+				});
+			}
+		}
+
+		// Mutant: mutagens created per rest, plus per-long-rest Strange Metabolism and Exalted
+		// Mutation pools. The auto-granted Corrosion curse is pushed like the Ghostslayer curse.
+		if (/mutant/i.test(subclassName) && level >= 3) {
+			const perRest = level >= 15 ? 3 : level >= 7 ? 2 : 1;
+			this._resizeFeatureBackedResource("Mutagen", perRest, "short", "Mutagencraft");
+			if (level >= 7) this._resizeFeatureBackedResource("Strange Metabolism", 1, "long");
+			if (level >= 18) {
+				const exaltedUses = Math.max(1, this.getAbilityMod(this._getHemocraftAbility()));
+				this._resizeFeatureBackedResource("Exalted Mutation", exaltedUses, "long");
+			}
+			if (level >= 15 && !this._data.features.some(f => f.name === "Blood Curse of Corrosion")) {
+				this._data.features.push({
+					id: "bh2022-blood-curse-of-corrosion",
+					name: "Blood Curse of Corrosion",
+					source: "BH2022",
+					level: 15,
+					className: "Blood Hunter",
+					featureType: "Optional Feature",
+					optionalFeatureTypes: ["BC"],
+					description: "You gain the Blood Curse of Corrosion for your Blood Maledict feature. This doesn't count against your number of blood curses known.",
+				});
+			}
+		}
+
+		// Profane Soul: the auto-granted Souleater curse at 18th (does not count against known).
+		if (/profane/i.test(subclassName) && level >= 18
+			&& !this._data.features.some(f => f.name === "Blood Curse of the Souleater")) {
+			this._data.features.push({
+				id: "bh2022-blood-curse-of-the-souleater",
+				name: "Blood Curse of the Souleater",
+				source: "BH2022",
+				level: 18,
+				className: "Blood Hunter",
+				featureType: "Optional Feature",
+				optionalFeatureTypes: ["BC"],
+				description: "You gain the Blood Curse of the Souleater for your Blood Maledict feature. This doesn't count against your number of blood curses known.",
+			});
 		}
 	}
 
@@ -38623,7 +38910,13 @@ class CharacterSheetState {
 		return [
 			{type: "advantage", target: "check:str"},
 			{type: "advantage", target: "save:str"},
-			...(calc.hasStalkersProwess ? [{type: "bonus", target: "speed:walk", value: calc.stalkersProwessSpeedBonus}] : []),
+			// Brand of the Voracious (15): while transformed, you have advantage on
+			// attacks against a creature branded by your Brand of Castigation. Gated
+			// on the shared `brandedTarget` state so it only fires when a target is
+			// actually branded, rather than on every attack you ever make.
+			...(calc.hasBrandOfTheVoracious && this.isStateTypeActive("brandedTarget")
+				? [{type: "advantage", target: "attack:melee", conditional: "against the creature branded by your Brand of Castigation"}]
+				: []),
 			{type: "resistance", target: "damage:bludgeoning", conditional: "nonmagical, nonsilvered attacks"},
 			{type: "resistance", target: "damage:piercing", conditional: "nonmagical, nonsilvered attacks"},
 			{type: "resistance", target: "damage:slashing", conditional: "nonmagical, nonsilvered attacks"},
@@ -38672,18 +38965,156 @@ class CharacterSheetState {
 			"rite of the dead": "necrotic",
 			"rite of the oracle": "psychic",
 			"rite of the roar": "thunder",
+			// Ghostslayer: Rite of the Dawn deals radiant damage and, while active, grants
+			// resistance to necrotic and sheds light (the light is descriptive only).
+			"rite of the dawn": "radiant",
 		})[String(riteName || "").toLowerCase()];
 		if (!damageType) return false;
+		const isDawn = /rite of the dawn/i.test(riteName || "");
+		if (isDawn && !calc.hasRiteOfTheDawn) return false;
 		this._payHemocraftHpCost(this._rollBloodHunterDie(roll));
 		const existing = this._data.activeStates.find(state => state.stateTypeId === "crimsonRite" && state.active);
 		const otherWeaponEffects = (existing?.customEffects || []).filter(effect => effect.weaponId !== weaponId);
 		const riteEffect = {type: "extraDamage", dice: calc.crimsonRiteDamage, damageType, source: riteName, weaponId, weaponName, isCrimsonRite: true};
+		const dawnEffects = otherWeaponEffects.some(e => e.type === "resistance" && e.target === "damage:necrotic")
+			? []
+			: (isDawn ? [{type: "resistance", target: "damage:necrotic", source: "Rite of the Dawn"}] : []);
+		const customEffects = [...otherWeaponEffects, riteEffect, ...dawnEffects];
 		this.activateState("crimsonRite", {
 			name: "Crimson Rites",
 			description: [...otherWeaponEffects, riteEffect].map(effect => `${effect.source} on ${effect.weaponName || "weapon"}`).join("; "),
-			customEffects: [...otherWeaponEffects, riteEffect],
+			customEffects,
 			duration: "Until your next short or long rest",
 		});
+		return true;
+	}
+
+	/** @returns {boolean} whether any crimson rite is currently active. */
+	_hasActiveCrimsonRite () {
+		return (this._data.activeStates || []).some(s => s.stateTypeId === "crimsonRite" && s.active);
+	}
+
+	/**
+	 * The list of mutagens currently affecting the Blood Hunter (Order of the Mutant),
+	 * newest last. Backed by `_data.activeMutagens`.
+	 * @returns {string[]} lowercase mutagen keys
+	 */
+	getActiveMutagens () {
+		return [...(this._data.activeMutagens || [])];
+	}
+
+	/**
+	 * Resolve one mutagen's benefit and drawback effect objects at the current Blood Hunter
+	 * level (so ability-score and speed values scale). Nighteye is level- AND state-dependent
+	 * (its darkvision stacks on any existing darkvision), so the current sight range is read
+	 * here — safe because the mutagen state is rebuilt before it is (re)activated.
+	 * @param {string} name mutagen key (case-insensitive)
+	 * @returns {{benefit: object[], drawback: object[]}|null}
+	 */
+	getMutagenEffects (name) {
+		const def = CharacterSheetState.MUTAGENS[String(name || "").toLowerCase()];
+		if (!def) return null;
+		const level = this._getBloodHunterClass()?.level || 0;
+		const existingDarkvision = String(name).toLowerCase() === "nighteye" ? this.getSense("darkvision") : 0;
+		return def.effects(level, existingDarkvision);
+	}
+
+	/**
+	 * The mutagens the character can currently create, gated on being an Order of the Mutant
+	 * of at least the mutagen's prerequisite level.
+	 * @returns {string[]} lowercase mutagen keys
+	 */
+	getAvailableMutagens () {
+		const cls = this._getBloodHunterClass();
+		if (!cls) return [];
+		const sub = this.getEffectiveSubclassForClass(cls);
+		if (!/mutant/i.test(sub?.name || sub?.shortName || "")) return [];
+		const level = cls.level || 0;
+		if (level < 3) return [];
+		return Object.entries(CharacterSheetState.MUTAGENS)
+			.filter(([, def]) => level >= (def.prerequisiteLevel || 3))
+			.map(([key]) => key);
+	}
+
+	/**
+	 * Rebuild and (re)activate the single generic `mutagen` state from `_data.activeMutagens`,
+	 * unioning every active mutagen's benefit and drawback effects. A drawback is omitted only
+	 * for the one mutagen flagged by Strange Metabolism (`_data.mutagenIgnoredDrawback`).
+	 * @private
+	 */
+	_rebuildMutagenState () {
+		const active = this._data.activeMutagens || [];
+		if (!active.length) {
+			this.deactivateState("mutagen");
+			return;
+		}
+		const ignored = this._data.mutagenIgnoredDrawback;
+		const customEffects = [];
+		for (const name of active) {
+			const resolved = this.getMutagenEffects(name);
+			if (!resolved) continue;
+			const src = CharacterSheetState.MUTAGENS[name]?.name || name;
+			for (const e of resolved.benefit) customEffects.push({...e, source: `${src} (mutagen)`});
+			if (name === ignored) continue;
+			for (const e of resolved.drawback) customEffects.push({...e, source: `${src} (mutagen)`});
+		}
+		this.activateState("mutagen", {
+			name: "Mutagen",
+			description: active.map(n => CharacterSheetState.MUTAGENS[n]?.name || n).join(", "),
+			customEffects,
+			duration: "Until you finish a short or long rest",
+		});
+	}
+
+	/**
+	 * Consume (drink) a mutagen the character knows, adding its effects to the mutagen state.
+	 * @param {string} name mutagen key (case-insensitive)
+	 * @returns {boolean} whether the mutagen was consumed
+	 */
+	consumeMutagen (name) {
+		const key = String(name || "").toLowerCase();
+		if (!this.getAvailableMutagens().includes(key)) return false;
+		this._data.activeMutagens = this._data.activeMutagens || [];
+		if (!this._data.activeMutagens.includes(key)) this._data.activeMutagens.push(key);
+		this._rebuildMutagenState();
+		return true;
+	}
+
+	/**
+	 * End one mutagen's effects (its benefit and drawback), rebuilding the mutagen state.
+	 * @param {string} name mutagen key (case-insensitive)
+	 * @returns {boolean} whether a mutagen was removed
+	 */
+	endMutagen (name) {
+		const key = String(name || "").toLowerCase();
+		const list = this._data.activeMutagens || [];
+		const idx = list.indexOf(key);
+		if (idx < 0) return false;
+		list.splice(idx, 1);
+		if (this._data.mutagenIgnoredDrawback === key) delete this._data.mutagenIgnoredDrawback;
+		this._rebuildMutagenState();
+		return true;
+	}
+
+	/** Clear every active mutagen (e.g. on a rest). */
+	flushMutagens () {
+		this._data.activeMutagens = [];
+		delete this._data.mutagenIgnoredDrawback;
+		this.deactivateState("mutagen");
+	}
+
+	/**
+	 * Strange Metabolism (7): ignore one active mutagen's drawback. Only one mutagen's
+	 * drawback can be suppressed at a time.
+	 * @param {string} name mutagen key (case-insensitive)
+	 * @returns {boolean} whether the drawback is now suppressed
+	 */
+	ignoreMutagenDrawback (name) {
+		const key = String(name || "").toLowerCase();
+		if (!(this._data.activeMutagens || []).includes(key)) return false;
+		if (!this.getFeatureCalculations().hasStrangeMetabolism) return false;
+		this._data.mutagenIgnoredDrawback = key;
+		this._rebuildMutagenState();
 		return true;
 	}
 
@@ -50701,6 +51132,24 @@ class CharacterSheetState {
 					: `against ${modSpecific.toLowerCase()}`;
 			}
 
+			// Qualifier-suffixed match: an entry like `skill:advantage:perception:senses`
+			// (baseType "skill:perception:senses") targets the SAME skill as a plain
+			// `skill:perception` query — the trailing segment is the *circumstance*, not a
+			// different target. Without this rule such a modifier matches nothing at all:
+			// the exact-match test fails on the extra segment, `modSpecific` is a standard
+			// skill so `_isConditionalSaveSubtype` rejects it, and no other branch applies.
+			// That silently stranded every qualified conditional ever registered (the Actor
+			// feat's impersonation entries among them). Matching here is safe because the
+			// qualifier is carried through as `conditional`, so `aggregateModifiers` still
+			// refuses to apply it unless the caller opts in per-roll.
+			if (!matches
+				&& modExtra
+				&& modSpecific === specific
+				&& (modCategory === category || (category === "skill" && modCategory === "check") || (category === "check" && modCategory === "skill"))
+			) {
+				matches = true;
+			}
+
 			if (matches) {
 				// Clone the modifier and add parsed advantage/disadvantage flags
 				const resultMod = {...mod};
@@ -51996,6 +52445,431 @@ class CharacterSheetState {
 	 * State type definitions with their effects
 	 * Each state defines what effects it provides when active
 	 */
+	/**
+	 * Blood Curse reference table (Blood Hunter, BH2022).
+	 *
+	 * The 12 curses differ in the three things a player needs at the moment of
+	 * invocation — which ability the target saves with (they are NOT all the
+	 * Hemocraft ability), what action it costs (four are REACTIONS, not bonus
+	 * actions), and what amplifying actually buys. Before this table the sheet
+	 * emitted one identical toast for all twelve, which told the player nothing.
+	 *
+	 * `save: null` means the curse forces no saving throw at all, so quoting a
+	 * Hemocraft save DC for it would be actively misleading.
+	 * @type {Record<string, {action: string, save: string|null, effect: string, amplified: string}>}
+	 */
+	static BLOOD_CURSES = {
+		"Blood Curse of Binding": {
+			action: "bonus",
+			save: "str",
+			effect: "A Large or smaller creature within 30 ft has its speed reduced to 0 and can't take reactions until the end of your next turn.",
+			amplified: "Lasts 1 minute and affects a creature of any size. It repeats the save at the end of each of its turns.",
+		},
+		"Blood Curse of Bloated Agony": {
+			action: "bonus",
+			save: null,
+			effect: "A creature within 30 ft has disadvantage on Strength and Dexterity checks, and takes 1d8 necrotic damage if it attacks more than once on its turn, until the end of your next turn.",
+			amplified: "Lasts 1 minute. The creature repeats a Constitution save at the end of each of its turns to end it.",
+		},
+		"Blood Curse of Corrosion": {
+			action: "bonus",
+			save: "con",
+			effect: "A creature within 30 ft is poisoned, repeating a Constitution save at the end of each of its turns to end it.",
+			amplified: "It also takes 4d6 necrotic damage immediately, and again each time it fails the save.",
+		},
+		"Blood Curse of Exposure": {
+			action: "reaction",
+			save: null,
+			effect: "Reaction when a creature within 30 ft takes damage: it loses resistance to the triggering damage types (including for that effect) until the end of its next turn.",
+			amplified: "It loses immunity to those damage types instead, but has resistance to them until the end of its next turn.",
+		},
+		"Blood Curse of the Anxious": {
+			action: "bonus",
+			save: null,
+			effect: "Charisma (Intimidation) checks against a creature within 30 ft have advantage until the end of your next turn.",
+			amplified: "Its next Wisdom saving throw before the curse ends has disadvantage.",
+		},
+		"Blood Curse of the Exorcist": {
+			action: "bonus",
+			save: null,
+			effect: "A charmed, frightened, or possessed creature within 30 ft is freed of that effect.",
+			amplified: "The creature responsible takes 3d6 psychic damage and must succeed on a Wisdom save or be stunned until the end of your next turn.",
+		},
+		"Blood Curse of the Eyeless": {
+			action: "reaction",
+			save: null,
+			effect: "Reaction when a creature within 30 ft attacks: subtract one hemocraft die from its attack roll. You may decide after seeing the roll. No effect on creatures immune to blinded.",
+			amplified: "Applies to all that creature's attack rolls until the end of its turn, rolled separately for each.",
+		},
+		"Blood Curse of the Fallen Puppet": {
+			action: "reaction",
+			save: null,
+			effect: "Reaction when a creature within 30 ft drops to 0 HP: it immediately makes one weapon attack against a target you choose.",
+			amplified: "It first moves up to half its speed, and its attack roll gains a bonus equal to your Hemocraft modifier (minimum +1).",
+		},
+		"Blood Curse of the Howl": {
+			action: "action",
+			save: "wis",
+			effect: "Each creature within 30 ft that can hear you must save or be frightened of you until the end of your next turn — stunned as well if it fails by 5 or more. On a success it is immune for 24 hours. You may exempt any creatures you can see.",
+			amplified: "The range increases to 60 ft, and a creature that fails by 5 or more is stunned while frightened this way.",
+		},
+		"Blood Curse of the Marked": {
+			action: "bonus",
+			save: null,
+			effect: "Until the end of your turn, you roll an extra hemocraft die for crimson rite damage against a marked creature within 30 ft.",
+			amplified: "Your next attack roll against the target before the end of your turn has advantage.",
+		},
+		"Blood Curse of the Muddled Mind": {
+			action: "bonus",
+			save: null,
+			effect: "A concentrating creature within 30 ft has disadvantage on its next Constitution save to maintain concentration before the end of your next turn.",
+			amplified: "It has disadvantage on all concentration saves until the end of your next turn.",
+		},
+		"Blood Curse of the Souleater": {
+			action: "reaction",
+			save: null,
+			effect: "Reaction when a non-construct, non-undead creature within 30 ft drops to 0 HP: until the end of your next turn you attack with advantage and have resistance to all damage.",
+			amplified: "You also regain one expended warlock spell slot. You must finish a long rest before amplifying this curse again.",
+		},
+	};
+
+	/**
+	 * Look up a blood curse's reference entry by feature name.
+	 * Tolerates the bare curse name ("Howl") as well as the full optional-feature
+	 * name, since feature rows reach the UI from several grant paths.
+	 * @param {string} name
+	 * @returns {{action: string, save: string|null, effect: string, amplified: string}|null}
+	 */
+	static getBloodCurseInfo (name) {
+		if (!name) return null;
+		const direct = CharacterSheetState.BLOOD_CURSES[name];
+		if (direct) return direct;
+		const lower = String(name).toLowerCase().trim();
+		const hit = Object.entries(CharacterSheetState.BLOOD_CURSES)
+			.find(([k]) => k.toLowerCase() === lower || k.toLowerCase().replace(/^blood curse of (the )?/, "") === lower.replace(/^blood curse of (the )?/, ""));
+		return hit ? hit[1] : null;
+	}
+
+	/**
+	 * Pact Magic slot grids, keyed by caster. Each grid maps class level (1-20) to
+	 * `[number of slots, slot level]`. The Warlock grid is the reference table; a subclass
+	 * caster (e.g. Order of the Profane Soul) can declare a reduced grid without touching
+	 * Warlock behaviour. See `PACT_TABLE_BY_SUBCLASS` for the subclass → grid mapping.
+	 */
+	/**
+	 * Resolve a subclass entry to the key used by the subclass-keyed lookup tables
+	 * (`subclassProgressionFallback`, `PACT_TABLE_BY_SUBCLASS`, the spellcasting-ability
+	 * switch).
+	 *
+	 * Saves store a subclass as either its full `name` or its `shortName` depending on the
+	 * path that wrote it, and for most subclasses the two coincide ("Eldritch Knight").
+	 * They DIVERGE for Blood Hunter, whose orders are named "Order of the Profane Soul"
+	 * with shortName "Profane Soul" — so a shortName-keyed save silently missed every
+	 * lookup and Order of the Profane Soul got no pact magic at all. Mirrors the
+	 * `name || shortName` pattern already used elsewhere in this file.
+	 *
+	 * @param {object} subclass A `_data.classes[].subclass` entry.
+	 * @param {object} table A lookup table keyed by subclass name.
+	 * @returns {*} The matching table value, or undefined.
+	 */
+	static lookupBySubclass (subclass, table) {
+		if (!subclass || !table) return undefined;
+		const canonical = CharacterSheetState.SUBCLASS_CANONICAL_NAME;
+		return table[subclass.name] ??
+			table[subclass.shortName] ??
+			table[canonical[subclass.name]] ??
+			table[canonical[subclass.shortName]];
+	}
+
+	static PACT_SLOT_TABLES = {
+		warlock: {
+			1: [1, 1],
+			2: [2, 1],
+			3: [2, 2],
+			4: [2, 2],
+			5: [2, 3],
+			6: [2, 3],
+			7: [2, 4],
+			8: [2, 4],
+			9: [2, 5],
+			10: [2, 5],
+			11: [3, 5],
+			12: [3, 5],
+			13: [3, 5],
+			14: [3, 5],
+			15: [3, 5],
+			16: [3, 5],
+			17: [4, 5],
+			18: [4, 5],
+			19: [4, 5],
+			20: [4, 5],
+		},
+		// Order of the Profane Soul (Matthew Mercer Blood Hunter 2022): a reduced pact
+		// progression that tops out at 2 slots of 4th level. Slot grid taken verbatim from
+		// the class' subclassTableGroups (BH level = Blood Hunter class level).
+		profaneSoul: {
+			1: [0, 0],
+			2: [0, 0],
+			3: [1, 1],
+			4: [1, 1],
+			5: [1, 1],
+			6: [2, 1],
+			7: [2, 2],
+			8: [2, 2],
+			9: [2, 2],
+			10: [2, 2],
+			11: [2, 2],
+			12: [2, 2],
+			13: [2, 3],
+			14: [2, 3],
+			15: [2, 3],
+			16: [2, 3],
+			17: [2, 3],
+			18: [2, 3],
+			19: [2, 4],
+			20: [2, 4],
+		},
+	};
+
+	/** Maps a subclass name to the `PACT_SLOT_TABLES` key it should use. */
+	/**
+	 * Subclasses whose stored `shortName` differs from the `name` the lookup tables and
+	 * the spellcasting-ability switch are keyed by. Only entries that actually diverge
+	 * need to appear here.
+	 */
+	static SUBCLASS_CANONICAL_NAME = {
+		"Ghostslayer": "Order of the Ghostslayer",
+		"Lycan": "Order of the Lycan",
+		"Mutant": "Order of the Mutant",
+		"Profane Soul": "Order of the Profane Soul",
+	};
+
+	static PACT_TABLE_BY_SUBCLASS = {
+		"Order of the Profane Soul": "profaneSoul",
+	};
+
+	/**
+	 * Order of the Mutant — the 20 mutagen formulas. Each entry carries the prerequisite
+	 * Blood Hunter level (3 unless noted), player-facing benefit/drawback prose, and an
+	 * `effects(level)` builder returning `{benefit, drawback}` arrays of REAL effect objects
+	 * that flow through the ordinary active-state pipeline (resistances, vulnerabilities,
+	 * ability-score bonuses, speed, senses, condition immunities, roll advantage/disadvantage).
+	 * Effects that a single-character sheet cannot mechanically resolve (an extra attack, a
+	 * widened crit range, turn-start regeneration) are surfaced as `{type:"info"}` so nothing
+	 * is silently dropped. Ability and speed values scale with the level the mutagen is
+	 * consumed at, per Mutagencraft.
+	 */
+	static MUTAGENS = {
+		aether: {
+			name: "Aether",
+			prerequisiteLevel: 11,
+			benefit: "You have a flying speed of 20 feet for 1 hour.",
+			drawback: "You have disadvantage on Strength and Dexterity checks.",
+			effects: () => ({
+				benefit: [{type: "bonus", target: "speed:fly", value: 20}],
+				drawback: [{type: "disadvantage", target: "check:str"}, {type: "disadvantage", target: "check:dex"}],
+			}),
+		},
+		alluring: {
+			name: "Alluring",
+			prerequisiteLevel: 3,
+			benefit: "You have advantage on Charisma checks.",
+			drawback: "You have disadvantage on initiative rolls.",
+			effects: () => ({
+				benefit: [{type: "advantage", target: "check:cha"}],
+				drawback: [{type: "disadvantage", target: "initiative"}],
+			}),
+		},
+		celerity: {
+			name: "Celerity",
+			prerequisiteLevel: 3,
+			benefit: "Your Dexterity score and its maximum increase by 3 (4 at 11th level, 5 at 18th).",
+			drawback: "You have disadvantage on Wisdom saving throws.",
+			effects: (level) => ({
+				benefit: [{type: "abilityScoreBonus", ability: "dex", value: level >= 18 ? 5 : level >= 11 ? 4 : 3}],
+				drawback: [{type: "disadvantage", target: "save:wis"}],
+			}),
+		},
+		conversant: {
+			name: "Conversant",
+			prerequisiteLevel: 3,
+			benefit: "You have advantage on Intelligence checks.",
+			drawback: "You have disadvantage on Wisdom checks.",
+			effects: () => ({
+				benefit: [{type: "advantage", target: "check:int"}],
+				drawback: [{type: "disadvantage", target: "check:wis"}],
+			}),
+		},
+		cruelty: {
+			name: "Cruelty",
+			prerequisiteLevel: 11,
+			benefit: "When you take the Attack action, you can make one additional weapon attack as a bonus action.",
+			drawback: "You have disadvantage on Intelligence, Wisdom, and Charisma saving throws.",
+			effects: () => ({
+				benefit: [{type: "info", label: "When you take the Attack action, you can make one additional weapon attack as a bonus action."}],
+				drawback: [
+					{type: "disadvantage", target: "save:int"},
+					{type: "disadvantage", target: "save:wis"},
+					{type: "disadvantage", target: "save:cha"},
+				],
+			}),
+		},
+		deftness: {
+			name: "Deftness",
+			prerequisiteLevel: 3,
+			benefit: "You have advantage on Dexterity checks.",
+			drawback: "You have disadvantage on Wisdom checks.",
+			effects: () => ({
+				benefit: [{type: "advantage", target: "check:dex"}],
+				drawback: [{type: "disadvantage", target: "check:wis"}],
+			}),
+		},
+		embers: {
+			name: "Embers",
+			prerequisiteLevel: 3,
+			benefit: "You have resistance to fire damage.",
+			drawback: "You have vulnerability to cold damage.",
+			effects: () => ({
+				benefit: [{type: "resistance", target: "damage:fire"}],
+				drawback: [{type: "vulnerability", target: "damage:cold"}],
+			}),
+		},
+		gelid: {
+			name: "Gelid",
+			prerequisiteLevel: 3,
+			benefit: "You have resistance to cold damage.",
+			drawback: "You have vulnerability to fire damage.",
+			effects: () => ({
+				benefit: [{type: "resistance", target: "damage:cold"}],
+				drawback: [{type: "vulnerability", target: "damage:fire"}],
+			}),
+		},
+		impermeable: {
+			name: "Impermeable",
+			prerequisiteLevel: 3,
+			benefit: "You have resistance to piercing damage.",
+			drawback: "You have vulnerability to slashing damage.",
+			effects: () => ({
+				benefit: [{type: "resistance", target: "damage:piercing"}],
+				drawback: [{type: "vulnerability", target: "damage:slashing"}],
+			}),
+		},
+		mobile: {
+			name: "Mobile",
+			prerequisiteLevel: 3,
+			benefit: "You are immune to the grappled and restrained conditions (also paralyzed at 11th level).",
+			drawback: "You have disadvantage on Strength checks.",
+			effects: (level) => ({
+				benefit: [
+					{type: "conditionImmunity", target: "grappled"},
+					{type: "conditionImmunity", target: "restrained"},
+					...(level >= 11 ? [{type: "conditionImmunity", target: "paralyzed"}] : []),
+				],
+				drawback: [{type: "disadvantage", target: "check:str"}],
+			}),
+		},
+		nighteye: {
+			name: "Nighteye",
+			prerequisiteLevel: 3,
+			benefit: "You gain darkvision out to 60 feet, or +60 feet if you already have it.",
+			drawback: "You have disadvantage on attack rolls and sight-based Wisdom (Perception) checks in direct sunlight.",
+			effects: (level, existingDarkvision = 0) => ({
+				benefit: [{type: "sense", target: "darkvision", value: existingDarkvision > 0 ? existingDarkvision + 60 : 60}],
+				drawback: [{type: "info", label: "You have disadvantage on attack rolls and on sight-based Wisdom (Perception) checks while you, your target, or the thing you perceive is in direct sunlight."}],
+			}),
+		},
+		percipient: {
+			name: "Percipient",
+			prerequisiteLevel: 3,
+			benefit: "You have advantage on Wisdom checks.",
+			drawback: "You have disadvantage on Charisma checks.",
+			effects: () => ({
+				benefit: [{type: "advantage", target: "check:wis"}],
+				drawback: [{type: "disadvantage", target: "check:cha"}],
+			}),
+		},
+		potency: {
+			name: "Potency",
+			prerequisiteLevel: 3,
+			benefit: "Your Strength score and its maximum increase by 3 (4 at 11th level, 5 at 18th).",
+			drawback: "You have disadvantage on Dexterity saving throws.",
+			effects: (level) => ({
+				benefit: [{type: "abilityScoreBonus", ability: "str", value: level >= 18 ? 5 : level >= 11 ? 4 : 3}],
+				drawback: [{type: "disadvantage", target: "save:dex"}],
+			}),
+		},
+		precision: {
+			name: "Precision",
+			prerequisiteLevel: 11,
+			benefit: "Your weapon attacks score a critical hit on a roll of 19 or 20.",
+			drawback: "You have disadvantage on Strength saving throws.",
+			effects: () => ({
+				benefit: [{type: "info", label: "Your weapon attacks score a critical hit on a roll of 19 or 20."}],
+				drawback: [{type: "disadvantage", target: "save:str"}],
+			}),
+		},
+		rapidity: {
+			name: "Rapidity",
+			prerequisiteLevel: 3,
+			benefit: "Your speed increases by 10 feet (an additional 5 feet at 15th level).",
+			drawback: "You have disadvantage on Intelligence checks.",
+			effects: (level) => ({
+				benefit: [{type: "bonus", target: "speed:walk", value: level >= 15 ? 15 : 10}],
+				drawback: [{type: "disadvantage", target: "check:int"}],
+			}),
+		},
+		reconstruction: {
+			name: "Reconstruction",
+			prerequisiteLevel: 7,
+			benefit: "For 1 hour, at the start of each turn while below half your hit points you regain hit points equal to your proficiency bonus.",
+			drawback: "Your speed is reduced by 10 feet.",
+			effects: () => ({
+				benefit: [{type: "info", label: "For 1 hour, at the start of each of your turns while you have at least 1 hit point but fewer than half your maximum, you regain hit points equal to your proficiency bonus."}],
+				drawback: [{type: "bonus", target: "speed:walk", value: -10}],
+			}),
+		},
+		sagacity: {
+			name: "Sagacity",
+			prerequisiteLevel: 3,
+			benefit: "Your Intelligence score and its maximum increase by 3 (4 at 11th level, 5 at 18th).",
+			drawback: "You have disadvantage on Charisma saving throws.",
+			effects: (level) => ({
+				benefit: [{type: "abilityScoreBonus", ability: "int", value: level >= 18 ? 5 : level >= 11 ? 4 : 3}],
+				drawback: [{type: "disadvantage", target: "save:cha"}],
+			}),
+		},
+		shielded: {
+			name: "Shielded",
+			prerequisiteLevel: 3,
+			benefit: "You have resistance to slashing damage.",
+			drawback: "You have vulnerability to bludgeoning damage.",
+			effects: () => ({
+				benefit: [{type: "resistance", target: "damage:slashing"}],
+				drawback: [{type: "vulnerability", target: "damage:bludgeoning"}],
+			}),
+		},
+		unbreakable: {
+			name: "Unbreakable",
+			prerequisiteLevel: 3,
+			benefit: "You have resistance to bludgeoning damage.",
+			drawback: "You have vulnerability to piercing damage.",
+			effects: () => ({
+				benefit: [{type: "resistance", target: "damage:bludgeoning"}],
+				drawback: [{type: "vulnerability", target: "damage:piercing"}],
+			}),
+		},
+		vermillion: {
+			name: "Vermillion",
+			prerequisiteLevel: 3,
+			benefit: "You gain an additional use of your Blood Maledict feature.",
+			drawback: "You have disadvantage on death saving throws.",
+			effects: () => ({
+				benefit: [{type: "info", label: "You gain an additional use of your Blood Maledict feature."}],
+				drawback: [{type: "disadvantage", target: "deathSave"}],
+			}),
+		},
+	};
+
 	static ACTIVE_STATE_TYPES = {
 		rage: {
 			id: "rage",
@@ -52124,6 +52998,42 @@ class CharacterSheetState {
 			duration: "Until your next short or long rest",
 			endConditions: ["Finish a short or long rest", "Activate another rite"],
 			activationAction: "bonus",
+			isGeneric: true,
+		},
+		mutagen: {
+			id: "mutagen",
+			name: "Mutagen",
+			icon: "🧪",
+			// A single generic state carrying the union of every consumed mutagen's effects.
+			// The Order of the Mutant can have several mutagens active at once, each with a
+			// benefit and a drawback; `consumeMutagen`/`flushMutagens` rebuild this state's
+			// customEffects from the mutagen catalog so resistances, vulnerabilities, ability
+			// bonuses, speed changes, senses, condition immunities and roll advantage/
+			// disadvantage all flow through the ordinary state pipeline.
+			description: "One or more mutagens are affecting you. Each contributes a benefit and a drawback until you finish a short or long rest.",
+			effects: [],
+			duration: "Until you finish a short or long rest",
+			endConditions: ["Finish a short or long rest"],
+			activationAction: "none",
+			isGeneric: true,
+		},
+		brandedTarget: {
+			id: "brandedTarget",
+			name: "Branded Target",
+			icon: "🎯",			// A single shared concept for every Blood Hunter brand — Castigation (6),
+			// Tethering (13), Ghostslayer's Sundering, Mutant's Axiom, and Profane
+			// Soul's Sapping Scar. Each brand's own damage/rider is resolved on the
+			// *target*, which a one-character sheet cannot track (see
+			// docs/charactersheet/10-known-limitations.md); what this state DOES model
+			// is the half that lands on the Blood Hunter — namely Brand of the
+			// Voracious's advantage on attacks against a branded creature while in
+			// hybrid form. Marking a target branded is free, so no resource is
+			// consumed here; the brand's own use is charged by its resource pool.
+			description: "A creature is branded by one of your brands. Brand effects that resolve on the target are the DM's to apply; brand effects that land on you are applied here.",
+			effects: [],
+			duration: "Until you die, until you brand another creature, or until you dismiss it",
+			endConditions: ["You brand another creature", "You dismiss the brand", "The branded creature dies", "You die"],
+			activationAction: "none",
 			isGeneric: true,
 		},
 		umbralCoating: {

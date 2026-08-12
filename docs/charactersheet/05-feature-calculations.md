@@ -99,7 +99,29 @@ darkAugmentationSpeedBonus: 5,
 
 Order of the Lycan adds `hybridTransformationUses`, `hybridAttackBonus`,
 `hybridDamageBonus`, `hybridNaturalWeaponDamage`, `hybridRegeneration`, and
-Stalker's Prowess movement/jump bonuses.
+`hybridAcBonus`.
+
+**Stalker's Prowess (L7) is *not* a hybrid-form bonus.** Its +10 ft speed and
++10 ft long / +3 ft high jump are permanent; only the Improved Predatory Strikes
+attack bonus is gated on the form. The speed is composed by
+`getStalkersProwessSpeedBonus()` alongside `getDarkAugmentationSpeedBonus()` —
+deliberately *not* routed through `getFeatureCalculations()`, which reads speeds
+back and would close an infinite loop. See `CS-BUG-122`.
+
+**Conditional advantages are registry entries, not calculation flags.** Hunter's
+Bane, Grim Psychometry, Hardened Soul and Heightened Senses are declared in
+`FeatureEffectRegistry` as `save:advantage:<condition>` /
+`skill:advantage:<skill>:<qualifier>` modifiers. They surface through
+`aggregateModifiers().conditionalsAvailable` and are applied only on per-roll
+opt-in, exactly like Fey Ancestry. The `hasHuntersBane` / `hasGrimPsychometry` /
+`hasHardenedSoul` / `hasHeightenedSenses` booleans remain for display only —
+**do not assert on them in tests**; assert the resulting advantage state.
+
+Note the modifier namespace: the canonical skill query is `skill:<skill>`, not
+`check:<skill>`. A qualifier-suffixed modType such as
+`skill:advantage:perception:senses` only matches because of the qualified-match
+rule in `getModifiersForType()`; before that rule existed such entries matched
+nothing at all.
 Hybrid Transformation and Crimson Rite are active states; their current effects
 are therefore read from state, not permanently folded into the calculation object.
 For legacy saves without a recorded Hunter's Bane choice, Hemocraft falls back

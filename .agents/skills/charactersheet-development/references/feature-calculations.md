@@ -114,6 +114,17 @@ Their pools are synchronized by `ensureBloodHunterResources()` so Builder,
 Level-Up, Quick Build, saved characters, and the active-state UI share one
 current/max value.
 
+Two Blood Hunter rules are easy to get wrong and are asserted by tests:
+Stalker's Prowess speed and jump bonuses are **permanent**, not hybrid-gated
+(`CS-BUG-122`), and Brand of the Voracious's advantage requires **both** hybrid
+form and an active `brandedTarget` state. `brandedTarget` is a generic
+`ACTIVE_STATE_TYPES` entry shared by every Brand feature across all four orders
+rather than a per-feature special case.
+
+Blood Hunter's conditional advantages (Hunter's Bane, Grim Psychometry, Hardened
+Soul, Heightened Senses) live in `FeatureEffectRegistry`, not in the calculation
+switch, and therefore follow the default-off conditional opt-in contract.
+
 Way of the Astral Self follows the same split. Calculations own level gates,
 Martial Arts dice, activation burst/DC data, `grantedAttacks`, damage riders,
 and Astral Barrage allowance. Runtime active states own whether Arms, Visage,

@@ -905,6 +905,70 @@ correct teardown for free — no per-feature hook. This replaced a hardcoded
 transformation now tears down through the same path because its
 `endConditions` already listed `"Unconscious"`.
 
+#### Branded Target (Blood Hunter)
+```javascript
+brandedTarget: {
+    effects: [],
+    duration: "Until you die, until you brand another creature, or until you dismiss it",
+    endConditions: ["You brand another creature", "You dismiss the brand", "The branded creature dies", "You die"],
+    activationAction: "none",
+    isGeneric: true,
+}
+```
+
+One shared state for **all five** Blood Hunter brands — Brand of Castigation
+(6), Brand of Tethering (13), Ghostslayer's Brand of Sundering, Mutant's Brand
+of Axiom, and Profane Soul's Brand of the Sapping Scar. It exists because a
+brand is a fact about *the world*, not about the character, and five separate
+per-brand flags would each need their own bespoke plumbing.
+
+It carries no `effects` of its own by design. Almost everything a brand does
+resolves **on the target** (retaliation damage, forced reverts, teleport
+denial), which a single-character sheet cannot track — see
+[10-known-limitations.md](10-known-limitations.md). What the state *does* buy is
+the half of a brand that lands on the Blood Hunter: `getBloodHunterHybridEffects()`
+gates **Brand of the Voracious** (Lycan 15, advantage on attacks against a
+branded creature while transformed) on
+`isStateTypeActive("brandedTarget")`, so that advantage fires only when a target
+is actually branded instead of on every attack the character ever makes.
+
+`activationAction: "none"` because marking a target branded costs nothing on its
+own; the brand's action cost and use are charged by its own resource pool.
+
+#### Mutagen (Blood Hunter: Order of the Mutant)
+```javascript
+mutagen: {
+    effects: [],
+    duration: "Until you finish a short or long rest",
+    endConditions: ["Finish a short or long rest"],
+    activationAction: "none",
+    isGeneric: true,
+}
+```
+
+A single generic state that carries the **union** of every mutagen currently
+affecting an Order of the Mutant. The Mutant can have several mutagens active at
+once, and each of the 20 formulas has both a **benefit** and a **drawback**, so
+the state's `customEffects` are rebuilt (never hand-authored) from
+`CharacterSheetState.MUTAGENS` by `_rebuildMutagenState()` whenever a mutagen is
+consumed or ends. `consumeMutagen(name)` adds a mutagen, `endMutagen(name)`
+removes one, and `flushMutagens()` clears them all (call it on a rest).
+
+Because it is one shared state, resistances/vulnerabilities, ability-score
+bonuses, speed changes, senses, condition immunities, and roll
+advantage/disadvantage from every active mutagen all flow through the ordinary
+active-state pipeline (`getResistances()`, `getVulnerabilities()`,
+`getAbilityScore()`, `getSpeed()`, `getSense()`, `getConditionImmunities()`,
+`getAdvantageState()`). Effects a single-character sheet cannot mechanically
+resolve — an extra attack (Cruelty), a widened crit range (Precision), turn-start
+regeneration (Reconstruction), the extra Blood Maledict use (Vermillion) — are
+surfaced as `{type: "info"}` so nothing is silently dropped. Ability-score
+bonuses (Celerity/Potency/Sagacity) are applied through
+`_getAbilityScoreBonusFromStatesRaw()` **after** the ability-score cap, because a
+mutagen raises the score *and* its maximum together. Strange Metabolism (7) can
+suppress one mutagen's drawback via `ignoreMutagenDrawback(name)`, which
+`_rebuildMutagenState()` honors by omitting that mutagen's drawback effects.
+
 #### Heavy Stance (Adamant Mountain)
 ```javascript
 heavyStance: {

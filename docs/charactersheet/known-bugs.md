@@ -8355,3 +8355,114 @@ than stopping at the first reader. The same discipline that disproved the
 `senseType` claim in
 [10-known-limitations.md](10-known-limitations.md#technical-debt) surfaced this:
 verifying "does it arrive?" answers "does it arrive *once*?" for free.
+
+---
+
+## CS-BUG-122 — Stalker's Prowess's speed and jump bonuses were gated on Hybrid Transformation, so they vanished out of form — FIXED
+
+**Status**: Fixed.
+**Surfaced**: Blood Hunter (BH2022) full-class implementation pass.
+**Component**: Character Sheet · `charactersheet-state.js`, `charactersheet.js`.
+
+### Symptom
+
+An Order of the Lycan Blood Hunter of level 7+ had a walking speed of 30 ft
+while in their normal form and 40 ft only while transformed. The long-jump
+(+10 ft) and high-jump (+3 ft) bonuses behaved the same way.
+
+Reproduced empirically before the fix: at Blood Hunter 7 (Lycan),
+`getWalkSpeed()` returned `30` untransformed and `40` after
+`activateHybridTransformation()`.
+
+### Root cause
+
+Stalker's Prowess (Order of the Lycan 7) reads:
+
+> Your speed increases by 10 feet, and you add 10 feet to your long jump
+> distance and 3 feet to your high jump distance. **Your hybrid form also gains
+> the following additional benefit.**
+
+Three of those clauses are unconditional; only the trailing *additional*
+benefit (Improved Predatory Strikes, the attack-roll bonus) is form-gated. The
+code gated all four:
+
+- `charactersheet-state.js` — the speed bonus was emitted from inside
+  `getBloodHunterHybridEffects()`, a function that returns `[]` unless the
+  transformation is active.
+- `charactersheet.js` — the jump bonuses were behind
+  `if (isHybrid && calc.hasStalkersProwess)`.
+
+The likely origin is the feature's placement in the source JSON: it is a
+subclass feature of a transformation-themed order, and the "also" in the last
+sentence is easy to read as scoping the whole paragraph.
+
+### Fix
+
+Added `getStalkersProwessSpeedBonus()` next to `getDarkAugmentationSpeedBonus()`
+and wired it into the same four permanent speed-composition sites (the speed
+breakdown components, both raw-walk sums, and `getSpeedByType()`). It derives
+from the class + subclass directly rather than from `getFeatureCalculations()`,
+for the recursion reason already documented on `getDarkAugmentationSpeedBonus()`
+— `getFeatureCalculations()` reads speeds back for features such as Stormborn,
+so routing a speed getter through it closes an infinite loop.
+
+Dropped the `isHybrid &&` guard on the jump bonuses. The attack-roll bonus
+stays hybrid-gated, which is correct.
+
+### Verification
+
+At Blood Hunter 7 (Lycan): walk speed is `40` both in and out of hybrid form.
+At level 6 (before the feature) it is `30`. At level 10 it is `45` — Stalker's
+Prowess (+10) stacking with Dark Augmentation (+5), proving the two compose
+rather than one shadowing the other.
+
+---
+
+## CS-BUG-123 — Subclass lookup tables missed saves that stored a `shortName`
+
+**Status:** FIXED
+**Area:** Spellcasting / subclass resolution (`charactersheet-state.js`)
+**Severity:** High for Order of the Profane Soul; latent for any subclass whose
+`name` and `shortName` diverge.
+
+### Symptom
+
+An Order of the Profane Soul Blood Hunter got **no Pact Magic at all** — zero
+spell slots at every level — when the save had stored the subclass as its
+`shortName` (`"Profane Soul"`) rather than its full `name`
+(`"Order of the Profane Soul"`).
+
+### Root cause
+
+Four subclass-keyed lookups indexed **only** on `cls.subclass?.name`:
+
+- `subclassProgressionFallback[...]` (two call sites) — decides `"pact"`
+- `PACT_TABLE_BY_SUBCLASS[...]` — picks the reduced pact grid
+- the spellcasting-ability `switch (subclassName)`
+
+For almost every subclass in the codebase `name === shortName`
+(`"Eldritch Knight"`, `"Gambler"`), so the omission was invisible. Blood
+Hunter is the first class whose two forms **diverge** — `"Order of the X"` vs
+`"X"` — so a shortName-keyed save matched nothing, `progression` resolved to
+`null`, and the character was treated as a non-caster.
+
+This was found by an independent probe, not by the existing tests: the suite
+only ever constructed the subclass by its full name.
+
+### Fix
+
+Added a generic `static lookupBySubclass(subclass, table)` that mirrors the
+`name || shortName` defensiveness already used elsewhere in the file (e.g. the
+Lycan speed getter), plus a `SUBCLASS_CANONICAL_NAME` map for the four Blood
+Hunter orders, whose forms genuinely differ. All four lookups now route through
+it. Because it is a lookup **helper** rather than a per-class special case, any
+future subclass with a diverging shortName is covered by adding one map entry.
+
+### Verification
+
+`CharacterSheetBloodHunterOrders.test.js` asserts the derived slots, not a flag:
+
+- Warlock is unchanged at L1/11/17/20 (1@1, 3@5, 4@5, 4@5) — proving the shared
+  pact-table generalisation did not regress the base class.
+- Profane Soul L19 yields **2 slots of 4th level** via the full name.
+- Profane Soul L19 yields the **same** 2@4 via the shortName (the regression).
