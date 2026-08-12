@@ -195,8 +195,32 @@ The following edge cases may need additional work:
 | **Sorcerer** | Advanced metamagic effects are still partial; cast-time selection and costs are supported, and runtime support now covers `quickened`, `subtle`, `bestowed`, `heightened`, `seeking`, `focused`, `lingering`, `aimed`, `overcharged`, and `vampiric` |
 | **Warlock** | Pact Boon interactions with invocations not tracked |
 
-### Anti-Pattern in Tests (Mostly Resolved)
+### Blood Hunter (BH2022) — effects that resolve on *other* creatures
 
+The Blood Hunter's brands and blood curses are unusual among class features in
+that most of what they do happens to a creature that is not the character. A
+single-character sheet has no model of the target, so these are surfaced
+honestly — with their save ability, DC and rider — rather than silently
+dropped or faked.
+
+| Feature | What the sheet does | What the DM still resolves |
+|---|---|---|
+| **Brand of Castigation / Tethering / Sundering / Axiom / Sapping Scar** | Tracks the use, and tracks *that* a creature is branded via the shared `brandedTarget` state | The retaliation damage, the forced revert, the teleport denial, and the healing denial all land on the target |
+| **Brand of the Voracious** (Lycan 15) | Fully modelled — its advantage lands on the *character*, so it is gated on `brandedTarget` and applies for real | — |
+| **Blood curses** | Surfaces each curse's own action cost, save ability, DC, base effect and amplified rider at the moment of invocation; charges the amplification HP cost for real | The target's saving throw and resulting condition |
+| **Blood Curse of the Eyeless / Fallen Puppet** | Surfaces the reaction timing and the hemocraft die to subtract | The affected creature's attack roll |
+
+The amplification cost is *not* in this category and is fully modelled: it is
+unavoidable necrotic damage to the Blood Hunter, and `useBloodMaledict({amplify: true})`
+reduces current HP by a real hemocraft die roll.
+
+**The Onus of Lycanthropy** (Lycan 3) is deliberately registered as an `info`
+effect rather than a mechanical one. Its content — that you cannot spread the
+curse unwillingly, that being cured against your will is a mark of shame undone
+by a renewed Taming, and that your beast-strain sets your hybrid form's
+appearance — is narrative and DM-facing, with no derived number to compute.
+
+### Anti-Pattern in Tests (Mostly Resolved)
 Previous tests used weak verification patterns. These have been largely corrected:
 
 ```javascript
