@@ -24460,3 +24460,206 @@ color: var(--cs-text-primary, #f1f5f9);
 	border-left-color: var(--cs-danger, #ef4444);
 	background: rgba(239, 68, 68, 0.08);
 }
+
+/* ============================================================================
+   Beastheart (MCDM) — companion roster picker + ferocity strip
+   ============================================================================
+   Operate mode: these are read mid-encounter, so the type stays quiet, the
+   numbers stay loud, and colour is rationed — the ferocity readout is neutral
+   until it crosses the rampage threshold, at which point gold means "roll to
+   hold them" and ruby means "too late".
+   ------------------------------------------------------------------------- */
+
+/* --- Roster picker ------------------------------------------------------- */
+
+.charsheet__beastheart-roster {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+	gap: var(--cs-space-sm, 8px);
+}
+
+.charsheet__beastheart-card {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	width: 100%;
+	padding: 12px 14px;
+	text-align: left;
+	background: var(--cs-bg-surface, rgba(255, 255, 255, 0.03));
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.12));
+	border-radius: var(--cs-radius-md, 10px);
+	color: inherit;
+	cursor: pointer;
+	transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.charsheet__beastheart-card:hover {
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.05));
+	border-color: var(--cs-border-hover, rgba(255, 255, 255, 0.2));
+}
+
+.charsheet__beastheart-card--selected,
+.charsheet__beastheart-card--selected:hover {
+	border-color: var(--cs-accent-emerald, #10b981);
+	background: var(--cs-accent-emerald-light, rgba(16, 185, 129, 0.15));
+}
+
+.charsheet__beastheart-card-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.charsheet__beastheart-card-name {
+	font-size: 1.1em;
+	font-weight: 700;
+}
+
+.charsheet__beastheart-card-current {
+	font-size: 0.75em;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--cs-accent-emerald, #10b981);
+}
+
+.charsheet__beastheart-card-sub {
+	font-size: 0.85em;
+	color: var(--cs-text-muted, #98a5b8);
+	text-transform: capitalize;
+}
+
+.charsheet__beastheart-card-stats {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin-top: 2px;
+	font-variant-numeric: tabular-nums;
+}
+
+.charsheet__beastheart-card-attack,
+.charsheet__beastheart-card-senses {
+	font-size: 0.85em;
+	color: var(--cs-text-secondary, #9fadc0);
+}
+
+.charsheet__beastheart-card-traits {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-top: 2px;
+}
+
+.charsheet__beastheart-card-traits > span {
+	padding: 1px 7px;
+	font-size: 0.75em;
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.05));
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.12));
+	border-radius: 10px;
+}
+
+/* --- Ferocity strip ------------------------------------------------------ */
+
+/* Deliberately NOT a percentage-fill bar: ferocity has no maximum, so a fill
+   would have to invent one and would therefore lie. A loud number plus an
+   explicit threshold marker tells the truth. */
+.charsheet__companion-ferocity {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin: 10px 0;
+	padding: 8px 12px;
+	background: var(--cs-bg-hover, rgba(255, 255, 255, 0.04));
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.12));
+	border-radius: var(--cs-radius-md, 10px);
+}
+
+.charsheet__companion-ferocity--risk {
+	border-color: var(--cs-accent-gold, #f59e0b);
+	background: var(--cs-accent-gold-light, rgba(245, 158, 11, 0.15));
+}
+
+.charsheet__companion-ferocity--rampaging {
+	border-color: var(--cs-accent-ruby, #f26161);
+	background: var(--cs-accent-ruby-light, rgba(239, 68, 68, 0.15));
+}
+
+.charsheet__companion-ferocity-label {
+	font-size: 0.72em;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--cs-text-muted, #98a5b8);
+}
+
+.charsheet__companion-ferocity-value {
+	font-size: 1.9em;
+	font-weight: 700;
+	line-height: 1;
+	font-variant-numeric: tabular-nums;
+}
+
+.charsheet__companion-ferocity--risk .charsheet__companion-ferocity-value {
+	color: var(--cs-accent-gold, #f59e0b);
+}
+
+.charsheet__companion-ferocity--rampaging .charsheet__companion-ferocity-value {
+	color: var(--cs-accent-ruby, #f26161);
+}
+
+.charsheet__companion-ferocity-threshold {
+	font-size: 0.8em;
+	color: var(--cs-text-muted, #98a5b8);
+	font-variant-numeric: tabular-nums;
+}
+
+.charsheet__companion-ferocity-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-left: auto;
+}
+
+.charsheet__companion-ferocity-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 3px 10px;
+	font-size: 0.8em;
+	font-weight: 600;
+	border-radius: 12px;
+	border: 1px solid var(--cs-accent-ruby, #f26161);
+	color: var(--cs-accent-ruby, #f26161);
+}
+
+/* Beastheart — bond actions row inside the ferocity strip.
+   Kept in the same shell as the ferocity controls because they spend the same
+   resource; the cost badge makes the price legible before the click. */
+.charsheet__companion-ferocity-bond {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.375rem;
+	width: 100%;
+	margin-top: 0.5rem;
+	padding-top: 0.5rem;
+	border-top: 1px solid var(--cs-border-subtle, rgba(128, 128, 128, 0.25));
+}
+
+.charsheet__companion-ferocity-cost {
+	display: inline-block;
+	min-width: 1.15em;
+	margin-left: 0.25rem;
+	padding: 0 0.25em;
+	border-radius: 0.25rem;
+	background: var(--cs-accent-gold, #b8860b);
+	color: #fff;
+	font-variant-numeric: tabular-nums;
+	font-weight: 700;
+	font-size: 0.85em;
+	text-align: center;
+}
+
+.charsheet__companion-ferocity-bond .ve-btn[disabled] .charsheet__companion-ferocity-cost {
+	background: var(--cs-text-muted, #888);
+}

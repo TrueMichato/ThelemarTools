@@ -45,6 +45,12 @@ export async function gotoWithThelemar (
 				// Those are republished as synthetic optional features by the sheet, so
 				// dropping them here would silently remove the class's core choice.
 				...(brew.psionic?.length ? {psionic: brew.psionic} : {}),
+				// …or ship its own creature roster (MCDM's Beastheart, whose Companion
+				// feature points at `{@filter companion creature|bestiary|tag=Companion}`
+				// rather than naming stat blocks). Dropping `monster` here would leave the
+				// companion picker empty and the class's central mechanic untestable.
+				...(brew.monster?.length ? {monster: brew.monster} : {}),
+				...(brew.monsterFluff?.length ? {monsterFluff: brew.monsterFluff} : {}),
 			} : {}),
 			subclass: subclasses,
 			subclassFeature: (brew.subclassFeature || []).filter((it: any) =>

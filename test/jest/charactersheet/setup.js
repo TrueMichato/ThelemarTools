@@ -65,6 +65,38 @@ if (!String.prototype.toTitleCase) {
 	};
 }
 
+// Prototype extensions the shared `js/` modules assume exist (defined in js/utils.js,
+// which is not loaded in the Node test environment). Mirrors the real implementations
+// so modules imported straight from `js/` — e.g. the summon-scaler reused by the
+// character sheet's companion recalculation — behave identically under test.
+if (!String.prototype.trimAnyChar) {
+	String.prototype.trimAnyChar = function (chars) {
+		let start = 0; let end = this.length;
+		while (start < end && chars.indexOf(this[start]) >= 0) ++start;
+		while (end > start && chars.indexOf(this[end - 1]) >= 0) --end;
+		return (start > 0 || end < this.length) ? this.substring(start, end) : this;
+	};
+}
+if (!Array.prototype.last) {
+	Object.defineProperty(Array.prototype, "last", {
+		enumerable: false,
+		writable: true,
+		value: function (arg) {
+			if (arg !== undefined) this[this.length - 1] = arg;
+			else return this[this.length - 1];
+		},
+	});
+}
+if (!Array.prototype.mergeMap) {
+	Object.defineProperty(Array.prototype, "mergeMap", {
+		enumerable: false,
+		writable: true,
+		value: function (fnMap) {
+			return this.map((...args) => fnMap(...args)).filter(it => it != null).reduce((a, b) => Object.assign(a, b), {});
+		},
+	});
+}
+
 // Mock RollerUtil before CryptUtil needs it
 globalThis.RollerUtil = {
 	isCrypto: () => typeof crypto !== "undefined" && crypto.getRandomValues,
@@ -136,6 +168,53 @@ globalThis.Parser = globalThis.Parser || {
 	sourceJsonToAbv: (source) => source,
 	sourceJsonToFull: (source) => source,
 	nameToTokenName: (name) => (name || "").replace(/"/g, ""),
+	levelToPb: (level) => (!level ? 2 : Math.ceil(level / 4) + 1),
+	textToNumber: (str) => {
+		// True parity with `Parser.textToNumber` (js/parser.js:136-170): same cases, same
+		// values, same NaN fallback. Deliberate deviation: the `String()` coercion, so the
+		// shim tolerates numeric input rather than throwing on `.trim()`.
+		//
+		// Parity is load-bearing, not tidiness. Two of the three call sites in
+		// scalecreature-scaler-summon-class.js capture `(?<perLevel>\d+|[a-z]+)` — an
+		// UNBOUNDED word — so a summon reading "5 + fifteen times your level" resolves to
+		// 15 in production. A narrower shim would silently yield NaN into the HP string
+		// here while production was fine, and the divergence would be invisible because
+		// the real Parser wins wherever it is imported and the shim wins where it is not.
+		// Note production has no ordinals above "tenth": "eleventh" is NaN, not 11.
+		str = String(str).trim().toLowerCase();
+		if (!isNaN(str)) return Number(str);
+		switch (str) {
+			case "zero": return 0;
+			case "one": case "a": case "an": case "first": return 1;
+			case "two": case "double": case "second": return 2;
+			case "three": case "triple": case "third": return 3;
+			case "four": case "quadruple": case "fourth": return 4;
+			case "five": case "fifth": return 5;
+			case "six": case "sixth": return 6;
+			case "seven": case "seventh": return 7;
+			case "eight": case "eighth": return 8;
+			case "nine": case "ninth": return 9;
+			case "ten": case "tenth": return 10;
+			case "eleven": return 11;
+			case "twelve": return 12;
+			case "thirteen": return 13;
+			case "fourteen": return 14;
+			case "fifteen": return 15;
+			case "sixteen": return 16;
+			case "seventeen": return 17;
+			case "eighteen": return 18;
+			case "nineteen": return 19;
+			case "twenty": return 20;
+			case "thirty": return 30;
+			case "forty": return 40;
+			case "fifty": return 50;
+			case "sixty": return 60;
+			case "seventy": return 70;
+			case "eighty": return 80;
+			case "ninety": return 90;
+			default: return NaN;
+		}
+	},
 	getOrdinalForm: (n) => {
 		const suffixes = ["th", "st", "nd", "rd"];
 		const v = n % 100;
@@ -166,6 +245,30 @@ globalThis.MiscUtil = globalThis.MiscUtil || {
 		}
 		current[parts[parts.length - 1]] = value;
 	},
+	GENERIC_WALKER_ENTRIES_KEY_BLOCKLIST: new Set(["caption", "type", "colLabels", "colLabelRows", "name", "colStyles", "style", "shortName", "subclassShortName", "id", "path", "source"]),
+	// Minimal stand-in for the real recursive walker: enough to drive the string
+	// handler over an entries tree, honouring the key blocklist.
+	getWalker: ({keyBlocklist} = {}) => ({
+		walk: (obj, handlers) => {
+			const blocked = keyBlocklist || new Set();
+			const rec = (node) => {
+				if (typeof node === "string") return handlers?.string ? handlers.string(node) : node;
+				if (Array.isArray(node)) return node.map(rec);
+				if (node && typeof node === "object") {
+					const out = {};
+					for (const [k, v] of Object.entries(node)) out[k] = blocked.has(k) ? v : rec(v);
+					return out;
+				}
+				return node;
+			};
+			return rec(obj);
+		},
+	}),
+};
+
+// Mock UiUtil (used by shared `js/` modules imported into sheet code)
+globalThis.UiUtil = globalThis.UiUtil || {
+	intToBonus: (int, {isPretty = false} = {}) => `${int >= 0 ? "+" : int < 0 ? (isPretty ? "\u2212" : "-") : ""}${Math.abs(int)}`,
 };
 
 // Mock StorageUtil if needed for serialization

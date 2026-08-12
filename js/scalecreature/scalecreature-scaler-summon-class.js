@@ -1,7 +1,18 @@
 import {ScaleSummonedCreature} from "./scalecreature-scaler-summon-base.js";
 
 export class ScaleClassSummonedCreature extends ScaleSummonedCreature {
+	/**
+	 * Async entry point, kept for the many `await`-ing call sites (bestiary, render,
+	 * dmscreen, makebrew). The scaling itself is pure string/AST rewriting with no I/O,
+	 * so the real work lives in {@link scaleSync} for callers that cannot await —
+	 * notably the character sheet, whose companion recalculation is synchronous and
+	 * runs on every level/ability change.
+	 */
 	static async scale (mon, toClassLevel) {
+		return this.scaleSync(mon, toClassLevel);
+	}
+
+	static scaleSync (mon, toClassLevel) {
 		mon = MiscUtil.copyFast(mon);
 
 		if ((!mon.summonedByClass && !mon.summonedScaleByPlayerLevel) || toClassLevel < 1) return mon;

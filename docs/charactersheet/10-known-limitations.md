@@ -511,4 +511,46 @@ Encounter-side rules of this shape belong on the DM Screen, not the sheet.
 
 ---
 
+## Beastheart (MCDM, `BST`) — positional and enemy-facing clauses
+
+Beastheart ships with every countable effect real, but six clauses are
+inherently positional or land on another creature's dice, which the sheet does
+not own. Each is surfaced as `info` with its countable half still live:
+
+| Feature | What is real | What is narrated |
+|---|---|---|
+| Frenzied Charge (Ferocious 3) | — | A reaction move-and-attack; the sheet models neither movement nor reaction ordering |
+| Pack Phalanx (Protector 3) | — | Disadvantage on **enemy** attack rolls against third parties |
+| Allied Earth (Primordial 7) | `getAlliedEarthAura()` reports whether the aura is live (≥1 ferocity) and its 10-ft radius | The difficult terrain itself |
+| Primal Warding (Hunter 7) | Uses, `4d8` force, exploit DC, CON save | Where the ward is placed |
+| Summon the Wilds (18) | A real 1-use short-rest pool | The summoned swarm's behaviour |
+| Natural Language (1), Faithful Companion (6) | — | Purely narrative |
+
+This is the same boundary as the Fluid Step case above: encounter-side rules
+belong on the DM Screen, not the sheet.
+
+### An unproven reentrancy risk, defended rather than asserted safe
+
+`_applyBeastheartCompanionBonuses()` reads `getFeatureCalculations()`, a broad
+derivation. No path from that derivation back into companion recalculation was
+observed across the full suite, but it could not be **proven** impossible, so
+the honest position is "unproven", not "safe".
+
+Rather than leave it at that, the method carries a reentrancy guard: a nested
+call is refused, logs a named warning, and returns — converting a hypothetical
+stack overflow into a diagnosable no-op. The guard releases in a `finally`, so a
+throw inside the body cannot wedge it permanently. Both behaviours are pinned by
+tests in `CharacterSheetBeastheartCompanion.test.js`, so the insurance has been
+fired at least once rather than merely written.
+
+**If that warning ever appears in the wild, the cycle is real** and the offending
+calculation should stop reaching into companions.
+
+Additionally, **Mystic Connection (`BST:MC`) is not offered as a pick.** The 15
+MC optional features map 1:1 to the 15 companions and each carries a
+prerequisite naming its companion, so choosing a companion already determines
+the connection. Surfacing it as a chooser would invite an invalid selection.
+
+---
+
 *Previous: [Testing Strategy](./09-testing-strategy.md) | Next: [Future Roadmap](./11-future-roadmap.md)*

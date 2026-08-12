@@ -7421,8 +7421,17 @@ class CharacterSheetNpcExporter {
 			wholeFeature: true,
 		});
 
-		// Crimson Rite is the Blood Hunter's signature damage and is applied to a specific
-		// held weapon, so the attack line is the only place it can honestly be stated.
+		// Primal Strike (Beastheart 8th) — "Once on each of your turns when you hit a
+		// creature with a weapon attack" — melee or ranged, so it is not melee-only.
+		// The damage type is the player's own pick, stored on the state.
+		push(calculations.primalStrikeDamage, "once per turn", {
+			sourceName: "Primal Strike",
+			meleeOnly: false,
+			damageType: calculations.primalStrikeDamageType || "",
+			wholeFeature: true,
+		});
+
+		// Crimson Rite is the Blood Hunter's signature damage and is applied to a specific		// held weapon, so the attack line is the only place it can honestly be stated.
 		push(calculations.crimsonRiteDamage, "while a rite is active on the weapon", {
 			sourceName: "Crimson Rite",
 		});
@@ -11513,6 +11522,7 @@ class CharacterSheetNpcExporter {
 		// but crediting them once each keeps the estimate conservative.
 		const keys = [
 			"rageDamage", "divineStrikeDamage", "crimsonRiteDamage", "sneakAttackDamage",
+			"primalStrikeDamage",
 			"improvedDivineSmiteDamage", "hexbladeCurseDamage", "brutalStrikeDamage",
 			"martialArtsBonusDamage", "huntersMarkDamage", "radiantStrikesDamage",
 		];

@@ -7615,17 +7615,26 @@ class CharacterSheetClassUtils {
 	 * prevent. MCDM's Talent ("Psionic Exertion", TalPsi) is the motivating case, but the
 	 * logic is entirely generic: any class or brew with the same shape gets a picker for free.
 	 *
-	 * Two signals are combined:
-	 *  - the ENUMERATING feature (the one carrying `refOptionalfeature` entries) contributes
-	 *    a count of 1 at its own level;
-	 *  - any sibling feature whose prose points back at it with a
+	 * Three signals are combined, in priority order:
+	 *  - an ENUMERATING feature whose `refOptionalfeature` entries sit inside an
+	 *    `{"type": "options", "count": N}` wrapper contributes exactly N at its own level.
+	 *    This is the canonical 5etools shape and carries the authoritative number, so it is
+	 *    always preferred over inference. MCDM's Beastheart ("Primal Exploits", BST) is the
+	 *    motivating case — its class table reads 3/5/7 and the wrappers read 3/2/2.
+	 *  - an enumerating feature with NO `options` wrapper contributes 1 at its own level
+	 *    (the Talent shape).
+	 *  - any sibling feature whose prose points back at an enumerating feature with a
 	 *    `{@classFeature <Name>|<Class>|<Source>|<Level>}` tag is treated as an "additional
 	 *    option" improvement and contributes +1 at ITS level.
+	 *
+	 * Features that SHARE A NAME across levels (Beastheart grants "Primal Exploits" at 2, 10
+	 * and 17) are one progression, accumulated cumulatively in level order — the sheet's
+	 * progressions are cumulative totals, not per-level deltas.
 	 *
 	 * The featureType is looked up from the referenced optional features themselves, so no
 	 * per-class registry is needed.
 	 *
-	 * Mutates `classData` in place (idempotent — an existing progression for the same
+	 * Mutates `entity` in place (idempotent — an existing progression for the same
 	 * featureType is never overwritten, so hand-authored data always wins).
 	 *
 	 * @param {*} classData class entity
@@ -7639,7 +7648,44 @@ class CharacterSheetClassUtils {
 		const own = classFeatures.filter(f =>
 			f?.className === classData.name
 			&& (!f.classSource || !classData.source || f.classSource === classData.source));
-		if (!own.length) return false;
+
+		return CharacterSheetClassUtils._deriveOptionalFeatureProgressionsFor(classData, own, optionalFeatures);
+	}
+
+	/**
+	 * Subclass counterpart of {@link deriveOptionalFeatureProgressions}. Subclasses declare
+	 * their own `optionalfeatureProgression`, read by `getOptionalFeatureGains` via
+	 * `subclassData`, so brews that enumerate subclass picks only as inline
+	 * `refOptionalfeature` entries need the same synthesis (Beastheart's Infernal/Primordial
+	 * bonds grant an exploit at 3 and another at 11 this way).
+	 *
+	 * @param {*} subclassData subclass entity
+	 * @param {Array<*>} subclassFeatures all subclassFeature entities (any subclass; filtered here)
+	 * @param {Array<*>} optionalFeatures all optionalfeature entities, for featureType lookup
+	 * @returns {boolean} whether a progression was added
+	 */
+	static deriveSubclassOptionalFeatureProgressions (/** @type {*} */ subclassData, /** @type {*} */ subclassFeatures, /** @type {*} */ optionalFeatures) {
+		if (!subclassData?.shortName || !Array.isArray(subclassFeatures) || !subclassFeatures.length) return false;
+
+		const own = subclassFeatures.filter(f =>
+			f?.subclassShortName === subclassData.shortName
+			&& (!f.subclassSource || !subclassData.source || f.subclassSource === subclassData.source)
+			&& (!f.className || !subclassData.className || f.className === subclassData.className));
+
+		return CharacterSheetClassUtils._deriveOptionalFeatureProgressionsFor(subclassData, own, optionalFeatures);
+	}
+
+	/**
+	 * Shared engine behind the class- and subclass-level derivations. `own` is the already
+	 * filtered set of features belonging to `entity`.
+	 *
+	 * @param {*} entity class or subclass entity, mutated in place
+	 * @param {Array<*>} own that entity's own features
+	 * @param {Array<*>} optionalFeatures all optionalfeature entities, for featureType lookup
+	 * @returns {boolean} whether a progression was added
+	 */
+	static _deriveOptionalFeatureProgressionsFor (/** @type {*} */ entity, /** @type {*} */ own, /** @type {*} */ optionalFeatures) {
+		if (!own?.length) return false;
 
 		const optByUid = new Map();
 		(optionalFeatures || []).forEach(of => {
@@ -7648,27 +7694,63 @@ class CharacterSheetClassUtils {
 		});
 
 		const existingTypes = new Set(
-			(classData.optionalfeatureProgression || []).flatMap((/** @type {*} */ p) => p.featureType || []),
+			(entity.optionalfeatureProgression || []).flatMap((/** @type {*} */ p) => p.featureType || []),
 		);
 
-		/** Collect every `refOptionalfeature` uid nested anywhere in an entries tree. */
-		const collectRefs = (/** @type {*} */ node, /** @type {Set<string>} */ acc) => {
+		/**
+		 * Collect `refOptionalfeature` uids nested anywhere in an entries tree, and the
+		 * explicit grant count declared by any enclosing `{"type": "options", "count": N}`.
+		 * `count` is null when no wrapper declared one, so callers can distinguish
+		 * "author said N" from "author said nothing".
+		 */
+		const collect = (/** @type {*} */ node, /** @type {*} */ acc, /** @type {*} */ optionsCount) => {
 			if (!node) return;
-			if (Array.isArray(node)) return node.forEach(n => collectRefs(n, acc));
+			if (Array.isArray(node)) return node.forEach(n => collect(n, acc, optionsCount));
 			if (typeof node !== "object") return;
-			if (node.type === "refOptionalfeature" && typeof node.optionalfeature === "string") acc.add(node.optionalfeature);
-			collectRefs(node.entries, acc);
-			collectRefs(node.items, acc);
+			if (node.type === "refOptionalfeature" && typeof node.optionalfeature === "string") {
+				acc.refs.add(node.optionalfeature);
+				if (optionsCount != null) acc.declared.add(optionsCount);
+			}
+			// An `options` node with an explicit count governs the refs beneath it. A nested
+			// `options` overrides its ancestor for its own subtree.
+			const nextCount = node.type === "options" && Number.isFinite(node.count) ? node.count : optionsCount;
+			collect(node.entries, acc, nextCount);
+			collect(node.items, acc, nextCount);
 		};
+
+		/** @returns {{refs: Set<string>, count: number}} */
+		const readFeature = (/** @type {*} */ feature) => {
+			const acc = {refs: new Set(), declared: new Set()};
+			collect(feature.entries, acc, null);
+			// Sum sibling `options` wrappers (a feature may present two independent picks);
+			// fall back to 1 for the wrapper-less Talent shape.
+			const count = acc.declared.size
+				? [...acc.declared].reduce((a, b) => a + b, 0)
+				: 1;
+			return {refs: acc.refs, count};
+		};
+
+		// Same-named features across levels are ONE progression (Beastheart's three
+		// "Primal Exploits" grants), so group before deriving.
+		/** @type {Map<string, Array<*>>} */ const byName = new Map();
+		own.forEach(feature => {
+			if (!feature?.name) return;
+			const key = feature.name.toLowerCase();
+			if (!byName.has(key)) byName.set(key, []);
+			byName.get(key).push(feature);
+		});
 
 		let added = false;
 
-		own.forEach(feature => {
-			/** @type {Set<string>} */ const refs = new Set();
-			collectRefs(feature.entries, refs);
-			if (!refs.size) return;
+		byName.forEach(group => {
+			const enumerating = group
+				.map(feature => ({feature, ...readFeature(feature)}))
+				.filter(it => it.refs.size)
+				.sort((a, b) => (Number(a.feature.level) || 0) - (Number(b.feature.level) || 0));
+			if (!enumerating.length) return;
 
-			const featureTypes = [...new Set([...refs]
+			const featureTypes = [...new Set(enumerating
+				.flatMap(it => [...it.refs])
 				.map(uid => optByUid.get(uid.toLowerCase()))
 				.flatMap(of => of?.featureType || []))];
 			if (!featureTypes.length) return;
@@ -7676,26 +7758,32 @@ class CharacterSheetClassUtils {
 			if (featureTypes.some(ft => existingTypes.has(ft))) return;
 
 			/** @type {Record<number, number>} */ const progression = {};
-			const baseLevel = Number(feature.level) || 1;
-			progression[baseLevel] = 1;
+			let running = 0;
+			enumerating.forEach(it => {
+				const lvl = Number(it.feature.level) || 1;
+				running += it.count;
+				progression[lvl] = running;
+			});
+
+			const baseFeature = enumerating[0].feature;
+			const baseLevel = Number(baseFeature.level) || 1;
 
 			// "you gain an additional {@classFeature Psionic Exertion|Talent|TalPsi|3} option"
 			const backRef = new RegExp(
-				`\\{@classFeature\\s+${feature.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\|`,
+				`\\{@(?:sub)?classFeature\\s+${baseFeature.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\|`,
 				"i",
 			);
-			const improvementLevels = own
-				.filter(other => other !== feature && backRef.test(JSON.stringify(other.entries || "")))
+			const enumeratingFeatures = new Set(enumerating.map(it => it.feature));
+			own
+				.filter(other => !enumeratingFeatures.has(other) && backRef.test(JSON.stringify(other.entries || "")))
 				.map(other => Number(other.level) || 0)
-				.filter(lvl => lvl > baseLevel)
-				.sort((a, b) => a - b);
+				.filter(lvl => lvl > baseLevel && progression[lvl] == null)
+				.sort((a, b) => a - b)
+				.forEach(lvl => { progression[lvl] = ++running; });
 
-			let count = 1;
-			improvementLevels.forEach(lvl => { progression[lvl] = ++count; });
-
-			classData.optionalfeatureProgression = classData.optionalfeatureProgression || [];
-			classData.optionalfeatureProgression.push({
-				name: feature.name,
+			entity.optionalfeatureProgression = entity.optionalfeatureProgression || [];
+			entity.optionalfeatureProgression.push({
+				name: baseFeature.name,
 				featureType: featureTypes,
 				progression,
 				_derived: true,
@@ -7733,6 +7821,39 @@ class CharacterSheetClassUtils {
 		return 0;
 	}
 
+	/**
+	 * Sum two CUMULATIVE optionalfeature progressions into one. Progressions store running
+	 * totals keyed by threshold level, so the sum is evaluated at the union of both key sets
+	 * (plus level 1, so a curve that starts later still reads correctly below its first key).
+	 *
+	 * Used when a subclass grants extra picks from a pool the class already grants from —
+	 * the two curves are additive, not competing (see `getOptionalFeatureGains`).
+	 *
+	 * @param {*} a cumulative progression (object keyed by level, or per-level array)
+	 * @param {*} b cumulative progression
+	 * @returns {Record<number, number>} summed cumulative progression
+	 */
+	static _sumCumulativeProgressions (/** @type {*} */ a, /** @type {*} */ b) {
+		const keysOf = (/** @type {*} */ p) => {
+			if (Array.isArray(p)) return p.map((_, i) => i + 1);
+			if (p && typeof p === "object") return Object.keys(p).map(k => parseInt(k)).filter(n => !Number.isNaN(n));
+			return [];
+		};
+		const levels = [...new Set([1, ...keysOf(a), ...keysOf(b)])].sort((x, y) => x - y);
+		/** @type {Record<number, number>} */ const out = {};
+		let prev = null;
+		levels.forEach(lvl => {
+			const total = CharacterSheetClassUtils._readOptFeatureProgressionCount(a, lvl)
+				+ CharacterSheetClassUtils._readOptFeatureProgressionCount(b, lvl);
+			// Only emit thresholds where the running total actually changes.
+			if (total !== prev) {
+				out[lvl] = total;
+				prev = total;
+			}
+		});
+		return out;
+	}
+
 	static filterOptionalFeaturesForProgressionSource (options, featureTypes, progressionSource) {
 		if (featureTypes?.includes("MV:B") && progressionSource !== Parser.SRC_PHB) {
 			return (options || []).filter(opt => opt.source === Parser.SRC_XPHB);
@@ -7748,10 +7869,10 @@ class CharacterSheetClassUtils {
 	 *
 	 * Reads both the CLASS-level `optionalfeatureProgression` and the active subclass's
 	 * progression (e.g. Arcane Archer "AS", Battle Master "MV:B"). A subclass progression
-	 * is merged only when its featureType set does NOT intersect any class-level
-	 * progression featureType — this prevents miscounting shared types (e.g. Champion's
-	 * subclass "FS:F" vs the Fighter class "FS:F", where a shared global count would
-	 * cancel the gain). A subclass CTM:* progression is skipped here (the level-up
+	 * whose featureType set intersects a class-level progression is SUMMED into it, because
+	 * both store cumulative totals against one shared "already known" count (PHB Champion's
+	 * level-10 second Fighting Style; brew subclasses granting extra picks from the class
+	 * pool). A subclass CTM:* progression is skipped here (the level-up
 	 * bonus-method path owns that grant), but the CLASS-level CTM:* progression is
 	 * still processed — with subclass-granted bonus methods discounted from the
 	 * "already known" count so they don't absorb a class-table increment
@@ -7768,9 +7889,6 @@ class CharacterSheetClassUtils {
 		/** @type {*[]} */ const gains = [];
 
 		const classProgressions = classData.optionalfeatureProgression || [];
-		const classFeatureTypeSet = new Set(
-			classProgressions.flatMap((/** @type {*} */ p) => p.featureType || []),
-		);
 
 		/** @type {*[]} */ const progressions = [...classProgressions];
 
@@ -7780,8 +7898,28 @@ class CharacterSheetClassUtils {
 			const types = p.featureType || [];
 			// Skip combat methods (handled by the bonus-method augmentation path).
 			if (types.some((/** @type {*} */ ft) => ft.startsWith?.("CTM:"))) continue;
-			// Overlap-guard: skip if this type also exists at class level (shared-count hazard).
-			if (types.some((/** @type {*} */ ft) => classFeatureTypeSet.has(ft))) continue;
+
+			// A subclass progression sharing a featureType with the class table is ADDITIVE
+			// to it, not a competing total. Both store CUMULATIVE counts and `existingOfType`
+			// counts every known feature of the type, so pushing the subclass progression as
+			// a peer would make the two cancel — which is why this used to be skipped
+			// outright. Skipping, though, means the pick is never offered at all: PHB
+			// Champion's level-10 second Fighting Style (`{"10": 1}` against Fighter's
+			// `{"1": 1}`) simply never appeared (CS-BUG-140). Summing the two cumulative
+			// curves gives the right total at every level for both that case and brews whose
+			// subclass grants extra picks from the class's own pool (Beastheart's Infernal /
+			// Primordial bonds add exploits at 3 and 11 on top of the class's 3/5/7).
+			const overlapIdx = progressions.findIndex((/** @type {*} */ cp) =>
+				(cp.featureType || []).some((/** @type {*} */ ft) => types.includes(ft)));
+			if (overlapIdx >= 0) {
+				const base = progressions[overlapIdx];
+				progressions[overlapIdx] = {
+					...base,
+					progression: CharacterSheetClassUtils._sumCumulativeProgressions(base.progression, p.progression),
+					required: base.required || p.required || false,
+				};
+				continue;
+			}
 			progressions.push(p);
 		}
 

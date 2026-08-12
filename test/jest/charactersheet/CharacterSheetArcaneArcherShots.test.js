@@ -10,8 +10,8 @@
  *  - getKnownArcaneShots: surfaces only "AS" optional features.
  *  - Save DC: 8 + prof + (CON TGTT / INT official).
  *  - Subclass-aware option gains: AS progression surfaces at 3/7/10/15/18 with the
- *    correct cumulative counts (root-cause fix in getOptionalFeatureGains), plus a
- *    no-regression guard for class/subclass shared featureTypes.
+ *    correct cumulative counts (root-cause fix in getOptionalFeatureGains), plus
+ *    coverage of class/subclass shared featureTypes being summed (CS-BUG-140).
  */
 
 import "./setup.js";
@@ -298,8 +298,61 @@ describe("Arcane Archer — Arcane Shot system", () => {
 			expect(gains.find(g => g.featureTypes.includes("AS"))).toBeUndefined();
 		});
 
-		it("overlap-guard: a subclass progression sharing a class featureType is NOT double-added", () => {
+		// CS-BUG-140 replaced the blanket overlap-guard ("skip any subclass progression
+		// whose featureType the class also grants") with an additive merge. These two
+		// tests pin what the guard must STILL refuse to merge, so that removing the old
+		// behaviour cannot silently re-introduce the opposite bug — over-granting.
+		it("still refuses to merge a subclass CTM:* progression (the level-up path owns it)", () => {
+			makeArcaneArcher(3);
+			const classWithCtm = {
+				name: "Fighter",
+				optionalfeatureProgression: [
+					{name: "Combat Methods", featureType: ["CTM:1AM"], progression: {1: 1}},
+				],
+			};
+			const subWithCtm = {
+				name: "Sub",
+				optionalfeatureProgression: [
+					{name: "More Methods", featureType: ["CTM:1AM"], progression: {3: 2}},
+				],
+			};
+			const gain = CharacterSheetClassUtils.getOptionalFeatureGains(
+				classWithCtm, 2, 3, state, subWithCtm,
+			).find(g => g.featureTypes.includes("CTM:1AM"));
+			// The CLASS-level CTM curve is honoured (total 1), but the subclass's {3: 2}
+			// is NOT summed in — were it merged the total would read 3.
+			expect(gain.totalCount).toBe(1);
+		});
+
+		it("does not over-grant when only the class declares a shared featureType", () => {
 			makeArcaneArcher(10);
+			const fighterOnly = {
+				name: "Fighter",
+				optionalfeatureProgression: [
+					{name: "Fighting Style", featureType: ["FS:F"], progression: {1: 1, 10: 2}},
+				],
+			};
+			// A subclass that grants a DIFFERENT type must leave the shared curve alone —
+			// the merge is per-featureType, not per-subclass.
+			const unrelatedSub = {
+				name: "Unrelated",
+				optionalfeatureProgression: [
+					{name: "Arcane Shot", featureType: ["AS"], progression: {3: 2}},
+				],
+			};
+			const gain = CharacterSheetClassUtils.getOptionalFeatureGains(
+				fighterOnly, 9, 10, state, unrelatedSub,
+			).find(g => g.featureTypes.includes("FS:F"));
+			// Two from the class curve alone — the unrelated subclass does not inflate it.
+			expect(gain.totalCount).toBe(2);
+		});
+
+		it("sums a subclass progression that shares a class featureType (CS-BUG-140)", () => {
+			makeArcaneArcher(10);
+			// PHB Champion: Fighter grants one Fighting Style at 1, and the subclass grants a
+			// SECOND at 10. Both curves are cumulative against one shared "already known"
+			// count, so they must be summed — skipping the subclass curve (the old behaviour)
+			// meant the level-10 pick was never offered at all.
 			const fighterWithClassFs = {
 				name: "Fighter",
 				optionalfeatureProgression: [
@@ -312,14 +365,59 @@ describe("Arcane Archer — Arcane Shot system", () => {
 					{name: "Additional Fighting Style", featureType: ["FS:F"], progression: {10: 1}},
 				],
 			};
+
+			// The character already knows the level-1 Fighting Style.
+			state.addFeature({
+				name: "Archery",
+				source: "PHB",
+				featureType: "Optional Feature",
+				optionalFeatureTypes: ["FS:F"],
+				description: "<p>Archery</p>",
+				entries: ["Archery"],
+			});
+
 			const withSub = CharacterSheetClassUtils.getOptionalFeatureGains(
 				fighterWithClassFs, 9, 10, state, championSub,
-			);
+			).find(g => g.featureTypes.includes("FS:F"));
+			// Exactly ONE new pick at 10, for a running total of two.
+			expect(withSub).toBeTruthy();
+			expect(withSub.currentCount).toBe(1);
+			expect(withSub.newCount).toBe(1);
+			expect(withSub.totalCount).toBe(2);
+
+			// Without the subclass there is no second style, so nothing is offered.
 			const withoutSub = CharacterSheetClassUtils.getOptionalFeatureGains(
 				fighterWithClassFs, 9, 10, state, null,
+			).find(g => g.featureTypes.includes("FS:F"));
+			expect(withoutSub).toBeUndefined();
+		});
+
+		it("does not re-offer a summed subclass pick on a later level-up", () => {
+			makeArcaneArcher(11);
+			const fighterWithClassFs = {
+				name: "Fighter",
+				optionalfeatureProgression: [
+					{name: "Fighting Style", featureType: ["FS:F"], progression: {1: 1}},
+				],
+			};
+			const championSub = {
+				name: "Champion",
+				optionalfeatureProgression: [
+					{name: "Additional Fighting Style", featureType: ["FS:F"], progression: {10: 1}},
+				],
+			};
+			["Archery", "Defense"].forEach(name => state.addFeature({
+				name,
+				source: "PHB",
+				featureType: "Optional Feature",
+				optionalFeatureTypes: ["FS:F"],
+				description: `<p>${name}</p>`,
+				entries: [name],
+			}));
+			const gains = CharacterSheetClassUtils.getOptionalFeatureGains(
+				fighterWithClassFs, 10, 11, state, championSub,
 			);
-			// Subclass FS:F is skipped (shared type) → identical result with or without it.
-			expect(withSub).toEqual(withoutSub);
+			expect(gains.find(g => g.featureTypes.includes("FS:F"))).toBeUndefined();
 		});
 	});
 });

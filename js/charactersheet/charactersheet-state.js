@@ -2983,6 +2983,30 @@ const FeatureEffectRegistry = {
 			{type: "modifier", modType: "save:wis:advantage", value: 1},
 			{type: "modifier", modType: "save:cha:advantage", value: 1},
 		]);
+
+		// ======= BEASTHEART (MCDM "Beastheart and Monstrous Companions", BST) =======
+		// Loyal to the End (13th) — "You and your companion can't be charmed or
+		// frightened." The companion half is applied in `_applyBeastheartCompanionBonuses`;
+		// this is the caregiver's half.
+		this.register("Loyal to the End", [
+			{type: "conditionImmunity", condition: "charmed"},
+			{type: "conditionImmunity", condition: "frightened"},
+		]);
+		// Keen Senses (14th) — advantage on Wisdom (Perception) checks relying on
+		// hearing, sight or smell. Registered as a sub-typed conditional so it surfaces
+		// in the per-roll conditional picker rather than silently applying to Perception
+		// checks it does not cover (e.g. a tremorsense-style vibration check).
+		this.register("Keen Senses", [
+			{type: "modifier", modType: "check:advantage:perception", value: 1, conditional: "relying on hearing, sight, or smell"},
+		]);
+		// Synchronized Stealth (11th, Hunter Bond) — advantage on the Dexterity (Stealth)
+		// check made as part of the Hide action, but ONLY when taken within 5 feet of the
+		// companion. That proximity condition is positional, so this is registered as a
+		// sub-typed conditional: it surfaces in the per-roll picker for the player to opt
+		// into rather than silently applying to every Stealth check.
+		this.register("Synchronized Stealth", [
+			{type: "modifier", modType: "check:advantage:stealth", value: 1, conditional: "hiding within 5 feet of your companion"},
+		]);
 	},
 
 	/**
@@ -9470,6 +9494,10 @@ class CharacterSheetState {
 		// getActiveStateEffects), so toggling the state on/off updates max HP live.
 		hp += this._aggregateActiveStateHpEffects().total;
 
+		// Beast Vitality (Protector Bond, 3rd) — "+3, and +1 again whenever you gain a
+		// level in this class", which resolves to exactly the Beastheart level.
+		hp += this._getBeastheartBeastVitalityHp();
+
 		// Apply temporary maximum-HP reductions last so they reduce the complete
 		// maximum, including feature and spell-effect increases such as Aid.
 		hp -= this.getMaxHpReduction();
@@ -10759,7 +10787,64 @@ class CharacterSheetState {
 		if (this._data.scholarExpertise === skill && baseProficiency >= 1) {
 			return 2; // Expertise level
 		}
+		// Beastheart grants several skills outright, some with a doubled proficiency bonus.
+		// Only override when the floor is strictly higher, so a legacy boolean `true`
+		// stored in `skillProficiencies` is returned unchanged rather than coerced to 1.
+		const beastheartFloor = this._getBeastheartSkillProficiencyFloor(skill, baseProficiency);
+		if (beastheartFloor > baseProficiency) return beastheartFloor;
 		return baseProficiency;
+	}
+
+	/**
+	 * The proficiency level Beastheart features guarantee in a skill.
+	 *
+	 * Reads the class and bond entries directly rather than through
+	 * `getFeatureCalculations()`, because this sits on the hot skill-resolution path that
+	 * the feature calculations themselves consult.
+	 *
+	 * @param {string} skill - Already-normalized skill key (e.g. `"animalhandling"`).
+	 * @param {number} baseProficiency - The character's own proficiency, since Master
+	 *   Caregiver only doubles the bonus for a character who was already proficient.
+	 * @returns {number} 0 = none, 1 = proficient, 2 = doubled proficiency bonus.
+	 * @private
+	 */
+	_getBeastheartSkillProficiencyFloor (skill, baseProficiency = 0) {
+		const cls = this._getBeastheartClass();
+		const level = cls?.level || 0;
+		if (!level) return 0;
+
+		// Callers reach this both with the stored key ("animalhandling") and with the
+		// display name ("Animal Handling"), so normalise rather than trusting the caller.
+		const key = String(skill || "").toLowerCase().replace(/[\s'’]/g, "");
+
+		// Master Caregiver (3rd): proficiency in Animal Handling, or a doubled
+		// proficiency bonus if the character already had it.
+		if (key === "animalhandling" && level >= 3) return baseProficiency >= 1 ? 2 : 1;
+
+		if (level < 3) return 0;
+		const subclass = this.getEffectiveSubclassForClass(cls);
+		const bond = subclass?.shortName || subclass?.name || "";
+		if (!bond) return 0;
+
+		// Hunter's Instincts (3rd): proficiency in Survival AND a doubled bonus, granted
+		// together — unlike Master Caregiver this does not require prior proficiency.
+		if (/hunter/i.test(bond) && key === "survival") return 2;
+
+		// Fury of the Wise (3rd): proficiency in Intimidation.
+		if (/ferocious/i.test(bond) && key === "intimidation") return 1;
+
+		// Primal Understanding (3rd): proficiency in Nature.
+		if (/primordial/i.test(bond) && key === "nature") return 1;
+
+		// Devil's Understanding (3rd): Arcana or Religion, the player's choice.
+		if (/infernal/i.test(bond) && (key === "arcana" || key === "religion")) {
+			const choice = (this._getBeastheartFeatureChoice("Devil's Understanding") || "").toLowerCase();
+			if (choice.includes(key)) return 1;
+			// Default to Arcana so the grant is never silently lost before a choice is made.
+			if (!choice && key === "arcana") return 1;
+		}
+
+		return 0;
 	}
 
 	/**
@@ -11003,6 +11088,13 @@ class CharacterSheetState {
 			const languages = this._data.languages || [];
 			const languageBonus = languages.filter(lang => lang.toLowerCase() !== "common").length;
 			if (languageBonus) out.push({name: "Linguistics (languages known)", value: languageBonus});
+		}
+
+		// Fury of the Wise (Ferocious Bond, 3rd): Intimidation checks gain the
+		// beastheart's Wisdom modifier on top of the usual Charisma-based total.
+		if (skill === "intimidation") {
+			const furyBonus = this.getFeatureCalculations().furyOfTheWiseBonus || 0;
+			if (furyBonus) out.push({name: "Fury of the Wise", value: furyBonus});
 		}
 
 		return out;
@@ -17983,6 +18075,82 @@ class CharacterSheetState {
 							calculations.timePocketDuration = "1d4 + 1 rounds";
 						}
 					}
+					break;
+				}
+				case "Beastheart": {
+					// MCDM "Beastheart and Monstrous Companions" (BST). Wisdom drives every
+					// derived number; the companion itself is a `_data.companions[]` record
+					// whose stat block scales through `ScaleClassSummonedCreature`.
+					const wisMod = this.getAbilityMod("wis");
+
+					calculations.hasCompanion = true;
+					calculations.hasNaturalLanguage = true;
+					// Bonding costs the beastheart a level of exhaustion, so the sheet states
+					// the price rather than silently applying it.
+					calculations.companionReviveExhaustion = 1;
+
+					if (level >= 2) {
+						calculations.hasPrimalExploits = true;
+						calculations.exploitSaveDc = 8 + profBonus + wisMod - exhaustionPenalty;
+						calculations.exploitSaveAbility = "wis";
+						// The class table's cumulative "Primal Exploits" column.
+						calculations.primalExploitsKnown = level >= 17 ? 7 : level >= 10 ? 5 : 3;
+						// Superior Ferocity lets the companion's own ferocity actions borrow
+						// the exploit DC when it is the better number.
+						calculations.hasSuperiorFerocity = true;
+						calculations.superiorFerocityDc = calculations.exploitSaveDc;
+					}
+
+					if (level >= 3) {
+						calculations.hasMasterCaregiver = true;
+						// Proficiency is granted; expertise only applies if it was already held.
+						calculations.masterCaregiverSkill = "animal handling";
+					}
+
+					if (level >= 5) {
+						calculations.hasBeyondInstinct = true;
+						// L5 +1, L10 +3, L15 +5 extra ferocity per start-of-turn roll.
+						calculations.beyondInstinctFerocityBonus = level >= 15 ? 5 : level >= 10 ? 3 : 1;
+						// One save + one skill proficiency at each of L5/L10/L15.
+						calculations.beyondInstinctSavePicks = level >= 15 ? 3 : level >= 10 ? 2 : 1;
+						calculations.beyondInstinctSkillPicks = calculations.beyondInstinctSavePicks;
+
+						calculations.hasImprovedSignatureAttack = true;
+						// L5 +1 die, L11 +2, L17 +3 (the feature text counts total dice
+						// including the base one: "a total of three/four damage dice").
+						calculations.signatureAttackBonusDice = level >= 17 ? 3 : level >= 11 ? 2 : 1;
+						calculations.companionAttacksCountAsMagical = true;
+					}
+
+					if (level >= 6) {
+						calculations.hasFaithfulCompanion = true;
+						calculations.hasRejuvenatingFerocity = true;
+						calculations.rejuvenatingFerocityUses = Math.max(1, wisMod);
+					}
+
+					if (level >= 8) {
+						calculations.hasPrimalStrike = true;
+						calculations.primalStrikeDamage = level >= 14 ? "2d8" : "1d8";
+						calculations.primalStrikeDamageType = this._getBeastheartPrimalStrikeDamageType();
+					}
+
+					if (level >= 9) calculations.hasMysticConnection = true;
+					if (level >= 13) calculations.hasLoyalToTheEnd = true;
+					if (level >= 14) calculations.hasKeenSenses = true;
+
+					if (level >= 18) {
+						calculations.hasSummonTheWilds = true;
+						calculations.summonTheWildsUses = 1;
+						calculations.summonTheWildsDc = calculations.exploitSaveDc;
+						calculations.summonTheWildsSaveAbility = "wis";
+					}
+
+					if (level >= 20) {
+						calculations.hasUnbreakableFriendship = true;
+						calculations.unbreakableFriendshipInitiativeFerocity = "1d10";
+					}
+
+					this._applyBeastheartBondCalculations(calculations, cls, level, {wisMod, profBonus, exhaustionPenalty});
 					break;
 				}
 				case "Blood Hunter": {
@@ -36175,6 +36343,7 @@ class CharacterSheetState {
 		this._ensureMeteorKnightResources();
 		this._ensureSteelHawkResources();
 		this._ensureGamblerResources();
+		this._ensureBeastheartResources();
 		this.ensureBloodHunterResources();
 		this.ensureTalentResources();
 		this._ensureChannelDivinityUses();
@@ -58922,6 +59091,7 @@ class CharacterSheetState {
 		MOUNT: "mount", // Find Steed / Find Greater Steed
 		INFERNAL: "infernal", // TGTT Fiendish Bloodline summons
 		CLASS_SUMMON: "class_summon", // Class/subclass feature summons that scale off the summoner
+		BEASTHEART_COMPANION: "beastheart_companion", // MCDM Beastheart bonded companion (carries a ferocity track)
 		CUSTOM: "custom", // User-created companions
 	};
 
@@ -59177,6 +59347,12 @@ class CharacterSheetState {
 			conditions: [],
 			exhaustion: 0,
 
+			// Ferocity (MCDM companions — see the FEROCITY region below).
+			// Unbounded, per-companion, reset at end of combat rather than on a rest,
+			// which is why it lives here rather than in `_data.resources[]`.
+			ferocity: companionData.ferocity || 0,
+			isRampaging: false,
+
 			// Attack data (for quick reference)
 			attacks: companionData.attacks || [],
 
@@ -59322,8 +59498,820 @@ class CharacterSheetState {
 		return companion.hp.current - before;
 	}
 
-	// ---- Grouped Companion HP Management (for Conjure spells) ----
+	// =========================================================================
+	// FEROCITY (MCDM companion rules)
+	// =========================================================================
+	// #region Ferocity
+	//
+	// Ferocity is a per-companion track with rules unlike any pool the sheet
+	// already models, which is why it lives on the companion record rather than
+	// in `_data.resources[]`:
+	//
+	//   * it is UNBOUNDED — "there is no maximum to the level of ferocity a
+	//     companion can gain" — so it has no `max` to spend down from;
+	//   * it resets at the END OF COMBAT, not on a rest, so the rest pipeline
+	//     must not touch it;
+	//   * it belongs to the companion, not the character — swapping companions
+	//     swaps the track.
+	//
+	// Forcing it into the resource pool would mean a fake `max`, a `recharge`
+	// value that lies, and a pool explicitly skipped by `restCompanions` — a
+	// parallel system wearing the resource system's clothes.
+	//
+	// Rules implemented here (MCDM "Companion Creatures", p6):
+	//   Gain      — at the start of the shared turn, if not incapacitated:
+	//               1d4 + hostile creatures within 5 ft (+ Beyond Instinct's 1).
+	//   Rampage   — risked at >= 10 ferocity; caregiver Wis (Animal Handling)
+	//               vs DC 5 + ferocity. Resolving the rampage drops ferocity to 0.
+	//   Exploits  — spend ferocity; legal while the companion is unconscious,
+	//               illegal while rampaging.
+	//   End of    — companion regains HP equal to its ferocity (unless dying),
+	//   combat      then ferocity drops to 0.
 
+	/** Ferocity at or above which a companion risks a rampage. */
+	static FEROCITY_RAMPAGE_THRESHOLD = 10;
+
+	/**
+	 * A companion's current ferocity.
+	 * @param {string} companionId
+	 * @returns {number} 0 when the companion is unknown or predates the field.
+	 */
+	getCompanionFerocity (companionId) {
+		return this.getCompanion(companionId)?.ferocity || 0;
+	}
+
+	/**
+	 * Set a companion's ferocity directly (manual correction, undo, DM fiat).
+	 * @param {string} companionId
+	 * @param {number} value - Clamped at 0; deliberately has no upper bound.
+	 * @returns {number} The stored value.
+	 */
+	setCompanionFerocity (companionId, value) {
+		const companion = this.getCompanion(companionId);
+		if (!companion) return 0;
+		companion.ferocity = Math.max(0, Math.floor(value || 0));
+		return companion.ferocity;
+	}
+
+	/**
+	 * The extra ferocity gained per start-of-turn roll from class features.
+	 * Beyond Instinct (5th) is the only source in the base class; keeping it a
+	 * lookup rather than a literal means bond features can contribute too.
+	 * @returns {number}
+	 */
+	getCompanionFerocityGainBonus () {
+		const calc = this.getFeatureCalculations?.() || {};
+		return calc.beyondInstinctFerocityBonus || 0;
+	}
+
+	/**
+	 * Gain ferocity at the start of the shared turn.
+	 *
+	 * @param {string} companionId
+	 * @param {object} [options]
+	 * @param {number} [options.hostilesWithin5=0] - Hostile creatures within 5 ft the
+	 *   companion can see or hear. Creatures sharing one stat block count as one.
+	 * @param {number} [options.roll] - An explicit 1d4 result. Rolled when omitted.
+	 * @param {boolean} [options.applyFeatureBonus=true] - Include Beyond Instinct's +1.
+	 * @returns {object} `{gained, roll, hostiles, bonus, ferocity, rampageRisk, rampageDc}`
+	 *   `gained` is 0 when the companion is incapacitated — the rule is gated on that.
+	 */
+	gainCompanionFerocity (companionId, options = {}) {
+		const companion = this.getCompanion(companionId);
+		const nil = {gained: 0, roll: 0, hostiles: 0, bonus: 0, ferocity: 0, rampageRisk: false, rampageDc: 0};
+		if (!companion) return nil;
+
+		if (this.isCompanionIncapacitated(companionId)) {
+			return {...nil, ferocity: companion.ferocity || 0};
+		}
+
+		const hostiles = Math.max(0, Math.floor(options.hostilesWithin5 || 0));
+		const roll = options.roll != null
+			? Math.max(1, Math.floor(options.roll))
+			: (1 + Math.floor(Math.random() * 4));
+		const bonus = options.applyFeatureBonus === false ? 0 : this.getCompanionFerocityGainBonus();
+
+		const gained = roll + hostiles + bonus;
+		companion.ferocity = Math.max(0, (companion.ferocity || 0) + gained);
+
+		return {
+			gained,
+			roll,
+			hostiles,
+			bonus,
+			ferocity: companion.ferocity,
+			rampageRisk: this.isCompanionRampageRisk(companionId),
+			rampageDc: this.getCompanionRampageDc(companionId),
+		};
+	}
+
+	/**
+	 * Spend ferocity to fuel an exploit or ferocity action.
+	 *
+	 * Refuses when the companion is rampaging ("Ferocity actions can't be used while a
+	 * companion is in a rampage", and the same restriction is printed on exploits), but
+	 * NOT when it is unconscious — exploits are explicitly legal then.
+	 *
+	 * @param {string} companionId
+	 * @param {number} cost
+	 * @returns {object} `{ok, spent, ferocity, reason}` — `reason` is `null` on success,
+	 *   otherwise `"no-companion" | "rampaging" | "insufficient"`.
+	 */
+	spendCompanionFerocity (companionId, cost) {
+		const companion = this.getCompanion(companionId);
+		if (!companion) return {ok: false, spent: 0, ferocity: 0, reason: "no-companion"};
+
+		const amount = Math.max(0, Math.floor(cost || 0));
+		if (companion.isRampaging) {
+			return {ok: false, spent: 0, ferocity: companion.ferocity || 0, reason: "rampaging"};
+		}
+		if ((companion.ferocity || 0) < amount) {
+			return {ok: false, spent: 0, ferocity: companion.ferocity || 0, reason: "insufficient"};
+		}
+
+		companion.ferocity -= amount;
+		return {ok: true, spent: amount, ferocity: companion.ferocity, reason: null};
+	}
+
+	/**
+	 * The DC of the Wisdom (Animal Handling) check to prevent a rampage: 5 + ferocity.
+	 * @param {string} companionId
+	 * @returns {number} 0 when there is no companion.
+	 */
+	getCompanionRampageDc (companionId) {
+		const companion = this.getCompanion(companionId);
+		if (!companion) return 0;
+		return 5 + (companion.ferocity || 0);
+	}
+
+	/**
+	 * Whether the companion is currently at risk of entering a rampage — i.e. at or
+	 * above the threshold and not incapacitated.
+	 * @param {string} companionId
+	 * @returns {boolean}
+	 */
+	isCompanionRampageRisk (companionId) {
+		const companion = this.getCompanion(companionId);
+		if (!companion || companion.isRampaging) return false;
+		if (this.isCompanionIncapacitated(companionId)) return false;
+		return (companion.ferocity || 0) >= CharacterSheetState.FEROCITY_RAMPAGE_THRESHOLD;
+	}
+
+	/**
+	 * A companion counts as incapacitated for ferocity purposes when it carries the
+	 * condition or is at 0 hit points.
+	 * @param {string} companionId
+	 * @returns {boolean}
+	 */
+	isCompanionIncapacitated (companionId) {
+		const companion = this.getCompanion(companionId);
+		if (!companion) return false;
+		if ((companion.hp?.current ?? 1) <= 0) return true;
+		return (companion.conditions || []).some(c => /^(incapacitated|unconscious|paralyzed|petrified|stunned)$/i.test(c));
+	}
+
+	/**
+	 * Resolve the rampage check for a companion.
+	 *
+	 * At 20th level Unbreakable Friendship makes the check succeed automatically while
+	 * the caregiver has at least 1 hit point, so the caller can skip prompting entirely
+	 * when `isAutomatic` is true.
+	 *
+	 * @param {string} companionId
+	 * @param {object} [options]
+	 * @param {boolean} [options.isSuccess] - The check's outcome. Ignored when automatic.
+	 * @param {boolean} [options.isDeclined=false] - Caregiver chose not to check, which
+	 *   the rules treat exactly like a failure.
+	 * @returns {object} `{isRampaging, dc, isAutomatic}`
+	 */
+	resolveCompanionRampageCheck (companionId, options = {}) {
+		const companion = this.getCompanion(companionId);
+		if (!companion) return {isRampaging: false, dc: 0, isAutomatic: false};
+
+		const dc = this.getCompanionRampageDc(companionId);
+		const isAutomatic = this.hasAutomaticRampageSuccess();
+
+		if (options.isDeclined) {
+			companion.isRampaging = true;
+			return {isRampaging: true, dc, isAutomatic};
+		}
+		if (isAutomatic) {
+			companion.isRampaging = false;
+			return {isRampaging: false, dc, isAutomatic: true};
+		}
+
+		companion.isRampaging = !options.isSuccess;
+		return {isRampaging: companion.isRampaging, dc, isAutomatic: false};
+	}
+
+	/**
+	 * Unbreakable Friendship (20th) — automatic success on rampage-prevention checks,
+	 * but only while the caregiver has at least 1 hit point.
+	 * @returns {boolean}
+	 */
+	hasAutomaticRampageSuccess () {
+		const calc = this.getFeatureCalculations?.() || {};
+		if (!calc.hasUnbreakableFriendship) return false;
+		return this.getCurrentHp() > 0;
+	}
+
+	/**
+	 * End a rampage: "their ferocity drops to 0 and they are no longer in a rampage."
+	 * No healing — that is the end-of-combat rule, not this one.
+	 * @param {string} companionId
+	 * @returns {number} The ferocity that was discarded.
+	 */
+	endCompanionRampage (companionId) {
+		const companion = this.getCompanion(companionId);
+		if (!companion) return 0;
+		const discarded = companion.ferocity || 0;
+		companion.ferocity = 0;
+		companion.isRampaging = false;
+		return discarded;
+	}
+
+	/**
+	 * The extra rampage-attack damage: half the companion's ferocity, rounded down.
+	 * Read before `endCompanionRampage`, since that zeroes the track.
+	 * @param {string} companionId
+	 * @returns {number}
+	 */
+	getCompanionRampageBonusDamage (companionId) {
+		return Math.floor(this.getCompanionFerocity(companionId) / 2);
+	}
+
+	/**
+	 * End of combat: "the companion regains hit points equal to their ferocity, and
+	 * their ferocity drops to 0" — the healing is withheld from a dying companion.
+	 *
+	 * @param {string} [companionId] - Omit to end combat for every companion.
+	 * @returns {object[]} One `{companionId, healed, ferocitySpent}` per companion touched.
+	 */
+	endCompanionCombat (companionId = null) {
+		const targets = companionId
+			? [this.getCompanion(companionId)].filter(Boolean)
+			: (this._data.companions || []);
+
+		return targets.map(companion => {
+			const ferocitySpent = companion.ferocity || 0;
+			const isDying = (companion.hp?.current ?? 1) <= 0;
+			const healed = isDying ? 0 : this.healCompanion(companion.id, ferocitySpent);
+			companion.ferocity = 0;
+			companion.isRampaging = false;
+			return {companionId: companion.id, healed, ferocitySpent};
+		});
+	}
+
+	// #endregion
+
+	// =========================================================================
+	// BEASTHEART (MCDM, BST)
+	// =========================================================================
+	// #region Beastheart
+
+	/**
+	 * Beast Vitality (Protector Bond, 3rd) hit-point bonus.
+	 *
+	 * "Your hit point maximum increases by 3, and increases by 1 again whenever you gain
+	 * a level in this class" — which resolves to exactly the Beastheart level, and is NOT
+	 * expressible as either a flat bonus or a per-CHARACTER-level bonus (the two shapes
+	 * the generic named-modifier path supports), so it needs its own resolution here.
+	 *
+	 * The generic description text-parse DOES match the leading "hit point maximum
+	 * increases by 3" and already credits a flat +3 named modifier. Adding the full level
+	 * on top of that would double-count the first 3 points, so whatever that path has
+	 * already contributed is subtracted — the same cross-path dedupe the carry-capacity
+	 * "size increase" handling performs for Powerful Build.
+	 *
+	 * Deliberately reads the class entry directly rather than going through
+	 * `getFeatureCalculations()`: this runs inside `_calculateMaxHp`, and the feature
+	 * calculations reach back into HP, so routing through them would risk recursion.
+	 * @returns {number}
+	 * @private
+	 */
+	_getBeastheartBeastVitalityHp () {
+		const cls = this._getBeastheartClass();
+		const level = cls?.level || 0;
+		if (level < 3) return 0;
+		const subclass = this.getEffectiveSubclassForClass(cls);
+		const bond = subclass?.shortName || subclass?.name || "";
+		if (!/protector/i.test(bond)) return 0;
+
+		const alreadyCredited = (this._data.namedModifiers || [])
+			.filter(m => m.enabled && m.type === "hp" && !m.perLevel)
+			.filter(m => /beast vitality/i.test(`${m.name || ""} ${m.note || ""}`))
+			.reduce((sum, m) => sum + (Number(m.value) || 0), 0);
+
+		return Math.max(0, level - alreadyCredited);
+	}
+
+	/** The character's Beastheart class entry, or null. @private */
+	_getBeastheartClass () {
+		return (this._data.classes || []).find(cls => (cls.name || "").toLowerCase() === "beastheart") || null;
+	}
+
+	/** The active Beastheart companion record, or null. */
+	getBeastheartCompanion () {
+		return (this._data.companions || [])
+			.find(c => c.type === CharacterSheetState.COMPANION_TYPES.BEASTHEART_COMPANION && c.active !== false)
+			|| null;
+	}
+
+	/**
+	 * A stored level-up choice, by the feature that offered it.
+	 * Mirrors the lookup Blood Hunter uses for its Hemocraft ability.
+	 * @private
+	 */
+	_getBeastheartFeatureChoice (featureName) {
+		return (this._data.levelHistory || [])
+			.filter(h => (h.class?.name || "").toLowerCase() === "beastheart")
+			.flatMap(h => h.choices?.featureChoices || [])
+			.find(choice => choice.featureName === featureName)?.choice
+			|| this._data.features.find(f => f.parentFeature === featureName)?.name
+			|| null;
+	}
+
+	/** Damage types Primal Strike (8th) may be set to. */
+	static BEASTHEART_PRIMAL_STRIKE_TYPES = ["acid", "cold", "fire", "lightning", "poison", "thunder"];
+
+	/**
+	 * The chosen Primal Strike damage type, defaulting to the first legal option so the
+	 * sheet always prints a concrete damage line rather than a blank.
+	 * @private
+	 */
+	_getBeastheartPrimalStrikeDamageType () {
+		const raw = (this._getBeastheartFeatureChoice("Primal Strike") || "").toLowerCase();
+		const match = CharacterSheetState.BEASTHEART_PRIMAL_STRIKE_TYPES.find(t => raw.includes(t));
+		return match || CharacterSheetState.BEASTHEART_PRIMAL_STRIKE_TYPES[0];
+	}
+
+	/** Fiendish Traits (11th, Infernal) options. */
+	static BEASTHEART_FIENDISH_TRAITS = ["Barbed Hide", "Fiendish Immunities", "Fiery Weapons", "Wings"];
+
+	/** The chosen Fiendish Trait, or null when none has been picked yet. */
+	getBeastheartFiendishTrait () {
+		const raw = (this._getBeastheartFeatureChoice("Fiendish Traits") || "").toLowerCase();
+		return CharacterSheetState.BEASTHEART_FIENDISH_TRAITS.find(t => raw.includes(t.toLowerCase())) || null;
+	}
+
+	/** Skills Beyond Instinct (5th) may grant the companion proficiency in. */
+	static BEASTHEART_BEYOND_INSTINCT_SKILLS = [
+		"acrobatics", "animal handling", "athletics", "intimidation", "investigation",
+		"perception", "performance", "sleight of hand", "stealth", "survival",
+	];
+
+	/**
+	 * Record Beyond Instinct's save/skill picks and push them onto the companion.
+	 *
+	 * Stored as ordered lists rather than one value per level so the Nth pick belongs to
+	 * the Nth grant — `_applyBeastheartCompanionBonuses` then slices to however many
+	 * grants the current level has actually reached, which makes a level drain drop the
+	 * newest pick instead of an arbitrary one.
+	 *
+	 * @param {string[]} [saves] - Ability abbreviations ("str", "dex", …).
+	 * @param {string[]} [skills] - Lower-case skill names.
+	 */
+	setBeastheartBeyondInstinctPicks (saves, skills) {
+		const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
+		this._data.beastheart = this._data.beastheart || {};
+		const bi = this._data.beastheart.beyondInstinct = this._data.beastheart.beyondInstinct || {};
+		if (Array.isArray(saves)) {
+			bi.saves = saves
+				.map(s => String(s || "").toLowerCase().slice(0, 3))
+				.filter(s => ABILITIES.includes(s));
+		}
+		if (Array.isArray(skills)) {
+			bi.skills = skills
+				.map(s => String(s || "").toLowerCase())
+				.filter(s => CharacterSheetState.BEASTHEART_BEYOND_INSTINCT_SKILLS.includes(s));
+		}
+		this.recalculateAllCompanions();
+		return this.getBeastheartBeyondInstinctPicks();
+	}
+
+	/** The recorded Beyond Instinct picks, `{saves: [], skills: []}`. */
+	getBeastheartBeyondInstinctPicks () {
+		const bi = this._data.beastheart?.beyondInstinct || {};
+		return {saves: [...(bi.saves || [])], skills: [...(bi.skills || [])]};
+	}
+
+	/**
+	 * Companion Bond (subclass) derived numbers.
+	 *
+	 * Kept out of the already-long `getFeatureCalculations` switch, but written to the
+	 * same contract: flat `has*` / `*Damage` / `*Uses` / `*Dc` keys on `calculations`.
+	 *
+	 * @param {object} calculations - Mutated in place.
+	 * @param {object} cls - The Beastheart class entry.
+	 * @param {number} level - Beastheart level.
+	 * @param {object} ctx - `{wisMod, profBonus, exhaustionPenalty}`.
+	 * @private
+	 */
+	_applyBeastheartBondCalculations (calculations, cls, level, ctx) {
+		if (level < 3) return;
+
+		const subclass = this.getEffectiveSubclassForClass(cls);
+		const bond = (subclass?.shortName || subclass?.name || "");
+		if (!bond) return;
+
+		const {wisMod} = ctx;
+		const exploitDc = calculations.exploitSaveDc;
+		const longRestUses = Math.max(1, wisMod);
+
+		calculations.beastheartBond = bond;
+
+		if (/ferocious/i.test(bond)) {
+			calculations.hasFrenziedCharge = true;
+			calculations.hasFuryOfTheWise = true;
+			calculations.furyOfTheWiseBonus = wisMod;
+			// A rampage normally zeroes ferocity; Energizing Rampage leaves a floor.
+			calculations.rampageFerocityFloor = level >= 7 ? 4 : 0;
+			// Rampage signature attacks deal half ferocity, or all of it from 11th.
+			calculations.rampageBonusDamageDivisor = level >= 11 ? 1 : 2;
+			if (level >= 11) calculations.hasFuriousRampage = true;
+			if (level >= 15) {
+				calculations.hasInvigoratedRampage = true;
+				calculations.invigoratedRampageConditions = ["blinded", "deafened", "frightened"];
+			}
+			return;
+		}
+
+		if (/hunter/i.test(bond)) {
+			calculations.hasChosenQuarry = true;
+			calculations.chosenQuarryFerocityCost = 4;
+			calculations.chosenQuarryDamage = "1d6";
+			calculations.chosenQuarryRange = 90;
+			calculations.hasHuntersInstincts = true;
+			if (level >= 7) {
+				calculations.hasPrimalWarding = true;
+				calculations.primalWardingUses = longRestUses;
+				calculations.primalWardingDamage = "4d8";
+				calculations.primalWardingDamageType = "force";
+				calculations.primalWardingDc = exploitDc;
+				calculations.primalWardingSaveAbility = "con";
+			}
+			if (level >= 11) calculations.hasSynchronizedStealth = true;
+			if (level >= 15) {
+				calculations.hasUnseenHunters = true;
+				calculations.unseenHuntersUses = 1;
+				calculations.unseenHuntersDuration = "10 minutes";
+			}
+			return;
+		}
+
+		if (/infernal/i.test(bond)) {
+			calculations.hasDevilsUnderstanding = true;
+			calculations.hasInfernalExploits = true;
+			calculations.infernalExploitsKnown = level >= 11 ? 2 : 1;
+			if (level >= 7) {
+				calculations.hasHellsCharmer = true;
+				calculations.hellsCharmerUses = longRestUses;
+				calculations.hellsCharmerDc = exploitDc;
+				calculations.hellsCharmerSaveAbility = "wis";
+			}
+			if (level >= 11) {
+				calculations.hasFiendishTraits = true;
+				calculations.fiendishTrait = this.getBeastheartFiendishTrait();
+				switch (calculations.fiendishTrait) {
+					case "Barbed Hide": calculations.fiendishTraitReflectDamage = "1d10"; break;
+					case "Fiery Weapons": calculations.fiendishTraitSignatureBonusDamage = "1d6"; break;
+					case "Wings": calculations.fiendishTraitFlySpeed = 40; break;
+					// Fiendish Immunities has no number — it is applied to the companion directly.
+				}
+			}
+			if (level >= 15) {
+				calculations.hasFiendishForm = true;
+				calculations.fiendishFormFerocityCost = 6;
+				calculations.fiendishFormDuration = "1 minute";
+			}
+			return;
+		}
+
+		if (/primordial/i.test(bond)) {
+			calculations.hasPrimalUnderstanding = true;
+			calculations.hasNatureExploits = true;
+			calculations.natureExploitsKnown = level >= 11 ? 2 : 1;
+			if (level >= 7) calculations.hasAlliedEarth = true;
+			if (level >= 11) {
+				calculations.hasSpiritStampede = true;
+				calculations.spiritStampedeDamageType = "force";
+				calculations.spiritStampedeRange = 30;
+			}
+			if (level >= 15) {
+				calculations.hasAlliedWeather = true;
+				calculations.alliedWeatherDc = exploitDc;
+				calculations.alliedWeatherDamageType = "lightning";
+			}
+			return;
+		}
+
+		if (/protector/i.test(bond)) {
+			calculations.hasBeastVitality = true;
+			// +3 at 3rd, +1 per class level thereafter — which is exactly the class level.
+			calculations.beastVitalityHpBonus = level;
+			calculations.hasPackPhalanx = true;
+			if (level >= 7) {
+				calculations.hasThickenedHide = true;
+				calculations.thickenedHideAcBonus = 2;
+			}
+			if (level >= 11) {
+				calculations.hasSentinelCompanion = true;
+				calculations.sentinelCompanionFerocityCost = 2;
+			}
+			if (level >= 15) {
+				calculations.hasUndyingProtector = true;
+				calculations.undyingProtectorFerocityCost = this.getUndyingProtectorCost();
+			}
+		}
+	}
+
+	/**
+	 * Rest-recharging Beastheart pools.
+	 *
+	 * Ferocity deliberately does NOT appear here — it is unbounded and clears at the end
+	 * of combat rather than on a rest, so it lives on the companion record instead.
+	 * These five are genuinely bounded, rest-restored uses, which is exactly what the
+	 * resource pool is for.
+	 *
+	 * Mirrors `_ensureGamblerResources`: derives from class level + ability directly
+	 * (never `getFeatureCalculations()`, which would recurse back through
+	 * `getResources()`), preserves expended uses across a max change, and removes rows
+	 * when the level requirement lapses (respec / level drain).
+	 * @private
+	 */
+	_ensureBeastheartResources () {
+		const cls = this._getBeastheartClass();
+		const level = cls?.level || 0;
+		this._data.resources = this._data.resources || [];
+
+		const bond = level >= 3
+			? (this.getEffectiveSubclassForClass(cls)?.shortName || this.getEffectiveSubclassForClass(cls)?.name || "")
+			: "";
+		const wisUses = Math.max(1, this.getAbilityMod("wis"));
+
+		// ADOPT a row rather than creating a parallel one.
+		//
+		// The generic feature-description parser already mints a pool for any feature whose
+		// text says "a number of times equal to your Wisdom modifier … regaining all uses
+		// when you finish a long rest", so a naive `push` produced TWO identically-named
+		// "Rejuvenating Ferocity" rows — one static, one live. `_resizeFeatureBackedResource`
+		// exists for exactly this: it finds the existing row by name, resizes it in place
+		// preserving expended uses, and only creates one when the feature is present and no
+		// row exists yet. The `resourceType` marker is stamped on afterwards so the
+		// deactivation sweep can still find rows this method owns.
+		const ensure = ({name, resourceType, isActive, max, recharge}) => {
+			if (!isActive) {
+				this._data.resources = this._data.resources.filter(r => r.resourceType !== resourceType);
+				return;
+			}
+			let resource = this._data.resources.find(r => r.resourceType === resourceType)
+				|| this._data.resources.find(r => r.name === name);
+			if (!resource) {
+				resource = {id: CryptUtil.uid(), name, current: max, max, recharge, resourceType};
+				this._data.resources.push(resource);
+				return;
+			}
+			const expended = Math.max(0, (resource.max ?? max) - (resource.current ?? resource.max ?? max));
+			resource.name = name;
+			resource.max = max;
+			resource.current = Math.max(0, max - expended);
+			resource.recharge = recharge;
+			resource.resourceType = resourceType;
+		};
+
+		ensure({
+			name: "Rejuvenating Ferocity",
+			resourceType: "beastheartRejuvenatingFerocity",
+			isActive: level >= 6,
+			max: wisUses,
+			recharge: "long",
+		});
+		ensure({
+			name: "Summon the Wilds",
+			resourceType: "beastheartSummonTheWilds",
+			isActive: level >= 18,
+			max: 1,
+			recharge: "short",
+		});
+		ensure({
+			name: "Primal Warding",
+			resourceType: "beastheartPrimalWarding",
+			isActive: level >= 7 && /hunter/i.test(bond),
+			max: wisUses,
+			recharge: "long",
+		});
+		ensure({
+			name: "Unseen Hunters",
+			resourceType: "beastheartUnseenHunters",
+			isActive: level >= 15 && /hunter/i.test(bond),
+			max: 1,
+			recharge: "long",
+		});
+		ensure({
+			name: "Hell's Charmer",
+			resourceType: "beastheartHellsCharmer",
+			isActive: level >= 7 && /infernal/i.test(bond),
+			max: wisUses,
+			recharge: "long",
+		});
+	}
+
+	/**
+	 * Undying Protector (15th, Protector) — the cost starts at 2 ferocity and rises by 2	 * with every use, resetting on a short or long rest.
+	 * @returns {number}
+	 */
+	getUndyingProtectorCost () {
+		const uses = this._data.beastheart?.undyingProtectorUses || 0;
+		return 2 + (2 * uses);
+	}
+
+	/**
+	 * Spend ferocity to drop to 1 hit point instead of 0 (Undying Protector).
+	 * @returns {object} `{ok, cost, nextCost, reason}`
+	 */
+	useUndyingProtector () {
+		const companion = this.getBeastheartCompanion();
+		const cost = this.getUndyingProtectorCost();
+		if (!companion) return {ok: false, cost, nextCost: cost, reason: "no-companion"};
+
+		const spend = this.spendCompanionFerocity(companion.id, cost);
+		if (!spend.ok) return {ok: false, cost, nextCost: cost, reason: spend.reason};
+
+		this._data.beastheart = this._data.beastheart || {};
+		this._data.beastheart.undyingProtectorUses = (this._data.beastheart.undyingProtectorUses || 0) + 1;
+		this.setCurrentHp(1);
+		return {ok: true, cost, nextCost: this.getUndyingProtectorCost(), reason: null};
+	}
+
+	/** Reset the escalating Undying Protector cost — called from both rest types. */
+	resetUndyingProtector () {
+		if (this._data.beastheart) this._data.beastheart.undyingProtectorUses = 0;
+	}
+
+	/**
+	 * End a rampage, honouring Energizing Rampage's (7th, Ferocious) ferocity floor.
+	 * Prefer this over `endCompanionRampage` anywhere the bond should apply.
+	 * @param {string} companionId
+	 * @returns {number} The ferocity remaining afterwards.
+	 */
+	endBeastheartRampage (companionId) {
+		const calc = this.getFeatureCalculations?.() || {};
+		const floor = calc.rampageFerocityFloor || 0;
+		const before = this.getCompanionFerocity(companionId);
+		this.endCompanionRampage(companionId);
+		if (floor > 0) this.setCompanionFerocity(companionId, Math.min(floor, before));
+		return this.getCompanionFerocity(companionId);
+	}
+
+	/**
+	 * The extra damage a rampaging companion's signature attack deals: half its ferocity,
+	 * or all of it once Furious Rampage (11th, Ferocious) is online.
+	 * @param {string} companionId
+	 * @returns {number}
+	 */
+	getBeastheartRampageBonusDamage (companionId) {
+		const calc = this.getFeatureCalculations?.() || {};
+		const divisor = calc.rampageBonusDamageDivisor || 2;
+		return Math.floor(this.getCompanionFerocity(companionId) / divisor);
+	}
+
+	/**
+	 * Spirit Stampede (11th, Primordial) — when the companion enters a rampage it deals
+	 * force damage equal to its CURRENT ferocity to chosen creatures within 30 feet.
+	 *
+	 * Read live rather than stored, because the number is only meaningful at the instant
+	 * the rampage begins and ferocity moves every turn.
+	 * @param {string} [companionId]
+	 * @returns {number} 0 when the bond/level does not grant it.
+	 */
+	getSpiritStampedeDamage (companionId = null) {
+		const calc = this.getFeatureCalculations?.() || {};
+		if (!calc.hasSpiritStampede) return 0;
+		const id = companionId || this.getBeastheartCompanion()?.id;
+		if (!id) return 0;
+		return this.getCompanionFerocity(id);
+	}
+
+	/**
+	 * Allied Weather (15th, Primordial) — the lightning option deals damage equal to the
+	 * companion's ferocity. Requires at least 1 ferocity for the feature to be online at
+	 * all, which is why 0 ferocity returns `isAvailable: false` rather than 0 damage.
+	 * @param {string} [companionId]
+	 * @returns {{isAvailable: boolean, damage: number, dc: number}}
+	 */
+	getAlliedWeatherEffect (companionId = null) {
+		const calc = this.getFeatureCalculations?.() || {};
+		const id = companionId || this.getBeastheartCompanion()?.id;
+		const ferocity = id ? this.getCompanionFerocity(id) : 0;
+		return {
+			isAvailable: !!calc.hasAlliedWeather && ferocity >= 1,
+			damage: ferocity,
+			dc: calc.exploitSaveDc || 0,
+		};
+	}
+
+	/**
+	 * Allied Earth (7th, Primordial) — difficult terrain within 10 feet of the companion
+	 * while it holds at least 1 ferocity. Purely positional, so the sheet reports only
+	 * whether the aura is live; the DM narrates the terrain.
+	 * @param {string} [companionId]
+	 * @returns {{isActive: boolean, radius: number}}
+	 */
+	getAlliedEarthAura (companionId = null) {
+		const calc = this.getFeatureCalculations?.() || {};
+		const id = companionId || this.getBeastheartCompanion()?.id;
+		const ferocity = id ? this.getCompanionFerocity(id) : 0;
+		return {isActive: !!calc.hasAlliedEarth && ferocity >= 1, radius: 10};
+	}
+
+	/**
+	 * Chosen Quarry (3rd, Hunter) — spend 4 ferocity to mark a creature for 1 minute.
+	 * Marking a new quarry replaces the old one, per the feature text.
+	 * @param {string} [name] Free-text label for the marked creature.
+	 * @returns {{ok: boolean, quarry: ?object, reason: ?string}}
+	 */
+	markBeastheartQuarry (name = "Quarry") {
+		const calc = this.getFeatureCalculations?.() || {};
+		if (!calc.hasChosenQuarry) return {ok: false, quarry: null, reason: "no-feature"};
+		const companion = this.getBeastheartCompanion();
+		if (!companion) return {ok: false, quarry: null, reason: "no-companion"};
+
+		const spend = this.spendCompanionFerocity(companion.id, calc.chosenQuarryFerocityCost || 4);
+		if (!spend.ok) return {ok: false, quarry: null, reason: spend.reason};
+
+		this._data.beastheart = this._data.beastheart || {};
+		this._data.beastheart.quarry = {name: name || "Quarry", damage: calc.chosenQuarryDamage || "1d6"};
+		return {ok: true, quarry: this._data.beastheart.quarry, reason: null};
+	}
+
+	/** The currently-marked Chosen Quarry, or null. */
+	getBeastheartQuarry () {
+		const calc = this.getFeatureCalculations?.() || {};
+		if (!calc.hasChosenQuarry) return null;
+		return this._data.beastheart?.quarry || null;
+	}
+
+	/** Clear the Chosen Quarry mark (duration expiry, or the creature dying). */
+	clearBeastheartQuarry () {
+		if (this._data.beastheart) delete this._data.beastheart.quarry;
+	}
+
+	/**
+	 * Sentinel Companion (11th, Protector) — spend 2 ferocity so the companion makes a
+	 * reaction signature attack against a creature attacking someone else.
+	 * @returns {{ok: boolean, cost: number, reason: ?string}}
+	 */
+	useSentinelCompanion () {
+		const calc = this.getFeatureCalculations?.() || {};
+		const cost = calc.sentinelCompanionFerocityCost || 2;
+		if (!calc.hasSentinelCompanion) return {ok: false, cost, reason: "no-feature"};
+		const companion = this.getBeastheartCompanion();
+		if (!companion) return {ok: false, cost, reason: "no-companion"};
+
+		const spend = this.spendCompanionFerocity(companion.id, cost);
+		return {ok: spend.ok, cost, reason: spend.ok ? null : spend.reason};
+	}
+
+	/**
+	 * Fiendish Form (15th, Infernal) — spend 6 ferocity to transform the companion for
+	 * 1 minute. Unlike the other bond actions this one has a persistent consequence, so
+	 * it writes real resistances onto the companion record and recalculates it; ending
+	 * the form recalculates again, which restores the pristine scaled stat block.
+	 * @returns {{ok: boolean, cost: number, reason: ?string}}
+	 */
+	useFiendishForm () {
+		const calc = this.getFeatureCalculations?.() || {};
+		const cost = calc.fiendishFormFerocityCost || 6;
+		if (!calc.hasFiendishForm) return {ok: false, cost, reason: "no-feature"};
+		const companion = this.getBeastheartCompanion();
+		if (!companion) return {ok: false, cost, reason: "no-companion"};
+
+		const spend = this.spendCompanionFerocity(companion.id, cost);
+		if (!spend.ok) return {ok: false, cost, reason: spend.reason};
+
+		this._data.beastheart = this._data.beastheart || {};
+		this._data.beastheart.fiendishFormCompanionId = companion.id;
+		this.recalculateCompanion(companion.id);
+		return {ok: true, cost, reason: null};
+	}
+
+	/** End Fiendish Form and restore the companion's ordinary stat block. */
+	endFiendishForm () {
+		const id = this._data.beastheart?.fiendishFormCompanionId;
+		if (!id) return;
+		delete this._data.beastheart.fiendishFormCompanionId;
+		this.recalculateCompanion(id);
+	}
+
+	/** Whether the companion is currently in Fiendish Form. */
+	isInFiendishForm (companionId = null) {
+		const id = companionId || this.getBeastheartCompanion()?.id;
+		return !!id && this._data.beastheart?.fiendishFormCompanionId === id;
+	}
+
+	// #endregion
+
+	// ---- Grouped Companion HP Management (for Conjure spells) ----
 	/**
 	 * Damage a specific creature in a grouped companion
 	 * @param {string} companionId - The companion ID
@@ -59696,6 +60684,13 @@ class CharacterSheetState {
 	 *  - `damageAddProf` — when true, proficiency bonus is added to damage.
 	 *  - `damageType`    — damage type string ("force").
 	 *
+	 * Alternatively a descriptor may set `statblockScaler: "classSummon"` and carry the
+	 * creature's PRISTINE stat block on `statblock`. That block is then resolved by the
+	 * shared {@link ScaleClassSummonedCreature}, the same scaler the bestiary, DM screen
+	 * and renderer use for `summonedScaleByPlayerLevel` creatures — so every stat the
+	 * author wrote in terms of the summoner ("13 plus PB", "7 + 7 times caregiver's
+	 * level", "{@hit +3+PB}") resolves correctly, not just the handful of keys above.
+	 *
 	 * @param {object} companion - The companion record (mutated in place).
 	 * @private
 	 */
@@ -59705,6 +60700,11 @@ class CharacterSheetState {
 		const level = s.className ? this._getClassLevel(s.className) : this.getTotalLevel();
 
 		companion.profBonus = profBonus;
+
+		if (s.statblockScaler === "classSummon") {
+			this._recalculateStatblockCompanion(companion, level);
+			return;
+		}
 
 		if (s.hpBase != null || s.hpPerLevel != null) {
 			// A summon whose class has been dropped entirely (multiclass respec)
@@ -59748,6 +60748,243 @@ class CharacterSheetState {
 		}
 	}
 
+	/**
+	 * Resolve a companion whose PRISTINE stat block is stored on
+	 * `companion.scaling.statblock` and written in terms of its summoner. Delegates to the
+	 * shared {@link ScaleClassSummonedCreature} — the same scaler the bestiary, DM screen
+	 * and renderer use — then re-parses the concrete stat block through
+	 * `_parseBestiaryCreatureToBeastRecord` so the companion card, quick rolls and
+	 * conditions all read normal numbers.
+	 *
+	 * Live combat state (current/temp HP, conditions, exhaustion, ferocity) is preserved;
+	 * only DERIVED stats are replaced. Current HP tracks a rising maximum the way the
+	 * declarative path does: a companion at full HP stays at full, otherwise it keeps its
+	 * damage and is clamped to the new maximum.
+	 *
+	 * @param {object} companion - The companion record (mutated in place).
+	 * @param {number} level - Level driving the scaling.
+	 * @private
+	 */
+	_recalculateStatblockCompanion (companion, level) {
+		const pristine = companion.scaling?.statblock;
+		if (!pristine || !(level > 0)) return;
+
+		const scaler = CharacterSheetState._getClassSummonScaler();
+		if (!scaler) return; // Degrade to the stored stat block rather than corrupting it.
+
+		let rec;
+		try {
+			const scaled = scaler.scaleSync(pristine, level);
+			rec = this._parseBestiaryCreatureToBeastRecord(scaled);
+			companion.scaling.scaledStatblock = scaled;
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn(`[CharSheet] Failed to scale companion stat block for ${companion.name}`, e);
+			return;
+		}
+
+		const prevMax = companion.hp?.max || 0;
+		const wasFull = (companion.hp?.current || 0) >= prevMax;
+
+		// Replace derived stats only. `hp.current`, `hp.temp`, `conditions`, `exhaustion`,
+		// `ferocity` and identity fields are live state and must survive a re-scale.
+		[
+			"ac", "passive", "profBonus", "size", "creatureType", "speed", "abilities", "senses", "languages",
+			"resistances", "immunities", "conditionImmunities", "saveProficiencies",
+			"skillProficiencies", "attacks", "actions", "bonusActions", "reactions", "traits",
+		].forEach(key => {
+			if (rec[key] !== undefined) companion[key] = rec[key];
+		});
+
+		const newMax = Math.max(1, rec.hp?.max || prevMax || 1);
+		companion.hp = companion.hp || {max: newMax, current: newMax, temp: 0};
+		companion.hp.max = newMax;
+		companion.hp.current = wasFull ? newMax : Math.min(companion.hp.current, newMax);
+		companion.scaling.scaledForLevel = level;
+
+		// Bond features modify the freshly-scaled block, so they must be re-applied on
+		// every rescale — the scaler always overwrites `ac`, `speed` and `immunities`.
+		this._applyBeastheartCompanionBonuses(companion);
+	}
+
+	/**
+	 * Layer Companion Bond effects onto a scaled Beastheart companion.
+	 *
+	 * Runs after `_recalculateStatblockCompanion` has replaced the derived stats, so the
+	 * bonuses are additive on top of the printed, level-scaled numbers rather than being
+	 * baked in and then compounded on the next rescale.
+	 *
+	 * Reentrancy: this reads `getFeatureCalculations()`, which is a broad derivation. No
+	 * path from it back into companion recalculation was observed across the full suite,
+	 * but it could not be proven impossible, so a guard converts any such cycle into a
+	 * diagnosable no-op instead of a stack overflow. If the warning below ever fires, the
+	 * cycle is real and the offending calculation should stop touching companions.
+	 * @private
+	 */
+	_applyBeastheartCompanionBonuses (companion) {
+		if (!companion || companion.type !== CharacterSheetState.COMPANION_TYPES.BEASTHEART_COMPANION) return;
+
+		if (this._isApplyingBeastheartBonuses) {
+			globalThis.console?.warn?.("[Beastheart] Re-entered _applyBeastheartCompanionBonuses; skipping the nested pass. Please report this — see CS-BUG notes in docs/charactersheet/22-beastheart.md.");
+			return;
+		}
+		this._isApplyingBeastheartBonuses = true;
+		try {
+			this._applyBeastheartCompanionBonusesInner(companion);
+		} finally {
+			this._isApplyingBeastheartBonuses = false;
+		}
+	}
+
+	/**
+	 * Body of {@link _applyBeastheartCompanionBonuses}, wrapped by its reentrancy guard.
+	 * @private
+	 */
+	_applyBeastheartCompanionBonusesInner (companion) {
+		const calc = this.getFeatureCalculations?.() || {};
+
+		// Thickened Hide (Protector, 7th).
+		if (calc.thickenedHideAcBonus) companion.ac = (companion.ac || 10) + calc.thickenedHideAcBonus;
+
+		// Fiendish Traits (Infernal, 11th) — only the two that change the stat block.
+		if (calc.fiendishTrait === "Fiendish Immunities") {
+			companion.immunities = Array.from(new Set([...(companion.immunities || []), "fire", "poison"]));
+			companion.conditionImmunities = Array.from(new Set([...(companion.conditionImmunities || []), "poisoned"]));
+		}
+		if (calc.fiendishTraitFlySpeed) {
+			companion.speed = companion.speed || {};
+			companion.speed.fly = Math.max(companion.speed.fly || 0, calc.fiendishTraitFlySpeed);
+		}
+
+		// Loyal to the End (13th) — the companion shares the immunity.
+		if (calc.hasLoyalToTheEnd) {
+			companion.conditionImmunities = Array.from(new Set([...(companion.conditionImmunities || []), "charmed", "frightened"]));
+		}
+
+		// Fiendish Form (Infernal, 15th) — a TRANSIENT transformation, so it is applied
+		// here in the recalc path rather than being baked in at bond time: ending the form
+		// simply recalculates and the pristine scaled stat block returns on its own.
+		//
+		// Note the explicit `else`: the recalc rebuilds array/object stats from the
+		// pristine stat block, but a scalar flag written directly onto the record would
+		// survive it, so ending the form has to clear the flag rather than rely on the
+		// rebuild to drop it.
+		if (this._data.beastheart?.fiendishFormCompanionId === companion.id) {
+			companion.creatureTypes = ["fiend"];
+			companion.resistances = Array.from(new Set([
+				...(companion.resistances || []), "bludgeoning", "piercing", "slashing",
+			]));
+			companion.hasAdvantageOnMagicSaves = true;
+		} else {
+			delete companion.hasAdvantageOnMagicSaves;
+		}
+
+		// Beyond Instinct (5th/10th/15th) — the player's save and skill picks become real
+		// proficiencies on the companion, which is what drives its save/check bonuses.
+		const bi = this._data.beastheart?.beyondInstinct || {};
+		if (calc.hasBeyondInstinct) {
+			const saves = (bi.saves || []).slice(0, calc.beyondInstinctSavePicks || 0);
+			const skills = (bi.skills || []).slice(0, calc.beyondInstinctSkillPicks || 0);
+			if (saves.length) {
+				companion.saveProficiencies = Array.from(new Set([...(companion.saveProficiencies || []), ...saves]));
+			}
+			if (skills.length) {
+				// A companion's `skillProficiencies` is a MAP of skill -> level (1 = proficient,
+				// 2 = expertise), unlike `saveProficiencies` which is a plain list.
+				const existing = Array.isArray(companion.skillProficiencies)
+					? Object.fromEntries(companion.skillProficiencies.map(s => [s, 1]))
+					: {...(companion.skillProficiencies || {})};
+				skills.forEach(skill => { existing[skill] = Math.max(existing[skill] || 0, 1); });
+				companion.skillProficiencies = existing;
+			}
+		}
+
+		// Improved Signature Attack (5th/11th/17th) and Fiery Weapons (Infernal 11th)
+		// both change the printed damage of the signature attack, so they are applied to
+		// the attack line itself rather than being left as prose for the player to add up.
+		this._applyBeastheartSignatureAttackDamage(companion, calc);
+	}
+
+	/**
+	 * Rewrite a companion's signature-attack damage to include Improved Signature
+	 * Attack's extra weapon dice and, for the Infernal bond, Fiery Weapons' rider.
+	 *
+	 * The scaler has already resolved "1d6 plus PB" into "{@damage 1d6 + 2}", so the
+	 * only edit needed is to raise the dice COUNT on the first damage expression of each
+	 * signature action — "one additional weapon damage die", per the feature text.
+	 * @private
+	 */
+	_applyBeastheartSignatureAttackDamage (companion, calc) {
+		const extraDice = Number(calc.signatureAttackBonusDice) || 0;
+		const fieryDamage = calc.fiendishTraitSignatureBonusDamage;
+		if (!extraDice && !fieryDamage) return;
+
+		const bump = entry => {
+			if (typeof entry !== "string") return entry;
+			let out = entry;
+			if (extraDice) {
+				let done = false;
+				out = out.replace(/\{@damage (\d+)d(\d+)/g, (m, count, faces) => {
+					if (done) return m;
+					done = true;
+					return `{@damage ${Number(count) + extraDice}d${faces}`;
+				});
+			}
+			if (fieryDamage && !/fire damage/i.test(out)) {
+				out = out.replace(/(\{@h\}[^.]*damage)\b/i, `$1 plus {@damage ${fieryDamage}} fire damage`);
+			}
+			return out;
+		};
+
+		["actions", "attacks", "bonusActions"].forEach(key => {
+			(companion[key] || []).forEach(action => {
+				if (!/signature attack/i.test(action?.name || "")) return;
+				if (Array.isArray(action.entries)) action.entries = action.entries.map(bump);
+				if (typeof action.description === "string") action.description = bump(action.description);
+				if (typeof action.damage === "string") action.damage = bump(`{@damage ${action.damage}}`).replace(/^\{@damage |\}$/g, "");
+			});
+		});
+	}
+
+	/**
+	 * The shared class-summon scaler, if it is reachable. Resolved lazily from the module
+	 * import with a `globalThis` fallback, so the sheet degrades to the stored stat block
+	 * (rather than throwing) in any environment where `js/scalecreature/` is not loaded.
+	 * @returns {*} the scaler class, or null
+	 * @private
+	 */
+	static _getClassSummonScaler () {
+		if (CharacterSheetState._CLASS_SUMMON_SCALER !== undefined) return CharacterSheetState._CLASS_SUMMON_SCALER;
+		const found = globalThis.ScaleClassSummonedCreature || null;
+		CharacterSheetState._CLASS_SUMMON_SCALER = found?.scaleSync ? found : null;
+		return CharacterSheetState._CLASS_SUMMON_SCALER;
+	}
+
+	static _CLASS_SUMMON_SCALER = undefined;
+
+	/**
+	 * Scale a raw stat block to a caregiver level WITHOUT touching state — used by the
+	 * companion picker so it can show real numbers for the character's current level
+	 * rather than the printed "13 plus PB" strings.
+	 *
+	 * @param {object} statblock - A pristine, unscaled stat block.
+	 * @param {number} level
+	 * @returns {object|null} The scaled block, or null when the scaler is unavailable or
+	 *   the block cannot be scaled (the caller then falls back to the printed text).
+	 */
+	getScaledCompanionStatblock (statblock, level) {
+		if (!statblock || !(level > 0)) return null;
+		const scaler = CharacterSheetState._getClassSummonScaler();
+		if (!scaler) return null;
+		try {
+			return scaler.scaleSync(statblock, level);
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn(`[CharSheet] Failed to preview-scale ${statblock.name}`, e);
+			return null;
+		}
+	}
+
 	/** Format a numeric bonus with an explicit sign ("+7" / "-1"). @private */
 	static _formatSignedBonus (n) {
 		const v = Number(n) || 0;
@@ -59777,6 +61014,8 @@ class CharacterSheetState {
 	 * @param {boolean} [options.concentrationLinked=false] - Link to concentration
 	 * @param {string} [options.customName] - Custom name
 	 * @param {string} [options.sourceFeatureId] - Source feature ID
+	 * @param {object} [options.scaling] - Declarative scaling descriptor (see
+	 *   `_recalculateScaledCompanion`), for stat blocks written in terms of the summoner.
 	 * @returns {string} The new companion's ID
 	 */
 	/**
@@ -60084,6 +61323,7 @@ class CharacterSheetState {
 				: {}),
 			concentrationLinked: options.concentrationLinked || false,
 			sourceFeatureId: options.sourceFeatureId || null,
+			scaling: options.scaling || null,
 		});
 
 		// Recalculate if it's a scaling companion
@@ -60100,6 +61340,11 @@ class CharacterSheetState {
 	 */
 	restCompanions (restType) {
 		(this._data.companions || []).forEach(companion => {
+			// A rest means the encounter is over, so settle the end-of-combat ferocity
+			// rule first: the companion banks the HP its fury earned it, then the track
+			// clears. Idempotent when combat was already ended explicitly.
+			this.endCompanionCombat(companion.id);
+
 			if (restType === "long") {
 				// Full heal on long rest
 				companion.hp.current = companion.hp.max;
@@ -60513,6 +61758,11 @@ class CharacterSheetState {
 
 		// Recharge magic items that recharge on short rest
 		this._rechargeItems("restShort");
+
+		// Undying Protector's escalating ferocity cost resets on either rest, and a rest
+		// means the encounter is over, so the companion's ferocity settles too.
+		this.resetUndyingProtector();
+		this.restCompanions("short");
 	}
 
 	onLongRest (options = {}) {
@@ -60582,6 +61832,7 @@ class CharacterSheetState {
 
 		// Restore companions on long rest
 		this.restCompanions("long");
+		this.resetUndyingProtector();
 
 		// College of Creation constructs are far shorter-lived than a long rest
 		// (proficiency-bonus hours for items, 1 hour for a Dancing Item).

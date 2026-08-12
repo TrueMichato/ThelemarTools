@@ -1378,4 +1378,22 @@ describe("Rage activation", () => {
 
 ---
 
+## What deliberately does NOT use `ACTIVE_STATE_TYPES`
+
+`ACTIVE_STATE_TYPES` models toggles belonging to **the character**. A toggle
+belonging to a *companion* does not fit it, and forcing it in produces a state
+whose effects would be applied to the wrong creature.
+
+**Beastheart (`BST`) adds no active states** for exactly this reason. Its two
+toggle-shaped things — **Rampage** and **Fiendish Form** — are properties of the
+companion, so they live on the companion record (`isRampaging`, and a
+`fiendishFormCompanionId` marker read during the companion recalc) and are
+driven by the ferocity strip inside the companion card.
+
+The test is whose sheet the effect lands on. Rage changes *your* damage, so it
+is an active state; Fiendish Form changes *your companion's* resistances, so it
+is a companion-record flag. See [Beastheart](./22-beastheart.md) §2.2.
+
+---
+
 *Previous: [Spellcasting](./07-spellcasting.md) | Next: [Testing Strategy](./09-testing-strategy.md)*
