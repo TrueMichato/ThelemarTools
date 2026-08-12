@@ -102,6 +102,33 @@ const TALENT_FEATURES: FeatureCheck[] = [
 			{kind: "featureCalculation", property: "manifestationDie", exact: "1d6"},
 			{kind: "featureCalculation", property: "firstOrderPowersKnown", exact: 5},
 			{kind: "manifestationTest", order: 3, roll: 2, expectStrain: 3},
+			// CS-BUG-133: the Chronopathy Adept reroll is a real reroll, not a
+			// resource the sheet lets you spend on nothing. Same order and same
+			// failing first roll as the line above — the reroll must turn a
+			// 3-strain "strained" outcome into a clean one, and cost a use.
+			{
+				kind: "manifestationAdeptReroll",
+				feature: "Chronopathy Adept",
+				order: 3,
+				roll: 2,
+				rerollResult: 5,
+				expectRoll: 5,
+				expectStrain: 0,
+				expectSpend: true,
+				powerType: "CP",
+			},
+			// ...and must NOT be spent when the first roll already beat the score.
+			{
+				kind: "manifestationAdeptReroll",
+				feature: "Chronopathy Adept",
+				order: 3,
+				roll: 5,
+				rerollResult: 1,
+				expectRoll: 5,
+				expectStrain: 0,
+				expectSpend: false,
+				powerType: "CP",
+			},
 		],
 	},
 

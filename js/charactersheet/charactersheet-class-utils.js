@@ -55,8 +55,47 @@ class CharacterSheetClassUtils {
 			// Class level at which each power order becomes learnable/manifestable.
 			orderUnlockLevels: {2: 1, 3: 5, 4: 9, 5: 13, 6: 17},
 			manifestationAbility: "int",
+			// Discipline code (as stamped on each power's `type`, preserved by
+			// `buildPsionicOptionalFeatures` as `_psionicPowerType`) → the specialization
+			// that masters it, and the discipline's own noun.
+			//
+			// Six of the seven Talent specializations grant an identical
+			// "<Discipline> Adept" reroll differing ONLY by which discipline it names, so
+			// this map is what lets one generic implementation serve all six instead of
+			// six copies of one rule. The feature is named for the DISCIPLINE, not the
+			// specialization ("Telekinesis Adept", not "Telekinetic Adept"), which is why
+			// both nouns are recorded. Maverick is deliberately absent: it is the "no
+			// academy" specialization and masters no single discipline.
+			disciplines: {
+				CP: {subclass: "Chronopath", discipline: "Chronopathy"},
+				MM: {subclass: "Metamorph", discipline: "Metamorphosis"},
+				PK: {subclass: "Pyrokinetic", discipline: "Pyrokinesis"},
+				RP: {subclass: "Resopath", discipline: "Resopathy"},
+				TK: {subclass: "Telekinetic", discipline: "Telekinesis"},
+				TP: {subclass: "Telepath", discipline: "Telepathy"},
+			},
 		},
 	};
+
+	/**
+	 * The psionic discipline a specialization masters.
+	 *
+	 * Inverse lookup over a manifester config's `disciplines` map. Used by the generic
+	 * "<Discipline> Adept" reroll so it can tell whether the power being manifested
+	 * belongs to the character's own academy, and what that academy's feature is called.
+	 *
+	 * @param {*} config a `PSIONIC_MANIFESTERS` entry
+	 * @param {string} subclassName specialization short name (e.g. "Telekinetic")
+	 * @returns {{code: string, subclass: string, discipline: string}|null} null when the
+	 *   specialization masters no discipline (Maverick) or is unknown
+	 */
+	static getPsionicDisciplineForSubclass (/** @type {*} */ config, /** @type {string} */ subclassName) {
+		if (!config?.disciplines || !subclassName) return null;
+		const needle = String(subclassName).trim().toLowerCase();
+		const hit = Object.entries(config.disciplines)
+			.find(([, it]) => it.subclass.toLowerCase() === needle);
+		return hit ? {code: hit[0], ...hit[1]} : null;
+	}
 
 	/**
 	 * Look up the psionic-manifester config for a class entity (or plain name/source).

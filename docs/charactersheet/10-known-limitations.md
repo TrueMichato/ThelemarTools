@@ -117,7 +117,7 @@ All Ranger subclasses are fully implemented:
 - **Swarmkeeper**: `gatheredSwarmDamage`, `writhingTideFlySpeed`, `swarmingDispersalUses`
 - **Drakewarden**: `drakeProfBonus`, `drakesBreathDamage`, `drakesBreathDc`
 
-#### Talent (TalPsi) and Chronopath ✅
+#### Talent (TalPsi) — all seven Psionic Specializations ✅
 
 - The whole base class is supported: the class table (manifestation die, max
   power order, both power-pool sizes, strain maximum, power save DC / attack
@@ -137,12 +137,37 @@ All Ranger subclasses are fully implemented:
 - Psionic powers and any feature whose text charges strain are activatable
   through a generic detector, so Chronopath's Decay, Time Pocket and Fickle
   Readiness are Use-button actions rather than paragraphs.
-- **Out of scope:** the other six Psionic Specializations (Cryokineticist,
-  Metamorph, Nomad, Oracle, Psychic Warrior, Telekinetic) get the base class
-  and its pickers but no specialization-specific calculations. The 103 psionic
-  powers are pickable and activatable but their individual per-power effects
-  (damage, saves, riders) are rendered from their source text rather than
-  modelled.
+- **All seven specializations** — Chronopath, Maverick, Metamorph, Pyrokinetic,
+  Resopath, Telekinetic, Telepath — have real feature calculations at 2/6/10/14.
+  The six shared "Adept" features are one generic mechanism keyed by the
+  `_psionicPowerType` discipline code, not six copies.
+- Three specialization toggles (`psionicToughness`, `flameOn`,
+  `manipulateTerrain`) go through `ACTIVE_STATE_TYPES`, documented in
+  [08-toggle-abilities.md](08-toggle-abilities.md).
+
+**Honestly out of scope for the Talent:**
+
+- **Per-power effects.** The 103 psionic powers are pickable, order-gated and
+  activatable, and they charge their strain correctly — but each power's
+  individual damage, save rider and scaling are rendered from its source text
+  rather than modelled as calculations. This is the same treatment spells get:
+  the sheet resolves the *cost* and the *save DC*, and the player reads the
+  effect. Modelling 103 bespoke powers is a separate body of work from
+  supporting the class.
+- **Order escalation inside the manifest dialog.** Powers whose data declares an
+  `Increased Order` mode can be manifested at a higher order per RAW, but the
+  dialog does not yet offer the order stepper; manifest at the higher order by
+  choosing the higher-order power entry. The strain arithmetic is already
+  order-aware (`resolvePsionicStrainCost` resolves `"powerOrder"`), so this is a
+  UI addition, not a mechanics gap.
+- **Splitting one manifestation's strain across several tracks.** Strain is paid
+  from a single chosen track per manifestation. RAW permits a split; the tracks
+  and their penalties are fully modelled, so this is an input affordance rather
+  than a missing subsystem.
+- **Encounter-side clauses.** Resopath's terrain shaping and Telepath's
+  telepathy-range features change what *other* creatures may do. As with every
+  such feature on the sheet, the self-facing half is mechanical and the
+  opponent-facing half is a rules note. See the "one creature" section below.
 
 #### Blood Hunter (BH2022) and Order of the Lycan ✅
 - Hunter's Bane records the Intelligence/Wisdom Hemocraft choice through the generic multi-attribute `abilityDc` feature-option path. Blood Curse, Crimson Rite, and Fighting Style selections use the generic optional-feature progression shared by Builder, Level-Up, and Quick Build.
@@ -352,6 +377,181 @@ Full upgrade pass landed (attack polish, spell DC/innate/pact, Multiattack, AC `
 ---
 
 ## Technical Debt
+
+### ⚠️ Named architectural seam: the two effect vocabularies
+
+**This is the single most expensive recurring defect in the sheet. Read this before
+adding any effect to a feature or an active state.**
+
+The sheet describes "what an ability does" in **two independent paths** whose
+vocabularies were developed separately and never reconciled. Both are alive, both
+are correct on their own side, and **they use different key names for the same
+concept**. At least one concept (`sense`) has *three* spellings, because the
+registry side also disagrees with itself:
+
+| Concept | `FeatureEffectRegistry` shape | `ACTIVE_STATE_TYPES` / supplemental shape |
+|---|---|---|
+| Speed | `{type:"speed", speedType:"fly", value:60}` | `{type:"bonus", target:"speed:walk", value:10}` |
+| Advantage | `{type:"modifier", modType:"deathSave:advantage"}` | `{type:"advantage", target:"deathSave"}` |
+| Damage immunity | `{type:"immunity", damageType:"poison"}` | `{type:"immunity", target:"poison"}` |
+| Sense | `{sense, range}` *(class-feature applier)* **or** `{senseType, value}` *(feat applier)* — dispatched by `_fromFeatRegistry`, both correct | `{type:"sense", target:"darkvision", value:60}` |
+| Max HP | *(not expressible)* | `{type:"hpMaxIncrease", value:N}` |
+| Read by | `aggregateModifiers(type)` | `getAdvantageState()`, `getSenses()`, the `*FromStates` collectors |
+
+Treat this table as the shape of the problem, not an inventory — the `sense` row
+shows the registry column can itself hold more than one spelling, and other rows
+may yet prove to do the same.
+
+#### Why it costs so much
+
+The readers are **strict and silent**. A reader that doesn't recognise the shape it
+was handed does not throw, does not warn, and does not log — it hits a bare
+`continue` or `return null` and moves on. The effect is computed perfectly, carried
+most of the way to the getter, and then dropped one line short.
+
+The resulting bug is **indistinguishable from an unimplemented feature**. The
+ability appears in the feature list, its toggle activates, its tooltip renders its
+numbers — and nothing happens. Every session that has hit this has diagnosed it by
+writing throwaway probes and bisecting the pipeline layer by layer, because there is
+no signal pointing at the seam.
+
+#### Known instances
+
+| # | Where | Symptom | Status |
+|---|---|---|---|
+| [CS-BUG-130](known-bugs.md) | `_getGrantedSpeedFromFeatures` | Feature-granted fly/climb/swim speed discarded by the movement-type guard | Fixed (opt-in `grantsMovementType`) |
+| [CS-BUG-131](known-bugs.md) | `activateState` / `_stateContributesHpMaxIncrease` | A `useFeatureDescription` state's `hpMaxIncrease` never synced to max HP | Fixed |
+| [CS-BUG-134](known-bugs.md) | `_getDamageDefenceFromStates` | Read `target` only, so a registry-shaped `damageType` immunity was dropped | Fixed (tolerant read) |
+| Sun Bloodline session | active-state `sense` effects | Registry's `{sense, range}` written into a state, which wants `{target, value}` → activates, renders, grants nothing | See [13-tgtt-thelemar-homebrew.md](13-tgtt-thelemar-homebrew.md) |
+| ~~Blood Hunter session~~ | ~~`FeatureEffectRegistry` `sense` entries~~ | **Retracted — not a defect.** The registry's two spellings are dispatched to two different appliers on purpose; both have working readers. See "The worked example" below | **Not a bug** |
+
+Three confirmed instances, found by three independent sessions working on
+unrelated classes, none aware of the others' findings until afterwards.
+
+> **A fourth claim was investigated and withdrawn.** It is kept above, struck
+> through, deliberately: the retraction is more instructive than the claim was.
+> See "Three sessions, three false positives" below before adding a row here.
+
+#### The worked example: `sense` is **three-way**, across **two paths** — and it works
+
+Senses are the clearest specimen, and the one to study before attempting anything
+here. There are **two independent paths** and **three spellings**. Every one of
+them has a working writer *and* a matching reader:
+
+| Spelling | Path | Writer → reader | Status |
+|---|---|---|---|
+| `{type:"sense", target:"darkvision", value:60}` | Active state | `getSenseBonusFromStates()` | ✅ works |
+| `{type:"sense", sense:"blindsight", range:30}` | Registry → class feature | `_applyFeatureEffect` → `_setClassFeatureSense(effect.sense, effect.range)` | ✅ works |
+| `{type:"sense", senseType:"blindsight", value:10}` | Registry → **feat** | `_processFeatRegistryEffects` → `addNamedModifier({type: "sense:X", value})` → `getSense()`'s `namedBonus` | ✅ works |
+
+**The separation is deliberate, not drift.** `_applyFeatureEffect` opens with a
+guard:
+
+```js
+if (effect._fromFeatRegistry) {
+    const FEAT_NAMEDMOD_TYPES = new Set(["hpBonus", "modifier", "speed", "sense", ...]);
+    if (FEAT_NAMEDMOD_TYPES.has(effect.type)) return null;   // "would double-count them"
+}
+```
+
+`"sense"` is in that set **by name**. Entries tagged `_fromFeatRegistry` are
+routed *away* from the class-feature applier on purpose, because the feat path
+already applied them via `addNamedModifier` at `addFeat` time.
+
+So this is **not** three rival spellings of which two are wrong, and it is **not**
+an intra-registry defect. It is two paths, each with its own writer and its own
+matching reader, doing what they were designed to do.
+
+> **⚠️ Do not "reconcile" the registry's two spellings.** The `_fromFeatRegistry`
+> guard exists specifically to keep those paths apart. Normalising them into one
+> applier risks reintroducing the double-count the guard was written to prevent.
+
+#### Three sessions, three false positives — the durable lesson
+
+Three separate sessions independently reported a bug here. **All three were
+wrong**, in the same way:
+
+| Session | Claimed | Reality |
+|---|---|---|
+| Talent (this one) | `{senseType, value}` "survives no reader" | Reaches `getSense()` via the named-modifier path |
+| Blood Hunter | registry `sense` split is a latent defect | Deliberate, guarded dispatch |
+| Beastheart | registry `damageType` resistances discarded | `_applyFeatureEffect` reads `effect.damageType` straight into `_addClassFeatureResistance` |
+
+The shared error: **each of us traced writer → one reader, found no match, and
+stopped.** Stopping one call short of the applier produces a specific, confident,
+*false* bug report — which is more damaging than no report, because it lands in
+the debt register as an instruction to "fix" working code.
+
+**The rule this yields:** before filing a divergence as a defect, trace to the
+**observable getter** and assert on it. `getSense("blindsight") === 10` is
+evidence. "I grepped the reader and it doesn't mention `senseType`" is not. Note
+that this is the same doctrine as the testing rule below — assert the derived
+value, never the shape of the effect object — applied to diagnosis rather than to
+tests.
+
+#### The residue that IS real: an authoring hazard
+
+What survives the retraction is smaller but genuine. `FeatureEffectRegistry` is
+**one structure whose entries are dispatched to different appliers** by the
+`_fromFeatRegistry` tag. Which spelling is correct therefore depends on *which
+path an entry will take* — and **nothing at the registration site says which**:
+
+```js
+this.register("Feral Senses", [{type: "sense", sense: "blindsight",     range: 30}]);  // class feature
+this.register("Skulker|XPHB", [{type: "sense", senseType: "blindsight", value: 10}]);  // feat
+```
+
+Same file, five lines apart, same effect type, different required spelling, and no
+local signal distinguishing them. An author adding a new `sense` effect has to
+already know which applier will receive it. That is a **latent authoring hazard,
+not an active bug** — and it is the honest version of what was originally
+documented here.
+
+Deliberately not pinning spelling counts: branches are unmerged as this is
+written, so any number would be stale on arrival. Grep for all three keys and
+trust the result over this table.
+
+> **This seam has a sibling in a different field.** [CS-BUG-113](known-bugs.md)
+> documents `featureType` carrying **three** vocabularies — authored code arrays,
+> sheet display buckets, and DM-grant UI labels written straight into the
+> discriminator — of which only two are quarantined. Different field, same family:
+> one slot, several vocabularies, dispatched by path. If you are reconciling one of
+> these, read the other first; the shape of the fix is likely to rhyme.
+
+#### The remedy: tolerant readers, where a spelling can genuinely arrive
+
+Three confirmed instances (CS-BUG-130/131/134) were fixed by making the **reader
+tolerant** — falling back to the other vocabulary's key when the expected one
+yields nothing:
+
+```js
+// The established pattern — additive, fallback only fires when the primary is absent.
+const sense = effect.sense || effect.target;
+const range = effect.range ?? effect.value;
+```
+
+This is *not* a proposal; the class-feature sense normalizer already does exactly
+this. It is the right fix **where a reader can genuinely receive both spellings** —
+which is what made those three real: an author reached for the registry vocabulary
+in a place that only understood the state vocabulary, and the effect was dropped.
+
+**It is not a licence to normalise everything.** Where dispatch is deliberate — as
+with `_fromFeatRegistry` — the paths are separate *by design*, and broadening a
+reader to accept the other path's spelling would make it apply effects that
+another applier has already applied. Tolerance fixes a reader that is missing
+input it should have had; it is not a substitute for knowing which applier owns an
+effect.
+
+**When adding a reader, accept every spelling it can plausibly be handed. When
+adding an effect, match the vocabulary of the path you are in and verify it
+arrives** — assert the *derived getter output* (`getSense("darkvision") === 60`),
+never that the effect object exists.
+
+#### Not attempted
+
+Full reconciliation of the two vocabularies into one is a **real refactor touching
+every reader and every registered effect**. It is deliberately out of scope for
+feature and class work, and is tracked separately. Do not attempt it as a ride-along.
 
 ### Code Organization
 

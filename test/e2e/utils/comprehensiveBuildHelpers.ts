@@ -1091,6 +1091,13 @@ export type EffectCheck = _EffectCommon & (
 	// asserting the strain charged matches the class rule (roll > score → none,
 	// roll === score → 1, roll < score → order).
 	| {kind: "manifestationTest"; order: number; roll: number; expectStrain: number}
+	/**
+	 * The per-discipline "<Discipline> Adept" reroll (CS-BUG-133). Asserts the reroll
+	 * actually replaces a failing manifestation die, that the better of the two rolls
+	 * is taken per RAW, that a use is consumed — and, in the `expectSpend: false`
+	 * case, that a use is NOT consumed when the first roll already succeeded.
+	 */
+	| {kind: "manifestationAdeptReroll"; feature: string; order: number; roll: number; rerollResult: number; expectRoll: number; expectStrain: number; expectSpend: boolean; powerType?: string}
 );
 
 const _TOGGLE_EFFECT_KINDS = new Set([
@@ -1988,6 +1995,42 @@ async function _runPassiveOrRollEffect (
 			if (!result.ok) throw new Error(`manifestationTest unavailable: ${JSON.stringify(result)}`);
 			if (result.test.strain !== e.expectStrain) throw new Error(`manifestation test order=${e.order} roll=${e.roll} strain=${result.test.strain}, expected ${e.expectStrain}`);
 			if (result.total !== e.expectStrain) throw new Error(`manifestation test applied ${result.total} strain, expected ${e.expectStrain}`);
+			return;
+		}
+		case "manifestationAdeptReroll": {
+			const result = await charSheet.page.evaluate((args) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				if (!state?.rollManifestationTest) return {ok: false, reason: "manifestation API missing"};
+				const readUses = () => {
+					const res = state.getResources?.()?.find((r: any) => r.name === args.feature);
+					return res ? res.current : null;
+				};
+				state.clearStrain();
+				// Top the pool back up first. Earlier matrix checks legitimately spend
+				// from it, and this check is about whether the reroll WORKS, not about
+				// pool bookkeeping — `longRestRestoresFeatureUses` already owns that.
+				const pool = state.getResources?.()?.find((r: any) => r.name === args.feature);
+				if (!pool) return {ok: false, reason: `no resource pool named "${args.feature}"`};
+				state.setResourceCurrent?.(pool.id, pool.max);
+				const before = readUses();
+				if (before == null) return {ok: false, reason: `no resource pool named "${args.feature}"`};
+				if (before < 1) return {ok: false, reason: `resource "${args.feature}" has max ${pool.max} — nothing to spend`};
+				const test = state.rollManifestationTest(args.order, {
+					roll: args.roll,
+					rerollResult: args.rerollResult,
+					track: "mind",
+					apply: true,
+					useAdeptReroll: true,
+					powerType: args.powerType ?? null,
+				});
+				return {ok: true, test, before, after: readUses(), total: state.getTotalStrain()};
+			}, e);
+			if (!result.ok) throw new Error(`manifestationAdeptReroll unavailable: ${JSON.stringify(result)}`);
+			if (result.test.roll !== e.expectRoll) throw new Error(`adept reroll used roll ${result.test.roll}, expected ${e.expectRoll} (first=${result.test.firstRoll}, reroll=${result.test.rerolledTo})`);
+			if (result.test.strain !== e.expectStrain) throw new Error(`adept reroll strain ${result.test.strain}, expected ${e.expectStrain}`);
+			const spent = result.before - result.after;
+			const expectSpent = e.expectSpend ? 1 : 0;
+			if (spent !== expectSpent) throw new Error(`adept reroll consumed ${spent} use(s) of "${e.feature}", expected ${expectSpent} (${result.before} → ${result.after})`);
 			return;
 		}
 		case "pickToggleable": {
