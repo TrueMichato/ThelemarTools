@@ -2977,11 +2977,20 @@ const FeatureEffectRegistry = {
 			{type: "conditionImmunity", condition: "charmed"},
 			{type: "conditionImmunity", condition: "frightened"},
 			{type: "resistance", damageType: "psychic"},
+			// "…and magic or psionics can't put you to sleep." Same grant, and the same
+			// spelling, as Fey Ancestry.
+			{type: "conditionImmunity", condition: "magically asleep"},
 		]);
 		this.register("Shielded Mind", [
 			{type: "modifier", modType: "save:int:advantage", value: 1},
 			{type: "modifier", modType: "save:wis:advantage", value: 1},
 			{type: "modifier", modType: "save:cha:advantage", value: 1},
+			// "…your thoughts can't be read, your alignment and creature type can't be
+			// divined, and you can't be targeted by telepathy without your consent."
+			{type: "conditionImmunity", condition: "thoughts read"},
+			{type: "conditionImmunity", condition: "alignment detected"},
+			{type: "conditionImmunity", condition: "creature type detected"},
+			{type: "conditionImmunity", condition: "unwanted telepathy"},
 		]);
 
 		// ======= BEASTHEART (MCDM "Beastheart and Monstrous Companions", BST) =======
@@ -13183,10 +13192,10 @@ class CharacterSheetState {
 		// Compute each movement type with per-type multipliers
 		const getTypeMultiplier = (speedType) => (itemSpeedMultiply[speedType] || 1) * (itemSpeedMultiply["*"] || 1);
 
-		const fly = (effectiveFly > 0 || hasEqualToWalkMod("fly")) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("fly", effectiveFly, (speedMods.fly || 0) + this.getSpeedBonusFromStates("fly") + adeptSpeedBonus + (itemSpeedBonus.fly || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("fly") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
-		const swim = (effectiveSwim > 0 || hasEqualToWalkMod("swim")) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("swim", effectiveSwim, (speedMods.swim || 0) + this.getSpeedBonusFromStates("swim") + adeptSpeedBonus + (itemSpeedBonus.swim || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("swim") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
-		const climb = (effectiveClimb > 0 || hasEqualToWalkMod("climb")) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("climb", effectiveClimb, (speedMods.climb || 0) + this.getSpeedBonusFromStates("climb") + adeptSpeedBonus + (itemSpeedBonus.climb || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("climb") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
-		const burrow = (effectiveBurrow > 0 || hasEqualToWalkMod("burrow")) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("burrow", effectiveBurrow, (speedMods.burrow || 0) + this.getSpeedBonusFromStates("burrow") + adeptSpeedBonus + (itemSpeedBonus.burrow || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("burrow") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
+		const fly = (effectiveFly > 0 || hasEqualToWalkMod("fly") || this._getGrantedSpeedFromFeatures("fly") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("fly", effectiveFly, (speedMods.fly || 0) + this.getSpeedBonusFromStates("fly") + adeptSpeedBonus + (itemSpeedBonus.fly || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("fly") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
+		const swim = (effectiveSwim > 0 || hasEqualToWalkMod("swim") || this._getGrantedSpeedFromFeatures("swim") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("swim", effectiveSwim, (speedMods.swim || 0) + this.getSpeedBonusFromStates("swim") + adeptSpeedBonus + (itemSpeedBonus.swim || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("swim") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
+		const climb = (effectiveClimb > 0 || hasEqualToWalkMod("climb") || this._getGrantedSpeedFromFeatures("climb") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("climb", effectiveClimb, (speedMods.climb || 0) + this.getSpeedBonusFromStates("climb") + adeptSpeedBonus + (itemSpeedBonus.climb || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("climb") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
+		const burrow = (effectiveBurrow > 0 || hasEqualToWalkMod("burrow") || this._getGrantedSpeedFromFeatures("burrow") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("burrow", effectiveBurrow, (speedMods.burrow || 0) + this.getSpeedBonusFromStates("burrow") + adeptSpeedBonus + (itemSpeedBonus.burrow || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("burrow") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
 
 		if (fly > 0) parts.push(`fly ${fly} ft.`);
 		if (swim > 0) parts.push(`swim ${swim} ft.`);
@@ -13278,7 +13287,7 @@ class CharacterSheetState {
 		// added — silently returning 0 for every such feature. Only a
 		// TYPE-SPECIFIC grant counts here, which is what keeps the generic
 		// "+10 speed" case above still correct.
-		if (type !== "walk" && base === 0 && this._getGrantedSpeedFromStates(type) <= 0) {
+		if (type !== "walk" && base === 0 && this._getGrantedSpeedFromStates(type) <= 0 && this._getGrantedSpeedFromFeatures(type) <= 0) {
 			return 0;
 		}
 
@@ -18050,31 +18059,7 @@ class CharacterSheetState {
 
 					const talentSubclass = this.getEffectiveSubclassForClass(cls);
 					const talentSubclassName = talentSubclass?.shortName || talentSubclass?.name || "";
-					if (/chronopath/i.test(talentSubclassName) && level >= 2) {
-						const chronoUses = Math.max(1, intMod);
-						calculations.hasChronopathyAdept = true;
-						calculations.chronopathyAdeptUses = chronoUses;
-						calculations.hasRapidManifestation = true;
-						calculations.rapidManifestationUses = chronoUses;
-						if (level >= 6) {
-							calculations.hasDecay = true;
-							calculations.decayMaxStrain = profBonus;
-							calculations.decayDamagePerStrain = "2d10";
-							calculations.decayDamageType = "necrotic";
-							calculations.decayDc = calculations.powerSaveDc;
-							calculations.decaySaveAbility = "wis";
-						}
-						if (level >= 10) calculations.hasFickleReadiness = true;
-						if (level >= 14) {
-							calculations.hasTimePocket = true;
-							calculations.timePocketDamage = "6d10";
-							calculations.timePocketDamageType = "psychic";
-							calculations.timePocketStrainCost = 3;
-							calculations.timePocketDc = calculations.powerSaveDc;
-							calculations.timePocketSaveAbility = "cha";
-							calculations.timePocketDuration = "1d4 + 1 rounds";
-						}
-					}
+					Object.assign(calculations, this._getTalentSpecializationCalculations(talentSubclassName, level, {intMod, profBonus, powerSaveDc: calculations.powerSaveDc}));
 					break;
 				}
 				case "Beastheart": {
@@ -27275,6 +27260,48 @@ class CharacterSheetState {
 			}
 		}
 
+		// ===== TALENT (MCDM "The Talent and Psionics") specializations =====
+		// Every effect below is emitted from the derived calculations rather than parsed
+		// from prose, so the number the sheet displays and the number it applies are the
+		// same number by construction.
+
+		// Metamorph 6 — Super Senses: add the Intelligence modifier to Wisdom
+		// (Perception) checks. `getPassiveScore` derives passive Perception from the
+		// same check modifier, so the skill bonus carries into passive Perception on its
+		// own — emitting a `passive:perception` bonus as well would double-count it.
+		if (calculations.hasSuperSenses && !alreadyProcessed("Super Senses")) {
+			effects.push({
+				type: "modifier",
+				modType: "skill:perception",
+				value: calculations.superSensesPerceptionBonus,
+				source: "Super Senses",
+			});
+		}
+
+		// Telepath 6 — Emotional Intelligence: the Intelligence modifier on four social
+		// skills. Four ordinary skill modifiers, not a special case.
+		if (calculations.hasEmotionalIntelligence && !alreadyProcessed("Emotional Intelligence")) {
+			for (const skill of calculations.emotionalIntelligenceSkills || []) {
+				effects.push({
+					type: "modifier",
+					modType: `skill:${skill}`,
+					value: calculations.emotionalIntelligenceBonus,
+					source: "Emotional Intelligence",
+				});
+			}
+		}
+
+		// Telekinetic 14 — Mind Wings: a real flying speed, not a note.
+		if (calculations.hasMindWings && !alreadyProcessed("Mind Wings")) {
+			effects.push({
+				type: "speed",
+				speedType: "fly",
+				value: calculations.mindWingsFlySpeed,
+				grantsMovementType: true,
+				source: "Mind Wings",
+			});
+		}
+
 		// Storm Soul resistances (Storm Herald)
 		if (calculations.stormSoulResistance) {
 			effects.push({
@@ -28619,6 +28646,7 @@ class CharacterSheetState {
 						note: `From ${effect.source} - ${effect.conditional}`,
 						enabled: !effect.conditional.includes("while"),
 						conditional: effect.conditional,
+						grantsMovementType: !!effect.grantsMovementType,
 					});
 				} else {
 					this._addClassFeatureModifier({
@@ -28627,9 +28655,10 @@ class CharacterSheetState {
 						value: speedValue,
 						note: `From ${effect.source}`,
 						enabled: true,
+						grantsMovementType: !!effect.grantsMovementType,
 					});
 				}
-				return `${effect.source}: +${speedValue} ft. ${effect.speedType} speed${effect.conditional ? ` (${effect.conditional})` : ""}`;
+				return `${effect.source}: ${effect.grantsMovementType ? `${speedValue} ft. ${effect.speedType} speed` : `+${speedValue} ft. ${effect.speedType} speed`}${effect.conditional ? ` (${effect.conditional})` : ""}`;
 			}
 
 			// ===== LANGUAGES =====
@@ -35896,6 +35925,34 @@ class CharacterSheetState {
 		return granted;
 	}
 
+	/**
+	 * Speed GRANTED to a non-walk movement type by a permanent feature.
+	 *
+	 * (CS-BUG-130) The movement-type guard in `getSpeed()` / `getSpeedByType()` exists so
+	 * a generic "+10 to your speed" can never conjure a climb speed for a character who
+	 * has none. But it was keyed only on active states, so a PERMANENT feature that grants
+	 * a flat non-walk speed outright — "You gain a flying speed of 60 feet" (Telekinetic's
+	 * Mind Wings; equally any homebrew or future class feature spelled the same way) —
+	 * wrote a perfectly good `speed:fly` modifier that the guard then discarded, silently
+	 * reporting 0.
+	 *
+	 * The fix stays generic rather than special-casing one feature: an effect may declare
+	 * `grantsMovementType: true`, which marks its modifier as conferring the movement type
+	 * itself. A plain bonus modifier still cannot, so the guard keeps doing its job.
+	 *
+	 * @param {string} speedType
+	 * @returns {number}
+	 */
+	_getGrantedSpeedFromFeatures (speedType) {
+		if (speedType === "walk") return 0;
+		let granted = 0;
+		for (const m of this._data.namedModifiers || []) {
+			if (m.type !== `speed:${speedType}` || !m.grantsMovementType || m.enabled === false) continue;
+			granted = Math.max(granted, Number(m.value) || 0);
+		}
+		return granted;
+	}
+
 	getSpeedBonusFromStates (speedType = "walk") {
 		const effects = this.getActiveStateEffects();
 		let bonus = 0;
@@ -37618,6 +37675,246 @@ class CharacterSheetState {
 	// penalties compose with items, active states and conditions automatically.
 
 	/**
+	 * Derived numbers for a Talent's Psionic Specialization (subclass).
+	 *
+	 * Split out of the giant `getFeatureCalculations()` switch so the seven
+	 * specializations read as seven small, comparable blocks rather than one 200-line
+	 * arm of a switch, and so the ONE rule the six academies share — the "<Discipline>
+	 * Adept" manifestation-die reroll — is expressed once, generically, driven by the
+	 * `disciplines` map in `CharacterSheetClassUtils.PSIONIC_MANIFESTERS`.
+	 *
+	 * @param {string} subclassName specialization short name
+	 * @param {number} level Talent class level
+	 * @param {*} ctx `{intMod, profBonus, powerSaveDc}`
+	 * @returns {*} calculation keys to merge
+	 */
+	_getTalentSpecializationCalculations (subclassName, level, {intMod, profBonus, powerSaveDc}) {
+		/** @type {*} */ const calc = {};
+		if (!subclassName || level < 2) return calc;
+
+		// Most Talent subclass pools are "Intelligence modifier (minimum once) per long rest".
+		const intUses = Math.max(1, intMod);
+		// Every subclass rider that adds the Intelligence modifier is floored at +1 by RAW.
+		const intBonus = Math.max(1, intMod);
+
+		// --- The one rule six of the seven academies share -----------------------------
+		// Chronopathy / Metamorphosis / Pyrokinesis / Resopathy / Telekinesis / Telepathy
+		// Adept are the SAME feature with a different discipline in the sentence. Keying
+		// it off the discipline map means adding a specialization is a data edit.
+		const config = typeof CharacterSheetClassUtils !== "undefined"
+			? CharacterSheetClassUtils.getPsionicManifesterConfig("Talent", "TalPsi")
+			: null;
+		const discipline = CharacterSheetClassUtils?.getPsionicDisciplineForSubclass?.(config, subclassName) || null;
+		if (discipline) {
+			calc.hasDisciplineAdept = true;
+			calc.adeptDiscipline = discipline.code;
+			calc.adeptDisciplineName = discipline.discipline;
+			calc.adeptFeatureName = `${discipline.discipline} Adept`;
+			calc.disciplineAdeptUses = intUses;
+			// Chronopath shipped first and its keys are load-bearing for saved characters,
+			// the existing test suite and the E2E spec; keep them as aliases.
+			if (discipline.code === "CP") {
+				calc.hasChronopathyAdept = true;
+				calc.chronopathyAdeptUses = intUses;
+			}
+		}
+
+		const name = subclassName.toLowerCase();
+
+		if (name === "chronopath") {
+			calc.hasRapidManifestation = true;
+			calc.rapidManifestationUses = intUses;
+			if (level >= 6) {
+				calc.hasDecay = true;
+				calc.decayMaxStrain = profBonus;
+				calc.decayDamagePerStrain = "2d10";
+				calc.decayDamageType = "necrotic";
+				calc.decayDc = powerSaveDc;
+				calc.decaySaveAbility = "wis";
+			}
+			if (level >= 10) calc.hasFickleReadiness = true;
+			if (level >= 14) {
+				calc.hasTimePocket = true;
+				calc.timePocketDamage = "6d10";
+				calc.timePocketDamageType = "psychic";
+				calc.timePocketStrainCost = 3;
+				calc.timePocketDc = powerSaveDc;
+				calc.timePocketSaveAbility = "cha";
+				calc.timePocketDuration = "1d4 + 1 rounds";
+			}
+			return calc;
+		}
+
+		if (name === "maverick") {
+			// Raw Power: add INT to one damage roll of any 1st-order power.
+			calc.hasRawPower = true;
+			calc.rawPowerDamageBonus = intBonus;
+			calc.rawPowerMaxOrder = 1;
+			// Reduce Stress: halve strain gained from manifesting (min 1), 1/short rest.
+			calc.hasReduceStress = true;
+			calc.reduceStressUses = 1;
+			calc.reduceStressMinimumStrain = 1;
+			if (level >= 6) {
+				calc.hasEnergyUnleashed = true;
+				calc.energyUnleashedDamagePerStrain = "1d6";
+				calc.energyUnleashedDamageType = "psychic";
+				calc.energyUnleashedDc = powerSaveDc;
+				calc.energyUnleashedSaveAbility = "wis";
+				calc.energyUnleashedRange = 60;
+			}
+			if (level >= 10) {
+				calc.hasShockAbsorption = true;
+				calc.shockAbsorptionStrainCost = 1;
+				calc.shockAbsorptionHalvesDamage = true;
+			}
+			if (level >= 14) {
+				calc.hasFullForce = true;
+				calc.fullForceUses = 1;
+				calc.fullForceMaximizesDamage = true;
+			}
+			return calc;
+		}
+
+		if (name === "metamorph") {
+			calc.hasPsionicToughness = true;
+			calc.psionicToughnessUses = intUses;
+			// "hit point maximum and current hit points increase by INT modifier + talent
+			// level (minimum 1)" — the floor is on the TOTAL, not on the modifier.
+			calc.psionicToughnessTempHpMax = Math.max(1, intMod + level);
+			calc.psionicToughnessDuration = "1 hour";
+			if (level >= 6) {
+				calc.hasMindSurgeon = true;
+				calc.mindSurgeonMaxStrain = profBonus;
+				calc.mindSurgeonHealingPerStrain = "1d10";
+				calc.hasSuperSenses = true;
+				calc.superSensesPerceptionBonus = intBonus;
+			}
+			if (level >= 10) {
+				calc.hasDeathFoiled = true;
+				calc.deathFoiledStrainCost = 8;
+				calc.deathFoiledUses = 1;
+			}
+			if (level >= 14) {
+				calc.hasPsionicEvolution = true;
+				calc.psionicEvolutionSpeedBonus = 10;
+				calc.psionicEvolutionBonusDamage = intBonus;
+				calc.psionicEvolutionDamageType = "psychic";
+			}
+			return calc;
+		}
+
+		if (name === "pyrokinetic") {
+			calc.hasFlameOn = true;
+			// "two flames at 5th level, three at 11th, four at 17th"
+			calc.flameOnCount = level >= 17 ? 4 : level >= 11 ? 3 : level >= 5 ? 2 : 1;
+			calc.flameOnDamage = level >= 10 ? "1d8" : "1d6";
+			calc.flameOnDamageBonus = intBonus;
+			calc.flameOnDamageType = "fire";
+			calc.flameOnAttackBonus = profBonus + intMod;
+			calc.flameOnRange = level >= 10 ? 120 : 60;
+			calc.flameOnBrightLight = 20;
+			calc.flameOnDimLight = 20;
+			if (level >= 6) {
+				calc.hasBendFlame = true;
+				calc.bendFlameOptions = ["Change fire damage to force damage", "Chosen creatures (up to the power's order) automatically succeed and take no damage"];
+			}
+			if (level >= 10) {
+				calc.hasHeatSeeking = true;
+				calc.heatSeekingIgnoresCover = true;
+			}
+			if (level >= 14) {
+				calc.hasImmolate = true;
+				calc.immolateDamage = `${profBonus * 2}`;
+				calc.immolateDamageType = "fire";
+				calc.immolateDc = powerSaveDc;
+				calc.immolateSaveAbility = "dex";
+				calc.immolateDuration = "1 minute";
+			}
+			return calc;
+		}
+
+		if (name === "resopath") {
+			calc.hasManipulateTerrain = true;
+			calc.manipulateTerrainUses = intUses;
+			calc.manipulateTerrainRange = 60;
+			calc.manipulateTerrainAreaSize = 20;
+			calc.manipulateTerrainDuration = "1 minute";
+			if (level >= 6) {
+				calc.hasManifestAlly = true;
+				// CR no higher than talent level ÷ 3 (rounded down); the strain cost equals
+				// that CR, minimum 1.
+				calc.manifestAllyMaxCr = Math.floor(level / 3);
+				calc.manifestAllyMaxStrain = Math.max(1, Math.floor(level / 3));
+				calc.manifestAllyDuration = "10 minutes";
+				calc.manifestAllyRange = 30;
+			}
+			if (level >= 10) {
+				calc.hasImaginationCreation = true;
+				calc.imaginationCreationUses = intUses;
+				calc.imaginationCreationMaxSize = "Large";
+			}
+			if (level >= 14) {
+				calc.hasNightmareTerrain = true;
+				calc.nightmareTerrainDamage = `${level}`;
+				calc.nightmareTerrainDamageType = "bludgeoning, piercing or slashing";
+				calc.nightmareTerrainDc = powerSaveDc;
+				calc.nightmareTerrainSaveAbility = "dex";
+				calc.nightmareTerrainMaxTargets = 3;
+			}
+			return calc;
+		}
+
+		if (name === "telekinetic") {
+			calc.hasInvisibleArmor = true;
+			calc.invisibleArmorUses = intUses;
+			calc.invisibleArmorAcBonus = intBonus;
+			calc.invisibleArmorRange = 30;
+			if (level >= 6) {
+				calc.hasStrongMind = true;
+				calc.strongMindStrainCost = 1;
+				calc.strongMindForcedMovementBonus = 10;
+				calc.strongMindSwapsSaveTo = "int";
+			}
+			if (level >= 10) {
+				calc.hasReflectiveArmor = true;
+				calc.reflectiveArmorBonusDamage = intBonus;
+				calc.reflectiveArmorAttackBonus = profBonus + intMod;
+			}
+			if (level >= 14) {
+				calc.hasMindWings = true;
+				calc.mindWingsFlySpeed = 60;
+				calc.mindWingsMoveAllyRange = 60;
+				calc.mindWingsMoveAllyDistance = 15;
+			}
+			return calc;
+		}
+
+		if (name === "telepath") {
+			calc.hasGreaterTelepathy = true;
+			calc.greaterTelepathyUses = intUses;
+			calc.greaterTelepathyRange = 30;
+			calc.greaterTelepathyLinkTargets = intUses;
+			calc.greaterTelepathyDuration = "1 hour";
+			if (level >= 6) {
+				calc.hasEmotionalIntelligence = true;
+				calc.emotionalIntelligenceBonus = intBonus;
+				calc.emotionalIntelligenceSkills = ["deception", "insight", "intimidation", "persuasion"];
+				calc.hasNotInTheFace = true;
+			}
+			if (level >= 10) calc.hasSharedConnection = true;
+			if (level >= 14) {
+				calc.hasTruthHurts = true;
+				calc.truthHurtsDamagePerStrain = "2d8";
+				calc.truthHurtsDamageType = "psychic";
+				calc.truthHurtsQuestionStrainCost = 2;
+			}
+			return calc;
+		}
+
+		return calc;
+	}
+
+	/**
 	 * The Talent class entry, if the character has one.
 	 * @returns {*} class entry or null
 	 */
@@ -37963,15 +38260,27 @@ class CharacterSheetState {
 	 * power's order. Strain that would break the maximum is reported as `overflow` and is
 	 * NOT applied — the caller resolves the RAW "die or drop to 0 hp" choice.
 	 *
+	 * Two specialization features can intervene, and both do so HERE rather than in the
+	 * UI, so any caller (dialog, test, future automation) gets the same answer:
+	 *
+	 * - **"<Discipline> Adept"** (six of the seven specializations) lets the Talent reroll
+	 *   the die once for a power of their own academy and use either result. The reroll is
+	 *   only spent when it helps, and it consumes a use from the pool.
+	 * - **Reduce Stress** (Maverick) halves the strain gained from manifesting, minimum 1.
+	 *
 	 * @param {number} order the power's base order (1-6)
 	 * @param {*} [opts]
 	 * @param {number} [opts.roll] forced manifestation-die result (tests)
+	 * @param {number} [opts.rerollResult] forced SECOND die result (tests)
 	 * @param {number} [opts.concentratingOn] number of other powers being concentrated on
 	 * @param {string} [opts.track] strain track to charge
 	 * @param {boolean} [opts.apply] whether to actually apply the strain (default true)
+	 * @param {string} [opts.powerType] the power's discipline code ("TK", "CP", …)
+	 * @param {boolean} [opts.useAdeptReroll] opt in to spending an Adept reroll
+	 * @param {boolean} [opts.useReduceStress] opt in to spending Maverick's Reduce Stress
 	 * @returns {*} test result
 	 */
-	rollManifestationTest (order, {roll = null, concentratingOn = 0, track = "body", apply = true} = {}) {
+	rollManifestationTest (order, {roll = null, rerollResult = null, concentratingOn = 0, track = "body", apply = true, powerType = null, useAdeptReroll = false, useReduceStress = false} = {}) {
 		const level = this.getTalentLevel();
 		if (!level) return null;
 		const baseOrder = Math.max(1, Math.floor(Number(order) || 1));
@@ -37981,9 +38290,29 @@ class CharacterSheetState {
 		}
 		const score = baseOrder + Math.max(0, Math.floor(Number(concentratingOn) || 0));
 		const faces = Number((this.getManifestationDie().match(/d(\d+)/i) || [])[1]) || 4;
-		const result = Number.isFinite(roll) ? Math.max(1, Math.floor(Number(roll))) : RollerUtil.randomise(faces);
-		const strain = result > score ? 0 : result === score ? 1 : baseOrder;
+		const firstRoll = Number.isFinite(roll) ? Math.max(1, Math.floor(Number(roll))) : RollerUtil.randomise(faces);
+
+		let result = firstRoll;
+		let rerolled = null;
+		let adeptUsed = false;
+		if (useAdeptReroll && this.canUseDisciplineAdeptReroll(powerType) && firstRoll <= score) {
+			rerolled = Number.isFinite(rerollResult) ? Math.max(1, Math.floor(Number(rerollResult))) : RollerUtil.randomise(faces);
+			// RAW: "use either roll" — the player would never choose the worse one.
+			result = Math.max(firstRoll, rerolled);
+			adeptUsed = this.spendDisciplineAdeptReroll();
+		}
+
+		const rawStrain = result > score ? 0 : result === score ? 1 : baseOrder;
 		const outcome = result > score ? "clean" : result === score ? "grazed" : "strained";
+
+		let strain = rawStrain;
+		let reduceStressUsed = false;
+		if (useReduceStress && rawStrain > 0 && this.canUseReduceStress()) {
+			strain = Math.max(1, Math.floor(rawStrain / 2));
+			reduceStressUsed = this.spendReduceStress();
+			if (!reduceStressUsed) strain = rawStrain;
+		}
+
 		let applied = 0;
 		let overflow = false;
 		if (strain > 0) {
@@ -37991,7 +38320,114 @@ class CharacterSheetState {
 			overflow = projected > this.getStrainMaximum();
 			if (apply && !overflow) applied = this.addStrain(strain, track).applied;
 		}
-		return {order: baseOrder, score, roll: result, die: this.getManifestationDie(), strain, applied, overflow, outcome};
+		return {
+			order: baseOrder,
+			score,
+			roll: result,
+			firstRoll,
+			rerolledTo: rerolled,
+			adeptRerollUsed: adeptUsed,
+			die: this.getManifestationDie(),
+			strain,
+			rawStrain,
+			reduceStressUsed,
+			applied,
+			overflow,
+			outcome,
+		};
+	}
+
+	/**
+	 * Whether a "<Discipline> Adept" reroll is available for a power of this discipline.
+	 *
+	 * Generic across all six academy specializations: the character's own discipline
+	 * comes from `getFeatureCalculations().adeptDiscipline`, so nothing here names a
+	 * specialization. A power with no recorded discipline is treated as eligible, since a
+	 * homebrew power that omits the code should not silently lose the feature.
+	 *
+	 * @param {string|null} powerType the power's discipline code ("TK", "CP", …)
+	 * @returns {boolean}
+	 */
+	canUseDisciplineAdeptReroll (powerType = null) {
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasDisciplineAdept) return false;
+		if (powerType && calc.adeptDiscipline && powerType !== calc.adeptDiscipline) return false;
+		return this._getDisciplineAdeptResource()?.current > 0;
+	}
+
+	/** @returns {*} the Adept reroll pool, whatever the specialization calls it. */
+	_getDisciplineAdeptResource () {
+		this.ensureTalentResources();
+		const calc = this.getFeatureCalculations();
+		if (!calc.hasDisciplineAdept) return null;
+		const wanted = String(calc.adeptFeatureName || "").toLowerCase();
+		return (this._data.resources || []).find(r => String(r.name || "").toLowerCase() === wanted) || null;
+	}
+
+	/**
+	 * Spend one "<Discipline> Adept" reroll.
+	 * @returns {boolean} whether a use was actually consumed
+	 */
+	spendDisciplineAdeptReroll () {
+		const resource = this._getDisciplineAdeptResource();
+		if (!resource || resource.current < 1) return false;
+		resource.current--;
+		const feature = this._data.features?.find(f => f.name === resource.name);
+		if (feature?.uses) feature.uses.current = resource.current;
+		return true;
+	}
+
+	/** @returns {boolean} Whether Maverick's Reduce Stress is available. */
+	canUseReduceStress () {
+		if (!this.getFeatureCalculations().hasReduceStress) return false;
+		const resource = this._getReduceStressResource();
+		return !!resource && resource.current > 0;
+	}
+
+	/** @returns {*} the Reduce Stress pool. */
+	_getReduceStressResource () {
+		this.ensureTalentResources();
+		return (this._data.resources || []).find(r => r.name === "Reduce Stress") || null;
+	}
+
+	/**
+	 * Spend Maverick's Reduce Stress (1/short rest).
+	 * @returns {boolean} whether a use was actually consumed
+	 */
+	spendReduceStress () {
+		const resource = this._getReduceStressResource();
+		if (!resource || resource.current < 1) return false;
+		resource.current--;
+		const feature = this._data.features?.find(f => f.name === "Reduce Stress");
+		if (feature?.uses) feature.uses.current = resource.current;
+		return true;
+	}
+
+	/**
+	 * Resolve a psionic strain price expressed in prose into a number.
+	 *
+	 * `_detectPsionicActivation` records the SHAPE of a cost ("the power's order", "half
+	 * the power's order", "your proficiency bonus", "any amount") rather than a number,
+	 * because the number depends on the power being manifested and on the character. This
+	 * turns that shape into the concrete strain the sheet will actually charge.
+	 *
+	 * @param {*} strainCost the `strainCost` recorded on an activation info
+	 * @param {*} [opts]
+	 * @param {number} [opts.powerOrder] order of the power being affected
+	 * @returns {number|null} null when the cost cannot be resolved yet
+	 */
+	resolvePsionicStrainCost (strainCost, {powerOrder = 0} = {}) {
+		if (strainCost == null) return null;
+		if (typeof strainCost === "number") return Math.max(0, Math.floor(strainCost));
+		const order = Math.max(0, Math.floor(Number(powerOrder) || 0));
+		switch (strainCost) {
+			case "proficiencyBonus": return this.getProficiencyBonus();
+			case "powerOrder": return order || null;
+			case "halfPowerOrder": return order ? Math.max(1, Math.floor(order / 2)) : null;
+			// "any amount of strain" — bounded only by what the character can still take.
+			case "any": return Math.max(0, this.getStrainMaximum() - this.getTotalStrain());
+			default: return null;
+		}
 	}
 
 	/**
@@ -38014,6 +38450,10 @@ class CharacterSheetState {
 	/**
 	 * Create / resize the Talent's level-scaled pools. Mirrors
 	 * `ensureBloodHunterResources` — idempotent, safe to call on every read path.
+	 *
+	 * Every specialization pool is derived from `getFeatureCalculations()` rather than
+	 * from a per-subclass branch, so the pool list and the numbers the sheet displays
+	 * can never disagree.
 	 */
 	ensureTalentResources () {
 		const cls = this._getTalentClass();
@@ -38023,12 +38463,34 @@ class CharacterSheetState {
 			const boosts = level >= 17 ? 3 : level >= 12 ? 2 : 1;
 			this._resizeFeatureBackedResource("Psychic Boost", boosts, "long");
 		}
+		if (level < 2) return;
+
 		const effectiveSubclass = this.getEffectiveSubclassForClass(cls);
 		const subclassName = effectiveSubclass?.shortName || effectiveSubclass?.name || "";
-		if (/chronopath/i.test(subclassName) && level >= 2) {
-			const intUses = Math.max(1, this.getAbilityMod("int"));
-			this._resizeFeatureBackedResource("Chronopathy Adept", intUses, "long");
-			this._resizeFeatureBackedResource("Rapid Manifestation", intUses, "long");
+		if (!subclassName) return;
+		const calc = this._getTalentSpecializationCalculations(subclassName, level, {
+			intMod: this.getAbilityMod("int"),
+			profBonus: this.getProficiencyBonus(),
+			powerSaveDc: 0,
+		});
+
+		// The six academy specializations each mint an identically-shaped reroll pool
+		// named after their own discipline.
+		if (calc.hasDisciplineAdept) this._resizeFeatureBackedResource(calc.adeptFeatureName, calc.disciplineAdeptUses, "long");
+
+		/** @type {Array<[boolean, string, number, string]>} */ const pools = [
+			[calc.hasRapidManifestation, "Rapid Manifestation", calc.rapidManifestationUses, "long"],
+			[calc.hasReduceStress, "Reduce Stress", calc.reduceStressUses, "short"],
+			[calc.hasFullForce, "Full Force", calc.fullForceUses, "short"],
+			[calc.hasPsionicToughness, "Psionic Toughness", calc.psionicToughnessUses, "long"],
+			[calc.hasDeathFoiled, "Death Foiled", calc.deathFoiledUses, "long"],
+			[calc.hasManipulateTerrain, "Manipulate Terrain", calc.manipulateTerrainUses, "long"],
+			[calc.hasImaginationCreation, "Imagination Creation", calc.imaginationCreationUses, "long"],
+			[calc.hasInvisibleArmor, "Invisible Armor", calc.invisibleArmorUses, "long"],
+			[calc.hasGreaterTelepathy, "Greater Telepathy", calc.greaterTelepathyUses, "long"],
+		];
+		for (const [enabled, poolName, max, reset] of pools) {
+			if (enabled && max > 0) this._resizeFeatureBackedResource(poolName, max, reset);
 		}
 	}
 
@@ -46495,7 +46957,16 @@ class CharacterSheetState {
 		for (const e of this.getActiveStateEffects()) {
 			if (e.type !== effectType) continue;
 			if (!!e.conditional !== conditional) continue;
-			const dmgType = CharacterSheetState._damageTypeFromEffectTarget(e.target);
+			// Accept BOTH effect shapes. Active states canonically say
+			// `{target: "poison"}` / `{target: "damage:poison"}`, but the
+			// FeatureEffectRegistry says `{damageType: "poison"}`, and a supplemental
+			// provider written against the registry naturally reaches for the latter.
+			// Reading only `target` silently DROPPED such an effect rather than
+			// erroring — the same "correct code wired to the wrong input" shape as
+			// CS-BUG-130/131. Tolerating both is purely additive: the fallback only
+			// fires when `target` yields nothing.
+			const dmgType = CharacterSheetState._damageTypeFromEffectTarget(e.target)
+				|| CharacterSheetState._damageTypeFromEffectTarget(e.damageType);
 			if (!dmgType) continue;
 			const key = conditional ? `${dmgType}|${e.conditional}` : dmgType;
 			if (seen.has(key)) continue;
@@ -49145,6 +49616,10 @@ class CharacterSheetState {
 		if (modifier.setMaximum != null) newModifier.setMaximum = modifier.setMaximum;
 		if (modifier.equalTo) newModifier.equalTo = modifier.equalTo;
 		if (modifier.equalToWalk) newModifier.equalToWalk = true;
+		// (CS-BUG-130) Marks a `speed:<type>` modifier as CONFERRING that movement type,
+		// not merely adding to it, so the "must already have this movement type" guard in
+		// `getSpeed()` / `getSpeedByType()` lets it through.
+		if (modifier.grantsMovementType) newModifier.grantsMovementType = true;
 		if (modifier.sizeIncrease) newModifier.sizeIncrease = true;
 
 		// Advantage/disadvantage
@@ -52733,6 +53208,54 @@ class CharacterSheetState {
 			detectPatterns: ["hellsight"],
 			activationAction: "action",
 		},
+		// ===== TALENT (MCDM "The Talent and Psionics") =====
+		// Three specialization features that persist for a duration and change derived
+		// numbers while up. They go through ACTIVE_STATE_TYPES like every other toggle,
+		// so the Status Strip, the end-condition list and the teardown are free.
+		flameOn: {
+			id: "flameOn",
+			name: "Flame On",
+			icon: "🔥",
+			description: "A psionic flame burns on your body, shedding bright light in a 20-foot radius and dim light for 20 more. You can make a melee or ranged power attack with it; the flame vanishes once you attack with it or dismiss it.",
+			effects: [],
+			duration: "Until you attack with it or dismiss it",
+			endConditions: ["You make an attack with the flame", "Dismissed (no action)", "Incapacitated"],
+			detectPatterns: ["flame on"],
+			activationAction: "action",
+			// Flame count, damage die, range and attack bonus all scale with level and
+			// with Heat Seeking, so they are supplied live rather than frozen here.
+			useFeatureDescription: true,
+		},
+		manipulateTerrain: {
+			id: "manipulateTerrain",
+			name: "Manipulate Terrain",
+			icon: "🌿",
+			description: "A 20-foot-square area within 60 feet is difficult terrain for creatures of your choice. Each round you can use a bonus action to move the area up to 20 feet, or move one willing creature within it.",
+			effects: [],
+			duration: "1 minute",
+			endConditions: ["Duration expires", "You use this feature again"],
+			resourceName: "Manipulate Terrain",
+			resourceCost: 1,
+			detectPatterns: ["manipulate terrain"],
+			activationAction: "bonus",
+			useFeatureDescription: true,
+		},
+		psionicToughness: {
+			id: "psionicToughness",
+			name: "Psionic Toughness",
+			icon: "💪",
+			description: "A touched creature's hit point maximum and current hit points rise by your Intelligence modifier + your talent level, and they have advantage on death saving throws.",
+			// The hit point grant and the death-save advantage are supplied live by
+			// `_getSupplementalActiveStateEffects` so they track level and Intelligence
+			// instead of freezing at the moment of activation.
+			effects: [],
+			duration: "1 hour",
+			endConditions: ["Duration expires"],
+			resourceName: "Psionic Toughness",
+			resourceCost: 1,
+			detectPatterns: ["psionic toughness"],
+			activationAction: "action",
+		},
 		// Generic homebrew toggle - catch-all for data-driven features
 		homebrewToggle: {
 			id: "homebrewToggle",
@@ -53749,6 +54272,59 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Every phrasing MCDM uses for "this costs you strain", in priority order.
+	 *
+	 * The Talent's features and Psionic Exertion options price themselves in prose, and
+	 * they do NOT share one sentence shape: an option can cost a literal number, the
+	 * power's own order, half that order, the character's proficiency bonus, or an amount
+	 * the player picks. A single regex captured only two of those five, which is why four
+	 * of the nine Psionic Exertion options and three subclass features rendered a
+	 * description but never charged anything (CS-BUG-071).
+	 *
+	 * Order matters: the more specific phrasings must be tested first, because
+	 * "strain equal to half the power's order" also satisfies the looser
+	 * "strain equal to the power's order" pattern.
+	 *
+	 * `variable` marks costs the player chooses at activation time rather than costs the
+	 * feature fixes, so the manifest dialog knows to ask for an amount.
+	 *
+	 * @type {Array<{re: RegExp, cost: *, variable?: boolean}>}
+	 */
+	static PSIONIC_STRAIN_COST_PATTERNS = [
+		// "gain strain equal to half the power's order (minimum 1 strain)"
+		{re: /gain strain equal to half (?:the|that) power'?s order/, cost: "halfPowerOrder"},
+		// "gain strain equal to the power's order", "…equal to the creature's challenge rating"
+		{re: /gain strain equal to (?:the|that) power'?s order/, cost: "powerOrder"},
+		// "gain strain up to your proficiency bonus" (word order differs from the below)
+		{re: /gain strain up to your proficiency bonus/, cost: "proficiencyBonus", variable: true},
+		// "gain up to your proficiency bonus strain"
+		{re: /gain up to your proficiency bonus strain/, cost: "proficiencyBonus", variable: true},
+		// "you gain any amount of strain"
+		{re: /gain any amount of strain/, cost: "any", variable: true},
+		// "you gain strain to create a soulless creature…" — the amount is the ally's CR
+		{re: /gain strain to (?:create|summon)/, cost: "any", variable: true},
+		// "gain up to 4 strain"
+		{re: /gain up to (\d+) strain/, cost: null, variable: true},
+		// "you gain 3 strain", "gain 1 strain while touching…"
+		{re: /gain (\d+) strain/, cost: null},
+	];
+
+	/**
+	 * Read a feature's strain price out of its prose.
+	 * @param {string} text lowercased, tag-stripped description
+	 * @returns {{strainCost: *, isVariable: boolean}|null} null when the text names no price
+	 */
+	static _detectPsionicStrainCost (text) {
+		for (const {re, cost, variable} of CharacterSheetState.PSIONIC_STRAIN_COST_PATTERNS) {
+			const m = text.match(re);
+			if (!m) continue;
+			// A null `cost` means the pattern captured a literal number in group 1.
+			return {strainCost: cost ?? parseInt(m[1], 10), isVariable: !!variable};
+		}
+		return null;
+	}
+
+	/**
 	 * Detect activation for psionics — powers themselves, and any feature whose cost
 	 * is psionic strain rather than a use pool.
 	 *
@@ -53770,15 +54346,10 @@ class CharacterSheetState {
 		const isPsionicPower = psionicOrder != null
 			&& (feature?.optionalFeatureTypes || []).some(it => typeof it === "string" && it.startsWith("PsiP"));
 
-		// "you gain 3 strain", "gain up to your proficiency bonus strain", "gain 1 strain while…"
-		const strainMatch = text.match(/gain (?:up to )?(\d+|your proficiency bonus) strain/);
-		if (!isPsionicPower && !strainMatch) return null;
+		const strain = CharacterSheetState._detectPsionicStrainCost(text);
+		if (!isPsionicPower && !strain) return null;
 
 		const base = this._buildAbilityActivationInfo(feature, rawText, text, {resourceName: feature?.uses?.max > 0 ? feature.name : null});
-		const strainCost = strainMatch
-			? (strainMatch[1] === "your proficiency bonus" ? "proficiencyBonus" : parseInt(strainMatch[1], 10))
-			: null;
-		const isVariableStrain = !!strainMatch && /gain up to /.test(text);
 
 		return {
 			...base,
@@ -53790,8 +54361,8 @@ class CharacterSheetState {
 			// A 1st-order power is manifested freely; 2nd-order and higher require a
 			// manifestation test whose failure charges strain equal to the power's order.
 			requiresManifestationTest: isPsionicPower && psionicOrder >= 2,
-			strainCost,
-			isVariableStrainCost: isVariableStrain,
+			strainCost: strain?.strainCost ?? null,
+			isVariableStrainCost: !!strain?.isVariable,
 		};
 	}
 
@@ -57071,9 +57642,17 @@ class CharacterSheetState {
 		// Will this activation involve an hpMaxIncrease effect? Only then do we
 		// touch HP — otherwise we'd risk recomputing max HP for unrelated states
 		// (e.g. Wild Shape, which manages its own HP pool out-of-band).
-		const incomingEffects = options.customEffects || stateType?.effects || [];
-		const involvesHpMaxIncrease = Array.isArray(incomingEffects)
-			&& incomingEffects.some(e => e?.type === "hpMaxIncrease");
+		//
+		// CS-BUG-131: this must consult `_getSupplementalActiveStateEffects` as well.
+		// States registered with `useFeatureDescription: true` carry NO static
+		// `effects` array — everything they grant is computed live — so reading only
+		// `customEffects`/`stateType.effects` silently dropped the hit point grant of
+		// any such state (Metamorph's Psionic Toughness was the first).
+		const incomingEffects = [
+			...(options.customEffects || stateType?.effects || []),
+			...(this._getSupplementalActiveStateEffects(stateTypeId, null) || []),
+		];
+		const involvesHpMaxIncrease = incomingEffects.some(e => e?.type === "hpMaxIncrease");
 
 		// Enforce mutual exclusivity: deactivate any exclusive states
 		if (stateType?.exclusiveWith?.length) {
@@ -57160,10 +57739,11 @@ class CharacterSheetState {
 	 */
 	_stateContributesHpMaxIncrease (state) {
 		if (!state) return false;
-		const effects = state.customEffects
-			|| CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]?.effects
-			|| [];
-		return Array.isArray(effects) && effects.some(e => e?.type === "hpMaxIncrease");
+		const effects = [
+			...(state.customEffects || CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]?.effects || []),
+			...(this._getSupplementalActiveStateEffects(state.stateTypeId, state) || []),
+		];
+		return effects.some(e => e?.type === "hpMaxIncrease");
 	}
 
 	/**
@@ -57670,6 +58250,7 @@ class CharacterSheetState {
 
 	_getSupplementalActiveStateEffects (stateTypeId, state = null) {
 		if (stateTypeId === "wrathOfTheSea") return this._getWrathOfTheSeaStateEffects(state);
+		if (stateTypeId === "psionicToughness") return this._getPsionicToughnessStateEffects();
 		if (CharacterSheetState.LUNAR_PHASE_STATE_IDS.includes(stateTypeId)) return this._getLunarPhaseStateEffects(stateTypeId);
 		if (stateTypeId !== "rage") return [];
 		const cls = this._data.classes.find(it => {
@@ -57686,6 +58267,50 @@ class CharacterSheetState {
 				effects.push({type: "conditionImmunity", target, source: "Unstoppable"});
 			}
 			effects.push({type: "speedReductionImmunity", source: "Unstoppable"});
+		}
+		return effects;
+	}
+
+	/**
+	 * Metamorph 2 — Psionic Toughness. While the state is up the target's hit point
+	 * maximum (and current HP) rise by INT modifier + talent level, and they have
+	 * advantage on death saving throws. Psionic Evolution (level 14) layers on +10
+	 * speed plus immunity to disease, poison damage and the poisoned condition.
+	 *
+	 * Computed live rather than frozen at activation so a level-up or an Intelligence
+	 * change is reflected immediately, and so the numbers can never drift from the
+	 * ones `getFeatureCalculations()` displays.
+	 *
+	 * Reads stored class data only — never `getFeatureCalculations()` — because
+	 * `getActiveStateEffects()` feeds the speed pipeline, and going through the
+	 * calculations would close the `getSpeed → getActiveStateEffects →
+	 * getFeatureCalculations → getSpeed` cycle guarded by
+	 * CharacterSheetSpeedCalcRecursion.test.js.
+	 * @returns {Array<object>}
+	 */
+	_getPsionicToughnessStateEffects () {
+		const cls = this._getTalentClass();
+		if (!cls) return [];
+		const sub = `${cls.subclass?.shortName || cls.subclass?.name || ""}`.toLowerCase();
+		if (sub !== "metamorph") return [];
+		const level = cls.level || 1;
+		const intMod = this.getAbilityMod("int");
+		const effects = [
+			// RAW: "…by your Intelligence modifier + your talent level". The minimum of 1
+			// is on the TOTAL, so a negative Intelligence modifier still yields a grant.
+			{type: "hpMaxIncrease", value: Math.max(1, intMod + level), source: "Psionic Toughness"},
+			{type: "advantage", target: "deathSave", source: "Psionic Toughness"},
+		];
+		// Psionic Evolution (Metamorph *14*, not 10 — 10 is Death Foiled, which is a
+		// resurrection with no persistent effects) rides the same state, because RAW
+		// grants it to "any creature that benefits from your Psionic Toughness".
+		if (level >= 14) {
+			effects.push(
+				{type: "bonus", target: "speed:walk", value: 10, source: "Psionic Evolution"},
+				{type: "immunity", target: "poison", source: "Psionic Evolution"},
+				{type: "conditionImmunity", target: "poisoned", source: "Psionic Evolution"},
+				{type: "conditionImmunity", target: "disease", source: "Psionic Evolution"},
+			);
 		}
 		return effects;
 	}

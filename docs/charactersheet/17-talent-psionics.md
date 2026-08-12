@@ -179,12 +179,164 @@ verified not to leak into the other six Psionic Specializations.
 
 ---
 
+## The generic discipline mechanism
+
+The seven specializations are not seven implementations. Every psionic power in
+the source data carries a `_psionicPowerType` discipline code
+(`CP` Chronopathy · `MM` Metamorphosis · `PK` Pyrokinesis · `RP` Resopathy ·
+`TK` Telekinesis · `TP` Telepathy), and
+`PSIONIC_MANIFESTERS["talent|talpsi"].disciplines` maps each code to its
+subclass and its discipline noun. `getPsionicDisciplineForSubclass()` resolves
+in the other direction.
+
+That map is what lets the shared rules be written once:
+
+**The Adept reroll.** All six disciplines grant a "*<Discipline>* Adept" feature
+— reroll the manifestation die, use either result. `rollManifestationTest(order,
+{allowAdeptReroll, powerType})` implements it once: it rerolls, takes
+`Math.max(first, reroll)`, spends a use, and does **not** spend one when the
+first roll already succeeded. `hasChronopathyAdept` survives as an alias of the
+generic `hasDisciplineAdept` so the pre-existing Chronopath tests and E2E spec
+keep passing unchanged.
+
+Note the feature name is the **discipline noun**, not the subclass adjective:
+`Telekinesis Adept`, not `Telekinetic Adept`. The resource pool is minted by
+`_resizeFeatureBackedResource`, which mints nothing unless a matching entry
+exists in `_data.features` — so a test that never adds the feature will see an
+empty resource list and conclude, wrongly, that the mechanism is broken.
+
+**Strain cost detection.** `_detectPsionicStrainCost()` runs an ordered pattern
+table (`PSIONIC_STRAIN_COST_PATTERNS`) and yields a derived cost of
+`"powerOrder" | "halfPowerOrder" | "proficiencyBonus" | "any" | <number>`,
+resolved at use time by `resolvePsionicStrainCost()`. Extending the table is how
+a new strain-priced feature becomes activatable; writing per-feature code is not.
+See CS-BUG-132 for what the previous single-regex version silently swallowed.
+
+**Strain reduction.** Maverick's *Reduce Stress* halves strain gained *from
+manifesting only* (minimum 1), and is not spent when the manifestation cost no
+strain. It is implemented as an opt-in flag on the strain-gain path rather than
+a Maverick special case, so any future "reduce the strain you gain" feature
+reuses it.
+
+---
+
+## The other six specializations
+
+All calculations are gated on subclass **and** level, and leak tests assert each
+is absent from the other six.
+
+### Maverick
+
+| Level | Feature | Mechanical effect |
+|---|---|---|
+| 2 | Raw Power | INT modifier added to one 1st-order damage roll |
+| 2 | Reduce Stress | Halves manifesting strain, min 1; generic strain-reduction hook |
+| 6 | Energy Unleashed | 1d6 psychic per strain spent, Wis save vs the power save DC |
+| 10 | Shock Absorption | Reaction, 1 strain, halves incoming damage |
+| 14 | Full Force | Maximizes a power's damage, once per short rest |
+
+### Metamorph
+
+| Level | Feature | Mechanical effect |
+|---|---|---|
+| 2 | Psionic Toughness | Toggle: max **and** current HP + `max(1, INT + level)`, death-save advantage |
+| 6 | Mind Surgeon | Variable strain → 1d10 each |
+| 6 | Super Senses | INT modifier added to Perception checks (and thus to passive Perception) |
+| 10 | Death Foiled | 8 strain; resurrection, once per long rest |
+| 14 | Psionic Evolution | While Psionic Toughness is up: +10 walking speed, immunity to poison damage, the poisoned condition and disease |
+
+`Super Senses` emits a `skill:perception` modifier and **not** a
+`passive:perception` one. `getPassiveScore()` already derives from
+`getSkillMod()`, so emitting both double-counts. Observant emits only the
+passive because it is a passive-*only* bonus; Super Senses is a check bonus.
+
+### Pyrokinetic
+
+| Level | Feature | Mechanical effect |
+|---|---|---|
+| 2 | Flame On | Toggle; 1/2/3/4 flames at L2/5/11/17, `1d6`→`1d8` and 60→120 ft at 10 |
+| 6 | Bend Flame | Three options (`pGetUserEnum`) |
+| 10 | Heat Seeking | Range 120, ignores cover, damage die → 1d8 |
+| 14 | Immolate | 2 × proficiency bonus fire damage at the start of the turn |
+
+### Resopath
+
+| Level | Feature | Mechanical effect |
+|---|---|---|
+| 2 | Manipulate Terrain | Toggle marking the shaped area |
+| 6 | Manifest Ally | Variable strain; summon CR = `floor(level / 3)`, strain equal, min 1 |
+| 10 | Imagination Creation | Activatable, strain-priced |
+| 14 | Nightmare Terrain | Damage equal to the flat talent level |
+
+### Telekinetic
+
+| Level | Feature | Mechanical effect |
+|---|---|---|
+| 2 | Invisible Armor | Reaction; AC bonus equal to the INT modifier |
+| 6 | Strong Mind | 1 strain to swap a Str/Dex save to Int; +10 ft forced movement |
+| 10 | Reflective Armor | Activatable, strain-priced |
+| 14 | Mind Wings | A **real** 60 ft flying speed via the shared speed path (CS-BUG-130) |
+
+### Telepath
+
+| Level | Feature | Mechanical effect |
+|---|---|---|
+| 2 | Greater Telepathy | Range and reach extension |
+| 6 | Emotional Intelligence | INT modifier added to Deception, Insight, Intimidation, Persuasion |
+| 6 | Not in the Face | Activatable, strain-priced |
+| 10 | Shared Connection | Activatable, strain-priced |
+| 14 | Truth Hurts | 2d8 per strain spent |
+
+---
+
+## Class capstones
+
+| Level | Feature | Mechanical effect |
+|---|---|---|
+| 11 | Psionic Bastion | Psychic resistance; immune to charmed, frightened, **and being magically put to sleep** |
+| 18 | Shielded Mind | Advantage on Int/Wis/Cha saves; immune to having thoughts read, alignment detected, creature type detected, and to unwanted telepathy |
+| 20 | Ignore Strain | One track is ignored; the track is re-chosen when a long rest ends |
+
+Registry effects (`conditionImmunity`, `resistance`, `modifier`) only reach the
+getters after `applyClassFeatureEffects()` — this is true of every class, not a
+Talent quirk, and a probe that skips that call will wrongly report them missing.
+
+---
+
+## The manifest dialog
+
+One bespoke modal, and it is earned: manifesting is a genuinely multi-field
+decision (which power · at what order · with which Exertion · paid from which
+track) whose *combination* determines the cost. Chaining sequential
+`pGetUserEnum` prompts would hide the one thing that makes the decision legible
+— the running strain total updating as the player pushes harder.
+
+`_pUsePsionicAbility` therefore shows: a context line (power, order, discipline,
+save DC), the concentration input, an Adept-reroll checkbox, a Reduce Stress
+checkbox, a live projection strip (`role="group"`, `aria-live="polite"`) that
+recomputes the worst-case strain as inputs change, and — after the roll — the
+result lines plus the **penalty deltas** the new strain just switched on, read
+from `getStrainState()`, so the cost is visible where it lands.
+
+Everything else uses the sheet's existing prompt vocabulary and does **not** get
+a modal: the Ignore Strain track choice on long rest is a single
+`InputUiUtil.pGetUserEnum`; every "spend 1 strain to …" is a
+`pGetUserBoolean`. The class adds exactly one dialog.
+
+---
+
 ## Tests
 
-- `test/jest/charactersheet/CharacterSheetTalent.test.js` — 62 tests covering
+- `test/jest/charactersheet/CharacterSheetTalent.test.js` — 63 tests covering
   the class table, every strain penalty against the *real* getters, overflow,
   rest behaviour, the manifestation test, every Chronopath ability, generic
   activation detection, and both derivation engines.
+- `test/jest/charactersheet/CharacterSheetTalentSpecializations.test.js` — 74
+  behavioural tests across all seven specializations, the generic Adept reroll,
+  Reduce Stress, the class capstones, strain-cost detection and cross-class leak
+  guards. Every assertion is on a derived effect (the fly speed that appears, the
+  hit points that move, the Persuasion modifier that rises), never on a
+  `has*` flag.
 - `test/e2e/specs/tgtt-talent-chronopath.spec.ts` — full L1→20 comprehensive
   build with a `featuresMatrix` entry per feature per tier, plus two new
   shared `EffectCheck` kinds: `psionicStrainMechanics` (drives all three tracks

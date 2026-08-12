@@ -942,6 +942,65 @@ ironPunisher: {
 }
 ```
 
+### Talent Psionics (MCDM — `TalPsi`)
+
+Three specialization toggles. All three are registered with
+`useFeatureDescription: true` and **no static `effects` array** — every number
+they grant depends on talent level, Intelligence, or proficiency bonus, so the
+effects are computed live by `_getSupplementalActiveStateEffects` rather than
+frozen into the registry. Read that section above before adding a fourth.
+
+#### `psionicToughness` (Metamorph 2)
+
+The only one of the three that emits machine-applied effects. While up:
+
+```javascript
+// _getPsionicToughnessStateEffects()
+[
+    {type: "hpMaxIncrease", value: Math.max(1, intMod + talentLevel)},
+    {type: "advantage", target: "deathSave"},
+    // Psionic Evolution (Metamorph *14* — 10 is Death Foiled, which has no
+    // persistent effects) rides the same toggle, because RAW grants it to
+    // "any creature that benefits from your Psionic Toughness":
+    {type: "bonus", target: "speed:walk", value: 10},
+    {type: "immunity", target: "poison"},
+    {type: "conditionImmunity", target: "poisoned"},
+    {type: "conditionImmunity", target: "disease"},
+]
+
+Note the damage immunity says `target`, **not** `damageType`. Active-state
+damage defences are read by `_getDamageDefenceFromStates`, which parses `target`;
+`damageType` is the *registry* spelling. Both are now tolerated (the collector
+falls back), but `target` is canonical here — see the vocabulary table below.
+```
+
+The hit point grant is Aid-like: **both** the maximum and the current total
+move, and both move back when the state ends. This is the state whose activation
+exposed **CS-BUG-131** — `activateState` decided whether to sync HP by reading
+only `customEffects`/`stateType.effects`, so a `useFeatureDescription` state's
+`hpMaxIncrease` was computed correctly and then never applied. Both that check
+and `_stateContributesHpMaxIncrease` now consult the supplemental provider.
+
+The `Math.max(1, …)` floors the **total**, not the ability modifier — a Metamorph
+with a penalty to Intelligence still gains at least 1 hit point.
+
+#### `flameOn` (Pyrokinetic 2)
+
+Sheathes the talent in psionic fire: light, a ranged fire attack, and the
+Immolate / Bend Flame / Heat Seeking riders at 6/10/14. The flame count
+(1/2/3/4 at L2/5/11/17), the damage die (`1d6` → `1d8` at 10), and the range
+(60 → 120 ft at 10) all surface through `getFeatureCalculations()`
+(`flameOnFlameCount`, `flameOnDamage`, `flameOnRange`), so the toggle itself
+carries no numeric effects — it records that the flames are lit.
+
+#### `manipulateTerrain` (Resopath 2)
+
+Marks the shaped area as live. Its area, duration and the Nightmare Terrain
+damage (flat talent level, from 14) come from the calculations
+(`manipulateTerrainArea`, `nightmareTerrainDamage`); as with Flame On, the state
+is a fact about the battlefield rather than a bundle of modifiers on the
+character, so it emits nothing.
+
 ---
 
 ## Detection System

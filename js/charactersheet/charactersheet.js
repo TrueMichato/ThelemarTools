@@ -9516,11 +9516,29 @@ class CharacterSheetPage {
 
 		const order = activationInfo.psionicOrder;
 		const pbCost = state.getProficiencyBonus();
-		const flatCost = activationInfo.strainCost === "proficiencyBonus" ? pbCost : activationInfo.strainCost;
+		const calc = state.getFeatureCalculations();
+		const flatCost = state.resolvePsionicStrainCost
+			? state.resolvePsionicStrainCost(activationInfo.strainCost, {powerOrder: order, proficiencyBonus: pbCost})
+			: (activationInfo.strainCost === "proficiencyBonus" ? pbCost : activationInfo.strainCost);
+
+		// The two per-rest levers that change what a manifestation costs. Each is a single
+		// bit, so each is an inline checkbox inside the decision it modifies rather than a
+		// prompt of its own — the player has to see its effect on the projection to judge
+		// whether spending it is worth it.
+		const canAdept = activationInfo.requiresManifestationTest && !!state.canUseDisciplineAdeptReroll?.();
+		const canReduce = !!state.canUseReduceStress?.();
 
 		const trackOptions = CharacterSheetState.PSIONIC_STRAIN_TRACKS
 			.map(track => `<option value="${track}">${track[0].toUpperCase()}${track.slice(1)}</option>`)
 			.join("");
+		const contextBits = [
+			order ? `${Parser.getOrdinalForm ? Parser.getOrdinalForm(order) : `${order}`}-order` : null,
+			calc.adeptDiscipline || null,
+			calc.powerSaveDc ? `save DC ${calc.powerSaveDc}` : null,
+		].filter(Boolean);
+		const contextRow = contextBits.length
+			? `<div class="ve-small ve-muted mb-2">${contextBits.join(" · ")}</div>`
+			: "";
 		const costLabel = flatCost == null
 			? ""
 			: `<div class="mb-2">Cost: <strong>${activationInfo.isVariableStrainCost ? `up to ${flatCost}` : flatCost} strain</strong></div>`;
@@ -9536,6 +9554,16 @@ class CharacterSheetPage {
 					<input type="number" class="ve-form-control form-control--minimal" id="psi-concentrating" min="0" value="0" style="width:5rem;">
 				</label>`
 			: "";
+		const adeptRow = canAdept
+			? `<label class="ve-flex-v-center mb-2" style="gap:.5rem;"><input type="checkbox" id="psi-adept">
+					Spend ${calc.adeptDiscipline || "discipline"} Adept to reroll a failed test (${state.getResources().find(r => r.name === `${calc.adeptDiscipline} Adept`)?.current ?? 0} left)
+				</label>`
+			: "";
+		const reduceRow = canReduce
+			? `<label class="ve-flex-v-center mb-2" style="gap:.5rem;"><input type="checkbox" id="psi-reduce">
+					Spend Reduce Stress to halve the strain this manifestation causes (minimum 1)
+				</label>`
+			: "";
 
 		const {eleModalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `🧠 ${feature.name}`,
@@ -9544,13 +9572,19 @@ class CharacterSheetPage {
 		const strain = state.getStrain();
 		const wrp = e_({
 			outer: `<div class="ve-flex-col p-2">
+				${contextRow}
 				${costLabel}
 				${amountRow}
 				${testRow}
+				${adeptRow}
+				${reduceRow}
 				<label class="ve-flex-v-center mb-2" style="gap:.5rem;">Strain track
 					<select class="ve-form-control form-control--minimal" id="psi-strain-track" style="width:9rem;">${trackOptions}</select>
 				</label>
 				<div class="ve-small ve-muted mb-2">Current strain — body ${strain.body}, mind ${strain.mind}, soul ${strain.soul} (max ${strainMax}).</div>
+				<div class="ve-flex-v-center mb-2" role="group" aria-label="Projected strain" id="psi-strip" style="gap:.5rem;font-variant-numeric:tabular-nums;">
+					<span class="ve-small" aria-live="polite" id="psi-projection"></span>
+				</div>
 				<div class="ve-flex" style="gap:.5rem;">
 					<button class="ve-btn ve-btn-primary" id="psi-confirm">${activationInfo.requiresManifestationTest ? "Manifest" : "Use"}</button>
 					<button class="ve-btn ve-btn-default" id="psi-cancel">Cancel</button>
@@ -9561,6 +9595,42 @@ class CharacterSheetPage {
 		eleModalInner.appendChild(wrp);
 
 		const eleResult = wrp.querySelector("#psi-result");
+		const eleProjection = wrp.querySelector("#psi-projection");
+
+		// The one thing that makes "how hard do I push this?" legible: the worst-case cost
+		// updating as the player changes concentration, amount and levers — BEFORE they
+		// commit, so the RAW "manifest and die" branch is never a surprise.
+		const doUpdateProjection = () => {
+			const concentrating = Number(/** @type {*} */ (wrp.querySelector("#psi-concentrating"))?.value || 0);
+			const useReduce = !!(/** @type {*} */ (wrp.querySelector("#psi-reduce"))?.checked);
+			let worst = 0;
+			if (activationInfo.requiresManifestationTest) worst += order;
+			if (flatCost != null) {
+				worst += activationInfo.isVariableStrainCost
+					? Math.max(1, Math.min(flatCost, Number(/** @type {*} */ (wrp.querySelector("#psi-strain-amount"))?.value || flatCost)))
+					: flatCost;
+			}
+			if (useReduce && activationInfo.requiresManifestationTest) worst = Math.max(1, Math.ceil(worst / 2));
+			const projected = state.getTotalStrain() + worst;
+			const isOver = projected > strainMax;
+			const score = activationInfo.requiresManifestationTest ? order + Math.max(0, concentrating) : null;
+			const parts = [
+				score != null ? `Score ${score}` : null,
+				activationInfo.requiresManifestationTest ? `Die ${state.getManifestationDie()}` : null,
+				`Worst case +${worst}`,
+				`Projected ${projected} / ${strainMax}`,
+				isOver ? "— exceeds your maximum" : null,
+			].filter(Boolean);
+			eleProjection.textContent = parts.join(" · ");
+			eleProjection.className = `ve-small ${isOver ? "ve-error" : "ve-muted"}`;
+		};
+		wrp.querySelectorAll("#psi-concentrating, #psi-strain-amount, #psi-reduce, #psi-adept")
+			.forEach((/** @type {*} */ ele) => {
+				ele.addEventListener("input", doUpdateProjection);
+				ele.addEventListener("change", doUpdateProjection);
+			});
+		doUpdateProjection();
+
 		wrp.querySelector("#psi-cancel").addEventListener("click", () => doClose(false));
 		wrp.querySelector("#psi-confirm").addEventListener("click", () => {
 			const track = /** @type {*} */ (wrp.querySelector("#psi-strain-track")).value;
@@ -9568,8 +9638,16 @@ class CharacterSheetPage {
 
 			if (activationInfo.requiresManifestationTest) {
 				const concentrating = Number(/** @type {*} */ (wrp.querySelector("#psi-concentrating"))?.value || 0);
-				const test = state.rollManifestationTest(order, {track, concentratingOn: concentrating, apply: true});
+				const test = state.rollManifestationTest(order, {
+					track,
+					concentratingOn: concentrating,
+					apply: true,
+					useAdeptReroll: !!(/** @type {*} */ (wrp.querySelector("#psi-adept"))?.checked),
+					useReduceStress: !!(/** @type {*} */ (wrp.querySelector("#psi-reduce"))?.checked),
+				});
 				lines.push(`Rolled <strong>${test.roll}</strong> on ${test.die} vs. score <strong>${test.score}</strong> — ${test.strain ? `<strong>${test.strain} strain</strong>` : "no strain"}.`);
+				if (test.adeptRerollUsed) lines.push(`<span class="ve-muted">${calc.adeptDiscipline || "Discipline"} Adept rerolled ${test.firstRoll} → ${test.rerolledTo}; kept the better result.</span>`);
+				if (test.reduceStressUsed) lines.push(`<span class="ve-muted">Reduce Stress halved ${test.rawStrain} strain to ${test.strain}.</span>`);
 				if (test.overflow) {
 					lines.push(`<span class="ve-error">This exceeds your strain maximum (${strainMax}). Either manifest the power and die, or don't manifest it and drop to 0 hit points.</span>`);
 					lines.push(`<button class="ve-btn ve-btn-xs ve-btn-danger mr-1" data-psi-overflow="manifest" data-psi-strain="${test.strain}" data-psi-track="${track}">Manifest and die</button>`
@@ -9590,6 +9668,14 @@ class CharacterSheetPage {
 
 			const total = state.getTotalStrain();
 			lines.push(`<span class="ve-muted">Total strain now ${total}/${strainMax}.</span>`);
+			// Show the penalties the strain just switched on, where the cost lands.
+			const strainState = state.getStrainState?.();
+			const penalties = [
+				strainState?.speedHalved ? "speed halved" : null,
+				strainState?.loseSkillProficiencies ? "skill proficiencies lost" : null,
+				strainState?.acPenalty ? `AC −${strainState.acPenalty}` : null,
+			].filter(Boolean);
+			if (penalties.length) lines.push(`<span class="ve-error">Now in effect: ${penalties.join(", ")}.</span>`);
 			eleResult.innerHTML = lines.map(it => `<div class="mb-1">${it}</div>`).join("");
 			eleResult.querySelectorAll("[data-psi-overflow]").forEach((/** @type {*} */ btn) => {
 				btn.addEventListener("click", () => {
@@ -12539,12 +12625,41 @@ class CharacterSheetPage {
 		this._saveCurrentCharacter();
 		this._renderCharacter();
 
+		// Ignore Strain (Talent 20): RAW binds the choice to finishing a long rest, and
+		// `onLongRest` deliberately clears it. A 1-of-3 choice is not worth a bespoke
+		// dialog — the sheet's existing enum prompt is exactly the right size. The
+		// tracker's select stays as the correction path.
+		await this._pPromptIgnoreStrainTrack();
+
 		const exhaustionAfter = this._state.getExhaustion();
 		let message = "Long rest completed! All resources recovered.";
 		if (exhaustionBefore > exhaustionAfter) {
 			message += ` Exhaustion reduced to ${exhaustionAfter}.`;
 		}
 		JqueryUtil.doToast({type: "success", content: message});
+	}
+
+	/**
+	 * Ignore Strain (Talent 20) — "whenever you finish a long rest, choose one strain
+	 * track; you ignore that track's effects until you finish your next long rest."
+	 *
+	 * One decision, three options, no interdependent fields, so it uses the sheet's
+	 * existing enum prompt rather than a dialog of its own.
+	 * @returns {Promise<void>}
+	 */
+	async _pPromptIgnoreStrainTrack () {
+		if (!this._state.getFeatureCalculations().hasIgnoreStrain) return;
+		const tracks = CharacterSheetState.PSIONIC_STRAIN_TRACKS;
+		const ix = await InputUiUtil.pGetUserEnum({
+			title: "Ignore Strain",
+			htmlDescription: "<p>Choose the strain track whose effects you ignore until you finish your next long rest.</p>",
+			values: tracks.map(it => `${it[0].toUpperCase()}${it.slice(1)}`),
+			isResolveItem: false,
+		});
+		if (ix == null) return;
+		this._state.setIgnoredStrainTrack(tracks[ix]);
+		this._saveCurrentCharacter();
+		this._renderCharacter();
 	}
 
 	_toggleInspiration () {

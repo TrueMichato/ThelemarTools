@@ -7990,3 +7990,368 @@ When a granted companion effect "doesn't work", check that a **reader** exists f
 the field before concluding the grant is unimplemented. Three of the four
 silent-failure instances found across the parallel class sessions have this same
 shape, and all of them fail invisibly.
+
+---
+
+## CS-BUG-130 — a permanently-granted non-walk speed was discarded, so a feature-granted fly speed never appeared
+
+**Status**: **Fixed** (this pass).
+**Surfaced**: Talent (MCDM `TalPsi`) full-implementation pass, while wiring
+Telekinetic 14 *Mind Wings* (a flat 60 ft flying speed).
+**Component**: Character Sheet · `charactersheet-state.js` —
+`getSpeed()` / `getSpeedByType()`.
+
+### Symptom
+
+A class or subclass feature that grants a **flat, permanent** non-walking speed
+(fly, swim, climb, burrow) produced no speed at all. `getSpeedByType("fly")`
+returned `0` even though `aggregateModifiers("speed:fly")` reported the correct
+`+60` with the correct source.
+
+### Root cause
+
+`getSpeedByType` guards non-walk speeds behind a "does this character actually
+*have* this movement type?" check — correctly, because otherwise every character
+with a swim-speed *bonus* item would gain a swim speed from nothing. That guard
+consulted the race's speed block and **active states only**. A permanent
+feature-granted movement type had nowhere to declare itself, so the guard said
+"you cannot fly", and the +60 was thrown away by the very code that had just
+computed it.
+
+This is the "correct code wired to the wrong input" shape: nothing was
+mis-calculated, the answer was discarded one layer later.
+
+### Fix
+
+Generic, not Talent-specific. `speed`-type registry effects may now carry
+`grantsMovementType: true`, which `addNamedModifier` persists onto the modifier
+record; a new `_getGrantedSpeedFromFeatures()` reads those records and the guard
+consults it alongside race and active states. Any future feature that *confers*
+rather than *augments* a movement type opts in with one flag.
+
+Note for whoever touches this next: **do not also raise `base`** in
+`getSpeedByType`. `speedMods[type]` already contributes the granted value; adding
+it to the base as well doubles the speed. This was caught by the existing
+speed suite.
+
+### Tests
+
+`CharacterSheetTalentSpecializations.test.js` — Mind Wings produces a real 60 ft
+fly speed at Telekinetic 14 and none at 13.
+
+---
+
+## CS-BUG-131 — a `useFeatureDescription` toggle's `hpMaxIncrease` was computed correctly and then never applied
+
+**Status**: **Fixed** (this pass).
+**Surfaced**: Talent full-implementation pass, wiring Metamorph 2
+*Psionic Toughness*.
+**Component**: Character Sheet · `charactersheet-state.js` —
+`activateState()` and `_stateContributesHpMaxIncrease()`.
+
+### Symptom
+
+Activating Psionic Toughness left both maximum and current hit points unchanged,
+despite `_getPsionicToughnessStateEffects()` returning
+`{type: "hpMaxIncrease", value: 14}` and `_aggregateActiveStateHpEffects()`
+reporting `total: 14`. Every layer computed the grant; the character never got it.
+
+### Root cause
+
+`activateState` gates the HP sync behind `involvesHpMaxIncrease`, deliberately —
+unrelated states (Wild Shape) manage HP out-of-band and must not trigger a
+recalculation. But that predicate read **only**
+`options.customEffects || stateType.effects`.
+
+States registered with `useFeatureDescription: true` carry **no static `effects`
+array** by design: everything they grant depends on level, ability modifier or
+proficiency bonus, so it is computed live by
+`_getSupplementalActiveStateEffects`. For any such state the predicate is
+structurally guaranteed to be `false`. The same omission existed in
+`_stateContributesHpMaxIncrease`, which governs the *deactivation* side, so the
+bug was symmetric and would have left a stale grant behind had the activation
+worked.
+
+### Fix
+
+Both predicates now union the static effects with
+`_getSupplementalActiveStateEffects(stateTypeId, state)`. The activation-side
+call passes `state: null`, which every current provider tolerates — a provider
+that needs the live record must keep tolerating it, since at that point in
+`activateState` the record does not yet exist.
+
+### A wrong turn worth recording
+
+The first diagnosis blamed `getMaxHp()`'s explicit-max branch for not adding
+`_aggregateActiveStateHpEffects()`, and "fixing" it broke ten Aid tests by
+double-counting. `getMaxHp()` is correct as written: an explicitly-stored
+maximum is refreshed by `recalculateHp()` whenever state changes, so the grant
+is *already inside* `_data.hp.max`. **Do not add it again there.** The failure
+was upstream, in deciding whether to refresh at all.
+
+### Tests
+
+`CharacterSheetTalentSpecializations.test.js` — Psionic Toughness moves both max
+and current HP by `INT + level`, floors the total at 1, and reverses cleanly when
+the state ends.
+
+---
+
+## CS-BUG-132 — four of the nine Psionic Exertion options were offered but did nothing
+
+**Status**: **Fixed** (this pass).
+**Surfaced**: Talent audit (empirical probe, not a TODO comment).
+**Component**: Character Sheet · `charactersheet-state.js` —
+`_detectPsionicActivation()`.
+
+### Symptom
+
+*Destructive Power*, *Expanded Power*, *Overwhelming Power* and *Shared Power*
+appeared in the Psionic Exertion picker, were selectable, and then produced no
+Use button and charged no strain. The sheet offered a choice that silently did
+nothing — the worst failure mode, because the player believes they paid.
+
+### Root cause
+
+The strain-cost detector matched a single narrow regex,
+`/gain (?:up to )?(\d+|your proficiency bonus) strain/`. The four dead options
+phrase their cost differently — "gain strain equal to the power's order" and
+variants — so no cost was found, no activation was detected, and the feature
+degraded to display text.
+
+Three subclass features (*Mind Surgeon*, *Truth Hurts*, *Manifest Ally*) were
+dark for exactly the same reason.
+
+### Fix
+
+Replaced the single regex with an ordered `PSIONIC_STRAIN_COST_PATTERNS` table
+in `_detectPsionicStrainCost()`, yielding a derived cost of
+`"powerOrder" | "halfPowerOrder" | "proficiencyBonus" | "any" | <number>`.
+One table change revived seven features; no per-feature code was written.
+
+### Tests
+
+`CharacterSheetTalentSpecializations.test.js` — each revived option's cost
+resolves to its correct derived form and charges the right strain.
+
+---
+
+## CS-BUG-133 — the per-discipline "Adept" manifestation-die reroll was decorative for all six disciplines
+
+**Status**: **Fixed** (this pass).
+**Surfaced**: Talent audit.
+**Component**: Character Sheet · `charactersheet-state.js` —
+`rollManifestationTest()`.
+
+### Symptom
+
+*Chronopathy Adept* (and its five siblings) minted a real, spendable resource
+pool that the sheet displayed and let the player decrement — but
+`rollManifestationTest()` contained a single `RollerUtil.randomise` call and no
+reroll path whatsoever. Spending the resource changed nothing.
+
+Chronopath was the only specialization with any calculations at all, so this was
+simultaneously the *best*-supported and a broken case.
+
+### Fix
+
+`rollManifestationTest(order, {allowAdeptReroll, powerType})` now performs the
+reroll, takes `Math.max(first, reroll)` per RAW ("use either roll"), consumes the
+pool, and — importantly — does **not** consume it when the first roll already
+succeeded. The feature is resolved generically from a `disciplines` map on
+`PSIONIC_MANIFESTERS["talent|talpsi"]` keyed by the `_psionicPowerType` code
+(`CP/MM/PK/RP/TK/TP`) already stamped on every power, so one implementation
+covers all six specializations instead of six near-identical copies.
+
+### Tests
+
+`CharacterSheetTalentSpecializations.test.js` — the reroll changes the outcome,
+consumes the pool, and is *not* consumed on an initial success; asserted for
+every discipline.
+
+---
+
+## CS-BUG-134 — active-state damage defences read `target` only, so a registry-shaped `damageType` immunity was silently dropped
+
+**Status**: **Fixed** (this pass).
+**Surfaced**: Talent full-implementation pass, adding Metamorph 14 *Psionic
+Evolution*'s poison immunity.
+**Component**: Character Sheet · `charactersheet-state.js` —
+`_getDamageDefenceFromStates()`.
+
+### Symptom
+
+An active-state effect of `{type: "immunity", damageType: "poison"}` produced no
+immunity. `getImmunities()` returned `[]`. No error, no warning — the effect was
+enumerated, failed to parse, and was skipped by `continue`.
+
+### Root cause
+
+The character sheet has **two effect vocabularies** that overlap but differ:
+
+| Purpose | `FeatureEffectRegistry` | `ACTIVE_STATE_TYPES` / supplemental |
+|---|---|---|
+| Damage immunity | `{type: "immunity", damageType: "poison"}` | `{type: "immunity", target: "poison"}` |
+| Speed | `{type: "speed", speedType: "fly", value: 60}` | `{type: "bonus", target: "speed:walk", value: 10}` |
+| Advantage | `{type: "modifier", modType: "deathSave:advantage"}` | `{type: "advantage", target: "deathSave"}` |
+| Read by | `aggregateModifiers(type)` | `getAdvantageState(type)` / the `*FromStates` collectors |
+
+`_getDamageDefenceFromStates` called `_damageTypeFromEffectTarget(e.target)` and
+`continue`d on a null. An author who has just written registry effects — which
+is exactly what writing a new class involves — reaches for `damageType` by
+muscle memory and gets silence.
+
+### Fix
+
+The collector now falls back to `e.damageType` when `e.target` yields nothing.
+Purely additive: the fallback cannot change any effect that already parsed, so
+no existing state's defences move.
+
+This is the third instance this pass of the same failure shape — effect computed
+correctly, then discarded by a reader looking at the wrong field (see CS-BUG-130
+and CS-BUG-131). The lesson is not "document the vocabularies harder"; it is
+that these readers should tolerate both spellings, because a silent drop is
+indistinguishable from an unimplemented feature.
+
+> **This is now a named architectural seam.** A further instance was found
+> independently by the Sun Bloodline session (active-state `sense` effects) on an
+> unrelated class. The seam — both paths, the confirmed instances, the
+> tolerant-reader remedy and its limits, the `_fromFeatRegistry` dispatch that
+> makes the registry's two `sense` spellings *both correct*, and the explicit note
+> that full reconciliation is a separate refactor which must not ride along on
+> class work — is documented under **"Named architectural seam: the two effect
+> vocabularies"** in
+> [10-known-limitations.md](10-known-limitations.md#technical-debt).
+>
+> Read especially **"Three sessions, three false positives"** there before filing
+> a divergence as a defect: three sessions, including this one, each traced writer
+> → one reader, found no match, stopped, and filed a confidently wrong bug. Trace
+> to the observable getter instead.
+
+### Tests
+
+`CharacterSheetTalentSpecializations.test.js` — Psionic Evolution's poison
+immunity and poisoned/disease condition immunities appear at 14 and not at 13.
+
+---
+
+## CS-BUG-135 — Psionic Evolution was gated at Metamorph 10 instead of 14
+
+**Status**: **Fixed** (this pass, before shipping — self-inflicted, recorded so
+the boundary test is not "simplified" away later).
+**Component**: Character Sheet · `charactersheet-state.js` —
+`_getPsionicToughnessStateEffects()`.
+
+Metamorph's level-10 feature is **Death Foiled** (a resurrection with no
+persistent effects); **Psionic Evolution is level 14**. The supplemental
+active-state provider granted Psionic Evolution's +10 speed from level 10 —
+four levels early — even though `_getTalentSpecializationCalculations` gated the
+same feature correctly at 14. The two halves of one feature disagreed.
+
+An off-by-four on a speed bonus is invisible in play until someone counts
+squares, which is why the replacement test asserts the **13/14 boundary**
+explicitly rather than just "it works at 20".
+
+Caught by re-deriving every subclass feature level from the source JSON rather
+than trusting the implementation. All other 41 gating levels across the seven
+specializations were verified correct against the source in the same pass.
+
+---
+
+## CS-BUG-136 — every `sense:` named modifier is counted twice, so Skulker grants blindsight 20 ft instead of 10
+
+**Status**: **Open — not fixed.** Found during a docs-only correction pass;
+reported rather than fixed because the fix is a one-line change to a getter with
+a blast radius that needs owning deliberately.
+**Surfaced**: Talent pass, while verifying (and disproving) a claim that the
+feat registry's `{senseType, value}` spelling had no reader.
+**Component**: Character Sheet · `charactersheet-state.js` — `getSense()`,
+`getSenses()`, `_recalculateCustomModifiers()`.
+
+### Symptom
+
+Reproduced end-to-end on a clean state, no Talent content involved:
+
+```js
+state.addFeat({name: "Skulker", source: "XPHB"});
+state.getSense("blindsight");        // → 20   (RAW: 10)
+```
+
+Fully generic — not Skulker-specific, and nothing to do with feats:
+
+```js
+state.addNamedModifier({name: "T", type: "sense:darkvision", value: 60});
+state.getSense("darkvision");        // → 120  (expected 60)
+state.getSenses().darkvision;        // → 120
+```
+
+Both the additive and `setValue` variants double. Any feat, feature, item or
+custom modifier that grants a sense through a `sense:X` named modifier is
+affected.
+
+### Root cause
+
+**Two readers of one write.** `_recalculateCustomModifiers()` resets
+`customModifiers.senses` and then folds every `sense:X` named modifier into it:
+
+```js
+} else if (mod.type.startsWith("sense:")) {
+    const sense = mod.type.split(":")[1];
+    if (cm.senses[sense] !== undefined) {
+        if (mod.setValue) cm.senses[sense] = Math.max(cm.senses[sense], value);
+        else              cm.senses[sense] += value;
+    }
+}
+```
+
+`getSense()` then reads `customModifiers.senses` **and** re-derives the same
+named modifiers independently:
+
+```js
+const namedBonus = this._data.namedModifiers
+    ?.filter(m => m.enabled && m.type === `sense:${sense}`)
+    ?.reduce(...);
+return Math.max(baseSenses[sense], senseMods[sense], itemSenses[sense], ...)
+    + namedBonus + ...;
+```
+
+`senseMods` already *contains* `namedBonus`. Since `customModifiers.senses` is
+reset and fully re-derived from named modifiers on each recalculation, it holds
+no independent user-entered value — so the addition is pure duplication, not a
+merge of two sources.
+
+### Why it went unnoticed
+
+The existing coverage asserts the **effect object**, not the derived value:
+
+```js
+// CharacterSheetFeatEffects.test.js:350
+state.addFeat({name: "Skulker", source: "XPHB"});
+expect(senseMod).toBeDefined();
+expect(senseMod.value).toBe(10);     // ← the modifier is 10; getSense() is 20
+```
+
+`getSense()` is never called, so the doubling passes cleanly. This is exactly
+the flag-assertion anti-pattern the contributing guide warns about, and it is
+the reason a plainly visible 2× error survived.
+
+### Suggested fix (not applied)
+
+Drop `namedBonus` from `getSense()`/`getSenses()`, since
+`_recalculateCustomModifiers()` already aggregates it into `senseMods` — or,
+symmetrically, stop folding `sense:` modifiers into `cm.senses`. Pick one owner.
+
+**Blast radius needs checking before either.** Four test files reference
+`sense:` modifiers or Skulker (`CharacterSheetSymbolicModifiers`,
+`CharacterSheetFeatEffects`, `CharacterSheetEffectEditor`,
+`CharacterSheetParsers`). Any that assert a *derived* sense value today are
+asserting the doubled number, and will need correcting alongside — those
+failures would be evidence, not collateral.
+
+### Lesson
+
+Found only by tracing the write all the way to the observable getter rather
+than stopping at the first reader. The same discipline that disproved the
+`senseType` claim in
+[10-known-limitations.md](10-known-limitations.md#technical-debt) surfaced this:
+verifying "does it arrive?" answers "does it arrive *once*?" for free.
