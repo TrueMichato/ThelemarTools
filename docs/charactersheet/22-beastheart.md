@@ -286,6 +286,15 @@ owns: `CharacterSheetSetupShimParity.test.js` pins the `setup.js` Parser shims
 against `js/parser.js`, and the reentrancy tests in the companion suite pin the
 guard described in `10-known-limitations.md`.
 
+**These suites carry the full weight alone.** The untracked `npc-exports/` corpus
+— 44 real character saves, and the strongest live-data cross-check in the
+repository — contains no Beastheart. Its 912 assertions were run against this
+branch's `charactersheet-npc-exporter.js` change and pass, but that clears
+*regression risk on shared exporter behaviour only*; the Primal Strike rider
+added here never executes under them. Unlike most classes, nothing outside the
+three suites above validates this one against real data. See §8 for why the
+obvious grep-based check of this claim returns the wrong answer.
+
 ---
 
 ## 8. The pattern this class kept finding
@@ -347,6 +356,39 @@ in a compound reference like `CS-BUG-113/119`, and a `^#+ CS-BUG-[0-9]+` sweep
 truncates the suffix on `017a` / `017b` and reports a false duplicate. Both are
 readers with an alphabet narrower than the writer's.
 
+**The polarity can flip, and that version is more dangerous.** Every instance
+above fails toward *absence* — a value silently dropped, a match silently missed.
+The inverse produces a confident **false positive**, and it has an unusually good
+habitat here.
+
+Asking whether the untracked `npc-exports/` corpus exercises this branch's
+`charactersheet-npc-exporter.js` change looks like a one-line question:
+
+```
+grep -ril "beastheart"    npc-exports/   → 0
+grep -ril "primal strike" npc-exports/   → 2      ← looks like coverage
+```
+
+Both hits are `Primal Strike|XPHB` — the **official 2024 Druid** feature at level
+7, in a Circle-of-the-Moon Druid and a Barbarian/Druid. This branch's feature is
+`Primal Strike|BST` at level 8. Nothing in the corpus is a Beastheart. The grep's
+`2` is not weak evidence of coverage; it is evidence of a *different feature that
+happens to share a name*, and acting on it would invert the truth while producing
+a plausible file list as justification.
+
+The detail worth keeping: one of the two matches is literally the string
+
+```json
+"classFeature": "Primal Strike|Druid|XPHB|7"
+```
+
+The matched text **contained its own disambiguation**, and a name-only grep threw
+it away. That is the whole reason this codebase identifies entities as
+`name|source` rather than by name — 5etools deliberately reuses feature names
+across sources, so a bare name is not an identifier and a bare-name search is not
+a question about a specific feature. Any homebrew class that reuses official
+terminology — which is most of them, by design — sits directly in this trap.
+
 ### Practical consequences
 
 - **Grepping a field name proves nothing about whether it is read.** Check the
@@ -354,6 +396,17 @@ readers with an alphabet narrower than the writer's.
   other. **And trace to the applier, not to the first plausible reader** — both
   rows removed above survived a writer check *and* a reader check, and were only
   disproven at the third hop, where the value is actually consumed.
+- **Grepping a *feature* name proves nothing about *which* feature you found.**
+  Search by `name|source`, or check the source field on every hit. A bare-name
+  match across mixed official and homebrew content is unresolved by construction.
+- **A test count is environment-dependent, and says so nowhere.** The real-save
+  suite `CharacterSheetNpcExporter.realsaves.test.js` reads `npc-exports/`, which
+  is gitignored (`.gitignore:46`) and therefore **absent from every worktree by
+  design**. It *skips* rather than fails, so it reports success by not running:
+  912 assertions in the main checkout, 0 in a worktree. Anyone editing
+  `charactersheet-npc-exporter.js` in a worktree — as this branch did — is
+  uncovered by the repository's strongest regression net and will not be told.
+  Symlink the corpus from the main checkout before trusting the number.
 - **Prefer a failure that is loud.** Where a `continue` or a silent default is
   unavoidable, leave a named warning behind it. The reentrancy guard in
   `_applyBeastheartCompanionBonuses` exists for exactly this reason.
