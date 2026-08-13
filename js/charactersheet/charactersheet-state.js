@@ -4228,6 +4228,10 @@ class CharacterSheetState {
 	static REACH_PROPERTY_BONUS = 5;
 	/** Ascending size categories, used by {@link getGrappleSizeCategory}. */
 	static GRAPPLE_SIZE_ORDER = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
+	static USABLE_GEAR_POLICIES = Object.freeze({
+		consume: /^(?:acid(?: \(vial\))?|alchemist's fire(?: \(flask\))?|holy water(?: \(flask\))?|oil(?: \(flask\))?)$/i,
+		deployRecoverable: /^(?:ball bearings|caltrops)(?: \(.+\))?$/i,
+	});
 
 	/**
 	 * Monotonic counter backing {@link _nextActiveStateId}. Active-state ids used
@@ -4281,6 +4285,7 @@ class CharacterSheetState {
 		// correctly. State works without it (degrades to lean refs), but then
 		// level-gated grouping in the spell list silently drops the spells.
 		this._allSpells = [];
+		this._allItems = [];
 	}
 
 	/**
@@ -4292,6 +4297,36 @@ class CharacterSheetState {
 	 */
 	setSpellData (allSpells) {
 		this._allSpells = Array.isArray(allSpells) ? allSpells : [];
+	}
+
+	/**
+	 * Inject the enhanced item catalog used to repair authoritative metadata on legacy
+	 * inventory rows. The migration also runs here for alternate load orders.
+	 * @param {Array} allItems
+	 */
+	setItemCatalog (allItems) {
+		this._allItems = Array.isArray(allItems) ? allItems : [];
+		this._migrateInventoryItemMetadata();
+	}
+
+	/**
+	 * Restore catalog-only identity fields lost by the legacy inventory add path.
+	 * Exact source matching prevents a PHB row from adopting XPHB metadata.
+	 */
+	_migrateInventoryItemMetadata () {
+		if (!this._allItems?.length || !Array.isArray(this._data?.inventory)) return;
+		const catalog = new Map(this._allItems
+			.filter(item => item?.name && item?.source)
+			.map(item => [`${item.name}|${item.source}`.toLowerCase(), item]));
+		for (const inventoryRow of this._data.inventory) {
+			const item = inventoryRow?.item;
+			if (!item?.name || !item?.source || item._isCustom || item.source === "Custom") continue;
+			const match = catalog.get(`${item.name}|${item.source}`.toLowerCase());
+			if (!match) continue;
+			if (item.typeCode == null && match.type != null) item.typeCode = match.type;
+			if (item.scfType == null && match.scfType != null) item.scfType = match.scfType;
+			if (item.focus == null && match.focus != null) item.focus = MiscUtil.copyFast(match.focus);
+		}
 	}
 
 	/**
@@ -5239,6 +5274,7 @@ class CharacterSheetState {
 			...this._getDefaultState(),
 			...MiscUtil.copyFast(data),
 		};
+		this._migrateInventoryItemMetadata();
 
 		this._data.xp = Math.max(0, Math.floor(Number(this._data.xp) || 0));
 		this._syncXpToCurrentLevelFloor();
@@ -30036,6 +30072,87 @@ class CharacterSheetState {
 			.replace(/^-+|-+$/g, "");
 	}
 
+	static _getItemRawEntryText (entry) {
+		if (entry == null) return "";
+		if (typeof entry === "string") return entry;
+		if (Array.isArray(entry)) return entry.map(it => CharacterSheetState._getItemRawEntryText(it)).filter(Boolean).join(" ");
+		if (typeof entry !== "object") return String(entry);
+		return [
+			entry.name,
+			CharacterSheetState._getItemRawEntryText(entry.entries),
+			CharacterSheetState._getItemRawEntryText(entry.items),
+			CharacterSheetState._getItemRawEntryText(entry.rows),
+		].filter(Boolean).join(" ");
+	}
+
+	static _getItemActivationFingerprint (actionType, description) {
+		const normalized = CharacterSheetState._getItemEntryText(description).toLowerCase();
+		return `${actionType || "other"}:${Math.abs(CryptUtil.hashCode(normalized))}`;
+	}
+
+	static _getUsableGearPolicy (item) {
+		const name = String(item?.name || "").trim();
+		if (CharacterSheetState.USABLE_GEAR_POLICIES.consume.test(name)) return "consume";
+		if (CharacterSheetState.USABLE_GEAR_POLICIES.deployRecoverable.test(name)) return "deploy-recoverable";
+		return "reference-only";
+	}
+
+	_getUsableGearActivations (item) {
+		const typeCode = item?.typeCode || item?.type || "";
+		if (String(typeCode).split("|")[0].toUpperCase() !== "G") return [];
+
+		const blocks = [];
+		for (const entry of item.entries || []) {
+			if (entry && typeof entry === "object" && entry.name) {
+				blocks.push({label: entry.name, raw: CharacterSheetState._getItemRawEntryText(entry.entries)});
+			} else {
+				blocks.push({label: null, raw: CharacterSheetState._getItemRawEntryText(entry)});
+			}
+		}
+
+		const out = [];
+		const seen = new Set();
+		const hasTaggedActivation = blocks.some(block => /\{@action\s+(?:Attack|Utilize)(?:\|[^}]*)?}/i.test(block.raw));
+		for (const block of blocks) {
+			if (!block.raw) continue;
+			const taggedActions = [...block.raw.matchAll(/\{@action\s+(Attack|Utilize)(?:\|[^}]*)?}/gi)]
+				.map(match => match[1]);
+			const legacyAction = hasTaggedActivation
+				? null
+				: this._detectItemActivation({entries: [block.raw]})
+					.find(activation => ["action", "bonus", "reaction"].includes(activation.type));
+			const actions = taggedActions.length
+				? [...new Set(taggedActions)].map(actionName => ({actionType: "action", actionName}))
+				: legacyAction
+					? [{actionType: legacyAction.type, actionName: null}]
+					: [];
+			for (const action of actions) {
+				const description = CharacterSheetState._getItemEntryText(block.raw);
+				const activationFingerprint = CharacterSheetState._getItemActivationFingerprint(action.actionType, description);
+				if (seen.has(activationFingerprint)) continue;
+				seen.add(activationFingerprint);
+				out.push({
+					itemId: item.id,
+					itemName: item.name,
+					itemSource: item.source,
+					itemHoverData: item,
+					quantity: item.quantity,
+					actionType: action.actionType,
+					actionName: action.actionName,
+					label: block.label || action.actionName || "Use",
+					description,
+					policy: CharacterSheetState._getUsableGearPolicy(item),
+					activationFingerprint,
+				});
+			}
+		}
+		return out;
+	}
+
+	getUsableGear () {
+		return this.getItems().flatMap(item => this._getUsableGearActivations(item));
+	}
+
 	static ITEM_SCHEMA_EFFECT_ADAPTERS = Object.freeze({
 		ability: {family: "ability", consumer: "inventory"},
 		bonusAbilityCheck: {family: "check", consumer: "rolls"},
@@ -30374,6 +30491,7 @@ class CharacterSheetState {
 				usesMax: recurring?.usesMax,
 				usesKey: recurring ? `${recurring.usageType}:derived:${CharacterSheetState._getItemPowerId([item.name, entry.name])}` : null,
 				description: text,
+				activationFingerprint: CharacterSheetState._getItemActivationFingerprint(actionType, text),
 				isDestructive: /\b(?:staff|item|weapon|armor)\s+is destroyed\b/i.test(text),
 				isReferenceOnly: !chargesCost && !recurring,
 			});
@@ -30407,6 +30525,7 @@ class CharacterSheetState {
 					actionType: explicitActionType || "other",
 					effectType: "modifySpeed",
 					description: text,
+					activationFingerprint: CharacterSheetState._getItemActivationFingerprint(explicitActionType || "other", text),
 					isReferenceOnly: true,
 				});
 			} else if (actionType && toggleEffectType) {
@@ -30418,6 +30537,7 @@ class CharacterSheetState {
 					isToggle: true,
 					effectType: toggleEffectType,
 					description: text,
+					activationFingerprint: CharacterSheetState._getItemActivationFingerprint(actionType, text),
 					isReferenceOnly: false,
 				});
 			} else if (actionType && recurring) {
@@ -30430,6 +30550,7 @@ class CharacterSheetState {
 					usesMax: recurring.usesMax,
 					usesKey: `${recurring.usageType}:derived:${CharacterSheetState._getItemPowerId([item.name, item.source])}`,
 					description: text,
+					activationFingerprint: CharacterSheetState._getItemActivationFingerprint(actionType, text),
 					isReferenceOnly: false,
 				});
 			} else if (actionType || explicitActionType) {
@@ -30439,6 +30560,7 @@ class CharacterSheetState {
 					kind: "ability",
 					actionType: explicitActionType || "other",
 					description: text,
+					activationFingerprint: CharacterSheetState._getItemActivationFingerprint(explicitActionType || "other", text),
 					isReferenceOnly: true,
 				});
 			}
@@ -30611,8 +30733,10 @@ class CharacterSheetState {
 	 */
 	getItemPowers ({activeOnly = false} = {}) {
 		const out = [];
+		const usableFingerprints = new Set(this.getUsableGear().map(activation => `${activation.itemId}|${activation.activationFingerprint}`));
 		for (const item of this.getItems()) {
 			for (const power of item.itemPowers || []) {
+				if (power.activationFingerprint && usableFingerprints.has(`${item.id}|${power.activationFingerprint}`)) continue;
 				const requiresEquipped = power.requiresEquipped !== false;
 				const isActive = (!requiresEquipped || !!item.equipped) && (!item.requiresAttunement || !!item.attuned);
 				if (activeOnly && !isActive) continue;
@@ -32976,7 +33100,10 @@ class CharacterSheetState {
 	 */
 	getSpellcastingFocusStatus () {
 		const inv = this._data.inventory || [];
-		const baseType = it => (typeof it.type === "string" ? it.type.split("|")[0] : "");
+		const baseType = it => {
+			const rawType = typeof it.typeCode === "string" ? it.typeCode : it.type;
+			return typeof rawType === "string" ? rawType.split("|")[0].toUpperCase() : "";
+		};
 		// Track which inventory item satisfied the focus, so callers can name it.
 		let matched = null;
 		const has = pred => inv.some(i => {

@@ -2919,7 +2919,7 @@ class CharacterSheetSpells {
 			const focusOptions = isBard
 				? "a spellcasting focus, musical instrument, or component pouch"
 				: "a spellcasting focus or component pouch";
-			return `Cannot cast ${spell.name} — its material components require ${focusOptions} (none equipped). Equip one, or enable "Ignore spellcasting restrictions" in settings.`;
+			return `Cannot cast ${spell.name} — its material components require ${focusOptions} (none carried or otherwise possessed). Carry one, or enable "Ignore spellcasting restrictions" in settings.`;
 		}
 
 		// Gold-cost component: the character must possess a qualifying item.

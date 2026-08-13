@@ -71,6 +71,7 @@ class CharacterSheetInventory {
 
 	setItems (items) {
 		this._allItems = items;
+		this._state?.setItemCatalog?.(items);
 		// Older saves / pre-effects inventory rows may lack catalog `effects[]`. Rehydrate
 		// from the loaded item index (by name|source) so equip/attune registration can apply
 		// brew mechanics like Gae Bolg's proficiency-to-initiative without requiring re-add.
@@ -1604,6 +1605,8 @@ class CharacterSheetInventory {
 			weight: item.weight || 0,
 			value: item.value || 0,
 			type: this._getItemType(item),
+			typeCode: item.typeCode || item.type || null,
+			scfType: item.scfType || null,
 			requiresAttunement: item.reqAttune || false,
 			// Weapon properties. `weapon` is the boolean both the inventory categorizer
 			// (_getItemCategory) and Combat attack-detection (filter(i => i.weapon)) key off,
@@ -1684,7 +1687,7 @@ class CharacterSheetInventory {
 			spellScrollLevel: item.spellScrollLevel ?? null,
 			selectedSpell: item.selectedSpell ? MiscUtil.copyFast(item.selectedSpell) : null,
 			// Spellcasting focus for classes
-			focus: item.focus || null,
+			focus: item.focus ?? null,
 			light: item.light ? MiscUtil.copyFast(item.light) : null,
 			grantsLanguage: !!item.grantsLanguage,
 			selectedLanguage: item.selectedLanguage || null,
@@ -4872,6 +4875,52 @@ class CharacterSheetInventory {
 		}
 
 		if (applied.length) JqueryUtil.doToast({type: "success", content: `Ate ${item.name} \u2014 ${applied.join(", ")}.`});
+	}
+
+	/**
+	 * Resolve a catalog gear activation using its explicit inventory policy.
+	 * @param {string} itemId
+	 * @param {string} activationFingerprint
+	 * @returns {Promise<boolean>}
+	 */
+	async _useUsableGear (itemId, activationFingerprint) {
+		const activation = (this._state.getUsableGear?.() || [])
+			.find(entry => entry.itemId === itemId && entry.activationFingerprint === activationFingerprint);
+		if (!activation) {
+			JqueryUtil.doToast({type: "warning", content: "That usable item action is no longer available."});
+			return false;
+		}
+
+		const safeName = CharacterSheetClassUtils.escapeHtml(activation.itemName);
+		if (activation.policy === "consume") {
+			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+				title: `Use ${activation.itemName}?`,
+				htmlDescription: `<p>Use <strong>${safeName}</strong>? One item will be consumed.</p>`,
+				textYes: "Use and consume",
+				textNo: "Cancel",
+			}));
+			if (!confirmed) return false;
+			this._state.consumeItem(itemId);
+			JqueryUtil.doToast({type: "success", content: `Used ${safeName}; one was consumed.`});
+		} else if (activation.policy === "deploy-recoverable") {
+			JqueryUtil.doToast({type: "success", content: `Deployed ${safeName}. It remains in inventory and can be recovered.`});
+		} else {
+			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+				title: `Resolve ${activation.itemName}?`,
+				htmlDescription: `<p>Resolve <strong>${safeName}</strong> using its rules text. This will not consume or remove the item.</p>`,
+				textYes: "Resolve manually",
+				textNo: "Cancel",
+			}));
+			if (!confirmed) return false;
+			JqueryUtil.doToast({type: "info", content: `Using ${safeName}; resolve its effect manually. The item was not consumed.`});
+		}
+
+		this._renderItemList();
+		this._updateEncumbrance();
+		this._page?._combat?.renderCombatConsumables?.();
+		this._page?._combat?.renderCombatItemPowers?.();
+		this._page?.saveCharacter?.();
+		return true;
 	}
 
 	/**
