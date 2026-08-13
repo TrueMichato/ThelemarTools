@@ -8522,23 +8522,36 @@ suite reads **477 suites / 15,549 tests / 0 skipped / 0 failed** with the corpus
 present, against **476 / 14,790 / 153 skipped** without it. Both are honest
 readings of different environments.
 
-Worth knowing before comparing test totals across sessions: that suite is
-`describe.each`-parameterised per save, so the corpus **multiplies** its tests
-rather than adding a fixed number. Measured in the author's checkout: 44 saves
-yield **912** tests, spread over *two* parameterised describes with non-uniform
-block sizes (26 blocks of 10, 24 of 23, plus singletons of 5/8/11/12/13/16/24).
-Without the corpus the same file contributes **153** skipped placeholder tests
-and nothing else. The net difference is therefore **+759**, not 153. That is why
-a "N passed, 0 skipped" baseline is **not portable** between the author's
-checkout and a worktree, and why a mismatch there is not evidence of a
-regression.
+Worth knowing before comparing test totals across sessions, because the numbers
+do not decompose the obvious way. The file is partly parameterised, so the
+corpus **multiplies** part of it rather than adding a fixed amount:
 
-One trap in the reconciliation itself, because it already caught someone: the
-identity closes for *any* placeholder/corpus pair differing by 759, so a
-matching grand total does **not** corroborate a guessed decomposition. An
-earlier revision of this paragraph published "33 placeholder tests become
-24 × 33" — correct net, invented factors, and the arithmetic agreed anyway.
-Measure each factor; a check that can only succeed is not a check.
+| | without corpus | with corpus |
+|---|---|---|
+| inside `describe.each(availableTable)` | 33 (one placeholder pass) | 33 × 24 = 792 |
+| sibling describes, not per-save | 120 | 120 |
+| **total** | **153** (all skipped) | **912** |
+
+The 24 is `SAVE_NAMES.length`, not the number of files in `npc-exports/` —
+`available` filters the fixed name list, so **any save on disk whose name is not
+in `SAVE_NAMES` is silently ignored** and contributes nothing. Counting `*.json`
+overstates the corpus — measured, `npc-exports/` holds **44** `.json` files but
+only **24** saves; the other 20 are `.picklog`/`.report` sidecars for ten of
+them. An earlier revision of this paragraph published that 44 as the corpus
+size, which is why the file count is called out here rather than left implicit.
+
+The decomposition is worth stating because the *net* alone does not constrain
+it: any placeholder/per-save split differing by 759 reproduces the observed
+totals equally well, so "the arithmetic closes" is not by itself evidence that
+the split is right. What makes this one checkable is that 33, 120 and 24 are
+each measurable **without** the corpus, and together they predict the corpus
+figure exactly — a wrong parameter would miss 912 rather than land on it.
+
+Consequence: a "N passed, 0 skipped" baseline is **not portable** between the
+author's checkout and a worktree, and a mismatch is not evidence of a
+regression. `CraftingDataFreshness.test.js` is the same hazard against
+`.cache/crafting/` — and note both degrade *silently toward green*, since a
+missing corpus skips rather than fails.
 
 ### Lesson
 
