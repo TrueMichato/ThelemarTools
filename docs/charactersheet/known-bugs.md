@@ -8258,15 +8258,13 @@ specializations were verified correct against the source in the same pass.
 
 ---
 
-## CS-BUG-136 — every `sense:` named modifier is counted twice, so Skulker grants blindsight 20 ft instead of 10
+## CS-BUG-136 — every `sense:` named modifier was counted twice, so Skulker granted blindsight 20 ft instead of 10 — FIXED
 
-**Status**: **Open — not fixed.** Found during a docs-only correction pass;
-reported rather than fixed because the fix is a one-line change to a getter with
-a blast radius that needs owning deliberately.
+**Status**: **Fixed.** Reported by the Talent pass, fixed in a dedicated pass.
 **Surfaced**: Talent pass, while verifying (and disproving) a claim that the
 feat registry's `{senseType, value}` spelling had no reader.
 **Component**: Character Sheet · `charactersheet-state.js` — `getSense()`,
-`getSenses()`, `_recalculateCustomModifiers()`.
+`getSenses()`, `_recalculateCustomModifiers()`, `getCustomModifier()`.
 
 ### Symptom
 
@@ -8288,6 +8286,14 @@ state.getSenses().darkvision;        // → 120
 Both the additive and `setValue` variants double. Any feat, feature, item or
 custom modifier that grants a sense through a `sense:X` named modifier is
 affected.
+
+**A second live case, found during the fix.** The Gae Bolg artifact (TGTT)
+carries `{type: "sense:truesight", value: 60, setValue: 60}` as an item effect,
+which is registered as a named modifier — so it rendered **truesight 120 ft**
+instead of 60. Its test asserted
+`expect(state.getSenses().truesight).toBeGreaterThanOrEqual(60)`, which passes
+just as happily at 120. A second flag-shaped assertion, in a second file, hiding
+the same 2×.
 
 ### Root cause
 
@@ -8320,12 +8326,130 @@ reset and fully re-derived from named modifiers on each recalculation, it holds
 no independent user-entered value — so the addition is pure duplication, not a
 merge of two sources.
 
+### The fix
+
+**`getSense()` is the single owner; the fold is deleted.**
+
+New private helper `_getNamedSenseContribution(sense)` returns `{add, set}` —
+the sum of the additive `sense:X` modifiers and the best `setValue` grant.
+`getSense()` calls it; `getSenses()` and `getCustomModifier("sense:X")` route
+through it. The `sense:` branch of `_recalculateCustomModifiers()` is gone,
+replaced by a comment naming the owner so it cannot be silently re-added.
+
+**Why not the other side.** Dropping `namedBonus` and keeping the fold — the
+first of the two options suggested above — would have been *strictly worse than
+the bug*. `customModifiers.senses` is initialised with only the four canonical
+keys and the fold was guarded by `if (cm.senses[sense] !== undefined)`, so a
+homebrew sense name never folded at all and was already counted **exactly
+once**, via `namedBonus`. Removing that path would have traded a visible 2× on
+four senses for a silent **0×** on every other sense name. Verified empirically:
+before the fix, `sense:echolocation` value 30 returned 30, not 60.
+
+Three further reasons the read path is the right owner:
+
+- **Arithmetic position.** `namedBonus` is added *on top of* the
+  `Math.max(base, item, states, gemstone)` group, while `cm.senses` sat *inside*
+  it. Named modifiers are additive over the base sense, so the additive position
+  is the correct one; promoting `cm.senses` would have meant lifting it out of
+  the max and adding it — i.e. rebuilding `namedBonus`.
+- **Documented commitment.** The worked-example table in
+  [10-known-limitations.md](10-known-limitations.md) already names
+  `getSense()`'s `namedBonus` as the reader for the feat `sense` spelling.
+- **House convention.** The `_fromFeatRegistry` guard in `_applyFeatureEffect`
+  exists specifically to stop registry effects reaching a second applier that
+  "would double-count them", with `"sense"` in that set by name. One owner, not
+  two reconciled — the same shape as this fix.
+
+**Two adjacent changes shipped in the same pass.** Neither is part of
+CS-BUG-136; both are recorded here only because they touch the same lines.
+
+- **`setValue` semantics — tracked separately as
+  [CS-BUG-137](#cs-bug-137--a-setvalue-sense-grant-was-added-on-top-of-an-existing-sense-instead-of-competing-with-it--fixed).**
+  A `setValue` grant was *added* on top of the `Math.max(...)` group rather than
+  joining it, so "you gain blindsight 10 ft" extended an innate blindsight 30 ft
+  to 40. This is **not** the double-count and is not fixed by fixing it: with a
+  base of 30, removing the duplication alone still yields `max(30, …) + 10 = 40`.
+  It changes numbers independently, so it has its own entry, its own `describe`
+  block and its own number.
+- **`getSenses()` no longer hardcodes the four canonical keys.** It now
+  delegates per key to `getSense()` over the union of every contributor (base
+  senses, `itemSenses`, `itemSenseBonuses`, item `senseBonus:*` effects,
+  `sense:*` named modifiers, active-state sense effects, gemstone sense
+  effects), emitting non-canonical keys only when non-zero. Before this, a
+  homebrew sense was readable through `getSense("echolocation")` but invisible
+  everywhere the player could actually see it.
+
+  **All four `getSenses()` consumers were traced, not assumed.** The Overview
+  (`buildSensesDisplay`, which has an `extraKeys` path) and the NPC exporter
+  (`Object.entries` + falsy filter) already handled arbitrary keys. **The PDF
+  export (`charactersheet-pdf.js`) and Play Mode (`charactersheet-playmode.js`)
+  did not** — both tested the four canonical names by hand and silently dropped
+  anything else. Both were routed through `buildSensesDisplay`, which removes
+  the triplicated ordering/labelling logic and is why a homebrew sense now
+  reaches all four surfaces. No consumer indexes a key it has not first tested,
+  so a variable key set cannot throw.
+
+  **It also closed a pre-existing divergence, which is worth naming rather than
+  absorbing:** the old `getSenses()` applied gemstone `sense` effects to
+  **darkvision only** (a hardcoded `gemstoneDarkvision` local), while
+  `getSense()` applied them to whatever sense the effect named. The two getters
+  already disagreed; delegation resolves it in `getSense()`'s favour. Nothing
+  observable changes today — the only gemstone with a `sense` effect
+  (`charactersheet-upgrades.js`, the Cat gemstone) grants darkvision — but a
+  future non-darkvision gemstone would have been visible through `getSense()`
+  and absent from the Overview. The two are now structurally incapable of
+  drifting, which `CharacterSheetSymbolicModifiers.test.js` already pins.
+
+**A capability the fold had, now carried across.** The fold resolved values
+through `_getNamedModifierEffectiveValue()` (symbolic tokens **plus** `perLevel`
+and `proficiencyBonus`); the read path used bare
+`_resolveSymbolicModifierValue()` and silently ignored the latter two. The new
+helper uses the full resolver, so a `perLevel` or `proficiencyBonus` sense
+modifier now scales correctly instead of contributing its bare value.
+
+`customModifiers.senses` is kept — zeroed on every recalculation, present in the
+default state, merged on load — as a documented vestigial no-op, so a legacy
+save that persisted a non-zero value cannot resurrect a phantom sense range. It
+now has zero readers.
+
+**Deliberate non-goal.** The `sense:`+`setValue` intercept in the feature-effect
+applier (which calls `setSense()` and returns, creating no named modifier) is
+now redundant with the `named.set` handling. Collapsing it was left out of
+scope: it also serves race senses, respec, `_classFeatureSenses` cleanup and the
+R23 interdiction-boon cleanup, and it never fired for Skulker in any case (the
+registry entry carries no `setValue`).
+
+### Blast radius — measured, not estimated
+
+The original report guessed four test files. The merged tree has **28** files
+referencing senses, ~20 with exact `toBe` assertions on derived values — but the
+fix moves **only the named-modifier path**, so nearly all of them were unaffected.
+Confirmed by simulating the fix before applying it (zeroing `cm.senses` after
+each recalculation is arithmetically identical to deleting the fold):
+
+| Path | Before → after | |
+|---|---|---|
+| Feat `Skulker` (named modifier) | 20 → **10** | the bug |
+| Item `Gae Bolg` (item effect → named modifier) | 120 → **60** | the bug |
+| Rogue 14 `Blindsense` (class feature → base senses) | 10 → 10 | unchanged |
+| Twilight cleric `Eyes of Night` (class feature → base) | 300 → 300 | unchanged |
+
+Corroborated structurally: of the five registry entries with sense effects, only
+the two Skulker variants use the `{senseType, value}` feat spelling that reaches
+`addNamedModifier`; `Feral Senses`, `Blindsense` and `Eyes of Night` use
+`{sense, range}` and write base senses. And corroborated by the suite itself —
+the item, class-feature and interdiction-boon sense tests already asserted
+*correct* exact values before the fix, which is only possible because those
+channels never touched the fold. **The full charactersheet suite passed
+unchanged after the fix** (475 suites, 14,758 tests): not one test had been
+pinning the doubled number.
+
 ### Why it went unnoticed
 
 The existing coverage asserts the **effect object**, not the derived value:
 
 ```js
-// CharacterSheetFeatEffects.test.js:350
+// CharacterSheetFeatEffects.test.js
 state.addFeat({name: "Skulker", source: "XPHB"});
 expect(senseMod).toBeDefined();
 expect(senseMod.value).toBe(10);     // ← the modifier is 10; getSense() is 20
@@ -8333,20 +8457,48 @@ expect(senseMod.value).toBe(10);     // ← the modifier is 10; getSense() is 20
 
 `getSense()` is never called, so the doubling passes cleanly. This is exactly
 the flag-assertion anti-pattern the contributing guide warns about, and it is
-the reason a plainly visible 2× error survived.
+the reason a plainly visible 2× error survived. The Gae Bolg
+`toBeGreaterThanOrEqual(60)` is the same failure in its inequality form: an
+assertion loose enough to be satisfied by the wrong answer.
 
-### Suggested fix (not applied)
+### Coverage added
 
-Drop `namedBonus` from `getSense()`/`getSenses()`, since
-`_recalculateCustomModifiers()` already aggregates it into `senseMods` — or,
-symmetrically, stop folding `sense:` modifiers into `cm.senses`. Pick one owner.
+`CharacterSheetSenseAggregation.test.js` — 24 tests (20 for this bug, 4 for
+CS-BUG-137), **every one asserting on `getSense()` / `getSenses()` output**,
+never on a modifier object. Covers the
+three primary regression guards (additive, `setValue`, Skulker end-to-end), the
+non-canonical sense name that made "just delete `namedBonus`" wrong, additive vs
+set semantics in both directions, `perLevel` / `proficiencyBonus` / symbolic
+resolution, `getSenses()`↔`getSense()` parity across all keys, the untouched
+item and base-sense channels, and an assertion that `customModifiers.senses`
+stays all-zero — which goes red the moment the fold returns.
 
-**Blast radius needs checking before either.** Four test files reference
-`sense:` modifiers or Skulker (`CharacterSheetSymbolicModifiers`,
-`CharacterSheetFeatEffects`, `CharacterSheetEffectEditor`,
-`CharacterSheetParsers`). Any that assert a *derived* sense value today are
-asserting the doubled number, and will need correcting alongside — those
-failures would be evidence, not collateral.
+Both pre-existing flag assertions were upgraded in place: the Skulker test now
+also asserts `getSense("blindsight") === 10`, and the Gae Bolg test asserts an
+exact `60` rather than `toBeGreaterThanOrEqual(60)`.
+
+`CharacterSheetPdf.test.js` and `CharacterSheetPlayMode.test.js` gained senses
+blocks covering a non-canonical sense reaching the rendered output, canonical
+senses ordering ahead of it, and a zero-range sense being omitted rather than
+printed as `0 ft.` — the two surfaces that previously dropped homebrew senses
+had no sense-key coverage at all.
+
+**Mutation-tested, one defect at a time.** A guard that cannot fail is worse
+than none, so each change was reverted independently and the coverage checked
+for red:
+
+| Mutation | Red |
+|---|---|
+| fold restored + `getSense()` reading it inside the max | 9 |
+| the above **plus** `named.set` added rather than maxed (the exact original arithmetic) | 16 |
+| `getSenses()` reverted to hardcoded canonical keys | 6 |
+| the PDF and Play Mode renderers reverted to their own hardcoded key lists | 4 |
+
+Every primary guard, both upgraded assertions and the Gae Bolg case go red on
+the full-original arithmetic. Note the additive and `setValue` guards fail on
+*different* mutations, which is the mechanical demonstration that CS-BUG-136 and
+CS-BUG-137 are two defects and not one: the `setValue` guard survives mutation 1
+untouched.
 
 ### Lesson
 
@@ -8355,6 +8507,83 @@ than stopping at the first reader. The same discipline that disproved the
 `senseType` claim in
 [10-known-limitations.md](10-known-limitations.md#technical-debt) surfaced this:
 verifying "does it arrive?" answers "does it arrive *once*?" for free.
+
+The fix pass added a corollary. Two separate assertions were load-bearing in the
+wrong direction — one asserting the modifier object, one asserting an inequality
+— and both passed against a doubled value. **An assertion that cannot
+distinguish the right answer from the wrong one is not coverage.** Where a
+derived value is exactly knowable, assert it exactly.
+
+---
+
+## CS-BUG-137 — a `setValue` sense grant was added on top of an existing sense instead of competing with it — FIXED
+
+**Status**: Fixed.
+**Surfaced**: while fixing [CS-BUG-136](#cs-bug-136--every-sense-named-modifier-was-counted-twice-so-skulker-granted-blindsight-20-ft-instead-of-10--fixed); found by probe, not by a failing test.
+**Component**: Character Sheet · `charactersheet-state.js`.
+**Severity**: Low — needs a character who *already has* the sense being granted.
+
+### Symptom
+
+A character with innate blindsight 30 ft who gains a "you have blindsight 10 ft"
+effect ended up with **blindsight 40 ft**. The lesser grant extended the greater
+one instead of being absorbed by it.
+
+### Why it is not CS-BUG-136
+
+They are easy to conflate — same three lines, same pass — so the discriminator
+is worth stating plainly. `getSense()` computed
+`Math.max(base, …) + named.set + named.add`. With base 30 and a `setValue` 10:
+
+| | duplication present | duplication removed only | CS-BUG-137 also fixed |
+|---|---|---|---|
+| result | 40 | **40** | **30** |
+
+Removing the double-count does not move this number at all. Reaching 30 requires
+the separate change of moving `named.set` **into** the `Math.max` group, which
+alters results for anyone relying on the additive behaviour. Conversely, with no
+pre-existing sense the two are indistinguishable (`0 + v === max(0, v)`) — which
+is why **Skulker is unaffected by CS-BUG-137** and why this never showed up on
+the official-content case that motivated the parent bug.
+
+### Root cause
+
+`setValue` modifiers were summed into the same additive term as ordinary ones.
+The flag's meaning — *set* the sense to this range rather than *add* to it — was
+recorded on the modifier and then ignored at aggregation.
+
+### Fix
+
+`_getNamedSenseContribution()` returns `{add, set}` as two distinct channels, and
+`getSense()` places `set` inside the max group and `add` outside it:
+
+```js
+Math.max(base, itemSenses, statesBonus, gemstone, named.set) + named.add + …
+```
+
+Max is the established semantics for this flag elsewhere in the file, which is
+the evidence this is a fix and not a preference:
+
+- the `sense:`+`setValue` intercept in the feature-effect applier writes only
+  `if (mod.value > currentValue) setSense(...)` — never a sum;
+- the Hellsight boon test asserts an active state's 60 ft *wins over* an innate
+  30 rather than producing 90.
+
+### Coverage
+
+`CharacterSheetSenseAggregation.test.js` → `describe("CS-BUG-137 …")`, four tests
+asserting on `getSense()` output: a `setValue` below an existing sense is
+absorbed (30 stays 30), one above it wins (30 → 60), the largest of several
+competing `setValue` grants wins, and `setValue` composes with an additive
+modifier as `max(base, set) + add` rather than `base + set + add`. Mutation-
+tested alongside CS-BUG-136.
+
+### Lesson
+
+Two independent behaviour changes to the same expression look like one change in
+a diff. Splitting them cost one `describe` block and one entry; conflating them
+would have buried a numbers-changing edit inside a bug fix, where nobody
+searching for the regression would ever find it.
 
 ---
 

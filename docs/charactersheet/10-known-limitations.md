@@ -466,7 +466,24 @@ them has a working writer *and* a matching reader:
 |---|---|---|---|
 | `{type:"sense", target:"darkvision", value:60}` | Active state | `getSenseBonusFromStates()` | ✅ works |
 | `{type:"sense", sense:"blindsight", range:30}` | Registry → class feature | `_applyFeatureEffect` → `_setClassFeatureSense(effect.sense, effect.range)` | ✅ works |
-| `{type:"sense", senseType:"blindsight", value:10}` | Registry → **feat** | `_processFeatRegistryEffects` → `addNamedModifier({type: "sense:X", value})` → `getSense()`'s `namedBonus` | ✅ works |
+| `{type:"sense", senseType:"blindsight", value:10}` | Registry → **feat** | `_processFeatRegistryEffects` → `addNamedModifier({type: "sense:X", value})` → `getSense()`'s `_getNamedSenseContribution()` | ✅ works |
+
+> **Correction (CS-BUG-136).** This row originally read "→ `getSense()`'s
+> `namedBonus` ✅ works". The claim that the effect *arrives* was right; the
+> implication that it arrives **once** was not. A second aggregation of the same
+> named modifiers in `_recalculateCustomModifiers()` folded them into
+> `customModifiers.senses`, which `getSense()` also read — so every named sense
+> grant doubled (Skulker rendered blindsight 20 ft). The fold has been deleted
+> and `getSense()` / `_getNamedSenseContribution()` is now the sole owner, which
+> is what this row always described. **No registry spelling changed**, and the
+> `_fromFeatRegistry` guard below is untouched: the duplication was downstream of
+> both paths, in the aggregation, not in the dispatch. See
+> [known-bugs.md](known-bugs.md) → CS-BUG-136.
+>
+> The lesson generalises to this table. Tracing a spelling to its reader proves
+> the writer→reader link exists; it does not prove the reader is the *only* one.
+> Where a derived value is exactly knowable, assert it exactly —
+> `getSense("blindsight") === 10`, not `>= 10` and not `senseMod.value === 10`.
 
 **The separation is deliberate, not drift.** `_applyFeatureEffect` opens with a
 guard:
@@ -512,6 +529,14 @@ evidence. "I grepped the reader and it doesn't mention `senseType`" is not. Note
 that this is the same doctrine as the testing rule below — assert the derived
 value, never the shape of the effect object — applied to diagnosis rather than to
 tests.
+
+> **The rule works — it produced a real bug the same day.** Applying it to
+> `{senseType, value}` is exactly what surfaced **CS-BUG-136**: `getSense()` did
+> read the modifier, and returned **20** for a value of 10. Three false positives
+> and one true one, from the same trace, distinguished only by whether the
+> reporter looked at the number the getter returned. The discipline was sound; the
+> retracted reports stopped one call short of the applier, and the accepted one
+> stopped one assertion short of the value. Go all the way to the number.
 
 #### The residue that IS real: an authoring hazard
 

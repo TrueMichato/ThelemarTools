@@ -241,6 +241,30 @@ describe("CharacterSheetPdf", () => {
 			expect(html).toContain("60 ft.");
 		});
 
+		test("renders a non-canonical sense granted by a named modifier", () => {
+			// `getSenses()` returns VARIABLE keys since CS-BUG-136. This renderer used to
+			// test the four canonical names by hand and silently dropped everything else,
+			// so a homebrew sense reached `getSense()` but never the exported sheet.
+			state.addNamedModifier({name: "Echo", type: "sense:echolocation", value: 30, sourceType: "classFeature"});
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("Echolocation");
+			expect(html).toContain("30 ft.");
+		});
+
+		test("renders canonical senses before non-canonical ones", () => {
+			state._data.senses = {darkvision: 60};
+			state.addNamedModifier({name: "Echo", type: "sense:echolocation", value: 30, sourceType: "classFeature"});
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html.indexOf("Darkvision")).toBeLessThan(html.indexOf("Echolocation"));
+		});
+
+		test("a zero-range sense is omitted rather than rendered as 0 ft.", () => {
+			// `getSenses()` reports the canonical four even at zero; the renderer must not.
+			state._data.senses = {darkvision: 60};
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).not.toContain("Truesight");
+		});
+
 		test("should render passive scores inline with skills", () => {
 			const html = new CharacterSheetPdf(state).generate();
 			// Passive scores should appear as badges next to Perception, Investigation, Insight

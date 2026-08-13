@@ -1053,14 +1053,12 @@ export class CharacterSheetPlayMode {
 	}
 
 	_renderSenses () {
-		const senses = this._state.getSenses();
-		if (!senses || !Object.keys(senses).length) return;
-
-		const entries = [];
-		if (senses.darkvision) entries.push(`Darkvision ${senses.darkvision}ft`);
-		if (senses.blindsight) entries.push(`Blindsight ${senses.blindsight}ft`);
-		if (senses.tremorsense) entries.push(`Tremorsense ${senses.tremorsense}ft`);
-		if (senses.truesight) entries.push(`Truesight ${senses.truesight}ft`);
+		// See the note in charactersheet-pdf.js `_renderSenses`: `getSenses()` returns
+		// VARIABLE keys since CS-BUG-136, so the four canonical names are no longer a
+		// complete list. `buildSensesDisplay` owns ordering, labels and filtering; this is
+		// `textContent`, so no escaping is needed.
+		const entries = CharacterSheetClassUtils.buildSensesDisplay(this._state.getSenses())
+			.map(it => `${it.label} ${it.range}ft`);
 		if (!entries.length) return;
 
 		const card = this._makeCard(this._elCharPanel, "senses", "Senses");
