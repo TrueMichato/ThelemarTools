@@ -8379,15 +8379,27 @@ CS-BUG-136; both are recorded here only because they touch the same lines.
   homebrew sense was readable through `getSense("echolocation")` but invisible
   everywhere the player could actually see it.
 
-  **All four `getSenses()` consumers were traced, not assumed.** The Overview
-  (`buildSensesDisplay`, which has an `extraKeys` path) and the NPC exporter
-  (`Object.entries` + falsy filter) already handled arbitrary keys. **The PDF
-  export (`charactersheet-pdf.js`) and Play Mode (`charactersheet-playmode.js`)
-  did not** — both tested the four canonical names by hand and silently dropped
-  anything else. Both were routed through `buildSensesDisplay`, which removes
-  the triplicated ordering/labelling logic and is why a homebrew sense now
-  reaches all four surfaces. No consumer indexes a key it has not first tested,
-  so a variable key set cannot throw.
+  **All three `getSenses()` consumers were traced, not assumed.** The Overview
+  (`buildSensesDisplay`, which has an `extraKeys` path) already handled
+  arbitrary keys. **The PDF export (`charactersheet-pdf.js`) and Play Mode
+  (`charactersheet-playmode.js`) did not** — both tested the four canonical
+  names by hand and silently dropped anything else. Both were routed through
+  `buildSensesDisplay`, which removes the triplicated ordering/labelling logic
+  and is why a homebrew sense now reaches all three surfaces. No consumer
+  indexes a key it has not first tested, so a variable key set cannot throw.
+
+  Because the display path is now the *only* consumer, and all three call sites
+  share it, the canonical-key assumption cannot reappear in one surface without
+  reappearing in all of them.
+
+  > **Correction.** An earlier draft of this entry claimed the NPC statblock
+  > exporter was a fourth consumer that "already filtered falsy". It is not a
+  > consumer at all: `charactersheet-npc-exporter.js` calls neither `getSenses()`
+  > nor `getSense()` — its only sense-related code is a prose regex. The claim
+  > came from a grep match read as a call site without opening the file. Kept
+  > visible rather than quietly deleted, because it is the same
+  > infer-from-the-writer error this entry exists to warn about, committed while
+  > writing the warning.
 
   **It also closed a pre-existing divergence, which is worth naming rather than
   absorbing:** the old `getSenses()` applied gemstone `sense` effects to
@@ -8495,7 +8507,23 @@ for red:
 | the PDF and Play Mode renderers reverted to their own hardcoded key lists | 4 |
 
 Every primary guard, both upgraded assertions and the Gae Bolg case go red on
-the full-original arithmetic. Note the additive and `setValue` guards fail on
+the full-original arithmetic.
+
+**Verified against the real-save corpus too.** The 912 assertions in
+`CharacterSheetNpcExporter.realsaves.test.js` are gated on `npc-exports/`, an
+untracked corpus of real character saves that is absent from every worktree and
+every fresh clone — so the suite self-skips (153 placeholder tests) wherever
+that corpus is missing, and the fixing session could not run it. The integrating
+session ran it against this change: **912 passed**, and the full charactersheet
+suite reads **477 suites / 15,549 tests / 0 skipped / 0 failed** with the corpus
+present, against **476 / 14,790 / 153 skipped** without it. Both are honest
+readings of different environments.
+
+Worth knowing before comparing test totals across sessions: that suite is
+`describe.each`-parameterised per save, so the corpus does not add 153 tests, it
+multiplies them (33 placeholder tests become 24 × 33). A "N passed, 0 skipped"
+baseline is therefore **not portable** between the author's checkout and a
+worktree, and a mismatch there is not evidence of a regression. Note the additive and `setValue` guards fail on
 *different* mutations, which is the mechanical demonstration that CS-BUG-136 and
 CS-BUG-137 are two defects and not one: the `setValue` guard survives mutation 1
 untouched.
