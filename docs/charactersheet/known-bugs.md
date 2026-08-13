@@ -8735,3 +8735,219 @@ future subclass with a diverging shortName is covered by adding one map entry.
   pact-table generalisation did not regress the base class.
 - Profane Soul L19 yields **2 slots of 4th level** via the full name.
 - Profane Soul L19 yields the **same** 2@4 via the shortName (the regression).
+
+---
+
+## CS-BUG-124 — Order of the Mutant's mutagens had no UI at all: the pool was reachable, the effect was not — FIXED
+
+**Status:** FIXED
+**Area:** Order of the Mutant / mutagens (`charactersheet-state.js`, `charactersheet.js`)
+**Severity:** High — the order's entire signature mechanic was unreachable by a player.
+
+### Symptom
+
+A player could level an Order of the Mutant Blood Hunter to 18, watch the
+**Mutagen** resource pool appear and tick down on a rest, and never once drink a
+mutagen. There was no way to learn a formula, no way to consume one, and no way
+to end one. The counter moved; nothing happened.
+
+That is the worse shape of failure: a missing button reads as unfinished, but a
+**counter that does nothing reads as working**.
+
+### Root cause
+
+The state layer was complete and correct — `MUTAGENS` (20 formulas, each with a
+benefit *and* a drawback), `consumeMutagen()`, `endMutagen()`, `flushMutagens()`,
+`getAvailableMutagens()` — and carried **81 passing tests**. Every one of those
+tests called `consumeMutagen()` directly. Not one entered where a player enters.
+
+Nothing above the state file ever called any of it:
+
+| Check | Result |
+|---|---|
+| `consumeMutagen` / `endMutagen` production callers outside `charactersheet-state.js` | **zero** |
+| `MTGN` anywhere in `js/charactersheet/` | **absent** |
+| `mutagenFormulasKnown` readers | **none** — computed at `:18360`, read only by a test |
+
+The controller dispatch that routes an activatable feature by its
+`optionalFeatureTypes` already handled `BC` (Blood Curse) and `CR` (Crimson
+Rite). `MTGN` — declared in the same `optionalFeatureTypes` block of the same
+source file — was simply never added.
+
+**Why MTGN specifically, and not BC or CR.** This is structural rather than an
+oversight, and the distinction matters for anyone adding a future pool. The
+BH2022 class data declares an `optionalfeatureProgression` for exactly three
+pools — `BC`, `CR` and `FS:F` — so the **generic** `getOptionalFeatureGains`
+machinery discovers those, surfaces them in the picker, and enforces their
+counts with no class-specific code at all. `MTGN` is declared in **no**
+`optionalfeatureProgression`, on the class or on any subclass: mutagen formulas
+known come from a subclass feature's prose, not from a progression table. So no
+generic path could ever have reached it, and it needed explicit wiring that BC
+and CR got for free.
+
+That also explains why `bloodCursesKnown` and `crimsonRitesKnown` are computed
+and unread without being bugs — they duplicate what `optionalfeatureProgression`
+already delivers — while `mutagenFormulasKnown` genuinely was inert. A calc key
+with no reader is only a defect when nothing *else* delivers the same behaviour.
+
+`mutagenFormulasKnown` (4/5/6/7/8 at levels 3/7/11/15/18) was *computed but not
+enforced*: `getAvailableMutagens()` gated on character level only, so the "known"
+cap was inert — a second, quieter instance of the same defect.
+
+### Fix
+
+1. **Split the two meanings of "available".** `getLearnableMutagens()` is the
+   level-eligible pool (the old behaviour); `getAvailableMutagens()` now returns
+   what the character actually **knows**. The names had been doing one job for two
+   concepts, which is why the cap had nowhere to attach.
+2. **Enforce the cap at every writer.** `learnMutagenFormula()` refuses past the
+   cap; `setKnownMutagenFormulas()` truncates; and `getKnownMutagenFormulas()`
+   itself truncates on read, so a respec, a level-down, or a stale save cannot
+   leave a character over cap.
+3. **Make the formulas reachable.** `_reconcileMutagenFormulaFeatures()` creates
+   one activatable feature row per known formula, tagged
+   `optionalFeatureTypes: ["MTGN"]` so it flows through the **same** generic
+   picker path BC and CR already use. The row's description carries the benefit
+   **and** the drawback, because a mutagen you can drink without seeing its cost
+   is a trap.
+4. **Wire the entry points.** `detectActivatableFeature()` recognises `MTGN`;
+   `charactersheet.js` dispatches it to `_pConsumeMutagen()` (a
+   `pGetUserBoolean` consume/end toggle whose description states the effect, the
+   side effect, and the concoctions remaining) and routes the Mutagencraft
+   feature to `_pManageMutagenFormulas()` (`pGetUserMultipleChoice`, capped).
+   No bespoke modal: both decisions fit the house prompt vocabulary.
+
+### Verification
+
+`CharacterSheetBloodHunterMutagenUi.test.js` was written to **enter where a
+player enters**, and it immediately found two further defects in the fix itself:
+
+- feature rows were built only when a resource reconcile happened to run, so
+  learning a formula could leave nothing to click — the writers now own that
+  invariant;
+- `getKnownMutagenFormulas()` filtered by eligibility but not by cap.
+
+Neither was visible from below the UI layer. The 81 pre-existing tests were
+migrated to a `drink()` helper that learns before consuming, so they now exercise
+the real gate rather than asserting the unlimited behaviour they were written
+against.
+
+### Lesson
+
+Eighty-one honest tests all entered *below* the missing layer. Coverage counted
+at the state file was excellent and told us nothing about whether the feature
+existed. **At least one test per mechanic must enter at the layer the player
+touches** — that is the only kind that could have caught this.
+
+---
+
+## CS-BUG-125 — Brand of Sundering was a missing feature, not a missing calculation — FIXED
+
+**Status:** FIXED
+**Area:** Order of the Ghostslayer (`charactersheet-state.js`)
+**Severity:** Medium — an 11th-level capstone rider did nothing and appeared nowhere.
+
+### Symptom
+
+An Order of the Ghostslayer Blood Hunter reached 11th level and their crimson
+rites did exactly what they did at 10th. Brand of Sundering was not mentioned on
+the sheet in any form.
+
+### Root cause
+
+`hasBrandOfSundering` and `brandOfSunderingRiteBonusDamage` were assigned in
+`getFeatureCalculations()` and had **zero readers**. The framing "the damage is
+computed and never applied" understates it: with no consumer for the `has` flag
+either, nothing rendered, gated, or so much as named the feature. A one-line fix
+that added the die would still have left the feature invisible.
+
+The keys also survived a dynamic-access check — `getFeatureCalculation(key)` and
+the data-driven `calculations[effect.dcCalculation]` resolution are the two ways
+a "dead" key can secretly be live, and neither referenced them.
+
+### Source-text note (deliberate, not an oversight)
+
+> "…leaving them vulnerable to your Crimson Rite feature. **Whenever you hit a
+> creature with a weapon for which you have an active crimson rite**, you roll an
+> additional hemocraft die… Additionally, if a branded creature has the
+> Incorporeal Movement trait… it can't move through creatures or objects **while
+> branded**."
+
+The extra-die sentence omits "branded" while the very next sentence in the same
+feature includes it. The omission is therefore deliberate, and the die is
+implemented as **unconditional** — it rides every rite hit, not only hits against
+a branded creature. Flagged here because the reading is arguable and a future
+reader deserves the evidence rather than the conclusion.
+
+### Fix
+
+`crimsonRiteDamage` becomes `2dN` at Ghostslayer 11 (scaling with the hemocraft
+die, not pinned to d8), so the extra die rides the **existing** per-weapon rite
+rider rather than needing a parallel path. `_refreshActiveCrimsonRiteDamage()`
+re-points rites that were already lit, so a rite kindled at 10th doesn't keep
+rolling one die after level-up — and doesn't keep rolling two after a level-down.
+The target-side half (Incorporeal Movement) is surfaced as `info` on the
+`brandedTarget` state; see CS-BUG-150.
+
+### Verification
+
+Ghostslayer 11 → `2d8`, 17 → `2d10`; Ghostslayer 7 → `1d6` and Lycan 11 → `1d8`
+prove the scoping. A live-rite test lights a rite at 10th and asserts the dice
+change on reaching 11th. Two pre-existing Rite of the Dawn assertions went red at
+exactly levels 11 and 17 — i.e. exactly where Sundering applies — confirming they
+had encoded the unfixed behaviour; both were updated with the reason inline.
+
+---
+
+## CS-BUG-150 — Brand of Axiom and Brand of the Sapping Scar: flags assigned, zero readers — FIXED
+
+**Status:** FIXED
+**Area:** Order of the Mutant / Order of the Profane Soul (`charactersheet-state.js`)
+**Severity:** Medium — same shape as CS-BUG-125, in two more orders.
+
+### Symptom
+
+`hasBrandOfAxiom` (Mutant 11) and the Profane Soul's Brand of the Sapping Scar
+were computed and never read. Neither feature appeared anywhere on the sheet.
+Brand of Axiom's save DC was calculated into `brandOfAxiomDc` and consumed by
+nothing.
+
+### Root cause
+
+Three of the four orders gain an 11th-level rider on the *branded creature*, and
+each was represented only as a calc flag. The sheet tracks one character, so an
+effect resolving on someone else's turn has no numeric home — but "no numeric
+home" was silently allowed to become "no representation at all".
+
+### Fix
+
+The `brandedTarget` entry in `ACTIVE_STATE_TYPES` now names an
+`effectsBuilder: "getBrandedTargetEffects"` — the **existing generic hook** in
+`activateState()`, so no shared code is special-cased. The builder returns one
+`info` effect per brand the character actually has, with its DC and damage
+resolved into the text: Castigation, Tethering, Sundering, Axiom, Sapping Scar,
+and the Voracious. Marking a target branded now states, in one place, everything
+that brand does to it.
+
+`info` effects on a state are genuinely rendered (the active-states tooltip,
+`charactersheet-combat.js`), which is why this path was chosen over
+`FeatureEffectRegistry`. **Registry `info` effects are aggregated but rendered
+nowhere**, so registering the brands there would have reproduced the exact defect
+being fixed — that is recorded in a comment beside the registry so the next
+person doesn't try it.
+
+### Verification
+
+Each order surfaces exactly its own riders — Ghostslayer gets Sundering, Mutant
+gets Axiom, Profane Soul gets the Sapping Scar, Lycan at 15 gets Tethering and
+the Voracious — and a 6th-level Blood Hunter of any order gets Castigation alone.
+The Axiom line is asserted to contain the character's real Hemocraft DC, and the
+Tethering line its real `4d6`, its DC, and *"the attempt fails"* rather than a
+"save for half" that the source does not say.
+
+### Not a bug — recorded so it isn't "fixed" later
+
+`hasBrandOfTheVoracious` has two readers and only one is gated on
+`brandedTarget`. That asymmetry is **faithful to the source**: the feature has
+two clauses with two different conditions — the bloodlust save advantage requires
+hybrid form only, while the attack advantage requires a branded target. Leave it.

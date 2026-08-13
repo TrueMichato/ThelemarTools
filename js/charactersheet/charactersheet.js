@@ -9398,6 +9398,10 @@ class CharacterSheetPage {
 			return this._pUseBattleMasterManeuver(feature, resource, resourceCost);
 		}
 		if (feature?.optionalFeatureTypes?.includes("BC") || name.startsWith("blood curse of ")) return this._pUseBloodMaledict(feature);
+		// (CS-BUG-124) Order of the Mutant. Mutagen formula rows consume; the Formulas/
+		// Mutagencraft rows manage which formulas are known and flush the system.
+		if (feature?.optionalFeatureTypes?.includes("MTGN")) return this._pConsumeMutagen(feature);
+		if (name === "formulas" || name === "mutagencraft") return this._pManageMutagenFormulas(feature);
 		// Psionics (MCDM Talent and any other manifester wired through
 		// `CharacterSheetClassUtils.PSIONIC_MANIFESTERS`). Manifesting a power runs the
 		// manifestation test; any feature whose cost is strain charges that strain.
@@ -10058,6 +10062,114 @@ class CharacterSheetPage {
 		});
 		this._saveCurrentCharacter();
 		this._renderResources();
+		this._features?.render?.();
+		return true;
+	}
+
+	/**
+	 * (CS-BUG-124) Consume a known mutagen, spending one concoction from the per-rest pool.
+	 * A 1-bit confirm, so this uses `pGetUserBoolean` rather than a bespoke modal.
+	 */
+	async _pConsumeMutagen (feature = null) {
+		const key = feature?.mutagenKey || (feature?.name || "").replace(/^mutagen:\s*/i, "").toLowerCase();
+		const def = CharacterSheetState.MUTAGENS?.[key];
+		const label = def?.name || feature?.name || "Mutagen";
+		if (this._state.getActiveMutagens?.().includes(key)) {
+			const end = await InputUiUtil.pGetUserBoolean({
+				title: `End ${label}?`,
+				htmlDescription: `<div class="mb-2">${label} is currently affecting you. Ending it removes both its benefit and its side effect.</div>`,
+				textYes: "End it",
+				textNo: "Keep it",
+			});
+			if (!end) return true;
+			this._state.endMutagen(key);
+			JqueryUtil.doToast({type: "info", content: `${label} ended.`});
+		} else {
+			const resource = this._state.getResource?.("Mutagen");
+			if (!resource || resource.current < 1) {
+				JqueryUtil.doToast({type: "warning", content: "No concocted mutagens remain. You concoct mutagens when you finish a short or long rest."});
+				return true;
+			}
+			const drink = await InputUiUtil.pGetUserBoolean({
+				title: `Consume ${label}`,
+				htmlDescription: `<div class="mb-2">
+					<div class="mb-1"><b>Cost:</b> Bonus action, one concocted mutagen (${resource.current} remaining)</div>
+					${def?.benefit ? `<div class="mb-1"><b>Effect:</b> ${def.benefit}</div>` : ""}
+					${def?.drawback ? `<div class="mb-1"><b>Side effect:</b> ${def.drawback}</div>` : ""}
+				</div>
+				<div>Effects and side effects last until you finish a short or long rest.</div>`,
+				textYes: "Consume",
+				textNo: "Cancel",
+			});
+			if (!drink) return true;
+			if (!this._state.consumeMutagen(key)) {
+				JqueryUtil.doToast({type: "warning", content: `You can't consume ${label} right now.`});
+				return true;
+			}
+			JqueryUtil.doToast({type: "success", content: `${label} consumed.`});
+		}
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderActiveStates();
+		this._renderCharacter();
+		this._features?.render?.();
+		return true;
+	}
+
+	/**
+	 * (CS-BUG-124) Choose which mutagen formulas are known, capped at `mutagenFormulasKnown`.
+	 * A genuine N-of-M decision, so it uses the house multi-select rather than a custom modal.
+	 * Also offers flushing every active mutagen (RAW: an action).
+	 */
+	async _pManageMutagenFormulas () {
+		const learnable = this._state.getLearnableMutagens?.() || [];
+		if (!learnable.length) {
+			JqueryUtil.doToast({type: "warning", content: "Mutagen formulas require Order of the Mutant."});
+			return true;
+		}
+		const max = this._state.getFeatureCalculations().mutagenFormulasKnown || 0;
+		const known = this._state.getKnownMutagenFormulas?.() || [];
+		const active = this._state.getActiveMutagens?.() || [];
+		if (active.length) {
+			const flush = await InputUiUtil.pGetUserBoolean({
+				title: "Flush your system?",
+				htmlDescription: `<div class="mb-2">Currently affecting you: ${active.map(k => CharacterSheetState.MUTAGENS?.[k]?.name || k).join(", ")}.</div>
+					<div>Flushing takes an action and ends every mutagen's effects and side effects. Choose "Manage formulas" instead to change which formulas you know.</div>`,
+				textYes: "Flush (action)",
+				textNo: "Manage formulas",
+			});
+			if (flush == null) return true;
+			if (flush) {
+				const ended = this._state.flushMutagens();
+				JqueryUtil.doToast({type: "info", content: `Flushed ${ended} mutagen${ended === 1 ? "" : "s"}.`});
+				this._saveCurrentCharacter();
+				this._renderResources();
+				this._renderActiveStates();
+				this._renderCharacter();
+				this._features?.render?.();
+				return true;
+			}
+		}
+		const picked = await InputUiUtil.pGetUserMultipleChoice({
+			title: "Mutagen Formulas",
+			htmlDescription: `<div class="mb-2">Choose the formulas you know (${max} at this level). Changing your selection covers RAW's "you can replace one formula you already know".</div>`,
+			values: learnable,
+			fnDisplay: key => {
+				const def = CharacterSheetState.MUTAGENS?.[key];
+				return def ? `${def.name} — ${def.benefit}` : key;
+			},
+			defaults: learnable.reduce((acc, key, ix) => {
+				if (known.includes(key)) acc.push(ix);
+				return acc;
+			}, []),
+			max,
+		});
+		if (picked == null) return true;
+		const next = this._state.setKnownMutagenFormulas(picked.map(ix => learnable[ix]));
+		JqueryUtil.doToast({type: "success", content: `Formulas known: ${next.length}/${max}.`});
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._renderCharacter();
 		this._features?.render?.();
 		return true;
 	}

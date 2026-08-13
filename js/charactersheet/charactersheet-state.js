@@ -3056,6 +3056,12 @@ const FeatureEffectRegistry = {
 			{type: "immunity", damageType: "poison"},
 			{type: "conditionImmunity", condition: "poisoned"},
 		]);
+		// NOTE: the three 11th-level brand riders (Sundering, Axiom, Sapping Scar) are NOT
+		// registered here. Registry `info` effects are aggregated but never rendered, so an
+		// entry here would be exactly the inert declaration this round set out to remove.
+		// They are surfaced instead on the `brandedTarget` state via getBrandedTargetEffects(),
+		// whose info lines the active-states tooltip genuinely renders, and Brand of
+		// Sundering's extra rite die is applied through `crimsonRiteDamage`.
 
 		// ======= ARTIFICER SUBCLASSES =======
 		this.register("Battle Ready", [
@@ -18412,9 +18418,18 @@ class CharacterSheetState {
 							calculations.aetherWalkDurationRounds = hemocraftModifier;
 						}
 						if (level >= 11) {
-							// Brand of Sundering (11): an extra hemocraft die of rite damage vs a branded creature.
+							// Brand of Sundering (11): "Whenever you hit a creature with a weapon for
+							// which you have an active crimson rite, you roll an additional hemocraft
+							// die when determining the extra damage from the rite."
+							// That clause is NOT limited to a branded creature — the very next sentence
+							// of the same feature does say "while branded", so the omission is deliberate.
 							calculations.hasBrandOfSundering = true;
-							calculations.brandOfSunderingRiteBonusDamage = hemocraftDie;
+							// (CS-BUG-125) Roll the extra die as part of the rite's damage, so the
+							// bonus actually rides the weapon's damage roll instead of being a
+							// calc key nothing reads. There is deliberately no separate
+							// `brandOfSunderingRiteBonusDamage` key: a second key holding the same
+							// number with no reader is the very defect this fixed.
+							if (calculations.crimsonRiteDamage) calculations.crimsonRiteDamage = `2${hemocraftDie.slice(1)}`;
 						}
 						if (level >= 15) calculations.grantsBloodCurseOfTheExorcist = true;
 						if (level >= 18) calculations.hasRiteRevival = true;
@@ -38917,7 +38932,14 @@ class CharacterSheetState {
 					description: "You gain the Blood Curse of Corrosion for your Blood Maledict feature. This doesn't count against your number of blood curses known.",
 				});
 			}
+			this._reconcileMutagenFormulaFeatures();
 		}
+
+		// (CS-BUG-125) A crimson rite stores its damage dice on the active state at
+		// activation time, so a rite lit before 11th level would keep rolling one
+		// hemocraft die after Brand of Sundering came online (and keep rolling two
+		// after a level-down). Re-point live rite effects at the current value.
+		this._refreshActiveCrimsonRiteDamage();
 
 		// Profane Soul: the auto-granted Souleater curse at 18th (does not count against known).
 		if (/profane/i.test(subclassName) && level >= 18
@@ -38932,6 +38954,23 @@ class CharacterSheetState {
 				optionalFeatureTypes: ["BC"],
 				description: "You gain the Blood Curse of the Souleater for your Blood Maledict feature. This doesn't count against your number of blood curses known.",
 			});
+		}
+	}
+
+	/**
+	 * (CS-BUG-125) Keep every live crimson rite's bonus damage in step with the current
+	 * `crimsonRiteDamage` calculation, which changes both with the hemocraft die and with
+	 * Ghostslayer's Brand of Sundering (11).
+	 * @private
+	 */
+	_refreshActiveCrimsonRiteDamage () {
+		const dice = this.getFeatureCalculations().crimsonRiteDamage;
+		if (!dice) return;
+		for (const state of this._data.activeStates || []) {
+			if (state.stateTypeId !== "crimsonRite" || !state.active) continue;
+			for (const effect of state.customEffects || []) {
+				if (effect.isCrimsonRite && effect.dice !== dice) effect.dice = dice;
+			}
 		}
 	}
 
@@ -39022,6 +39061,45 @@ class CharacterSheetState {
 		return true;
 	}
 
+	/**
+	 * (CS-BUG-125 / CS-BUG-150) Live effects for the shared `brandedTarget` state.
+	 *
+	 * Every Blood Hunter brand rider past Castigation resolves on the BRANDED CREATURE,
+	 * which a single-character sheet cannot track (see
+	 * docs/charactersheet/10-known-limitations.md). Before this, that meant
+	 * `hasBrandOfSundering`, `hasBrandOfAxiom` and `hasBrandOfTheSappingScar` were
+	 * assigned and never read by anything, so branding a creature said nothing about what
+	 * the brand did. These surface each rider the character actually has, with its DC
+	 * resolved, on the state the player toggles when they brand something. The active-states
+	 * tooltip renders `info` custom effects, so this is genuinely visible.
+	 *
+	 * @returns {object[]} effect descriptors for the branded-target state
+	 */
+	getBrandedTargetEffects () {
+		const calc = this.getFeatureCalculations();
+		const effects = [];
+		if (calc.hasBrandOfCastigation) {
+			effects.push({type: "info", label: `Brand of Castigation: each time the branded creature deals damage to you, or to a creature you can see within 5 feet of you, it takes ${calc.brandDamage} psychic damage. You always know its direction while it is on your plane.`, source: "Brand of Castigation"});
+		}
+		if (calc.hasBrandOfTethering) {
+			effects.push({type: "info", label: `Brand of Tethering: the branded creature can't take the Dash action. If it attempts to teleport or leave its plane it takes ${calc.brandTetherDamage} psychic damage and must make a DC ${calc.brandTetherDc} Wisdom save, or the attempt fails.`, source: "Brand of Tethering"});
+		}
+		if (calc.hasBrandOfSundering) {
+			effects.push({type: "info", label: "Brand of Sundering: a branded creature with Incorporeal Movement (or similar) can't move through creatures or objects. Your extra rite die applies to every rite hit, branded or not.", source: "Brand of Sundering"});
+		}
+		if (calc.hasBrandOfAxiom) {
+			const dc = calc.brandOfAxiomDc ?? calc.hemocraftSaveDc;
+			effects.push({type: "info", label: `Brand of Axiom: illusions and invisibility on the branded creature end and can't benefit it. If it is in, or attempts, an alternative form it must make a DC ${dc} Wisdom save or revert and be stunned until the end of your next turn.`, source: "Brand of Axiom"});
+		}
+		if (calc.hasBrandOfTheSappingScar) {
+			effects.push({type: "info", label: "Brand of the Sapping Scar: the branded creature has disadvantage on saving throws against your warlock spells.", source: "Brand of the Sapping Scar"});
+		}
+		if (calc.hasBrandOfTheVoracious) {
+			effects.push({type: "info", label: "Brand of the Voracious: while in hybrid form you have advantage on attack rolls against the branded creature (applied automatically).", source: "Brand of the Voracious"});
+		}
+		return effects;
+	}
+
 	activateCrimsonRite (riteName, {roll = null, weaponId = null, weaponName = null} = {}) {
 		const calc = this.getFeatureCalculations();
 		if (!calc.hasCrimsonRite || !weaponId) return false;
@@ -39087,11 +39165,12 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * The mutagens the character can currently create, gated on being an Order of the Mutant
-	 * of at least the mutagen's prerequisite level.
+	 * The mutagen formulas an Order of the Mutant character is *eligible to learn* — the pool
+	 * the Formulas picker offers. RAW: "You can learn a mutagen at the same time you meet its
+	 * prerequisites", so this is gated on prerequisite level only, not on what is known.
 	 * @returns {string[]} lowercase mutagen keys
 	 */
-	getAvailableMutagens () {
+	getLearnableMutagens () {
 		const cls = this._getBloodHunterClass();
 		if (!cls) return [];
 		const sub = this.getEffectiveSubclassForClass(cls);
@@ -39101,6 +39180,76 @@ class CharacterSheetState {
 		return Object.entries(CharacterSheetState.MUTAGENS)
 			.filter(([, def]) => level >= (def.prerequisiteLevel || 3))
 			.map(([key]) => key);
+	}
+
+	/**
+	 * The mutagen formulas the character has actually learned, intersected with current
+	 * eligibility so a formula never survives a level-down that removes its prerequisite,
+	 * and truncated to `mutagenFormulasKnown` so a level-down that shrinks the cap cannot
+	 * leave the character over it. Truncation keeps the earliest-learned formulas; the
+	 * player can re-pick freely from the Formulas manager.
+	 * Backed by `_data.knownMutagenFormulas`.
+	 * @returns {string[]} lowercase mutagen keys
+	 */
+	getKnownMutagenFormulas () {
+		const learnable = new Set(this.getLearnableMutagens());
+		const max = this.getFeatureCalculations().mutagenFormulasKnown || 0;
+		return (this._data.knownMutagenFormulas || []).filter(it => learnable.has(it)).slice(0, max);
+	}
+
+	/**
+	 * (CS-BUG-124) The mutagens the character can currently concoct and consume: the formulas
+	 * they know. Previously this returned every level-eligible mutagen, which made
+	 * `mutagenFormulasKnown` inert — a 3rd-level Mutant could consume all 20 eligible mutagens
+	 * rather than the four formulas they chose.
+	 * @returns {string[]} lowercase mutagen keys
+	 */
+	getAvailableMutagens () {
+		return this.getKnownMutagenFormulas();
+	}
+
+	/**
+	 * Replace the set of known mutagen formulas, truncated to `mutagenFormulasKnown` and to
+	 * currently-learnable options. Used by the Formulas picker, which also covers RAW's
+	 * "when you learn a new formula you can replace one you already know".
+	 * @param {string[]} names mutagen keys (case-insensitive)
+	 * @returns {string[]} the formulas now known
+	 */
+	setKnownMutagenFormulas (names) {
+		const learnable = new Set(this.getLearnableMutagens());
+		const max = this.getFeatureCalculations().mutagenFormulasKnown || 0;
+		const next = [];
+		for (const raw of names || []) {
+			const key = String(raw || "").toLowerCase();
+			if (!learnable.has(key) || next.includes(key)) continue;
+			if (next.length >= max) break;
+			next.push(key);
+		}
+		this._data.knownMutagenFormulas = next;
+		// A formula that is no longer known cannot keep affecting the character.
+		for (const active of [...(this._data.activeMutagens || [])]) {
+			if (!next.includes(active)) this.endMutagen(active);
+		}
+		// The clickable rows ARE the known set; rebuild them here so no caller has to
+		// remember to, which is the omission that made mutagens unreachable (CS-BUG-124).
+		this._reconcileMutagenFormulaFeatures();
+		return [...next];
+	}
+
+	/**
+	 * Learn one additional formula, respecting the `mutagenFormulasKnown` cap.
+	 * @param {string} name mutagen key (case-insensitive)
+	 * @returns {boolean} whether the formula was learned
+	 */
+	learnMutagenFormula (name) {
+		const key = String(name || "").toLowerCase();
+		const known = this.getKnownMutagenFormulas();
+		if (known.includes(key)) return false;
+		if (!this.getLearnableMutagens().includes(key)) return false;
+		if (known.length >= (this.getFeatureCalculations().mutagenFormulasKnown || 0)) return false;
+		this._data.knownMutagenFormulas = [...known, key];
+		this._reconcileMutagenFormulaFeatures();
+		return true;
 	}
 
 	/**
@@ -39134,15 +39283,25 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Consume (drink) a mutagen the character knows, adding its effects to the mutagen state.
+	 * (CS-BUG-124) Consume (drink) a mutagen the character knows, spending one concoction from
+	 * the per-rest Mutagen pool. RAW models concocting on a rest and consuming as a bonus
+	 * action; the pool is the concoction budget, so consuming without spending it made
+	 * `mutagensCreatedPerRest` unenforceable.
 	 * @param {string} name mutagen key (case-insensitive)
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.spendUse=true] set false when the concoction was already paid for
+	 *        (e.g. Exalted Mutation, which substitutes a mutagen rather than concocting one).
 	 * @returns {boolean} whether the mutagen was consumed
 	 */
-	consumeMutagen (name) {
+	consumeMutagen (name, {spendUse = true} = {}) {
 		const key = String(name || "").toLowerCase();
 		if (!this.getAvailableMutagens().includes(key)) return false;
 		this._data.activeMutagens = this._data.activeMutagens || [];
-		if (!this._data.activeMutagens.includes(key)) this._data.activeMutagens.push(key);
+		if (this._data.activeMutagens.includes(key)) return false;
+		const resource = spendUse ? this.getResource("Mutagen") : null;
+		if (spendUse && resource && (resource.current ?? 0) < 1) return false;
+		if (resource) this.setResourceCurrent(resource.id, (resource.current ?? 0) - 1);
+		this._data.activeMutagens.push(key);
 		this._rebuildMutagenState();
 		return true;
 	}
@@ -39163,11 +39322,47 @@ class CharacterSheetState {
 		return true;
 	}
 
-	/** Clear every active mutagen (e.g. on a rest). */
+	/**
+	 * (CS-BUG-124) Keep one activatable feature row per known mutagen formula, so a Mutant can
+	 * actually drink a mutagen from the sheet. Mirrors the auto-granted Blood Curse rows: the
+	 * `MTGN` type tag is what makes the row activatable and what the controller dispatches on.
+	 * @private
+	 */
+	_reconcileMutagenFormulaFeatures () {
+		const known = this.getKnownMutagenFormulas();
+		const wanted = new Map(known.map(key => [`bh2022-mutagen-${key}`, key]));
+		// Drop rows for formulas that were replaced, forgotten, or lost to a level change.
+		this._data.features = this._data.features.filter(f =>
+			!(f.id?.startsWith?.("bh2022-mutagen-") && !wanted.has(f.id)));
+		for (const [id, key] of wanted) {
+			if (this._data.features.some(f => f.id === id)) continue;
+			const def = CharacterSheetState.MUTAGENS[key];
+			if (!def) continue;
+			this._data.features.push({
+				id,
+				name: `Mutagen: ${def.name || key}`,
+				source: "BH2022",
+				level: def.prerequisiteLevel || 3,
+				className: "Blood Hunter",
+				featureType: "Optional Feature",
+				optionalFeatureTypes: ["MTGN"],
+				mutagenKey: key,
+				description: `${def.benefit || ""}${def.drawback ? ` <b>Side effect:</b> ${def.drawback}` : ""}`.trim()
+					|| "A mutagen formula you know. Consuming it is a bonus action; its effects last until you finish a short or long rest.",
+			});
+		}
+	}
+
+	/**
+	 * Flush every mutagen from the character's system (RAW: an action).
+	 * @returns {number} how many mutagens were ended
+	 */
 	flushMutagens () {
+		const ended = (this._data.activeMutagens || []).length;
 		this._data.activeMutagens = [];
 		delete this._data.mutagenIgnoredDrawback;
 		this.deactivateState("mutagen");
+		return ended;
 	}
 
 	/**
@@ -53103,6 +53298,10 @@ class CharacterSheetState {
 			// consumed here; the brand's own use is charged by its resource pool.
 			description: "A creature is branded by one of your brands. Brand effects that resolve on the target are the DM's to apply; brand effects that land on you are applied here.",
 			effects: [],
+			// (CS-BUG-125 / CS-BUG-150) Resolve the brand's riders against the current build
+			// so the player can see what THIS character's brand actually does — including
+			// Brand of Axiom's save DC — instead of a generic "a creature is branded" line.
+			effectsBuilder: "getBrandedTargetEffects",
 			duration: "Until you die, until you brand another creature, or until you dismiss it",
 			endConditions: ["You brand another creature", "You dismiss the brand", "The branded creature dies", "You die"],
 			activationAction: "none",
@@ -55558,6 +55757,9 @@ class CharacterSheetState {
 		// Crimson Rites and Blood Curses above, the type tag alone is enough to keep it
 		// out of the "no description ⇒ not activatable" early return below.
 		const isJesterAct = feature?.optionalFeatureTypes?.includes("JA");
+		// (CS-BUG-124) A known mutagen formula is activatable: consuming it is a bonus action
+		// that spends one concoction from the per-rest Mutagen pool.
+		const isMutagen = feature?.optionalFeatureTypes?.includes("MTGN");
 		const isHybridTransformation = name === "hybrid transformation";
 		// (R20) Allow features that carry classification-relevant markers to be processed
 		// even when they only have `entries` (no rendered `description`) — e.g. Invoke Hell
@@ -55568,7 +55770,7 @@ class CharacterSheetState {
 		// entries-only copies were dropped here and never reached their branches below.
 		const isSunBloodlineFeature = ["sun bloodline", "child of the sun bloodline"]
 			.includes((feature?.subclassShortName || feature?.subclassName || "").toLowerCase());
-		const hasMarkers = !!(feature?.consumes || feature?._raceManifestation || isCrimsonRite || isBloodCurse || isHybridTransformation || isJesterAct || isSunBloodlineFeature);
+		const hasMarkers = !!(feature?.consumes || feature?._raceManifestation || isCrimsonRite || isBloodCurse || isHybridTransformation || isJesterAct || isMutagen || isSunBloodlineFeature);
 		// (R40) A feature named in FEATURE_CLASSIFICATION_OVERRIDES must be processed even when
 		// it arrives entries-only (no rendered `description`), so its override is honoured
 		// rather than dropped by this early return. The override branch below builds its own
@@ -55876,6 +56078,19 @@ class CharacterSheetState {
 				matchedBy: "optionalFeatureType",
 				activationAction: "special",
 				resourceName: "Blood Maledict",
+				resourceCost: 1,
+				interactionMode: "limited",
+				isInstant: true,
+				isDataDriven: true,
+			};
+		}
+		if (isMutagen) {
+			return {
+				stateTypeId: "mutagen",
+				stateType: this.ACTIVE_STATE_TYPES.mutagen,
+				matchedBy: "optionalFeatureType",
+				activationAction: "bonus",
+				resourceName: "Mutagen",
 				resourceCost: 1,
 				interactionMode: "limited",
 				isInstant: true,
