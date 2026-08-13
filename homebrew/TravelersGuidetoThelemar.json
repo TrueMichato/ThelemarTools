@@ -5708,7 +5708,7 @@
 				}
 			],
 			"entries": [
-				"You choose one object that you must touch throughout the casting of the spell. If it is a magic item or some other magic-imbued object, you get a +10 bonus to the {@skill Arcana} check for identifying its magical effects.",
+				"You choose one object that you must touch throughout the casting of the spell. If it is a magic item or some other magic-imbued object, you get a +10 bonus to the {@skill Arcana} check for identifying its magical effects (see {@variantrule Identifying Magic Items & Effects|TGTT}).",
 				"You also get knowledge of the exact number of charges and of the command word (assuming any of these are relevant to the item).",
 				"The spell prevents false information from being gleaned about the item if you fail on your check.",
 				"If you instead touch a creature throughout the casting, you learn what spells, if any, are currently affecting it."
