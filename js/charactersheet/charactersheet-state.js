@@ -8889,43 +8889,113 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Senses
+	/** The senses every character sheet always reports, even at zero. */
+	static get _CANONICAL_SENSES () { return ["darkvision", "blindsight", "tremorsense", "truesight"]; }
+
+	/**
+	 * Aggregate the named modifiers targeting one sense.
+	 *
+	 * SOLE OWNER of the `sense:*` named-modifier channel (CS-BUG-136). This aggregation
+	 * used to be performed TWICE for the same write: `_recalculateCustomModifiers` folded
+	 * every `sense:X` modifier into `customModifiers.senses[X]`, and then `getSense`
+	 * re-derived the very same modifiers from `namedModifiers` and ADDED that on top of a
+	 * `Math.max` that already contained the fold — so Skulker's 10 ft of blindsight
+	 * rendered as 20. The fold has been deleted; this helper is now the only place
+	 * `sense:*` modifiers are summed.
+	 *
+	 * Deleting the OTHER side would have been worse than the bug: `customModifiers.senses`
+	 * is initialised with only the four canonical keys and the fold was guarded by
+	 * `!== undefined`, so a homebrew sense name never folded and was already counted
+	 * exactly once — via this read path. Removing this path would have turned a visible 2x
+	 * into a silent 0x for every non-canonical sense.
+	 *
+	 * Values resolve through `_getNamedModifierEffectiveValue`, not bare
+	 * `_resolveSymbolicModifierValue`, so `perLevel` and `proficiencyBonus` modifiers are
+	 * honoured here — the one capability the deleted fold had that this read path lacked.
+	 *
+	 * @param {string} sense - The sense name
+	 * @returns {{add: number, set: number}} Additive total, and the best "set to" grant
+	 */
+	_getNamedSenseContribution (sense) {
+		const out = {add: 0, set: 0};
+		for (const mod of this._data.namedModifiers || []) {
+			if (!mod?.enabled || mod.type !== `sense:${sense}`) continue;
+			const value = this._getNamedModifierEffectiveValue(mod);
+			// A "set" grant ("you gain blindsight 10 ft") competes with the existing sense
+			// rather than stacking on it, matching the setSense() intercept in the
+			// feature-effect applier, which only writes when `mod.value > currentValue`.
+			if (mod.setValue) out.set = Math.max(out.set, value);
+			else out.add += value;
+		}
+		return out;
+	}
+
+	/**
+	 * Every sense name this character has any source for.
+	 *
+	 * `getSenses()` used to hardcode the four canonical keys, so a homebrew sense granted
+	 * by a named modifier or item was readable through `getSense("echolocation")` but never
+	 * surfaced anywhere the player could see it.
+	 *
+	 * Consumers were traced individually rather than assumed. `getSenses()` has four
+	 * readers: the Overview (`buildSensesDisplay`, has an `extraKeys` path) and the NPC
+	 * exporter (`Object.entries` + falsy filter) already handled arbitrary keys; the PDF
+	 * export and Play Mode hardcoded the same four names and silently dropped everything
+	 * else, so both were routed through `buildSensesDisplay` alongside this change. No
+	 * reader indexes a key it has not first tested, so the variable key set cannot throw.
+	 *
+	 * @returns {string[]} Canonical senses first, then any additional sense names
+	 */
+	_getKnownSenseNames () {
+		const extra = new Set();
+		const addAll = obj => Object.keys(obj || {}).forEach(key => extra.add(key));
+		addAll(this._data.senses);
+		addAll(this._data.itemSenses);
+		addAll(this._data.itemSenseBonuses);
+		for (const mod of this._data.namedModifiers || []) {
+			if (mod?.enabled && typeof mod.type === "string" && mod.type.startsWith("sense:")) extra.add(mod.type.slice("sense:".length));
+		}
+		for (const item of this.getItems()) {
+			if (!this._isItemEffectsActive(item)) continue;
+			for (const effect of item.effects || []) {
+				if (typeof effect?.type === "string" && effect.type.startsWith("senseBonus:")) extra.add(effect.type.slice("senseBonus:".length));
+			}
+		}
+		for (const effect of this.getActiveStateEffects()) {
+			if (effect?.type === "sense" && effect.target) extra.add(effect.target);
+		}
+		for (const gem of this.getGemstoneEffects()) {
+			for (const effect of gem.effects || []) {
+				if (effect?.type === "sense" && effect.sense) extra.add(effect.sense);
+			}
+		}
+		const canonical = CharacterSheetState._CANONICAL_SENSES;
+		canonical.forEach(key => extra.delete(key));
+		return [...canonical, ...[...extra].filter(Boolean)];
+	}
+
 	/**
 	 * Get all senses for this character
 	 * @returns {object} Object with sense names and ranges
 	 */
 	getSenses () {
-		const senseMods = /** @type {*} */ (this._data.customModifiers.senses || {});
-		const baseSenses = /** @type {*} */ (this._data.senses || {});
-		const itemSenses = /** @type {*} */ (this._data.itemSenses || {});
-		const itemSenseBonuses = /** @type {*} */ (this._data.itemSenseBonuses || {});
-		const getTypedItemBonus = sense => {
-			let total = 0;
-			for (const item of this.getItems()) {
-				if (!this._isItemEffectsActive(item)) continue;
-				for (const effect of item.effects || []) {
-					if (effect?.type === `senseBonus:${sense}`) total += Number(effect.value) || 0;
-				}
-			}
-			return total;
-		};
-		const getNamedModifierBonus = sense => this._data.namedModifiers
-			?.filter(modifier => modifier.enabled && modifier.type === `sense:${sense}`)
-			?.reduce((total, modifier) => {
-				const value = this._resolveSymbolicModifierValue(modifier.value) ?? 0;
-				return modifier.setValue ? Math.max(total, value) : total + value;
-			}, 0) || 0;
-
-		const gemstoneDarkvision = this.getGemstoneEffects()
-			.filter(gem => !gem.effects?.some(effect => effect.requiresRuntimeActive) || gem.runtime.activeUntil > Date.now())
-			.flatMap(gem => gem.effects || [])
-			.filter(it => it.type === "sense" && it.sense === "darkvision")
-			.reduce((max, it) => Math.max(max, Number(it.value) || 0), 0);
-		return {
-			darkvision: Math.max(baseSenses.darkvision || 0, senseMods.darkvision || 0, itemSenses.darkvision || 0, this.getSenseBonusFromStates("darkvision"), gemstoneDarkvision) + getNamedModifierBonus("darkvision") + getTypedItemBonus("darkvision") + (itemSenseBonuses.darkvision || 0),
-			blindsight: Math.max(baseSenses.blindsight || 0, senseMods.blindsight || 0, itemSenses.blindsight || 0, this.getSenseBonusFromStates("blindsight")) + getNamedModifierBonus("blindsight") + getTypedItemBonus("blindsight") + (itemSenseBonuses.blindsight || 0),
-			tremorsense: Math.max(baseSenses.tremorsense || 0, senseMods.tremorsense || 0, itemSenses.tremorsense || 0, this.getSenseBonusFromStates("tremorsense")) + getNamedModifierBonus("tremorsense") + getTypedItemBonus("tremorsense") + (itemSenseBonuses.tremorsense || 0),
-			truesight: Math.max(baseSenses.truesight || 0, senseMods.truesight || 0, itemSenses.truesight || 0, this.getSenseBonusFromStates("truesight")) + getNamedModifierBonus("truesight") + getTypedItemBonus("truesight") + (itemSenseBonuses.truesight || 0),
-		};
+		// Delegating per key rather than recomputing means `getSenses()` and `getSense()`
+		// cannot drift. They HAD drifted: the old `getSenses()` applied gemstone `sense`
+		// effects to darkvision ONLY (a hardcoded `gemstoneDarkvision`), while `getSense()`
+		// applied them to whatever sense the effect named. A gemstone granting, say,
+		// truesight was therefore visible through `getSense("truesight")` but absent from
+		// the Overview. Delegation resolves that in `getSense()`'s favour — no gemstone in
+		// the current data grants a non-darkvision sense, so nothing observable changes
+		// today, but the two are now structurally incapable of disagreeing.
+		const out = /** @type {*} */ ({});
+		const canonical = new Set(CharacterSheetState._CANONICAL_SENSES);
+		for (const sense of this._getKnownSenseNames()) {
+			const value = this.getSense(sense);
+			// The four canonical senses always report, even at 0, because callers index them
+			// directly. Everything else only appears once it actually has a range.
+			if (canonical.has(sense) || value) out[sense] = value;
+		}
+		return out;
 	}
 
 	/**
@@ -8934,7 +9004,6 @@ class CharacterSheetState {
 	 * @returns {number} The range in feet
 	 */
 	getSense (sense) {
-		const senseMods = /** @type {*} */ (this._data.customModifiers.senses || {});
 		const baseSenses = /** @type {*} */ (this._data.senses || {});
 		const itemSenses = /** @type {*} */ (this._data.itemSenses || {});
 		const itemSenseBonuses = /** @type {*} */ (this._data.itemSenseBonuses || {});
@@ -8945,20 +9014,18 @@ class CharacterSheetState {
 				if (effect?.type === `senseBonus:${sense}`) typedItemBonus += Number(effect.value) || 0;
 			}
 		}
-		const namedBonus = this._data.namedModifiers
-			?.filter(modifier => modifier.enabled && modifier.type === `sense:${sense}`)
-			?.reduce((total, modifier) => {
-				const value = this._resolveSymbolicModifierValue(modifier.value) ?? 0;
-				return modifier.setValue ? Math.max(total, value) : total + value;
-			}, 0) || 0;
+		const named = this._getNamedSenseContribution(sense);
 
 		const gemstoneSense = this.getGemstoneEffects()
 			.filter(gem => !gem.effects?.some(effect => effect.requiresRuntimeActive) || gem.runtime.activeUntil > Date.now())
 			.flatMap(gem => gem.effects || [])
 			.filter(effect => effect.type === "sense" && effect.sense === sense)
 			.reduce((max, effect) => Math.max(max, Number(effect.value) || 0), 0);
-		return Math.max(baseSenses[sense] || 0, senseMods[sense] || 0, itemSenses[sense] || 0, this.getSenseBonusFromStates(sense), gemstoneSense)
-			+ namedBonus + typedItemBonus + (itemSenseBonuses[sense] || 0);
+		// `named.set` joins the max group rather than being added: "you gain blindsight 10 ft"
+		// must not extend an innate blindsight 30 ft to 40 ft. `named.add` stays additive on
+		// top, which is what "+30 ft of darkvision" means.
+		return Math.max(baseSenses[sense] || 0, itemSenses[sense] || 0, this.getSenseBonusFromStates(sense), gemstoneSense, named.set)
+			+ named.add + typedItemBonus + (itemSenseBonuses[sense] || 0);
 	}
 
 	/**
@@ -50408,6 +50475,9 @@ class CharacterSheetState {
 		cm.hp = 0;
 		cm.hpPerLevel = 0;
 		cm.proficiencyBonus = 0;
+		// Vestigial since CS-BUG-136 — nothing reads it any more (getSense() owns the
+		// `sense:*` channel). Kept zeroed so a legacy save that persisted a non-zero
+		// `customModifiers.senses` cannot resurrect a phantom sense range.
 		cm.senses = {darkvision: 0, blindsight: 0, tremorsense: 0, truesight: 0};
 		cm.passives = {};
 		cm.carryCapacity = 0;
@@ -50579,16 +50649,15 @@ class CharacterSheetState {
 							nextAbilityScoreMaxIncrease[abl] = (nextAbilityScoreMaxIncrease[abl] || 0) + value;
 						}
 					} else if (mod.type.startsWith("sense:")) {
-						// Handle sense:darkvision, sense:blindsight, etc.
-						const sense = mod.type.split(":")[1];
-						if (cm.senses[sense] !== undefined) {
-							if (mod.setValue) {
-								// Set value takes the maximum
-								cm.senses[sense] = Math.max(cm.senses[sense], value);
-							} else {
-								cm.senses[sense] += value;
-							}
-						}
+						// Deliberately NOT aggregated here (CS-BUG-136). `sense:*` modifiers used
+						// to be folded into `cm.senses[sense]`, which `getSense()` then read
+						// INSIDE its `Math.max(...)` while ALSO re-deriving the same modifiers
+						// from `namedModifiers` and adding them on top — every named sense grant
+						// counted twice (Skulker's blindsight 10 rendered as 20). `getSense()` /
+						// `_getNamedSenseContribution()` is the single owner of this channel; it
+						// also handles non-canonical sense names, which the fold's
+						// `cm.senses[sense] !== undefined` guard silently dropped. Do not
+						// re-add an aggregation here.
 					} else if (mod.type.startsWith("passive:")) {
 						// Handle passive:perception, passive:investigation, passive:insight
 						// Passive scores use the skill modifier system
@@ -50711,7 +50780,10 @@ class CharacterSheetState {
 				}
 				if (type.startsWith("sense:")) {
 					const sense = type.split(":")[1];
-					return this._data.customModifiers.senses?.[sense] || 0;
+					// Read through the named-modifier owner, not `customModifiers.senses`, which
+					// is a vestigial no-op since CS-BUG-136.
+					const named = this._getNamedSenseContribution(sense);
+					return Math.max(named.add + named.set, 0);
 				}
 				return 0;
 		}

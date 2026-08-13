@@ -423,13 +423,14 @@ class CharacterSheetPdf {
 	// region Senses
 
 	_renderSenses () {
-		const senses = this._state.getSenses();
-
-		const parts = [];
-		if (senses.darkvision) parts.push(`<span><strong>Darkvision</strong> ${senses.darkvision} ft.</span>`);
-		if (senses.blindsight) parts.push(`<span><strong>Blindsight</strong> ${senses.blindsight} ft.</span>`);
-		if (senses.tremorsense) parts.push(`<span><strong>Tremorsense</strong> ${senses.tremorsense} ft.</span>`);
-		if (senses.truesight) parts.push(`<span><strong>Truesight</strong> ${senses.truesight} ft.</span>`);
+		// Routed through the shared `buildSensesDisplay` rather than testing the four
+		// canonical keys by hand: `getSenses()` returns VARIABLE keys since CS-BUG-136, and
+		// hardcoding meant a homebrew sense reached `getSense()` but never the PDF. The
+		// helper owns ordering, humanised labels for unknown keys, and the positive-range
+		// filter. Labels are escaped because a non-canonical sense name is derived from a
+		// user-authored modifier type.
+		const parts = CharacterSheetClassUtils.buildSensesDisplay(this._state.getSenses())
+			.map(it => `<span><strong>${this._esc(it.label)}</strong> ${it.range} ft.</span>`);
 
 		if (!parts.length) return "";
 

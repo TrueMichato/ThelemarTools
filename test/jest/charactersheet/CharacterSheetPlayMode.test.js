@@ -243,4 +243,48 @@ describe("CharacterSheetPlayMode", () => {
 			expect(restored.getFavorites()).toEqual([]);
 		});
 	});
+	describe("Senses card", () => {
+		// `getSenses()` returns VARIABLE keys since CS-BUG-136. This renderer used to test
+		// the four canonical names by hand and silently dropped everything else. Captures
+		// the rendered cells without a real DOM (the suite runs in the node environment),
+		// matching the `_renderVitals` approach in CharacterSheetPlayModeSpeedDisplay.
+		const renderSensesCapture = (st) => {
+			const pm = new CharacterSheetPlayMode({getState: () => st});
+			const cells = [];
+			pm._makeCard = () => ({});
+			pm._ce = (tag, cls) => {
+				const el = {style: {}};
+				if (cls === "pm-passive") cells.push(el);
+				return el;
+			};
+			pm._renderSenses();
+			return cells.map(c => c.textContent).filter(Boolean);
+		};
+
+		it("renders a canonical sense", () => {
+			state.setSense("darkvision", 60);
+			expect(renderSensesCapture(state)).toEqual(["Darkvision 60ft"]);
+		});
+
+		it("renders a non-canonical sense granted by a named modifier", () => {
+			state.addNamedModifier({name: "Echo", type: "sense:echolocation", value: 30, sourceType: "classFeature"});
+			expect(renderSensesCapture(state)).toEqual(["Echolocation 30ft"]);
+		});
+
+		it("orders canonical senses before non-canonical ones", () => {
+			state.setSense("darkvision", 60);
+			state.addNamedModifier({name: "Echo", type: "sense:echolocation", value: 30, sourceType: "classFeature"});
+			expect(renderSensesCapture(state)).toEqual(["Darkvision 60ft", "Echolocation 30ft"]);
+		});
+
+		it("omits zero-range senses rather than rendering them as 0ft", () => {
+			// `getSenses()` reports the canonical four even at zero; the card must not.
+			state.setSense("darkvision", 60);
+			expect(renderSensesCapture(state)).toEqual(["Darkvision 60ft"]);
+		});
+
+		it("renders nothing when the character has no senses", () => {
+			expect(renderSensesCapture(state)).toEqual([]);
+		});
+	});
 });

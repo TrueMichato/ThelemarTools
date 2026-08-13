@@ -325,7 +325,11 @@ describe("TGTT artifact item effects (Gae Bolg / Necklace / Ring of Human Influe
 
 		// DEX +2 + PB +3
 		expect(state.getInitiative()).toBe(before + state.getProficiencyBonus());
-		expect(state.getSenses().truesight).toBeGreaterThanOrEqual(60);
+		// Exact, not `toBeGreaterThanOrEqual(60)` — the loose form passed at 120 and hid
+		// this item's share of CS-BUG-136 (the `sense:truesight` effect was aggregated both
+		// into `customModifiers.senses` and again by `getSense()`'s named-modifier read).
+		expect(state.getSenses().truesight).toBe(60);
+		expect(state.getSense("truesight")).toBe(60);
 	});
 
 	it("Gae Bolg initiative does not apply while unequipped", () => {

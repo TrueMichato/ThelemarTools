@@ -354,6 +354,13 @@ describe("Character Sheet Feat Effects", () => {
 			const senseMod = mods.find(m => m.type === "sense:blindsight");
 			expect(senseMod).toBeDefined();
 			expect(senseMod.value).toBe(10);
+			// The modifier-object assertion above is a PREMISE, not the result. On its own it
+			// let CS-BUG-136 through for the entire life of this test: the modifier was
+			// written correctly with value 10 while the sheet displayed 20, because
+			// `getSense()` counted it twice. Assert on the observable getter — that is what
+			// the player reads.
+			expect(state.getSense("blindsight")).toBe(10);
+			expect(state.getSenses().blindsight).toBe(10);
 		});
 	});
 
