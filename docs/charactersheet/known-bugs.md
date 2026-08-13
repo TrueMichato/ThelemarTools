@@ -8507,7 +8507,10 @@ for red:
 | the PDF and Play Mode renderers reverted to their own hardcoded key lists | 4 |
 
 Every primary guard, both upgraded assertions and the Gae Bolg case go red on
-the full-original arithmetic.
+the full-original arithmetic. Note the additive and `setValue` guards fail on
+*different* mutations, which is the mechanical demonstration that CS-BUG-136 and
+CS-BUG-137 are two defects and not one: the `setValue` guard survives mutation 1
+untouched.
 
 **Verified against the real-save corpus too.** The 912 assertions in
 `CharacterSheetNpcExporter.realsaves.test.js` are gated on `npc-exports/`, an
@@ -8520,13 +8523,22 @@ present, against **476 / 14,790 / 153 skipped** without it. Both are honest
 readings of different environments.
 
 Worth knowing before comparing test totals across sessions: that suite is
-`describe.each`-parameterised per save, so the corpus does not add 153 tests, it
-multiplies them (33 placeholder tests become 24 × 33). A "N passed, 0 skipped"
-baseline is therefore **not portable** between the author's checkout and a
-worktree, and a mismatch there is not evidence of a regression. Note the additive and `setValue` guards fail on
-*different* mutations, which is the mechanical demonstration that CS-BUG-136 and
-CS-BUG-137 are two defects and not one: the `setValue` guard survives mutation 1
-untouched.
+`describe.each`-parameterised per save, so the corpus **multiplies** its tests
+rather than adding a fixed number. Measured in the author's checkout: 44 saves
+yield **912** tests, spread over *two* parameterised describes with non-uniform
+block sizes (26 blocks of 10, 24 of 23, plus singletons of 5/8/11/12/13/16/24).
+Without the corpus the same file contributes **153** skipped placeholder tests
+and nothing else. The net difference is therefore **+759**, not 153. That is why
+a "N passed, 0 skipped" baseline is **not portable** between the author's
+checkout and a worktree, and why a mismatch there is not evidence of a
+regression.
+
+One trap in the reconciliation itself, because it already caught someone: the
+identity closes for *any* placeholder/corpus pair differing by 759, so a
+matching grand total does **not** corroborate a guessed decomposition. An
+earlier revision of this paragraph published "33 placeholder tests become
+24 × 33" — correct net, invented factors, and the arithmetic agreed anyway.
+Measure each factor; a check that can only succeed is not a check.
 
 ### Lesson
 
