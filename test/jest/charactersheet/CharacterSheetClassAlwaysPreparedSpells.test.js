@@ -210,10 +210,9 @@ describe("Class-level always-prepared spells — teardown on removal / level-dow
 });
 
 describe("Class-level always-prepared spells — existing save auto-fix on load", () => {
-	const FIXTURE = "/Users/tommichaeli/.copilot/session-state/8152ec14-2999-4191-a841-cfad776ac594/files/lorian-tempest-cleric.json";
-	const maybe = fs.existsSync(FIXTURE) ? test : test.skip;
+	const FIXTURE = path.join(__dirname, "fixtures", "lorian-tempest-cleric.json");
 
-	maybe("a stored L10 TGTT Cleric gains Ceremony/Thaumaturgy WITHOUT editing the save", () => {
+	test("a stored L10 TGTT Cleric gains Ceremony/Thaumaturgy WITHOUT editing the save", () => {
 		const raw = fs.readFileSync(FIXTURE, "utf8");
 		const before = JSON.parse(raw);
 
