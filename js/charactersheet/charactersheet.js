@@ -374,7 +374,8 @@ class CharacterSheetPage {
 		this._itemMaterialsData = [];
 		// Feature-granted companion stat blocks are homebrew-only too.
 		this._brewMonstersData = [];
-		// Draconic domain resonances are likewise homebrew-only.		this._draconicResonancesData = [];
+		// Draconic domain resonances are likewise homebrew-only.
+		this._draconicResonancesData = [];
 		// Divine Favor gods are homebrew-only (no site data file); the catalog starts
 		// empty and is populated from brew in _mergeBrewData.
 		this._divineFavorData = [];
