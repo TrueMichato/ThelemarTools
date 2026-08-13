@@ -809,6 +809,27 @@ export const PRESET_FULL_LYCAN_BLOOD_HUNTER: CharacterPreset = {
 	],
 };
 
+/** BH2022 Order of the Mutant Blood Hunter — mutagen formulas, benefits AND drawbacks. */
+export const PRESET_FULL_MUTANT_BLOOD_HUNTER: CharacterPreset = {
+	race: "Human",
+	raceSource: "PHB'24",
+	className: "Blood Hunter",
+	classSource: "BH2022",
+	prioritySources: ["BH2022"],
+	skipConditionalPrompt: true,
+	background: "Sage",
+	bgSource: "PHB'24",
+	name: "Ysolde Vane",
+	skillCount: 3,
+	optFeatCount: 1,
+	subclassName: "Order of the Mutant",
+	subclassSource: "BH2022",
+	preferredFeatProgressionPattern: /^dueling\b/i,
+	homebrewUrls: [
+		"https://raw.githubusercontent.com/TheGiddyLimit/homebrew/refs/heads/master/class/Matthew%20Mercer%3B%20Blood%20Hunter%20(2022).json",
+	],
+};
+
 /** TalPsi Chronopath Talent (MCDM "The Talent and Psionics") — psionic strain + powers. */
 export const PRESET_FULL_TALENT_CHRONOPATH: CharacterPreset = {
 	race: "Human",

@@ -8951,3 +8951,118 @@ Tethering line its real `4d6`, its DC, and *"the attempt fails"* rather than a
 `brandedTarget`. That asymmetry is **faithful to the source**: the feature has
 two clauses with two different conditions — the bloodlust save advantage requires
 hybrid form only, while the attack advantage requires a branded target. Leave it.
+
+---
+
+## CS-BUG-151 — Ending a mutagen from the Active States panel left the list populated — FIXED
+
+**Status:** FIXED
+**Area:** Order of the Mutant (`charactersheet-state.js` → `deactivateState`)
+**Severity:** Low-Medium — player-visible, and it blocked a legal action.
+
+### Symptom
+
+Consuming a mutagen, then ending it with the generic **End** control on the
+Overview Active-States panel, left `_data.activeMutagens` unchanged. The effects
+were correctly removed, so nothing looked wrong — but `getActiveMutagens()` kept
+reporting the mutagen as active, the feature row still read as "active", and
+`consumeMutagen()`, which refuses a key already in that list, silently **refused
+the re-drink** until the player ended it a second time.
+
+### Root cause
+
+`mutagen` is a single generic state carrying the *union* of every consumed
+mutagen's effects, so it goes through the ordinary `deactivateState` path. That
+path only flipped `active = false`; the backing list was owned by `endMutagen()`,
+which the panel never calls. One writer, two exits, and only one of them cleaned
+up.
+
+### Fix
+
+Clear `_data.activeMutagens` (and `mutagenIgnoredDrawback`) inside
+`deactivateState` when the state is `mutagen`, matching the astral cross-state
+cleanup idiom directly above it. `flushMutagens()` clears the list *before*
+calling `deactivateState`, so there is no recursion.
+
+### Regression test
+
+`CharacterSheetBloodHunterMutagenUi.test.js` → *"leaves no residue behind, so the
+same mutagen can be drunk again"*. Verified to go red with the fix disabled.
+
+---
+
+## CS-BUG-152 — After drinking your last concoction, the mutagen row went dead — FIXED
+
+**Status:** FIXED
+**Area:** Order of the Mutant (`charactersheet-state.js` → `featureOwnsItsCost`)
+**Severity:** Medium — a reachable feature became unreachable at exactly the
+moment a player would use it.
+
+### Symptom
+
+Clicking a `Mutagen: <Name>` row while one was active is supposed to offer
+**"End it"**. With an empty Mutagen pool the click produced only a toast and
+nothing happened.
+
+### Root cause
+
+`_activateFeatureState` (`charactersheet.js`) runs a generic pre-flight that
+refuses to dispatch when `resource.current < cost`, returning *before*
+`_pHandleR20FeatureActivation` and therefore before the MTGN handler. Consuming
+your last concoction empties the very pool the End path was gated on. The cost
+model was right for drinking and wrong for ending — and `_pConsumeMutagen`
+already resolves its own cost either way.
+
+### Fix
+
+Return `true` from the existing `featureOwnsItsCost` escape hatch for any feature
+tagged `MTGN`. Keyed on the **structural** `optionalFeatureTypes` marker rather
+than row names, because mutagen rows are generated per known formula.
+
+### Regression test
+
+`CharacterSheetBloodHunterMutagenUi.test.js` → *"exempts an MTGN row from the
+resource pre-flight"*, including a negative control (`Blood Maledict` must still
+return `false`). Verified to go red with the fix disabled. Also exercised through
+the real click path by `tgtt-mutant-blood-hunter.spec.ts`.
+
+### How it was found
+
+Only by driving the UI. Every Jest test called `consumeMutagen()` directly and so
+entered *below* the pre-flight — the same class of blind spot as CS-BUG-124.
+
+---
+
+## CS-BUG-153 — Three auto-granted blood curses shipped meta-text instead of mechanics — FIXED
+
+**Status:** FIXED
+**Area:** Mutant / Ghostslayer / Profane Soul (`charactersheet-state.js` →
+`ensureBloodHunterResources`)
+**Severity:** Medium — the player could not read what the curse does.
+
+### Symptom
+
+Blood Curse of Corrosion (Mutant 15), Blood Curse of the Exorcist (Ghostslayer
+15) and Blood Curse of the Souleater (Profane Soul 18) each rendered as:
+
+> "You gain the Blood Curse of X for your Blood Maledict feature. This doesn't
+> count against your number of blood curses known."
+
+That is commentary *about* the grant, not the curse. The save ability, the DC,
+the effect and the Amplify rider were all absent, and activation detection had
+nothing to parse. Blood Curse of the Howl (Lycan 18) was written correctly, which
+is why the pattern was not obvious.
+
+### Fix
+
+Replaced all three descriptions with the real base + Amplify text from the
+BH2022 source, keeping the "doesn't count against" sentence as a trailing note
+where it belongs.
+
+### Regression test
+
+`CharacterSheetBloodHunterMutagenUi.test.js` → parameterised over **all four**
+auto-granted curses, asserting the description does not *begin* with the grant
+note and does carry an `Amplify:` rider. Note that not every curse has a saving
+throw — the Souleater is a self-buff reaction — so asserting one would fail on
+correct data.

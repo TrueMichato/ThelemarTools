@@ -995,7 +995,36 @@ export type EffectCheck = _EffectCommon & (
 		expectHpDelta?: number;
 		expectTempHpDelta?: number;
 		expectReturns?: Record<string, unknown>;
+		// Scalar return assertion, for predicates like `isImmuneToCondition("poisoned")`.
+		// `expectReturns` can only reach into an object, so a bare boolean/number/string
+		// return was previously inexpressible.
+		expectReturnValue?: unknown;
+		// Array readers (`getResistances()`, `getVulnerabilities()`, `getSenses()`, …).
+		// `reader` is called after `method`; entries are lower-cased and matched loosely
+		// so `"piercing"` matches a `"damage:piercing"` or `"Piercing"` entry.
+		reader?: string;
+		expectReaderContains?: string[];
+		expectReaderExcludes?: string[];
 	}
+	// Drives a mutagen through the REAL activate button and its confirmation prompt,
+	// then asserts the granted benefit AND drawback actually landed, that a concoction
+	// was spent, and that ending it reverts both.
+	//
+	// This is the only Blood Hunter probe that enters where the player enters: every
+	// other one calls the state API from `page.evaluate`, which is exactly the blind
+	// spot that let CS-BUG-124 ship with 81 green unit tests and no UI at all.
+	| {
+		kind: "mutagenUiFlow";
+		formula: string;
+		confirmText?: string;
+		endText?: string;
+		expectResistance?: string;
+		expectVulnerability?: string;
+	}
+	// Asserts the formulas-known cap ENFORCES rather than merely computing. Throughout
+	// CS-BUG-124 `mutagenFormulasKnown` held the right number while nothing applied it,
+	// so a check of the value alone stayed green the entire time the cap was inert.
+	| {kind: "mutagenFormulasCap"}
 	// === Phase 11: per-pick effect dispatch ===
 	// On a parent FeatureCheck of `kind: "pick"`, attach
 	// `pickedFeatureGrants` to declare effects that should fire ONLY
@@ -2237,10 +2266,156 @@ async function _runPassiveOrRollEffect (
 			if (e.expectTempHpDelta != null && result.tempHpDelta !== e.expectTempHpDelta) {
 				throw new Error(`${e.method} temp HP delta=${result.tempHpDelta}, expected ${e.expectTempHpDelta}`);
 			}
+			if (e.expectReturnValue !== undefined && result.returned !== e.expectReturnValue) {
+				throw new Error(`${e.method}(${JSON.stringify(e.args || [])}) returned ${JSON.stringify(result.returned)}, expected ${JSON.stringify(e.expectReturnValue)}`);
+			}
 			for (const [k, v] of Object.entries(e.expectReturns || {})) {
 				if ((result.returned as any)?.[k] !== v) {
 					throw new Error(`${e.method}().${k}=${JSON.stringify((result.returned as any)?.[k])}, expected ${JSON.stringify(v)}`);
 				}
+			}
+			if (e.reader) {
+				const entries = await charSheet.page.evaluate((reader) => {
+					const state: any = (globalThis as any).charSheet?._state;
+					if (typeof state?.[reader] !== "function") return null;
+					const out = state[reader]();
+					const flat = Array.isArray(out) ? out : Object.entries(out || {}).map(([k, v]) => `${k}:${v}`);
+					// Match on the identifying field when there is one, otherwise on the whole
+					// serialized entry. Falling back to `String(obj)` yields "[object Object]",
+					// which makes every entry look identical and every `contains` fail — an
+					// assertion that cannot pass is as useless as one that cannot fail.
+					return flat.map((it: any) => {
+						const label = it?.name ?? it?.target ?? null;
+						if (label != null && typeof label !== "object") return String(label).toLowerCase();
+						if (it && typeof it === "object") {
+							try { return JSON.stringify(it).toLowerCase(); } catch { return String(it).toLowerCase(); }
+						}
+						return String(it ?? "").toLowerCase();
+					});
+				}, e.reader);
+				if (entries == null) throw new Error(`array reader "${e.reader}" does not exist`);
+				for (const want of e.expectReaderContains || []) {
+					if (!entries.some(it => it.includes(want.toLowerCase()))) {
+						throw new Error(`${e.reader}() missing "${want}" (got ${JSON.stringify(entries)})`);
+					}
+				}
+				for (const unwanted of e.expectReaderExcludes || []) {
+					if (entries.some(it => it.includes(unwanted.toLowerCase()))) {
+						throw new Error(`${e.reader}() unexpectedly contains "${unwanted}" (got ${JSON.stringify(entries)})`);
+					}
+				}
+			}
+			return;
+		}
+		case "mutagenUiFlow": {
+			const rowName = `Mutagen: ${e.formula}`;
+			const key = e.formula.toLowerCase();
+			// Setup only — teach the formula and stock the pool. The ACTION under test
+			// is the click below, never a state call.
+			const ready = await charSheet.page.evaluate((mutagenKey) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				if (typeof state?.learnMutagenFormula !== "function") return {ok: false, reason: "no mutagen API"};
+				state.flushMutagens?.();
+				// The creation wizard's auto-fill already answers the Formulas prompt, so the
+				// character arrives at the `mutagenFormulasKnown` cap and `learnMutagenFormula`
+				// correctly refuses. Swap the formula under test in rather than appending.
+				const alreadyKnown: string[] = state.getKnownMutagenFormulas() || [];
+				if (!alreadyKnown.includes(mutagenKey)) {
+					state.setKnownMutagenFormulas([mutagenKey, ...alreadyKnown]);
+				}
+				const resource = state.getResource?.("Mutagen");
+				if (resource) state.setResourceCurrent(resource.id, resource.max);
+				return {
+					ok: state.getKnownMutagenFormulas().includes(mutagenKey),
+					uses: state.getResource?.("Mutagen")?.current ?? null,
+					learnable: state.getLearnableMutagens?.() || [],
+					cap: state.getFeatureCalculations?.().mutagenFormulasKnown ?? null,
+					known: state.getKnownMutagenFormulas?.() || [],
+				};
+			}, key);
+			if (!ready.ok) throw new Error(`could not teach mutagen formula "${key}": ${JSON.stringify(ready)}`);
+			await charSheet.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				cs?._renderResources?.(); cs?._renderActiveStates?.(); cs?._features?.render?.();
+			});
+			await charSheet.page.waitForTimeout(300);
+
+			await charSheet.activateFeatureAndConfirm(rowName, e.confirmText || "Consume");
+
+			const after = await charSheet.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const def = state.getEffectiveDefenses?.() || {};
+				return {
+					active: state.getActiveMutagens?.() || [],
+					uses: state.getResource?.("Mutagen")?.current ?? null,
+					resistances: (def.resistances || []).map((it: any) => String(it?.name ?? it?.target ?? it).toLowerCase()),
+					vulnerabilities: (def.vulnerabilities || []).map((it: any) => String(it?.name ?? it?.target ?? it).toLowerCase()),
+				};
+			});
+			if (!after.active.includes(key)) {
+				throw new Error(`clicking Activate on "${rowName}" and confirming did not make the mutagen active (active=${JSON.stringify(after.active)}). The controller never reached the state layer.`);
+			}
+			if (ready.uses != null && after.uses != null && after.uses !== ready.uses - 1) {
+				throw new Error(`consuming via the UI spent ${ready.uses - (after.uses as number)} concoctions, expected 1`);
+			}
+			if (e.expectResistance && !after.resistances.some(it => it.includes(e.expectResistance!.toLowerCase()))) {
+				throw new Error(`benefit did not land: no "${e.expectResistance}" resistance after consuming (got ${JSON.stringify(after.resistances)})`);
+			}
+			// The drawback is the half a player actually feels; a mutagen that grants its
+			// benefit without its cost is the more dangerous half-implementation.
+			if (e.expectVulnerability && !after.vulnerabilities.some(it => it.includes(e.expectVulnerability!.toLowerCase()))) {
+				throw new Error(`drawback did not land: no "${e.expectVulnerability}" vulnerability after consuming (got ${JSON.stringify(after.vulnerabilities)})`);
+			}
+
+			// End it through the same real control: clicking the feature row again opens
+			// the handler's own "End it" / "Keep it" prompt. (The generic End button on the
+			// Active States panel is the OTHER real path, and ending there used to desync
+			// the backing list — CS-BUG-151.)
+			await charSheet.activateFeatureAndConfirm(rowName, e.endText || "End it");
+
+			const ended = await charSheet.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const def = state.getEffectiveDefenses?.() || {};
+				return {
+					active: state.getActiveMutagens?.() || [],
+					resistances: (def.resistances || []).map((it: any) => String(it?.name ?? it?.target ?? it).toLowerCase()),
+					vulnerabilities: (def.vulnerabilities || []).map((it: any) => String(it?.name ?? it?.target ?? it).toLowerCase()),
+				};
+			});
+			if (ended.active.includes(key)) throw new Error(`ending "${rowName}" via the UI left it active (${JSON.stringify(ended.active)})`);
+			if (e.expectResistance && ended.resistances.some(it => it.includes(e.expectResistance!.toLowerCase()))) {
+				throw new Error(`ending the mutagen left its "${e.expectResistance}" resistance behind (${JSON.stringify(ended.resistances)})`);
+			}
+			if (e.expectVulnerability && ended.vulnerabilities.some(it => it.includes(e.expectVulnerability!.toLowerCase()))) {
+				throw new Error(`ending the mutagen left its "${e.expectVulnerability}" vulnerability behind (${JSON.stringify(ended.vulnerabilities)})`);
+			}
+			return;
+		}
+		case "mutagenFormulasCap": {
+			const result = await charSheet.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				if (typeof state?.learnMutagenFormula !== "function") return {missing: true} as any;
+				state.flushMutagens?.();
+				state.setKnownMutagenFormulas?.([]);
+				const cap = state.getFeatureCalculations?.().mutagenFormulasKnown;
+				const learnable = state.getLearnableMutagens?.() || [];
+				// Attempt to learn EVERY eligible formula — deliberately more than the cap.
+				for (const key of learnable) state.learnMutagenFormula(key);
+				return {
+					missing: false,
+					cap,
+					learnableCount: learnable.length,
+					knownCount: (state.getKnownMutagenFormulas?.() || []).length,
+				};
+			});
+			if (result.missing) throw new Error(`mutagen formula API is missing`);
+			// Positive control: if there were never more eligible formulas than the cap,
+			// the assertion below could not fail and would certify nothing.
+			if (!(result.learnableCount > result.cap)) {
+				throw new Error(`cap check is vacuous: ${result.learnableCount} learnable formulas vs cap ${result.cap} — cannot exceed it, so enforcement is untested`);
+			}
+			if (result.knownCount !== result.cap) {
+				throw new Error(`formulas-known cap is not ENFORCED: learned ${result.knownCount} of ${result.learnableCount} eligible with a cap of ${result.cap}`);
 			}
 			return;
 		}
