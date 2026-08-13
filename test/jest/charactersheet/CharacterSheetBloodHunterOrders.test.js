@@ -41,6 +41,14 @@ function addFeature (state, name, level) {
 	state.addFeature({name, level, className: "Blood Hunter", source: "BH2022", description: `${name} feature`});
 }
 
+// (CS-BUG-124) A mutagen can only be consumed if its formula is known. `getAvailableMutagens()`
+// used to return every level-eligible mutagen, which made the `mutagenFormulasKnown` limit
+// inert, so these tests drank mutagens they had never learned. Learn, then drink.
+function drink (state, key) {
+	state.learnMutagenFormula(key);
+	return state.consumeMutagen(key);
+}
+
 // ---------------------------------------------------------------------------
 // Order of the Ghostslayer
 // ---------------------------------------------------------------------------
@@ -61,8 +69,10 @@ describe("Order of the Ghostslayer (BH2022)", () => {
 	it.each([
 		[3, "1d4"],
 		[5, "1d6"],
-		[11, "1d8"],
-		[17, "1d10"],
+		// (CS-BUG-125) From 11th level Brand of Sundering adds a second hemocraft die to
+		// every rite's extra damage, so the rite rolls 2dN rather than 1dN from here on.
+		[11, "2d8"],
+		[17, "2d10"],
 	])("Rite of the Dawn deals radiant damage scaling with the hemocraft die at level %i", (level, die) => {
 		const state = makeBloodHunter({subclass: "Order of the Ghostslayer", level});
 		addFeature(state, "Rite of the Dawn", 3);
@@ -111,9 +121,16 @@ describe("Order of the Ghostslayer (BH2022)", () => {
 	it("Brand of Sundering adds a hemocraft die of rite damage from level 11", () => {
 		const state = makeBloodHunter({subclass: "Order of the Ghostslayer", level: 11});
 		const calc = state.getFeatureCalculations();
-		expect(calc.brandOfSunderingRiteBonusDamage).toBe(calc.hemocraftDie);
-		expect(calc.brandOfSunderingRiteBonusDamage).toBe("1d8");
-		expect(makeBloodHunter({subclass: "Order of the Ghostslayer", level: 10}).getFeatureCalculations().hasBrandOfSundering).toBeUndefined();
+		// Assert the OBSERVABLE outcome, not a mirror key. The old assertions pinned
+		// `brandOfSunderingRiteBonusDamage`, which nothing read — so they stayed green
+		// for the entire period the feature did nothing (CS-BUG-125). The rite's own
+		// damage is the value a player actually rolls.
+		expect(calc.hasBrandOfSundering).toBe(true);
+		expect(calc.hemocraftDie).toBe("1d8");
+		expect(calc.crimsonRiteDamage).toBe("2d8");
+		const l10 = makeBloodHunter({subclass: "Order of the Ghostslayer", level: 10}).getFeatureCalculations();
+		expect(l10.hasBrandOfSundering).toBeUndefined();
+		expect(l10.crimsonRiteDamage).toBe("1d6");
 	});
 
 	it("auto-grants Blood Curse of the Exorcist at 15 without spending a known slot", () => {
@@ -125,7 +142,16 @@ describe("Order of the Ghostslayer (BH2022)", () => {
 		expect(curse.optionalFeatureTypes).toContain("BC");
 		// The auto-granted curse is not paid for from bloodCursesKnown.
 		expect(calc.grantsBloodCurseOfTheExorcist).toBe(true);
-		expect(state.getBloodHunterState?.() ?? true).toBeTruthy();
+		// It is granted OUTSIDE the pick budget: the row is pushed unconditionally at 15
+		// rather than being chosen, and the class table's known count is untouched by it.
+		expect(calc.bloodCursesKnown).toBe(4);
+		expect(curse.id).toBe("bh2022-blood-curse-of-the-exorcist");
+		expect(curse.description).toContain("doesn't count against your number of blood curses known");
+		// Falsifiable in the direction that matters: a 14th-level Ghostslayer must NOT have it.
+		const l14 = makeBloodHunter({subclass: "Order of the Ghostslayer", level: 14});
+		l14.ensureBloodHunterResources();
+		expect(l14._data.features.some(f => f.name === "Blood Curse of the Exorcist")).toBe(false);
+		expect(l14.getFeatureCalculations().grantsBloodCurseOfTheExorcist).toBeUndefined();
 	});
 
 	it("does not auto-grant the Exorcist curse before level 15", () => {
@@ -194,15 +220,15 @@ describe("Order of the Mutant (BH2022)", () => {
 		expect(state.getResource("Mutagen").max).toBe(perRest);
 	});
 
-	it("exposes all 20 mutagen formulas, gated by prerequisite level", () => {
+	it("exposes all 20 mutagen formulas as learnable, gated by prerequisite level", () => {
 		expect(Object.keys(CharacterSheetState.MUTAGENS)).toHaveLength(20);
 		// At level 3, the four higher-level mutagens (Reconstruction 7, Aether/Cruelty/Precision 11) are unavailable.
-		const lvl3 = makeBloodHunter({subclass: "Order of the Mutant", level: 3}).getAvailableMutagens();
+		const lvl3 = makeBloodHunter({subclass: "Order of the Mutant", level: 3}).getLearnableMutagens();
 		expect(lvl3).toHaveLength(16);
 		expect(lvl3).not.toContain("aether");
 		expect(lvl3).not.toContain("reconstruction");
 		// At 11 every mutagen is available.
-		expect(makeBloodHunter({subclass: "Order of the Mutant", level: 11}).getAvailableMutagens()).toHaveLength(20);
+		expect(makeBloodHunter({subclass: "Order of the Mutant", level: 11}).getLearnableMutagens()).toHaveLength(20);
 	});
 
 	it.each([
@@ -213,7 +239,7 @@ describe("Order of the Mutant (BH2022)", () => {
 		["unbreakable", "bludgeoning", "piercing"],
 	])("%s applies its resistance benefit AND its vulnerability drawback", (mutagen, resist, vuln) => {
 		const state = makeBloodHunter({subclass: "Order of the Mutant", level: 3});
-		expect(state.consumeMutagen(mutagen)).toBe(true);
+		expect(drink(state, mutagen)).toBe(true);
 		expect(state.getResistances()).toContain(resist);
 		expect(state.getVulnerabilities()).toContain(vuln);
 	});
@@ -225,64 +251,81 @@ describe("Order of the Mutant (BH2022)", () => {
 	])("%s raises %s by 3/4/5 as it scales, beyond the ability cap", (mutagen, ability) => {
 		const l3 = makeBloodHunter({subclass: "Order of the Mutant", level: 3});
 		const before = l3.getAbilityScore(ability);
-		l3.consumeMutagen(mutagen);
+		drink(l3, mutagen);
 		expect(l3.getAbilityScore(ability)).toBe(before + 3);
 
 		const l11 = makeBloodHunter({subclass: "Order of the Mutant", level: 11});
 		const before11 = l11.getAbilityScore(ability);
-		l11.consumeMutagen(mutagen);
+		drink(l11, mutagen);
 		expect(l11.getAbilityScore(ability)).toBe(before11 + 4);
 
 		const l18 = makeBloodHunter({subclass: "Order of the Mutant", level: 18});
 		const before18 = l18.getAbilityScore(ability);
-		l18.consumeMutagen(mutagen);
+		drink(l18, mutagen);
 		expect(l18.getAbilityScore(ability)).toBe(before18 + 5);
 	});
 
 	it("Mobile grants condition immunities (paralyzed only from 11) with a Strength-check drawback", () => {
 		const l3 = makeBloodHunter({subclass: "Order of the Mutant", level: 3});
-		l3.consumeMutagen("mobile");
+		drink(l3, "mobile");
 		expect(l3.getConditionImmunities()).toEqual(expect.arrayContaining(["grappled", "restrained"]));
 		expect(l3.getConditionImmunities()).not.toContain("paralyzed");
 		expect(l3.getAdvantageState("check:str").disadvantage).toBe(true);
 
 		const l11 = makeBloodHunter({subclass: "Order of the Mutant", level: 11});
-		l11.consumeMutagen("mobile");
+		drink(l11, "mobile");
 		expect(l11.getConditionImmunities()).toContain("paralyzed");
 	});
 
 	it("Rapidity increases walking speed (+10, +15 at 15) and hampers Intelligence checks", () => {
 		const l3 = makeBloodHunter({subclass: "Order of the Mutant", level: 3});
 		const base = l3.getWalkSpeed();
-		l3.consumeMutagen("rapidity");
+		drink(l3, "rapidity");
 		expect(l3.getWalkSpeed()).toBe(base + 10);
 		expect(l3.getAdvantageState("check:int").disadvantage).toBe(true);
 
 		const l15 = makeBloodHunter({subclass: "Order of the Mutant", level: 15});
 		const base15 = l15.getWalkSpeed();
-		l15.consumeMutagen("rapidity");
+		drink(l15, "rapidity");
 		expect(l15.getWalkSpeed()).toBe(base15 + 15);
 	});
 
 	it("Reconstruction reduces speed by 10 as its drawback", () => {
 		const state = makeBloodHunter({subclass: "Order of the Mutant", level: 7});
 		const base = state.getWalkSpeed();
-		state.consumeMutagen("reconstruction");
+		drink(state, "reconstruction");
 		expect(state.getWalkSpeed()).toBe(base - 10);
 	});
 
 	it("Aether grants a flying speed as its benefit", () => {
 		const state = makeBloodHunter({subclass: "Order of the Mutant", level: 11});
 		expect(state.getSpeed("fly")).toBe(0);
-		state.consumeMutagen("aether");
+		drink(state, "aether");
 		expect(state.getSpeed("fly")).toBe(20);
 		expect(state.getAdvantageState("check:str").disadvantage).toBe(true);
+	});
+
+	// Nighteye emits an ABSOLUTE darkvision value (existing + 60), not a +60 bonus,
+	// because the source reads "or +60 feet if you already have it". getSense() folds
+	// state senses through Math.max but SUMS namedBonus, so the absolute value is only
+	// correct while mutagen senses stay on the max side. This pins the stacking case:
+	// if a future refactor routes state senses into the named-contribution sum, this
+	// goes to 180 and fails loudly instead of silently doubling a player's darkvision.
+	it("Nighteye extends existing darkvision to 120 rather than stacking to 180", () => {
+		const state = makeBloodHunter({subclass: "Order of the Mutant", level: 11});
+		state.setSense("darkvision", 60);
+		expect(state.getSense("darkvision")).toBe(60);
+		state.learnMutagenFormula("nighteye");
+		state.consumeMutagen("nighteye");
+		expect(state.getSense("darkvision")).toBe(120);
+		state.endMutagen("nighteye");
+		expect(state.getSense("darkvision")).toBe(60);
 	});
 
 	it("Nighteye grants darkvision as its benefit", () => {
 		const state = makeBloodHunter({subclass: "Order of the Mutant", level: 3});
 		expect(state.getSense("darkvision")).toBe(0);
-		state.consumeMutagen("nighteye");
+		drink(state, "nighteye");
 		expect(state.getSense("darkvision")).toBe(60);
 	});
 
@@ -293,21 +336,21 @@ describe("Order of the Mutant (BH2022)", () => {
 		["percipient", "check:wis", "check:cha"],
 	])("%s grants advantage on %s and disadvantage on %s", (mutagen, advTarget, disTarget) => {
 		const state = makeBloodHunter({subclass: "Order of the Mutant", level: 3});
-		state.consumeMutagen(mutagen);
+		drink(state, mutagen);
 		expect(state.getAdvantageState(advTarget).advantage).toBe(true);
 		expect(state.getAdvantageState(disTarget).disadvantage).toBe(true);
 	});
 
 	it("Vermillion imposes disadvantage on death saving throws", () => {
 		const state = makeBloodHunter({subclass: "Order of the Mutant", level: 3});
-		state.consumeMutagen("vermillion");
+		drink(state, "vermillion");
 		expect(state.getAdvantageState("deathSave").disadvantage).toBe(true);
 	});
 
 	it("stacks multiple mutagens' effects in one shared state", () => {
 		const state = makeBloodHunter({subclass: "Order of the Mutant", level: 3});
-		state.consumeMutagen("embers");
-		state.consumeMutagen("gelid");
+		drink(state, "embers");
+		drink(state, "gelid");
 		// Embers: resist fire / vuln cold. Gelid: resist cold / vuln fire. Both present.
 		expect(state.getResistances()).toEqual(expect.arrayContaining(["fire", "cold"]));
 		expect(state.getVulnerabilities()).toEqual(expect.arrayContaining(["fire", "cold"]));
@@ -316,12 +359,12 @@ describe("Order of the Mutant (BH2022)", () => {
 
 	it("ending or flushing mutagens removes their effects", () => {
 		const state = makeBloodHunter({subclass: "Order of the Mutant", level: 3});
-		state.consumeMutagen("embers");
+		drink(state, "embers");
 		expect(state.getResistances()).toContain("fire");
 		state.endMutagen("embers");
 		expect(state.getResistances()).not.toContain("fire");
 
-		state.consumeMutagen("gelid");
+		drink(state, "gelid");
 		expect(state.getResistances()).toContain("cold");
 		state.flushMutagens();
 		expect(state.getActiveMutagens()).toEqual([]);
@@ -329,9 +372,17 @@ describe("Order of the Mutant (BH2022)", () => {
 	});
 
 	it("only an Order of the Mutant of the right level can create a mutagen", () => {
-		expect(makeBloodHunter({subclass: "Order of the Ghostslayer", level: 11}).consumeMutagen("embers")).toBe(false);
-		// Aether needs level 11.
-		expect(makeBloodHunter({subclass: "Order of the Mutant", level: 3}).consumeMutagen("aether")).toBe(false);
+		// A Ghostslayer has no mutagen access at all: the formula is not even learnable.
+		const ghostslayer = makeBloodHunter({subclass: "Order of the Ghostslayer", level: 11});
+		expect(ghostslayer.getLearnableMutagens()).toEqual([]);
+		expect(ghostslayer.learnMutagenFormula("embers")).toBe(false);
+		expect(ghostslayer.consumeMutagen("embers")).toBe(false);
+
+		// Aether needs level 11, so a level-3 Mutant cannot learn it and therefore cannot drink it.
+		const mutant3 = makeBloodHunter({subclass: "Order of the Mutant", level: 3});
+		expect(mutant3.getLearnableMutagens()).not.toContain("aether");
+		expect(mutant3.learnMutagenFormula("aether")).toBe(false);
+		expect(mutant3.consumeMutagen("aether")).toBe(false);
 	});
 
 	it("Strange Metabolism grants poison immunities and can suppress one mutagen drawback (level 7)", () => {
@@ -344,7 +395,7 @@ describe("Order of the Mutant (BH2022)", () => {
 		state.ensureBloodHunterResources();
 		expect(state.getResource("Strange Metabolism").max).toBe(1);
 
-		state.consumeMutagen("embers");
+		drink(state, "embers");
 		expect(state.getVulnerabilities()).toContain("cold");
 		expect(state.ignoreMutagenDrawback("embers")).toBe(true);
 		// The drawback (cold vulnerability) is suppressed; the benefit (fire resistance) remains.
@@ -512,8 +563,10 @@ describe("Blood Hunter — subclass-name resolution (CS-BUG-123)", () => {
 		const p = ps._data.spellcasting.pactSlots || {};
 		const w = wl._data.spellcasting.pactSlots || {};
 		// Profane Soul peaks at 2 slots of 4th level; warlock is far stronger.
+		// Both pinned exactly: `toBeGreaterThan` would be satisfied by any wrong warlock
+		// value above 4, which is precisely the loose-assertion defect CS-BUG-137 exposed.
 		expect({max: p.max, level: p.level}).toEqual({max: 2, level: 4});
-		expect(w.level).toBeGreaterThan(p.level);
+		expect({max: w.max, level: w.level}).toEqual({max: 4, level: 5});
 	});
 
 	test("Profane Soul pact grid resolves from shortName too (fails OPEN to warlock grid)", () => {

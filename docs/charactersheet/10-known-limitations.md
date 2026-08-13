@@ -230,10 +230,18 @@ dropped or faked.
 
 | Feature | What the sheet does | What the DM still resolves |
 |---|---|---|
-| **Brand of Castigation / Tethering / Sundering / Axiom / Sapping Scar** | Tracks the use, and tracks *that* a creature is branded via the shared `brandedTarget` state | The retaliation damage, the forced revert, the teleport denial, and the healing denial all land on the target |
+| **Brand of Castigation / Tethering / Axiom / Sapping Scar** | Tracks the use, tracks *that* a creature is branded via the shared `brandedTarget` state, and states each rider's real damage and DC on that state | The retaliation damage, the forced revert, the teleport denial, and the saving-throw disadvantage all land on the target |
+| **Brand of Sundering** (Ghostslayer 11) | **Half fully modelled:** the additional hemocraft die rides the character's crimson rite damage for real (`2dN`), including on rites already lit | Only the Incorporeal Movement denial, which lands on the target |
 | **Brand of the Voracious** (Lycan 15) | Fully modelled — its advantage lands on the *character*, so it is gated on `brandedTarget` and applies for real | — |
 | **Blood curses** | Surfaces each curse's own action cost, save ability, DC, base effect and amplified rider at the moment of invocation; charges the amplification HP cost for real | The target's saving throw and resulting condition |
 | **Blood Curse of the Eyeless / Fallen Puppet** | Surfaces the reaction timing and the hemocraft die to subtract | The affected creature's attack roll |
+
+Target-side riders are surfaced as `info` effects **on the `brandedTarget`
+state**, via its `effectsBuilder`, not in `FeatureEffectRegistry`. That is not a
+stylistic choice: registry `info` effects are aggregated and then rendered
+nowhere, whereas state `info` effects appear in the active-states tooltip. A
+rider registered in the registry would look declared and be invisible — the
+exact defect CS-BUG-125 and CS-BUG-150 were filed for.
 
 The amplification cost is *not* in this category and is fully modelled: it is
 unavoidable necrotic damage to the Blood Hunter, and `useBloodMaledict({amplify: true})`
@@ -244,6 +252,14 @@ effect rather than a mechanical one. Its content — that you cannot spread the
 curse unwillingly, that being cured against your will is a mark of shame undone
 by a renewed Taming, and that your beast-strain sets your hybrid form's
 appearance — is narrative and DM-facing, with no derived number to compute.
+
+**Caveat, disclosed rather than buried:** that entry sits in
+`FeatureEffectRegistry`, and registry `info` effects are currently rendered
+nowhere. So the Onus is *recorded* but not *shown*. It is the least costly
+instance of the pattern — purely narrative text with no number — which is why it
+is noted here rather than filed as a bug, but it is the same gap that made
+CS-BUG-150 invisible. Rendering registry `info` effects would fix both at once,
+and is the right general fix if that surface is ever built.
 
 ### Anti-Pattern in Tests (Mostly Resolved)
 Previous tests used weak verification patterns. These have been largely corrected:

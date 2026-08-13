@@ -922,13 +922,28 @@ of Axiom, and Profane Soul's Brand of the Sapping Scar. It exists because a
 brand is a fact about *the world*, not about the character, and five separate
 per-brand flags would each need their own bespoke plumbing.
 
-It carries no `effects` of its own by design. Almost everything a brand does
-resolves **on the target** (retaliation damage, forced reverts, teleport
-denial), which a single-character sheet cannot track — see
-[10-known-limitations.md](10-known-limitations.md). What the state *does* buy is
-the half of a brand that lands on the Blood Hunter: `getBloodHunterHybridEffects()`
-gates **Brand of the Voracious** (Lycan 15, advantage on attacks against a
-branded creature while transformed) on
+It carries no static `effects`, because which riders apply depends on the
+character's order and level. Instead it names an
+`effectsBuilder: "getBrandedTargetEffects"` — the generic hook `activateState()`
+already offers — which resolves the brand's riders against the current build at
+the moment a target is marked. The builder emits one `info` effect per brand the
+character actually has, with damage and DCs interpolated: Castigation,
+Tethering, Sundering (Ghostslayer 11), Axiom (Mutant 11), the Sapping Scar
+(Profane Soul 11), and the Voracious (Lycan 15). So a Ghostslayer sees
+Sundering and a Mutant sees Axiom, rather than both seeing a generic "branded"
+label. (CS-BUG-150.)
+
+`info` effects on a state are rendered in the active-states tooltip. Note that
+`info` effects registered in `FeatureEffectRegistry` are **not** rendered
+anywhere — they are aggregated and dropped — so a brand rider belongs here, not
+there.
+
+Most of what a brand does still resolves **on the target** (retaliation damage,
+forced reverts, teleport denial), which a single-character sheet cannot apply —
+see [10-known-limitations.md](10-known-limitations.md). The state's job is to
+state those consequences precisely and to gate the half that lands on the Blood
+Hunter: `getBloodHunterHybridEffects()` gates **Brand of the Voracious** (Lycan
+15, advantage on attacks against a branded creature while transformed) on
 `isStateTypeActive("brandedTarget")`, so that advantage fires only when a target
 is actually branded instead of on every attack the character ever makes.
 
@@ -968,6 +983,34 @@ bonuses (Celerity/Potency/Sagacity) are applied through
 mutagen raises the score *and* its maximum together. Strange Metabolism (7) can
 suppress one mutagen's drawback via `ignoreMutagenDrawback(name)`, which
 `_rebuildMutagenState()` honors by omitting that mutagen's drawback effects.
+
+**How a player reaches it (CS-BUG-124).** All of the above shipped once with no
+entry point whatsoever: `consumeMutagen()` had zero production callers and
+`MTGN` appeared nowhere outside the state file, so the Mutagen pool ticked down
+on rests and nothing could ever be drunk. The flow now mirrors Blood Curses and
+Crimson Rites exactly rather than inventing a parallel one:
+
+1. `_reconcileMutagenFormulaFeatures()` creates one activatable feature row per
+   **known** formula, tagged `optionalFeatureTypes: ["MTGN"]`. The description
+   carries the benefit **and** the drawback — a mutagen you can drink without
+   seeing its cost is a trap.
+2. `detectActivatableFeature()` recognises `MTGN` alongside `BC` and `CR`, so
+   the row becomes clickable through the generic path.
+3. `charactersheet.js` dispatches `MTGN` to `_pConsumeMutagen()` — an
+   `InputUiUtil.pGetUserBoolean` consume/end toggle stating the effect, the side
+   effect, and the concoctions remaining — and routes the Mutagencraft feature
+   to `_pManageMutagenFormulas()` (`pGetUserMultipleChoice`, capped at
+   `mutagenFormulasKnown`). Neither decision earns a bespoke modal.
+
+`getLearnableMutagens()` is the level-eligible pool; `getAvailableMutagens()` is
+what the character **knows**. The cap is enforced at every writer *and* on read,
+so a respec or a stale save cannot leave a character over cap.
+
+Note that Nighteye emits an **absolute** darkvision value (`existing + 60`, per
+"or +60 feet if you already have it"), not a bonus. `getSense()` folds state
+senses through `Math.max` but sums `namedBonus`, so that is correct only while
+mutagen senses stay on the max side; a test pins the stacking case at 120 rather
+than 180 so a future sense refactor fails loudly instead of silently doubling it.
 
 #### Heavy Stance (Adamant Mountain)
 ```javascript
