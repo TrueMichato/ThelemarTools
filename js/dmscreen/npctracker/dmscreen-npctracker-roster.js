@@ -1,3 +1,5 @@
+import {getNpcTrackerConditionColor} from "./dmscreen-npctracker-condition.js";
+
 const _SEARCH_INDEX_NAME = "entity_NpcTrackerCreatures";
 
 export function getNpcTrackerImportedMonsters (json) {
@@ -91,7 +93,7 @@ export class NpcTrackerRoster {
 			<label class="dm-npc__all-toggle">${cbAll}<span>All creatures</span></label>
 		</div>`.appendTo(wrp);
 
-		const wrpRows = ee`<div class="dm-npc__roster-rows" role="listbox" aria-label="NPC roster"></div>`.appendTo(wrp);
+		const wrpRows = ee`<div class="dm-npc__roster-rows"></div>`.appendTo(wrp);
 		if (!state.npcs.length && !state.groups.length) {
 			ee`<div class="dm-npc__roster-empty">
 				<strong>Your cast is empty</strong>
@@ -135,10 +137,12 @@ export class NpcTrackerRoster {
 	_renderGroup ({group, npcs, state, wrp}) {
 		const isCollapsed = group ? group.isCollapsed : state.settings.isUnsortedCollapsed;
 		const btnToggle = ee`<button class="dm-npc__group-toggle" type="button" aria-expanded="${!isCollapsed}"></button>`;
+		btnToggle.attr("aria-label", `${isCollapsed ? "Expand" : "Collapse"} ${group?.name || "Unsorted"}`);
 		btnToggle.innerHTML = `<span class="glyphicon glyphicon-chevron-${isCollapsed ? "right" : "down"}" aria-hidden="true"></span>`;
 		btnToggle.onn("click", () => group ? this._fnToggleGroup(group.id) : this._fnToggleUnsorted());
 		const eleName = ee`<strong class="dm-npc__group-name"></strong>`;
 		eleName.textContent = group?.name || "Unsorted";
+		eleName.title = group?.name || "Unsorted";
 		const eleCount = ee`<span class="dm-npc__group-count"></span>`;
 		eleCount.textContent = npcs.length;
 		const btnRoll = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" type="button" title="Batch roll this group">
@@ -162,7 +166,7 @@ export class NpcTrackerRoster {
 			: null;
 		const wrpGroup = ee`<section class="dm-npc__group">
 			<div class="dm-npc__group-header">${btnToggle}${eleName}${eleCount}<div class="dm-npc__group-actions">${btnRoll}${btnRename}${btnRemove}</div></div>
-			<div class="dm-npc__group-rows"></div>
+			<div class="dm-npc__group-rows" role="list" aria-label="${group?.name || "Unsorted"} NPCs"></div>
 		</section>`;
 		const wrpGroupRows = wrpGroup.querySelector(".dm-npc__group-rows");
 		if (isCollapsed) wrpGroupRows.classList.add("ve-hidden");
@@ -180,7 +184,7 @@ export class NpcTrackerRoster {
 
 	_renderRow ({npc, state, wrp, isSelected}) {
 		const mon = npc.monster;
-		const btnSelect = ee`<button class="dm-npc__roster-select" type="button" role="option" aria-selected="${isSelected}"></button>`
+		const btnSelect = ee`<button class="dm-npc__roster-select" type="button" aria-current="${isSelected ? "true" : "false"}"></button>`
 			.onn("click", () => this._fnSelect(npc.id));
 		const eleName = ee`<span class="dm-npc__roster-name"></span>`;
 		eleName.textContent = npc.alias || mon.name;
@@ -206,8 +210,11 @@ export class NpcTrackerRoster {
 		selGroup.value = npc.groupId || optUnsorted.value;
 		selGroup.onn("change", evt => this._fnAssignGroup({npc, groupId: evt.currentTarget.value || null}));
 
-		const getHpInput = ({prop, value, label}) => ee`<input class="ve-form-control ve-input-xs dm-npc__roster-hp-input" type="number" min="0" value="${value}" aria-label="${label}">`
-			.onn("change", evt => this._fnUpdateNpc({npc, prop: `hp.${prop}`, value: evt.currentTarget.value}));
+		const getHpField = ({prop, value, label, shortLabel}) => {
+			const input = ee`<input class="ve-form-control ve-input-xs dm-npc__roster-hp-input" type="number" min="0" value="${value}" aria-label="${label}">`
+				.onn("change", evt => this._fnUpdateNpc({npc, prop: `hp.${prop}`, value: evt.currentTarget.value}));
+			return ee`<label class="dm-npc__roster-hp-field"><span>${shortLabel}</span>${input}</label>`;
+		};
 
 		const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs" type="button" title="Remove NPC" aria-label="Remove NPC">
 			<span class="glyphicon glyphicon-trash" aria-hidden="true"></span>
@@ -216,23 +223,33 @@ export class NpcTrackerRoster {
 				if (confirm(`Remove "${npc.alias || mon.name}" from the roster?`)) this._fnRemove(npc.id);
 			});
 
-		const row = ee`<div class="dm-npc__roster-row ${isSelected ? "dm-npc__roster-row--selected" : ""}" role="presentation">
+		const row = ee`<div class="dm-npc__roster-row ${isSelected ? "dm-npc__roster-row--selected" : ""}" role="listitem">
 			${btnSelect}
 			${btnRemove}
 			<div class="dm-npc__roster-edit">
 				${iptAlias}
 				${selGroup}
 				<div class="dm-npc__roster-hp">
-					<span>HP</span>
-					${getHpInput({prop: "current", value: npc.hp.current, label: "Current hit points"})}
-					<span>/</span>
-					${getHpInput({prop: "max", value: npc.hp.max, label: "Maximum hit points"})}
-					<span>+T</span>
-					${getHpInput({prop: "temp", value: npc.hp.temp, label: "Temporary hit points"})}
+					${getHpField({prop: "current", value: npc.hp.current, label: "Current hit points", shortLabel: "HP"})}
+					${getHpField({prop: "max", value: npc.hp.max, label: "Maximum hit points", shortLabel: "Max"})}
+					${getHpField({prop: "temp", value: npc.hp.temp, label: "Temporary hit points", shortLabel: "Temp"})}
 				</div>
+				${this._getConditionChips(npc)}
 			</div>
 		</div>`;
 		row.appendTo(wrp);
+	}
+
+	_getConditionChips (npc) {
+		if (!npc.conditions.length) return null;
+		const wrp = ee`<div class="dm-npc__conditions" aria-label="Conditions"></div>`;
+		npc.conditions.forEach(condition => {
+			const chip = ee`<span class="dm-npc__condition"></span>`;
+			chip.textContent = condition.toTitleCase();
+			chip.style.borderColor = getNpcTrackerConditionColor(condition);
+			chip.appendTo(wrp);
+		});
+		return wrp;
 	}
 
 	async _pLoadSearchIndex () {

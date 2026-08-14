@@ -47,6 +47,8 @@ export class InitiativeTrackerRowDataSerializer extends InitiativeTrackerDataSer
 
 		"entity.hpCurrent": "h",
 		"entity.hpMax": "g",
+		"entity.hpTemp": "ht",
+		"entity.monster": "mon",
 		"entity.initiative": "i",
 		"entity.isActive": "a",
 		"entity.source": "s",
@@ -124,6 +126,7 @@ export class InitiativeTrackerRowDataSerializer extends InitiativeTrackerDataSer
 			"scaledSummonClassLevel",
 			"hpCurrent",
 			"hpMax",
+			"hpTemp",
 			"initiative",
 			"ordinal",
 		]

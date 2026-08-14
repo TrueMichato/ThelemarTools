@@ -1,5 +1,8 @@
 import "../../js/parser.js";
 import "../../js/utils.js";
+import "../../js/render.js";
+import "../../js/render-dice.js";
+import "../../js/utils-ui.js";
 import {
 	NpcTrackerSerializer,
 	removeNpcTrackerGroup,
@@ -12,11 +15,21 @@ import {
 } from "../../js/dmscreen/npctracker/dmscreen-npctracker-detail.js";
 import {getNpcTrackerImportedMonsters} from "../../js/dmscreen/npctracker/dmscreen-npctracker-roster.js";
 import {
+	getNpcTrackerInitiativeHandoff,
 	getNpcTrackerNpcsForScope,
 	getNpcTrackerRollBonus,
 	getNpcTrackerRollLabel,
 	sortNpcTrackerBatchResults,
 } from "../../js/dmscreen/npctracker/dmscreen-npctracker-roll.js";
+import {
+	getNpcTrackerHpAfterOperation,
+	getNpcTrackerHpInputValue,
+	getNpcTrackerHpOperation,
+} from "../../js/dmscreen/npctracker/dmscreen-npctracker-hp.js";
+import {
+	getNpcTrackerCanonicalConditionName,
+	getNpcTrackerConditionsAfterUpdate,
+} from "../../js/dmscreen/npctracker/dmscreen-npctracker-condition.js";
 
 const getMonster = () => ({
 	name: "Court Mage",
@@ -47,9 +60,11 @@ describe("NPC Tracker serialization", () => {
 			fluff: {entries: ["A patient adviser."]},
 			alias: "Magister Vale",
 		});
+
 		npc.hp.current = 11;
 		npc.hp.temp = 4;
 		npc.groupId = "court";
+		npc.conditions = ["poisoned", "prone"];
 
 		const saved = NpcTrackerSerializer.serialize({
 			version: 2,
@@ -59,7 +74,7 @@ describe("NPC Tracker serialization", () => {
 		});
 		const restored = NpcTrackerSerializer.deserialize(saved);
 
-		expect(saved.v).toBe(2);
+		expect(saved.v).toBe(3);
 		expect(restored.settings).toEqual({
 			selectedId: npc.id,
 			isIncludeAllCreatures: true,
@@ -71,6 +86,7 @@ describe("NPC Tracker serialization", () => {
 			alias: "Magister Vale",
 			groupId: "court",
 			hp: {current: 11, max: 27, temp: 4},
+			conditions: ["poisoned", "prone"],
 			monster,
 			fluff: {entries: ["A patient adviser."]},
 		});
@@ -123,7 +139,28 @@ describe("NPC Tracker serialization", () => {
 			alias: "Legacy Mage",
 			groupId: null,
 			hp: {current: 9, max: 27, temp: 2},
+			conditions: [],
 			fluff: {entries: ["Preserved lore."]},
+		});
+	});
+
+	it("migrates version 2 saves with default-safe conditions", () => {
+		const restored = NpcTrackerSerializer.deserialize({
+			v: 2,
+			g: [{id: "court", n: "Town Council"}],
+			n: [{
+				id: "legacy-v2",
+				g: "court",
+				hp: {c: 12, m: 27, t: 0},
+				mon: getMonster(),
+			}],
+		});
+
+		expect(restored.version).toBe(3);
+		expect(restored.npcs[0]).toMatchObject({
+			id: "legacy-v2",
+			groupId: "court",
+			conditions: [],
 		});
 	});
 
@@ -159,6 +196,70 @@ describe("NPC Tracker serialization", () => {
 
 		expect(restored.npcs.map(npc => npc.groupId)).toEqual(["a", "b"]);
 		expect(restored.npcs[0].id).not.toBe(restored.npcs[1].id);
+	});
+});
+
+describe("NPC Tracker conditions", () => {
+	it("uses the canonical Parser condition list and deduplicates updates", () => {
+		expect(getNpcTrackerCanonicalConditionName(" Poisoned ")).toBe("poisoned");
+		expect(getNpcTrackerCanonicalConditionName("custom")).toBeNull();
+		expect(getNpcTrackerConditionsAfterUpdate({
+			conditions: ["poisoned", "poisoned", "custom"],
+			condition: "prone",
+			isAdd: true,
+		})).toEqual(["poisoned", "prone"]);
+		expect(getNpcTrackerConditionsAfterUpdate({
+			conditions: ["poisoned", "prone"],
+			condition: "poisoned",
+			isAdd: false,
+		})).toEqual(["prone"]);
+	});
+
+	it("repairs invalid serialized conditions", () => {
+		const restored = NpcTrackerSerializer.deserialize({
+			v: 3,
+			n: [{
+				id: "conditioned",
+				c: ["Poisoned", "poisoned", "made-up", null],
+				mon: getMonster(),
+			}],
+		});
+		expect(restored.npcs[0].conditions).toEqual(["poisoned"]);
+	});
+});
+
+describe("NPC Tracker HP input", () => {
+	it("rejects blank and non-numeric values instead of coercing them to zero", () => {
+		expect(getNpcTrackerHpInputValue("")).toBeNull();
+		expect(getNpcTrackerHpInputValue("   ")).toBeNull();
+		expect(getNpcTrackerHpInputValue("not a number")).toBeNull();
+		expect(getNpcTrackerHpInputValue("0")).toBe(0);
+		expect(getNpcTrackerHpInputValue("-3")).toBe(0);
+		expect(getNpcTrackerHpInputValue("12")).toBe(12);
+	});
+
+	it("parses damage, healing, set, dice, and half operations", () => {
+		expect(getNpcTrackerHpOperation({raw: "12"})).toEqual({ok: true, operation: {mode: "delta", value: -12}});
+		expect(getNpcTrackerHpOperation({raw: "+6"})).toEqual({ok: true, operation: {mode: "delta", value: 6}});
+		expect(getNpcTrackerHpOperation({raw: "=15"})).toEqual({ok: true, operation: {mode: "set", value: 15}});
+		expect(getNpcTrackerHpOperation({raw: "7", isHalf: true})).toEqual({ok: true, operation: {mode: "delta", value: -3}});
+		expect(getNpcTrackerHpOperation({raw: "1d1"})).toEqual({ok: true, operation: {mode: "delta", value: -1}});
+		expect(getNpcTrackerHpOperation({raw: ""}).ok).toBe(false);
+	});
+
+	it("consumes temporary HP before current HP and caps healing at max", () => {
+		expect(getNpcTrackerHpAfterOperation({
+			hp: {current: 20, max: 30, temp: 5},
+			operation: {mode: "delta", value: -8},
+		})).toEqual({current: 17, max: 30, temp: 0});
+		expect(getNpcTrackerHpAfterOperation({
+			hp: {current: 27, max: 30, temp: 2},
+			operation: {mode: "delta", value: 8},
+		})).toEqual({current: 30, max: 30, temp: 2});
+		expect(getNpcTrackerHpAfterOperation({
+			hp: {current: 27, max: 30, temp: 2},
+			operation: {mode: "set", value: 4},
+		})).toEqual({current: 4, max: 30, temp: 2});
 	});
 });
 
@@ -220,6 +321,35 @@ describe("NPC Tracker batch rolls", () => {
 			sortKey: "order",
 			sortDirection: "asc",
 		}).map(it => it.name)).toEqual(["Alpha", "Bravo", "Charlie"]);
+	});
+
+	it("builds complete initiative handoffs and blocks incomplete batches", () => {
+		const state = {
+			npcs: [
+				{...NpcTrackerSerializer.createNpc({monster: getMonster(), alias: "Vale"}), id: "a"},
+				{...NpcTrackerSerializer.createNpc({monster: getMonster()}), id: "b"},
+			],
+		};
+		const batch = {
+			scope: {type: "all"},
+			rollType: "initiative",
+			isRolling: false,
+			selectedNpcIds: new Set(["a", "b"]),
+			results: [{npcId: "a", total: 18}, {npcId: "b", total: 12}],
+		};
+
+		const complete = getNpcTrackerInitiativeHandoff({state, batch});
+		expect(complete.ok).toBe(true);
+		expect(complete.entries).toMatchObject([
+			{npcId: "a", alias: "Vale", initiative: 18, conditions: []},
+			{npcId: "b", initiative: 12, conditions: []},
+		]);
+
+		batch.results.pop();
+		expect(getNpcTrackerInitiativeHandoff({state, batch})).toEqual({
+			ok: false,
+			message: "Roll initiative for every selected NPC before sending it.",
+		});
 	});
 });
 

@@ -28,6 +28,7 @@ class _InitiativeTrackerRowStateBuilderBase {
 	 * @param {?string} source
 	 * @param {?number} hpCurrent
 	 * @param {?number} hpMax
+	 * @param {?number} hpTemp
 	 * @param {?number} initiative
 	 * @param {?number} ordinal
 	 * @param {?array} rowStatColData
@@ -48,6 +49,7 @@ class _InitiativeTrackerRowStateBuilderBase {
 			source = null,
 			hpCurrent = null,
 			hpMax = null,
+			hpTemp = null,
 			initiative = null,
 			ordinal = null,
 			rowStatColData = null,
@@ -70,6 +72,7 @@ class _InitiativeTrackerRowStateBuilderBase {
 				source,
 				hpCurrent,
 				hpMax,
+				hpTemp,
 				initiative,
 				ordinal,
 				rowStatColData: rowStatColData ?? [],
@@ -159,6 +162,7 @@ export class InitiativeTrackerRowStateBuilderActive extends _InitiativeTrackerRo
 	async pGetNewRowState (
 		{
 			rows = null,
+			monster = null,
 
 			isActive = null,
 			isPlayerVisible = null,
@@ -171,14 +175,15 @@ export class InitiativeTrackerRowStateBuilderActive extends _InitiativeTrackerRo
 			source = null,
 			hpCurrent = null,
 			hpMax = null,
+			hpTemp = null,
 			initiative = null,
 			ordinal = null,
 			rowStatColData = null,
 			conditions = null,
 		} = {},
 	) {
-		const isMon = !!(name && source);
-		const mon = await this.pGetScaledCreature({isMon, name, source, scaledCr, scaledSummonSpellLevel, scaledSummonClassLevel});
+		const isMon = !!monster || !!(name && source);
+		const mon = monster || await this.pGetScaledCreature({isMon, name, source, scaledCr, scaledSummonSpellLevel, scaledSummonClassLevel});
 		if (isMon && !mon) return null;
 
 		const fluff = mon ? await Renderer.monster.pGetFluff(mon) : null;
@@ -230,8 +235,10 @@ export class InitiativeTrackerRowStateBuilderActive extends _InitiativeTrackerRo
 				scaledSummonClassLevel,
 				customName,
 				source,
+				monster: monster ? MiscUtil.copyFast(monster) : null,
 				hpCurrent,
 				hpMax,
+				hpTemp,
 				initiative,
 				ordinal,
 				rowStatColData: rowStatColData ?? [],
@@ -245,7 +252,7 @@ export class InitiativeTrackerRowStateBuilderActive extends _InitiativeTrackerRo
 	async pGetRowInitiativeMeta ({row}) {
 		const out = await super.pGetRowInitiativeMeta({row});
 
-		const mon = await this.pGetScaledCreature(row.entity);
+		const mon = row.entity.monster || await this.pGetScaledCreature(row.entity);
 		if (!mon) return out;
 
 		out.mon = mon;

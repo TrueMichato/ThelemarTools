@@ -5,11 +5,20 @@ import {NpcTrackerDetail} from "./dmscreen-npctracker-detail.js";
 import {NpcTrackerBatch} from "./dmscreen-npctracker-batch.js";
 import {
 	getNpcTrackerDisplayName,
+	getNpcTrackerInitiativeHandoff,
 	getNpcTrackerNpcsForScope,
 	getNpcTrackerRollBonus,
 	getNpcTrackerRollLabel,
 	pRollNpcTrackerD20,
 } from "./dmscreen-npctracker-roll.js";
+import {
+	getNpcTrackerHpAfterOperation,
+	getNpcTrackerHpInputValue,
+	getNpcTrackerHpOperation,
+} from "./dmscreen-npctracker-hp.js";
+import {getNpcTrackerConditionsAfterUpdate} from "./dmscreen-npctracker-condition.js";
+import {DmScreenUtil} from "../dmscreen-util.js";
+import {PANEL_TYP_INITIATIVE_TRACKER} from "../dmscreen-consts.js";
 
 export class NpcTracker extends DmScreenPanelAppBase {
 	constructor (...args) {
@@ -37,6 +46,7 @@ export class NpcTrackerRoot {
 		this._view = this._state.settings.selectedId ? "detail" : "roster";
 		this._workspaceMode = "detail";
 		this._batchState = null;
+		this._hpUndoStack = [];
 		this._wrpRoot = null;
 		this._wrpRoster = null;
 		this._wrpDetail = null;
@@ -69,10 +79,17 @@ export class NpcTrackerRoot {
 			fnGetContext: () => ({
 				batch: this._batchState,
 				npcs: this._batchState ? getNpcTrackerNpcsForScope({state: this._state, scope: this._batchState.scope}) : [],
+				hasHpUndo: !!this._hpUndoStack.length,
 			}),
 			fnUpdateConfig: config => this._updateBatchConfig(config),
 			fnRoll: () => this._pRollBatch(),
 			fnSort: key => this._sortBatch(key),
+			fnToggleNpc: id => this._toggleBatchNpc(id),
+			fnToggleAll: isSelected => this._toggleBatchAll(isSelected),
+			fnApplyHp: meta => this._applyBatchHp(meta),
+			fnUndoHp: () => this._undoBatchHp(),
+			fnUpdateCondition: meta => this._updateBatchCondition(meta),
+			fnSendInitiative: () => this._pSendBatchInitiative(),
 		});
 	}
 
@@ -89,6 +106,47 @@ export class NpcTrackerRoot {
 		this._wrpDetail.appendTo(this._wrpRoot);
 		this._wrpRoot.appendTo(wrp);
 		this._renderRoster();
+		this._renderDetail();
+	}
+
+	async _pSendBatchInitiative () {
+		if (!this._batchState) return;
+		const handoff = getNpcTrackerInitiativeHandoff({state: this._state, batch: this._batchState});
+		if (!handoff.ok) {
+			this._batchState.error = handoff.message;
+			this._renderDetail();
+			return;
+		}
+
+		const panelApps = DmScreenUtil.getPanelApps({board: this._board, type: PANEL_TYP_INITIATIVE_TRACKER});
+		if (!panelApps.length) {
+			this._batchState.error = "Add an Initiative Tracker panel before sending initiative.";
+			this._renderDetail();
+			return;
+		}
+
+		let panelApp = panelApps[0];
+		if (panelApps.length > 1) {
+			const selected = await InputUiUtil.pGetUserEnum({
+				title: "Choose an Initiative Tracker",
+				values: panelApps.map((app, ix) => ({app, label: `Tracker ${ix + 1}: ${app.getSummary()}`})),
+				fnDisplay: meta => meta.label,
+				isResolveItem: true,
+			});
+			if (!selected) return;
+			panelApp = selected.app;
+		}
+
+		const result = await panelApp.pDoAppendNpcTrackerEntries({entries: handoff.entries});
+		if (!result.ok) {
+			this._batchState.error = result.message;
+			this._renderDetail();
+			return;
+		}
+
+		this._batchState.error = null;
+		this._batchState.isInitiativeSent = true;
+		this._batchState.operationMessage = `Sent ${result.count} ${result.count === 1 ? "NPC" : "NPCs"} to Initiative Tracker.`;
 		this._renderDetail();
 	}
 
@@ -183,14 +241,14 @@ export class NpcTrackerRoot {
 		else if (prop.startsWith("hp.")) {
 			const hpProp = prop.slice(3);
 			if (!["current", "max", "temp"].includes(hpProp)) return;
-			const num = Number(value);
-			if (!Number.isFinite(num)) {
+			const num = getNpcTrackerHpInputValue(value);
+			if (num == null) {
 				JqueryUtil.doToast({type: "warning", content: "Hit points must be a number."});
 				this._renderRoster();
 				this._renderDetail();
 				return;
 			}
-			npc.hp[hpProp] = Math.max(0, num);
+			npc.hp[hpProp] = num;
 		}
 		this._renderRoster();
 		this._renderDetail();
@@ -312,6 +370,8 @@ export class NpcTrackerRoot {
 			sortDirection: "desc",
 			isRolling: false,
 			error: null,
+			operationMessage: null,
+			selectedNpcIds: new Set(getNpcTrackerNpcsForScope({state: this._state, scope}).map(npc => npc.id)),
 		};
 		this._workspaceMode = "batch";
 		this._setView("detail");
@@ -322,8 +382,7 @@ export class NpcTrackerRoot {
 		if (!this._batchState || this._batchState.isRolling) return;
 		if (rollType != null) this._batchState.rollType = rollType;
 		if (key !== undefined) this._batchState.key = key;
-		this._batchState.results = [];
-		this._batchState.error = null;
+		this._clearBatchResults();
 		this._batchState.sortKey = this._batchState.rollType === "initiative" ? "total" : "order";
 		this._batchState.sortDirection = this._batchState.rollType === "initiative" ? "desc" : "asc";
 		this._renderDetail();
@@ -332,12 +391,15 @@ export class NpcTrackerRoot {
 	async _pRollBatch () {
 		if (!this._batchState || this._batchState.isRolling) return;
 		const batch = this._batchState;
-		const npcs = getNpcTrackerNpcsForScope({state: this._state, scope: batch.scope});
+		const npcs = getNpcTrackerNpcsForScope({state: this._state, scope: batch.scope})
+			.filter(npc => batch.selectedNpcIds.has(npc.id));
 		if (!npcs.length) return;
 
 		batch.isRolling = true;
 		batch.error = null;
+		batch.operationMessage = null;
 		batch.results = [];
+		batch.isInitiativeSent = false;
 		this._renderDetail();
 
 		const results = [];
@@ -379,6 +441,97 @@ export class NpcTrackerRoot {
 			? `${failures} ${failures === 1 ? "roll was" : "rolls were"} cancelled or could not be completed.`
 			: null;
 		this._renderDetail();
+	}
+
+	_toggleBatchNpc (npcId) {
+		if (!this._batchState || this._batchState.isRolling) return;
+		if (this._batchState.selectedNpcIds.has(npcId)) this._batchState.selectedNpcIds.delete(npcId);
+		else this._batchState.selectedNpcIds.add(npcId);
+		this._clearBatchResults();
+		this._renderDetail();
+	}
+
+	_toggleBatchAll (isSelected) {
+		if (!this._batchState || this._batchState.isRolling) return;
+		const npcs = getNpcTrackerNpcsForScope({state: this._state, scope: this._batchState.scope});
+		this._batchState.selectedNpcIds = new Set(isSelected ? npcs.map(npc => npc.id) : []);
+		this._clearBatchResults();
+		this._renderDetail();
+	}
+
+	_applyBatchHp ({raw, isHalf}) {
+		if (!this._batchState || this._batchState.isRolling) return;
+		const parsed = getNpcTrackerHpOperation({raw, isHalf});
+		if (!parsed.ok) {
+			this._batchState.error = parsed.message;
+			this._renderDetail();
+			return;
+		}
+
+		const npcs = getNpcTrackerNpcsForScope({state: this._state, scope: this._batchState.scope})
+			.filter(npc => this._batchState.selectedNpcIds.has(npc.id));
+		if (!npcs.length) {
+			this._batchState.error = "Select at least one NPC.";
+			this._renderDetail();
+			return;
+		}
+
+		const snapshots = npcs.map(npc => ({npcId: npc.id, hp: {...npc.hp}}));
+		npcs.forEach(npc => npc.hp = getNpcTrackerHpAfterOperation({hp: npc.hp, operation: parsed.operation}));
+		this._hpUndoStack.push({snapshots});
+		while (this._hpUndoStack.length > 5) this._hpUndoStack.shift();
+
+		this._batchState.error = null;
+		this._batchState.operationMessage = `Updated HP for ${npcs.length} ${npcs.length === 1 ? "NPC" : "NPCs"}.`;
+		this._renderRoster();
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_undoBatchHp () {
+		if (!this._batchState || this._batchState.isRolling) return;
+		const entry = this._hpUndoStack.pop();
+		if (!entry) return;
+
+		let restored = 0;
+		entry.snapshots.forEach(snapshot => {
+			const npc = this._state.npcs.find(it => it.id === snapshot.npcId);
+			if (!npc) return;
+			npc.hp = {...snapshot.hp};
+			restored++;
+		});
+		this._batchState.error = null;
+		this._batchState.operationMessage = `Restored HP for ${restored} ${restored === 1 ? "NPC" : "NPCs"}.`;
+		this._renderRoster();
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_updateBatchCondition ({condition, isAdd}) {
+		if (!this._batchState || this._batchState.isRolling) return;
+		const npcs = getNpcTrackerNpcsForScope({state: this._state, scope: this._batchState.scope})
+			.filter(npc => this._batchState.selectedNpcIds.has(npc.id));
+		if (!npcs.length) {
+			this._batchState.error = "Select at least one NPC.";
+			this._renderDetail();
+			return;
+		}
+
+		npcs.forEach(npc => {
+			npc.conditions = getNpcTrackerConditionsAfterUpdate({conditions: npc.conditions, condition, isAdd});
+		});
+		this._batchState.error = null;
+		this._batchState.operationMessage = `${isAdd ? "Added" : "Removed"} ${condition.toTitleCase()} ${isAdd ? "to" : "from"} ${npcs.length} ${npcs.length === 1 ? "NPC" : "NPCs"}.`;
+		this._renderRoster();
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_clearBatchResults () {
+		this._batchState.results = [];
+		this._batchState.error = null;
+		this._batchState.operationMessage = null;
+		this._batchState.isInitiativeSent = false;
 	}
 
 	_sortBatch (key) {

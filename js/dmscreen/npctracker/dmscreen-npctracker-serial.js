@@ -1,5 +1,5 @@
 export class NpcTrackerSerializer {
-	static VERSION = 2;
+	static VERSION = 3;
 
 	static getDefaultState () {
 		return {
@@ -27,6 +27,7 @@ export class NpcTrackerSerializer {
 				max: hpMax,
 				temp: 0,
 			},
+			conditions: [],
 			monster: MiscUtil.copyFast(monster),
 			fluff: fluff ? MiscUtil.copyFast(fluff) : null,
 		};
@@ -55,6 +56,7 @@ export class NpcTrackerSerializer {
 					m: npc.hp.max,
 					t: npc.hp.temp,
 				},
+				c: [...npc.conditions],
 				mon: MiscUtil.copyFast(npc.monster),
 				fluff: npc.fluff ? MiscUtil.copyFast(npc.fluff) : null,
 			})),
@@ -126,6 +128,7 @@ export class NpcTrackerSerializer {
 				max: hpMax,
 				temp: this._getNonNegativeNumber(rawHp.t ?? rawHp.temp, 0),
 			},
+			conditions: this._getConditions(rawNpc.c ?? rawNpc.conditions),
 			monster: MiscUtil.copyFast(monster),
 			fluff: rawNpc.fluff ? MiscUtil.copyFast(rawNpc.fluff) : null,
 		};
@@ -138,6 +141,13 @@ export class NpcTrackerSerializer {
 	static _getNonNegativeNumber (value, fallback) {
 		const num = Number(value);
 		return Number.isFinite(num) ? Math.max(0, num) : fallback;
+	}
+
+	static _getConditions (conditions) {
+		if (!Array.isArray(conditions)) return [];
+		return [...new Set(conditions
+			.map(condition => `${condition ?? ""}`.trim().toLowerCase())
+			.filter(condition => Parser.CONDITIONS.includes(condition)))];
 	}
 }
 

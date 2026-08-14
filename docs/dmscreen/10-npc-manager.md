@@ -16,13 +16,13 @@ The NPC Manager is DM Screen panel type 26. It keeps independent NPC instances i
 
 `NpcTrackerRoot` owns state and wires the roster, detail, and batch components through callbacks. Every persisted mutation ends at `_doSave()` and `board.doSaveStateDebounced()`. Batch configuration and results are intentionally in-memory; each underlying roll is retained by the normal dice roll log.
 
-## State and serializer v2
+## State and serializer v3
 
 The expanded state is:
 
 ```js
 {
-  version: 2,
+  version: 3,
   settings: {
     selectedId: null,
     isIncludeAllCreatures: false,
@@ -37,6 +37,7 @@ The expanded state is:
       alias: "Magister Vale",
       groupId: "group-id",
       hp: {current: 27, max: 27, temp: 0},
+      conditions: ["poisoned"],
       monster: {/* bestiary entity */},
       fluff: null,
     },
@@ -44,11 +45,13 @@ The expanded state is:
 }
 ```
 
-Serialized keys are `v`, `s:{sel,all,uc}`, `g:[{id,n,c}]`, and `n:[{id,a,g,hp:{c,m,t},mon,fluff}]`.
+Serialized keys are `v`, `s:{sel,all,uc}`, `g:[{id,n,c}]`, and `n:[{id,a,g,hp:{c,m,t},c,mon,fluff}]`.
 
 Membership lives on each NPC as `groupId`. This guarantees that duplicate instances of the same monster can be assigned independently and prevents one NPC from belonging to multiple groups. Deleting a group clears matching memberships; it never deletes NPCs.
 
 Version 1 saves have no groups or memberships. Deserialization defaults them to `groups: []`, `groupId: null`, and an expanded Unsorted section. Invalid group records are dropped, duplicate group IDs are ignored after the first, and dangling NPC memberships are repaired to Unsorted.
+
+Version 2 saves have no conditions. Serializer v3 defaults every migrated NPC to `conditions: []`; invalid and duplicate condition names are repaired against `Parser.CONDITIONS`.
 
 ## Group workflow
 
@@ -88,13 +91,21 @@ This produces one normal roll-log entry per NPC and returns the total for the co
 
 Initiative results default to total descending with roster-order tie-breaking. Ability, save, and skill results initially preserve roster order. Name and Total headers can re-sort the table, and **Roll Again** repeats the current configuration.
 
+## Encounter control
+
+Every batch scope is also an encounter-operations workspace. Scope members begin selected and can be toggled independently before rolling or applying a mutation.
+
+- HP expressions accept damage (`30` or `-30`), healing (`+12`), absolute values (`=15`), and dice (`8d6`). The optional **Half** toggle rounds toward zero using the Initiative Tracker's shared rule. Damage consumes temporary HP before current HP, and healing is capped at maximum HP.
+- The last five batch HP operations are available to the session-only **Undo HP** stack. The roster state itself still saves after every apply or undo.
+- Standard conditions come from `Parser.CONDITIONS`. Add and remove operate on every selected NPC, persist independently for duplicate instances, and render as compact chips in both roster and detail views.
+- A complete initiative batch can be appended to an existing Initiative Tracker. The handoff preserves each selected NPC's exact rolled total, alias and monster identity, current/maximum/temporary HP, and conditions. It respects the tracker lock and is intentionally a one-way snapshot; Initiative Tracker owns combat state after handoff.
+
 ## Responsive behavior
 
 Wide panels show the grouped roster and current detail/batch workspace side by side. At the existing 520px container breakpoint, the roster and workspace become separate views; both NPC detail and batch results provide a **Roster** back action. Night mode uses the same neutral surfaces, selected blue, borders, and form controls as other DM Screen panels.
 
 ## Deferred work
 
-- Batch HP and conditions
 - Drag-and-drop group or NPC ordering
 - Encounter import/export
-- Sending batch initiative directly to Initiative Tracker
+- Live two-way HP or condition synchronization with Initiative Tracker

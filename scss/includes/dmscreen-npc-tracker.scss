@@ -9,7 +9,7 @@
 
 	.dm-npc__layout {
 		display: grid;
-		grid-template-columns: minmax(190px, 28%) minmax(0, 1fr);
+		grid-template-columns: minmax(270px, 36%) minmax(0, 1fr);
 		width: 100%;
 		height: 100%;
 		min-height: 0;
@@ -179,8 +179,9 @@
 	}
 
 	.dm-npc__roster-edit {
-		display: flex;
+		display: grid;
 		grid-column: 1 / -1;
+		grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr);
 		align-items: center;
 		gap: 4px;
 	}
@@ -190,21 +191,47 @@
 	}
 
 	.dm-npc__group-select {
-		min-width: 72px;
-		max-width: 110px;
+		min-width: 0;
 	}
 
 	.dm-npc__roster-hp {
+		display: grid;
+		grid-column: 1 / -1;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 4px;
+		font-size: 0.76rem;
+	}
+
+	.dm-npc__conditions {
 		display: flex;
+		grid-column: 1 / -1;
+		flex-wrap: wrap;
+		gap: 3px;
+	}
+
+	.dm-npc__condition {
+		padding: 1px 5px;
+		border: 1px solid vars.$rgb-border-grey;
+		border-left-width: 4px;
+		border-radius: 9px;
+		background: #f5f5f5;
+		color: #555;
+		font-size: 0.68rem;
+		line-height: 1.35;
+	}
+
+	.dm-npc__roster-hp-field {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
 		align-items: center;
 		gap: 2px;
-		margin-left: auto;
-		font-size: 0.76rem;
-		white-space: nowrap;
+		margin: 0;
+		font-weight: 400;
 	}
 
 	.dm-npc__roster-hp-input {
-		width: 38px;
+		width: 100%;
+		min-width: 0;
 		padding-inline: 3px;
 		text-align: center;
 	}
@@ -395,16 +422,17 @@
 		.ve-stats {
 			width: min(100%, 720px);
 		}
+	}
 
-		.dm-npc__batch {
-			display: flex;
-			flex-direction: column;
-			width: 100%;
-			height: 100%;
-			min-height: 0;
-		}
+	.dm-npc__batch {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		height: 100%;
+		min-height: 0;
+	}
 
-		.dm-npc__batch-header {
+	.dm-npc__batch-header {
 			display: flex;
 			flex-wrap: wrap;
 			align-items: center;
@@ -413,19 +441,19 @@
 			border-bottom: 1px solid vars.$rgb-border-grey;
 		}
 
-		.dm-npc__batch-title {
+	.dm-npc__batch-title {
 			margin: 0;
 			font-size: 1.12rem;
 			line-height: 1.2;
 		}
 
-		.dm-npc__batch-count {
+	.dm-npc__batch-count {
 			display: block;
 			color: #666;
 			font-size: 0.79rem;
 		}
 
-		.dm-npc__batch-controls {
+	.dm-npc__batch-controls {
 			display: flex;
 			flex-wrap: wrap;
 			align-items: flex-end;
@@ -443,14 +471,107 @@
 			}
 		}
 
-		.dm-npc__batch-body {
+	.dm-npc__batch-body {
 			flex: 1;
 			min-height: 0;
 			overflow-y: auto;
 			padding: 10px;
 		}
 
-		.dm-npc__batch-empty {
+		.dm-npc__batch-members,
+		.dm-npc__batch-operation {
+			max-width: 720px;
+			margin: 0 auto 10px;
+			border: 1px solid vars.$rgb-border-grey;
+			border-radius: 4px;
+			background: #fff;
+		}
+
+		.dm-npc__batch-members-header,
+		.dm-npc__batch-operation {
+			padding: 7px 9px;
+		}
+
+		.dm-npc__batch-members-header label,
+		.dm-npc__batch-member,
+		.dm-npc__batch-half {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			margin: 0;
+			font-weight: 400;
+		}
+
+		.dm-npc__batch-member-list {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+			border-top: 1px solid vars.$rgb-border-grey;
+		}
+
+		.dm-npc__batch-member {
+			min-width: 0;
+			padding: 6px 9px;
+		}
+
+		.dm-npc__batch-member-name {
+			min-width: 0;
+			overflow: hidden;
+			font-weight: 600;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.dm-npc__batch-member-hp {
+			margin-left: auto;
+			color: #666;
+			font-size: 0.78rem;
+			font-variant-numeric: tabular-nums;
+			white-space: nowrap;
+		}
+
+		.dm-npc__batch-operation {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: flex-end;
+			gap: 8px;
+		}
+
+		.dm-npc__batch-operation-help {
+			display: block;
+			color: #666;
+			font-size: 0.72rem;
+			font-weight: 400;
+		}
+
+		.dm-npc__batch-operation-controls {
+			display: flex;
+			flex: 1 1 310px;
+			align-items: center;
+			justify-content: flex-end;
+			gap: 5px;
+		}
+
+		.dm-npc__batch-hp-input {
+			min-width: 120px;
+			max-width: 190px;
+		}
+
+		.dm-npc__batch-condition-select {
+			min-width: 130px;
+			max-width: 190px;
+		}
+
+		.dm-npc__batch-status {
+			max-width: 720px;
+			margin: 0 auto 8px;
+			padding: 7px 9px;
+			border: 1px solid #5ca45c;
+			border-radius: 4px;
+			background: #eff9ef;
+			color: #285f28;
+		}
+
+	.dm-npc__batch-empty {
 			display: flex;
 			align-items: center;
 			justify-content: center;
@@ -459,7 +580,7 @@
 			text-align: center;
 		}
 
-		.dm-npc__batch-error {
+	.dm-npc__batch-error {
 			margin-bottom: 8px;
 			padding: 7px 9px;
 			border: 1px solid #d89b2b;
@@ -468,7 +589,7 @@
 			color: #694b12;
 		}
 
-		.dm-npc__batch-results {
+	.dm-npc__batch-results {
 			max-width: 720px;
 			margin: 0 auto;
 			border: 1px solid vars.$rgb-border-grey;
@@ -476,7 +597,14 @@
 			overflow: hidden;
 		}
 
-		.dm-npc__batch-result-row {
+		.dm-npc__batch-handoff {
+			display: flex;
+			justify-content: flex-end;
+			max-width: 720px;
+			margin: 8px auto 0;
+		}
+
+	.dm-npc__batch-result-row {
 			display: grid;
 			grid-template-columns: minmax(120px, 1fr) minmax(90px, 0.45fr) minmax(58px, 0.25fr);
 			align-items: center;
@@ -492,14 +620,14 @@
 			}
 		}
 
-		.dm-npc__batch-result-row--header {
+	.dm-npc__batch-result-row--header {
 			background: #f3f3f3;
 			color: #555;
 			font-size: 0.78rem;
 			font-weight: 700;
 		}
 
-		.dm-npc__batch-sort {
+	.dm-npc__batch-sort {
 			padding: 0;
 			border: 0;
 			background: transparent;
@@ -512,25 +640,24 @@
 			}
 		}
 
-		.dm-npc__batch-result-name {
+	.dm-npc__batch-result-name {
 			overflow: hidden;
 			font-weight: 600;
 			text-overflow: ellipsis;
 			white-space: nowrap;
 		}
 
-		.dm-npc__batch-result-formula {
+	.dm-npc__batch-result-formula {
 			color: #666;
 			font-variant-numeric: tabular-nums;
 		}
 
-		.dm-npc__batch-result-total {
+	.dm-npc__batch-result-total {
 			font-size: 1rem;
 			font-variant-numeric: tabular-nums;
 		}
-	}
 
-	@container (max-width: 520px) {
+	@container (max-width: 640px) {
 		.dm-npc__layout {
 			display: block;
 		}
@@ -576,6 +703,53 @@
 		}
 	}
 
+	@container (max-width: 220px) {
+		.dm-npc__roster-edit,
+		.dm-npc__roster-hp {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+
+	@container (max-width: 320px) {
+		.dm-npc__batch-result-row {
+			grid-template-columns: minmax(0, 1fr) auto;
+		}
+
+		.dm-npc__batch-result-row > :nth-child(2) {
+			grid-column: 1 / -1;
+			grid-row: 2;
+		}
+
+		.dm-npc__batch-result-row--header > :nth-child(2) {
+			display: none;
+		}
+
+		.dm-npc__batch-member-list {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.dm-npc__batch-operation-controls {
+			align-items: stretch;
+			flex-direction: column;
+		}
+
+		.dm-npc__batch-hp-input {
+			width: 100%;
+			max-width: none;
+		}
+
+		.dm-npc__batch-condition-select {
+			width: 100%;
+			max-width: none;
+		}
+
+		.dm-npc__batch-handoff > button {
+			width: 100%;
+			min-width: 0;
+			white-space: normal;
+		}
+	}
+
 	@media (prefers-reduced-motion: reduce) {
 		.dm-npc__roster-row,
 		.dm-npc__ability {
@@ -615,8 +789,25 @@
 		}
 
 		.dm-npc__group-header,
+		.dm-npc__batch-members,
+		.dm-npc__batch-operation,
 		.dm-npc__batch-results,
 		.dm-npc__batch-result-row + .dm-npc__batch-result-row {
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		.dm-npc__batch-members,
+		.dm-npc__batch-operation {
+			background: vars-night.$rgb-bg--night;
+		}
+
+		.dm-npc__condition {
+			border-color: vars-night.$rgb-border-grey--night;
+			background: vars-night.$rgb-bg--alt-night;
+			color: #ccc;
+		}
+
+		.dm-npc__batch-member-list {
 			border-color: vars-night.$rgb-border-grey--night;
 		}
 
@@ -632,6 +823,17 @@
 
 		.dm-npc__group-empty {
 			color: #999;
+		}
+
+		.dm-npc__batch-member-hp,
+		.dm-npc__batch-operation-help {
+			color: #aaa;
+		}
+
+		.dm-npc__batch-status {
+			border-color: #4d8c4d;
+			background: rgb(77 140 77 / 15%);
+			color: #a9dca9;
 		}
 
 		.dm-npc__batch-error {
