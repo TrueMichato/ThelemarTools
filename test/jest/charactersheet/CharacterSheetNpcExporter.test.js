@@ -43,6 +43,7 @@ describe("CharacterSheetNpcExporter", () => {
 
 		expect(out.name).toBe("Aelar (NPC)");
 		expect(out.source).toBe("CSHEET");
+		expect(out.isNpc).toBe(true);
 		expect(out.size).toEqual(["M"]);
 		expect(out.type).toEqual({type: "humanoid"});
 		expect(out.alignment).toEqual(["N", "G"]);

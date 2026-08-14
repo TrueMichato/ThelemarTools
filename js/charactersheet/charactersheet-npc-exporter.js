@@ -390,6 +390,7 @@ class CharacterSheetNpcExporter {
 			name: displayName,
 			source: safeSource,
 			page: 0,
+			isNpc: true,
 			size,
 			type: monsterType,
 			alignment,
