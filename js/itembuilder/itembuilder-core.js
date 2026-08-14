@@ -291,6 +291,12 @@ export class ItemBuilderCore {
 				message: `Cannot safely save this legacy projected item because ${missing.label} "${missing.ref.name}" is unavailable. Restore the referenced catalog entry before saving.`,
 			});
 		}
+		for (const ambiguity of legacyResolution.ambiguities) {
+			errors.push({
+				field: ambiguity.field,
+				message: `Cannot safely save this legacy projected item because its baked ${ambiguity.label} cannot be uniquely reversed (${ambiguity.reason}). Rebuild the item from its authored base values before saving.`,
+			});
+		}
 
 		if (normalized.preset && !_findByRef(catalogs.items, normalized.preset) && !normalized.materialized?.isLegacyProjected) warnings.push({field: "preset", message: `Preset "${normalized.preset.name}" is unavailable; authored fields are preserved.`});
 		if (normalized.material && !_findByRef(catalogs.materials, normalized.material) && !normalized.materialized?.isLegacyProjected) warnings.push({field: "material", message: `Material "${normalized.material.name}" is unavailable; its reference is preserved.`});
@@ -306,7 +312,10 @@ export class ItemBuilderCore {
 	static serialize (draft, catalogs = {}) {
 		const normalized = this.normalizeDraft(draft);
 		const legacyResolution = this._getLegacyCompositionResolution(normalized, catalogs);
-		if (normalized.materialized?.isLegacyProjected && legacyResolution.missing.length) {
+		if (
+			normalized.materialized?.isLegacyProjected
+			&& (legacyResolution.missing.length || legacyResolution.ambiguities.length)
+		) {
 			return this._serializeUnresolvedLegacyItem(normalized);
 		}
 
@@ -338,7 +347,11 @@ export class ItemBuilderCore {
 	static projectForPreview (draft, catalogs = {}) {
 		const normalized = this.normalizeDraft(draft);
 		let out = this.serialize(normalized, catalogs);
-		if (normalized.materialized?.isLegacyProjected && this._getLegacyCompositionResolution(normalized, catalogs).missing.length) return out;
+		const legacyResolution = this._getLegacyCompositionResolution(normalized, catalogs);
+		if (
+			normalized.materialized?.isLegacyProjected
+			&& (legacyResolution.missing.length || legacyResolution.ambiguities.length)
+		) return out;
 		const material = _findByRef(catalogs.materials, normalized.material);
 		const upgrades = normalized.upgrades.map(ref => _findByRef(catalogs.upgrades, ref) || ref).filter(Boolean);
 		const gemstone = normalized.gemstone ? (_findByRef(catalogs.upgrades, normalized.gemstone) || normalized.gemstone) : null;
@@ -394,6 +407,7 @@ export class ItemBuilderCore {
 			upgrades: (normalized.materialized?.upgrades || []).map(ref => _findByRef(catalogs.upgrades, ref)),
 			gemstone: _findByRef(catalogs.upgrades, normalized.materialized?.gemstone),
 			missing: [],
+			ambiguities: [],
 		};
 		if (!normalized.materialized?.isLegacyProjected) return out;
 
@@ -411,6 +425,7 @@ export class ItemBuilderCore {
 		addMissing("material", "material", normalized.material, _findByRef(catalogs.materials, normalized.material));
 		normalized.upgrades.forEach(ref => addMissing("upgrades", "upgrade", ref, _findByRef(catalogs.upgrades, ref)));
 		addMissing("gemstone", "gem empowerment", normalized.gemstone, _findByRef(catalogs.upgrades, normalized.gemstone));
+		if (!out.missing.length) out.ambiguities = this._getLegacyDeprojectionAmbiguities(normalized, out);
 		return out;
 	}
 
@@ -420,9 +435,122 @@ export class ItemBuilderCore {
 		delete out.material;
 		delete out.appliedUpgrades;
 		delete out.socketedGemstones;
-		out.entries = (out.entries || []).filter(entry => !(entry?.name || "").startsWith(_GENERATED_ENTRY_PREFIX));
-		if (!out.entries.length) delete out.entries;
 		return out;
+	}
+
+	static _getLegacyDeprojectionAmbiguities (normalized, legacyResolution) {
+		const original = normalized.materialized?.item || {};
+		const material = legacyResolution.material;
+		const upgrades = legacyResolution.upgrades.filter(Boolean);
+		const upgradeEffects = _getUpgradeEffects(upgrades);
+		const materialEffects = material
+			? CharacterSheetMaterials.getMaterialEffects(
+				{...legacyResolution.preset, ...original, material: normalized.materialized.material},
+				material,
+			)
+			: null;
+		const out = [];
+		const add = (field, label, reason) => {
+			if (out.some(it => it.field === field && it.reason === reason)) return;
+			out.push({field, label, reason});
+		};
+
+		const materialDamageSteps = CharacterSheetMaterials.getItemKind({...legacyResolution.preset, ...original}) === "weapon"
+			? (CharacterSheetMaterials.axisValue(material?.damage) || 0)
+			: 0;
+		const damageCandidates = [
+			...CharacterSheetMaterials.DIE_LADDER,
+			...Object.keys(CharacterSheetMaterials.DIE_EQUIVALENTS),
+		];
+		for (const prop of ["dmg1", "dmg2"]) {
+			if (!original[prop] || (!materialDamageSteps && !upgradeEffects.damageDieIncrease)) continue;
+			const preimages = this._getProjectionPreimages({
+				observed: original[prop],
+				candidates: damageCandidates,
+				project: candidate => _increaseDamageDie(
+					CharacterSheetMaterials.stepDamageDie(candidate, materialDamageSteps),
+					upgradeEffects.damageDieIncrease,
+				),
+			});
+			if (preimages.length > 1) {
+				add(
+					prop,
+					`${prop === "dmg1" ? "primary" : "versatile"} damage die`,
+					`the projected value ${original[prop]} has multiple possible bases: ${preimages.join(", ")}`,
+				);
+			}
+		}
+
+		const materialCritical = CharacterSheetMaterials.axisValue(material?.critical) || 0;
+		if (materialCritical || upgradeEffects.critThresholdReduction) {
+			const observed = Number(original.critThreshold);
+			if (Number.isFinite(observed)) {
+				const preimages = this._getProjectionPreimages({
+					observed,
+					candidates: Array.from({length: 19}, (_, ix) => ix + 2),
+					project: candidate => {
+						const materialized = materialCritical
+							? Math.max(2, Math.min(20, candidate - materialCritical))
+							: candidate;
+						return upgradeEffects.critThresholdReduction
+							? Math.max(2, materialized - upgradeEffects.critThresholdReduction)
+							: materialized;
+					},
+				});
+				if (preimages.length > 1) {
+					add(
+						"critThreshold",
+						"critical-hit threshold",
+						`the projected value ${observed} has multiple possible bases: ${preimages.join(", ")}`,
+					);
+				}
+			}
+		}
+
+		if (materialEffects?.armorDexCapDelta && Number(original.dexterityMax) === 0) {
+			const preimages = this._getProjectionPreimages({
+				observed: 0,
+				candidates: Array.from({length: 31}, (_, ix) => ix),
+				project: candidate => Math.max(0, candidate + materialEffects.armorDexCapDelta),
+			});
+			if (preimages.length > 1) {
+				add(
+					"dexterityMax",
+					"armor Dexterity cap",
+					"the projected zero cap is the result of a clamped material adjustment",
+				);
+			}
+		}
+
+		const gemstoneDescriptor = getGemstoneDescriptor(legacyResolution.gemstone);
+		if (
+			gemstoneDescriptor?.resource?.key === "charges"
+			&& Number.isFinite(Number(gemstoneDescriptor.resource.max))
+		) {
+			const observed = Number(original.charges);
+			const maximum = Number(gemstoneDescriptor.resource.max);
+			if (Number.isFinite(observed)) {
+				const preimages = this._getProjectionPreimages({
+					observed,
+					candidates: Array.from({length: Math.max(maximum, observed, 0) + 1}, (_, ix) => ix),
+					project: candidate => Math.max(candidate, maximum),
+				});
+				if (preimages.length > 1) {
+					add(
+						"charges",
+						"charge maximum",
+						`the projected value ${observed} may contain any authored maximum from 0 through ${maximum}`,
+					);
+				}
+			}
+		}
+
+		return out;
+	}
+
+	static _getProjectionPreimages ({observed, candidates, project}) {
+		return [...new Set(candidates)]
+			.filter(candidate => _isEqual(project(candidate), observed));
 	}
 
 	static _getAuthoredItemFromMaterialized ({normalized, preset, legacyResolution, catalogs}) {

@@ -239,22 +239,116 @@ describe("ItemBuilderCore", () => {
 	});
 
 	test("deprojects material and upgrade damage-die overrides without repeated drift", () => {
-		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
+		const preset = {...ITEMS[0]};
+		delete preset.dmg2;
+		const catalogs = {items: [preset], materials: MATERIALS, upgrades: UPGRADES};
 		for (const composition of [
 			{material: {name: "Starsteel", source: "TGTT"}},
 			{upgrades: [{name: "Superior", source: "TCAH"}]},
 		]) {
-			const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), ITEMS[0], {source: "HB"});
-			draft.item.dmg1 = "1d10";
+			const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), preset, {source: "HB"});
+			draft.item.dmg1 = "1d8";
 			Object.assign(draft, composition);
 			const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
-			expect(legacyProjected.dmg1).toBe("1d12");
+			expect(legacyProjected.dmg1).toBe("1d10");
 
 			const canonical = ItemBuilderCore.serialize(ItemBuilderCore.fromItem(legacyProjected), catalogs);
-			expect(canonical.dmg1).toBe("1d10");
-			expect(ItemBuilderCore.projectForPreview(ItemBuilderCore.fromItem(canonical), catalogs).dmg1).toBe("1d12");
+			expect(canonical.dmg1).toBe("1d8");
+			expect(ItemBuilderCore.projectForPreview(ItemBuilderCore.fromItem(canonical), catalogs).dmg1).toBe("1d10");
 			expect(ItemBuilderCore.serialize(ItemBuilderCore.fromItem(canonical), catalogs)).toEqual(canonical);
 		}
+	});
+
+	test.each([
+		{
+			label: "a clamped Gold damage reduction",
+			item: {dmg1: "1d4"},
+			composition: {material: {name: "Gold", source: "TGTT"}},
+			expectedProjected: {dmg1: "1d4"},
+			expectedField: "dmg1",
+		},
+		{
+			label: "a saturated Gold critical threshold",
+			item: {critThreshold: 19},
+			composition: {material: {name: "Gold", source: "TGTT"}},
+			expectedProjected: {critThreshold: 20},
+			expectedField: "critThreshold",
+		},
+		{
+			label: "a clamped Superior damage increase",
+			item: {dmg1: "1d12"},
+			composition: {upgrades: [{name: "Superior", source: "TCAH"}]},
+			expectedProjected: {dmg1: "1d12"},
+			expectedField: "dmg1",
+		},
+	])("blocks legacy deprojection of $label without guessing an authored base", ({
+		item,
+		composition,
+		expectedProjected,
+		expectedField,
+	}) => {
+		const gold = {
+			name: "Gold",
+			source: "TGTT",
+			appliesTo: ["weapon"],
+			damage: -1,
+			critical: -1,
+			entries: ["Gold is soft."],
+		};
+		const catalogs = {items: ITEMS, materials: [...MATERIALS, gold], upgrades: UPGRADES};
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), ITEMS[0], {source: "HB"});
+		Object.assign(draft.item, item);
+		Object.assign(draft, composition);
+		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
+		expect(legacyProjected).toEqual(expect.objectContaining(expectedProjected));
+		const restored = ItemBuilderCore.fromItem(legacyProjected);
+
+		const validation = ItemBuilderCore.validate(restored, catalogs);
+		expect(validation.isValid).toBe(false);
+		expect(validation.errors).toContainEqual(expect.objectContaining({
+			field: expectedField,
+			message: expect.stringMatching(/cannot be uniquely reversed/i),
+		}));
+
+		const failSafe = ItemBuilderCore.serialize(restored, catalogs);
+		expect(failSafe).toEqual(expect.objectContaining(expectedProjected));
+		expect(failSafe.entries).toEqual(legacyProjected.entries);
+		expect(failSafe).not.toHaveProperty("baseItem");
+		expect(failSafe).not.toHaveProperty("material");
+		expect(failSafe).not.toHaveProperty("appliedUpgrades");
+		expect(failSafe).not.toHaveProperty("socketedGemstones");
+	});
+
+	test("deprojects an ordinary invertible legacy damage transformation exactly once", () => {
+		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), ITEMS[0], {source: "HB"});
+		draft.material = {name: "Starsteel", source: "TGTT"};
+		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
+		expect(legacyProjected.dmg1).toBe("1d10");
+		const restored = ItemBuilderCore.fromItem(legacyProjected);
+
+		expect(ItemBuilderCore.validate(restored, catalogs).isValid).toBe(true);
+		const canonical = ItemBuilderCore.serialize(restored, catalogs);
+		expect(canonical.dmg1).toBe("1d8");
+		expect(ItemBuilderCore.serialize(ItemBuilderCore.fromItem(canonical), catalogs)).toEqual(canonical);
+	});
+
+	test("blocks a saturated legacy gemstone charge maximum", () => {
+		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), ITEMS[0], {source: "HB"});
+		draft.item.charges = 2;
+		draft.gemstone = {name: "Arrow-Catcher", source: "TGTT"};
+		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
+		expect(legacyProjected.charges).toBe(3);
+		const restored = ItemBuilderCore.fromItem(legacyProjected);
+
+		const validation = ItemBuilderCore.validate(restored, catalogs);
+		expect(validation.isValid).toBe(false);
+		expect(validation.errors).toContainEqual(expect.objectContaining({
+			field: "charges",
+			message: expect.stringMatching(/cannot be uniquely reversed/i),
+		}));
+		expect(ItemBuilderCore.serialize(restored, catalogs)).toEqual(expect.objectContaining({charges: 3}));
 	});
 
 	test("deprojects invertible material properties while preserving authored bases", () => {
