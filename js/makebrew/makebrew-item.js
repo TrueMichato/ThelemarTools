@@ -122,7 +122,35 @@ export class ItemBuilder extends BuilderBase {
 	}
 
 	_getAsMarkdown (item) {
-		return RendererMarkdown.item.getCompactRenderedString(item);
+		const projected = ItemBuilderCore.projectForPreview(ItemBuilderCore.fromItem(item), this._catalogs);
+		return RendererMarkdown.item.getCompactRenderedString(projected);
+	}
+
+	async pDoHandleClickDownloadMarkdown ({uniqueIds = null} = {}) {
+		const entities = (await this._pGetBrewEntitiesCurrentSource())
+			.filter(ent => uniqueIds == null || uniqueIds.includes(ent.uniqueId))
+			.map(ent => ItemBuilderCore.projectForPreview(ItemBuilderCore.fromItem(ent), this._catalogs));
+		const mdOut = await RendererMarkdown.exporting.pGetMarkdownDoc({
+			ents: entities,
+			prop: this._prop,
+			pFnGetFluff: this._pFnGetFluff,
+		});
+		DataUtil.userDownloadText(`${DataUtil.getCleanFilename(BrewUtil2.sourceJsonToFull(this._ui.source))}.md`, mdOut);
+	}
+
+	async pHandleClick_viewMarkdownUniqueId (evt, uniqueId) {
+		const entry = MiscUtil.copy(await BrewUtil2.pGetEditableBrewEntity(this._prop, uniqueId));
+		const name = `${entry._displayName || entry.name} \u2014 Markdown`;
+		const mdText = this._getAsMarkdown(entry);
+		Renderer.hover.getShowWindow(
+			Renderer.hover.getHoverContent_miscCode(name, mdText),
+			Renderer.hover.getWindowPositionFromEvent(evt),
+			{
+				title: name,
+				isPermanent: true,
+				isBookContent: true,
+			},
+		);
 	}
 
 	async pHandleClickLoadExisting () {

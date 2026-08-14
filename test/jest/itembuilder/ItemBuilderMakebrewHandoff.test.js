@@ -191,9 +191,19 @@ describe("Makebrew ItemBuilder Quick Forge handoff", () => {
 		const builder = new ItemBuilder();
 		builder.ui = {source: "HB", allSources: ["HB"], doSaveDebounced: jest.fn()};
 		builder.renderOutput = jest.fn();
-		builder._draft = ItemBuilderCore.createDraft({source: "HB"});
+		builder._catalogs = {
+			items: [{name: "Longsword", source: "PHB", type: "M", dmg1: "1d8"}],
+			materials: [],
+			upgrades: [{name: "Balanced", source: "TCAH", upgradeType: ["WU:1"], entries: ["Upgrade."]}],
+		};
+		builder._draft = ItemBuilderCore.applyPreset(
+			ItemBuilderCore.createDraft({source: "HB"}),
+			builder._catalogs.items[0],
+			{source: "HB"},
+		);
+		builder._draft.upgrades = [{name: "Balanced", source: "TCAH"}];
 		builder._draft.item.name = "Before";
-		builder.__state = {...ItemBuilderCore.serialize(builder._draft), uniqueId: "item-id"};
+		builder.__state = {...ItemBuilderCore.serialize(builder._draft, builder._catalogs), uniqueId: "item-id"};
 		builder.__meta = {isModified: true, isPersisted: true, nameOriginal: "Before"};
 		builder._state = builder.__state;
 		builder._meta = builder.__meta;
@@ -207,12 +217,93 @@ describe("Makebrew ItemBuilder Quick Forge handoff", () => {
 
 			expect(persist).toHaveBeenCalledTimes(1);
 			expect(persist).toHaveBeenCalledWith("item", expect.objectContaining({name: "After", uniqueId: "item-id"}));
+			expect(persist.mock.calls[0][1]).toEqual(expect.objectContaining({
+				baseItem: "Longsword|PHB",
+				appliedUpgrades: [{name: "Balanced", source: "TCAH"}],
+				dmg1: "1d8",
+			}));
+			expect(persist.mock.calls[0][1]).not.toHaveProperty("bonusWeaponAttack");
+			expect(persist.mock.calls[0][1].entries || []).not.toContainEqual(expect.objectContaining({name: expect.stringMatching(/^Item Builder:/)}));
 			jest.runOnlyPendingTimers();
 			expect(persist).toHaveBeenCalledTimes(1);
 			expect(builder._meta.isModified).toBe(false);
 		} finally {
 			MiscUtil.debounce = debounceOriginal;
 			jest.useRealTimers();
+		}
+	});
+
+	test("projects Markdown render and downloads while keeping JSON data canonical", async () => {
+		const builder = new ItemBuilder();
+		builder.ui = {source: "HB", allSources: ["HB"], doSaveDebounced: jest.fn(), _getJsonOutputTemplate: () => ({})};
+		builder._catalogs = {
+			items: [{name: "Longsword", source: "PHB", type: "M", weapon: true, dmg1: "1d8"}],
+			materials: [{name: "Starsteel", source: "TGTT", appliesTo: ["weapon"], damage: 1, entries: ["Material."]}],
+			upgrades: [{name: "Balanced", source: "TCAH", upgradeType: ["WU:1"], entries: ["Upgrade."]}],
+		};
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), builder._catalogs.items[0], {source: "HB"});
+		draft.item.name = "Markdown Blade";
+		draft.material = {name: "Starsteel", source: "TGTT"};
+		draft.upgrades = [{name: "Balanced", source: "TCAH"}];
+		const canonical = {...ItemBuilderCore.serialize(draft, builder._catalogs), uniqueId: "markdown-id"};
+		builder._draft = draft;
+		builder.__state = canonical;
+
+		const markdownRendererOriginal = RendererMarkdown.item.getCompactRenderedString;
+		const markdownExportOriginal = RendererMarkdown.exporting?.pGetMarkdownDoc;
+		const getEntityOriginal = BrewUtil2.pGetEditableBrewEntity;
+		const sourceToFullOriginal = BrewUtil2.sourceJsonToFull;
+		const cleanFilenameOriginal = DataUtil.getCleanFilename;
+		const userDownloadOriginal = DataUtil.userDownload;
+		const userDownloadTextOriginal = DataUtil.userDownloadText;
+		RendererMarkdown.item.getCompactRenderedString = jest.fn(item => JSON.stringify(item));
+		RendererMarkdown.exporting ||= {};
+		RendererMarkdown.exporting.pGetMarkdownDoc = jest.fn(async ({ents}) => JSON.stringify(ents));
+		BrewUtil2.pGetEditableBrewEntity = jest.fn(async () => canonical);
+		BrewUtil2.sourceJsonToFull = source => source;
+		DataUtil.getCleanFilename = value => value;
+		DataUtil.userDownload = jest.fn();
+		DataUtil.userDownloadText = jest.fn();
+		builder._pGetBrewEntitiesCurrentSource = jest.fn(async () => [canonical]);
+
+		try {
+			const rendered = JSON.parse(builder._getAsMarkdown(canonical));
+			expect(rendered).toEqual(expect.objectContaining({dmg1: "1d10", bonusWeaponAttack: 1}));
+			expect(rendered.entries).toEqual(expect.arrayContaining([
+				expect.objectContaining({name: "Item Builder: Material - Starsteel"}),
+				expect.objectContaining({name: "Item Builder: Upgrade - Balanced"}),
+			]));
+
+			await builder.pHandleClick_downloadMarkdownUniqueId("markdown-id");
+			expect(JSON.parse(DataUtil.userDownloadText.mock.calls[0][1])).toEqual(expect.objectContaining({
+				dmg1: "1d10",
+				bonusWeaponAttack: 1,
+			}));
+
+			await builder.pDoHandleClickDownloadMarkdown();
+			expect(JSON.parse(DataUtil.userDownloadText.mock.calls[1][1])[0]).toEqual(expect.objectContaining({
+				dmg1: "1d10",
+				bonusWeaponAttack: 1,
+			}));
+
+			await builder.pHandleClick_downloadJsonUniqueId("markdown-id");
+			const jsonItem = DataUtil.userDownload.mock.calls[0][1].item[0];
+			expect(jsonItem).toEqual(expect.objectContaining({
+				dmg1: "1d8",
+				material: {name: "Starsteel", source: "TGTT"},
+				appliedUpgrades: [{name: "Balanced", source: "TCAH"}],
+			}));
+			expect(jsonItem).not.toHaveProperty("bonusWeaponAttack");
+			expect(jsonItem.entries || []).not.toContainEqual(expect.objectContaining({name: expect.stringMatching(/^Item Builder:/)}));
+		} finally {
+			RendererMarkdown.item.getCompactRenderedString = markdownRendererOriginal;
+			if (markdownExportOriginal) RendererMarkdown.exporting.pGetMarkdownDoc = markdownExportOriginal;
+			else delete RendererMarkdown.exporting.pGetMarkdownDoc;
+			BrewUtil2.pGetEditableBrewEntity = getEntityOriginal;
+			BrewUtil2.sourceJsonToFull = sourceToFullOriginal;
+			DataUtil.getCleanFilename = cleanFilenameOriginal;
+			DataUtil.userDownload = userDownloadOriginal;
+			DataUtil.userDownloadText = userDownloadTextOriginal;
 		}
 	});
 });

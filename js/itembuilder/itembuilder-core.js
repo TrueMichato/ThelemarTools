@@ -115,7 +115,7 @@ function _increaseDamageDie (damageDie, steps = 1) {
 	const count = Number(match[1]);
 	const ix = _DIE_ORDER.indexOf(Number(match[2]));
 	if (!~ix) return damageDie;
-	return `${count}d${_DIE_ORDER[Math.min(_DIE_ORDER.length - 1, ix + steps)]}`;
+	return `${count}d${_DIE_ORDER[Math.max(0, Math.min(_DIE_ORDER.length - 1, ix + steps))]}`;
 }
 
 function _getUpgradeEffects (upgrades) {
@@ -275,6 +275,7 @@ export class ItemBuilderCore {
 		const errors = [];
 		const warnings = [];
 		const {item} = normalized;
+		const legacyResolution = this._getLegacyCompositionResolution(normalized, catalogs);
 
 		if (!String(item.name || "").trim()) errors.push({field: "name", message: "Enter an item name."});
 		if (!String(item.source || "").trim()) errors.push({field: "source", message: "Choose a homebrew source."});
@@ -284,12 +285,19 @@ export class ItemBuilderCore {
 				errors.push({field: prop, message: `${prop.toTitleCase ? prop.toTitleCase() : prop} must be zero or greater.`});
 			}
 		}
-		if (normalized.preset && !_findByRef(catalogs.items, normalized.preset)) warnings.push({field: "preset", message: `Preset "${normalized.preset.name}" is unavailable; authored fields are preserved.`});
-		if (normalized.material && !_findByRef(catalogs.materials, normalized.material)) warnings.push({field: "material", message: `Material "${normalized.material.name}" is unavailable; its reference is preserved.`});
-		for (const upgrade of normalized.upgrades) {
-			if (!_findByRef(catalogs.upgrades, upgrade)) warnings.push({field: "upgrades", message: `Upgrade "${upgrade.name}" is unavailable; its reference is preserved.`});
+		for (const missing of legacyResolution.missing) {
+			errors.push({
+				field: missing.field,
+				message: `Cannot safely save this legacy projected item because ${missing.label} "${missing.ref.name}" is unavailable. Restore the referenced catalog entry before saving.`,
+			});
 		}
-		if (normalized.gemstone && !_findByRef(catalogs.upgrades, normalized.gemstone)) warnings.push({field: "gemstone", message: `Gem empowerment "${normalized.gemstone.name}" is unavailable; its reference is preserved.`});
+
+		if (normalized.preset && !_findByRef(catalogs.items, normalized.preset) && !normalized.materialized?.isLegacyProjected) warnings.push({field: "preset", message: `Preset "${normalized.preset.name}" is unavailable; authored fields are preserved.`});
+		if (normalized.material && !_findByRef(catalogs.materials, normalized.material) && !normalized.materialized?.isLegacyProjected) warnings.push({field: "material", message: `Material "${normalized.material.name}" is unavailable; its reference is preserved.`});
+		for (const upgrade of normalized.upgrades) {
+			if (!_findByRef(catalogs.upgrades, upgrade) && !normalized.materialized?.isLegacyProjected) warnings.push({field: "upgrades", message: `Upgrade "${upgrade.name}" is unavailable; its reference is preserved.`});
+		}
+		if (normalized.gemstone && !_findByRef(catalogs.upgrades, normalized.gemstone) && !normalized.materialized?.isLegacyProjected) warnings.push({field: "gemstone", message: `Gem empowerment "${normalized.gemstone.name}" is unavailable; its reference is preserved.`});
 		if (normalized.gemstone && !isSocketable(item)) errors.push({field: "gemstone", message: "Only weapons, armor, and shields can hold an empowered gemstone."});
 
 		return {isValid: !errors.length, errors, warnings};
@@ -297,9 +305,14 @@ export class ItemBuilderCore {
 
 	static serialize (draft, catalogs = {}) {
 		const normalized = this.normalizeDraft(draft);
-		const preset = _findByRef(catalogs.items, normalized.preset);
-		const authoredItem = normalized.materialized?.isLegacyProjected && preset
-			? this._getAuthoredItemFromMaterialized({normalized, preset, catalogs})
+		const legacyResolution = this._getLegacyCompositionResolution(normalized, catalogs);
+		if (normalized.materialized?.isLegacyProjected && legacyResolution.missing.length) {
+			return this._serializeUnresolvedLegacyItem(normalized);
+		}
+
+		const preset = legacyResolution.preset || _findByRef(catalogs.items, normalized.preset);
+		const authoredItem = normalized.materialized?.isLegacyProjected
+			? this._getAuthoredItemFromMaterialized({normalized, preset, legacyResolution, catalogs})
 			: normalized.item;
 		let out = {..._copy(preset || {}), ..._copy(authoredItem)};
 
@@ -325,6 +338,7 @@ export class ItemBuilderCore {
 	static projectForPreview (draft, catalogs = {}) {
 		const normalized = this.normalizeDraft(draft);
 		let out = this.serialize(normalized, catalogs);
+		if (normalized.materialized?.isLegacyProjected && this._getLegacyCompositionResolution(normalized, catalogs).missing.length) return out;
 		const material = _findByRef(catalogs.materials, normalized.material);
 		const upgrades = normalized.upgrades.map(ref => _findByRef(catalogs.upgrades, ref) || ref).filter(Boolean);
 		const gemstone = normalized.gemstone ? (_findByRef(catalogs.upgrades, normalized.gemstone) || normalized.gemstone) : null;
@@ -373,9 +387,52 @@ export class ItemBuilderCore {
 		return out;
 	}
 
-	static _getAuthoredItemFromMaterialized ({normalized, preset, catalogs}) {
+	static _getLegacyCompositionResolution (normalized, catalogs) {
+		const out = {
+			preset: _findByRef(catalogs.items, normalized.preset),
+			material: _findByRef(catalogs.materials, normalized.materialized?.material),
+			upgrades: (normalized.materialized?.upgrades || []).map(ref => _findByRef(catalogs.upgrades, ref)),
+			gemstone: _findByRef(catalogs.upgrades, normalized.materialized?.gemstone),
+			missing: [],
+		};
+		if (!normalized.materialized?.isLegacyProjected) return out;
+
+		const addMissing = (field, label, ref, resolved) => {
+			if (!ref?.name || resolved) return;
+			const uid = `${field}|${_key(ref.name)}|${_key(ref.source)}`;
+			if (out.missing.some(it => it.uid === uid)) return;
+			out.missing.push({field, label, ref, uid});
+		};
+		addMissing("preset", "preset", normalized.preset, out.preset);
+		addMissing("material", "material", normalized.materialized.material, out.material);
+		(normalized.materialized.upgrades || []).forEach((ref, ix) => addMissing("upgrades", "upgrade", ref, out.upgrades[ix]));
+		addMissing("gemstone", "gem empowerment", normalized.materialized.gemstone, out.gemstone);
+
+		addMissing("material", "material", normalized.material, _findByRef(catalogs.materials, normalized.material));
+		normalized.upgrades.forEach(ref => addMissing("upgrades", "upgrade", ref, _findByRef(catalogs.upgrades, ref)));
+		addMissing("gemstone", "gem empowerment", normalized.gemstone, _findByRef(catalogs.upgrades, normalized.gemstone));
+		return out;
+	}
+
+	static _serializeUnresolvedLegacyItem (normalized) {
+		const out = _copy(normalized.item);
+		delete out.baseItem;
+		delete out.material;
+		delete out.appliedUpgrades;
+		delete out.socketedGemstones;
+		out.entries = (out.entries || []).filter(entry => !(entry?.name || "").startsWith(_GENERATED_ENTRY_PREFIX));
+		if (!out.entries.length) delete out.entries;
+		return out;
+	}
+
+	static _getAuthoredItemFromMaterialized ({normalized, preset, legacyResolution, catalogs}) {
 		const materialized = this.normalizeDraft({
-			item: preset,
+			item: preset || {
+				type: normalized.materialized.item?.type,
+				weapon: normalized.materialized.item?.weapon,
+				armor: normalized.materialized.item?.armor,
+				shield: normalized.materialized.item?.shield,
+			},
 			preset: normalized.preset,
 			material: normalized.materialized.material,
 			upgrades: normalized.materialized.upgrades,
@@ -384,26 +441,81 @@ export class ItemBuilderCore {
 		const projectedPreset = this.projectForPreview(materialized, catalogs);
 		const original = normalized.materialized.item || {};
 		const authored = _copy(normalized.item);
+		const resetProps = new Set();
 
-		for (const prop of new Set([...Object.keys(preset), ...Object.keys(projectedPreset)])) {
-			if (_isEqual(projectedPreset[prop], preset[prop])) continue;
+		for (const prop of new Set([...Object.keys(preset || {}), ...Object.keys(projectedPreset)])) {
+			if (_isEqual(projectedPreset[prop], preset?.[prop])) continue;
 			if (!_isEqual(original[prop], projectedPreset[prop])) continue;
 			if (!_isEqual(authored[prop], original[prop])) continue;
-			if (preset[prop] === undefined) delete authored[prop];
+			if (preset?.[prop] === undefined) delete authored[prop];
 			else authored[prop] = _copy(preset[prop]);
+			resetProps.add(prop);
 		}
 
 		authored.entries = (authored.entries || []).filter(entry => !(entry?.name || "").startsWith(_GENERATED_ENTRY_PREFIX));
-		const oldUpgrades = (normalized.materialized.upgrades || []).map(ref => _findByRef(catalogs.upgrades, ref) || ref).filter(Boolean);
+		const oldMaterial = legacyResolution.material;
+		const oldUpgrades = legacyResolution.upgrades.filter(Boolean);
 		const oldUpgradeEffects = _getUpgradeEffects(oldUpgrades);
+		const materialContext = {...original, material: normalized.materialized.material};
+		const oldMaterialEffects = oldMaterial
+			? CharacterSheetMaterials.getMaterialEffects(materialContext, oldMaterial)
+			: null;
+
+		const subtractNumeric = (prop, delta) => {
+			if (!delta || resetProps.has(prop) || !Object.hasOwn(authored, prop)) return;
+			const value = Number(authored[prop]);
+			if (!Number.isFinite(value)) return;
+			authored[prop] = value - delta;
+		};
+		subtractNumeric("bonusWeaponAttack", (oldMaterialEffects?.bonusWeaponAttack || 0) + oldUpgradeEffects.bonusWeaponAttack);
+		subtractNumeric("bonusWeaponDamage", (oldMaterialEffects?.bonusWeaponDamage || 0) + oldUpgradeEffects.bonusWeaponDamage);
+		subtractNumeric("bonusSpellAttack", oldUpgradeEffects.bonusSpellAttack);
+		subtractNumeric("bonusSpellSaveDc", oldUpgradeEffects.bonusSpellSaveDc);
+		subtractNumeric("acBonus", oldMaterialEffects?.bonusAc || 0);
+		subtractNumeric("dexterityMax", oldMaterialEffects?.armorDexCapDelta || 0);
+		if (
+			oldMaterialEffects?.armorStrengthRequirementDelta
+			&& !oldMaterialEffects.armorNoStrengthRequirement
+		) subtractNumeric("strength", oldMaterialEffects.armorStrengthRequirementDelta);
+
+		if (!resetProps.has("critThreshold") && Object.hasOwn(authored, "critThreshold")) {
+			const value = Number(authored.critThreshold);
+			const materialCritical = CharacterSheetMaterials.axisValue(oldMaterial?.critical) || 0;
+			if (Number.isFinite(value)) authored.critThreshold = value + materialCritical + oldUpgradeEffects.critThresholdReduction;
+		}
+
+		for (const prop of ["dmg1", "dmg2"]) {
+			if (resetProps.has(prop) || !authored[prop]) continue;
+			authored[prop] = _increaseDamageDie(authored[prop], -oldUpgradeEffects.damageDieIncrease);
+			const materialSteps = CharacterSheetMaterials.axisValue(oldMaterial?.damage) || 0;
+			authored[prop] = CharacterSheetMaterials.stepDamageDie(authored[prop], -materialSteps);
+		}
+
+		if (oldMaterial && oldMaterialEffects && !resetProps.has("property") && Array.isArray(authored.property)) {
+			authored.property = this._deprojectMaterialProperties({
+				current: authored.property,
+				original: original.property,
+				preset: preset?.property,
+				projectedPreset: projectedPreset.property,
+				effects: oldMaterialEffects,
+			});
+		}
+		if (oldMaterialEffects?.rangeMultiplier && !resetProps.has("range") && authored.range != null) {
+			authored.range = this._deprojectRange(authored.range, oldMaterialEffects.rangeMultiplier);
+		}
+		if (oldMaterial && !resetProps.has("weight") && authored.weight != null) {
+			authored.weight = this._deprojectWeight(authored.weight, oldMaterial);
+		}
+		if (oldMaterial && !resetProps.has("value") && authored.value != null) {
+			authored.value = this._deprojectValue(authored, oldMaterial);
+		}
+
 		authored.effects = _removeMatching(authored.effects, [
 			...oldUpgradeEffects.tags.map(tag => ({type: "itemTag", tag})),
 			...oldUpgradeEffects.notes.map(note => ({type: "note", note})),
 		]);
 
-		const oldGemstone = normalized.materialized.gemstone
-			? (_findByRef(catalogs.upgrades, normalized.materialized.gemstone) || normalized.materialized.gemstone)
-			: null;
+		const oldGemstone = legacyResolution.gemstone;
 		const oldGemDescriptor = getGemstoneDescriptor(oldGemstone);
 		authored.effects = _removeMatching(authored.effects, oldGemDescriptor?.effects);
 		authored.itemPowers = _removeMatching(authored.itemPowers, oldGemDescriptor?.powers, it => it.id || it.name);
@@ -414,5 +526,79 @@ export class ItemBuilderCore {
 		delete authored.appliedUpgrades;
 		delete authored.socketedGemstones;
 		return authored;
+	}
+
+	static _deprojectMaterialProperties ({current, original, preset, projectedPreset, effects}) {
+		const getAbv = value => String(value).split("|")[0];
+		const getWithout = (values, removals) => {
+			const removalAbvs = new Set(removals.map(getAbv));
+			return values.filter(it => !removalAbvs.has(getAbv(it)));
+		};
+		const add = (values, value) => {
+			if (!values.some(it => getAbv(it) === getAbv(value))) values.push(_copy(value));
+		};
+		const candidates = [];
+		const addCandidate = values => {
+			if (!candidates.some(it => _isEqual(it, values))) candidates.push(values);
+		};
+		const base = getWithout([...(current || [])], effects.addProperties);
+		for (const removed of effects.removeProperties) {
+			const presetValue = (preset || []).find(it => getAbv(it) === removed);
+			if (presetValue) add(base, presetValue);
+		}
+
+		for (const [source, target] of Object.entries(effects.propertyLadder || {})) {
+			if (!base.some(it => getAbv(it) === target)) continue;
+			const candidate = getWithout(base, [target]);
+			if (source !== "_") add(candidate, (preset || []).find(it => getAbv(it) === source) || source);
+			addCandidate(candidate);
+		}
+		addCandidate(base);
+
+		const presetDiff = [...(preset || [])];
+		for (const value of original || []) {
+			if (!(projectedPreset || []).some(it => getAbv(it) === getAbv(value))) add(presetDiff, value);
+		}
+		for (const value of projectedPreset || []) {
+			if ((original || []).some(it => getAbv(it) === getAbv(value))) continue;
+			const ix = presetDiff.findIndex(it => getAbv(it) === getAbv(value));
+			if (~ix) presetDiff.splice(ix, 1);
+		}
+		for (const value of current || []) {
+			if (!(original || []).some(it => getAbv(it) === getAbv(value))) add(presetDiff, value);
+		}
+		for (const value of original || []) {
+			if ((current || []).some(it => getAbv(it) === getAbv(value))) continue;
+			const ix = presetDiff.findIndex(it => getAbv(it) === getAbv(value));
+			if (~ix) presetDiff.splice(ix, 1);
+		}
+		addCandidate(presetDiff);
+
+		return candidates.find(it => _isEqual(CharacterSheetMaterials._projectProperties(it, effects), current))
+			|| _copy(current);
+	}
+
+	static _deprojectRange (range, multiplier) {
+		const parts = String(range).split("/").map(it => Number(it.trim()));
+		if (!multiplier || parts.some(it => !Number.isFinite(it))) return range;
+		const candidate = parts.map(it => Math.ceil(it / multiplier)).join("/");
+		return CharacterSheetMaterials._scaleRange(candidate, multiplier) === String(range) ? candidate : range;
+	}
+
+	static _deprojectWeight (weight, material) {
+		const value = Number(weight);
+		const multiplier = CharacterSheetMaterials.getWeightMultiplier(material);
+		if (!Number.isFinite(value) || !multiplier) return weight;
+		const candidate = Math.round((value / multiplier) * 100) / 100;
+		return CharacterSheetMaterials.getEffectiveWeight({weight: candidate}, material) === value ? candidate : weight;
+	}
+
+	static _deprojectValue (authored, material) {
+		const value = Number(authored.value);
+		if (!Number.isFinite(value) || material?.price?.unit !== "lb" || !Number.isFinite(Number(material.price.gp))) return authored.value;
+		const effectiveWeight = CharacterSheetMaterials.getEffectiveWeight({weight: authored.weight}, material);
+		if (!Number.isFinite(effectiveWeight) || effectiveWeight <= 0) return authored.value;
+		const candidate = value - Math.round(effectiveWeight * Number(material.price.gp) * 100);
+		return CharacterSheetMaterials.getEffectiveValue({...authored, value: candidate}, material) === value ? candidate : authored.value;
 	}
 }
