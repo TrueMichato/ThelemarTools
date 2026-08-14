@@ -424,12 +424,24 @@ describeCharacter({
 describeCharacter({
 	preset: PRESET_FULL_ZODIAC_CENTAUR,
 	displayName: "Zodiac Druid Centaur",
-	// Wild Shape and Zodiac Form ARE registered active states, but the sheet
-	// deliberately routes them to the dedicated Druid Resources modal and drops
-	// them from the generic strip (`isDruidResourceActivatable` in
-	// charactersheet.js). So this probe's surface can never show them, by
-	// design. Wild Shape is covered as a `kind: "resource"` matrix row.
-	signatureToggleSkip: {skip: true, reason: "Wild Shape and Zodiac Form are deliberately routed to the dedicated Druid Resources modal and excluded from the generic Overview activatable strip via isDruidResourceActivatable; Wild Shape is covered as a kind:\"resource\" matrix row"},
+	// The Zodiac Form DOES reach the Overview activatable strip — but under the
+	// name of the *chosen constellation* ("Bee"), never the string "Zodiac
+	// Form". An earlier `/zodiac|starry|wild shape/i` pattern matched nothing
+	// and skipped silently, and its skip reason (that
+	// `isDruidResourceActivatable` removes Zodiac forms from the strip by
+	// design) is true of the PARENT "Zodiac Form: Month" feature and false of
+	// the constellation rows — which is why the strip was showing one.
+	//
+	// Pointing the probe at the 12 month constellations found the row, flipped
+	// it, and measured zero delta across every derived surface: activating a
+	// constellation from the strip bypasses `activateZodiacForm()`, so no
+	// formId is attached and the form def's `getEffects()` (Bee's radiant
+	// bonus-action attack) never runs. Filed as CS-BUG-163.
+	//
+	// blocked by CS-BUG-163 — restore this to a real probe once the strip row
+	// either activates the form properly or is filtered like its parent:
+	//   signatureToggle: /^(beaver|aurochs|horse|octopus|peacock|roc|bee|hound|cat|griffon|bulette|phoenix)$/i,
+	signatureToggleSkip: {skip: true, reason: "blocked by CS-BUG-163 — the constellation row (e.g. Bee) IS present and enabled in the Overview strip, but activating it bypasses activateZodiacForm(), so no formId is set, the form definition's getEffects() never runs, and the toggle produces no measurable effect; Zodiac Form's working path is the Druid Resources modal and every constellation is covered by buildZodiacFormChecks()"},
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [

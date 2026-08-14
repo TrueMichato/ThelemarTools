@@ -9567,3 +9567,56 @@ CS-BUG-156: a probe that finds *a* match is not a probe that finds *the* match.
 asserting the new behaviour red, while the Lycan test, the single-row test, the
 already-chosen-from-the-pool test and the below-level test stay green — those hold
 under both versions, so the control discriminates rather than covaries.
+
+## CS-BUG-163 — activating a Zodiac constellation from the Overview strip does nothing — OPEN
+
+**Symptom.** A Circle of the Zodiac druid at L5 sees a row named after its chosen
+constellation (e.g. **Bee**) under *Available to Activate* on the Overview tab, with
+a working **Activate** button. Clicking it marks the state active and then ended, but
+produces **no mechanical change at all** — no new attack, and no change to AC, spell
+save DC, resistances, speed, existing attack damage, or any advantage flag. Bee is
+documented to grant a bonus-action ranged spell attack dealing `1d8 + Wis` radiant
+damage at 60 ft, and that attack never appears.
+
+**Root cause — a name-shaped detector and a name-shaped filter disagreeing.**
+Zodiac Form is detected only when the *feature name* matches
+`/^zodiac form:\s*(month|star week)/i` (or `/^zodiac form\b/i`) —
+`charactersheet-state.js:56636`. That parent feature correctly gets
+`stateTypeId: "zodiacForm"` and `needsFormChoice: true`, and is then deliberately
+filtered out of the generic strip by
+`if (this._druidResourcesEnabled && CharacterSheetState.isDruidResourceActivatable(af)) return false;`
+(`charactersheet.js:8292`), which routes it to the dedicated Druid Resources modal.
+
+The **individual constellation features** are separate class-feature rows named
+`Bee`, `Roc`, `Cat`, … . None of those names match the `/^zodiac form/` detector, so
+none of them receive `stateTypeId: "zodiacForm"` — and `isDruidResourceActivatable`
+tests exactly that id, so the filter at `:8292` does not exclude them. They leak into
+the generic strip as ordinary activatable rows.
+
+Activating one therefore never calls `activateZodiacForm()`
+(`charactersheet-state.js:58309`), so no `zodiacForm: {formId}` payload is attached
+to the state. The form definition's `getEffects()` — which is what emits Bee's
+`{type: "attack", name: "Bee Form (Zodiac)"}` at
+`charactersheet-state.js:52656` — is keyed off that `formId` and never runs.
+`getActiveStateAttacks()` consequently has nothing to return.
+
+The two mechanisms are individually correct and disagree only because one identifies
+a Zodiac form by *state type* and the other by *name prefix*. The working path (the
+Druid Resources modal) and the dead path (the strip row) are both reachable by the
+player, and the dead one looks identical to every other working toggle on the sheet.
+
+**Detection.** Found by pointing the `signatureToggle` probe at the constellation
+names after CS-BUG-156 converted silent skips into hard failures. The probe located
+and flipped the row, then measured zero delta across every derived surface it reads —
+so the failure is a measured absence of effect, not an absent row.
+
+**Why the earlier skip was wrong.** This spec previously declared
+`signatureToggleSkip` on the reasoning that `isDruidResourceActivatable` removes
+Zodiac forms from the strip *by design*. That is true of the parent feature and false
+of the constellations, which is precisely why the strip was showing one. The skip
+generalised a correct statement about one row to a different row it does not cover —
+the same shape as CS-BUG-162.
+
+**Scope note.** Whether the constellation rows *should* be activatable from the strip
+at all, or should be filtered like their parent, is a design decision. Either
+resolution fixes the defect: today the row is present, enabled, and inert.
