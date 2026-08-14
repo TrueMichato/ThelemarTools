@@ -8,11 +8,77 @@ import {
 const _VERSION = 1;
 const _GENERATED_ENTRY_PREFIX = "Item Builder:";
 const _DIE_ORDER = [4, 6, 8, 10, 12];
+const _ITEM_COLLECTION_PROPS = [
+	"entries",
+	"additionalEntries",
+	"properties",
+	"property",
+	"attachedSpells",
+	"focus",
+	"effects",
+	"itemPowers",
+	"appliedUpgrades",
+	"socketedGemstones",
+];
+const _COMPOSITION_COLLECTION_PROPS = [
+	"entries",
+	"upgradeType",
+	"prerequisite",
+	"properties",
+	"property",
+	"attachedSpells",
+	"focus",
+	"effects",
+	"itemPowers",
+	"appliesTo",
+];
 
 const _copy = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const _key = value => String(value || "").trim().toLowerCase();
 const _ref = ent => ent?.name ? {name: ent.name, source: ent.source || ""} : null;
 const _isEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+function _isObject (value) {
+	return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function _normalizeCollectionProps (entity, props) {
+	if (!_isObject(entity)) return entity;
+	for (const prop of props) {
+		if (!Object.hasOwn(entity, prop)) continue;
+		entity[prop] = Array.isArray(entity[prop]) ? entity[prop] : [];
+	}
+	return entity;
+}
+
+function _normalizeCompositionEntity (entity) {
+	if (!_isObject(entity)) return null;
+	return _normalizeCollectionProps(entity, _COMPOSITION_COLLECTION_PROPS);
+}
+
+function _normalizeCompositionCollection (value) {
+	if (!Array.isArray(value)) return [];
+	return value
+		.map(it => _normalizeCompositionEntity(it))
+		.filter(Boolean);
+}
+
+function _normalizeItem (item) {
+	item = _isObject(item) ? item : {};
+	_normalizeCollectionProps(item, _ITEM_COLLECTION_PROPS);
+	item.appliedUpgrades = _normalizeCompositionCollection(item.appliedUpgrades);
+	item.socketedGemstones = _normalizeCompositionCollection(item.socketedGemstones);
+	return item;
+}
+
+function _normalizeMaterialized (materialized) {
+	if (!_isObject(materialized)) return null;
+	materialized.item = _normalizeItem(materialized.item);
+	materialized.material = _normalizeCompositionEntity(materialized.material);
+	materialized.upgrades = _normalizeCompositionCollection(materialized.upgrades);
+	materialized.gemstone = _normalizeCompositionEntity(materialized.gemstone);
+	return materialized;
+}
 
 function _findByRef (pool, ref) {
 	if (!ref?.name) return null;
@@ -134,18 +200,17 @@ export class ItemBuilderCore {
 		if (saved?.name && saved?.source && !saved.item) saved = {version: _VERSION, item: saved};
 		const draft = {
 			version: _VERSION,
-			item: _copy(saved?.item || {}),
+			item: _normalizeItem(_copy(saved?.item || {})),
 			preset: _copy(saved?.preset || null),
-			material: _copy(Object.hasOwn(saved || {}, "material") ? saved.material : (saved?.item?.material || null)),
-			upgrades: _copy(Object.hasOwn(saved || {}, "upgrades") ? saved.upgrades : (saved?.item?.appliedUpgrades || [])),
-			gemstone: _copy(Object.hasOwn(saved || {}, "gemstone") ? saved.gemstone : (saved?.item?.socketedGemstones?.[0] || null)),
-			materialized: _copy(saved?.materialized || null),
+			material: _normalizeCompositionEntity(_copy(Object.hasOwn(saved || {}, "material") ? saved.material : (saved?.item?.material || null))),
+			upgrades: _normalizeCompositionCollection(_copy(Object.hasOwn(saved || {}, "upgrades") ? saved.upgrades : (saved?.item?.appliedUpgrades || []))),
+			gemstone: _normalizeCompositionEntity(_copy(Object.hasOwn(saved || {}, "gemstone") ? saved.gemstone : (saved?.item?.socketedGemstones?.[0] || null))),
+			materialized: _normalizeMaterialized(_copy(saved?.materialized || null)),
 		};
 		if (draft.item.name == null) draft.item.name = "New Item";
 		if (draft.item.source == null) draft.item.source = source;
 		if (draft.item.type == null) draft.item.type = "W";
 		if (draft.item.rarity == null) draft.item.rarity = "none";
-		draft.item.entries = Array.isArray(draft.item.entries) ? draft.item.entries : [];
 		return draft;
 	}
 

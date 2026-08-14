@@ -251,6 +251,8 @@ export class BuilderBase extends ProxyBase {
 	}
 
 	_doBindHeaderElements () {
+		this._btnHeaderSave.prop("disabled", false).attr("aria-disabled", "false");
+		this._btnHeaderSave.removeAttribute("title");
 		this._addHook("meta", "isModified", () => this._btnHeaderSave.txt(this._meta.isModified ? "Save *" : "Saved"))();
 		this._addHook("meta", "nameOriginal", () => this._dispHeaderName.txt(`Editing "${this._meta.nameOriginal || "?"}"`))();
 	}

@@ -1,0 +1,223 @@
+@use "../vars/vars";
+@use "../vars/vars-night";
+
+@layer vetools {
+	.itembuilder-picker {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		min-width: 0;
+		padding: 0.75rem;
+		color: vars.$rgb-font;
+
+		h3,
+		p {
+			margin: 0;
+		}
+
+		p {
+			max-width: 70ch;
+			color: vars.$rgb-font--muted;
+		}
+	}
+
+	.itembuilder-picker__heading {
+		display: flex;
+		gap: 1rem;
+		align-items: end;
+		justify-content: space-between;
+	}
+
+	.itembuilder-picker__count {
+		flex: none;
+		color: vars.$rgb-font--muted;
+		font-size: 0.75rem;
+	}
+
+	.itembuilder-picker__filters {
+		display: grid;
+		grid-template-columns: minmax(10rem, 2fr) minmax(8rem, 1fr) minmax(8rem, 1fr);
+		gap: 0.5rem;
+
+		label {
+			display: flex;
+			flex-direction: column;
+			gap: 0.2rem;
+			min-width: 0;
+			font-size: 0.75rem;
+			font-weight: 600;
+		}
+
+		input,
+		select {
+			min-height: 36px;
+		}
+	}
+
+	.itembuilder-picker__results {
+		display: flex;
+		flex-direction: column;
+		max-height: 28rem;
+		overflow-y: auto;
+		border: 1px solid vars.$rgb-border-grey;
+	}
+
+	.itembuilder-picker__choice {
+		position: relative;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 0.25rem 1rem;
+		width: 100%;
+		min-height: 72px;
+		padding: 0.65rem 0.75rem;
+		border: 0;
+		border-bottom: 1px solid vars.$rgb-border-grey--list-row;
+		background: vars.$rgb-bg;
+		color: vars.$rgb-font;
+		text-align: left;
+
+		&:last-child {
+			border-bottom: 0;
+		}
+
+		&:hover {
+			background: vars.$rgb-bg--alt;
+		}
+
+		&:focus-visible {
+			z-index: 1;
+			outline: 2px solid vars.$rgb-link-blue;
+			outline-offset: -2px;
+		}
+	}
+
+	.itembuilder-picker__choice--selected {
+		background: #eaf4fb;
+		box-shadow: inset 0 0 0 1px vars.$rgb-link-blue;
+	}
+
+	.itembuilder-picker__choice-head {
+		display: flex;
+		gap: 0.5rem;
+		align-items: baseline;
+		min-width: 0;
+
+		> strong {
+			overflow-wrap: anywhere;
+		}
+
+		> span {
+			color: vars.$rgb-font--muted;
+			font-size: 0.75rem;
+		}
+	}
+
+	.itembuilder-picker__effect,
+	.itembuilder-picker__context,
+	.itembuilder-picker__delta {
+		grid-column: 1;
+		overflow-wrap: anywhere;
+	}
+
+	.itembuilder-picker__context {
+		color: vars.$rgb-font--muted;
+		font-size: 0.75rem;
+	}
+
+	.itembuilder-picker__delta {
+		color: vars.$rgb-alert-text-info;
+		font-size: 0.75rem;
+		font-weight: 600;
+	}
+
+	.itembuilder-picker__action {
+		grid-column: 2;
+		grid-row: 1 / span 4;
+		align-self: center;
+		min-width: 4.5rem;
+		color: vars.$rgb-link-blue;
+		font-weight: 700;
+		text-align: right;
+	}
+
+	.itembuilder-picker__empty {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		align-items: start;
+		padding: 1rem;
+		color: vars.$rgb-font--muted;
+
+		button {
+			min-height: 36px;
+		}
+	}
+
+	.ve-night-mode {
+		.itembuilder-picker {
+			color: vars-night.$rgb-font--night;
+
+			p {
+				color: #b8b8b8;
+			}
+		}
+
+		.itembuilder-picker__count,
+		.itembuilder-picker__choice-head > span,
+		.itembuilder-picker__context,
+		.itembuilder-picker__empty {
+			color: #b8b8b8;
+		}
+
+		.itembuilder-picker__results {
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		.itembuilder-picker__choice {
+			border-color: vars-night.$rgb-border-grey--list-row-night;
+			background: vars-night.$rgb-bg--night;
+			color: vars-night.$rgb-font--night;
+
+			&:hover {
+				background: vars-night.$rgb-bg--alt-night;
+			}
+
+			&:focus-visible {
+				outline-color: vars-night.$rgb-link-blue--night;
+			}
+		}
+
+		.itembuilder-picker__choice--selected {
+			background: #263b4b;
+			box-shadow: inset 0 0 0 1px vars-night.$rgb-link-blue--night;
+		}
+
+		.itembuilder-picker__delta,
+		.itembuilder-picker__action {
+			color: #8bc8fa;
+		}
+	}
+
+	@media (width <= 600px) {
+		.itembuilder-picker__heading {
+			align-items: start;
+			flex-direction: column;
+			gap: 0.25rem;
+		}
+
+		.itembuilder-picker__filters {
+			grid-template-columns: 1fr;
+		}
+
+		.itembuilder-picker__choice {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.itembuilder-picker__action {
+			grid-column: 1;
+			grid-row: auto;
+			min-width: 0;
+			text-align: left;
+		}
+	}
+}

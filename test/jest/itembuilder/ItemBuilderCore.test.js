@@ -44,6 +44,80 @@ describe("ItemBuilderCore", () => {
 		expect(draft.upgrades).toEqual([]);
 	});
 
+	test("normalizes malformed restored collections before validation and serialization", () => {
+		const malformed = {
+			item: {
+				name: "Restored",
+				source: "HB",
+				type: "W",
+				entries: {},
+				additionalEntries: "invalid",
+				properties: null,
+				property: 42,
+				attachedSpells: {},
+				focus: "wizard",
+				effects: false,
+				itemPowers: {},
+				appliedUpgrades: "Balanced",
+				socketedGemstones: {},
+			},
+			material: {name: "Malformed Material", entries: "invalid", appliesTo: "weapon"},
+			upgrades: {name: "Balanced"},
+			gemstone: {name: "Journey", upgradeType: "GS:R", entries: {}},
+			materialized: {
+				item: {entries: null, effects: "invalid", appliedUpgrades: {}, socketedGemstones: "invalid"},
+				material: {name: "Old Material", entries: "invalid"},
+				upgrades: "invalid",
+				gemstone: {name: "Old Gem", effects: {}},
+			},
+		};
+
+		const draft = ItemBuilderCore.normalizeDraft(malformed);
+
+		for (const prop of ["entries", "additionalEntries", "properties", "property", "attachedSpells", "focus", "effects", "itemPowers", "appliedUpgrades", "socketedGemstones"]) {
+			expect(draft.item[prop]).toEqual([]);
+		}
+		expect(draft.upgrades).toEqual([]);
+		expect(draft.material).toEqual(expect.objectContaining({entries: [], appliesTo: []}));
+		expect(draft.gemstone).toEqual(expect.objectContaining({upgradeType: [], entries: []}));
+		expect(draft.materialized.item).toEqual(expect.objectContaining({entries: [], effects: [], appliedUpgrades: [], socketedGemstones: []}));
+		expect(draft.materialized.upgrades).toEqual([]);
+		expect(draft.materialized.gemstone.effects).toEqual([]);
+		expect(() => ItemBuilderCore.validate(draft)).not.toThrow();
+		expect(() => ItemBuilderCore.serialize(draft)).not.toThrow();
+	});
+
+	test("preserves canonical collection data while normalizing nested composition fields", () => {
+		const saved = {
+			item: {
+				name: "Canonical",
+				source: "HB",
+				type: "M",
+				entries: ["Description"],
+				additionalEntries: [{type: "entries", entries: ["More"]}],
+				property: ["F"],
+				attachedSpells: ["fireball|phb"],
+				focus: ["Wizard"],
+				effects: [{type: "itemTag", tag: "Magical"}],
+				itemPowers: [{id: "power", name: "Power"}],
+			},
+			upgrades: [{name: "Balanced", source: "TCAH", upgradeType: ["WU:1"], prerequisite: [{item: ["any weapon"]}], entries: ["Effect"]}],
+			gemstone: {name: "Journey", source: "TGTT", upgradeType: ["GS:R"], effects: [{type: "speedBonus", value: 10}]},
+		};
+
+		const draft = ItemBuilderCore.normalizeDraft(saved);
+
+		expect(draft.item.entries).toEqual(saved.item.entries);
+		expect(draft.item.additionalEntries).toEqual(saved.item.additionalEntries);
+		expect(draft.item.property).toEqual(saved.item.property);
+		expect(draft.item.attachedSpells).toEqual(saved.item.attachedSpells);
+		expect(draft.item.focus).toEqual(saved.item.focus);
+		expect(draft.item.effects).toEqual(saved.item.effects);
+		expect(draft.item.itemPowers).toEqual(saved.item.itemPowers);
+		expect(draft.upgrades).toEqual(saved.upgrades);
+		expect(draft.gemstone).toEqual(saved.gemstone);
+	});
+
 	test("deduplicates catalog entities by case-insensitive UID", () => {
 		const entities = ItemBuilderCore.dedupeCatalog([
 			{name: "Adamant", source: "TGTT", marker: "site"},

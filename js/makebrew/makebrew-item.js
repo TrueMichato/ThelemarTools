@@ -1,9 +1,40 @@
 import {ItemBuilderCore} from "../itembuilder/itembuilder-core.js";
+import {ItemCompositionCatalogPicker} from "../itembuilder/itembuilder-catalog-picker.js";
 import {BuilderBase} from "./makebrew-builder-base.js";
 import {BuilderUi} from "./makebrew-builderui.js";
 
 const _RARITIES = ["none", "common", "uncommon", "rare", "very rare", "legendary", "artifact", "unknown", "unknown (magic)"];
 const _ITEM_TYPES = ["A", "AF", "AT", "EM", "EXP", "FD", "G", "GS", "HA", "INS", "LA", "M", "MA", "MNT", "OTH", "P", "R", "RD", "RG", "S", "SC", "SCF", "ST", "T", "TAH", "TG", "WD", "W"];
+const _ITEM_TYPE_LABELS = {
+	A: "Ammunition",
+	AF: "Futuristic Ammunition",
+	AT: "Artisan's Tools",
+	EM: "Eldritch Machine",
+	EXP: "Explosive",
+	FD: "Food and Drink",
+	G: "Adventuring Gear",
+	GS: "Gaming Set",
+	HA: "Heavy Armor",
+	INS: "Instrument",
+	LA: "Light Armor",
+	M: "Melee Weapon",
+	MA: "Medium Armor",
+	MNT: "Mount",
+	OTH: "Other",
+	P: "Potion",
+	R: "Ranged Weapon",
+	RD: "Rod",
+	RG: "Ring",
+	S: "Shield",
+	SC: "Scroll",
+	SCF: "Spellcasting Focus",
+	ST: "Staff",
+	T: "Tool",
+	TAH: "Tack and Harness",
+	TG: "Trade Good",
+	WD: "Wand",
+	W: "Wondrous Item",
+};
 
 export class ItemBuilder extends BuilderBase {
 	constructor () {
@@ -13,6 +44,8 @@ export class ItemBuilder extends BuilderBase {
 		});
 		this._catalogs = {items: [], materials: [], upgrades: []};
 		this._draft = null;
+		this._saveStatus = "";
+		this._wrpValidation = null;
 		this._renderOutputDebounced = MiscUtil.debounce(() => this._renderOutput(), 50);
 	}
 
@@ -97,6 +130,7 @@ export class ItemBuilder extends BuilderBase {
 	}
 
 	_doSync ({isRenderInput = false} = {}) {
+		this._saveStatus = "";
 		const uniqueId = this.__state.uniqueId || CryptUtil.uid();
 		const canonical = ItemBuilderCore.serialize(this._draft, this._catalogs);
 		canonical.uniqueId = uniqueId;
@@ -106,6 +140,7 @@ export class ItemBuilder extends BuilderBase {
 		this._dispHeaderName?.txt(`Editing "${this.__state.name || "?"}"`);
 		this.renderOutput();
 		this.doUiSave();
+		this._refreshValidation();
 		if (isRenderInput) this.renderInput();
 	}
 
@@ -122,23 +157,35 @@ export class ItemBuilder extends BuilderBase {
 		this._resetTabs({tabGroup: "input"});
 		const opts = {hasBorder: true, hasBackground: true};
 		const tabs = this._renderTabs([
-			new TabUiUtil.TabMeta({...opts, name: "Preset"}),
-			new TabUiUtil.TabMeta({...opts, name: "Construction"}),
-			new TabUiUtil.TabMeta({...opts, name: "Enchantments"}),
-			new TabUiUtil.TabMeta({...opts, name: "Mechanics"}),
-			new TabUiUtil.TabMeta({...opts, name: "Description"}),
-			new TabUiUtil.TabMeta({...opts, name: "Advanced"}),
+			new TabUiUtil.TabMeta({...opts, name: "Base"}),
+			new TabUiUtil.TabMeta({...opts, name: "Composition"}),
+			new TabUiUtil.TabMeta({...opts, name: "Details"}),
+			new TabUiUtil.TabMeta({...opts, name: "Review & Save"}),
 		], {tabGroup: "input", cbTabChange: this.doUiSave.bind(this)});
-		const [presetTab, constructionTab, enchantmentsTab, mechanicsTab, descriptionTab, advancedTab] = tabs;
-		ee`<div class="ve-flex-v-center ve-w-100 ve-no-shrink ve-ui-tab__wrp-tab-heads--border mkbru_item__tabs">${tabs.map(it => it.btnTab)}</div>`.appendTo(wrp);
+		const [baseTab, compositionTab, detailsTab, reviewTab] = tabs;
+		const wrpTabHeads = ee`<div class="ve-flex-v-center ve-w-100 ve-no-shrink ve-ui-tab__wrp-tab-heads--border mkbru_item__tabs" role="tablist" aria-label="Item creation steps">${tabs.map(it => it.btnTab)}</div>`.appendTo(wrp);
+		this._decorateTabsA11y({tabs, wrpTabHeads});
+		this._wrpValidation = ee`<div class="mkbru_item__validation-slot"></div>`.appendTo(wrp);
+		this._refreshValidation();
 		tabs.forEach(it => it.wrpTab.appendTo(wrp));
 
-		this._renderPresetTab({wrp: presetTab.wrpTab, cb});
-		this._renderConstructionTab({wrp: constructionTab.wrpTab});
-		this._renderEnchantmentsTab({wrp: enchantmentsTab.wrpTab});
-		this._renderMechanicsTab({wrp: mechanicsTab.wrpTab, cb});
-		this._renderDescriptionTab({wrp: descriptionTab.wrpTab, cb});
-		this._renderAdvancedTab({wrp: advancedTab.wrpTab});
+		this._renderPresetTab({wrp: baseTab.wrpTab, cb});
+		this._renderCompositionTab({wrp: compositionTab.wrpTab});
+		this._renderDetailsTab({wrp: detailsTab.wrpTab, cb});
+		this._renderReviewTab({wrp: reviewTab.wrpTab});
+	}
+
+	_decorateTabsA11y ({tabs}) {
+		const setActive = activeTab => tabs.forEach((tab, ix) => {
+			const idTab = `mkbru-item-tab-${ix}`;
+			const idPanel = `mkbru-item-panel-${ix}`;
+			tab.btnTab.attr("id", idTab).attr("role", "tab").attr("aria-controls", idPanel);
+			tab.wrpTab.attr("id", idPanel).attr("role", "tabpanel").attr("aria-labelledby", idTab);
+			const isActive = tab === activeTab;
+			tab.btnTab.attr("aria-selected", `${isActive}`).attr("tabindex", isActive ? "0" : "-1");
+		});
+		tabs.forEach(tab => tab.btnTab.onn("click", () => setActive(tab)));
+		setActive(tabs[this._getIxActiveTab({tabGroup: "input"})] || tabs[0]);
 	}
 
 	_renderPresetTab ({wrp, cb}) {
@@ -151,7 +198,7 @@ export class ItemBuilder extends BuilderBase {
 				<div class="ve-muted ve-small">A preset supplies the base weapon, armor, or item fields. Your homebrew source and later edits remain yours.</div>
 			</div>
 			<div class="ve-flex-v-center ve-flex-wrap">
-				<span class="mkbru_item__selection ve-mr-2">${presetName}</span>
+				<span class="mkbru_item__selection ve-mr-2">${presetName.qq()}</span>
 				${btnChoose}
 			</div>
 		</div>`.appendTo(wrp);
@@ -165,66 +212,37 @@ export class ItemBuilder extends BuilderBase {
 			"source",
 		).appendTo(wrp);
 		BuilderUi.getStateIptString("Page", cb, this._draft.item, {}, "page").appendTo(wrp);
-		BuilderUi.getStateIptEnum("Type", cb, this._draft.item, {vals: _ITEM_TYPES, nullable: false}, "type").appendTo(wrp);
+		BuilderUi.getStateIptEnum("Type", cb, this._draft.item, {vals: _ITEM_TYPES, nullable: false, fnDisplay: it => _ITEM_TYPE_LABELS[it] || it}, "type").appendTo(wrp);
 		BuilderUi.getStateIptEnum("Rarity", cb, this._draft.item, {vals: _RARITIES, nullable: false, fnDisplay: it => it.toTitleCase()}, "rarity").appendTo(wrp);
 		BuilderUi.getStateIptString("Attunement", cb, this._draft.item, {nullable: true}, "reqAttune").appendTo(wrp);
 	}
 
-	_renderConstructionTab ({wrp}) {
-		const eligible = ItemBuilderCore.getEligibleMaterials({draft: this._draft, materials: this._catalogs.materials});
-		const materialOptions = eligible
-			.sort((a, b) => SortUtil.ascSortLower(a.name, b.name))
-			.map(it => `<option value="${ItemBuilderCore.packUid(it).qq()}">${it.name.qq()} (${it.source.qq()})</option>`);
-		const select = ee`<select class="ve-form-control ve-input-sm">
-			<option value="">No special material</option>
-			${materialOptions}
-		</select>`.val(ItemBuilderCore.packUid(this._draft.material) || "")
-			.onn("change", () => {
-				this._draft.material = ItemBuilderCore.unpackUid(select.val());
+	_renderCompositionTab ({wrp}) {
+		new ItemCompositionCatalogPicker({
+			draft: this._draft,
+			catalogs: this._catalogs,
+			onSelect: ({category, entity, isSelected}) => {
+				const ref = {name: entity.name, source: entity.source};
+				const uid = ItemBuilderCore.packUid(ref);
+				if (category === "material") this._draft.material = isSelected ? null : ref;
+				if (category === "gemstone") this._draft.gemstone = isSelected ? null : ref;
+				if (category === "upgrade") {
+					this._draft.upgrades = isSelected
+						? this._draft.upgrades.filter(it => ItemBuilderCore.packUid(it) !== uid)
+						: [...this._draft.upgrades, ref];
+				}
 				this._doSync({isRenderInput: true});
-			});
-		ee`<div class="mkbru_item__section">
-			<div class="ve-bold">Material</div>
-			<div class="ve-muted ve-small ve-mb-2">Only materials compatible with the current item are shown. Their weight, value, damage, protection, and other axes are projected into the saved item.</div>
-			${select}
-		</div>`.appendTo(wrp);
-		this._renderValidation({wrp});
+			},
+		}).render({wrp});
 	}
 
-	_renderEnchantmentsTab ({wrp}) {
-		const eligible = ItemBuilderCore.getEligibleUpgrades({draft: this._draft, upgrades: this._catalogs.upgrades});
-		const selected = new Set(this._draft.upgrades.map(ItemBuilderCore.packUid));
-		const wrpRows = ee`<div class="mkbru_item__choice-list"></div>`;
-		for (const upgrade of eligible) {
-			const uid = ItemBuilderCore.packUid(upgrade);
-			const cb = ee`<input type="checkbox">`.prop("checked", selected.has(uid))
-				.onn("change", () => {
-					if (cb.prop("checked")) this._draft.upgrades.push({name: upgrade.name, source: upgrade.source});
-					else this._draft.upgrades = this._draft.upgrades.filter(it => ItemBuilderCore.packUid(it) !== uid);
-					this._doSync({isRenderInput: true});
-				});
-			ee`<label class="mkbru_item__choice">${cb}<span><span class="ve-bold">${upgrade.name}</span><span class="ve-muted ve-small">${upgrade.upgradeType?.join(", ") || "Upgrade"}</span></span></label>`.appendTo(wrpRows);
-		}
-
-		const gemstones = ItemBuilderCore.getEligibleGemstones({draft: this._draft, upgrades: this._catalogs.upgrades});
-		const selGem = ee`<select class="ve-form-control ve-input-sm">
-			<option value="">No gemstone empowerment</option>
-			${gemstones.sort((a, b) => SortUtil.ascSortLower(a.name, b.name)).map(it => `<option value="${ItemBuilderCore.packUid(it).qq()}">${it.name.qq()} (${it.source.qq()})</option>`)}
-		</select>`.val(ItemBuilderCore.packUid(this._draft.gemstone) || "")
-			.onn("change", () => {
-				this._draft.gemstone = ItemBuilderCore.unpackUid(selGem.val());
-				this._doSync({isRenderInput: true});
-			});
-
-		ee`<div class="mkbru_item__section">
-			<div class="ve-bold">Weapon and armor upgrades</div>
-			<div class="ve-muted ve-small ve-mb-2">Selections are filtered by item kind and remain recorded for character-sheet editing.</div>
-			${wrpRows}
-			<hr class="ve-hr-2">
-			<div class="ve-bold ve-mb-2">Gem empowerment</div>
-			${selGem}
-		</div>`.appendTo(wrp);
-		this._renderValidation({wrp});
+	_renderDetailsTab ({wrp, cb}) {
+		const wrpMechanics = ee`<section class="mkbru_item__section"><h3>Mechanics</h3></section>`.appendTo(wrp);
+		this._renderMechanicsTab({wrp: wrpMechanics, cb});
+		const wrpDescription = ee`<section class="mkbru_item__section"><h3>Description</h3></section>`.appendTo(wrp);
+		this._renderDescriptionTab({wrp: wrpDescription, cb});
+		const wrpAdvanced = ee`<details class="mkbru_item__section mkbru_item__details-advanced"><summary>Advanced canonical fields</summary></details>`.appendTo(wrp);
+		this._renderAdvancedTab({wrp: wrpAdvanced});
 	}
 
 	_renderMechanicsTab ({wrp, cb}) {
@@ -263,11 +281,11 @@ export class ItemBuilder extends BuilderBase {
 
 	_renderAdvancedTab ({wrp}) {
 		const msg = ee`<div class="ve-small ve-mt-2" role="status"></div>`;
-		const textarea = ee`<textarea class="ve-form-control mkbru_item__advanced" spellcheck="false">${JSON.stringify(this._draft.item, null, "\t")}</textarea>`
+		const textarea = ee`<textarea class="ve-form-control mkbru_item__advanced" aria-label="Canonical item JSON" spellcheck="false">${JSON.stringify(this._draft.item, null, "\t").qq()}</textarea>`
 			.onn("change", () => {
 				try {
 					const parsed = JSON.parse(textarea.val());
-					this._draft.item = parsed;
+					this._draft = ItemBuilderCore.normalizeDraft({...this._draft, item: parsed});
 					msg.attr("class", "ve-small ve-mt-2 text-success").txt("Advanced data applied.");
 					this._doSync();
 				} catch (e) {
@@ -282,12 +300,55 @@ export class ItemBuilder extends BuilderBase {
 		</div>`.appendTo(wrp);
 	}
 
-	_renderValidation ({wrp}) {
+	_renderReviewTab ({wrp}) {
+		const item = ItemBuilderCore.serialize(this._draft, this._catalogs);
+		const type = _ITEM_TYPE_LABELS[String(this._draft.item.type || "").split("|")[0]] || "Unknown item type";
+		const composition = [
+			this._draft.material?.name ? `Material: ${this._draft.material.name}` : null,
+			this._draft.upgrades.length ? `Upgrades: ${this._draft.upgrades.map(it => it.name).join(", ")}` : null,
+			this._draft.gemstone?.name ? `Gemstone: ${this._draft.gemstone.name}` : null,
+		].filter(Boolean);
+		ee`<section class="mkbru_item__review">
+			<div class="mkbru_item__review-summary">
+				<h3>Review your item</h3>
+				<p><strong>${(this._draft.item.name || "Unnamed item").qq()}</strong> \u00b7 ${type.qq()} \u00b7 ${(this._draft.item.source || "No source").qq()}</p>
+				<p>${(composition.length ? composition.join(" \u00b7 ") : "No composition options selected.").qq()}</p>
+				<p>Use the Save control above when the validation status is ready.</p>
+			</div>
+			<div class="mkbru_item__review-preview"><table class="ve-w-100 ve-stats" aria-label="Item preview">${Renderer.item.getCompactRenderedString(item)}</table></div>
+		</section>`.appendTo(wrp);
+	}
+
+	_refreshValidation () {
+		if (!this._draft) return;
 		const {errors, warnings} = ItemBuilderCore.validate(this._draft, this._catalogs);
-		if (!errors.length && !warnings.length) return;
-		ee`<div class="mkbru_item__validation ${errors.length ? "mkbru_item__validation--error" : ""}" role="status">
-			${[...errors, ...warnings].map(it => `<div>${it.message.qq()}</div>`)}
-		</div>`.appendTo(wrp);
+		this._btnHeaderSave?.prop("disabled", !!errors.length)
+			.attr("aria-disabled", `${!!errors.length}`)
+			.attr("title", errors.length ? `Cannot save: ${errors[0].message}` : "Save item to homebrew");
+		if (!this._wrpValidation) return;
+		this._wrpValidation.empty();
+		const messages = [...errors, ...warnings];
+		const status = this._saveStatus || (errors.length
+			? `Cannot save yet. ${errors[0].message}`
+			: warnings.length
+				? "Ready to save with warnings."
+				: "Ready to save.");
+		ee`<div class="mkbru_item__validation ${errors.length ? "mkbru_item__validation--error" : warnings.length ? "mkbru_item__validation--warning" : "mkbru_item__validation--ready"}" role="status" aria-live="polite">
+			<strong>${status.qq()}</strong>
+			${messages.map(it => `<div>${it.message.qq()}</div>`)}
+		</div>`.appendTo(this._wrpValidation);
+	}
+
+	async pDoHandleClickSaveBrew () {
+		const validation = ItemBuilderCore.validate(this._draft, this._catalogs);
+		if (!validation.isValid) {
+			this._saveStatus = `Cannot save: ${validation.errors[0].message}`;
+			this._refreshValidation();
+			return;
+		}
+		await super.pDoHandleClickSaveBrew();
+		this._saveStatus = `Saved "${this._draft.item.name}" to homebrew.`;
+		this._refreshValidation();
 	}
 
 	renderOutput () {

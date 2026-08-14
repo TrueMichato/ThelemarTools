@@ -1,5 +1,42 @@
 import {DmScreenPanelAppBase} from "../dmscreen-panelapp-base.js";
+import {ItemCompositionCatalogPicker} from "../../itembuilder/itembuilder-catalog-picker.js";
 import {ItemBuilderCore} from "../../itembuilder/itembuilder-core.js";
+
+const _ITEM_TYPE_LABELS = {
+	A: "Ammunition",
+	AT: "Artisan's Tools",
+	G: "Adventuring Gear",
+	HA: "Heavy Armor",
+	LA: "Light Armor",
+	M: "Melee Weapon",
+	MA: "Medium Armor",
+	P: "Potion",
+	R: "Ranged Weapon",
+	RD: "Rod",
+	RG: "Ring",
+	S: "Shield",
+	SC: "Scroll",
+	SCF: "Spellcasting Focus",
+	ST: "Staff",
+	T: "Tool",
+	WD: "Wand",
+	W: "Wondrous Item",
+};
+
+function _getTypeLabel (type) {
+	const abbreviation = String(type || "").split("|")[0];
+	return _ITEM_TYPE_LABELS[abbreviation] || abbreviation || "Unknown type";
+}
+
+function _getJsonErrorMessage (error, value) {
+	const message = error?.message || "Invalid JSON.";
+	const position = Number(message.match(/position\s+(\d+)/i)?.[1]);
+	if (!Number.isFinite(position)) return `Invalid JSON: ${message}`;
+	const before = value.slice(0, position);
+	const line = before.split("\n").length;
+	const column = position - before.lastIndexOf("\n");
+	return `Invalid JSON at line ${line}, column ${column}: ${message}`;
+}
 
 export class ItemBuilderPanel extends DmScreenPanelAppBase {
 	constructor ({board, savedState}) {
@@ -8,6 +45,9 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 		this._catalogs = {items: [], materials: [], upgrades: []};
 		this._root = null;
 		this._isLoading = true;
+		this._loadError = null;
+		this._saveStatus = "";
+		this._focusedEditorRoot = null;
 	}
 
 	getState () {
@@ -25,22 +65,33 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 	}
 
 	async _pInit () {
-		const [itemData, materialData, upgradeData, brew] = await Promise.all([
-			DataUtil.item.loadJSON(),
-			DataUtil.itemMaterial.loadJSON(),
-			DataUtil.itemUpgrade.loadJSON(),
-			BrewUtil2.pGetBrewProcessed(),
-		]);
-		this._catalogs = {
-			items: ItemBuilderCore.dedupeCatalog([...(itemData.baseitem || []), ...(itemData.item || []), ...(brew.item || [])]),
-			materials: ItemBuilderCore.dedupeCatalog([...(materialData.itemMaterial || []), ...(brew.itemMaterial || [])]),
-			upgrades: ItemBuilderCore.dedupeCatalog([...(upgradeData.itemUpgrade || []), ...(brew.itemUpgrade || [])]),
-		};
-		this._isLoading = false;
+		this._isLoading = true;
+		this._loadError = null;
+		this._render();
+		try {
+			const [itemData, materialData, upgradeData, brew] = await Promise.all([
+				DataUtil.item.loadJSON(),
+				DataUtil.itemMaterial.loadJSON(),
+				DataUtil.itemUpgrade.loadJSON(),
+				BrewUtil2.pGetBrewProcessed(),
+			]);
+			this._catalogs = {
+				items: ItemBuilderCore.dedupeCatalog([...(itemData.baseitem || []), ...(itemData.item || []), ...(brew.item || [])]),
+				materials: ItemBuilderCore.dedupeCatalog([...(materialData.itemMaterial || []), ...(brew.itemMaterial || [])]),
+				upgrades: ItemBuilderCore.dedupeCatalog([...(upgradeData.itemUpgrade || []), ...(brew.itemUpgrade || [])]),
+			};
+			this._isLoading = false;
+			this._saveStatus = "Catalogs loaded. Item draft ready.";
+		} catch (error) {
+			this._isLoading = false;
+			this._loadError = error;
+		}
 		this._render();
 	}
 
-	_doUpdate ({isRender = true} = {}) {
+	_doUpdate ({isRender = true, status = ""} = {}) {
+		this._draft = ItemBuilderCore.normalizeDraft(this._draft);
+		this._saveStatus = status;
 		this._board.doSaveStateDebounced();
 		if (isRender) this._render();
 	}
@@ -49,18 +100,63 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 		if (!this._root) return;
 		this._root.empty();
 		if (this._isLoading) {
-			ee`<div class="dm-item-builder__loading"><span class="glyphicon glyphicon-refresh ve-spin"></span> Loading item catalogs...</div>`.appendTo(this._root);
+			ee`<div class="dm-item-builder__loading" role="status" aria-live="polite">
+				<span class="dm-item-builder__loading-bar"></span>
+				<span class="dm-item-builder__loading-bar dm-item-builder__loading-bar--short"></span>
+				<strong>Loading item catalogs...</strong>
+				<span>Your saved draft is safe while compatible materials and upgrades load.</span>
+			</div>`.appendTo(this._root);
+			return;
+		}
+		if (this._loadError) {
+			const btnRetry = ee`<button class="ve-btn ve-btn-primary">Retry loading catalogs</button>`
+				.onn("click", () => this._pInit());
+			ee`<div class="dm-item-builder__load-error" role="alert">
+				<strong>Item catalogs could not be loaded</strong>
+				<span>${(this._loadError.message || "Check your connection and try again.").qq()}</span>
+				${btnRetry}
+			</div>`.appendTo(this._root);
 			return;
 		}
 
 		const item = ItemBuilderCore.serialize(this._draft, this._catalogs);
 		const validation = ItemBuilderCore.validate(this._draft, this._catalogs);
-		const nameInput = ee`<input class="ve-form-control ve-input-sm" aria-label="Item name" value="${this._draft.item.name.qq()}">`
+		const btnOpen = ee`<button class="ve-btn ve-btn-primary dm-item-builder__open-editor">Open focused editor</button>`
+			.onn("click", () => this._pOpenFocusedEditor({trigger: btnOpen}));
+		ee`<div class="dm-item-builder__summary">
+			<div>
+				<strong>${(item.name || "Unnamed item").qq()}</strong>
+				<span>${_getTypeLabel(item.type).qq()} \u00b7 ${(item.source || "No source").qq()}</span>
+			</div>
+			<div>${this._getCompositionSummaryText().qq()}</div>
+			${this._getValidationElement(validation, {isCompact: true})}
+			${btnOpen}
+		</div>`.appendTo(this._root);
+
+		const wrpEditor = ee`<div class="dm-item-builder__editor"></div>`.appendTo(this._root);
+		this._renderEditor({wrp: wrpEditor, item, validation});
+		this._renderFocusedEditor();
+	}
+
+	_renderFocusedEditor () {
+		if (!this._focusedEditorRoot?.isConnected) return;
+		this._focusedEditorRoot.empty();
+		this._renderEditor({
+			wrp: this._focusedEditorRoot,
+			item: ItemBuilderCore.serialize(this._draft, this._catalogs),
+			validation: ItemBuilderCore.validate(this._draft, this._catalogs),
+			isFocused: true,
+			doClose: this._focusedEditorDoClose,
+		});
+	}
+
+	_renderEditor ({wrp, item, validation, isFocused = false, doClose = null}) {
+		const nameInput = ee`<input class="ve-form-control" aria-label="Item name" value="${this._draft.item.name.qq()}">`
 			.onn("change", () => {
 				this._draft.item.name = nameInput.val().trim();
 				this._doUpdate();
 			});
-		const sourceSelect = ee`<select class="ve-form-control ve-input-sm" aria-label="Homebrew source">
+		const sourceSelect = ee`<select class="ve-form-control" aria-label="Homebrew source">
 			<option value="">Choose source</option>
 			${BrewUtil2.getSources().map(source => `<option value="${source.json.qq()}">${source.full.qq()}</option>`)}
 		</select>`.val(this._draft.item.source)
@@ -68,160 +164,213 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 				this._draft.item.source = sourceSelect.val();
 				this._doUpdate();
 			});
-
-		const btnPreset = ee`<button class="ve-btn ve-btn-primary ve-btn-sm">Choose preset</button>`
-			.onn("click", async () => {
-				const result = await SearchWidget.pGetUserItemSearch();
-				if (!result) return;
-				const preset = MiscUtil.copy(await DataLoader.pCacheAndGet(result.page, result.source, result.hash));
-				this._draft = ItemBuilderCore.applyPreset(this._draft, preset, {source: this._draft.item.source});
-				this._doUpdate();
-			});
-
-		const materialSelect = this._getMaterialSelect();
-		const upgradeSelect = this._getUpgradeSelect();
-		const gemstoneSelect = this._getGemstoneSelect();
-		const btnAdvanced = ee`<button class="ve-btn ve-btn-default ve-btn-sm"><span class="glyphicon glyphicon-cog"></span> Advanced fields</button>`
-			.onn("click", () => this._pOpenAdvanced());
-		const btnSave = ee`<button class="ve-btn ve-btn-success ve-btn-sm" ${validation.isValid ? "" : "disabled"}><span class="glyphicon glyphicon-floppy-disk"></span> Save to Homebrew</button>`
+		const btnPreset = ee`<button class="ve-btn ve-btn-primary">Choose catalog preset</button>`
+			.onn("click", () => this._pChoosePreset());
+		const btnAdvanced = ee`<button class="ve-btn ve-btn-default dm-item-builder__advanced-action"><span class="glyphicon glyphicon-cog"></span> Edit advanced fields</button>`
+			.onn("click", () => this._pOpenAdvanced({trigger: btnAdvanced}));
+		const btnReset = ee`<button class="ve-btn ve-btn-danger"><span class="glyphicon glyphicon-trash"></span> Reset draft</button>`
+			.onn("click", () => this._pResetDraft());
+		const btnSave = ee`<button class="ve-btn ve-btn-success" ${validation.isValid ? "" : "disabled"} aria-disabled="${!validation.isValid}"><span class="glyphicon glyphicon-floppy-disk"></span> Save item to Homebrew</button>`
 			.onn("click", () => this._pSaveToBrew());
-		const btnReset = ee`<button class="ve-btn ve-btn-danger ve-btn-sm" title="Reset item"><span class="glyphicon glyphicon-trash"></span></button>`
-			.onn("click", async () => {
-				if (!await InputUiUtil.pGetUserBoolean({title: "Reset Item Builder", htmlDescription: "Discard this item draft?", textYes: "Reset", textNo: "Cancel"})) return;
-				this._draft = ItemBuilderCore.createDraft({source: this._draft.item.source});
-				this._doUpdate();
-			});
+		const btnClose = isFocused
+			? ee`<button class="ve-btn ve-btn-default">Close editor</button>`.onn("click", () => doClose(false))
+			: null;
+		const wrpPicker = ee`<div></div>`;
 
-		ee`<div class="dm-item-builder__content">
-		<div class="dm-item-builder__header">
-			<div class="dm-item-builder__title">Item workbench</div>
-			<div class="dm-item-builder__actions">${btnAdvanced}${btnReset}</div>
-		</div>
-		<div class="dm-item-builder__identity">${nameInput}${sourceSelect}</div>
-		<div class="dm-item-builder__step">
-			<div><span class="dm-item-builder__step-name">Preset</span><span class="ve-muted ve-small">${this._draft.preset ? `${this._draft.preset.name} (${this._draft.preset.source})` : "Start from any catalog item"}</span></div>
-			${btnPreset}
-		</div>
-		<div class="dm-item-builder__step">
-			<div><span class="dm-item-builder__step-name">Material</span><span class="ve-muted ve-small">Projects physical properties</span></div>
-			${materialSelect}
-		</div>
-		<div class="dm-item-builder__step dm-item-builder__step--stack">
-			<div><span class="dm-item-builder__step-name">Upgrades</span><span class="ve-muted ve-small">Weapon and armor improvements</span></div>
-			${this._getUpgradeChips()}
-			${upgradeSelect}
-		</div>
-		<div class="dm-item-builder__step">
-			<div><span class="dm-item-builder__step-name">Gem empowerment</span><span class="ve-muted ve-small">One compatible gemstone power</span></div>
-			${gemstoneSelect}
-		</div>
-		${this._getValidationElement(validation)}
-		<div class="dm-item-builder__preview"><table class="ve-w-100 ve-stats">${Renderer.item.getCompactRenderedString(item)}</table></div>
-		<div class="dm-item-builder__footer">${btnSave}</div>
-		</div>`.appendTo(this._root);
+		new ItemCompositionCatalogPicker({
+			draft: this._draft,
+			catalogs: this._catalogs,
+			onSelect: meta => this._handleCompositionSelect(meta),
+		}).render({wrp: wrpPicker});
+
+		ee`<div class="dm-item-builder__content ${isFocused ? "dm-item-builder__content--focused" : ""}">
+			<div class="dm-item-builder__header">
+				<div>
+					<div class="dm-item-builder__title">Item workbench</div>
+					<div class="dm-item-builder__subtitle">Build from a trusted base, compose its properties, then review the real item.</div>
+				</div>
+				<div class="dm-item-builder__actions">${btnAdvanced}${btnReset}</div>
+			</div>
+			<div class="dm-item-builder__identity">
+				<label><span>Item name</span>${nameInput}</label>
+				<label><span>Homebrew source</span>${sourceSelect}</label>
+			</div>
+			<div class="dm-item-builder__step">
+				<div><span class="dm-item-builder__step-name">Base item</span><span class="dm-item-builder__muted">${(this._draft.preset ? `${this._draft.preset.name} (${this._draft.preset.source})` : "Start from any catalog item").qq()}</span></div>
+				${btnPreset}
+			</div>
+			${this._getSelectedCompositionElement()}
+			${wrpPicker}
+			${this._getValidationElement(validation)}
+			<div class="dm-item-builder__preview"><table class="ve-w-100 ve-stats" aria-label="Item preview">${Renderer.item.getCompactRenderedString(item)}</table></div>
+			<div class="dm-item-builder__footer">${btnClose}${btnSave}</div>
+		</div>`.appendTo(wrp);
 	}
 
-	_getMaterialSelect () {
-		const eligible = ItemBuilderCore.getEligibleMaterials({draft: this._draft, materials: this._catalogs.materials})
-			.sort((a, b) => SortUtil.ascSortLower(a.name, b.name));
-		const select = ee`<select class="ve-form-control ve-input-sm" aria-label="Material">
-			<option value="">No special material</option>
-			${eligible.map(it => `<option value="${ItemBuilderCore.packUid(it).qq()}">${it.name.qq()}</option>`)}
-		</select>`.val(ItemBuilderCore.packUid(this._draft.material) || "")
-			.onn("change", () => {
-				this._draft.material = ItemBuilderCore.unpackUid(select.val());
-				this._doUpdate();
-			});
-		return select;
+	async _pChoosePreset () {
+		try {
+			const result = await SearchWidget.pGetUserItemSearch();
+			if (!result) return;
+			const preset = MiscUtil.copy(await DataLoader.pCacheAndGet(result.page, result.source, result.hash));
+			this._draft = ItemBuilderCore.applyPreset(this._draft, preset, {source: this._draft.item.source});
+			this._doUpdate({status: `Loaded ${preset.name} as the base item.`});
+		} catch (error) {
+			this._saveStatus = `Could not load that preset: ${error.message}`;
+			this._render();
+		}
 	}
 
-	_getUpgradeSelect () {
-		const eligible = ItemBuilderCore.getEligibleUpgrades({draft: this._draft, upgrades: this._catalogs.upgrades})
-			.sort((a, b) => SortUtil.ascSortLower(a.name, b.name));
-		const select = ee`<select class="ve-form-control ve-input-sm" aria-label="Add upgrade">
-			<option value="">Add an upgrade...</option>
-			${eligible.map(it => `<option value="${ItemBuilderCore.packUid(it).qq()}">${it.name.qq()}</option>`)}
-		</select>`
-			.onn("change", () => {
-				const ref = ItemBuilderCore.unpackUid(select.val());
-				if (!ref) return;
-				this._draft.upgrades.push(ref);
-				this._doUpdate();
-			});
-		return select;
+	_handleCompositionSelect ({category, entity, isSelected}) {
+		const ref = {name: entity.name, source: entity.source};
+		const uid = ItemBuilderCore.packUid(ref);
+		if (category === "material") this._draft.material = isSelected ? null : ref;
+		if (category === "gemstone") this._draft.gemstone = isSelected ? null : ref;
+		if (category === "upgrade") {
+			this._draft.upgrades = isSelected
+				? this._draft.upgrades.filter(it => ItemBuilderCore.packUid(it) !== uid)
+				: [...this._draft.upgrades, ref];
+		}
+		this._doUpdate({status: `${isSelected ? "Removed" : "Selected"} ${entity.name}.`});
 	}
 
-	_getUpgradeChips () {
-		const wrp = ee`<div class="dm-item-builder__chips"></div>`;
-		for (const upgrade of this._draft.upgrades) {
-			ee`<button class="dm-item-builder__chip" title="Remove ${upgrade.name.qq()}">${upgrade.name}<span aria-hidden="true">&times;</span></button>`
-				.onn("click", () => {
-					const uid = ItemBuilderCore.packUid(upgrade);
-					this._draft.upgrades = this._draft.upgrades.filter(it => ItemBuilderCore.packUid(it) !== uid);
-					this._doUpdate();
-				})
+	_getCompositionSummaryText () {
+		const selected = [
+			this._draft.material?.name,
+			...this._draft.upgrades.map(it => it.name),
+			this._draft.gemstone?.name,
+		].filter(Boolean);
+		return selected.length ? selected.join(", ") : "No composition selected";
+	}
+
+	_getSelectedCompositionElement () {
+		const selected = [
+			this._draft.material ? {category: "material", entity: this._draft.material} : null,
+			...this._draft.upgrades.map(entity => ({category: "upgrade", entity})),
+			this._draft.gemstone ? {category: "gemstone", entity: this._draft.gemstone} : null,
+		].filter(Boolean);
+		const wrp = ee`<div class="dm-item-builder__selected">
+			<div><strong>Current composition</strong><span class="dm-item-builder__muted">${selected.length ? "Remove a choice or compare alternatives below." : "No material, upgrade, or gemstone selected yet."}</span></div>
+		</div>`;
+		for (const meta of selected) {
+			ee`<button class="dm-item-builder__remove" aria-label="Remove ${meta.entity.name.qq()}">Remove ${meta.entity.name.qq()}</button>`
+				.onn("click", () => this._handleCompositionSelect({...meta, isSelected: true}))
 				.appendTo(wrp);
 		}
 		return wrp;
 	}
 
-	_getGemstoneSelect () {
-		const gemstones = ItemBuilderCore.getEligibleGemstones({draft: this._draft, upgrades: this._catalogs.upgrades})
-			.sort((a, b) => SortUtil.ascSortLower(a.name, b.name));
-		const select = ee`<select class="ve-form-control ve-input-sm" aria-label="Gem empowerment">
-			<option value="">No gemstone empowerment</option>
-			${gemstones.map(it => `<option value="${ItemBuilderCore.packUid(it).qq()}">${it.name.qq()}</option>`)}
-		</select>`.val(ItemBuilderCore.packUid(this._draft.gemstone) || "")
-			.onn("change", () => {
-				this._draft.gemstone = ItemBuilderCore.unpackUid(select.val());
-				this._doUpdate();
-			});
-		return select;
+	_getValidationElement ({errors, warnings}, {isCompact = false} = {}) {
+		const messages = [...errors, ...warnings];
+		const stateClass = errors.length
+			? "dm-item-builder__status--error"
+			: warnings.length
+				? "dm-item-builder__status--warning"
+				: "dm-item-builder__status--ready";
+		const heading = this._saveStatus || (errors.length ? "Cannot save yet." : warnings.length ? "Ready with warnings." : "Ready to save.");
+		const wrp = ee`<div class="dm-item-builder__status ${stateClass} ${isCompact ? "dm-item-builder__status--compact" : ""}" role="status" aria-live="polite"></div>`;
+		const eleHeading = ee`<strong></strong>`;
+		eleHeading.textContent = heading;
+		wrp.append(eleHeading);
+		(isCompact ? messages.slice(0, 1) : messages).forEach(it => {
+			const eleMessage = ee`<span></span>`;
+			eleMessage.textContent = it.message;
+			wrp.append(eleMessage);
+		});
+		return wrp;
 	}
 
-	_getValidationElement ({errors, warnings}) {
-		if (!errors.length && !warnings.length) return ee`<div class="dm-item-builder__status dm-item-builder__status--ready"><span class="glyphicon glyphicon-ok"></span> Ready to save</div>`;
-		return ee`<div class="dm-item-builder__status ${errors.length ? "dm-item-builder__status--error" : "dm-item-builder__status--warning"}" role="status">
-			${[...errors, ...warnings].map(it => `<div>${it.message.qq()}</div>`)}
-		</div>`;
-	}
-
-	async _pOpenAdvanced () {
+	async _pOpenFocusedEditor ({trigger}) {
 		const {eleModalInner, doClose} = UiUtil.getShowModal({
+			title: "Item Workbench",
+			isHeight100: true,
+			isWidth100: true,
+			cbClose: () => {
+				this._focusedEditorRoot = null;
+				this._focusedEditorDoClose = null;
+				this._restoreFocus({trigger, selector: ".dm-item-builder__open-editor"});
+			},
+		});
+		this._focusedEditorRoot = ee`<div class="dm-item-builder dm-item-builder--modal"></div>`.appendTo(eleModalInner);
+		this._focusedEditorDoClose = doClose;
+		this._renderFocusedEditor();
+	}
+
+	async _pResetDraft () {
+		if (!await InputUiUtil.pGetUserBoolean({title: "Reset Item Builder", htmlDescription: "Discard this item draft and all composition choices?", textYes: "Reset draft", textNo: "Cancel"})) return;
+		this._draft = ItemBuilderCore.createDraft({source: this._draft.item.source});
+		this._doUpdate({status: "Draft reset."});
+	}
+
+	async _pOpenAdvanced ({trigger}) {
+		const original = JSON.stringify(this._draft.item, null, "\t");
+		const {eleModalInner, eleModalFooter, doClose} = UiUtil.getShowModal({
 			title: "Item Builder - Advanced Fields",
 			isHeight100: true,
 			isWidth100: true,
+			isPermanent: true,
+			hasFooter: true,
+			cbClose: () => this._restoreFocus({trigger, selector: ".dm-item-builder__advanced-action"}),
 		});
-		const message = ee`<div class="ve-small ve-mt-2" role="status"></div>`;
-		const textarea = ee`<textarea class="ve-form-control dm-item-builder__advanced" spellcheck="false">${JSON.stringify(this._draft.item, null, "\t")}</textarea>`;
-		const btnApply = ee`<button class="ve-btn ve-btn-primary">Apply fields</button>`
+		const message = ee`<div class="dm-item-builder__advanced-message" role="status" aria-live="polite"></div>`;
+		const textarea = ee`<textarea class="ve-form-control dm-item-builder__advanced" aria-label="Canonical item JSON" spellcheck="false">${original.qq()}</textarea>`;
+		const btnCancel = ee`<button class="ve-btn ve-btn-default">Cancel</button>`
+			.onn("click", async () => {
+				if (
+					textarea.val() !== original
+					&& !await InputUiUtil.pGetUserBoolean({
+						title: "Discard Advanced Changes",
+						htmlDescription: "Your advanced JSON changes have not been applied. Discard them?",
+						textYes: "Discard changes",
+						textNo: "Keep editing",
+					})
+				) return;
+				doClose(false);
+			});
+		const btnApply = ee`<button class="ve-btn ve-btn-primary">Apply advanced fields</button>`
 			.onn("click", () => {
 				try {
-					this._draft.item = JSON.parse(textarea.val());
-					this._doUpdate();
-					doClose();
-				} catch (e) {
-					message.attr("class", "ve-small ve-mt-2 text-danger").txt(`Invalid JSON: ${e.message}`);
+					const parsed = JSON.parse(textarea.val());
+					this._draft = ItemBuilderCore.normalizeDraft({...this._draft, item: parsed});
+					this._doUpdate({status: "Advanced fields applied successfully."});
+					doClose(true);
+				} catch (error) {
+					message.attr("class", "dm-item-builder__advanced-message dm-item-builder__advanced-message--error")
+						.txt(_getJsonErrorMessage(error, textarea.val()));
 				}
 			});
 		ee`<div class="ve-flex-col ve-h-100">
-			<p class="ve-muted">Edit any canonical item field. Composition choices remain separate and are materialized when the item is saved.</p>
+			<p class="dm-item-builder__muted">Edit uncommon canonical fields. Composition choices stay separate and are projected when the item is saved.</p>
 			${textarea}
-			<div class="ve-flex-v-center ve-mt-2">${btnApply}${message}</div>
+			${message}
 		</div>`.appendTo(eleModalInner);
+		ee`<div class="ve-flex-v-center ve-flex-h-right ve-w-100">${btnCancel}${btnApply}</div>`.appendTo(eleModalFooter);
+		textarea.focuse();
+	}
+
+	_restoreFocus ({trigger, selector}) {
+		const target = trigger?.isConnected
+			? trigger
+			: this._focusedEditorRoot?.querySelector(selector) || this._root?.querySelector(selector);
+		target?.focus();
 	}
 
 	async _pSaveToBrew () {
 		const validation = ItemBuilderCore.validate(this._draft, this._catalogs);
 		if (!validation.isValid) {
-			JqueryUtil.doToast({type: "danger", content: validation.errors[0].message});
+			this._saveStatus = `Cannot save: ${validation.errors[0].message}`;
+			this._render();
 			return;
 		}
-		const item = ItemBuilderCore.serialize(this._draft, this._catalogs);
-		item.uniqueId = this._draft.item.uniqueId || CryptUtil.uid();
-		await BrewUtil2.pPersistEditableBrewEntity("item", DataUtil.cleanJson(item, {isDeleteUniqueId: false}));
-		this._draft.item.uniqueId = item.uniqueId;
-		this._doUpdate({isRender: false});
-		JqueryUtil.doToast({type: "success", content: `Saved "${item.name}" to homebrew.`});
+		try {
+			const item = ItemBuilderCore.serialize(this._draft, this._catalogs);
+			item.uniqueId = this._draft.item.uniqueId || CryptUtil.uid();
+			await BrewUtil2.pPersistEditableBrewEntity("item", DataUtil.cleanJson(item, {isDeleteUniqueId: false}));
+			this._draft.item.uniqueId = item.uniqueId;
+			this._doUpdate({status: `Saved "${item.name}" to homebrew.`});
+			JqueryUtil.doToast({type: "success", content: `Saved "${item.name}" to homebrew.`});
+		} catch (error) {
+			this._saveStatus = `Save failed: ${error.message}`;
+			this._render();
+		}
 	}
 }
