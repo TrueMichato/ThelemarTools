@@ -9507,3 +9507,63 @@ that arrives late at the same level.
 **Negative control.** Disabling the guard turned exactly one test red — the one
 asserting suppression — while "still offers the choice for features where it IS a
 real decision" stayed green, so the control discriminates rather than covaries.
+
+## CS-BUG-162 — three orders' free blood curse was described but never granted — FIXED
+
+**Symptom.** A Ghostslayer 15, a Mutant 15, or a Profane Soul 18 read the feature
+text *"You gain the Blood Curse of the Exorcist for your Blood Maledict feature"*
+and then could not invoke it. `detectActivatableFeature()` returned `null` for that
+row, so it never became a usable Blood Maledict option. Order of the Lycan was
+unaffected.
+
+**Root cause — a dedupe guard defeated by the thing it was guarding against.**
+`ensureBloodHunterResources()` pushed the granted curse behind:
+
+```js
+if (level >= 15 && !this._data.features.some(f => f.name === "Blood Curse of the Exorcist")) { … }
+```
+
+Three of the four orders name the *granting subclass feature* after the curse it
+grants — the BH2022 data has a `subclassFeature` literally called "Blood Curse of
+the Exorcist" whose text merely says you gain the curse. That descriptive feature
+satisfied the name check, so the guard concluded the curse was already present and
+skipped the push. The player got the prose and none of the mechanics.
+
+Only the Lycan escaped, because its granting feature is called "Hybrid
+Transformation Mastery" and so never collided.
+
+**Why it survived earlier review.** The auto-grant path was spot-checked on the
+Lycan — the single order where no collision exists — and generalised from. Reading
+the *other* three would have shown the name equality immediately. It also survived
+a `grep` audit: searching for readers of `grantsBloodCurseOfTheExorcist` returns
+only the assignment, which reads as "feature not implemented", when in fact the
+feature is implemented under a completely different name. That confident zero was
+wrong in both directions at once — the flag genuinely has no reader (it is
+decorative), *and* the mechanism exists elsewhere.
+
+**Fix.** Replaced the four copy-pasted push blocks with one
+`_grantSubclassBloodCurse()` helper. Name alone cannot answer "has this been granted
+yet?"; the real question is whether an **invocable** entry (one carrying
+`optionalFeatureTypes: ["BC"]`, the marker `_pUseBloodMaledict` dispatches on)
+exists. Where only the descriptive feature is present it is promoted in place —
+gaining the `BC` marker and the curse's mechanical text — rather than being shadowed
+by a second row of the same name, so the player still sees exactly one entry per
+curse.
+
+**Detection.** Found by reading the passing gated matrix run's exported character
+rather than trusting the green. The L20 export contained a
+`Blood Curse of the Exorcist` entry with `isSubclassFeature: true` and **no**
+`optionalFeatureTypes` — a feature present under the expected name but without the
+one field that makes it usable.
+
+**Note on the E2E probe.** The first spec assertion used
+`activatableListed`, and it **passed against the broken code** because it matched the
+descriptive feature by name. It was replaced with `featureActivation`, which calls
+`detectActivatableFeature` and therefore returns `null` before the fix and a
+descriptor costing 1 Blood Maledict after it. This is the same family as
+CS-BUG-156: a probe that finds *a* match is not a probe that finds *the* match.
+
+**Negative control.** Restoring the name-only guard turns exactly the five tests
+asserting the new behaviour red, while the Lycan test, the single-row test, the
+already-chosen-from-the-pool test and the below-level test stay green — those hold
+under both versions, so the control discriminates rather than covaries.

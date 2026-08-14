@@ -38907,15 +38907,11 @@ class CharacterSheetState {
 			// generic resource renderers never have to serialize/render Infinity.
 			const hybridMax = level >= 11 ? 2 : 1;
 			this._resizeFeatureBackedResource("Hybrid Transformation", hybridMax, "short");
-			if (level >= 18 && !this._data.features.some(f => f.name === "Blood Curse of the Howl")) {
-				this._data.features.push({
+			if (level >= 18) {
+				this._grantSubclassBloodCurse({
 					id: "bh2022-blood-curse-of-the-howl",
 					name: "Blood Curse of the Howl",
-					source: "BH2022",
 					level: 18,
-					className: "Blood Hunter",
-					featureType: "Optional Feature",
-					optionalFeatureTypes: ["BC"],
 					description: "As an action, creatures of your choice within 30 feet that can hear you make a Wisdom save against your Hemocraft save DC. On a failure they are frightened until the end of your next turn; a failure by 5 or more also stuns them. Amplify: the range becomes 60 feet.",
 				});
 			}
@@ -38927,15 +38923,11 @@ class CharacterSheetState {
 		if (/ghostslayer/i.test(subclassName) && level >= 3) {
 			this._resizeFeatureBackedResource("Blood Maledict", maledictMax + 1, "short", "Curse Specialist");
 			if (level >= 7) this._resizeFeatureBackedResource("Aether Walk", level >= 15 ? 2 : 1, "short");
-			if (level >= 15 && !this._data.features.some(f => f.name === "Blood Curse of the Exorcist")) {
-				this._data.features.push({
+			if (level >= 15) {
+				this._grantSubclassBloodCurse({
 					id: "bh2022-blood-curse-of-the-exorcist",
 					name: "Blood Curse of the Exorcist",
-					source: "BH2022",
 					level: 15,
-					className: "Blood Hunter",
-					featureType: "Optional Feature",
-					optionalFeatureTypes: ["BC"],
 					description: "As a bonus action, you choose one creature you can see within 30 feet of you that is charmed or frightened, or which is under a possession effect. The target creature is no longer charmed, frightened, or possessed. <b>Amplify:</b> a creature that charmed, frightened, or possessed the target takes 3d6 psychic damage and must succeed on a Wisdom saving throw against your Hemocraft save DC or be stunned until the end of your next turn. This doesn't count against your number of blood curses known.",
 				});
 			}
@@ -38951,15 +38943,11 @@ class CharacterSheetState {
 				const exaltedUses = Math.max(1, this.getAbilityMod(this._getHemocraftAbility()));
 				this._resizeFeatureBackedResource("Exalted Mutation", exaltedUses, "long");
 			}
-			if (level >= 15 && !this._data.features.some(f => f.name === "Blood Curse of Corrosion")) {
-				this._data.features.push({
+			if (level >= 15) {
+				this._grantSubclassBloodCurse({
 					id: "bh2022-blood-curse-of-corrosion",
 					name: "Blood Curse of Corrosion",
-					source: "BH2022",
 					level: 15,
-					className: "Blood Hunter",
-					featureType: "Optional Feature",
-					optionalFeatureTypes: ["BC"],
 					description: "As a bonus action, you cause a creature within 30 feet of you to become poisoned. The cursed creature can make a Constitution saving throw against your Hemocraft save DC at the end of each of its turns, ending the curse on itself on a success. <b>Amplify:</b> the cursed creature takes 4d6 necrotic damage when you inflict this curse, and takes this damage again each time it fails the saving throw to end the curse. This doesn't count against your number of blood curses known.",
 				});
 			}
@@ -38973,19 +38961,66 @@ class CharacterSheetState {
 		this._refreshActiveCrimsonRiteDamage();
 
 		// Profane Soul: the auto-granted Souleater curse at 18th (does not count against known).
-		if (/profane/i.test(subclassName) && level >= 18
-			&& !this._data.features.some(f => f.name === "Blood Curse of the Souleater")) {
-			this._data.features.push({
+		if (/profane/i.test(subclassName) && level >= 18) {
+			this._grantSubclassBloodCurse({
 				id: "bh2022-blood-curse-of-the-souleater",
 				name: "Blood Curse of the Souleater",
-				source: "BH2022",
 				level: 18,
-				className: "Blood Hunter",
-				featureType: "Optional Feature",
-				optionalFeatureTypes: ["BC"],
 				description: "When a creature that isn't a construct or undead is reduced to 0 hit points within 30 feet of you, you can use your reaction to offer their life energy to your patron in exchange for power. Until the end of your next turn, you make attacks with advantage and you have resistance to all damage. <b>Amplify:</b> you also regain one expended warlock spell slot; once you've amplified this curse, you must finish a long rest before you can amplify it again. This doesn't count against your number of blood curses known.",
 			});
 		}
+	}
+
+	/**
+	 * (CS-BUG-162) Grant a blood curse that a subclass hands out for free, so it becomes
+	 * INVOCABLE through Blood Maledict rather than merely described.
+	 *
+	 * Three of the four orders name the granting subclass feature after the curse it
+	 * grants ("Blood Curse of the Exorcist" / "of Corrosion" / "of the Souleater"), so the
+	 * previous `!features.some(f => f.name === name)` dedupe guard was satisfied by the
+	 * very feature whose text says the curse is granted — and the usable curse was never
+	 * added. Only the Lycan escaped, because its granting feature is called "Hybrid
+	 * Transformation Mastery" and so never collided. That is why the Lycan path tested
+	 * clean while the other three silently did nothing.
+	 *
+	 * Name alone therefore cannot answer "has this been granted yet?". The real question
+	 * is whether an INVOCABLE (`optionalFeatureTypes: ["BC"]`) entry exists. Where only
+	 * the descriptive feature is present, it is upgraded in place instead of pushing a
+	 * duplicate row: the player should see one entry per curse, not two identically named
+	 * ones.
+	 * @private
+	 */
+	_grantSubclassBloodCurse ({id, name, level, description}) {
+		const features = this._data.features || (this._data.features = []);
+		const isUsable = f => (f.optionalFeatureTypes || []).includes("BC");
+
+		// Already invocable — whether auto-granted earlier or chosen from the pool.
+		if (features.some(f => f.name === name && isUsable(f))) return;
+
+		// The descriptive subclass feature exists but carries no mechanics: promote it
+		// rather than shadowing it with a second row of the same name.
+		const descriptive = features.find(f => f.name === name);
+		if (descriptive) {
+			descriptive.optionalFeatureTypes = ["BC"];
+			descriptive.isAutoGrantedBloodCurse = true;
+			// Keep the subclass feature's own prose (it explains the grant) and append the
+			// curse's mechanics, which is what the player needs in order to invoke it.
+			if (descriptive.description && !descriptive.description.includes(description)) descriptive.description = `${descriptive.description}${description}`;
+			else if (!descriptive.description) descriptive.description = description;
+			return;
+		}
+
+		features.push({
+			id,
+			name,
+			source: "BH2022",
+			level,
+			className: "Blood Hunter",
+			featureType: "Optional Feature",
+			optionalFeatureTypes: ["BC"],
+			isAutoGrantedBloodCurse: true,
+			description,
+		});
 	}
 
 	/**

@@ -859,6 +859,27 @@ export const PRESET_FULL_PROFANE_SOUL_BLOOD_HUNTER: CharacterPreset = {
 	],
 };
 
+/** BH2022 Order of the Ghostslayer — undead-hunting Blood Hunter; radiant rite + Aether Walk. */
+export const PRESET_FULL_GHOSTSLAYER_BLOOD_HUNTER: CharacterPreset = {
+	race: "Human",
+	raceSource: "PHB'24",
+	className: "Blood Hunter",
+	classSource: "BH2022",
+	prioritySources: ["BH2022"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Ordwin Kesh",
+	skillCount: 3,
+	optFeatCount: 1,
+	subclassName: "Order of the Ghostslayer",
+	subclassSource: "BH2022",
+	preferredFeatProgressionPattern: /^dueling\b/i,
+	homebrewUrls: [
+		"https://raw.githubusercontent.com/TheGiddyLimit/homebrew/refs/heads/master/class/Matthew%20Mercer%3B%20Blood%20Hunter%20(2022).json",
+	],
+};
+
 /** TalPsi Chronopath Talent (MCDM "The Talent and Psionics") — psionic strain + powers. */
 export const PRESET_FULL_TALENT_CHRONOPATH: CharacterPreset = {
 	race: "Human",

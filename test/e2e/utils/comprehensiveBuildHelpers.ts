@@ -1122,7 +1122,7 @@ export type EffectCheck = _EffectCommon & (
 		maxValueGp?: number;
 		expectCount?: number;
 	}
-	| {kind: "crimsonRiteMechanics"; hpCosts: [number, number]}
+	| {kind: "crimsonRiteMechanics"; hpCosts: [number, number]; expectDice?: string; expectDamageType?: string}
 	| {kind: "hybridTransformationMechanics"}
 
 	// Brand of the Voracious (Order of the Lycan 15): advantage on attacks against a
@@ -1884,6 +1884,11 @@ async function _runPassiveOrRollEffect (
 			for (const weaponId of ["e2e-rite-longsword", "e2e-rite-longbow"]) {
 				const rider = result.effects.find((it: any) => it.weaponId === weaponId);
 				if (!rider?.dice || !rider?.damageType) throw new Error(`typed Crimson Rite rider missing for ${weaponId}: ${JSON.stringify(result.effects)}`);
+				// An existence check alone cannot tell a correct rider from a wrong one —
+				// it would pass just as happily on `1d4` when Brand of Sundering should
+				// have doubled it to `2d8`. Specs that know the expected die pin it.
+				if (e.expectDice && rider.dice !== e.expectDice) throw new Error(`Crimson Rite rider dice=${rider.dice} for ${weaponId}, expected ${e.expectDice}`);
+				if (e.expectDamageType && !new RegExp(e.expectDamageType, "i").test(String(rider.damageType))) throw new Error(`Crimson Rite rider damageType=${rider.damageType} for ${weaponId}, expected ${e.expectDamageType}`);
 			}
 			return;
 		}

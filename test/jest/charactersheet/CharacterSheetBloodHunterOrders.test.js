@@ -647,3 +647,93 @@ describe("Blood Hunter — effects survive the writer/reader boundary", () => {
 		expect(s.getSpeedByType("climb")).toBe(0);
 	});
 });
+
+/**
+ * (CS-BUG-162) Three of the four orders grant a blood curse outright, and the granting
+ * SUBCLASS FEATURE is named after the curse it grants. The dedupe guard on the auto-grant
+ * matched by name, so the descriptive feature satisfied it and the invocable curse was
+ * never added: the player read "You gain the Blood Curse of the Exorcist" and then could
+ * not invoke it through Blood Maledict.
+ *
+ * The Lycan escaped only because its granting feature is called "Hybrid Transformation
+ * Mastery", so nothing collided — which is exactly why the auto-grant path looked healthy
+ * when it was spot-checked on the Lycan.
+ *
+ * These assert the curse is INVOCABLE (carries `optionalFeatureTypes: ["BC"]`, the marker
+ * `_pUseBloodMaledict` dispatches on), never that a `grants*` calc flag is true — those
+ * four flags exist but no application code reads them.
+ */
+describe("Blood Hunter — subclass-granted blood curses are invocable, not just described", () => {
+	const mkOrder = (sub, lvl) => {
+		const s = new CharacterSheetState();
+		s.addClass({name: "Blood Hunter", source: "BH2022", level: lvl});
+		s.setSubclass("Blood Hunter", {name: `Order of the ${sub}`, shortName: sub, source: "BH2022"});
+		["str", "dex", "con", "int", "wis", "cha"].forEach(a => s.setAbilityBase(a, 14));
+		s.setMaxHp(100);
+		s.setCurrentHp(100);
+		return s;
+	};
+	// Reproduce the real build: the descriptive subclass feature is already present,
+	// because the class data grants it at that level. This is the collision.
+	const withGrantingFeature = (s, name, level) => {
+		s.addFeature({name, level, className: "Blood Hunter", source: "BH2022", isSubclassFeature: true, description: `<p>You gain the ${name} for your Blood Maledict feature.</p>`});
+		s.ensureBloodHunterResources();
+		return s;
+	};
+	const invocable = (s, re) => (s._data.features || []).filter(f => re.test(f.name) && (f.optionalFeatureTypes || []).includes("BC"));
+
+	test.each([
+		["Ghostslayer", 15, "Blood Curse of the Exorcist", /exorcist/i],
+		["Mutant", 15, "Blood Curse of Corrosion", /corrosion/i],
+		["Profane Soul", 18, "Blood Curse of the Souleater", /souleater/i],
+	])("%s grants an invocable curse even though the granting feature shares its name", (sub, lvl, featureName, re) => {
+		const s = withGrantingFeature(mkOrder(sub, lvl), featureName, lvl);
+		expect(invocable(s, re).length).toBe(1);
+	});
+
+	test("the Lycan path is unchanged — its granting feature never collided", () => {
+		const s = mkOrder("Lycan", 18);
+		s.addFeature({name: "Hybrid Transformation Mastery", level: 18, className: "Blood Hunter", source: "BH2022", isSubclassFeature: true, description: "<p>...</p>"});
+		s.ensureBloodHunterResources();
+		expect(invocable(s, /howl/i).length).toBe(1);
+	});
+
+	test("the granted curse is promoted in place, so the player sees ONE row and not two", () => {
+		const s = withGrantingFeature(mkOrder("Ghostslayer", 15), "Blood Curse of the Exorcist", 15);
+		const named = (s._data.features || []).filter(f => f.name === "Blood Curse of the Exorcist");
+		expect(named.length).toBe(1);
+	});
+
+	test("promotion keeps the subclass prose AND adds the curse's mechanics", () => {
+		const s = withGrantingFeature(mkOrder("Ghostslayer", 15), "Blood Curse of the Exorcist", 15);
+		const feature = (s._data.features || []).find(f => f.name === "Blood Curse of the Exorcist");
+		expect({
+			keepsGrantProse: /for your Blood Maledict feature/.test(feature.description),
+			addsMechanics: /no longer charmed, frightened, or possessed/.test(feature.description),
+		}).toEqual({keepsGrantProse: true, addsMechanics: true});
+	});
+
+	test("running twice does not duplicate the curse or re-append its text", () => {
+		const s = withGrantingFeature(mkOrder("Ghostslayer", 15), "Blood Curse of the Exorcist", 15);
+		s.ensureBloodHunterResources();
+		s.ensureBloodHunterResources();
+		const feature = (s._data.features || []).find(f => f.name === "Blood Curse of the Exorcist");
+		const occurrences = feature.description.split("no longer charmed").length - 1;
+		expect({rows: invocable(s, /exorcist/i).length, occurrences}).toEqual({rows: 1, occurrences: 1});
+	});
+
+	test("a curse already CHOSEN from the pool is not shadowed by the auto-grant", () => {
+		// The Exorcist is one of the 12 BC options, so a player can pick it before 15th.
+		// The grant must recognise the existing invocable entry rather than adding a second.
+		const s = mkOrder("Ghostslayer", 15);
+		s.addFeature({name: "Blood Curse of the Exorcist", level: 10, className: "Blood Hunter", source: "BH2022", optionalFeatureTypes: ["BC"], description: "chosen from the pool"});
+		s.ensureBloodHunterResources();
+		const named = (s._data.features || []).filter(f => f.name === "Blood Curse of the Exorcist");
+		expect({rows: named.length, description: named[0].description}).toEqual({rows: 1, description: "chosen from the pool"});
+	});
+
+	test("below the granting level no curse is added", () => {
+		const s = withGrantingFeature(mkOrder("Ghostslayer", 14), "Blood Curse of the Exorcist", 15);
+		expect(invocable(s, /exorcist/i).length).toBe(0);
+	});
+});
