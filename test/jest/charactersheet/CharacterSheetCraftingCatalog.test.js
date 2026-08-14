@@ -15,6 +15,9 @@ import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+globalThis.window ||= {addEventListener () {}};
+await import("../../../js/charactersheet/charactersheet.js");
+const CharacterSheetPage = globalThis.CharacterSheetPage;
 
 const ABOLETH_EYE_AR8 = {
 	name: "Aboleth Eye",
@@ -112,6 +115,33 @@ describe("Crafting catalog", () => {
 
 		it("returns null before a catalog is loaded", () => {
 			expect(new CharacterSheetState().getCraftingCatalog()).toBeNull();
+		});
+
+		it("discovers a Brew craftingMaterial with a nested variant component", () => {
+			const brewMaterial = {
+				name: "Homebrew Phoenix Feather",
+				source: "MYHB",
+				materialCategory: "spell component",
+				variantComponent: {
+					spellEffects: [{
+						match: {damageType: "fire"},
+						effects: [{type: "bonusDice", count: 1}],
+					}],
+				},
+			};
+			const mergedData = CharacterSheetPage._getCraftingCatalogWithBrew(
+				{craftingMaterial: CATALOG.craftingMaterial, craftingRecipe: CATALOG.craftingRecipe, craftingRule: CATALOG.craftingRule},
+				[brewMaterial],
+			);
+			const brewState = new CharacterSheetState();
+			brewState.setCraftingCatalog(mergedData);
+
+			const discovered = brewState.getCraftingMaterialByName("homebrew phoenix feather");
+			expect(discovered.source).toBe("MYHB");
+			expect(discovered.variantComponent.spellEffects[0]).toEqual({
+				match: {damageType: "fire"},
+				effects: [{type: "bonusDice", count: 1}],
+			});
 		});
 	});
 

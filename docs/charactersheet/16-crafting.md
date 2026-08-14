@@ -93,6 +93,8 @@ finished sword has** (MTL). See [21-item-materials.md](./21-item-materials.md).
 and most characters never harvest. It is **not** in the initial `Promise.all`; `pGetCraftingCatalog()`
 fetches it on first use and caches the promise, so concurrent callers share one request and a
 failed load is not retried in a loop. A failure is non-fatal: the flows show an empty state.
+Homebrew `craftingMaterial` entities are merged into that lazy catalog by case-insensitive
+`name|source` identity, including any nested `variantComponent` authored in Makebrew.
 
 ## Settings
 

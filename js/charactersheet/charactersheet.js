@@ -104,6 +104,7 @@ class CharacterSheetPage {
 		// `data/crafting.json` is ~2.5 MB, so it is fetched on first use rather than at load.
 		// See `pGetCraftingCatalog()`.
 		this._pCraftingCatalog = null;
+		this._craftingMaterialsBrewData = [];
 		this._divineFavorData = [];
 		this._skillsData = [];
 		this._conditionsData = [];
@@ -733,6 +734,13 @@ class CharacterSheetPage {
 			this._itemMaterialsData = [...this._itemMaterialsData, ...brewMaterials];
 			this._state.setItemMaterialCatalog(this._itemMaterialsData);
 			if (this._materials) this._materials.setMaterials(this._itemMaterialsData);
+		}
+
+		if (brewData.craftingMaterial?.length) {
+			this._craftingMaterialsBrewData = [
+				...this._craftingMaterialsBrewData,
+				...MiscUtil.copyFast(brewData.craftingMaterial),
+			];
 		}
 
 		// Draconic domain resonances (TGTT — carried by items made of solid dragon remains)
@@ -18921,7 +18929,7 @@ class CharacterSheetPage {
 		this._pCraftingCatalog = (async () => {
 			try {
 				const json = await DataUtil.loadJSON(`${Renderer.get().baseUrl}data/crafting.json`);
-				this._state.setCraftingCatalog(json);
+				this._state.setCraftingCatalog(this.constructor._getCraftingCatalogWithBrew(json, this._craftingMaterialsBrewData));
 				return this._state.getCraftingCatalog();
 			} catch (e) {
 				// Non-fatal: the crafting surfaces show an empty state rather than breaking the sheet
@@ -18932,6 +18940,20 @@ class CharacterSheetPage {
 		})();
 
 		return this._pCraftingCatalog;
+	}
+
+	static _getCraftingCatalogWithBrew (siteData, brewMaterials) {
+		const out = MiscUtil.copyFast(siteData || {});
+		const byIdentity = new Map();
+		for (const material of out.craftingMaterial || []) {
+			byIdentity.set(`${material.name || ""}|${material.source || ""}`.trim().toLowerCase(), material);
+		}
+		for (const material of brewMaterials || []) {
+			const copy = MiscUtil.copyFast(material);
+			byIdentity.set(`${copy.name || ""}|${copy.source || ""}`.trim().toLowerCase(), copy);
+		}
+		out.craftingMaterial = [...byIdentity.values()];
+		return out;
 	}
 
 	/** Whether crafting surfaces should be offered at all. */

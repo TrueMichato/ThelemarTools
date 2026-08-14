@@ -50,6 +50,38 @@ const _ITEM_MATERIAL_EFFECT_TYPES = [
 	"note",
 ];
 
+const _CRAFTING_MATERIAL_MATCH_PREDICATES = ["spell", "damageType", "spellTag", "any"];
+const _CRAFTING_MATERIAL_EFFECT_TYPES = [
+	"text",
+	"dieSizeIncrease",
+	"bonusDice",
+	"additionalTargets",
+	"acOverride",
+	"bonusDamage",
+	"condition",
+	"noSlot",
+	"rangeChange",
+	"areaChange",
+	"resistance",
+	"saveDcMod",
+	"saveDisadvantage",
+	"speedFallRate",
+	"speedOverride",
+	"lowerSlot",
+	"removeConcentration",
+	"immunity",
+];
+const _CRAFTING_MATERIAL_DERIVED_PROPS = new Set([
+	"usedInRecipes",
+	"alsoIn",
+	"hasMechanicalEffect",
+	"hasUseEffect",
+	"effectTags",
+	"ingredientGraph",
+	"ingredientGraphMeta",
+	"ingredientMetadata",
+]);
+
 export const CRAFTING_WORKBENCH_VOCABULARY = Object.freeze({
 	props: Object.freeze([..._PROPS]),
 	itemMaterial: Object.freeze({
@@ -68,6 +100,8 @@ export const CRAFTING_WORKBENCH_VOCABULARY = Object.freeze({
 	}),
 	craftingMaterial: Object.freeze({
 		categories: Object.freeze(["creature part", "herb", "mineral", "food ingredient", "spell component", "other"]),
+		matchPredicates: Object.freeze(_CRAFTING_MATERIAL_MATCH_PREDICATES),
+		effectTypes: Object.freeze(_CRAFTING_MATERIAL_EFFECT_TYPES),
 	}),
 	craftingRecipe: Object.freeze({
 		categories: Object.freeze(["item", "potion", "scroll", "dish", "curse"]),
@@ -117,13 +151,24 @@ function _normalizeItemMaterial (entity) {
 
 function _normalizeCraftingMaterial (entity) {
 	const out = _copy(_asObject(entity));
-	for (const prop of ["entries", "effectTags", "usedInRecipes", "alsoIn", "spells"]) out[prop] = _asArray(out[prop]);
+	for (const prop of _CRAFTING_MATERIAL_DERIVED_PROPS) delete out[prop];
+	out.entries = _asArray(out.entries);
+	out.spells = _normalizeObjectRows(out.spells);
 
 	if (Object.hasOwn(out, "harvest")) {
 		if (!_isObject(out.harvest)) delete out.harvest;
 		else {
 			out.harvest = _copy(out.harvest);
-			if (Object.hasOwn(out.harvest, "creature")) out.harvest.creature = _asObject(out.harvest.creature);
+			delete out.harvest.creatureType;
+			delete out.harvest.cr;
+			if (Object.hasOwn(out.harvest, "creature")) {
+				out.harvest.creature = _asObject(out.harvest.creature);
+				delete out.harvest.creature.label;
+				if (!Object.keys(out.harvest.creature).length) delete out.harvest.creature;
+			}
+			if (_key(out.harvest.quantityRoll)) delete out.harvest.quantity;
+			else delete out.harvest.quantityRoll;
+			if (!Object.keys(out.harvest).length) delete out.harvest;
 		}
 	}
 
@@ -131,13 +176,22 @@ function _normalizeCraftingMaterial (entity) {
 		if (!_isObject(out.variantComponent)) delete out.variantComponent;
 		else {
 			out.variantComponent = _copy(out.variantComponent);
+			if (Object.hasOwn(out.variantComponent, "uses")) out.variantComponent.uses = _normalizeObjectRows(out.variantComponent.uses);
 			out.variantComponent.spellEffects = _normalizeObjectRows(
 				out.variantComponent.spellEffects,
-				spellEffect => ({
-					...spellEffect,
-					match: _asObject(spellEffect.match),
-					effects: _normalizeObjectRows(spellEffect.effects),
-				}),
+				spellEffect => {
+					const match = _asObject(spellEffect.match);
+					const predicates = _CRAFTING_MATERIAL_MATCH_PREDICATES
+						.filter(prop => prop === "any" ? match[prop] === true : _key(match[prop]));
+					for (const prop of _CRAFTING_MATERIAL_MATCH_PREDICATES) {
+						if (prop !== predicates[0]) delete match[prop];
+					}
+					return {
+						...spellEffect,
+						match,
+						effects: _normalizeObjectRows(spellEffect.effects),
+					};
+				},
 			);
 		}
 	}
@@ -229,6 +283,7 @@ function _validateItemMaterial (entity, out) {
 }
 
 function _validateCraftingMaterial (entity, out) {
+	if (!_key(entity.materialCategory)) out.errors.push({field: "materialCategory", message: "Choose a material category."});
 	_validateEnum({
 		entity,
 		prop: "materialCategory",
@@ -241,8 +296,29 @@ function _validateCraftingMaterial (entity, out) {
 			out.errors.push({field: prop, message: `${prop === "value" ? "Value (cp)" : "Weight"} must be zero or greater.`});
 		}
 	}
+	if (entity.harvest) {
+		for (const prop of ["dc", "quantity"]) {
+			if (entity.harvest[prop] != null && (!Number.isFinite(Number(entity.harvest[prop])) || Number(entity.harvest[prop]) < 0)) {
+				out.errors.push({field: `harvest.${prop}`, message: `Harvest ${prop === "dc" ? "DC" : "quantity"} must be zero or greater.`});
+			}
+		}
+	}
+	entity.spells.forEach((spell, ix) => {
+		if (!_key(spell.name)) out.errors.push({field: `spells.${ix}.name`, message: `Spell reference ${ix + 1} needs a name.`});
+	});
 	entity.variantComponent?.spellEffects.forEach((spellEffect, ix) => {
-		if (!Object.keys(spellEffect.match).length) out.warnings.push({field: `variantComponent.spellEffects.${ix}.match`, message: `Variant spell effect ${ix + 1} has no match criteria.`});
+		const predicates = _CRAFTING_MATERIAL_MATCH_PREDICATES
+			.filter(prop => prop === "any" ? spellEffect.match[prop] === true : _key(spellEffect.match[prop]));
+		if (predicates.length !== 1) {
+			out.errors.push({field: `variantComponent.spellEffects.${ix}.match`, message: `Variant spell effect ${ix + 1} needs exactly one match predicate.`});
+		}
+		spellEffect.effects.forEach((effect, effectIx) => {
+			if (!_key(effect.type)) {
+				out.errors.push({field: `variantComponent.spellEffects.${ix}.effects.${effectIx}.type`, message: `Effect ${effectIx + 1} in variant spell effect ${ix + 1} needs a type.`});
+			} else if (!_CRAFTING_MATERIAL_EFFECT_TYPES.includes(effect.type)) {
+				out.warnings.push({field: `variantComponent.spellEffects.${ix}.effects.${effectIx}.type`, message: `Effect type "${effect.type}" is not in the current vocabulary; it will be preserved.`});
+			}
+		});
 	});
 }
 
@@ -322,9 +398,6 @@ export class CraftingWorkbenchCore {
 				source,
 				materialCategory: "other",
 				entries: [],
-				effectTags: [],
-				usedInRecipes: [],
-				alsoIn: [],
 				spells: [],
 			},
 			craftingRecipe: {

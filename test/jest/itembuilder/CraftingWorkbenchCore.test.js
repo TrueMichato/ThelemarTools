@@ -1,4 +1,5 @@
 import {CraftingWorkbenchCore} from "../../../js/itembuilder/crafting-workbench-core.js";
+import {readFileSync} from "fs";
 
 describe("CraftingWorkbenchCore", () => {
 	test.each([
@@ -20,7 +21,7 @@ describe("CraftingWorkbenchCore", () => {
 
 	test.each([
 		["itemMaterial", {effects: "bad", magicCapacityRules: {}, entries: false, degradation: []}, ["effects", "magicCapacityRules", "entries"]],
-		["craftingMaterial", {entries: {}, effectTags: false, variantComponent: {spellEffects: "bad"}}, ["entries", "effectTags"]],
+		["craftingMaterial", {entries: {}, spells: false, variantComponent: {spellEffects: "bad", uses: {}}}, ["entries", "spells"]],
 		["craftingRecipe", {ingredients: "bad", outcomes: [{tier: "success", entries: {}}], componentGroups: null}, ["ingredients", "componentGroups"]],
 	])("normalizes malformed %s collections safely", (prop, malformed, emptyProps) => {
 		const draft = CraftingWorkbenchCore.createDraft(prop, {source: "HB", entity: malformed});
@@ -84,6 +85,136 @@ describe("CraftingWorkbenchCore", () => {
 			variantComponent,
 		};
 		expect(CraftingWorkbenchCore.serialize("craftingMaterial", entity).variantComponent).toEqual(variantComponent);
+	});
+
+	test("round-trips every runtime variant-component predicate and effect type", () => {
+		const predicates = [
+			{spell: "fireball|phb"},
+			{damageType: "fire"},
+			{spellTag: "restoration"},
+			{any: true},
+		];
+		const effectTypes = [
+			"text", "dieSizeIncrease", "bonusDice", "additionalTargets", "acOverride",
+			"bonusDamage", "condition", "noSlot", "rangeChange", "areaChange",
+			"resistance", "saveDcMod", "saveDisadvantage", "speedFallRate",
+			"speedOverride", "lowerSlot", "removeConcentration", "immunity",
+		];
+		const entity = {
+			name: "Complete Component",
+			source: "HB",
+			materialCategory: "spell component",
+			variantComponent: {
+				harvestDC: 12,
+				harvestQuantity: 2,
+				harvestSource: "Dragon",
+				harvestTime: "15 minutes",
+				usesPerCasting: 2,
+				uses: [{name: "Searing", key: "searing", entry: "Deal more damage.", expertUse: true}],
+				spellEffects: predicates.map((match, ix) => ({
+					match,
+					description: `Match ${ix + 1}`,
+					effects: effectTypes
+						.filter((_, effectIx) => effectIx % predicates.length === ix)
+						.map(type => ({type, expertDetails: {preserved: true}})),
+				})),
+			},
+		};
+
+		const serialized = CraftingWorkbenchCore.serialize("craftingMaterial", entity);
+		expect(CraftingWorkbenchCore.validate("craftingMaterial", serialized).isValid).toBe(true);
+		expect(serialized).toEqual(expect.objectContaining(entity));
+		expect(serialized.variantComponent).toEqual(entity.variantComponent);
+		expect(new Set(serialized.variantComponent.spellEffects.flatMap(it => it.effects).map(it => it.type))).toEqual(new Set(effectTypes));
+	});
+
+	test("covers every predicate and effect type in the read-only Arcadia 8 catalog", () => {
+		const data = JSON.parse(readFileSync("data/items-variant-components-ar8.json", "utf8"));
+		const predicates = new Set();
+		const effectTypes = new Set();
+		data.item.forEach(item => item.variantComponent?.spellEffects?.forEach(spellEffect => {
+			Object.keys(spellEffect.match || {}).forEach(prop => predicates.add(prop));
+			spellEffect.effects?.forEach(effect => effectTypes.add(effect.type));
+		}));
+
+		expect([...predicates].every(prop => CraftingWorkbenchCore.VOCABULARY.craftingMaterial.matchPredicates.includes(prop))).toBe(true);
+		expect([...effectTypes].every(type => CraftingWorkbenchCore.VOCABULARY.craftingMaterial.effectTypes.includes(type))).toBe(true);
+		expect(CraftingWorkbenchCore.VOCABULARY.craftingMaterial.matchPredicates).toEqual(["spell", "damageType", "spellTag", "any"]);
+	});
+
+	test("normalizes malformed nested variant arrays and enforces one supported predicate", () => {
+		const normalized = CraftingWorkbenchCore.normalize("craftingMaterial", {
+			name: "Component",
+			source: "HB",
+			materialCategory: "spell component",
+			variantComponent: {
+				uses: ["bad", {name: "Kept"}],
+				spellEffects: [
+					{
+						match: {damageType: "cold", spell: "cone of cold|phb", expertMatch: true},
+						effects: ["bad", {type: "bonusDice", count: 2}],
+					},
+					{match: "bad", effects: {}},
+					"bad",
+				],
+			},
+		});
+
+		expect(normalized.variantComponent.uses).toEqual([{name: "Kept"}]);
+		expect(normalized.variantComponent.spellEffects).toHaveLength(2);
+		expect(normalized.variantComponent.spellEffects[0].match).toEqual({spell: "cone of cold|phb", expertMatch: true});
+		expect(normalized.variantComponent.spellEffects[0].effects).toEqual([{type: "bonusDice", count: 2}]);
+		expect(normalized.variantComponent.spellEffects[1]).toEqual({match: {}, effects: []});
+		expect(CraftingWorkbenchCore.validate("craftingMaterial", normalized)).toEqual(expect.objectContaining({
+			isValid: false,
+			errors: expect.arrayContaining([expect.objectContaining({field: "variantComponent.spellEffects.1.match"})]),
+		}));
+	});
+
+	test("keeps fixed and rolled harvest quantities mutually exclusive", () => {
+		const normalized = CraftingWorkbenchCore.normalize("craftingMaterial", {
+			harvest: {quantity: 2, quantityRoll: "1d4"},
+		});
+		expect(normalized.harvest).toEqual({quantityRoll: "1d4"});
+	});
+
+	test("requires a canonical crafting material category", () => {
+		expect(CraftingWorkbenchCore.validate("craftingMaterial", {name: "Ore", source: "HB"})).toEqual(expect.objectContaining({
+			isValid: false,
+			errors: expect.arrayContaining([expect.objectContaining({field: "materialCategory"})]),
+		}));
+	});
+
+	test("strips generated crafting-material fields but preserves expert fields and cp", () => {
+		const serialized = CraftingWorkbenchCore.serialize("craftingMaterial", {
+			name: "Aboleth Eye",
+			source: "HB",
+			materialCategory: "spell component",
+			value: 37500,
+			usedInRecipes: [{name: "Lens"}],
+			alsoIn: [{name: "Eye", source: "Ar8"}],
+			hasMechanicalEffect: true,
+			hasUseEffect: true,
+			effectTags: ["generated"],
+			ingredientGraph: {generated: true},
+			harvest: {
+				dc: 17,
+				creature: {name: "Aboleth", source: "MM", label: "Aboleths"},
+				creatureType: "aberration",
+				cr: 10,
+			},
+			expertField: {kept: true},
+		});
+
+		expect(serialized.value).toBe(37500);
+		expect(serialized).not.toHaveProperty("usedInRecipes");
+		expect(serialized).not.toHaveProperty("alsoIn");
+		expect(serialized).not.toHaveProperty("hasMechanicalEffect");
+		expect(serialized).not.toHaveProperty("hasUseEffect");
+		expect(serialized).not.toHaveProperty("effectTags");
+		expect(serialized).not.toHaveProperty("ingredientGraph");
+		expect(serialized.harvest).toEqual({dc: 17, creature: {name: "Aboleth", source: "MM"}});
+		expect(serialized.expertField).toEqual({kept: true});
 	});
 
 	test("round-trips item material sentinels, effects, Magic Capacity rules, and degradation", () => {
