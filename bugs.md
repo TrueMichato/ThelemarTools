@@ -3,7 +3,13 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 50 — usable items in Combat + spell-focus false-block, TGTT Identify link, Item Builder, NPC Manager — IN PROGRESS
+_None currently tracked._
+
+## Closed Bugs
+
+### Round 50 — usable items in Combat + spell-focus false-block, TGTT Identify link, Item Builder, NPC Manager — INTEGRATED
+
+**Integration (no push).** Merged S1→S3→S4 `--no-ff` into throwaway branch `r50-integration` (tip `ddbe7e3c`) off base `f82262db` (backup tag `r50-base-backup`). Only the three pre-allocated DM-shell registration surfaces conflicted — `dmscreen-consts.js`, `dmscreen-panels.js`, `scss/dmscreen.scss` — and were resolved as keep-both unions (panel **25** Item Builder + panel **26** NPC Tracker, distinct symbol names); `dmscreen.js` auto-merged; S1 was file-disjoint from both features. `css/dmscreen.css` + `css/makebrew.css` were regenerated once with pinned sass 1.97.3. Full gate green on the merged tree: ESLint clean, stylelint clean, **511 suites / 14,981 tests pass** (the sole non-pass is the environmental `CraftingDataFreshness.test.js`, which needs the gitignored `.cache/crafting/*.json` absent from a fresh worktree — confirmed passing once the cache is symlinked in). Browser-verified on `dmscreen.html`: both panels register in the **Special** tab and instantiate their UIs (Item Builder loads the material + gem catalogs and shows the source/preset/upgrades/composition workbench; NPC Tracker shows its cast-desk roster) with no new console errors beyond the pre-existing `sw-injector.js` 404.
 
 Five reported items (character sheet + DM Screen, all TGTT-flavoured unless noted). Root-caused via parallel explore agents and pressure-tested with a rubber-duck grouping pass. **Key structural finding:** the "regular usable items don't appear in Combat" bug (Bug 1) and the "spellcasting focus falsely blocks casting" bug (Bug 2) share ONE nucleus — `CharacterSheetInventory._addItem()` coarsens an item's raw `type` via `_getItemType()` (e.g. `SCF`/`SCF|XPHB` → `"gear"`) and does not preserve `scfType`, so a UI-added Orb stores `type:"gear"` with no `scfType`/`focus` and `getSpellcastingFocusStatus()` can't see it; the same lost raw-type metadata is what prevents type-`G` thrown/utility consumables from being classified. They are therefore **one session**, not two parallel owners of `charactersheet-inventory.js`. Decomposed into **1 combined character-sheet session (S1) + 2 large DM-Screen/homebrew feature sessions (S3, S4) + 1 orchestrator-direct data fix (Bug 3, landed at setup)**.
 
@@ -13,8 +19,7 @@ Five reported items (character sheet + DM Screen, all TGTT-flavoured unless note
 - **Bug 5 (S4, FEATURE, `/impeccable shape`) — NPC Manager DM-Screen widget.** `isNpc` already exists in the bestiary schema (~750 creatures) — **no schema change**; `charactersheet-npc-exporter.js` must emit `isNpc:true` (isolated). New DM panel `js/dmscreen/npctracker/` (panel type **26**) modeled on Party Tracker: left roster (choose NPCs via `SearchWidget.pGetUserCreatureSearch`, filter `isNpc`), RP-focused detail (stats/saves/skills/immunities/senses/traits/spells via `Renderer.monster.*` part fns), clickable rolling via `{@dice}`/`{@savingThrow}`/`{@hit}` tags, expand-to-full-statblock via `render-bestiary.js` `getRenderedCreature`. Phase 1 MVP = roster + RP view + rolling + expand + persistence; Phase 2 = groups + batch rolling. Persistence is the panel's own versioned saved state (snapshot vs name|source|hash decided in-plan).
 
 **Shared-surface watch (integration):** S3 and S4 both register a DM panel → additive edits to `dmscreen-consts.js` (new `PANEL_TYP_*` const — S3=25, S4=26), `dmscreen-panels.js` (new `PanelContentManager_*` subclass + `_register()`), `dmscreen.js` (import + `doPopulate_*` + an `AddMenuSpecialTab` row ~3060-3125), and `scss/dmscreen.scss` (one `@import`); the generated `css/dmscreen.css` is regenerated ONCE by the orchestrator at integration. Distinct pre-allocated IDs + symbol names keep this a trivial union merge. S1 is file-disjoint from both features. Merge order: S1 → S3 → S4.
-
-## Closed Bugs
+- **Orchestrator-direct page-init hotfix (`ee459b8e`, landed at round setup).** `charactersheet.js:377` had a lost newline that merged `this._draconicResonancesData = [];` into the preceding comment, so the field stayed `undefined` and `?spawn` page init threw `_draconicResonancesData is not iterable`. Split the comment and assignment so the array initializes. Pre-commit hooks (ESLint + 33 related tests) passed.
 
 ### Round 49 — Oiled String prereq, weapon damage-bonus display parity, Gemstone Empowerment overhaul, openable equipment packs — INTEGRATED
 
