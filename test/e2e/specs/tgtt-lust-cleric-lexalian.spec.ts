@@ -159,7 +159,12 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 describeCharacter({
 	preset: PRESET_FULL_LUST_LEXALIAN,
 	displayName: "Lust Domain Cleric Lexalian",
-	signatureToggle: /channel divinity|charm|lust|allure|persuasion|seduction|domain/i,
+	// The old pattern led with `channel divinity`, which never matched: the
+	// sheet surfaces the Channel Divinity OPTION by its own name ("Turn
+	// Undead"), not by the resource that funds it. Every Cleric has it from
+	// L2, so this is the domain-independent Channel Divinity expression.
+	signatureToggle: /turn undead|channel divinity|charm|lust|allure|persuasion|seduction/i,
+	signatureToggleNoDerivedEffect: "Turn Undead is enemy-facing (undead within 30 ft make a WIS save or flee); the sheet models one character, so no self-facing stat can move. Activation itself is still asserted.",
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [

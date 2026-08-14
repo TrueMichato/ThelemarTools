@@ -16,7 +16,12 @@ import {buildSpecialtyChecks, buildAnyInvocationChecks, withSkipReason} from "..
 describeCharacter({
 	preset: PRESET_FULL_HORROR_THEOCRACIAN,
 	displayName: "The Horror Warlock Theocracian",
-	signatureToggle: /horror|invocation|pact|hex|dark|terror|eldritch/i,
+	// Eldritch Invocations default to PASSIVE (they are routed through
+	// WARLOCK_INVOCATION_REGISTRY and only opt into toggle/trigger behaviour
+	// per entry), and Pact Boon is a choice rather than a stance. The only row
+	// this build puts in the Overview strip at L5 is Devastating Strike, a
+	// racial feature — asserting that would be asserting an unrelated mechanic.
+	signatureToggleSkip: {skip: true, reason: "Eldritch Invocations default to passive via WARLOCK_INVOCATION_REGISTRY and Pact Boon is a pick, not a stance; both are covered in featuresMatrix (pact magic passive, pact boon pick)"},
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [

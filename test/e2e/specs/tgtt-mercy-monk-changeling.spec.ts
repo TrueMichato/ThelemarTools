@@ -232,7 +232,12 @@ const MERCY_MONK_FEATURES_MATRIX: FeatureCheck[] = [
 describeCharacter({
 	preset: PRESET_FULL_MERCY_MONK_CHANGELING,
 	displayName: "Mercy Monk Changeling",
-	signatureToggle: /flurry|hand of (heal|harm)|patient defense/i,
+	// Flurry of Blows, Patient Defense and Hand of Healing/Harm all spend Focus
+	// and classify as `isInstant: true`, so R21 keeps them off the Overview
+	// "Available to Activate" strip that `signatureToggle` reads. Hand of
+	// Healing / Hand of Harm are already asserted as toggles in the matrix
+	// (:184, :189), currently blocked by CS-BUG-017.
+	signatureToggleSkip: {skip: true, reason: "Flurry of Blows, Patient Defense and Hand of Healing/Harm are Focus-spending instant abilities excluded from the Overview activatable strip by R21; Hand of Healing/Harm are covered as matrix toggles (blocked by CS-BUG-017)"},
 	usage: {
 		atLevel: 5,
 		// Monks render Unarmed Strike via a dedicated panel, not the

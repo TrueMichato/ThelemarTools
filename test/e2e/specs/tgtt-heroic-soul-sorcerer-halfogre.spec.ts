@@ -229,7 +229,10 @@ const HEROIC_SOUL_FEATURES_MATRIX: FeatureCheck[] = [
 describeCharacter({
 	preset: PRESET_FULL_HEROIC_SOUL_HALFOGRE,
 	displayName: "Heroic Soul Sorcerer Half-Ogre",
-	signatureToggle: /over soul|legendary weapon|manifest legend|hero/i,
+	// Same as the Child of the Sun spec: Over Soul / Manifest Legend resolve
+	// when invoked rather than holding a stance, and Metamagic is armed at cast
+	// time. Nothing stands in the Overview activatable strip at rest.
+	signatureToggleSkip: {skip: true, reason: "Heroic Soul's abilities resolve on use rather than holding a stance and Metamagic is armed at cast time, so none sit in the Overview activatable strip; the Metamagic picks are covered as kind:\"pick\" matrix rows"},
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [

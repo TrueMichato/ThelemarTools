@@ -9079,3 +9079,491 @@ auto-granted curses, asserting the description does not *begin* with the grant
 note and does carry an `Amplify:` rider. Note that not every curse has a saving
 throw — the Souleater is a self-buff reaction — so asserting one would fail on
 correct data.
+
+---
+
+## CS-BUG-154 — An active Crimson Rite was invisible on the weapon it empowered — FIXED
+
+### Symptom
+
+A Blood Hunter pays hit points to bind a Crimson Rite to **one chosen weapon**,
+and the rite then rides that weapon's damage rolls until it ends. With two
+weapons equipped, nothing on either attack row indicated which one carried the
+rite — an active rite and no rite at all looked identical.
+
+### Root cause
+
+The rite's bonus damage is real, but it is applied **at roll time** inside the
+damage roller (`charactersheet-combat.js` → `getExtraDamageFromStates()`). No
+static surface consulted it: the attack row's damage badge renders only
+`attack.damage` plus `totalDamageBonus`, and `getAttackRiderNotes()` was
+**item-scoped** — it read `attack.sourceItem.attackRiders` and knew nothing
+about active states.
+
+So the effect *worked* while being *unshown*, which is the harder half of the
+bug to notice: every damage roll was correct, so nothing looked wrong until you
+asked the sheet which weapon was empowered and it had no answer.
+
+### Fix
+
+Two changes, both generic rather than Blood-Hunter-specific:
+
+1. `getAttackRiderNotes()` now also emits a rider for any active-state extra
+   damage **bound to this weapon** (`weaponId === attack.id`). Deliberately
+   limited to bound effects: an unbound state rider applies to every attack, so
+   pinning it to one row would misinform. Any future weapon-bound state damage
+   gets this surface for free.
+2. `getExtraDamageFromStates()` now prefers the effect's own `source` over the
+   state's display name. A rite effect carries `source: "Rite of the Flame"`
+   while its state is the generic "Crimson Rites", so reading `stateName` first
+   discarded the only field identifying *which* rite was burning — with two
+   rites active, both riders read identically apart from damage type.
+
+### Regression test
+
+`CharacterSheetBloodHunter.test.js` → "surfaces an active Crimson Rite as a
+rider on the weapon it empowers, and not on others", including a negative
+control asserting the rite does **not** leak onto an unempowered weapon.
+Verified causal: disabling the rider turns the E2E `L5 loadout` signature-toggle
+probe red, and restoring it turns it green.
+
+---
+
+## CS-BUG-155 — `getAttackDamageString` read a button label, so no spec could observe a damage change — FIXED (test infra)
+
+### Symptom
+
+`probeToggleDelta` snapshots each attack's damage before and after a toggle so
+that toggles expressing themselves in damage (Rage's +2, a Crimson Rite's rider)
+are not misreported as "no effect". The damage field never changed for any spec.
+
+### Root cause
+
+`CharacterSheetPage.getAttackDamageString` read
+`.charsheet__attack-damage, .charsheet__attack-roll-damage`. The first is the
+**"Roll Damage" button**, whose label is the constant string `"Damage"` for
+every attack ever rendered; the second **does not exist anywhere in the
+application**. So the method returned `"Damage"` unconditionally and the
+before/after comparison compared two identical constants.
+
+This is the "cannot pass" assertion form: not an assertion that fails to catch
+its target, but one whose two inputs are equal by construction.
+
+### Fix
+
+Read `.charsheet__attack-details` (the badge the player actually reads) and
+append any `.charsheet__attack-rider-note` text.
+
+### Note
+
+The dead field had been silently absorbing effect changes suite-wide, not just
+for Blood Hunter. Any toggle whose only expression is damage was invisible to
+the probe.
+
+---
+
+## CS-BUG-156 — A signature-toggle probe could silently skip, reporting success by not running — FIXED (test infra)
+
+### Symptom
+
+`test/e2e/specs/tgtt-mutant-blood-hunter.spec.ts` declared
+`signatureToggle: /mutagen/i`. The probe logged
+`no toggle for /mutagen/i; skipping toggle probe` and the test **passed**. The
+spec whose entire purpose is the mutagen flow was green while exercising no
+mutagen behaviour in a default run.
+
+### Root cause
+
+Two independent reasons the pattern could never match:
+
+1. No mutagen formula is auto-picked, so no row exists to toggle (the CS-BUG-124
+   root cause).
+2. More fundamentally, `getToggleableFeatureNames()` reads
+   `.charsheet__activatable-row` on the **Overview** tab, while mutagen rows are
+   `.charsheet__feature` cards on the **Features** tab. The pattern was
+   *structurally* unmatchable — seeding formulas would not have helped.
+
+When `probeToggleDelta` returned `null`, the factory logged and returned,
+leaving the test green. A runtime skip is indistinguishable from a pass in the
+summary line.
+
+### Fix
+
+The factory now **throws** when no toggleable row matches, naming the pattern
+and listing the rows that *were* present. A class whose signature mechanic
+genuinely is not a toggle declares `signatureToggleSkip: {skip: true, reason}` —
+a channel that already existed, is greppable, and keeps the gap visible in the
+spec file rather than in a log line nobody reads.
+
+Also added: `signatureTogglePrompt`, because every Blood Hunter signature toggle
+is **prompt-gated** (Crimson Rite opens `InputUiUtil.pGetUserEnum` to choose the
+weapon and returns early unless answered). Without it the probe clicked, walked
+away, and reported "no derived effect" for a feature that works — a harness gap
+indistinguishable from a product bug. Answering is best-effort on both sides,
+because whether the prompt appears depends on how many weapons are equipped —
+i.e. on the character's data, not on the spec.
+
+### Known related gap (not fixed here)
+
+`Shadow Knight Fighter`'s `/action surge|second wind/i` was silently skipping for
+the same reason — those are resource counters, not Overview toggles. The
+hard-fail surfaces it.
+
+---
+
+## CS-BUG-157 — Level-up wizard renders no control for a feature-option group the subclass introduces, then refuses to finish — FIXED
+
+### Symptom
+
+Creating an Order of the Profane Soul Blood Hunter and levelling to 3, the wizard
+summary read **"✓ Ready to level up!"** with every section ticked, but pressing
+**Finish** silently refused and raised:
+
+> Please select 1 option(s) for Pact Magic.
+
+There was no "Pact Magic" control anywhere in the wizard. The toast named a
+control the player could not see, so there was no possible workaround — the
+character was permanently stuck at level 2.
+
+This is the maximally deceptive shape of the failure: the *validator* and the
+*summary* disagreed, and the summary is the half the player reads.
+
+### Root cause
+
+A render/validate skew scoped to **the level at which a subclass is chosen**.
+
+`findFeatureOptions` emits a required 1-of-N group for any `abilityDc` carrying
+more than one attribute. BH2022's Pact Magic declares
+`{"type": "abilityDc", "attributes": ["int", "wis"]}`, so it produces a real
+group — but only *after* a subclass exists.
+
+`_pShowLevelUpModal` built the "Feature Choices" accordion inside a one-shot
+`if (featureOptionGroups.length) { … }` evaluated **before** any subclass was
+picked, when the list is empty. The subclass-selection callback did recompute
+`featureOptionGroups`, but — unlike the `optfeatures` block immediately beside
+it — had no code to *build* the now-missing UI, so `accordions.featoptions?.…`
+silently no-opped. The validator then read the recomputed list and blocked.
+
+At every other level the subclass is already known when the initial render runs,
+so the accordion is created normally. That is why only the subclass level broke.
+
+### Fix
+
+`js/charactersheet/charactersheet-levelup.js` — the one-shot `if` became a
+reusable `buildFeatOptionsSection()` closure that either re-renders the existing
+accordion body or creates the accordion and its summary item on demand,
+mirroring the adjacent `optfeatures` pattern. The subclass-selection callback now
+clears `selectedFeatureOptions` (stale keys from a previously-selected subclass
+must not carry over) and calls it. It ends by running `updateFeatOptionsStatus()`
+so the summary can no longer falsely report "Ready to level up!".
+
+### Blast radius — measured, not inferred
+
+A static scan of the corpus predicted **10** official subclasses affected
+(Battle Master, Hunter, Totem Warrior, Soulknife, Kensei, Psi Warrior, Storm
+Herald, Swords Bard, Genie Warlock…). That over-predicted. A runtime probe on
+Battle Master L3 showed its resolved group list is **empty**, and the existing
+Battle Master spec passes. The *mechanism* is generic; the realised impact on
+official content is small-to-zero, and it bites homebrew that declares a
+multi-attribute `abilityDc` on a subclass feature.
+
+The static scan is a worked example of a confident non-zero: it matched the
+shape in the source JSON without seeing that the runtime never resolves those
+entries into groups.
+
+---
+
+## CS-BUG-158 — A subclass casting from another class's spell list was offered an EMPTY spell picker — FIXED
+
+### Symptom
+
+Immediately behind CS-BUG-157. With the wizard finally able to finish, level 3
+opened a **"Choose Spell: Cantrips Known"** modal reading
+
+> Cantrip from **Blood Hunter** spell list
+
+containing a search box, a Cancel button and **zero selectable spells**. The base
+Blood Hunter class has no spell list, so the modal could never be satisfied and
+level-up hung — again leaving the character stuck at 2.
+
+### Root cause
+
+BH2022's Order of the Profane Soul declares
+`subclassSpells: [{className: "Warlock", classSource: "PHB"}]` — 5etools'
+structured way of saying "this subclass casts from that class's list".
+
+`CharacterSheetState.getSubclassSpellListClass()` exists precisely to answer that
+question, but did not read the field, so it fell through to the parent class and
+built `filter: level=0|class=Blood Hunter`.
+
+Two independent defects, and the second is the one that made the first invisible:
+
+1. The resolver did not consider `subclassSpells`.
+2. **The field was never persisted.** `charactersheet-builder.js`,
+   `charactersheet-levelup.js` and `charactersheet-quickbuild.js` each copy an
+   explicit *whitelist* of subclass fields onto the stored class entry. The
+   whitelist carried the confusingly-similar `subSubclassSpells` (an unrelated
+   sub-subclass map) but not `subclassSpells`, so the resolver fix alone changed
+   nothing — the stored object simply did not have the field.
+
+The second defect is why reasoning failed here and instrumentation succeeded:
+logging `Object.keys(subclass)` at the resolver showed `subSubclassSpells`
+present and `subclassSpells` absent, which no amount of reading the source data
+would have revealed.
+
+### Fix
+
+- `getSubclassSpellListClass()` now reads `subclassSpells[].className`, ranked
+  below an explicit `spellcastingSpellList` override and above the
+  `additionalSpells` filter scan (an `additionalSpells` entry only ever describes
+  spells layered *on top of* a list, so it is the weaker signal).
+- `subclassSpells` added to the persistence whitelist at all four call sites.
+
+No official subclass uses `subclassSpells`, so reading it cannot change the
+behaviour of any first-party content.
+
+---
+
+## CS-BUG-159 — A subclass that publishes its own spellcasting progression knew ZERO spells — FIXED
+
+### Symptom
+
+With the picker fixed, cantrips populated correctly from the Warlock list — but
+the exported state still showed `spellsKnown: []` at level 3, where Order of the
+Profane Soul should know 2 spells.
+
+The character-sheet calculation `profaneSoulSpellsKnown` reported **2** the whole
+time, because it reads the published progression table. Only the *learned* list
+was empty.
+
+### Root cause
+
+`_getClassSpellcastingInfo()` resolves subclass casters through a ladder of
+**hard-coded name branches** — `Gambler`, `Eldritch Knight`, `Arcane Trickster`,
+`Architect of Ruin` — each inlining its own spells-known array. A subclass that
+*declares* `spellsKnownProgression` / `cantripProgression` in data matches none
+of them and falls through to `return null`, i.e. "not a caster at all".
+
+The irony is that the persistence whitelist already carefully stores
+`casterProgression`, `spellcastingAbility`, `cantripProgression` and
+`subclassTableGroups` on the subclass — fields only a *generic* reader would ever
+want — while the reader that needed them consulted a list of names instead.
+
+### Fix
+
+- A generic branch in `_getClassSpellcastingInfo()` reads the subclass's own
+  declared `spellsKnownProgression` / `cantripProgression`. It is placed
+  **last**, after every named branch, so it cannot alter the behaviour of any
+  subclass handled above; the Eldritch Knight regression test in
+  `CharacterSheetProfaneSoulSpellcasting.test.js` is the guard that it stays
+  there.
+- `spellsKnownProgression` added to the subclass persistence whitelist at all
+  four call sites, beside `cantripProgression`.
+
+`spellListClass` was deliberately **not** emitted from the new branch: it is
+written by the Gambler branch and propagated by `getSpellcastingInfo()`, but no
+code in `js/` ever reads it back, so adding it would have been decorative.
+
+### Testing note — why the existing assertions could not have caught any of this
+
+The E2E spec asserted `profaneSoulCantripsKnown` and `profaneSoulSpellsKnown`.
+Both are derived from the progression table and report the right number whether
+or not the player can pick anything, so both were green throughout. The spec now
+also asserts `{kind: "cantripCount", min: 2}`, which counts cantrips **actually
+learned** and is the only assertion in that milestone that fails when the
+spell-list plumbing breaks.
+
+All three fixes were verified with a negative control: each branch was disabled
+in turn and the corresponding tests confirmed to go red (5 of 11 for the generic
+caster branch, 1 of 11 for the `subclassSpells` resolver).
+
+---
+
+## CS-BUG-160 — Order of the Profane Soul's patron choice was never offered — FIXED
+
+**Symptom.** A level-3 Profane Soul Blood Hunter is told by the feature text to
+"strike a bargain with an otherworldly being of your choice", and that choice
+augments three later features. The level-up wizard never asked. The
+`profaneSoulPatron` calculation was therefore permanently `null`, so Rite Focus,
+Revealed Arcana and Unsealed Arcana could never deliver a patron-specific
+benefit — not because those bodies are unimplemented (they are, separately, and
+that is recorded in `10-known-limitations.md`), but because the input they read
+did not exist.
+
+**Root cause.** `CharacterSheetClassUtils.findFeatureOptions()` detects choices
+by looking for a `type: "options"` entry, plus a narrow `abilityDc` special
+case. BH2022 states the nine patrons as *prose* inside a `type: "list"`:
+
+```json
+"entries": [
+  "When you reach 3rd level, you strike a bargain with an otherworldly being of your choice:",
+  {"type": "list", "items": [
+    "The Archfey, the Fiend, or the Great Old One, detailed in the {@book Player's Handbook|PHB}",
+    "The Undying, from {@book Sword Coast Adventurer's Guide|SCAG}",
+    ...
+  ]},
+  "The choice you make augments some of your subclass features, as noted below."
+]
+```
+
+No `options` entry exists, so the resolver correctly found nothing, and nothing
+downstream was broken — the choice simply never entered the pipeline.
+
+**Why this was invisible.** The read path was complete and correct.
+`_getProfaneSoulPatron()` (`charactersheet-state.js:38866`) walks
+`levelHistory[].choices.featureChoices` and would have returned the patron the
+moment one was stored. A reader that works perfectly against an empty writer
+returns `null`, which is indistinguishable from "the player hasn't chosen yet".
+Only the gated E2E matrix — which auto-picks every offered choice and then
+asserts the recorded value — could tell the two apart, and it reported
+`Otherworldly Patron choice=undefined`.
+
+**Fix.** A name-keyed `FEATURE_PROSE_CHOICES` table on
+`CharacterSheetClassUtils`, mirroring the established
+`FEATURE_CLASSIFICATION_OVERRIDES` pattern. It is consulted **only when the data
+yielded nothing**, and it emits the same `{count, options}` shape the `abilityDc`
+branch already emits (`type: "inline"`), so no code downstream of the resolver
+special-cases it: the wizard renders it, the validator counts it, and the level
+history stores it exactly as it does a data-declared choice.
+
+Ordering matters and is pinned by a test: if BH2022 is ever corrected upstream to
+declare a real `options` entry, the data wins and the table goes quiet, so the
+player is never asked twice.
+
+**Both resolvers had to be patched.** `charactersheet-builder.js:161` carries a
+near-copy of `findFeatureOptions` under the name `_findFeatureOptions`. Patching
+only the `ClassUtils` one would have fixed level-up and quick-build while leaving
+the Builder path silently dropping the choice — the same same-named-neighbour
+trap that produced CS-BUG-158 (`subSubclassSpells` vs `subclassSpells`).
+
+**Files.**
+- `js/charactersheet/charactersheet-class-utils.js` — `FEATURE_PROSE_CHOICES` +
+  the fallback at the end of `findFeatureOptions()`.
+- `js/charactersheet/charactersheet-builder.js` — same fallback in
+  `_findFeatureOptions()`.
+- `test/jest/charactersheet/CharacterSheetProfaneSoulSpellcasting.test.js` — 6
+  tests covering the offer, the option shape, non-firing on choiceless features,
+  data precedence, and the store→read round trip.
+
+**Negative control.** Disabling the table turned exactly the two tests that
+assert the new behaviour red (16 → 15 passing, 2 failed); the read-back,
+precedence and non-firing tests stayed green because they exercise other paths.
+The control therefore discriminates rather than merely covarying.
+
+---
+
+## CS-BUG-161 — Pact Magic asked for a casting ability, then ignored the answer — FIXED
+
+**Symptom.** Levelling a Blood Hunter into Order of the Profane Soul at level 3
+presented a "Feature Choices" prompt asking whether Pact Magic uses Intelligence
+or Wisdom. The answer was recorded in level history and shown back to the player.
+It had no effect. A player who chose Intelligence cast with Wisdom.
+
+**Evidence.** The level-20 E2E export records both, disagreeing:
+
+```
+"Hunter's Bane = Wisdom", "Otherworldly Patron = The Archfey", "Pact Magic = Intelligence"
+profaneSoulSpellcastingAbility = wis
+```
+
+**Root cause.** `findFeatureOptions()` treats any `abilityDc` entry with more
+than one attribute as a player choice. That is right for Hunter's Bane, which is
+where the Blood Hunter actually picks a Hemocraft ability. It is wrong for Pact
+Magic, whose own text says the decision was already made:
+
+> Your chosen Hemocraft ability (Intelligence or Wisdom) is your spellcasting
+> ability for your warlock spells…
+
+Its `{"type": "abilityDc", "attributes": ["int", "wis"]}` entry exists so 5etools
+can *render* "Spell save DC = 8 + prof + Int/Wis", not to pose a second question.
+`charactersheet-state.js` correctly assigns `profaneSoulSpellcastingAbility =
+hemocraftAbility` and never consults the Pact Magic choice.
+
+**Why this is worth fixing rather than tolerating.** This is the mirror image of
+CS-BUG-125. There, an effect existed with no channel to reach the player. Here a
+channel exists with no effect behind it — and unlike inert *text*, an inert
+*prompt* actively misinforms: it invites a decision, confirms it, and silently
+discards it.
+
+**Fix.** A `FEATURE_DERIVED_ABILITY_DCS` set on `CharacterSheetClassUtils` naming
+features whose `abilityDc` restates an ability chosen elsewhere. The `abilityDc`
+branch skips those. Applied to both resolvers (`charactersheet-class-utils.js`
+and the near-copy in `charactersheet-builder.js`), as with CS-BUG-160.
+
+**Collision check.** A corpus scan of `data/class/*.json` found exactly **one**
+multi-attribute `abilityDc` in official content — Battle Master's Combat
+Superiority `[str, dex]` — and no other feature named "Pact Magic" carries one,
+so keying by name is safe. The scan was run with a positive control (searching
+for *any* multi-attribute `abilityDc`) to prove it could find something, rather
+than trusting a bare zero.
+
+**Historical note.** The comment at `charactersheet-levelup.js` describing
+CS-BUG-157 previously named this very prompt as its example and called it "a real
+Intelligence/Wisdom choice". That claim was inferred from the data shape without
+reading the feature text; it has been corrected in place. CS-BUG-157's fix is
+still exercised — the Otherworldly Patron group (CS-BUG-160) is now the group
+that arrives late at the same level.
+
+**Negative control.** Disabling the guard turned exactly one test red — the one
+asserting suppression — while "still offers the choice for features where it IS a
+real decision" stayed green, so the control discriminates rather than covaries.
+
+## CS-BUG-162 — three orders' free blood curse was described but never granted — FIXED
+
+**Symptom.** A Ghostslayer 15, a Mutant 15, or a Profane Soul 18 read the feature
+text *"You gain the Blood Curse of the Exorcist for your Blood Maledict feature"*
+and then could not invoke it. `detectActivatableFeature()` returned `null` for that
+row, so it never became a usable Blood Maledict option. Order of the Lycan was
+unaffected.
+
+**Root cause — a dedupe guard defeated by the thing it was guarding against.**
+`ensureBloodHunterResources()` pushed the granted curse behind:
+
+```js
+if (level >= 15 && !this._data.features.some(f => f.name === "Blood Curse of the Exorcist")) { … }
+```
+
+Three of the four orders name the *granting subclass feature* after the curse it
+grants — the BH2022 data has a `subclassFeature` literally called "Blood Curse of
+the Exorcist" whose text merely says you gain the curse. That descriptive feature
+satisfied the name check, so the guard concluded the curse was already present and
+skipped the push. The player got the prose and none of the mechanics.
+
+Only the Lycan escaped, because its granting feature is called "Hybrid
+Transformation Mastery" and so never collided.
+
+**Why it survived earlier review.** The auto-grant path was spot-checked on the
+Lycan — the single order where no collision exists — and generalised from. Reading
+the *other* three would have shown the name equality immediately. It also survived
+a `grep` audit: searching for readers of `grantsBloodCurseOfTheExorcist` returns
+only the assignment, which reads as "feature not implemented", when in fact the
+feature is implemented under a completely different name. That confident zero was
+wrong in both directions at once — the flag genuinely has no reader (it is
+decorative), *and* the mechanism exists elsewhere.
+
+**Fix.** Replaced the four copy-pasted push blocks with one
+`_grantSubclassBloodCurse()` helper. Name alone cannot answer "has this been granted
+yet?"; the real question is whether an **invocable** entry (one carrying
+`optionalFeatureTypes: ["BC"]`, the marker `_pUseBloodMaledict` dispatches on)
+exists. Where only the descriptive feature is present it is promoted in place —
+gaining the `BC` marker and the curse's mechanical text — rather than being shadowed
+by a second row of the same name, so the player still sees exactly one entry per
+curse.
+
+**Detection.** Found by reading the passing gated matrix run's exported character
+rather than trusting the green. The L20 export contained a
+`Blood Curse of the Exorcist` entry with `isSubclassFeature: true` and **no**
+`optionalFeatureTypes` — a feature present under the expected name but without the
+one field that makes it usable.
+
+**Note on the E2E probe.** The first spec assertion used
+`activatableListed`, and it **passed against the broken code** because it matched the
+descriptive feature by name. It was replaced with `featureActivation`, which calls
+`detectActivatableFeature` and therefore returns `null` before the fix and a
+descriptor costing 1 Blood Maledict after it. This is the same family as
+CS-BUG-156: a probe that finds *a* match is not a probe that finds *the* match.
+
+**Negative control.** Restoring the name-only guard turns exactly the five tests
+asserting the new behaviour red, while the Lycan test, the single-row test, the
+already-chosen-from-the-pool test and the below-level test stay green — those hold
+under both versions, so the control discriminates rather than covaries.

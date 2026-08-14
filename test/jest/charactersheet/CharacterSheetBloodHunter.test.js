@@ -166,6 +166,27 @@ describe("Blood Hunter (BH2022)", () => {
 		expect(state.isStateTypeActive("crimsonRite")).toBe(false);
 	});
 
+	// The rite is paid for in hit points and rides ONE chosen weapon, but the damage
+	// is applied inside the damage roller, so nothing on the weapon row said which
+	// weapon carried it: with two weapons equipped an active rite was
+	// indistinguishable from no rite. Assert the weapon-bound rider surfaces, and
+	// that it lands on the empowered weapon ONLY.
+	it("surfaces an active Crimson Rite as a rider on the weapon it empowers, and not on others", () => {
+		const state = getBloodHunterState({level: 7});
+		expect(state.activateCrimsonRite("Rite of the Flame", {roll: 2, weaponId: "weapon-1", weaponName: "Longsword"})).toBe(true);
+
+		const empowered = state.getAttackRiderNotes({id: "weapon-1", name: "Longsword"});
+		expect(empowered.length).toBeGreaterThan(0);
+		const rider = empowered.find(r => /rite of the flame/i.test(r.label));
+		if (!rider) throw new Error(`expected a Rite of the Flame rider, got ${JSON.stringify(empowered)}`);
+		expect(rider.label).toMatch(/fire/i);
+		expect(rider.label).toMatch(/\d+d\d+/);
+
+		// Negative control: the rite must not leak onto an unempowered weapon.
+		const other = state.getAttackRiderNotes({id: "weapon-2", name: "Longbow"});
+		expect(other.some(r => /rite of the flame/i.test(r.label))).toBe(false);
+	});
+
 	it("ends finite Hybrid Transformation on rest but preserves mastery transformations", () => {
 		const finite = getBloodHunterState({level: 11, lycan: true});
 		addResourceFeature(finite, "Hybrid Transformation", 3);

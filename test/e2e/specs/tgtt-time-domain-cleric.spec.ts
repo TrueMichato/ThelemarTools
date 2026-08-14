@@ -15,7 +15,11 @@ import {buildSpecialtyChecks} from "../utils/tgttFeaturePools";
 describeCharacter({
 	preset: PRESET_FULL_TIME_CLERIC,
 	displayName: "Time Domain Cleric",
-	signatureToggle: /channel divinity|time|temporal|destroy undead/i,
+	// `destroy undead` is the L5 passive rider, not a row; `channel divinity`
+	// is the resource, not the ability. The activatable the sheet actually
+	// renders is the Channel Divinity option itself — "Turn Undead".
+	signatureToggle: /turn undead|channel divinity|time|temporal/i,
+	signatureToggleNoDerivedEffect: "Turn Undead is enemy-facing (undead within 30 ft make a WIS save or flee); the sheet models one character, so no self-facing stat can move. Activation itself is still asserted.",
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [

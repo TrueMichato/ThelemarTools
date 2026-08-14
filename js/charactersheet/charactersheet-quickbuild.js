@@ -4859,6 +4859,8 @@ class CharacterSheetQuickBuild {
 						casterProgression: selectedSubclass.casterProgression,
 						spellcastingAbility: selectedSubclass.spellcastingAbility,
 						additionalSpells: selectedSubclass.additionalSpells,
+						// Class whose spell list this subclass casts from. See CS-BUG-158.
+						subclassSpells: selectedSubclass.subclassSpells,
 						subSubclassSpells: selectedSubclass.subSubclassSpells,
 						optionalfeatureProgression: selectedSubclass.optionalfeatureProgression,
 						// Subclass-declared spell-slot / cantrip progression tables. Persisted so
@@ -4869,6 +4871,9 @@ class CharacterSheetQuickBuild {
 						// Gambler) declare their cantrip table on the SUBCLASS. Persisted so
 						// `getSubclassCantripChoiceSlots` can prompt for those picks.
 						cantripProgression: selectedSubclass.cantripProgression,
+						// Likewise their spells-known table. Without this the subclass falls through
+						// every branch of `_getClassSpellcastingInfo` and knows ZERO spells. CS-BUG-159.
+						spellsKnownProgression: selectedSubclass.spellsKnownProgression,
 					};
 					if (selectedSubclass.casterProgression && !targetClass.casterProgression) {
 						targetClass.casterProgression = selectedSubclass.casterProgression;
@@ -4894,6 +4899,8 @@ class CharacterSheetQuickBuild {
 							casterProgression: selectedSubclass.casterProgression,
 							spellcastingAbility: selectedSubclass.spellcastingAbility,
 							additionalSpells: selectedSubclass.additionalSpells,
+							// Class whose spell list this subclass casts from. See CS-BUG-158.
+							subclassSpells: selectedSubclass.subclassSpells,
 							subSubclassSpells: selectedSubclass.subSubclassSpells,
 							optionalfeatureProgression: selectedSubclass.optionalfeatureProgression,
 							subclassTableGroups: selectedSubclass.subclassTableGroups,
@@ -4901,6 +4908,9 @@ class CharacterSheetQuickBuild {
 							// Gambler) declare their cantrip table on the SUBCLASS. Persisted so
 							// `getSubclassCantripChoiceSlots` can prompt for those picks.
 							cantripProgression: selectedSubclass.cantripProgression,
+							// Likewise their spells-known table. Without this the subclass falls through
+							// every branch of `_getClassSpellcastingInfo` and knows ZERO spells. CS-BUG-159.
+							spellsKnownProgression: selectedSubclass.spellsKnownProgression,
 						}
 						: null,
 					subclassChoice: this._selections.subclassChoices[`${className}_${classSource}`] || null,

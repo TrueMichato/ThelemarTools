@@ -88,7 +88,11 @@ describeCharacter({
 		// weapon the USE attack probe can actually roll.
 		{name: "Longsword", equipped: true},
 	],
-	signatureToggle: /action surge|second wind/i,
+	// Same architectural cause as the Champion spec: Action Surge and Second
+	// Wind are `isInstant: true`, so R21 excludes them from the Overview
+	// "Available to Activate" strip that `signatureToggle` reads. Battle
+	// Master's own signature — Superiority Dice — is a die pool, not a toggle.
+	signatureToggleSkip: {skip: true, reason: "Action Surge and Second Wind are instant abilities excluded from the Overview activatable strip by R21, and Superiority Dice is a pool rather than a stance; all three are covered as resources in featuresMatrix"},
 	usage: {
 		useResourceName: "Superiority Dice",
 		attackName: /longsword|greatsword|warhammer|battleaxe|mace|scimitar|rapier|shortsword/i,

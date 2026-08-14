@@ -816,6 +816,38 @@ MC optional features map 1:1 to the 15 companions and each carries a
 prerequisite naming its companion, so choosing a companion already determines
 the connection. Surfacing it as a chooser would invite an invalid selection.
 
+## Blood Hunter — Order of the Profane Soul (`BH2022`) patron-specific text
+
+The order's **Otherworldly Patron** choice is a real, persisted decision: it is
+offered at level 3, stored, and read back by the `profaneSoulPatron`
+calculation, so later features can key off it. That was **not** true until
+`CS-BUG-160` was fixed — the source states the nine patrons as prose inside a
+`type: "list"`, which the option resolver could not see, so the choice was never
+offered and `profaneSoulPatron` was permanently `null`. See
+[`known-bugs.md`](./known-bugs.md).
+
+What is **not** implemented is the patron-specific *body* of three features:
+
+| Feature | Level | What is implemented | What is not |
+|---|---|---|---|
+| Rite Focus | 3 | the flag, and the patron name | the per-patron benefit clause |
+| Revealed Arcana | 7 | the feature is listed | the per-patron spell grant |
+| Unsealed Arcana | 15 | the feature is listed | the per-patron spell grant |
+
+Each of the nine patrons supplies a different clause, and several are
+enemy-facing or DM-adjudicated ("the target takes…", "the creature must…") — the
+same boundary described for brands and curse saves above: a single-character
+sheet cannot resolve an effect that lands on someone else.
+
+The two spell-granting features are, by contrast, mechanically expressible and
+are simply not done yet; they are a candidate for the `additionalSpells` path
+rather than new machinery.
+
+The E2E spec declares this gap explicitly rather than asserting around it, so the
+missing coverage is visible in the spec file instead of only in this document.
+
+---
+
 ---
 
 *Previous: [Testing Strategy](./09-testing-strategy.md) | Next: [Future Roadmap](./11-future-roadmap.md)*
