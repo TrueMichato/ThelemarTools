@@ -420,9 +420,9 @@ export class RenderCrafting {
 		"itemMaterial": new _RenderItemMaterialImpl(),
 	};
 
-	static getRenderedCrafting (ent) {
+	static getRenderedCrafting (ent, opts) {
 		const impl = this._RENDER_BY_PROP[ent.__prop];
 		if (!impl) throw new Error(`Unhandled crafting property "${ent.__prop}"!`);
-		return impl.getRendered(ent);
+		return impl.getRendered(ent, opts);
 	}
 }

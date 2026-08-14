@@ -86,6 +86,52 @@ describe("CraftingWorkbenchCore", () => {
 		expect(CraftingWorkbenchCore.serialize("craftingMaterial", entity).variantComponent).toEqual(variantComponent);
 	});
 
+	test("round-trips item material sentinels, effects, Magic Capacity rules, and degradation", () => {
+		const entity = {
+			name: "Rimeglass",
+			source: "TGTT",
+			materialCategory: "crystal",
+			density: null,
+			densityVaries: true,
+			damage: "na",
+			protection: 14,
+			critical: 0,
+			penetration: null,
+			magicCapacity: "-infinity",
+			effects: [{
+				type: "bonusCritDamage",
+				appliesTo: ["weapon"],
+				dice: "1d6",
+				damageType: "cold",
+				note: "A specialized effect.",
+				specializedUnknown: {kept: true},
+			}],
+			magicCapacityRules: [{
+				type: "freeEffect",
+				theme: "frost",
+				appliesTo: "fragment",
+				note: "The first frost effect is free.",
+				expertRule: true,
+			}],
+			degradation: {
+				trigger: {on: "damageTaken", damageType: "fire", natural: []},
+				effect: {type: "zeroAxes", axes: ["protection", "critical"], expertEffect: true},
+				stacking: false,
+				destroys: false,
+				repair: {method: "shortRest", tool: "glassblower's tools", expertRepair: true},
+				note: "Fire softens it.",
+				expertDegradation: true,
+			},
+		};
+
+		const serialized = CraftingWorkbenchCore.serialize("itemMaterial", entity);
+		expect(CraftingWorkbenchCore.validate("itemMaterial", serialized).isValid).toBe(true);
+		expect(serialized).toEqual(expect.objectContaining(entity));
+		expect(serialized.effects).toEqual(entity.effects);
+		expect(serialized.magicCapacityRules).toEqual(entity.magicCapacityRules);
+		expect(serialized.degradation).toEqual(entity.degradation);
+	});
+
 	test("omits workbench-only state and preview prop while preserving canonical unknowns", () => {
 		const serialized = CraftingWorkbenchCore.serialize("itemMaterial", {
 			name: "Test",

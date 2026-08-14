@@ -1,4 +1,5 @@
 import {CraftingWorkbenchCore} from "../itembuilder/crafting-workbench-core.js";
+import {RenderCrafting} from "../render-crafting.js";
 import {BuilderBase} from "./makebrew-builder-base.js";
 
 export class CraftingWorkbenchBuilderBase extends BuilderBase {
@@ -50,6 +51,16 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 		this._sourcesCache = MiscUtil.copy(this._ui.allSources);
 	}
 
+	async pDoHandleSourceUpdate () {
+		const source = this._ui.source;
+		this._sourcesCache = MiscUtil.copy(this._ui.allSources);
+		if (this._draft) this._draft.source = source;
+		this.__state.source = source;
+		this.renderInput();
+		this.renderOutput();
+		this.doUiSave();
+	}
+
 	async pHandleLoadExistingData (entity, opts = {}) {
 		this._draft = CraftingWorkbenchCore.normalize(this._prop, entity);
 		this._draft.source = this._ui.source;
@@ -78,6 +89,8 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 		this._resetTabs({tabGroup: "input"});
 		const opts = {hasBorder: true, hasBackground: true};
 		const definitions = this._getStageDefinitions();
+		const cb = this._getCb();
+		this._cbCache = cb;
 		const tabs = this._renderTabs(
 			definitions.map(definition => new TabUiUtil.TabMeta({...opts, name: definition.name})),
 			{tabGroup: "input", cbTabChange: this.doUiSave.bind(this)},
@@ -88,7 +101,7 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 		this._refreshValidation();
 		tabs.forEach(it => it.wrpTab.appendTo(wrp));
 
-		definitions.forEach((definition, ix) => definition.render({wrp: tabs[ix].wrpTab, cb: this._getCb()}));
+		definitions.forEach((definition, ix) => definition.render({wrp: tabs[ix].wrpTab, cb}));
 		this._wrpReview = tabs.at(-1)?.wrpTab || null;
 	}
 
@@ -142,8 +155,11 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 		this._refreshValidation();
 		this.renderOutput();
 		this.doUiSave();
+		this._refreshReview();
 		if (isRenderInput) this.renderInput();
 	}
+
+	_refreshReview () {}
 
 	_renderAdvancedJson ({wrp}) {
 		const msg = ee`<div class="ve-small ve-mt-2" role="status" aria-live="polite"></div>`;
@@ -223,7 +239,8 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 
 		const canonical = CraftingWorkbenchCore.serialize(this._prop, this.__state);
 		const preview = this.constructor.getPreviewEntity(this._prop, canonical);
-		ee`<table class="ve-w-100 ve-stats" aria-label="${Parser.getPropDisplayName(this._prop)} preview">${RenderCrafting.getRenderedCrafting(preview)}</table>`.appendTo(previewTab.wrpTab);
+		const previewTable = ee`<table class="ve-w-100 ve-stats" aria-label="${Parser.getPropDisplayName(this._prop)} preview"></table>`.appendTo(previewTab.wrpTab);
+		previewTable.appends(RenderCrafting.getRenderedCrafting(preview, {isSkipExcludesRender: true}));
 
 		const clean = DataUtil.cleanJson(MiscUtil.copy(canonical));
 		const dataHtml = Renderer.get().render({type: "entries", entries: [{type: "code", name: "Data", preformatted: JSON.stringify(clean, null, "\t")}]});
