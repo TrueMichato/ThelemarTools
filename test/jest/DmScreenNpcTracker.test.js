@@ -1,6 +1,9 @@
 import "../../js/parser.js";
 import "../../js/utils.js";
-import {NpcTrackerSerializer} from "../../js/dmscreen/npctracker/dmscreen-npctracker-serial.js";
+import {
+	NpcTrackerSerializer,
+	removeNpcTrackerGroup,
+} from "../../js/dmscreen/npctracker/dmscreen-npctracker-serial.js";
 import {
 	getNpcTrackerDetailModel,
 	getNpcTrackerDisplayName,
@@ -8,6 +11,12 @@ import {
 	hasNpcTrackerAttackRoll,
 } from "../../js/dmscreen/npctracker/dmscreen-npctracker-detail.js";
 import {getNpcTrackerImportedMonsters} from "../../js/dmscreen/npctracker/dmscreen-npctracker-roster.js";
+import {
+	getNpcTrackerNpcsForScope,
+	getNpcTrackerRollBonus,
+	getNpcTrackerRollLabel,
+	sortNpcTrackerBatchResults,
+} from "../../js/dmscreen/npctracker/dmscreen-npctracker-roll.js";
 
 const getMonster = () => ({
 	name: "Court Mage",
@@ -40,19 +49,27 @@ describe("NPC Tracker serialization", () => {
 		});
 		npc.hp.current = 11;
 		npc.hp.temp = 4;
+		npc.groupId = "court";
 
 		const saved = NpcTrackerSerializer.serialize({
-			version: 1,
-			settings: {selectedId: npc.id, isIncludeAllCreatures: true},
+			version: 2,
+			settings: {selectedId: npc.id, isIncludeAllCreatures: true, isUnsortedCollapsed: true},
+			groups: [{id: "court", name: "Town Council", isCollapsed: true}],
 			npcs: [npc],
 		});
 		const restored = NpcTrackerSerializer.deserialize(saved);
 
-		expect(saved.v).toBe(1);
-		expect(restored.settings).toEqual({selectedId: npc.id, isIncludeAllCreatures: true});
+		expect(saved.v).toBe(2);
+		expect(restored.settings).toEqual({
+			selectedId: npc.id,
+			isIncludeAllCreatures: true,
+			isUnsortedCollapsed: true,
+		});
+		expect(restored.groups).toEqual([{id: "court", name: "Town Council", isCollapsed: true}]);
 		expect(restored.npcs[0]).toMatchObject({
 			id: npc.id,
 			alias: "Magister Vale",
+			groupId: "court",
 			hp: {current: 11, max: 27, temp: 4},
 			monster,
 			fluff: {entries: ["A patient adviser."]},
@@ -80,6 +97,129 @@ describe("NPC Tracker serialization", () => {
 	it("defaults malformed or empty state safely", () => {
 		expect(NpcTrackerSerializer.deserialize(null)).toEqual(NpcTrackerSerializer.getDefaultState());
 		expect(NpcTrackerSerializer.deserialize({n: [{mon: {name: "Missing source"}}]}).npcs).toEqual([]);
+	});
+
+	it("migrates version 1 saves into Unsorted without losing NPC state", () => {
+		const restored = NpcTrackerSerializer.deserialize({
+			v: 1,
+			s: {sel: "legacy", all: true},
+			n: [{
+				id: "legacy",
+				a: "Legacy Mage",
+				hp: {c: 9, m: 27, t: 2},
+				mon: getMonster(),
+				fluff: {entries: ["Preserved lore."]},
+			}],
+		});
+
+		expect(restored.groups).toEqual([]);
+		expect(restored.settings).toEqual({
+			selectedId: "legacy",
+			isIncludeAllCreatures: true,
+			isUnsortedCollapsed: false,
+		});
+		expect(restored.npcs[0]).toMatchObject({
+			id: "legacy",
+			alias: "Legacy Mage",
+			groupId: null,
+			hp: {current: 9, max: 27, temp: 2},
+			fluff: {entries: ["Preserved lore."]},
+		});
+	});
+
+	it("repairs dangling memberships and removes groups without deleting NPCs", () => {
+		const first = NpcTrackerSerializer.createNpc({monster: getMonster(), alias: "First"});
+		const second = NpcTrackerSerializer.createNpc({monster: getMonster(), alias: "Second"});
+		first.groupId = "valid";
+		second.groupId = "missing";
+		const state = NpcTrackerSerializer.deserialize({
+			groups: [{id: "valid", name: "Council"}],
+			npcs: [first, second],
+		});
+
+		expect(state.npcs.map(npc => npc.groupId)).toEqual(["valid", null]);
+		expect(removeNpcTrackerGroup({state, groupId: "valid"})).toBe(true);
+		expect(state.groups).toEqual([]);
+		expect(state.npcs).toHaveLength(2);
+		expect(state.npcs.map(npc => npc.groupId)).toEqual([null, null]);
+	});
+
+	it("keeps duplicate monster instances independently assignable", () => {
+		const first = NpcTrackerSerializer.createNpc({monster: getMonster()});
+		const second = NpcTrackerSerializer.createNpc({monster: getMonster()});
+		first.groupId = "a";
+		second.groupId = "b";
+		const restored = NpcTrackerSerializer.deserialize({
+			g: [{id: "a", n: "A"}, {id: "b", n: "B"}],
+			n: [
+				NpcTrackerSerializer.serialize({groups: [{id: "a", name: "A"}], npcs: [first]}).n[0],
+				NpcTrackerSerializer.serialize({groups: [{id: "b", name: "B"}], npcs: [second]}).n[0],
+			],
+		});
+
+		expect(restored.npcs.map(npc => npc.groupId)).toEqual(["a", "b"]);
+		expect(restored.npcs[0].id).not.toBe(restored.npcs[1].id);
+	});
+});
+
+describe("NPC Tracker batch rolls", () => {
+	it("resolves initiative, abilities, saves, and skills with correct fallbacks", () => {
+		const rendererOriginal = globalThis.Renderer;
+		globalThis.Renderer = {monster: {getInitiativeBonusNumber: () => 7}};
+		const npc = {
+			monster: {
+				...getMonster(),
+				dex: 14,
+				wis: 12,
+				save: {dex: "+6"},
+				skill: {perception: "+4"},
+			},
+		};
+
+		try {
+			expect(getNpcTrackerRollBonus({npc, rollType: "initiative"})).toBe(7);
+			expect(getNpcTrackerRollBonus({npc, rollType: "ability", key: "dex"})).toBe(2);
+			expect(getNpcTrackerRollBonus({npc, rollType: "save", key: "dex"})).toBe(6);
+			expect(getNpcTrackerRollBonus({npc, rollType: "save", key: "wis"})).toBe(1);
+			expect(getNpcTrackerRollBonus({npc, rollType: "skill", key: "perception"})).toBe(4);
+			expect(getNpcTrackerRollBonus({npc, rollType: "skill", key: "insight"})).toBe(1);
+			expect(getNpcTrackerRollLabel({rollType: "save", key: "dex"})).toBe("Dexterity save");
+		} finally {
+			globalThis.Renderer = rendererOriginal;
+		}
+	});
+
+	it("resolves all, named-group, and Unsorted scopes in roster order", () => {
+		const state = {
+			npcs: [
+				{id: "a", groupId: "g"},
+				{id: "b", groupId: null},
+				{id: "c", groupId: "g"},
+			],
+		};
+
+		expect(getNpcTrackerNpcsForScope({state, scope: {type: "all"}}).map(npc => npc.id)).toEqual(["a", "b", "c"]);
+		expect(getNpcTrackerNpcsForScope({state, scope: {type: "group", groupId: "g"}}).map(npc => npc.id)).toEqual(["a", "c"]);
+		expect(getNpcTrackerNpcsForScope({state, scope: {type: "unsorted"}}).map(npc => npc.id)).toEqual(["b"]);
+	});
+
+	it("sorts initiative totals descending with stable roster-order ties", () => {
+		const results = [
+			{name: "Bravo", total: 15, order: 1},
+			{name: "Alpha", total: 18, order: 0},
+			{name: "Charlie", total: 15, order: 2},
+		];
+
+		expect(sortNpcTrackerBatchResults({
+			results,
+			sortKey: "total",
+			sortDirection: "desc",
+		}).map(it => it.name)).toEqual(["Alpha", "Bravo", "Charlie"]);
+		expect(sortNpcTrackerBatchResults({
+			results,
+			sortKey: "order",
+			sortDirection: "asc",
+		}).map(it => it.name)).toEqual(["Alpha", "Bravo", "Charlie"]);
 	});
 });
 

@@ -1,7 +1,15 @@
 import {DmScreenPanelAppBase} from "../dmscreen-panelapp-base.js";
-import {NpcTrackerSerializer} from "./dmscreen-npctracker-serial.js";
+import {NpcTrackerSerializer, removeNpcTrackerGroup} from "./dmscreen-npctracker-serial.js";
 import {NpcTrackerRoster, getNpcTrackerImportedMonsters} from "./dmscreen-npctracker-roster.js";
 import {NpcTrackerDetail} from "./dmscreen-npctracker-detail.js";
+import {NpcTrackerBatch} from "./dmscreen-npctracker-batch.js";
+import {
+	getNpcTrackerDisplayName,
+	getNpcTrackerNpcsForScope,
+	getNpcTrackerRollBonus,
+	getNpcTrackerRollLabel,
+	pRollNpcTrackerD20,
+} from "./dmscreen-npctracker-roll.js";
 
 export class NpcTracker extends DmScreenPanelAppBase {
 	constructor (...args) {
@@ -27,6 +35,8 @@ export class NpcTrackerRoot {
 		this._state = NpcTrackerSerializer.deserialize(savedState);
 		this._isFullStatblock = false;
 		this._view = this._state.settings.selectedId ? "detail" : "roster";
+		this._workspaceMode = "detail";
+		this._batchState = null;
 		this._wrpRoot = null;
 		this._wrpRoster = null;
 		this._wrpDetail = null;
@@ -39,6 +49,13 @@ export class NpcTrackerRoot {
 			fnUpdateNpc: meta => this._updateNpc(meta),
 			fnRemove: id => this._removeNpc(id),
 			fnToggleIncludeAll: value => this._toggleIncludeAll(value),
+			fnAddGroup: () => this._pAddGroup(),
+			fnRenameGroup: id => this._pRenameGroup(id),
+			fnRemoveGroup: id => this._removeGroup(id),
+			fnToggleGroup: id => this._toggleGroup(id),
+			fnToggleUnsorted: () => this._toggleUnsorted(),
+			fnAssignGroup: meta => this._assignGroup(meta),
+			fnOpenBatch: scope => this._openBatch(scope),
 		});
 		this._detail = new NpcTrackerDetail({
 			fnGetNpc: () => this._getSelectedNpc(),
@@ -47,6 +64,15 @@ export class NpcTrackerRoot {
 				this._renderDetail();
 			},
 			fnUpdateHp: ({npc, prop, value}) => this._updateNpc({npc, prop: `hp.${prop}`, value}),
+		});
+		this._batch = new NpcTrackerBatch({
+			fnGetContext: () => ({
+				batch: this._batchState,
+				npcs: this._batchState ? getNpcTrackerNpcsForScope({state: this._state, scope: this._batchState.scope}) : [],
+			}),
+			fnUpdateConfig: config => this._updateBatchConfig(config),
+			fnRoll: () => this._pRollBatch(),
+			fnSort: key => this._sortBatch(key),
 		});
 	}
 
@@ -71,12 +97,13 @@ export class NpcTrackerRoot {
 	}
 
 	_renderDetail () {
-		this._detail.render({
+		const opts = {
 			wrp: this._wrpDetail,
-			isFullStatblock: this._isFullStatblock,
 			isNarrow: true,
 			fnShowRoster: () => this._setView("roster"),
-		});
+		};
+		if (this._workspaceMode === "batch") this._batch.render(opts);
+		else this._detail.render({...opts, isFullStatblock: this._isFullStatblock});
 	}
 
 	async _pAddNpc () {
@@ -107,6 +134,7 @@ export class NpcTrackerRoot {
 		const npc = NpcTrackerSerializer.createNpc({monster, fluff});
 		this._state.npcs.push(npc);
 		this._state.settings.selectedId = npc.id;
+		this._workspaceMode = "detail";
 		this._isFullStatblock = false;
 		this._setView("detail");
 		this._renderRoster();
@@ -129,6 +157,7 @@ export class NpcTrackerRoot {
 		}));
 		this._state.npcs.push(...added);
 		this._state.settings.selectedId = added[0].id;
+		this._workspaceMode = "detail";
 		this._isFullStatblock = false;
 		this._setView("detail");
 		this._renderRoster();
@@ -140,6 +169,7 @@ export class NpcTrackerRoot {
 	_selectNpc (id) {
 		if (!this._state.npcs.some(npc => npc.id === id)) return;
 		this._state.settings.selectedId = id;
+		this._workspaceMode = "detail";
 		this._isFullStatblock = false;
 		this._setView("detail");
 		this._renderRoster();
@@ -184,6 +214,182 @@ export class NpcTrackerRoot {
 	_toggleIncludeAll (value) {
 		this._state.settings.isIncludeAllCreatures = !!value;
 		this._doSave();
+	}
+
+	async _pAddGroup () {
+		const name = await InputUiUtil.pGetUserString({title: "New NPC Group", isSkippable: true});
+		if (name == null) return;
+		const cleanName = name.trim();
+		if (!cleanName) {
+			JqueryUtil.doToast({type: "warning", content: "Group name cannot be empty."});
+			return;
+		}
+		if (this._state.groups.some(group => group.name.toLowerCase() === cleanName.toLowerCase())) {
+			JqueryUtil.doToast({type: "warning", content: `A group named "${cleanName}" already exists.`});
+			return;
+		}
+		this._state.groups.push({id: CryptUtil.uid(), name: cleanName, isCollapsed: false});
+		this._renderRoster();
+		this._doSave();
+	}
+
+	async _pRenameGroup (groupId) {
+		const group = this._state.groups.find(it => it.id === groupId);
+		if (!group) return;
+		const name = await InputUiUtil.pGetUserString({title: "Rename NPC Group", default: group.name, isSkippable: true});
+		if (name == null) return;
+		const cleanName = name.trim();
+		if (!cleanName) {
+			JqueryUtil.doToast({type: "warning", content: "Group name cannot be empty."});
+			return;
+		}
+		if (this._state.groups.some(it => it.id !== groupId && it.name.toLowerCase() === cleanName.toLowerCase())) {
+			JqueryUtil.doToast({type: "warning", content: `A group named "${cleanName}" already exists.`});
+			return;
+		}
+		group.name = cleanName;
+		if (this._batchState?.scope.groupId === groupId) this._batchState.scopeName = cleanName;
+		this._renderRoster();
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_removeGroup (groupId) {
+		const group = this._state.groups.find(it => it.id === groupId);
+		if (this._batchState?.isRolling && this._batchState.scope.groupId === groupId) {
+			JqueryUtil.doToast({type: "warning", content: "Wait for the active batch roll to finish before deleting this group."});
+			return;
+		}
+		if (!group || !confirm(`Delete group "${group.name}"? Its NPCs will move to Unsorted.`)) return;
+		removeNpcTrackerGroup({state: this._state, groupId});
+		if (this._batchState?.scope.groupId === groupId) {
+			this._workspaceMode = "detail";
+			this._batchState = null;
+		}
+		this._renderRoster();
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_toggleGroup (groupId) {
+		const group = this._state.groups.find(it => it.id === groupId);
+		if (!group) return;
+		group.isCollapsed = !group.isCollapsed;
+		this._renderRoster();
+		this._doSave();
+	}
+
+	_toggleUnsorted () {
+		this._state.settings.isUnsortedCollapsed = !this._state.settings.isUnsortedCollapsed;
+		this._renderRoster();
+		this._doSave();
+	}
+
+	_assignGroup ({npc, groupId}) {
+		if (!this._state.npcs.includes(npc)) return;
+		npc.groupId = this._state.groups.some(group => group.id === groupId) ? groupId : null;
+		this._renderRoster();
+		if (this._workspaceMode === "batch") this._renderDetail();
+		this._doSave();
+	}
+
+	_openBatch (scope) {
+		if (this._batchState?.isRolling) {
+			JqueryUtil.doToast({type: "warning", content: "Wait for the active batch roll to finish before starting another."});
+			return;
+		}
+		const group = scope.type === "group"
+			? this._state.groups.find(it => it.id === scope.groupId)
+			: null;
+		if (scope.type === "group" && !group) return;
+		this._batchState = {
+			scope,
+			scopeName: scope.type === "all" ? "All NPCs" : scope.type === "unsorted" ? "Unsorted" : group.name,
+			rollType: "initiative",
+			key: null,
+			results: [],
+			sortKey: "total",
+			sortDirection: "desc",
+			isRolling: false,
+			error: null,
+		};
+		this._workspaceMode = "batch";
+		this._setView("detail");
+		this._renderDetail();
+	}
+
+	_updateBatchConfig ({rollType, key}) {
+		if (!this._batchState || this._batchState.isRolling) return;
+		if (rollType != null) this._batchState.rollType = rollType;
+		if (key !== undefined) this._batchState.key = key;
+		this._batchState.results = [];
+		this._batchState.error = null;
+		this._batchState.sortKey = this._batchState.rollType === "initiative" ? "total" : "order";
+		this._batchState.sortDirection = this._batchState.rollType === "initiative" ? "desc" : "asc";
+		this._renderDetail();
+	}
+
+	async _pRollBatch () {
+		if (!this._batchState || this._batchState.isRolling) return;
+		const batch = this._batchState;
+		const npcs = getNpcTrackerNpcsForScope({state: this._state, scope: batch.scope});
+		if (!npcs.length) return;
+
+		batch.isRolling = true;
+		batch.error = null;
+		batch.results = [];
+		this._renderDetail();
+
+		const results = [];
+		let failures = 0;
+		for (let order = 0; order < npcs.length; ++order) {
+			const npc = npcs[order];
+			try {
+				const bonus = getNpcTrackerRollBonus({
+					npc,
+					rollType: batch.rollType,
+					key: batch.key,
+				});
+				const label = getNpcTrackerRollLabel({
+					rollType: batch.rollType,
+					key: batch.key,
+				});
+				const rolled = await pRollNpcTrackerD20({npc, label, bonus});
+				if (!rolled) {
+					failures++;
+					continue;
+				}
+				results.push({
+					npcId: npc.id,
+					name: getNpcTrackerDisplayName(npc),
+					bonus,
+					die: rolled.die,
+					total: rolled.total,
+					order,
+				});
+			} catch {
+				failures++;
+			}
+		}
+
+		if (this._batchState !== batch) return;
+		batch.results = results;
+		batch.isRolling = false;
+		batch.error = failures
+			? `${failures} ${failures === 1 ? "roll was" : "rolls were"} cancelled or could not be completed.`
+			: null;
+		this._renderDetail();
+	}
+
+	_sortBatch (key) {
+		if (!this._batchState) return;
+		if (this._batchState.sortKey === key) {
+			this._batchState.sortDirection = this._batchState.sortDirection === "asc" ? "desc" : "asc";
+		} else {
+			this._batchState.sortKey = key;
+			this._batchState.sortDirection = key === "total" ? "desc" : "asc";
+		}
+		this._renderDetail();
 	}
 
 	_setView (view) {

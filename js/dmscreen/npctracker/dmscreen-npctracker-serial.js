@@ -1,5 +1,5 @@
 export class NpcTrackerSerializer {
-	static VERSION = 1;
+	static VERSION = 2;
 
 	static getDefaultState () {
 		return {
@@ -7,7 +7,9 @@ export class NpcTrackerSerializer {
 			settings: {
 				selectedId: null,
 				isIncludeAllCreatures: false,
+				isUnsortedCollapsed: false,
 			},
+			groups: [],
 			npcs: [],
 		};
 	}
@@ -19,6 +21,7 @@ export class NpcTrackerSerializer {
 		return {
 			id: CryptUtil.uid(),
 			alias: alias.trim(),
+			groupId: null,
 			hp: {
 				current: hpMax,
 				max: hpMax,
@@ -36,10 +39,17 @@ export class NpcTrackerSerializer {
 			s: {
 				sel: clean.settings.selectedId,
 				all: clean.settings.isIncludeAllCreatures,
+				uc: clean.settings.isUnsortedCollapsed,
 			},
+			g: clean.groups.map(group => ({
+				id: group.id,
+				n: group.name,
+				c: group.isCollapsed,
+			})),
 			n: clean.npcs.map(npc => ({
 				id: npc.id,
 				a: npc.alias,
+				g: npc.groupId,
 				hp: {
 					c: npc.hp.current,
 					m: npc.hp.max,
@@ -55,13 +65,28 @@ export class NpcTrackerSerializer {
 		const out = this.getDefaultState();
 		if (!raw || typeof raw !== "object") return out;
 
+		const rawGroups = Array.isArray(raw.g) ? raw.g : Array.isArray(raw.groups) ? raw.groups : [];
+		const seenGroupIds = new Set();
+		out.groups = rawGroups
+			.map(rawGroup => this._deserializeGroup(rawGroup))
+			.filter(group => {
+				if (!group || seenGroupIds.has(group.id)) return false;
+				seenGroupIds.add(group.id);
+				return true;
+			});
+
 		const rawNpcs = Array.isArray(raw.n) ? raw.n : Array.isArray(raw.npcs) ? raw.npcs : [];
 		out.npcs = rawNpcs
 			.map(rawNpc => this._deserializeNpc(rawNpc))
 			.filter(Boolean);
+		const validGroupIds = new Set(out.groups.map(group => group.id));
+		out.npcs.forEach(npc => {
+			if (!validGroupIds.has(npc.groupId)) npc.groupId = null;
+		});
 
 		const rawSettings = raw.s || raw.settings || {};
 		out.settings.isIncludeAllCreatures = !!(rawSettings.all ?? rawSettings.isIncludeAllCreatures);
+		out.settings.isUnsortedCollapsed = !!(rawSettings.uc ?? rawSettings.isUnsortedCollapsed);
 
 		const selectedId = rawSettings.sel ?? rawSettings.selectedId ?? null;
 		out.settings.selectedId = out.npcs.some(npc => npc.id === selectedId)
@@ -69,6 +94,17 @@ export class NpcTrackerSerializer {
 			: out.npcs[0]?.id || null;
 
 		return out;
+	}
+
+	static _deserializeGroup (rawGroup) {
+		if (!rawGroup || typeof rawGroup !== "object") return null;
+		const name = `${rawGroup.n ?? rawGroup.name ?? ""}`.trim();
+		if (!name) return null;
+		return {
+			id: rawGroup.id || CryptUtil.uid(),
+			name,
+			isCollapsed: !!(rawGroup.c ?? rawGroup.isCollapsed),
+		};
 	}
 
 	static _deserializeNpc (rawNpc) {
@@ -84,6 +120,7 @@ export class NpcTrackerSerializer {
 		return {
 			id: rawNpc.id || CryptUtil.uid(),
 			alias: `${rawNpc.a ?? rawNpc.alias ?? ""}`.trim(),
+			groupId: rawNpc.g ?? rawNpc.groupId ?? null,
 			hp: {
 				current: this._getNonNegativeNumber(rawHp.c ?? rawHp.current, hpMax),
 				max: hpMax,
@@ -102,4 +139,14 @@ export class NpcTrackerSerializer {
 		const num = Number(value);
 		return Number.isFinite(num) ? Math.max(0, num) : fallback;
 	}
+}
+
+export function removeNpcTrackerGroup ({state, groupId}) {
+	const ix = state.groups.findIndex(group => group.id === groupId);
+	if (!~ix) return false;
+	state.groups.splice(ix, 1);
+	state.npcs.forEach(npc => {
+		if (npc.groupId === groupId) npc.groupId = null;
+	});
+	return true;
 }

@@ -1,4 +1,9 @@
 import {RenderBestiary} from "../../render-bestiary.js";
+import {
+	getNpcTrackerDisplayName,
+	getNpcTrackerSignedNumber,
+	pRollNpcTrackerD20,
+} from "./dmscreen-npctracker-roll.js";
 
 const _PROPS_ATTACK = ["action", "bonus", "reaction", "legendary", "mythic"];
 
@@ -33,15 +38,7 @@ export function hasNpcTrackerAttackRoll (entry) {
 		|| JSON.stringify(entry?.entries || []).includes("{@hit");
 }
 
-export function getNpcTrackerDisplayName (npc) {
-	return npc?.alias || npc?.monster?.name || "Unnamed NPC";
-}
-
-export function getNpcTrackerSignedNumber (value) {
-	const num = Number(value);
-	if (!Number.isFinite(num)) return `${value}`;
-	return num >= 0 ? `+${num}` : `${num}`;
-}
+export {getNpcTrackerDisplayName, getNpcTrackerSignedNumber};
 
 export class NpcTrackerDetail {
 	constructor ({fnGetNpc, fnSetViewMode, fnUpdateHp}) {
@@ -196,10 +193,10 @@ export class NpcTrackerDetail {
 	}
 
 	_roll ({npcName, label, bonus}) {
-		return Renderer.dice.pRoll2(`1d20${getNpcTrackerSignedNumber(bonus)}`, {
-			isUser: false,
-			name: npcName,
+		return pRollNpcTrackerD20({
+			npc: this._fnGetNpc() || {alias: npcName, monster: {name: npcName}},
 			label,
+			bonus: Number(bonus),
 		});
 	}
 }

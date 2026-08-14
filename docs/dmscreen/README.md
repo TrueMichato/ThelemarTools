@@ -1,6 +1,6 @@
-# DM Screen — Party Tracker & Journey Tracker Documentation
+# DM Screen Panel Documentation
 
-Developer documentation for the Party Tracker and Journey Tracker panels in the 5etools DM Screen (`dmscreen.html`). These two panels work together: the Party Tracker manages character data, and the Journey Tracker consumes it for overland travel simulation.
+Developer documentation for custom panels in the 5etools DM Screen (`dmscreen.html`).
 
 ## Quick Navigation
 
@@ -14,6 +14,8 @@ Developer documentation for the Party Tracker and Journey Tracker panels in the 
 | [Party–Journey Integration](./06-party-journey-integration.md) | Board event system, automatic character sync, player data mapping |
 | [Styling Guide](./07-styling-guide.md) | SCSS class hierarchy for both trackers, color coding, night mode |
 | [Initiative Tracker — Multi-Select HP](./08-initiative-tracker-multi-select-hp.md) | Bulk-apply HP workflow (Fireball / save-for-half), selection state, `UiUtil.getStrNumericModified` |
+| [Item Builder](./09-item-builder.md) | Build and export custom magic items from the DM Screen |
+| [NPC Manager](./10-npc-manager.md) | NPC roster, roleplay detail, persistent groups, and batch rolling |
 
 ## System at a Glance
 
