@@ -107,14 +107,32 @@ function _removeMatching (base, removals, getKey = it => JSON.stringify(it)) {
 	return _copy(base || []).filter(it => !removalKeys.has(getKey(it)));
 }
 
+function _parseDamageDie (damageDie) {
+	const match = String(damageDie || "").match(/^(\s*)(\d+)d(\d+)(\s*[+-]\s*\d+)?(\s*)$/i);
+	if (!match) return null;
+	return {
+		prefix: match[1],
+		count: Number(match[2]),
+		sides: Number(match[3]),
+		modifier: match[4] || "",
+		suffix: match[5],
+	};
+}
+
+function _formatDamageDie ({prefix = "", count, sides, modifier = "", suffix = ""}) {
+	return `${prefix}${count}d${sides}${modifier}${suffix}`;
+}
+
 function _increaseDamageDie (damageDie, steps = 1) {
 	if (!damageDie || !steps) return damageDie;
-	const match = String(damageDie).match(/^(\d+)d(\d+)$/i);
-	if (!match) return damageDie;
-	const count = Number(match[1]);
-	const ix = _DIE_ORDER.indexOf(Number(match[2]));
+	const parsed = _parseDamageDie(damageDie);
+	if (!parsed) return damageDie;
+	const ix = _DIE_ORDER.indexOf(parsed.sides);
 	if (!~ix) return damageDie;
-	return `${count}d${_DIE_ORDER[Math.max(0, Math.min(_DIE_ORDER.length - 1, ix + steps))]}`;
+	return _formatDamageDie({
+		...parsed,
+		sides: _DIE_ORDER[Math.max(0, Math.min(_DIE_ORDER.length - 1, ix + steps))],
+	});
 }
 
 function _getUpgradeEffects (upgrades) {
@@ -448,21 +466,22 @@ export class ItemBuilderCore {
 				material,
 			)
 			: null;
+		const itemKind = CharacterSheetMaterials.getItemKind({...legacyResolution.preset, ...original});
 		const out = [];
 		const add = (field, label, reason) => {
 			if (out.some(it => it.field === field && it.reason === reason)) return;
 			out.push({field, label, reason});
 		};
 
-		const materialDamageSteps = CharacterSheetMaterials.getItemKind({...legacyResolution.preset, ...original}) === "weapon"
+		const materialDamageSteps = itemKind === "weapon"
 			? (CharacterSheetMaterials.axisValue(material?.damage) || 0)
 			: 0;
-		const damageCandidates = [
-			...CharacterSheetMaterials.DIE_LADDER,
-			...Object.keys(CharacterSheetMaterials.DIE_EQUIVALENTS),
-		];
 		for (const prop of ["dmg1", "dmg2"]) {
 			if (!original[prop] || (!materialDamageSteps && !upgradeEffects.damageDieIncrease)) continue;
+			const damageCandidates = this._getDamageProjectionCandidates({
+				observed: original[prop],
+				materialDamageSteps,
+			});
 			const preimages = this._getProjectionPreimages({
 				observed: original[prop],
 				candidates: damageCandidates,
@@ -486,11 +505,12 @@ export class ItemBuilderCore {
 			if (Number.isFinite(observed)) {
 				const preimages = this._getProjectionPreimages({
 					observed,
-					candidates: Array.from({length: 19}, (_, ix) => ix + 2),
+					candidates: [undefined, ...Array.from({length: 19}, (_, ix) => ix + 2)],
 					project: candidate => {
+						const base = Number(candidate) || 20;
 						const materialized = materialCritical
-							? Math.max(2, Math.min(20, candidate - materialCritical))
-							: candidate;
+							? Math.max(2, Math.min(20, base - materialCritical))
+							: base;
 						return upgradeEffects.critThresholdReduction
 							? Math.max(2, materialized - upgradeEffects.critThresholdReduction)
 							: materialized;
@@ -500,7 +520,7 @@ export class ItemBuilderCore {
 					add(
 						"critThreshold",
 						"critical-hit threshold",
-						`the projected value ${observed} has multiple possible bases: ${preimages.join(", ")}`,
+						`the projected value ${observed} has multiple possible bases: ${preimages.map(it => it == null ? "unset (defaults to 20)" : it).join(", ")}`,
 					);
 				}
 			}
@@ -521,11 +541,73 @@ export class ItemBuilderCore {
 			}
 		}
 
-		const gemstoneDescriptor = getGemstoneDescriptor(legacyResolution.gemstone);
+		const materialProtection = itemKind === "armor"
+			? (CharacterSheetMaterials.axisValue(material?.protection) || 0)
+			: 0;
+		if (materialProtection && Number(original.ac) === materialProtection) {
+			add("ac", "base Armor Class", `the material overwrites every authored base AC with ${materialProtection}`);
+		}
+
+		const materialPenetration = itemKind === "weapon"
+			? CharacterSheetMaterials.getPenetration(original, material)
+			: 0;
+		if (materialPenetration && Number(original.penetration) === materialPenetration) {
+			add("penetration", "penetration rating", `the material overwrites every authored penetration rating with ${materialPenetration}`);
+		}
+
 		if (
+			itemKind === "weapon"
+			&& (
+				materialEffects?.addProperties?.length
+				|| materialEffects?.removeProperties?.length
+				|| materialEffects?.propertyLadder
+			)
+		) {
+			const operations = [
+				materialEffects.addProperties.length ? `adds ${materialEffects.addProperties.join(", ")}` : null,
+				materialEffects.removeProperties.length ? `removes ${materialEffects.removeProperties.join(", ")}` : null,
+				materialEffects.propertyLadder ? "applies a property ladder" : null,
+			].filter(Boolean).join(", ");
+			add("property", "weapon properties", `the material ${operations}, which can collapse distinct authored property sets`);
+		}
+
+		if (itemKind === "armor") {
+			if (materialEffects?.armorNoStealthDisadvantage && original.stealth === false) {
+				add("stealth", "Stealth-disadvantage flag", "the material overwrites both an authored false value and an absent value with false");
+			} else if (materialEffects?.armorStealthDisadvantage && original.stealth === true) {
+				add("stealth", "Stealth-disadvantage flag", "the material overwrites both an authored true value and an absent value with true");
+			}
+			if (materialEffects?.armorNoStrengthRequirement && original.strength == null) {
+				add("strength", "Strength requirement", "the material replaces every authored Strength requirement with no requirement");
+			}
+			if (materialEffects?.armorForceHeavy && original.armorType === "heavy") {
+				add("armorType", "armor category", "the material replaces every authored armor category with heavy armor");
+			}
+		}
+
+		if (itemKind === "weapon" && materialEffects?.rangeMultiplier && original.range != null) {
+			add("range", "weapon range", `floor rounding after the material's ×${materialEffects.rangeMultiplier} multiplier can collapse distinct authored ranges`);
+		}
+
+		const weightMultiplier = CharacterSheetMaterials.getWeightMultiplier(material);
+		if (weightMultiplier != null && Number(original.weight) > 0) {
+			add("weight", "weight", `rounding the material's ×${weightMultiplier} density projection to two decimals can collapse distinct authored weights`);
+		}
+		if (
+			material?.price?.unit === "lb"
+			&& Number.isFinite(Number(material.price.gp))
+			&& Number(original.weight) > 0
+			&& Number.isFinite(Number(original.value))
+		) {
+			add("value", "value", "the material price calculation rounds to whole copper pieces and can collapse distinct authored values");
+		}
+
+		const gemstoneDescriptor = getGemstoneDescriptor(legacyResolution.gemstone);
+		const isGemChargeProjection = (
 			gemstoneDescriptor?.resource?.key === "charges"
 			&& Number.isFinite(Number(gemstoneDescriptor.resource.max))
-		) {
+		);
+		if (isGemChargeProjection) {
 			const observed = Number(original.charges);
 			const maximum = Number(gemstoneDescriptor.resource.max);
 			if (Number.isFinite(observed)) {
@@ -543,8 +625,47 @@ export class ItemBuilderCore {
 				}
 			}
 		}
+		if (isGemChargeProjection) {
+			if (gemstoneDescriptor.resource.recharge && original.recharge === gemstoneDescriptor.resource.recharge) {
+				add("recharge", "recharge schedule", "the gemstone overwrites the authored recharge schedule");
+			}
+			if (
+				gemstoneDescriptor.resource.recovery
+				&& original.rechargeAmount === `{@dice ${gemstoneDescriptor.resource.recovery}}`
+			) {
+				add("rechargeAmount", "recharge amount", "the gemstone overwrites the authored recharge amount");
+			}
+		}
+		if (gemstoneDescriptor?.requiresAttunement && original.reqAttune === true) {
+			add("reqAttune", "attunement requirement", "the gemstone maps both an authored requirement and no authored requirement to true");
+		}
+
+		const generatedEffects = [
+			...upgradeEffects.tags.map(tag => ({type: "itemTag", tag})),
+			...upgradeEffects.notes.map(note => ({type: "note", note})),
+			...(gemstoneDescriptor?.effects || []),
+		];
+		if (generatedEffects.length) {
+			add("effects", "effects", "composition effects are deduplicated against identical authored effects");
+		}
+		if (gemstoneDescriptor?.powers?.length) {
+			add("itemPowers", "item powers", "gemstone powers are deduplicated against identical authored powers");
+		}
 
 		return out;
+	}
+
+	static _getDamageProjectionCandidates ({observed, materialDamageSteps}) {
+		const parsed = _parseDamageDie(observed);
+		if (!parsed) return [];
+
+		const out = _DIE_ORDER.map(sides => _formatDamageDie({...parsed, sides}));
+		if (!materialDamageSteps || parsed.modifier) return out;
+		out.push(
+			...CharacterSheetMaterials.DIE_LADDER,
+			...Object.keys(CharacterSheetMaterials.DIE_EQUIVALENTS),
+		);
+		return [...new Set(out)];
 	}
 
 	static _getProjectionPreimages ({observed, candidates, project}) {

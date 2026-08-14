@@ -207,7 +207,6 @@ describe("ItemBuilderCore", () => {
 		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), ITEMS[0], {source: "HB"});
 		draft.material = {name: "Starsteel", source: "TGTT"};
 		draft.upgrades = [{name: "Balanced", source: "TCAH"}];
-		draft.gemstone = {name: "Journey", source: "TGTT"};
 		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
 		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
 
@@ -281,6 +280,20 @@ describe("ItemBuilderCore", () => {
 			expectedProjected: {dmg1: "1d12"},
 			expectedField: "dmg1",
 		},
+		{
+			label: "a clamped Superior multiple-dice increase",
+			item: {dmg1: "3d12"},
+			composition: {upgrades: [{name: "Superior", source: "TCAH"}]},
+			expectedProjected: {dmg1: "3d12"},
+			expectedField: "dmg1",
+		},
+		{
+			label: "a clamped Superior modified-dice increase",
+			item: {dmg1: "2d12 + 3"},
+			composition: {upgrades: [{name: "Superior", source: "TCAH"}]},
+			expectedProjected: {dmg1: "2d12 + 3"},
+			expectedField: "dmg1",
+		},
 	])("blocks legacy deprojection of $label without guessing an authored base", ({
 		item,
 		composition,
@@ -333,6 +346,21 @@ describe("ItemBuilderCore", () => {
 		expect(ItemBuilderCore.serialize(ItemBuilderCore.fromItem(canonical), catalogs)).toEqual(canonical);
 	});
 
+	test("preserves dice count and modifiers through an invertible Superior migration", () => {
+		const preset = {...ITEMS[0]};
+		delete preset.dmg2;
+		const catalogs = {items: [preset], materials: MATERIALS, upgrades: UPGRADES};
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), preset, {source: "HB"});
+		draft.item.dmg1 = "3d8 + 2";
+		draft.upgrades = [{name: "Superior", source: "TCAH"}];
+		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
+		expect(legacyProjected.dmg1).toBe("3d10 + 2");
+		const restored = ItemBuilderCore.fromItem(legacyProjected);
+
+		expect(ItemBuilderCore.validate(restored, catalogs).isValid).toBe(true);
+		expect(ItemBuilderCore.serialize(restored, catalogs).dmg1).toBe("3d8 + 2");
+	});
+
 	test("blocks a saturated legacy gemstone charge maximum", () => {
 		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
 		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), ITEMS[0], {source: "HB"});
@@ -351,82 +379,107 @@ describe("ItemBuilderCore", () => {
 		expect(ItemBuilderCore.serialize(restored, catalogs)).toEqual(expect.objectContaining({charges: 3}));
 	});
 
-	test("deprojects invertible material properties while preserving authored bases", () => {
-		const preset = {
-			...ITEMS[0],
-			type: "R",
-			range: "80/320",
-			property: ["A"],
-			weight: 4,
-			value: 100,
-		};
+	test.each([
+		{
+			label: "an authored Heavy property duplicated by a material addition",
+			authored: ["H"],
+			effects: [{type: "addProperty", properties: ["H"]}],
+			projected: ["H"],
+		},
+		{
+			label: "an authored Heavy property erased by a material removal",
+			authored: ["H"],
+			effects: [{type: "removeProperty", properties: ["H"]}],
+			projected: [],
+		},
+		{
+			label: "an authored Versatile property duplicated by a property ladder",
+			authored: ["2H", "V"],
+			effects: [{type: "propertyLadder", ladder: {"2H": "V", "_": "L", "L": "F"}}],
+			projected: ["V"],
+		},
+	])("blocks legacy deprojection of $label", ({authored, effects, projected}) => {
+		const preset = {...ITEMS[0], property: []};
+		const material = {name: "Property Material", source: "HB", appliesTo: ["weapon"], effects};
+		const catalogs = {items: [preset], materials: [material], upgrades: []};
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), preset, {source: "HB"});
+		draft.item.property = authored;
+		draft.material = {name: material.name, source: material.source};
+		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
+		expect(legacyProjected.property).toEqual(projected);
+		const restored = ItemBuilderCore.fromItem(legacyProjected);
+
+		expect(ItemBuilderCore.validate(restored, catalogs).errors).toContainEqual(expect.objectContaining({
+			field: "property",
+			message: expect.stringMatching(/cannot be uniquely reversed/i),
+		}));
+		const failSafe = ItemBuilderCore.serialize(restored, catalogs);
+		expect(failSafe.property).toEqual(projected);
+		expect(failSafe).not.toHaveProperty("baseItem");
+		expect(failSafe).not.toHaveProperty("material");
+	});
+
+	test.each([
+		{
+			label: "a no-Strength-requirement override",
+			preset: {name: "Plate", source: "PHB", type: "HA", armor: true, strength: 13},
+			item: {strength: 15},
+			material: {effects: [{type: "armorNoStrengthRequirement"}]},
+			expectedField: "strength",
+			expectedProjected: {strength: null},
+		},
+		{
+			label: "a rounded density projection",
+			preset: {...ITEMS[0], weight: 4},
+			item: {weight: 6},
+			material: {weightMultiplier: 0.5},
+			expectedField: "weight",
+			expectedProjected: {weight: 3},
+		},
+		{
+			label: "a rounded range projection",
+			preset: {...ITEMS[0], type: "R", range: "80/320"},
+			item: {range: "81/321"},
+			material: {effects: [{type: "rangeMultiplier", value: 1.5}]},
+			expectedField: "range",
+			expectedProjected: {range: "121/481"},
+		},
+	])("blocks legacy deprojection of $label", ({preset, item, material, expectedField, expectedProjected}) => {
+		material = {name: "Projection Material", source: "HB", appliesTo: ["weapon", "armor"], ...material};
+		const catalogs = {items: [preset], materials: [material], upgrades: []};
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), preset, {source: "HB"});
+		Object.assign(draft.item, item);
+		draft.material = {name: material.name, source: material.source};
+		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
+		expect(legacyProjected).toEqual(expect.objectContaining(expectedProjected));
+		const restored = ItemBuilderCore.fromItem(legacyProjected);
+
+		expect(ItemBuilderCore.validate(restored, catalogs).errors).toContainEqual(expect.objectContaining({
+			field: expectedField,
+			message: expect.stringMatching(/cannot be uniquely reversed/i),
+		}));
+		const failSafe = ItemBuilderCore.serialize(restored, catalogs);
+		expect(failSafe).toEqual(expect.objectContaining(expectedProjected));
+		expect(failSafe).not.toHaveProperty("material");
+	});
+
+	test("does not apply legacy ambiguity checks to a current reference-only draft", () => {
+		const preset = {...ITEMS[0], property: ["H"]};
 		const material = {
-			name: "Swiftglass",
+			name: "Darkmetal",
 			source: "HB",
 			appliesTo: ["weapon"],
-			weightMultiplier: 0.5,
-			price: {unit: "lb", gp: 2},
-			effects: [
-				{type: "addProperty", properties: ["F"]},
-				{type: "rangeMultiplier", value: 2},
-				{type: "bonusWeaponDamage", value: 1},
-			],
+			effects: [{type: "addProperty", properties: ["H"]}],
 		};
 		const catalogs = {items: [preset], materials: [material], upgrades: []};
 		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), preset, {source: "HB"});
-		Object.assign(draft.item, {
-			range: "100/400",
-			property: ["A", "L"],
-			weight: 6,
-			value: 200,
-			bonusWeaponDamage: 2,
-		});
 		draft.material = {name: material.name, source: material.source};
-		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
-		expect(legacyProjected).toEqual(expect.objectContaining({
-			range: "200/800",
-			property: ["A", "L", "F"],
-			weight: 3,
-			value: 800,
-			bonusWeaponDamage: 3,
-		}));
 
-		const canonical = ItemBuilderCore.serialize(ItemBuilderCore.fromItem(legacyProjected), catalogs);
-		expect(canonical).toEqual(expect.objectContaining({
-			range: "100/400",
-			property: ["A", "L"],
-			weight: 6,
-			value: 200,
-			bonusWeaponDamage: 2,
-		}));
-		expect(ItemBuilderCore.projectForPreview(ItemBuilderCore.fromItem(canonical), catalogs)).toEqual(legacyProjected);
+		expect(ItemBuilderCore.validate(draft, catalogs).isValid).toBe(true);
+		expect(ItemBuilderCore.serialize(draft, catalogs).material).toEqual({name: "Darkmetal", source: "HB"});
 	});
 
-	test("deprojects material property ladders to the authored property set", () => {
-		const preset = {...ITEMS[0], property: ["2H"]};
-		const material = {
-			name: "Mithril",
-			source: "HB",
-			appliesTo: ["weapon"],
-			effects: [
-				{type: "removeProperty", properties: ["H"]},
-				{type: "propertyLadder", ladder: {"2H": "V", "_": "L", "L": "F"}},
-			],
-		};
-		const catalogs = {items: [preset], materials: [material], upgrades: []};
-		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), preset, {source: "HB"});
-		draft.item.property = ["L"];
-		draft.material = {name: material.name, source: material.source};
-		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
-		expect(legacyProjected.property).toEqual(["L", "F"]);
-
-		const canonical = ItemBuilderCore.serialize(ItemBuilderCore.fromItem(legacyProjected), catalogs);
-		expect(canonical.property).toEqual(["L"]);
-		expect(ItemBuilderCore.projectForPreview(ItemBuilderCore.fromItem(canonical), catalogs).property).toEqual(["L", "F"]);
-		expect(ItemBuilderCore.serialize(ItemBuilderCore.fromItem(canonical), catalogs)).toEqual(canonical);
-	});
-
-	test("deprojects generated gemstone resources without dropping authored maxima", () => {
+	test("blocks gemstone recharge overwrites even when the authored charge maximum is invertible", () => {
 		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
 		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), ITEMS[0], {source: "HB"});
 		draft.item.charges = 5;
@@ -438,12 +491,18 @@ describe("ItemBuilderCore", () => {
 			rechargeAmount: "{@dice 1d3}",
 		}));
 
-		const canonical = ItemBuilderCore.serialize(ItemBuilderCore.fromItem(legacyProjected), catalogs);
-		expect(canonical.charges).toBe(5);
-		expect(canonical).not.toHaveProperty("recharge");
-		expect(canonical).not.toHaveProperty("rechargeAmount");
-		expect(ItemBuilderCore.projectForPreview(ItemBuilderCore.fromItem(canonical), catalogs)).toEqual(legacyProjected);
-		expect(ItemBuilderCore.serialize(ItemBuilderCore.fromItem(canonical), catalogs)).toEqual(canonical);
+		const restored = ItemBuilderCore.fromItem(legacyProjected);
+		expect(ItemBuilderCore.validate(restored, catalogs).errors).toEqual(expect.arrayContaining([
+			expect.objectContaining({field: "recharge"}),
+			expect.objectContaining({field: "rechargeAmount"}),
+		]));
+		const failSafe = ItemBuilderCore.serialize(restored, catalogs);
+		expect(failSafe).toEqual(expect.objectContaining({
+			charges: 5,
+			recharge: "dawn",
+			rechargeAmount: "{@dice 1d3}",
+		}));
+		expect(failSafe).not.toHaveProperty("socketedGemstones");
 	});
 
 	test("preserves explicit authored mechanics while projecting composition around them", () => {
