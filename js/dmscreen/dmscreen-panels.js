@@ -5,7 +5,7 @@ import {
 	PANEL_TYP_DICE_CALCULATOR,
 	PANEL_TYP_INITIATIVE_TRACKER, PANEL_TYP_INITIATIVE_TRACKER_CREATURE_VIEWER,
 	PANEL_TYP_INITIATIVE_TRACKER_PLAYER_V0,
-	PANEL_TYP_INITIATIVE_TRACKER_PLAYER_V1, PANEL_TYP_JOURNEY_TRACKER, PANEL_TYP_MONEY_CONVERTER, PANEL_TYP_PARTY_TRACKER, PANEL_TYP_TEXTBOX, PANEL_TYP_TIME_TRACKER, PANEL_TYP_UNIT_CONVERTER,
+	PANEL_TYP_INITIATIVE_TRACKER_PLAYER_V1, PANEL_TYP_ITEM_BUILDER, PANEL_TYP_JOURNEY_TRACKER, PANEL_TYP_MONEY_CONVERTER, PANEL_TYP_PARTY_TRACKER, PANEL_TYP_TEXTBOX, PANEL_TYP_TIME_TRACKER, PANEL_TYP_UNIT_CONVERTER,
 } from "./dmscreen-consts.js";
 import {InitiativeTracker} from "./initiativetracker/dmscreen-initiativetracker.js";
 import {InitiativeTrackerPlayerV0, InitiativeTrackerPlayerV1} from "./dmscreen-playerinitiativetracker.js";
@@ -20,6 +20,7 @@ import {DmMapper} from "./dmscreen-mapper.js";
 import {PartyTracker} from "./partytracker/dmscreen-partytracker.js";
 import {JourneyTracker} from "./dmscreen-journeytracker.js";
 import {CustomRandomTable} from "./dmscreen-customrandomtable.js";
+import {ItemBuilderPanel} from "./itembuilder/dmscreen-itembuilder.js";
 
 export class PanelContentManagerFactory {
 	static _PANEL_TYPES = {};
@@ -316,5 +317,16 @@ export class PanelContentManager_JourneyTracker extends _PanelContentManager {
 
 	_getPanelApp ({state}) {
 		return JourneyTracker.getPanelApp({board: this._board, savedState: state});
+	}
+}
+
+export class PanelContentManager_ItemBuilder extends _PanelContentManager {
+	static _PANEL_TYPE = PANEL_TYP_ITEM_BUILDER;
+	static _TITLE = "Item Builder";
+
+	static _ = this._register();
+
+	_getPanelApp ({state}) {
+		return ItemBuilderPanel.getPanelApp({board: this._board, savedState: state});
 	}
 }
