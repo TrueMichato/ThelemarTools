@@ -63,9 +63,13 @@ const PROFANE_SOUL_FEATURES: FeatureCheck[] = [
 				kind: "featureChoiceCalculation",
 				className: "Blood Hunter",
 				featureName: "Hunter's Bane",
-				expectedChoice: "Intelligence",
+				// The source declares `attributes: ["wis", "int"]` and the auto-picker
+				// takes the first, so Wisdom is the recorded choice. Pinning the ability
+				// AND the DC together is what proves the choice is load-bearing: the DC
+				// is recomputed from whichever ability was chosen.
+				expectedChoice: "Wisdom",
 				property: "hemocraftAbility",
-				expectedValue: "int",
+				expectedValue: "wis",
 				dcProperty: "hemocraftSaveDc",
 			},
 		],
@@ -145,9 +149,11 @@ const PROFANE_SOUL_FEATURES: FeatureCheck[] = [
 				kind: "featureChoiceCalculation",
 				className: "Blood Hunter",
 				featureName: "Otherworldly Patron",
-				expectedChoice: "The Fiend",
+				// The nine patrons come from FEATURE_PROSE_CHOICES in the order the
+				// source lists them, and the auto-picker takes the first.
+				expectedChoice: "The Archfey",
 				property: "profaneSoulPatron",
-				expectedValue: "The Fiend",
+				expectedValue: "The Archfey",
 			},
 		],
 	},
@@ -162,7 +168,14 @@ const PROFANE_SOUL_FEATURES: FeatureCheck[] = [
 		//     numeric grid — the UI half that a state-only assertion would miss.
 		effects: [
 			{kind: "featureCalculation", property: "hasPactMagic", exact: true},
-			{kind: "featureCalculation", property: "profaneSoulSpellcastingAbility", exact: "int"},
+			// `wis` is not a literal from the subclass data — the subclass declares
+			// `spellcastingAbility: "int"` as a default, but the feature text says
+			// "Your chosen Hemocraft ability … is your spellcasting ability", and
+			// charactersheet-state.js:18500 assigns the hemocraft ability verbatim.
+			// So this pin only holds while the L1 Hunter's Bane row above records
+			// Wisdom: together the two rows assert the L1→L3 coupling, which is the
+			// claim in this spec's docblock.
+			{kind: "featureCalculation", property: "profaneSoulSpellcastingAbility", exact: "wis"},
 			{kind: "featureCalculation", property: "profaneSoulCantripsKnown", min: 2},
 			{kind: "featureCalculation", property: "profaneSoulSpellsKnown", min: 2},
 			// The four calcs above all read the PROGRESSION TABLE, so they report 2/2
@@ -344,8 +357,10 @@ describeCharacter({
 		skillRoll: {name: "Arcana"},
 		shortRestRestores: {resourceName: "Blood Maledict", expectAfter: 2},
 		// Unlike the other two orders, this one DOES cast — so concentration is
-		// genuinely reachable here and is exercised rather than skipped.
-		concentrationCheck: {},
+		// genuinely reachable here and is exercised rather than skipped. The probe
+		// drives `setConcentration` directly, so the name need only be a plausible
+		// concentration spell; Hex is the canonical warlock one.
+		concentrationCheck: {castSpell: "Hex", thenAction: "break", expectActive: false},
 		deathSaves: true,
 		applyCondition: {name: "Frightened"},
 		featAbility: {skip: true}, // The preset does not pin an activatable feat.

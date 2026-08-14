@@ -834,11 +834,15 @@ class CharacterSheetLevelUp {
 			// Built as a closure rather than a one-shot `if`, so the subclass-selection
 			// callback can rebuild it. A subclass chosen *inside* this wizard can introduce
 			// feature-option groups that did not exist when the modal first rendered — e.g.
-			// BH2022 Profane Soul's "Pact Magic", whose two-attribute `abilityDc` is a real
-			// Intelligence/Wisdom choice. Previously such a group existed only in the Finish
-			// validator, which refused to close the wizard while pointing at an accordion
-			// that was never created, leaving the character permanently unlevelable while
-			// the summary still read "Ready to level up!". See CS-BUG-157.
+			// BH2022 Profane Soul's "Otherworldly Patron". Previously such a group existed
+			// only in the Finish validator, which refused to close the wizard while pointing
+			// at an accordion that was never created, leaving the character permanently
+			// unlevelable while the summary still read "Ready to level up!". See CS-BUG-157.
+			//
+			// (This comment previously named Pact Magic's two-attribute `abilityDc` as the
+			// example and called it "a real Intelligence/Wisdom choice". The feature text
+			// says otherwise — the ability is fixed at level 1 by Hunter's Bane — and the
+			// prompt was inert. That is CS-BUG-161, and the group is no longer produced.)
 			buildFeatOptionsSection = () => {
 				if (!featureOptionGroups.length) return;
 

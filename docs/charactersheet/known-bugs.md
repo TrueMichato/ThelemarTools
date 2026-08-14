@@ -9376,3 +9376,134 @@ spell-list plumbing breaks.
 All three fixes were verified with a negative control: each branch was disabled
 in turn and the corresponding tests confirmed to go red (5 of 11 for the generic
 caster branch, 1 of 11 for the `subclassSpells` resolver).
+
+---
+
+## CS-BUG-160 — Order of the Profane Soul's patron choice was never offered — FIXED
+
+**Symptom.** A level-3 Profane Soul Blood Hunter is told by the feature text to
+"strike a bargain with an otherworldly being of your choice", and that choice
+augments three later features. The level-up wizard never asked. The
+`profaneSoulPatron` calculation was therefore permanently `null`, so Rite Focus,
+Revealed Arcana and Unsealed Arcana could never deliver a patron-specific
+benefit — not because those bodies are unimplemented (they are, separately, and
+that is recorded in `10-known-limitations.md`), but because the input they read
+did not exist.
+
+**Root cause.** `CharacterSheetClassUtils.findFeatureOptions()` detects choices
+by looking for a `type: "options"` entry, plus a narrow `abilityDc` special
+case. BH2022 states the nine patrons as *prose* inside a `type: "list"`:
+
+```json
+"entries": [
+  "When you reach 3rd level, you strike a bargain with an otherworldly being of your choice:",
+  {"type": "list", "items": [
+    "The Archfey, the Fiend, or the Great Old One, detailed in the {@book Player's Handbook|PHB}",
+    "The Undying, from {@book Sword Coast Adventurer's Guide|SCAG}",
+    ...
+  ]},
+  "The choice you make augments some of your subclass features, as noted below."
+]
+```
+
+No `options` entry exists, so the resolver correctly found nothing, and nothing
+downstream was broken — the choice simply never entered the pipeline.
+
+**Why this was invisible.** The read path was complete and correct.
+`_getProfaneSoulPatron()` (`charactersheet-state.js:38866`) walks
+`levelHistory[].choices.featureChoices` and would have returned the patron the
+moment one was stored. A reader that works perfectly against an empty writer
+returns `null`, which is indistinguishable from "the player hasn't chosen yet".
+Only the gated E2E matrix — which auto-picks every offered choice and then
+asserts the recorded value — could tell the two apart, and it reported
+`Otherworldly Patron choice=undefined`.
+
+**Fix.** A name-keyed `FEATURE_PROSE_CHOICES` table on
+`CharacterSheetClassUtils`, mirroring the established
+`FEATURE_CLASSIFICATION_OVERRIDES` pattern. It is consulted **only when the data
+yielded nothing**, and it emits the same `{count, options}` shape the `abilityDc`
+branch already emits (`type: "inline"`), so no code downstream of the resolver
+special-cases it: the wizard renders it, the validator counts it, and the level
+history stores it exactly as it does a data-declared choice.
+
+Ordering matters and is pinned by a test: if BH2022 is ever corrected upstream to
+declare a real `options` entry, the data wins and the table goes quiet, so the
+player is never asked twice.
+
+**Both resolvers had to be patched.** `charactersheet-builder.js:161` carries a
+near-copy of `findFeatureOptions` under the name `_findFeatureOptions`. Patching
+only the `ClassUtils` one would have fixed level-up and quick-build while leaving
+the Builder path silently dropping the choice — the same same-named-neighbour
+trap that produced CS-BUG-158 (`subSubclassSpells` vs `subclassSpells`).
+
+**Files.**
+- `js/charactersheet/charactersheet-class-utils.js` — `FEATURE_PROSE_CHOICES` +
+  the fallback at the end of `findFeatureOptions()`.
+- `js/charactersheet/charactersheet-builder.js` — same fallback in
+  `_findFeatureOptions()`.
+- `test/jest/charactersheet/CharacterSheetProfaneSoulSpellcasting.test.js` — 6
+  tests covering the offer, the option shape, non-firing on choiceless features,
+  data precedence, and the store→read round trip.
+
+**Negative control.** Disabling the table turned exactly the two tests that
+assert the new behaviour red (16 → 15 passing, 2 failed); the read-back,
+precedence and non-firing tests stayed green because they exercise other paths.
+The control therefore discriminates rather than merely covarying.
+
+---
+
+## CS-BUG-161 — Pact Magic asked for a casting ability, then ignored the answer — FIXED
+
+**Symptom.** Levelling a Blood Hunter into Order of the Profane Soul at level 3
+presented a "Feature Choices" prompt asking whether Pact Magic uses Intelligence
+or Wisdom. The answer was recorded in level history and shown back to the player.
+It had no effect. A player who chose Intelligence cast with Wisdom.
+
+**Evidence.** The level-20 E2E export records both, disagreeing:
+
+```
+"Hunter's Bane = Wisdom", "Otherworldly Patron = The Archfey", "Pact Magic = Intelligence"
+profaneSoulSpellcastingAbility = wis
+```
+
+**Root cause.** `findFeatureOptions()` treats any `abilityDc` entry with more
+than one attribute as a player choice. That is right for Hunter's Bane, which is
+where the Blood Hunter actually picks a Hemocraft ability. It is wrong for Pact
+Magic, whose own text says the decision was already made:
+
+> Your chosen Hemocraft ability (Intelligence or Wisdom) is your spellcasting
+> ability for your warlock spells…
+
+Its `{"type": "abilityDc", "attributes": ["int", "wis"]}` entry exists so 5etools
+can *render* "Spell save DC = 8 + prof + Int/Wis", not to pose a second question.
+`charactersheet-state.js` correctly assigns `profaneSoulSpellcastingAbility =
+hemocraftAbility` and never consults the Pact Magic choice.
+
+**Why this is worth fixing rather than tolerating.** This is the mirror image of
+CS-BUG-125. There, an effect existed with no channel to reach the player. Here a
+channel exists with no effect behind it — and unlike inert *text*, an inert
+*prompt* actively misinforms: it invites a decision, confirms it, and silently
+discards it.
+
+**Fix.** A `FEATURE_DERIVED_ABILITY_DCS` set on `CharacterSheetClassUtils` naming
+features whose `abilityDc` restates an ability chosen elsewhere. The `abilityDc`
+branch skips those. Applied to both resolvers (`charactersheet-class-utils.js`
+and the near-copy in `charactersheet-builder.js`), as with CS-BUG-160.
+
+**Collision check.** A corpus scan of `data/class/*.json` found exactly **one**
+multi-attribute `abilityDc` in official content — Battle Master's Combat
+Superiority `[str, dex]` — and no other feature named "Pact Magic" carries one,
+so keying by name is safe. The scan was run with a positive control (searching
+for *any* multi-attribute `abilityDc`) to prove it could find something, rather
+than trusting a bare zero.
+
+**Historical note.** The comment at `charactersheet-levelup.js` describing
+CS-BUG-157 previously named this very prompt as its example and called it "a real
+Intelligence/Wisdom choice". That claim was inferred from the data shape without
+reading the feature text; it has been corrected in place. CS-BUG-157's fix is
+still exercised — the Otherworldly Patron group (CS-BUG-160) is now the group
+that arrives late at the same level.
+
+**Negative control.** Disabling the guard turned exactly one test red — the one
+asserting suppression — while "still offers the choice for features where it IS a
+real decision" stayed green, so the control discriminates rather than covaries.

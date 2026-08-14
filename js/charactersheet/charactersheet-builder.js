@@ -170,6 +170,15 @@ class CharacterSheetBuilder {
 				if (typeof entry === "object"
 					&& entry.type === "abilityDc"
 					&& Array.isArray(entry.attributes)
+					// Some features RESTATE an ability that was already chosen elsewhere rather
+					// than posing a new choice. BH2022's Pact Magic is the motivating case:
+					// "Your chosen Hemocraft ability (Intelligence or Wisdom) is your
+					// spellcasting ability" — the decision was made at level 1 by Hunter's
+					// Bane, and `abilityDc` here only declares how the DC is displayed.
+					// Offering it again asks a question the rules do not pose, and the answer
+					// is then ignored (the sheet correctly uses the hemocraft ability), which
+					// is worse than not asking. See CS-BUG-161.
+					&& !CharacterSheetClassUtils.FEATURE_DERIVED_ABILITY_DCS?.has(String(feature.name || "").toLowerCase())
 					&& entry.attributes.length > 1) {
 					results.push({
 						count: 1,
@@ -284,6 +293,27 @@ class CharacterSheetBuilder {
 		};
 
 		searchEntries(feature.entries);
+
+		// Prose-stated 1-of-N choices (see CharacterSheetClassUtils.FEATURE_PROSE_CHOICES).
+		// This method is a near-copy of the ClassUtils resolver, so the fallback has to
+		// be applied here too or the Builder path silently drops the choice that
+		// level-up and quick-build both offer.
+		if (!results.length) {
+			const proseChoice = CharacterSheetClassUtils.FEATURE_PROSE_CHOICES?.[String(feature.name || "").toLowerCase()];
+			if (proseChoice) {
+				results.push({
+					count: proseChoice.count || 1,
+					options: proseChoice.options.map(name => ({
+						name,
+						type: "inline",
+						source: feature.source,
+						entries: [`${name} — see ${feature.name}.`],
+					})),
+					featureName: feature.name,
+				});
+			}
+		}
+
 		return results;
 	}
 

@@ -2998,6 +2998,15 @@ class CharacterSheetClassUtils {
 				if (/** @type {*} */ typeof entry === "object"
 					&& entry.type === "abilityDc"
 					&& Array.isArray(entry.attributes)
+					// Some features RESTATE an ability that was already chosen elsewhere rather
+					// than posing a new choice. BH2022's Pact Magic is the motivating case:
+					// "Your chosen Hemocraft ability (Intelligence or Wisdom) is your
+					// spellcasting ability" — the decision was made at level 1 by Hunter's
+					// Bane, and `abilityDc` here only declares how the DC is displayed.
+					// Offering it again asks a question the rules do not pose, and the answer
+					// is then ignored (the sheet correctly uses the hemocraft ability), which
+					// is worse than not asking. See CS-BUG-161.
+					&& !CharacterSheetClassUtils.FEATURE_DERIVED_ABILITY_DCS?.has(String(feature.name || "").toLowerCase())
 					&& entry.attributes.length > 1) {
 					results.push({
 						count: 1,
@@ -3117,8 +3126,73 @@ class CharacterSheetClassUtils {
 		};
 
 		searchEntries(feature.entries);
+
+		// Some features present a genuine 1-of-N choice as PROSE plus a bulleted list
+		// rather than a structured `options` entry, so nothing above can detect them.
+		// BH2022's Otherworldly Patron is the motivating case: the patron drives Rite
+		// Focus, Revealed Arcana and Unsealed Arcana, and `_getProfaneSoulPatron()`
+		// already reads it back out of `levelHistory.choices.featureChoices` — the only
+		// missing link was that the choice was never OFFERED.
+		//
+		// Keyed by lowercase feature name, mirroring FEATURE_CLASSIFICATION_OVERRIDES.
+		// Only consulted when the data yielded nothing, so a source that later adds a
+		// proper `options` entry silently takes precedence over this table.
+		if (!results.length) {
+			const proseChoice = CharacterSheetClassUtils.FEATURE_PROSE_CHOICES[String(feature.name || "").toLowerCase()];
+			if (proseChoice) {
+				results.push({
+					count: proseChoice.count || 1,
+					// Same shape the `abilityDc` branch emits, so the wizard renders and
+					// stores these with no special-casing anywhere downstream.
+					options: proseChoice.options.map(name => ({
+						name,
+						type: "inline",
+						source: feature.source,
+						entries: [`${name} — see ${feature.name}.`],
+					})),
+					featureName: feature.name,
+				});
+			}
+		}
+
 		return results;
 	}
+
+	/**
+	 * Features whose `abilityDc` entry RESTATES an ability chosen by another feature
+	 * rather than posing a fresh choice. Offering these produces a prompt whose answer
+	 * nothing reads. Keyed by lowercase feature name. See CS-BUG-161.
+	 * @type {Set<string>}
+	 */
+	static FEATURE_DERIVED_ABILITY_DCS = new Set([
+		// BH2022 Order of the Profane Soul. The hemocraft ability is chosen once, at
+		// level 1, by Hunter's Bane; Pact Magic inherits it verbatim
+		// (charactersheet-state.js assigns `profaneSoulSpellcastingAbility = hemocraftAbility`).
+		"pact magic",
+	]);
+
+	/**
+	 * 1-of-N choices that a feature states in prose rather than as an `options` entry.
+	 * @type {Record<string, {count?: number, options: string[]}>}
+	 */
+	static FEATURE_PROSE_CHOICES = {
+		// BH2022 Order of the Profane Soul. Nine patrons, drawn from the feature's own
+		// bulleted list, in the order the source presents them.
+		"otherworldly patron": {
+			count: 1,
+			options: [
+				"The Archfey",
+				"The Fiend",
+				"The Great Old One",
+				"The Undying",
+				"The Celestial",
+				"The Hexblade",
+				"The Fathomless",
+				"The Genie",
+				"The Undead",
+			],
+		},
+	};
 
 	/**
 	 * Get feature options from features gained at a specific level.
