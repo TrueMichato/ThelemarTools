@@ -538,6 +538,13 @@ export async function assertMilestone (charSheet: CharacterSheetPage, expected: 
 export async function probeToggleDelta (
 	charSheet: CharacterSheetPage,
 	featureName: string | RegExp,
+	// Some signature toggles are PROMPT-GATED: activating them opens an
+	// `InputUiUtil` dialog and the handler returns early unless it is answered
+	// (every Blood Hunter Crimson Rite asks which weapon to empower). Clicking and
+	// walking away leaves the feature inactive, so the probe reports "no derived
+	// effect" for a feature that works perfectly — a harness gap indistinguishable
+	// from a product bug. Pass the confirm button's label to answer it.
+	{promptButton}: {promptButton?: string} = {},
 ): Promise<{acDelta: number; dcDelta: number; changed: boolean} | null> {
 	const re = featureName instanceof RegExp ? featureName : new RegExp(featureName, "i");
 	if (charSheet.page.isClosed()) throw new Error(`probeToggleDelta(${re}): page already closed`);
@@ -607,12 +614,20 @@ export async function probeToggleDelta (
 	}).catch(() => 0);
 
 	await charSheet.activateFeature(match);
+	// Best-effort on BOTH sides: whether a prompt appears is a property of the
+	// character's DATA, not of the spec. Crimson Rite only asks which weapon to
+	// empower when more than one is equipped, so a hard failure here would make the
+	// probe pass or fail on the loadout rather than on the toggle.
+	if (promptButton) await charSheet.confirmPrompt(promptButton).catch(() => { /* no prompt raised */ });
 	await charSheet.page.waitForTimeout(250);
 
 	const after = await snapshot();
 
-	// toggle off so subsequent assertions see the resting baseline
+	// toggle off so subsequent assertions see the resting baseline. Ending may
+	// prompt too; answering is best-effort because a toggle that ends cleanly
+	// must not fail the probe.
 	await charSheet.deactivateFeature(match);
+	if (promptButton) await charSheet.confirmPrompt(promptButton).catch(() => { /* no end prompt */ });
 	await charSheet.page.waitForTimeout(150);
 
 	// …and make "resting baseline" true rather than merely intended.

@@ -1860,12 +1860,23 @@ export class CharacterSheetPage {
 			.filter({hasText: re})
 			.first();
 		if (await item.count() === 0) return null;
-		const damageEl = item.locator(".charsheet__attack-damage, .charsheet__attack-roll-damage").first();
-		if (await damageEl.count() === 0) {
+		// NB: `.charsheet__attack-damage` is the "Roll Damage" BUTTON, whose label is
+		// the constant string "Damage" for every attack ever rendered. Reading it made
+		// this method return "Damage" unconditionally, so every caller comparing damage
+		// before/after a toggle compared two identical constants and could never
+		// observe a change. (`.charsheet__attack-roll-damage` does not exist anywhere
+		// in the app.) The damage the player actually reads is the badge inside
+		// `.charsheet__attack-details`, plus any rider notes for riders that are not
+		// folded into the badge (e.g. an active Crimson Rite bound to this weapon).
+		const details = item.locator(".charsheet__attack-details").first();
+		if (await details.count() === 0) {
 			return (await item.textContent({timeout: 1000}).catch(() => "")) || null;
 		}
-		const t = await damageEl.textContent({timeout: 1000}).catch(() => null);
-		return t ? t.trim() : null;
+		const t = await details.textContent({timeout: 1000}).catch(() => null);
+		const riderEl = item.locator(".charsheet__attack-rider-note").first();
+		const rider = await riderEl.count() ? await riderEl.textContent({timeout: 1000}).catch(() => null) : null;
+		const joined = [t, rider].filter(Boolean).join(" | ").replace(/\s+/g, " ").trim();
+		return joined || null;
 	}
 
 	/**

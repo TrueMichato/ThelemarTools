@@ -367,7 +367,16 @@ describeCharacter({
 		{name: "Cloak of Protection", source: "XDMG", attune: true},
 		{name: "Longsword", equipped: true},
 	],
-	signatureToggle: /mutagen/i,
+	// NOT `/mutagen/i`. Two independent reasons, and the second is the one that
+	// matters: `getToggleableFeatureNames()` reads `.charsheet__activatable-row` on
+	// the OVERVIEW tab, while mutagen rows are `.charsheet__feature` cards on the
+	// FEATURES tab. So the pattern is structurally unmatchable — seeding a formula
+	// would not have helped. Crimson Rite is the class's real Overview toggle and is
+	// present at L5; the mutagen click path is covered by `mutagenUiFlow` above.
+	signatureToggle: /rite of the/i,
+	// Crimson Rite asks which weapon to empower (`pGetUserEnum`), so the probe must
+	// answer the dialog or the handler returns before activating anything.
+	signatureTogglePrompt: "OK",
 	usage: {
 		atLevel: 7,
 		useResourceName: "Blood Maledict",

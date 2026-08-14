@@ -9079,3 +9079,132 @@ auto-granted curses, asserting the description does not *begin* with the grant
 note and does carry an `Amplify:` rider. Note that not every curse has a saving
 throw — the Souleater is a self-buff reaction — so asserting one would fail on
 correct data.
+
+---
+
+## CS-BUG-154 — An active Crimson Rite was invisible on the weapon it empowered — FIXED
+
+### Symptom
+
+A Blood Hunter pays hit points to bind a Crimson Rite to **one chosen weapon**,
+and the rite then rides that weapon's damage rolls until it ends. With two
+weapons equipped, nothing on either attack row indicated which one carried the
+rite — an active rite and no rite at all looked identical.
+
+### Root cause
+
+The rite's bonus damage is real, but it is applied **at roll time** inside the
+damage roller (`charactersheet-combat.js` → `getExtraDamageFromStates()`). No
+static surface consulted it: the attack row's damage badge renders only
+`attack.damage` plus `totalDamageBonus`, and `getAttackRiderNotes()` was
+**item-scoped** — it read `attack.sourceItem.attackRiders` and knew nothing
+about active states.
+
+So the effect *worked* while being *unshown*, which is the harder half of the
+bug to notice: every damage roll was correct, so nothing looked wrong until you
+asked the sheet which weapon was empowered and it had no answer.
+
+### Fix
+
+Two changes, both generic rather than Blood-Hunter-specific:
+
+1. `getAttackRiderNotes()` now also emits a rider for any active-state extra
+   damage **bound to this weapon** (`weaponId === attack.id`). Deliberately
+   limited to bound effects: an unbound state rider applies to every attack, so
+   pinning it to one row would misinform. Any future weapon-bound state damage
+   gets this surface for free.
+2. `getExtraDamageFromStates()` now prefers the effect's own `source` over the
+   state's display name. A rite effect carries `source: "Rite of the Flame"`
+   while its state is the generic "Crimson Rites", so reading `stateName` first
+   discarded the only field identifying *which* rite was burning — with two
+   rites active, both riders read identically apart from damage type.
+
+### Regression test
+
+`CharacterSheetBloodHunter.test.js` → "surfaces an active Crimson Rite as a
+rider on the weapon it empowers, and not on others", including a negative
+control asserting the rite does **not** leak onto an unempowered weapon.
+Verified causal: disabling the rider turns the E2E `L5 loadout` signature-toggle
+probe red, and restoring it turns it green.
+
+---
+
+## CS-BUG-155 — `getAttackDamageString` read a button label, so no spec could observe a damage change — FIXED (test infra)
+
+### Symptom
+
+`probeToggleDelta` snapshots each attack's damage before and after a toggle so
+that toggles expressing themselves in damage (Rage's +2, a Crimson Rite's rider)
+are not misreported as "no effect". The damage field never changed for any spec.
+
+### Root cause
+
+`CharacterSheetPage.getAttackDamageString` read
+`.charsheet__attack-damage, .charsheet__attack-roll-damage`. The first is the
+**"Roll Damage" button**, whose label is the constant string `"Damage"` for
+every attack ever rendered; the second **does not exist anywhere in the
+application**. So the method returned `"Damage"` unconditionally and the
+before/after comparison compared two identical constants.
+
+This is the "cannot pass" assertion form: not an assertion that fails to catch
+its target, but one whose two inputs are equal by construction.
+
+### Fix
+
+Read `.charsheet__attack-details` (the badge the player actually reads) and
+append any `.charsheet__attack-rider-note` text.
+
+### Note
+
+The dead field had been silently absorbing effect changes suite-wide, not just
+for Blood Hunter. Any toggle whose only expression is damage was invisible to
+the probe.
+
+---
+
+## CS-BUG-156 — A signature-toggle probe could silently skip, reporting success by not running — FIXED (test infra)
+
+### Symptom
+
+`test/e2e/specs/tgtt-mutant-blood-hunter.spec.ts` declared
+`signatureToggle: /mutagen/i`. The probe logged
+`no toggle for /mutagen/i; skipping toggle probe` and the test **passed**. The
+spec whose entire purpose is the mutagen flow was green while exercising no
+mutagen behaviour in a default run.
+
+### Root cause
+
+Two independent reasons the pattern could never match:
+
+1. No mutagen formula is auto-picked, so no row exists to toggle (the CS-BUG-124
+   root cause).
+2. More fundamentally, `getToggleableFeatureNames()` reads
+   `.charsheet__activatable-row` on the **Overview** tab, while mutagen rows are
+   `.charsheet__feature` cards on the **Features** tab. The pattern was
+   *structurally* unmatchable — seeding formulas would not have helped.
+
+When `probeToggleDelta` returned `null`, the factory logged and returned,
+leaving the test green. A runtime skip is indistinguishable from a pass in the
+summary line.
+
+### Fix
+
+The factory now **throws** when no toggleable row matches, naming the pattern
+and listing the rows that *were* present. A class whose signature mechanic
+genuinely is not a toggle declares `signatureToggleSkip: {skip: true, reason}` —
+a channel that already existed, is greppable, and keeps the gap visible in the
+spec file rather than in a log line nobody reads.
+
+Also added: `signatureTogglePrompt`, because every Blood Hunter signature toggle
+is **prompt-gated** (Crimson Rite opens `InputUiUtil.pGetUserEnum` to choose the
+weapon and returns early unless answered). Without it the probe clicked, walked
+away, and reported "no derived effect" for a feature that works — a harness gap
+indistinguishable from a product bug. Answering is best-effort on both sides,
+because whether the prompt appears depends on how many weapons are equipped —
+i.e. on the character's data, not on the spec.
+
+### Known related gap (not fixed here)
+
+`Shadow Knight Fighter`'s `/action surge|second wind/i` was silently skipping for
+the same reason — those are resource counters, not Overview toggles. The
+hard-fail surfaces it.

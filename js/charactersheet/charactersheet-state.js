@@ -45542,6 +45542,28 @@ class CharacterSheetState {
 			});
 		}
 
+		// Active-state damage riders BOUND to this specific weapon — most notably a
+		// Blood Hunter's Crimson Rite, which the player pays hit points for and which
+		// then rides one chosen weapon until it ends. The damage roller already
+		// applies these (`getExtraDamageFromStates`), but until now nothing on the
+		// weapon row said so, and the choice of weapon is the whole point: with two
+		// weapons equipped, an active rite was indistinguishable from no rite, and the
+		// player could not tell WHICH weapon they had empowered.
+		//
+		// Deliberately limited to effects carrying a `weaponId`. An unbound state
+		// rider applies to every attack, so pinning it to one row would misinform;
+		// bound riders are exactly the ones whose weapon identity is information.
+		for (const eff of (this.getExtraDamageFromStates?.() || [])) {
+			if (!eff?.weaponId || eff.weaponId !== attack.id) continue;
+			const dmgType = eff.damageType ? ` ${eff.damageType}` : "";
+			riders.push({
+				id: `stateDamage:${eff.source}:${eff.weaponId}`,
+				icon: "\u{1FA78}",
+				label: `${eff.source}: +${eff.dice}${dmgType}`,
+				description: `${eff.source} is active on this weapon, adding ${eff.dice}${dmgType} damage to its damage rolls.`,
+			});
+		}
+
 		return riders;
 	}
 
@@ -60186,7 +60208,13 @@ class CharacterSheetState {
 			.map(e => ({
 				dice: e.value || e.dice || "1d6",
 				damageType: e.damageType || "",
-				source: e.stateName || "state effect",
+				// Prefer the effect's OWN source over the state's display name. A
+				// Crimson Rite effect carries `source: "Rite of the Flame"` while its
+				// state is the generic "Crimson Rites", so reading `stateName` first
+				// discarded the one thing that identifies which rite is burning — and
+				// with two rites on two weapons both read identically apart from the
+				// damage type.
+				source: e.source || e.stateName || "state effect",
 				weaponId: e.weaponId || null,
 				isCrimsonRite: !!e.isCrimsonRite,
 				// Scoping flags — consumed by the damage roller so a rider that reads
