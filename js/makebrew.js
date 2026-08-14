@@ -2,7 +2,7 @@ import {BuilderBase} from "./makebrew/makebrew-builder-base.js";
 import {SpellBuilder} from "./makebrew/makebrew-spell.js";
 import {CreatureBuilder} from "./makebrew/makebrew-creature.js";
 import {LegendaryGroupBuilder} from "./makebrew/makebrew-legendarygroup.js";
-import {ItemBuilder} from "./makebrew/makebrew-item.js";
+import {ItemBuilder, pConsumeItemBuilderHandoff} from "./makebrew/makebrew-item.js";
 import {ItemMaterialBuilder} from "./makebrew/makebrew-item-material.js";
 import {CraftingMaterialBuilder} from "./makebrew/makebrew-crafting-material.js";
 import {CraftingRecipeBuilder} from "./makebrew/makebrew-crafting-recipe.js";
@@ -406,6 +406,7 @@ class Makebrew {
 		await ui.init();
 
 		if (window.location.hash.length) await Makebrew.pHashChange();
+		await pConsumeItemBuilderHandoff({ui, builder: itemBuilder});
 		window.addEventListener("hashchange", Makebrew.pHashChange.bind(Makebrew));
 
 		window.dispatchEvent(new Event("toolsLoaded"));

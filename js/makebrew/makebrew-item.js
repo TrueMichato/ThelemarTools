@@ -1,5 +1,6 @@
 import {ItemBuilderCore} from "../itembuilder/itembuilder-core.js";
 import {ItemCompositionCatalogPicker} from "../itembuilder/itembuilder-catalog-picker.js";
+import {ItemBuilderHandoff} from "../itembuilder/itembuilder-handoff.js";
 import {BuilderBase} from "./makebrew-builder-base.js";
 import {BuilderUi} from "./makebrew-builderui.js";
 
@@ -35,6 +36,14 @@ const _ITEM_TYPE_LABELS = {
 	WD: "Wand",
 	W: "Wondrous Item",
 };
+
+export async function pConsumeItemBuilderHandoff ({ui, builder, storage = StorageUtil}) {
+	const result = await ItemBuilderHandoff.pConsume({storage});
+	if (result.status === "empty") return result;
+	await ui.pSetActiveBuilderById("itemBuilder");
+	builder.setStateFromHandoffResult(result);
+	return result;
+}
 
 export class ItemBuilder extends BuilderBase {
 	constructor () {
@@ -84,6 +93,32 @@ export class ItemBuilder extends BuilderBase {
 		this.__state = state.s;
 		this.__meta = state.m;
 		this._draft = ItemBuilderCore.normalizeDraft(state.d || ItemBuilderCore.fromItem(state.s), {source: this._ui?.source});
+	}
+
+	setStateFromHandoffResult (result) {
+		if (result.status === "success") {
+			const draft = ItemBuilderCore.normalizeDraft(result.draft, {source: this._ui?.source});
+			draft.item.uniqueId = CryptUtil.uid();
+			const item = ItemBuilderCore.serialize(draft, this._catalogs);
+			item.uniqueId = draft.item.uniqueId;
+			this.setStateFromLoaded({
+				s: item,
+				d: draft,
+				m: this._getInitialMetaState({
+					nameOriginal: item.name,
+					isModified: true,
+					isPersisted: false,
+				}),
+			});
+			this._saveStatus = "Quick Forge draft restored. Review it, then save when ready.";
+		} else {
+			this._draft = this._draft || ItemBuilderCore.fromItem(this.__state);
+			this._saveStatus = result.message;
+		}
+
+		this.renderInput();
+		this.renderOutput();
+		this.doUiSave();
 	}
 
 	_getAsMarkdown (item) {

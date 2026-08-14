@@ -20,11 +20,52 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;
+		width: 100%;
 		min-width: 0;
 	}
 
 	.dm-item-builder__summary {
-		display: none;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		width: 100%;
+		max-width: 100%;
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.dm-item-builder__summary-heading,
+	.dm-item-builder__summary-composition {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+
+	.dm-item-builder__summary-heading > span,
+	.dm-item-builder__summary-composition > span {
+		color: vars.$rgb-font--muted;
+	}
+
+	.dm-item-builder__summary-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+
+		button {
+			flex: 1 1 10rem;
+			min-width: 0;
+			min-height: 40px;
+			white-space: normal;
+		}
+	}
+
+	.dm-item-builder--modal {
+		overflow-x: hidden;
+	}
+
+	.dm-item-builder__content--focused {
+		width: min(100%, 72rem);
+		margin-inline: auto;
 	}
 
 	.dm-item-builder__loading {
@@ -294,7 +335,9 @@
 
 		.dm-item-builder__loading,
 		.dm-item-builder__subtitle,
-		.dm-item-builder__muted {
+		.dm-item-builder__muted,
+		.dm-item-builder__summary-heading > span,
+		.dm-item-builder__summary-composition > span {
 			color: #b8b8b8;
 		}
 
@@ -324,25 +367,7 @@
 	}
 
 	@container dm-item-builder (width <= 240px) {
-		.dm-item-builder__summary {
-			display: flex;
-			flex-direction: column;
-			gap: 0.5rem;
-			min-width: 0;
-
-			> div {
-				display: flex;
-				flex-direction: column;
-				min-width: 0;
-				overflow-wrap: anywhere;
-			}
-		}
-
-		.dm-item-builder__editor {
-			display: none;
-		}
-
-		.dm-item-builder__open-editor {
+		.dm-item-builder__summary-actions button {
 			width: 100%;
 			min-height: 40px;
 			white-space: normal;
@@ -350,6 +375,12 @@
 	}
 
 	@media (width <= 600px) {
+		.dm-item-builder__content--focused {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr);
+			width: 100%;
+		}
+
 		.dm-item-builder__identity,
 		.dm-item-builder__step {
 			align-items: stretch;
@@ -362,8 +393,16 @@
 		}
 
 		.dm-item-builder__footer > button {
+			flex: 1 1 100%;
+			width: 100%;
 			max-width: 100%;
 			white-space: normal;
+		}
+
+		.dm-item-builder__preview,
+		.itembuilder-picker {
+			min-width: 0;
+			max-width: 100%;
 		}
 	}
 

@@ -1,6 +1,7 @@
 import {DmScreenPanelAppBase} from "../dmscreen-panelapp-base.js";
 import {ItemCompositionCatalogPicker} from "../../itembuilder/itembuilder-catalog-picker.js";
 import {ItemBuilderCore} from "../../itembuilder/itembuilder-core.js";
+import {ItemBuilderHandoff} from "../../itembuilder/itembuilder-handoff.js";
 
 const _ITEM_TYPE_LABELS = {
 	A: "Ammunition",
@@ -39,9 +40,16 @@ function _getJsonErrorMessage (error, value) {
 }
 
 export class ItemBuilderPanel extends DmScreenPanelAppBase {
-	constructor ({board, savedState}) {
+	constructor ({
+		board,
+		savedState,
+		compositionPickerClass = ItemCompositionCatalogPicker,
+		fnNavigateToMakebrew = () => window.location.assign("makebrew.html#itembuilder"),
+	}) {
 		super({board, savedState});
 		this._draft = ItemBuilderCore.normalizeDraft(savedState?.draft || savedState);
+		this._CompositionPicker = compositionPickerClass;
+		this._fnNavigateToMakebrew = fnNavigateToMakebrew;
 		this._catalogs = {items: [], materials: [], upgrades: []};
 		this._root = null;
 		this._isLoading = true;
@@ -121,21 +129,45 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 
 		const item = ItemBuilderCore.serialize(this._draft, this._catalogs);
 		const validation = ItemBuilderCore.validate(this._draft, this._catalogs);
+		this._renderEmbedded({item, validation});
+		this._renderFocusedEditor();
+	}
+
+	_renderEmbedded ({item, validation}) {
+		const nameInput = ee`<input class="ve-form-control" aria-label="Item name" value="${this._draft.item.name.qq()}">`
+			.onn("change", () => {
+				this._draft.item.name = nameInput.val().trim();
+				this._doUpdate();
+			});
+		const sourceSelect = ee`<select class="ve-form-control" aria-label="Homebrew source">
+			<option value="">Choose source</option>
+			${BrewUtil2.getSources().map(source => `<option value="${source.json.qq()}">${source.full.qq()}</option>`)}
+		</select>`.val(this._draft.item.source)
+			.onn("change", () => {
+				this._draft.item.source = sourceSelect.val();
+				this._doUpdate();
+			});
 		const btnOpen = ee`<button class="ve-btn ve-btn-primary dm-item-builder__open-editor">Open focused editor</button>`
 			.onn("click", () => this._pOpenFocusedEditor({trigger: btnOpen}));
-		ee`<div class="dm-item-builder__summary">
-			<div>
+		const btnHandoff = this._getBtnContinueInMakebrew();
+
+		ee`<section class="dm-item-builder__summary" aria-label="Quick Forge item draft">
+			<div class="dm-item-builder__summary-heading">
 				<strong>${(item.name || "Unnamed item").qq()}</strong>
 				<span>${_getTypeLabel(item.type).qq()} \u00b7 ${(item.source || "No source").qq()}</span>
 			</div>
-			<div>${this._getCompositionSummaryText().qq()}</div>
+			<div class="dm-item-builder__identity">
+				<label><span>Item name</span>${nameInput}</label>
+				<label><span>Homebrew source</span>${sourceSelect}</label>
+			</div>
+			<div class="dm-item-builder__summary-composition">
+				<strong>Composition</strong>
+				<span>${this._getCompositionSummaryText().qq()}</span>
+				<span>${(this._draft.preset ? `Base: ${this._draft.preset.name} (${this._draft.preset.source})` : "No catalog base selected").qq()}</span>
+			</div>
 			${this._getValidationElement(validation, {isCompact: true})}
-			${btnOpen}
-		</div>`.appendTo(this._root);
-
-		const wrpEditor = ee`<div class="dm-item-builder__editor"></div>`.appendTo(this._root);
-		this._renderEditor({wrp: wrpEditor, item, validation});
-		this._renderFocusedEditor();
+			<div class="dm-item-builder__summary-actions">${btnOpen}${btnHandoff}</div>
+		</section>`.appendTo(this._root);
 	}
 
 	_renderFocusedEditor () {
@@ -151,6 +183,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 	}
 
 	_renderEditor ({wrp, item, validation, isFocused = false, doClose = null}) {
+		if (!isFocused) throw new Error("The full Item Builder editor may only be rendered in focused mode.");
 		const nameInput = ee`<input class="ve-form-control" aria-label="Item name" value="${this._draft.item.name.qq()}">`
 			.onn("change", () => {
 				this._draft.item.name = nameInput.val().trim();
@@ -172,12 +205,13 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 			.onn("click", () => this._pResetDraft());
 		const btnSave = ee`<button class="ve-btn ve-btn-success" ${validation.isValid ? "" : "disabled"} aria-disabled="${!validation.isValid}"><span class="glyphicon glyphicon-floppy-disk"></span> Save item to Homebrew</button>`
 			.onn("click", () => this._pSaveToBrew());
+		const btnHandoff = this._getBtnContinueInMakebrew();
 		const btnClose = isFocused
 			? ee`<button class="ve-btn ve-btn-default">Close editor</button>`.onn("click", () => doClose(false))
 			: null;
 		const wrpPicker = ee`<div></div>`;
 
-		new ItemCompositionCatalogPicker({
+		new this._CompositionPicker({
 			draft: this._draft,
 			catalogs: this._catalogs,
 			onSelect: meta => this._handleCompositionSelect(meta),
@@ -203,8 +237,24 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 			${wrpPicker}
 			${this._getValidationElement(validation)}
 			<div class="dm-item-builder__preview"><table class="ve-w-100 ve-stats" aria-label="Item preview">${Renderer.item.getCompactRenderedString(item)}</table></div>
-			<div class="dm-item-builder__footer">${btnClose}${btnSave}</div>
+			<div class="dm-item-builder__footer">${btnClose}${btnHandoff}${btnSave}</div>
 		</div>`.appendTo(wrp);
+	}
+
+	_getBtnContinueInMakebrew () {
+		const btn = ee`<button class="ve-btn ve-btn-default dm-item-builder__handoff"><span class="glyphicon glyphicon-new-window"></span> Continue in Makebrew</button>`;
+		btn.onn("click", () => this._pContinueInMakebrew());
+		return btn;
+	}
+
+	async _pContinueInMakebrew () {
+		try {
+			await ItemBuilderHandoff.pStore({draft: this._draft});
+			this._fnNavigateToMakebrew();
+		} catch (error) {
+			this._saveStatus = `Could not continue in Makebrew: ${error.message}`;
+			this._render();
+		}
 	}
 
 	async _pChoosePreset () {
@@ -315,23 +365,13 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 		const textarea = ee`<textarea class="ve-form-control dm-item-builder__advanced" aria-label="Canonical item JSON" spellcheck="false">${original.qq()}</textarea>`;
 		const btnCancel = ee`<button class="ve-btn ve-btn-default">Cancel</button>`
 			.onn("click", async () => {
-				if (
-					textarea.val() !== original
-					&& !await InputUiUtil.pGetUserBoolean({
-						title: "Discard Advanced Changes",
-						htmlDescription: "Your advanced JSON changes have not been applied. Discard them?",
-						textYes: "Discard changes",
-						textNo: "Keep editing",
-					})
-				) return;
+				if (!await this._pConfirmAdvancedDiscard({original, current: textarea.val()})) return;
 				doClose(false);
 			});
 		const btnApply = ee`<button class="ve-btn ve-btn-primary">Apply advanced fields</button>`
 			.onn("click", () => {
 				try {
-					const parsed = JSON.parse(textarea.val());
-					this._draft = ItemBuilderCore.normalizeDraft({...this._draft, item: parsed});
-					this._doUpdate({status: "Advanced fields applied successfully."});
+					this._applyAdvancedJson(textarea.val());
 					doClose(true);
 				} catch (error) {
 					message.attr("class", "dm-item-builder__advanced-message dm-item-builder__advanced-message--error")
@@ -345,6 +385,22 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 		</div>`.appendTo(eleModalInner);
 		ee`<div class="ve-flex-v-center ve-flex-h-right ve-w-100">${btnCancel}${btnApply}</div>`.appendTo(eleModalFooter);
 		textarea.focuse();
+	}
+
+	async _pConfirmAdvancedDiscard ({original, current}) {
+		if (current === original) return true;
+		return InputUiUtil.pGetUserBoolean({
+			title: "Discard Advanced Changes",
+			htmlDescription: "Your advanced JSON changes have not been applied. Discard them?",
+			textYes: "Discard changes",
+			textNo: "Keep editing",
+		});
+	}
+
+	_applyAdvancedJson (value) {
+		const parsed = JSON.parse(value);
+		this._draft = ItemBuilderCore.normalizeDraft({...this._draft, item: parsed});
+		this._doUpdate({status: "Advanced fields applied successfully."});
 	}
 
 	_restoreFocus ({trigger, selector}) {
