@@ -141,6 +141,7 @@ export class ItemBuilder extends BuilderBase {
 		this.renderOutput();
 		this.doUiSave();
 		this._refreshValidation();
+		if (this._wrpReview) this._renderReviewTab({wrp: this._wrpReview});
 		if (isRenderInput) this.renderInput();
 	}
 
@@ -172,7 +173,8 @@ export class ItemBuilder extends BuilderBase {
 		this._renderPresetTab({wrp: baseTab.wrpTab, cb});
 		this._renderCompositionTab({wrp: compositionTab.wrpTab});
 		this._renderDetailsTab({wrp: detailsTab.wrpTab, cb});
-		this._renderReviewTab({wrp: reviewTab.wrpTab});
+		this._wrpReview = reviewTab.wrpTab;
+		this._renderReviewTab({wrp: this._wrpReview});
 	}
 
 	_decorateTabsA11y ({tabs}) {
@@ -184,7 +186,23 @@ export class ItemBuilder extends BuilderBase {
 			const isActive = tab === activeTab;
 			tab.btnTab.attr("aria-selected", `${isActive}`).attr("tabindex", isActive ? "0" : "-1");
 		});
-		tabs.forEach(tab => tab.btnTab.onn("click", () => setActive(tab)));
+		tabs.forEach((tab, ix) => {
+			tab.btnTab
+				.onn("click", () => setActive(tab))
+				.onn("keydown", evt => {
+					const keyToIx = {
+						ArrowLeft: (ix - 1 + tabs.length) % tabs.length,
+						ArrowRight: (ix + 1) % tabs.length,
+						Home: 0,
+						End: tabs.length - 1,
+					};
+					const ixNext = keyToIx[evt.key];
+					if (ixNext == null) return;
+					evt.preventDefault();
+					tabs[ixNext].btnTab.click();
+					tabs[ixNext].btnTab.focuse();
+				});
+		});
 		setActive(tabs[this._getIxActiveTab({tabGroup: "input"})] || tabs[0]);
 	}
 
@@ -301,6 +319,7 @@ export class ItemBuilder extends BuilderBase {
 	}
 
 	_renderReviewTab ({wrp}) {
+		wrp.empty();
 		const item = ItemBuilderCore.serialize(this._draft, this._catalogs);
 		const type = _ITEM_TYPE_LABELS[String(this._draft.item.type || "").split("|")[0]] || "Unknown item type";
 		const composition = [
@@ -346,7 +365,7 @@ export class ItemBuilder extends BuilderBase {
 			this._refreshValidation();
 			return;
 		}
-		await super.pDoHandleClickSaveBrew();
+		if (!await super.pDoHandleClickSaveBrew()) return;
 		this._saveStatus = `Saved "${this._draft.item.name}" to homebrew.`;
 		this._refreshValidation();
 	}

@@ -14,7 +14,6 @@ const _ITEM_COLLECTION_PROPS = [
 	"properties",
 	"property",
 	"attachedSpells",
-	"focus",
 	"effects",
 	"itemPowers",
 	"appliedUpgrades",
@@ -27,7 +26,6 @@ const _COMPOSITION_COLLECTION_PROPS = [
 	"properties",
 	"property",
 	"attachedSpells",
-	"focus",
 	"effects",
 	"itemPowers",
 	"appliesTo",
@@ -66,6 +64,7 @@ function _normalizeCompositionCollection (value) {
 function _normalizeItem (item) {
 	item = _isObject(item) ? item : {};
 	_normalizeCollectionProps(item, _ITEM_COLLECTION_PROPS);
+	if (Object.hasOwn(item, "focus") && item.focus !== true) item.focus = Array.isArray(item.focus) ? item.focus : [];
 	item.appliedUpgrades = _normalizeCompositionCollection(item.appliedUpgrades);
 	item.socketedGemstones = _normalizeCompositionCollection(item.socketedGemstones);
 	return item;

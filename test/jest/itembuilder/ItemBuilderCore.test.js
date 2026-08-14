@@ -118,6 +118,15 @@ describe("ItemBuilderCore", () => {
 		expect(draft.gemstone).toEqual(saved.gemstone);
 	});
 
+	test("preserves the canonical boolean spellcasting focus flag", () => {
+		const draft = ItemBuilderCore.normalizeDraft({
+			item: {name: "Focus", source: "HB", type: "SCF", focus: true},
+		});
+
+		expect(draft.item.focus).toBe(true);
+		expect(ItemBuilderCore.serialize(draft).focus).toBe(true);
+	});
+
 	test("deduplicates catalog entities by case-insensitive UID", () => {
 		const entities = ItemBuilderCore.dedupeCatalog([
 			{name: "Adamant", source: "TGTT", marker: "site"},

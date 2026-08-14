@@ -535,7 +535,7 @@ export class BuilderBase extends ProxyBase {
 					textYes: "Yes",
 					textNo: "Cancel",
 				});
-				if (!isMove) return;
+				if (!isMove) return false;
 
 				const brew = await BrewUtil2.pMoveOrCopyToEditableBySourceJson(source);
 				if (!brew) throw new Error(`Failed to make brew for source "${source}" editable!`);
@@ -568,6 +568,7 @@ export class BuilderBase extends ProxyBase {
 		this._meta.nameOriginal = this._state.name;
 		this.doUiSave();
 		await this.pDoPostSave();
+		return true;
 	}
 
 	_getAsMarkdown (ent) {
