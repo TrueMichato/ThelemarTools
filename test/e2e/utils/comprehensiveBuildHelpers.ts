@@ -789,7 +789,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "abilityMod"; ability: AblKey; min?: number; exact?: number}
 	| {kind: "ac"; min?: number; exact?: number}
 	| {kind: "spellSaveDc"; min?: number; exact?: number}
-	| {kind: "spellSlots"; level: number; min: number}
+	| {kind: "spellSlots"; level: number | "pact"; min: number}
 	| {kind: "speed"; type?: SpeedType; min?: number; exact?: number}
 	| {kind: "speedEquals"; left: SpeedType; right: SpeedType}
 	| {kind: "initiative"; min?: number; exact?: number}

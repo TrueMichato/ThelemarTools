@@ -683,8 +683,15 @@ export class CharacterSheetPage {
 
 	/**
 	 * Get the displayed spell slot counts {current, max} for a given level.
+	 *
+	 * Pass `"pact"` for warlock-style pact slots. They are a SEPARATE store
+	 * (`_data.spellcasting.pactSlots`) rendered as `data-spell-level="pact"`,
+	 * not as a numeric level — so a pure pact caster (Warlock, Blood Hunter
+	 * Order of the Profane Soul) has NO `data-spell-level="1"` container at
+	 * all, and asking for level 1 reports max 0 for a perfectly correct
+	 * build. That is a false negative, not a missing feature.
 	 */
-	async getSpellSlots (level: number): Promise<{current: number; max: number}> {
+	async getSpellSlots (level: number | "pact"): Promise<{current: number; max: number}> {
 		await this.switchToTab(this.tabSpells);
 		const slotContainer = this.page.locator(
 			`[data-spell-level="${level}"], .charsheet__spell-slot-level-${level}`,

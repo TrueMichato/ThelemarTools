@@ -830,6 +830,35 @@ export const PRESET_FULL_MUTANT_BLOOD_HUNTER: CharacterPreset = {
 	],
 };
 
+/**
+ * BH2022 Order of the Profane Soul Blood Hunter — INT-based Pact Magic on a
+ * reduced warlock grid, plus a patron choice that other features key off.
+ *
+ * Human matches the Lycan and Mutant presets deliberately: the variable under
+ * test here is the ORDER, and holding race/chassis constant across the three
+ * Blood Hunter specs means a difference in results is attributable to the
+ * subclass rather than to racial bonuses.
+ */
+export const PRESET_FULL_PROFANE_SOUL_BLOOD_HUNTER: CharacterPreset = {
+	race: "Human",
+	raceSource: "PHB'24",
+	className: "Blood Hunter",
+	classSource: "BH2022",
+	prioritySources: ["BH2022"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Cassian Vole",
+	skillCount: 3,
+	optFeatCount: 1,
+	subclassName: "Order of the Profane Soul",
+	subclassSource: "BH2022",
+	preferredFeatProgressionPattern: /^dueling\b/i,
+	homebrewUrls: [
+		"https://raw.githubusercontent.com/TheGiddyLimit/homebrew/refs/heads/master/class/Matthew%20Mercer%3B%20Blood%20Hunter%20(2022).json",
+	],
+};
+
 /** TalPsi Chronopath Talent (MCDM "The Talent and Psionics") — psionic strain + powers. */
 export const PRESET_FULL_TALENT_CHRONOPATH: CharacterPreset = {
 	race: "Human",
@@ -1439,6 +1468,18 @@ export async function levelUpTo (
 					await charSheet.btnLevelUp.click({timeout: 5000});
 					break;
 				} catch (e) {
+					// The click may have ALREADY landed. Playwright re-checks
+					// actionability after dispatching, so the wizard's own
+					// overlay animating in covers the button and a SUCCESSFUL
+					// click is reported as "subtree intercepts pointer events".
+					// Retrying then blocks forever against the very modal we
+					// asked for — the button is now permanently covered — and
+					// the run dies 5 attempts later pointing at the wizard as
+					// if it were a stray leftover. Treat an open wizard as the
+					// success it is, before attributing the failure to an
+					// unresolved feature choice.
+					const wizardUp = await page.locator(".charsheet__levelup-wizard").isVisible().catch(() => false);
+					if (wizardUp) break;
 					if (attempt >= 4) throw e;
 					await levelUp.resolvePendingFeatureChoices();
 					await page.waitForTimeout(400);

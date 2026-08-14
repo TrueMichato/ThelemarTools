@@ -14604,6 +14604,28 @@ class CharacterSheetState {
 			};
 		}
 
+		// GENERIC subclass-declared caster. The named branches above each inline their
+		// own hard-coded table; a subclass that PUBLISHES its progression in data (any
+		// homebrew, e.g. BH2022 Order of the Profane Soul) otherwise falls through to
+		// `return null` and knows zero spells — even though the builder/level-up/
+		// quick-build flows already persist every field needed to compute it.
+		// Deliberately placed last: every named subclass returns before reaching here,
+		// so this cannot alter their behaviour. See CS-BUG-159.
+		const subclassData = cls.subclass;
+		if (subclassData?.spellsKnownProgression || subclassData?.cantripProgression) {
+			const knownMax = subclassData.spellsKnownProgression?.[levelIndex] || 0;
+			const subclassCantrips = subclassData.cantripProgression?.[levelIndex] || 0;
+			if (!knownMax && !subclassCantrips) return null;
+			return {
+				type: "known",
+				max: knownMax,
+				cantripsKnown: subclassCantrips,
+				spellsKnownMax: knownMax,
+				hasFullAccess: false,
+				is2024: false,
+			};
+		}
+
 		return null;
 	}
 
@@ -16714,6 +16736,15 @@ class CharacterSheetState {
 	 */
 	static getSubclassSpellListClass (subclass, cls) {
 		if (subclass?.spellcastingSpellList) return subclass.spellcastingSpellList;
+		// A `subclassSpells` entry naming a class is 5etools' structured way of saying
+		// "this subclass casts from that class's list" — BH2022's Order of the Profane
+		// Soul declares `[{className: "Warlock"}]`. It outranks an `additionalSpells`
+		// filter, which only ever describes spells layered ON TOP of a list. No official
+		// subclass uses `subclassSpells`, so reading it cannot change existing behaviour.
+		const subclassSpellsClassName = (Array.isArray(subclass?.subclassSpells) ? subclass.subclassSpells : [])
+			.map(itm => itm?.className)
+			.find(name => typeof name === "string" && name);
+		if (subclassSpellsClassName) return subclassSpellsClassName;
 		const blocks = Array.isArray(subclass?.additionalSpells) ? subclass.additionalSpells : [];
 		let fallback = null;
 		for (const block of blocks) {

@@ -9208,3 +9208,171 @@ i.e. on the character's data, not on the spec.
 `Shadow Knight Fighter`'s `/action surge|second wind/i` was silently skipping for
 the same reason — those are resource counters, not Overview toggles. The
 hard-fail surfaces it.
+
+---
+
+## CS-BUG-157 — Level-up wizard renders no control for a feature-option group the subclass introduces, then refuses to finish — FIXED
+
+### Symptom
+
+Creating an Order of the Profane Soul Blood Hunter and levelling to 3, the wizard
+summary read **"✓ Ready to level up!"** with every section ticked, but pressing
+**Finish** silently refused and raised:
+
+> Please select 1 option(s) for Pact Magic.
+
+There was no "Pact Magic" control anywhere in the wizard. The toast named a
+control the player could not see, so there was no possible workaround — the
+character was permanently stuck at level 2.
+
+This is the maximally deceptive shape of the failure: the *validator* and the
+*summary* disagreed, and the summary is the half the player reads.
+
+### Root cause
+
+A render/validate skew scoped to **the level at which a subclass is chosen**.
+
+`findFeatureOptions` emits a required 1-of-N group for any `abilityDc` carrying
+more than one attribute. BH2022's Pact Magic declares
+`{"type": "abilityDc", "attributes": ["int", "wis"]}`, so it produces a real
+group — but only *after* a subclass exists.
+
+`_pShowLevelUpModal` built the "Feature Choices" accordion inside a one-shot
+`if (featureOptionGroups.length) { … }` evaluated **before** any subclass was
+picked, when the list is empty. The subclass-selection callback did recompute
+`featureOptionGroups`, but — unlike the `optfeatures` block immediately beside
+it — had no code to *build* the now-missing UI, so `accordions.featoptions?.…`
+silently no-opped. The validator then read the recomputed list and blocked.
+
+At every other level the subclass is already known when the initial render runs,
+so the accordion is created normally. That is why only the subclass level broke.
+
+### Fix
+
+`js/charactersheet/charactersheet-levelup.js` — the one-shot `if` became a
+reusable `buildFeatOptionsSection()` closure that either re-renders the existing
+accordion body or creates the accordion and its summary item on demand,
+mirroring the adjacent `optfeatures` pattern. The subclass-selection callback now
+clears `selectedFeatureOptions` (stale keys from a previously-selected subclass
+must not carry over) and calls it. It ends by running `updateFeatOptionsStatus()`
+so the summary can no longer falsely report "Ready to level up!".
+
+### Blast radius — measured, not inferred
+
+A static scan of the corpus predicted **10** official subclasses affected
+(Battle Master, Hunter, Totem Warrior, Soulknife, Kensei, Psi Warrior, Storm
+Herald, Swords Bard, Genie Warlock…). That over-predicted. A runtime probe on
+Battle Master L3 showed its resolved group list is **empty**, and the existing
+Battle Master spec passes. The *mechanism* is generic; the realised impact on
+official content is small-to-zero, and it bites homebrew that declares a
+multi-attribute `abilityDc` on a subclass feature.
+
+The static scan is a worked example of a confident non-zero: it matched the
+shape in the source JSON without seeing that the runtime never resolves those
+entries into groups.
+
+---
+
+## CS-BUG-158 — A subclass casting from another class's spell list was offered an EMPTY spell picker — FIXED
+
+### Symptom
+
+Immediately behind CS-BUG-157. With the wizard finally able to finish, level 3
+opened a **"Choose Spell: Cantrips Known"** modal reading
+
+> Cantrip from **Blood Hunter** spell list
+
+containing a search box, a Cancel button and **zero selectable spells**. The base
+Blood Hunter class has no spell list, so the modal could never be satisfied and
+level-up hung — again leaving the character stuck at 2.
+
+### Root cause
+
+BH2022's Order of the Profane Soul declares
+`subclassSpells: [{className: "Warlock", classSource: "PHB"}]` — 5etools'
+structured way of saying "this subclass casts from that class's list".
+
+`CharacterSheetState.getSubclassSpellListClass()` exists precisely to answer that
+question, but did not read the field, so it fell through to the parent class and
+built `filter: level=0|class=Blood Hunter`.
+
+Two independent defects, and the second is the one that made the first invisible:
+
+1. The resolver did not consider `subclassSpells`.
+2. **The field was never persisted.** `charactersheet-builder.js`,
+   `charactersheet-levelup.js` and `charactersheet-quickbuild.js` each copy an
+   explicit *whitelist* of subclass fields onto the stored class entry. The
+   whitelist carried the confusingly-similar `subSubclassSpells` (an unrelated
+   sub-subclass map) but not `subclassSpells`, so the resolver fix alone changed
+   nothing — the stored object simply did not have the field.
+
+The second defect is why reasoning failed here and instrumentation succeeded:
+logging `Object.keys(subclass)` at the resolver showed `subSubclassSpells`
+present and `subclassSpells` absent, which no amount of reading the source data
+would have revealed.
+
+### Fix
+
+- `getSubclassSpellListClass()` now reads `subclassSpells[].className`, ranked
+  below an explicit `spellcastingSpellList` override and above the
+  `additionalSpells` filter scan (an `additionalSpells` entry only ever describes
+  spells layered *on top of* a list, so it is the weaker signal).
+- `subclassSpells` added to the persistence whitelist at all four call sites.
+
+No official subclass uses `subclassSpells`, so reading it cannot change the
+behaviour of any first-party content.
+
+---
+
+## CS-BUG-159 — A subclass that publishes its own spellcasting progression knew ZERO spells — FIXED
+
+### Symptom
+
+With the picker fixed, cantrips populated correctly from the Warlock list — but
+the exported state still showed `spellsKnown: []` at level 3, where Order of the
+Profane Soul should know 2 spells.
+
+The character-sheet calculation `profaneSoulSpellsKnown` reported **2** the whole
+time, because it reads the published progression table. Only the *learned* list
+was empty.
+
+### Root cause
+
+`_getClassSpellcastingInfo()` resolves subclass casters through a ladder of
+**hard-coded name branches** — `Gambler`, `Eldritch Knight`, `Arcane Trickster`,
+`Architect of Ruin` — each inlining its own spells-known array. A subclass that
+*declares* `spellsKnownProgression` / `cantripProgression` in data matches none
+of them and falls through to `return null`, i.e. "not a caster at all".
+
+The irony is that the persistence whitelist already carefully stores
+`casterProgression`, `spellcastingAbility`, `cantripProgression` and
+`subclassTableGroups` on the subclass — fields only a *generic* reader would ever
+want — while the reader that needed them consulted a list of names instead.
+
+### Fix
+
+- A generic branch in `_getClassSpellcastingInfo()` reads the subclass's own
+  declared `spellsKnownProgression` / `cantripProgression`. It is placed
+  **last**, after every named branch, so it cannot alter the behaviour of any
+  subclass handled above; the Eldritch Knight regression test in
+  `CharacterSheetProfaneSoulSpellcasting.test.js` is the guard that it stays
+  there.
+- `spellsKnownProgression` added to the subclass persistence whitelist at all
+  four call sites, beside `cantripProgression`.
+
+`spellListClass` was deliberately **not** emitted from the new branch: it is
+written by the Gambler branch and propagated by `getSpellcastingInfo()`, but no
+code in `js/` ever reads it back, so adding it would have been decorative.
+
+### Testing note — why the existing assertions could not have caught any of this
+
+The E2E spec asserted `profaneSoulCantripsKnown` and `profaneSoulSpellsKnown`.
+Both are derived from the progression table and report the right number whether
+or not the player can pick anything, so both were green throughout. The spec now
+also asserts `{kind: "cantripCount", min: 2}`, which counts cantrips **actually
+learned** and is the only assertion in that milestone that fails when the
+spell-list plumbing breaks.
+
+All three fixes were verified with a negative control: each branch was disabled
+in turn and the corresponding tests confirmed to go red (5 of 11 for the generic
+caster branch, 1 of 11 for the `subclassSpells` resolver).

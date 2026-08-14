@@ -609,6 +609,8 @@ class CharacterSheetBuilder {
 						casterProgression: this._selectedSubclass.casterProgression,
 						spellcastingAbility: this._selectedSubclass.spellcastingAbility,
 						additionalSpells: this._selectedSubclass.additionalSpells,
+						// Class whose spell list this subclass casts from. See CS-BUG-158.
+						subclassSpells: this._selectedSubclass.subclassSpells,
 						subSubclassSpells: this._selectedSubclass.subSubclassSpells,
 						optionalfeatureProgression: this._selectedSubclass.optionalfeatureProgression,
 						// Subclass-declared spell-slot / cantrip progression tables. Persisted so
@@ -619,6 +621,9 @@ class CharacterSheetBuilder {
 						// Gambler) declare their cantrip table on the SUBCLASS. Persisted so
 						// `getSubclassCantripChoiceSlots` can prompt for those picks.
 						cantripProgression: this._selectedSubclass.cantripProgression,
+						// Likewise their spells-known table. Without this the subclass falls through
+						// every branch of `_getClassSpellcastingInfo` and knows ZERO spells. CS-BUG-159.
+						spellsKnownProgression: this._selectedSubclass.spellsKnownProgression,
 					} : null,
 					subclassChoice: this._divineSoulAffinity,
 					casterProgression: casterProgressionBuilder,
