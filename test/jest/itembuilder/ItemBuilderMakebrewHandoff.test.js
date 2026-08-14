@@ -1,5 +1,6 @@
 import "../charactersheet/setup.js";
 import {jest} from "@jest/globals";
+import {readFileSync} from "node:fs";
 
 globalThis.MiscUtil.throttle ||= fn => fn;
 globalThis.MiscUtil.debounce ||= fn => fn;
@@ -32,6 +33,8 @@ globalThis.DataUtil ||= {};
 globalThis.DataUtil.cleanJson ||= entity => entity;
 globalThis.BrewUtil2 ||= {};
 
+const {ItemBuilderCore} = await import("../../../js/itembuilder/itembuilder-core.js");
+const {BuilderUi} = await import("../../../js/makebrew/makebrew-builderui.js");
 const {ItemBuilder, pConsumeItemBuilderHandoff} = await import("../../../js/makebrew/makebrew-item.js");
 
 describe("Makebrew ItemBuilder Quick Forge handoff", () => {
@@ -137,5 +140,79 @@ describe("Makebrew ItemBuilder Quick Forge handoff", () => {
 		expect(builder.__state.name).toBe(originalName);
 		expect(builder._saveStatus).toMatch(/try again/i);
 		expect(builder.renderInput).toHaveBeenCalledTimes(1);
+	});
+
+	test("loads and renders a canonical boolean-focus item without lossy conversion", async () => {
+		const items = JSON.parse(readFileSync(new URL("../../../data/items.json", import.meta.url))).item;
+		const ruby = items.find(it => it.name === "Ruby of the War Mage" && it.source === "XDMG");
+		const builder = new ItemBuilder();
+		builder.ui = {source: "HB", allSources: ["HB"], doSaveDebounced: jest.fn()};
+		builder._catalogs.items = [ruby];
+		builder.renderInput = jest.fn();
+		builder.renderOutput = jest.fn();
+
+		await builder.pHandleLoadExistingData(ruby);
+
+		expect(builder._draft.item.focus).toBe(true);
+		expect(builder.__state.focus).toBe(true);
+		const boolSpy = jest.spyOn(BuilderUi, "getStateIptBoolean").mockReturnValue({appendTo: jest.fn()});
+		const stringsSpy = jest.spyOn(BuilderUi, "getStateIptStringArray").mockReturnValue({appendTo: jest.fn()});
+		const eeOriginal = globalThis.ee;
+		globalThis.ee = () => ({appendTo: jest.fn()});
+		try {
+			expect(() => builder._renderSpellcastingFocus({wrp: {}, cb: jest.fn()})).not.toThrow();
+			expect(boolSpy).toHaveBeenCalledWith(
+				"Universal Spellcasting Focus",
+				expect.any(Function),
+				{isUniversal: true},
+				{nullable: false},
+				"isUniversal",
+			);
+			expect(stringsSpy).not.toHaveBeenCalled();
+			expect(ItemBuilderCore.serialize(ItemBuilderCore.fromItem(builder.__state), builder._catalogs).focus).toBe(true);
+		} finally {
+			globalThis.ee = eeOriginal;
+			boolSpy.mockRestore();
+			stringsSpy.mockRestore();
+		}
+	});
+
+	test("synchronizes a pending debounced field before immediate Save persistence", async () => {
+		jest.useFakeTimers();
+		const debounceOriginal = MiscUtil.debounce;
+		MiscUtil.debounce = fn => {
+			let timerId = null;
+			const debounced = (...args) => timerId = setTimeout(() => fn(...args), 33);
+			debounced.cancel = () => clearTimeout(timerId);
+			return debounced;
+		};
+		const persist = jest.fn(async () => {});
+		BrewUtil2.pPersistEditableBrewEntity = persist;
+		const builder = new ItemBuilder();
+		builder.ui = {source: "HB", allSources: ["HB"], doSaveDebounced: jest.fn()};
+		builder.renderOutput = jest.fn();
+		builder._draft = ItemBuilderCore.createDraft({source: "HB"});
+		builder._draft.item.name = "Before";
+		builder.__state = {...ItemBuilderCore.serialize(builder._draft), uniqueId: "item-id"};
+		builder.__meta = {isModified: true, isPersisted: true, nameOriginal: "Before"};
+		builder._state = builder.__state;
+		builder._meta = builder.__meta;
+		const cb = builder._getCb();
+		builder._cbCache = cb;
+
+		try {
+			builder._draft.item.name = "After";
+			cb();
+			await builder.pDoHandleClickSaveBrew();
+
+			expect(persist).toHaveBeenCalledTimes(1);
+			expect(persist).toHaveBeenCalledWith("item", expect.objectContaining({name: "After", uniqueId: "item-id"}));
+			jest.runOnlyPendingTimers();
+			expect(persist).toHaveBeenCalledTimes(1);
+			expect(builder._meta.isModified).toBe(false);
+		} finally {
+			MiscUtil.debounce = debounceOriginal;
+			jest.useRealTimers();
+		}
 	});
 });

@@ -76,6 +76,8 @@ function _normalizeMaterialized (materialized) {
 	materialized.material = _normalizeCompositionEntity(materialized.material);
 	materialized.upgrades = _normalizeCompositionCollection(materialized.upgrades);
 	materialized.gemstone = _normalizeCompositionEntity(materialized.gemstone);
+	materialized.isLegacyProjected = materialized.isLegacyProjected ?? (materialized.item.entries || [])
+		.some(entry => (entry?.name || "").startsWith(_GENERATED_ENTRY_PREFIX));
 	return materialized;
 }
 
@@ -225,6 +227,7 @@ export class ItemBuilderCore {
 				material: item?.material,
 				upgrades: item?.appliedUpgrades,
 				gemstone: item?.socketedGemstones?.[0],
+				isLegacyProjected: (item?.entries || []).some(entry => (entry?.name || "").startsWith(_GENERATED_ENTRY_PREFIX)),
 			},
 		});
 	}
@@ -295,35 +298,43 @@ export class ItemBuilderCore {
 	static serialize (draft, catalogs = {}) {
 		const normalized = this.normalizeDraft(draft);
 		const preset = _findByRef(catalogs.items, normalized.preset);
-		const authoredItem = normalized.materialized && preset
+		const authoredItem = normalized.materialized?.isLegacyProjected && preset
 			? this._getAuthoredItemFromMaterialized({normalized, preset, catalogs})
 			: normalized.item;
 		let out = {..._copy(preset || {}), ..._copy(authoredItem)};
-		const material = _findByRef(catalogs.materials, normalized.material);
-		const upgrades = normalized.upgrades.map(ref => _findByRef(catalogs.upgrades, ref) || ref).filter(Boolean);
-		const gemstone = normalized.gemstone ? (_findByRef(catalogs.upgrades, normalized.gemstone) || normalized.gemstone) : null;
 
 		if (preset) {
 			out.baseItem = this.packUid(preset);
 			if (out.type && preset.source && !String(out.type).includes("|")) out.type = `${out.type}|${preset.source}`;
 		}
 
-		if (normalized.material) {
-			out.material = _ref(material || normalized.material);
+		if (normalized.material) out.material = _ref(normalized.material);
+		else delete out.material;
+
+		out.appliedUpgrades = normalized.upgrades.map(_ref).filter(Boolean);
+		if (!out.appliedUpgrades.length) delete out.appliedUpgrades;
+
+		if (normalized.gemstone) out.socketedGemstones = [_ref(normalized.gemstone)];
+		else delete out.socketedGemstones;
+
+		out.entries = (out.entries || []).filter(entry => !(entry?.name || "").startsWith(_GENERATED_ENTRY_PREFIX));
+		if (!out.entries.length) delete out.entries;
+		return out;
+	}
+
+	static projectForPreview (draft, catalogs = {}) {
+		const normalized = this.normalizeDraft(draft);
+		let out = this.serialize(normalized, catalogs);
+		const material = _findByRef(catalogs.materials, normalized.material);
+		const upgrades = normalized.upgrades.map(ref => _findByRef(catalogs.upgrades, ref) || ref).filter(Boolean);
+		const gemstone = normalized.gemstone ? (_findByRef(catalogs.upgrades, normalized.gemstone) || normalized.gemstone) : null;
+
+		if (material) {
 			out = CharacterSheetMaterials.applyToItem(out, material, {isSkipDegradation: true});
 			delete out._materialEffects;
 			delete out._materialEntity;
 			delete out._materialDegradation;
-		} else delete out.material;
-
-		out.appliedUpgrades = upgrades.map(upgrade => ({
-			name: upgrade.name,
-			source: upgrade.source,
-			...upgrade.upgradeType ? {upgradeType: _copy(upgrade.upgradeType)} : {},
-			...upgrade.cost != null ? {cost: _copy(upgrade.cost)} : {},
-			...upgrade.entries ? {entries: _copy(upgrade.entries)} : {},
-		}));
-		if (!out.appliedUpgrades.length) delete out.appliedUpgrades;
+		}
 
 		const upgradeEffects = _getUpgradeEffects(upgrades);
 		for (const prop of ["bonusWeaponAttack", "bonusWeaponDamage", "bonusSpellAttack", "bonusSpellSaveDc"]) {
@@ -346,14 +357,6 @@ export class ItemBuilderCore {
 
 		if (gemstone) {
 			const descriptor = getGemstoneDescriptor(gemstone);
-			out.socketedGemstones = [{
-				name: gemstone.name,
-				source: gemstone.source,
-				...gemstone.gemName ? {gemName: gemstone.gemName} : {},
-				...gemstone.rarity ? {rarity: gemstone.rarity} : {},
-				...gemstone.upgradeType ? {upgradeType: _copy(gemstone.upgradeType)} : {},
-				...gemstone.entries ? {entries: _copy(gemstone.entries)} : {},
-			}];
 			if (descriptor?.effects?.length) out.effects = _mergeUnique(out.effects, descriptor.effects);
 			if (descriptor?.powers?.length) out.itemPowers = _mergeUnique(out.itemPowers, descriptor.powers, it => it.id || it.name);
 			if (descriptor?.resource?.key === "charges" && Number.isFinite(Number(descriptor.resource.max))) {
@@ -362,7 +365,7 @@ export class ItemBuilderCore {
 				if (descriptor.resource.recovery) out.rechargeAmount = `{@dice ${descriptor.resource.recovery}}`;
 			}
 			if (descriptor?.requiresAttunement) out.reqAttune = out.reqAttune || true;
-		} else delete out.socketedGemstones;
+		}
 
 		const authoredEntries = (out.entries || []).filter(entry => !(entry?.name || "").startsWith(_GENERATED_ENTRY_PREFIX));
 		out.entries = [...authoredEntries, ..._getGeneratedEntries({material, upgrades, gemstone})];
@@ -378,7 +381,7 @@ export class ItemBuilderCore {
 			upgrades: normalized.materialized.upgrades,
 			gemstone: normalized.materialized.gemstone,
 		});
-		const projectedPreset = this.serialize(materialized, catalogs);
+		const projectedPreset = this.projectForPreview(materialized, catalogs);
 		const original = normalized.materialized.item || {};
 		const authored = _copy(normalized.item);
 

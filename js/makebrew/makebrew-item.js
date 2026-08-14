@@ -323,7 +323,26 @@ export class ItemBuilder extends BuilderBase {
 		]) BuilderUi.getStateIptString(label, cb, this._draft.item, {nullable: true}, prop).appendTo(wrp);
 		BuilderUi.getStateIptStringArray("Properties", cb, this._draft.item, {shortName: "Property"}, "property").appendTo(wrp);
 		BuilderUi.getStateIptStringArray("Attached Spells", cb, this._draft.item, {shortName: "Spell UID"}, "attachedSpells").appendTo(wrp);
-		BuilderUi.getStateIptStringArray("Spellcasting Focus", cb, this._draft.item, {shortName: "Class"}, "focus").appendTo(wrp);
+		this._renderSpellcastingFocus({wrp, cb});
+	}
+
+	_renderSpellcastingFocus ({wrp, cb}) {
+		const focusMode = {isUniversal: this._draft.item.focus === true};
+		BuilderUi.getStateIptBoolean(
+			"Universal Spellcasting Focus",
+			() => {
+				this._draft.item.focus = focusMode.isUniversal ? true : [];
+				this._doSync({isRenderInput: true});
+			},
+			focusMode,
+			{nullable: false},
+			"isUniversal",
+		).appendTo(wrp);
+		if (focusMode.isUniversal) {
+			ee`<div class="ve-muted ve-small ve-mb-2" role="status">This item can be used as a spellcasting focus by any spellcaster.</div>`.appendTo(wrp);
+			return;
+		}
+		BuilderUi.getStateIptStringArray("Spellcasting Focus Classes", cb, this._draft.item, {shortName: "Class", nullable: false}, "focus").appendTo(wrp);
 	}
 
 	_renderDescriptionTab ({wrp, cb}) {
@@ -355,7 +374,7 @@ export class ItemBuilder extends BuilderBase {
 
 	_renderReviewTab ({wrp}) {
 		wrp.empty();
-		const item = ItemBuilderCore.serialize(this._draft, this._catalogs);
+		const item = ItemBuilderCore.projectForPreview(this._draft, this._catalogs);
 		const type = _ITEM_TYPE_LABELS[String(this._draft.item.type || "").split("|")[0]] || "Unknown item type";
 		const composition = [
 			this._draft.material?.name ? `Material: ${this._draft.material.name}` : null,
@@ -394,6 +413,8 @@ export class ItemBuilder extends BuilderBase {
 	}
 
 	async pDoHandleClickSaveBrew () {
+		this._cbCache?.cancel?.();
+		this._doSync();
 		const validation = ItemBuilderCore.validate(this._draft, this._catalogs);
 		if (!validation.isValid) {
 			this._saveStatus = `Cannot save: ${validation.errors[0].message}`;
@@ -422,7 +443,8 @@ export class ItemBuilder extends BuilderBase {
 		tabs.forEach(it => it.wrpTab.appendTo(wrp));
 
 		const item = MiscUtil.copy(this.__state);
-		ee`<table class="ve-w-100 ve-stats">${Renderer.item.getCompactRenderedString(item)}</table>`.appendTo(itemTab.wrpTab);
+		const previewItem = ItemBuilderCore.projectForPreview(this._draft, this._catalogs);
+		ee`<table class="ve-w-100 ve-stats">${Renderer.item.getCompactRenderedString(previewItem)}</table>`.appendTo(itemTab.wrpTab);
 
 		const clean = DataUtil.cleanJson(MiscUtil.copy(item));
 		const dataHtml = Renderer.get().render({type: "entries", entries: [{type: "code", name: "Data", preformatted: JSON.stringify(clean, null, "\t")}]});

@@ -101,8 +101,8 @@ function _formatDeltaValue ({prop, value}) {
 
 function _getProjectedDelta ({draft, catalogs, category, entity, isSelected}) {
 	try {
-		const before = ItemBuilderCore.serialize(draft, catalogs);
-		const after = ItemBuilderCore.serialize(_getNextDraft({draft, category, entity, isSelected}), catalogs);
+		const before = ItemBuilderCore.projectForPreview(draft, catalogs);
+		const after = ItemBuilderCore.projectForPreview(_getNextDraft({draft, category, entity, isSelected}), catalogs);
 		const changes = _DELTA_FIELDS
 			.filter(([prop]) => JSON.stringify(before[prop]) !== JSON.stringify(after[prop]))
 			.map(([prop, label]) => `${label}: ${_formatDeltaValue({prop, value: before[prop]})} \u2192 ${_formatDeltaValue({prop, value: after[prop]})}`);

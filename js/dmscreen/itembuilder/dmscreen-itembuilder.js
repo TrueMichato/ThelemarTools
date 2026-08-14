@@ -127,7 +127,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 			return;
 		}
 
-		const item = ItemBuilderCore.serialize(this._draft, this._catalogs);
+		const item = ItemBuilderCore.projectForPreview(this._draft, this._catalogs);
 		const validation = ItemBuilderCore.validate(this._draft, this._catalogs);
 		this._renderEmbedded({item, validation});
 		this._renderFocusedEditor();
@@ -175,7 +175,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 		this._focusedEditorRoot.empty();
 		this._renderEditor({
 			wrp: this._focusedEditorRoot,
-			item: ItemBuilderCore.serialize(this._draft, this._catalogs),
+			item: ItemBuilderCore.projectForPreview(this._draft, this._catalogs),
 			validation: ItemBuilderCore.validate(this._draft, this._catalogs),
 			isFocused: true,
 			doClose: this._focusedEditorDoClose,

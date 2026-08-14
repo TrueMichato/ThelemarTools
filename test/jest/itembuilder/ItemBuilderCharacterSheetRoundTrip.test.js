@@ -22,24 +22,37 @@ describe("Item Builder character-sheet compatibility", () => {
 		draft.upgrades = [{name: "Balanced", source: "TCAH"}];
 		draft.gemstone = {name: "Journey", source: "TGTT"};
 		const item = ItemBuilderCore.serialize(draft, catalogs);
+		const preview = ItemBuilderCore.projectForPreview(draft, catalogs);
+		expect(item.dmg1).toBe("1d8");
+		expect(item).not.toHaveProperty("bonusWeaponAttack");
+		expect(item).not.toHaveProperty("effects");
+		expect(preview).toEqual(expect.objectContaining({dmg1: "1d10", bonusWeaponAttack: 1}));
+		expect(preview.effects).toContainEqual(expect.objectContaining({type: "speedBonus", value: 10}));
 
 		const state = new CharacterSheetState();
+		state.setItemMaterialCatalog(catalogs.materials);
 		state.addItem(item, 1, true, false);
 		const added = state.getItems()[0];
 		expect(added).toEqual(expect.objectContaining({
 			name: "Star Road",
 			type: "M|PHB",
-			bonusWeaponAttack: 1,
+			dmg1: "1d10",
 		}));
+		expect(state.getEffectiveItemBonuses(added.id).bonusWeaponAttack).toBe(1);
+		expect(state.getGemstoneSpeedBonus()).toBe(10);
 		expect(added.appliedUpgrades[0].name).toBe("Balanced");
 		expect(added.socketedGemstones[0].name).toBe("Journey");
 
 		const restored = new CharacterSheetState();
 		restored.loadFromJson(state.toJson());
+		restored.setItemMaterialCatalog(catalogs.materials);
 		const roundTripped = restored.getItems()[0];
+		expect(roundTripped.dmg1).toBe("1d10");
+		expect(restored.getEffectiveItemBonuses(roundTripped.id).bonusWeaponAttack).toBe(1);
+		expect(restored.getGemstoneSpeedBonus()).toBe(10);
 		expect(roundTripped.material).toEqual({name: "Starsteel", source: "TGTT"});
 		expect(roundTripped.appliedUpgrades[0]).toEqual(expect.objectContaining({name: "Balanced", source: "TCAH"}));
 		expect(roundTripped.socketedGemstones[0]).toEqual(expect.objectContaining({name: "Journey", source: "TGTT"}));
-		expect(roundTripped.effects).toContainEqual(expect.objectContaining({type: "speedBonus", value: 10}));
+		expect(roundTripped.effects || []).not.toContainEqual(expect.objectContaining({type: "speedBonus"}));
 	});
 });

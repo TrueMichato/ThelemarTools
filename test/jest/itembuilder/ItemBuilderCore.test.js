@@ -140,7 +140,7 @@ describe("ItemBuilderCore", () => {
 		]);
 	});
 
-	test("materializes a preset, material, upgrade, and gemstone without mutating inputs", () => {
+	test("keeps canonical composition reference-only and projects mechanics for previews", () => {
 		const preset = structuredClone(ITEMS[0]);
 		let draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), preset, {source: "HB"});
 		draft.item.name = "Wayfarer's Starblade";
@@ -148,21 +148,31 @@ describe("ItemBuilderCore", () => {
 		draft.upgrades = [{name: "Balanced", source: "TCAH"}];
 		draft.gemstone = {name: "Journey", source: "TGTT"};
 
-		const out = ItemBuilderCore.serialize(draft, {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES});
+		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
+		const out = ItemBuilderCore.serialize(draft, catalogs);
 
 		expect(out).toEqual(expect.objectContaining({
 			name: "Wayfarer's Starblade",
 			source: "HB",
 			baseItem: "Longsword|PHB",
 			type: "M|PHB",
-			dmg1: "1d10",
-			bonusWeaponAttack: 1,
+			dmg1: "1d8",
 			material: {name: "Starsteel", source: "TGTT"},
 		}));
-		expect(out.appliedUpgrades[0]).toEqual(expect.objectContaining({name: "Balanced", source: "TCAH"}));
-		expect(out.socketedGemstones[0]).toEqual(expect.objectContaining({name: "Journey", source: "TGTT"}));
-		expect(out.effects).toContainEqual(expect.objectContaining({type: "speedBonus", value: 10}));
-		expect(out.entries.map(it => it?.name).filter(Boolean)).toEqual(expect.arrayContaining([
+		expect(out.appliedUpgrades).toEqual([{name: "Balanced", source: "TCAH"}]);
+		expect(out.socketedGemstones).toEqual([{name: "Journey", source: "TGTT"}]);
+		expect(out).not.toHaveProperty("bonusWeaponAttack");
+		expect(out).not.toHaveProperty("effects");
+		expect(out.entries.map(it => it?.name).filter(Boolean)).not.toEqual(expect.arrayContaining([
+			"Item Builder: Material - Starsteel",
+			"Item Builder: Upgrade - Balanced",
+			"Item Builder: Gem - Journey",
+		]));
+
+		const preview = ItemBuilderCore.projectForPreview(draft, catalogs);
+		expect(preview).toEqual(expect.objectContaining({dmg1: "1d10", bonusWeaponAttack: 1}));
+		expect(preview.effects).toContainEqual(expect.objectContaining({type: "speedBonus", value: 10}));
+		expect(preview.entries.map(it => it?.name).filter(Boolean)).toEqual(expect.arrayContaining([
 			"Item Builder: Material - Starsteel",
 			"Item Builder: Upgrade - Balanced",
 			"Item Builder: Gem - Journey",
@@ -176,7 +186,8 @@ describe("ItemBuilderCore", () => {
 		draft.upgrades = [{name: "Balanced", source: "TCAH"}];
 		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
 		expect(ItemBuilderCore.serialize(draft, catalogs)).toEqual(ItemBuilderCore.serialize(draft, catalogs));
-		expect(ItemBuilderCore.serialize(draft, catalogs).bonusWeaponAttack).toBe(1);
+		expect(ItemBuilderCore.serialize(draft, catalogs)).not.toHaveProperty("bonusWeaponAttack");
+		expect(ItemBuilderCore.projectForPreview(draft, catalogs).bonusWeaponAttack).toBe(1);
 	});
 
 	test("re-importing a serialized item is idempotent", () => {
@@ -188,6 +199,35 @@ describe("ItemBuilderCore", () => {
 		const first = ItemBuilderCore.serialize(draft, catalogs);
 
 		expect(ItemBuilderCore.serialize(ItemBuilderCore.fromItem(first), catalogs)).toEqual(first);
+	});
+
+	test("normalizes an already-projected legacy builder item without cumulative drift", () => {
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), ITEMS[0], {source: "HB"});
+		draft.material = {name: "Starsteel", source: "TGTT"};
+		draft.upgrades = [{name: "Balanced", source: "TCAH"}];
+		draft.gemstone = {name: "Journey", source: "TGTT"};
+		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
+		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
+
+		const canonical = ItemBuilderCore.serialize(ItemBuilderCore.fromItem(legacyProjected), catalogs);
+
+		expect(canonical.dmg1).toBe("1d8");
+		expect(canonical).not.toHaveProperty("bonusWeaponAttack");
+		expect(canonical).not.toHaveProperty("effects");
+		expect(ItemBuilderCore.projectForPreview(ItemBuilderCore.fromItem(canonical), catalogs)).toEqual(legacyProjected);
+	});
+
+	test("preserves explicit authored mechanics while projecting composition around them", () => {
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), ITEMS[0], {source: "HB"});
+		draft.item.bonusWeaponAttack = 2;
+		draft.upgrades = [{name: "Balanced", source: "TCAH"}];
+		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
+
+		const canonical = ItemBuilderCore.serialize(draft, catalogs);
+
+		expect(canonical.bonusWeaponAttack).toBe(2);
+		expect(ItemBuilderCore.projectForPreview(draft, catalogs).bonusWeaponAttack).toBe(3);
+		expect(ItemBuilderCore.serialize(ItemBuilderCore.fromItem(canonical), catalogs).bonusWeaponAttack).toBe(2);
 	});
 
 	test("changing a re-imported composition removes old projections", () => {
