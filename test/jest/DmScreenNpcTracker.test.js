@@ -17,6 +17,7 @@ import {
 	getNpcTrackerRollLabel,
 	sortNpcTrackerBatchResults,
 } from "../../js/dmscreen/npctracker/dmscreen-npctracker-roll.js";
+import {getNpcTrackerHpInputValue} from "../../js/dmscreen/npctracker/dmscreen-npctracker-hp.js";
 
 const getMonster = () => ({
 	name: "Court Mage",
@@ -47,6 +48,7 @@ describe("NPC Tracker serialization", () => {
 			fluff: {entries: ["A patient adviser."]},
 			alias: "Magister Vale",
 		});
+
 		npc.hp.current = 11;
 		npc.hp.temp = 4;
 		npc.groupId = "court";
@@ -159,6 +161,17 @@ describe("NPC Tracker serialization", () => {
 
 		expect(restored.npcs.map(npc => npc.groupId)).toEqual(["a", "b"]);
 		expect(restored.npcs[0].id).not.toBe(restored.npcs[1].id);
+	});
+});
+
+describe("NPC Tracker HP input", () => {
+	it("rejects blank and non-numeric values instead of coercing them to zero", () => {
+		expect(getNpcTrackerHpInputValue("")).toBeNull();
+		expect(getNpcTrackerHpInputValue("   ")).toBeNull();
+		expect(getNpcTrackerHpInputValue("not a number")).toBeNull();
+		expect(getNpcTrackerHpInputValue("0")).toBe(0);
+		expect(getNpcTrackerHpInputValue("-3")).toBe(0);
+		expect(getNpcTrackerHpInputValue("12")).toBe(12);
 	});
 });
 

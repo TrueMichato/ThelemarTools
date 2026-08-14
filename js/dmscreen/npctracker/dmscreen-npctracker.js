@@ -10,6 +10,7 @@ import {
 	getNpcTrackerRollLabel,
 	pRollNpcTrackerD20,
 } from "./dmscreen-npctracker-roll.js";
+import {getNpcTrackerHpInputValue} from "./dmscreen-npctracker-hp.js";
 
 export class NpcTracker extends DmScreenPanelAppBase {
 	constructor (...args) {
@@ -183,14 +184,14 @@ export class NpcTrackerRoot {
 		else if (prop.startsWith("hp.")) {
 			const hpProp = prop.slice(3);
 			if (!["current", "max", "temp"].includes(hpProp)) return;
-			const num = Number(value);
-			if (!Number.isFinite(num)) {
+			const num = getNpcTrackerHpInputValue(value);
+			if (num == null) {
 				JqueryUtil.doToast({type: "warning", content: "Hit points must be a number."});
 				this._renderRoster();
 				this._renderDetail();
 				return;
 			}
-			npc.hp[hpProp] = Math.max(0, num);
+			npc.hp[hpProp] = num;
 		}
 		this._renderRoster();
 		this._renderDetail();

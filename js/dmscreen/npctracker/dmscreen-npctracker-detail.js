@@ -189,7 +189,8 @@ export class NpcTrackerDetail {
 
 	_renderFullStatblock ({npc, wrp}) {
 		const rendered = RenderBestiary.getRenderedCreature(npc.monster, {isSkipTokenRender: true});
-		ee`<div class="dm-npc__statblock"></div>`.appends(rendered).appendTo(wrp);
+		const table = ee`<table class="ve-w-100 ve-stats"></table>`.appends(rendered);
+		ee`<div class="dm-npc__statblock">${table}</div>`.appendTo(wrp);
 	}
 
 	_roll ({npcName, label, bonus}) {
