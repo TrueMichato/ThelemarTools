@@ -339,6 +339,22 @@ describe("ItemBuilderCore", () => {
 		expect(failSafe).not.toHaveProperty("socketedGemstones");
 	});
 
+	test("keeps an unresolved legacy fail-safe serialization idempotent", () => {
+		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), ITEMS[0], {source: "HB"});
+		draft.item.dmg1 = "d8";
+		draft.upgrades = [{name: "Superior", source: "TCAH"}];
+		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
+		const failSafe = ItemBuilderCore.serialize(ItemBuilderCore.fromItem(legacyProjected), catalogs);
+		const restored = ItemBuilderCore.fromItem(failSafe);
+
+		expect(ItemBuilderCore.validate(restored, catalogs).errors).toContainEqual(expect.objectContaining({
+			field: "composition",
+			message: expect.stringMatching(/composition references are no longer available/i),
+		}));
+		expect(ItemBuilderCore.serialize(restored, catalogs)).toEqual(failSafe);
+	});
+
 	test("deprojects an ordinary invertible legacy damage transformation exactly once", () => {
 		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
 		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), ITEMS[0], {source: "HB"});

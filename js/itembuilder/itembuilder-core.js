@@ -442,7 +442,16 @@ export class ItemBuilderCore {
 		addMissing("material", "material", normalized.material, _findByRef(catalogs.materials, normalized.material));
 		normalized.upgrades.forEach(ref => addMissing("upgrades", "upgrade", ref, _findByRef(catalogs.upgrades, ref)));
 		addMissing("gemstone", "gem empowerment", normalized.gemstone, _findByRef(catalogs.upgrades, normalized.gemstone));
-		if (!out.missing.length) out.ambiguities = this._getLegacyDeprojectionAmbiguities(normalized, out);
+		const hasCompositionRefs = normalized.materialized.material?.name
+			|| normalized.materialized.upgrades.length
+			|| normalized.materialized.gemstone?.name;
+		if (!out.missing.length && !hasCompositionRefs) {
+			out.ambiguities.push({
+				field: "composition",
+				label: "composition",
+				reason: "the composition references are no longer available",
+			});
+		} else if (!out.missing.length) out.ambiguities = this._getLegacyDeprojectionAmbiguities(normalized, out);
 		return out;
 	}
 
