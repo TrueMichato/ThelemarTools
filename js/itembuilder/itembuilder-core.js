@@ -478,23 +478,18 @@ export class ItemBuilderCore {
 			: 0;
 		for (const prop of ["dmg1", "dmg2"]) {
 			if (!original[prop] || (!materialDamageSteps && !upgradeEffects.damageDieIncrease)) continue;
-			const damageCandidates = this._getDamageProjectionCandidates({
+			const preimages = this._getDamageProjectionPreimages({
 				observed: original[prop],
 				materialDamageSteps,
+				upgradeDamageSteps: upgradeEffects.damageDieIncrease,
 			});
-			const preimages = this._getProjectionPreimages({
-				observed: original[prop],
-				candidates: damageCandidates,
-				project: candidate => _increaseDamageDie(
-					CharacterSheetMaterials.stepDamageDie(candidate, materialDamageSteps),
-					upgradeEffects.damageDieIncrease,
-				),
-			});
-			if (preimages.length > 1) {
+			if (preimages.length !== 1) {
 				add(
 					prop,
 					`${prop === "dmg1" ? "primary" : "versatile"} damage die`,
-					`the projected value ${original[prop]} has multiple possible bases: ${preimages.join(", ")}`,
+					preimages.length
+						? `the projected value ${original[prop]} has multiple possible bases: ${preimages.join(", ")}`
+						: `the projected value ${original[prop]} has no possible base in the supported damage-die form`,
 				);
 			}
 		}
@@ -668,6 +663,17 @@ export class ItemBuilderCore {
 		return [...new Set(out)];
 	}
 
+	static _getDamageProjectionPreimages ({observed, materialDamageSteps, upgradeDamageSteps}) {
+		return this._getProjectionPreimages({
+			observed,
+			candidates: this._getDamageProjectionCandidates({observed, materialDamageSteps}),
+			project: candidate => _increaseDamageDie(
+				CharacterSheetMaterials.stepDamageDie(candidate, materialDamageSteps),
+				upgradeDamageSteps,
+			),
+		});
+	}
+
 	static _getProjectionPreimages ({observed, candidates, project}) {
 		return [...new Set(candidates)]
 			.filter(candidate => _isEqual(project(candidate), observed));
@@ -708,6 +714,7 @@ export class ItemBuilderCore {
 		const oldMaterialEffects = oldMaterial
 			? CharacterSheetMaterials.getMaterialEffects(materialContext, oldMaterial)
 			: null;
+		const itemKind = CharacterSheetMaterials.getItemKind({...preset, ...original});
 
 		const subtractNumeric = (prop, delta) => {
 			if (!delta || resetProps.has(prop) || !Object.hasOwn(authored, prop)) return;
@@ -734,9 +741,15 @@ export class ItemBuilderCore {
 
 		for (const prop of ["dmg1", "dmg2"]) {
 			if (resetProps.has(prop) || !authored[prop]) continue;
-			authored[prop] = _increaseDamageDie(authored[prop], -oldUpgradeEffects.damageDieIncrease);
-			const materialSteps = CharacterSheetMaterials.axisValue(oldMaterial?.damage) || 0;
-			authored[prop] = CharacterSheetMaterials.stepDamageDie(authored[prop], -materialSteps);
+			const materialDamageSteps = itemKind === "weapon"
+				? (CharacterSheetMaterials.axisValue(oldMaterial?.damage) || 0)
+				: 0;
+			const preimages = this._getDamageProjectionPreimages({
+				observed: authored[prop],
+				materialDamageSteps,
+				upgradeDamageSteps: oldUpgradeEffects.damageDieIncrease,
+			});
+			if (preimages.length === 1) authored[prop] = preimages[0];
 		}
 
 		if (oldMaterial && oldMaterialEffects && !resetProps.has("property") && Array.isArray(authored.property)) {

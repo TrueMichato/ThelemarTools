@@ -294,6 +294,13 @@ describe("ItemBuilderCore", () => {
 			expectedProjected: {dmg1: "2d12 + 3"},
 			expectedField: "dmg1",
 		},
+		{
+			label: "an unsupported damage expression with no candidate base",
+			item: {dmg1: "d8"},
+			composition: {upgrades: [{name: "Superior", source: "TCAH"}]},
+			expectedProjected: {dmg1: "d8"},
+			expectedField: "dmg1",
+		},
 	])("blocks legacy deprojection of $label without guessing an authored base", ({
 		item,
 		composition,
@@ -359,6 +366,31 @@ describe("ItemBuilderCore", () => {
 
 		expect(ItemBuilderCore.validate(restored, catalogs).isValid).toBe(true);
 		expect(ItemBuilderCore.serialize(restored, catalogs).dmg1).toBe("3d8 + 2");
+	});
+
+	test("deprojects composed Gold and Superior damage transforms in forward order without drift", () => {
+		const gold = {
+			name: "Gold",
+			source: "TGTT",
+			appliesTo: ["weapon"],
+			damage: -1,
+			entries: ["Gold is soft."],
+		};
+		const preset = {...ITEMS[0], dmg1: "3d12", dmg2: "3d12"};
+		const catalogs = {items: [preset], materials: [gold], upgrades: UPGRADES};
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), preset, {source: "HB"});
+		draft.material = {name: "Gold", source: "TGTT"};
+		draft.upgrades = [{name: "Superior", source: "TCAH"}];
+		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
+		expect(legacyProjected).toEqual(expect.objectContaining({dmg1: "3d12", dmg2: "3d12"}));
+
+		const restored = ItemBuilderCore.fromItem(legacyProjected);
+		expect(ItemBuilderCore.validate(restored, catalogs).isValid).toBe(true);
+		const canonical = ItemBuilderCore.serialize(restored, catalogs);
+		expect(canonical).toEqual(expect.objectContaining({dmg1: "3d12", dmg2: "3d12"}));
+		expect(ItemBuilderCore.projectForPreview(ItemBuilderCore.fromItem(canonical), catalogs))
+			.toEqual(expect.objectContaining({dmg1: "3d12", dmg2: "3d12"}));
+		expect(ItemBuilderCore.serialize(ItemBuilderCore.fromItem(canonical), catalogs)).toEqual(canonical);
 	});
 
 	test("blocks a saturated legacy gemstone charge maximum", () => {
