@@ -538,6 +538,13 @@ export async function assertMilestone (charSheet: CharacterSheetPage, expected: 
 export async function probeToggleDelta (
 	charSheet: CharacterSheetPage,
 	featureName: string | RegExp,
+	// Some signature toggles are PROMPT-GATED: activating them opens an
+	// `InputUiUtil` dialog and the handler returns early unless it is answered
+	// (every Blood Hunter Crimson Rite asks which weapon to empower). Clicking and
+	// walking away leaves the feature inactive, so the probe reports "no derived
+	// effect" for a feature that works perfectly — a harness gap indistinguishable
+	// from a product bug. Pass the confirm button's label to answer it.
+	{promptButton}: {promptButton?: string} = {},
 ): Promise<{acDelta: number; dcDelta: number; changed: boolean} | null> {
 	const re = featureName instanceof RegExp ? featureName : new RegExp(featureName, "i");
 	if (charSheet.page.isClosed()) throw new Error(`probeToggleDelta(${re}): page already closed`);
@@ -607,12 +614,20 @@ export async function probeToggleDelta (
 	}).catch(() => 0);
 
 	await charSheet.activateFeature(match);
+	// Best-effort on BOTH sides: whether a prompt appears is a property of the
+	// character's DATA, not of the spec. Crimson Rite only asks which weapon to
+	// empower when more than one is equipped, so a hard failure here would make the
+	// probe pass or fail on the loadout rather than on the toggle.
+	if (promptButton) await charSheet.confirmPrompt(promptButton).catch(() => { /* no prompt raised */ });
 	await charSheet.page.waitForTimeout(250);
 
 	const after = await snapshot();
 
-	// toggle off so subsequent assertions see the resting baseline
+	// toggle off so subsequent assertions see the resting baseline. Ending may
+	// prompt too; answering is best-effort because a toggle that ends cleanly
+	// must not fail the probe.
 	await charSheet.deactivateFeature(match);
+	if (promptButton) await charSheet.confirmPrompt(promptButton).catch(() => { /* no end prompt */ });
 	await charSheet.page.waitForTimeout(150);
 
 	// …and make "resting baseline" true rather than merely intended.
@@ -774,7 +789,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "abilityMod"; ability: AblKey; min?: number; exact?: number}
 	| {kind: "ac"; min?: number; exact?: number}
 	| {kind: "spellSaveDc"; min?: number; exact?: number}
-	| {kind: "spellSlots"; level: number; min: number}
+	| {kind: "spellSlots"; level: number | "pact"; min: number}
 	| {kind: "speed"; type?: SpeedType; min?: number; exact?: number}
 	| {kind: "speedEquals"; left: SpeedType; right: SpeedType}
 	| {kind: "initiative"; min?: number; exact?: number}
@@ -1107,7 +1122,7 @@ export type EffectCheck = _EffectCommon & (
 		maxValueGp?: number;
 		expectCount?: number;
 	}
-	| {kind: "crimsonRiteMechanics"; hpCosts: [number, number]}
+	| {kind: "crimsonRiteMechanics"; hpCosts: [number, number]; expectDice?: string; expectDamageType?: string}
 	| {kind: "hybridTransformationMechanics"}
 
 	// Brand of the Voracious (Order of the Lycan 15): advantage on attacks against a
@@ -1869,6 +1884,11 @@ async function _runPassiveOrRollEffect (
 			for (const weaponId of ["e2e-rite-longsword", "e2e-rite-longbow"]) {
 				const rider = result.effects.find((it: any) => it.weaponId === weaponId);
 				if (!rider?.dice || !rider?.damageType) throw new Error(`typed Crimson Rite rider missing for ${weaponId}: ${JSON.stringify(result.effects)}`);
+				// An existence check alone cannot tell a correct rider from a wrong one —
+				// it would pass just as happily on `1d4` when Brand of Sundering should
+				// have doubled it to `2d8`. Specs that know the expected die pin it.
+				if (e.expectDice && rider.dice !== e.expectDice) throw new Error(`Crimson Rite rider dice=${rider.dice} for ${weaponId}, expected ${e.expectDice}`);
+				if (e.expectDamageType && !new RegExp(e.expectDamageType, "i").test(String(rider.damageType))) throw new Error(`Crimson Rite rider damageType=${rider.damageType} for ${weaponId}, expected ${e.expectDamageType}`);
 			}
 			return;
 		}

@@ -17,7 +17,13 @@ import {buildSpecialtyChecks, buildTricksterTrickChecks, buildWeaponMasteryCheck
 describeCharacter({
 	preset: PRESET_FULL_TRICKSTER_GOBLIN,
 	displayName: "Trickster Rogue Goblin",
-	signatureToggle: /disarming strike|trip attack|swing away|deafening strike|blinding strike|noise maker|rebounding throw|weaponized debris|rapid deployment|trick/i,
+	// Trickster Tricks are spent per attack out of the Trickster Dice pool, not
+	// switched on, so none reach the Overview activatable strip. The one row
+	// that IS there at L5 is Steady Aim — a base Rogue feature already covered
+	// by the Gambler Rogue spec. Pointing this probe at it would assert a
+	// different mechanic than the one named, which is exactly the
+	// "finds *a* match, not *the* match" failure CS-BUG-156 exists to stop.
+	signatureToggleSkip: {skip: true, reason: "Trickster Tricks are spent per attack from the Trickster Dice pool rather than toggled, and the only strip row at L5 (Steady Aim) is an unrelated base-Rogue feature; the tricks are covered as kind:\"resource\" trickster-dice rows in featuresMatrix"},
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [

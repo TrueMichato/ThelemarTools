@@ -388,7 +388,11 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 describeCharacter({
 	preset: PRESET_FULL_HUNTER_CENTAUR,
 	displayName: "Hunter Ranger Centaur",
-	signatureToggle: /hunter|hunter's mark|colossus|horde/i,
+	// Hunter's Mark is a concentration SPELL rather than a class toggle, and
+	// Colossus Slayer / Horde Breaker are passive per-turn damage riders — none
+	// of them is a stance, so none reaches the Overview activatable strip. The
+	// Hunter's Prey choice is covered as a `kind: "pick"` matrix row.
+	signatureToggleSkip: {skip: true, reason: "Hunter's Mark is a concentration spell and Colossus Slayer / Horde Breaker are passive damage riders, so the Hunter has no L5 stance; the Hunter's Prey choice is covered as a kind:\"pick\" matrix row"},
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [
@@ -420,7 +424,26 @@ describeCharacter({
 describeCharacter({
 	preset: PRESET_FULL_ZODIAC_CENTAUR,
 	displayName: "Zodiac Druid Centaur",
-	signatureToggle: /zodiac|starry|wild shape|stellar/i,
+	// Circle of the Zodiac has no L5 strip toggle, and that is the CORRECT end
+	// state rather than a coverage gap.
+	//
+	// History (CS-BUG-163, now FIXED): an earlier `/zodiac|starry|wild shape/i`
+	// pattern matched nothing and skipped silently, justified by the claim that
+	// `isDruidResourceActivatable` removes Zodiac forms from the strip by
+	// design. That claim is true of the PARENT "Zodiac Form: Month" feature and
+	// false of the constellation rows — and a `Bee` row was sitting in the strip
+	// disproving it. Pointing the probe at the 12 month constellations found
+	// that row, flipped it, and measured zero delta: generic prose analysis had
+	// promoted a descriptive `header: 2` child into its own `custom` toggle that
+	// never set a formId, so no `getEffects()` ever ran.
+	//
+	// The fix REMOVES the row rather than making it work — a constellation
+	// describes one option of its parent and was never independently
+	// activatable, so the correct surface is the Druid Resources modal that the
+	// parent routes to. The skip therefore outlives the bug legitimately; what
+	// changed is that its reason is now true, and verified live (the strip lists
+	// only Wild Resurgence).
+	signatureToggleSkip: {skip: true, reason: "Circle of the Zodiac has no L5 strip toggle by design: a constellation (Bee / Roc / ...) describes one option of \"Zodiac Form: Month\", and activation is owned by that parent feature, which carries needsFormChoice and is routed to the dedicated Druid Resources modal. Verified live: the strip lists only Wild Resurgence. Every form is covered by buildZodiacFormChecks(), and CS-BUG-163 pins the classification in CharacterSheetZodiacFormModifierGating.test.js"},
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [

@@ -240,7 +240,12 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 describeCharacter({
 	preset: PRESET_FULL_SURREALISM_YUANTI,
 	displayName: "College of Surrealism Bard Yuan-Ti",
-	signatureToggle: /bardic inspiration|surreal|illusion|mockery/i,
+	// Bardic Inspiration is deliberately classified as a tracked RESOURCE, not a
+	// toggle: `charactersheet-state.js` anchors `/^bardic inspiration$/i` to
+	// `stateTypeId: "custom"` with no `isInstant` precisely so it surfaces as a
+	// pool rather than a stance. It therefore never appears in the Overview
+	// activatable strip. Covered as `kind: "resource"` in the matrix at :47.
+	signatureToggleSkip: {skip: true, reason: "Bardic Inspiration is deliberately classified as a tracked resource pool rather than a toggle (see the ^bardic inspiration$ activation pattern in charactersheet-state.js), so it never enters the Overview activatable strip; covered as kind:\"resource\" in featuresMatrix"},
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [

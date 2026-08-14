@@ -14640,6 +14640,28 @@ class CharacterSheetState {
 			};
 		}
 
+		// GENERIC subclass-declared caster. The named branches above each inline their
+		// own hard-coded table; a subclass that PUBLISHES its progression in data (any
+		// homebrew, e.g. BH2022 Order of the Profane Soul) otherwise falls through to
+		// `return null` and knows zero spells — even though the builder/level-up/
+		// quick-build flows already persist every field needed to compute it.
+		// Deliberately placed last: every named subclass returns before reaching here,
+		// so this cannot alter their behaviour. See CS-BUG-159.
+		const subclassData = cls.subclass;
+		if (subclassData?.spellsKnownProgression || subclassData?.cantripProgression) {
+			const knownMax = subclassData.spellsKnownProgression?.[levelIndex] || 0;
+			const subclassCantrips = subclassData.cantripProgression?.[levelIndex] || 0;
+			if (!knownMax && !subclassCantrips) return null;
+			return {
+				type: "known",
+				max: knownMax,
+				cantripsKnown: subclassCantrips,
+				spellsKnownMax: knownMax,
+				hasFullAccess: false,
+				is2024: false,
+			};
+		}
+
 		return null;
 	}
 
@@ -16750,6 +16772,15 @@ class CharacterSheetState {
 	 */
 	static getSubclassSpellListClass (subclass, cls) {
 		if (subclass?.spellcastingSpellList) return subclass.spellcastingSpellList;
+		// A `subclassSpells` entry naming a class is 5etools' structured way of saying
+		// "this subclass casts from that class's list" — BH2022's Order of the Profane
+		// Soul declares `[{className: "Warlock"}]`. It outranks an `additionalSpells`
+		// filter, which only ever describes spells layered ON TOP of a list. No official
+		// subclass uses `subclassSpells`, so reading it cannot change existing behaviour.
+		const subclassSpellsClassName = (Array.isArray(subclass?.subclassSpells) ? subclass.subclassSpells : [])
+			.map(itm => itm?.className)
+			.find(name => typeof name === "string" && name);
+		if (subclassSpellsClassName) return subclassSpellsClassName;
 		const blocks = Array.isArray(subclass?.additionalSpells) ? subclass.additionalSpells : [];
 		let fallback = null;
 		for (const block of blocks) {
@@ -39003,15 +39034,11 @@ class CharacterSheetState {
 			// generic resource renderers never have to serialize/render Infinity.
 			const hybridMax = level >= 11 ? 2 : 1;
 			this._resizeFeatureBackedResource("Hybrid Transformation", hybridMax, "short");
-			if (level >= 18 && !this._data.features.some(f => f.name === "Blood Curse of the Howl")) {
-				this._data.features.push({
+			if (level >= 18) {
+				this._grantSubclassBloodCurse({
 					id: "bh2022-blood-curse-of-the-howl",
 					name: "Blood Curse of the Howl",
-					source: "BH2022",
 					level: 18,
-					className: "Blood Hunter",
-					featureType: "Optional Feature",
-					optionalFeatureTypes: ["BC"],
 					description: "As an action, creatures of your choice within 30 feet that can hear you make a Wisdom save against your Hemocraft save DC. On a failure they are frightened until the end of your next turn; a failure by 5 or more also stuns them. Amplify: the range becomes 60 feet.",
 				});
 			}
@@ -39023,15 +39050,11 @@ class CharacterSheetState {
 		if (/ghostslayer/i.test(subclassName) && level >= 3) {
 			this._resizeFeatureBackedResource("Blood Maledict", maledictMax + 1, "short", "Curse Specialist");
 			if (level >= 7) this._resizeFeatureBackedResource("Aether Walk", level >= 15 ? 2 : 1, "short");
-			if (level >= 15 && !this._data.features.some(f => f.name === "Blood Curse of the Exorcist")) {
-				this._data.features.push({
+			if (level >= 15) {
+				this._grantSubclassBloodCurse({
 					id: "bh2022-blood-curse-of-the-exorcist",
 					name: "Blood Curse of the Exorcist",
-					source: "BH2022",
 					level: 15,
-					className: "Blood Hunter",
-					featureType: "Optional Feature",
-					optionalFeatureTypes: ["BC"],
 					description: "As a bonus action, you choose one creature you can see within 30 feet of you that is charmed or frightened, or which is under a possession effect. The target creature is no longer charmed, frightened, or possessed. <b>Amplify:</b> a creature that charmed, frightened, or possessed the target takes 3d6 psychic damage and must succeed on a Wisdom saving throw against your Hemocraft save DC or be stunned until the end of your next turn. This doesn't count against your number of blood curses known.",
 				});
 			}
@@ -39047,15 +39070,11 @@ class CharacterSheetState {
 				const exaltedUses = Math.max(1, this.getAbilityMod(this._getHemocraftAbility()));
 				this._resizeFeatureBackedResource("Exalted Mutation", exaltedUses, "long");
 			}
-			if (level >= 15 && !this._data.features.some(f => f.name === "Blood Curse of Corrosion")) {
-				this._data.features.push({
+			if (level >= 15) {
+				this._grantSubclassBloodCurse({
 					id: "bh2022-blood-curse-of-corrosion",
 					name: "Blood Curse of Corrosion",
-					source: "BH2022",
 					level: 15,
-					className: "Blood Hunter",
-					featureType: "Optional Feature",
-					optionalFeatureTypes: ["BC"],
 					description: "As a bonus action, you cause a creature within 30 feet of you to become poisoned. The cursed creature can make a Constitution saving throw against your Hemocraft save DC at the end of each of its turns, ending the curse on itself on a success. <b>Amplify:</b> the cursed creature takes 4d6 necrotic damage when you inflict this curse, and takes this damage again each time it fails the saving throw to end the curse. This doesn't count against your number of blood curses known.",
 				});
 			}
@@ -39069,19 +39088,66 @@ class CharacterSheetState {
 		this._refreshActiveCrimsonRiteDamage();
 
 		// Profane Soul: the auto-granted Souleater curse at 18th (does not count against known).
-		if (/profane/i.test(subclassName) && level >= 18
-			&& !this._data.features.some(f => f.name === "Blood Curse of the Souleater")) {
-			this._data.features.push({
+		if (/profane/i.test(subclassName) && level >= 18) {
+			this._grantSubclassBloodCurse({
 				id: "bh2022-blood-curse-of-the-souleater",
 				name: "Blood Curse of the Souleater",
-				source: "BH2022",
 				level: 18,
-				className: "Blood Hunter",
-				featureType: "Optional Feature",
-				optionalFeatureTypes: ["BC"],
 				description: "When a creature that isn't a construct or undead is reduced to 0 hit points within 30 feet of you, you can use your reaction to offer their life energy to your patron in exchange for power. Until the end of your next turn, you make attacks with advantage and you have resistance to all damage. <b>Amplify:</b> you also regain one expended warlock spell slot; once you've amplified this curse, you must finish a long rest before you can amplify it again. This doesn't count against your number of blood curses known.",
 			});
 		}
+	}
+
+	/**
+	 * (CS-BUG-162) Grant a blood curse that a subclass hands out for free, so it becomes
+	 * INVOCABLE through Blood Maledict rather than merely described.
+	 *
+	 * Three of the four orders name the granting subclass feature after the curse it
+	 * grants ("Blood Curse of the Exorcist" / "of Corrosion" / "of the Souleater"), so the
+	 * previous `!features.some(f => f.name === name)` dedupe guard was satisfied by the
+	 * very feature whose text says the curse is granted — and the usable curse was never
+	 * added. Only the Lycan escaped, because its granting feature is called "Hybrid
+	 * Transformation Mastery" and so never collided. That is why the Lycan path tested
+	 * clean while the other three silently did nothing.
+	 *
+	 * Name alone therefore cannot answer "has this been granted yet?". The real question
+	 * is whether an INVOCABLE (`optionalFeatureTypes: ["BC"]`) entry exists. Where only
+	 * the descriptive feature is present, it is upgraded in place instead of pushing a
+	 * duplicate row: the player should see one entry per curse, not two identically named
+	 * ones.
+	 * @private
+	 */
+	_grantSubclassBloodCurse ({id, name, level, description}) {
+		const features = this._data.features || (this._data.features = []);
+		const isUsable = f => (f.optionalFeatureTypes || []).includes("BC");
+
+		// Already invocable — whether auto-granted earlier or chosen from the pool.
+		if (features.some(f => f.name === name && isUsable(f))) return;
+
+		// The descriptive subclass feature exists but carries no mechanics: promote it
+		// rather than shadowing it with a second row of the same name.
+		const descriptive = features.find(f => f.name === name);
+		if (descriptive) {
+			descriptive.optionalFeatureTypes = ["BC"];
+			descriptive.isAutoGrantedBloodCurse = true;
+			// Keep the subclass feature's own prose (it explains the grant) and append the
+			// curse's mechanics, which is what the player needs in order to invoke it.
+			if (descriptive.description && !descriptive.description.includes(description)) descriptive.description = `${descriptive.description}${description}`;
+			else if (!descriptive.description) descriptive.description = description;
+			return;
+		}
+
+		features.push({
+			id,
+			name,
+			source: "BH2022",
+			level,
+			className: "Blood Hunter",
+			featureType: "Optional Feature",
+			optionalFeatureTypes: ["BC"],
+			isAutoGrantedBloodCurse: true,
+			description,
+		});
 	}
 
 	/**
@@ -45666,6 +45732,28 @@ class CharacterSheetState {
 				icon: "\u{1FA99}",
 				label: "Ricochet: ignores half cover",
 				description: "Gambler's Tools: the coins ricochet off nearby surfaces \u2014 a ranged attack with them treats a target behind half cover as having no cover (the target loses the +2 AC and +2 Dexterity saving-throw bonus half cover would grant).",
+			});
+		}
+
+		// Active-state damage riders BOUND to this specific weapon — most notably a
+		// Blood Hunter's Crimson Rite, which the player pays hit points for and which
+		// then rides one chosen weapon until it ends. The damage roller already
+		// applies these (`getExtraDamageFromStates`), but until now nothing on the
+		// weapon row said so, and the choice of weapon is the whole point: with two
+		// weapons equipped, an active rite was indistinguishable from no rite, and the
+		// player could not tell WHICH weapon they had empowered.
+		//
+		// Deliberately limited to effects carrying a `weaponId`. An unbound state
+		// rider applies to every attack, so pinning it to one row would misinform;
+		// bound riders are exactly the ones whose weapon identity is information.
+		for (const eff of (this.getExtraDamageFromStates?.() || [])) {
+			if (!eff?.weaponId || eff.weaponId !== attack.id) continue;
+			const dmgType = eff.damageType ? ` ${eff.damageType}` : "";
+			riders.push({
+				id: `stateDamage:${eff.source}:${eff.weaponId}`,
+				icon: "\u{1FA78}",
+				label: `${eff.source}: +${eff.dice}${dmgType}`,
+				description: `${eff.source} is active on this weapon, adding ${eff.dice}${dmgType} damage to its damage rolls.`,
 			});
 		}
 
@@ -55877,6 +55965,25 @@ class CharacterSheetState {
 		// (CS-BUG-051) Pure "here are the options you gained" wrappers are never independently
 		// activatable — their children carry the mechanics and their own rows.
 		if (CharacterSheetState.isReferenceWrapperFeature(feature)) return null;
+		// (CS-BUG-163) A constellation form (Bee / Roc / Aurochs / …) DESCRIBES one
+		// option of "Zodiac Form: Month"; it is never independently activatable.
+		// Activation is owned by the parent feature, which carries
+		// `stateTypeId: "zodiacForm"` + `needsFormChoice` and is routed to the Druid
+		// Resources modal, and the form's mechanics come from ZODIAC_FORM_DEFS
+		// `getEffects()` keyed off the active state's `formId`.
+		//
+		// Without this guard the generic prose analysis promoted any constellation
+		// whose text happens to read like an activation ("When you activate this
+		// form, and as a Bonus Action … you can make a ranged spell attack") into
+		// its own `stateTypeId: "custom"` toggle. That produced a strip row that was
+		// present, enabled, indistinguishable from a working toggle, and completely
+		// inert — it never set a `formId`, so no `getEffects()` ever ran. Bee was the
+		// only form whose wording tripped it; the other 11 were already `null`, so
+		// this makes all 12 consistent rather than changing a working behaviour.
+		//
+		// Reuses the existing `isZodiacFormFeature` predicate (subclass-gated, matched
+		// against ZODIAC_FORM_DEFS) so new tiers are covered as their defs are added.
+		if (CharacterSheetState.isZodiacFormFeature(feature)) return null;
 		const name = feature?.name?.toLowerCase() || "";
 		const isCrimsonRite = feature?.optionalFeatureTypes?.includes("CR");
 		const isBloodCurse = feature?.optionalFeatureTypes?.includes("BC");
@@ -60313,7 +60420,13 @@ class CharacterSheetState {
 			.map(e => ({
 				dice: e.value || e.dice || "1d6",
 				damageType: e.damageType || "",
-				source: e.stateName || "state effect",
+				// Prefer the effect's OWN source over the state's display name. A
+				// Crimson Rite effect carries `source: "Rite of the Flame"` while its
+				// state is the generic "Crimson Rites", so reading `stateName` first
+				// discarded the one thing that identifies which rite is burning — and
+				// with two rites on two weapons both read identically apart from the
+				// damage type.
+				source: e.source || e.stateName || "state effect",
 				weaponId: e.weaponId || null,
 				isCrimsonRite: !!e.isCrimsonRite,
 				// Scoping flags — consumed by the damage roller so a rider that reads

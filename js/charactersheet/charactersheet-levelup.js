@@ -148,6 +148,9 @@ class CharacterSheetLevelUp {
 		/** @type {*} */ let selectedCombatTraditions = null;
 		/** @type {Object<string, *>} */ let selectedFeatureOptions = {};
 		/** @type {*} */ let featureOptionGroups = [];
+		// Assigned when the Feature Options section is built (below); invoked again from the
+		// subclass-selection callback, which can introduce new option groups. See CS-BUG-157.
+		/** @type {(() => void)|null} */ let buildFeatOptionsSection = null;
 		this._selectedFeatureSkillChoices = {};
 		/** @type {Object<string, *>} */ let selectedExpertise = {};
 		let expertiseGrants = CharacterSheetClassUtils.getExpertiseGrantsForLevel(currentFeatures);
@@ -508,6 +511,9 @@ class CharacterSheetLevelUp {
 				// Update dependent sections
 				featureOptionGroups = CharacterSheetClassUtils.getFeatureOptionsForLevel(currentFeatures, newLevel, this._page.getClassFeatures())
 					.filter((/** @type {*} */ optGroup) => !optGroup.options.every((/** @type {*} */ opt) => opt.type === "optionalfeature"));
+				// Selections keyed to the previous subclass's groups no longer apply.
+				selectedFeatureOptions = {};
+				buildFeatOptionsSection?.();
 				expertiseGrants = CharacterSheetClassUtils.getExpertiseGrantsForLevel(currentFeatures);
 				languageGrants = CharacterSheetClassUtils.getLanguageGrantsForLevel(currentFeatures);
 
@@ -786,14 +792,7 @@ class CharacterSheetLevelUp {
 		}
 
 		// ========== 4. FEATURE OPTIONS (Specialties, etc.) ==========
-		if (featureOptionGroups.length) {
-			summaryItems.append(createSummaryItem("featoptions", "🎯", "Feature Choices", {required: true}));
-
-			const featOptContent = this._renderFeatureOptionsSelection(featureOptionGroups, (/** @type {*} */ featureKey, /** @type {*} */ options) => {
-				selectedFeatureOptions[featureKey] = options;
-				updateFeatOptionsStatus();
-			});
-
+		{
 			const updateFeatOptionsStatus = () => {
 				let allComplete = true;
 				const summaries = [];
@@ -832,7 +831,45 @@ class CharacterSheetLevelUp {
 				accordions.featoptions.setComplete(allComplete, summaries.length ? `${summaries.length} chosen` : "");
 			};
 
-			main.append(createAccordion("featoptions", "🎯", "Feature Choices", featOptContent, {required: true}));
+			// Built as a closure rather than a one-shot `if`, so the subclass-selection
+			// callback can rebuild it. A subclass chosen *inside* this wizard can introduce
+			// feature-option groups that did not exist when the modal first rendered — e.g.
+			// BH2022 Profane Soul's "Otherworldly Patron". Previously such a group existed
+			// only in the Finish validator, which refused to close the wizard while pointing
+			// at an accordion that was never created, leaving the character permanently
+			// unlevelable while the summary still read "Ready to level up!". See CS-BUG-157.
+			//
+			// (This comment previously named Pact Magic's two-attribute `abilityDc` as the
+			// example and called it "a real Intelligence/Wisdom choice". The feature text
+			// says otherwise — the ability is fixed at level 1 by Hunter's Bane — and the
+			// prompt was inert. That is CS-BUG-161, and the group is no longer produced.)
+			buildFeatOptionsSection = () => {
+				if (!featureOptionGroups.length) return;
+
+				const featOptContent = this._renderFeatureOptionsSelection(featureOptionGroups, (/** @type {*} */ featureKey, /** @type {*} */ options) => {
+					selectedFeatureOptions[featureKey] = options;
+					updateFeatOptionsStatus();
+				});
+
+				if (accordions.featoptions) {
+					const body = accordions.featoptions.el.querySelector(".charsheet__levelup-accordion-body");
+					body.innerHTML = "";
+					body.append(featOptContent);
+				} else {
+					summaryItems.append(createSummaryItem("featoptions", "🎯", "Feature Choices", {required: true}));
+					const featOptAccordion = createAccordion("featoptions", "🎯", "Feature Choices", featOptContent, {required: true});
+					// Keep the wizard's section order when created late: sit beside the
+					// Class Options step, falling back to the subclass step.
+					const anchor = accordions.optfeatures?.el || accordions.subclass?.el;
+					if (anchor?.nextSibling) main.insertBefore(featOptAccordion, anchor.nextSibling);
+					else if (anchor) main.append(featOptAccordion);
+					else main.append(featOptAccordion);
+				}
+
+				updateFeatOptionsStatus();
+			};
+
+			buildFeatOptionsSection();
 		}
 
 		// ========== 4b. CLASS FEAT PROGRESSION (Fighting Style, etc.) ==========
@@ -4518,6 +4555,10 @@ class CharacterSheetLevelUp {
 					casterProgression: selectedSubclass.casterProgression,
 					spellcastingAbility: selectedSubclass.spellcastingAbility,
 					additionalSpells: selectedSubclass.additionalSpells,
+					// `subclassSpells` names the class whose spell list this subclass casts
+					// from (BH2022 Profane Soul → Warlock). Unpersisted, `getSubclassSpellListClass`
+					// fell back to the parent class and offered an EMPTY picker. See CS-BUG-158.
+					subclassSpells: selectedSubclass.subclassSpells,
 					subSubclassSpells: selectedSubclass.subSubclassSpells,
 					optionalfeatureProgression: selectedSubclass.optionalfeatureProgression,
 					// Subclass-declared spell-slot / cantrip progression tables. Persisted so
@@ -4528,6 +4569,9 @@ class CharacterSheetLevelUp {
 					// Gambler) declare their cantrip table on the SUBCLASS. Persisted so
 					// `getSubclassCantripChoiceSlots` can prompt for those picks.
 					cantripProgression: selectedSubclass.cantripProgression,
+					// Likewise their spells-known table. Without this the subclass falls through
+					// every branch of `_getClassSpellcastingInfo` and knows ZERO spells. CS-BUG-159.
+					spellsKnownProgression: selectedSubclass.spellsKnownProgression,
 				};
 				// Update class-level caster progression if subclass grants spellcasting (like Eldritch Knight)
 				if (selectedSubclass.casterProgression && !targetClass.casterProgression) {

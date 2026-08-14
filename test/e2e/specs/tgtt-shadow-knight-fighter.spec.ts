@@ -110,7 +110,13 @@ describeCharacter({
 	midTierLoadout: [
 		{name: "Cloak of Protection", source: "DMG", attune: true},
 	],
-	signatureToggle: /action surge|second wind/i,
+	// Was `signatureToggle: /action surge|second wind/i`, which never matched: both
+	// are resource counters, not `.charsheet__activatable-row` toggles on Overview,
+	// so `getToggleableFeatureNames()` cannot see them. The probe skipped silently
+	// and the test stayed green while testing nothing — see CS-BUG-156, which turns
+	// that skip into a hard failure. Recorded explicitly so the gap is visible in
+	// the spec rather than in a log line.
+	signatureToggleSkip: {skip: true, reason: "Action Surge and Second Wind are per-rest resource counters, not on/off toggles; their usage is covered by the USE probes and the resource assertions rather than by a toggle delta."},
 	usage: {
 		useResourceName: "Shadowcasting",
 		attackName: /shadow weapon/i,

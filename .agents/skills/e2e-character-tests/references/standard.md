@@ -19,7 +19,10 @@ Every spec must include **explicit** checks for every:
 - **feature picked** — class, subclass, race, feat, optional-feature,
 - **milestone hit** — Extra Attack, slot-table change, prof bump, capstone,
 - **loadout change** — gear expected to move AC / attack / DC at L5,
-- **signature toggle** — Rage / Bladesong / Channel Divinity / Wild Shape / …,
+- **signature toggle** — Rage / Bladesong / Hybrid Transformation / …
+  (a *standing stance*, not a limited-use ability — see "Which surface a
+  toggle lives on" below; Channel Divinity and Wild Shape are **not**
+  examples, they are counter-examples),
 - **specialty pick** — TGTT class-feature `Specialties` pool,
 - **mastery pick** — XPHB Weapon Mastery (martials), and
 - **battle-tactic pick** — Fighter Battle Tactics + the parallel
@@ -55,7 +58,7 @@ pickers](#helpers-for-class-option-pickers) for the full inventory.
 | 2 | **L3 subclass arrival + initial subclass feature** | factory `L3: subclass arrives …` | Subclass selection actually grants its L3 feature on the Features tab. |
 | 3 | **L5 milestone (Extra Attack / 3rd-level slots / prof +3)** | factory `L5: extra attack …` | Mid-tier mechanics turn on. Caster slot tables advance; martials get Extra Attack. |
 | 4 | **L5 loadout: gear changes derived stats** | factory `L5 loadout …` | Inventory/attunement actually affects AC, attack bonus, or DC. |
-| 5 | **L5 signature toggle changes derived stats** | same test, `probeToggleDelta` | Class-defining toggle (Bladesong, Rage, Channel Divinity, …) measurably changes AC or DC. |
+| 5 | **L5 signature toggle changes derived stats** | same test, `probeToggleDelta` | Class-defining **stance** (Bladesong, Rage, …) measurably changes a derived stat. Limited-use abilities are not eligible — see "Which surface a toggle lives on". |
 | 6 | **MEGA L1→20 with milestone asserts at 3/5/11/17/20** | factory `MEGA L1→20 …` (RUN_MEGA gated) | The wizard can drive 19 sequential level-ups without crashing; HP/slots/resources scale per the rules. |
 | 7 | **USE: cast a spell decrements a slot** | factory `USE: …`, `castSpellAtSlot` | The full cast pipeline (state.useSpellSlot → render → DOM pip count). |
 | 8 | **USE: spend a class resource decrements its counter** | factory `USE: …`, `useResourceByName` | Ki/Sorcery/CD/BI/Rage tracker decrements via UI-equivalent state hook. |
@@ -73,6 +76,39 @@ pickers](#helpers-for-class-option-pickers) for the full inventory.
 | 20 | **Weapon Mastery: pickedFrom + rollAttack + per-mastery effect** *(new, martials)* | per-spec `featuresMatrix` `pick` with `rollAttack` + `pickedFeatureGrants` | XPHB martials gain Weapon Mastery at L1. The picked weapons must surface as attacks, roll without throwing, and the mastery property must observably modify attack output (Vex → advantage flag, Topple → save line, Sap → disadvantage rider, etc.). |
 | 21 | **Class-option pickers + per-pick effect** *(new, Fighter / Sorcerer / Warlock / Bard / Rogue)* | per-spec `featuresMatrix` `pick` with `pickActivatable` + `pickedFeatureGrants` | Fighter Battle Tactics (2 at L3, +1 at L7/10/15), Sorcerer Metamagic, Warlock Invocations, Jester Acts, Trickster Tricks, Precise Strikes, Pact Boons, Dreamwalker calls / studies — each must register the picked option as a feature on the sheet AND attach `pickedFeatureGrants` so the auto-picked option's documented effect (damage rider, attack bonus, resource cost, toggle) is verified. |
 | 22 | **Per-feature effect coverage** *(new, applies to every entry)* | every `featuresMatrix` row | Every non-cinematic feature, ability, feat, spell, attack, or item in the matrix MUST attach at least one `EffectCheck` (or carry a `// no measurable derived effect: <reason>` comment). Existence-only assertions are insufficient — see [Effect verification](#effect-verification-every-feature-should-do-something) below. |
+
+## Which surface a toggle lives on
+
+`signatureToggle` (and `probeToggleDelta`) read **one** surface:
+`getToggleableFeatureNames()` → the Overview tab's *"Available to
+Activate"* strip (`.charsheet__activatable-row`). That strip holds
+standing **stances** only. The sheet deliberately routes other things
+elsewhere, so a pattern naming them can never match no matter how it is
+written:
+
+| Excluded from the strip | By what | Where it lives instead |
+|---|---|---|
+| Any ability `detectActivatableFeature` marks `isInstant`/`limited`/`trigger` — Action Surge, Second Wind, Patient Defense, Flurry of Blows, … | `isActivatableAbilityEntry()` (R21) | Features tab, canonical **Use** button |
+| Wild Shape / Wild Companion / Zodiac Form | `isDruidResourceActivatable()` | dedicated Druid Resources modal |
+| Interdict boons, `<X> Improvement` riders | `isInterdictBoonEntry()`, `isHiddenFromGenericAbilitySurfaces()` | their own panels |
+| Bardic Inspiration | anchored to a resource pool in `charactersheet-state.js` | resource tracker |
+
+Channel Divinity is a **resource**, not a row — the sheet surfaces the
+*option* that spends it (a Cleric's row is literally named `Turn
+Undead`). Point the pattern at the option, not at the pool.
+
+The corollary matters: **`expectToggles` in a milestone reads a
+different surface** — `getActivatableFeatureNames()`, the Features tab,
+which lists everything. So `expectToggles: [/second wind/i]` passing
+tells you nothing about whether `signatureToggle: /second wind/i` can
+match. Two probes, two surfaces, one name.
+
+Before writing a `signatureToggle`, check what the build actually has in
+the strip at the level the probe runs — not what the class grants on
+paper. If the signature mechanic is limited-use, arrives after L5, or is
+routed to a bespoke panel, declare `signatureToggleSkip` with a reason
+naming the cause, and make sure the mechanic is covered in
+`featuresMatrix` instead.
 
 ## Which env flags actually run the matrix
 

@@ -163,7 +163,15 @@ describeCharacter({
 		// weapon the USE attack probe can actually roll.
 		{name: "Longsword", equipped: true},
 	],
-	signatureToggle: /action surge|second wind/i,
+	// Action Surge and Second Wind are instant abilities, not stances:
+	// `detectActivatableFeature` classifies both as `isInstant: true`, and R21
+	// deliberately routes instant/limited-use abilities to the Features tab's
+	// Use button while EXCLUDING them from the Overview "Available to Activate"
+	// strip (`isActivatableAbilityEntry` → filtered). `signatureToggle` reads
+	// only that strip, so no pattern naming them can ever match here. Both are
+	// asserted as resources in the matrix (:37, :45) and as Features-tab
+	// activatables via the milestone `expectToggles`, which reads the other surface.
+	signatureToggleSkip: {skip: true, reason: "Action Surge and Second Wind are instant abilities (isInstant: true), which R21 routes to the Features tab and excludes from the Overview activatable strip this probe reads; both are covered as resources in featuresMatrix and by milestone expectToggles"},
 	usage: {
 		useResourceName: "Second Wind",
 		attackName: /longsword|greatsword|warhammer|battleaxe|mace|scimitar|rapier|shortsword/i,

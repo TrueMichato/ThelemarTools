@@ -150,7 +150,11 @@ describeCharacter({
 	preset: PRESET_FULL_DAEMONOLOGIST_DWARF,
 	displayName: "Daemonologist Wizard Dwarf",
 	midTierLoadout: [{name: "Cloak of Protection", source: "XDMG", attune: true}],
-	signatureToggle: /unearthly countenance/i,
+	// Unearthly Countenance is a LEVEL 10 feature — this spec's own matrix
+	// declares it at `{level: 10}` (:97). The signature-toggle probe runs at
+	// L5, so the pattern could never match: a level-window error, not a
+	// missing toggle. Same treatment as the Steel Hawk spec's Eagle Eye.
+	signatureToggleSkip: {skip: true, reason: "Unearthly Countenance is a level-10 feature, past this L5 probe's window; it is asserted in featuresMatrix at level 10 instead"},
 	usage: {
 		atLevel: 10,
 		castSpellSlotLevel: 1,

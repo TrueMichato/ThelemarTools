@@ -257,7 +257,11 @@ describeCharacter({
 	midTierLoadout: [
 		{name: "Cloak of Protection", source: "XDMG", attune: true},
 	],
-	signatureToggle: /action surge|second wind|arcane shot/i,
+	// Arcane Shot is spent per-attack rather than switched on, and Action Surge
+	// / Second Wind are `isInstant: true` — all three are excluded from the
+	// Overview "Available to Activate" strip by R21. Covered in the matrix at
+	// :71 (Second Wind), :115/:127 (Action Surge) and :212 (Arcane Shot).
+	signatureToggleSkip: {skip: true, reason: "Arcane Shot is spent per attack and Action Surge / Second Wind are instant abilities; R21 excludes all of them from the Overview activatable strip this probe reads, and each is covered in featuresMatrix"},
 	usage: {
 		skillRoll: {name: "Perception"},
 		shortRestRestores: {resourceName: "Action Surge", expectAfter: 1},

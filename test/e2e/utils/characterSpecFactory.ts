@@ -45,6 +45,13 @@ export interface CharacterSpec {
 	signatureToggle?: string | RegExp;
 	/** Explicit opt-out when the build has no toggle online at the L5 checkpoint. */
 	signatureToggleSkip?: {skip: true; reason: string};
+	/**
+	 * Confirm-button label for a PROMPT-GATED signature toggle. Without this the
+	 * probe clicks Activate, the handler opens an `InputUiUtil` dialog and returns
+	 * early, and the toggle reads as "produces no derived effect" — a harness gap
+	 * that is indistinguishable from a product bug in the failure message.
+	 */
+	signatureTogglePrompt?: string;
 	/** Attack row granted by a signature toggle instead of an AC/DC delta. */
 	signatureToggleAddsAttack?: string | RegExp;
 	/**
@@ -320,7 +327,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 						await charSheet.deactivateFeature(toggleName!);
 						return;
 					}
-					const delta = await probeToggleDelta(charSheet, signatureToggle);
+					const delta = await probeToggleDelta(charSheet, signatureToggle, {promptButton: spec.signatureTogglePrompt});
 					if (delta == null) {
 						if (spec.signatureToggleNoDerivedEffect) {
 							const re = signatureToggle instanceof RegExp ? signatureToggle : new RegExp(signatureToggle, "i");
@@ -341,8 +348,27 @@ export function describeCharacter (spec: CharacterSpec): void {
 						// from a genuinely toggle-less class, which is how
 						// CS-BUG-032's probe stayed silently dead.
 						const toggleables = await charSheet.getToggleableFeatureNames().catch(() => [] as string[]);
-						console.log(`[spec ${displayName}] L5 loadout: no toggle for ${signatureToggle}; skipping toggle probe `
-							+ `(toggleable rows present: ${toggleables.length ? toggleables.join(", ") : "none"})`);
+						// HARD FAIL, not a silent skip. A probe named "produces its
+						// mechanical effect" that quietly returns when its target is
+						// absent is indistinguishable from a passing probe in the
+						// summary line — the spec reports success by not running. That
+						// is how `/mutagen/i` sat green in the very spec written to
+						// cover the mutagen flow: the pattern could never match,
+						// because mutagen rows are `.charsheet__feature` cards on the
+						// Features tab while `getToggleableFeatureNames` reads
+						// `.charsheet__activatable-row` on Overview.
+						//
+						// A class whose signature mechanic genuinely isn't a toggle
+						// (Cleric's Channel Divinity is a resource counter) declares
+						// `signatureToggleSkip` with a reason. That channel already
+						// exists, is greppable, and keeps the gap visible in the spec
+						// file — which a runtime skip does not.
+						throw new Error(
+							`[spec ${displayName}] L5 loadout: no toggleable row matches ${signatureToggle}. `
+							+ `Toggleable rows present: ${toggleables.length ? toggleables.join(", ") : "none"}. `
+							+ `Either fix the pattern, or — if this class's signature mechanic is not a toggle — `
+							+ `declare \`signatureToggleSkip: {skip: true, reason: "…"}\` so the gap is visible in the spec.`,
+						);
 					} else if (spec.signatureToggleNoDerivedEffect) {
 						// The toggle surfaced and activated (probeToggleDelta
 						// returned a delta), which is the part we can verify.
