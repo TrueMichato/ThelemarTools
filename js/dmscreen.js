@@ -29,6 +29,7 @@ import {
 	PanelContentManager_ItemBuilder,
 	PanelContentManager_JourneyTracker,
 	PanelContentManager_MoneyConverter,
+	PanelContentManager_NpcTracker,
 	PanelContentManager_NoteBox, PanelContentManager_PartyTracker, PanelContentManager_TimeTracker,
 	PanelContentManager_UnitConverter,
 	PanelContentManagerFactory,
@@ -1194,6 +1195,11 @@ class Panel {
 
 	doPopulate_Empty (ixOpt) {
 		this.closeTabContent(ixOpt);
+	}
+
+	async doPopulate_NpcTracker () {
+		const pcm = new PanelContentManager_NpcTracker({board: this.board, panel: this});
+		return pcm.pDoPopulate();
 	}
 
 	doPopulate_Loading (message) {
@@ -3065,6 +3071,17 @@ class AddMenuSpecialTab extends AddMenuTab {
 			ee`<div class="ve-ui-modal__row">
 			<span>Party Tracker</span>
 			${btnPartyTracker}
+			</div>`.appendTo(eleTab);
+
+			const btnNpcTracker = ee`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`
+				.onn("click", async () => {
+					await this.menu.pnl.doPopulate_NpcTracker();
+					this.menu.doClose();
+				});
+
+			ee`<div class="ve-ui-modal__row">
+			<span>NPC Tracker</span>
+			${btnNpcTracker}
 			</div>`.appendTo(eleTab);
 
 			ee`<hr class="ve-hr-2">`.appendTo(eleTab);

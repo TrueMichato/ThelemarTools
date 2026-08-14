@@ -7,6 +7,7 @@ import {
 	PANEL_TYP_INITIATIVE_TRACKER_PLAYER_V0,
 	PANEL_TYP_INITIATIVE_TRACKER_PLAYER_V1, PANEL_TYP_ITEM_BUILDER, PANEL_TYP_JOURNEY_TRACKER, PANEL_TYP_MONEY_CONVERTER, PANEL_TYP_PARTY_TRACKER, PANEL_TYP_TEXTBOX, PANEL_TYP_TIME_TRACKER, PANEL_TYP_UNIT_CONVERTER,
 } from "./dmscreen-consts.js";
+import {PANEL_TYP_NPC_TRACKER} from "./dmscreen-consts.js";
 import {InitiativeTracker} from "./initiativetracker/dmscreen-initiativetracker.js";
 import {InitiativeTrackerPlayerV0, InitiativeTrackerPlayerV1} from "./dmscreen-playerinitiativetracker.js";
 import {InitiativeTrackerCreatureViewer} from "./dmscreen-initiativetrackercreatureviewer.js";
@@ -21,6 +22,7 @@ import {PartyTracker} from "./partytracker/dmscreen-partytracker.js";
 import {JourneyTracker} from "./dmscreen-journeytracker.js";
 import {CustomRandomTable} from "./dmscreen-customrandomtable.js";
 import {ItemBuilderPanel} from "./itembuilder/dmscreen-itembuilder.js";
+import {NpcTracker} from "./npctracker/dmscreen-npctracker.js";
 
 export class PanelContentManagerFactory {
 	static _PANEL_TYPES = {};
@@ -328,5 +330,16 @@ export class PanelContentManager_ItemBuilder extends _PanelContentManager {
 
 	_getPanelApp ({state}) {
 		return ItemBuilderPanel.getPanelApp({board: this._board, savedState: state});
+	}
+}
+
+export class PanelContentManager_NpcTracker extends _PanelContentManager {
+	static _PANEL_TYPE = PANEL_TYP_NPC_TRACKER;
+	static _TITLE = "NPC Tracker";
+
+	static _ = this._register();
+
+	_getPanelApp ({state}) {
+		return NpcTracker.getPanelApp({board: this._board, savedState: state});
 	}
 }
