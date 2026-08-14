@@ -85,9 +85,8 @@ function _findByRef (pool, ref) {
 	if (!ref?.name) return null;
 	const name = _key(ref.name);
 	const source = _key(ref.source);
-	return (pool || []).find(it => _key(it.name) === name && (!source || _key(it.source) === source))
-		|| (pool || []).find(it => _key(it.name) === name)
-		|| null;
+	if (source) return (pool || []).find(it => _key(it.name) === name && _key(it.source) === source) || null;
+	return (pool || []).find(it => _key(it.name) === name) || null;
 }
 
 function _mergeUnique (base, additions, getKey = it => JSON.stringify(it)) {

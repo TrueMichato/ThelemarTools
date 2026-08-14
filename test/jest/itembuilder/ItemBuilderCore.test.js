@@ -551,6 +551,51 @@ describe("ItemBuilderCore", () => {
 		expect(ItemBuilderCore.projectForPreview(restored, unresolvedCatalogs)).toEqual(failSafe);
 	});
 
+	test("rejects same-name wrong-source legacy presets and materials without deprojecting them", () => {
+		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), ITEMS[0], {source: "HB"});
+		draft.material = {name: "Starsteel", source: "TGTT"};
+		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
+		const restored = ItemBuilderCore.fromItem(legacyProjected);
+		const wrongSourceCatalogs = {
+			items: [{...ITEMS[0], source: "XPHB", dmg1: "1d12"}],
+			materials: [{...MATERIALS[0], source: "ALT", damage: -1}],
+			upgrades: UPGRADES,
+		};
+
+		const validation = ItemBuilderCore.validate(restored, wrongSourceCatalogs);
+		expect(validation.isValid).toBe(false);
+		expect(validation.errors).toEqual(expect.arrayContaining([
+			expect.objectContaining({field: "preset", message: expect.stringMatching(/unavailable/i)}),
+			expect.objectContaining({field: "material", message: expect.stringMatching(/unavailable/i)}),
+		]));
+
+		const failSafe = ItemBuilderCore.serialize(restored, wrongSourceCatalogs);
+		expect(failSafe.dmg1).toBe(legacyProjected.dmg1);
+		expect(failSafe.entries).toEqual(legacyProjected.entries);
+		expect(failSafe).not.toHaveProperty("baseItem");
+		expect(failSafe).not.toHaveProperty("material");
+	});
+
+	test("permits name-only fallback for source-less legacy references", () => {
+		const catalogs = {items: ITEMS, materials: MATERIALS, upgrades: UPGRADES};
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), ITEMS[0], {source: "HB"});
+		draft.material = {name: "Starsteel", source: "TGTT"};
+		const legacyProjected = ItemBuilderCore.projectForPreview(draft, catalogs);
+		legacyProjected.baseItem = "longsword|";
+		legacyProjected.material = {name: "starsteel", source: ""};
+		const restored = ItemBuilderCore.fromItem(legacyProjected);
+
+		expect(ItemBuilderCore.validate(restored, catalogs).isValid).toBe(true);
+		const canonical = ItemBuilderCore.serialize(restored, catalogs);
+		expect(canonical).toEqual(expect.objectContaining({
+			baseItem: "Longsword|PHB",
+			dmg1: "1d8",
+			material: {name: "starsteel", source: ""},
+		}));
+		expect(ItemBuilderCore.projectForPreview(ItemBuilderCore.fromItem(canonical), catalogs).dmg1).toBe("1d10");
+	});
+
 	test("restores provenance from an emitted item", () => {
 		const item = {
 			name: "Restored",
