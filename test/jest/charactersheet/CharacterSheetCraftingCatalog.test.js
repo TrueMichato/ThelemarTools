@@ -143,6 +143,30 @@ describe("Crafting catalog", () => {
 				effects: [{type: "bonusDice", count: 1}],
 			});
 		});
+
+		it("lets a same-name Brew material override Arcadia's casting effects", () => {
+			const brewMaterial = {
+				name: "Aboleth Eye",
+				source: "MYHB",
+				materialCategory: "spell component",
+				variantComponent: {
+					spellEffects: [{
+						match: {spell: "legend lore|phb"},
+						effects: [{type: "additionalTargets", count: 9}],
+					}],
+				},
+			};
+			const mergedData = CharacterSheetPage._getCraftingCatalogWithBrew(
+				{craftingMaterial: CATALOG.craftingMaterial, craftingRecipe: CATALOG.craftingRecipe, craftingRule: CATALOG.craftingRule},
+				[brewMaterial],
+			);
+			const brewState = new CharacterSheetState();
+			brewState.setCraftingCatalog(mergedData);
+
+			const discovered = brewState.getCraftingMaterialByName("Aboleth Eye");
+			expect(discovered.source).toBe("MYHB");
+			expect(discovered.variantComponent.spellEffects[0].effects).toEqual([{type: "additionalTargets", count: 9}]);
+		});
 	});
 
 	describe("name normalisation", () => {

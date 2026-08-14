@@ -18944,15 +18944,15 @@ class CharacterSheetPage {
 
 	static _getCraftingCatalogWithBrew (siteData, brewMaterials) {
 		const out = MiscUtil.copyFast(siteData || {});
-		const byIdentity = new Map();
-		for (const material of out.craftingMaterial || []) {
-			byIdentity.set(`${material.name || ""}|${material.source || ""}`.trim().toLowerCase(), material);
-		}
+		const brewByMaterialKey = new Map();
 		for (const material of brewMaterials || []) {
 			const copy = MiscUtil.copyFast(material);
-			byIdentity.set(`${copy.name || ""}|${copy.source || ""}`.trim().toLowerCase(), copy);
+			brewByMaterialKey.set(CharacterSheetState.normaliseMaterialKey(copy.name), copy);
 		}
-		out.craftingMaterial = [...byIdentity.values()];
+		out.craftingMaterial = [
+			...(out.craftingMaterial || []).filter(material => !brewByMaterialKey.has(CharacterSheetState.normaliseMaterialKey(material.name))),
+			...brewByMaterialKey.values(),
+		];
 		return out;
 	}
 

@@ -52,6 +52,23 @@ export class CraftingMaterialBuilder extends CraftingWorkbenchBuilderBase {
 
 	static getDraftFromArcadiaPreset (preset, {source}) {
 		const item = _copy(preset || {});
+		const component = item.variantComponent || {};
+		const matchQuantity = typeof component.harvestQuantity === "string"
+			? /^\s*(\d+)\s*(.*)$/.exec(component.harvestQuantity)
+			: null;
+		const quantity = matchQuantity
+			? Number(matchQuantity[1])
+			: Number.isFinite(Number(component.harvestQuantity))
+				? Number(component.harvestQuantity)
+				: null;
+		const quantityUnit = matchQuantity?.[2]?.trim() || null;
+		const harvest = {
+			...(component.harvestDC != null ? {dc: component.harvestDC} : {}),
+			...(quantity != null ? {quantity} : {}),
+			...(quantityUnit ? {quantityUnit} : {}),
+			...(component.harvestTime ? {time: component.harvestTime} : {}),
+			...(component.harvestSource ? {creature: {name: component.harvestSource}} : {}),
+		};
 		const spells = CraftingWorkbenchCore.dedupe(
 			(item.variantComponent?.spellEffects || [])
 				.map(spellEffect => spellEffect.match?.spell)
@@ -68,6 +85,8 @@ export class CraftingMaterialBuilder extends CraftingWorkbenchBuilderBase {
 				source,
 				...(item.page != null ? {page: item.page} : {}),
 				materialCategory: "spell component",
+				...(Object.keys(harvest).length ? {harvest} : {}),
+				...(item.value != null ? {value: item.value} : {}),
 				...(item.weight != null ? {weight: item.weight} : {}),
 				...(item.rarity != null ? {rarity: item.rarity} : {}),
 				entries: _copy(item.entries || []),
