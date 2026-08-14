@@ -21,6 +21,10 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 		};
 	}
 
+	_getCoreOptions () {
+		return {};
+	}
+
 	getSaveableState () {
 		return {
 			...super.getSaveableState(),
@@ -40,7 +44,7 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 		this.__meta = state.m;
 		this._draft = CraftingWorkbenchCore.normalize(this._prop, state.d || state.s);
 		this._saveStatus = state.w?.saveStatus || "";
-		this._validation = state.w?.validation || CraftingWorkbenchCore.validate(this._prop, this._draft);
+		this._validation = state.w?.validation || CraftingWorkbenchCore.validate(this._prop, this._draft, this._getCoreOptions());
 	}
 
 	_setStateFromLoaded (state) {
@@ -64,7 +68,7 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 	async pHandleLoadExistingData (entity, opts = {}) {
 		this._draft = CraftingWorkbenchCore.normalize(this._prop, entity);
 		this._draft.source = this._ui.source;
-		this.__state = CraftingWorkbenchCore.serialize(this._prop, this._draft);
+		this.__state = CraftingWorkbenchCore.serialize(this._prop, this._draft, this._getCoreOptions());
 		this.__state.uniqueId = CryptUtil.uid();
 		this.__meta = {
 			...(opts.meta || {}),
@@ -145,13 +149,13 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 	_doSync ({isRenderInput = false} = {}) {
 		this._saveStatus = "";
 		const uniqueId = this.__state.uniqueId || CryptUtil.uid();
-		const canonical = CraftingWorkbenchCore.serialize(this._prop, this._draft);
+		const canonical = CraftingWorkbenchCore.serialize(this._prop, this._draft, this._getCoreOptions());
 		canonical.uniqueId = uniqueId;
 		for (const key of Object.keys(this.__state)) delete this.__state[key];
 		Object.assign(this.__state, canonical);
 		this._meta.isModified = true;
 		this._dispHeaderName?.txt(`Editing "${this.__state.name || "?"}"`);
-		this._validation = CraftingWorkbenchCore.validate(this._prop, this._draft);
+		this._validation = CraftingWorkbenchCore.validate(this._prop, this._draft, this._getCoreOptions());
 		this._refreshValidation();
 		this.renderOutput();
 		this.doUiSave();
@@ -163,7 +167,8 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 
 	_renderAdvancedJson ({wrp}) {
 		const msg = ee`<div class="ve-small ve-mt-2" role="status" aria-live="polite"></div>`;
-		const textarea = ee`<textarea class="ve-form-control mkbru_cw__advanced" aria-label="Canonical ${Parser.getPropDisplayName(this._prop)} JSON" spellcheck="false">${JSON.stringify(this._draft, null, "\t").qq()}</textarea>`
+		const canonical = CraftingWorkbenchCore.serialize(this._prop, this._draft, this._getCoreOptions());
+		const textarea = ee`<textarea class="ve-form-control mkbru_cw__advanced" aria-label="Canonical ${Parser.getPropDisplayName(this._prop)} JSON" spellcheck="false">${JSON.stringify(canonical, null, "\t").qq()}</textarea>`
 			.onn("change", () => {
 				try {
 					this._draft = CraftingWorkbenchCore.normalize(this._prop, JSON.parse(textarea.val()));
@@ -183,7 +188,7 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 
 	_refreshValidation () {
 		if (!this._draft) return;
-		this._validation = CraftingWorkbenchCore.validate(this._prop, this._draft);
+		this._validation = CraftingWorkbenchCore.validate(this._prop, this._draft, this._getCoreOptions());
 		const {errors, warnings} = this._validation;
 		this._btnHeaderSave?.prop("disabled", !!errors.length)
 			.attr("aria-disabled", `${!!errors.length}`)
@@ -204,7 +209,7 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 
 	async pDoHandleClickSaveBrew () {
 		this._doSync();
-		const validation = CraftingWorkbenchCore.validate(this._prop, this._draft);
+		const validation = CraftingWorkbenchCore.validate(this._prop, this._draft, this._getCoreOptions());
 		if (!validation.isValid) {
 			this._saveStatus = `Cannot save: ${validation.errors[0].message}`;
 			this._refreshValidation();
@@ -274,7 +279,7 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 		ee`<div class="ve-flex-v-center ve-w-100 ve-no-shrink">${tabs.map(it => it.btnTab)}</div>`.appendTo(wrp);
 		tabs.forEach(it => it.wrpTab.appendTo(wrp));
 
-		const canonical = CraftingWorkbenchCore.serialize(this._prop, this.__state);
+		const canonical = CraftingWorkbenchCore.serialize(this._prop, this.__state, this._getCoreOptions());
 		const preview = this.constructor.getPreviewEntity(this._prop, canonical);
 		const previewTable = ee`<table class="ve-w-100 ve-stats" aria-label="${Parser.getPropDisplayName(this._prop)} preview"></table>`.appendTo(previewTab.wrpTab);
 		previewTable.appends(RenderCrafting.getRenderedCrafting(preview, {isSkipExcludesRender: true}));

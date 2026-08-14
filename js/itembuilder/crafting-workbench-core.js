@@ -81,6 +81,18 @@ const _CRAFTING_MATERIAL_DERIVED_PROPS = new Set([
 	"ingredientGraphMeta",
 	"ingredientMetadata",
 ]);
+const _CRAFTING_RECIPE_DERIVED_PROPS = new Set([
+	"componentGroups",
+	"effectTags",
+	"hasMechanicalEffect",
+]);
+const _CRAFTING_RECIPE_INGREDIENT_DERIVED_PROPS = new Set([
+	"uid",
+	"isAlternative",
+	"alternativeGroup",
+	"alternativeIndex",
+	"isInferred",
+]);
 
 export const CRAFTING_WORKBENCH_VOCABULARY = Object.freeze({
 	props: Object.freeze([..._PROPS]),
@@ -105,6 +117,7 @@ export const CRAFTING_WORKBENCH_VOCABULARY = Object.freeze({
 	}),
 	craftingRecipe: Object.freeze({
 		categories: Object.freeze(["item", "potion", "scroll", "dish", "curse"]),
+		crafters: Object.freeze(["Alchemist", "Artificer", "Blacksmith", "Cook", "Leatherworker", "Thaumaturge", "Tinker"]),
 		complexities: Object.freeze(["simple", "special"]),
 		outcomeTiers: Object.freeze(["success", "delicious", "extraDelicious"]),
 	}),
@@ -201,12 +214,93 @@ function _normalizeCraftingMaterial (entity) {
 
 function _normalizeCraftingRecipe (entity) {
 	const out = _copy(_asObject(entity));
-	for (const prop of ["componentGroups", "entries", "effectTags"]) out[prop] = _asArray(out[prop]);
-	out.ingredients = _normalizeObjectRows(out.ingredients);
+	for (const prop of _CRAFTING_RECIPE_DERIVED_PROPS) delete out[prop];
+	out.entries = _asArray(out.entries);
+	out.ingredients = _normalizeObjectRows(out.ingredients, ingredient => {
+		const ref = _key(ingredient._materialRef || ingredient.uid);
+		const alternativeSet = String(ingredient._alternativeSet ?? (ingredient.isAlternative ? ingredient.alternativeGroup : "")).trim();
+		const alternativeOrderRaw = ingredient._alternativeOrder ?? ingredient.alternativeIndex;
+		const alternativeOrder = Number.isFinite(Number(alternativeOrderRaw)) ? Number(alternativeOrderRaw) : null;
+		for (const prop of _CRAFTING_RECIPE_INGREDIENT_DERIVED_PROPS) delete ingredient[prop];
+		if (ref) ingredient._materialRef = ref;
+		else delete ingredient._materialRef;
+		if (alternativeSet) ingredient._alternativeSet = alternativeSet;
+		else {
+			delete ingredient._alternativeSet;
+			delete ingredient._alternativeOrder;
+		}
+		if (alternativeSet && alternativeOrder != null) ingredient._alternativeOrder = alternativeOrder;
+		return ingredient;
+	});
 	out.outcomes = _normalizeObjectRows(out.outcomes, outcome => ({
 		...outcome,
 		entries: _asArray(outcome.entries),
 	}));
+	return out;
+}
+
+function _getRecipeMaterialLookup (materialCatalog) {
+	return new Map(
+		CraftingWorkbenchCore.dedupe(materialCatalog)
+			.map(material => [CraftingWorkbenchCore.getIdentity(material), material]),
+	);
+}
+
+function _serializeCraftingRecipe (entity, {materialCatalog = null} = {}) {
+	const out = _normalizeCraftingRecipe(entity);
+	const materialLookup = materialCatalog == null ? null : _getRecipeMaterialLookup(materialCatalog);
+	const alternativeRows = new Map();
+	const alternativeSetLabels = new Map();
+
+	out.ingredients.forEach((ingredient, ix) => {
+		const set = _key(ingredient._alternativeSet);
+		if (!set) return;
+		if (!alternativeSetLabels.has(set)) alternativeSetLabels.set(set, String(ingredient._alternativeSet).trim());
+		if (!alternativeRows.has(set)) alternativeRows.set(set, []);
+		alternativeRows.get(set).push({
+			ingredient,
+			ix,
+			order: Number.isFinite(Number(ingredient._alternativeOrder)) ? Number(ingredient._alternativeOrder) : Number.MAX_SAFE_INTEGER,
+		});
+	});
+	for (const rows of alternativeRows.values()) rows.sort((a, b) => a.order - b.order || a.ix - b.ix);
+	const alternativeSets = [...alternativeRows]
+		.filter(([, rows]) => rows.length > 1)
+		.map(([set]) => set)
+		.sort((a, b) => alternativeSetLabels.get(a).localeCompare(alternativeSetLabels.get(b), undefined, {numeric: true, sensitivity: "base"}));
+	const alternativeSetToGroup = new Map(alternativeSets.map((set, ix) => [set, `alt-${ix}`]));
+
+	out.ingredients = out.ingredients.map(ingredient => {
+		const serialized = _copy(ingredient);
+		const materialRef = _key(serialized._materialRef);
+		const material = materialRef && materialLookup ? materialLookup.get(materialRef) : null;
+		for (const prop of _CRAFTING_RECIPE_INGREDIENT_DERIVED_PROPS) delete serialized[prop];
+		delete serialized._materialRef;
+		delete serialized._alternativeSet;
+		delete serialized._alternativeOrder;
+		if (material) {
+			serialized.name = material.name;
+			serialized.uid = CraftingWorkbenchCore.getIdentity(material);
+		} else if (materialRef && materialLookup == null) serialized.uid = materialRef;
+
+		const set = _key(ingredient._alternativeSet);
+		if (alternativeSetToGroup.has(set)) {
+			serialized.isAlternative = true;
+			serialized.alternativeGroup = alternativeSetToGroup.get(set);
+			serialized.alternativeIndex = alternativeRows.get(set).findIndex(it => it.ingredient === ingredient);
+		}
+		return serialized;
+	});
+
+	const componentGroupLookup = new Map();
+	out.ingredients.forEach(ingredient => {
+		const group = String(ingredient.group || "").trim();
+		if (group && !componentGroupLookup.has(_key(group))) componentGroupLookup.set(_key(group), group);
+	});
+	const componentGroups = [...componentGroupLookup.values()];
+	if (componentGroups.length > 1) out.componentGroups = componentGroups;
+	else delete out.componentGroups;
+	for (const prop of ["effectTags", "hasMechanicalEffect"]) delete out[prop];
 	return out;
 }
 
@@ -323,12 +417,23 @@ function _validateCraftingMaterial (entity, out) {
 }
 
 function _validateCraftingRecipe (entity, out) {
+	if (!_key(entity.recipeCategory)) out.errors.push({field: "recipeCategory", message: "Choose a recipe category."});
 	_validateEnum({
 		entity,
 		prop: "recipeCategory",
 		values: CRAFTING_WORKBENCH_VOCABULARY.craftingRecipe.categories,
 		errors: out.errors,
 		label: "Recipe category",
+	});
+	if (entity.crafter != null && !CRAFTING_WORKBENCH_VOCABULARY.craftingRecipe.crafters.includes(entity.crafter)) {
+		out.warnings.push({field: "crafter", message: `Crafter "${entity.crafter}" is custom and will be preserved.`});
+	}
+	_validateEnum({
+		entity,
+		prop: "complexity",
+		values: CRAFTING_WORKBENCH_VOCABULARY.craftingRecipe.complexities,
+		errors: out.errors,
+		label: "Complexity",
 	});
 	for (const prop of ["craftDC", "value"]) {
 		if (entity[prop] != null && (!Number.isFinite(Number(entity[prop])) || Number(entity[prop]) < 0)) {
@@ -340,10 +445,27 @@ function _validateCraftingRecipe (entity, out) {
 		if (ingredient.quantity != null && (!Number.isFinite(Number(ingredient.quantity)) || Number(ingredient.quantity) < 0)) {
 			out.errors.push({field: `ingredients.${ix}.quantity`, message: `Ingredient ${ix + 1} quantity must be zero or greater.`});
 		}
-		if (ingredient.isAlternative && !_key(ingredient.alternativeGroup)) {
-			out.warnings.push({field: `ingredients.${ix}.alternativeGroup`, message: `Alternative ingredient ${ix + 1} has no group identifier.`});
-		}
+		if (!_key(ingredient._materialRef)) out.warnings.push({field: `ingredients.${ix}.name`, message: `Ingredient "${ingredient.name || ix + 1}" has no resolved crafting material; its authored name will be preserved.`});
 	});
+	const alternativeSetCounts = entity.ingredients.reduce((counts, ingredient) => {
+		const set = _key(ingredient._alternativeSet);
+		if (set) counts.set(set, (counts.get(set) || 0) + 1);
+		return counts;
+	}, new Map());
+	entity.ingredients.forEach((ingredient, ix) => {
+		const set = _key(ingredient._alternativeSet);
+		if (set && alternativeSetCounts.get(set) < 2) out.warnings.push({field: `ingredients.${ix}._alternativeSet`, message: `Alternative set "${ingredient._alternativeSet}" needs at least two ingredients; this ingredient will be saved as non-alternative.`});
+	});
+	const outcomeTiers = new Set();
+	entity.outcomes.forEach((outcome, ix) => {
+		if (!CRAFTING_WORKBENCH_VOCABULARY.craftingRecipe.outcomeTiers.includes(outcome.tier)) {
+			out.errors.push({field: `outcomes.${ix}.tier`, message: `Outcome ${ix + 1} needs a supported dish tier.`});
+		} else if (outcomeTiers.has(outcome.tier)) {
+			out.errors.push({field: `outcomes.${ix}.tier`, message: `Dish outcome tier "${outcome.tier}" is duplicated.`});
+		}
+		outcomeTiers.add(outcome.tier);
+	});
+	if (entity.recipeCategory !== "dish" && entity.outcomes.length) out.warnings.push({field: "outcomes", message: "Outcomes are normally used only for dish recipes; they will be preserved."});
 }
 
 const _VALIDATORS = {
@@ -418,14 +540,23 @@ export class CraftingWorkbenchCore {
 		return _NORMALIZERS[_getProp(prop)](entity);
 	}
 
-	static validate (prop, entity) {
+	static validate (prop, entity, opts = {}) {
 		const normalized = this.normalize(prop, entity);
 		const out = _validateCommon(normalized);
 		_VALIDATORS[prop](normalized, out);
+		if (prop === "craftingRecipe" && opts.materialCatalog != null) {
+			const materialLookup = _getRecipeMaterialLookup(opts.materialCatalog);
+			normalized.ingredients.forEach((ingredient, ix) => {
+				if (_key(ingredient._materialRef) && !materialLookup.has(_key(ingredient._materialRef))) {
+					out.warnings.push({field: `ingredients.${ix}.name`, message: `Ingredient "${ingredient.name || ix + 1}" references a material which is not currently installed; its authored name will be preserved.`});
+				}
+			});
+		}
 		return {...out, isValid: !out.errors.length, entity: normalized};
 	}
 
-	static serialize (prop, entity) {
+	static serialize (prop, entity, opts = {}) {
+		if (_getProp(prop) === "craftingRecipe") return _stripWorkbenchState(_serializeCraftingRecipe(entity, opts));
 		const normalized = this.normalize(prop, entity);
 		return _stripWorkbenchState(normalized);
 	}

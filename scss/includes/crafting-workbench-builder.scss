@@ -164,6 +164,30 @@
 		background: vars.$rgb-bg--alt;
 	}
 
+	.mkbru_cw__material-search {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		min-width: 0;
+	}
+
+	.mkbru_cw__outcome {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		min-width: 0;
+		margin: 0;
+		padding: 0.65rem;
+		border: 1px solid vars.$rgb-border-grey--list-row;
+
+		legend {
+			width: auto;
+			margin: 0;
+			padding-inline: 0.25rem;
+			font-size: inherit;
+		}
+	}
+
 	.mkbru_cw__row {
 		display: flex;
 		flex-direction: column;
@@ -267,6 +291,10 @@
 		.mkbru_cw__nested {
 			border-color: vars-night.$rgb-border-grey--list-row-night;
 			background: vars-night.$rgb-bg--alt-night;
+		}
+
+		.mkbru_cw__outcome {
+			border-color: vars-night.$rgb-border-grey--list-row-night;
 		}
 	}
 

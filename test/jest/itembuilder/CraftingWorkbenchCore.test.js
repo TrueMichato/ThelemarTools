@@ -22,7 +22,7 @@ describe("CraftingWorkbenchCore", () => {
 	test.each([
 		["itemMaterial", {effects: "bad", magicCapacityRules: {}, entries: false, degradation: []}, ["effects", "magicCapacityRules", "entries"]],
 		["craftingMaterial", {entries: {}, spells: false, variantComponent: {spellEffects: "bad", uses: {}}}, ["entries", "spells"]],
-		["craftingRecipe", {ingredients: "bad", outcomes: [{tier: "success", entries: {}}], componentGroups: null}, ["ingredients", "componentGroups"]],
+		["craftingRecipe", {ingredients: "bad", outcomes: [{tier: "success", entries: {}}], componentGroups: null}, ["ingredients"]],
 	])("normalizes malformed %s collections safely", (prop, malformed, emptyProps) => {
 		const draft = CraftingWorkbenchCore.createDraft(prop, {source: "HB", entity: malformed});
 		for (const emptyProp of emptyProps) expect(draft[emptyProp]).toEqual([]);
@@ -52,17 +52,133 @@ describe("CraftingWorkbenchCore", () => {
 		expect(CraftingWorkbenchCore.serialize("craftingRecipe", recipe).value).toBe(875);
 	});
 
-	test("round-trips ingredient alternatives", () => {
+	test("derives deterministic ingredient alternatives and strips stale generated metadata", () => {
 		const entity = {
 			name: "Hide Armor",
 			source: "HB",
 			recipeCategory: "item",
 			ingredients: [
-				{name: "Ghast Hide", quantity: 1, isAlternative: true, alternativeGroup: "alt-0", alternativeIndex: 0},
-				{name: "Ghoul Hide", quantity: 1, isAlternative: true, alternativeGroup: "alt-0", alternativeIndex: 1, expert: "kept"},
+				{name: "Copper", quantity: 1, isAlternative: false, alternativeGroup: "stale", alternativeIndex: 12, isInferred: true},
+				{name: "Ghast Hide", quantity: 1, _alternativeSet: "HIDE", _alternativeOrder: 20},
+				{name: "Wolf Hide", quantity: 1, _alternativeSet: "2", _alternativeOrder: 1},
+				{name: "Ghoul Hide", quantity: 1, _alternativeSet: "Hide", _alternativeOrder: 10, expert: "kept"},
+				{name: "Bear Hide", quantity: 1, _alternativeSet: "2", _alternativeOrder: 2},
+				{name: "Thread", quantity: 1, _alternativeSet: "single"},
 			],
 		};
-		expect(CraftingWorkbenchCore.serialize("craftingRecipe", entity).ingredients).toEqual(entity.ingredients);
+		expect(CraftingWorkbenchCore.serialize("craftingRecipe", entity).ingredients).toEqual([
+			{name: "Copper", quantity: 1},
+			{name: "Ghast Hide", quantity: 1, isAlternative: true, alternativeGroup: "alt-1", alternativeIndex: 1},
+			{name: "Wolf Hide", quantity: 1, isAlternative: true, alternativeGroup: "alt-0", alternativeIndex: 0},
+			{name: "Ghoul Hide", quantity: 1, expert: "kept", isAlternative: true, alternativeGroup: "alt-1", alternativeIndex: 0},
+			{name: "Bear Hide", quantity: 1, isAlternative: true, alternativeGroup: "alt-0", alternativeIndex: 1},
+			{name: "Thread", quantity: 1},
+		]);
+	});
+
+	test("round-trips authored recipe fields and preserves copper pieces", () => {
+		const entity = {
+			name: "Perfect Roast",
+			source: "HB",
+			page: 42,
+			recipeCategory: "dish",
+			crafter: "Cook",
+			craftDC: 17,
+			complexity: "special",
+			rarity: "rare",
+			reqAttune: false,
+			itemUid: "perfect roast|hb",
+			value: 4321,
+			ingredients: [{name: "Herb", quantity: 2, unit: "sprigs", group: "Seasoning", _materialRef: "HERB|HB"}],
+			outcomes: [{tier: "success", entries: ["Gain {@dice 1d4} temporary hit points."]}],
+			entries: ["A carefully prepared meal."],
+			expertCanonical: {kept: true},
+		};
+
+		expect(CraftingWorkbenchCore.serialize("craftingRecipe", entity)).toEqual({
+			...entity,
+			ingredients: [{name: "Herb", quantity: 2, unit: "sprigs", group: "Seasoning", uid: "herb|hb"}],
+		});
+	});
+
+	test("resolves selected material UIDs case-insensitively and warns without losing unresolved names", () => {
+		const materialCatalog = [
+			{name: "Mithril", source: "TGTT"},
+			{name: "mithril", source: "tgtt"},
+		];
+		const entity = {
+			name: "Blade",
+			source: "HB",
+			recipeCategory: "item",
+			ingredients: [
+				{name: "wrong display", quantity: 1, _materialRef: "MITHRIL|tgtt"},
+				{name: "Moonwater", quantity: 3},
+			],
+		};
+		const serialized = CraftingWorkbenchCore.serialize("craftingRecipe", entity, {materialCatalog});
+		const validation = CraftingWorkbenchCore.validate("craftingRecipe", entity, {materialCatalog});
+
+		expect(serialized.ingredients).toEqual([
+			{name: "Mithril", quantity: 1, uid: "mithril|tgtt"},
+			{name: "Moonwater", quantity: 3},
+		]);
+		expect(validation.warnings).toEqual(expect.arrayContaining([
+			expect.objectContaining({field: "ingredients.1.name", message: expect.stringContaining("Moonwater")}),
+		]));
+	});
+
+	test("derives component groups in ingredient order without duplicates", () => {
+		const serialized = CraftingWorkbenchCore.serialize("craftingRecipe", {
+			name: "Pie",
+			source: "HB",
+			recipeCategory: "dish",
+			componentGroups: ["stale"],
+			ingredients: [
+				{name: "Flour", group: "Crust"},
+				{name: "Butter", group: "crust"},
+				{name: "Apple", group: "Filling"},
+				{name: "Sugar", group: "Topping"},
+			],
+		});
+		expect(serialized.componentGroups).toEqual(["Crust", "Filling", "Topping"]);
+	});
+
+	test("normalizes dish outcome tiers and nested entries", () => {
+		const normalized = CraftingWorkbenchCore.normalize("craftingRecipe", {
+			name: "Pie",
+			source: "HB",
+			recipeCategory: "dish",
+			outcomes: [
+				{tier: "success", entries: ["Text", {type: "entries", name: "Nested", entries: [{type: "list", items: ["One"]}]}]},
+				{tier: "delicious", entries: null},
+				{tier: "extraDelicious", entries: "bad"},
+				null,
+			],
+		});
+		expect(normalized.outcomes).toEqual([
+			{tier: "success", entries: ["Text", {type: "entries", name: "Nested", entries: [{type: "list", items: ["One"]}]}]},
+			{tier: "delicious", entries: []},
+			{tier: "extraDelicious", entries: []},
+		]);
+		expect(CraftingWorkbenchCore.validate("craftingRecipe", normalized).isValid).toBe(true);
+	});
+
+	test("strips recipe generator output while preserving unrelated expert fields", () => {
+		const serialized = CraftingWorkbenchCore.serialize("craftingRecipe", {
+			name: "Tonic",
+			source: "HB",
+			recipeCategory: "potion",
+			effectTags: ["healing"],
+			hasMechanicalEffect: true,
+			componentGroups: ["stale"],
+			ingredients: [{name: "Herb", uid: "herb|hb", isInferred: true}],
+			expertCanonical: {kept: true},
+		});
+		expect(serialized).not.toHaveProperty("effectTags");
+		expect(serialized).not.toHaveProperty("hasMechanicalEffect");
+		expect(serialized).not.toHaveProperty("componentGroups");
+		expect(serialized.ingredients).toEqual([{name: "Herb", uid: "herb|hb"}]);
+		expect(serialized.expertCanonical).toEqual({kept: true});
 	});
 
 	test("round-trips nested variant component matches and effects", () => {

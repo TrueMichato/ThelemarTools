@@ -5,6 +5,7 @@ import {LegendaryGroupBuilder} from "./makebrew/makebrew-legendarygroup.js";
 import {ItemBuilder} from "./makebrew/makebrew-item.js";
 import {ItemMaterialBuilder} from "./makebrew/makebrew-item-material.js";
 import {CraftingMaterialBuilder} from "./makebrew/makebrew-crafting-material.js";
+import {CraftingRecipeBuilder} from "./makebrew/makebrew-crafting-recipe.js";
 import {TagCondition, TaggerUtils} from "./converter/converterutils-tags.js";
 import {SITE_STYLE__CLASSIC} from "./consts.js";
 import {SourceUiUtil} from "./utils-ui/utils-ui-sourcebuilder.js";
@@ -42,6 +43,7 @@ class PageUi extends ProxyBase {
 	set itemBuilder (itemBuilder) { this._builders.itemBuilder = itemBuilder; }
 	set itemMaterialBuilder (itemMaterialBuilder) { this._builders.itemMaterialBuilder = itemMaterialBuilder; }
 	set craftingMaterialBuilder (craftingMaterialBuilder) { this._builders.craftingMaterialBuilder = craftingMaterialBuilder; }
+	set craftingRecipeBuilder (craftingRecipeBuilder) { this._builders.craftingRecipeBuilder = craftingRecipeBuilder; }
 
 	get creatureBuilder () { return this._builders.creatureBuilder; }
 
@@ -169,6 +171,7 @@ class PageUi extends ProxyBase {
 			<option value="itemBuilder">Item</option>
 			<option value="itemMaterialBuilder">Item Material</option>
 			<option value="craftingMaterialBuilder">Crafting Material</option>
+			<option value="craftingRecipeBuilder">Crafting Recipe</option>
 			<option value="none" class="ve-italic">Everything Else?</option>
 		</select>`
 			.onn("change", async () => {
@@ -493,6 +496,10 @@ itemMaterialBuilder.ui = ui;
 const craftingMaterialBuilder = new CraftingMaterialBuilder();
 ui.craftingMaterialBuilder = craftingMaterialBuilder;
 craftingMaterialBuilder.ui = ui;
+
+const craftingRecipeBuilder = new CraftingRecipeBuilder();
+ui.craftingRecipeBuilder = craftingRecipeBuilder;
+craftingRecipeBuilder.ui = ui;
 
 window.addEventListener("load", async () => {
 	await Makebrew.doPageInit();
