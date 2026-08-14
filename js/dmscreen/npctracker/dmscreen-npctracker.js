@@ -15,6 +15,7 @@ import {
 	getNpcTrackerHpInputValue,
 	getNpcTrackerHpOperation,
 } from "./dmscreen-npctracker-hp.js";
+import {getNpcTrackerConditionsAfterUpdate} from "./dmscreen-npctracker-condition.js";
 
 export class NpcTracker extends DmScreenPanelAppBase {
 	constructor (...args) {
@@ -84,6 +85,7 @@ export class NpcTrackerRoot {
 			fnToggleAll: isSelected => this._toggleBatchAll(isSelected),
 			fnApplyHp: meta => this._applyBatchHp(meta),
 			fnUndoHp: () => this._undoBatchHp(),
+			fnUpdateCondition: meta => this._updateBatchCondition(meta),
 		});
 	}
 
@@ -454,6 +456,26 @@ export class NpcTrackerRoot {
 		});
 		this._batchState.error = null;
 		this._batchState.operationMessage = `Restored HP for ${restored} ${restored === 1 ? "NPC" : "NPCs"}.`;
+		this._renderRoster();
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_updateBatchCondition ({condition, isAdd}) {
+		if (!this._batchState || this._batchState.isRolling) return;
+		const npcs = getNpcTrackerNpcsForScope({state: this._state, scope: this._batchState.scope})
+			.filter(npc => this._batchState.selectedNpcIds.has(npc.id));
+		if (!npcs.length) {
+			this._batchState.error = "Select at least one NPC.";
+			this._renderDetail();
+			return;
+		}
+
+		npcs.forEach(npc => {
+			npc.conditions = getNpcTrackerConditionsAfterUpdate({conditions: npc.conditions, condition, isAdd});
+		});
+		this._batchState.error = null;
+		this._batchState.operationMessage = `${isAdd ? "Added" : "Removed"} ${condition.toTitleCase()} ${isAdd ? "to" : "from"} ${npcs.length} ${npcs.length === 1 ? "NPC" : "NPCs"}.`;
 		this._renderRoster();
 		this._renderDetail();
 		this._doSave();

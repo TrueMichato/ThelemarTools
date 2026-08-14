@@ -5,7 +5,7 @@ import {
 } from "./dmscreen-npctracker-roll.js";
 
 export class NpcTrackerBatch {
-	constructor ({fnGetContext, fnUpdateConfig, fnRoll, fnSort, fnToggleNpc, fnToggleAll, fnApplyHp, fnUndoHp}) {
+	constructor ({fnGetContext, fnUpdateConfig, fnRoll, fnSort, fnToggleNpc, fnToggleAll, fnApplyHp, fnUndoHp, fnUpdateCondition}) {
 		this._fnGetContext = fnGetContext;
 		this._fnUpdateConfig = fnUpdateConfig;
 		this._fnRoll = fnRoll;
@@ -14,6 +14,7 @@ export class NpcTrackerBatch {
 		this._fnToggleAll = fnToggleAll;
 		this._fnApplyHp = fnApplyHp;
 		this._fnUndoHp = fnUndoHp;
+		this._fnUpdateCondition = fnUpdateCondition;
 	}
 
 	render ({wrp, isNarrow = false, fnShowRoster = null}) {
@@ -69,6 +70,7 @@ export class NpcTrackerBatch {
 
 		this._renderMembers({batch, npcs, wrp: wrpBody});
 		this._renderHpControls({batch, selectedCount, hasHpUndo, wrp: wrpBody});
+		this._renderConditionControls({batch, selectedCount, wrp: wrpBody});
 
 		if (batch.error) {
 			const eleError = ee`<div class="dm-npc__batch-error" role="alert"></div>`;
@@ -134,6 +136,25 @@ export class NpcTrackerBatch {
 		ee`<section class="dm-npc__batch-operation">
 			<div><strong>Hit points</strong><span class="dm-npc__batch-operation-help">Unsigned values deal damage; damage consumes temporary HP first.</span></div>
 			<div class="dm-npc__batch-operation-controls">${input}<label class="dm-npc__batch-half">${cbHalf}<span>Half</span></label>${btnApply}${btnUndo}</div>
+		</section>`.appendTo(wrp);
+	}
+
+	_renderConditionControls ({batch, selectedCount, wrp}) {
+		const select = ee`<select class="ve-form-control ve-select ve-select-xs dm-npc__batch-condition-select" aria-label="Condition"></select>`;
+		Parser.CONDITIONS.forEach(condition => {
+			const option = ee`<option value="${condition}"></option>`;
+			option.textContent = condition.toTitleCase();
+			option.appendTo(select);
+		});
+		const btnAdd = ee`<button class="ve-btn ve-btn-primary ve-btn-xs" type="button">Add</button>`
+			.onn("click", () => this._fnUpdateCondition({condition: select.value, isAdd: true}));
+		const btnRemove = ee`<button class="ve-btn ve-btn-default ve-btn-xs" type="button">Remove</button>`
+			.onn("click", () => this._fnUpdateCondition({condition: select.value, isAdd: false}));
+		btnAdd.disabled = btnRemove.disabled = batch.isRolling || !selectedCount;
+
+		ee`<section class="dm-npc__batch-operation">
+			<div><strong>Conditions</strong><span class="dm-npc__batch-operation-help">Apply or remove a standard condition for every selected NPC.</span></div>
+			<div class="dm-npc__batch-operation-controls">${select}${btnAdd}${btnRemove}</div>
 		</section>`.appendTo(wrp);
 	}
 

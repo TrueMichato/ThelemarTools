@@ -202,6 +202,24 @@
 		font-size: 0.76rem;
 	}
 
+	.dm-npc__conditions {
+		display: flex;
+		grid-column: 1 / -1;
+		flex-wrap: wrap;
+		gap: 3px;
+	}
+
+	.dm-npc__condition {
+		padding: 1px 5px;
+		border: 1px solid vars.$rgb-border-grey;
+		border-left-width: 4px;
+		border-radius: 9px;
+		background: #f5f5f5;
+		color: #555;
+		font-size: 0.68rem;
+		line-height: 1.35;
+	}
+
 	.dm-npc__roster-hp-field {
 		display: grid;
 		grid-template-columns: auto minmax(0, 1fr);
@@ -538,6 +556,11 @@
 			max-width: 190px;
 		}
 
+		.dm-npc__batch-condition-select {
+			min-width: 130px;
+			max-width: 190px;
+		}
+
 		.dm-npc__batch-status {
 			max-width: 720px;
 			margin: 0 auto 8px;
@@ -707,6 +730,11 @@
 			width: 100%;
 			max-width: none;
 		}
+
+		.dm-npc__batch-condition-select {
+			width: 100%;
+			max-width: none;
+		}
 	}
 
 	@media (prefers-reduced-motion: reduce) {
@@ -758,6 +786,12 @@
 		.dm-npc__batch-members,
 		.dm-npc__batch-operation {
 			background: vars-night.$rgb-bg--night;
+		}
+
+		.dm-npc__condition {
+			border-color: vars-night.$rgb-border-grey--night;
+			background: vars-night.$rgb-bg--alt-night;
+			color: #ccc;
 		}
 
 		.dm-npc__batch-member-list {

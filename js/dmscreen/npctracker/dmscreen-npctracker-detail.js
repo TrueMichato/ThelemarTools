@@ -4,6 +4,7 @@ import {
 	getNpcTrackerSignedNumber,
 	pRollNpcTrackerD20,
 } from "./dmscreen-npctracker-roll.js";
+import {getNpcTrackerConditionColor} from "./dmscreen-npctracker-condition.js";
 
 const _PROPS_ATTACK = ["action", "bonus", "reaction", "legendary", "mythic"];
 
@@ -88,7 +89,7 @@ export class NpcTrackerDetail {
 		const eleMeta = ee`<div class="dm-npc__meta"></div>`;
 		eleMeta.textContent = this._getMetaText(mon);
 
-		const wrpIdentity = ee`<div class="dm-npc__identity">${eleName}${eleOriginal}${eleMeta}</div>`;
+		const wrpIdentity = ee`<div class="dm-npc__identity">${eleName}${eleOriginal}${eleMeta}${this._getConditionChips(npc)}</div>`;
 		const wrpControls = ee`<div class="dm-npc__detail-actions">${btnMode}</div>`;
 
 		ee`<div class="dm-npc__detail-header">
@@ -105,6 +106,18 @@ export class NpcTrackerDetail {
 		if (mon.type) parts.push(Parser.monTypeToFullObj(mon.type).asText);
 		if (mon.cr != null) parts.push(`CR ${mon.cr.cr || mon.cr}`);
 		return parts.filter(Boolean).join(" · ");
+	}
+
+	_getConditionChips (npc) {
+		if (!npc.conditions.length) return null;
+		const wrp = ee`<div class="dm-npc__conditions" aria-label="Conditions"></div>`;
+		npc.conditions.forEach(condition => {
+			const chip = ee`<span class="dm-npc__condition"></span>`;
+			chip.textContent = condition.toTitleCase();
+			chip.style.borderColor = getNpcTrackerConditionColor(condition);
+			chip.appendTo(wrp);
+		});
+		return wrp;
 	}
 
 	_getHpControl (npc) {

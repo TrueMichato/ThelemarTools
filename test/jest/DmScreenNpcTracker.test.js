@@ -25,6 +25,10 @@ import {
 	getNpcTrackerHpInputValue,
 	getNpcTrackerHpOperation,
 } from "../../js/dmscreen/npctracker/dmscreen-npctracker-hp.js";
+import {
+	getNpcTrackerCanonicalConditionName,
+	getNpcTrackerConditionsAfterUpdate,
+} from "../../js/dmscreen/npctracker/dmscreen-npctracker-condition.js";
 
 const getMonster = () => ({
 	name: "Court Mage",
@@ -59,6 +63,7 @@ describe("NPC Tracker serialization", () => {
 		npc.hp.current = 11;
 		npc.hp.temp = 4;
 		npc.groupId = "court";
+		npc.conditions = ["poisoned", "prone"];
 
 		const saved = NpcTrackerSerializer.serialize({
 			version: 2,
@@ -68,7 +73,7 @@ describe("NPC Tracker serialization", () => {
 		});
 		const restored = NpcTrackerSerializer.deserialize(saved);
 
-		expect(saved.v).toBe(2);
+		expect(saved.v).toBe(3);
 		expect(restored.settings).toEqual({
 			selectedId: npc.id,
 			isIncludeAllCreatures: true,
@@ -80,6 +85,7 @@ describe("NPC Tracker serialization", () => {
 			alias: "Magister Vale",
 			groupId: "court",
 			hp: {current: 11, max: 27, temp: 4},
+			conditions: ["poisoned", "prone"],
 			monster,
 			fluff: {entries: ["A patient adviser."]},
 		});
@@ -132,7 +138,28 @@ describe("NPC Tracker serialization", () => {
 			alias: "Legacy Mage",
 			groupId: null,
 			hp: {current: 9, max: 27, temp: 2},
+			conditions: [],
 			fluff: {entries: ["Preserved lore."]},
+		});
+	});
+
+	it("migrates version 2 saves with default-safe conditions", () => {
+		const restored = NpcTrackerSerializer.deserialize({
+			v: 2,
+			g: [{id: "court", n: "Town Council"}],
+			n: [{
+				id: "legacy-v2",
+				g: "court",
+				hp: {c: 12, m: 27, t: 0},
+				mon: getMonster(),
+			}],
+		});
+
+		expect(restored.version).toBe(3);
+		expect(restored.npcs[0]).toMatchObject({
+			id: "legacy-v2",
+			groupId: "court",
+			conditions: [],
 		});
 	});
 
@@ -168,6 +195,35 @@ describe("NPC Tracker serialization", () => {
 
 		expect(restored.npcs.map(npc => npc.groupId)).toEqual(["a", "b"]);
 		expect(restored.npcs[0].id).not.toBe(restored.npcs[1].id);
+	});
+});
+
+describe("NPC Tracker conditions", () => {
+	it("uses the canonical Parser condition list and deduplicates updates", () => {
+		expect(getNpcTrackerCanonicalConditionName(" Poisoned ")).toBe("poisoned");
+		expect(getNpcTrackerCanonicalConditionName("custom")).toBeNull();
+		expect(getNpcTrackerConditionsAfterUpdate({
+			conditions: ["poisoned", "poisoned", "custom"],
+			condition: "prone",
+			isAdd: true,
+		})).toEqual(["poisoned", "prone"]);
+		expect(getNpcTrackerConditionsAfterUpdate({
+			conditions: ["poisoned", "prone"],
+			condition: "poisoned",
+			isAdd: false,
+		})).toEqual(["prone"]);
+	});
+
+	it("repairs invalid serialized conditions", () => {
+		const restored = NpcTrackerSerializer.deserialize({
+			v: 3,
+			n: [{
+				id: "conditioned",
+				c: ["Poisoned", "poisoned", "made-up", null],
+				mon: getMonster(),
+			}],
+		});
+		expect(restored.npcs[0].conditions).toEqual(["poisoned"]);
 	});
 });
 
