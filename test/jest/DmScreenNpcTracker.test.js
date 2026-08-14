@@ -1,5 +1,8 @@
 import "../../js/parser.js";
 import "../../js/utils.js";
+import "../../js/render.js";
+import "../../js/render-dice.js";
+import "../../js/utils-ui.js";
 import {
 	NpcTrackerSerializer,
 	removeNpcTrackerGroup,
@@ -17,7 +20,11 @@ import {
 	getNpcTrackerRollLabel,
 	sortNpcTrackerBatchResults,
 } from "../../js/dmscreen/npctracker/dmscreen-npctracker-roll.js";
-import {getNpcTrackerHpInputValue} from "../../js/dmscreen/npctracker/dmscreen-npctracker-hp.js";
+import {
+	getNpcTrackerHpAfterOperation,
+	getNpcTrackerHpInputValue,
+	getNpcTrackerHpOperation,
+} from "../../js/dmscreen/npctracker/dmscreen-npctracker-hp.js";
 
 const getMonster = () => ({
 	name: "Court Mage",
@@ -172,6 +179,30 @@ describe("NPC Tracker HP input", () => {
 		expect(getNpcTrackerHpInputValue("0")).toBe(0);
 		expect(getNpcTrackerHpInputValue("-3")).toBe(0);
 		expect(getNpcTrackerHpInputValue("12")).toBe(12);
+	});
+
+	it("parses damage, healing, set, dice, and half operations", () => {
+		expect(getNpcTrackerHpOperation({raw: "12"})).toEqual({ok: true, operation: {mode: "delta", value: -12}});
+		expect(getNpcTrackerHpOperation({raw: "+6"})).toEqual({ok: true, operation: {mode: "delta", value: 6}});
+		expect(getNpcTrackerHpOperation({raw: "=15"})).toEqual({ok: true, operation: {mode: "set", value: 15}});
+		expect(getNpcTrackerHpOperation({raw: "7", isHalf: true})).toEqual({ok: true, operation: {mode: "delta", value: -3}});
+		expect(getNpcTrackerHpOperation({raw: "1d1"})).toEqual({ok: true, operation: {mode: "delta", value: -1}});
+		expect(getNpcTrackerHpOperation({raw: ""}).ok).toBe(false);
+	});
+
+	it("consumes temporary HP before current HP and caps healing at max", () => {
+		expect(getNpcTrackerHpAfterOperation({
+			hp: {current: 20, max: 30, temp: 5},
+			operation: {mode: "delta", value: -8},
+		})).toEqual({current: 17, max: 30, temp: 0});
+		expect(getNpcTrackerHpAfterOperation({
+			hp: {current: 27, max: 30, temp: 2},
+			operation: {mode: "delta", value: 8},
+		})).toEqual({current: 30, max: 30, temp: 2});
+		expect(getNpcTrackerHpAfterOperation({
+			hp: {current: 27, max: 30, temp: 2},
+			operation: {mode: "set", value: 4},
+		})).toEqual({current: 4, max: 30, temp: 2});
 	});
 });
 

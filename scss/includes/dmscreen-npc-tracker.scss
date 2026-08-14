@@ -460,6 +460,94 @@
 			padding: 10px;
 		}
 
+		.dm-npc__batch-members,
+		.dm-npc__batch-operation {
+			max-width: 720px;
+			margin: 0 auto 10px;
+			border: 1px solid vars.$rgb-border-grey;
+			border-radius: 4px;
+			background: #fff;
+		}
+
+		.dm-npc__batch-members-header,
+		.dm-npc__batch-operation {
+			padding: 7px 9px;
+		}
+
+		.dm-npc__batch-members-header label,
+		.dm-npc__batch-member,
+		.dm-npc__batch-half {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			margin: 0;
+			font-weight: 400;
+		}
+
+		.dm-npc__batch-member-list {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+			border-top: 1px solid vars.$rgb-border-grey;
+		}
+
+		.dm-npc__batch-member {
+			min-width: 0;
+			padding: 6px 9px;
+		}
+
+		.dm-npc__batch-member-name {
+			min-width: 0;
+			overflow: hidden;
+			font-weight: 600;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.dm-npc__batch-member-hp {
+			margin-left: auto;
+			color: #666;
+			font-size: 0.78rem;
+			font-variant-numeric: tabular-nums;
+			white-space: nowrap;
+		}
+
+		.dm-npc__batch-operation {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: flex-end;
+			gap: 8px;
+		}
+
+		.dm-npc__batch-operation-help {
+			display: block;
+			color: #666;
+			font-size: 0.72rem;
+			font-weight: 400;
+		}
+
+		.dm-npc__batch-operation-controls {
+			display: flex;
+			flex: 1 1 310px;
+			align-items: center;
+			justify-content: flex-end;
+			gap: 5px;
+		}
+
+		.dm-npc__batch-hp-input {
+			min-width: 120px;
+			max-width: 190px;
+		}
+
+		.dm-npc__batch-status {
+			max-width: 720px;
+			margin: 0 auto 8px;
+			padding: 7px 9px;
+			border: 1px solid #5ca45c;
+			border-radius: 4px;
+			background: #eff9ef;
+			color: #285f28;
+		}
+
 	.dm-npc__batch-empty {
 			display: flex;
 			align-items: center;
@@ -605,6 +693,20 @@
 		.dm-npc__batch-result-row--header > :nth-child(2) {
 			display: none;
 		}
+
+		.dm-npc__batch-member-list {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.dm-npc__batch-operation-controls {
+			align-items: stretch;
+			flex-direction: column;
+		}
+
+		.dm-npc__batch-hp-input {
+			width: 100%;
+			max-width: none;
+		}
 	}
 
 	@media (prefers-reduced-motion: reduce) {
@@ -646,8 +748,19 @@
 		}
 
 		.dm-npc__group-header,
+		.dm-npc__batch-members,
+		.dm-npc__batch-operation,
 		.dm-npc__batch-results,
 		.dm-npc__batch-result-row + .dm-npc__batch-result-row {
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		.dm-npc__batch-members,
+		.dm-npc__batch-operation {
+			background: vars-night.$rgb-bg--night;
+		}
+
+		.dm-npc__batch-member-list {
 			border-color: vars-night.$rgb-border-grey--night;
 		}
 
@@ -663,6 +776,17 @@
 
 		.dm-npc__group-empty {
 			color: #999;
+		}
+
+		.dm-npc__batch-member-hp,
+		.dm-npc__batch-operation-help {
+			color: #aaa;
+		}
+
+		.dm-npc__batch-status {
+			border-color: #4d8c4d;
+			background: rgb(77 140 77 / 15%);
+			color: #a9dca9;
 		}
 
 		.dm-npc__batch-error {

@@ -5,16 +5,20 @@ import {
 } from "./dmscreen-npctracker-roll.js";
 
 export class NpcTrackerBatch {
-	constructor ({fnGetContext, fnUpdateConfig, fnRoll, fnSort}) {
+	constructor ({fnGetContext, fnUpdateConfig, fnRoll, fnSort, fnToggleNpc, fnToggleAll, fnApplyHp, fnUndoHp}) {
 		this._fnGetContext = fnGetContext;
 		this._fnUpdateConfig = fnUpdateConfig;
 		this._fnRoll = fnRoll;
 		this._fnSort = fnSort;
+		this._fnToggleNpc = fnToggleNpc;
+		this._fnToggleAll = fnToggleAll;
+		this._fnApplyHp = fnApplyHp;
+		this._fnUndoHp = fnUndoHp;
 	}
 
 	render ({wrp, isNarrow = false, fnShowRoster = null}) {
 		wrp.empty();
-		const {batch, npcs} = this._fnGetContext();
+		const {batch, npcs, hasHpUndo} = this._fnGetContext();
 		if (!batch) return;
 
 		const btnBack = isNarrow
@@ -22,9 +26,10 @@ export class NpcTrackerBatch {
 				.onn("click", fnShowRoster)
 			: null;
 		const eleTitle = ee`<h2 class="dm-npc__batch-title"></h2>`;
-		eleTitle.textContent = `Batch Roll: ${batch.scopeName}`;
+		eleTitle.textContent = `Encounter Control: ${batch.scopeName}`;
 		const eleCount = ee`<span class="dm-npc__batch-count"></span>`;
-		eleCount.textContent = `${npcs.length} ${npcs.length === 1 ? "NPC" : "NPCs"}`;
+		const selectedCount = npcs.filter(npc => batch.selectedNpcIds.has(npc.id)).length;
+		eleCount.textContent = `${selectedCount} of ${npcs.length} selected`;
 
 		const selType = ee`<select class="ve-form-control ve-select ve-select-xs" aria-label="Batch roll type"></select>`;
 		NPC_TRACKER_ROLL_TYPES.forEach(({id, name}) => {
@@ -47,7 +52,7 @@ export class NpcTrackerBatch {
 
 		const btnRoll = ee`<button class="ve-btn ve-btn-primary ve-btn-xs" type="button"></button>`;
 		btnRoll.textContent = batch.isRolling ? "Rolling..." : batch.results.length ? "Roll Again" : "Roll";
-		btnRoll.disabled = batch.isRolling || !npcs.length;
+		btnRoll.disabled = batch.isRolling || !selectedCount;
 		btnRoll.onn("click", () => this._fnRoll());
 
 		const wrpControls = ee`<div class="dm-npc__batch-controls">
@@ -62,10 +67,18 @@ export class NpcTrackerBatch {
 		</div>`;
 		const wrpBody = wrpBatch.querySelector(".dm-npc__batch-body");
 
+		this._renderMembers({batch, npcs, wrp: wrpBody});
+		this._renderHpControls({batch, selectedCount, hasHpUndo, wrp: wrpBody});
+
 		if (batch.error) {
 			const eleError = ee`<div class="dm-npc__batch-error" role="alert"></div>`;
 			eleError.textContent = batch.error;
 			eleError.appendTo(wrpBody);
+		}
+		if (batch.operationMessage) {
+			const eleStatus = ee`<div class="dm-npc__batch-status" role="status"></div>`;
+			eleStatus.textContent = batch.operationMessage;
+			eleStatus.appendTo(wrpBody);
 		}
 
 		if (batch.results.length) this._renderResults({batch, wrp: wrpBody});
@@ -78,6 +91,50 @@ export class NpcTrackerBatch {
 		}
 
 		wrpBatch.appendTo(wrp);
+	}
+
+	_renderMembers ({batch, npcs, wrp}) {
+		const selectedCount = npcs.filter(npc => batch.selectedNpcIds.has(npc.id)).length;
+		const cbAll = ee`<input type="checkbox" aria-label="Select all NPCs in scope">`;
+		cbAll.checked = !!npcs.length && selectedCount === npcs.length;
+		cbAll.indeterminate = selectedCount > 0 && selectedCount < npcs.length;
+		cbAll.disabled = batch.isRolling || !npcs.length;
+		cbAll.onn("change", evt => this._fnToggleAll(evt.currentTarget.checked));
+
+		const wrpMembers = ee`<section class="dm-npc__batch-members">
+			<div class="dm-npc__batch-members-header"><label>${cbAll}<strong>Scope members</strong></label></div>
+			<div class="dm-npc__batch-member-list" role="list"></div>
+		</section>`;
+		const list = wrpMembers.querySelector(".dm-npc__batch-member-list");
+		npcs.forEach(npc => {
+			const cb = ee`<input type="checkbox">`;
+			cb.checked = batch.selectedNpcIds.has(npc.id);
+			cb.disabled = batch.isRolling;
+			cb.attr("aria-label", `Select ${npc.alias || npc.monster.name}`);
+			cb.onn("change", () => this._fnToggleNpc(npc.id));
+			const name = ee`<span class="dm-npc__batch-member-name"></span>`;
+			name.textContent = npc.alias || npc.monster.name;
+			const hp = ee`<span class="dm-npc__batch-member-hp"></span>`;
+			hp.textContent = `HP ${npc.hp.current}/${npc.hp.max}${npc.hp.temp ? ` +${npc.hp.temp}` : ""}`;
+			ee`<label class="dm-npc__batch-member" role="listitem">${cb}${name}${hp}</label>`.appendTo(list);
+		});
+		wrpMembers.appendTo(wrp);
+	}
+
+	_renderHpControls ({batch, selectedCount, hasHpUndo, wrp}) {
+		const input = ee`<input class="ve-form-control ve-input-xs dm-npc__batch-hp-input" type="text" placeholder="-30, +12, =15, or 8d6" aria-label="Batch HP expression">`;
+		const cbHalf = ee`<input type="checkbox" aria-label="Apply half value">`;
+		const btnApply = ee`<button class="ve-btn ve-btn-danger ve-btn-xs" type="button">Apply HP</button>`
+			.onn("click", () => this._fnApplyHp({raw: input.value, isHalf: cbHalf.checked}));
+		btnApply.disabled = batch.isRolling || !selectedCount;
+		const btnUndo = ee`<button class="ve-btn ve-btn-default ve-btn-xs" type="button">Undo HP</button>`
+			.onn("click", () => this._fnUndoHp());
+		btnUndo.disabled = batch.isRolling || !hasHpUndo;
+
+		ee`<section class="dm-npc__batch-operation">
+			<div><strong>Hit points</strong><span class="dm-npc__batch-operation-help">Unsigned values deal damage; damage consumes temporary HP first.</span></div>
+			<div class="dm-npc__batch-operation-controls">${input}<label class="dm-npc__batch-half">${cbHalf}<span>Half</span></label>${btnApply}${btnUndo}</div>
+		</section>`.appendTo(wrp);
 	}
 
 	_getKeySelect (batch) {
