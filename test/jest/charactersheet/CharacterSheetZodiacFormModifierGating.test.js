@@ -258,3 +258,70 @@ describe("#13 follow-up — orphaned feature-sourced named modifiers are cleaned
 		expect(abilityComp.name).toBe("INT modifier"); // NOT "INT modifier (swapped from …)"
 	});
 });
+
+/**
+ * CS-BUG-163 — the ACTIVATION analogue of the modifier leak above.
+ *
+ * `isZodiacFormFeature` already gated the modifier parser so a constellation's
+ * bonuses cannot leak while the druid is NOT in that form. The same reasoning
+ * applies to activation: a constellation DESCRIBES one option of "Zodiac Form:
+ * Month" and is never independently activatable — the parent owns activation
+ * (stateTypeId "zodiacForm" + needsFormChoice, routed to the Druid Resources
+ * modal) and the form's mechanics come from ZODIAC_FORM_DEFS `getEffects()`
+ * keyed off the active state's `formId`.
+ *
+ * Bee's prose ("When you activate this form, and as a Bonus Action … you can
+ * make a ranged spell attack") tripped the generic activation analysis into
+ * classifying it as its own `stateTypeId: "custom"` toggle. That surfaced a row
+ * in the Overview "Available to Activate" strip which was present, enabled,
+ * indistinguishable from a working toggle — and inert, because it never set a
+ * formId and so never ran any getEffects().
+ */
+describe("CS-BUG-163 — Zodiac constellations are not independently activatable", () => {
+	const mkForm = (name, description) => ({
+		name, source: "TGTT", className: "Druid", classSource: "TGTT",
+		subclassShortName: "Zodiac", subclassSource: "TGTT", level: 3, header: 2,
+		description,
+	});
+
+	test("Bee — the form whose wording tripped the analysis — is not activatable", () => {
+		const bee = mkForm("Bee", "When you activate this form, and as a Bonus Action on subsequent turns while it lasts, you can make a ranged spell attack against one creature within 60 feet. On a hit, the attack deals radiant damage equal to 1d8 + your Wisdom modifier.");
+		expect(CharacterSheetState.detectActivatableFeature(bee)).toBeNull();
+	});
+
+	test("every ZODIAC_FORM_DEFS constellation is non-activatable, whatever its wording", () => {
+		// Data-driven so a new tier's forms are covered as their defs are added,
+		// rather than pinning the one name that happened to regress.
+		const activatable = CharacterSheetState.ZODIAC_FORM_DEFS
+			.filter(def => CharacterSheetState.detectActivatableFeature(
+				mkForm(def.name, `When you activate this form you can ${def.summary || "do something"}.`),
+			))
+			.map(def => def.name);
+		expect(activatable).toEqual([]);
+	});
+
+	test("the PARENT feature still owns activation and still routes to the Druid Resources modal", () => {
+		// The guard must not disarm the working path: this is what makes the fix a
+		// redirection rather than a removal.
+		const parent = {
+			name: "Zodiac Form: Month", source: "TGTT", className: "Druid",
+			subclassShortName: "Zodiac", level: 3,
+			description: "You can use your Wild Shape to assume a zodiac form.",
+		};
+		const detected = CharacterSheetState.detectActivatableFeature(parent);
+		expect(detected).not.toBeNull();
+		expect(detected.stateTypeId).toBe("zodiacForm");
+		expect(detected.needsFormChoice).toBe(true);
+		expect(CharacterSheetState.isDruidResourceActivatable({stateTypeId: detected.stateTypeId, feature: parent})).toBe(true);
+	});
+
+	test("a same-named feature OUTSIDE the Zodiac subclass is unaffected", () => {
+		// The predicate is subclass-gated, so an unrelated 'Cat'/'Hound' feature
+		// elsewhere must keep whatever classification it had.
+		const impostor = {
+			name: "Bee", source: "XPHB", className: "Ranger", subclassShortName: "Beast Master",
+			description: "When you activate this form, and as a Bonus Action on subsequent turns while it lasts, you can make a ranged spell attack against one creature within 60 feet.",
+		};
+		expect(CharacterSheetState.detectActivatableFeature(impostor)).not.toBeNull();
+	});
+});

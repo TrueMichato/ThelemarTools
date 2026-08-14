@@ -9568,7 +9568,7 @@ asserting the new behaviour red, while the Lycan test, the single-row test, the
 already-chosen-from-the-pool test and the below-level test stay green — those hold
 under both versions, so the control discriminates rather than covaries.
 
-## CS-BUG-163 — activating a Zodiac constellation from the Overview strip does nothing — OPEN
+## CS-BUG-163 — activating a Zodiac constellation from the Overview strip did nothing — FIXED
 
 **Symptom.** A Circle of the Zodiac druid at L5 sees a row named after its chosen
 constellation (e.g. **Bee**) under *Available to Activate* on the Overview tab, with
@@ -9617,6 +9617,47 @@ of the constellations, which is precisely why the strip was showing one. The ski
 generalised a correct statement about one row to a different row it does not cover —
 the same shape as CS-BUG-162.
 
-**Scope note.** Whether the constellation rows *should* be activatable from the strip
-at all, or should be filtered like their parent, is a design decision. Either
-resolution fixes the defect: today the row is present, enabled, and inert.
+**Fix.** One guard in `detectActivatableFeature`, beside the CS-BUG-051
+`isReferenceWrapperFeature` guard it mirrors:
+
+```js
+if (CharacterSheetState.isZodiacFormFeature(feature)) return null;
+```
+
+`isZodiacFormFeature` already existed. It was written to stop the *modifier* parser
+registering a constellation's bonuses as always-on (they apply only while
+transformed), and it is subclass-gated and matched against `ZODIAC_FORM_DEFS`, so
+new tiers are covered as their defs are added. The activation case is the same
+argument about the same features, so the existing predicate is consulted rather than
+a new list of names introduced.
+
+**The fix removes the control rather than making it work**, which is the correct
+resolution: a constellation *describes* one option of its parent, and the parent
+already owns activation and routes to the Druid Resources modal. Nothing becomes
+unreachable — the form's mechanics were only ever obtainable through that modal.
+
+**Bee was a lone false positive.** Only its wording ("When you activate this form,
+and as a Bonus Action … you can make a ranged spell attack") tripped the generic
+activation analysis; the other 11 forms already returned `null`, which is why the
+strip showed one row and not twelve. `ZODIAC_FORM_EFFECTS` in
+`test/e2e/utils/tgttFeatureEffects.ts` had independently recorded the intended rule —
+*"none of the 12 Zodiac forms is a toggle"* — so the fix makes the code agree with a
+statement the test corpus and `isZodiacFormFeature`'s own docstring were already
+making. The fix makes all 12 consistent rather than changing a working behaviour.
+
+**Verification.** `CharacterSheetZodiacFormModifierGating.test.js` gains four tests:
+Bee specifically, a data-driven sweep asserting *every* `ZODIAC_FORM_DEFS` entry is
+non-activatable whatever its wording, the parent still resolving to
+`stateTypeId: "zodiacForm"` + `needsFormChoice` (so the fix is a redirection, not a
+removal), and an identically-worded feature *outside* the Zodiac subclass staying
+activatable (so the guard does not over-reach).
+
+**Negative control.** Disabling the guard turns exactly the two tests asserting the
+new behaviour red; the parent-path and subclass-gating tests stay green under both
+versions, so the control discriminates rather than covaries. End-to-end, the live
+Overview strip went from `Bee, Wild Resurgence` to `Wild Resurgence`.
+
+**Coverage note.** `ZODIAC_FORM_EFFECTS` is existence-only for all 24 forms — a
+pre-existing, documented limitation, not one introduced here. Asserting a
+constellation's *effect* end-to-end needs a page-object that can drive the Druid
+Resources modal, which does not exist yet.

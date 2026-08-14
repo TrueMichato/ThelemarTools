@@ -55838,6 +55838,25 @@ class CharacterSheetState {
 		// (CS-BUG-051) Pure "here are the options you gained" wrappers are never independently
 		// activatable — their children carry the mechanics and their own rows.
 		if (CharacterSheetState.isReferenceWrapperFeature(feature)) return null;
+		// (CS-BUG-163) A constellation form (Bee / Roc / Aurochs / …) DESCRIBES one
+		// option of "Zodiac Form: Month"; it is never independently activatable.
+		// Activation is owned by the parent feature, which carries
+		// `stateTypeId: "zodiacForm"` + `needsFormChoice` and is routed to the Druid
+		// Resources modal, and the form's mechanics come from ZODIAC_FORM_DEFS
+		// `getEffects()` keyed off the active state's `formId`.
+		//
+		// Without this guard the generic prose analysis promoted any constellation
+		// whose text happens to read like an activation ("When you activate this
+		// form, and as a Bonus Action … you can make a ranged spell attack") into
+		// its own `stateTypeId: "custom"` toggle. That produced a strip row that was
+		// present, enabled, indistinguishable from a working toggle, and completely
+		// inert — it never set a `formId`, so no `getEffects()` ever ran. Bee was the
+		// only form whose wording tripped it; the other 11 were already `null`, so
+		// this makes all 12 consistent rather than changing a working behaviour.
+		//
+		// Reuses the existing `isZodiacFormFeature` predicate (subclass-gated, matched
+		// against ZODIAC_FORM_DEFS) so new tiers are covered as their defs are added.
+		if (CharacterSheetState.isZodiacFormFeature(feature)) return null;
 		const name = feature?.name?.toLowerCase() || "";
 		const isCrimsonRite = feature?.optionalFeatureTypes?.includes("CR");
 		const isBloodCurse = feature?.optionalFeatureTypes?.includes("BC");

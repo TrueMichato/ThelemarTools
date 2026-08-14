@@ -424,24 +424,26 @@ describeCharacter({
 describeCharacter({
 	preset: PRESET_FULL_ZODIAC_CENTAUR,
 	displayName: "Zodiac Druid Centaur",
-	// The Zodiac Form DOES reach the Overview activatable strip — but under the
-	// name of the *chosen constellation* ("Bee"), never the string "Zodiac
-	// Form". An earlier `/zodiac|starry|wild shape/i` pattern matched nothing
-	// and skipped silently, and its skip reason (that
+	// Circle of the Zodiac has no L5 strip toggle, and that is the CORRECT end
+	// state rather than a coverage gap.
+	//
+	// History (CS-BUG-163, now FIXED): an earlier `/zodiac|starry|wild shape/i`
+	// pattern matched nothing and skipped silently, justified by the claim that
 	// `isDruidResourceActivatable` removes Zodiac forms from the strip by
-	// design) is true of the PARENT "Zodiac Form: Month" feature and false of
-	// the constellation rows — which is why the strip was showing one.
+	// design. That claim is true of the PARENT "Zodiac Form: Month" feature and
+	// false of the constellation rows — and a `Bee` row was sitting in the strip
+	// disproving it. Pointing the probe at the 12 month constellations found
+	// that row, flipped it, and measured zero delta: generic prose analysis had
+	// promoted a descriptive `header: 2` child into its own `custom` toggle that
+	// never set a formId, so no `getEffects()` ever ran.
 	//
-	// Pointing the probe at the 12 month constellations found the row, flipped
-	// it, and measured zero delta across every derived surface: activating a
-	// constellation from the strip bypasses `activateZodiacForm()`, so no
-	// formId is attached and the form def's `getEffects()` (Bee's radiant
-	// bonus-action attack) never runs. Filed as CS-BUG-163.
-	//
-	// blocked by CS-BUG-163 — restore this to a real probe once the strip row
-	// either activates the form properly or is filtered like its parent:
-	//   signatureToggle: /^(beaver|aurochs|horse|octopus|peacock|roc|bee|hound|cat|griffon|bulette|phoenix)$/i,
-	signatureToggleSkip: {skip: true, reason: "blocked by CS-BUG-163 — the constellation row (e.g. Bee) IS present and enabled in the Overview strip, but activating it bypasses activateZodiacForm(), so no formId is set, the form definition's getEffects() never runs, and the toggle produces no measurable effect; Zodiac Form's working path is the Druid Resources modal and every constellation is covered by buildZodiacFormChecks()"},
+	// The fix REMOVES the row rather than making it work — a constellation
+	// describes one option of its parent and was never independently
+	// activatable, so the correct surface is the Druid Resources modal that the
+	// parent routes to. The skip therefore outlives the bug legitimately; what
+	// changed is that its reason is now true, and verified live (the strip lists
+	// only Wild Resurgence).
+	signatureToggleSkip: {skip: true, reason: "Circle of the Zodiac has no L5 strip toggle by design: a constellation (Bee / Roc / ...) describes one option of \"Zodiac Form: Month\", and activation is owned by that parent feature, which carries needsFormChoice and is routed to the dedicated Druid Resources modal. Verified live: the strip lists only Wild Resurgence. Every form is covered by buildZodiacFormChecks(), and CS-BUG-163 pins the classification in CharacterSheetZodiacFormModifierGating.test.js"},
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [
