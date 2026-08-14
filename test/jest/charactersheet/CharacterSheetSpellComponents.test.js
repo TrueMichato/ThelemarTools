@@ -14,12 +14,31 @@
  */
 
 import {jest} from "@jest/globals";
+import {readFileSync} from "fs";
+import {resolve, dirname} from "path";
+import {fileURLToPath} from "url";
 import "./setup.js";
+import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-inventory.js";
 import "../../../js/charactersheet/charactersheet-spells.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const CharacterSheetInventory = globalThis.CharacterSheetInventory;
 const CharacterSheetSpells = globalThis.CharacterSheetSpells;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(__dirname, "..", "..", "..");
+const baseItems = JSON.parse(readFileSync(resolve(REPO_ROOT, "data/items-base.json"), "utf8")).baseitem;
+const items = JSON.parse(readFileSync(resolve(REPO_ROOT, "data/items.json"), "utf8")).item;
+
+if (typeof globalThis.document === "undefined") {
+	globalThis.document = {
+		addEventListener () {},
+		getElementById () { return null; },
+		querySelector () { return null; },
+		querySelectorAll () { return []; },
+	};
+}
 
 /* -------------------------------------------------------------------------- */
 /* Fixtures                                                                    */
@@ -61,6 +80,16 @@ function makeSpells (state, allSpells) {
 	spells._allSpells = allSpells;
 	spells._page = {saveCharacter: () => {}};
 	return spells;
+}
+
+function makeInventory (state) {
+	const inventory = new CharacterSheetInventory({
+		getState: () => state,
+		saveCharacter: () => {},
+	});
+	inventory._renderItemList = () => {};
+	inventory._updateEncumbrance = () => {};
+	return inventory;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -152,12 +181,70 @@ describe("getSpellcastingFocusStatus", () => {
 		expect(status.source).toBe("arcane focus");
 	});
 
+	it.each(["PHB", "XPHB"])("preserves %s Orb focus metadata through the real catalog add path", (source) => {
+		const state = makeState();
+		const inventory = makeInventory(state);
+		const orb = baseItems.find(item => item.name === "Orb" && item.source === source);
+
+		inventory._addItem(orb);
+
+		const stored = state.getItems().find(item => item.name === "Orb" && item.source === source);
+		expect(stored).toEqual(expect.objectContaining({
+			type: "gear",
+			typeCode: source === "PHB" ? "SCF" : "SCF|XPHB",
+			scfType: "arcane",
+		}));
+		expect(state.getSpellcastingFocusStatus()).toEqual(expect.objectContaining({
+			ok: true,
+			source: "arcane focus",
+			itemName: "Orb",
+		}));
+
+		const spells = makeSpells(state, [SPELL_NO_COST]);
+		expect(spells._checkCastingConstraints(SPELL_NO_COST, SPELL_NO_COST, null, {enforceMaterial: true}).block).toBeNull();
+	});
+
+	it("rehydrates a legacy coarse Orb row during load", () => {
+		const state = makeState();
+		const orb = baseItems.find(item => item.name === "Orb" && item.source === "XPHB");
+		state.setItemCatalog([orb]);
+		const legacy = state.toJson();
+		legacy.inventory = [{
+			id: "legacy-orb",
+			item: {name: "Orb", source: "XPHB", type: "gear"},
+			quantity: 1,
+			equipped: false,
+			attuned: false,
+		}];
+
+		state.loadFromJson(legacy);
+
+		expect(state.getItemRaw("legacy-orb")).toEqual(expect.objectContaining({
+			type: "gear",
+			typeCode: "SCF|XPHB",
+			scfType: "arcane",
+		}));
+		expect(state.getSpellcastingFocusStatus().ok).toBe(true);
+	});
+
 	it("is true with a component pouch (matched by name)", () => {
 		const state = makeState();
 		state.addItem({name: "Component Pouch", source: "PHB", type: "G", _isCustom: true});
 		const status = state.getSpellcastingFocusStatus();
 		expect(status.ok).toBe(true);
 		expect(status.itemName).toBe("Component Pouch");
+	});
+
+	it("recognises a component pouch added through the catalog inventory path", () => {
+		const state = makeState();
+		const inventory = makeInventory(state);
+		const pouch = items.find(item => item.name === "Component Pouch" && item.source === "XPHB");
+		inventory._addItem(pouch);
+		expect(state.getSpellcastingFocusStatus()).toEqual(expect.objectContaining({
+			ok: true,
+			source: "component pouch",
+			itemName: "Component Pouch",
+		}));
 	});
 
 	it("is true via Spellsword Technique with a melee weapon possessed", () => {
@@ -253,6 +340,8 @@ describe("_checkCastingConstraints material gate", () => {
 		const spells = makeSpells(state, [SPELL_NO_COST]);
 		const {block} = spells._checkCastingConstraints(SPELL_NO_COST, SPELL_NO_COST, null, {enforceMaterial: true});
 		expect(block).toMatch(/focus or component pouch/i);
+		expect(block).toMatch(/none carried or otherwise possessed/i);
+		expect(block).not.toMatch(/none equipped|equip one/i);
 	});
 
 	it("allows a no-cost material spell once a focus is equipped", () => {

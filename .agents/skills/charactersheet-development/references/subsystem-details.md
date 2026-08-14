@@ -470,12 +470,39 @@ A Divine Soul Sorcerer's affinity grants ONE always-prepared spell (Good → cur
 ### Items (`_data.inventory[]`)
 ```javascript
 {
-    item: {name, source, rarity, type, ...},  // Full 5etools item object
+    item: {
+        name, source, rarity,
+        type,       // Coarse inventory category ("gear", "weapon", ...)
+        typeCode,   // Authoritative 5etools code, including suffix ("SCF|XPHB")
+        scfType, focus,
+        ...
+    },
     quantity: 3,
     equipped: true,
     attuned: false,
 }
 ```
+
+Catalog adds preserve both type layers: inventory grouping continues to use the coarse
+`type`, while rules logic reads `typeCode` first and strips any `|source` suffix.
+`CharacterSheetInventory.setItems()` injects the enhanced catalog into state;
+`loadFromJson()` then repairs missing `typeCode` / `scfType` / `focus` by exact,
+case-insensitive `name|source`. The migration is idempotent, skips custom items, and
+never overwrites metadata already present on the save.
+
+### Usable adventuring gear
+
+`getUsableGear()` is the canonical read API for type-`G` items whose entries declare an
+Attack/Utilize action or legacy action prose. Every activation has one explicit policy:
+
+- `consume`: Acid, Alchemist's Fire, Holy Water, and Oil variants decrement quantity.
+- `deploy-recoverable`: Ball Bearings and Caltrops remain in inventory after deployment.
+- `reference-only`: ambiguous gear such as Rope requires confirmation and is never removed.
+
+Combat renders these activations through the quick-use item surface. Derived item powers
+carry a stable activation fingerprint; `getItemPowers()` suppresses a power only when its
+`itemId + activationFingerprint` matches usable gear, preventing duplicate controls while
+preserving unrelated powers on the same item.
 
 ### Item Bonuses (tracked separately)
 ```javascript

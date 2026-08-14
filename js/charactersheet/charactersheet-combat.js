@@ -2719,14 +2719,25 @@ class CharacterSheetCombat {
 		if (!container) return;
 
 		const inv = this._page?._inventory;
-		const items = (this._state.getItems?.() || []).filter(it => inv?._isConsumable?.(it));
+		const usableGear = this._state.getUsableGear?.() || [];
+		const usableItemIds = new Set(usableGear.map(activation => activation.itemId));
+		const items = (this._state.getItems?.() || [])
+			.filter(it => !usableItemIds.has(it.id) && inv?._isConsumable?.(it));
 
-		if (!items.length) {
+		if (!items.length && !usableGear.length) {
 			if (section) section.style.display = "none";
 			container.innerHTML = "";
 			return;
 		}
 		if (section) section.style.display = "";
+		const title = section?.querySelector?.(".charsheet__section-title");
+		if (title) {
+			title.textContent = items.length && usableGear.length
+				? "🎒 Consumables & Usable Gear"
+				: usableGear.length
+					? "🎒 Usable Items"
+					: "🧪 Consumables";
+		}
 
 		container.innerHTML = "";
 		const settings = this._state.getSettings?.() || {};
@@ -2765,6 +2776,43 @@ class CharacterSheetCombat {
 							console.error("[CharSheet Combat] Error using consumable:", err);
 						});
 				});
+			});
+			container.append(row);
+		});
+
+		usableGear.forEach((activation) => {
+			const item = activation.itemHoverData;
+			const qty = activation.quantity || 1;
+			const nameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(item);
+			const safeName = CharacterSheetClassUtils.escapeHtml(activation.itemName);
+			const safeId = CharacterSheetClassUtils.escapeHtml(activation.itemId);
+			const safeFingerprint = CharacterSheetClassUtils.escapeHtml(activation.activationFingerprint);
+			const policyMeta = {
+				"consume": {label: "Consumed on use", button: "Use"},
+				"deploy-recoverable": {label: "Recoverable", button: "Deploy"},
+				"reference-only": {label: "Rules reference", button: "Resolve"},
+			}[activation.policy] || {label: "Rules reference", button: "Resolve"};
+			const activationLabel = activation.label && activation.label !== activation.itemName
+				? `<span class="ve-muted ve-small">${CharacterSheetClassUtils.escapeHtml(activation.label)}</span>`
+				: "";
+			const row = e_({outer: `
+				<div class="charsheet__combat-consumable ve-flex ve-flex-v-center ve-flex-wrap gap-1" data-item-id="${safeId}" data-activation="${safeFingerprint}">
+					<span class="charsheet__combat-consumable-icon" title="Usable gear">🎒</span>
+					<span class="bold charsheet__combat-consumable-name">${nameHtml}</span>
+					${activationLabel}
+					<span class="ve-muted ve-small charsheet__combat-consumable-qty">×${qty}</span>
+					<span class="badge badge-secondary ve-small">${policyMeta.label}</span>
+					<button class="ve-btn ve-btn-xs ve-btn-primary ml-auto charsheet__combat-gear-use" title="${policyMeta.button} ${safeName}">${policyMeta.button}</button>
+				</div>
+			`});
+			row.querySelector(".charsheet__combat-gear-use")?.addEventListener("click", (/** @type {*} */ evt) => {
+				evt.stopPropagation();
+				Promise.resolve(inv?._useUsableGear?.(activation.itemId, activation.activationFingerprint))
+					.then(() => this.renderCombatConsumables())
+					.catch((err) => {
+						// eslint-disable-next-line no-console
+						console.error("[CharSheet Combat] Error using gear:", err);
+					});
 			});
 			container.append(row);
 		});
