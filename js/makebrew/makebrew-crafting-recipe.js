@@ -2,7 +2,6 @@ import {
 	CRAFTING_WORKBENCH_VOCABULARY,
 	CraftingWorkbenchCore,
 } from "../itembuilder/crafting-workbench-core.js";
-import {RenderCrafting} from "../render-crafting.js";
 import {BuilderUi} from "./makebrew-builderui.js";
 import {CraftingWorkbenchBuilderBase} from "./makebrew-crafting-workbench.js";
 
@@ -103,23 +102,6 @@ export class CraftingRecipeBuilder extends CraftingWorkbenchBuilderBase {
 		return select;
 	}
 
-	_renderNullableBoolean ({wrp, label, object, prop, cb}) {
-		const state = {value: object[prop] == null ? "" : `${object[prop]}`};
-		this._renderSelect({
-			wrp,
-			label,
-			object: state,
-			prop: "value",
-			values: ["true", "false"],
-			cb: () => {
-				if (state.value === "") delete object[prop];
-				else object[prop] = state.value === "true";
-				cb();
-			},
-			fnDisplay: value => value === "true" ? "Yes" : "No",
-		});
-	}
-
 	_renderBaseStage ({wrp, cb}) {
 		const section = ee`<section class="mkbru_cw__section">
 			<h3>Identity</h3>
@@ -190,7 +172,7 @@ export class CraftingRecipeBuilder extends CraftingWorkbenchBuilderBase {
 			cb,
 			fnDisplay: it => it.toTitleCase(),
 		});
-		this._renderNullableBoolean({wrp: requirements, label: "Requires attunement", object: this._draft, prop: "reqAttune", cb});
+		this._renderAttunement({wrp: requirements, cb});
 
 		const output = ee`<section class="mkbru_cw__section">
 			<h3>Crafted output</h3>
@@ -198,6 +180,53 @@ export class CraftingRecipeBuilder extends CraftingWorkbenchBuilderBase {
 		</section>`.appendTo(wrp);
 		this._renderNumber({wrp: output, label: "Output value (cp)", object: this._draft, prop: "value", cb});
 		this._renderText({wrp: output, label: "Item UID", object: this._draft, prop: "itemUid", cb, placeholder: "item name|source"});
+	}
+
+	_renderAttunement ({wrp, cb}) {
+		const state = {
+			mode: this.constructor.getAttunementMode(this._draft.reqAttune),
+		};
+		this._renderSelect({
+			wrp,
+			label: "Requires attunement",
+			object: state,
+			prop: "mode",
+			values: ["true", "false", "custom"],
+			cb: () => {
+				this.constructor.setAttunementMode(this._draft, state.mode);
+				this._doSync({isRenderInput: true});
+			},
+			fnDisplay: value => ({
+				"true": "Yes",
+				"false": "No",
+				"custom": "Custom requirement",
+			})[value],
+		});
+		if (state.mode !== "custom") return;
+		this._renderText({
+			wrp,
+			label: "Custom attunement text",
+			object: this._draft,
+			prop: "reqAttune",
+			cb,
+			placeholder: "by a spellcaster",
+			hint: "Use canonical text such as “by a bard” or “by a creature of good alignment.”",
+		});
+	}
+
+	static getAttunementMode (reqAttune) {
+		if (typeof reqAttune === "string") return "custom";
+		if (reqAttune == null) return "";
+		return `${reqAttune}`;
+	}
+
+	static setAttunementMode (entity, mode) {
+		switch (mode) {
+			case "true": entity.reqAttune = true; break;
+			case "false": entity.reqAttune = false; break;
+			case "custom": entity.reqAttune = typeof entity.reqAttune === "string" ? entity.reqAttune : ""; break;
+			default: delete entity.reqAttune;
+		}
 	}
 
 	_renderIngredientsStage ({wrp}) {
@@ -384,19 +413,18 @@ export class CraftingRecipeBuilder extends CraftingWorkbenchBuilderBase {
 	_renderReviewContent () {
 		const wrp = this._wrpReview.empty();
 		const canonical = CraftingWorkbenchCore.serialize("craftingRecipe", this._draft, this._getCoreOptions());
-		const preview = this.constructor.getPreviewEntity("craftingRecipe", canonical);
-		const previewTable = ee`<table class="ve-w-100 ve-stats" aria-label="Crafting recipe review preview"></table>`;
+		const previewWrapper = ee`<div class="mkbru_cw__review-preview"></div>`;
 		const unresolved = this._draft.ingredients.filter(ingredient => !ingredient._materialRef).length;
 		ee`<section class="mkbru_cw__review">
 			<div class="mkbru_cw__review-summary">
-				<h3>Review ${this._draft.name || "unnamed recipe"}</h3>
-				<p>${(this._draft.recipeCategory || "No category").toTitleCase()} · ${this._draft.source || "No source"}</p>
+				<h3>Review ${this._getDisplayText(this._draft.name, {fallback: "unnamed recipe"})}</h3>
+				<p>${this._getDisplayText(this._draft.recipeCategory, {fallback: "No category", isTitleCase: true})} · ${this._getDisplayText(this._draft.source, {fallback: "No source"})}</p>
 				<p>${this._draft.ingredients.length} ingredient${this._draft.ingredients.length === 1 ? "" : "s"} · ${unresolved} unresolved · ${this._draft.outcomes.length} outcome tier${this._draft.outcomes.length === 1 ? "" : "s"}</p>
 				<p class="ve-muted">Resolve any validation error above, then use Save in the builder toolbar. Unresolved material names are warnings and remain intact.</p>
 			</div>
-			<div class="mkbru_cw__review-preview">${previewTable}</div>
+			${previewWrapper}
 		</section>`.appendTo(wrp);
-		previewTable.appends(RenderCrafting.getRenderedCrafting(preview, {isSkipExcludesRender: true}));
+		this._renderPreview({wrp: previewWrapper, prop: "craftingRecipe", entity: canonical, label: "Crafting recipe review"});
 		this._renderAdvancedJson({wrp});
 	}
 }

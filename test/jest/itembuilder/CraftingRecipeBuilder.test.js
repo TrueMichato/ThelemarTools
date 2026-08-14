@@ -1,4 +1,5 @@
 import "../charactersheet/setup.js";
+import {jest} from "@jest/globals";
 
 globalThis.MiscUtil.throttle ||= fn => fn;
 globalThis.MiscUtil.debounce ||= fn => fn;
@@ -27,6 +28,8 @@ globalThis.DataUtil.cleanJson ||= entity => entity;
 globalThis.BrewUtil2 ||= {};
 
 const {PropOrder} = await import("../../../js/utils-proporder.js");
+const {CraftingWorkbenchCore} = await import("../../../js/itembuilder/crafting-workbench-core.js");
+const {RenderCrafting} = await import("../../../js/render-crafting.js");
 const {BuilderBase} = await import("../../../js/makebrew/makebrew-builder-base.js");
 const {CraftingWorkbenchBuilderBase} = await import("../../../js/makebrew/makebrew-crafting-workbench.js");
 const {CraftingRecipeBuilder} = await import("../../../js/makebrew/makebrew-crafting-recipe.js");
@@ -103,6 +106,65 @@ describe("CraftingRecipeBuilder", () => {
 
 		expect(preview).toEqual({...entity, ingredients: [], outcomes: [], entries: [], __prop: "craftingRecipe"});
 		expect(entity).not.toHaveProperty("__prop");
+	});
+
+	test("models custom attunement text and varies rarity for requirements controls", () => {
+		expect(CraftingWorkbenchCore.VOCABULARY.rarities).toContain("varies");
+		expect(CraftingRecipeBuilder.getAttunementMode("by a spellcaster")).toBe("custom");
+
+		const entity = {reqAttune: "by a spellcaster"};
+		CraftingRecipeBuilder.setAttunementMode(entity, "custom");
+		expect(entity.reqAttune).toBe("by a spellcaster");
+		CraftingRecipeBuilder.setAttunementMode(entity, "true");
+		expect(entity.reqAttune).toBe(true);
+		CraftingRecipeBuilder.setAttunementMode(entity, "custom");
+		expect(entity.reqAttune).toBe("");
+	});
+
+	test("keeps malformed advanced category and rarity errors while falling back review preview", () => {
+		const builder = new CraftingRecipeBuilder();
+		builder._draft = CraftingWorkbenchCore.normalize("craftingRecipe", {
+			name: "Malformed Tonic",
+			source: "HB",
+			recipeCategory: {value: "potion"},
+			rarity: ["rare"],
+		});
+		const getElement = () => {
+			const out = globalThis.e_({});
+			out.appendTo = parent => { parent.append(out); return out; };
+			out.empty = () => { out._children = []; out._html = ""; return out; };
+			out.attr = () => out;
+			out.prop = () => out;
+			out.txt = value => { out.textContent = value; return out; };
+			out.val = () => "";
+			out.onn = () => out;
+			out.appends = (...children) => { out.append(...children); return out; };
+			return out;
+		};
+		const eeOriginal = globalThis.ee;
+		const qqOriginal = String.prototype.qq;
+		globalThis.ee = getElement;
+		String.prototype.qq ||= function () { return `${this}`; };
+		builder._wrpValidation = getElement();
+		builder._wrpReview = getElement();
+		const renderSpy = jest.spyOn(RenderCrafting, "getRenderedCrafting");
+
+		try {
+			expect(() => builder._refreshValidation()).not.toThrow();
+			expect(builder._validation.errors).toEqual(expect.arrayContaining([
+				expect.objectContaining({field: "recipeCategory"}),
+				expect.objectContaining({field: "rarity"}),
+			]));
+			expect(builder._getDisplayText(builder._draft.recipeCategory, {fallback: "No category", isTitleCase: true})).toBe("No category");
+			expect(builder._getDisplayText(builder._draft.rarity, {fallback: "No rarity", isTitleCase: true})).toBe("No rarity");
+			expect(() => builder._renderReviewContent()).not.toThrow();
+			expect(renderSpy).not.toHaveBeenCalled();
+		} finally {
+			renderSpy.mockRestore();
+			globalThis.ee = eeOriginal;
+			if (qqOriginal) String.prototype.qq = qqOriginal;
+			else delete String.prototype.qq;
+		}
 	});
 
 	test("material catalog loader merges generated and installed Brew without duplicate identities", async () => {

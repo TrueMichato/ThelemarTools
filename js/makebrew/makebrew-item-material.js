@@ -2,7 +2,6 @@ import {
 	CRAFTING_WORKBENCH_VOCABULARY,
 	CraftingWorkbenchCore,
 } from "../itembuilder/crafting-workbench-core.js";
-import {RenderCrafting} from "../render-crafting.js";
 import {BuilderUi} from "./makebrew-builderui.js";
 import {CraftingWorkbenchBuilderBase} from "./makebrew-crafting-workbench.js";
 
@@ -545,18 +544,17 @@ export class ItemMaterialBuilder extends CraftingWorkbenchBuilderBase {
 
 	_renderReviewContent () {
 		const wrp = this._wrpReview.empty();
-		const preview = this.constructor.getPreviewEntity("itemMaterial", this._draft);
-		const previewTable = ee`<table class="ve-w-100 ve-stats" aria-label="Item material review preview"></table>`;
+		const previewWrapper = ee`<div class="mkbru_cw__review-preview"></div>`;
 		ee`<section class="mkbru_cw__review">
 			<div class="mkbru_cw__review-summary">
-				<h3>Review ${this._draft.name || "unnamed material"}</h3>
-				<p>${(this._draft.materialCategory || "No category").toTitleCase()} · ${this._draft.source || "No source"}</p>
+				<h3>Review ${this._getDisplayText(this._draft.name, {fallback: "unnamed material"})}</h3>
+				<p>${this._getDisplayText(this._draft.materialCategory, {fallback: "No category", isTitleCase: true})} · ${this._getDisplayText(this._draft.source, {fallback: "No source"})}</p>
 				<p>${this._draft.effects.length} effect${this._draft.effects.length === 1 ? "" : "s"} · ${this._draft.magicCapacityRules.length} Magic Capacity rule${this._draft.magicCapacityRules.length === 1 ? "" : "s"}${this._draft.degradation ? " · Degrades in use" : ""}</p>
 				<p class="ve-muted">Resolve any validation message above, then use Save in the builder toolbar.</p>
 			</div>
-			<div class="mkbru_cw__review-preview">${previewTable}</div>
+			${previewWrapper}
 		</section>`.appendTo(wrp);
-		previewTable.appends(RenderCrafting.getRenderedCrafting(preview, {isSkipExcludesRender: true}));
+		this._renderPreview({wrp: previewWrapper, prop: "itemMaterial", entity: this._draft, label: "Item material review"});
 		BuilderUi.getStateIptEntries(
 			"Description",
 			() => this._doSync(),

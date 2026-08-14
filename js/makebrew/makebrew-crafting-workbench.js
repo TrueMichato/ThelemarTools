@@ -165,6 +165,33 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 
 	_refreshReview () {}
 
+	_getDisplayText (value, {fallback, isTitleCase = false} = {}) {
+		if (!["string", "number", "boolean"].includes(typeof value)) return fallback;
+		const text = `${value}`.trim();
+		if (!text) return fallback;
+		return isTitleCase ? text.toTitleCase() : text;
+	}
+
+	_renderPreview ({wrp, prop = this._prop, entity, label = Parser.getPropDisplayName(prop)}) {
+		const validation = CraftingWorkbenchCore.validate(prop, entity, this._getCoreOptions());
+		if (validation.errors.length) {
+			ee`<div class="ve-muted ve-small">Preview unavailable: ${validation.errors[0].message.qq()}</div>`.appendTo(wrp);
+			return false;
+		}
+
+		try {
+			const preview = this.constructor.getPreviewEntity(prop, entity);
+			const previewTable = ee`<table class="ve-w-100 ve-stats" aria-label="${label.qq()} preview"></table>`;
+			previewTable.appends(RenderCrafting.getRenderedCrafting(preview, {isSkipExcludesRender: true}));
+			previewTable.appendTo(wrp);
+			return true;
+		} catch {
+			wrp.empty();
+			ee`<div class="ve-muted ve-small">Preview unavailable until invalid advanced data is corrected.</div>`.appendTo(wrp);
+			return false;
+		}
+	}
+
 	_renderAdvancedJson ({wrp}) {
 		const msg = ee`<div class="ve-small ve-mt-2" role="status" aria-live="polite"></div>`;
 		const canonical = CraftingWorkbenchCore.serialize(this._prop, this._draft, this._getCoreOptions());
@@ -280,9 +307,7 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 		tabs.forEach(it => it.wrpTab.appendTo(wrp));
 
 		const canonical = CraftingWorkbenchCore.serialize(this._prop, this.__state, this._getCoreOptions());
-		const preview = this.constructor.getPreviewEntity(this._prop, canonical);
-		const previewTable = ee`<table class="ve-w-100 ve-stats" aria-label="${Parser.getPropDisplayName(this._prop)} preview"></table>`.appendTo(previewTab.wrpTab);
-		previewTable.appends(RenderCrafting.getRenderedCrafting(preview, {isSkipExcludesRender: true}));
+		this._renderPreview({wrp: previewTab.wrpTab, entity: canonical});
 
 		const clean = DataUtil.cleanJson(MiscUtil.copy(canonical));
 		const dataHtml = Renderer.get().render({type: "entries", entries: [{type: "code", name: "Data", preformatted: JSON.stringify(clean, null, "\t")}]});

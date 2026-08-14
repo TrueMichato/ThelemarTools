@@ -71,6 +71,7 @@ const _CRAFTING_MATERIAL_EFFECT_TYPES = [
 	"removeConcentration",
 	"immunity",
 ];
+const _RARITIES = ["none", "common", "uncommon", "rare", "very rare", "legendary", "artifact", "varies", "unknown"];
 const _CRAFTING_MATERIAL_DERIVED_PROPS = new Set([
 	"usedInRecipes",
 	"alsoIn",
@@ -121,7 +122,7 @@ export const CRAFTING_WORKBENCH_VOCABULARY = Object.freeze({
 		complexities: Object.freeze(["simple", "special"]),
 		outcomeTiers: Object.freeze(["success", "delicious", "extraDelicious"]),
 	}),
-	rarities: Object.freeze(["none", "common", "uncommon", "rare", "very rare", "legendary", "artifact", "unknown"]),
+	rarities: Object.freeze(_RARITIES),
 });
 
 function _getProp (prop) {
@@ -269,8 +270,22 @@ function _serializeCraftingRecipe (entity, {materialCatalog = null} = {}) {
 		.map(([set]) => set)
 		.sort((a, b) => alternativeSetLabels.get(a).localeCompare(alternativeSetLabels.get(b), undefined, {numeric: true, sensitivity: "base"}));
 	const alternativeSetToGroup = new Map(alternativeSets.map((set, ix) => [set, `alt-${ix}`]));
+	const alternativeSetAnchors = new Map(
+		alternativeSets.map(set => [Math.min(...alternativeRows.get(set).map(it => it.ix)), set]),
+	);
+	const ingredientsOrdered = [];
+	out.ingredients.forEach((ingredient, ix) => {
+		const set = _key(ingredient._alternativeSet);
+		if (!alternativeSetToGroup.has(set)) {
+			ingredientsOrdered.push(ingredient);
+			return;
+		}
+		if (alternativeSetAnchors.get(ix) !== set) return;
+		ingredientsOrdered.push(...alternativeRows.get(set).map(it => it.ingredient));
+	});
+	const alternativeSetIndices = new Map();
 
-	out.ingredients = out.ingredients.map(ingredient => {
+	out.ingredients = ingredientsOrdered.map(ingredient => {
 		const serialized = _copy(ingredient);
 		const materialRef = _key(serialized._materialRef);
 		const material = materialRef && materialLookup ? materialLookup.get(materialRef) : null;
@@ -278,16 +293,14 @@ function _serializeCraftingRecipe (entity, {materialCatalog = null} = {}) {
 		delete serialized._materialRef;
 		delete serialized._alternativeSet;
 		delete serialized._alternativeOrder;
-		if (material) {
-			serialized.name = material.name;
-			serialized.uid = CraftingWorkbenchCore.getIdentity(material);
-		} else if (materialRef && materialLookup == null) serialized.uid = materialRef;
+		if (materialRef) serialized.uid = material ? CraftingWorkbenchCore.getIdentity(material) : materialRef;
 
 		const set = _key(ingredient._alternativeSet);
 		if (alternativeSetToGroup.has(set)) {
 			serialized.isAlternative = true;
 			serialized.alternativeGroup = alternativeSetToGroup.get(set);
-			serialized.alternativeIndex = alternativeRows.get(set).findIndex(it => it.ingredient === ingredient);
+			serialized.alternativeIndex = alternativeSetIndices.get(set) || 0;
+			alternativeSetIndices.set(set, serialized.alternativeIndex + 1);
 		}
 		return serialized;
 	});
@@ -328,6 +341,7 @@ function _validateCommon (entity) {
 	if (entity.page != null && (!Number.isFinite(Number(entity.page)) || Number(entity.page) < 0)) {
 		errors.push({field: "page", message: "Page must be zero or greater."});
 	}
+	if (entity.rarity != null && !_RARITIES.includes(entity.rarity)) errors.push({field: "rarity", message: "Rarity is not recognized."});
 	return {errors, warnings};
 }
 
@@ -435,6 +449,11 @@ function _validateCraftingRecipe (entity, out) {
 		errors: out.errors,
 		label: "Complexity",
 	});
+	if (entity.reqAttune != null && typeof entity.reqAttune !== "boolean" && typeof entity.reqAttune !== "string") {
+		out.errors.push({field: "reqAttune", message: "Attunement must be Yes, No, or custom text."});
+	} else if (typeof entity.reqAttune === "string" && !_key(entity.reqAttune)) {
+		out.errors.push({field: "reqAttune", message: "Enter custom attunement text."});
+	}
 	for (const prop of ["craftDC", "value"]) {
 		if (entity[prop] != null && (!Number.isFinite(Number(entity[prop])) || Number(entity[prop]) < 0)) {
 			out.errors.push({field: prop, message: `${prop === "value" ? "Value (cp)" : "Craft DC"} must be zero or greater.`});

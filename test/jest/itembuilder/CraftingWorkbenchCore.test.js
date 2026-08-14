@@ -68,9 +68,9 @@ describe("CraftingWorkbenchCore", () => {
 		};
 		expect(CraftingWorkbenchCore.serialize("craftingRecipe", entity).ingredients).toEqual([
 			{name: "Copper", quantity: 1},
+			{name: "Ghoul Hide", quantity: 1, expert: "kept", isAlternative: true, alternativeGroup: "alt-1", alternativeIndex: 0},
 			{name: "Ghast Hide", quantity: 1, isAlternative: true, alternativeGroup: "alt-1", alternativeIndex: 1},
 			{name: "Wolf Hide", quantity: 1, isAlternative: true, alternativeGroup: "alt-0", alternativeIndex: 0},
-			{name: "Ghoul Hide", quantity: 1, expert: "kept", isAlternative: true, alternativeGroup: "alt-1", alternativeIndex: 0},
 			{name: "Bear Hide", quantity: 1, isAlternative: true, alternativeGroup: "alt-0", alternativeIndex: 1},
 			{name: "Thread", quantity: 1},
 		]);
@@ -101,7 +101,7 @@ describe("CraftingWorkbenchCore", () => {
 		});
 	});
 
-	test("resolves selected material UIDs case-insensitively and warns without losing unresolved names", () => {
+	test("uses selected material references only for UIDs and warns without losing authored names", () => {
 		const materialCatalog = [
 			{name: "Mithril", source: "TGTT"},
 			{name: "mithril", source: "tgtt"},
@@ -119,12 +119,62 @@ describe("CraftingWorkbenchCore", () => {
 		const validation = CraftingWorkbenchCore.validate("craftingRecipe", entity, {materialCatalog});
 
 		expect(serialized.ingredients).toEqual([
-			{name: "Mithril", quantity: 1, uid: "mithril|tgtt"},
+			{name: "wrong display", quantity: 1, uid: "mithril|tgtt"},
 			{name: "Moonwater", quantity: 3},
 		]);
 		expect(validation.warnings).toEqual(expect.arrayContaining([
 			expect.objectContaining({field: "ingredients.1.name", message: expect.stringContaining("Moonwater")}),
 		]));
+	});
+
+	test("round-trips the real Abyssal Oil display label without replacing it with packaging text", () => {
+		const data = JSON.parse(readFileSync("data/crafting.json", "utf8"));
+		const recipe = data.craftingRecipe.find(it => it.name === "Abyssal Oil");
+		const material = data.craftingMaterial.find(it => it.name === "Abyssal Weapon Ichor (6 vials)");
+
+		const serialized = CraftingWorkbenchCore.serialize(
+			"craftingRecipe",
+			CraftingWorkbenchCore.normalize("craftingRecipe", recipe),
+			{materialCatalog: [material]},
+		);
+
+		expect(serialized.ingredients).toContainEqual({
+			name: "Abyssal Weapon Ichor",
+			quantity: 1,
+			unit: "vial",
+			uid: "abyssal weapon ichor (6 vials)|hhhviii",
+		});
+	});
+
+	test("round-trips canonical custom attunement and varies rarity from real recipe data", () => {
+		const data = JSON.parse(readFileSync("data/crafting.json", "utf8"));
+		const recipe = data.craftingRecipe.find(it => it.name === "Dragon Wand");
+
+		const serialized = CraftingWorkbenchCore.serialize("craftingRecipe", CraftingWorkbenchCore.normalize("craftingRecipe", recipe));
+
+		expect(serialized.reqAttune).toBe("by a spellcaster");
+		expect(serialized.rarity).toBe("varies");
+		expect(CraftingWorkbenchCore.validate("craftingRecipe", serialized).isValid).toBe(true);
+	});
+
+	test("retains validation errors for malformed recipe category, rarity, and attunement scalars", () => {
+		const validation = CraftingWorkbenchCore.validate("craftingRecipe", {
+			name: "Malformed Tonic",
+			source: "HB",
+			recipeCategory: {value: "potion"},
+			rarity: ["rare"],
+			reqAttune: {value: true},
+		});
+
+		expect(validation).toEqual(expect.objectContaining({
+			isValid: false,
+			errors: expect.arrayContaining([
+				expect.objectContaining({field: "recipeCategory"}),
+				expect.objectContaining({field: "rarity"}),
+				expect.objectContaining({field: "reqAttune"}),
+			]),
+		}));
+		expect(() => CraftingWorkbenchCore.serialize("craftingRecipe", validation.entity)).not.toThrow();
 	});
 
 	test("derives component groups in ingredient order without duplicates", () => {
