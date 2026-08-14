@@ -98,6 +98,7 @@ Every batch scope is also an encounter-operations workspace. Scope members begin
 - HP expressions accept damage (`30` or `-30`), healing (`+12`), absolute values (`=15`), and dice (`8d6`). The optional **Half** toggle rounds toward zero using the Initiative Tracker's shared rule. Damage consumes temporary HP before current HP, and healing is capped at maximum HP.
 - The last five batch HP operations are available to the session-only **Undo HP** stack. The roster state itself still saves after every apply or undo.
 - Standard conditions come from `Parser.CONDITIONS`. Add and remove operate on every selected NPC, persist independently for duplicate instances, and render as compact chips in both roster and detail views.
+- A complete initiative batch can be appended to an existing Initiative Tracker. The handoff preserves each selected NPC's exact rolled total, alias and monster identity, current/maximum/temporary HP, and conditions. It respects the tracker lock and is intentionally a one-way snapshot; Initiative Tracker owns combat state after handoff.
 
 ## Responsive behavior
 
@@ -107,4 +108,4 @@ Wide panels show the grouped roster and current detail/batch workspace side by s
 
 - Drag-and-drop group or NPC ordering
 - Encounter import/export
-- Sending batch initiative directly to Initiative Tracker
+- Live two-way HP or condition synchronization with Initiative Tracker

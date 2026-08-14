@@ -277,6 +277,12 @@ export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGe
 			<div class="ve-text-left">${iptHpMax}</div>
 		</div>`
 			.appendTo(wrpRhs);
+
+		const dispHpTemp = ee`<span class="ve-small ve-muted ve-mr-2" title="Temporary hit points"></span>`.appendTo(wrpRhs);
+		comp._addHookBase("hpTemp", () => {
+			dispHpTemp.txt(`+${comp._state.hpTemp || 0} temp`);
+			dispHpTemp.toggleVe(!!comp._state.hpTemp);
+		})();
 	}
 
 	/* ----- */

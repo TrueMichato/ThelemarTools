@@ -44,6 +44,33 @@ export function getNpcTrackerNpcsForScope ({state, scope}) {
 	throw new Error(`Unknown NPC batch scope "${scope.type}".`);
 }
 
+export function getNpcTrackerInitiativeHandoff ({state, batch}) {
+	if (!batch || batch.isRolling || batch.rollType !== "initiative") {
+		return {ok: false, message: "Complete an initiative batch before sending it."};
+	}
+
+	const npcs = getNpcTrackerNpcsForScope({state, scope: batch.scope})
+		.filter(npc => batch.selectedNpcIds.has(npc.id));
+	if (!npcs.length) return {ok: false, message: "Select at least one NPC."};
+
+	const resultsByNpcId = new Map(batch.results.map(result => [result.npcId, result]));
+	if (npcs.some(npc => !Number.isFinite(resultsByNpcId.get(npc.id)?.total))) {
+		return {ok: false, message: "Roll initiative for every selected NPC before sending it."};
+	}
+
+	return {
+		ok: true,
+		entries: npcs.map(npc => ({
+			npcId: npc.id,
+			alias: npc.alias,
+			monster: npc.monster,
+			hp: {...npc.hp},
+			conditions: [...npc.conditions],
+			initiative: resultsByNpcId.get(npc.id).total,
+		})),
+	};
+}
+
 export function sortNpcTrackerBatchResults ({results, sortKey, sortDirection}) {
 	const direction = sortDirection === "asc" ? 1 : -1;
 	return [...results].sort((a, b) => {

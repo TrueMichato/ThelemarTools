@@ -597,6 +597,13 @@
 			overflow: hidden;
 		}
 
+		.dm-npc__batch-handoff {
+			display: flex;
+			justify-content: flex-end;
+			max-width: 720px;
+			margin: 8px auto 0;
+		}
+
 	.dm-npc__batch-result-row {
 			display: grid;
 			grid-template-columns: minmax(120px, 1fr) minmax(90px, 0.45fr) minmax(58px, 0.25fr);
@@ -734,6 +741,12 @@
 		.dm-npc__batch-condition-select {
 			width: 100%;
 			max-width: none;
+		}
+
+		.dm-npc__batch-handoff > button {
+			width: 100%;
+			min-width: 0;
+			white-space: normal;
 		}
 	}
 

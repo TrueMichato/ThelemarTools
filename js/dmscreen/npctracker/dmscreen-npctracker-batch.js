@@ -5,7 +5,7 @@ import {
 } from "./dmscreen-npctracker-roll.js";
 
 export class NpcTrackerBatch {
-	constructor ({fnGetContext, fnUpdateConfig, fnRoll, fnSort, fnToggleNpc, fnToggleAll, fnApplyHp, fnUndoHp, fnUpdateCondition}) {
+	constructor ({fnGetContext, fnUpdateConfig, fnRoll, fnSort, fnToggleNpc, fnToggleAll, fnApplyHp, fnUndoHp, fnUpdateCondition, fnSendInitiative}) {
 		this._fnGetContext = fnGetContext;
 		this._fnUpdateConfig = fnUpdateConfig;
 		this._fnRoll = fnRoll;
@@ -15,6 +15,7 @@ export class NpcTrackerBatch {
 		this._fnApplyHp = fnApplyHp;
 		this._fnUndoHp = fnUndoHp;
 		this._fnUpdateCondition = fnUpdateCondition;
+		this._fnSendInitiative = fnSendInitiative;
 	}
 
 	render ({wrp, isNarrow = false, fnShowRoster = null}) {
@@ -83,8 +84,10 @@ export class NpcTrackerBatch {
 			eleStatus.appendTo(wrpBody);
 		}
 
-		if (batch.results.length) this._renderResults({batch, wrp: wrpBody});
-		else {
+		if (batch.results.length) {
+			this._renderResults({batch, wrp: wrpBody});
+			this._renderInitiativeHandoff({batch, npcs, wrp: wrpBody});
+		} else {
 			const eleEmpty = ee`<div class="dm-npc__batch-empty"></div>`;
 			eleEmpty.textContent = npcs.length
 				? "Choose a roll and roll every NPC in this scope."
@@ -156,6 +159,19 @@ export class NpcTrackerBatch {
 			<div><strong>Conditions</strong><span class="dm-npc__batch-operation-help">Apply or remove a standard condition for every selected NPC.</span></div>
 			<div class="dm-npc__batch-operation-controls">${select}${btnAdd}${btnRemove}</div>
 		</section>`.appendTo(wrp);
+	}
+
+	_renderInitiativeHandoff ({batch, npcs, wrp}) {
+		if (batch.rollType !== "initiative") return;
+		const selectedIds = new Set(npcs.filter(npc => batch.selectedNpcIds.has(npc.id)).map(npc => npc.id));
+		const resultIds = new Set(batch.results.filter(result => Number.isFinite(result.total)).map(result => result.npcId));
+		const isComplete = !!selectedIds.size && [...selectedIds].every(id => resultIds.has(id));
+		const button = ee`<button class="ve-btn ve-btn-success ve-btn-xs" type="button"></button>`;
+		button.textContent = batch.isInitiativeSent ? "Sent to Initiative Tracker" : "Send to Initiative Tracker";
+		button.disabled = batch.isRolling || batch.isInitiativeSent || !isComplete;
+		button.title = isComplete ? "Append these rolled initiatives to an Initiative Tracker" : "Roll initiative for every selected NPC first";
+		button.onn("click", () => this._fnSendInitiative());
+		ee`<div class="dm-npc__batch-handoff">${button}</div>`.appendTo(wrp);
 	}
 
 	_getKeySelect (batch) {

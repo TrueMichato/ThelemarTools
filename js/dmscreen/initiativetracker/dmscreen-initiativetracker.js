@@ -28,6 +28,7 @@ import {
 import {InitiativeTrackerDefaultParty} from "./dmscreen-initiativetracker-defaultparty.js";
 import {ListUtilBestiary} from "../../utils-list-bestiary.js";
 import {InitiativeTrackerLairMarkers} from "./dmscreen-initiativetracker-lairmarkers.js";
+import {InitiativeTrackerConditionUtil} from "./dmscreen-initiativetracker-condition.js";
 
 // TODO(Future) refactor to subclass `DmScreenPanelAppBase`; move state to `_comp`
 export class InitiativeTracker extends BaseComponent {
@@ -175,11 +176,15 @@ export class InitiativeTracker extends BaseComponent {
 		const nextRows = this._state.rows.map(row => {
 			if (!idSet.has(row.id) || InitiativeTrackerRowUtil.isNonCombatantRow(row)) return row;
 			const cur = row.entity.hpCurrent;
-			const next = absoluteSet != null ? absoluteSet : ((cur ?? 0) + sharedDelta);
-			snapshots.push({rowId: row.id, hpCurrent: cur});
+			const hpTemp = Math.max(0, row.entity.hpTemp || 0);
+			const absorbed = absoluteSet == null && sharedDelta < 0
+				? Math.min(hpTemp, Math.abs(sharedDelta))
+				: 0;
+			const next = absoluteSet != null ? absoluteSet : ((cur ?? 0) + sharedDelta + absorbed);
+			snapshots.push({rowId: row.id, hpCurrent: cur, hpTemp: row.entity.hpTemp});
 			return {
 				...row,
-				entity: {...row.entity, hpCurrent: next},
+				entity: {...row.entity, hpCurrent: next, hpTemp: hpTemp - absorbed},
 			};
 		});
 		if (!snapshots.length) return {ok: false, msg: "Selected rows are no longer present."};
@@ -195,10 +200,11 @@ export class InitiativeTracker extends BaseComponent {
 	_undoLastHpApply () {
 		const entry = this._hpApplyUndoStack.pop();
 		if (!entry) return {ok: false, msg: "Nothing to undo."};
-		const byId = new Map(entry.snapshots.map(s => [s.rowId, s.hpCurrent]));
+		const byId = new Map(entry.snapshots.map(s => [s.rowId, s]));
 		const nextRows = this._state.rows.map(row => {
 			if (!byId.has(row.id)) return row;
-			return {...row, entity: {...row.entity, hpCurrent: byId.get(row.id)}};
+			const snapshot = byId.get(row.id);
+			return {...row, entity: {...row.entity, hpCurrent: snapshot.hpCurrent, hpTemp: snapshot.hpTemp}};
 		});
 		this._state.rows = nextRows;
 		this._updateSelectionBar();
@@ -237,6 +243,49 @@ export class InitiativeTracker extends BaseComponent {
 
 	async pDoLoadEncounter ({entityInfos, encounterInfo}) {
 		await this._pDoLoadEncounter({entityInfos, encounterInfo});
+	}
+
+	async pDoAppendNpcTrackerEntries ({entries}) {
+		if (this._state.isLocked) return {ok: false, message: "Initiative Tracker is locked."};
+		if (!Array.isArray(entries) || !entries.length) return {ok: false, message: "No NPCs were provided."};
+		if (entries.some(entry => !entry?.monster?.name || !entry.monster.source || !Number.isFinite(entry.initiative))) {
+			return {ok: false, message: "NPC initiative data is incomplete."};
+		}
+
+		const rowsNext = [...this._state.rows];
+		for (const entry of entries) {
+			const conditions = (entry.conditions || [])
+				.filter(condition => Parser.CONDITIONS.includes(condition))
+				.map(condition => {
+					const name = condition === "exhaustion" ? "Exhausted" : condition.toTitleCase();
+					return InitiativeTrackerConditionUtil.getNewRowState({
+						name,
+						color: Parser.CONDITION_TO_COLOR[name],
+					});
+				});
+			const row = await this._rowStateBuilderActive.pGetNewRowState({
+				rows: rowsNext,
+				monster: MiscUtil.copyFast(entry.monster),
+				name: entry.monster.name,
+				displayName: entry.monster._displayName || entry.monster.name,
+				customName: entry.alias || null,
+				source: entry.monster.source,
+				hpCurrent: entry.hp?.current ?? null,
+				hpMax: entry.hp?.max ?? null,
+				hpTemp: entry.hp?.temp ?? 0,
+				initiative: entry.initiative,
+				conditions,
+			});
+			if (!row) return {ok: false, message: `Could not add "${entry.alias || entry.monster.name}".`};
+			rowsNext.push(row);
+		}
+
+		this._state.rows = InitiativeTrackerSort.getSortedRows({
+			rows: rowsNext,
+			sortBy: this._state.sort,
+			sortDir: this._state.dir,
+		});
+		return {ok: true, count: entries.length};
 	}
 
 	getApi () {
@@ -753,6 +802,7 @@ export class InitiativeTracker extends BaseComponent {
 				if (isMon ? !!this._state.playerInitShowExactMonsterHp : !!this._state.playerInitShowExactPlayerHp) {
 					out.hpCurrent = entity.hpCurrent;
 					out.hpMax = entity.hpMax;
+					out.hpTemp = entity.hpTemp;
 				}
 
 				if (isNaN(entity.hpCurrent) || isNaN(entity.hpMax)) {
@@ -1144,7 +1194,7 @@ export class InitiativeTracker extends BaseComponent {
 			return;
 		}
 
-		const mon = await DmScreenUtil.pGetScaledCreature({
+		const mon = row.entity.monster || await DmScreenUtil.pGetScaledCreature({
 			name: row.entity.name,
 			source: row.entity.source,
 			scaledCr: row.entity.scaledCr,
@@ -1211,7 +1261,7 @@ export class InitiativeTracker extends BaseComponent {
 	async pAddLairMarkerManualForRow ({rowEntity}) {
 		if (!rowEntity?.name || !rowEntity?.source) return false;
 
-		const mon = await DmScreenUtil.pGetScaledCreature({
+		const mon = rowEntity.monster || await DmScreenUtil.pGetScaledCreature({
 			name: rowEntity.name,
 			source: rowEntity.source,
 			scaledCr: rowEntity.scaledCr,
@@ -1262,7 +1312,7 @@ export class InitiativeTracker extends BaseComponent {
 		const out = {isEligible: false, isAlreadyTracked: false, monName: null, legendaryGroup: null};
 		if (!rowEntity?.name || !rowEntity?.source) return out;
 
-		const mon = await DmScreenUtil.pGetScaledCreature({
+		const mon = rowEntity.monster || await DmScreenUtil.pGetScaledCreature({
 			name: rowEntity.name,
 			source: rowEntity.source,
 			scaledCr: rowEntity.scaledCr,

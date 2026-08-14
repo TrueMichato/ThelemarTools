@@ -15,6 +15,7 @@ import {
 } from "../../js/dmscreen/npctracker/dmscreen-npctracker-detail.js";
 import {getNpcTrackerImportedMonsters} from "../../js/dmscreen/npctracker/dmscreen-npctracker-roster.js";
 import {
+	getNpcTrackerInitiativeHandoff,
 	getNpcTrackerNpcsForScope,
 	getNpcTrackerRollBonus,
 	getNpcTrackerRollLabel,
@@ -320,6 +321,35 @@ describe("NPC Tracker batch rolls", () => {
 			sortKey: "order",
 			sortDirection: "asc",
 		}).map(it => it.name)).toEqual(["Alpha", "Bravo", "Charlie"]);
+	});
+
+	it("builds complete initiative handoffs and blocks incomplete batches", () => {
+		const state = {
+			npcs: [
+				{...NpcTrackerSerializer.createNpc({monster: getMonster(), alias: "Vale"}), id: "a"},
+				{...NpcTrackerSerializer.createNpc({monster: getMonster()}), id: "b"},
+			],
+		};
+		const batch = {
+			scope: {type: "all"},
+			rollType: "initiative",
+			isRolling: false,
+			selectedNpcIds: new Set(["a", "b"]),
+			results: [{npcId: "a", total: 18}, {npcId: "b", total: 12}],
+		};
+
+		const complete = getNpcTrackerInitiativeHandoff({state, batch});
+		expect(complete.ok).toBe(true);
+		expect(complete.entries).toMatchObject([
+			{npcId: "a", alias: "Vale", initiative: 18, conditions: []},
+			{npcId: "b", initiative: 12, conditions: []},
+		]);
+
+		batch.results.pop();
+		expect(getNpcTrackerInitiativeHandoff({state, batch})).toEqual({
+			ok: false,
+			message: "Roll initiative for every selected NPC before sending it.",
+		});
 	});
 });
 

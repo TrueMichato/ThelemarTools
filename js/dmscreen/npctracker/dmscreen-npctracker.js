@@ -5,6 +5,7 @@ import {NpcTrackerDetail} from "./dmscreen-npctracker-detail.js";
 import {NpcTrackerBatch} from "./dmscreen-npctracker-batch.js";
 import {
 	getNpcTrackerDisplayName,
+	getNpcTrackerInitiativeHandoff,
 	getNpcTrackerNpcsForScope,
 	getNpcTrackerRollBonus,
 	getNpcTrackerRollLabel,
@@ -16,6 +17,8 @@ import {
 	getNpcTrackerHpOperation,
 } from "./dmscreen-npctracker-hp.js";
 import {getNpcTrackerConditionsAfterUpdate} from "./dmscreen-npctracker-condition.js";
+import {DmScreenUtil} from "../dmscreen-util.js";
+import {PANEL_TYP_INITIATIVE_TRACKER} from "../dmscreen-consts.js";
 
 export class NpcTracker extends DmScreenPanelAppBase {
 	constructor (...args) {
@@ -86,6 +89,7 @@ export class NpcTrackerRoot {
 			fnApplyHp: meta => this._applyBatchHp(meta),
 			fnUndoHp: () => this._undoBatchHp(),
 			fnUpdateCondition: meta => this._updateBatchCondition(meta),
+			fnSendInitiative: () => this._pSendBatchInitiative(),
 		});
 	}
 
@@ -102,6 +106,47 @@ export class NpcTrackerRoot {
 		this._wrpDetail.appendTo(this._wrpRoot);
 		this._wrpRoot.appendTo(wrp);
 		this._renderRoster();
+		this._renderDetail();
+	}
+
+	async _pSendBatchInitiative () {
+		if (!this._batchState) return;
+		const handoff = getNpcTrackerInitiativeHandoff({state: this._state, batch: this._batchState});
+		if (!handoff.ok) {
+			this._batchState.error = handoff.message;
+			this._renderDetail();
+			return;
+		}
+
+		const panelApps = DmScreenUtil.getPanelApps({board: this._board, type: PANEL_TYP_INITIATIVE_TRACKER});
+		if (!panelApps.length) {
+			this._batchState.error = "Add an Initiative Tracker panel before sending initiative.";
+			this._renderDetail();
+			return;
+		}
+
+		let panelApp = panelApps[0];
+		if (panelApps.length > 1) {
+			const selected = await InputUiUtil.pGetUserEnum({
+				title: "Choose an Initiative Tracker",
+				values: panelApps.map((app, ix) => ({app, label: `Tracker ${ix + 1}: ${app.getSummary()}`})),
+				fnDisplay: meta => meta.label,
+				isResolveItem: true,
+			});
+			if (!selected) return;
+			panelApp = selected.app;
+		}
+
+		const result = await panelApp.pDoAppendNpcTrackerEntries({entries: handoff.entries});
+		if (!result.ok) {
+			this._batchState.error = result.message;
+			this._renderDetail();
+			return;
+		}
+
+		this._batchState.error = null;
+		this._batchState.isInitiativeSent = true;
+		this._batchState.operationMessage = `Sent ${result.count} ${result.count === 1 ? "NPC" : "NPCs"} to Initiative Tracker.`;
 		this._renderDetail();
 	}
 
@@ -337,8 +382,7 @@ export class NpcTrackerRoot {
 		if (!this._batchState || this._batchState.isRolling) return;
 		if (rollType != null) this._batchState.rollType = rollType;
 		if (key !== undefined) this._batchState.key = key;
-		this._batchState.results = [];
-		this._batchState.error = null;
+		this._clearBatchResults();
 		this._batchState.sortKey = this._batchState.rollType === "initiative" ? "total" : "order";
 		this._batchState.sortDirection = this._batchState.rollType === "initiative" ? "desc" : "asc";
 		this._renderDetail();
@@ -353,7 +397,9 @@ export class NpcTrackerRoot {
 
 		batch.isRolling = true;
 		batch.error = null;
+		batch.operationMessage = null;
 		batch.results = [];
+		batch.isInitiativeSent = false;
 		this._renderDetail();
 
 		const results = [];
@@ -485,6 +531,7 @@ export class NpcTrackerRoot {
 		this._batchState.results = [];
 		this._batchState.error = null;
 		this._batchState.operationMessage = null;
+		this._batchState.isInitiativeSent = false;
 	}
 
 	_sortBatch (key) {
