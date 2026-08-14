@@ -70,6 +70,9 @@ export const getFnRootPropListSort = (prop, {isRequired = false} = {}) => {
 		case "charoptionFluff":
 		case "recipe":
 		case "recipeFluff":
+		case "itemMaterial":
+		case "craftingMaterial":
+		case "craftingRecipe":
 		case "sense":
 		case "skill":
 		case "deck":

@@ -203,6 +203,7 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 	}
 
 	async pDoHandleClickSaveBrew () {
+		this._doSync();
 		const validation = CraftingWorkbenchCore.validate(this._prop, this._draft);
 		if (!validation.isValid) {
 			this._saveStatus = `Cannot save: ${validation.errors[0].message}`;
@@ -213,6 +214,42 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 		this._saveStatus = `Saved "${this._draft.name}" to homebrew.`;
 		this._refreshValidation();
 		return true;
+	}
+
+	_getAsMarkdown (entity) {
+		const subtitle = [
+			Parser.getPropDisplayName(this._prop),
+			entity.source ? Parser.sourceJsonToFull(entity.source) : null,
+			entity.page != null ? `p. ${entity.page}` : null,
+		].filter(Boolean).join(" · ");
+		const entries = entity.entries?.length
+			? RendererMarkdown.get().render({type: "entries", entries: entity.entries}).trim()
+			: "";
+		return [
+			`## ${entity.name || "Unnamed"}`,
+			subtitle ? `*${subtitle}*` : "",
+			entries,
+			"```json",
+			JSON.stringify(DataUtil.cleanJson(MiscUtil.copy(entity)), null, "\t"),
+			"```",
+		].filter(Boolean).join("\n\n");
+	}
+
+	async pDoHandleClickDownloadMarkdown ({uniqueIds = null} = {}) {
+		const entities = (await this._pGetBrewEntitiesCurrentSource())
+			.filter(entity => uniqueIds == null || uniqueIds.includes(entity.uniqueId));
+		const markdown = entities.map(entity => this._getAsMarkdown(entity)).join("\n\n---\n\n");
+		DataUtil.userDownloadText(`${DataUtil.getCleanFilename(BrewUtil2.sourceJsonToFull(this._ui.source))}.md`, markdown);
+	}
+
+	async pHandleClick_viewMarkdownUniqueId (evt, uniqueId) {
+		const entity = MiscUtil.copy(await BrewUtil2.pGetEditableBrewEntity(this._prop, uniqueId));
+		const name = `${entity._displayName || entity.name} — Markdown`;
+		Renderer.hover.getShowWindow(
+			Renderer.hover.getHoverContent_miscCode(name, this._getAsMarkdown(entity)),
+			Renderer.hover.getWindowPositionFromEvent(evt),
+			{title: name, isPermanent: true, isBookContent: true},
+		);
 	}
 
 	static getPreviewEntity (prop, entity) {

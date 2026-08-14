@@ -2556,6 +2556,33 @@ const PROPORDER_ENCOUNTER_SHAPE = [
 	"shapeTemplate",
 ];
 
+const PROPORDER_ITEM_MATERIAL = [
+	"name", "source", "page",
+	"materialCategory", "density", "densityVaries",
+	"damage", "protection", "critical", "penetration", "magicCapacity",
+	"rarity", "price", "color", "objectAc",
+	"primaryRole", "roles", "appliesTo",
+	"effects", "magicCapacityRules", "degradation",
+	"entries", "uniqueId",
+];
+
+const PROPORDER_CRAFTING_MATERIAL = [
+	"name", "source", "page",
+	"materialCategory", "materialKind", "harvest",
+	"value", "weight", "rarity",
+	"spells", "variantComponent", "entries",
+	"effectTags", "hasUseEffect", "hasMechanicalEffect",
+	"usedInRecipes", "alsoIn", "uniqueId",
+];
+
+const PROPORDER_CRAFTING_RECIPE = [
+	"name", "source", "page",
+	"recipeCategory", "crafter", "craftDC", "complexity", "rarity", "reqAttune",
+	"ingredients", "componentGroups", "outcomes",
+	"itemUid", "value", "entries",
+	"effectTags", "hasMechanicalEffect", "uniqueId",
+];
+
 export const PROPORDER_PROP_TO_LIST = {
 	"_meta": PROPORDER_META,
 	"_test": PROPORDER_TEST,
@@ -2624,6 +2651,9 @@ export const PROPORDER_PROP_TO_LIST = {
 	"vehicleUpgrade": PROPORDER_VEHICLE_UPGRADE,
 	"foundryVehicleUpgrade": PROPORDER_FOUNDRY_GENERIC_FEATURE,
 	"item": PROPORDER_ITEM,
+	"itemMaterial": PROPORDER_ITEM_MATERIAL,
+	"craftingMaterial": PROPORDER_CRAFTING_MATERIAL,
+	"craftingRecipe": PROPORDER_CRAFTING_RECIPE,
 	"foundryItem": PROPORDER_FOUNDRY_GENERIC,
 	"baseitem": PROPORDER_ITEM,
 	"foundryBaseitem": PROPORDER_FOUNDRY_GENERIC,
@@ -2815,6 +2845,9 @@ export const PROPORDER_ROOT = [
 	// region Other
 	ArrayKey.getRootKey(PROPORDER_PROP_TO_LIST, "recipe"),
 	ArrayKey.getRootKey(PROPORDER_PROP_TO_LIST, "recipeFluff"),
+	ArrayKey.getRootKey(PROPORDER_PROP_TO_LIST, "itemMaterial"),
+	ArrayKey.getRootKey(PROPORDER_PROP_TO_LIST, "craftingMaterial"),
+	ArrayKey.getRootKey(PROPORDER_PROP_TO_LIST, "craftingRecipe"),
 	ArrayKey.getRootKey(PROPORDER_PROP_TO_LIST, "crochetPattern"),
 	ArrayKey.getRootKey(PROPORDER_PROP_TO_LIST, "crochetPatternFluff"),
 	// endregion

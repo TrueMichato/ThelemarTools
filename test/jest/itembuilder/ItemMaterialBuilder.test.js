@@ -18,10 +18,16 @@ globalThis.TabUiUtil ||= {decorate: () => {}};
 globalThis.CryptUtil ||= {uid: () => "generated-id"};
 globalThis.StorageUtil.syncGet ||= () => null;
 globalThis.StorageUtil.syncSet ||= () => {};
+globalThis.Parser.getPropDisplayName ||= prop => prop;
+globalThis.Parser.sourceJsonToFull ||= source => source;
+globalThis.RendererMarkdown ||= {get: () => ({render: ({entries}) => entries.join("\n")})};
+globalThis.DataUtil ||= {};
+globalThis.DataUtil.cleanJson ||= entity => entity;
 
 const {BuilderBase} = await import("../../../js/makebrew/makebrew-builder-base.js");
 const {CraftingWorkbenchBuilderBase} = await import("../../../js/makebrew/makebrew-crafting-workbench.js");
 const {ItemMaterialBuilder} = await import("../../../js/makebrew/makebrew-item-material.js");
+const {PropOrder} = await import("../../../js/utils-proporder.js");
 
 describe("ItemMaterialBuilder", () => {
 	test("registers as a separate BuilderBase instance with an independent prop", () => {
@@ -82,5 +88,22 @@ describe("ItemMaterialBuilder", () => {
 
 		expect(preview).toEqual(expect.objectContaining({...entity, __prop: "itemMaterial"}));
 		expect(entity).not.toHaveProperty("__prop");
+	});
+
+	test("supports canonical JSON ordering and Markdown export", () => {
+		const builder = new ItemMaterialBuilder();
+		const entity = {
+			name: "Ordered Metal",
+			source: "HB",
+			materialCategory: "metal",
+			entries: ["Description."],
+			uniqueId: "ordered-id",
+		};
+
+		expect(PropOrder.hasOrder("itemMaterial")).toBe(true);
+		expect(PropOrder.hasOrder("craftingMaterial")).toBe(true);
+		expect(PropOrder.hasOrder("craftingRecipe")).toBe(true);
+		expect(builder._getAsMarkdown(entity)).toContain("## Ordered Metal");
+		expect(builder._getAsMarkdown(entity)).toContain("Description.");
 	});
 });
