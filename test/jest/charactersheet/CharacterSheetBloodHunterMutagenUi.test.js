@@ -7,35 +7,21 @@
  * so no feature row was activatable and no controller dispatched to it. A player
  * could not drink a mutagen at all.
  *
- * These tests deliberately enter where the PLAYER enters:
- *   1. the feature row the sheet renders and its `detectActivatableFeature()`
- *      descriptor — the row a player clicks;
- *   2. the controller dispatch and handlers in charactersheet.js — asserted at
- *      source level, per the repo idiom (the 6.5K-line CharacterSheetPage cannot
- *      be imported under jsdom because of its top-level `window.addEventListener`).
+ * Root cause worth remembering: Blood Curses and Crimson Rites reach the same
+ * picker through the GENERIC `optionalfeatureProgression` machinery with no
+ * class-specific code at all. Two of the three pools therefore never needed a
+ * dispatch line, which is precisely why the missing third was invisible.
  *
- * The source-level half is the exact test whose absence let this ship: the gap
- * WAS the missing dispatch line.
+ * These tests enter at the feature row the sheet renders — the row a player
+ * clicks. The controller dispatch above it is covered by the Playwright spec
+ * `test/e2e/specs/tgtt-mutant-blood-hunter.spec.ts`, which drives the real click.
  */
-
-import {readFileSync} from "fs";
-import {resolve, dirname} from "path";
-import {fileURLToPath} from "url";
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
-
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const controllerSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
-
-const bodyOf = (name) => {
-	const m = controllerSrc.match(new RegExp(`async ${name}\\s*\\([\\s\\S]*?\\n\\t\\}`));
-	expect(m).not.toBeNull();
-	return m[0];
-};
 
 function makeMutant (level = 3) {
 	const state = new CharacterSheetState();
@@ -174,44 +160,14 @@ describe("CS-BUG-124: consuming a mutagen spends a concoction", () => {
 // ---------------------------------------------------------------------------
 // 4. The UI path — the layer that did not exist
 // ---------------------------------------------------------------------------
-describe("CS-BUG-124: the controller reaches the mutagen state", () => {
-	it("dispatches an MTGN feature to the consume handler", () => {
-		// This single line IS the bug fix: without it no mutagen is reachable.
-		expect(controllerSrc).toMatch(/optionalFeatureTypes\?\.includes\("MTGN"\)\)\s*return this\._pConsumeMutagen\(feature\)/);
-	});
-
-	it("routes the formula manager so a player can choose what they know", () => {
-		expect(controllerSrc).toMatch(/return this\._pManageMutagenFormulas\(feature\)/);
-	});
-
-	it("the consume handler gates on the pool, calls consumeMutagen, then persists and re-renders", () => {
-		const body = bodyOf("_pConsumeMutagen");
-		expect(body).toContain(`getResource?.("Mutagen")`);
-		expect(body).toContain("this._state.consumeMutagen(key)");
-		expect(body).toContain("this._state.endMutagen(key)");
-		expect(body).toContain("_saveCurrentCharacter");
-		expect(body).toContain("_renderActiveStates");
-	});
-
-	it("the consume prompt shows the side effect, not just the benefit", () => {
-		const body = bodyOf("_pConsumeMutagen");
-		expect(body).toContain("def?.benefit");
-		expect(body).toContain("def?.drawback");
-		// Uses the house prompt vocabulary rather than a bespoke modal.
-		expect(body).toContain("InputUiUtil.pGetUserBoolean");
-		expect(body).not.toContain("CharacterSheetModal.pGetShow");
-	});
-
-	it("the formula manager uses the house multi-select and writes the known set", () => {
-		const body = bodyOf("_pManageMutagenFormulas");
-		expect(body).toContain("InputUiUtil.pGetUserMultipleChoice");
-		expect(body).toContain("setKnownMutagenFormulas");
-		expect(body).toContain("flushMutagens");
-		// `defaults` takes INDICES; `defaultState` is not an option this API has.
-		expect(body).toContain("defaults:");
-		expect(body).not.toContain("defaultState");
-	});
-});
+// The controller dispatch is covered end-to-end by the Playwright spec
+// `test/e2e/specs/tgtt-mutant-blood-hunter.spec.ts`, whose `mutagenUiFlow` probe
+// clicks the real feature row, answers the real prompt, and asserts the benefit
+// and the drawback both land. The four source-text regex assertions that used to
+// live here were deleted with it: they matched strings in charactersheet.js, so
+// they went red on reformatting and green on broken wiring — false in both
+// directions about the one thing they were named after.
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // 5. CS-BUG-125 / CS-BUG-150 — the brand riders that nothing read
@@ -302,4 +258,83 @@ describe("CS-BUG-150: each order's brand states what it actually does", () => {
 		expect(tether.label).toContain("the attempt fails");
 		expect(tether.label).not.toMatch(/half/i);
 	});
+});
+
+// ---------------------------------------------------------------------------
+// 6. CS-BUG-151 / 152 / 153 — three defects found by driving the real UI path
+// ---------------------------------------------------------------------------
+describe("CS-BUG-151: the generic End control clears the active-mutagen list", () => {
+	it("leaves no residue behind, so the same mutagen can be drunk again", () => {
+		const state = makeMutant(3);
+		state.setKnownMutagenFormulas(["embers"]);
+		expect(state.consumeMutagen("embers")).toBeTruthy();
+		expect(state.getActiveMutagens()).toContain("embers");
+
+		// The Overview Active-States panel ends states generically; it does not
+		// route through endMutagen(). Before the fix this flipped `active` but left
+		// `_data.activeMutagens` populated, so getActiveMutagens() over-reported and
+		// consumeMutagen() — which refuses a key already listed — blocked the re-drink.
+		state.deactivateState("mutagen");
+
+		expect(state.getActiveMutagens()).toEqual([]);
+		expect(state.consumeMutagen("embers")).toBeTruthy();
+	});
+});
+
+describe("CS-BUG-152: the End control still works once the pool is empty", () => {
+	it("exempts an MTGN row from the resource pre-flight, because it pays its own cost", () => {
+		const state = makeMutant(3);
+		state.setKnownMutagenFormulas(["embers"]);
+		const row = state.getFeatures().find(f => f.id === "bh2022-mutagen-embers");
+		expect(row.optionalFeatureTypes).toContain("MTGN");
+
+		// The controller refuses to dispatch when `resource.current < cost` — but
+		// drinking your last concoction empties the very pool the End path was gated
+		// on, so the row went silently dead. `featureOwnsItsCost` is the existing
+		// escape hatch for handlers that resolve their own cost.
+		expect(CharacterSheetState.featureOwnsItsCost(row)).toBe(true);
+		// Structural, not name-based: rows are generated per known formula.
+		expect(CharacterSheetState.featureOwnsItsCost({name: "Blood Maledict"})).toBe(false);
+	});
+});
+
+describe("CS-BUG-153: every auto-granted blood curse carries its real mechanics", () => {
+	it.each([
+		["Order of the Lycan", 18, /Howl/i],
+		["Order of the Mutant", 15, /Corrosion/i],
+		["Order of the Ghostslayer", 15, /Exorcist/i],
+		["Order of the Profane Soul", 18, /Souleater/i],
+	])("%s grants a readable, activatable curse", (subclass, level, nameRe) => {
+		const state = makeOrder(subclass, level);
+		// Auto-granted rows are pushed by ensureBloodHunterResources(); getFeatures()
+		// alone does not trigger it, so a bare read misses them.
+		state.ensureBloodHunterResources();
+		const curse = state.getFeatures().find(f => nameRe.test(f.name || "") && /blood curse/i.test(f.name || ""));
+		expect(curse).toBeTruthy();
+
+		// The shipped text was meta-commentary ABOUT the grant — "You gain the Blood
+		// Curse of X... doesn't count against your number known" — rather than the
+		// curse itself, so the player could not read what it does. The grant note is
+		// legitimate as an appendix; it is not legitimate as the whole description.
+		const desc = curse.description || "";
+		expect(desc).not.toMatch(/^You gain the Blood Curse/i);
+		// Both discriminate: the old text had neither an Amplify rider nor anything
+		// but the grant note. Not every curse has a save (the Souleater is a self-buff
+		// reaction), so asserting one would fail on correct data.
+		expect(desc).toMatch(/Amplify/i);
+
+		expect(CharacterSheetState.detectActivatableFeature(curse)).not.toBeNull();
+	});
+});
+
+describe("Blood Curses known is exact at each threshold", () => {
+	// Lives here rather than in the E2E matrix: matrix rows are evaluated at the
+	// checkpoint levels [3, 5, 11, 17, 20], not at their declared level, so a
+	// level-varying number pinned there is asserted at the wrong levels too.
+	it.each([[3, 1], [5, 1], [6, 2], [10, 3], [14, 4], [15, 4], [18, 5], [20, 5]])(
+		"L%i → %i known",
+		(level, expected) => {
+			expect(makeOrder("Order of the Mutant", level).getFeatureCalculations().bloodCursesKnown).toBe(expected);
+		},
+	);
 });

@@ -335,6 +335,69 @@ export class CharacterSheetPage {
 	}
 
 	/**
+	 * Answer an `InputUiUtil.pGetUser*` prompt by clicking the button with the given
+	 * label (e.g. "Consume", "End it", "Cancel").
+	 *
+	 * The house prompts render their buttons as `button.ve-btn` wrapping a `<span>`
+	 * with the label, so match on the trimmed text rather than a bespoke class.
+	 */
+	async confirmPrompt (buttonText: string): Promise<void> {
+		const escaped = buttonText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const btn = this.page.locator("button.ve-btn")
+			.filter({hasText: new RegExp(`^\\s*${escaped}\\s*$`, "i")})
+			.last();
+		try {
+			await btn.waitFor({state: "visible", timeout: 5000});
+		} catch (e) {
+			// Report what the sheet actually showed. A prompt whose buttons don't match is
+			// almost always the WRONG prompt, and the labels identify which one it is far
+			// faster than reasoning about the handler.
+			const labels = await this.page.locator("button.ve-btn").allTextContents().catch(() => []);
+			const titles = await this.page.locator(".ve-flex-col .ve-flex-v-center, .ui-modal__title").allTextContents().catch(() => []);
+			throw new Error(`no prompt button matching "${buttonText}"; visible buttons=${JSON.stringify(labels.map(l => l.trim()).filter(Boolean))} titles=${JSON.stringify(titles.map(t => t.trim()).filter(Boolean).slice(0, 4))}`);
+		}
+		await btn.click({timeout: 5000});
+		// The handler saves, re-renders resources, active states, the sheet and the
+		// features tab after the prompt resolves; let that settle before asserting.
+		await this.page.waitForTimeout(300);
+	}
+
+	/**
+	 * Click a feature's Activate button and answer the confirmation prompt its handler
+	 * opens.
+	 *
+	 * `activateFeature()` cannot be used for prompt-gated features: its click-failure
+	 * path calls `isFeatureActive()`, which switches tabs, and doing that while a modal
+	 * is open races the prompt. This drives the same real DOM button but hands control
+	 * to the prompt instead of probing state.
+	 */
+	async activateFeatureAndConfirm (featureName: string, buttonText: string): Promise<void> {
+		// Features tab FIRST. Prompt-gated features are `_data.features` rows whose Use
+		// button reaches `_pHandleR20FeatureActivation`; the Overview's Active-States
+		// panel may simultaneously show a generic End control for the state they switch
+		// on, and that control ends things silently without a prompt. Searching Overview
+		// first therefore races the two and can click the wrong one.
+		await this.switchToTab(this.tabFeatures);
+		const exactName = new RegExp(`^\\s*${featureName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i");
+		const card = this.page.locator(".charsheet__feature").filter({
+			has: this.page.locator(".charsheet__feature-name").filter({hasText: exactName}),
+		}).first();
+		const useBtn = card.locator(".charsheet__feature-use");
+		if (await useBtn.isVisible({timeout: 2000}).catch(() => false)) {
+			await useBtn.click({timeout: 5000});
+			await this.confirmPrompt(buttonText);
+			return;
+		}
+		await this.switchToTab(this.tabOverview);
+		const row = this.page.locator(".charsheet__activatable-row")
+			.filter({hasText: this._getFeatureActivationPattern(featureName)}).first();
+		const rowBtn = row.locator(".charsheet__activate-btn");
+		await rowBtn.waitFor({state: "visible", timeout: 5000});
+		await rowBtn.click({timeout: 5000});
+		await this.confirmPrompt(buttonText);
+	}
+
+	/**
 	 * Activate a toggleable feature by name (e.g. "Bladesong", "Hexblade's Curse").
 	 */
 	async activateFeature (featureName: string): Promise<void> {

@@ -38905,7 +38905,7 @@ class CharacterSheetState {
 					className: "Blood Hunter",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["BC"],
-					description: "You gain the Blood Curse of the Exorcist for your Blood Maledict feature. This doesn't count against your number of blood curses known.",
+					description: "As a bonus action, you choose one creature you can see within 30 feet of you that is charmed or frightened, or which is under a possession effect. The target creature is no longer charmed, frightened, or possessed. <b>Amplify:</b> a creature that charmed, frightened, or possessed the target takes 3d6 psychic damage and must succeed on a Wisdom saving throw against your Hemocraft save DC or be stunned until the end of your next turn. This doesn't count against your number of blood curses known.",
 				});
 			}
 		}
@@ -38929,7 +38929,7 @@ class CharacterSheetState {
 					className: "Blood Hunter",
 					featureType: "Optional Feature",
 					optionalFeatureTypes: ["BC"],
-					description: "You gain the Blood Curse of Corrosion for your Blood Maledict feature. This doesn't count against your number of blood curses known.",
+					description: "As a bonus action, you cause a creature within 30 feet of you to become poisoned. The cursed creature can make a Constitution saving throw against your Hemocraft save DC at the end of each of its turns, ending the curse on itself on a success. <b>Amplify:</b> the cursed creature takes 4d6 necrotic damage when you inflict this curse, and takes this damage again each time it fails the saving throw to end the curse. This doesn't count against your number of blood curses known.",
 				});
 			}
 			this._reconcileMutagenFormulaFeatures();
@@ -38952,7 +38952,7 @@ class CharacterSheetState {
 				className: "Blood Hunter",
 				featureType: "Optional Feature",
 				optionalFeatureTypes: ["BC"],
-				description: "You gain the Blood Curse of the Souleater for your Blood Maledict feature. This doesn't count against your number of blood curses known.",
+				description: "When a creature that isn't a construct or undead is reduced to 0 hit points within 30 feet of you, you can use your reaction to offer their life energy to your patron in exchange for power. Until the end of your next turn, you make attacks with advantage and you have resistance to all damage. <b>Amplify:</b> you also regain one expended warlock spell slot; once you've amplified this curse, you must finish a long rest before you can amplify it again. This doesn't count against your number of blood curses known.",
 			});
 		}
 	}
@@ -59141,6 +59141,17 @@ class CharacterSheetState {
 		if (stateTypeId === "awakenedAstralSelf") {
 			for (const componentId of ["astralBody", "astralVisage", "astralArms"]) this.deactivateState(componentId);
 		}
+		// (CS-BUG-151) `mutagen` is a single generic state carrying the UNION of every
+		// consumed mutagen, so ending it from the Active States panel ends them all — but
+		// the backing list lived on unchanged. The effects correctly disappeared while
+		// `getActiveMutagens()` still reported them, so the feature row stayed "active"
+		// and `consumeMutagen` refused the re-drink until the player ended it a second
+		// time. Clear the list here so the one control the panel offers is truthful.
+		// `flushMutagens()` clears first and then calls this, so there is no recursion.
+		if (stateTypeId === "mutagen") {
+			this._data.activeMutagens = [];
+			delete this._data.mutagenIgnoredDrawback;
+		}
 	}
 
 	_deactivateStatesForEndCondition ({isIncapacitated = false, isDead = false} = {}) {
@@ -63221,6 +63232,14 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	static featureOwnsItsCost (feature) {
+		// (CS-BUG-152) A mutagen row resolves its own cost inside `_pConsumeMutagen`:
+		// consuming spends a concoction, but ENDING one is free. The generic pre-flight
+		// check refuses to dispatch a feature whose resource pool is empty, so drinking
+		// your LAST concoction made the handler's "End it" branch unreachable from the
+		// feature row — the pool it was gated on was the pool the drink had just emptied.
+		// Keyed on the `MTGN` marker rather than each row's name, since the rows are
+		// generated per known formula.
+		if (feature?.optionalFeatureTypes?.includes?.("MTGN")) return true;
 		const name = (feature?.name || "").toLowerCase().trim();
 		return name === "performance of creation"
 			|| name === "animating performance"
