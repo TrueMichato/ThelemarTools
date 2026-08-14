@@ -1,3 +1,6 @@
+@use "vars/vars";
+@use "vars/vars-night";
+
 @layer vetools {
 	/* GENERAL/PAGE STYLES */
 	#content_input {
@@ -201,4 +204,96 @@
 		text-align: center;
 	}
 	/* *** */
+
+	.mkbru_item__tabs {
+		overflow-x: auto;
+	}
+
+	.mkbru_item__preset,
+	.mkbru_item__section {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		padding: 0.75rem;
+	}
+
+	.mkbru_item__preset {
+		border-bottom: 1px solid vars.$rgb-border-grey;
+	}
+
+	.mkbru_item__selection {
+		padding: 0.3rem 0.6rem;
+		border: 1px solid vars.$rgb-border-grey;
+		border-radius: 6px;
+		background: vars.$rgb-bg--alt;
+	}
+
+	.mkbru_item__choice-list {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.35rem 0.75rem;
+		max-height: 18rem;
+		overflow-y: auto;
+	}
+
+	.mkbru_item__choice {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		gap: 0.5rem;
+		align-items: start;
+		padding: 0.35rem;
+		border-bottom: 1px solid vars.$rgb-border-grey--list-row;
+
+		> span {
+			display: flex;
+			flex-direction: column;
+		}
+	}
+
+	.mkbru_item__advanced {
+		min-height: 28rem;
+		font-family: monospace;
+	}
+
+	.mkbru_item__validation {
+		margin: 0.75rem;
+		padding: 0.5rem 0.75rem;
+		border: 1px solid vars.$rgb-alert-text-warning;
+		background: vars.$rgb-bg--alt;
+		color: vars.$rgb-alert-text-warning;
+	}
+
+	.mkbru_item__validation--error {
+		border-color: vars.$rgb-alert-text-danger;
+		color: vars.$rgb-alert-text-danger;
+	}
+
+	.ve-night-mode {
+		.mkbru_item__preset,
+		.mkbru_item__choice {
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		.mkbru_item__selection {
+			border-color: vars-night.$rgb-border-grey--night;
+			background: vars-night.$rgb-bg--alt-night;
+		}
+
+		.mkbru_item__validation {
+			border-color: vars-night.$rgb-alert-warning-border-orange--night;
+			background: vars-night.$rgb-bg--alt-night;
+			color: vars-night.$rgb-alert-warning-orange--night;
+		}
+
+		.mkbru_item__validation--error {
+			border-color: vars-night.$rgb-alert-danger-border-red--night;
+			color: vars-night.$rgb-alert-danger-red--night;
+		}
+	}
+
+	@media (width <= 768px) {
+		.mkbru_item__choice-list {
+			grid-template-columns: 1fr;
+		}
+	}
 }

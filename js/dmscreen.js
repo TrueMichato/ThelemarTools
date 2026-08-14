@@ -26,6 +26,7 @@ import {
 	PanelContentManager_InitiativeTrackerCreatureViewer,
 	PanelContentManager_InitiativeTrackerPlayerViewV0,
 	PanelContentManager_InitiativeTrackerPlayerViewV1,
+	PanelContentManager_ItemBuilder,
 	PanelContentManager_JourneyTracker,
 	PanelContentManager_MoneyConverter,
 	PanelContentManager_NoteBox, PanelContentManager_PartyTracker, PanelContentManager_TimeTracker,
@@ -1745,6 +1746,11 @@ class Panel {
 		});
 	}
 
+	async doPopulate_ItemBuilder () {
+		const pcm = new PanelContentManager_ItemBuilder({board: this.board, panel: this});
+		await pcm.pDoPopulate();
+	}
+
 	// endregion
 
 	// region Mass panel population
@@ -3145,6 +3151,13 @@ class AddMenuSpecialTab extends AddMenuTab {
 			btnJourneyTracker.onn("click", async () => {
 				const pcm = new PanelContentManager_JourneyTracker({board: this._board, panel: this.menu.pnl});
 				await pcm.pDoPopulate();
+				this.menu.doClose();
+			});
+
+			const wrpItemBuilder = ee`<div class="ve-ui-modal__row"><span class="ve-help" title="Build a canonical homebrew item from a catalog preset, material, upgrades, and gemstone empowerment.">Item Builder</span></div>`.appendTo(eleTab);
+			const btnItemBuilder = ee`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`.appendTo(wrpItemBuilder);
+			btnItemBuilder.onn("click", async () => {
+				await this.menu.pnl.doPopulate_ItemBuilder();
 				this.menu.doClose();
 			});
 
