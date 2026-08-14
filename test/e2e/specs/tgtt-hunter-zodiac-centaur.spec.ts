@@ -388,7 +388,11 @@ const HUNTER_ZODIAC_MULTI_FEATURES_MATRIX: FeatureCheck[] = [
 describeCharacter({
 	preset: PRESET_FULL_HUNTER_CENTAUR,
 	displayName: "Hunter Ranger Centaur",
-	signatureToggle: /hunter|hunter's mark|colossus|horde/i,
+	// Hunter's Mark is a concentration SPELL rather than a class toggle, and
+	// Colossus Slayer / Horde Breaker are passive per-turn damage riders — none
+	// of them is a stance, so none reaches the Overview activatable strip. The
+	// Hunter's Prey choice is covered as a `kind: "pick"` matrix row.
+	signatureToggleSkip: {skip: true, reason: "Hunter's Mark is a concentration spell and Colossus Slayer / Horde Breaker are passive damage riders, so the Hunter has no L5 stance; the Hunter's Prey choice is covered as a kind:\"pick\" matrix row"},
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [
@@ -420,7 +424,12 @@ describeCharacter({
 describeCharacter({
 	preset: PRESET_FULL_ZODIAC_CENTAUR,
 	displayName: "Zodiac Druid Centaur",
-	signatureToggle: /zodiac|starry|wild shape|stellar/i,
+	// Wild Shape and Zodiac Form ARE registered active states, but the sheet
+	// deliberately routes them to the dedicated Druid Resources modal and drops
+	// them from the generic strip (`isDruidResourceActivatable` in
+	// charactersheet.js). So this probe's surface can never show them, by
+	// design. Wild Shape is covered as a `kind: "resource"` matrix row.
+	signatureToggleSkip: {skip: true, reason: "Wild Shape and Zodiac Form are deliberately routed to the dedicated Druid Resources modal and excluded from the generic Overview activatable strip via isDruidResourceActivatable; Wild Shape is covered as a kind:\"resource\" matrix row"},
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [

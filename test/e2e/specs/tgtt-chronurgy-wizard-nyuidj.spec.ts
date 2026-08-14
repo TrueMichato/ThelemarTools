@@ -154,7 +154,10 @@ const CHRONURGY_WIZARD_FEATURES_MATRIX: FeatureCheck[] = [
 describeCharacter({
 	preset: PRESET_FULL_CHRONURGY_NYUIDJ,
 	displayName: "Chronurgy Wizard Nyuidj",
-	signatureToggle: /chronal|convergent|temporal|momentary/i,
+	// Chronal Shift is a twice-per-rest REACTION (reroll a d20), not a stance,
+	// and Convergent Future is L14 — past this L5 probe entirely. Chronal Shift
+	// is covered as a resource in the matrix at :121.
+	signatureToggleSkip: {skip: true, reason: "Chronal Shift is a per-rest reaction rather than a stance and Convergent Future arrives at L14, past this L5 window; Chronal Shift is covered as a resource in featuresMatrix"},
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [

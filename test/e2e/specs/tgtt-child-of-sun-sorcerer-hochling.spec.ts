@@ -280,7 +280,12 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 describeCharacter({
 	preset: PRESET_FULL_CHILD_OF_SUN_HOCHLING,
 	displayName: "Child of the Sun Sorcerer Hochling",
-	signatureToggle: /metamagic|sun|font of magic|searing/i,
+	// Metamagic is applied at cast time (the `metamagic` active state is armed
+	// while casting, not held as a standing stance), and Font of Magic is a
+	// point pool. Neither appears in the Overview "Available to Activate"
+	// strip at rest, which is the only surface `signatureToggle` reads.
+	// Metamagic picks are covered as `kind: "pick"` rows in the matrix.
+	signatureToggleSkip: {skip: true, reason: "Metamagic is armed at cast time rather than held as a stance and Font of Magic is a point pool, so neither sits in the Overview activatable strip at rest; the Metamagic picks are covered as kind:\"pick\" matrix rows"},
 	// CS-BUG-030: TGTT presets deliberately ship unarmed, so equip a weapon
 	// the USE attack probe can actually roll.
 	midTierLoadout: [

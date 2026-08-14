@@ -13,7 +13,9 @@ Every `tgtt-*.spec.ts` must include **explicit** checks for every:
 - **feature picked** (class, subclass, race, feat, optional-feature),
 - **milestone hit** (Extra Attack, slot table change, prof bump, capstone),
 - **loadout change** (gear that should move AC / attack / DC),
-- **signature toggle** (Rage, Bladesong, Channel Divinity, Wild Shape, …),
+- **signature toggle** (Rage, Bladesong, Hybrid Transformation, … — a
+  standing *stance*; Channel Divinity and Wild Shape are counter-examples,
+  see the skill's "Which surface a toggle lives on"),
 - **specialty pick** (TGTT class-feature `Specialties` pool),
 - **mastery pick** (XPHB Weapon Mastery for martials), and
 - **battle-tactic pick** (Fighter Battle Tactics, plus the parallel
