@@ -6706,6 +6706,62 @@ class CharacterSheetCombat {
 	}
 
 	/**
+	 * Universal combat actions shown for every character. Each name is resolved
+	 * against the loaded action catalog so its source and hover hash stay valid.
+	 */
+	static get ACTION_ECONOMY_STANDARD_ACTION_NAMES () {
+		return [
+			"Attack",
+			"Dash",
+			"Disengage",
+			"Dodge",
+			"Grapple",
+			"Help",
+			"Hide",
+			"Ready",
+			"Search",
+			"Shove",
+			"Use an Object",
+			"Opportunity Attack",
+		];
+	}
+
+	/**
+	 * Resolve one canonical entity for each standard action name. Prefer the
+	 * 2024 entry only when that exact name/source pair exists; Grapple, Shove,
+	 * and Use an Object therefore correctly retain their PHB entities.
+	 * @returns {Array<object>}
+	 */
+	_getStandardActionEconomyEntities () {
+		const actions = this._page?._actionsData || [];
+		return CharacterSheetCombat.ACTION_ECONOMY_STANDARD_ACTION_NAMES
+			.map(name => {
+				const matches = actions.filter(action => action?.name === name);
+				return matches.find(action => action.source === Parser.SRC_XPHB)
+					|| matches.find(action => action.source === Parser.SRC_PHB)
+					|| null;
+			})
+			.filter(Boolean);
+	}
+
+	/**
+	 * Read an action entity's structured time entries into supported economy
+	 * buckets. String-form "Varies"/"Free" entries and unknown units are ignored.
+	 * @param {*} action
+	 * @returns {Array<"action"|"bonus"|"reaction">}
+	 */
+	_getStandardActionTypes (action) {
+		const out = [];
+		for (const time of action?.time || []) {
+			if (!time || typeof time !== "object") continue;
+			const type = this._normalizeActionType(time.unit);
+			if (!["action", "bonus", "reaction"].includes(type) || out.includes(type)) continue;
+			out.push(type);
+		}
+		return out;
+	}
+
+	/**
 	 * Positive relevance test: does this feature genuinely carry turn action
 	 * economy (so it belongs in the overview)? This is the INVERSE intent of
 	 * the renderCombatActions suppression filter — here toggles (Bladesong),
@@ -6779,8 +6835,8 @@ class CharacterSheetCombat {
 	 * Aggregate every turn-usable option the character has into action-economy
 	 * buckets. Pure and read-only: no state is mutated and no shared classifier
 	 * is touched. Returns `{action, bonus, reaction}`, each an array of
-	 * normalized entries `{kind, id, name, source, subtitle, actionType}`.
-	 * `kind` ∈ "attack" | "spell" | "feature" | "custom".
+	 * normalized entries `{kind, id, name, source, subtitle, actionType, entity}`.
+	 * `kind` ∈ "action" | "attack" | "spell" | "feature" | "custom" | "item".
 	 * @returns {{action: Array<object>, bonus: Array<object>, reaction: Array<object>}}
 	 */
 	getCombatActionEconomy () {
@@ -6803,6 +6859,7 @@ class CharacterSheetCombat {
 				source: atk.sourceState || "",
 				subtitle: damage || (atk.isSpell ? "Spell attack" : "Weapon attack"),
 				actionType: type,
+				entity: atk,
 			});
 		};
 
@@ -6844,6 +6901,7 @@ class CharacterSheetCombat {
 				source: spell.source || "",
 				subtitle: spell.level === 0 ? "Cantrip" : `Level ${spell.level}`,
 				actionType: type,
+				entity: spell,
 			});
 		}
 
@@ -6860,6 +6918,7 @@ class CharacterSheetCombat {
 				source: feature.featureType || feature.source || "",
 				subtitle: this._featureEconomySubtitle(feature),
 				actionType: type,
+				entity: feature,
 			});
 		}
 
@@ -6875,6 +6934,7 @@ class CharacterSheetCombat {
 				source: "",
 				subtitle: ability.mode === "limited" ? "Limited use" : "At will",
 				actionType: type,
+				entity: ability,
 			});
 		}
 
@@ -6889,10 +6949,27 @@ class CharacterSheetCombat {
 				kind: "item",
 				id: `${power.itemId}:${power.id}`,
 				name: power.name,
-				source: power.itemName,
+				source: power.itemSource || "",
 				subtitle: cost,
 				actionType: type,
+				entity: power,
 			});
+		}
+
+		// (6) Standard actions — append universal rules options after the
+		// character-specific affordances already collected above.
+		for (const action of this._getStandardActionEconomyEntities()) {
+			for (const type of this._getStandardActionTypes(action)) {
+				push(type, {
+					kind: "action",
+					id: `${action.name}|${action.source}`,
+					name: action.name,
+					source: action.source,
+					subtitle: "Standard action",
+					actionType: type,
+					entity: action,
+				});
+			}
 		}
 
 		return buckets;
@@ -6919,12 +6996,56 @@ class CharacterSheetCombat {
 	 */
 	static get ACTION_ECONOMY_KIND_META () {
 		return {
+			action: {label: "Standard action", glyph: "●"},
 			attack: {label: "Attack", glyph: "⚔"},
 			spell: {label: "Spell", glyph: "✦"},
 			feature: {label: "Feature", glyph: "★"},
 			custom: {label: "Custom", glyph: "✨"},
 			item: {label: "Item", glyph: "◆"},
 		};
+	}
+
+	/**
+	 * Build the rules-hover name for one economy row. Catalog-backed entities
+	 * use the sheet's canonical link helper; local-only abilities use their own
+	 * stored rules text so they remain informative without a dead data-page key.
+	 * @param {*} entry
+	 * @returns {string}
+	 */
+	_getActionEconomyNameHtml (entry) {
+		const safeName = CharacterSheetClassUtils.escapeHtml(entry?.name || "");
+		try {
+			switch (entry?.kind) {
+				case "action":
+					return this._page?.getHoverLink?.(UrlUtil.PG_ACTIONS, entry.name, entry.source, null, safeName) || safeName;
+				case "attack": {
+					const attackAction = this._getStandardActionEconomyEntities().find(action => action.name === "Attack");
+					if (!attackAction) return safeName;
+					const hash = UrlUtil.encodeForHash([attackAction.name, attackAction.source].join(HASH_LIST_SEP));
+					return this._page?.getHoverLink?.(UrlUtil.PG_ACTIONS, attackAction.name, attackAction.source, hash, safeName) || safeName;
+				}
+				case "spell":
+					return this._page?.getHoverLink?.(UrlUtil.PG_SPELLS, entry.name, entry.source, null, safeName) || safeName;
+				case "feature":
+					return this._page?._getFeatureHoverLink?.(entry.entity) || safeName;
+				case "item": {
+					const power = entry.entity || {};
+					return this._page?.getHoverLink?.(UrlUtil.PG_ITEMS, power.itemName, power.itemSource, null, safeName) || safeName;
+				}
+				case "custom": {
+					const ability = entry.entity || {};
+					const entries = ability.entries?.length
+						? ability.entries
+						: [ability.description || entry.subtitle || "Custom ability."];
+					return CharacterSheetClassUtils.buildInlineEntriesHoverLink(entry.name, entry.name, entries) || safeName;
+				}
+				default: return safeName;
+			}
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn("[Combat] Error building action-economy hover:", e);
+			return safeName;
+		}
 	}
 
 	/**
@@ -6982,10 +7103,8 @@ class CharacterSheetCombat {
 					badge.textContent = meta.glyph;
 					row.appendChild(badge);
 
-					// User-controlled strings are set as text (never interpolated
-					// into markup) to keep the overview injection-safe.
 					const name = e_({tag: "span", clazz: "cs-combat-action-economy__name"});
-					name.textContent = entry.name || "";
+					name.innerHTML = this._getActionEconomyNameHtml(entry);
 					row.appendChild(name);
 
 					if (entry.subtitle) {
