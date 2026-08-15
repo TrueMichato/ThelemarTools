@@ -3,87 +3,27 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 51 — in flight (6 parallel sessions)
-
-Ownership map (single-owner per shared surface). Sessions NEVER edit `bugs.md`
-(orchestrator-owned), generated CSS (`css/dmscreen.css`, `css/makebrew.css`), or
-generated `test/e2e/utils/tgttFeaturePools.ts` — the integrator regenerates
-those after merge. Each session adds its OWN Jest test files (no editing the
-umbrella `CharacterSheetTGTT.test.js`).
-
-**S1 — NPC Manager UX** (bug 1). DM Screen. `/impeccable` critique + shape then
-overhaul: statblock visual quality, roll skills the NPC is NOT proficient in
-(default ability mod fallback), less-awkward batch rolling, easier condition
-management. OWNS `js/dmscreen/npctracker/*` (incl. `-roll.js`, `-condition.js`,
-`-batch.js`, `-roster.js`, `-serial.js`, `-detail.js`, `-hp.js`),
-`js/dmscreen/dmscreen-npctracker.js`, `scss/includes/dmscreen-npc-tracker.scss`,
-`docs/dmscreen/*npc*`. No character-sheet code. Do not regenerate `dmscreen.css`.
-
-**S2 — Item Maker UX + non-TGTT sources** (bug 2). `/impeccable` critique + shape
-then overhaul, PLUS **full** support (user-confirmed) for Upgrades/Gems/Materials
-from TGTT **and** non-TGTT sources — selectable in the builder AND mechanics apply
-on the sheet after Makebrew→save→reload. OWNS `js/itembuilder/*` (incl. the shared
-`itembuilder-upgrade-rules.js`), `js/makebrew/makebrew-item*.js` +
-`makebrew-crafting-*.js` + `makebrew-crafting-workbench.js`,
-`js/dmscreen/itembuilder/dmscreen-itembuilder.js`, the sheet-side upgrade/gem
-resolver `js/charactersheet/charactersheet-upgrades.js`, and item/makebrew SCSS.
-MUST NOT touch `charactersheet-state.js` or `charactersheet-inventory.js`
-item-application internals (route sheet-mechanics needs through the resolver +
-reference-based JSON contract). Do not commit generated CSS.
-
-**S3 — Feat mechanical calcs** (bugs 3,4,5). `charactersheet-state.js` only.
-Bug 3 Draconic Resilience AC — make it apply as unarmored defense; **edition-aware
-formula** (PHB `13+Dex`; XPHB/TGTT `10+Dex+Cha` per `class-sorcerer.json`) with a
-real "while unarmored" gate — do NOT blanket-un-skip conditional AC formulas; guard
-Barbarian/Monk unarmored-defense competition + multiclass. Bug 4 Speedy `+10` walk
-speed via a generic feat-speed contributor in `getSpeed`. Bug 5 Metamagic Adept
-`+2` sorcery points — works for the feat lifecycle (add/remove/reload, non-Sorcerer
-too), reversible. OWNS `getSpeed`/`getWalkSpeed`, Sorcerer `getFeatureCalculations`
-+ `getSorceryPointsMaxForClass`, `_getBestAcFormula` + the Draconic acFormula
-registration, and `FeatureEffectRegistry` feat entries. MUST NOT touch
-`getAdvantageState` (S4), the feature-option add path (S5), or combat render (S6).
-
-**S4 — Skills & checks** (bugs 7,8,9). Bug 7 passive-scores modal ignores per-skill
-ability override — re-render passive cards after override change and confirm the
-passive path uses `getSkillMod`. Bug 8 skills hoverable → definition (`data/skills.json`,
-`getHoverLink`, page "skill") at the 3 skill-render sites. Bug 9 armor stealth
-disadvantage — wire `hasArmorStealthDisadvantage()` into `getAdvantageState` for
-`skill:stealth` BEFORE `removeDisadvantage` is applied. OWNS
-`charactersheet.js` skill render sites + `_showSkillAbilitiesModal` +
-`_renderAbilitiesDetailed`, and `charactersheet-state.js` `getAdvantageState`.
-MUST NOT change `getHoverLink`'s signature (shared read-only with S6) or touch
-`_getBestAcFormula`/speed/sorcery (S3).
-
-**S5 — Paladin / generic feature-option pools** (bug 6). Root cause is the generic
-CS-BUG-017: recurring "pick from a pool" features past L3 (Paladin Specialties,
-Fighter Battle Tactics, Rogue specialties, Metamagic/Invocations/Maneuvers/Arcane
-Shots/Jester Acts/Trickster Tricks) don't fully register. Fix the shared machinery
-generically + the Paladin data/UI. OWNS the feature-option add path across ALL
-entry points: `charactersheet-class-utils.js` `findFeatureOptions`,
-`charactersheet-levelup.js` `_applyLevelUp` + multiclass application,
-`charactersheet-quickbuild.js` dedup, `charactersheet-builder.js` `_findFeatureOptions`,
-`charactersheet-respec.js` consumption, `charactersheet-state.js` `addFeature`
-dedup + Paladin `getFeatureCalculations` + Channel Divinity special-case,
-`charactersheet-features.js` specialty rendering, `charactersheet.js`
-`_renderOverviewSpecialtiesFeats`, and Paladin data in
-`homebrew/TravelersGuidetoThelemar.json` (~L12755–20920). Regression surface: all
-other pool classes — guard cumulative counts, no duplicate prompts, class-level
-gating in multiclass, uniqueness vs explicitly-repeatable options. MUST NOT touch
-`getSpeed`/sorcery/AC (S3), `getAdvantageState`/skills (S4), or the Shoulder Check
-JSON region (S6).
-
-**S6 — Combat action economy + Shoulder Check** (bugs 11,10). Bug 11
-`charactersheet-combat.js`: make every action-economy entry hoverable (existing
-`getHoverLink`/`Renderer.hover`) and add the standard actions (Attack, Dash,
-Disengage, Dodge, Help, Hide, Ready, Search, Shove, Grapple, Opportunity Attack,
-etc.) from `data/actions.json` into `getCombatActionEconomy`/`renderCombatActionEconomy`
-(append-only, `#charsheet-combat-action-economy`). Bug 10 pure data reword of the
-"Shoulder Check" TGTT method (`homebrew/TravelersGuidetoThelemar.json` ~L37967) to
-"the creature makes a Strength saving throw against your method DC." OWNS the
-action-economy render region + the Shoulder Check JSON region. MUST NOT change
-`getHoverLink`'s signature (shared with S4) or edit the Paladin JSON region (S5).
+_None currently tracked._
 
 ## Closed Bugs
+
+### Round 51 — NPC Manager UX, Item Maker non-TGTT sources, feat calcs (Draconic/Speedy/Metamagic Adept), Paladin/generic feature-option pools, skills & checks, combat action economy + Shoulder Check — INTEGRATED
+
+**Integration (no push at this step).** 6 parallel single-owner sessions merged `--no-ff` foundations-first S5→S3→S4→S6→S1→S2 into throwaway branch `r51-integration` off base `251b4fb7` (backup tag `backup/pre-bugfix-integration-r51`). **Zero conflicts** on every merge — the 3-way `charactersheet-state.js` overlap (S3 AC/speed/sorcery + S4 `getAdvantageState` + S5 `addFeature`) and the 2-way `charactersheet.js` overlap (S4 skill render + S6 constructor/`_pLoadData`) both auto-unioned cleanly by `ort` (disjoint regions). `css/dmscreen.css` (S1) + `css/makebrew.css` (S2) + `test/e2e/utils/tgttFeaturePools.ts` regenerated once (the pools `.ts` changed only its source-SHA header — S6 edited only Shoulder Check prose, S5 no TGTT JSON). One integration lint fixup (S4 test doublequote — S4 only ran targeted ESLint). Full gate green on the merged tree: ESLint clean, stylelint clean, **528 suites / 15,188 tests pass** (sole non-pass = environmental `CraftingDataFreshness.test.js` needing the gitignored `.cache/crafting/*.json`, confirmed passing once the cache is populated). TGTT JSON re-parsed OK. **Semantic reconciliation (S3↔S5):** a new orchestrator regression (`CharacterSheetR51IntegrationReconcile.test.js`) proves a single `addFeat` of Metamagic Adept simultaneously grants +2 sorcery points (S3) AND lands both metamagic optional-feature picks through S5's rewritten `addFeature` (7 total SP on a base-5 sorcerer), with `useSorceryPoint`/`removeFeat` unwinding both and never refunding spent points.
+
+Eleven reported items (character sheet + DM Screen, TGTT-flavoured unless noted), decomposed into 6 region-disjoint single-owner sessions. Sessions never touched `bugs.md`, generated CSS, or generated `tgttFeaturePools.ts` (orchestrator-regenerated at integration); each added only its own Jest suites.
+
+- **Bug 1 (S1, `361bedb2`) — NPC Manager UX overhaul.** DM Screen. Roleplay detail now surfaces ALL standard skills (listed proficiencies emphasised; every unlisted skill routed through `getNpcTrackerRollBonus` governing-ability fallback) instead of only `monster.skill`; the full statblock renders through the canonical `Renderer.monster.getCompactRenderedString` inside one `.ve-stats` table (fixes invalid double-wrapped nesting + night-mode white-out); one-click removable condition chips + quick-add selects routed through `getNpcTrackerConditionsAfterUpdate` (serializer stays v3); Encounter Control reshaped to lead with roll setup → results/handoff, HP/conditions demoted to a secondary disclosure. Owns `js/dmscreen/npctracker/*` + `scss/includes/dmscreen-npc-tracker.scss` + `docs/dmscreen/10-npc-manager.md`. Initiative-Tracker handoff + HP-undo preserved.
+- **Bug 2 (S2, `f1c177ec`) — Item Maker overhaul + non-TGTT source support.** Replaced the duplicated, name-hardcoded mechanics resolution (builder local switch + `charactersheet-upgrades.js` TCAH/TGTT-only) with ONE source-qualified `name|source` descriptor/aggregation layer shared by preview + sheet runtime; structured non-TGTT upgrades/gems/materials now contribute bonuses/effects/resources/powers/spells and survive reference-only save→reload→sheet application exactly once (prose-only TCAH/TGTT behaviour stays built-in; wrong-source names never inherit built-ins). Unified Makebrew + DM panel 25 to Base→Composition→Details→Review&Save; crafting-material presets merge site + Brew + the read-only Arcadia 8 adapter. Owns `js/itembuilder/*`, `js/makebrew/makebrew-item*.js` + `makebrew-crafting-*`, `js/dmscreen/itembuilder/dmscreen-itembuilder.js`, `charactersheet-upgrades.js` (sheet-side resolver only — did NOT touch `charactersheet-state.js`/`-inventory.js`), item/makebrew SCSS. Reference-based canonical JSON + `projectForPreview()` exact-once preserved.
+- **Bug 3 (S3, `538008e2`) — Draconic Resilience AC now applies as unarmored defense.** Root cause: the registered formula used `conditional:"while unarmored"`, which `_getBestAcFormula()` blanket-skips, and was hardcoded PHB `13+DEX`. Fixed with a source-aware structured `requireUnarmored` flag (NOT by un-skipping arbitrary conditional formulas): PHB `13+DEX`, XPHB/TGTT `10+DEX+CHA`; `getAc()`/`getAcBreakdown()` agree, body armor suppresses it, Barbarian/Monk unarmored-defense + multiclass still pick the higher AC. `charactersheet-state.js` only.
+- **Bug 4 (S3, `538008e2`) — Speedy feat `+10` walk speed.** Registered a `speed:walk +10` FeatureEffectRegistry entry reusing the existing reversible feat-speed modifier lifecycle; stacks with Mobile; consistent across numeric/formatted/breakdown readers.
+- **Bug 5 (S3, `538008e2`) — Metamagic Adept `+2` sorcery points.** Added generic `resourceMaxBonus` feat effect + tracked-delta reconciliation on add/remove/load/read. Sorcerers gain +2 on top of their class pool; non-Sorcerers get a standalone 2-point pool; the feat ID is NEVER attached to a Sorcerer's shared class pool (so `removeFeat` can't delete it); spend/removal/reload preserve the spent-point deficit with no double-apply.
+- **Bug 6 (S5, `1101dd94`) — Paladin / generic recurring feature-option pools (CS-BUG-017).** Root cause: 5 entry paths independently resolved/materialized option descriptors, mixed definition-level with acquisition-level, recorded lossy multiclass history, didn't replay feature choices on reload, and Respec matched the wrong same-named instance. Converged all paths onto ONE canonical `CharacterSheetClassUtils` contract (`findFeatureOptions` + new `resolveFeatureOptionData` + `materializeFeatureOption`) with a definitionLevel/acquisitionLevel split, replay-safe history (multiclass now records `replayData.featureChoices`), reload replay, and exact class/acquisition-level Respec targeting. **ADD-FEATURE CHANGE (flagged, reconciled):** `addFeature` identity normalized (case/whitespace, symmetric class+level) — feat ownership kept separate from class-bound features (verified by the S3↔S5 reconciliation test above). Owns class-utils/levelup/quickbuild/builder/respec + `addFeature` in state. No TGTT JSON edit needed. Paladin Specialties verified at 3/5/7/9/11/14/19; Channel Divinity 2 uses L3 / 3 uses L11.
+- **Bug 7 (S4, `8587e900`) — passive-scores modal ignored per-skill ability override.** The override modal only re-rendered the skills table, not `_renderAbilitiesDetailed()`, and the full-skills passive column used `10+mod` instead of `getPassiveScore()`. Now re-renders the passive cards on override change and routes passives through `getPassiveScore()`.
+- **Bug 8 (S4, `8587e900`) — skills hoverable to their definition.** The 3 skill-render sites emitted plain text; added `_getSkillHoverLink()` via `getHoverLink("skill", …)` (signature unchanged, shared read-only with S6); skill-name anchor clicks are excluded from the roll handlers.
+- **Bug 9 (S4, `8587e900`) — armor stealth disadvantage now applied.** `hasArmorStealthDisadvantage()` was detected but `getAdvantageState()` never consumed it; it now injects disadvantage + an `Armor` source for `skill:stealth` before the removal pass (deduped before removal).
+- **Bug 10 (S6, `0205d6b6`) — Shoulder Check contest corrected.** The TGTT method inverted the contest (reactor rolled Athletics vs the target's method DC); the single method entry now makes the target creature roll a Strength save against your method DC, shoving on failure. `homebrew/TravelersGuidetoThelemar.json` (Shoulder Check region only).
+- **Bug 11 (S6, `0205d6b6`) — Combat action economy: standard actions + hoverable entries.** `getCombatActionEconomy()` had no action catalog and `renderCombatActionEconomy()` emitted plain text. The page now loads `DataUtil.action.loadJSON()` once, appends 12 core universal actions (XPHB preferred when the exact name exists; PHB fallback for Grapple/Shove/Use an Object), derives Action/Bonus/Reaction buckets from `time`, and renders canonical/local hovers for standard actions, attacks, spells, features, custom abilities, and item powers. `charactersheet-combat.js` render region + a single localized action-data cache/load in `charactersheet.js`.
 
 ### Item Builder — "Crafting Workbench v2" (Impeccable critique + shape) — INTEGRATED
 
