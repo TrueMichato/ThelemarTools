@@ -2753,6 +2753,7 @@ globalThis.FeatureModifierParser = FeatureModifierParser;
 const FeatureEffectRegistry = {
 	// Internal registry of feature name -> effects mapping
 	_registry: {},
+	_sourceAwareFeatureNames: new Set(["draconic resilience"]),
 
 	/**
 	 * Initialize the default feature effects registry.
@@ -2961,9 +2962,21 @@ const FeatureEffectRegistry = {
 		]);
 
 		// ======= SORCERER =======
+		this.register("Draconic Resilience|PHB", [
+			{type: "hpBonus", value: 1, perLevel: true},
+			{type: "acFormula", base: 13, addDex: true, requireUnarmored: true},
+		]);
+		this.register("Draconic Resilience|XPHB", [
+			{type: "hpBonus", value: 1, perLevel: true},
+			{type: "acFormula", base: 10, addDex: true, secondAbility: "cha", requireUnarmored: true},
+		]);
+		this.register("Draconic Resilience|TGTT", [
+			{type: "hpBonus", value: 1, perLevel: true},
+			{type: "acFormula", base: 10, addDex: true, secondAbility: "cha", requireUnarmored: true},
+		]);
 		this.register("Draconic Resilience", [
 			{type: "hpBonus", value: 1, perLevel: true},
-			{type: "acFormula", base: 13, addDex: true, conditional: "while unarmored"},
+			{type: "acFormula", base: 13, addDex: true, requireUnarmored: true},
 		]);
 
 		// ======= BLOOD HUNTER (BH2022) =======
@@ -3509,6 +3522,19 @@ const FeatureEffectRegistry = {
 		this.register("Mobile", [
 			{type: "speed", speedType: "walk", value: 10},
 		]);
+		this.register("Speedy|XPHB", [
+			{type: "speed", speedType: "walk", value: 10},
+		]);
+		this.register("Speedy", [
+			{type: "speed", speedType: "walk", value: 10},
+		]);
+
+		// ===================================================================
+		// METAMAGIC ADEPT — +2 Sorcery Points
+		// ===================================================================
+		this.register("Metamagic Adept", [
+			{type: "resourceMaxBonus", resource: "Sorcery Points", value: 2},
+		]);
 
 		// ===================================================================
 		// DUAL WIELDER (PHB 2014) — +1 AC while dual wielding
@@ -3964,9 +3990,14 @@ const FeatureEffectRegistry = {
 	/**
 	 * Get effects for a feature by name
 	 * @param {string} featureName - The feature name to look up
+	 * @param {string} [source] - Optional source for edition/source-specific effects
 	 * @returns {Array} Array of effect objects, or empty array if not found
 	 */
-	getEffects (featureName) {
+	getEffects (featureName, source) {
+		if (source) {
+			const sourceKey = this._normalizeKey(`${featureName}|${source}`);
+			if (this._registry[sourceKey]) return this._registry[sourceKey];
+		}
 		const key = this._normalizeKey(featureName);
 		return this._registry[key] || [];
 	},
@@ -3981,11 +4012,16 @@ const FeatureEffectRegistry = {
 	getFeatEffects (featName, source) {
 		if (source) {
 			const sourceKey = this._normalizeKey(`${featName}|${source}`);
-			if (this._registry[sourceKey] && this._registry[sourceKey].length > 0) {
-				return this._registry[sourceKey];
-			}
+			if (this._registry[sourceKey]?.length) return this._registry[sourceKey];
 		}
 		return this.getEffects(featName);
+	},
+
+	getStoredFeatureEffects (featureName, source) {
+		const key = this._normalizeKey(featureName);
+		return this._sourceAwareFeatureNames.has(key)
+			? this.getEffects(featureName, source)
+			: this.getEffects(featureName);
 	},
 
 	/**
@@ -5630,6 +5666,7 @@ class CharacterSheetState {
 
 		// Re-apply class feature effects (proficiencies, resistances, etc.)
 		// so that saved characters get all calculation-based effects on load
+		this._reconcileSorceryPointsFeatBonus();
 		this.applyClassFeatureEffects();
 
 		// Re-derive Zodiac Form (Circle of the Zodiac) per-form effects from the
@@ -22164,7 +22201,8 @@ class CharacterSheetState {
 					// level-up resource writer and `_ensureSorceryPoints` can
 					// never disagree again.
 					{
-						const sp = CharacterSheetState.getSorceryPointsMaxForClass(cls);
+						const sp = CharacterSheetState.getSorceryPointsMaxForClass(cls)
+							+ this._getFeatResourceMaxBonus("Sorcery Points");
 						if (sp > 0) {
 							calculations.hasFontOfMagic = true;
 							calculations.sorceryPoints = sp;
@@ -22226,7 +22264,14 @@ class CharacterSheetState {
 									// HP bonus = 1 per sorcerer level
 									calculations.draconicResilienceHpBonus = level;
 									// AC = 13 + DEX when not wearing armor
-									calculations.draconicResilienceAc = 13 + this.getAbilityMod("dex");
+									calculations.draconicResilienceAcFormula = is2024
+										? {base: 10, addDex: true, secondAbility: "cha", requireUnarmored: true}
+										: {base: 13, addDex: true, requireUnarmored: true};
+									calculations.draconicResilienceAc = calculations.draconicResilienceAcFormula.base
+										+ this.getAbilityMod("dex")
+										+ (calculations.draconicResilienceAcFormula.secondAbility
+											? this.getAbilityMod(calculations.draconicResilienceAcFormula.secondAbility)
+											: 0);
 								}
 								// Elemental Affinity (level 6)
 								if (level >= 6) {
@@ -27107,7 +27152,7 @@ class CharacterSheetState {
 				if (!feature.name) return;
 
 				// Try to get effects from the registry by feature name
-				const registryEffects = FeatureEffectRegistry.getEffects(feature.name);
+				const registryEffects = FeatureEffectRegistry.getStoredFeatureEffects(feature.name, feature.source);
 				if (registryEffects.length > 0) {
 					// Effects that opt in with `__editionAware` need the FEATURE's own source
 					// (e.g. "PHB" vs "XPHB") to resolve edition-divergent wording. Opt-in by
@@ -28322,7 +28367,7 @@ class CharacterSheetState {
 			});
 		}
 
-		// Draconic Resilience: +1 HP per level, unarmored AC = 13 + DEX
+		// Draconic Resilience: +1 HP per level, with an edition-specific unarmored formula.
 		if (calculations.hasDraconicResilience && !alreadyProcessed("Draconic Resilience")) {
 			effects.push({
 				type: "hpBonus",
@@ -28332,10 +28377,8 @@ class CharacterSheetState {
 			});
 			effects.push({
 				type: "acFormula",
-				base: 13,
-				addDex: true,
+				...(calculations.draconicResilienceAcFormula || {base: 13, addDex: true, requireUnarmored: true}),
 				source: "Draconic Resilience",
-				conditional: "while unarmored",
 			});
 		}
 
@@ -29044,6 +29087,9 @@ class CharacterSheetState {
 					base: effect.base,
 					addDex: effect.addDex,
 					secondAbility: effect.secondAbility,
+					formulaType: effect.formulaType,
+					requireUnarmored: !!effect.requireUnarmored,
+					name: effect.name || effect.source,
 					sourceName: effect.source,
 					sourceType: "classFeature",
 					conditional: effect.conditional,
@@ -37022,6 +37068,56 @@ class CharacterSheetState {
 		return level >= 2 ? level : 0;
 	}
 
+	_getFeatResourceMaxBonus (resourceName) {
+		return (this._data.feats || []).reduce((total, feat) => {
+			const effects = FeatureEffectRegistry.getFeatEffects(feat.name, feat.source);
+			return total + effects
+				.filter(effect => effect.type === "resourceMaxBonus" && effect.resource === resourceName)
+				.reduce((sum, effect) => sum + (Number(effect.value) || 0), 0);
+		}, 0);
+	}
+
+	_getSorceryPointsClassMax () {
+		return (this._data.classes || [])
+			.reduce((max, cls) => Math.max(max, CharacterSheetState.getSorceryPointsMaxForClass(cls)), 0);
+	}
+
+	_getSorceryPointsCalculatedMax () {
+		return this._getSorceryPointsClassMax() + this._getFeatResourceMaxBonus("Sorcery Points");
+	}
+
+	_reconcileSorceryPointsFeatBonus () {
+		const desiredBonus = this._getFeatResourceMaxBonus("Sorcery Points");
+		let resource = (this._data.resources || []).find(r => r.name === "Sorcery Points");
+
+		if (!resource) {
+			const desiredMax = this._getSorceryPointsClassMax() + desiredBonus;
+			if (desiredMax <= 0) return;
+			resource = {
+				id: CryptUtil.uid(),
+				name: "Sorcery Points",
+				current: desiredMax,
+				max: desiredMax,
+				recharge: "long",
+				_featMaxBonusApplied: desiredBonus,
+			};
+			this._data.resources.push(resource);
+			return;
+		}
+
+		const appliedBonus = Number(resource._featMaxBonusApplied) || 0;
+		const delta = desiredBonus - appliedBonus;
+		if (delta) {
+			resource.max = Math.max(0, (Number(resource.max) || 0) + delta);
+			resource.current = Math.max(0, Math.min(resource.max, (Number(resource.current) || 0) + delta));
+		}
+		resource._featMaxBonusApplied = desiredBonus;
+
+		if (resource.max <= 0 && this._getSorceryPointsClassMax() <= 0) {
+			this._data.resources = this._data.resources.filter(r => r !== resource);
+		}
+	}
+
 	/**
 	 * Create / re-scale the player-facing "Sorcery Points" pool from the class
 	 * table, mirroring {@link _ensureChannelDivinityUses}.
@@ -37033,23 +37129,22 @@ class CharacterSheetState {
 	 * a Metamagic list and subclass features that spend Sorcery Points, but no
 	 * pool to spend from.
 	 *
-	 * Only ever RAISES the max (largest contribution across classes), so a
-	 * homebrew or item effect that legitimately pushed the pool higher is never
-	 * clobbered.
+	 * Existing pools keep their base/tuned/manual maximum. The only reconciliation
+	 * performed here is the tracked delta owned by feat resource bonuses.
 	 * @private
 	 */
 	_ensureSorceryPoints () {
-		// CREATE-ONLY, deliberately. Re-scaling an existing pool on level-up is
-		// `CharacterSheetClassUtils.updateClassResources`'s job; reconciling here as
-		// well would fight two legitimate in-place writers of `max`:
+		// Base pool creation remains create-only. Re-scaling an existing class pool
+		// on level-up is `CharacterSheetClassUtils.updateClassResources`'s job; only
+		// the separately tracked feat delta is reconciled here, so it does not fight:
 		//   - `setSorceryPoints()`, the explicit player/DM override, and
 		//   - TGTT passive Metamagic tuning, which LOCKS points by LOWERING `max`
 		//     (see `tuneMetamagic`) — a reconciler would silently untune every
 		//     metamagic the moment anything called `getResources()`.
+		this._reconcileSorceryPointsFeatBonus();
 		if ((this._data.resources || []).some(r => r.name === "Sorcery Points")) return;
 
-		const desiredMax = (this._data.classes || [])
-			.reduce((max, cls) => Math.max(max, CharacterSheetState.getSorceryPointsMaxForClass(cls)), 0);
+		const desiredMax = this._getSorceryPointsCalculatedMax();
 		if (desiredMax <= 0) return;
 
 		(this._data.resources = this._data.resources || []).push({
@@ -37058,6 +37153,7 @@ class CharacterSheetState {
 			current: desiredMax,
 			max: desiredMax,
 			recharge: "long",
+			_featMaxBonusApplied: this._getFeatResourceMaxBonus("Sorcery Points"),
 		});
 	}
 
@@ -44427,6 +44523,7 @@ class CharacterSheetState {
 
 		// Process registry-defined effects for this feat (HP bonuses, speed, senses, etc.)
 		this._processFeatRegistryEffects(featData);
+		this._reconcileSorceryPointsFeatBonus();
 
 		// ====================
 		// TGTT Feat: Lore Mastery (variant-rule aligned)
@@ -44547,6 +44644,7 @@ class CharacterSheetState {
 			if (f.name === featIdOrName && f.source === source) return false;
 			return true;
 		});
+		this._reconcileSorceryPointsFeatBonus();
 	}
 	// #endregion
 
