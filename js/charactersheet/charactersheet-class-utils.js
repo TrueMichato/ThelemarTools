@@ -2986,7 +2986,12 @@ class CharacterSheetClassUtils {
 	 * @param {Array<*>} [classFeatures] - All class features (for ref lookup)
 	 * @returns {Array<*>} Array of {count, options} objects
 	 */
-	static findFeatureOptions (/** @type {*} */ feature, /** @type {*} */ characterLevel = 1, /** @type {*} */ classFeatures = []) {
+	static findFeatureOptions (
+		/** @type {*} */ feature,
+		/** @type {*} */ characterLevel = 1,
+		/** @type {*} */ classFeatures = [],
+		/** @type {Set<string>} */ visitedRefs = new Set(),
+	) {
 		if (!feature?.entries) return [];
 
 		/** @type {*[]} */ const results = [];
@@ -3053,16 +3058,20 @@ class CharacterSheetClassUtils {
 								}
 							} else if (opt.type === "refSubclassFeature" && opt.subclassFeature) {
 								const parts = opt.subclassFeature.split("|");
-								options.push({
-									name: parts[0],
-									className: parts[1],
-									source: parts[2],
-									subclassShortName: parts[3],
-									subclassSource: parts[4],
-									level: parseInt(parts[5]) || 1,
-									type: "subclassFeature",
-									ref: opt.subclassFeature,
-								});
+								const optLevel = parseInt(parts[5]) || 1;
+								if (optLevel <= characterLevel) {
+									options.push({
+										name: parts[0],
+										className: parts[1],
+										classSource: parts[2],
+										source: parts[4] || parts[2],
+										subclassShortName: parts[3],
+										subclassSource: parts[4],
+										level: optLevel,
+										type: "subclassFeature",
+										ref: opt.subclassFeature,
+									});
+								}
 							} else if (opt.type === "refOptionalfeature" && opt.optionalfeature) {
 								const parts = opt.optionalfeature.split("|");
 								options.push({
@@ -3077,6 +3086,12 @@ class CharacterSheetClassUtils {
 									type: "inline",
 									entries: opt.entries,
 									source: opt.source,
+								});
+							} else if (typeof opt === "string") {
+								options.push({
+									name: opt,
+									type: "text",
+									source: feature.source,
 								});
 							}
 						}
@@ -3103,13 +3118,19 @@ class CharacterSheetClassUtils {
 						const refClassName = refParts[1];
 						const refSource = refParts[2];
 						const refLevel = parseInt(refParts[3]) || 1;
+						const refKey = [refFeatureName, refClassName, refSource, refLevel]
+							.map(it => String(it || "").toLowerCase())
+							.join("|");
+						if (visitedRefs.has(refKey)) continue;
 
 						const referencedFeature = CharacterSheetClassUtils.getClassFeatureData(
 							classFeatures, refFeatureName, refClassName, refSource, refLevel,
 						);
 						if (/** @type {*} */ referencedFeature) {
+							const nextVisitedRefs = new Set(visitedRefs);
+							nextVisitedRefs.add(refKey);
 							const refResults = CharacterSheetClassUtils.findFeatureOptions(
-								referencedFeature, characterLevel, classFeatures,
+								referencedFeature, characterLevel, classFeatures, nextVisitedRefs,
 							);
 							for (/** @type {*} */ const refResult of refResults) {
 								results.push({
@@ -3288,6 +3309,116 @@ class CharacterSheetClassUtils {
 		const parts = featureRef.split("|");
 		const [name, className, source, level] = parts;
 		return CharacterSheetClassUtils.getClassFeatureData(classFeatures, name, className, source, parseInt(level) || 1);
+	}
+
+	/**
+	 * Resolve an option descriptor to its canonical data entity.
+	 * @param {*} option
+	 * @param {{classFeatures?:Array<*>, subclassFeatures?:Array<*>, optionalFeatures?:Array<*>}} catalogs
+	 * @returns {*}
+	 */
+	static resolveFeatureOptionData (
+		/** @type {*} */ option,
+		{classFeatures = [], subclassFeatures = [], optionalFeatures = []} = {},
+	) {
+		if (!option) return null;
+
+		if (option.type === "classFeature") {
+			if (option.ref) return CharacterSheetClassUtils.getClassFeatureDataFromRef(classFeatures, option.ref);
+			const candidates = classFeatures.filter((/** @type {*} */ feature) =>
+				feature.name === option.name
+				&& (!option.className || feature.className === option.className)
+				&& (!option.source || feature.source === option.source));
+			return candidates.find((/** @type {*} */ feature) => feature.level === option.definitionLevel)
+				|| candidates.find((/** @type {*} */ feature) => feature.level === option.level)
+				|| candidates[0]
+				|| null;
+		}
+
+		if (option.type === "subclassFeature") {
+			const parts = option.ref ? option.ref.split("|") : [];
+			const name = parts[0] || option.name;
+			const className = parts[1] || option.className;
+			const classSource = parts[2] || option.classSource;
+			const subclassShortName = parts[3] || option.subclassShortName;
+			const subclassSource = parts[4] || option.subclassSource || option.source;
+			const level = parseInt(parts[5]) || option.definitionLevel || option.level;
+			const exact = subclassFeatures.find((/** @type {*} */ feature) =>
+				feature.name === name
+				&& (!className || feature.className === className)
+				&& (!classSource || !feature.classSource || feature.classSource === classSource)
+				&& (!subclassShortName || feature.subclassShortName === subclassShortName)
+				&& (!subclassSource || feature.subclassSource === subclassSource || feature.source === subclassSource)
+				&& (!level || feature.level === level));
+			if (exact) return exact;
+			return subclassFeatures.find((/** @type {*} */ feature) =>
+				feature.name === name
+					&& (!className || feature.className === className)
+					&& (!subclassShortName || feature.subclassShortName === subclassShortName))
+				|| null;
+		}
+
+		if (option.type === "optionalfeature") {
+			const [refName, refSource] = option.ref ? option.ref.split("|") : [];
+			const name = refName || option.name;
+			const source = refSource || option.source;
+			return optionalFeatures.find((/** @type {*} */ feature) =>
+				feature.name === name && (!source || feature.source === source))
+				|| optionalFeatures.find((/** @type {*} */ feature) => feature.name === name)
+				|| null;
+		}
+
+		return option;
+	}
+
+	/**
+	 * Materialize a selected option at the level where the character acquired it.
+	 * @param {*} option
+	 * @param {*} opts
+	 * @returns {*}
+	 */
+	static materializeFeatureOption (
+		/** @type {*} */ option,
+		{
+			className,
+			classSource,
+			acquisitionLevel,
+			parentFeature,
+			catalogs = {},
+			subclassName,
+			subclassShortName,
+			subclassSource,
+		} = {},
+	) {
+		const resolved = CharacterSheetClassUtils.resolveFeatureOptionData(option, catalogs);
+		const definitionLevel = Number(resolved?.level || option?.definitionLevel || option?.level) || 1;
+		const level = Number(acquisitionLevel) || definitionLevel;
+		const isSubclassFeature = option?.type === "subclassFeature" || !!resolved?.isSubclassFeature;
+		const featureType = option?.type === "optionalfeature" ? "Optional Feature" : "Class";
+
+		return CharacterSheetClassUtils.buildFeatureStateObject(
+			{
+				...(resolved || {}),
+				...(option || {}),
+				level: undefined,
+				entries: resolved?.entries ?? option?.entries,
+				description: resolved?.description || option?.description,
+				definitionLevel,
+				acquisitionLevel: level,
+			},
+			{
+				className: option?.className || className,
+				classSource: option?.classSource || classSource,
+				level,
+				featureType,
+				subclassName: option?.subclassName || resolved?.subclassName || subclassName,
+				subclassShortName: option?.subclassShortName || resolved?.subclassShortName || subclassShortName,
+				subclassSource: option?.subclassSource || resolved?.subclassSource || subclassSource,
+				isSubclassFeature,
+				isFeatureOption: true,
+				parentFeature,
+			},
+		);
 	}
 
 	/**
@@ -5965,7 +6096,7 @@ class CharacterSheetClassUtils {
 	 * @param {string} [opts.parentFeature]
 	 * @returns {*}
 	 */
-	static buildHistoryFeatureSnapshot (/** @type {*} */ feature, {type, parentFeature} = {}) {
+	static buildHistoryFeatureSnapshot (/** @type {*} */ feature, {type, parentFeature, includeEntries = false} = {}) {
 		const outFeature = feature || {};
 		/** @type {*} */ const snapshot = {
 			name: outFeature.name,
@@ -5974,6 +6105,8 @@ class CharacterSheetClassUtils {
 			parentFeature: parentFeature ?? outFeature.parentFeature,
 			ref: outFeature.ref,
 			level: outFeature.level,
+			definitionLevel: outFeature.definitionLevel,
+			acquisitionLevel: outFeature.acquisitionLevel,
 			featureType: outFeature.featureType,
 			optionalFeatureTypes: outFeature.optionalFeatureTypes || (Array.isArray(outFeature.featureType) ? outFeature.featureType : undefined),
 			className: outFeature.className,
@@ -5999,7 +6132,7 @@ class CharacterSheetClassUtils {
 			_replaces: outFeature._replaces,
 		};
 
-		if (!snapshot.ref) {
+		if (!snapshot.ref || includeEntries || outFeature.isFeatureOption) {
 			snapshot.entries = outFeature.entries;
 			snapshot.description = outFeature.description;
 		}

@@ -384,6 +384,133 @@ describe("CharacterSheetLevelHistory", () => {
 			expect(state.getKnownMetamagicKeys()).toContain("careful");
 		});
 
+		it("reconstructs recurring feature options from replay snapshots when runtime features are absent", () => {
+			const levelHistory = [1, 2, 3, 4, 5].map(level => ({
+				level,
+				class: {name: "Paladin", source: "TGTT"},
+				choices: level === 3 || level === 5
+					? {
+						featureChoices: [{
+							featureName: "Specialties",
+							choice: "Divine Sentinel",
+							source: "TGTT",
+							acquisitionLevel: level,
+							ref: "Divine Sentinel|Paladin|TGTT|3",
+						}],
+						replayData: {
+							featureChoices: [{
+								name: "Divine Sentinel",
+								source: "TGTT",
+								type: "classFeature",
+								ref: "Divine Sentinel|Paladin|TGTT|3",
+								parentFeature: "Specialties",
+								level,
+								definitionLevel: 3,
+								acquisitionLevel: level,
+								className: "Paladin",
+								classSource: "TGTT",
+								entries: [`Rules acquired at level ${level}.`],
+								isFeatureOption: true,
+							}],
+						},
+					}
+					: {},
+			}));
+
+			state.loadFromJson({
+				classes: [{name: "Paladin", source: "TGTT", level: 5}],
+				levelHistory,
+				features: [],
+			});
+
+			const picks = state.getFeatures().filter(feature => feature.name === "Divine Sentinel");
+			expect(picks).toHaveLength(2);
+			expect(picks.map(feature => feature.level)).toEqual([3, 5]);
+			expect(picks.every(feature => feature.isFeatureOption && feature.parentFeature === "Specialties")).toBe(true);
+			expect(picks.map(feature => feature.definitionLevel)).toEqual([3, 3]);
+		});
+
+		it("reconciles duplicate legacy definition-level rows to distinct acquisition levels idempotently", () => {
+			const featureChoice = acquisitionLevel => ({
+				featureName: "Specialties",
+				choice: "Adept Speed",
+				source: "TGTT",
+				acquisitionLevel,
+				ref: "Adept Speed|Monk|TGTT|2",
+			});
+			const replayChoice = acquisitionLevel => ({
+				name: "Adept Speed",
+				source: "TGTT",
+				type: "classFeature",
+				ref: "Adept Speed|Monk|TGTT|2",
+				parentFeature: "Specialties",
+				level: 2,
+				definitionLevel: 2,
+				acquisitionLevel,
+				className: "Monk",
+				classSource: "TGTT",
+				isFeatureOption: true,
+			});
+			const levelHistory = [1, 2, 3, 4].map(level => ({
+				level,
+				class: {name: "Monk", source: "TGTT"},
+				choices: level === 2 || level === 4
+					? {
+						featureChoices: [featureChoice(level)],
+						replayData: {featureChoices: [replayChoice(level)]},
+					}
+					: {},
+			}));
+
+			state.loadFromJson({
+				classes: [{name: "Monk", source: "TGTT", level: 4}],
+				levelHistory,
+				features: [
+					{id: "legacy-a", name: "Adept Speed", source: "TGTT", className: "Monk", level: 2, isFeatureOption: true, parentFeature: "Specialties"},
+					{id: "legacy-b", name: "Adept Speed", source: "TGTT", className: "Monk", level: 2, isFeatureOption: true, parentFeature: "Specialties"},
+				],
+			});
+
+			expect(state.getFeatures().filter(feature => feature.name === "Adept Speed").map(feature => feature.level)).toEqual([2, 4]);
+			state.setClassFeatureCatalog([{
+				name: "Adept Speed",
+				source: "TGTT",
+				className: "Monk",
+				level: 2,
+				entries: ["Your speed increases by 10 feet."],
+			}], [], []);
+			const picks = state.getFeatures().filter(feature => feature.name === "Adept Speed");
+			expect(picks).toHaveLength(2);
+			expect(picks.map(feature => feature.level)).toEqual([2, 4]);
+			expect(picks.every(feature => feature.entries?.[0] === "Your speed increases by 10 feet.")).toBe(true);
+		});
+
+		it("keeps inline and text choices in history without creating phantom feature cards", () => {
+			state.loadFromJson({
+				classes: [{name: "Wizard", source: "PHB", level: 1}],
+				levelHistory: [{
+					level: 1,
+					class: {name: "Wizard", source: "PHB"},
+					choices: {
+						featureChoices: [
+							{featureName: "Spellcasting Ability", choice: "Intelligence", type: "inline"},
+							{featureName: "Tradition", choice: "Old School", type: "text"},
+						],
+						replayData: {
+							featureChoices: [
+								{name: "Intelligence", type: "inline", parentFeature: "Spellcasting Ability"},
+								{name: "Old School", type: "text", parentFeature: "Tradition"},
+							],
+						},
+					},
+				}],
+				features: [],
+			});
+
+			expect(state.getFeatures().map(feature => feature.name)).not.toEqual(expect.arrayContaining(["Intelligence", "Old School"]));
+			expect(state.getLevelHistoryEntry(1).choices.featureChoices).toHaveLength(2);
+		});
+
 		it("should keep only known passive tuned metamagics when loading a save", () => {
 			const save = {
 				classes: [{name: "Sorcerer", source: "TGTT", level: 2}],

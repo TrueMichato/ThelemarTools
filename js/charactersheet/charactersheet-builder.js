@@ -159,162 +159,11 @@ class CharacterSheetBuilder {
 	 * @returns {Array<*>} Array of {count, options} objects
 	 */
 	_findFeatureOptions (feature, characterLevel = 1) {
-		if (!feature?.entries) return [];
-		/** @type {*[]} */ const results = [];
-
-		/** @param {*} entries */
-		const searchEntries = (/** @type {*} */ entries) => {
-			if (!Array.isArray(entries)) return;
-
-			for (const entry of entries) {
-				if (typeof entry === "object"
-					&& entry.type === "abilityDc"
-					&& Array.isArray(entry.attributes)
-					// Some features RESTATE an ability that was already chosen elsewhere rather
-					// than posing a new choice. BH2022's Pact Magic is the motivating case:
-					// "Your chosen Hemocraft ability (Intelligence or Wisdom) is your
-					// spellcasting ability" — the decision was made at level 1 by Hunter's
-					// Bane, and `abilityDc` here only declares how the DC is displayed.
-					// Offering it again asks a question the rules do not pose, and the answer
-					// is then ignored (the sheet correctly uses the hemocraft ability), which
-					// is worse than not asking. See CS-BUG-161.
-					&& !CharacterSheetClassUtils.FEATURE_DERIVED_ABILITY_DCS?.has(String(feature.name || "").toLowerCase())
-					&& entry.attributes.length > 1) {
-					results.push({
-						count: 1,
-						options: entry.attributes.map((ability) => ({
-							name: Parser.attAbvToFull(ability),
-							type: "inline",
-							source: feature.source,
-							entries: [`Use ${Parser.attAbvToFull(ability)} for ${entry.name || feature.name}.`],
-						})),
-					});
-				}
-
-				if (typeof entry === "object" && entry.type === "options") {
-					// An options group made entirely of `refOptionalfeature` children is pool
-					// DOCUMENTATION, not a choice — the paired `optionalfeatureProgression` is
-					// what grants the picks. Prompting here as well asked for the same pick
-					// twice and over-granted (a level-3 Jester learned 4 acts instead of 3).
-					// Mirrors the guard in CharacterSheetClassUtils.findFeatureOptions.
-					if (Array.isArray(entry.entries) && entry.entries.length
-						&& entry.entries.every(o => o?.type === "refOptionalfeature")) continue;
-
-					// Found an options entry
-					/** @type {*[]} */ const options = [];
-					const count = entry.count || 1;
-
-					// Process the option entries
-					if (entry.entries) {
-						for (const opt of entry.entries) {
-							if (opt.type === "refClassFeature" && opt.classFeature) {
-								// Parse "FeatureName|ClassName|Source|Level" format
-								const parts = opt.classFeature.split("|");
-								const optLevel = parseInt(parts[3]) || 1;
-
-								// Only include options available at current level
-								if (optLevel <= characterLevel) {
-									options.push({
-										name: parts[0],
-										className: parts[1],
-										source: parts[2],
-										level: optLevel,
-										type: "classFeature",
-										ref: opt.classFeature,
-									});
-								}
-							} else if (opt.type === "refSubclassFeature" && opt.subclassFeature) {
-								const parts = opt.subclassFeature.split("|");
-								const optLevel = parseInt(parts[5]) || 1;
-
-								if (optLevel <= characterLevel) {
-									options.push({
-										name: parts[0],
-										className: parts[1],
-										classSource: parts[2],
-										subclassShortName: parts[3],
-										subclassSource: parts[4],
-										level: optLevel,
-										type: "subclassFeature",
-										ref: opt.subclassFeature,
-									});
-								}
-							} else if (opt.type === "refOptionalfeature" && opt.optionalfeature) {
-								options.push({
-									name: opt.optionalfeature.split("|")[0],
-									source: opt.optionalfeature.split("|")[1],
-									type: "optionalfeature",
-									ref: opt.optionalfeature,
-								});
-							} else if (typeof opt === "string") {
-								options.push({
-									name: opt,
-									type: "text",
-								});
-							}
-						}
-					}
-
-					if (options.length > 0) {
-						results.push({count, options, featureName: feature.name});
-					}
-				}
-
-				// Recursively search nested entries
-				if (entry.entries) {
-					searchEntries(entry.entries);
-				}
-
-				// Check for features that reference another feature's options via {@classFeature ...}
-				if (typeof entry === "string") {
-					const refMatch = entry.match(/\{@classFeature\s+([^}]+)\}/);
-					if (refMatch && /another|additional|gain/i.test(entry)) {
-						const refParts = refMatch[1].split("|");
-						const refFeatureName = refParts[0];
-						const refClassName = refParts[1];
-						const refSource = refParts[2];
-						const refLevel = parseInt(refParts[3]) || 1;
-
-						const referencedFeature = this._getClassFeatureData(refFeatureName, refClassName, refSource, refLevel);
-						if (referencedFeature) {
-							const refResults = this._findFeatureOptions(referencedFeature, characterLevel);
-							for (const refResult of refResults) {
-								results.push({
-									count: 1,
-									options: refResult.options,
-									featureName: feature.name,
-									referencedFrom: refMatch[1],
-								});
-							}
-						}
-					}
-				}
-			}
-		};
-
-		searchEntries(feature.entries);
-
-		// Prose-stated 1-of-N choices (see CharacterSheetClassUtils.FEATURE_PROSE_CHOICES).
-		// This method is a near-copy of the ClassUtils resolver, so the fallback has to
-		// be applied here too or the Builder path silently drops the choice that
-		// level-up and quick-build both offer.
-		if (!results.length) {
-			const proseChoice = CharacterSheetClassUtils.FEATURE_PROSE_CHOICES?.[String(feature.name || "").toLowerCase()];
-			if (proseChoice) {
-				results.push({
-					count: proseChoice.count || 1,
-					options: proseChoice.options.map(name => ({
-						name,
-						type: "inline",
-						source: feature.source,
-						entries: [`${name} — see ${feature.name}.`],
-					})),
-					featureName: feature.name,
-				});
-			}
-		}
-
-		return results;
+		return CharacterSheetClassUtils.findFeatureOptions(
+			feature,
+			characterLevel,
+			this._page.getClassFeatures?.() || this._page._classFeatures || [],
+		);
 	}
 
 	/**
@@ -760,14 +609,32 @@ class CharacterSheetBuilder {
 						Object.entries(this._selectedFeatureOptions).forEach(([/** @type {*} */ featureName, /** @type {*} */ options]) => {
 							const parentFeature = featureName.split("_")[0];
 							options.forEach((/** @type {*} */ opt) => {
+								const materialized = CharacterSheetClassUtils.materializeFeatureOption(opt, {
+									className: this._selectedClass?.name,
+									classSource: this._selectedClass?.source,
+									acquisitionLevel: 1,
+									parentFeature,
+									catalogs: {
+										classFeatures: this._page.getClassFeatures?.() || this._page._classFeatures || [],
+										subclassFeatures: this._page.getSubclassFeatures?.() || this._page._subclassFeatures || [],
+										optionalFeatures: this._page.getOptionalFeatures?.() || [],
+									},
+									subclassName: this._selectedSubclass?.name,
+									subclassShortName: this._selectedSubclass?.shortName,
+									subclassSource: this._selectedSubclass?.source,
+								});
 								featureChoices.push({
 									featureName: parentFeature,
 									choice: opt.name,
 									source: opt.source,
+									acquisitionLevel: 1,
+									ref: opt.ref,
+									type: opt.type,
 								});
-								featureChoiceReplay.push(CharacterSheetClassUtils.buildHistoryFeatureSnapshot(opt, {
+								featureChoiceReplay.push(CharacterSheetClassUtils.buildHistoryFeatureSnapshot(materialized, {
 									type: opt.type || "featureOption",
 									parentFeature,
+									includeEntries: true,
 								}));
 							});
 						});
@@ -2110,22 +1977,17 @@ class CharacterSheetBuilder {
 			options.forEach((/** @type {*} */ opt) => {
 				// For class feature options (like Specialties), look up the full feature data
 				if (opt.type === "classFeature" && opt.ref) {
-					const fullOpt = this._getClassFeatureDataFromRef(opt.ref);
-					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(
-						{
-							...(fullOpt || {}),
-							...opt,
-							entries: fullOpt?.entries ?? opt.entries,
+					this._state.addFeature(CharacterSheetClassUtils.materializeFeatureOption(opt, {
+						className: this._selectedClass?.name,
+						classSource: this._selectedClass?.source,
+						acquisitionLevel: 1,
+						parentFeature: featureKey.split("_")[0],
+						catalogs: {
+							classFeatures: this._page.getClassFeatures?.() || this._page._classFeatures || [],
+							subclassFeatures: this._page.getSubclassFeatures?.() || this._page._subclassFeatures || [],
+							optionalFeatures: this._page.getOptionalFeatures?.() || [],
 						},
-						{
-							className: opt.className || this._selectedClass?.name,
-							classSource: this._selectedClass?.source,
-							level: opt.level || 1,
-							featureType: "Class",
-							isFeatureOption: true,
-							parentFeature: featureKey.split("_")[0],
-						},
-					));
+					}));
 
 					// Apply any skill sub-choices for this specialty
 					const choiceKey = `${featureKey}__${opt.name}__${opt.ref || ""}`;
@@ -2166,17 +2028,19 @@ class CharacterSheetBuilder {
 					});
 				} else if (opt.type === "subclassFeature" && opt.ref) {
 					// Handle subclass feature options
-					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(opt, {
+					this._state.addFeature(CharacterSheetClassUtils.materializeFeatureOption(opt, {
 						className: opt.className || this._selectedClass?.name,
 						classSource: this._selectedClass?.source,
-						level: opt.level || 1,
-						featureType: "Class",
+						acquisitionLevel: 1,
+						parentFeature: featureKey.split("_")[0],
+						catalogs: {
+							classFeatures: this._page.getClassFeatures?.() || this._page._classFeatures || [],
+							subclassFeatures: this._page.getSubclassFeatures?.() || this._page._subclassFeatures || [],
+							optionalFeatures: this._page.getOptionalFeatures?.() || [],
+						},
 						subclassName: this._selectedSubclass?.name,
 						subclassShortName: opt.subclassShortName || this._selectedSubclass?.shortName,
 						subclassSource: opt.subclassSource || this._selectedSubclass?.source,
-						isSubclassFeature: true,
-						isFeatureOption: true,
-						parentFeature: featureKey.split("_")[0],
 					}));
 				} else if (opt.type === "optionalfeature" && opt.ref) {
 					// Handle optional feature options (like specialties from TGTT)
@@ -2202,15 +2066,14 @@ class CharacterSheetBuilder {
 						entries: fullOpt?.entries,
 					};
 
-					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(
+					this._state.addFeature(CharacterSheetClassUtils.materializeFeatureOption(
 						resolvedOptData,
 						{
 							className: this._selectedClass?.name,
 							classSource: this._selectedClass?.source,
-							level: 1,
-							featureType: "Optional Feature",
-							isFeatureOption: true,
+							acquisitionLevel: 1,
 							parentFeature: featureKey.split("_")[0],
+							catalogs: {optionalFeatures: allOptFeatures},
 						},
 					));
 
@@ -2251,7 +2114,7 @@ class CharacterSheetBuilder {
 						});
 					});
 				} else if (opt.type === "text") {
-					// Simple text option - just note the selection
+					// Text choices are history-only; they do not represent a rules feature.
 				}
 			});
 		});

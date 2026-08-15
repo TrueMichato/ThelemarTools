@@ -5344,66 +5344,22 @@ class CharacterSheetQuickBuild {
 			const selected = this._selections.featureOptions[levelKey] || [];
 
 			selected.forEach(opt => {
-				if (opt.type === "classFeature" && opt.ref) {
-					const classFeatures = this._page.getClassFeatures();
-					const parts = opt.ref.split("|");
-					const fullOpt = classFeatures.find(f =>
-						f.name === parts[0] && f.className === parts[1] && f.source === parts[2],
-					);
-					// Strip data-defined `level` (e.g. Adept Speed's `level: 2`) so the caller-supplied
-					// character level wins; otherwise repeatable picks at L4/L6/L8/L10 would all be
-					// stored with level 2 and collapsed by addFeature's (name, source, className,
-					// level) dedup. See bugs.md "Adept Speed stacking".
-					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(
-						{
-							...(fullOpt || {}),
-							...opt,
-							level: undefined,
-							entries: fullOpt?.entries ?? opt.entries,
-						},
-						{
-							className: analysis.className,
-							classSource: analysis.classSource,
-							level: analysis.classLevel,
-							featureType: "Class",
-							isFeatureOption: true,
-							parentFeature: optGroup.featureName,
-						},
-					));
-				} else if (opt.type === "subclassFeature" && opt.ref) {
-					const subclass = this._getSubclassForClass(analysis.className, analysis.classSource, analysis.classLevel);
-					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject({...opt, level: undefined}, {
-						className: analysis.className,
-						classSource: analysis.classSource,
-						level: analysis.classLevel,
-						featureType: "Class",
-						subclassName: subclass?.name,
-						subclassShortName: opt.subclassShortName || subclass?.shortName,
-						subclassSource: opt.subclassSource || subclass?.source,
-						isSubclassFeature: true,
-						isFeatureOption: true,
-						parentFeature: optGroup.featureName,
-					}));
-				} else if (opt.type === "optionalfeature" && opt.ref) {
-					const allOptFeats = this._page.getOptionalFeatures();
-					const fullOpt = allOptFeats.find(f => f.name === opt.name);
-					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(
-						{
-							...(fullOpt || {}),
-							...opt,
-							level: undefined,
-							entries: fullOpt?.entries ?? opt.entries,
-						},
-						{
-							className: analysis.className,
-							classSource: analysis.classSource,
-							level: analysis.classLevel,
-							featureType: "Optional Feature",
-							isFeatureOption: true,
-							parentFeature: optGroup.featureName,
-						},
-					));
-				}
+				if (!["classFeature", "subclassFeature", "optionalfeature"].includes(opt.type)) return;
+				const subclass = this._getSubclassForClass(analysis.className, analysis.classSource, analysis.classLevel);
+				this._state.addFeature(CharacterSheetClassUtils.materializeFeatureOption(opt, {
+					className: analysis.className,
+					classSource: analysis.classSource,
+					acquisitionLevel: analysis.classLevel,
+					parentFeature: optGroup.featureName,
+					catalogs: {
+						classFeatures: this._page.getClassFeatures(),
+						subclassFeatures: this._page.getSubclassFeatures() || [],
+						optionalFeatures: this._page.getOptionalFeatures(),
+					},
+					subclassName: subclass?.name,
+					subclassShortName: subclass?.shortName,
+					subclassSource: subclass?.source,
+				}));
 			});
 		});
 	}
@@ -5480,10 +5436,33 @@ class CharacterSheetQuickBuild {
 			const selKey = `${analysis.className}_${analysis.classLevel}_${optGroup.featureName}`;
 			const selected = this._selections.featureOptions[selKey] || [];
 			selected.forEach(opt => {
-				featureChoices.push({featureName: optGroup.featureName, choice: opt.name, source: opt.source});
-				featureChoiceReplay.push(CharacterSheetClassUtils.buildHistoryFeatureSnapshot(opt, {
+				const subclass = this._getSubclassForClass(analysis.className, analysis.classSource, analysis.classLevel);
+				const materialized = CharacterSheetClassUtils.materializeFeatureOption(opt, {
+					className: analysis.className,
+					classSource: analysis.classSource,
+					acquisitionLevel: analysis.classLevel,
+					parentFeature: optGroup.featureName,
+					catalogs: {
+						classFeatures: this._page.getClassFeatures(),
+						subclassFeatures: this._page.getSubclassFeatures() || [],
+						optionalFeatures: this._page.getOptionalFeatures(),
+					},
+					subclassName: subclass?.name,
+					subclassShortName: subclass?.shortName,
+					subclassSource: subclass?.source,
+				});
+				featureChoices.push({
+					featureName: optGroup.featureName,
+					choice: opt.name,
+					source: opt.source,
+					acquisitionLevel: analysis.classLevel,
+					ref: opt.ref,
+					type: opt.type,
+				});
+				featureChoiceReplay.push(CharacterSheetClassUtils.buildHistoryFeatureSnapshot(materialized, {
 					type: opt.type || "featureOption",
 					parentFeature: optGroup.featureName,
+					includeEntries: true,
 				}));
 			});
 		});

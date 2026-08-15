@@ -33,6 +33,22 @@ const CharacterSheetState = globalThis.CharacterSheetState;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
+
+describe("CS-BUG-017 level-up option-pool wiring", () => {
+	const source = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-levelup.js"), "utf8");
+
+	test("single-class and multiclass application use acquisition-level materialization", () => {
+		const calls = source.match(/CharacterSheetClassUtils\.materializeFeatureOption\s*\(/g) || [];
+		expect(calls.length).toBeGreaterThanOrEqual(5);
+		expect(source).toMatch(/acquisitionLevel:\s*newLevel/);
+		expect(source).toMatch(/acquisitionLevel:\s*1/);
+	});
+
+	test("multiclass history stores replay-safe feature-choice snapshots", () => {
+		expect(source).toMatch(/mcFeatureChoiceReplay\.push\(CharacterSheetClassUtils\.buildHistoryFeatureSnapshot\(materialized/);
+		expect(source).toMatch(/mcHistory\.choices\.replayData\.featureChoices\s*=\s*mcFeatureChoiceReplay/);
+	});
+});
 const read = (/** @type {string} */ rel) => readFileSync(resolve(REPO_ROOT, rel), "utf8");
 
 // ==========================================================================

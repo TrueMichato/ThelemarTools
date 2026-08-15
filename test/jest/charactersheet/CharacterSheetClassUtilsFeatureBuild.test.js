@@ -1,4 +1,5 @@
 import "./setup.js";
+import {readFileSync} from "node:fs";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
@@ -597,6 +598,91 @@ describe("findFeatureOptions — Specialty Option Groups", () => {
 		expect(optGroups[0].featureName).toBe("Specialties");
 		expect(optGroups[0].count).toBe(1);
 		expect(optGroups[0].options.length).toBeGreaterThan(0);
+	});
+
+	test("resolves the real TGTT Paladin specialty pool at every recurring level", () => {
+		const brew = JSON.parse(readFileSync("homebrew/TravelersGuidetoThelemar.json", "utf8"));
+		const paladinFeatures = brew.classFeature.filter(feature => feature.className === "Paladin" && feature.source === "TGTT");
+		const specialtyLevels = [3, 5, 7, 9, 11, 14, 19];
+
+		for (const level of specialtyLevels) {
+			const wrapper = paladinFeatures.find(feature => feature.name === "Specialties" && feature.level === level);
+			const groups = CharacterSheetClassUtils.findFeatureOptions(wrapper, level, paladinFeatures);
+			expect(groups).toHaveLength(1);
+			expect(groups[0].count).toBe(1);
+			expect(groups[0].options.length).toBeGreaterThan(0);
+			if (level > 3) expect(groups[0].referencedFrom).toBe("Specialties|Paladin|TGTT|3");
+		}
+	});
+
+	test("preserves subclass identity, level-gates subclass refs, and supports inline/text options", () => {
+		const feature = {
+			name: "Mixed Options",
+			source: "HB",
+			entries: [{
+				type: "options",
+				entries: [
+					{type: "refSubclassFeature", subclassFeature: "Moon Gift|Druid|PHB|Moon|XPHB|3"},
+					{type: "entries", name: "Inline Gift", entries: ["Inline rules."]},
+					"Plain Choice",
+				],
+			}],
+		};
+
+		expect(CharacterSheetClassUtils.findFeatureOptions(feature, 2, [])[0].options.map(it => it.name))
+			.toEqual(["Inline Gift", "Plain Choice"]);
+		const options = CharacterSheetClassUtils.findFeatureOptions(feature, 3, [])[0].options;
+		expect(options[0]).toMatchObject({
+			name: "Moon Gift",
+			classSource: "PHB",
+			source: "XPHB",
+			subclassSource: "XPHB",
+			level: 3,
+		});
+		expect(options.map(it => it.type)).toEqual(["subclassFeature", "inline", "text"]);
+	});
+
+	test("terminates cyclic class-feature references", () => {
+		const a = {
+			name: "Pool A",
+			className: "Fighter",
+			source: "HB",
+			level: 1,
+			entries: ["You gain another option from {@classFeature Pool B|Fighter|HB|1}."],
+		};
+		const b = {
+			name: "Pool B",
+			className: "Fighter",
+			source: "HB",
+			level: 1,
+			entries: ["You gain another option from {@classFeature Pool A|Fighter|HB|1}."],
+		};
+
+		expect(() => CharacterSheetClassUtils.findFeatureOptions(a, 1, [a, b])).not.toThrow();
+		expect(CharacterSheetClassUtils.findFeatureOptions(a, 1, [a, b])).toEqual([]);
+	});
+
+	test("materializes a recurring pick at acquisition level while retaining definition metadata", () => {
+		const materialized = CharacterSheetClassUtils.materializeFeatureOption(
+			{type: "classFeature", ref: "Adept Speed|Monk|TGTT|2", name: "Adept Speed", source: "TGTT", level: 2},
+			{
+				className: "Monk",
+				classSource: "TGTT",
+				acquisitionLevel: 6,
+				parentFeature: "Specialties",
+				catalogs: {classFeatures: allClassFeatures},
+			},
+		);
+
+		expect(materialized).toMatchObject({
+			name: "Adept Speed",
+			level: 6,
+			definitionLevel: 2,
+			acquisitionLevel: 6,
+			isFeatureOption: true,
+			parentFeature: "Specialties",
+		});
+		expect(materialized.entries).toEqual(["Your speed increases by 10 feet."]);
 	});
 });
 

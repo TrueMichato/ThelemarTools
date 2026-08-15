@@ -137,3 +137,18 @@ describe("#6 (builder) `_finishCharacterCore` seeds + drains pending feature cho
 		expect(idxSave).toBeGreaterThan(idxDrain);
 	});
 });
+
+describe("CS-BUG-017 builder option-pool parity", () => {
+	const builderSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-builder.js"), "utf8");
+
+	test("Builder delegates discovery to the shared resolver instead of maintaining a fork", () => {
+		const method = builderSrc.match(/_findFeatureOptions \([\s\S]*?\n\t\}/)?.[0] || "";
+		expect(method).toMatch(/CharacterSheetClassUtils\.findFeatureOptions\s*\(/);
+		expect(method).not.toMatch(/refClassFeature/);
+	});
+
+	test("Builder materializes applied picks and replay snapshots through the shared contract", () => {
+		expect(builderSrc).toMatch(/_applySelectedFeatureOptions \([\s\S]*?CharacterSheetClassUtils\.materializeFeatureOption\s*\(/);
+		expect(builderSrc).toMatch(/featureChoiceReplay\.push\(CharacterSheetClassUtils\.buildHistoryFeatureSnapshot\(materialized/);
+	});
+});

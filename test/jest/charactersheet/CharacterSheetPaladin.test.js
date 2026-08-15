@@ -1477,6 +1477,30 @@ describe("PHB vs XPHB Paladin Feature Comparison", () => {
 			expect(phbCalcs.channelDivinityUses).toBe(1);
 			expect(xphbCalcs.channelDivinityUses).toBe(2);
 		});
+
+		it("treats TGTT Paladin as 2024 for Channel Divinity scaling", () => {
+			const level3 = new CharacterSheetState();
+			level3.addClass({name: "Paladin", source: "TGTT", level: 3});
+			expect(level3.getFeatureCalculations().channelDivinityUses).toBe(2);
+
+			const level11 = new CharacterSheetState();
+			level11.addClass({name: "Paladin", source: "TGTT", level: 11});
+			expect(level11.getFeatureCalculations().channelDivinityUses).toBe(3);
+		});
+
+		it("permits TGTT Paladin spell-slot conversion only when combat methods are active", () => {
+			const tgtt = new CharacterSheetState();
+			tgtt.addClass({name: "Paladin", source: "TGTT", level: 3});
+			expect(tgtt.canConvertSpellSlotToStamina()).toBe(false);
+			tgtt.addCombatTradition("AM");
+			expect(tgtt.canConvertSpellSlotToStamina()).toBe(true);
+			expect(tgtt.getStaminaFromSpellSlot(2)).toBe(3);
+
+			const xphb = new CharacterSheetState();
+			xphb.addClass({name: "Paladin", source: "XPHB", level: 3});
+			xphb.addCombatTradition("AM");
+			expect(xphb.canConvertSpellSlotToStamina()).toBe(false);
+		});
 	});
 
 	describe("Level 11 Feature", () => {
