@@ -1,8 +1,95 @@
 import "./setup.js";
+import {jest} from "@jest/globals";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-respec.js";
 
 const CharacterSheetRespec = globalThis.CharacterSheetRespec;
+
+describe("CS-BUG-017 recurring feature-choice respec", () => {
+	test("replaces only the selected acquisition-level instance and updates replayData", async () => {
+		const features = [
+			{id: "early", name: "Divine Sentinel", source: "TGTT", className: "Paladin", level: 3, isFeatureOption: true, parentFeature: "Specialties"},
+			{id: "later", name: "Divine Sentinel", source: "TGTT", className: "Paladin", level: 5, isFeatureOption: true, parentFeature: "Specialties"},
+		];
+		const history = {
+			level: 5,
+			class: {name: "Paladin", source: "TGTT"},
+			choices: {
+				featureChoices: [{
+					featureName: "Specialties",
+					choice: "Divine Sentinel",
+					source: "TGTT",
+					acquisitionLevel: 5,
+					ref: "Divine Sentinel|Paladin|TGTT|3",
+				}],
+				replayData: {featureChoices: [{
+					name: "Divine Sentinel",
+					source: "TGTT",
+					type: "classFeature",
+					parentFeature: "Specialties",
+					acquisitionLevel: 5,
+					definitionLevel: 3,
+				}]},
+			},
+		};
+		const state = {
+			getFeatures: jest.fn(() => features),
+			getLevelHistory: jest.fn(() => [
+				{level: 1, class: history.class},
+				{level: 2, class: history.class},
+				{level: 3, class: history.class},
+				{level: 4, class: history.class},
+				history,
+			]),
+			removeFeature: jest.fn(),
+			removeModifiersByName: jest.fn(),
+			addFeature: jest.fn(),
+			addNamedModifier: jest.fn(),
+			updateLevelChoice: jest.fn(),
+			applyClassFeatureEffects: jest.fn(),
+			calculateSpellSlots: jest.fn(),
+		};
+		const classFeatures = [{
+			name: "Mounted Warden",
+			source: "TGTT",
+			className: "Paladin",
+			level: 3,
+			entries: ["Mounted rules."],
+		}];
+		const respec = Object.create(CharacterSheetRespec.prototype);
+		respec._state = state;
+		respec._page = {
+			getClassFeatures: () => classFeatures,
+			getSubclassFeatures: () => [],
+			getOptionalFeatures: () => [],
+		};
+		respec._recalcHpPreservingHealing = jest.fn();
+
+		await respec._applyFeatureChoiceChange(5, history, 0, history.choices.featureChoices[0], {
+			name: "Mounted Warden",
+			source: "TGTT",
+			className: "Paladin",
+			level: 3,
+			type: "classFeature",
+			ref: "Mounted Warden|Paladin|TGTT|3",
+		});
+
+		expect(state.removeFeature).toHaveBeenCalledWith("later");
+		expect(state.removeFeature).not.toHaveBeenCalledWith("early");
+		expect(state.addFeature).toHaveBeenCalledWith(expect.objectContaining({
+			name: "Mounted Warden",
+			level: 5,
+			definitionLevel: 3,
+			acquisitionLevel: 5,
+		}));
+		expect(state.updateLevelChoice).toHaveBeenCalledWith(5, expect.objectContaining({
+			featureChoices: [expect.objectContaining({choice: "Mounted Warden", acquisitionLevel: 5})],
+			replayData: expect.objectContaining({
+				featureChoices: [expect.objectContaining({name: "Mounted Warden", acquisitionLevel: 5})],
+			}),
+		}));
+	});
+});
 
 describe("CharacterSheetRespec optional features", () => {
 	/** Create a minimal respec instance with mocked dependencies */

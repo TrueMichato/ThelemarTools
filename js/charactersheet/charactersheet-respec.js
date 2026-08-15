@@ -2172,11 +2172,26 @@ class CharacterSheetRespec {
 		// Get available options for this feature
 		const parentFeatureName = currentChoice.featureName;
 		const classFeatures = this._page.getClassFeatures();
+		const replayChoice = history.choices.replayData?.featureChoices?.[choice.index];
+		const acquisitionLevel = Number(
+			currentChoice.acquisitionLevel
+				|| replayChoice?.acquisitionLevel
+				|| this._state.getLevelHistory()
+					.filter(entry =>
+						entry.level <= level
+							&& entry.class?.name === history.class.name
+							&& entry.class?.source === history.class.source)
+					.length,
+		) || 1;
 
 		// Find the parent feature that defines the options
 		const parentFeature = classFeatures.find(f =>
 			f.name === parentFeatureName
-			&& f.className === history.class.name,
+				&& f.className === history.class.name
+				&& f.level === acquisitionLevel,
+		) || classFeatures.find(f =>
+			f.name === parentFeatureName
+				&& f.className === history.class.name,
 		);
 
 		if (!parentFeature) {
@@ -2202,7 +2217,13 @@ class CharacterSheetRespec {
 
 		// Get existing features to filter already-chosen options
 		const existingFeatures = this._state.getFeatures();
-		const existingFeatureNames = new Set(existingFeatures.map(f => f.name));
+		const poolOptionNames = new Set(optionGroups[0].options.map(opt => opt.name));
+		const existingFeatureNames = new Set(existingFeatures
+			.filter(feature =>
+				feature.isFeatureOption
+					&& feature.className === history.class.name
+					&& poolOptionNames.has(feature.name))
+			.map(feature => feature.name));
 
 		// Filter to options not already chosen (except current)
 		const availableOptions = optionGroups[0].options.filter(opt => {
@@ -2300,8 +2321,22 @@ class CharacterSheetRespec {
 	async _applyFeatureChoiceChange (level, history, choiceIndex, oldChoice, newOption) {
 		// Remove old feature using proper API
 		const features = this._state.getFeatures();
+		const replayChoice = history.choices.replayData?.featureChoices?.[choiceIndex];
+		const acquisitionLevel = Number(
+			oldChoice.acquisitionLevel
+				|| replayChoice?.acquisitionLevel
+				|| this._state.getLevelHistory()
+					.filter(entry =>
+						entry.level <= level
+							&& entry.class?.name === history.class.name
+							&& entry.class?.source === history.class.source)
+					.length,
+		) || 1;
 		const oldFeature = features.find(f =>
-			f.name === oldChoice.choice && f.parentFeature === oldChoice.featureName,
+			f.name === oldChoice.choice
+				&& f.parentFeature === oldChoice.featureName
+				&& f.className === history.class.name
+				&& Number(f.level) === acquisitionLevel,
 		);
 		if (oldFeature) {
 			this._state.removeFeature(oldFeature.id);
@@ -2312,29 +2347,20 @@ class CharacterSheetRespec {
 
 		// Add new feature
 		const classFeatures = this._page.getClassFeatures();
-		let fullFeature = null;
-
-		if (newOption.type === "classFeature" && newOption.ref) {
-			const parts = newOption.ref.split("|");
-			fullFeature = classFeatures.find(f =>
-				f.name === parts[0]
-				&& f.className === parts[1]
-				&& f.source === parts[2],
-			);
-		}
-
-		this._state.addFeature({
-			name: newOption.name,
-			source: newOption.source || fullFeature?.source || history.class.source,
-			level: newOption.level || level,
-			className: newOption.className || history.class.name,
+		const catalogs = {
+			classFeatures,
+			subclassFeatures: this._page.getSubclassFeatures() || [],
+			optionalFeatures: this._page.getOptionalFeatures(),
+		};
+		const materialized = CharacterSheetClassUtils.materializeFeatureOption(newOption, {
+			className: history.class.name,
 			classSource: history.class.source,
-			featureType: "Class",
-			entries: fullFeature?.entries,
-			description: fullFeature?.entries ? Renderer.get().render({entries: fullFeature.entries}) : "",
-			isFeatureOption: true,
+			acquisitionLevel,
 			parentFeature: oldChoice.featureName,
+			catalogs,
 		});
+		this._state.addFeature(materialized);
+		const fullFeature = CharacterSheetClassUtils.resolveFeatureOptionData(newOption, catalogs);
 
 		// Apply specialty auto-effects for the new feature (passive bonuses, PB skill bonuses, etc.)
 		const autoEffects = CharacterSheetClassUtils.parseFeatureAutoEffects(
@@ -2358,10 +2384,22 @@ class CharacterSheetRespec {
 			featureName: oldChoice.featureName,
 			choice: newOption.name,
 			source: newOption.source,
+			acquisitionLevel,
+			ref: newOption.ref,
+			type: newOption.type,
 		};
+		const replayData = {...(history.choices.replayData || {})};
+		const updatedReplayChoices = [...(replayData.featureChoices || history.choices.featureChoices.map(() => null))];
+		updatedReplayChoices[choiceIndex] = CharacterSheetClassUtils.buildHistoryFeatureSnapshot(materialized, {
+			type: newOption.type || "featureOption",
+			parentFeature: oldChoice.featureName,
+			includeEntries: true,
+		});
+		replayData.featureChoices = updatedReplayChoices;
 
 		this._state.updateLevelChoice(level, {
 			featureChoices: updatedFeatureChoices,
+			replayData,
 		});
 
 		// Recalculate derived values after the swap

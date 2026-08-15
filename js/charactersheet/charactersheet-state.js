@@ -5615,6 +5615,7 @@ class CharacterSheetState {
 		// Reapply history-backed optional features for saves which persisted history
 		// but did not fully reconstruct runtime feature state.
 		this._reapplyHistoryOptionalFeatures();
+		this._reapplyHistoryFeatureChoices();
 		this._syncTunedMetamagicsToKnownOptions();
 
 		// Ensure unarmed strike exists for all characters
@@ -41735,6 +41736,121 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Reapply class-feature option picks from level history. Existing definition-level rows
+	 * from legacy saves are moved to the level where the choice was acquired, not duplicated.
+	 * @private
+	 */
+	_reapplyHistoryFeatureChoices () {
+		const history = [...(this._data.levelHistory || [])].sort((a, b) => a.level - b.level);
+		if (!history.length) return;
+		if (!Array.isArray(this._data.features)) this._data.features = [];
+
+		const classLevels = new Map();
+		const claimedFeatures = new Set();
+		const norm = (value) => String(value || "").trim().toLowerCase();
+
+		for (const entry of history) {
+			const entryClassName = entry?.class?.name || "";
+			const entryClassSource = entry?.class?.source || "";
+			const classKey = `${norm(entryClassName)}|${norm(entryClassSource)}`;
+			const classLevel = (classLevels.get(classKey) || 0) + 1;
+			classLevels.set(classKey, classLevel);
+
+			const displayChoices = Array.isArray(entry?.choices?.featureChoices)
+				? entry.choices.featureChoices
+				: [];
+			const hasReplayChoices = Array.isArray(entry?.choices?.replayData?.featureChoices);
+			const replayChoices = hasReplayChoices
+				? entry.choices.replayData.featureChoices
+				: displayChoices.map((choice) => ({
+					name: choice.choice,
+					source: choice.source,
+					type: choice.type || (choice.ref?.split("|").length >= 6 ? "subclassFeature" : "classFeature"),
+					parentFeature: choice.featureName,
+					ref: choice.ref,
+					acquisitionLevel: choice.acquisitionLevel,
+				}));
+
+			for (let i = 0; i < replayChoices.length; ++i) {
+				const snapshot = replayChoices[i] || {};
+				const displayChoice = displayChoices[i] || {};
+				if (["inline", "text"].includes(snapshot.type)) continue;
+				const name = snapshot.name || displayChoice.choice;
+				if (!name) continue;
+				const source = snapshot.source || displayChoice.source;
+				const parentFeature = snapshot.parentFeature || displayChoice.featureName;
+				const acquisitionLevel = Number(snapshot.acquisitionLevel || displayChoice.acquisitionLevel) || classLevel;
+				const className = snapshot.className || entryClassName;
+				const option = {
+					...snapshot,
+					name,
+					source,
+					parentFeature,
+					type: snapshot.type || "classFeature",
+				};
+				const catalogs = {
+					classFeatures: this._classFeatureCatalog || [],
+					subclassFeatures: this._subclassFeatureCatalog || [],
+					optionalFeatures: this._optionalFeatureCatalog || [],
+				};
+				if (!hasReplayChoices && !CharacterSheetClassUtils.resolveFeatureOptionData(option, catalogs)) continue;
+				const materialized = CharacterSheetClassUtils.materializeFeatureOption(option, {
+					className,
+					classSource: snapshot.classSource || entryClassSource,
+					acquisitionLevel,
+					parentFeature,
+					catalogs,
+					subclassName: snapshot.subclassName,
+					subclassShortName: snapshot.subclassShortName,
+					subclassSource: snapshot.subclassSource,
+				});
+
+				const candidates = this._data.features.filter((feature) =>
+					!claimedFeatures.has(feature)
+							&& norm(feature.name) === norm(name)
+							&& (!source || norm(feature.source) === norm(source))
+							&& (!className || norm(feature.className) === norm(className)));
+				const exact = candidates.find((feature) => Number(feature.level) === acquisitionLevel);
+				if (exact) {
+					exact.isFeatureOption = true;
+					exact.parentFeature = exact.parentFeature || parentFeature;
+					exact.acquisitionLevel = acquisitionLevel;
+					exact.definitionLevel = exact.definitionLevel || snapshot.definitionLevel;
+					for (const key of ["entries", "description", "ref", "subclassName", "subclassShortName", "subclassSource"]) {
+						if ((exact[key] == null || exact[key] === "" || (Array.isArray(exact[key]) && !exact[key].length))
+								&& materialized[key] != null) exact[key] = materialized[key];
+					}
+					claimedFeatures.add(exact);
+					continue;
+				}
+
+				const definitionLevel = Number(snapshot.definitionLevel || snapshot.level);
+				const legacy = candidates.find((feature) =>
+					feature.isFeatureOption
+							|| feature.parentFeature === parentFeature
+							|| (definitionLevel && Number(feature.level) === definitionLevel));
+				if (legacy) {
+					legacy.level = acquisitionLevel;
+					legacy.acquisitionLevel = acquisitionLevel;
+					legacy.definitionLevel = legacy.definitionLevel || definitionLevel;
+					legacy.isFeatureOption = true;
+					legacy.parentFeature = legacy.parentFeature || parentFeature;
+					claimedFeatures.add(legacy);
+					continue;
+				}
+
+				this.addFeature(materialized);
+				const added = this._data.features.find((feature) =>
+					norm(feature.name) === norm(name)
+							&& (!source || norm(feature.source) === norm(source))
+							&& (!className || norm(feature.className) === norm(className))
+							&& Number(feature.level) === acquisitionLevel);
+				if (added) claimedFeatures.add(added);
+			}
+		}
+	}
+
+	/**
 	 * Purge an optional-feature choice (matched by name + source) from EVERY level-history
 	 * entry's `choices.optionalFeatures` and `choices.replayData.optionalFeatures`.
 	 *
@@ -41831,14 +41947,19 @@ class CharacterSheetState {
 	}
 
 	addFeature (feature, opts = {}) {
-		// Deduplicate: don't add if feature with same name, source, and className/level combo exists
+		// Class-bound features are level-scoped so recurring option picks can coexist. Normalize
+		// identity fields because references and migrated saves are not guaranteed to preserve case.
+		const normalizeIdentity = (value) => String(value || "").trim().toLowerCase();
 		const duplicate = this._data.features.find(f => {
-			if (f.name !== feature.name) return false;
-			if (f.source !== feature.source) return false;
-			// For class features, also check className and level
-			if (feature.className) {
-				if (f.className !== feature.className) return false;
-				if (f.level !== feature.level) return false;
+			if (normalizeIdentity(f.name) !== normalizeIdentity(feature.name)) return false;
+			if (normalizeIdentity(f.source) !== normalizeIdentity(feature.source)) return false;
+			if (f.className || feature.className) {
+				if (normalizeIdentity(f.className) !== normalizeIdentity(feature.className)) return false;
+				const existingLevel = Number(f.level);
+				const incomingLevel = Number(feature.level);
+				if (Number.isFinite(existingLevel) || Number.isFinite(incomingLevel)) {
+					if (existingLevel !== incomingLevel) return false;
+				} else if (normalizeIdentity(f.level) !== normalizeIdentity(feature.level)) return false;
 			}
 			return true;
 		});
@@ -42816,6 +42937,7 @@ class CharacterSheetState {
 		this._classFeatureCatalog = Array.isArray(classFeatures) ? classFeatures : [];
 		this._subclassFeatureCatalog = Array.isArray(subclassFeatures) ? subclassFeatures : [];
 		this._optionalFeatureCatalog = Array.isArray(optionalFeatures) ? optionalFeatures : [];
+		this._reapplyHistoryFeatureChoices();
 	}
 
 	/**

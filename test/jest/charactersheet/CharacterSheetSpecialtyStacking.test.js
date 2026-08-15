@@ -17,10 +17,12 @@
 import "./setup.js";
 import {jest} from "@jest/globals";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
+import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-quickbuild.js";
 
 const CharacterSheetQuickBuild = globalThis.CharacterSheetQuickBuild;
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+const CharacterSheetState = globalThis.CharacterSheetState;
 
 // Adept Speed as it appears in homebrew/TravelersGuidetoThelemar.json — note
 // `level: 2` (the Specialties unlock level), not the level at which it was picked.
@@ -195,5 +197,17 @@ describe("Repeatable specialty stacking — buildFeatureStateObject contract", (
 			},
 		);
 		expect(out.level).toBe(5);
+	});
+});
+
+describe("Repeatable specialty stacking — addFeature identity", () => {
+	it("normalizes identity, remains same-level idempotent, and keeps feat ownership separate", () => {
+		const state = new CharacterSheetState();
+		expect(state.addFeature({name: "Adept Speed", source: "TGTT", className: "Monk", level: 2})).toBe(true);
+		expect(state.addFeature({name: " adept speed ", source: "tgtt", className: "monk", level: 2})).toBe(false);
+		expect(state.addFeature({name: "Adept Speed", source: "TGTT", className: "Monk", level: 4})).toBe(true);
+		expect(state.addFeature({name: "Adept Speed", source: "TGTT", featureType: "Feat"})).toBe(true);
+
+		expect(state.getFeatures().filter(feature => feature.name.trim().toLowerCase() === "adept speed")).toHaveLength(3);
 	});
 });
