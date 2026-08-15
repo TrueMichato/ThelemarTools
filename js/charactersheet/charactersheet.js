@@ -96,6 +96,7 @@ class CharacterSheetPage {
 		this._backgrounds = [];
 		this._spellsData = [];
 		this._itemsData = [];
+		this._actionsData = [];
 		this._featsData = [];
 		this._optionalFeaturesData = [];
 		this._psionicsData = [];
@@ -334,7 +335,7 @@ class CharacterSheetPage {
 		// Load all necessary data in parallel
 		// Note: Using loadRawJSON for classes to get classFeature and subclassFeature arrays
 		// Also pre-cache class/subclass features in DataLoader so hover links work properly
-		const [races, classes, backgrounds, spells, items, brewItems, prereleaseItems, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, itemUpgrades, prereleaseData, brewData, variantComponents] = await Promise.all([
+		const [races, classes, backgrounds, spells, items, brewItems, prereleaseItems, actions, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, itemUpgrades, prereleaseData, brewData, variantComponents] = await Promise.all([
 			DataUtil.race.loadJSON(),
 			DataUtil.class.loadRawJSON(),
 			DataUtil.loadJSON("data/backgrounds.json"),
@@ -345,6 +346,7 @@ class CharacterSheetPage {
 			DataUtil.item.loadJSON().then(d => d.item || []),
 			DataUtil.item.loadBrew().then(d => d.item || []).catch(() => []),
 			DataUtil.item.loadPrerelease().then(d => d.item || []).catch(() => []),
+			DataUtil.action.loadJSON(),
 			DataUtil.loadJSON("data/feats.json"),
 			DataUtil.loadJSON("data/optionalfeatures.json"),
 			DataUtil.loadJSON("data/skills.json"),
@@ -373,6 +375,7 @@ class CharacterSheetPage {
 		// Merge site + prerelease + brew + variant component items here (all already enhanced by DataUtil.item.*).
 		this._itemsData = [...(items || []), ...(prereleaseItems || []), ...(brewItems || []), ...(variantComponents.item || [])]
 			.filter(it => !it._isItemGroup);
+		this._actionsData = actions.action || [];
 		this._featsData = feats.feat || [];
 		this._optionalFeaturesData = optFeatures.optionalfeature || [];
 		this._combatMethodsData = (combatMethods.combatMethod || []).map(m => ({...m, _entityType: "combatMethod"}));

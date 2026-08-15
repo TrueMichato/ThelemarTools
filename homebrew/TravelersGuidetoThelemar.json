@@ -37972,7 +37972,7 @@
 			"staminaCost": 1,
 			"actionType": "reaction",
 			"entries": [
-				"{@b Reaction (1 Stamina Point)}. Watching a companion under attack infuriates you and you fling yourself at their opponent with a powerful shove. After a creature within your reach makes a melee attack against an ally, you can use your reaction to make an Athletics check against the creature's method DC. On a success you shove the creature 10 feet away from you and you move 10 feet in that direction. This movement does not provoke opportunity attacks."
+				"{@b Reaction (1 Stamina Point)}. Watching a companion under attack infuriates you and you fling yourself at their opponent with a powerful shove. After a creature within your reach makes a melee attack against an ally, you can use your reaction to force the creature to make a Strength saving throw against your method DC. On a failure, you shove the creature 10 feet away from you and you move 10 feet in that direction. This movement does not provoke opportunity attacks."
 			]
 		},
 		{
