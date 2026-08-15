@@ -52019,6 +52019,11 @@ class CharacterSheetState {
 			if (!agg.sources.includes("Psionic Strain")) agg.sources.push("Psionic Strain");
 		}
 
+		if (type === "skill:stealth" && this.hasArmorStealthDisadvantage()) {
+			hasDisadvantage = true;
+			if (!agg.sources.includes("Armor")) agg.sources.push("Armor");
+		}
+
 		// Apply removals
 		if (agg.removeAdvantage) hasAdvantage = false;
 		if (agg.removeDisadvantage) hasDisadvantage = false;

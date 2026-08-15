@@ -3866,6 +3866,14 @@ class CharacterSheetPage {
 		});
 	}
 
+	_getSkillHoverLink (skill) {
+		const name = skill?.name || "";
+		if (!skill?.source || skill.isCustom || skill.isLoreSkill || skill.source === "Custom") {
+			return CharacterSheetClassUtils.escapeHtml(name);
+		}
+		return CharacterSheetPage.getHoverLink("skill", name, skill.source);
+	}
+
 	_renderSkills () {
 		const container = document.getElementById("charsheet-skills");
 		container.innerHTML = "";
@@ -3932,11 +3940,12 @@ class CharacterSheetPage {
 			const defaultAbility = effectiveAbility || "";
 
 			const customClass = skill.isCustom ? " charsheet__skill-row--custom" : "";
+			const skillNameHtml = this._getSkillHoverLink(skill);
 
 			const row = e_({outer: `
 				<div class="charsheet__skill-row${customClass}" data-skill="${skillKey}" data-default-ability="${defaultAbility}" title="${skillTooltip.replace(/"/g, "&quot;")}">
 					<span class="charsheet__prof-indicator charsheet__prof-indicator--clickable ${profClass}" title="${profTitle}" data-skill="${skillKey}"></span>
-					<span class="charsheet__skill-name"><span class="charsheet__skill-name-text" title="${skill.name.replace(/"/g, "&quot;")}">${skill.name}</span>${skill.isCustom ? `<span class="charsheet__skill-custom-marker" title="Custom skill">✦</span>` : ""}</span>
+					<span class="charsheet__skill-name"><span class="charsheet__skill-name-text">${skillNameHtml}</span>${skill.isCustom ? `<span class="charsheet__skill-custom-marker" title="Custom skill">✦</span>` : ""}</span>
 					<span class="charsheet__skill-ability">(${abilityCell})</span>
 					<span class="charsheet__skill-mod">${modHtml}</span>
 					<span class="charsheet__skill-passive" title="Passive ${skill.name}: ${passiveScore}">${passiveScore}</span>
@@ -3956,6 +3965,7 @@ class CharacterSheetPage {
 				// Don't roll if clicking delete button or prof indicator
 				if (e.target.classList.contains("charsheet__skill-delete")) return;
 				if (e.target.classList.contains("charsheet__prof-indicator")) return;
+				if (e.target.closest?.("a[data-vet-page]")) return;
 				this._rollSkillCheck(skillKey, skill.name, e);
 			});
 			row.addEventListener("contextmenu", (e) => this._showSkillAbilityMenu(e, skillKey, skill.name, effectiveAbility));
@@ -6849,6 +6859,8 @@ class CharacterSheetPage {
 
 		const passivesGrid = passivesSection.querySelector(".charsheet__passives-hero-grid");
 		passiveSkills.forEach(passive => {
+			const skill = skills.find(it => it.name.toLowerCase().replace(/\s+/g, "") === passive.key);
+			const passiveNameHtml = this._getSkillHoverLink(skill || passive);
 			const skillMod = this._state.getSkillMod(passive.key);
 			const passiveScore = this._state.getPassiveScore(passive.key);
 			const profLevel = this._state.getEffectiveSkillProficiency(passive.key);
@@ -6860,7 +6872,7 @@ class CharacterSheetPage {
 				<div class="charsheet__passive-hero-card charsheet__passive-hero-card--${passive.key}" title="${passive.desc}">
 					<div class="charsheet__passive-hero-icon">${passive.icon}</div>
 					<div class="charsheet__passive-hero-value">${passiveScore}</div>
-					<div class="charsheet__passive-hero-label">${passive.name}</div>
+					<div class="charsheet__passive-hero-label">${passiveNameHtml}</div>
 					<div class="charsheet__passive-hero-prof">${profIcon} ${skillMod >= 0 ? "+" : ""}${skillMod}</div>
 				</div>
 			`);
@@ -6919,7 +6931,8 @@ class CharacterSheetPage {
 				const profLevel = this._state.getEffectiveSkillProficiency(skillKey);
 				const mod = this._state.getSkillMod(skillKey);
 				const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
-				const passiveScore = 10 + mod;
+				const passiveScore = this._state.getPassiveScore(skillKey);
+				const skillNameHtml = this._getSkillHoverLink(skill);
 
 				let profIcon = "○";
 				let profClass = "";
@@ -6928,13 +6941,16 @@ class CharacterSheetPage {
 				const skillRow = e_({outer: `
 					<div class="charsheet__skill-full-row ${profClass}" data-skill="${skillKey}">
 						<span class="charsheet__skill-full-prof">${profIcon}</span>
-						<span class="charsheet__skill-full-name">${skill.name}</span>
+						<span class="charsheet__skill-full-name">${skillNameHtml}</span>
 						<span class="charsheet__skill-full-mod">${modStr}</span>
 						<span class="charsheet__skill-full-passive">${passiveScore}</span>
 					</div>
 				`});
 
-				skillRow.addEventListener("click", () => this._rollSkillCheck(skillKey, skill.name));
+				skillRow.addEventListener("click", (e) => {
+					if (e.target.closest?.("a[data-vet-page]")) return;
+					this._rollSkillCheck(skillKey, skill.name, e);
+				});
 				this._bindActivate(skillRow, {label: `Roll ${skill.name} check`});
 				list.append(skillRow);
 			});
@@ -19971,6 +19987,7 @@ class CharacterSheetPage {
 						this._saveCurrentCharacter();
 						renderList();
 						this._renderSkills();
+						this._renderAbilitiesDetailed();
 					});
 					controls.append(btn);
 				});
@@ -19981,6 +19998,7 @@ class CharacterSheetPage {
 					this._saveCurrentCharacter();
 					renderList();
 					this._renderSkills();
+					this._renderAbilitiesDetailed();
 				});
 				controls.append(resetBtn);
 
