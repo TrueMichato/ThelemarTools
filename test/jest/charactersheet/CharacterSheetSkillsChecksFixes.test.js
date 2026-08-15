@@ -111,8 +111,8 @@ describe("Bug 8 — skill definition hovers", () => {
 			page: "skill",
 			source: "XPHB",
 		})]);
-		expect(html).toContain('data-vet-page="skill"');
-		expect(html).toContain('data-vet-source="XPHB"');
+		expect(html).toContain("data-vet-page=\"skill\"");
+		expect(html).toContain("data-vet-source=\"XPHB\"");
 		expect(html).toContain(">Perception</a>");
 	});
 
