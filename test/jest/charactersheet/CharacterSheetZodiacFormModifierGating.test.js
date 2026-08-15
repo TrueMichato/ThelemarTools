@@ -279,8 +279,14 @@ describe("#13 follow-up — orphaned feature-sourced named modifiers are cleaned
  */
 describe("CS-BUG-163 — Zodiac constellations are not independently activatable", () => {
 	const mkForm = (name, description) => ({
-		name, source: "TGTT", className: "Druid", classSource: "TGTT",
-		subclassShortName: "Zodiac", subclassSource: "TGTT", level: 3, header: 2,
+		name,
+		source: "TGTT",
+		className: "Druid",
+		classSource: "TGTT",
+		subclassShortName: "Zodiac",
+		subclassSource: "TGTT",
+		level: 3,
+		header: 2,
 		description,
 	});
 
@@ -304,8 +310,11 @@ describe("CS-BUG-163 — Zodiac constellations are not independently activatable
 		// The guard must not disarm the working path: this is what makes the fix a
 		// redirection rather than a removal.
 		const parent = {
-			name: "Zodiac Form: Month", source: "TGTT", className: "Druid",
-			subclassShortName: "Zodiac", level: 3,
+			name: "Zodiac Form: Month",
+			source: "TGTT",
+			className: "Druid",
+			subclassShortName: "Zodiac",
+			level: 3,
 			description: "You can use your Wild Shape to assume a zodiac form.",
 		};
 		const detected = CharacterSheetState.detectActivatableFeature(parent);
@@ -319,7 +328,10 @@ describe("CS-BUG-163 — Zodiac constellations are not independently activatable
 		// The predicate is subclass-gated, so an unrelated 'Cat'/'Hound' feature
 		// elsewhere must keep whatever classification it had.
 		const impostor = {
-			name: "Bee", source: "XPHB", className: "Ranger", subclassShortName: "Beast Master",
+			name: "Bee",
+			source: "XPHB",
+			className: "Ranger",
+			subclassShortName: "Beast Master",
 			description: "When you activate this form, and as a Bonus Action on subsequent turns while it lasts, you can make a ranged spell attack against one creature within 60 feet.",
 		};
 		expect(CharacterSheetState.detectActivatableFeature(impostor)).not.toBeNull();
