@@ -206,18 +206,52 @@
 		display: flex;
 		grid-column: 1 / -1;
 		flex-wrap: wrap;
+		align-items: center;
 		gap: 3px;
 	}
 
 	.dm-npc__condition {
-		padding: 1px 5px;
-		border: 1px solid vars.$rgb-border-grey;
-		border-left-width: 4px;
-		border-radius: 9px;
-		background: #f5f5f5;
-		color: #555;
-		font-size: 0.68rem;
-		line-height: 1.35;
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		min-height: 24px;
+		padding: 2px 6px;
+		border: 1px solid var(--dm-npc-condition-color, vars.$rgb-border-grey);
+		border-radius: 3px;
+		box-shadow: inset 0 -2px var(--dm-npc-condition-color, vars.$rgb-border-grey);
+		background: #fff;
+		color: #333;
+		font-size: 0.88rem;
+		line-height: 1.2;
+
+		&:hover,
+		&:focus-visible {
+			background: #f1f7fc;
+		}
+	}
+
+	.dm-npc__condition-remove {
+		color: #666;
+		font-size: 1.1em;
+		line-height: 1;
+	}
+
+	.dm-npc__condition-add {
+		width: auto;
+		min-width: 116px;
+		max-width: 160px;
+	}
+
+	.dm-npc__conditions--compact {
+		.dm-npc__condition {
+			min-height: 22px;
+			font-size: 0.82rem;
+		}
+
+		.dm-npc__condition-add {
+			min-width: 104px;
+			max-width: 132px;
+		}
 	}
 
 	.dm-npc__roster-hp-field {
@@ -274,6 +308,11 @@
 		gap: 8px;
 		padding: 8px 42px 8px 10px;
 		border-bottom: 1px solid vars.$rgb-border-grey;
+
+		> .dm-npc__conditions {
+			flex: 1 0 100%;
+			order: 4;
+		}
 	}
 
 	.dm-npc__back {
@@ -344,7 +383,7 @@
 			padding-bottom: 3px;
 			border-bottom: 1px solid #ddd;
 			color: #444;
-			font-size: 0.83rem;
+			font-size: 0.95rem;
 			font-weight: 700;
 			letter-spacing: 0.04em;
 			text-transform: uppercase;
@@ -375,12 +414,73 @@
 		}
 
 		span {
-			font-size: 0.72rem;
+			font-size: 0.82rem;
 		}
 
 		strong {
-			font-size: 1rem;
+			font-size: 1.08rem;
 		}
+	}
+
+	.dm-npc__section-heading {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 4px 8px;
+		margin-bottom: 6px;
+		border-bottom: 1px solid #ddd;
+
+		h3 {
+			margin: 0;
+			border: 0;
+		}
+
+		span {
+			color: #666;
+			font-size: 0.8rem;
+		}
+	}
+
+	.dm-npc__skills {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+		gap: 4px;
+	}
+
+	.dm-npc__skill {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 6px;
+		min-height: 30px;
+		padding: 4px 7px;
+		border: 1px solid #ddd;
+		border-radius: 3px;
+		background: #fff;
+		color: inherit;
+		text-align: left;
+
+		&:hover,
+		&:focus-visible {
+			border-color: #337ab7;
+			background: rgb(51 122 183 / 8%);
+		}
+	}
+
+	.dm-npc__skill--proficient {
+		border-color: #6f9fc7;
+		background: rgb(51 122 183 / 6%);
+
+		.dm-npc__skill-name {
+			font-weight: 700;
+		}
+	}
+
+	.dm-npc__skill-meta {
+		color: #666;
+		font-size: 0.8rem;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
 	}
 
 	.dm-npc__stat-line {
@@ -415,12 +515,15 @@
 	}
 
 	.dm-npc__statblock {
-		display: flex;
-		justify-content: center;
+		display: block;
 		min-width: 0;
+		overflow-x: auto;
 
 		.ve-stats {
-			width: min(100%, 720px);
+			width: 100%;
+			min-width: 460px;
+			max-width: 720px;
+			margin: 0 auto;
 		}
 	}
 
@@ -433,199 +536,256 @@
 	}
 
 	.dm-npc__batch-header {
-			display: flex;
-			flex-wrap: wrap;
-			align-items: center;
-			gap: 8px;
-			padding: 8px 42px 8px 10px;
-			border-bottom: 1px solid vars.$rgb-border-grey;
-		}
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 42px 8px 10px;
+		border-bottom: 1px solid vars.$rgb-border-grey;
+	}
 
 	.dm-npc__batch-title {
-			margin: 0;
-			font-size: 1.12rem;
-			line-height: 1.2;
-		}
+		margin: 0;
+		font-size: 1.12rem;
+		line-height: 1.2;
+	}
 
 	.dm-npc__batch-count {
-			display: block;
-			color: #666;
-			font-size: 0.79rem;
-		}
+		display: block;
+		color: #666;
+		font-size: 0.82rem;
+	}
+
+	.dm-npc__batch-rollbar {
+		position: sticky;
+		z-index: 2;
+		top: -10px;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: 5px 12px;
+		max-width: 720px;
+		margin: 0 auto 8px;
+		padding: 8px 9px;
+		border: 1px solid vars.$rgb-border-grey;
+		border-radius: 4px;
+		background: #fff;
+		box-shadow: 0 3px 8px rgb(0 0 0 / 9%);
+	}
 
 	.dm-npc__batch-controls {
-			display: flex;
-			flex-wrap: wrap;
-			align-items: flex-end;
-			gap: 6px;
-			margin-left: auto;
+		display: flex;
+		flex: 1 1 auto;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: 6px;
 
-			label {
-				display: flex;
-				flex-direction: column;
-				gap: 2px;
-				margin: 0;
-				color: #666;
-				font-size: 0.72rem;
-				font-weight: 400;
-			}
+		label {
+			display: flex;
+			flex: 1 1 130px;
+			flex-direction: column;
+			gap: 2px;
+			margin: 0;
+			color: #555;
+			font-size: 0.8rem;
+			font-weight: 600;
 		}
+	}
+
+	.dm-npc__batch-roll-help {
+		color: #666;
+		font-size: 0.8rem;
+		white-space: nowrap;
+	}
 
 	.dm-npc__batch-body {
-			flex: 1;
-			min-height: 0;
-			overflow-y: auto;
-			padding: 10px;
-		}
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		padding: 10px;
+	}
 
-		.dm-npc__batch-members,
-		.dm-npc__batch-operation {
-			max-width: 720px;
-			margin: 0 auto 10px;
-			border: 1px solid vars.$rgb-border-grey;
-			border-radius: 4px;
-			background: #fff;
-		}
+	.dm-npc__batch-members,
+	.dm-npc__batch-operations,
+	.dm-npc__batch-operation {
+		max-width: 720px;
+		margin: 0 auto 8px;
+		border: 1px solid vars.$rgb-border-grey;
+		border-radius: 4px;
+		background: #fff;
+	}
 
-		.dm-npc__batch-members-header,
-		.dm-npc__batch-operation {
-			padding: 7px 9px;
-		}
+	.dm-npc__batch-members-header,
+	.dm-npc__batch-operations > summary {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-height: 32px;
+		padding: 6px 9px;
+		cursor: pointer;
 
-		.dm-npc__batch-members-header label,
-		.dm-npc__batch-member,
-		.dm-npc__batch-half {
-			display: flex;
-			align-items: center;
-			gap: 6px;
-			margin: 0;
-			font-weight: 400;
-		}
-
-		.dm-npc__batch-member-list {
-			display: grid;
-			grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-			border-top: 1px solid vars.$rgb-border-grey;
-		}
-
-		.dm-npc__batch-member {
-			min-width: 0;
-			padding: 6px 9px;
-		}
-
-		.dm-npc__batch-member-name {
-			min-width: 0;
-			overflow: hidden;
-			font-weight: 600;
-			text-overflow: ellipsis;
-			white-space: nowrap;
-		}
-
-		.dm-npc__batch-member-hp {
+		span {
 			margin-left: auto;
 			color: #666;
-			font-size: 0.78rem;
-			font-variant-numeric: tabular-nums;
-			white-space: nowrap;
-		}
-
-		.dm-npc__batch-operation {
-			display: flex;
-			flex-wrap: wrap;
-			align-items: flex-end;
-			gap: 8px;
-		}
-
-		.dm-npc__batch-operation-help {
-			display: block;
-			color: #666;
-			font-size: 0.72rem;
+			font-size: 0.8rem;
 			font-weight: 400;
 		}
+	}
 
-		.dm-npc__batch-operation-controls {
-			display: flex;
-			flex: 1 1 310px;
-			align-items: center;
-			justify-content: flex-end;
-			gap: 5px;
-		}
+	.dm-npc__batch-select-all {
+		padding: 6px 9px;
+		border-top: 1px solid vars.$rgb-border-grey;
+	}
 
-		.dm-npc__batch-hp-input {
-			min-width: 120px;
-			max-width: 190px;
-		}
+	.dm-npc__batch-select-all label,
+	.dm-npc__batch-member,
+	.dm-npc__batch-half {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		margin: 0;
+		font-weight: 400;
+	}
 
-		.dm-npc__batch-condition-select {
-			min-width: 130px;
-			max-width: 190px;
-		}
+	.dm-npc__batch-member-list {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+		border-top: 1px solid vars.$rgb-border-grey;
+	}
 
-		.dm-npc__batch-status {
-			max-width: 720px;
-			margin: 0 auto 8px;
-			padding: 7px 9px;
-			border: 1px solid #5ca45c;
-			border-radius: 4px;
-			background: #eff9ef;
-			color: #285f28;
-		}
+	.dm-npc__batch-member {
+		min-width: 0;
+		padding: 6px 9px;
+	}
+
+	.dm-npc__batch-member-name {
+		min-width: 0;
+		overflow: hidden;
+		font-weight: 600;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.dm-npc__batch-member-hp {
+		margin-left: auto;
+		color: #666;
+		font-size: 0.82rem;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+
+	.dm-npc__batch-operations {
+		margin-top: 12px;
+	}
+
+	.dm-npc__batch-operations-body {
+		padding: 0 8px 8px;
+		border-top: 1px solid vars.$rgb-border-grey;
+	}
+
+	.dm-npc__batch-operation {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: 8px;
+		margin: 8px 0 0;
+		padding: 7px 9px;
+	}
+
+	.dm-npc__batch-operation-help {
+		display: block;
+		color: #666;
+		font-size: 0.8rem;
+		font-weight: 400;
+	}
+
+	.dm-npc__batch-operation-controls {
+		display: flex;
+		flex: 1 1 310px;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 5px;
+	}
+
+	.dm-npc__batch-hp-input {
+		min-width: 120px;
+		max-width: 190px;
+	}
+
+	.dm-npc__batch-condition-select {
+		min-width: 130px;
+		max-width: 190px;
+	}
+
+	.dm-npc__batch-status {
+		max-width: 720px;
+		margin: 0 auto 8px;
+		padding: 7px 9px;
+		border: 1px solid #5ca45c;
+		border-radius: 4px;
+		background: #eff9ef;
+		color: #285f28;
+	}
 
 	.dm-npc__batch-empty {
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			min-height: 130px;
-			color: #666;
-			text-align: center;
-		}
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 90px;
+		max-width: 720px;
+		margin: 0 auto;
+		padding: 14px;
+		color: #666;
+		text-align: center;
+	}
 
 	.dm-npc__batch-error {
-			margin-bottom: 8px;
-			padding: 7px 9px;
-			border: 1px solid #d89b2b;
-			border-radius: 4px;
-			background: #fff8e7;
-			color: #694b12;
-		}
+		max-width: 720px;
+		margin: 0 auto 8px;
+		padding: 7px 9px;
+		border: 1px solid #d89b2b;
+		border-radius: 4px;
+		background: #fff8e7;
+		color: #694b12;
+	}
 
 	.dm-npc__batch-results {
-			max-width: 720px;
-			margin: 0 auto;
-			border: 1px solid vars.$rgb-border-grey;
-			border-radius: 4px;
-			overflow: hidden;
-		}
+		max-width: 720px;
+		margin: 0 auto;
+		border: 1px solid vars.$rgb-border-grey;
+		border-radius: 4px;
+		overflow: hidden;
+	}
 
-		.dm-npc__batch-handoff {
-			display: flex;
-			justify-content: flex-end;
-			max-width: 720px;
-			margin: 8px auto 0;
-		}
+	.dm-npc__batch-handoff {
+		display: flex;
+		justify-content: flex-end;
+		max-width: 720px;
+		margin: 8px auto 0;
+	}
 
 	.dm-npc__batch-result-row {
-			display: grid;
-			grid-template-columns: minmax(120px, 1fr) minmax(90px, 0.45fr) minmax(58px, 0.25fr);
-			align-items: center;
-			min-height: 34px;
+		display: grid;
+		grid-template-columns: minmax(120px, 1fr) minmax(90px, 0.45fr) minmax(58px, 0.25fr);
+		align-items: center;
+		min-height: 36px;
 
-			& + & {
-				border-top: 1px solid #eee;
-			}
-
-			> * {
-				min-width: 0;
-				padding: 6px 8px;
-			}
+		& + & {
+			border-top: 1px solid #eee;
 		}
+
+		> * {
+			min-width: 0;
+			padding: 6px 8px;
+		}
+	}
 
 	.dm-npc__batch-result-row--header {
-			background: #f3f3f3;
-			color: #555;
-			font-size: 0.78rem;
-			font-weight: 700;
-		}
+		background: #f3f3f3;
+		color: #555;
+		font-size: 0.82rem;
+		font-weight: 700;
+	}
 
 	.dm-npc__batch-sort {
 			padding: 0;
@@ -641,21 +801,21 @@
 		}
 
 	.dm-npc__batch-result-name {
-			overflow: hidden;
-			font-weight: 600;
-			text-overflow: ellipsis;
-			white-space: nowrap;
-		}
+		overflow: hidden;
+		font-weight: 600;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
 
 	.dm-npc__batch-result-formula {
-			color: #666;
-			font-variant-numeric: tabular-nums;
-		}
+		color: #666;
+		font-variant-numeric: tabular-nums;
+	}
 
 	.dm-npc__batch-result-total {
-			font-size: 1rem;
-			font-variant-numeric: tabular-nums;
-		}
+		font-size: 1.12rem;
+		font-variant-numeric: tabular-nums;
+	}
 
 	@container (max-width: 640px) {
 		.dm-npc__layout {
@@ -690,16 +850,22 @@
 			align-items: flex-start;
 		}
 
+		.dm-npc__batch-rollbar {
+			top: -10px;
+		}
+
 		.dm-npc__batch-controls {
-			order: 3;
 			width: 100%;
-			margin-left: 0;
 		}
 
 		.dm-npc__hp {
 			order: 3;
 			width: 100%;
 			margin-left: 0;
+		}
+
+		.dm-npc__detail-header > .dm-npc__conditions {
+			order: 4;
 		}
 	}
 
@@ -711,6 +877,63 @@
 	}
 
 	@container (max-width: 320px) {
+		.dm-npc__roster-toolbar {
+			padding-right: 34px;
+		}
+
+		.dm-npc__roster-toolbar .ve-btn-group {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			width: 100%;
+
+			> .ve-btn {
+				min-width: 0;
+			}
+		}
+
+		.dm-npc__skills {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.dm-npc__condition-add {
+			width: 100%;
+			max-width: none;
+		}
+
+		.dm-npc__batch-rollbar {
+			position: static;
+		}
+
+		.dm-npc__batch-controls {
+			align-items: stretch;
+			flex-direction: column;
+
+			label {
+				flex-basis: auto;
+			}
+
+			.ve-form-control,
+			.ve-btn {
+				width: 100%;
+				font-size: 0.9rem;
+			}
+		}
+
+		.dm-npc__batch-roll-help {
+			width: 100%;
+			white-space: normal;
+		}
+
+		.dm-npc__batch-members-header,
+		.dm-npc__batch-operations > summary {
+			align-items: flex-start;
+			flex-direction: column;
+
+			span {
+				margin-left: 0;
+			}
+		}
+
 		.dm-npc__batch-result-row {
 			grid-template-columns: minmax(0, 1fr) auto;
 		}
@@ -747,6 +970,28 @@
 			width: 100%;
 			min-width: 0;
 			white-space: normal;
+		}
+
+		.dm-npc__hp {
+			display: grid;
+			grid-template-columns: auto 44px auto 44px;
+			justify-content: start;
+
+			.dm-npc__hp-temp-label {
+				grid-column: 1;
+				grid-row: 2;
+				margin-left: 0;
+			}
+
+			.dm-npc__hp-input:last-child {
+				grid-column: 2;
+				grid-row: 2;
+			}
+		}
+
+		.dm-npc__hp-input {
+			width: 44px;
+			min-width: 44px;
 		}
 	}
 
@@ -789,7 +1034,9 @@
 		}
 
 		.dm-npc__group-header,
+		.dm-npc__batch-rollbar,
 		.dm-npc__batch-members,
+		.dm-npc__batch-operations,
 		.dm-npc__batch-operation,
 		.dm-npc__batch-results,
 		.dm-npc__batch-result-row + .dm-npc__batch-result-row {
@@ -797,16 +1044,30 @@
 		}
 
 		.dm-npc__batch-members,
+		.dm-npc__batch-operations,
+		.dm-npc__batch-rollbar,
 		.dm-npc__batch-operation {
 			background: vars-night.$rgb-bg--night;
 		}
 
 		.dm-npc__condition {
 			border-color: vars-night.$rgb-border-grey--night;
-			background: vars-night.$rgb-bg--alt-night;
+			background: vars-night.$rgb-bg--night;
 			color: #ccc;
+
+			&:hover,
+			&:focus-visible {
+				border-color: #7db6e8;
+				background: rgb(125 182 232 / 12%);
+			}
 		}
 
+		.dm-npc__condition-remove {
+			color: #bbb;
+		}
+
+		.dm-npc__batch-select-all,
+		.dm-npc__batch-operations-body,
 		.dm-npc__batch-member-list {
 			border-color: vars-night.$rgb-border-grey--night;
 		}
@@ -826,7 +1087,12 @@
 		}
 
 		.dm-npc__batch-member-hp,
-		.dm-npc__batch-operation-help {
+		.dm-npc__batch-operation-help,
+		.dm-npc__batch-members-header span,
+		.dm-npc__batch-operations > summary span,
+		.dm-npc__batch-roll-help,
+		.dm-npc__section-heading span,
+		.dm-npc__skill-meta {
 			color: #aaa;
 		}
 
@@ -852,6 +1118,7 @@
 		}
 
 		.dm-npc__section h3,
+		.dm-npc__section-heading,
 		.dm-npc__stat-line {
 			border-color: vars-night.$rgb-border-grey--night;
 		}
@@ -868,6 +1135,30 @@
 			&:focus-visible {
 				border-color: #7db6e8;
 				background: rgb(125 182 232 / 12%);
+			}
+
+			.dm-npc__skill {
+				border-color: vars-night.$rgb-border-grey--night;
+				background: vars-night.$rgb-bg--night;
+
+				&:hover,
+				&:focus-visible {
+					border-color: #7db6e8;
+					background: rgb(125 182 232 / 12%);
+				}
+			}
+
+			.dm-npc__skill--proficient {
+				border-color: #7db6e8;
+				background: rgb(125 182 232 / 10%);
+			}
+
+			.dm-npc__hp-label {
+				color: #e78b8b;
+			}
+
+			.dm-npc__hp-temp-label {
+				color: #87bedb;
 			}
 		}
 

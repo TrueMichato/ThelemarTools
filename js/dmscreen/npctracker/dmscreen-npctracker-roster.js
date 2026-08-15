@@ -1,4 +1,4 @@
-import {getNpcTrackerConditionColor} from "./dmscreen-npctracker-condition.js";
+import {getNpcTrackerConditionControls} from "./dmscreen-npctracker-condition.js";
 
 const _SEARCH_INDEX_NAME = "entity_NpcTrackerCreatures";
 
@@ -37,6 +37,7 @@ export class NpcTrackerRoster {
 			fnToggleUnsorted,
 			fnAssignGroup,
 			fnOpenBatch,
+			fnUpdateCondition,
 		},
 	) {
 		this._fnGetState = fnGetState;
@@ -53,6 +54,7 @@ export class NpcTrackerRoster {
 		this._fnToggleUnsorted = fnToggleUnsorted;
 		this._fnAssignGroup = fnAssignGroup;
 		this._fnOpenBatch = fnOpenBatch;
+		this._fnUpdateCondition = fnUpdateCondition;
 	}
 
 	render (wrp) {
@@ -234,22 +236,10 @@ export class NpcTrackerRoster {
 					${getHpField({prop: "max", value: npc.hp.max, label: "Maximum hit points", shortLabel: "Max"})}
 					${getHpField({prop: "temp", value: npc.hp.temp, label: "Temporary hit points", shortLabel: "Temp"})}
 				</div>
-				${this._getConditionChips(npc)}
+				${getNpcTrackerConditionControls({npc, fnUpdate: this._fnUpdateCondition, isCompact: true})}
 			</div>
 		</div>`;
 		row.appendTo(wrp);
-	}
-
-	_getConditionChips (npc) {
-		if (!npc.conditions.length) return null;
-		const wrp = ee`<div class="dm-npc__conditions" aria-label="Conditions"></div>`;
-		npc.conditions.forEach(condition => {
-			const chip = ee`<span class="dm-npc__condition"></span>`;
-			chip.textContent = condition.toTitleCase();
-			chip.style.borderColor = getNpcTrackerConditionColor(condition);
-			chip.appendTo(wrp);
-		});
-		return wrp;
 	}
 
 	async _pLoadSearchIndex () {

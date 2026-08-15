@@ -9,7 +9,7 @@ The NPC Manager is DM Screen panel type 26. It keeps independent NPC instances i
 | `js/dmscreen/npctracker/dmscreen-npctracker.js` | Panel app, root controller, persisted mutations, workspace mode |
 | `js/dmscreen/npctracker/dmscreen-npctracker-serial.js` | Versioned state, migration, group deletion helper |
 | `js/dmscreen/npctracker/dmscreen-npctracker-roster.js` | Add/import toolbar, grouped roster, assignment controls |
-| `js/dmscreen/npctracker/dmscreen-npctracker-detail.js` | Roleplay view, statblock view, single-NPC rolls |
+| `js/dmscreen/npctracker/dmscreen-npctracker-detail.js` | Roleplay view, compact canonical statblock, all single-NPC rolls |
 | `js/dmscreen/npctracker/dmscreen-npctracker-roll.js` | Shared d20 roll, bonus resolution, scope and sort helpers |
 | `js/dmscreen/npctracker/dmscreen-npctracker-batch.js` | Batch configuration and results workspace |
 | `scss/includes/dmscreen-npc-tracker.scss` | Panel, group, detail, batch, responsive, and night-mode styles |
@@ -77,6 +77,8 @@ Supported rolls:
 | Saving throw | Explicit `monster.save[ability]`, otherwise ability modifier |
 | Skill check | Explicit `monster.skill[skill]`, otherwise governing ability modifier |
 
+The selected-NPC roleplay view exposes every standard skill, not only entries listed in `monster.skill`. Listed proficiencies are emphasized; unlisted skills remain rollable and use the governing ability modifier through the same `getNpcTrackerRollBonus()` path as batch rolls.
+
 Every NPC is rolled sequentially through:
 
 ```js
@@ -91,18 +93,22 @@ This produces one normal roll-log entry per NPC and returns the total for the co
 
 Initiative results default to total descending with roster-order tie-breaking. Ability, save, and skill results initially preserve roster order. Name and Total headers can re-sort the table, and **Roll Again** repeats the current configuration.
 
-## Encounter control
+## Statblock and encounter control
+
+**Full statblock** uses the same compact `Renderer.monster.getCompactRenderedString()` table structure as the DM Screen creature viewer. The canonical `.ve-stats` table preserves 5etools statblock typography and behavior, and scrolls horizontally rather than overlapping content when a tile is narrower than the statblock's readable minimum.
 
 Every batch scope is also an encounter-operations workspace. Scope members begin selected and can be toggled independently before rolling or applying a mutation.
 
+Encounter Control presents roll type, governing ability/skill, and the primary Roll action first. Target selection is available from a compact disclosure. Results and Initiative Tracker handoff appear immediately after rolling; secondary HP and condition operations live together under **Encounter actions** so they remain available without pushing results below the fold.
+
 - HP expressions accept damage (`30` or `-30`), healing (`+12`), absolute values (`=15`), and dice (`8d6`). The optional **Half** toggle rounds toward zero using the Initiative Tracker's shared rule. Damage consumes temporary HP before current HP, and healing is capped at maximum HP.
 - The last five batch HP operations are available to the session-only **Undo HP** stack. The roster state itself still saves after every apply or undo.
-- Standard conditions come from `Parser.CONDITIONS`. Add and remove operate on every selected NPC, persist independently for duplicate instances, and render as compact chips in both roster and detail views.
+- Standard conditions come from `Parser.CONDITIONS`. Each roster row and selected-NPC header has a quick-add selector; active chips remove their condition in one click. Batch add/remove still operates on every selected NPC. All paths use `getNpcTrackerConditionsAfterUpdate()`, persist independently for duplicate instances, and render consistently in roster and detail views.
 - A complete initiative batch can be appended to an existing Initiative Tracker. The handoff preserves each selected NPC's exact rolled total, alias and monster identity, current/maximum/temporary HP, and conditions. It respects the tracker lock and is intentionally a one-way snapshot; Initiative Tracker owns combat state after handoff.
 
 ## Responsive behavior
 
-Wide panels show the grouped roster and current detail/batch workspace side by side. At the existing 520px container breakpoint, the roster and workspace become separate views; both NPC detail and batch results provide a **Roster** back action. Night mode uses the same neutral surfaces, selected blue, borders, and form controls as other DM Screen panels.
+Wide panels show the grouped roster and current detail/batch workspace side by side. At the panel container breakpoint, the roster and workspace become separate views; both NPC detail and batch results provide a **Roster** back action. Narrow controls stack without collapsing HP values, while canonical statblocks use contained horizontal scrolling. Night mode uses the same neutral surfaces, selected blue, borders, focus states, and form controls as other DM Screen panels.
 
 ## Deferred work
 
