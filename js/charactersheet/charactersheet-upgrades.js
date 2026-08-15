@@ -5,12 +5,17 @@
 
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 import {
-	GEMSTONE_EFFECT_REGISTRY,
+	getAggregatedArmorUpgradeEffects,
+	getAggregatedUpgradeEffects,
 	getEligibleUpgrades,
+	getGemstoneDescriptor,
+	getGemstoneRegistryNames,
 	isArmor,
 	isShield,
 	isSocketable,
 	isWeapon,
+	resetItemUpgradeCatalog,
+	setItemUpgradeCatalog,
 } from "../itembuilder/itembuilder-upgrade-rules.js";
 
 // Project globals — typed via globalThis cast for TypeScript checkJs
@@ -25,6 +30,15 @@ class CharacterSheetUpgrades {
 
 	setUpgrades (upgrades) {
 		this._allUpgrades = upgrades;
+		setItemUpgradeCatalog(upgrades);
+	}
+
+	static setUpgradeCatalog (upgrades) {
+		setItemUpgradeCatalog(upgrades);
+	}
+
+	static resetUpgradeCatalog () {
+		resetItemUpgradeCatalog();
 	}
 
 	// ==========================================
@@ -1123,48 +1137,7 @@ class CharacterSheetUpgrades {
 	 * @returns {object} Flags for each armor upgrade type
 	 */
 	static getArmorUpgradeEffects (item) {
-		const effects = {
-			muffled: false,
-			reinforced: false,
-			critDamageReduction: 0,
-			armorProofingTier: 0,
-			spiked: false,
-			breathable: false,
-			insulated: false,
-			climbingHarness: false,
-			lockingJoints: false,
-			quickRelease: false,
-			decorated: false,
-			runic: false,
-			burnished: false,
-			camouflaged: false,
-			formFitted: false,
-		};
-
-		if (!item?.appliedUpgrades?.length) return effects;
-
-		for (const upgrade of item.appliedUpgrades) {
-			const name = upgrade.name.toLowerCase();
-
-			if (name === "muffled") effects.muffled = true;
-			else if (name === "reinforced") { effects.reinforced = true; effects.critDamageReduction = 3; } else if (name === "spiked") effects.spiked = true;
-			else if (name === "breathable") effects.breathable = true;
-			else if (name === "insulated") effects.insulated = true;
-			else if (name === "climbing harness") effects.climbingHarness = true;
-			else if (name === "locking joints") effects.lockingJoints = true;
-			else if (name === "quick-release clasps") effects.quickRelease = true;
-			else if (name === "decorated") effects.decorated = true;
-			else if (name === "runic") effects.runic = true;
-			else if (name === "burnished") effects.burnished = true;
-			else if (name === "camouflaged") effects.camouflaged = true;
-			else if (name === "form fitted") effects.formFitted = true;
-			else if (name.startsWith("armor proofing")) {
-				const tierMatch = name.match(/(\d)(?:st|nd|rd)/);
-				if (tierMatch) effects.armorProofingTier = Math.max(effects.armorProofingTier, parseInt(tierMatch[1]));
-			}
-		}
-
-		return effects;
+		return getAggregatedArmorUpgradeEffects(item);
 	}
 
 	/**
@@ -1208,97 +1181,7 @@ class CharacterSheetUpgrades {
 	 * @returns {object} Bonus adjustments including numeric bonuses, tags, notes, and extra damage
 	 */
 	static getUpgradeEffects (item) {
-		const effects = {
-			bonusWeaponAttack: 0,
-			bonusWeaponDamage: 0,
-			critThresholdReduction: 0,
-			bonusSpellAttack: 0,
-			bonusSpellSaveDc: 0,
-			damageDieIncrease: 0,
-			// Tags: weapon properties granted by upgrades (e.g., "Silvered", "Magical")
-			tags: [],
-			// Notes: free-text mechanical reminders for the player
-			notes: [],
-			// Extra damage dice (e.g., Saw-toothed +1d4 slashing)
-			bonusDamageDice: null,
-			bonusDamageType: null,
-		};
-
-		if (!item?.appliedUpgrades?.length) return effects;
-
-		for (const upgrade of item.appliedUpgrades) {
-			const name = upgrade.name.toLowerCase();
-
-			// Balanced: +1 attack
-			if (name === "balanced") {
-				effects.bonusWeaponAttack += 1;
-			}
-
-			// Wounding (Keen or Oiled String): +1 damage
-			if (name.startsWith("wounding:")) {
-				effects.bonusWeaponDamage += 1;
-			}
-
-			// Critical upgrades: lower crit threshold by 1
-			if (name.startsWith("critical:")) {
-				effects.critThresholdReduction += 1;
-			}
-
-			// Superior: damage die increase
-			if (name === "superior") {
-				effects.damageDieIncrease += 1;
-			}
-
-			// Masterwork: +1/+1 attack and damage
-			if (name === "masterwork") {
-				effects.bonusWeaponAttack += 1;
-				effects.bonusWeaponDamage += 1;
-			}
-
-			// Enchanted: +1 spell attack
-			if (name === "enchanted") {
-				effects.bonusSpellAttack += 1;
-			}
-
-			// Arcane: +1 spell save DC
-			if (name === "arcane") {
-				effects.bonusSpellSaveDc += 1;
-			}
-
-			// Silvered: weapon counts as silvered
-			if (name === "silvered") {
-				effects.tags.push("Silvered");
-			}
-
-			// Magical: weapon counts as magical
-			if (name === "magical") {
-				effects.tags.push("Magical");
-			}
-
-			// Runic (weapon): can be imbued with rune magic
-			if (name === "runic") {
-				effects.tags.push("Runic");
-			}
-
-			// Saw-toothed: +1d4 slashing (no effect vs constructs/undead)
-			if (name === "saw-toothed") {
-				effects.bonusDamageDice = "1d4";
-				effects.bonusDamageType = "slashing";
-				effects.notes.push("Saw-toothed: +1d4 slashing damage (no effect vs constructs/undead)");
-			}
-
-			// Brutal: on max damage die, reroll and add (repeats if max again)
-			if (name === "brutal") {
-				effects.notes.push("Brutal: Reroll max damage dice and add to total (repeats if max rolled again)");
-			}
-
-			// Flanged: sunder armor on hit
-			if (name === "flanged") {
-				effects.notes.push("Flanged: On hit, target\u2019s medium/heavy armor takes cumulative \u22121 AC");
-			}
-		}
-
-		return effects;
+		return getAggregatedUpgradeEffects(item);
 	}
 
 	/**
@@ -1323,13 +1206,11 @@ class CharacterSheetUpgrades {
 	}
 
 	static getGemstoneDescriptor (gem) {
-		const name = String(gem?.name || gem || "").trim().toLowerCase();
-		const descriptor = GEMSTONE_EFFECT_REGISTRY[name];
-		return descriptor ? MiscUtil.copyFast(descriptor) : null;
+		return getGemstoneDescriptor(gem);
 	}
 
 	static getGemstoneRegistryNames () {
-		return Object.keys(GEMSTONE_EFFECT_REGISTRY);
+		return getGemstoneRegistryNames();
 	}
 
 	/**

@@ -212,8 +212,31 @@
 
 		> button {
 			flex: 1 1 8rem;
-			min-height: 36px;
+			min-height: 44px;
 			white-space: normal;
+		}
+	}
+
+	.mkbru_item__composition-summary {
+		display: flex;
+		gap: 0.75rem;
+		align-items: start;
+		justify-content: space-between;
+		margin: 0.75rem 0.75rem 0;
+		padding: 0.75rem 0;
+		border-bottom: 1px solid vars.$rgb-border-grey;
+
+		> div {
+			display: flex;
+			flex-direction: column;
+			max-width: 70ch;
+		}
+
+		> span {
+			max-width: 50%;
+			color: vars.$rgb-font--muted;
+			text-align: end;
+			overflow-wrap: anywhere;
 		}
 	}
 
@@ -318,6 +341,12 @@
 		}
 	}
 
+	.mkbru_item__review-save {
+		width: 100%;
+		min-height: 44px;
+		margin-top: 0.75rem;
+	}
+
 	.mkbru_item__review-preview {
 		min-width: 0;
 		overflow-x: auto;
@@ -325,8 +354,13 @@
 
 	.ve-night-mode {
 		.mkbru_item__preset,
-		.mkbru_item__choice {
+		.mkbru_item__choice,
+		.mkbru_item__composition-summary {
 			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		.mkbru_item__composition-summary > span {
+			color: vars-night.$rgb-font--night;
 		}
 
 		.mkbru_item__selection {
@@ -341,17 +375,17 @@
 
 		.mkbru_item__validation--error {
 			border-color: vars-night.$rgb-alert-danger-border-red--night;
-			color: #ff8a86;
+			color: vars-night.$rgb-font--night;
 		}
 
 		.mkbru_item__validation--warning {
 			border-color: vars-night.$rgb-alert-warning-border-orange--night;
-			color: #f5ba60;
+			color: vars-night.$rgb-font--night;
 		}
 
 		.mkbru_item__validation--ready {
 			border-color: vars-night.$rgb-alert-success-border-green--night;
-			color: #74d7a6;
+			color: vars-night.$rgb-font--night;
 		}
 	}
 
@@ -394,6 +428,16 @@
 
 		.mkbru_item__review {
 			grid-template-columns: 1fr;
+		}
+
+		.mkbru_item__composition-summary {
+			align-items: stretch;
+			flex-direction: column;
+
+			> span {
+				max-width: none;
+				text-align: start;
+			}
 		}
 	}
 }

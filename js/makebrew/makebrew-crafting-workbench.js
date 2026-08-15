@@ -96,7 +96,7 @@ export class CraftingWorkbenchBuilderBase extends BuilderBase {
 		const cb = this._getCb();
 		this._cbCache = cb;
 		const tabs = this._renderTabs(
-			definitions.map(definition => new TabUiUtil.TabMeta({...opts, name: definition.name})),
+			definitions.map((definition, ix) => new TabUiUtil.TabMeta({...opts, name: `${ix + 1} ${definition.name}`})),
 			{tabGroup: "input", cbTabChange: this.doUiSave.bind(this)},
 		);
 		const wrpTabHeads = ee`<div class="ve-flex-v-center ve-w-100 ve-no-shrink ve-ui-tab__wrp-tab-heads--border mkbru_cw__tabs" role="tablist" aria-label="${Parser.getPropDisplayName(this._prop)} authoring steps">${tabs.map(it => it.btnTab)}</div>`.appendTo(wrp);

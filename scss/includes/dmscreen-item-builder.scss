@@ -68,6 +68,96 @@
 		margin-inline: auto;
 	}
 
+	.dm-item-builder__stages {
+		position: sticky;
+		z-index: 1;
+		top: -0.5rem;
+		display: grid;
+		grid-template-columns: repeat(4, minmax(8rem, 1fr));
+		background: vars.$rgb-bg;
+		border-bottom: 1px solid vars.$rgb-border-grey;
+	}
+
+	.dm-item-builder__stage-link {
+		display: flex;
+		gap: 0.45rem;
+		align-items: center;
+		justify-content: center;
+		min-height: 44px;
+		border: 0;
+		border-bottom: 3px solid transparent;
+		background: transparent;
+		color: vars.$rgb-font;
+		font-weight: 700;
+
+		span {
+			display: grid;
+			width: 1.5rem;
+			height: 1.5rem;
+			border: 1px solid vars.$rgb-border-grey;
+			border-radius: 50%;
+			place-items: center;
+			font-size: 0.75rem;
+		}
+
+		&:hover {
+			border-bottom-color: vars.$rgb-link-blue;
+			color: vars.$rgb-link-blue;
+		}
+
+		&:focus-visible {
+			outline: 2px solid vars.$rgb-link-blue;
+			outline-offset: -2px;
+		}
+	}
+
+	.dm-item-builder__stage {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		padding: 1rem 0;
+		border-bottom: 1px solid vars.$rgb-border-grey;
+		scroll-margin-top: 3rem;
+
+		> header {
+			display: flex;
+			gap: 0.65rem;
+			align-items: start;
+
+			> span {
+				display: grid;
+				flex: none;
+				width: 2rem;
+				height: 2rem;
+				border-radius: 50%;
+				background: vars.$rgb-bg--alt;
+				color: vars.$rgb-font;
+				font-weight: 700;
+				place-items: center;
+			}
+
+			div {
+				display: flex;
+				flex-direction: column;
+			}
+
+			strong {
+				font-size: 1rem;
+			}
+
+			small {
+				max-width: 70ch;
+				color: vars.$rgb-font--muted;
+				font-size: 1rem;
+			}
+		}
+	}
+
+	.dm-item-builder__stage--review {
+		padding-bottom: 0;
+		border-bottom: 0;
+	}
+
 	.dm-item-builder__loading {
 		display: flex;
 		flex-direction: column;
@@ -154,7 +244,7 @@
 			flex-direction: column;
 			gap: 0.2rem;
 			min-width: 0;
-			font-size: 0.75rem;
+			font-size: 1rem;
 			font-weight: 700;
 		}
 
@@ -259,7 +349,7 @@
 	}
 
 	.dm-item-builder__status--compact {
-		font-size: 0.75rem;
+		font-size: 1rem;
 	}
 
 	.dm-item-builder__status--ready {
@@ -318,6 +408,8 @@
 		}
 
 		.dm-item-builder__header,
+		.dm-item-builder__stages,
+		.dm-item-builder__stage,
 		.dm-item-builder__step,
 		.dm-item-builder__footer,
 		.dm-item-builder__chip,
@@ -325,6 +417,29 @@
 		.dm-item-builder__remove,
 		.dm-item-builder__status {
 			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		.dm-item-builder__stages {
+			background: vars-night.$rgb-bg--night;
+		}
+
+		.dm-item-builder__stage-link {
+			color: vars-night.$rgb-font--night;
+
+			span {
+				border-color: vars-night.$rgb-border-grey--night;
+			}
+		}
+
+		.dm-item-builder__stage > header {
+			> span {
+				background: vars-night.$rgb-bg--alt-night;
+				color: vars-night.$rgb-font--night;
+			}
+
+			small {
+				color: vars-night.$rgb-font--night;
+			}
 		}
 
 		.dm-item-builder__chip,
@@ -338,7 +453,7 @@
 		.dm-item-builder__muted,
 		.dm-item-builder__summary-heading > span,
 		.dm-item-builder__summary-composition > span {
-			color: #b8b8b8;
+			color: vars-night.$rgb-font--night;
 		}
 
 		.dm-item-builder__loading-bar {
@@ -348,20 +463,20 @@
 		.dm-item-builder__load-error,
 		.dm-item-builder__status--error,
 		.dm-item-builder__advanced-message--error {
-			border-color: #ff8a86;
-			color: #ff8a86;
+			border-color: vars-night.$rgb-alert-danger-border-red--night;
+			color: vars-night.$rgb-font--night;
 		}
 
 		.dm-item-builder__status--warning {
-			color: #f5ba60;
+			color: vars-night.$rgb-font--night;
 		}
 
 		.dm-item-builder__status--ready {
-			color: #74d7a6;
+			color: vars-night.$rgb-font--night;
 		}
 
 		.dm-item-builder button:disabled {
-			color: #aaa;
+			color: vars-night.$rgb-font--night;
 			opacity: 0.72;
 		}
 	}
@@ -385,6 +500,16 @@
 		.dm-item-builder__step {
 			align-items: stretch;
 			flex-direction: column;
+		}
+
+		.dm-item-builder__stages {
+			position: static;
+			grid-template-columns: 1fr 1fr;
+		}
+
+		.dm-item-builder__stage-link {
+			justify-content: start;
+			padding-inline: 0.5rem;
 		}
 
 		.dm-item-builder__step select {
