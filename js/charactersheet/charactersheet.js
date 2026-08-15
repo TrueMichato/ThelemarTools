@@ -105,6 +105,14 @@ class CharacterSheetPage {
 		// See `pGetCraftingCatalog()`.
 		this._pCraftingCatalog = null;
 		this._craftingMaterialsBrewData = [];
+		// Homebrew-only brew catalogs (no site data file). `_pLoadData` also resets
+		// these before `_mergeBrewData` runs, but initialize them here too so the
+		// spreads in `_mergeBrewData` can never hit an undefined value (guards
+		// against `X is not iterable` if the merge is ever reached before the
+		// `_pLoadData` reset block).
+		this._itemMaterialsData = [];
+		this._brewMonstersData = [];
+		this._draconicResonancesData = [];
 		this._divineFavorData = [];
 		this._skillsData = [];
 		this._conditionsData = [];
@@ -17140,6 +17148,16 @@ class CharacterSheetPage {
 			// entities the sheet emits links for; scope the guard to PG_ITEMS so
 			// other entity hovers are untouched.
 			if (page === UrlUtil.PG_ITEMS && (!source || String(source).toLowerCase() === "custom")) {
+				return displayName || CharacterSheetClassUtils.escapeHtml(name);
+			}
+
+			// A hover target is keyed by page + source + hash; without a source the
+			// hover can never resolve, and Renderer.hover.getHoverElementAttributes
+			// would throw on `source.qq()`. Feature/optional-feature choices recorded
+			// in level history sometimes lack a source, so degrade to a plain,
+			// non-hover label instead of throwing a caught-and-logged error on every
+			// render.
+			if (!source) {
 				return displayName || CharacterSheetClassUtils.escapeHtml(name);
 			}
 
