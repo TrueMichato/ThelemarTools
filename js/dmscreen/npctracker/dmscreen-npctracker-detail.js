@@ -1,10 +1,10 @@
-import {RenderBestiary} from "../../render-bestiary.js";
 import {
 	getNpcTrackerDisplayName,
+	getNpcTrackerRollBonus,
 	getNpcTrackerSignedNumber,
 	pRollNpcTrackerD20,
 } from "./dmscreen-npctracker-roll.js";
-import {getNpcTrackerConditionColor} from "./dmscreen-npctracker-condition.js";
+import {getNpcTrackerConditionControls} from "./dmscreen-npctracker-condition.js";
 
 const _PROPS_ATTACK = ["action", "bonus", "reaction", "legendary", "mythic"];
 
@@ -39,13 +39,28 @@ export function hasNpcTrackerAttackRoll (entry) {
 		|| JSON.stringify(entry?.entries || []).includes("{@hit");
 }
 
+export function getNpcTrackerAllSkillsModel (monster) {
+	return Object.entries(Parser.SKILL_TO_ATB_ABV)
+		.map(([skill, ability]) => ({
+			skill,
+			ability,
+			bonus: getNpcTrackerRollBonus({
+				npc: {monster},
+				rollType: "skill",
+				key: skill,
+			}),
+			isProficient: monster.skill?.[skill] != null,
+		}));
+}
+
 export {getNpcTrackerDisplayName, getNpcTrackerSignedNumber};
 
 export class NpcTrackerDetail {
-	constructor ({fnGetNpc, fnSetViewMode, fnUpdateHp}) {
+	constructor ({fnGetNpc, fnSetViewMode, fnUpdateHp, fnUpdateCondition}) {
 		this._fnGetNpc = fnGetNpc;
 		this._fnSetViewMode = fnSetViewMode;
 		this._fnUpdateHp = fnUpdateHp;
+		this._fnUpdateCondition = fnUpdateCondition;
 	}
 
 	render ({wrp, isFullStatblock = false, isNarrow = false, fnShowRoster = null}) {
@@ -89,7 +104,7 @@ export class NpcTrackerDetail {
 		const eleMeta = ee`<div class="dm-npc__meta"></div>`;
 		eleMeta.textContent = this._getMetaText(mon);
 
-		const wrpIdentity = ee`<div class="dm-npc__identity">${eleName}${eleOriginal}${eleMeta}${this._getConditionChips(npc)}</div>`;
+		const wrpIdentity = ee`<div class="dm-npc__identity">${eleName}${eleOriginal}${eleMeta}</div>`;
 		const wrpControls = ee`<div class="dm-npc__detail-actions">${btnMode}</div>`;
 
 		ee`<div class="dm-npc__detail-header">
@@ -97,6 +112,7 @@ export class NpcTrackerDetail {
 			${wrpIdentity}
 			${this._getHpControl(npc)}
 			${wrpControls}
+			${getNpcTrackerConditionControls({npc, fnUpdate: this._fnUpdateCondition})}
 		</div>`.appendTo(wrp);
 	}
 
@@ -106,18 +122,6 @@ export class NpcTrackerDetail {
 		if (mon.type) parts.push(Parser.monTypeToFullObj(mon.type).asText);
 		if (mon.cr != null) parts.push(`CR ${mon.cr.cr || mon.cr}`);
 		return parts.filter(Boolean).join(" · ");
-	}
-
-	_getConditionChips (npc) {
-		if (!npc.conditions.length) return null;
-		const wrp = ee`<div class="dm-npc__conditions" aria-label="Conditions"></div>`;
-		npc.conditions.forEach(condition => {
-			const chip = ee`<span class="dm-npc__condition"></span>`;
-			chip.textContent = condition.toTitleCase();
-			chip.style.borderColor = getNpcTrackerConditionColor(condition);
-			chip.appendTo(wrp);
-		});
-		return wrp;
 	}
 
 	_getHpControl (npc) {
@@ -139,6 +143,7 @@ export class NpcTrackerDetail {
 		const model = getNpcTrackerDetailModel(mon, {fluff: npc.fluff});
 
 		this._renderCoreStats({mon, model, wrp});
+		this._renderSkills({npc, wrp});
 		this._renderEntriesSection({wrp, title: "Roleplay Traits", entries: model.traits});
 		this._renderEntriesSection({wrp, title: "Spellcasting", entries: model.spellcasting});
 		this._renderEntriesSection({wrp, title: "Attacks", entries: model.attacks});
@@ -169,7 +174,6 @@ export class NpcTrackerDetail {
 			ee`<div class="dm-npc__stat-line"><strong>${label}</strong><span>${html}</span></div>`.appendTo(wrpSection);
 		};
 		addLine({label: "Saving Throws", html: model.saves.map(({ability, bonus}) => this._getRollButtonHtml({name: ability.toUpperCase(), bonus, label: `${Parser.attAbvToFull(ability)} save`})).join(", ")});
-		addLine({label: "Skills", html: model.skills.map(({skill, bonus}) => this._getRollButtonHtml({name: skill.toTitleCase(), bonus, label: `${skill.toTitleCase()} check`})).join(", ")});
 		addLine({label: "Resistances", html: mon.resist ? Parser.getFullImmRes(mon.resist) : ""});
 		addLine({label: "Vulnerabilities", html: mon.vulnerable ? Parser.getFullImmRes(mon.vulnerable) : ""});
 		addLine({label: "Immunities", html: Renderer.monster.getImmunitiesCombinedPart(mon)});
@@ -181,6 +185,35 @@ export class NpcTrackerDetail {
 			label: btn.dataset.rollLabel,
 			bonus: btn.dataset.rollBonus,
 		})));
+	}
+
+	_renderSkills ({npc, wrp}) {
+		const wrpSkills = ee`<div class="dm-npc__skills"></div>`;
+		getNpcTrackerAllSkillsModel(npc.monster).forEach(({skill, ability, bonus, isProficient}) => {
+			const button = ee`<button class="dm-npc__skill ${isProficient ? "dm-npc__skill--proficient" : ""}" type="button"></button>`;
+			const name = ee`<span class="dm-npc__skill-name"></span>`;
+			name.textContent = skill.toTitleCase();
+			const meta = ee`<span class="dm-npc__skill-meta"></span>`;
+			meta.textContent = `${ability.toUpperCase()} ${getNpcTrackerSignedNumber(bonus)}`;
+			button.append(name, meta);
+			button.attr("title", isProficient
+				? `Roll ${skill.toTitleCase()} with the listed bonus`
+				: `Roll ${skill.toTitleCase()} using ${Parser.attAbvToFull(ability)}`);
+			button.onn("click", () => this._roll({
+				npcName: getNpcTrackerDisplayName(npc),
+				label: `${skill.toTitleCase()} check`,
+				bonus,
+			}));
+			button.appendTo(wrpSkills);
+		});
+
+		ee`<section class="dm-npc__section dm-npc__section--skills">
+			<div class="dm-npc__section-heading">
+				<h3>Skills</h3>
+				<span>Listed proficiencies are emphasized; every other skill uses its governing ability.</span>
+			</div>
+			${wrpSkills}
+		</section>`.appendTo(wrp);
 	}
 
 	_getRollButtonHtml ({name, bonus, label}) {
@@ -201,8 +234,8 @@ export class NpcTrackerDetail {
 	}
 
 	_renderFullStatblock ({npc, wrp}) {
-		const rendered = RenderBestiary.getRenderedCreature(npc.monster, {isSkipTokenRender: true});
-		const table = ee`<table class="ve-w-100 ve-stats"></table>`.appends(rendered);
+		const table = ee`<table class="ve-w-100 ve-stats"><tbody>${Renderer.monster.getCompactRenderedString(npc.monster, {isShowScalers: false})}</tbody></table>`;
+		Renderer.statblockCollapse.apply(table);
 		ee`<div class="dm-npc__statblock">${table}</div>`.appendTo(wrp);
 	}
 

@@ -66,6 +66,7 @@ export class NpcTrackerRoot {
 			fnToggleUnsorted: () => this._toggleUnsorted(),
 			fnAssignGroup: meta => this._assignGroup(meta),
 			fnOpenBatch: scope => this._openBatch(scope),
+			fnUpdateCondition: meta => this._updateNpcCondition(meta),
 		});
 		this._detail = new NpcTrackerDetail({
 			fnGetNpc: () => this._getSelectedNpc(),
@@ -74,6 +75,7 @@ export class NpcTrackerRoot {
 				this._renderDetail();
 			},
 			fnUpdateHp: ({npc, prop, value}) => this._updateNpc({npc, prop: `hp.${prop}`, value}),
+			fnUpdateCondition: meta => this._updateNpcCondition(meta),
 		});
 		this._batch = new NpcTrackerBatch({
 			fnGetContext: () => ({
@@ -255,6 +257,14 @@ export class NpcTrackerRoot {
 		this._doSave();
 	}
 
+	_updateNpcCondition ({npc, condition, isAdd}) {
+		if (!this._state.npcs.includes(npc)) return;
+		npc.conditions = getNpcTrackerConditionsAfterUpdate({conditions: npc.conditions, condition, isAdd});
+		this._renderRoster();
+		this._renderDetail();
+		this._doSave();
+	}
+
 	_removeNpc (id) {
 		const ix = this._state.npcs.findIndex(npc => npc.id === id);
 		if (!~ix) return;
@@ -372,6 +382,8 @@ export class NpcTrackerRoot {
 			error: null,
 			operationMessage: null,
 			selectedNpcIds: new Set(getNpcTrackerNpcsForScope({state: this._state, scope}).map(npc => npc.id)),
+			isMembersExpanded: false,
+			isOperationsExpanded: false,
 		};
 		this._workspaceMode = "batch";
 		this._setView("detail");

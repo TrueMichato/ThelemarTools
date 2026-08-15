@@ -33,6 +33,42 @@ export class NpcTrackerBatch {
 		const selectedCount = npcs.filter(npc => batch.selectedNpcIds.has(npc.id)).length;
 		eleCount.textContent = `${selectedCount} of ${npcs.length} selected`;
 
+		const wrpBatch = ee`<div class="dm-npc__batch">
+			<div class="dm-npc__batch-header">${btnBack}<div>${eleTitle}${eleCount}</div></div>
+			<div class="dm-npc__batch-body"></div>
+		</div>`;
+		const wrpBody = wrpBatch.querySelector(".dm-npc__batch-body");
+
+		this._renderRollControls({batch, selectedCount, wrp: wrpBody});
+		this._renderMembers({batch, npcs, wrp: wrpBody});
+
+		if (batch.error) {
+			const eleError = ee`<div class="dm-npc__batch-error" role="alert"></div>`;
+			eleError.textContent = batch.error;
+			eleError.appendTo(wrpBody);
+		}
+		if (batch.operationMessage) {
+			const eleStatus = ee`<div class="dm-npc__batch-status" role="status"></div>`;
+			eleStatus.textContent = batch.operationMessage;
+			eleStatus.appendTo(wrpBody);
+		}
+
+		if (batch.results.length) {
+			this._renderResults({batch, wrp: wrpBody});
+			this._renderInitiativeHandoff({batch, npcs, wrp: wrpBody});
+		} else {
+			const eleEmpty = ee`<div class="dm-npc__batch-empty"></div>`;
+			eleEmpty.textContent = npcs.length
+				? "Choose a roll above. All selected NPCs will roll into one results table."
+				: "This scope has no NPCs to roll.";
+			eleEmpty.appendTo(wrpBody);
+		}
+
+		this._renderEncounterOperations({batch, selectedCount, hasHpUndo, wrp: wrpBody});
+		wrpBatch.appendTo(wrp);
+	}
+
+	_renderRollControls ({batch, selectedCount, wrp}) {
 		const selType = ee`<select class="ve-form-control ve-select ve-select-xs" aria-label="Batch roll type"></select>`;
 		NPC_TRACKER_ROLL_TYPES.forEach(({id, name}) => {
 			const option = ee`<option value="${id}"></option>`;
@@ -57,45 +93,14 @@ export class NpcTrackerBatch {
 		btnRoll.disabled = batch.isRolling || !selectedCount;
 		btnRoll.onn("click", () => this._fnRoll());
 
-		const wrpControls = ee`<div class="dm-npc__batch-controls">
-			<label><span>Roll</span>${selType}</label>
-			${selKey ? ee`<label><span>Using</span>${selKey}</label>` : null}
-			${btnRoll}
-		</div>`;
-
-		const wrpBatch = ee`<div class="dm-npc__batch">
-			<div class="dm-npc__batch-header">${btnBack}<div>${eleTitle}${eleCount}</div>${wrpControls}</div>
-			<div class="dm-npc__batch-body"></div>
-		</div>`;
-		const wrpBody = wrpBatch.querySelector(".dm-npc__batch-body");
-
-		this._renderMembers({batch, npcs, wrp: wrpBody});
-		this._renderHpControls({batch, selectedCount, hasHpUndo, wrp: wrpBody});
-		this._renderConditionControls({batch, selectedCount, wrp: wrpBody});
-
-		if (batch.error) {
-			const eleError = ee`<div class="dm-npc__batch-error" role="alert"></div>`;
-			eleError.textContent = batch.error;
-			eleError.appendTo(wrpBody);
-		}
-		if (batch.operationMessage) {
-			const eleStatus = ee`<div class="dm-npc__batch-status" role="status"></div>`;
-			eleStatus.textContent = batch.operationMessage;
-			eleStatus.appendTo(wrpBody);
-		}
-
-		if (batch.results.length) {
-			this._renderResults({batch, wrp: wrpBody});
-			this._renderInitiativeHandoff({batch, npcs, wrp: wrpBody});
-		} else {
-			const eleEmpty = ee`<div class="dm-npc__batch-empty"></div>`;
-			eleEmpty.textContent = npcs.length
-				? "Choose a roll and roll every NPC in this scope."
-				: "This scope has no NPCs to roll.";
-			eleEmpty.appendTo(wrpBody);
-		}
-
-		wrpBatch.appendTo(wrp);
+		ee`<section class="dm-npc__batch-rollbar" aria-label="Batch roll setup">
+			<div class="dm-npc__batch-controls">
+				<label><span>Roll</span>${selType}</label>
+				${selKey ? ee`<label><span>Using</span>${selKey}</label>` : null}
+				${btnRoll}
+			</div>
+			<span class="dm-npc__batch-roll-help">${selectedCount} ${selectedCount === 1 ? "NPC" : "NPCs"} will roll</span>
+		</section>`.appendTo(wrp);
 	}
 
 	_renderMembers ({batch, npcs, wrp}) {
@@ -106,10 +111,12 @@ export class NpcTrackerBatch {
 		cbAll.disabled = batch.isRolling || !npcs.length;
 		cbAll.onn("change", evt => this._fnToggleAll(evt.currentTarget.checked));
 
-		const wrpMembers = ee`<section class="dm-npc__batch-members">
-			<div class="dm-npc__batch-members-header"><label>${cbAll}<strong>Scope members</strong></label></div>
+		const wrpMembers = ee`<details class="dm-npc__batch-members" ${batch.isMembersExpanded ? "open" : ""}>
+			<summary class="dm-npc__batch-members-header"><strong>Targets</strong><span>${selectedCount} of ${npcs.length} selected</span></summary>
+			<div class="dm-npc__batch-select-all"><label>${cbAll}<span>Select all in scope</span></label></div>
 			<div class="dm-npc__batch-member-list" role="list"></div>
-		</section>`;
+		</details>`;
+		wrpMembers.onn("toggle", () => batch.isMembersExpanded = wrpMembers.open);
 		const list = wrpMembers.querySelector(".dm-npc__batch-member-list");
 		npcs.forEach(npc => {
 			const cb = ee`<input type="checkbox">`;
@@ -126,6 +133,18 @@ export class NpcTrackerBatch {
 		wrpMembers.appendTo(wrp);
 	}
 
+	_renderEncounterOperations ({batch, selectedCount, hasHpUndo, wrp}) {
+		const wrpOperations = ee`<details class="dm-npc__batch-operations" ${batch.isOperationsExpanded ? "open" : ""}>
+			<summary><strong>Encounter actions</strong><span>HP and conditions for selected NPCs</span></summary>
+			<div class="dm-npc__batch-operations-body"></div>
+		</details>`;
+		wrpOperations.onn("toggle", () => batch.isOperationsExpanded = wrpOperations.open);
+		const body = wrpOperations.querySelector(".dm-npc__batch-operations-body");
+		this._renderHpControls({batch, selectedCount, hasHpUndo, wrp: body});
+		this._renderConditionControls({batch, selectedCount, wrp: body});
+		wrpOperations.appendTo(wrp);
+	}
+
 	_renderHpControls ({batch, selectedCount, hasHpUndo, wrp}) {
 		const input = ee`<input class="ve-form-control ve-input-xs dm-npc__batch-hp-input" type="text" placeholder="-30, +12, =15, or 8d6" aria-label="Batch HP expression">`;
 		const cbHalf = ee`<input type="checkbox" aria-label="Apply half value">`;
@@ -136,7 +155,7 @@ export class NpcTrackerBatch {
 			.onn("click", () => this._fnUndoHp());
 		btnUndo.disabled = batch.isRolling || !hasHpUndo;
 
-		ee`<section class="dm-npc__batch-operation">
+		ee`<section class="dm-npc__batch-operation dm-npc__batch-operation--hp">
 			<div><strong>Hit points</strong><span class="dm-npc__batch-operation-help">Unsigned values deal damage; damage consumes temporary HP first.</span></div>
 			<div class="dm-npc__batch-operation-controls">${input}<label class="dm-npc__batch-half">${cbHalf}<span>Half</span></label>${btnApply}${btnUndo}</div>
 		</section>`.appendTo(wrp);
@@ -155,7 +174,7 @@ export class NpcTrackerBatch {
 			.onn("click", () => this._fnUpdateCondition({condition: select.value, isAdd: false}));
 		btnAdd.disabled = btnRemove.disabled = batch.isRolling || !selectedCount;
 
-		ee`<section class="dm-npc__batch-operation">
+		ee`<section class="dm-npc__batch-operation dm-npc__batch-operation--conditions">
 			<div><strong>Conditions</strong><span class="dm-npc__batch-operation-help">Apply or remove a standard condition for every selected NPC.</span></div>
 			<div class="dm-npc__batch-operation-controls">${select}${btnAdd}${btnRemove}</div>
 		</section>`.appendTo(wrp);
