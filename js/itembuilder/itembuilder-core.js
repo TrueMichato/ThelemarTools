@@ -1,5 +1,6 @@
 import {CharacterSheetMaterials} from "../charactersheet/charactersheet-materials.js";
 import {
+	getAggregatedUpgradeEffects,
 	getEligibleUpgrades,
 	getGemstoneDescriptor,
 	isSocketable,
@@ -135,39 +136,7 @@ function _increaseDamageDie (damageDie, steps = 1) {
 	});
 }
 
-function _getUpgradeEffects (upgrades) {
-	const out = {
-		bonusWeaponAttack: 0,
-		bonusWeaponDamage: 0,
-		bonusSpellAttack: 0,
-		bonusSpellSaveDc: 0,
-		critThresholdReduction: 0,
-		damageDieIncrease: 0,
-		tags: [],
-		notes: [],
-	};
-
-	for (const upgrade of upgrades || []) {
-		const name = _key(upgrade.name);
-		if (name === "balanced") out.bonusWeaponAttack++;
-		if (name.startsWith("wounding:")) out.bonusWeaponDamage++;
-		if (name.startsWith("critical:")) out.critThresholdReduction++;
-		if (name === "superior") out.damageDieIncrease++;
-		if (name === "masterwork") {
-			out.bonusWeaponAttack++;
-			out.bonusWeaponDamage++;
-		}
-		if (name === "enchanted") out.bonusSpellAttack++;
-		if (name === "arcane") out.bonusSpellSaveDc++;
-		if (["silvered", "magical", "runic"].includes(name)) out.tags.push(name.toTitleCase ? name.toTitleCase() : `${name[0].toUpperCase()}${name.slice(1)}`);
-		if (name === "saw-toothed") out.notes.push("Saw-toothed: +1d4 slashing damage (no effect against constructs or undead).");
-		if (name === "brutal") out.notes.push("Brutal: reroll maximum weapon damage dice and add them to the total.");
-		if (name === "flanged") out.notes.push("Flanged: hits can cumulatively reduce medium or heavy armor AC.");
-	}
-	return out;
-}
-
-function _getGeneratedEntries ({material, upgrades, gemstone}) {
+function _getGeneratedEntries ({material, upgrades, gemstone, upgradeCatalog}) {
 	const out = [];
 	if (material) {
 		out.push({
@@ -184,7 +153,7 @@ function _getGeneratedEntries ({material, upgrades, gemstone}) {
 		});
 	}
 	if (gemstone) {
-		const descriptor = getGemstoneDescriptor(gemstone);
+		const descriptor = getGemstoneDescriptor(gemstone, {catalog: upgradeCatalog});
 		out.push({
 			type: "entries",
 			name: `${_GENERATED_ENTRY_PREFIX} Gem - ${gemstone.name}`,
@@ -380,8 +349,19 @@ export class ItemBuilderCore {
 			delete out._materialDegradation;
 		}
 
-		const upgradeEffects = _getUpgradeEffects(upgrades);
-		for (const prop of ["bonusWeaponAttack", "bonusWeaponDamage", "bonusSpellAttack", "bonusSpellSaveDc"]) {
+		const upgradeEffects = getAggregatedUpgradeEffects({appliedUpgrades: upgrades}, {catalog: catalogs.upgrades});
+		for (const prop of [
+			"bonusWeaponAttack",
+			"bonusWeaponDamage",
+			"bonusSpellAttack",
+			"bonusSpellSaveDc",
+			"bonusAc",
+			"bonusSavingThrow",
+			"bonusAbilityCheck",
+			"bonusProficiencyBonus",
+			"bonusSavingThrowConcentration",
+			"bonusSpellDamage",
+		]) {
 			if (upgradeEffects[prop]) out[prop] = (Number(out[prop]) || 0) + upgradeEffects[prop];
 		}
 		if (upgradeEffects.critThresholdReduction) out.critThreshold = Math.max(2, (Number(out.critThreshold) || 20) - upgradeEffects.critThresholdReduction);
@@ -389,18 +369,29 @@ export class ItemBuilderCore {
 			out.dmg1 = _increaseDamageDie(out.dmg1, upgradeEffects.damageDieIncrease);
 			out.dmg2 = _increaseDamageDie(out.dmg2, upgradeEffects.damageDieIncrease);
 		}
-		if (upgradeEffects.tags.length || upgradeEffects.notes.length) {
+		if (upgradeEffects.tags.length || upgradeEffects.notes.length || upgradeEffects.effects.length) {
 			out.effects = _mergeUnique(
 				out.effects,
 				[
 					...upgradeEffects.tags.map(tag => ({type: "itemTag", tag})),
 					...upgradeEffects.notes.map(note => ({type: "note", note})),
+					...upgradeEffects.effects,
 				],
 			);
 		}
+		if (upgradeEffects.itemPowers.length) out.itemPowers = _mergeUnique(out.itemPowers, upgradeEffects.itemPowers, it => it.id || it.name);
+		if (upgradeEffects.attachedSpells.length) out.attachedSpells = _mergeUnique(out.attachedSpells, upgradeEffects.attachedSpells, it => String(it).toLowerCase());
+		if (Number.isFinite(Number(upgradeEffects.charges))) out.charges = Math.max(Number(out.charges) || 0, Number(upgradeEffects.charges));
+		if (upgradeEffects.recharge) out.recharge = upgradeEffects.recharge;
+		if (upgradeEffects.rechargeAmount) out.rechargeAmount = upgradeEffects.rechargeAmount;
+		if (upgradeEffects.reqAttune) out.reqAttune = out.reqAttune || upgradeEffects.reqAttune;
+		if (upgradeEffects.focus === true) out.focus = true;
+		else if (upgradeEffects.focus?.length && out.focus !== true) out.focus = _mergeUnique(out.focus, upgradeEffects.focus, it => String(it).toLowerCase());
+		if (upgradeEffects.ability) out.ability = {...(out.ability || {}), ..._copy(upgradeEffects.ability)};
+		if (upgradeEffects.modifySpeed) out.modifySpeed = {...(out.modifySpeed || {}), ..._copy(upgradeEffects.modifySpeed)};
 
 		if (gemstone) {
-			const descriptor = getGemstoneDescriptor(gemstone);
+			const descriptor = getGemstoneDescriptor(gemstone, {catalog: catalogs.upgrades});
 			if (descriptor?.effects?.length) out.effects = _mergeUnique(out.effects, descriptor.effects);
 			if (descriptor?.powers?.length) out.itemPowers = _mergeUnique(out.itemPowers, descriptor.powers, it => it.id || it.name);
 			if (descriptor?.resource?.key === "charges" && Number.isFinite(Number(descriptor.resource.max))) {
@@ -412,7 +403,7 @@ export class ItemBuilderCore {
 		}
 
 		const authoredEntries = (out.entries || []).filter(entry => !(entry?.name || "").startsWith(_GENERATED_ENTRY_PREFIX));
-		out.entries = [...authoredEntries, ..._getGeneratedEntries({material, upgrades, gemstone})];
+		out.entries = [...authoredEntries, ..._getGeneratedEntries({material, upgrades, gemstone, upgradeCatalog: catalogs.upgrades})];
 		if (!out.entries.length) delete out.entries;
 		return out;
 	}
@@ -468,7 +459,7 @@ export class ItemBuilderCore {
 		const original = normalized.materialized?.item || {};
 		const material = legacyResolution.material;
 		const upgrades = legacyResolution.upgrades.filter(Boolean);
-		const upgradeEffects = _getUpgradeEffects(upgrades);
+		const upgradeEffects = getAggregatedUpgradeEffects({appliedUpgrades: upgrades}, {catalog: []});
 		const materialEffects = material
 			? CharacterSheetMaterials.getMaterialEffects(
 				{...legacyResolution.preset, ...original, material: normalized.materialized.material},
@@ -606,7 +597,7 @@ export class ItemBuilderCore {
 			add("value", "value", "the material price calculation rounds to whole copper pieces and can collapse distinct authored values");
 		}
 
-		const gemstoneDescriptor = getGemstoneDescriptor(legacyResolution.gemstone);
+		const gemstoneDescriptor = getGemstoneDescriptor(legacyResolution.gemstone, {catalog: []});
 		const isGemChargeProjection = (
 			gemstoneDescriptor?.resource?.key === "charges"
 			&& Number.isFinite(Number(gemstoneDescriptor.resource.max))
@@ -718,7 +709,7 @@ export class ItemBuilderCore {
 		authored.entries = (authored.entries || []).filter(entry => !(entry?.name || "").startsWith(_GENERATED_ENTRY_PREFIX));
 		const oldMaterial = legacyResolution.material;
 		const oldUpgrades = legacyResolution.upgrades.filter(Boolean);
-		const oldUpgradeEffects = _getUpgradeEffects(oldUpgrades);
+		const oldUpgradeEffects = getAggregatedUpgradeEffects({appliedUpgrades: oldUpgrades}, {catalog: []});
 		const materialContext = {...original, material: normalized.materialized.material};
 		const oldMaterialEffects = oldMaterial
 			? CharacterSheetMaterials.getMaterialEffects(materialContext, oldMaterial)
@@ -786,7 +777,7 @@ export class ItemBuilderCore {
 		]);
 
 		const oldGemstone = legacyResolution.gemstone;
-		const oldGemDescriptor = getGemstoneDescriptor(oldGemstone);
+		const oldGemDescriptor = getGemstoneDescriptor(oldGemstone, {catalog: []});
 		authored.effects = _removeMatching(authored.effects, oldGemDescriptor?.effects);
 		authored.itemPowers = _removeMatching(authored.itemPowers, oldGemDescriptor?.powers, it => it.id || it.name);
 		if (!authored.effects?.length) delete authored.effects;

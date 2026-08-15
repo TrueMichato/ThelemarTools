@@ -31,15 +31,32 @@ const _EFFECT_FIELDS = {
 const _copy = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const _key = value => String(value ?? "").trim().toLowerCase();
 
+export function getCraftingMaterialPresetCatalog ({siteMaterials = [], brewMaterials = [], arcadiaItems = []} = {}) {
+	return [
+		...CraftingWorkbenchCore.dedupe([...siteMaterials, ...brewMaterials]).map(entity => ({kind: "material", entity})),
+		...CraftingWorkbenchCore.dedupe(arcadiaItems).map(entity => ({kind: "arcadia", entity})),
+	];
+}
+
 export class CraftingMaterialBuilder extends CraftingWorkbenchBuilderBase {
 	constructor () {
 		super({prop: "craftingMaterial"});
 		this._arcadiaCatalog = [];
+		this._presetCatalog = [];
 	}
 
 	async _pInit () {
-		const data = await DataUtil.loadRawJSON("data/items-variant-components-ar8.json");
-		this._arcadiaCatalog = CraftingWorkbenchCore.dedupe(data.item || []);
+		const [arcadiaData, materialData, brew] = await Promise.all([
+			DataUtil.loadRawJSON("data/items-variant-components-ar8.json"),
+			DataUtil.craftingMaterial?.loadJSON?.() || {},
+			globalThis.BrewUtil2?.pGetBrewProcessed?.() || {},
+		]);
+		this._arcadiaCatalog = CraftingWorkbenchCore.dedupe(arcadiaData.item || []);
+		this._presetCatalog = getCraftingMaterialPresetCatalog({
+			siteMaterials: materialData.craftingMaterial,
+			brewMaterials: brew.craftingMaterial,
+			arcadiaItems: this._arcadiaCatalog,
+		});
 	}
 
 	static getPreviewEntity (prop, entity) {
@@ -95,20 +112,27 @@ export class CraftingMaterialBuilder extends CraftingWorkbenchBuilderBase {
 		});
 	}
 
-	async _pChooseArcadiaPreset () {
-		if (!this._arcadiaCatalog.length) return JqueryUtil.doToast({type: "warning", content: "No Arcadia 8 variant components are available."});
+	async _pChoosePreset () {
+		if (!this._presetCatalog.length) return JqueryUtil.doToast({type: "warning", content: "No crafting material presets are available."});
 		const selected = await InputUiUtil.pGetUserEnum({
-			title: "Start from Arcadia 8 Component",
-			values: this._arcadiaCatalog,
-			fnDisplay: it => `${it.name} (${Parser.sourceJsonToAbv(it.source)})`,
+			title: "Start from Crafting Material",
+			values: this._presetCatalog,
+			fnDisplay: it => `${it.entity.name} (${Parser.sourceJsonToAbv(it.entity.source)})${it.kind === "arcadia" ? " \u00b7 Variant component" : ""}`,
 			isResolveItem: true,
 		});
 		if (!selected) return;
-		return this.pHandleLoadExistingData(this.constructor.getDraftFromArcadiaPreset(selected, {source: this._ui.source}));
+		const entity = selected.kind === "arcadia"
+			? this.constructor.getDraftFromArcadiaPreset(selected.entity, {source: this._ui.source})
+			: selected.entity;
+		return this.pHandleLoadExistingData(entity);
+	}
+
+	async _pChooseArcadiaPreset () {
+		return this._pChoosePreset();
 	}
 
 	async pHandleClickLoadExisting () {
-		return this._pChooseArcadiaPreset();
+		return this._pChoosePreset();
 	}
 
 	_getStageDefinitions () {
@@ -203,12 +227,12 @@ export class CraftingMaterialBuilder extends CraftingWorkbenchBuilderBase {
 	_renderBaseStage ({wrp, cb}) {
 		const preset = ee`<section class="mkbru_cw__section mkbru_cw__preset">
 			<div>
-				<h3>Arcadia 8 preset</h3>
-				<p class="ve-muted">Copy an official component as a starting point. The reference file remains read-only, and your selected homebrew source is retained.</p>
+				<h3>Crafting catalog preset</h3>
+				<p class="ve-muted">Start from core data, installed homebrew, or an Arcadia 8 variant component. The published source stays visible while your copy is saved under the active homebrew source.</p>
 			</div>
-			<button class="ve-btn ve-btn-default ve-btn-sm" type="button">Start from Arcadia 8 component</button>
+			<button class="ve-btn ve-btn-default ve-btn-sm" type="button">Choose catalog preset</button>
 		</section>`.appendTo(wrp);
-		preset.querySelector("button").addEventListener("click", () => this._pChooseArcadiaPreset());
+		preset.querySelector("button").addEventListener("click", () => this._pChoosePreset());
 
 		const section = ee`<section class="mkbru_cw__section">
 			<h3>Identity</h3>
@@ -216,7 +240,7 @@ export class CraftingMaterialBuilder extends CraftingWorkbenchBuilderBase {
 		</section>`.appendTo(wrp);
 		this._renderText({wrp: section, label: "Name", object: this._draft, prop: "name", cb});
 		this._selSource = BuilderUi.getStateIptEnum(
-			"Source",
+			"Saved under",
 			cb,
 			this._draft,
 			{vals: this._sourcesCache, fnDisplay: Parser.sourceJsonToFull, nullable: false},

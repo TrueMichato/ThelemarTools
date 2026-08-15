@@ -29,6 +29,10 @@ function _getTypeLabel (type) {
 	return _ITEM_TYPE_LABELS[abbreviation] || abbreviation || "Unknown type";
 }
 
+function _getSourceLabel (source) {
+	return source ? Parser.sourceJsonToFull(source) || source : "Unknown source";
+}
+
 function _getJsonErrorMessage (error, value) {
 	const message = error?.message || "Invalid JSON.";
 	const position = Number(message.match(/position\s+(\d+)/i)?.[1]);
@@ -139,7 +143,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 				this._draft.item.name = nameInput.val().trim();
 				this._doUpdate();
 			});
-		const sourceSelect = ee`<select class="ve-form-control" aria-label="Homebrew source">
+		const sourceSelect = ee`<select class="ve-form-control" aria-label="Saved under homebrew source">
 			<option value="">Choose source</option>
 			${BrewUtil2.getSources().map(source => `<option value="${source.json.qq()}">${source.full.qq()}</option>`)}
 		</select>`.val(this._draft.item.source)
@@ -158,7 +162,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 			</div>
 			<div class="dm-item-builder__identity">
 				<label><span>Item name</span>${nameInput}</label>
-				<label><span>Homebrew source</span>${sourceSelect}</label>
+				<label><span>Saved under</span>${sourceSelect}</label>
 			</div>
 			<div class="dm-item-builder__summary-composition">
 				<strong>Composition</strong>
@@ -189,7 +193,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 				this._draft.item.name = nameInput.val().trim();
 				this._doUpdate();
 			});
-		const sourceSelect = ee`<select class="ve-form-control" aria-label="Homebrew source">
+		const sourceSelect = ee`<select class="ve-form-control" aria-label="Saved under homebrew source">
 			<option value="">Choose source</option>
 			${BrewUtil2.getSources().map(source => `<option value="${source.json.qq()}">${source.full.qq()}</option>`)}
 		</select>`.val(this._draft.item.source)
@@ -216,6 +220,17 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 			catalogs: this._catalogs,
 			onSelect: meta => this._handleCompositionSelect(meta),
 		}).render({wrp: wrpPicker});
+		const wrpStages = ee`<nav class="dm-item-builder__stages" aria-label="Item Forge stages"></nav>`;
+		[
+			["Base", "base"],
+			["Composition", "composition"],
+			["Details", "details"],
+			["Review & Save", "review"],
+		].forEach(([label, id], ix) => {
+			ee`<button class="dm-item-builder__stage-link"><span>${ix + 1}</span>${label}</button>`
+				.onn("click", () => wrp.querySelector(`#dm-item-builder-${id}`)?.scrollIntoView({behavior: "smooth", block: "start"}))
+				.appendTo(wrpStages);
+		});
 
 		ee`<div class="dm-item-builder__content ${isFocused ? "dm-item-builder__content--focused" : ""}">
 			<div class="dm-item-builder__header">
@@ -225,19 +240,32 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 				</div>
 				<div class="dm-item-builder__actions">${btnAdvanced}${btnReset}</div>
 			</div>
-			<div class="dm-item-builder__identity">
-				<label><span>Item name</span>${nameInput}</label>
-				<label><span>Homebrew source</span>${sourceSelect}</label>
-			</div>
-			<div class="dm-item-builder__step">
-				<div><span class="dm-item-builder__step-name">Base item</span><span class="dm-item-builder__muted">${(this._draft.preset ? `${this._draft.preset.name} (${this._draft.preset.source})` : "Start from any catalog item").qq()}</span></div>
-				${btnPreset}
-			</div>
-			${this._getSelectedCompositionElement()}
-			${wrpPicker}
-			${this._getValidationElement(validation)}
-			<div class="dm-item-builder__preview"><table class="ve-w-100 ve-stats" aria-label="Item preview">${Renderer.item.getCompactRenderedString(item)}</table></div>
-			<div class="dm-item-builder__footer">${btnClose}${btnHandoff}${btnSave}</div>
+			${wrpStages}
+			<section class="dm-item-builder__stage" id="dm-item-builder-base">
+				<header><span>1</span><div><strong>Choose a base</strong><small>Start with trusted core or installed homebrew item data.</small></div></header>
+				<div class="dm-item-builder__step">
+					<div><span class="dm-item-builder__step-name">Current base</span><span class="dm-item-builder__muted">${(this._draft.preset ? `${this._draft.preset.name} \u00b7 Published in ${_getSourceLabel(this._draft.preset.source)}` : "No catalog base selected").qq()}</span></div>
+					${btnPreset}
+				</div>
+			</section>
+			<section class="dm-item-builder__stage" id="dm-item-builder-composition">
+				<header><span>2</span><div><strong>Compose the item</strong><small>Compare compatible materials, upgrades, and gemstones by source and effect.</small></div></header>
+				${this._getSelectedCompositionElement()}
+				${wrpPicker}
+			</section>
+			<section class="dm-item-builder__stage" id="dm-item-builder-details">
+				<header><span>3</span><div><strong>Name and publish</strong><small>Set the item identity. Component sources remain attached to their references.</small></div></header>
+				<div class="dm-item-builder__identity">
+					<label><span>Item name</span>${nameInput}</label>
+					<label><span>Saved under</span>${sourceSelect}</label>
+				</div>
+			</section>
+			<section class="dm-item-builder__stage dm-item-builder__stage--review" id="dm-item-builder-review">
+				<header><span>4</span><div><strong>Review and save</strong><small>Confirm the resolved result before writing reference-only item data.</small></div></header>
+				${this._getValidationElement(validation)}
+				<div class="dm-item-builder__preview"><table class="ve-w-100 ve-stats" aria-label="Item preview">${Renderer.item.getCompactRenderedString(item)}</table></div>
+				<div class="dm-item-builder__footer">${btnClose}${btnHandoff}${btnSave}</div>
+			</section>
 		</div>`.appendTo(wrp);
 	}
 

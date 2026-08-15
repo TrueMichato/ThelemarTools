@@ -1,4 +1,9 @@
-export const GEMSTONE_EFFECT_REGISTRY = Object.freeze({
+const _copy = value => value == null ? value : JSON.parse(JSON.stringify(value));
+const _key = value => String(value || "").trim().toLowerCase();
+const _uid = value => value?.name ? `${_key(value.name)}|${_key(value.source)}` : "";
+const _toTitleCase = value => value?.toTitleCase ? value.toTitleCase() : `${value[0].toUpperCase()}${value.slice(1)}`;
+
+const _GEMSTONE_EFFECTS_TGTT = Object.freeze({
 	alchemist: {summary: "+2 HP when drinking a potion of healing", effects: [{type: "healingPotionBonus", value: 2}]},
 	mariner: {summary: "Host weapon ignores underwater attack disadvantage", effects: [{type: "removeDisadvantage", target: "attack", conditional: "underwater"}]},
 	thief: {summary: "1/day: Reroll a failed Dexterity check", resource: {key: "uses", name: "Thief Gemstone", max: 1, recharge: "dawn"}},
@@ -40,7 +45,247 @@ export const GEMSTONE_EFFECT_REGISTRY = Object.freeze({
 	volant: {summary: "Hover flight speed equals twice walking speed", effects: [{type: "flightSpeedMultiplier", speed: "walk", value: 2, hover: true}]},
 });
 
-const _copy = value => value == null ? value : JSON.parse(JSON.stringify(value));
+// Kept for compatibility with consumers which enumerate the original TGTT names.
+export const GEMSTONE_EFFECT_REGISTRY = _GEMSTONE_EFFECTS_TGTT;
+
+const _UPGRADE_EFFECT_DEFAULTS = Object.freeze({
+	bonusWeaponAttack: 0,
+	bonusWeaponDamage: 0,
+	critThresholdReduction: 0,
+	bonusSpellAttack: 0,
+	bonusSpellSaveDc: 0,
+	damageDieIncrease: 0,
+	tags: [],
+	notes: [],
+	bonusDamageDice: null,
+	bonusDamageType: null,
+	effects: [],
+	itemPowers: [],
+	attachedSpells: [],
+});
+
+const _ARMOR_EFFECT_DEFAULTS = Object.freeze({
+	muffled: false,
+	reinforced: false,
+	critDamageReduction: 0,
+	armorProofingTier: 0,
+	spiked: false,
+	breathable: false,
+	insulated: false,
+	climbingHarness: false,
+	lockingJoints: false,
+	quickRelease: false,
+	decorated: false,
+	runic: false,
+	burnished: false,
+	camouflaged: false,
+	formFitted: false,
+});
+
+let _itemUpgradeCatalog = [];
+
+function _getEntryText (value) {
+	if (typeof value === "string") return value;
+	if (Array.isArray(value)) return value.map(_getEntryText).filter(Boolean).join(" ");
+	if (!value || typeof value !== "object") return "";
+	return _getEntryText(value.entries || value.entry || value.items);
+}
+
+function _getNumeric (value) {
+	if (value == null || value === "") return 0;
+	const out = Number(value);
+	return Number.isFinite(out) ? out : 0;
+}
+
+function _mergeUnique (base, additions, getKey = it => JSON.stringify(it)) {
+	const out = _copy(base || []);
+	const seen = new Set(out.map(getKey));
+	for (const addition of additions || []) {
+		const key = getKey(addition);
+		if (seen.has(key)) continue;
+		seen.add(key);
+		out.push(_copy(addition));
+	}
+	return out;
+}
+
+function _findByRef (ref, catalog = _itemUpgradeCatalog) {
+	if (!ref?.name) return null;
+	const name = _key(ref.name);
+	const source = _key(ref.source);
+	const matches = (catalog || []).filter(it => _key(it?.name) === name);
+	if (source) return matches.find(it => _key(it.source) === source) || null;
+	return matches.length === 1 ? matches[0] : null;
+}
+
+function _getResolvedEntity (value, catalog) {
+	if (!value?.name) return null;
+	const resolved = _findByRef(value, catalog);
+	if (resolved) return resolved;
+	const hasEntityData = value.upgradeType?.length
+		|| value.entries?.length
+		|| value.effects?.length
+		|| value.itemPowers?.length;
+	return hasEntityData ? value : null;
+}
+
+function _isLegacySource (value, source) {
+	const actual = _key(value?.source);
+	return actual ? actual === _key(source) : true;
+}
+
+function _getBuiltInUpgradeDescriptor (upgrade) {
+	if (!upgrade?.name || !_isLegacySource(upgrade, "TCAH")) return null;
+	const name = _key(upgrade.name);
+	const out = {};
+	if (name === "balanced") out.bonusWeaponAttack = 1;
+	if (name.startsWith("wounding:")) out.bonusWeaponDamage = 1;
+	if (name.startsWith("critical:")) out.critThresholdReduction = 1;
+	if (name === "superior") out.damageDieIncrease = 1;
+	if (name === "masterwork") {
+		out.bonusWeaponAttack = 1;
+		out.bonusWeaponDamage = 1;
+	}
+	if (name === "enchanted") out.bonusSpellAttack = 1;
+	if (name === "arcane") out.bonusSpellSaveDc = 1;
+	if (["silvered", "magical", "runic"].includes(name)) out.tags = [_toTitleCase(name)];
+	if (name === "saw-toothed") {
+		out.bonusDamageDice = "1d4";
+		out.bonusDamageType = "slashing";
+		out.notes = ["Saw-toothed: +1d4 slashing damage (no effect vs constructs/undead)"];
+	}
+	if (name === "brutal") out.notes = ["Brutal: Reroll max damage dice and add to total (repeats if max rolled again)"];
+	if (name === "flanged") out.notes = ["Flanged: On hit, target\u2019s medium/heavy armor takes cumulative \u22121 AC"];
+
+	const armor = {};
+	if (name === "muffled") armor.muffled = true;
+	if (name === "reinforced") {
+		armor.reinforced = true;
+		armor.critDamageReduction = 3;
+	}
+	if (name === "spiked") armor.spiked = true;
+	if (name === "breathable") armor.breathable = true;
+	if (name === "insulated") armor.insulated = true;
+	if (name === "climbing harness") armor.climbingHarness = true;
+	if (name === "locking joints") armor.lockingJoints = true;
+	if (name === "quick-release clasps") armor.quickRelease = true;
+	if (name === "decorated") armor.decorated = true;
+	if (name === "runic") armor.runic = true;
+	if (name === "burnished") armor.burnished = true;
+	if (name === "camouflaged") armor.camouflaged = true;
+	if (name === "form fitted") armor.formFitted = true;
+	if (name.startsWith("armor proofing")) {
+		const tier = Number(name.match(/(\d)(?:st|nd|rd)/)?.[1]);
+		if (tier) armor.armorProofingTier = tier;
+	}
+	if (Object.keys(armor).length) out.armor = armor;
+	return Object.keys(out).length ? out : null;
+}
+
+function _getStructuredUpgradeDescriptor (entity) {
+	if (!entity) return null;
+	const out = {};
+	for (const prop of [
+		"bonusWeaponAttack",
+		"bonusWeaponDamage",
+		"bonusSpellAttack",
+		"bonusSpellSaveDc",
+		"critThresholdReduction",
+		"damageDieIncrease",
+	]) {
+		if (entity[prop] != null) out[prop] = _getNumeric(entity[prop]);
+	}
+	if (entity.bonusWeapon != null) {
+		out.bonusWeaponAttack = (out.bonusWeaponAttack || 0) + _getNumeric(entity.bonusWeapon);
+		out.bonusWeaponDamage = (out.bonusWeaponDamage || 0) + _getNumeric(entity.bonusWeapon);
+	}
+	for (const prop of [
+		"bonusAc",
+		"bonusSavingThrow",
+		"bonusAbilityCheck",
+		"bonusProficiencyBonus",
+		"bonusSavingThrowConcentration",
+		"bonusSpellDamage",
+	]) {
+		if (entity[prop] != null) out[prop] = _getNumeric(entity[prop]);
+	}
+	if (entity.bonusDamageDice) out.bonusDamageDice = entity.bonusDamageDice;
+	if (entity.bonusDamageType) out.bonusDamageType = entity.bonusDamageType;
+	if (entity.tags?.length) out.tags = _copy(entity.tags);
+	if (entity.notes?.length) out.notes = _copy(entity.notes);
+	if (entity.effects?.length) out.effects = _copy(entity.effects);
+	if (entity.itemPowers?.length) out.itemPowers = _copy(entity.itemPowers);
+	if (entity.attachedSpells?.length) out.attachedSpells = _copy(entity.attachedSpells);
+	for (const prop of ["charges", "recharge", "rechargeAmount", "reqAttune", "focus", "ability", "modifySpeed"]) {
+		if (entity[prop] != null) out[prop] = _copy(entity[prop]);
+	}
+	return Object.keys(out).length ? out : null;
+}
+
+function _mergeUpgradeDescriptor (base, addition, {isNumericOverride = false} = {}) {
+	const out = _copy(base || {});
+	for (const prop of [
+		"bonusWeaponAttack",
+		"bonusWeaponDamage",
+		"bonusSpellAttack",
+		"bonusSpellSaveDc",
+		"critThresholdReduction",
+		"damageDieIncrease",
+		"bonusAc",
+		"bonusSavingThrow",
+		"bonusAbilityCheck",
+		"bonusProficiencyBonus",
+		"bonusSavingThrowConcentration",
+		"bonusSpellDamage",
+	]) {
+		if (!Object.hasOwn(addition || {}, prop)) continue;
+		out[prop] = isNumericOverride
+			? addition[prop]
+			: (out[prop] || 0) + addition[prop];
+	}
+	for (const prop of ["tags", "notes", "effects", "itemPowers", "attachedSpells"]) {
+		if (addition?.[prop]?.length) out[prop] = _mergeUnique(out[prop], addition[prop], it => prop === "itemPowers" ? (it.id || it.name) : JSON.stringify(it));
+	}
+	for (const prop of ["bonusDamageDice", "bonusDamageType", "charges", "recharge", "rechargeAmount", "reqAttune", "focus", "ability", "modifySpeed"]) {
+		if (addition?.[prop] != null) out[prop] = _copy(addition[prop]);
+	}
+	if (addition?.armor) out.armor = {...(out.armor || {}), ..._copy(addition.armor)};
+	return out;
+}
+
+function _getStructuredGemstoneDescriptor (entity) {
+	if (!entity) return null;
+	const structured = _getStructuredUpgradeDescriptor(entity) || {};
+	const descriptor = {
+		...structured,
+		...(entity.gemstoneDescriptor || {}),
+	};
+	if (!descriptor.summary) {
+		const text = _getEntryText(entity.entries).replace(/\{@\w+\s+([^}|]+)(?:\|[^}]*)?}/g, "$1").replace(/\s+/g, " ").trim();
+		if (text) descriptor.summary = text.length > 180 ? `${text.slice(0, 177).trim()}...` : text;
+	}
+	if (entity.resource) descriptor.resource = _copy(entity.resource);
+	if (entity.trigger) descriptor.trigger = _copy(entity.trigger);
+	if (entity.rider) descriptor.rider = _copy(entity.rider);
+	if (entity.choices) descriptor.choices = _copy(entity.choices);
+	if (entity.spellStorage) descriptor.spellStorage = _copy(entity.spellStorage);
+	if (entity.requiresAttunement != null) descriptor.requiresAttunement = !!entity.requiresAttunement;
+	if (descriptor.itemPowers?.length && !descriptor.powers?.length) descriptor.powers = descriptor.itemPowers;
+	delete descriptor.itemPowers;
+	return Object.keys(descriptor).length ? descriptor : null;
+}
+
+export function setItemUpgradeCatalog (upgrades = []) {
+	_itemUpgradeCatalog = _copy(upgrades || []);
+}
+
+export function resetItemUpgradeCatalog () {
+	_itemUpgradeCatalog = [];
+}
+
+export function getItemUpgradeCatalog () {
+	return _copy(_itemUpgradeCatalog);
+}
 
 export function isWeapon (item) {
 	return !!(item?.weapon || ["M", "R"].includes(String(item?.type || "").split("|")[0]));
@@ -58,22 +303,76 @@ export function isSocketable (item) {
 	return isWeapon(item) || isArmor(item) || isShield(item);
 }
 
+function _isUpgradeTypeCompatible ({type, item}) {
+	if (type.startsWith("GS:")) return false;
+	if (type.startsWith("WU")) return isWeapon(item);
+	if (type === "AU" || type.startsWith("AU:")) return isArmor(item) || isShield(item);
+	return true;
+}
+
 export function getEligibleUpgrades ({item, upgrades = []}) {
-	const appliedNames = new Set((item?.appliedUpgrades || []).map(it => String(it?.name || "").toLowerCase()));
+	const applied = new Set((item?.appliedUpgrades || []).map(_uid));
+	const appliedLegacyNames = new Set(
+		(item?.appliedUpgrades || [])
+			.filter(it => !it?.source)
+			.map(it => _key(it?.name)),
+	);
 	return upgrades.filter(upgrade => {
-		const upgradeType = upgrade?.upgradeType?.[0] || "";
-		if (upgradeType.startsWith("GS:")) return false;
-		if (appliedNames.has(String(upgrade?.name || "").toLowerCase())) return false;
-		if (upgradeType.startsWith("WU") && !isWeapon(item)) return false;
-		if (upgradeType === "AU" && !isArmor(item) && !isShield(item)) return false;
-		return true;
+		if (applied.has(_uid(upgrade)) || appliedLegacyNames.has(_key(upgrade?.name))) return false;
+		const types = upgrade?.upgradeType || [];
+		if (types.some(type => String(type).startsWith("GS:"))) return false;
+		return !types.length || types.some(type => _isUpgradeTypeCompatible({type: String(type), item}));
 	});
 }
 
-export function getGemstoneDescriptor (gem) {
-	return _copy(GEMSTONE_EFFECT_REGISTRY[String(gem?.name || gem || "").trim().toLowerCase()] || null);
+export function getUpgradeDescriptor (upgrade, {catalog = _itemUpgradeCatalog} = {}) {
+	if (!upgrade?.name) return null;
+	const entity = _getResolvedEntity(upgrade, catalog);
+	const identity = entity || upgrade;
+	const builtIn = _getBuiltInUpgradeDescriptor(identity);
+	const structured = _getStructuredUpgradeDescriptor(entity);
+	const descriptor = _mergeUpgradeDescriptor(builtIn, structured, {isNumericOverride: true});
+	return Object.keys(descriptor).length ? descriptor : null;
+}
+
+export function getAggregatedUpgradeEffects (item, {catalog = _itemUpgradeCatalog} = {}) {
+	let out = _copy(_UPGRADE_EFFECT_DEFAULTS);
+	for (const upgrade of item?.appliedUpgrades || []) {
+		out = _mergeUpgradeDescriptor(out, getUpgradeDescriptor(upgrade, {catalog}));
+	}
+	return out;
+}
+
+export function getAggregatedArmorUpgradeEffects (item, {catalog = _itemUpgradeCatalog} = {}) {
+	const out = _copy(_ARMOR_EFFECT_DEFAULTS);
+	for (const upgrade of item?.appliedUpgrades || []) {
+		const descriptor = getUpgradeDescriptor(upgrade, {catalog});
+		if (!descriptor?.armor) continue;
+		for (const [prop, value] of Object.entries(descriptor.armor)) {
+			if (prop === "armorProofingTier") out[prop] = Math.max(out[prop], Number(value) || 0);
+			else if (prop === "critDamageReduction") out[prop] = Math.max(out[prop], Number(value) || 0);
+			else out[prop] ||= !!value;
+		}
+	}
+	return out;
+}
+
+export function getGemstoneDescriptor (gem, {catalog = _itemUpgradeCatalog} = {}) {
+	if (!gem?.name && typeof gem !== "string") return null;
+	const ref = typeof gem === "string" ? {name: gem} : gem;
+	const entity = _getResolvedEntity(ref, catalog);
+	const identity = entity || ref;
+	const source = _key(identity.source);
+	const builtIn = (!source || source === "tgtt") ? _GEMSTONE_EFFECTS_TGTT[_key(identity.name)] : null;
+	const structured = _getStructuredGemstoneDescriptor(entity);
+	if (!builtIn && !structured) return null;
+	const out = {..._copy(builtIn || {}), ..._copy(structured || {})};
+	for (const prop of ["effects", "powers", "notes"]) {
+		if (builtIn?.[prop]?.length || structured?.[prop]?.length) out[prop] = _mergeUnique(builtIn?.[prop], structured?.[prop], it => prop === "powers" ? (it.id || it.name) : JSON.stringify(it));
+	}
+	return out;
 }
 
 export function getGemstoneRegistryNames () {
-	return Object.keys(GEMSTONE_EFFECT_REGISTRY);
+	return Object.keys(_GEMSTONE_EFFECTS_TGTT);
 }

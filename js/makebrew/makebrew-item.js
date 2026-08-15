@@ -189,6 +189,7 @@ export class ItemBuilder extends BuilderBase {
 		this._doCreateProxies();
 		this._doBindHeaderElements();
 		this._draft = this._draft || ItemBuilderCore.fromItem(this.__state);
+		if (!this._draft.item.source && this._ui?.source) this._draft.item.source = this._ui.source;
 		this._renderInputMain();
 	}
 
@@ -221,10 +222,10 @@ export class ItemBuilder extends BuilderBase {
 		this._resetTabs({tabGroup: "input"});
 		const opts = {hasBorder: true, hasBackground: true};
 		const tabs = this._renderTabs([
-			new TabUiUtil.TabMeta({...opts, name: "Base"}),
-			new TabUiUtil.TabMeta({...opts, name: "Composition"}),
-			new TabUiUtil.TabMeta({...opts, name: "Details"}),
-			new TabUiUtil.TabMeta({...opts, name: "Review & Save"}),
+			new TabUiUtil.TabMeta({...opts, name: "1 Base"}),
+			new TabUiUtil.TabMeta({...opts, name: "2 Composition"}),
+			new TabUiUtil.TabMeta({...opts, name: "3 Details"}),
+			new TabUiUtil.TabMeta({...opts, name: "4 Review & Save"}),
 		], {tabGroup: "input", cbTabChange: this.doUiSave.bind(this)});
 		const [baseTab, compositionTab, detailsTab, reviewTab] = tabs;
 		const wrpTabHeads = ee`<div class="ve-flex-v-center ve-w-100 ve-no-shrink ve-ui-tab__wrp-tab-heads--border mkbru_item__tabs" role="tablist" aria-label="Item creation steps">${tabs.map(it => it.btnTab)}</div>`.appendTo(wrp);
@@ -286,19 +287,31 @@ export class ItemBuilder extends BuilderBase {
 
 		BuilderUi.getStateIptString("Name", cb, this._draft.item, {nullable: false}, "name").appendTo(wrp);
 		this._selSource = BuilderUi.getStateIptEnum(
-			"Source",
+			"Saved under",
 			cb,
 			this._draft.item,
 			{vals: this._sourcesCache, fnDisplay: Parser.sourceJsonToFull, nullable: false},
 			"source",
 		).appendTo(wrp);
 		BuilderUi.getStateIptString("Page", cb, this._draft.item, {}, "page").appendTo(wrp);
-		BuilderUi.getStateIptEnum("Type", cb, this._draft.item, {vals: _ITEM_TYPES, nullable: false, fnDisplay: it => _ITEM_TYPE_LABELS[it] || it}, "type").appendTo(wrp);
+		BuilderUi.getStateIptEnum("Type", () => this._doSync({isRenderInput: true}), this._draft.item, {vals: _ITEM_TYPES, nullable: false, fnDisplay: it => _ITEM_TYPE_LABELS[it] || it}, "type").appendTo(wrp);
 		BuilderUi.getStateIptEnum("Rarity", cb, this._draft.item, {vals: _RARITIES, nullable: false, fnDisplay: it => it.toTitleCase()}, "rarity").appendTo(wrp);
 		BuilderUi.getStateIptString("Attunement", cb, this._draft.item, {nullable: true}, "reqAttune").appendTo(wrp);
 	}
 
 	_renderCompositionTab ({wrp}) {
+		const selected = [
+			this._draft.material ? `Material: ${this._draft.material.name} (${this._draft.material.source})` : null,
+			...this._draft.upgrades.map(it => `Upgrade: ${it.name} (${it.source})`),
+			this._draft.gemstone ? `Gemstone: ${this._draft.gemstone.name} (${this._draft.gemstone.source})` : null,
+		].filter(Boolean);
+		ee`<section class="mkbru_item__composition-summary">
+			<div>
+				<strong>Current composition</strong>
+				<span>${selected.length ? "Selected components appear first in each catalog view." : "Choose a material, upgrades, or a gemstone to shape this item."}</span>
+			</div>
+			<span>${(selected.length ? selected.join(" \u00b7 ") : "No components selected").qq()}</span>
+		</section>`.appendTo(wrp);
 		new ItemCompositionCatalogPicker({
 			draft: this._draft,
 			catalogs: this._catalogs,
@@ -327,29 +340,37 @@ export class ItemBuilder extends BuilderBase {
 	}
 
 	_renderMechanicsTab ({wrp, cb}) {
-		for (const [label, prop] of [
+		const type = String(this._draft.item.type || "").split("|")[0];
+		const isWeapon = ["A", "M", "R"].includes(type);
+		const isArmor = ["HA", "LA", "MA", "S"].includes(type);
+		const fields = [
 			["Weight (lb.)", "weight"],
 			["Value (cp)", "value"],
-			["Armor Class", "ac"],
-			["Dexterity Maximum", "dexterityMax"],
-			["Strength Requirement", "strength"],
-			["Damage", "dmg1"],
-			["Versatile Damage", "dmg2"],
-			["Damage Type", "dmgType"],
-			["Range", "range"],
+			...isArmor ? [
+				["Armor Class", "ac"],
+				["Dexterity Maximum", "dexterityMax"],
+				["Strength Requirement", "strength"],
+				["AC Bonus", "bonusAc"],
+			] : [],
+			...isWeapon ? [
+				["Damage", "dmg1"],
+				["Versatile Damage", "dmg2"],
+				["Damage Type", "dmgType"],
+				["Range", "range"],
+				["Weapon Bonus", "bonusWeapon"],
+				["Weapon Attack Bonus", "bonusWeaponAttack"],
+				["Weapon Damage Bonus", "bonusWeaponDamage"],
+			] : [],
 			["Charges", "charges"],
 			["Recharge", "recharge"],
 			["Recharge Amount", "rechargeAmount"],
-			["Weapon Bonus", "bonusWeapon"],
-			["Weapon Attack Bonus", "bonusWeaponAttack"],
-			["Weapon Damage Bonus", "bonusWeaponDamage"],
-			["AC Bonus", "bonusAc"],
 			["Spell Attack Bonus", "bonusSpellAttack"],
 			["Spell Save DC Bonus", "bonusSpellSaveDc"],
 			["Saving Throw Bonus", "bonusSavingThrow"],
 			["Ability Check Bonus", "bonusAbilityCheck"],
-		]) BuilderUi.getStateIptString(label, cb, this._draft.item, {nullable: true}, prop).appendTo(wrp);
-		BuilderUi.getStateIptStringArray("Properties", cb, this._draft.item, {shortName: "Property"}, "property").appendTo(wrp);
+		];
+		for (const [label, prop] of fields) BuilderUi.getStateIptString(label, cb, this._draft.item, {nullable: true}, prop).appendTo(wrp);
+		if (isWeapon) BuilderUi.getStateIptStringArray("Properties", cb, this._draft.item, {shortName: "Property"}, "property").appendTo(wrp);
 		BuilderUi.getStateIptStringArray("Attached Spells", cb, this._draft.item, {shortName: "Spell UID"}, "attachedSpells").appendTo(wrp);
 		this._renderSpellcastingFocus({wrp, cb});
 	}
@@ -405,16 +426,22 @@ export class ItemBuilder extends BuilderBase {
 		const item = ItemBuilderCore.projectForPreview(this._draft, this._catalogs);
 		const type = _ITEM_TYPE_LABELS[String(this._draft.item.type || "").split("|")[0]] || "Unknown item type";
 		const composition = [
-			this._draft.material?.name ? `Material: ${this._draft.material.name}` : null,
-			this._draft.upgrades.length ? `Upgrades: ${this._draft.upgrades.map(it => it.name).join(", ")}` : null,
-			this._draft.gemstone?.name ? `Gemstone: ${this._draft.gemstone.name}` : null,
+			this._draft.material?.name ? `Material: ${this._draft.material.name} (${this._draft.material.source})` : null,
+			this._draft.upgrades.length ? `Upgrades: ${this._draft.upgrades.map(it => `${it.name} (${it.source})`).join(", ")}` : null,
+			this._draft.gemstone?.name ? `Gemstone: ${this._draft.gemstone.name} (${this._draft.gemstone.source})` : null,
 		].filter(Boolean);
+		const validation = ItemBuilderCore.validate(this._draft, this._catalogs);
+		const btnSave = ee`<button class="ve-btn ve-btn-success mkbru_item__review-save" ${validation.isValid ? "" : "disabled"} aria-disabled="${!validation.isValid}">
+			<span class="glyphicon glyphicon-floppy-disk"></span> Save item
+		</button>`.onn("click", () => this.pDoHandleClickSaveBrew());
 		ee`<section class="mkbru_item__review">
 			<div class="mkbru_item__review-summary">
 				<h3>Review your item</h3>
-				<p><strong>${(this._draft.item.name || "Unnamed item").qq()}</strong> \u00b7 ${type.qq()} \u00b7 ${(this._draft.item.source || "No source").qq()}</p>
+				<p><strong>${(this._draft.item.name || "Unnamed item").qq()}</strong> \u00b7 ${type.qq()}</p>
+				<p><strong>Saved under:</strong> ${(Parser.sourceJsonToFull(this._draft.item.source) || "No source").qq()}</p>
 				<p>${(composition.length ? composition.join(" \u00b7 ") : "No composition options selected.").qq()}</p>
-				<p>Use the Save control above when the validation status is ready.</p>
+				<p>The saved JSON keeps composition references lean; this preview resolves their mechanics.</p>
+				${btnSave}
 			</div>
 			<div class="mkbru_item__review-preview"><table class="ve-w-100 ve-stats" aria-label="Item preview">${Renderer.item.getCompactRenderedString(item)}</table></div>
 		</section>`.appendTo(wrp);

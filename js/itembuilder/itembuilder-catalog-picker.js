@@ -72,6 +72,13 @@ function _getEffectSummary (entity) {
 	return "No catalog effect summary is available.";
 }
 
+function _getEffectKind (row) {
+	const beforeAfter = row.delta !== "No numeric stat change; see the effect summary.";
+	if (beforeAfter) return "mechanical";
+	if (_getEntryText(row.entity?.entries)) return "rules";
+	return "unresolved";
+}
+
 function _findByRef (pool, ref) {
 	const uid = _uid(ref);
 	return (pool || []).find(it => _uid(it) === uid) || ref;
@@ -152,14 +159,19 @@ export function getItemCompositionCatalogRows ({draft, catalogs}) {
 		effectSummary: _getEffectSummary(row.entity),
 		compatibility: _getCompatibility({category: row.category, entity: row.entity, item: draft.item}),
 		delta: _getProjectedDelta({draft, catalogs, ...row}),
+	})).map(row => ({
+		...row,
+		effectKind: _getEffectKind(row),
+		isUnresolved: Object.keys(row.entity || {}).every(prop => ["name", "source"].includes(prop)),
 	}));
 }
 
-export function filterItemCompositionCatalogRows (rows, {search = "", category = "", source = ""} = {}) {
+export function filterItemCompositionCatalogRows (rows, {search = "", category = "", source = "", effect = ""} = {}) {
 	const searchKey = _key(search);
 	return (rows || []).filter(row => {
 		if (category && row.category !== category) return false;
 		if (source && row.entity.source !== source) return false;
+		if (effect && row.effectKind !== effect) return false;
 		if (!searchKey) return true;
 		return [
 			row.entity.name,
@@ -178,7 +190,7 @@ export class ItemCompositionCatalogPicker {
 		this._draft = draft;
 		this._catalogs = catalogs;
 		this._onSelect = onSelect;
-		this._filters = {search: "", category: "", source: ""};
+		this._filters = {search: "", category: "material", source: "", effect: ""};
 	}
 
 	render ({wrp}) {
@@ -188,28 +200,47 @@ export class ItemCompositionCatalogPicker {
 			.sort((a, b) => _getSourceLabel(a).localeCompare(_getSourceLabel(b)));
 		const iptSearch = ee`<input type="search" class="ve-form-control" aria-label="Search composition catalog" placeholder="Search materials, upgrades, and effects...">`
 			.val(this._filters.search);
-		const selCategory = ee`<select class="ve-form-control" aria-label="Filter composition category">
-			<option value="">All categories</option>
-			${Object.entries(_CATEGORY_LABELS).map(([value, label]) => `<option value="${value}">${label}</option>`)}
-		</select>`.val(this._filters.category);
 		const selSource = ee`<select class="ve-form-control" aria-label="Filter composition source">
 			<option value="">All sources</option>
 			${sources.map(source => `<option value="${source.qq()}">${_getSourceLabel(source).qq()}</option>`)}
 		</select>`.val(this._filters.source);
+		const selEffect = ee`<select class="ve-form-control" aria-label="Filter composition effect">
+			<option value="">All effects</option>
+			<option value="mechanical">Mechanical changes</option>
+			<option value="rules">Rules text</option>
+			<option value="unresolved">Unavailable references</option>
+		</select>`.val(this._filters.effect);
+		const wrpCategories = ee`<div class="itembuilder-picker__categories" role="tablist" aria-label="Composition category"></div>`;
 		const wrpRows = ee`<div class="itembuilder-picker__results"></div>`;
 		const status = ee`<div class="itembuilder-picker__count" role="status" aria-live="polite"></div>`;
+		const categoryButtons = Object.entries(_CATEGORY_LABELS).map(([value, label]) => {
+			const count = rows.filter(row => row.category === value).length;
+			return ee`<button class="itembuilder-picker__category" role="tab" aria-selected="false" data-category="${value}">
+				<span>${label}</span><strong>${count}</strong>
+			</button>`
+				.onn("click", () => {
+					this._filters.category = value;
+					renderRows();
+				})
+				.appendTo(wrpCategories);
+		});
 
 		const renderRows = () => {
-			const visible = filterItemCompositionCatalogRows(rows, this._filters);
+			const visible = filterItemCompositionCatalogRows(rows, this._filters)
+				.sort((a, b) => Number(b.isSelected) - Number(a.isSelected) || a.entity.name.localeCompare(b.entity.name));
 			wrpRows.empty();
 			status.txt(`${visible.length} of ${rows.length} compatible choices`);
+			categoryButtons.forEach(btn => {
+				const isActive = btn.attr("data-category") === this._filters.category;
+				btn.attr("aria-selected", `${isActive}`).attr("tabindex", isActive ? "0" : "-1");
+			});
 			if (!visible.length) {
 				const btnClear = ee`<button class="ve-btn ve-btn-default">Clear filters</button>`
 					.onn("click", () => {
-						this._filters = {search: "", category: "", source: ""};
+						this._filters = {search: "", category: "material", source: "", effect: ""};
 						iptSearch.val("");
-						selCategory.val("");
 						selSource.val("");
+						selEffect.val("");
 						renderRows();
 						iptSearch.focuse();
 					});
@@ -223,18 +254,22 @@ export class ItemCompositionCatalogPicker {
 
 			for (const row of visible) {
 				const action = row.isSelected ? "Remove" : row.category === "upgrade" ? "Add" : "Choose";
-				ee`<button class="itembuilder-picker__choice ${row.isSelected ? "itembuilder-picker__choice--selected" : ""}" aria-pressed="${row.isSelected}" aria-label="${action} ${row.entity.name.qq()}">
+				const btnAction = ee`<button class="itembuilder-picker__action" aria-pressed="${row.isSelected}" aria-label="${action} ${row.entity.name.qq()}">${action}</button>`
+					.onn("click", () => this._onSelect({category: row.category, entity: row.entity, isSelected: row.isSelected}));
+				ee`<article class="itembuilder-picker__choice ${row.isSelected ? "itembuilder-picker__choice--selected" : ""}">
 					<span class="itembuilder-picker__choice-head">
 						<strong>${row.entity.name.qq()}</strong>
-						<span>${row.categoryLabel.slice(0, -1).qq()} \u00b7 ${row.sourceLabel.qq()}</span>
+						<span>Published in ${row.sourceLabel.qq()}</span>
 					</span>
-					<span class="itembuilder-picker__effect">${row.effectSummary.qq()}</span>
-					<span class="itembuilder-picker__context">${row.compatibility.qq()}</span>
+					<span class="itembuilder-picker__effect">${row.isUnresolved ? "This reference is unavailable. Reinstall its source to restore mechanics." : row.effectSummary.qq()}</span>
 					<span class="itembuilder-picker__delta">${row.isSelected ? "Without selection" : "Projected change"}: ${row.delta.qq()}</span>
-					<span class="itembuilder-picker__action">${action}</span>
-				</button>`
-					.onn("click", () => this._onSelect({category: row.category, entity: row.entity, isSelected: row.isSelected}))
-					.appendTo(wrpRows);
+					${btnAction}
+					<details class="itembuilder-picker__details">
+						<summary>Compatibility and source details</summary>
+						<span>${row.compatibility.qq()}</span>
+						<span>Reference: ${row.entity.name.qq()}|${(row.entity.source || "unknown").qq()}</span>
+					</details>
+				</article>`.appendTo(wrpRows);
 			}
 		};
 
@@ -242,12 +277,12 @@ export class ItemCompositionCatalogPicker {
 			this._filters.search = iptSearch.val();
 			renderRows();
 		});
-		selCategory.onn("change", () => {
-			this._filters.category = selCategory.val();
-			renderRows();
-		});
 		selSource.onn("change", () => {
 			this._filters.source = selSource.val();
+			renderRows();
+		});
+		selEffect.onn("change", () => {
+			this._filters.effect = selEffect.val();
 			renderRows();
 		});
 
@@ -255,14 +290,15 @@ export class ItemCompositionCatalogPicker {
 			<div class="itembuilder-picker__heading">
 				<div>
 					<h3 id="${idTitle}">Composition catalog</h3>
-					<p>Search compatible materials, upgrades, and gemstone empowerments. Every choice shows its projected result.</p>
+					<p>Compare compatible components from core data and installed homebrew. Your saved item keeps source-qualified references.</p>
 				</div>
 				${status}
 			</div>
+			${wrpCategories}
 			<div class="itembuilder-picker__filters">
 				<label><span>Search</span>${iptSearch}</label>
-				<label><span>Category</span>${selCategory}</label>
-				<label><span>Source</span>${selSource}</label>
+				<label><span>Published in</span>${selSource}</label>
+				<label><span>Effect</span>${selEffect}</label>
 			</div>
 			${wrpRows}
 		</section>`.appendTo(wrp);
