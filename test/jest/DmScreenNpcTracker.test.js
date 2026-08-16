@@ -251,6 +251,10 @@ describe("NPC Tracker conditions", () => {
 		expect(getNpcTrackerConditionHoverMeta("Poisoned", {conditionCatalog})).toMatchObject({
 			page: UrlUtil.PG_CONDITIONS_DISEASES,
 			source: "XPHB",
+			hash: UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CONDITIONS_DISEASES]({
+				name: "Poisoned",
+				source: "XPHB",
+			}),
 		});
 		expect(getNpcTrackerConditionHoverMeta("dreambound", {conditionCatalog})).toMatchObject({source: "HB"});
 		expect(getNpcTrackerConditionHoverMeta("custom", {conditionCatalog})).toBeNull();

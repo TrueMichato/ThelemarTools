@@ -17,6 +17,7 @@ import {
 } from "../../../js/dmscreen/npctracker/dmscreen-npctracker-condition.js";
 import {NpcTrackerSerializer} from "../../../js/dmscreen/npctracker/dmscreen-npctracker-serial.js";
 import {
+	getNpcTrackerConditionSourceRank,
 	getNpcTrackerSkillDescriptors,
 	pGetNpcTrackerReferenceData,
 	resetNpcTrackerReferenceDataCache,
@@ -232,5 +233,51 @@ describe("NPC Manager reference data", () => {
 			ability: "wis",
 			source: "TGTT",
 		}));
+	});
+
+	it("prefers TGTT-family conditions, then XPHB, over legacy and fallback entries", async () => {
+		jest.spyOn(DataLoader, "pCacheAndGetAllSite").mockImplementation(async page => page === "skill"
+			? []
+			: [
+				{__prop: "condition", name: "Frightened", source: "PHB"},
+				{__prop: "condition", name: "Frightened", source: "XPHB"},
+				{__prop: "condition", name: "Poisoned", source: "PHB"},
+				{__prop: "condition", name: "Poisoned", source: "XPHB"},
+			]);
+		jest.spyOn(DataLoader, "pCacheAndGetAllBrew").mockImplementation(async page => page === "skill"
+			? []
+			: [{__prop: "condition", name: "Frightened", source: "TGTT-TEST"}]);
+
+		const referenceData = await pGetNpcTrackerReferenceData();
+
+		expect(referenceData.conditions.find(it => it.name === "frightened")).toMatchObject({
+			label: "Frightened",
+			source: "TGTT-TEST",
+		});
+		expect(referenceData.conditions.find(it => it.name === "poisoned")).toMatchObject({
+			label: "Poisoned",
+			source: "XPHB",
+		});
+		expect(getNpcTrackerConditionSourceRank("TGTT")).toBeGreaterThan(getNpcTrackerConditionSourceRank("XPHB"));
+		expect(getNpcTrackerConditionSourceRank("XPHB")).toBeGreaterThan(getNpcTrackerConditionSourceRank("HB"));
+		expect(getNpcTrackerConditionSourceRank("HB")).toBeGreaterThan(getNpcTrackerConditionSourceRank("PHB"));
+		expect(getNpcTrackerConditionSourceRank("PHB")).toBeGreaterThan(getNpcTrackerConditionSourceRank(null));
+	});
+
+	it("lets same-name homebrew beat PHB while retaining custom conditions", async () => {
+		jest.spyOn(DataLoader, "pCacheAndGetAllSite").mockImplementation(async page => page === "skill"
+			? []
+			: [{__prop: "condition", name: "Dazed", source: "PHB"}]);
+		jest.spyOn(DataLoader, "pCacheAndGetAllBrew").mockImplementation(async page => page === "skill"
+			? []
+			: [
+				{__prop: "condition", name: "Dazed", source: "HB"},
+				{__prop: "condition", name: "Dreambound", source: "HB"},
+			]);
+
+		const referenceData = await pGetNpcTrackerReferenceData();
+
+		expect(referenceData.conditions.find(it => it.name === "dazed")).toMatchObject({source: "HB"});
+		expect(referenceData.conditions.find(it => it.name === "dreambound")).toMatchObject({source: "HB"});
 	});
 });

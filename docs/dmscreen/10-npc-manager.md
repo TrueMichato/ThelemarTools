@@ -65,7 +65,9 @@ The NPC Manager renders immediately with the parser's standard conditions and sk
 - Conditions and statuses use `DataLoader.pCacheAndGetAllSite(UrlUtil.PG_CONDITIONS_DISEASES)` plus `pCacheAndGetAllBrew(...)`.
 - Skills use the DataLoader `"skill"` page for the same site-plus-brew merge.
 
-Condition and skill names are deduplicated case-insensitively. A completed load refreshes the roster and active workspace without changing selection or encounter state. If the user is editing a control, the refresh waits until focus leaves the NPC panel so an in-progress value is not reset.
+Condition and skill names are deduplicated case-insensitively. Condition duplicates use a modern-source preference: TGTT-family sources (`TGTT` and `TGTT-*`) win first, followed by XPHB, other sourced entries, PHB, and finally the parser's null-source fallback. This makes the picker and chip hover use installed Thelemar or 2024 rules text instead of silently retaining the first 2014 entry. Skill deduplication keeps its existing first-sourced behavior because skill UIDs and monster bonuses have separate source-sensitive resolution rules.
+
+A completed load refreshes the roster and active workspace without changing selection or encounter state. If the user is editing a control, the refresh waits until focus leaves the NPC panel so an in-progress value is not reset.
 
 Reference loading affects available choices only. It never participates in serialization, so missing or removed brew cannot erase a saved condition or an explicit monster skill.
 
@@ -144,11 +146,13 @@ Encounter Control presents roll type, governing ability/skill, and the primary R
 
 Wide panels show the grouped roster and current detail/batch workspace side by side. Roster rows prioritize live-play controls: identity, HP, and conditions remain visible, while alias, group assignment, and removal live behind **Edit NPC**. The toolbar separates the primary **Add NPC** action from grouping, import, and encounter-wide controls.
 
+The visual hierarchy uses tactical slate for structural chrome, warm parchment-toned content surfaces, blue for selection and interactive emphasis, and each condition's canonical color only for condition state. Selected roster rows, At-a-Glance statistics, resource controls, and Encounter Control have distinct surface depth without changing their order or behavior. Night mode uses dedicated high-contrast surfaces, borders, primary text, muted text, and state colors rather than reusing washed-out day values.
+
 The toolbar also provides **A / A+** text sizing. The choice persists with the panel and increases the NPC Manager's information text without changing global site typography.
 
 The detail workspace keeps identity, HP, conditions, and the roleplay/statblock switch in a persistent command header. Encounter Control follows the table workflow from targets to roll setup, results/initiative handoff, then reversible HP and condition actions.
 
-At the panel container breakpoint, the roster and workspace become separate views; both NPC detail and batch results provide a **Roster** back action. Narrow controls stack without hiding core actions or collapsing HP values, while canonical statblocks use contained horizontal scrolling. Night mode uses the same neutral surfaces, selected blue, borders, focus states, and form controls as other DM Screen panels.
+At the panel container breakpoint, the roster and workspace become separate views; both NPC detail and batch results provide a **Roster** back action. Narrow controls stack without hiding core actions or collapsing HP values, while canonical statblocks use contained horizontal scrolling. The same hierarchy remains usable at a 300px panel width and with **A+** text enabled.
 
 ## Deferred work
 
