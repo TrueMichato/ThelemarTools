@@ -68,6 +68,7 @@ export class NpcTrackerRoot {
 			fnUpdateNpc: meta => this._updateNpc(meta),
 			fnRemove: id => this._removeNpc(id),
 			fnToggleIncludeAll: value => this._toggleIncludeAll(value),
+			fnSetTextSize: value => this._setTextSize(value),
 			fnAddGroup: () => this._pAddGroup(),
 			fnRenameGroup: id => this._pRenameGroup(id),
 			fnRemoveGroup: id => this._removeGroup(id),
@@ -86,6 +87,11 @@ export class NpcTrackerRoot {
 			},
 			fnUpdateHp: ({npc, prop, value}) => this._updateNpc({npc, prop: `hp.${prop}`, value}),
 			fnUpdateCondition: meta => this._updateNpcCondition(meta),
+			fnUpdateSpellSlot: meta => this._updateSpellSlot(meta),
+			fnUpdateCharge: meta => this._updateCharge(meta),
+			fnAddCharge: meta => this._pAddCharge(meta),
+			fnEditCharge: meta => this._pEditCharge(meta),
+			fnRemoveCharge: meta => this._removeCharge(meta),
 		});
 		this._batch = new NpcTrackerBatch({
 			fnGetContext: () => ({
@@ -112,7 +118,7 @@ export class NpcTrackerRoot {
 
 	render (wrp) {
 		wrp.empty();
-		this._wrpRoot = ee`<div class="dm-npc__layout" data-view="${this._view}"></div>`;
+		this._wrpRoot = ee`<div class="dm-npc__layout" data-view="${this._view}" data-text-size="${this._state.settings.textSize}"></div>`;
 		this._wrpRoster = ee`<aside class="dm-npc__roster" aria-label="NPC roster"></aside>`;
 		this._wrpDetail = ee`<main class="dm-npc__workspace"></main>`;
 		this._wrpRoster.appendTo(this._wrpRoot);
@@ -314,6 +320,88 @@ export class NpcTrackerRoot {
 		this._doSave();
 	}
 
+	_setTextSize (value) {
+		this._state.settings.textSize = value === "large" ? "large" : "normal";
+		this._wrpRoot?.attr("data-text-size", this._state.settings.textSize);
+		this._renderRoster();
+		this._doSave();
+	}
+
+	_updateSpellSlot ({npc, level, mode}) {
+		if (!this._state.npcs.includes(npc)) return;
+		const slots = npc.spellSlots?.[level];
+		if (!slots) return;
+		if (mode === "spend") {
+			if (slots.current < 1) {
+				JqueryUtil.doToast({type: "warning", content: `No level ${level} spell slots remain.`});
+				return;
+			}
+			slots.current--;
+		} else if (mode === "restore") slots.current = Math.min(slots.max, slots.current + 1);
+		else if (mode === "reset") slots.current = slots.max;
+		else return;
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_updateCharge ({npc, chargeId, mode}) {
+		if (!this._state.npcs.includes(npc)) return;
+		const charge = npc.charges?.find(it => it.id === chargeId);
+		if (!charge) return;
+		if (mode === "spend") charge.current = Math.max(0, charge.current - 1);
+		else if (mode === "restore") charge.current = Math.min(charge.max, charge.current + 1);
+		else if (mode === "reset") charge.current = charge.max;
+		else return;
+		this._renderDetail();
+		this._doSave();
+	}
+
+	async _pAddCharge ({npc}) {
+		if (!this._state.npcs.includes(npc)) return;
+		const name = await InputUiUtil.pGetUserString({title: "Charge Tracker Name", isSkippable: true});
+		if (name == null) return;
+		const cleanName = name.trim();
+		if (!cleanName) {
+			JqueryUtil.doToast({type: "warning", content: "Charge tracker name cannot be empty."});
+			return;
+		}
+		const max = await InputUiUtil.pGetUserNumber({title: `Maximum Charges: ${cleanName}`, min: 1, int: true, default: 1});
+		if (max == null) return;
+		npc.charges.push({id: CryptUtil.uid(), name: cleanName, current: max, max, isAuto: false});
+		this._renderDetail();
+		this._doSave();
+	}
+
+	async _pEditCharge ({npc, chargeId}) {
+		if (!this._state.npcs.includes(npc)) return;
+		const charge = npc.charges?.find(it => it.id === chargeId);
+		if (!charge) return;
+		const name = await InputUiUtil.pGetUserString({title: "Charge Tracker Name", default: charge.name, isSkippable: true});
+		if (name == null) return;
+		const cleanName = name.trim();
+		if (!cleanName) {
+			JqueryUtil.doToast({type: "warning", content: "Charge tracker name cannot be empty."});
+			return;
+		}
+		const max = await InputUiUtil.pGetUserNumber({title: `Maximum Charges: ${cleanName}`, min: 1, int: true, default: charge.max});
+		if (max == null) return;
+		charge.name = cleanName;
+		charge.max = max;
+		charge.current = Math.min(charge.current, max);
+		charge.isAuto = false;
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_removeCharge ({npc, chargeId}) {
+		if (!this._state.npcs.includes(npc)) return;
+		const charge = npc.charges?.find(it => it.id === chargeId);
+		if (!charge || !confirm(`Remove the "${charge.name}" charge tracker?`)) return;
+		npc.charges = npc.charges.filter(it => it.id !== chargeId);
+		this._renderDetail();
+		this._doSave();
+	}
+
 	async _pAddGroup () {
 		const name = await InputUiUtil.pGetUserString({title: "New NPC Group", isSkippable: true});
 		if (name == null) return;
@@ -463,7 +551,13 @@ export class NpcTrackerRoot {
 					key: batch.key,
 					skill,
 				});
-				const rolled = await pRollNpcTrackerD20({npc, label, bonus});
+				const rolled = await pRollNpcTrackerD20({
+					npc,
+					label,
+					bonus,
+					rollType: batch.rollType,
+					key: batch.key,
+				});
 				if (!rolled) {
 					failures++;
 					continue;
@@ -474,6 +568,8 @@ export class NpcTrackerRoot {
 					bonus,
 					die: rolled.die,
 					total: rolled.total,
+					mode: rolled.mode,
+					statusText: rolled.statusText,
 					order,
 				});
 			} catch {

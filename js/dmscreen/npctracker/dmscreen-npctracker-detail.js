@@ -9,6 +9,10 @@ import {
 	getNpcTrackerMonsterSkillMeta,
 	getNpcTrackerSkillDescriptors,
 } from "./dmscreen-npctracker-data.js";
+import {
+	getNpcTrackerAttackBonus,
+	getNpcTrackerSpecialEquipmentEntries,
+} from "./dmscreen-npctracker-resource.js";
 
 const _PROPS_ATTACK = ["action", "bonus", "reaction", "legendary", "mythic"];
 
@@ -29,7 +33,7 @@ export function getNpcTrackerDetailModel (monster, {fluff = null} = {}) {
 		skills: Object.entries(monster.skill || {})
 			.filter(([key]) => !["other", "special"].includes(key))
 			.map(([skill, bonus]) => ({skill, bonus})),
-		traits: monster.trait || [],
+		traits: getNpcTrackerSpecialEquipmentEntries(monster),
 		spellcasting: monster.spellcasting || [],
 		attacks: _PROPS_ATTACK
 			.flatMap(prop => (monster[prop] || []).map(entry => ({...entry, _prop: prop})))
@@ -41,6 +45,13 @@ export function getNpcTrackerDetailModel (monster, {fluff = null} = {}) {
 export function hasNpcTrackerAttackRoll (entry) {
 	return JSON.stringify(entry?.entries || []).includes("{@atk")
 		|| JSON.stringify(entry?.entries || []).includes("{@hit");
+}
+
+export function getNpcTrackerProficiencyBonusText (monster) {
+	if (monster?.pbNote != null && `${monster.pbNote}`.trim()) return `${monster.pbNote}`.trim();
+	if (monster?.cr == null) return null;
+	const proficiencyBonus = Parser.crToPb(monster.cr?.cr ?? monster.cr);
+	return Number.isFinite(proficiencyBonus) ? getNpcTrackerSignedNumber(proficiencyBonus) : null;
 }
 
 export function getNpcTrackerAllSkillsModel (monster, {skillCatalog = []} = {}) {
@@ -60,12 +71,30 @@ export function getNpcTrackerAllSkillsModel (monster, {skillCatalog = []} = {}) 
 export {getNpcTrackerDisplayName, getNpcTrackerSignedNumber};
 
 export class NpcTrackerDetail {
-	constructor ({fnGetNpc, fnGetReferenceData, fnSetViewMode, fnUpdateHp, fnUpdateCondition}) {
+	constructor (
+		{
+			fnGetNpc,
+			fnGetReferenceData,
+			fnSetViewMode,
+			fnUpdateHp,
+			fnUpdateCondition,
+			fnUpdateSpellSlot,
+			fnUpdateCharge,
+			fnAddCharge,
+			fnEditCharge,
+			fnRemoveCharge,
+		},
+	) {
 		this._fnGetNpc = fnGetNpc;
 		this._fnGetReferenceData = fnGetReferenceData;
 		this._fnSetViewMode = fnSetViewMode;
 		this._fnUpdateHp = fnUpdateHp;
 		this._fnUpdateCondition = fnUpdateCondition;
+		this._fnUpdateSpellSlot = fnUpdateSpellSlot;
+		this._fnUpdateCharge = fnUpdateCharge;
+		this._fnAddCharge = fnAddCharge;
+		this._fnEditCharge = fnEditCharge;
+		this._fnRemoveCharge = fnRemoveCharge;
 	}
 
 	render ({wrp, isFullStatblock = false, isNarrow = false, fnShowRoster = null}) {
@@ -152,8 +181,10 @@ export class NpcTrackerDetail {
 		this._renderCoreStats({mon, model, wrp});
 		this._renderSkills({npc, wrp});
 		this._renderEntriesSection({wrp, title: "Roleplay Traits", entries: model.traits});
+		this._renderSpellSlots({npc, wrp});
 		this._renderEntriesSection({wrp, title: "Spellcasting", entries: model.spellcasting});
-		this._renderEntriesSection({wrp, title: "Attacks", entries: model.attacks});
+		this._renderCharges({npc, wrp});
+		this._renderEntriesSection({npc, wrp, title: "Attacks", entries: model.attacks, isAttackSection: true});
 		this._renderEntriesSection({wrp, title: "Lore & Information", entries: model.fluffEntries});
 	}
 
@@ -164,7 +195,8 @@ export class NpcTrackerDetail {
 			btn.innerHTML = `<span>${abv.toUpperCase()}</span><strong>${score}</strong><span>${getNpcTrackerSignedNumber(modifier)}</span>`;
 			btn.attr("title", `Roll ${Parser.attAbvToFull(abv)} check`);
 			btn.onn("click", () => this._roll({
-				npcName: this._fnGetNpc()?.alias || mon.name,
+				rollType: "ability",
+				key: abv,
 				label: `${Parser.attAbvToFull(abv)} check`,
 				bonus: modifier,
 			}));
@@ -180,6 +212,7 @@ export class NpcTrackerDetail {
 			if (!html) return;
 			ee`<div class="dm-npc__stat-line"><strong>${label}</strong><span>${html}</span></div>`.appendTo(wrpSection);
 		};
+		addLine({label: "Proficiency Bonus", html: getNpcTrackerProficiencyBonusText(mon)});
 		addLine({label: "Saving Throws", html: model.saves.map(({ability, bonus}) => this._getRollButtonHtml({name: ability.toUpperCase(), bonus, label: `${Parser.attAbvToFull(ability)} save`})).join(", ")});
 		addLine({label: "Resistances", html: mon.resist ? Parser.getFullImmRes(mon.resist) : ""});
 		addLine({label: "Vulnerabilities", html: mon.vulnerable ? Parser.getFullImmRes(mon.vulnerable) : ""});
@@ -188,7 +221,8 @@ export class NpcTrackerDetail {
 		addLine({label: "Languages", html: Renderer.monster.getRenderedLanguages(mon.languages)});
 
 		wrpSection.querySelectorAll("[data-roll-bonus]").forEach(btn => btn.addEventListener("click", () => this._roll({
-			npcName: this._fnGetNpc()?.alias || mon.name,
+			rollType: "save",
+			key: btn.dataset.rollKey,
 			label: btn.dataset.rollLabel,
 			bonus: btn.dataset.rollBonus,
 		})));
@@ -210,7 +244,8 @@ export class NpcTrackerDetail {
 					? `Roll ${label} using ${Parser.attAbvToFull(ability)}`
 					: `Roll ${label} with its flat bonus`);
 			button.onn("click", () => this._roll({
-				npcName: getNpcTrackerDisplayName(npc),
+				rollType: "skill",
+				key: skillMeta.id,
 				label: `${label} check`,
 				bonus,
 			}));
@@ -227,10 +262,11 @@ export class NpcTrackerDetail {
 	}
 
 	_getRollButtonHtml ({name, bonus, label}) {
-		return `<button class="dm-npc__inline-roll roller" type="button" data-roll-bonus="${bonus}" data-roll-label="${label}">${name} ${getNpcTrackerSignedNumber(bonus)}</button>`;
+		const ability = Parser.ABIL_ABVS.find(abv => label === `${Parser.attAbvToFull(abv)} save`) || "";
+		return `<button class="dm-npc__inline-roll roller" type="button" data-roll-key="${ability}" data-roll-bonus="${bonus}" data-roll-label="${label}">${name} ${getNpcTrackerSignedNumber(bonus)}</button>`;
 	}
 
-	_renderEntriesSection ({wrp, title, entries}) {
+	_renderEntriesSection ({npc = null, wrp, title, entries, isAttackSection = false}) {
 		if (!entries?.length) return;
 		const renderer = Renderer.get();
 		const wrpEntries = ee`<div class="dm-npc__entries"></div>`;
@@ -238,9 +274,87 @@ export class NpcTrackerDetail {
 			const entryRenderable = entry?.name && entry?.entries
 				? {type: "entries", name: entry.name, entries: entry.entries}
 				: entry;
-			ee`<div class="dm-npc__entry">${renderer.render(entryRenderable, 2)}</div>`.appendTo(wrpEntries);
+			const wrpEntry = ee`<div class="dm-npc__entry">${renderer.render(entryRenderable, 2)}</div>`;
+			if (isAttackSection) {
+				const bonus = getNpcTrackerAttackBonus(entry);
+				if (bonus != null) {
+					const button = ee`<button class="ve-btn ve-btn-default ve-btn-xxs dm-npc__attack-roll" type="button"></button>`;
+					button.textContent = `Roll attack ${getNpcTrackerSignedNumber(bonus)}`;
+					button.onn("click", () => this._roll({
+						rollType: "attack",
+						key: entry.name || "Attack",
+						label: `${entry.name || "Attack"} attack`,
+						bonus,
+					}));
+					button.appendTo(wrpEntry);
+				}
+			}
+			wrpEntry.appendTo(wrpEntries);
 		});
 		ee`<section class="dm-npc__section"><h3>${title}</h3>${wrpEntries}</section>`.appendTo(wrp);
+	}
+
+	_renderSpellSlots ({npc, wrp}) {
+		const levels = Object.keys(npc.spellSlots || {}).sort((a, b) => Number(a) - Number(b));
+		if (!levels.length) return;
+		const rows = ee`<div class="dm-npc__resources"></div>`;
+		levels.forEach(level => {
+			const slots = npc.spellSlots[level];
+			const current = ee`<strong class="dm-npc__resource-value"></strong>`;
+			current.textContent = `${slots.current}/${slots.max}`;
+			const btnCast = ee`<button class="ve-btn ve-btn-primary ve-btn-xxs" type="button">Cast</button>`
+				.onn("click", () => this._fnUpdateSpellSlot({npc, level, mode: "spend"}));
+			btnCast.disabled = slots.current < 1;
+			const btnRestore = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" type="button" title="Restore one spell slot">+1</button>`
+				.onn("click", () => this._fnUpdateSpellSlot({npc, level, mode: "restore"}));
+			btnRestore.disabled = slots.current >= slots.max;
+			const btnReset = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" type="button">Reset</button>`
+				.onn("click", () => this._fnUpdateSpellSlot({npc, level, mode: "reset"}));
+			ee`<div class="dm-npc__resource-row">
+				<span class="dm-npc__resource-name">Level ${level}</span>
+				${current}
+				<div class="dm-npc__resource-actions">${btnCast}${btnRestore}${btnReset}</div>
+			</div>`.appendTo(rows);
+		});
+		ee`<section class="dm-npc__section dm-npc__section--resources">
+			<div class="dm-npc__section-heading"><h3>Spell Slots</h3><span>Track slots as spells are cast.</span></div>
+			${rows}
+		</section>`.appendTo(wrp);
+	}
+
+	_renderCharges ({npc, wrp}) {
+		const rows = ee`<div class="dm-npc__resources"></div>`;
+		(npc.charges || []).forEach(charge => {
+			const current = ee`<strong class="dm-npc__resource-value"></strong>`;
+			current.textContent = `${charge.current}/${charge.max}`;
+			const btnSpend = ee`<button class="ve-btn ve-btn-primary ve-btn-xxs" type="button">Use</button>`
+				.onn("click", () => this._fnUpdateCharge({npc, chargeId: charge.id, mode: "spend"}));
+			btnSpend.disabled = charge.current < 1;
+			const btnRestore = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" type="button" title="Restore one charge">+1</button>`
+				.onn("click", () => this._fnUpdateCharge({npc, chargeId: charge.id, mode: "restore"}));
+			btnRestore.disabled = charge.current >= charge.max;
+			const btnReset = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" type="button">Reset</button>`
+				.onn("click", () => this._fnUpdateCharge({npc, chargeId: charge.id, mode: "reset"}));
+			const btnEdit = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" type="button" title="Edit charge tracker">
+				<span class="glyphicon glyphicon-pencil" aria-hidden="true"></span>
+			</button>`.onn("click", () => this._fnEditCharge({npc, chargeId: charge.id}));
+			const btnRemove = ee`<button class="ve-btn ve-btn-danger ve-btn-xxs" type="button" title="Remove charge tracker">
+				<span class="glyphicon glyphicon-trash" aria-hidden="true"></span>
+			</button>`.onn("click", () => this._fnRemoveCharge({npc, chargeId: charge.id}));
+			ee`<div class="dm-npc__resource-row">
+				<span class="dm-npc__resource-name">${charge.name}</span>
+				${current}
+				<div class="dm-npc__resource-actions">${btnSpend}${btnRestore}${btnReset}${btnEdit}${btnRemove}</div>
+			</div>`.appendTo(rows);
+		});
+		const btnAdd = ee`<button class="ve-btn ve-btn-default ve-btn-xs dm-npc__resource-add" type="button">
+			<span class="glyphicon glyphicon-plus" aria-hidden="true"></span> Add charge tracker
+		</button>`.onn("click", () => this._fnAddCharge({npc}));
+		ee`<section class="dm-npc__section dm-npc__section--resources">
+			<div class="dm-npc__section-heading"><h3>Item Charges</h3><span>Charged Special Equipment and custom items.</span></div>
+			${npc.charges?.length ? rows : ee`<div class="dm-npc__resource-empty">No charged equipment detected.</div>`}
+			${btnAdd}
+		</section>`.appendTo(wrp);
 	}
 
 	_renderFullStatblock ({npc, wrp}) {
@@ -249,11 +363,20 @@ export class NpcTrackerDetail {
 		ee`<div class="dm-npc__statblock">${table}</div>`.appendTo(wrp);
 	}
 
-	_roll ({npcName, label, bonus}) {
-		return pRollNpcTrackerD20({
-			npc: this._fnGetNpc() || {alias: npcName, monster: {name: npcName}},
+	async _roll ({rollType, key, label, bonus}) {
+		const result = await pRollNpcTrackerD20({
+			npc: this._fnGetNpc(),
+			rollType,
+			key,
 			label,
 			bonus: Number(bonus),
 		});
+		if (result?.mode === "unavailable" || result?.mode === "autoFail") {
+			JqueryUtil.doToast({
+				type: result.mode === "unavailable" ? "warning" : "info",
+				content: `${label}: ${result.statusText}.`,
+			});
+		}
+		return result;
 	}
 }

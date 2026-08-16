@@ -6,9 +6,13 @@ import "../../../js/render-dice.js";
 import "../../../js/utils-ui.js";
 import {jest} from "@jest/globals";
 import {getNpcTrackerAllSkillsModel} from "../../../js/dmscreen/npctracker/dmscreen-npctracker-detail.js";
-import {getNpcTrackerRollBonus} from "../../../js/dmscreen/npctracker/dmscreen-npctracker-roll.js";
+import {
+	getNpcTrackerConditionRollMeta,
+	getNpcTrackerRollBonus,
+} from "../../../js/dmscreen/npctracker/dmscreen-npctracker-roll.js";
 import {
 	getNpcTrackerConditionPickerModel,
+	getNpcTrackerConditionHoverMeta,
 	getNpcTrackerConditionsAfterUpdate,
 } from "../../../js/dmscreen/npctracker/dmscreen-npctracker-condition.js";
 import {NpcTrackerSerializer} from "../../../js/dmscreen/npctracker/dmscreen-npctracker-serial.js";
@@ -180,6 +184,25 @@ describe("NPC Manager direct conditions", () => {
 		});
 
 		expect(picker.available).toContainEqual(expect.objectContaining({name: "dreambound"}));
+	});
+
+	it("resolves homebrew condition hovers and leaves custom chips safe", () => {
+		const catalog = [{name: "dreambound", label: "Dreambound", source: "HB"}];
+		expect(getNpcTrackerConditionHoverMeta("dreambound", {conditionCatalog: catalog})).toMatchObject({source: "HB"});
+		expect(getNpcTrackerConditionHoverMeta("unlisted", {conditionCatalog: catalog})).toBeNull();
+	});
+
+	it("reports mechanical roll state without applying unknown homebrew rules", () => {
+		expect(getNpcTrackerConditionRollMeta({
+			npc: {conditions: ["frightened"]},
+			rollType: "ability",
+			key: "wis",
+		})).toMatchObject({mode: "disadvantage"});
+		expect(getNpcTrackerConditionRollMeta({
+			npc: {conditions: ["dreambound"]},
+			rollType: "ability",
+			key: "wis",
+		})).toMatchObject({mode: "normal"});
 	});
 });
 

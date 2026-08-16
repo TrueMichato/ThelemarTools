@@ -11,6 +11,47 @@ export const NPC_TRACKER_ROLL_TYPES = [
 	{id: "skill", name: "Skill"},
 ];
 
+const _CONDITION_ROLL_EFFECTS = {
+	poisoned: [
+		{mode: "disadvantage", rollTypes: ["ability", "skill", "attack"], reason: "Poisoned"},
+	],
+	frightened: [
+		{mode: "disadvantage", rollTypes: ["ability", "skill", "attack"], reason: "Frightened (source in sight)"},
+	],
+	blinded: [
+		{mode: "disadvantage", rollTypes: ["attack"], reason: "Blinded"},
+	],
+	restrained: [
+		{mode: "disadvantage", rollTypes: ["attack"], reason: "Restrained"},
+		{mode: "disadvantage", rollTypes: ["save"], keys: ["dex"], reason: "Restrained"},
+	],
+	prone: [
+		{mode: "disadvantage", rollTypes: ["attack"], reason: "Prone"},
+	],
+	invisible: [
+		{mode: "advantage", rollTypes: ["attack"], reason: "Invisible"},
+	],
+	paralyzed: [
+		{mode: "unavailable", rollTypes: ["attack"], reason: "Paralyzed"},
+		{mode: "autoFail", rollTypes: ["save"], keys: ["str", "dex"], reason: "Paralyzed"},
+	],
+	stunned: [
+		{mode: "unavailable", rollTypes: ["attack"], reason: "Stunned"},
+		{mode: "autoFail", rollTypes: ["save"], keys: ["str", "dex"], reason: "Stunned"},
+	],
+	unconscious: [
+		{mode: "unavailable", rollTypes: ["attack"], reason: "Unconscious"},
+		{mode: "autoFail", rollTypes: ["save"], keys: ["str", "dex"], reason: "Unconscious"},
+	],
+	petrified: [
+		{mode: "unavailable", rollTypes: ["attack"], reason: "Petrified"},
+		{mode: "autoFail", rollTypes: ["save"], keys: ["str", "dex"], reason: "Petrified"},
+	],
+	incapacitated: [
+		{mode: "unavailable", rollTypes: ["attack"], reason: "Incapacitated"},
+	],
+};
+
 export function getNpcTrackerDisplayName (npc) {
 	return npc?.alias || npc?.monster?.name || "Unnamed NPC";
 }
@@ -49,8 +90,32 @@ export function getNpcTrackerRollLabel ({rollType, key = null, skill = null}) {
 		case "ability": return `${Parser.attAbvToFull(key)} check`;
 		case "save": return `${Parser.attAbvToFull(key)} save`;
 		case "skill": return `${skill?.label || getNpcTrackerSkillKeyMeta(key).name.toTitleCase()} check`;
+		case "attack": return key || "Attack roll";
 		default: throw new Error(`Unknown NPC roll type "${rollType}".`);
 	}
+}
+
+export function getNpcTrackerConditionRollMeta ({npc, rollType, key = null}) {
+	const effects = (npc?.conditions || [])
+		.flatMap(condition => (_CONDITION_ROLL_EFFECTS[`${condition}`.trim().toLowerCase()] || [])
+			.filter(effect => effect.rollTypes.includes(rollType) && (!effect.keys || effect.keys.includes(key))));
+	const unavailable = effects.filter(effect => effect.mode === "unavailable");
+	if (unavailable.length) return _getConditionMeta({mode: "unavailable", effects: unavailable});
+	const autoFail = effects.filter(effect => effect.mode === "autoFail");
+	if (autoFail.length) return _getConditionMeta({mode: "autoFail", effects: autoFail});
+
+	const advantages = effects.filter(effect => effect.mode === "advantage");
+	const disadvantages = effects.filter(effect => effect.mode === "disadvantage");
+	if (advantages.length && disadvantages.length) {
+		return {
+			mode: "normal",
+			reasons: [...new Set([...advantages, ...disadvantages].map(effect => effect.reason))],
+			statusText: `Normal (advantage and disadvantage cancel: ${[...new Set([...advantages, ...disadvantages].map(effect => effect.reason))].join(", ")})`,
+		};
+	}
+	if (advantages.length) return _getConditionMeta({mode: "advantage", effects: advantages});
+	if (disadvantages.length) return _getConditionMeta({mode: "disadvantage", effects: disadvantages});
+	return {mode: "normal", reasons: [], statusText: ""};
 }
 
 export function getNpcTrackerNpcsForScope ({state, scope}) {
@@ -94,23 +159,51 @@ export function sortNpcTrackerBatchResults ({results, sortKey, sortDirection}) {
 			? SortUtil.ascSort(a.order, b.order)
 			: sortKey === "name"
 				? SortUtil.ascSortLower(a.name, b.name)
-				: SortUtil.ascSort(a.total, b.total);
+				: SortUtil.ascSort(a.total ?? Number.NEGATIVE_INFINITY, b.total ?? Number.NEGATIVE_INFINITY);
 		if (primary) return primary * direction;
 		return SortUtil.ascSort(a.order, b.order);
 	});
 }
 
-export async function pRollNpcTrackerD20 ({npc, label, bonus}) {
-	const total = await Renderer.dice.pRoll2(`1d20${getNpcTrackerSignedNumber(bonus)}`, {
+export async function pRollNpcTrackerD20 ({npc, label, bonus, rollType = null, key = null}) {
+	const conditionMeta = rollType
+		? getNpcTrackerConditionRollMeta({npc, rollType, key})
+		: {mode: "normal", reasons: [], statusText: ""};
+	if (conditionMeta.mode === "unavailable") return {...conditionMeta, total: null, die: null};
+	if (conditionMeta.mode === "autoFail") return {...conditionMeta, total: null, die: null};
+
+	const d20 = conditionMeta.mode === "advantage"
+		? "2d20dl1"
+		: conditionMeta.mode === "disadvantage"
+			? "2d20dh1"
+			: "1d20";
+	const rollLabel = conditionMeta.statusText ? `${label} \u2014 ${conditionMeta.statusText}` : label;
+	const total = await Renderer.dice.pRoll2(`${d20}${getNpcTrackerSignedNumber(bonus)}`, {
 		isUser: false,
 		name: getNpcTrackerDisplayName(npc),
-		label,
+		label: rollLabel,
 	}, {isResultUsed: true});
 
 	if (total == null || total === Renderer.dice._SYMBOL_PARSE_FAILED || !Number.isFinite(Number(total))) return null;
 	return {
+		...conditionMeta,
 		total: Number(total),
 		die: Number(total) - Number(bonus),
+	};
+}
+
+function _getConditionMeta ({mode, effects}) {
+	const reasons = [...new Set(effects.map(effect => effect.reason))];
+	const modeLabel = {
+		advantage: "Advantage",
+		disadvantage: "Disadvantage",
+		autoFail: "Automatic failure",
+		unavailable: "Unavailable",
+	}[mode];
+	return {
+		mode,
+		reasons,
+		statusText: `${modeLabel}: ${reasons.join(", ")}`,
 	};
 }
 

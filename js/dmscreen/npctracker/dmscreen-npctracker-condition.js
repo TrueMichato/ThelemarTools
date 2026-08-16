@@ -31,6 +31,20 @@ export function getNpcTrackerConditionPickerModel ({conditions, conditionCatalog
 	};
 }
 
+export function getNpcTrackerConditionHoverMeta (condition, {conditionCatalog = []} = {}) {
+	const canonical = getNpcTrackerCanonicalConditionName(condition);
+	const catalogEntry = conditionCatalog.find(it => getNpcTrackerCanonicalConditionName(it.name) === canonical);
+	if (!catalogEntry?.source) return null;
+	return {
+		page: UrlUtil.PG_CONDITIONS_DISEASES,
+		source: catalogEntry.source,
+		hash: UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_CONDITIONS_DISEASES]({
+			name: catalogEntry.label || catalogEntry.name,
+			source: catalogEntry.source,
+		}),
+	};
+}
+
 export function getNpcTrackerConditionControls ({npc, fnUpdate, conditionCatalog = [], isCompact = false}) {
 	const conditions = getNpcTrackerConditionsAfterUpdate({
 		conditions: npc.conditions,
@@ -44,6 +58,16 @@ export function getNpcTrackerConditionControls ({npc, fnUpdate, conditionCatalog
 		const button = ee`<button class="dm-npc__condition" type="button"></button>`;
 		button.style.setProperty("--dm-npc-condition-color", getNpcTrackerConditionColor(condition, {conditionCatalog}));
 		button.attr("aria-label", `Remove ${label} from ${npc.alias || npc.monster.name}`);
+		const hoverMeta = getNpcTrackerConditionHoverMeta(condition, {conditionCatalog});
+		if (hoverMeta) {
+			button.classList.add("dm-npc__condition--hoverable");
+			button.onn("mouseover", evt => Renderer.hover.pHandleLinkMouseOver(evt, button, {
+				isSpecifiedLinkData: true,
+				...hoverMeta,
+			}).then(null));
+			button.onn("mousemove", evt => Renderer.hover.handleLinkMouseMove(evt, button));
+			button.onn("mouseleave", evt => Renderer.hover.handleLinkMouseLeave(evt, button));
+		}
 		const name = ee`<span></span>`;
 		name.textContent = label;
 		const remove = ee`<span class="dm-npc__condition-remove" aria-hidden="true">\u00d7</span>`;
