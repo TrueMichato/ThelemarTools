@@ -712,6 +712,27 @@ class CharacterSheetPage {
 			this._spellsData = [...this._spellsData, ...MiscUtil.copyFast(brewData.spell)];
 		}
 
+		// Actions
+		if (brewData.action?.length) {
+			this._actionsData = [...this._actionsData, ...MiscUtil.copyFast(brewData.action)];
+		}
+
+		// The TGTT Item Utilization rule supplements the 2024 Utilize action.
+		// Keep the rule attached to the action catalog so the combat overview can
+		// build one synchronous hover without introducing another page-wide catalog.
+		const itemUtilizationRule = brewData.variantrule?.find(rule => rule?.name === "Item Utilization" && rule?.source === "TGTT");
+		if (itemUtilizationRule) {
+			this._actionsData = this._actionsData.map(action => {
+				if (action?.name !== "Utilize" || action?.source !== Parser.SRC_XPHB) return action;
+				const supplementalRules = action._actionEconomySupplementalRules || [];
+				if (supplementalRules.some(rule => rule?.name === itemUtilizationRule.name && rule?.source === itemUtilizationRule.source)) return action;
+				return {
+					...action,
+					_actionEconomySupplementalRules: [...supplementalRules, MiscUtil.copyFast(itemUtilizationRule)],
+				};
+			});
+		}
+
 		// Items are loaded separately via DataUtil.item.loadBrew() in _pLoadData so they go
 		// through the full enhancement pipeline (generic variants, property/mastery merging).
 		// Do not merge raw brewData.item here — it lacks the enhanced fields.

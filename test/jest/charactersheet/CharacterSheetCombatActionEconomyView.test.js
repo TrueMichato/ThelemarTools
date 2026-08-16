@@ -30,6 +30,7 @@ function makeCombat ({attacks = [], items = [], temporaryAttacks = [], activeSta
 		getCustomAbilities: () => customAbilities,
 	};
 	combat._page = {};
+	combat._getStandardActionEconomyEntities = () => [];
 	return combat;
 }
 

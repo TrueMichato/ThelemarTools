@@ -6721,6 +6721,7 @@ class CharacterSheetCombat {
 				"Ready",
 				"Search",
 				"Shove",
+				"Two-Weapon Fighting",
 				"Use an Object",
 				"Opportunity Attack",
 			],
@@ -6735,10 +6736,51 @@ class CharacterSheetCombat {
 				"Ready",
 				"Search",
 				"Study",
+				"Two-Weapon Fighting",
+				"Unarmed Strike",
 				"Utilize",
 				"Opportunity Attack",
 			],
 		};
+	}
+
+	static get ACTION_ECONOMY_OPTIONAL_ACTION_NAMES () {
+		return ["Disarm", "Overrun", "Tumble"];
+	}
+
+	static get ACTION_ECONOMY_TGTT_ACTION_NAMES () {
+		return ["Strangle", "Disruptive Strike"];
+	}
+
+	_getActionEconomyStartingClass () {
+		const classes = this._state?.getClasses?.() || [];
+		const chronologicalFirst = this._state?.getChronologicalFirstClass?.();
+		return chronologicalFirst
+			? classes.find(cls => cls?.name === chronologicalFirst.name && cls?.source === chronologicalFirst.source) || chronologicalFirst
+			: classes.find(cls => cls?.isStartingClass) || classes[0] || null;
+	}
+
+	/**
+	 * Action-economy rules are modern by default. This intentionally does not
+	 * broaden CharacterSheetClassUtils.is2024Source, whose exact matching is
+	 * relied on by unrelated systems such as Illrigger epic-boon handling.
+	 * @param {*} cls
+	 * @returns {boolean}
+	 */
+	_is2024ActionEconomyClass (cls) {
+		if (!cls) return true;
+		const edition = String(cls.edition || "").toLowerCase();
+		if (edition === "classic") return false;
+		if (edition === "one") return true;
+
+		const source = String(cls.source || "").trim();
+		const sourceUpper = source.toUpperCase();
+		if (sourceUpper.includes("2014")) return false;
+		if (sourceUpper.includes("2024")) return true;
+		if (sourceUpper === "TGTT" || sourceUpper.startsWith("TGTT-")) return true;
+		if (sourceUpper === String(Parser.SRC_PHB || "PHB").toUpperCase()) return false;
+		if (globalThis.SourceUtil?.isClassicSource?.(source)) return false;
+		return true;
 	}
 
 	/**
@@ -6749,15 +6791,14 @@ class CharacterSheetCombat {
 	 * @returns {boolean}
 	 */
 	_is2024ActionEconomy () {
-		const classes = this._state?.getClasses?.() || [];
-		const chronologicalFirst = this._state?.getChronologicalFirstClass?.();
-		const startingClass = chronologicalFirst
-			? classes.find(cls => cls?.name === chronologicalFirst.name && cls?.source === chronologicalFirst.source) || chronologicalFirst
-			: classes.find(cls => cls?.isStartingClass) || classes[0];
-		if (!startingClass) return true;
-		if (startingClass.edition === "one") return true;
-		return this._state?._sourceIs2024?.(startingClass.source) ??
-			CharacterSheetClassUtils.is2024Source(startingClass.source);
+		return this._is2024ActionEconomyClass(this._getActionEconomyStartingClass());
+	}
+
+	_isTgttActionEconomy () {
+		const startingClass = this._getActionEconomyStartingClass();
+		if (!this._is2024ActionEconomyClass(startingClass)) return false;
+		const source = String(startingClass?.source || "").toUpperCase();
+		return source === "TGTT" || source.startsWith("TGTT-");
 	}
 
 	/**
@@ -6768,15 +6809,47 @@ class CharacterSheetCombat {
 	 */
 	_getStandardActionEconomyEntities () {
 		const is2024 = this._is2024ActionEconomy();
-		const source = is2024 ? Parser.SRC_XPHB : Parser.SRC_PHB;
 		const names = CharacterSheetCombat.ACTION_ECONOMY_STANDARD_ACTION_NAMES_BY_EDITION[is2024 ? "one" : "classic"];
 		const actions = this._page?._actionsData || [];
+		const sourcePreferences = is2024
+			? [Parser.SRC_TGTT || "TGTT", Parser.SRC_XPHB, Parser.SRC_PHB]
+			: [Parser.SRC_PHB];
+		const resolve = (name, sources, meta = {}) => {
+			if (name === "Unarmed Strike" && is2024) {
+				return {
+					name,
+					source: Parser.SRC_XPHB,
+					time: [{number: 1, unit: "action"}],
+					_actionEconomyHoverPage: UrlUtil.PG_VARIANTRULES,
+					_actionEconomySubtitle: "Damage · Grapple · Shove",
+					...meta,
+				};
+			}
+			const action = sources
+				.map(source => actions.find(it => it?.name === name && it?.source === source))
+				.find(Boolean);
+			return action ? {...action, ...meta} : null;
+		};
+
+		const resolved = [
+			...names.map(name => resolve(name, sourcePreferences, {_actionEconomyCategory: "core"})),
+			...CharacterSheetCombat.ACTION_ECONOMY_OPTIONAL_ACTION_NAMES
+				.map(name => resolve(name, [Parser.SRC_DMG || "DMG"], {
+					_actionEconomyCategory: "optional",
+					_actionEconomySubtitle: "DMG optional",
+				})),
+			...(this._isTgttActionEconomy()
+				? CharacterSheetCombat.ACTION_ECONOMY_TGTT_ACTION_NAMES.map(name => resolve(name, [Parser.SRC_TGTT || "TGTT"], {
+					_actionEconomyCategory: "tgtt",
+					_actionEconomySubtitle: "TGTT rule",
+				}))
+				: []),
+		];
 		const seen = new Set();
-		return names
-			.map(name => actions.find(action => action?.name === name && action?.source === source) || null)
+		return resolved
 			.filter(action => {
 				if (!action) return false;
-				const key = `${action.name}|${action.source}`.toLowerCase();
+				const key = action.name.toLowerCase();
 				if (seen.has(key)) return false;
 				seen.add(key);
 				return true;
@@ -7004,9 +7077,10 @@ class CharacterSheetCombat {
 					id: `${action.name}|${action.source}`,
 					name: action.name,
 					source: action.source,
-					subtitle: "Standard action",
+					subtitle: action._actionEconomySubtitle || "Standard action",
 					actionType: type,
 					entity: action,
+					rulesCategory: action._actionEconomyCategory || "core",
 				});
 			}
 		}
@@ -7055,8 +7129,25 @@ class CharacterSheetCombat {
 		const safeName = CharacterSheetClassUtils.escapeHtml(entry?.name || "");
 		try {
 			switch (entry?.kind) {
-				case "action":
+				case "action": {
+					const action = entry.entity || {};
+					if (action._actionEconomyHoverPage) {
+						return this._page?.getHoverLink?.(action._actionEconomyHoverPage, entry.name, entry.source, null, safeName) || safeName;
+					}
+					if (entry.name === "Utilize" && action._actionEconomySupplementalRules?.length && action.entries?.length) {
+						const supplementalEntries = action._actionEconomySupplementalRules.map(rule => ({
+							type: "entries",
+							name: rule.name,
+							entries: rule.entries,
+						}));
+						return CharacterSheetClassUtils.buildInlineEntriesHoverLink(
+							entry.name,
+							entry.name,
+							[...action.entries, ...supplementalEntries],
+						) || safeName;
+					}
 					return this._page?.getHoverLink?.(UrlUtil.PG_ACTIONS, entry.name, entry.source, null, safeName) || safeName;
+				}
 				case "attack": {
 					const attackAction = this._getStandardActionEconomyEntities().find(action => action.name === "Attack");
 					if (!attackAction) return safeName;
@@ -7121,42 +7212,59 @@ class CharacterSheetCombat {
 
 		for (const col of columns) {
 			const entries = buckets[col.key];
-			const group = e_({tag: "div", clazz: "cs-combat-action-economy__group"});
+			const group = e_({tag: "div", clazz: `cs-combat-action-economy__group cs-combat-action-economy__group--${col.key}`});
 
 			const header = e_({outer: `<div class="cs-combat-action-economy__head">${csCombatActionChip(col.chip)}<span class="cs-combat-action-economy__count">${entries.length}</span></div>`});
 			group.appendChild(header);
 
-			const list = e_({tag: "div", clazz: "cs-combat-action-economy__list"});
 			if (!entries.length) {
 				const empty = e_({tag: "div", clazz: "cs-combat-action-economy__empty"});
-				empty.textContent = "None";
-				list.appendChild(empty);
+				empty.textContent = "Nothing available";
+				group.appendChild(empty);
 			} else {
-				for (const entry of entries) {
-					const meta = kindMeta[entry.kind] || {label: "", glyph: "•"};
-					const row = e_({tag: "div", clazz: `cs-combat-action-economy__item cs-combat-action-economy__item--${entry.kind}`});
+				const content = e_({tag: "div", clazz: "cs-combat-action-economy__content"});
+				const appendSection = (label, sectionEntries, sectionType) => {
+					if (!sectionEntries.length) return;
+					const sectionWrp = e_({tag: "div", clazz: `cs-combat-action-economy__section cs-combat-action-economy__section--${sectionType}`});
+					const sectionLabel = e_({tag: "div", clazz: "cs-combat-action-economy__section-label"});
+					sectionLabel.textContent = label;
+					sectionWrp.appendChild(sectionLabel);
 
-					const badge = e_({tag: "span", clazz: "cs-combat-action-economy__kind"});
-					badge.setAttribute("title", meta.label);
-					badge.setAttribute("aria-label", meta.label);
-					badge.textContent = meta.glyph;
-					row.appendChild(badge);
+					const list = e_({tag: "div", clazz: "cs-combat-action-economy__list"});
+					for (const entry of sectionEntries) {
+						const meta = kindMeta[entry.kind] || {label: "", glyph: "•"};
+						const categoryClass = entry.rulesCategory ? ` cs-combat-action-economy__item--${entry.rulesCategory}` : "";
+						const row = e_({tag: "div", clazz: `cs-combat-action-economy__item cs-combat-action-economy__item--${entry.kind}${categoryClass}`});
 
-					const name = e_({tag: "span", clazz: "cs-combat-action-economy__name"});
-					name.innerHTML = this._getActionEconomyNameHtml(entry);
-					row.appendChild(name);
+						const badge = e_({tag: "span", clazz: "cs-combat-action-economy__kind"});
+						badge.setAttribute("title", meta.label);
+						badge.setAttribute("aria-label", meta.label);
+						badge.textContent = meta.glyph;
+						row.appendChild(badge);
 
-					if (entry.subtitle) {
-						const sub = e_({tag: "span", clazz: "cs-combat-action-economy__sub"});
-						sub.textContent = entry.subtitle;
-						row.appendChild(sub);
+						const body = e_({tag: "span", clazz: "cs-combat-action-economy__body"});
+						const name = e_({tag: "span", clazz: "cs-combat-action-economy__name"});
+						name.innerHTML = this._getActionEconomyNameHtml(entry);
+						body.appendChild(name);
+
+						if (entry.subtitle) {
+							const sub = e_({tag: "span", clazz: "cs-combat-action-economy__sub"});
+							sub.textContent = entry.subtitle;
+							body.appendChild(sub);
+						}
+
+						row.appendChild(body);
+						list.appendChild(row);
 					}
+					sectionWrp.appendChild(list);
+					content.appendChild(sectionWrp);
+				};
 
-					list.appendChild(row);
-				}
+				appendSection("Your options", entries.filter(entry => entry.kind !== "action"), "personal");
+				appendSection("Rules actions", entries.filter(entry => entry.kind === "action"), "rules");
+				group.appendChild(content);
 			}
 
-			group.appendChild(list);
 			container.appendChild(group);
 		}
 	}
