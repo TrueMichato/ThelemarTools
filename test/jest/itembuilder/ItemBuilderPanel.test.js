@@ -246,6 +246,10 @@ describe("ItemBuilderPanel persistence", () => {
 		expect(ItemBuilderCore.validate(panel._draft, panel._catalogs).errors).toContainEqual(expect.objectContaining({
 			message: "Enter an item name.",
 		}));
+		expect(panel._getValidationMeta(ItemBuilderCore.validate(panel._draft, panel._catalogs))).toEqual(expect.objectContaining({
+			heading: "Cannot save yet.",
+			stateClass: "dm-item-builder__status--error",
+		}));
 	});
 
 	test("keeps Brew save success and failure visible and clears stale success after mutation", async () => {
@@ -274,6 +278,10 @@ describe("ItemBuilderPanel persistence", () => {
 		BrewUtil2.pPersistEditableBrewEntity.mockRejectedValueOnce(new Error("storage unavailable"));
 		await panel._pSaveToBrew();
 		expect(panel._saveStatus).toBe("Save failed: storage unavailable");
+		expect(panel._getValidationMeta(ItemBuilderCore.validate(panel._draft, panel._catalogs))).toEqual(expect.objectContaining({
+			heading: "Save failed: storage unavailable",
+			stateClass: "dm-item-builder__status--error",
+		}));
 	});
 
 	test("reloads a serialized focused preview without changing its canonical item", () => {

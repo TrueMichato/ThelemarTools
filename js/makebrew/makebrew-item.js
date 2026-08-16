@@ -228,7 +228,11 @@ export class ItemBuilder extends BuilderBase {
 			new TabUiUtil.TabMeta({...opts, name: "4 Review & Save"}),
 		], {tabGroup: "input", cbTabChange: this.doUiSave.bind(this)});
 		const [baseTab, compositionTab, detailsTab, reviewTab] = tabs;
-		const wrpTabHeads = ee`<div class="ve-flex-v-center ve-w-100 ve-no-shrink ve-ui-tab__wrp-tab-heads--border mkbru_item__tabs" role="tablist" aria-label="Item creation steps">${tabs.map(it => it.btnTab)}</div>`.appendTo(wrp);
+		baseTab.wrpTab.addClass("mkbru_item__stage").addClass("mkbru_item__stage--base");
+		compositionTab.wrpTab.addClass("mkbru_item__stage").addClass("mkbru_item__stage--composition");
+		detailsTab.wrpTab.addClass("mkbru_item__stage").addClass("mkbru_item__stage--details");
+		reviewTab.wrpTab.addClass("mkbru_item__stage").addClass("mkbru_item__stage--review");
+		const wrpTabHeads = ee`<div class="ve-w-100 ve-no-shrink ve-ui-tab__wrp-tab-heads--border mkbru_item__tabs" role="tablist" aria-label="Item creation steps">${tabs.map(it => it.btnTab)}</div>`.appendTo(wrp);
 		this._decorateTabsA11y({tabs, wrpTabHeads});
 		this._wrpValidation = ee`<div class="mkbru_item__validation-slot"></div>`.appendTo(wrp);
 		this._refreshValidation();
@@ -271,6 +275,13 @@ export class ItemBuilder extends BuilderBase {
 	}
 
 	_renderPresetTab ({wrp, cb}) {
+		ee`<header class="mkbru_item__stage-intro">
+			<div>
+				<h2>Define the item</h2>
+				<p>Start from an existing item or establish the identity of a new one.</p>
+			</div>
+			<span>Base</span>
+		</header>`.appendTo(wrp);
 		const btnChoose = ee`<button class="ve-btn ve-btn-primary ve-btn-sm">Choose catalog preset</button>`
 			.onn("click", () => this.pHandleClickLoadExisting());
 		const presetName = this._draft.preset ? `${this._draft.preset.name} (${this._draft.preset.source})` : "No preset selected";
@@ -300,6 +311,13 @@ export class ItemBuilder extends BuilderBase {
 	}
 
 	_renderCompositionTab ({wrp}) {
+		ee`<header class="mkbru_item__stage-intro">
+			<div>
+				<h2>Shape the composition</h2>
+				<p>Compare compatible materials, upgrades, and gemstones without losing their source provenance.</p>
+			</div>
+			<span>Composition</span>
+		</header>`.appendTo(wrp);
 		const selected = [
 			this._draft.material ? `Material: ${this._draft.material.name} (${this._draft.material.source})` : null,
 			...this._draft.upgrades.map(it => `Upgrade: ${it.name} (${it.source})`),
@@ -331,6 +349,13 @@ export class ItemBuilder extends BuilderBase {
 	}
 
 	_renderDetailsTab ({wrp, cb}) {
+		ee`<header class="mkbru_item__stage-intro">
+			<div>
+				<h2>Describe the result</h2>
+				<p>Add the mechanics and rules text that belong to this specific item.</p>
+			</div>
+			<span>Details</span>
+		</header>`.appendTo(wrp);
 		const wrpMechanics = ee`<section class="mkbru_item__section"><h3>Mechanics</h3></section>`.appendTo(wrp);
 		this._renderMechanicsTab({wrp: wrpMechanics, cb});
 		const wrpDescription = ee`<section class="mkbru_item__section"><h3>Description</h3></section>`.appendTo(wrp);
@@ -434,16 +459,31 @@ export class ItemBuilder extends BuilderBase {
 		const btnSave = ee`<button class="ve-btn ve-btn-success mkbru_item__review-save" ${validation.isValid ? "" : "disabled"} aria-disabled="${!validation.isValid}">
 			<span class="glyphicon glyphicon-floppy-disk"></span> Save item
 		</button>`.onn("click", () => this.pDoHandleClickSaveBrew());
+		ee`<header class="mkbru_item__stage-intro">
+			<div>
+				<h2>Confirm the finished item</h2>
+				<p>Review the resolved mechanics and publication details before saving.</p>
+			</div>
+			<span>Review &amp; Save</span>
+		</header>`.appendTo(wrp);
 		ee`<section class="mkbru_item__review">
 			<div class="mkbru_item__review-summary">
 				<h3>Review your item</h3>
-				<p><strong>${(this._draft.item.name || "Unnamed item").qq()}</strong> \u00b7 ${type.qq()}</p>
-				<p><strong>Saved under:</strong> ${(Parser.sourceJsonToFull(this._draft.item.source) || "No source").qq()}</p>
-				<p>${(composition.length ? composition.join(" \u00b7 ") : "No composition options selected.").qq()}</p>
-				<p>The saved JSON keeps composition references lean; this preview resolves their mechanics.</p>
+				<div class="mkbru_item__review-identity">
+					<strong>${(this._draft.item.name || "Unnamed item").qq()}</strong>
+					<span>${type.qq()}</span>
+				</div>
+				<dl class="mkbru_item__review-facts">
+					<div><dt>Saved under</dt><dd>${(Parser.sourceJsonToFull(this._draft.item.source) || "No source").qq()}</dd></div>
+					<div><dt>Composition</dt><dd>${(composition.length ? composition.join(" \u00b7 ") : "No composition options selected.").qq()}</dd></div>
+				</dl>
+				<p class="ve-muted ve-small">The saved JSON keeps composition references lean; this preview resolves their mechanics.</p>
 				${btnSave}
 			</div>
-			<div class="mkbru_item__review-preview"><table class="ve-w-100 ve-stats" aria-label="Item preview">${Renderer.item.getCompactRenderedString(item)}</table></div>
+			<div class="mkbru_item__review-preview">
+				<div class="mkbru_item__review-preview-label">Resolved preview</div>
+				<table class="ve-w-100 ve-stats" aria-label="Item preview">${Renderer.item.getCompactRenderedString(item)}</table>
+			</div>
 		</section>`.appendTo(wrp);
 	}
 
