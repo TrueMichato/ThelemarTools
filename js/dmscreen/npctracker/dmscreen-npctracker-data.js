@@ -158,15 +158,14 @@ async function _pLoadBrew (page) {
 }
 
 function _getDedupedByName (entities) {
-	const out = [];
-	const seen = new Set();
+	const byName = new Map();
 	entities.forEach(entity => {
 		const key = `${entity?.name ?? ""}`.trim().toLowerCase();
-		if (!key || seen.has(key)) return;
-		seen.add(key);
-		out.push(entity);
+		if (!key) return;
+		const existing = byName.get(key);
+		if (!existing || (existing.source == null && entity.source != null)) byName.set(key, entity);
 	});
-	return out.sort((a, b) => SortUtil.ascSortLower(a.label, b.label));
+	return [...byName.values()].sort((a, b) => SortUtil.ascSortLower(a.label, b.label));
 }
 
 function _getDedupedSkills (entities) {

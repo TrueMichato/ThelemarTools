@@ -10,6 +10,7 @@ import {
 import {
 	getNpcTrackerDetailModel,
 	getNpcTrackerDisplayName,
+	getNpcTrackerProficiencyBonusText,
 	getNpcTrackerSignedNumber,
 	hasNpcTrackerAttackRoll,
 } from "../../js/dmscreen/npctracker/dmscreen-npctracker-detail.js";
@@ -18,6 +19,7 @@ import {
 	getNpcTrackerInitiativeHandoff,
 	getNpcTrackerNpcsForScope,
 	getNpcTrackerRollBonus,
+	getNpcTrackerConditionRollMeta,
 	getNpcTrackerRollLabel,
 	sortNpcTrackerBatchResults,
 } from "../../js/dmscreen/npctracker/dmscreen-npctracker-roll.js";
@@ -28,8 +30,14 @@ import {
 } from "../../js/dmscreen/npctracker/dmscreen-npctracker-hp.js";
 import {
 	getNpcTrackerCanonicalConditionName,
+	getNpcTrackerConditionHoverMeta,
 	getNpcTrackerConditionsAfterUpdate,
 } from "../../js/dmscreen/npctracker/dmscreen-npctracker-condition.js";
+import {
+	getNpcTrackerAttackBonus,
+	getNpcTrackerChargeDefaults,
+	getNpcTrackerSpellSlotDefaults,
+} from "../../js/dmscreen/npctracker/dmscreen-npctracker-resource.js";
 
 const getMonster = () => ({
 	name: "Court Mage",
@@ -42,6 +50,7 @@ const getMonster = () => ({
 	int: 17,
 	wis: 12,
 	cha: 13,
+	cr: "5",
 	save: {int: "+5"},
 	skill: {arcana: "+5", history: "+5"},
 	trait: [{name: "Courtier", entries: ["The mage knows court protocol."]}],
@@ -74,11 +83,12 @@ describe("NPC Tracker serialization", () => {
 		});
 		const restored = NpcTrackerSerializer.deserialize(saved);
 
-		expect(saved.v).toBe(3);
+		expect(saved.v).toBe(4);
 		expect(restored.settings).toEqual({
 			selectedId: npc.id,
 			isIncludeAllCreatures: true,
 			isUnsortedCollapsed: true,
+			textSize: "normal",
 		});
 		expect(restored.groups).toEqual([{id: "court", name: "Town Council", isCollapsed: true}]);
 		expect(restored.npcs[0]).toMatchObject({
@@ -133,6 +143,7 @@ describe("NPC Tracker serialization", () => {
 			selectedId: "legacy",
 			isIncludeAllCreatures: true,
 			isUnsortedCollapsed: false,
+			textSize: "normal",
 		});
 		expect(restored.npcs[0]).toMatchObject({
 			id: "legacy",
@@ -140,11 +151,13 @@ describe("NPC Tracker serialization", () => {
 			groupId: null,
 			hp: {current: 9, max: 27, temp: 2},
 			conditions: [],
+			spellSlots: {},
+			charges: [],
 			fluff: {entries: ["Preserved lore."]},
 		});
 	});
 
-	it("migrates version 2 saves with default-safe conditions", () => {
+	it("migrates version 2 saves with default-safe live-play fields", () => {
 		const restored = NpcTrackerSerializer.deserialize({
 			v: 2,
 			g: [{id: "court", n: "Town Council"}],
@@ -156,11 +169,13 @@ describe("NPC Tracker serialization", () => {
 			}],
 		});
 
-		expect(restored.version).toBe(3);
+		expect(restored.version).toBe(4);
 		expect(restored.npcs[0]).toMatchObject({
 			id: "legacy-v2",
 			groupId: "court",
 			conditions: [],
+			spellSlots: {},
+			charges: [],
 		});
 	});
 
@@ -224,7 +239,21 @@ describe("NPC Tracker conditions", () => {
 				mon: getMonster(),
 			}],
 		});
+
 		expect(restored.npcs[0].conditions).toEqual(["poisoned", "made-up"]);
+	});
+
+	it("builds hover metadata for site and homebrew catalog conditions only", () => {
+		const conditionCatalog = [
+			{name: "poisoned", label: "Poisoned", source: "XPHB"},
+			{name: "dreambound", label: "Dreambound", source: "HB"},
+		];
+		expect(getNpcTrackerConditionHoverMeta("Poisoned", {conditionCatalog})).toMatchObject({
+			page: UrlUtil.PG_CONDITIONS_DISEASES,
+			source: "XPHB",
+		});
+		expect(getNpcTrackerConditionHoverMeta("dreambound", {conditionCatalog})).toMatchObject({source: "HB"});
+		expect(getNpcTrackerConditionHoverMeta("custom", {conditionCatalog})).toBeNull();
 	});
 });
 
@@ -323,6 +352,32 @@ describe("NPC Tracker batch rolls", () => {
 		}).map(it => it.name)).toEqual(["Alpha", "Bravo", "Charlie"]);
 	});
 
+	it("applies condition roll effects and cancels advantage against disadvantage", () => {
+		expect(getNpcTrackerConditionRollMeta({
+			npc: {conditions: ["poisoned"]},
+			rollType: "skill",
+			key: "stealth",
+		})).toMatchObject({mode: "disadvantage", reasons: ["Poisoned"]});
+		expect(getNpcTrackerConditionRollMeta({
+			npc: {conditions: ["restrained"]},
+			rollType: "save",
+			key: "dex",
+		})).toMatchObject({mode: "disadvantage"});
+		expect(getNpcTrackerConditionRollMeta({
+			npc: {conditions: ["stunned"]},
+			rollType: "save",
+			key: "str",
+		})).toMatchObject({mode: "autoFail"});
+		expect(getNpcTrackerConditionRollMeta({
+			npc: {conditions: ["invisible", "poisoned"]},
+			rollType: "attack",
+		})).toMatchObject({mode: "normal"});
+		expect(getNpcTrackerConditionRollMeta({
+			npc: {conditions: ["dreambound"]},
+			rollType: "attack",
+		})).toEqual({mode: "normal", reasons: [], statusText: ""});
+	});
+
 	it("builds complete initiative handoffs and blocks incomplete batches", () => {
 		const state = {
 			npcs: [
@@ -364,6 +419,20 @@ describe("NPC Tracker detail model", () => {
 		expect(model.spellcasting[0].name).toBe("Spellcasting");
 		expect(model.attacks.map(it => it.name)).toEqual(["Dagger"]);
 		expect(model.fluffEntries).toEqual(["A patient adviser."]);
+		expect(getNpcTrackerProficiencyBonusText(getMonster())).toBe("+3");
+	});
+
+	it("orders Special Equipment first and prefers an explicit PB note", () => {
+		const monster = {
+			...getMonster(),
+			pbNote: "equals its summoner's",
+			trait: [
+				{name: "Courtier", entries: ["Court protocol."]},
+				{name: "SPECIAL EQUIPMENT", entries: ["A charged wand."]},
+			],
+		};
+		expect(getNpcTrackerDetailModel(monster).traits.map(it => it.name)).toEqual(["SPECIAL EQUIPMENT", "Courtier"]);
+		expect(getNpcTrackerProficiencyBonusText(monster)).toBe("equals its summoner's");
 	});
 
 	it("recognizes attacks and formats roll/display labels", () => {
@@ -372,6 +441,61 @@ describe("NPC Tracker detail model", () => {
 		expect(getNpcTrackerSignedNumber("+5")).toBe("+5");
 		expect(getNpcTrackerSignedNumber(-2)).toBe("-2");
 		expect(getNpcTrackerDisplayName({alias: "Vale", monster: {name: "Mage"}})).toBe("Vale");
+	});
+});
+
+describe("NPC Tracker resources", () => {
+	it("derives spell slots and charged Special Equipment", () => {
+		const monster = {
+			...getMonster(),
+			spellcasting: [{
+				name: "Spellcasting",
+				spells: {
+					"0": {spells: ["{@spell light}"]},
+					"1": {slots: 4, spells: ["{@spell shield}"]},
+					"2": {slots: 2, spells: ["{@spell misty step}"]},
+				},
+			}],
+			trait: [{
+				name: "Special Equipment",
+				entries: ["The moon wand has 7 charges. It regains charges at dawn."],
+			}],
+		};
+		expect(getNpcTrackerSpellSlotDefaults(monster)).toEqual({
+			"1": {current: 4, max: 4},
+			"2": {current: 2, max: 2},
+		});
+		expect(getNpcTrackerChargeDefaults(monster)).toEqual([
+			expect.objectContaining({name: "Moon Wand", current: 7, max: 7, isAuto: true}),
+		]);
+	});
+
+	it("round-trips spent slots, charge trackers, and large text", () => {
+		const monster = {
+			...getMonster(),
+			spellcasting: [{spells: {"1": {slots: 3, spells: ["{@spell shield}"]}}}],
+		};
+		const npc = NpcTrackerSerializer.createNpc({monster});
+		npc.spellSlots["1"].current = 1;
+		npc.charges.push({id: "wand", name: "Wand", current: 2, max: 5, isAuto: false});
+		const restored = NpcTrackerSerializer.deserialize(NpcTrackerSerializer.serialize({
+			settings: {selectedId: npc.id, textSize: "large"},
+			npcs: [npc],
+		}));
+		expect(restored.settings.textSize).toBe("large");
+		expect(restored.npcs[0].spellSlots).toEqual({"1": {current: 1, max: 3}});
+		expect(restored.npcs[0].charges).toContainEqual({
+			id: "wand",
+			name: "Wand",
+			current: 2,
+			max: 5,
+			isAuto: false,
+		});
+	});
+
+	it("extracts attack bonuses without inventing missing rolls", () => {
+		expect(getNpcTrackerAttackBonus({entries: ["{@atk mw} {@hit +6} to hit."]})).toBe(6);
+		expect(getNpcTrackerAttackBonus({entries: ["The target must save."]})).toBeNull();
 	});
 });
 

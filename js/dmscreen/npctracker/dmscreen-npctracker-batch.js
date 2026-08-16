@@ -242,9 +242,11 @@ export class NpcTrackerBatch {
 			const eleName = ee`<div class="dm-npc__batch-result-name" role="cell"></div>`;
 			eleName.textContent = result.name;
 			const eleFormula = ee`<div class="dm-npc__batch-result-formula" role="cell"></div>`;
-			eleFormula.textContent = `${result.die} ${getNpcTrackerSignedNumber(result.bonus)}`;
+			eleFormula.textContent = result.mode === "autoFail"
+				? result.statusText
+				: `${result.die} ${getNpcTrackerSignedNumber(result.bonus)}${result.statusText ? ` \u00b7 ${result.statusText}` : ""}`;
 			const eleTotal = ee`<strong class="dm-npc__batch-result-total" role="cell"></strong>`;
-			eleTotal.textContent = result.total;
+			eleTotal.textContent = result.total == null ? "\u2014" : result.total;
 			ee`<div class="dm-npc__batch-result-row" role="row">${eleName}${eleFormula}${eleTotal}</div>`.appendTo(table);
 		});
 		table.appendTo(wrp);

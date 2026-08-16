@@ -16,7 +16,7 @@ The NPC Manager is DM Screen panel type 26. It keeps independent NPC instances i
 
 `NpcTrackerRoot` owns state and wires the roster, detail, and batch components through callbacks. Every persisted mutation ends at `_doSave()` and `board.doSaveStateDebounced()`. Batch configuration and results are intentionally in-memory; each underlying roll is retained by the normal dice roll log.
 
-## State and serializer v3
+## State and serializer v4
 
 The expanded state is:
 
@@ -27,6 +27,7 @@ The expanded state is:
     selectedId: null,
     isIncludeAllCreatures: false,
     isUnsortedCollapsed: false,
+    textSize: "normal",
   },
   groups: [
     {id: "group-id", name: "Town Council", isCollapsed: false},
@@ -38,6 +39,8 @@ The expanded state is:
       groupId: "group-id",
       hp: {current: 27, max: 27, temp: 0},
       conditions: ["poisoned"],
+      spellSlots: {"1": {current: 3, max: 4}},
+      charges: [{id: "wand", name: "Moon Wand", current: 5, max: 7, isAuto: true}],
       monster: {/* bestiary entity */},
       fluff: null,
     },
@@ -45,13 +48,15 @@ The expanded state is:
 }
 ```
 
-Serialized keys are `v`, `s:{sel,all,uc}`, `g:[{id,n,c}]`, and `n:[{id,a,g,hp:{c,m,t},c,mon,fluff}]`.
+Serialized keys are `v`, `s:{sel,all,uc,ts}`, `g:[{id,n,c}]`, and `n:[{id,a,g,hp:{c,m,t},c,ss,ch,mon,fluff}]`. Spell slots use `ss:{level:{c,m}}`; charge trackers use `ch:[{id,n,c,m,a}]`, where `a` marks a statblock-derived tracker.
 
 Membership lives on each NPC as `groupId`. This guarantees that duplicate instances of the same monster can be assigned independently and prevents one NPC from belonging to multiple groups. Deleting a group clears matching memberships; it never deletes NPCs.
 
 Version 1 saves have no groups or memberships. Deserialization defaults them to `groups: []`, `groupId: null`, and an expanded Unsorted section. Invalid group records are dropped, duplicate group IDs are ignored after the first, and dangling NPC memberships are repaired to Unsorted.
 
 Version 2 saves have no conditions. Serializer v3 defaults every migrated NPC to `conditions: []`. Condition names are normalized and deduplicated, but are not checked against a fixed parser list. This is intentional: an installed-brew condition must survive save/load even when that brew is temporarily unavailable.
+
+Version 3 saves have no text-size or resource state. Serializer v4 defaults `textSize` to `normal`, derives full spell slots from `monster.spellcasting[].spells[level].slots`, and detects charged items from Special Equipment text. Saved current values are clamped to their maxima. Existing saves therefore gain usable trackers without losing HP, conditions, memberships, or selection.
 
 ## Site and homebrew reference data
 
@@ -124,11 +129,22 @@ Encounter Control presents roll type, governing ability/skill, and the primary R
 - HP expressions accept damage (`30` or `-30`), healing (`+12`), absolute values (`=15`), and dice (`8d6`). The optional **Half** toggle rounds toward zero using the Initiative Tracker's shared rule. Damage consumes temporary HP before current HP, and healing is capped at maximum HP.
 - The last five batch HP operations are available to the session-only **Undo HP** stack. The roster state itself still saves after every apply or undo.
 - Conditions come from the merged site and installed-brew catalog. Each roster row and selected-NPC header has a quick-add selector; active chips remove their condition in one click. Batch add/remove still operates on every selected NPC. All paths use `getNpcTrackerConditionsAfterUpdate()`, persist independently for duplicate instances, and render consistently in roster and detail views. A saved condition remains visible and removable even if its brew source is later removed.
+- Catalog-backed condition chips use the standard Conditions & Diseases hover, including installed homebrew sources. A custom condition with no current catalog entity remains visible and removable but has no hover target.
+- Standard mechanical conditions affect NPC Manager rolls. Poisoned and Frightened impose disadvantage on checks and attacks; Blinded, Restrained, Prone, and Invisible affect attacks; Restrained affects Dexterity saves; incapacitating conditions prevent attacks and can automatically fail Strength or Dexterity saves. Advantage and disadvantage cancel normally, and every affected result identifies the condition. Unknown homebrew conditions do not invent mechanics.
 - A complete initiative batch can be appended to an existing Initiative Tracker. The handoff preserves each selected NPC's exact rolled total, alias and monster identity, current/maximum/temporary HP, and conditions. It respects the tracker lock and is intentionally a one-way snapshot; Initiative Tracker owns combat state after handoff.
+
+## Roleplay and resource depth
+
+- Special Equipment is normalized to the first Roleplay Traits entry, case-insensitively. Current bestiary data stores it as a trait; direct `specialEquipment` data is also accepted.
+- Proficiency Bonus appears with the core abilities and saves. Explicit `pbNote` text wins; otherwise the value is derived from CR with `Parser.crToPb()`.
+- Spellcasting NPCs receive level-by-level current/maximum slot controls. **Cast** spends one slot, **+1** restores one, and **Reset** restores the level to maximum.
+- Special Equipment prose such as “the moon wand has 7 charges” seeds an item-charge tracker. DMs can spend, restore, reset, rename, resize, remove, or manually add trackers when the source prose is unstructured.
 
 ## Responsive behavior
 
 Wide panels show the grouped roster and current detail/batch workspace side by side. Roster rows prioritize live-play controls: identity, HP, and conditions remain visible, while alias, group assignment, and removal live behind **Edit NPC**. The toolbar separates the primary **Add NPC** action from grouping, import, and encounter-wide controls.
+
+The toolbar also provides **A / A+** text sizing. The choice persists with the panel and increases the NPC Manager's information text without changing global site typography.
 
 The detail workspace keeps identity, HP, conditions, and the roleplay/statblock switch in a persistent command header. Encounter Control follows the table workflow from targets to roll setup, results/initiative handoff, then reversible HP and condition actions.
 

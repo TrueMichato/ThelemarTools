@@ -31,6 +31,7 @@ export class NpcTrackerRoster {
 			fnUpdateNpc,
 			fnRemove,
 			fnToggleIncludeAll,
+			fnSetTextSize,
 			fnAddGroup,
 			fnRenameGroup,
 			fnRemoveGroup,
@@ -49,6 +50,7 @@ export class NpcTrackerRoster {
 		this._fnUpdateNpc = fnUpdateNpc;
 		this._fnRemove = fnRemove;
 		this._fnToggleIncludeAll = fnToggleIncludeAll;
+		this._fnSetTextSize = fnSetTextSize;
 		this._fnAddGroup = fnAddGroup;
 		this._fnRenameGroup = fnRenameGroup;
 		this._fnRemoveGroup = fnRemoveGroup;
@@ -89,10 +91,23 @@ export class NpcTrackerRoster {
 
 		const eleCount = ee`<span class="dm-npc__count"></span>`;
 		eleCount.textContent = `${state.npcs.length} ${state.npcs.length === 1 ? "NPC" : "NPCs"}`;
+		const wrpTextSize = ee`<div class="ve-btn-group dm-npc__text-size" role="group" aria-label="NPC Manager text size"></div>`;
+		[
+			{value: "normal", label: "A", title: "Normal text"},
+			{value: "large", label: "A+", title: "Large text"},
+		].forEach(({value, label, title}) => {
+			const button = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" type="button"></button>`;
+			button.textContent = label;
+			button.title = title;
+			button.attr("aria-pressed", state.settings.textSize === value ? "true" : "false");
+			button.classList.toggle("active", state.settings.textSize === value);
+			button.onn("click", () => this._fnSetTextSize(value));
+			button.appendTo(wrpTextSize);
+		});
 
 		ee`<div class="dm-npc__roster-toolbar">
 			<div class="dm-npc__roster-primary">${btnAdd}${eleCount}</div>
-			<div class="dm-npc__roster-secondary">${btnRollAll}${btnAddGroup}${btnImport}</div>
+			<div class="dm-npc__roster-secondary">${btnRollAll}${btnAddGroup}${btnImport}${wrpTextSize}</div>
 			${iptImport}
 			<label class="dm-npc__all-toggle">${cbAll}<span>All creatures</span></label>
 		</div>`.appendTo(wrp);

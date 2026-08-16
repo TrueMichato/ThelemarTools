@@ -1,5 +1,10 @@
+import {
+	getNpcTrackerChargeDefaults,
+	getNpcTrackerSpellSlotDefaults,
+} from "./dmscreen-npctracker-resource.js";
+
 export class NpcTrackerSerializer {
-	static VERSION = 3;
+	static VERSION = 4;
 
 	static getDefaultState () {
 		return {
@@ -8,6 +13,7 @@ export class NpcTrackerSerializer {
 				selectedId: null,
 				isIncludeAllCreatures: false,
 				isUnsortedCollapsed: false,
+				textSize: "normal",
 			},
 			groups: [],
 			npcs: [],
@@ -28,6 +34,8 @@ export class NpcTrackerSerializer {
 				temp: 0,
 			},
 			conditions: [],
+			spellSlots: getNpcTrackerSpellSlotDefaults(monster),
+			charges: getNpcTrackerChargeDefaults(monster),
 			monster: MiscUtil.copyFast(monster),
 			fluff: fluff ? MiscUtil.copyFast(fluff) : null,
 		};
@@ -41,6 +49,7 @@ export class NpcTrackerSerializer {
 				sel: clean.settings.selectedId,
 				all: clean.settings.isIncludeAllCreatures,
 				uc: clean.settings.isUnsortedCollapsed,
+				ts: clean.settings.textSize,
 			},
 			g: clean.groups.map(group => ({
 				id: group.id,
@@ -57,6 +66,17 @@ export class NpcTrackerSerializer {
 					t: npc.hp.temp,
 				},
 				c: [...npc.conditions],
+				ss: Object.fromEntries(Object.entries(npc.spellSlots).map(([level, slots]) => [level, {
+					c: slots.current,
+					m: slots.max,
+				}])),
+				ch: npc.charges.map(charge => ({
+					id: charge.id,
+					n: charge.name,
+					c: charge.current,
+					m: charge.max,
+					a: charge.isAuto,
+				})),
 				mon: MiscUtil.copyFast(npc.monster),
 				fluff: npc.fluff ? MiscUtil.copyFast(npc.fluff) : null,
 			})),
@@ -89,6 +109,7 @@ export class NpcTrackerSerializer {
 		const rawSettings = raw.s || raw.settings || {};
 		out.settings.isIncludeAllCreatures = !!(rawSettings.all ?? rawSettings.isIncludeAllCreatures);
 		out.settings.isUnsortedCollapsed = !!(rawSettings.uc ?? rawSettings.isUnsortedCollapsed);
+		out.settings.textSize = this._getTextSize(rawSettings.ts ?? rawSettings.textSize);
 
 		const selectedId = rawSettings.sel ?? rawSettings.selectedId ?? null;
 		out.settings.selectedId = out.npcs.some(npc => npc.id === selectedId)
@@ -129,6 +150,8 @@ export class NpcTrackerSerializer {
 				temp: this._getNonNegativeNumber(rawHp.t ?? rawHp.temp, 0),
 			},
 			conditions: this._getConditions(rawNpc.c ?? rawNpc.conditions),
+			spellSlots: this._getSpellSlots(rawNpc.ss ?? rawNpc.spellSlots, monster),
+			charges: this._getCharges(rawNpc.ch ?? rawNpc.charges, monster),
 			monster: MiscUtil.copyFast(monster),
 			fluff: rawNpc.fluff ? MiscUtil.copyFast(rawNpc.fluff) : null,
 		};
@@ -148,6 +171,51 @@ export class NpcTrackerSerializer {
 		return [...new Set(conditions
 			.map(condition => `${condition ?? ""}`.trim().toLowerCase())
 			.filter(Boolean))];
+	}
+
+	static _getTextSize (value) {
+		return value === "large" ? "large" : "normal";
+	}
+
+	static _getSpellSlots (spellSlots, monster) {
+		const defaults = getNpcTrackerSpellSlotDefaults(monster);
+		if (!spellSlots || typeof spellSlots !== "object" || Array.isArray(spellSlots)) return defaults;
+
+		const out = {};
+		const levels = new Set([...Object.keys(defaults), ...Object.keys(spellSlots)]);
+		levels.forEach(level => {
+			const levelNumber = Number(level);
+			if (!Number.isInteger(levelNumber) || levelNumber < 1) return;
+			const rawSlots = spellSlots[level] || {};
+			const defaultMax = defaults[level]?.max || 0;
+			const max = Math.floor(this._getNonNegativeNumber(rawSlots.m ?? rawSlots.max, defaultMax));
+			if (!max) return;
+			const current = Math.floor(this._getNonNegativeNumber(rawSlots.c ?? rawSlots.current, max));
+			out[level] = {current: Math.min(current, max), max};
+		});
+		return out;
+	}
+
+	static _getCharges (charges, monster) {
+		const defaults = getNpcTrackerChargeDefaults(monster);
+		if (!Array.isArray(charges)) return defaults;
+		const seenIds = new Set();
+		return charges.map(rawCharge => {
+			if (!rawCharge || typeof rawCharge !== "object") return null;
+			const name = `${rawCharge.n ?? rawCharge.name ?? ""}`.trim();
+			const max = Math.floor(this._getNonNegativeNumber(rawCharge.m ?? rawCharge.max, 0));
+			if (!name || max < 1) return null;
+			const id = `${rawCharge.id || CryptUtil.uid()}`;
+			if (seenIds.has(id)) return null;
+			seenIds.add(id);
+			return {
+				id,
+				name,
+				current: Math.min(Math.floor(this._getNonNegativeNumber(rawCharge.c ?? rawCharge.current, max)), max),
+				max,
+				isAuto: !!(rawCharge.a ?? rawCharge.isAuto),
+			};
+		}).filter(Boolean);
 	}
 }
 
