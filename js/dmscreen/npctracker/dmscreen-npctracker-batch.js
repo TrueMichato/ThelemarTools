@@ -3,6 +3,7 @@ import {
 	getNpcTrackerSignedNumber,
 	sortNpcTrackerBatchResults,
 } from "./dmscreen-npctracker-roll.js";
+import {getNpcTrackerSkillDescriptors} from "./dmscreen-npctracker-data.js";
 
 export class NpcTrackerBatch {
 	constructor ({fnGetContext, fnUpdateConfig, fnRoll, fnSort, fnToggleNpc, fnToggleAll, fnApplyHp, fnUndoHp, fnUpdateCondition, fnSendInitiative}) {
@@ -20,7 +21,7 @@ export class NpcTrackerBatch {
 
 	render ({wrp, isNarrow = false, fnShowRoster = null}) {
 		wrp.empty();
-		const {batch, npcs, hasHpUndo} = this._fnGetContext();
+		const {batch, npcs, hasHpUndo, referenceData} = this._fnGetContext();
 		if (!batch) return;
 
 		const btnBack = isNarrow
@@ -39,7 +40,11 @@ export class NpcTrackerBatch {
 		</div>`;
 		const wrpBody = wrpBatch.querySelector(".dm-npc__batch-body");
 
-		this._renderRollControls({batch, selectedCount, wrp: wrpBody});
+		const skills = getNpcTrackerSkillDescriptors({
+			skillCatalog: referenceData.skills,
+			monsters: npcs.map(npc => npc.monster),
+		});
+		this._renderRollControls({batch, selectedCount, skills, wrp: wrpBody});
 		this._renderMembers({batch, npcs, wrp: wrpBody});
 
 		if (batch.error) {
@@ -64,11 +69,11 @@ export class NpcTrackerBatch {
 			eleEmpty.appendTo(wrpBody);
 		}
 
-		this._renderEncounterOperations({batch, selectedCount, hasHpUndo, wrp: wrpBody});
+		this._renderEncounterOperations({batch, selectedCount, hasHpUndo, conditionCatalog: referenceData.conditions, wrp: wrpBody});
 		wrpBatch.appendTo(wrp);
 	}
 
-	_renderRollControls ({batch, selectedCount, wrp}) {
+	_renderRollControls ({batch, selectedCount, skills, wrp}) {
 		const selType = ee`<select class="ve-form-control ve-select ve-select-xs" aria-label="Batch roll type"></select>`;
 		NPC_TRACKER_ROLL_TYPES.forEach(({id, name}) => {
 			const option = ee`<option value="${id}"></option>`;
@@ -79,10 +84,10 @@ export class NpcTrackerBatch {
 		selType.disabled = batch.isRolling;
 		selType.onn("change", evt => this._fnUpdateConfig({
 			rollType: evt.currentTarget.value,
-			key: this._getDefaultKey(evt.currentTarget.value),
+			key: this._getDefaultKey(evt.currentTarget.value, skills),
 		}));
 
-		const selKey = this._getKeySelect(batch);
+		const selKey = this._getKeySelect(batch, skills);
 		if (selKey) {
 			selKey.disabled = batch.isRolling;
 			selKey.onn("change", evt => this._fnUpdateConfig({key: evt.currentTarget.value}));
@@ -133,7 +138,7 @@ export class NpcTrackerBatch {
 		wrpMembers.appendTo(wrp);
 	}
 
-	_renderEncounterOperations ({batch, selectedCount, hasHpUndo, wrp}) {
+	_renderEncounterOperations ({batch, selectedCount, hasHpUndo, conditionCatalog, wrp}) {
 		const wrpOperations = ee`<details class="dm-npc__batch-operations" ${batch.isOperationsExpanded ? "open" : ""}>
 			<summary><strong>Encounter actions</strong><span>HP and conditions for selected NPCs</span></summary>
 			<div class="dm-npc__batch-operations-body"></div>
@@ -141,7 +146,7 @@ export class NpcTrackerBatch {
 		wrpOperations.onn("toggle", () => batch.isOperationsExpanded = wrpOperations.open);
 		const body = wrpOperations.querySelector(".dm-npc__batch-operations-body");
 		this._renderHpControls({batch, selectedCount, hasHpUndo, wrp: body});
-		this._renderConditionControls({batch, selectedCount, wrp: body});
+		this._renderConditionControls({batch, selectedCount, conditionCatalog, wrp: body});
 		wrpOperations.appendTo(wrp);
 	}
 
@@ -161,11 +166,11 @@ export class NpcTrackerBatch {
 		</section>`.appendTo(wrp);
 	}
 
-	_renderConditionControls ({batch, selectedCount, wrp}) {
+	_renderConditionControls ({batch, selectedCount, conditionCatalog, wrp}) {
 		const select = ee`<select class="ve-form-control ve-select ve-select-xs dm-npc__batch-condition-select" aria-label="Condition"></select>`;
-		Parser.CONDITIONS.forEach(condition => {
-			const option = ee`<option value="${condition}"></option>`;
-			option.textContent = condition.toTitleCase();
+		conditionCatalog.forEach(condition => {
+			const option = ee`<option value="${condition.name}"></option>`;
+			option.textContent = condition.label;
 			option.appendTo(select);
 		});
 		const btnAdd = ee`<button class="ve-btn ve-btn-primary ve-btn-xs" type="button">Add</button>`
@@ -175,7 +180,7 @@ export class NpcTrackerBatch {
 		btnAdd.disabled = btnRemove.disabled = batch.isRolling || !selectedCount;
 
 		ee`<section class="dm-npc__batch-operation dm-npc__batch-operation--conditions">
-			<div><strong>Conditions</strong><span class="dm-npc__batch-operation-help">Apply or remove a standard condition for every selected NPC.</span></div>
+			<div><strong>Conditions</strong><span class="dm-npc__batch-operation-help">Apply or remove a condition for every selected NPC.</span></div>
 			<div class="dm-npc__batch-operation-controls">${select}${btnAdd}${btnRemove}</div>
 		</section>`.appendTo(wrp);
 	}
@@ -193,24 +198,24 @@ export class NpcTrackerBatch {
 		ee`<div class="dm-npc__batch-handoff">${button}</div>`.appendTo(wrp);
 	}
 
-	_getKeySelect (batch) {
+	_getKeySelect (batch, skills) {
 		if (batch.rollType === "initiative") return null;
 		const values = batch.rollType === "skill"
-			? Object.keys(Parser.SKILL_TO_ATB_ABV)
-			: Parser.ABIL_ABVS;
+			? skills
+			: Parser.ABIL_ABVS.map(value => ({id: value, label: Parser.attAbvToFull(value)}));
 		const select = ee`<select class="ve-form-control ve-select ve-select-xs" aria-label="Batch roll ability or skill"></select>`;
 		values.forEach(value => {
-			const option = ee`<option value="${value}"></option>`;
-			option.textContent = batch.rollType === "skill" ? value.toTitleCase() : Parser.attAbvToFull(value);
+			const option = ee`<option value="${value.id}"></option>`;
+			option.textContent = value.label;
 			option.appendTo(select);
 		});
 		select.value = batch.key;
 		return select;
 	}
 
-	_getDefaultKey (rollType) {
+	_getDefaultKey (rollType, skills) {
 		if (rollType === "initiative") return null;
-		if (rollType === "skill") return "perception";
+		if (rollType === "skill") return skills.find(it => it.name === "perception")?.id || skills[0]?.id || null;
 		return "dex";
 	}
 

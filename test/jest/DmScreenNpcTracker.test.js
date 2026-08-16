@@ -200,14 +200,14 @@ describe("NPC Tracker serialization", () => {
 });
 
 describe("NPC Tracker conditions", () => {
-	it("uses the canonical Parser condition list and deduplicates updates", () => {
+	it("normalizes standard and homebrew condition names and deduplicates updates", () => {
 		expect(getNpcTrackerCanonicalConditionName(" Poisoned ")).toBe("poisoned");
-		expect(getNpcTrackerCanonicalConditionName("custom")).toBeNull();
+		expect(getNpcTrackerCanonicalConditionName("custom")).toBe("custom");
 		expect(getNpcTrackerConditionsAfterUpdate({
 			conditions: ["poisoned", "poisoned", "custom"],
 			condition: "prone",
 			isAdd: true,
-		})).toEqual(["poisoned", "prone"]);
+		})).toEqual(["poisoned", "custom", "prone"]);
 		expect(getNpcTrackerConditionsAfterUpdate({
 			conditions: ["poisoned", "prone"],
 			condition: "poisoned",
@@ -215,7 +215,7 @@ describe("NPC Tracker conditions", () => {
 		})).toEqual(["prone"]);
 	});
 
-	it("repairs invalid serialized conditions", () => {
+	it("preserves normalized homebrew conditions while dropping empty values", () => {
 		const restored = NpcTrackerSerializer.deserialize({
 			v: 3,
 			n: [{
@@ -224,7 +224,7 @@ describe("NPC Tracker conditions", () => {
 				mon: getMonster(),
 			}],
 		});
-		expect(restored.npcs[0].conditions).toEqual(["poisoned"]);
+		expect(restored.npcs[0].conditions).toEqual(["poisoned", "made-up"]);
 	});
 });
 

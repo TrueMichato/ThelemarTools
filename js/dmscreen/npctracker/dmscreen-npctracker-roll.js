@@ -1,3 +1,9 @@
+import {
+	getNpcTrackerMonsterSkillMeta,
+	getNpcTrackerSkillKeyMeta,
+	getNpcTrackerNormalizedSkillName,
+} from "./dmscreen-npctracker-data.js";
+
 export const NPC_TRACKER_ROLL_TYPES = [
 	{id: "initiative", name: "Initiative"},
 	{id: "ability", name: "Ability Check"},
@@ -15,24 +21,34 @@ export function getNpcTrackerSignedNumber (value) {
 	return num >= 0 ? `+${num}` : `${num}`;
 }
 
-export function getNpcTrackerRollBonus ({npc, rollType, key = null}) {
+export function getNpcTrackerRollBonus ({npc, rollType, key = null, skill = null}) {
 	const mon = npc?.monster || {};
 
 	switch (rollType) {
 		case "initiative": return _getFiniteNumber(Renderer.monster.getInitiativeBonusNumber({mon}), 0);
 		case "ability": return _getAbilityModifier(mon, key);
 		case "save": return _getFiniteNumber(mon.save?.[key], _getAbilityModifier(mon, key));
-		case "skill": return _getFiniteNumber(mon.skill?.[key], _getAbilityModifier(mon, Parser.skillToAbilityAbv(key)));
+		case "skill": {
+			const skillMeta = skill || _getLegacySkillMeta(key);
+			const explicit = getNpcTrackerMonsterSkillMeta({monster: mon, skill: skillMeta});
+			if (explicit) {
+				return _getFiniteNumber(
+					explicit.bonus,
+					skillMeta.ability ? _getAbilityModifier(mon, skillMeta.ability) : 0,
+				);
+			}
+			return skillMeta.ability ? _getAbilityModifier(mon, skillMeta.ability) : 0;
+		}
 		default: throw new Error(`Unknown NPC roll type "${rollType}".`);
 	}
 }
 
-export function getNpcTrackerRollLabel ({rollType, key = null}) {
+export function getNpcTrackerRollLabel ({rollType, key = null, skill = null}) {
 	switch (rollType) {
 		case "initiative": return "Initiative";
 		case "ability": return `${Parser.attAbvToFull(key)} check`;
 		case "save": return `${Parser.attAbvToFull(key)} save`;
-		case "skill": return `${key.toTitleCase()} check`;
+		case "skill": return `${skill?.label || getNpcTrackerSkillKeyMeta(key).name.toTitleCase()} check`;
 		default: throw new Error(`Unknown NPC roll type "${rollType}".`);
 	}
 }
@@ -107,4 +123,16 @@ function _getAbilityModifier (mon, ability) {
 function _getFiniteNumber (value, fallback) {
 	const number = Number(value);
 	return Number.isFinite(number) ? number : fallback;
+}
+
+function _getLegacySkillMeta (key) {
+	const {name, source} = getNpcTrackerSkillKeyMeta(key);
+	const parserName = Object.keys(Parser.SKILL_TO_ATB_ABV)
+		.find(it => getNpcTrackerNormalizedSkillName(it) === getNpcTrackerNormalizedSkillName(name));
+	return {
+		name,
+		source,
+		label: name.toTitleCase(),
+		ability: parserName ? Parser.SKILL_TO_ATB_ABV[parserName] : null,
+	};
 }
