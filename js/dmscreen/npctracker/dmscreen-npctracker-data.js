@@ -121,7 +121,7 @@ async function _pLoadConditions (fallback) {
 				source: entity.source || null,
 				color: entity.color || null,
 			}));
-		return _getDedupedByName([...fallback, ...entities]);
+		return _getDedupedConditions([...fallback, ...entities]);
 	} catch (e) {
 		_showLoadWarning("NPC Manager could not load condition reference data. Standard conditions remain available.");
 		return fallback;
@@ -157,13 +157,22 @@ async function _pLoadBrew (page) {
 	}
 }
 
-function _getDedupedByName (entities) {
+export function getNpcTrackerConditionSourceRank (source) {
+	const normalizedSource = `${source ?? ""}`.trim().toUpperCase();
+	if (!normalizedSource) return 0;
+	if (/^TGTT(?:-|$)/.test(normalizedSource)) return 4;
+	if (normalizedSource === "XPHB") return 3;
+	if (normalizedSource === "PHB") return 1;
+	return 2;
+}
+
+function _getDedupedConditions (entities) {
 	const byName = new Map();
 	entities.forEach(entity => {
 		const key = `${entity?.name ?? ""}`.trim().toLowerCase();
 		if (!key) return;
 		const existing = byName.get(key);
-		if (!existing || (existing.source == null && entity.source != null)) byName.set(key, entity);
+		if (!existing || getNpcTrackerConditionSourceRank(entity.source) > getNpcTrackerConditionSourceRank(existing.source)) byName.set(key, entity);
 	});
 	return [...byName.values()].sort((a, b) => SortUtil.ascSortLower(a.label, b.label));
 }

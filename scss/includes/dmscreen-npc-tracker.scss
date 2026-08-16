@@ -1,8 +1,23 @@
 @use "../vars/vars";
-@use "../vars/vars-night";
 
 @layer vetools {
 	.dm-npc__root {
+		--dm-npc-canvas: #e8edf1;
+		--dm-npc-roster: #edf1f4;
+		--dm-npc-surface: #fffdf8;
+		--dm-npc-surface-elevated: #fff;
+		--dm-npc-surface-inset: #f2eee6;
+		--dm-npc-ink: #25313d;
+		--dm-npc-muted: #5d6873;
+		--dm-npc-border: #c5cfd8;
+		--dm-npc-border-strong: #9eacb9;
+		--dm-npc-slate: #344b5f;
+		--dm-npc-accent: #2f6f9f;
+		--dm-npc-accent-soft: #e5f0f7;
+		--dm-npc-warm: #9a642b;
+		--dm-npc-warm-soft: #f6eee1;
+		--dm-npc-shadow: 0 3px 10px rgb(37 49 61 / 10%);
+
 		container-type: inline-size;
 		overflow: hidden;
 	}
@@ -13,9 +28,9 @@
 		width: 100%;
 		height: 100%;
 		min-height: 0;
-		background: #f2f5f8;
+		background: var(--dm-npc-canvas);
 		font-size: 1rem;
-		color: #252a31;
+		color: var(--dm-npc-ink);
 	}
 
 	.dm-npc__layout[data-text-size="large"] {
@@ -52,8 +67,8 @@
 		flex-direction: column;
 		min-width: 0;
 		min-height: 0;
-		border-right: 1px solid vars.$rgb-border-grey;
-		background: #f4f6f8;
+		border-right: 1px solid var(--dm-npc-border);
+		background: var(--dm-npc-roster);
 	}
 
 	.dm-npc__roster-toolbar {
@@ -62,9 +77,9 @@
 		align-items: center;
 		gap: 6px;
 		padding: 8px 42px 8px 8px;
-		border-bottom: 1px solid vars.$rgb-border-grey;
-		background: #fff;
-		box-shadow: 0 2px 8px rgb(38 55 72 / 7%);
+		border-bottom: 1px solid var(--dm-npc-border);
+		background: var(--dm-npc-surface);
+		box-shadow: var(--dm-npc-shadow);
 	}
 
 	.dm-npc__roster-primary,
@@ -93,7 +108,7 @@
 
 	.dm-npc__count {
 		font-size: 0.82rem;
-		color: #555;
+		color: var(--dm-npc-muted);
 		margin-left: auto;
 		font-variant-numeric: tabular-nums;
 	}
@@ -104,7 +119,7 @@
 		gap: 4px;
 		margin-left: auto;
 		font-size: 0.82rem;
-		color: #555;
+		color: var(--dm-npc-muted);
 	}
 
 	.dm-npc__roster-rows {
@@ -126,9 +141,10 @@
 		gap: 5px;
 		min-height: 30px;
 		padding: 3px 2px 4px;
-		border-bottom: 1px solid #cbd2da;
-		color: #34485c;
-		font-weight: 600;
+		border-bottom: 1px solid var(--dm-npc-border-strong);
+		color: var(--dm-npc-slate);
+		font-weight: 700;
+		letter-spacing: 0.015em;
 	}
 
 	.dm-npc__group-toggle {
@@ -163,8 +179,9 @@
 		height: 18px;
 		padding-inline: 5px;
 		border-radius: 9px;
-		background: #e5e5e5;
-		color: #555;
+		border: 1px solid var(--dm-npc-border);
+		background: var(--dm-npc-surface-inset);
+		color: var(--dm-npc-slate);
 		font-size: 0.74rem;
 	}
 
@@ -176,7 +193,7 @@
 
 	.dm-npc__group-empty {
 		padding: 9px 5px;
-		color: #777;
+		color: var(--dm-npc-muted);
 		font-size: 0.78rem;
 		text-align: center;
 	}
@@ -184,24 +201,26 @@
 	.dm-npc__roster-row {
 		display: block;
 		overflow: hidden;
-		border: 1px solid #d7dce2;
-		border-radius: 6px;
-		background: #fff;
-		box-shadow: 0 1px 3px rgb(35 49 64 / 6%);
+		border: 1px solid var(--dm-npc-border);
+		border-radius: 7px;
+		background: var(--dm-npc-surface-elevated);
+		box-shadow: 0 2px 6px rgb(35 49 64 / 8%);
+		transition: border-color 160ms ease-out, box-shadow 160ms ease-out, background-color 160ms ease-out;
 
 		& + & {
 			margin-top: 5px;
 		}
 
 		&:hover {
-			border-color: #b8c1cc;
+			border-color: var(--dm-npc-border-strong);
+			box-shadow: var(--dm-npc-shadow);
 		}
 	}
 
 	.dm-npc__roster-row--selected {
-		border-color: #337ab7;
-		background: #f8fbff;
-		box-shadow: inset 3px 0 #337ab7, 0 2px 6px rgb(51 122 183 / 12%);
+		border-color: var(--dm-npc-accent);
+		background: var(--dm-npc-accent-soft);
+		box-shadow: 0 3px 10px rgb(47 111 159 / 20%);
 	}
 
 	.dm-npc__roster-summary {
@@ -242,7 +261,7 @@
 		max-width: 100%;
 		overflow: hidden;
 		font-size: 0.78rem;
-		color: #666;
+		color: var(--dm-npc-muted);
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
@@ -256,7 +275,7 @@
 			gap: 4px;
 			padding: 3px 5px;
 			border-radius: 4px;
-			color: #666;
+			color: var(--dm-npc-muted);
 			cursor: pointer;
 			font-size: 0.76rem;
 			list-style: none;
@@ -267,8 +286,8 @@
 
 			&:hover,
 			&:focus-visible {
-				background: #edf3f8;
-				color: #245a86;
+				background: var(--dm-npc-accent-soft);
+				color: var(--dm-npc-accent);
 				outline: none;
 			}
 		}
@@ -279,8 +298,8 @@
 		grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr) auto;
 		gap: 5px;
 		padding: 7px 6px;
-		border-top: 1px solid #e2e5e9;
-		background: #f8f9fb;
+		border-top: 1px solid var(--dm-npc-border);
+		background: var(--dm-npc-surface-inset);
 	}
 
 	.dm-npc__roster-edit[open] {
@@ -298,8 +317,8 @@
 		align-items: center;
 		gap: 6px;
 		padding: 6px;
-		border-top: 1px solid #e2e5e9;
-		background: #fbfcfd;
+		border-top: 1px solid var(--dm-npc-border);
+		background: var(--dm-npc-warm-soft);
 	}
 
 	.dm-npc__alias {
@@ -332,27 +351,27 @@
 		gap: 4px;
 		min-height: 24px;
 		padding: 2px 6px;
-		border: 1px solid var(--dm-npc-condition-color, vars.$rgb-border-grey);
+		border: 1px solid color-mix(in srgb, var(--dm-npc-condition-color, var(--dm-npc-border)) 72%, var(--dm-npc-border));
 		border-radius: 999px;
-		box-shadow: inset 0 -2px var(--dm-npc-condition-color, vars.$rgb-border-grey);
-		background: #fff;
-		color: #333;
+		box-shadow: 0 1px 3px color-mix(in srgb, var(--dm-npc-condition-color, transparent) 24%, transparent);
+		background: color-mix(in srgb, var(--dm-npc-condition-color, var(--dm-npc-border)) 10%, var(--dm-npc-surface-elevated));
+		color: var(--dm-npc-ink);
 		font-size: 0.88rem;
 		line-height: 1.2;
 
 		&:hover,
 		&:focus-visible {
-			background: #f1f7fc;
+			background: color-mix(in srgb, var(--dm-npc-condition-color, var(--dm-npc-accent)) 18%, var(--dm-npc-surface-elevated));
 		}
 
-		.dm-npc__condition--hoverable {
+		&.dm-npc__condition--hoverable {
 			text-decoration: underline dotted;
 			text-underline-offset: 2px;
 		}
 	}
 
 	.dm-npc__condition-remove {
-		color: #666;
+		color: var(--dm-npc-muted);
 		font-size: 1.1em;
 		line-height: 1;
 	}
@@ -401,7 +420,7 @@
 		gap: 6px;
 		min-height: 130px;
 		padding: 20px;
-		color: #666;
+		color: var(--dm-npc-muted);
 		text-align: center;
 	}
 
@@ -425,9 +444,9 @@
 	.dm-npc__detail-header {
 		display: block;
 		padding: 8px 42px 0 10px;
-		border-bottom: 1px solid vars.$rgb-border-grey;
-		background: #fff;
-		box-shadow: 0 2px 10px rgb(38 55 72 / 8%);
+		border-bottom: 1px solid var(--dm-npc-border);
+		background: var(--dm-npc-surface);
+		box-shadow: var(--dm-npc-shadow);
 		z-index: 1;
 	}
 
@@ -444,7 +463,7 @@
 		align-items: center;
 		gap: 7px 12px;
 		padding: 7px 0;
-		border-top: 1px solid #e4e7eb;
+		border-top: 1px solid var(--dm-npc-border);
 
 		> .dm-npc__conditions {
 			flex: 1 1 220px;
@@ -464,13 +483,13 @@
 		margin: 0;
 		font-size: 1.2rem;
 		line-height: 1.2;
-		color: #223b53;
+		color: var(--dm-npc-slate);
 	}
 
 	.dm-npc__original-name,
 	.dm-npc__meta {
 		display: block;
-		color: #666;
+		color: var(--dm-npc-muted);
 		font-size: 0.79rem;
 	}
 
@@ -480,7 +499,7 @@
 		gap: 3px;
 		margin-left: 0;
 		padding-right: 12px;
-		border-right: 1px solid #ddd;
+		border-right: 1px solid var(--dm-npc-border);
 		font-size: 0.82rem;
 		white-space: nowrap;
 	}
@@ -513,27 +532,32 @@
 		min-height: 0;
 		overflow-y: auto;
 		padding: 12px;
-		background: #eef2f6;
+		background: var(--dm-npc-canvas);
 	}
 
 	.dm-npc__section {
 		max-width: 78ch;
 		margin: 0 auto 16px;
 		padding: 10px 12px 12px;
-		border: 1px solid #dfe3e8;
-		border-radius: 6px;
-		background: #fff;
-		box-shadow: 0 2px 8px rgb(38 55 72 / 6%);
+		border: 1px solid var(--dm-npc-border);
+		border-radius: 7px;
+		background: var(--dm-npc-surface);
+		box-shadow: var(--dm-npc-shadow);
 
 		h3 {
 			margin: 0 0 6px;
 			padding-bottom: 3px;
-			border-bottom: 1px solid #dfe3e8;
-			color: #2d5f87;
+			border-bottom: 1px solid var(--dm-npc-border);
+			color: var(--dm-npc-accent);
 			font-size: 0.95rem;
 			font-weight: 700;
 			letter-spacing: 0.04em;
 			text-transform: uppercase;
+		}
+
+		.dm-npc__section--core {
+			border-color: color-mix(in srgb, var(--dm-npc-warm) 35%, var(--dm-npc-border));
+			background: var(--dm-npc-warm-soft);
 		}
 	}
 
@@ -549,15 +573,15 @@
 		grid-template-rows: auto auto auto;
 		justify-items: center;
 		padding: 5px 3px;
-		border: 1px solid #ddd;
+		border: 1px solid var(--dm-npc-border);
 		border-radius: 5px;
-		background: #f7f9fb;
+		background: var(--dm-npc-surface-elevated);
 		color: inherit;
 
 		&:hover,
 		&:focus-visible {
-			border-color: #337ab7;
-			background: rgb(51 122 183 / 8%);
+			border-color: var(--dm-npc-accent);
+			background: var(--dm-npc-accent-soft);
 		}
 
 		span {
@@ -575,7 +599,7 @@
 		align-items: baseline;
 		gap: 4px 8px;
 		margin-bottom: 6px;
-		border-bottom: 1px solid #ddd;
+		border-bottom: 1px solid var(--dm-npc-border);
 
 		h3 {
 			margin: 0;
@@ -583,7 +607,7 @@
 		}
 
 		span {
-			color: #666;
+			color: var(--dm-npc-muted);
 			font-size: 0.8rem;
 		}
 	}
@@ -601,22 +625,22 @@
 		gap: 6px;
 		min-height: 30px;
 		padding: 4px 7px;
-		border: 1px solid #ddd;
+		border: 1px solid var(--dm-npc-border);
 		border-radius: 5px;
-		background: #fff;
+		background: var(--dm-npc-surface-elevated);
 		color: inherit;
 		text-align: left;
 
 		&:hover,
 		&:focus-visible {
-			border-color: #337ab7;
-			background: rgb(51 122 183 / 8%);
+			border-color: var(--dm-npc-accent);
+			background: var(--dm-npc-accent-soft);
 		}
 	}
 
 	.dm-npc__skill--proficient {
-		border-color: #6f9fc7;
-		background: rgb(51 122 183 / 6%);
+		border-color: color-mix(in srgb, var(--dm-npc-accent) 65%, var(--dm-npc-border));
+		background: var(--dm-npc-accent-soft);
 
 		.dm-npc__skill-name {
 			font-weight: 700;
@@ -624,7 +648,7 @@
 	}
 
 	.dm-npc__skill-meta {
-		color: #666;
+		color: var(--dm-npc-muted);
 		font-size: 0.8rem;
 		font-variant-numeric: tabular-nums;
 		white-space: nowrap;
@@ -635,12 +659,13 @@
 		grid-template-columns: minmax(105px, 0.25fr) minmax(0, 1fr);
 		gap: 6px;
 		padding-block: 3px;
-		border-top: 1px solid #eee;
+		border-top: 1px solid color-mix(in srgb, var(--dm-npc-border) 65%, transparent);
 		font-size: 0.86rem;
 	}
 
 	.dm-npc__section--resources {
-		border-color: #cbd9e5;
+		border-color: color-mix(in srgb, var(--dm-npc-accent) 36%, var(--dm-npc-border));
+		background: color-mix(in srgb, var(--dm-npc-accent-soft) 54%, var(--dm-npc-surface));
 	}
 
 	.dm-npc__resources {
@@ -656,9 +681,9 @@
 		gap: 8px;
 		min-height: 34px;
 		padding: 4px 6px;
-		border: 1px solid #e0e6ec;
+		border: 1px solid var(--dm-npc-border);
 		border-radius: 5px;
-		background: #f8fafc;
+		background: var(--dm-npc-surface-elevated);
 	}
 
 	.dm-npc__resource-name {
@@ -669,7 +694,7 @@
 
 	.dm-npc__resource-value {
 		min-width: 42px;
-		color: #2d5f87;
+		color: var(--dm-npc-accent);
 		font-size: 1.05em;
 		font-variant-numeric: tabular-nums;
 		text-align: center;
@@ -688,7 +713,7 @@
 
 	.dm-npc__resource-empty {
 		padding: 5px 0;
-		color: #5f6872;
+		color: var(--dm-npc-muted);
 	}
 
 	.dm-npc__inline-roll {
@@ -744,8 +769,9 @@
 		align-items: center;
 		gap: 8px;
 		padding: 8px 42px 8px 10px;
-		border-bottom: 1px solid vars.$rgb-border-grey;
-		background: #fff;
+		border-bottom: 1px solid var(--dm-npc-border);
+		background: var(--dm-npc-surface);
+		box-shadow: var(--dm-npc-shadow);
 	}
 
 	.dm-npc__batch-title {
@@ -756,7 +782,7 @@
 
 	.dm-npc__batch-count {
 		display: block;
-		color: #666;
+		color: var(--dm-npc-muted);
 		font-size: 0.82rem;
 	}
 
@@ -771,10 +797,10 @@
 		max-width: 720px;
 		margin: 0 auto 8px;
 		padding: 8px 9px;
-		border: 1px solid vars.$rgb-border-grey;
+		border: 1px solid var(--dm-npc-border-strong);
 		border-radius: 6px;
-		background: #fff;
-		box-shadow: 0 3px 8px rgb(0 0 0 / 9%);
+		background: var(--dm-npc-surface);
+		box-shadow: var(--dm-npc-shadow);
 	}
 
 	.dm-npc__batch-controls {
@@ -790,14 +816,14 @@
 			flex-direction: column;
 			gap: 2px;
 			margin: 0;
-			color: #555;
+			color: var(--dm-npc-slate);
 			font-size: 0.8rem;
 			font-weight: 600;
 		}
 	}
 
 	.dm-npc__batch-roll-help {
-		color: #666;
+		color: var(--dm-npc-muted);
 		font-size: 0.8rem;
 		white-space: nowrap;
 	}
@@ -807,7 +833,7 @@
 		min-height: 0;
 		overflow-y: auto;
 		padding: 12px;
-		background: #f6f7f9;
+		background: var(--dm-npc-canvas);
 	}
 
 	.dm-npc__batch-members,
@@ -815,9 +841,10 @@
 	.dm-npc__batch-operation {
 		max-width: 720px;
 		margin: 0 auto 8px;
-		border: 1px solid vars.$rgb-border-grey;
+		border: 1px solid var(--dm-npc-border);
 		border-radius: 6px;
-		background: #fff;
+		background: var(--dm-npc-surface);
+		box-shadow: 0 2px 7px rgb(37 49 61 / 8%);
 	}
 
 	.dm-npc__batch-members-header,
@@ -831,7 +858,7 @@
 
 		span {
 			margin-left: auto;
-			color: #666;
+			color: var(--dm-npc-muted);
 			font-size: 0.8rem;
 			font-weight: 400;
 		}
@@ -839,7 +866,7 @@
 
 	.dm-npc__batch-select-all {
 		padding: 6px 9px;
-		border-top: 1px solid vars.$rgb-border-grey;
+		border-top: 1px solid var(--dm-npc-border);
 	}
 
 	.dm-npc__batch-select-all label,
@@ -855,7 +882,7 @@
 	.dm-npc__batch-member-list {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-		border-top: 1px solid vars.$rgb-border-grey;
+		border-top: 1px solid var(--dm-npc-border);
 	}
 
 	.dm-npc__batch-member {
@@ -873,7 +900,7 @@
 
 	.dm-npc__batch-member-hp {
 		margin-left: auto;
-		color: #666;
+		color: var(--dm-npc-muted);
 		font-size: 0.82rem;
 		font-variant-numeric: tabular-nums;
 		white-space: nowrap;
@@ -885,7 +912,7 @@
 
 	.dm-npc__batch-operations-body {
 		padding: 0 8px 8px;
-		border-top: 1px solid vars.$rgb-border-grey;
+		border-top: 1px solid var(--dm-npc-border);
 	}
 
 	.dm-npc__batch-operation {
@@ -899,7 +926,7 @@
 
 	.dm-npc__batch-operation-help {
 		display: block;
-		color: #666;
+		color: var(--dm-npc-muted);
 		font-size: 0.8rem;
 		font-weight: 400;
 	}
@@ -957,9 +984,10 @@
 	.dm-npc__batch-results {
 		max-width: 720px;
 		margin: 0 auto;
-		border: 1px solid vars.$rgb-border-grey;
+		border: 1px solid var(--dm-npc-border);
 		border-radius: 6px;
 		overflow: hidden;
+		background: var(--dm-npc-surface);
 	}
 
 	.dm-npc__batch-handoff {
@@ -976,7 +1004,7 @@
 		min-height: 36px;
 
 		& + & {
-			border-top: 1px solid #eee;
+			border-top: 1px solid var(--dm-npc-border);
 		}
 
 		> * {
@@ -986,8 +1014,8 @@
 	}
 
 	.dm-npc__batch-result-row--header {
-		background: #f3f3f3;
-		color: #555;
+		background: var(--dm-npc-surface-inset);
+		color: var(--dm-npc-slate);
 		font-size: 0.82rem;
 		font-weight: 700;
 	}
@@ -1013,7 +1041,7 @@
 	}
 
 	.dm-npc__batch-result-formula {
-		color: #666;
+		color: var(--dm-npc-muted);
 		font-variant-numeric: tabular-nums;
 	}
 
@@ -1233,226 +1261,46 @@
 	}
 
 	.ve-night-mode {
-		.dm-npc__layout,
-		.dm-npc__workspace {
-			background: vars-night.$rgb-bg--night;
-		}
-
-		.dm-npc__roster {
-			border-color: vars-night.$rgb-border-grey--night;
-			background: vars-night.$rgb-bg--alt-night;
-		}
-
-		.dm-npc__roster-toolbar,
-		.dm-npc__detail-header,
-		.dm-npc__batch-header,
-		.dm-npc__section {
-			background: vars-night.$rgb-bg--night;
-		}
-
-		.dm-npc__roster-toolbar,
-		.dm-npc__detail-header,
-		.dm-npc__batch-header {
-			border-color: vars-night.$rgb-border-grey--night;
-		}
-
-		.dm-npc__count,
-		.dm-npc__all-toggle,
-		.dm-npc__batch-count,
-		.dm-npc__batch-controls label,
-		.dm-npc__batch-empty,
-		.dm-npc__batch-result-formula,
-		.dm-npc__roster-meta,
-		.dm-npc__original-name,
-		.dm-npc__meta,
-		.dm-npc__roster-empty,
-		.dm-npc__empty {
-			color: #aaa;
-		}
-
-		.dm-npc__group-header,
-		.dm-npc__batch-rollbar,
-		.dm-npc__batch-members,
-		.dm-npc__batch-operations,
-		.dm-npc__batch-operation,
-		.dm-npc__batch-results,
-		.dm-npc__batch-result-row + .dm-npc__batch-result-row {
-			border-color: vars-night.$rgb-border-grey--night;
-		}
-
-		.dm-npc__batch-members,
-		.dm-npc__batch-operations,
-		.dm-npc__batch-rollbar,
-		.dm-npc__batch-operation {
-			background: vars-night.$rgb-bg--night;
-		}
-
-		.dm-npc__resource-row {
-			border-color: vars-night.$rgb-border-grey--night;
-			background: vars-night.$rgb-bg--alt-night;
-		}
-
-		.dm-npc__resource-value {
-			color: #9ac7ef;
-		}
-
-		.dm-npc__resource-empty {
-			color: #aaa;
-		}
-
-		.dm-npc__condition {
-			border-color: vars-night.$rgb-border-grey--night;
-			background: vars-night.$rgb-bg--night;
-			color: #ccc;
-
-			&:hover,
-			&:focus-visible {
-				border-color: #7db6e8;
-				background: rgb(125 182 232 / 12%);
-			}
-		}
-
-		.dm-npc__roster-row {
-			border-color: vars-night.$rgb-border-grey--night;
-			background: vars-night.$rgb-bg--night;
-
-			&:hover {
-				border-color: #677482;
-			}
-		}
-
-		.dm-npc__roster-summary,
-		.dm-npc__roster-live,
-		.dm-npc__roster-edit-fields,
-		.dm-npc__detail-vitals {
-			border-color: vars-night.$rgb-border-grey--night;
-		}
-
-		.dm-npc__roster-live,
-		.dm-npc__roster-edit-fields,
-		.dm-npc__detail-scroll,
-		.dm-npc__batch-body {
-			background: vars-night.$rgb-bg--alt-night;
-		}
-
-		.dm-npc__roster-edit > summary {
-			color: #aaa;
-
-			&:hover,
-			&:focus-visible {
-				background: rgb(125 182 232 / 12%);
-				color: #9ac7ef;
-			}
-		}
-
-		.dm-npc__condition-remove {
-			color: #bbb;
-		}
-
-		.dm-npc__batch-select-all,
-		.dm-npc__batch-operations-body,
-		.dm-npc__batch-member-list {
-			border-color: vars-night.$rgb-border-grey--night;
-		}
-
-		.dm-npc__group-header {
-			color: #ccc;
-		}
-
-		.dm-npc__group-count,
-		.dm-npc__batch-result-row--header {
-			background: vars-night.$rgb-bg--alt-night;
-			color: #bbb;
-		}
-
-		.dm-npc__group-empty {
-			color: #999;
-		}
-
-		.dm-npc__batch-member-hp,
-		.dm-npc__batch-operation-help,
-		.dm-npc__batch-members-header span,
-		.dm-npc__batch-operations > summary span,
-		.dm-npc__batch-roll-help,
-		.dm-npc__section-heading span,
-		.dm-npc__skill-meta {
-			color: #aaa;
+		.dm-npc__root {
+			--dm-npc-canvas: #141a20;
+			--dm-npc-roster: #182029;
+			--dm-npc-surface: #202932;
+			--dm-npc-surface-elevated: #26313c;
+			--dm-npc-surface-inset: #171e25;
+			--dm-npc-ink: #eef3f6;
+			--dm-npc-muted: #b7c2cb;
+			--dm-npc-border: #445362;
+			--dm-npc-border-strong: #657789;
+			--dm-npc-slate: #d7e8f5;
+			--dm-npc-accent: #86c6f2;
+			--dm-npc-accent-soft: #263d50;
+			--dm-npc-warm: #dda75d;
+			--dm-npc-warm-soft: #302b24;
+			--dm-npc-shadow: 0 4px 12px rgb(0 0 0 / 28%);
 		}
 
 		.dm-npc__batch-status {
 			border-color: #4d8c4d;
-			background: rgb(77 140 77 / 15%);
-			color: #a9dca9;
+			background: #1f3927;
+			color: #b9e6bd;
 		}
 
 		.dm-npc__batch-error {
 			border-color: #b7862f;
-			background: rgb(183 134 47 / 15%);
-			color: #e4c47d;
-		}
-
-		.dm-npc__roster-row--selected {
-			border-color: #7db6e8;
-			background: vars-night.$rgb-bg--night;
-			box-shadow: inset 3px 0 #7db6e8, 0 2px 6px rgb(0 0 0 / 18%);
-		}
-
-		.dm-npc__section h3,
-		.dm-npc__section-heading,
-		.dm-npc__stat-line {
-			border-color: vars-night.$rgb-border-grey--night;
-		}
-
-		.dm-npc__section h3 {
-			color: #9ac7ef;
-		}
-
-		.dm-npc__ability {
-			border-color: vars-night.$rgb-border-grey--night;
-			background: vars-night.$rgb-bg--alt-night;
-
-			&:hover,
-			&:focus-visible {
-				border-color: #7db6e8;
-				background: rgb(125 182 232 / 12%);
-			}
-
-		}
-
-		.dm-npc__skill {
-			border-color: vars-night.$rgb-border-grey--night;
-			background: vars-night.$rgb-bg--night;
-
-			&:hover,
-			&:focus-visible {
-				border-color: #7db6e8;
-				background: rgb(125 182 232 / 12%);
-			}
-		}
-
-		.dm-npc__skill--proficient {
-			border-color: #7db6e8;
-			background: rgb(125 182 232 / 10%);
-		}
-
-		.dm-npc__hp {
-			border-color: vars-night.$rgb-border-grey--night;
+			background: #3b301d;
+			color: #f2d596;
 		}
 
 		.dm-npc__hp-label {
-			color: #e78b8b;
+			color: #f1a0a0;
 		}
 
 		.dm-npc__hp-temp-label {
-			color: #87bedb;
+			color: #9bd4ef;
 		}
 
 		.dm-npc__inline-roll {
-			color: vars-night.$rgb-link-blue--night;
-		}
-
-		.dm-npc__name {
-			color: #d9ecfb;
+			color: var(--dm-npc-accent);
 		}
 	}
 }
