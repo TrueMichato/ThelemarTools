@@ -7212,59 +7212,43 @@ class CharacterSheetCombat {
 
 		for (const col of columns) {
 			const entries = buckets[col.key];
-			const group = e_({tag: "div", clazz: `cs-combat-action-economy__group cs-combat-action-economy__group--${col.key}`});
+			const group = e_({tag: "div", clazz: "cs-combat-action-economy__group"});
 
 			const header = e_({outer: `<div class="cs-combat-action-economy__head">${csCombatActionChip(col.chip)}<span class="cs-combat-action-economy__count">${entries.length}</span></div>`});
 			group.appendChild(header);
 
+			const list = e_({tag: "div", clazz: "cs-combat-action-economy__list"});
 			if (!entries.length) {
 				const empty = e_({tag: "div", clazz: "cs-combat-action-economy__empty"});
-				empty.textContent = "Nothing available";
-				group.appendChild(empty);
+				empty.textContent = "None";
+				list.appendChild(empty);
 			} else {
-				const content = e_({tag: "div", clazz: "cs-combat-action-economy__content"});
-				const appendSection = (label, sectionEntries, sectionType) => {
-					if (!sectionEntries.length) return;
-					const sectionWrp = e_({tag: "div", clazz: `cs-combat-action-economy__section cs-combat-action-economy__section--${sectionType}`});
-					const sectionLabel = e_({tag: "div", clazz: "cs-combat-action-economy__section-label"});
-					sectionLabel.textContent = label;
-					sectionWrp.appendChild(sectionLabel);
+				for (const entry of entries) {
+					const meta = kindMeta[entry.kind] || {label: "", glyph: "•"};
+					const categoryClass = entry.rulesCategory ? ` cs-combat-action-economy__item--${entry.rulesCategory}` : "";
+					const row = e_({tag: "div", clazz: `cs-combat-action-economy__item cs-combat-action-economy__item--${entry.kind}${categoryClass}`});
 
-					const list = e_({tag: "div", clazz: "cs-combat-action-economy__list"});
-					for (const entry of sectionEntries) {
-						const meta = kindMeta[entry.kind] || {label: "", glyph: "•"};
-						const categoryClass = entry.rulesCategory ? ` cs-combat-action-economy__item--${entry.rulesCategory}` : "";
-						const row = e_({tag: "div", clazz: `cs-combat-action-economy__item cs-combat-action-economy__item--${entry.kind}${categoryClass}`});
+					const badge = e_({tag: "span", clazz: "cs-combat-action-economy__kind"});
+					badge.setAttribute("title", meta.label);
+					badge.setAttribute("aria-label", meta.label);
+					badge.textContent = meta.glyph;
+					row.appendChild(badge);
 
-						const badge = e_({tag: "span", clazz: "cs-combat-action-economy__kind"});
-						badge.setAttribute("title", meta.label);
-						badge.setAttribute("aria-label", meta.label);
-						badge.textContent = meta.glyph;
-						row.appendChild(badge);
+					const name = e_({tag: "span", clazz: "cs-combat-action-economy__name"});
+					name.innerHTML = this._getActionEconomyNameHtml(entry);
+					row.appendChild(name);
 
-						const body = e_({tag: "span", clazz: "cs-combat-action-economy__body"});
-						const name = e_({tag: "span", clazz: "cs-combat-action-economy__name"});
-						name.innerHTML = this._getActionEconomyNameHtml(entry);
-						body.appendChild(name);
-
-						if (entry.subtitle) {
-							const sub = e_({tag: "span", clazz: "cs-combat-action-economy__sub"});
-							sub.textContent = entry.subtitle;
-							body.appendChild(sub);
-						}
-
-						row.appendChild(body);
-						list.appendChild(row);
+					if (entry.subtitle) {
+						const sub = e_({tag: "span", clazz: "cs-combat-action-economy__sub"});
+						sub.textContent = entry.subtitle;
+						row.appendChild(sub);
 					}
-					sectionWrp.appendChild(list);
-					content.appendChild(sectionWrp);
-				};
 
-				appendSection("Your options", entries.filter(entry => entry.kind !== "action"), "personal");
-				appendSection("Rules actions", entries.filter(entry => entry.kind === "action"), "rules");
-				group.appendChild(content);
+					list.appendChild(row);
+				}
 			}
 
+			group.appendChild(list);
 			container.appendChild(group);
 		}
 	}
@@ -10171,6 +10155,7 @@ class CharacterSheetCombat {
 		if (!container) return;
 
 		container.innerHTML = "";
+		const features = this._state.getFeatures?.() || [];
 
 		// (R23 #6) Use the SAME canonical generic-pool set as the Overview "Resources" panel
 		// so the two lists are always identical. Previously this filtered with a name
@@ -10186,6 +10171,7 @@ class CharacterSheetCombat {
 		const shownNames = new Set(combatResources.map(r => (r.name || "").toLowerCase()));
 
 		for (const resource of combatResources) {
+			const resourceNameHtml = this._getCombatResourceNameHtml(resource, features);
 			// Build pips - filled = available, empty = used. Each pip carries its
 			// index so a single delegated listener (see _bindResourcePipClicks) can
 			// route clicks for ANY pip, not just the first.
@@ -10196,7 +10182,7 @@ class CharacterSheetCombat {
 			}).join("");
 			const resourceEl = e_({outer: `
 				<div class="charsheet__combat-resource-item mb-2" data-resource-id="${resource.id}">
-					<div class="charsheet__combat-resource-name ve-small font-weight-bold">${resource.name}</div>
+					<div class="charsheet__combat-resource-name ve-small font-weight-bold">${resourceNameHtml}</div>
 					<div class="charsheet__combat-resource-pips">${pipsHtml}</div>
 					<div class="ve-small ve-muted">${resource.current}/${resource.max}${resource.recharge ? ` (${resource.recharge})` : ""}</div>
 				</div>
@@ -10215,6 +10201,7 @@ class CharacterSheetCombat {
 		const syntheticResources = this._state.getSyntheticCombatResources?.() || [];
 		for (const resource of syntheticResources) {
 			if (shownNames.has((resource.name || "").toLowerCase())) continue;
+			const resourceNameHtml = this._getCombatResourceNameHtml(resource, features);
 			const rechargeLabel = resource.recharge === "long" ? "Long Rest" : "Short/Long Rest";
 			const pipsHtml = Array.from({length: resource.max}, (_, i) => {
 				const isFilled = i < resource.current;
@@ -10223,7 +10210,7 @@ class CharacterSheetCombat {
 			}).join("");
 			const resourceEl = e_({outer: `
 				<div class="charsheet__combat-resource-item charsheet__combat-resource-item--synthetic mb-2" data-resource-kind="${resource.kind}">
-					<div class="charsheet__combat-resource-name ve-small font-weight-bold">${resource.name}</div>
+					<div class="charsheet__combat-resource-name ve-small font-weight-bold">${resourceNameHtml}</div>
 					<div class="charsheet__combat-resource-pips">${pipsHtml}</div>
 					<div class="ve-small ve-muted">${resource.current}/${resource.max} (${rechargeLabel})</div>
 				</div>
@@ -10248,6 +10235,18 @@ class CharacterSheetCombat {
 		// (no resource pips and no supplemental toggle sections).
 		if (!container.children.length) {
 			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No combat resources</div>`;
+		}
+	}
+
+	_getCombatResourceNameHtml (resource, features = this._state.getFeatures?.() || []) {
+		const safeName = CharacterSheetClassUtils.escapeHtml(resource?.name || "");
+		const feature = (resource?.featureId ? features.find(it => it.id === resource.featureId) : null)
+			|| features.find(it => (it.name || "") === (resource?.name || ""));
+		if (!feature || typeof this._page?._getFeatureHoverLink !== "function") return safeName;
+		try {
+			return this._page._getFeatureHoverLink(feature) || safeName;
+		} catch (e) {
+			return safeName;
 		}
 	}
 

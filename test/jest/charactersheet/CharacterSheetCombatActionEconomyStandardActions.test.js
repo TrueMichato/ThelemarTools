@@ -337,14 +337,14 @@ describe("CharacterSheetCombat standard action economy", () => {
 
 		const populatedRows = container._children
 			.flatMap(group => group._children[1]?._children || [])
-			.flatMap(section => section._children[1]?._children || []);
+			.filter(row => row._children.length);
 		expect(populatedRows.length).toBeGreaterThan(12);
 		for (const row of populatedRows) {
-			expect(row._children[1]._children[0].innerHTML).toMatch(/data-hover(?:-inline)?="true"/);
+			expect(row._children[1].innerHTML).toMatch(/data-hover(?:-inline)?="true"/);
 		}
 	});
 
-	test("renders personal options separately from rules actions", () => {
+	test("renders one compact flat list per action type without labeled subsections", () => {
 		const {combat} = makeCombat({attacks: [{name: "Longsword", damage: "1d8"}]});
 		const section = globalThis.e_({tag: "section"});
 		const container = globalThis.e_({tag: "div"});
@@ -354,8 +354,20 @@ describe("CharacterSheetCombat standard action economy", () => {
 
 		combat.renderCombatActionEconomy();
 
-		const actionColumnSections = container._children[0]._children[1]._children;
-		expect(actionColumnSections.map(it => it._children[0].textContent)).toEqual(["Your options", "Rules actions"]);
+		const buckets = combat.getCombatActionEconomy();
+		expect(container._children).toHaveLength(3);
+		for (const [ix, key] of ["action", "bonus", "reaction"].entries()) {
+			const group = container._children[ix];
+			expect(group._children).toHaveLength(2);
+			expect(group._children[1]._children).toHaveLength(buckets[key].length);
+			for (const row of group._children[1]._children) {
+				expect(row._children.length).toBeGreaterThanOrEqual(2);
+				expect(row._children[1].innerHTML).toMatch(/data-hover(?:-inline)?="true"/);
+			}
+		}
+		const labels = JSON.stringify(container._children.map(group => group._children));
+		expect(labels).not.toContain("Your options");
+		expect(labels).not.toContain("Rules actions");
 	});
 
 	test("uses the appropriate canonical hover pages and explicit Attack hash", () => {
