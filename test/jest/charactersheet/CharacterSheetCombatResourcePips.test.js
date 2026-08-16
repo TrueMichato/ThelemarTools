@@ -18,6 +18,14 @@
 
 import "./setup.js";
 import {jest} from "@jest/globals";
+
+globalThis.CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils || {
+	escapeHtml: value => String(value || "")
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;"),
+};
+
 import "../../../js/charactersheet/charactersheet-combat.js";
 
 const CharacterSheetCombat = globalThis.CharacterSheetCombat;
@@ -283,5 +291,84 @@ describe("renderCombatResources — empty-state suppression (fold-in)", () => {
 		combat.renderCombatResources();
 		expect(container.innerHTML).toContain("No combat resources");
 		expect(children.length).toBe(0);
+	});
+});
+
+describe("renderCombatResources — feature hover names", () => {
+	let combat;
+	let container;
+	let children;
+
+	beforeEach(() => {
+		children = [];
+		container = {
+			innerHTML: "",
+			append: (...els) => { children.push(...els); },
+			get children () { return children; },
+		};
+		global.document = {getElementById: id => id === "charsheet-combat-resources" ? container : null};
+		combat = makeCombat();
+		combat._renderSneakAttackToggle = () => {};
+		combat._renderWeaponDamageRiders = () => {};
+		combat._renderArcaneShotToggle = () => {};
+	});
+
+	afterEach(() => { delete global.document; });
+
+	it("prefers a resource featureId and renders its name through the centralized hover builder", () => {
+		const linked = {id: "feat-linked", name: "Canonical Feature", source: "XPHB", entries: ["Rules text."]};
+		const sameName = {id: "feat-name", name: "Display Pool", source: "PHB", entries: ["Wrong feature."]};
+		combat._state = {
+			getFeatures: () => [linked, sameName],
+			getGenericPoolResources: () => [{id: "pool", name: "Display Pool", featureId: linked.id, current: 2, max: 3, recharge: "short"}],
+			getSyntheticCombatResources: () => [],
+		};
+		combat._page = {
+			_getFeatureHoverLink: jest.fn(feature => `<a data-feature-id="${feature.id}">${feature.name}</a>`),
+		};
+
+		combat.renderCombatResources();
+
+		expect(combat._page._getFeatureHoverLink).toHaveBeenCalledWith(linked);
+		expect(children[0]._html).toContain(`data-feature-id="feat-linked"`);
+		expect(children[0]._html).toContain("2/3 (short)");
+		expect(children[0]._html.match(/data-pip-index=/g)).toHaveLength(3);
+	});
+
+	it("uses exact feature-name fallback for synthetic resources and leaves unresolved names plain", () => {
+		const secondWind = {id: "feat-second-wind", name: "Second Wind", source: "XPHB", entries: ["Regain hit points."]};
+		combat._state = {
+			getFeatures: () => [secondWind],
+			getGenericPoolResources: () => [{id: "unlinked", name: "Unlinked Pool", current: 1, max: 1, recharge: "long"}],
+			getSyntheticCombatResources: () => [
+				{id: "sw", kind: "secondWind", name: "Second Wind", current: 1, max: 2, recharge: "short"},
+				{id: "arcane", kind: "arcaneShot", name: "Arcane Shot", current: 2, max: 2, recharge: "short"},
+			],
+		};
+		combat._page = {
+			_getFeatureHoverLink: jest.fn(feature => `<a data-feature-id="${feature.id}">${feature.name}</a>`),
+		};
+
+		combat.renderCombatResources();
+
+		expect(combat._page._getFeatureHoverLink).toHaveBeenCalledTimes(1);
+		expect(combat._page._getFeatureHoverLink).toHaveBeenCalledWith(secondWind);
+		expect(children[0]._html).toContain(">Unlinked Pool<");
+		expect(children[1]._html).toContain(`data-feature-id="feat-second-wind"`);
+		expect(children[2]._html).toContain(">Arcane Shot<");
+		expect(children[2]._html).not.toContain("data-feature-id");
+	});
+
+	it("falls back to escaped plain text when the hover builder fails", () => {
+		combat._state = {
+			getFeatures: () => [{id: "feat", name: "<Unsafe Pool>"}],
+			getGenericPoolResources: () => [{id: "pool", name: "<Unsafe Pool>", featureId: "feat", current: 1, max: 1}],
+			getSyntheticCombatResources: () => [],
+		};
+		combat._page = {_getFeatureHoverLink: () => { throw new Error("hover failed"); }};
+
+		expect(() => combat.renderCombatResources()).not.toThrow();
+		expect(children[0]._html).toContain("&lt;Unsafe Pool&gt;");
+		expect(children[0]._html).not.toContain("<Unsafe Pool>");
 	});
 });
