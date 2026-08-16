@@ -6706,42 +6706,81 @@ class CharacterSheetCombat {
 	}
 
 	/**
-	 * Universal combat actions shown for every character. Each name is resolved
-	 * against the loaded action catalog so its source and hover hash stay valid.
+	 * Curated universal combat actions shown for each rules edition.
 	 */
-	static get ACTION_ECONOMY_STANDARD_ACTION_NAMES () {
-		return [
-			"Attack",
-			"Dash",
-			"Disengage",
-			"Dodge",
-			"Grapple",
-			"Help",
-			"Hide",
-			"Ready",
-			"Search",
-			"Shove",
-			"Use an Object",
-			"Opportunity Attack",
-		];
+	static get ACTION_ECONOMY_STANDARD_ACTION_NAMES_BY_EDITION () {
+		return {
+			classic: [
+				"Attack",
+				"Dash",
+				"Disengage",
+				"Dodge",
+				"Grapple",
+				"Help",
+				"Hide",
+				"Ready",
+				"Search",
+				"Shove",
+				"Use an Object",
+				"Opportunity Attack",
+			],
+			one: [
+				"Attack",
+				"Dash",
+				"Disengage",
+				"Dodge",
+				"Help",
+				"Hide",
+				"Influence",
+				"Ready",
+				"Search",
+				"Study",
+				"Utilize",
+				"Opportunity Attack",
+			],
+		};
 	}
 
 	/**
-	 * Resolve one canonical entity for each standard action name. Prefer the
-	 * 2024 entry only when that exact name/source pair exists; Grapple, Shove,
-	 * and Use an Object therefore correctly retain their PHB entities.
+	 * Resolve whether the character uses the 2024/TGTT standard-action rules.
+	 * The chronological starting class is authoritative for mixed-edition
+	 * multiclass characters. Legacy saves fall back to their marked or first
+	 * stored class; classless sheets use the current 2024 rules.
+	 * @returns {boolean}
+	 */
+	_is2024ActionEconomy () {
+		const classes = this._state?.getClasses?.() || [];
+		const chronologicalFirst = this._state?.getChronologicalFirstClass?.();
+		const startingClass = chronologicalFirst
+			? classes.find(cls => cls?.name === chronologicalFirst.name && cls?.source === chronologicalFirst.source) || chronologicalFirst
+			: classes.find(cls => cls?.isStartingClass) || classes[0];
+		if (!startingClass) return true;
+		if (startingClass.edition === "one") return true;
+		return this._state?._sourceIs2024?.(startingClass.source) ??
+			CharacterSheetClassUtils.is2024Source(startingClass.source);
+	}
+
+	/**
+	 * Resolve one canonical entity for each standard action in the character's
+	 * rules edition. Missing catalog entries are skipped rather than replaced
+	 * with an action from the other edition.
 	 * @returns {Array<object>}
 	 */
 	_getStandardActionEconomyEntities () {
+		const is2024 = this._is2024ActionEconomy();
+		const source = is2024 ? Parser.SRC_XPHB : Parser.SRC_PHB;
+		const names = CharacterSheetCombat.ACTION_ECONOMY_STANDARD_ACTION_NAMES_BY_EDITION[is2024 ? "one" : "classic"];
 		const actions = this._page?._actionsData || [];
-		return CharacterSheetCombat.ACTION_ECONOMY_STANDARD_ACTION_NAMES
-			.map(name => {
-				const matches = actions.filter(action => action?.name === name);
-				return matches.find(action => action.source === Parser.SRC_XPHB)
-					|| matches.find(action => action.source === Parser.SRC_PHB)
-					|| null;
-			})
-			.filter(Boolean);
+		const seen = new Set();
+		return names
+			.map(name => actions.find(action => action?.name === name && action?.source === source) || null)
+			.filter(action => {
+				if (!action) return false;
+				const key = `${action.name}|${action.source}`.toLowerCase();
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			});
 	}
 
 	/**
