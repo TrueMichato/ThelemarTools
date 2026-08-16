@@ -147,7 +147,7 @@ export class NpcTrackerSerializer {
 		if (!Array.isArray(conditions)) return [];
 		return [...new Set(conditions
 			.map(condition => `${condition ?? ""}`.trim().toLowerCase())
-			.filter(condition => Parser.CONDITIONS.includes(condition)))];
+			.filter(Boolean))];
 	}
 }
 

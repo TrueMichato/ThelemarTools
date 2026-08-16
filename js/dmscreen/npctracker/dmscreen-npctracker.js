@@ -17,6 +17,11 @@ import {
 	getNpcTrackerHpOperation,
 } from "./dmscreen-npctracker-hp.js";
 import {getNpcTrackerConditionsAfterUpdate} from "./dmscreen-npctracker-condition.js";
+import {
+	getNpcTrackerFallbackReferenceData,
+	getNpcTrackerSkillDescriptors,
+	pGetNpcTrackerReferenceData,
+} from "./dmscreen-npctracker-data.js";
 import {DmScreenUtil} from "../dmscreen-util.js";
 import {PANEL_TYP_INITIATIVE_TRACKER} from "../dmscreen-consts.js";
 
@@ -47,12 +52,16 @@ export class NpcTrackerRoot {
 		this._workspaceMode = "detail";
 		this._batchState = null;
 		this._hpUndoStack = [];
+		this._referenceData = getNpcTrackerFallbackReferenceData();
+		this._isReferenceDataLoadStarted = false;
+		this._isReferenceRefreshPending = false;
 		this._wrpRoot = null;
 		this._wrpRoster = null;
 		this._wrpDetail = null;
 
 		this._roster = new NpcTrackerRoster({
 			fnGetState: () => this._state,
+			fnGetReferenceData: () => this._referenceData,
 			fnSelect: id => this._selectNpc(id),
 			fnAdd: () => this._pAddNpc(),
 			fnImport: file => this._pImport(file),
@@ -70,6 +79,7 @@ export class NpcTrackerRoot {
 		});
 		this._detail = new NpcTrackerDetail({
 			fnGetNpc: () => this._getSelectedNpc(),
+			fnGetReferenceData: () => this._referenceData,
 			fnSetViewMode: isFull => {
 				this._isFullStatblock = isFull;
 				this._renderDetail();
@@ -82,6 +92,7 @@ export class NpcTrackerRoot {
 				batch: this._batchState,
 				npcs: this._batchState ? getNpcTrackerNpcsForScope({state: this._state, scope: this._batchState.scope}) : [],
 				hasHpUndo: !!this._hpUndoStack.length,
+				referenceData: this._referenceData,
 			}),
 			fnUpdateConfig: config => this._updateBatchConfig(config),
 			fnRoll: () => this._pRollBatch(),
@@ -107,6 +118,25 @@ export class NpcTrackerRoot {
 		this._wrpRoster.appendTo(this._wrpRoot);
 		this._wrpDetail.appendTo(this._wrpRoot);
 		this._wrpRoot.appendTo(wrp);
+		this._wrpRoot.onn("focusout", () => setTimeout(() => this._doReferenceDataRefreshIfReady()));
+		this._renderRoster();
+		this._renderDetail();
+		this._pInitReferenceData();
+	}
+
+	async _pInitReferenceData () {
+		if (this._isReferenceDataLoadStarted) return;
+		this._isReferenceDataLoadStarted = true;
+		this._referenceData = await pGetNpcTrackerReferenceData();
+		if (!this._wrpRoot?.isConnected) return;
+		this._isReferenceRefreshPending = true;
+		this._doReferenceDataRefreshIfReady();
+	}
+
+	_doReferenceDataRefreshIfReady () {
+		if (!this._isReferenceRefreshPending || !this._wrpRoot?.isConnected) return;
+		if (this._wrpRoot.contains(document.activeElement)) return;
+		this._isReferenceRefreshPending = false;
 		this._renderRoster();
 		this._renderDetail();
 	}
@@ -419,14 +449,19 @@ export class NpcTrackerRoot {
 		for (let order = 0; order < npcs.length; ++order) {
 			const npc = npcs[order];
 			try {
+				const skill = batch.rollType === "skill"
+					? this._getBatchSkills().find(it => it.id === batch.key) || null
+					: null;
 				const bonus = getNpcTrackerRollBonus({
 					npc,
 					rollType: batch.rollType,
 					key: batch.key,
+					skill,
 				});
 				const label = getNpcTrackerRollLabel({
 					rollType: batch.rollType,
 					key: batch.key,
+					skill,
 				});
 				const rolled = await pRollNpcTrackerD20({npc, label, bonus});
 				if (!rolled) {
@@ -564,6 +599,14 @@ export class NpcTrackerRoot {
 
 	_getSelectedNpc () {
 		return this._state.npcs.find(npc => npc.id === this._state.settings.selectedId) || null;
+	}
+
+	_getBatchSkills () {
+		if (!this._batchState) return [];
+		return getNpcTrackerSkillDescriptors({
+			skillCatalog: this._referenceData.skills,
+			monsters: getNpcTrackerNpcsForScope({state: this._state, scope: this._batchState.scope}).map(npc => npc.monster),
+		});
 	}
 
 	_doSave () {

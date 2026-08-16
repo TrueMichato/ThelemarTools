@@ -1,9 +1,11 @@
 export function getNpcTrackerCanonicalConditionName (value) {
 	const normalized = `${value ?? ""}`.trim().toLowerCase();
-	return Parser.CONDITIONS.includes(normalized) ? normalized : null;
+	return normalized || null;
 }
 
-export function getNpcTrackerConditionColor (condition) {
+export function getNpcTrackerConditionColor (condition, {conditionCatalog = []} = {}) {
+	const catalogColor = conditionCatalog.find(it => it.name === condition)?.color;
+	if (catalogColor) return catalogColor.startsWith("#") ? catalogColor : `#${catalogColor}`;
 	const key = condition === "exhaustion" ? "Exhausted" : condition.toTitleCase();
 	return Parser.CONDITION_TO_COLOR?.[key] || "#777777";
 }
@@ -16,36 +18,49 @@ export function getNpcTrackerConditionsAfterUpdate ({conditions, condition, isAd
 	return current.filter(it => it !== canonical);
 }
 
-export function getNpcTrackerConditionControls ({npc, fnUpdate, isCompact = false}) {
+export function getNpcTrackerConditionPickerModel ({conditions, conditionCatalog = []}) {
+	const active = getNpcTrackerConditionsAfterUpdate({
+		conditions,
+		condition: null,
+		isAdd: true,
+	});
+	const labelByName = new Map(conditionCatalog.map(it => [it.name, it.label]));
+	return {
+		active: active.map(name => ({name, label: labelByName.get(name) || name.toTitleCase()})),
+		available: conditionCatalog.filter(it => !active.includes(it.name)),
+	};
+}
+
+export function getNpcTrackerConditionControls ({npc, fnUpdate, conditionCatalog = [], isCompact = false}) {
 	const conditions = getNpcTrackerConditionsAfterUpdate({
 		conditions: npc.conditions,
 		condition: null,
 		isAdd: true,
 	});
+	const picker = getNpcTrackerConditionPickerModel({conditions, conditionCatalog});
 	const wrp = ee`<div class="dm-npc__conditions ${isCompact ? "dm-npc__conditions--compact" : ""}" aria-label="Conditions"></div>`;
 
-	conditions.forEach(condition => {
+	picker.active.forEach(({name: condition, label}) => {
 		const button = ee`<button class="dm-npc__condition" type="button"></button>`;
-		button.style.setProperty("--dm-npc-condition-color", getNpcTrackerConditionColor(condition));
-		button.attr("aria-label", `Remove ${condition.toTitleCase()} from ${npc.alias || npc.monster.name}`);
+		button.style.setProperty("--dm-npc-condition-color", getNpcTrackerConditionColor(condition, {conditionCatalog}));
+		button.attr("aria-label", `Remove ${label} from ${npc.alias || npc.monster.name}`);
 		const name = ee`<span></span>`;
-		name.textContent = condition.toTitleCase();
+		name.textContent = label;
 		const remove = ee`<span class="dm-npc__condition-remove" aria-hidden="true">\u00d7</span>`;
 		button.append(name, remove);
 		button.onn("click", () => fnUpdate({npc, condition, isAdd: false}));
 		button.appendTo(wrp);
 	});
 
-	const available = Parser.CONDITIONS.filter(condition => !conditions.includes(condition));
 	const select = ee`<select class="ve-form-control ve-select ve-select-xs dm-npc__condition-add" aria-label="Add condition to ${npc.alias || npc.monster.name}">
 		<option value="">${conditions.length ? "Add condition..." : "Add a condition..."}</option>
 	</select>`;
-	available.forEach(condition => {
-		const option = ee`<option value="${condition}"></option>`;
-		option.textContent = condition.toTitleCase();
+	picker.available.forEach(condition => {
+		const option = ee`<option value="${condition.name}"></option>`;
+		option.textContent = condition.label;
 		option.appendTo(select);
 	});
-	select.disabled = !available.length;
+	select.disabled = !picker.available.length;
 	select.onn("change", evt => {
 		const condition = evt.currentTarget.value;
 		if (!condition) return;

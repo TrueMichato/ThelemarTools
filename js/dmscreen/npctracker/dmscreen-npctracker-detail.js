@@ -5,6 +5,10 @@ import {
 	pRollNpcTrackerD20,
 } from "./dmscreen-npctracker-roll.js";
 import {getNpcTrackerConditionControls} from "./dmscreen-npctracker-condition.js";
+import {
+	getNpcTrackerMonsterSkillMeta,
+	getNpcTrackerSkillDescriptors,
+} from "./dmscreen-npctracker-data.js";
 
 const _PROPS_ATTACK = ["action", "bonus", "reaction", "legendary", "mythic"];
 
@@ -39,25 +43,26 @@ export function hasNpcTrackerAttackRoll (entry) {
 		|| JSON.stringify(entry?.entries || []).includes("{@hit");
 }
 
-export function getNpcTrackerAllSkillsModel (monster) {
-	return Object.entries(Parser.SKILL_TO_ATB_ABV)
-		.map(([skill, ability]) => ({
-			skill,
-			ability,
+export function getNpcTrackerAllSkillsModel (monster, {skillCatalog = []} = {}) {
+	return getNpcTrackerSkillDescriptors({skillCatalog, monsters: [monster]})
+		.map(skill => ({
+			...skill,
+			skill: skill.name,
 			bonus: getNpcTrackerRollBonus({
 				npc: {monster},
 				rollType: "skill",
-				key: skill,
+				skill,
 			}),
-			isProficient: monster.skill?.[skill] != null,
+			isProficient: !!getNpcTrackerMonsterSkillMeta({monster, skill}),
 		}));
 }
 
 export {getNpcTrackerDisplayName, getNpcTrackerSignedNumber};
 
 export class NpcTrackerDetail {
-	constructor ({fnGetNpc, fnSetViewMode, fnUpdateHp, fnUpdateCondition}) {
+	constructor ({fnGetNpc, fnGetReferenceData, fnSetViewMode, fnUpdateHp, fnUpdateCondition}) {
 		this._fnGetNpc = fnGetNpc;
+		this._fnGetReferenceData = fnGetReferenceData;
 		this._fnSetViewMode = fnSetViewMode;
 		this._fnUpdateHp = fnUpdateHp;
 		this._fnUpdateCondition = fnUpdateCondition;
@@ -106,13 +111,15 @@ export class NpcTrackerDetail {
 
 		const wrpIdentity = ee`<div class="dm-npc__identity">${eleName}${eleOriginal}${eleMeta}</div>`;
 		const wrpControls = ee`<div class="dm-npc__detail-actions">${btnMode}</div>`;
+		const conditions = getNpcTrackerConditionControls({
+			npc,
+			fnUpdate: this._fnUpdateCondition,
+			conditionCatalog: this._fnGetReferenceData().conditions,
+		});
 
 		ee`<div class="dm-npc__detail-header">
-			${btnBack}
-			${wrpIdentity}
-			${this._getHpControl(npc)}
-			${wrpControls}
-			${getNpcTrackerConditionControls({npc, fnUpdate: this._fnUpdateCondition})}
+			<div class="dm-npc__detail-heading">${btnBack}${wrpIdentity}${wrpControls}</div>
+			<div class="dm-npc__detail-vitals">${this._getHpControl(npc)}${conditions}</div>
 		</div>`.appendTo(wrp);
 	}
 
@@ -189,19 +196,22 @@ export class NpcTrackerDetail {
 
 	_renderSkills ({npc, wrp}) {
 		const wrpSkills = ee`<div class="dm-npc__skills"></div>`;
-		getNpcTrackerAllSkillsModel(npc.monster).forEach(({skill, ability, bonus, isProficient}) => {
+		getNpcTrackerAllSkillsModel(npc.monster, {skillCatalog: this._fnGetReferenceData().skills}).forEach(skillMeta => {
+			const {skill, ability, bonus, isProficient, label} = skillMeta;
 			const button = ee`<button class="dm-npc__skill ${isProficient ? "dm-npc__skill--proficient" : ""}" type="button"></button>`;
 			const name = ee`<span class="dm-npc__skill-name"></span>`;
-			name.textContent = skill.toTitleCase();
+			name.textContent = label;
 			const meta = ee`<span class="dm-npc__skill-meta"></span>`;
-			meta.textContent = `${ability.toUpperCase()} ${getNpcTrackerSignedNumber(bonus)}`;
+			meta.textContent = `${ability ? ability.toUpperCase() : "Flat"} ${getNpcTrackerSignedNumber(bonus)}`;
 			button.append(name, meta);
 			button.attr("title", isProficient
-				? `Roll ${skill.toTitleCase()} with the listed bonus`
-				: `Roll ${skill.toTitleCase()} using ${Parser.attAbvToFull(ability)}`);
+				? `Roll ${label} with the listed bonus`
+				: ability
+					? `Roll ${label} using ${Parser.attAbvToFull(ability)}`
+					: `Roll ${label} with its flat bonus`);
 			button.onn("click", () => this._roll({
 				npcName: getNpcTrackerDisplayName(npc),
-				label: `${skill.toTitleCase()} check`,
+				label: `${label} check`,
 				bonus,
 			}));
 			button.appendTo(wrpSkills);

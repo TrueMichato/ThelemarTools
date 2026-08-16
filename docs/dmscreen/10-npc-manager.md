@@ -51,7 +51,18 @@ Membership lives on each NPC as `groupId`. This guarantees that duplicate instan
 
 Version 1 saves have no groups or memberships. Deserialization defaults them to `groups: []`, `groupId: null`, and an expanded Unsorted section. Invalid group records are dropped, duplicate group IDs are ignored after the first, and dangling NPC memberships are repaired to Unsorted.
 
-Version 2 saves have no conditions. Serializer v3 defaults every migrated NPC to `conditions: []`; invalid and duplicate condition names are repaired against `Parser.CONDITIONS`.
+Version 2 saves have no conditions. Serializer v3 defaults every migrated NPC to `conditions: []`. Condition names are normalized and deduplicated, but are not checked against a fixed parser list. This is intentional: an installed-brew condition must survive save/load even when that brew is temporarily unavailable.
+
+## Site and homebrew reference data
+
+The NPC Manager renders immediately with the parser's standard conditions and skills, then loads the complete site and installed-brew catalogs in the background:
+
+- Conditions and statuses use `DataLoader.pCacheAndGetAllSite(UrlUtil.PG_CONDITIONS_DISEASES)` plus `pCacheAndGetAllBrew(...)`.
+- Skills use the DataLoader `"skill"` page for the same site-plus-brew merge.
+
+Condition and skill names are deduplicated case-insensitively. A completed load refreshes the roster and active workspace without changing selection or encounter state. If the user is editing a control, the refresh waits until focus leaves the NPC panel so an in-progress value is not reset.
+
+Reference loading affects available choices only. It never participates in serialization, so missing or removed brew cannot erase a saved condition or an explicit monster skill.
 
 ## Group workflow
 
@@ -77,7 +88,16 @@ Supported rolls:
 | Saving throw | Explicit `monster.save[ability]`, otherwise ability modifier |
 | Skill check | Explicit `monster.skill[skill]`, otherwise governing ability modifier |
 
-The selected-NPC roleplay view exposes every standard skill, not only entries listed in `monster.skill`. Listed proficiencies are emphasized; unlisted skills remain rollable and use the governing ability modifier through the same `getNpcTrackerRollBonus()` path as batch rolls.
+The selected-NPC roleplay view exposes every site and installed-brew skill, not only entries listed in `monster.skill`. It also includes custom skills found directly in the monster's skill block, including `Name|SOURCE` keys exported by the Character Sheet.
+
+Skill bonuses resolve in this order:
+
+1. An exact `Name|SOURCE` bonus in `monster.skill`.
+2. A matching bare-name bonus in `monster.skill`.
+3. The governing ability modifier from the site/brew skill entity.
+4. `+0` for an ad-hoc Lore skill that has no governing ability and no listed bonus.
+
+Listed proficiencies are emphasized. The same descriptor and bonus path drives single-NPC and batch rolls, so custom skill labels never expose their raw UID and cannot drift between surfaces.
 
 Every NPC is rolled sequentially through:
 
@@ -103,12 +123,16 @@ Encounter Control presents roll type, governing ability/skill, and the primary R
 
 - HP expressions accept damage (`30` or `-30`), healing (`+12`), absolute values (`=15`), and dice (`8d6`). The optional **Half** toggle rounds toward zero using the Initiative Tracker's shared rule. Damage consumes temporary HP before current HP, and healing is capped at maximum HP.
 - The last five batch HP operations are available to the session-only **Undo HP** stack. The roster state itself still saves after every apply or undo.
-- Standard conditions come from `Parser.CONDITIONS`. Each roster row and selected-NPC header has a quick-add selector; active chips remove their condition in one click. Batch add/remove still operates on every selected NPC. All paths use `getNpcTrackerConditionsAfterUpdate()`, persist independently for duplicate instances, and render consistently in roster and detail views.
+- Conditions come from the merged site and installed-brew catalog. Each roster row and selected-NPC header has a quick-add selector; active chips remove their condition in one click. Batch add/remove still operates on every selected NPC. All paths use `getNpcTrackerConditionsAfterUpdate()`, persist independently for duplicate instances, and render consistently in roster and detail views. A saved condition remains visible and removable even if its brew source is later removed.
 - A complete initiative batch can be appended to an existing Initiative Tracker. The handoff preserves each selected NPC's exact rolled total, alias and monster identity, current/maximum/temporary HP, and conditions. It respects the tracker lock and is intentionally a one-way snapshot; Initiative Tracker owns combat state after handoff.
 
 ## Responsive behavior
 
-Wide panels show the grouped roster and current detail/batch workspace side by side. At the panel container breakpoint, the roster and workspace become separate views; both NPC detail and batch results provide a **Roster** back action. Narrow controls stack without collapsing HP values, while canonical statblocks use contained horizontal scrolling. Night mode uses the same neutral surfaces, selected blue, borders, focus states, and form controls as other DM Screen panels.
+Wide panels show the grouped roster and current detail/batch workspace side by side. Roster rows prioritize live-play controls: identity, HP, and conditions remain visible, while alias, group assignment, and removal live behind **Edit NPC**. The toolbar separates the primary **Add NPC** action from grouping, import, and encounter-wide controls.
+
+The detail workspace keeps identity, HP, conditions, and the roleplay/statblock switch in a persistent command header. Encounter Control follows the table workflow from targets to roll setup, results/initiative handoff, then reversible HP and condition actions.
+
+At the panel container breakpoint, the roster and workspace become separate views; both NPC detail and batch results provide a **Roster** back action. Narrow controls stack without hiding core actions or collapsing HP values, while canonical statblocks use contained horizontal scrolling. Night mode uses the same neutral surfaces, selected blue, borders, focus states, and form controls as other DM Screen panels.
 
 ## Deferred work
 

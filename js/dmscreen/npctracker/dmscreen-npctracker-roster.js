@@ -24,6 +24,7 @@ export class NpcTrackerRoster {
 	constructor (
 		{
 			fnGetState,
+			fnGetReferenceData,
 			fnSelect,
 			fnAdd,
 			fnImport,
@@ -41,6 +42,7 @@ export class NpcTrackerRoster {
 		},
 	) {
 		this._fnGetState = fnGetState;
+		this._fnGetReferenceData = fnGetReferenceData;
 		this._fnSelect = fnSelect;
 		this._fnAdd = fnAdd;
 		this._fnImport = fnImport;
@@ -89,9 +91,9 @@ export class NpcTrackerRoster {
 		eleCount.textContent = `${state.npcs.length} ${state.npcs.length === 1 ? "NPC" : "NPCs"}`;
 
 		ee`<div class="dm-npc__roster-toolbar">
-			<div class="ve-btn-group">${btnAdd}${btnImport}${btnAddGroup}${btnRollAll}</div>
+			<div class="dm-npc__roster-primary">${btnAdd}${eleCount}</div>
+			<div class="dm-npc__roster-secondary">${btnRollAll}${btnAddGroup}${btnImport}</div>
 			${iptImport}
-			${eleCount}
 			<label class="dm-npc__all-toggle">${cbAll}<span>All creatures</span></label>
 		</div>`.appendTo(wrp);
 
@@ -225,18 +227,28 @@ export class NpcTrackerRoster {
 				if (confirm(`Remove "${npc.alias || mon.name}" from the roster?`)) this._fnRemove(npc.id);
 			});
 
-		const row = ee`<div class="dm-npc__roster-row ${isSelected ? "dm-npc__roster-row--selected" : ""}" role="listitem">
-			${btnSelect}
-			${btnRemove}
-			<div class="dm-npc__roster-edit">
+		const edit = ee`<details class="dm-npc__roster-edit">
+			<summary><span class="glyphicon glyphicon-pencil" aria-hidden="true"></span> Edit NPC</summary>
+			<div class="dm-npc__roster-edit-fields">
 				${iptAlias}
 				${selGroup}
+				${btnRemove}
+			</div>
+		</details>`;
+		const row = ee`<div class="dm-npc__roster-row ${isSelected ? "dm-npc__roster-row--selected" : ""}" role="listitem">
+			<div class="dm-npc__roster-summary">${btnSelect}${edit}</div>
+			<div class="dm-npc__roster-live">
 				<div class="dm-npc__roster-hp">
 					${getHpField({prop: "current", value: npc.hp.current, label: "Current hit points", shortLabel: "HP"})}
 					${getHpField({prop: "max", value: npc.hp.max, label: "Maximum hit points", shortLabel: "Max"})}
 					${getHpField({prop: "temp", value: npc.hp.temp, label: "Temporary hit points", shortLabel: "Temp"})}
 				</div>
-				${getNpcTrackerConditionControls({npc, fnUpdate: this._fnUpdateCondition, isCompact: true})}
+				${getNpcTrackerConditionControls({
+		npc,
+		fnUpdate: this._fnUpdateCondition,
+		conditionCatalog: this._fnGetReferenceData().conditions,
+		isCompact: true,
+	})}
 			</div>
 		</div>`;
 		row.appendTo(wrp);
