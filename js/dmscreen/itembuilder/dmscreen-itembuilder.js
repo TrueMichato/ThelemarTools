@@ -59,6 +59,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 		this._isLoading = true;
 		this._loadError = null;
 		this._saveStatus = "";
+		this._saveStatusType = "";
 		this._focusedEditorRoot = null;
 	}
 
@@ -79,6 +80,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 	async _pInit () {
 		this._isLoading = true;
 		this._loadError = null;
+		this._saveStatusType = "";
 		this._render();
 		try {
 			const [itemData, materialData, upgradeData, brew] = await Promise.all([
@@ -101,9 +103,10 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 		this._render();
 	}
 
-	_doUpdate ({isRender = true, status = ""} = {}) {
+	_doUpdate ({isRender = true, status = "", statusType = ""} = {}) {
 		this._draft = ItemBuilderCore.normalizeDraft(this._draft);
 		this._saveStatus = status;
+		this._saveStatusType = statusType;
 		this._board.doSaveStateDebounced();
 		if (isRender) this._render();
 	}
@@ -158,7 +161,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 		ee`<section class="dm-item-builder__summary" aria-label="Quick Forge item draft">
 			<div class="dm-item-builder__summary-heading">
 				<strong>${(item.name || "Unnamed item").qq()}</strong>
-				<span>${_getTypeLabel(item.type).qq()} \u00b7 ${(item.source || "No source").qq()}</span>
+				<span class="dm-item-builder__summary-meta">${_getTypeLabel(item.type).qq()} \u00b7 ${(item.source || "No source").qq()}</span>
 			</div>
 			<div class="dm-item-builder__identity">
 				<label><span>Item name</span>${nameInput}</label>
@@ -167,7 +170,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 			<div class="dm-item-builder__summary-composition">
 				<strong>Composition</strong>
 				<span>${this._getCompositionSummaryText().qq()}</span>
-				<span>${(this._draft.preset ? `Base: ${this._draft.preset.name} (${this._draft.preset.source})` : "No catalog base selected").qq()}</span>
+				<span class="dm-item-builder__summary-base">${(this._draft.preset ? `Base: ${this._draft.preset.name} (${this._draft.preset.source})` : "No catalog base selected").qq()}</span>
 			</div>
 			${this._getValidationElement(validation, {isCompact: true})}
 			<div class="dm-item-builder__summary-actions">${btnOpen}${btnHandoff}</div>
@@ -227,14 +230,14 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 			["Details", "details"],
 			["Review & Save", "review"],
 		].forEach(([label, id], ix) => {
-			ee`<button class="dm-item-builder__stage-link"><span>${ix + 1}</span>${label}</button>`
+			ee`<button class="dm-item-builder__stage-link" type="button" aria-label="Go to step ${ix + 1}: ${label.qq()}"><span>${ix + 1}</span>${label}</button>`
 				.onn("click", () => wrp.querySelector(`#dm-item-builder-${id}`)?.scrollIntoView({behavior: "smooth", block: "start"}))
 				.appendTo(wrpStages);
 		});
 
 		ee`<div class="dm-item-builder__content ${isFocused ? "dm-item-builder__content--focused" : ""}">
 			<div class="dm-item-builder__header">
-				<div>
+				<div class="dm-item-builder__header-copy">
 					<div class="dm-item-builder__title">Item workbench</div>
 					<div class="dm-item-builder__subtitle">Build from a trusted base, compose its properties, then review the real item.</div>
 				</div>
@@ -263,7 +266,10 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 			<section class="dm-item-builder__stage dm-item-builder__stage--review" id="dm-item-builder-review">
 				<header><span>4</span><div><strong>Review and save</strong><small>Confirm the resolved result before writing reference-only item data.</small></div></header>
 				${this._getValidationElement(validation)}
-				<div class="dm-item-builder__preview"><table class="ve-w-100 ve-stats" aria-label="Item preview">${Renderer.item.getCompactRenderedString(item)}</table></div>
+				<div class="dm-item-builder__preview">
+					<div class="dm-item-builder__preview-label">Resolved preview</div>
+					<table class="ve-w-100 ve-stats" aria-label="Item preview">${Renderer.item.getCompactRenderedString(item)}</table>
+				</div>
 				<div class="dm-item-builder__footer">${btnClose}${btnHandoff}${btnSave}</div>
 			</section>
 		</div>`.appendTo(wrp);
@@ -281,6 +287,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 			this._fnNavigateToMakebrew();
 		} catch (error) {
 			this._saveStatus = `Could not continue in Makebrew: ${error.message}`;
+			this._saveStatusType = "error";
 			this._render();
 		}
 	}
@@ -294,6 +301,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 			this._doUpdate({status: `Loaded ${preset.name} as the base item.`});
 		} catch (error) {
 			this._saveStatus = `Could not load that preset: ${error.message}`;
+			this._saveStatusType = "error";
 			this._render();
 		}
 	}
@@ -338,13 +346,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 	}
 
 	_getValidationElement ({errors, warnings}, {isCompact = false} = {}) {
-		const messages = [...errors, ...warnings];
-		const stateClass = errors.length
-			? "dm-item-builder__status--error"
-			: warnings.length
-				? "dm-item-builder__status--warning"
-				: "dm-item-builder__status--ready";
-		const heading = this._saveStatus || (errors.length ? "Cannot save yet." : warnings.length ? "Ready with warnings." : "Ready to save.");
+		const {heading, messages, stateClass} = this._getValidationMeta({errors, warnings});
 		const wrp = ee`<div class="dm-item-builder__status ${stateClass} ${isCompact ? "dm-item-builder__status--compact" : ""}" role="status" aria-live="polite"></div>`;
 		const eleHeading = ee`<strong></strong>`;
 		eleHeading.textContent = heading;
@@ -355,6 +357,21 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 			wrp.append(eleMessage);
 		});
 		return wrp;
+	}
+
+	_getValidationMeta ({errors, warnings}) {
+		const isError = !!errors.length || this._saveStatusType === "error";
+		return {
+			messages: [...errors, ...warnings],
+			stateClass: isError
+				? "dm-item-builder__status--error"
+				: warnings.length
+					? "dm-item-builder__status--warning"
+					: "dm-item-builder__status--ready",
+			heading: errors.length
+				? "Cannot save yet."
+				: this._saveStatus || (warnings.length ? "Ready with warnings." : "Ready to save."),
+		};
 	}
 
 	async _pOpenFocusedEditor ({trigger}) {
@@ -442,6 +459,7 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 		const validation = ItemBuilderCore.validate(this._draft, this._catalogs);
 		if (!validation.isValid) {
 			this._saveStatus = `Cannot save: ${validation.errors[0].message}`;
+			this._saveStatusType = "error";
 			this._render();
 			return;
 		}
@@ -450,10 +468,11 @@ export class ItemBuilderPanel extends DmScreenPanelAppBase {
 			item.uniqueId = this._draft.item.uniqueId || CryptUtil.uid();
 			await BrewUtil2.pPersistEditableBrewEntity("item", DataUtil.cleanJson(item, {isDeleteUniqueId: false}));
 			this._draft.item.uniqueId = item.uniqueId;
-			this._doUpdate({status: `Saved "${item.name}" to homebrew.`});
+			this._doUpdate({status: `Saved "${item.name}" to homebrew.`, statusType: "success"});
 			JqueryUtil.doToast({type: "success", content: `Saved "${item.name}" to homebrew.`});
 		} catch (error) {
 			this._saveStatus = `Save failed: ${error.message}`;
+			this._saveStatusType = "error";
 			this._render();
 		}
 	}
