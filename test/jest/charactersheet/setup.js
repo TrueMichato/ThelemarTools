@@ -10,6 +10,7 @@ globalThis.e_ = function (opts = {}) {
 	const html = opts.outer || opts.html || "";
 	const el = {
 		tag: opts.tag || "div",
+		_clazz: opts.clazz || opts.class || "",
 		_html: html,
 		_children: [],
 		_handlers: {},
