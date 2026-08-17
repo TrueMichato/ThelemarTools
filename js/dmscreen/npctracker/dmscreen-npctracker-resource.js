@@ -57,6 +57,57 @@ export function getNpcTrackerChargeDefaults (monster) {
 	return out;
 }
 
+export function getNpcTrackerLegendaryResistanceDefault (monster) {
+	const traits = Array.isArray(monster?.trait) ? monster.trait : [];
+	for (const trait of traits) {
+		const name = `${trait?.name ?? ""}`;
+		if (!/legendary resistance/i.test(name)) continue;
+		const match = name.match(/\(\s*(\d+)\s*\/\s*day\s*\)/i)
+			|| Renderer.stripTags(_getEntryStrings(trait?.entries ?? trait).join(" ")).match(/(\d+)\s*\/\s*day/i);
+		const max = match ? Math.floor(Number(match[1])) : 3;
+		if (Number.isFinite(max) && max >= 1) return {current: max, max};
+	}
+	return null;
+}
+
+export function getNpcTrackerLegendaryActionDefault (monster) {
+	if (!Array.isArray(monster?.legendary) || !monster.legendary.length) return null;
+	const max = Math.floor(Number(monster?.legendaryActions));
+	const clean = Number.isFinite(max) && max >= 1 ? max : 3;
+	return {current: clean, max: clean};
+}
+
+export function getNpcTrackerRechargeDefaults (monster) {
+	const out = [];
+	const seen = new Set();
+	const props = ["action", "trait", "legendary", "bonus", "reaction", "mythic"];
+	const reRecharge = /\{@recharge\s*(\d?)[^}]*}/i;
+	props.forEach(prop => {
+		(Array.isArray(monster?.[prop]) ? monster[prop] : []).forEach(entry => {
+			const haystack = `${entry?.name ?? ""} ${_getEntryStrings(entry?.entries ?? []).join(" ")}`;
+			const match = haystack.match(reRecharge);
+			if (!match) return;
+			const min = match[1] ? Math.floor(Number(match[1])) : 6;
+			if (!Number.isFinite(min) || min < 1 || min > 6) return;
+			const cleanName = `${entry?.name ?? ""}`
+				.replace(/\{@recharge\s*\d?[^}]*}/gi, "")
+				.replace(/\s+/g, " ")
+				.trim()
+				|| "Recharge ability";
+			const key = cleanName.toLowerCase();
+			if (seen.has(key)) return;
+			seen.add(key);
+			out.push({
+				id: `auto:recharge:${key.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}:${min}`,
+				name: cleanName,
+				min,
+				isReady: true,
+			});
+		});
+	});
+	return out;
+}
+
 export function getNpcTrackerAttackBonus (entry) {
 	const match = JSON.stringify(entry?.entries || []).match(/\{@hit\s+([+-]?\d+)(?:\|[^}]*)?}/i);
 	if (!match) return null;

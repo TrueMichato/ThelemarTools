@@ -9,20 +9,22 @@ The NPC Manager is DM Screen panel type 26. It keeps independent NPC instances i
 | `js/dmscreen/npctracker/dmscreen-npctracker.js` | Panel app, root controller, persisted mutations, workspace mode |
 | `js/dmscreen/npctracker/dmscreen-npctracker-serial.js` | Versioned state, migration, group deletion helper |
 | `js/dmscreen/npctracker/dmscreen-npctracker-roster.js` | Add/import toolbar, grouped roster, assignment controls |
-| `js/dmscreen/npctracker/dmscreen-npctracker-detail.js` | Roleplay view, compact canonical statblock, all single-NPC rolls |
+| `js/dmscreen/npctracker/dmscreen-npctracker-detail.js` | Roleplay view, consolidated vitals section, compact canonical statblock, all single-NPC rolls |
+| `js/dmscreen/npctracker/dmscreen-npctracker-resource.js` | Auto-detect helpers for spell slots, charges, legendary resistances/actions, and recharge abilities |
 | `js/dmscreen/npctracker/dmscreen-npctracker-roll.js` | Shared d20 roll, bonus resolution, scope and sort helpers |
 | `js/dmscreen/npctracker/dmscreen-npctracker-batch.js` | Batch configuration and results workspace |
+| `js/dmscreen/npctracker/dmscreen-npctracker-data.js` | Reference data loading and condition catalog |
 | `scss/includes/dmscreen-npc-tracker.scss` | Panel, group, detail, batch, responsive, and night-mode styles |
 
 `NpcTrackerRoot` owns state and wires the roster, detail, and batch components through callbacks. Every persisted mutation ends at `_doSave()` and `board.doSaveStateDebounced()`. Batch configuration and results are intentionally in-memory; each underlying roll is retained by the normal dice roll log.
 
-## State and serializer v4
+## State and serializer v5
 
 The expanded state is:
 
 ```js
 {
-  version: 3,
+  version: 5,
   settings: {
     selectedId: null,
     isIncludeAllCreatures: false,
@@ -41,6 +43,14 @@ The expanded state is:
       conditions: ["poisoned"],
       spellSlots: {"1": {current: 3, max: 4}},
       charges: [{id: "wand", name: "Moon Wand", current: 5, max: 7, isAuto: true}],
+      vitals: {
+        deathSaves: {successes: 0, failures: 0},
+        legendaryResistances: {current: 3, max: 3},
+        legendaryActions: {current: 3, max: 3},
+        recharges: [{id: "recharge-0", name: "Fire Breath", min: 5, isReady: true}],
+        concentration: "",
+      },
+      reactionUsed: false,
       monster: {/* bestiary entity */},
       fluff: null,
     },
@@ -48,7 +58,11 @@ The expanded state is:
 }
 ```
 
-Serialized keys are `v`, `s:{sel,all,uc,ts}`, `g:[{id,n,c}]`, and `n:[{id,a,g,hp:{c,m,t},c,ss,ch,mon,fluff}]`. Spell slots use `ss:{level:{c,m}}`; charge trackers use `ch:[{id,n,c,m,a}]`, where `a` marks a statblock-derived tracker.
+Serialized keys are `v`, `s:{sel,all,uc,ts}`, `g:[{id,n,c}]`, and `n:[{id,a,g,hp:{c,m,t},c,ss,ch,vi,mon,fluff}]`. Spell slots use `ss:{level:{c,m}}`; charge trackers use `ch:[{id,n,c,m,a}]`, where `a` marks a statblock-derived tracker.
+
+Combat vitals use the compressed key `vi:{ds:{s,f}, lr:{c,m}, la:{c,m}, rc:[{id,n,mn,r}], co}` — `ds` death saves (successes/failures), `lr` legendary resistances, `la` legendary actions, `rc` recharge abilities (`n` name, `mn` recharge minimum, `r` isReady), and `co` the concentration string. `lr` and `la` are omitted when the monster has none; `rc` is omitted when empty. The per-turn **reaction-used** flag is deliberately session-only: it is defaulted to `false` on load and never written to the payload, because a stale "reaction spent" state across a panel reload or new day is misleading rather than useful.
+
+Text size accepts four tiers — `normal`, `large`, `x-large`, `xx-large` — driven by a single `--dm-npc-scale` custom property on `.dm-npc__layout` rather than per-element overrides. Larger tiers scale all type (including secondary/muted text) proportionally; earlier builds shrank secondary text at the large tier, which was an accessibility regression that has been removed. Legacy `normal`/`large` saves still load; any unrecognized value coerces to `normal`.
 
 Membership lives on each NPC as `groupId`. This guarantees that duplicate instances of the same monster can be assigned independently and prevents one NPC from belonging to multiple groups. Deleting a group clears matching memberships; it never deletes NPCs.
 
@@ -57,6 +71,9 @@ Version 1 saves have no groups or memberships. Deserialization defaults them to 
 Version 2 saves have no conditions. Serializer v3 defaults every migrated NPC to `conditions: []`. Condition names are normalized and deduplicated, but are not checked against a fixed parser list. This is intentional: an installed-brew condition must survive save/load even when that brew is temporarily unavailable.
 
 Version 3 saves have no text-size or resource state. Serializer v4 defaults `textSize` to `normal`, derives full spell slots from `monster.spellcasting[].spells[level].slots`, and detects charged items from Special Equipment text. Saved current values are clamped to their maxima. Existing saves therefore gain usable trackers without losing HP, conditions, memberships, or selection.
+
+Version 4 (and earlier) saves have no combat-vitals state. Serializer v5 defaults every migrated NPC's `vitals` by re-deriving them from the stored monster snapshot — the same back-derivation used for spell slots and charges. Legendary resistance counts are parsed from a `Legendary Resistance (N/Day)` trait; legendary action maxima use `monster.legendaryActions` (defaulting to 3 when a `legendary` array is present); recharge abilities are detected from `{@recharge N}` tags in trait/action/legendary names and entries (a bare `{@recharge}` implies 6). Where a `vi` key is present, saved current values and readiness are preserved and clamped; named recharge abilities are retained (so a DM's manually added recharge survives a reload), while malformed or unnamed saved recharge entries are dropped. Existing saves therefore gain fully populated vitals trackers without losing any prior state.
+
 
 ## Site and homebrew reference data
 
@@ -141,6 +158,7 @@ Encounter Control presents roll type, governing ability/skill, and the primary R
 - Proficiency Bonus appears with the core abilities and saves. Explicit `pbNote` text wins; otherwise the value is derived from CR with `Parser.crToPb()`.
 - Spellcasting NPCs receive level-by-level current/maximum slot controls. **Cast** spends one slot, **+1** restores one, and **Reset** restores the level to maximum.
 - Special Equipment prose such as “the moon wand has 7 charges” seeds an item-charge tracker. DMs can spend, restore, reset, rename, resize, remove, or manually add trackers when the source prose is unstructured.
+- The consolidated **Vitals** section surfaces streamlined live-combat tracking above spell slots. Death saves are two three-pip clusters that click to set the count and clear when three successes (**Stable**) or three failures (**Dead**) are marked, with a **Reset** control; the pip cluster is mirrored in the roster row for at-a-glance play. Legendary resistance and legendary action counters render as `current/max` stepper rows (Use / +1 / Reset) auto-detected from the statblock. Recharge abilities appear as Ready/Spent chips toggled with a click, plus a **Roll recharges** action that rolls a d6 per spent ability and marks any meeting its threshold ready. Concentration is a single highlighted "Concentrating on X" chip with a clear affordance, or a subtle "Set concentration" button when empty. Reaction-used is a per-turn toggle in the roster live area; it is intentionally session-only and is not persisted.
 
 ## Responsive behavior
 
@@ -148,11 +166,11 @@ Wide panels show the grouped roster and current detail/batch workspace side by s
 
 The visual hierarchy uses tactical slate for structural chrome, warm parchment-toned content surfaces, blue for selection and interactive emphasis, and each condition's canonical color only for condition state. Selected roster rows, At-a-Glance statistics, resource controls, and Encounter Control have distinct surface depth without changing their order or behavior. Night mode uses dedicated high-contrast surfaces, borders, primary text, muted text, and state colors rather than reusing washed-out day values.
 
-The toolbar also provides **A / A+** text sizing. The choice persists with the panel and increases the NPC Manager's information text without changing global site typography.
+The toolbar also provides **A / A+ / A++ / A+++** text sizing across four tiers (Normal, Large, X-Large, XX-Large). The choice persists with the panel and increases the NPC Manager's information text — including secondary and muted text — without changing global site typography.
 
-The detail workspace keeps identity, HP, conditions, and the roleplay/statblock switch in a persistent command header. Encounter Control follows the table workflow from targets to roll setup, results/initiative handoff, then reversible HP and condition actions.
+The detail workspace keeps identity, HP, conditions, and the roleplay/statblock switch in a persistent command header. A consolidated **Vitals** section — death saves, legendary resistances, legendary actions, recharge abilities, and concentration — sits above spell slots for quick live-play access, with the two most frequently flipped controls (a compact death-save cluster and a reaction toggle) mirrored in the roster row's live area. Encounter Control follows the table workflow from targets to roll setup, results/initiative handoff, then reversible HP and condition actions.
 
-At the panel container breakpoint, the roster and workspace become separate views; both NPC detail and batch results provide a **Roster** back action. Narrow controls stack without hiding core actions or collapsing HP values, while canonical statblocks use contained horizontal scrolling. The same hierarchy remains usable at a 300px panel width and with **A+** text enabled.
+At the panel container breakpoint, the roster and workspace become separate views; both NPC detail and batch results provide a **Roster** back action. Narrow controls stack without hiding core actions or collapsing HP values, while canonical statblocks use contained horizontal scrolling. The same hierarchy remains usable at a 300px panel width and at the largest text tier.
 
 ## Deferred work
 

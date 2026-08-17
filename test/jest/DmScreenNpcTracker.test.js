@@ -5,10 +5,12 @@ import "../../js/render-dice.js";
 import "../../js/utils-ui.js";
 import {
 	NpcTrackerSerializer,
+	getNpcTrackerVitalsDefaults,
 	removeNpcTrackerGroup,
 } from "../../js/dmscreen/npctracker/dmscreen-npctracker-serial.js";
 import {
 	getNpcTrackerDetailModel,
+	getNpcTrackerDeathSaveState,
 	getNpcTrackerDisplayName,
 	getNpcTrackerProficiencyBonusText,
 	getNpcTrackerSignedNumber,
@@ -36,8 +38,35 @@ import {
 import {
 	getNpcTrackerAttackBonus,
 	getNpcTrackerChargeDefaults,
+	getNpcTrackerLegendaryActionDefault,
+	getNpcTrackerLegendaryResistanceDefault,
+	getNpcTrackerRechargeDefaults,
 	getNpcTrackerSpellSlotDefaults,
 } from "../../js/dmscreen/npctracker/dmscreen-npctracker-resource.js";
+
+const getLegendaryMonster = () => ({
+	name: "Ancient Wyrm",
+	source: "TST",
+	isNpc: false,
+	hp: {average: 200, formula: "16d12"},
+	str: 23,
+	dex: 10,
+	con: 21,
+	int: 14,
+	wis: 13,
+	cha: 17,
+	cr: "17",
+	legendaryActions: 3,
+	trait: [{name: "Legendary Resistance (3/Day)", entries: ["If the wyrm fails a save, it can choose to succeed instead."]}],
+	action: [
+		{name: "Bite", entries: ["{@atk mw} {@hit +11} to hit."]},
+		{name: "Fire Breath {@recharge 5}", entries: ["Each creature makes a {@dc 21} save."]},
+	],
+	legendary: [
+		{name: "Detect", entries: ["The wyrm makes a Perception check."]},
+		{name: "Tail Attack", entries: ["The wyrm makes a tail attack."]},
+	],
+});
 
 const getMonster = () => ({
 	name: "Court Mage",
@@ -83,7 +112,7 @@ describe("NPC Tracker serialization", () => {
 		});
 		const restored = NpcTrackerSerializer.deserialize(saved);
 
-		expect(saved.v).toBe(4);
+		expect(saved.v).toBe(5);
 		expect(restored.settings).toEqual({
 			selectedId: npc.id,
 			isIncludeAllCreatures: true,
@@ -169,7 +198,7 @@ describe("NPC Tracker serialization", () => {
 			}],
 		});
 
-		expect(restored.version).toBe(4);
+		expect(restored.version).toBe(5);
 		expect(restored.npcs[0]).toMatchObject({
 			id: "legacy-v2",
 			groupId: "court",
@@ -500,6 +529,137 @@ describe("NPC Tracker resources", () => {
 	it("extracts attack bonuses without inventing missing rolls", () => {
 		expect(getNpcTrackerAttackBonus({entries: ["{@atk mw} {@hit +6} to hit."]})).toBe(6);
 		expect(getNpcTrackerAttackBonus({entries: ["The target must save."]})).toBeNull();
+	});
+});
+
+describe("NPC Tracker text size", () => {
+	it("accepts all four tiers and coerces legacy/invalid values", () => {
+		const load = ts => NpcTrackerSerializer.deserialize({s: {ts}}).settings.textSize;
+		expect(load("normal")).toBe("normal");
+		expect(load("large")).toBe("large");
+		expect(load("x-large")).toBe("x-large");
+		expect(load("xx-large")).toBe("xx-large");
+		expect(load("gigantic")).toBe("normal");
+		expect(load(undefined)).toBe("normal");
+	});
+
+	it("round-trips a new tier via the compressed key", () => {
+		const npc = NpcTrackerSerializer.createNpc({monster: getMonster()});
+		const saved = NpcTrackerSerializer.serialize({settings: {selectedId: npc.id, textSize: "xx-large"}, npcs: [npc]});
+		expect(saved.s.ts).toBe("xx-large");
+		expect(NpcTrackerSerializer.deserialize(saved).settings.textSize).toBe("xx-large");
+	});
+});
+
+describe("NPC Tracker vitals auto-detection", () => {
+	it("parses legendary resistance count from the trait", () => {
+		expect(getNpcTrackerLegendaryResistanceDefault(getLegendaryMonster())).toEqual({current: 3, max: 3});
+		expect(getNpcTrackerLegendaryResistanceDefault(getMonster())).toBeNull();
+	});
+
+	it("defaults legendary actions to 3 and honors explicit counts", () => {
+		expect(getNpcTrackerLegendaryActionDefault(getLegendaryMonster())).toEqual({current: 3, max: 3});
+		expect(getNpcTrackerLegendaryActionDefault({legendary: [{name: "Move"}], legendaryActions: 5})).toEqual({current: 5, max: 5});
+		expect(getNpcTrackerLegendaryActionDefault({legendary: [{name: "Move"}]})).toEqual({current: 3, max: 3});
+		expect(getNpcTrackerLegendaryActionDefault(getMonster())).toBeNull();
+	});
+
+	it("detects recharge abilities and their thresholds", () => {
+		const recharges = getNpcTrackerRechargeDefaults(getLegendaryMonster());
+		expect(recharges).toHaveLength(1);
+		expect(recharges[0]).toMatchObject({name: "Fire Breath", min: 5, isReady: true});
+
+		const bare = getNpcTrackerRechargeDefaults({action: [{name: "Web {@recharge}", entries: ["Restrains."]}]});
+		expect(bare[0]).toMatchObject({name: "Web", min: 6});
+
+		expect(getNpcTrackerRechargeDefaults(getMonster())).toEqual([]);
+	});
+});
+
+describe("NPC Tracker vitals serialization", () => {
+	it("derives full vitals from a legendary monster on creation", () => {
+		const npc = NpcTrackerSerializer.createNpc({monster: getLegendaryMonster()});
+		expect(npc.vitals.deathSaves).toEqual({successes: 0, failures: 0});
+		expect(npc.vitals.legendaryResistances).toEqual({current: 3, max: 3});
+		expect(npc.vitals.legendaryActions).toEqual({current: 3, max: 3});
+		expect(npc.vitals.recharges).toHaveLength(1);
+		expect(npc.vitals.concentration).toBe("");
+		expect(npc.reactionUsed).toBe(false);
+	});
+
+	it("round-trips mutated vitals and clamps out-of-range values", () => {
+		const npc = NpcTrackerSerializer.createNpc({monster: getLegendaryMonster()});
+		npc.vitals.deathSaves = {successes: 2, failures: 9};
+		npc.vitals.legendaryResistances.current = 1;
+		npc.vitals.legendaryActions.current = 2;
+		npc.vitals.recharges[0].isReady = false;
+		npc.vitals.concentration = "Hold Person";
+
+		const saved = NpcTrackerSerializer.serialize({settings: {selectedId: npc.id}, npcs: [npc]});
+		expect(saved.n[0].vi).toMatchObject({ds: {s: 2, f: 3}, lr: {c: 1, m: 3}, la: {c: 2, m: 3}, co: "Hold Person"});
+		expect(saved.n[0].vi.rc[0]).toMatchObject({n: "Fire Breath", mn: 5, r: false});
+
+		const restored = NpcTrackerSerializer.deserialize(saved).npcs[0];
+		expect(restored.vitals.deathSaves).toEqual({successes: 2, failures: 3});
+		expect(restored.vitals.legendaryResistances).toEqual({current: 1, max: 3});
+		expect(restored.vitals.recharges[0].isReady).toBe(false);
+		expect(restored.vitals.concentration).toBe("Hold Person");
+		expect(restored.reactionUsed).toBe(false);
+	});
+
+	it("omits absent counters and recharges from the compressed payload", () => {
+		const npc = NpcTrackerSerializer.createNpc({monster: getMonster()});
+		const saved = NpcTrackerSerializer.serialize({settings: {selectedId: npc.id}, npcs: [npc]});
+		expect(saved.n[0].vi.lr).toBeUndefined();
+		expect(saved.n[0].vi.la).toBeUndefined();
+		expect(saved.n[0].vi.rc).toBeUndefined();
+	});
+
+	it("does not persist the session-only reaction flag", () => {
+		const npc = NpcTrackerSerializer.createNpc({monster: getMonster()});
+		npc.reactionUsed = true;
+		const saved = NpcTrackerSerializer.serialize({settings: {selectedId: npc.id}, npcs: [npc]});
+		expect(JSON.stringify(saved.n[0])).not.toContain("reactionUsed");
+		expect(NpcTrackerSerializer.deserialize(saved).npcs[0].reactionUsed).toBe(false);
+	});
+
+	it("derives vitals from the monster snapshot for legacy v4 saves without a vi key", () => {
+		const legacy = {
+			v: 4,
+			s: {sel: "legacy-v4"},
+			n: [{
+				id: "legacy-v4",
+				hp: {c: 200, m: 200, t: 0},
+				mon: getLegendaryMonster(),
+			}],
+		};
+		const restored = NpcTrackerSerializer.deserialize(legacy).npcs[0];
+		expect(restored.vitals).toEqual(getNpcTrackerVitalsDefaults(getLegendaryMonster()));
+		expect(restored.vitals.legendaryResistances).toEqual({current: 3, max: 3});
+		expect(restored.vitals.recharges[0]).toMatchObject({name: "Fire Breath", min: 5, isReady: true});
+	});
+
+	it("keeps named manual recharges but drops unresolvable saved entries", () => {
+		const npc = NpcTrackerSerializer.createNpc({monster: getLegendaryMonster()});
+		const saved = NpcTrackerSerializer.serialize({settings: {selectedId: npc.id}, npcs: [npc]});
+		saved.n[0].vi.rc.push({id: "manual", n: "Custom Ability", mn: 6, r: false});
+		saved.n[0].vi.rc.push({id: "", n: "", mn: 6, r: true});
+		const restored = NpcTrackerSerializer.deserialize(saved).npcs[0];
+		expect(restored.vitals.recharges.map(it => it.name)).toEqual(["Fire Breath", "Custom Ability"]);
+	});
+});
+
+describe("NPC Tracker death saves", () => {
+	it("derives stabilize and dead states at three marks", () => {
+		expect(getNpcTrackerDeathSaveState({successes: 0, failures: 0})).toMatchObject({isStable: false, isDead: false});
+		expect(getNpcTrackerDeathSaveState({successes: 2, failures: 1})).toMatchObject({isStable: false, isDead: false});
+		expect(getNpcTrackerDeathSaveState({successes: 3, failures: 1})).toMatchObject({isStable: true, isDead: false});
+		expect(getNpcTrackerDeathSaveState({successes: 1, failures: 3})).toMatchObject({isStable: false, isDead: true});
+	});
+
+	it("clamps out-of-range and non-numeric marks", () => {
+		expect(getNpcTrackerDeathSaveState({successes: 9, failures: -2})).toMatchObject({successes: 3, failures: 0});
+		expect(getNpcTrackerDeathSaveState(undefined)).toMatchObject({successes: 0, failures: 0, isStable: false, isDead: false});
 	});
 });
 
