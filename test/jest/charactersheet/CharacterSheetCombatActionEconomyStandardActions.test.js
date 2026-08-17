@@ -466,3 +466,124 @@ describe("CharacterSheetCombat standard action economy", () => {
 		expect(html).not.toContain("&amp;amp;");
 	});
 });
+
+describe("renderCombatActionEconomy — collapsed action-cost spells", () => {
+	/** Render into mock-DOM containers and return the three column groups. */
+	function render (combat) {
+		const section = globalThis.e_({tag: "section"});
+		const container = globalThis.e_({tag: "div"});
+		globalThis.document = {
+			getElementById: id => id === "charsheet-combat-action-economy-section" ? section : container,
+		};
+		combat.renderCombatActionEconomy();
+		return {section, container, groups: container._children};
+	}
+
+	const listOf = group => group._children[1];
+	const isSpellDisclosure = node => node.tag === "details";
+
+	test("many action-cost spells collapse into a single summary disclosure, not N flat rows", () => {
+		const {combat} = makeCombat({
+			// No standard actions so the Action column contains only these spells.
+			actionsData: [],
+			spells: [
+				{name: "Fire Bolt", source: "PHB", level: 0, castingTime: "1 action"},
+				{name: "Mage Armor", source: "PHB", level: 1, prepared: true, castingTime: "1 action"},
+				{name: "Fireball", source: "PHB", level: 3, prepared: true, castingTime: "1 action"},
+				{name: "Misty Step", source: "PHB", level: 2, prepared: true, castingTime: "1 bonus action"},
+				{name: "Shield", source: "PHB", level: 1, prepared: true, castingTime: "1 reaction"},
+			],
+		});
+		const {groups} = render(combat);
+		const actionList = listOf(groups[0]);
+
+		// The action-cost spells collapse into exactly one disclosure node.
+		const disclosures = actionList._children.filter(isSpellDisclosure);
+		expect(disclosures).toHaveLength(1);
+		const details = disclosures[0];
+		expect(details.tag).toBe("details");
+
+		// Summary shows the count of the three action-cost spells.
+		const summary = details._children[0];
+		expect(summary.tag).toBe("summary");
+		const count = summary._children.find(c => c._clazz.includes("__spell-count"));
+		expect(count.textContent).toBe("3");
+
+		// The disclosure body holds one row per collapsed spell.
+		const body = details._children[1];
+		expect(body._children).toHaveLength(3);
+	});
+
+	test("bonus and reaction spells stay individual inline rows (never collapsed)", () => {
+		const {combat} = makeCombat({
+			actionsData: [],
+			spells: [
+				{name: "Fireball", source: "PHB", level: 3, prepared: true, castingTime: "1 action"},
+				{name: "Misty Step", source: "PHB", level: 2, prepared: true, castingTime: "1 bonus action"},
+				{name: "Healing Word", source: "PHB", level: 1, prepared: true, castingTime: "1 bonus action"},
+				{name: "Shield", source: "PHB", level: 1, prepared: true, castingTime: "1 reaction"},
+			],
+		});
+		const {groups} = render(combat);
+
+		const bonusList = listOf(groups[1]);
+		const reactionList = listOf(groups[2]);
+
+		// Bonus column: two flat spell rows, no disclosure.
+		expect(bonusList._children.every(n => !isSpellDisclosure(n))).toBe(true);
+		expect(bonusList._children).toHaveLength(2);
+		expect(bonusList._children.every(row => row._clazz.includes("--spell"))).toBe(true);
+
+		// Reaction column: one flat spell row, no disclosure.
+		expect(reactionList._children.every(n => !isSpellDisclosure(n))).toBe(true);
+		expect(reactionList._children).toHaveLength(1);
+	});
+
+	test("collapsed spell rows preserve cantrip vs leveled subtitle and hover markup", () => {
+		const {combat} = makeCombat({
+			actionsData: [],
+			spells: [
+				{name: "Fire Bolt", source: "PHB", level: 0, castingTime: "1 action"},
+				{name: "Fireball", source: "PHB", level: 3, prepared: true, castingTime: "1 action"},
+			],
+		});
+		const {groups} = render(combat);
+		const body = listOf(groups[0])._children.find(isSpellDisclosure)._children[1];
+
+		const rowByName = name => body._children.find(row => row._children[1].innerHTML.includes(name));
+		const cantrip = rowByName("Fire Bolt");
+		const leveled = rowByName("Fireball");
+
+		// Subtitle is the third child of each row.
+		expect(cantrip._children[2].textContent).toBe("Cantrip");
+		expect(leveled._children[2].textContent).toBe("Level 3");
+		// Hover preserved on the collapsed spell name.
+		expect(cantrip._children[1].innerHTML).toMatch(/data-hover(?:-inline)?="true"/);
+	});
+
+	test("non-spell action rows (attacks) render before the spell disclosure, unchanged", () => {
+		const {combat} = makeCombat({
+			actionsData: [],
+			attacks: [{name: "Longsword", damage: "1d8", damageType: "slashing"}],
+			spells: [{name: "Fireball", source: "PHB", level: 3, prepared: true, castingTime: "1 action"}],
+		});
+		const {groups} = render(combat);
+		const actionList = listOf(groups[0]);
+
+		// The disclosure is appended after all flat rows; the Longsword attack row
+		// sits among those flat rows, unchanged.
+		expect(isSpellDisclosure(actionList._children.at(-1))).toBe(true);
+		const longsword = actionList._children.find(n => !isSpellDisclosure(n) && n._children[1]?.innerHTML.includes("Longsword"));
+		expect(longsword).toBeTruthy();
+		expect(longsword._clazz).toContain("--attack");
+	});
+
+	test("no action-cost spells means no disclosure node", () => {
+		const {combat} = makeCombat({
+			actionsData: [],
+			spells: [{name: "Shield", source: "PHB", level: 1, prepared: true, castingTime: "1 reaction"}],
+		});
+		const {groups} = render(combat);
+		expect(listOf(groups[0])._children.some(isSpellDisclosure)).toBe(false);
+	});
+});

@@ -7210,6 +7210,33 @@ class CharacterSheetCombat {
 			{key: "reaction", chip: "reaction"},
 		];
 
+		// One row builder shared by flat rows and the collapsed spell disclosure so
+		// glyph + hover name + subtitle stay identical wherever a spell surfaces.
+		const buildRow = (entry) => {
+			const meta = kindMeta[entry.kind] || {label: "", glyph: "•"};
+			const categoryClass = entry.rulesCategory ? ` cs-combat-action-economy__item--${entry.rulesCategory}` : "";
+			const row = e_({tag: "div", clazz: `cs-combat-action-economy__item cs-combat-action-economy__item--${entry.kind}${categoryClass}`});
+
+			const badge = e_({tag: "span", clazz: "cs-combat-action-economy__kind"});
+			badge.setAttribute("title", meta.label);
+			badge.setAttribute("aria-label", meta.label);
+			badge.textContent = meta.glyph;
+			row.appendChild(badge);
+
+			const name = e_({tag: "span", clazz: "cs-combat-action-economy__name"});
+			name.innerHTML = this._getActionEconomyNameHtml(entry);
+			row.appendChild(name);
+
+			if (entry.subtitle) {
+				const sub = e_({tag: "span", clazz: "cs-combat-action-economy__sub"});
+				sub.textContent = entry.subtitle;
+				row.appendChild(sub);
+			}
+			return row;
+		};
+
+		const spellMeta = kindMeta.spell || {label: "Spell", glyph: "✦"};
+
 		for (const col of columns) {
 			const entries = buckets[col.key];
 			const group = e_({tag: "div", clazz: "cs-combat-action-economy__group"});
@@ -7223,28 +7250,45 @@ class CharacterSheetCombat {
 				empty.textContent = "None";
 				list.appendChild(empty);
 			} else {
-				for (const entry of entries) {
-					const meta = kindMeta[entry.kind] || {label: "", glyph: "•"};
-					const categoryClass = entry.rulesCategory ? ` cs-combat-action-economy__item--${entry.rulesCategory}` : "";
-					const row = e_({tag: "div", clazz: `cs-combat-action-economy__item cs-combat-action-economy__item--${entry.kind}${categoryClass}`});
+				// Action-cost spells are numerous and unsurprising, so in the Action
+				// column they collapse into one compact disclosure to keep the panel
+				// from flooding; the rare, easy-to-forget Bonus/Reaction spells stay as
+				// individual rows because those are the ones that drive turn planning.
+				const collapseSpells = col.key === "action";
+				const spellEntries = collapseSpells ? entries.filter(e => e.kind === "spell") : [];
+				const flatEntries = collapseSpells ? entries.filter(e => e.kind !== "spell") : entries;
+
+				for (const entry of flatEntries) list.appendChild(buildRow(entry));
+
+				if (spellEntries.length) {
+					const details = e_({tag: "details", clazz: "cs-combat-action-economy__spells"});
+					const summary = e_({tag: "summary", clazz: "cs-combat-action-economy__spell-summary"});
 
 					const badge = e_({tag: "span", clazz: "cs-combat-action-economy__kind"});
-					badge.setAttribute("title", meta.label);
-					badge.setAttribute("aria-label", meta.label);
-					badge.textContent = meta.glyph;
-					row.appendChild(badge);
+					badge.setAttribute("title", spellMeta.label);
+					badge.setAttribute("aria-label", spellMeta.label);
+					badge.textContent = spellMeta.glyph;
+					summary.appendChild(badge);
 
-					const name = e_({tag: "span", clazz: "cs-combat-action-economy__name"});
-					name.innerHTML = this._getActionEconomyNameHtml(entry);
-					row.appendChild(name);
+					const label = e_({tag: "span", clazz: "cs-combat-action-economy__name", text: "Spells"});
+					summary.appendChild(label);
 
-					if (entry.subtitle) {
-						const sub = e_({tag: "span", clazz: "cs-combat-action-economy__sub"});
-						sub.textContent = entry.subtitle;
-						row.appendChild(sub);
-					}
+					const count = e_({tag: "span", clazz: "cs-combat-action-economy__spell-count", text: String(spellEntries.length)});
+					count.setAttribute("aria-label", `${spellEntries.length} action-cost spell${spellEntries.length === 1 ? "" : "s"}`);
+					summary.appendChild(count);
 
-					list.appendChild(row);
+					const chevron = e_({tag: "span", clazz: "cs-combat-action-economy__spell-chevron"});
+					chevron.setAttribute("aria-hidden", "true");
+					chevron.textContent = "\u203A";
+					summary.appendChild(chevron);
+
+					details.appendChild(summary);
+
+					const children = e_({tag: "div", clazz: "cs-combat-action-economy__spell-children"});
+					for (const entry of spellEntries) children.appendChild(buildRow(entry));
+					details.appendChild(children);
+
+					list.appendChild(details);
 				}
 			}
 
