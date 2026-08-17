@@ -77,6 +77,8 @@ export class NpcTrackerRoot {
 			fnAssignGroup: meta => this._assignGroup(meta),
 			fnOpenBatch: scope => this._openBatch(scope),
 			fnUpdateCondition: meta => this._updateNpcCondition(meta),
+			fnUpdateDeathSave: meta => this._updateDeathSave(meta),
+			fnToggleReaction: meta => this._toggleReaction(meta),
 		});
 		this._detail = new NpcTrackerDetail({
 			fnGetNpc: () => this._getSelectedNpc(),
@@ -92,6 +94,14 @@ export class NpcTrackerRoot {
 			fnAddCharge: meta => this._pAddCharge(meta),
 			fnEditCharge: meta => this._pEditCharge(meta),
 			fnRemoveCharge: meta => this._removeCharge(meta),
+			fnUpdateDeathSave: meta => this._updateDeathSave(meta),
+			fnResetDeathSaves: meta => this._resetDeathSaves(meta),
+			fnUpdateLegendary: meta => this._updateLegendary(meta),
+			fnToggleRecharge: meta => this._toggleRecharge(meta),
+			fnRollRecharges: meta => this._pRollRecharges(meta),
+			fnToggleReaction: meta => this._toggleReaction(meta),
+			fnSetConcentration: meta => this._pSetConcentration(meta),
+			fnClearConcentration: meta => this._clearConcentration(meta),
 		});
 		this._batch = new NpcTrackerBatch({
 			fnGetContext: () => ({
@@ -321,7 +331,7 @@ export class NpcTrackerRoot {
 	}
 
 	_setTextSize (value) {
-		this._state.settings.textSize = value === "large" ? "large" : "normal";
+		this._state.settings.textSize = ["normal", "large", "x-large", "xx-large"].includes(value) ? value : "normal";
 		this._wrpRoot?.attr("data-text-size", this._state.settings.textSize);
 		this._renderRoster();
 		this._doSave();
@@ -398,6 +408,94 @@ export class NpcTrackerRoot {
 		const charge = npc.charges?.find(it => it.id === chargeId);
 		if (!charge || !confirm(`Remove the "${charge.name}" charge tracker?`)) return;
 		npc.charges = npc.charges.filter(it => it.id !== chargeId);
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_updateDeathSave ({npc, kind, value}) {
+		if (!this._state.npcs.includes(npc)) return;
+		const prop = kind === "failure" ? "failures" : "successes";
+		const next = Math.max(0, Math.min(3, Math.floor(Number(value))));
+		if (!Number.isFinite(next)) return;
+		npc.vitals.deathSaves[prop] = npc.vitals.deathSaves[prop] === next ? next - 1 < 0 ? 0 : next - 1 : next;
+		this._renderRoster();
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_resetDeathSaves ({npc}) {
+		if (!this._state.npcs.includes(npc)) return;
+		npc.vitals.deathSaves = {successes: 0, failures: 0};
+		this._renderRoster();
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_updateLegendary ({npc, kind, mode}) {
+		if (!this._state.npcs.includes(npc)) return;
+		const counter = kind === "action" ? npc.vitals.legendaryActions : npc.vitals.legendaryResistances;
+		if (!counter) return;
+		if (mode === "spend") counter.current = Math.max(0, counter.current - 1);
+		else if (mode === "restore") counter.current = Math.min(counter.max, counter.current + 1);
+		else if (mode === "reset") counter.current = counter.max;
+		else return;
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_toggleRecharge ({npc, rechargeId}) {
+		if (!this._state.npcs.includes(npc)) return;
+		const recharge = npc.vitals.recharges?.find(it => it.id === rechargeId);
+		if (!recharge) return;
+		recharge.isReady = !recharge.isReady;
+		this._renderDetail();
+		this._doSave();
+	}
+
+	async _pRollRecharges ({npc}) {
+		if (!this._state.npcs.includes(npc)) return;
+		const spent = (npc.vitals.recharges || []).filter(recharge => !recharge.isReady);
+		if (!spent.length) {
+			JqueryUtil.doToast({type: "info", content: "No spent recharge abilities to roll."});
+			return;
+		}
+		const recharged = [];
+		for (const recharge of spent) {
+			const result = await Renderer.dice.pRoll2("1d6", {isUser: false, name: getNpcTrackerDisplayName(npc), label: `${recharge.name} recharge`}, {isResultUsed: false});
+			if (!Number.isFinite(result)) continue;
+			if (result >= recharge.min) {
+				recharge.isReady = true;
+				recharged.push(recharge.name);
+			}
+		}
+		JqueryUtil.doToast({
+			type: recharged.length ? "success" : "info",
+			content: recharged.length ? `Recharged: ${recharged.join(", ")}.` : "No abilities recharged.",
+		});
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_toggleReaction ({npc}) {
+		if (!this._state.npcs.includes(npc)) return;
+		npc.reactionUsed = !npc.reactionUsed;
+		this._renderRoster();
+		this._renderDetail();
+		// Session-only flag: intentionally not persisted.
+	}
+
+	async _pSetConcentration ({npc}) {
+		if (!this._state.npcs.includes(npc)) return;
+		const value = await InputUiUtil.pGetUserString({title: "Concentrating On", default: npc.vitals.concentration, isSkippable: true});
+		if (value == null) return;
+		npc.vitals.concentration = `${value}`.trim();
+		this._renderDetail();
+		this._doSave();
+	}
+
+	_clearConcentration ({npc}) {
+		if (!this._state.npcs.includes(npc)) return;
+		npc.vitals.concentration = "";
 		this._renderDetail();
 		this._doSave();
 	}

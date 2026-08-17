@@ -1,10 +1,23 @@
 import {
 	getNpcTrackerChargeDefaults,
+	getNpcTrackerLegendaryActionDefault,
+	getNpcTrackerLegendaryResistanceDefault,
+	getNpcTrackerRechargeDefaults,
 	getNpcTrackerSpellSlotDefaults,
 } from "./dmscreen-npctracker-resource.js";
 
+export function getNpcTrackerVitalsDefaults (monster) {
+	return {
+		deathSaves: {successes: 0, failures: 0},
+		legendaryResistances: getNpcTrackerLegendaryResistanceDefault(monster),
+		legendaryActions: getNpcTrackerLegendaryActionDefault(monster),
+		recharges: getNpcTrackerRechargeDefaults(monster),
+		concentration: "",
+	};
+}
+
 export class NpcTrackerSerializer {
-	static VERSION = 4;
+	static VERSION = 5;
 
 	static getDefaultState () {
 		return {
@@ -36,6 +49,8 @@ export class NpcTrackerSerializer {
 			conditions: [],
 			spellSlots: getNpcTrackerSpellSlotDefaults(monster),
 			charges: getNpcTrackerChargeDefaults(monster),
+			vitals: getNpcTrackerVitalsDefaults(monster),
+			reactionUsed: false,
 			monster: MiscUtil.copyFast(monster),
 			fluff: fluff ? MiscUtil.copyFast(fluff) : null,
 		};
@@ -77,6 +92,7 @@ export class NpcTrackerSerializer {
 					m: charge.max,
 					a: charge.isAuto,
 				})),
+				vi: this._serializeVitals(npc.vitals),
 				mon: MiscUtil.copyFast(npc.monster),
 				fluff: npc.fluff ? MiscUtil.copyFast(npc.fluff) : null,
 			})),
@@ -152,6 +168,8 @@ export class NpcTrackerSerializer {
 			conditions: this._getConditions(rawNpc.c ?? rawNpc.conditions),
 			spellSlots: this._getSpellSlots(rawNpc.ss ?? rawNpc.spellSlots, monster),
 			charges: this._getCharges(rawNpc.ch ?? rawNpc.charges, monster),
+			vitals: this._getVitals(rawNpc.vi ?? rawNpc.vitals, monster),
+			reactionUsed: false,
 			monster: MiscUtil.copyFast(monster),
 			fluff: rawNpc.fluff ? MiscUtil.copyFast(rawNpc.fluff) : null,
 		};
@@ -174,7 +192,7 @@ export class NpcTrackerSerializer {
 	}
 
 	static _getTextSize (value) {
-		return value === "large" ? "large" : "normal";
+		return ["normal", "large", "x-large", "xx-large"].includes(value) ? value : "normal";
 	}
 
 	static _getSpellSlots (spellSlots, monster) {
@@ -214,6 +232,79 @@ export class NpcTrackerSerializer {
 				current: Math.min(Math.floor(this._getNonNegativeNumber(rawCharge.c ?? rawCharge.current, max)), max),
 				max,
 				isAuto: !!(rawCharge.a ?? rawCharge.isAuto),
+			};
+		}).filter(Boolean);
+	}
+
+	static _serializeVitals (vitals) {
+		const out = {
+			ds: {
+				s: vitals.deathSaves.successes,
+				f: vitals.deathSaves.failures,
+			},
+			co: vitals.concentration || "",
+		};
+		if (vitals.legendaryResistances) out.lr = {c: vitals.legendaryResistances.current, m: vitals.legendaryResistances.max};
+		if (vitals.legendaryActions) out.la = {c: vitals.legendaryActions.current, m: vitals.legendaryActions.max};
+		if (vitals.recharges.length) {
+			out.rc = vitals.recharges.map(recharge => ({
+				id: recharge.id,
+				n: recharge.name,
+				mn: recharge.min,
+				r: recharge.isReady,
+			}));
+		}
+		return out;
+	}
+
+	static _getVitals (rawVitals, monster) {
+		const defaults = getNpcTrackerVitalsDefaults(monster);
+		if (!rawVitals || typeof rawVitals !== "object" || Array.isArray(rawVitals)) return defaults;
+
+		const rawDs = rawVitals.ds ?? rawVitals.deathSaves ?? {};
+		const clampSave = value => Math.max(0, Math.min(3, Math.floor(this._getNonNegativeNumber(value, 0))));
+
+		return {
+			deathSaves: {
+				successes: clampSave(rawDs.s ?? rawDs.successes),
+				failures: clampSave(rawDs.f ?? rawDs.failures),
+			},
+			legendaryResistances: this._getCounter(rawVitals.lr ?? rawVitals.legendaryResistances, defaults.legendaryResistances),
+			legendaryActions: this._getCounter(rawVitals.la ?? rawVitals.legendaryActions, defaults.legendaryActions),
+			recharges: this._getRecharges(rawVitals.rc ?? rawVitals.recharges, defaults.recharges),
+			concentration: `${rawVitals.co ?? rawVitals.concentration ?? ""}`.trim(),
+		};
+	}
+
+	static _getCounter (rawCounter, fallback) {
+		if (!rawCounter || typeof rawCounter !== "object") return fallback;
+		const max = Math.floor(this._getNonNegativeNumber(rawCounter.m ?? rawCounter.max, fallback?.max ?? 0));
+		if (max < 1) return fallback;
+		const current = Math.floor(this._getNonNegativeNumber(rawCounter.c ?? rawCounter.current, max));
+		return {current: Math.min(current, max), max};
+	}
+
+	static _getRecharges (rawRecharges, defaults) {
+		if (!Array.isArray(rawRecharges)) return defaults;
+		const byId = new Map(defaults.map(recharge => [recharge.id, recharge]));
+		const byName = new Map(defaults.map(recharge => [recharge.name.toLowerCase(), recharge]));
+		const seenIds = new Set();
+		return rawRecharges.map(rawRecharge => {
+			if (!rawRecharge || typeof rawRecharge !== "object") return null;
+			const id = `${rawRecharge.id ?? ""}`;
+			const name = `${rawRecharge.n ?? rawRecharge.name ?? ""}`.replace(/\s+/g, " ").trim();
+			const match = byId.get(id) || byName.get(name.toLowerCase());
+			const cleanName = name || match?.name;
+			if (!cleanName) return null;
+			const resolvedId = id || match?.id || `manual:recharge:${CryptUtil.uid()}`;
+			if (seenIds.has(resolvedId)) return null;
+			seenIds.add(resolvedId);
+			const min = Math.floor(this._getNonNegativeNumber(rawRecharge.mn ?? rawRecharge.min, match?.min ?? 6)) || 6;
+			return {
+				id: resolvedId,
+				name: cleanName,
+				min: Math.max(1, Math.min(6, min)),
+				isReady: (rawRecharge.r ?? rawRecharge.isReady) !== false,
 			};
 		}).filter(Boolean);
 	}

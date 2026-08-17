@@ -40,6 +40,8 @@ export class NpcTrackerRoster {
 			fnAssignGroup,
 			fnOpenBatch,
 			fnUpdateCondition,
+			fnUpdateDeathSave,
+			fnToggleReaction,
 		},
 	) {
 		this._fnGetState = fnGetState;
@@ -59,6 +61,8 @@ export class NpcTrackerRoster {
 		this._fnAssignGroup = fnAssignGroup;
 		this._fnOpenBatch = fnOpenBatch;
 		this._fnUpdateCondition = fnUpdateCondition;
+		this._fnUpdateDeathSave = fnUpdateDeathSave;
+		this._fnToggleReaction = fnToggleReaction;
 	}
 
 	render (wrp) {
@@ -95,6 +99,8 @@ export class NpcTrackerRoster {
 		[
 			{value: "normal", label: "A", title: "Normal text"},
 			{value: "large", label: "A+", title: "Large text"},
+			{value: "x-large", label: "A++", title: "X-Large text"},
+			{value: "xx-large", label: "A+++", title: "XX-Large text"},
 		].forEach(({value, label, title}) => {
 			const button = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" type="button"></button>`;
 			button.textContent = label;
@@ -258,6 +264,7 @@ export class NpcTrackerRoster {
 					${getHpField({prop: "max", value: npc.hp.max, label: "Maximum hit points", shortLabel: "Max"})}
 					${getHpField({prop: "temp", value: npc.hp.temp, label: "Temporary hit points", shortLabel: "Temp"})}
 				</div>
+				${this._getRowVitals({npc})}
 				${getNpcTrackerConditionControls({
 		npc,
 		fnUpdate: this._fnUpdateCondition,
@@ -267,6 +274,32 @@ export class NpcTrackerRoster {
 			</div>
 		</div>`;
 		row.appendTo(wrp);
+	}
+
+	_getRowVitals ({npc}) {
+		const {successes, failures} = npc.vitals.deathSaves;
+		const getMiniPips = ({kind, filled, glyph, ariaBase}) => {
+			const wrpPips = ee`<div class="dm-npc__roster-deathsaves-pips" role="group" aria-label="${ariaBase}"></div>`;
+			for (let i = 1; i <= 3; ++i) {
+				const isOn = i <= filled;
+				ee`<button class="dm-npc__roster-deathsaves-pip dm-npc__roster-deathsaves-pip--${kind} ${isOn ? "dm-npc__roster-deathsaves-pip--on" : ""}" type="button" aria-label="${ariaBase} ${i}" aria-pressed="${isOn}"><span class="glyphicon ${glyph}" aria-hidden="true"></span></button>`
+					.onn("click", () => this._fnUpdateDeathSave({npc, kind: kind === "success" ? "success" : "failure", value: i}))
+					.appendTo(wrpPips);
+			}
+			return wrpPips;
+		};
+
+		const deathSaves = ee`<div class="dm-npc__roster-deathsaves" title="Death saves">
+			<span class="glyphicon glyphicon-heart-empty" aria-hidden="true"></span>
+			${getMiniPips({kind: "success", filled: successes, glyph: "glyphicon-ok", ariaBase: "Death save success"})}
+			${getMiniPips({kind: "failure", filled: failures, glyph: "glyphicon-remove", ariaBase: "Death save failure"})}
+		</div>`;
+
+		const reaction = ee`<button class="dm-npc__roster-reaction ${npc.reactionUsed ? "dm-npc__roster-reaction--used" : ""}" type="button" aria-pressed="${!!npc.reactionUsed}" title="Toggle reaction used (not saved)" aria-label="Reaction ${npc.reactionUsed ? "used" : "available"}">
+			<span class="glyphicon glyphicon-share-alt" aria-hidden="true"></span>
+		</button>`.onn("click", () => this._fnToggleReaction({npc}));
+
+		return ee`<div class="dm-npc__roster-vitals">${deathSaves}${reaction}</div>`;
 	}
 
 	async _pLoadSearchIndex () {

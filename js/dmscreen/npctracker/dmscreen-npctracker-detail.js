@@ -47,6 +47,17 @@ export function hasNpcTrackerAttackRoll (entry) {
 		|| JSON.stringify(entry?.entries || []).includes("{@hit");
 }
 
+export function getNpcTrackerDeathSaveState (deathSaves) {
+	const successes = Math.max(0, Math.min(3, Math.floor(Number(deathSaves?.successes)) || 0));
+	const failures = Math.max(0, Math.min(3, Math.floor(Number(deathSaves?.failures)) || 0));
+	return {
+		successes,
+		failures,
+		isStable: successes >= 3,
+		isDead: failures >= 3,
+	};
+}
+
 export function getNpcTrackerProficiencyBonusText (monster) {
 	if (monster?.pbNote != null && `${monster.pbNote}`.trim()) return `${monster.pbNote}`.trim();
 	if (monster?.cr == null) return null;
@@ -83,6 +94,14 @@ export class NpcTrackerDetail {
 			fnAddCharge,
 			fnEditCharge,
 			fnRemoveCharge,
+			fnUpdateDeathSave,
+			fnResetDeathSaves,
+			fnUpdateLegendary,
+			fnToggleRecharge,
+			fnRollRecharges,
+			fnToggleReaction,
+			fnSetConcentration,
+			fnClearConcentration,
 		},
 	) {
 		this._fnGetNpc = fnGetNpc;
@@ -95,6 +114,14 @@ export class NpcTrackerDetail {
 		this._fnAddCharge = fnAddCharge;
 		this._fnEditCharge = fnEditCharge;
 		this._fnRemoveCharge = fnRemoveCharge;
+		this._fnUpdateDeathSave = fnUpdateDeathSave;
+		this._fnResetDeathSaves = fnResetDeathSaves;
+		this._fnUpdateLegendary = fnUpdateLegendary;
+		this._fnToggleRecharge = fnToggleRecharge;
+		this._fnRollRecharges = fnRollRecharges;
+		this._fnToggleReaction = fnToggleReaction;
+		this._fnSetConcentration = fnSetConcentration;
+		this._fnClearConcentration = fnClearConcentration;
 	}
 
 	render ({wrp, isFullStatblock = false, isNarrow = false, fnShowRoster = null}) {
@@ -181,6 +208,7 @@ export class NpcTrackerDetail {
 		this._renderCoreStats({mon, model, wrp});
 		this._renderSkills({npc, wrp});
 		this._renderEntriesSection({wrp, title: "Roleplay Traits", entries: model.traits});
+		this._renderVitals({npc, wrp});
 		this._renderSpellSlots({npc, wrp});
 		this._renderEntriesSection({wrp, title: "Spellcasting", entries: model.spellcasting});
 		this._renderCharges({npc, wrp});
@@ -292,6 +320,132 @@ export class NpcTrackerDetail {
 			wrpEntry.appendTo(wrpEntries);
 		});
 		ee`<section class="dm-npc__section"><h3>${title}</h3>${wrpEntries}</section>`.appendTo(wrp);
+	}
+
+	_renderVitals ({npc, wrp}) {
+		const vitals = npc.vitals;
+		const rows = ee`<div class="dm-npc__vitals"></div>`;
+
+		rows.append(this._getDeathSavesRow({npc}));
+		if (vitals.legendaryResistances) rows.append(this._getLegendaryRow({npc, kind: "resistance", label: "Legendary Resistance", counter: vitals.legendaryResistances}));
+		if (vitals.legendaryActions) rows.append(this._getLegendaryRow({npc, kind: "action", label: "Legendary Actions", counter: vitals.legendaryActions}));
+		if (vitals.recharges.length) rows.append(this._getRechargeRow({npc}));
+		rows.append(this._getReactionRow({npc}));
+		rows.append(this._getConcentrationRow({npc}));
+
+		ee`<section class="dm-npc__section dm-npc__section--vitals">
+			<div class="dm-npc__section-heading"><h3>Vitals</h3><span>Live combat trackers for this NPC.</span></div>
+			${rows}
+		</section>`.appendTo(wrp);
+	}
+
+	_getDeathSavesRow ({npc}) {
+		const {successes, failures, isStable, isDead} = getNpcTrackerDeathSaveState(npc.vitals.deathSaves);
+		const getPips = ({kind, filled, glyph, ariaBase}) => {
+			const wrpPips = ee`<div class="dm-npc__deathsaves-pips" role="group" aria-label="${ariaBase}"></div>`;
+			for (let i = 1; i <= 3; ++i) {
+				const isOn = i <= filled;
+				const pip = ee`<button class="dm-npc__deathsaves-pip dm-npc__deathsaves-pip--${kind} ${isOn ? "dm-npc__deathsaves-pip--on" : ""}" type="button" aria-label="${ariaBase} ${i}" aria-pressed="${isOn}"><span class="glyphicon ${glyph}" aria-hidden="true"></span></button>`
+					.onn("click", () => this._fnUpdateDeathSave({npc, kind: kind === "success" ? "success" : "failure", value: i}));
+				pip.appendTo(wrpPips);
+			}
+			return wrpPips;
+		};
+
+		const badge = isStable
+			? ee`<span class="dm-npc__deathsaves-badge dm-npc__deathsaves-badge--stable">Stable</span>`
+			: isDead
+				? ee`<span class="dm-npc__deathsaves-badge dm-npc__deathsaves-badge--dead">Dead</span>`
+				: null;
+
+		const btnReset = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" type="button" title="Reset death saves">Reset</button>`
+			.onn("click", () => this._fnResetDeathSaves({npc}));
+
+		return ee`<div class="dm-npc__vitals-row dm-npc__vitals-row--deathsaves">
+			<span class="dm-npc__vitals-label">Death Saves</span>
+			<div class="dm-npc__deathsaves">
+				${getPips({kind: "success", filled: successes, glyph: "glyphicon-ok", ariaBase: "Death save success"})}
+				${getPips({kind: "failure", filled: failures, glyph: "glyphicon-remove", ariaBase: "Death save failure"})}
+				${badge || ""}
+			</div>
+			<div class="dm-npc__vitals-actions">${btnReset}</div>
+		</div>`;
+	}
+
+	_getLegendaryRow ({npc, kind, label, counter}) {
+		const value = ee`<strong class="dm-npc__resource-value"></strong>`;
+		value.textContent = `${counter.current}/${counter.max}`;
+		const btnSpend = ee`<button class="ve-btn ve-btn-primary ve-btn-xxs" type="button">Use</button>`
+			.onn("click", () => this._fnUpdateLegendary({npc, kind, mode: "spend"}));
+		btnSpend.disabled = counter.current < 1;
+		const btnRestore = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" type="button" title="Restore one">+1</button>`
+			.onn("click", () => this._fnUpdateLegendary({npc, kind, mode: "restore"}));
+		btnRestore.disabled = counter.current >= counter.max;
+		const btnReset = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" type="button" title="Restore all">Reset</button>`
+			.onn("click", () => this._fnUpdateLegendary({npc, kind, mode: "reset"}));
+		return ee`<div class="dm-npc__vitals-row">
+			<span class="dm-npc__vitals-label">${label}</span>
+			${value}
+			<div class="dm-npc__vitals-actions">${btnSpend}${btnRestore}${btnReset}</div>
+		</div>`;
+	}
+
+	_getRechargeRow ({npc}) {
+		const wrpChips = ee`<div class="dm-npc__recharge-chips"></div>`;
+		npc.vitals.recharges.forEach(recharge => {
+			const chip = ee`<button class="dm-npc__recharge-chip ${recharge.isReady ? "dm-npc__recharge-chip--ready" : "dm-npc__recharge-chip--spent"}" type="button" aria-pressed="${recharge.isReady}"></button>`
+				.onn("click", () => this._fnToggleRecharge({npc, rechargeId: recharge.id}));
+			const name = ee`<span class="dm-npc__recharge-name"></span>`;
+			name.textContent = recharge.name;
+			const state = ee`<span class="dm-npc__recharge-state"></span>`;
+			state.textContent = recharge.isReady ? "Ready" : `Spent (${recharge.min}${recharge.min < 6 ? "\u2013" : ""}6)`;
+			chip.attr("title", recharge.isReady ? `${recharge.name}: ready — click to mark spent` : `${recharge.name}: spent — recharges on ${recharge.min}${recharge.min < 6 ? "\u20136" : ""}`);
+			chip.append(name, state);
+			chip.appendTo(wrpChips);
+		});
+		const btnRoll = ee`<button class="ve-btn ve-btn-default ve-btn-xxs dm-npc__recharge-roll" type="button" title="Roll a d6 for each spent ability">
+			<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Roll recharges
+		</button>`.onn("click", () => this._fnRollRecharges({npc}));
+		return ee`<div class="dm-npc__vitals-row dm-npc__vitals-row--recharge">
+			<span class="dm-npc__vitals-label">Recharge</span>
+			<div class="dm-npc__recharge">${wrpChips}${btnRoll}</div>
+		</div>`;
+	}
+
+	_getReactionRow ({npc}) {
+		const toggle = ee`<button class="dm-npc__reaction-toggle ${npc.reactionUsed ? "dm-npc__reaction-toggle--used" : ""}" type="button" aria-pressed="${!!npc.reactionUsed}"></button>`
+			.onn("click", () => this._fnToggleReaction({npc}));
+		toggle.innerHTML = `<span class="glyphicon glyphicon-share-alt" aria-hidden="true"></span> <span>${npc.reactionUsed ? "Reaction used" : "Reaction available"}</span>`;
+		toggle.attr("title", "Toggle whether this NPC has used its reaction this round (not saved)");
+		return ee`<div class="dm-npc__vitals-row dm-npc__vitals-row--reaction">
+			<span class="dm-npc__vitals-label">Reaction</span>
+			<div class="dm-npc__vitals-actions">${toggle}</div>
+		</div>`;
+	}
+
+	_getConcentrationRow ({npc}) {
+		const value = `${npc.vitals.concentration || ""}`.trim();
+		let control;
+		if (value) {
+			const label = ee`<span class="dm-npc__concentration-on"></span>`;
+			label.textContent = value;
+			const btnClear = ee`<button class="dm-npc__concentration-clear" type="button" aria-label="Clear concentration" title="Clear concentration"><span class="glyphicon glyphicon-remove" aria-hidden="true"></span></button>`
+				.onn("click", () => this._fnClearConcentration({npc}));
+			const chip = ee`<span class="dm-npc__concentration-chip">Concentrating on ${label}${btnClear}</span>`
+				.onn("click", evt => {
+					if (evt.target.closest(".dm-npc__concentration-clear")) return;
+					this._fnSetConcentration({npc});
+				});
+			control = chip;
+		} else {
+			control = ee`<button class="ve-btn ve-btn-default ve-btn-xxs" type="button">
+				<span class="glyphicon glyphicon-plus" aria-hidden="true"></span> Set concentration
+			</button>`.onn("click", () => this._fnSetConcentration({npc}));
+		}
+		return ee`<div class="dm-npc__vitals-row dm-npc__vitals-row--concentration">
+			<span class="dm-npc__vitals-label">Concentration</span>
+			<div class="dm-npc__concentration">${control}</div>
+		</div>`;
 	}
 
 	_renderSpellSlots ({npc, wrp}) {
