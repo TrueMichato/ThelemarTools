@@ -331,7 +331,7 @@ class CharacterSheetSpells {
 			const btn = e.target.closest(".charsheet__spell-remove");
 			if (!btn) return;
 			const spellId = btn.closest(".charsheet__spell-item").dataset.spellId;
-			this._removeSpell(spellId);
+			this._pConfirmRemoveSpell(spellId);
 		});
 
 		// Swap Divine Soul affinity spell (restricted to Cleric list)
@@ -6675,6 +6675,35 @@ class CharacterSheetSpells {
 		} catch (e) {
 			return "";
 		}
+	}
+
+	/**
+	 * Confirm before dropping a spell from the sheet.
+	 *
+	 * The ✕ shares a dense row with prepare, favourite and cast — the controls a
+	 * player reaches for constantly mid-encounter. A mis-tap silently discards a
+	 * known or prepared spell with no undo, and on a phone that row is a few
+	 * millimetres wide. Recovering means re-opening the picker and hunting the
+	 * spell down again.
+	 *
+	 * Kept out of `_removeSpell` so that programmatic removals — level-down,
+	 * respec, class swaps — stay silent; only a human pressing ✕ is asked.
+	 *
+	 * @param {string} spellId
+	 */
+	async _pConfirmRemoveSpell (spellId) {
+		const spell = this._state.getSpells().find(s => (s.id || `${s.name}|${s.source}`) === spellId);
+		const name = spell?.name || "this spell";
+
+		const isConfirmed = await InputUiUtil.pGetUserBoolean({
+			title: "Remove Spell",
+			htmlDescription: `Remove <b>${name.qq()}</b> from your spell list?`,
+			textYes: "Remove",
+			textNo: "Cancel",
+		});
+		if (!isConfirmed) return;
+
+		this._removeSpell(spellId);
 	}
 
 	_removeSpell (spellId) {

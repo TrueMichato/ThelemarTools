@@ -1,6 +1,14 @@
 /* ========================================================================
    Character Sheet — Mobile Responsive Styles
-   Activates below 768px viewport width.
+
+   Activates below 768px viewport width, *or* on a short touch device held in
+   landscape. The second condition matters more than it looks: a phone rotated
+   sideways is 844x390, which is wider than 768, so the entire mobile layer used
+   to switch itself off at exactly the moment the viewport got shortest. That is
+   why landscape measured 12.6 screens deep — it was never mobile at all, it was
+   the desktop sheet in a 390px-tall window. `pointer: coarse` keeps a merely
+   short desktop window out of it.
+
    Progressive enhancement: desktop remains unchanged.
    ======================================================================== */
 
@@ -8,7 +16,117 @@
    Mobile Detection — Applied via media query + .is-touch class (set by JS)
    ======================================================================== */
 
-@media (max-width: 768px) {
+@media (max-width: 768px), (max-height: 480px) and (orientation: landscape) and (pointer: coarse) {
+
+	/* ====================================================================
+	   Viewport Reclamation
+	   --------------------------------------------------------------------
+	   Before this block the first phone viewport contained no character data
+	   at all on any tab: a ~230px marketing hero, the site nav, and a
+	   ~300px character-management toolbar pushed the character's own name to
+	   roughly y=1085 — past the fold on every device we support. Everything
+	   here is chrome removal; nothing is hidden that cannot be reached.
+	   ==================================================================== */
+
+	/* The site hero is authored `hidden-xs hidden-sm` (charactersheet.html:45),
+	   but neither class is defined anywhere in this codebase — they are
+	   unported Bootstrap 3 idioms — so the header has always rendered at every
+	   width despite the markup declaring otherwise. Honour the stated intent.
+	   Play Mode already suppresses its competing header the same way
+	   (charactersheet-playmode.css:27). */
+	body.is-charsheet-page .page__header {
+		display: none;
+	}
+
+	/* ---- Management toolbar folds behind the existing "More" control -------
+	   #charsheet-header carries three groups: character (select + new /
+	   duplicate / delete), progression (XP + Level Up + Multiclass + Quick
+	   Build) and tools (Roll Log, Alt View, Note, settings). None of them are
+	   in-play controls, and together they cost ~300px on every tab.
+
+	   Collapse the row to its two load-bearing controls — the character
+	   selector and the settings toggle — and let the toggle reveal the rest.
+	   The reveal class is applied by CharacterSheetMobile#_initHeaderToggle,
+	   which already observes the same collapse state for the secondary row, so
+	   this reuses the existing toggle rather than adding a second mechanism.
+
+	   Level Up is safe to fold away because the floating level-up banner
+	   (#charsheet-levelup-banner) already surfaces it exactly when it matters,
+	   and is deliberately left visible below. */
+	body.is-charsheet-mobile #charsheet-header:not(.charsheet-mobile__header--expanded) .charsheet__header-group--progression,
+	body.is-charsheet-mobile #charsheet-header:not(.charsheet-mobile__header--expanded) .charsheet__header-divider,
+	body.is-charsheet-mobile #charsheet-header:not(.charsheet-mobile__header--expanded) .charsheet__header-group-icon,
+	body.is-charsheet-mobile #charsheet-header:not(.charsheet-mobile__header--expanded) .charsheet__header-btn-group,
+	body.is-charsheet-mobile #charsheet-header:not(.charsheet-mobile__header--expanded) .charsheet__tool-separator,
+	body.is-charsheet-mobile #charsheet-header:not(.charsheet-mobile__header--expanded) .charsheet__rolllog-toggle,
+	body.is-charsheet-mobile #charsheet-header:not(.charsheet-mobile__header--expanded) .pm-toggle-btn,
+	body.is-charsheet-mobile #charsheet-header:not(.charsheet-mobile__header--expanded) .charsheet__tool-btn--note,
+	body.is-charsheet-mobile #charsheet-header:not(.charsheet-mobile__header--expanded) .charsheet__help-tips {
+		display: none !important;
+	}
+
+	/* Collapsed, the row is a single line: selector + save state + toggle. */
+	body.is-charsheet-mobile .charsheet__header-row--primary {
+		flex-wrap: nowrap;
+		gap: 0.375rem;
+		padding: 0.25rem 0.5rem;
+		min-height: 0;
+	}
+
+	body.is-charsheet-mobile .charsheet__header-group--character {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+
+	body.is-charsheet-mobile .charsheet__header-select {
+		width: 100%;
+		min-width: 0;
+	}
+
+	body.is-charsheet-mobile .charsheet__header-group--tools {
+		flex: 0 0 auto;
+	}
+
+	/* Expanded, the folded groups return as a wrapped block rather than a
+	   nowrap row, so nothing truncates mid-word the way the desktop row did
+	   ("Create New Charac…", trash icon clipped off the right edge). */
+	body.is-charsheet-mobile #charsheet-header.charsheet-mobile__header--expanded .charsheet__header-row--primary {
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	body.is-charsheet-mobile #charsheet-header.charsheet-mobile__header--expanded .charsheet__header-group--progression {
+		flex: 1 1 100%;
+		flex-wrap: wrap;
+	}
+
+	/* The character group is the one that actually broke on desktop: the select
+	   and the three icon buttons were competing for a single nowrap row, which
+	   is what clipped the label to "Create New Charac…" and pushed the delete
+	   button off the right edge. Let the row wrap and give the select the width
+	   it needs; the buttons drop to their own line instead of stealing it. */
+	body.is-charsheet-mobile #charsheet-header.charsheet-mobile__header--expanded .charsheet__header-group--character {
+		flex: 1 1 100%;
+		flex-wrap: wrap;
+	}
+
+	body.is-charsheet-mobile #charsheet-header.charsheet-mobile__header--expanded .charsheet__header-select {
+		flex: 1 1 12rem;
+		min-width: 0;
+		max-width: none;
+	}
+
+	/* The settings toggle is the only way back to the folded controls, so it
+	   must read as a real, thumb-sized target and show its own state. */
+	body.is-charsheet-mobile .charsheet__more-toggle {
+		min-height: 44px;
+		min-width: 44px;
+	}
+
+	body.is-charsheet-mobile #charsheet-header.charsheet-mobile__header--expanded .charsheet__more-toggle {
+		background: var(--cs-primary, #6366f1);
+		color: #fff;
+	}
 
 	/* ====================================================================
 	   Bottom Tab Bar — Fixed navigation at screen bottom
@@ -41,33 +159,45 @@
 	}
 
 	#charsheet-tabs > li {
-		flex: 0 0 auto;
+		flex: 1 1 0;
 		margin-bottom: 0;
-		min-width: 64px;
+		min-width: 0;
+	}
+
+	/* The prep tabs live in the "More" sheet, not the bar. They stay in the DOM
+	   and keep owning activation — CharacterSheetMobile#_initTabOverflow. */
+	#charsheet-tabs > li.charsheet-mobile__tab--overflow {
+		display: none;
 	}
 
 	#charsheet-tabs > li > a {
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		padding: 6px 10px 4px;
+		padding: 6px 2px 4px;
 		gap: 2px;
 		border: none;
 		border-bottom: none;
 		border-radius: 0;
-		font-size: 0.65rem;
+		font-size: var(--cs-text-xs, 0.75rem);
 		min-height: 56px;
 		white-space: nowrap;
 	}
 
 	#charsheet-tabs > li > a .charsheet__tab-icon {
-		font-size: 1.3rem;
+		font-size: var(--cs-text-xl, 1.25rem);
 		line-height: 1;
 	}
 
+	/* Six evenly-distributed items fit 390px, so the labels no longer have to
+	   shrink out of legibility. --cs-text-xs is the floor of the documented
+	   ramp; the previous 0.6rem/0.55rem rendered at 9.6px and 8.8px. */
 	#charsheet-tabs > li > a .charsheet__tab-text {
-		font-size: 0.6rem;
+		font-size: var(--cs-text-xs, 0.75rem);
 		line-height: 1.2;
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	#charsheet-tabs > li.ve-active > a,
@@ -82,9 +212,355 @@
 		border-bottom: none;
 	}
 
+	/* ====================================================================
+	   "More" Sheet — the four prep tabs, one tap from the bar
+	   ==================================================================== */
+	.charsheet-mobile__tab-sheet {
+		position: fixed;
+		inset: 0;
+		z-index: var(--cs-z-tooltip, 1070);
+	}
+
+	.charsheet-mobile__tab-sheet-backdrop {
+		position: absolute;
+		inset: 0;
+		background: var(--cs-scrim-bg, rgba(0, 0, 0, 0.5));
+		opacity: 0;
+		transition: opacity 0.2s ease-out;
+	}
+
+	.charsheet-mobile__tab-sheet.charsheet-mobile--visible .charsheet-mobile__tab-sheet-backdrop {
+		opacity: 1;
+	}
+
+	.charsheet-mobile__tab-sheet-panel {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		padding: 0.5rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+		background: var(--cs-bg-surface, #1e293b);
+		border-top: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+		border-radius: var(--cs-radius-xl, 24px) var(--cs-radius-xl, 24px) 0 0;
+		transform: translateY(100%);
+		transition: transform 0.25s ease-out;
+	}
+
+	.charsheet-mobile__tab-sheet.charsheet-mobile--visible .charsheet-mobile__tab-sheet-panel {
+		transform: translateY(0);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.charsheet-mobile__tab-sheet-panel,
+		.charsheet-mobile__tab-sheet-backdrop {
+			transition: none;
+		}
+	}
+
+	.charsheet-mobile__tab-sheet-grip {
+		width: 36px;
+		height: 4px;
+		margin: 0 auto 0.5rem;
+		border-radius: var(--cs-radius-full, 9999px);
+		background: var(--cs-border, rgba(255, 255, 255, 0.1));
+	}
+
+	.charsheet-mobile__tab-sheet-title {
+		font-size: var(--cs-text-xs, 0.75rem);
+		font-weight: 600;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--cs-text-muted, #98a5b8);
+		margin-bottom: 0.5rem;
+	}
+
+	.charsheet-mobile__tab-sheet-list {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.5rem;
+	}
+
+	.charsheet-mobile__tab-sheet-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-height: 56px;
+		padding: 0 0.75rem;
+		border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+		border-radius: var(--cs-radius-md, 10px);
+		background: var(--cs-bg-elevated, rgba(255, 255, 255, 0.04));
+		color: var(--cs-text-primary, #f1f5f9);
+		font-size: var(--cs-text-sm, 0.875rem);
+		text-align: left;
+	}
+
+	.charsheet-mobile__tab-sheet-item:focus-visible {
+		outline: 2px solid var(--cs-primary, #6366f1);
+		outline-offset: 2px;
+	}
+
+	.charsheet-mobile__tab-sheet-icon {
+		font-size: var(--cs-text-lg, 1.125rem);
+		line-height: 1;
+	}
+
+	.charsheet-mobile__tab-sheet-label {
+		min-width: 0;
+	}
+
+	/* ====================================================================
+	   Status Strip — the play loop, promoted into persistent chrome
+	   --------------------------------------------------------------------
+	   HP, AC, the next spendable slot and the next available class resource,
+	   pinned above the tab bar so the two-second glance never costs a tab
+	   switch and a scroll. Follows DESIGN.md's status-strip grammar
+	   (label + value pairs, hairline border, base-tone inset) and mirrors the
+	   tab bar's surface so the two read as one piece of chrome, not two bars.
+
+	   Segments are rendered by the mobile layer only when their source exists,
+	   so a Champion Fighter simply gets a shorter strip — there is no empty
+	   "Slots" well and no per-class rule in here.
+	   ==================================================================== */
+	.charsheet-mobile__status {
+		position: fixed;
+		left: 0;
+		right: 0;
+		bottom: var(--cs-tabbar-height, 56px);
+		z-index: var(--cs-z-panel, 1040);
+		background: var(--cs-bg-surface, #1e293b);
+		border-top: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+		/* Same lift the tab bar uses, so the two read as one block of chrome.
+		   The tab bar sits a layer above, so its own upward shadow would paint a
+		   dark band across the strip — it is suppressed below. */
+		box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.3);
+	}
+
+	body.charsheet-mobile__has-status #charsheet-tabs {
+		box-shadow: none;
+	}
+
+	/* Nothing to report yet (no character, or still loading): give the space
+	   back rather than pinning an empty bar over the content. */
+	.charsheet-mobile__status--empty {
+		display: none;
+	}
+
+	.charsheet-mobile__status-row {
+		display: flex;
+		align-items: stretch;
+		min-height: 48px;
+	}
+
+	.charsheet-mobile__status-seg {
+		flex: 1 1 0;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		gap: 1px;
+		position: relative;
+		padding: 6px 4px;
+		background: transparent;
+		border: 0;
+		border-left: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+		color: var(--cs-text-primary, #f1f5f9);
+		text-align: center;
+		cursor: pointer;
+		-webkit-tap-highlight-color: transparent;
+	}
+
+	.charsheet-mobile__status-seg:first-child {
+		border-left: 0;
+	}
+
+	.charsheet-mobile__status-seg:active {
+		background: var(--cs-bg-hover, rgba(255, 255, 255, 0.06));
+	}
+
+	.charsheet-mobile__status-seg:focus-visible {
+		outline: 2px solid var(--cs-accent, #6366f1);
+		outline-offset: -2px;
+	}
+
+	.charsheet-mobile__status-label {
+		font-size: max(10px, calc(var(--cs-text-xs, 0.75rem) * var(--cs-text-scale, 1)));
+		line-height: 1.1;
+		color: var(--cs-text-muted, #94a3b8);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.charsheet-mobile__status-readout {
+		display: flex;
+		align-items: baseline;
+		justify-content: center;
+		gap: 1px;
+		min-width: 0;
+	}
+
+	.charsheet-mobile__status-value {
+		font-size: max(15px, calc(var(--cs-text-base, 1rem) * var(--cs-text-scale, 1)));
+		font-weight: 600;
+		line-height: 1.1;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.charsheet-mobile__status-sub {
+		font-size: max(10px, calc(var(--cs-text-xs, 0.75rem) * var(--cs-text-scale, 1)));
+		color: var(--cs-text-muted, #94a3b8);
+		font-variant-numeric: tabular-nums;
+	}
+
+	/* The bar is a peripheral-vision cue for HP, so it sits at the very bottom
+	   edge of its segment where it reads as a fill line rather than a divider. */
+	.charsheet-mobile__status-bar {
+		position: absolute;
+		left: 6px;
+		right: 6px;
+		bottom: 4px;
+		height: 3px;
+		border-radius: var(--cs-radius-full, 9999px);
+		background: var(--cs-bg-base, #0f172a);
+		overflow: hidden;
+	}
+
+	.charsheet-mobile__status-bar > i {
+		display: block;
+		height: 100%;
+		width: 100%;
+		border-radius: inherit;
+		background: var(--cs-success, #22c55e);
+		/* Scale, not width: the fill changes on every point of damage, and this
+		   is chrome pinned over a long scrolling list — it must not relayout. */
+		transform-origin: left center;
+		transition: transform 0.2s ease-out;
+	}
+
+	.charsheet-mobile__status-seg--warn .charsheet-mobile__status-bar > i {
+		background: var(--cs-warning, #f59e0b);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.charsheet-mobile__status-bar > i {
+			transition: none;
+		}
+	}
+
+	/* Downed is a situation, not a low number — colour the readout too, so it
+	   is legible at a glance and not only via a 3px bar. */
+	.charsheet-mobile__status-seg--critical .charsheet-mobile__status-value {
+		color: var(--cs-danger, #ef4444);
+	}
+
+	.charsheet-mobile__status-seg--critical .charsheet-mobile__status-bar > i {
+		background: var(--cs-danger, #ef4444);
+	}
+
+	/* Heal and Damage need an amount, so they live in a tray instead of the
+	   strip: the glance surface stays a glance surface. */
+	.charsheet-mobile__status-tray {
+		display: flex;
+		gap: 8px;
+		padding: 8px;
+		border-top: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+		background: var(--cs-bg-base, #0f172a);
+	}
+
+	.charsheet-mobile__status-tray[hidden] {
+		display: none;
+	}
+
+	.charsheet-mobile__status-tray-btn {
+		flex: 1 1 0;
+		min-height: 44px;
+		border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
+		border-radius: var(--cs-radius-md, 8px);
+		background: var(--cs-bg-surface, #1e293b);
+		color: var(--cs-text-primary, #f1f5f9);
+		font-size: max(14px, calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1)));
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.charsheet-mobile__status-tray-btn:active {
+		background: var(--cs-bg-hover, rgba(255, 255, 255, 0.06));
+	}
+
+	.charsheet-mobile__status-tray-btn:focus-visible {
+		outline: 2px solid var(--cs-accent, #6366f1);
+		outline-offset: 2px;
+	}
+
+	/* A modal is a mode: our own chrome steps out of the way (see the
+	   Layer-Scale Rule in DESIGN.md). */
+	body.ve-ui-modal__body-active .charsheet-mobile__status {
+		display: none;
+	}
+
 	/* Add bottom padding to main content so tabs don't overlap */
 	.charsheet-page .tab-content {
 		padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+	}
+
+	/* …plus the strip's own height once it is actually showing something. */
+	body.charsheet-mobile__has-status .charsheet-page .tab-content {
+		padding-bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+	}
+
+	/* The FAB clears the tab bar; once the strip exists it has to clear that too,
+	   or the two fight for the same thumb arc. */
+	body.charsheet-mobile__has-status .charsheet-mobile__fab {
+		bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+	}
+
+	/* ====================================================================
+	   Touch Input Sizing
+	   --------------------------------------------------------------------
+	   iOS Safari zooms the viewport whenever a focused field renders below
+	   16px, and never zooms back out — which is how a single tap on the
+	   character selector left the sheet stranded at 1.3x with the tab bar
+	   off-screen. Every measured input on this page was 14-15px.
+
+	   16px is the threshold, not a style choice: it is the only way to keep
+	   the field editable without the zoom. Density is bought back with
+	   padding, per DESIGN.md's rule that type is not the density lever.
+
+	   The size these fields actually render at is owned by the page's
+	   text-size feature — `calc(var(--cs-text-sm) * var(--cs-text-scale))`
+	   at charactersheet.css:1705, plus a handful of `!important` overrides
+	   for the header controls. Overriding those with a flat 16px would
+	   silently disable that feature on phones. So this is a *floor*, not a
+	   replacement: `max()` keeps every user-chosen scale above 100 % intact
+	   and only lifts the ones that fall into the zoom trap.
+	   ==================================================================== */
+	body.is-charsheet-page .charsheet-page input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+	body.is-charsheet-page .charsheet-page select,
+	body.is-charsheet-page .charsheet-page textarea,
+	body.is-charsheet-page .ve-ui-modal__inner input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+	body.is-charsheet-page .ve-ui-modal__inner select,
+	body.is-charsheet-page .ve-ui-modal__inner textarea {
+		font-size: max(16px, calc(var(--cs-text-sm, 0.875rem) * var(--cs-text-scale, 1))) !important;
+	}
+
+	body.is-charsheet-page .charsheet-page .charsheet__header-select {
+		font-size: max(16px, calc(0.9375rem * var(--cs-text-scale, 1))) !important;
+	}
+
+	/* The site omnisearch box sits in the page nav, outside `.charsheet-page`,
+	   but it is on screen on this page and is the field a player is most likely
+	   to tap first. Left at 14px it triggers the same one-way zoom. */
+	body.is-charsheet-page .omni__input {
+		font-size: 16px;
+	}
+
+	body.is-charsheet-page .ve-input-sm,
+	body.is-charsheet-page .charsheet__xp-input,
+	body.is-charsheet-page .charsheet__header-select {
+		padding-top: 0.25rem;
+		padding-bottom: 0.25rem;
 	}
 
 	/* ====================================================================
@@ -477,21 +953,62 @@
 		}
 	}
 
-	/* Modal scroll containment.
+	/* Modal stacking — the real fix for the tab bar covering modal content.
 
-	   The sheet is anchored to `bottom: 0` but the tab bar sits on top of it at a
-	   higher layer, so the last ~56px of every modal (the twelfth Zodiac card,
-	   the final row of any picker) was unreachable. Reserving the bar's height as
-	   scroll padding fixes it inside the character-sheet scope, without
-	   re-stacking `.ve-ui-modal__inner`, which is shared site-wide chrome. */
+	   The site modal renders at --cs-z-modal (1001) but the mobile tab bar sits
+	   at --cs-z-tabbar (1050) and the FAB at --cs-z-panel (1040), so both
+	   floated above every modal. The last ~56px of each sheet — the twelfth
+	   Zodiac card, the final row of any picker, and critically the modal
+	   FOOTER holding the primary action — sat underneath the bar.
+
+	   The previous workaround reserved the bar's height as scroll padding on
+	   the body/scroller only, which left the footer uncovered (the footer is a
+	   sibling of the scroller, not a descendant) and opened a dead 56px gap at
+	   the bottom of every modal that did scroll.
+
+	   Fix it at the layer it belongs to. While a modal owns the viewport our
+	   own chrome is not usable, so it drops to --cs-z-sticky, below the site's
+	   --cs-z-overlay scrim. Shared site chrome (.ve-ui-modal__inner) is left
+	   untouched, and no new bare z-index is invented — see the token scale note
+	   in charactersheet-modern.css. */
+	body.is-charsheet-page.ve-ui-modal__body-active #charsheet-tabs {
+		z-index: var(--cs-z-sticky, 100);
+	}
+
+	/* The FAB is not actionable while a modal is open, and a floating action
+	   button peeking around a bottom sheet reads as a second, competing
+	   primary action. Remove it from both the stack and the tab order. */
+	body.is-charsheet-page.ve-ui-modal__body-active .charsheet-mobile__fab {
+		display: none;
+	}
+
 	body.is-charsheet-page .ve-ui-modal__inner .ve-ui-modal__row--body,
 	body.is-charsheet-page .ve-ui-modal__inner .ve-ui-modal__scroller {
 		max-height: 65vh;
 		max-height: calc(var(--vh, 1vh) * 65);
 		overflow-y: auto;
 		-webkit-overflow-scrolling: touch;
-		padding-bottom: var(--cs-tabbar-height, 56px);
-		scroll-padding-bottom: var(--cs-tabbar-height, 56px);
+	}
+
+	/* The sheet is anchored to `bottom: 0`, so on notched hardware its last row
+	   still has to clear the home indicator.
+
+	   `env()` alone is not enough: it resolves to 0 on every phone without a
+	   notch, which leaves the primary action — "✓ Finish Short Rest" and its
+	   equivalents — flush against the sheet's bottom edge with no margin for a
+	   thumb. Modals that build their own footer inside the content (the rest
+	   modal's `.charsheet__modal-footer`) are hit by the second selector, since
+	   they have no `.ve-ui-modal__footer` for the first to match. */
+	body.is-charsheet-page .ve-ui-modal__inner .ve-ui-modal__footer,
+	body.is-charsheet-page .ve-ui-modal__inner:not(:has(.ve-ui-modal__footer)) .ve-ui-modal__scroller {
+		padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+	}
+
+	/* The modal's own close control measured 28x28 — under both the 44px
+	   comfortable target and the 24px WCAG 2.5.8 floor. */
+	body.is-charsheet-page .ve-ui-modal__inner .ve-btn:has(> .glyphicon-remove) {
+		min-width: 44px;
+		min-height: 44px;
 	}
 
 	/* ====================================================================
@@ -531,7 +1048,7 @@
 	/* ====================================================================
 	   Inventory List — Touch Friendly
 	   ==================================================================== */
-	.charsheet__inventory-item {
+	.charsheet__item {
 		min-height: 48px;
 		padding: 0.5rem;
 	}
@@ -663,95 +1180,81 @@
 	}
 
 	/* ====================================================================
-	   Roll Modifier Toolbar — Shows after rolling to offer Adv/Disadv
+	   Long-Press Affordance
+
+	   Long-press is now the single route to advantage/disadvantage rolls and
+	   to spell upcasting, so the gesture can no longer be invisible. Two
+	   signals:
+
+	   1. A hold indicator on every long-pressable row, so a hold reads as
+	      "something is happening" rather than "this control is dead".
+	   2. A persistent ⋯ hint, but only on rows where long-press reveals
+	      capability that has no other route. Inventory and resource rows
+	      already show their buttons — marking those would be noise.
 	   ==================================================================== */
-	.charsheet-mobile__roll-toolbar {
-		position: fixed;
-		bottom: calc(72px + env(safe-area-inset-bottom, 0px));
-		left: 50%;
-		transform: translateX(-50%);
-		z-index: var(--cs-z-toast, 1060);
-		display: none;
-		flex-direction: column;
-		align-items: center;
-		background: var(--cs-bg-surface, #1e293b);
-		border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.15));
-		border-radius: var(--cs-radius-xl, 24px);
-		padding: 6px 12px 8px;
-		gap: 4px;
-		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-		animation: charsheet-mobile-fadeIn 0.15s ease;
+	.charsheet-mobile--pressing {
+		position: relative;
 	}
 
-	.charsheet-mobile__roll-toolbar.charsheet-mobile--visible {
-		display: flex;
+	.charsheet-mobile--pressing::before {
+		content: "";
+		position: absolute;
+		left: 0;
+		bottom: 0;
+		height: 2px;
+		width: 100%;
+		border-radius: 2px;
+		background: var(--cs-accent, #d4a24c);
+		transform-origin: left center;
+		transform: scaleX(0);
+		animation: charsheet-mobile-holdProgress 0.5s linear forwards;
+		pointer-events: none;
+		z-index: 1;
 	}
 
-	@keyframes charsheet-mobile-fadeIn {
-		from { opacity: 0; transform: translateX(-50%) translateY(8px); }
-		to { opacity: 1; transform: translateX(-50%) translateY(0); }
+	@keyframes charsheet-mobile-holdProgress {
+		from { transform: scaleX(0); }
+		to { transform: scaleX(1); }
 	}
 
-	.charsheet-mobile__roll-toolbar-label {
-		font-size: 0.7rem;
-		color: var(--cs-text-muted, #64748b);
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		white-space: nowrap;
-		max-width: 180px;
-		overflow: hidden;
-		text-overflow: ellipsis;
+	.charsheet-page .charsheet__skill-row,
+	.charsheet-page .charsheet__save-row,
+	.charsheet-page .charsheet__ability,
+	.charsheet-page .charsheet__combat-stat--clickable,
+	.charsheet-page .charsheet__spell-item {
+		position: relative;
 	}
 
-	.charsheet-mobile__roll-toolbar-buttons {
-		display: flex;
-		gap: 8px;
-		align-items: center;
+	/* Long-press affordance.
+	   A glyph ("⋯") in the corner was measured to overlap the row's own trailing
+	   value — the passive score on a skill row, the modifier on an ability card —
+	   on 12 of 15 sampled rows, because content reaches to within ~8px of the
+	   edge. A hint that obscures the number it sits next to is worse than no hint.
+	   An edge marker lives inside that existing 8px gutter instead, so it collides
+	   with nothing by construction, needs no padding change, and reads the same on
+	   a dense list row and a centred card. */
+	.charsheet-page .charsheet__skill-row::after,
+	.charsheet-page .charsheet__save-row::after,
+	.charsheet-page .charsheet__ability::after,
+	.charsheet-page .charsheet__combat-stat--clickable::after,
+	.charsheet-page .charsheet__spell-item::after {
+		content: "";
+		position: absolute;
+		top: 30%;
+		bottom: 30%;
+		right: 2px;
+		width: 2px;
+		border-radius: 1px;
+		background: var(--cs-text-muted, #94a3b8);
+		opacity: 0.35;
+		pointer-events: none;
 	}
 
-	.charsheet-mobile__roll-toolbar-btn {
-		padding: 10px 16px;
-		border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.1));
-		border-radius: var(--cs-radius-md, 10px);
-		background: var(--cs-bg-elevated, #334155);
-		color: var(--cs-text-primary, #f1f5f9);
-		font-size: 0.8rem;
-		font-weight: 600;
-		cursor: pointer;
-		white-space: nowrap;
-		min-height: 44px;
-		transition: background 0.15s ease, border-color 0.15s ease;
-	}
-
-	.charsheet-mobile__roll-toolbar-btn:active {
-		background: var(--cs-primary, #6366f1);
-		border-color: var(--cs-primary, #6366f1);
-	}
-
-	.charsheet-mobile__roll-toolbar-btn--advantage {
-		color: var(--cs-success, #10b981);
-		border-color: rgba(16, 185, 129, 0.3);
-	}
-
-	.charsheet-mobile__roll-toolbar-btn--disadvantage {
-		color: var(--cs-danger, #ef4444);
-		border-color: rgba(239, 68, 68, 0.3);
-	}
-
-	.charsheet-mobile__roll-toolbar-close {
-		width: 32px;
-		height: 32px;
-		border-radius: 50%;
-		border: none;
-		background: rgba(255, 255, 255, 0.1);
-		color: var(--cs-text-muted, #64748b);
-		font-size: 1rem;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		cursor: pointer;
-		margin-left: 4px;
+	@media (prefers-reduced-motion: reduce) {
+		.charsheet-mobile--pressing::before {
+			animation: none;
+			transform: scaleX(1);
+		}
 	}
 
 	/* ====================================================================
@@ -766,6 +1269,12 @@
 		padding: 8px 0;
 		min-width: 180px;
 		max-width: calc(100vw - 16px);
+		/* A 9th-level caster's upcast menu can run to a dozen entries. Cap the
+		   height and scroll rather than letting it run off the viewport. */
+		max-height: 70vh;
+		overflow-y: auto;
+		-webkit-overflow-scrolling: touch;
+		overscroll-behavior: contain;
 		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 		display: none;
 		animation: charsheet-mobile-contextAppear 0.15s ease;
@@ -773,6 +1282,26 @@
 
 	.charsheet-mobile__context-menu.charsheet-mobile--visible {
 		display: block;
+	}
+
+	/* Guarantees dismissal. The previous `{once: true}` document listener removed
+	   itself on the first tap inside the menu, stranding it open with no way out.
+	   Sits directly beneath the menu so any outside tap dismisses rather than
+	   falling through to the tab bar or status strip. */
+	.charsheet-mobile__context-menu-backdrop {
+		display: none;
+		position: fixed;
+		inset: 0;
+		z-index: calc(var(--cs-z-tooltip, 1070) - 1);
+		background: transparent;
+	}
+
+	.charsheet-mobile__context-menu-backdrop.charsheet-mobile--visible {
+		display: block;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.charsheet-mobile__context-menu { animation: none; }
 	}
 
 	@keyframes charsheet-mobile-contextAppear {
@@ -807,10 +1336,35 @@
 		background: var(--cs-bg-active, rgba(255, 255, 255, 0.1));
 	}
 
+	.charsheet-mobile__context-menu-item--disabled {
+		opacity: 0.45;
+		cursor: default;
+	}
+
+	.charsheet-mobile__context-menu-item--disabled:active {
+		background: none;
+	}
+
 	.charsheet-mobile__context-menu-item-icon {
 		font-size: 1.1rem;
 		width: 24px;
 		text-align: center;
+		flex: 0 0 auto;
+	}
+
+	.charsheet-mobile__context-menu-item-text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+
+	/* Carries "3 slots remaining", "2 SP" — the detail that makes an upcast
+	   choice decidable. */
+	.charsheet-mobile__context-menu-item-sublabel {
+		font-size: 0.75rem;
+		line-height: 1.25;
+		color: var(--cs-text-muted, #94a3b8);
 	}
 
 	.charsheet-mobile__context-menu-separator {
@@ -951,21 +1505,8 @@
 		margin-bottom: 0.5rem;
 	}
 
-	/* Spell slot display — horizontal scroll */
-	.charsheet__spell-slots-grid {
-		display: flex;
-		overflow-x: auto;
-		-webkit-overflow-scrolling: touch;
-		gap: 0.5rem;
-		padding-bottom: 0.5rem;
-		scrollbar-width: none;
-	}
-
-	.charsheet__spell-slots-grid::-webkit-scrollbar {
-		display: none;
-	}
-
-	.charsheet__spell-slot-item {
+	/* Spell slot display */
+	.charsheet__spell-slot-box {
 		flex: 0 0 auto;
 		min-width: 60px;
 	}
@@ -983,34 +1524,18 @@
 		margin-bottom: 0.5rem;
 	}
 
-	/* Inventory search — full width, prominent */
-	.charsheet__inventory-search {
-		position: sticky;
-		top: 0;
-		z-index: var(--cs-z-sticky, 100);
-		background: var(--cs-bg-surface, #1e293b);
-		padding: 0.5rem 0;
-		margin-bottom: 0.5rem;
-	}
-
-	.charsheet__inventory-search input {
+	/* Inventory search — comfortable tap target */
+	#charsheet-ipt-inventory-search {
 		min-height: 44px;
 		font-size: 1rem;
 	}
 
-	/* Inventory items — card-like with swipe affordance */
-	.charsheet__inventory-item {
+	/* Inventory items — card-like rows */
+	.charsheet__item {
 		border-radius: var(--cs-radius-md, 10px);
 		padding: 0.75rem;
 		margin-bottom: 0.4rem;
 		min-height: 52px;
-	}
-
-	/* Equipment section — compact grid */
-	.charsheet__equipment-slots {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 0.4rem;
 	}
 
 	/* ====================================================================
@@ -1024,7 +1549,7 @@
 	/* ====================================================================
 	   Tab-Specific: Features — Accordion Style
 	   ==================================================================== */
-	.charsheet__feature-item {
+	.charsheet__feature {
 		border-radius: var(--cs-radius-md, 10px);
 		margin-bottom: 0.4rem;
 	}
@@ -1035,21 +1560,10 @@
 	}
 
 	/* ====================================================================
-	   Tab-Specific: Abilities (Detailed) — Touch Grid
-	   ==================================================================== */
-	.charsheet__abilities-detailed .charsheet__ability-detail-card {
-		padding: 0.75rem;
-	}
-
-	/* ====================================================================
 	   Tab-Specific: Companions — Card Layout
 	   ==================================================================== */
 	.charsheet__companion-card {
 		margin-bottom: 0.75rem;
-	}
-
-	.charsheet__companion-stat {
-		min-height: 36px;
 	}
 
 	.charsheet__companion-quick-rolls {
@@ -1061,21 +1575,17 @@
    Extra Small Devices (< 480px)
    ======================================================================== */
 @media (max-width: 480px) {
-	#charsheet-tabs > li {
-		min-width: 56px;
-	}
-
+	/* At 320px the six tabs are 56.5px wide and "Overview" measures 55px at the
+	   12px label size. The 2px side padding was the entire difference between a
+	   whole word and "Overvie…". Reclaim it here rather than dropping below the
+	   type ramp's floor — DESIGN.md buys density with disclosure, not type. */
 	#charsheet-tabs > li > a {
-		padding: 5px 6px 3px;
+		padding: 5px 0 3px;
 		min-height: 50px;
 	}
 
 	#charsheet-tabs > li > a .charsheet__tab-icon {
-		font-size: 1.1rem;
-	}
-
-	#charsheet-tabs > li > a .charsheet__tab-text {
-		font-size: 0.55rem;
+		font-size: var(--cs-text-lg, 1.125rem);
 	}
 
 	.charsheet__combat-stat {
@@ -1087,18 +1597,6 @@
 		width: 48px;
 		height: 48px;
 		font-size: 1.3rem;
-	}
-
-	.charsheet-mobile__roll-toolbar {
-		left: 8px;
-		right: 8px;
-		transform: none;
-		border-radius: var(--cs-radius-lg, 16px);
-	}
-
-	.charsheet-mobile__roll-toolbar-btn {
-		padding: 8px 12px;
-		font-size: 0.75rem;
 	}
 
 	/* Identity — even more compact */
@@ -1115,18 +1613,51 @@
 /* ========================================================================
    Landscape Phone — Adjustments
    ======================================================================== */
-@media (max-width: 768px) and (orientation: landscape) {
+@media (max-width: 768px) and (orientation: landscape),
+	(max-height: 480px) and (orientation: landscape) and (pointer: coarse) {
 	#charsheet-tabs > li > a {
 		min-height: 44px;
-		padding: 4px 10px 2px;
+		flex-direction: row;
+		gap: 6px;
+		padding: 4px 8px;
 	}
 
+	/* Landscape has width to spare and only six tabs to place, so the labels
+	   stay. Dropping them left six unlabelled emoji as the sole navigation —
+	   DESIGN.md requires a text alternative for every icon. */
 	#charsheet-tabs > li > a .charsheet__tab-text {
-		display: none;
+		display: inline;
 	}
 
 	.charsheet-mobile__fab {
 		bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+	}
+
+	/* Landscape gives us width but almost no height, so the strip trades its
+	   stacked label/value for one line. Same four segments, half the height. */
+	.charsheet-mobile__status-row {
+		min-height: 36px;
+	}
+
+	.charsheet-mobile__status-seg {
+		flex-direction: row;
+		align-items: baseline;
+		justify-content: center;
+		gap: 6px;
+		padding: 4px 8px;
+	}
+
+	.charsheet-mobile__status-bar {
+		bottom: 2px;
+		height: 2px;
+	}
+
+	body.charsheet-mobile__has-status .charsheet-page .tab-content {
+		padding-bottom: calc(94px + env(safe-area-inset-bottom, 0px));
+	}
+
+	body.charsheet-mobile__has-status .charsheet-mobile__fab {
+		bottom: calc(96px + env(safe-area-inset-bottom, 0px));
 	}
 
 	/* More horizontal space — use 2 columns */
@@ -1150,15 +1681,111 @@
 }
 
 /* ========================================================================
-   Light mode (Day Mode) overrides for mobile
+   Touch targets
 
-   Active only when the site is in day mode. Mobile is token-driven, so the
-   day-mode token layer handles the bulk; this patches a hardcoded faint-white
-   surface that would vanish on the light canvas.
+   WCAG 2.5.8 sets a 24px floor; 44px is the comfortable target. Which one a
+   control gets is decided by its neighbours, not by preference — an expanded
+   hit area that overlaps the control beside it turns a small-target problem
+   into a wrong-target problem, and a mis-spent spell slot is worse than a
+   fiddly one. So the rule is: expand to 44px only where a control has room,
+   and never past the midpoint to its nearest neighbour.
+
+   Spell-slot pips sit on a 25.6px pitch (20px pip + 0.35rem gap), so 24px is
+   the largest area they can take without stealing each other's taps. Chips in
+   wrapped rows get 28px for the same reason. Icon controls that sit alone in a
+   section title have no such neighbour and take the full 44px.
+
+   The expansion rides on `::after` because glyphicons already own `::before`.
    ======================================================================== */
-@media (max-width: 768px) {
-	:root:not(.ve-night-mode) .charsheet-mobile__roll-toolbar-close {
-		background: rgba(15, 23, 42, 0.06);
+@media (max-width: 768px), (max-height: 480px) and (orientation: landscape) and (pointer: coarse) {
+	.charsheet-page .charsheet__spell-slot-pip,
+	.charsheet-page .ve-btn-xs,
+	.charsheet-page .charsheet__section-edit,
+	.charsheet-page .charsheet__deathsave-check,
+	.charsheet-page .charsheet__resource-use-btn,
+	.charsheet-page .charsheet__resource-restore-btn {
+		position: relative;
+	}
+
+	.charsheet-page .charsheet__spell-slot-pip::after,
+	.charsheet-page .ve-btn-xs::after,
+	.charsheet-page .charsheet__section-edit::after,
+	.charsheet-page .charsheet__deathsave-check::after,
+	.charsheet-page .charsheet__resource-use-btn::after,
+	.charsheet-page .charsheet__resource-restore-btn::after {
+		content: "";
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		/* Invisible: this enlarges the hit area, not the control. */
+		background: none;
+		border: 0;
+	}
+
+	/* Dense row, both sides occupied — 24px is the non-overlapping maximum. */
+	.charsheet-page .charsheet__spell-slot-pip::after {
+		width: 24px;
+		height: 24px;
+	}
+
+	/* Death saves are 13px boxes on a 28px pitch — and they are the taps you make
+	   while dying, so they get every pixel the pitch allows. */
+	.charsheet-page .charsheet__deathsave-check::after {
+		width: 26px;
+		height: 26px;
+	}
+
+	/* Wrapped chip rows: full width plus a little, capped short of the row pitch. */
+	.charsheet-page .ve-btn-xs::after {
+		width: calc(100% + 6px);
+		height: 28px;
+	}
+
+	/* Alone in a section title — room for the full comfortable target. */
+	.charsheet-page .charsheet__section-edit::after {
+		width: 44px;
+		height: 44px;
+	}
+
+	/* Side by side in a resource row: grow vertically, stay inside horizontally. */
+	.charsheet-page .charsheet__resource-use-btn::after,
+	.charsheet-page .charsheet__resource-restore-btn::after {
+		width: 100%;
+		height: 44px;
+	}
+
+	/* A disabled control must not keep claiming an enlarged hit area. */
+	.charsheet-page .ve-btn-xs:disabled::after,
+	.charsheet-page .charsheet__resource-use-btn:disabled::after,
+	.charsheet-page .charsheet__resource-restore-btn:disabled::after {
+		display: none;
+	}
+}
+
+/* ========================================================================
+   Hover-only affordances
+
+   ~153 rules in the sheet reveal state on `:hover` alone, which on a
+   touchscreen means never. Pair each with `:focus-visible` so keyboard and
+   switch users reach the same state, and make the pressed state carry the
+   feedback that hover carries on a pointer device.
+   ======================================================================== */
+@media (max-width: 768px), (max-height: 480px) and (orientation: landscape) and (pointer: coarse) {
+	.charsheet-page .charsheet__spell-slot-pip:focus-visible,
+	.charsheet-page .charsheet__section-edit:focus-visible,
+	.charsheet-page .ve-btn-xs:focus-visible {
+		outline: 2px solid var(--cs-accent, #8b5cf6);
+		outline-offset: 2px;
+	}
+
+	/* `:hover` sticks after a tap on touch; `:active` is the honest signal. */
+	.charsheet-page .charsheet__spell-slot-pip:active {
+		transform: scale(0.92);
+	}
+
+	.charsheet-page .charsheet__spell-slot-pip:hover {
+		transform: none;
 	}
 }
 
@@ -1170,7 +1797,8 @@
    menu) neutralized even in isolation. Scoped to the character-sheet subtree so
    it never reaches unrelated page chrome.
    ======================================================================== */
-@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+@media (max-width: 768px) and (prefers-reduced-motion: reduce),
+	(max-height: 480px) and (orientation: landscape) and (pointer: coarse) and (prefers-reduced-motion: reduce) {
 	.charsheet-page,
 	.charsheet-page *,
 	.charsheet-page *::before,

@@ -277,7 +277,9 @@ at rest.
 | `--cs-z-toast` | 1060 | Toasts + the roll-modifier toolbar |
 | `--cs-z-tooltip` | 1070 | Context menus, hover cards — always on top |
 
-Values were chosen to preserve the stacking order already shipping, so migration is mechanical. Two corollaries: (1) **a fixed layer owes the layers beneath it clearance, not just a higher number** — the mobile tab bar publishes its own height as `--cs-tabbar-height` (including `env(safe-area-inset-bottom)`), and anything it can cover pads by that amount rather than re-stacking shared chrome; (2) when a shared, site-wide element is in the stack, scope the fix to `body.is-charsheet-page` so non-sheet surfaces are untouched. *Known outliers:* two `10000`/`10001` declarations remain in `css/charactersheet.css`; they are a logged follow-up, not a licence for new ones.
+Values were chosen to preserve the stacking order already shipping, so migration is mechanical. Three corollaries: (1) **a fixed layer owes the layers beneath it clearance, not just a higher number** — the mobile tab bar publishes its own height as `--cs-tabbar-height` (including `env(safe-area-inset-bottom)`), and anything it can cover pads by that amount rather than re-stacking shared chrome; (2) when a shared, site-wide element is in the stack, scope the fix to `body.is-charsheet-page` so non-sheet surfaces are untouched; (3) **when our chrome and a shared surface collide, demote ours for the duration** — a modal is a mode, and while `body.ve-ui-modal__body-active` is set the tab bar drops to `--cs-z-sticky` and the FAB hides, rather than the modal being pushed above a tab bar it never knew about. Clearance alone was not enough here: the modal *footer* is a sibling of the scroller, so padding the scroller left the primary action under the bar. *Known outliers:* two `10000`/`10001` declarations remain in `css/charactersheet.css`; they are a logged follow-up, not a licence for new ones.
+
+**Scrims.** A backdrop's colour is a token too: `--cs-scrim-bg` (`rgba(0, 0, 0, 0.5)`) is the single dimming value for full-screen and local backdrops, paired with `--cs-z-overlay` or `--cs-z-scrim` respectively. Do not hand-roll a new alpha at the call site.
 
 ## 5. Components
 
@@ -341,6 +343,20 @@ collapse to a thin ~48px "add" affordance with a right-aligned "None" hint.
 - **The payload never yields space to chrome.** In compact mode, put identity and the action button on one row and let the description span the full panel width beneath them; never let a `nowrap` badge column in a `minmax(0, 1fr) auto` grid squeeze the readable column to nothing.
 - **Density is bought by disclosure, not by shrinking type.** Reference prose that hover already carries (rules reminders, long feature text) collapses behind a `<details>` showing names only; the type scale is not the lever.
 - **Verify containment before shipping.** `container-type: inline-size` establishes size containment. Absolutely-positioned children *inside* the panel will be clipped by it; children portalled to `document.body` (as 5etools hover windows are — `js/utils-ui.js`) escape safely. Check which kind you have.
+
+**The Mobile-Is-A-Posture Rule.** "Mobile" is a *posture*, not a width. Gating the mobile layer on `max-width: 768px` alone meant a phone in landscape — 844×390 — fell out of it at precisely the moment the viewport got shortest, which is why landscape measured 12.6 screens deep while portrait measured 5.3. The gate is width **or** a short touch viewport:
+
+```css
+@media (max-width: 768px),
+	(max-height: 480px) and (orientation: landscape) and (pointer: coarse) { … }
+```
+
+`pointer: coarse` keeps a merely short desktop window out; the JS twin in `CharacterSheetMobile.isMobile()` uses the same query plus a real touch check. Three corollaries:
+
+- **The mobile bar carries the play loop; prep goes behind "More."** Ten tabs do not fit a 390px strip (they measured a 459px `scrollWidth` with no scroll affordance, so three tabs were simply unreachable). Five play tabs stay; the rest move into a bottom sheet. The split is a product decision, so it lives in a pure static — `CharacterSheetMobile.partitionTabs()` — whose binding invariant is that `play ∪ overflow` is *every* tab. **Mobile may rearrange the sheet; it may never shrink it.**
+- **The mobile layer delegates, it does not reimplement.** Mobile affordances drive the existing controls (`document.getElementById("charsheet-btn-short-rest").click()`, the real tab anchors) rather than owning a second copy of the logic. A parallel implementation would take `CharacterSheetState` off the critical path and quietly void the test suite that covers it.
+- **16px on form controls is a floor, not a value.** Safari zooms — one way, never back — on any focused field under 16px. But the page's own text-size feature owns these sizes via `calc(var(--cs-text-sm) * var(--cs-text-scale))`, so overriding them flat would disable that feature on phones. Write `max(16px, calc(…))` and both survive.
+- **Persistent chrome carries the play loop; the mobile status strip is a mirror.** The two-second glance mid-encounter — read HP, spend a resource, look up — used to cost a tab switch and a scroll on every tab, because HP, AC, slots and class resources each live on a different one. The strip pins them above the tab bar. It owns no state: each segment *reads* the real control and, when tapped, clicks it. Segments are descriptors with a `read()` that may return `null`, which is what makes the strip class-agnostic — a Champion Fighter yields no Slots segment and a Warlock yields `Pact` from the same scan, with no per-class branch anywhere. **If a segment ever needs to compute rather than read, it is in the wrong layer.**
 
 ## 6. Do's and Don'ts
 

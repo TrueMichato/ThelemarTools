@@ -336,7 +336,7 @@ class CharacterSheetInventory {
 			}
 			if (e.target.closest(".charsheet__item-remove")) {
 				const itemId = _getItemId(e.target);
-				if (itemId) this._removeItem(itemId);
+				if (itemId) this._pConfirmRemoveItem(itemId);
 				return;
 			}
 			if (e.target.closest(".charsheet__item-info")) {
@@ -5134,6 +5134,37 @@ class CharacterSheetInventory {
 
 		// Could add fallback loading here if needed
 		return null;
+	}
+
+	/**
+	 * Confirm before destroying an inventory row.
+	 *
+	 * Removal is unrecoverable — there is no undo on the sheet — and the ✕ sits in
+	 * a tight cluster with equip, attune, info and edit. On a touch screen that
+	 * cluster is a minefield: a mis-tap silently deletes an item and everything it
+	 * carried (attunement, charges, custom edits, pack contents).
+	 *
+	 * The confirm is deliberately *not* inside `_removeItem`, because the other
+	 * caller — quantity decremented to zero — is incremental and self-evident. The
+	 * user watched the count tick down; interrupting the last arrow of twenty with
+	 * a dialog would be noise. Only the explicit destroy action asks.
+	 *
+	 * @param {string} itemId
+	 */
+	async _pConfirmRemoveItem (itemId) {
+		const item = this._state.getItems().find(it => it.id === itemId);
+		const name = item?.name || "this item";
+		const qty = item?.quantity > 1 ? ` (×${item.quantity})` : "";
+
+		const isConfirmed = await InputUiUtil.pGetUserBoolean({
+			title: "Remove Item",
+			htmlDescription: `Remove <b>${name.qq()}</b>${qty} from your inventory? This can't be undone.`,
+			textYes: "Remove",
+			textNo: "Cancel",
+		});
+		if (!isConfirmed) return;
+
+		this._removeItem(itemId);
 	}
 
 	_removeItem (itemId) {

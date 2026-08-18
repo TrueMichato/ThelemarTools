@@ -166,7 +166,108 @@ BEM-like naming: `.charsheet__element--modifier`
 - Utility classes from 5etools: `.ve-flex-col`, `.w-100`, `.no-wrap`, `.my-0`
 - Four stylesheets: `charactersheet.css` (layout/main sheet), `charactersheet-modern.css`
   (design tokens + aesthetics), `charactersheet-playmode.css` (Alt View / `pm-*`),
-  `charactersheet-mobile.css` (`<768px`).
+  `charactersheet-mobile.css` (phones — see below).
+
+#### The mobile layer
+
+`charactersheet-mobile.css` + `js/charactersheet/charactersheet-mobile.js` form a
+**shell around the desktop sheet**, not a second sheet. Ten rules govern it:
+
+1. **The gate is a posture, not a width.** Both the CSS media query and
+   `CharacterSheetMobile.isMobile()` fire on
+   `(max-width: 768px), (max-height: 480px) and (orientation: landscape)`
+   (CSS adds `(pointer: coarse)`; JS adds a real touch check). Width alone
+   excluded phones in landscape, which are 844px wide — the mobile layer used to
+   switch itself off on rotation.
+2. **Delegate; never reimplement.** Mobile affordances click the real controls
+   (`_executeFabAction` → `#charsheet-btn-short-rest`; the tab sheet → the real
+   `<a href="#charsheet-tab-…">`). No parallel resource logic, so
+   `CharacterSheetState` stays the single source of truth and the existing tests
+   keep covering the real path.
+3. **Rearrange, never shrink.** The tab bar shows five play tabs (Overview,
+   Combat, Spells, Inventory, Features) and moves the rest into a "More" bottom
+   sheet. `CharacterSheetMobile.partitionTabs(hrefs)` is a pure static so the
+   "no tab is dropped" invariant is testable without a DOM
+   (`test/jest/charactersheet/MobileTabOverflow.test.js`).
+4. **A modal is a mode.** While `body.ve-ui-modal__body-active` is set, the tab
+   bar drops to `--cs-z-sticky`, and the FAB and status strip hide. Padding the
+   modal scroller is not sufficient — the footer is a *sibling* of the scroller,
+   so the primary action was the one thing left under the bar.
+5. **The status strip is a mirror.** `#charsheet-mobile-status` pins HP, AC, the
+   next spendable slot and the next available class resource above the tab bar.
+   Each segment is a descriptor in `CharacterSheetMobile._STATUS_SEGMENTS` with a
+   `read()` that returns a render model or `null` (→ segment hides) and an
+   `activate()` that clicks the real control. Class-agnostic by construction: a
+   Champion Fighter yields no Slots segment, a Warlock yields `Pact`, from the
+   same scan. Policy lives in the pure statics `readVitalState()` and
+   `pickSlotLevel()`, tested in
+   `test/jest/charactersheet/MobileStatusStrip.test.js`. Sync is driven by one
+   debounced `MutationObserver` over `.charsheet-page` plus `input`/`change`
+   listeners — `.value` writes mutate a property, which the observer cannot see.
+   The strip is appended to `<body>`, outside the observed subtree, so it cannot
+   observe itself.
+6. **`max-height` is a transition device, never a resting state.**
+   `_initCollapsibleSections()` wraps each section's content and animates it with
+   `max-height`; an expanded wrapper must rest at `none`. Pinning it to a pixel
+   value clips whatever renders *later* — silently, with no scrollbar and no
+   error — and most of this sheet's content renders after init. Two traps:
+   inactive tab panes are `display: none` at init, so their `scrollHeight` reads
+   0; and `transitionend` never fires under `prefers-reduced-motion`. Hence
+   `_releaseMaxHeight(section, contentWrapper)` restores `none` on
+   `transitionend` **or** after `_MAX_HEIGHT_RELEASE_MS` (400ms), whichever
+   comes first, ignoring transitions bubbling from descendants and bailing if
+   the section was re-collapsed meanwhile. Regression-tested in
+   `test/jest/charactersheet/MobileSectionMaxHeight.test.js`.
+   A related ceiling: the collapse mechanism returns early on a section with no
+   `.charsheet__section-title`, so Overview's four largest blocks (HP, combat
+   stats, survival, core stats — ~1,170px) structurally cannot collapse. That is
+   a known limit, not a bug to route around.
+7. **Touch targets are sized by neighbour distance, not by preference.** Hit
+   areas expand with a transparent `::after` overlay — glyphicons own `::before`
+   — and each is capped just under its control's pitch, because an oversized
+   target turns a small-target problem into a *wrong-target* problem, which is
+   worse. Spell-slot pips: 24px on a 25.6px pitch. Death-save checkboxes: 26px
+   on a 28px pitch. Isolated icons (the section-edit pencil) get the full 44px.
+   Verified with `elementFromPoint` across every tab — zero misfires. Every
+   hover-only affordance touched here also carries `:focus-visible`.
+8. **The long-press menu *discovers*; it does not describe.** For rows with no
+   bespoke branch, `_buildRowActionItems(row, {skipSelector})` scans the row's
+   own `<button>`s and builds one entry per rendered control, labelled by
+   `deriveActionLabel` (`title` → `aria-label` → text → class-derived). This
+   replaced hardcoded selector lists that named DOM which never existed
+   (`__inventory-equip`, `__resource-reset`, `__resource-edit`, …), and it is the
+   only approach that survives the two row types naming their controls
+   incompatibly — inventory renders icon-only buttons carrying `title`, resources
+   render `__resource-use-btn` with visible text and no `title`. It also surfaces
+   `title` text a touch user can never hover to read. A nameless entry is
+   *skipped* deliberately: `deriveActionLabel` returning `null` is correct, since
+   an unlabelled menu row is worse than none and the button is still tappable.
+   Spell rows combine both: `_buildCastOptionItems` (which knows slot levels,
+   ritual and metamagic) owns casting, and discovery supplies the rest with
+   `skipSelector: "[class*='charsheet__spell-cast']"`. Without that supplement a
+   spell offering no cast options — an innate grant, an at-will — produced an
+   *empty* menu, and an empty menu makes long-press a dead gesture on a row that
+   advertises one.
+9. **Every selector the mobile layer names must exist.**
+   `test/jest/charactersheet/MobileSelectorIntegrity.test.js` greps every
+   `.charsheet__*` class used by `charactersheet-mobile.{js,css}` and asserts it
+   is authored somewhere real. It found 8 phantoms on first run, beyond the 8
+   found by hand — including a horizontally-scrolling spell-slot grid that styled
+   nothing on any screen. **The corpus must include `charactersheet.html`**:
+   scanning only `js/` manufactures false positives, because classes such as
+   `.charsheet__combat-stat--clickable` are authored in markup.
+10. **Suppress the synthetic post-press click narrowly.** `touchend` is followed
+    by a synthetic `click` that `preventDefault()` cannot stop, so a capture-phase
+    blocker swallows it. That blocker must be scoped to the pressed row and must
+    always let `.charsheet-mobile__context-menu` through. A blanket `once: true`
+    listener eats whichever click arrives first within its 500ms window — on a
+    phone that is usually the user's immediate tap on the menu the press just
+    opened, so their first choice silently does nothing.
+
+Form controls on mobile take a 16px **floor**
+(`max(16px, calc(var(--cs-text-sm) * var(--cs-text-scale)))`) rather than a flat
+16px, so Safari's one-way auto-zoom is avoided without disabling the page's own
+text-size feature.
 
 #### Design tokens & light mode (Day Mode)
 

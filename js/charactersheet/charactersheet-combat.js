@@ -1739,6 +1739,7 @@ class CharacterSheetCombat {
 		const btn = offer.querySelector(".charsheet__penetration-btn");
 		btn.addEventListener("click", async () => {
 			const margin = await InputUiUtil.pGetUserNumber({
+				inputMode: "numeric",
 				title: "Penetrating Blow",
 				default: 1,
 				min: 1,
@@ -11930,6 +11931,7 @@ class CharacterSheetCombat {
 			const max = calcs.focusSwitchesMaxNum ?? calcs.focusSwitchesMax ?? 1;
 			const cur = this._state.getFocusSwitchesRemaining?.();
 			const next = await InputUiUtil.pGetUserNumber({
+				inputMode: "numeric",
 				title: "Set remaining Focus Switches",
 				min: 0,
 				max,
@@ -11946,6 +11948,7 @@ class CharacterSheetCombat {
 			const max = calcs.huntersDodgeUses ?? 0;
 			const cur = this._state.getHuntersDodgeRemaining?.() ?? 0;
 			const next = await InputUiUtil.pGetUserNumber({
+				inputMode: "numeric",
 				title: "Set remaining Hunter's Dodge uses",
 				min: 0,
 				max,

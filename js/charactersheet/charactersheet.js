@@ -2355,6 +2355,7 @@ class CharacterSheetPage {
 
 		card.querySelector(".btn-companion-ferocity-gain")?.addEventListener("click", async () => {
 			const hostiles = await InputUiUtil.pGetUserNumber({
+				inputMode: "numeric",
 				title: "Gain Ferocity",
 				htmlDescription: `<div>At the start of the turn your companion gains <strong>1d4</strong> ferocity, plus 1 for each hostile creature within 5 feet that they can see or hear. Creatures sharing a stat block (a swarm) count as one.</div>`,
 				min: 0,
@@ -2373,6 +2374,7 @@ class CharacterSheetPage {
 
 		card.querySelector(".btn-companion-ferocity-spend")?.addEventListener("click", async () => {
 			const cost = await InputUiUtil.pGetUserNumber({
+				inputMode: "numeric",
 				title: "Spend Ferocity",
 				htmlDescription: `<div>Your companion has <strong>${this._state.getCompanionFerocity(companion.id)}</strong> ferocity. Exploits print their cost in their name (e.g. "Thrash (4 Ferocity)").</div>`,
 				min: 1,
@@ -5746,6 +5748,7 @@ class CharacterSheetPage {
 			// Heal button
 			card.querySelector(".btn-companion-heal").addEventListener("click", async () => {
 				const healing = await InputUiUtil.pGetUserNumber({
+					inputMode: "numeric",
 					title: `Heal ${companion.name}`,
 					min: 1,
 					int: true,
@@ -5761,6 +5764,7 @@ class CharacterSheetPage {
 			// Damage button
 			card.querySelector(".btn-companion-damage").addEventListener("click", async () => {
 				const damage = await InputUiUtil.pGetUserNumber({
+					inputMode: "numeric",
 					title: `Damage ${companion.name}`,
 					min: 1,
 					int: true,
@@ -6289,6 +6293,7 @@ class CharacterSheetPage {
 		// Heal all creatures
 		card.querySelector(".btn-heal-all").addEventListener("click", async () => {
 			const amount = await InputUiUtil.pGetUserNumber({
+				inputMode: "numeric",
 				title: `Heal All ${companion.name}`,
 				min: 1,
 				int: true,
@@ -6304,6 +6309,7 @@ class CharacterSheetPage {
 		// Damage all creatures
 		card.querySelector(".btn-damage-all").addEventListener("click", async () => {
 			const amount = await InputUiUtil.pGetUserNumber({
+				inputMode: "numeric",
 				title: `Damage All ${companion.name}`,
 				min: 1,
 				int: true,
@@ -6326,6 +6332,7 @@ class CharacterSheetPage {
 			evt.stopPropagation();
 			const index = parseInt(evt.currentTarget.dataset.index);
 			const amount = await InputUiUtil.pGetUserNumber({
+				inputMode: "numeric",
 				title: `Heal ${companion.name} #${index + 1}`,
 				min: 1,
 				int: true,
@@ -6342,6 +6349,7 @@ class CharacterSheetPage {
 			evt.stopPropagation();
 			const index = parseInt(evt.currentTarget.dataset.index);
 			const amount = await InputUiUtil.pGetUserNumber({
+				inputMode: "numeric",
 				title: `Damage ${companion.name} #${index + 1}`,
 				min: 1,
 				int: true,
@@ -10371,6 +10379,7 @@ class CharacterSheetPage {
 	 */
 	async _pUseDivineAllegiance (feature) {
 		const raw = await InputUiUtil.pGetUserNumber({
+			inputMode: "numeric",
 			title: "Divine Allegiance",
 			default: 1,
 			min: 1,
@@ -10926,6 +10935,7 @@ class CharacterSheetPage {
 		let valueGp = 0;
 		if (calc.createdItemMaxGp != null) {
 			const entered = await InputUiUtil.pGetUserNumber({
+				inputMode: "numeric",
 				title: `${name} — Value in gp (max ${calc.createdItemMaxGp})`,
 				default: 0,
 				min: 0,
@@ -11215,6 +11225,7 @@ class CharacterSheetPage {
 				if (name == null) return true;
 				target = String(name).trim() || "an ally";
 				const feet = await InputUiUtil.pGetUserNumber({
+					inputMode: "numeric",
 					title: "How far away are they?",
 					default: 0,
 					min: 0,
@@ -11255,6 +11266,7 @@ class CharacterSheetPage {
 		const canRecall = !!calc.hasCovenCalling;
 
 		const spellLevel = await InputUiUtil.pGetUserNumber({
+			inputMode: "numeric",
 			title: "Clever Little Witch — spell level",
 			min: 1,
 			max: calc.cleverLittleWitchMaxSpellLevel ?? 9,
@@ -11395,6 +11407,7 @@ class CharacterSheetPage {
 			JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: "🜛 <strong>Coven Calling</strong>: the duplicates fade."}));
 		} else if (choice === OPT_CAST) {
 			const lvl = await InputUiUtil.pGetUserNumber({
+				inputMode: "numeric",
 				title: "Duplicate casts — spell level",
 				min: 1,
 				max: dupes.maxSpellLevel ?? 3,
@@ -11542,6 +11555,7 @@ class CharacterSheetPage {
 		if (isMelee == null) return true;
 
 		const damage = await InputUiUtil.pGetUserNumber({
+			inputMode: "numeric",
 			title: "How much damage are you taking?",
 			default: reduction,
 			min: 0,
@@ -12398,6 +12412,7 @@ class CharacterSheetPage {
 	// #region Actions
 	async _onHeal () {
 		const amount = await InputUiUtil.pGetUserNumber({
+			inputMode: "numeric",
 			title: "Heal",
 			default: 0,
 			min: 0,
@@ -12419,6 +12434,7 @@ class CharacterSheetPage {
 
 	async _onDamage () {
 		const amount = await InputUiUtil.pGetUserNumber({
+			inputMode: "numeric",
 			title: "Take Damage",
 			default: 0,
 			min: 0,
@@ -12728,6 +12744,21 @@ class CharacterSheetPage {
 	}
 
 	async _onDeathSave () {
+		// Death saves are only meaningful at 0 HP, and rolling one while conscious
+		// is actively destructive: a natural 20 calls `setCurrentHp(1)`, so a stray
+		// tap on a healthy character silently drops them from full health to 1 HP
+		// with no undo. The button sits in the Survival block on desktop and behind
+		// the mobile FAB, where a mis-tap costs nothing to make and everything to
+		// discover. Guard the whole handler rather than the nat-20 branch, because
+		// accruing failures on a conscious character is equally wrong.
+		if (this._state.getCurrentHp() > 0) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: "Death saves are only rolled at 0 HP.",
+			});
+			return;
+		}
+
 		const roll = RollerUtil.randomise(20);
 		let result = "";
 

@@ -3052,6 +3052,16 @@ class InputUiUtil {
 	 * @param [opts.isSkippable] If the prompt is skippable.
 	 * @param [opts.storageKey_default] Storage key for a "default" value override using the user's last/previous input.
 	 * @param [opts.isGlobal_default] If the "default" storage key is global (rather than page-specific).
+	 * @param [opts.inputMode] Value for the input's `inputmode` attribute, e.g. `"numeric"`. Opt-in, and
+	 *        omitted by default so every existing caller keeps its current keyboard exactly.
+	 *
+	 *        On a phone this field otherwise raises the full QWERTY keyboard for a number-only prompt,
+	 *        which is both slower and more error-prone. `inputmode` is used in preference to
+	 *        `type="number"` because it changes only the on-screen keyboard: no spinners, no locale
+	 *        parsing differences, and the field still accepts whatever is typed or pasted.
+	 *
+	 *        Note that `"numeric"` offers no minus key on iOS, so callers whose value may legitimately
+	 *        be negative should leave this unset.
 	 * @return {Promise<number>} A promise which resolves to the number if the user entered one, or null otherwise.
 	 */
 	static async pGetUserNumber (opts) {
@@ -3063,7 +3073,7 @@ class InputUiUtil {
 			if (prev != null) defaultVal = prev;
 		}
 
-		const iptNumber = ee`<input class="ve-form-control ve-mb-2 ve-text-right" ${opts.min ? `min="${opts.min}"` : ""} ${opts.max ? `max="${opts.max}"` : ""}>`
+		const iptNumber = ee`<input class="ve-form-control ve-mb-2 ve-text-right" ${opts.min ? `min="${opts.min}"` : ""} ${opts.max ? `max="${opts.max}"` : ""} ${opts.inputMode ? `inputmode="${opts.inputMode}"` : ""}>`
 			.onn("keydown", evt => {
 				if (evt.key === "Escape") { iptNumber.blure(); return; }
 

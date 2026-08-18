@@ -661,9 +661,131 @@ feature and class work, and is tracked separately. Do not attempt it as a ride-a
 
 ### Mobile Experience
 
-- **Responsive**: Basic mobile support exists
-- **Touch optimization**: Could be improved
-- **Screen space**: Complex features cramped on small screens
+The sheet reclaims its first viewport on phones and keeps the play loop
+reachable, but the information architecture below the fold is still the desktop
+one.
+
+**Fixed (mobile viewport reclamation pass):**
+
+- **First viewport**: the marketing hero is hidden and the character-management
+  toolbar folds behind the 🔧 toggle, so the character's name now lands at
+  ~284px instead of ~1085px. Nothing is removed — expanding the header restores
+  every management control, unclipped.
+- **Tab bar**: five play tabs (Overview, Combat, Spells, Inventory, Features)
+  stay in the bar; Abilities, Notes, Companions, Builder and Respec move into a
+  **More** bottom sheet. The strip no longer overflows at 390px or 320px, and
+  "More" mirrors the active state when an overflow tab is open.
+- **Modals**: the tab bar is demoted to `--cs-z-sticky` and the FAB is hidden
+  while a modal is open, so modal footers — and their primary action — are no
+  longer covered.
+- **iOS auto-zoom**: every input, select and textarea now has a 16px *floor*
+  (`max(16px, …)`), which keeps the page's text-size feature working while
+  staying above Safari's one-way zoom threshold.
+- **Landscape**: the mobile layer used to switch itself off on rotation, because
+  a phone in landscape is 844px wide — outside the `max-width: 768px` gate. It
+  now also activates on `(max-height: 480px) and (orientation: landscape) and
+  (pointer: coarse)`.
+- **Status strip**: a persistent, *interactive* bar sits above the tab bar and
+  mirrors HP, AC, the next spendable spell slot and the next available class
+  resource. Tapping a slot or resource spends it; tapping HP opens a two-button
+  Heal / Damage tray; tapping AC opens the existing breakdown. Every segment is
+  a mirror — it reads the real controls and clicks them, so `CharacterSheetState`
+  remains the single source of truth and no resource logic is duplicated.
+  Segments are self-hiding, which is why a Champion Fighter simply shows no
+  Slots segment and a Warlock shows `Pact` — from the same scan, with no
+  per-class branch.
+- **Silent content clipping**: collapsible sections pinned `max-height` to the
+  height they measured during init, and only released it after a *manual*
+  expand. Anything that rendered later — favourite spells, proficiencies, an
+  added item — was clipped with no scrollbar and no affordance, hiding up to
+  176px in a single section. `max-height` is now treated as a transition
+  device rather than a resting state: an expanded section rests at
+  `max-height: none`, and `_releaseMaxHeight()` returns it there after a
+  toggle, with a timeout fallback because `transitionend` never fires under
+  `prefers-reduced-motion`. This also removed a whole class of timing bug —
+  inactive tab panes are `display: none` at init, so their measured
+  `scrollHeight` was 0.
+- **Overview length**: sections that are reference material, or that another
+  tab owns (Proficiencies, Specialties & Feats, Principles of Devotion, Active
+  Features), now start collapsed. Overview went from 4,787px to 4,247px
+  (5.67 → 5.03 screens) with nothing removed — every collapsed section is one
+  tap from open.
+- **Touch targets**: hit areas are expanded via `::after` (glyphicons own
+  `::before`) to clear the WCAG 2.5.8 24px floor. The expansion is sized by
+  distance to the nearest neighbour, not by preference — spell-slot pips sit on
+  a 25.6px pitch so they take 24px, while a section-edit pencil sits alone and
+  goes from 14×13 to 44×44. Verified with `elementFromPoint` across all five
+  tabs: **zero misfires**, i.e. no control captures a neighbour's tap.
+
+**Fixed (mobile interactivity pass):**
+
+- **Spell upcasting had no route on mobile.** `charactersheet-mobile.js` read
+  `window._charsheetPage`, which nothing ever assigns — the real global is
+  `window.charSheet`. The spell branch of the long-press menu therefore never
+  ran, and since the Cast button is hardcoded to `autoSlot: true`, upcasting was
+  unreachable for every class except Sorcerers. A rename alone would not have
+  worked: the mobile module constructs on `DOMContentLoaded`, but `charSheet` is
+  assigned ~10–25s later, after `pInit()`. Resolved with a lazy `get _page()`.
+  Long-press on a levelled spell now offers each affordable higher slot with a
+  "N slots remaining" sublabel, and unaffordable levels render disabled.
+- **The long-press menu named DOM that did not exist.** Two of its branches were
+  hardcoded selector lists; four of the names (`__resource-reset`,
+  `__resource-edit`, `__resource-decrement`, `__inventory-name`) had no real
+  counterpart at all. Replaced with discovery over the row's own buttons, which
+  now surfaces the full capability of a row — a Wizard item yields ten real
+  actions, and *Toggle Prepared* gained a mobile route it never had.
+- **Spells with no cast options opened an empty menu**, which `_showContextMenu`
+  discards — so long-press was a dead gesture on innate and at-will grants even
+  though the row advertised a menu. Discovery now supplements the cast options.
+- **The first tap after a long press was swallowed.** The blocker that suppresses
+  the synthetic post-`touchend` click was global and `once: true`, so for 500ms
+  it ate whichever click arrived first — usually the user's immediate tap on the
+  menu the press had just opened. It is now scoped to the pressed row and always
+  lets the context menu through.
+- **The mobile roll toolbar is gone.** It duplicated the long-press menu, with
+  advantage/disadvantage reachable two ways and consistent nowhere. Long-press
+  is now the single path, and rows where it is the *only* route to a capability
+  carry a quiet right-edge marker plus hold-progress feedback, so the gesture is
+  discoverable rather than assumed. The marker is a 2px bar, not a `⋯` glyph:
+  the glyph was measured to overlap the row's own trailing value (the passive
+  score, the ability modifier) on 12 of 15 sampled rows, and a hint that
+  obscures the number beside it is worse than no hint.
+- **Destructive actions confirm** (shared with desktop): removing an item or a
+  spell now asks first. The confirm lives in the click handler, not in
+  `_removeItem`/`_removeSpell`, so programmatic removal — e.g. quantity
+  decremented to zero — stays silent, as it should.
+- **Death saves are guarded** (shared with desktop): rolling one above 0 HP was
+  possible, and a natural 20 called `setCurrentHp(1)` — silently dropping a
+  healthy character to 1 HP with no undo. The whole handler now returns early
+  with a warning toast.
+- **Numeric fields raise a numeric keypad**: `pGetUserNumber` accepts an opt-in
+  `inputMode`, applied to the 19 character-sheet call sites (all of which have
+  `min: 0` or `min: 1`, so the absent iOS minus key costs nothing). The 32
+  call sites elsewhere — dice roller, DM Screen, homebrew builder — are
+  untouched.
+
+**Still open:**
+
+- **Overview's four largest blocks cannot collapse**: the HP, combat-stats,
+  survival and core-stats sections (~1,170px combined, ~28% of the tab) have no
+  `.charsheet__section-title`, and the collapse mechanism needs one to hang the
+  toggle on. Reducing them further means adding a heading to shared desktop
+  markup, which is out of scope for a mobile pass.
+- **Lineage-granted spells do not spend a slot when upcast** (e.g. a Druid's
+  Thorn Whip from Elven Lineage). The mobile menu drives the same `onSelect` the
+  desktop menu does, and a normally-prepared spell spends the correct slot, so
+  this is a spells-controller behaviour shared with desktop, not a mobile defect.
+- **`#charsheet-roll-initiative` is read but never created**
+  (`charactersheet-combat.js:485`, `charactersheet-mobile.js:972`). Not a live
+  bug — the FAB falls back to `#charsheet-box-initiative` and combat.js uses
+  optional chaining — but the id is dead.
+- **Landscape depth**: ~9.7 screens — better than before, but the layout is not
+  yet reauthored for a short viewport.
+- **Hover-only affordances**: `:focus-visible` and `:active` equivalents are in
+  place for the pips, chips and section-edit controls; the remaining ~150
+  hover-only rules across the sheet have not been swept.
+- **Play Mode**: a separate, largely non-functional surface; the Manager view is
+  the supported mobile experience.
 
 ---
 

@@ -101,6 +101,10 @@
 	--cs-radius-lg: 16px;
 	--cs-radius-xl: 24px;
 	--cs-radius-full: 9999px;
+
+	/* Scrim — the dim behind anything that owns the viewport (bottom sheets,
+	   local backdrops). Paired with --cs-z-scrim; see the Layer-Scale Rule. */
+	--cs-scrim-bg: rgba(0, 0, 0, 0.5);
 	
 	/* Spacing — 4pt-based scale. --cs-space-2xs codifies the hairline gaps
 	   that were raw 2px; --cs-space-3xl gives major sections room to separate. */
