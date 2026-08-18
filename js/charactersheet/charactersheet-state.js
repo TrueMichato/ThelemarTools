@@ -29702,9 +29702,19 @@ class CharacterSheetState {
 		const mat = this.getItemMaterialEntity(item);
 		if (!mat) return null;
 
-		return CharacterSheetMaterials.getMagicCapacityStatus(item, mat, {
-			manualAdjust: this.getMagicCapacityAdjust(itemId),
-		});
+		// The tally reads a dozen loosely-typed item fields straight from the catalog,
+		// homebrew and hand-built custom items. This is the single choke point every
+		// caller funnels through, and all of them already treat `null` as "no capacity
+		// to show" — so one unfamiliar shape costs a badge, not the inventory render.
+		try {
+			return CharacterSheetMaterials.getMagicCapacityStatus(item, mat, {
+				manualAdjust: this.getMagicCapacityAdjust(itemId),
+			});
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.warn(`[CharSheet State] Failed to compute Magic Capacity for item "${item.name}":`, e);
+			return null;
+		}
 	}
 
 	/**

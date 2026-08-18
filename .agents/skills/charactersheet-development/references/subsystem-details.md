@@ -583,8 +583,31 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
   Of the five `magicCapacityRules`, only `freeEffect` and `dcRiseThreshold` are automated;
   `opposedStatesCountAsOne` and `makerForeknowledge` are advisory, with the manual ±1
   `material.mcAdjust` as the escape hatch.
+- ⚠️ **`item.attachedSpells` is a dict far more often than an array** (~343 vs ~84 in the
+  shipped catalog). `will` / `other` / `ritual` hold arrays directly; `daily` / `charges` /
+  `limited` / `rest` nest one level further under a use count (`{"1e": [...]}`); and a
+  sibling `ability` key holds a bare **string**, not spells. `charactersheet-inventory.js`
+  both copies the dict from the catalog onto matched items (`:166`) and *constructs* it for
+  custom items (`:4044`). Read it via `CharacterSheetMaterials._flattenAttachedSpells`,
+  which collects only strings living **inside an array** — covering every shape in one rule
+  and excluding `ability` for free. Assuming an array here caused a real crash that took out
+  the material picker, the inventory row render and the rest flow at once.
+- **`state.getMagicCapacityStatus` is a guarded choke point.** It try/catches and returns
+  `null`; all three callers (picker preview, `_renderItemRow`, `notifyOverloadedItemsOnRest`)
+  already treat `null` as "no capacity to show", so one unfamiliar item costs a badge rather
+  than a whole render. Don't add try/catch to the render paths instead — that hides bugs.
 - An effect's authored `note` **replaces** the generated summary unless it carries
   `"noteMode": "qualifier"`, in which case it is appended. `grantsAction` is exempt.
+- **`getSummary(material, item)` is item-aware — always pass the item.** It gates each axis
+  by the same rule `applyToItem` uses (`Dmg`/`Crit`/`Pen` → weapon, `AC` → armour, `MC` →
+  always). Omitting `item` lists everything, which reads as nonsense in a picker row: a
+  longsword used to advertise `Mithril — AC 18`. `applyToItem` matches — no `critThreshold`
+  is written onto armour, where nothing rolls against it.
+- **The material picker is a filter-first disclosure list, not a hover preview.** 65 options
+  means search leads: an auto-focused filter box matches name, category, summary **and** note
+  text; each row is a native `<button>` whose expanded panel holds the diff and the *only*
+  Apply button on screen. One category group is always open. Never reintroduce hover preview
+  — it cannot work on touch.
 - ⚠️ `addItem()` **stacks same-named items**, so a material applies to the whole stack.
 - **Elemental condensates** (`materialCategory: "condensate"`, 18 of them) are **role-gated**:
   the affinity's mechanics only fire while the material occupies its own role

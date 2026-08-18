@@ -448,7 +448,7 @@ misbehave. It is the one axis that is a *budget* rather than a modifier.
 |---|---|
 | Applied upgrades | One per upgrade |
 | Set gemstones | One per gem |
-| Attached spells | One per spell |
+| Attached spells | One per **distinct** spell, across every usage category |
 | Resistances / immunities / condition immunities | One per entry |
 | Ability score grants (`ability`) | One per ability |
 | Speed modifications (`modifySpeed`) | One |
@@ -458,9 +458,30 @@ misbehave. It is the one axis that is a *budget* rather than a modifier.
 **Bonus families collapse.** `bonusWeapon`, `bonusWeaponAttack` and `bonusWeaponDamage` on
 one item are a single `+N` enchantment, not three, and are counted once.
 
+**`attachedSpells` is read in every shape it ships in.** It is a flat
+`["fireball|phb"]` array only about a fifth of the time; far more often it is keyed by
+usage — `will` / `other` / `ritual` hold arrays directly, while `daily` / `charges` /
+`limited` / `rest` nest one level further under a use count (`{"1e": [...]}`). The sheet
+emits that dict itself when a custom item is built with spells, and copies it verbatim
+from the catalog onto matched inventory items. `_flattenAttachedSpells` therefore
+collects **only strings that live inside an array**, which covers every shape in one rule
+and drops non-spell siblings such as `ability: "int"` for free. Names are stripped of
+`|source` and `#level` suffixes and deduped, so a spell offered both at-will and daily
+counts once.
+
 **Counting reads the raw item, not the projection.** A material's own intrinsic properties
 are what the item *is*, not enchantments placed into it — Darkmetal's shield `+1 AC` must
 not consume a slot of Darkmetal's own capacity.
+
+**A bad item costs a badge, not the page.** The tally reads a dozen loosely-typed fields
+straight from the catalog, homebrew and hand-built custom items, and it is reached from
+three places — the picker preview, `_renderItemRow`, and `notifyOverloadedItemsOnRest` — two
+of which would take down a whole render or the rest flow if it threw. `state.getMagicCapacityStatus`
+is the single choke point all three funnel through, so it catches, logs, and returns `null`;
+every caller already treats `null` as "no capacity to show", so an unfamiliar shape
+degrades to a missing badge instead of a broken inventory tab. Render paths are deliberately
+left unguarded — one catch at the boundary between the tolerant read layer and the pure
+calculator is enough, and scattering more would only hide bugs.
 
 ### Status
 
@@ -572,7 +593,7 @@ must do the same.
 |---|---|
 | Material badge on inventory rows (`⚙ Darkmetal`) | `charactersheet-inventory.js` |
 | Material row + config button in the item info modal | `charactersheet-inventory.js` |
-| **Material picker modal** — categorised, hover/focus live before-after preview | `CharacterSheetMaterials.showMaterialPickerModal(itemId)` |
+| **Material picker modal** — filterable, grouped, click-to-expand inline diff | `CharacterSheetMaterials.showMaterialPickerModal(itemId)` |
 | **Material** dropdown in Create / Modify Custom Item | `charactersheet-inventory.js` |
 | **Material** dropdown in the Craft workbench commit dialog | `charactersheet-crafting.js` |
 | `Pen N` on attack rows + post-attack **Penetrating Blow** prompt | `charactersheet-combat.js` |

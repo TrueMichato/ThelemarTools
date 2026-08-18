@@ -738,6 +738,51 @@ describe("Item Materials", () => {
 			const {total} = CharacterSheetMaterials.countMagicalEffects({name: "Ring"}, {manualAdjust: -5});
 			expect(total).toBe(0);
 		});
+
+		// `attachedSpells` is a dict roughly four times as often as it is an array —
+		// both in the shipped catalog and in what the sheet's own custom-item builder
+		// emits — so every usage shape has to count, not just the flat list.
+		describe("attachedSpells shapes", () => {
+			const countSpells = (attachedSpells) => {
+				const {breakdown} = CharacterSheetMaterials.countMagicalEffects({name: "Blade", attachedSpells});
+				return breakdown.find(b => b.label === "Attached spells") || {count: 0, detail: ""};
+			};
+
+			it.each([
+				["flat array", ["fireball|phb", "light"], 2],
+				["will", {will: ["thunderwave"]}, 1],
+				["other", {other: ["teleport|xphb"]}, 1],
+				["ritual", {ritual: ["detect evil and good"]}, 1],
+				["daily", {daily: {"1e": ["antimagic field", "augury"]}}, 2],
+				["charges", {charges: {"3": ["reverse gravity"]}}, 1],
+				["limited", {limited: {"1": ["feather fall", "levitate"]}}, 2],
+				["rest", {rest: {"1e": ["meld into stone"]}}, 1],
+			])("counts the %s form", (_label, attachedSpells, expected) => {
+				expect(countSpells(attachedSpells).count).toBe(expected);
+			});
+
+			it("counts across combined usage keys, as the custom-item builder emits them", () => {
+				expect(countSpells({will: ["mage hand|phb"], daily: {"1": ["bigby's hand|phb"]}, charges: {"2": ["shatter"]}}).count).toBe(3);
+			});
+
+			it("does not mistake the non-spell `ability` key for a spell", () => {
+				const res = countSpells({daily: {"1e": ["augury", "polymorph"]}, ability: "int"});
+				expect(res.count).toBe(2);
+				expect(res.detail).not.toContain("int");
+			});
+
+			it("counts a spell offered under two usages only once", () => {
+				expect(countSpells({will: ["mage hand"], daily: {"1": ["Mage Hand|PHB"]}}).count).toBe(1);
+			});
+
+			it("strips source and cast-level suffixes from the breakdown detail", () => {
+				expect(countSpells({will: ["thunderwave#4"], other: ["teleport|xphb"]}).detail).toBe("thunderwave, teleport");
+			});
+
+			it("treats a dict holding no spell lists as no spells", () => {
+				expect(countSpells({ability: "cha"}).count).toBe(0);
+			});
+		});
 	});
 
 	describe("getMagicCapacityStatus", () => {
@@ -837,6 +882,30 @@ describe("Item Materials", () => {
 		it("returns null for an item with no material", () => {
 			state.addItem({name: "Club", weapon: true, type: "M", dmg1: "1d4"});
 			expect(state.getMagicCapacityStatus(state.getItems().at(-1).id)).toBeNull();
+		});
+
+		it("counts dict-form attached spells, the shape the catalog actually ships", () => {
+			const id = addBlade("Electrum", {attachedSpells: {will: ["mage hand|phb"], daily: {"1e": ["fireball|phb"]}}});
+			expect(state.getMagicCapacityStatus(id)?.count).toBe(2);
+		});
+
+		it("degrades to null rather than throwing when the tally cannot be computed", () => {
+			const id = addBlade("Electrum");
+			const origStatus = CharacterSheetMaterials.getMagicCapacityStatus;
+			const origWarn = console.warn;
+			let errors = 0;
+			CharacterSheetMaterials.getMagicCapacityStatus = () => { throw new Error("unfamiliar item shape"); };
+			console.warn = () => { errors++; };
+			try {
+				// A single odd item must cost a badge, not the whole inventory render.
+				expect(() => state.getMagicCapacityStatus(id)).not.toThrow();
+				expect(state.getMagicCapacityStatus(id)).toBeNull();
+				expect(() => state.getOverloadedMaterialItems()).not.toThrow();
+				expect(errors).toBeGreaterThan(0);
+			} finally {
+				CharacterSheetMaterials.getMagicCapacityStatus = origStatus;
+				console.warn = origWarn;
+			}
 		});
 
 		it("counts against the RAW item, so a material's own bonus does not eat its capacity", () => {

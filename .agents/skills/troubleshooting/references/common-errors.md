@@ -258,6 +258,29 @@ Smell test: register a single `+1` to `check` and verify a Strength (Athletics) 
 
 **Fix**: Ensure proper format: `{@spell fireball|phb}`, `{@dice 2d6+3}`, `{@b bold text}`.
 
+### C8. `attachedSpells` Is Usually a Dict, Not an Array
+
+**Symptom**: `TypeError: spells.map is not a function` — often repeated once per hover or
+per render, because the throwing call sits in a live-preview or row-render handler.
+
+**Root Cause**: `item.attachedSpells` is a **dict roughly four times as often as an array**
+(~343 vs ~84 in the shipped catalog). Its list-bearing keys come in two nesting depths —
+`will` / `other` / `ritual` hold arrays directly, while `daily` / `charges` / `limited` /
+`rest` nest under a use count (`{"1e": ["antimagic field"]}`) — and a sibling `ability` key
+holds a bare **string** (`"int"`) that is not a spell at all. Both the catalog
+(`charactersheet-inventory.js:166`) and the sheet's own custom-item builder (`:4044`) put
+the dict form on inventory items, so array-only code fails on the common case.
+
+**Fix**: Never index or `.map` it directly. Flatten by collecting **only strings that live
+inside an array**, recursing through nested objects — one rule covers every shape and drops
+`ability` for free. See `CharacterSheetMaterials._flattenAttachedSpells`. Strip `|source`
+and `#level` suffixes and dedupe if you are counting distinct spells.
+
+**Watch for**: this class of bug hides behind *any* argument evaluated before a guard —
+`add(label, spells.length, spells.map(...))` throws before `if (!count) return` can save it.
+Also check the blast radius: a helper reached from a row-render loop takes out the whole
+list, not just one row.
+
 ---
 
 ## D. Feature Calculation Errors

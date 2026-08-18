@@ -780,6 +780,49 @@ class CharacterSheetMaterials {
 	// ==========================================
 
 	/**
+	 * Every distinct spell an item has attached, whatever shape the data is in.
+	 *
+	 * `attachedSpells` is only sometimes the flat `["fireball|phb"]` array — far more
+	 * often it is keyed by usage: `will` / `other` / `ritual` hold arrays directly,
+	 * while `daily` / `charges` / `limited` / `rest` nest one level further under a
+	 * use count (`{"1e": [...]}`). The sheet emits that shape itself when a custom
+	 * item is built with spells, so it has to be read, not assumed away.
+	 *
+	 * Rather than enumerate the usage keys — which would need revisiting every time a
+	 * new one appears — this collects **only strings that live inside an array**. That
+	 * covers every observed shape in one rule, and drops non-spell siblings such as
+	 * `ability: "int"` for free, since a bare string value is not in a list.
+	 *
+	 * @param {Array|object|null} attachedSpells
+	 * @returns {string[]} Distinct spell names, without `|source` or `#level` suffixes.
+	 */
+	static _flattenAttachedSpells (attachedSpells) {
+		if (!attachedSpells) return [];
+
+		const raw = [];
+		const walk = (node, isInArray) => {
+			if (Array.isArray(node)) return node.forEach(it => walk(it, true));
+			if (node && typeof node === "object") return Object.values(node).forEach(it => walk(it, false));
+			if (isInArray && typeof node === "string") raw.push(node);
+		};
+		walk(attachedSpells, false);
+
+		// The same spell offered both at-will and daily is one enchantment, not two —
+		// consistent with bonus families collapsing together in the tally below.
+		const seen = new Set();
+		const out = [];
+		for (const it of raw) {
+			const name = it.split("|")[0].split("#")[0].trim();
+			if (!name) continue;
+			const key = name.toLowerCase();
+			if (seen.has(key)) continue;
+			seen.add(key);
+			out.push(name);
+		}
+		return out;
+	}
+
+	/**
 	 * How many magical effects an item is counted as carrying.
 	 *
 	 * The book never enumerates what "one distinct magical effect" is, so this is a
@@ -825,8 +868,8 @@ class CharacterSheetMaterials {
 			if (hit.length) add(fam.label, 1, hit.join(", "));
 		}
 
-		const spells = item.attachedSpells || [];
-		add("Attached spells", spells.length, spells.map(s => String(s).split("|")[0]).join(", "));
+		const spells = CharacterSheetMaterials._flattenAttachedSpells(item.attachedSpells);
+		add("Attached spells", spells.length, spells.join(", "));
 
 		const defences = [
 			...(item.resist || []),
