@@ -756,7 +756,10 @@ describe("CharacterSheetNpcExporter", () => {
 		});
 
 		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {includeFeatures: "allImportant"});
-		const trait = out.trait.find(t => t.name === "Brave Presence");
+		// v16: standing advantage claims merge into the pinned roll-modifier trait, so the
+		// tags have to survive that merge as well as the prose passes.
+		const trait = out.trait.find(t => t.name === "Brave Presence")
+			|| out.trait.find(t => /^resilience$/i.test(t.name));
 		expect(trait).toBeDefined();
 		const text = trait.entries.join(" ");
 		expect(text).toContain("{@condition frightened}");

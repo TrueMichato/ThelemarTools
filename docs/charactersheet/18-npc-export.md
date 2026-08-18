@@ -919,6 +919,105 @@ governs the whole group.
     following`) and the dependent, which had nothing else to say, is dropped. Only fires when
     the improvement's whole body is the count claim.
 
+### v16 — numbers on the numbers, subsystems in one place
+
+v15 moved riders onto their attacks. v16 finishes the same doctrine on the two surfaces it
+did not reach: **a number or a roll leaves the trait list for the line it modifies**, and
+**a subsystem spread over several entries reads as one entry at its final form**.
+
+109. **2014 base weapons inherit the 2024 mastery** (`_getBaseWeaponRecord`,
+    `_getInheritedMasteryFromBaseItem`). Most magic weapons in the corpus carry
+    `mastery: []` and a `baseItem` pointing at a 2014 item, so Aldor's greatsword printed no
+    Graze and Wisp's war pick no Sap. The base item is now resolved by name against the XPHB
+    base-item list and its mastery read from there — gated on the character actually having
+    Weapon Mastery, because printing a mastery for a wizard's dagger would be a new bug, not
+    a fix.
+
+110. **Mastery names are hoverable in prose** (`_tagCapabilityTerms`). "replace that property
+    with the Push, Sap, or Slow property" was plain text in four exports; the eight mastery
+    names are now `{@itemMastery Name|XPHB}` wherever they appear, not only in the `Mastery:`
+    suffix on an attack.
+
+111. **A derived value prints the character's number** (`_getNamedModifierValues`,
+    `_resolveAbilityFormulas`). Dzeiy said "twice its Hemocraft modifier (minimum of 2)" —
+    a formula the DM has to evaluate mid-turn. The computed number is substituted and the
+    now-vacuous minimum dropped. Fails closed: a modifier that cannot be read from state
+    leaves the phrase exactly as written, because a wrong number is worse than a formula.
+
+112. **A dependent feature folds into its anchor at final form**
+    (`_foldNamedDependentsIntoAnchor`, widened `_foldImprovedEntriesIntoBase`). Brand of
+    Tethering only edits Brand of Castigation; Improved Shadowcasting only edits
+    Shadowcasting. The continuation test now scans any body line rather than only the first,
+    since the name already proves the entry is a rider.
+
+113. **The aura family is one emanation entry** (`_mergeAuraEntries`). Three Aura traits all
+    described the same 10-foot emanation. They now read as
+    `Auras (10-ft. Emanation)`, each immunity keeping the aura that grants it in parentheses.
+
+114. **Blood Maledict rosters its curses** (`_rosterBloodCurses`). The entry opened with the
+    generic "It knows one blood curse of its choice" while the curse it actually knows sat
+    three entries away — the same defect the Combat Method and Maneuver rosters already fixed.
+
+115. **An ASI-and-spells-only feat gets no entry** (`_dropSpellOnlyFeatEntries`). Shadow
+    Touched's whole mechanical content is two spells, so the trait is dropped and the spells
+    attributed inside the spell block. Telekinetic is deliberately not caught: it also grants
+    a real bonus-action shove.
+
+116. **A paragraph is split at a buried label** (`_splitAtInlineBoldLabels`). Improved
+    Shadowcasting welded `{@b Eyes of the Dark.}` onto the end of the previous paragraph.
+    The split only fires after a completed sentence and never on a bullet line, where it
+    would leave a bare `•`.
+
+117. **Every standing roll modifier is consolidated into one pinned trait**
+    (`_mergeResilienceTraits`, `_getStandingDefenseClause`,
+    `_extractStandingDefenseResidue`). This is the widest-blast-radius pass in v16: 37
+    entries across the corpus were wholly an advantage or disadvantage claim, and
+    `Dauntless Heritage` alone stood as its own trait on eight characters. The threshold
+    dropped from two candidates to one, the matcher widened to checks and Initiative, and a
+    trait that *mixes* a roll claim with a real mechanic is **split, not swallowed** — the
+    clause merges and the remainder stays as a shorter trait. The pass runs twice, the second
+    time deliberately late, because some claims are still in first person or still carry a
+    level preamble when the first pass runs.
+
+118. **A save bonus the sheet applies silently is named**
+    (`_explainSaveBonusesOnResilience`). `getSaveMod` folds in features the sheet's own
+    breakdown never lists — Dark Augmentation is the corpus case — so the printed save
+    exceeded anything the block explained and read as an arithmetic error. The difference is
+    now stated where every other roll modifier lives. Skipped when an aura already states the
+    same number, and printed without a source rather than credited to a guess when the
+    feature cannot be identified.
+
+119. **Mac Lir's on-hit power rides the sword** (`_foldItemPowerTraitsOntoAttack`). A trait
+    describing what happens when he hits with the sword now ends the sword's own line, using
+    the same weapon-scoped rider path v15 built for Leviathan's Bite.
+
+120. **Carried poisons are equipment with numbers** (`_POISON_FACTS`,
+    `_getCarriedPoisonEntries`). Poisons are ordinary `type: "gear"` items, so the magic-item
+    gate in `_getSpecialEquipmentBlock` filtered every one of them out. They now emit as a
+    `Poisons:` bullet with hoverable item tags, quantities, the save DC and the damage. An
+    unrecognised poison is named without invented numbers.
+
+121. **A form's deltas are folded onto the lines that carry them**
+    (`_foldFormTraitOntoLines`, `_placeFormUnit`, `_mintFormUnarmedStrike`). A transformation
+    is not a trait; it is a second set of numbers. The user rejected a second statblock
+    ("tedious moving between two"), so Dzeiy's Hybrid Form is decomposed: the AC bonus
+    becomes a second `ac` line conditioned on the form, the resistance joins `resist` tagged
+    `while in Hybrid Form`, Predatory Strikes becomes a real `Unarmed Strike (Hybrid Form)`
+    action, and the advantage claim joins the roll-modifier trait. What is left is only what
+    a stat line cannot hold — Bloodlust's save-or-charge. A clause is split to sentences (and
+    a sentence welding an advantage claim onto an unrelated bonus is split again) so placing
+    one claim never silently discards another; anything the pass cannot confidently place
+    stays in the trait.
+
+122. **A rogue is rated for its defence and its burst** (`_getEvasiveDefenseMultiplier`,
+    `_estimateBurstDamageCredit`). A level-20 rogue rated CR 10 against a level-17 barbarian's
+    CR 16, because the model was blind to Uncanny Dodge, Evasion and Elusive defensively and
+    to Assassinate, Death Strike and Cunning Strike offensively. The multipliers sit
+    deliberately below the physical-resistance fold, each covering a narrower slice of
+    incoming damage. The acceptance test was that **no non-rogue moves**: Juen went 11 → 15
+    and Missy 7 → 9, and nothing else changed.
+
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). Hard errors block Save to Homebrew; warnings allow Download / Copy. Full browser-side monster schema validation is still out of scope (graceful hand validator only).
 

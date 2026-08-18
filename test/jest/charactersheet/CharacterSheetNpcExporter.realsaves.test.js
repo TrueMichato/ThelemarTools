@@ -441,7 +441,11 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 			if (!available.includes("Onger")) return;
 			const names = allAbilityNames(loadMonster("Onger")).join(" | ");
 			expect(names).toMatch(/reckless attack/i);
-			expect(names).toMatch(/danger sense/i);
+			// v16: a standing advantage claim is no longer its own trait — it is one clause
+			// of the pinned roll-modifier list, still attributed to the feature that grants it.
+			const onger = loadMonster("Onger");
+			const resilience = (onger.trait || []).find(it => /^resilience$/i.test(it.name));
+			expect(resilience.entries.join(" ")).toMatch(/danger sense/i);
 		});
 
 		it("defines every feature an attack rider names", () => {
@@ -1686,8 +1690,17 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			expect(actText.length).toBeLessThan(600);
 			expect(actText).toMatch(/transforms into/i);
 			expect(actText).not.toMatch(/Feral Might|Resilient Hide|Bloodlust/i);
-			// The deltas live where every other standing modifier lives.
-			expect(form.entries.join(" ")).toMatch(/Feral Might[\s\S]*Resilient Hide/i);
+			// v16: the deltas no longer sit in the trait at all. Each one is on the line the
+			// DM reads to use it, so running the form needs no transcription.
+			expect((mon.ac || []).some(e => (e.from || []).some(f => /Hybrid Form/i.test(String(f))))).toBe(true);
+			expect((mon.resist || []).some(e => /while in Hybrid Form/i.test(String(e?.note || "")))).toBe(true);
+			const resilience = (mon.trait || []).find(e => /^Resilience$/i.test(e.name));
+			expect(`resilience ${resilience ? "present" : "missing"}`).toBe("resilience present");
+			expect(resilience.entries.join(" ")).toMatch(/Hybrid Form/);
+			expect((mon.action || []).some(e => /Unarmed Strike \(Hybrid Form\)/i.test(e.name))).toBe(true);
+			// What is left is only what a stat line cannot hold.
+			expect(form.entries.join(" ")).toMatch(/Bloodlust/i);
+			expect(form.entries.join(" ")).not.toMatch(/resistance to bludgeoning/i);
 		});
 
 		it("drops long subclass lore that states no mechanic (A8)", () => {
@@ -1787,6 +1800,113 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			// Missy has Cunning Strike without the upgrade and must still read "one".
 			const missy = (loadMonster("Missy").trait || []).find(it => it.name === "Cunning Strike");
 			if (missy) expect(missy.entries[0]).not.toMatch(/up to two of the following/);
+		});
+	});
+
+	// ---- v16 contracts ----------------------------------------------------
+	//
+	// Two doctrines: a number or a roll leaves the trait list for the line it
+	// modifies, and a subsystem spread over several entries reads as one entry at
+	// its final form.
+
+	describe("v16 — numbers on the numbers, subsystems in one place", () => {
+		it("consolidates standing roll modifiers into one pinned trait (A1)", () => {
+			["Onger", "Dauk", "Tignor", "Dzeiy"].forEach(name => {
+				const mon = loadMonster(name);
+				const resilience = (mon.trait || []).find(it => /^Resilience$/i.test(it.name));
+				expect(`${name}: ${resilience ? "present" : "missing"}`).toBe(`${name}: present`);
+				// Every clause keeps the feature that grants it, so the DM can still tell
+				// where a modifier comes from without a second lookup.
+				expect(resilience.entries.join(" ")).toMatch(/\([^()]+\)/);
+				// …and the claim no longer stands as its own entry.
+				const names = allAbilityNames(mon).join("|");
+				expect(`${name}: ${names}`).not.toMatch(/\|Dauntless Heritage\|/);
+			});
+		});
+
+		it("splits a mixed trait rather than swallowing it (A1 residue)", () => {
+			["Wisp", "Duralin"].forEach(name => {
+				const mon = loadMonster(name);
+				const resilience = (mon.trait || []).find(it => /^Resilience$/i.test(it.name));
+				expect(`${name}: ${resilience ? "present" : "missing"}`).toBe(`${name}: present`);
+				expect(resilience.entries.join(" ")).toMatch(/prone/i);
+			});
+		});
+
+		it("names the source of a save bonus the sheet applies silently (A1)", () => {
+			const resilience = (loadMonster("Dzeiy").trait || []).find(it => /^Resilience$/i.test(it.name));
+			expect(resilience.entries.join(" ")).toMatch(/bonus to saving throws/i);
+		});
+
+		it("resolves a derived value to the character's number (A2)", () => {
+			const text = allEntryText(loadMonster("Dzeiy"));
+			expect(text).not.toMatch(/twice its Hemocraft modifier \(minimum of 2\)/i);
+		});
+
+		it("makes mastery names hoverable in prose (A3/A4)", () => {
+			const text = allEntryText(loadMonster("Duralin"));
+			if (/\bSap\b/.test(text)) expect(text).toMatch(/\{@itemMastery [^|}]+\|XPHB\}/);
+		});
+
+		it("folds a dependent feature into its anchor at final form (B1)", () => {
+			const names = allAbilityNames(loadMonster("Duralin")).join("|");
+			expect(names).not.toMatch(/Improved Shadowcasting/);
+			expect(names).toMatch(/Shadowcasting/);
+		});
+
+		it("merges the aura family into one emanation entry (B1)", () => {
+			["Dranan", "Mikase"].forEach(name => {
+				const names = allAbilityNames(loadMonster(name)).join("|");
+				expect(`${name}: ${names}`).not.toMatch(/Aura of Courage|Aura of Devotion/);
+			});
+		});
+
+		it("rosters the blood curses Blood Maledict can spend on (B2)", () => {
+			const maledict = (loadMonster("Dzeiy").trait || []).find(it => /^Blood Maledict/i.test(it.name));
+			expect(`maledict ${maledict ? "present" : "missing"}`).toBe("maledict present");
+			expect(maledict.entries.join(" ")).toMatch(/Fallen Puppet/i);
+		});
+
+		it("drops an ASI-and-spells-only feat entry (B3)", () => {
+			const names = allAbilityNames(loadMonster("Nessa")).join("|");
+			expect(names).not.toMatch(/Shadow Touched/);
+			// Telekinetic grants a real bonus action and must survive.
+			expect(allEntryText(loadMonster("Nessa"))).toMatch(/Telekinetic/i);
+		});
+
+		it("never splits a bullet line at an inline label (C2)", () => {
+			available.forEach(name => {
+				(loadMonster(name).trait || []).forEach(entry => {
+					(entry.entries || []).forEach(line => {
+						if (typeof line !== "string" || !line.trim().startsWith("•")) return;
+						expect(`${name}/${entry.name}: ${line}`).not.toMatch(/^•\s*$/);
+					});
+				});
+			});
+		});
+
+		it("lists carried poisons with their numbers (C3)", () => {
+			["Juen", "Missy"].forEach(name => {
+				const equipment = (loadMonster(name).trait || []).find(it => /^Special Equipment$/i.test(it.name));
+				expect(`${name}: ${equipment ? "present" : "missing"}`).toBe(`${name}: present`);
+				const joined = equipment.entries.join(" ");
+				expect(`${name}: ${joined}`).toMatch(/Poisons:/);
+				expect(`${name}: ${joined}`).toMatch(/\{@item [^|}]*Poison/i);
+			});
+		});
+
+		it("folds a form's deltas onto the lines that carry them (D1)", () => {
+			const mon = loadMonster("Dzeiy");
+			expect((mon.ac || []).length).toBeGreaterThan(1);
+			expect((mon.resist || []).some(it => /while in Hybrid Form/i.test(String(it?.note || "")))).toBe(true);
+			expect((mon.action || []).some(it => /Hybrid Form/.test(it.name))).toBe(true);
+		});
+
+		it("rates a rogue's defence and burst (D2)", () => {
+			// A level-20 rogue is not a CR 10 creature; Uncanny Dodge, Evasion and Elusive
+			// are defence the model was blind to, and Assassinate is burst it never priced.
+			expect(Number(loadMonster("Juen").cr)).toBeGreaterThanOrEqual(13);
+			expect(Number(loadMonster("Missy").cr)).toBeGreaterThanOrEqual(8);
 		});
 	});
 });

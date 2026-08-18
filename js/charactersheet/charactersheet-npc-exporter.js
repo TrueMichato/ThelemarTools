@@ -83,6 +83,141 @@ class CharacterSheetNpcExporter {
 		{cr: "29", dpr: 302}, {cr: "30", dpr: 320},
 	];
 
+	/**
+	 * The 2024 facts about each base weapon, keyed by lowercased name.
+	 *
+	 * Two defects share one cause. Most magic weapons in the corpus are built on a *2014*
+	 * base item — `greatsword|phb`, `war pick|phb` — which carries no mastery at all, so a
+	 * Weapon Mastery character's signature weapon exports without the property it is
+	 * entitled to. Separately, homebrew weapons frequently omit `property`, `dmgType` and
+	 * `weaponCategory` entirely, and the attack derivation then reads Finesse as absent,
+	 * proficiency as absent and the damage type as bludgeoning — Juen's Hecate's Dagger
+	 * exported at +8 for 1d4+2 bludgeoning instead of +14 for 1d4+8 piercing.
+	 *
+	 * The 2024 twin of every base weapon shares its name, so the name alone recovers all
+	 * of it. Mirrors the XPHB `baseitem` entries in `data/items-base.json`.
+	 */
+	static _XPHB_BASE_WEAPON = {
+		"battleaxe": {mastery: "Topple", dmgType: "S", category: "martial", properties: ["V"]},
+		"blowgun": {mastery: "Vex", dmgType: "P", category: "martial", properties: ["A", "LD"]},
+		"club": {mastery: "Slow", dmgType: "B", category: "simple", properties: ["L"]},
+		"dagger": {mastery: "Nick", dmgType: "P", category: "simple", properties: ["F", "L", "T"]},
+		"dart": {mastery: "Vex", dmgType: "P", category: "simple", properties: ["F", "T"]},
+		"flail": {mastery: "Sap", dmgType: "B", category: "martial", properties: []},
+		"glaive": {mastery: "Graze", dmgType: "S", category: "martial", properties: ["H", "R", "2H"]},
+		"greataxe": {mastery: "Cleave", dmgType: "S", category: "martial", properties: ["H", "2H"]},
+		"greatclub": {mastery: "Push", dmgType: "B", category: "simple", properties: ["2H"]},
+		"greatsword": {mastery: "Graze", dmgType: "S", category: "martial", properties: ["H", "2H"]},
+		"halberd": {mastery: "Cleave", dmgType: "S", category: "martial", properties: ["H", "R", "2H"]},
+		"hand crossbow": {mastery: "Vex", dmgType: "P", category: "martial", properties: ["A", "L", "LD"]},
+		"handaxe": {mastery: "Vex", dmgType: "S", category: "simple", properties: ["L", "T"]},
+		"heavy crossbow": {mastery: "Push", dmgType: "P", category: "martial", properties: ["A", "H", "LD", "2H"]},
+		"javelin": {mastery: "Slow", dmgType: "P", category: "simple", properties: ["T"]},
+		"lance": {mastery: "Topple", dmgType: "P", category: "martial", properties: ["H", "R", "2H"]},
+		"light crossbow": {mastery: "Slow", dmgType: "P", category: "simple", properties: ["A", "LD", "2H"]},
+		"light hammer": {mastery: "Nick", dmgType: "B", category: "simple", properties: ["L", "T"]},
+		"longbow": {mastery: "Slow", dmgType: "P", category: "martial", properties: ["A", "H", "2H"]},
+		"longsword": {mastery: "Sap", dmgType: "S", category: "martial", properties: ["V"]},
+		"mace": {mastery: "Sap", dmgType: "B", category: "simple", properties: []},
+		"maul": {mastery: "Topple", dmgType: "B", category: "martial", properties: ["H", "2H"]},
+		"morningstar": {mastery: "Sap", dmgType: "P", category: "martial", properties: []},
+		"musket": {mastery: "Slow", dmgType: "P", category: "martial", properties: ["A", "LD", "2H"]},
+		"pike": {mastery: "Push", dmgType: "P", category: "martial", properties: ["H", "R", "2H"]},
+		"pistol": {mastery: "Vex", dmgType: "P", category: "martial", properties: ["A", "LD"]},
+		"quarterstaff": {mastery: "Topple", dmgType: "B", category: "simple", properties: ["V"]},
+		"rapier": {mastery: "Vex", dmgType: "P", category: "martial", properties: ["F"]},
+		"scimitar": {mastery: "Nick", dmgType: "S", category: "martial", properties: ["F", "L"]},
+		"shortbow": {mastery: "Vex", dmgType: "P", category: "simple", properties: ["A", "2H"]},
+		"shortsword": {mastery: "Vex", dmgType: "P", category: "martial", properties: ["F", "L"]},
+		"sickle": {mastery: "Nick", dmgType: "S", category: "simple", properties: ["L"]},
+		"sling": {mastery: "Slow", dmgType: "B", category: "simple", properties: ["A"]},
+		"spear": {mastery: "Sap", dmgType: "P", category: "simple", properties: ["T", "V"]},
+		"trident": {mastery: "Topple", dmgType: "P", category: "martial", properties: ["T", "V"]},
+		"war pick": {mastery: "Sap", dmgType: "P", category: "martial", properties: ["V"]},
+		"warhammer": {mastery: "Push", dmgType: "B", category: "martial", properties: ["V"]},
+		"whip": {mastery: "Slow", dmgType: "S", category: "martial", properties: ["F", "R"]},
+	};
+
+	static _MASTERY_PROPERTY_NAMES = ["Cleave", "Graze", "Nick", "Push", "Sap", "Slow", "Topple", "Vex"];
+
+	/**
+	 * The 2024 base-weapon record behind an inventory item, or `null`.
+	 *
+	 * @param {object} item inventory item
+	 * @returns {object|null} `{mastery, dmgType, category, properties}`
+	 */
+	static _getBaseWeaponRecord (item) {
+		const baseName = String(item?.baseItem || "").split("|")[0].trim().toLowerCase();
+		if (baseName && this._XPHB_BASE_WEAPON[baseName]) return this._XPHB_BASE_WEAPON[baseName];
+		// A homebrew weapon that declares no base item may still *be* one by name.
+		const ownName = String(item?.name || "").trim().toLowerCase();
+		return this._XPHB_BASE_WEAPON[ownName] || null;
+	}
+
+	/**
+	 * Fills in the weapon facts a homebrew or 2014 item omitted, from its 2024 base weapon.
+	 *
+	 * Only ever adds: an item that states its own damage type, properties or category is
+	 * authoritative and is returned untouched. Without this, a weapon missing `property`
+	 * loses Finesse (so a Dexterity rogue swings at Strength), loses its category (so
+	 * proficiency is not detected, costing the whole proficiency bonus) and falls back to
+	 * bludgeoning damage.
+	 *
+	 * @param {object} item inventory item
+	 * @returns {object} the item, or a filled-in copy of it
+	 */
+	static _withBaseWeaponFacts (item) {
+		if (!item) return item;
+		const declared = (item.property?.length ? item.property : null) || item.properties || [];
+		const base = this._getBaseWeaponRecord(item);
+
+		const out = {...item};
+		let changed = false;
+		// `updateAttackFromWeapon` reads `item.property || item.properties`, and an *empty*
+		// array is truthy — so a saved item carrying `property: []` alongside a populated
+		// `properties` silently loses Finesse, and a Dexterity rogue swings at Strength.
+		if (Array.isArray(item.property) && !item.property.length && declared.length) {
+			out.property = [...declared];
+			changed = true;
+		}
+		if (!base) return changed ? out : item;
+
+		if (!declared.length && base.properties.length) {
+			out.property = [...base.properties];
+			out.properties = [...base.properties];
+			changed = true;
+		}
+		if (!item.dmgType && base.dmgType) { out.dmgType = base.dmgType; changed = true; }
+		if (!item.weaponCategory && base.category) { out.weaponCategory = base.category; changed = true; }
+		return changed ? out : item;
+	}
+
+	/**
+	 * Mastery a magic weapon inherits from its base item, or `""`.
+	 *
+	 * Gated twice, because printing a property the creature cannot use is a worse bug than
+	 * omitting one: the character must have the Weapon Mastery feature *and* have chosen
+	 * this base weapon as one of its mastered weapons.
+	 *
+	 * @param {object} item inventory item
+	 * @param {object} state character state
+	 * @returns {string} mastery property name, or `""`
+	 */
+	static _getInheritedMasteryFromBaseItem (item, state) {
+		if (!item || !state) return "";
+		if (item.mastery?.length) return "";
+
+		const mastery = this._getBaseWeaponRecord(item)?.mastery;
+		if (!mastery) return "";
+
+		const baseName = String(item.baseItem || item.name || "").split("|")[0].trim().toLowerCase();
+		const calc = state.getFeatureCalculations?.() || {};
+		if (!calc.hasWeaponMastery && !calc.weaponMasterySlots) return "";
+		if (!state.hasWeaponMastery?.(baseName)) return "";
+
+		return mastery;
+	}
+
 	static getSanitizedSourceConfig (
 		{
 			sourceJson = CharacterSheetNpcExporter.SOURCE_JSON_DEFAULT,
@@ -494,6 +629,16 @@ class CharacterSheetNpcExporter {
 		this._foldImprovedEntriesIntoBase(out);
 		this._dropUnownedOptionClauses(out, state);
 		this._applyCrossEntryQuantityUpgrades(out);
+		// After the "Improved X" fold and the quantity upgrade: what is left are dependents
+		// that name their anchor in prose rather than in their own name.
+		this._foldNamedDependentsIntoAnchor(out);
+		this._mergeAuraEntries(out, {npcName});
+		this._rosterBloodCurses(out, {npcName});
+		this._dropSpellOnlyFeatEntries(out);
+		this._foldItemPowerTraitsOntoAttack(out);
+		// After every fold: a paragraph pulled in from another entry can carry a labelled
+		// sub-option in its middle, which reads as part of the sentence before it.
+		this._splitAtInlineBoldLabels(out);
 		this._dropScaffoldSentences(out);
 		this._trimNonMechanicalSentences(out);
 		this._boldInlineSubHeadings(out);
@@ -530,6 +675,15 @@ class CharacterSheetNpcExporter {
 		// After the roster passes: a maneuver roster states its own die budget, which
 		// makes a standalone pool trait for the same pool pure restatement.
 		this._dropPoolTraitsRestatedElsewhere(out);
+		// Second pass, deliberately late: a claim that was still in first person or still
+		// carried a level preamble the first time round only reads as a standing modifier
+		// once the voice and preamble passes have run.
+		this._mergeResilienceTraits(out, {npcName});
+		// After the resilience merge exists to receive them: a save bonus the sheet applies
+		// but never names reads, on the block, as an arithmetic error.
+		this._explainSaveBonusesOnResilience(out, state, {npcName});
+		// After the resilience merge exists to receive the form's advantage claims.
+		this._foldFormTraitOntoLines(out, {npcName});
 		// Before the trait ordering and the hover pass: both key off entry names.
 		this._consolidateCostedOptionMenus(out);
 		this._annotateResourceCostsOnNames(out);
@@ -672,6 +826,18 @@ class CharacterSheetNpcExporter {
 		// `surprised` and `concentration` read like conditions but 5etools files them as
 		// statuses; the hover only resolves under `{@status}`.
 		plain = plain.replace(/\b(surprised|concentration)\b/g, (m, word) => `\uE001${masked.push(`{@status ${word}}`) - 1}\uE001`);
+
+		// Mastery property names are all ordinary English words — "push", "slow", "sap" —
+		// so they are only ever tagged when the sentence names them *as* properties. That
+		// keeps Tactical Master's "the Push, Sap, or Slow property" hoverable without
+		// turning every "push the target" into a broken link.
+		const MASTERIES = this._MASTERY_PROPERTY_NAMES.join("|");
+		const MASTERY_RUN = new RegExp(
+			String.raw`\b(?:${MASTERIES})\b(?:(?:,\s*|\s+)(?:(?:or|and)\s+)?(?:${MASTERIES})\b)*(?=\s+(?:mastery|propert(?:y|ies)))`,
+			"g",
+		);
+		plain = plain.replace(MASTERY_RUN, run => run.replace(new RegExp(String.raw`\b(${MASTERIES})\b`, "g"),
+			word => `\uE001${masked.push(`{@itemMastery ${word}|XPHB}`) - 1}\uE001`));
 		glossary(/\bopportunity attacks\b/gi, "Opportunity Attack", "action");
 		glossary(/\bopportunity attack\b/gi, "Opportunity Attack", "action");
 		glossary(/\bunarmed strikes\b/gi, "Unarmed Strike", "variantrule");
@@ -1825,6 +1991,355 @@ class CharacterSheetNpcExporter {
 	}
 
 	/**
+	 * A feature whose whole subject is another feature is a rider on it, not a second
+	 * ability — but only some of them announce that in their name. Brand of Tethering
+	 * exists solely to edit Brand of Castigation; Improved Shadowcasting solely to extend
+	 * Shadowcasting. Kept apart, a DM reads the anchor, acts on its numbers, and only then
+	 * discovers a later entry replaced them.
+	 *
+	 * The detector is deliberately narrow. A dependent must open by naming its anchor and
+	 * doing something to it, must live in the same section (an entry with its own action
+	 * economy is a real ability), and must not itself be named by anything else — v15's
+	 * anchor rule holds, so a feature other entries point at may be compressed but never
+	 * folded away.
+	 *
+	 * @param {Object} out monster object (mutated)
+	 */
+	static _foldNamedDependentsIntoAnchor (out) {
+		const sections = ["trait", "action", "bonus", "reaction"];
+		const bare = entry => String(entry?.name || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
+		const all = [];
+		sections.forEach(section => (out[section] || []).forEach(entry => all.push({section, entry})));
+		// A one-word name matches too much English to be a safe anchor ("Rage" inside
+		// "courage"); an anchor has to be nameable without ambiguity.
+		const anchors = all.filter(it => bare(it.entry).split(/\s+/).length >= 2);
+		if (!anchors.length) return;
+
+		const EDITS = /\b(?:increases? to|improves? to|becomes|now|also|instead|in addition|additionally|extends?|gains?|can (?:instead|also))\b/i;
+		const dropped = new Set();
+
+		all.forEach(({section, entry}) => {
+			if (dropped.has(entry)) return;
+			const body = (entry.entries || []).filter(it => typeof it === "string");
+			if (!body.length) return;
+			const first = this._splitIntoClauses(body[0])[0] || "";
+			if (!EDITS.test(first)) return;
+
+			const selfKey = this._normalizeFeatureKey(bare(entry));
+			const hit = anchors.find(({section: anchorSection, entry: anchor}) => {
+				if (anchor === entry || dropped.has(anchor) || anchorSection !== section) return false;
+				const name = bare(anchor);
+				if (this._normalizeFeatureKey(name) === selfKey) return false;
+				return new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(first);
+			});
+			if (!hit) return;
+			// Something else leans on this entry, so it is an anchor in its own right.
+			const isReferenced = all.some(({entry: other}) => other !== entry
+				&& (other.entries || []).some(line => typeof line === "string"
+					&& new RegExp(`\\b${bare(entry).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(line)));
+			if (isReferenced) return;
+
+			const anchor = hit.entry;
+			// The announcing sentence is only worth keeping when the value it announces
+			// could not be written onto the anchor in its place. Rewriting by position is
+			// not safe here — the anchor states several numbers and only one of them is the
+			// one being raised — so the replacement is keyed on the phrase they share.
+			const upgrade = /\bincreases?\s+to\s+(.+?)\.?\s*$/i.exec(first);
+			const applied = upgrade && this._rewriteDerivedPhrase(anchor, upgrade[1]);
+			const surviving = body.flatMap((line, idx) => {
+				const clauses = this._splitIntoClauses(line);
+				if (idx === 0 && applied) clauses.shift();
+				return clauses.length ? [clauses.join(" ")] : [];
+			});
+			const existing = (anchor.entries || []).filter(it => typeof it === "string").join(" ");
+			// Once the options sit in the anchor's own list, "the following effects are now
+			// among its options" points at a distinction the statblock no longer draws.
+			const CONNECTOR = /^\s*the following (?:effects?|options?)[^.]{0,40}\bnow\b[^.]{0,40}\.\s*$/i;
+			anchor.entries.push(...surviving.filter(line => line && !existing.includes(line) && !CONNECTOR.test(line)));
+			dropped.add(entry);
+		});
+
+		if (!dropped.size) return;
+		sections.forEach(section => {
+			if (!out[section]) return;
+			out[section] = out[section].filter(entry => !dropped.has(entry));
+			if (!out[section].length && section !== "trait") delete out[section];
+		});
+	}
+
+	/**
+	 * A labelled sub-option is a heading, so it has to start its own paragraph. Left in the
+	 * middle of a line it reads as a continuation of the sentence before it — "…make a
+	 * single weapon attack with a shadow weapon it is holding. {@b Eyes of the Dark.} …" —
+	 * and the option becomes invisible to anyone scanning for it.
+	 *
+	 * @param {Object} out monster object (mutated)
+	 */
+	static _splitAtInlineBoldLabels (out) {
+		["trait", "action", "bonus", "reaction"].forEach(section => {
+			(out[section] || []).forEach(entry => {
+				if (!Array.isArray(entry?.entries)) return;
+				entry.entries = entry.entries.flatMap(line => {
+					if (typeof line !== "string") return [line];
+					// Bullets carry their own label by construction, and a roster is one unit.
+					if (/^\s*\u2022/.test(line)) return [line];
+					// Only break where a label follows a finished sentence — mid-sentence bold is
+					// emphasis, not a heading.
+					const parts = line.split(/(?<=[.!?}])\s+(?=\{@b [^}]+\.\})/g).map(it => it.trim()).filter(Boolean);
+					// A line that *is* one labelled option is already correct; only a line that
+					// buries a label after other prose needs breaking up.
+					return parts.length > 1 ? parts : [line];
+				});
+			});
+		});
+	}
+
+	/**
+	 * An item power that triggers on a hit with that item belongs on that item's attack
+	 * line. Filed as its own trait it is invisible at the moment it matters: a DM rolls
+	 * the sword, reads the damage, and never learns the sword also kills on a failed save.
+	 *
+	 * Only on-hit powers move. A power that costs its own action ("in place of one attack",
+	 * "can take a Magic action") is a separate thing to do on a turn and keeps its entry,
+	 * and a power the attack line already names is simply dropped as a duplicate.
+	 *
+	 * @param {Object} out monster object (mutated)
+	 */
+	static _foldItemPowerTraitsOntoAttack (out) {
+		const attacks = (out.action || []).filter(entry => (entry.entries || [])
+			.some(it => typeof it === "string" && /\{@atk\b/.test(it)));
+		if (!attacks.length || !(out.trait || []).length) return;
+
+		const ON_HIT = /\b(?:hits?|hitting)\b/i;
+		const TRIGGER = /^(?:when|whenever|each time|the first time|if|while)\b/i;
+		const OWN_ACTION = /\b(?:in place of one attack|take a \{@action|takes? an? (?:Magic|Attack) action|can use an action|as an action|bonus action)\b/i;
+		const dropped = new Set();
+
+		(out.trait || []).forEach(entry => {
+			const name = String(entry?.name || "").trim();
+			const split = /^(.+?)\s+[\u2014-]\s+(.+)$/.exec(name);
+			if (!split) return;
+			const attack = attacks.find(it => this._normalizeFeatureKey(it.name) === this._normalizeFeatureKey(split[1]));
+			if (!attack) return;
+
+			const body = (entry.entries || []).filter(it => typeof it === "string");
+			if (body.length !== 1) return;
+			const text = body[0];
+			const first = this._splitIntoClauses(text)[0] || "";
+			if (!TRIGGER.test(first) || !ON_HIT.test(first) || OWN_ACTION.test(text)) return;
+
+			const power = split[2].replace(/\s*\([^)]*\)\s*$/, "").trim();
+			const line = attack.entries.findIndex(it => typeof it === "string" && /\{@atk\b/.test(it));
+			// The rider channel may already have put this power's numbers on the line, in
+			// which case the trait is a second telling of the same fact.
+			if (new RegExp(`\\b${power.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(String(attack.entries[line]))) {
+				dropped.add(entry);
+				return;
+			}
+			attack.entries.splice(line + 1, 0, `{@b ${power}.} ${text}`);
+			dropped.add(entry);
+		});
+
+		if (!dropped.size) return;
+		out.trait = out.trait.filter(entry => !dropped.has(entry));
+	}
+
+	/**
+	 * Blood Maledict opens on the book's own words — "it knows one blood curse of its
+	 * choice" — which tells a DM nothing about the creature in front of them. The curses
+	 * it actually knows are already exported, three entries away and in other sections.
+	 * Same defect the Combat Method and Maneuver rosters already fixed: name the roster.
+	 *
+	 * @param {Object} out monster object (mutated)
+	 * @param {Object} opts
+	 * @param {string} opts.npcName creature name
+	 */
+	static _rosterBloodCurses (out, {npcName} = {}) {
+		const sections = ["trait", "action", "bonus", "reaction"];
+		const COST = {trait: "", action: "Action", bonus: "Bonus Action", reaction: "Reaction"};
+		let maledict = null;
+		const curses = [];
+		sections.forEach(section => {
+			(out[section] || []).forEach(entry => {
+				const name = String(entry?.name || "").trim();
+				if (/^Blood Maledict\b/i.test(name)) { maledict = maledict || entry; return; }
+				if (/^Blood Curse of\b/i.test(name)) curses.push({name: name.replace(/\s*\([^)]*\)\s*$/, ""), cost: COST[section]});
+			});
+		});
+		if (!maledict || !curses.length) return;
+
+		const who = npcName || "The creature";
+		const listed = curses.map(it => (it.cost ? `${it.name} (${it.cost})` : it.name)).join(", ");
+		// Everything else the generic text says is either restated by each curse's own entry
+		// or is the amplify rule, which is one number and one proviso.
+		const amplify = (maledict.entries || [])
+			.filter(it => typeof it === "string")
+			.flatMap(line => this._splitIntoClauses(line))
+			.filter(it => /\bamplif/i.test(it) && !/^Each time\b/i.test(it));
+		maledict.entries = [`${who} knows ${listed}.`, ...amplify];
+	}
+
+	/**
+	 * A feat whose whole mechanic is "you learn these spells" is already stated by the
+	 * spellcasting block, which attributes each granted spell to the feat that granted it.
+	 * Keeping the feat as well says the same thing twice, in the section a DM reads for
+	 * things the stat lines cannot express.
+	 *
+	 * Only the spell sentences are removed, so a feat that also does something real —
+	 * Telekinetic's bonus-action shove, War Caster's reaction — keeps its entry and simply
+	 * loses the half the spell block already covers.
+	 *
+	 * @param {Object} out monster object (mutated)
+	 */
+	static _dropSpellOnlyFeatEntries (out) {
+		const granted = new Set();
+		// The attribution is written before feat names are tagged, so it can be either
+		// `({@feat Shadow Touched|TCE})` or a bare `(Shadow Touched)` depending on when in
+		// the chain this runs. Read both rather than depending on the order.
+		// Every spell the block prints, so a sentence is only dropped once the block
+		// demonstrably says the same thing; a feat that also grants a spell the block never
+		// lists keeps that sentence rather than losing it silently.
+		const printed = new Set();
+		(out.spellcasting || []).forEach(block => {
+			const json = JSON.stringify(block);
+			[...json.matchAll(/\{@spell ([^|}]+)[^}]*\}\s*\((?:\{@feat )?([^}()|]+?)(?:\|[^}]*\})?\)/g)]
+				.forEach(m => granted.add(this._normalizeFeatureKey(m[2])));
+			[...json.matchAll(/\{@spell ([^|}]+)/g)].forEach(m => printed.add(this._normalizeFeatureKey(m[1])));
+		});
+		if (!granted.size) return;
+
+		const SPELL_ONLY = /^[^.]{0,80}\b(?:learns?|knows?|can cast)\b[^.]*\{@spell /i;
+		const CAST_PROVISO = /^It can cast (?:each of these spells|it|them)\b/i;
+		// "its spellcasting ability for these spells is Constitution" loses its antecedent the
+		// moment the spells leave, and the block it sends them to states the ability anyway.
+		const ORPHAN = /spellcasting ability for (?:these|those|this|the) spells?\b/i;
+
+		["trait", "action", "bonus", "reaction"].forEach(section => {
+			(out[section] || []).forEach(entry => {
+				const raw = String(entry?.name || "").replace(/^\{@feat ([^}|]+)\|[^}]*\}$/, "$1").replace(/\s*\([^)]*\)\s*$/, "");
+				if (!granted.has(this._normalizeFeatureKey(raw)) || !Array.isArray(entry.entries)) return;
+				entry.entries = entry.entries.flatMap(line => {
+					if (typeof line !== "string") return [line];
+					const kept = this._splitIntoClauses(line).filter(it => {
+						if (CAST_PROVISO.test(it) || ORPHAN.test(it)) return false;
+						if (!SPELL_ONLY.test(it)) return true;
+						const named = [...it.matchAll(/\{@spell ([^|}]+)/g)].map(sp => this._normalizeFeatureKey(sp[1]));
+						return !named.length || !named.every(sp => printed.has(sp));
+					});
+					return kept.length ? [kept.join(" ")] : [];
+				});
+			});
+			out[section] = (out[section] || []).filter(entry => (entry.entries || []).length);
+			if (!out[section].length && section !== "trait") delete out[section];
+		});
+	}
+
+	/**
+	 * Replace a derived phrase the anchor already states with the upgraded form of the
+	 * same phrase ("its Hemocraft modifier (2)" -> "twice its Hemocraft modifier (4)").
+	 *
+	 * Keyed on the phrase's own noun rather than on position, because an anchor states
+	 * several numbers and overwriting the wrong one silently corrupts a fact the DM has
+	 * no way to check. Returns false when the anchor states nothing comparable, so the
+	 * caller keeps the announcing sentence instead of losing the upgrade.
+	 *
+	 * @param {Object} entry anchor entry (mutated)
+	 * @param {string} phrase the upgraded phrase, e.g. "twice its Hemocraft modifier (4)"
+	 * @returns {boolean}
+	 */
+	static _rewriteDerivedPhrase (entry, phrase) {
+		const text = String(phrase || "").trim();
+		// The noun is what makes two phrases comparable; without one there is nothing to
+		// key on and a blind replacement would be a guess.
+		const noun = /\b((?:[A-Z][\w'\u2019]*\s+)?\w+\s+(?:modifier|die|dice|bonus))\b/i.exec(text);
+		if (!noun) return false;
+		const find = new RegExp(String.raw`(?:twice |half |double )?(?:its |the )?${noun[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\s*\((?:minimum[^)]*|[+-]?\d+)\))?`, "i");
+		for (let i = 0; i < (entry.entries || []).length; ++i) {
+			const line = entry.entries[i];
+			if (typeof line !== "string" || !find.test(line)) continue;
+			entry.entries[i] = line.replace(find, text);
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * A paladin's auras are three entries describing one emanation. Read down the trait
+	 * list, they look like three separate zones to track; at the table they are one circle
+	 * whose contents a DM states once. Merge them, keeping each clause's source so the
+	 * player can still see which aura granted what.
+	 *
+	 * @param {Object} out monster object (mutated)
+	 * @param {Object} opts
+	 * @param {string} opts.npcName creature name
+	 */
+	static _mergeAuraEntries (out, {npcName} = {}) {
+		const traits = out.trait || [];
+		const auras = traits.filter(entry => /^Aura of\b/i.test(String(entry?.name || "").trim())
+			&& (entry.entries || []).some(it => typeof it === "string"));
+		if (auras.length < 2) return;
+
+		const who = npcName || "The creature";
+		let radius = 0;
+		let saveBonus = "";
+		const immunities = [];
+		const extras = [];
+
+		// Boilerplate the merged entry states once, or does not need to state at all: the
+		// emanation's own description, the incapacitated proviso, the multi-paladin
+		// arbitration rule, and the restatement that an aura also works on allies who walk
+		// into it (which is what "in the aura" already means).
+		const NOISE = [
+			/radiates? an?\b[^.]*\bEmanation\b/i,
+			/\baura is inactive\b/i,
+			/\banother Paladin is present\b/i,
+			/^If an? \{@condition [^}]+\} ally enters the aura\b/i,
+			/\bchooses which aura\b/i,
+		];
+
+		auras.forEach(entry => {
+			const source = String(entry.name || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
+			(entry.entries || []).forEach(line => {
+				if (typeof line !== "string") return;
+				this._splitIntoClauses(line).forEach(sentence => {
+					const text = sentence.trim();
+					if (!text) return;
+					const m = /(\d+)[- ]f(?:oo|ee)?t\.?\s*Emanation/i.exec(text);
+					if (m) radius = Math.max(radius, Number(m[1]) || 0);
+					if (NOISE.some(re => re.test(text))) return;
+
+					const save = /bonus to saving throws[^.]*?\(([+-]?\d+)\)/i.exec(text);
+					if (save) { saveBonus = this._toSignedStr(Number(save[1])); return; }
+
+					const imm = /Immunity to the (\{@condition [^}]+\}) condition/i.exec(text);
+					if (imm) { immunities.push({condition: imm[1], source}); return; }
+
+					extras.push(`${text.replace(/\.$/, "")} (${source})`);
+				});
+			});
+		});
+		if (!saveBonus && !immunities.length) return;
+
+		const parts = [];
+		if (saveBonus) parts.push(`add ${saveBonus} to saving throws`);
+		if (immunities.length) {
+			const listed = immunities.map(it => `${it.condition} (${it.source})`).join(" and ");
+			parts.push(`have Immunity to the ${listed} condition${immunities.length > 1 ? "s" : ""}`);
+		}
+
+		const merged = {
+			name: radius ? `Auras (${radius}-ft. Emanation)` : "Auras",
+			entries: [
+				`${who} and its allies in the emanation ${parts.join(", and ")}.`,
+				...extras,
+				`Inactive while ${who} has the {@condition incapacitated} condition.`,
+			],
+		};
+		out.trait = traits.filter(entry => !auras.includes(entry));
+		out.trait.unshift(merged);
+	}
+
+	/**
 	 * "Improved X" is a rider on "X", not a second ability. Kept apart, a DM has to
 	 * read two entries in two sections and reconcile them. Fold the rider into the
 	 * base and keep the base's action economy.
@@ -1850,7 +2365,10 @@ class CharacterSheetNpcExporter {
 				// Only fold a genuine continuation; a rider that restates the whole feature
 				// would duplicate rather than extend it.
 				const body = (entry.entries || []).filter(it => typeof it === "string");
-				if (!body.length || !/^\s*(?:in addition|additionally|moreover|also|the\s)/i.test(body[0])) return;
+				// The name already proves this is a rider, so the continuation opener only has
+				// to appear somewhere in the body — Improved Shadowcasting leads with the extra
+				// attack it grants and states "In addition" one paragraph later.
+				if (!body.length || !body.some(line => /^\s*(?:in addition|additionally|moreover|also|whenever|the\s)/i.test(line))) return;
 				const existing = (base.entries || []).filter(it => typeof it === "string").join(" ");
 				// Once the options sit in the base feature's own list, "the following effects
 				// are now among its options" points at a distinction the statblock no longer
@@ -3097,7 +3615,8 @@ class CharacterSheetNpcExporter {
 		const kept = [];
 
 		out.trait.forEach(entry => {
-			const clause = this._getStandingDefenseClause(entry, npcName);
+			const clause = this._getStandingDefenseClause(entry, npcName)
+				|| this._extractStandingDefenseResidue(entry, npcName, kept);
 			if (!clause) return void kept.push(entry);
 			merged.push({
 				clause,
@@ -3126,8 +3645,8 @@ class CharacterSheetNpcExporter {
 				&& other.conditions.length > it.conditions.length
 				&& it.conditions.every(c => other.conditions.includes(c))));
 
-		// Nothing to do when no clause was folded away and there is only one to print.
-		if (distinct.length < 2 && distinct.length === merged.length) return;
+		// Even one standing claim belongs in the pinned list rather than adrift among the
+		// narrative traits — a DM reads every roll modifier in one place, always first.
 		if (!distinct.length) return;
 
 		const text = distinct
@@ -3138,10 +3657,45 @@ class CharacterSheetNpcExporter {
 			})
 			.join("; ");
 
+		// A second, later run of this pass finds claims that were still in first person or
+		// still carried a level preamble the first time round. Those append to the existing
+		// list rather than minting a rival trait.
+		const prior = kept.find(it => /^resilience$/i.test(String(it?.name || "")));
+		const priorText = prior ? String(prior.entries?.[0] || "").replace(/\.$/, "") : "";
+		const body = priorText ? `${priorText}; ${text.replace(/^([A-Z])(?=[a-z])/, m => m.toLowerCase())}` : text;
+
 		out.trait = [
-			{name: "Resilience", entries: [`${text.charAt(0).toUpperCase()}${text.slice(1)}.`]},
-			...kept,
+			{name: "Resilience", entries: [`${body.charAt(0).toUpperCase()}${body.slice(1)}.`]},
+			...kept.filter(it => it !== prior),
 		];
+	}
+
+	/**
+	 * A trait that opens with a standing modifier and then goes on to something else —
+	 * Stable Footing's advantage against being knocked prone, followed by a fall-damage
+	 * rule — must be split rather than swallowed whole. The roll clause joins the merged
+	 * list; the remainder stays as a (shorter) trait so no mechanic is lost.
+	 *
+	 * @param {Object} entry candidate trait
+	 * @param {string} npcName
+	 * @param {Array} kept accumulator the shortened remainder is pushed onto
+	 * @returns {string} the extracted clause, or `""` when the trait does not split
+	 */
+	static _extractStandingDefenseResidue (entry, npcName, kept) {
+		const strings = (entry?.entries || []).filter(it => typeof it === "string");
+		if (!strings.length || strings.length !== (entry?.entries || []).length) return "";
+		if (/^resilience$/i.test(String(entry?.name || ""))) return "";
+
+		const sentences = strings[0].split(/(?<=[.!?])\s+/).map(it => it.trim()).filter(Boolean);
+		if (sentences.length < 2) return "";
+
+		const clause = this._getStandingDefenseClause({name: entry.name, entries: [sentences[0]]}, npcName);
+		if (!clause) return "";
+
+		const remainder = [sentences.slice(1).join(" "), ...strings.slice(1)].filter(Boolean);
+		if (!remainder.length) return clause;
+		kept.push({...entry, entries: remainder});
+		return clause;
 	}
 
 	/**
@@ -3207,7 +3761,9 @@ class CharacterSheetNpcExporter {
 
 	/** `Robe of the Archmagi — Magic Resistance` reads as `Magic Resistance` in a list. */
 	static _getResilienceAttributionLabel (name) {
-		const raw = String(name || "").trim();
+		// The attribution sits inside parentheses, so a name that already carries a use
+		// annotation ("Stronghold Builder (1/LR)") would nest a second pair inside the first.
+		const raw = String(name || "").trim().replace(/\s*\([^()]*\)\s*$/, "").trim();
 		if (/^other defenses$/i.test(raw)) return "";
 		const parts = raw.split(/\s+[—–-]\s+/);
 		return parts[parts.length - 1] || raw;
@@ -3226,17 +3782,27 @@ class CharacterSheetNpcExporter {
 		if (body.split(/(?<=[.!?])\s+/).filter(it => it.trim()).length !== 1) return "";
 		// Dice, DCs, action economy and gates are mechanics a flat list cannot carry.
 		if (/\{@(?:dc|damage|atk|hit|recharge|scaledamage|spell)\b/.test(body)) return "";
-		if (/\b(?:bonus action|reaction|as an action|magic action|attack roll|spell slot|per turn|while|unless|until|when it|if it)\b/i.test(body)) return "";
+		if (/\b(?:bonus action|reaction|as an action|magic action|spell slot|per turn|until|when it|if it)\b/i.test(body)) return "";
 
 		const subject = String(npcName || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-		const re = new RegExp(`^(?:${subject}|it|they|he|she)\\s+(?:also\\s+)?(?:has|have|gains?)\\s+(.+?)\\.?$`, "i");
-		const clause = re.exec(body)?.[1];
+		// A claim may open with a gate ("While holding the rod, …") or bury the subject
+		// behind flavour ("Its instincts are so honed that it has …"); both still state one
+		// standing modifier, and the gate is carried into the merged clause so nothing about
+		// when it applies is lost.
+		const gate = /^(While\s[^,]{3,60}),\s+(.+)$/i.exec(body);
+		const rest = (gate ? gate[2] : body).trim();
+		const re = new RegExp(`^(?:${subject}|it|they|he|she)\\s+(?:also\\s+)?(?:has|have|gains?|doesn't have|does not have)\\s+(.+?)\\.?$`, "i");
+		// The flavour strip is a fallback only. Applied first it would eat the relative
+		// clause out of "…saving throws that it makes to maintain Concentration".
+		const clause = re.exec(rest)?.[1] ??
+			re.exec(rest.replace(/^[^.]*?\bthat\s+(?=(?:it|they|he|she)\s)/i, ""))?.[1];
 		if (!clause) return "";
 
-		// Only defences merge — a skill or utility benefit belongs to its own feature.
-		if (!/\b(?:advantage|resistance|immunity|immune|resistant)\b/i.test(clause)) return "";
-		if (!/\b(?:saving throws?|saves?|damage|condition|being|to the)\b/i.test(clause)) return "";
-		return clause.trim();
+		// Only standing modifiers merge — a benefit with its own decision belongs to its
+		// own feature.
+		if (!/\b(?:advantage|disadvantage|resistance|immunity|immune|resistant)\b/i.test(clause)) return "";
+		if (!/\b(?:saving throws?|saves?|damage|condition|being|to the|checks?|initiative)\b/i.test(clause)) return "";
+		return gate ? `${clause.trim().replace(/\.$/, "")} ${gate[1].toLowerCase()}` : clause.trim();
 	}
 
 	/**
@@ -3809,6 +4375,31 @@ class CharacterSheetNpcExporter {
 	 * @param {Object} state character sheet state
 	 * @returns {string} text with modifier/proficiency formulas resolved
 	 */
+	/**
+	 * Modifiers a class names after itself rather than after an ability score.
+	 *
+	 * Fails closed: a name is only offered for substitution when the sheet has actually
+	 * computed a finite value for it, because printing a wrong number is worse than
+	 * leaving the formula for the DM to read.
+	 *
+	 * @param {Object} state character sheet state
+	 * @returns {Map<string, number>} lowercase modifier name -> value
+	 */
+	static _getNamedModifierValues (state) {
+		const out = new Map();
+		let calc = null;
+		try { calc = state.getFeatureCalculations?.(); } catch (ignored) { calc = null; }
+		if (!calc) return out;
+
+		const put = (name, value) => {
+			const num = Number(value);
+			if (Number.isFinite(num)) out.set(name, num);
+		};
+		put("hemocraft", calc.hemocraftModifier);
+		if (calc.manifestationAbility) put("manifestation ability", state.getAbilityMod?.(calc.manifestationAbility));
+		return out;
+	}
+
 	static _resolveAbilityFormulas (text, state) {
 		let str = String(text || "");
 		if (!str || !/modifier|proficiency bonus/i.test(str)) return str;
@@ -3823,8 +4414,15 @@ class CharacterSheetNpcExporter {
 
 		// "equal to X" introduces a quantity, so it reads as a bare number; anything else is
 		// a modifier being added to a roll, which conventionally carries its sign.
-		const QUANTITY = /(?:equal to|number of|total of|rolls? of|amount equal to)[^.]{0,24}$/i;
-		const format = (whole, offset, value) => (QUANTITY.test(whole.slice(Math.max(0, offset - 40), offset)) ? `${value}` : this._toSignedStr(value));
+		const QUANTITY = /(?:equal to|number of|total of|rolls? of|amount equal to|increases? to|becomes)[^.]{0,24}$/i;
+		// "a bonus to its attack roll equal to X" satisfies QUANTITY on the "equal to", but a
+		// bonus is a thing you add to a roll and so conventionally carries its sign.
+		const SIGNED = /\bbonus (?:to|on)\b[^.]{0,40}$/i;
+		const format = (whole, offset, value) => {
+			const before = whole.slice(Math.max(0, offset - 60), offset);
+			if (SIGNED.test(before)) return this._toSignedStr(value);
+			return QUANTITY.test(before.slice(-40)) ? `${value}` : this._toSignedStr(value);
+		};
 
 		// A trailing minimum clause is part of the same formula, so it must be consumed with
 		// it — otherwise the "already annotated" guard below sees a parenthesis and the whole
@@ -3881,6 +4479,18 @@ class CharacterSheetNpcExporter {
 			const mod = modOf(abl);
 			return mod == null ? null : mod + pb;
 		});
+		// A class can name its own modifier ("its Hemocraft modifier", "its manifestation
+		// ability modifier"). Those read exactly like an ability modifier to a DM but are not
+		// one of the six, so the alternation above never sees them and Dzeiy's brand keeps
+		// printing "equal to its Hemocraft modifier (minimum of 1)" instead of the number.
+		const named = this._getNamedModifierValues(state);
+		const namedAlt = [...named.keys()].map(n => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") || "(?!)";
+		compound(String.raw`\btwice (?:its )?(${namedAlt}) modifier\b`, ([nm]) => {
+			const mod = named.get(String(nm).toLowerCase());
+			return mod == null ? null : 2 * mod;
+		});
+		compound(String.raw`\b(?:its )?(${namedAlt}) modifier\b`, ([nm]) => named.get(String(nm).toLowerCase()) ?? null);
+
 		compound(String.raw`\b(?:its )?(${ABL}) modifier and (?:its )?(${classAlt}) level\b`, ([abl, cls]) => {
 			const mod = modOf(abl);
 			const lvl = classLevels.get(String(cls).toLowerCase());
@@ -6324,7 +6934,8 @@ class CharacterSheetNpcExporter {
 		const activeWeapons = (state.getItems?.() || [])
 			.filter(it => !!it)
 			.filter(it => this._isActiveItem(it))
-			.filter(it => this._isWeaponItem(it));
+			.filter(it => this._isWeaponItem(it))
+			.map(it => this._withBaseWeaponFacts(it));
 
 		const activeWeaponByName = new Map(
 			activeWeapons
@@ -6348,13 +6959,17 @@ class CharacterSheetNpcExporter {
 				magicAttackBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponAttack) || 0);
 				magicDamageBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponDamage) || 0);
 			}
-			const masteryProperty = this._getMasteryName(item.mastery?.[0]);
+			const inheritedMastery = this._getInheritedMasteryFromBaseItem(item, state);
+			const itemMastery = item.mastery?.length
+				? item.mastery
+				: (inheritedMastery ? [`${inheritedMastery}|${Parser.SRC_XPHB}`] : []);
+			const masteryProperty = this._getMasteryName(itemMastery[0]);
 
 			return {
 				...attack,
 				_sourceItem: item,
 				weaponKey: `${item.name}|${item.source || Parser.SRC_XPHB}`,
-				mastery: attack.mastery || item.mastery || [],
+				mastery: attack.mastery?.length ? attack.mastery : itemMastery,
 				masteryProperty: attack.masteryProperty || masteryProperty || null,
 				magicAttackBonus,
 				magicDamageBonus,
@@ -6387,7 +7002,11 @@ class CharacterSheetNpcExporter {
 			if (damageDieIncrease > 0 && typeof CharacterSheetUpgrades !== "undefined") {
 				exportDamage = CharacterSheetUpgrades.increaseDamageDie(exportDamage, damageDieIncrease);
 			}
-			const masteryProperty = this._getMasteryName(item.mastery?.[0]);
+			const inheritedMastery = this._getInheritedMasteryFromBaseItem(item, state);
+			const itemMastery = item.mastery?.length
+				? item.mastery
+				: (inheritedMastery ? [`${inheritedMastery}|${Parser.SRC_XPHB}`] : []);
+			const masteryProperty = this._getMasteryName(itemMastery[0]);
 			const props = item.property || item.properties || derived.properties || [];
 			const typeAbv = String(item.type || "").split("|")[0];
 			const isRangedType = typeAbv === "R" || typeAbv === "RW";
@@ -6405,7 +7024,7 @@ class CharacterSheetNpcExporter {
 				_damageIncludesAbilityMod: true,
 				_sourceItem: item,
 				weaponKey: `${item.name}|${item.source || Parser.SRC_XPHB}`,
-				mastery: item.mastery || [],
+				mastery: itemMastery,
 				masteryProperty,
 				magicAttackBonus,
 				magicDamageBonus,
@@ -6691,11 +7310,11 @@ class CharacterSheetNpcExporter {
 	 * equipped-only gate — a stowed item is worth *listing* but grants no ability.
 	 */
 	static _getSpecialEquipmentBlock (state) {
-		const magic = (state.getItems?.() || [])
-			.filter(it => !!it)
-			.filter(it => this._isMagicItem(it));
+		const carried = (state.getItems?.() || []).filter(it => !!it);
+		const magic = carried.filter(it => this._isMagicItem(it));
+		const poisonLine = this._getCarriedPoisonEntries(carried);
 
-		if (!magic.length) return null;
+		if (!magic.length && !poisonLine) return null;
 
 		const consumables = magic.filter(it => this._isConsumableItem(it));
 		// A dozen Ioun Stones would eat the whole equipment list one bullet at a time, and
@@ -6735,12 +7354,313 @@ class CharacterSheetNpcExporter {
 			if (counted) entries.push(`• {@b Consumables:} ${counted}.`);
 		}
 
+		if (poisonLine) entries.push(poisonLine);
+
 		if (!entries.length) return null;
 
 		return {
 			name: "Special Equipment",
 			entries,
 		};
+	}
+
+	/**
+	 * The printed save can exceed the sheet's own breakdown, because the breakdown is a
+	 * display artefact while `getSaveMod` folds in features the breakdown never lists —
+	 * Dark Augmentation being the corpus case. Printed without a word of explanation the
+	 * block reads as an arithmetic error, so the difference is named where every other
+	 * roll modifier already lives.
+	 *
+	 * Fails closed: an unattributable difference is stated without a source rather than
+	 * credited to a guess.
+	 *
+	 * @param {Object} out monster object (mutated)
+	 * @param {Object} state character state
+	 * @param {Object} opts
+	 * @param {string} opts.npcName creature name
+	 */
+	static _explainSaveBonusesOnResilience (out, state, {npcName = "The NPC"} = {}) {
+		if (!out.save || typeof state?.getSaveBreakdown !== "function") return;
+
+		const byDelta = new Map();
+		Object.entries(out.save).forEach(([abv, printed]) => {
+			const shown = Number(state.getSaveBreakdown(abv)?.total);
+			const delta = Number(printed) - shown;
+			if (!Number.isFinite(delta) || delta <= 0) return;
+			if (!byDelta.has(delta)) byDelta.set(delta, []);
+			byDelta.get(delta).push(abv);
+		});
+		if (!byDelta.size) return;
+		// An aura already states the same number in the entry the DM reads for it; a second
+		// telling in the roll-modifier list is noise, not clarity.
+		if (/add \+\d+ to saving throws|bonus to (?:its )?saving throws/i.test(JSON.stringify(out.trait || []))) return;
+
+		const calc = state.getFeatureCalculations?.() || {};
+		const clauses = [...byDelta.entries()].map(([delta, abvs]) => {
+			const names = abvs.map(it => Parser.attAbvToFull?.(it) || it.toUpperCase());
+			const list = names.length === 6
+				? "every ability"
+				: names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
+			const source = Number(calc.darkAugmentationSaveBonus) === delta && abvs.length === 3 && abvs.every(it => ["str", "dex", "con"].includes(it))
+				? " (Dark Augmentation)"
+				: "";
+			return `${npcName} gains a +${delta} bonus to saving throws it makes with ${list}${source}`;
+		});
+		if (!clauses.length) return;
+
+		const resilience = (out.trait || []).find(it => /^resilience$/i.test(String(it?.name || "")));
+		if (resilience) {
+			const cur = String(resilience.entries[0] || "").replace(/\.$/, "");
+			if (/bonus to saving throws/i.test(cur)) return;
+			resilience.entries[0] = `${cur}; ${clauses.join("; ")}.`;
+			return;
+		}
+		out.trait = out.trait || [];
+		out.trait.unshift({name: "Resilience", entries: [`${clauses.join("; ")}.`]});
+	}
+
+	/**
+	 * A transformation is not a trait; it is a second set of numbers. Left whole, Dzeiy's
+	 * `Hybrid Form` is a 900-character paragraph holding an AC bonus, a resistance list, a
+	 * whole unarmed attack and two advantage claims — every one of which the DM has to
+	 * transcribe onto the stat line by hand, mid-combat, to actually use the form.
+	 *
+	 * The user rejected a second statblock ("tedious moving between two"), so the deltas go
+	 * where they are read: on the AC, in the resistance list, as a real attack entry, and
+	 * in the roll-modifier trait. What is left behind is only what a stat line cannot hold.
+	 *
+	 * Fails closed throughout: a clause this pass cannot confidently place stays in the
+	 * trait rather than being moved to the wrong line.
+	 *
+	 * @param {Object} out monster object (mutated)
+	 * @param {Object} opts
+	 * @param {string} opts.npcName creature name
+	 */
+	static _foldFormTraitOntoLines (out, {npcName = "The NPC"} = {}) {
+		const form = (out.trait || []).find(it => /\b(?:hybrid|wild|avatar|beast)\s+form$/i.test(String(it?.name || "").trim()));
+		if (!form || !Array.isArray(form.entries)) return;
+		const labelName = String(form.name).trim();
+
+		const clauses = form.entries
+			.filter(it => typeof it === "string")
+			.flatMap(line => line.split(/\s+(?=\{@b [^}]+\.\})/g))
+			.map(it => it.trim())
+			.filter(Boolean);
+		if (clauses.length < 2) return;
+
+		const kept = [];
+		let changed = false;
+		let mintedStrike = false;
+
+		clauses.forEach(clause => {
+			const label = /^\{@b [^}]+\.\}/.exec(clause)?.[0] || "";
+			const body = clause.slice(label.length).trim();
+			// A clause is rarely one claim. Split to sentences, then split a sentence that
+			// welds an advantage claim onto an unrelated bonus, so placing one does not
+			// silently discard the other.
+			const units = body
+				.split(/(?<=[.!?])\s+/)
+				.flatMap(it => (/\badvantage on\b/i.test(it) ? it.split(/,\s+and\s+(?=(?:it|they|he|she)\s)/i) : [it]))
+				.map(it => it.trim())
+				.filter(Boolean);
+
+			const leftover = [];
+			units.forEach(unit => {
+				if (this._placeFormUnit(unit, {out, label: labelName, npcName})) {
+					changed = true;
+					return;
+				}
+				if (/\bunarmed strikes?\b/i.test(this._getPlainMatchText(unit)) && /(?:\{@damage |\b\d*d\d+\b)/.test(unit)) {
+					const minted = this._mintFormUnarmedStrike(unit, labelName, out, npcName);
+					if (minted) {
+						out.action = out.action || [];
+						if (!out.action.some(it => it.name === minted.name)) out.action.push(minted);
+						changed = true;
+						mintedStrike = true;
+						return;
+					}
+				}
+				// Once the strike is its own action entry, a leftover sentence about that same
+				// strike is a second telling of a line the DM is already reading.
+				if (mintedStrike && /\bunarmed strikes?\b/i.test(this._getPlainMatchText(unit))) return;
+				leftover.push(unit);
+			});
+
+			const surviving = mintedStrike
+				? leftover.filter(it => !/\bunarmed strikes?\b/i.test(this._getPlainMatchText(it)))
+				: leftover;
+			if (!surviving.length) return;
+			const rejoined = this._restoreClauseSubject(surviving.join(" ").trim(), npcName);
+			kept.push(label ? `${label} ${this._ensureSentence(rejoined)}` : this._ensureSentence(rejoined));
+		});
+
+		if (!changed) return;
+		if (kept.length) form.entries = kept;
+		else out.trait = out.trait.filter(it => it !== form);
+	}
+
+	/**
+	 * Place one form claim on the stat line it belongs to.
+	 *
+	 * @param {string} unit a single claim
+	 * @param {Object} ctx
+	 * @param {Object} ctx.out monster object (mutated)
+	 * @param {string} ctx.label form name
+	 * @returns {boolean} `true` when the claim was placed and should leave the trait
+	 */
+	static _placeFormUnit (unit, {out, label}) {
+		const plain = this._getPlainMatchText(unit);
+
+		const acBonus = /\+(\d+)\s+bonus to (?:its )?ac\b/i.exec(plain);
+		if (acBonus && Array.isArray(out.ac) && out.ac.length) {
+			const base = Number(out.ac[0]?.ac);
+			if (!Number.isFinite(base)) return false;
+			if (!out.ac.some(it => (it.from || []).some(f => String(f) === label))) {
+				out.ac.push({ac: base + Number(acBonus[1]), from: [...(out.ac[0].from || []), label], condition: `in ${label}`});
+			}
+			return true;
+		}
+
+		const resist = /\bresistance to ([^.]+?)(?:\.|$)/i.exec(plain);
+		if (resist) {
+			out.resist = out.resist || [];
+			if (out.resist.some(it => typeof it === "object" && String(it.note || "").includes(label))) return true;
+			out.resist.push({
+				resist: [{special: resist[1].replace(/\s+/g, " ").trim()}],
+				note: `while in ${label}`,
+				cond: true,
+			});
+			return true;
+		}
+
+		if (/\badvantage on\b/i.test(plain) && !/\bdisadvantage\b/i.test(plain)) {
+			const claim = /\badvantage on ([^.]+?)(?:\.|$)/i.exec(unit);
+			if (!claim) return false;
+			const text = `advantage on ${claim[1].trim()} (${label})`;
+			const resilience = (out.trait || []).find(it => /^resilience$/i.test(String(it?.name || "")));
+			if (resilience) {
+				const cur = String(resilience.entries[0] || "").replace(/\.$/, "");
+				if (!cur.toLowerCase().includes(claim[1].trim().toLowerCase())) resilience.entries[0] = `${cur}; ${text}.`;
+			} else {
+				out.trait = out.trait || [];
+				out.trait.unshift({name: "Resilience", entries: [`${text.charAt(0).toUpperCase()}${text.slice(1)}.`]});
+			}
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Splitting a welded sentence can leave a fragment opening on a bare pronoun
+	 * ("it has a +2 bonus…"). Restore the subject so the surviving clause still reads
+	 * as a sentence.
+	 *
+	 * @param {string} text clause text
+	 * @param {string} npcName creature name
+	 * @returns {string} the clause with a stated subject
+	 */
+	static _restoreClauseSubject (text, npcName) {
+		const trimmed = String(text).trim();
+		if (!/^(?:it|they|he|she)\s/i.test(trimmed)) return trimmed;
+		return `${npcName} ${trimmed.replace(/^(?:it|they|he|she)\s+/i, "")}`;
+	}
+
+	/**
+	 * @param {string} text sentence text
+	 * @returns {string} the text with terminal punctuation
+	 */
+	static _ensureSentence (text) {
+		const trimmed = String(text).trim();
+		return /[.!?:)"\]}]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+	}
+
+	/**
+	 * Build the attack entry a form's unarmed-strike clause describes, reusing the
+	 * creature's best melee attack bonus so the line is usable without cross-referencing.
+	 *
+	 * @param {string} clause the form clause
+	 * @param {string} label form name
+	 * @param {Object} out monster object
+	 * @param {string} npcName creature name
+	 * @returns {Object|null} attack entry, or `null` when the clause is not specific enough
+	 */
+	static _mintFormUnarmedStrike (clause, label, out, npcName) {
+		const dice = /\{@damage ([^}]+)\}/.exec(clause)?.[1] || /\b(\d*d\d+)\b/.exec(clause)?.[1];
+		if (!dice) return null;
+		const type = /(?:\}|\d)\s*([a-z]+(?:\s+or\s+[a-z]+)?)\s+damage/i.exec(clause)?.[1] || "bludgeoning";
+		const hit = /\{@hit \\?"?([+-]?\d+)/.exec(JSON.stringify(out.action || []))?.[1];
+		if (!hit) return null;
+
+		const notes = [];
+		if (/\bone additional unarmed strike as a bonus action\b/i.test(clause)) notes.push(`${npcName} can make one additional unarmed strike as a bonus action.`);
+		// A rite the form extends to unarmed strikes is damage on this line, not a footnote.
+		if (/\bcrimson rite\b/i.test(clause)) notes.push("Its Crimson Rite can be applied to these strikes.");
+		if (/\buse dexterity instead of strength\b/i.test(clause)) notes.push("It uses Dexterity for these attack and damage rolls.");
+		const extra = notes.length ? ` ${notes.join(" ")}` : "";
+		return {
+			name: `Unarmed Strike (${label})`,
+			entries: [`{@atk mw} {@hit ${hit}} to hit, reach 5 ft., one target. {@h} {@damage ${dice}} ${type} damage.${extra}`],
+		};
+	}
+
+	/** Standing injury poisons, by name: the save DC and the damage a failed save takes. */
+	static _POISON_FACTS = {
+		"purple worm poison": {dc: 19, fail: "12d6", success: "6d6"},
+		"wyvern poison": {dc: 15, fail: "7d6", success: "3d6"},
+		"serpent venom": {dc: 11, fail: "3d6", success: "1d6"},
+		"drow poison": {dc: 13, fail: "", success: ""},
+		"carrion crawler mucus": {dc: 13, fail: "", success: ""},
+		"assassin's blood": {dc: 10, fail: "6", success: "3"},
+		"malice": {dc: 15, fail: "", success: ""},
+		"midnight tears": {dc: 17, fail: "31d6", success: "15d6"},
+		"oil of taggit": {dc: 13, fail: "", success: ""},
+		"pale tincture": {dc: 16, fail: "1d6", success: ""},
+		"torpor": {dc: 15, fail: "", success: ""},
+		"truth serum": {dc: 11, fail: "", success: ""},
+		"burnt othur fumes": {dc: 13, fail: "3d6", success: ""},
+		"essence of ether": {dc: 15, fail: "", success: ""},
+	};
+
+	/**
+	 * A carried poison is a whole extra attack the DM can choose to make, and it never
+	 * reached the block: a poison is ordinary gear, not a magic item, so the equipment
+	 * list filtered it out. It belongs there with its numbers stated, because "it has
+	 * purple worm poison" is only useful if the DM also knows it is a {@dc 19} save for
+	 * 12d6.
+	 *
+	 * Numbers come from a table of the published injury poisons; a poison this exporter
+	 * does not recognise is still named, just without invented figures.
+	 *
+	 * @param {Array} items inventory items
+	 * @returns {string} a bullet line, or `""` when the creature carries no poison
+	 */
+	static _getCarriedPoisonEntries (items) {
+		const seen = new Map();
+		(items || []).forEach(item => {
+			const name = String(item?.name || "").trim();
+			if (!name || !/\bpoison|venom|tears|tincture|torpor|malice|mucus|fumes|ether\b/i.test(name)) return;
+			// A poisoner's kit makes poison; it is not poison.
+			if (/\bkit\b|resist|immunity|absorb/i.test(name)) return;
+			const key = name.toLowerCase();
+			if (!this._POISON_FACTS[key] && !/poison|venom/i.test(name)) return;
+			seen.set(key, {item, count: (seen.get(key)?.count || 0) + (Number(item.quantity) || 1)});
+		});
+		if (!seen.size) return "";
+
+		const parts = [...seen.values()].map(({item, count}) => {
+			const tag = this._getItemTag(item);
+			const facts = this._POISON_FACTS[String(item.name || "").toLowerCase()];
+			const qty = count > 1 ? ` ×${count}` : "";
+			if (!facts) return `${tag}${qty}`;
+			// Nested parentheses read badly and trip the balance check, so the whole fact
+			// stays inside one pair.
+			const damage = facts.fail
+				? `, {@damage ${facts.fail}} poison damage${facts.success ? `, half as much on a success` : ""}`
+				: "";
+			return `${tag}${qty} ({@dc ${facts.dc}} Constitution save${damage})`;
+		});
+		return `• {@b Poisons:} ${parts.join("; ")}. Coating a weapon or piece of ammunition with an injury poison takes an action, and the coating lasts until it hits or 1 minute passes.`;
 	}
 
 	/**
@@ -11094,7 +12014,8 @@ class CharacterSheetNpcExporter {
 	}
 
 	static _estimateCr ({totalLevel, hp, ac, attacks, attacksPerAction = 1, spellcastingBlocks = [], state = null, defenses = null, spellIndex = null}) {
-		const effectiveHp = this._getEffectiveHpForCr(hp, state, defenses);
+		const effectiveHp = this._getEffectiveHpForCr(hp, state, defenses)
+			* this._getEvasiveDefenseMultiplier(state);
 		const defensiveCr = this._crFromHpAndAc(effectiveHp, this._getEffectiveAcForCr(ac, state));
 		const dpr = this._estimateDpr({attacks, attacksPerAction, spellcastingBlocks, state, spellIndex});
 		const offensiveCr = this._crFromDprAndAttack(dpr, attacks, state, spellcastingBlocks);
@@ -11142,6 +12063,68 @@ class CharacterSheetNpcExporter {
 		if (coversPhysical) return base * 1.4;
 		if (new Set(resistances).size >= 3) return base * 1.25;
 		return base * 1.1;
+	}
+
+	/**
+	 * Resistance is not the only way a creature survives longer than its hit points say.
+	 * A rogue halves the biggest attack of the round with Uncanny Dodge, takes nothing at
+	 * all from most area effects with Evasion, and from level 18 denies attackers
+	 * Advantage outright — three effects the resistance fold is completely blind to, which
+	 * is why the corpus rated a level 20 Rogue below a level 9 Fighter.
+	 *
+	 * Sized deliberately below the physical-resistance fold: each covers a narrower slice
+	 * of incoming damage than "all weapon damage halved" does.
+	 *
+	 * @param {Object} state character sheet state
+	 * @returns {number} multiplier to apply to effective HP
+	 */
+	static _getEvasiveDefenseMultiplier (state) {
+		const calc = state?.getFeatureCalculations?.() || {};
+		const names = new Set((state?.getFeatures?.() || [])
+			.map(it => String(it?.name || "").toLowerCase().trim())
+			.filter(Boolean));
+		const has = (key, label) => !!calc[key] || names.has(label);
+
+		let out = 1;
+		// One attack per round halved is worth roughly a sixth of a martial's incoming
+		// damage across a typical three-attacker round.
+		if (has("hasUncannyDodge", "uncanny dodge")) out *= 1.15;
+		// Half damage becomes none, and full becomes half, on the saves that matter most.
+		if (has("hasEvasion", "evasion")) out *= 1.12;
+		// Denying Advantage is worth about a 15% drop in incoming accuracy.
+		if (has("hasElusive", "elusive")) out *= 1.12;
+		return out;
+	}
+
+	/**
+	 * A rogue's damage is not its round-in-round-out average; it is the round it chooses.
+	 * Assassinate turns the opening round's Sneak Attack into a critical, Death Strike
+	 * doubles an entire opening hit, and Cunning Strike converts Sneak Attack dice into
+	 * conditions the DMG would price as riders. None of that reaches a per-round average,
+	 * so the offensive rating sees a rogue as a single-attack skirmisher.
+	 *
+	 * @param {Object} state character sheet state
+	 * @param {number} riderDamage once-per-turn rider damage already counted
+	 * @returns {number} extra damage-per-round credit
+	 */
+	static _estimateBurstDamageCredit (state, riderDamage) {
+		const rider = Number(riderDamage) || 0;
+		if (!rider) return 0;
+		const calc = state?.getFeatureCalculations?.() || {};
+		const names = new Set((state?.getFeatures?.() || [])
+			.map(it => String(it?.name || "").toLowerCase().trim())
+			.filter(Boolean));
+		const has = (key, label) => !!calc[key] || names.has(label);
+
+		let credit = 0;
+		// A guaranteed critical on the opening turn doubles the rider dice, amortised
+		// across the encounter rather than counted at full value.
+		if (has("hasAssassinate", "assassinate")) credit += rider * 0.35;
+		// Death Strike doubles the whole hit, not just the rider, but only on a failed save.
+		if (has("hasDeathStrike", "death strike")) credit += rider * 0.35;
+		// Conditions bought with Sneak Attack dice are worth roughly what the dice were.
+		if (has("hasCunningStrike", "cunning strike")) credit += rider * 0.15;
+		return credit;
 	}
 
 	/**
@@ -11210,7 +12193,10 @@ class CharacterSheetNpcExporter {
 		// bonus action is another attack — leaving both out rated a level-13 monk at CR 6.
 		const rider = this._estimatePerHitRiderDamage(state);
 		const swings = Math.max(1, attacksPerAction) + this._getBonusActionAttackCount(state, attacksPerAction);
-		const weaponDpr = ((perHit + rider) * swings) + this._estimateOncePerTurnRiderDamage(state);
+		const oncePerTurn = this._estimateOncePerTurnRiderDamage(state);
+		const weaponDpr = ((perHit + rider) * swings)
+			+ oncePerTurn
+			+ this._estimateBurstDamageCredit(state, oncePerTurn);
 
 		const spellDpr = spellcastingBlocks?.length
 			? this._estimateSpellDpr({state, spellcastingBlocks, spellIndex})
@@ -11447,7 +12433,9 @@ class CharacterSheetNpcExporter {
 			if (typeof value === "object") return Number(value.avgDamage) || this._averageOfDiceExpression(value.dice);
 			return this._averageOfDiceExpression(value);
 		};
-		let total = avgOf(calc.sneakAttack) + avgOf(calc.sneakAttackDamage);
+		// The two keys are two spellings of the same rider; a class that ever populates
+		// both must not have its Sneak Attack counted twice.
+		let total = Math.max(avgOf(calc.sneakAttack), avgOf(calc.sneakAttackDamage));
 		// A paladin spends slots on smites; the base smite is the sustainable one.
 		if (calc.hasDivineSmite) total += avgOf(calc.smiteBaseDamage);
 		return total;

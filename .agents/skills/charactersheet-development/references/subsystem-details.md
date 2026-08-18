@@ -1269,11 +1269,46 @@ Staged DMG-style tables (`_CR_HP_THRESHOLDS`, `_CR_DPR_THRESHOLDS`):
   pass rewrites `add one of the following` → `add up to two of the following` at the anchor
   and drops the dependent. Only fires when the improvement's whole body is the count claim.
 
+### Numbers and subsystems (v16)
+- **`_mergeResilienceTraits` runs twice, and the second call is load-bearing.** At its first
+  site some claims are still in first person or still carry a level preamble, so the
+  subject-anchored clause regex cannot see them. The late call (just before
+  `_consolidateCostedOptionMenus`) must **absorb** an existing `Resilience` entry, or it
+  mints a rival one.
+- **Order inside `_getStandingDefenseClause` matters.** The flavour-prefix strip
+  (`^[^.]*?\bthat\s+(?=(?:it|they)\s)`) is a *fallback only*; applied first it eats the
+  relative clause out of "…saving throws **that it makes** to maintain Concentration".
+- **A mixed trait is split, not swallowed.** `_extractStandingDefenseResidue` merges the
+  roll clause and leaves the remainder; `Umbral Warrior` and `Clearsight Sentinel` carry a
+  non-roll mechanic that must survive.
+- **Attribution labels can carry their own parentheses** (`Stronghold Builder (1/LR)`),
+  which nests as `))` and fails the v9 balance test. Strip a trailing `(…)` from the label.
+- **Never split a bullet line at `{@b`.** `_splitAtInlineBoldLabels` skips lines opening on
+  `•`, otherwise the split leaves a bare bullet and fails the "never truncates mid-sentence"
+  contract.
+- **`getSaveMod` ≠ `getSaveBreakdown().total`.** The former folds in Dark Augmentation, auras
+  and stances; the latter is a display artefact. `_explainSaveBonusesOnResilience` names the
+  difference, and skips when an aura entry already states the same number.
+- **Poisons are `type: "gear"`**, which is why the magic-item gate in
+  `_getSpecialEquipmentBlock` had dropped every one. `_POISON_FACTS` covers 14 published
+  poisons; anything else is named without invented numbers.
+- **`_foldFormTraitOntoLines` splits to sentences, then splits a sentence again** on
+  `, and ` when it welds an advantage claim onto an unrelated bonus — otherwise placing the
+  advantage silently discards Feral Might's `+2` to melee damage. A surviving fragment
+  opening on a bare pronoun gets its subject restored.
+- **It runs before `_tagBareDice`**, so the unarmed-strike clause must be matched on bare
+  `NdX` as well as `{@damage}`.
+- **Rogue CR: measure the whole corpus.** The acceptance test for
+  `_getEvasiveDefenseMultiplier` / `_estimateBurstDamageCredit` was that *no non-rogue
+  moves*. Juen 11 → 15, Missy 7 → 9, everything else unchanged.
+- **`base/` in the session harness predates v15.** A structural difference against it is not
+  proof of a regression — confirm against `git show HEAD:…` first.
+
 ### Dialog actions
 Close | Refresh | **Copy JSON** | Download JSON | Save to Homebrew. In-dialog validation panel; Save blocked on hard errors.
 
 ### Tests
-`CharacterSheetNpcExporter.test.js` + `CharacterSheetNpcExporter.matrix.test.js` (class × special-system matrix) + `.realsaves.test.js` (981 contract tests against the 24-save corpus; auto-skips when absent).
+`CharacterSheetNpcExporter.test.js` + `CharacterSheetNpcExporter.matrix.test.js` (class × special-system matrix) + `.realsaves.test.js` (925 contract tests against the 24-save corpus; auto-skips when absent).
 
 ## Rest Mechanics
 
