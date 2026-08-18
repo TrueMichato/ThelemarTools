@@ -1262,6 +1262,76 @@ class CharacterSheetMaterials {
 	// ==========================================
 
 	/**
+	 * The comparable numbers behind each sort option, projected onto this specific item.
+	 *
+	 * Axes are nulled when the item kind cannot express them, so a longsword reports no
+	 * AC rather than the armour value the material would give a breastplate — the same
+	 * item-awareness rule `getSummary` follows. Weight and value are nulled when the
+	 * material cannot actually reweigh or reprice the item, because leaving the base
+	 * number in would rank every priceless material as the cheapest option. Null sinks
+	 * to the bottom of a sort instead of being filtered out: the material is still
+	 * eligible, just not ranked on that axis.
+	 *
+	 * @param {object} item
+	 * @param {object} material
+	 * @returns {{dmg: ?number, ac: ?number, mc: ?number, weight: ?number, value: ?number}}
+	 */
+	static getSortMetrics (item, material) {
+		const empty = {dmg: null, ac: null, mc: null, weight: null, value: null};
+		if (!item || !material) return empty;
+
+		const kind = CharacterSheetMaterials.getItemKind(item);
+		const base = {...item};
+		delete base.material;
+		const after = CharacterSheetMaterials.applyToItem({...base, material: {name: material.name, source: material.source}}, material);
+		const mc = CharacterSheetMaterials.getMagicCapacityStatus(item, material);
+
+		const dieOf = (v) => {
+			const m = /^\s*\d*d(\d+)/i.exec(String(v || ""));
+			return m ? Number(m[1]) : null;
+		};
+
+		// A material that cannot reprice or reweigh the item leaves the base number in
+		// place. Ranking on that would put every priceless material at the top of
+		// "cheapest" — so report no value instead, and let it sink to the bottom.
+		const price = material.price;
+		const canReprice = !!price && !price.isPriceless && price.unit === "lb" && typeof price.gp === "number";
+		const canReweigh = typeof material.density === "number";
+
+		return {
+			dmg: kind === "weapon" ? dieOf(after.dmg1) : null,
+			ac: kind === "armor" ? (after.ac ?? null) : kind === "shield" ? (after.acBonus ?? null) : null,
+			// Unlimited outranks every finite capacity and a suppressor sits below every
+			// one, which is exactly the order a player ranks them in.
+			mc: !mc ? null : mc.isUnlimited ? Infinity : mc.isSuppressing ? -Infinity : mc.capacity,
+			weight: canReweigh ? (after.weight ?? null) : null,
+			value: canReprice ? (after.value ?? null) : null,
+		};
+	}
+
+	/**
+	 * Sort options worth offering for this item.
+	 *
+	 * Only axes that can actually differ across the eligible list appear: offering
+	 * "sort by Armor Class" on a longsword would produce 65 identical rows and teach
+	 * the player the control is broken.
+	 *
+	 * @param {object} item
+	 * @returns {Array<{key: string, label: string, isDesc?: boolean}>}
+	 */
+	static getSortOptions (item) {
+		const kind = CharacterSheetMaterials.getItemKind(item);
+		return [
+			{key: "", label: "Category"},
+			...(kind === "weapon" ? [{key: "dmg", label: "Damage", isDesc: true}] : []),
+			...(kind === "armor" || kind === "shield" ? [{key: "ac", label: "Armor Class", isDesc: true}] : []),
+			{key: "mc", label: "Magic Capacity", isDesc: true},
+			{key: "weight", label: "Weight (lightest)"},
+			{key: "value", label: "Value (cheapest)"},
+		];
+	}
+
+	/**
 	 * Before/after comparison rows for the picker preview. Only axes that actually
 	 * change are returned, so an inert material shows an empty preview rather than a
 	 * wall of unchanged numbers.
@@ -1360,10 +1430,8 @@ class CharacterSheetMaterials {
 					<div class="ve-flex-1">
 						<strong>${esc(mat.name)}</strong>
 						<span class="ve-muted ve-small ml-1">${esc(CharacterSheetMaterials.getSummary(mat, item))}</span>
+						<button type="button" class="ve-btn ve-btn-xxs ve-btn-default ml-2 charsheet__material-clear" aria-label="Remove ${esc(mat.name)} and revert ${esc(item.name)} to its default material">Remove</button>
 					</div>
-					<button type="button" class="ve-btn ve-btn-xs ve-btn-danger charsheet__material-clear" aria-label="Revert to the item's default material" title="Revert to the item's default material">
-						<span class="glyphicon glyphicon-trash" aria-hidden="true"></span>
-					</button>
 				</div>
 			`}));
 
@@ -1439,7 +1507,12 @@ class CharacterSheetMaterials {
 		renderCurrent();
 
 		if (!eligible.length) {
-			content.append(e_({outer: `<p class="ve-muted">No materials in the catalog can be applied to this kind of item.</p>`}));
+			// "Nothing fits this item" and "the catalog never arrived" look identical from
+			// here, and blaming the item for a data-loading failure sends the player off to
+			// re-read the rules for an answer that is not there.
+			content.append(this.getMaterials().length
+				? e_({outer: `<p class="ve-muted">No material in the catalog can be applied to this kind of item.</p>`})
+				: e_({outer: `<p class="ve-muted">The material catalog has not loaded. It ships with the <i>Traveler's Guide to Thelemar</i> homebrew \u2014 if that is still loading, close this and try again in a moment.</p>`}));
 		} else {
 			// One interaction model for mouse, keyboard and touch: every material is a
 			// disclosure button, and its before/after diff opens *underneath the row the
@@ -1464,13 +1537,22 @@ class CharacterSheetMaterials {
 				].join(" ").toLowerCase();
 			});
 
+			// Built once on open: the numbers a player sorts by.
+			const metrics = eligible.map(mat => CharacterSheetMaterials.getSortMetrics(item, mat));
+			const SORTS = CharacterSheetMaterials.getSortOptions(item);
+			let sortKey = "";
+
 			const filterBar = e_({outer: `
 				<div class="charsheet__material-filter">
 					<input type="search" class="form-control input-sm charsheet__material-filter-ipt" placeholder="Filter ${eligible.length} materials\u2026" aria-label="Filter materials by name or effect" autocomplete="off">
+					<select class="form-control input-sm w-auto charsheet__material-sort" aria-label="Sort materials">
+						${SORTS.map(s => `<option value="${s.key}">${s.key ? `Sort: ${esc(s.label)}` : "Group by category"}</option>`).join("")}
+					</select>
 					<span class="ve-small ve-muted charsheet__material-filter-count" role="status"></span>
 				</div>
 			`});
 			filterIpt = filterBar.querySelector(".charsheet__material-filter-ipt");
+			const sortSel = filterBar.querySelector(".charsheet__material-sort");
 			const filterCount = filterBar.querySelector(".charsheet__material-filter-count");
 			const list = e_({outer: `<div class="charsheet__material-list"></div>`});
 
@@ -1581,7 +1663,24 @@ class CharacterSheetMaterials {
 					return;
 				}
 
-				if (q) {
+				// Sorting and grouping answer different questions and fight each other: a
+				// "best damage" ranking split across eight collapsed headers ranks nothing.
+				// An explicit sort therefore flattens the list, exactly as a filter does.
+				const sort = SORTS.find(s => s.key === sortKey);
+				if (sortKey && sort) {
+					const val = i => metrics[i][sortKey];
+					// Materials that do not carry the sorted axis sink to the bottom rather
+					// than being hidden — they are still eligible, just not ranked.
+					idxs.sort((a, b) => {
+						const va = val(a); const vb = val(b);
+						if (va == null && vb == null) return eligible[a].name.localeCompare(eligible[b].name);
+						if (va == null) return 1;
+						if (vb == null) return -1;
+						if (va === vb) return eligible[a].name.localeCompare(eligible[b].name);
+						return sort.isDesc ? vb - va : va - vb;
+					});
+					idxs.forEach(i => renderRow(list, i));
+				} else if (q) {
 					// A filtered result set is already short; re-grouping it would bury three
 					// matches under eight collapsed headers.
 					idxs.forEach(i => renderRow(list, i));
@@ -1631,8 +1730,8 @@ class CharacterSheetMaterials {
 				doExpand(idx, {isScroll: true});
 			});
 
-			filterIpt.addEventListener("input", () => renderList());
-			filterIpt.addEventListener("keydown", (evt) => {
+			sortSel.addEventListener("change", () => { sortKey = sortSel.value; renderList(); });
+			filterIpt.addEventListener("input", () => renderList());			filterIpt.addEventListener("keydown", (evt) => {
 				// Escape clears the filter before it closes the modal — the reflex every
 				// other search box in the app already honours.
 				if (evt.key !== "Escape" || !filterIpt.value) return;
@@ -1652,6 +1751,24 @@ class CharacterSheetMaterials {
 		}
 
 		modalInner.append(content);
+
+		// The rules doc is 678 lines; the picker is where people meet the vocabulary. A
+		// disclosure keeps the definitions one keystroke away without spending list space
+		// on players who already know them.
+		modalInner.append(e_({outer: `
+			<details class="charsheet__material-glossary mt-2">
+				<summary class="ve-small">What do these numbers mean?</summary>
+				<dl class="charsheet__material-glossary-list ve-small mb-0">
+					<dt>MC</dt><dd>Magic Capacity \u2014 how many magical effects the material carries before the item is overloaded. Steel holds 3; an overloaded item stops working until you remove effects.</dd>
+					<dt>MC \u221e</dt><dd>Unlimited \u2014 this material never overloads.</dd>
+					<dt>MC \u2212\u221e</dt><dd>Suppressing \u2014 this material smothers magic entirely, so no enchantment functions while the item is made of it.</dd>
+					<dt>\u2726</dt><dd>The material carries a magical property of its own.</dd>
+					<dt>Pen</dt><dd>Penetration \u2014 ignores that much of a target's non-magical damage resistance.</dd>
+					<dt>Crit</dt><dd>The die roll on which an attack becomes a critical hit. Lower is better.</dd>
+					<dt>Roles</dt><dd>A condensate grants its affinity in one role only: a weapon's <b>striking surface</b> or its <b>focus</b>, or armour's <b>protective layer</b>. An affinity written for a role this item cannot host stays dormant.</dd>
+				</dl>
+			</details>
+		`}));
 
 		const footer = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
 			<button class="ve-btn ve-btn-default">Close</button>

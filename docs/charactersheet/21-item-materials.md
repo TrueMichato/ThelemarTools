@@ -743,6 +743,53 @@ The old copy said "Applies only while this material is the item's protective lay
 cases, which reads as a condition the player could go and satisfy. On a weapon they cannot.
 The label reflects it too: `(dormant)` versus `(not available)`.
 
+### The picker ranks, and explains its own vocabulary
+
+Filtering answers *"where is mithril?"*. It does not answer *"which of these twelve metals is
+best for my sword?"* — for that the list has to rank.
+
+`getSortMetrics(item, material)` returns the five comparable numbers **projected onto this
+specific item**, and `getSortOptions(item)` returns the axes worth offering for it. Three
+rules keep the ranking honest:
+
+- **Options are item-aware.** A longsword gets Damage but not Armor Class; offering AC there
+  would produce sixty-five identical rows and teach the player the control is broken.
+- **Unrankable materials sink, they do not lie.** A material priced *per scale*, or priceless,
+  cannot reprice the item — `applyToItem` correctly leaves the base value in place. Ranking on
+  that number would file every priceless material under "cheapest". `getSortMetrics` therefore
+  reports `null` for an axis the material cannot move, and `null` sorts to the bottom. Same for
+  weight when a material carries no density.
+- **`∞` outranks every finite capacity; `−∞` sits below every one** — exactly how a player ranks
+  an unlimited material against a suppressing one.
+
+Sorting and grouping answer different questions and fight each other, so an explicit sort
+**flattens** the list the way a filter does: a "best damage" ranking split across eight
+collapsed category headers ranks nothing.
+
+Alongside it, a collapsed `<details>` at the foot of the picker defines `MC`, `MC ∞`, `MC −∞`,
+`✦`, `Pen`, `Crit` and the condensate roles. The vocabulary is invented by this feature and
+explained nowhere else outside a 678-line rules document; the legend is a reference for the
+first few visits rather than a permanent tax on list space.
+
+### An empty list says which kind of empty it is
+
+"No material fits this item" and "the catalog never arrived" look identical from inside the
+modal, and blaming the item for a data-loading failure sends the player off to re-read the
+rules for an answer that is not there. The picker branches on `getMaterials().length` and names
+the homebrew when the catalog itself is missing.
+
+### The row wraps instead of overflowing
+
+Each row carries a name, a stat summary and up to two chips. At 390px they cannot share a line:
+without `flex-wrap` the summary is squeezed toward zero and breaks one word per line while the
+`white-space: nowrap` chips overflow the modal. The row wraps, and the summary has a
+`14ch` flex basis so it drops to its own line rather than being crushed.
+
+The header's clear-material control also moved: it was a red trash glyph sitting directly under
+the modal's ✕, which is a mis-tap that silently changes the item. It is now a labelled
+**Remove** button beside the material's own name, and the expanded detail panel carries a second
+one in context.
+
 ### Penetration is not auto-resolved
 
 The sheet tracks **no target AC**. Penetration therefore shows as `Pen N` on the attack row,
@@ -772,7 +819,7 @@ The crafting page is **unconditional** — it is a reference, not a rules engine
 NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetMaterials --no-coverage --forceExit
 ```
 
-`test/jest/charactersheet/CharacterSheetMaterials.test.js` — 201 tests over a hand-built
+`test/jest/charactersheet/CharacterSheetMaterials.test.js` — 209 tests over a hand-built
 material fixture: die ladder (including negative steps, clamping and off-ladder
 normalisation), tri-state axes, eligibility, weapon/armour/shield projection, weight and
 value, effect resolution, state integration, the preview rows, item-aware summaries, effect counting, Magic
@@ -785,6 +832,8 @@ rule), degradation (trigger matching, stacking vs non-stacking, axis zeroing, de
 candidate scoping, short-rest repair listing, the sub-toggle and the save round-trip), and
 the two-tier risk flag (data-derived, absent for the other 67 materials), material undo
 (restoring a previous material, restoring the absence of one, and the acknowledgement toast),
+the picker sort metrics (item-aware axis gating, projected damage die, `∞`/`−∞` ordering, and
+the null-not-lie rule for materials that cannot reprice or reweigh the item),
 and the `attachedSpells` shape matrix (every usage key, combined keys, the non-spell `ability`
 sibling, suffix stripping, cross-category dedupe, plus the state guard degrading to `null`
 instead of throwing).

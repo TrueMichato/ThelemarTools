@@ -24751,6 +24751,59 @@ color: var(--cs-text-primary, #f1f5f9);
 	font-variant-numeric: tabular-nums;
 }
 
+.charsheet__material-sort {
+	flex: 0 0 auto;
+	max-width: 45%;
+}
+
+/* The vocabulary this feature invents (MC, Pen, roles) is only explained in a 678-line
+   rules doc, so the picker carries its own legend. Collapsed by default: it is a
+   reference for the first few visits, not a permanent tax on list space. */
+.charsheet__material-glossary > summary {
+	cursor: pointer;
+	color: var(--cs-text-muted, #94a3b8);
+	padding: 4px 0;
+}
+
+.charsheet__material-glossary-list {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	gap: 2px 12px;
+	margin-top: 6px;
+	padding: 8px 10px;
+	border: 1px solid var(--cs-border, #334155);
+	border-radius: var(--cs-radius-sm, 4px);
+}
+
+.charsheet__material-glossary-list dt {
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.charsheet__material-glossary-list dd {
+	margin: 0;
+	color: var(--cs-text-muted, #94a3b8);
+}
+
+@media (max-width: 480px) {
+	.charsheet__material-filter {
+		flex-wrap: wrap;
+	}
+
+	.charsheet__material-sort {
+		max-width: none;
+		flex: 1 1 100%;
+	}
+
+	.charsheet__material-glossary-list {
+		grid-template-columns: 1fr;
+	}
+
+	.charsheet__material-glossary-list dd {
+		margin-bottom: 6px;
+	}
+}
+
 .charsheet__material-group > summary {
 	padding: 4px 2px;
 	cursor: pointer;
@@ -24764,8 +24817,12 @@ color: var(--cs-text-primary, #f1f5f9);
    hand-rolled key handler — and `aria-expanded` describes it for free. */
 .charsheet__material-option-btn {
 	display: flex;
+	/* Wraps: the row carries a name, a stat summary and up to two chips, which will
+	   not fit on one line at 390px. Without this the summary is squeezed toward zero
+	   and breaks one word per line while the nowrap chips overflow the modal. */
+	flex-wrap: wrap;
 	align-items: baseline;
-	gap: 8px;
+	gap: 4px 8px;
 	width: 100%;
 	padding: 6px 8px;
 	border: 0;
@@ -24803,9 +24860,10 @@ color: var(--cs-text-primary, #f1f5f9);
 }
 
 /* Wraps rather than truncates: a material's summary is the only thing
-   distinguishing two otherwise identical metals, so it must not be clipped. */
+   distinguishing two otherwise identical metals, so it must not be clipped.
+   The basis lets it drop to its own line rather than be crushed to one word wide. */
 .charsheet__material-option-summary {
-	flex: 1 1 auto;
+	flex: 1 1 14ch;
 	min-width: 0;
 }
 
@@ -24886,6 +24944,18 @@ color: var(--cs-text-primary, #f1f5f9);
 		min-height: 44px;
 		padding-right: 20px;
 		padding-left: 20px;
+	}
+
+	/* The sort control and the header's Remove button are both real targets, and both
+	   render at Bootstrap's ~20px on touch. */
+	.charsheet__material-sort {
+		min-height: 44px;
+	}
+
+	.charsheet__material-current .charsheet__material-clear {
+		min-height: 44px;
+		padding-right: 16px;
+		padding-left: 16px;
 	}
 
 	/* The capacity chip opens the Magic Capacity modal, so on touch it is a target

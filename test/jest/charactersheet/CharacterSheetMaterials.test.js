@@ -915,6 +915,83 @@ describe("Item Materials", () => {
 	// ==========================================================================
 	// Magic Capacity
 	// ==========================================================================
+	// ==========================================================================
+	// Picker sort
+	// ==========================================================================
+	describe("sort metrics and options", () => {
+		const SWORD = {name: "Longsword", type: "M", weaponCategory: "martial", dmg1: "1d8", weight: 3, value: 1500};
+		const PLATE = {name: "Plate", armor: true, type: "HA", ac: 18, weight: 65, value: 150000};
+		const SHIELD = {name: "Shield", type: "S", acBonus: 2, weight: 6, value: 1000};
+
+		it("offers damage only on a weapon and AC only on armour or a shield", () => {
+			const keys = it => CharacterSheetMaterials.getSortOptions(it).map(o => o.key);
+			expect(keys(SWORD)).toContain("dmg");
+			expect(keys(SWORD)).not.toContain("ac");
+			expect(keys(PLATE)).toContain("ac");
+			expect(keys(PLATE)).not.toContain("dmg");
+			expect(keys(SHIELD)).toContain("ac");
+			expect(keys(SHIELD)).not.toContain("dmg");
+		});
+
+		it("always offers the axes every item shares", () => {
+			[SWORD, PLATE, SHIELD, {name: "Rope"}].forEach((item) => {
+				const keys = CharacterSheetMaterials.getSortOptions(item).map(o => o.key);
+				expect(keys).toEqual(expect.arrayContaining(["", "mc", "weight", "value"]));
+			});
+		});
+
+		it("ranks damage by the projected die, not the base one", () => {
+			const steel = CharacterSheetMaterials.getSortMetrics(SWORD, findMat("Steel"));
+			const gold = CharacterSheetMaterials.getSortMetrics(SWORD, findMat("Gold"));
+			// Steel steps 1d8 up to 1d10; gold steps it down to 1d6.
+			expect(steel.dmg).toBe(10);
+			expect(gold.dmg).toBe(6);
+		});
+
+		it("nulls the axes the item kind cannot express", () => {
+			const onSword = CharacterSheetMaterials.getSortMetrics(SWORD, findMat("Darkmetal"));
+			expect(onSword.ac).toBeNull();
+			const onPlate = CharacterSheetMaterials.getSortMetrics(PLATE, findMat("Darkmetal"));
+			expect(onPlate.dmg).toBeNull();
+			expect(onPlate.ac).toBe(19);
+		});
+
+		it("sorts unlimited above every finite capacity and a suppressor below every one", () => {
+			const finite = CharacterSheetMaterials.getSortMetrics(SWORD, findMat("Steel")).mc;
+			const unlimited = CharacterSheetMaterials.getSortMetrics(SWORD, findMat("Jadoo")).mc;
+			const suppressing = CharacterSheetMaterials.getSortMetrics(SWORD, findMat("Lead")).mc;
+			expect(unlimited).toBe(Infinity);
+			expect(suppressing).toBe(-Infinity);
+			expect(unlimited).toBeGreaterThan(finite);
+			expect(suppressing).toBeLessThan(finite);
+		});
+
+		it("reports the projected weight and value, so density and price actually rank", () => {
+			const steel = CharacterSheetMaterials.getSortMetrics(SWORD, findMat("Steel"));
+			const gold = CharacterSheetMaterials.getSortMetrics(SWORD, findMat("Gold"));
+			// Gold is ~2.5x steel's density and 50x its price per pound.
+			expect(gold.weight).toBeGreaterThan(steel.weight);
+			expect(gold.value).toBeGreaterThan(steel.value);
+		});
+
+		it("does not rank a material that cannot reprice or reweigh the item", () => {
+			// A price quoted per scale, or none at all, leaves the item's own value in
+			// place — ranking on that would file every priceless material under "cheapest".
+			const priceless = {...findMat("Steel"), name: "Heart Stone", price: {gp: null, unit: "none", isPriceless: true}, density: null};
+			const perScale = {...findMat("Steel"), name: "Dragon Scales", price: {gp: 150, unit: "scale", isPriceless: false}};
+			expect(CharacterSheetMaterials.getSortMetrics(SWORD, priceless).value).toBeNull();
+			expect(CharacterSheetMaterials.getSortMetrics(SWORD, priceless).weight).toBeNull();
+			expect(CharacterSheetMaterials.getSortMetrics(SWORD, perScale).value).toBeNull();
+			// …but it still ranks on the axes it does carry.
+			expect(CharacterSheetMaterials.getSortMetrics(SWORD, perScale).dmg).toBe(10);
+		});
+
+		it("returns an all-null shape rather than throwing on missing input", () => {
+			expect(CharacterSheetMaterials.getSortMetrics(null, findMat("Steel"))).toEqual({dmg: null, ac: null, mc: null, weight: null, value: null});
+			expect(CharacterSheetMaterials.getSortMetrics(SWORD, null).mc).toBeNull();
+		});
+	});
+
 	describe("countMagicalEffects", () => {
 		it("counts nothing on a mundane item", () => {
 			expect(CharacterSheetMaterials.countMagicalEffects({name: "Longsword"}).total).toBe(0);

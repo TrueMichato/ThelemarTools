@@ -643,6 +643,30 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
   rootstone sword, authored for a protective layer a weapon has no slot for — it says the
   affinity never applies. Never phrase an unreachable role as a condition the player could go
   and satisfy.
+- **Picker sort metrics must return `null`, never a stale base number.** `getSortMetrics(item,
+  material)` nulls an axis the item kind cannot express (AC on a longsword) *and* an axis the
+  material cannot move — a price quoted per scale or marked `isPriceless` leaves the item's own
+  value in place, so ranking on it would file every priceless material under "cheapest".
+  `null` sinks to the bottom of the sort; the material stays eligible. `∞` is `Infinity` and a
+  suppressor is `-Infinity`, so both sort naturally.
+- **An explicit sort flattens the list.** Sorting and category grouping answer different
+  questions; a "best damage" ranking split across eight collapsed headers ranks nothing.
+  `getSortOptions(item)` gates which axes are even offered, on the same item-awareness rule
+  `getSummary` follows.
+- ⚠️ **The picker's empty state must branch on `getMaterials().length`.** "Nothing fits this
+  item" and "the catalog never loaded" are indistinguishable from inside the modal, and the
+  default message blames the item for what is really a homebrew-loading failure.
+- ⚠️ **Picker rows need `flex-wrap`.** A row carries a name, a summary and up to two
+  `white-space: nowrap` chips; at 390px they cannot share a line. Without wrapping the summary
+  collapses to one word per line *and* the chips overflow the modal. The summary needs a
+  flex-basis (`14ch`), not `auto`, or it is crushed instead of dropping to its own line.
+- **Do not put a destructive control under the modal's ✕.** The clear-material trash used to
+  sit directly beneath it; it is now a labelled `Remove` button beside the material's name,
+  with a second in-context one inside the expanded detail panel.
+- **The picker carries its own glossary.** `MC`, `MC ∞`, `MC −∞`, `✦`, `Pen`, `Crit` and the
+  condensate roles are vocabulary this feature invents; outside the 678-line rules document the
+  collapsed `<details>` at the foot of the picker is the only place they are defined. Adding a
+  new abbreviation to a row means adding it there too.
 - ⚠️ **The MC headline modifier is `--overloaded` / `--suppressing`; the inventory badge's is
   `--over` / `--suppress`.** They are different elements with different vocabularies, and
   writing `.charsheet__mc-headline--over` (which matched nothing for as long as it existed)
