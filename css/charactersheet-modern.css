@@ -61,6 +61,29 @@
 	--cs-danger-light: rgba(239, 68, 68, 0.1);
 	--cs-info: #06b6d4;
 	--cs-info-light: rgba(6, 182, 212, 0.1);
+
+	/* Ink-on-tint variants for night.
+	   The day block far below already defines these four, one shade *darker* than
+	   the base hue. Night needs them one shade *lighter*, for exactly the same
+	   reason: the semantic hues above are tuned to read as fills, and used as TEXT
+	   on their own 12% tint they land around 4.0:1 on a card and ~3.5:1 inside a
+	   modal — under AA in both cases.
+
+	   Every consumer already reads these through a
+	   `var(--cs-danger-text, var(--cs-danger, …))` chain, which is why night was
+	   failing: the token was simply undefined here, so the chain fell through to
+	   the fill hue. Defining it fixes every tinted chip on the sheet at once.
+
+	   Verified against the two surfaces tinted chips actually sit on —
+	   `--cs-bg-surface` #1e293b and `--cs-bg-elevated` #334155:
+	     danger  #fca5a5 → 6.67 / 4.86
+	     warning #fcd34d → 8.25 / 6.00
+	     success #6ee7b7 → 7.94 / 5.77
+	     info    #67e8f9 → 8.24 / 5.99 */
+	--cs-warning-text: #fcd34d;
+	--cs-success-text: #6ee7b7;
+	--cs-danger-text: #fca5a5;
+	--cs-info-text: #67e8f9;
 	
 	/* Background colors */
 	--cs-bg-base: #0f172a;

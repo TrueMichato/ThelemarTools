@@ -6086,7 +6086,7 @@ class CharacterSheetInventory {
 				: degradation.repair?.method === "shortRest"
 					? `Repaired over a Short Rest${degradation.repair.tool ? ` with ${esc(degradation.repair.tool)}` : ""}.`
 					: "Repaired manually.";
-			html += `<p class="${degradation.isDestroyed ? "text-danger" : "text-warning"}"><strong>Degraded:</strong> ${esc(summaryTxt)}${degradation.stacks > 1 && !degradation.isDestroyed ? ` (${degradation.stacks} events)` : ""} <span class="ve-muted ve-small">${repairTxt}</span> <button type="button" class="ve-btn ve-btn-xxs ve-btn-default charsheet__material-repair-btn" data-item-id="${esc(item.id)}">Repair</button></p>`;
+			html += `<p class="charsheet__degradation-line ${degradation.isDestroyed ? "charsheet__degradation-line--destroyed" : "charsheet__degradation-line--worn"}"><strong>Degraded:</strong> ${esc(summaryTxt)}${degradation.stacks > 1 && !degradation.isDestroyed ? ` (${degradation.stacks} events)` : ""} <span class="ve-muted ve-small">${repairTxt}</span> <button type="button" class="ve-btn ve-btn-xxs ve-btn-default charsheet__material-repair-btn" data-item-id="${esc(item.id)}">Repair</button></p>`;
 		}
 		return html;
 	}
