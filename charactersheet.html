@@ -383,6 +383,7 @@
 			<li><a data-toggle="tab" href="#charsheet-tab-abilities"><span class="charsheet__tab-icon">💪</span><span class="charsheet__tab-text">Abilities</span></a></li>
 			<li><a data-toggle="tab" href="#charsheet-tab-combat"><span class="charsheet__tab-icon">⚔️</span><span class="charsheet__tab-text">Combat</span></a></li>
 			<li><a data-toggle="tab" href="#charsheet-tab-spells"><span class="charsheet__tab-icon">✨</span><span class="charsheet__tab-text">Spells</span></a></li>
+			<li><a data-toggle="tab" href="#charsheet-tab-powers"><span class="charsheet__tab-icon">🧠</span><span class="charsheet__tab-text">Powers</span></a></li>
 			<li><a data-toggle="tab" href="#charsheet-tab-inventory"><span class="charsheet__tab-icon">🎒</span><span class="charsheet__tab-text">Inventory</span></a></li>
 			<li><a data-toggle="tab" href="#charsheet-tab-features"><span class="charsheet__tab-icon">📜</span><span class="charsheet__tab-text">Features</span></a></li>
 			<li><a data-toggle="tab" href="#charsheet-tab-notes"><span class="charsheet__tab-icon">📝</span><span class="charsheet__tab-text">Notes</span></a></li>
@@ -1384,6 +1385,14 @@
 						</div>
 					</div>
 				</div>
+			</div>
+
+			<!-- Powers Tab (psionic manifesters only; self-hides via _updateTabVisibility) -->
+			<div id="charsheet-tab-powers" class="tab-pane fade">
+				<!-- Fully rendered by CharacterSheetPowers.render(): the manifesting header,
+				     the strain tracker, active manifestations, the learning panel and the
+				     powers list, grouped by order. -->
+				<div class="charsheet__powers-container" id="charsheet-powers-container"></div>
 			</div>
 
 			<!-- Inventory Tab -->

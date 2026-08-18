@@ -144,26 +144,43 @@ All Ranger subclasses are fully implemented:
 - Three specialization toggles (`psionicToughness`, `flameOn`,
   `manipulateTerrain`) go through `ACTIVE_STATE_TYPES`, documented in
   [08-toggle-abilities.md](08-toggle-abilities.md).
+- **Powers are first-class entities.** A dedicated `🧠 Powers` tab carries the
+  manifesting stats, the strain tracker, running manifestations and the powers
+  list grouped by order. Each power's manifestation time, range and duration are
+  parsed out of its prose, and its `modes[]` are classified into order bands,
+  character-level scaling bands, the `Increased Order` upcast rule and variant
+  effects.
+- **Increased order is supported**, with a live-updating order stepper in the
+  manifest dialog.
+- **Concentration is a list, not a slot.** A manifester holds up to their
+  proficiency bonus in powers, never a power and a spell together, and the
+  manifestation score is derived from that automatically instead of being typed
+  in by the player.
+- **Psionic Exertions apply.** At-manifestation options are offered in the
+  dialog; outcome-triggered ones are an **Exert** button on the running
+  manifestation. One per manifestation, per RAW.
+- **Strain to Maintain** derives its cost from the powers actually running.
+- Powers reach play mode and the favourites bar, and per-level replacement plus
+  a lightweight learning-from-others tracker are supported.
 
 **Honestly out of scope for the Talent:**
 
-- **Per-power effects.** The 103 psionic powers are pickable, order-gated and
-  activatable, and they charge their strain correctly — but each power's
-  individual damage, save rider and scaling are rendered from its source text
+- **Per-power effects.** The 103 psionic powers are pickable, order-gated,
+  manifestable and fully described — their metadata is parsed and the mode that
+  applies at the character's level is the one shown — but each power's
+  individual damage roll and save rider are still rendered from its source text
   rather than modelled as calculations. This is the same treatment spells get:
-  the sheet resolves the *cost* and the *save DC*, and the player reads the
-  effect. Modelling 103 bespoke powers is a separate body of work from
-  supporting the class.
-- **Order escalation inside the manifest dialog.** Powers whose data declares an
-  `Increased Order` mode can be manifested at a higher order per RAW, but the
-  dialog does not yet offer the order stepper; manifest at the higher order by
-  choosing the higher-order power entry. The strain arithmetic is already
-  order-aware (`resolvePsionicStrainCost` resolves `"powerOrder"`), so this is a
-  UI addition, not a mechanics gap.
+  the sheet resolves the *cost*, the *save DC* and the *attack bonus*, and the
+  player reads the effect. Modelling 103 bespoke powers is a separate body of
+  work from supporting the class.
 - **Splitting one manifestation's strain across several tracks.** Strain is paid
   from a single chosen track per manifestation. RAW permits a split; the tracks
   and their penalties are fully modelled, so this is an input affordance rather
   than a missing subsystem.
+- **The multi-day learning period is a counter, not a calendar.** "Learning from
+  Others" tracks the roll, the required days and the days logged, but the sheet
+  has no clock, so advancing a day is a button rather than something a long rest
+  infers.
 - **Encounter-side clauses.** Resopath's terrain shaping and Telepath's
   telepathy-range features change what *other* creatures may do. As with every
   such feature on the sheet, the self-facing half is mechanical and the

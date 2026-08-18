@@ -3,6 +3,7 @@ import {CharacterSheetState} from "./charactersheet-state.js";
 import {CharacterSheetBuilder} from "./charactersheet-builder.js";
 import {CharacterSheetCombat} from "./charactersheet-combat.js";
 import {CharacterSheetSpells} from "./charactersheet-spells.js";
+import {CharacterSheetPowers} from "./charactersheet-powers.js";
 import {CharacterSheetInventory} from "./charactersheet-inventory.js";
 import {CharacterSheetFeatures} from "./charactersheet-features.js";
 import {CharacterSheetRest} from "./charactersheet-rest.js";
@@ -53,6 +54,7 @@ class CharacterSheetPage {
 		this._builder = null;
 		this._combat = null;
 		this._spells = null;
+		this._powers = null;
 		this._inventory = null;
 		this._features = null;
 		this._rest = null;
@@ -144,6 +146,10 @@ class CharacterSheetPage {
 		try {
 			this._spells = new CharacterSheetSpells(this);
 		} catch (e) { console.error("Failed to init spells:", e); }
+
+		try {
+			this._powers = new CharacterSheetPowers(this);
+		} catch (e) { console.error("Failed to init powers:", e); }
 
 		try {
 			this._inventory = new CharacterSheetInventory(this);
@@ -878,6 +884,11 @@ class CharacterSheetPage {
 				}
 			});
 		}
+
+		// Give the state the raw catalog too. The picked-power records in `features` are
+		// whatever the optional-feature picker chose to keep; the catalog is what
+		// guarantees the Powers tab can always render a power's full modes and entries.
+		this._state?.setPsionicCatalog?.(this._psionicsData);
 	}
 
 	/**
@@ -1350,6 +1361,14 @@ class CharacterSheetPage {
 			this._showTab("#charsheet-tab-respec");
 		} else {
 			this._hideTab("#charsheet-tab-respec");
+		}
+
+		// Powers: only for a psionic manifester. Every other character would see an empty
+		// tab, so it is hidden the same way Builder and Respec are.
+		if (this._state?.isPsionicManifester?.()) {
+			this._showTab("#charsheet-tab-powers");
+		} else {
+			this._hideTab("#charsheet-tab-powers");
 		}
 
 		// Abilities: optional, gated by the showAbilitiesTab setting (default off).
@@ -3518,6 +3537,7 @@ class CharacterSheetPage {
 
 		// Sub-modules
 		if (this._spells) this._spells.render();
+		if (this._powers) this._powers.render();
 		if (this._inventory) this._inventory.render();
 		if (this._features) this._features.render();
 		if (this._customAbilities) this._customAbilities.render();
@@ -5426,6 +5446,7 @@ class CharacterSheetPage {
 		this._renderAbilitiesDetailed();
 		this._renderAttacks();
 		if (this._spells) this._spells.render();
+		if (this._powers) this._powers.render();
 		if (this._features) this._features.render();
 		if (this._combat) this._combat.render();
 	}
@@ -8117,6 +8138,9 @@ class CharacterSheetPage {
 				case "spell":
 					this._spells?._renderSpellList?.();
 					break;
+				case "power":
+					this._powers?.render?.();
+					break;
 				case "feature":
 				case "optionalFeature":
 				case "feat":
@@ -8183,6 +8207,11 @@ class CharacterSheetPage {
 				}, {title: "Use feature charge"});
 				if (!canUse) (/** @type {HTMLButtonElement} */ (btn)).disabled = true;
 				return btn;
+			}
+			case "power": {
+				// Manifesting is a multi-field decision, so the tile hands off to the one
+				// dialog rather than trying to reproduce it inline.
+				return make("Manifest", "ve-btn-primary", () => this._powers?._pManifest?.(entity), {title: "Manifest this power"});
 			}
 			case "customAbility": {
 				const usesDisplay = this._state.getCustomAbilityUsesDisplay?.(entity.id);
@@ -8316,7 +8345,7 @@ class CharacterSheetPage {
 				const concRow = e_({outer: `
 					<div class="charsheet__state-row charsheet__state--active">
 						<span class="charsheet__state-icon">🔮</span>
-						<span class="charsheet__state-name">Concentrating: ${concentration.spellName || "Unknown"}</span>
+						<span class="charsheet__state-name">Concentrating: ${this._state.getConcentrationLabel?.() || concentration.spellName || "Unknown"}</span>
 						<div class="charsheet__state-controls ml-auto">
 							<button class="ve-btn ve-btn-xs ve-btn-warning charsheet__end-concentration-btn">End</button>
 						</div>
@@ -12575,7 +12604,7 @@ class CharacterSheetPage {
 		const concentration = this._state.getConcentration?.();
 		if (!concentration) return;
 
-		const spellName = concentration.spellName || "Unknown Spell";
+		const spellName = this._state.getConcentrationLabel?.() || concentration.spellName || "Unknown Spell";
 		const checkInfo = this._state.makeConcentrationCheck(damageTaken);
 		let {dc, bonus, advantage, sources, rollNeeded} = checkInfo;
 
@@ -12585,10 +12614,27 @@ class CharacterSheetPage {
 		if (sources.length) bonusBreakdown.push(...sources);
 
 		return new Promise(resolve => {
+			// A failed save ends concentration unless Strain to Maintain is paid. The
+			// break is DEFERRED to close so the player has a chance to pay — and
+			// guaranteed at close, so dismissing the dialog can never silently keep a
+			// concentration the save just lost.
+			let pendingBreak = false;
+			let maintained = false;
+			const finalize = () => {
+				if (pendingBreak && !maintained) {
+					this._state.breakConcentration();
+					this._combatModule?.renderCombatStates?.();
+					this._renderActiveStates?.();
+					this._saveCurrentCharacter();
+					this._renderCharacter?.();
+				}
+				pendingBreak = false;
+			};
+
 			const {eleModalInner: modalInner, doClose} = UiUtil.getShowModal({
 				title: "Concentration Check",
 				isMinHeight0: true,
-				cbClose: () => resolve(),
+				cbClose: () => { finalize(); resolve(); },
 			});
 
 			const rollResult = e_({outer: `<div class="charsheet__concentration-result ve-hidden"></div>`});
@@ -12670,31 +12716,63 @@ class CharacterSheetPage {
 				rollResult.classList.remove("ve-hidden");
 
 				if (!success) {
-					this._state.breakConcentration();
-					this._combatModule?.renderCombatStates?.();
-					this._renderActiveStates?.();
-					this._saveCurrentCharacter();
-					this._renderCharacter?.();
+					pendingBreak = true;
+					// Strain to Maintain (Talent 1): a manifester may pay strain equal to
+					// the summed order of the powers they are concentrating on to keep
+					// them ALL active. Offered here, at the only moment RAW allows it,
+					// rather than left as a button the player has to remember.
+					const quote = this._state.payStrainToMaintain?.({apply: false});
+					const affordable = quote?.ok && quote.cost > 0 && quote.total + quote.cost <= quote.max;
+					if (quote?.ok && quote.cost > 0) {
+						rollResult.innerHTML += `
+							<div class="mt-2 p-2 charsheet__concentration-maintain">
+								<div class="ve-small">Strain to Maintain: gain <strong>${quote.cost} strain</strong> to keep
+									${quote.powers.join(", ")} active.</div>
+								${affordable
+		? `<button class="ve-btn ve-btn-xs ve-btn-warning mt-1" id="charsheet-strain-maintain">Take ${quote.cost} strain and hold on</button>`
+		: `<div class="ve-small ve-error mt-1">That would take you past your strain maximum (${quote.max}), so the powers end.</div>`}
+							</div>`;
+						rollResult.querySelector("#charsheet-strain-maintain")?.addEventListener("click", async () => {
+							const track = await this._pPickStrainTrack(`Keeping ${quote.powers.join(", ")} active costs ${quote.cost} strain. Take it as:`);
+							if (!track) return;
+							const paid = this._state.payStrainToMaintain({track});
+							rollResult.querySelector("#charsheet-strain-maintain")?.remove();
+							if (paid.ok) {
+								maintained = true;
+								rollResult.innerHTML += `<div class="ve-small mt-1">Held on — <strong>${paid.applied} ${track} strain</strong>.</div>`;
+							} else {
+								rollResult.innerHTML += `<div class="ve-small ve-error mt-1">You could not take the strain; the powers end.</div>`;
+							}
+							this._saveCurrentCharacter();
+							this._renderCharacter?.();
+						});
+					} else {
+						// Nothing to pay for (a spell, or no powers) — end it immediately,
+						// which is the behaviour every non-psion has always seen.
+						finalize();
+					}
 				}
 
-				// Replace buttons with close button
+				// Replace buttons with close button.
+				// `e_(…).addEventListener(…)` returns undefined (DOM contract), so these
+				// must use ElementUtil's own `click` option or nothing gets appended.
+				// See CS-BUG-164.
 				btnRow.empty().append(
-					e_({outer: `<button class="btn btn-primary">Close</button>`})
-						.addEventListener("click", () => { doClose(); resolve(); }),
+					e_({outer: `<button class="ve-btn ve-btn-primary">Close</button>`, click: () => { doClose(); resolve(); }}),
 				);
 			};
 
 			// Roll button
-			const btnRoll = e_({outer: `<button class="btn btn-primary mr-2">Roll Check</button>`})
-				.addEventListener("click", () => performRoll());
+			const btnRoll = e_({outer: `<button class="ve-btn ve-btn-primary mr-2">Roll Check</button>`, click: () => performRoll()});
 
 			// Skip button (keep concentration without rolling)
-			const btnSkip = e_({outer: `<button class="btn btn-default mr-2">Skip (Keep)</button>`})
-				.addEventListener("click", () => { doClose(); resolve(); });
+			const btnSkip = e_({outer: `<button class="ve-btn ve-btn-default mr-2">Skip (Keep)</button>`, click: () => { doClose(); resolve(); }});
 
 			// Break button (voluntarily end concentration)
-			const btnBreak = e_({outer: `<button class="btn btn-danger">Break Concentration</button>`})
-				.addEventListener("click", () => {
+			const btnBreak = e_({
+				outer: `<button class="ve-btn ve-btn-danger">Break Concentration</button>`,
+				click: () => {
+					pendingBreak = false;
 					this._state.breakConcentration();
 					this._combatModule?.renderCombatStates?.();
 					this._renderActiveStates?.();
@@ -12703,7 +12781,8 @@ class CharacterSheetPage {
 					JqueryUtil.doToast({type: "info", content: `Concentration on ${spellName} ended.`});
 					doClose();
 					resolve();
-				});
+				},
+			});
 
 			btnRow.append(btnRoll, btnSkip, btnBreak);
 			modalInner.append(btnRow);
@@ -12871,6 +12950,23 @@ class CharacterSheetPage {
 	 * existing enum prompt rather than a dialog of its own.
 	 * @returns {Promise<void>}
 	 */
+	/**
+	 * Ask which strain track to charge. Shared by every "you gain N strain" prompt so
+	 * the question is asked the same way wherever it comes up.
+	 * @param {string} prompt
+	 * @returns {Promise<string|null>} the track, or null when cancelled
+	 */
+	async _pPickStrainTrack (prompt) {
+		const tracks = CharacterSheetState.PSIONIC_STRAIN_TRACKS;
+		const ix = await InputUiUtil.pGetUserEnum({
+			title: "Strain track",
+			htmlDescription: `<p>${prompt}</p>`,
+			values: tracks.map(it => `${it[0].toUpperCase()}${it.slice(1)}`),
+			isResolveItem: false,
+		});
+		return ix == null ? null : tracks[ix];
+	}
+
 	async _pPromptIgnoreStrainTrack () {
 		if (!this._state.getFeatureCalculations().hasIgnoreStrain) return;
 		const tracks = CharacterSheetState.PSIONIC_STRAIN_TRACKS;

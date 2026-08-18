@@ -49,6 +49,14 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   Spell slots, known/prepared/cantrip tracking, casting,
 │   ritual casting, spell rarity (Thelemar).
 │
+├── CharacterSheetPowers (charactersheet-powers.js, ~800 lines)
+│   The Powers tab for psionic manifesters (MCDM Talent). Manifesting
+│   stats, strain tracker, active manifestations, learning tracker, the
+│   powers list grouped by order, and the manifest dialog (order stepper,
+│   mode, Psionic Exertion, auto-derived manifestation score). Reads the
+│   `getKnownPowers()` projection; never writes the pick list, which the
+│   shared optional-feature picker owns. Tab self-hides for non-psions.
+│
 ├── CharacterSheetInventory (charactersheet-inventory.js, ~2,300 lines)
 │   Items, equipment, attunement (max 3), encumbrance, currency,
 │   charges, consumables, pagination.

@@ -10892,7 +10892,7 @@ class CharacterSheetCombat {
 			if (concentration) {
 				const conc = e_({outer: `
 					<div class="charsheet__combat-state-item badge badge-info mr-1 mb-1">
-						🔮 ${concentration.spellName || "Concentrating"}
+						🔮 ${this._state.getConcentrationLabel?.() || concentration.spellName || "Concentrating"}
 						<span class="charsheet__state-remove ml-1" title="Break Concentration">&times;</span>
 					</div>
 				`});
@@ -11391,7 +11391,7 @@ class CharacterSheetCombat {
 					title: "Break Concentration?",
 					textYes: "Yes, break",
 					textNo: "Cancel",
-					htmlDescription: `Currently concentrating on: <strong>${this._state.getConcentration?.()?.spellName || "Unknown"}</strong>`,
+					htmlDescription: `Currently concentrating on: <strong>${this._state.getConcentrationLabel?.() || "Unknown"}</strong>`,
 				}));
 				if (confirmed) {
 					this._state.breakConcentration();
@@ -11568,8 +11568,8 @@ class CharacterSheetCombat {
 		concBtn.classList.toggle("active", concentrating);
 		concBtn.classList.toggle("ve-btn-info", concentrating); concBtn.classList.toggle("ve-btn-warning", !concentrating);
 		if (concentrating) {
-			const spellName = this._state.getConcentration?.()?.spellName;
-			concBtn.textContent = spellName ? `🔮 ${spellName}` : "Concentrating";
+			const label = this._state.getConcentrationLabel?.() || this._state.getConcentration?.()?.spellName;
+			concBtn.textContent = label ? `🔮 ${label}` : "Concentrating";
 		} else {
 			concBtn.textContent = "Concentrate";
 		}

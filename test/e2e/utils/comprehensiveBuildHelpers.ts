@@ -1142,6 +1142,37 @@ export type EffectCheck = _EffectCommon & (
 	// asserting the strain charged matches the class rule (roll > score → none,
 	// roll === score → 1, roll < score → order).
 	| {kind: "manifestationTest"; order: number; roll: number; expectStrain: number}
+
+	/**
+	 * Powers as first-class entities. Learns a real power from the loaded `psionic`
+	 * catalog, then asserts the whole pipeline actually works end to end: its prose
+	 * metadata is parsed, it manifests through `manifestPower()`, an increased order
+	 * raises the manifestation score, and a concentrating power registers both a
+	 * concentration entry and a running manifestation. An existence check on
+	 * `getKnownPowers().length` would pass even if none of that were wired up.
+	 */
+	| {kind: "psionicPowerModel"; power: string; expectOrder: number; increaseTo?: number}
+
+	/**
+	 * Concentration capacity (the rule the old single-slot model could not express).
+	 * Asserts a manifester holds up to their proficiency bonus in powers, that the
+	 * oldest is evicted past the cap, and that a spell and a power can never coexist.
+	 */
+	| {kind: "psionicConcentrationCap"}
+
+	/**
+	 * Psionic Exertion actually applying. Asserts an at-manifestation option is charged
+	 * during `manifestPower()`, that an outcome-timed option is charged afterwards
+	 * against a running manifestation, and that only one may apply per manifestation.
+	 */
+	| {kind: "psionicExertion"; power: string; manifestationOption: string; outcomeOption: string}
+
+	/**
+	 * Strain to Maintain deriving its own cost. Asserts the quoted price equals the
+	 * summed order of the powers actually being concentrated on — not a number the
+	 * caller supplied — and that paying it keeps them running.
+	 */
+	| {kind: "psionicStrainToMaintain"; powers: string[]; expectCost: number}
 	/**
 	 * The per-discipline "<Discipline> Adept" reroll (CS-BUG-133). Asserts the reroll
 	 * actually replaces a failing manifestation die, that the better of the two rolls
@@ -2080,8 +2111,194 @@ async function _runPassiveOrRollEffect (
 			if (result.total !== e.expectStrain) throw new Error(`manifestation test applied ${result.total} strain, expected ${e.expectStrain}`);
 			return;
 		}
-		case "manifestationAdeptReroll": {
+		case "psionicPowerModel": {
 			const result = await charSheet.page.evaluate((args) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state: any = cs?._state;
+				if (!state?.manifestPower) return {ok: false, reason: "power API missing"};
+
+				const raw = (cs._psionicsData || []).find((p: any) => p.name === args.power);
+				if (!raw) return {ok: false, reason: `power "${args.power}" not in the loaded catalog`};
+
+				state.clearStrain();
+				state.breakConcentration();
+				state.endAllManifestations?.();
+				if (!state.getKnownPower(`${raw.name}|${raw.source || ""}`)) state.learnPsionicPower(raw);
+
+				const known = state.getKnownPower(`${raw.name}|${raw.source || ""}`);
+				if (!known) return {ok: false, reason: "power was not learned" };
+
+				// Roll high so the test itself never charges strain — this check is about
+				// the model, not about the dice.
+				const base = state.manifestPower(known.id, {roll: 99, track: "mind"});
+				const up = args.increaseTo
+					? state.manifestPower(known.id, {order: args.increaseTo, roll: 99, track: "mind"})
+					: null;
+
+				return {
+					ok: true,
+					order: known.order,
+					meta: known.meta,
+					concentrates: known.concentrates,
+					modeKinds: known.modes.map((m: any) => m.kind),
+					base: base.ok ? {order: base.order, score: base.test.score, conc: !!base.concentration} : base,
+					up: up && (up.ok ? {order: up.order, score: up.test.score, increased: up.increased} : up),
+					running: state.getActiveManifestations().map((m: any) => m.name),
+					concentrating: state.getPowerConcentrations().map((c: any) => c.name),
+				};
+			}, e);
+			if (!result.ok) throw new Error(`psionicPowerModel unavailable: ${JSON.stringify(result)}`);
+			if (result.order !== e.expectOrder) throw new Error(`${e.power} projected order ${result.order}, expected ${e.expectOrder}`);
+			if (!result.meta?.manifestationTime || !result.meta?.range) {
+				throw new Error(`${e.power} metadata not parsed out of its prose: ${JSON.stringify(result.meta)}`);
+			}
+			if (!result.base?.order) throw new Error(`${e.power} failed to manifest: ${JSON.stringify(result.base)}`);
+			// A 1st-order power is manifested at will and has no manifestation score.
+			if (e.expectOrder >= 2 && result.base.score !== e.expectOrder) {
+				throw new Error(`${e.power} manifestation score ${result.base.score}, expected ${e.expectOrder}`);
+			}
+			if (!result.running.includes(e.power)) throw new Error(`${e.power} manifested but is not running: ${JSON.stringify(result.running)}`);
+			if (result.concentrates && !result.concentrating.includes(e.power)) {
+				throw new Error(`${e.power} concentrates but registered no concentration: ${JSON.stringify(result.concentrating)}`);
+			}
+			if (e.increaseTo) {
+				if (!result.up?.increased) throw new Error(`${e.power} did not increase to ${e.increaseTo}: ${JSON.stringify(result.up)}`);
+				if (result.up.order !== e.increaseTo) throw new Error(`${e.power} increased to ${result.up.order}, expected ${e.increaseTo}`);
+				if (result.up.score !== e.increaseTo) throw new Error(`increased manifestation score ${result.up.score}, expected ${e.increaseTo}`);
+			}
+			return;
+		}
+		case "psionicConcentrationCap": {
+			const result = await charSheet.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				if (!state?.addConcentration) return {ok: false, reason: "concentration API missing"};
+				state.breakConcentration();
+				const pb = state.getProficiencyBonus();
+				const max = state.getPowerConcentrationMax();
+
+				for (let i = 0; i < max; ++i) {
+					state.addConcentration({id: `power:P${i}|X`, kind: "power", name: `P${i}`, order: 2});
+				}
+				const atCap = state.getPowerConcentrations().map((c: any) => c.name);
+				state.addConcentration({id: "power:Over|X", kind: "power", name: "Over", order: 2});
+				const pastCap = state.getPowerConcentrations().map((c: any) => c.name);
+
+				state.setConcentration("Haste", 3);
+				const afterSpell = {
+					powers: state.getPowerConcentrations().length,
+					spell: state.getSpellConcentration()?.name ?? null,
+				};
+				state.addConcentration({id: "power:Back|X", kind: "power", name: "Back", order: 2});
+				const afterPower = {
+					powers: state.getPowerConcentrations().length,
+					spell: state.getSpellConcentration()?.name ?? null,
+				};
+				state.breakConcentration();
+				return {ok: true, pb, max, atCap, pastCap, afterSpell, afterPower, cleared: state.getConcentrationCount()};
+			});
+			if (!result.ok) throw new Error(`psionicConcentrationCap unavailable: ${JSON.stringify(result)}`);
+			if (result.max !== result.pb) throw new Error(`power concentration cap ${result.max}, expected the proficiency bonus ${result.pb}`);
+			if (result.atCap.length !== result.max) throw new Error(`held ${result.atCap.length} powers, expected ${result.max}`);
+			if (result.pastCap.length !== result.max) throw new Error(`held ${result.pastCap.length} powers past the cap, expected ${result.max}`);
+			if (result.pastCap.includes(result.atCap[0])) throw new Error(`the oldest power "${result.atCap[0]}" was not evicted past the cap`);
+			if (result.afterSpell.powers !== 0) throw new Error(`casting a spell left ${result.afterSpell.powers} powers concentrated on`);
+			if (result.afterSpell.spell !== "Haste") throw new Error(`spell concentration did not take: ${result.afterSpell.spell}`);
+			if (result.afterPower.spell !== null) throw new Error(`manifesting a power left the spell "${result.afterPower.spell}" concentrated on`);
+			if (result.afterPower.powers !== 1) throw new Error(`expected 1 power after the spell was displaced, got ${result.afterPower.powers}`);
+			if (result.cleared !== 0) throw new Error(`breakConcentration() left ${result.cleared} entries`);
+			return;
+		}
+		case "psionicExertion": {
+			const result = await charSheet.page.evaluate((args) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state: any = cs?._state;
+				if (!state?.manifestPower || !state?.applyExertionToManifestation) return {ok: false, reason: "exertion API missing"};
+
+				const raw = (cs._psionicsData || []).find((p: any) => p.name === args.power);
+				if (!raw) return {ok: false, reason: `power "${args.power}" not in the loaded catalog`};
+				state.clearStrain();
+				state.breakConcentration();
+				state.endAllManifestations?.();
+				if (!state.getKnownPower(`${raw.name}|${raw.source || ""}`)) state.learnPsionicPower(raw);
+				const known = state.getKnownPower(`${raw.name}|${raw.source || ""}`);
+
+				// The character may not have picked these Exertions; grant them so the
+				// check is about whether they APPLY, not about the picker.
+				for (const name of [args.manifestationOption, args.outcomeOption]) {
+					if (!state._data.features.some((f: any) => f.name === name)) {
+						state.addFeature({name, level: 3, className: "Talent", source: "TalPsi", description: `${name} exertion`});
+					}
+				}
+				const known2 = state.getKnownExertions().map((x: any) => `${x.name}:${x.timing}`);
+
+				// 1. An at-manifestation option is charged during the manifestation.
+				const withExertion = state.manifestPower(known.id, {roll: 99, track: "mind", exertion: args.manifestationOption});
+				const afterManifest = state.getTotalStrain();
+
+				// 2. A FRESH manifestation (re-manifesting replaces the record) with no
+				//    up-front option, so the outcome option has room to apply.
+				state.clearStrain();
+				const plain = state.manifestPower(known.id, {roll: 99, track: "mind"});
+				const beforeOutcome = state.getTotalStrain();
+				const applied = state.applyExertionToManifestation(plain.manifestation?.id, args.outcomeOption, {track: "soul"});
+				const afterOutcome = state.getTotalStrain();
+
+				// 3. Only one Exertion may apply to a single manifestation.
+				const second = state.applyExertionToManifestation(plain.manifestation?.id, args.manifestationOption, {track: "soul"});
+
+				return {ok: true, known2, exertion: withExertion.exertion, afterManifest, beforeOutcome, applied, afterOutcome, second};
+			}, e);
+			if (!result.ok) throw new Error(`psionicExertion unavailable: ${JSON.stringify(result)}`);
+			if (!result.exertion?.name) throw new Error(`at-manifestation exertion "${e.manifestationOption}" was not applied: ${JSON.stringify(result)}`);
+			if (result.afterManifest < result.exertion.cost) throw new Error(`exertion cost ${result.exertion.cost} but only ${result.afterManifest} strain was charged`);
+			if (!result.applied?.ok) throw new Error(`outcome exertion "${e.outcomeOption}" was not applied: ${JSON.stringify(result.applied)}`);
+			if (result.afterOutcome <= result.beforeOutcome) throw new Error(`outcome exertion charged no strain (${result.beforeOutcome} → ${result.afterOutcome})`);
+			if (result.second?.ok) throw new Error(`a second exertion was allowed on the same manifestation`);
+			return;
+		}
+		case "psionicStrainToMaintain": {
+			const result = await charSheet.page.evaluate((args) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state: any = cs?._state;
+				if (!state?.payStrainToMaintain) return {ok: false, reason: "strain-to-maintain API missing"};
+				state.clearStrain();
+				state.breakConcentration();
+				state.endAllManifestations?.();
+
+				for (const name of args.powers) {
+					const raw = (cs._psionicsData || []).find((p: any) => p.name === name);
+					if (!raw) return {ok: false, reason: `power "${name}" not in the loaded catalog`};
+					if (!state.getKnownPower(`${raw.name}|${raw.source || ""}`)) state.learnPsionicPower(raw);
+					const known = state.getKnownPower(`${raw.name}|${raw.source || ""}`);
+					// Pick the first variant mode when the power has one, so concentration
+					// is actually registered.
+					const modeName = known.variantModes?.[0]?.name || null;
+					state.manifestPower(known.id, {roll: 99, track: "mind", modeName});
+				}
+
+				const concentrating = state.getPowerConcentrations().map((c: any) => `${c.name}@${c.order}`);
+				const quote = state.payStrainToMaintain({apply: false});
+				const before = state.getTotalStrain();
+				const paid = state.payStrainToMaintain({track: "soul"});
+				return {
+					ok: true, concentrating, quote, before, paid,
+					after: state.getTotalStrain(),
+					stillRunning: state.getPowerConcentrations().length,
+				};
+			}, e);
+			if (!result.ok) throw new Error(`psionicStrainToMaintain unavailable: ${JSON.stringify(result)}`);
+			if (result.quote?.cost !== e.expectCost) {
+				throw new Error(`Strain to Maintain quoted ${result.quote?.cost} for ${JSON.stringify(result.concentrating)}, expected ${e.expectCost}`);
+			}
+			if (result.before !== 0) throw new Error(`quoting the cost charged ${result.before} strain — it must not apply`);
+			if (!result.paid?.ok) throw new Error(`paying Strain to Maintain failed: ${JSON.stringify(result.paid)}`);
+			if (result.after !== e.expectCost) throw new Error(`paid ${result.after} strain, expected ${e.expectCost}`);
+			if (result.stillRunning !== e.powers.length) {
+				throw new Error(`paying should keep all ${e.powers.length} powers running, ${result.stillRunning} remain`);
+			}
+			return;
+		}
+		case "manifestationAdeptReroll": {			const result = await charSheet.page.evaluate((args) => {
 				const state: any = (globalThis as any).charSheet?._state;
 				if (!state?.rollManifestationTest) return {ok: false, reason: "manifestation API missing"};
 				const readUses = () => {

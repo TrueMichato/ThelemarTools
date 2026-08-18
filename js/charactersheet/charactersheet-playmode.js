@@ -1211,9 +1211,97 @@ export class CharacterSheetPlayMode {
 		this._renderAttacks();
 		this._renderItemPowers();
 		this._renderSpellsQuick();
+		this._renderPsionicPowersQuick();
 		this._renderFeaturesQuick();
 		this._renderCrafting();
 		this._renderResources();
+	}
+
+	/**
+	 * Psionic powers, mirroring `_renderSpellsQuick`.
+	 *
+	 * Play mode is about what you can do right now, so this leads with the two things a
+	 * manifester actually reads mid-turn: how much strain is left, and what is already
+	 * running. The full list lives in the Powers tab; this shows the at-will pool and the
+	 * powers most likely to be reached for.
+	 */
+	_renderPsionicPowersQuick () {
+		const state = this._state;
+		if (!state.isPsionicManifester?.()) return;
+		const powers = state.getKnownPowers?.() || [];
+		if (!powers.length) return;
+
+		const card = this._makeCard(this._elActionsHub, "spell", "Powers");
+
+		const calc = state.getFeatureCalculations();
+		const statRow = this._ce("div", "pm-spell-stats", card);
+		if (calc.powerSaveDc) {
+			this._ce("span", "pm-spell-stats__tag", statRow).textContent = `DC ${calc.powerSaveDc}`;
+		}
+		if (calc.powerAttackBonus != null) {
+			this._ce("span", "pm-spell-stats__tag", statRow).textContent = `${this._fmtMod(calc.powerAttackBonus)} attack`;
+		}
+		this._ce("span", "pm-spell-stats__tag", statRow).textContent = `${state.getManifestationDie()} manifestation`;
+
+		const max = state.getStrainMaximum();
+		const total = state.getTotalStrain();
+		const strainTag = this._ce("span", "pm-spell-stats__tag", statRow);
+		strainTag.textContent = `Strain ${total}/${max}`;
+
+		const concMax = state.getPowerConcentrationMax();
+		const active = state.getActiveManifestations();
+		if (active.length) {
+			this._ce("span", "pm-spell-stats__tag", statRow).textContent = `Concentrating ${state.getPowerConcentrations().length}/${concMax}`;
+			for (const m of active) {
+				const wrapper = this._ce("div", "pm-spell-wrapper", card);
+				const row = this._ce("div", "pm-spell", wrapper);
+				this._ce("span", "pm-spell__name", row).textContent = m.name;
+				this._ce("span", "pm-spell__level", row).textContent = `O${m.order}`;
+				this._ce("span", "pm-spell__meta", row).textContent = [m.modeName, m.concentration ? "conc." : null, "running"].filter(Boolean).join(" · ");
+				const btn = this._ce("button", "pm-spell__cast", row);
+				btn.textContent = "End";
+				btn.addEventListener("click", () => {
+					state.endManifestation(m.id);
+					this._page._saveCurrentCharacter?.();
+					this._page._renderCharacter?.();
+				});
+			}
+		}
+
+		// At-will powers first — they cost nothing and are the default move.
+		const ordered = [...powers.filter(p => p.isFirstOrder), ...powers.filter(p => !p.isFirstOrder)];
+		for (const power of ordered.slice(0, 10)) this._renderPsionicPowerRow(card, power);
+		if (ordered.length > 10) {
+			const expander = this._ce("div", "pm-expander", card);
+			const arrow = this._ce("span", "pm-expander__arrow", expander);
+			this._setIcon(arrow, "chevron-down");
+			expander.appendChild(document.createTextNode(` Show all ${ordered.length} powers`));
+			this._makeClickable(expander, "Show all powers", () => {
+				state.setViewMode?.("full");
+				this._page._renderCharacter?.();
+				document.querySelector("#charsheet-tabs a[href=\"#charsheet-tab-powers\"]")?.click();
+			});
+		}
+	}
+
+	_renderPsionicPowerRow (card, power) {
+		const wrapper = this._ce("div", "pm-spell-wrapper", card);
+		const row = this._ce("div", "pm-spell", wrapper);
+		this._ce("span", "pm-spell__name", row).textContent = power.name;
+		this._ce("span", "pm-spell__level", row).textContent = power.isFirstOrder ? "AW" : `O${power.order}`;
+		this._ce("span", "pm-spell__meta", row).textContent = [
+			power.meta?.manifestationTime,
+			power.disciplineLabel,
+			power.concentrates ? "conc." : null,
+		].filter(Boolean).join(" · ");
+
+		const btn = this._ce("button", "pm-spell__cast", row);
+		btn.textContent = "Manifest";
+		btn.addEventListener("click", async () => {
+			// One pipeline: play mode opens the same dialog the Powers tab does, so the
+			// two surfaces can never drift on what manifesting costs.
+			await this._page._powers?._pManifest(power);
+		});
 	}
 
 	_renderItemPowers () {

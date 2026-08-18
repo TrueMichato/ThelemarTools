@@ -141,9 +141,10 @@ describe("#16 Thelemar characters resolve _tgtt condition variants", () => {
 
 	it("an incapacitating _tgtt condition still breaks concentration for a Thelemar character", () => {
 		const state = makeThelemarCharacter();
-		state._data.concentrating = true;
+		state.setConcentration("Hold Person", 2);
+		expect(state.isConcentrating()).toBe(true);
 		state.addCondition({name: "Stunned", source: "Feature"});
-		expect(state._data.concentrating).toBeFalsy();
+		expect(state.isConcentrating()).toBe(false);
 	});
 
 	// -------------------------------------------------------------------------

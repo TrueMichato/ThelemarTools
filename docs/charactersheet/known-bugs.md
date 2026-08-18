@@ -9661,3 +9661,53 @@ Overview strip went from `Bee, Wild Resurgence` to `Wild Resurgence`.
 pre-existing, documented limitation, not one introduced here. Asserting a
 constellation's *effect* end-to-end needs a page-object that can drive the Druid
 Resources modal, which does not exist yet.
+
+---
+
+## CS-BUG-164 — the Concentration Check dialog rendered with no buttons at all — FIXED
+
+**Symptom.** Taking damage while concentrating opens the **Concentration Check**
+modal, correctly showing the DC, the roll needed and the bonus breakdown — and then
+nothing. There is no *Roll Check*, no *Skip (Keep)* and no *Break Concentration*
+button. The dialog can only be dismissed with the modal's own ✕, which resolves the
+promise without ever rolling. The concentration save was, in practice, unrollable
+from the sheet; players had to break concentration from the combat badge instead.
+
+**Root cause — `addEventListener` returns `undefined`.** All three buttons were
+built with the chained form:
+
+```js
+const btnRoll = e_({outer: `<button …>Roll Check</button>`})
+    .addEventListener("click", () => performRoll());
+```
+
+`e_` is `ElementUtil.getOrModify` (`js/utils.js:2012`). It returns an enhanced
+element, but it does **not** override `addEventListener`, so the chain evaluates to
+the DOM method's return value — `undefined`. `btnRoll`, `btnSkip` and `btnBreak` were
+therefore all `undefined`, and `btnRow.append(btnRoll, btnSkip, btnBreak)` appended
+nothing. The same mistake was repeated on the post-roll *Close* button.
+
+Nothing threw, so the bug was invisible to every non-DOM test: the modal opened, the
+information rendered, and only the controls were missing.
+
+**Fix.** Use `ElementUtil`'s own `click` option, which is the idiomatic form and
+returns the element:
+
+```js
+const btnRoll = e_({outer: `<button …>Roll Check</button>`, click: () => performRoll()});
+```
+
+**Found while** adding the Talent's *Strain to Maintain* to the failed-save branch of
+this dialog (see [17-talent-psionics.md](17-talent-psionics.md)) — the new affordance
+was unreachable because the roll that triggers it could not be made.
+
+**Two more instances, same defect.** A repo-wide sweep for the pattern found the
+level-up **Hit Points** radios (`charactersheet-levelup.js:2903`) built the same way,
+so *Take average* / *Roll* rendered as bare labels with no radio to click — the HP
+method was unselectable. Fixed with `e_({outer, change})`.
+
+**Lesson.** `e_({…}).addEventListener(…)` is always a bug in this codebase. Prefer
+`e_({outer, click})` / `e_({outer, change})`, or bind on a separate statement. A
+dialog that renders its *content* correctly can still be completely non-functional,
+and only a DOM-level check catches it — grep for
+`e_({…})\n\s*.addEventListener` when touching any dialog.

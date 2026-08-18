@@ -646,7 +646,7 @@ describe("Character Sheet Companions", () => {
 			});
 
 			// Start concentrating on a spell
-			state._data.concentrating = {spellName: "Summon Beast", spellLevel: 2};
+			state.setConcentration("Summon Beast", 2);
 
 			// Break concentration
 			state.breakConcentration();
@@ -659,7 +659,7 @@ describe("Character Sheet Companions", () => {
 			const id1 = state.addCompanion({name: "Summoned Beast", type: "summon", concentrationLinked: true});
 			const id2 = state.addCompanion({name: "Wolf", type: "beast_companion", concentrationLinked: false});
 
-			state._data.concentrating = {spellName: "Summon Beast", spellLevel: 2};
+			state.setConcentration("Summon Beast", 2);
 			state.breakConcentration();
 
 			expect(state.getCompanion(id1).active).toBe(false); // Dismissed

@@ -107,7 +107,7 @@ class CharacterSheetRest {
 				cbConc.onChange(() => { shouldBreakConcentration = cbConc.checked; });
 				ee`<label class="charsheet__rest-option">
 					${cbConc}
-					<span>🔮 Break Concentration (${concentration?.spellName || "unknown spell"})</span>
+					<span>🔮 Break Concentration (${this._state.getConcentrationLabel?.() || concentration?.spellName || "unknown spell"})</span>
 				</label>`.appendTo(condContainer);
 			}
 
@@ -626,7 +626,7 @@ class CharacterSheetRest {
 			if (isConcentrating) {
 				ee`<label class="charsheet__rest-option">
 					${cbBreakConcentration}
-					<span>🔮 Break Concentration (${concentration?.spellName || "unknown spell"})</span>
+					<span>🔮 Break Concentration (${this._state.getConcentrationLabel?.() || concentration?.spellName || "unknown spell"})</span>
 				</label>`.appendTo(condContainer);
 			}
 

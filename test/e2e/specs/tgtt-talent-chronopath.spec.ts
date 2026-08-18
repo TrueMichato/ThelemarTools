@@ -34,6 +34,16 @@ const TALENT_FEATURES: FeatureCheck[] = [
 			// strain equal to the power's order.
 			{kind: "manifestationTest", order: 2, roll: 4, expectStrain: 0},
 			{kind: "manifestationTest", order: 2, roll: 2, expectStrain: 1},
+			// Powers are first-class: a real power's prose metadata is parsed, it
+			// manifests through the one pipeline, and a concentrating power registers
+			// both a concentration entry and a running manifestation.
+			{kind: "psionicPowerModel", power: "Apparition", expectOrder: 1},
+			{kind: "psionicPowerModel", power: "Adapt", expectOrder: 2},
+			// The rule the old single-slot concentration model could not express.
+			{kind: "psionicConcentrationCap"},
+			// Strain to Maintain derives its own price from what is actually running:
+			// Apparition (1st) + Aura Projection… see the level-9 entry for the pair.
+			{kind: "psionicStrainToMaintain", powers: ["Apparition"], expectCost: 1},
 		],
 	},
 	{
@@ -86,7 +96,18 @@ const TALENT_FEATURES: FeatureCheck[] = [
 		kind: "pick",
 		pickedCount: 1,
 		pickedFrom: PSIONIC_EXERTIONS,
-		effects: [{kind: "featureCalculation", property: "psionicExertionsKnown", exact: 1}],
+		effects: [
+			{kind: "featureCalculation", property: "psionicExertionsKnown", exact: 1},
+			// Exertions must actually DO something. An at-manifestation option is
+			// charged during the manifestation; an outcome option is charged against
+			// the running manifestation afterwards; only one may apply to either.
+			{
+				kind: "psionicExertion",
+				power: "Adapt",
+				manifestationOption: "Shared Power",
+				outcomeOption: "Halting Power",
+			},
+		],
 	},
 
 	{level: 4, name: /ability score improvement/i, kind: "passive"},
@@ -102,6 +123,9 @@ const TALENT_FEATURES: FeatureCheck[] = [
 			{kind: "featureCalculation", property: "manifestationDie", exact: "1d6"},
 			{kind: "featureCalculation", property: "firstOrderPowersKnown", exact: 5},
 			{kind: "manifestationTest", order: 3, roll: 2, expectStrain: 3},
+			// Increased Order: manifesting a 2nd-order power at 3rd raises the
+			// manifestation score, which is the whole point of the mechanic.
+			{kind: "psionicPowerModel", power: "Adapt", expectOrder: 2, increaseTo: 3},
 			// CS-BUG-133: the Chronopathy Adept reroll is a real reroll, not a
 			// resource the sheet lets you spend on nothing. Same order and same
 			// failing first roll as the line above — the reroll must turn a

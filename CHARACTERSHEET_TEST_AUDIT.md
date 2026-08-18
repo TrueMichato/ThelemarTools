@@ -14,6 +14,7 @@ The character sheet test suite is in **good overall health**: **86 test files, 7
 6. **Infrastructure note**: `npm install` required before tests run — dependencies are not pre-installed in worktrees
 
 ### Previous Updates
+- ✅ **(Aug 2025)** Psionic powers made first-class: `CharacterSheetPowers.test.js` (parser, projection, `manifestPower()`, Psionic Exertion, Strain to Maintain, acquisition) and `CharacterSheetConcentration.test.js` (multi-slot concentration, PB cap, power/spell exclusion, legacy migration). See `docs/charactersheet/17-talent-psionics.md`.
 - ✅ **Gemstone Empowerment** has dedicated host-lifecycle/resource/rider/migration and Chalice storage suites.
 - ✅ **(Feb 2025)** All core class subclasses now have full mechanical calculations
 - ✅ **(Feb 2025)** TGTT (Thelemar) homebrew fully implemented (737+ tests)

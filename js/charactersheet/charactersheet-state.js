@@ -5034,6 +5034,20 @@ class CharacterSheetState {
 			// "Ignore Strain" (Talent 20) — the track whose EFFECTS are suppressed until the
 			// next long rest. One of "body" | "mind" | "soul" | null.
 			psionicStrainIgnored: null,
+			// Runtime psionics state. Deliberately holds NO record of which powers are
+			// known — that stays in `features`, written by the shared optional-feature
+			// picker, and is read back through `getKnownPowers()`. A parallel list here
+			// would be a second source of truth for the same fact.
+			psionics: {
+				// Powers currently running. See `manifestPower()` / `endManifestation()`.
+				activeManifestations: [],
+				// An in-progress "Learning from Others" study period, or null.
+				learning: null,
+				// Class level at which the once-per-level power swap was already spent.
+				replacementUsedAtLevel: null,
+				// Set when a learn-from-others roll failed; clears on a long rest.
+				learnLockedOut: false,
+			},
 
 			// Resources (class features, racial abilities, etc.)
 			resources: [], // [{id, name, current, max, recharge: "short"|"long"|"dawn"}]
@@ -5164,7 +5178,10 @@ class CharacterSheetState {
 			combatRound: 0,
 
 			// Concentration tracking
-			concentrating: null, // {spellName, spellLevel, startTime?} or null
+			concentrating: null, // Legacy single slot; migrated into `concentrations` on load
+			// Live concentration entries. RAW allows exactly one spell, or up to a psionic
+			// manifester's proficiency bonus in powers — never both. See `addConcentration`.
+			concentrations: [], // [{id, kind: "spell"|"power"|"ability", name, ...}]
 
 			// Pending spell choices (from feats/features that grant spell selection)
 			// Each choice: {id, featureName, featureId, filter, innate, uses, recharge, ability}
@@ -5423,6 +5440,32 @@ class CharacterSheetState {
 		}
 		if (!CharacterSheetState.PSIONIC_STRAIN_TRACKS.includes(this._data.psionicStrainIgnored)) {
 			this._data.psionicStrainIgnored = null;
+		}
+
+		// Migrate the legacy single concentration slot into the list. Saved characters
+		// predating multi-slot concentration store `concentrating: {…}`; the list is now
+		// authoritative and `getConcentration()` reads its head.
+		if (!Array.isArray(this._data.concentrations)) this._data.concentrations = [];
+		if (this._data.concentrating) {
+			const legacy = this._data.concentrating;
+			const id = legacy.id || (legacy.customAbilityId ? `ability:${legacy.customAbilityId}` : `spell:${legacy.spellName || legacy.name}`);
+			if (!this._data.concentrations.some(c => c.id === id)) {
+				this._data.concentrations.push({
+					...legacy,
+					id,
+					kind: legacy.kind || (legacy.customAbilityId ? "ability" : "spell"),
+				});
+			}
+			this._data.concentrating = null;
+		}
+
+		// Ensure the runtime psionics block exists (saves predating first-class powers).
+		if (!this._data.psionics || typeof this._data.psionics !== "object") {
+			this._data.psionics = {activeManifestations: [], learning: null, replacementUsedAtLevel: null, learnLockedOut: false};
+		} else {
+			if (!Array.isArray(this._data.psionics.activeManifestations)) this._data.psionics.activeManifestations = [];
+			if (this._data.psionics.learning != null && typeof this._data.psionics.learning !== "object") this._data.psionics.learning = null;
+			this._data.psionics.learnLockedOut = !!this._data.psionics.learnLockedOut;
 		}
 
 		// Ensure temporaryAttacks array exists (variant components system)
@@ -36015,7 +36058,11 @@ class CharacterSheetState {
 			const condDef = this._resolveConditionEffects(condObj.name, condObj.source);
 			const isIncapacitating = condDef?.effects?.some(e => e.type === "incapacitated" && e.value);
 			if (isIncapacitating) {
-				if (this._data.concentrating) this.breakConcentration();
+				if (this.isConcentrating()) this.breakConcentration();
+				// RAW: "If you become incapacitated or die, all of your current active
+				// powers end immediately" — including the ones that never needed
+				// concentration in the first place.
+				this.endAllManifestations();
 				this._deactivateStatesForEndCondition({isIncapacitated: true});
 			}
 
@@ -36824,6 +36871,17 @@ class CharacterSheetState {
 				const entity = all.find(s => s.id === idSuffix || s.name === idSuffix);
 				if (!entity) return {found: false};
 				const detail = entity.level === 0 ? "Cantrip" : `Level ${entity.level}`;
+				return {found: true, entity, detail};
+			}
+			case "power": {
+				// Powers are a projection, not a stored list, so resolve through the same
+				// getter the Powers tab uses rather than reaching into `features`.
+				const entity = this.getKnownPower(idSuffix);
+				if (!entity) return {found: false};
+				const running = this.getActiveManifestations().some(m => m.powerId === entity.id);
+				const detail = entity.isFirstOrder
+					? (running ? "At will · running" : "At will")
+					: `${CharacterSheetState._ordinalOrder(entity.order)}-order${running ? " · running" : ""}`;
 				return {found: true, entity, detail};
 			}
 			case "feature": {
@@ -38541,6 +38599,178 @@ class CharacterSheetState {
 		return level + 1;
 	}
 
+	// ==========================================
+	// Powers as first-class entities
+	// ==========================================
+
+	/**
+	 * The character's psionic-manifester class, resolved generically.
+	 *
+	 * The strain getters above are written against the Talent because the Talent is the
+	 * only class whose *table* they encode. Everything below is table-independent, so it
+	 * reads `PSIONIC_MANIFESTERS` instead and works for any future manifester.
+	 *
+	 * @returns {{cls: *, config: *, level: number}|null}
+	 */
+	getPsionicManifesterEntry () {
+		const CU = /** @type {*} */ (globalThis).CharacterSheetClassUtils;
+		if (!CU?.getPsionicManifesterConfig) return null;
+		for (const cls of (this._data.classes || [])) {
+			const config = CU.getPsionicManifesterConfig(cls.name, cls.source);
+			if (config) return {cls, config, level: cls.level || 0};
+		}
+		return null;
+	}
+
+	/** @returns {boolean} Whether the character manifests psionic powers at all. */
+	isPsionicManifester () {
+		return !!this.getPsionicManifesterEntry();
+	}
+
+	/**
+	 * Install the loaded `psionic` catalog so powers can be projected at full fidelity.
+	 *
+	 * Picked powers are stored in `features` by the shared optional-feature picker, which
+	 * is free to trim fields it does not need. The catalog is what guarantees the Powers
+	 * tab always has the full `entries`/`modes` to render, regardless of that trimming.
+	 * Not persisted — it is reference data, re-supplied on every load.
+	 *
+	 * @param {Array<*>} powers
+	 */
+	setPsionicCatalog (powers) {
+		this._psionicCatalog = new Map(
+			(Array.isArray(powers) ? powers : [])
+				.filter(p => p?.name)
+				.map(p => [`${p.name}|${p.source || ""}`.toLowerCase(), p]),
+		);
+	}
+
+	/** @returns {Array<*>} The raw psionic catalog, or an empty array when none is loaded. */
+	getPsionicCatalog () {
+		return this._psionicCatalog ? [...this._psionicCatalog.values()] : [];
+	}
+
+	/**
+	 * Is this stored feature a picked psionic power?
+	 *
+	 * Uses exactly the predicate `_detectPsionicActivation` uses, so the Powers tab and
+	 * the Use button can never disagree about what counts as a power.
+	 * @param {*} feature
+	 * @returns {boolean}
+	 */
+	static isPsionicPowerFeature (feature) {
+		return feature?._psionicOrder != null
+			&& (feature?.optionalFeatureTypes || feature?.featureType || []).some(it => typeof it === "string" && it.startsWith("PsiP"));
+	}
+
+	/**
+	 * Best available entity for a picked power: the catalog entry when loaded (full
+	 * `entries` and `modes`), otherwise the stored feature itself.
+	 * @param {*} feature
+	 * @returns {*}
+	 */
+	_resolvePsionicEntity (feature) {
+		const key = `${feature?.name}|${feature?.source || ""}`.toLowerCase();
+		return this._psionicCatalog?.get(key)
+			// A saved character may record no source; fall back to a name-only match.
+			|| (this._psionicCatalog ? [...this._psionicCatalog.values()].find(p => p.name === feature?.name) : null)
+			|| feature;
+	}
+
+	/**
+	 * Every psionic power the character knows, enriched with parsed metadata.
+	 *
+	 * Projection, not storage: the authoritative record of which powers are known stays
+	 * in `features`, written by the Builder / Level-Up / Quick Build optional-feature
+	 * picker. This joins those picks to the catalog and the parser so consumers get one
+	 * ready-to-render shape.
+	 *
+	 * @param {*} [opts]
+	 * @param {number} [opts.order] only powers of this order
+	 * @param {string} [opts.discipline] only powers of this discipline code ("TK")
+	 * @param {boolean} [opts.firstOrderOnly]
+	 * @param {boolean} [opts.higherOrderOnly]
+	 * @returns {Array<*>}
+	 */
+	getKnownPowers ({order = null, discipline = null, firstOrderOnly = false, higherOrderOnly = false} = {}) {
+		const CU = /** @type {*} */ (globalThis).CharacterSheetClassUtils;
+		if (!CU?.parsePsionicPower) return [];
+		const config = this.getPsionicManifesterEntry()?.config || null;
+
+		return (this._data.features || [])
+			.filter(f => CharacterSheetState.isPsionicPowerFeature(f))
+			.map(feature => {
+				const entity = this._resolvePsionicEntity(feature);
+				const parsed = CU.parsePsionicPower(entity) || {};
+				const powerOrder = feature._psionicOrder || parsed.order || 0;
+				const code = feature._psionicPowerType || parsed.discipline || null;
+				return {
+					id: `${feature.name}|${feature.source || ""}`,
+					name: feature.name,
+					source: feature.source || "",
+					order: powerOrder,
+					isFirstOrder: powerOrder === 1,
+					discipline: code,
+					disciplineLabel: (code && config?.disciplines?.[code]?.discipline) || null,
+					meta: parsed.meta || {},
+					body: parsed.body || [],
+					modes: parsed.modes || [],
+					orderModes: parsed.orderModes || [],
+					levelModes: parsed.levelModes || [],
+					variantModes: parsed.variantModes || [],
+					increasedOrder: parsed.increasedOrder || null,
+					concentrates: !!parsed.concentrates,
+					feature,
+					entity,
+				};
+			})
+			.filter(p => {
+				if (order != null && p.order !== order) return false;
+				if (discipline && p.discipline !== discipline) return false;
+				if (firstOrderOnly && !p.isFirstOrder) return false;
+				if (higherOrderOnly && p.isFirstOrder) return false;
+				return true;
+			})
+			.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+	}
+
+	/**
+	 * One known power by its `name|source` id (source-insensitive fallback).
+	 * @param {string} id
+	 * @returns {*} null when not known
+	 */
+	getKnownPower (id) {
+		if (!id) return null;
+		const needle = String(id).toLowerCase();
+		const all = this.getKnownPowers();
+		return all.find(p => p.id.toLowerCase() === needle)
+			|| all.find(p => p.name.toLowerCase() === needle.split("|")[0])
+			|| null;
+	}
+
+	/**
+	 * How full each of the two powers-known pools is.
+	 * @returns {{firstOrder: {used: number, max: number}, higherOrder: {used: number, max: number}}}
+	 */
+	getPowersKnownBudget () {
+		const known = this.getKnownPowers();
+		return {
+			firstOrder: {used: known.filter(p => p.isFirstOrder).length, max: this.getFirstOrderPowersKnown()},
+			higherOrder: {used: known.filter(p => !p.isFirstOrder).length, max: this.getHigherOrderPowersKnown()},
+		};
+	}
+
+	/**
+	 * How many powers can be concentrated on at once.
+	 *
+	 * RAW: "you can simultaneously maintain concentration on a number of powers equal to
+	 * your proficiency bonus" — unlike spells, which are always one.
+	 * @returns {number} 0 when the character is not a manifester
+	 */
+	getPowerConcentrationMax () {
+		return this.isPsionicManifester() ? this.getProficiencyBonus() : 0;
+	}
+
 	/** @returns {{body: number, mind: number, soul: number}} A copy of the strain tracks. */
 	getStrain () {
 		const raw = this._data.psionicStrain || {};
@@ -38901,6 +39131,446 @@ class CharacterSheetState {
 		};
 	}
 
+	// ==========================================
+	// Manifesting: the one pipeline every caller uses
+	// ==========================================
+
+	/** Ordinal form of a power order, without depending on `Parser` being loaded. */
+	static _ordinalOrder (n) {
+		const num = Number(n) || 0;
+		const suffix = num === 1 ? "st" : num === 2 ? "nd" : num === 3 ? "rd" : "th";
+		return `${num}${suffix}`;
+	}
+
+	/** @returns {Array<*>} Powers currently running, oldest first. */
+	getActiveManifestations () {
+		if (!Array.isArray(this._data.psionics?.activeManifestations)) {
+			this._data.psionics = {...(this._data.psionics || {}), activeManifestations: []};
+		}
+		return this._data.psionics.activeManifestations;
+	}
+
+	/**
+	 * The Psionic Exertion options the character has actually picked.
+	 * @param {*} [opts]
+	 * @param {string} [opts.timing] "manifestation" | "outcome"
+	 * @returns {Array<*>} entries from `PSIONIC_EXERTIONS`, augmented with `featureName`
+	 */
+	getKnownExertions ({timing = null} = {}) {
+		const CU = /** @type {*} */ (globalThis).CharacterSheetClassUtils;
+		if (!CU?.getPsionicExertion) return [];
+		return (this._data.features || [])
+			.map(f => {
+				const def = CU.getPsionicExertion(f.name);
+				return def ? {...def, featureName: f.name} : null;
+			})
+			.filter(Boolean)
+			.filter(e => !timing || e.timing === timing)
+			// The same option can be granted twice by a malformed save; show it once.
+			.filter((e, i, arr) => arr.findIndex(o => o.name === e.name) === i);
+	}
+
+	/**
+	 * The strain an Exertion costs for a power of this order.
+	 * @param {string} exertionName
+	 * @param {*} [opts]
+	 * @param {number} [opts.powerOrder]
+	 * @param {number} [opts.costOverride] one of the option's `costOptions` values
+	 * @returns {number} 0 when the option is unknown
+	 */
+	getExertionStrainCost (exertionName, {powerOrder = 0, costOverride = null} = {}) {
+		const CU = /** @type {*} */ (globalThis).CharacterSheetClassUtils;
+		const def = CU?.getPsionicExertion?.(exertionName);
+		if (!def) return 0;
+		if (costOverride != null && def.costOptions?.some(o => o.cost === Number(costOverride))) return Number(costOverride);
+		return this.resolvePsionicStrainCost(def.cost, {powerOrder}) || 0;
+	}
+
+	/**
+	 * Manifest a power: the single entry point the dialog, the tests and any future
+	 * automation all share.
+	 *
+	 * Everything that makes manifesting more than "roll a die" happens here, in one
+	 * ordered pass, so no caller can get a partial application:
+	 *
+	 * 1. validate the order (never below the power's own, never above what the class
+	 *    table allows, never above 6);
+	 * 2. derive the manifestation score from *actual* concentration, so the player is
+	 *    never asked to compute their own cost;
+	 * 3. roll the manifestation test (Adept reroll and Reduce Stress included);
+	 * 4. charge any at-manifestation Exertion;
+	 * 5. register concentration when the chosen order/mode requires it, which is what
+	 *    enforces "no multiples of the same power" and the proficiency-bonus cap;
+	 * 6. record the running manifestation.
+	 *
+	 * On overflow nothing is committed beyond the roll — the caller resolves the RAW
+	 * "manifest and die / decline and drop to 0 hp" choice via `resolveStrainOverflow()`.
+	 *
+	 * @param {string} powerId `name|source` of a known power
+	 * @param {*} [opts]
+	 * @param {number} [opts.order] the order to manifest at (defaults to the power's own)
+	 * @param {string} [opts.modeName] chosen variant mode
+	 * @param {string} [opts.exertion] an at-manifestation Exertion to spend
+	 * @param {number} [opts.exertionCost] which `costOptions` price to pay
+	 * @param {string} [opts.track] strain track to charge
+	 * @param {number} [opts.roll] forced die result (tests)
+	 * @param {number} [opts.rerollResult] forced reroll result (tests)
+	 * @param {boolean} [opts.useAdeptReroll]
+	 * @param {boolean} [opts.useReduceStress]
+	 * @param {string} [opts.replaceConcentrationId] which power to drop when at the cap
+	 * @returns {*} `{ok, reason?}` on rejection, else the full result
+	 */
+	manifestPower (powerId, {
+		order = null, modeName = null, exertion = null, exertionCost = null, track = "body",
+		roll = null, rerollResult = null, useAdeptReroll = false, useReduceStress = false,
+		replaceConcentrationId = null,
+	} = {}) {
+		const CU = /** @type {*} */ (globalThis).CharacterSheetClassUtils;
+		const power = this.getKnownPower(powerId);
+		if (!power) return {ok: false, reason: "unknown-power"};
+
+		const maxOrder = Math.min(this.getMaxPowerOrder() || 0, CU?.PSIONIC_MAX_ORDER || 6);
+		const atOrder = Math.max(power.order, Math.floor(Number(order) || power.order));
+		// A 1st-order power is at-will and is never "increased"; everything else is capped
+		// by the class table, so the dialog can never commit an illegal manifestation.
+		if (!power.isFirstOrder && atOrder > maxOrder) return {ok: false, reason: "order-too-high", maxOrder};
+
+		// The score counts the OTHER powers being concentrated on. Re-manifesting a power
+		// already running does not count itself, since it will replace its own entry.
+		const others = this.getPowerConcentrations().filter(c => c.id !== `power:${power.id}`).length;
+
+		const test = this.rollManifestationTest(atOrder, {
+			roll,
+			rerollResult,
+			concentratingOn: others,
+			track,
+			apply: true,
+			powerType: power.discipline,
+			useAdeptReroll,
+			useReduceStress,
+		});
+		if (!test) return {ok: false, reason: "not-a-manifester"};
+		if (test.overflow) return {ok: false, reason: "overflow", test, order: atOrder, power};
+
+		// Exertions are priced off the order actually manifested at, not the base order.
+		let exertionApplied = null;
+		if (exertion) {
+			const def = CU?.getPsionicExertion?.(exertion);
+			if (def && def.timing === "manifestation") {
+				const cost = this.getExertionStrainCost(exertion, {powerOrder: atOrder, costOverride: exertionCost});
+				// `addStrain` fills to the maximum and reports the overflow, so an Exertion
+				// has to be priced BEFORE it is charged — a partial payment would buy a
+				// benefit the character cannot actually afford.
+				const wouldOverflow = cost > 0 && this.getTotalStrain() + cost > this.getStrainMaximum();
+				const applied = cost > 0 && !wouldOverflow ? this.addStrain(cost, track).applied : 0;
+				exertionApplied = {name: def.name, cost, applied, overflow: wouldOverflow};
+			}
+		}
+
+		const concentration = CU?.getPsionicPowerConcentration?.(power.entity, {
+			order: atOrder, modeName, characterLevel: this.getTotalLevel(),
+		}) || null;
+
+		let droppedConcentrations = [];
+		if (concentration) {
+			const {dropped} = this.addConcentration({
+				id: `power:${power.id}`,
+				kind: "power",
+				name: power.name,
+				source: power.source,
+				order: atOrder,
+				modeName,
+				duration: concentration,
+			}, {replaceId: replaceConcentrationId});
+			droppedConcentrations = dropped;
+		} else {
+			// Re-manifesting the same power in a mode or at an order that does NOT
+			// concentrate must release the slot the previous manifestation held. Without
+			// this the orphaned entry keeps inflating every future manifestation score.
+			this._dropConcentrationsWhere(c => c.id === `power:${power.id}`);
+		}
+
+		const active = this.getActiveManifestations();
+		// RAW: "You can't have multiple manifestations of the same power active at once."
+		const priorIdx = active.findIndex(m => m.powerId === power.id);
+		if (priorIdx >= 0) active.splice(priorIdx, 1);
+		// A dropped concentration means that power ended, so it stops being active too.
+		for (const dropped of droppedConcentrations) {
+			const idx = active.findIndex(m => `power:${m.powerId}` === dropped.id);
+			if (idx >= 0) active.splice(idx, 1);
+		}
+
+		const record = {
+			id: `manifestation:${power.id}:${Date.now()}`,
+			powerId: power.id,
+			name: power.name,
+			source: power.source,
+			order: atOrder,
+			baseOrder: power.order,
+			modeName,
+			discipline: power.discipline,
+			concentration,
+			// Only an Exertion that was actually PAID counts against the one-per-power
+			// limit. On overflow nothing is charged and no benefit is gained, so locking
+			// the player out of every outcome Exertion would penalise them for an
+			// Exertion that never happened.
+			exertionUsed: exertionApplied && !exertionApplied.overflow ? exertionApplied.name : null,
+			startedAt: Date.now(),
+		};
+		active.push(record);
+
+		return {
+			ok: true,
+			power,
+			order: atOrder,
+			increased: atOrder > power.order,
+			modeName,
+			test,
+			exertion: exertionApplied,
+			concentration,
+			droppedConcentrations,
+			manifestation: record,
+			totalStrain: this.getTotalStrain(),
+		};
+	}
+
+	/**
+	 * End a running manifestation. RAW this is free and can be done at any point on the
+	 * character's turn, so there is no cost or gate here.
+	 * @param {string} id the manifestation record's id, or the power's `name|source`
+	 * @returns {boolean} whether anything was ended
+	 */
+	endManifestation (id) {
+		if (!id) return false;
+		const active = this.getActiveManifestations();
+		const needle = String(id).toLowerCase();
+		const idx = active.findIndex(m => String(m.id).toLowerCase() === needle || String(m.powerId).toLowerCase() === needle);
+		if (idx < 0) return false;
+		const [ended] = active.splice(idx, 1);
+		this.breakConcentration(`power:${ended.powerId}`);
+		return true;
+	}
+
+	/** End every running manifestation — incapacitation, death, and long rests. */
+	endAllManifestations () {
+		const active = this.getActiveManifestations();
+		if (!active.length) return 0;
+		const n = active.length;
+		for (const m of [...active]) this.breakConcentration(`power:${m.powerId}`);
+		active.length = 0;
+		return n;
+	}
+
+	/**
+	 * Apply an Exertion that triggers on a manifestation's outcome (a hit, a failed save,
+	 * a successful save), after the fact.
+	 * @param {string} manifestationId
+	 * @param {string} exertionName
+	 * @param {*} [opts]
+	 * @param {string} [opts.track]
+	 * @param {number} [opts.costOverride]
+	 * @returns {*} `{ok, reason?}` on rejection, else `{name, cost, applied}`
+	 */
+	applyExertionToManifestation (manifestationId, exertionName, {track = "body", costOverride = null} = {}) {
+		const CU = /** @type {*} */ (globalThis).CharacterSheetClassUtils;
+		const record = this.getActiveManifestations().find(m => m.id === manifestationId);
+		if (!record) return {ok: false, reason: "unknown-manifestation"};
+		const def = CU?.getPsionicExertion?.(exertionName);
+		if (!def) return {ok: false, reason: "unknown-exertion"};
+		// RAW: "You can use only one Psionic Exertion option on a power when you manifest it."
+		if (record.exertionUsed) return {ok: false, reason: "already-exerted", exertionUsed: record.exertionUsed};
+
+		const cost = this.getExertionStrainCost(exertionName, {powerOrder: record.order, costOverride});
+		// Priced before it is charged: `addStrain` would otherwise fill to the maximum and
+		// leave the character having part-paid for a benefit they cannot afford.
+		if (cost > 0 && this.getTotalStrain() + cost > this.getStrainMaximum()) return {ok: false, reason: "overflow", cost};
+		const applied = cost > 0 ? this.addStrain(cost, track).applied : 0;
+		record.exertionUsed = def.name;
+		return {ok: true, name: def.name, cost, applied};
+	}
+
+	// ==========================================
+	// Acquiring powers
+	// ==========================================
+
+	/**
+	 * RAW study period for learning an observed power, keyed by its baseline order.
+	 * ("Learning New Powers" table, Talent 1.)
+	 */
+	static PSIONIC_LEARNING_DAYS = Object.freeze({2: 1, 3: 4, 4: 8, 5: 12, 6: 16});
+
+	/**
+	 * Record a picked power in `features` — the same shape the shared optional-feature
+	 * picker writes, so a power learned here is indistinguishable from one picked at
+	 * level-up and needs no special handling anywhere downstream.
+	 * @param {*} power a raw catalog entity
+	 * @returns {boolean}
+	 */
+	learnPsionicPower (power) {
+		const CU = /** @type {*} */ (globalThis).CharacterSheetClassUtils;
+		if (!power?.name || !CU) return false;
+		const order = CU.getPsionicPowerOrder(power);
+		const config = this.getPsionicManifesterEntry()?.config;
+		if (!order || !config) return false;
+		if (this.getKnownPower(`${power.name}|${power.source || ""}`)) return false;
+
+		this.addFeature({
+			name: power.name,
+			source: power.source,
+			level: this.getTotalLevel(),
+			className: config.className,
+			optionalFeatureTypes: [order === 1 ? config.firstOrderType : config.higherOrderType],
+			_entityType: "psionicPower",
+			_psionicOrder: order,
+			_psionicPowerType: power._psionicPowerType || power.type || null,
+			entries: power.entries,
+			modes: power.modes,
+		});
+		return true;
+	}
+
+	/**
+	 * Whether the once-per-level power swap is still available.
+	 * @returns {boolean}
+	 */
+	canReplacePower () {
+		const entry = this.getPsionicManifesterEntry();
+		if (!entry) return false;
+		return this._data.psionics?.replacementUsedAtLevel !== entry.level;
+	}
+
+	/**
+	 * Which powers may replace `outgoingId`.
+	 *
+	 * RAW: "replace it with another power of the same order or lower (minimum 2nd order)".
+	 * 1st-order powers are a separate, fixed pool and are not swapped this way.
+	 * @param {string} outgoingId
+	 * @returns {Array<*>} catalog entities
+	 */
+	getPowerReplacementCandidates (outgoingId) {
+		const CU = /** @type {*} */ (globalThis).CharacterSheetClassUtils;
+		const outgoing = this.getKnownPower(outgoingId);
+		if (!outgoing || outgoing.isFirstOrder || !CU) return [];
+		const known = new Set(this.getKnownPowers().map(p => p.id.toLowerCase()));
+		return this.getPsionicCatalog()
+			.filter(p => {
+				const order = CU.getPsionicPowerOrder(p);
+				return order >= 2 && order <= outgoing.order
+					&& !known.has(`${p.name}|${p.source || ""}`.toLowerCase());
+			})
+			.sort((a, b) => CU.getPsionicPowerOrder(a) - CU.getPsionicPowerOrder(b) || a.name.localeCompare(b.name));
+	}
+
+	/**
+	 * Swap one known power for another, spending the once-per-level replacement.
+	 * @param {string} outgoingId
+	 * @param {*} incomingPower a raw catalog entity
+	 * @returns {*} `{ok, reason?}`
+	 */
+	replacePsionicPower (outgoingId, incomingPower) {
+		const entry = this.getPsionicManifesterEntry();
+		if (!entry) return {ok: false, reason: "not-a-manifester"};
+		if (!this.canReplacePower()) return {ok: false, reason: "already-replaced"};
+		const outgoing = this.getKnownPower(outgoingId);
+		if (!outgoing) return {ok: false, reason: "unknown-power"};
+		if (outgoing.isFirstOrder) return {ok: false, reason: "first-order"};
+
+		const CU = /** @type {*} */ (globalThis).CharacterSheetClassUtils;
+		const incomingOrder = CU?.getPsionicPowerOrder(incomingPower) || 0;
+		if (incomingOrder < 2 || incomingOrder > outgoing.order) return {ok: false, reason: "order-mismatch", maxOrder: outgoing.order};
+		if (this.getKnownPower(`${incomingPower.name}|${incomingPower.source || ""}`)) return {ok: false, reason: "already-known"};
+
+		// A power being swapped away stops running.
+		this.endManifestation(outgoing.id);
+		this.removeFeature(outgoing.feature.id || outgoing.name, outgoing.source);
+		if (!this.learnPsionicPower(incomingPower)) return {ok: false, reason: "learn-failed"};
+		this._data.psionics.replacementUsedAtLevel = entry.level;
+		return {ok: true, outgoing: outgoing.name, incoming: incomingPower.name};
+	}
+
+	/** @returns {*} The in-progress "Learning from Others" study, or null. */
+	getPowerLearningProgress () {
+		return this._data.psionics?.learning || null;
+	}
+
+	/** @returns {boolean} Whether a failed attempt has locked out learning until a long rest. */
+	isPowerLearningLockedOut () {
+		return !!this._data.psionics?.learnLockedOut;
+	}
+
+	/**
+	 * "Learning from Others" (Talent 1): react to another creature manifesting a power by
+	 * rolling the manifestation die against the power's BASELINE order (never the order it
+	 * was manifested at). Beating it starts a study period; failing locks the character
+	 * out until a long rest.
+	 *
+	 * @param {*} power a raw catalog entity
+	 * @param {*} [opts]
+	 * @param {number} [opts.roll] forced die result (tests)
+	 * @returns {*} `{ok, reason?}` or `{ok:true, learned:false, roll, order, days}`
+	 */
+	rollLearnFromOthers (power, {roll = null} = {}) {
+		const CU = /** @type {*} */ (globalThis).CharacterSheetClassUtils;
+		if (!this.getPsionicManifesterEntry()) return {ok: false, reason: "not-a-manifester"};
+		if (this.isPowerLearningLockedOut()) return {ok: false, reason: "locked-out"};
+		if (this.getPowerLearningProgress()) return {ok: false, reason: "already-learning"};
+
+		const order = CU?.getPsionicPowerOrder(power) || 0;
+		if (order < 2) return {ok: false, reason: "first-order"};
+		if (order > this.getMaxPowerOrder()) return {ok: false, reason: "order-too-high"};
+		if (this.getKnownPower(`${power.name}|${power.source || ""}`)) return {ok: false, reason: "already-known"};
+
+		const faces = Number((this.getManifestationDie().match(/d(\d+)/i) || [])[1]) || 4;
+		const result = Number.isFinite(roll) ? Math.max(1, Math.floor(Number(roll))) : RollerUtil.randomise(faces);
+
+		if (result <= order) {
+			this._data.psionics.learnLockedOut = true;
+			return {ok: true, learned: false, roll: result, order, die: this.getManifestationDie()};
+		}
+
+		const days = CharacterSheetState.PSIONIC_LEARNING_DAYS[order] || 1;
+		this._data.psionics.learning = {
+			name: power.name,
+			source: power.source || "",
+			order,
+			daysRequired: days,
+			daysDone: 0,
+			startedAt: Date.now(),
+		};
+		return {ok: true, learned: false, started: true, roll: result, order, days, die: this.getManifestationDie()};
+	}
+
+	/**
+	 * Log one day of the study period. RAW requires an hour of practice each day, and
+	 * completing the period is what actually teaches the power.
+	 * @returns {*} `{ok, reason?}` or `{ok:true, daysDone, daysRequired, complete}`
+	 */
+	advancePowerLearning () {
+		const learning = this.getPowerLearningProgress();
+		if (!learning) return {ok: false, reason: "not-learning"};
+		learning.daysDone = Math.min(learning.daysRequired, (learning.daysDone || 0) + 1);
+		if (learning.daysDone < learning.daysRequired) {
+			return {ok: true, daysDone: learning.daysDone, daysRequired: learning.daysRequired, complete: false};
+		}
+
+		const catalogEntry = this.getPsionicCatalog().find(p => p.name === learning.name)
+			|| {name: learning.name, source: learning.source, order: `${learning.order}th-Order`};
+		this.learnPsionicPower(catalogEntry);
+		this._data.psionics.learning = null;
+		return {ok: true, daysDone: learning.daysRequired, daysRequired: learning.daysRequired, complete: true, name: learning.name};
+	}
+
+	/**
+	 * Abandon the study period. RAW, starting a different power forfeits the progress and
+	 * the power must be observed again, so nothing is preserved.
+	 * @returns {boolean}
+	 */
+	abandonPowerLearning () {
+		if (!this._data.psionics?.learning) return false;
+		this._data.psionics.learning = null;
+		return true;
+	}
+
 	/**
 	 * Whether a "<Discipline> Adept" reroll is available for a power of this discipline.
 	 *
@@ -38995,20 +39665,39 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Strain to Maintain (Talent 1): pay strain equal to the summed order of the powers
-	 * being concentrated on instead of dropping concentration.
-	 * @param {number} summedOrder sum of the orders of the maintained powers
-	 * @param {string} [track]
-	 * @returns {{applied: number, overflow: boolean, total: number, max: number}|null}
+	 * Strain to Maintain (Talent 1): keep every concentrated-on power alive through a
+	 * failed concentration save, at a cost of the summed order of those powers.
+	 *
+	 * The cost is derived from what is *actually* being concentrated on. It can still be
+	 * passed explicitly — a table ruling, or a caller that already knows the sum — which
+	 * is also the original signature, `payStrainToMaintain(3, "soul")`.
+	 *
+	 * @param {number|*} [summedOrderOrOpts] the summed order, or an options object
+	 * @param {string} [trackArg] strain track, when called with a number
+	 * @returns {*} null when not a manifester, else
+	 *   `{ok, reason?, cost, applied, overflow, total, max, powers}`
 	 */
-	payStrainToMaintain (summedOrder, track = "mind") {
+	payStrainToMaintain (summedOrderOrOpts = null, trackArg = "mind") {
 		if (!this.getTalentLevel()) return null;
-		const cost = Math.max(1, Math.floor(Number(summedOrder) || 1));
-		const projected = this.getTotalStrain() + cost;
-		if (projected > this.getStrainMaximum()) {
-			return {applied: 0, overflow: true, total: this.getTotalStrain(), max: this.getStrainMaximum()};
-		}
-		return this.addStrain(cost, track);
+		const isOpts = summedOrderOrOpts != null && typeof summedOrderOrOpts === "object";
+		const {track = trackArg, apply = true} = isOpts ? summedOrderOrOpts : {};
+		const explicit = isOpts ? summedOrderOrOpts.summedOrder : summedOrderOrOpts;
+
+		const powers = this.getPowerConcentrations();
+		const derived = powers.reduce((sum, p) => sum + (Number(p.order) || 0), 0);
+		const cost = Number.isFinite(Number(explicit)) && Number(explicit) > 0
+			? Math.max(1, Math.floor(Number(explicit)))
+			: derived;
+
+		const total = this.getTotalStrain();
+		const max = this.getStrainMaximum();
+		const names = powers.map(p => p.name);
+		if (!cost) return {ok: false, reason: "no-powers", cost: 0, applied: 0, overflow: false, total, max, powers: names};
+		if (!apply) return {ok: true, cost, applied: 0, overflow: false, total, max, powers: names};
+		if (total + cost > max) return {ok: false, reason: "overflow", cost, applied: 0, overflow: true, total, max, powers: names};
+
+		const {applied} = this.addStrain(cost, track);
+		return {ok: true, cost, applied, overflow: false, total: this.getTotalStrain(), max, powers: names};
 	}
 
 	/**
@@ -39733,7 +40422,7 @@ class CharacterSheetState {
 			dc: 8,
 			bonus: this.getSaveMod("wis"),
 			advantage: !!calc.hasBrandOfTheVoracious,
-			automaticFailure: !!this._data.concentrating || this.isStateTypeActive("rage"),
+			automaticFailure: this.isConcentrating() || this.isStateTypeActive("rage"),
 		};
 	}
 
@@ -48948,13 +49637,13 @@ class CharacterSheetState {
 		if (ability.isActive) {
 			// Handle concentration - break existing and set new
 			if (ability.concentration) {
-				this.breakConcentration();
-				this._data.concentrating = {
+				this.addConcentration({
+					id: `ability:${ability.id}`,
+					kind: "ability",
 					name: ability.name,
 					spellName: null,
 					customAbilityId: ability.id,
-					startedAt: Date.now(),
-				};
+				});
 			}
 			this._registerCustomAbilityEffects(ability);
 
@@ -48971,8 +49660,8 @@ class CharacterSheetState {
 			}
 		} else {
 			// Clear concentration if this ability was concentrating
-			if (ability.concentration && this._data.concentrating?.customAbilityId === id) {
-				this._data.concentrating = null;
+			if (ability.concentration) {
+				this._dropConcentrationsWhere(c => c.customAbilityId === id);
 			}
 			this._unregisterCustomAbilityEffects(id);
 		}
@@ -59169,7 +59858,7 @@ class CharacterSheetState {
 				this.deactivateState(exclusiveId);
 			}
 		}
-		if (stateType?.breaksConcentration && this._data.concentrating) {
+		if (stateType?.breaksConcentration && this.isConcentrating()) {
 			this.breakConcentration();
 		}
 
@@ -59354,7 +60043,7 @@ class CharacterSheetState {
 		}
 
 		// States that break concentration (e.g., Rage prevents spellcasting)
-		if (stateType?.breaksConcentration && this._data.concentrating) {
+		if (stateType?.breaksConcentration && this.isConcentrating()) {
 			this.breakConcentration();
 		}
 
@@ -59839,13 +60528,15 @@ class CharacterSheetState {
 				// duration expired during combat left its granted condition stuck.
 				this._removeStateAddedConditions(state);
 
-				// If this was a spell effect that matches the concentrated spell, do full cleanup
-				if (state.isSpellEffect && this._data.concentrating?.spellName === state.name) {
-					this._data.concentrating = null;
+				// If this was a spell effect that matches a concentrated spell, do full cleanup
+				if (state.isSpellEffect && this.getConcentrations().some(c => c.name === state.name || c.spellName === state.name)) {
+					this._dropConcentrationsWhere(c => c.name === state.name || c.spellName === state.name);
 					this.dismissConcentrationCompanions();
 					// Also remove legacy "concentration" state type if exists
-					const concState = this._data.activeStates.find(s => s.stateTypeId === "concentration");
-					if (concState) this.removeActiveState(concState.id);
+					if (!this.getConcentrationCount()) {
+						const concState = this._data.activeStates.find(s => s.stateTypeId === "concentration");
+						if (concState) this.removeActiveState(concState.id);
+					}
 				}
 
 				// If this was a custom ability state, toggle off the ability
@@ -59854,8 +60545,8 @@ class CharacterSheetState {
 					if (ability && ability.isActive) {
 						ability.isActive = false;
 						// Clear concentration if this ability was concentrating
-						if (ability.concentration && this._data.concentrating?.customAbilityId === ability.id) {
-							this._data.concentrating = null;
+						if (ability.concentration) {
+							this._dropConcentrationsWhere(c => c.customAbilityId === ability.id);
 						}
 						// Unregister effects (named modifiers)
 						this._unregisterCustomAbilityEffects(ability.id);
@@ -61131,11 +61822,133 @@ class CharacterSheetState {
 	// --- Concentration Management ---
 
 	/**
-	 * Get current concentration info
-	 * @returns {object|null} The concentration info or null
+	 * Every effect currently being concentrated on.
+	 *
+	 * Concentration is a LIST, not a slot, because a psionic manifester maintains up to
+	 * their proficiency bonus in powers at once ("Psionics · Duration · Concentration").
+	 * Spells remain one-at-a-time, and a spell and a power can never coexist — both rules
+	 * are enforced centrally in `addConcentration()` rather than at each call site.
+	 *
+	 * @returns {Array<*>}
+	 */
+	getConcentrations () {
+		if (!Array.isArray(this._data.concentrations)) this._data.concentrations = [];
+		return this._data.concentrations;
+	}
+
+	/** @returns {number} How many effects are being concentrated on. */
+	getConcentrationCount () {
+		return this.getConcentrations().length;
+	}
+
+	/**
+	 * The primary concentration — the first entry.
+	 *
+	 * Back-compat shim. Every pre-existing caller assumed a single slot and reads
+	 * `.spellName` / `.spellLevel` off the result, so single-spell characters see exactly
+	 * the behaviour they always did.
+	 * @returns {object|null}
 	 */
 	getConcentration () {
-		return this._data.concentrating;
+		return this.getConcentrations()[0] || null;
+	}
+
+	/**
+	 * A human label naming EVERYTHING currently concentrated on.
+	 *
+	 * The single-slot surfaces that predate powers (the combat badge, the rest modals,
+	 * the active-states list) read `getConcentration().spellName` — one name — but their
+	 * controls call `breakConcentration()`, which ends the whole list. For a psion
+	 * holding several powers that label silently under-reports what the button destroys.
+	 *
+	 * @returns {string} "" when nothing is being concentrated on
+	 */
+	getConcentrationLabel () {
+		const names = this.getConcentrations().map(c => c.name || c.spellName).filter(Boolean);
+		if (!names.length) return "";
+		if (names.length === 1) return names[0];
+		return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+	}
+
+	/** @returns {Array<*>} Only the concentrated-on psionic powers. */
+	getPowerConcentrations () {
+		return this.getConcentrations().filter(c => c.kind === "power");
+	}
+
+	/** @returns {object|null} The concentrated-on spell, if any. */
+	getSpellConcentration () {
+		return this.getConcentrations().find(c => c.kind !== "power") || null;
+	}
+
+	/**
+	 * Is this specific effect being concentrated on?
+	 * @param {string} id entry id, e.g. `power:Apparition|TalPsi`
+	 * @returns {boolean}
+	 */
+	isConcentratingOn (id) {
+		if (!id) return false;
+		const needle = String(id).toLowerCase();
+		return this.getConcentrations().some(c => String(c.id).toLowerCase() === needle);
+	}
+
+	/**
+	 * Add one concentration entry, enforcing the rules that govern the list.
+	 *
+	 * - A spell (or a custom ability) clears everything else: spells are one-at-a-time,
+	 *   and RAW forbids concentrating on a power and a spell simultaneously.
+	 * - A power clears any spell, then respects `getPowerConcentrationMax()`. When full,
+	 *   the oldest power is dropped unless the caller names one via `opts.replaceId`.
+	 * - Re-adding the same id replaces that entry ("no multiples of the same power").
+	 *
+	 * @param {*} entry
+	 * @param {*} [opts]
+	 * @param {string} [opts.replaceId] which entry to drop when the list is full
+	 * @returns {{added: *, dropped: Array<*>}}
+	 */
+	addConcentration (entry, {replaceId = null} = {}) {
+		const list = this.getConcentrations();
+		const kind = entry?.kind === "power" ? "power" : (entry?.kind || "spell");
+		const name = entry?.name || entry?.spellName || "unknown";
+		const record = {
+			startedAt: Date.now(),
+			...entry,
+			kind,
+			name,
+			// Every pre-existing concentration display reads `.spellName`, so a power
+			// would otherwise render as "Unknown" in the seven places that predate powers
+			// existing. Aliased for powers ONLY: a custom ability's `spellName` is
+			// contractually null (CharacterSheetCustomAbilities asserts it), and a spell
+			// already carries its own.
+			...(kind === "power" ? {spellName: entry?.spellName ?? name} : {}),
+			id: entry?.id || `${kind}:${name}`,
+		};
+		const dropped = [];
+
+		const drop = (/** @type {*} */ victim) => {
+			if (!victim) return;
+			this._teardownConcentration(victim);
+			const idx = list.indexOf(victim);
+			if (idx >= 0) list.splice(idx, 1);
+			dropped.push(victim);
+		};
+
+		// Re-manifesting / re-casting the same thing replaces its own entry.
+		drop(list.find(c => String(c.id).toLowerCase() === String(record.id).toLowerCase()));
+
+		if (kind === "power") {
+			// A power can never share concentration with a spell.
+			[...list].filter(c => c.kind !== "power").forEach(drop);
+			const max = Math.max(1, this.getPowerConcentrationMax() || 1);
+			while (list.filter(c => c.kind === "power").length >= max) {
+				const named = replaceId ? list.find(c => c.kind === "power" && String(c.id).toLowerCase() === String(replaceId).toLowerCase()) : null;
+				drop(named || list.find(c => c.kind === "power"));
+			}
+		} else {
+			[...list].forEach(drop);
+		}
+
+		list.push(record);
+		return {added: record, dropped};
 	}
 
 	/**
@@ -61155,20 +61968,16 @@ class CharacterSheetState {
 			? null
 			: (spellNameOrObj?.appliedMetamagic || spellNameOrObj?.metamagic || null);
 
-		// End any existing concentration
-		if (this._data.concentrating) {
-			this.breakConcentration();
-		}
-
-		this._data.concentrating = {
+		this.addConcentration({
+			id: `spell:${spellName}`,
+			kind: "spell",
 			name: spellName, // Use 'name' for consistency with getConcentratingSpell()
 			spellName,
 			spellLevel: level,
 			...(appliedMetamagic ? {appliedMetamagic} : {}),
 			focusedRerollAvailable: appliedMetamagic?.key === "focused",
 			lingersOnBreak: appliedMetamagic?.key === "lingering",
-			startedAt: Date.now(),
-		};
+		});
 
 		// Don't add a separate "Concentrating" active state - the spell effect state
 		// already tracks this via its isSpellEffect + concentration flags.
@@ -61186,15 +61995,25 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Break concentration (spell ends)
+	 * Tear down everything one concentration entry was holding up: its custom ability,
+	 * its companions, its temporary attacks and its spell-effect states.
+	 * Does NOT remove the entry from the list — callers own that.
+	 * @param {*} concentration
 	 */
-	breakConcentration () {
-		// Save the spell name BEFORE clearing, so we can match by name as fallback
-		const concentration = this._data.concentrating;
-		const concSpellName = concentration?.spellName;
-		const concCustomAbilityId = concentration?.customAbilityId;
-		const shouldLingerSpellEffects = !!(concentration?.lingersOnBreak && this._data.inCombat);
-		this._data.concentrating = null;
+	_teardownConcentration (concentration) {
+		if (!concentration) return;
+		const concSpellName = concentration.spellName;
+		const concCustomAbilityId = concentration.customAbilityId;
+		const shouldLingerSpellEffects = !!(concentration.lingersOnBreak && this._data.inCombat);
+
+		// A power that stops being concentrated on stops running. Enforced here rather
+		// than at each call site so the invariant holds however the entry was dropped —
+		// ended by hand, replaced, or pushed out by the proficiency-bonus cap.
+		if (concentration.kind === "power") {
+			const active = this.getActiveManifestations();
+			const idx = active.findIndex(m => `power:${m.powerId}` === concentration.id);
+			if (idx >= 0) active.splice(idx, 1);
+		}
 
 		// If a custom ability was concentrating, toggle it off
 		if (concCustomAbilityId) {
@@ -61210,22 +62029,22 @@ class CharacterSheetState {
 			this.dismissConcentrationCompanions();
 		}
 
-		// Remove concentration-linked temporary attacks
-		if (concSpellName && !shouldLingerSpellEffects) {
+		// Remove concentration-linked temporary attacks. Powers are excluded: temporary
+		// attacks are a spell mechanism (variant components), and a power only has a
+		// `spellName` at all because it is a display alias.
+		if (concentration.kind !== "power" && concSpellName && !shouldLingerSpellEffects) {
 			this.removeTemporaryAttacksBySpell(concSpellName);
 		}
 
-		// Remove concentration active state (legacy)
-		const concState = this._data.activeStates.find(s => s.stateTypeId === "concentration");
-		if (concState) {
-			this.removeActiveState(concState.id);
-		}
-
-		// Remove any spell-effect active states that require concentration
+		// Remove any spell-effect active states that require concentration.
 		// Match by EITHER the concentration flag OR by name (fallback for states
-		// where the concentration flag wasn't set correctly)
+		// where the concentration flag wasn't set correctly). A power tears down only
+		// its OWN state, since other powers may still be running.
 		const concSpellStates = this._data.activeStates.filter(s =>
-			s.isSpellEffect && (s.concentration || s.name === concSpellName),
+			s.isSpellEffect
+			&& (concentration.kind === "power"
+				? s.name === concentration.name
+				: (s.concentration || s.name === concSpellName)),
 		);
 		for (const state of concSpellStates) {
 			if (shouldLingerSpellEffects) {
@@ -61247,13 +62066,69 @@ class CharacterSheetState {
 		}
 	}
 
+	/**
+	 * Remove concentration entries matching a predicate WITHOUT running teardown.
+	 *
+	 * For call sites that are already unwinding the thing being concentrated on (a spell
+	 * effect expiring, a custom ability toggling off) and only need the bookkeeping
+	 * cleared — the historical behaviour of nulling `_data.concentrating` in place.
+	 * @param {(c: *) => boolean} predicate
+	 */
+	_dropConcentrationsWhere (predicate) {
+		const list = this.getConcentrations();
+		for (let i = list.length - 1; i >= 0; --i) {
+			if (predicate(list[i])) list.splice(i, 1);
+		}
+	}
+
+	/**
+	 * Break concentration.
+	 * @param {string} [id] a single entry to drop; omit to drop everything (the default,
+	 *   and what a failed concentration save or a rest does)
+	 */
+	breakConcentration (id = null) {
+		const list = this.getConcentrations();
+		let didLinger = false;
+
+		const teardown = (/** @type {*} */ victim) => {
+			if (victim.lingersOnBreak && this._data.inCombat) didLinger = true;
+			this._teardownConcentration(victim);
+			list.splice(list.indexOf(victim), 1);
+		};
+
+		if (id) {
+			const victim = list.find(c => String(c.id).toLowerCase() === String(id).toLowerCase());
+			if (!victim) return;
+			teardown(victim);
+			if (list.length) return;
+		} else {
+			[...list].forEach(teardown);
+		}
+
+		// Sweep, unconditionally. Callers break concentration defensively — including when
+		// nothing is being concentrated on — and have always relied on this running: it is
+		// what dismisses orphaned summons and clears the legacy singleton state. Skipped
+		// when Lingering Spell just converted the effects rather than ending them.
+		if (didLinger) return;
+		this.dismissConcentrationCompanions();
+		const concState = this._data.activeStates.find(s => s.stateTypeId === "concentration");
+		if (concState) this.removeActiveState(concState.id);
+		for (const state of this._data.activeStates.filter(s => s.isSpellEffect && s.concentration)) {
+			if (state.grantsConditions?.length > 0) {
+				for (const condName of state.grantsConditions) this.removeCondition?.(condName);
+			}
+			this.removeActiveState(state.id);
+		}
+	}
+
 	canUseFocusedConcentrationReroll () {
-		return !!this._data.concentrating?.focusedRerollAvailable;
+		return this.getConcentrations().some(c => c.focusedRerollAvailable);
 	}
 
 	useFocusedConcentrationReroll () {
-		if (!this._data.concentrating?.focusedRerollAvailable) return false;
-		this._data.concentrating.focusedRerollAvailable = false;
+		const entry = this.getConcentrations().find(c => c.focusedRerollAvailable);
+		if (!entry) return false;
+		entry.focusedRerollAvailable = false;
 		return true;
 	}
 
@@ -61269,7 +62144,7 @@ class CharacterSheetState {
 	 * @returns {boolean}
 	 */
 	isConcentrating () {
-		return this._data.concentrating !== null;
+		return this.getConcentrationCount() > 0;
 	}
 
 	/**
@@ -61277,7 +62152,7 @@ class CharacterSheetState {
 	 * @returns {object|null} Spell object or null
 	 */
 	getConcentratingSpell () {
-		return this._data.concentrating;
+		return this.getConcentration();
 	}
 
 	/**
@@ -61383,7 +62258,7 @@ class CharacterSheetState {
 		if (!this.getFeatureCalculations().hasHybridTransformationMastery) this.deactivateState("hybridTransformation");
 
 		// Concentration ends on rest
-		if (this._data.concentrating) {
+		if (this.isConcentrating()) {
 			this.breakConcentration();
 		}
 
@@ -64155,6 +65030,10 @@ class CharacterSheetState {
 		if (this.getTalentLevel()) {
 			this.clearStrain();
 			this._data.psionicStrainIgnored = null;
+			// Nothing survives a night's sleep: running powers end, and the failed
+			// learn-from-others attempt can be retried.
+			this.endAllManifestations();
+			if (this._data.psionics) this._data.psionics.learnLockedOut = false;
 		}
 
 		// Recover stamina (Thelemar: recovers on any rest)

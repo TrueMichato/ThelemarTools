@@ -2900,10 +2900,16 @@ class CharacterSheetLevelUp {
 		const conMod = this._state.getAbilityMod("con");
 		const averageHp = Math.ceil(hitDie / 2) + 1 + conMod;
 
-		const radioAverage = e_({outer: `<input type="radio" name="hp-method" value="average" checked class="mr-2">`})
-			.addEventListener("change", () => onMethodChange?.("average"));
-		const radioRoll = e_({outer: `<input type="radio" name="hp-method" value="roll" class="mr-2">`})
-			.addEventListener("change", () => onMethodChange?.("roll"));
+		// CS-BUG-164: `e_({…}).addEventListener(…)` evaluates to `undefined`, so these
+		// radios were never appended and the HP method could not be chosen.
+		const radioAverage = e_({
+			outer: `<input type="radio" name="hp-method" value="average" checked class="mr-2">`,
+			change: () => onMethodChange?.("average"),
+		});
+		const radioRoll = e_({
+			outer: `<input type="radio" name="hp-method" value="roll" class="mr-2">`,
+			change: () => onMethodChange?.("roll"),
+		});
 
 		const section = ee`
 			<div class="charsheet__levelup-section">

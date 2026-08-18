@@ -122,6 +122,27 @@ When Rage (or any state with `breaksConcentration: true`) activates:
 3. Removes conditions those states granted (via `grantsConditions`)
 4. Disables currently-concentrating custom abilities
 
+### Concentration Is A List
+
+`_data.concentrations[]` is the store; `_data.concentrating` is legacy and migrates
+on load. Entries are `{id, kind: "spell"|"power"|"ability", name, order, modeName, …}`.
+
+- `getConcentration()` is a **back-compat shim** returning the first entry, so every
+  pre-existing single-slot caller is untouched. Use `getConcentrations()`,
+  `getConcentrationCount()`, `getPowerConcentrations()` / `getSpellConcentration()`
+  for the real picture.
+- `addConcentration(entry, {replaceId})` owns the rules: a spell or ability clears
+  everything; a power clears any spell then respects `getPowerConcentrationMax()`
+  (= proficiency bonus, psionic manifesters only); re-adding the same id replaces
+  its own entry. Never write `_data.concentrations` directly.
+- `breakConcentration(id?)` drops one entry or everything. With **no id** it also
+  performs an unconditional sweep (dismiss companions, clear the legacy state) even
+  when nothing was concentrated on — callers rely on that defensively.
+- `_teardownConcentration()` removes the matching active manifestation for a power,
+  so the "concentration ended ⇒ power stopped" invariant holds however it was dropped.
+
+See `docs/charactersheet/17-talent-psionics.md` for the psionic side.
+
 ### Subclass-Scoped State Effects
 
 `getActiveStateEffects()` can append state-specific supplemental effects

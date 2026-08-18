@@ -126,6 +126,292 @@ class CharacterSheetClassUtils {
 		return m ? Number(m[1]) : 0;
 	}
 
+	/** The highest order any power can be manifested at, however much it is increased. */
+	static PSIONIC_MAX_ORDER = 6;
+
+	/**
+	 * The four shapes a `psionic.modes[]` entry can take.
+	 *
+	 * The source data overloads one array for four unrelated jobs, distinguishable only
+	 * by the mode's `name`. Classifying once here is what lets every consumer — the
+	 * powers list, the manifest dialog, the NPC exporter — ask a structured question
+	 * instead of re-deriving intent from a string.
+	 */
+	static PSIONIC_MODE_KINDS = Object.freeze({
+		/** The power's body at a given order ("2nd-Order"). */
+		ORDER_BAND: "orderBand",
+		/** Cantrip-style scaling for 1st-order powers ("5th-10th Level"). */
+		LEVEL_BAND: "levelBand",
+		/** The upcast rule ("Increased Order"). */
+		INCREASED_ORDER: "increasedOrder",
+		/** A player choice at manifest time (Aura Projection's "Inspired"). */
+		VARIANT: "variant",
+	});
+
+	/** Header labels that prefix a power's `entries[]`, in display order. */
+	static _PSIONIC_HEADER_LABELS = Object.freeze(["Manifestation Time", "Range", "Duration"]);
+
+	/** @type {WeakMap<*, *>} keyed on the power object, so a re-parse can never go stale */
+	static _psionicParseCache = new WeakMap();
+
+	/**
+	 * Normalize a manifestation-time string into an action-economy bucket.
+	 * @param {string} time
+	 * @returns {{actionType: string, reactionTrigger: string|null}}
+	 */
+	static _parsePsionicManifestationTime (/** @type {string} */ time) {
+		const raw = String(time || "").trim();
+		if (/^1\s+bonus\s+action/i.test(raw)) return {actionType: "bonus", reactionTrigger: null};
+		if (/^1\s+reaction/i.test(raw)) {
+			const m = /^1\s+reaction\s*,\s*(?:which\s+you\s+take\s+)?(.*)$/i.exec(raw);
+			return {actionType: "reaction", reactionTrigger: m ? m[1].trim() : null};
+		}
+		if (/^1\s+action/i.test(raw)) return {actionType: "action", reactionTrigger: null};
+		// 1 minute, 10 minutes, 8 hours … — anything that cannot be done in a turn.
+		return {actionType: raw ? "long" : "action", reactionTrigger: null};
+	}
+
+	/**
+	 * Classify one `modes[]` entry. See `PSIONIC_MODE_KINDS`.
+	 * @param {*} mode
+	 * @returns {*} the mode, augmented with `kind` and the fields that kind implies
+	 */
+	static _parsePsionicMode (/** @type {*} */ mode) {
+		const K = CharacterSheetClassUtils.PSIONIC_MODE_KINDS;
+		const name = String(mode?.name || "").trim();
+		/** @type {*} */ const out = {
+			name,
+			entries: mode?.entries || [],
+			concentration: mode?.concentration || null,
+			order: null,
+			levelBand: null,
+		};
+
+		if (/^increased\s+order$/i.test(name)) return {...out, kind: K.INCREASED_ORDER};
+
+		const order = /^(\d+)(?:st|nd|rd|th)[-\u2013]order$/i.exec(name);
+		if (order) return {...out, kind: K.ORDER_BAND, order: Number(order[1])};
+
+		// "1st-4th Level", "17th+ Level"
+		const band = /^(\d+)(?:st|nd|rd|th)(?:[-\u2013](\d+)(?:st|nd|rd|th))?(\+)?\s+level$/i.exec(name);
+		if (band) {
+			const min = Number(band[1]);
+			const max = band[2] ? Number(band[2]) : (band[3] ? Number.POSITIVE_INFINITY : min);
+			return {...out, kind: K.LEVEL_BAND, levelBand: {min, max}};
+		}
+
+		return {...out, kind: K.VARIANT};
+	}
+
+	/**
+	 * Lift a `psionic` power's prose into structured metadata.
+	 *
+	 * Every power states its manifestation time, range and (64 of the 103 in `TalPsi`)
+	 * duration as bolded header strings at the top of `entries[]`, and hides its upcast
+	 * rule, its per-order bodies and its concentration requirement inside `modes[]`.
+	 * None of that is machine-readable as authored, which is why the sheet could
+	 * previously only show a power's name. This is the single place that turns it into
+	 * data; every consumer reads the result rather than re-matching prose.
+	 *
+	 * Results are cached on the power object, so rendering a list re-parses nothing.
+	 *
+	 * @param {*} power a raw `psionic` entity
+	 * @returns {*} parsed shape, or null when `power` is falsy
+	 */
+	static parsePsionicPower (/** @type {*} */ power) {
+		if (!power) return null;
+		const cached = CharacterSheetClassUtils._psionicParseCache.get(power);
+		if (cached) return cached;
+
+		const K = CharacterSheetClassUtils.PSIONIC_MODE_KINDS;
+		const labels = CharacterSheetClassUtils._PSIONIC_HEADER_LABELS;
+		/** @type {Record<string, string>} */ const headers = {};
+		const body = [];
+
+		for (const entry of (power.entries || [])) {
+			const m = typeof entry === "string" ? /^\{@b\s+([^:}]+):\}\s*(.*)$/s.exec(entry) : null;
+			const label = m ? m[1].trim() : null;
+			if (label && labels.includes(label)) headers[label] = m[2].trim();
+			else body.push(entry);
+		}
+
+		const {actionType, reactionTrigger} = CharacterSheetClassUtils._parsePsionicManifestationTime(headers["Manifestation Time"]);
+		const modes = (power.modes || []).map(m => CharacterSheetClassUtils._parsePsionicMode(m));
+		const duration = headers["Duration"] || null;
+
+		/** @type {*} */ const out = {
+			name: power.name,
+			source: power.source,
+			order: CharacterSheetClassUtils.getPsionicPowerOrder(power),
+			discipline: power._psionicPowerType || power.type || null,
+			meta: {
+				manifestationTime: headers["Manifestation Time"] || null,
+				range: headers["Range"] || null,
+				duration,
+				actionType,
+				reactionTrigger,
+			},
+			body,
+			modes,
+			orderModes: modes.filter(m => m.kind === K.ORDER_BAND),
+			levelModes: modes.filter(m => m.kind === K.LEVEL_BAND),
+			variantModes: modes.filter(m => m.kind === K.VARIANT),
+			increasedOrder: modes.find(m => m.kind === K.INCREASED_ORDER) || null,
+			// Display-level "does this tie up concentration at all?". The authoritative
+			// per-manifestation answer is `getPsionicPowerConcentration()`, because
+			// concentration is a property of the mode chosen, not of the power.
+			concentrates: modes.some(m => !!m.concentration) || /concentration/i.test(duration || ""),
+		};
+
+		CharacterSheetClassUtils._psionicParseCache.set(power, out);
+		return out;
+	}
+
+	/**
+	 * The modes that actually apply to one specific manifestation.
+	 *
+	 * @param {*} power raw power (or an already-parsed shape)
+	 * @param {*} [opts]
+	 * @param {number} [opts.order] the order it is being manifested at
+	 * @param {number} [opts.characterLevel] for 1st-order level-band scaling
+	 * @param {string} [opts.modeName] the chosen variant, when the power offers a choice
+	 * @returns {Array<*>} parsed modes, most specific first
+	 */
+	static getPsionicPowerModes (/** @type {*} */ power, /** @type {*} */ {order = null, characterLevel = null, modeName = null} = {}) {
+		const parsed = power?.modes && power?.meta ? power : CharacterSheetClassUtils.parsePsionicPower(power);
+		if (!parsed) return [];
+		const out = [];
+
+		if (modeName) {
+			const chosen = parsed.variantModes.find((/** @type {*} */ m) => m.name.toLowerCase() === String(modeName).toLowerCase());
+			if (chosen) out.push(chosen);
+		}
+
+		const atOrder = Number(order) || parsed.order;
+		// An order band matches the highest band at or below the manifested order, so a
+		// power increased past its last authored band keeps using that band's body.
+		const bands = parsed.orderModes
+			.filter((/** @type {*} */ m) => m.order <= atOrder)
+			.sort((/** @type {*} */ a, /** @type {*} */ b) => b.order - a.order);
+		if (bands.length) out.push(bands[0]);
+
+		if (characterLevel != null) {
+			const lvl = Number(characterLevel);
+			const band = parsed.levelModes.find((/** @type {*} */ m) => lvl >= m.levelBand.min && lvl <= m.levelBand.max);
+			if (band) out.push(band);
+		}
+
+		return out;
+	}
+
+	/**
+	 * Whether a specific manifestation requires concentration, and for how long.
+	 *
+	 * @param {*} power raw or parsed power
+	 * @param {*} [opts] see `getPsionicPowerModes`
+	 * @returns {{duration: number, unit: string}|null}
+	 */
+	static getPsionicPowerConcentration (/** @type {*} */ power, /** @type {*} */ opts = {}) {
+		const applicable = CharacterSheetClassUtils.getPsionicPowerModes(power, opts);
+		const withConc = applicable.find((/** @type {*} */ m) => !!m.concentration);
+		if (withConc) return withConc.concentration;
+
+		const parsed = power?.modes && power?.meta ? power : CharacterSheetClassUtils.parsePsionicPower(power);
+		// Defensive: no power in `TalPsi` states concentration in its Duration header,
+		// but future data might rather than repeating it on every mode.
+		if (parsed && /concentration/i.test(parsed.meta?.duration || "")) {
+			const m = /concentration,?\s*(?:up to\s*)?(\d+)\s*(round|minute|hour|day)/i.exec(parsed.meta.duration);
+			return m ? {duration: Number(m[1]), unit: m[2].toLowerCase()} : {duration: 1, unit: "min"};
+		}
+		return null;
+	}
+
+	/**
+	 * The Psionic Exertion options (Talent 3/7/11/15), as data.
+	 *
+	 * Two things about an Exertion matter mechanically and neither is derivable from its
+	 * name: **when** it can be spent, and **what** it costs. Both are recorded here so the
+	 * manifest dialog can offer the ones that apply up front and the active-manifestation
+	 * row can offer the rest after the dice land, with no per-option branching.
+	 *
+	 * `timing`:
+	 *  - `manifestation` — chosen before/at the manifestation test, so it belongs in the dialog
+	 *  - `outcome`       — triggered by a hit, a failed save or a successful save afterwards
+	 *
+	 * `cost` uses the same vocabulary as `resolvePsionicStrainCost()`; `costOptions` lists
+	 * the discrete alternatives where RAW prices the same option differently by target size.
+	 *
+	 * Keyed by lowercased name, matching how a picked optional feature is stored.
+	 */
+	static PSIONIC_EXERTIONS = Object.freeze({
+		"destructive power": {
+			name: "Destructive Power",
+			timing: "outcome",
+			cost: "halfPowerOrder",
+			summary: "Half the damage dice you rolled deal their maximum value.",
+		},
+		"dynamic power": {
+			name: "Dynamic Power",
+			timing: "outcome",
+			cost: 2,
+			costOptions: [{label: "Medium or smaller", cost: 2}, {label: "Large", cost: 3}, {label: "Huge", cost: 4}],
+			summary: "Move the target 15 feet, or knock them prone.",
+		},
+		"expanded power": {
+			name: "Expanded Power",
+			timing: "manifestation",
+			cost: "powerOrder",
+			summary: "Double every dimension of the area of effect.",
+		},
+		"fascinating power": {
+			name: "Fascinating Power",
+			timing: "outcome",
+			cost: 2,
+			summary: "Charm the target for 1 minute (CR/level ≤ your talent level).",
+		},
+		"halting power": {
+			name: "Halting Power",
+			timing: "outcome",
+			cost: 2,
+			costOptions: [{label: "Medium or smaller", cost: 2}, {label: "Large", cost: 4}],
+			summary: "Restrain the target until the start of your next turn.",
+		},
+		"magnified power": {
+			name: "Magnified Power",
+			timing: "manifestation",
+			cost: 1,
+			summary: "Double the power's duration, or double/extend its range.",
+		},
+		"overwhelming power": {
+			name: "Overwhelming Power",
+			timing: "outcome",
+			cost: "powerOrder",
+			summary: "Force a reroll of a successful save, at a penalty equal to your PB.",
+		},
+		"shared power": {
+			name: "Shared Power",
+			timing: "manifestation",
+			cost: "powerOrder",
+			summary: "Target a second creature in range with the same power.",
+		},
+		"terrifying power": {
+			name: "Terrifying Power",
+			timing: "outcome",
+			cost: 3,
+			summary: "Frighten the target for 1 minute (CR/level ≤ your talent level).",
+		},
+	});
+
+	/**
+	 * Look up an Exertion option by name.
+	 * @param {string} name
+	 * @returns {*} null when unknown
+	 */
+	static getPsionicExertion (/** @type {string} */ name) {
+		if (!name) return null;
+		return CharacterSheetClassUtils.PSIONIC_EXERTIONS[String(name).trim().toLowerCase()] || null;
+	}
+
 	/**
 	 * Turn a pool of `psionic` powers into synthetic `optionalfeature` entities so the
 	 * EXISTING optional-feature picker engine surfaces them in the Builder, Level-Up and

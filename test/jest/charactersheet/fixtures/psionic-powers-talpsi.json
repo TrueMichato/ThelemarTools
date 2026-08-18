@@ -1,0 +1,162 @@
+{
+	"psionic": [
+		{
+			"name": "Adapt",
+			"source": "TalPsi",
+			"page": 35,
+			"type": "MM",
+			"order": "2nd-Order",
+			"entries": [
+				"{@b Manifestation Time:} 1 action",
+				"{@b Range:} 15 feet",
+				"{@b Duration:} 24 hours"
+			],
+			"modes": [
+				{
+					"name": "2nd-Order",
+					"entries": [
+						"Effect text omitted; this fixture exercises structure only."
+					]
+				},
+				{
+					"name": "Increased Order",
+					"entries": [
+						"Effect text omitted; this fixture exercises structure only."
+					]
+				}
+			]
+		},
+		{
+			"name": "Again",
+			"source": "TalPsi",
+			"page": 35,
+			"type": "CP",
+			"order": "2nd-Order",
+			"entries": [
+				"{@b Manifestation Time:} 1 reaction, which you take when the trigger condition occurs",
+				"{@b Range:} 30 feet",
+				"{@b Duration:} Instantaneous"
+			],
+			"modes": [
+				{
+					"name": "2nd-Order",
+					"entries": [
+						"Effect text omitted; this fixture exercises structure only."
+					]
+				}
+			]
+		},
+		{
+			"name": "Apparition",
+			"source": "TalPsi",
+			"page": 33,
+			"type": "RP",
+			"order": "1st-Order",
+			"entries": [
+				"{@b Manifestation Time:} 1 action",
+				"{@b Range:} 60 feet"
+			],
+			"modes": [
+				{
+					"name": "1st-Order",
+					"concentration": {
+						"duration": 1,
+						"unit": "min"
+					},
+					"entries": [
+						"Effect text omitted; this fixture exercises structure only."
+					]
+				}
+			]
+		},
+		{
+			"name": "Aura Projection",
+			"source": "TalPsi",
+			"page": 45,
+			"type": "TP",
+			"order": "4th-Order",
+			"entries": [
+				"{@b Manifestation Time:} 1 action",
+				"{@b Range:} Self (30-foot radius)",
+				"Effect text omitted; this fixture exercises structure only."
+			],
+			"modes": [
+				{
+					"name": "Inspired",
+					"concentration": {
+						"duration": 1,
+						"unit": "min"
+					},
+					"entries": [
+						"Effect text omitted; this fixture exercises structure only."
+					]
+				},
+				{
+					"name": "Sorrow",
+					"concentration": {
+						"duration": 1,
+						"unit": "min"
+					},
+					"entries": [
+						"Effect text omitted; this fixture exercises structure only."
+					]
+				},
+				{
+					"name": "Terror",
+					"concentration": {
+						"duration": 1,
+						"unit": "min"
+					},
+					"entries": [
+						"Effect text omitted; this fixture exercises structure only."
+					]
+				},
+				{
+					"name": "Increased Order",
+					"entries": [
+						"Effect text omitted; this fixture exercises structure only."
+					]
+				}
+			]
+		},
+		{
+			"name": "Psionic Bolt",
+			"source": "TalPsi",
+			"page": 34,
+			"type": "RP",
+			"order": "1st-Order",
+			"entries": [
+				"{@b Manifestation Time:} 1 action",
+				"{@b Range:} 120 feet",
+				"{@b Duration:} Instantaneous"
+			],
+			"modes": [
+				{
+					"name": "1st-4th Level",
+					"entries": [
+						"Effect text omitted; this fixture exercises structure only."
+					]
+				},
+				{
+					"name": "5th-10th Level",
+					"entries": [
+						"Effect text omitted; this fixture exercises structure only."
+					]
+				},
+				{
+					"name": "11th-16th Level",
+					"entries": [
+						"Effect text omitted; this fixture exercises structure only."
+					]
+				},
+				{
+					"name": "17th+ Level",
+					"entries": [
+						"Effect text omitted; this fixture exercises structure only."
+					]
+				}
+			]
+		}
+	],
+	"_note": "Structural fixture for the psionic power parser. Derived from MCDM's 'The Talent and Psionics' (TalPsi), which this repo fetches by URL rather than vendoring. Mechanical headers, mode names, orders and concentration objects are kept because they are what the parser reads; all effect prose is replaced with a placeholder."
+}

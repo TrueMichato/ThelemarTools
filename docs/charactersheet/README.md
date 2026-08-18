@@ -21,7 +21,7 @@ Welcome to the 5etools Character Sheet system documentation. This comprehensive 
 | [TGTT Homebrew](./13-tgtt-thelemar-homebrew.md) | Thelemar homebrew: rules, classes, methods, tactics |
 | [Design System Overhaul](./14-design-system-overhaul.md) | Visual/UX redesign: token layer, the two surfaces, Combat Section Shell, governing rules |
 | [Spawning Test Characters](./15-spawn-test-characters.md) | One-line character creation for manual testing and bug repros: spec DSL, seeds, the four surfaces |
-| [Talent & Psionics](./17-talent-psionics.md) | MCDM Talent base class: psionic strain, manifestation tests, generic power/exertion pickers, Chronopath |
+| [Talent & Psionics](./17-talent-psionics.md) | MCDM Talent base class: psionic strain, powers as first-class entities, the power parser, multi-slot concentration, `manifestPower()`, Psionic Exertion, the Powers tab |
 | [NPC Export](./18-npc-export.md) | Character → bestiary monster conversion, export options, CR, legendary framing, brew save |
 | [Ioun Stones](./20-ioun-stones.md) | MECIounStones and official-stone parity: attunement exemption, orbit/bond manager, item conditional modifiers, effect-implementation audit |
 | [Item Materials](./21-item-materials.md) | Thelemar item materials: the 72 `itemMaterial` entities, the six axes, the read-time projection, the damage die ladder, and the picker/custom-item/craft entry points |

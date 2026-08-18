@@ -3,8 +3,9 @@
 The Talent is a **full homebrew base class**, not a subclass bolt-on. It has no
 spellcasting at all: instead of slots it spends **psionic strain**, a
 three-track damage economy that degrades the character as it fills. This
-document describes the strain subsystem, the generic machinery that surfaces
-the Talent's many choices, and the Chronopath specialization.
+document describes the strain subsystem, the **power model** (powers are
+first-class entities, not list entries), the generic machinery that surfaces the
+Talent's many choices, and the seven specializations.
 
 The brew is auto-imported — `homebrew/index.json` lists
 `MCDM Productions; The Talent and Psionics.json` in its `toImport` array, so
@@ -84,6 +85,106 @@ list of live penalties, which is what the sheet's strain tracker renders.
 
 ---
 
+## Powers as first-class entities
+
+A power is not a row in a list. It has metadata, per-order bodies, variant modes, an
+upcast rule and a concentration requirement that depends on *how* it is manifested —
+all of which the source data states as prose or as an overloaded `modes[]` array.
+
+### The parser
+
+`CharacterSheetClassUtils.parsePsionicPower(power)` is the single place that turns a
+`psionic` entity into data. It is pure, and cached on the power object (a `WeakMap`, so
+a re-parse can never go stale), which is why rendering a list re-parses nothing.
+
+It lifts the three bolded header strings that open every power's `entries[]` —
+`Manifestation Time`, `Range` and, for 64 of the 103 in `TalPsi`, `Duration` — out of
+the body, and normalizes the manifestation time into an
+`actionType` of `action` | `bonus` | `reaction` | `long` (86 / 6 / 5 / 6 in `TalPsi`),
+capturing the reaction's trigger text where there is one.
+
+It then classifies every `modes[]` entry, because that one array does four unrelated
+jobs distinguishable only by the mode's `name`:
+
+| `kind` | Name shape | Meaning |
+|---|---|---|
+| `orderBand` | `2nd-Order` | The power's body when manifested at that order |
+| `levelBand` | `5th-10th Level` | Cantrip-style scaling for a 1st-order power |
+| `increasedOrder` | `Increased Order` | The upcast rule |
+| `variant` | anything else | A player choice at manifest time (Aura Projection's *Inspired* / *Sorrow* / *Terror*) |
+
+**Concentration is a property of the manifestation, not of the power.** It is stated on
+46 individual modes (`modes[].concentration`), never in a `TalPsi` Duration header, so
+`getPsionicPowerConcentration(power, {order, modeName, characterLevel})` resolves it for
+one specific manifestation. The parsed `concentrates` flag is display-only ("could this
+tie up concentration at all?"). A Duration header that *does* state concentration is
+handled defensively for future data.
+
+Note that a 1st-order power can still require concentration — *Apparition* does. That is
+not a contradiction: 1st-order powers skip the manifestation test, not the duration
+rules, and it is exactly why *Strain to Maintain* exists.
+
+### The projection
+
+`getKnownPowers({order, discipline, firstOrderOnly, higherOrderOnly})` is a
+**projection, not a store**. The authoritative record of which powers are known stays in
+`_data.features`, written by the shared optional-feature picker — which is why the
+Builder, Level-Up and Quick Build flows needed *no changes at all*. The getter selects
+features by the same predicate activation uses (`_psionicOrder` plus a `PsiP*` optional
+feature type), joins each to the catalog and the parser, and returns one ready-to-render
+shape.
+
+> The catalog is installed with `setPsionicCatalog()` from `_mergeBrewData()`. It is
+> reference data, not saved state. The state getter is `getKnownPowers()` and **not**
+> `getPsionicPowers()`, which already exists on the *page* and returns the raw catalog.
+
+A parallel `_data.psionics.powersKnown` would have been a second source of truth for the
+same fact, and is deliberately absent. `_data.psionics` holds runtime state only:
+`{activeManifestations, learning, replacementUsedAtLevel, learnLockedOut}`.
+
+---
+
+## Concentration is a list, not a slot
+
+RAW: *"you can simultaneously maintain concentration on a number of powers equal to your
+proficiency bonus"* — and never on a power and a spell at once. The sheet's
+`_data.concentrating` was a single object, which is why the manifest dialog used to ask
+the player to **type in** their own manifestation score.
+
+`_data.concentrations[]` is now the store. Each entry is
+`{id, kind: "spell" | "power" | "ability", name, order, modeName, …}`.
+
+| API | Behaviour |
+|---|---|
+| `getConcentration()` | **Back-compat shim** — the first entry. Every pre-existing caller reads `.spellName` / `.spellLevel` off it and is untouched |
+| `getConcentrations()` / `getConcentrationCount()` / `isConcentratingOn(id)` | The list |
+| `getPowerConcentrations()` / `getSpellConcentration()` | The two halves |
+| `setConcentration(...)` | Unchanged spell semantics: replaces the whole list |
+| `addConcentration(entry, {replaceId})` | Enforces the rules centrally (below) |
+| `breakConcentration(id?)` | One entry, or everything |
+
+`addConcentration` is where the rules live, so no call site can get them wrong:
+
+- adding a **spell** or an **ability** clears everything else;
+- adding a **power** clears any spell, then respects `getPowerConcentrationMax()`
+  (= proficiency bonus), dropping the oldest power — or `replaceId` — when full;
+- re-adding the same id replaces its own entry, which is what implements *"you can't
+  have multiple manifestations of the same power active at once"*.
+
+Two subtleties worth keeping:
+
+- `_teardownConcentration()` removes the matching **active manifestation** when the entry
+  is a power. Putting it there rather than at each call site means the invariant holds
+  however the entry was dropped — ended by hand, replaced, or evicted by the cap.
+- `breakConcentration()` with no id still performs an unconditional **sweep** (dismiss
+  companions, clear the legacy singleton state) even when nothing was being concentrated
+  on. Callers have always relied on that defensively; skipping it silently orphaned
+  summons. The sweep is skipped when Lingering Spell converted the effects instead.
+
+Saved characters migrate in `loadFromJson()`: `concentrating` → `concentrations[0]`.
+
+---
+
 ## Manifestation test
 
 1st-order powers manifest automatically. For order ≥ 2:
@@ -99,6 +200,72 @@ roll the manifestation die
 `rollManifestationTest(order, {roll, concentratingOn, track, apply})` returns
 `{score, roll, strain, applied, outcome, overflow}` where `outcome` is
 `"automatic" | "clean" | "grazed" | "strained"`.
+
+---
+
+## `manifestPower()` — the one pipeline
+
+Every surface — the Powers tab, play mode, the tests — goes through
+`manifestPower(powerId, opts)`, so none of them can disagree about what manifesting
+costs. In one ordered pass it:
+
+1. validates the order (never below the power's own, never above `getMaxPowerOrder()`,
+   never above 6);
+2. **derives** `concentratingOn` from `getPowerConcentrations()` — the number is no
+   longer typed in by the player;
+3. rolls the manifestation test (Adept reroll and Reduce Stress included);
+4. charges an at-manifestation Psionic Exertion;
+5. registers concentration when the chosen order/mode requires it;
+6. records the running manifestation.
+
+On overflow **nothing is committed beyond the roll** — the caller resolves the RAW
+"manifest and die / decline and drop to 0 hp" choice through `resolveStrainOverflow()`.
+
+`endManifestation(id)` is free and takes no action, per RAW. `endAllManifestations()` is
+wired to incapacitation, death and the long rest, because *"if you become incapacitated
+or die, all of your current active powers end immediately"* covers powers that never
+required concentration in the first place.
+
+### Psionic Exertion
+
+`CharacterSheetClassUtils.PSIONIC_EXERTIONS` records the two things about an Exertion
+that are not derivable from its name — **when** it can be spent and **what** it costs:
+
+- `timing: "manifestation"` (Expanded, Magnified, Shared) → a dropdown in the manifest
+  dialog;
+- `timing: "outcome"` (Destructive, Dynamic, Fascinating, Halting, Overwhelming,
+  Terrifying) → an **Exert** button on the active-manifestation row, since they trigger
+  on a hit or a save after the dice have landed.
+
+Costs reuse the existing `resolvePsionicStrainCost()` vocabulary (`powerOrder`,
+`halfPowerOrder`, a flat number), and `costOptions` carries the size-scaled alternatives
+(Dynamic Power: 2 / 3 / 4 by target size). RAW allows only one Exertion per
+manifestation, enforced in state.
+
+> Exertions are **priced before they are charged**. `addStrain()` fills to the maximum
+> and reports the overflow rather than refusing, so calling it first would leave the
+> character having part-paid for a benefit they cannot afford.
+
+### Strain to Maintain
+
+`payStrainToMaintain({track, apply})` derives the cost from what is *actually* being
+concentrated on (the summed order), and `apply: false` quotes it so the prompt can state
+the price before the player commits. The original numeric signature —
+`payStrainToMaintain(3, "soul")` — still works and takes precedence when supplied.
+
+---
+
+## Acquiring powers
+
+- **Per level**: the `level + 1` budget comes from the generic progression. The swap is
+  `replacePsionicPower(outgoingId, incoming)`, guarded by
+  `_data.psionics.replacementUsedAtLevel`, restricted to a power of equal or lower order,
+  minimum 2nd. 1st-order powers are a separate fixed pool and are not swapped this way.
+- **Learning from others**: `rollLearnFromOthers(power)` rolls the manifestation die
+  against the power's **baseline** order (never the order it was manifested at). Beating
+  it opens a study period sized by the RAW table (2nd → 1 day … 6th → 16 days);
+  `advancePowerLearning()` logs a day and teaches the power on completion. A roll equal
+  to or below the order locks the character out until a long rest.
 
 ---
 
@@ -303,42 +470,95 @@ Talent quirk, and a probe that skips that call will wrongly report them missing.
 
 ---
 
-## The manifest dialog
+## The Powers tab
 
-One bespoke modal, and it is earned: manifesting is a genuinely multi-field
-decision (which power · at what order · with which Exertion · paid from which
-track) whose *combination* determines the cost. Chaining sequential
-`pGetUserEnum` prompts would hide the one thing that makes the decision legible
-— the running strain total updating as the player pushes harder.
+`charactersheet-powers.js` renders a dedicated `🧠 Powers` tab, shown only when
+`isPsionicManifester()` resolves — the same conditional-visibility mechanism
+`_updateTabVisibility()` already uses for Builder and Respec. It deliberately reuses the
+spell tab's visual language rather than inventing a second one: a power *is* the psion's
+spell, and a player who knows one panel already knows this one.
 
-`_pUsePsionicAbility` therefore shows: a context line (power, order, discipline,
-save DC), the concentration input, an Adept-reroll checkbox, a Reduce Stress
-checkbox, a live projection strip (`role="group"`, `aria-live="polite"`) that
-recomputes the worst-case strain as inputs change, and — after the roll — the
-result lines plus the **penalty deltas** the new strain just switched on, read
-from `getStrainState()`, so the cost is visible where it lands.
+| Section | Contents |
+|---|---|
+| Manifesting | Manifestation die, power save DC, power attack bonus, max order, both powers-known budgets, and the concentration meter *n / PB* |
+| Strain | A gradient meter, the three tracks with ± controls and their live penalties, plus *Psychic Boost* and *Strain to Maintain* buttons when they apply |
+| Active manifestations | One row per running power — order, mode, concentration, an **Exert** button for outcome-timed options, and **End** |
+| Learning from others | The in-progress study with its day counter, or the long-rest lockout notice |
+| Powers | Grouped by order, 1st-order first and badged **At will · no test · no strain**, with discipline chips, parsed metadata, a favourite star, expandable bodies and **Manifest** |
 
-Everything else uses the sheet's existing prompt vocabulary and does **not** get
-a modal: the Ignore Strain track choice on long rest is a single
-`InputUiUtil.pGetUserEnum`; every "spend 1 strain to …" is a
-`pGetUserBoolean`. The class adds exactly one dialog.
+The only new visual idiom is the strain meter, because strain has no spell analogue: it
+is a cost that *accumulates* rather than a slot that empties.
+
+Expanding a power renders its parsed body plus the modes that actually apply — the
+character's own level band, not all four — with the `Increased Order` rule highlighted.
+
+Powers also reach:
+
+- **Play mode**, as a Powers card mirroring `_renderSpellsQuick()`: DC, attack bonus,
+  manifestation die, strain, concentration count, running manifestations with an End
+  button, then the at-will pool. Its Manifest button opens **the same dialog** the tab
+  does, so the two surfaces cannot drift.
+- **Favourites**, as a `power` type resolved through `getKnownPower()` rather than by
+  reaching into `features`, so a favourited power reports whether it is currently running.
+
+### The manifest dialog
+
+One bespoke modal, and it is earned: manifesting is a genuinely multi-field decision
+(which power · at what order · in which mode · with which Exertion · paid from which
+track) whose *combination* determines the cost. Chaining sequential `pGetUserEnum`
+prompts would hide the one thing that makes the decision legible — the running strain
+total updating as the player pushes harder.
+
+It shows a context line (order, discipline, save DC, attack bonus, manifestation time,
+range), and then:
+
+- an **order stepper** from the power's own order up to `getMaxPowerOrder()`, printing
+  the power's `Increased Order` rule and updating the score live. It is absent when the
+  power cannot be increased — a 4th-order power at Talent 9 is already at the cap;
+- a **mode selector** when the power offers variant effects;
+- an **Exertion dropdown** of the at-manifestation options the character actually knows;
+- an **auto-derived, read-only** manifestation score reading
+  *"4 + 1 for the power you are already concentrating on"* — replacing the number the
+  player used to type;
+- a strain-track selector, and the Adept-reroll / Reduce-Stress checkboxes;
+- a live projection strip (`role="group"`, `aria-live="polite"`) giving worst-case strain,
+  the projected total, whether it would exceed the maximum, whether concentration will
+  evict an older power, and whether a concentrated spell is about to end.
+
+After the roll it shows the result lines plus the **penalty deltas** the new strain just
+switched on, so the cost is visible where it lands, and — on overflow — the two
+`resolveStrainOverflow` buttons.
+
+Everything else uses the sheet's existing prompt vocabulary and does **not** get a modal:
+the Ignore Strain track choice, the strain-track pick for an outcome Exertion and the
+Strain-to-Maintain confirmation are all `InputUiUtil.pGetUserEnum`. The class adds
+exactly one dialog.
 
 ---
 
 ## Tests
 
-- `test/jest/charactersheet/CharacterSheetTalent.test.js` — 63 tests covering
-  the class table, every strain penalty against the *real* getters, overflow,
-  rest behaviour, the manifestation test, every Chronopath ability, generic
-  activation detection, and both derivation engines.
-- `test/jest/charactersheet/CharacterSheetTalentSpecializations.test.js` — 74
-  behavioural tests across all seven specializations, the generic Adept reroll,
-  Reduce Stress, the class capstones, strain-cost detection and cross-class leak
-  guards. Every assertion is on a derived effect (the fly speed that appears, the
-  hit points that move, the Persuasion modifier that rises), never on a
-  `has*` flag.
-- `test/e2e/specs/tgtt-talent-chronopath.spec.ts` — full L1→20 comprehensive
-  build with a `featuresMatrix` entry per feature per tier, plus two new
-  shared `EffectCheck` kinds: `psionicStrainMechanics` (drives all three tracks
-  through every threshold and asserts AC / speed / max HP / proficiency /
-  advantage / healing / overflow / long rest) and `manifestationTest`.
+- `test/jest/charactersheet/CharacterSheetTalent.test.js` — the class table, every strain
+  penalty against the *real* getters, overflow, rest behaviour, the manifestation test,
+  every Chronopath ability, generic activation detection, and both derivation engines.
+- `test/jest/charactersheet/CharacterSheetTalentSpecializations.test.js` — behavioural
+  tests across all seven specializations, the generic Adept reroll, Reduce Stress, the
+  class capstones, strain-cost detection and cross-class leak guards. Every assertion is
+  on a derived effect (the fly speed that appears, the hit points that move, the
+  Persuasion modifier that rises), never on a `has*` flag.
+- `test/jest/charactersheet/CharacterSheetPowers.test.js` — the parser (all four mode
+  kinds, both concentration sources, level bands, action-economy buckets), the
+  projection, both budgets, order validation, increased order, auto-derived scores,
+  active manifestations and the no-multiples rule, Exertion timing and pricing, Strain to
+  Maintain, per-level replacement and learning-from-others. Backed by
+  `fixtures/psionic-powers-talpsi.json`, five real powers chosen to cover every mode kind
+  — including *Apparition*, a 1st-order power that still ties up concentration.
+- `test/jest/charactersheet/CharacterSheetConcentration.test.js` — the multi-slot model:
+  unchanged single-spell behaviour, the proficiency-bonus cap, power/spell mutual
+  exclusion, ending one without ending the rest, and the `concentrating` → `concentrations`
+  migration.
+- `test/e2e/specs/tgtt-talent-chronopath.spec.ts` — full L1→20 comprehensive build with a
+  `featuresMatrix` entry per feature per tier, plus the shared `EffectCheck` kinds
+  `psionicStrainMechanics` (drives all three tracks through every threshold and asserts
+  AC / speed / max HP / proficiency / advantage / healing / overflow / long rest) and
+  `manifestationTest`.
