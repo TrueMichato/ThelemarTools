@@ -686,6 +686,44 @@ describe("Item Materials", () => {
 		});
 	});
 
+	describe("getSummary", () => {
+		const sword = {name: "Longsword", weapon: true, type: "M", dmg1: "1d8"};
+		const mail = {name: "Chain Mail", armor: true, type: "HA", ac: 16};
+
+		it("lists every axis when no item is supplied", () => {
+			const summary = CharacterSheetMaterials.getSummary(findMat("Mithril"));
+			expect(summary).toContain("AC");
+		});
+
+		it("never promises AC on a weapon", () => {
+			// The picker used to advertise "Mithril — AC 18" on a longsword, describing
+			// armour the player was not looking at.
+			const summary = CharacterSheetMaterials.getSummary(findMat("Mithril"), sword);
+			expect(summary).not.toContain("AC");
+			expect(summary).toContain("MC");
+		});
+
+		it("never promises damage or penetration on armour", () => {
+			const summary = CharacterSheetMaterials.getSummary(findMat("Darkmetal"), mail);
+			expect(summary).not.toContain("Dmg");
+			expect(summary).not.toContain("Pen");
+			expect(summary).toContain("AC");
+		});
+
+		it("never promises a crit threshold on armour, and does not set one", () => {
+			// Nothing rolls against a breastplate's crit threshold, so advertising one
+			// would be a promise the projection cannot keep.
+			expect(CharacterSheetMaterials.getSummary(findMat("Gold"), mail)).not.toContain("Crit");
+			expect(CharacterSheetMaterials.applyToItem(mail, findMat("Gold")).critThreshold).toBeUndefined();
+		});
+
+		it("keeps the axes that do apply", () => {
+			const summary = CharacterSheetMaterials.getSummary(findMat("Darkmetal"), sword);
+			expect(summary).toContain("Dmg");
+			expect(summary).toContain("Pen");
+		});
+	});
+
 	// ==========================================================================
 	// Magic Capacity
 	// ==========================================================================

@@ -24685,6 +24685,137 @@ color: var(--cs-text-primary, #f1f5f9);
 }
 
 /* ============================================================================
+   Material picker
+   ============================================================================
+   Operate mode. The player is comparing 65 candidates against one item, so the
+   list stays quiet and scannable and the only loud thing on screen is the diff
+   of whichever row they opened. Exactly one indigo button exists at a time —
+   the Apply inside the open row — which is what makes it read as *the* action.
+   ------------------------------------------------------------------------- */
+
+.charsheet__material-filter {
+	position: sticky;
+	top: 0;
+	z-index: var(--cs-z-sticky, 100);
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 0;
+	margin-bottom: 4px;
+	background: var(--cs-bg-surface, #1e293b);
+}
+
+.charsheet__material-filter-ipt {
+	flex: 1;
+	min-width: 0;
+}
+
+.charsheet__material-filter-count {
+	flex: 0 0 auto;
+	font-variant-numeric: tabular-nums;
+}
+
+.charsheet__material-group > summary {
+	padding: 4px 2px;
+	cursor: pointer;
+}
+
+.charsheet__material-option + .charsheet__material-option {
+	border-top: 1px solid var(--cs-border-subtle, rgba(255, 255, 255, 0.06));
+}
+
+/* The row is a real <button>, so Enter, Space and touch all work without a
+   hand-rolled key handler — and `aria-expanded` describes it for free. */
+.charsheet__material-option-btn {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	width: 100%;
+	padding: 6px 8px;
+	border: 0;
+	border-radius: var(--cs-radius-sm, 6px);
+	background: transparent;
+	color: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.charsheet__material-option-btn:hover,
+.charsheet__material-option-btn:focus-visible {
+	background: var(--cs-bg-hover, rgba(148, 163, 184, 0.1));
+}
+
+.charsheet__material-option-chevron {
+	/* CSS triangle, not an accent stripe — these borders draw the glyph itself. */
+	flex: 0 0 auto;
+	width: 0;
+	height: 0;
+	align-self: center;
+	border-top: 4px solid transparent;
+	border-bottom: 4px solid transparent;
+	border-left: 5px solid var(--cs-text-muted, #94a3b8);
+	transition: transform 0.12s ease;
+}
+
+.charsheet__material-option-btn[aria-expanded="true"] .charsheet__material-option-chevron {
+	transform: rotate(90deg);
+}
+
+.charsheet__material-option-name {
+	flex: 0 0 auto;
+	font-weight: 600;
+}
+
+/* Wraps rather than truncates: a material's summary is the only thing
+   distinguishing two otherwise identical metals, so it must not be clipped. */
+.charsheet__material-option-summary {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.charsheet__material-option-applied {
+	flex: 0 0 auto;
+	padding: 1px 8px;
+	border: 1px solid var(--cs-border, rgba(255, 255, 255, 0.12));
+	border-radius: 9999px;
+	color: var(--cs-text-secondary, #94a3b8);
+	white-space: nowrap;
+}
+
+.charsheet__material-detail {
+	padding: 8px 8px 8px 21px;
+	border-radius: var(--cs-radius-sm, 6px);
+	background: var(--cs-bg-elevated, #334155);
+}
+
+.charsheet__material-detail-actions {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.charsheet__material-option-chevron {
+		transition: none;
+	}
+}
+
+/* Touch: the row and its Apply are the two things a player actually hits at the
+   table, and at desktop density they land at 35px and 22px. Coarse pointers get
+   a real target rather than a smaller version of a mouse UI. */
+@media (pointer: coarse) {
+	.charsheet__material-option-btn {
+		min-height: 44px;
+	}
+
+	.charsheet__material-detail-actions .charsheet__material-apply {
+		min-height: 44px;
+		padding-right: 20px;
+		padding-left: 20px;
+	}
+}
+
+/* ============================================================================
    Beastheart (MCDM) — companion roster picker + ferocity strip
    ============================================================================
    Operate mode: these are read mid-encounter, so the type stays quiet, the

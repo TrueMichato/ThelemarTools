@@ -6060,7 +6060,7 @@ class CharacterSheetInventory {
 
 		const esc = str => String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 		const notes = CharacterSheetMaterials.getMaterialNotes(item, material);
-		const summary = CharacterSheetMaterials.getSummary(material);
+		const summary = CharacterSheetMaterials.getSummary(material, item);
 
 		let html = `<p><strong>Material:</strong> ${esc(material.name)}${summary ? ` <span class="ve-muted ve-small">(${esc(summary)})</span>` : ""}</p>`;
 
@@ -7499,7 +7499,7 @@ class CharacterSheetInventory {
 						${packProvenanceName ? `<span class="ve-small ve-muted" title="${item._fromPack.replace(/"/g, "&quot;")}">From ${packProvenanceName}</span>` : ""}
 						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}${item.chargeName ? ` — ${item.chargeName}` : ""}">${item.chargeName ? `${item.chargeName}:` : "Charges:"} <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
 						${hasSpellward ? `<span class="ve-small" title="${spellwardLabel}">🛡 ${spellwardLabel}: <strong>${spellwardCount}</strong>/${spellwardMax}${spellwardCount ? ` (${(item.chosenSpellImmunities || []).map(s => typeof s === "string" ? s : s.name).filter(Boolean).join(", ")})` : ""}</span>` : ""}
-						${materialEntity ? `<span class="ve-small charsheet__item-material-badge" title="${(`${materialEntity.name} — ${CharacterSheetMaterials.getSummary(materialEntity)}`).replace(/"/g, "&quot;")}">⚙ ${materialEntity.name}</span>` : ""}
+						${materialEntity ? `<span class="ve-small charsheet__item-material-badge" title="${(`${materialEntity.name} — ${CharacterSheetMaterials.getSummary(materialEntity, item)}`).replace(/"/g, "&quot;")}">⚙ ${materialEntity.name}</span>` : ""}
 						${mcStatus ? `<span class="ve-small charsheet__item-mc-badge charsheet__item-mc-badge--${mcStatus.isSuppressing ? "suppress" : mcStatus.isOverloaded ? "over" : "ok"} charsheet__item-mc-config" title="${this._getMagicCapacityTooltip(materialEntity, mcStatus).replace(/"/g, "&quot;")}">✦ ${mcStatus.count}/${mcStatus.capacityDisplay}</span>` : ""}
 						${this._page.getMaterialsModule?.()?.getDegradationBadgeHtml(item.id) || ""}
 						${item.appliedUpgrades?.length ? `<span class="ve-small charsheet__item-upgrade-badges">${item.appliedUpgrades.map(u => {

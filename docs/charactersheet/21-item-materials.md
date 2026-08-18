@@ -602,6 +602,44 @@ The picker only offers **eligible** materials — `isEligible(item, material)` f
 `appliesTo` against the item's kind, so a weapon sees 65 of the 72 and armour sees a
 different set.
 
+### Picker interaction model
+
+Sixty-five options is a list, not a menu, so the picker is built around **finding** rather
+than browsing:
+
+- A **filter box** takes focus on open and matches name, category, one-line summary **and**
+  the material's note text — so typing `silver` finds Silver *and* Mercurial Steel, whose
+  silvered-damage note never mentions it in the title. The live count (`Filter 65
+  materials…` → `4 of 65`) is announced via `role="status"`.
+- Each material is a **native `<button>` disclosure row**. Clicking, or pressing Enter or
+  Space, expands the before-after diff **inline underneath that row** — mouse, keyboard and
+  touch all drive the same single interaction. There is deliberately **no hover preview**:
+  it would thrash layout and could never work on a phone.
+- **Apply lives only inside the expanded row**, so exactly one primary button is ever on
+  screen. Selecting is a separate act from committing.
+- Materials are grouped by category in `<details>` sections. **One group is always open** —
+  the applied material's group when there is one, otherwise the first — because landing on
+  eight collapsed headers gives the player nothing to react to.
+- Filtering flattens the groups; the open selection survives being filtered out, so clearing
+  the filter restores it.
+- `@media (pointer: coarse)` raises rows and the Apply button to a 44 px minimum.
+
+### Summaries are item-aware
+
+`getSummary(material, item)` gates each axis by the **same rules `applyToItem` uses**, so
+the one-line summary only ever promises what the projection will actually deliver:
+
+| Axis | Shown when |
+|---|---|
+| `Dmg`, `Crit`, `Pen` | the item is a weapon |
+| `AC` | the item is armour |
+| `MC` | always |
+
+Omitting `item` lists every axis — correct for a context-free chip, wrong for a picker row.
+Without this a longsword advertised `Mithril — AC 18`, describing a suit of armour the
+player was not looking at. `applyToItem` is gated to match: it no longer writes a
+`critThreshold` onto armour, where nothing rolls against it.
+
 ### Penetration is not auto-resolved
 
 The sheet tracks **no target AC**. Penetration therefore shows as `Pen N` on the attack row,
@@ -631,17 +669,20 @@ The crafting page is **unconditional** — it is a reference, not a rules engine
 NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetMaterials --no-coverage --forceExit
 ```
 
-`test/jest/charactersheet/CharacterSheetMaterials.test.js` — 124 tests over a hand-built
+`test/jest/charactersheet/CharacterSheetMaterials.test.js` — 144 tests over a hand-built
 material fixture: die ladder (including negative steps, clamping and off-ladder
 normalisation), tri-state axes, eligibility, weapon/armour/shield projection, weight and
-value, effect resolution, state integration, the preview rows, effect counting, Magic
+value, effect resolution, state integration, the preview rows, item-aware summaries, effect counting, Magic
 Capacity status (including `∞` / `−∞` / `na` and `dcRiseThreshold`), interference rolls,
 `mcAdjust` persistence, note override / qualifier handling, condensate role gating, and
 draconic resonance selection / validation / note replacement / save round-trip, and the
 Ioun Sand matrix (effect-keyed detection, seat sizing without an invented bonus, doubling,
 restoration, idempotence, fragment exclusion, matrix-to-matrix moves, and the form-scoped MC
-rule), and degradation (trigger matching, stacking vs non-stacking, axis zeroing, destruction,
-candidate scoping, short-rest repair listing, the sub-toggle and the save round-trip).
+rule), degradation (trigger matching, stacking vs non-stacking, axis zeroing, destruction,
+candidate scoping, short-rest repair listing, the sub-toggle and the save round-trip), and
+the `attachedSpells` shape matrix (every usage key, combined keys, the non-spell `ability`
+sibling, suffix stripping, cross-category dedupe, plus the state guard degrading to `null`
+instead of throwing).
 
 `test/jest/CraftingItemMaterials.test.js` additionally pins the two Thelemar reference rules,
 including the drift guard between the brew's Magical Interference table and the JS constant.

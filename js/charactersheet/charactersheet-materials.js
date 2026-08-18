@@ -570,10 +570,13 @@ class CharacterSheetMaterials {
 		if (protection && kind === "armor") out.ac = protection;
 
 		// --- Critical: each positive point lowers the threshold by 1 ---
+		// Weapons only: a crit threshold on a breastplate is inert — nothing rolls
+		// against it — so setting one would have the summary promise an effect that
+		// never lands.
 		const critical = degradation?.zeroedAxes?.includes("critical")
 			? 0
 			: CharacterSheetMaterials.axisValue(mat.critical);
-		if (critical) {
+		if (critical && kind === "weapon") {
 			const baseCrit = Number(out.critThreshold) || 20;
 			// Clamped both ways: never an impossible crit, never past the natural 20.
 			out.critThreshold = Math.max(2, Math.min(20, baseCrit - critical));
@@ -759,18 +762,30 @@ class CharacterSheetMaterials {
 	// Display helpers
 	// ==========================================
 
-	/** One-line summary of what a material does, for pickers and chips. */
-	static getSummary (material) {
+	/**
+	 * One-line summary of what a material does, for pickers and chips.
+	 *
+	 * Pass `item` whenever one is in hand. Without it the summary lists every axis
+	 * the material carries, which reads as nonsense in context — a longsword row
+	 * announcing "AC 18" is describing a suit of armour the player is not looking
+	 * at. The axis gating here mirrors `applyToItem` exactly, so the summary
+	 * promises only what the projection will actually deliver.
+	 *
+	 * @param {object} material
+	 * @param {object} [item] Item the material would be applied to.
+	 */
+	static getSummary (material, item) {
 		if (!material) return "";
+		const kind = item ? CharacterSheetMaterials.getItemKind(item) : null;
 		const bits = [];
 		const push = (label, v, opts) => {
 			const n = CharacterSheetMaterials.axisValue(v);
 			if (n) bits.push(`${label} ${CharacterSheetMaterials.formatAxis(v, opts)}`);
 		};
-		push("Dmg", material.damage, {plus: true});
-		if (CharacterSheetMaterials.axisValue(material.protection)) bits.push(`AC ${material.protection}`);
-		push("Crit", material.critical, {plus: true});
-		push("Pen", material.penetration, {plus: true});
+		if (!kind || kind === "weapon") push("Dmg", material.damage, {plus: true});
+		if ((!kind || kind === "armor") && CharacterSheetMaterials.axisValue(material.protection)) bits.push(`AC ${material.protection}`);
+		if (!kind || kind === "weapon") push("Crit", material.critical, {plus: true});
+		if (!item || CharacterSheetMaterials.isWeapon(item)) push("Pen", material.penetration, {plus: true});
 		if (material.magicCapacity != null) bits.push(`MC ${CharacterSheetMaterials.formatAxis(material.magicCapacity)}`);
 		return bits.join(" \u00B7 ");
 	}
@@ -1190,9 +1205,12 @@ class CharacterSheetMaterials {
 		// --- Currently applied ---
 		const currentSection = e_({outer: `<div class="charsheet__material-current mb-3"></div>`});
 		content.append(currentSection);
-		// Assigned below once the preview element exists; the role selector needs it so that
-		// switching roles updates the effect list the crafter is reading.
+		// Assigned below once the list exists; the role selector needs them so that switching
+		// roles updates the effect list the crafter is reading, and clearing the material
+		// updates the "Applied" marker in the list without a full modal rebuild.
 		let renderPreview = () => {};
+		let refreshList = () => {};
+		let filterIpt = null;
 		const renderCurrent = () => {
 			currentSection.innerHTML = "";
 			const mat = CharacterSheetMaterials.resolveMaterial(
@@ -1207,10 +1225,10 @@ class CharacterSheetMaterials {
 				<div class="ve-flex-v-center p-2 stripe-even">
 					<div class="ve-flex-1">
 						<strong>${esc(mat.name)}</strong>
-						<span class="ve-muted ve-small ml-1">${esc(CharacterSheetMaterials.getSummary(mat))}</span>
+						<span class="ve-muted ve-small ml-1">${esc(CharacterSheetMaterials.getSummary(mat, item))}</span>
 					</div>
-					<button type="button" class="ve-btn ve-btn-xs ve-btn-danger charsheet__material-clear" title="Revert to the item's default material">
-						<span class="glyphicon glyphicon-trash"></span>
+					<button type="button" class="ve-btn ve-btn-xs ve-btn-danger charsheet__material-clear" aria-label="Revert to the item's default material" title="Revert to the item's default material">
+						<span class="glyphicon glyphicon-trash" aria-hidden="true"></span>
 					</button>
 				</div>
 			`}));
@@ -1241,7 +1259,7 @@ class CharacterSheetMaterials {
 					this._page.saveCharacter?.();
 					this._page.renderCharacter?.();
 					renderCurrent();
-					renderPreview(mat);
+					renderPreview();
 				});
 				currentSection.append(sel);
 			}
@@ -1279,7 +1297,7 @@ class CharacterSheetMaterials {
 					this._page.saveCharacter?.();
 					this._page.renderCharacter?.();
 					renderCurrent();
-					renderPreview(mat);
+					renderPreview();
 				});
 				currentSection.append(res);
 			}
@@ -1289,11 +1307,43 @@ class CharacterSheetMaterials {
 		if (!eligible.length) {
 			content.append(e_({outer: `<p class="ve-muted">No materials in the catalog can be applied to this kind of item.</p>`}));
 		} else {
-			// --- Preview ---
-			const preview = e_({outer: `<div class="charsheet__material-preview mb-3"></div>`});
-			renderPreview = (mat) => {
-				preview.innerHTML = "";
-				if (!mat) return;
+			// One interaction model for mouse, keyboard and touch: every material is a
+			// disclosure button, and its before/after diff opens *underneath the row the
+			// player just activated*. The previous design painted the diff into a pane
+			// pinned to the top of the modal and drove it from `mouseover`, which meant
+			// the feedback rendered off-screen on a long list and did not exist at all on
+			// a phone. Feedback belongs where the decision is being made.
+			const keyOf = (m) => `${m.name}|${m.source}`;
+			let currentKey = current ? keyOf(current) : null;
+			let selectedIdx = null;
+
+			// Built once on open: what the filter box searches. Name and category are the
+			// obvious handles, but a player usually arrives wanting an *effect* — "silvered",
+			// "resistance", "shatter" — without knowing which metal supplies it.
+			const searchText = eligible.map((mat) => {
+				const notes = CharacterSheetMaterials.getMaterialNotes({...item, material: {name: mat.name, source: mat.source}}, mat) || [];
+				return [
+					mat.name,
+					CharacterSheetMaterials.CATEGORY_LABELS[mat.materialCategory] || mat.materialCategory || "",
+					CharacterSheetMaterials.getSummary(mat, item),
+					...notes.map(n => `${n.label} ${n.description}`),
+				].join(" ").toLowerCase();
+			});
+
+			const filterBar = e_({outer: `
+				<div class="charsheet__material-filter">
+					<input type="search" class="form-control input-sm charsheet__material-filter-ipt" placeholder="Filter ${eligible.length} materials\u2026" aria-label="Filter materials by name or effect" autocomplete="off">
+					<span class="ve-small ve-muted charsheet__material-filter-count" role="status"></span>
+				</div>
+			`});
+			filterIpt = filterBar.querySelector(".charsheet__material-filter-ipt");
+			const filterCount = filterBar.querySelector(".charsheet__material-filter-count");
+			const list = e_({outer: `<div class="charsheet__material-list"></div>`});
+
+			// The expanded row: the whole reason the modal exists. Deliberately does *not*
+			// repeat the material name — the row directly above it already says it.
+			const buildDetail = (idx) => {
+				const mat = eligible[idx];
 				const rows = CharacterSheetMaterials.getPreviewRows(item, mat);
 				// Preview the material as it would actually sit on this item — including the
 				// chosen role, so a dormant condensate affinity reads as dormant here too.
@@ -1313,63 +1363,137 @@ class CharacterSheetMaterials {
 						</div>
 						${mc.notes.map(n => `<div class="ve-small ve-muted mt-1">${esc(n)}</div>`).join("")}`
 					: "";
-				preview.append(e_({outer: `
-					<div class="p-2 stripe-odd">
-						<div class="mb-1"><strong>${esc(mat.name)}</strong> <span class="ve-muted ve-small">${esc(CharacterSheetMaterials.getSummary(mat))}</span></div>
+				return e_({outer: `
+					<div class="charsheet__material-detail">
 						${rows.length
 		? `<table class="w-100 ve-small charsheet__material-preview-table"><tbody>${rows.map(r => `<tr><td class="ve-muted">${esc(r.label)}</td><td class="ve-text-right">${esc(r.from)}</td><td class="ve-text-center ve-muted px-1">&rarr;</td><td class="ve-text-right"><strong>${esc(r.to)}</strong></td></tr>`).join("")}</tbody></table>`
 		: `<div class="ve-muted ve-small">No numeric changes to this item.</div>`}
 						${notes.length ? `<ul class="ve-small mt-1 mb-0">${notes.map(n => `<li><strong>${esc(n.label)}.</strong> ${esc(n.description)}</li>`).join("")}</ul>` : ""}
 						${mcHtml}
+						<div class="charsheet__material-detail-actions">
+							<button type="button" class="ve-btn ve-btn-xs ${isApplied ? "ve-btn-default" : "ve-btn-primary"} charsheet__material-apply" data-material-idx="${idx}" ${isApplied ? "disabled" : ""} aria-label="${isApplied ? `${esc(mat.name)} is already applied` : `Apply ${esc(mat.name)}`}">${isApplied ? "Applied" : "Apply"}</button>
+						</div>
+					</div>
+				`});
+			};
+
+			const doCollapse = () => {
+				list.querySelectorAll(".charsheet__material-detail").forEach(ele => ele.remove());
+				list.querySelectorAll(`.charsheet__material-option-btn[aria-expanded="true"]`)
+					.forEach(ele => ele.setAttribute("aria-expanded", "false"));
+			};
+
+			const doExpand = (idx, {isScroll = false} = {}) => {
+				doCollapse();
+				selectedIdx = idx;
+				if (idx == null) return;
+				const opt = list.querySelector(`.charsheet__material-option[data-material-idx="${idx}"]`);
+				if (!opt) return;
+				opt.querySelector(".charsheet__material-option-btn")?.setAttribute("aria-expanded", "true");
+				opt.append(buildDetail(idx));
+				if (isScroll) opt.scrollIntoView({block: "nearest"});
+			};
+
+			// Re-opens whatever is currently expanded, so a role or resonance change is
+			// reflected in the diff the player is looking at.
+			renderPreview = () => {
+				if (selectedIdx != null) doExpand(selectedIdx);
+			};
+
+			const renderRow = (parent, i) => {
+				const mat = eligible[i];
+				const isCurrent = keyOf(mat) === currentKey;
+				parent.append(e_({outer: `
+					<div class="charsheet__material-option${isCurrent ? " charsheet__material-option--current" : ""}" data-material-idx="${i}">
+						<button type="button" class="charsheet__material-option-btn" aria-expanded="false">
+							<span class="charsheet__material-option-chevron" aria-hidden="true"></span>
+							<span class="charsheet__material-option-name">${esc(mat.name)}</span>
+							<span class="charsheet__material-option-summary ve-muted ve-small">${esc(CharacterSheetMaterials.getSummary(mat, item))}</span>
+							${isCurrent ? `<span class="charsheet__material-option-applied ve-small">Applied</span>` : ""}
+						</button>
 					</div>
 				`}));
 			};
 
-			// --- Grouped list ---
-			const byCategory = new Map();
-			for (const mat of eligible) {
-				const cat = mat.materialCategory || "other";
-				if (!byCategory.has(cat)) byCategory.set(cat, []);
-				byCategory.get(cat).push(mat);
-			}
+			const renderList = () => {
+				const q = (filterIpt.value || "").trim().toLowerCase();
+				list.innerHTML = "";
+				const idxs = eligible.map((_, i) => i).filter(i => !q || searchText[i].includes(q));
+				filterCount.textContent = q ? `${idxs.length} of ${eligible.length}` : "";
 
-			const list = e_({outer: `<div class="charsheet__material-list"></div>`});
-			for (const [cat, mats] of byCategory) {
-				const label = CharacterSheetMaterials.CATEGORY_LABELS[cat] || cat;
-				const section = e_({outer: `<details class="mb-2" ${current?.materialCategory === cat ? "open" : ""}><summary><strong>${esc(label)}</strong> <span class="ve-muted ve-small">(${mats.length})</span></summary></details>`});
-				for (const mat of mats) {
-					const isCurrent = current && current.name === mat.name && current.source === mat.source;
-					section.append(e_({outer: `
-						<div class="charsheet__material-option ve-flex-v-center mb-1 p-1 stripe-even" data-material-name="${esc(mat.name)}" data-material-source="${esc(mat.source)}">
-							<div class="ve-flex-1 charsheet__material-hover" role="button" tabindex="0" title="Preview">
-								<span>${esc(mat.name)}</span>
-								<span class="ve-muted ve-small ml-1">${esc(CharacterSheetMaterials.getSummary(mat))}</span>
-							</div>
-							<button type="button" class="ve-btn ve-btn-xs ${isCurrent ? "ve-btn-default" : "ve-btn-primary"} charsheet__material-apply" ${isCurrent ? "disabled" : ""}>
-								${isCurrent ? "Applied" : "Apply"}
-							</button>
-						</div>
-					`}));
+				if (!idxs.length) {
+					list.append(e_({outer: `<p class="ve-muted ve-small mb-0 p-2">No material matches \u201c${esc(filterIpt.value.trim())}\u201d.</p>`}));
+					return;
 				}
-				list.append(section);
-			}
 
-			content.append(preview);
+				if (q) {
+					// A filtered result set is already short; re-grouping it would bury three
+					// matches under eight collapsed headers.
+					idxs.forEach(i => renderRow(list, i));
+				} else {
+					const byCategory = new Map();
+					for (const i of idxs) {
+						const cat = eligible[i].materialCategory || "other";
+						if (!byCategory.has(cat)) byCategory.set(cat, []);
+						byCategory.get(cat).push(i);
+					}
+					// The group holding the applied material leads — it is the one the player
+					// is comparing against, and it should not sit below seven collapsed others.
+					const cats = [...byCategory.keys()]
+						.sort((a, b) => Number(b === current?.materialCategory) - Number(a === current?.materialCategory));
+					for (const cat of cats) {
+						const label = CharacterSheetMaterials.CATEGORY_LABELS[cat] || cat;
+						// Always open one group. Landing on eight collapsed headers gives the
+						// player nothing to react to and no idea what a material even looks
+						// like; the leading group is the cheapest possible worked example.
+						const isOpen = current ? current.materialCategory === cat : cat === cats[0];
+						const section = e_({outer: `<details class="charsheet__material-group" ${isOpen ? "open" : ""}><summary><strong>${esc(label)}</strong> <span class="ve-muted ve-small">(${byCategory.get(cat).length})</span></summary></details>`});
+						byCategory.get(cat).forEach(i => renderRow(section, i));
+						list.append(section);
+					}
+				}
+
+				// Keep the open diff open across a re-render; if the filter hid it, leave the
+				// selection intact so clearing the filter brings it back.
+				if (selectedIdx != null && idxs.includes(selectedIdx)) doExpand(selectedIdx);
+			};
+
+			refreshList = () => {
+				const live = this._state.getItemRaw?.(itemId) || item;
+				currentKey = live.material ? `${live.material.name}|${live.material.source}` : null;
+				renderList();
+			};
+
+			list.addEventListener("click", (evt) => {
+				const btn = evt.target.closest(".charsheet__material-option-btn");
+				if (!btn) return;
+				const idx = Number(btn.closest(".charsheet__material-option").dataset.materialIdx);
+				if (selectedIdx === idx) {
+					doCollapse();
+					selectedIdx = null;
+					return;
+				}
+				doExpand(idx, {isScroll: true});
+			});
+
+			filterIpt.addEventListener("input", () => renderList());
+			filterIpt.addEventListener("keydown", (evt) => {
+				// Escape clears the filter before it closes the modal — the reflex every
+				// other search box in the app already honours.
+				if (evt.key !== "Escape" || !filterIpt.value) return;
+				evt.stopPropagation();
+				filterIpt.value = "";
+				renderList();
+			});
+
+			content.append(filterBar);
 			content.append(list);
-			if (current) renderPreview(current);
 
-			list.addEventListener("mouseover", (evt) => {
-				const hover = evt.target.closest(".charsheet__material-hover");
-				if (!hover) return;
-				const row = hover.closest(".charsheet__material-option");
-				renderPreview(eligible.find(m => m.name === row.dataset.materialName && m.source === row.dataset.materialSource));
-			});
-			list.addEventListener("focusin", (evt) => {
-				const hover = evt.target.closest(".charsheet__material-hover");
-				if (!hover) return;
-				const row = hover.closest(".charsheet__material-option");
-				renderPreview(eligible.find(m => m.name === row.dataset.materialName && m.source === row.dataset.materialSource));
-			});
+			// Open on the applied material's diff, so the modal answers "what am I on now?"
+			// before the player has to ask it.
+			if (currentKey) selectedIdx = eligible.findIndex(m => keyOf(m) === currentKey);
+			if (selectedIdx < 0) selectedIdx = null;
+			renderList();
 		}
 
 		modalInner.append(content);
@@ -1383,8 +1507,7 @@ class CharacterSheetMaterials {
 		content.addEventListener("click", (evt) => {
 			const applyBtn = evt.target.closest(".charsheet__material-apply");
 			if (applyBtn) {
-				const row = applyBtn.closest(".charsheet__material-option");
-				const mat = this.getMaterials().find(m => m.name === row.dataset.materialName && m.source === row.dataset.materialSource);
+				const mat = eligible[Number(applyBtn.dataset.materialIdx)];
 				if (!mat) return;
 				this._state.setItemMaterial(itemId, mat);
 				this._page.saveCharacter?.();
@@ -1398,8 +1521,15 @@ class CharacterSheetMaterials {
 				this._page.saveCharacter?.();
 				this._page.renderCharacter?.();
 				renderCurrent();
+				// The list carries the "Applied" marker, so it has to hear about this too.
+				refreshList();
 			}
 		});
+
+		// The modal's own focus trap restores focus on close but deliberately leaves
+		// focus-*in* to each caller. Landing on the filter means a keyboard user starts
+		// where the work is instead of at the top of the page.
+		filterIpt?.focus();
 	}
 
 	/**
