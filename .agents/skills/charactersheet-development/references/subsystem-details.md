@@ -608,6 +608,15 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
   text; each row is a native `<button>` whose expanded panel holds the diff and the *only*
   Apply button on screen. One category group is always open. Never reintroduce hover preview
   — it cannot work on touch.
+- **Inventory-row chips carry an accessible name, not just a `title`.** Build them with
+  `getMaterialBadgeAriaLabel(material, item)` and `getMagicCapacityAriaLabel(material,
+  status)`; never let a chip's meaning live only in `title=`, which is mouse-only. The
+  glyphs (`⚙ ✦ ⚠`) are `aria-hidden` — a screen reader otherwise announces "black
+  four-pointed star" — and ratios are spelled "4 of 6", not "4/6".
+- ⚠️ **The `✦` capacity chip is a `<button>`, not a click-handled `<span>`.** It opens the
+  Magic Capacity modal, so it needs tab order, Enter/Space and a focus ring. Its UA styling
+  is reset in CSS (`font: inherit; background: none`) so it sits flush with the inert chips
+  beside it, and under `pointer: coarse` all three chips share a 44 px minimum.
 - ⚠️ `addItem()` **stacks same-named items**, so a material applies to the whole stack.
 - **Elemental condensates** (`materialCategory: "condensate"`, 18 of them) are **role-gated**:
   the affinity's mechanics only fire while the material occupies its own role

@@ -24569,7 +24569,11 @@ color: var(--cs-text-primary, #f1f5f9);
 }
 
 /* Magic Capacity. The only one of the three states that shouts is "overloaded",
-   because it is the only one that costs the player a roll. */
+   because it is the only one that costs the player a roll.
+
+   This is a real <button>: it opens the capacity modal, so it has to be reachable
+   by keyboard and announce itself as actionable. The UA button styling is reset
+   rather than fought, so it sits flush with the material chip beside it. */
 .charsheet__item-mc-badge {
 	display: inline-flex;
 	align-items: center;
@@ -24577,9 +24581,17 @@ color: var(--cs-text-primary, #f1f5f9);
 	padding: 2px 8px;
 	border-radius: 9999px;
 	border: 1px solid transparent;
+	font: inherit;
+	line-height: inherit;
+	background: none;
 	font-variant-numeric: tabular-nums;
 	white-space: nowrap;
 	cursor: pointer;
+}
+
+.charsheet__item-mc-badge:focus-visible {
+	outline: 2px solid var(--cs-primary, #7681f5);
+	outline-offset: 2px;
 }
 
 .charsheet__item-mc-badge--ok {
@@ -24812,6 +24824,16 @@ color: var(--cs-text-primary, #f1f5f9);
 		min-height: 44px;
 		padding-right: 20px;
 		padding-left: 20px;
+	}
+
+	/* The capacity chip opens the Magic Capacity modal, so on touch it is a target
+	   and not just a readout. Its two neighbours are inert text, but they grow with
+	   it — a 44px chip beside a 23px chip reads as a broken baseline, and the row
+	   has the vertical room. */
+	.charsheet__item-mc-badge,
+	.charsheet__item-material-badge,
+	.charsheet__item-degradation-badge {
+		min-height: 44px;
 	}
 }
 

@@ -724,6 +724,61 @@ describe("Item Materials", () => {
 		});
 	});
 
+	describe("accessible names", () => {
+		const sword = {name: "Longsword", weapon: true, type: "M", dmg1: "1d8"};
+
+		it("names the material chip with its effects, not just its noun", () => {
+			// The chip renders "⚙ Mithril". A screen reader that only gets the visible
+			// text learns the item is made of something, and nothing about why it matters.
+			const label = CharacterSheetMaterials.getMaterialBadgeAriaLabel(findMat("Mithril"), sword);
+			expect(label).toMatch(/^Material: Mithril\./);
+			expect(label).toContain("MC");
+		});
+
+		it("respects item-aware axis gating in the chip's name", () => {
+			expect(CharacterSheetMaterials.getMaterialBadgeAriaLabel(findMat("Mithril"), sword)).not.toContain("AC");
+		});
+
+		it("returns nothing when there is no material to name", () => {
+			expect(CharacterSheetMaterials.getMaterialBadgeAriaLabel(null, sword)).toBe("");
+		});
+
+		it("spells the capacity ratio out rather than relying on a slash", () => {
+			const label = CharacterSheetMaterials.getMagicCapacityAriaLabel(
+				{name: "Steel"},
+				{count: 2, capacityDisplay: "3", isOverloaded: false},
+			);
+			expect(label).toBe("Magic Capacity 2 of 3. Open details.");
+		});
+
+		it("carries the overage and the interference DC when overloaded", () => {
+			const label = CharacterSheetMaterials.getMagicCapacityAriaLabel(
+				{name: "Steel"},
+				{count: 5, capacityDisplay: "3", isOverloaded: true, overage: 2, dc: 17},
+			);
+			expect(label).toContain("overloaded by 2");
+			expect(label).toContain("Interference DC 17");
+		});
+
+		it("names the suppressing and unlimited states distinctly", () => {
+			const suppress = CharacterSheetMaterials.getMagicCapacityAriaLabel({name: "Rimeglass"}, {isSuppressing: true, count: 1});
+			const unlimited = CharacterSheetMaterials.getMagicCapacityAriaLabel({name: "Adamant"}, {isUnlimited: true, count: 4});
+			expect(suppress).toContain("suppresses magic");
+			expect(unlimited).toContain("any number of enchantments");
+		});
+
+		it("describes the outcome rather than the input device", () => {
+			// "Click for details" is fine in a tooltip, which only a mouse ever sees.
+			// It is wrong in an accessible name, which a keyboard and a switch also read.
+			const label = CharacterSheetMaterials.getMagicCapacityAriaLabel({name: "Steel"}, {count: 1, capacityDisplay: "3"});
+			expect(label).not.toMatch(/click/i);
+		});
+
+		it("returns nothing when there is no capacity status", () => {
+			expect(CharacterSheetMaterials.getMagicCapacityAriaLabel({name: "Steel"}, null)).toBe("");
+		});
+	});
+
 	// ==========================================================================
 	// Magic Capacity
 	// ==========================================================================
@@ -1675,6 +1730,26 @@ describe("Item Materials", () => {
 			state.degradeItemMaterial(id);
 			expect(CharacterSheetMaterials.getDegradationSummary(state.getItemRaw(id)))
 				.toBe("Protection and Critical reduced to 0");
+		});
+
+		it("gives the degradation badge an accessible name, not just a tooltip", () => {
+			// The badge is "⚠ Damage -1 step" on screen. Everything that makes that
+			// actionable — what happened, and how to undo it — lived only in `title`.
+			state.degradeItemMaterial(flintId);
+			const mod = new CharacterSheetMaterials({getState: () => state, renderCharacter: () => {}});
+			const html = mod.getDegradationBadgeHtml(flintId);
+			expect(html).toContain(`aria-hidden="true"`);
+			expect(html).toContain(`<span class="sr-only">Damaged:</span>`);
+			expect(html).toContain("Repaired manually.");
+		});
+
+		it("names a destroyed item as destroyed", () => {
+			state.addItem({name: "Glass Dagger", type: "M", weight: 1, value: 200, quantity: 1});
+			const id = state.getItems().at(-1).id;
+			state.setItemMaterial(id, {name: "Ordinary Glass", source: "TGTT"});
+			state.degradeItemMaterial(id);
+			const mod = new CharacterSheetMaterials({getState: () => state, renderCharacter: () => {}});
+			expect(mod.getDegradationBadgeHtml(id)).toContain(`<span class="sr-only">Destroyed:</span>`);
 		});
 	});
 });

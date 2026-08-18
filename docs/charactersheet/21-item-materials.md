@@ -640,6 +640,32 @@ Without this a longsword advertised `Mithril — AC 18`, describing a suit of ar
 player was not looking at. `applyToItem` is gated to match: it no longer writes a
 `critThreshold` onto armour, where nothing rolls against it.
 
+### Inventory-row badges have accessible names
+
+The three chips on an inventory row each carried their whole meaning in `title=`, which
+reaches a mouse and nothing else. They now pair a visible glyph with an accessible name:
+
+| Badge | Element | Accessible name |
+|---|---|---|
+| `⚙ Darkmetal` | `<span>` | `Material: Darkmetal. Dmg +1 · Pen 2 · MC 2` — via `getMaterialBadgeAriaLabel(material, item)`, so it respects the same item-aware axis gating |
+| `✦ 5/3` | **`<button>`** | `Magic Capacity 5 of 3, overloaded by 2. Interference DC 17. Open details to roll.` — via `getMagicCapacityAriaLabel(material, status)` |
+| `⚠ Damage −1 step` | `<span>` | `Damaged: Damage −1 step — Its striking edge chips. Repaired manually.` |
+
+Three rules hold across all of them:
+
+- **The glyph is `aria-hidden`.** `⚙`, `✦` and `⚠` are announced as "gear", "black
+  four-pointed star" and "warning sign", which is noise in front of the real content.
+- **The ratio is spelled out.** `4/6` becomes "4 of 6"; a slash is read literally by some
+  screen readers and skipped by others.
+- **The accessible name names the outcome, not the input device.** The tooltip still says
+  "Click for details" because only a mouse ever sees it; the accessible name says "Open
+  details", because a keyboard and a switch read it too.
+
+The capacity chip is a real `<button>` rather than a click-handled `<span>`, so it is
+tab-reachable, activates on Enter and Space, and shows the standard focus ring. Under
+`pointer: coarse` all three chips reach a 44 px minimum — the two inert ones grow with the
+button so the row keeps one baseline.
+
 ### Penetration is not auto-resolved
 
 The sheet tracks **no target AC**. Penetration therefore shows as `Pen N` on the attack row,

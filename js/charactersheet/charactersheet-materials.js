@@ -790,6 +790,23 @@ class CharacterSheetMaterials {
 		return bits.join(" \u00B7 ");
 	}
 
+	/**
+	 * Accessible name for the material chip on an inventory row.
+	 *
+	 * The chip shows a gear glyph and a bare noun — "\u2699 Mithril" — which tells a
+	 * screen reader nothing about why the player should care. Everything that made
+	 * the chip worth rendering lives in its tooltip, and a tooltip is mouse-only.
+	 *
+	 * @param {object} material
+	 * @param {object} [item] host item, so the summary names only axes it can host
+	 * @returns {string}
+	 */
+	static getMaterialBadgeAriaLabel (material, item) {
+		if (!material?.name) return "";
+		const summary = CharacterSheetMaterials.getSummary(material, item);
+		return `Material: ${material.name}${summary ? `. ${summary}` : ""}`;
+	}
+
 	// ==========================================
 	// Magic Capacity
 	// ==========================================
@@ -1041,6 +1058,27 @@ class CharacterSheetMaterials {
 		if (passed) return {d20, dc, passed: true, d8: null, effect: null};
 		const d8 = roll(8);
 		return {d20, dc, passed: false, d8, effect: CharacterSheetMaterials.MAGICAL_INTERFERENCE_TABLE[d8 - 1]};
+	}
+
+	/**
+	 * Accessible name for the Magic Capacity badge.
+	 *
+	 * The visible tooltip says "Click…" because a tooltip only ever reaches a mouse.
+	 * The accessible name has to serve a keyboard and a screen reader too, so it names
+	 * the outcome rather than the input device, and spells "4/6" out as "4 of 6" —
+	 * a slash is read as a literal slash by some screen readers and skipped by others.
+	 *
+	 * @param {object} material
+	 * @param {object} status from `getMagicCapacityStatus`
+	 * @returns {string}
+	 */
+	static getMagicCapacityAriaLabel (material, status) {
+		if (!status) return "";
+		const name = material?.name || "This material";
+		if (status.isUnlimited) return `Magic Capacity: ${name} holds any number of enchantments, ${status.count} counted. Open details.`;
+		if (status.isSuppressing) return `Magic Capacity: ${name} suppresses magic rather than storing it. Open details.`;
+		if (status.isOverloaded) return `Magic Capacity ${status.count} of ${status.capacityDisplay}, overloaded by ${status.overage}. Interference DC ${status.dc}. Open details to roll.`;
+		return `Magic Capacity ${status.count} of ${status.capacityDisplay}. Open details.`;
 	}
 
 	/** Display-ready notes for an item's material, for the item info modal. */
@@ -1760,7 +1798,9 @@ class CharacterSheetMaterials {
 				? `Repaired over a Short Rest${status.repair.tool ? ` with ${status.repair.tool}` : ""}.`
 				: "Repaired manually.";
 		const tip = esc(`${status.note ? `${status.note} ` : ""}${repairHint}`).replace(/"/g, "&quot;");
-		return `<span class="ve-small charsheet__item-degradation-badge charsheet__item-degradation-badge--${status.isDestroyed ? "destroyed" : "worn"}" title="${tip}">\u26A0 ${esc(summary)}${status.stacks > 1 && !status.isDestroyed ? ` \u00D7${status.stacks}` : ""}</span>`;
+		const stacks = status.stacks > 1 && !status.isDestroyed ? ` \u00D7${status.stacks}` : "";
+		const state = status.isDestroyed ? "Destroyed" : "Damaged";
+		return `<span class="ve-small charsheet__item-degradation-badge charsheet__item-degradation-badge--${status.isDestroyed ? "destroyed" : "worn"}" title="${tip}"><span aria-hidden="true">\u26A0</span> <span class="sr-only">${state}:</span>${esc(summary)}${stacks}<span class="sr-only"> \u2014 ${tip}</span></span>`;
 	}
 }
 

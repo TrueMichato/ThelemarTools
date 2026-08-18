@@ -7499,8 +7499,8 @@ class CharacterSheetInventory {
 						${packProvenanceName ? `<span class="ve-small ve-muted" title="${item._fromPack.replace(/"/g, "&quot;")}">From ${packProvenanceName}</span>` : ""}
 						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}${item.chargeName ? ` — ${item.chargeName}` : ""}">${item.chargeName ? `${item.chargeName}:` : "Charges:"} <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
 						${hasSpellward ? `<span class="ve-small" title="${spellwardLabel}">🛡 ${spellwardLabel}: <strong>${spellwardCount}</strong>/${spellwardMax}${spellwardCount ? ` (${(item.chosenSpellImmunities || []).map(s => typeof s === "string" ? s : s.name).filter(Boolean).join(", ")})` : ""}</span>` : ""}
-						${materialEntity ? `<span class="ve-small charsheet__item-material-badge" title="${(`${materialEntity.name} — ${CharacterSheetMaterials.getSummary(materialEntity, item)}`).replace(/"/g, "&quot;")}">⚙ ${materialEntity.name}</span>` : ""}
-						${mcStatus ? `<span class="ve-small charsheet__item-mc-badge charsheet__item-mc-badge--${mcStatus.isSuppressing ? "suppress" : mcStatus.isOverloaded ? "over" : "ok"} charsheet__item-mc-config" title="${this._getMagicCapacityTooltip(materialEntity, mcStatus).replace(/"/g, "&quot;")}">✦ ${mcStatus.count}/${mcStatus.capacityDisplay}</span>` : ""}
+						${materialEntity ? `<span class="ve-small charsheet__item-material-badge" title="${(`${materialEntity.name} — ${CharacterSheetMaterials.getSummary(materialEntity, item)}`).replace(/"/g, "&quot;")}"><span aria-hidden="true">⚙</span> <span class="sr-only">Material:</span>${materialEntity.name}<span class="sr-only"> — ${CharacterSheetMaterials.getSummary(materialEntity, item)}</span></span>` : ""}
+						${mcStatus ? `<button type="button" class="ve-small charsheet__item-mc-badge charsheet__item-mc-badge--${mcStatus.isSuppressing ? "suppress" : mcStatus.isOverloaded ? "over" : "ok"} charsheet__item-mc-config" title="${this._getMagicCapacityTooltip(materialEntity, mcStatus).replace(/"/g, "&quot;")}" aria-label="${CharacterSheetMaterials.getMagicCapacityAriaLabel(materialEntity, mcStatus).replace(/"/g, "&quot;")}"><span aria-hidden="true">✦ ${mcStatus.count}/${mcStatus.capacityDisplay}</span></button>` : ""}
 						${this._page.getMaterialsModule?.()?.getDegradationBadgeHtml(item.id) || ""}
 						${item.appliedUpgrades?.length ? `<span class="ve-small charsheet__item-upgrade-badges">${item.appliedUpgrades.map(u => {
 		const tooltip = typeof CharacterSheetUpgrades !== "undefined" ? (() => {
@@ -7623,8 +7623,8 @@ class CharacterSheetInventory {
 							</button>
 						` : ""}
 						${mcStatus ? `
-							<button type="button" class="ve-btn ve-btn-xs ${mcStatus.isOverloaded ? "ve-btn-danger" : "ve-btn-default"} charsheet__item-mc-config" title="${this._getMagicCapacityTooltip(materialEntity, mcStatus).replace(/"/g, "&quot;")}">
-								✦ ${mcStatus.count}/${mcStatus.capacityDisplay}
+							<button type="button" class="ve-btn ve-btn-xs ${mcStatus.isOverloaded ? "ve-btn-danger" : "ve-btn-default"} charsheet__item-mc-config" title="${this._getMagicCapacityTooltip(materialEntity, mcStatus).replace(/"/g, "&quot;")}" aria-label="${CharacterSheetMaterials.getMagicCapacityAriaLabel(materialEntity, mcStatus).replace(/"/g, "&quot;")}">
+								<span aria-hidden="true">✦ ${mcStatus.count}/${mcStatus.capacityDisplay}</span>
 							</button>
 						` : ""}
 						<button type="button" class="ve-btn ve-btn-xs ${hasNote ? "ve-btn-primary" : "ve-btn-default"} charsheet__item-note" title="${hasNote ? "View/Edit Note" : "Add Note"}">
