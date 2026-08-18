@@ -24807,6 +24807,44 @@ color: var(--cs-text-primary, #f1f5f9);
 	white-space: nowrap;
 }
 
+/* Risk. Two tiers, because "shatters permanently" and "chips until you re-knap it"
+   are not the same decision. Both read at a glance in the row; the expanded panel
+   carries the authored rule. The tint is derived from the same token as the text so
+   the pair cannot drift out of contrast when a theme changes. */
+.charsheet__material-option-risk {
+	flex: 0 0 auto;
+	padding: 1px 8px;
+	border: 1px solid currentcolor;
+	border-radius: 9999px;
+	white-space: nowrap;
+}
+
+.charsheet__material-option-risk--degrades {
+	color: var(--cs-warning-text, var(--cs-warning, #f59e0b));
+	background: color-mix(in srgb, var(--cs-warning, #f59e0b) 12%, transparent);
+}
+
+.charsheet__material-option-risk--destroys {
+	color: var(--cs-danger-text, var(--cs-danger, #f26161));
+	background: color-mix(in srgb, var(--cs-danger, #f26161) 12%, transparent);
+}
+
+.charsheet__material-risk {
+	padding: 6px 10px;
+	border: 1px solid currentcolor;
+	border-radius: var(--cs-radius-sm, 6px);
+}
+
+.charsheet__material-risk--degrades {
+	color: var(--cs-warning-text, var(--cs-warning, #f59e0b));
+	background: color-mix(in srgb, var(--cs-warning, #f59e0b) 12%, transparent);
+}
+
+.charsheet__material-risk--destroys {
+	color: var(--cs-danger-text, var(--cs-danger, #f26161));
+	background: color-mix(in srgb, var(--cs-danger, #f26161) 12%, transparent);
+}
+
 .charsheet__material-detail {
 	padding: 8px 8px 8px 21px;
 	border-radius: var(--cs-radius-sm, 6px);

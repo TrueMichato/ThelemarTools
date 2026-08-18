@@ -707,6 +707,44 @@ class CharacterSheetMaterials {
 		return out;
 	}
 
+	/**
+	 * The risk a material carries, asked *before* it is applied — or `null`.
+	 *
+	 * `getDegradationStatus` answers "what has already happened to this item".
+	 * This answers "what could happen if I choose this", which is the question the
+	 * picker is actually asking, and it has to be answerable with no item state at all.
+	 *
+	 * Two tiers, because they are not the same decision. Exactly one material in the
+	 * catalog destroys its item outright; four others degrade recoverably. Collapsing
+	 * them into one warning would either cry wolf about Obsidian or under-sell Glass.
+	 * Both tiers are derived from the authored `degradation` block — never from a
+	 * material's name.
+	 *
+	 * @param {object} material
+	 * @returns {?{tier: string, label: string, trigger: string, note: ?string, repair: ?string}}
+	 */
+	static getRiskFlag (material) {
+		const spec = CharacterSheetMaterials.getDegradationSpec(material);
+		if (!spec) return null;
+
+		const t = spec.trigger || {};
+		let trigger = "in use";
+		if (t.on === "attackRoll") {
+			const nat = (t.natural || []).map(n => `a natural ${n}`).join(" or ");
+			trigger = [nat, t.alsoOnCriticalHit ? "a critical hit" : null].filter(Boolean).join(" or ");
+			trigger = trigger ? `on ${trigger}` : "on an attack roll";
+		} else if (t.on === "damageTaken") {
+			trigger = `when it takes ${t.damageType ? `${t.damageType} ` : ""}damage`;
+		}
+
+		if (spec.destroys) return {tier: "destroys", label: "Can be destroyed", trigger, note: spec.note || null, repair: null};
+
+		const repair = spec.repair?.method === "shortRest"
+			? `Repaired over a Short Rest${spec.repair.tool ? ` with ${spec.repair.tool}` : ""}.`
+			: "Repaired manually.";
+		return {tier: "degrades", label: "Degrades in use", trigger, note: spec.note || null, repair};
+	}
+
 	/** Human-readable one-liner for the badge / tooltip, or `null`. */
 	static getDegradationSummary (item, material) {
 		const status = CharacterSheetMaterials.getDegradationStatus(item, material);
@@ -1401,8 +1439,21 @@ class CharacterSheetMaterials {
 						</div>
 						${mc.notes.map(n => `<div class="ve-small ve-muted mt-1">${esc(n)}</div>`).join("")}`
 					: "";
+				// The risk leads the panel. A player who is about to spend materials on a
+				// glass sword needs to meet "this shatters" before the damage numbers that
+				// made it tempting, not after them.
+				const risk = CharacterSheetMaterials.getRiskFlag(mat);
+				const riskHtml = risk
+					? `<p class="charsheet__material-risk charsheet__material-risk--${risk.tier} ve-small mb-1">
+							<span aria-hidden="true">\u26A0</span>
+							<strong>${esc(risk.label)} ${esc(risk.trigger)}.</strong>
+							${risk.note ? ` ${esc(risk.note)}` : ""}
+							${risk.repair ? ` ${esc(risk.repair)}` : " This cannot be undone."}
+						</p>`
+					: "";
 				return e_({outer: `
 					<div class="charsheet__material-detail">
+						${riskHtml}
 						${rows.length
 		? `<table class="w-100 ve-small charsheet__material-preview-table"><tbody>${rows.map(r => `<tr><td class="ve-muted">${esc(r.label)}</td><td class="ve-text-right">${esc(r.from)}</td><td class="ve-text-center ve-muted px-1">&rarr;</td><td class="ve-text-right"><strong>${esc(r.to)}</strong></td></tr>`).join("")}</tbody></table>`
 		: `<div class="ve-muted ve-small">No numeric changes to this item.</div>`}
@@ -1441,12 +1492,14 @@ class CharacterSheetMaterials {
 			const renderRow = (parent, i) => {
 				const mat = eligible[i];
 				const isCurrent = keyOf(mat) === currentKey;
+				const risk = CharacterSheetMaterials.getRiskFlag(mat);
 				parent.append(e_({outer: `
 					<div class="charsheet__material-option${isCurrent ? " charsheet__material-option--current" : ""}" data-material-idx="${i}">
 						<button type="button" class="charsheet__material-option-btn" aria-expanded="false">
 							<span class="charsheet__material-option-chevron" aria-hidden="true"></span>
 							<span class="charsheet__material-option-name">${esc(mat.name)}</span>
 							<span class="charsheet__material-option-summary ve-muted ve-small">${esc(CharacterSheetMaterials.getSummary(mat, item))}</span>
+							${risk ? `<span class="charsheet__material-option-risk charsheet__material-option-risk--${risk.tier} ve-small"><span aria-hidden="true">\u26A0</span> ${esc(risk.label)}</span>` : ""}
 							${isCurrent ? `<span class="charsheet__material-option-applied ve-small">Applied</span>` : ""}
 						</button>
 					</div>
@@ -1547,20 +1600,24 @@ class CharacterSheetMaterials {
 			if (applyBtn) {
 				const mat = eligible[Number(applyBtn.dataset.materialIdx)];
 				if (!mat) return;
+				const prior = this._state.getItemRaw?.(itemId)?.material || null;
 				this._state.setItemMaterial(itemId, mat);
 				this._page.saveCharacter?.();
 				this._page.renderCharacter?.();
 				doClose(true);
+				this._offerMaterialUndo(itemId, prior, `${mat.name} applied.`);
 				return;
 			}
 
 			if (evt.target.closest(".charsheet__material-clear")) {
+				const prior = this._state.getItemRaw?.(itemId)?.material || null;
 				this._state.clearItemMaterial(itemId);
 				this._page.saveCharacter?.();
 				this._page.renderCharacter?.();
 				renderCurrent();
 				// The list carries the "Applied" marker, so it has to hear about this too.
 				refreshList();
+				this._offerMaterialUndo(itemId, prior, `${prior?.name || "Material"} removed.`);
 			}
 		});
 
@@ -1568,6 +1625,48 @@ class CharacterSheetMaterials {
 		// focus-*in* to each caller. Landing on the filter means a keyboard user starts
 		// where the work is instead of at the top of the page.
 		filterIpt?.focus();
+	}
+
+	/**
+	 * Offer to put back what a material change replaced.
+	 *
+	 * Applying a material is reversible, so a confirm dialog would be the wrong trade —
+	 * it taxes all 72 choices to protect against a mistake in one of them, and the
+	 * player has to answer it before they can see whether they were right. Undo taxes
+	 * nothing and arrives after the result is visible on the sheet.
+	 *
+	 * `prior` is the raw `{name, source, ...}` reference or `null` for "was bare", so
+	 * reverting restores the *absence* of a material as faithfully as a previous one.
+	 *
+	 * @param {string} itemId
+	 * @param {?object} prior the material reference being replaced
+	 * @param {string} label what just happened, for the toast line
+	 */
+	_offerMaterialUndo (itemId, prior, label) {
+		if (typeof JqueryUtil === "undefined" || !JqueryUtil?.doToast) return;
+		const esc = CharacterSheetMaterials._esc;
+		const back = prior?.name ? esc(prior.name) : "no material";
+
+		const content = e_({outer: `
+			<div class="ve-flex-v-center">
+				<span class="ve-flex-1">${esc(label)}</span>
+				<button type="button" class="ve-btn ve-btn-xxs ve-btn-default charsheet__material-undo">Revert to ${back}</button>
+			</div>
+		`});
+
+		content.addEventListener("click", (evt) => {
+			if (!evt.target.closest(".charsheet__material-undo")) return;
+			if (prior?.name) this._state.setItemMaterial(itemId, prior);
+			else this._state.clearItemMaterial(itemId);
+			this._page.saveCharacter?.();
+			this._page.renderCharacter?.();
+			// The host toast dismisses itself on any click inside it, so there is no
+			// element left to swap into a "Reverted" state — say it in a fresh toast
+			// instead, or the revert lands with no acknowledgement at all.
+			JqueryUtil.doToast({type: "success", content: `Reverted to ${back}.`, autoHideTime: 4000});
+		});
+
+		JqueryUtil.doToast({type: "info", content, autoHideTime: 12000});
 	}
 
 	/**

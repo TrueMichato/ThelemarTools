@@ -779,6 +779,125 @@ describe("Item Materials", () => {
 		});
 	});
 
+	describe("getRiskFlag", () => {
+		const spec = (over) => ({
+			name: "X", source: "TGTT", materialCategory: "stone", density: 2, damage: 0, protection: 0,
+			critical: 0, penetration: 0, magicCapacity: 1, rarity: "common",
+			price: {gp: 0, unit: "lb", display: "—"}, appliesTo: ["weapon"], effects: [],
+			degradation: over,
+		});
+
+		it("says nothing about the sixty-seven materials that never degrade", () => {
+			expect(CharacterSheetMaterials.getRiskFlag({name: "Steel"})).toBeNull();
+			expect(CharacterSheetMaterials.getRiskFlag(null)).toBeNull();
+		});
+
+		it("separates destruction from recoverable wear", () => {
+			// Collapsing the two would either cry wolf about Obsidian or under-sell Glass.
+			const destroys = CharacterSheetMaterials.getRiskFlag(spec({
+				trigger: {on: "attackRoll", natural: [1], alsoOnCriticalHit: true},
+				effect: {type: "destroy"}, destroys: true, repair: null,
+			}));
+			const degrades = CharacterSheetMaterials.getRiskFlag(spec({
+				trigger: {on: "attackRoll", natural: [1]},
+				effect: {type: "damageStepDelta", value: -1}, destroys: false,
+				repair: {method: "shortRest", tool: "mason's tools"},
+			}));
+			expect(destroys.tier).toBe("destroys");
+			expect(destroys.label).toBe("Can be destroyed");
+			expect(destroys.repair).toBeNull();
+			expect(degrades.tier).toBe("degrades");
+			expect(degrades.repair).toBe("Repaired over a Short Rest with mason's tools.");
+		});
+
+		it("names the trigger the player will actually roll", () => {
+			expect(CharacterSheetMaterials.getRiskFlag(spec({
+				trigger: {on: "attackRoll", natural: [1], alsoOnCriticalHit: true}, destroys: true,
+			})).trigger).toBe("on a natural 1 or a critical hit");
+
+			expect(CharacterSheetMaterials.getRiskFlag(spec({
+				trigger: {on: "damageTaken", damageType: "fire"},
+				effect: {type: "zeroAxes", axes: ["protection"]}, repair: {method: "manual"},
+			})).trigger).toBe("when it takes fire damage");
+		});
+
+		it("falls back rather than throwing on an unrecognised trigger", () => {
+			expect(CharacterSheetMaterials.getRiskFlag(spec({trigger: {on: "eclipse"}})).trigger).toBe("in use");
+			expect(CharacterSheetMaterials.getRiskFlag(spec({})).trigger).toBe("in use");
+		});
+
+		it("flags exactly the five degrading materials in the real catalog", () => {
+			// Derived from the authored `degradation` block, never from a material's name —
+			// so adding a sixth degrading material needs no code change.
+			const flagged = MATERIALS.filter(m => CharacterSheetMaterials.getRiskFlag(m));
+			expect(flagged.every(m => !!m.degradation)).toBe(true);
+			expect(MATERIALS.filter(m => m.degradation).length).toBe(flagged.length);
+		});
+	});
+
+	describe("material undo", () => {
+		let state; let mod; let itemId; let toasts; let restoreToast;
+
+		beforeEach(() => {
+			state = new CharacterSheetState();
+			state.setItemMaterialCatalog(MATERIALS);
+			state.addItem({name: "Longsword", type: "M", weight: 3, value: 1500, quantity: 1, dmg1: "1d8"});
+			itemId = state.getItems().at(-1).id;
+			mod = new CharacterSheetMaterials({getState: () => state, renderCharacter: () => {}, saveCharacter: () => {}});
+			toasts = [];
+			restoreToast = globalThis.JqueryUtil.doToast;
+			globalThis.JqueryUtil.doToast = (opts) => toasts.push(opts);
+		});
+
+		afterEach(() => { globalThis.JqueryUtil.doToast = restoreToast; });
+
+		const fireUndo = () => {
+			const content = toasts.at(-1).content;
+			content._handlers.click({target: {closest: sel => sel === ".charsheet__material-undo" ? {} : null}});
+		};
+
+		it("names what it would put back", () => {
+			state.setItemMaterial(itemId, {name: "Steel", source: "TGTT"});
+			mod._offerMaterialUndo(itemId, {name: "Gold", source: "TGTT"}, "Steel applied.");
+			expect(toasts).toHaveLength(1);
+			expect(toasts[0].content.outerHTML).toContain("Revert to Gold");
+			expect(toasts[0].content.outerHTML).toContain("Steel applied.");
+		});
+
+		it("restores the material it replaced", () => {
+			state.setItemMaterial(itemId, {name: "Gold", source: "TGTT"});
+			state.setItemMaterial(itemId, {name: "Steel", source: "TGTT"});
+			mod._offerMaterialUndo(itemId, {name: "Gold", source: "TGTT"}, "Steel applied.");
+			fireUndo();
+			expect(state.getItemRaw(itemId).material.name).toBe("Gold");
+		});
+
+		it("acknowledges the revert, since the host toast dismisses itself on the click", () => {
+			state.setItemMaterial(itemId, {name: "Steel", source: "TGTT"});
+			mod._offerMaterialUndo(itemId, {name: "Gold", source: "TGTT"}, "Steel applied.");
+			fireUndo();
+			expect(toasts).toHaveLength(2);
+			expect(toasts[1].content).toBe("Reverted to Gold.");
+		});
+
+		it("restores the *absence* of a material as faithfully as a previous one", () => {
+			// The common case is applying a material to a bare item, so "revert" has to
+			// mean "make it bare again", not "leave the newest one in place".
+			state.setItemMaterial(itemId, {name: "Steel", source: "TGTT"});
+			mod._offerMaterialUndo(itemId, null, "Steel applied.");
+			expect(toasts[0].content.outerHTML).toContain("Revert to no material");
+			fireUndo();
+			expect(state.getItemRaw(itemId).material).toBeFalsy();
+		});
+
+		it("stays silent rather than throwing when there is no toast host", () => {
+			const saved = globalThis.JqueryUtil;
+			globalThis.JqueryUtil = undefined;
+			expect(() => mod._offerMaterialUndo(itemId, null, "x")).not.toThrow();
+			globalThis.JqueryUtil = saved;
+		});
+	});
+
 	// ==========================================================================
 	// Magic Capacity
 	// ==========================================================================

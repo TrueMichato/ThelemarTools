@@ -666,6 +666,56 @@ tab-reachable, activates on Enter and Space, and shows the standard focus ring. 
 `pointer: coarse` all three chips reach a 44 px minimum — the two inert ones grow with the
 button so the row keeps one baseline.
 
+### Risk is stated before the choice, and reversible after it
+
+Exactly one material in the catalog destroys the item outright — **Ordinary Glass**, which
+shatters on a natural 1 or after it scores a critical hit. Four more degrade without
+destroying (Stone and Flint, Obsidian, Rimeglass, Duststone). Before this, all six looked
+exactly like Steel at the moment of choosing.
+
+`CharacterSheetMaterials.getRiskFlag(material)` derives a two-tier flag **entirely from the
+authored `degradation` block** — never from a material's name, so a sixth degrading material
+needs no code change:
+
+| Tier | Condition | Reads |
+|---|---|---|
+| `destroys` | `degradation.destroys === true` | `⚠ Can be destroyed` |
+| `degrades` | any other `degradation` block | `⚠ Degrades in use` |
+
+The flag appears twice: as a chip in the picker row, so it is visible while scanning, and as
+the **first** element of the expanded detail panel — ahead of the damage and capacity numbers
+that made the material tempting.
+
+Applying still commits instantly. A confirm dialog is the wrong trade here: it would tax all
+65 eligible choices to protect against a mistake in one of them, and it demands an answer
+*before* the player can see whether they were right. Instead every apply and every clear
+raises an undo toast:
+
+- `_offerMaterialUndo(itemId, prior, label)` captures the raw material reference **before**
+  the mutation. `prior` may be `null`, and reverting then restores the *absence* of a
+  material as faithfully as a previous one — which is the common case, since most applies
+  land on a bare item.
+- The host toast dismisses itself on any click inside it, so the Revert button cannot swap
+  itself into a "Reverted" state. A short success toast acknowledges the revert instead;
+  without it the revert lands silently.
+
+### Status colours read through an ink-on-tint token
+
+Every material status — capacity overload, worn, destroyed, both risk tiers — is semantic ink
+on a 12–14% tint of its own hue. That construction fails quietly: move `--cs-danger` for a
+fill somewhere else on the sheet and the chip's text and background move *together*, so the
+pair keeps looking deliberate while dropping under AA.
+
+The chips therefore read `var(--cs-danger-text, var(--cs-danger, …))` and tint with
+`color-mix()` off the **same** token, so the two can never drift apart. `--cs-*-text` is
+defined per theme in `css/charactersheet-modern.css` — one shade darker than the fill hue in
+day, one shade lighter in night. Night's values were missing until now, which is precisely
+why the night chips failed.
+
+`CharacterSheetMaterialsContrast.test.js` resolves the real token values out of the real
+stylesheet and asserts AA for every state pair against both `--cs-bg-surface` and
+`--cs-bg-elevated` (the modal — the harder surface, and where the whole picker lives).
+
 ### Penetration is not auto-resolved
 
 The sheet tracks **no target AC**. Penetration therefore shows as `Pen N` on the attack row,
@@ -695,7 +745,7 @@ The crafting page is **unconditional** — it is a reference, not a rules engine
 NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetMaterials --no-coverage --forceExit
 ```
 
-`test/jest/charactersheet/CharacterSheetMaterials.test.js` — 144 tests over a hand-built
+`test/jest/charactersheet/CharacterSheetMaterials.test.js` — 164 tests over a hand-built
 material fixture: die ladder (including negative steps, clamping and off-ladder
 normalisation), tri-state axes, eligibility, weapon/armour/shield projection, weight and
 value, effect resolution, state integration, the preview rows, item-aware summaries, effect counting, Magic
@@ -706,7 +756,9 @@ Ioun Sand matrix (effect-keyed detection, seat sizing without an invented bonus,
 restoration, idempotence, fragment exclusion, matrix-to-matrix moves, and the form-scoped MC
 rule), degradation (trigger matching, stacking vs non-stacking, axis zeroing, destruction,
 candidate scoping, short-rest repair listing, the sub-toggle and the save round-trip), and
-the `attachedSpells` shape matrix (every usage key, combined keys, the non-spell `ability`
+the two-tier risk flag (data-derived, absent for the other 67 materials), material undo
+(restoring a previous material, restoring the absence of one, and the acknowledgement toast),
+and the `attachedSpells` shape matrix (every usage key, combined keys, the non-spell `ability`
 sibling, suffix stripping, cross-category dedupe, plus the state guard degrading to `null`
 instead of throwing).
 

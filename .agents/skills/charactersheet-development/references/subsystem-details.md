@@ -617,8 +617,24 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
   Magic Capacity modal, so it needs tab order, Enter/Space and a focus ring. Its UA styling
   is reset in CSS (`font: inherit; background: none`) so it sits flush with the inert chips
   beside it, and under `pointer: coarse` all three chips share a 44 px minimum.
-- ⚠️ `addItem()` **stacks same-named items**, so a material applies to the whole stack.
-- **Elemental condensates** (`materialCategory: "condensate"`, 18 of them) are **role-gated**:
+- **Risk is derived from `degradation`, never from a material name.**
+  `getRiskFlag(material)` returns `null`, `{tier: "degrades"}` or `{tier: "destroys"}` —
+  `destroys` only when the authored block sets `destroys: true` (today: Ordinary Glass alone).
+  It renders in the picker row *and* as the first element of the detail panel, ahead of the
+  numbers that made the material tempting. Adding a sixth degrading material needs no code.
+- **Every material apply and clear raises an undo toast** via `_offerMaterialUndo(itemId,
+  prior, label)`. Capture `prior` **before** mutating; `null` is a legitimate value and
+  reverting must restore the *absence* of a material. The host toast dismisses itself on any
+  click inside it, so the Revert button can never swap itself into a "Reverted" label — fire a
+  second short toast to acknowledge, or the revert lands silently.
+- ⚠️ **Status colours must read `var(--cs-<sem>-text, var(--cs-<sem>, …))` and tint with
+  `color-mix()` off the same token.** Semantic ink on a tint of its own hue fails silently:
+  change the fill hue elsewhere and text and background move together, so the chip still looks
+  deliberate while dropping under AA. `--cs-*-text` is theme-scoped in
+  `charactersheet-modern.css` (darker in day, lighter in night); collapsing the chain to one
+  token, or hardcoding an `rgba()` tint, reintroduces the bug.
+  `CharacterSheetMaterialsContrast.test.js` reads the real tokens and guards every pair.
+- ⚠️ `addItem()` **stacks same-named items**, so a material applies to the whole stack.- **Elemental condensates** (`materialCategory: "condensate"`, 18 of them) are **role-gated**:
   the affinity's mechanics only fire while the material occupies its own role
   (`strikingSurface` / `protectiveLayer` / `focus`). Only weapons are ambiguous, so only
   weapons get a role selector. The **instability is never gated**. Override via
