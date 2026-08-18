@@ -1304,11 +1304,32 @@ Staged DMG-style tables (`_CR_HP_THRESHOLDS`, `_CR_DPR_THRESHOLDS`):
 - **`base/` in the session harness predates v15.** A structural difference against it is not
   proof of a regression — confirm against `git show HEAD:…` first.
 
+### The modifier is on its roll (v17)
+- **A parenthetical list cannot hold a name ending in a parenthetical.** `(Shadow Sneak
+  (1/SR), Shadowbite)` fails the v9 balance test — strip a label's uses suffix before
+  listing it.
+- **"Every attack" ≠ "every attack in scope".** `_foldSituationalAttackBonuses` retires a
+  trait only when no *in-scope* attack was missed; counting out-of-scope attacks as misses
+  keeps every scoped trait alive forever.
+- **A gate longer than 60 characters stays in its trait** and is referenced by name on the
+  line. An attack line is not the place for a paragraph.
+- **A rider condition true of every line it prints on states nothing.**
+  `_isUniversalRiderCondition` normalises `on every melee weapon hit` to no condition, which
+  is what lets two same-type riders merge into `2d8`.
+- **`_getItemDamageRiders` blanks `sourceName` for a self-named rider** — right when it
+  stands alone, wrong once merged. `mergeLabel` carries the attribution across the merge.
+- **A trigger rider is the only fold allowed to cross sections**, and only from `trait`: a
+  trait is the one shape that cannot be a turn's worth of action on its own. It must carry
+  its **full** name — `bare()` drops `(1/LR)` and orphans the pool.
+- **`_getStandingDefenseClause` sees raw tag text.** A claim written as
+  `{@variantrule Disadvantage|XPHB}` never matches a literal `disadvantage`; match against
+  `_getPlainMatchText(...)`.
+
 ### Dialog actions
 Close | Refresh | **Copy JSON** | Download JSON | Save to Homebrew. In-dialog validation panel; Save blocked on hard errors.
 
 ### Tests
-`CharacterSheetNpcExporter.test.js` + `CharacterSheetNpcExporter.matrix.test.js` (class × special-system matrix) + `.realsaves.test.js` (925 contract tests against the 24-save corpus; auto-skips when absent).
+`CharacterSheetNpcExporter.test.js` + `CharacterSheetNpcExporter.matrix.test.js` (class × special-system matrix) + `.realsaves.test.js` (932 contract tests against the 24-save corpus; auto-skips when absent; 999 across all three files).
 
 ## Rest Mechanics
 

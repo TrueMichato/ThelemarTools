@@ -1017,6 +1017,64 @@ did not reach: **a number or a roll leaves the trait list for the line it modifi
     incoming damage. The acceptance test was that **no non-rogue moves**: Juen went 11 → 15
     and Missy 7 → 9, and nothing else changed.
 
+### v17 — the modifier is on the roll it modifies
+
+v16 emptied the trait list of standing numbers. v17 closes the last four places where a
+modifier still sat away from the roll it changes, and where a conversion a DM makes mid-turn
+was written as prose instead of as an attack.
+
+123. **A trigger rider folds into the feature that triggers it** (`_foldNamedDependentsIntoAnchor`
+    `TRIGGERS` branch, `_getTriggerRiderLines`). Tactical Shift fires *"whenever it activates
+    its Second Wind"* — that is not a sibling ability, it is part of Second Wind. The rider
+    keeps its name (a DM still has to be able to say which feature is doing this) and its own
+    uses (`{@b Uncanny Metabolism (1/LR).}` — dropping the suffix orphaned the pool), and loses
+    only the exact self-reference its new position already states. A trigger rider is the one
+    fold allowed to cross sections, because a trait is the only shape that cannot be a turn's
+    worth of action in its own right. The generalisation reached Sear Undead → Turn Undead,
+    Mote of Potential → Bardic Inspiration and Empowered Strikes → Unarmed Strike unprompted.
+124. **A situational to-hit bonus is written onto the roll** (`_foldSituationalAttackBonuses`,
+    `_attackLineMatchesScope`). High Ground's +2 with ranged attacks was three entries away
+    from the only ranged attack on the block. The alternative is now stated already added up —
+    `{@hit +6} to hit (+8 when standing 5 feet or more above an enemy)` — and a second
+    conditional joins the same parenthetical rather than opening a rival one. Two rules keep it
+    honest: a gate too long for a line (Hammer and Anvil's 148 characters) is referenced by
+    name and **keeps its trait**, and the trait is dropped only when every attack *in scope*
+    was annotated — Duralin has High Ground and no ranged attack, so his trait survives.
+125. **The coated weapon is its own attack** (`_mintCoatedWeaponAttacks`,
+    `_findWeaponCoatingClause`, `_getCoatingUnlockedFeatureNames`, `_dropCoatingCrossReferences`).
+    Umbral Coating turns a carried sword into a shadow weapon, unlocking Shadow Sneak and
+    Shadowbite on it — written as a paragraph inside Shadowcasting, that is a conversion the DM
+    has to reconstruct. The converted weapon is now minted beside its base, carrying the thrown
+    range and naming what the conversion unlocks, and the paragraph and the *"can instead
+    convert…"* cross-reference are retired. Only riders that fire **off a hit** count as
+    unlocked; Shadowcasting's own bonus-action attack merely mentions a shadow weapon.
+126. **Two riders of the same kind state one number** (`_coalesceDamageRiders`,
+    `_isUniversalRiderCondition`). Mikase stacks a Paladin-11 Radiant Strikes die and the
+    Starfire Katana's own, and the line read *"plus 1d8 radiant damage (Radiant Strikes), plus
+    1d8 radiant damage"*. They merge on damage type, die size and **gate**, where "on every
+    melee weapon hit" and no condition at all are recognised as the same gate on a melee
+    weapon's own line. A weapon's self-named rider carries a `mergeLabel` so it can still be
+    attributed once merged, even though it is deliberately anonymous when it stands alone.
+127. **A standing defence has exactly one home** (`_extractStandingDefenseResidue` returning an
+    array, `_getDefenseClauseSignature`, inverted-shape fallback in `_getStandingDefenseClause`).
+    Talna's Master Smith's Aegis printed its own trait *and* appeared inside Resilience. The
+    residue extractor now takes a **leading run** of qualifying sentences rather than one, the
+    inverted shape (*"Spell attack rolls against it have Disadvantage"*, which never names the
+    NPC as subject) is recognised, and signatures canonicalise `damage from Xs` → `X damage` so
+    "Resistance to damage from spells" and "resistance to spell damage" dedupe.
+
+**What v17 taught.**
+
+- **A parenthetical list cannot hold a name that ends in a parenthetical.** `(Shadow Sneak
+  (1/SR), Shadowbite)` reads as unbalanced to the renderer. Any label lifted into a list has
+  its own uses suffix stripped first.
+- **"Every attack" and "every attack in scope" are different acceptance tests.** Counting
+  out-of-scope attacks as failures kept every scoped trait alive; counting only in-scope
+  failures is what lets High Ground retire on Arthur and survive on Duralin.
+- **A rider's gate can be phrased two ways and mean one thing.** Merging on the literal
+  condition string left Mikase's two radiant dice apart; a rider whose condition is true of
+  every line it is printed on states nothing, and must normalise to no condition at all.
+
 
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). Hard errors block Save to Homebrew; warnings allow Download / Copy. Full browser-side monster schema validation is still out of scope (graceful hand validator only).

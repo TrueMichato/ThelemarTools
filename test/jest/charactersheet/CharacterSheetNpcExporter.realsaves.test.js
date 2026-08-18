@@ -367,9 +367,13 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 			expect(shadow.entries[0]).toMatch(/\{@atk mw\} \{@hit [+-]\d+\}/);
 			expect(shadow.entries[0]).toMatch(/psychic damage/);
 			expect(shadow.entries[0]).toMatch(/two hands/);
-			// The held weapon is known, so the statblock names it rather than making the
-			// DM cross-reference the inventory.
-			expect(shadow.entries[0]).toMatch(/\{@item Retaliator/);
+			// The conversion is no longer a cross-reference: the coated weapon is its own
+			// attack, sitting beside the weapon it converts.
+			expect(shadow.entries[0]).not.toMatch(/can instead convert/i);
+			const coated = (mon.action || []).find(a => /Retaliator.*\(Umbral Coating\)/i.test(a.name));
+			expect(coated).toBeDefined();
+			expect(coated.entries[0]).toMatch(/range 20\/60 ft\./);
+			expect(coated.entries[0]).toMatch(/Counts as a shadow weapon \(Shadow Sneak, Shadowbite\)\./);
 		});
 
 		it("surfaces stance mechanics as their own ability", () => {
@@ -1717,7 +1721,7 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			// Base/gated AC numbers track the local npc-exports/ corpus (personal saves).
 			// Dual Wielder is folded into the primary AC and annotated as a lower alternate
 			// when not dual wielding — assert the split, not absolute armor loadouts.
-			[["Elizabeth", 18, 17], ["Mikase", 20, 19], ["Vern", 21, 20]].forEach(([n, base, gated]) => {
+			[["Elizabeth", 18, 17], ["Mikase", 22, 21], ["Vern", 21, 20]].forEach(([n, base, gated]) => {
 				const ac = loadMonster(n).ac;
 				expect(`${n}: ${ac[0].ac}`).toBe(`${n}: ${base}`);
 				const alt = ac.find(it => it.condition);
@@ -1768,8 +1772,10 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			const arc = (mikase.action || []).find(it => /^Starlight Arc/.test(it.name));
 			expect(arc.name).toMatch(/\(Replaces One Attack\)$/);
 			// It carries the parent weapon's own line, retargeted, with its own die appended.
-			expect(arc.entries[0]).toMatch(/\{@atk mw\} \{@hit \+13\} to hit, 30-foot cone, each nearest creature in it\./);
-			expect(arc.entries[0]).toMatch(/\{@damage 1d8\+7\} slashing damage/);
+			expect(arc.entries[0]).toMatch(/\{@atk mw\} \{@hit \+16\} to hit, 30-foot cone, each nearest creature in it\./);
+			expect(arc.entries[0]).toMatch(/\{@damage 1d8\+10\} slashing damage/);
+			// The extra die lands inside the damage sentence, not after the line's last period.
+			expect(arc.entries[0]).not.toMatch(/magical\.,/);
 			// …and states only what the line cannot carry.
 			expect(arc.entries.join(" ").length).toBeLessThan(400);
 			expect(arc.entries.join(" ")).not.toMatch(/dissipates|equidistant|forgo/i);
@@ -1907,6 +1913,86 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			// are defence the model was blind to, and Assassinate is burst it never priced.
 			expect(Number(loadMonster("Juen").cr)).toBeGreaterThanOrEqual(13);
 			expect(Number(loadMonster("Missy").cr)).toBeGreaterThanOrEqual(8);
+		});
+	});
+
+	describe("v17 — the modifier is on the roll it modifies", () => {
+		const entriesOf = (mon, name, section = "bonus") => (mon[section] || [])
+			.find(it => new RegExp(name, "i").test(String(it?.name || "")))?.entries || [];
+
+		it("folds a trigger rider into the feature that triggers it (1)", () => {
+			["Aldor", "Arthur", "Elizabeth", "Wisp"].filter(it => available.includes(it)).forEach(name => {
+				const mon = loadMonster(name);
+				// It is no longer a sibling…
+				expect(`${name}: ${(mon.trait || []).map(it => it.name).join("|")}`).not.toMatch(/Tactical Shift/);
+				// …it is a labelled rider on the feature whose activation triggers it, and
+				// the self-reference the placement already states is gone.
+				const wind = entriesOf(mon, "^Second Wind").join(" ");
+				expect(`${name}: ${wind}`).toMatch(/\{@b Tactical Shift\.\} It can also move up to half its Speed/);
+				expect(`${name}: ${wind}`).not.toMatch(/Whenever \w+ activates its Second Wind/);
+			});
+		});
+
+		it("keeps a folded rider's own uses (1)", () => {
+			["Reggu", "Tikal"].filter(it => available.includes(it)).forEach(name => {
+				const joined = (loadMonster(name).trait || []).flatMap(it => it.entries || [])
+					.filter(it => typeof it === "string").join(" ");
+				expect(`${name}: ${joined}`).toMatch(/\{@b Uncanny Metabolism \(1\/LR\)\.\}/);
+			});
+		});
+
+		it("writes a situational to-hit bonus onto the roll it changes (2)", () => {
+			const arthur = loadMonster("Arthur");
+			const lines = ["action", "bonus"].flatMap(sec => (arthur[sec] || []).flatMap(it => it.entries || []))
+				.filter(it => typeof it === "string" && /\{@atk /.test(it));
+			// Every attack carries the alternative number, already added up.
+			expect(lines.filter(it => /to hit \(\+\d+ with Hammer and Anvil/.test(it)).length).toBeGreaterThan(0);
+			// A scoped claim only reaches the attacks it covers, and its gate is stated
+			// inline rather than left in a trait to be looked up.
+			const ranged = lines.find(it => /\{@atk rs\}/.test(it));
+			expect(ranged).toMatch(/when standing 5 feet or more above an enemy/);
+			expect((arthur.trait || []).map(it => it.name).join("|")).not.toMatch(/High Ground/);
+			// Two conditionals share one parenthetical rather than opening rival ones.
+			expect(ranged).not.toMatch(/\) \(\+/);
+			// A gate too long for the line keeps its trait, so nothing is lost.
+			expect((arthur.trait || []).map(it => it.name).join("|")).toMatch(/Hammer and Anvil/);
+		});
+
+		it("leaves a scoped bonus alone when no attack is in scope (2)", () => {
+			// Duralin has High Ground and no ranged attack: the trait is the only place the
+			// claim can live, so it survives.
+			expect((loadMonster("Duralin").trait || []).map(it => it.name).join("|")).toMatch(/High Ground/);
+		});
+
+		it("mints the coated weapon as its own attack (3)", () => {
+			const mon = loadMonster("Duralin");
+			const coated = (mon.action || []).find(it => /\(Umbral Coating\)$/.test(String(it?.name || "")));
+			expect(coated).toBeDefined();
+			expect(coated.name).toMatch(/^Retaliator/);
+			// It is the parent weapon's own line plus what coating adds…
+			expect(coated.entries[0]).toMatch(/\{@atk mw\} \{@hit \+\d+\} to hit, reach 5 ft\. or range 20\/60 ft\./);
+			expect(coated.entries[0]).toMatch(/Counts as a shadow weapon \(Shadow Sneak, Shadowbite\)\./);
+			// …and the paragraph and cross-reference it replaces are gone.
+			const joined = ["action", "bonus", "trait"].flatMap(sec => (mon[sec] || []).flatMap(it => it.entries || []))
+				.filter(it => typeof it === "string").join(" ");
+			expect(joined).not.toMatch(/can instead convert/i);
+			expect(joined).not.toMatch(/\{@b Umbral Coating\.\}/);
+		});
+
+		it("states one merged rider instead of two of the same kind (3)", () => {
+			const katana = (loadMonster("Mikase").action || [])
+				.find(it => /^Starfire Katana$/.test(String(it?.name || "")));
+			expect(katana.entries[0]).toMatch(/plus \{@damage 2d8\} radiant damage \(Radiant Strikes, Starfire Katana\)/);
+			expect((katana.entries[0].match(/radiant damage/g) || []).length).toBe(1);
+		});
+
+		it("keeps a standing defence in one place (4)", () => {
+			const mon = loadMonster("Talna");
+			expect((mon.trait || []).map(it => it.name).join("|")).not.toMatch(/Master Smith's Aegis/);
+			const res = (mon.trait || []).find(it => /^Resilience$/i.test(String(it?.name || "")));
+			// Every claim the item made is in the merged entry, each still attributed.
+			expect(res.entries.join(" ")).toMatch(/disadvantage on spell attack rolls against it \(Master Smith's Aegis\)/i);
+			expect(res.entries.join(" ")).toMatch(/resistance to damage from spells \(Master Smith's Aegis\)/i);
 		});
 	});
 });

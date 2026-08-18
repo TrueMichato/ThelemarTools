@@ -648,6 +648,8 @@ class CharacterSheetNpcExporter {
 		this._splitFormBlocksIntoAlternateForm(out);
 		this._promoteReplacementAttacks(out);
 		this._annotateToggledAttackRiders(out);
+		this._foldSituationalAttackBonuses(out);
+		this._mintCoatedWeaponAttacks(out);
 		this._foldCountUpgradesIntoBase(out);
 		// After the roster passes have settled the trait's final name.
 		this._linkSpellModifiersFromSpellcasting(out);
@@ -2016,6 +2018,10 @@ class CharacterSheetNpcExporter {
 		if (!anchors.length) return;
 
 		const EDITS = /\b(?:increases? to|improves? to|becomes|now|also|instead|in addition|additionally|extends?|gains?|can (?:instead|also))\b/i;
+		// A rider can also announce itself as a trigger on the anchor rather than as an
+		// edit to it — Tactical Shift fires "whenever it activates its Second Wind". That
+		// has no action economy of its own, so it is part of the anchor, not a sibling.
+		const TRIGGERS = /^(?:whenever|when|each time|immediately after)\b/i;
 		const dropped = new Set();
 
 		all.forEach(({section, entry}) => {
@@ -2023,11 +2029,15 @@ class CharacterSheetNpcExporter {
 			const body = (entry.entries || []).filter(it => typeof it === "string");
 			if (!body.length) return;
 			const first = this._splitIntoClauses(body[0])[0] || "";
-			if (!EDITS.test(first)) return;
+			const isEdit = EDITS.test(first);
+			// Only a trait may cross into another section: it is the one shape that cannot
+			// be a turn's worth of action in its own right.
+			const isTrigger = !isEdit && section === "trait" && TRIGGERS.test(first);
+			if (!isEdit && !isTrigger) return;
 
 			const selfKey = this._normalizeFeatureKey(bare(entry));
 			const hit = anchors.find(({section: anchorSection, entry: anchor}) => {
-				if (anchor === entry || dropped.has(anchor) || anchorSection !== section) return false;
+				if (anchor === entry || dropped.has(anchor) || (!isTrigger && anchorSection !== section)) return false;
 				const name = bare(anchor);
 				if (this._normalizeFeatureKey(name) === selfKey) return false;
 				return new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(first);
@@ -2046,11 +2056,15 @@ class CharacterSheetNpcExporter {
 			// one being raised — so the replacement is keyed on the phrase they share.
 			const upgrade = /\bincreases?\s+to\s+(.+?)\.?\s*$/i.exec(first);
 			const applied = upgrade && this._rewriteDerivedPhrase(anchor, upgrade[1]);
-			const surviving = body.flatMap((line, idx) => {
-				const clauses = this._splitIntoClauses(line);
-				if (idx === 0 && applied) clauses.shift();
-				return clauses.length ? [clauses.join(" ")] : [];
-			});
+			const surviving = isTrigger
+				// The full name, not the bare one: a rider that owns a pool ("Uncanny
+				// Metabolism (1/LR)") takes its uses with it or the pool is lost.
+				? this._getTriggerRiderLines(entry, String(entry.name || bare(entry)).trim(), bare(anchor), body)
+				: body.flatMap((line, idx) => {
+					const clauses = this._splitIntoClauses(line);
+					if (idx === 0 && applied) clauses.shift();
+					return clauses.length ? [clauses.join(" ")] : [];
+				});
 			const existing = (anchor.entries || []).filter(it => typeof it === "string").join(" ");
 			// Once the options sit in the anchor's own list, "the following effects are now
 			// among its options" points at a distinction the statblock no longer draws.
@@ -2065,6 +2079,30 @@ class CharacterSheetNpcExporter {
 			out[section] = out[section].filter(entry => !dropped.has(entry));
 			if (!out[section].length && section !== "trait") delete out[section];
 		});
+	}
+
+	/**
+	 * A trigger rider keeps its own name once it is inside the anchor — a DM still has to
+	 * be able to say which feature is doing this — but loses the self-reference, because
+	 * "whenever it activates its Second Wind" is a fact the rider's new position already
+	 * states. Only that exact self-reference is stripped; any other trigger is preserved
+	 * verbatim, since it says something the placement does not.
+	 *
+	 * @param {Object} entry the dependent being folded away
+	 * @param {string} name its bare display name
+	 * @param {string} anchorName the anchor's bare display name
+	 * @param {Array<string>} body its string entries
+	 * @returns {Array<string>} lines to append to the anchor
+	 */
+	static _getTriggerRiderLines (entry, name, anchorName, body) {
+		const escaped = anchorName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const selfTrigger = new RegExp(`^(?:whenever|when|each time)\\s+.{0,40}?\\b(?:activates?|uses?|takes?)\\b[^,]*\\b${escaped}\\b[^,]*,\\s*`, "i");
+		const first = String(body[0] || "");
+		const stripped = selfTrigger.test(first)
+			? first.replace(selfTrigger, "").replace(/^it can\b/i, "it can also")
+			: first;
+		const sentence = `${stripped.charAt(0).toUpperCase()}${stripped.slice(1)}`;
+		return [`{@b ${name}.} ${sentence}`, ...body.slice(1)];
 	}
 
 	/**
@@ -3047,11 +3085,17 @@ class CharacterSheetNpcExporter {
 
 				const shortName = name.includes("—") ? name.split("—").pop().trim() : name;
 				const targets = `${area[1]}-foot ${area[2].toLowerCase()}, each nearest creature in it`;
-				const line = parentLine
-					.replace(/reach [^,]+, one target\.|range [^,]+, one target\.|, one target\./i, `${targets}.`)
-					.replace(/(\{@h\}[\s\S]*?)(?=$)/, `$1, plus ${extra[1]} ${extra[2].toLowerCase()} damage`)
-					.replace(/damage\., plus/g, "damage, plus")
-					.replace(/\s{2,}/g, " ");
+				// The extra die belongs in the damage sentence, not at the end of the line: a
+				// parent that closes on "The attack is magical." would otherwise read
+				// "…magical., plus 1d8 radiant damage".
+				const retargeted = parentLine
+					.replace(/reach [^,]+, one target\.|range [^,]+, one target\.|, one target\./i, `${targets}.`);
+				const clauses = this._splitIntoClauses(retargeted);
+				const hitIx = clauses.findIndex(it => /\{@h\}/.test(it));
+				const addition = `, plus ${extra[1]} ${extra[2].toLowerCase()} damage`;
+				if (hitIx >= 0) clauses[hitIx] = `${clauses[hitIx].replace(/\s*\.$/, "")}${addition}.`;
+				else clauses.push(`${addition.replace(/^,\s*/, "").replace(/^./, c => c.toUpperCase())}.`);
+				const line = clauses.join(" ").replace(/\s{2,}/g, " ");
 				// Only what the line cannot carry. Every other sentence in the source either
 				// restates the roll, the damage, or the fact that an area ends after it fires.
 				const residue = [
@@ -3112,6 +3156,180 @@ class CharacterSheetNpcExporter {
 				if (activation) entry.entries = [`${activation} Its melee attacks gain ${rider} for the duration.`];
 			});
 		});
+	}
+
+	/**
+	 * A conditional to-hit bonus is a number a DM needs at the instant of rolling, and
+	 * filed as its own trait it is a number they will not have. High Ground's +2 with
+	 * ranged attacks was three entries away from the only ranged attack on the block.
+	 *
+	 * Writes the alternative straight onto the roll — `{@hit +6} to hit (+8 when standing
+	 * 5 feet or more above an enemy)` — and drops the trait once every attack it could
+	 * reach has been annotated. A gate too long to sit inside the line keeps its trait and
+	 * is referenced by name, because an attack line is not the place for a paragraph.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _foldSituationalAttackBonuses (out) {
+		const SECTIONS = ["action", "bonus", "reaction"];
+		const lines = [];
+		SECTIONS.forEach(section => (out[section] || []).forEach(entry => {
+			(entry.entries || []).forEach((line, ix) => {
+				if (typeof line === "string" && /\{@hit [+-]?\d+\}/.test(line)) lines.push({entry, ix});
+			});
+		}));
+		if (!lines.length || !out.trait?.length) return;
+
+		const dropped = new Set();
+		out.trait.forEach(trait => {
+			const body = (trait.entries || []).filter(it => typeof it === "string");
+			const claim = body
+				.map(it => /^(?:(?:when|while|whenever)\s+(.+?),\s*)?[^,.]{0,40}?\bgains? an? \+(\d+) bonus to (?:hit|attack rolls?)\b(.*)$/i
+					.exec(this._getPlainMatchTextCased(it).trim()))
+				.find(Boolean);
+			if (!claim) return;
+			const gate = String(claim[1] || "").trim().replace(/^(?:it|they|he|she) /i, "");
+			const bonus = Number(claim[2]);
+			if (!bonus) return;
+
+			const scope = /\bwith ranged\b/i.test(claim[3]) ? "ranged"
+				: /\bwith melee\b/i.test(claim[3]) ? "melee"
+					: "any";
+			// A gate the line cannot hold is referenced by name, and its trait survives to
+			// state it in full.
+			const inlinable = !!gate && gate.length <= 60;
+			const qualifier = inlinable ? `when ${gate}` : `with ${this._getResilienceAttributionLabel(trait.name)}`;
+
+			const inScope = lines.filter(({entry, ix}) => this._attackLineMatchesScope(entry.entries[ix], scope));
+			let placed = 0;
+			let missed = 0;
+			inScope.forEach(({entry, ix}) => {
+				const line = entry.entries[ix];
+				if (line.includes(qualifier)) return void ++placed;
+				const hit = /\{@hit ([+-]?\d+)\}(\s*to hit)/.exec(line);
+				if (!hit) return void ++missed;
+				const raised = this._toSignedStr(Number(hit[1]) + bonus);
+				// A second conditional joins the first parenthetical rather than opening a
+				// rival one — two asides in a row read as a typo.
+				const existing = new RegExp(`${hit[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(([^)]*)\\)`).exec(line);
+				entry.entries[ix] = existing
+					? line.replace(existing[0], `${hit[0]} (${existing[1]}; ${raised} ${qualifier})`)
+					: line.replace(hit[0], `${hit[0]} (${raised} ${qualifier})`);
+				++placed;
+			});
+
+			// The trait is only redundant when the lines now carry the whole claim: every
+			// attack in scope, and the condition itself. The trait is the only place a long
+			// gate or an unreachable attack can still be read.
+			if (placed && !missed && inlinable && body.length === 1) dropped.add(trait);
+		});
+
+		if (dropped.size) out.trait = out.trait.filter(it => !dropped.has(it));
+	}
+
+	/**
+	 * Umbral Coating turns a weapon the NPC already carries into a shadow weapon, which
+	 * unlocks Shadow Sneak and Shadowbite on it. Written as a paragraph three entries away
+	 * from the sword, that is a conversion a DM has to reconstruct mid-turn.
+	 *
+	 * Mints the converted weapon as a real attack sitting next to its base — the same shape
+	 * a statblock uses for any alternative attack form — and retires the paragraph and the
+	 * "can instead convert …" cross-reference that stood in for it.
+	 *
+	 * @param {Object} out monster object being assembled (mutated)
+	 */
+	static _mintCoatedWeaponAttacks (out) {
+		const SECTIONS = ["trait", "action", "bonus", "reaction"];
+		const coating = this._findWeaponCoatingClause(out, SECTIONS);
+		if (!coating) return;
+
+		const base = (out.action || []).find(it => this._normalizeFeatureKey(it?.name) === this._normalizeFeatureKey(coating.weaponName));
+		const attackIx = (base?.entries || []).findIndex(it => typeof it === "string" && /\{@atk /.test(it));
+		if (attackIx < 0) return;
+
+		// The features a shadow weapon unlocks are the reason to convert at all, so they are
+		// named on the line rather than left to be discovered.
+		const unlocked = this._getCoatingUnlockedFeatureNames(out, SECTIONS, coating.adjective);
+		const unlockedNote = unlocked.length ? ` (${unlocked.join(", ")})` : "";
+		const thrown = coating.range ? ` or range ${coating.range} ft. (returns to its hand as a Bonus Action)` : "";
+
+		const line = String(base.entries[attackIx])
+			.replace(/(reach \d+ ft\.)(,?)/i, `$1${thrown}$2`)
+			.replace(/\.\s*$/, "");
+		const name = `${base.name} (${coating.label})`;
+		if ((out.action || []).some(it => it?.name === name)) return;
+
+		const entries = base.entries.map((it, ix) => (ix === attackIx
+			? `${line}. Counts as a ${coating.adjective} weapon${unlockedNote}.`
+			: it));
+		out.action.splice(out.action.indexOf(base) + 1, 0, {name, entries});
+
+		// The prose that described the conversion has been superseded by the attack.
+		coating.drop();
+		this._dropCoatingCrossReferences(out, SECTIONS, coating.weaponName);
+	}
+
+	/** Locates a "coat <weapon> in shadowstuff" clause and everything the attack needs from it. */
+	static _findWeaponCoatingClause (out, sections) {
+		let found = null;
+		sections.forEach(section => (out[section] || []).forEach(entry => {
+			(entry.entries || []).forEach((rawLine, ix) => {
+				if (found || typeof rawLine !== "string") return;
+				const tag = /\bcoat\s+(\{@item ([^|}]+)[^}]*\})/i.exec(rawLine);
+				if (!tag) return;
+				const plain = this._getPlainMatchTextCased(rawLine);
+				const adjective = (/\bcounts as an?\s+([a-z]+)\s+weapon\b/i.exec(plain) || [])[1];
+				if (!adjective) return;
+				found = {
+					weaponName: tag[2].trim(),
+					adjective: adjective.toLowerCase(),
+					range: (/\bthrown property \(range (\d+\/\d+)\)/i.exec(plain) || [])[1] || "",
+					label: this._getSafeInlineText((/^\{@b ([^}]+?)\.\}/.exec(rawLine) || [])[1] || entry.name || "Coated", {maxLen: 40}),
+					drop: () => { entry.entries = entry.entries.filter((_, i) => i !== ix); },
+				};
+			});
+		}));
+		return found;
+	}
+
+	/** Names of the entries that only trigger off a `<adjective> weapon` — the point of coating one. */
+	static _getCoatingUnlockedFeatureNames (out, sections, adjective) {
+		const names = [];
+		// Only a rider that fires off a hit is unlocked by coating a weapon; a line that
+		// merely mentions attacking with one (Shadowcasting's bonus-action attack) is not.
+		const re = new RegExp(`\\bhit(?:s|ting)?\\b[^.]*\\bwith an?\\s+${adjective}\\s+weapon\\b`, "i");
+		sections.forEach(section => (out[section] || []).forEach(entry => {
+			(entry.entries || []).forEach(line => {
+				if (typeof line !== "string" || !re.test(this._getPlainMatchTextCased(line))) return;
+				// The list already sits inside parentheses, so a rider's own "(1/SR)" suffix
+				// would nest a second pair — which the renderer reads as unbalanced.
+				const label = String((/^\{@b ([^}]+?)\.\}/.exec(line) || [])[1] || entry.name || "")
+					.replace(/\s*\([^)]*\)\s*$/, "");
+				const safe = this._getSafeInlineText(label, {maxLen: 40});
+				if (safe && !names.includes(safe)) names.push(safe);
+			});
+		}));
+		return names;
+	}
+
+	/** Retires "it can instead convert <weapon> (see X)" once the converted attack exists. */
+	static _dropCoatingCrossReferences (out, sections, weaponName) {
+		const escaped = String(weaponName).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const re = new RegExp(`\\s*[^.]*\\bcan instead convert\\b[^.]*${escaped}[^.]*\\.`, "i");
+		sections.forEach(section => (out[section] || []).forEach(entry => {
+			entry.entries = (entry.entries || [])
+				.map(it => (typeof it === "string" ? it.replace(re, "") : it))
+				.filter(it => typeof it !== "string" || it.trim());
+		}));
+	}
+
+	/** Whether an attack line is melee, ranged, or either — for scoped rider placement. */
+	static _attackLineMatchesScope (line, scope) {
+		if (scope === "any") return true;
+		const tag = /\{@atk ([^}]+)\}/.exec(line)?.[1] || "";
+		const kinds = tag.split(",").map(it => it.trim().toLowerCase());
+		if (scope === "ranged") return kinds.some(it => it === "rw" || it === "rs");
+		return kinds.some(it => it === "mw" || it === "ms");
 	}
 
 	/**
@@ -3615,16 +3833,16 @@ class CharacterSheetNpcExporter {
 		const kept = [];
 
 		out.trait.forEach(entry => {
-			const clause = this._getStandingDefenseClause(entry, npcName)
-				|| this._extractStandingDefenseResidue(entry, npcName, kept);
-			if (!clause) return void kept.push(entry);
-			merged.push({
+			const single = this._getStandingDefenseClause(entry, npcName);
+			const clauses = single ? [single] : this._extractStandingDefenseResidue(entry, npcName, kept);
+			if (!clauses.length) return void kept.push(entry);
+			clauses.forEach(clause => merged.push({
 				clause,
-				sig: this._getEntryBodySignature(clause),
+				sig: this._getDefenseClauseSignature(clause),
 				label: this._getResilienceAttributionLabel(entry.name),
 				kind: this._getDefenseClauseKind(clause),
 				conditions: this._getDefenseClauseConditions(clause),
-			});
+			}));
 		});
 
 		// Two sources granting the same defence contribute one clause. The more specific
@@ -3679,23 +3897,44 @@ class CharacterSheetNpcExporter {
 	 * @param {Object} entry candidate trait
 	 * @param {string} npcName
 	 * @param {Array} kept accumulator the shortened remainder is pushed onto
-	 * @returns {string} the extracted clause, or `""` when the trait does not split
+	 * @returns {Array<string>} the extracted clauses, empty when the trait does not split
 	 */
 	static _extractStandingDefenseResidue (entry, npcName, kept) {
 		const strings = (entry?.entries || []).filter(it => typeof it === "string");
-		if (!strings.length || strings.length !== (entry?.entries || []).length) return "";
-		if (/^resilience$/i.test(String(entry?.name || ""))) return "";
+		if (!strings.length || strings.length !== (entry?.entries || []).length) return [];
+		if (/^resilience$/i.test(String(entry?.name || ""))) return [];
 
 		const sentences = strings[0].split(/(?<=[.!?])\s+/).map(it => it.trim()).filter(Boolean);
-		if (sentences.length < 2) return "";
+		if (sentences.length < 2) return [];
 
-		const clause = this._getStandingDefenseClause({name: entry.name, entries: [sentences[0]]}, npcName);
-		if (!clause) return "";
+		// Only a leading run of claims is taken. A defence stated after other prose is
+		// usually a qualification of that prose, and tearing it out would leave the
+		// remainder referring to something that is no longer there.
+		const clauses = [];
+		let ix = 0;
+		for (; ix < sentences.length; ++ix) {
+			const clause = this._getStandingDefenseClause({name: entry.name, entries: [sentences[ix]]}, npcName);
+			if (!clause) break;
+			clauses.push(clause);
+		}
+		if (!clauses.length) return [];
 
-		const remainder = [sentences.slice(1).join(" "), ...strings.slice(1)].filter(Boolean);
-		if (!remainder.length) return clause;
+		const remainder = [sentences.slice(ix).join(" "), ...strings.slice(1)].filter(Boolean);
+		if (!remainder.length) return clauses;
 		kept.push({...entry, entries: remainder});
-		return clause;
+		return clauses;
+	}
+
+	/**
+	 * Two sources can state the same defence in opposite word order — an item says
+	 * "Resistance to damage from spells", the sheet's own defence list says "resistance
+	 * to spell damage". Canonicalising the phrasing lets the subsumption filter see that
+	 * they are one claim rather than printing both.
+	 */
+	static _getDefenseClauseSignature (clause) {
+		return this._getEntryBodySignature(String(clause || "")
+			.replace(/\bdamage from (\w+)s\b/gi, "$1 damage")
+			.replace(/\bto being (\w+)\b/gi, "to $1"));
 	}
 
 	/**
@@ -3796,7 +4035,16 @@ class CharacterSheetNpcExporter {
 		// clause out of "…saving throws that it makes to maintain Concentration".
 		const clause = re.exec(rest)?.[1] ??
 			re.exec(rest.replace(/^[^.]*?\bthat\s+(?=(?:it|they|he|she)\s)/i, ""))?.[1];
-		if (!clause) return "";
+		// A defence is often stated from the attacker's side — "Spell attack rolls against
+		// it have Disadvantage" — which never names the NPC as the subject. That is the
+		// same kind of standing roll modifier and belongs in the same pinned list.
+		if (!clause) {
+			const inverted = new RegExp(`^(.+?\\brolls?)\\s+(?:made\\s+)?against\\s+(?:${subject}|it|them|him|her)\\s+(?:have|has|are made with)\\s+(advantage|disadvantage)\\b`, "i")
+				.exec(this._getPlainMatchText(rest));
+			if (!inverted) return "";
+			const inv = `${inverted[2].toLowerCase()} on ${inverted[1].toLowerCase()} against it`;
+			return gate ? `${inv} ${gate[1].toLowerCase()}` : inv;
+		}
 
 		// Only standing modifiers merge — a benefit with its own decision belongs to its
 		// own feature.
@@ -8435,6 +8683,7 @@ class CharacterSheetNpcExporter {
 					meleeOnly: false,
 					onlyWeapon: weapon,
 					sourceName,
+					mergeLabel: label,
 					named: !!sourceName,
 					wholeFeature: false,
 					appliesTo: "",
@@ -8572,7 +8821,7 @@ class CharacterSheetNpcExporter {
 	 */
 	static _formatDamageRidersForAttack (riders, attack) {
 		if (!riders?.length) return "";
-		const applicable = riders.filter(rider => this._riderAppliesToAttack(rider, attack));
+		const applicable = this._coalesceDamageRiders(riders.filter(rider => this._riderAppliesToAttack(rider, attack)));
 		if (!applicable.length) return "";
 		return applicable
 			.map(rider => {
@@ -8583,12 +8832,71 @@ class CharacterSheetNpcExporter {
 				if (rider.named && rider.sourceName) {
 					// A condition that is true of every attack the rider is printed on adds
 					// nothing but length — the attack line itself is the condition.
-					const isUniversal = !condition || /^on (every|each|all) /i.test(condition);
+					const isUniversal = this._isUniversalRiderCondition(condition);
 					return `, plus {@damage ${rider.damage}}${type} damage (${rider.sourceName}${isUniversal ? "" : `, ${condition}`})`;
 				}
 				return `, plus {@damage ${rider.damage}}${type} damage${condition ? ` ${condition}` : ""}`;
 			})
 			.join("");
+	}
+
+	/**
+	 * Two sources can add the same damage to the same attack — Mikase's Starfire Katana
+	 * carries 1d8 radiant and Radiant Strikes adds another — and printed separately the
+	 * line says "plus 1d8 radiant damage (Radiant Strikes), plus 1d8 radiant damage",
+	 * which a DM has to add up mid-roll. State the total once and name both sources.
+	 *
+	 * Only riders that share a damage type, a condition and a die size combine; a 1d8 and
+	 * a 1d4 are two different rolls and stay two clauses.
+	 *
+	 * @param {Array<Object>} riders riders already filtered to this attack
+	 * @returns {Array<Object>} riders with same-die groups collapsed
+	 */
+	/** A rider condition that is true of every line it is printed on states nothing. */
+	static _isUniversalRiderCondition (condition) {
+		const text = String(condition || "").trim();
+		return !text || /^on (?:every|each|all) /i.test(text);
+	}
+
+	static _coalesceDamageRiders (riders) {
+		const order = [];
+		const groups = new Map();
+
+		(riders || []).forEach(rider => {
+			const die = /^(\d+)d(\d+)$/.exec(String(rider?.damage || "").trim());
+			const type = String(rider?.damageType || "").trim().toLowerCase();
+			if (!die || !type) return void order.push({single: rider});
+			// "on every melee weapon hit" and no condition at all are the same condition on
+			// a melee weapon's own line; treating them as different keeps the two apart.
+			const gate = this._isUniversalRiderCondition(rider.condition) ? "" : String(rider.condition).trim().toLowerCase();
+			const key = `${type}|${gate}|d${die[2]}`;
+			if (!groups.has(key)) {
+				const slot = {faces: die[2], members: []};
+				groups.set(key, slot);
+				order.push(slot);
+			}
+			groups.get(key).members.push({rider, count: Number(die[1])});
+		});
+
+		return order.flatMap(slot => {
+			if (slot.single) return [slot.single];
+			if (slot.members.length === 1) return [slot.members[0].rider];
+			const count = slot.members.reduce((acc, it) => acc + it.count, 0);
+			const labels = [];
+			slot.members.forEach(({rider}) => {
+				// A weapon's own rider prints unattributed on its own line, because the line
+				// already names the weapon — but once merged the attribution is the only way
+				// to see where the bigger number came from.
+				const label = rider.sourceName || rider.mergeLabel || "";
+				if (label && !labels.includes(label)) labels.push(label);
+			});
+			return [{
+				...slot.members[0].rider,
+				damage: `${count}d${slot.faces}`,
+				sourceName: labels.join(", "),
+				named: !!labels.length,
+			}];
+		});
 	}
 
 	/**
