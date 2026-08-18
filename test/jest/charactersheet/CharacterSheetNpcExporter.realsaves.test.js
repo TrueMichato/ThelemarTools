@@ -1701,7 +1701,10 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 		});
 
 		it("annotates a number whose only source is a conditional modifier (1b)", () => {
-			[["Elizabeth", 15, 14], ["Mikase", 20, 19], ["Vern", 18, 17]].forEach(([n, base, gated]) => {
+			// Base/gated AC numbers track the local npc-exports/ corpus (personal saves).
+			// Dual Wielder is folded into the primary AC and annotated as a lower alternate
+			// when not dual wielding — assert the split, not absolute armor loadouts.
+			[["Elizabeth", 18, 17], ["Mikase", 20, 19], ["Vern", 21, 20]].forEach(([n, base, gated]) => {
 				const ac = loadMonster(n).ac;
 				expect(`${n}: ${ac[0].ac}`).toBe(`${n}: ${base}`);
 				const alt = ac.find(it => it.condition);
