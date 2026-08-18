@@ -5,6 +5,7 @@
  */
 
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 
 // Project globals — typed via globalThis cast for TypeScript checkJs
 const {e_, ee} = /** @type {*} */ (globalThis);
@@ -471,8 +472,24 @@ class CharacterSheetSpellPicker {
 				return true;
 			});
 
-			if (!filtered.length) {
-				spellList.append(e_({outer: `<p class="ve-muted text-center py-2">No spells match your filters</p>`}));
+			if (FilterPickerHelpers.shouldShowFilteredEmpty(filtered)) {
+				const dirty = !!(searchText || levelVal !== "" || schoolVal || onlyRitual || onlyConc || rarityVal || legalityVal);
+				const reset = () => {
+					search.value = "";
+					levelFilter.value = "";
+					schoolFilter.value = "";
+					ritualFilter.querySelector("input").checked = false;
+					concFilter.querySelector("input").checked = false;
+					if (rarityFilter) rarityFilter.value = "";
+					if (legalityFilter) legalityFilter.value = "";
+					renderSpellList();
+				};
+				spellList.append(FilterPickerHelpers.buildEmptyState({
+					icon: "📖",
+					title: FilterPickerHelpers.LABELS.emptyFilteredTitle,
+					detail: FilterPickerHelpers.LABELS.emptyFilteredDetail,
+					onReset: dirty ? reset : null,
+				}));
 				return;
 			}
 
@@ -743,8 +760,24 @@ class CharacterSheetSpellPicker {
 				return true;
 			});
 
-			if (!filtered.length) {
-				spellList.append(e_({outer: `<p class="ve-muted text-center py-2">No spells match your filters</p>`}));
+			if (FilterPickerHelpers.shouldShowFilteredEmpty(filtered)) {
+				const dirty = !!(searchText || levelVal || schoolVal || onlyRitual || onlyConc || rarityVal || legalityVal);
+				const reset = () => {
+					search.value = "";
+					levelFilter.value = "";
+					schoolFilter.value = "";
+					ritualFilter.querySelector("input").checked = false;
+					concFilter.querySelector("input").checked = false;
+					if (rarityFilter) rarityFilter.value = "";
+					if (legalityFilter) legalityFilter.value = "";
+					renderSpellList();
+				};
+				spellList.append(FilterPickerHelpers.buildEmptyState({
+					icon: "📖",
+					title: FilterPickerHelpers.LABELS.emptyFilteredTitle,
+					detail: FilterPickerHelpers.LABELS.emptyFilteredDetail,
+					onReset: dirty ? reset : null,
+				}));
 				return;
 			}
 

@@ -1,4 +1,5 @@
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 
 /**
  * sourceFeature values assigned to player-chosen spells by the Builder, LevelUp, and QuickBuild flows.
@@ -722,27 +723,35 @@ class CharacterSheetSpells {
 			</p>
 		`}));
 
-		// Build enhanced filter UI - single row with source pushed to right
+		// Primary filter row (search + high-frequency facets). Secondary facets live in More filters.
 		const filterRow = e_({tag: "div", clazz: "charsheet__modal-filter-row"});
 		modalInner.append(filterRow);
 
-		// Helper function to position dropdown towards center of modal
-		const positionDropdown = (dropdown, btn) => {
-			const btnRect = btn.getBoundingClientRect();
-			const modalRect = modalInner.getBoundingClientRect();
-			const btnCenterX = btnRect.left + btnRect.width / 2;
-			const modalCenterX = modalRect.left + modalRect.width / 2;
-
-			// If button is to the left of center, open dropdown to the right
-			// If button is to the right of center, open dropdown to the left
-			if (btnCenterX < modalCenterX) {
-				dropdown.classList.add("open-right");
-				dropdown.classList.remove("open-left");
-			} else {
-				dropdown.classList.remove("open-right");
-				dropdown.classList.add("open-left");
-			}
+		// Progressive disclosure: secondary facets (school, components, …)
+		const moreFiltersToggle = e_({outer: `<button type="button" class="charsheet__filter-toggle charsheet__spell-more-filters-toggle mt-2">
+			<span class="charsheet__filter-toggle-icon">▶</span>
+			<span>More filters</span>
+			<span class="charsheet__filter-toggle-count"></span>
+		</button>`});
+		modalInner.append(moreFiltersToggle);
+		const moreFiltersCollapsible = e_({outer: `<div class="charsheet__filter-collapsible charsheet__spell-more-filters"></div>`});
+		modalInner.append(moreFiltersCollapsible);
+		const moreFilterRow = e_({tag: "div", clazz: "charsheet__modal-filter-row charsheet__modal-filter-row--secondary"});
+		moreFiltersCollapsible.append(moreFilterRow);
+		let moreFiltersOpen = false;
+		const _updateMoreFiltersToggle = () => {
+			moreFiltersToggle.querySelector(".charsheet__filter-toggle-icon").textContent = moreFiltersOpen ? "▼" : "▶";
+			moreFiltersCollapsible.classList.toggle("charsheet__filter-collapsible--open", moreFiltersOpen);
+			moreFiltersToggle.setAttribute("aria-expanded", moreFiltersOpen ? "true" : "false");
 		};
+		moreFiltersToggle.addEventListener("click", () => {
+			moreFiltersOpen = !moreFiltersOpen;
+			_updateMoreFiltersToggle();
+		});
+		_updateMoreFiltersToggle();
+
+		const spellPopoverCtl = FilterPickerHelpers.createExclusivePopoverController([]);
+		const toggleSpellMenu = (menu, btn, e) => spellPopoverCtl.toggle(menu, btn, e);
 
 		// Search input with icon
 		const searchWrapper = e_({tag: "div", clazz: "charsheet__modal-search"});
@@ -864,17 +873,7 @@ class CharacterSheetSpells {
 		const classText = classDropdown.querySelector(".charsheet__source-multiselect-text");
 
 		classBtn.addEventListener("click", (/** @type {*} */ e) => {
-			e.stopPropagation();
-			positionDropdown(classDropdownMenu, classBtn);
-			classDropdownMenu.classList.toggle("open");
-			// Close other dropdowns
-			levelDropdownMenu?.classList.remove("open");
-			schoolDropdownMenu?.classList.remove("open");
-			sourceDropdownMenu?.classList.remove("open");
-			rarityDropdownMenu?.classList.remove("open");
-			legalityDropdownMenu?.classList.remove("open");
-			subschoolDropdownMenu?.classList.remove("open");
-			subclassDropdownMenu?.classList.remove("open");
+			toggleSpellMenu(classDropdownMenu, classBtn, e);
 		});
 
 		const updateClassText = () => {
@@ -981,17 +980,7 @@ class CharacterSheetSpells {
 			subclassDropdownMenu = subclassDropdown.querySelector(".charsheet__source-multiselect-dropdown");
 
 			subclassBtn.addEventListener("click", (/** @type {*} */ e) => {
-				e.stopPropagation();
-				positionDropdown(subclassDropdownMenu, subclassBtn);
-				subclassDropdownMenu.classList.toggle("open");
-				// Close other dropdowns
-				classDropdownMenu.classList.remove("open");
-				levelDropdownMenu?.classList.remove("open");
-				schoolDropdownMenu?.classList.remove("open");
-				sourceDropdownMenu?.classList.remove("open");
-				rarityDropdownMenu?.classList.remove("open");
-				legalityDropdownMenu?.classList.remove("open");
-				subschoolDropdownMenu?.classList.remove("open");
+				toggleSpellMenu(subclassDropdownMenu, subclassBtn, e);
 			});
 
 			const updateSubclassText = () => {
@@ -1082,16 +1071,7 @@ class CharacterSheetSpells {
 		const levelText = levelDropdown.querySelector(".charsheet__source-multiselect-text");
 
 		levelBtn.addEventListener("click", (/** @type {*} */ e) => {
-			e.stopPropagation();
-			positionDropdown(levelDropdownMenu, levelBtn);
-			levelDropdownMenu.classList.toggle("open");
-			// Close other dropdowns
-			classDropdownMenu.classList.remove("open");
-			schoolDropdownMenu.classList.remove("open");
-			sourceDropdownMenu.classList.remove("open");
-			rarityDropdownMenu?.classList.remove("open");
-			legalityDropdownMenu?.classList.remove("open");
-			subschoolDropdownMenu?.classList.remove("open");
+			toggleSpellMenu(levelDropdownMenu, levelBtn, e);
 		});
 
 		const updateLevelText = () => {
@@ -1149,7 +1129,7 @@ class CharacterSheetSpells {
 				</div>
 			</div>
 		`});
-		filterRow.append(schoolDropdown);
+		moreFilterRow.append(schoolDropdown);
 
 		// School dropdown behavior
 		const schoolBtn = schoolDropdown.querySelector(".charsheet__source-multiselect-btn");
@@ -1157,16 +1137,7 @@ class CharacterSheetSpells {
 		const schoolText = schoolDropdown.querySelector(".charsheet__source-multiselect-text");
 
 		schoolBtn.addEventListener("click", (/** @type {*} */ e) => {
-			e.stopPropagation();
-			positionDropdown(schoolDropdownMenu, schoolBtn);
-			schoolDropdownMenu.classList.toggle("open");
-			// Close other dropdowns
-			classDropdownMenu.classList.remove("open");
-			levelDropdownMenu.classList.remove("open");
-			sourceDropdownMenu.classList.remove("open");
-			rarityDropdownMenu?.classList.remove("open");
-			legalityDropdownMenu?.classList.remove("open");
-			subschoolDropdownMenu?.classList.remove("open");
+			toggleSpellMenu(schoolDropdownMenu, schoolBtn, e);
 		});
 
 		const updateSchoolText = () => {
@@ -1184,6 +1155,7 @@ class CharacterSheetSpells {
 				schoolText.textContent = `${checked.length} Schools`;
 				selectedSchools = new Set(Array.from(checked).map(el => el.value));
 			}
+			if (typeof _updateMoreFiltersCount === "function") _updateMoreFiltersCount();
 			renderList();
 		};
 
@@ -1233,22 +1205,14 @@ class CharacterSheetSpells {
 					</div>
 				</div>
 			`});
-			filterRow.append(rarityDropdown);
+			moreFilterRow.append(rarityDropdown);
 
 			rarityDropdownMenu = rarityDropdown.querySelector(".charsheet__source-multiselect-dropdown");
 			const rarityBtn = rarityDropdown.querySelector(".charsheet__source-multiselect-btn");
 			const rarityText = rarityDropdown.querySelector(".charsheet__source-multiselect-text");
 
 			rarityBtn.addEventListener("click", (/** @type {*} */ e) => {
-				e.stopPropagation();
-				positionDropdown(rarityDropdownMenu, rarityBtn);
-				rarityDropdownMenu.classList.toggle("open");
-				classDropdownMenu.classList.remove("open");
-				levelDropdownMenu.classList.remove("open");
-				schoolDropdownMenu.classList.remove("open");
-				legalityDropdownMenu?.classList.remove("open");
-				subschoolDropdownMenu?.classList.remove("open");
-				sourceDropdownMenu.classList.remove("open");
+				toggleSpellMenu(rarityDropdownMenu, rarityBtn, e);
 			});
 
 			const updateRarityText = () => {
@@ -1312,22 +1276,14 @@ class CharacterSheetSpells {
 					</div>
 				</div>
 			`});
-			filterRow.append(legalityDropdown);
+			moreFilterRow.append(legalityDropdown);
 
 			legalityDropdownMenu = legalityDropdown.querySelector(".charsheet__source-multiselect-dropdown");
 			const legalityBtn = legalityDropdown.querySelector(".charsheet__source-multiselect-btn");
 			const legalityText = legalityDropdown.querySelector(".charsheet__source-multiselect-text");
 
 			legalityBtn.addEventListener("click", (/** @type {*} */ e) => {
-				e.stopPropagation();
-				positionDropdown(legalityDropdownMenu, legalityBtn);
-				legalityDropdownMenu.classList.toggle("open");
-				classDropdownMenu.classList.remove("open");
-				levelDropdownMenu.classList.remove("open");
-				schoolDropdownMenu.classList.remove("open");
-				rarityDropdownMenu?.classList.remove("open");
-				subschoolDropdownMenu?.classList.remove("open");
-				sourceDropdownMenu.classList.remove("open");
+				toggleSpellMenu(legalityDropdownMenu, legalityBtn, e);
 			});
 
 			const updateLegalityText = () => {
@@ -1401,23 +1357,14 @@ class CharacterSheetSpells {
 					</div>
 				</div>
 			`});
-			filterRow.append(subschoolDropdown);
+			moreFilterRow.append(subschoolDropdown);
 
 			subschoolDropdownMenu = subschoolDropdown.querySelector(".charsheet__source-multiselect-dropdown");
 			const subschoolBtn = subschoolDropdown.querySelector(".charsheet__source-multiselect-btn");
 			const subschoolText = subschoolDropdown.querySelector(".charsheet__source-multiselect-text");
 
 			subschoolBtn.addEventListener("click", (/** @type {*} */ e) => {
-				e.stopPropagation();
-				positionDropdown(subschoolDropdownMenu, subschoolBtn);
-				subschoolDropdownMenu.classList.toggle("open");
-				// Close other dropdowns
-				classDropdownMenu.classList.remove("open");
-				levelDropdownMenu.classList.remove("open");
-				schoolDropdownMenu.classList.remove("open");
-				rarityDropdownMenu?.classList.remove("open");
-				legalityDropdownMenu?.classList.remove("open");
-				sourceDropdownMenu.classList.remove("open");
+				toggleSpellMenu(subschoolDropdownMenu, subschoolBtn, e);
 			});
 
 			const updateSubschoolText = () => {
@@ -1487,31 +1434,29 @@ class CharacterSheetSpells {
 		const sourceText = sourceDropdown.querySelector(".charsheet__source-multiselect-text");
 
 		sourceBtn.addEventListener("click", (/** @type {*} */ e) => {
-			e.stopPropagation();
-			positionDropdown(sourceDropdownMenu, sourceBtn);
-			sourceDropdownMenu.classList.toggle("open");
-			// Close other dropdowns
-			classDropdownMenu.classList.remove("open");
-			levelDropdownMenu.classList.remove("open");
-			schoolDropdownMenu.classList.remove("open");
-			rarityDropdownMenu?.classList.remove("open");
-			legalityDropdownMenu?.classList.remove("open");
-			subschoolDropdownMenu?.classList.remove("open");
+			toggleSpellMenu(sourceDropdownMenu, sourceBtn, e);
 		});
 
-		// Close all dropdowns when clicking outside
-		document.addEventListener("click", () => {
-			classDropdownMenu.classList.remove("open");
-			sourceDropdownMenu.classList.remove("open");
-			levelDropdownMenu.classList.remove("open");
-			schoolDropdownMenu.classList.remove("open");
-			rarityDropdownMenu?.classList.remove("open");
-			legalityDropdownMenu?.classList.remove("open");
-			subschoolDropdownMenu?.classList.remove("open");
+		// Register menus + outside/escape/resize dismiss for fixed popovers
+		[
+			classDropdownMenu,
+			typeof subclassDropdownMenu !== "undefined" ? subclassDropdownMenu : null,
+			levelDropdownMenu,
+			schoolDropdownMenu,
+			rarityDropdownMenu,
+			typeof legalityDropdownMenu !== "undefined" ? legalityDropdownMenu : null,
+			typeof subschoolDropdownMenu !== "undefined" ? subschoolDropdownMenu : null,
+			sourceDropdownMenu,
+		].filter(Boolean).forEach(m => {
+			spellPopoverCtl.register(m);
+			m.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation());
 		});
-		sourceDropdownMenu.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation());
-		levelDropdownMenu.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation());
-		schoolDropdownMenu.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation());
+		document.addEventListener("click", () => spellPopoverCtl.closeAll());
+		window.addEventListener("resize", () => spellPopoverCtl.closeAll());
+		modalInner.closest?.(".ve-ui-modal__scroller")?.addEventListener("scroll", () => spellPopoverCtl.closeAll(), {passive: true});
+		document.addEventListener("keydown", (/** @type {*} */ e) => {
+			if (e.key === "Escape") spellPopoverCtl.closeAll();
+		});
 
 		// Update source text based on selection
 		const updateSourceText = () => {
@@ -1552,9 +1497,9 @@ class CharacterSheetSpells {
 			updateSourceText();
 		});
 
-		// Quick filter buttons row
+		// Component / casting quick filters (secondary)
 		const quickFilters = e_({outer: `<div class="charsheet__modal-quick-filters"></div>`});
-		modalInner.append(quickFilters);
+		moreFiltersCollapsible.append(quickFilters);
 
 		let filterRitual = false;
 		let filterConcentration = false;
@@ -1562,47 +1507,162 @@ class CharacterSheetSpells {
 		let filterSomatic = false;
 		let filterMaterial = false;
 
-		const ritualBtn = e_({outer: `<span class="charsheet__modal-filter-btn" role="button" tabindex="0">🔮 Ritual</span>`});
-
+		const ritualBtn = e_({tag: "button", clazz: "charsheet__modal-filter-btn", type: "button", txt: "🔮 Ritual"});
 		quickFilters.append(ritualBtn);
-		const concBtn = e_({outer: `<span class="charsheet__modal-filter-btn" role="button" tabindex="0">⏳ Concentration</span>`});
+		const concBtn = e_({tag: "button", clazz: "charsheet__modal-filter-btn", type: "button", txt: "⏳ Concentration"});
 		quickFilters.append(concBtn);
-		const verbalBtn = e_({outer: `<span class="charsheet__modal-filter-btn" role="button" tabindex="0">🗣️ Verbal</span>`});
+		const verbalBtn = e_({tag: "button", clazz: "charsheet__modal-filter-btn", type: "button", txt: "🗣️ Verbal"});
 		quickFilters.append(verbalBtn);
-		const somaticBtn = e_({outer: `<span class="charsheet__modal-filter-btn" role="button" tabindex="0">✋ Somatic</span>`});
+		const somaticBtn = e_({tag: "button", clazz: "charsheet__modal-filter-btn", type: "button", txt: "✋ Somatic"});
 		quickFilters.append(somaticBtn);
-		const materialBtn = e_({outer: `<span class="charsheet__modal-filter-btn" role="button" tabindex="0">💎 Material</span>`});
+		const materialBtn = e_({tag: "button", clazz: "charsheet__modal-filter-btn", type: "button", txt: "💎 Material"});
 		quickFilters.append(materialBtn);
 
-		// Set up click handlers immediately after creation
+		// Set up click handlers immediately after creation (use .active — CSS targets that, not ve-active)
 		ritualBtn.addEventListener("click", function () {
 			filterRitual = !filterRitual;
-			this.classList.toggle("ve-active");
+			FilterPickerHelpers.setPressed(this, filterRitual);
+			_updateMoreFiltersCount();
 			renderList();
 		});
 		concBtn.addEventListener("click", function () {
 			filterConcentration = !filterConcentration;
-			this.classList.toggle("ve-active");
+			FilterPickerHelpers.setPressed(this, filterConcentration);
+			_updateMoreFiltersCount();
 			renderList();
 		});
 		verbalBtn.addEventListener("click", function () {
 			filterVerbal = !filterVerbal;
-			this.classList.toggle("ve-active");
+			FilterPickerHelpers.setPressed(this, filterVerbal);
+			_updateMoreFiltersCount();
 			renderList();
 		});
 		somaticBtn.addEventListener("click", function () {
 			filterSomatic = !filterSomatic;
-			this.classList.toggle("ve-active");
+			FilterPickerHelpers.setPressed(this, filterSomatic);
+			_updateMoreFiltersCount();
 			renderList();
 		});
 		materialBtn.addEventListener("click", function () {
 			filterMaterial = !filterMaterial;
-			this.classList.toggle("ve-active");
+			FilterPickerHelpers.setPressed(this, filterMaterial);
+			_updateMoreFiltersCount();
 			renderList();
 		});
 
+		FilterPickerHelpers.relabelSelectNoneButtons(modalInner);
+
+		// Snapshot open defaults for Reset filters (not "select all")
+		const _snapshotChecks = (root) => [...(root?.querySelectorAll("input[type=checkbox]") || [])].map(el => ({value: el.value, checked: !!el.checked}));
+		const _restoreChecks = (root, snap) => {
+			if (!root || !snap) return;
+			const byVal = new Map(snap.map(s => [s.value, s.checked]));
+			root.querySelectorAll("input[type=checkbox]").forEach(el => {
+				if (byVal.has(el.value)) el.checked = byVal.get(el.value);
+			});
+		};
+		const defaultCheckSnapshots = {
+			class: _snapshotChecks(classDropdown),
+			subclass: subclassDropdown ? _snapshotChecks(subclassDropdown) : null,
+			level: _snapshotChecks(levelDropdown),
+			school: _snapshotChecks(schoolDropdown),
+			rarity: typeof rarityDropdown !== "undefined" && rarityDropdown ? _snapshotChecks(rarityDropdown) : null,
+			legality: typeof legalityDropdown !== "undefined" && legalityDropdown ? _snapshotChecks(legalityDropdown) : null,
+			subschool: typeof subschoolDropdown !== "undefined" && subschoolDropdown ? _snapshotChecks(subschoolDropdown) : null,
+			source: _snapshotChecks(sourceDropdown),
+		};
+		const defaultSelected = {
+			classes: new Set(selectedClasses),
+			subclasses: new Set(selectedSubclasses),
+			levels: new Set(selectedLevels),
+			schools: new Set(selectedSchools),
+			rarities: new Set(selectedRarities),
+			legalities: new Set(selectedLegalities),
+			subschools: new Set(selectedSubschools),
+			sources: new Set(selectedSources),
+		};
+
+		const _updateMoreFiltersCount = () => {
+			let n = 0;
+			if (selectedSchools.size > 0) n++;
+			if (selectedRarities.size > 0) n++;
+			if (selectedLegalities.size > 0) n++;
+			if (selectedSubschools.size > 0) n++;
+			if (filterRitual) n++;
+			if (filterConcentration) n++;
+			if (filterVerbal) n++;
+			if (filterSomatic) n++;
+			if (filterMaterial) n++;
+			const el = moreFiltersToggle.querySelector(".charsheet__filter-toggle-count");
+			if (el) el.textContent = n > 0 ? `(${n} active)` : "";
+		};
+
+		_updateMoreFiltersCount();
+
+		const isSpellFiltersDirty = () => FilterPickerHelpers.isFilterDirty({
+			search: search.value,
+			defaultSearch: "",
+			dimensions: [
+				{current: selectedClasses, default: defaultSelected.classes},
+				{current: selectedSubclasses, default: defaultSelected.subclasses},
+				{current: selectedLevels, default: defaultSelected.levels},
+				{current: selectedSchools, default: defaultSelected.schools},
+				{current: selectedRarities, default: defaultSelected.rarities},
+				{current: selectedLegalities, default: defaultSelected.legalities},
+				{current: selectedSubschools, default: defaultSelected.subschools},
+				{current: selectedSources, default: defaultSelected.sources},
+			],
+			flags: [
+				{current: filterRitual, default: false},
+				{current: filterConcentration, default: false},
+				{current: filterVerbal, default: false},
+				{current: filterSomatic, default: false},
+				{current: filterMaterial, default: false},
+			],
+		});
+
+		const _resyncDropdown = (root) => {
+			const inp = root?.querySelector("input[type=checkbox]");
+			if (inp) inp.dispatchEvent(new Event("change", {bubbles: true}));
+		};
+		const resetSpellFilters = () => {
+			search.value = "";
+			_restoreChecks(classDropdown, defaultCheckSnapshots.class);
+			if (subclassDropdown) _restoreChecks(subclassDropdown, defaultCheckSnapshots.subclass);
+			_restoreChecks(levelDropdown, defaultCheckSnapshots.level);
+			_restoreChecks(schoolDropdown, defaultCheckSnapshots.school);
+			if (rarityDropdown) _restoreChecks(rarityDropdown, defaultCheckSnapshots.rarity);
+			if (legalityDropdown) _restoreChecks(legalityDropdown, defaultCheckSnapshots.legality);
+			if (subschoolDropdown) _restoreChecks(subschoolDropdown, defaultCheckSnapshots.subschool);
+			_restoreChecks(sourceDropdown, defaultCheckSnapshots.source);
+			filterRitual = false;
+			filterConcentration = false;
+			filterVerbal = false;
+			filterSomatic = false;
+			filterMaterial = false;
+			FilterPickerHelpers.setPressed(ritualBtn, false);
+			FilterPickerHelpers.setPressed(concBtn, false);
+			FilterPickerHelpers.setPressed(verbalBtn, false);
+			FilterPickerHelpers.setPressed(somaticBtn, false);
+			FilterPickerHelpers.setPressed(materialBtn, false);
+			moreFiltersOpen = false;
+			_updateMoreFiltersToggle();
+			_updateMoreFiltersCount();
+			spellPopoverCtl.closeAll();
+			// Resync selected* via existing change handlers (block-scoped update*Text)
+			_resyncDropdown(classDropdown);
+			_resyncDropdown(subclassDropdown);
+			_resyncDropdown(levelDropdown);
+			_resyncDropdown(schoolDropdown);
+			_resyncDropdown(rarityDropdown);
+			_resyncDropdown(legalityDropdown);
+			_resyncDropdown(subschoolDropdown);
+			_resyncDropdown(sourceDropdown);
+			renderList();
+		};
+
 		// Results count
-		const resultsCount = e_({outer: `<div class="charsheet__modal-results-count"></div>`});
+		const resultsCount = e_({outer: `<div class="charsheet__modal-results-count charsheet__modal-results-toolbar"></div>`});
 		modalInner.append(resultsCount);
 
 		// Spell list
@@ -1628,6 +1688,7 @@ class CharacterSheetSpells {
 		};
 
 		const renderList = () => {
+			if (typeof _updateMoreFiltersCount === "function") _updateMoreFiltersCount();
 			list.innerHTML = "";
 
 			const searchTerm = search.value.toLowerCase();
@@ -1695,15 +1756,21 @@ class CharacterSheetSpells {
 			const capped = filtered.slice(0, renderCap);
 
 			const knownCount = filtered.filter(s => knownSpellIds.includes(`${s.name}|${s.source}`)).length;
-			resultsCount.innerHTML = `<span>${totalCount} spell${totalCount !== 1 ? "s" : ""} found</span>${totalCount > renderCap ? `<span class="ml-2" style="opacity: 0.7;">(showing first ${renderCap})</span>` : ""}${knownCount > 0 ? `<span class="ml-2" style="color: var(--cs-success);">(${knownCount} already known)</span>` : ""}`;
+			const countHtml = `<span>${totalCount} spell${totalCount !== 1 ? "s" : ""} found</span>${totalCount > renderCap ? `<span class="ml-2" style="opacity: 0.7;">(showing first ${renderCap})</span>` : ""}${knownCount > 0 ? `<span class="ml-2" style="color: var(--cs-success);">(${knownCount} already known)</span>` : ""}`;
+			const dirty = isSpellFiltersDirty();
+			FilterPickerHelpers.renderResultsToolbar(resultsCount, {
+				countContent: countHtml,
+				isDirty: dirty,
+				onReset: resetSpellFilters,
+			});
 
-			if (!filtered) {
-				list.innerHTML = `
-					<div class="charsheet__modal-empty">
-						<div class="charsheet__modal-empty-icon">📖</div>
-						<div class="charsheet__modal-empty-text">No spells match your filters.<br>Try adjusting your search or filters.</div>
-					</div>
-				`;
+			if (FilterPickerHelpers.shouldShowFilteredEmpty(filtered)) {
+				list.append(FilterPickerHelpers.buildEmptyState({
+					icon: "📖",
+					title: FilterPickerHelpers.LABELS.emptyFilteredTitle,
+					detail: FilterPickerHelpers.LABELS.emptyFilteredDetail,
+					onReset: dirty ? resetSpellFilters : null,
+				}));
 				return;
 			}
 
@@ -7517,7 +7584,7 @@ class CharacterSheetSpells {
 			filtered = filtered.filter(s => s.name.toLowerCase().includes(this._spellFilter));
 		}
 
-		if (!filtered) return;
+		if (!filtered?.length) return;
 
 		const group = e_({outer: `
 			<div class="charsheet__spell-group charsheet__spell-group--innate">
@@ -8497,7 +8564,7 @@ class CharacterSheetSpells {
 				? matchingSpells.filter(s => s.name.toLowerCase().includes(filter))
 				: matchingSpells;
 
-			if (!filtered) {
+			if (!filtered?.length) {
 				list.insertAdjacentHTML("beforeend", `<p class="ve-muted text-center py-2">No spells found</p>`);
 				return;
 			}

@@ -910,6 +910,26 @@ Rendered inline in the **Skills** tab via `_renderLoreSkillsSection()` (characte
 
 ---
 
+## Filtered picker grammar (empty / reset / disclosure / popovers)
+
+**Helper**: `js/charactersheet/charactersheet-filter-picker-helpers.js` (`CharacterSheetFilterPickerHelpers`).
+
+Shared UX for Add Spell / Item / Feat, conditions source filter, builder spell pickers, and custom-abilities search:
+
+| Control | Meaning |
+|--------|---------|
+| **Select none** | Empty the multiselect (was Clear All / Clear / None) |
+| **Reset filters** | Restore that modal's **open defaults** (e.g. My Classes), clear search + quick chips — not "select every option" |
+| Empty canvas | Real empty state + primary Reset when filters/search are dirty |
+| Chip pressed | `.active` + `aria-pressed` via `setPressed` (not bare `ve-active`) |
+| Progressive disclosure | Item: tabs + collapsed **Filters** + nested facet sections (weapon/armor/props). Spell: primary Class/Level/Source row + collapsed **More filters** (school, components, …) |
+| Type-aware facets | `shouldShowTypeFamily(selectedTypes, "weapon"|"armor")` — empty Set = all types; `__NONE__` hides |
+| Multiselect menus | `placeAnchoredPopover` / `createExclusivePopoverController` — `position:fixed` so modal overflow cannot clip menus |
+
+Use `shouldShowFilteredEmpty(arr)` instead of `if (!filtered)` — arrays are always truthy. Multiselect All/Clear must call `syncMultiselectChecks` so every row updates. Do **not** migrate these pickers to site `ModalFilterBase` without a dedicated architecture pass.
+
+---
+
 ## Custom Abilities
 
 **Files**: UI in `js/charactersheet/charactersheet-customabilities.js` (~3.6K lines), state in `charactersheet-state.js` (`addCustomAbility` / `_registerCustomAbilityGrants` / `removeFeaturesBySourceAbility`).

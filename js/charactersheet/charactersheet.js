@@ -13,6 +13,7 @@ import {CharacterSheetNotes} from "./charactersheet-notes.js";
 import {CharacterSheetRollHistory} from "./charactersheet-rollhistory.js";
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 import {CharacterSheetCustomAbilities} from "./charactersheet-customabilities.js";
+import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 import {CharacterSheetQuickBuild} from "./charactersheet-quickbuild.js";
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 import {CharacterSheetSpellPicker} from "./charactersheet-spell-picker.js";
@@ -13805,22 +13806,21 @@ class CharacterSheetPage {
 
 		sourceDropdown.addEventListener("click", (e) => e.stopPropagation());
 
-		// Action button handlers
+		// Action button handlers (sync ALL checkbox rows — not only the first)
 		sourceActions.querySelector("[data-action='all']").addEventListener("click", () => {
 			conditionSources.forEach(src => selectedSources.add(src));
-			sourceList.querySelector("input").checked = true;
-			sourceList.querySelector(".charsheet__source-multiselect-check").textContent = "✓";
+			FilterPickerHelpers.syncMultiselectChecks(sourceList, selectedSources);
 			updateSourceBtnText();
 			renderList(search.value);
 		});
 
 		sourceActions.querySelector("[data-action='clear']").addEventListener("click", () => {
 			selectedSources.clear();
-			sourceList.querySelector("input").checked = false;
-			sourceList.querySelector(".charsheet__source-multiselect-check").textContent = "";
+			FilterPickerHelpers.syncMultiselectChecks(sourceList, selectedSources);
 			updateSourceBtnText();
 			renderList(search.value);
 		});
+		FilterPickerHelpers.relabelSelectNoneButtons(sourceActions);
 
 		sourceActions.querySelector("[data-action='official']").addEventListener("click", () => {
 			selectedSources.clear();

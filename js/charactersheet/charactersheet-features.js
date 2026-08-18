@@ -3,6 +3,7 @@
  * Handles class features, racial traits, feats, and other abilities
  */
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 
 const {e_, ee} = /** @type {*} */ (globalThis);
 
@@ -480,12 +481,52 @@ class CharacterSheetFeatures {
 		quickFilters.append(noPrereqBtn);
 
 		// Results count
-		const resultsCount = e_({tag: "div", clazz: "charsheet__modal-results-count"});
+		const resultsCount = e_({tag: "div", clazz: "charsheet__modal-results-count charsheet__modal-results-toolbar"});
 		modalInner.append(resultsCount);
 
 		// Feat list
 		const list = e_({tag: "div", clazz: "charsheet__modal-list"});
 		modalInner.append(list);
+
+		FilterPickerHelpers.relabelSelectNoneButtons(modalInner);
+
+		const _snapshotChecks = (root) => [...(root?.querySelectorAll("input[type=checkbox]") || [])].map(el => ({value: el.value, checked: !!el.checked}));
+		const _restoreChecks = (root, snap) => {
+			if (!root || !snap) return;
+			const byVal = new Map(snap.map(s => [s.value, s.checked]));
+			root.querySelectorAll("input[type=checkbox]").forEach(el => {
+				if (byVal.has(el.value)) el.checked = byVal.get(el.value);
+			});
+		};
+		const defaultFeatChecks = {
+			category: _snapshotChecks(categoryDropdown),
+			source: _snapshotChecks(sourceDropdown),
+		};
+		const defaultFeatSelected = {
+			categories: new Set(selectedCategories),
+			sources: new Set(selectedSources),
+		};
+
+		const isFeatFiltersDirty = () => FilterPickerHelpers.isFilterDirty({
+			search: search.value,
+			defaultSearch: "",
+			dimensions: [
+				{current: selectedCategories, default: defaultFeatSelected.categories},
+				{current: selectedSources, default: defaultFeatSelected.sources},
+			],
+			flags: [{current: filterNoPrereq, default: false}],
+		});
+
+		const resetFeatFilters = () => {
+			search.value = "";
+			_restoreChecks(categoryDropdown, defaultFeatChecks.category);
+			_restoreChecks(sourceDropdown, defaultFeatChecks.source);
+			updateCategoryText();
+			updateSourceText();
+			filterNoPrereq = false;
+			FilterPickerHelpers.setPressed(noPrereqBtn, false);
+			renderList();
+		};
 
 		const renderList = () => {
 			list.innerHTML = "";
@@ -506,15 +547,21 @@ class CharacterSheetFeatures {
 			});
 
 			const knownCount = filtered.filter(f => knownFeatNames.includes(f.name.toLowerCase())).length;
-			resultsCount.innerHTML = `<span>${filtered.length} feat${filtered.length !== 1 ? "s" : ""} found</span>${knownCount > 0 ? `<span class="ml-2" style="color: var(--cs-success);">(${knownCount} already known)</span>` : ""}`;
+			const countHtml = `<span>${filtered.length} feat${filtered.length !== 1 ? "s" : ""} found</span>${knownCount > 0 ? `<span class="ml-2" style="color: var(--cs-success);">(${knownCount} already known)</span>` : ""}`;
+			const dirty = isFeatFiltersDirty();
+			FilterPickerHelpers.renderResultsToolbar(resultsCount, {
+				countContent: countHtml,
+				isDirty: dirty,
+				onReset: resetFeatFilters,
+			});
 
-			if (!filtered.length) {
-				list.innerHTML = `
-					<div class="charsheet__modal-empty">
-						<div class="charsheet__modal-empty-icon">🎖️</div>
-						<div class="charsheet__modal-empty-text">No feats match your filters.<br>Try adjusting your search or filters.</div>
-					</div>
-				`;
+			if (FilterPickerHelpers.shouldShowFilteredEmpty(filtered)) {
+				list.append(FilterPickerHelpers.buildEmptyState({
+					icon: "🎖️",
+					title: FilterPickerHelpers.LABELS.emptyFilteredTitle,
+					detail: FilterPickerHelpers.LABELS.emptyFilteredDetail,
+					onReset: dirty ? resetFeatFilters : null,
+				}));
 				return;
 			}
 
@@ -582,7 +629,7 @@ class CharacterSheetFeatures {
 		// Toggle quick filter button
 		noPrereqBtn.addEventListener("click", () => {
 			filterNoPrereq = !filterNoPrereq;
-			noPrereqBtn.classList.toggle("active", filterNoPrereq);
+			FilterPickerHelpers.setPressed(noPrereqBtn, filterNoPrereq);
 			renderList();
 		});
 

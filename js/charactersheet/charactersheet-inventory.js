@@ -3,6 +3,7 @@
  * Handles items, equipment, currency, and encumbrance
  */
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 
 const {e_, ee} = /** @type {*} */ (globalThis);
 
@@ -812,24 +813,24 @@ class CharacterSheetInventory {
 		const sourceDropdownMenu = sourceDropdownEl.querySelector(".charsheet__source-multiselect-dropdown");
 		const sourceText = sourceDropdownEl.querySelector(".charsheet__source-multiselect-text");
 
-		// ---- Dropdown toggle behavior ----
+		// ---- Dropdown toggle behavior (fixed popovers — avoid modal clip) ----
 		const allMenus = [typeDropdownMenu, rarityDropdownMenu, sourceDropdownMenu];
-		const openDropdown = (menu, e) => {
-			e.stopPropagation();
-			const wasOpen = menu.classList.contains("open");
-			allMenus.forEach(m => m.classList.remove("open"));
-			if (!wasOpen) {
-				menu.classList.add("open");
-				// Auto-expand filters if collapsed when opening a dropdown
-				if (!filtersOpen) { filtersOpen = true; _updateFilterToggle(); }
-			}
+		const popoverCtl = FilterPickerHelpers.createExclusivePopoverController(allMenus);
+		const openDropdown = (menu, btn, e) => {
+			const opened = popoverCtl.toggle(menu, btn, e);
+			// Auto-expand filters if collapsed when opening a dropdown
+			if (opened && !filtersOpen) { filtersOpen = true; _updateFilterToggle(); }
 		};
-		typeBtn.addEventListener("click", (/** @type {*} */ e) => openDropdown(typeDropdownMenu, e));
-		rarityBtn.addEventListener("click", (/** @type {*} */ e) => openDropdown(rarityDropdownMenu, e));
-		sourceBtn.addEventListener("click", (/** @type {*} */ e) => openDropdown(sourceDropdownMenu, e));
+		typeBtn.addEventListener("click", (/** @type {*} */ e) => openDropdown(typeDropdownMenu, typeBtn, e));
+		rarityBtn.addEventListener("click", (/** @type {*} */ e) => openDropdown(rarityDropdownMenu, rarityBtn, e));
+		sourceBtn.addEventListener("click", (/** @type {*} */ e) => openDropdown(sourceDropdownMenu, sourceBtn, e));
 
-		const _closeDropdowns = () => allMenus.forEach(m => m.classList.remove("open"));
+		const _closeDropdowns = () => popoverCtl.closeAll();
 		document.addEventListener("click", _closeDropdowns);
+		const _onViewportChange = () => popoverCtl.closeAll();
+		window.addEventListener("resize", _onViewportChange);
+		// Close on scroll inside the modal scroller so fixed coords stay honest
+		modalInner.closest?.(".ve-ui-modal__scroller")?.addEventListener("scroll", _onViewportChange, {passive: true});
 		allMenus.forEach(m => m.addEventListener("click", (/** @type {*} */ e) => e.stopPropagation()));
 
 		// ---- Shared dropdown update helper ----
@@ -855,10 +856,15 @@ class CharacterSheetInventory {
 				selectedSet.clear();
 				checked.forEach(el => selectedSet.add(el.value));
 			}
+			_updateFilterToggle();
 			renderList();
 		};
 
-		const updateTypeText = () => _updateMultiselect(typeDropdownEl, itemTypes, selectedTypes, typeText, "All Types", "No Types");
+		const updateTypeText = () => {
+			_updateMultiselect(typeDropdownEl, itemTypes, selectedTypes, typeText, "All Types", "No Types");
+			// Types gate weapon/armor facet sections
+			if (typeof updateFilterVisibility === "function") updateFilterVisibility();
+		};
 		const updateRarityText = () => _updateMultiselect(rarityDropdownEl, rarities, selectedRarities, rarityText, "All Rarities", "No Rarities");
 		const updateSourceText = () => _updateMultiselect(sourceDropdownEl, uniqueSources, selectedSources, sourceText, "All Sources", "No Sources");
 
@@ -895,33 +901,76 @@ class CharacterSheetInventory {
 		quickFilters.append(attuneBtn);
 		attuneBtn.addEventListener("click", () => {
 			filterAttunement = !filterAttunement;
-			attuneBtn.classList.toggle("active", filterAttunement);
+			FilterPickerHelpers.setPressed(attuneBtn, filterAttunement);
+			_updateFilterToggle();
 			renderList();
 		});
 
+		/** Collapsible facet block inside Filters (keeps power, hides chip walls by default). */
+		const _makeFacetSection = (title) => {
+			const section = e_({outer: `<div class="charsheet__filter-facet"></div>`});
+			const toggle = e_({
+				tag: "button",
+				clazz: "charsheet__filter-facet-toggle",
+				type: "button",
+			});
+			const titleEl = e_({tag: "span", clazz: "charsheet__filter-facet-title", txt: title});
+			const summaryEl = e_({tag: "span", clazz: "charsheet__filter-facet-summary"});
+			const chevron = e_({tag: "span", clazz: "charsheet__filter-facet-chevron", txt: "▶"});
+			toggle.append(chevron, titleEl, summaryEl);
+			const body = e_({outer: `<div class="charsheet__filter-facet-body"></div>`});
+			section.append(toggle, body);
+			filterCollapsible.append(section);
+
+			let open = false;
+			const setOpen = (v) => {
+				open = !!v;
+				section.classList.toggle("charsheet__filter-facet--open", open);
+				chevron.textContent = open ? "▼" : "▶";
+				toggle.setAttribute("aria-expanded", open ? "true" : "false");
+			};
+			const setSummary = (text) => {
+				summaryEl.textContent = text || "";
+			};
+			toggle.addEventListener("click", () => setOpen(!open));
+			setOpen(false);
+			return {section,
+				body,
+				toggle,
+				setOpen,
+				isOpen: () => open,
+				setSummary,
+				setVisible (vis) {
+					section.style.display = vis ? "" : "none";
+				}};
+		};
+
 		// ---- Weapon category filter (simple/martial) ----
-		const weaponCatLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Weapon Category:"});
-		filterCollapsible.append(weaponCatLabel);
+		const weaponFacet = _makeFacetSection("Weapon details");
+		const weaponCatLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted", txt: "Category"});
+		weaponFacet.body.append(weaponCatLabel);
 		const weaponCatBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
-		filterCollapsible.append(weaponCatBtns);
+		weaponFacet.body.append(weaponCatBtns);
 
 		let selectedWeaponCat = null;
 		["simple", "martial"].forEach(cat => {
 			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: (/** @type {*} */ (cat)).toTitleCase()});
 			btn.addEventListener("click", () => {
 				selectedWeaponCat = selectedWeaponCat === cat ? null : cat;
-				weaponCatBtns.querySelectorAll("button").forEach(b => b.classList.remove("active"));
-				if (selectedWeaponCat) btn.classList.add("active");
+				weaponCatBtns.querySelectorAll("button").forEach(b => FilterPickerHelpers.setPressed(b, false));
+				if (selectedWeaponCat) FilterPickerHelpers.setPressed(btn, true);
+				_syncFacetSummaries();
 				renderList();
 			});
 			weaponCatBtns.append(btn);
 		});
 
 		// ---- Armor category filter (light/medium/heavy) ----
-		const armorCatLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Armor Category:"});
-		filterCollapsible.append(armorCatLabel);
+		const armorFacet = _makeFacetSection("Armor details");
+		const armorCatLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted", txt: "Category"});
+		armorFacet.body.append(armorCatLabel);
 		const armorCatBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
-		filterCollapsible.append(armorCatBtns);
+		armorFacet.body.append(armorCatBtns);
 
 		let selectedArmorCat = null;
 		const armorCatMap = {"light": "LA", "medium": "MA", "heavy": "HA"};
@@ -929,8 +978,9 @@ class CharacterSheetInventory {
 			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: (/** @type {*} */ (cat)).toTitleCase()});
 			btn.addEventListener("click", () => {
 				selectedArmorCat = selectedArmorCat === cat ? null : cat;
-				armorCatBtns.querySelectorAll("button").forEach(b => b.classList.remove("active"));
-				if (selectedArmorCat) btn.classList.add("active");
+				armorCatBtns.querySelectorAll("button").forEach(b => FilterPickerHelpers.setPressed(b, false));
+				if (selectedArmorCat) FilterPickerHelpers.setPressed(btn, true);
+				_syncFacetSummaries();
 				renderList();
 			});
 			armorCatBtns.append(btn);
@@ -969,17 +1019,17 @@ class CharacterSheetInventory {
 		const weaponProps = [...seenProps.entries()].sort((a, b) => a[1].displayName.localeCompare(b[1].displayName));
 		let selectedProps = new Set();
 
-		const propLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Weapon Properties:"});
-		filterCollapsible.append(propLabel);
+		const propsFacet = _makeFacetSection("Weapon properties");
 		const propBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
-		filterCollapsible.append(propBtns);
+		propsFacet.body.append(propBtns);
 
 		weaponProps.forEach(([key, {displayName, ent}]) => {
 			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: displayName});
 			_attachEntityHover(btn, ent);
 			btn.addEventListener("click", () => {
 				selectedProps.has(key) ? selectedProps.delete(key) : selectedProps.add(key);
-				btn.classList.toggle("active", selectedProps.has(key));
+				FilterPickerHelpers.setPressed(btn, selectedProps.has(key));
+				_syncFacetSummaries();
 				renderList();
 			});
 			propBtns.append(btn);
@@ -1004,17 +1054,17 @@ class CharacterSheetInventory {
 		const masteryTypes = [...seenMasteries.entries()].sort((a, b) => a[1].displayName.localeCompare(b[1].displayName));
 		let selectedMasteries = new Set();
 
-		const masteryLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Weapon Masteries:"});
-		filterCollapsible.append(masteryLabel);
+		const masteryFacet = _makeFacetSection("Weapon masteries");
 		const masteryBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
-		filterCollapsible.append(masteryBtns);
+		masteryFacet.body.append(masteryBtns);
 
 		masteryTypes.forEach(([key, {displayName, ent}]) => {
 			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: displayName});
 			_attachEntityHover(btn, ent);
 			btn.addEventListener("click", () => {
 				selectedMasteries.has(key) ? selectedMasteries.delete(key) : selectedMasteries.add(key);
-				btn.classList.toggle("active", selectedMasteries.has(key));
+				FilterPickerHelpers.setPressed(btn, selectedMasteries.has(key));
+				_syncFacetSummaries();
 				renderList();
 			});
 			masteryBtns.append(btn);
@@ -1031,38 +1081,50 @@ class CharacterSheetInventory {
 		const dmgTypes = [...seenDmgTypes.entries()].sort((a, b) => a[1].localeCompare(b[1]));
 		let selectedDmgTypes = new Set();
 
-		const dmgTypeLabel = e_({tag: "div", clazz: "charsheet__modal-filter-section-label ve-small ve-muted mt-2", txt: "Damage Type:"});
-		filterCollapsible.append(dmgTypeLabel);
+		const dmgFacet = _makeFacetSection("Damage type");
 		const dmgTypeBtns = e_({outer: `<div class="charsheet__modal-quick-filters charsheet__modal-quick-filters--sub"></div>`});
-		filterCollapsible.append(dmgTypeBtns);
+		dmgFacet.body.append(dmgTypeBtns);
 
 		dmgTypes.forEach(([code, displayName]) => {
 			const btn = e_({tag: "button", clazz: "charsheet__modal-filter-btn charsheet__modal-filter-btn--sm", txt: displayName});
 			btn.addEventListener("click", () => {
 				selectedDmgTypes.has(code) ? selectedDmgTypes.delete(code) : selectedDmgTypes.add(code);
-				btn.classList.toggle("active", selectedDmgTypes.has(code));
+				FilterPickerHelpers.setPressed(btn, selectedDmgTypes.has(code));
+				_syncFacetSummaries();
 				renderList();
 			});
 			dmgTypeBtns.append(btn);
 		});
 
-		// ---- Context-sensitive filter visibility ----
+		const _syncFacetSummaries = () => {
+			const wParts = [];
+			if (selectedWeaponCat) wParts.push(selectedWeaponCat.toTitleCase());
+			weaponFacet.setSummary(wParts.length ? `· ${wParts.join(", ")}` : "");
+			armorFacet.setSummary(selectedArmorCat ? `· ${selectedArmorCat.toTitleCase()}` : "");
+			propsFacet.setSummary(selectedProps.size ? `· ${selectedProps.size}` : "");
+			masteryFacet.setSummary(selectedMasteries.size ? `· ${selectedMasteries.size}` : "");
+			dmgFacet.setSummary(selectedDmgTypes.size ? `· ${selectedDmgTypes.size}` : "");
+			// Auto-open facets that already have selections so dirty state stays visible
+			if (selectedWeaponCat) weaponFacet.setOpen(true);
+			if (selectedArmorCat) armorFacet.setOpen(true);
+			if (selectedProps.size) propsFacet.setOpen(true);
+			if (selectedMasteries.size) masteryFacet.setOpen(true);
+			if (selectedDmgTypes.size) dmgFacet.setOpen(true);
+		};
+
+		// ---- Context-sensitive filter visibility (tab + Types multiselect) ----
 		updateFilterVisibility = () => {
 			const isConsumableTab = currentTab === "consumable";
-			// Rarity filter shown on all tabs (includes Mundane option for non-magical items)
 			rarityDropdownEl.style.display = "";
-			// Hide weapon/armor filters on consumable tab
-			const showWeaponFilters = !isConsumableTab;
-			weaponCatLabel.style.display = showWeaponFilters ? "" : "none";
-			weaponCatBtns.style.display = showWeaponFilters ? "" : "none";
-			armorCatLabel.style.display = showWeaponFilters ? "" : "none";
-			armorCatBtns.style.display = showWeaponFilters ? "" : "none";
-			propLabel.style.display = showWeaponFilters ? "" : "none";
-			propBtns.style.display = showWeaponFilters ? "" : "none";
-			masteryLabel.style.display = showWeaponFilters ? "" : "none";
-			masteryBtns.style.display = showWeaponFilters ? "" : "none";
-			dmgTypeLabel.style.display = showWeaponFilters ? "" : "none";
-			dmgTypeBtns.style.display = showWeaponFilters ? "" : "none";
+			const showWeapon = FilterPickerHelpers.shouldShowTypeFamily(selectedTypes, "weapon", {forceHide: isConsumableTab});
+			const showArmor = FilterPickerHelpers.shouldShowTypeFamily(selectedTypes, "armor", {forceHide: isConsumableTab});
+			// Damage applies mainly to weapons; keep with weapon family
+			weaponFacet.setVisible(showWeapon);
+			propsFacet.setVisible(showWeapon);
+			masteryFacet.setVisible(showWeapon);
+			dmgFacet.setVisible(showWeapon);
+			armorFacet.setVisible(showArmor);
+			_syncFacetSummaries();
 		};
 		updateFilterVisibility();
 
@@ -1095,12 +1157,81 @@ class CharacterSheetInventory {
 		sortRow.append(sortSelect);
 
 		// ---- Results count ----
-		const resultsCount = e_({outer: `<div class="charsheet__modal-results-count"></div>`});
+		const resultsCount = e_({outer: `<div class="charsheet__modal-results-count charsheet__modal-results-toolbar"></div>`});
 		modalInner.append(resultsCount);
 
 		// ---- Item list ----
 		const list = e_({outer: `<div class="charsheet__modal-list"></div>`});
 		modalInner.append(list);
+
+		FilterPickerHelpers.relabelSelectNoneButtons(modalInner);
+
+		const _snapshotChecks = (root) => [...(root?.querySelectorAll("input[type=checkbox]") || [])].map(el => ({value: el.value, checked: !!el.checked}));
+		const _restoreChecks = (root, snap) => {
+			if (!root || !snap) return;
+			const byVal = new Map(snap.map(s => [s.value, s.checked]));
+			root.querySelectorAll("input[type=checkbox]").forEach(el => {
+				if (byVal.has(el.value)) el.checked = byVal.get(el.value);
+			});
+		};
+		const defaultItemChecks = {
+			type: _snapshotChecks(typeDropdownEl),
+			rarity: _snapshotChecks(rarityDropdownEl),
+			source: _snapshotChecks(sourceDropdownEl),
+		};
+		const defaultItemSort = currentSort;
+
+		const isItemFiltersDirty = () => FilterPickerHelpers.isFilterDirty({
+			search: search.value,
+			defaultSearch: "",
+			dimensions: [
+				{current: selectedTypes, default: new Set()},
+				{current: selectedRarities, default: new Set()},
+				{current: selectedSources, default: new Set()},
+				{current: selectedProps, default: new Set()},
+				{current: selectedMasteries, default: new Set()},
+				{current: selectedDmgTypes, default: new Set()},
+			],
+			flags: [
+				{current: filterAttunement, default: false},
+				{current: !!selectedWeaponCat, default: false},
+				{current: !!selectedArmorCat, default: false},
+				{current: currentSort !== defaultItemSort, default: false},
+			],
+		});
+
+		const resetItemFilters = () => {
+			search.value = "";
+			filterAttunement = false;
+			FilterPickerHelpers.setPressed(attuneBtn, false);
+			selectedWeaponCat = null;
+			weaponCatBtns.querySelectorAll("button").forEach(b => FilterPickerHelpers.setPressed(b, false));
+			selectedArmorCat = null;
+			armorCatBtns.querySelectorAll("button").forEach(b => FilterPickerHelpers.setPressed(b, false));
+			selectedProps.clear();
+			propBtns.querySelectorAll("button").forEach(b => FilterPickerHelpers.setPressed(b, false));
+			selectedMasteries.clear();
+			masteryBtns.querySelectorAll("button").forEach(b => FilterPickerHelpers.setPressed(b, false));
+			selectedDmgTypes.clear();
+			dmgTypeBtns.querySelectorAll("button").forEach(b => FilterPickerHelpers.setPressed(b, false));
+			weaponFacet.setOpen(false);
+			armorFacet.setOpen(false);
+			propsFacet.setOpen(false);
+			masteryFacet.setOpen(false);
+			dmgFacet.setOpen(false);
+			currentSort = defaultItemSort;
+			sortSelect.value = defaultItemSort;
+			_restoreChecks(typeDropdownEl, defaultItemChecks.type);
+			_restoreChecks(rarityDropdownEl, defaultItemChecks.rarity);
+			_restoreChecks(sourceDropdownEl, defaultItemChecks.source);
+			// Keep tab as-is; resync multiselect state (last update triggers render)
+			updateTypeText();
+			updateRarityText();
+			updateSourceText();
+			_updateFilterToggle();
+			_syncFacetSummaries();
+			popoverCtl.closeAll();
+		};
 
 		renderList = () => {
 			list.innerHTML = "";
@@ -1187,15 +1318,22 @@ class CharacterSheetInventory {
 
 			const filtered = allMatching.slice(0, 150);
 
-			resultsCount.innerHTML = `<span>${filtered.length}${totalMatches > 150 ? ` of ${totalMatches}` : ""} item${filtered.length !== 1 ? "s" : ""} found</span>${totalMatches > 150 ? `<span class="ml-2" style="opacity: 0.7;">(showing first 150)</span>` : ""}`;
+			const countHtml = `<span>${filtered.length}${totalMatches > 150 ? ` of ${totalMatches}` : ""} item${filtered.length !== 1 ? "s" : ""} found</span>${totalMatches > 150 ? `<span class="ml-2" style="opacity: 0.7;">(showing first 150)</span>` : ""}`;
+			const dirty = isItemFiltersDirty();
+			FilterPickerHelpers.renderResultsToolbar(resultsCount, {
+				countContent: countHtml,
+				isDirty: dirty,
+				onReset: resetItemFilters,
+			});
 
-			if (!filtered.length) {
-				list.innerHTML = `
-					<div class="charsheet__modal-empty">
-						<div class="charsheet__modal-empty-icon">🎒</div>
-						<div class="charsheet__modal-empty-text">No items match your filters.<br>Try adjusting your search or filters.</div>
-					</div>
-				`;
+			if (FilterPickerHelpers.shouldShowFilteredEmpty(filtered)) {
+				list.append(FilterPickerHelpers.buildEmptyState({
+					icon: "🎒",
+					title: FilterPickerHelpers.LABELS.emptyFilteredTitle,
+					detail: FilterPickerHelpers.LABELS.emptyFilteredDetail,
+					onReset: dirty ? resetItemFilters : null,
+				}));
+				_updateFilterToggle();
 				return;
 			}
 

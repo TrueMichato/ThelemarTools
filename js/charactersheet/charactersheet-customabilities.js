@@ -166,11 +166,35 @@ class CharacterSheetCustomAbilities {
 		}
 
 		if (!filtered.length) {
-			container.innerHTML = `
-				<div class="custom-abilities__empty">
-					<p class="ve-muted ve-text-center py-2">No abilities match your search.</p>
-				</div>
-			`;
+			const H = globalThis.CharacterSheetFilterPickerHelpers;
+			const dirty = !!(searchTerm || (categoryFilter && categoryFilter !== "all"));
+			const reset = () => {
+				const searchInput = document.getElementById("custom-abilities-search");
+				const categorySelect = document.getElementById("custom-abilities-category-filter");
+				if (searchInput) searchInput.value = "";
+				if (categorySelect) categorySelect.value = "all";
+				const contentContainer = document.getElementById("custom-abilities__content");
+				if (contentContainer) {
+					const state = this._sheet.getState();
+					this._renderFilteredAbilities(contentContainer, state.getCustomAbilities(), "", "all");
+				}
+			};
+			if (H?.buildEmptyState) {
+				container.replaceChildren();
+				container.append(H.buildEmptyState({
+					icon: "✨",
+					title: H.LABELS.emptyFilteredTitle,
+					detail: dirty ? H.LABELS.emptyFilteredDetail : "No custom abilities yet.",
+					onReset: dirty ? reset : null,
+					showReset: dirty,
+				}));
+			} else {
+				container.innerHTML = `
+					<div class="custom-abilities__empty">
+						<p class="ve-muted ve-text-center py-2">No abilities match your search.</p>
+					</div>
+				`;
+			}
 			return;
 		}
 
