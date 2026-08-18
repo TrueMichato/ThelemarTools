@@ -768,7 +768,10 @@ class CharacterSheetCombat {
 					nameInput.value = weapon.name;
 					// Use property (5etools format) or properties (normalized format)
 					const props = weapon.property || weapon.properties || [];
-					const isRanged = props.some(p => p.includes("A") || p.toLowerCase().includes("ammunition")) || weapon.range;
+					// Ranged for ability purposes = true ranged weapon only. A thrown MELEE
+					// weapon (Thrown property, or a melee weapon's thrown `range`) still uses
+					// STR/finesse, so classify on Ammunition / type R / explicit isMelee===false.
+					const isRanged = props.some(p => p === "A" || p.startsWith("A|") || p.toLowerCase().includes("ammunition")) || ["R", "RW"].includes((weapon.type || "").split("|")[0]) || weapon.isMelee === false;
 					typeSelect.value = isRanged ? "ranged" : "melee";
 					const hasFinesse = props.some(p => p.includes("F") || p.toLowerCase().includes("finesse"));
 					abilitySelect.value = isRanged ? "dex" : (hasFinesse ? "finesse" : "str");
@@ -805,7 +808,7 @@ class CharacterSheetCombat {
 			const weapon = this._allItems.find(i => i.name === name && i.source === source);
 			if (weapon) {
 				nameInput.value = weapon.name;
-				const isRanged = weapon.property?.includes("A") || weapon.range;
+				const isRanged = weapon.property?.some(p => p === "A" || p.startsWith("A|")) || ["R", "RW"].includes((weapon.type || "").split("|")[0]) || weapon.isMelee === false;
 				typeSelect.value = isRanged ? "ranged" : "melee";
 				const hasFinesse = weapon.property?.includes("F");
 				abilitySelect.value = isRanged ? "dex" : (hasFinesse ? "finesse" : "str");
@@ -922,7 +925,10 @@ class CharacterSheetCombat {
 		// Build the current attack stats from weapon data + any existing overrides
 		// Handle both raw 5etools items (property) and normalized inventory items (properties)
 		const props = weapon.property || weapon.properties || [];
-		const isRanged = props.some(p => p === "A" || p === "T" || p.startsWith("A|") || p.startsWith("T|")) || weapon.range;
+		// Thrown (T) does NOT make a weapon ranged for ability purposes — a thrown melee
+		// weapon uses STR/finesse. Only Ammunition (A) / type R / explicit isMelee===false
+		// mark a true ranged weapon.
+		const isRanged = props.some(p => p === "A" || p.startsWith("A|")) || ["R", "RW"].includes((weapon.type || "").split("|")[0]) || weapon.isMelee === false;
 		const hasFinesse = props.some(p => p === "F" || p.startsWith("F|"));
 
 		// Get weapon's base stats with overrides
@@ -4326,7 +4332,7 @@ class CharacterSheetCombat {
 				// Auto-generate attack from weapon
 				// Use property (5etools format) or properties (normalized format)
 				const props = weapon.property || weapon.properties || [];
-				const isRanged = props.some(p => p === "A" || p === "T" || p.startsWith("A|") || p.startsWith("T|"));
+				const isRanged = props.some(p => p === "A" || p.startsWith("A|")) || ["R", "RW"].includes((weapon.type || "").split("|")[0]) || weapon.isMelee === false;
 				const hasFinesse = props.some(p => p === "F" || p.startsWith("F|"));
 				const isMonkWeapon = this._state.isMonkWeapon?.(weapon);
 				const defaultAbility = isRanged ? "dex" : ((hasFinesse || isMonkWeapon) ? "finesse" : "str");

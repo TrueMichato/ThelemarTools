@@ -35811,7 +35811,9 @@ class CharacterSheetState {
 		const props = item.property || item.properties || [];
 		const isFinesse = props.some(p => p === "F" || p.startsWith("F|"));
 		const rawType = (item.type || "").split("|")[0];
-		const isRanged = rawType === "R" || props.some(p => p === "T" || p.startsWith("T|") || p === "A" || p.startsWith("A|")) || (item.isMelee === false);
+		// Thrown (T) alone does not make a weapon ranged — a thrown melee weapon uses
+		// STR/finesse. Classify ranged via Ammunition (A) / type R / explicit isMelee===false.
+		const isRanged = rawType === "R" || props.some(p => p === "A" || p.startsWith("A|")) || (item.isMelee === false);
 		const isMonkWeapon = this.isMonkWeapon?.(item) || item.isMonkWeapon;
 
 		let abilityUsed;
@@ -35903,6 +35905,32 @@ class CharacterSheetState {
 		if (!weapon || !token) return false;
 		const t = String(token).toLowerCase();
 
+		const props = weapon.property || weapon.properties || [];
+		const hasProp = (code) => props.some(p => p === code || (typeof p === "string" && p.startsWith(`${code}|`)));
+
+		// Property-inclusion descriptors, e.g. the 2024 Rogue's "Martial weapons that have
+		// the Finesse or Light property". These name a weapon category plus one or more
+		// required properties (OR-joined by default) and carry no melee/ranged reach word,
+		// so they must be handled before the reach gate below or they would be rejected as
+		// "not a reach descriptor". Prefer the machine-readable `{@filter ...|property=a;b}`
+		// params when present (a `;`/`,` list is an OR set), else fall back to prose keywords.
+		const PROP_CODE = {finesse: "F", light: "L", thrown: "T", heavy: "H", reach: "R", versatile: "V", "two-handed": "2H", "2h": "2H", ammunition: "A", loading: "LD"};
+		const mFilterProp = /property=([a-z;,\s]+)/i.exec(token);
+		let required = [];
+		if (mFilterProp) {
+			required = mFilterProp[1].split(/[;,]/).map(s => PROP_CODE[s.trim().toLowerCase()]).filter(Boolean);
+		} else if (/\bpropert(y|ies)\b/.test(t)) {
+			required = Object.entries(PROP_CODE).filter(([k]) => new RegExp(`\\b${k.replace(/-/g, "\\-")}\\b`).test(t)).map(([, v]) => v);
+		}
+		if (required.length) {
+			// Category gate (only enforce a category the token actually names).
+			if (/\bmartial\b/.test(t) && weapon.weaponCategory !== "martial") return false;
+			if (/\bsimple\b/.test(t) && weapon.weaponCategory !== "simple") return false;
+			// "or" (and a `{@filter}` property list) → any-of; an explicit "and" → all-of.
+			const requireAll = /\band\b/.test(t) && !/\bor\b/.test(t) && !mFilterProp;
+			return requireAll ? required.every(hasProp) : required.some(hasProp);
+		}
+
 		const wantsMelee = /\bmelee\b/.test(t);
 		const wantsRanged = /\branged\b/.test(t);
 		if (!wantsMelee && !wantsRanged) return false; // not a reach descriptor
@@ -35911,8 +35939,6 @@ class CharacterSheetState {
 		if (/\bmartial\b/.test(t) && weapon.weaponCategory !== "martial") return false;
 		if (/\bsimple\b/.test(t) && weapon.weaponCategory !== "simple") return false;
 
-		const props = weapon.property || weapon.properties || [];
-		const hasProp = (code) => props.some(p => p === code || (typeof p === "string" && p.startsWith(`${code}|`)));
 		const itemType = (weapon.type || "").split("|")[0];
 		// Reach: prefer an explicit melee/ranged item type; otherwise the Ammunition (A)
 		// property is a definitive ranged signal, and `isMelee === false` marks a
