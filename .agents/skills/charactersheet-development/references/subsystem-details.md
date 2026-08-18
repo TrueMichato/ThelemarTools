@@ -634,6 +634,19 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
   `charactersheet-modern.css` (darker in day, lighter in night); collapsing the chain to one
   token, or hardcoding an `rgba()` tint, reintroduces the bug.
   `CharacterSheetMaterialsContrast.test.js` reads the real tokens and guards every pair.
+- **The MC breakdown must never print raw property names.** `_BONUS_KEY_LABELS`,
+  `_ABILITY_KEY_LABELS` and `_SPEED_KEY_LABELS` translate them via `_labelKeys`; an unmapped
+  key falls through verbatim on purpose, because hiding it would make the detail line
+  unreconcilable with the count beside it.
+- **A dormant condensate affinity distinguishes reachable from unreachable.** If the item kind
+  can host the affinity's role it says "switch its role to claim it"; if it cannot — a
+  rootstone sword, authored for a protective layer a weapon has no slot for — it says the
+  affinity never applies. Never phrase an unreachable role as a condition the player could go
+  and satisfy.
+- ⚠️ **The MC headline modifier is `--overloaded` / `--suppressing`; the inventory badge's is
+  `--over` / `--suppress`.** They are different elements with different vocabularies, and
+  writing `.charsheet__mc-headline--over` (which matched nothing for as long as it existed)
+  is the exact mistake to avoid.
 - ⚠️ `addItem()` **stacks same-named items**, so a material applies to the whole stack.- **Elemental condensates** (`materialCategory: "condensate"`, 18 of them) are **role-gated**:
   the affinity's mechanics only fire while the material occupies its own role
   (`strikingSurface` / `protectiveLayer` / `focus`). Only weapons are ambiguous, so only

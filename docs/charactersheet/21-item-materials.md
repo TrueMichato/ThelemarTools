@@ -716,6 +716,33 @@ why the night chips failed.
 stylesheet and asserts AA for every state pair against both `--cs-bg-surface` and
 `--cs-bg-elevated` (the modal — the harder surface, and where the whole picker lives).
 
+### The breakdown speaks in game terms, not property names
+
+The Magic Capacity breakdown is shown to a player deciding what to strip off an overloaded
+item, and it was the one place 5etools' internal property names reached the screen —
+`bonusWeapon, bonusWeaponAttack` is not an answer to *what is filling my sword up*. Three
+maps on `CharacterSheetMaterials` translate them: `_BONUS_KEY_LABELS`, `_ABILITY_KEY_LABELS`
+and `_SPEED_KEY_LABELS`, applied through `_labelKeys`.
+
+An **unmapped** key falls through verbatim rather than being dropped. A leaked key is a bug
+worth seeing, and hiding it would make the detail line unreconcilable with the count printed
+beside it.
+
+### A dormant affinity says whether it is reachable
+
+A condensate's affinity applies only in the role it is authored for. Two situations look
+identical in the data and are completely different to a player:
+
+- **Reachable** — the item kind *can* host that role, so the affinity is one role switch
+  away. → *"…switch its role to claim it."*
+- **Unreachable** — the item kind has no such slot at all. A rootstone sword is authored for
+  a protective layer a weapon does not have. → *"Never applies on a weapon: it is written for
+  the item's protective layer, which a weapon cannot have."*
+
+The old copy said "Applies only while this material is the item's protective layer" in both
+cases, which reads as a condition the player could go and satisfy. On a weapon they cannot.
+The label reflects it too: `(dormant)` versus `(not available)`.
+
 ### Penetration is not auto-resolved
 
 The sheet tracks **no target AC**. Penetration therefore shows as `Pen N` on the attack row,
@@ -745,7 +772,7 @@ The crafting page is **unconditional** — it is a reference, not a rules engine
 NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetMaterials --no-coverage --forceExit
 ```
 
-`test/jest/charactersheet/CharacterSheetMaterials.test.js` — 164 tests over a hand-built
+`test/jest/charactersheet/CharacterSheetMaterials.test.js` — 201 tests over a hand-built
 material fixture: die ladder (including negative steps, clamping and off-ladder
 normalisation), tri-state axes, eligibility, weapon/armour/shield projection, weight and
 value, effect resolution, state integration, the preview rows, item-aware summaries, effect counting, Magic

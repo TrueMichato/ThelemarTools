@@ -935,7 +935,7 @@ class CharacterSheetMaterials {
 		];
 		for (const fam of families) {
 			const hit = fam.keys.filter(k => CharacterSheetMaterials._isMeaningfulBonus(item[k]));
-			if (hit.length) add(fam.label, 1, hit.join(", "));
+			if (hit.length) add(fam.label, 1, hit.map(k => CharacterSheetMaterials._BONUS_KEY_LABELS[k] || k).join(", "));
 		}
 
 		const spells = CharacterSheetMaterials._flattenAttachedSpells(item.attachedSpells);
@@ -948,8 +948,8 @@ class CharacterSheetMaterials {
 		].map(x => (typeof x === "string" ? x : x?.resist || x?.immune || "")).filter(Boolean);
 		add("Granted resistances/immunities", defences.length, defences.join(", "));
 
-		if (item.ability && Object.keys(item.ability).length) add("Ability score set/bonus", 1, Object.keys(item.ability).join(", "));
-		if (item.modifySpeed && Object.keys(item.modifySpeed).length) add("Speed alteration", 1);
+		if (item.ability && Object.keys(item.ability).length) add("Ability score set/bonus", 1, CharacterSheetMaterials._labelKeys(item.ability, CharacterSheetMaterials._ABILITY_KEY_LABELS));
+		if (item.modifySpeed && Object.keys(item.modifySpeed).length) add("Speed alteration", 1, CharacterSheetMaterials._labelKeys(item.modifySpeed, CharacterSheetMaterials._SPEED_KEY_LABELS));
 		if (item.curse) add("Cursed", 1);
 		if (item.sentient) add("Sentient", 1);
 
@@ -974,6 +974,54 @@ class CharacterSheetMaterials {
 		}
 
 		return {total: Math.max(0, total), breakdown};
+	}
+
+	/**
+	 * The Magic Capacity breakdown is shown to a player who is deciding whether to strip an
+	 * enchantment off an overloaded item. It is the one place these internal 5etools property
+	 * names would otherwise reach the screen — `bonusWeapon, bonusWeaponAttack` is not an
+	 * answer to "what is filling my sword up".
+	 */
+	static _BONUS_KEY_LABELS = {
+		bonusWeapon: "attack and damage",
+		bonusWeaponAttack: "attack rolls",
+		bonusWeaponDamage: "damage rolls",
+		bonusAc: "Armor Class",
+		bonusSpellAttack: "spell attack rolls",
+		bonusSpellSaveDc: "spell save DC",
+		bonusSavingThrow: "saving throws",
+		bonusSavingThrowConcentration: "concentration saves",
+		bonusAbilityCheck: "ability checks",
+		bonusProficiencyBonus: "proficiency bonus",
+	};
+
+	static _ABILITY_KEY_LABELS = {
+		str: "Strength",
+		dex: "Dexterity",
+		con: "Constitution",
+		int: "Intelligence",
+		wis: "Wisdom",
+		cha: "Charisma",
+	};
+
+	static _SPEED_KEY_LABELS = {
+		walk: "walking",
+		fly: "flying",
+		swim: "swimming",
+		climb: "climbing",
+		burrow: "burrowing",
+		equal: "matched to another speed",
+		multiply: "multiplied",
+		static: "set to a fixed value",
+	};
+
+	/**
+	 * Human labels for an object's keys, in the object's own order. An unmapped key falls
+	 * through verbatim rather than being dropped — a leaked key is a bug worth seeing, and
+	 * silently hiding it would make the tally unreconcilable with the count beside it.
+	 */
+	static _labelKeys (obj, labels) {
+		return Object.keys(obj || {}).map(k => labels[k] || k).join(", ");
 	}
 
 	/** A bonus counts only when it is present and non-zero; `"+0"` and `0` are inert. */
@@ -1181,11 +1229,21 @@ class CharacterSheetMaterials {
 		for (const act of fx.grantedActions) notes.push({label: act.name, description: Renderer.stripTags(act.note || ""), type: "active"});
 		if (fx.condensate?.affinity) {
 			const dormant = fx.condensate.isActive === false;
-			const roleLabel = CharacterSheetMaterials.ROLE_LABELS[fx.condensate.role] || fx.condensate.role;
+			const roleLabel = String(CharacterSheetMaterials.ROLE_LABELS[fx.condensate.role] || fx.condensate.role).toLowerCase();
+			// Two very different kinds of dormant. If this item kind *can* host the affinity's
+			// role, the player only has to switch the material's role over. If it cannot — a
+			// rootstone sword is authored for a protective layer a weapon does not have — then
+			// "applies only while…" reads as a condition they could go and satisfy, and they
+			// cannot. Say it is unreachable on this item rather than implying a path to it.
+			const reachable = CharacterSheetMaterials.getAvailableRoles(item, mat).includes(fx.condensate.role);
+			const kindLabel = {weapon: "a weapon", armor: "armor", shield: "a shield"}[CharacterSheetMaterials.getItemKind(item)] || "this item";
+			const why = reachable
+				? `Applies only while this material is the item's ${roleLabel} \u2014 switch its role to claim it.`
+				: `Never applies on ${kindLabel}: it is written for the item's ${roleLabel}, which ${kindLabel} cannot have.`;
 			notes.push({
-				label: `${mat.name} \u2014 Affinity${dormant ? " (dormant)" : ""}`,
+				label: `${mat.name} \u2014 Affinity${dormant ? (reachable ? " (dormant)" : " (not available)") : ""}`,
 				description: dormant
-					? `${Renderer.stripTags(fx.condensate.affinity)} \u2014 Applies only while this material is the item's ${String(roleLabel).toLowerCase()}.`
+					? `${Renderer.stripTags(fx.condensate.affinity)} \u2014 ${why}`
 					: Renderer.stripTags(fx.condensate.affinity),
 				type: dormant ? "note" : "passive",
 			});
@@ -1460,7 +1518,13 @@ class CharacterSheetMaterials {
 						${notes.length ? `<ul class="ve-small mt-1 mb-0">${notes.map(n => `<li><strong>${esc(n.label)}.</strong> ${esc(n.description)}</li>`).join("")}</ul>` : ""}
 						${mcHtml}
 						<div class="charsheet__material-detail-actions">
-							<button type="button" class="ve-btn ve-btn-xs ${isApplied ? "ve-btn-default" : "ve-btn-primary"} charsheet__material-apply" data-material-idx="${idx}" ${isApplied ? "disabled" : ""} aria-label="${isApplied ? `${esc(mat.name)} is already applied` : `Apply ${esc(mat.name)}`}">${isApplied ? "Applied" : "Apply"}</button>
+							${isApplied
+		// A disabled "Applied" button here would just repeat the pill on the row
+		// above it. The slot is better spent on the action a player who has
+		// already applied this material actually wants, and it puts Remove in
+		// context instead of only under the modal's close button.
+		? `<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__material-clear" aria-label="Remove ${esc(mat.name)} from ${esc(item.name)}">Remove material</button>`
+		: `<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__material-apply" data-material-idx="${idx}" aria-label="Apply ${esc(mat.name)}">Apply</button>`}
 						</div>
 					</div>
 				`});

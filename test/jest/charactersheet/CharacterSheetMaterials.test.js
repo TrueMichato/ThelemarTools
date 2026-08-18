@@ -781,9 +781,19 @@ describe("Item Materials", () => {
 
 	describe("getRiskFlag", () => {
 		const spec = (over) => ({
-			name: "X", source: "TGTT", materialCategory: "stone", density: 2, damage: 0, protection: 0,
-			critical: 0, penetration: 0, magicCapacity: 1, rarity: "common",
-			price: {gp: 0, unit: "lb", display: "—"}, appliesTo: ["weapon"], effects: [],
+			name: "X",
+			source: "TGTT",
+			materialCategory: "stone",
+			density: 2,
+			damage: 0,
+			protection: 0,
+			critical: 0,
+			penetration: 0,
+			magicCapacity: 1,
+			rarity: "common",
+			price: {gp: 0, unit: "lb", display: "—"},
+			appliesTo: ["weapon"],
+			effects: [],
 			degradation: over,
 		});
 
@@ -796,11 +806,14 @@ describe("Item Materials", () => {
 			// Collapsing the two would either cry wolf about Obsidian or under-sell Glass.
 			const destroys = CharacterSheetMaterials.getRiskFlag(spec({
 				trigger: {on: "attackRoll", natural: [1], alsoOnCriticalHit: true},
-				effect: {type: "destroy"}, destroys: true, repair: null,
+				effect: {type: "destroy"},
+				destroys: true,
+				repair: null,
 			}));
 			const degrades = CharacterSheetMaterials.getRiskFlag(spec({
 				trigger: {on: "attackRoll", natural: [1]},
-				effect: {type: "damageStepDelta", value: -1}, destroys: false,
+				effect: {type: "damageStepDelta", value: -1},
+				destroys: false,
 				repair: {method: "shortRest", tool: "mason's tools"},
 			}));
 			expect(destroys.tier).toBe("destroys");
@@ -817,7 +830,8 @@ describe("Item Materials", () => {
 
 			expect(CharacterSheetMaterials.getRiskFlag(spec({
 				trigger: {on: "damageTaken", damageType: "fire"},
-				effect: {type: "zeroAxes", axes: ["protection"]}, repair: {method: "manual"},
+				effect: {type: "zeroAxes", axes: ["protection"]},
+				repair: {method: "manual"},
 			})).trigger).toBe("when it takes fire damage");
 		});
 
@@ -924,6 +938,30 @@ describe("Item Materials", () => {
 
 		it("ignores inert zero bonuses", () => {
 			expect(CharacterSheetMaterials.countMagicalEffects({name: "Sword", bonusWeapon: "+0", bonusAc: 0}).total).toBe(0);
+		});
+
+		it("keeps internal property names out of the breakdown a player reads", () => {
+			// The breakdown is shown to someone deciding what to strip off an overloaded item.
+			// `bonusWeapon, bonusWeaponAttack` is not an answer to "what is filling my sword up".
+			const {breakdown} = CharacterSheetMaterials.countMagicalEffects({
+				name: "Longsword",
+				bonusWeapon: "+2",
+				bonusWeaponDamage: "+2",
+				ability: {str: {static: 19}},
+				modifySpeed: {equal: {fly: "walk"}},
+			});
+			const detail = l => breakdown.find(b => b.label === l).detail;
+			expect(detail("Weapon bonus")).toBe("attack and damage, damage rolls");
+			expect(detail("Ability score set/bonus")).toBe("Strength");
+			expect(detail("Speed alteration")).toBe("matched to another speed");
+			expect(breakdown.some(b => /bonus[A-Z]|\bstr\b/.test(b.detail || ""))).toBe(false);
+		});
+
+		it("shows an unmapped key rather than dropping it", () => {
+			// A leaked key is a bug worth seeing; hiding it would make the detail
+			// unreconcilable with the count printed beside it.
+			const {breakdown} = CharacterSheetMaterials.countMagicalEffects({name: "Idol", ability: {luck: {static: 19}}});
+			expect(breakdown.find(b => b.label === "Ability score set/bonus").detail).toBe("luck");
 		});
 
 		it("counts upgrades, gems, spells, defences and item flags", () => {
@@ -1290,6 +1328,30 @@ describe("Item Materials", () => {
 			const affinity = notes.find(n => n.label.includes("Affinity"));
 			expect(affinity.label).toContain("dormant");
 			expect(affinity.description).toContain("spellcasting focus");
+		});
+
+		it("tells a player who *can* reach the role how to reach it", () => {
+			// A weapon can host `focus`, so Smokestone's affinity is one role switch away.
+			const notes = CharacterSheetMaterials.getMaterialNotes(weapon, SMOKESTONE);
+			const affinity = notes.find(n => n.label.includes("Affinity"));
+			expect(affinity.description).toContain("switch its role to claim it");
+		});
+
+		it("does not dangle an unreachable affinity as if it were claimable", () => {
+			// Rootstone's real shape: authored for a protective layer, which a weapon has no
+			// slot for. "Applies only while…" would read as a condition the player could go
+			// and satisfy; they cannot, and the copy has to say so.
+			const ROOTSTONE = {
+				...SMOKESTONE,
+				name: "Rootstone",
+				roles: ["protectiveLayer"],
+				effects: [{type: "condensateAffinity", role: "protectiveLayer", text: "Roots grasp at attackers."}],
+			};
+			const notes = CharacterSheetMaterials.getMaterialNotes(weapon, ROOTSTONE);
+			const affinity = notes.find(n => n.label.includes("Affinity"));
+			expect(affinity.label).toContain("not available");
+			expect(affinity.description).toContain("Never applies on a weapon");
+			expect(affinity.description).not.toContain("switch its role");
 		});
 
 		it("ignores a stored role the item cannot host", () => {
