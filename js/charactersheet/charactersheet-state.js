@@ -13260,6 +13260,30 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * The material notes for one inventory item — the prose explaining what its material does,
+	 * preferring the brew's own authored wording over generated sentences.
+	 *
+	 * Shaped to match `getArmorUpgradeNotes()` so both can be rendered by one consumer. Takes an
+	 * item id rather than an item because the caller should never have to decide between the raw
+	 * inventory row and the projected item: this resolves the material against the raw row (which
+	 * is where `material` lives) and returns notes valid for either.
+	 *
+	 * @param {string} itemId
+	 * @returns {Array<{label: string, description: string, type: "passive"|"active"|"reactive"|"drawback"}>}
+	 */
+	getItemMaterialNotes (itemId) {
+		if (typeof CharacterSheetMaterials === "undefined") return [];
+		if (this._data.settings?.enableMaterials === false) return [];
+		const invItem = (this._data.inventory || []).find(it => (it.id || it.item?.id) === itemId);
+		if (!invItem) return [];
+		const item = invItem.item || invItem;
+		if (!item?.material?.name) return [];
+		const material = CharacterSheetMaterials.resolveMaterial(item, this._itemMaterialCatalog || []);
+		if (!material) return [];
+		return CharacterSheetMaterials.getMaterialNotes(item, material) || [];
+	}
+
+	/**
 	 * Get all armor upgrade notes for display in the AC/equipment area
 	 * @returns {Array<{label: string, description: string, type: string}>}
 	 */
@@ -31200,6 +31224,49 @@ class CharacterSheetState {
 					resourceMax: resource?.max ?? null,
 					isActive: !!item.itemPowerStates?.[power.id]?.active,
 					recharge: item.recharge || null,
+					isAvailable: !unavailableReason,
+					unavailableReason,
+				});
+			}
+
+			// --- Material-granted actions ---
+			// Read from the `_materialEffects` stamp that `applyToItem` already leaves on every
+			// projected item, so this inherits the projection's gating for free: the effect's own
+			// `appliesTo`, and condensate role-scoping (a Smokestone *weapon* is ordinary dense
+			// stone — only a Smokestone *focus* grants the smoke cloud).
+			for (const act of item._materialEffects?.grantedActions || []) {
+				const isActive = !!item.equipped && (!item.requiresAttunement || !!item.attuned);
+				if (activeOnly && !isActive) continue;
+				// No authored action cost means the effect rides on something the player is
+				// already doing — an extra attack, a contest on a hit. The sheet cannot resolve
+				// that from a button, so it is surfaced as an explicitly reference-only power
+				// rather than as a button that only pretends to do something.
+				const isReferenceOnly = !act.actionType;
+				const unavailableReason = !item.equipped
+					? "Equip this item to use its powers."
+					: item.requiresAttunement && !item.attuned
+						? "Attune to this item to use its powers."
+						: isReferenceOnly
+							? "Rules reference only; resolve this effect manually."
+							: null;
+				out.push({
+					id: act.id,
+					name: act.name,
+					actionType: act.actionType || "special",
+					kind: "ability",
+					description: act.note || "",
+					isReferenceOnly,
+					materialPower: true,
+					materialName: item._materialEntity?.name || null,
+					itemId: item.id,
+					itemName: item.name,
+					itemSource: item.source,
+					itemHoverData: item,
+					requiresEquipped: true,
+					chargesCurrent: item.chargesCurrent ?? item.charges ?? 0,
+					chargesMax: item.charges || 0,
+					usesCurrent: null,
+					isActive: !!item.itemPowerStates?.[act.id]?.active,
 					isAvailable: !unavailableReason,
 					unavailableReason,
 				});

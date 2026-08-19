@@ -176,7 +176,7 @@ class CharacterSheetMaterials {
 		noRangedDisadvantageInMelee: {consumer: "reference", note: "The sheet has no positional model, so it never imposes the disadvantage this would suppress."},
 
 		// --- power: surfaces in the Actions hub ---
-		grantsAction: {consumer: "power", note: "Becomes an item power."},
+		grantsAction: {consumer: "power", note: "Becomes an item power in the Actions hub; activatable when the author declared an `actionType`, reference-only otherwise. A `requiresProperty` gate removes it entirely."},
 		condensateAffinity: {consumer: "power", note: "Becomes an item power; reference-only when it is a table call."},
 		condensateInstability: {consumer: "power", note: "Offered on its trigger, never auto-applied."},
 
@@ -501,9 +501,25 @@ class CharacterSheetMaterials {
 					});
 					break;
 
-				case "grantsAction":
-					out.grantedActions.push({name: fx.name || material.name, actionType: fx.actionType || null, note: fx.note || null});
+				case "grantsAction": {
+					// `requiresProperty` is a HARD gate, not an availability message: a stout
+					// blackwood dagger does not have an unavailable Shove, it simply never had
+					// one. Filtering here means every downstream reader inherits the gate.
+					if (fx.requiresProperty && !CharacterSheetMaterials._hasProperty(item, fx.requiresProperty)) break;
+					const name = fx.name || material.name;
+					out.grantedActions.push({
+						id: `mat:${String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`,
+						name,
+						// An authored `actionType` is the author's declaration that this costs a
+						// discrete action, and is therefore the signal that it can be ACTIVATED.
+						// Without one the effect is a rider on something the player is already
+						// doing (an extra attack, a contest on a hit) and is reference-only.
+						actionType: fx.actionType || null,
+						requiresProperty: fx.requiresProperty || null,
+						note: fx.note || null,
+					});
 					break;
+				}
 
 				case "condensateAffinity":
 					out.condensate = {
@@ -901,7 +917,11 @@ class CharacterSheetMaterials {
 	 */
 	static _hasProperty (item, abv) {
 		const props = Array.isArray(item?.property) ? item.property : [];
-		return props.some(p => String(p).split("|")[0].toUpperCase() === String(abv).toUpperCase());
+		const want = String(abv).toUpperCase();
+		// Properties appear in two shapes across 5etools data: the bare `"2H"` / `"2H|XPHB"`
+		// string, and the newer `{uid: "2H|XPHB"}` object. `String(obj)` on the latter yields
+		// "[object Object]", so unwrapping `uid` first is what keeps the object form working.
+		return props.some(p => String(p?.uid ?? p).split("|")[0].toUpperCase() === want);
 	}
 
 	// ==========================================
