@@ -42614,6 +42614,12 @@
 					"text": "When an attack hits its wearer, the wearer can take a Reaction to move 5 feet without provoking Opportunity Attacks."
 				},
 				{
+					"type": "grantsAction",
+					"name": "Tideglass Slip",
+					"actionType": "reaction",
+					"note": "When an attack hits you, move 5 feet without provoking Opportunity Attacks."
+				},
+				{
 					"type": "condensateInstability",
 					"text": "Cold damage suppresses this movement until the end of the wearer's next turn."
 				}
@@ -42971,6 +42977,11 @@
 					"text": "Once per day, touching Mineralite to a damaged nonmagical object for 1 minute repairs a break or tear no larger than 1 foot in any dimension."
 				},
 				{
+					"type": "grantsAction",
+					"name": "Mineralite Mending",
+					"note": "Once per day, touch Mineralite to a damaged nonmagical object for 1 minute to repair a break or tear no larger than 1 foot in any dimension."
+				},
+				{
 					"type": "condensateInstability",
 					"text": "Magical interference doubles the item's weight until one of its magical effects is removed."
 				}
@@ -43021,6 +43032,12 @@
 					"type": "condensateAffinity",
 					"role": "focus",
 					"text": "Its user gains a +1 bonus to Initiative and can take a Reaction immediately after being hit to move up to 10 feet without provoking Opportunity Attacks."
+				},
+				{
+					"type": "grantsAction",
+					"name": "Stormprism Surge",
+					"actionType": "reaction",
+					"note": "Immediately after being hit, move up to 10 feet without provoking Opportunity Attacks."
 				},
 				{
 					"type": "bonusInitiative",
@@ -43129,6 +43146,12 @@
 					"type": "condensateAffinity",
 					"role": "focus",
 					"text": "Sunprism sheds bright light in a 20-foot radius and dim light for a further 20 feet on command. As a Magic action, its user can outline {@condition invisible} creatures and objects in the bright light until the start of the user's next turn."
+				},
+				{
+					"type": "grantsAction",
+					"name": "Sunprism Outline",
+					"actionType": "action",
+					"note": "Outline {@condition invisible} creatures and objects in the bright light until the start of your next turn."
 				},
 				{
 					"type": "condensateInstability",
@@ -43255,6 +43278,12 @@
 					"text": "On command, a Voidglass item produces no sound and grants Advantage on Dexterity ({@skill Stealth}) checks that depend on moving quietly."
 				},
 				{
+					"type": "checkAdvantage",
+					"skill": "stealth",
+					"conditional": "on checks that depend on moving quietly",
+					"note": "On command, a Voidglass item produces no sound."
+				},
+				{
 					"type": "condensateInstability",
 					"text": "While this property is active, its user cannot speak or provide Verbal spell components."
 				}
@@ -43357,6 +43386,12 @@
 					"type": "condensateAffinity",
 					"role": "focus",
 					"text": "Ashglass can extinguish a nonmagical flame no larger than a 5-foot Cube by touch. When its user takes fire damage, they can take a Reaction to gain Resistance to that instance of damage; the glass then becomes inert until the next Long Rest."
+				},
+				{
+					"type": "grantsAction",
+					"name": "Ashglass Ward",
+					"actionType": "reaction",
+					"note": "When you take fire damage, gain Resistance to that instance of damage. The glass then becomes inert until the next Long Rest."
 				},
 				{
 					"type": "condensateInstability",
@@ -43463,6 +43498,11 @@
 					"type": "condensateAffinity",
 					"role": "strikingSurface",
 					"text": "When a living creature dies within 10 feet, Deathglass can hold one death charge for 24 hours. A weapon or focus made from it can expend that charge to deal an extra {@damage 2d6} necrotic damage to one target damaged by it."
+				},
+				{
+					"type": "grantsAction",
+					"name": "Deathglass Charge",
+					"note": "Expend a stored death charge to deal an extra {@damage 2d6} necrotic damage to one target damaged by this item. A charge is held for 24 hours when a living creature dies within 10 feet."
 				},
 				{
 					"type": "condensateInstability",

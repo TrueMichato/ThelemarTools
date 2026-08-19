@@ -13424,7 +13424,13 @@ class CharacterSheetState {
 				this._data.namedModifiers.push({
 					id: CryptUtil.uid(),
 					name: `${material.name}${mod.schools?.length ? ` (${mod.schools.join(", ")})` : ""}`,
-					type: mod.kind === "save" ? "save" : "check",
+					// A skill-scoped check advantage narrows to that skill; without a scope it
+					// stays the blanket ability-check advantage this bridge has always emitted.
+					type: mod.kind === "save"
+						? "save"
+						: mod.skill
+							? `skill:${String(mod.skill).toLowerCase()}`
+							: "check",
 					value: 0,
 					advantage: true,
 					conditional: mod.conditional || material.name,
@@ -13489,6 +13495,29 @@ class CharacterSheetState {
 	 * Whether a material's armour-scoped damage reduction applies to the item carrying it.
 	 * @private
 	 */
+	/**
+	 * Turn a condensate role key into player-facing words.
+	 *
+	 * The roles are authored as camelCase keys (`strikingSurface`, `protectiveLayer`, `focus`),
+	 * and a dormant-affinity message is the one place they escape into a sentence a player
+	 * reads. "this item uses it as strikingSurface" is not a sentence.
+	 *
+	 * @param {string|null} role
+	 * @param {{article?: boolean}} [opts] prefix with "a"/"an" for mid-sentence use
+	 * @returns {string}
+	 */
+	static _formatMaterialRole (role, {article = false} = {}) {
+		const LABELS = {
+			strikingSurface: "striking surface",
+			protectiveLayer: "protective layer",
+			focus: "focus",
+		};
+		if (!role) return article ? "something else" : "another";
+		const label = LABELS[role] || String(role).replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+		if (!article) return label;
+		return `${/^[aeiou]/i.test(label) ? "an" : "a"} ${label}`;
+	}
+
 	static _materialDamageReductionApplies (item, armorType) {
 		const type = (item?.type || "").split("|")[0].toUpperCase();
 		switch (armorType) {
@@ -31270,6 +31299,59 @@ class CharacterSheetState {
 					isAvailable: !unavailableReason,
 					unavailableReason,
 				});
+			}
+
+			// --- Condensate affinity reference card ---
+			// A condensate's affinity is the whole statement of what the substance does, and
+			// half of it is never mechanizable (Emberglass "kindles dry material touched to it
+			// for a minute"). It is surfaced as an explicitly reference-only power so the rule
+			// is one click from the character rather than buried in the item modal.
+			//
+			// The important part is the DORMANT case. An affinity is scoped to one role, so a
+			// Smokestone mace has no smoke cloud — and until now the sheet showed that by
+			// showing nothing at all, which is indistinguishable from the material being
+			// broken. The card is emitted either way and says which it is.
+			const condensate = item._materialEffects?.condensate;
+			if (condensate?.affinity) {
+				const isActive = !!item.equipped && (!item.requiresAttunement || !!item.attuned);
+				if (!activeOnly || isActive) {
+					const materialName = item._materialEntity?.name || "Condensate";
+					const isDormant = condensate.isActive === false;
+					out.push({
+						id: "mat:affinity",
+						name: `${materialName} Affinity`,
+						actionType: "special",
+						kind: "ability",
+						description: condensate.affinity,
+						isReferenceOnly: true,
+						materialPower: true,
+						materialAffinity: true,
+						materialName,
+						affinityRole: condensate.role || null,
+						affinityActiveRole: condensate.activeRole || null,
+						isDormant,
+						itemId: item.id,
+						itemName: item.name,
+						itemSource: item.source,
+						itemHoverData: item,
+						requiresEquipped: true,
+						chargesCurrent: 0,
+						chargesMax: 0,
+						usesCurrent: null,
+						isActive: false,
+						isAvailable: false,
+						// Dormancy is the more useful thing to say, so it wins over the generic
+						// equip prompt: a Smokestone mace will never have the cloud however you
+						// hold it, and telling the player to equip it harder would be a lie.
+						unavailableReason: isDormant
+							? `Dormant: this affinity needs the ${CharacterSheetState._formatMaterialRole(condensate.role)} role, and this item uses it as ${CharacterSheetState._formatMaterialRole(condensate.activeRole, {article: true})}.`
+							: !item.equipped
+								? "Equip this item to use its powers."
+								: item.requiresAttunement && !item.attuned
+									? "Attune to this item to use its powers."
+									: "Rules reference only; resolve this effect manually.",
+					});
+				}
 			}
 		}
 		for (const effect of this.getGemstoneEffects({activeOnly: false})) {

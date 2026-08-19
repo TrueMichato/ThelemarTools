@@ -496,6 +496,11 @@ class CharacterSheetMaterials {
 				case "checkAdvantage":
 					out.conditionalModifiers.push({
 						kind: fx.type === "saveAdvantage" ? "save" : "check",
+						// A skill scope narrows the advantage from "every ability check" to one
+						// skill — Voidglass grants it on Stealth, not on Arcana. Without this the
+						// only expressible advantage is a blanket one, which is wrong more often
+						// than it is right.
+						skill: fx.skill || null,
 						conditional: fx.conditional || null,
 						schools: fx.schools || null,
 					});
