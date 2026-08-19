@@ -30186,6 +30186,69 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Carried items whose material bites its CARRIER on this trigger.
+	 *
+	 * The deliberate sibling of `getDegradationCandidates`, which finds items that hurt
+	 * THEMSELVES. Same trigger shapes, same narrowing rules: `opts.itemId` scopes an attack
+	 * roll to the weapon actually swung, while a `damageTaken` trigger sweeps everything
+	 * carried, because Magmaheart contracts wherever you are keeping it.
+	 *
+	 * Gated on the degradation setting: both are the same opt-in "materials can hurt you"
+	 * behaviour, and a table that turned one off did not ask for the other.
+	 *
+	 * @param {object} trigger `{type, natural, isCrit, damageType}`
+	 * @param {object} [opts] `{itemId}`
+	 * @returns {Array<{id: string, name: string, material: object, spec: object}>}
+	 */
+	getInstabilityCandidates (trigger, opts = {}) {
+		if (typeof CharacterSheetMaterials === "undefined") return [];
+		if (!this.isMaterialDegradationEnabled()) return [];
+
+		const rows = opts.itemId
+			? this._data.inventory.filter(i => i.id === opts.itemId)
+			: this._data.inventory;
+
+		const out = [];
+		for (const invItem of rows) {
+			if (!invItem.item?.material) continue;
+			if (invItem.item.material.isDestroyed) continue;
+			const mat = this.getItemMaterialEntity(invItem.item);
+			if (!mat) continue;
+			if (!CharacterSheetMaterials.isInstabilityTriggered(mat, trigger)) continue;
+			out.push({
+				id: invItem.id,
+				name: invItem.item.name,
+				material: mat,
+				spec: CharacterSheetMaterials.getInstabilitySpec(mat),
+			});
+		}
+		return out;
+	}
+
+	/**
+	 * Damage types that would change something if the player named them — the union of every
+	 * carried material's reactive triggers.
+	 *
+	 * The sheet's Damage button only asks "what type?" when the character has a resistance,
+	 * immunity or vulnerability. That made Rimeglass and Magmaheart unreachable for anyone
+	 * without one, since their triggers are the only thing that cared. This lets the prompt ask
+	 * whenever the answer can matter.
+	 *
+	 * @returns {Array<string>}
+	 */
+	getMaterialReactiveDamageTypes () {
+		if (typeof CharacterSheetMaterials === "undefined") return [];
+		if (!this.isMaterialDegradationEnabled()) return [];
+		const out = [];
+		for (const invItem of this._data.inventory || []) {
+			if (!invItem.item?.material || invItem.item.material.isDestroyed) continue;
+			const mat = this.getItemMaterialEntity(invItem.item);
+			if (mat) out.push(...CharacterSheetMaterials.getReactiveDamageTypes(mat));
+		}
+		return [...new Set(out)];
+	}
+
+	/**
 	 * Record one degradation event against an item.
 	 *
 	 * Always an explicit call — the combat hook prompts first, because whether a

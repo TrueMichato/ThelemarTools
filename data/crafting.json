@@ -91160,6 +91160,18 @@
 					"text": "Cold damage makes it contract explosively, dealing {@damage 1d6} force damage to the creature carrying it."
 				}
 			],
+			"instability": {
+				"trigger": {
+					"on": "damageTaken",
+					"damageType": "cold"
+				},
+				"effect": {
+					"type": "selfDamage",
+					"damage": "1d6",
+					"damageType": "force"
+				},
+				"note": "Cold damage makes it contract explosively, dealing {@damage 1d6} force damage to the creature carrying it."
+			},
 			"entries": [
 				"{@b Affinity.} After a Magmaheart weapon hits a creature wearing manufactured armor, the next attack against that creature before the start of the user's next turn gains a +1 bonus.",
 				"{@b Instability.} Cold damage makes it contract explosively, dealing 1d6 Force damage to the creature carrying it."
@@ -92208,6 +92220,19 @@
 					"text": "When it takes thunder damage, a creature holding or wearing it must succeed on a {@dc 13} Strength saving throw or be pushed 10 feet."
 				}
 			],
+			"instability": {
+				"trigger": {
+					"on": "damageTaken",
+					"damageType": "thunder"
+				},
+				"effect": {
+					"type": "save",
+					"ability": "str",
+					"dc": 13,
+					"onFail": "pushed 10 feet"
+				},
+				"note": "When it takes thunder damage, a creature holding or wearing it must succeed on a {@dc 13} Strength saving throw or be pushed 10 feet."
+			},
 			"entries": [
 				"{@b Affinity.} Equipment made primarily from Skyshard weighs one quarter as much, and a Skyshard weapon's normal and long thrown ranges increase by 20 feet.",
 				"{@b Instability.} When it takes Thunder damage, a creature holding or wearing it must succeed on a DC 13 Strength saving throw or be pushed 10 feet."
@@ -92509,6 +92534,20 @@
 					"text": "On a natural 1 involving the item, its user takes {@damage 1d6} lightning damage."
 				}
 			],
+			"instability": {
+				"trigger": {
+					"on": "attackRoll",
+					"natural": [
+						1
+					]
+				},
+				"effect": {
+					"type": "selfDamage",
+					"damage": "1d6",
+					"damageType": "lightning"
+				},
+				"note": "On a natural 1 involving the item, its user takes {@damage 1d6} lightning damage."
+			},
 			"entries": [
 				"{@b Affinity.} Its user gains a +1 bonus to Initiative and can take a Reaction immediately after being hit to move up to 10 feet without provoking Opportunity Attacks.",
 				"{@b Instability.} On a natural 1 involving the item, its user takes 1d6 Lightning damage."
@@ -92749,6 +92788,20 @@
 					"text": "On a natural 1 attack roll, its user takes {@damage 1d4} acid damage."
 				}
 			],
+			"instability": {
+				"trigger": {
+					"on": "attackRoll",
+					"natural": [
+						1
+					]
+				},
+				"effect": {
+					"type": "selfDamage",
+					"damage": "1d4",
+					"damageType": "acid"
+				},
+				"note": "On a natural 1 attack roll, its user takes {@damage 1d4} acid damage."
+			},
 			"entries": [
 				"{@b Affinity.} Vitriol Crystal repairs its own mundane damage during a Long Rest. A weapon made from it can deal Acid damage instead of its normal type.",
 				"{@b Instability.} On a natural 1 attack roll, its user takes 1d4 Acid damage."

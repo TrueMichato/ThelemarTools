@@ -765,9 +765,61 @@ class CharacterSheetMaterials {
 	 * `trigger` is `{type: "attackRoll", natural, isCrit}` or `{type: "damageTaken", damageType}`.
 	 */
 	static isDegradationTriggered (material, trigger) {
-		const spec = CharacterSheetMaterials.getDegradationSpec(material);
-		if (!spec || !trigger) return false;
-		const t = spec.trigger || {};
+		return CharacterSheetMaterials._matchesTrigger(
+			CharacterSheetMaterials.getDegradationSpec(material)?.trigger,
+			trigger,
+		);
+	}
+
+	/* ------------------------------------------------------------------
+	 * Instability backlash
+	 *
+	 * A condensate's instability is the price of its affinity, and some of them bite the
+	 * carrier: Vitriol Crystal burns you on a natural 1, Magmaheart contracts explosively when
+	 * chilled. Those were authored only as `condensateInstability` prose, which no roll ever
+	 * read.
+	 *
+	 * The `instability` block is a deliberate sibling of `degradation`: identical trigger
+	 * vocabulary, matched by the same function, and offered rather than applied — a fumble
+	 * bites you only if the table says it did. What differs is the effect, because degradation
+	 * damages the ITEM and backlash damages the CARRIER.
+	 * ------------------------------------------------------------------ */
+
+	/** The authored `instability` block, or `null` when the material has no backlash. */
+	static getInstabilitySpec (material) {
+		const spec = material?.instability;
+		return spec && typeof spec === "object" ? spec : null;
+	}
+
+	/** Would `trigger` cause this material to bite its carrier? Same trigger shapes as degradation. */
+	static isInstabilityTriggered (material, trigger) {
+		return CharacterSheetMaterials._matchesTrigger(
+			CharacterSheetMaterials.getInstabilitySpec(material)?.trigger,
+			trigger,
+		);
+	}
+
+	/**
+	 * Damage types a material reacts to, so a caller can ask which type was dealt only when
+	 * the answer can actually change something.
+	 * @returns {Array<string>}
+	 */
+	static getReactiveDamageTypes (material) {
+		const out = [];
+		for (const spec of [CharacterSheetMaterials.getDegradationSpec(material), CharacterSheetMaterials.getInstabilitySpec(material)]) {
+			const t = spec?.trigger;
+			if (t?.on === "damageTaken" && t.damageType) out.push(String(t.damageType).toLowerCase());
+		}
+		return [...new Set(out)];
+	}
+
+	/**
+	 * The one trigger matcher, shared by degradation and instability so the two can never
+	 * drift into disagreeing about what a natural 1 is.
+	 * @private
+	 */
+	static _matchesTrigger (t, trigger) {
+		if (!t || !trigger) return false;
 
 		if (t.on === "attackRoll") {
 			if (trigger.type !== "attackRoll") return false;

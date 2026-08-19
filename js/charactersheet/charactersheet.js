@@ -12465,6 +12465,10 @@ class CharacterSheetPage {
 			...(this._state.getResistances?.() || []),
 			...(this._state.getImmunities?.() || []),
 			...(this._state.getVulnerabilities?.() || []),
+			// Materials that react to a damage type care about the answer too. Without this
+			// the prompt never appeared for a character with no defenses, so Rimeglass's
+			// authored fire degradation and Magmaheart's cold backlash could never fire.
+			...(this._state.getMaterialReactiveDamageTypes?.() || []),
 		];
 		if (defended.length) {
 			const NONE = "Untyped / no defense";
@@ -12495,9 +12499,50 @@ class CharacterSheetPage {
 		// Offer any drop-to-0 intervention the character has (Strength of the Grave, …).
 		await this._pOfferZeroHpIntervention();
 
+		// Materials that react to being damaged. Until now `damageTaken` was matched by
+		// `isDegradationTriggered` but never fired by anything, so every authored
+		// damage-triggered material block — Rimeglass's fire degradation included — was dead.
+		await this._pOfferMaterialDamageReactions(damageType);
+
 		// Prompt for concentration check if concentrating
 		if (this._state.isConcentrating?.()) {
 			await this._promptConcentrationCheck(preview.damage);
+		}
+	}
+
+	/**
+	 * Offer the material reactions that firing damage of this type provokes: items that
+	 * degrade, and items whose instability bites their carrier.
+	 *
+	 * Reuses the same offer-never-apply handlers the attack path uses, so a material behaves
+	 * identically whether it was provoked by a fumble or by a bucket of cold water.
+	 *
+	 * @param {string|null} damageType
+	 */
+	async _pOfferMaterialDamageReactions (damageType) {
+		if (!damageType) return;
+		const trigger = {type: "damageTaken", damageType};
+
+		const unstable = this._state.getInstabilityCandidates?.(trigger) || [];
+		if (unstable.length) await this._combat?.pResolveMaterialInstability?.(unstable);
+
+		const degrading = this._state.getDegradationCandidates?.(trigger) || [];
+		for (const cand of degrading) {
+			const spec = CharacterSheetMaterials.getDegradationSpec(cand.material);
+			const isConfirm = await InputUiUtil.pGetUserBoolean({
+				title: spec?.destroys ? "Material Shatters" : "Material Degrades",
+				htmlDescription: `<div><b>${cand.name}</b> (${cand.material.name}) ${spec?.destroys ? "shatters" : "degrades"} from the ${damageType} damage.</div><div class="ve-muted ve-small mt-1">${Renderer.stripTags(spec?.note || "")}</div><div class="mt-2">Apply it?</div>`,
+				textYes: "Apply",
+				textNo: "Skip",
+			});
+			if (!isConfirm) continue;
+
+			const status = this._state.degradeItemMaterial(cand.id);
+			const summary = status?.isDestroyed
+				? "Destroyed"
+				: CharacterSheetMaterials.getDegradationSummary(this._state.getItemRaw(cand.id), cand.material);
+			JqueryUtil.doToast({type: "warning", content: `${cand.name}: ${summary}`});
+			this.renderCharacter?.();
 		}
 	}
 

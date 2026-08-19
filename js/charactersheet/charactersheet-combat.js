@@ -1890,6 +1890,15 @@ class CharacterSheetCombat {
 					&& this._getDegradationCandidates(ctx).length > 0,
 				handler: (ctx) => this._pOfferMaterialDegradation(ctx),
 			},
+			{
+				// Material instability backlash (Vitriol Crystal, Stormprism, …). The sibling
+				// of degradation: that one hurts the ITEM, this one hurts the CARRIER. Also
+				// data-driven off an authored block, also only ever offered.
+				id: "materialInstability",
+				predicate: (ctx) => !ctx.attack?.isSpell
+					&& this._getInstabilityCandidates(ctx).length > 0,
+				handler: (ctx) => this._pOfferMaterialInstability(ctx),
+			},
 		];
 	}
 
@@ -1937,6 +1946,75 @@ class CharacterSheetCombat {
 				type: "warning",
 				content: `${cand.name}: ${summary}${status?.repair?.method === "shortRest" ? " — repairable on a Short Rest" : ""}`,
 			});
+			this._page.renderCharacter?.();
+		}
+	}
+
+	/**
+	 * Carried items whose material bites the carrier on this attack roll.
+	 * @param {object} ctx Post-attack context.
+	 */
+	_getInstabilityCandidates (ctx) {
+		if (!this._state.getInstabilityCandidates) return [];
+		const itemId = ctx.attack?.sourceItem?.id;
+		if (!itemId) return [];
+		return this._state.getInstabilityCandidates(
+			{type: "attackRoll", natural: ctx.rollResult?.roll, isCrit: ctx.isCrit},
+			{itemId},
+		);
+	}
+
+	/**
+	 * Offer the backlash from an unstable material after a fumble.
+	 * @param {object} ctx Post-attack context.
+	 */
+	async _pOfferMaterialInstability (ctx) {
+		await this.pResolveMaterialInstability(this._getInstabilityCandidates(ctx));
+	}
+
+	/**
+	 * Offer, then resolve, each instability that fired.
+	 *
+	 * Public because the trigger is not always an attack: `damageTaken` instabilities are
+	 * offered from the sheet's Damage flow. Both callers hand in candidates and get the same
+	 * confirm-then-apply treatment, so a Magmaheart chill and a Vitriol fumble read alike.
+	 *
+	 * Self-damage routes through `takeDamage`, so the carrier's own resistances apply — being
+	 * fire-immune should protect you from your own scabbard too.
+	 *
+	 * @param {Array<{id, name, material, spec}>} candidates
+	 */
+	async pResolveMaterialInstability (candidates) {
+		if (!candidates?.length) return;
+
+		for (const cand of candidates) {
+			const effect = cand.spec?.effect || {};
+			const isDamage = effect.type === "selfDamage";
+			const what = isDamage
+				? `<b>${cand.name}</b> (${cand.material.name}) lashes back for ${effect.damage} ${effect.damageType} damage.`
+				: `<b>${cand.name}</b> (${cand.material.name}) destabilises.`;
+
+			const isConfirm = await InputUiUtil.pGetUserBoolean({
+				title: "Material Instability",
+				htmlDescription: `<div>${what}</div><div class="ve-muted ve-small mt-1">${Renderer.stripTags(cand.spec?.note || "")}</div><div class="mt-2">Apply it?</div>`,
+				textYes: "Apply",
+				textNo: "Skip",
+			});
+			if (!isConfirm) continue;
+
+			if (isDamage) {
+				const roll = await Renderer.dice.pRoll2(effect.damage, {isUser: false, name: `${cand.material.name} backlash`}, {isResultUsed: true});
+				const amount = Math.max(0, Number(roll) || 0);
+				this._state.takeDamage(amount, {damageType: effect.damageType});
+				JqueryUtil.doToast({type: "warning", content: `${cand.material.name}: ${amount} ${effect.damageType} damage to you`});
+			} else if (effect.type === "save") {
+				const abil = Parser.attAbvToFull?.(effect.ability) || String(effect.ability || "").toUpperCase();
+				JqueryUtil.doToast({
+					type: "warning",
+					content: `${cand.material.name}: DC ${effect.dc} ${abil} saving throw${effect.onFail ? ` or ${effect.onFail}` : ""}`,
+				});
+			}
+
 			this._page.renderCharacter?.();
 		}
 	}
