@@ -108,6 +108,75 @@ class CharacterSheetMaterials {
 		},
 	};
 
+	/**
+	 * How each effect type reaches the player. This registry is the contract between
+	 * AUTHORING (the brew declares `effects[].type`) and CONSUMPTION (something in the
+	 * sheet acts on it).
+	 *
+	 * Without it, an effect can be authored, normalised by {@link getMaterialEffects},
+	 * rendered as a tidy sentence by {@link getMaterialNotes} — and do nothing at all,
+	 * silently and forever. There was no way to tell "deliberately narrative" apart from
+	 * "someone forgot to wire it up". `CharacterSheetMaterialEffectHandling.test.js` walks
+	 * every material in the brew and fails on any type missing from this table, so the gap
+	 * is now a test failure rather than a bug report.
+	 *
+	 * `consumer` values:
+	 * - `projection`  — `applyToItem` bakes it into the derived item.
+	 * - `modifier`    — reaches a derived stat (speed, initiative, named modifiers, resistances).
+	 * - `power`       — surfaces as an item power in the Actions hub.
+	 * - `roll`        — read by the attack/damage roll path.
+	 * - `reference`   — DELIBERATELY not automated; it is a table call. Must still be visible.
+	 */
+	static EFFECT_HANDLING = {
+		// --- projection: baked into the derived item ---
+		bonusAc: {consumer: "projection", note: "Folded into the item's AC bonus."},
+		bonusWeaponAttack: {consumer: "projection", note: "Folded into the weapon's attack bonus."},
+		bonusWeaponDamage: {consumer: "projection", note: "Folded into the weapon's damage bonus."},
+		addProperty: {consumer: "projection", note: "Adds weapon properties."},
+		removeProperty: {consumer: "projection", note: "Removes weapon properties."},
+		propertyLadder: {consumer: "projection", note: "Steps a property up its ladder."},
+		armorForceHeavy: {consumer: "projection", note: "Forces the armour to Heavy."},
+		armorStealthDisadvantage: {consumer: "projection", note: "Imposes Stealth disadvantage."},
+		armorNoStealthDisadvantage: {consumer: "projection", note: "Removes Stealth disadvantage."},
+		armorNoStrengthRequirement: {consumer: "projection", note: "Drops the Strength requirement."},
+		armorStrengthRequirementDelta: {consumer: "projection", note: "Adjusts the Strength requirement."},
+		armorDexCapDelta: {consumer: "projection", note: "Adjusts the Dex cap."},
+		rangeMultiplier: {consumer: "projection", note: "Multiplies weapon range."},
+		thrownRangeDelta: {consumer: "projection", note: "Adjusts thrown range."},
+		doubleNumericProperties: {consumer: "projection", note: "Doubles the item's numeric ratings."},
+		penetrationIgnoresMagicalAc: {consumer: "projection", note: "Penetration applies against magical AC."},
+
+		// --- modifier: reaches a derived stat ---
+		bonusInitiative: {consumer: "modifier", note: "getInitiativeBonuses() → getInitiative()."},
+		speedDelta: {consumer: "modifier", note: "getMaterialSpeedBonus() → getSpeed()/getSpeedByType()."},
+		saveAdvantage: {consumer: "modifier", note: "Conditional named modifier on saves."},
+		checkAdvantage: {consumer: "modifier", note: "Conditional named modifier on checks."},
+		damageReduction: {consumer: "modifier", note: "Named modifier of type damageReduction."},
+		resistance: {consumer: "modifier", note: "Added to derived resistances."},
+		immunity: {consumer: "modifier", note: "Added to derived immunities."},
+		perceptionPenaltyToNotice: {consumer: "modifier", note: "Derived, DM-facing: penalty to OTHERS' passive Perception to notice the wearer."},
+		spellcastingFocus: {consumer: "modifier", note: "Makes the item eligible as a spellcasting focus."},
+		draconicResonanceSlot: {consumer: "modifier", note: "Grants draconic resonance slots."},
+
+		// --- roll: read by the attack/damage path ---
+		countsAsMagical: {consumer: "roll", note: "Weapon tag; overcomes non-magical resistance."},
+		countsAsSilvered: {consumer: "roll", note: "Weapon tag; overcomes silver-vulnerable resistance."},
+		overrideDamageType: {consumer: "roll", note: "Offered as a damage-type choice at roll time."},
+		bonusCritDamage: {consumer: "roll", note: "Extra dice on a critical hit."},
+		extraDamageDiceVsType: {consumer: "roll", note: "Extra dice against a creature type."},
+		noRangedDisadvantageInMelee: {consumer: "roll", note: "Suppresses the melee-range ranged disadvantage."},
+
+		// --- power: surfaces in the Actions hub ---
+		grantsAction: {consumer: "power", note: "Becomes an item power."},
+		condensateAffinity: {consumer: "power", note: "Becomes an item power; reference-only when it is a table call."},
+		condensateInstability: {consumer: "power", note: "Offered on its trigger, never auto-applied."},
+
+		// --- reference: deliberately a table call ---
+		indestructible: {consumer: "reference", note: "Whether an effect could damage the item is a DM call."},
+		armorWearableUnderClothing: {consumer: "reference", note: "Concealment is a fiction/social question, not a stat."},
+		note: {consumer: "reference", note: "Free prose the author attached to the material."},
+	};
+
 	static ROLE_LABELS = {
 		strikingSurface: "Striking surface",
 		protectiveLayer: "Protective layer",
@@ -435,7 +504,9 @@ class CharacterSheetMaterials {
 						activeRole: isRoleScoped ? CharacterSheetMaterials.getActiveRole(item, material) : null,
 						isActive: affinityActive,
 					};
-					break;				case "condensateInstability":
+					break;
+
+				case "condensateInstability":
 					out.condensate = {...(out.condensate || {}), instability: fx.text};
 					break;
 

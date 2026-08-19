@@ -12521,8 +12521,15 @@ class CharacterSheetState {
 			if (halfProf !== 0) components.push({type: "proficiency", name: "Jack of All Trades", value: halfProf, icon: "🃏", isCanonical: true});
 		}
 
-		for (const bonus of this._getFeatureInitiativeBonuses()) {
-			components.push({type: "feature", name: bonus.name, value: bonus.value, icon: "⚡", isCanonical: true});
+		for (const bonus of this.getInitiativeBonuses()) {
+			const isMaterial = bonus.sourceType === "itemMaterial";
+			components.push({
+				type: isMaterial ? "material" : "feature",
+				name: bonus.name,
+				value: bonus.value,
+				icon: isMaterial ? "🪨" : "⚡",
+				isCanonical: true,
+			});
 		}
 
 		// Exhaustion: subtract from EFFECTIVE only. Initiative roll handlers consume
@@ -13269,6 +13276,67 @@ class CharacterSheetState {
 	 *
 	 * Idempotent: every `sourceType: "itemMaterial"` modifier is stripped and rebuilt.
 	 */
+	/**
+	 * Every equipped item's resolved material, paired with its normalised effects.
+	 *
+	 * This is the single place the character-facing side of the sheet asks "what are my
+	 * materials doing?". Speed, initiative, resistances, damage reduction, focus
+	 * eligibility and the material-granted powers all read it, so a material's effect is
+	 * derived once and consumed many times rather than each reader re-walking the
+	 * inventory with its own subtly different notion of "equipped".
+	 *
+	 * @returns {Array<{invItem: object, item: object, material: object, fx: object}>}
+	 */
+	getEquippedMaterialEffects () {
+		if (typeof CharacterSheetMaterials === "undefined") return [];
+		if (this._data.settings?.enableMaterials === false) return [];
+		if (!Array.isArray(this._data.inventory)) return [];
+
+		const out = [];
+		for (const invItem of this._data.inventory) {
+			// Only worn/wielded gear projects its material onto the character.
+			if (!invItem.equipped || !invItem.item?.material?.name) continue;
+			const material = CharacterSheetMaterials.resolveMaterial(invItem.item, this._itemMaterialCatalog || []);
+			if (!material) continue;
+			out.push({
+				invItem,
+				item: invItem.item,
+				material,
+				fx: CharacterSheetMaterials.getMaterialEffects(invItem.item, material),
+			});
+		}
+		return out;
+	}
+
+	/**
+	 * Walking-speed delta from equipped materials (Darkeline, Rootstone −5).
+	 *
+	 * Mirrors {@link getGemstoneSpeedBonus}. Note that it must be added in THREE places —
+	 * `getSpeed()`, `getWalkSpeed()` and `getSpeedByType("walk")` — because `getSpeed(type)`
+	 * early-returns to `getSpeedByType(type)`, so a bonus added to only one of them is
+	 * invisible from half the sheet.
+	 *
+	 * @returns {number}
+	 */
+	getMaterialSpeedBonus () {
+		return this.getEquippedMaterialEffects()
+			.reduce((total, it) => total + (Number(it.fx.speedDelta) || 0), 0);
+	}
+
+	/**
+	 * Initiative bonuses contributed by equipped materials (Stormprism +1).
+	 *
+	 * Returns the same `{name, value}` shape `getInitiativeBonuses()` already produces for
+	 * class features, so the material appears by name in the initiative breakdown.
+	 *
+	 * @returns {Array<{name: string, value: number}>}
+	 */
+	getMaterialInitiativeBonuses () {
+		return this.getEquippedMaterialEffects()
+			.filter(it => Number(it.fx.bonusInitiative))
+			.map(it => ({name: it.material.name, value: Number(it.fx.bonusInitiative)}));
+	}
+
 	_recalculateMaterialModifiers ({isDeferAggregate = false} = {}) {
 		if (!Array.isArray(this._data.namedModifiers)) this._data.namedModifiers = [];
 
@@ -13276,34 +13344,63 @@ class CharacterSheetState {
 		this._data.namedModifiers = this._data.namedModifiers.filter(m => m.sourceType !== "itemMaterial");
 
 		let added = false;
-		if (typeof CharacterSheetMaterials !== "undefined" && this._data.settings?.enableMaterials !== false) {
-			for (const invItem of this._data.inventory) {
-				// Only worn/wielded gear projects its material onto the character.
-				if (!invItem.equipped || !invItem.item?.material?.name) continue;
-				const material = CharacterSheetMaterials.resolveMaterial(invItem.item, this._itemMaterialCatalog || []);
-				if (!material) continue;
+		for (const {item, material, fx} of this.getEquippedMaterialEffects()) {
+			for (const mod of fx.conditionalModifiers) {
+				this._data.namedModifiers.push({
+					id: CryptUtil.uid(),
+					name: `${material.name}${mod.schools?.length ? ` (${mod.schools.join(", ")})` : ""}`,
+					type: mod.kind === "save" ? "save" : "check",
+					value: 0,
+					advantage: true,
+					conditional: mod.conditional || material.name,
+					sourceType: "itemMaterial",
+					sourceLabel: item.name || "",
+					enabled: true,
+				});
+				added = true;
+			}
 
-				const fx = CharacterSheetMaterials.getMaterialEffects(invItem.item, material);
-				for (const mod of fx.conditionalModifiers) {
-					this._data.namedModifiers.push({
-						id: CryptUtil.uid(),
-						name: `${material.name}${mod.schools?.length ? ` (${mod.schools.join(", ")})` : ""}`,
-						type: mod.kind === "save" ? "save" : "check",
-						value: 0,
-						advantage: true,
-						conditional: mod.conditional || material.name,
-						sourceType: "itemMaterial",
-						sourceLabel: invItem.item.name || "",
-						enabled: true,
-					});
-					added = true;
-				}
+			// Adamantine's "reduce all bludgeoning/piercing/slashing damage by N" is a real,
+			// always-on defence, not a note. It rides the first-class `damageReduction`
+			// modifier type the sheet already resolves for class features.
+			for (const dr of fx.damageReduction || []) {
+				if (!dr.value) continue;
+				// `armorType` narrows the reduction to a class of armour; when the material is
+				// on something else the reduction simply does not apply.
+				if (dr.armorType && !CharacterSheetState._materialDamageReductionApplies(item, dr.armorType)) continue;
+				this._data.namedModifiers.push({
+					id: CryptUtil.uid(),
+					name: `${material.name} (damage reduction)`,
+					type: "damageReduction",
+					value: Number(dr.value) || 0,
+					damageTypes: dr.damageTypes?.length ? [...dr.damageTypes] : ["bludgeoning", "piercing", "slashing"],
+					sourceType: "itemMaterial",
+					sourceLabel: item.name || "",
+					enabled: true,
+				});
+				added = true;
 			}
 		}
 
 		const isChanged = hadOwn || added;
 		if (isChanged && !isDeferAggregate) this._recalculateCustomModifiers();
 		return isChanged;
+	}
+
+	/**
+	 * Whether a material's armour-scoped damage reduction applies to the item carrying it.
+	 * @private
+	 */
+	static _materialDamageReductionApplies (item, armorType) {
+		const type = (item?.type || "").split("|")[0].toUpperCase();
+		switch (armorType) {
+			case "heavy": return type === "HA";
+			case "medium": return type === "MA";
+			case "light": return type === "LA";
+			case "shield": return type === "S";
+			case "any": return ["HA", "MA", "LA", "S"].includes(type);
+			default: return true;
+		}
 	}
 
 	/**
@@ -13541,8 +13638,9 @@ class CharacterSheetState {
 		const unarmoredBonus = this.getUnarmoredMovementBonus();
 		const adeptSpeedBonus = this.getAdeptSpeedBonus();
 		const gemstoneSpeedBonus = this.getGemstoneSpeedBonus();
+		const materialSpeedBonus = this.getMaterialSpeedBonus();
 		const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus() + this.getStalkersProwessSpeedBonus();
-		const rawWalk = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + darkAugmentationSpeedBonus + (itemSpeedBonus.walk || 0) + (itemSpeedBonus["*"] || 0);
+		const rawWalk = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + materialSpeedBonus + darkAugmentationSpeedBonus + (itemSpeedBonus.walk || 0) + (itemSpeedBonus["*"] || 0);
 		const walkMultiplier = (itemSpeedMultiply.walk || 1) * (itemSpeedMultiply["*"] || 1);
 		const exhaustionSpeedPenalty = ignoresSpeedReductions ? 0 : this._getExhaustionSpeedPenalty();
 		const walk = Math.max(0, Math.floor(rawWalk * walkMultiplier * speedMultiplier) - exhaustionSpeedPenalty);
@@ -13630,10 +13728,11 @@ class CharacterSheetState {
 		const unarmoredBonus = this.getUnarmoredMovementBonus();
 		const adeptSpeedBonus = this.getAdeptSpeedBonus();
 		const gemstoneSpeedBonus = this.getGemstoneSpeedBonus();
+		const materialSpeedBonus = this.getMaterialSpeedBonus();
 		const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus() + this.getStalkersProwessSpeedBonus();
 		const ignoresSpeedReductions = this.hasSpeedReductionImmunityFromStates();
 		const armorPenalty = ignoresSpeedReductions ? 0 : this.getArmorStrengthPenalty(); // -10 if STR requirement not met
-		const raw = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + darkAugmentationSpeedBonus + armorPenalty;
+		const raw = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + materialSpeedBonus + darkAugmentationSpeedBonus + armorPenalty;
 		const speedMultiplier = ignoresSpeedReductions ? Math.max(1, this.getSpeedMultiplierFromConditions()) : this.getSpeedMultiplierFromConditions();
 		return Math.max(0, Math.floor(raw * speedMultiplier) - (ignoresSpeedReductions ? 0 : this._getExhaustionSpeedPenalty()));
 	}
@@ -13667,7 +13766,7 @@ class CharacterSheetState {
 		const bonus = (speedMods[type] || 0)
 			+ this.getSpeedBonusFromStates(type)
 			+ this.getAdeptSpeedBonus()
-			+ (type === "walk" ? this.getDarkAugmentationSpeedBonus() + this.getStalkersProwessSpeedBonus() : 0)
+			+ (type === "walk" ? this.getGemstoneSpeedBonus() + this.getMaterialSpeedBonus() + this.getDarkAugmentationSpeedBonus() + this.getStalkersProwessSpeedBonus() : 0)
 			+ (itemSpeedBonus[type] || 0)
 			+ (itemSpeedBonus["*"] || 0);
 
@@ -13750,6 +13849,23 @@ class CharacterSheetState {
 		return bonuses;
 	}
 
+	/**
+	 * Every passive initiative bonus, whatever its origin — class features and equipped
+	 * materials (Stormprism +1) alike.
+	 *
+	 * `getInitiative()` and `getInitiativeBreakdown()` both read this rather than each
+	 * assembling their own list, so a new source cannot land in the total but go missing
+	 * from the breakdown (or vice versa).
+	 *
+	 * @returns {Array<{name: string, value: number, sourceType: string}>}
+	 */
+	getInitiativeBonuses () {
+		return [
+			...this._getFeatureInitiativeBonuses().map(it => ({...it, sourceType: "feature"})),
+			...this.getMaterialInitiativeBonuses().map(it => ({...it, sourceType: "itemMaterial"})),
+		];
+	}
+
 	getInitiative () {
 		let initiative = this.getAbilityMod("dex") + (this._data.customModifiers.initiative || 0);
 
@@ -13758,8 +13874,8 @@ class CharacterSheetState {
 			initiative += Math.floor(this.getProficiencyBonus() / 2);
 		}
 
-		// Passive initiative bonuses from class/subclass features
-		for (const bonus of this._getFeatureInitiativeBonuses()) {
+		// Passive initiative bonuses from class/subclass features and equipped materials
+		for (const bonus of this.getInitiativeBonuses()) {
 			initiative += bonus.value;
 		}
 
