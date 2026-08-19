@@ -12107,12 +12107,16 @@ class CharacterSheetPage {
 				const abilityMod = isRanged ? "dex" : ((hasFinesse || isMonkWeapon) ? (this._state.getAbilityMod("dex") >= this._state.getAbilityMod("str") ? "dex" : "str") : "str");
 
 				const effectiveBonuses = this._state.getEffectiveItemBonuses?.(weapon.id);
-				const attackBonus = effectiveBonuses
-					? (effectiveBonuses.bonusWeapon || 0) + (effectiveBonuses.bonusWeaponAttack || 0) + (weapon.customAttackBonus || 0)
-					: (weapon.bonusWeapon || 0) + (weapon.bonusWeaponAttack || 0) + (weapon.customAttackBonus || 0);
-				const damageBonus = effectiveBonuses
-					? (effectiveBonuses.bonusWeapon || 0) + (effectiveBonuses.bonusWeaponDamage || 0) + (weapon.customDamageBonus || 0)
-					: (weapon.bonusWeapon || 0) + (weapon.bonusWeaponDamage || 0) + (weapon.customDamageBonus || 0);
+				// `totalAttackBonus`/`totalDamageBonus` already fold `bonusWeapon` (which applies
+				// to both axes) into the per-axis bonus AND coerce the authored "+2" strings.
+				// The fallback coerces by hand for the same reason.
+				const parseB = (v) => (typeof v === "number" ? v : (parseInt(String(v ?? 0), 10) || 0));
+				const attackBonus = (effectiveBonuses
+					? (effectiveBonuses.totalAttackBonus || 0)
+					: parseB(weapon.bonusWeapon) + parseB(weapon.bonusWeaponAttack)) + parseB(weapon.customAttackBonus);
+				const damageBonus = (effectiveBonuses
+					? (effectiveBonuses.totalDamageBonus || 0)
+					: parseB(weapon.bonusWeapon) + parseB(weapon.bonusWeaponDamage)) + parseB(weapon.customDamageBonus);
 
 				let baseDamageDie = this._state.getWeaponDamageDie(weapon);
 				let baseDamageType = weapon.dmgType

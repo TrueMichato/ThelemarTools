@@ -710,10 +710,15 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
   **`state.getEffectiveWeaponDamage(itemId)`** instead: it reads the projected item and folds in
   `getEffectiveItemBonuses`, so materials, die steps and flat upgrade bonuses all land. Returns
   `null` when there are no dice — render nothing rather than inventing a line.
-- ⚠️ **`getEffectiveItemBonuses` returns AUTHORED values, which are sometimes strings.** `"+1"`
-  and `"0"` both occur, so `(a || 0) + (b || 0)` concatenates instead of summing and yields
-  `"+10"` for 1 + 0. Coerce with `Number()` before any arithmetic. This was a real bug, caught by
-  a test, not a hypothetical.
+- ✅ **`getEffectiveItemBonuses` returns NUMBERS and exposes folded totals.** Item data authors
+  bonuses as signed strings — all 190 `bonusWeapon` values in the site catalogue are `"+2"`-style,
+  as is every `bonusAc` and `bonusSpellAttack` — so `(eff.bonusWeapon || 0) + (eff.bonusWeaponAttack || 0)`
+  used to concatenate and report `"2200"` for a +2 weapon with three upgrades. The derivation now
+  coerces every numeric field (unparseable → `0`, never `NaN`).
+  **Read `totalAttackBonus` / `totalDamageBonus`, not the parts:** `bonusWeapon` applies to BOTH
+  axes, and twenty-one call sites across four modules each had to remember that. The per-axis
+  fields remain for anything that genuinely needs one axis. An unknown id still returns `{}`, so
+  `|| 0` guards and `() => ({})` test stubs hold.
 - **`getEffectiveWeaponDamage().display` excludes damage riders; `displayFull` includes them.**
   The inventory row renders riders in their own warning-coloured chip and would print them twice
   otherwise. `isModified` compares against the **raw** entry, not the projected one — comparing
@@ -735,6 +740,10 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
 - ⚠️ **A plain catalog item must keep taking the catalog path.** This is the regression to guard
   when touching hover routing: verify a pristine item side by side and confirm it still renders
   the full statblock, not the inline entry.
+- ⚠️ **Never hand-roll `{@item …}` for an item name — call `buildItemHoverNameHtml`.** The Combat
+  tab did, and so opted out of the whole routing above: custom weapons got a link resolving to
+  nothing, modified ones got the pristine catalog entry. Only pass it something that IS an item —
+  a feature or spell attack resolved against the item catalog is just a different broken link.
 - **State publishes itself as `globalThis.__csState`** from its constructor. The item hover
   builders in `charactersheet-class-utils.js` are pure statics called from a dozen render sites
   with no state reference, and they need `getEffectiveWeaponDamage` / `getItemMaterialEntity`.
@@ -946,6 +955,25 @@ An NPC export is a homebrew document (`{_meta, monster: [...]}`), so it may also
 - **`itemPowers` is intentionally dropped.** The NPC's usable powers are already rendered
   into the monster itself; an item's actives survive as `entries` prose + `attachedSpells`.
   Do not "fix" this.
+
+**The preview must resolve the links the payload promises.** The dialog renders before
+anything is saved, so a bundled item exists only as a JS object — the `{@item}` link
+resolves against an empty cache and the hover shows **nothing, silently**.
+`_registerCompanionItemHovers(items)` (in `charactersheet-export.js`) seeds the cache:
+
+```js
+DataLoader._pCache_addToCache({allDataMerged: {item: forCache}, propAllowlist: new Set(["item"])});
+```
+
+- Same house pattern as the Ar8 variant-component items and `_registerLoadedHoverEntities`
+  in `charactersheet.js` (see the rationale comment there). Synchronous — no first-hover race.
+- **Called from `rebuildCompanionItems()`, not once.** The export source is part of an item's
+  hash and the user can change it from this dialog.
+- **Cache the copy, not the payload item.** The cache wants `__prop: "item"`; the item schema
+  forbids it. A test asserts the payload object keeps exactly its schema keys.
+- Feature-detects `DataLoader` and swallows throws — jest and headless callers no-op cleanly.
+- **Item hashes are URL-encoded** (`hecate's%20dagger_csheet`). `getFromCache` with a literal
+  space silently returns undefined; that produced two false negatives while debugging this.
 
 **`getValidationIssues` returns three buckets** — `errors`, `warnings`, `notes`. Only the
 first two toast. Informational dependency notices go in `notes`, because Download and Save

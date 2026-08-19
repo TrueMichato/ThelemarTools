@@ -12912,13 +12912,25 @@ class CharacterSheetState {
 			});
 		}
 
+		// Item data authors these as SIGNED STRINGS ("+2"), not numbers — all 190 `bonusWeapon`
+		// values in the site catalogue are strings, as are every `bonusAc` and `bonusSpellAttack`.
+		// Handing that raw text to a caller means `(eff.bonusWeapon || 0) + (eff.bonusWeaponAttack || 0)`
+		// concatenates instead of adding, and a +2 longsword reports an attack bonus of "2200".
+		// A derivation absorbs the authored format; it never leaks it.
+		const num = (val) => {
+			if (typeof val === "number") return Number.isFinite(val) ? val : 0;
+			if (val == null) return 0;
+			const parsed = parseInt(String(val).replace(/\s/g, ""), 10);
+			return Number.isFinite(parsed) ? parsed : 0;
+		};
+
 		const base = {
-			bonusWeaponAttack: item.bonusWeaponAttack || 0,
-			bonusWeaponDamage: item.bonusWeaponDamage || 0,
-			bonusWeapon: item.bonusWeapon || 0,
-			bonusSpellAttack: item.bonusSpellAttack || 0,
-			bonusSpellSaveDc: item.bonusSpellSaveDc || 0,
-			critThreshold: item.critThreshold || 20,
+			bonusWeaponAttack: num(item.bonusWeaponAttack),
+			bonusWeaponDamage: num(item.bonusWeaponDamage),
+			bonusWeapon: num(item.bonusWeapon),
+			bonusSpellAttack: num(item.bonusSpellAttack),
+			bonusSpellSaveDc: num(item.bonusSpellSaveDc),
+			critThreshold: num(item.critThreshold) || 20,
 			damageDieIncrease: 0,
 			// Non-flat dice riders (item catalog + upgrades). Combat auto-applies these on hit.
 			bonusDamageDice: damageRiders[0]?.dice || null,
@@ -12956,6 +12968,13 @@ class CharacterSheetState {
 			}
 		}
 
+		// `bonusWeapon` is the "+2" of a +2 weapon: it applies to BOTH attack and damage. Left
+		// as a bare field, every reader has to know that and fold it in itself — twenty-one call
+		// sites tried, and the ones that mattered got it wrong. These are the folded, canonical
+		// totals; a caller should reach for these and never re-add the parts.
+		base.totalAttackBonus = base.bonusWeapon + base.bonusWeaponAttack;
+		base.totalDamageBonus = base.bonusWeapon + base.bonusWeaponDamage;
+
 		return base;
 	}
 
@@ -12988,9 +13007,8 @@ class CharacterSheetState {
 		if (!item.dmg1) return null;
 
 		const eff = this.getEffectiveItemBonuses(itemId) || {};
-		// `getEffectiveItemBonuses` hands back bonuses as they were AUTHORED — "+1" and "0" are
-		// both strings on some paths. Adding two of those concatenates instead of summing, so
-		// every figure below is coerced before any arithmetic touches it.
+		// `getEffectiveItemBonuses` coerces and folds; `num` here only guards the empty object it
+		// returns for an unknown id.
 		const num = (v) => {
 			const n = Number(v);
 			return Number.isFinite(n) ? n : 0;
@@ -13002,7 +13020,7 @@ class CharacterSheetState {
 
 		const dice = bump(String(item.dmg1));
 		const diceVersatile = item.dmg2 ? bump(String(item.dmg2)) : null;
-		const flat = num(eff.bonusWeaponDamage) + num(eff.bonusWeapon);
+		const flat = num(eff.totalDamageBonus);
 		const damageType = item.dmgType
 			? (Parser.dmgTypeToFull?.(item.dmgType) || item.dmgType)
 			: null;
@@ -13025,7 +13043,7 @@ class CharacterSheetState {
 			damageType,
 			display,
 			displayFull: `${display}${riderStr}`,
-			attackBonus: num(eff.bonusWeaponAttack) + num(eff.bonusWeapon),
+			attackBonus: num(eff.totalAttackBonus),
 			critThreshold: num(eff.critThreshold) || 20,
 			riders,
 			// True when anything has moved the weapon off its PRINTED line, so a caller can mark

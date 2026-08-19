@@ -1619,12 +1619,15 @@ export class CharacterSheetPlayMode {
 			const hasFinesse = props.some(p => p === "F" || p.startsWith?.("F|"));
 			const abilityMod = isRanged ? "dex" : ((hasFinesse && this._state.getAbilityMod("dex") >= this._state.getAbilityMod("str")) ? "dex" : "str");
 			const effectiveBonuses = this._state.getEffectiveItemBonuses?.(weapon.id);
-			const attackBonus = effectiveBonuses
-				? (effectiveBonuses.bonusWeapon || 0) + (effectiveBonuses.bonusWeaponAttack || 0) + (weapon.customAttackBonus || 0)
-				: (weapon.bonusWeapon || 0) + (weapon.bonusWeaponAttack || 0) + (weapon.customAttackBonus || 0);
-			const damageBonus = effectiveBonuses
-				? (effectiveBonuses.bonusWeapon || 0) + (effectiveBonuses.bonusWeaponDamage || 0) + (weapon.customDamageBonus || 0)
-				: (weapon.bonusWeapon || 0) + (weapon.bonusWeaponDamage || 0) + (weapon.customDamageBonus || 0);
+			// See `getEffectiveItemBonuses`: the totals fold `bonusWeapon` into both axes and
+			// coerce the authored "+2" strings, which a raw `+` would concatenate.
+			const parseB = (v) => (typeof v === "number" ? v : (parseInt(String(v ?? 0), 10) || 0));
+			const attackBonus = (effectiveBonuses
+				? (effectiveBonuses.totalAttackBonus || 0)
+				: parseB(weapon.bonusWeapon) + parseB(weapon.bonusWeaponAttack)) + parseB(weapon.customAttackBonus);
+			const damageBonus = (effectiveBonuses
+				? (effectiveBonuses.totalDamageBonus || 0)
+				: parseB(weapon.bonusWeapon) + parseB(weapon.bonusWeaponDamage)) + parseB(weapon.customDamageBonus);
 			const baseDamageDie = this._state.getWeaponDamageDie(weapon);
 			const baseDamageType = weapon.dmgType ? Parser.dmgTypeToFull?.(weapon.dmgType) : "slashing";
 

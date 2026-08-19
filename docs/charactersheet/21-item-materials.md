@@ -824,11 +824,10 @@ upgrade's `damageDieIncrease`, flat `bonusWeaponDamage` and attack bonus land to
 
 Two details worth keeping:
 
-- **`getEffectiveItemBonuses` hands back authored values, not numbers.** `"+1"` and `"0"` are
-  both strings on some paths, so `a + b` concatenates instead of summing. Every figure is coerced
-  before arithmetic. This was a live bug caught by the tests, not a theoretical one.
 - **`display` excludes damage riders; `displayFull` includes them.** The inventory row already
   gives riders their own warning-coloured chip and would otherwise print them twice.
+- **The coercion now lives one level down.** See *The derivation returns numbers* below —
+  `getEffectiveItemBonuses` absorbs the authored string format, so this function no longer has to.
 
 A figure that has moved off the printed value is marked `isModified` and rendered in
 `--cs-info` with a dotted underline. The cue is quiet on purpose: on an unmodified weapon —
@@ -836,6 +835,39 @@ the common case — none of it fires. `isModified` compares against the **raw** 
 projected one, or a material's die step would silently look standard.
 
 The stored `damage` field stays for save compatibility but is legacy. Read-time derivation wins.
+
+### The derivation returns numbers, and everyone reads one total
+
+Item data authors bonuses as **signed strings**. Every one of the 190 `bonusWeapon` values in the
+site catalogue is `"+1"` / `"+2"` / `"+3"`; so is every `bonusAc` and every `bonusSpellAttack`.
+`getEffectiveItemBonuses` used to coerce everything *around* those fields while passing them
+through untouched, so the obvious thing a caller does —
+
+```js
+(eff.bonusWeapon || 0) + (eff.bonusWeaponAttack || 0)
+```
+
+— concatenated instead of adding. A `+2` longsword carrying Balanced, Wounding: Keen and
+Masterwork reported an attack bonus of **`"2200"`** and a damage line of **`1d8+223`**. Twenty-one
+call sites across four modules made exactly that mistake, while a coercion helper (`_parseBonus`)
+sat three of them away.
+
+Two changes, both in the derivation rather than the readers:
+
+- **Every numeric field comes back a number.** A derivation absorbs the authored format; it never
+  leaks it. An unparseable value reports `0`, never `NaN` — a garbled bonus must not poison an
+  entire attack line.
+- **`totalAttackBonus` and `totalDamageBonus` are folded and canonical.** `bonusWeapon` is the
+  "+2" of a +2 weapon and applies to *both* axes. Left as a bare field, every reader has to know
+  that and fold it in itself. Callers now read the totals and never re-add the parts; the per-axis
+  fields remain (numeric) for anything that genuinely needs one axis.
+
+The two weapon-attack modals were also reading the **raw entry** rather than the derivation, so
+they told a player carrying three upgrades that their magic bonus was "none". They consult
+`getEffectiveItemBonuses` now like everything else.
+
+> A `getEffectiveItemBonuses` call for an unknown id still returns `{}`, so `|| 0` guards on the
+> totals hold. Test stubs that mock the function with `() => ({})` keep working unchanged.
 
 ### The hover tells the truth, and keeps a way back to the book
 
@@ -863,6 +895,15 @@ punctuation, so joining several with semicolons was unreadable.
 to state, so state publishes itself as **`globalThis.__csState`** in its constructor, mirroring
 the existing `__csMaterialCatalog` / `__csResonanceCatalog` handles. `window.charSheet` looks
 like an alternative but is explicitly a debugging affordance.
+
+**Every surface has to actually call the shared builder for any of this to hold.** The Combat tab
+opted out: it hard-coded `Renderer.get().render("{@item ${name}|${source}}")` for auto-generated
+weapon rows. A custom weapon has no catalog entry, so that produced a link resolving to nothing; a
+materialled one resolved to the pristine entity — the exact lie removed everywhere else, still
+intact there because that site never called `buildItemHoverNameHtml`. It does now.
+
+Only weapon-backed rows go through it. A feature or spell attack is not an item, and resolving its
+name against the item catalog would produce a second broken link in place of the first.
 
 ### A single-valued picker closes; a multi-valued one stays open
 

@@ -7305,8 +7305,8 @@ class CharacterSheetNpcExporter {
 			let magicDamageBonus;
 			let damageDieIncrease = 0;
 			if (eff) {
-				magicAttackBonus = (Number(eff.bonusWeapon) || 0) + (Number(eff.bonusWeaponAttack) || 0);
-				magicDamageBonus = (Number(eff.bonusWeapon) || 0) + (Number(eff.bonusWeaponDamage) || 0);
+				magicAttackBonus = eff.totalAttackBonus || 0;
+				magicDamageBonus = eff.totalDamageBonus || 0;
 				damageDieIncrease = eff.damageDieIncrease || 0;
 			} else {
 				magicAttackBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponAttack) || 0);
