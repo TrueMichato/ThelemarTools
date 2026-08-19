@@ -1041,10 +1041,10 @@ describe("Item Materials", () => {
 			expect(breakdown.find(b => b.label === "Ability score set/bonus").detail).toBe("luck");
 		});
 
-		it("counts upgrades, gems, spells, defences and item flags", () => {
+		it("counts magical upgrades, gems, spells, defences and item flags", () => {
 			const {total} = CharacterSheetMaterials.countMagicalEffects({
 				name: "Blade",
-				appliedUpgrades: [{name: "Keen"}, {name: "Silvered"}],
+				appliedUpgrades: [{name: "Enchanted", isMagical: true}, {name: "Magical", isMagical: true}],
 				socketedGemstones: [{name: "Ruby"}],
 				attachedSpells: ["fireball|phb"],
 				resist: ["fire"],
@@ -1052,6 +1052,47 @@ describe("Item Materials", () => {
 				sentient: true,
 			});
 			expect(total).toBe(7);
+		});
+
+		it("ignores mundane upgrades entirely", () => {
+			const {total, breakdown} = CharacterSheetMaterials.countMagicalEffects({
+				name: "Blade",
+				appliedUpgrades: [{name: "Keen"}, {name: "Silvered"}, {name: "Balanced"}],
+			});
+			expect(total).toBe(0);
+			expect(breakdown.find(b => b.label === "Magical upgrades")).toBeUndefined();
+		});
+
+		it("counts only the magical upgrades in a mixed set, and names them", () => {
+			const {total, breakdown} = CharacterSheetMaterials.countMagicalEffects({
+				name: "Blade",
+				appliedUpgrades: [
+					{name: "Balanced", isMagical: false},
+					{name: "Arcane", isMagical: true},
+					{name: "Brutal", isMagical: false},
+				],
+			});
+			expect(total).toBe(1);
+			expect(breakdown.find(b => b.label === "Magical upgrades").detail).toBe("Arcane");
+		});
+
+		it("resolves legacy snapshots that predate the isMagical flag", () => {
+			// Saved before the field existed: no `isMagical` anywhere, so the caller's resolver
+			// consults the catalog.
+			const catalog = {Arcane: true, Balanced: false};
+			const {total} = CharacterSheetMaterials.countMagicalEffects(
+				{name: "Blade", appliedUpgrades: [{name: "Arcane"}, {name: "Balanced"}]},
+				{isUpgradeMagical: (u) => catalog[u.name] === true},
+			);
+			expect(total).toBe(1);
+		});
+
+		it("fails open — an unresolvable upgrade never inflates the count", () => {
+			const {total} = CharacterSheetMaterials.countMagicalEffects(
+				{name: "Blade", appliedUpgrades: [{name: "Who Knows"}]},
+				{isUpgradeMagical: () => undefined},
+			);
+			expect(total).toBe(0);
 		});
 
 		it("deducts the material's free effect and shows it in the breakdown", () => {
@@ -1120,7 +1161,7 @@ describe("Item Materials", () => {
 		});
 
 		it("is not overloaded at exactly capacity", () => {
-			const item = withMat("Electrum", {appliedUpgrades: [{name: "A"}, {name: "B"}]});
+			const item = withMat("Electrum", {appliedUpgrades: [{name: "A", isMagical: true}, {name: "B", isMagical: true}]});
 			const st = CharacterSheetMaterials.getMagicCapacityStatus(item, findMat("Electrum"));
 			expect(st.count).toBe(2);
 			expect(st.isOverloaded).toBe(false);
@@ -1128,7 +1169,7 @@ describe("Item Materials", () => {
 		});
 
 		it("raises the DC by one per effect over capacity", () => {
-			const item = withMat("Electrum", {appliedUpgrades: [{name: "A"}, {name: "B"}, {name: "C"}, {name: "D"}]});
+			const item = withMat("Electrum", {appliedUpgrades: [{name: "A", isMagical: true}, {name: "B", isMagical: true}, {name: "C", isMagical: true}, {name: "D", isMagical: true}]});
 			const st = CharacterSheetMaterials.getMagicCapacityStatus(item, findMat("Electrum"));
 			expect(st.overage).toBe(2);
 			expect(st.dc).toBe(17);
@@ -1136,17 +1177,17 @@ describe("Item Materials", () => {
 
 		it("honours Steeline's two-over threshold before the DC climbs", () => {
 			const mat = findMat("Steeline");
-			const one = CharacterSheetMaterials.getMagicCapacityStatus(withMat("Steeline", {appliedUpgrades: [{name: "A"}, {name: "B"}, {name: "C"}]}), mat);
+			const one = CharacterSheetMaterials.getMagicCapacityStatus(withMat("Steeline", {appliedUpgrades: [{name: "A", isMagical: true}, {name: "B", isMagical: true}, {name: "C", isMagical: true}]}), mat);
 			expect(one.overage).toBe(1);
 			expect(one.dc).toBe(15);
 
-			const two = CharacterSheetMaterials.getMagicCapacityStatus(withMat("Steeline", {appliedUpgrades: [{name: "A"}, {name: "B"}, {name: "C"}, {name: "D"}]}), mat);
+			const two = CharacterSheetMaterials.getMagicCapacityStatus(withMat("Steeline", {appliedUpgrades: [{name: "A", isMagical: true}, {name: "B", isMagical: true}, {name: "C", isMagical: true}, {name: "D", isMagical: true}]}), mat);
 			expect(two.overage).toBe(2);
 			expect(two.dc).toBe(16);
 		});
 
 		it("never overloads an unlimited material", () => {
-			const item = withMat("Jadoo", {appliedUpgrades: Array.from({length: 20}, (_, i) => ({name: `U${i}`}))});
+			const item = withMat("Jadoo", {appliedUpgrades: Array.from({length: 20}, (_, i) => ({name: `U${i}`, isMagical: true}))});
 			const st = CharacterSheetMaterials.getMagicCapacityStatus(item, findMat("Jadoo"));
 			expect(st.isUnlimited).toBe(true);
 			expect(st.isOverloaded).toBe(false);
@@ -1280,7 +1321,7 @@ describe("Item Materials", () => {
 
 		it("lists only overloaded items for the rest re-check", () => {
 			addBlade("Electrum");
-			const overId = addBlade("Electrum", {appliedUpgrades: [{name: "A"}, {name: "B"}, {name: "C"}]});
+			const overId = addBlade("Electrum", {appliedUpgrades: [{name: "A", isMagical: true}, {name: "B", isMagical: true}, {name: "C", isMagical: true}]});
 			const overloaded = state.getOverloadedMaterialItems();
 			expect(overloaded).toHaveLength(1);
 			expect(overloaded[0].id).toBe(overId);

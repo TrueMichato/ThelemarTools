@@ -441,12 +441,12 @@ misbehave. It is the one axis that is a *budget* rather than a modifier.
 
 ### Counting effects
 
-`CharacterSheetMaterials.countMagicalEffects(item, {material, manualAdjust})` returns
-`{total, breakdown}`. It counts, from the item:
+`CharacterSheetMaterials.countMagicalEffects(item, {material, manualAdjust, isUpgradeMagical})`
+returns `{total, breakdown}`. It counts, from the item:
 
 | Counted | Notes |
 |---|---|
-| Applied upgrades | One per upgrade |
+| **Magical** applied upgrades | One per upgrade — **only** those authored `isMagical` |
 | Set gemstones | One per gem |
 | Attached spells | One per **distinct** spell, across every usage category |
 | Resistances / immunities / condition immunities | One per entry |
@@ -454,6 +454,35 @@ misbehave. It is the one axis that is a *budget* rather than a modifier.
 | Speed modifications (`modifySpeed`) | One |
 | A curse | One |
 | Sentience | One |
+
+**Most upgrades are not magical, and must not fill a magic budget.** Balanced, Brutal,
+Sharpened, Silvered, Masterwork and the armour proofings are plain smithing; counting them
+here meant a well-made sword was "full" before a single enchantment touched it.
+
+Magicality is **authored data** — an `isMagical: true` on the upgrade entity — never inferred
+from effect shape and never read off a hardcoded name table. Effect shape cannot tell the two
+apart: *Balanced* grants +1 to attack and is mundane craftsmanship, while *Enchanted* grants
++1 to spell attacks and is not. A name table would silently miss every homebrew upgrade.
+
+What is flagged today:
+
+| Source | Flagged | Rationale |
+|---|---|---|
+| `data/itemupgrades.json` | **Enchanted**, **Magical**, **Arcane** | The only three of thirty that invoke magic — spellcasting-focus bonuses, and counting as magical for resistance |
+| `homebrew/TravelersGuidetoThelemar.json` | all 39 `GS:*` gemstone powers | They carry `rarity` and `craftingDC`: magic items by construction |
+| `homebrew/TravelersGuidetoThelemar.json` | **Blessed**, **Mirrored**, **Specifically Tempered**, **Copper Plated** | The four `AU` tags that grant damage resistance. No mundane crafting in 5e grants resistance — that is the province of magic, or of a *material*, which is a separate axis |
+
+Absence of the field means mundane; the flag is never written `false` in data. Note that
+*Gem Socket* is **not** magical — the socket is a fitting, and the gem set into it is counted
+separately.
+
+**Legacy saves resolve against the catalog.** `applyItemUpgrade` snapshots `isMagical`
+alongside the name, so the hot path never needs a lookup. Snapshots written before the field
+existed carry nothing, so `getMagicCapacityStatus` passes
+`CharacterSheetUpgrades.isUpgradeMagical` as a resolver, which reads the snapshot's own flag
+first and falls back to `itembuilder-upgrade-rules.isUpgradeMagical`. An upgrade that resolves
+to nothing counts as **non**-magical: a lookup miss must never manufacture an overload the
+player did not earn.
 
 **Bonus families collapse.** `bonusWeapon`, `bonusWeaponAttack` and `bonusWeaponDamage` on
 one item are a single `+N` enchantment, not three, and are counted once.

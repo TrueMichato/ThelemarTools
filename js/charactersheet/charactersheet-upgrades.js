@@ -13,6 +13,7 @@ import {
 	isArmor,
 	isShield,
 	isSocketable,
+	isUpgradeMagical,
 	isWeapon,
 	resetItemUpgradeCatalog,
 	setItemUpgradeCatalog,
@@ -1211,6 +1212,20 @@ class CharacterSheetUpgrades {
 	 */
 	static getUpgradeEffects (item) {
 		return getAggregatedUpgradeEffects(item);
+	}
+
+	/**
+	 * Does an applied upgrade count as a magical effect?
+	 *
+	 * Reads the authored `isMagical` flag, falling back to the catalog for snapshots written
+	 * before the field existed. Unresolvable upgrades count as non-magical so a lookup miss can
+	 * never inflate an item's Magic Capacity.
+	 *
+	 * @param {object} upgrade - Applied-upgrade snapshot or catalog entity
+	 * @returns {boolean}
+	 */
+	static isUpgradeMagical (upgrade) {
+		return isUpgradeMagical(upgrade);
 	}
 
 	/**

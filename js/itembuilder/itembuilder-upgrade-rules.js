@@ -335,6 +335,29 @@ export function getUpgradeDescriptor (upgrade, {catalog = _itemUpgradeCatalog} =
 	return Object.keys(descriptor).length ? descriptor : null;
 }
 
+/**
+ * Is an applied upgrade a magical effect?
+ *
+ * Magicality is authored data (`isMagical` on the catalog entity), never inferred from effect
+ * shape: *Balanced* grants +1 to attack and is plain smithing in this ruleset, indistinguishable
+ * by shape from an enchantment. Nor is it inferred from a name table, which would silently miss
+ * every homebrew upgrade.
+ *
+ * Applied-upgrade snapshots written before the field existed carry no `isMagical`, so those fall
+ * back to the catalog. A snapshot that cannot be resolved counts as **non**-magical: a lookup
+ * miss must never inflate an item's Magic Capacity and push it into an overload it did not earn.
+ *
+ * @param {object} ref Applied-upgrade snapshot, or a catalog entity.
+ * @param {object} [opts]
+ * @param {Array} [opts.catalog] Upgrade catalog to resolve against.
+ * @returns {boolean}
+ */
+export function isUpgradeMagical (ref, {catalog = _itemUpgradeCatalog} = {}) {
+	if (!ref) return false;
+	if (typeof ref.isMagical === "boolean") return ref.isMagical;
+	return _getResolvedEntity(ref, catalog)?.isMagical === true;
+}
+
 export function getAggregatedUpgradeEffects (item, {catalog = _itemUpgradeCatalog} = {}) {
 	let out = _copy(_UPGRADE_EFFECT_DEFAULTS);
 	for (const upgrade of item?.appliedUpgrades || []) {

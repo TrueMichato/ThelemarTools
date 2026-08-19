@@ -688,6 +688,22 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
   condensate roles are vocabulary this feature invents; outside the 678-line rules document the
   collapsed `<details>` at the foot of the picker is the only place they are defined. Adding a
   new abbreviation to a row means adding it there too.
+- ⚠️ **Only upgrades authored `isMagical` count toward Magic Capacity.** Most upgrades are plain
+  smithing — Balanced, Brutal, Sharpened, Silvered, Masterwork, the armour proofings — and
+  counting all of them filled items up with craftsmanship before a single enchantment landed.
+  Magicality is data on the entity, never inferred from effect shape (Balanced grants +1 attack
+  and is mundane; Enchanted grants +1 spell attack and is not — the shapes are identical) and
+  never a hardcoded name table (which would miss every homebrew upgrade). Flagged today: the
+  three site upgrades Enchanted / Magical / Arcane, all 39 `GS:*` gemstone powers, and the four
+  brew `AU` tags that grant damage resistance. *Gem Socket* is a fitting, not magic; the gem set
+  into it is counted separately.
+- **`applyItemUpgrade` snapshots `isMagical`, so the hot path never hits the catalog.**
+  `_recalculateItemBonuses` runs on every equip toggle. Saves written before the field existed
+  carry nothing, so `getMagicCapacityStatus` injects `CharacterSheetUpgrades.isUpgradeMagical`
+  as a resolver — snapshot flag first, catalog second. It reads the resolver off `globalThis`
+  rather than importing it, so materials keeps no hard dependency on upgrades.
+- ⚠️ **Magicality fails open.** An upgrade that resolves to nothing counts as NON-magical. The
+  opposite default would let a missing brew silently overload every item a character owns.
 - ⚠️ **A single-valued picker closes on apply; a multi-valued one must not.** A material is one
   field, so `showMaterialPickerModal` closing is correct. `showUpgradePickerModal` is a *list*
   editor — a weapon takes several upgrades — so it rebuilds its body in place via `renderBody()`

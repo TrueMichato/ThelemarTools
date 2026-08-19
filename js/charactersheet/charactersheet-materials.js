@@ -907,9 +907,14 @@ class CharacterSheetMaterials {
 	 * @param {object} [opts]
 	 * @param {object} [opts.material] Resolved material, for its MC exceptions.
 	 * @param {number} [opts.manualAdjust] User override, added to the total.
+	 * @param {(upgrade: object) => boolean} [opts.isUpgradeMagical] Magicality resolver for applied
+	 *        upgrades. Defaults to reading the snapshot's own `isMagical`; callers with the upgrade
+	 *        catalog to hand pass `CharacterSheetUpgrades.isUpgradeMagical` so that saves written
+	 *        before the flag existed still resolve. Kept injectable so this stays testable without
+	 *        a loaded catalog.
 	 * @returns {{total: number, breakdown: Array<{label: string, count: number, detail?: string}>}}
 	 */
-	static countMagicalEffects (item, {material = null, manualAdjust = 0} = {}) {
+	static countMagicalEffects (item, {material = null, manualAdjust = 0, isUpgradeMagical = null} = {}) {
 		const breakdown = [];
 		if (!item) return {total: 0, breakdown};
 
@@ -918,8 +923,13 @@ class CharacterSheetMaterials {
 			breakdown.push(detail ? {label, count, detail} : {label, count});
 		};
 
-		const upgrades = item.appliedUpgrades || [];
-		add("Applied upgrades", upgrades.length, upgrades.map(u => u.name).join(", "));
+		// Most upgrades are plain smithing — Balanced, Brutal, Sharpened, Silvered, the armour
+		// proofings — and counting them against a MAGIC capacity budget filled items up with
+		// craftsmanship. Only upgrades authored `isMagical` count. A snapshot that cannot be
+		// resolved is treated as non-magical: a lookup miss must not manufacture an overload.
+		const resolveMagical = isUpgradeMagical || (u => u?.isMagical === true);
+		const upgrades = (item.appliedUpgrades || []).filter(u => resolveMagical(u));
+		add("Magical upgrades", upgrades.length, upgrades.map(u => u.name).join(", "));
 
 		const gems = item.socketedGemstones || [];
 		add("Socketed gemstones", gems.length, gems.map(g => g.name).join(", "));
@@ -1067,7 +1077,15 @@ class CharacterSheetMaterials {
 		const raw = mat.magicCapacity;
 		if (raw == null || raw === "na") return null;
 
-		const {total: count, breakdown} = CharacterSheetMaterials.countMagicalEffects(item, {material: mat, manualAdjust});
+		// Resolve magicality through the upgrades module when it is loaded, so applied-upgrade
+		// snapshots written before `isMagical` existed still resolve against the catalog. Read
+		// off `globalThis` rather than imported: materials must not take a hard dependency on
+		// upgrades, and the fallback (the snapshot's own flag) is correct for every new save.
+		const isUpgradeMagical = globalThis.CharacterSheetUpgrades?.isUpgradeMagical
+			? (u) => globalThis.CharacterSheetUpgrades.isUpgradeMagical(u)
+			: null;
+
+		const {total: count, breakdown} = CharacterSheetMaterials.countMagicalEffects(item, {material: mat, manualAdjust, isUpgradeMagical});
 		const notes = [];
 		for (const rule of mat.magicCapacityRules || []) {
 			const spec = CharacterSheetMaterials.MC_RULE_TEXT[rule.type];

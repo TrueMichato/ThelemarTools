@@ -33683,6 +33683,10 @@ class CharacterSheetState {
 			name: upgrade.name,
 			source: upgrade.source,
 			upgradeType: upgrade.upgradeType?.[0] || null,
+			// Snapshotted so the hot path (`_recalculateItemBonuses`, the MC counter) never has
+			// to consult the catalog. Saves written before this field existed carry `undefined`
+			// and are resolved back to the catalog by `isUpgradeMagical`.
+			isMagical: upgrade.isMagical === true,
 			costPaid,
 			appliedAt: Date.now(),
 		});

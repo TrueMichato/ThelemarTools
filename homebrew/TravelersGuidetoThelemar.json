@@ -34375,6 +34375,7 @@
 			"upgradeType": [
 				"GS:C"
 			],
+			"isMagical": true,
 			"gemName": "Bloodstone",
 			"rarity": "common",
 			"cost": "At least 10 gp",
@@ -34397,6 +34398,7 @@
 			"upgradeType": [
 				"GS:C"
 			],
+			"isMagical": true,
 			"gemName": "Jasper",
 			"rarity": "common",
 			"cost": "At least 10 gp",
@@ -34419,6 +34421,7 @@
 			"upgradeType": [
 				"GS:C"
 			],
+			"isMagical": true,
 			"gemName": "Malachite",
 			"rarity": "common",
 			"cost": "At least 10 gp",
@@ -34441,6 +34444,7 @@
 			"upgradeType": [
 				"GS:C"
 			],
+			"isMagical": true,
 			"gemName": "Onyx",
 			"rarity": "common",
 			"cost": "At least 10 gp",
@@ -34463,6 +34467,7 @@
 			"upgradeType": [
 				"GS:UC"
 			],
+			"isMagical": true,
 			"gemName": "Coral",
 			"rarity": "uncommon",
 			"cost": "At least 50 gp",
@@ -34485,6 +34490,7 @@
 			"upgradeType": [
 				"GS:UC"
 			],
+			"isMagical": true,
 			"gemName": "Spinel",
 			"rarity": "uncommon",
 			"cost": "At least 50 gp",
@@ -34507,6 +34513,7 @@
 			"upgradeType": [
 				"GS:UC"
 			],
+			"isMagical": true,
 			"gemName": "Spinel",
 			"rarity": "uncommon",
 			"cost": "At least 50 gp",
@@ -34529,6 +34536,7 @@
 			"upgradeType": [
 				"GS:UC"
 			],
+			"isMagical": true,
 			"gemName": "Chrysoberyl",
 			"rarity": "uncommon",
 			"cost": "At least 50 gp",
@@ -34551,6 +34559,7 @@
 			"upgradeType": [
 				"GS:UC"
 			],
+			"isMagical": true,
 			"gemName": "Jet",
 			"rarity": "uncommon",
 			"cost": "At least 50 gp",
@@ -34573,6 +34582,7 @@
 			"upgradeType": [
 				"GS:UC"
 			],
+			"isMagical": true,
 			"gemName": "Tourmaline",
 			"rarity": "uncommon",
 			"cost": "At least 50 gp",
@@ -34595,6 +34605,7 @@
 			"upgradeType": [
 				"GS:UC"
 			],
+			"isMagical": true,
 			"gemName": "Pearl",
 			"rarity": "uncommon",
 			"cost": "At least 50 gp",
@@ -34617,6 +34628,7 @@
 			"upgradeType": [
 				"GS:UC"
 			],
+			"isMagical": true,
 			"gemName": "Garnet",
 			"rarity": "uncommon",
 			"cost": "At least 50 gp",
@@ -34639,6 +34651,7 @@
 			"upgradeType": [
 				"GS:UC"
 			],
+			"isMagical": true,
 			"gemName": "Carnelian",
 			"rarity": "uncommon",
 			"cost": "At least 50 gp",
@@ -34661,6 +34674,7 @@
 			"upgradeType": [
 				"GS:UC"
 			],
+			"isMagical": true,
 			"gemName": "Amber",
 			"rarity": "uncommon",
 			"cost": "At least 50 gp",
@@ -34683,6 +34697,7 @@
 			"upgradeType": [
 				"GS:UC"
 			],
+			"isMagical": true,
 			"gemName": "Jade",
 			"rarity": "uncommon",
 			"cost": "At least 50 gp",
@@ -34705,6 +34720,7 @@
 			"upgradeType": [
 				"GS:R"
 			],
+			"isMagical": true,
 			"gemName": "Aquamarine",
 			"rarity": "rare",
 			"cost": "At least 500 gp",
@@ -34727,6 +34743,7 @@
 			"upgradeType": [
 				"GS:R"
 			],
+			"isMagical": true,
 			"gemName": "Crimson Essence",
 			"rarity": "rare",
 			"cost": "At least 500 gp",
@@ -34749,6 +34766,7 @@
 			"upgradeType": [
 				"GS:R"
 			],
+			"isMagical": true,
 			"gemName": "Alexandrite",
 			"rarity": "rare",
 			"cost": "At least 500 gp",
@@ -34771,6 +34789,7 @@
 			"upgradeType": [
 				"GS:R"
 			],
+			"isMagical": true,
 			"gemName": "Black Pearl",
 			"rarity": "rare",
 			"cost": "At least 500 gp",
@@ -34793,6 +34812,7 @@
 			"upgradeType": [
 				"GS:R"
 			],
+			"isMagical": true,
 			"gemName": "Topaz",
 			"rarity": "rare",
 			"cost": "At least 500 gp",
@@ -34815,6 +34835,7 @@
 			"upgradeType": [
 				"GS:R"
 			],
+			"isMagical": true,
 			"gemName": "Star Ruby",
 			"rarity": "rare",
 			"cost": "At least 500 gp",
@@ -34837,6 +34858,7 @@
 			"upgradeType": [
 				"GS:R"
 			],
+			"isMagical": true,
 			"gemName": "Amethyst",
 			"rarity": "rare",
 			"cost": "At least 500 gp",
@@ -34859,6 +34881,7 @@
 			"upgradeType": [
 				"GS:R"
 			],
+			"isMagical": true,
 			"gemName": "Yellow Sapphire",
 			"rarity": "rare",
 			"cost": "At least 500 gp",
@@ -34881,6 +34904,7 @@
 			"upgradeType": [
 				"GS:R"
 			],
+			"isMagical": true,
 			"gemName": "Peridot",
 			"rarity": "rare",
 			"cost": "At least 500 gp",
@@ -34903,6 +34927,7 @@
 			"upgradeType": [
 				"GS:R"
 			],
+			"isMagical": true,
 			"gemName": "Blue Spinel",
 			"rarity": "rare",
 			"cost": "At least 500 gp",
@@ -34925,6 +34950,7 @@
 			"upgradeType": [
 				"GS:R"
 			],
+			"isMagical": true,
 			"gemName": "Star Sapphire",
 			"rarity": "rare",
 			"cost": "At least 500 gp",
@@ -34947,6 +34973,7 @@
 			"upgradeType": [
 				"GS:VR"
 			],
+			"isMagical": true,
 			"gemName": "Ruby",
 			"rarity": "very rare",
 			"cost": "At least 1,000 gp",
@@ -34969,6 +34996,7 @@
 			"upgradeType": [
 				"GS:VR"
 			],
+			"isMagical": true,
 			"gemName": "Oriental Amethyst",
 			"rarity": "very rare",
 			"cost": "At least 1,000 gp",
@@ -34991,6 +35019,7 @@
 			"upgradeType": [
 				"GS:VR"
 			],
+			"isMagical": true,
 			"gemName": "Opal",
 			"rarity": "very rare",
 			"cost": "At least 1,000 gp",
@@ -35013,6 +35042,7 @@
 			"upgradeType": [
 				"GS:VR"
 			],
+			"isMagical": true,
 			"gemName": "Oriental Topaz",
 			"rarity": "very rare",
 			"cost": "At least 1,000 gp",
@@ -35035,6 +35065,7 @@
 			"upgradeType": [
 				"GS:VR"
 			],
+			"isMagical": true,
 			"gemName": "Fire Opal",
 			"rarity": "very rare",
 			"cost": "At least 1,000 gp",
@@ -35057,6 +35088,7 @@
 			"upgradeType": [
 				"GS:VR"
 			],
+			"isMagical": true,
 			"gemName": "Oriental Emerald",
 			"rarity": "very rare",
 			"cost": "At least 1,000 gp",
@@ -35079,6 +35111,7 @@
 			"upgradeType": [
 				"GS:VR"
 			],
+			"isMagical": true,
 			"gemName": "Black Opal",
 			"rarity": "very rare",
 			"cost": "At least 1,000 gp",
@@ -35101,6 +35134,7 @@
 			"upgradeType": [
 				"GS:VR"
 			],
+			"isMagical": true,
 			"gemName": "Jacinth",
 			"rarity": "very rare",
 			"cost": "At least 1,000 gp",
@@ -35123,6 +35157,7 @@
 			"upgradeType": [
 				"GS:VR"
 			],
+			"isMagical": true,
 			"gemName": "Star Ruby",
 			"rarity": "very rare",
 			"cost": "At least 1,000 gp",
@@ -35145,6 +35180,7 @@
 			"upgradeType": [
 				"GS:L"
 			],
+			"isMagical": true,
 			"gemName": "Emerald",
 			"rarity": "legendary",
 			"cost": "At least 5,000 gp",
@@ -35167,6 +35203,7 @@
 			"upgradeType": [
 				"GS:L"
 			],
+			"isMagical": true,
 			"gemName": "Diamond",
 			"rarity": "legendary",
 			"cost": "At least 5,000 gp",
@@ -35189,6 +35226,7 @@
 			"upgradeType": [
 				"GS:L"
 			],
+			"isMagical": true,
 			"gemName": "Blue Sapphire",
 			"rarity": "legendary",
 			"cost": "At least 5,000 gp",
@@ -35211,6 +35249,7 @@
 			"upgradeType": [
 				"GS:L"
 			],
+			"isMagical": true,
 			"gemName": "Black Sapphire",
 			"rarity": "legendary",
 			"cost": "At least 5,000 gp",
@@ -35385,6 +35424,7 @@
 			"upgradeType": [
 				"AU"
 			],
+			"isMagical": true,
 			"cost": "500 gp",
 			"prerequisite": [
 				{
@@ -35404,6 +35444,7 @@
 			"upgradeType": [
 				"AU"
 			],
+			"isMagical": true,
 			"cost": "400 gp",
 			"prerequisite": [
 				{
@@ -35423,6 +35464,7 @@
 			"upgradeType": [
 				"AU"
 			],
+			"isMagical": true,
 			"cost": "600 gp",
 			"prerequisite": [
 				{
@@ -35470,6 +35512,7 @@
 			"upgradeType": [
 				"AU"
 			],
+			"isMagical": true,
 			"cost": "500 gp",
 			"prerequisite": [
 				{
