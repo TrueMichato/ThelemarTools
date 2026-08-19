@@ -1297,6 +1297,37 @@ Juen's dagger carries 68 properties, of which **17** survive. The schema is
 Legal as-is, pleasingly: `property: ["F","L","T"]` (bare codes validate), `mastery:
 ["Nick|XPHB"]`, `baseItem: "dagger|PHB"`, and the object form of `attachedSpells`.
 
+**The preview has to prove it, too.** The payload was right the moment the sanitizer
+landed — but the dialog renders the monster before any of it has been saved anywhere, so
+the bundled item existed only as a JS object the dialog was holding. `{@item Hecate's
+Dagger|CSHEET}` therefore rendered a link whose hover resolved against an empty cache and
+**silently showed nothing**. The item was in the download and dead on screen, which reads
+to a user as "the fix doesn't work".
+
+`_registerCompanionItemHovers` seeds `DataLoader` directly:
+
+```js
+DataLoader._pCache_addToCache({allDataMerged: {item: forCache}, propAllowlist: new Set(["item"])});
+```
+
+That is the same mechanism the sheet already uses for Ar8 variant-component items and for
+its loaded class/subclass/optfeature entities (`charactersheet.js`), so it is a house
+pattern rather than a new one. It is synchronous — no first-hover race — and it keys on
+`source` plus the item hash builder, exactly what the rendered link queries.
+
+Two details that are load-bearing:
+
+- **It reruns whenever the monster does.** The export source is part of an item's hash, and
+  the user can change the source from this very dialog, so registration sits inside
+  `rebuildCompanionItems()` rather than happening once.
+- **The cached entity is a *copy*.** `_pCache_addEntityToCache` wants a `__prop`, which the
+  item schema forbids; caching the payload object itself would quietly invalidate the
+  download. A test asserts the payload keeps exactly its schema keys.
+
+Failure is non-fatal by design: no `DataLoader` (jest, or a future headless caller) is a
+silent no-op, and a throwing cache warns and moves on. Only the preview hover is at stake —
+never the payload.
+
 **What v20 taught.**
 
 - **A whitelist is safe; a rename is not.** Dropping an unknown property is correct by
@@ -1547,6 +1578,16 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
   damage is on Onger's attack line, but four entries key off "while raging", so the Rage
   entry stays. Compressing an anchor can make that entry *longer* while the block gets
   shorter — measure the character total, not the entry.
+- **A correct payload is not a finished feature.** The bundle was right, the tests were
+  green, and the user's verdict was still "the fix doesn't work" — because the only surface
+  they looked at showed a dead link. Whatever the export *produces*, the preview is where it
+  gets judged, so the preview has to resolve the same references the payload promises.
+- **Verify against the dev server, never the ad-hoc one.** A plain `python -m http.server`
+  sends no `Cache-Control`, so Chrome heuristically caches ES modules and keeps running code
+  you have already changed — `location.reload(true)`, a fresh tab, and CDP cache-disable all
+  failed to shift it. `npm run serve:dev` (`http-server -c-1`) sends `no-store`. A
+  cache-busted `import("…?bust=" + Date.now())` is the quickest way to tell "my fix is
+  wrong" apart from "the page is stale".
 
 ## Key files
 

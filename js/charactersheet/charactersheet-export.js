@@ -310,6 +310,7 @@ class CharacterSheetExport {
 			let exportOptions = await this._pGetNpcExportOptions();
 			const spellIndex = await this._pGetNpcExportSpellIndex();
 			let monster = null;
+			let companionItems = [];
 			let sourceMeta = CharacterSheetNpcExporter.getDefaultSourceMeta(sourceConfig);
 
 			const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
@@ -475,19 +476,23 @@ class CharacterSheetExport {
 
 			// A sheet-authored item resolves nowhere on its own, so it ships with the
 			// statblock. Homebrew documents already carry `item`; we simply never populated it.
-			const getCompanionItems = () => {
+			// Rebuilt whenever the monster is, since the export source is part of an item's
+			// identity and the user can change it from this very dialog.
+			const rebuildCompanionItems = () => {
 				try {
-					return CharacterSheetNpcExporter.buildCompanionItems(monster, this._state, {sourceJson: monster?.source});
+					companionItems = CharacterSheetNpcExporter.buildCompanionItems(monster, this._state, {sourceJson: monster?.source});
 				} catch (e) {
 					// eslint-disable-next-line no-console
 					console.error("Failed to build companion items for NPC export:", e);
-					return [];
+					companionItems = [];
 				}
+				this._registerCompanionItemHovers(companionItems);
 			};
+			const getCompanionItems = () => companionItems;
 
 			const renderValidation = (validation) => {
 				const notes = [...(validation.notes || [])];
-				const nBundled = getCompanionItems().length;
+				const nBundled = companionItems.length;
 				if (nBundled) notes.unshift(`Bundling ${nBundled} custom item${nBundled === 1 ? "" : "s"} so their links resolve.`);
 				const noteHtml = notes.slice(0, 4).map(n => `<div class="ve-muted">• ${this._escapeHtml(n)}</div>`).join("");
 
@@ -552,6 +557,10 @@ class CharacterSheetExport {
 					spellIndex,
 				});
 				sourceMeta = CharacterSheetNpcExporter.getDefaultSourceMeta(sourceConfig);
+
+				// Must precede the render: the preview's `{@item}` links are resolved on
+				// hover against the DataLoader cache, and a bundled item is in no other store.
+				rebuildCompanionItems();
 
 				const rendered = Renderer.monster.getCompactRenderedString(monster, {isShowScalers: false});
 				const safeName = this._escapeHtml(monster.name);
@@ -782,6 +791,38 @@ class CharacterSheetExport {
 		}
 
 		return parts.join(" ");
+	}
+
+	/**
+	 * Make bundled items hoverable in the export preview.
+	 *
+	 * The preview renders the monster before any of it has been saved anywhere, so a
+	 * bundled item exists only as a JS object we are holding. `{@item Name|CSHEET}`
+	 * therefore renders a link whose hover resolves against an empty cache and silently
+	 * shows nothing — the payload was right, but the preview could not prove it.
+	 *
+	 * Seeding the DataLoader cache directly is the same mechanism the sheet already uses
+	 * for Ar8 variant-component items and for its loaded class/subclass/optfeature
+	 * entities (see `_pPreCacheEntityData` / `_registerLoadedHoverEntities` in
+	 * `charactersheet.js`). It is synchronous, so there is no first-hover race, and it
+	 * keys on `source` + the item hash builder — exactly what the rendered link queries.
+	 *
+	 * Registering under the *current* export source is why this reruns whenever the
+	 * monster is rebuilt: changing the source in this dialog changes the item's hash.
+	 */
+	_registerCompanionItemHovers (items) {
+		if (!items?.length) return;
+		if (typeof DataLoader === "undefined" || typeof DataLoader._pCache_addToCache !== "function") return;
+		try {
+			// Cached entities are shared and long-lived; the payload copy must not gain a
+			// `__prop` the schema would reject on download.
+			const forCache = items.map(item => ({...item, __prop: "item"}));
+			DataLoader._pCache_addToCache({allDataMerged: {item: forCache}, propAllowlist: new Set(["item"])});
+		} catch (e) {
+			// Non-critical: the export payload is unaffected, only the preview hover.
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet] Failed to register companion items for hovers:", e);
+		}
 	}
 
 	_getNpcCopyName ({name, existingMonsters}) {

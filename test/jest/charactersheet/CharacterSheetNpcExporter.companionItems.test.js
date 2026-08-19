@@ -10,6 +10,7 @@
  * `additionalProperties: false` — hence the whitelist, and hence this file, which
  * pins that whitelist against the schema shipped in `node_modules`.
  */
+import {jest} from "@jest/globals";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -220,5 +221,81 @@ describe("v20 — external brew is reported, never copied", () => {
 	it("reports each source once however many items cite it", () => {
 		expect(CharacterSheetNpcExporter.getExternalItemSources(
 			mk("{@item A|THELEMAR}", "{@item B|THELEMAR}", "{@item C|THELEMAR}"))).toEqual(["THELEMAR"]);
+	});
+});
+
+/**
+ * The preview renders before anything is saved, so a bundled item exists only as a
+ * JS object we are holding — its `{@item}` link resolves against an empty cache and
+ * the hover silently shows nothing. Seeding `DataLoader` fixes that, but the cached
+ * entity needs a `__prop` the item schema forbids, so the two must not be the same
+ * object: a `__prop` leaking into the payload would invalidate the download.
+ */
+describe("v20 — preview hover registration", () => {
+	const ITEM = {name: "Hecate's Dagger", source: "CSHEET", rarity: "legendary", type: "M"};
+
+	let register; let calls; let realDataLoader; let warnSpy;
+
+	beforeAll(async () => {
+		const mod = await import("../../../js/charactersheet/charactersheet-export.js");
+		register = mod.CharacterSheetExport.prototype._registerCompanionItemHovers;
+	});
+
+	beforeEach(() => {
+		calls = [];
+		realDataLoader = globalThis.DataLoader;
+		globalThis.DataLoader = {_pCache_addToCache: (arg) => calls.push(arg)};
+		warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		globalThis.DataLoader = realDataLoader;
+		warnSpy.mockRestore();
+	});
+
+	it("seeds the cache under the item prop, allowlisted", () => {
+		register.call({}, [ITEM]);
+		expect(calls).toHaveLength(1);
+		expect(Object.keys(calls[0].allDataMerged)).toEqual(["item"]);
+		expect([...calls[0].propAllowlist]).toEqual(["item"]);
+		expect(calls[0].allDataMerged.item).toHaveLength(1);
+	});
+
+	it("never lets the cache-only __prop reach the payload item", () => {
+		const payload = [{...ITEM}];
+		register.call({}, payload);
+
+		expect(calls[0].allDataMerged.item[0].__prop).toBe("item");
+		expect(payload[0]).not.toHaveProperty("__prop");
+		expect(calls[0].allDataMerged.item[0]).not.toBe(payload[0]);
+		expect(Object.keys(payload[0]).sort()).toEqual(Object.keys(ITEM).sort());
+	});
+
+	it("registers every bundled item", () => {
+		register.call({}, [ITEM, {...ITEM, name: "Gambler's Dice"}]);
+		expect(calls[0].allDataMerged.item.map(it => it.name))
+			.toEqual(["Hecate's Dagger", "Gambler's Dice"]);
+	});
+
+	it("does nothing when there is nothing to bundle", () => {
+		register.call({}, []);
+		register.call({}, null);
+		register.call({}, undefined);
+		expect(calls).toHaveLength(0);
+	});
+
+	it("stays silent outside the browser, where DataLoader does not exist", () => {
+		delete globalThis.DataLoader;
+		expect(() => register.call({}, [ITEM])).not.toThrow();
+
+		globalThis.DataLoader = {};
+		expect(() => register.call({}, [ITEM])).not.toThrow();
+		expect(warnSpy).not.toHaveBeenCalled();
+	});
+
+	it("warns but does not throw when the cache rejects the item", () => {
+		globalThis.DataLoader = {_pCache_addToCache: () => { throw new Error("boom"); }};
+		expect(() => register.call({}, [ITEM])).not.toThrow();
+		expect(warnSpy).toHaveBeenCalled();
 	});
 });
