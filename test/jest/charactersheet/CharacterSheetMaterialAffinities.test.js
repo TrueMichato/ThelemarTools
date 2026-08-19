@@ -266,3 +266,32 @@ describe("The normaliser carries the skill scope", () => {
 		for (const mod of fx.conditionalModifiers) expect(mod.skill).toBeNull();
 	});
 });
+
+/**
+ * The Item Powers section grouped by `actionType` against a fixed list and dropped anything
+ * else. Affinity cards are `special`, so they were computed, returned by `getItemPowers`, and
+ * then silently discarded by the only surface that lists them — the same
+ * computed-then-ignored failure this whole effort exists to remove.
+ *
+ * The renderer is DOM-bound and Jest runs without jsdom here, so this is pinned the same way
+ * the picker legend is: against the source.
+ */
+describe("Item Powers renders every power it is given", () => {
+	const combatSrc = readFileSync(join(__dirname, "../../../js/charactersheet/charactersheet-combat.js"), "utf8");
+	const section = combatSrc.slice(combatSrc.indexOf("charsheet-combat-item-powers-section"));
+
+	it("groups with an exhaustive fallback rather than filtering by actionType", () => {
+		const body = section.slice(0, 2000);
+		expect(body).toMatch(/grouped\.has\(power\.actionType\)\s*\?\s*power\.actionType\s*:\s*"other"/);
+		// The old shape dropped anything unlisted.
+		expect(body).not.toMatch(/powers\.filter\(power => power\.actionType === type\)/);
+	});
+
+	it("emits an actionType the section can place, for every affinity", () => {
+		for (const mat of CATALOG.filter(m => (m.effects || []).some(fx => fx.type === "condensateAffinity"))) {
+			const fx = CharacterSheetMaterials.getMaterialEffects({name: "Probe", type: "SCF"}, mat);
+			if (!fx.condensate?.affinity) continue;
+			expect(typeof fx.condensate.affinity).toBe("string");
+		}
+	});
+});

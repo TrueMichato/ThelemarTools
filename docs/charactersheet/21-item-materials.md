@@ -67,21 +67,94 @@ Each material declares six axes plus metadata. Every axis is **tri-state**:
 
 ### Structured effects
 
-Effects are **declared as data**, never hardcoded per material name. 33 types are in use:
+Effects are **declared as data**, never hardcoded per material name.
 
-| Group | Types |
+Every type is registered in `CharacterSheetMaterials.EFFECT_HANDLING`, which names the single
+place that consumes it. That registry is the contract between authoring and consumption, and it
+exists because the alternative failed: for a long stretch a new effect type could be authored,
+pass the normaliser, render a tidy sentence in the item modal, and change no number in the
+sheet — silently, forever. Thirty-four of the 72 materials were in that state. Nothing
+distinguished "deliberately narrative" from "someone forgot to wire it up".
+
+`CharacterSheetMaterialEffectHandling.test.js` walks all 72 materials and fails on any type that
+is unregistered, so that failure mode is now a red build rather than a disappointed player.
+
+The five consumers:
+
+| Consumer | Meaning |
 |---|---|
-| Weapon properties | `addProperty`, `removeProperty`, `propertyLadder` |
-| Armour | `armorForceHeavy`, `armorStealthDisadvantage`, `armorNoStealthDisadvantage`, `armorNoStrengthRequirement`, `armorStrengthRequirementDelta`, `armorDexCapDelta`, `armorWearableUnderClothing` |
-| Bonuses | `bonusAc`, `bonusInitiative`, `bonusCritDamage`, `speedDelta`, `rangeMultiplier`, `thrownRangeDelta` |
-| Damage | `damageReduction`, `extraDamageDiceVsType`, `overrideDamageType` |
-| Tags | `countsAsMagical`, `countsAsSilvered`, `indestructible`, `spellcastingFocus` |
-| Rolls | `saveAdvantage`, `perceptionPenaltyToNotice`, `noRangedDisadvantageInMelee`, `penetrationIgnoresMagicalAc` |
-| Actions | `grantsAction` |
-| Condensates | `condensateAffinity`, `condensateInstability` |
-| Draconic | `draconicResonanceSlot` |
-| Ioun | `doubleNumericProperties` |
-| Advisory | `note` |
+| `projection` | Changes the item itself, via `applyToItem`. The projected item carries the new number. |
+| `modifier` | Becomes a named modifier on the character through `_recalculateMaterialModifiers`. |
+| `roll` | Read at roll time by `charactersheet-combat.js` — a rider, a crit change, an advantage. |
+| `power` | Surfaces in the Actions hub through `getItemPowers()`. |
+| `reference` | **Deliberately** not automated. Surfaced as prose because resolving it is a table decision. |
+
+`reference` is a claim that has to be earned. It means someone decided the rule is a DM call,
+not that nobody got to it. Only seven types hold it, and the guard test caps that number — pushing
+past the cap fails CI and forces the question to be argued rather than assumed.
+
+#### `projection`  (15)
+
+| Effect type | What actually happens |
+|---|---|
+| `bonusAc` | Folded into the item's AC bonus. |
+| `bonusWeaponAttack` | Folded into the weapon's attack bonus. |
+| `bonusWeaponDamage` | Folded into the weapon's damage bonus. |
+| `addProperty` | Adds weapon properties. |
+| `removeProperty` | Removes weapon properties. |
+| `propertyLadder` | Steps a property up its ladder. |
+| `armorForceHeavy` | Forces the armour to Heavy. |
+| `armorStealthDisadvantage` | Imposes Stealth disadvantage. |
+| `armorNoStealthDisadvantage` | Removes Stealth disadvantage. |
+| `armorNoStrengthRequirement` | Drops the Strength requirement. |
+| `armorStrengthRequirementDelta` | Adjusts the Strength requirement. |
+| `armorDexCapDelta` | Adjusts the Dex cap. |
+| `rangeMultiplier` | Multiplies weapon range. |
+| `thrownRangeDelta` | Adjusts thrown range. |
+| `penetrationIgnoresMagicalAc` | Penetration applies against magical AC. |
+
+#### `modifier`  (10)
+
+| Effect type | What actually happens |
+|---|---|
+| `bonusInitiative` | getInitiativeBonuses() → getInitiative(). |
+| `speedDelta` | getMaterialSpeedBonus() → getSpeed()/getSpeedByType(). |
+| `saveAdvantage` | Conditional named modifier on saves. |
+| `checkAdvantage` | Conditional named modifier on checks. |
+| `damageReduction` | Named modifier of type damageReduction. |
+| `resistance` | Added to derived resistances. |
+| `immunity` | Added to derived immunities. |
+| `perceptionPenaltyToNotice` | Conditional Stealth modifier: a penalty to an observer's check equals a bonus to the wearer's contested roll. |
+| `spellcastingFocus` | Makes the item eligible as a spellcasting focus. |
+| `draconicResonanceSlot` | Grants draconic resonance slots. |
+
+#### `roll`  (5)
+
+| Effect type | What actually happens |
+|---|---|
+| `countsAsMagical` | Weapon tag; overcomes non-magical resistance. |
+| `countsAsSilvered` | Weapon tag; overcomes silver-vulnerable resistance. |
+| `overrideDamageType` | Offered as a damage-type choice at roll time. |
+| `bonusCritDamage` | Extra dice on a critical hit. |
+| `extraDamageDiceVsType` | Extra dice against a creature type. |
+
+#### `power`  (3)
+
+| Effect type | What actually happens |
+|---|---|
+| `grantsAction` | Becomes an item power in the Actions hub; activatable when the author declared an `actionType`, reference-only otherwise. A `requiresProperty` gate removes it entirely. |
+| `condensateAffinity` | Becomes an item power; reference-only when it is a table call. |
+| `condensateInstability` | Offered on its trigger, never auto-applied. |
+
+#### `reference`  (5)
+
+| Effect type | What actually happens |
+|---|---|
+| `doubleNumericProperties` | Ioun Sand doubles properties granted by an intact Ioun Stone SET IN THE MATRIX — explicitly not ordinary enchantments or loose fragments. The sheet models Ioun Stones as their own subsystem, not as material sockets, so which numbers qualify is a table call. |
+| `noRangedDisadvantageInMelee` | The sheet has no positional model, so it never imposes the disadvantage this would suppress. |
+| `indestructible` | Whether an effect could damage the item is a DM call. |
+| `armorWearableUnderClothing` | Concealment is a fiction/social question, not a stat. |
+| `note` | Free prose the author attached to the material. |
 
 Most effects accept an `appliesTo` gate so one material can behave differently on a weapon
 than on a shield. **Darkmetal's `+1 AC` is gated to `["shield"]`** — it is not a
@@ -102,11 +175,49 @@ Notes on effects that generate no summary line of their own (`rangeMultiplier`, 
 …) are surfaced as free-standing notes so their prose is never lost. `grantsAction` is exempt
 from both rules — its note *is* the action's description.
 
-### Degradation (Phase 4)
+### Degradation and instability
 
-Five materials carry a `degradation` block (Duststone, Obsidian, Ordinary Glass, Rimeglass,
-Stone and Flint). These are **authored but not yet automated** — they render on the crafting
-page and are reserved for Phase 4.
+Some materials break, and some bite back. The two are deliberate siblings — **identical trigger
+vocabulary, matched by the same function** (`_matchesTrigger`) so they can never drift about what
+a natural 1 is. They differ in who gets hurt:
+
+| Block | Who it hurts | Materials |
+|---|---|---|
+| `degradation` | The **item** | Duststone, Obsidian, Ordinary Glass, Rimeglass, Stone and Flint |
+| `instability` | The **carrier** | Vitriol Crystal, Stormprism, Magmaheart, Skyshard |
+
+Both are **offered, never applied**. Whether a fumble actually chipped the blade is a table
+decision, so the sheet asks and the player confirms.
+
+#### Triggers
+
+```jsonc
+{"on": "attackRoll", "natural": [1], "alsoOnCriticalHit": true}
+{"on": "damageTaken", "damageType": "fire"}   // omit damageType to match any
+```
+
+An `attackRoll` trigger is scoped to the weapon actually swung. A `damageTaken` trigger sweeps
+**everything carried**, because Magmaheart contracts wherever you are keeping it.
+
+#### Instability effects
+
+```jsonc
+{"type": "selfDamage", "damage": "1d4", "damageType": "acid"}
+{"type": "save", "ability": "str", "dc": 13, "onFail": "pushed 10 feet"}
+```
+
+Self-damage routes through `takeDamage`, so the carrier's own resistances apply — being
+fire-immune should protect you from your own scabbard too.
+
+> **The `damageTaken` trap.** `isDegradationTriggered` matched this trigger from the day it was
+> written, but `getDegradationCandidates` had exactly one caller, and that caller only ever passed
+> `attackRoll`. Rimeglass's authored fire degradation was therefore unreachable — matched by the
+> vocabulary, fired by nothing. It is now offered from the sheet's Damage flow.
+>
+> A related consequence: that flow only asked "what damage type?" when the character had a
+> resistance, immunity or vulnerability, so a character with no defenses could never provoke a
+> material reaction at all. It now also asks when a carried material cares, via
+> `getMaterialReactiveDamageTypes()`.
 
 ## Elemental condensates and roles
 
@@ -408,6 +519,23 @@ ever a candidate, and it excludes spell attacks. Destroyed items stop being cand
 | `state.repairItemMaterial(itemId)` | state | Clears stacks **and** `isDestroyed` |
 | `state.getShortRestRepairableItems()` | state | Degraded, `shortRest`-repairable, not destroyed |
 
+### Instability API
+
+The carrier-facing sibling. Same trigger shapes, same offer-never-apply doctrine, same
+`materials_degradation` sub-toggle — a table that turned one off did not ask for the other.
+
+| Call | Where | Returns |
+|---|---|---|
+| `getInstabilitySpec(material)` | static | The authored block, or `null` |
+| `isInstabilityTriggered(material, trigger)` | static | Whether this roll/damage matches |
+| `getReactiveDamageTypes(material)` | static | Damage types this material reacts to, from **both** blocks |
+| `state.getInstabilityCandidates(trigger, {itemId})` | state | `[{id, name, material, spec}]` |
+| `state.getMaterialReactiveDamageTypes()` | state | Union across everything carried |
+| `combat.pResolveMaterialInstability(candidates)` | combat | Offers, then applies each |
+
+`pResolveMaterialInstability` is public because the trigger is not always an attack — the
+Damage flow calls it too, so a Magmaheart chill and a Vitriol fumble read alike.
+
 ### Surfaces
 
 | Surface | Where |
@@ -415,6 +543,8 @@ ever a candidate, and it excludes spell attacks. Destroyed items stop being cand
 | `⚠ Damage -2 steps` badge on the inventory row (amber; red + struck through when destroyed) | `getDegradationBadgeHtml(itemId)` |
 | **Degraded:** line + **Repair** button in the item info modal | `charactersheet-inventory.js` |
 | *Material Degrades* / *Material Shatters* confirm after a qualifying attack | `charactersheet-combat.js`, hook `materialDegradation` |
+| *Material Instability* confirm after a qualifying attack | `charactersheet-combat.js`, hook `materialInstability` |
+| Both reactions offered after taking typed damage | `charactersheet.js`, `_pOfferMaterialDamageReactions()` |
 | Short-rest toast offering per-item repairs | `offerShortRestRepairs()`, called from `charactersheet-rest.js` |
 
 `materials_degradation: false` suspends the **effect** but preserves the recorded stacks,
@@ -626,6 +756,7 @@ must do the same.
 | **Material** dropdown in Create / Modify Custom Item | `charactersheet-inventory.js` |
 | **Material** dropdown in the Craft workbench commit dialog | `charactersheet-crafting.js` |
 | `Pen N` on attack rows + post-attack **Penetrating Blow** prompt | `charactersheet-combat.js` |
+| **NPC export** — attack-line qualifiers, `Armor Traits`, `Resilience` folding, and baked companion items | `charactersheet-npc-exporter.js` (see [18-npc-export.md](./18-npc-export.md#v22--a-material-is-part-of-the-weapon-so-it-belongs-on-the-attack)) |
 
 The picker only offers **eligible** materials — `isEligible(item, material)` filters on
 `appliesTo` against the item's kind, so a weapon sees 65 of the 72 and armour sees a

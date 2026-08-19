@@ -7785,8 +7785,17 @@ class CharacterSheetCombat {
 		container.innerHTML = "";
 		const order = ["action", "bonus", "reaction", "onHit", "other"];
 		const labels = {action: "Action", bonus: "Bonus Action", reaction: "Reaction", onHit: "On Hit", other: "Other"};
+		// Grouping must be exhaustive. This used to filter by `actionType` against `order`, so a
+		// power carrying any other type — condensate affinity cards are `special` — was computed,
+		// returned by the API, and then silently dropped by the only surface that lists it.
+		// Anything unrecognised now falls into "Other" rather than vanishing.
+		const grouped = new Map(order.map(t => [t, []]));
+		for (const power of powers) {
+			const type = grouped.has(power.actionType) ? power.actionType : "other";
+			grouped.get(type).push(power);
+		}
 		for (const type of order) {
-			const groupPowers = powers.filter(power => power.actionType === type);
+			const groupPowers = grouped.get(type) || [];
 			if (!groupPowers.length) continue;
 			const group = e_({tag: "div", clazz: "cs-combat-item-powers__group"});
 			group.append(e_({tag: "div", clazz: "cs-combat-item-powers__title", text: labels[type]}));

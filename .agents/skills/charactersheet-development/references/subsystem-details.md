@@ -604,6 +604,26 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
   Of the five `magicCapacityRules`, only `freeEffect` and `dcRiseThreshold` are automated;
   `opposedStatesCountAsOne` and `makerForeknowledge` are advisory, with the manual ±1
   `material.mcAdjust` as the escape hatch.
+- **`EFFECT_HANDLING` is the authoring↔consumption contract.** Every effect type is registered
+  with a `consumer` (`projection` / `modifier` / `roll` / `power` / `reference`) and a note
+  saying what actually happens. It exists because the alternative failed silently: 34 of 72
+  materials once carried an effect that normalised cleanly, rendered a tidy sentence in the item
+  modal, and changed no number anywhere. ⚠️ **Adding an effect type without registering it fails
+  `CharacterSheetMaterialEffectHandling.test.js`**, which walks all 72 materials. `reference`
+  means "deliberately a DM call" and is capped by that test — pushing past the cap forces the
+  question to be argued rather than assumed.
+- **`degradation` and `instability` are siblings, matched by one shared `_matchesTrigger`.**
+  Degradation hurts the **item**; instability hurts the **carrier**. Same trigger vocabulary
+  (`{on: "attackRoll", natural, alsoOnCriticalHit}` / `{on: "damageTaken", damageType}`), same
+  `materials_degradation` sub-toggle, same offer-never-apply doctrine. Instability effects are
+  `{type: "selfDamage", damage, damageType}` or `{type: "save", ability, dc, onFail}`; self-damage
+  goes through `takeDamage` so the carrier's own resistances apply.
+- ⚠️ **`damageTaken` triggers are fired from `charactersheet.js`, not the combat hook.** The
+  post-attack hook only ever passes `attackRoll`. For a long time nothing passed `damageTaken` at
+  all, so Rimeglass's authored fire degradation was matched-but-unreachable. Damage-triggered
+  reactions now come from `_pOfferMaterialDamageReactions()` on the Damage flow. That flow's
+  damage-type prompt is also driven by `getMaterialReactiveDamageTypes()`, not just by the
+  character's resistances — otherwise a character with no defenses can never provoke one.
 - ⚠️ **`item.attachedSpells` is a dict far more often than an array** (~343 vs ~84 in the
   shipped catalog). `will` / `other` / `ritual` hold arrays directly; `daily` / `charges` /
   `limited` / `rest` nest one level further under a use count (`{"1e": [...]}`); and a
@@ -841,7 +861,7 @@ Full documentation: `docs/charactersheet/21-item-materials.md`.
 
 **Files**: `charactersheet-npc-exporter.js` (pure converter), `charactersheet-export.js` (dialog).  
 **Docs**: `docs/charactersheet/18-npc-export.md`  
-**Tests**: `CharacterSheetNpcExporter.test.js` + `.matrix.test.js` + `.realsaves.test.js` (contract tests against a corpus of 24 full saves in `npc-exports/`; auto-skips when those untracked fixtures are absent)
+**Tests**: `CharacterSheetNpcExporter.test.js` + `.matrix.test.js` + `.materials.test.js` + `.realsaves.test.js` (contract tests against a corpus of 24 full saves in `npc-exports/`; auto-skips when those untracked fixtures are absent)
 
 ### Key Method: `convertStateToMonster(state, options)`
 
@@ -958,6 +978,40 @@ and the sheet header render from. Two rules follow, and both have tests.
 Both branches of `_getMergedAttacks` must stay in step, including reading
 `eff.totalAttackBonus` / `eff.totalDamageBonus` rather than raw `eff.bonusWeapon*`. No corpus
 character exercises the first branch, which is precisely why it silently drifted.
+
+### Materials and upgrades reach the statblock (v22)
+
+Materials and upgrades are stored as **references** and resolved at read time, so anything
+that reads `getInventory()` / `_data.inventory` sees the *base* item. That was both reported
+bugs: the statblock had no material awareness at all, and `buildCompanionItems` bundled an
+item measurably weaker than the block was built from (Angelic Plate AC 18 vs 21, Cataclysm
+`2d6` vs `2d10`).
+
+- **Read the projection, never the store.** `getItems()` for material projection,
+  `getEffectiveItemBonuses(id)` / `getEffectiveWeaponDamage(id)` for upgrade composition.
+  There were 21 sites independently re-deriving a weapon's total; do not add another.
+- **`CharacterSheetMaterials.getMaterialEffects(item, material)` does NOT resolve its own
+  material.** Called with one argument it returns a fully-populated **empty** shape instead
+  of throwing, so a forgotten `resolveMaterial(item)` is indistinguishable from a material
+  with no effects. Always `getMaterialEffects(item, Materials.resolveMaterial(item))`.
+  (`applyToItem`, `getMaterialNotes` and `getPenetration` *do* resolve internally — the
+  inconsistency is the trap.)
+- **Routing follows the standing doctrine.** Roll-affecting effects go on the **attack
+  line** (penetration, crit threshold, magical/silvered tags, the damage-type *option*,
+  material riders); save/check advantage folds into the `Resilience` trait with
+  per-source attribution; non-roll properties go to `Armor Traits` or the bundled item's
+  `entries`. `CharacterSheetMaterials.EFFECT_HANDLING` is the routing authority and an
+  exporter test fails when a type has no home.
+- **`requiresProperty` is a hard gate**, not an availability hint — Stout Blackwood's crit
+  die exists only on a Loading weapon.
+- **Penetration is an AC mechanic** (near-miss), *not* resistance-piercing. The in-app
+  glossary at `charactersheet-materials.js:1892` still says otherwise and is wrong.
+- **Bake, then describe.** Bundled items carry baked numbers and no `material` /
+  `appliedUpgrades` refs — `additionalProperties: false` forbids them and a reference is
+  inert (or double-applies) on a receiving instance. Provenance survives as `entries` prose.
+- **Multiattack scores the rendered attack**, summing every `{@damage}` clause on the
+  finished line (once-per-turn riders excluded), because `attack.damage` holds only the
+  weapon's own die. Also fixes monks, whose Unarmed Strike row omits the ability modifier.
 
 ### Bundling sheet-authored items with the export (v20)
 
