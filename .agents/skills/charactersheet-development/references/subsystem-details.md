@@ -929,6 +929,36 @@ a term exists, prose only where it adds something.
 - **A default Unarmed Strike is filler; a monk's is not.** `_getMultiattackAction` picks
   the best weapon attack unless an unarmed strike out-damages all of them.
 
+### Weapon damage must come from the sheet's own breakdown (v21)
+
+The exported flat on a weapon line is **`abilityMod + base + feature + item`** from
+`state.getWeaponDisplayDamageBreakdown(attack)` — the same helper the combat tab, play mode
+and the sheet header render from. Two rules follow, and both have tests.
+
+- **Never fold `state` / `rage` / `hybrid` from the breakdown.** Those are situational, and
+  the v15 rider system already prints them as conditional clauses on the same line (`plus 2
+  damage while raging`). Folding `.total` hides the condition *and* double-counts.
+- **`getWeaponDisplayDamageBreakdown` reads `sourceItem`, not `_sourceItem`.** The exporter's
+  own convention is the underscored name; `_attackMatchesWeaponBaseItems` is not. Pass an
+  attack shaped like combat.js's `autoAttack`: `{id, name, abilityMod, damageBonus, properties,
+  range, sourceItem}` where `damageBonus = eff.totalDamageBonus + (item.customDamageBonus||0)`.
+
+**Two traps this replaced.**
+
+- **`CharacterSheetUpgrades.increaseDamageDie(damageDie, steps)` returns the die and nothing
+  else.** `"2d6+15"` comes back as `"2d8"` — flat bonus, damage type and rider clause gone,
+  silently. Extract the bare die (`/^\s*(\d+d\d+)/`) before calling it. The sheet's two
+  callers already pass bare dice; the exporter was the sole misuse.
+- **`state.updateAttackFromWeapon()` is legacy and the exporter is its only production
+  caller.** It folds `customModifiers.damageBonus` — dead save data (`setCustomModifier` has
+  zero callers in `js/`, present in 10 of 24 corpus saves) — and knows nothing about named
+  `"damage"` modifiers or weapon-scoped item bonuses. Use it for `name` / `abilityMod` /
+  `properties` / `range` / the base die; **never for the damage total**.
+
+Both branches of `_getMergedAttacks` must stay in step, including reading
+`eff.totalAttackBonus` / `eff.totalDamageBonus` rather than raw `eff.bonusWeapon*`. No corpus
+character exercises the first branch, which is precisely why it silently drifted.
+
 ### Bundling sheet-authored items with the export (v20)
 
 An NPC export is a homebrew document (`{_meta, monster: [...]}`), so it may also carry

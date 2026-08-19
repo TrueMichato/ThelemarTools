@@ -1350,6 +1350,93 @@ never the payload.
   `renderValidation`, because `pApplySourceConfig()` runs — and validates — before the
   button handlers below it are ever defined.
 
+### v21 — the damage number on the line is the damage number on the sheet
+
+The user reported one weapon: Arthur's Cataclysm exported `2d8+4` where the sheet
+showed `+13`. The attack roll was right, so only the damage flat was wrong. Pulling on
+it surfaced **two independent defects that pushed in opposite directions**, which is
+why no earlier read-through caught them — a spot-check of any single weapon could
+plausibly look correct.
+
+**Defect 1 — a die-only helper handed a whole formula.**
+`CharacterSheetUpgrades.increaseDamageDie(damageDie, steps)` matches `/(\d+)d(\d+)/`
+and returns `` `${numDice}d${newSize}` `` **and nothing else**. Its parameter is named
+`damageDie`; its doc comment reads `"1d6" -> "1d8"`; the sheet's two callers both hand it
+a bare die. The exporter handed it `derived.damage` — a full formula — so `"2d6+15"` came
+back as `"2d8"` and the flat bonus, the damage type and any rider clause were silently
+dropped. **The exporter was the sole misuse, so the fix belongs in the exporter**: extract
+the bare die with `/^\s*(\d+d\d+)/`, step that, and compose the flat separately.
+
+**Defect 2 — the exporter and the sheet used two different formulas.**
+The exporter derived weapon rows from `state.updateAttackFromWeapon()`, a helper whose
+**only production caller is the exporter** — everything else that references it is a test.
+It composes damage as `weaponDie + abilityMod + customModifiers.damageBonus`, and
+`customModifiers.damageBonus` is dead legacy save data: its writer `setCustomModifier` has
+zero callers in `js/`, and nothing else reads it. It is nevertheless present in **10 of the
+24 corpus saves** with values from 1 to 7, so those characters exported an inflated number.
+Meanwhile the helper knows nothing about the named `"damage"` modifiers (Dueling's +2) and
+weapon-scoped item bonuses (Bracers of Archery) the sheet *does* show — so other characters
+exported a number that was too low.
+
+The sheet's canonical formula, used identically by combat, play mode and the sheet header,
+is `abilityMod + getWeaponDisplayDamageBreakdown(attack).total`. The exporter now builds an
+attack object shaped exactly like the combat tab's `autoAttack` — crucially `sourceItem`,
+**not** the exporter's own `_sourceItem`, because `_attackMatchesWeaponBaseItems` reads
+`sourceItem` — and folds the breakdown itself.
+
+**It folds `base + feature + item` and deliberately *not* `state` / `rage` / `hybrid`.**
+Those are situational, and v15's rider system already prints them as conditional clauses on
+the same line (`plus 2 damage while raging`). Folding `.total` would both hide the condition
+and double-count against the rider. This is the single most important line in the change and
+it has its own test.
+
+Both branches of `_getMergedAttacks` were fixed. The second (auto-generated weapon rows) had
+both defects; the first (rows already on the sheet, matched to an active weapon by name) was
+still reading raw `eff.bonusWeapon + eff.bonusWeaponDamage` where the second had moved to
+`eff.totalAttackBonus` / `eff.totalDamageBonus`, so an upgraded weapon exported different
+numbers depending on whether the sheet happened to carry a hand-added row of the same name.
+No corpus character exercises that branch today, which is exactly why it had drifted.
+
+**Corpus effect — 11 weapons across 9 characters moved, and all 28 now agree with the
+sheet exactly:**
+
+| character | weapon | was | now | why |
+|---|---|---|---|---|
+| Arthur | Cataclysm | `2d8+4` | `2d8+13` | die-step wiped the flat |
+| Aldor | Phoenix Rocket Sword | +14 | +7 | phantom custom +7 |
+| Dranan | Sun Blade | +11 | +9 | custom out, feature +2 in |
+| Duralin | Retaliator, Sword of Mac Lir | +16 | +13 | custom out, feature in |
+| Dzeiy | Reaper's Scream | +9 | +8 | phantom custom +1 |
+| Elizabeth | Fang of the Whale Eater / Riptide Katana | +7 / +5 | +6 / +4 | phantom custom +1 |
+| Mikase | Silver Dragon Katana | +9 | +10 | feature bonus recovered |
+| Missy | Ninjato | +7 | +8 | feature bonus recovered |
+| Onger | Gae Bolg | +14 | +13 | phantom custom +1 |
+| Vern | Scimitar of Speed / Defender Rapier | +9 / +10 | +7 / +8 | phantom custom +2 |
+| Wisp | +2 War Pick | +12 | +9 | custom out, feature in |
+
+Aldor's and Vern's CR each drop by one as a consequence, which is the correct downstream
+effect of no longer over-reporting their damage per round.
+
+**What v21 taught.**
+
+- **A helper's contract lives in its parameter name, not in what it tolerates.**
+  `increaseDamageDie` accepted a formula without complaint and returned something
+  plausible-looking. Nothing failed loudly; a `+15` just evaporated. When a helper's
+  input is narrower than what it will silently accept, the caller has to narrow it.
+- **A legacy helper with exactly one production caller is a fork in the road, not a
+  shared path.** `updateAttackFromWeapon` looked like the sheet's own weapon logic and
+  was in fact the exporter's private copy, drifting from the real one for as long as
+  both existed. Before deriving a number, check who else derives it — and prefer the
+  function the UI actually renders from.
+- **Two bugs pushing opposite ways hide each other.** Nine characters were too high and
+  one was too low, so "the export damage looks about right" held up under casual review
+  for many passes. Measuring the whole corpus against the sheet's own formula — rather
+  than eyeballing diffs — was what made the shape of it visible.
+- **Correct-by-construction beats correct-today.** The verification that matters is not
+  "Arthur is now 13" but "for all 28 equipped weapons in the corpus, exported flat ==
+  `abilityMod + base + feature + item`, and the situational component is zero." That
+  probe is what proved the rider exclusion was safe.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 

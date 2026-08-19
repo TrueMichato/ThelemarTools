@@ -7263,13 +7263,16 @@ class CharacterSheetNpcExporter {
 			const item = key ? activeWeaponByName.get(key) : null;
 			if (!item) return attack;
 
-			// Use effective bonuses (includes upgrade effects) when available
+			// Use effective bonuses (includes upgrade effects) when available. These are the
+			// same totals the auto-weapon branch below reads — the two branches disagreed
+			// until v21, so an upgraded weapon exported different numbers depending on
+			// whether the sheet happened to carry a hand-added row of the same name.
 			const eff = state.getEffectiveItemBonuses?.(item.id);
 			let magicAttackBonus;
 			let magicDamageBonus;
 			if (eff) {
-				magicAttackBonus = (Number(eff.bonusWeapon) || 0) + (Number(eff.bonusWeaponAttack) || 0);
-				magicDamageBonus = (Number(eff.bonusWeapon) || 0) + (Number(eff.bonusWeaponDamage) || 0);
+				magicAttackBonus = Number(eff.totalAttackBonus) || 0;
+				magicDamageBonus = Number(eff.totalDamageBonus) || 0;
 			} else {
 				magicAttackBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponAttack) || 0);
 				magicDamageBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponDamage) || 0);
@@ -7280,8 +7283,17 @@ class CharacterSheetNpcExporter {
 				: (inheritedMastery ? [`${inheritedMastery}|${Parser.SRC_XPHB}`] : []);
 			const masteryProperty = this._getMasteryName(itemMastery[0]);
 
+			// `_getAttackDamageText` renders this row as `abilityMod + damageBonus`, so the
+			// standing total has to land in `damageBonus` or the named damage modifiers and
+			// weapon-scoped item bonuses the sheet shows are silently dropped.
+			const bd = state.getWeaponDisplayDamageBreakdown?.(attack);
+			const damageBonus = bd
+				? (Number(bd.base) || 0) + (Number(bd.feature) || 0) + (Number(bd.item) || 0)
+				: attack.damageBonus;
+
 			return {
 				...attack,
+				damageBonus,
 				_sourceItem: item,
 				weaponKey: `${item.name}|${item.source || Parser.SRC_XPHB}`,
 				mastery: attack.mastery?.length ? attack.mastery : itemMastery,
@@ -7312,11 +7324,15 @@ class CharacterSheetNpcExporter {
 				magicAttackBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponAttack) || 0);
 				magicDamageBonus = (Number(item.bonusWeapon) || 0) + (Number(item.bonusWeaponDamage) || 0);
 			}
-			// Apply Superior upgrade die increase to exported damage
-			let exportDamage = derived.damage;
+			// The die is taken bare. `CharacterSheetUpgrades.increaseDamageDie` returns *only*
+			// the die term it matched, so handing it a whole formula ("2d6+15") silently
+			// returns "2d8" and drops the flat bonus — which is how Arthur's Cataclysm
+			// exported as 2d8+4 against the sheet's +13.
+			let damageDie = String(derived.damage).match(/^\s*(\d+d\d+)/)?.[1] || String(derived.damage);
 			if (damageDieIncrease > 0 && typeof CharacterSheetUpgrades !== "undefined") {
-				exportDamage = CharacterSheetUpgrades.increaseDamageDie(exportDamage, damageDieIncrease);
+				damageDie = CharacterSheetUpgrades.increaseDamageDie(damageDie, damageDieIncrease);
 			}
+			const exportDamage = this._getWeaponStandingDamage({state, item, derived, damageDie, magicDamageBonus});
 			const inheritedMastery = this._getInheritedMasteryFromBaseItem(item, state);
 			const itemMastery = item.mastery?.length
 				? item.mastery
@@ -7331,7 +7347,8 @@ class CharacterSheetNpcExporter {
 				isMelee: !isRangedType,
 				properties: props,
 				attackBonus: (Number(derived.attackBonus) || 0) + magicAttackBonus,
-				damage: this._addFlatBonusToDiceFormula(exportDamage, magicDamageBonus),
+				// Already carries the ability modifier and every standing bonus.
+				damage: exportDamage,
 				// `updateAttackFromWeapon` already folds the ability modifier into `damage`.
 				// Rows coming straight from `getAttacks()` do not — the sheet adds it at roll
 				// time — so the formatter has to be told which is which rather than guessing
@@ -7349,6 +7366,42 @@ class CharacterSheetNpcExporter {
 		});
 
 		return attacks;
+	}
+
+	/**
+	 * The weapon line's standing damage, composed the way the sheet's combat tab composes
+	 * it: the ability modifier plus `getWeaponDisplayDamageBreakdown`.
+	 *
+	 * The exporter used to read this off `updateAttackFromWeapon` — whose only production
+	 * caller it is. That helper folds in `customModifiers.damageBonus`, a field with no
+	 * writer and no live reader left anywhere in the sheet, while knowing nothing about the
+	 * named damage modifiers (Dueling's +2) and weapon-scoped item bonuses the sheet does
+	 * show. Nine of the corpus' characters exported a damage number the sheet disagreed
+	 * with, wrong in both directions at once.
+	 *
+	 * Situational damage is deliberately excluded. Rage, Hybrid Transformation and
+	 * active-state bonuses are printed as conditional riders on this same line, so folding
+	 * them in here would count them twice.
+	 */
+	static _getWeaponStandingDamage ({state, item, derived, damageDie, magicDamageBonus}) {
+		const abilityMod = Number(state.getAbilityMod?.(derived.abilityMod)) || 0;
+		// Mirrors the shape the combat tab builds for an auto-generated weapon attack, so the
+		// breakdown resolves the same contributions here as it does on the sheet.
+		const breakdown = state.getWeaponDisplayDamageBreakdown?.({
+			id: `auto_${item.id}`,
+			name: item.name,
+			abilityMod: derived.abilityMod,
+			damageBonus: magicDamageBonus + (Number(item.customDamageBonus) || 0),
+			properties: derived.properties,
+			range: derived.range,
+			sourceItem: item,
+		});
+		const standing = breakdown
+			? (Number(breakdown.base) || 0) + (Number(breakdown.feature) || 0) + (Number(breakdown.item) || 0)
+			: magicDamageBonus;
+		const flat = abilityMod + standing;
+		if (!flat) return damageDie;
+		return `${damageDie}${flat > 0 ? "+" : ""}${flat}`;
 	}
 
 	static _isActiveItem (item) {

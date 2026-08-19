@@ -1781,7 +1781,13 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			const arc = (mikase.action || []).find(it => /^Starlight Arc/.test(it.name));
 			expect(arc.name).toMatch(/\(Replaces One Attack\)$/);
 			// It carries the parent weapon's own line, retargeted, with its own die appended.
-			expect(arc.entries[0]).toMatch(/\{@atk mw\} \{@hit \+16\} to hit, 30-foot cone, each nearest creature in it\./);
+			// Derived from the parent rather than hardcoded: the point is that the two agree,
+			// and pinning the literal number here only records whatever the item bonuses
+			// happened to total on the day the test was written.
+			const parent = (mikase.action || []).find(it => it.name === "Starfire Katana");
+			const parentHit = (parent.entries[0].match(/\{@hit ([+-]\d+)\}/) || [])[1];
+			expect(parentHit).toBeTruthy();
+			expect(arc.entries[0]).toContain(`{@atk mw} {@hit ${parentHit}} to hit, 30-foot cone, each nearest creature in it.`);
 			expect(arc.entries[0]).toMatch(/\{@damage 1d8\+10\} slashing damage/);
 			// The extra die lands inside the damage sentence, not after the line's last period.
 			expect(arc.entries[0]).not.toMatch(/magical\.,/);
@@ -2327,9 +2333,12 @@ describeReal("v20 — companion items travel with the monster", () => {
 
 	(available.includes("Juen") ? it : it.skip)("bundles Juen's dagger and points the statblock at it", () => {
 		const {monster, items} = bundleFor("Juen");
-		expect(items.map(i => i.name)).toEqual(["Hecate's Dagger"]);
+		// Both of Juen's `source: "CUSTOM"` items ship. The ring used to tag as `|RAZA`,
+		// which resolved to a *different* designer's ring — a live hover pointing at the
+		// wrong item is worse than a dead one, so it belongs in the bundle too.
+		expect(items.map(i => i.name).sort()).toEqual(["Hecate's Dagger", "Ring of the Assassin Lord"]);
 
-		const dagger = items[0];
+		const dagger = items.find(i => i.name === "Hecate's Dagger");
 		// `type: "weapon"` is the shape the sheet stores and the schema rejects.
 		expect(dagger.type).toBe("M");
 		expect(dagger.reqAttune).toBe(true);
