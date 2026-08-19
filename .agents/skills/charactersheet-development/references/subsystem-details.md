@@ -726,6 +726,23 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
   Multi-word labels render as stretched empty ellipses. Item-row upgrade badges therefore use
   `.charsheet__item-upgrade-badge`, not `.badge badge-warning`; the three item modals carry a
   scoped override instead. Do not "fix" the global — the rest of the site depends on it.
+- ⚠️ **A materialled / upgraded / socketed item is NOT a catalog hover target.** It is no longer
+  what `items.html` describes, so `isCatalogItemHoverTarget` returns false for it and it falls
+  through to `buildItemInlineHoverEntry`. `_addItem` copies `entries`, so the printed prose is not
+  lost. **`hasCatalogItemIdentity` is the separate predicate** for "does this resolve in a loaded
+  catalog" — an item can have an identity while no longer being what that entry describes, which
+  is what lets the inline entry end with an `{@item}` link back to the printed version.
+- ⚠️ **A plain catalog item must keep taking the catalog path.** This is the regression to guard
+  when touching hover routing: verify a pristine item side by side and confirm it still renders
+  the full statblock, not the inline entry.
+- **State publishes itself as `globalThis.__csState`** from its constructor. The item hover
+  builders in `charactersheet-class-utils.js` are pure statics called from a dozen render sites
+  with no state reference, and they need `getEffectiveWeaponDamage` / `getItemMaterialEntity`.
+  Mirrors `__csMaterialCatalog` / `__csResonanceCatalog`. `window.charSheet` exists but is
+  explicitly labelled a debugging handle — do not build on it.
+- ⚠️ **Several upgrade `notes` are authored self-labelled** (`"Brutal: Reroll max damage dice…"`),
+  so `getUpgradeSummary` strips a redundant `"<name>: "` prefix before prepending the name.
+  Without it the hover read `"Brutal: Brutal: Reroll…"`.
 - ⚠️ **A single-valued picker closes on apply; a multi-valued one must not.** A material is one
   field, so `showMaterialPickerModal` closing is correct. `showUpgradePickerModal` is a *list*
   editor — a weapon takes several upgrades — so it rebuilds its body in place via `renderBody()`

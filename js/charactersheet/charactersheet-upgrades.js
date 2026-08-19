@@ -1285,7 +1285,14 @@ class CharacterSheetUpgrades {
 		if (eff.bonusDamageDice) parts.push(`+${eff.bonusDamageDice} ${eff.bonusDamageType}`);
 		parts.push(...(eff.tags || []));
 		parts.push(...(eff.notes || []));
-		return parts.length ? `${upgrade.name}: ${parts.join("; ")}` : upgrade.name;
+		if (!parts.length) return upgrade.name;
+
+		// Several upgrade notes are authored self-labelled ("Brutal: Reroll max damage dice…"),
+		// so prepending the name unconditionally produced "Brutal: Brutal: Reroll…". Strip the
+		// redundant prefix rather than re-authoring 88 data entries to a second convention.
+		const prefix = `${upgrade.name}: `;
+		const cleaned = parts.map(p => (String(p).startsWith(prefix) ? String(p).slice(prefix.length) : p));
+		return `${upgrade.name}: ${cleaned.join("; ")}`;
 	}
 
 	static getGemstoneSummary (gem) {

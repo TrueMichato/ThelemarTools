@@ -1342,18 +1342,16 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
-	 * A user-authored item has no DataLoader identity even when an imported save
-	 * carries a non-Custom source label. Only real catalog entries may use the
-	 * standard item hover.
+	 * Does this item exist in a loaded catalog under its own name and source?
+	 *
+	 * Separate from {@link isCatalogItemHoverTarget} on purpose: a materialled longsword still
+	 * HAS a catalog identity (so the hover can offer a "view the printed entry" link) while no
+	 * longer BEING what that entry describes.
 	 * @param {*} item
 	 * @returns {boolean}
 	 */
-	static isCatalogItemHoverTarget (/** @type {*} */ item) {
+	static hasCatalogItemIdentity (/** @type {*} */ item) {
 		const source = String(item?.source || "").trim();
-		const isDerived = item?._isCraftingMaterial
-			|| item?._isCraftedItem
-			|| item?._isEmpoweredGemstone
-			|| item?.cookedTier != null;
 		const isSourceLoaded = !!source && !!(
 			globalThis.SourceUtil?.isSiteSource?.(source)
 			|| globalThis.BrewUtil2?.hasSourceJson?.(source)
@@ -1362,8 +1360,30 @@ class CharacterSheetClassUtils {
 		return !!item?.name
 			&& isSourceLoaded
 			&& source.toLowerCase() !== "custom"
-			&& !item?._isCustom
-			&& !isDerived;
+			&& !item?._isCustom;
+	}
+
+	/**
+	 * A user-authored item has no DataLoader identity even when an imported save
+	 * carries a non-Custom source label. Only real catalog entries may use the
+	 * standard item hover.
+	 * @param {*} item
+	 * @returns {boolean}
+	 */
+	static isCatalogItemHoverTarget (/** @type {*} */ item) {
+		// An item the sheet has MODIFIED is no longer the thing the catalog describes. A material
+		// rewrites its dice, weight and value; an upgrade adds bonuses the printed entry never
+		// mentions. Routing it to `items.html` shows the player a pristine longsword and quietly
+		// drops everything they paid for, so these join the derived-item family and fall through
+		// to `buildItemInlineHoverEntry` — which keeps a link back to the printed entry.
+		const isDerived = item?._isCraftingMaterial
+			|| item?._isCraftedItem
+			|| item?._isEmpoweredGemstone
+			|| item?.cookedTier != null
+			|| !!item?.material?.name
+			|| !!item?.appliedUpgrades?.length
+			|| !!item?.socketedGemstones?.length;
+		return CharacterSheetClassUtils.hasCatalogItemIdentity(item) && !isDerived;
 	}
 
 	/**
@@ -1478,9 +1498,13 @@ class CharacterSheetClassUtils {
 		addLine("Value", valueText);
 		addLine("Weight", weightText);
 
-		const damage = item.damage || item.dmg1;
+		// The DERIVED damage, not the printed one. `item.damage` is frozen at add-time, so on a
+		// materialled or upgraded weapon it is exactly the number the player must not be shown —
+		// the same reason the inventory row stopped reading it. `dmg1` here is already projected.
+		const effDamage = (item?.id && globalThis.__csState?.getEffectiveWeaponDamage?.(item.id)) || null;
+		const damage = effDamage ? null : (item.damage || item.dmg1);
 		const damageType = toLabel(item.dmgType);
-		addLine("Damage", damage ? `${damage}${damageType ? ` ${damageType}` : ""}` : "");
+		addLine("Damage", effDamage ? effDamage.displayFull : (damage ? `${damage}${damageType ? ` ${damageType}` : ""}` : ""));
 		addLine("Properties", listResolved(item.properties || item.property, resolveProperty));
 		addLine("Mastery", listResolved(item.mastery, resolveMastery));
 
@@ -1514,6 +1538,42 @@ class CharacterSheetClassUtils {
 			.filter(Boolean);
 		addLine("Bonuses", bonuses.join(", "));
 
+		// What the sheet did to this item, which the catalog entry knows nothing about. These sit
+		// immediately after Bonuses because they are the reason the numbers above differ from the
+		// book.
+		if (item.material?.name) {
+			const materialEntity = globalThis.__csState?.getItemMaterialEntity?.(item) || null;
+			const summary = materialEntity && globalThis.CharacterSheetMaterials
+				? globalThis.CharacterSheetMaterials.getSummary(materialEntity, item)
+				: "";
+			addLine("Material", `${item.material.name}${summary ? ` — ${summary}` : ""}`);
+		}
+
+		if (item.appliedUpgrades?.length) {
+			const summaries = item.appliedUpgrades.map(u => (globalThis.CharacterSheetUpgrades
+				? globalThis.CharacterSheetUpgrades.getUpgradeSummary(u)
+				: u.name));
+			// One upgrade reads fine inline; several become an unparseable semicolon run-on,
+			// because each summary already carries its own punctuation.
+			if (summaries.length === 1) addLine("Upgrades", summaries[0]);
+			else {
+				entries.push("{@b Upgrades:}");
+				entries.push({type: "list", items: summaries});
+			}
+		}
+
+		if (item.socketedGemstones?.length) {
+			const gems = item.socketedGemstones.map(g => {
+				const gemSummary = globalThis.CharacterSheetUpgrades?.getGemstoneSummary?.(g) || "";
+				const charges = g.chargesMax ? ` [${g.chargesCurrent ?? g.chargesMax}/${g.chargesMax}]` : "";
+				return `${g.name}${charges}${gemSummary ? ` — ${gemSummary}` : ""}`;
+			});
+			addLine("Socketed", gems.join("; "));
+		}
+
+		if (effDamage?.attackBonus) addLine("Attack", `${effDamage.attackBonus > 0 ? "+" : ""}${effDamage.attackBonus}`);
+		if (effDamage && effDamage.critThreshold < 20) addLine("Critical", `${effDamage.critThreshold}\u201320`);
+
 		addLine("Resistance", list(item.resist));
 		addLine("Immunity", list(item.immune));
 		addLine("Vulnerability", list(item.vulnerable));
@@ -1536,6 +1596,14 @@ class CharacterSheetClassUtils {
 		}
 
 		if (!entries.length) entries.push(item._isCustom || String(item.source || "").toLowerCase() === "custom" ? "Custom item." : "Item details are stored on this character.");
+
+		// A modified item leaves the standard catalog hover, so keep a way back to the printed
+		// entry — otherwise applying a material silently costs the player the book text. Only
+		// offered when the item genuinely resolves in a loaded catalog.
+		const isModified = !!item.material?.name || !!item.appliedUpgrades?.length || !!item.socketedGemstones?.length;
+		if (isModified && CharacterSheetClassUtils.hasCatalogItemIdentity(item)) {
+			entries.push(`{@note This item has been modified. See the printed entry: {@item ${item.name}|${item.source}}.}`);
+		}
 
 		// Inline entry strings are rendered as HTML. Custom/imported item data is
 		// save-file input, so escape raw markup recursively while leaving 5etools

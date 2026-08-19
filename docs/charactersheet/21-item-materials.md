@@ -837,6 +837,33 @@ projected one, or a material's die step would silently look standard.
 
 The stored `damage` field stays for save compatibility but is legacy. Read-time derivation wins.
 
+### The hover tells the truth, and keeps a way back to the book
+
+A materialled or upgraded item is no longer what the catalog describes, so it stops routing to
+`items.html`. `isCatalogItemHoverTarget` now treats "has a material", "has applied upgrades" and
+"has socketed gemstones" as derived-item conditions, in the same class as `_isEmpoweredGemstone`,
+and those items fall through to `buildItemInlineHoverEntry`. Nothing is lost: `_addItem` copies
+`entries`, so the printed prose comes along.
+
+Two things make this safe rather than a trade of one regression for another:
+
+- **A plain catalog item takes the catalog path unchanged.** Verified side by side — a pristine
+  Shortsword still shows the full 5etools statblock with properties, mastery and source line.
+- **A modified item keeps a link back.** `hasCatalogItemIdentity` was split out of
+  `isCatalogItemHoverTarget` for exactly this: an item can *have* a catalog identity while no
+  longer *being* what that entry describes. The inline entry ends with a `{@note}` carrying an
+  `{@item}` link to the printed version.
+
+The entry gains **Material**, **Upgrades**, **Socketed**, **Attack** and **Critical** lines, and
+its Damage line comes from `getEffectiveWeaponDamage` rather than the frozen string. With more
+than one upgrade the list becomes a real bulleted list — each summary already carries its own
+punctuation, so joining several with semicolons was unreadable.
+
+`buildItemInlineHoverEntry` is a pure static called from a dozen render sites with no reference
+to state, so state publishes itself as **`globalThis.__csState`** in its constructor, mirroring
+the existing `__csMaterialCatalog` / `__csResonanceCatalog` handles. `window.charSheet` looks
+like an alternative but is explicitly a debugging affordance.
+
 ### A single-valued picker closes; a multi-valued one stays open
 
 A material is one field, so applying one is a completed decision and the modal closes. Upgrades

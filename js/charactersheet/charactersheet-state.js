@@ -4322,6 +4322,12 @@ class CharacterSheetState {
 		// level-gated grouping in the spell list silently drops the spells.
 		this._allSpells = [];
 		this._allItems = [];
+		// Live handle for the pure static helpers that must consult character state but are
+		// called from contexts with no reference to it — chiefly the item hover builders in
+		// `charactersheet-class-utils.js`, which are invoked from a dozen render sites. Mirrors
+		// the existing `__csMaterialCatalog` / `__csResonanceCatalog` handles. `window.charSheet`
+		// looks like an alternative but is explicitly a debugging affordance.
+		globalThis.__csState = this;
 	}
 
 	/**
