@@ -12945,6 +12945,10 @@ class CharacterSheetState {
 			damageRiders,
 			// Weapon-property tags granted by upgrades (e.g. Silvered, Magical, Runic).
 			tags: [],
+			// Whether the weapon overcomes resistance to nonmagical / non-silvered attacks.
+			// Fed by materials (Silver, Orichalcum, Orichaline); upgrades feed the tags above.
+			countsAsMagical: false,
+			countsAsSilvered: false,
 			// A weapon whose own damage dice explode: a die rolling its maximum is rerolled and
 			// added, and the reroll may explode again (Brutal). Authored data, per upgrade.
 			explodingDamageDice: item.explodingDamageDice === true,
@@ -12977,6 +12981,53 @@ class CharacterSheetState {
 				base.tags = [...effects.tags];
 			}
 			if (effects.explodingDamageDice) base.explodingDamageDice = true;
+		}
+
+		// --- Material effects ---
+		// Deliberately narrow: only the fields `applyToItem` does NOT already project.
+		// Attack/damage/AC bonuses, damage steps, properties and ranges are baked into the
+		// item by the read-time projection, so re-adding them here would count them twice.
+		// What is added here is everything the projection has no place to put — tags the
+		// attack path reads, and riders that depend on the target or the roll.
+		if (typeof CharacterSheetMaterials !== "undefined" && this._data.settings?.enableMaterials !== false && item.material?.name) {
+			const material = CharacterSheetMaterials.resolveMaterial(item, this._itemMaterialCatalog || []);
+			if (material) {
+				const fx = CharacterSheetMaterials.getMaterialEffects(item, material);
+
+				// Silver and Orichalcum have always *said* they overcome resistance. These are
+				// the same tags upgrades feed, so the badge, the hover and the resistance check
+				// all read one source rather than three.
+				if (fx.countsAsMagical && !base.tags.includes("Magical")) base.tags.push("Magical");
+				if (fx.countsAsSilvered && !base.tags.includes("Silvered")) base.tags.push("Silvered");
+				base.countsAsMagical = base.countsAsMagical || fx.countsAsMagical;
+				base.countsAsSilvered = base.countsAsSilvered || fx.countsAsSilvered;
+
+				// Stout Blackwood: extra dice on a crit, gated on a weapon property.
+				if (fx.bonusCritDamage?.dice
+					&& (!fx.bonusCritDamage.requiresProperty || CharacterSheetMaterials._hasProperty(item, fx.bonusCritDamage.requiresProperty))) {
+					base.materialCritDamage = {
+						dice: String(fx.bonusCritDamage.dice),
+						// `"weapon"` means "the weapon's own type", which only the roll site knows.
+						damageType: fx.bonusCritDamage.damageType === "weapon" ? null : (fx.bonusCritDamage.damageType || null),
+						name: material.name,
+					};
+				}
+
+				// Cold Iron: an extra weapon die against fey. Target-gated, so the roll path
+				// asks rather than assuming.
+				if (fx.extraDamageDiceVsType?.length) {
+					base.materialExtraDiceVsType = fx.extraDamageDiceVsType.map(it => ({
+						dice: Number(it.dice) || 1,
+						creatureType: it.creatureType,
+						name: material.name,
+					}));
+				}
+
+				// Yellowwood: no disadvantage shooting inside melee range.
+				if (fx.noRangedDisadvantageInMelee) base.noRangedDisadvantageInMelee = true;
+
+				if (fx.penetrationIgnoresMagicalAc) base.penetrationIgnoresMagicalAc = true;
+			}
 		}
 
 		// `bonusWeapon` is the "+2" of a +2 weapon: it applies to BOTH attack and damage. Left
@@ -61448,14 +61499,56 @@ class CharacterSheetState {
 		return bonus;
 	}
 
+	/**
+	 * Every damage type a given weapon may deal on this attack.
+	 *
+	 * Two independent sources feed it:
+	 * - active states (e.g. a spell letting a weapon deal a chosen element), and
+	 * - the weapon's MATERIAL. Emberglass "may deal fire damage instead of its normal type";
+	 *   Vitriol Crystal the same for acid. Both are authored `optional: true`, so they widen
+	 *   the choice rather than replacing the base type — a non-optional override would
+	 *   silently take away the player's ability to hit a fire-immune creature.
+	 *
+	 * The base type always comes first so the default selection is unchanged.
+	 *
+	 * @param {*} weaponId
+	 * @param {string} baseDamageType
+	 * @returns {Array<string>}
+	 */
 	getWeaponDamageTypeChoices (weaponId, baseDamageType) {
+		const choices = [];
+
 		const effect = this.getActiveStateEffects().find(it =>
 			it.type === "damageTypeChoice"
 			&& it.weaponId === weaponId);
-		if (!effect) return [baseDamageType];
-		return [...new Set((effect.choices || [])
-			.map(choice => choice === "weapon" ? baseDamageType : choice)
-			.filter(Boolean))];
+		if (effect) {
+			choices.push(...(effect.choices || []).map(choice => choice === "weapon" ? baseDamageType : choice));
+		}
+
+		const materialType = this.getMaterialDamageTypeChoice(weaponId);
+		if (materialType) {
+			// The base type leads, so nothing about the default roll changes.
+			if (!choices.length) choices.push(baseDamageType);
+			choices.push(materialType.damageType);
+			// A non-optional override genuinely replaces the type.
+			if (!materialType.optional) return [materialType.damageType];
+		}
+
+		if (!choices.length) return [baseDamageType];
+		return [...new Set(choices.filter(Boolean))];
+	}
+
+	/**
+	 * The damage type a weapon's material offers, if any.
+	 * @param {*} weaponId
+	 * @returns {{damageType: string, optional: boolean, materialName: string}|null}
+	 */
+	getMaterialDamageTypeChoice (weaponId) {
+		if (weaponId == null) return null;
+		const entry = this.getEquippedMaterialEffects().find(it => it.invItem.id === weaponId);
+		const override = entry?.fx?.overrideDamageType;
+		if (!override?.damageType) return null;
+		return {damageType: override.damageType, optional: !!override.optional, materialName: entry.material.name};
 	}
 
 	getEnemyTurnStartDamageEffects () {

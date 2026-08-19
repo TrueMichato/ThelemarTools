@@ -4696,9 +4696,16 @@ class CharacterSheetCombat {
 
 		// Generic "counts as magical" badge — any attack descriptor (feature-granted or
 		// otherwise) that sets `countsAsMagical` advertises that it overcomes resistance
-		// and immunity to nonmagical attacks and damage.
-		if (attack.countsAsMagical) {
+		// and immunity to nonmagical attacks and damage. Materials (Orichalcum, Orichaline)
+		// reach it through the item derivation rather than the descriptor.
+		const itemEff = attack.sourceItem?.id != null
+			? (this._state.getEffectiveItemBonuses?.(attack.sourceItem.id) || {})
+			: {};
+		if (attack.countsAsMagical || itemEff.countsAsMagical) {
 			badgeHtml += " <span class=\"badge badge-success\" title=\"Counts as magical for overcoming resistance and immunity to nonmagical attacks and damage\">✧ Magical</span>";
+		}
+		if (itemEff.countsAsSilvered) {
+			badgeHtml += " <span class=\"badge badge-secondary\" title=\"Counts as silvered, where a creature's rules specifically call for silver\">◈ Silvered</span>";
 		}
 
 		// Show active combat method effect badge

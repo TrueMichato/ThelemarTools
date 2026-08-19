@@ -75,7 +75,7 @@ describe("Material effect handling registry", () => {
 		// If this ever grows large, the sheet has quietly given up on automating materials.
 		const referenced = Object.entries(CharacterSheetMaterials.EFFECT_HANDLING)
 			.filter(([, spec]) => spec.consumer === "reference");
-		expect(referenced.length).toBeLessThanOrEqual(5);
+		expect(referenced.length).toBeLessThanOrEqual(6);
 	});
 });
 
@@ -87,12 +87,18 @@ describe("Material effect coverage across the brew", () => {
 		// the exact failure mode this whole pass fixed. `note`-only materials are legitimate
 		// (pure flavour), so they are exempt.
 		//
-		// A handful of materials genuinely make only a table call — Adamant and Heart Stone
-		// promise nothing but indestructibility, and whether a given effect could damage an
-		// object is not a number the sheet can compute. Those are allowed, but ONLY by name,
-		// so that a new material joining this list is a deliberate decision someone had to
-		// write down rather than an accident nobody noticed.
-		const REFERENCE_ONLY_BY_DESIGN = new Set(["Adamant", "Heart Stone"]);
+		// A handful of materials genuinely make only a table call:
+		// - Adamant and Heart Stone promise nothing but indestructibility, and whether a
+		//   given effect could damage an object is not a number the sheet can compute.
+		// - Ioun Sand doubles numeric properties granted by an intact Ioun Stone SET IN THE
+		//   MATRIX, and explicitly not ordinary enchantments or loose fragments. The sheet
+		//   models Ioun Stones as their own subsystem rather than as material sockets, so
+		//   which of an item's numbers qualify is a question only the table can answer.
+		//
+		// Those are allowed, but ONLY by name, so that a new material joining this list is a
+		// deliberate decision someone had to write down rather than an accident nobody
+		// noticed.
+		const REFERENCE_ONLY_BY_DESIGN = new Set(["Adamant", "Heart Stone", "Ioun Sand"]);
 
 		const offenders = [];
 		for (const mat of materials) {

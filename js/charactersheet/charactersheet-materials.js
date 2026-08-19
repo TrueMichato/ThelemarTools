@@ -143,7 +143,7 @@ class CharacterSheetMaterials {
 		armorDexCapDelta: {consumer: "projection", note: "Adjusts the Dex cap."},
 		rangeMultiplier: {consumer: "projection", note: "Multiplies weapon range."},
 		thrownRangeDelta: {consumer: "projection", note: "Adjusts thrown range."},
-		doubleNumericProperties: {consumer: "projection", note: "Doubles the item's numeric ratings."},
+		doubleNumericProperties: {consumer: "reference", note: "Ioun Sand doubles properties granted by an intact Ioun Stone SET IN THE MATRIX — explicitly not ordinary enchantments or loose fragments. The sheet models Ioun Stones as their own subsystem, not as material sockets, so which numbers qualify is a table call."},
 		penetrationIgnoresMagicalAc: {consumer: "projection", note: "Penetration applies against magical AC."},
 
 		// --- modifier: reaches a derived stat ---
@@ -656,6 +656,10 @@ class CharacterSheetMaterials {
 		// --- Penetration ---
 		const penetration = CharacterSheetMaterials.getPenetration(item, mat);
 		if (penetration) out.penetration = penetration;
+		// Orichaline's penetration reaches through *magical* AC too. Projected as a flag on
+		// the item so the attack path can widen the penetrating-blow check without needing
+		// to know which material granted it.
+		if (fx.penetrationIgnoresMagicalAc) out.penetrationIgnoresMagicalAc = true;
 
 		// --- Weapon properties ---
 		if (kind === "weapon" && (fx.addProperties.length || fx.removeProperties.length || fx.propertyLadder)) {
@@ -688,6 +692,14 @@ class CharacterSheetMaterials {
 		// --- Ranged weapon range ---
 		if (kind === "weapon" && fx.rangeMultiplier && out.range) {
 			out.range = CharacterSheetMaterials._scaleRange(out.range, fx.rangeMultiplier);
+		}
+
+		// --- Thrown range ---
+		// Skyshard: "its thrown ranges increase by 20 feet" — both the normal and the long
+		// range, hence the plural. Gated on the Thrown property, because a weapon nobody can
+		// throw has no thrown range to extend.
+		if (kind === "weapon" && fx.thrownRangeDelta && out.range && CharacterSheetMaterials._hasProperty(out, "T")) {
+			out.range = CharacterSheetMaterials._shiftRange(out.range, fx.thrownRangeDelta);
 		}
 
 		// --- Derived weight / value ---
@@ -865,6 +877,22 @@ class CharacterSheetMaterials {
 		const parts = str.split("/").map(p => Number(p.trim()));
 		if (parts.some(p => !Number.isFinite(p))) return range;
 		return parts.map(p => Math.floor(p * mult)).join("/");
+	}
+
+	/** Shift every leg of a `"20/60"`-style range string by a flat number of feet. */
+	static _shiftRange (range, delta) {
+		const parts = String(range).split("/").map(p => Number(p.trim()));
+		if (parts.some(p => !Number.isFinite(p))) return range;
+		return parts.map(p => Math.max(0, p + delta)).join("/");
+	}
+
+	/**
+	 * Whether an item carries a weapon property, tolerating both the bare (`"T"`) and
+	 * source-qualified (`"T|XPHB"`) spellings the data uses interchangeably.
+	 */
+	static _hasProperty (item, abv) {
+		const props = Array.isArray(item?.property) ? item.property : [];
+		return props.some(p => String(p).split("|")[0].toUpperCase() === String(abv).toUpperCase());
 	}
 
 	// ==========================================
