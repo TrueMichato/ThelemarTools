@@ -351,6 +351,7 @@ class CharacterSheetNpcExporter {
 		const alignment = this._getAlignmentArray(state.getAlignment?.());
 		this._rebuildSpellProvenanceTags(state);
 		this._rebuildSpellCastingTimes(state, exportOpts?.spellIndex);
+		this._rebuildCompanionItemSource(safeSource);
 		const size = [this._getSizeAbv(state.getSize?.() || "medium")];
 		const speed = this._getSpeedObject(state);
 		const saves = this._getSaveBlock(state);
@@ -6496,6 +6497,49 @@ class CharacterSheetNpcExporter {
 		"prone", "restrained", "stunned", "unconscious",
 	]);
 
+	/**
+	 * The item schema is `additionalProperties: false`, and a character-sheet item carries
+	 * roughly four times as many properties as the schema allows — sheet-only bookkeeping
+	 * (`effects`, `itemPowers`, `damageRiders`, `socketedGemstones`, per-ability
+	 * `bonusSavingThrow*` splits, …). Bundling an item therefore means whitelisting, not
+	 * cleaning. Pinned against the real schema by
+	 * `CharacterSheetNpcExporter.companionItems.test.js`, so schema drift fails loudly.
+	 */
+	static ITEM_SCHEMA_PROPS = new Set([
+		"ability", "ac", "additionalEntries", "additionalSources", "age", "alias", "ammoType",
+		"atomicPackContents", "attachedSpells", "barDimensions", "baseItem", "basicRules",
+		"basicRules2024", "bonusAbilityCheck", "bonusAc", "bonusProficiencyBonus",
+		"bonusSavingThrow", "bonusSavingThrowConcentration", "bonusSpellAttack",
+		"bonusSpellDamage", "bonusSpellSaveDc", "bonusWeapon", "bonusWeaponAttack",
+		"bonusWeaponCritDamage", "bonusWeaponDamage", "capCargo", "capPassenger",
+		"carryingCapacity", "charges", "classFeatures", "conditionImmune", "containerCapacity",
+		"crew", "crewMax", "crewMin", "critThreshold", "curse", "detail1", "detail2",
+		"dexterityMax", "dmg1", "dmg2", "dmgType", "entries", "firearm", "focus", "grantsLanguage",
+		"grantsProficiency", "group", "hasFluff", "hasFluffImages", "hasRefs", "immune", "legacy",
+		"light", "lootTables", "mastery", "miscTags", "modifySpeed", "name", "optionalfeatures",
+		"otherSources", "packContents", "page", "poison", "poisonTypes", "property", "range",
+		"rarity", "reach", "recharge", "rechargeAmount", "referenceSources", "reload",
+		"reprintedAs", "reqAttune", "reqAttuneAlt", "reqAttuneAltTags", "reqAttuneTags", "resist",
+		"scfType", "seeAlsoDeck", "seeAlsoVehicle", "sentient", "shippingCost", "source", "speed",
+		"spellScrollLevel", "srd", "srd52", "staff", "stealth", "strength", "tattoo", "tier",
+		"travelCost", "type", "typeAlt", "value", "valueMult", "valueRarity", "vehAc",
+		"vehDmgThresh", "vehHp", "vehSpeed", "vulnerable", "weaponCategory", "weight",
+		"weightMult", "weightNote", "wondrous",
+	]);
+
+	/**
+	 * The sheet stores several fields under its own names. `typeCode` is the important one:
+	 * the sheet's `type` is a human-readable word ("weapon") that is NOT a legal item type
+	 * code, while the real code ("M") sits in `typeCode`. Whitelisting alone would happily
+	 * ship the invalid value, so the rename has to win over the incumbent.
+	 */
+	static _ITEM_PROP_RENAMES = {
+		typeCode: "type",
+		requiresAttunement: "reqAttune",
+		properties: "property",
+		damage: "dmg1",
+	};
+
 	static _isSchemaDefenseValue (value, isCondition) {
 		const raw = String(value || "").toLowerCase().trim();
 		if (!raw) return false;
@@ -6547,9 +6591,14 @@ class CharacterSheetNpcExporter {
 	static getValidationIssues (monster) {
 		const errors = [];
 		const warnings = [];
+		// Informational, never a defect. Kept apart from `warnings` so a dependency notice
+		// cannot trigger the "exported with validation issues" toast — almost every
+		// character references some homebrew, and a warning everybody sees is a warning
+		// nobody reads.
+		const notes = [];
 
 		if (!monster || typeof monster !== "object") {
-			return {errors: ["Monster export payload is missing or invalid."], warnings};
+			return {errors: ["Monster export payload is missing or invalid."], warnings, notes};
 		}
 
 		if (!monster.name || typeof monster.name !== "string") errors.push("Missing required field: name.");
@@ -6683,9 +6732,18 @@ class CharacterSheetNpcExporter {
 			.filter(it => typeof it.value === "string" && htmlUnsafePattern.test(it.value))
 			.forEach(it => warnings.push(`Potentially unsafe markup found in ${it.label}.`));
 
+		// Third-party brew items keep their own source rather than being copied into this
+		// payload, so their hovers depend on the reader's install. Say which ones, instead
+		// of shipping a statblock whose links quietly fail for everyone else.
+		const externalSources = this.getExternalItemSources(monster);
+		if (externalSources.length) {
+			notes.push(`Item links resolve only for readers who have installed: ${externalSources.join(", ")}.`);
+		}
+
 		return {
 			errors: [...new Set(errors)],
 			warnings: [...new Set(warnings)],
+			notes: [...new Set(notes)],
 		};
 	}
 
@@ -7327,10 +7385,225 @@ class CharacterSheetNpcExporter {
 
 	static _getItemTag (item) {
 		const safeName = this._getSafeInlineText(item?.name || "Item", {maxLen: 80}) || "Item";
-		const source = this._getSafeSourceJson(item?.source || "");
+		// A sheet-authored item resolves nowhere, so it travels with the statblock as a
+		// companion entity under the export's own source. Tag and entity have to agree,
+		// which is why the re-sourcing happens here, at the single choke point every
+		// `{@item}` tag passes through.
+		const source = this._isCompanionItem(item)
+			? CharacterSheetNpcExporter._companionItemSource
+			: this._getSafeSourceJson(item?.source || "");
 		if (!source) return safeName;
 		return `{@item ${safeName}|${source}}`;
 	}
+
+	/**
+	 * The export source in force for the current conversion, so `_getItemTag` can re-source
+	 * companion items without threading an argument through six call sites. Reset per
+	 * conversion in the same place v19 resets its casting-time lookup.
+	 */
+	static _companionItemSource = CharacterSheetNpcExporter.SOURCE_JSON_DEFAULT;
+
+	/**
+	 * `_isCustom` is set only by deliberate paths — the custom-item editor, `replaceItem`,
+	 * and a few sheet-synthesized items (Gambler's weapons, Performance of Creation,
+	 * unsocketed gemstones). An ordinary catalog add never sets it, so this never fires on
+	 * an item that already has a real home.
+	 */
+	static _isCompanionItem (item) {
+		if (!item || typeof item !== "object") return false;
+		return item._isCustom === true || String(item.source || "").toLowerCase() === "custom";
+	}
+
+	static _rebuildCompanionItemSource (sourceJson) {
+		CharacterSheetNpcExporter._companionItemSource = this._getSafeSourceJson(sourceJson);
+	}
+
+	/**
+	 * Reshape a character-sheet item into a schema-legal brew item.
+	 *
+	 * The sheet's shape overlaps the schema's only loosely: a custom dagger can carry ~68
+	 * properties of which 17 are legal. Because the item schema is
+	 * `additionalProperties: false`, this is a whitelist, not a clean-up — anything the
+	 * schema does not name is dropped rather than guessed at.
+	 */
+	static _getSanitizedBrewItem (item, {sourceJson} = {}) {
+		if (!item || typeof item !== "object") return null;
+
+		const name = this._getSafeName(item.name);
+		if (!name) return null;
+
+		// Renames run first, and win over any incumbent value. The sheet stores a
+		// human-readable `type: "weapon"` next to the real code in `typeCode: "M"`; keeping
+		// the incumbent would ship a value the schema's type enum rejects.
+		const renamed = {};
+		Object.entries(item).forEach(([key, value]) => {
+			if (key in CharacterSheetNpcExporter._ITEM_PROP_RENAMES) return;
+			renamed[key] = value;
+		});
+		Object.entries(CharacterSheetNpcExporter._ITEM_PROP_RENAMES).forEach(([from, to]) => {
+			if (!(from in item)) return;
+			const value = item[from];
+			if (value == null || value === "" || (Array.isArray(value) && !value.length)) return;
+			// `damage` is a duplicate spelling of `dmg1`; never let it clobber a real one.
+			if (to === "dmg1" && renamed.dmg1) return;
+			renamed[to] = value;
+		});
+
+		const out = {};
+		Object.entries(renamed).forEach(([key, value]) => {
+			if (!CharacterSheetNpcExporter.ITEM_SCHEMA_PROPS.has(key)) return;
+			if (!this._isMeaningfulItemValue(key, value)) return;
+			out[key] = this._getSanitizedItemValue(key, value);
+		});
+
+		out.name = name;
+		out.source = this._getSafeSourceJson(sourceJson || CharacterSheetNpcExporter._companionItemSource);
+		// `name`, `rarity` and `source` are the schema's only required fields.
+		if (typeof out.rarity !== "string" || !out.rarity.trim()) out.rarity = "none";
+
+		return out;
+	}
+
+	/**
+	 * The sheet writes an exhaustive record — every bonus slot present and zeroed, every
+	 * unused container empty. Carrying that through would bury the handful of properties
+	 * that actually say something about the item.
+	 */
+	static _isMeaningfulItemValue (key, value) {
+		if (value == null || value === "" || value === false) return false;
+		if (Array.isArray(value)) return value.length > 0;
+		if (typeof value === "object") return Object.keys(value).length > 0;
+		if (typeof value === "number") {
+			if (!Number.isFinite(value)) return false;
+			// A zeroed bonus or a zero price is the sheet saying "not applicable".
+			if (value === 0 && (/^bonus/.test(key) || key === "value" || key === "weight")) return false;
+		}
+		return true;
+	}
+
+	static _getSanitizedItemValue (key, value) {
+		if (key === "entries" || key === "additionalEntries") return this._getSanitizedItemEntries(value);
+		if (typeof value === "string") return this._stripHtmlTags(value).trim();
+		return value;
+	}
+
+	static _getSanitizedItemEntries (entries) {
+		if (!Array.isArray(entries)) return entries;
+		const out = [];
+		entries.forEach(entry => {
+			if (typeof entry !== "string") {
+				if (entry != null) out.push(entry);
+				return;
+			}
+			// A blank line is authored paragraph structure, but `\n` means nothing to the
+			// renderer and `_stripHtmlTags` collapses it away — a 800-word magic item would
+			// arrive as one unbroken wall. One array element per paragraph is both the
+			// idiomatic shape and the only one that actually renders as paragraphs.
+			// `{@tag}`s are preserved verbatim; only stray HTML is removed.
+			String(entry)
+				.split(/\n\s*\n/)
+				.map(para => this._stripHtmlTags(para).trim())
+				.filter(Boolean)
+				.forEach(para => out.push(para));
+		});
+		return out;
+	}
+
+	/**
+	 * Collect the companion items a finished statblock refers to.
+	 *
+	 * Reading the *finished monster* rather than the state is what keeps the bundle and the
+	 * statblock from drifting: an item is bundled precisely when a `{@item}` tag mentions
+	 * it, so a custom item the statblock never names is not shipped, and a tag can never
+	 * point at an entity that is missing.
+	 */
+	static buildCompanionItems (monster, state, {sourceJson} = {}) {
+		const source = this._getSafeSourceJson(sourceJson || monster?.source || CharacterSheetNpcExporter._companionItemSource);
+		const tagged = this._collectItemTagNames(monster, source);
+		if (!tagged.size) return [];
+
+		const inventory = state?.getInventory?.() || state?._data?.inventory || [];
+		const out = [];
+		const seen = new Set();
+
+		inventory.forEach(wrapper => {
+			const item = wrapper?.item || wrapper;
+			if (!this._isCompanionItem(item)) return;
+
+			const tagName = this._getSafeInlineText(item?.name || "Item", {maxLen: 80}) || "Item";
+			if (!tagged.has(tagName.toLowerCase())) return;
+
+			const key = tagName.toLowerCase();
+			if (seen.has(key)) return;
+			seen.add(key);
+
+			const sanitized = this._getSanitizedBrewItem(item, {sourceJson: source});
+			if (sanitized) out.push(sanitized);
+		});
+
+		return out.sort((a, b) => a.name.localeCompare(b.name));
+	}
+
+	/** Every `{@item Name|SOURCE}` in the monster whose source is `source`, lowercased. */
+	static _collectItemTagNames (monster, source) {
+		const wanted = String(source || "").toUpperCase();
+		const found = new Set();
+		const re = /\{@item ([^|}]+)\|([^|}]+)(?:\|[^}]*)?\}/g;
+
+		const walk = (node) => {
+			if (node == null) return;
+			if (typeof node === "string") {
+				let m;
+				re.lastIndex = 0;
+				while ((m = re.exec(node)) !== null) {
+					if (String(m[2]).trim().toUpperCase() === wanted) found.add(m[1].trim().toLowerCase());
+				}
+				return;
+			}
+			if (Array.isArray(node)) return node.forEach(walk);
+			if (typeof node === "object") return Object.values(node).forEach(walk);
+		};
+
+		walk(monster);
+		return found;
+	}
+
+	/**
+	 * Sources referenced by `{@item}` tags that are neither core nor our own. Their hovers
+	 * work only for a reader who has that homebrew installed — worth saying out loud, since
+	 * copying the items into our payload would launder somebody else's content.
+	 */
+	static getExternalItemSources (monster) {
+		const own = String(monster?.source || "").toUpperCase();
+		const re = /\{@item [^|}]+\|([^|}]+)(?:\|[^}]*)?\}/g;
+		const found = new Set();
+
+		const walk = (node) => {
+			if (node == null) return;
+			if (typeof node === "string") {
+				let m;
+				re.lastIndex = 0;
+				while ((m = re.exec(node)) !== null) {
+					const src = String(m[1]).trim().toUpperCase();
+					if (src && src !== own && !CharacterSheetNpcExporter._CORE_ITEM_SOURCES.has(src)) found.add(src);
+				}
+				return;
+			}
+			if (Array.isArray(node)) return node.forEach(walk);
+			if (typeof node === "object") return Object.values(node).forEach(walk);
+		};
+
+		walk(monster);
+		return [...found].sort();
+	}
+
+	/** Sources every 5etools install already has, so a tag pointing at them always resolves. */
+	static _CORE_ITEM_SOURCES = new Set([
+		"PHB", "DMG", "MM", "XPHB", "XDMG", "XMM", "TCE", "XGE", "SCAG", "VGM", "MTF", "MPMM",
+		"FTD", "EGW", "MOT", "AI", "GGR", "SCC", "BMT", "BGG", "TDCSR", "ERLW", "RMR", "SAC",
+		"DMG-1", "WDMM", "WBTW", "HOTDQ", "SKT", "TOA", "GOS", "IDRotF", "CM", "CRCotN", "JTTRC",
+		"SATO", "DSotDQ", "KFTGV", "PABTSO", "LOX", "DODK", "QFTIS", "VEOR", "AATM", "SCREEN",
+	]);
 
 	static _getClassResourcesBlock (state, {npcName = "The NPC", coveredPoolNames = new Set()} = {}) {
 		const pools = [];

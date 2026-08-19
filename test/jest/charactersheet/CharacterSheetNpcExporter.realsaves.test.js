@@ -2270,3 +2270,96 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 		});
 	});
 });
+
+/**
+ * v20 — a sheet-authored item ships with the statblock that names it.
+ *
+ * Juen is the corpus's only character with a custom item (Hecate's Dagger), and its
+ * export cited that dagger three times — Special Equipment, an attack, and an
+ * attached-spells entry — with every one of those links resolving to nothing.
+ */
+describeReal("v20 — companion items travel with the monster", () => {
+	const loadState = (name) => {
+		const state = new CharacterSheetState();
+		state.loadFromJson(JSON.parse(fs.readFileSync(path.join(SAVE_DIR, `${name}.json`), "utf8")));
+		state.setDivineFavorCatalog?.(DIVINE_FAVOR_CATALOG);
+		return state;
+	};
+
+	// Four assertions over the whole corpus; converting 24 level-20 saves once per
+	// assertion cost ~50 s of suite time for identical output.
+	const BUNDLE_CACHE = new Map();
+	const bundleFor = (name) => {
+		if (!BUNDLE_CACHE.has(name)) {
+			const state = loadState(name);
+			const monster = CharacterSheetNpcExporter.convertStateToMonster(state);
+			BUNDLE_CACHE.set(name, {monster, items: CharacterSheetNpcExporter.buildCompanionItems(monster, state, {sourceJson: monster.source})});
+		}
+		return BUNDLE_CACHE.get(name);
+	};
+
+	it("every custom-item tag in every export resolves to a bundled entity, and vice versa", () => {
+		// The invariant that makes the feature trustworthy: bundle and statblock are
+		// derived from one another, so neither a dead link nor an orphan payload is
+		// representable. Checked across the whole corpus, not just the character that
+		// happens to have a custom item today.
+		available.forEach(name => {
+			const {monster, items} = bundleFor(name);
+			const tagged = [...CharacterSheetNpcExporter._collectItemTagNames(monster, monster.source)].sort();
+			const bundled = items.map(i => i.name.toLowerCase()).sort();
+			expect(`${name}: ${bundled.join(", ")}`).toBe(`${name}: ${tagged.join(", ")}`);
+		});
+	});
+
+	it("keeps every bundled entity inside the item schema's vocabulary", () => {
+		available.forEach(name => {
+			bundleFor(name).items.forEach(item => {
+				Object.keys(item).forEach(key => {
+					expect(`${name}/${item.name}: ${key}`)
+						.toBe(`${name}/${item.name}: ${CharacterSheetNpcExporter.ITEM_SCHEMA_PROPS.has(key) ? key : "ILLEGAL"}`);
+				});
+				expect(typeof item.name).toBe("string");
+				expect(typeof item.rarity).toBe("string");
+				expect(item.source).toBe("CSHEET");
+			});
+		});
+	});
+
+	(available.includes("Juen") ? it : it.skip)("bundles Juen's dagger and points the statblock at it", () => {
+		const {monster, items} = bundleFor("Juen");
+		expect(items.map(i => i.name)).toEqual(["Hecate's Dagger"]);
+
+		const dagger = items[0];
+		// `type: "weapon"` is the shape the sheet stores and the schema rejects.
+		expect(dagger.type).toBe("M");
+		expect(dagger.reqAttune).toBe(true);
+		expect(dagger.property).toEqual(expect.arrayContaining(["F", "L", "T"]));
+		expect(dagger.entries.length).toBeGreaterThan(1);
+		["effects", "itemPowers", "requiresAttunement", "typeCode", "properties", "_isCustom", "weapon"]
+			.forEach(k => expect(dagger[k]).toBeUndefined());
+
+		const text = JSON.stringify(monster);
+		expect(text).toContain("{@item Hecate's Dagger|CSHEET}");
+		expect(text).not.toContain("|CUSTOM}");
+	});
+
+	it("reports third-party brew a reader needs rather than copying it", () => {
+		available.forEach(name => {
+			const {monster} = bundleFor(name);
+			const external = CharacterSheetNpcExporter.getExternalItemSources(monster);
+			// Never our own source, never a core book — those resolve unaided.
+			expect(external).not.toContain(monster.source);
+			external.forEach(src => expect(CharacterSheetNpcExporter._CORE_ITEM_SOURCES.has(src)).toBe(false));
+		});
+	});
+
+	it("routes the brew dependency into notes, never into warnings", () => {
+		// A warning ~every character trips is a warning nobody reads, and both Download
+		// and Save toast "validation issues" the moment `warnings` is non-empty.
+		available.forEach(name => {
+			const issues = CharacterSheetNpcExporter.getValidationIssues(bundleFor(name).monster);
+			expect(Array.isArray(issues.notes)).toBe(true);
+			expect(issues.warnings.join(" ")).not.toMatch(/homebrew|external brew/i);
+		});
+	});
+});

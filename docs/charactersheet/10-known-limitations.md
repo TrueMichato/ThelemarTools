@@ -1026,3 +1026,33 @@ references. It is deliberately not a silent default.
 ---
 
 *Previous: [Testing Strategy](./09-testing-strategy.md) | Next: [Future Roadmap](./11-future-roadmap.md)*
+
+## NPC export — bundled items carry prose, not their active abilities
+
+An exported statblock ships the character's *sheet-authored* items alongside the
+monster so their `{@item}` hovers resolve (see
+[18-npc-export.md](./18-npc-export.md), v20). What ships is a schema-legal item
+entity: name, type, rarity, bonuses, `entries` prose and `attachedSpells`.
+
+**`itemPowers` is deliberately dropped**, along with every other sheet-only
+field (`effects`, `damageRiders`, `socketedGemstones`, charge counters, the
+per-ability `bonusSavingThrow*` splits). This is not an oversight:
+
+- The item schema is `additionalProperties: false` and has no vocabulary for
+  them — they cannot be expressed.
+- More importantly, **the NPC does not need them.** Everything an item actually
+  *does* for this character has already been folded into the statblock itself:
+  its damage rider is in the attack line, its bonus is in the number, its
+  granted ability is a trait or action. Re-stating it inside the bundled item
+  would be the cross-referencing the export exists to remove.
+
+The consequence is that a bundled item is a **reference for this statblock**,
+not a portable, fully-functional item for a different character. Someone who
+drags Hecate's Dagger out of an NPC export onto a new sheet gets the prose and
+the attached spells, but not the sheet wiring that made it live.
+
+Third-party brew items (`|GRIFFONSSADDLEBAG3`, `|MECIOUNSTONES`, `|THELEMAR`…)
+are **never** bundled — they have a real home, and copying them would launder
+someone else's content. Their hovers work only for a reader who has that brew
+installed, which the export reports as an informational note rather than a
+warning.

@@ -1241,8 +1241,98 @@ leaving the footnote-wrapping `{@sup}` uses in `data/` untouched.
   the mark on and off — and diffing everything *except* the marks found the `Shadow Touched`
   regression in one run, and proved no CR moved.
 
+### v20 — a sheet-authored item ships with the statblock that names it
+
+The exporter tags gear as `{@item Name|SOURCE}`. That is the right shape, and for the 143
+core-book tags in the corpus it resolves perfectly. But when the item is one the character
+sheet *authored*, there is nothing on the receiving end to resolve **to**:
+
+```
+Juen  →  • {@item Hecate's Dagger|CUSTOM} (attuned)      ← dead hover
+         Hecate's Dagger. Melee Attack Roll: +11 …       ← dead
+         Hecate's Dagger — Spells. …                     ← dead
+```
+
+Three references to an item the reader cannot look up. The export has always been a
+homebrew document — `{_meta, monster: [...]}` — and homebrew documents carry `item: [...]`
+perfectly well. We simply never populated it.
+
+**What ships and what does not.** Only items the sheet authored (`_isCustom`, or the legacy
+`source: "custom"`). Third-party brew — `|GRIFFONSSADDLEBAG3`, `|MECIOUNSTONES`,
+`|THELEMAR`, 50+ tags across the corpus — stays a *reference*. It has a real home, and
+copying it into our payload would launder somebody else's content. Instead
+`getExternalItemSources` names the brews a reader needs, and that goes in the new
+informational `notes` bucket.
+
+**The bundle is derived from the finished monster, not from the inventory.**
+`buildCompanionItems(monster, state)` harvests `{@item Name|OURSOURCE}` out of the converted
+statblock and intersects that with the custom inventory. This is the whole reason the
+feature can be trusted: an item is bundled *precisely when a tag names it*, so an unequipped
+custom item is not shipped, and a tag can never point at a missing entity. Neither a dead
+link nor an orphan payload is representable. A corpus-wide test asserts the set equality in
+both directions.
+
+**Re-sourced to the NPC's own source.** `{@item Hecate's Dagger|CSHEET}`. One declared
+source, a self-contained payload, and — by construction — no way to shadow a catalog item.
+`_getItemTag` is the single choke point for all six tag sites, so this was one edit.
+
+**The sanitizer is the whole risk surface.** The sheet's item shape is far from the schema:
+Juen's dagger carries 68 properties, of which **17** survive. The schema is
+`additionalProperties: false`, so shipping the raw object was never an option.
+
+- **Whitelist**, `ITEM_SCHEMA_PROPS` — the schema's 111 legal names, pinned by a test that
+  reads `node_modules/5etools-utils/schema/site/items.json` and fails on a set difference in
+  either direction. A schema bump tells you which property appeared or vanished.
+- **Renames run first and win over the incumbent.** `requiresAttunement → reqAttune`,
+  `properties → property`, `damage → dmg1` — and the landmine: the sheet stores
+  `type: "weapon"`, which is **not a legal item type code**, while the real code sits in
+  `typeCode: "M"`. Whitelisting alone would have shipped an invalid `type` past a green
+  test run. A rename whose *source* name is schema-legal would silently move real data, so a
+  test asserts all four sources are sheet-only spellings.
+- **Prune the sheet's exhaustive record** — nulls, empty containers, `bonus*: 0`, `value: 0`.
+  The sheet writes every bonus slot present and zeroed; carrying that through would bury the
+  handful of properties that say something about the item.
+- **Default the three required fields** — `name`, `rarity` (`"none"`), `source`.
+
+Legal as-is, pleasingly: `property: ["F","L","T"]` (bare codes validate), `mastery:
+["Nick|XPHB"]`, `baseItem: "dagger|PHB"`, and the object form of `attachedSpells`.
+
+**What v20 taught.**
+
+- **A whitelist is safe; a rename is not.** Dropping an unknown property is correct by
+  construction. Moving a value into a new name is a *transform*, and `typeCode → type` is
+  the one that would have shipped invalid data silently. Renames get dedicated tests;
+  whitelisting gets one.
+- **`_stripHtmlTags` collapses `\s+`.** Correct for statblock prose, destructive for item
+  prose — an 800-character magic item arrived as one unbroken wall. `\n` means nothing to
+  the renderer either; **one array element per paragraph** is both the idiomatic 5etools
+  shape and the only one that actually renders as paragraphs. Caught by reading the output,
+  not by a test.
+- **A warning ~everybody trips is a warning nobody reads.** Download and Save both toast
+  "validation issues" the moment `warnings` is non-empty, and ~20 of 24 characters reference
+  external brew. Routing the dependency notice through `warnings` would have trained users
+  to dismiss the toast. Hence a third `notes` bucket: rendered in the dialog, never toasted.
+- **Derive the manifest from the artefact.** Bundling from inventory would have been the
+  obvious implementation and would have drifted the first time a statblock stopped naming
+  something. Harvesting from the finished monster makes drift unrepresentable.
+- **TDZ is a real hazard in this file.** `getCompanionItems` had to move above
+  `renderValidation`, because `pApplySourceConfig()` runs — and validates — before the
+  button handlers below it are ever defined.
+
 ## Validation
-`getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). Hard errors block Save to Homebrew; warnings allow Download / Copy. Full browser-side monster schema validation is still out of scope (graceful hand validator only).
+`getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
+
+| bucket | blocks Save? | toasts? | for |
+|---|---|---|---|
+| `errors` | yes | yes | structurally invalid output |
+| `warnings` | no | yes | something a reader will notice is wrong |
+| `notes` | no | **no** | informational — bundled item count, external brew dependencies |
+
+`notes` exists because both Download and Save toast "validation issues" whenever `warnings`
+is non-empty, and the external-brew notice fires for ~20 of 24 characters. A warning
+everybody sees is a warning nobody reads.
+
+Full browser-side monster schema validation is still out of scope (graceful hand validator only).
 
 ## Consumers
 

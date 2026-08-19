@@ -473,9 +473,30 @@ class CharacterSheetExport {
 				});
 			};
 
+			// A sheet-authored item resolves nowhere on its own, so it ships with the
+			// statblock. Homebrew documents already carry `item`; we simply never populated it.
+			const getCompanionItems = () => {
+				try {
+					return CharacterSheetNpcExporter.buildCompanionItems(monster, this._state, {sourceJson: monster?.source});
+				} catch (e) {
+					// eslint-disable-next-line no-console
+					console.error("Failed to build companion items for NPC export:", e);
+					return [];
+				}
+			};
+
 			const renderValidation = (validation) => {
+				const notes = [...(validation.notes || [])];
+				const nBundled = getCompanionItems().length;
+				if (nBundled) notes.unshift(`Bundling ${nBundled} custom item${nBundled === 1 ? "" : "s"} so their links resolve.`);
+				const noteHtml = notes.slice(0, 4).map(n => `<div class="ve-muted">• ${this._escapeHtml(n)}</div>`).join("");
+
 				if (!validation.errors.length && !validation.warnings.length) {
-					wrpValidation.innerHTML = `<div class="ve-muted" style="font-size: 0.85rem;">Validation: no issues.</div>`;
+					wrpValidation.innerHTML = `
+						<div style="font-size: 0.85rem;">
+							<div class="ve-muted">Validation: no issues.</div>
+							${noteHtml}
+						</div>`;
 					return;
 				}
 				const errHtml = validation.errors.slice(0, 4).map(e => `<div class="text-danger">• ${this._escapeHtml(e)}</div>`).join("");
@@ -486,6 +507,7 @@ class CharacterSheetExport {
 					<div style="font-size: 0.85rem;">
 						${errHtml}${extraE ? `<div class="text-danger">(+${extraE} more errors)</div>` : ""}
 						${warnHtml}${extraW ? `<div class="text-warning">(+${extraW} more warnings)</div>` : ""}
+						${noteHtml}
 					</div>`;
 			};
 
@@ -626,7 +648,12 @@ class CharacterSheetExport {
 				}});
 			btnRefresh.innerHTML = `<span class="glyphicon glyphicon-refresh"></span> Refresh Preview`;
 
-			const getBrewPayload = () => ({_meta: {sources: [sourceMeta]}, monster: [monster]});
+			const getBrewPayload = () => {
+				const payload = {_meta: {sources: [sourceMeta]}, monster: [monster]};
+				const items = getCompanionItems();
+				if (items.length) payload.item = items;
+				return payload;
+			};
 
 			const btnCopy = e_({tag: "button",
 				clazz: "ve-btn ve-btn-default",
@@ -634,7 +661,13 @@ class CharacterSheetExport {
 					await pApplySourceConfig();
 					const payload = getBrewPayload();
 					await MiscUtil.pCopyTextToClipboard(JSON.stringify(payload, null, 2));
-					JqueryUtil.doToast({type: "success", content: "NPC homebrew JSON copied to clipboard!"});
+					const nItems = payload.item?.length || 0;
+					JqueryUtil.doToast({
+						type: "success",
+						content: nItems
+							? `NPC homebrew JSON copied to clipboard, with ${nItems} custom item${nItems === 1 ? "" : "s"}.`
+							: "NPC homebrew JSON copied to clipboard!",
+					});
 				}});
 			btnCopy.innerHTML = `<span class="glyphicon glyphicon-copy"></span> Copy JSON`;
 
@@ -654,12 +687,19 @@ class CharacterSheetExport {
 
 					// Note: DataUtil.userDownload appends ".json" itself — pass bare basename.
 					const basename = (monster.name || "npc").replace(/[^a-zA-Z0-9]/g, "_");
+					const payload = getBrewPayload();
 					DataUtil.userDownload(
 						basename,
-						getBrewPayload(),
+						payload,
 						{fileType: "homebrew"},
 					);
-					JqueryUtil.doToast({type: "success", content: `Downloaded ${basename}.json`});
+					const nItems = payload.item?.length || 0;
+					JqueryUtil.doToast({
+						type: "success",
+						content: nItems
+							? `Downloaded ${basename}.json with ${nItems} custom item${nItems === 1 ? "" : "s"}.`
+							: `Downloaded ${basename}.json`,
+					});
 				}});
 			btnDownload.innerHTML = `<span class="glyphicon glyphicon-download"></span> Download JSON`;
 
@@ -667,7 +707,7 @@ class CharacterSheetExport {
 				clazz: "ve-btn ve-btn-primary",
 				click: async () => {
 					await pApplySourceConfig();
-					await this._pSaveNpcToEditableBrew(monster, {sourceMeta});
+					await this._pSaveNpcToEditableBrew(monster, {sourceMeta, companionItems: getCompanionItems()});
 				}});
 			btnSave.innerHTML = `<span class="glyphicon glyphicon-floppy-disk"></span> Save to Homebrew`;
 
@@ -758,7 +798,7 @@ class CharacterSheetExport {
 		return `${name} (Copy ${CryptUtil.uid().slice(0, 6)})`;
 	}
 
-	async _pSaveNpcToEditableBrew (monster, {sourceMeta = null} = {}) {
+	async _pSaveNpcToEditableBrew (monster, {sourceMeta = null, companionItems = []} = {}) {
 		if (typeof BrewUtil2 === "undefined") {
 			JqueryUtil.doToast({type: "danger", content: "Homebrew utilities are not available."});
 			return;
@@ -817,7 +857,25 @@ class CharacterSheetExport {
 			};
 
 			await BrewUtil2.pPersistEditableBrewEntity("monster", toSave);
-			JqueryUtil.doToast({type: "success", content: `Saved ${toSave.name} to editable homebrew.`});
+
+			// The statblock's `{@item}` tags point at these, so saving the monster without
+			// them would persist the dead hover we are trying to fix.
+			let nItemsSaved = 0;
+			for (const item of companionItems) {
+				const existingItem = (brew.body?.item || []).find(it => it.name === item.name && it.source === item.source);
+				await BrewUtil2.pPersistEditableBrewEntity("item", {
+					...item,
+					uniqueId: existingItem?.uniqueId || CryptUtil.uid(),
+				});
+				nItemsSaved++;
+			}
+
+			JqueryUtil.doToast({
+				type: "success",
+				content: nItemsSaved
+					? `Saved ${toSave.name} to editable homebrew, with ${nItemsSaved} custom item${nItemsSaved === 1 ? "" : "s"}.`
+					: `Saved ${toSave.name} to editable homebrew.`,
+			});
 		} catch (e) {
 			// eslint-disable-next-line no-console
 			console.error("Failed to save NPC to homebrew:", e);

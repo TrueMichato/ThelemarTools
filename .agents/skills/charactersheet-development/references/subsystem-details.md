@@ -837,6 +837,51 @@ a term exists, prose only where it adds something.
 - **A default Unarmed Strike is filler; a monk's is not.** `_getMultiattackAction` picks
   the best weapon attack unless an unarmed strike out-damages all of them.
 
+### Bundling sheet-authored items with the export (v20)
+
+An NPC export is a homebrew document (`{_meta, monster: [...]}`), so it may also carry
+`item: [...]`. It now does — for **sheet-authored items only**.
+
+- **Predicate**: `item._isCustom === true` (or legacy `source: "custom"`). An ordinary
+  catalog add never sets `_isCustom` (`addItem` only *consults* it to suppress
+  stack-merging, `charactersheet-state.js:31646`), so this fires exactly for items with no
+  home to resolve against.
+- **Third-party brew is never copied** — `getExternalItemSources(monster)` names it in
+  `getValidationIssues().notes` instead. Copying it would launder someone else's content.
+- **The bundle is derived from the finished monster.** `buildCompanionItems(monster, state)`
+  harvests `{@item Name|OURSOURCE}` from the converted statblock and intersects with the
+  custom inventory. Bundle↔tag set equality is a corpus-wide test. Do **not** "simplify"
+  this to iterate the inventory — that reintroduces drift.
+- **Items are re-sourced to the NPC's export source** via `_getItemTag`, the single choke
+  point for all six tag sites. `_rebuildCompanionItemSource(safeSource)` seeds the
+  per-conversion static, beside `_rebuildSpellCastingTimes`.
+
+**Sanitizer landmines** (`_getSanitizedBrewItem`):
+
+- The item schema is `additionalProperties: false` with **111** legal props; a real sheet
+  item carries ~68, of which ~17 survive. `ITEM_SCHEMA_PROPS` is pinned against
+  `node_modules/5etools-utils/schema/site/items.json` by a test.
+- **`typeCode → type` must win over the incumbent `type`.** The sheet stores
+  `type: "weapon"`, which the schema's enum rejects. Also renamed:
+  `requiresAttunement → reqAttune`, `properties → property`, `damage → dmg1` (never
+  clobbering a real `dmg1`).
+- Required fields are exactly `name`, `rarity`, `source` — `rarity` defaults to `"none"`.
+- **Entries split on blank lines into one array element per paragraph.** `_stripHtmlTags`
+  collapses `\s+`, and `\n` means nothing to the renderer; without the split a long magic
+  item renders as one wall of text.
+- **`itemPowers` is intentionally dropped.** The NPC's usable powers are already rendered
+  into the monster itself; an item's actives survive as `entries` prose + `attachedSpells`.
+  Do not "fix" this.
+
+**`getValidationIssues` returns three buckets** — `errors`, `warnings`, `notes`. Only the
+first two toast. Informational dependency notices go in `notes`, because Download and Save
+both toast whenever `warnings` is non-empty and ~20 of 24 corpus characters cite external
+brew.
+
+**TDZ**: in `charactersheet-export.js`, `getCompanionItems` must be declared **above**
+`renderValidation` — `pApplySourceConfig()` runs and validates before the button handlers
+further down exist.
+
 ### Action economy as a superscript mark (v19)
 - **Every saved spell already carries `castingTime`** (`"1 action"`, `"1 bonus"`,
   `"10 minute"` — ungrammatical, must be normalised for display). The exporter reads it
