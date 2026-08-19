@@ -7463,6 +7463,16 @@ class CharacterSheetInventory {
 			? item.mastery.map(m => this._formatMasteryWithHover(m)).join(", ")
 			: "";
 
+		// `item.damage` is a display string frozen at add-time; a material's die step and an
+		// upgrade's bonuses all land afterwards. Derive the line now instead, so the row agrees
+		// with the combat tab. Falls back to the stored string only when there is no `dmg1` to
+		// derive from (older saves, oddly-shaped custom items).
+		const dmg = this._state.getEffectiveWeaponDamage?.(item.id) || null;
+		const damageStr = dmg ? dmg.display : (item.damage || "");
+		const damageTitle = dmg?.isModified
+			? "Includes material and upgrade effects — printed value differs"
+			: "Weapon damage";
+
 		return e_({outer: `
 			<div class="charsheet__item ${item.equipped ? "equipped" : ""} ${item.starred ? "starred" : ""}" data-item-id="${item.id}">
 				<div class="charsheet__item-star-wrapper">
@@ -7485,7 +7495,9 @@ class CharacterSheetInventory {
 						</span>
 					</div>
 					<div class="charsheet__item-details">
-						${item.damage ? `<span class="ve-small">Dmg: ${item.damage}</span>` : ""}
+						${damageStr ? `<span class="ve-small${dmg?.isModified ? " charsheet__item-dmg--derived" : ""}" title="${damageTitle}">Dmg: ${damageStr}</span>` : ""}
+						${dmg?.attackBonus ? `<span class="ve-small charsheet__item-dmg--derived" title="Attack bonus from material and upgrades">Atk: ${dmg.attackBonus > 0 ? "+" : ""}${dmg.attackBonus}</span>` : ""}
+						${dmg && dmg.critThreshold < 20 ? `<span class="ve-small charsheet__item-dmg--derived" title="Critical hit range, widened by upgrades">Crit: ${dmg.critThreshold}\u201320</span>` : ""}
 						${item.ac ? `<span class="ve-small">AC: ${item.ac}</span>` : ""}
 						${(item.bonusDamageDice || (item.damageRiders?.length)) ? `<span class="ve-small text-warning" title="Extra damage on hit">${
 		item.damageRiders?.length
@@ -7503,21 +7515,10 @@ class CharacterSheetInventory {
 						${mcStatus ? `<button type="button" class="ve-small charsheet__item-mc-badge charsheet__item-mc-badge--${mcStatus.isSuppressing ? "suppress" : mcStatus.isOverloaded ? "over" : "ok"} charsheet__item-mc-config" title="${this._getMagicCapacityTooltip(materialEntity, mcStatus).replace(/"/g, "&quot;")}" aria-label="${CharacterSheetMaterials.getMagicCapacityAriaLabel(materialEntity, mcStatus).replace(/"/g, "&quot;")}"><span aria-hidden="true">✦ ${mcStatus.count}/${mcStatus.capacityDisplay}</span></button>` : ""}
 						${this._page.getMaterialsModule?.()?.getDegradationBadgeHtml(item.id) || ""}
 						${item.appliedUpgrades?.length ? `<span class="ve-small charsheet__item-upgrade-badges">${item.appliedUpgrades.map(u => {
-		const tooltip = typeof CharacterSheetUpgrades !== "undefined" ? (() => {
-			const eff = CharacterSheetUpgrades.getUpgradeEffects({appliedUpgrades: [u]});
-			const parts = [];
-			if (eff.bonusWeaponAttack) parts.push(`+${eff.bonusWeaponAttack} attack`);
-			if (eff.bonusWeaponDamage) parts.push(`+${eff.bonusWeaponDamage} damage`);
-			if (eff.critThresholdReduction) parts.push(`Crit on ${20 - eff.critThresholdReduction}-20`);
-			if (eff.damageDieIncrease) parts.push(`Damage die +${eff.damageDieIncrease} step`);
-			if (eff.bonusSpellAttack) parts.push(`+${eff.bonusSpellAttack} spell attack`);
-			if (eff.bonusSpellSaveDc) parts.push(`+${eff.bonusSpellSaveDc} spell DC`);
-			if (eff.bonusDamageDice) parts.push(`+${eff.bonusDamageDice} ${eff.bonusDamageType}`);
-			parts.push(...eff.tags);
-			parts.push(...eff.notes);
-			return parts.length ? `${u.name}: ${parts.join("; ")}` : u.name;
-		})() : u.name;
-		return `<span class="badge badge-warning ve-small" title="${tooltip.replace(/"/g, "&quot;")}">${u.name}</span>`;
+		// Bootstrap's global `.badge` is a 2.5rem circular puck with no background, so a
+		// multi-word upgrade name rendered as an empty ellipse. These carry their own class.
+		const tooltip = typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getUpgradeSummary(u) : u.name;
+		return `<span class="ve-small charsheet__item-upgrade-badge" title="${tooltip.replace(/"/g, "&quot;")}">${u.name}</span>`;
 	}).join(" ")}</span>` : ""}
 						${item.socketedGemstones?.length ? `<span class="ve-small charsheet__item-gem-badges">${item.socketedGemstones.map(g => {
 		const summary = typeof CharacterSheetUpgrades !== "undefined" ? CharacterSheetUpgrades.getGemstoneSummary(g) : "";

@@ -21342,7 +21342,8 @@ body:not(.ve-night-mode) .charsheet__socket-modal .badge-secondary { --cs-badge-
 	flex-wrap: wrap;
 }
 
-.charsheet__item-upgrade-badges .badge {
+.charsheet__item-upgrade-badges .badge,
+.charsheet__item-upgrade-badge {
 	font-size: 0.65em;
 	letter-spacing: 0.02em;
 }
@@ -24690,6 +24691,36 @@ color: var(--cs-text-primary, #f1f5f9);
  * The material chip on an inventory row. Deliberately quieter than the upgrade
  * badges beside it: what an item is *made of* is standing context, not an event.
  */
+/* An applied upgrade, shown on the inventory row.
+
+   These deliberately do NOT use Bootstrap's `.badge`: that global is a 2.5rem circular puck
+   (`border-radius: 50%`, `min-width: 2.5rem`) whose `-warning` variant defines no background at
+   all, so a two-word upgrade name rendered as a stretched empty ellipse. Amber ink on a faint
+   amber tint reads as "worked metal" beside the material chip's neutral grey without shouting
+   over it. */
+.charsheet__item-upgrade-badge {
+	display: inline-flex;
+	align-items: center;
+	padding: 2px 8px;
+	border-radius: 9999px;
+	border: 1px solid var(--cs-warning, #f59e0b);
+	background: color-mix(in srgb, var(--cs-warning, #f59e0b) 12%, transparent);
+	color: var(--cs-warning, #f59e0b);
+	white-space: nowrap;
+	cursor: help;
+}
+
+/* A damage / attack / crit figure the sheet DERIVED, rather than one printed on the item.
+   A material's die step and an upgrade's bonuses move these numbers off the catalog value, and
+   a player comparing the row against the book needs to know which of the two is lying. The cue
+   is deliberately quiet — an ink shift and a dotted underline, not a badge — because on an
+   unmodified weapon (the common case) nothing here fires at all. */
+.charsheet__item-dmg--derived {
+	color: var(--cs-info, #06b6d4);
+	border-bottom: 1px dotted currentcolor;
+	cursor: help;
+}
+
 .charsheet__item-material-badge {
 	display: inline-flex;
 	align-items: center;

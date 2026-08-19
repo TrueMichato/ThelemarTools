@@ -1262,6 +1262,32 @@ class CharacterSheetUpgrades {
 	 * @param {object} gem - Socketed gemstone data
 	 * @returns {string} One-line summary of the gemstone's effect
 	 */
+	/**
+	 * A one-line, human-readable summary of what a single applied upgrade actually does.
+	 *
+	 * Lives here rather than inline in the inventory renderer because three surfaces need the
+	 * same sentence — the inventory row's badge tooltip, the item hover, and the upgrade picker
+	 * — and three hand-rolled copies is how they drift apart.
+	 *
+	 * @param {object} upgrade A single applied-upgrade snapshot.
+	 * @returns {string} `"Balanced: +1 attack"`, or just the name when it has no legible effect.
+	 */
+	static getUpgradeSummary (upgrade) {
+		if (!upgrade) return "";
+		const eff = CharacterSheetUpgrades.getUpgradeEffects({appliedUpgrades: [upgrade]});
+		const parts = [];
+		if (eff.bonusWeaponAttack) parts.push(`+${eff.bonusWeaponAttack} attack`);
+		if (eff.bonusWeaponDamage) parts.push(`+${eff.bonusWeaponDamage} damage`);
+		if (eff.critThresholdReduction) parts.push(`Crit on ${20 - eff.critThresholdReduction}-20`);
+		if (eff.damageDieIncrease) parts.push(`Damage die +${eff.damageDieIncrease} step`);
+		if (eff.bonusSpellAttack) parts.push(`+${eff.bonusSpellAttack} spell attack`);
+		if (eff.bonusSpellSaveDc) parts.push(`+${eff.bonusSpellSaveDc} spell DC`);
+		if (eff.bonusDamageDice) parts.push(`+${eff.bonusDamageDice} ${eff.bonusDamageType}`);
+		parts.push(...(eff.tags || []));
+		parts.push(...(eff.notes || []));
+		return parts.length ? `${upgrade.name}: ${parts.join("; ")}` : upgrade.name;
+	}
+
 	static getGemstoneSummary (gem) {
 		if (!gem?.name) return "";
 		return this.getGemstoneDescriptor(gem)?.summary

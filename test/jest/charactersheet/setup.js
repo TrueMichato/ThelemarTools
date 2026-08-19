@@ -159,6 +159,14 @@ globalThis.Parser = globalThis.Parser || {
 	SRC_PHB: "PHB",
 	SRC_XPHB: "XPHB",
 	attAbvToFull: (abv) => globalThis.Parser.ATB_ABV_TO_FULL[abv] || abv,
+	// Damage-type abbreviations, as used on weapon `dmgType`. Only the physical trio and the
+	// common elemental set are needed by the sheet; anything unknown falls through unchanged.
+	DMGTYPE_JSON_TO_FULL: {
+		A: "acid", B: "bludgeoning", C: "cold", F: "fire", O: "force", L: "lightning",
+		N: "necrotic", P: "piercing", I: "poison", Y: "psychic", R: "radiant", S: "slashing",
+		T: "thunder",
+	},
+	dmgTypeToFull: (abv) => globalThis.Parser.DMGTYPE_JSON_TO_FULL[abv] || abv,
 	getAbilityModNumber: (score) => Math.floor((score - 10) / 2),
 	spLevelToFull: (level) => {
 		if (level === 0) return "Cantrip";

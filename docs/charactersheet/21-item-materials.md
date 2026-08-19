@@ -810,6 +810,33 @@ the homebrew when the catalog itself is missing.
 The **upgrade** picker now follows the same rule with three branches: nothing eligible for this
 item kind, nothing eligible at this tier, and everything this item can take already applied.
 
+### The inventory row derives; it does not remember
+
+`item.damage` is a display string written once, when the item is added, and never touched again.
+A material's die step and an upgrade's bonuses all land afterwards, so for the entire life of a
+modified weapon the inventory row showed a number the combat tab disagreed with — the same
+weapon reading `1d8` in one tab and `1d10+3` in another.
+
+The row now calls **`state.getEffectiveWeaponDamage(itemId)`**, which reads the *projected* item
+(so a material's die step is already in `dmg1`) and folds in `getEffectiveItemBonuses` (so an
+upgrade's `damageDieIncrease`, flat `bonusWeaponDamage` and attack bonus land too). It returns
+`null` rather than a fallback when there are no damage dice, so a lantern gets no `Dmg:` line.
+
+Two details worth keeping:
+
+- **`getEffectiveItemBonuses` hands back authored values, not numbers.** `"+1"` and `"0"` are
+  both strings on some paths, so `a + b` concatenates instead of summing. Every figure is coerced
+  before arithmetic. This was a live bug caught by the tests, not a theoretical one.
+- **`display` excludes damage riders; `displayFull` includes them.** The inventory row already
+  gives riders their own warning-coloured chip and would otherwise print them twice.
+
+A figure that has moved off the printed value is marked `isModified` and rendered in
+`--cs-info` with a dotted underline. The cue is quiet on purpose: on an unmodified weapon —
+the common case — none of it fires. `isModified` compares against the **raw** entry, not the
+projected one, or a material's die step would silently look standard.
+
+The stored `damage` field stays for save compatibility but is legacy. Read-time derivation wins.
+
 ### A single-valued picker closes; a multi-valued one stays open
 
 A material is one field, so applying one is a completed decision and the modal closes. Upgrades

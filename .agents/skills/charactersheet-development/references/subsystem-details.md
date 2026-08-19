@@ -704,6 +704,28 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
   rather than importing it, so materials keeps no hard dependency on upgrades.
 - ⚠️ **Magicality fails open.** An upgrade that resolves to nothing counts as NON-magical. The
   opposite default would let a missing brew silently overload every item a character owns.
+- ⚠️ **`item.damage` is a display string FROZEN at add-time.** It is written only in `_addItem`
+  and in custom-item creation, and nothing rewrites it — `projectItemMaterial` writes `dmg1`. Any
+  surface that reads it shows a modified weapon's *printed* damage forever. Use
+  **`state.getEffectiveWeaponDamage(itemId)`** instead: it reads the projected item and folds in
+  `getEffectiveItemBonuses`, so materials, die steps and flat upgrade bonuses all land. Returns
+  `null` when there are no dice — render nothing rather than inventing a line.
+- ⚠️ **`getEffectiveItemBonuses` returns AUTHORED values, which are sometimes strings.** `"+1"`
+  and `"0"` both occur, so `(a || 0) + (b || 0)` concatenates instead of summing and yields
+  `"+10"` for 1 + 0. Coerce with `Number()` before any arithmetic. This was a real bug, caught by
+  a test, not a hypothetical.
+- **`getEffectiveWeaponDamage().display` excludes damage riders; `displayFull` includes them.**
+  The inventory row renders riders in their own warning-coloured chip and would print them twice
+  otherwise. `isModified` compares against the **raw** entry, not the projected one — comparing
+  against the projection makes a material's die step look standard.
+- **`CharacterSheetUpgrades.getUpgradeSummary(upgrade)`** is the single one-line description of
+  what an applied upgrade does (`"Balanced: +1 attack"`). Extracted from an inline builder in the
+  inventory renderer because the row badge, the hover and the picker all need the same sentence.
+- ⚠️ **Bootstrap's global `.badge` is a 2.5rem circular puck with no background** (`border-radius:
+  50%`, `min-width: 2.5rem`, and `-warning` / `-info` / `-default` define no `background` at all).
+  Multi-word labels render as stretched empty ellipses. Item-row upgrade badges therefore use
+  `.charsheet__item-upgrade-badge`, not `.badge badge-warning`; the three item modals carry a
+  scoped override instead. Do not "fix" the global — the rest of the site depends on it.
 - ⚠️ **A single-valued picker closes on apply; a multi-valued one must not.** A material is one
   field, so `showMaterialPickerModal` closing is correct. `showUpgradePickerModal` is a *list*
   editor — a weapon takes several upgrades — so it rebuilds its body in place via `renderBody()`

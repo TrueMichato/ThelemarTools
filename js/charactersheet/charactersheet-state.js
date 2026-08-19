@@ -12953,6 +12953,82 @@ class CharacterSheetState {
 		return base;
 	}
 
+	/**
+	 * A weapon's damage as it actually stands right now.
+	 *
+	 * `item.damage` is a display string frozen when the item was ADDED. A material's die step
+	 * and an upgrade's `damageDieIncrease` / `bonusWeaponDamage` all land after that, so the
+	 * stored string quietly lies for the entire life of a modified weapon. This derives the
+	 * whole line at read time from the projected dice plus `getEffectiveItemBonuses`, which is
+	 * what the combat tab has always done — the two surfaces now agree by construction.
+	 *
+	 * Returns `null` for anything with no damage dice, so callers render nothing rather than
+	 * inventing a `Dmg:` line for a lantern.
+	 *
+	 * @param {string} itemId
+	 * @returns {null|{
+	 *   dice: string, diceVersatile: string|null, flat: number, damageType: string|null,
+	 *   display: string, attackBonus: number, critThreshold: number,
+	 *   riders: Array<{dice: string, damageType: string|null}>, isModified: boolean
+	 * }}
+	 */
+	getEffectiveWeaponDamage (itemId) {
+		const invItem = this._data.inventory.find(i => i.id === itemId);
+		if (!invItem) return null;
+
+		// Read the PROJECTED item — a material rewrites `dmg1` at read time and never touches
+		// the raw entry.
+		const item = this.getItems().find(i => i.id === itemId) || invItem.item || invItem;
+		if (!item.dmg1) return null;
+
+		const eff = this.getEffectiveItemBonuses(itemId) || {};
+		// `getEffectiveItemBonuses` hands back bonuses as they were AUTHORED — "+1" and "0" are
+		// both strings on some paths. Adding two of those concatenates instead of summing, so
+		// every figure below is coerced before any arithmetic touches it.
+		const num = (v) => {
+			const n = Number(v);
+			return Number.isFinite(n) ? n : 0;
+		};
+		const step = num(eff.damageDieIncrease);
+		const bump = (die) => (die && step > 0 && typeof CharacterSheetUpgrades !== "undefined"
+			? CharacterSheetUpgrades.increaseDamageDie(die, step)
+			: die);
+
+		const dice = bump(String(item.dmg1));
+		const diceVersatile = item.dmg2 ? bump(String(item.dmg2)) : null;
+		const flat = num(eff.bonusWeaponDamage) + num(eff.bonusWeapon);
+		const damageType = item.dmgType
+			? (Parser.dmgTypeToFull?.(item.dmgType) || item.dmgType)
+			: null;
+
+		const riders = (eff.damageRiders || []).map(r => ({dice: r.dice, damageType: r.damageType || null}));
+
+		const flatStr = flat ? (flat > 0 ? `+${flat}` : `${flat}`) : "";
+		const versatileStr = diceVersatile ? ` (${diceVersatile}${flatStr})` : "";
+		const riderStr = riders.length ? ` + ${riders.map(r => `${r.dice}${r.damageType ? ` ${r.damageType}` : ""}`).join(" + ")}` : "";
+		// `display` is the weapon's OWN line. Riders are kept out of it and handed back
+		// separately, because the inventory row already gives them their own warning-coloured
+		// chip and would otherwise print them twice; `displayFull` is for callers that want one
+		// complete string.
+		const display = `${dice}${flatStr}${versatileStr}${damageType ? ` ${damageType}` : ""}`;
+
+		return {
+			dice,
+			diceVersatile,
+			flat,
+			damageType,
+			display,
+			displayFull: `${display}${riderStr}`,
+			attackBonus: num(eff.bonusWeaponAttack) + num(eff.bonusWeapon),
+			critThreshold: num(eff.critThreshold) || 20,
+			riders,
+			// True when anything has moved the weapon off its PRINTED line, so a caller can mark
+			// the value as derived rather than catalog-standard. Compared against the raw entry,
+			// because `item.dmg1` here is already the material's projection.
+			isModified: step > 0 || !!flat || dice !== String(invItem.dmg1 ?? invItem.item?.dmg1 ?? item.dmg1),
+		};
+	}
+
 	// Senses granted by equipped/attuned magic items
 	setItemSenses (senses) {
 		this._data.itemSenses = senses || {darkvision: 0, blindsight: 0, tremorsense: 0, truesight: 0};
