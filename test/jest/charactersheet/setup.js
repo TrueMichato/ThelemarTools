@@ -162,8 +162,18 @@ globalThis.Parser = globalThis.Parser || {
 	// Damage-type abbreviations, as used on weapon `dmgType`. Only the physical trio and the
 	// common elemental set are needed by the sheet; anything unknown falls through unchanged.
 	DMGTYPE_JSON_TO_FULL: {
-		A: "acid", B: "bludgeoning", C: "cold", F: "fire", O: "force", L: "lightning",
-		N: "necrotic", P: "piercing", I: "poison", Y: "psychic", R: "radiant", S: "slashing",
+		A: "acid",
+		B: "bludgeoning",
+		C: "cold",
+		F: "fire",
+		O: "force",
+		L: "lightning",
+		N: "necrotic",
+		P: "piercing",
+		I: "poison",
+		Y: "psychic",
+		R: "radiant",
+		S: "slashing",
 		T: "thunder",
 	},
 	dmgTypeToFull: (abv) => globalThis.Parser.DMGTYPE_JSON_TO_FULL[abv] || abv,

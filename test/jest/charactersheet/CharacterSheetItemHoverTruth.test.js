@@ -27,8 +27,14 @@ beforeAll(() => {
 afterEach(() => { delete globalThis.__csState; });
 
 const plainSword = () => ({
-	id: "i1", name: "Longsword", source: "PHB", weapon: true,
-	dmg1: "1d8", dmgType: "S", weight: 3, value: 1500,
+	id: "i1",
+	name: "Longsword",
+	source: "PHB",
+	weapon: true,
+	dmg1: "1d8",
+	dmgType: "S",
+	weight: 3,
+	value: 1500,
 });
 
 describe("Item hover routing", () => {
