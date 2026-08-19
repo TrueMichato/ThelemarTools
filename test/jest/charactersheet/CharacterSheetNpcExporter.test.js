@@ -126,8 +126,9 @@ describe("CharacterSheetNpcExporter", () => {
 		const methodsText = methodsTrait.entries.join(" ");
 		expect(methodsText.indexOf("Cost 0:")).toBeLessThan(methodsText.indexOf("Cost 1:"));
 		expect(methodsText.indexOf("Cost 1:")).toBeLessThan(methodsText.indexOf("Cost 2:"));
-		expect(methodsText).toContain("Rooted Stance|TGTT} (Bonus Action)");
-		expect(methodsText).toContain("Flowing Strike|TGTT} (Action)");
+		// v19: the economy is a hoverable superscript mark rather than a parenthetical.
+		expect(methodsText).toContain("Rooted Stance|TGTT}{@sup {@tip B|Bonus Action}}");
+		expect(methodsText).toContain("Flowing Strike|TGTT}{@sup {@tip A|Action}}");
 	});
 
 	it("should include weapon attacks derived from equipped inventory weapons", () => {

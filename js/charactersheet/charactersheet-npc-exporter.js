@@ -350,6 +350,7 @@ class CharacterSheetNpcExporter {
 
 		const alignment = this._getAlignmentArray(state.getAlignment?.());
 		this._rebuildSpellProvenanceTags(state);
+		this._rebuildSpellCastingTimes(state, exportOpts?.spellIndex);
 		const size = [this._getSizeAbv(state.getSize?.() || "medium")];
 		const speed = this._getSpeedObject(state);
 		const saves = this._getSaveBlock(state);
@@ -2240,7 +2241,10 @@ class CharacterSheetNpcExporter {
 		const printed = new Set();
 		(out.spellcasting || []).forEach(block => {
 			const json = JSON.stringify(block);
-			[...json.matchAll(/\{@spell ([^|}]+)[^}]*\}\s*\((?:\{@feat )?([^}()|]+?)(?:\|[^}]*\})?\)/g)]
+			// v19 puts a superscript economy mark between the tag and its provenance
+			// parenthetical, so the mark has to be skipped rather than blocking the match.
+			const reGranted = new RegExp(`\\{@spell ([^|}]+)[^}]*\\}${this.ECONOMY_MARK_RE_SRC}?\\s*\\((?:\\{@feat )?([^}()|]+?)(?:\\|[^}]*\\})?\\)`, "g");
+			[...json.matchAll(reGranted)]
 				.forEach(m => granted.add(this._normalizeFeatureKey(m[2])));
 			[...json.matchAll(/\{@spell ([^|}]+)/g)].forEach(m => printed.add(this._normalizeFeatureKey(m[1])));
 		});
@@ -2664,7 +2668,7 @@ class CharacterSheetNpcExporter {
 
 	/** Entry name without its use-count suffix, tag markup or provenance parenthetical. */
 	static _getAnchorBareName (name) {
-		return String(name || "")
+		return this._stripEconomyMarks(name)
 			.replace(/\{@\w+\s+([^|}]+)[^}]*\}/g, "$1")
 			.replace(/\s*\([^)]*\)\s*$/, "")
 			.replace(/\s*—.*$/, "")
@@ -3755,8 +3759,13 @@ class CharacterSheetNpcExporter {
 				}
 				compact = compact.replace(/\s{2,}/g, " ").replace(/\s+([.,])/g, "$1").trim();
 				const label = this._getManeuverActionLabel(section, compact);
+				const labelMark = this._getEconomyMark(label);
 				compact = this._condenseRosterClause(compact);
-				bodies.push(`{@b ${this._getFeatureHoverTag(feature) || name} (${label}).} ${compact}`);
+				const lead = this._getFeatureHoverTag(feature) || name;
+				// "Replaces One Attack" / "Triggered" / "Special" have no glyph and stay prose.
+				bodies.push(labelMark
+					? `{@b ${lead}${labelMark}.} ${compact}`
+					: `{@b ${lead} (${label}).} ${compact}`);
 			});
 
 		if (bodies.length < 2) return;
@@ -8094,7 +8103,7 @@ class CharacterSheetNpcExporter {
 				const {name: spellName, source: spellSrc} = this._parseSpellUid(sp?.name, sp?.source);
 				const usage = this._getItemSpellUsageText(sp) || "";
 				if (!byUsage.has(usage)) byUsage.set(usage, []);
-				byUsage.get(usage).push(`{@spell ${spellName}|${spellSrc}}`);
+				byUsage.get(usage).push(this._formatSpellTag({name: spellName, source: spellSrc}, {showProvenance: false}));
 			});
 
 			const clauses = [...byUsage.entries()].map(([usage, tags]) => {
@@ -9257,7 +9266,81 @@ class CharacterSheetNpcExporter {
 		if (innateBlock) blocks.push(innateBlock);
 		const swappableBlocks = this._getSwappableSpellSetBlocks(state, {npcName});
 		blocks.push(...swappableBlocks);
+		const powersBlock = this._getPsionicPowersBlock(state, {npcName});
+		if (powersBlock) blocks.push(powersBlock);
 		return blocks;
+	}
+
+	/**
+	 * The roster half of the psionics split. Every one of the book's 27 psionic
+	 * statblocks routes its utility powers through a `spellcasting` block named
+	 * "Powers" rather than minting a trait apiece, and reserves real entries for the
+	 * handful of powers that resolve in combat. Before this, a level 20 Talent exported
+	 * twenty-four separate entries — sixteen of them actions — for what the book states
+	 * as six entries and a two-line roster.
+	 *
+	 * @param {Object} state character state
+	 * @param {Object} opts
+	 * @returns {Object|null} a bestiary `spellcasting` block, or null when not a manifester
+	 */
+	/**
+	 * The rostered (non-signature) powers, or `[]`. Shared so that the `Powers` block and
+	 * the `Psionic Powers` trait cannot disagree about whether a roster exists.
+	 * @param {object} state
+	 * @returns {Array<object>}
+	 */
+	static _getRosteredPsionicPowers (state) {
+		if (!state?.getFeatureCalculations?.()?.hasPsionicPowers) return [];
+		return (state?.getFeatures?.() || [])
+			.filter(f => f?._entityType === "psionicPower" && f?.name)
+			.filter(f => !this._isSignaturePsionicPower(f));
+	}
+
+	/**
+	 * @param {object} state
+	 * @returns {boolean} whether a `Powers` roster block will be emitted
+	 */
+	static _hasPsionicRoster (state) { return !!this._getRosteredPsionicPowers(state).length; }
+
+	static _getPsionicPowersBlock (state, {npcName = "The NPC"} = {}) {
+		const calc = state?.getFeatureCalculations?.() || {};
+		if (!calc.hasPsionicPowers) return null;
+
+		const powers = this._getRosteredPsionicPowers(state);
+		if (!powers.length) return null;
+
+		/** @type {Record<string, Array<string>>} */ const banded = {};
+		powers
+			.slice()
+			.sort((a, b) => (a._psionicOrder || 0) - (b._psionicOrder || 0) || String(a.name).localeCompare(String(b.name)))
+			.forEach(power => {
+				// Fails closed to at-will: a fabricated limit is worse than none.
+				const band = this._getPsionicBand(power._psionicOrder, calc) || "will";
+				const mark = this._getEconomyMark(this._getPsionicManifestationTime(power));
+				(banded[band] ||= []).push(`{@psionic ${power.name}|${power.source || "TalPsi"}}${mark}`);
+			});
+
+		const ability = String(calc.manifestationAbility || "int").toLowerCase();
+		const abilityFull = Parser.attAbvToFull(ability) || "Intelligence";
+		const dcPart = Number.isFinite(Number(calc.powerSaveDc)) ? ` (power save {@dc ${calc.powerSaveDc}})` : "";
+
+		const block = {
+			name: "Powers",
+			type: "spellcasting",
+			headerEntries: [
+				`In addition to the other powers in this stat block, ${npcName} can manifest the following powers, using ${abilityFull} as its manifestation ability${dcPart}:`,
+			],
+			ability,
+		};
+		if (banded.will?.length) block.will = banded.will;
+		// The book writes a daily band as "3e"/"1e" — N per day *each*, not N shared.
+		const daily = {};
+		["3/Day", "1/Day"].forEach(key => {
+			if (banded[key]?.length) daily[`${key.split("/")[0]}e`] = banded[key];
+		});
+		if (Object.keys(daily).length) block.daily = daily;
+
+		return block;
 	}
 
 	/**
@@ -9419,6 +9502,33 @@ class CharacterSheetNpcExporter {
 	}
 
 	/**
+	 * Index of spell name → casting time, rebuilt at the start of every conversion.
+	 *
+	 * Some spell lines are built from a bare `name|source` reference rather than from
+	 * a spell record — subclass mode lists and item-granted spells both are — so they
+	 * carry no `castingTime` of their own. The character almost always knows the same
+	 * spell elsewhere, and that record does carry it, so one index recovers the mark
+	 * for lines that would otherwise read as "could not determine".
+	 *
+	 * @type {Map<string, string>}
+	 */
+	static _spellCastingTimes = new Map();
+
+	/** @type {Function|null} */
+	static _spellCastingTimeLookup = null;
+
+	static _rebuildSpellCastingTimes (state, spellIndex = null) {
+		this._spellCastingTimes = new Map();
+		this._spellCastingTimeLookup = this._getSpellIndexLookup(spellIndex);
+		(state?.getSpells?.() || []).forEach(spell => {
+			const key = String(spell?.name || "").trim().toLowerCase();
+			const time = String(spell?.castingTime || "").trim();
+			if (!key || !time || this._spellCastingTimes.has(key)) return;
+			this._spellCastingTimes.set(key, time);
+		});
+	}
+
+	/**
 	 * A spell attributed to a feature that merely *mentions* it (the sheet's grant
 	 * parser is generous) and which the character has neither prepared nor recorded in
 	 * a spellbook is not actually castable. Listing it implies an option the DM does
@@ -9523,10 +9633,74 @@ class CharacterSheetNpcExporter {
 		return this._spellProvenanceTags.get(this._normalizeFeatureKey(label)) || label;
 	}
 
+	/**
+	 * The action economy, as a hoverable superscript.
+	 *
+	 * MCDM's statblocks mark economy with a superscript letter rather than a
+	 * parenthetical: one glyph instead of a dozen characters, on lines a DM scans
+	 * dozens of times a session. `{@sup}` renders natively here, and nesting `{@tip}`
+	 * inside it means the mark names itself on hover — so it needs no legend, which is
+	 * the thing that normally makes superscript notation fail outside a printed book.
+	 *
+	 * Long casting times superscript the time itself (`¹ʰʳ`) rather than a code letter.
+	 * A DM reading `E` has to hover to learn anything, and hovers do not exist on a
+	 * tablet or in a markdown copy; `1hr` is already the answer.
+	 *
+	 * Every readable time is marked, including a plain action. That is deliberate: it
+	 * makes an *unmarked* line mean "the casting time could not be read", so the export
+	 * reports its own gaps instead of hiding them among the actions.
+	 *
+	 * @param {string} raw casting/manifestation time as the sheet stores it — "1 bonus",
+	 *   "10 minute", "1 reaction, which you take when …"
+	 * @returns {string} a `{@sup …}` mark, or `""` when the time is unreadable
+	 */
+	/**
+	 * Regex source for the v19 superscript economy mark. Any pass that parses a tag
+	 * positionally — "a parenthetical directly after a spell tag is provenance" — has
+	 * to allow the mark to sit between, and any pass that treats a name as an identity
+	 * has to strip it first. The mark is presentation; it is never part of a key.
+	 */
+	static ECONOMY_MARK_RE_SRC = "(?:\\{@sup \\{@tip [^{}|]+\\|[^{}]+\\}\\})";
+
+	/** @returns {string} `text` with every economy mark removed. */
+	static _stripEconomyMarks (text) {
+		return String(text || "").replace(new RegExp(this.ECONOMY_MARK_RE_SRC, "g"), "");
+	}
+
+	static _getEconomyMark (raw) {
+		const time = String(raw || "").trim();
+		if (!time) return "";
+
+		if (/^(?:1\s+)?bonus\b/i.test(time)) return this._formatEconomyMark("B", "Bonus Action");
+		if (/^(?:1\s+)?reaction\b/i.test(time)) return this._formatEconomyMark("R", "Reaction");
+		if (/^(?:1\s+)?action\b/i.test(time)) return this._formatEconomyMark("A", "Action");
+
+		// The sheet stores the unit unpluralised — "10 minute", "24 hour".
+		const m = /^(\d+)\s*(minute|hour|round|day)s?\b/i.exec(time);
+		if (!m) return "";
+		const n = Number(m[1]);
+		const unit = m[2].toLowerCase();
+		const abbr = {minute: "min", hour: "hr", round: "rd", day: "day"}[unit];
+		const full = `${unit.charAt(0).toUpperCase()}${unit.slice(1)}${n === 1 ? "" : "s"}`;
+		return this._formatEconomyMark(`${n}${abbr}`, `Takes ${n} ${full}`);
+	}
+
+	/** @returns {string} one superscript economy mark that names itself on hover */
+	static _formatEconomyMark (glyph, title) {
+		return `{@sup {@tip ${glyph}|${title}}}`;
+	}
+
 	static _formatSpellTag (spell, {showProvenance = true} = {}) {
 		const name = this._getSafeInlineText(spell?.name || "spell", {maxLen: 80}) || "spell";
 		const source = this._getSafeSourceJson(spell?.source || Parser.SRC_XPHB || "XPHB");
-		const tag = `{@spell ${name}|${source}}`;
+		// The economy mark binds tightest to the name, ahead of any provenance
+		// parenthetical — `_pickPreferredSpellTag` reads a *trailing* `)` as "this tag
+		// carries provenance", so a mark placed after the paren would spoof that test.
+		const castingTime = spell?.castingTime
+			|| this._spellCastingTimes.get(String(spell?.name || "").trim().toLowerCase())
+			|| this._spellCastingTimeLookup?.(spell)?.castingTime
+			|| "";
+		const tag = `{@spell ${name}|${source}}${this._getEconomyMark(castingTime)}`;
 		if (!showProvenance) return tag;
 		const provenance = this._getSpellProvenanceDisplay(spell);
 		return provenance ? `${tag} (${provenance})` : tag;
@@ -9704,8 +9878,12 @@ class CharacterSheetNpcExporter {
 			const methodsAtCost = byCost.get(cost)
 				.sort((a, b) => a.name.localeCompare(b.name))
 				.map(m => {
+					// The three turn economies become superscript marks, matching the spell and
+					// power rosters. Anything else ("Stance", "Free Action") has no glyph and
+					// keeps its parenthetical rather than being silently dropped.
 					const actionTypeRaw = m.actionType ? this._getSafeInlineText(m.actionType, {maxLen: 24}) : "Action";
-					const actionType = actionTypeRaw ? ` (${actionTypeRaw})` : "";
+					const economyMark = this._getEconomyMark(actionTypeRaw);
+					const actionType = economyMark || (actionTypeRaw ? ` (${actionTypeRaw})` : "");
 					const stanceMark = m.isStance ? " [Stance]" : "";
 					const safeName = this._getSafeInlineText(m.name, {maxLen: 80}) || "Method";
 					const safeSource = this._getSafeSourceJson(m.source || Parser.SRC_TGTT || Parser.SRC_XPHB);
@@ -9767,11 +9945,16 @@ class CharacterSheetNpcExporter {
 		const speed = this._getSpeedObject(state);
 		const skills = this._getSkillBlock(state);
 		const resourceIndex = this._buildResourceIndex(state);
+		// Expensive and not memoized, so read once for the whole feature pass.
+		const psionicCalc = state?.getFeatureCalculations?.() || {};
 
 		// Class/race/etc features + feats (feats live on getFeats(), not getFeatures()).
 		const features = [
 			...(state.getFeatures?.() || [])
-				.map(f => this._expandPsionicPower(f))
+				// Utility powers are rostered in the "Powers" spellcasting block; only
+				// powers that resolve in combat earn an entry of their own.
+				.filter(f => !(f?._entityType === "psionicPower" && !this._isSignaturePsionicPower(f)))
+				.map(f => this._expandPsionicPower(f, psionicCalc))
 				.filter(f => f?.name && f?.description)
 				.filter(f => !(typeof CharacterSheetClassUtils !== "undefined" && CharacterSheetClassUtils.isCombatMethod?.(f))),
 			...(state.getFeats?.() || [])
@@ -9958,7 +10141,7 @@ class CharacterSheetNpcExporter {
 	}
 
 	static _normalizeFeatureKey (name) {
-		return String(name || "")
+		return this._stripEconomyMarks(name)
 			.toLowerCase()
 			.replace(/\s*\([^)]*level[^)]*\)\s*/gi, " ")
 			.replace(/\s*\d+(?:st|nd|rd|th)\s*level\s*/gi, " ")
@@ -10276,14 +10459,23 @@ class CharacterSheetNpcExporter {
 			const calc = state?.getFeatureCalculations?.() || {};
 			if (!calc.hasPsionicPowers) return null;
 			const ability = {str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma"}[String(calc.manifestationAbility || "").toLowerCase()] || "Intelligence";
-			const head = [`${ability} is ${npcName}'s manifestation ability`];
-			if (Number.isFinite(Number(calc.powerSaveDc))) head.push(`power save {@dc ${calc.powerSaveDc}}`);
+			const head = [];
+			// The Powers block's header states the manifestation ability and save DC, in the
+			// book's own words. Repeating them here would say them twice on one page — but a
+			// manifester with no roster has no such header, so the facts stay put.
+			if (!this._hasPsionicRoster(state)) {
+				head.push(`${ability} is ${npcName}'s manifestation ability`);
+				if (Number.isFinite(Number(calc.powerSaveDc))) head.push(`power save {@dc ${calc.powerSaveDc}}`);
+			}
 			if (Number.isFinite(Number(calc.powerAttackBonus))) head.push(`{@hit ${calc.powerAttackBonus}} with power attacks`);
 			const tail = [];
 			if (calc.manifestationDie) tail.push(`Manifestation die {@dice ${calc.manifestationDie}}`);
 			if (Number.isFinite(Number(calc.strainMaximum))) tail.push(`strain maximum ${calc.strainMaximum}`);
 			if (Number.isFinite(Number(calc.maxPowerOrder))) tail.push(`knows powers up to ${this._toOrdinal(calc.maxPowerOrder)} order`);
-			return `${head.join(", ")}. ${tail.join("; ")}.`;
+			const sentences = [];
+			if (head.length) sentences.push(`${head.join(", ")}.`);
+			if (tail.length) sentences.push(`${tail.join("; ")}.`);
+			return sentences.join(" ") || null;
 		}
 
 		if (/^reckless attack$/.test(name)) {
@@ -10470,7 +10662,125 @@ class CharacterSheetNpcExporter {
 		return `${num}${({1: "st", 2: "nd", 3: "rd"}[num % 10] || "th")}`;
 	}
 
-	static _expandPsionicPower (feature) {
+	/**
+	 * A power's primary mode is the one matching its own order; "Increased Order" is the
+	 * upcast rule, not the effect. Both `_expandPsionicPower` and the signature/roster
+	 * classifier must agree on which mode is the body, or a power could be rostered on
+	 * the strength of a paragraph that never prints.
+	 *
+	 * @param {Object} feature sheet feature
+	 * @returns {{primary: Object|null, upcast: Object|null}}
+	 */
+	static _PSIONIC_STRAIN_BUDGET_DIVISOR = 3;
+
+	static _PSIONIC_FREQUENT_THRESHOLD = 3;
+
+	static _getPsionicModes (feature) {
+		const modes = (feature?.modes || []).filter(mode => (mode?.entries || []).length);
+		if (!modes.length) return {primary: null, upcast: null};
+		const orderKey = String(feature.order || "").toLowerCase();
+		const upcast = modes.find(mode => /increased order/i.test(String(mode?.name || ""))) || null;
+		const primary = modes.find(mode => String(mode?.name || "").toLowerCase() === orderKey)
+			|| modes.find(mode => !/increased order/i.test(String(mode?.name || "")))
+			|| modes[0];
+		return {primary, upcast};
+	}
+
+	/**
+	 * Strain is the Talent's signature mechanic and the one thing a statblock must not
+	 * ask a DM to track — which is why the book's own 27 psionic statblocks convert it
+	 * into a flat `N/Day` and never mention strain at all.
+	 *
+	 * The conversion is exact rather than estimated. A 1st-order power needs no
+	 * manifestation test and costs nothing. For order `n` you roll a `dD`: above `n`
+	 * costs nothing, exactly `n` costs 1 strain, below `n` costs `n` strain. So
+	 *
+	 *     E[strain] = n·P(roll < n) + 1·P(roll = n)  =  (n·(n−1) + 1) / D   for n ≤ D
+	 *
+	 * The day's budget is *not* the strain maximum. Strain effects bite per track and
+	 * hard — 5 strain in one track is a −5 penalty to AC or Disadvantage on saves — so a
+	 * manifester who spends to their maximum is crippled long before they get there.
+	 * One track's worth (`strainMaximum / 3`) is the budget a creature can actually
+	 * spend and keep fighting, and it is the divisor that reproduces the book's numbers.
+	 *
+	 * @param {number} order the power's order
+	 * @param {Object} calc feature calculations
+	 * @returns {number|null} sustainable manifestations per day; `Infinity` when free,
+	 *   `null` when the character's strain economy cannot be read
+	 */
+	static _getPsionicUsesPerDay (order, calc) {
+		const n = Number(order) || 0;
+		if (n <= 1) return Infinity;
+		const die = Number(/d(\d+)/i.exec(String(calc?.manifestationDie || ""))?.[1]);
+		const strainMax = Number(calc?.strainMaximum);
+		// Fails closed: a fabricated use limit is worse than none at all.
+		if (!Number.isFinite(die) || die <= 0) return null;
+		if (!Number.isFinite(strainMax) || strainMax <= 0) return null;
+		const pBelow = Math.min(n - 1, die) / die;
+		const pEqual = n <= die ? 1 / die : 0;
+		const expected = (n * pBelow) + pEqual;
+		if (expected <= 0) return Infinity;
+		return (strainMax / this._PSIONIC_STRAIN_BUDGET_DIVISOR) / expected;
+	}
+
+	/**
+	 * The book's 27 statblocks use exactly three frequencies — at-will, 3/Day and 1/Day —
+	 * and never anything else, so the model snaps to that vocabulary rather than printing
+	 * a computed "8/Day" no published psion has ever had.
+	 *
+	 * Measured against all 181 roster entries in the book, this reproduces the authors'
+	 * own choice 77% of the time, and every one of the 28 at-will powers exactly. The
+	 * residual is not modellable: the same power at the same order is filed under 3/Day
+	 * in one statblock and 1/Day in another (`read object` is 3/Day for the Pyrokinetic
+	 * Expert and 1/Day for the Telepath Expert), so the split is roster-sizing taste, not
+	 * a rule.
+	 *
+	 * @param {number} order
+	 * @param {Object} calc
+	 * @returns {string|null} "will", "3/Day", "1/Day", or null when unreadable
+	 */
+	static _getPsionicBand (order, calc) {
+		if ((Number(order) || 0) <= 1) return "will";
+		const uses = this._getPsionicUsesPerDay(order, calc);
+		if (uses == null) return null;
+		if (!Number.isFinite(uses)) return "will";
+		return uses >= this._PSIONIC_FREQUENT_THRESHOLD ? "3/Day" : "1/Day";
+	}
+
+	/**
+	 * @param {number} order
+	 * @param {Object} calc
+	 * @returns {string|null} the use figure for an entry name, or null when at-will
+	 */
+	static _getPsionicUsesLabel (order, calc) {
+		const band = this._getPsionicBand(order, calc);
+		return !band || band === "will" ? null : band;
+	}
+
+	/**
+	 * The book gives a real entry only to powers that resolve in combat — an attack roll,
+	 * a forced save, or damage — and rosters the rest. Applied to the Chronopath trio
+	 * this reproduces the authors' split exactly: Psionic Bolt, Time Thief, Intuition,
+	 * Again, Witness Demise and Ally of Time earn entries; illuminator, shared thoughts,
+	 * read object and friends are roster lines.
+	 *
+	 * @param {Object} feature sheet feature
+	 * @returns {boolean} true when the power deserves its own statblock entry
+	 */
+	static _isSignaturePsionicPower (feature) {
+		if (feature?._entityType !== "psionicPower") return false;
+		const {primary} = this._getPsionicModes(feature);
+		if (!primary) return false;
+		const text = (primary.entries || [])
+			.map(it => typeof it === "string" ? it : (it?.items || []).filter(x => typeof x === "string").join(" "))
+			.join(" ");
+		if (/\{@damage\b|\{@dice\b/i.test(text)) return true;
+		if (/\bsaving throw\b/i.test(text)) return true;
+		if (/\battack roll\b|\bmake an attack\b|\branged power attack\b|\bmelee power attack\b/i.test(text)) return true;
+		return false;
+	}
+
+	static _expandPsionicPower (feature, calc = {}) {
 		if (/^psionic powers?$/i.test(String(feature?.name || ""))) {
 			// Class rules, not an ability the creature spends a reaction on.
 			return {...feature, _npcEconomy: "trait"};
@@ -10494,20 +10804,130 @@ class CharacterSheetNpcExporter {
 			if (items.length) paragraphs.push(`<ul>${items.map(item => `<li>${item}</li>`).join("")}</ul>`);
 		});
 		push(primary?.entries);
-		if (upcast && upcast !== primary) push(upcast.entries);
+		if (upcast && upcast !== primary) {
+			const compressed = this._compressPsionicUpcast(upcast.entries, feature?._psionicOrder, calc?.maxPowerOrder);
+			if (compressed == null) push(upcast.entries);
+			else if (compressed) paragraphs.push(`<p>${compressed}</p>`);
+		}
 
 		const header = (feature.entries || [])
 			.filter(it => typeof it === "string")
 			.map(it => it.replace(/\{@b ([^}]*)\}/g, "$1").trim())
-			.filter(it => !/^manifestation time\s*:/i.test(it));
-		if (header.length) paragraphs.push(`<p>${header.join(", ").replace(/:/g, "")}.</p>`);
+			.filter(it => !/^manifestation time\s*:/i.test(it))
+			// Concentration is stated in the entry's name, so repeating it here spends a
+			// line on a fact the DM has already read.
+			.map(it => it.replace(/^duration\s*:\s*concentration,?\s*(?:up to\s*)?/i, "Duration: "))
+			// "Duration: Instantaneous" is the absence of a duration.
+			.filter(it => !/^duration\s*:?\s*(?:instantaneous|concentration)\.?$/i.test(it))
+			// Only standalone measurements: "30-foot line" is the house style and stays.
+			.map(it => it.replace(/(\d+) feet\b/g, "$1 ft."));
+		if (header.length) paragraphs.push(`<p>${header.join(", ").replace(/:/g, "").replace(/\.$/, "")}.</p>`);
 
 		if (!paragraphs.length) return feature;
+		// "it can make a ranged power attack with the object" is a roll the DM is left to
+		// look up. The bonus is on the sheet, so state it where the roll is called for.
+		const attackBonus = Number(calc?.powerAttackBonus);
+		const body = Number.isFinite(attackBonus)
+			? paragraphs.map(it => it.replace(/\b(a (?:ranged|melee) power attack)\b(?!\s*\()/gi, `$1 ({@hit ${attackBonus}})`))
+			: paragraphs;
 		return {
 			...feature,
-			description: paragraphs.join(""),
+			name: this._getPsionicEntryName(feature, primary, calc),
+			description: body.join(""),
 			_npcEconomy: this._getPsionicEconomy(feature),
 		};
+	}
+
+	/**
+	 * The book states a power's whole economy in its name — `Intuition (3/Day;
+	 * 2nd-Order Power; Concentration)` — so a DM never has to look anywhere else for
+	 * how often it can be used, how much it costs to push, or whether it competes with
+	 * another effect. Every one of the 27 published psionic statblocks does this.
+	 *
+	 * Order is always stated; the use figure only when the power is not at-will, which
+	 * matches `Psionic Bolt (1st-Order Power)`.
+	 *
+	 * @param {Object} feature sheet feature
+	 * @param {Object|null} primary the mode supplying the body
+	 * @param {Object} calc feature calculations
+	 * @returns {string} the entry name
+	 */
+	/**
+	 * "When Phirse manifests this power, it can increase its order by 1 or more. For each
+	 * increase of 1, the damage increases by 2d10" is two paragraphs asking a DM to do
+	 * arithmetic the sheet already knows the answer to. A manifester who knows powers up
+	 * to 6th order has exactly four orders of headroom on a 2nd-order power, so the
+	 * ceiling is a number we can state.
+	 *
+	 * Fails closed in both directions: no headroom drops the paragraph outright, and an
+	 * upcast shape we cannot read keeps its original prose rather than guessing.
+	 *
+	 * @param {Array} upcastEntries the "Increased Order" mode's entries
+	 * @param {number} order the power's own order
+	 * @param {number} maxOrder the highest order the character can manifest
+	 * @returns {string|null} the compressed sentence, `""` to drop, `null` to keep as-is
+	 */
+	static _compressPsionicUpcast (upcastEntries, order, maxOrder) {
+		const own = Number(order) || 0;
+		const max = Number(maxOrder) || 0;
+		if (!own || !max) return null;
+		const headroom = max - own;
+		// Nothing to upcast into: the paragraph is pure noise for this creature.
+		if (headroom <= 0) return "";
+
+		const text = (upcastEntries || []).filter(it => typeof it === "string").join(" ");
+		if (!text) return "";
+		const clauses = [];
+
+		const damage = /(?:each|every) increase of 1,[^.]*?damage increases by \{@damage (\d+)d(\d+)\}/i.exec(text);
+		if (damage) clauses.push(`{@damage ${Number(damage[1]) * headroom}d${damage[2]}} more damage`);
+
+		if (/increase of 1,[^.]*?targets? (?:one|1) additional/i.test(text)) {
+			clauses.push(`up to ${headroom} more target${headroom === 1 ? "" : "s"}`);
+		}
+
+		const distance = /(?:each|every) increase of 1, the (radius|length|range)[^.]*?increases by (\d+) f(?:ee|oo)t/i.exec(text);
+		if (distance) clauses.push(`+${Number(distance[2]) * headroom} ft. ${distance[1].toLowerCase()}`);
+
+		if (!clauses.length) return null;
+		return `{@b Increased Order.} At ${this._toOrdinal(max)} order: ${clauses.join(", ")}.`;
+	}
+
+	static _getPsionicEntryName (feature, primary, calc) {
+		const name = String(feature?.name || "");
+		// A name that already carries a parenthetical must not gain a nested one.
+		if (!name || /\)\s*$/.test(name)) return name;
+		const order = Number(feature?._psionicOrder) || 0;
+		if (!order) return name;
+
+		const parts = [];
+		const uses = this._getPsionicUsesLabel(order, calc);
+		if (uses) parts.push(uses);
+		parts.push(`${this._toOrdinal(order)}-Order Power`);
+		if (this._psionicPowerConcentrates(feature, primary)) parts.push("Concentration");
+
+		// A bonus-action or reaction power is already filed under the matching section
+		// heading, so marking it there would restate the heading. A power that takes
+		// minutes has no section that says so, and needs the mark.
+		const time = this._getPsionicManifestationTime(feature);
+		const mark = this._isTurnEconomyTime(time) ? "" : this._getEconomyMark(time);
+		return `${name}${mark} (${parts.join("; ")})`;
+	}
+
+	/**
+	 * Concentration is a property of the mode manifested, not of the power, so the flag
+	 * is read off the chosen mode first and only then off the power's Duration header.
+	 *
+	 * @param {Object} feature
+	 * @param {Object|null} primary
+	 * @returns {boolean}
+	 */
+	static _psionicPowerConcentrates (feature, primary) {
+		if (primary?.concentration) return true;
+		const duration = (feature?.entries || [])
+			.filter(it => typeof it === "string")
+			.find(it => /^\{@b\s*Duration:?\}?/i.test(it) || /duration/i.test(it)) || "";
+		return /concentration/i.test(duration);
 	}
 
 	/**
@@ -10516,6 +10936,22 @@ class CharacterSheetNpcExporter {
 	 * @param {Object} feature
 	 * @returns {string|null} "action" | "bonus" | "reaction" | null
 	 */
+	/**
+	 * @param {Object} feature psionic power feature
+	 * @returns {string} the raw Manifestation Time header — "1 bonus action", "10 minutes"
+	 */
+	static _getPsionicManifestationTime (feature) {
+		const line = (feature?.entries || [])
+			.filter(it => typeof it === "string")
+			.find(it => /^\{@b\s*Manifestation Time:?\s*\}/i.test(it)) || "";
+		return line.replace(/^\{@b[^}]*\}\s*/i, "").trim();
+	}
+
+	/** @returns {boolean} true when the time is one a statblock section already states */
+	static _isTurnEconomyTime (raw) {
+		return /^(?:1\s+)?(?:action|bonus|reaction)\b/i.test(String(raw || "").trim());
+	}
+
 	static _getPsionicEconomy (feature) {
 		const line = (feature?.entries || [])
 			.filter(it => typeof it === "string")
@@ -12658,8 +13094,13 @@ class CharacterSheetNpcExporter {
 			// e.g. Chain Lightning) multiplies damage but less than a true area, and every
 			// other tag — S/C/Y/W/N/Q/L/R/H — is a shape that can catch a whole group.
 			const isAoe = areaTags.some(tag => tag !== "ST" && tag !== "MT");
+			// 5etools stores `[{number: 1, unit: "bonus"}]`, which stringifies to exactly
+			// the shape the character sheet saves ("1 bonus"), so one parser serves both.
+			const timeEnt = (spell.time || [])[0];
+			const castingTime = timeEnt ? `${Number(timeEnt.number) || 1} ${String(timeEnt.unit || "").trim()}` : "";
 			const entry = {
 				level: Number(spell.level) || 0,
+				castingTime,
 				avgDamage,
 				isAoe,
 				isMultiTarget: !isAoe && areaTags.includes("MT"),
@@ -12788,9 +13229,21 @@ class CharacterSheetNpcExporter {
 		});
 		(state?.getFeatures?.() || []).forEach(feature => {
 			if (feature?._entityType !== "psionicPower" && !/psionic|power/i.test(String(feature?.featureType || ""))) return;
-			const body = this._stripHtmlTags(feature?.description || "");
+			// A power's `description` is only its Manifestation Time/Range headers — the
+			// effect lives in `modes`. Reading the wrong field credited a level 20 Talent
+			// with none of its powers, and rated it three steps below the book's own
+			// Master tier despite better HP and equal AC.
+			const {primary} = this._getPsionicModes(feature);
+			const body = this._stripHtmlTags(
+				[...(primary?.entries || []), feature?.description || ""]
+					.map(it => (typeof it === "string" ? it : JSON.stringify(it?.items || "")))
+					.join(" "),
+			);
 			const dice = body.match(/\b\d+d\d+\b/g) || [];
-			dice.forEach(die => { best = Math.max(best, this._averageOfDiceExpression(die)); });
+			if (!dice.length) return;
+			// DMG practice: an effect that catches an area is rated against two targets.
+			const targets = /\beach creature\b|\b\d+-f(?:oo|ee)t (?:radius|cone|line|cube|sphere)/i.test(body) ? 2 : 1;
+			dice.forEach(die => { best = Math.max(best, this._averageOfDiceExpression(die) * targets); });
 		});
 		// A manifestation is one action; the strain economy stops it every round.
 		return best;

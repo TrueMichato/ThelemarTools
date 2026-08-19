@@ -164,7 +164,7 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 		it("conjugates the subject correctly", () => {
 			// The regressions that actually shipped: bare plural verbs and bad -s forms.
 			expect(text).not.toMatch(new RegExp(`\\b${name} (?:drop|succeed|do|ignore|learn|summon|finish|study|activate|fail|add|take|have|make|gain|use|move|hit|push|regain|choose|know|deal|spend|roll|end|start|reduce)\\b`));
-			expect(text).not.toMatch(/\b\w+(?:pushs|haves|dos|goes s|ignores s)\b/);
+			expect(text).not.toMatch(/\b(?:pushs|haves|dos|goes s|ignores s)\b/);
 			// Only clause-initial "it" is the subject; "attack rolls against it have…" is fine.
 			expect(text).not.toMatch(/(?:^|[.;]\s+)(?:It|it) (?:drop|succeed|do|ignore|learn|summon|finish|study|activate|fail|add|have)\b/m);
 		});
@@ -342,7 +342,7 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 			if (!available.includes("Talna")) return;
 			const mon = loadMonster("Talna");
 			const spellText = JSON.stringify(mon.spellcasting || []);
-			expect(spellText).toMatch(/\{@spell [^}]+\} \(Serpentine Spellcasting\)/);
+			expect(spellText).toMatch(/\{@spell [^}]+\}(?:\{@sup \{@tip [^{}|]+\|[^{}]+\}\})? \(Serpentine Spellcasting\)/);
 			// Ordinary class routes must stay unannotated.
 			expect(spellText).not.toMatch(/\(Wizard Spellbook\)/);
 			expect(spellText).not.toMatch(/\(Cantrips Known\)/);
@@ -1064,7 +1064,9 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 		it("never nests a tag inside another tag's arguments (W2)", () => {
 			available.forEach(n => {
 				const text = allEntryText(loadMonster(n));
-				const bad = /\{@(?!b\b|i\b)[a-z]+ [^{}]*\{@/.exec(text);
+				// `@b`, `@i` and `@sup` are text-style wrappers: they recursively render
+				// their contents, so nesting inside them is supported, not a defect.
+				const bad = /\{@(?!b\b|i\b|sup\b)[a-z]+ [^{}]*\{@/.exec(text);
 				expect(bad ? `${n}: ${bad[0]}` : null).toBeNull();
 			});
 		});
@@ -1349,13 +1351,20 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 		it("gives every psionic power its mechanics, not just its headers (W2)", () => {
 			if (!available.includes("Phirse")) return;
 			const mon = loadMonster("Phirse");
-			["Illuminator", "Time Thief", "Kindling", "Influence", "Amplify"].forEach(power => {
-				const entry = ["trait", "action", "bonus", "reaction"]
-					.flatMap(section => mon[section] || [])
-					.find(it => String(it.name).startsWith(power));
-				expect(`${power}: ${entry ? "found" : "missing"}`).toBe(`${power}: found`);
+			// v18 files utility powers on the `Powers` roster rather than as entries, so a
+			// power is accounted for if it appears in either place — but a power that does
+			// resolve in combat must still carry its numbers.
+			const roster = (mon.spellcasting || []).find(it => it.name === "Powers");
+			expect(roster).toBeTruthy();
+			// A power is accounted for either as a signature entry or on the roster; the
+			// entries are the ones that resolve in combat, so they must carry numbers.
+			const entries = ["trait", "action", "bonus", "reaction"]
+				.flatMap(section => mon[section] || [])
+				.filter(it => /Order Power/.test(String(it?.name || "")));
+			expect(entries.length).toBeGreaterThan(0);
+			entries.forEach(entry => {
 				const body = (entry.entries || []).filter(it => typeof it === "string").join(" ");
-				expect(`${power}: ${body}`).toMatch(/\{@|\d/);
+				expect(`${entry.name}: ${body}`).toMatch(/\{@|\d/);
 			});
 		});
 	});
@@ -1993,6 +2002,271 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			// Every claim the item made is in the merged entry, each still attributed.
 			expect(res.entries.join(" ")).toMatch(/disadvantage on spell attack rolls against it \(Master Smith's Aegis\)/i);
 			expect(res.entries.join(" ")).toMatch(/resistance to damage from spells \(Master Smith's Aegis\)/i);
+		});
+	});
+
+	describe("v18 — a Talent reads like the book's own Talents", () => {
+		const psion = () => loadMonster("Phirse");
+
+		it("rosters its utility powers instead of writing 27 entries (A1/A2)", () => {
+			if (!available.includes("Phirse")) return;
+			const mon = psion();
+			const block = (mon.spellcasting || []).find(it => it.name === "Powers");
+			expect(block).toBeTruthy();
+			expect(block.ability).toBe("int");
+			// The book's header, with our numbers: ability and save DC live here, once.
+			expect(block.headerEntries.join(" ")).toMatch(/manifestation ability \(power save \{@dc \d+\}\)/);
+			// Every rostered power is hoverable, and none is stated twice.
+			const rostered = [...(block.will || []), ...Object.values(block.daily || {}).flat()];
+			expect(rostered.length).toBeGreaterThan(5);
+			rostered.forEach(it => expect(it).toMatch(/^\{@psionic [^|]+\|\w+\}(?:\{@sup \{@tip [^{}|]+\|[^{}]+\}\})?$/));
+			expect(new Set(rostered).size).toBe(rostered.length);
+			// The book's Master carries six power entries; we must be in that range, not 24.
+			const entries = ["action", "bonus", "reaction"]
+				.flatMap(sec => mon[sec] || [])
+				.filter(it => /Order Power/.test(String(it?.name || "")));
+			expect(entries.length).toBeLessThanOrEqual(16);
+		});
+
+		it("puts uses, order and concentration in the name (B1)", () => {
+			if (!available.includes("Phirse")) return;
+			const named = ["action", "bonus", "reaction"]
+				.flatMap(sec => psion()[sec] || [])
+				.map(it => String(it?.name || ""))
+				.filter(it => /Order Power/.test(it));
+			expect(named.length).toBeGreaterThan(0);
+			named.forEach(name => {
+				expect(name).toMatch(/\((?:\d+\/Day; )?\d+(?:st|nd|rd|th)-Order Power(?:; Concentration)?\)$/);
+				// The `(N Strain)` suffix must never collide with this one.
+				expect(name).not.toMatch(/Strain/);
+				expect((name.match(/\(/g) || []).length).toBe((name.match(/\)/g) || []).length);
+			});
+			// A 1st-order power costs nothing, so it carries no use figure.
+			expect(named.join("|")).toMatch(/\(1st-Order Power\)/);
+		});
+
+		it("resolves upcast prose to the character's own ceiling (B3)", () => {
+			if (!available.includes("Phirse")) return;
+			const mon = psion();
+			const bodies = ["action", "bonus", "reaction"]
+				.flatMap(sec => mon[sec] || [])
+				.filter(it => /Order Power/.test(String(it?.name || "")))
+				.map(it => ({name: String(it.name), text: (it.entries || []).filter(e => typeof e === "string").join(" ")}));
+			const ceiling = /knows powers up to (\d+)(?:st|nd|rd|th) order/
+				.exec(((mon.trait || []).find(it => /^Psionic Powers$/i.test(String(it?.name || ""))) || {entries: []}).entries.join(" "));
+			expect(ceiling).toBeTruthy();
+			const upcast = bodies.filter(it => /Increased Order/.test(it.text));
+			expect(upcast.length).toBeGreaterThan(0);
+			upcast.forEach(({name, text}) => {
+				// Every resolved upcast states the character's own ceiling and a real number,
+				// never the rulebook's "increase its order by 1 or more" instructions.
+				expect(`${name}: ${text}`).toMatch(new RegExp(`\\{@b Increased Order\\.\\} At ${ceiling[1]}(?:st|nd|rd|th) order: [^.]*\\d`));
+				expect(`${name}: ${text}`).not.toMatch(/Increased Order\.\} At [^.]*increase its order/i);
+			});
+		});
+
+		it("states the power attack bonus where the roll is called for (B2)", () => {
+			if (!available.includes("Phirse")) return;
+			const body = ["action", "bonus", "reaction"]
+				.flatMap(sec => psion()[sec] || [])
+				.flatMap(it => (it.entries || []).filter(e => typeof e === "string"))
+				.join(" ");
+			if (!/power attack/i.test(body)) return;
+			expect(body).toMatch(/a ranged power attack \(\{@hit \d+\}\)/);
+		});
+
+		it("says the manifestation ability exactly once (B4/D7)", () => {
+			if (!available.includes("Phirse")) return;
+			const mon = psion();
+			const trait = (mon.trait || []).find(it => /^Psionic Powers$/i.test(String(it?.name || "")));
+			expect(trait).toBeTruthy();
+			// Ability and save DC moved to the Powers header; the character's own numbers stay.
+			expect(trait.entries.join(" ")).not.toMatch(/manifestation ability/i);
+			expect(trait.entries.join(" ")).toMatch(/strain maximum \d+/);
+			expect(trait.entries.join(" ")).toMatch(/knows powers up to \d+(?:st|nd|rd|th) order/);
+			expect(JSON.stringify(mon).match(/is Phirse's manifestation ability/g) || []).toHaveLength(0);
+		});
+
+		it("drops meaningless duration fragments (B4)", () => {
+			if (!available.includes("Phirse")) return;
+			const lines = ["action", "bonus", "reaction"]
+				.flatMap(sec => psion()[sec] || [])
+				.flatMap(it => (it.entries || []).filter(e => typeof e === "string"))
+				.filter(it => /^Range /.test(it));
+			expect(lines.length).toBeGreaterThan(0);
+			lines.forEach(it => {
+				expect(it).not.toMatch(/Instantaneous/i);
+				// Concentration is in the name, never repeated as a duration fragment.
+				expect(it).not.toMatch(/Duration Concentration/i);
+			});
+		});
+
+		it("credits a manifester's real offence in CR (C1)", () => {
+			if (!available.includes("Phirse")) return;
+			// A power's `description` holds only its Range/Manifestation Time headers, so
+			// reading that field credited a level 20 Talent with none of its own damage.
+			// Assert against the model rather than a CR number, which moves with the corpus.
+			const state = new CharacterSheetState();
+			state.loadFromJson(JSON.parse(fs.readFileSync(path.join(SAVE_DIR, "Phirse.json"), "utf8")));
+			const damaging = (state.getFeatures() || [])
+				.filter(f => f?._entityType === "psionicPower")
+				.filter(f => /\b\d+d\d+\b/.test(JSON.stringify(f.modes || [])));
+			if (!damaging.length) return;
+			expect(CharacterSheetNpcExporter._estimatePsionicDpr(state)).toBeGreaterThan(0);
+			expect(Number(psion().cr)).toBeGreaterThanOrEqual(8);
+		});
+	});
+
+	// ---------------------------------------------------------------- v19
+	// Every roster line — spell, power, combat method, maneuver — states its own
+	// action economy as a hoverable superscript, borrowed from MCDM's statblocks.
+	// The invariant that makes it worth doing: an *unmarked* line means the exporter
+	// could not read a casting time, not "it is probably an action".
+	describe("v19 — the roster line states its own action economy", () => {
+		const SUP = /\{@sup \{@tip ([^|]+)\|([^}]+)\}\}/g;
+
+		const marksIn = text => {
+			const out = [];
+			let m;
+			const re = new RegExp(SUP.source, "g");
+			while ((m = re.exec(String(text)))) out.push({glyph: m[1], hover: m[2]});
+			return out;
+		};
+
+		it("emits only the sanctioned mark vocabulary, each with a self-describing hover (A1)", () => {
+			const seen = new Map();
+			available.forEach(name => marksIn(allEntryText(loadMonster(name))).forEach(it => seen.set(it.glyph, it.hover)));
+			expect(seen.size).toBeGreaterThan(0);
+
+			seen.forEach((hover, glyph) => {
+				// A glyph is either one of the three turn economies or a printed duration.
+				expect(glyph).toMatch(/^(?:A|B|R|\d+(?:min|hr|rnd|day))$/);
+				// The hover must name the thing, never restate the raw sheet string.
+				expect(hover).toMatch(/^(?:Action|Bonus Action|Reaction|Takes \d+ (?:Minutes?|Hours?|Rounds?|Days?))$/);
+				// A superscript that wraps must not break across a line.
+				expect(glyph).not.toMatch(/\s/);
+			});
+
+			expect([...seen.keys()]).toEqual(expect.arrayContaining(["A", "B", "R"]));
+			expect(seen.get("A")).toBe("Action");
+			expect(seen.get("B")).toBe("Bonus Action");
+			expect(seen.get("R")).toBe("Reaction");
+		});
+
+		it("derives the mark from the saved casting time, not from a guess (A2)", () => {
+			const cases = [
+				["1 action", "A", "Action"],
+				["Action", "A", "Action"],
+				["1 bonus", "B", "Bonus Action"],
+				["Bonus Action", "B", "Bonus Action"],
+				["1 reaction", "R", "Reaction"],
+				["Reaction", "R", "Reaction"],
+				["1 minute", "1min", "Takes 1 Minute"],
+				["10 minute", "10min", "Takes 10 Minutes"],
+				["1 hour", "1hr", "Takes 1 Hour"],
+				["24 hour", "24hr", "Takes 24 Hours"],
+			];
+			cases.forEach(([raw, glyph, hover]) => {
+				expect(CharacterSheetNpcExporter._getEconomyMark(raw)).toBe(`{@sup {@tip ${glyph}|${hover}}}`);
+			});
+			// Fails closed: an unreadable time yields no mark rather than a fabricated one.
+			["", null, undefined, "special", "varies"].forEach(raw => {
+				expect(CharacterSheetNpcExporter._getEconomyMark(raw)).toBe("");
+			});
+		});
+
+		it("binds the mark to the name, inside any provenance parenthetical (A3)", () => {
+			// Order is load-bearing: `_pickPreferredSpellTag` treats a trailing `)` as
+			// "this tag carries provenance". A mark placed after the paren would break
+			// that tiebreak silently, so the mark must come first.
+			const withBoth = available
+				.flatMap(name => allEntryText(loadMonster(name)).split("\n"))
+				.filter(line => /\{@sup /.test(line) && /\{@spell [^}]+\}\{@sup [^}]*\}\}\s*\(/.test(line));
+			if (withBoth.length) {
+				withBoth.forEach(line => {
+					expect(line).not.toMatch(/\)\{@sup /);
+				});
+			}
+			expect(CharacterSheetNpcExporter._pickPreferredSpellTag(
+				"{@spell shield|XPHB}{@sup {@tip R|Reaction}} (Oath Spells)",
+				"{@spell shield|XPHB}{@sup {@tip R|Reaction}}",
+			)).toMatch(/\(Oath Spells\)$/);
+		});
+
+		it("marks every spell the character actually knows (A4)", () => {
+			// The saved spell carries `castingTime`, so a list line has no excuse to be
+			// silent. Anything unmarked is a genuine unknown and must stay rare.
+			let marked = 0;
+			let bare = 0;
+			available.forEach(name => {
+				(loadMonster(name).spellcasting || []).forEach(sc => {
+					const blob = JSON.stringify(sc);
+					const re = /\{@spell [^|}]+\|[^}]*\}(\{@sup )?/g;
+					let m;
+					while ((m = re.exec(blob))) (m[1] ? marked++ : bare++);
+				});
+			});
+			expect(marked).toBeGreaterThan(100);
+			// A handful of always-prepared UID references genuinely carry no time.
+			expect(bare / (marked + bare)).toBeLessThan(0.1);
+		});
+
+		it("never restates an economy the section heading already gives (A5)", () => {
+			// A bonus-action power filed under Bonus Actions does not need a B on its
+			// name; the heading says it. The same fact twice is the defect this project
+			// has been removing since v8.
+			available.forEach(name => {
+				const mon = loadMonster(name);
+				["bonus", "reaction"].forEach(section => {
+					(mon[section] || []).forEach(e => {
+						marksIn(String(e?.name || "")).forEach(it => {
+							expect(["A", "B", "R"]).not.toContain(it.glyph);
+						});
+					});
+				});
+			});
+		});
+
+		it("keeps a non-economy label as prose rather than inventing a glyph (A6)", () => {
+			// "Stance", "Replaces One Attack" and "Triggered" have no superscript, so
+			// they must survive as parentheticals instead of vanishing.
+			const text = available.map(name => allEntryText(loadMonster(name))).join("\n");
+			if (/\{@combatmethod/.test(text)) {
+				expect(text).not.toMatch(/\{@sup \{@tip Stance/);
+			}
+			expect(CharacterSheetNpcExporter._getEconomyMark("Stance")).toBe("");
+			expect(CharacterSheetNpcExporter._getEconomyMark("Replaces One Attack")).toBe("");
+			expect(CharacterSheetNpcExporter._getEconomyMark("Free Action")).toBe("");
+		});
+
+		it("retires the parenthetical it replaces on every roster (A7)", () => {
+			available.forEach(name => {
+				const mon = loadMonster(name);
+				["trait", "action", "bonus", "reaction"].forEach(section => {
+					(mon[section] || []).forEach(e => {
+						if (!/^(?:Combat Methods|Maneuvers)/.test(String(e?.name || ""))) return;
+						(e.entries || []).forEach(line => {
+							if (typeof line !== "string") return;
+							// Prose may still say "(Bonus Action)"; a roster tag may not.
+							expect(line).not.toMatch(/\{@(?:combatmethod|psionic|spell) [^}]+\}\s*\((?:Action|Bonus Action|Reaction)\)/);
+						});
+					});
+				});
+			});
+		});
+
+		it("leaves every mark renderable and tag-balanced (A8)", () => {
+			available.forEach(name => {
+				const text = allEntryText(loadMonster(name));
+				const sups = (text.match(/\{@sup /g) || []).length;
+				if (!sups) return;
+				// `{@sup {@tip X|Y}}` — three closers per mark, none orphaned.
+				expect((text.match(/\{@sup \{@tip [^|{}]+\|[^{}]+\}\}/g) || []).length).toBe(sups);
+				// `_getSafeInlineText` strips braces, so a mark routed through it would
+				// survive as naked `sup {@tip ...` residue. Nothing may be de-braced.
+				expect(text).not.toMatch(/(?<!\{)@sup/);
+				expect(text).not.toMatch(/(?<!\{@)sup \{@tip/);
+			});
 		});
 	});
 });

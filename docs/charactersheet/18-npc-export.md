@@ -1076,6 +1076,171 @@ was written as prose instead of as an attack.
   every line it is printed on states nothing, and must normalise to no condition at all.
 
 
+### v18 — a Talent reads like the book's own Talents
+
+Every prior version invented its own answer. v18 did not have to: *The Talent and Psionics*
+ships **27 author-written psionic statblocks** — seven disciplines at Talent (CR 4) / Expert
+(CR 8) / Master (CR 12), plus six named psions from CR 7 to CR 29 — and they agree with each
+other on every question we were about to guess at. **None of them invents a psionics
+subsystem.** All 27 route their powers through an ordinary `spellcasting` block plus about
+six real entries.
+
+Measured against that, Phirse (Chronopath Talent 20) had 24 of his 27 powers written out as
+full entries, 16 of them actions, with no roster, no use limits, no order, no concentration
+and no hoverable tags.
+
+128. **The strain economy converts to `N/Day`** (`_getPsionicUsesPerDay`, `_getPsionicBand`).
+    Manifesting an `n`th-order power rolls the manifestation die `dD`: above `n` costs
+    nothing, equal costs 1, below costs `n`, so one manifestation costs
+    `E[strain] = (n·(n−1) + 1) / D`. The day's budget is **not** the strain maximum —
+    strain bites per track and 5 in a track is −5 AC or Disadvantage on saves, so spending
+    to the maximum cripples the character long before reaching it. One track's worth
+    (`strainMaximum / 3`) is what reproduces the book's numbers. Fails closed: an
+    unreadable die or strain maximum yields no limit rather than a fabricated one.
+129. **Utility powers become a `Powers` roster** (`_getPsionicPowersBlock`,
+    `_getRosteredPsionicPowers`, `_isSignaturePsionicPower`). A power earns a real entry
+    when it *resolves in combat* — an attack roll, a saving throw or damage. Everything
+    else is a `{@psionic}` line in a spellcasting block whose header is the book's own
+    sentence with our numbers substituted. This is what takes 24 entries down to the
+    book's range.
+130. **The name states the whole economy** (`_getPsionicEntryName`,
+    `_psionicPowerConcentrates`). `Intuition (3/Day; 2nd-Order Power; Concentration)` — uses,
+    order and concentration, exactly as all 27 statblocks write them. Order is always
+    stated; the use figure only when the power is not at-will, matching
+    `Psionic Bolt (1st-Order Power)`.
+131. **Upcast prose resolves to the character's ceiling** (`_compressPsionicUpcast`). Two
+    paragraphs of *"it can increase its order by 1 or more. For each increase of 1, the
+    damage increases by 2d10"* become `{@b Increased Order.} At 6th order: {@damage 6d10}
+    more damage.` — the v16 A2 doctrine finally applied to powers. Damage, extra targets
+    and area growth are each resolved; a shape we cannot read keeps its original prose, and
+    a power with no headroom drops the paragraph entirely.
+132. **Range and duration stop trailing as fragments.** `Duration Instantaneous` is the
+    absence of a duration and is dropped; concentration already lives in the name, so
+    `Duration Concentration, 1 minute` never prints twice; standalone measurements become
+    `ft.` while `30-foot line` keeps house style.
+133. **The power attack bonus is written where the roll is called for.** *"can make a ranged
+    power attack with the object"* becomes *"a ranged power attack ({@hit 8})"*.
+134. **The `Psionic Powers` trait stops repeating the header** (`_hasPsionicRoster`). Ability
+    and save DC moved into the `Powers` header, so the trait keeps only what is the
+    character's own — manifestation die, strain maximum, highest order known. A manifester
+    with no roster has no such header, so the facts stay put.
+135. **CR sees a manifester's actual offence** (`_estimatePsionicDpr`). The function read
+    `feature.description`, which for a power holds **only its Range and Manifestation Time
+    headers** — so it found no dice at all and rated a level 20 Talent purely on a stray
+    calculation key. It now reads the primary mode's body (never the upcast mode, which
+    would over-credit) and follows DMG practice in rating an area effect against two
+    targets. Phirse moved CR 9 → 11, beside the book's Master tier, with better HP.
+
+**What v18 taught.**
+
+- **Look for the published answer before designing one.** Every rule above reproduces a
+  choice 27 shipped statblocks visibly made, which is why it can be checked against
+  something other than taste.
+- **Calibration has a ceiling, and reaching it is the result.** Snapping to the book's three
+  bands matched **140/181 = 77%** of its own roster assignments, and order-1 → at-will
+  matched **28/28**. The residual is unmodellable: the same power at the same order is filed
+  `3/Day` in one statblock and `1/Day` in another. Tuning past 77% would be fitting noise.
+- **A continuous model produces numbers no author would write.** Before snapping to bands the
+  conversion emitted 8/Day, 6/Day and 2/Day — values that appear nowhere in the book. The
+  bands are the format, not a rounding convenience.
+- **Reading the wrong field is invisible when the right field is optional.** `description`
+  exists on every feature, so `_estimatePsionicDpr` never threw; it just silently valued a
+  psion's entire arsenal at zero. A parser that finds nothing should be as suspicious as one
+  that throws.
+- **`\w+haves` matches "behaves".** A conjugation guard that had been green for seventeen
+  versions failed the moment a power containing that word entered the corpus. Bad-word
+  checks need whole-word anchors, not a leading `\w+`.
+
+
+### v19 — every roster line states its own action economy
+
+Borrowed from MCDM's statblocks: a raised letter after a name, saying when you may use it.
+A spell list is the one place a statblock prints dozens of options with no economy attached,
+so a DM reading *Misty Step* on a list has to know, or look up, that it is a Bonus Action.
+
+**Pass 136 — `_getEconomyMark`.** Every saved spell already carried `castingTime`
+(`"1 action"`, `"1 bonus"`, `"10 minute"`), and the exporter had never once read it. The
+mark is built from that string and nothing else:
+
+| casting time | mark | renders | hover |
+|---|---|---|---|
+| `1 action` | `{@sup {@tip A\|Action}}` | ᴬ | Action |
+| `1 bonus` | `{@sup {@tip B\|Bonus Action}}` | ᴮ | Bonus Action |
+| `1 reaction` | `{@sup {@tip R\|Reaction}}` | ᴿ | Reaction |
+| `1 minute` / `10 minute` / `1 hour` | `{@sup {@tip 10min\|Takes 10 Minutes}}` | ¹⁰ᵐⁱⁿ | Takes 10 Minutes |
+| unreadable or absent | *(none)* | | — |
+
+`{@sup}` recursively renders its contents, so nesting `{@tip}` inside it makes the mark
+**name itself on hover**. That is what lets the notation ship without a legend, which is
+the usual reason superscript conventions fail outside a printed book.
+
+**Long times print the time, not a letter.** An `E`-for-else glyph would have covered 35 of
+the corpus's 88 non-action spells and collapsed "1 minute" and "24 hours" into one shape,
+forcing a hover to learn anything — and hovers do not exist on a tablet. `Ceremony ¹ʰʳ` is
+lossless and readable without hovering, consistent with the project's rule that a derived
+value prints its number rather than its formula. The glyph carries no space (`10min`, not
+`10 min`) so a superscript can never wrap mid-mark.
+
+**Every readable time is marked, including plain actions**, which buys an invariant worth
+~250 extra ᴬ glyphs: *an unmarked roster line means the exporter could not read a casting
+time.* Two of 487 corpus spell rows have an empty `castingTime`; they are now visible
+instead of indistinguishable from the other 395.
+
+**Pass 137 — one mark, four rosters.** Spell lines go through `_formatSpellTag`, the single
+choke point that also appends provenance. Psionic roster lines read `meta.actionType`
+through `parsePsionicPower`. Combat-method and maneuver rosters replace the 138
+`(Action)` / `(Bonus Action)` / `(Reaction)` parentheticals they already printed.
+
+A **psionic entry name** filed under Bonus Actions or Reactions gets **no** mark — the
+section heading already says it, and the same fact twice is the defect this exporter has
+been removing since v8. The invariant survives because a heading is not a silent default.
+An entry with a long manifestation time *is* marked, because it lands under Actions where
+nothing else states the time.
+
+A label with no glyph — `Stance`, `Replaces One Attack`, `Triggered`, `Free Action` — keeps
+its parenthetical rather than being dropped. `_getEconomyMark` returns `""` for anything it
+cannot read, and a `""` never silently means "action".
+
+**Pass 138 — the mark is presentation, never identity.** Adding markup between a tag and
+its trailing parenthetical broke a pass that had been correct for eleven versions:
+`_dropSpellOnlyFeatEntries` detects provenance with `\{@spell …\}\s*\(`, so the
+interposed mark made `granted` empty and Nessa's ASI-and-spells-only *Shadow Touched* feat
+reappeared as its own trait. The fix is general, not local:
+
+- `ECONOMY_MARK_RE_SRC` — one shared regex source, so any pass that parses a tag
+  positionally can skip the mark instead of being blocked by it.
+- `_stripEconomyMarks` is applied at the head of `_normalizeFeatureKey` and
+  `_getAnchorBareName`, the two functions that turn a name into a key. Without it
+  `Stasis Field{@sup {@tip 10min|…}}` normalises to `stasis field sup tip 10min takes 10
+  minutes` and matches nothing.
+
+**Ordering is load-bearing.** The mark binds tightest to the name, *inside* any provenance
+parenthetical — `{@spell shield|XPHB}ᴿ (Oath Spells)`. `_pickPreferredSpellTag` treats a
+trailing `)` as "this tag carries provenance"; a mark placed after the paren would spoof
+that tiebreak silently. A test pins the order.
+
+**Markdown recovers the fact rather than degrading.** `RendererMarkdown` had no `@sup`
+case, so a mark fell through to `Renderer.stripTags` and became a mute `B`. It now prints
+the hover title — `*Misty Step* (Bonus Action)` — for a `{@sup {@tip …}}` specifically,
+leaving the footnote-wrapping `{@sup}` uses in `data/` untouched.
+
+**Lessons**
+
+- **A convention that needs a legend is a convention that will not be read.** Nesting
+  `{@tip}` inside `{@sup}` was the whole feasibility question; without the hover this would
+  have needed a key line in every statblock, and would not have been worth doing.
+- **The published answer does not always scale down.** The bestiary promotes a non-action
+  spell to a real entry named `Shield (1st-Level Spell; 3/Day)` — but only 41 times in the
+  entire corpus, one to three per monster. Talna has 21 non-action spells; promoting them
+  reproduces exactly the defect v18 had just removed from powers. *Mark in place, do not
+  promote.*
+- **Inserting markup mid-string is an interface change.** Every pass that reads
+  "parenthetical directly after a tag" is a caller of that interface. One shared regex
+  source and one stripper are cheaper than auditing each site again next version.
+- **A/B the whole corpus, not the changed lines.** Converting all 24 characters twice — with
+  the mark on and off — and diffing everything *except* the marks found the `Shadow Touched`
+  regression in one run, and proved no CR moved.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). Hard errors block Save to Homebrew; warnings allow Download / Copy. Full browser-side monster schema validation is still out of scope (graceful hand validator only).
 

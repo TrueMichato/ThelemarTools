@@ -696,6 +696,16 @@ class RendererMarkdown {
 				this._recursiveRender(text, textStack, meta);
 				textStack[0] += `~~`;
 				break;
+			case "@sup": {
+				// Markdown has no superscript and no hover, so a mark written as
+				// `{@sup {@tip B|Bonus Action}}` would otherwise degrade to a mute "B".
+				// Print the hover title instead, which is the fact the mark stands for.
+				// Any other `{@sup ...}` (the footnote markers in `data/`) renders as before.
+				const tip = /^\{@tip [^|{}]+\|([^{}]+)\}$/.exec(String(text).trim());
+				if (tip) { textStack[0] += ` (${tip[1]})`; break; }
+				this._recursiveRender(text, textStack, meta);
+				break;
+			}
 			case "@s2":
 			case "@strikeDouble":
 				textStack[0] += `~~`;

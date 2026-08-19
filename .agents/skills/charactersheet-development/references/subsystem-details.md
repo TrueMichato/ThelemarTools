@@ -837,6 +837,51 @@ a term exists, prose only where it adds something.
 - **A default Unarmed Strike is filler; a monk's is not.** `_getMultiattackAction` picks
   the best weapon attack unless an unarmed strike out-damages all of them.
 
+### Action economy as a superscript mark (v19)
+- **Every saved spell already carries `castingTime`** (`"1 action"`, `"1 bonus"`,
+  `"10 minute"` — ungrammatical, must be normalised for display). The exporter reads it
+  through `_getEconomyMark`, which emits `{@sup {@tip B|Bonus Action}}`. `@sup`
+  recursively renders, so nesting `@tip` inside it makes the mark **name itself on
+  hover** — that is what lets the notation ship without a legend.
+- **Long times print the time, not a letter**: `Ceremony ¹ʰʳ`, `Scrying ¹⁰ᵐⁱⁿ`. The glyph
+  carries no space (`10min`) so a superscript cannot wrap mid-mark.
+- **Every readable time is marked, including plain actions.** The invariant that buys:
+  *an unmarked roster line means the casting time could not be read* — never "probably an
+  action".
+- **A psionic entry name filed under Bonus Actions / Reactions gets no mark** — the section
+  heading already states it. An entry with a long manifestation time is marked, because it
+  lands under Actions where nothing else says so.
+- **The mark is presentation, never identity.** `_stripEconomyMarks` runs at the head of
+  `_normalizeFeatureKey` and `_getAnchorBareName`; without it a marked name normalises to
+  `stasis field sup tip 10min takes 10 minutes` and matches nothing.
+- **Any pass parsing "a parenthetical directly after a tag" must skip the mark.** Use
+  `ECONOMY_MARK_RE_SRC`. Missing this in `_dropSpellOnlyFeatEntries` silently resurrected a
+  feat entry that eleven versions of the exporter had correctly dropped.
+- **Ordering is load-bearing**: mark first, provenance paren second —
+  `{@spell shield|XPHB}ᴿ (Oath Spells)`. `_pickPreferredSpellTag` treats a trailing `)` as
+  "carries provenance", so the reverse order spoofs that tiebreak.
+- **`RendererMarkdown` has an `@sup` case** that prints the hover title
+  (`*Misty Step* (Bonus Action)`) rather than degrading to a mute `B`.
+
+### Representing a manifester as a monster (v18)
+- **The published answer already exists.** *The Talent and Psionics* ships 27 author-written
+  psionic statblocks (7 disciplines x Talent/Expert/Master, plus 6 named psions CR 7-29).
+  None invents a psionics subsystem: all route powers through a `spellcasting` block named
+  `Powers` plus ~6 real entries. Match them rather than designing something new.
+- **Strain converts to `N/Day`, and the budget is one track, not the maximum.** Manifesting
+  an `n`th-order power on a `dD` costs `E[strain] = (n(n-1) + 1) / D`; the sustainable
+  budget is `strainMaximum / 3`, because strain effects bite per track (5 in a track is -5
+  AC or Disadvantage on saves). Snap the result to the book's three bands - `will`,
+  `3/Day`, `1/Day` - because a continuous model emits 8/Day and 6/Day, which appear nowhere
+  in the book.
+- **A power earns an entry only if it resolves in combat** (attack roll, saving throw, or
+  damage). Everything else is a `{@psionic name|source}` roster line.
+- **`feature.description` on a `psionicPower` holds only the Range / Manifestation Time
+  headers.** Anything reading a power's mechanics must go through `modes[]` (see
+  `_getPsionicModes`). Reading `description` does not throw - it silently finds nothing,
+  which is how the CR model valued a level 20 psion's whole arsenal at zero.
+- **Concentration is a property of the mode, not the power.**
+
 ### Level 20, psionics and item banks (v12)
 - **`modes[]` is where a psionic power's mechanics live.** A `feature._entityType ===
   "psionicPower"` carries only headers (Manifestation Time / Range / Duration) at the top
