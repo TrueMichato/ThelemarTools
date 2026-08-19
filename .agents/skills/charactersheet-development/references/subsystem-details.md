@@ -1003,15 +1003,43 @@ item measurably weaker than the block was built from (Angelic Plate AC 18 vs 21,
   `entries`. `CharacterSheetMaterials.EFFECT_HANDLING` is the routing authority and an
   exporter test fails when a type has no home.
 - **`requiresProperty` is a hard gate**, not an availability hint — Stout Blackwood's crit
-  die exists only on a Loading weapon.
+  die exists only on a Loading weapon. `getMaterialEffects` enforces it only inside its
+  `grantsAction` case, **never** for `bonusCritDamage`, so the exporter's own gate is
+  load-bearing.
 - **Penetration is an AC mechanic** (near-miss), *not* resistance-piercing. The in-app
-  glossary at `charactersheet-materials.js:1892` still says otherwise and is wrong.
+  glossary at `charactersheet-materials.js:1892` said otherwise until `9dbdc5b9`; all three
+  places that describe it are now pinned by tests, on both sides.
 - **Bake, then describe.** Bundled items carry baked numbers and no `material` /
   `appliedUpgrades` refs — `additionalProperties: false` forbids them and a reference is
   inert (or double-applies) on a receiving instance. Provenance survives as `entries` prose.
 - **Multiattack scores the rendered attack**, summing every `{@damage}` clause on the
   finished line (once-per-turn riders excluded), because `attack.damage` holds only the
   weapon's own die. Also fixes monks, whose Unarmed Strike row omits the ability modifier.
+
+### Material riders say what they do (v23)
+
+Three semantics the sheet pinned in `9dbdc5b9` that the exporter had guessed at. All three
+were **latent** — no corpus character carries the materials or the feat involved, so the
+regenerated 24-character corpus moved zero characters. Output diffing could never have
+found them.
+
+- **"One additional weapon damage die" is one die**, not another copy of the expression: a
+  maul rolling `2d6` adds `1d6`. `CharacterSheetCombat._getSingleWeaponDie` is the
+  authority. On 1-die weapons the wrong arithmetic gives the right answer, which is how it
+  shipped and why a fixture must be chosen that can distinguish the hypotheses.
+- **A die granted BY a crit is not doubled by that crit** (Brutal Critical precedent). The
+  statblock has to say so, because prose that omits it reads both ways and there is nobody
+  to ask.
+- **`noRangedDisadvantageInMelee` is `reference` on the sheet but mechanical here.** The
+  sheet has no positional model, so it can never impose the disadvantage this suppresses;
+  a statblock reader knows where the creature is standing. This exporter is the effect's
+  one legitimate consumer, and the same applies to the identically-shaped
+  `ranged:noDisdvantageInMelee` (Crossbow Expert) — both route to one attack-line sentence.
+- **A registered modifier is not a delivered modifier.** Measured: a character holding
+  Crossbow Expert aggregates **nothing** for `ranged:noDisdvantageInMelee`; the effect never
+  reaches `namedModifiers`. Read `globalThis.FeatureEffectRegistry.getFeatEffects(name,
+  source)` instead — it keys on the same authored data, so any feature granting the effect
+  is picked up rather than one hardcoded name.
 
 ### Bundling sheet-authored items with the export (v20)
 

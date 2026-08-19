@@ -761,8 +761,17 @@ export class ItemBuilderCore {
 				effects: oldMaterialEffects,
 			});
 		}
-		if (oldMaterialEffects?.rangeMultiplier && !resetProps.has("range") && authored.range != null) {
-			authored.range = this._deprojectRange(authored.range, oldMaterialEffects.rangeMultiplier);
+		if (
+			(oldMaterialEffects?.rangeMultiplier || oldMaterialEffects?.thrownRangeDelta)
+			&& !resetProps.has("range") && authored.range != null
+		) {
+			// `applyToItem` multiplies and THEN shifts, so the inverse must subtract before it
+			// divides. The thrown shift is gated on the Thrown property there, so it is gated on
+			// the same property here — read from the PROJECTED item, which is what that gate saw.
+			const thrownDelta = CharacterSheetMaterials._hasProperty(original, "T")
+				? (oldMaterialEffects.thrownRangeDelta || 0)
+				: 0;
+			authored.range = this._deprojectRange(authored.range, oldMaterialEffects.rangeMultiplier, thrownDelta);
 		}
 		if (oldMaterial && !resetProps.has("weight") && authored.weight != null) {
 			authored.weight = this._deprojectWeight(authored.weight, oldMaterial);
@@ -839,11 +848,18 @@ export class ItemBuilderCore {
 			|| _copy(current);
 	}
 
-	static _deprojectRange (range, multiplier) {
+	static _deprojectRange (range, multiplier, thrownDelta = 0) {
 		const parts = String(range).split("/").map(it => Number(it.trim()));
-		if (!multiplier || parts.some(it => !Number.isFinite(it))) return range;
-		const candidate = parts.map(it => Math.ceil(it / multiplier)).join("/");
-		return CharacterSheetMaterials._scaleRange(candidate, multiplier) === String(range) ? candidate : range;
+		if ((!multiplier && !thrownDelta) || parts.some(it => !Number.isFinite(it))) return range;
+		// `applyToItem` scales and then shifts, so the inverse unshifts before it undivides.
+		// Getting this backwards would silently mis-recover any material carrying both.
+		const unshifted = parts.map(it => Math.max(0, it - thrownDelta));
+		const candidate = (multiplier ? unshifted.map(it => Math.ceil(it / multiplier)) : unshifted).join("/");
+		// Same discipline as before: only accept a pre-image that re-projects to exactly what
+		// was observed, so a range that was never projected in the first place is left alone.
+		let reprojected = multiplier ? CharacterSheetMaterials._scaleRange(candidate, multiplier) : candidate;
+		if (thrownDelta) reprojected = CharacterSheetMaterials._shiftRange(reprojected, thrownDelta);
+		return String(reprojected) === String(range) ? candidate : range;
 	}
 
 	static _deprojectWeight (weight, material) {

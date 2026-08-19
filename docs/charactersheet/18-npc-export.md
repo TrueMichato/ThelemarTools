@@ -1527,6 +1527,72 @@ modifier, so Tikal's `1d10+5` fist scored `5.5` and lost to a `1d6+5` spear.
   independently re-deriving a weapon's total. The fix was not to add a 22nd but to read
   `getEffectiveItemBonuses` / `getEffectiveWeaponDamage` like everything else.
 
+### v23 — the rider says what it does, and says it once
+
+The sibling session's `9dbdc5b9` landed the sheet-side material combat riders and, in doing
+so, pinned down three semantics this exporter had been guessing at. Each claim was checked
+against the authored brew data rather than taken on trust; three were real defects here.
+
+**All three were latent.** No character in the 24-save corpus carries Cold Iron,
+Yellowwood, Stout Blackwood or Crossbow Expert, so the regenerated corpus moved **zero**
+characters. Nothing in this section would have been caught by looking at output — which is
+the whole argument for the tests that now pin it.
+
+**One extra weapon die is one die.** `_getExtraWeaponDice` multiplied the authored count by
+the weapon's *die count*, so Cold Iron's "an additional weapon damage die" paid a maul
+twice: `2d6` instead of `1d6`. The sheet's `_getSingleWeaponDie`
+(`charactersheet-combat.js`) is the authority and is explicit — *a maul rolling `2d6` adds
+`d6`, NOT another `2d6`.* On 1-die weapons the old arithmetic was already right (`1 x 1`),
+which is exactly why it shipped, and why the v22 test that covered a longsword passed
+throughout.
+
+**A die granted by a crit is not doubled by that crit.** The rule doubles *the attack's*
+damage dice; a die the crit itself grants is not among them, Brutal Critical is the
+precedent, and the sheet does not double it. The old line — *"On a critical hit it deals an
+extra `1d4` damage"* — read both ways, and a statblock has nobody to ask. It now says
+`(this extra damage is not doubled)`.
+
+The `requiresProperty` gate on that rider is load-bearing and stays: `getMaterialEffects`
+applies the gate only inside its `grantsAction` case, **never** for `bonusCritDamage`, so
+without the exporter's own check a stout blackwood *club* would advertise a crit die it
+never had.
+
+**"No disadvantage in melee" is an attack-line fact.** The sheet declares
+`noRangedDisadvantageInMelee` `reference` and never applies it, for a sound reason: it has
+no positional model, so it can never impose the disadvantage the effect suppresses. A
+statblock reader knows exactly where the creature is standing, which makes this export the
+one consumer entitled to state it mechanically. It now appears as a ranged-attack
+qualifier.
+
+Two sources feed one sentence — Yellowwood grants it on a bow, Crossbow Expert grants it to
+the character — because a reader should not have to care which. The provenance rides in the
+parenthetical.
+
+This is *not* the "Master Smith's Aegis appears twice" defect. The flag has always lived in
+`_MATERIAL_NOTE_FLAGS`, which is read only on the path to `_applyComposedItemStats` — the
+**bundled item**, seen on hover. The statblock never carried it. Adding the attack qualifier
+produces the intended split rather than a duplicate, which is the division the v22
+de-duplication decision already settled.
+
+**What v23 taught.**
+
+- **A registered modifier is not a delivered modifier.** The plan was to read
+  `getModifiersForType("ranged:noDisdvantageInMelee")`. Measured: a character holding
+  Crossbow Expert aggregates **nothing** for that type — the effect is registered and never
+  reaches `namedModifiers`. The exporter reads `FeatureEffectRegistry` instead, which keys
+  on the same authored data and therefore picks up *any* feature that grants the effect
+  rather than hardcoding the one that does today. A test pins the discrepancy so the day it
+  is wired up is visible.
+- **A bug that cannot move the corpus still needs a test.** Every defect in this pass was
+  invisible to the 24-character regression corpus. "The output did not change" is evidence
+  about the corpus, not about the code.
+- **Verify a guard RED before trusting it.** Each of the three fixes was reverted and the
+  suite re-run: exactly four tests failed and the four guards describing unchanged
+  behaviour stayed green. A guard that has never failed has not been tested.
+- **A test can be correct and still not catch the bug.** The v22 rider test used a
+  one-die weapon, where the wrong arithmetic gives the right answer. Choosing the fixture
+  that can distinguish the hypotheses is most of the work.
+
 ## Validation
 `getValidationIssues(monster)` is sync and structural (name/source/size/type/AC/HP/abilities/spellcasting shape/legendary fields). It returns **three** buckets:
 
@@ -1561,7 +1627,11 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
   rider die scaling, the `requiresProperty` gate), advantage folding into `Resilience`,
   material-power economy inference, bundle composition, and three **routing-completeness**
   guards driven by `CharacterSheetMaterials.EFFECT_HANDLING` — a new effect type with no
-  exporter home fails the suite rather than silently vanishing.
+  exporter home fails the suite rather than silently vanishing. The v23 block adds the
+  latent cases the corpus cannot reach: one-extra-die arithmetic on a *multi-die* weapon,
+  the not-doubled crit clause, and the no-disadvantage-in-melee qualifier from both a
+  material and a feat — plus a pin on the fact that the feat's registered modifier never
+  materialises, which is why the registry is read instead.
 - **Real-save contract tests**: `CharacterSheetNpcExporter.realsaves.test.js` runs the
   exporter against complete character saves in `npc-exports/` and asserts the contracts
   that synthetic fixtures never caught (no serialized JSON, no `p`/`s`/`b` damage codes,

@@ -746,3 +746,94 @@ describe("shared item upgrade rules", () => {
 		expect(getGemstoneDescriptor({name: "Journey"}).effects[0].value).toBe(10);
 	});
 });
+
+/**
+ * `thrownRangeDelta` was added to `applyToItem`'s projection without a matching inverse in the
+ * legacy de-projection, which only ever knew how to undo `rangeMultiplier`. A Skyshard dagger
+ * therefore gained 20 feet of thrown range on EVERY trip through the builder — 20/60 became
+ * 40/80 became 60/100 — and the gain was permanent, because it was baked into the authored
+ * value rather than re-derived.
+ *
+ * The ordering matters and is asserted separately: projection scales and then shifts, so the
+ * inverse must unshift before it undivides. A material carrying both would be mis-recovered by
+ * the obvious-but-wrong order, and no existing material carries both, so nothing else would
+ * catch it.
+ */
+describe("thrown-range de-projection", () => {
+	const SKYSHARD = {
+		name: "Skyshard",
+		source: "TGTT",
+		appliesTo: ["weapon"],
+		effects: [{type: "thrownRangeDelta", value: 20}],
+		entries: ["Skyshard longs for the horizon."],
+	};
+	const DAGGER = {
+		name: "Dagger",
+		source: "PHB",
+		type: "M",
+		rarity: "none",
+		weapon: true,
+		dmg1: "1d4",
+		dmgType: "P",
+		property: ["T"],
+		range: "20/60",
+		weight: 1,
+		value: 200,
+		entries: ["A simple melee weapon."],
+	};
+
+	function project (catalogs, presetItem, materialRef) {
+		const draft = ItemBuilderCore.applyPreset(ItemBuilderCore.createDraft({source: "HB"}), presetItem, {source: "HB"});
+		if (materialRef) draft.material = materialRef;
+		return ItemBuilderCore.projectForPreview(draft, catalogs);
+	}
+
+	test("recovers the authored thrown range instead of compounding it", () => {
+		const catalogs = {items: [DAGGER], materials: [SKYSHARD], upgrades: []};
+		const legacyProjected = project(catalogs, DAGGER, {name: "Skyshard", source: "TGTT"});
+		expect(legacyProjected.range).toBe("40/80");
+
+		const canonical = ItemBuilderCore.serialize(ItemBuilderCore.fromItem(legacyProjected), catalogs);
+		expect(canonical.range).toBe("20/60");
+	});
+
+	test("stays put across repeated round trips", () => {
+		const catalogs = {items: [DAGGER], materials: [SKYSHARD], upgrades: []};
+		let projected = project(catalogs, DAGGER, {name: "Skyshard", source: "TGTT"});
+
+		for (let i = 0; i < 3; ++i) {
+			const canonical = ItemBuilderCore.serialize(ItemBuilderCore.fromItem(projected), catalogs);
+			expect(canonical.range).toBe("20/60");
+			projected = ItemBuilderCore.projectForPreview(ItemBuilderCore.fromItem(canonical), catalogs);
+			expect(projected.range).toBe("40/80");
+		}
+	});
+
+	test("leaves a non-thrown weapon's range alone", () => {
+		const bow = {...DAGGER, name: "Shortbow", type: "R", property: [], range: "80/320"};
+		const catalogs = {items: [bow], materials: [SKYSHARD], upgrades: []};
+		const legacyProjected = project(catalogs, bow, {name: "Skyshard", source: "TGTT"});
+		expect(legacyProjected.range).toBe("80/320");
+
+		const canonical = ItemBuilderCore.serialize(ItemBuilderCore.fromItem(legacyProjected), catalogs);
+		expect(canonical.range).toBe("80/320");
+	});
+
+	test("unshifts before it undivides when a material both scales and shifts", () => {
+		// 20/60 → ×2 → 40/120 → +20 → 60/140. The inverse must subtract 20 and THEN halve;
+		// halving first gives 30/70 − 20 = 10/50, which is wrong and which nothing else would
+		// catch, because no shipped material both scales and shifts.
+		expect(ItemBuilderCore._deprojectRange("60/140", 2, 20)).toBe("20/60");
+	});
+
+	test("still refuses a multiplier-only range, whose floor rounding is genuinely lossy", () => {
+		const scaled = {...SKYSHARD, name: "Skyglass", effects: [{type: "rangeMultiplier", value: 1.5}]};
+		const catalogs = {items: [DAGGER], materials: [scaled], upgrades: []};
+		const legacyProjected = project(catalogs, DAGGER, {name: "Skyglass", source: "TGTT"});
+		const restored = ItemBuilderCore.fromItem(legacyProjected);
+
+		expect(ItemBuilderCore.validate(restored, catalogs).errors).toContainEqual(expect.objectContaining({
+			field: "range",
+		}));
+	});
+});

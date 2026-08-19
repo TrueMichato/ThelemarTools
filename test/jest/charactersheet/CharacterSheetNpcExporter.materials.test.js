@@ -332,3 +332,169 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 		});
 	});
 });
+
+/**
+ * v23 — three semantics the sheet pinned down in `9dbdc5b9` that this exporter had guessed.
+ *
+ * All three are LATENT against the corpus: no saved character carries Cold Iron,
+ * Yellowwood, Stout Blackwood or Crossbow Expert, so none of them moved a single exported
+ * statblock. That is precisely why they need tests — nothing else would have caught them.
+ */
+maybeDescribe("NPC export v23 — the rider says what it does", () => {
+	const bludgeon = ({name, dmg1, material, type = "weapon", property = [], base = "maul|xphb"}) => {
+		const item = {
+			id: `w-${name.replace(/\W+/g, "-").toLowerCase()}`,
+			name,
+			source: "CUSTOM",
+			custom: true,
+			type,
+			weapon: true,
+			weaponCategory: "martial",
+			baseItem: base,
+			dmg1,
+			dmgType: "B",
+			property,
+			weight: 10,
+			value: 1000,
+		};
+		if (material) item.material = {name: material, source: "TGTT"};
+		return {id: item.id, item, quantity: 1, equipped: true};
+	};
+
+	const attackLine = (items, namePattern, extra = {}) => {
+		const state = new CharacterSheetState();
+		state.loadFromJson({
+			name: "Probe",
+			classes: [{name: "Fighter", source: "PHB", level: 5}],
+			abilities: {str: 16, dex: 16, con: 14, int: 10, wis: 10, cha: 10},
+			hp: {max: 44, current: 44},
+			inventory: items,
+			...extra,
+		});
+		state.setItemMaterialCatalog?.(MATERIALS);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const action = (out.action || []).find(a => namePattern.test(String(a.name || "")));
+		return {out, action, text: JSON.stringify(action || {})};
+	};
+
+	describe("an extra weapon die is one die, not another expression", () => {
+		it("adds a single d6 to a maul, not a second 2d6", () => {
+			// The bug: `_getExtraWeaponDice` multiplied the authored count by the weapon's
+			// DIE COUNT, so "one additional weapon damage die" paid a maul twice over. The
+			// sheet is explicit (`_getSingleWeaponDie`): a maul rolling 2d6 adds d6.
+			const {text} = attackLine([bludgeon({name: "Cold Maul", dmg1: "2d6", material: "Cold Iron"})], /Cold Maul/i);
+
+			expect(text).toMatch(/extra \{@damage 1d6\} damage to fey creatures/i);
+			expect(text).not.toMatch(/extra \{@damage 2d6\}/i);
+		});
+
+		it("still adds a whole d8 to a one-die weapon", () => {
+			// The invisibility guard: on 1-die weapons the old arithmetic was already right
+			// (1 x 1), which is why this shipped. Pin the case that never moved.
+			const {text} = attackLine(
+				[bludgeon({name: "Cold Sword", dmg1: "1d8", material: "Cold Iron", base: "longsword|xphb"})],
+				/Cold Sword/i,
+			);
+
+			expect(text).toMatch(/extra \{@damage 1d8\} damage to fey creatures/i);
+		});
+	});
+
+	describe("a die granted by a crit is not doubled by that crit", () => {
+		const loadingCrossbow = bludgeon({
+			name: "Blackwood Crossbow",
+			dmg1: "1d8",
+			material: "Stout Blackwood",
+			type: "R",
+			base: "crossbow, heavy|xphb",
+			property: ["LD", "2H", "A"],
+		});
+
+		it("says so on the line, because the reader has nobody to ask", () => {
+			// The crit rule doubles the ATTACK's damage dice. A die granted BY the crit is
+			// not one of them (Brutal Critical is the precedent) and the sheet does not
+			// double it. Without this clause the sentence reads both ways.
+			const {text} = attackLine([loadingCrossbow], /Blackwood Crossbow/i);
+
+			expect(text).toMatch(/On a critical hit it deals an extra \{@damage 1d4\}/i);
+			expect(text).toMatch(/not doubled/i);
+		});
+
+		it("omits the die entirely on a weapon without the required property", () => {
+			// `requiresProperty` is a HARD gate, and `getMaterialEffects` applies it only
+			// inside its `grantsAction` case — never for `bonusCritDamage`. So the
+			// exporter's own gate is load-bearing: drop it and a stout blackwood CLUB
+			// advertises a crit die it never had.
+			const {text} = attackLine(
+				[bludgeon({name: "Blackwood Club", dmg1: "1d8", material: "Stout Blackwood"})],
+				/Blackwood Club/i,
+			);
+
+			expect(text).not.toMatch(/critical hit it deals an extra/i);
+		});
+	});
+
+	describe("no disadvantage in melee is an attack-line fact", () => {
+		const bow = ({name, material}) => {
+			const it = bludgeon({name, dmg1: "1d8", material, type: "R", base: "longbow|xphb", property: ["A", "H", "2H"]});
+			it.item.dmgType = "P";
+			return it;
+		};
+
+		it("states it for the material that grants it, naming the material", () => {
+			// The sheet declares this `reference` and never applies it: it has no positional
+			// model, so it can never impose the disadvantage this suppresses. A statblock
+			// reader knows exactly where the creature is standing, which makes the export
+			// the one consumer entitled to state it mechanically.
+			const {text} = attackLine([bow({name: "Yew Longbow", material: "Yellowwood"})], /Yew Longbow/i);
+
+			expect(text).toMatch(/within 5 feet of a hostile creature does not impose disadvantage/i);
+			expect(text).toMatch(/Yellowwood/);
+		});
+
+		it("states it for a feat that grants it, naming the feat", () => {
+			// Crossbow Expert registers the identical `ranged:noDisdvantageInMelee` effect.
+			// A reader should not have to care whether the effect came from the bow or the
+			// character, so both route through one sentence.
+			const {text} = attackLine(
+				[bow({name: "Plain Longbow"})],
+				/Plain Longbow/i,
+				{feats: [{name: "Crossbow Expert", source: "PHB"}]},
+			);
+
+			expect(text).toMatch(/within 5 feet of a hostile creature does not impose disadvantage/i);
+			expect(text).toMatch(/Crossbow Expert/);
+		});
+
+		it("is read from the registry, because the modifier it registers never materialises", () => {
+			// Measured: a character holding Crossbow Expert aggregates NOTHING for
+			// `ranged:noDisdvantageInMelee` — the modifier is registered and never reaches
+			// `namedModifiers`. Reading `getModifiersForType` would have been dead code, so
+			// this pins the reason the registry is the source of truth here. If the sheet
+			// ever wires the modifier up, this test documents that it was not always so.
+			const state = new CharacterSheetState();
+			state.loadFromJson({
+				name: "Probe",
+				classes: [{name: "Fighter", source: "PHB", level: 5}],
+				abilities: {str: 16, dex: 16, con: 14, int: 10, wis: 10, cha: 10},
+				hp: {max: 44, current: 44},
+				feats: [{name: "Crossbow Expert", source: "PHB"}],
+			});
+
+			expect(state.getModifiersForType("ranged:noDisdvantageInMelee")).toEqual([]);
+			expect(CharacterSheetNpcExporter._getNoMeleeDisadvantageFeatures(state)).toContain("Crossbow Expert");
+		});
+
+		it("says nothing on a melee-only attack", () => {
+			// The clause is about ranged attack rolls. A maul cannot suffer the penalty, so
+			// mentioning it there would be noise on a line that has to be read mid-swing.
+			const {text} = attackLine(
+				[bludgeon({name: "Plain Maul", dmg1: "2d6"})],
+				/Plain Maul/i,
+				{feats: [{name: "Crossbow Expert", source: "PHB"}]},
+			);
+
+			expect(text).not.toMatch(/does not impose disadvantage/i);
+		});
+	});
+});

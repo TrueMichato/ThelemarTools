@@ -9924,6 +9924,79 @@ class CharacterSheetNpcExporter {
 		return isMelee ? "reach 5 ft., one target" : "range 30/120 ft., one target";
 	}
 
+	/**
+	 * "No disadvantage on a ranged attack made within 5 feet of a hostile creature."
+	 *
+	 * The sheet declares this `reference` and never applies it, for a good reason: it has
+	 * no positional model, so it can never impose the disadvantage this would suppress.
+	 * A statblock reader is the one consumer that CAN model it -- they know exactly where
+	 * the creature is standing -- so this is one of the rare effects the export is
+	 * entitled to state mechanically where the sheet is not.
+	 *
+	 * Two sources, one sentence. Yellowwood grants it on a specific bow; Crossbow Expert
+	 * grants it to the character. A reader should not have to care which, so both route
+	 * here and the provenance rides in the parenthetical.
+	 */
+	static _getNoMeleeDisadvantageClause (attack, state, itemBonuses, sourceItem) {
+		// Thrown weapons count: the attack line covers their ranged use too, and the
+		// disadvantage it suppresses applies to any ranged attack roll.
+		if (!this._isRangedOnlyAttack(attack) && !this._isThrownAttack(attack)) return "";
+
+		const sources = [];
+
+		if (itemBonuses?.noRangedDisadvantageInMelee || sourceItem?.noRangedDisadvantageInMelee) {
+			const material = this._getSafeInlineText(sourceItem?.material?.name, {maxLen: 40});
+			if (material) sources.push(material);
+		}
+
+		this._getNoMeleeDisadvantageFeatures(state).forEach(name => {
+			if (!sources.includes(name)) sources.push(name);
+		});
+
+		if (!sources.length) return "";
+
+		const provenance = ` (${sources.join(", ")})`;
+		return `Being within 5 feet of a hostile creature does not impose disadvantage on this attack${provenance}`;
+	}
+
+	/**
+	 * Features that suppress the in-melee ranged penalty, by name.
+	 *
+	 * Read from `FeatureEffectRegistry` rather than from `getModifiersForType`, because the
+	 * `ranged:noDisdvantageInMelee` modifier is registered but never materialises into
+	 * `namedModifiers` -- measured: a character holding Crossbow Expert still aggregates
+	 * nothing for that type. Consulting the registry keys on the same authored data the
+	 * sheet declares, so this picks up ANY feature that registers the effect rather than
+	 * hardcoding the one that does today. If the modifier is ever wired up, this keeps
+	 * agreeing with it.
+	 */
+	static _MODTYPE_NO_MELEE_DISADVANTAGE = "ranged:noDisdvantageInMelee";
+
+	static _getNoMeleeDisadvantageFeatures (state) {
+		const registry = globalThis.FeatureEffectRegistry;
+		if (typeof registry?.getFeatEffects !== "function") return [];
+
+		const out = [];
+		const seen = new Set();
+		const consider = (name, source) => {
+			const clean = this._getSafeInlineText(name, {maxLen: 40});
+			if (!clean || seen.has(clean.toLowerCase())) return;
+			let effects = [];
+			try {
+				effects = registry.getFeatEffects(name, source) || [];
+			} catch { /* an unregistered name is simply not a source */ }
+			const grants = effects.some(eff => eff?.type === "modifier"
+				&& eff?.modType === CharacterSheetNpcExporter._MODTYPE_NO_MELEE_DISADVANTAGE);
+			seen.add(clean.toLowerCase());
+			if (grants) out.push(clean);
+		};
+
+		(state?.getFeats?.() || []).forEach(feat => consider(feat?.name, feat?.source));
+		(state?.getFeatures?.() || []).forEach(feature => consider(feature?.name, feature?.source));
+
+		return out;
+	}
+
 	static _getAttackTypeTag (attack) {
 		const isThrown = this._isThrownAttack(attack);
 		const isMelee = this._isMeleeAttack(attack);
@@ -10090,6 +10163,9 @@ class CharacterSheetNpcExporter {
 				: `Penetrating Blow: a miss by ${penetration} or less still hits against nonmagical AC`);
 		}
 
+		const noMeleeDisadvantage = this._getNoMeleeDisadvantageClause(attack, state, itemBonuses, sourceItem);
+		if (noMeleeDisadvantage) parts.push(noMeleeDisadvantage);
+
 		parts.push(...this._getMaterialDamageRiders(sourceItem));
 
 		const damageTypeChoice = typeof state?.getMaterialDamageTypeChoice === "function"
@@ -10170,19 +10246,34 @@ class CharacterSheetNpcExporter {
 			const qualifier = crit.requiresProperty
 				? ""
 				: this._getSafeInlineText(qualifiers.bonusCritDamage, {maxLen: 160});
-			if (dice) parts.push(`On a critical hit it deals an extra {@damage ${dice}}${type} damage${qualifier ? ` (${qualifier.replace(/\.$/, "")})` : ""}`);
+			// The crit rule doubles *the attack's* damage dice; a die granted BY the crit is
+			// not one of them (Brutal Critical is the precedent, and the sheet does not
+			// double it either). The reader has nobody to ask, so the line says so.
+			const notDoubled = "this extra damage is not doubled";
+			const parenthetical = qualifier
+				? `${qualifier.replace(/\.$/, "")}; ${notDoubled}`
+				: notDoubled;
+			if (dice) parts.push(`On a critical hit it deals an extra {@damage ${dice}}${type} damage (${parenthetical})`);
 		}
 
 		return parts;
 	}
 
-	/** `count` extra weapon dice, expressed in this weapon's own die. */
+	/**
+	 * `count` extra weapon *dice*, expressed in this weapon's own die.
+	 *
+	 * "An additional weapon damage die" means one more of whatever the weapon already
+	 * rolls, not another copy of its whole expression: a maul rolling `2d6` adds `1d6`,
+	 * NOT `2d6`. Multiplying by the weapon's die count paid a maul twice over, and was
+	 * invisible on the 1-die weapons that make up most of the corpus. Mirrors
+	 * `CharacterSheetCombat._getSingleWeaponDie`, which is the sheet's authority on this.
+	 */
 	static _getExtraWeaponDice (sourceItem, count) {
 		const n = Number(count) || 0;
 		if (n <= 0) return "";
 		const die = /(\d*)d(\d+)/i.exec(String(sourceItem?.dmg1 || ""));
 		if (!die) return "";
-		return `${n * (Number(die[1]) || 1)}d${die[2]}`;
+		return `${n}d${die[2]}`;
 	}
 
 	static _getMasteryName (masteryEntry) {
