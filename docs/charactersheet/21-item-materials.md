@@ -1000,6 +1000,48 @@ they told a player carrying three upgrades that their magic bonus was "none". Th
 > A `getEffectiveItemBonuses` call for an unknown id still returns `{}`, so `|| 0` guards on the
 > totals hold. Test stubs that mock the function with `() => ({})` keep working unchanged.
 
+### Three accessors that could not see their own data
+
+Found by the NPC-export session reading this subsystem from the outside — which is the point:
+every one of them looked correct from inside the file that produced the value.
+
+- **`getEffectiveItemBonuses().critThreshold` read the raw item.** A material's `critical` axis
+  lands on the *projection*, so an Orichaline katana reported 20 from this accessor while the
+  projected item said 19 — live on the combat tab, not only in export. The delta is now read from
+  the projection, the way `_recalculateItemBonuses` already did, so `applyToItem`'s clamps and
+  degradation's `zeroedAxes` come along instead of being re-derived and drifting.
+
+  The material and the `Critical: Spiked` upgrade are **independent sources that must combine
+  exactly once**: 20 − 1 − 1 = 18. The first fix compared them instead of summing and silently
+  dropped the material's point whenever an upgrade had already taken one. The clamp now sits
+  after *both* sources rather than inside one, which also closed a hole where an upgrade-only
+  reduction was never clamped.
+
+- **Adamantine's damage reduction never reached a custom-built armour.** The gate asked
+  `item.type === "HA"` — the 5etools catalogue's vocabulary — but the custom-item builder writes
+  `type: "armor"` with a separate `armorType: "heavy"`. Every hand-built plate silently lost its
+  DR while a catalogue plate kept it. Use **`CharacterSheetState.getArmorCategory(item)`**, which
+  understands both vocabularies and returns `"heavy" | "medium" | "light" | "shield" | null`,
+  rather than adding another ad-hoc check.
+
+- **`getMaterialEffects(item)` returned a populated *empty* shape** when the material argument was
+  forgotten, because — alone among `applyToItem` / `getMaterialNotes` / `getPenetration` — it did
+  not resolve internally. A forgotten argument was indistinguishable from a material with no
+  effects. It now resolves like its siblings; the two-argument form is unchanged.
+
+### Projection needs a matching inverse, or values compound
+
+`thrownRangeDelta` was added to `applyToItem` without one. The item builder's legacy
+de-projection only knew how to undo `rangeMultiplier`, so a Skyshard dagger gained 20 feet of
+thrown range on **every** trip through the builder — 20/60 → 40/80 → 60/100 — permanently, because
+the gain was baked into the authored value rather than re-derived.
+
+The inverse runs in the opposite order to the projection: `applyToItem` scales and *then* shifts,
+so `_deprojectRange` unshifts and *then* undivides. Any new projection field that writes a number
+onto the item needs a reversal in `_deprojectLegacyProjection` and, if it is lossy, an entry in
+`_getLegacyDeprojectionAmbiguities`. A multiplier is lossy (floor rounding collapses distinct
+authored ranges) and is deliberately refused; an additive shift is exact and is reversed.
+
 ### Exploding damage dice are an effect, not a note
 
 *Brutal*'s rules text is genuine exploding dice — roll the maximum on the weapon's damage dice

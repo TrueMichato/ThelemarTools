@@ -624,6 +624,29 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
   reactions now come from `_pOfferMaterialDamageReactions()` on the Damage flow. That flow's
   damage-type prompt is also driven by `getMaterialReactiveDamageTypes()`, not just by the
   character's resistances — otherwise a character with no defenses can never provoke one.
+- ⚠️ **Raw item vs projected item is the single most common material bug.** A material's numbers
+  land on the *projection* (`applyToItem`), so any accessor that reads `invItem.item || invItem`
+  cannot see them. This bit `getEffectiveItemBonuses().critThreshold`, which reported 20 for an
+  Orichaline katana while the projected item said 19 — on the combat tab, not just in export.
+  Read the delta from `projectItemMaterial(item)` rather than re-deriving it from the axis, so
+  `applyToItem`'s clamps and degradation's `zeroedAxes` come along.
+- ⚠️ **Material crit and the `Critical: Spiked` upgrade are independent sources.** They must
+  combine exactly once (20 − 1 − 1 = 18). Comparing them instead of summing silently drops the
+  material's point whenever an upgrade already took one. Clamp after both, never inside one.
+- ⚠️ **Two vocabularies describe armour category and neither is going away.** The 5etools
+  catalogue uses `type: "HA" | "MA" | "LA" | "S"` (sometimes suffixed, `"HA|XPHB"`); the
+  custom-item builder writes `type: "armor"` with a separate `armorType: "heavy"`. Code that
+  knows only one silently ignores half the inventory — that is how Adamantine's damage reduction
+  came to do nothing on every hand-built plate. Use `CharacterSheetState.getArmorCategory(item)`.
+- ⚠️ **Every projection field needs a matching inverse in the item builder.** `applyToItem` writes
+  numbers onto the item; `itembuilder-core.js`'s `_deprojectLegacyProjection` subtracts them back
+  out. `thrownRangeDelta` shipped without one, so a Skyshard dagger gained 20 feet of thrown range
+  on *every* round trip, permanently. The inverse runs in the opposite order to the projection
+  (projection scales then shifts; de-projection unshifts then undivides). If the projection is
+  lossy, register it in `_getLegacyDeprojectionAmbiguities` instead of reversing it.
+- **`getMaterialEffects(item, material)` resolves internally now**, like `applyToItem` /
+  `getMaterialNotes` / `getPenetration`. Before, a forgotten second argument returned a fully
+  populated *empty* shape, indistinguishable from a material with no effects.
 - ⚠️ **`item.attachedSpells` is a dict far more often than an array** (~343 vs ~84 in the
   shipped catalog). `will` / `other` / `ritual` hold arrays directly; `daily` / `charges` /
   `limited` / `rest` nest one level further under a use count (`{"1e": [...]}`); and a
